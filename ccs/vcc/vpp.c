@@ -24,9 +24,7 @@
 #include "intern.h"
 #include "pp.h"
 
-static const char predef_aarch64_linux[] =
 #include "ppdata-predef.inc"
-	;
 
 typedef struct buf {
 	char *p;
@@ -174,6 +172,7 @@ int main(int argc, char **argv)
 	int nq = 0, ni = 0, ns = 0, na = 0, n = 0;
 	const char *cmp = NULL, *out = NULL, *main_file = NULL;
 	buf pre = { 0 }, cmdl = { 0 }, incl = { 0 }, o = { 0 };
+	int darwin = 1, nostdinc = 0;
 	int opt = 2, os = 0, pie = 0, pic = 0, freestanding = 0, cfi = 0, strict_align = 0, tiny = 0;
 	pp_opts po = { 0 };
 	char *pmap = NULL;
@@ -206,7 +205,9 @@ int main(int argc, char **argv)
 			pmap = strdup(a + 19);
 			continue;
 		}
-		if (!strcmp(a, "-O0")) opt = 0;
+		if (!strncmp(a, "--target=", 9) || !strcmp(a, "-target")) darwin = strstr(a, "darwin") || strstr(a, "apple");
+		else if (!strcmp(a, "-nostdinc")) nostdinc = 1;
+		else if (!strcmp(a, "-O0")) opt = 0;
 		else if (!strcmp(a, "-Os") || !strcmp(a, "-Oz")) { opt = 2; os = 1; }
 		else if (!strncmp(a, "-O", 2)) opt = 2;
 		else if (!strcmp(a, "-fpie")) pie = 1;
@@ -231,11 +232,19 @@ int main(int argc, char **argv)
 #define ADD(d) do { int dup_ = 0; for (int j = po.nquote; j < n; j++) dup_ |= !strcmp(all[j], d); if (!dup_) all[n++] = d; } while (0)
 	for (int k = 0; k < ni; k++) ADD(dirs_i[k]);
 	for (int k = 0; k < ns; k++) ADD(dirs_s[k]);
+	if (darwin && !nostdinc)
+		for (size_t k = 0; k < sizeof(sysdirs_darwin) / sizeof(sysdirs_darwin[0]); k++)
+			ADD(sysdirs_darwin[k]);
 	for (int k = 0; k < na; k++) ADD(dirs_a[k]);
+	if (darwin && !nostdinc) {
+		po.fwdirs = fwdirs_darwin;
+		po.nfwdirs = (int)(sizeof(fwdirs_darwin) / sizeof(fwdirs_darwin[0]));
+	}
 	po.dirs = all;
 	po.ndirs = n;
 
-	bstr(&pre, predef_aarch64_linux);
+	bstr(&pre, darwin ? predef_darwin : predef_aarch64_linux);
+	po.target = darwin ? PP_DARWIN : PP_LINUX_AARCH64;
 	if (opt == 0) bstr(&pre, "#undef __OPTIMIZE__\n#define __NO_INLINE__ 1\n");
 	if (os) bstr(&pre, "#define __OPTIMIZE_SIZE__ 1\n");
 	if (pie || pic) {
@@ -258,7 +267,7 @@ int main(int argc, char **argv)
 	bput(&pre, "", 1);
 	po.predef = pre.p;
 	po.main = main_file;
-	po.unsigned_char = 1;
+	po.unsigned_char = !darwin;
 	if (pmap) {
 		char *eq = strchr(pmap, '=');
 

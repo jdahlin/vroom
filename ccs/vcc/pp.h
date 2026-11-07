@@ -40,8 +40,13 @@ typedef struct pp_opts {
 	int ndirs, nquote;		/* dirs[0..nquote) only for "" includes */
 	const char *predef;		/* "<built-in>": #define/#undef/#include lines, run first */
 	const char *prefix_from, *prefix_to;	/* -fmacro-prefix-map (one) */
+	const char *const *fwdirs;	/* framework dirs: <A/b.h> -> DIR/A.framework/Headers/b.h */
+	int nfwdirs;
 	int unsigned_char;
+	int target;			/* PP_LINUX_AARCH64 or PP_DARWIN (column of the feature table) */
 } pp_opts;
+
+enum { PP_LINUX_AARCH64, PP_DARWIN };
 
 typedef struct pp pp;
 

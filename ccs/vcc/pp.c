@@ -286,6 +286,9 @@ enum {
 	B_BASE_FILE, B_FILE_NAME, B_INCLUDE_LEVEL, B_PRAGMA,
 	B_HAS_ATTRIBUTE, B_HAS_BUILTIN, B_HAS_FEATURE, B_HAS_EXTENSION,
 	B_HAS_C_ATTRIBUTE, B_HAS_CPP_ATTRIBUTE, B_HAS_DECLSPEC, B_HAS_WARNING,
+	B_HAS_CONSTEXPR_BUILTIN, B_IS_TARGET_ARCH, B_IS_TARGET_OS, B_IS_TARGET_VENDOR,
+	B_IS_TARGET_ENVIRONMENT, B_IS_TARGET_VARIANT_OS, B_IS_TARGET_VARIANT_ENVIRONMENT,
+	B_BUILDING_MODULE,
 	B_IS_IDENTIFIER, B_HAS_INCLUDE, B_HAS_INCLUDE_NEXT,
 };
 
@@ -1318,12 +1321,33 @@ static int has_query(pp *p, int b, const char *name, uint32_t loc)
 		[B_HAS_FEATURE] = "__has_feature", [B_HAS_EXTENSION] = "__has_extension",
 		[B_HAS_C_ATTRIBUTE] = "__has_c_attribute", [B_HAS_CPP_ATTRIBUTE] = "__has_cpp_attribute",
 		[B_HAS_DECLSPEC] = "__has_declspec_attribute", [B_HAS_WARNING] = "__has_warning",
+		[B_HAS_CONSTEXPR_BUILTIN] = "__has_constexpr_builtin",
+		[B_IS_TARGET_ARCH] = "__is_target_arch", [B_IS_TARGET_OS] = "__is_target_os",
+		[B_IS_TARGET_VENDOR] = "__is_target_vendor",
+		[B_IS_TARGET_ENVIRONMENT] = "__is_target_environment",
+		[B_IS_TARGET_VARIANT_OS] = "__is_target_variant_os",
+		[B_IS_TARGET_VARIANT_ENVIRONMENT] = "__is_target_variant_environment",
+		[B_BUILDING_MODULE] = "__building_module",
 	};
 
-	for (size_t i = 0; i < sizeof(has_tab) / sizeof(has_tab[0]); i++)
-		if (!strcmp(has_tab[i].q, q[b]) && !strcmp(has_tab[i].name, name))
-			return has_tab[i].v;
-	warn(p, loc, "%s(%s) not in the capability table, assuming 0", q[b], name);
+	size_t lo = 0, hi = sizeof(has_tab) / sizeof(has_tab[0]);
+
+	if (b == B_BUILDING_MODULE)
+		return 0;	/* no modules */
+	/* the table holds the nonzero answers, sorted by (query, name) */
+	while (lo < hi) {
+		size_t mid = (lo + hi) / 2;
+		int c = strcmp(has_tab[mid].q, q[b]);
+
+		if (!c)
+			c = strcmp(has_tab[mid].name, name);
+		if (!c)
+			return has_tab[mid].v[p->o->target];
+		if (c < 0)
+			lo = mid + 1;
+		else
+			hi = mid;
+	}
 	return 0;
 }
 
@@ -2004,6 +2028,20 @@ static const vlex_file *find_include(pp *p, const ctx *from, const char *name, s
 			return f;
 		}
 	}
+	/* frameworks: <Fw/h.h> -> DIR/Fw.framework/Headers/h.h */
+	if (angled && !next) {
+		const char *sl = memchr(name, '/', nlen);
+
+		for (int k = 0; sl && k < p->o->nfwdirs; k++) {
+			int l = snprintf(buf, sizeof(buf), "%s/%.*s.framework/Headers/%.*s", p->o->fwdirs[k],
+					 (int)(sl - name), name, (int)(nlen - (size_t)(sl - name) - 1), sl + 1);
+
+			if (l > 0 && (size_t)l < sizeof(buf) && (f = vlex_get(buf, (size_t)l))) {
+				*path = pstrdup(p, buf, (size_t)l);
+				return f;
+			}
+		}
+	}
 	return NULL;
 }
 
@@ -2274,6 +2312,13 @@ pp *pp_open(const pp_opts *o)
 		{ "__has_declspec_attribute", B_HAS_DECLSPEC }, { "__has_warning", B_HAS_WARNING },
 		{ "__is_identifier", B_IS_IDENTIFIER }, { "__has_include", B_HAS_INCLUDE },
 		{ "__has_include_next", B_HAS_INCLUDE_NEXT },
+		{ "__has_constexpr_builtin", B_HAS_CONSTEXPR_BUILTIN },
+		{ "__is_target_arch", B_IS_TARGET_ARCH }, { "__is_target_os", B_IS_TARGET_OS },
+		{ "__is_target_vendor", B_IS_TARGET_VENDOR },
+		{ "__is_target_environment", B_IS_TARGET_ENVIRONMENT },
+		{ "__is_target_variant_os", B_IS_TARGET_VARIANT_OS },
+		{ "__is_target_variant_environment", B_IS_TARGET_VARIANT_ENVIRONMENT },
+		{ "__building_module", B_BUILDING_MODULE },
 	};
 	const vlex_file *mf;
 	size_t n = strlen(o->predef);
