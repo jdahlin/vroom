@@ -132,10 +132,19 @@ typedef struct {
 
 static uint32_t fnv(const char *s, uint32_t n)
 {
-	uint32_t h = 2166136261u;
-	for (uint32_t i = 0; i < n; i++)
-		h = (h ^ (uint8_t)s[i]) * 16777619u;
-	return h;
+	/* 8 bytes at a time, multiply-xorshift mixing */
+	uint64_t h = 0x9e3779b97f4a7c15ull ^ n;
+	uint32_t i = 0;
+	for (; i + 8 <= n; i += 8) {
+		uint64_t w;
+		memcpy(&w, s + i, 8);
+		h = (h ^ w) * 0xff51afd7ed558ccdull;
+		h ^= h >> 29;
+	}
+	uint64_t w = 0;
+	memcpy(&w, s + i, n - i);
+	h = (h ^ w) * 0xc4ceb9fe1a85ec53ull;
+	return (uint32_t)(h ^ h >> 32);
 }
 static void st_grow(StrTab *t)
 {
@@ -151,7 +160,21 @@ static void st_grow(StrTab *t)
 	t->tab = nt;
 	t->tmask = nm - 1;
 }
-static void st_add(StrTab *t, const char *s)
+static void st_reserve(StrTab *t, uint32_t n)
+{
+	uint32_t m = 1024;
+	while (m < n * 2 + 2)
+		m *= 2;
+	if (t->tab && t->tmask + 1 >= m)
+		return;
+	t->v = realloc(t->v, (t->cap = n > t->cap ? n : t->cap) * sizeof(StrEnt));
+	t->tmask = m / 2 - 1;	/* st_grow doubles */
+	uint32_t *old = t->tab;
+	t->tab = xcalloc(1, 4);
+	st_grow(t);
+	free(old);
+}
+static uint32_t st_add(StrTab *t, const char *s)
 {
 	uint32_t len = strlen(s), h = fnv(s, len);
 	if (!t->tab || (t->n + 1) * 2 > t->tmask)
@@ -160,7 +183,7 @@ static void st_add(StrTab *t, const char *s)
 	while (t->tab[j]) {
 		StrEnt *e = &t->v[t->tab[j] - 1];
 		if (e->h == h && e->len == len && !memcmp(e->s, s, len))
-			return;
+			return t->tab[j] - 1;
 		j = (j + 1) & t->tmask;
 	}
 	if (t->n == t->cap) {
@@ -169,6 +192,7 @@ static void st_add(StrTab *t, const char *s)
 	}
 	t->v[t->n] = (StrEnt){.s = s, .len = len, .h = h};
 	t->tab[j] = ++t->n;
+	return t->n - 1;
 }
 static uint64_t st_find(const StrTab *t, const char *s)
 {
@@ -185,31 +209,74 @@ static uint64_t st_find(const StrTab *t, const char *s)
 	return 0;
 }
 /* multikeySort order: by characters from the end, larger first, a string
-   before its own suffixes; a total order on distinct strings */
+   before its own suffixes; a total order on distinct strings.  That is
+   descending lexicographic order of the reversed strings, so each entry
+   carries its reversed name (one shared buffer) and comparisons are
+   memcmp, with the first 8 bytes as an integer key. */
+typedef struct { uint64_t key; const char *r; uint32_t len; StrEnt *e; } SortEnt;
 static int st_cmp(const void *a, const void *b)
 {
-	const StrEnt *x = *(StrEnt *const *)a, *y = *(StrEnt *const *)b;
-	uint32_t i = 0;
-	for (;;) {
-		int cx = i < x->len ? (uint8_t)x->s[x->len - 1 - i] : -1;
-		int cy = i < y->len ? (uint8_t)y->s[y->len - 1 - i] : -1;
-		if (cx != cy)
-			return cy - cx;
-		if (cx < 0)
-			return 0;
-		i++;
+	const SortEnt *p = a, *q = b;
+	if (p->key != q->key)
+		return p->key < q->key ? 1 : -1;
+	uint32_t n = p->len < q->len ? p->len : q->len;
+	if (n > 8) {
+		int c = memcmp(p->r + 8, q->r + 8, n - 8);
+		if (c)
+			return -c;
 	}
+	return (p->len < q->len) - (p->len > q->len);
 }
 static void st_finalize(StrTab *t)
 {
-	StrEnt **p = xcalloc(t->n, sizeof *p);
+	SortEnt *p = xcalloc(t->n, sizeof *p);
+	size_t tot = 0;
 	for (uint32_t i = 0; i < t->n; i++)
-		p[i] = &t->v[i];
-	qsort(p, t->n, sizeof *p, st_cmp);
+		tot += t->v[i].len;
+	char *rev = xcalloc(tot + 8, 1);
+	size_t ro = 0;
+	for (uint32_t i = 0; i < t->n; i++) {
+		StrEnt *e = &t->v[i];
+		char *r = rev + ro;
+		for (uint32_t j = 0; j < e->len; j++)
+			r[j] = e->s[e->len - 1 - j];
+		uint64_t k = 0;
+		for (uint32_t j = 0; j < 8; j++)
+			k = k << 8 | (j < e->len ? (uint8_t)r[j] : 0);
+		p[i] = (SortEnt){k, r, e->len, e};
+		ro += e->len;
+	}
+	/* LSD radix sort on the key, descending; ties (same last 8 bytes)
+	   are then sorted by the full comparison */
+	SortEnt *tmp = xcalloc(t->n, sizeof *tmp);
+	for (int sh = 0; sh < 64; sh += 8) {
+		uint32_t cnt[257] = {0};
+		for (uint32_t i = 0; i < t->n; i++)
+			cnt[255 - (p[i].key >> sh & 255) + 1]++;
+		bool one = false;
+		for (int i = 1; i < 257; i++)
+			one |= cnt[i] == t->n;
+		if (one)
+			continue;
+		for (int i = 0; i < 256; i++)
+			cnt[i + 1] += cnt[i];
+		for (uint32_t i = 0; i < t->n; i++)
+			tmp[cnt[255 - (p[i].key >> sh & 255)]++] = p[i];
+		SortEnt *x = p;
+		p = tmp;
+		tmp = x;
+	}
+	free(tmp);
+	for (uint32_t i = 0, j; i < t->n; i = j) {
+		for (j = i + 1; j < t->n && p[j].key == p[i].key; j++)
+			;
+		if (j - i > 1 && p[i].len >= 8)
+			qsort(p + i, j - i, sizeof *p, st_cmp);
+	}
 	t->size = 1;
 	const StrEnt *prev = NULL;
 	for (uint32_t i = 0; i < t->n; i++) {
-		StrEnt *e = p[i];
+		StrEnt *e = p[i].e;
 		if (prev && prev->len >= e->len && !memcmp(prev->s + prev->len - e->len, e->s, e->len)) {
 			e->off = t->size - e->len - 1;
 			continue;
@@ -219,6 +286,7 @@ static void st_finalize(StrTab *t)
 		prev = e;
 	}
 	free(p);
+	free(rev);
 }
 static void st_write(const StrTab *t, uint8_t *dst)
 {
@@ -265,7 +333,7 @@ typedef struct {
 	uint16_t shndx;			/* original */
 	uint64_t value, size;
 	bool removed;
-	uint32_t idx;
+	uint32_t idx, sidx;		/* new index, string table entry */
 } OSym;
 
 typedef struct {
@@ -295,7 +363,16 @@ static bool match_list(const char **v, uint32_t n, const char *name)
 			neg = true;
 			p++;
 		}
-		bool m = oc.wildcard ? fnmatch(p, name, 0) == 0 : strcmp(p, name) == 0;
+		bool m;
+		size_t meta = 0;
+		while (p[meta] && !(oc.wildcard && (p[meta] == '*' || p[meta] == '?' || p[meta] == '[' || p[meta] == '\\')))
+			meta++;
+		if (!p[meta])
+			m = !strcmp(p, name);
+		else if (p[meta] == '*' && !p[meta + 1])	/* prefix* */
+			m = !strncmp(p, name, meta);
+		else
+			m = fnmatch(p, name, 0) == 0;
 		if (m)
 			return !neg;
 	}
@@ -620,10 +697,11 @@ static int objcopy_run(int dirfd)
 		if (!sec[k].removed)
 			st_add(&names, sname(&sec[k]));
 	StrTab *sn = shared_str ? &names : &symnames;
+	st_reserve(sn, nsym + (shared_str ? ns : 0));
 	if (symtab_i != NONE)
 		for (uint32_t i = 0; i < nsym; i++)
 			if (!sym[i].removed)
-				st_add(sn, yname(&sym[i]));
+				sym[i].sidx = st_add(sn, yname(&sym[i]));
 	st_finalize(&names);
 	if (!shared_str && symtab_i != NONE)
 		st_finalize(&symnames);
@@ -650,7 +728,7 @@ static int objcopy_run(int dirfd)
 				uint16_t shndx = y->shndx;
 				if (shndx && shndx < 0xff00)
 					shndx = shndx < ns ? sec[shndx].idx : 0;
-				d[y->idx] = (Sym){.st_name = (uint32_t)st_find(sn, yname(y)), .st_info = y->info,
+				d[y->idx] = (Sym){.st_name = sn->v[y->sidx].len ? (uint32_t)sn->v[y->sidx].off : 0, .st_info = y->info,
 						  .st_other = y->other, .st_shndx = shndx, .st_value = y->value,
 						  .st_size = y->size};
 			}
