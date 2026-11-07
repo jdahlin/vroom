@@ -58,6 +58,7 @@ enum {
 	R_AARCH64_MOVW_UABS_G1 = 265, R_AARCH64_MOVW_UABS_G1_NC = 266,
 	R_AARCH64_MOVW_UABS_G2 = 267, R_AARCH64_MOVW_UABS_G2_NC = 268,
 	R_AARCH64_MOVW_UABS_G3 = 269,
+	R_AARCH64_MOVW_SABS_G0 = 270, R_AARCH64_MOVW_SABS_G1 = 271, R_AARCH64_MOVW_SABS_G2 = 272,
 	R_AARCH64_LD_PREL_LO19 = 273, R_AARCH64_ADR_PREL_LO21 = 274,
 	R_AARCH64_ADR_PREL_PG_HI21 = 275, R_AARCH64_ADR_PREL_PG_HI21_NC = 276,
 	R_AARCH64_ADD_ABS_LO12_NC = 277, R_AARCH64_LDST8_ABS_LO12_NC = 278,
@@ -109,6 +110,8 @@ typedef struct {
 	uint32_t size_add, size_sub;	/* deferred .size expression */
 	int64_t size_c;
 	uint32_t idx;		/* symbol table index (elf_finish) */
+	uint32_t alias;		/* .set alias of this symbol: type and size merge from it */
+	uint8_t reg;		/* registered (MC's Asm.symbols(): symbol-table order) */
 } ElfSym;
 
 enum {				/* ElfSym.flags */
@@ -132,9 +135,10 @@ typedef struct { uint8_t *base; size_t used, cap; } ElfRegion;
 
 typedef struct ElfObj {
 	ElfRegion arena;	/* chunks, names, hash tables */
-	ElfRegion secs, frags, syms, fixes;
-	uint32_t nsec, nfrag, nsym, nfix;
+	ElfRegion secs, frags, syms, fixes, regs;
+	uint32_t nsec, nfrag, nsym, nfix, nreg;
 	uint32_t *htab; uint32_t hmask, hcount;	/* name -> symbol */
+	void *fin;		/* elf_finish() results for elf_emit() */
 	char err[256];
 	int has_err;
 } ElfObj;
@@ -197,6 +201,11 @@ static inline void elf_bind(ElfObj *o, uint32_t s, int bind)
 static inline void elf_type(ElfObj *o, uint32_t s, int type) { elf_symp(o, s)->type = (uint8_t)type; }
 static inline void elf_vis(ElfObj *o, uint32_t s, int vis) { elf_symp(o, s)->vis = (uint8_t)vis; }
 void elf_size_expr(ElfObj *o, uint32_t sym, ElfVal v);	/* .size sym, expr */
+/* Registration fixes symbol-table order (MC registers a symbol when it is
+ * defined, given an attribute, or used in an emitted value/instruction).
+ * elf_define(), elf_fixup() and the mapping symbols register on their own. */
+void elf_reg_slow(ElfObj *o, uint32_t sym);
+static inline void elf_reg(ElfObj *o, uint32_t s) { if (s && !elf_symp(o, s)->reg) elf_reg_slow(o, s); }
 
 /* Fixups: store v at (frag, off) - p points at the field (the bytes from
  * elf_grow).  Data fixups (ABS*, PREL*) store the value little-endian into

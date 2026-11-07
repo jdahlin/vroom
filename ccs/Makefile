@@ -20,7 +20,7 @@ clean:
 # ---- vcc: egen verktygskedja (fas 2) ----
 VCC_CFLAGS = -std=c11 -O2 -Wall -Wextra -Wno-unused-parameter -D_DARWIN_C_SOURCE
 
-vcc: $(OUT)/vcc $(OUT)/vld $(OUT)/vas $(OUT)/vccd $(OUT)/lextest $(OUT)/vpp
+vcc: $(OUT)/vcc $(OUT)/vld $(OUT)/vas $(OUT)/vccd $(OUT)/lextest $(OUT)/vpp $(OUT)/vasm
 
 LEX_SRC = vcc/lex.c vcc/intern.c
 LEX_HDR = vcc/lex.h vcc/intern.h
@@ -32,6 +32,12 @@ $(OUT)/vpp: vcc/vpp.c vcc/ppdata-predef.inc $(PP_SRC) $(PP_HDR) $(LEX_SRC) $(LEX
 
 $(OUT)/lextest: vcc/lextest.c vcc/pmc.c vcc/pmc.h $(LEX_SRC) $(LEX_HDR) | $(OUT)
 	/usr/bin/clang $(VCC_CFLAGS) -O3 -mcpu=apple-m1 -mno-outline -pthread vcc/lextest.c vcc/pmc.c $(LEX_SRC) -o $@
+
+AS_SRC = vcc/as.c vcc/a64.c vcc/elf.c
+AS_HDR = vcc/as.h vcc/a64.h vcc/elf.h vcc/a64sysreg.inc
+
+$(OUT)/vasm: vcc/vasm.c $(AS_SRC) $(AS_HDR) | $(OUT)
+	/usr/bin/clang $(VCC_CFLAGS) -O3 -mcpu=apple-m1 vcc/vasm.c $(AS_SRC) -o $@
 
 $(OUT)/vcc: vcc/shim.c protocol.h | $(OUT)
 	/usr/bin/clang $(VCC_CFLAGS) $< -o $@

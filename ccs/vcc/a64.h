@@ -36,7 +36,8 @@ enum { A64_EQ, A64_NE, A64_HS, A64_LO, A64_MI, A64_PL, A64_VS, A64_VC,
 /* relocation-operator modifiers (A64Op.mod) */
 enum { A64_MOD_NONE, A64_MOD_LO12, A64_MOD_PG_HI21, A64_MOD_PG_HI21_NC,
        A64_MOD_ABS_G0, A64_MOD_ABS_G0_NC, A64_MOD_ABS_G1, A64_MOD_ABS_G1_NC,
-       A64_MOD_ABS_G2, A64_MOD_ABS_G2_NC, A64_MOD_ABS_G3, A64_MOD_GOT, A64_MOD_GOT_LO12 };
+       A64_MOD_ABS_G2, A64_MOD_ABS_G2_NC, A64_MOD_ABS_G3, A64_MOD_GOT, A64_MOD_GOT_LO12,
+       A64_MOD_ABS_G0_S, A64_MOD_ABS_G1_S, A64_MOD_ABS_G2_S };
 
 /* ---- parsed operand ---- */
 enum {
@@ -62,6 +63,7 @@ typedef struct {
 	uint8_t mod;		/* IMM/MEM offset: A64_MOD_* */
 	uint8_t hassym;		/* IMM/MEM offset: v has symbols (not a constant) */
 	uint8_t hash;		/* IMM: written with '#' */
+	uint8_t wb;		/* REG: followed by '!' (MOPS) */
 	int64_t imm;		/* IMM value, MEM offset, SHIFT amount */
 	double fimm;		/* FIMM */
 	ElfVal v;		/* symbolic part (v.c holds the constant part) */
