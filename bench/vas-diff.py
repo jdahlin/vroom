@@ -4,6 +4,7 @@
   bench/vas-diff.py ref [-j N] [PAT]   clang -E and clang -c for every .S TU -> $VAS_REF
   bench/vas-diff.py cmp [-j N] [PAT]   vas on the preprocessed text, compare with clang's .o
   bench/vas-diff.py show PAT           detailed diff for one TU
+  --vpp: preprocess with our vpp instead of using clang's -E output
 
 TUs and argv come from work/build-o0/**/.*.o.cmd (as in vcc-diff.py); each
 command runs in work/build-o0 (relative .incbin paths).  The comparison is
@@ -20,6 +21,8 @@ vd.B = B = f'{ROOT}/work/build-o0'
 REF = os.environ.get('VAS_REF', f'{ROOT}/work/asref')
 CL = '/opt/homebrew/opt/llvm/bin/clang'; RE = '/opt/homebrew/opt/llvm/bin/llvm-readelf'
 VAS = os.environ.get('VAS', f'{R}/build/ccs/vasm')
+VPP = os.environ.get('VPP', f'{R}/build/ccs/vpp')
+USE_VPP = os.environ.get('VAS_VPP') == '1'
 
 def tus(pat=None):
     return [t for t in vd.tus(pat) if t[1][-1].endswith('.S') and '-c' not in t[1]
@@ -51,13 +54,19 @@ def cmp(t):
     obj, a = t
     n = name(obj)
     out = n[:-2] + '.vas.o'
-    p = subprocess.run([VAS, '-o', out, n[:-2] + '.s'], cwd=B, capture_output=True, text=True)
+    src = n[:-2] + '.s'
+    if USE_VPP:
+        src = n[:-2] + '.vpp.s'
+        p = subprocess.run([VPP, '-o', src] + a, cwd=B, capture_output=True, text=True)
+        if p.returncode: return obj, 2, 'vpp: ' + p.stderr.strip()[-600:]
+    p = subprocess.run([VAS, '-o', out, src], cwd=B, capture_output=True, text=True)
     if p.returncode: return obj, 2, p.stderr.strip()[-600:]
     if open(n, 'rb').read() == open(out, 'rb').read(): return obj, 0, ''
     return obj, 1, detail(n, out)
 
 if __name__ == '__main__':
     av = sys.argv[1:]; j = 2
+    if '--vpp' in av: av.remove('--vpp'); os.environ['VAS_VPP'] = '1'; USE_VPP = True
     if '-j' in av: k = av.index('-j'); j = int(av[k + 1]); del av[k:k + 2]
     mode = av[0]; pat = av[1] if len(av) > 1 else None
     os.makedirs(REF, exist_ok=True)
