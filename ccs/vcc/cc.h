@@ -218,6 +218,8 @@ typedef struct cc_opts {
 	int short_wchar;	/* -fshort-wchar */
 	int dump_layouts;	/* append _Static_assert checks for clang to verify */
 	int outfd;
+	int emit;		/* generate code (emit.c): 1 = assembly text to outfd */
+	int nthreads;		/* emitter threads (0: 1) */
 } cc_opts;
 
 typedef struct cc cc;
