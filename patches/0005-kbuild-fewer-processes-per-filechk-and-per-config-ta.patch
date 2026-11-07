@@ -1,0 +1,54 @@
+From 756e0cedfb4aa55b1c5b1f98c74a1bc1b372d8c6 Mon Sep 17 00:00:00 2001
+From: vroom <vroom@localhost>
+Date: Sat, 7 Nov 2026 22:21:07 +0100
+Subject: [PATCH 5/6] kbuild: fewer processes per filechk and per config-target
+ command
+
+filechk ran mkdir -p for a directory that almost always exists and rm -f
+for a temporary file that mv had already moved away: two processes of the
+four per generated header.  Test first; both are shell builtins.
+
+For *config targets, CC_VERSION_TEXT, RUSTC_VERSION_TEXT and
+PAHOLE_VERSION are exported recursive variables, so make ran
+`$(CC) --version | head`, `$(RUSTC) --version` and pahole-version.sh
+again for every command it started (some 20 times in syncconfig).
+Expand them once, after the arch Makefile has been included.
+---
+ Makefile               | 5 +++++
+ scripts/Kbuild.include | 4 ++--
+ 2 files changed, 7 insertions(+), 2 deletions(-)
+
+diff --git a/Makefile b/Makefile
+index d02ba9ce1..9c23ca67a 100644
+--- a/Makefile
++++ b/Makefile
+@@ -763,6 +763,11 @@ ifdef config-build
+ # KBUILD_DEFCONFIG may point out an alternative default configuration
+ # used for 'make defconfig'
+ include $(srctree)/arch/$(SRCARCH)/Makefile
++# Expand once: an exported recursive variable is expanded again for every
++# command make runs, and these each run the tool.
++CC_VERSION_TEXT := $(CC_VERSION_TEXT)
++RUSTC_VERSION_TEXT := $(RUSTC_VERSION_TEXT)
++PAHOLE_VERSION := $(PAHOLE_VERSION)
+ export KBUILD_DEFCONFIG KBUILD_KCONFIG CC_VERSION_TEXT RUSTC_VERSION_TEXT PAHOLE_VERSION
+ 
+ config: outputmakefile scripts_basic FORCE
+diff --git a/scripts/Kbuild.include b/scripts/Kbuild.include
+index 8c311b997..a38c460ec 100644
+--- a/scripts/Kbuild.include
++++ b/scripts/Kbuild.include
+@@ -97,8 +97,8 @@ kecho := $($(quiet)kecho)
+ define filechk
+ 	$(check-FORCE)
+ 	$(Q)set -e;						\
+-	mkdir -p $(dir $@);					\
+-	trap "rm -f $(tmp-target)" EXIT;			\
++	[ -d $(dir $@) ] || mkdir -p $(dir $@);			\
++	trap "[ ! -e $(tmp-target) ] || rm -f $(tmp-target)" EXIT; \
+ 	{ $(filechk_$(1)); } > $(tmp-target);			\
+ 	if [ ! -r $@ ] || ! cmp -s $@ $(tmp-target); then	\
+ 		$(kecho) '  UPD     $@';			\
+-- 
+2.54.0 (Apple Git-157)
+

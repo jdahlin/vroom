@@ -1,0 +1,47 @@
+From bd1300c95b7a0307e7eb10c13c60479802365a2e Mon Sep 17 00:00:00 2001
+From: vroom <vroom@localhost>
+Date: Sat, 7 Nov 2026 22:20:41 +0100
+Subject: [PATCH 4/6] kbuild: let archprepare wait only for scripts_basic
+
+prepare needs fixdep (scripts_basic), but Kbuild makes archprepare depend
+on all of scripts/, so dtc, kallsyms, sorttable and friends are built
+before the first compile of prepare (bounds.s, asm-offsets.s, the vDSO).
+They are only used once the tree is descended or at link time.
+
+Let archprepare depend on scripts_basic and make the tree descent and
+modules_prepare depend on scripts instead.  GCC plugins and recordmcount
+are used by every C compile, and Rust needs target.json, so keep the
+dependency for those configurations.
+---
+ Makefile | 11 ++++++++++-
+ 1 file changed, 10 insertions(+), 1 deletion(-)
+
+diff --git a/Makefile b/Makefile
+index de4cc052a..d02ba9ce1 100644
+--- a/Makefile
++++ b/Makefile
+@@ -1407,11 +1407,20 @@ scripts: scripts_basic scripts_dtc
+ 
+ PHONY += prepare archprepare
+ 
+-archprepare: outputmakefile archheaders archscripts scripts include/config/kernel.release \
++archprepare: outputmakefile archheaders archscripts scripts_basic include/config/kernel.release \
+ 	asm-generic $(version_h) include/generated/utsrelease.h \
+ 	include/generated/compile.h include/generated/autoconf.h \
+ 	include/generated/rustc_cfg remove-stale-files
+ 
++# The host programs in scripts/ (kallsyms, sorttable, asn1_compiler, ...)
++# are used once the tree is descended or at link time, so they can build in
++# parallel with prepare.  GCC plugins and recordmcount are used by every C
++# compile, including those in prepare, and Rust needs target.json.
++$(build-dir) modules_prepare: scripts
++ifneq ($(CONFIG_GCC_PLUGINS)$(BUILD_C_RECORDMCOUNT)$(CONFIG_RUST),)
++archprepare: scripts
++endif
++
+ prepare0: archprepare
+ 	$(Q)$(MAKE) $(build)=. prepare
+ 	$(Q)$(MAKE) $(build)=scripts/mod
+-- 
+2.54.0 (Apple Git-157)
+
