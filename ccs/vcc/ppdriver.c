@@ -296,7 +296,7 @@ int ppd_run(int argc, char **argv, const ppd_env *env)
 	char *pmap = NULL;
 	double t0;
 	pp *p;
-	int syntax = 0, layout = 0, ms_anon = 0, short_wchar = 0;
+	int syntax = 0, layout = 0, ms_anon = 0, short_wchar = 0, tokhash = 0;
 
 	for (int i = 1; i < argc; i++) {
 		const char *a = argv[i];
@@ -308,6 +308,7 @@ int ppd_run(int argc, char **argv, const ppd_env *env)
 		if (!strcmp(a, "-fms-anonymous-structs") || !strcmp(a, "-fms-extensions")) { ms_anon = 1; continue; }
 		if (!strcmp(a, "-fshort-wchar")) { short_wchar = 1; continue; }
 		if (!strcmp(a, "--vcc-layout-checks")) { syntax = 1; layout = 1; continue; }
+		if (!strcmp(a, "--vcc-tokhash")) { tokhash = 1; continue; }
 		if (!strcmp(a, "-o") && i + 1 < argc) { out = argv[++i]; continue; }
 		if (!strncmp(a, "-Wp,-MMD,", 9) || !strncmp(a, "-Wp,-MD,", 8)) { depfile = strchr(a + 4, ',') + 1; continue; }
 		if (!strcmp(a, "-MD") || !strcmp(a, "-MMD")) { md = 1; continue; }
@@ -430,6 +431,45 @@ int ppd_run(int argc, char **argv, const ppd_env *env)
 	pp_set_fatal(p, &jb);
 	if (setjmp(jb)) {
 		status = 1;
+		goto done;
+	}
+	if (tokhash) {
+		/* a hash of what pp_next hands the parser: kind, SOL/SPACE, spelling, id, file:line:col, sys */
+		uint64_t h = 1469598103934665603ull;
+		unsigned long n = 0;
+		char tmp[1 << 16], line[64];
+		const char *fn[4096];
+		size_t nf;
+		ptok t;
+		const int count_only = getenv("VPP_TOKCOUNT") != NULL;
+
+#define HB(ptr, len) do { const unsigned char *q_ = (const unsigned char *)(ptr); \
+		for (size_t k_ = 0; k_ < (size_t)(len); k_++) h = (h ^ q_[k_]) * 1099511628211ull; } while (0)
+		for (;;) {
+			const char *sp;
+			size_t sl;
+			unsigned char kf[2];
+
+			pp_next(p, &t);
+			if (t.kind == T_EOF)
+				break;
+			n++;
+			if (count_only)
+				continue;
+			kf[0] = t.kind, kf[1] = t.flags & (TF_SOL | TF_SPACE);
+			HB(kf, 2);
+			HB(&t.loc, 4);	/* the same in every run: file bases are assigned in order */
+			sp = t.len < sizeof(tmp) ? pp_spell(&t, tmp, &sl) : (sl = 0, "");
+			HB(sp, sl);
+			if (t.kind == T_IDENT)
+				HB(vintern_ents[t.id].s, vintern_ents[t.id].len);
+		}
+		nf = pp_files(p, fn, 4096);
+		for (size_t i = 0; i < nf; i++)
+			HB(fn[i], strlen(fn[i]) + 1);
+#undef HB
+		snprintf(line, sizeof(line), "%016llx %lu\n", (unsigned long long)h, n);
+		status = pp_errors(p) ? 1 : write_out(env->cwd, out, env->outfd, line, strlen(line), errfd);
 		goto done;
 	}
 	if (syntax) {

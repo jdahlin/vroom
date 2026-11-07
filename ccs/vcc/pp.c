@@ -340,7 +340,7 @@ struct pmacro {
 
 /* ---------------- contexts ---------------- */
 
-enum { C_FILE, C_VTOK, C_PTOK };
+enum { C_FILE, C_VTOK, C_PTOK, C_REPLAY };
 
 typedef struct ctx {
 	uint8_t type;
@@ -360,6 +360,11 @@ typedef struct ctx {
 	int32_t sdir;		/* search dir it was found in, -1 if none */
 	uint32_t fe;		/* fent index */
 	const char *spath;	/* the path as clang spells it (f->path is the cache key) */
+	/* C_REPLAY: a header cache entry's tokens (pt, n), its children spliced in */
+	const struct hent *he;
+	uint32_t si, ci;	/* next segment, next __COUNTER__ record */
+	unsigned cbase;		/* __COUNTER__ at the entry's start */
+	uint8_t top;		/* outermost: owes the entry's pend_out when done */
 } ctx;
 
 typedef struct fent {
@@ -439,7 +444,7 @@ typedef struct cprov {
 
 typedef struct hctr {
 	uint32_t off, len, rel;	/* own-text offset; value - counter at entry */
-} hctr;
+} hctr;	/* tokens: off = own-token index, len = byte offset << 16 | length */
 
 /* a lookup of an identifier pasted from __COUNTER__ (it was undefined) */
 typedef struct hcread {
@@ -450,9 +455,10 @@ typedef struct hcread {
 typedef struct hent hent;
 
 typedef struct hseg {
-	uint32_t at;		/* own-text offset the child's text goes before */
+	uint32_t at;		/* own-text offset (tokens: own-token index) the child goes before */
 	uint32_t cdelta;	/* child's counter at entry - ours */
 	const hent *child;
+	uint32_t lbase;		/* tokens: child's location base - ours */
 } hseg;
 
 struct hent {
@@ -465,10 +471,11 @@ struct hent {
 	const vlex_file *const *oadd;
 	const hfent *fe;
 	const char *text;	/* own text */
+	const ptok *tk;		/* token entries: own tokens (loc: offset from the base + 1, 0: none) */
 	const hctr *ctr;
 	const hcread *crd;
 	const hseg *seg;
-	size_t ntext, total;	/* own text; with the children */
+	size_t ntext, total;	/* own text (tokens); with the children */
 	int32_t level;		/* __INCLUDE_LEVEL__ used: the include depth it ran at (-1: not used) */
 	uint32_t ndirs, psig;	/* leading search directories its lookups depended on; their id */
 	uint32_t nrg, nru, nrv, ndl, nord, noadd, nfe, nctr, ncrd, nseg, span, counter_delta;
@@ -505,10 +512,11 @@ typedef struct hcrd {		/* hcread while recording: absolute value */
 	uint32_t len, off, dlen, val;
 } hcrd;
 
-typedef struct hsegr {		/* a child entry's text in the output */
+typedef struct hsegr {		/* a child entry's text (tokens) in the output */
 	size_t start, end;
 	const hent *child;
 	uint32_t counter0;
+	uint32_t base0;		/* tokens: its location base */
 } hsegr;
 
 typedef struct hlev {
@@ -560,7 +568,8 @@ struct pp {
 	size_t nout, capout;
 	unsigned col;
 	/* header cache */
-	int hc;			/* on (pp_text, not disabled) */
+	int hc;			/* on (pp_text or pp_next, not disabled) */
+	int tokmode;		/* 0 unset, 1 text (pp_text), 2 tokens (pp_next) */
 	uint32_t sig;		/* base signature (HNONE: no cache) */
 	uint32_t *psig;		/* search path prefix ids, [0, ndirs] */
 	struct hrec {
@@ -581,6 +590,10 @@ struct pp {
 		uint32_t nseg;
 		cprov *cp;	/* indexed by ptok.ctr */
 		uint32_t ncp;
+		ptok *tk;	/* tokens handed out (token mode) */
+		uint32_t ntk;
+		char *sb;	/* their spellings that live in per-TU memory */
+		size_t nsb;
 	} rec;
 	uint64_t *rst[NMDIR];	/* per id: serial << 32 | index in rec.t */
 };
@@ -1213,6 +1226,8 @@ static void pop_to(pp *p, int d)
 
 static int directive(pp *p, ctx *c, ptok *out);
 static void hc_end(pp *p);
+static bool replay_seg(pp *p, ctx *c);
+static void replay_tok(pp *p, ctx *c, ptok *t);
 
 /* the next token, no macro expansion; runs directives in file contexts */
 static void raw(pp *p, ptok *t)
@@ -1227,6 +1242,10 @@ static void raw(pp *p, ptok *t)
 				const vtok *v = &c->vt[c->i++];
 
 				vfill(t, v, c->src, c->offloc ? c->loc + v->off : c->loc);
+			} else if (c->type == C_REPLAY) {
+				if (replay_seg(p, c))
+					continue;
+				replay_tok(p, c, t);
 			} else {
 				const vtok *v = &c->vt[c->i];
 
@@ -1247,6 +1266,14 @@ static void raw(pp *p, ptok *t)
 				p->pend = 0;
 			}
 			return;
+		}
+		if (c->type == C_REPLAY) {
+			if (replay_seg(p, c))
+				continue;
+			if (c->top)
+				p->pend |= c->he->pend_out;
+			p->depth--;
+			continue;
 		}
 		if (c->barrier) {
 			mkeof(t);
@@ -1278,7 +1305,7 @@ static bool peek_lparen(const pp *p)
 		const ctx *c = &p->cx[d];
 
 		if (c->i < c->n)
-			return (c->type == C_PTOK ? c->pt[c->i].kind : c->vt[c->i].kind) == T_LPAREN;
+			return (c->type == C_PTOK || c->type == C_REPLAY ? c->pt[c->i].kind : c->vt[c->i].kind) == T_LPAREN;
 		if (c->type == C_FILE || c->barrier)
 			return false;
 	}
@@ -3149,14 +3176,135 @@ static inline void text_start(pp *p, uint8_t sol)
 	}
 }
 
+/* ---------------- header cache: token entries (pp_next) ---------------- */
+
+static void push_replay(pp *p, const hent *e, uint32_t base, unsigned cbase, uint8_t top)
+{
+	ctx *c = push(p);
+
+	c->type = C_REPLAY;
+	c->pt = e->tk;
+	c->n = (uint32_t)e->ntext;
+	c->loc = base;
+	c->he = e;
+	c->si = c->ci = 0;
+	c->cbase = cbase;
+	c->top = top;
+}
+
+/* a child entry's tokens go before the next own token: pushed */
+static bool replay_seg(pp *p, ctx *c)
+{
+	const hent *e = c->he;
+	const hseg *g;
+
+	if (c->si >= e->nseg || e->seg[c->si].at != c->i)
+		return false;
+	g = &e->seg[c->si++];
+	push_replay(p, g->child, c->loc + g->lbase, c->cbase + g->cdelta, 0);
+	return true;
+}
+
+static void replay_tok(pp *p, ctx *c, ptok *t)
+{
+	const hent *e = c->he;
+
+	*t = c->pt[c->i];
+	t->loc = t->loc ? c->loc + t->loc - 1 : 0;
+	t->ctr = 0;
+	if (t->kind == T_IDENT)
+		t->flags |= PF_NOEXP;	/* handed out as recorded: expanded already */
+	if (unlikely(c->ci < e->nctr && e->ctr[c->ci].off == c->i)) {
+		/* __COUNTER__ digits in the spelling: this TU's values */
+		char *b = alloc(&p->perm, t->len + 24 * 4 + 32), *w = b;
+		uint32_t at = 0;
+
+		while (c->ci < e->nctr && e->ctr[c->ci].off == c->i) {
+			const hctr *h = &e->ctr[c->ci++];
+			uint32_t bo = h->len >> 16, bl = h->len & 0xffff;
+
+			memcpy(w, t->s + at, bo - at);
+			w += bo - at;
+			w += utoa(w, c->cbase + h->rel);
+			at = bo + bl;
+		}
+		memcpy(w, t->s + at, t->len - at);
+		w += t->len - at;
+		memset(w, 0, 16);
+		t->s = b;
+		t->len = (uint32_t)(w - b);
+		if (t->kind == T_IDENT)
+			t->id = vintern_copy(b, t->len);
+	}
+	c->i++;
+}
+
+static inline bool tu_mem(const pp *p, const char *s)
+{
+	return (s >= p->tmp.base && s < p->tmp.end) || (s >= p->perm.base && s < p->perm.end);
+}
+
+#define HC_MAXTK (1u << 24)
+#define HC_MAXSB ((size_t)1 << 28)
+
+/* a token pp_next hands out while recording */
+static void rec_tok(pp *p, const ptok *t)
+{
+	struct hrec *r = &p->rec;
+	const hlev *L = &r->lev[r->n - 1];
+	ptok *d;
+
+	if (t->kind == T_EOF)
+		return;
+	if (unlikely(r->ntk >= HC_MAXTK || (t->loc && t->loc < L->base0))) {
+		HC_BAD(p);
+		return;
+	}
+	d = &r->tk[r->ntk++];
+	*d = *t;
+	if (tu_mem(p, t->s)) {
+		if (r->nsb + t->len + 16 > HC_MAXSB) {
+			HC_BAD(p);
+			return;
+		}
+		d->s = r->sb + r->nsb;
+		memcpy(r->sb + r->nsb, t->s, t->len);
+		memset(r->sb + r->nsb + t->len, 0, 16);
+		r->nsb += t->len + 16;
+	}
+	if (unlikely(t->ctr)) {
+		if (t->flags & TF_DIRTY)
+			HC_BAD(p);
+		for (uint16_t q = t->ctr; q; q = r->cp[q].next) {
+			const cprov *c = &r->cp[q];
+
+			if (r->nctr < HC_MAXCP)
+				r->ctr[r->nctr++] = (hcpos){ r->ntk - 1, (uint32_t)c->off << 16 | c->len, c->val };
+			else
+				HC_BAD(p);
+		}
+	}
+}
+
 static void hc_apply(pp *p, const hent *e)
 {
 	unsigned c0 = p->counter;
 	struct hrec *r = &p->rec;
 	hlev *L = r->n ? &r->lev[r->n - 1] : NULL;
 
-	if (e->has_text) {
+	if (p->tokmode == 2) {
+		if (e->has_text) {
+			if (L) {
+				if (r->nseg < HC_MAXSEG)
+					r->seg[r->nseg++] = (hsegr){ r->ntk, r->ntk + e->total, e, c0, p->next_base };
+				else
+					HC_BAD(p);
+			}
+			push_replay(p, e, p->next_base, c0, 1);
+		}
+	} else if (e->has_text) {
 		size_t st;
+
 		if (p->col)
 			out_ch(p, e->first_sol ? '\n' : ' ');
 		if (L)
@@ -3167,7 +3315,7 @@ static void hc_apply(pp *p, const hent *e)
 		p->col = e->col_end;
 		if (L) {
 			if (r->nseg < HC_MAXSEG)
-				r->seg[r->nseg++] = (hsegr){ st, p->nout, e, c0 };
+				r->seg[r->nseg++] = (hsegr){ st, p->nout, e, c0, 0 };
 			else
 				HC_BAD(p);
 		}
@@ -3223,7 +3371,8 @@ static void hc_apply(pp *p, const hent *e)
 	for (uint32_t i = 0; i < e->noadd && p->nonce < 4096; i++)
 		p->once[p->nonce++] = e->oadd[i];
 	p->counter += e->counter_delta;
-	p->pend = e->pend_out;
+	if (p->tokmode != 2 || !e->has_text)
+		p->pend = e->pend_out;	/* (tokens: when the replay is done) */
 	atomic_fetch_add_explicit(&hstat.hit, 1, memory_order_relaxed);
 	atomic_fetch_add_explicit(&hstat.bytes_replayed, e->total, memory_order_relaxed);
 }
@@ -3282,6 +3431,9 @@ static bool hc_try(pp *p, hkey *k)
 	return false;
 }
 
+static _Thread_local ptok *tk_spare;
+static _Thread_local char *sb_spare;
+
 static _Thread_local struct {
 	htouch *t;
 	honce *ord;
@@ -3311,8 +3463,19 @@ static void hc_begin(pp *p, hkey *k)
 		r->seg = vm(HC_MAXSEG * sizeof(hsegr));
 		r->cp = vm((HC_MAXCP + 1) * sizeof(cprov));
 	}
+	if (p->tokmode == 2 && !r->tk) {
+		if (tk_spare) {
+			r->tk = tk_spare, r->sb = sb_spare;
+			tk_spare = NULL;
+		} else {
+			r->tk = vm(HC_MAXTK * sizeof(ptok));
+			r->sb = vm(HC_MAXSB);
+		}
+	}
 	if (!r->n) {
 		r->nt = r->nord = r->nctr = r->ncrd = r->nseg = r->ncp = 0;
+		r->ntk = 0;
+		r->nsb = 0;
 		r->nbad = 0;
 	}
 	L = &r->lev[r->n++];
@@ -3333,7 +3496,8 @@ static void hc_begin(pp *p, hkey *k)
 	L->errors0 = p->errors;
 	L->warns0 = p->warns;
 	L->counter0 = p->counter;
-	L->text_started = 0;
+	L->text_started = p->tokmode == 2;	/* tokens: positions count from here */
+	L->text0 = r->ntk;
 	L->uses_level = 0;
 	L->ndirs = 0;
 	L->nfile = p->nfile - 1;	/* before the region's file */
@@ -3356,6 +3520,57 @@ static char *hstrdup(const char *s, size_t n)
 	memcpy(d, s, n);
 	d[n] = 0;
 	return d;
+}
+
+/* tokens [L->text0, end) minus the children's: e's own tokens */
+static void publish_tok(pp *p, const hlev *L, size_t end, hent *e)
+{
+	struct hrec *r = &p->rec;
+	uint32_t ns = r->nseg - L->s0, nc = r->nctr - L->c0;
+	size_t own = end - L->text0, w = 0, at = L->text0, skipped = 0;
+	hseg *sg = salloc((ns ? ns : 1) * sizeof(hseg));
+	hctr *ct = salloc((nc ? nc : 1) * sizeof(hctr));
+	uint32_t ci = L->c0;
+	ptok *tk;
+
+	for (uint32_t i = L->s0; i < r->nseg; i++)
+		own -= r->seg[i].end - r->seg[i].start;
+	tk = salloc((own ? own : 1) * sizeof(ptok));
+	for (uint32_t i = L->s0; i <= r->nseg; i++) {
+		size_t to = i < r->nseg ? r->seg[i].start : end;
+
+		for (; ci < r->nctr && r->ctr[ci].pos < to; ci++)
+			ct[ci - L->c0] = (hctr){ (uint32_t)(r->ctr[ci].pos - L->text0 - skipped), r->ctr[ci].len,
+						 r->ctr[ci].val - L->counter0 };
+		for (; at < to; at++, w++) {
+			ptok t = r->tk[at];
+
+			t.loc = t.loc ? t.loc - L->base0 + 1 : 0;
+			t.ctr = 0;
+			if (t.s >= r->sb && t.s < r->sb + r->nsb) {
+				char *d = salloc(t.len + 16);
+
+				memcpy(d, t.s, t.len);
+				memset(d + t.len, 0, 16);
+				t.s = d;
+			}
+			tk[w] = t;
+		}
+		if (i < r->nseg) {
+			sg[i - L->s0] = (hseg){ (uint32_t)w, r->seg[i].counter0 - L->counter0, r->seg[i].child,
+						r->seg[i].base0 - L->base0 };
+			skipped += r->seg[i].end - r->seg[i].start;
+			at = r->seg[i].end;
+		}
+	}
+	e->tk = tk;
+	e->ntext = own;
+	e->total = end - L->text0;
+	e->seg = sg;
+	e->nseg = ns;
+	e->ctr = ct;
+	e->nctr = nc;
+	e->has_text = 1;
 }
 
 /* the entry for the innermost level, which ends at output offset end */
@@ -3438,7 +3653,10 @@ static hent *publish(pp *p, const hlev *L, size_t end)
 		e->crd = cr;
 		e->ncrd = r->ncrd - L->r0;
 	}
-	if (L->text_started) {
+	if (p->tokmode == 2) {
+		if (end > L->text0)
+			publish_tok(p, L, end, e);
+	} else if (L->text_started) {
 		/* own text: the output minus the children's texts */
 		uint32_t ns = r->nseg - L->s0, nc = r->nctr - L->c0;
 		size_t own = end - L->text0;
@@ -3461,7 +3679,7 @@ static hent *publish(pp *p, const hlev *L, size_t end)
 			memcpy(t + w, p->out + at, to - at);
 			w += to - at;
 			if (i < r->nseg) {
-				sg[i - L->s0] = (hseg){ (uint32_t)w, r->seg[i].counter0 - L->counter0, r->seg[i].child };
+				sg[i - L->s0] = (hseg){ (uint32_t)w, r->seg[i].counter0 - L->counter0, r->seg[i].child, 0 };
 				skipped += r->seg[i].end - r->seg[i].start;
 				at = r->seg[i].end;
 			}
@@ -3509,7 +3727,7 @@ static void hc_end(pp *p)
 		    (hc_mem_max && atomic_load_explicit(&hstat.mem, memory_order_relaxed) + sz > hc_mem_max)) {
 			atomic_fetch_add_explicit(&hstat.full, 1, memory_order_relaxed);
 		} else {
-			e = publish(p, L, p->nout);
+			e = publish(p, L, p->tokmode == 2 ? r->ntk : p->nout);
 			/* (other threads allocate too: close enough for a limit) */
 			atomic_fetch_add_explicit(&hstat.mem, atomic_load_explicit(&shared_used, memory_order_relaxed) - m0,
 						  memory_order_relaxed);
@@ -3567,7 +3785,8 @@ static void hc_end(pp *p)
 		r->nctr = L->c0;
 		r->nseg = L->s0;
 		if (e->has_text)
-			r->seg[r->nseg++] = (hsegr){ L->text0, p->nout, e, L->counter0 };
+			r->seg[r->nseg++] = (hsegr){ L->text0, p->tokmode == 2 ? r->ntk : p->nout, e, L->counter0,
+						     L->base0 };
 	}
 }
 
@@ -3591,7 +3810,7 @@ static void enter_file(pp *p, const vlex_file *f, const char *path, int32_t sdir
 	sys = sdir == -2 || (sdir >= 0 && p->o->nsys && sdir >= p->o->nsys) ||
 	      (sdir == -1 && from && p->fe[from->fe].sys);
 	if (f != &p->builtin && from && hc_top(p)) {
-		k = hkey_get(p->sig, f, sdir, 0, path, sys, true);
+		k = hkey_get(p->sig * 2 + (p->tokmode == 2), f, sdir, 0, path, sys, true);
 		if (k && hc_try(p, k))
 			return;
 	}
@@ -3977,11 +4196,51 @@ pp *pp_open(const pp_opts *o)
 	return p;
 }
 
-void pp_next(pp *p, ptok *t)
+static inline void next_tok(pp *p, ptok *t)
 {
 	if (p->depth == p->nfile && !p->svn)
 		p->tmp.p = p->tmp.base;	/* nothing above file level refers to tmp */
 	next_exp(p, t);
+}
+
+/* the header cache's mode: text for pp_text, tokens for pp_next */
+static void hc_mode(pp *p, int mode)
+{
+	static int env = -1;
+
+	if (env < 0) {
+		const char *m = getenv("VPP_HC_MAX_MB");
+
+		hc_mem_max = m ? (size_t)atol(m) << 20 : (size_t)8 << 30;
+		env = getenv("VPP_NOHC") != NULL;
+	}
+	p->hc = !env;
+	p->tokmode = mode;
+}
+
+void pp_next(pp *p, ptok *t)
+{
+	ctx *c = &p->cx[p->depth - 1];
+
+	/* a cached header's tokens: straight out, unless a child or __COUNTER__ digits come next */
+	if (c->type == C_REPLAY && c->i < c->n) {
+		const hent *e = c->he;
+
+		if ((c->si >= e->nseg || e->seg[c->si].at != c->i) && (c->ci >= e->nctr || e->ctr[c->ci].off != c->i)) {
+			*t = c->pt[c->i++];
+			t->loc = t->loc ? c->loc + t->loc - 1 : 0;
+			if (t->kind == T_IDENT)
+				t->flags |= PF_NOEXP;
+			if (unlikely(p->rec.on))
+				rec_tok(p, t);
+			return;
+		}
+	}
+	if (unlikely(!p->tokmode))
+		hc_mode(p, 2);
+	next_tok(p, t);
+	if (unlikely(p->rec.on))
+		rec_tok(p, t);
 }
 
 /* the token as clang -E -P prints it */
@@ -4026,18 +4285,11 @@ static inline void render(pp *p, const ptok *t)
 
 int pp_text(pp *p, const char **out, size_t *len)
 {
-	static int env = -1;
 	ptok t;
 
-	if (env < 0) {
-		const char *m = getenv("VPP_HC_MAX_MB");
-
-		hc_mem_max = m ? (size_t)atol(m) << 20 : (size_t)8 << 30;
-		env = getenv("VPP_NOHC") != NULL;
-	}
-	p->hc = !env;
+	hc_mode(p, 1);
 	for (;;) {
-		pp_next(p, &t);
+		next_tok(p, &t);
 		if (t.kind == T_EOF)
 			break;
 		render(p, &t);
@@ -4108,6 +4360,14 @@ void pp_close(pp *p)
 			out_spare = p->out, out_spare_cap = p->capout;
 		} else {
 			munmap(p->out, p->capout);
+		}
+	}
+	if (p->rec.tk) {
+		if (!tk_spare) {
+			tk_spare = p->rec.tk, sb_spare = p->rec.sb;
+		} else {
+			munmap(p->rec.tk, HC_MAXTK * sizeof(ptok));
+			munmap(p->rec.sb, HC_MAXSB);
 		}
 	}
 	if (p->rec.t && !rec_spare.t) {

@@ -366,6 +366,32 @@ load 5–7.
 4. **Ordered reads** with child splicing at replay, against the guard-variant misses.
    This helps every payload, so it lands before 3.
 
+### 6.5 Token payload, measured (step 2 done)
+- **Representation.** Own tokens are copied `ptok`s in shared memory:
+  - locations are offsets from the region base;
+  - spellings that lived in per-TU arenas are copied;
+  - `__COUNTER__` digits are kept as (token, byte offset, length).
+
+  A hit pushes a `C_REPLAY` context, and `pp_next` hands its tokens out directly
+  (painted, so nothing re-expands). Children are spliced in by segment, counter digits
+  are rewritten, and identifiers re-interned with `vintern_copy`, since `vintern` keeps
+  the caller's pointer.
+- **Exactness.** A per-TU hash of every token's kind, SOL/SPACE flags, location,
+  spelling and id, plus the file list, is identical with and without the cache for all
+  911 TUs. The sema and layout runs stay green.
+- **Speed** (`-j 6`, load 8–11):
+
+  | | with cache | without |
+  |---|---|---|
+  | token stream | 1.74 s / 10.4 s CPU | 3.1 s / 18.5 s |
+  | `-fsyntax-only` | 3.77 s / 22.6 s CPU | 4.80 s / 28.7 s |
+
+  Replay costs ~7–8 ns per token for 541 M tokens and is bound by memory bandwidth.
+- **What follows.** Shrinking tokens (16 bytes, or runs into the files' `vtok` arrays)
+  would at best halve the token-stream cost. Parsing the replayed tokens now dominates,
+  which confirms that declaration replay (step 3) is the large win for the compile
+  path.
+
 ## Sources
 - clang: TokenLexer.cpp, PPMacroExpansion.cpp, Preprocessor.cpp, MacroArgs.cpp,
   DependencyDirectivesScanner.cpp (llvm-project `main`)

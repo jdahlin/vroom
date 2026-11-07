@@ -309,7 +309,23 @@ aldrig i bygget. Ett TU-test (`bench/vcc-diff.py`) körs över alla kärnfiler.
   - Den dominerande riktningen är tvärtom: posten spelades in när barnet redan fanns, och den här TU:n saknar det. Den kräver att läsningarna ordnas relativt barnets plats (läsposition per indata) eller ett prefixträd per include-sekvens.
   - Snabbare bearbetning per token (pp-fartarbetet) minskar missarnas kostnad direkt.
 - Miljövariabler: `VPP_NOHC=1` stänger av cachen, `VPP_HC_DEBUG=1` skriver orsak per miss, `VPP_HC_MAX_MB` sätter minnestaket (standard 8 GB).
-- Kvar: cc-vägen (`cc_run`) använder inte cachen (deklarationer och typer per region kommer senare). Läsordning per region för att få ner guard-missarna.
+- **Tokenläge (`pp_next`, alltså parsern):** samma regioner och läsmängder, men nyckeln skiljer på text och tokens.
+  - Inspelningen tar de tokens som `pp_next` lämnar ut. Spellningar i per-TU-minne kopieras, platser lagras relativt regionens bas, och `__COUNTER__`-siffror sparas som (token, byteposition).
+  - En träff lägger en `C_REPLAY`-kontext som lämnar ut tokens oexpanderade (målade). Barnens poster skarvas in, platser flyttas till TU:ns bas och räknarsiffror skrivs om (identifierare internas på nytt). `pp_next` har en snabbväg för replay-tokens.
+  - **Verifiering:**
+    - `--vcc-tokhash` hashar art, SOL/SPACE, plats, spellning, id och fillistan per TU: identisk med `VPP_NOHC=1` för alla 911 TU:er.
+    - `vcc-sema.py run` 878/879, `layout` 878/879 (18,8 M kontroller).
+    - `-E` är fortfarande byte-identisk, och deps likaså.
+  - **Fart (`-j 6`, load 8–11):**
+    - tokenströmmen för alla TU:er: 1,74 s / 10,4 s CPU mot 3,1 s / 18,5 s utan cache;
+    - `-fsyntax-only` för 879 C-TU:er: 3,77 s / 22,6 s CPU mot 4,80 s / 28,7 s.
+
+    541 M tokens spelas upp, med ~7–8 ns per token som begränsas av minnesbandbredden (24-bytes `ptok`). Parsern är nu den större delen, så deklarationsuppspelning (RESEARCH-preprocessor §6.4) är nästa stora vinst.
+- Kvar:
+  - deklarationer per region för cc-vägen;
+  - läsordning per region mot guard-missarna;
+  - minnet: 2,8 GB lagrat vid `-j 6`, taket är `VPP_HC_MAX_MB`;
+  - vccd tar inte om filer och litar redan på att de är oföränderliga, och cachen ärver det.
 ### Status 2.5 (2026-11-07): parser + sema, första version klar
 - 2.4 (header-cache) är medvetet uppskjuten: först hela kedjan, sedan fart.
 - `ccs/vcc/cc.c` (+ `cc.h`): rekursiv descent för GNU C11 med sema i samma pass. Typer internas (qty = index<<3 | kvalificerare), poster/symboler/noder är 32-bitars index i per-TU-arrayer som reserveras med mmap. Varje uttryck får sin typ, implicita konverteringar blir N_CAST-noder, och konstantuttryck utvärderas vid behov med clangs skillnad mellan ICE och vikbart (nollpekarkonstanter, alltså `__is_constexpr`, beror på den).
