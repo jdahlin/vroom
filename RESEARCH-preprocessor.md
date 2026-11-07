@@ -234,6 +234,138 @@ lexing is already solved (token cache, each file lexed once).
 4. Read-set recording per included region (measure hit rates before caching anything).
 5. Prefix snapshot, then memoized regions (2.4).
 
+## 6. Header cache review (2026-11-07, after the first 2.4 implementation)
+
+### 6.1 Measurements of the committed cache (8b96810)
+Setup: all 912 TUs in one process, `vpp --batch`, `-O3`; the machine was shared, with
+load 5–7.
+
+| | wall (`-j 6`) | CPU | `-j 1` |
+|---|---|---|---|
+| no cache (`VPP_NOHC=1`) | 3.3–4.7 s | 20–28 s | ~22 s |
+| cache | 0.77 s | 4.6 s | 3.5 s |
+
+- **Hits.** 41.7k region hits against 13.5k misses (76 %), and 2.8 of 2.9 GB of
+  `-E` text is replayed. A side session measured a 48 % hit rate, 4.4 MB stored per TU,
+  "arena full" and an `-O3` crash, but that was on a snapshot from before nested
+  regions, before the fixes for the arena-order and interning crashes, and before the
+  prefix-based dir signatures. The committed tree runs clean at `-O3`.
+- **Recording cost on a cold TU:** +15–20 % (fork.c 86 vs 73 ms, namei 73 vs 64, async
+  44 vs 38). It pays back fast: the first 100 TUs take 0.80 s against 1.94 s without the
+  cache.
+- **Where the misses come from:** 9.4k of the ~10k misses on existing keys are
+  include-guard variants. The same header is reached with a child guard
+  defined in one TU and undefined in another.
+  - Each miss processes only the header's own text, since the children hit, but misses
+    are still 2/3 of the CPU.
+  - Tolerating "child already included" (leave the child out on replay) recovered only
+    376 hits.
+  - The dominant direction is the opposite: the entry was recorded *after* the child
+    was included, and this TU has not included it yet. Fixing that needs reads ordered
+    relative to the child's position.
+- **Token volume:** about 5.2 bytes of `-E` text per token, so a full build replays
+  ~550 M tokens (fork.c alone: 0.97 M). Copying 24-byte `ptok`s would move ~13 GB, and
+  even at 1–2 ns per token, delivery through `pp_next` costs 0.5–1 s of CPU. The parser
+  then still has to parse every one of those tokens.
+
+### 6.2 Prior art (not covered in §2)
+- **KDevelop C++ support (D. Nolden, ~2008).**
+  - Each header is parsed into an "environment file" keyed on the macros it *used*
+    (with values) and *defined*.
+  - A header can have several stored versions, and a lookup picks the one whose used
+    macros match the current environment.
+  - To keep recording cheap, the identifiers ("strings") occurring in the file serve
+    as a static superset of what it can depend on.
+
+  This is nested memoization on read sets, as vcc's regions are. KDevelop accepts
+  approximations, which we cannot.
+- **Eclipse CDT indexer, "significant macros".**
+  - A header's significant macros are those tested in `#if`/`#ifdef`/`defined`, plus
+    those used before being defined.
+  - Versions of a header are keyed on their values, and the index stores several
+    variants per header.
+  - CDT also reuses any indexed version of a header ("skip already indexed"), which is
+    unsound and only good enough for an IDE.
+- **EDG automatic PCH, Borland automatic precompiled headers.**
+  - The header stop point is chosen automatically (the first non-preprocessor token,
+    or `#pragma hdrstop`).
+  - A PCH is valid when the prefix of the TU (the text of the directives) and the
+    command-line state are identical. The whole prefix is validated at once, with no
+    read sets.
+- **clangd / libclang preamble.**
+  - The preamble is the leading run of directives and comments.
+  - It is reused when the preamble text, the compile command and the contents of every
+    included file are unchanged. Each edit validates it once.
+- **ccache direct mode.**
+  - A manifest maps hash(source, args) to a list of (included files, content hashes)
+    and the result.
+  - It does not record failed lookups, so a header created earlier in the search path
+    later (shadowing) is a documented hazard.
+  - vcc records how many leading search directories each lookup depended on (`ndirs`,
+    `psig`) inside one process. A long-lived vccd must also notice new files there,
+    for example with a per-directory generation counter from dircache.
+- **Bothner's GCC compile server (2003), re-read.**
+  - Its fragments are delimited by conditionals, not files, and its dependencies are
+    per-identifier bits ("used as non-macro").
+  - Recording overhead was the main cost he reported; the server won because most
+    fragments were reused.
+  - It cached declarations, not tokens: the parser skipped reused fragments entirely.
+
+### 6.3 Answers
+- **Granularity.**
+  - Already nested: every `#include` at any depth is its own region with its own read
+    set, and a parent's read set is the union of its children's that were not
+    satisfied by its own writes.
+  - Read sets are big (17 M undef reads stored), but validating them is cheap: about
+    10 % of samples, including the copy.
+  - The cost is in the variants, not in coarse regions.
+- **Whole-prefix variant per flag signature.**
+  - It cannot add hits over the current cache. When two TUs share a flag signature and
+    a leading include sequence, their states before each of those includes are
+    identical, so every one of those region lookups already validates against the
+    first TU's entry.
+  - A prefix tree only saves the validation (about 10 %), and it fails at the first
+    differing include, where region lookup does not.
+  - **Not worth building.**
+- **Representation.** Text replay serves `-E` only, and in a kernel build `-E` jobs are
+  a handful of linker scripts and DT files. The C compile goes through `pp_next` into
+  `cc_run`, so the cache has to feed the parser.
+  - Token replay with references to shared, immutable token data (the file token
+    caches and the immutable macro bodies) is the necessary first step. It still costs
+    the parser ~550 M tokens.
+  - The goal is Bothner's and the plan's §4: replay the region's *declarations*
+    (symbols, tags, types, enumerator values, typedef-ness). The parser then never
+    sees the tokens, and a hit costs O(declarations).
+  - The read set gains name lookups, because typedef names change the parse. That
+    follows the same exact-read-set scheme: lookups of ordinary and tag names,
+    recorded per region.
+- **Cheap recording.**
+  - The recording itself costs 15–20 % on a cold TU.
+  - The real cost of "pioneer" TUs is the misses, because guard variants keep
+    re-recording a header's own text.
+  - Fix the misses by recording, for each read, its position relative to the children
+    (its first-touch index is already ordered). Then an entry recorded with child X
+    already included can be replayed with X spliced in: validate the reads before X's
+    position against the state at entry, look X up at that point, and validate the
+    reads after X against the state that results.
+
+### 6.4 Design going forward
+1. Keep the region model: nested memoization on exact read sets, lock-free publication,
+   and nothing freed.
+2. Make the payload per consumer.
+   - **Text** stays for `-E`, and is done.
+   - **Tokens** come next, for `pp_next`. An entry's own output becomes a rope of runs:
+     - (file token array, range) for tokens that pass through unexpanded, which is
+       most of a header's declarations;
+     - immutable `ptok` arrays in shared memory for expansion results;
+     - child references, as for text.
+
+     Locations are a per-entry base plus an offset, as `span`/`rbase` are now.
+3. **Declarations** follow once 2.6 gives the front end a stable state layout. They are
+   the large win for the compile path.
+4. **Ordered reads** with child splicing at replay, against the guard-variant misses.
+   This helps every payload, so it lands before 3.
+
 ## Sources
 - clang: TokenLexer.cpp, PPMacroExpansion.cpp, Preprocessor.cpp, MacroArgs.cpp,
   DependencyDirectivesScanner.cpp (llvm-project `main`)
