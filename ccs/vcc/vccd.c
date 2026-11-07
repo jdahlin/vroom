@@ -199,12 +199,15 @@ static void say(const struct req *r, const char *fmt, const char *arg)
  *   PROBE_CC    -c/-S of C from /dev/null (cc-option, Kconfig's cc-probe):
  *               the answer depends on the options alone;
  *   PROBE_AS    -c of assembler-with-cpp from stdin into /dev/null or a
- *               try-run temporary (as-instr): the source is looked up;
+ *               try-run temporary (as-instr),
+ *   PROBE_SRC   -c/-S of C from stdin into the same (`echo ... | $(CC)`):
+ *               the source is looked up, and compiled for real (forwarded
+ *               with the bytes already read) if it is not in the table;
  *   PROBE_LINK  a link of C from stdin into /dev/null (cc-can-link.sh).
  *
  * Anything else (a real file, stdin into a real output) is a real job.
  */
-enum { PROBE_NONE, PROBE_CC, PROBE_AS, PROBE_LINK };
+enum { PROBE_NONE, PROBE_CC, PROBE_AS, PROBE_SRC, PROBE_LINK };
 
 static bool probe_output(const char *out)
 {
@@ -252,6 +255,8 @@ static int cc_probe_kind(const struct req *r)
 	if (in_stdin && !devnull && compile && !strcmp(lang, "assembler-with-cpp") &&
 	    probe_output(out))
 		return PROBE_AS;
+	if (in_stdin && !devnull && compile && !strcmp(lang, "c") && probe_output(out))
+		return PROBE_SRC;
 	if (in_stdin && !devnull && !compile && !strcmp(lang, "c") && out &&
 	    !strcmp(out, "/dev/null"))
 		return PROBE_LINK;
@@ -276,6 +281,29 @@ static ssize_t read_stdin(const struct req *r, char *buf, size_t size)
 		if (n == size)
 			return -1;
 	}
+}
+
+static int forward(const struct req *r, const char *sock);
+
+/* forward r with src[0..n) (already read from its stdin) as stdin */
+static int forward_stdin(const struct req *r, const char *src, size_t n)
+{
+	struct req r2 = *r;
+	int p[2], status;
+
+	if (pipe(p))
+		return 127;
+	/* a probe source fits in the pipe buffer: write it all, then hand over */
+	if (!write_full(p[1], src, n)) {
+		close(p[0]);
+		close(p[1]);
+		return 127;
+	}
+	close(p[1]);
+	r2.fds[0] = p[0];
+	status = forward(&r2, backend_sock);
+	close(p[0]);
+	return status;
 }
 
 static int cc_probe(const struct req *r, int kind)
@@ -315,12 +343,20 @@ static int cc_probe(const struct req *r, int kind)
 			i++;
 		}
 	}
-	if (kind == PROBE_AS) {
+	if (kind == PROBE_AS || kind == PROBE_SRC) {
 		char src[4096];
 		ssize_t len = read_stdin(r, src, sizeof(src));
+		int ok;
 
-		if (len < 0 || !as_source_ok(src, len)) {
-			say(r, "%s: error: %s\n", "unsupported assembler input");
+		if (len < 0) {
+			say(r, "%s: error: %s\n", "probe input too large");
+			return 1;
+		}
+		ok = kind == PROBE_AS ? as_source_probe(src, len) : c_source_probe(src, len);
+		if (ok < 0)
+			return forward_stdin(r, src, len);
+		if (!ok) {
+			say(r, "%s: error: %s\n", "probe source rejected");
 			return 1;
 		}
 	}
@@ -500,7 +536,7 @@ static int handle(const struct req *r, const char **kind)
 	}
 	probe = cc_probe_kind(r);
 	if (probe) {
-		static const char *const names[] = { "", "cc-probe", "as-probe", "link-probe" };
+		static const char *const names[] = { "", "cc-probe", "as-probe", "src-probe", "link-probe" };
 
 		*kind = names[probe];
 		atomic_fetch_add(&n_probe, 1);

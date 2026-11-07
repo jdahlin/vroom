@@ -16,8 +16,12 @@ bool cc_predefined(const char *def);
 
 /* `vcc --version` and `vld --version`/`-v` output (clang/lld-compatible identity) */
 extern const char cc_version_text[], ld_version_text[];
-/* true if vcc's assembler accepts src[0..n) (stdin of an as-instr probe) */
-bool as_source_ok(const char *src, size_t n);
+/*
+ * A probe's source (stdin) for the assembler or the C compiler:
+ * 1 accepted, 0 rejected, -1 not in the table (compile it for real).
+ */
+int as_source_probe(const char *src, size_t n);
+int c_source_probe(const char *src, size_t n);
 /* whether vcc links user-space programs (it has no target libc) */
 extern const bool cc_can_link;
 /* answer to -print-file-name=include */

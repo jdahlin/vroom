@@ -181,29 +181,57 @@ bool ld_rejects(const char *a, const char *next)
 }
 
 /*
- * Assembler sources vcc's assembler accepts, as Kconfig's as-instr probes
- * send them (after printf %b; trailing newlines are ignored).  Anything else
- * is rejected, so a new probe means "not supported" until listed here.
+ * Probe sources: what Kbuild and Kconfig pipe into the compiler to test a
+ * feature (as-instr; `echo '...' | $(CC) -x c - -c`), with vcc's answer.
+ * Compared after printf %b/echo, trailing newlines ignored.  A source that is
+ * not listed is compiled for real (vccd forwards it), so the list only has to
+ * cover the probes on the critical path; all answers equal clang's.
  */
-static const char *const as_sources[] = {
-	"1:\n.inst 0\n.rept . - 1b\n\nnop\n.endr",		/* arm64 Kconfig (negated) */
-	".cfi_startproc\n.cfi_negate_ra_state\n.cfi_endproc",	/* AS_HAS_CFI_NEGATE_RA_STATE */
-	".arch armv8.5-a+memtag\nstgm xzr,[x0]",		/* ARM64_AS_HAS_MTE */
-	".arch_extension mops",					/* AS_HAS_MOPS */
-	".arch_extension lsui",					/* AS_HAS_LSUI */
-	".arch_extension sme",					/* AS_HAS_SME */
-	".uleb128 .Lexpr_end4 - .Lexpr_start3\n.Lexpr_start3:\n.Lexpr_end4:", /* AS_HAS_NON_CONST_ULEB128 */
-	NULL
+struct probe_src {
+	const char *src;
+	bool ok;
 };
 
-bool as_source_ok(const char *src, size_t n)
+static const struct probe_src as_sources[] = {
+	{ "1:\n.inst 0\n.rept . - 1b\n\nnop\n.endr", true },		/* arm64 Kconfig (negated) */
+	{ ".cfi_startproc\n.cfi_negate_ra_state\n.cfi_endproc", true },	/* AS_HAS_CFI_NEGATE_RA_STATE */
+	{ ".arch armv8.5-a+memtag\nstgm xzr,[x0]", true },			/* ARM64_AS_HAS_MTE */
+	{ ".arch_extension mops", true },					/* AS_HAS_MOPS */
+	{ ".arch_extension lsui", true },					/* AS_HAS_LSUI */
+	{ ".arch_extension sme", true },					/* AS_HAS_SME */
+	{ ".uleb128 .Lexpr_end4 - .Lexpr_start3\n.Lexpr_start3:\n.Lexpr_end4:", true }, /* AS_HAS_NON_CONST_ULEB128 */
+	{ NULL, false }
+};
+
+static const struct probe_src c_sources[] = {
+	/* arm64 Makefile: "K" takes a 32-bit logical immediate, 0xffffffff is not one */
+	{ "int main(void) { asm volatile(\"and w0, w0, %w0\" :: \"K\" (4294967295)); return 0; }", false },
+	{ "__attribute__((no_profile_instrument_function)) int x();", true },
+	{ "char tag[][4] __attribute__((__nonstring__)) = { };", true },
+	{ "int foo(int *x) { asm goto (\".long (%l[bar]) - .\": \"+m\"(*x) ::: bar); return *x; bar: return 0; }", true },
+	{ "int foo(int x) { asm goto (\"\": \"=r\"(x) ::: bar); return x; bar: return 0; }", true },
+	{ "void foo(void) { asm inline (\"\"); }", true },
+	{ NULL, false }
+};
+
+static int lookup(const struct probe_src *t, const char *src, size_t n)
 {
 	while (n && src[n - 1] == '\n')
 		n--;
-	for (const char *const *p = as_sources; *p; p++)
-		if (strlen(*p) == n && !memcmp(*p, src, n))
-			return true;
-	return false;
+	for (; t->src; t++)
+		if (strlen(t->src) == n && !memcmp(t->src, src, n))
+			return t->ok;
+	return -1;
+}
+
+int as_source_probe(const char *src, size_t n)
+{
+	return lookup(as_sources, src, n);
+}
+
+int c_source_probe(const char *src, size_t n)
+{
+	return lookup(c_sources, src, n);
 }
 
 /* macros vcc predefines (with a value of its own) */
