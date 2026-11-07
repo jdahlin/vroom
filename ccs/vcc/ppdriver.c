@@ -160,8 +160,10 @@ int ppd_compare(const char *ours, size_t on, const char *refpath)
 		char *m = mmap(NULL, (size_t)st.st_size + 1, PROT_READ, MAP_PRIVATE, fd, 0);
 
 		close(fd);
+		vlex_no_intern = 1;	/* the copies are freed: nothing may point into them */
 		A = lexbuf(ours, on);
 		B = lexbuf(m, (size_t)st.st_size);
+		vlex_no_intern = 0;
 		munmap(m, (size_t)st.st_size + 1);
 	}
 	r = cmp_toks(&A, &B, ba, bb);
@@ -294,9 +296,7 @@ int ppd_run(int argc, char **argv, const ppd_env *env)
 	char *pmap = NULL;
 	double t0;
 	pp *p;
-	ptok t;
-	int col = 0, syntax = 0, layout = 0, ms_anon = 0, short_wchar = 0;
-	char sb[1 << 16];
+	int syntax = 0, layout = 0, ms_anon = 0, short_wchar = 0;
 
 	for (int i = 1; i < argc; i++) {
 		const char *a = argv[i];
@@ -459,34 +459,14 @@ int ppd_run(int argc, char **argv, const ppd_env *env)
 			dprintf(errfd, "vcc: %.1f ms\n", (now() - t0) * 1e3);
 		goto done;
 	}
-	for (;;) {
-		size_t l;
+	{
 		const char *s;
+		size_t l;
 
-		pp_next(p, &t);
-		if (t.kind == T_EOF)
-			break;
-		if (t.kind == P_DIRECTIVE) {
-			if (col)
-				bput(&o, "\n", 1);
-			bput(&o, "#", 1);
-			bput(&o, t.s, t.len);
-			bput(&o, "\n", 1);
-			col = 0;
-			continue;
-		}
-		if ((t.flags & TF_SOL) && col) {
-			bput(&o, "\n", 1);
-			col = 0;
-		}
-		if (col)
-			bput(&o, " ", 1);
-		s = pp_spell(&t, sb, &l);
-		bput(&o, s, l);
-		col++;
+		pp_text(p, &s, &l);
+		o.p = (char *)s;
+		o.n = l;
 	}
-	if (col)
-		bput(&o, "\n", 1);
 	if (getenv("VPP_TIME")) {
 		extern unsigned long pp_stat_try, pp_stat_skip, vdir_probes;
 
@@ -503,11 +483,10 @@ int ppd_run(int argc, char **argv, const ppd_env *env)
 			status = write_deps(p, env->cwd, depfile, deptarget ? deptarget : out ? out : "-", errfd);
 	}
 done:
-	pp_close(p);
+	pp_close(p);	/* frees the text in o */
 out:
 	bfree(&pre);
 	bfree(&cmdl);
 	bfree(&incl);
-	bfree(&o);
 	return status;
 }

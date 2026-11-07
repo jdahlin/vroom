@@ -34,7 +34,7 @@ typedef struct ptok {
 	uint32_t id;		/* interned id (T_IDENT) */
 	uint32_t loc;		/* TU source location (file base + offset) */
 	uint8_t kind, flags;	/* vtok_kind / P_*, TF_* | PF_* */
-	uint16_t _pad;
+	uint16_t ctr;		/* pp internal: __COUNTER__ digits in the spelling (header cache) */
 } ptok;
 
 typedef struct pp_opts {
@@ -66,6 +66,14 @@ void pp_set_fatal(pp *p, jmp_buf *jb);
 size_t pp_files(const pp *p, const char **names, size_t max);
 /* the next token; T_EOF at the end (and ever after) */
 void pp_next(pp *p, ptok *t);
+/*
+ * -E: the whole TU as clang -E -P prints it (instead of pp_next), with the
+ * header cache (VPP_NOHC=1: off).  *out stays valid until pp_close.
+ * Returns the number of errors.
+ */
+int pp_text(pp *p, const char **out, size_t *len);
+/* header cache counters (process-wide) */
+void pp_hc_stats(char *buf, size_t n);
 /* errors reported so far */
 int pp_errors(const pp *p);
 

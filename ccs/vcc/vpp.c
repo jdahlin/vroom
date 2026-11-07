@@ -129,6 +129,12 @@ static int batch(const char *file, int nthr)
 				fprintf(stderr, "failed: %s\n", jobs[i].av[jobs[i].ac - 1]);
 		}
 	}
+	{
+		char hs[512];
+
+		pp_hc_stats(hs, sizeof(hs));
+		printf("%s\n", hs);
+	}
 	printf("%d/%d ok; wall %.0f ms on %d threads, cpu sum %.0f ms\n", njobs - bad, njobs, wall * 1e3, nthr, sum);
 	return bad != 0;
 }

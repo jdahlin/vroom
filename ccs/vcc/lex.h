@@ -74,7 +74,7 @@ const char *vtok_name(int kind);
  * T_EOF not counted.
  */
 size_t vlex_scratch_size(size_t size);
-extern int vlex_no_intern;	/* benchmarking only */
+extern _Thread_local int vlex_no_intern;	/* this thread: no interning (ids 0) */
 uint32_t vlex(const char *src, size_t size, vtok *out, void *scratch);
 
 /* cleaned spelling (splices removed) into buf; returns its length */

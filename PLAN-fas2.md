@@ -285,6 +285,31 @@ aldrig i bygget. Ett TU-test (`bench/vcc-diff.py`) körs över alla kärnfiler.
 - `ppdriver.c`: clang-argv, predefines, `-E -P`-utskrift och `-MMD`/`-MD`-deps (clangs ordning, `./` strippas) bakom `ppd_run()`; används av `vpp` och av `vccd`, som nu kör `cc -E`-jobb själv (`VCC_PP=0` → clang). Fatala fel longjmp:ar, `pp_close` frigör allt.
 - **Acceptans:** `bench/vcc-diff.py cmp -j 6`: **911/912 TU:er token-identiska** (840 C + 39 .S + 32 lds/dts i kärnan, + host). Undantaget, `scripts/mod/modpost.c`, behöver en genererad `module-offsets.h` som clang inte heller hittar. Via `vcc`-shimmen → `vccd`: vmlinux.lds, vdso.lds och empty_root.dtb identiska med clang inkl. dep-filer, 0,5–3,4 ms per jobb.
 - Kvar → 2.4 (header-cache/prefix-snapshot) för att komma under 0,5 s totalt.
+### Status 2.4 (2026-11-07): header-cache för `-E`, målet inte nått (0,77 s mot 0,5 s)
+- Mätrigg: `vpp --batch JOBS -j N -C DIR [--cmp]` kör alla TU:er i en process med en tokencache, som vccd gör (`bench/vcc-diff.py batch [-j N] [--cmp]`). Utgångsläge utan cache: 912 TU:er på **4,7 s vägg / 28 s CPU** (`-j 6`).
+- Delade makroobjekt: `#define` i headers cachas per direktivplats, main-filens och `<built-in>`-definitioner görs kanoniska på innehåll, och builtins är processglobala. Samma makro blir då samma pekare i alla TU:er, så makrovärden jämförs med en pekarjämförelse.
+- Regioncache (bara `pp_text`, alltså `-E`): varje `#include` är en region, även nästlade (upp till 64 nivåer). Läsmängden är exakt:
+  - makrovärde vid inträdet, eller bara "definierat" när enbart det lästes;
+  - include-guards (kontrolleras först);
+  - medlemskap i `#pragma once`;
+  - identifierare som klistrats ihop med `__COUNTER__`;
+  - `__INCLUDE_LEVEL__`;
+  - hur många sökvägskataloger uppslagen berodde på (prefix-signatur).
+
+  En post sparar define/undef-deltat, once-tillägg och filposter (för deps och positioner), `__COUNTER__`-delta och -positioner (värdena skrivs om vid uppspelning, även inne i strängar från `#`), samt texten som ett rep: egen text plus referenser till barnens poster. En uppspelning inne i en region som spelas in läggs in i den yttre läsmängden. Ej cachebart: diagnostik, `#line`, push/pop_macro, `__DATE__`/`__TIME__`/`__TIMESTAMP__`/`__BASE_FILE__`. Upp till 64 varianter per nyckel (fil, sökväg, katalog, sys-flagga, flaggsignatur). Allt publiceras låsfritt (CAS) i delat minne och frigörs aldrig.
+- Småsaker från profilen: `-E`-bufferten och inspelningsbuffertarna återanvänds per tråd (ingen munmap och inga sidfel per TU), och `__COUNTER__`-siffror skrivs utan snprintf.
+- **Fart (`-j 6`, delad maskin med load 5–7): 0,77 s vägg / 4,6 s CPU** (6× mindre CPU); `-j 10` ger 0,67 s; en tråd 3,5 s (utan cache ~22 s). 2,8 GB av 2,9 GB utdata spelas upp ur cachen (42k träffar, 12,5k inspelade missar).
+- **Verifiering:**
+  - `vcc-diff.py batch -j 6 --cmp`: 911/912.
+  - `-E`-texten och dep-filerna är byte-identiska med `VPP_NOHC=1` för alla 911 TU:er.
+  - `vcc-diff.py cmp -j 6`: 911/912.
+  - `vcc-sema.py run`: 878/879.
+- Varför 0,5 s inte nås: två tredjedelar av CPU-tiden går åt till missar. 9,4k av dem beror på include-guards, alltså att samma header inkluderas där ett barn redan är (eller ännu inte är) inkluderat. Varje miss bearbetar bara headerns egen text, eftersom barnen träffar, men det räcker för att dominera.
+  - Provat: "guard-tolerant" träff, som hoppar över ett barn som TU:n redan har inkluderat. Det gav bara 376 träffar och togs bort.
+  - Den dominerande riktningen är tvärtom: posten spelades in när barnet redan fanns, och den här TU:n saknar det. Den kräver att läsningarna ordnas relativt barnets plats (läsposition per indata) eller ett prefixträd per include-sekvens.
+  - Snabbare bearbetning per token (pp-fartarbetet) minskar missarnas kostnad direkt.
+- Miljövariabler: `VPP_NOHC=1` stänger av cachen, `VPP_HC_DEBUG=1` skriver orsak per miss, `VPP_HC_MAX_MB` sätter minnestaket (standard 8 GB).
+- Kvar: cc-vägen (`cc_run`) använder inte cachen (deklarationer och typer per region kommer senare). Läsordning per region för att få ner guard-missarna.
 ### Status 2.5 (2026-11-07): parser + sema, första version klar
 - 2.4 (header-cache) är medvetet uppskjuten: först hela kedjan, sedan fart.
 - `ccs/vcc/cc.c` (+ `cc.h`): rekursiv descent för GNU C11 med sema i samma pass. Typer internas (qty = index<<3 | kvalificerare), poster/symboler/noder är 32-bitars index i per-TU-arrayer som reserveras med mmap. Varje uttryck får sin typ, implicita konverteringar blir N_CAST-noder, och konstantuttryck utvärderas vid behov med clangs skillnad mellan ICE och vikbart (nollpekarkonstanter, alltså `__is_constexpr`, beror på den).

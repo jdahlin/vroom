@@ -605,7 +605,7 @@ size_t vlex_scratch_size(size_t size)
 	return M_COUNT * (size / 64 + 3) * sizeof(uint64_t) + (size + 2) * sizeof(uint32_t);
 }
 
-int vlex_no_intern;
+_Thread_local int vlex_no_intern;
 static pthread_once_t tables_once = PTHREAD_ONCE_INIT;
 
 /* 64 mask bits starting at position p (m[(p >> 6) + 1] must exist) */

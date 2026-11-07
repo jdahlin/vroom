@@ -19,6 +19,7 @@
  * read), the paint flag, GNU ", ## __VA_ARGS__", and the leading-space
  * propagation that stringification makes visible.
  */
+#include <pthread.h>
 #include <setjmp.h>
 #include <stdarg.h>
 #include <stdatomic.h>
@@ -48,6 +49,20 @@ static void *vm(size_t n)
 		abort();
 	}
 	return p;
+}
+
+/* decimal digits of v at b (no terminator); returns the length */
+static inline int utoa(char *b, unsigned long long v)
+{
+	char t[24];
+	int n = 0;
+
+	do
+		t[n++] = (char)('0' + v % 10);
+	while (v /= 10);
+	for (int i = 0; i < n; i++)
+		b[i] = t[n - 1 - i];
+	return n;
 }
 
 /* ---------------- shared (process-wide) allocation ---------------- */
@@ -87,8 +102,11 @@ typedef struct pdir {
 	uint32_t kind;
 } pdir;
 
+typedef struct pmacro pmacro;
+
 typedef struct pfile {
 	const pdir *dir;
+	_Atomic(const pmacro *) *mac;	/* per directive: the #define's macro, built once */
 	uint32_t ndir;
 	uint32_t guard;		/* controlling macro id, 0 if none */
 	int bad;		/* unbalanced conditionals */
@@ -180,6 +198,7 @@ static pfile *pfile_build(const vlex_file *f)
 		fi->bad = 1;
 	free(stk);
 	fi->dir = d;
+	fi->mac = salloc((nd + 1) * sizeof(*fi->mac));	/* fresh: zero */
 	fi->ndir = nd;
 	/*
 	 * Include guard: the file is one #ifndef X / #if !defined(X) group
@@ -283,7 +302,10 @@ static inline void *alloc(arena *a, size_t n)
 /* ---------------- macros ---------------- */
 
 enum { MK_OBJ, MK_FUNC, MK_BUILTIN };
-enum { MF_VARIADIC = 1, MF_PASTE = 2, MF_VAOPT = 4 };
+enum {
+	MF_VARIADIC = 1, MF_PASTE = 2, MF_VAOPT = 4,
+	MF_BADHASH = 8,		/* '#' not before a parameter: an error unless assembler */
+};
 enum {
 	B_NONE, B_FILE, B_LINE, B_COUNTER, B_DATE, B_TIME, B_TIMESTAMP,
 	B_BASE_FILE, B_FILE_NAME, B_INCLUDE_LEVEL, B_PRAGMA,
@@ -295,14 +317,22 @@ enum {
 	B_IS_IDENTIFIER, B_HAS_INCLUDE, B_HAS_INCLUDE_NEXT,
 };
 
-typedef struct pmacro {
+/*
+ * Macro definitions are immutable and shared by all TUs, so that "the same
+ * definition" is one pointer (the header cache compares macro table entries
+ * by pointer): a #define in a header is built once per directive site
+ * (pfile.mac), one in the main file or <built-in> is made canonical by its
+ * content (canon_macro), and the builtin macros are process-wide.
+ */
+struct pmacro {
 	const vtok *body;
 	const char *src;
 	const uint8_t *pidx;	/* per body token: parameter index + 1, or 0 */
 	uint32_t nbody, name;
+	uint32_t hash;		/* canon_macro */
 	uint16_t nparam;
 	uint8_t kind, flags, builtin;
-} pmacro;
+};
 
 #define MPAGE_BITS 11
 #define MPAGE (1u << MPAGE_BITS)
@@ -345,6 +375,154 @@ typedef struct fent {
 #define MAXCTX (1u << 15)
 #define SVMAX (1u << 24)
 
+/* ---------------- header cache: types ---------------- */
+
+/*
+ * The header cache (step 2.4; -E text only for now).  Every #include is a
+ * region.  While a region runs for the first time its inputs are recorded
+ * exactly:
+ *
+ *   - every macro table entry it reads before writing it: the value at
+ *     region entry, or only whether it was defined (#ifdef, defined(),
+ *     include guards).  Definitions are shared pointers (see pmacro), so
+ *     "same definition" is pointer equality;
+ *   - #pragma once membership of the files it would enter;
+ *   - names pasted from __COUNTER__ that it looks up (must be undefined);
+ *
+ * and its effects: the final value of every macro it wrote, the files it
+ * marked once, the files it entered (dependencies, locations), the counter
+ * delta, and its output text.  Uses of __COUNTER__ are relative: digit runs
+ * are tracked through paste and stringify (ptok.ctr) and rewritten on
+ * replay.  A region's text is a rope: its own text with the entries of the
+ * nested regions it contains spliced in, so each header's text is stored
+ * once however deep it is included.
+ *
+ * Regions nest; recording keeps one level per open region.  A read is
+ * recorded in the innermost level; a level's records are merged into its
+ * parent when it ends (and a replayed entry's into the level it is
+ * replayed in).  A later TU with the same search path signature reaching
+ * the same #include (file, search dir, spelling, nesting level, system
+ * header or not) replays an entry whose inputs all match the current state
+ * instead of running the header.  Regions that print diagnostics, change
+ * #line state, use push/pop_macro, __DATE__/__TIME__/__TIMESTAMP__/
+ * __BASE_FILE__ or __COUNTER__ in a directive are not cached.  Entries are
+ * immutable and shared by all threads.
+ */
+#define HDEF ((uintptr_t)1)	/* read: only "defined" was read, and it was */
+#define HNONE 0xffffffffu
+#define HC_MAXLEV 64
+
+typedef struct hread {
+	uint32_t id, _pad;
+	uintptr_t v;		/* value at entry (enabled), or HDEF */
+} hread;
+
+typedef struct honce {
+	const vlex_file *f;
+	uint32_t present;
+} honce;
+
+typedef struct hfent {
+	const vlex_file *f;
+	const pfile *fi;
+	const char *name, *spath;
+	uint32_t namelen, rbase;
+	uint8_t sys;
+} hfent;
+
+/* __COUNTER__ digits: in a token's spelling (cprov) or in an entry's own text (hctr) */
+typedef struct cprov {
+	uint32_t val;
+	uint32_t off;
+	uint16_t len, next;	/* next run in the same token (a chain, increasing off) */
+} cprov;
+
+typedef struct hctr {
+	uint32_t off, len, rel;	/* own-text offset; value - counter at entry */
+} hctr;
+
+/* a lookup of an identifier pasted from __COUNTER__ (it was undefined) */
+typedef struct hcread {
+	const char *s;
+	uint32_t len, off, dlen, rel;
+} hcread;
+
+typedef struct hent hent;
+
+typedef struct hseg {
+	uint32_t at;		/* own-text offset the child's text goes before */
+	uint32_t cdelta;	/* child's counter at entry - ours */
+	const hent *child;
+} hseg;
+
+struct hent {
+	hent *next;
+	const hread *rg;	/* inputs: include guards (v: HDEF or 0); checked first */
+	const uint32_t *ru;	/* inputs: ids read while undefined */
+	const hread *rv;	/* inputs: other reads */
+	const hread *dl;	/* delta: (id, new value) */
+	const honce *ord;
+	const vlex_file *const *oadd;
+	const hfent *fe;
+	const char *text;	/* own text */
+	const hctr *ctr;
+	const hcread *crd;
+	const hseg *seg;
+	size_t ntext, total;	/* own text; with the children */
+	int32_t level;		/* __INCLUDE_LEVEL__ used: the include depth it ran at (-1: not used) */
+	uint32_t ndirs, psig;	/* leading search directories its lookups depended on; their id */
+	uint32_t nrg, nru, nrv, ndl, nord, noadd, nfe, nctr, ncrd, nseg, span, counter_delta;
+	uint8_t has_text, first_sol, col_end, pend_out;
+};
+
+typedef struct hkey {
+	uint64_t hash;
+	const vlex_file *f;
+	const char *spath;
+	uint32_t sig, nfile;
+	int32_t sdir;
+	uint8_t sys;
+	_Atomic(hent *) head;
+	_Atomic uint32_t n;
+} hkey;
+
+/* recording, per TU */
+enum { HT_R = 1, HT_W = 2, HT_G = 4 /* the read was an include guard check */ };
+
+typedef struct htouch {	/* a level's first touch of an id */
+	uint32_t id, flags;	/* HT_* */
+	uintptr_t v;		/* HT_R: value at entry or HDEF */
+	uint64_t prev;		/* the id's stamp before (the enclosing levels') */
+} htouch;
+
+typedef struct hcpos {		/* __COUNTER__ digits in the output */
+	size_t pos;
+	uint32_t len, val;
+} hcpos;
+
+typedef struct hcrd {		/* hcread while recording: absolute value */
+	const char *s;
+	uint32_t len, off, dlen, val;
+} hcrd;
+
+typedef struct hsegr {		/* a child entry's text in the output */
+	size_t start, end;
+	const hent *child;
+	uint32_t counter0;
+} hsegr;
+
+typedef struct hlev {
+	hkey *k;
+	uint32_t serial;
+	int depth, errors0, warns0, text_started;
+	uint32_t t0, o0, c0, r0, s0;	/* starts in the stacks below */
+	uint32_t fe0, base0, nonce0, nlm0, npushed0;
+	unsigned counter0;
+	size_t text0;
+	uint8_t first_sol, uses_level;
+	uint32_t nfile, ndirs;
+} hlev;
+
 struct pp {
 	uintptr_t *mdir[NMDIR];
 	const pp_opts *o;
@@ -374,6 +552,37 @@ struct pp {
 		uint32_t namelen;
 	} *lm;
 	uint32_t nlm;
+	int warns;
+	int in_dir;		/* evaluating a directive's tokens (#if, #include, #line) */
+	int collecting;		/* in collect(): directives are inside macro arguments */
+	/* -E text (pp_text) */
+	char *out;
+	size_t nout, capout;
+	unsigned col;
+	/* header cache */
+	int hc;			/* on (pp_text, not disabled) */
+	uint32_t sig;		/* base signature (HNONE: no cache) */
+	uint32_t *psig;		/* search path prefix ids, [0, ndirs] */
+	struct hrec {
+		int on;		/* n > 0 */
+		int n, nbad;	/* levels; levels [0, nbad) are not cacheable */
+		int badline;
+		uint32_t serial;
+		hlev lev[HC_MAXLEV];
+		htouch *t;
+		uint32_t nt;
+		honce *ord;
+		uint32_t nord;
+		hcpos *ctr;
+		uint32_t nctr;
+		hcrd *crd;
+		uint32_t ncrd;
+		hsegr *seg;
+		uint32_t nseg;
+		cprov *cp;	/* indexed by ptok.ctr */
+		uint32_t ncp;
+	} rec;
+	uint64_t *rst[NMDIR];	/* per id: serial << 32 | index in rec.t */
 };
 
 /* ---------------- diagnostics ---------------- */
@@ -443,6 +652,8 @@ static void diag(pp *p, uint32_t loc, const char *what, const char *fmt, ...)
 	(void)!write(fd, line, (size_t)n);
 	if (what[0] == 'e' || what[0] == 'f')
 		p->errors++;
+	else
+		p->warns++;
 	if (what[0] == 'f') {
 		if (p->fatal_jb)
 			longjmp(*p->fatal_jb, 1);
@@ -496,6 +707,8 @@ void pp_vdiag(pp *p, uint32_t loc, const char *what, const char *fmt, va_list ap
 	(void)!write(fd, buf, (size_t)n);
 	if (what[0] == 'e' || what[0] == 'f')
 		p->errors++;
+	else
+		p->warns++;
 	if (what[0] == 'f') {
 		if (p->fatal_jb)
 			longjmp(*p->fatal_jb, 1);
@@ -535,6 +748,332 @@ static inline void mset(pp *p, uint32_t id, const pmacro *m)
 static inline void mdisable(pp *p, uint32_t id) { *mslot(p, id) |= 1; }
 static inline void menable(pp *p, uint32_t id) { *mslot(p, id) &= ~(uintptr_t)1; }
 
+/* ---------------- header cache: recording reads and writes ---------------- */
+
+/* the open regions are not cacheable (something in them depends on more than we record) */
+#define HC_BAD(p) do { if ((p)->rec.n) { (p)->rec.nbad = (p)->rec.n; (p)->rec.badline = __LINE__; } } while (0)
+
+static uint64_t *rslot(pp *p, uint32_t id)
+{
+	uint64_t **pg = &p->rst[id >> MPAGE_BITS];
+
+	if (unlikely(!*pg)) {
+		*pg = alloc(&p->perm, MPAGE * sizeof(uint64_t));
+		memset(*pg, 0, MPAGE * sizeof(uint64_t));
+	}
+	return &(*pg)[id & (MPAGE - 1)];
+}
+
+#define HC_MAXT (1u << 24)
+
+/* the innermost level's touch entry for id (new if *isnew) */
+static inline htouch *touch(pp *p, uint32_t id, bool *isnew)
+{
+	uint64_t *s = rslot(p, id);
+	uint32_t ser = p->rec.lev[p->rec.n - 1].serial;
+
+	if ((uint32_t)(*s >> 32) == ser) {
+		*isnew = false;
+		return &p->rec.t[(uint32_t)*s];
+	}
+	if (unlikely(p->rec.nt == HC_MAXT)) {
+		HC_BAD(p);
+		*isnew = false;
+		return NULL;
+	}
+	*isnew = true;
+	p->rec.t[p->rec.nt] = (htouch){ id, 0, 0, *s };
+	*s = (uint64_t)ser << 32 | p->rec.nt;
+	return &p->rec.t[p->rec.nt++];
+}
+
+/* id read with value v at entry of the innermost level (v: enabled, or HDEF) */
+static inline void touch_read(pp *p, uint32_t id, uintptr_t v, uint32_t g)
+{
+	bool isnew;
+	htouch *t = touch(p, id, &isnew);
+
+	if (!t)
+		return;
+	if (isnew) {
+		t->flags = HT_R | g;
+		t->v = v;
+	} else if (v != HDEF && (t->flags & HT_R) && t->v == HDEF && !(t->flags & HT_W)) {
+		t->v = v;	/* defined-only so far; unwritten, so this is the entry value */
+	}
+}
+
+static inline void touch_write(pp *p, uint32_t id)
+{
+	bool isnew;
+	htouch *t = touch(p, id, &isnew);
+
+	if (t)
+		t->flags |= HT_W;
+}
+
+/* a read of id (entry e) while recording; def: only definedness matters */
+static __attribute__((noinline)) void rec_read(pp *p, uint32_t id, uintptr_t e, int def)
+{
+	e &= ~(uintptr_t)1;
+	touch_read(p, id, def ? (e ? HDEF : 0) : e, def == 2 ? HT_G : 0);
+}
+
+#define HC_MAXCP 65535u
+
+static uint16_t new_cprov(pp *p, uint32_t val, uint32_t off, uint32_t len, uint16_t next)
+{
+	if (p->rec.ncp >= HC_MAXCP || len > 0xffff) {
+		HC_BAD(p);
+		return 0;
+	}
+	p->rec.cp[++p->rec.ncp] = (cprov){ val, off, (uint16_t)len, next };
+	return (uint16_t)p->rec.ncp;
+}
+
+/* chain a shifted by d, followed by chain tail (shared) */
+static uint16_t cp_chain(pp *p, uint16_t a, uint32_t d, uint16_t tail)
+{
+	if (!a)
+		return tail;
+	{
+		const cprov c = p->rec.cp[a];
+		uint16_t n = cp_chain(p, c.next, d, tail);
+
+		return new_cprov(p, c.val, c.off + d, c.len, n);
+	}
+}
+
+#define HC_MAXCRD 65536u
+
+/* a read of an identifier with __COUNTER__ digits: at replay its name differs */
+static __attribute__((noinline)) void rec_ctr_read(pp *p, const ptok *t, uintptr_t e)
+{
+	const cprov *c = &p->rec.cp[t->ctr];
+	char *d;
+
+	if (e || c->next || p->rec.ncrd >= HC_MAXCRD || t->len > 4096) {
+		HC_BAD(p);	/* such a name defined as a macro, or two runs: give up */
+		return;
+	}
+	d = alloc(&p->perm, t->len + 1);
+	memcpy(d, t->s, t->len);	/* pasted: the spelling is clean */
+	p->rec.crd[p->rec.ncrd++] = (hcrd){ d, t->len, c->off, c->len, c->val };
+}
+
+/* the entry for token t's identifier, as an expansion reads it */
+static inline uintptr_t mread_tok(pp *p, const ptok *t, int def)
+{
+	uintptr_t e = mget(p, t->id);
+
+	if (unlikely(p->rec.on)) {
+		if (t->ctr)
+			rec_ctr_read(p, t, e);
+		else
+			rec_read(p, t->id, e, def);
+	}
+	return e;
+}
+
+/* the entry for id, as a macro expansion reads it */
+static inline uintptr_t mread(pp *p, uint32_t id)
+{
+	uintptr_t e = mget(p, id);
+
+	if (unlikely(p->rec.on))
+		rec_read(p, id, e, 0);
+	return e;
+}
+
+/* is id defined (#ifdef, defined(), include guards) */
+static inline bool mdefined(pp *p, uint32_t id)
+{
+	uintptr_t e = mget(p, id);
+
+	if (unlikely(p->rec.on))
+		rec_read(p, id, e, 1);
+	return e != 0;
+}
+
+/* an include guard: defined? */
+static inline bool mguard(pp *p, uint32_t id)
+{
+	uintptr_t e = mget(p, id);
+
+	if (unlikely(p->rec.on))
+		rec_read(p, id, e, 2);
+	return e != 0;
+}
+
+/* #define / #undef / pop_macro */
+static void mdef(pp *p, uint32_t id, const pmacro *m)
+{
+	if (unlikely(p->rec.on))
+		touch_write(p, id);
+	mset(p, id, m);
+}
+
+/* ---------------- header cache: shared table ---------------- */
+
+static struct {
+	_Atomic unsigned long hit, miss, rec, uncacheable, full, bytes_replayed, bytes_rec, mem;
+	_Atomic unsigned long nru, nrv, ndl, nfe, nvalid, nchecked;
+} hstat;
+
+#define HKEY_BITS 16
+static _Atomic(hkey *) hkey_tab[1u << HKEY_BITS];
+static size_t hc_mem_max;
+
+/*
+ * Signatures.  The base signature is every option that decides what a
+ * header does except the macros and the search path; the search path is an
+ * input of a region only as far as its lookups went: an entry records how
+ * many leading search directories its #include / __has_include lookups
+ * depended on (up to the one a file was found in; all of them for a
+ * lookup that failed), and matches TUs whose search path starts with the
+ * same directories.  (kbuild adds -I for each source directory at the end:
+ * that does not split the cache.)
+ */
+static pthread_mutex_t sig_mu = PTHREAD_MUTEX_INITIALIZER;
+static char *sig_str[1 << 16];
+static size_t sig_len[1 << 16];
+static uint32_t nsig;
+
+static uint32_t sig_intern(char *b, size_t n)
+{
+	uint32_t r = HNONE;
+
+	pthread_mutex_lock(&sig_mu);
+	for (uint32_t i = 0; i < nsig; i++)
+		if (sig_len[i] == n && !memcmp(sig_str[i], b, n)) {
+			r = i;
+			break;
+		}
+	if (r == HNONE && nsig < (1 << 16)) {
+		char *c = malloc(n ? n : 1);
+
+		memcpy(c, b, n);
+		sig_str[nsig] = c;
+		sig_len[nsig] = n;
+		r = nsig++;
+	}
+	pthread_mutex_unlock(&sig_mu);
+	return r;
+}
+
+/* base signature into *sig, prefix ids into psig[0..ndirs]; false if too long */
+static bool sig_of(const pp_opts *o, uint32_t *sig, uint32_t *psig)
+{
+	char *b = malloc(1 << 17);
+	size_t n = 0;
+	bool ok = true;
+
+#define SIGS(x) do { const char *s_ = (x) ? (x) : ""; size_t l_ = strlen(s_); \
+	if (n + l_ + 8 < (1 << 17)) { memcpy(b + n, s_, l_); n += l_; b[n++] = 0; } else ok = false; } while (0)
+	n += (size_t)snprintf(b, 64, "%d %d %d %d", o->nfwdirs, o->unsigned_char, o->asm_mode, o->target) + 1;
+	for (int i = 0; i < o->nfwdirs; i++)
+		SIGS(o->fwdirs[i]);
+	SIGS(o->cwd);
+	SIGS(o->prefix_from);
+	SIGS(o->prefix_to);
+	*sig = sig_intern(b, n);
+	n = 0;
+	psig[0] = sig_intern(b, 0);
+	for (int i = 0; i < o->ndirs && ok; i++) {
+		/* each directory with whether it is a quote-only and a system directory */
+		b[n++] = (char)('0' + (i < o->nquote) + 2 * (o->nsys && i >= o->nsys));
+		SIGS(o->dirs[i]);
+		psig[i + 1] = sig_intern(b, n);
+	}
+#undef SIGS
+	free(b);
+	return ok && *sig != HNONE;
+}
+
+static hkey *hkey_get(uint32_t sig, const vlex_file *f, int32_t sdir, uint32_t nfile, const char *spath, uint8_t sys,
+		     bool make)
+{
+	size_t sl = strlen(spath);
+	uint64_t h = ((uint64_t)(uintptr_t)f * 0x9E3779B97F4A7C15ull) ^
+		     ((uint64_t)sig << 40 | (uint64_t)(uint32_t)sdir << 16 | (uint64_t)sys << 15 | nfile);
+	hkey *mine = NULL;
+
+	h = (h ^ vintern_hash(spath, sl)) * 0xff51afd7ed558ccdull;
+	h ^= h >> 29;
+	for (uint32_t i = (uint32_t)(h >> (64 - HKEY_BITS)), k = 0; k < (1u << HKEY_BITS);
+	     i = (i + 1) & ((1u << HKEY_BITS) - 1), k++) {
+		hkey *e = atomic_load_explicit(&hkey_tab[i], memory_order_acquire);
+
+		if (!e) {
+			if (!make)
+				return NULL;
+			if (!mine) {
+				char *sp = salloc(sl + 1);
+
+				memcpy(sp, spath, sl + 1);
+				mine = salloc(sizeof(*mine));
+				mine->hash = h;
+				mine->f = f;
+				mine->spath = sp;
+				mine->sig = sig;
+				mine->nfile = nfile;
+				mine->sdir = sdir;
+				mine->sys = sys;
+			}
+			if (atomic_compare_exchange_strong_explicit(&hkey_tab[i], &e, mine, memory_order_acq_rel,
+								    memory_order_acquire))
+				return mine;
+		}
+		if (e->hash == h && e->f == f && e->sig == sig && e->sdir == sdir && e->nfile == nfile && e->sys == sys &&
+		    !strcmp(e->spath, spath))
+			return e;
+	}
+	return NULL;
+}
+
+/* ---------------- -E text ---------------- */
+
+/* the -E buffer of this thread's last pp, kept for the next one (no unmap, no page faults) */
+static _Thread_local char *out_spare;
+static _Thread_local size_t out_spare_cap;
+
+static void out_reserve(pp *p, size_t n)
+{
+	size_t nc;
+	char *np;
+
+	if (likely(p->nout + n <= p->capout))
+		return;
+	if (!p->out && out_spare && out_spare_cap >= n) {
+		p->out = out_spare, p->capout = out_spare_cap;
+		out_spare = NULL, out_spare_cap = 0;
+		return;
+	}
+	nc = p->capout ? p->capout * 2 : 1u << 24;
+	while (nc < p->nout + n)
+		nc *= 2;
+	np = vm(nc);
+	if (p->out) {
+		memcpy(np, p->out, p->nout);
+		munmap(p->out, p->capout);
+	}
+	p->out = np;
+	p->capout = nc;
+}
+
+static inline void out_put(pp *p, const char *s, size_t n)
+{
+	out_reserve(p, n);
+	memcpy(p->out + p->nout, s, n);
+	p->nout += n;
+}
+
+static inline void out_ch(pp *p, char ch)
+{
+	out_reserve(p, 1);
+	p->out[p->nout++] = ch;
+}
+
 /* ---------------- tokens ---------------- */
 
 static inline void vfill(ptok *t, const vtok *v, const char *src, uint32_t loc)
@@ -545,7 +1084,7 @@ static inline void vfill(ptok *t, const vtok *v, const char *src, uint32_t loc)
 	t->loc = loc;
 	t->kind = v->kind;
 	t->flags = v->flags & (TF_SOL | TF_SPACE | TF_DIRTY | TF_RAW);
-	t->_pad = 0;
+	t->ctr = 0;
 }
 
 static inline void mkeof(ptok *t)
@@ -673,6 +1212,7 @@ static void pop_to(pp *p, int d)
 }
 
 static int directive(pp *p, ctx *c, ptok *out);
+static void hc_end(pp *p);
 
 /* the next token, no macro expansion; runs directives in file contexts */
 static void raw(pp *p, ptok *t)
@@ -717,6 +1257,8 @@ static void raw(pp *p, ptok *t)
 				mkeof(t);
 				return;
 			}
+			if (unlikely(p->rec.on) && p->depth == p->rec.lev[p->rec.n - 1].depth)
+				hc_end(p);
 			p->nfile--;
 			p->depth--;
 			continue;
@@ -755,7 +1297,7 @@ static void next_exp(pp *p, ptok *t)
 		raw(p, t);
 		if (t->kind != T_IDENT || (t->flags & PF_NOEXP))
 			return;
-		e = mget(p, t->id);
+		e = mread_tok(p, t, 0);
 		if (likely(!e))
 			return;
 		if (e & 1) {
@@ -781,7 +1323,7 @@ typedef struct margs {
 	const ptok **str;	/* stringified */
 } margs;
 
-static bool collect(pp *p, const pmacro *m, const ptok *name, margs *a, ptok *rp)
+static bool collect_(pp *p, const pmacro *m, const ptok *name, margs *a, ptok *rp)
 {
 	uint32_t np = m->nparam, slots = np ? np : 1, k = 0, depth = 0, n;
 	size_t base = p->svn;
@@ -851,11 +1393,21 @@ static bool collect(pp *p, const pmacro *m, const ptok *name, margs *a, ptok *rp
 	return true;
 }
 
+static bool collect(pp *p, const pmacro *m, const ptok *name, margs *a, ptok *rp)
+{
+	bool r;
+
+	p->collecting++;
+	r = collect_(p, m, name, a, rp);
+	p->collecting--;
+	return r;
+}
+
 /* clang's MacroArgs::ArgNeedsPreexpansion: any identifier with a macro */
-static bool needs_pre(const pp *p, const ptok *t, uint32_t n)
+static bool needs_pre(pp *p, const ptok *t, uint32_t n)
 {
 	for (uint32_t i = 0; i < n; i++)
-		if (t[i].kind == T_IDENT && mget(p, t[i].id))
+		if (t[i].kind == T_IDENT && mread_tok(p, &t[i], 1))
 			return true;
 	return false;
 }
@@ -903,9 +1455,15 @@ static void stringify(pp *p, const ptok *t, uint32_t n, ptok *out)
 
 	for (uint32_t i = 0; i < n; i++)
 		cap += 2 * t[i].len + 1;
+	/* __COUNTER__ digit runs, in order: (run, its offset in the result) */
+	uint16_t runs[64];
+	uint32_t roff[64], nr = 0;
+
 	b = w = alloc(&p->tmp, cap + 16);
 	*w++ = '"';
 	for (uint32_t i = 0; i < n; i++) {
+		uint16_t rc = unlikely(t[i].ctr) && p->rec.on ? t[i].ctr : 0;
+
 		if (i && (t[i].flags & (TF_SPACE | TF_SOL)))
 			*w++ = ' ';
 		if (is_strlit(t[i].kind)) {
@@ -914,6 +1472,16 @@ static void stringify(pp *p, const ptok *t, uint32_t n, ptok *out)
 			const char *s = pp_spell(&t[i], tmp, &l);
 
 			for (size_t j = 0; j < l; j++) {
+				/* digits are never escaped: a run starts where its first digit lands */
+				while (rc && p->rec.cp[rc].off == j) {
+					if (nr < 64) {
+						runs[nr] = rc;
+						roff[nr++] = (uint32_t)(w - b);
+					} else {
+						HC_BAD(p);
+					}
+					rc = p->rec.cp[rc].next;
+				}
 				if (s[j] == '\\' || s[j] == '"')
 					*w++ = '\\';
 				if (s[j] == '\n') {
@@ -923,7 +1491,17 @@ static void stringify(pp *p, const ptok *t, uint32_t n, ptok *out)
 				}
 				*w++ = s[j];
 			}
+			if (rc)
+				HC_BAD(p);
 		} else {
+			for (; rc; rc = p->rec.cp[rc].next) {
+				if (nr < 64) {
+					runs[nr] = rc;
+					roff[nr++] = (uint32_t)(w - b) + p->rec.cp[rc].off;
+				} else {
+					HC_BAD(p);
+				}
+			}
 			w = spell_to(w, &t[i]);
 		}
 	}
@@ -943,6 +1521,11 @@ static void stringify(pp *p, const ptok *t, uint32_t n, ptok *out)
 	out->len = (uint32_t)(w - b);
 	out->kind = T_STRING;
 	out->loc = n ? t[0].loc : 0;
+	for (uint32_t k = nr; k-- > 0;) {
+		const cprov c = p->rec.cp[runs[k]];
+
+		out->ctr = new_cprov(p, c.val, roff[k], c.len, out->ctr);
+	}
 }
 
 /* ---------------- token pasting ---------------- */
@@ -1027,8 +1610,10 @@ static ptok paste(pp *p, const ptok *l, const ptok *r)
 	char *b = alloc(&p->tmp, l->len + r->len + 24), *w;
 	ptok t = *l;
 	int k;
+	uint32_t ll;
 
 	w = spell_to(b, l);
+	ll = (uint32_t)(w - b);
 	w = spell_to(w, r);
 	memset(w, 0, 17);
 	k = classify(b, (size_t)(w - b), r->kind);
@@ -1041,6 +1626,8 @@ static ptok paste(pp *p, const ptok *l, const ptok *r)
 	t.kind = (uint8_t)k;
 	t.flags = l->flags & (TF_SOL | TF_SPACE);
 	t.id = k == T_IDENT ? vintern_copy(b, t.len) : 0;
+	if (unlikely(r->ctr) && p->rec.on)
+		t.ctr = cp_chain(p, l->ctr, 0, cp_chain(p, r->ctr, ll, 0));
 	return t;
 }
 
@@ -1290,14 +1877,14 @@ static int subst(pp *p, const pmacro *m, const ptok *name, margs *a, uint32_t el
 }
 
 /* clang's isTrivialSingleTokenExpansion */
-static bool trivial(const pp *p, const pmacro *m)
+static bool trivial(pp *p, const pmacro *m)
 {
 	const vtok *v = &m->body[0];
 	uintptr_t e;
 
 	if (v->kind != T_IDENT)
 		return true;
-	e = mget(p, v->id);
+	e = mread(p, v->id);
 	if (e && !(e & 1) && v->id != m->name)
 		return false;
 	if (m->kind == MK_OBJ)
@@ -1305,13 +1892,13 @@ static bool trivial(const pp *p, const pmacro *m)
 	return !m->pidx || !m->pidx[0];
 }
 
-static void single(const pp *p, const pmacro *m, ptok *t, uint8_t nf, uint32_t eloc)
+static void single(pp *p, const pmacro *m, ptok *t, uint8_t nf, uint32_t eloc)
 {
 	uintptr_t e;
 
 	vfill(t, &m->body[0], m->src, eloc);
 	t->flags = (t->flags & ~(TF_SOL | TF_SPACE)) | nf;
-	if (t->kind == T_IDENT && (e = mget(p, t->id)) && ((e & 1) || (const pmacro *)(e & ~(uintptr_t)1) == m))
+	if (t->kind == T_IDENT && (e = mread(p, t->id)) && ((e & 1) || (const pmacro *)(e & ~(uintptr_t)1) == m))
 		t->flags |= PF_NOEXP;
 }
 
@@ -1376,13 +1963,14 @@ static const ctx *cur_file(const pp *p)
 static void mknum(pp *p, ptok *t, unsigned long long v)
 {
 	char *b = alloc(&p->tmp, 40);
-	int n = snprintf(b, 24, "%llu", v);
+	int n = utoa(b, v);
 
 	memset(b + n, 0, 16);
 	t->s = b;
 	t->len = (uint32_t)n;
 	t->kind = T_NUMBER;
 	t->id = 0;
+	t->ctr = 0;
 	t->flags &= ~(TF_DIRTY | TF_RAW | PF_NOEXP);
 }
 
@@ -1402,6 +1990,7 @@ static void mkstr(pp *p, ptok *t, const char *s, size_t n)
 	t->len = (uint32_t)(w - b);
 	t->kind = T_STRING;
 	t->id = 0;
+	t->ctr = 0;
 	t->flags &= ~(TF_DIRTY | TF_RAW | PF_NOEXP);
 }
 
@@ -1577,16 +2166,29 @@ static int builtin(pp *p, const pmacro *m, ptok *t)
 		break;
 	}
 	case B_BASE_FILE:
+		HC_BAD(p);
 		mkstr(p, t, p->base_name, p->base_namelen);
 		break;
 	case B_COUNTER:
-		mknum(p, t, p->counter++);
+		if (p->rec.on) {
+			if (p->in_dir)
+				HC_BAD(p);	/* the value decides something */
+			mknum(p, t, p->counter);
+			t->ctr = new_cprov(p, p->counter, 0, t->len, 0);
+			p->counter++;
+		} else {
+			mknum(p, t, p->counter++);
+		}
 		break;
 	case B_INCLUDE_LEVEL:
+		for (int i = 0; i < p->rec.n; i++)
+			p->rec.lev[i].uses_level = 1;
 		mknum(p, t, p->nfile > 1 ? (unsigned)p->nfile - 1 : 0);
 		break;
 	case B_DATE: case B_TIME: case B_TIMESTAMP: {
 		time_t now = time(NULL);
+
+		HC_BAD(p);
 		struct tm tm;
 
 		localtime_r(&now, &tm);
@@ -1610,6 +2212,8 @@ static int builtin(pp *p, const pmacro *m, ptok *t)
 			error(p, t->loc, "_Pragma takes a parenthesized string literal");
 			return 1;
 		}
+		if (s.ctr)
+			HC_BAD(p);
 		next_exp(p, &r);
 		if (r.kind != T_RPAREN)
 			error(p, t->loc, "_Pragma takes a parenthesized string literal");
@@ -1868,7 +2472,7 @@ static ival eprimary(ev *e, bool live)
 				e->bad = true;
 				return r;
 			}
-			r.v = mget(p, n.id) != 0;
+			r.v = mdefined(p, n.id);
 			if (paren) {
 				raw(p, &n);
 				if (n.kind != T_RPAREN) {
@@ -2022,8 +2626,10 @@ static bool eval_if(pp *p, const ctx *fc, uint32_t b, uint32_t e)
 		return false;
 	}
 	push_line(p, fc, b, e);
+	p->in_dir++;
 	eadv(&E);
 	r = ecomma(&E, true);
+	p->in_dir--;
 	if (!E.bad && E.t.kind != T_EOF)
 		error(p, E.loc, "token is not a valid binary operator in a preprocessor subexpression");
 	pop_to(p, d);
@@ -2044,7 +2650,7 @@ static bool cond_true(pp *p, const ctx *c, const pdir *d)
 			error(p, c->loc + c->vt[d->tok].off, "macro name missing");
 			return false;
 		}
-		def = mget(p, c->vt[b].id) != 0;
+		def = mdefined(p, c->vt[b].id);
 		return (d->kind == D_IFDEF || d->kind == D_ELIFDEF) ? def : !def;
 	}
 	default:
@@ -2070,27 +2676,21 @@ static void skip_from(pp *p, ctx *c, uint32_t k)
 	}
 }
 
-static void define(pp *p, ctx *c, uint32_t b, uint32_t e)
+/*
+ * Parse "#define" tokens vt[b, e) into *m (pidx in memory from mem).
+ * Returns 0, or an error message (*eoff: the token it is at).
+ */
+static const char *parse_define(const vtok *vt, uint32_t b, uint32_t e, pmacro *m,
+				void *(*mem)(void *, size_t), void *mc, uint32_t *eoff)
 {
-	const vtok *vt = c->vt;
-	pmacro *m;
 	uint32_t params[256], np = 0, i = b + 1;
 	uint8_t *pidx = NULL;
 	bool va = false;
 
-	if (b >= e || vt[b].kind != T_IDENT) {
-		error(p, c->loc + vt[b - 1].off, "macro name must be an identifier");
-		return;
-	}
-	if (vt[b].id == KW_defined) {
-		error(p, c->loc + vt[b].off, "'defined' cannot be used as a macro name");
-		return;
-	}
-	m = alloc(&p->perm, sizeof(*m));
 	memset(m, 0, sizeof(*m));
 	m->name = vt[b].id;
-	m->src = c->src;
 	m->kind = MK_OBJ;
+	*eoff = b;
 	if (i < e && vt[i].kind == T_LPAREN && !(vt[i].flags & TF_SPACE)) {
 		m->kind = MK_FUNC;
 		i++;
@@ -2099,7 +2699,7 @@ static void define(pp *p, ctx *c, uint32_t b, uint32_t e)
 		} else {
 			for (;;) {
 				if (i >= e)
-					goto bad;
+					return "invalid macro parameter list";
 				if (vt[i].kind == T_ELLIPSIS) {
 					params[np++] = KW_VA_ARGS;
 					va = true;
@@ -2111,12 +2711,12 @@ static void define(pp *p, ctx *c, uint32_t b, uint32_t e)
 						i++;
 					}
 				} else {
-					goto bad;
+					return "invalid macro parameter list";
 				}
 				if (i < e && vt[i].kind == T_RPAREN && (i++, 1))
 					break;
 				if (va || i >= e || vt[i].kind != T_COMMA)
-					goto bad;
+					return "invalid macro parameter list";
 				i++;
 			}
 		}
@@ -2132,8 +2732,10 @@ static void define(pp *p, ctx *c, uint32_t b, uint32_t e)
 		if (vt[j].kind == T_IDENT && vt[j].id == KW_VA_OPT)
 			m->flags |= MF_VAOPT;
 	}
+	if (m->nbody && (m->body[0].kind == T_HASHHASH || m->body[m->nbody - 1].kind == T_HASHHASH))
+		return "'##' cannot appear at either end of a macro expansion";
 	if (np) {
-		pidx = alloc(&p->perm, m->nbody + 1);
+		pidx = mem(mc, m->nbody + 1);
 		for (uint32_t j = 0; j < m->nbody; j++) {
 			pidx[j] = 0;
 			if (m->body[j].kind != T_IDENT)
@@ -2146,21 +2748,157 @@ static void define(pp *p, ctx *c, uint32_t b, uint32_t e)
 		}
 		m->pidx = pidx;
 	}
-	if (m->nbody && (m->body[0].kind == T_HASHHASH || m->body[m->nbody - 1].kind == T_HASHHASH)) {
-		error(p, c->loc + vt[b].off, "'##' cannot appear at either end of a macro expansion");
-		return;
-	}
-	if (m->kind == MK_FUNC && !p->o->asm_mode)
+	if (m->kind == MK_FUNC)
 		for (uint32_t j = 0; j < m->nbody; j++)
 			if (m->body[j].kind == T_HASH && !(j + 1 < m->nbody && pidx && pidx[j + 1]) &&
 			    !(j + 1 < m->nbody && m->body[j + 1].kind == T_IDENT && m->body[j + 1].id == KW_VA_OPT)) {
-				error(p, c->loc + m->body[j].off, "'#' is not followed by a macro parameter");
-				return;
+				m->flags |= MF_BADHASH;
+				*eoff = i + j;
+				break;
 			}
-	mset(p, m->name, m);
-	return;
-bad:
-	error(p, c->loc + vt[b].off, "invalid macro parameter list");
+	return NULL;
+}
+
+static void *mem_perm(void *a, size_t n) { return alloc(a, n); }
+static void *mem_shared(void *a, size_t n) { (void)a; return salloc(n); }
+
+/* ---- content-canonical macros (definitions in the main file and <built-in>) ---- */
+
+#define CANON_BITS 18
+static _Atomic(const pmacro *) canon_tab[1u << CANON_BITS];
+static const vtok no_body[1];
+
+static uint32_t macro_hash(const pmacro *m)
+{
+	uint64_t h = m->name * 0x9E3779B97F4A7C15ull ^ ((uint64_t)m->kind << 8 | m->flags | (uint64_t)m->nparam << 16);
+
+	for (uint32_t j = 0; j < m->nbody; j++) {
+		const vtok *v = &m->body[j];
+		uint32_t x = v->kind | (v->flags & (TF_SPACE | TF_DIRTY)) << 8 | (m->pidx ? m->pidx[j] : 0) << 16;
+
+		h = (h ^ x) * 0x100000001B3ull;
+		h = (h ^ vintern_hash(m->src + v->off, v->len)) * 0x100000001B3ull;
+	}
+	return (uint32_t)(h ^ h >> 32);
+}
+
+static bool macro_same(const pmacro *a, const pmacro *b)
+{
+	if (a->name != b->name || a->kind != b->kind || a->flags != b->flags || a->nparam != b->nparam ||
+	    a->nbody != b->nbody || !a->pidx != !b->pidx)
+		return false;
+	for (uint32_t j = 0; j < a->nbody; j++) {
+		const vtok *x = &a->body[j], *y = &b->body[j];
+
+		if (x->kind != y->kind || x->len != y->len || ((x->flags ^ y->flags) & (TF_SPACE | TF_DIRTY)) ||
+		    (a->pidx && a->pidx[j] != b->pidx[j]) || memcmp(a->src + x->off, b->src + y->off, x->len))
+			return false;
+	}
+	return true;
+}
+
+/* the shared macro equal to m (m's body may be in per-TU memory) */
+static const pmacro *canon_macro(const pmacro *m)
+{
+	uint32_t h = macro_hash(m);
+	pmacro *c = NULL;
+
+	for (uint32_t i = h >> (32 - CANON_BITS), k = 0; k < 64; i = (i + 1) & ((1u << CANON_BITS) - 1), k++) {
+		const pmacro *e = atomic_load_explicit(&canon_tab[i], memory_order_acquire);
+
+		if (!e) {
+			if (!c) {
+				/* a copy in shared memory: body tokens rebased on a copy of their text */
+				uint32_t lo = m->nbody ? m->body[0].off : 0;
+				uint32_t hi = m->nbody ? m->body[m->nbody - 1].off + m->body[m->nbody - 1].len : 0;
+				char *t = salloc(hi - lo + 64);
+				vtok *v = m->nbody ? salloc(m->nbody * sizeof(vtok)) : (vtok *)no_body;
+
+				memcpy(t, m->src + lo, hi - lo);
+				memset(t + (hi - lo), 0, 64);
+				for (uint32_t j = 0; j < m->nbody; j++) {
+					v[j] = m->body[j];
+					v[j].off -= lo;
+				}
+				c = salloc(sizeof(*c));
+				*c = *m;
+				c->body = v;
+				c->src = t;
+				c->hash = h;
+				if (m->pidx) {
+					uint8_t *x = salloc(m->nbody + 1);
+
+					memcpy(x, m->pidx, m->nbody);
+					c->pidx = x;
+				}
+			}
+			if (atomic_compare_exchange_strong_explicit(&canon_tab[i], &e, c, memory_order_acq_rel,
+								    memory_order_acquire))
+				return c;
+		}
+		if (e->hash == h && macro_same(e, m))
+			return e;
+	}
+	return NULL;	/* table crowded here: keep the per-TU one */
+}
+
+static void mdef(pp *p, uint32_t id, const pmacro *m);
+
+static void define(pp *p, ctx *c, uint32_t b, uint32_t e)
+{
+	const vtok *vt = c->vt;
+	const pmacro *m;
+	const char *err;
+	uint32_t eoff;
+	bool site = c->f != &p->builtin && c->fe != 0;	/* a header: one macro per directive */
+	_Atomic(const pmacro *) *slot = site ? &((pfile *)c->fi)->mac[c->di - 1] : NULL;
+
+	if (b >= e || vt[b].kind != T_IDENT) {
+		error(p, c->loc + vt[b - 1].off, "macro name must be an identifier");
+		return;
+	}
+	if (vt[b].id == KW_defined) {
+		error(p, c->loc + vt[b].off, "'defined' cannot be used as a macro name");
+		return;
+	}
+	m = slot ? atomic_load_explicit(slot, memory_order_acquire) : NULL;
+	if (!m) {
+		pmacro *n = site ? salloc(sizeof(*n)) : alloc(&p->perm, sizeof(*n));
+
+		err = parse_define(vt, b, e, n, site ? mem_shared : mem_perm, &p->perm, &eoff);
+		if (err) {
+			error(p, c->loc + vt[eoff].off, "%s", err);
+			return;
+		}
+		n->src = c->src;
+		if (!n->nbody)
+			n->body = no_body;
+		if ((n->flags & MF_BADHASH) && !p->o->asm_mode) {
+			error(p, c->loc + vt[eoff].off, "'#' is not followed by a macro parameter");
+			return;
+		}
+		if (site) {
+			const pmacro *z = NULL;
+
+			if (!atomic_compare_exchange_strong_explicit(slot, &z, n, memory_order_acq_rel, memory_order_acquire))
+				n = (pmacro *)z;	/* the same definition, built by another TU */
+			m = n;
+		} else {
+			m = canon_macro(n);
+			if (!m)
+				m = n;
+		}
+	} else if ((m->flags & MF_BADHASH) && !p->o->asm_mode) {
+		/* cached by an assembler TU; body offsets are this file's */
+		uint32_t j = 0;
+
+		while (j < m->nbody && !(m->body[j].kind == T_HASH && !(j + 1 < m->nbody && m->pidx && m->pidx[j + 1]) &&
+					 !(j + 1 < m->nbody && m->body[j + 1].kind == T_IDENT && m->body[j + 1].id == KW_VA_OPT)))
+			j++;
+		error(p, c->loc + (j < m->nbody ? m->body[j].off : vt[b].off), "'#' is not followed by a macro parameter");
+		return;
+	}
+	mdef(p, m->name, m);
 }
 
 static char *pstrdup(pp *p, const char *s, size_t n)
@@ -2204,14 +2942,15 @@ static const vlex_file *try_path(const char *cwd, const char *path, size_t len)
 	return f;
 }
 
-static const vlex_file *find_include(pp *p, const ctx *from, const char *name, size_t nlen,
-				     bool angled, bool next, int32_t *sdir, const char **path)
+static const vlex_file *find_include_(pp *p, const ctx *from, const char *name, size_t nlen,
+				      bool angled, bool next, int32_t *sdir, const char **path, uint32_t *used)
 {
 	char buf[4096];
 	const vlex_file *f;
 	int32_t start;
 
 	*sdir = -1;
+	*used = 0;
 	if (nlen + 2 >= sizeof(buf))
 		return NULL;
 	if (name[0] == '/') {
@@ -2254,9 +2993,11 @@ static const vlex_file *find_include(pp *p, const ctx *from, const char *name, s
 		if ((f = try_path(p->o->cwd, buf, l))) {
 			*sdir = k;
 			*path = pstrdup(p, buf, l);
+			*used = (uint32_t)k + 1;
 			return f;
 		}
 	}
+	*used = (uint32_t)p->o->ndirs;	/* not in any of them */
 	/* frameworks: <Fw/h.h> -> DIR/Fw.framework/Headers/h.h */
 	if (angled && !next) {
 		const char *sl = memchr(name, '/', nlen);
@@ -2273,6 +3014,20 @@ static const vlex_file *find_include(pp *p, const ctx *from, const char *name, s
 		}
 	}
 	return NULL;
+}
+
+/* (the search path prefix the lookup depended on is an input of the open regions) */
+static const vlex_file *find_include(pp *p, const ctx *from, const char *name, size_t nlen,
+				     bool angled, bool next, int32_t *sdir, const char **path)
+{
+	uint32_t used;
+	const vlex_file *f = find_include_(p, from, name, nlen, angled, next, sdir, path, &used);
+
+	if (unlikely(p->rec.on))
+		for (int i = 0; i < p->rec.n; i++)
+			if (p->rec.lev[i].ndirs < used)
+				p->rec.lev[i].ndirs = used;
+	return f;
 }
 
 static void add_fent(pp *p, ctx *c, const vlex_file *f, const char *name)
@@ -2302,25 +3057,544 @@ static void add_fent(pp *p, ctx *c, const vlex_file *f, const char *name)
 	p->next_base += f->size + 1;
 }
 
-/* the innermost file context under the top of the stack (the includer) */
-static const ctx *cur_file_below(const pp *p)
+/* ---------------- header cache: regions ---------------- */
+
+#define HC_MAXVAR 64	/* entries per key */
+#define HC_MAXORD (1u << 20)
+#define HC_MAXSEG (1u << 20)
+
+static int once_index(const pp *p, const vlex_file *f)
 {
-	for (int d = p->depth - 2; d >= 0; d--)
-		if (p->cx[d].type == C_FILE)
-			return &p->cx[d];
-	return NULL;
+	for (uint32_t i = 0; i < p->nonce; i++)
+		if (p->once[i] == f)
+			return (int)i;
+	return -1;
+}
+
+/* can an #include here be a region? */
+static bool hc_top(const pp *p)
+{
+	return p->hc && p->sig != HNONE && p->rec.n < HC_MAXLEV && p->depth == p->nfile && !p->svn && !p->pend &&
+	       !p->preexp && !p->collecting && !p->in_dir;
+}
+
+static bool hc_valid(const pp *p, const hent *e)
+{
+	if (e->level >= 0 && e->level != p->nfile)
+		return false;
+	if ((int)e->ndirs > p->o->ndirs || p->psig[e->ndirs] != e->psig)
+		return false;
+	for (uint32_t i = 0; i < e->nrg; i++)
+		if ((mget(p, e->rg[i].id) != 0) != (e->rg[i].v != 0))
+			return false;
+	for (uint32_t i = 0; i < e->nord; i++)
+		if ((once_index(p, e->ord[i].f) >= 0) != (bool)e->ord[i].present)
+			return false;
+	for (uint32_t i = 0; i < e->nru; i++)
+		if (mget(p, e->ru[i]))
+			return false;
+	for (uint32_t i = 0; i < e->nrv; i++) {
+		uintptr_t c = mget(p, e->rv[i].id) & ~(uintptr_t)1, v = e->rv[i].v;
+
+		if (v == HDEF ? !c : c != v)
+			return false;
+	}
+	for (uint32_t i = 0; i < e->ncrd; i++) {
+		const hcread *r = &e->crd[i];
+		char b[4096 + 40];
+		int dl = utoa(b + r->off, p->counter + r->rel);
+		size_t n = r->off + (size_t)dl + (r->len - r->off - r->dlen);
+		uint32_t id;
+
+		memcpy(b, r->s, r->off);
+		memcpy(b + r->off + dl, r->s + r->off + r->dlen, r->len - r->off - r->dlen);
+		memset(b + n, 0, 16);
+		id = vintern_find(b, n, vintern_hash(b, n));
+		if (id && mget(p, id))
+			return false;
+	}
+	return true;
+}
+
+/* an entry's text, children spliced in, __COUNTER__ values from base */
+static void emit(pp *p, const hent *e, unsigned base)
+{
+	uint32_t pos = 0, ci = 0;
+
+	for (uint32_t si = 0; si <= e->nseg; si++) {
+		uint32_t to = si < e->nseg ? e->seg[si].at : (uint32_t)e->ntext;
+
+		while (ci < e->nctr && e->ctr[ci].off < to) {
+			const hctr *c = &e->ctr[ci++];
+
+			out_put(p, e->text + pos, c->off - pos);
+			out_reserve(p, 24);
+			p->nout += (size_t)utoa(p->out + p->nout, base + c->rel);
+			pos = c->off + c->len;
+		}
+		out_put(p, e->text + pos, to - pos);
+		pos = to;
+		if (si < e->nseg)
+			emit(p, e->seg[si].child, base + e->seg[si].cdelta);
+	}
+}
+
+/* the first output of the open levels that have none yet starts here */
+static inline void text_start(pp *p, uint8_t sol)
+{
+	for (int i = p->rec.n - 1; i >= 0 && !p->rec.lev[i].text_started; i--) {
+		p->rec.lev[i].text_started = 1;
+		p->rec.lev[i].first_sol = sol;
+		p->rec.lev[i].text0 = p->nout;
+	}
+}
+
+static void hc_apply(pp *p, const hent *e)
+{
+	unsigned c0 = p->counter;
+	struct hrec *r = &p->rec;
+	hlev *L = r->n ? &r->lev[r->n - 1] : NULL;
+
+	if (e->has_text) {
+		size_t st;
+		if (p->col)
+			out_ch(p, e->first_sol ? '\n' : ' ');
+		if (L)
+			text_start(p, e->first_sol);
+		out_reserve(p, e->total + 16 * (size_t)e->nctr);
+		st = p->nout;
+		emit(p, e, c0);
+		p->col = e->col_end;
+		if (L) {
+			if (r->nseg < HC_MAXSEG)
+				r->seg[r->nseg++] = (hsegr){ st, p->nout, e, c0 };
+			else
+				HC_BAD(p);
+		}
+	}
+	if (L) {
+		/* the entry's inputs and writes are the enclosing level's too */
+		for (int i = 0; i < r->n; i++) {
+			if (e->level >= 0)
+				r->lev[i].uses_level = 1;
+			if (r->lev[i].ndirs < e->ndirs)
+				r->lev[i].ndirs = e->ndirs;
+		}
+		for (uint32_t i = 0; i < e->nrg; i++)
+			touch_read(p, e->rg[i].id, e->rg[i].v, HT_G);
+		for (uint32_t i = 0; i < e->nru; i++)
+			touch_read(p, e->ru[i], 0, 0);
+		for (uint32_t i = 0; i < e->nrv; i++)
+			touch_read(p, e->rv[i].id, e->rv[i].v, 0);
+		for (uint32_t i = 0; i < e->ndl; i++)
+			touch_write(p, e->dl[i].id);
+		for (uint32_t i = 0; i < e->nord; i++) {
+			if (e->ord[i].present && once_index(p, e->ord[i].f) >= (int)L->nonce0)
+				continue;	/* marked by this level itself */
+			if (r->nord < HC_MAXORD)
+				r->ord[r->nord++] = e->ord[i];
+			else
+				HC_BAD(p);
+		}
+		for (uint32_t i = 0; i < e->ncrd; i++) {
+			const hcread *c = &e->crd[i];
+
+			if (r->ncrd < HC_MAXCRD)
+				r->crd[r->ncrd++] = (hcrd){ c->s, c->len, c->off, c->dlen, c0 + c->rel };
+			else
+				HC_BAD(p);
+		}
+	}
+	for (uint32_t i = 0; i < e->nfe; i++) {
+		const hfent *h = &e->fe[i];
+		fent *d = &p->fe[p->nfe++];
+
+		d->base = p->next_base + h->rbase;
+		d->f = h->f;
+		d->fi = h->fi;
+		d->name = h->name;
+		d->namelen = h->namelen;
+		d->spath = h->spath;
+		d->sys = h->sys;
+	}
+	p->next_base += e->span;
+	for (uint32_t i = 0; i < e->ndl; i++)
+		mset(p, e->dl[i].id, (const pmacro *)e->dl[i].v);
+	for (uint32_t i = 0; i < e->noadd && p->nonce < 4096; i++)
+		p->once[p->nonce++] = e->oadd[i];
+	p->counter += e->counter_delta;
+	p->pend = e->pend_out;
+	atomic_fetch_add_explicit(&hstat.hit, 1, memory_order_relaxed);
+	atomic_fetch_add_explicit(&hstat.bytes_replayed, e->total, memory_order_relaxed);
+}
+
+static void hc_why(const pp *p, const hkey *k, const hent *e)
+{
+	char b[512];
+	int n = 0;
+
+	for (uint32_t i = 0; i < e->nrg && !n; i++)
+		if ((mget(p, e->rg[i].id) != 0) != (e->rg[i].v != 0)) {
+			const vident *d = &vintern_ents[e->rg[i].id];
+
+			n = snprintf(b, sizeof(b), "hc-miss %s: guard %.*s %s\n", k->spath, (int)d->len, d->s,
+				     e->rg[i].v ? "def/undef" : "undef/def");
+		}
+	for (uint32_t i = 0; i < e->nord && !n; i++)
+		if ((once_index(p, e->ord[i].f) >= 0) != (bool)e->ord[i].present)
+			n = snprintf(b, sizeof(b), "hc-miss %s: once %s\n", k->spath, e->ord[i].f->path);
+	for (uint32_t i = 0; i < e->nru && !n; i++)
+		if (mget(p, e->ru[i])) {
+			const vident *d = &vintern_ents[e->ru[i]];
+
+			n = snprintf(b, sizeof(b), "hc-miss %s: %.*s undef/def\n", k->spath, (int)d->len, d->s);
+		}
+	for (uint32_t i = 0; i < e->nrv && !n; i++) {
+		uintptr_t c = mget(p, e->rv[i].id) & ~(uintptr_t)1, v = e->rv[i].v;
+
+		if (v == HDEF ? !c : c != v) {
+			const vident *d = &vintern_ents[e->rv[i].id];
+
+			n = snprintf(b, sizeof(b), "hc-miss %s: %.*s %s/%s\n", k->spath, (int)d->len, d->s,
+				     v == HDEF ? "def" : "val", c ? "def" : "undef");
+		}
+	}
+	if (!n)
+		n = snprintf(b, sizeof(b), "hc-miss %s: counter name\n", k->spath);
+	(void)!write(2, b, (size_t)n);
+}
+
+/* replay a matching entry for this #include; true if done */
+static bool hc_try(pp *p, hkey *k)
+{
+	static int dbg = -1;
+	const hent *h = atomic_load_explicit(&k->head, memory_order_acquire);
+
+	for (const hent *e = h; e; e = e->next)
+		if (hc_valid(p, e)) {
+			hc_apply(p, e);
+			return true;
+		}
+	if (dbg < 0)
+		dbg = getenv("VPP_HC_DEBUG") != NULL;
+	if (dbg && h)
+		hc_why(p, k, h);
+	return false;
+}
+
+static _Thread_local struct {
+	htouch *t;
+	honce *ord;
+	hcpos *ctr;
+	hcrd *crd;
+	hsegr *seg;
+	cprov *cp;
+} rec_spare;
+
+/* the region's file was just entered (top of the stack) */
+static void hc_begin(pp *p, hkey *k)
+{
+	struct hrec *r = &p->rec;
+	hlev *L;
+
+	if (!r->t && rec_spare.t) {
+		/* this thread's last pp's buffers: counts are reset below, contents need no clearing */
+		r->t = rec_spare.t, r->ord = rec_spare.ord, r->ctr = rec_spare.ctr;
+		r->crd = rec_spare.crd, r->seg = rec_spare.seg, r->cp = rec_spare.cp;
+		rec_spare.t = NULL;
+	}
+	if (!r->t) {
+		r->t = vm(HC_MAXT * sizeof(htouch));
+		r->ord = vm(HC_MAXORD * sizeof(honce));
+		r->ctr = vm(HC_MAXCP * sizeof(hcpos));
+		r->crd = vm(HC_MAXCRD * sizeof(hcrd));
+		r->seg = vm(HC_MAXSEG * sizeof(hsegr));
+		r->cp = vm((HC_MAXCP + 1) * sizeof(cprov));
+	}
+	if (!r->n) {
+		r->nt = r->nord = r->nctr = r->ncrd = r->nseg = r->ncp = 0;
+		r->nbad = 0;
+	}
+	L = &r->lev[r->n++];
+	r->on = 1;
+	L->k = k;
+	L->serial = ++r->serial;
+	L->depth = p->depth;
+	L->t0 = r->nt;
+	L->o0 = r->nord;
+	L->c0 = r->nctr;
+	L->r0 = r->ncrd;
+	L->s0 = r->nseg;
+	L->fe0 = p->cx[p->depth - 1].fe;
+	L->base0 = p->fe[L->fe0].base;
+	L->nonce0 = p->nonce;
+	L->nlm0 = p->nlm;
+	L->npushed0 = p->npushed;
+	L->errors0 = p->errors;
+	L->warns0 = p->warns;
+	L->counter0 = p->counter;
+	L->text_started = 0;
+	L->uses_level = 0;
+	L->ndirs = 0;
+	L->nfile = p->nfile - 1;	/* before the region's file */
+	atomic_fetch_add_explicit(&hstat.miss, 1, memory_order_relaxed);
+}
+
+static void *hcopy(const void *s, size_t n)
+{
+	void *d = n ? salloc(n) : NULL;
+
+	if (n)
+		memcpy(d, s, n);
+	return d;
+}
+
+static char *hstrdup(const char *s, size_t n)
+{
+	char *d = salloc(n + 1);
+
+	memcpy(d, s, n);
+	d[n] = 0;
+	return d;
+}
+
+/* the entry for the innermost level, which ends at output offset end */
+static hent *publish(pp *p, const hlev *L, size_t end)
+{
+	struct hrec *r = &p->rec;
+	hent *e = salloc(sizeof(*e));
+	uint32_t nrg = 0, nru = 0, nrv = 0, ndl = 0, *ru;
+	hread *rg, *rv, *dl;
+	hfent *fe;
+
+	memset(e, 0, sizeof(*e));
+	for (uint32_t i = L->t0; i < r->nt; i++) {
+		const htouch *t = &r->t[i];
+
+		if (t->flags & HT_R) {
+			if ((t->flags & HT_G) && (t->v == HDEF || !t->v))
+				nrg++;
+			else if (t->v)
+				nrv++;
+			else
+				nru++;
+		}
+		ndl += (t->flags & HT_W) != 0;
+	}
+	rg = salloc((nrg ? nrg : 1) * sizeof(*rg));
+	ru = salloc((nru ? nru : 1) * sizeof(*ru));
+	rv = salloc((nrv ? nrv : 1) * sizeof(*rv));
+	dl = salloc((ndl ? ndl : 1) * sizeof(*dl));
+	nrg = nru = nrv = ndl = 0;
+	for (uint32_t i = L->t0; i < r->nt; i++) {
+		const htouch *t = &r->t[i];
+
+		if (t->flags & HT_R) {
+			if ((t->flags & HT_G) && (t->v == HDEF || !t->v))
+				rg[nrg++] = (hread){ t->id, 0, t->v };
+			else if (t->v)
+				rv[nrv++] = (hread){ t->id, 0, t->v };
+			else
+				ru[nru++] = t->id;
+		}
+		if (t->flags & HT_W)
+			dl[ndl++] = (hread){ t->id, 0, mget(p, t->id) & ~(uintptr_t)1 };
+	}
+	atomic_fetch_add_explicit(&hstat.nru, nru, memory_order_relaxed);
+	atomic_fetch_add_explicit(&hstat.nrv, nrv, memory_order_relaxed);
+	atomic_fetch_add_explicit(&hstat.ndl, ndl, memory_order_relaxed);
+	atomic_fetch_add_explicit(&hstat.nfe, p->nfe - L->fe0, memory_order_relaxed);
+	e->rg = rg, e->nrg = nrg;
+	e->ru = ru, e->nru = nru;
+	e->rv = rv, e->nrv = nrv;
+	e->dl = dl, e->ndl = ndl;
+	e->ord = hcopy(r->ord + L->o0, (r->nord - L->o0) * sizeof(honce));
+	e->nord = r->nord - L->o0;
+	e->oadd = hcopy(p->once + L->nonce0, (p->nonce - L->nonce0) * sizeof(*p->once));
+	e->noadd = p->nonce - L->nonce0;
+	e->nfe = p->nfe - L->fe0;
+	fe = salloc((e->nfe ? e->nfe : 1) * sizeof(hfent));
+	for (uint32_t i = 0; i < e->nfe; i++) {
+		const fent *f = &p->fe[L->fe0 + i];
+
+		fe[i] = (hfent){ f->f, f->fi, hstrdup(f->name, f->namelen), hstrdup(f->spath, strlen(f->spath)),
+				 f->namelen, f->base - L->base0, f->sys };
+	}
+	e->fe = fe;
+	e->span = p->next_base - L->base0;
+	e->counter_delta = p->counter - L->counter0;
+	e->pend_out = p->pend;
+	e->level = L->uses_level ? (int32_t)L->nfile : -1;
+	e->ndirs = L->ndirs;
+	e->psig = p->psig[L->ndirs];
+	{
+		hcread *cr = salloc((r->ncrd - L->r0 ? r->ncrd - L->r0 : 1) * sizeof(hcread));
+
+		for (uint32_t i = L->r0; i < r->ncrd; i++) {
+			const hcrd *c = &r->crd[i];
+
+			cr[i - L->r0] = (hcread){ hstrdup(c->s, c->len), c->len, c->off, c->dlen, c->val - L->counter0 };
+		}
+		e->crd = cr;
+		e->ncrd = r->ncrd - L->r0;
+	}
+	if (L->text_started) {
+		/* own text: the output minus the children's texts */
+		uint32_t ns = r->nseg - L->s0, nc = r->nctr - L->c0;
+		size_t own = end - L->text0;
+		char *t;
+		hseg *sg = salloc((ns ? ns : 1) * sizeof(hseg));
+		hctr *ct = salloc((nc ? nc : 1) * sizeof(hctr));
+		size_t w = 0, at = L->text0, skipped = 0;
+		uint32_t ci = L->c0;
+
+		for (uint32_t i = L->s0; i < r->nseg; i++)
+			own -= r->seg[i].end - r->seg[i].start;
+		t = salloc(own + 1);
+		for (uint32_t i = L->s0; i <= r->nseg; i++) {
+			size_t to = i < r->nseg ? r->seg[i].start : end;
+
+
+			for (; ci < r->nctr && r->ctr[ci].pos < to; ci++)
+				ct[ci - L->c0] = (hctr){ (uint32_t)(r->ctr[ci].pos - L->text0 - skipped), r->ctr[ci].len,
+							 r->ctr[ci].val - L->counter0 };
+			memcpy(t + w, p->out + at, to - at);
+			w += to - at;
+			if (i < r->nseg) {
+				sg[i - L->s0] = (hseg){ (uint32_t)w, r->seg[i].counter0 - L->counter0, r->seg[i].child };
+				skipped += r->seg[i].end - r->seg[i].start;
+				at = r->seg[i].end;
+			}
+		}
+		e->text = t;
+		e->ntext = own;
+		e->total = end - L->text0;
+		e->seg = sg;
+		e->nseg = ns;
+		e->ctr = ct;
+		e->nctr = nc;
+		e->has_text = 1;
+		e->first_sol = L->first_sol;
+		e->col_end = p->col != 0;
+	}
+	return e;
+}
+
+/* the innermost region's file context is being popped */
+static void hc_end(pp *p)
+{
+	struct hrec *r = &p->rec;
+	hlev *L = &r->lev[r->n - 1], *P;
+	hkey *k = L->k;
+	hent *e = NULL;
+	size_t sz;
+
+	if (r->n - 1 < r->nbad || p->errors != L->errors0 || p->warns != L->warns0 || p->nlm != L->nlm0 ||
+	    p->npushed != L->npushed0 || p->nonce < L->nonce0) {
+		if (r->n - 1 >= r->nbad)
+			r->nbad = r->n;	/* the enclosing regions saw it too */
+		atomic_fetch_add_explicit(&hstat.uncacheable, 1, memory_order_relaxed);
+		if (getenv("VPP_HC_DEBUG")) {
+			char b[512];
+			int n = snprintf(b, sizeof(b), "hc-bad %s: line %d errors %d warns %d nlm %u\n", k->spath,
+					 r->badline, p->errors - L->errors0, p->warns - L->warns0, p->nlm - L->nlm0);
+
+			(void)!write(2, b, (size_t)n);
+		}
+	} else {
+		uint64_t m0 = atomic_load_explicit(&shared_used, memory_order_relaxed);
+
+		sz = (r->nt - L->t0) * 16 + (p->nfe - L->fe0) * (sizeof(hfent) + 64) + sizeof(hent);
+		if (atomic_load_explicit(&k->n, memory_order_relaxed) >= HC_MAXVAR ||
+		    (hc_mem_max && atomic_load_explicit(&hstat.mem, memory_order_relaxed) + sz > hc_mem_max)) {
+			atomic_fetch_add_explicit(&hstat.full, 1, memory_order_relaxed);
+		} else {
+			e = publish(p, L, p->nout);
+			/* (other threads allocate too: close enough for a limit) */
+			atomic_fetch_add_explicit(&hstat.mem, atomic_load_explicit(&shared_used, memory_order_relaxed) - m0,
+						  memory_order_relaxed);
+			atomic_fetch_add_explicit(&hstat.rec, 1, memory_order_relaxed);
+			atomic_fetch_add_explicit(&hstat.bytes_rec, e->ntext, memory_order_relaxed);
+			atomic_fetch_add_explicit(&k->n, 1, memory_order_relaxed);
+			e->next = atomic_load_explicit(&k->head, memory_order_relaxed);
+			while (!atomic_compare_exchange_weak_explicit(&k->head, &e->next, e, memory_order_release,
+								      memory_order_relaxed))
+				;
+		}
+	}
+	r->n--;
+	if (r->nbad > r->n)
+		r->nbad = r->n;
+	if (!r->n) {
+		r->on = 0;
+		return;
+	}
+	/* merge into the enclosing level */
+	P = &r->lev[r->n - 1];
+	{
+		uint32_t w = L->t0;
+
+		for (uint32_t i = L->t0; i < r->nt; i++) {
+			htouch T = r->t[i];
+			uint64_t *st = rslot(p, T.id);
+
+			if ((uint32_t)(T.prev >> 32) == P->serial) {
+				htouch *pt = &r->t[(uint32_t)T.prev];
+
+				if (!(pt->flags & HT_W) && (T.flags & HT_R) && (pt->flags & HT_R) && pt->v == HDEF &&
+				    T.v != HDEF)
+					pt->v = T.v;
+				pt->flags |= T.flags & HT_W;
+				*st = T.prev;
+			} else {
+				r->t[w] = T;
+				*st = (uint64_t)P->serial << 32 | w;
+				w++;
+			}
+		}
+		r->nt = w;
+	}
+	{
+		uint32_t w = L->o0;
+
+		for (uint32_t i = L->o0; i < r->nord; i++)
+			if (!r->ord[i].present || once_index(p, r->ord[i].f) < (int)P->nonce0)
+				r->ord[w++] = r->ord[i];
+		r->nord = w;
+	}
+	if (e) {
+		/* the level's own counter digits and children are inside its entry */
+		r->nctr = L->c0;
+		r->nseg = L->s0;
+		if (e->has_text)
+			r->seg[r->nseg++] = (hsegr){ L->text0, p->nout, e, L->counter0 };
+	}
 }
 
 static void enter_file(pp *p, const vlex_file *f, const char *path, int32_t sdir)
 {
 	const pfile *fi = pfile_get(f);
+	const ctx *from = cur_file(p);
+	hkey *k = NULL;
+	uint8_t sys;
+	int oi;
 	ctx *c;
 
-	if (fi->guard && mget(p, fi->guard))
+	if (fi->guard && mguard(p, fi->guard))
 		return;
-	for (uint32_t i = 0; i < p->nonce; i++)
-		if (p->once[i] == f)
+	oi = once_index(p, f);
+	if (unlikely(p->rec.on) && p->rec.nord < HC_MAXORD &&
+	    (oi < 0 || oi < (int)p->rec.lev[p->rec.n - 1].nonce0))
+		p->rec.ord[p->rec.nord++] = (honce){ f, oi >= 0 };
+	if (oi >= 0)
+		return;
+	sys = sdir == -2 || (sdir >= 0 && p->o->nsys && sdir >= p->o->nsys) ||
+	      (sdir == -1 && from && p->fe[from->fe].sys);
+	if (f != &p->builtin && from && hc_top(p)) {
+		k = hkey_get(p->sig, f, sdir, 0, path, sys, true);
+		if (k && hc_try(p, k))
 			return;
+	}
 	if (fi->bad)
 		fatal(p, 0, "%s: unterminated or unbalanced conditional directives", path);
 	c = push(p);
@@ -2334,14 +3608,10 @@ static void enter_file(pp *p, const vlex_file *f, const char *path, int32_t sdir
 	c->sdir = sdir;
 	c->spath = path;
 	p->nfile++;
-	{
-		const ctx *from = cur_file_below(p);
-		uint8_t sys = sdir == -2 || (sdir >= 0 && p->o->nsys && sdir >= p->o->nsys) ||
-			      (sdir == -1 && from && p->fe[from->fe].sys);
-
-		add_fent(p, c, f, path);
-		p->fe[c->fe].sys = sys;
-	}
+	add_fent(p, c, f, path);
+	p->fe[c->fe].sys = sys;
+	if (k)
+		hc_begin(p, k);
 }
 
 static void include(pp *p, ctx *c, uint32_t b, uint32_t e, int kind, uint32_t loc)
@@ -2358,7 +3628,12 @@ static void include(pp *p, ctx *c, uint32_t b, uint32_t e, int kind, uint32_t lo
 	push_line(p, c, b, e);
 	raw(p, &t);
 	if (t.kind == T_STRING || t.kind == T_LESS || t.kind == T_IDENT) {
-		if (!header_name(p, buf, sizeof(buf), &n, &angled, &t)) {
+		bool ok;
+
+		p->in_dir++;
+		ok = header_name(p, buf, sizeof(buf), &n, &angled, &t);
+		p->in_dir--;
+		if (!ok) {
 			pop_to(p, d);
 			error(p, loc, "expected \"FILENAME\" or <FILENAME>");
 			return;
@@ -2429,18 +3704,20 @@ static int pragma_text(pp *p, const char *s, size_t n, uint32_t loc, ptok *out)
 	if (word(&q, e, "push_macro")) {
 		uint32_t id = pragma_macro_name(q, (size_t)(e - q));
 
+		HC_BAD(p);
 		if (id && p->npushed < 4096) {
 			p->pushed[p->npushed].id = id;
-			p->pushed[p->npushed++].m = mget(p, id) & ~(uintptr_t)1;
+			p->pushed[p->npushed++].m = mread(p, id) & ~(uintptr_t)1;
 		}
 		return 0;
 	}
 	if (word(&q, e, "pop_macro")) {
 		uint32_t id = pragma_macro_name(q, (size_t)(e - q));
 
+		HC_BAD(p);
 		for (uint32_t i = p->npushed; i-- > 0;)
 			if (p->pushed[i].id == id) {
-				mset(p, id, (const pmacro *)p->pushed[i].m);
+				mdef(p, id, (const pmacro *)p->pushed[i].m);
 				memmove(&p->pushed[i], &p->pushed[i + 1], (p->npushed - i - 1) * sizeof(p->pushed[0]));
 				p->npushed--;
 				break;
@@ -2474,8 +3751,10 @@ static void line_directive(pp *p, ctx *c, uint32_t b, uint32_t e, bool expand_li
 
 	push_line(p, c, b, e);
 	if (expand_line) {
+		p->in_dir++;
 		next_exp(p, &n);
 		next_exp(p, &f);
+		p->in_dir--;
 	} else {
 		raw(p, &n);
 		raw(p, &f);
@@ -2543,7 +3822,7 @@ static int directive(pp *p, ctx *c, ptok *out)
 		return 0;
 	case D_UNDEF:
 		if (b + 1 < e && c->vt[b + 1].kind == T_IDENT)
-			mset(p, c->vt[b + 1].id, NULL);
+			mdef(p, c->vt[b + 1].id, NULL);
 		else
 			error(p, loc, "macro name must be an identifier");
 		return 0;
@@ -2602,39 +3881,46 @@ pass: {
 
 /* ---------------- setup ---------------- */
 
-static void def_builtin(pp *p, const char *name, int b)
-{
-	pmacro *m = alloc(&p->perm, sizeof(*m));
+/* the builtin macros: process-wide, so equal in every TU */
+static const struct { const char *n; int b; } bi[] = {
+	{ "__FILE__", B_FILE }, { "__LINE__", B_LINE }, { "__COUNTER__", B_COUNTER },
+	{ "__DATE__", B_DATE }, { "__TIME__", B_TIME }, { "__TIMESTAMP__", B_TIMESTAMP },
+	{ "__BASE_FILE__", B_BASE_FILE }, { "__FILE_NAME__", B_FILE_NAME },
+	{ "__INCLUDE_LEVEL__", B_INCLUDE_LEVEL }, { "_Pragma", B_PRAGMA },
+	{ "__has_attribute", B_HAS_ATTRIBUTE }, { "__has_builtin", B_HAS_BUILTIN },
+	{ "__has_feature", B_HAS_FEATURE }, { "__has_extension", B_HAS_EXTENSION },
+	{ "__has_c_attribute", B_HAS_C_ATTRIBUTE }, { "__has_cpp_attribute", B_HAS_CPP_ATTRIBUTE },
+	{ "__has_declspec_attribute", B_HAS_DECLSPEC }, { "__has_warning", B_HAS_WARNING },
+	{ "__is_identifier", B_IS_IDENTIFIER }, { "__has_include", B_HAS_INCLUDE },
+	{ "__has_include_next", B_HAS_INCLUDE_NEXT },
+	{ "__has_constexpr_builtin", B_HAS_CONSTEXPR_BUILTIN },
+	{ "__is_target_arch", B_IS_TARGET_ARCH }, { "__is_target_os", B_IS_TARGET_OS },
+	{ "__is_target_vendor", B_IS_TARGET_VENDOR },
+	{ "__is_target_environment", B_IS_TARGET_ENVIRONMENT },
+	{ "__is_target_variant_os", B_IS_TARGET_VARIANT_OS },
+	{ "__is_target_variant_environment", B_IS_TARGET_VARIANT_ENVIRONMENT },
+	{ "__building_module", B_BUILDING_MODULE },
+};
 
-	memset(m, 0, sizeof(*m));
-	m->kind = MK_BUILTIN;
-	m->builtin = (uint8_t)b;
-	m->name = vintern_copy(name, strlen(name));
-	mset(p, m->name, m);
+static const pmacro *bi_macro[sizeof(bi) / sizeof(bi[0])];
+
+static void bi_init(void)
+{
+	for (size_t i = 0; i < sizeof(bi) / sizeof(bi[0]); i++) {
+		pmacro *m = salloc(sizeof(*m));
+
+		memset(m, 0, sizeof(*m));
+		m->kind = MK_BUILTIN;
+		m->builtin = (uint8_t)bi[i].b;
+		m->name = vintern_copy(bi[i].n, strlen(bi[i].n));
+		m->body = no_body;
+		bi_macro[i] = m;
+	}
 }
 
 pp *pp_open(const pp_opts *o)
 {
 	pp *p = vm(sizeof(pp));
-	static const struct { const char *n; int b; } bi[] = {
-		{ "__FILE__", B_FILE }, { "__LINE__", B_LINE }, { "__COUNTER__", B_COUNTER },
-		{ "__DATE__", B_DATE }, { "__TIME__", B_TIME }, { "__TIMESTAMP__", B_TIMESTAMP },
-		{ "__BASE_FILE__", B_BASE_FILE }, { "__FILE_NAME__", B_FILE_NAME },
-		{ "__INCLUDE_LEVEL__", B_INCLUDE_LEVEL }, { "_Pragma", B_PRAGMA },
-		{ "__has_attribute", B_HAS_ATTRIBUTE }, { "__has_builtin", B_HAS_BUILTIN },
-		{ "__has_feature", B_HAS_FEATURE }, { "__has_extension", B_HAS_EXTENSION },
-		{ "__has_c_attribute", B_HAS_C_ATTRIBUTE }, { "__has_cpp_attribute", B_HAS_CPP_ATTRIBUTE },
-		{ "__has_declspec_attribute", B_HAS_DECLSPEC }, { "__has_warning", B_HAS_WARNING },
-		{ "__is_identifier", B_IS_IDENTIFIER }, { "__has_include", B_HAS_INCLUDE },
-		{ "__has_include_next", B_HAS_INCLUDE_NEXT },
-		{ "__has_constexpr_builtin", B_HAS_CONSTEXPR_BUILTIN },
-		{ "__is_target_arch", B_IS_TARGET_ARCH }, { "__is_target_os", B_IS_TARGET_OS },
-		{ "__is_target_vendor", B_IS_TARGET_VENDOR },
-		{ "__is_target_environment", B_IS_TARGET_ENVIRONMENT },
-		{ "__is_target_variant_os", B_IS_TARGET_VARIANT_OS },
-		{ "__is_target_variant_environment", B_IS_TARGET_VARIANT_ENVIRONMENT },
-		{ "__building_module", B_BUILDING_MODULE },
-	};
 	const vlex_file *mf;
 	size_t n = strlen(o->predef);
 	char *src;
@@ -2646,13 +3932,21 @@ pp *pp_open(const pp_opts *o)
 	p->cx = vm(MAXCTX * sizeof(ctx));
 	arena_init(&p->perm, 1ull << 30);
 	arena_init(&p->tmp, 1ull << 32);
+	p->psig = alloc(&p->perm, ((size_t)o->ndirs + 1) * sizeof(uint32_t));
+	if (!sig_of(o, &p->sig, p->psig))
+		p->sig = HNONE;
 	p->sv = vm(SVMAX * sizeof(ptok));
 	p->fe = vm((1u << 20) * sizeof(fent));
 	p->once = alloc(&p->perm, 4096 * sizeof(*p->once));
 	p->pushed = alloc(&p->perm, 4096 * sizeof(*p->pushed));
 	p->lm = vm(65536 * sizeof(*p->lm));
-	for (size_t i = 0; i < sizeof(bi) / sizeof(bi[0]); i++)
-		def_builtin(p, bi[i].n, bi[i].b);
+	{
+		static pthread_once_t once = PTHREAD_ONCE_INIT;
+
+		pthread_once(&once, bi_init);
+		for (size_t i = 0; i < sizeof(bi) / sizeof(bi[0]); i++)
+			mset(p, bi_macro[i]->name, bi_macro[i]);
+	}
 
 	mf = try_path(o->cwd, o->main, strlen(o->main));
 	if (!mf) {
@@ -2688,6 +3982,87 @@ void pp_next(pp *p, ptok *t)
 	if (p->depth == p->nfile && !p->svn)
 		p->tmp.p = p->tmp.base;	/* nothing above file level refers to tmp */
 	next_exp(p, t);
+}
+
+/* the token as clang -E -P prints it */
+static inline void render(pp *p, const ptok *t)
+{
+	bool sol = t->kind == P_DIRECTIVE || (t->flags & TF_SOL);
+	size_t l;
+	const char *sp;
+
+	if (p->col) {
+		out_ch(p, sol ? '\n' : ' ');
+		if (sol)
+			p->col = 0;
+	}
+	if (unlikely(p->rec.on) && !p->rec.lev[p->rec.n - 1].text_started)
+		text_start(p, sol);
+	if (t->kind == P_DIRECTIVE) {
+		out_reserve(p, t->len + 2);
+		p->out[p->nout++] = '#';
+		memcpy(p->out + p->nout, t->s, t->len);
+		p->nout += t->len;
+		p->out[p->nout++] = '\n';
+		p->col = 0;
+		return;
+	}
+	out_reserve(p, t->len);
+	sp = pp_spell(t, p->out + p->nout, &l);
+	if (sp != p->out + p->nout)
+		memcpy(p->out + p->nout, sp, l);
+	if (unlikely(t->ctr) && p->rec.on)
+		for (uint16_t r = t->ctr; r; r = p->rec.cp[r].next) {
+			const cprov *c = &p->rec.cp[r];
+
+			if (p->rec.nctr < HC_MAXCP)
+				p->rec.ctr[p->rec.nctr++] = (hcpos){ p->nout + c->off, c->len, c->val };
+			else
+				HC_BAD(p);
+		}
+	p->nout += l;
+	p->col++;
+}
+
+int pp_text(pp *p, const char **out, size_t *len)
+{
+	static int env = -1;
+	ptok t;
+
+	if (env < 0) {
+		const char *m = getenv("VPP_HC_MAX_MB");
+
+		hc_mem_max = m ? (size_t)atol(m) << 20 : (size_t)8 << 30;
+		env = getenv("VPP_NOHC") != NULL;
+	}
+	p->hc = !env;
+	for (;;) {
+		pp_next(p, &t);
+		if (t.kind == T_EOF)
+			break;
+		render(p, &t);
+	}
+	if (p->col)
+		out_ch(p, '\n');
+	*out = p->out ? p->out : "";
+	*len = p->nout;
+	return p->errors;
+}
+
+void pp_hc_stats(char *buf, size_t n)
+{
+	snprintf(buf, n, "header cache: %lu hits, %lu misses (%lu recorded, %lu uncacheable, %lu not stored), "
+		 "%.1f MB replayed, %.1f MB recorded, %.1f MB stored",
+		 (unsigned long)hstat.hit, (unsigned long)hstat.miss, (unsigned long)hstat.rec,
+		 (unsigned long)hstat.uncacheable, (unsigned long)hstat.full, hstat.bytes_replayed / 1e6,
+		 hstat.bytes_rec / 1e6, hstat.mem / 1e6);
+	if (getenv("VPP_HC_DEBUG")) {
+		size_t l = strlen(buf);
+
+		snprintf(buf + l, n - l, "\n  stored: %lu undef reads, %lu other reads, %lu writes, %lu files",
+			 (unsigned long)hstat.nru, (unsigned long)hstat.nrv, (unsigned long)hstat.ndl,
+			 (unsigned long)hstat.nfe);
+	}
 }
 
 int pp_errors(const pp *p)
@@ -2726,5 +4101,25 @@ void pp_close(pp *p)
 	if (p->sv) munmap(p->sv, SVMAX * sizeof(ptok));
 	if (p->fe) munmap(p->fe, (1u << 20) * sizeof(fent));
 	if (p->lm) munmap(p->lm, 65536 * sizeof(*p->lm));
+	if (p->out) {
+		if (out_spare_cap < p->capout) {
+			if (out_spare)
+				munmap(out_spare, out_spare_cap);
+			out_spare = p->out, out_spare_cap = p->capout;
+		} else {
+			munmap(p->out, p->capout);
+		}
+	}
+	if (p->rec.t && !rec_spare.t) {
+		rec_spare.t = p->rec.t, rec_spare.ord = p->rec.ord, rec_spare.ctr = p->rec.ctr;
+		rec_spare.crd = p->rec.crd, rec_spare.seg = p->rec.seg, rec_spare.cp = p->rec.cp;
+	} else if (p->rec.t) {
+		munmap(p->rec.t, HC_MAXT * sizeof(htouch));
+		munmap(p->rec.ord, HC_MAXORD * sizeof(honce));
+		munmap(p->rec.ctr, HC_MAXCP * sizeof(hcpos));
+		munmap(p->rec.crd, HC_MAXCRD * sizeof(hcrd));
+		munmap(p->rec.seg, HC_MAXSEG * sizeof(hsegr));
+		munmap(p->rec.cp, (HC_MAXCP + 1) * sizeof(cprov));
+	}
 	munmap(p, sizeof(pp));
 }
