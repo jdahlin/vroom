@@ -55,9 +55,11 @@ def main():
     ap.add_argument("--append", default="")
     ap.add_argument("--allow-degraded", action="store_true")
     ap.add_argument("--no-login", action="store_true", help="nöj dig med login-prompten")
+    ap.add_argument("--overlay", default=os.path.join(ROOT, "work/debian/overlay.qcow2"),
+                    help="egen overlay när flera sessioner bootar samtidigt")
     a = ap.parse_args()
 
-    overlay = os.path.join(ROOT, "work/debian/overlay.qcow2")
+    overlay = a.overlay
     if os.path.exists(overlay):
         os.remove(overlay)
     subprocess.run(["qemu-img", "create", "-q", "-f", "qcow2", "-F", "qcow2", "-b", BASE, overlay],

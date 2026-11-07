@@ -3319,7 +3319,7 @@ enum {
 	A_NONE, A_ALIGNED, A_PACKED, A_SECTION, A_MODE, A_CLEANUP, A_ALIAS, A_WEAK, A_USED, A_UNUSED,
 	A_NORETURN, A_ALWAYS_INLINE, A_NOINLINE, A_GNU_INLINE, A_TRANSPARENT_UNION, A_VISIBILITY,
 	A_CONSTRUCTOR, A_DESTRUCTOR, A_COUNTED_BY, A_VECTOR_SIZE, A_COLD, A_NONSTRING, A_MAY_ALIAS,
-	A_WEAKREF, A_NAKED, A_NOCF,
+	A_WEAKREF, A_NAKED, A_NOCF, A_ERROR,
 	A_COUNT
 };
 
@@ -3331,7 +3331,7 @@ static const char *const attr_names[A_COUNT] = {
 	[A_VISIBILITY] = "visibility", [A_CONSTRUCTOR] = "constructor", [A_DESTRUCTOR] = "destructor",
 	[A_COUNTED_BY] = "counted_by", [A_VECTOR_SIZE] = "vector_size", [A_COLD] = "cold",
 	[A_NONSTRING] = "nonstring", [A_MAY_ALIAS] = "may_alias", [A_WEAKREF] = "weakref",
-	[A_NAKED] = "naked", [A_NOCF] = "nocf_check",
+	[A_NAKED] = "naked", [A_NOCF] = "nocf_check", [A_ERROR] = "error",
 };
 
 static uint32_t *attr_dir[NDIR];
@@ -3509,6 +3509,7 @@ static void attribute_list(cc *c, attrs *a)
 			case A_COLD: a->cold = 1; break;
 			case A_NONSTRING: a->nonstring = 1; break;
 			case A_MAY_ALIAS: a->may_alias = 1; break;
+			case A_ERROR: a->error_fn = 1; break;	/* a call left after folding is a build error */
 			default: break;
 			}
 			if (is(c, T_LPAREN))
@@ -3533,7 +3534,7 @@ static void merge_attrs(attrs *to, const attrs *from)
 	to->packed |= from->packed, to->transparent |= from->transparent, to->used |= from->used;
 	to->unused |= from->unused, to->weak |= from->weak, to->noreturn |= from->noreturn;
 	to->constructor |= from->constructor, to->destructor |= from->destructor;
-	to->nonstring |= from->nonstring, to->may_alias |= from->may_alias, to->cold |= from->cold;
+	to->nonstring |= from->nonstring, to->may_alias |= from->may_alias, to->cold |= from->cold, to->error_fn |= from->error_fn;
 	to->gnu_inline |= from->gnu_inline, to->always_inline |= from->always_inline;
 	to->noinline |= from->noinline;
 }
@@ -5006,6 +5007,15 @@ static uint32_t file_scope_sym(cc *c, uint32_t name)
 	return 0;
 }
 
+/* the file-scope sym named s (the emitter: alias targets), or 0 */
+uint32_t cc_global_named(cc *c, const char *s)
+{
+	size_t n = strlen(s);
+	uint32_t id = vintern_find(s, n, vintern_hash(s, n));
+
+	return id ? file_scope_sym(c, id) : 0;
+}
+
 static uint32_t declare(cc *c, const dspec *ds, declr *d, qty t, bool file)
 {
 	attrs at = d->at;
@@ -5074,7 +5084,7 @@ static uint32_t declare(cc *c, const dspec *ds, declr *d, qty t, bool file)
 			if (ds->sc == SC_STATIC && kind == S_FUNC)
 				y->sc = SC_STATIC;
 			if (ds->inline_)
-				y->flags |= SF_INLINE;
+				y->flags |= SF_INLINE | (ds->sc != SC_EXTERN ? SF_INLINE_NOEXTERN : 0);
 			apply_sym_attrs(c, y, &at);
 			if (!file && c->syms[prev].depth != c->depth) {
 				/* block-scope extern: a local binding that names the global */
@@ -5096,7 +5106,7 @@ static uint32_t declare(cc *c, const dspec *ds, declr *d, qty t, bool file)
 		if (file || ds->sc == SC_EXTERN || kind == S_FUNC)
 			y->flags |= SF_GLOBAL;
 		if (ds->inline_)
-			y->flags |= SF_INLINE;
+			y->flags |= SF_INLINE | (ds->sc != SC_EXTERN ? SF_INLINE_NOEXTERN : 0);
 		if (ds->noreturn)
 			y->flags |= SF_NORETURN;
 		if (ds->thread)

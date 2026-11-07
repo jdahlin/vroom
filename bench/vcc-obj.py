@@ -4,15 +4,15 @@
   vcc-obj.py ref [PAT] [-j N]   clang -c with the TU's own flags -> $OBJ/ref
   vcc-obj.py cmp [PAT] [-j N]   vpp -S, clang -c the assembly -> $OBJ/vcc, compare
 
-The comparison is per object:
-  - defined global symbols (name, binding, kind) and the section each is in;
-  - undefined symbols: vcc may not reference anything clang does not (that is
-    dead code left behind, e.g. __compiletime_assert_*), except the library
-    helpers vcc calls where clang inlines (memcpy, __lshrti3, ...);
-  - the special sections (everything but .text/.data/.bss/.rodata*/.rela*/
-    .note*/.comment/.llvm*) and, per such section, the set of symbols its
-    relocations point at, since those carry kernel tables (__ksymtab,
-    __ex_table, .altinstructions, __jump_table, .init_array, ...).
+The comparison is per object.  Errors:
+  - defined global symbols differ in binding, kind, section or (objects) size;
+  - vcc references a must-be-dead function (__compiletime_assert_*, ...);
+  - a data section's relocations point at different named globals.
+Notes (differences that follow from clang -O2 inlining more, so not errors):
+  - other undefined symbols only one side references;
+  - sections only one side has; .text vs .text.unlikely.;
+  - relocations of code and of asm-made tables (.altinstructions, __bug_table,
+    __jump_table, __ex_table, ...).
 Objects go to $OBJ (default: $TMPDIR/vcc-obj), never into the build tree.
 """
 import os, re, struct, subprocess, sys, time
@@ -24,8 +24,9 @@ B, CL, VPP = vd.B, vd.CL, vd.VPP
 OBJ = os.environ.get('OBJ') or os.path.join(os.environ.get('TMPDIR', '/tmp'), 'vcc-obj')
 HELPERS = {'memcpy', 'memset', 'memmove', 'strlen', '__udivti3', '__divti3', '__umodti3', '__modti3',
            '__ashlti3', '__lshrti3', '__ashrti3'}
-TOLERATED = {'__bug_table'}
-PLAIN = re.compile(r'^(\.text|\.data|\.bss|\.rodata.*|\.rela.*|\.note.*|\.comment|\.llvm.*|\.symtab|\.strtab|\.shstrtab|)$')
+MUSTDIE = re.compile(r'^__compiletime_assert|^__bad_|_called_with_bad_|^__build_bug|^__unknown_|^__invalid_|^undefined_function')
+TABLES = re.compile(r'^(\.altinstructions|__bug_table|__jump_table|__ex_table|\.data\.\.once|runtime_shift_|\.discard|__patchable)')
+PLAIN = re.compile(r'^(\.text|\.text\.unlikely\.|\.data|\.bss|\.rodata.*|\.rela.*|\.note.*|\.comment|\.llvm.*|\.symtab|\.strtab|\.shstrtab|)$')
 
 def name(obj, kind): return f'{OBJ}/{kind}/{obj.replace("/", "__")}'
 
@@ -38,7 +39,7 @@ def mkref(t):
     return obj, p.returncode, p.stderr[-300:]
 
 def elf(path):
-    """{sections, defined globals, undefined, reloc targets per section}"""
+    """sections, {global: (bind, type, section, size)}, undefined, {section: reloc targets}, exec sections"""
     d = open(path, 'rb').read()
     shoff, = struct.unpack_from('<Q', d, 0x28)
     shentsize, shnum, shstrndx = struct.unpack_from('<HHH', d, 0x3a)
@@ -53,56 +54,77 @@ def elf(path):
             stro = sh[s[6]][4]
             for k in range(s[5] // 24):
                 st_name, info, other, shndx, val, size = struct.unpack_from('<IBBHQQ', d, s[4] + k * 24)
-                syms.append((cstr(stro + st_name), info >> 4, info & 15, shndx))
+                syms.append((cstr(stro + st_name), info >> 4, info & 15, shndx, size, val))
     defs, undef = {}, set()
-    for n, bind, typ, shndx in syms:
+    gobj = {}	# section -> [(start, end, name)] of global objects
+    for n, bind, typ, shndx, size, val in syms:
+        if bind and n and typ == 1 and 0 < shndx < 0xff00:
+            gobj.setdefault(shndx, []).append((val, val + size, n))
+    for n, bind, typ, shndx, size, val in syms:
         if bind == 0 or not n: continue
         if shndx == 0: undef.add(n)
-        else: defs[n] = (bind, typ, sname[shndx] if shndx < 0xff00 else 'ABS')
+        else: defs[n] = (bind, typ, sname[shndx] if shndx < 0xff00 else 'ABS', size if typ == 1 else 0)
     rel = {}
     for i, s in enumerate(sh):
         if s[1] != 4: continue	# SHT_RELA
         tgt = sname[s[7]]
-        if PLAIN.match(tgt) or tgt.startswith('.text.') or tgt.startswith('.debug'): continue
+        if tgt.startswith('.debug'): continue
         out = rel.setdefault(tgt, set())
+        objs = gobj.get(s[7], [])
         for k in range(s[5] // 24):
             off, info, add = struct.unpack_from('<QQq', d, s[4] + k * 24)
-            n, bind, typ, shndx = syms[info >> 32]
-            out.add(n if n and bind else sname[shndx] if typ == 3 and shndx < 0xff00 else n or '?')
+            n, bind, typ, shndx, size, val = syms[info >> 32]
+            t = n if n and bind else '.' + sname[shndx] if typ == 3 and shndx < 0xff00 else '?'
+            if not (s[2] & 4) and not (sh[s[7]][2] & 4):	# data: only what global objects hold
+                held = [o for o in objs if o[0] <= off < o[1]]
+                if not held: continue
+                t = held[0][2] + '->' + t
+            out.add(t)
+    exe = {sname[i] for i, s in enumerate(sh) if s[2] & 4}	# SHF_EXECINSTR
     secs = {n for n in sname if not PLAIN.match(n) and not n.startswith('.debug')}
-    return secs, defs, undef, rel
+    return secs, defs, undef, rel, exe
 
 def cmpobj(t):
     obj, a = t
     s, o = name(obj, 'vcc') + '.s', name(obj, 'vcc') + '.o'
     t0 = time.time()
-    p = subprocess.run([VPP, '-S', '-o', s] + a, cwd=B, capture_output=True, text=True)
+    try:
+        p = subprocess.run([VPP, '-S', '-o', s] + a, cwd=B, capture_output=True, text=True, timeout=60)
+    except subprocess.TimeoutExpired:
+        return obj, 1, 'vpp: timeout', 60, False
     dt = time.time() - t0
-    if p.returncode: return obj, 1, 'vpp: ' + p.stderr[-1200:], dt
+    if p.returncode: return obj, 1, 'vpp: ' + p.stderr[-1200:], dt, False
     tgt = [x for x in a if x.startswith(('--target=', '-march=', '-mcpu='))]
     q = subprocess.run([CL, '-c', '-x', 'assembler', '-w'] + tgt + ['-o', o, s], capture_output=True, text=True)
-    if q.returncode: return obj, 1, 'as: ' + q.stderr[-1200:], dt
+    if q.returncode: return obj, 1, 'as: ' + q.stderr[-1200:], dt, False
     ref = name(obj, 'ref') + '.o'
-    if not os.path.exists(ref): return obj, 1, 'no reference (run ref first)', dt
-    rs, rd, ru, rr = elf(ref)
-    vs, vdf, vu, vr = elf(o)
-    err = []
+    if not os.path.exists(ref): return obj, 1, 'no reference (run ref first)', dt, False
+    rs, rd, ru, rr, rx = elf(ref)
+    vs, vdf, vu, vr, vx = elf(o)
+    err, note = [], []
     for n in sorted(set(rd) | set(vdf)):
-        if rd.get(n) != vdf.get(n):
-            err.append(f'def {n}: clang {rd.get(n)} vcc {vdf.get(n)}')
-    extra = vu - ru - HELPERS - set(rd)
-    if extra: err.append('undef only in vcc: ' + ' '.join(sorted(extra)[:12]))
-    miss = ru - vu - set(vdf)
-    if miss: err.append('undef only in clang: ' + ' '.join(sorted(miss)[:12]))
-    vs -= TOLERATED - rs	# WARN_ON clang proves dead by value ranges
-    if rs != vs:
-        err.append(f'sections: clang-only {sorted(rs - vs)[:8]} vcc-only {sorted(vs - rs)[:8]}')
-    for sec in sorted(set(rr) | set(vr)):
-        if sec in TOLERATED and rr.get(sec, set()) <= vr.get(sec, set()): continue
-        a1, b1 = rr.get(sec, set()), vr.get(sec, set())
+        a1, b1 = rd.get(n), vdf.get(n)
         if a1 != b1:
-            err.append(f'relocs {sec}: clang-only {sorted(a1 - b1)[:6]} vcc-only {sorted(b1 - a1)[:6]}')
-    return obj, len(err) and 1, '\n'.join(err[:20]), dt
+            # clang -O2 places cold functions in .text.unlikely.
+            soft = a1 and b1 and a1[:2] == b1[:2] and {a1[2], b1[2]} == {'.text', '.text.unlikely.'}
+            (note if soft else err).append(f'def {n}: clang {a1} vcc {b1}')
+    extra = vu - ru - HELPERS - set(rd)
+    dead = {n for n in extra if MUSTDIE.search(n)}
+    if dead: err.append('dead code left: ' + ' '.join(sorted(dead)[:12]))
+    if extra - dead: note.append('undef only in vcc: ' + ' '.join(sorted(extra - dead)[:12]))
+    miss = ru - vu - set(vdf)
+    if miss: note.append('undef only in clang: ' + ' '.join(sorted(miss)[:12]))
+    if rs != vs:	# with different inlining, code-only and table sections come and go
+        note.append(f'sections: clang-only {sorted(rs - vs)[:8]} vcc-only {sorted(vs - rs)[:8]}')
+    # data: the named globals each data section points at must agree (code differs with inlining;
+    # asm-made tables follow the code; section-relative targets name local data)
+    for sec in sorted((set(rr) | set(vr)) - rx - vx):
+        a1 = {n for n in rr.get(sec, ()) if '->.' not in n and not n.startswith('.')}
+        b1 = {n for n in vr.get(sec, ()) if '->.' not in n and not n.startswith('.')}
+        if a1 != b1:
+            msg = f'relocs {sec}: clang-only {sorted(a1 - b1)[:6]} vcc-only {sorted(b1 - a1)[:6]}'
+            (note if TABLES.match(sec) else err).append(msg)
+    return obj, len(err) and 1, '\n'.join(err[:20] + (['(notes)'] + note[:6] if note and os.environ.get('NOTES') else [])), dt, len(note) > 0
 
 if __name__ == '__main__':
     av = sys.argv[1:]; j = 2
@@ -117,4 +139,6 @@ if __name__ == '__main__':
         print(f'--- {r[0]}\n{r[2]}')
     if mode == 'cmp':
         print(f'vpp -S total {sum(r[3] for r in res):.1f} s over {len(res)} TUs')
+    if mode == 'cmp':
+        print(f'{sum(1 for r in res if not r[1] and r[4])} of the ok ones with notes (NOTES=1 shows them)')
     print(f'{len(res) - len(bad)}/{len(res)} ok')

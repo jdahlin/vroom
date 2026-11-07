@@ -120,6 +120,7 @@ enum {
 	SF_THREAD = 2048,
 	SF_ATTR_USED = 4096,
 	SF_ADDR_TAKEN = 8192,
+	SF_INLINE_NOEXTERN = 16384,	/* some declaration is 'inline' without 'extern' */
 };
 
 typedef struct sym {

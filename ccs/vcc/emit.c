@@ -19,6 +19,17 @@
  *   - locals live in stack slots; expression temporaries in x9-x15 and
  *     x19-x28.
  *
+ * The kernel also relies on what clang -O2 folds beyond that: a
+ * BUILD_BUG_ON inside a plain static or inline function that only folds
+ * once the function is inlined where its arguments are constants.  Such
+ * functions are inlined too: plain inline functions that call an error()
+ * function directly, and static functions in which an error() call
+ * survived folding (need_fold: the TU is generated again with them
+ * inlined).  An error() call that still survives is one clang removes with
+ * value ranges; it becomes a trap.  __builtin_constant_p follows clang's
+ * rules (front-end fold, else 0 with side effects or for pointers, else
+ * the operand after inlining).
+ *
  * Output goes through a narrow instruction-record interface (struct ins,
  * 16 bytes): codegen appends records per function, a backend turns them
  * into assembly text (assembled by clang -c for verification) or, later,
@@ -145,7 +156,7 @@ enum {
 };
 
 enum { C_EQ, C_NE, C_HS, C_LO, C_MI, C_PL, C_VS, C_VC, C_HI, C_LS, C_GE, C_LT, C_GT, C_LE, C_AL };
-static const char *const cond_name[] = { "eq", "ne", "hs", "lo", "mi", "pl", "vs", "vc", "hi", "ls", "ge", "lt", "gt", "le", "al" };
+static const char cond_name[][8] = { "eq", "ne", "hs", "lo", "mi", "pl", "vs", "vc", "hi", "ls", "ge", "lt", "gt", "le", "al" };
 
 typedef struct ins {
 	uint8_t op, sz;		/* sz: 1 = 64-bit (x), 0 = 32-bit (w); memory: log2 bytes */
@@ -201,7 +212,7 @@ static inline void tb_c(tbuf *b, char ch)
 
 static inline void tb_s(tbuf *b, const char *s) { tb_put(b, s, strlen(s)); }
 
-static void tb_u(tbuf *b, uint64_t v)
+static void tb_u_slow(tbuf *b, uint64_t v)
 {
 	char t[24];
 	int i = 24;
@@ -210,6 +221,45 @@ static void tb_u(tbuf *b, uint64_t v)
 		t[--i] = (char)('0' + v % 10);
 	while ((v /= 10));
 	tb_put(b, t + i, (size_t)(24 - i));
+}
+
+static inline void tb_u(tbuf *b, uint64_t v)
+{
+	if (likely(v < 10)) {
+		tb_c(b, (char)('0' + v));
+	} else if (v < 100) {
+		tb_need(b, 2);
+		b->p[b->n] = (char)('0' + v / 10);
+		b->p[b->n + 1] = (char)('0' + v % 10);
+		b->n += 2;
+	} else {
+		tb_u_slow(b, v);
+	}
+}
+
+/* lower-case hex digits, no prefix: label numbers */
+static inline void tb_x(tbuf *b, uint32_t v)
+{
+	int n = v ? (35 - __builtin_clz(v)) >> 2 : 1;
+	char *p;
+
+	tb_need(b, 8);
+	p = b->p + b->n;
+	for (int i = n - 1; i >= 0; i--, v >>= 4)
+		p[i] = "0123456789abcdef"[v & 15];
+	b->n += (size_t)n;
+}
+
+/* a name from a char[8] table: one 8-byte copy, the length from the first zero byte */
+static inline void tb_n8(tbuf *b, const char s[8])
+{
+	uint64_t w, z;
+
+	memcpy(&w, s, 8);
+	tb_need(b, 8);
+	memcpy(b->p + b->n, &w, 8);
+	z = (w - 0x0101010101010101ull) & ~w & 0x8080808080808080ull;
+	b->n += z ? (size_t)(__builtin_ctzll(z) >> 3) : 8;
 }
 
 static void tb_i(tbuf *b, int64_t v)
@@ -285,17 +335,28 @@ static bool logimm_ok(uint64_t v, int x)
 
 /* ---------------- register names ---------------- */
 
-static void reg(tbuf *b, int r, int x)
+static inline void reg(tbuf *b, int r, int x)
 {
-	if (r == ZR) {
-		tb_s(b, x ? "xzr" : "wzr");
-	} else if (r == SP) {
-		tb_s(b, x ? "sp" : "wsp");
+	char *p;
+
+	tb_need(b, 4);
+	p = b->p + b->n;
+	p[0] = x ? 'x' : 'w';
+	if (likely(r < 10)) {
+		p[1] = (char)('0' + r);
+		b->n += 2;
+	} else if (likely(r < 31)) {
+		p[1] = (char)('0' + r / 10);
+		p[2] = (char)('0' + r % 10);
+		b->n += 3;
+	} else if (r == ZR) {
+		p[1] = 'z', p[2] = 'r';
+		b->n += 3;
 	} else {
-		tb_c(b, x ? 'x' : 'w');
-		if (r >= 10)
-			tb_c(b, (char)('0' + r / 10));
-		tb_c(b, (char)('0' + r % 10));
+		if (x)
+			p[0] = 's', p[1] = 'p', b->n += 2;
+		else
+			p[1] = 's', p[2] = 'p', b->n += 3;
 	}
 }
 
@@ -308,7 +369,7 @@ typedef struct chunk {
 } chunk;
 
 /* analysis bits (prepass, read-only while emitting) */
-enum { SA_WRITTEN = 1, SA_CLEANUP_FN = 2 };	/* per sym */
+enum { SA_WRITTEN = 1, SA_CLEANUP_FN = 2, SA_MUSTFOLD = 4 };	/* per sym; MUSTFOLD: a function that calls an error() function */
 enum { NA_LABEL = 1 };				/* per node: statement contains a label or case */
 
 typedef struct emitter {
@@ -317,6 +378,7 @@ typedef struct emitter {
 	_Atomic uint8_t *claimed;	/* per sym: queued for emission */
 	_Atomic uint8_t *strdone;	/* per string: emitted */
 	_Atomic uint8_t *extref;	/* per sym: referenced (for .weak of undefined syms) */
+	_Atomic uint8_t *walked;	/* per function: prepass state (0 no, 1 running, 2 done) */
 	uint8_t *sflags;		/* SA_* per sym */
 	uint8_t *nflags;		/* NA_* per node */
 	uint8_t *lref;			/* per label: target of a goto / asm goto / && */
@@ -334,6 +396,11 @@ typedef struct emitter {
 	_Atomic uint32_t asmno;
 	_Atomic int errors;
 	_Atomic uint64_t nins, nfn, nobj, ninl;
+	_Atomic uint64_t print_ns, walk_ns, nwalk;
+	uint8_t *mf;			/* per sym: static function to inline everywhere (kept across rounds) */
+	_Atomic uint32_t newmf;		/* marked this round */
+	_Atomic uint32_t nerrcall;	/* error() calls replaced by traps */	/* VCC_EMIT_STATS: time in finish_function */
+	bool stats;
 	pthread_mutex_t emu;		/* diagnostics */
 } emitter;
 
@@ -389,11 +456,13 @@ typedef struct ecx {
 	/* records of the function being emitted */
 	ins *in;
 	uint32_t nin, capin;
+	uint32_t curloc;	/* innermost statement being generated (diagnostics) */
 	tbuf raw;		/* inline asm text */
 	tbuf out;		/* this thread's output text */
 	tbuf data;		/* scratch: data object bytes */
-	struct reloc { uint64_t off; uint32_t ref; int64_t add; } *rel;
+	struct reloc { uint64_t off; uint32_t ref, seq; int64_t add; } *rel;
 	uint32_t nrel;
+	uint64_t relend;	/* end of the highest relocated word */
 	/* bindings */
 	bind *b;		/* per sym */
 	lbl *lm;		/* per label */
@@ -412,6 +481,7 @@ typedef struct ecx {
 	uint32_t usedcs;	/* callee-saved registers used (bit = x number) */
 	/* control */
 	bool reach;
+	int dry;		/* inside dry(): code is generated and thrown away, no references */
 	loopctx loops[MAXLOOP];
 	int nloop;
 	uint32_t clean[MAXCLEAN];	/* syms with cleanup, innermost last */
@@ -420,11 +490,25 @@ typedef struct ecx {
 	int inline_depth;
 	uint32_t top;		/* sym being emitted */
 	uint32_t *cases;	/* scratch for switch case collection */
+	uint32_t *weakref;	/* weak undefined syms this thread referenced first */
+	uint32_t nweakref;
 	uint32_t ncases;
 	jmp_buf bail;
 } ecx;
 
 static const uint8_t tempregs[NTEMP] = { 9, 10, 11, 12, 13, 14, 15, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28 };
+
+__attribute__((format(printf, 3, 4)))
+static void ediag(ecx *e, uint32_t loc, const char *fmt, ...)
+{
+	va_list ap;
+
+	pthread_mutex_lock(&e->E->emu);
+	va_start(ap, fmt);
+	pp_vdiag(e->c->p, loc, "note", fmt, ap);
+	va_end(ap);
+	pthread_mutex_unlock(&e->E->emu);
+}
 
 __attribute__((format(printf, 3, 4), unused))
 static void eerror(ecx *e, uint32_t loc, const char *fmt, ...)
@@ -450,7 +534,7 @@ static void efatal(ecx *e, uint32_t loc, const char *fmt, ...)
 	va_end(ap);
 	pthread_mutex_unlock(&e->E->emu);
 	e->E->errors++;
-	longjmp(e->bail, 1);
+	_longjmp(e->bail, 1);
 }
 
 /* ---------------- names ---------------- */
@@ -547,9 +631,9 @@ static void ref_off(cc *c, tbuf *b, uint32_t r, int64_t off)
 static void p_lbl(tbuf *b, uint32_t fid, uint32_t l)
 {
 	tb_s(b, ".LBB");
-	tb_u(b, fid);
+	tb_x(b, fid);
 	tb_c(b, '_');
-	tb_u(b, l);
+	tb_x(b, l);
 }
 
 static void p_movi(tbuf *b, int rd, int x, uint64_t v)
@@ -602,11 +686,11 @@ static void p_movi(tbuf *b, int rd, int x, uint64_t v)
 		p_movi(b, rd, x, 0);
 }
 
-static const char *const ld_name[2][4][3] = {
+static const char ld_name[2][4][3][8] = {
 	{ { "ldrb", "ldrsb", "ldrsb" }, { "ldrh", "ldrsh", "ldrsh" }, { "ldr", "ldrsw", "ldr" }, { "ldr", "ldr", "ldr" } },
 	{ { "ldurb", "ldursb", "ldursb" }, { "ldurh", "ldursh", "ldursh" }, { "ldur", "ldursw", "ldur" }, { "ldur", "ldur", "ldur" } },
 };
-static const char *const st_name[2][4] = { { "strb", "strh", "str", "str" }, { "sturb", "sturh", "stur", "stur" } };
+static const char st_name[2][4][8] = { { "strb", "strh", "str", "str" }, { "sturb", "sturh", "stur", "stur" } };
 
 static inline int ld_x(const ins *i) { return i->sz == 3 || (i->op == I_LD && i->cond == 1) || (i->op == I_LDLO && i->cond == 1); }
 
@@ -628,9 +712,9 @@ static void p_mem(tbuf *b, const ins *i)
 	}
 	tb_c(b, '\t');
 	if (i->op == I_ST)
-		tb_s(b, st_name[!scaled][sz]);
+		tb_n8(b, st_name[!scaled][sz]);
 	else
-		tb_s(b, ld_name[!scaled][sz][i->cond]);
+		tb_n8(b, ld_name[!scaled][sz][i->cond]);
 	tb_c(b, '\t');
 	reg(b, i->rd, x);
 	tb_s(b, ", [");
@@ -642,7 +726,7 @@ static void p_mem(tbuf *b, const ins *i)
 	tb_s(b, "]\n");
 }
 
-static const char *const alu_name[] = {
+static const char alu_name[][8] = {
 	[I_ADD] = "add", [I_SUB] = "sub", [I_ADDS] = "adds", [I_SUBS] = "subs", [I_AND] = "and",
 	[I_ORR] = "orr", [I_EOR] = "eor", [I_ANDS] = "ands", [I_BIC] = "bic", [I_ORN] = "orn",
 	[I_ADC] = "adc", [I_SBC] = "sbc", [I_ADCS] = "adcs", [I_SBCS] = "sbcs",
@@ -658,7 +742,7 @@ static const char *const alu_name[] = {
 static void p_rrr(tbuf *b, const char *mn, const ins *i)
 {
 	tb_c(b, '\t');
-	tb_s(b, mn);
+	tb_n8(b, mn);
 	tb_c(b, '\t');
 	reg(b, i->rd, i->sz);
 	tb_s(b, ", ");
@@ -680,31 +764,31 @@ static void p_addi(tbuf *b, const ins *i)
 	}
 	if (!i->sz)
 		v &= 0xffffffff;
-	if (v < 4096 || ((v & 0xfff) == 0 && v < (1 << 24)) || (!flags && v < (1 << 24))) {
+	if (v >= 0 && (v < 4096 || ((v & 0xfff) == 0 && v < (1 << 24)) || (!flags && v < (1 << 24)))) {
 		const char *mn = sub ? (flags ? "subs" : "sub") : (flags ? "adds" : "add");
 		int rn = i->rn;
 
 		if (v >= 4096 && (v & 0xfff)) {
-			tb_f(b, "\t%s\t", mn);
+			tb_c(b, '\t'), tb_s(b, mn), tb_c(b, '\t');
 			reg(b, i->rd, i->sz);
 			tb_s(b, ", ");
 			reg(b, rn, i->sz);
-			tb_f(b, ", #%d, lsl #12\n", (int)(v >> 12));
+			tb_s(b, ", #"), tb_i(b, v >> 12), tb_s(b, ", lsl #12\n");
 			rn = i->rd;
 			v &= 0xfff;
 		}
-		tb_f(b, "\t%s\t", mn);
+		tb_c(b, '\t'), tb_s(b, mn), tb_c(b, '\t');
 		reg(b, i->rd, i->sz);
 		tb_s(b, ", ");
 		reg(b, rn, i->sz);
 		if ((v & 0xfff) == 0 && v)
-			tb_f(b, ", #%d, lsl #12\n", (int)(v >> 12));
+			tb_s(b, ", #"), tb_i(b, v >> 12), tb_s(b, ", lsl #12\n");
 		else
-			tb_f(b, ", #%d\n", (int)v);
+			tb_s(b, ", #"), tb_i(b, v), tb_c(b, '\n');
 		return;
 	}
 	p_movi(b, R_X17, i->sz, (uint64_t)v);
-	tb_f(b, "\t%s\t", sub ? (flags ? "subs" : "sub") : (flags ? "adds" : "add"));
+	tb_c(b, '\t'), tb_s(b, sub ? (flags ? "subs" : "sub") : (flags ? "adds" : "add")), tb_c(b, '\t');
 	reg(b, i->rd, i->sz);
 	tb_s(b, ", ");
 	reg(b, i->rn, i->sz);
@@ -736,7 +820,7 @@ static void print_ins(cc *c, tbuf *b, const ins *i, uint32_t fid, const char *ra
 		return;
 	case I_ANDI: case I_ORRI: case I_EORI: case I_ANDSI:
 		tb_c(b, '\t');
-		tb_s(b, alu_name[i->op]);
+		tb_n8(b, alu_name[i->op]);
 		tb_c(b, '\t');
 		reg(b, i->rd, i->sz);
 		tb_s(b, ", ");
@@ -767,7 +851,7 @@ static void print_ins(cc *c, tbuf *b, const ins *i, uint32_t fid, const char *ra
 		return;
 	case I_SBFM: case I_UBFM: case I_BFM:
 		tb_c(b, '\t');
-		tb_s(b, alu_name[i->op]);
+		tb_n8(b, alu_name[i->op]);
 		tb_c(b, '\t');
 		reg(b, i->rd, i->sz);
 		tb_s(b, ", ");
@@ -781,12 +865,12 @@ static void print_ins(cc *c, tbuf *b, const ins *i, uint32_t fid, const char *ra
 	case I_CSEL: case I_CSINC: case I_CSINV: case I_CSNEG:
 		p_rrr(b, alu_name[i->op], i);
 		tb_s(b, ", ");
-		tb_s(b, cond_name[i->cond]);
+		tb_n8(b, cond_name[i->cond]);
 		tb_c(b, '\n');
 		return;
 	case I_CLZ: case I_CLS: case I_RBIT: case I_REV: case I_REV16: case I_REV32:
 		tb_c(b, '\t');
-		tb_s(b, alu_name[i->op]);
+		tb_n8(b, alu_name[i->op]);
 		tb_c(b, '\t');
 		reg(b, i->rd, i->sz);
 		tb_s(b, ", ");
@@ -869,7 +953,7 @@ static void print_ins(cc *c, tbuf *b, const ins *i, uint32_t fid, const char *ra
 		return;
 	case I_BC:
 		tb_s(b, "\tb.");
-		tb_s(b, cond_name[i->cond]);
+		tb_n8(b, cond_name[i->cond]);
 		tb_c(b, '\t');
 		p_lbl(b, fid, i->label);
 		tb_c(b, '\n');
@@ -1095,16 +1179,24 @@ static int treg(ecx *e)
 				e->usedcs |= 1u << tempregs[i];
 			return tempregs[i];
 		}
-	efatal(e, 0, "expression too complex (out of registers)");
+	{
+		const fnctx *f = e->f;
+
+		while (f->up)
+			f = f->up;
+		if (getenv("VCC_LEAKCHK"))
+			ediag(e, e->curloc, "here");
+		efatal(e, e->c->syms[f->fn].loc, "expression too complex (out of registers) in '%.*s'",
+		       (int)vintern_ents[e->c->syms[f->fn].name].len, vintern_ents[e->c->syms[f->fn].name].s);
+	}
 }
 
-static int tidx(int r)
-{
-	for (int i = 0; i < NTEMP; i++)
-		if (tempregs[i] == r)
-			return i;
-	return -1;
-}
+static const int8_t tidx_of[34] = {
+	-1, -1, -1, -1, -1, -1, -1, -1, -1, 0, 1, 2, 3, 4, 5, 6, -1, -1, -1,
+	7, 8, 9, 10, 11, 12, 13, 14, 15, 16, -1, -1, -1, -1, -1,
+};
+
+static inline int tidx(int r) { return (unsigned)r < 34 ? tidx_of[r] : -1; }
 
 static void tfree(ecx *e, int r)
 {
@@ -1523,7 +1615,7 @@ static void note_ref(ecx *e, uint32_t ref)
 	emitter *E = e->E;
 	cc *c = e->c;
 
-	if (!e->reach)
+	if (!e->reach || e->dry)
 		return;
 	if (RKIND(ref) == RK_STR) {
 		uint32_t i = RIDX(ref);
@@ -1539,8 +1631,10 @@ static void note_ref(ecx *e, uint32_t ref)
 		uint32_t s = canon_sym(c, RIDX(ref));
 		const sym *y = &c->syms[s];
 
-		if (!atomic_load_explicit(&E->extref[s], memory_order_relaxed))
-			atomic_store_explicit(&E->extref[s], 1, memory_order_relaxed);
+		if (unlikely((y->flags & SF_WEAK) && !(y->flags & SF_DEFINED)) &&
+		    !atomic_load_explicit(&E->extref[s], memory_order_relaxed) &&
+		    !atomic_exchange(&E->extref[s], 1))
+			e->weakref[e->nweakref++] = s;
 		if (atomic_load_explicit(&E->claimed[s], memory_order_relaxed))
 			return;
 		if (y->kind == S_FUNC) {
@@ -2405,7 +2499,8 @@ static void park(ecx *e, carg *a)
 {
 	cc *c = e->c;
 
-	a->slot = 1;
+	if (a->slot != 1)
+		return;		/* parked while the arguments were evaluated */
 	if (is_agg(c, a->t)) {
 		uint64_t sz = (tsize(c, a->t) + 7) & ~(uint64_t)7;
 		int32_t sl = slot(e, sz ? sz : 8, talign(c, a->t) > 8 ? 16 : 8);
@@ -2450,6 +2545,26 @@ static void arg_word(ecx *e, const carg *a, int k, int rd)
  * The call proper: args are evaluated (vals); callee is a ref (direct) or a
  * value (indirect).  Returns the result value.
  */
+/*
+ * A call to an error() function survived folding.  clang -O2 would have
+ * inlined the static function this code belongs to into its callers, where
+ * the arguments are constants: mark it, and emit_tu generates the TU again
+ * with it inlined.
+ */
+static void need_fold(ecx *e)
+{
+	const fnctx *f = e->f;
+	uint32_t s;
+
+	while (f->up)
+		f = f->up;
+	s = f->fn;
+	if (e->c->syms[s].sc == SC_STATIC && !e->E->mf[s]) {
+		e->E->mf[s] = 1;
+		e->E->newmf++;
+	}
+}
+
 static val do_call(ecx *e, uint32_t ref, val *fnv, carg *args, int n, qty rty, bool noret)
 {
 	cc *c = e->c;
@@ -2484,6 +2599,23 @@ static val do_call(ecx *e, uint32_t ref, val *fnv, carg *args, int n, qty rty, b
 		rslot = slot(e, tsize(c, rty), talign(c, rty) > 16 ? 16 : talign(c, rty));
 	if (!e->reach)
 		return is_void(c, rty) ? vnone() : vconst(0);
+	if (unlikely(RKIND(ref) == RK_SYM && !fnv && sym_attrs(c, RIDX(ref))->error_fn)) {
+		/*
+		 * An error() call that folding did not remove.  clang removed it
+		 * (the tree builds with clang), with value ranges vcc does not
+		 * have: trap instead of referencing the undefined function.
+		 */
+		if (!e->dry) {
+			need_fold(e);
+			e->E->nerrcall++;
+			if (e->E->stats)
+				ediag(e, e->curloc, "error() call '%.*s' not folded: trap", (int)vintern_ents[c->syms[RIDX(ref)].name].len,
+				      vintern_ents[c->syms[RIDX(ref)].name].s);
+		}
+		put(e, I_BRK)->imm = 0x3ea;
+		e->reach = false;
+		return is_void(c, rty) ? vnone() : vconst(0);
+	}
 	spill_live(e, &sp);
 	for (int i = 0; i < n; i++) {
 		carg *a = &args[i];
@@ -2571,13 +2703,31 @@ static bool on_inline_stack(ecx *e, uint32_t fn)
 	return false;
 }
 
+static void ensure_walked(emitter *E, cc *c, uint32_t s);
+
 static bool can_inline(ecx *e, uint32_t s)
 {
 	cc *c = e->c;
 	const sym *y = &c->syms[s];
 
-	if (!(y->flags & SF_ALWAYS_INLINE) || !(y->flags & SF_DEFINED) || !y->body)
+	if (!(y->flags & SF_DEFINED) || !y->body)
 		return false;
+	if (!(y->flags & SF_ALWAYS_INLINE)) {
+		/*
+		 * A plain inline function that calls an error() function (the
+		 * kernel's BUILD_BUG_ON) only compiles when an optimizing compiler
+		 * inlines it and folds the call away: inline it too.
+		 */
+		if (y->flags & SF_NOINLINE)
+			return false;
+		if (!e->E->mf[s]) {
+			if (!(y->flags & SF_INLINE))
+				return false;
+			ensure_walked(e->E, c, s);
+			if (!(e->E->sflags[s] & SA_MUSTFOLD))
+				return false;
+		}
+	}
 	if (T(c, y->ty)->flags & TF_VARIADIC)
 		return false;
 	if (e->inline_depth >= 48 || on_inline_stack(e, s))
@@ -2586,6 +2736,7 @@ static bool can_inline(ecx *e, uint32_t s)
 }
 
 static void run_cleanups(ecx *e, int to);
+
 
 static val inline_call(ecx *e, uint32_t s, carg *args, int n)
 {
@@ -2596,6 +2747,7 @@ static val inline_call(ecx *e, uint32_t s, carg *args, int n)
 	qty rty = T(c, y->ty)->base;
 	val res;
 
+	ensure_walked(e->E, c, s);
 	memset(&F, 0, sizeof(F));
 	F.fn = s;
 	F.inst = ++e->inst_next;
@@ -2608,6 +2760,20 @@ static val inline_call(ecx *e, uint32_t s, carg *args, int n)
 	F.up = e->f;
 	if (!is_void(c, rty))
 		F.retslot = slot(e, tsize(c, rty) ? tsize(c, rty) : 8, talign(c, rty) > 16 ? 16 : talign(c, rty));
+	for (int i = 0; i < n; i++)
+		if (args[i].slot != 1) {	/* parked: back in a register */
+			if (is_agg(c, args[i].t)) {
+				int r = treg(e);
+
+				opi(e, I_ADDI, 1, r, FRAME, args[i].slot);
+				args[i].v = vreg(r);
+			} else {
+				lval l = { .k = L_FRAME, .off = args[i].slot, .align = 8 };
+
+				args[i].v = load(e, &l, args[i].t);
+			}
+			args[i].slot = 1;
+		}
 	for (int i = 0; i < (int)body->aux; i++) {
 		uint32_t p = c->lists[body->a + i];
 		const sym *ps = &c->syms[p];
@@ -2702,6 +2868,9 @@ static val gen_call(ecx *e, uint32_t n)
 		args[i].v = gen(e, an);
 		args[i].t = N(an)->ty;
 		args[i].slot = 1;
+		/* many arguments: keep the registers for evaluating the rest */
+		if (__builtin_popcount(e->live) > NTEMP / 2 && (args[i].v.k == V_REG || args[i].v.k == V_REG2))
+			park(e, &args[i]);
 	}
 	if (s && can_inline(e, s)) {
 		return inline_call(e, s, args, na);
@@ -2720,20 +2889,80 @@ static uint32_t strip_casts(cc *c, uint32_t n)
 	return n;
 }
 
+/* clang's Expr::HasSideEffects (with possible effects): calls, writes, volatile reads */
+static bool side_effects(cc *c, uint32_t n)
+{
+	const node *x;
+
+	if (!n)
+		return false;
+	x = N(n);
+	if ((QQ(x->ty) & Q_VOLATILE) && (x->op == N_VAR || x->op == N_DEREF || x->op == N_MEMBER || x->op == N_INDEX))
+		return true;
+	switch (x->op) {
+	case N_NUM: case N_FNUM: case N_STR: case N_VAR: case N_ZERO: case N_LABELADDR:
+		return false;
+	case N_CALL: case N_ASSIGN: case N_PREINC: case N_PREDEC: case N_POSTINC: case N_POSTDEC:
+	case N_ASM:
+		return true;
+	case N_BUILTIN:
+		switch (x->aux) {
+		case BI_VA_START: case BI_VA_COPY: case BI_VA_END: case BI_ALLOCA: case BI_TRAP:
+		case BI_UNREACHABLE:
+			return true;
+		default:
+			if (x->aux == BI_CONSTANT_P)
+				return false;	/* its operand is not evaluated */
+			for (uint32_t i = 0; i < x->c; i++)
+				if (side_effects(c, c->lists[x->b + i]))
+					return true;
+			return false;
+		}
+	case N_MEMBER: case N_DEREF: case N_UNARY: case N_CAST: case N_ADDR: case N_COMPLIT:
+	case N_STMTEXPR: case N_EXPR: case N_RETURN:
+		return side_effects(c, x->a);
+	case N_INDEX: case N_BINARY: case N_LOGAND: case N_LOGOR: case N_COMMA:
+		return side_effects(c, x->a) || side_effects(c, x->b);
+	case N_COND: case N_IF:
+		return side_effects(c, x->a) || side_effects(c, x->b) || side_effects(c, x->c);
+	case N_DECL:
+		return side_effects(c, x->b);
+	case N_BLOCK: case N_INIT:
+		if (x->op == N_INIT && x->aux == 1) {
+			for (uint32_t i = 0; i < x->c; i++)
+				if (side_effects(c, c->lists[x->b + 3 * i + 2]))
+					return true;
+			return false;
+		}
+		for (uint32_t i = 0; i < x->c; i++)
+			if (side_effects(c, c->lists[x->b + i]))
+				return true;
+		return false;
+	default:
+		return true;	/* loops, gotos, labels, va_arg: conservatively yes */
+	}
+}
+
 /* evaluate n without emitting anything: constant or address constant? */
+/*
+ * __builtin_constant_p: generate the operand as if it were reachable (so
+ * inlined bodies run their returns and fold), then throw the code away.
+ * References made meanwhile do not count: nothing gets queued for emission.
+ */
 static val dry(ecx *e, uint32_t n)
 {
-	uint32_t nin = e->nin, live = e->live, usedcs = e->usedcs, nlabel = e->nlabel, inst = e->inst_next;
+	uint32_t nin = e->nin, live = e->live, usedcs = e->usedcs, nlabel = e->nlabel;
+	size_t raw = e->raw.n;
 	int32_t foff = e->foff;
-	bool reach = e->reach;
+	bool reach = e->reach, calls = e->calls;
 	int nclean = e->nclean, nloop = e->nloop;
 	val v;
 
-	e->reach = false;
+	e->dry++;
 	v = gen(e, n);
+	e->dry--;
 	e->nin = nin, e->live = live, e->usedcs = usedcs, e->nlabel = nlabel, e->foff = foff;
-	e->reach = reach, e->nclean = nclean, e->nloop = nloop;
-	(void)inst;
+	e->reach = reach, e->nclean = nclean, e->nloop = nloop, e->raw.n = raw, e->calls = calls;
 	if (v.k != V_CONST && v.k != V_ADDR)
 		v = vnone();
 	return v;
@@ -2919,11 +3148,24 @@ static val gen_builtin(ecx *e, uint32_t n)
 	val v;
 
 	switch (x->aux) {
-	case BI_CONSTANT_P:
-		v = dry(e, arg[0]);
-		if (v.k == V_CONST || (v.k == V_ADDR && RKIND(v.ref) == RK_STR && v.i == 0))
+	case BI_CONSTANT_P: {
+		/*
+		 * clang: 1 if the front end folds the operand (a pointer only as a
+		 * string literal at offset 0); else 0 if it has side effects or is
+		 * not arithmetic; else whatever the optimizer folds, which here is
+		 * the operand after inlining (dry).
+		 */
+		cval cv;
+		qty at = N(arg[0])->ty;
+
+		if (cc_eval(c, arg[0], &cv) && (cv.kind == CV_INT || cv.kind == CV_FLT ||
+						 (cv.kind == CV_ADDR && cv.str && cv.i == 0 && !cv.sym && !cv.label)))
 			return vconst(1);
-		return vconst(0);
+		if (side_effects(c, arg[0]) || !(is_integer(c, at) || is_flt(c, at)))
+			return vconst(0);
+		v = dry(e, arg[0]);
+		return vconst(v.k == V_CONST);
+	}
 	case BI_EXPECT:
 	case BI_EXPECT_PROB:
 		v = gen(e, arg[0]);
@@ -4100,6 +4342,7 @@ static void gen_switch(ecx *e, uint32_t n)
 				val a = vreg(r), b = vconst(lo);
 
 				emit_cmp(e, T_EQUALEQUAL, cx, false, &a, &b);
+				vfree(e, &b);
 				bcond(e, C_EQ, e->caselbl[e->cases[k]]);
 			} else {
 				opi(e, I_SUBI, cx, R_X16, r, (int64_t)lo);
@@ -4267,7 +4510,28 @@ static int find_loop(ecx *e, bool cont)
 	return -1;
 }
 
+static void gen_stmt1(ecx *e, uint32_t n);
+static int leakchk = -1;
+
+/* every statement leaves the temporaries it found; VCC_LEAKCHK reports the first that does not */
 static void gen_stmt(ecx *e, uint32_t n)
+{
+	cc *c = e->c;
+	uint32_t live = e->live, loc = e->curloc;
+
+	if (n)
+		e->curloc = N(n)->loc;
+	gen_stmt1(e, n);
+	e->curloc = loc;
+	if (unlikely(leakchk < 0))
+		leakchk = getenv("VCC_LEAKCHK") != NULL;
+	if (unlikely(leakchk) && n && e->live != live) {
+		ediag(e, N(n)->loc, "temporaries leaked: %#x -> %#x (op %d)", live, e->live, N(n)->op);
+		leakchk = 0;
+	}
+}
+
+static void gen_stmt1(ecx *e, uint32_t n)
 {
 	cc *c = e->c;
 	const node *x;
@@ -4575,7 +4839,7 @@ static void gen_asm(ecx *e, uint32_t n)
 		const char *cs = c->strs[ao->constraint - 1].s;
 		asmopnd *o = &op[i];
 		uint32_t en = ao->expr;
-		bool reg_ok = strpbrk(cs, "r") != NULL, mem_ok = strpbrk(cs, "mQo") != NULL;
+		bool reg_ok = strpbrk(cs, "rp") != NULL, mem_ok = strpbrk(cs, "mQo") != NULL;	/* p: address in a register */
 		int tied = -1;
 
 		o->t = N(en)->ty;
@@ -4598,7 +4862,11 @@ static void gen_asm(ecx *e, uint32_t n)
 			continue;
 		}
 		if (mem_ok && !reg_ok && !strpbrk(cs, "inIJKLMNZ")) {
-			lval l = gen_lval(e, en);
+			lval l;
+
+			if (N(en)->op == N_CAST && N(en)->aux == CK_DECAY)
+				en = N(en)->a;	/* an array as a memory operand: the array itself */
+			l = gen_lval(e, en);
 			val av = laddr(e, &l);
 
 			o->kind = AO_MEM;
@@ -4751,10 +5019,15 @@ static void gen_asm(ecx *e, uint32_t n)
 					o = &op[o->inout];
 				switch (o->kind) {
 				case AO_REG:
-					if (mod == 'H' && o->wide)
+					if (mod == 'H' && o->wide) {
 						reg(rb, o->v.r2, 1);
-					else
+					} else if (mod == 'a') {	/* address operand: [xN] */
+						tb_c(rb, '[');
+						reg(rb, o->reg, 1);
+						tb_c(rb, ']');
+					} else {
 						reg(rb, o->reg, mod != 'w');
+					}
 					break;
 				case AO_ZERO:
 					reg(rb, ZR, mod != 'w');
@@ -4979,6 +5252,7 @@ static void emit_function(ecx *e, uint32_t s)
 	fnctx F;
 	int ngrn = 0, nsaa = 0;
 
+	ensure_walked(e->E, c, s);
 	e->nin = 0;
 	e->raw.n = 0;
 	e->nlabel = 0;
@@ -4998,7 +5272,7 @@ static void emit_function(ecx *e, uint32_t s)
 	F.rty = rty;
 	F.retlbl = newlabel(e);
 	e->f = &F;
-	if (setjmp(e->bail)) {
+	if (_setjmp(e->bail)) {
 		e->f = NULL;
 		return;
 	}
@@ -5062,7 +5336,14 @@ static void emit_function(ecx *e, uint32_t s)
 		movi(e, 0, 0, 0);
 	deflabel(e, F.retlbl);
 	e->f = NULL;
-	finish_function(e, s);
+	if (unlikely(e->E->stats)) {
+		double t = now();
+
+		finish_function(e, s);
+		e->E->print_ns += (uint64_t)((now() - t) * 1e9);
+	} else {
+		finish_function(e, s);
+	}
 }
 
 /* ---------------- data ---------------- */
@@ -5077,6 +5358,10 @@ static void data_put(ecx *e, uint64_t off, uint64_t v, int n)
 	}
 	for (int i = 0; i < n; i++)
 		e->data.p[off + (uint64_t)i] = (char)(v >> (8 * i));
+	if (unlikely(n && off < e->relend))
+		for (uint32_t j = 0; j < e->nrel; j++)	/* overwritten: the relocation goes */
+			if (e->rel[j].off < off + (uint64_t)n && off < e->rel[j].off + 8)
+				e->rel[j].seq = UINT32_MAX;
 }
 
 static void data_or(ecx *e, uint64_t off, uint8_t bits)
@@ -5090,7 +5375,10 @@ static void data_or(ecx *e, uint64_t off, uint8_t bits)
 static void data_reloc(ecx *e, uint64_t off, uint32_t ref, int64_t add)
 {
 	data_put(e, off, 0, 8);
-	e->rel[e->nrel++] = (struct reloc){ off, ref, add };
+	e->rel[e->nrel] = (struct reloc){ off, ref, e->nrel, add };
+	e->nrel++;
+	if (off + 8 > e->relend)
+		e->relend = off + 8;
 	note_ref(e, ref);
 }
 
@@ -5112,9 +5400,16 @@ static void data_init(ecx *e, uint64_t off, qty ty, uint32_t init)
 			qty et = T(c, ty)->base;
 			uint64_t es = tsize(c, et);
 
-			for (uint32_t i = 0; i < x->c; i++)
+			uint64_t n = 0;
+
+			for (uint32_t i = 0; i < x->c; i++) {
 				for (uint64_t k = v[3 * i]; k <= v[3 * i + 1]; k++)
 					data_init(e, off + k * es, et, v[3 * i + 2]);
+				if (v[3 * i + 1] + 1 > n)
+					n = v[3 * i + 1] + 1;
+			}
+			if (T(c, ty)->flags & TF_INCOMPLETE)
+				data_put(e, off + n * es, 0, 0);	/* flexible array member: its initialized length counts */
 			return;
 		}
 		{
@@ -5228,7 +5523,9 @@ static int rel_cmp(const void *a, const void *b)
 {
 	const struct reloc *x = a, *y = b;
 
-	return x->off < y->off ? -1 : x->off > y->off;
+	if (x->off != y->off)
+		return x->off < y->off ? -1 : 1;
+	return x->seq < y->seq ? -1 : x->seq > y->seq;
 }
 
 /* the bytes in e->data with e->rel, as directives */
@@ -5239,6 +5536,19 @@ static void data_bytes(ecx *e, tbuf *b, uint64_t size)
 	const unsigned char *d = (const unsigned char *)e->data.p;
 
 	qsort(e->rel, e->nrel, sizeof(e->rel[0]), rel_cmp);
+	{
+		/* a later initializer for the same element overrides: keep the last */
+		uint32_t k = 0;
+
+		for (uint32_t j = 0; j < e->nrel; j++) {
+			if (e->rel[j].seq == UINT32_MAX)
+				continue;
+			if (k && e->rel[k - 1].off == e->rel[j].off)
+				k--;
+			e->rel[k++] = e->rel[j];
+		}
+		e->nrel = k;
+	}
 	while (o < size) {
 		uint64_t end = ri < e->nrel ? e->rel[ri].off : size;
 
@@ -5302,17 +5612,17 @@ static void emit_object(ecx *e, uint32_t s)
 	const attrs *a = sym_attrs(c, s);
 	bool zero;
 
-	if (setjmp(e->bail))
+	if (_setjmp(e->bail))
 		return;
 	e->data.n = 0;
-	e->nrel = 0;
+	e->nrel = 0, e->relend = 0;
 	e->reach = true;
 	if (y->body)
 		data_init(e, 0, y->ty, y->body);
 	if (e->data.n > size)
 		size = e->data.n;	/* flexible array member initialised */
-	if (size == 0 && !y->body)
-		size = is_array(c, y->ty) ? tsize(c, T(c, y->ty)->base) : 0;
+	if (size == 0 && !y->body && is_array(c, y->ty) && (T(c, y->ty)->flags & TF_INCOMPLETE))
+		size = tsize(c, T(c, y->ty)->base);	/* int x[]; is one element */
 	zero = e->nrel == 0;
 	for (uint64_t i = 0; zero && i < e->data.n; i++)
 		zero = !e->data.p[i];
@@ -5399,6 +5709,7 @@ static void emit_string(ecx *e, uint32_t i)
 typedef struct pre {
 	emitter *E;
 	cc *c;
+	uint32_t fn;		/* the function being walked */
 	int cdepth;		/* cleanup variables in scope */
 } pre;
 
@@ -5426,6 +5737,35 @@ static void mark_written(pre *P, uint32_t n)
 		P->E->sflags[N(n)->a] |= SA_WRITTEN;
 	else if (N(n)->op == N_COMPLIT)
 		P->E->sflags[N(n)->b] |= SA_WRITTEN;
+}
+
+/*
+ * The prepass runs per function, the first time a function is emitted or
+ * inlined: most of a TU's functions are header inlines nobody uses.  The
+ * facts it records (writes to params and locals, labels) belong to that
+ * function alone, so one walk per function is all that is needed.
+ */
+static int walk(pre *P, uint32_t n);
+
+static void ensure_walked(emitter *E, cc *c, uint32_t s)
+{
+	uint8_t st = atomic_load_explicit(&E->walked[s], memory_order_acquire);
+
+	if (likely(st == 2))
+		return;
+	st = 0;
+	if (atomic_compare_exchange_strong(&E->walked[s], &st, 1)) {
+		pre P = { E, c, s, 0 };
+		double t = E->stats ? now() : 0;
+
+		walk(&P, c->syms[s].body);
+		if (E->stats)
+			E->walk_ns += (uint64_t)((now() - t) * 1e9), E->nwalk++;
+		atomic_store_explicit(&E->walked[s], 2, memory_order_release);
+		return;
+	}
+	while (atomic_load_explicit(&E->walked[s], memory_order_acquire) != 2)
+		;	/* another thread is walking it: a few microseconds */
 }
 
 /* walks every node; returns whether it contains a label (or case) */
@@ -5470,8 +5810,13 @@ static int walk(pre *P, uint32_t n)
 	case N_COND:
 		lab = walk(P, x->a) | walk(P, x->b) | walk(P, x->c);
 		break;
-	case N_CALL:
+	case N_CALL: {
+		uint32_t ref, callee = direct_callee(c, x->a, &ref);
+
+		if (callee && sym_attrs(c, callee)->error_fn)
+			P->E->sflags[P->fn] |= SA_MUSTFOLD;
 		lab = walk(P, x->a);
+	}
 		/* fall through */
 	case N_BUILTIN:
 		for (uint32_t i = 0; i < x->c; i++)
@@ -5507,11 +5852,19 @@ static int walk(pre *P, uint32_t n)
 	case N_GOTO_IND:
 		lab = walk(P, x->a);
 		break;
-	case N_DECL:
+	case N_DECL: {
+		const sym *y = &c->syms[x->a];
+
 		lab = walk(P, x->b);
 		if (sym_attrs(c, x->a)->cleanup)
 			P->cdepth++;
+		/* a __used static local is emitted with its function, referenced or not */
+		if (y->kind == S_VAR && y->sc == SC_STATIC && sym_attrs(c, x->a)->used &&
+		    !atomic_load_explicit(&P->E->claimed[x->a], memory_order_relaxed) &&
+		    !atomic_exchange(&P->E->claimed[x->a], 1))
+			enqueue(P->E, x->a);
 		break;
+	}
 	case N_IF:
 		lab = walk(P, x->a) | walk(P, x->b) | walk(P, x->c);
 		break;
@@ -5561,6 +5914,13 @@ static int walk(pre *P, uint32_t n)
 	return lab;
 }
 
+static int u32_cmp(const void *a, const void *b)
+{
+	uint32_t x = *(const uint32_t *)a, y = *(const uint32_t *)b;
+
+	return x < y ? -1 : x > y;
+}
+
 /* ---------------- the work queue and threads ---------------- */
 
 static void enqueue(emitter *E, uint32_t item)
@@ -5590,6 +5950,7 @@ static void ecx_init(ecx *e, emitter *E)
 	e->caplabel = 1u << 22;
 	e->lrefc = reserve((size_t)e->caplabel * sizeof(uint32_t));
 	e->cases = reserve((size_t)1 << 24);
+	e->weakref = reserve((size_t)c->nsym * sizeof(uint32_t) + 4096);
 }
 
 static void ecx_free(ecx *e)
@@ -5597,6 +5958,7 @@ static void ecx_free(ecx *e)
 	cc *c = e->c;
 
 	munmap(e->in, (size_t)e->capin * sizeof(ins));
+	munmap(e->weakref, (size_t)c->nsym * sizeof(uint32_t) + 4096);
 	munmap(e->raw.p, e->raw.cap);
 	munmap(e->data.p, e->data.cap);
 	munmap(e->rel, (size_t)1 << 26);
@@ -5663,11 +6025,13 @@ static bool is_root(cc *c, uint32_t s)
 
 	if (y->depth != 0 && !(y->kind == S_VAR && y->sc == SC_STATIC && a->used))
 		return false;
+	if (a->alias)
+		return false;	/* .set in the tail; its target is a root (emit_tu) */
 	if (y->kind == S_FUNC) {
 		if (!(y->flags & SF_DEFINED) || !y->body)
 			return false;
-		if ((y->flags & SF_GNU_INLINE) && y->sc == SC_EXTERN)
-			return false;
+		if ((y->flags & SF_GNU_INLINE) && !(y->flags & SF_INLINE_NOEXTERN))
+			return false;	/* GNU 'extern inline': clang's isInlineDefinitionExternallyVisible */
 		if (y->sc == SC_STATIC)
 			return a->used || a->constructor;
 		if ((y->flags & SF_INLINE) && !(y->flags & SF_GNU_INLINE) && y->sc != SC_EXTERN)
@@ -5686,7 +6050,7 @@ static bool is_root(cc *c, uint32_t s)
 	return false;
 }
 
-int emit_tu(cc *c, const cc_opts *o)
+static int emit_tu1(cc *c, const cc_opts *o, bool write_out, uint8_t *mf, bool *again, bool last)
 {
 	emitter E;
 	int nthr = o->nthreads > 0 ? o->nthreads : 1;
@@ -5699,6 +6063,7 @@ int emit_tu(cc *c, const cc_opts *o)
 	memset(&E, 0, sizeof(E));
 	E.c = c;
 	E.o = o;
+	E.mf = mf;
 	E.claimed = reserve(c->nsym + 64);
 	E.extref = reserve(c->nsym + 64);
 	E.sflags = reserve(c->nsym + 64);
@@ -5712,22 +6077,27 @@ int emit_tu(cc *c, const cc_opts *o)
 	pthread_cond_init(&E.cv, NULL);
 	pthread_mutex_init(&E.cmu, NULL);
 	pthread_mutex_init(&E.emu, NULL);
-	/* prepass over every function body */
-	{
-		pre P = { &E, c, 0 };
-
-		for (uint32_t s = 1; s < c->nsym; s++)
-			if (c->syms[s].kind == S_FUNC && c->syms[s].body && (c->syms[s].flags & SF_DEFINED)) {
-				P.cdepth = 0;
-				walk(&P, c->syms[s].body);
-			}
-	}
+	E.walked = reserve(c->nsym + 64);
+	E.stats = getenv("VCC_EMIT_STATS") != NULL;
 	/* roots */
-	for (uint32_t s = 1; s < c->nsym; s++)
+	for (uint32_t i = 0; i < c->ntoplevel; i++) {
+		uint32_t s = c->toplevel[i];
+
 		if (is_root(c, s) && !E.claimed[s]) {
 			E.claimed[s] = 1;
 			E.q[E.qt++] = s;
 		}
+		if (unlikely(sym_attrs(c, s)->alias)) {
+			/* an alias keeps its target, static or not */
+			uint32_t t = cc_global_named(c, c->strs[sym_attrs(c, s)->alias - 1].s);
+
+			if (t && !E.claimed[t] && (c->syms[t].flags & (SF_DEFINED | SF_TENTATIVE)) &&
+			    (c->syms[t].kind == S_FUNC ? c->syms[t].body != 0 : true)) {
+				E.claimed[t] = 1;
+				E.q[E.qt++] = t;
+			}
+		}
+	}
 	t1 = now();
 	if (nthr > 64)
 		nthr = 64;
@@ -5756,14 +6126,30 @@ int emit_tu(cc *c, const cc_opts *o)
 		int k = 0;
 
 		tb_init(&tail, (size_t)1 << 26);
-		for (uint32_t s = 1; s < c->nsym; s++) {
+		{
+			/* .weak for weak undefined syms, in symbol order whatever the threads did */
+			uint32_t nw = 0, *w;
+
+			for (int t = 0; t < nthr; t++)
+				nw += ctx[t].nweakref;
+			w = malloc((nw + 1) * sizeof(uint32_t));
+			nw = 0;
+			for (int t = 0; t < nthr; t++)
+				for (uint32_t j = 0; j < ctx[t].nweakref; j++)
+					w[nw++] = ctx[t].weakref[j];
+			qsort(w, nw, sizeof(uint32_t), u32_cmp);
+			for (uint32_t j = 0; j < nw; j++)
+				if (!E.claimed[w[j]] && c->syms[w[j]].name && !sym_attrs(c, w[j])->alias) {
+					tb_s(&tail, "\t.weak\t");
+					sym_name(c, &tail, w[j]);
+					tb_c(&tail, '\n');
+				}
+			free(w);
+		}
+		for (uint32_t ti = 0; ti < c->ntoplevel; ti++) {
+			uint32_t s = c->toplevel[ti];
 			const sym *y = &c->syms[s];
 
-			if (E.extref[s] && (y->flags & SF_WEAK) && !(y->flags & SF_DEFINED) && !E.claimed[s] && y->name) {
-				tb_s(&tail, "\t.weak\t");
-				sym_name(c, &tail, s);
-				tb_c(&tail, '\n');
-			}
 			/* aliases */
 			if (y->depth == 0 && sym_attrs(c, s)->alias && y->name) {
 				const attrs *a = sym_attrs(c, s);
@@ -5773,6 +6159,9 @@ int emit_tu(cc *c, const cc_opts *o)
 					sym_name(c, &tail, s);
 					tb_c(&tail, '\n');
 				}
+				tb_s(&tail, "\t.type\t");
+				sym_name(c, &tail, s);
+				tb_s(&tail, y->kind == S_FUNC ? ",@function\n" : ",@object\n");
 				tb_s(&tail, "\t.set\t");
 				sym_name(c, &tail, s);
 				tb_s(&tail, ", ");
@@ -5785,7 +6174,8 @@ int emit_tu(cc *c, const cc_opts *o)
 		for (uint32_t i = 0; i < E.nchunk; i++)
 			iov[k++] = (struct iovec){ (void *)E.chunks[i].p, E.chunks[i].n };
 		iov[k++] = (struct iovec){ tail.p, tail.n };
-		if (!E.errors) {
+		*again = E.newmf != 0 && !last;
+		if (!E.errors && write_out && !*again) {
 			for (int i = 0; i < k;) {
 				int m = k - i > 1024 ? 1024 : k - i;
 				ssize_t w = writev(o->outfd, iov + i, m);
@@ -5827,10 +6217,10 @@ int emit_tu(cc *c, const cc_opts *o)
 			for (uint32_t i = 0; i < E.nchunk; i++)
 				bytes += E.chunks[i].n;
 			fprintf(stderr, "vcc emit: %llu functions, %llu objects, %llu inlined, %llu instructions (%.1f KB code); "
-				"prepass %.2f ms, emit %.2f ms (%d threads), %.1f MB text; %.0f MB/s machine code\n",
+				"setup %.2f ms, emit %.2f ms (%d threads; %.2f ms printing, %.2f ms prepass over %llu functions), %.1f MB text; %.0f MB/s machine code\n",
 				(unsigned long long)E.nfn, (unsigned long long)E.nobj, (unsigned long long)E.ninl,
 				(unsigned long long)E.nins, E.nins * 4 / 1024.0, (t1 - t0) * 1e3, (t2 - t1) * 1e3, nthr,
-				bytes / 1e6, E.nins * 4 / 1e6 / (t2 - t1));
+				E.print_ns / 1e6, E.walk_ns / 1e6, (unsigned long long)E.nwalk, bytes / 1e6, E.nins * 4 / 1e6 / (t2 - t1));
 		}
 		munmap(tail.p, tail.cap);
 	}
@@ -5847,8 +6237,32 @@ int emit_tu(cc *c, const cc_opts *o)
 	munmap(E.strdone, c->nstr + 64);
 	munmap(E.nflags, c->nnode + 64);
 	munmap(E.lref, c->nlabel + 64);
+	munmap((void *)E.walked, c->nsym + 64);
 	munmap(E.lcdepth, (size_t)c->nlabel * 2 + 64);
 	munmap(E.q, ((size_t)c->nsym + c->nstr + 64) * sizeof(uint32_t));
 	munmap(E.chunks, ((size_t)c->nsym + c->nstr + c->ntlasm + 64) * sizeof(chunk));
 	return errors;
+}
+
+/*
+ * VCC_EMIT_REPEAT=N: generate N times over the same AST (profiling), write once.
+ * A round that marks functions for inlining (need_fold) is generated again.
+ */
+int emit_tu(cc *c, const cc_opts *o)
+{
+	const char *r = getenv("VCC_EMIT_REPEAT");
+	int n = r ? atoi(r) : 1, err = 0;
+	uint8_t *mf = reserve(c->nsym + 64);
+	bool again = false;
+
+	for (int i = 1; i < n; i++)
+		if (emit_tu1(c, o, false, mf, &again, false))
+			break;
+	for (int round = 0; round < 8; round++) {
+		err = emit_tu1(c, o, true, mf, &again, round == 7);
+		if (err || !again)
+			break;
+	}
+	munmap(mf, c->nsym + 64);
+	return err;
 }
