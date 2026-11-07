@@ -339,6 +339,7 @@ typedef struct fent {
 	const char *name;	/* for __FILE__ (prefix map applied) */
 	uint32_t namelen;
 	const char *spath;	/* as spelled, for dependency files */
+	uint8_t sys;		/* a system header (found in a system directory, or included by one) */
 } fent;
 
 #define MAXCTX (1u << 15)
@@ -440,6 +441,59 @@ static void diag(pp *p, uint32_t loc, const char *what, const char *fmt, ...)
 		n = (int)sizeof(line) - 2;
 	line[n++] = '\n';
 	(void)!write(fd, line, (size_t)n);
+	if (what[0] == 'e' || what[0] == 'f')
+		p->errors++;
+	if (what[0] == 'f') {
+		if (p->fatal_jb)
+			longjmp(*p->fatal_jb, 1);
+		exit(1);
+	}
+}
+
+/* ---------------- exported for the parser ---------------- */
+
+int pp_in_system_header(const pp *p, uint32_t loc)
+{
+	const fent *e = loc_fent(p, loc);
+
+	return e && loc - e->base <= e->f->size && e->sys;
+}
+
+int pp_where(const pp *p, uint32_t loc, const char **name, uint32_t *namelen, uint32_t *line, uint32_t *col)
+{
+	const fent *e = loc_fent(p, loc);
+	uint32_t off, b;
+
+	if (!e || loc - e->base > e->f->size) {
+		*name = "<built-in>", *namelen = 10, *line = *col = 0;
+		return 0;
+	}
+	off = loc - e->base;
+	for (b = off; b > 0 && e->f->src[b - 1] != '\n'; b--)
+		;
+	*line = loc_line(p, loc);
+	*col = off - b + 1;
+	*name = presumed_name(p, (uint32_t)(e - p->fe), loc, namelen);
+	return 1;
+}
+
+void pp_vdiag(pp *p, uint32_t loc, const char *what, const char *fmt, va_list ap)
+{
+	int fd = p->o->errfd ? p->o->errfd : 2;
+	const char *name;
+	uint32_t nl, line, col;
+	char buf[2048];
+	int n;
+
+	if (pp_where(p, loc, &name, &nl, &line, &col))
+		n = snprintf(buf, sizeof(buf), "%.*s:%u:%u: %s: ", (int)nl, name, line, col, what);
+	else
+		n = snprintf(buf, sizeof(buf), "vcc: %s: ", what);
+	n += vsnprintf(buf + n, sizeof(buf) - (size_t)n - 1, fmt, ap);
+	if (n > (int)sizeof(buf) - 2)
+		n = (int)sizeof(buf) - 2;
+	buf[n++] = '\n';
+	(void)!write(fd, buf, (size_t)n);
 	if (what[0] == 'e' || what[0] == 'f')
 		p->errors++;
 	if (what[0] == 'f') {
@@ -2213,6 +2267,7 @@ static const vlex_file *find_include(pp *p, const ctx *from, const char *name, s
 
 			if (l > 0 && (size_t)l < sizeof(buf) && (f = try_path(p->o->cwd, buf, (size_t)l))) {
 				*path = pstrdup(p, buf, (size_t)l);
+				*sdir = -2;
 				return f;
 			}
 		}
@@ -2247,6 +2302,15 @@ static void add_fent(pp *p, ctx *c, const vlex_file *f, const char *name)
 	p->next_base += f->size + 1;
 }
 
+/* the innermost file context under the top of the stack (the includer) */
+static const ctx *cur_file_below(const pp *p)
+{
+	for (int d = p->depth - 2; d >= 0; d--)
+		if (p->cx[d].type == C_FILE)
+			return &p->cx[d];
+	return NULL;
+}
+
 static void enter_file(pp *p, const vlex_file *f, const char *path, int32_t sdir)
 {
 	const pfile *fi = pfile_get(f);
@@ -2270,7 +2334,14 @@ static void enter_file(pp *p, const vlex_file *f, const char *path, int32_t sdir
 	c->sdir = sdir;
 	c->spath = path;
 	p->nfile++;
-	add_fent(p, c, f, path);
+	{
+		const ctx *from = cur_file_below(p);
+		uint8_t sys = sdir == -2 || (sdir >= 0 && p->o->nsys && sdir >= p->o->nsys) ||
+			      (sdir == -1 && from && p->fe[from->fe].sys);
+
+		add_fent(p, c, f, path);
+		p->fe[c->fe].sys = sys;
+	}
 }
 
 static void include(pp *p, ctx *c, uint32_t b, uint32_t e, int kind, uint32_t loc)

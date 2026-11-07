@@ -15,6 +15,7 @@
  * clang's argument pre-expansion, paste and whitespace rules.
  */
 #include <setjmp.h>
+#include <stdarg.h>
 
 #include "lex.h"
 
@@ -40,6 +41,7 @@ typedef struct pp_opts {
 	const char *main;		/* the source file */
 	const char *const *dirs;	/* search path: -iquote dirs, then -I, -isystem, -idirafter */
 	int ndirs, nquote;		/* dirs[0..nquote) only for "" includes */
+	int nsys;			/* dirs[nsys..) are system directories (0: none) */
 	const char *predef;		/* "<built-in>": #define/#undef/#include lines, run first */
 	const char *prefix_from, *prefix_to;	/* -fmacro-prefix-map (one) */
 	const char *const *fwdirs;	/* framework dirs: <A/b.h> -> DIR/A.framework/Headers/b.h */
@@ -66,6 +68,13 @@ size_t pp_files(const pp *p, const char **names, size_t max);
 void pp_next(pp *p, ptok *t);
 /* errors reported so far */
 int pp_errors(const pp *p);
+
+/* is loc in a system header */
+int pp_in_system_header(const pp *p, uint32_t loc);
+/* presumed file name, line and column of a location; 0 if it has none */
+int pp_where(const pp *p, uint32_t loc, const char **name, uint32_t *namelen, uint32_t *line, uint32_t *col);
+/* a diagnostic at loc ("error", "warning", "fatal error": longjmp/exit) */
+void pp_vdiag(pp *p, uint32_t loc, const char *what, const char *fmt, va_list ap);
 
 /* the token's spelling without splices; buf must hold t->len bytes */
 const char *pp_spell(const ptok *t, char *buf, size_t *len);

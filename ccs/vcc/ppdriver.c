@@ -25,6 +25,7 @@
 
 #include "intern.h"
 #include "pp.h"
+#include "cc.h"
 #include "ppdriver.h"
 #include "ppdata-predef.inc"
 
@@ -265,7 +266,7 @@ int ppd_run(int argc, char **argv, const ppd_env *env)
 	double t0;
 	pp *p;
 	ptok t;
-	int col = 0;
+	int col = 0, syntax = 0, layout = 0, ms_anon = 0, short_wchar = 0;
 	char sb[1 << 16];
 
 	for (int i = 1; i < argc; i++) {
@@ -274,6 +275,10 @@ int ppd_run(int argc, char **argv, const ppd_env *env)
 		const char *v;
 
 		if (!strcmp(a, "--cmp") && i + 1 < argc) { cmp = argv[++i]; continue; }
+		if (!strcmp(a, "-fsyntax-only")) { syntax = 1; continue; }
+		if (!strcmp(a, "-fms-anonymous-structs") || !strcmp(a, "-fms-extensions")) { ms_anon = 1; continue; }
+		if (!strcmp(a, "-fshort-wchar")) { short_wchar = 1; continue; }
+		if (!strcmp(a, "--vcc-layout-checks")) { syntax = 1; layout = 1; continue; }
 		if (!strcmp(a, "-o") && i + 1 < argc) { out = argv[++i]; continue; }
 		if (!strncmp(a, "-Wp,-MMD,", 9) || !strncmp(a, "-Wp,-MD,", 8)) { depfile = strchr(a + 4, ',') + 1; continue; }
 		if (!strcmp(a, "-MD") || !strcmp(a, "-MMD")) { md = 1; continue; }
@@ -331,6 +336,7 @@ int ppd_run(int argc, char **argv, const ppd_env *env)
 	po.nquote = n;
 #define ADD(d) do { int dup_ = 0; for (int j = po.nquote; j < n; j++) dup_ |= !strcmp(all[j], d); if (!dup_) all[n++] = d; } while (0)
 	for (int k = 0; k < ni; k++) ADD(dirs_i[k]);
+	po.nsys = n;
 	for (int k = 0; k < ns; k++) ADD(dirs_s[k]);
 	if (darwin && !nostdinc)
 		for (size_t k = 0; k < sizeof(sysdirs_darwin) / sizeof(sysdirs_darwin[0]); k++)
@@ -395,6 +401,33 @@ int ppd_run(int argc, char **argv, const ppd_env *env)
 	pp_set_fatal(p, &jb);
 	if (setjmp(jb)) {
 		status = 1;
+		goto done;
+	}
+	if (syntax) {
+		cc_opts co = { .target = po.target, .unsigned_char = po.unsigned_char, .dump_layouts = layout, .ms_anon = ms_anon, .short_wchar = short_wchar,
+			       .outfd = env->outfd };
+		int fd = -1;
+
+		if (layout && out) {
+			char path[4096];
+
+			if (out[0] != '/' && env->cwd)
+				snprintf(path, sizeof(path), "%s/%s", env->cwd, out);
+			else
+				snprintf(path, sizeof(path), "%s", out);
+			fd = open(path, O_WRONLY | O_CREAT | O_TRUNC, 0644);
+			if (fd < 0) {
+				dprintf(errfd, "vcc: error: cannot open %s\n", out);
+				status = 1;
+				goto done;
+			}
+			co.outfd = fd;
+		}
+		status = cc_run(p, &co) || pp_errors(p) ? 1 : 0;
+		if (fd >= 0)
+			close(fd);
+		if (getenv("VPP_TIME"))
+			dprintf(errfd, "vcc: %.1f ms\n", (now() - t0) * 1e3);
 		goto done;
 	}
 	for (;;) {
