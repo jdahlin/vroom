@@ -1,0 +1,114 @@
+/*
+ * Directory cache for #include resolution: which directories exist.
+ *
+ * An #include <linux/foo.h> is tried in every search directory until one
+ * has it, and each miss is an open() that fails (~3 us, and serialised
+ * system-wide on macOS: 8 threads miss no faster than 1).  Measured over
+ * the kernel TUs, 94% of the distinct misses are in directories that do
+ * not exist at all (arch/arm64/include/linux/, .../generated/linux/, ...:
+ * kbuild's -I list is the same for every subtree), so the cache only
+ * remembers, per directory, whether it exists: one probe per distinct
+ * directory, shared by all threads, instead of one failed open() per
+ * (directory, name).
+ *
+ * Listing directories (getattrlistbulk) to answer the remaining misses was
+ * tried and measured slower: the few misses in existing directories are
+ * cheaper than listing them.
+ */
+#include <fcntl.h>
+#include <stdatomic.h>
+#include <stdint.h>
+#include <stdlib.h>
+#include <string.h>
+#include <sys/mman.h>
+#include <sys/stat.h>
+
+#include "dircache.h"
+#include "intern.h"
+
+enum { D_UNKNOWN, D_PROBING, D_EXISTS, D_MISSING };
+
+typedef struct dnode {
+	uint32_t hash, plen;
+	_Atomic int state;
+	char path[];
+} dnode;
+
+#define DBITS 14
+static _Atomic(dnode *) dtab[1u << DBITS];
+
+static char *base;
+static _Atomic size_t used;
+#define DC_MAX (64ull << 20)
+
+unsigned long vdir_probes;
+
+static void *dalloc(size_t n)
+{
+	size_t off;
+
+	if (!__atomic_load_n(&base, __ATOMIC_ACQUIRE)) {
+		char *b = mmap(NULL, DC_MAX, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANON, -1, 0), *z = NULL;
+
+		if (b == MAP_FAILED)
+			abort();
+		if (!__atomic_compare_exchange_n(&base, &z, b, 0, __ATOMIC_ACQ_REL, __ATOMIC_ACQUIRE))
+			munmap(b, DC_MAX);
+	}
+	off = atomic_fetch_add(&used, (n + 15) & ~(size_t)15);
+	if (off + n > DC_MAX)
+		abort();
+	return base + off;
+}
+
+static dnode *node_get(const char *path, size_t plen)
+{
+	uint32_t h = vintern_hash(path, plen);
+	dnode *mine = NULL;
+
+	for (uint32_t i = h >> (32 - DBITS);; i = (i + 1) & ((1u << DBITS) - 1)) {
+		dnode *e = atomic_load_explicit(&dtab[i], memory_order_acquire);
+
+		if (!e) {
+			if (!mine) {
+				mine = dalloc(sizeof(*mine) + plen + 17);
+				mine->hash = h;
+				mine->plen = (uint32_t)plen;
+				memcpy(mine->path, path, plen);
+				memset(mine->path + plen, 0, 17);
+			}
+			if (atomic_compare_exchange_strong_explicit(&dtab[i], &e, mine,
+					memory_order_acq_rel, memory_order_acquire))
+				return mine;
+		}
+		if (e->hash == h && e->plen == plen && !memcmp(e->path, path, plen))
+			return e;
+	}
+}
+
+static int dir_state(dnode *n)
+{
+	int s = atomic_load_explicit(&n->state, memory_order_acquire);
+	struct stat st;
+
+	if (s == D_EXISTS || s == D_MISSING)
+		return s;
+	if (s == D_UNKNOWN && atomic_compare_exchange_strong(&n->state, &s, D_PROBING)) {
+		vdir_probes++;
+		s = !stat(n->plen ? n->path : ".", &st) && S_ISDIR(st.st_mode) ? D_EXISTS : D_MISSING;
+		atomic_store_explicit(&n->state, s, memory_order_release);
+		return s;
+	}
+	return D_UNKNOWN;	/* another thread is probing: don't wait */
+}
+
+int vdir_exists(const char *path, size_t len)
+{
+	size_t dl;
+
+	for (dl = len; dl > 0 && path[dl - 1] != '/'; dl--)
+		;
+	if (dl <= 1)
+		return -1;
+	return dir_state(node_get(path, dl - 1)) == D_MISSING ? 0 : -1;
+}

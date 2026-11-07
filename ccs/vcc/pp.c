@@ -29,6 +29,7 @@
 #include <sys/mman.h>
 #include <time.h>
 
+#include "dircache.h"
 #include "intern.h"
 #include "pp.h"
 #include "ppdata.inc"
@@ -2103,6 +2104,26 @@ static char *pstrdup(pp *p, const char *s, size_t n)
 	return d;
 }
 
+unsigned long pp_stat_try, pp_stat_skip;
+
+/* the file at a candidate path, if any: misses in missing directories cost no syscall */
+static const vlex_file *try_path(const char *path, size_t len)
+{
+	static int off = -1;
+
+	if (off < 0)
+		off = getenv("VPP_NODIRCACHE") != NULL;
+	pp_stat_try++;
+	const vlex_file *f;
+
+	if (!off && !vdir_exists(path, len)) {
+		pp_stat_skip++;
+		return NULL;
+	}
+	f = vlex_get(path, len);
+	return f;
+}
+
 static const vlex_file *find_include(pp *p, const ctx *from, const char *name, size_t nlen,
 				     bool angled, bool next, int32_t *sdir, const char **path)
 {
@@ -2117,7 +2138,7 @@ static const vlex_file *find_include(pp *p, const ctx *from, const char *name, s
 		memcpy(buf, name, nlen);
 		buf[nlen] = 0;
 		*path = pstrdup(p, buf, nlen);
-		return vlex_get(buf, nlen);
+		return try_path(buf, nlen);
 	}
 	if (next && from && from->sdir < 0)
 		next = false;	/* #include_next outside the search path: a normal search */
@@ -2130,7 +2151,7 @@ static const vlex_file *find_include(pp *p, const ctx *from, const char *name, s
 			memcpy(buf, fp, dl);
 			memcpy(buf + dl, name, nlen);
 			buf[dl + nlen] = 0;
-			if ((f = vlex_get(buf, dl + nlen))) {
+			if ((f = try_path(buf, dl + nlen))) {
 				*path = pstrdup(p, buf, dl + nlen);
 				return f;
 			}
@@ -2150,7 +2171,7 @@ static const vlex_file *find_include(pp *p, const ctx *from, const char *name, s
 		memcpy(buf + l, name, nlen);
 		l += nlen;
 		buf[l] = 0;
-		if ((f = vlex_get(buf, l))) {
+		if ((f = try_path(buf, l))) {
 			*sdir = k;
 			*path = pstrdup(p, buf, l);
 			return f;
@@ -2164,7 +2185,7 @@ static const vlex_file *find_include(pp *p, const ctx *from, const char *name, s
 			int l = snprintf(buf, sizeof(buf), "%s/%.*s.framework/Headers/%.*s", p->o->fwdirs[k],
 					 (int)(sl - name), name, (int)(nlen - (size_t)(sl - name) - 1), sl + 1);
 
-			if (l > 0 && (size_t)l < sizeof(buf) && (f = vlex_get(buf, (size_t)l))) {
+			if (l > 0 && (size_t)l < sizeof(buf) && (f = try_path(buf, (size_t)l))) {
 				*path = pstrdup(p, buf, (size_t)l);
 				return f;
 			}

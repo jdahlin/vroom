@@ -330,8 +330,12 @@ int main(int argc, char **argv)
 	}
 	if (col)
 		bput(&o, "\n", 1);
-	if (getenv("VPP_TIME"))
-		fprintf(stderr, "vpp: %.1f ms, %zu bytes out\n", (now() - t0) * 1e3, o.n);
+	if (getenv("VPP_TIME")) {
+		extern unsigned long pp_stat_try, pp_stat_skip, vdir_probes;
+
+		fprintf(stderr, "vpp: %.1f ms, %zu bytes out; include candidates %lu, %lu ruled out by the directory cache (%lu dirs probed)\n",
+			(now() - t0) * 1e3, o.n, pp_stat_try, pp_stat_skip, vdir_probes);
+	}
 	if (pp_errors(p))
 		return 1;
 	if (cmp)
