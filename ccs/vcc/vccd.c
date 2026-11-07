@@ -6,8 +6,10 @@
  * threads.  A worker receives the request (argv, env, cwd, fds 0-2) into a
  * per-thread buffer, then
  *
- *   - answers toolchain probes (cc-option, ld-option, ...) from the
- *     capability table in caps.c, without running anything;
+ *   - answers toolchain probes from the capability table in caps.c,
+ *     without running anything: cc-option/ld-option, as-instr (the source
+ *     on stdin is looked up), user-space link tests, --version,
+ *     -print-file-name, and links with options vld refuses;
  *   - runs preprocessing jobs (-E: kbuild's linker scripts and device
  *     trees) itself, with vcc's preprocessor (ppdriver.c), in this thread;
  *   - forwards everything else to the current backend: C compiles to
@@ -192,13 +194,27 @@ static void say(const struct req *r, const char *fmt, const char *arg)
 /* ---------------- probes ---------------- */
 
 /*
- * A probe is a compile (-c/-S) whose only input is /dev/null: the answer
- * depends on the options alone.  Anything reading stdin or a real file is
- * not a probe.
+ * Probes: jobs whose answer vcc's capability table gives without compiling.
+ *
+ *   PROBE_CC    -c/-S of C from /dev/null (cc-option, Kconfig's cc-probe):
+ *               the answer depends on the options alone;
+ *   PROBE_AS    -c of assembler-with-cpp from stdin into /dev/null or a
+ *               try-run temporary (as-instr): the source is looked up;
+ *   PROBE_LINK  a link of C from stdin into /dev/null (cc-can-link.sh).
+ *
+ * Anything else (a real file, stdin into a real output) is a real job.
  */
-static bool cc_is_probe(const struct req *r)
+enum { PROBE_NONE, PROBE_CC, PROBE_AS, PROBE_LINK };
+
+static bool probe_output(const char *out)
 {
-	bool compile = false, input = false;
+	return out && (!strcmp(out, "/dev/null") || strstr(out, ".tmp_"));
+}
+
+static int cc_probe_kind(const struct req *r)
+{
+	bool compile = false, devnull = false, in_stdin = false;
+	const char *lang = "c", *out = NULL;
 	int i;
 
 	for (i = 1; i < r->argc; i++) {
@@ -208,29 +224,72 @@ static bool cc_is_probe(const struct req *r)
 
 		if (!strcmp(a, "-c") || !strcmp(a, "-S"))
 			compile = true;
-		if (!strcmp(a, "-E") || !strcmp(a, "-"))
-			return false;
+		if (!strcmp(a, "-E"))
+			return PROBE_NONE;
+		if (!strcmp(a, "-")) {
+			if (in_stdin)
+				return PROBE_NONE;
+			in_stdin = true;
+			continue;
+		}
 		if (a[0] != '-') {
 			if (strcmp(a, "/dev/null"))
-				return false;
-			input = true;
+				return PROBE_NONE;
+			devnull = true;
 			continue;
 		}
 		n = cc_option(a, i + 1 < r->argc ? r->argv[i + 1] : NULL, &why);
 		if (n == 2) {
-			if (!strcmp(a, "-x") && strcmp(r->argv[i + 1], "c"))
-				return false;	/* only C probes */
+			if (!strcmp(a, "-x"))
+				lang = r->argv[i + 1];
+			if (!strcmp(a, "-o"))
+				out = r->argv[i + 1];
 			i++;
 		}
 	}
-	return compile && input;
+	if (devnull && !in_stdin && compile && !strcmp(lang, "c"))
+		return PROBE_CC;
+	if (in_stdin && !devnull && compile && !strcmp(lang, "assembler-with-cpp") &&
+	    probe_output(out))
+		return PROBE_AS;
+	if (in_stdin && !devnull && !compile && !strcmp(lang, "c") && out &&
+	    !strcmp(out, "/dev/null"))
+		return PROBE_LINK;
+	return PROBE_NONE;
 }
 
-static int cc_probe(const struct req *r)
+/* the probe's stdin, up to sizeof(buf); -1 if it is larger or unreadable */
+static ssize_t read_stdin(const struct req *r, char *buf, size_t size)
+{
+	size_t n = 0;
+
+	for (;;) {
+		ssize_t k = read(r->fds[0], buf + n, size - n);
+
+		if (k < 0 && errno == EINTR)
+			continue;
+		if (k < 0)
+			return -1;
+		if (k == 0)
+			return n;
+		n += k;
+		if (n == size)
+			return -1;
+	}
+}
+
+static int cc_probe(const struct req *r, int kind)
 {
 	const char *out = NULL, *why;
 	bool werror = false;
 	int i, n;
+
+	if (kind == PROBE_LINK) {
+		if (!cc_can_link) {
+			say(r, "%s: error: %s\n", "cannot link user-space programs");
+			return 1;
+		}
+	}
 
 	for (i = 1; i < r->argc; i++)
 		if (!strcmp(r->argv[i], "-Werror"))
@@ -238,8 +297,8 @@ static int cc_probe(const struct req *r)
 	for (i = 1; i < r->argc; i++) {
 		const char *a = r->argv[i];
 
-		if (a[0] != '-')
-			continue;
+		if (a[0] != '-' || !a[1])
+			continue;	/* the input: /dev/null or - */
 		n = cc_option(a, i + 1 < r->argc ? r->argv[i + 1] : NULL, &why);
 		if (!n) {
 			say(r, "%s: error: unsupported option '%s'\n", why);
@@ -254,6 +313,15 @@ static int cc_probe(const struct req *r)
 			if (!strcmp(a, "-o"))
 				out = r->argv[i + 1];
 			i++;
+		}
+	}
+	if (kind == PROBE_AS) {
+		char src[4096];
+		ssize_t len = read_stdin(r, src, sizeof(src));
+
+		if (len < 0 || !as_source_ok(src, len)) {
+			say(r, "%s: error: %s\n", "unsupported assembler input");
+			return 1;
 		}
 	}
 	/* produce the (empty) output like a real compile of /dev/null would */
@@ -389,25 +457,54 @@ static double now_ms(void)
 
 static int handle(const struct req *r, const char **kind)
 {
+	int probe;
+
 	if (!strcmp(r->tool, "vld") || !strcmp(r->tool, "ld")) {
 		if (ld_is_probe(r)) {
 			*kind = "ld-probe";
 			atomic_fetch_add(&n_probe, 1);
 			return ld_probe(r);
 		}
-		atomic_fetch_add(&n_spawn, 1);
-		/* version queries and links go to the backend linker */
 		if (r->argc == 2 && (!strcmp(r->argv[1], "-v") || !strcmp(r->argv[1], "--version"))) {
 			*kind = "ld-version";
-			return spawn(r, lld);
+			atomic_fetch_add(&n_probe, 1);
+			return write_full(r->fds[1], ld_version_text, strlen(ld_version_text)) ? 0 : 1;
 		}
+		for (int i = 1; i < r->argc; i++)
+			if (ld_rejects(r->argv[i], i + 1 < r->argc ? r->argv[i + 1] : NULL)) {
+				*kind = "ld-reject";
+				atomic_fetch_add(&n_probe, 1);
+				say(r, "%s: error: unsupported option '%s'\n",
+				    strcmp(r->argv[i], "-z") ? r->argv[i] : r->argv[i + 1]);
+				return 1;
+			}
+		/* links go to the backend linker */
+		atomic_fetch_add(&n_spawn, 1);
 		*kind = "ld";
 		return spawn(r, ld_backend ? ld_backend : lld);
 	}
-	if (cc_is_probe(r)) {
-		*kind = "cc-probe";
+	if (r->argc == 2 && !strcmp(r->argv[1], "--version")) {
+		*kind = "cc-version";
 		atomic_fetch_add(&n_probe, 1);
-		return cc_probe(r);
+		return write_full(r->fds[1], cc_version_text, strlen(cc_version_text)) ? 0 : 1;
+	}
+	if (r->argc == 2 && !strncmp(r->argv[1], "-print-file-name=", 17)) {
+		const char *name = r->argv[1] + 17;
+		char line[4096];
+		int n;
+
+		*kind = "cc-print";
+		atomic_fetch_add(&n_probe, 1);
+		n = snprintf(line, sizeof(line), "%s\n", strcmp(name, "include") ? name : cc_resource_include);
+		return n < (int)sizeof(line) && write_full(r->fds[1], line, n) ? 0 : 1;
+	}
+	probe = cc_probe_kind(r);
+	if (probe) {
+		static const char *const names[] = { "", "cc-probe", "as-probe", "link-probe" };
+
+		*kind = names[probe];
+		atomic_fetch_add(&n_probe, 1);
+		return cc_probe(r, probe);
 	}
 	if (cc_is_pp(r)) {
 		ppd_env e = { r->cwd, r->fds[1], r->fds[2] };

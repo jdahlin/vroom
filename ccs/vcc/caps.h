@@ -10,7 +10,19 @@ int cc_option(const char *a, const char *next, const char **why);
 int ld_option(const char *a, const char **why);
 
 #include <stdbool.h>
+#include <stddef.h>
 /* true if vcc predefines the macro named in "NAME[=VALUE]" */
 bool cc_predefined(const char *def);
+
+/* `vcc --version` and `vld --version`/`-v` output (clang/lld-compatible identity) */
+extern const char cc_version_text[], ld_version_text[];
+/* true if vcc's assembler accepts src[0..n) (stdin of an as-instr probe) */
+bool as_source_ok(const char *src, size_t n);
+/* whether vcc links user-space programs (it has no target libc) */
+extern const bool cc_can_link;
+/* answer to -print-file-name=include */
+extern const char cc_resource_include[];
+/* true if vld refuses the link option a (next: the following argument) */
+bool ld_rejects(const char *a, const char *next);
 
 #endif

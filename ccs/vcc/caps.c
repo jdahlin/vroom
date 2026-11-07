@@ -155,6 +155,57 @@ int ld_option(const char *a, const char **why)
 	return in(a, ld_exact);
 }
 
+/*
+ * Identity.  Kbuild/Kconfig parse these (cc-version.sh takes the version from
+ * __clang_major__ etc., ld-version.sh and CC_VERSION_TEXT from --version), so
+ * they are what clang/lld 23.1.4 print: the .config stays the same.
+ */
+const char cc_version_text[] = "Homebrew clang version 23.1.4\n";
+const char ld_version_text[] = "Homebrew LLD 23.1.4 (compatible with GNU linkers)\n";
+
+/* `-print-file-name=include`: the compiler's own headers (stddef.h, ...) */
+const char cc_resource_include[] = "/opt/homebrew/opt/llvm/lib/clang/23/include";
+
+/* vcc builds the kernel only: no target libc, so no user-space links */
+const bool cc_can_link = false;
+
+/*
+ * Link options vld rejects up front, so that a probe link (Kconfig's
+ * tools-support-relr.sh) fails without running a linker: vld does not pack
+ * relative relocations (RELR), and TOOLS_SUPPORT_RELR stays n.
+ */
+bool ld_rejects(const char *a, const char *next)
+{
+	return prefix(a, "--pack-dyn-relocs=") || !strcmp(a, "-zpack-relative-relocs") ||
+	       (!strcmp(a, "-z") && next && !strcmp(next, "pack-relative-relocs"));
+}
+
+/*
+ * Assembler sources vcc's assembler accepts, as Kconfig's as-instr probes
+ * send them (after printf %b; trailing newlines are ignored).  Anything else
+ * is rejected, so a new probe means "not supported" until listed here.
+ */
+static const char *const as_sources[] = {
+	"1:\n.inst 0\n.rept . - 1b\n\nnop\n.endr",		/* arm64 Kconfig (negated) */
+	".cfi_startproc\n.cfi_negate_ra_state\n.cfi_endproc",	/* AS_HAS_CFI_NEGATE_RA_STATE */
+	".arch armv8.5-a+memtag\nstgm xzr,[x0]",		/* ARM64_AS_HAS_MTE */
+	".arch_extension mops",					/* AS_HAS_MOPS */
+	".arch_extension lsui",					/* AS_HAS_LSUI */
+	".arch_extension sme",					/* AS_HAS_SME */
+	".uleb128 .Lexpr_end4 - .Lexpr_start3\n.Lexpr_start3:\n.Lexpr_end4:", /* AS_HAS_NON_CONST_ULEB128 */
+	NULL
+};
+
+bool as_source_ok(const char *src, size_t n)
+{
+	while (n && src[n - 1] == '\n')
+		n--;
+	for (const char *const *p = as_sources; *p; p++)
+		if (strlen(*p) == n && !memcmp(*p, src, n))
+			return true;
+	return false;
+}
+
 /* macros vcc predefines (with a value of its own) */
 bool cc_predefined(const char *def)
 {
