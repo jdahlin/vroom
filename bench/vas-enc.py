@@ -47,7 +47,7 @@ if __name__ == '__main__':
                     if ch in '01': mask |= 1 << (8 * k + j); ref |= int(ch) << (8 * k + j)
         w, fx = ours[t]
         # bytes with fixup letters: llvm-mc zeroes those bits; we do too
-        if (w & mask) == (ref & mask) and (fx or mask == 0xffffffff):
+        if (w & mask) == (ref & mask):  # where llvm-mc leaves a fixup we may have resolved (abs_gN of a constant)
             ok += 1
         else:
             bad += 1
