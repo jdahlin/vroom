@@ -194,6 +194,7 @@ förprocessas 121 gånger.
 | 2.6 | Emitter arm64 | kompilerar alla TU:er; per-fil-diff av symboler och sektioner mot clang -O0; kärnan bootar med vcc-objekt + lld |
 | 2.7 | Assembler | alla `.S` och all inline asm; byte-identiskt mot clang `-cc1as` för `.S` |
 | 2.8 | Länkare + objcopy | `vmlinux` och `Image` utan lld; bootar |
+| | **2.8 klar** (utom vdso-länken): `vlink` byte-identisk med lld (30 ms mot 340 ms), `vobjcopy`/`vnm` identiska med llvm-objcopy/llvm-nm, Image bootar | |
 | 2.9 | Allt i minnet, profilering, finjustering | kallt bygge < 2 s, bootar Debian till `running` |
 
 ### Status 2.2 (2026-11-07)
@@ -318,6 +319,24 @@ aldrig i bygget. Ett TU-test (`bench/vcc-diff.py`) körs över alla kärnfiler.
 - **Acceptans:** `bench/vcc-sema.py run`: **878/879 TU:er utan fel** (840 kärna + 38 värd; modpost.c saknar genererad header även för clang). `bench/vcc-sema.py layout`: vcc skriver `_Static_assert` för sizeof/_Alignof/offsetof för alla poster/enums/typedefs på filnivå, sizeof och typ (`__builtin_types_compatible_p`) för alla globala objekt och funktioner samt värde och typ för alla uppräknare; clang kontrollerar dem mot sin egen -E-utdata: **18,8 M kontroller, 878/879 TU:er gröna**. (clangs `-fdump-record-layouts-complete` gick inte att använda: den dumpar innan `} __packed;` har applicerats.)
 - Fart: kernel/fork.c `-fsyntax-only` 84 ms inkl. pp (pp ensam ~75 ms), clang 464 ms.
 - Kvar till 2.6: typerna inuti funktionskroppar är inte verifierade mot clang (kommer med objektjämförelsen), statiska initierare kontrolleras inte för konstanthet, VLA och deklarationer efter label är approximerade, `__builtin_constant_p` efter inlining (emitterns sak), inget K&R.
+
+### Status 2.8 (2026-11-07): länkare + objcopy, `vmlinux` och `Image` utan lld, bootar
+- `ccs/vcc/ld.c` (`vlink`, `ld_main()`): ELF-länkare för kärnans två länkar. Slutlänken med `vmlinux.lds` (skriptparser/-utvärderare med lld:s ExprValue-semantik, PROVIDE, orphan-placering, merge-sektioner i 32 xxh3-shards, AArch64-relokeringar inkl. ADRP+ADD→ADR-relaxering, thunkar enligt lld:s pass-ordning, phdrs, `.rela.dyn` för `-shared -z notext`, symtab/strtab i lld:s ordning, build-id) och `-r` (vmlinux.o för modpost). Indata mmap:as, tunga faser är parallella (egen trådpool, låsfri globaltabell), utdata byggs i en buffert och skrivs med en write. `ld_main` tar ett lås och kan anropas från vccd.
+- `ccs/vcc/objcopy.c` (`vobjcopy`/`vnm`, symlänkar till `vlink`): byggets objcopy/nm-användningar enligt llvm-objcopy 23:s ELF-skrivare (segmentbevarande layout, StringTableBuilder med svansdelning, symbolborttagning/-prefix, `--prefix-alloc-sections`, `-O binary`, `-j`, `--dump-section`) och llvm-nm:s BSD-format (`-p`/`-n`/`-S`).
+- **Acceptans:**
+  - Slutlänken är **byte-identisk** med lld:s `vmlinux.unstripped` (build-id inräknat), med 1 och 8 trådar. `-r`: `bench/vld-rcmp.py` mot lld:s vmlinux.o OK (92 429 symboler, 169 601 relokeringar); modpost ger identiska utdata.
+  - `bench/vobjcopy-cmp.sh`: 12/12 byte-identiska mot llvm-objcopy/llvm-nm (vmlinux, Image, modules.builtin.modinfo, vdso.so, 6 pi/*.pi.o, `nm -p -S vmlinux`, `nm vdso.so.dbg`).
+  - Hela kedjan med bara våra verktyg (vlink → vnm → sorttable → vobjcopy → vobjcopy -O binary) ger en `Image` som är byte-identisk med lld-byggets; `bench/boot-test.py` med den: **BOOT OK, `running`, 0 felande enheter** (1,9 s).
+- **Fart** (maskinen delad, last 2,5–5):
+  - Slutlänk: **30–34 ms** med 8 trådar, 85 ms med 1 (lld 340 ms). Faser vid 8 trådar: mmap+parse 6–7 ms, resolve 3 ms, layout 3 ms, kopiera+relokera 2,9 ms, build-id 4,5 ms, write 4 ms. `-r`: ~14 ms.
+  - Roofline: memcpy av 21 MB till nymappat minne tar 1,5 ms med 8 trådar (14,9 GB/s; 4,0 ms / 5,7 GB/s med 1), `write(2)` 3,4–7,8 ms. Kopiera+relokera når 7,3 GB/s ≈ 50 % av memcpy. Hela länken: 29 MB in + 21 MB ut på 31 ms ≈ 1,6 GB/s, ungefär 5× I/O-golvet (~6 ms). Resten är symbolupplösning, parse och layout (~15 ms) samt BLAKE3 (4,7 GB/s).
+  - objcopy: strip av vmlinux 20,5 ms (llvm-objcopy 45 ms; golvet för en tråd ~12 ms), Image 9,3 ms (30 ms), `nm -p -S` 24 ms (61 ms). Processgolvet ~2 ms.
+- Kända skillnader: vnm:s standardsortering ordnar helt lika nycklar annorlunda än llvm-nm (libc++ `std::sort` är instabil). Bygget använder den inte.
+- Kvar:
+  - vdso-länken (`-shared` med `.dynamic`/`.dynsym`/hash/versioner) går fortfarande via lld.
+  - Koppla in `vlink`/`vobjcopy`/`vnm` i bygget: shimmen i stället för vroom-ld och llvm-objcopy/llvm-nm.
+  - Kör länken i vccd (ingen process, indata redan i minnet).
+  - `Image` kan skrivas direkt från vmlinux.unstripped parallellt med strip.
 
 ## Risker
 - **GNU C-ytan och inline asm** är det stora jobbet. Uppskattat: lexer + pp ~2 kloc,
