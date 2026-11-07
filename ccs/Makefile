@@ -20,7 +20,7 @@ clean:
 # ---- vcc: egen verktygskedja (fas 2) ----
 VCC_CFLAGS = -std=c11 -O2 -Wall -Wextra -Wno-unused-parameter -D_DARWIN_C_SOURCE
 
-vcc: $(OUT)/vcc $(OUT)/vld $(OUT)/vas $(OUT)/vccd $(OUT)/lextest $(OUT)/vpp
+vcc: $(OUT)/vcc $(OUT)/vld $(OUT)/vas $(OUT)/vccd $(OUT)/lextest $(OUT)/vpp $(OUT)/vlink
 
 LEX_SRC = vcc/lex.c vcc/intern.c
 LEX_HDR = vcc/lex.h vcc/intern.h
@@ -38,6 +38,12 @@ $(OUT)/vcc: vcc/shim.c protocol.h | $(OUT)
 
 $(OUT)/vld $(OUT)/vas: $(OUT)/vcc
 	ln -sf vcc $@
+
+# vlink: the linker (ld.c) as a standalone tool; vobjcopy/vnm by argv[0]
+LD_SRC = vcc/ld.c vcc/ldhash.c
+LD_HDR = vcc/ld.h vcc/ldhash.h
+$(OUT)/vlink: $(LD_SRC) $(LD_HDR) | $(OUT)
+	/usr/bin/clang $(VCC_CFLAGS) -O3 -mcpu=apple-m1 -pthread -DVLD_MAIN $(LD_SRC) -o $@
 
 $(OUT)/vccd: vcc/vccd.c vcc/caps.c vcc/caps.h vcc/warnings.inc protocol.h $(PP_SRC) $(PP_HDR) $(LEX_SRC) $(LEX_HDR) | $(OUT)
 	/usr/bin/clang $(VCC_CFLAGS) -O3 -mcpu=apple-m1 -pthread vcc/vccd.c vcc/caps.c $(PP_SRC) $(LEX_SRC) -o $@
