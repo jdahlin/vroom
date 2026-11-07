@@ -10,7 +10,6 @@
  */
 #include "as.h"
 #include "a64.h"
-#include <ctype.h>
 #include <fcntl.h>
 #include <stdarg.h>
 #include <stdio.h>
@@ -75,6 +74,7 @@ struct As {
 	Var *vars; uint32_t vmask, vcount;
 	void *pool_dummy; struct PoolS *pool; uint32_t npool, poolcap;
 	uint32_t ninst;		/* \@ */
+	uint64_t nstmt, nstmtb;	/* statistics: statements and their bytes */
 	const char *fname;
 	char msg[512];
 	int err;
@@ -96,6 +96,19 @@ static void *rget(Region *r, size_t n)
 	r->used = u + n;
 	return r->base + u;
 }
+
+/* ASCII classes without libc's locale lookups (hot in the scanner) */
+enum { C_D = 1, C_X = 2, C_A = 4, C_S = 8, C_I = 16 };
+static const uint8_t cclass[256] = {
+	['0' ... '9'] = C_D | C_X | C_I, ['a' ... 'f'] = C_A | C_X | C_I, ['A' ... 'F'] = C_A | C_X | C_I,
+	['g' ... 'z'] = C_A | C_I, ['G' ... 'Z'] = C_A | C_I, ['_'] = C_I, ['.'] = C_I, ['$'] = C_I,
+	[' '] = C_S, ['\t'] = C_S, ['\n'] = C_S, ['\v'] = C_S, ['\f'] = C_S, ['\r'] = C_S,
+};
+static inline int c_digit(int c) { return (unsigned)c - '0' < 10; }
+static inline int c_xdigit(int c) { return cclass[(uint8_t)c] & C_X; }
+static inline int c_alpha(int c) { return cclass[(uint8_t)c] & C_A; }
+static inline int c_lower(int c) { return (unsigned)c - 'A' < 26 ? c | 0x20 : c; }
+static inline int isidc(int c) { return cclass[(uint8_t)c] & C_I; }
 
 static Sv svdup(As *a, const char *s, size_t n)
 {
@@ -121,15 +134,15 @@ static int err(As *a, const char *fmt, ...)
 	return -1;
 }
 
-static inline int isidc(int c) { return isalnum(c) || c == '_' || c == '.' || c == '$'; }
-static inline int isids(int c) { return isalpha(c) || c == '_' || c == '.' || c == '$'; }
+static inline int isids(int c) { return c_alpha(c) || c == '_' || c == '.' || c == '$'; }
 static inline const char *ws(const char *p, const char *e) { while (p < e && (*p == ' ' || *p == '\t' || *p == '\r' || *p == '\f' || *p == '\v')) p++; return p; }
 static inline int sveq(Sv a, const char *s) { size_t n = strlen(s); return a.n == n && !memcmp(a.s, s, n); }
 static inline int sveqi(const char *p, size_t n, const char *s)
 {
+	if (!n || c_lower((unsigned char)p[0]) != s[0]) return 0;
 	size_t m = strlen(s);
 	if (m != n) return 0;
-	for (size_t i = 0; i < n; i++) if (tolower((unsigned char)p[i]) != s[i]) return 0;
+	for (size_t i = 0; i < n; i++) if (c_lower((unsigned char)p[i]) != s[i]) return 0;
 	return 1;
 }
 
@@ -254,14 +267,14 @@ static int parse_number(Lx *l, Val *v)
 	if (p + 1 < e && p[0] == '0' && (p[1] == 'x' || p[1] == 'X')) {
 		p += 2;
 		const char *s = p;
-		while (p < e && isxdigit((unsigned char)*p)) { x = x * 16 + (uint64_t)(isdigit((unsigned char)*p) ? *p - '0' : (tolower((unsigned char)*p) - 'a' + 10)); p++; }
+		while (p < e && c_xdigit((unsigned char)*p)) { x = x * 16 + (uint64_t)(c_digit((unsigned char)*p) ? *p - '0' : (c_lower((unsigned char)*p) - 'a' + 10)); p++; }
 		if (p == s) return err(l->a, "invalid hexadecimal number");
 	} else if (p + 2 < e && p[0] == '0' && (p[1] == 'b' || p[1] == 'B') && (p[2] == '0' || p[2] == '1')) {
 		p += 2;
 		while (p < e && (*p == '0' || *p == '1')) x = x * 2 + (uint64_t)(*p++ - '0');
 	} else {
 		const char *s = p;
-		while (p < e && isdigit((unsigned char)*p)) p++;
+		while (p < e && c_digit((unsigned char)*p)) p++;
 		/* local label reference */
 		if (p < e && (*p == 'b' || *p == 'f') && (p + 1 >= e || !isidc((unsigned char)p[1]))) {
 			uint32_t num = 0;
@@ -318,7 +331,7 @@ static int primary(Lx *l, Val *v)
 		v->c = c == '~' ? ~v->c : !v->c;
 		return 0;
 	}
-	if (isdigit((unsigned char)c)) return parse_number(l, v);
+	if (c_digit((unsigned char)c)) return parse_number(l, v);
 	if (c == '\'') {
 		const char *p = l->p + 1;
 		if (p >= l->e) return err(a, "bad character literal");
@@ -500,6 +513,9 @@ static void pop_frame(As *a)
 
 /* Copy the next statement of f into a->sb, without comments.  Returns its
  * length; sets *raw to where it started in the frame text. */
+/* bytes next_stmt must look at: newline, ';', comments, strings */
+static const uint8_t sstop[256] = { ['\n'] = 1, [';'] = 1, ['/'] = 1, ['"'] = 1 };
+
 static size_t next_stmt(As *a, Frame *f, const char **raw)
 {
 	const char *p = f->p, *e = f->e;
@@ -517,6 +533,14 @@ static size_t next_stmt(As *a, Frame *f, const char **raw)
 				while (p < e && *p != '\n') p++;
 				continue;
 			}
+		}
+		if (!sstop[(uint8_t)c]) {	/* plain run: copy it whole */
+			const char *q = p + 1;
+			while (q < e && !sstop[(uint8_t)*q]) q++;
+			size_t k = (size_t)(q - p);
+			if (k > cap - n) k = cap - n;
+			memcpy(o + n, p, k); n += k; p = q;
+			continue;
 		}
 		if (c == ';') { p++; break; }
 		if (c == '/' && p + 1 < e && p[1] == '/') { while (p < e && *p != '\n') p++; continue; }
@@ -729,7 +753,7 @@ static int parse_string(As *a, const char **pp, const char *e, char *out, size_t
 			switch (c) {
 			case 'n': c = '\n'; break; case 't': c = '\t'; break; case 'r': c = '\r'; break;
 			case 'b': c = '\b'; break; case 'f': c = '\f'; break; case '"': break; case '\\': break;
-			case 'x': { int v = 0; while (p < e && isxdigit((unsigned char)*p)) { v = v * 16 + (isdigit((unsigned char)*p) ? *p - '0' : tolower((unsigned char)*p) - 'a' + 10); p++; } c = (char)v; break; }
+			case 'x': { int v = 0; while (p < e && c_xdigit((unsigned char)*p)) { v = v * 16 + (c_digit((unsigned char)*p) ? *p - '0' : c_lower((unsigned char)*p) - 'a' + 10); p++; } c = (char)v; break; }
 			default:
 				if (c >= '0' && c <= '7') {
 					int v = c - '0';
@@ -1158,7 +1182,9 @@ static size_t expand(As *a, char *o, Sv body, const Param *ps, const Sv *args, u
 			else xput(a, &o, args[k].s, args[k].n);
 			continue;
 		}
-		*o++ = b[i++];
+		const char *q = memchr(b + i + 1, '\\', n - i - 1);
+		size_t k = (q ? (size_t)(q - b) : n) - i;
+		memcpy(o, b + i, k); o += k; i += k;
 	}
 	(void)e;
 	return (size_t)(o - o0);
@@ -1486,7 +1512,8 @@ static int cond_dir(As *a, Sv w, const char *p, const char *e, int *rc)
 static int reg_alias(As *a, const char *s, size_t n, Sv *out)
 {
 	for (uint32_t i = a->nal; i-- > 0;)
-		if (a->al[i].name.n == n && !strncasecmp(a->al[i].name.s, s, n)) { *out = a->al[i].reg; return 1; }
+		if (a->al[i].name.n == n && c_lower((unsigned char)a->al[i].name.s[0]) == c_lower((unsigned char)s[0]) &&
+		    !strncasecmp(a->al[i].name.s, s, n)) { *out = a->al[i].reg; return 1; }
 	return 0;
 }
 
@@ -1494,7 +1521,7 @@ static int parse_regnum(const char *s, size_t n, int max)
 {
 	if (!n || n > 2) return -1;
 	int v = 0;
-	for (size_t i = 0; i < n; i++) { if (!isdigit((unsigned char)s[i])) return -1; v = v * 10 + s[i] - '0'; }
+	for (size_t i = 0; i < n; i++) { if (!c_digit((unsigned char)s[i])) return -1; v = v * 10 + s[i] - '0'; }
 	if (n == 2 && s[0] == '0') return -1;
 	return v <= max ? v : -1;
 }
@@ -1503,7 +1530,7 @@ static int arrangement(const char *s, size_t n)
 {
 	char b[8];
 	if (n >= sizeof b) return -1;
-	for (size_t i = 0; i < n; i++) b[i] = (char)tolower((unsigned char)s[i]);
+	for (size_t i = 0; i < n; i++) b[i] = (char)c_lower((unsigned char)s[i]);
 	b[n] = 0;
 	static const char *t[] = { "", "8b", "16b", "4h", "8h", "2s", "4s", "1d", "2d", "1q", "b", "h", "s", "d", "q" };
 	for (int i = 1; i < 15; i++) if (!strcmp(b, t[i])) return i;
@@ -1522,16 +1549,21 @@ static int parse_reg(As *a, const char *s, size_t n, A64Op *op, int depth)
 		memcpy(buf, al.s, al.n); memcpy(buf + al.n, s + bn, n - bn);
 		return parse_reg(a, buf, al.n + (n - bn), op, depth + 1);
 	}
-	char c = (char)tolower((unsigned char)s[0]);
+	char c = (char)c_lower((unsigned char)s[0]);
 	memset(op, 0, sizeof *op);
 	if (!dot) {
+		int r;
+		if (n >= 2 && c_digit((unsigned char)s[1])) {	/* the common case: x0, w12, v3, q1 ... */
+			if ((c == 'x' || c == 'w') && (r = parse_regnum(s + 1, n - 1, 30)) >= 0) {
+				op->kind = A64O_REG; op->cls = c == 'x' ? A64_X : A64_W; op->reg = (uint8_t)r; return 1;
+			}
+		} else if (n < 2 || n > 3) return 0;
 		if (sveqi(s, n, "sp")) { op->kind = A64O_REG; op->cls = A64_X; op->reg = 31; op->sp = 1; return 1; }
 		if (sveqi(s, n, "wsp")) { op->kind = A64O_REG; op->cls = A64_W; op->reg = 31; op->sp = 1; return 1; }
 		if (sveqi(s, n, "xzr")) { op->kind = A64O_REG; op->cls = A64_X; op->reg = 31; return 1; }
 		if (sveqi(s, n, "wzr")) { op->kind = A64O_REG; op->cls = A64_W; op->reg = 31; return 1; }
 		if (sveqi(s, n, "fp")) { op->kind = A64O_REG; op->cls = A64_X; op->reg = 29; return 1; }
 		if (sveqi(s, n, "lr")) { op->kind = A64O_REG; op->cls = A64_X; op->reg = 30; return 1; }
-		int r;
 		if ((c == 'x' || c == 'w') && (r = parse_regnum(s + 1, n - 1, 30)) >= 0) {
 			op->kind = A64O_REG; op->cls = c == 'x' ? A64_X : A64_W; op->reg = (uint8_t)r; return 1;
 		}
@@ -1594,7 +1626,7 @@ static int parse_imm(As *a, const char **pp, const char *e, A64Op *op)
 		const char *q = p;
 		if (q < e && (*q == '-' || *q == '+')) q++;
 		const char *d = q;
-		while (q < e && isdigit((unsigned char)*q)) q++;
+		while (q < e && c_digit((unsigned char)*q)) q++;
 		if (q > d && q < e && (*q == '.' || ((*q == 'e' || *q == 'E') && !(d[0] == '0' && q - d == 1)))) {
 			if (*q == '.' || *q == 'e' || *q == 'E') {
 				char tmp[64]; size_t k = (size_t)(e - p) < 63 ? (size_t)(e - p) : 63;
@@ -1671,7 +1703,18 @@ static int names_ops(const char *m, size_t n)
 	static const char *t[] = { "msr", "mrs", "sys", "sysl", "dmb", "dsb", "isb", "prfm", "prfum", "dc", "ic", "at",
 				   "tlbi", "bti", "csel", "csinc", "csinv", "csneg", "cset", "csetm", "cinc", "cinv",
 				   "cneg", "ccmp", "ccmn", "fcsel", "fccmp", "fccmpe", "hint", "psb", "tsb", "clrex", "sb", 0 };
-	for (int i = 0; t[i]; i++) if (sveqi(m, n, t[i])) return 1;
+	static uint64_t k[sizeof t / sizeof t[0]];	/* names packed little-endian */
+	static int nk;
+	if (n > 8) return 0;
+	if (!nk) {	/* benign race: every thread writes the same values */
+		int j;
+		for (j = 0; t[j]; j++) { uint64_t v = 0; memcpy(&v, t[j], strlen(t[j])); k[j] = v; }
+		__atomic_store_n(&nk, j, __ATOMIC_RELEASE);
+	}
+	uint64_t v = 0;
+	memcpy(&v, m, n);	/* m is lowercase already */
+	int c = __atomic_load_n(&nk, __ATOMIC_ACQUIRE);
+	for (int i = 0; i < c; i++) if (k[i] == v) return 1;
 	return 0;
 }
 
@@ -1730,7 +1773,7 @@ static int instruction(As *a, const char *p, const char *e)
 	(void)0;
 	size_t mlen = (size_t)(p - s);
 	if (mlen >= sizeof mn) return err(a, "invalid instruction mnemonic");
-	for (size_t i = 0; i < mlen; i++) mn[i] = (char)tolower((unsigned char)s[i]);
+	for (size_t i = 0; i < mlen; i++) mn[i] = (char)c_lower((unsigned char)s[i]);
 	mn[mlen] = 0;
 	int names = names_ops(mn, mlen);
 	A64Op ops[MAXOPS];
@@ -1778,7 +1821,7 @@ static int instruction(As *a, const char *p, const char *e)
 				p++;
 				op->idx = (uint8_t)ix; op->hasidx = 1;
 			}
-		} else if (c == '#' || c == ':' || c == '(' || c == '-' || c == '+' || c == '~' || isdigit((unsigned char)c)) {
+		} else if (c == '#' || c == ':' || c == '(' || c == '-' || c == '+' || c == '~' || c_digit((unsigned char)c)) {
 			if (parse_imm(a, &p, e, op)) return -1;
 		} else if (isids((unsigned char)c)) {
 			const char *t = p;
@@ -1797,7 +1840,7 @@ static int instruction(As *a, const char *p, const char *e)
 					op->kind = A64O_VELEM; op->idx = (uint8_t)ix; op->hasidx = 1;
 					p = q + 1;
 				}
-			} else if ((k = shift_kind(t, tn)) >= 0 && (q >= e || *q == '#' || *q == ',' || *q == '(' || isdigit((unsigned char)*q))) {
+			} else if ((k = shift_kind(t, tn)) >= 0 && (q >= e || *q == '#' || *q == ',' || *q == '(' || c_digit((unsigned char)*q))) {
 				op->kind = A64O_SHIFT; op->shift = (uint8_t)k;
 				p = q;
 				if (p < e && *p != ',') {
@@ -1860,7 +1903,7 @@ enc:;
 
 static int define_label(As *a, const char *s, size_t n)
 {
-	if (isdigit((unsigned char)s[0])) {
+	if (c_digit((unsigned char)s[0])) {
 		uint32_t num = 0;
 		for (size_t i = 0; i < n; i++) num = num * 10 + (uint32_t)(s[i] - '0');
 		NumLab *nl = numlab(a, num);
@@ -2041,21 +2084,20 @@ static int statement(As *a, const char *p, const char *e)
 	if (cond_ignore(a)) return 0;
 	/* labels */
 	for (;;) {
-		w = first_word(p, e);
 		if (!w.n) break;
 		const char *q = ws(w.s + w.n, e);
 		if (q < e && *q == ':') {
 			int numeric = 1;
-			for (uint32_t i = 0; i < w.n; i++) if (!isdigit((unsigned char)w.s[i])) numeric = 0;
-			if (!numeric && isdigit((unsigned char)w.s[0])) break;
+			for (uint32_t i = 0; i < w.n; i++) if (!c_digit((unsigned char)w.s[i])) numeric = 0;
+			if (!numeric && c_digit((unsigned char)w.s[0])) break;
 			if (define_label(a, w.s, w.n)) return -1;
 			p = ws(q + 1, e);
 			if (p >= e) return 0;
+			w = first_word(p, e);
 			continue;
 		}
 		break;
 	}
-	w = first_word(p, e);
 	if (!w.n) return err(a, "unexpected token at start of statement");
 	const char *q = ws(w.s + w.n, e);
 	if (q < e && *q == '=' && !(q + 1 < e && q[1] == '=')) return assign(a, w, q + 1, e);
@@ -2089,6 +2131,8 @@ As *as_new(void)
 	return a;
 }
 
+void as_stats(const As *a, uint64_t *stmts, uint64_t *bytes) { *stmts = a->nstmt; *bytes = a->nstmtb; }
+
 void as_free(As *a)
 {
 	munmap(a->xs.base, a->xs.cap); munmap(a->defs.base, a->defs.cap); munmap(a->sb.base, a->sb.cap);
@@ -2121,6 +2165,7 @@ int as_run(As *a, ElfObj *o, const char *text, size_t len, const char *name, con
 		const char *raw;
 		size_t n = next_stmt(a, f, &raw);
 		const char *s = (const char *)a->sb.base;
+		a->nstmt++; a->nstmtb += n + 1;
 		if (statement(a, s, s + n)) {
 			size_t k = strlen(a->msg);
 			snprintf(a->msg + k, sizeof a->msg - k, "\n  in: %.*s", (int)(n > 200 ? 200 : n), s);

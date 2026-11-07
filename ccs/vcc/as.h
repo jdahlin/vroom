@@ -5,6 +5,7 @@
  * uses), writing into an ElfObj.  One As per thread.
  */
 #include <stddef.h>
+#include <stdint.h>
 #include "elf.h"
 
 typedef struct As As;
@@ -15,6 +16,9 @@ void as_free(As *a);
  * name is used for messages; dir resolves relative .incbin paths (NULL =
  * cwd).  Returns 0 on success; on error *msg points at a message. */
 int as_run(As *a, ElfObj *o, const char *text, size_t len, const char *name, const char **msg);
+
+/* statements run (after macro/loop expansion) and their bytes, cumulative */
+void as_stats(const As *a, uint64_t *stmts, uint64_t *bytes);
 
 extern int as_trace;
 
