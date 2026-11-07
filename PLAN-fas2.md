@@ -273,14 +273,18 @@ förprocessas 121 gånger.
 Varje steg verifieras differentiellt mot clang/lld, som bara används som referens och
 aldrig i bygget. Ett TU-test (`bench/vcc-diff.py`) körs över alla kärnfiler.
 
-### Status 2.3 (2026-11-07): första version, paritet klar för kärnan
+### Status 2.3 (2026-11-07): klar
 - `ccs/vcc/pp.c` (+ `pp.h`): pull-modell (`pp_next`), kontextstack utan kopiering (filer och objektliknande makrokroppar pekar in i tokencachens arrayer), funktionsliknande expansioner i en per-TU-arena som nollställs när stacken är nere på filnivå. Expansionen är en port av clangs TokenLexer-logik: disable-bit per makro (bit 0 i makrotabellens post) + paint-bit, pre-expansion bara om argumentet nämner ett makro, pop av färdiga kontexter före `(`, GNU `, ## __VA_ARGS__`, whitespace-propagering (syns i `#x`), `__LINE__` = expansionens slut för ##-operander.
 - Per fil (delat, byggs en gång, publiceras atomiskt i `vlex_file.pp`): direktivskelett med `#if`→`#elif`/`#else`/`#endif`-länkar (en falsk grupp = ett hopp, inga tokens rörs) och include-guard (`#ifndef X` / `#if !defined(X)`) → filen hoppas över utan att öppnas igen.
 - Makrotabell indexerad med identifierar-id (tvånivå, 2048-postssidor), ingen hashning. Predefines + `__has_*`-svar tas från clang en gång (`gen-ppdata.sh` → `ppdata*.inc`), som caps.c; vcc kör aldrig clang.
 - **Acceptans:** `bench/vcc-diff.py cmp --kernel`: **840/840 kärn-TU:er token-identiska med `clang -E -P`** (art + stavning, lexat med vcc:s lexer). Referenser: `bench/vcc-diff.py ref` → `work/ppref/`.
 - Fart (`vpp`, en TU per process): kernel/fork.c 78 ms kallt / 29 ms med varm tokencache; clang -E 310 ms. async.c 49/15 ms mot 170 ms.
-- Kvar: host-TU:er (`scripts/`, behöver macOS-SDK-predefines och sökvägar), `__VA_OPT__`, `#line`, `.S`/assembler-with-cpp, katalogcache (include-uppslag går nu via tokencachens MISSING-poster: ett open() per kandidat första gången), in i `vccd`, och 2.4 (header-cache) för att komma under 0,5 s totalt.
-
+- Host-TU:er (`scripts/`): Darwin-predefines, clangs resource-include + SDK `usr/include`, framework-kataloger (`<A/b.h>` → `A.framework/Headers/b.h`), `__has_*`-tabell med två kolumner (linux, darwin) genererad över alla SDK-/kärnidentifierare.
+- `__VA_OPT__` (inkl. placemarker vid `##`), `#line` (påverkar `__LINE__`/`__FILE__`), assembler-with-cpp (`.S`, `.lds.S`, `.dts`: okända direktiv och `# N "fil"` passerar, `#` utan parameter, ogiltig paste lämnar båda tokens, `__ASSEMBLER__`), `-undef`.
+- Katalogcache (`dircache.c`): ENOENT-open() kostar ~3 µs och serialiseras systemvitt; 94 % av missarna ligger i kataloger som inte finns, så cachen minns bara om en katalog finns (en stat per katalog, låsfri, delad mellan trådar). Listning med getattrlistbulk provades och var långsammare.
+- `ppdriver.c`: clang-argv, predefines, `-E -P`-utskrift och `-MMD`/`-MD`-deps (clangs ordning, `./` strippas) bakom `ppd_run()`; används av `vpp` och av `vccd`, som nu kör `cc -E`-jobb själv (`VCC_PP=0` → clang). Fatala fel longjmp:ar, `pp_close` frigör allt.
+- **Acceptans:** `bench/vcc-diff.py cmp -j 6`: **911/912 TU:er token-identiska** (840 C + 39 .S + 32 lds/dts i kärnan, + host). Undantaget, `scripts/mod/modpost.c`, behöver en genererad `module-offsets.h` som clang inte heller hittar. Via `vcc`-shimmen → `vccd`: vmlinux.lds, vdso.lds och empty_root.dtb identiska med clang inkl. dep-filer, 0,5–3,4 ms per jobb.
+- Kvar → 2.4 (header-cache/prefix-snapshot) för att komma under 0,5 s totalt.
 ## Risker
 - **GNU C-ytan och inline asm** är det stora jobbet. Uppskattat: lexer + pp ~2 kloc,
   parser + sema ~10–15 kloc, emitter ~5 kloc, assembler ~4 kloc, länkare ~3 kloc.
