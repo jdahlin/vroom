@@ -40,10 +40,12 @@ $(OUT)/vld $(OUT)/vas: $(OUT)/vcc
 	ln -sf vcc $@
 
 # vlink: the linker (ld.c) as a standalone tool; vobjcopy/vnm by argv[0]
-LD_SRC = vcc/ld.c vcc/ldhash.c
-LD_HDR = vcc/ld.h vcc/ldhash.h
+LD_SRC = vcc/ld.c vcc/ldhash.c vcc/objcopy.c
+LD_HDR = vcc/ld.h vcc/ldhash.h vcc/ldelf.h
 $(OUT)/vlink: $(LD_SRC) $(LD_HDR) | $(OUT)
 	/usr/bin/clang $(VCC_CFLAGS) -O3 -mcpu=apple-m1 -pthread -DVLD_MAIN $(LD_SRC) -o $@
+	ln -sf vlink $(OUT)/vobjcopy
+	ln -sf vlink $(OUT)/vnm
 
 $(OUT)/vccd: vcc/vccd.c vcc/caps.c vcc/caps.h vcc/warnings.inc protocol.h $(PP_SRC) $(PP_HDR) $(LEX_SRC) $(LEX_HDR) | $(OUT)
 	/usr/bin/clang $(VCC_CFLAGS) -O3 -mcpu=apple-m1 -pthread vcc/vccd.c vcc/caps.c $(PP_SRC) $(LEX_SRC) -o $@
