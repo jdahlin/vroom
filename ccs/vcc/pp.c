@@ -360,7 +360,13 @@ struct pp {
 	vlex_file builtin;
 	const char *base_name;
 	uint32_t base_namelen;
-	int warned_line;
+	struct lmark {		/* #line / GNU line markers */
+		uint32_t fe, off;	/* in fent fe, from byte offset off on */
+		uint32_t pline, line;	/* physical line pline is line */
+		const char *name;	/* presumed file name, or NULL */
+		uint32_t namelen;
+	} *lm;
+	uint32_t nlm;
 };
 
 /* ---------------- diagnostics ---------------- */
@@ -383,8 +389,30 @@ static const fent *loc_fent(const pp *p, uint32_t loc)
 static uint32_t loc_line(const pp *p, uint32_t loc)
 {
 	const fent *e = loc_fent(p, loc);
+	uint32_t l, fe;
 
-	return e ? file_line(e->f, e->fi, loc - e->base) : 0;
+	if (!e)
+		return 0;
+	l = file_line(e->f, e->fi, loc - e->base);
+	fe = (uint32_t)(e - p->fe);
+	for (uint32_t i = p->nlm; i-- > 0;)
+		if (p->lm[i].fe == fe && p->lm[i].off <= loc - e->base)
+			return p->lm[i].line + (l - p->lm[i].pline);
+	return l;
+}
+
+/* the presumed file name at loc in file context fc (#line can change it) */
+static const char *presumed_name(const pp *p, uint32_t fe, uint32_t loc, uint32_t *len)
+{
+	const fent *e = &p->fe[fe];
+
+	for (uint32_t i = p->nlm; i-- > 0;)
+		if (p->lm[i].fe == fe && p->lm[i].off <= loc - e->base && p->lm[i].name) {
+			*len = p->lm[i].namelen;
+			return p->lm[i].name;
+		}
+	*len = e->namelen;
+	return e->name;
 }
 
 static void diag(pp *p, uint32_t loc, const char *what, const char *fmt, ...)
@@ -971,39 +999,36 @@ static size_t append(pp *p, const ptok *t, uint32_t n)
 }
 
 /* substitute arguments into m's body (clang's ExpandFunctionArguments), paste, push */
-static int subst(pp *p, const pmacro *m, const ptok *name, margs *a, uint32_t eloc)
+static uint32_t va_opt(pp *p, const pmacro *m, margs *a, uint32_t i, uint32_t to, size_t base,
+		       uint32_t eloc, bool *ngsp, bool str);
+
+/* substitute body[from, to) into sv (clang's ExpandFunctionArguments) */
+static void subst_range(pp *p, const pmacro *m, margs *a, uint32_t from, uint32_t to, size_t base,
+			uint32_t eloc, bool *ngsp)
 {
 	const vtok *body = m->body;
 	const uint8_t *pidx = m->pidx;
-	uint32_t nb = m->nbody, np = m->nparam, n;
-	uint8_t nf = name->flags & (TF_SOL | TF_SPACE);
-	bool ngs = false, va = m->flags & MF_VARIADIC;
-	size_t base;
-	ptok t, *r;
+	uint32_t np = m->nparam;
+	bool ngs = *ngsp, va = m->flags & MF_VARIADIC;
+	ptok t;
 
-	/* pre-expand first: it pushes contexts and uses sv */
-	if (a && pidx) {
-		for (uint32_t i = 0; i < nb; i++) {
-			uint32_t k = pidx[i];
-
-			if (!k || a->prest[k - 1])
-				continue;
-			if (i && body[i - 1].kind == T_HASH)
-				continue;
-			if ((i && body[i - 1].kind == T_HASHHASH) || (i + 1 < nb && body[i + 1].kind == T_HASHHASH))
-				continue;
-			preexpand(p, a, k - 1);
-		}
-	}
-	base = p->svn;
-	for (uint32_t i = 0; i < nb; i++) {
+	for (uint32_t i = from; i < to; i++) {
 		const vtok *cur = &body[i];
 		uint32_t k = pidx ? pidx[i] : 0;
 		bool before_nonempty, before, after;
 
 		if (i && (cur->flags & TF_SPACE))
 			ngs = true;
-		if (cur->kind == T_HASH && m->kind == MK_FUNC && i + 1 < nb && pidx && pidx[i + 1]) {
+		if (unlikely(cur->kind == T_IDENT && cur->id == KW_VA_OPT && va)) {
+			i = va_opt(p, m, a, i, to, base, eloc, &ngs, false);
+			continue;
+		}
+		if (unlikely(cur->kind == T_HASH && m->kind == MK_FUNC && i + 1 < to &&
+			     body[i + 1].kind == T_IDENT && body[i + 1].id == KW_VA_OPT && va)) {
+			i = va_opt(p, m, a, i + 1, to, base, eloc, &ngs, true);
+			continue;
+		}
+		if (cur->kind == T_HASH && m->kind == MK_FUNC && i + 1 < to && pidx && pidx[i + 1]) {
 			uint32_t j = pidx[i + 1] - 1;
 
 			stringify(p, a->tok + a->st[j], a->ln[j], &t);
@@ -1017,7 +1042,7 @@ static int subst(pp *p, const pmacro *m, const ptok *name, margs *a, uint32_t el
 		}
 		before_nonempty = p->svn > base && hashhash(&p->sv[p->svn - 1]);
 		before = i && body[i - 1].kind == T_HASHHASH;
-		after = i + 1 < nb && body[i + 1].kind == T_HASHHASH;
+		after = i + 1 < to && body[i + 1].kind == T_HASHHASH;
 		if (!k) {
 			vfill(&t, cur, m->src, eloc);
 			t.flags &= ~(TF_SOL | TF_SPACE);
@@ -1070,6 +1095,88 @@ static int subst(pp *p, const pmacro *m, const ptok *name, margs *a, uint32_t el
 		if (va && k == np - 1)
 			remove_va_comma(p, base, &ngs);
 	}
+	*ngsp = ngs;
+}
+
+/*
+ * __VA_OPT__(...) at body[i] (C23 6.10.5.1): the content if the variadic
+ * argument is non-empty after expansion, else a placemarker.  With str,
+ * the result is stringified (#__VA_OPT__).  Returns the index of its ')'.
+ */
+static uint32_t va_opt(pp *p, const pmacro *m, margs *a, uint32_t i, uint32_t to, size_t base,
+		       uint32_t eloc, bool *ngsp, bool str)
+{
+	const vtok *body = m->body;
+	uint32_t k = m->nparam - 1, b = i + 2, e = b, depth = 0;
+	size_t start = p->svn;
+	bool before = i && body[i - 1].kind == T_HASHHASH && !str;
+
+	for (; e < to; e++) {
+		if (body[e].kind == T_LPAREN)
+			depth++;
+		else if (body[e].kind == T_RPAREN && !depth--)
+			break;
+	}
+	if (i + 1 >= to || body[i + 1].kind != T_LPAREN || e >= to) {
+		error(p, eloc, "__VA_OPT__ must be followed by a parenthesized list");
+		return to;
+	}
+	if (!a->prest[k])
+		preexpand(p, a, k);
+	if (a->preln[k]) {
+		bool ngs = false;
+
+		subst_range(p, m, a, b, e, start, eloc, &ngs);
+	}
+	if (str) {
+		ptok t;
+		uint32_t n;
+		const ptok *r = svtake(p, start, &n);
+
+		stringify(p, r, n, &t);
+		t.loc = eloc;
+		if (*ngsp)
+			t.flags |= TF_SPACE;
+		svpush(p, &t);
+	} else if (p->svn == start) {
+		/* placemarker: a ## pm ## d is a ## d; pm ## d is d; a ## pm is a */
+		if (e + 1 < to && body[e + 1].kind == T_HASHHASH)
+			e++;
+		else if (before && p->svn > base && hashhash(&p->sv[p->svn - 1]))
+			p->svn--;
+	} else {
+		p->sv[start].flags = (p->sv[start].flags & ~(TF_SOL | TF_SPACE)) | (*ngsp ? TF_SPACE : 0);
+	}
+	*ngsp = false;
+	return e;
+}
+
+static int subst(pp *p, const pmacro *m, const ptok *name, margs *a, uint32_t eloc)
+{
+	const vtok *body = m->body;
+	const uint8_t *pidx = m->pidx;
+	uint32_t nb = m->nbody, n;
+	uint8_t nf = name->flags & (TF_SOL | TF_SPACE);
+	bool ngs = false;
+	size_t base;
+	ptok *r;
+
+	/* pre-expand first: it pushes contexts and uses sv */
+	if (a && pidx) {
+		for (uint32_t i = 0; i < nb; i++) {
+			uint32_t k = pidx[i];
+
+			if (!k || a->prest[k - 1])
+				continue;
+			if (i && body[i - 1].kind == T_HASH)
+				continue;
+			if ((i && body[i - 1].kind == T_HASHHASH) || (i + 1 < nb && body[i + 1].kind == T_HASHHASH))
+				continue;
+			preexpand(p, a, k - 1);
+		}
+	}
+	base = p->svn;
+	subst_range(p, m, a, 0, nb, base, eloc, &ngs);
 	/* token pasting, left to right */
 	if (m->flags & MF_PASTE) {
 		size_t w = base, e = p->svn;
@@ -1364,9 +1471,13 @@ static int builtin(pp *p, const pmacro *m, ptok *t)
 		mknum(p, t, loc_line(p, t->loc));
 		break;
 	case B_FILE: {
-		const fent *e = &p->fe[fc->fe];
+		uint32_t l, loc = t->loc;
+		const char *s;
 
-		mkstr(p, t, e->name, e->namelen);
+		if (loc < p->fe[fc->fe].base || loc > p->fe[fc->fe].base + p->fe[fc->fe].f->size)
+			loc = p->fe[fc->fe].base + fc->vt[fc->i ? fc->i - 1 : 0].off;
+		s = presumed_name(p, fc->fe, loc, &l);
+		mkstr(p, t, s, l);
 		break;
 	}
 	case B_FILE_NAME: {
@@ -1954,12 +2065,11 @@ static void define(pp *p, ctx *c, uint32_t b, uint32_t e)
 	}
 	if (m->kind == MK_FUNC)
 		for (uint32_t j = 0; j < m->nbody; j++)
-			if (m->body[j].kind == T_HASH && !(j + 1 < m->nbody && pidx && pidx[j + 1])) {
+			if (m->body[j].kind == T_HASH && !(j + 1 < m->nbody && pidx && pidx[j + 1]) &&
+			    !(j + 1 < m->nbody && m->body[j + 1].kind == T_IDENT && m->body[j + 1].id == KW_VA_OPT)) {
 				error(p, c->loc + m->body[j].off, "'#' is not followed by a macro parameter");
 				return;
 			}
-	if (m->flags & MF_VAOPT)
-		error(p, c->loc + vt[b].off, "__VA_OPT__ is not supported yet");
 	mset(p, m->name, m);
 	return;
 bad:
@@ -2215,6 +2325,56 @@ static int pragma_text(pp *p, const char *s, size_t n, uint32_t loc, ptok *out)
 	return 1;
 }
 
+/* #line N ["file"] (macro-expanded) or # N "file" flags (GNU line marker) */
+static void line_directive(pp *p, ctx *c, uint32_t b, uint32_t e, bool expand_line, uint32_t loc)
+{
+	int d = p->depth;
+	const vtok *last = &c->vt[e - 1];
+	struct lmark *m;
+	ptok n, f;
+	ival v;
+
+	push_line(p, c, b, e);
+	if (expand_line) {
+		next_exp(p, &n);
+		next_exp(p, &f);
+	} else {
+		raw(p, &n);
+		raw(p, &f);
+	}
+	if (n.kind != T_NUMBER) {
+		pop_to(p, d);
+		error(p, loc, "#line directive requires a positive integer argument");
+		return;
+	}
+	v = parse_number(p, &n);
+	if (p->nlm == 65536) {
+		pop_to(p, d);
+		return;
+	}
+	m = &p->lm[p->nlm++];
+	m->fe = c->fe;
+	m->off = last->off + last->len;
+	m->pline = file_line(c->f, c->fi, m->off) + 1;
+	m->line = (uint32_t)v.v;
+	m->name = NULL;
+	if (f.kind == T_STRING) {
+		char tmp[f.len + 1], *w;
+		size_t l;
+		const char *s = pp_spell(&f, tmp, &l);
+
+		w = alloc(&p->perm, l + 1);
+		m->name = w;
+		for (size_t i = 1; i + 1 < l; i++) {
+			if (s[i] == '\\' && i + 2 < l)
+				i++;
+			*w++ = s[i];
+		}
+		m->namelen = (uint32_t)(w - m->name);
+	}
+	pop_to(p, d);
+}
+
 /* run the directive at c->i; 1 if it produced a token in *out */
 static int directive(pp *p, ctx *c, ptok *out)
 {
@@ -2276,8 +2436,7 @@ static int directive(pp *p, ctx *c, ptok *out)
 		return 0;
 	}
 	case D_LINE: case D_LINEMARK:
-		if (!p->warned_line++)
-			warn(p, loc, "#line is not supported yet, ignored");
+		line_directive(p, c, d->kind == D_LINE ? b + 1 : b, e, d->kind == D_LINE, loc);
 		return 0;
 	default:
 		error(p, loc, "invalid preprocessing directive");
@@ -2335,6 +2494,7 @@ pp *pp_open(const pp_opts *o)
 	p->fe = vm((1u << 20) * sizeof(fent));
 	p->once = alloc(&p->perm, 4096 * sizeof(*p->once));
 	p->pushed = alloc(&p->perm, 4096 * sizeof(*p->pushed));
+	p->lm = vm(65536 * sizeof(*p->lm));
 	for (size_t i = 0; i < sizeof(bi) / sizeof(bi[0]); i++)
 		def_builtin(p, bi[i].n, bi[i].b);
 
