@@ -88,14 +88,22 @@ static vlex_file lexbuf(const char *s, size_t n)
 	vlex_file f = { 0 };
 	char *src = mmap(NULL, n + 4096, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANON, -1, 0);
 	vtok *tok = mmap(NULL, (n + 2) * sizeof(vtok), PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANON, -1, 0);
-	void *scr = mmap(NULL, vlex_scratch_size(n) + 4096, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANON, -1, 0);
+	size_t sn = vlex_scratch_size(n) + 4096;
+	void *scr = mmap(NULL, sn, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANON, -1, 0);
 
 	memcpy(src, s, n);
 	f.src = src;
 	f.size = (uint32_t)n;
 	f.ntok = vlex(src, n, tok, scr);
 	f.tok = tok;
+	munmap(scr, sn);
 	return f;
+}
+
+static void lexfree(vlex_file *f)
+{
+	munmap((void *)f->src, f->size + 4096);
+	munmap((void *)f->tok, (f->size + 2) * sizeof(vtok));
 }
 
 static size_t clean(const vlex_file *f, const vtok *t, char *b)
@@ -129,22 +137,43 @@ static void show(const char *what, const vlex_file *f, uint32_t i)
 	fputc('\n', stderr);
 }
 
+static int cmp_toks(const vlex_file *pa, const vlex_file *pb, char *ba, char *bb);
+
 int ppd_compare(const char *ours, size_t on, const char *refpath)
 {
 	vintern_init();
 	int fd = open(refpath, O_RDONLY);
 	struct stat st;
-	char *r;
 	vlex_file A, B;
-	static char ba[1 << 20], bb[1 << 20];
+	static _Thread_local char *ba, *bb;
+	int r;
 
 	if (fd < 0 || fstat(fd, &st)) {
 		perror(refpath);
 		return 2;
 	}
-	r = mmap(NULL, (size_t)st.st_size + 1, PROT_READ, MAP_PRIVATE, fd, 0);
-	A = lexbuf(ours, on);
-	B = lexbuf(r, (size_t)st.st_size);
+	if (!ba) {
+		ba = malloc(1 << 20);
+		bb = malloc(1 << 20);
+	}
+	{
+		char *m = mmap(NULL, (size_t)st.st_size + 1, PROT_READ, MAP_PRIVATE, fd, 0);
+
+		close(fd);
+		A = lexbuf(ours, on);
+		B = lexbuf(m, (size_t)st.st_size);
+		munmap(m, (size_t)st.st_size + 1);
+	}
+	r = cmp_toks(&A, &B, ba, bb);
+	lexfree(&A);
+	lexfree(&B);
+	return r;
+}
+
+static int cmp_toks(const vlex_file *pa, const vlex_file *pb, char *ba, char *bb)
+{
+	const vlex_file A = *pa, B = *pb;
+
 	for (uint32_t i = 0;; i++) {
 		const vtok *x = &A.tok[i], *y = &B.tok[i];
 		size_t nx, ny;

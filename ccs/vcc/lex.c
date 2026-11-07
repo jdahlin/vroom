@@ -822,14 +822,21 @@ uint32_t vlex(const char *s, size_t n, vtok *out, void *scratch)
 			{ " \t\v\f\n\r", &&l_space },
 		};
 
-		pthread_once(&tables_once, init_tables);
-		init_struct_tables();
-		for (int c = 1; c < 256; c++)
-			disp[c] = c >= 0x80 ? &&l_high : isid[c] ? &&l_ident : &&l_other;
-		for (unsigned i = 0; i < sizeof(map) / sizeof(map[0]); i++)
-			for (const char *c = map[i].chars; *c; c++)
-				disp[(uint8_t)*c] = map[i].label;
-		atomic_store_explicit((_Atomic(const void *) *)&disp[0], &&l_nul, memory_order_release);
+		/*
+		 * Re-check under the lock: a second initialization would
+		 * briefly point '"', '/', '\\' ... at l_other while another
+		 * thread is already lexing with the table.
+		 */
+		if (!atomic_load_explicit((_Atomic(const void *) *)&disp[0], memory_order_relaxed)) {
+			pthread_once(&tables_once, init_tables);
+			init_struct_tables();
+			for (int c = 1; c < 256; c++)
+				disp[c] = c >= 0x80 ? &&l_high : isid[c] ? &&l_ident : &&l_other;
+			for (unsigned i = 0; i < sizeof(map) / sizeof(map[0]); i++)
+				for (const char *c = map[i].chars; *c; c++)
+					disp[(uint8_t)*c] = map[i].label;
+			atomic_store_explicit((_Atomic(const void *) *)&disp[0], &&l_nul, memory_order_release);
+		}
 		pthread_mutex_unlock(&lock);
 	}
 
@@ -1271,7 +1278,7 @@ static _Thread_local size_t scratch_size;
  */
 static char *read_file(int fd, size_t size, size_t *got)
 {
-	char *b = arena(size + 128);	/* fresh arena memory is zero */
+	char *b = arena(size + 128);	/* not always fresh: arena_trim gives tails back */
 	size_t n = 0;
 
 	while (n < size) {
@@ -1283,6 +1290,7 @@ static char *read_file(int fd, size_t size, size_t *got)
 			break;
 		n += (size_t)r;
 	}
+	memset(b + n, 0, 128);
 	*got = n;
 	return b;
 }
@@ -1376,6 +1384,7 @@ static centry *centry_get(const char *path, size_t len, int st0, bool *ins)
 		if (!e) {
 			if (!mine) {
 				mine = arena(sizeof(*mine) + len + 1);
+				memset(mine, 0, sizeof(*mine));
 				mine->hash = h;
 				mine->len = (uint32_t)len;
 				memcpy(mine->path, path, len);

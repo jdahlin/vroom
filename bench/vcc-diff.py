@@ -4,6 +4,8 @@
   bench/vcc-diff.py ref [-j N]          clang -E -P for every C TU -> work/ppref/
   bench/vcc-diff.py cmp [-j N] [PAT]    vpp --cmp against the references
   bench/vcc-diff.py args TU             the clang argv for one TU (for vpp)
+  bench/vcc-diff.py batch [-j N] [--cmp] [PAT]
+                                        all TUs in one vpp process (vpp --batch)
 
 TUs come from work/build-o0/**/.*.o.cmd (savedcmd_X := ...); each command
 runs in work/build-o0.  The comparison is a token stream (kind, spelling),
@@ -51,7 +53,7 @@ def cmp(t):
     return obj, p.returncode, (p.stdout + p.stderr)[-1500:]
 
 if __name__ == '__main__':
-    av = [a for a in sys.argv[1:] if a != '--kernel']; j = 6
+    av = [a for a in sys.argv[1:] if a not in ('--kernel', '--cmp')]; j = 6
     if '-j' in av: k = av.index('-j'); j = int(av[k+1]); del av[k:k+2]
     mode = av[0]; pat = av[1] if len(av) > 1 else None
     if mode == 'args':
@@ -59,6 +61,12 @@ if __name__ == '__main__':
         sys.exit(0)
     ts = tus(pat)
     if '--kernel' in sys.argv: ts = [t for t in ts if not t[0].startswith('scripts/')]
+    if mode == 'batch':
+        jf = f'/tmp/vcc-batch-{os.getpid()}.jobs'
+        with open(jf, 'w') as f:
+            for obj, a in ts: f.write('\x1f'.join([refname(obj)] + a) + '\n')
+        r = subprocess.run([VPP, '--batch', jf, '-j', str(j), '-C', B] + (['--cmp'] if '--cmp' in sys.argv else []))
+        os.unlink(jf); sys.exit(r.returncode)
     with Pool(j) as pool:
         res = pool.map(mkref if mode == 'ref' else cmp, ts, chunksize=4)
     bad = [r for r in res if r[1]]

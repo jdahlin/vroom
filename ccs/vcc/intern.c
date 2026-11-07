@@ -1,5 +1,6 @@
 #include <arm_acle.h>
 #include <stdatomic.h>
+#include <pthread.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -167,7 +168,7 @@ uint32_t vintern_count(void)
 	return atomic_load(&nent) - 1;
 }
 
-void vintern_init(void)
+static void init_once(void)
 {
 	static const char *const kw[] = {
 #define X(k) #k,
@@ -176,8 +177,6 @@ void vintern_init(void)
 		"__VA_ARGS__", "__VA_OPT__",
 	};
 
-	if (slots)
-		return;
 	/* lazily backed: only touched pages cost anything */
 	slots = reserve(NSLOT * sizeof(*slots));
 	vintern_ents = reserve(MAX_ENT * sizeof(*vintern_ents));
@@ -191,6 +190,13 @@ void vintern_init(void)
 			abort();
 		}
 	}
+}
+
+void vintern_init(void)
+{
+	static pthread_once_t once = PTHREAD_ONCE_INIT;
+
+	pthread_once(&once, init_once);
 }
 
 vintern_cache *vintern_local(void)
