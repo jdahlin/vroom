@@ -8,6 +8,8 @@
  *
  *   - answers toolchain probes (cc-option, ld-option, ...) from the
  *     capability table in caps.c, without running anything;
+ *   - runs preprocessing jobs (-E: kbuild's linker scripts and device
+ *     trees) itself, with vcc's preprocessor (ppdriver.c), in this thread;
  *   - forwards everything else to the current backend: C compiles to
  *     vroomd (clang, temporary until vcc's own compiler exists), links to
  *     vroom-ld/ld.lld.
@@ -16,6 +18,7 @@
  *
  *   vccd [--sock PATH] [--backend-sock PATH] [--ld PATH] [--lld PATH] [-j N]
  *   VCC_LOG=1   log one line per request to stderr (kind, ms, argv[0..2])
+ *   VCC_PP=0    send -E jobs to the backend too (clang)
  */
 #include <errno.h>
 #include <fcntl.h>
@@ -39,15 +42,16 @@
 
 #include "../protocol.h"
 #include "caps.h"
+#include "ppdriver.h"
 
 #define MAX_STRS	(VROOM_MAX_PAYLOAD / 2)
 
 static const char *backend_sock = "/tmp/vroomd.sock";
 static const char *ld_backend;		/* full links (vroom-ld) */
 static const char *lld = "/opt/homebrew/bin/ld.lld";
-static bool log_requests;
+static bool log_requests, own_pp = true;
 
-static atomic_ulong n_probe, n_fwd, n_spawn;
+static atomic_ulong n_probe, n_fwd, n_spawn, n_pp;
 
 /* ---------------- work queue: accepted sockets ---------------- */
 
@@ -290,6 +294,20 @@ static int ld_probe(const struct req *r)
 	return 0;
 }
 
+/* ---------------- preprocessing ---------------- */
+
+/* -E on a named file (not stdin): vcc's preprocessor handles it */
+static bool cc_is_pp(const struct req *r)
+{
+	bool e = false;
+	const char *last = r->argv[r->argc - 1];
+
+	for (int i = 1; i < r->argc; i++)
+		e |= !strcmp(r->argv[i], "-E");
+	return e && own_pp && last[0] != '-' && (strstr(last, ".c") || strstr(last, ".S") ||
+						  strstr(last, ".dts") || strstr(last, ".lds"));
+}
+
 /* ---------------- forwarding ---------------- */
 
 /* relay the request unchanged to another vroom-protocol server */
@@ -391,6 +409,13 @@ static int handle(const struct req *r, const char **kind)
 		atomic_fetch_add(&n_probe, 1);
 		return cc_probe(r);
 	}
+	if (cc_is_pp(r)) {
+		ppd_env e = { r->cwd, r->fds[1], r->fds[2] };
+
+		*kind = "cc-E";
+		atomic_fetch_add(&n_pp, 1);
+		return ppd_run(r->argc, r->argv, &e);
+	}
 	*kind = "cc";
 	atomic_fetch_add(&n_fwd, 1);
 	return forward(r, backend_sock);
@@ -455,6 +480,7 @@ int main(int argc, char **argv)
 		}
 	}
 	log_requests = getenv("VCC_LOG");
+	own_pp = !getenv("VCC_PP") || strcmp(getenv("VCC_PP"), "0");
 	signal(SIGPIPE, SIG_IGN);
 
 	unlink(sock);

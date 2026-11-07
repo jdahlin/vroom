@@ -14,6 +14,8 @@
  * (PF_NOEXP) on identifier tokens read while their macro was disabled, and
  * clang's argument pre-expansion, paste and whitespace rules.
  */
+#include <setjmp.h>
+
 #include "lex.h"
 
 enum {
@@ -43,6 +45,8 @@ typedef struct pp_opts {
 	const char *const *fwdirs;	/* framework dirs: <A/b.h> -> DIR/A.framework/Headers/b.h */
 	int nfwdirs;
 	int unsigned_char;
+	const char *cwd;		/* relative paths are relative to this (NULL: process cwd) */
+	int errfd;			/* diagnostics (0: stderr) */
 	int asm_mode;			/* assembler-with-cpp: unknown directives pass, # need not stringify */
 	int target;			/* PP_LINUX_AARCH64 or PP_DARWIN (column of the feature table) */
 } pp_opts;
@@ -51,7 +55,13 @@ enum { PP_LINUX_AARCH64, PP_DARWIN };
 
 typedef struct pp pp;
 
+/* NULL if the main file cannot be read (reported) */
 pp *pp_open(const pp_opts *o);
+void pp_close(pp *p);
+/* fatal errors (missing #include) longjmp here instead of exiting */
+void pp_set_fatal(pp *p, jmp_buf *jb);
+/* the distinct files read so far, as spelled (for -MD dependency files) */
+size_t pp_files(const pp *p, const char **names, size_t max);
 /* the next token; T_EOF at the end (and ever after) */
 void pp_next(pp *p, ptok *t);
 /* errors reported so far */

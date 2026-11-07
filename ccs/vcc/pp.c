@@ -19,6 +19,7 @@
  * read), the paint flag, GNU ", ## __VA_ARGS__", and the leading-space
  * propagation that stringification makes visible.
  */
+#include <setjmp.h>
 #include <stdarg.h>
 #include <stdatomic.h>
 #include <stddef.h>
@@ -28,6 +29,7 @@
 #include <string.h>
 #include <sys/mman.h>
 #include <time.h>
+#include <unistd.h>
 
 #include "dircache.h"
 #include "intern.h"
@@ -327,6 +329,7 @@ typedef struct ctx {
 	uint32_t di;		/* next directive */
 	int32_t sdir;		/* search dir it was found in, -1 if none */
 	uint32_t fe;		/* fent index */
+	const char *spath;	/* the path as clang spells it (f->path is the cache key) */
 } ctx;
 
 typedef struct fent {
@@ -335,6 +338,7 @@ typedef struct fent {
 	const pfile *fi;
 	const char *name;	/* for __FILE__ (prefix map applied) */
 	uint32_t namelen;
+	const char *spath;	/* as spelled, for dependency files */
 } fent;
 
 #define MAXCTX (1u << 15)
@@ -361,6 +365,7 @@ struct pp {
 	vlex_file builtin;
 	const char *base_name;
 	uint32_t base_namelen;
+	jmp_buf *fatal_jb;	/* fatal errors end the TU here */
 	struct lmark {		/* #line / GNU line markers */
 		uint32_t fe, off;	/* in fent fe, from byte offset off on */
 		uint32_t pline, line;	/* physical line pline is line */
@@ -419,20 +424,29 @@ static const char *presumed_name(const pp *p, uint32_t fe, uint32_t loc, uint32_
 static void diag(pp *p, uint32_t loc, const char *what, const char *fmt, ...)
 {
 	const fent *e = loc_fent(p, loc);
+	int fd = p->o->errfd ? p->o->errfd : 2;
+	char line[2048];
+	int n;
 	va_list ap;
 
 	if (e)
-		fprintf(stderr, "%s:%u: %s: ", e->f->path, loc_line(p, loc), what);
+		n = snprintf(line, sizeof(line), "%s:%u: %s: ", e->name, loc_line(p, loc), what);
 	else
-		fprintf(stderr, "vcc: %s: ", what);
+		n = snprintf(line, sizeof(line), "vcc: %s: ", what);
 	va_start(ap, fmt);
-	vfprintf(stderr, fmt, ap);
+	n += vsnprintf(line + n, sizeof(line) - (size_t)n - 1, fmt, ap);
 	va_end(ap);
-	fputc('\n', stderr);
-	if (what[0] == 'e')
+	if (n > (int)sizeof(line) - 2)
+		n = (int)sizeof(line) - 2;
+	line[n++] = '\n';
+	(void)!write(fd, line, (size_t)n);
+	if (what[0] == 'e' || what[0] == 'f')
 		p->errors++;
-	if (what[0] == 'f')
+	if (what[0] == 'f') {
+		if (p->fatal_jb)
+			longjmp(*p->fatal_jb, 1);
 		exit(1);
+	}
 }
 
 #define error(p, loc, ...) diag(p, loc, "error", __VA_ARGS__)
@@ -2107,7 +2121,7 @@ static char *pstrdup(pp *p, const char *s, size_t n)
 unsigned long pp_stat_try, pp_stat_skip;
 
 /* the file at a candidate path, if any: misses in missing directories cost no syscall */
-static const vlex_file *try_path(const char *path, size_t len)
+static const vlex_file *try_path(const char *cwd, const char *path, size_t len)
 {
 	static int off = -1;
 
@@ -2116,9 +2130,21 @@ static const vlex_file *try_path(const char *path, size_t len)
 	pp_stat_try++;
 	const vlex_file *f;
 
-	if (!off && !vdir_exists(path, len)) {
+	if (!off && (!cwd || path[0] == '/') && !vdir_exists(path, len)) {
 		pp_stat_skip++;
 		return NULL;
+	}
+	if (cwd && path[0] != '/') {
+		char abs[8192];
+		size_t cl = strlen(cwd);
+
+		if (cl + len + 2 > sizeof(abs))
+			return NULL;
+		memcpy(abs, cwd, cl);
+		abs[cl] = '/';
+		memcpy(abs + cl + 1, path, len);
+		abs[cl + 1 + len] = 0;
+		return vlex_get(abs, cl + 1 + len);
 	}
 	f = vlex_get(path, len);
 	return f;
@@ -2138,12 +2164,12 @@ static const vlex_file *find_include(pp *p, const ctx *from, const char *name, s
 		memcpy(buf, name, nlen);
 		buf[nlen] = 0;
 		*path = pstrdup(p, buf, nlen);
-		return try_path(buf, nlen);
+		return try_path(p->o->cwd, buf, nlen);
 	}
 	if (next && from && from->sdir < 0)
 		next = false;	/* #include_next outside the search path: a normal search */
 	if (!angled && !next) {
-		const char *fp = from && from->f != &p->builtin ? from->f->path : "";
+		const char *fp = from && from->f != &p->builtin ? from->spath : "";
 		const char *sl = strrchr(fp, '/');
 		size_t dl = sl ? (size_t)(sl - fp) + 1 : 0;
 
@@ -2151,7 +2177,7 @@ static const vlex_file *find_include(pp *p, const ctx *from, const char *name, s
 			memcpy(buf, fp, dl);
 			memcpy(buf + dl, name, nlen);
 			buf[dl + nlen] = 0;
-			if ((f = try_path(buf, dl + nlen))) {
+			if ((f = try_path(p->o->cwd, buf, dl + nlen))) {
 				*path = pstrdup(p, buf, dl + nlen);
 				return f;
 			}
@@ -2171,7 +2197,7 @@ static const vlex_file *find_include(pp *p, const ctx *from, const char *name, s
 		memcpy(buf + l, name, nlen);
 		l += nlen;
 		buf[l] = 0;
-		if ((f = try_path(buf, l))) {
+		if ((f = try_path(p->o->cwd, buf, l))) {
 			*sdir = k;
 			*path = pstrdup(p, buf, l);
 			return f;
@@ -2185,7 +2211,7 @@ static const vlex_file *find_include(pp *p, const ctx *from, const char *name, s
 			int l = snprintf(buf, sizeof(buf), "%s/%.*s.framework/Headers/%.*s", p->o->fwdirs[k],
 					 (int)(sl - name), name, (int)(nlen - (size_t)(sl - name) - 1), sl + 1);
 
-			if (l > 0 && (size_t)l < sizeof(buf) && (f = try_path(buf, (size_t)l))) {
+			if (l > 0 && (size_t)l < sizeof(buf) && (f = try_path(p->o->cwd, buf, (size_t)l))) {
 				*path = pstrdup(p, buf, (size_t)l);
 				return f;
 			}
@@ -2200,6 +2226,7 @@ static void add_fent(pp *p, ctx *c, const vlex_file *f, const char *name)
 	const char *from = p->o->prefix_from;
 	fent *e = &p->fe[p->nfe];
 
+	e->spath = name;
 	if (from && !strncmp(name, from, strlen(from))) {
 		const char *to = p->o->prefix_to ? p->o->prefix_to : "";
 		size_t fl = strlen(from), tl = strlen(to);
@@ -2241,6 +2268,7 @@ static void enter_file(pp *p, const vlex_file *f, const char *path, int32_t sdir
 	c->fi = fi;
 	c->di = 0;
 	c->sdir = sdir;
+	c->spath = path;
 	p->nfile++;
 	add_fent(p, c, f, path);
 }
@@ -2555,17 +2583,21 @@ pp *pp_open(const pp_opts *o)
 	for (size_t i = 0; i < sizeof(bi) / sizeof(bi[0]); i++)
 		def_builtin(p, bi[i].n, bi[i].b);
 
-	mf = vlex_get(o->main, strlen(o->main));
+	mf = try_path(o->cwd, o->main, strlen(o->main));
 	if (!mf) {
-		fprintf(stderr, "vcc: %s: cannot read\n", o->main);
-		exit(1);
+		char m[4200];
+		int l = snprintf(m, sizeof(m), "vcc: error: %s: cannot read\n", o->main);
+
+		(void)!write(o->errfd ? o->errfd : 2, m, (size_t)(l < (int)sizeof(m) ? l : (int)sizeof(m) - 1));
+		pp_close(p);
+		return NULL;
 	}
 	enter_file(p, mf, o->main, -1);
 	p->base_name = p->fe[0].name;
 	p->base_namelen = p->fe[0].namelen;
 
 	/* "<built-in>": the predefines, -D/-U and -include, on top of the main file */
-	src = alloc(&p->perm, n + 129);
+	src = salloc(n + 129);	/* interned identifiers point into it: immortal */
 	memcpy(src, o->predef, n);
 	memset(src + n, 0, 129);
 	tok = alloc(&p->perm, (n + 2) * sizeof(vtok));
@@ -2590,4 +2622,38 @@ void pp_next(pp *p, ptok *t)
 int pp_errors(const pp *p)
 {
 	return p->errors;
+}
+
+void pp_set_fatal(pp *p, jmp_buf *jb)
+{
+	p->fatal_jb = jb;
+}
+
+size_t pp_files(const pp *p, const char **names, size_t max)
+{
+	size_t n = 0;
+
+	for (uint32_t i = 0; i < p->nfe; i++) {
+		const char *s = p->fe[i].spath;
+		bool dup = false;
+
+		if (p->fe[i].f == &p->builtin)
+			continue;
+		for (size_t j = 0; j < n && !dup; j++)
+			dup = !strcmp(names[j], s);
+		if (!dup && n < max)
+			names[n++] = s;
+	}
+	return n;
+}
+
+void pp_close(pp *p)
+{
+	if (p->cx) munmap(p->cx, MAXCTX * sizeof(ctx));
+	if (p->perm.base) munmap(p->perm.base, (size_t)(p->perm.end - p->perm.base));
+	if (p->tmp.base) munmap(p->tmp.base, (size_t)(p->tmp.end - p->tmp.base));
+	if (p->sv) munmap(p->sv, SVMAX * sizeof(ptok));
+	if (p->fe) munmap(p->fe, (1u << 20) * sizeof(fent));
+	if (p->lm) munmap(p->lm, 65536 * sizeof(*p->lm));
+	munmap(p, sizeof(pp));
 }

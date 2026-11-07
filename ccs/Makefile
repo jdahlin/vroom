@@ -24,8 +24,8 @@ vcc: $(OUT)/vcc $(OUT)/vld $(OUT)/vas $(OUT)/vccd $(OUT)/lextest $(OUT)/vpp
 
 LEX_SRC = vcc/lex.c vcc/intern.c
 LEX_HDR = vcc/lex.h vcc/intern.h
-PP_SRC = vcc/pp.c vcc/dircache.c
-PP_HDR = vcc/pp.h vcc/dircache.h vcc/ppdata.inc
+PP_SRC = vcc/pp.c vcc/dircache.c vcc/ppdriver.c
+PP_HDR = vcc/pp.h vcc/dircache.h vcc/ppdriver.h vcc/ppdata.inc vcc/ppdata-predef.inc
 
 $(OUT)/vpp: vcc/vpp.c vcc/ppdata-predef.inc $(PP_SRC) $(PP_HDR) $(LEX_SRC) $(LEX_HDR) | $(OUT)
 	/usr/bin/clang $(VCC_CFLAGS) -O3 -mcpu=apple-m1 -pthread vcc/vpp.c $(PP_SRC) $(LEX_SRC) -o $@
@@ -39,5 +39,5 @@ $(OUT)/vcc: vcc/shim.c protocol.h | $(OUT)
 $(OUT)/vld $(OUT)/vas: $(OUT)/vcc
 	ln -sf vcc $@
 
-$(OUT)/vccd: vcc/vccd.c vcc/caps.c vcc/caps.h vcc/warnings.inc protocol.h | $(OUT)
-	/usr/bin/clang $(VCC_CFLAGS) -pthread vcc/vccd.c vcc/caps.c -o $@
+$(OUT)/vccd: vcc/vccd.c vcc/caps.c vcc/caps.h vcc/warnings.inc protocol.h $(PP_SRC) $(PP_HDR) $(LEX_SRC) $(LEX_HDR) | $(OUT)
+	/usr/bin/clang $(VCC_CFLAGS) -O3 -mcpu=apple-m1 -pthread vcc/vccd.c vcc/caps.c $(PP_SRC) $(LEX_SRC) -o $@
