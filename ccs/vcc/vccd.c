@@ -1,0 +1,505 @@
+/*
+ * vccd: the vcc server.
+ *
+ * One process.  The main thread waits in kqueue for connections from the
+ * shims (vcc, vld) and hands each accepted socket to a pool of I/O worker
+ * threads.  A worker receives the request (argv, env, cwd, fds 0-2) into a
+ * per-thread buffer, then
+ *
+ *   - answers toolchain probes (cc-option, ld-option, ...) from the
+ *     capability table in caps.c, without running anything;
+ *   - forwards everything else to the current backend: C compiles to
+ *     vroomd (clang, temporary until vcc's own compiler exists), links to
+ *     vroom-ld/ld.lld.
+ *
+ * No allocation per request: buffers are mmap'ed once per worker.
+ *
+ *   vccd [--sock PATH] [--backend-sock PATH] [--ld PATH] [--lld PATH] [-j N]
+ *   VCC_LOG=1   log one line per request to stderr (kind, ms, argv[0..2])
+ */
+#include <errno.h>
+#include <fcntl.h>
+#include <pthread.h>
+#include <signal.h>
+#include <spawn.h>
+#include <stdatomic.h>
+#include <stdbool.h>
+#include <stdint.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <sys/event.h>
+#include <sys/mman.h>
+#include <sys/socket.h>
+#include <sys/stat.h>
+#include <sys/un.h>
+#include <sys/wait.h>
+#include <time.h>
+#include <unistd.h>
+
+#include "../protocol.h"
+#include "caps.h"
+
+#define MAX_STRS	(VROOM_MAX_PAYLOAD / 2)
+
+static const char *backend_sock = "/tmp/vroomd.sock";
+static const char *ld_backend;		/* full links (vroom-ld) */
+static const char *lld = "/opt/homebrew/bin/ld.lld";
+static bool log_requests;
+
+static atomic_ulong n_probe, n_fwd, n_spawn;
+
+/* ---------------- work queue: accepted sockets ---------------- */
+
+#define QSIZE 4096
+static int queue[QSIZE];
+static unsigned qhead, qtail;
+static pthread_mutex_t qlock = PTHREAD_MUTEX_INITIALIZER;
+static pthread_cond_t qcond = PTHREAD_COND_INITIALIZER;
+
+static void queue_push(int fd)
+{
+	pthread_mutex_lock(&qlock);
+	if (qtail - qhead == QSIZE) {
+		pthread_mutex_unlock(&qlock);
+		close(fd);		/* overload: the shim reports an error */
+		return;
+	}
+	queue[qtail++ % QSIZE] = fd;
+	pthread_cond_signal(&qcond);
+	pthread_mutex_unlock(&qlock);
+}
+
+static int queue_pop(void)
+{
+	int fd;
+
+	pthread_mutex_lock(&qlock);
+	while (qhead == qtail)
+		pthread_cond_wait(&qcond, &qlock);
+	fd = queue[qhead++ % QSIZE];
+	pthread_mutex_unlock(&qlock);
+	return fd;
+}
+
+/* ---------------- request ---------------- */
+
+struct req {
+	char *raw;		/* header + payload as received */
+	size_t rawlen;
+	int fds[3];
+	const char *cwd;
+	char **argv;
+	char **envp;
+	int argc;
+	const char *tool;	/* basename of argv[0] */
+};
+
+struct worker {
+	char *raw;
+	char **strs;
+};
+
+static bool read_full(int fd, char *p, size_t n)
+{
+	while (n) {
+		ssize_t r = read(fd, p, n);
+
+		if (r < 0 && errno == EINTR)
+			continue;
+		if (r <= 0)
+			return false;
+		p += r;
+		n -= r;
+	}
+	return true;
+}
+
+static bool write_full(int fd, const char *p, size_t n)
+{
+	while (n) {
+		ssize_t r = write(fd, p, n);
+
+		if (r < 0 && errno == EINTR)
+			continue;
+		if (r <= 0)
+			return false;
+		p += r;
+		n -= r;
+	}
+	return true;
+}
+
+static bool recv_req(struct worker *w, int conn, struct req *r)
+{
+	struct vroom_req_hdr *h = (struct vroom_req_hdr *)w->raw;
+	char cbuf[CMSG_SPACE(3 * sizeof(int))];
+	struct iovec iov = { h, sizeof(*h) };
+	struct msghdr m = { 0 };
+	struct cmsghdr *c;
+	size_t off, i, n;
+
+	m.msg_iov = &iov;
+	m.msg_iovlen = 1;
+	m.msg_control = cbuf;
+	m.msg_controllen = sizeof(cbuf);
+	r->fds[0] = r->fds[1] = r->fds[2] = -1;
+	if (recvmsg(conn, &m, MSG_WAITALL) != (ssize_t)sizeof(*h))
+		return false;
+	for (c = CMSG_FIRSTHDR(&m); c; c = CMSG_NXTHDR(&m, c))
+		if (c->cmsg_level == SOL_SOCKET && c->cmsg_type == SCM_RIGHTS)
+			memcpy(r->fds, CMSG_DATA(c), sizeof(r->fds));
+	if (h->magic != VROOM_MAGIC || h->payload_len > VROOM_MAX_PAYLOAD ||
+	    1 + h->argc + h->envc > MAX_STRS)
+		return false;
+	if (!read_full(conn, w->raw + sizeof(*h), h->payload_len))
+		return false;
+	r->raw = w->raw;
+	r->rawlen = sizeof(*h) + h->payload_len;
+
+	/* split NUL-separated strings: cwd, argv..., envp... */
+	n = 0;
+	for (off = sizeof(*h); off < r->rawlen && n < MAX_STRS - 2; off += strlen(w->raw + off) + 1)
+		w->strs[n++] = w->raw + off;
+	if (n != 1 + h->argc + h->envc || h->argc < 1)
+		return false;
+	r->cwd = w->strs[0];
+	r->argv = w->strs + 1;
+	r->argc = h->argc;
+	/* argv and envp each need a NULL terminator: shift envp up by one */
+	for (i = n; i > 1 + h->argc; i--)
+		w->strs[i] = w->strs[i - 1];
+	w->strs[1 + h->argc] = NULL;
+	r->envp = w->strs + 2 + h->argc;
+	r->envp[h->envc] = NULL;
+	r->tool = strrchr(r->argv[0], '/') ? strrchr(r->argv[0], '/') + 1 : r->argv[0];
+	return true;
+}
+
+static void say(const struct req *r, const char *fmt, const char *arg)
+{
+	char line[512];
+	int n = snprintf(line, sizeof(line), fmt, r->tool, arg);
+
+	if (n > 0)
+		(void)!write(r->fds[2], line, n < (int)sizeof(line) ? n : (int)sizeof(line) - 1);
+}
+
+/* ---------------- probes ---------------- */
+
+/*
+ * A probe is a compile (-c/-S) whose only input is /dev/null: the answer
+ * depends on the options alone.  Anything reading stdin or a real file is
+ * not a probe.
+ */
+static bool cc_is_probe(const struct req *r)
+{
+	bool compile = false, input = false;
+	int i;
+
+	for (i = 1; i < r->argc; i++) {
+		const char *a = r->argv[i];
+		const char *why;
+		int n;
+
+		if (!strcmp(a, "-c") || !strcmp(a, "-S"))
+			compile = true;
+		if (!strcmp(a, "-E") || !strcmp(a, "-"))
+			return false;
+		if (a[0] != '-') {
+			if (strcmp(a, "/dev/null"))
+				return false;
+			input = true;
+			continue;
+		}
+		n = cc_option(a, i + 1 < r->argc ? r->argv[i + 1] : NULL, &why);
+		if (n == 2) {
+			if (!strcmp(a, "-x") && strcmp(r->argv[i + 1], "c"))
+				return false;	/* only C probes */
+			i++;
+		}
+	}
+	return compile && input;
+}
+
+static int cc_probe(const struct req *r)
+{
+	const char *out = NULL, *why;
+	bool werror = false;
+	int i, n;
+
+	for (i = 1; i < r->argc; i++)
+		if (!strcmp(r->argv[i], "-Werror"))
+			werror = true;
+	for (i = 1; i < r->argc; i++) {
+		const char *a = r->argv[i];
+
+		if (a[0] != '-')
+			continue;
+		n = cc_option(a, i + 1 < r->argc ? r->argv[i + 1] : NULL, &why);
+		if (!n) {
+			say(r, "%s: error: unsupported option '%s'\n", why);
+			return 1;
+		}
+		/* -D of a macro vcc predefines: -Wmacro-redefined, an error with -Werror */
+		if (werror && !strncmp(a, "-D", 2) && cc_predefined(a + 2)) {
+			say(r, "%s: error: '%s' macro redefined\n", a + 2);
+			return 1;
+		}
+		if (n == 2) {
+			if (!strcmp(a, "-o"))
+				out = r->argv[i + 1];
+			i++;
+		}
+	}
+	/* produce the (empty) output like a real compile of /dev/null would */
+	if (out && strcmp(out, "/dev/null")) {
+		char path[4096];
+		int fd;
+
+		if (out[0] == '/')
+			snprintf(path, sizeof(path), "%s", out);
+		else
+			snprintf(path, sizeof(path), "%s/%s", r->cwd, out);
+		fd = open(path, O_WRONLY | O_CREAT | O_TRUNC | O_CLOEXEC, 0644);
+		if (fd < 0) {
+			say(r, "%s: error: cannot open output '%s'\n", out);
+			return 1;
+		}
+		close(fd);
+	}
+	return 0;
+}
+
+/* `ld -v <opt>...`: version query plus options; answered from the table */
+static bool ld_is_probe(const struct req *r)
+{
+	return r->argc >= 3 && !strcmp(r->argv[1], "-v");
+}
+
+static int ld_probe(const struct req *r)
+{
+	const char *why;
+	int i;
+
+	for (i = 2; i < r->argc; i++)
+		if (!ld_option(r->argv[i], &why)) {
+			say(r, "%s: error: unknown argument '%s'\n", why);
+			return 1;
+		}
+	return 0;
+}
+
+/* ---------------- forwarding ---------------- */
+
+/* relay the request unchanged to another vroom-protocol server */
+static int forward(const struct req *r, const char *sock)
+{
+	struct sockaddr_un sa = { .sun_family = AF_UNIX };
+	char cbuf[CMSG_SPACE(3 * sizeof(int))];
+	struct iovec iov = { r->raw, r->rawlen };
+	struct msghdr m = { 0 };
+	struct cmsghdr *c;
+	int32_t status;
+	ssize_t n;
+	int s;
+
+	strncpy(sa.sun_path, sock, sizeof(sa.sun_path) - 1);
+	s = socket(AF_UNIX, SOCK_STREAM, 0);
+	if (s < 0 || connect(s, (struct sockaddr *)&sa, sizeof(sa)) < 0) {
+		say(r, "%s: error: backend %s not reachable\n", sock);
+		if (s >= 0)
+			close(s);
+		return 127;
+	}
+	memset(cbuf, 0, sizeof(cbuf));
+	m.msg_iov = &iov;
+	m.msg_iovlen = 1;
+	m.msg_control = cbuf;
+	m.msg_controllen = sizeof(cbuf);
+	c = CMSG_FIRSTHDR(&m);
+	c->cmsg_level = SOL_SOCKET;
+	c->cmsg_type = SCM_RIGHTS;
+	c->cmsg_len = CMSG_LEN(sizeof(r->fds));
+	memcpy(CMSG_DATA(c), r->fds, sizeof(r->fds));
+	do
+		n = sendmsg(s, &m, 0);
+	while (n < 0 && errno == EINTR);
+	if (n < 0 || !write_full(s, r->raw + n, r->rawlen - n) ||
+	    !read_full(s, (char *)&status, sizeof(status)))
+		status = 127;
+	close(s);
+	return status;
+}
+
+/* run a program with the request's cwd, env and fds */
+static int spawn(const struct req *r, const char *prog)
+{
+	posix_spawn_file_actions_t fa;
+	char *saved = r->argv[0];
+	pid_t pid;
+	int st, i, err;
+
+	posix_spawn_file_actions_init(&fa);
+	for (i = 0; i < 3; i++)
+		if (r->fds[i] >= 0)
+			posix_spawn_file_actions_adddup2(&fa, r->fds[i], i);
+	posix_spawn_file_actions_addchdir(&fa, r->cwd);
+	r->argv[0] = (char *)prog;
+	err = posix_spawn(&pid, prog, &fa, NULL, r->argv, r->envp);
+	r->argv[0] = saved;
+	posix_spawn_file_actions_destroy(&fa);
+	if (err) {
+		say(r, "%s: error: cannot run %s\n", prog);
+		return 127;
+	}
+	while (waitpid(pid, &st, 0) < 0)
+		if (errno != EINTR)
+			return 127;
+	return WIFEXITED(st) ? WEXITSTATUS(st) : 128 + WTERMSIG(st);
+}
+
+/* ---------------- dispatch ---------------- */
+
+static double now_ms(void)
+{
+	struct timespec ts;
+
+	clock_gettime(CLOCK_MONOTONIC, &ts);
+	return ts.tv_sec * 1e3 + ts.tv_nsec / 1e6;
+}
+
+static int handle(const struct req *r, const char **kind)
+{
+	if (!strcmp(r->tool, "vld") || !strcmp(r->tool, "ld")) {
+		if (ld_is_probe(r)) {
+			*kind = "ld-probe";
+			atomic_fetch_add(&n_probe, 1);
+			return ld_probe(r);
+		}
+		atomic_fetch_add(&n_spawn, 1);
+		/* version queries and links go to the backend linker */
+		if (r->argc == 2 && (!strcmp(r->argv[1], "-v") || !strcmp(r->argv[1], "--version"))) {
+			*kind = "ld-version";
+			return spawn(r, lld);
+		}
+		*kind = "ld";
+		return spawn(r, ld_backend ? ld_backend : lld);
+	}
+	if (cc_is_probe(r)) {
+		*kind = "cc-probe";
+		atomic_fetch_add(&n_probe, 1);
+		return cc_probe(r);
+	}
+	*kind = "cc";
+	atomic_fetch_add(&n_fwd, 1);
+	return forward(r, backend_sock);
+}
+
+static void *worker_main(void *arg)
+{
+	struct worker w;
+
+	(void)arg;
+	w.raw = mmap(NULL, sizeof(struct vroom_req_hdr) + VROOM_MAX_PAYLOAD,
+		     PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANON, -1, 0);
+	w.strs = mmap(NULL, MAX_STRS * sizeof(char *), PROT_READ | PROT_WRITE,
+		      MAP_PRIVATE | MAP_ANON, -1, 0);
+	if (w.raw == MAP_FAILED || w.strs == MAP_FAILED) {
+		perror("vccd: mmap");
+		exit(1);
+	}
+	for (;;) {
+		int conn = queue_pop();
+		struct req r;
+		int32_t status = 127;
+		const char *kind = "bad";
+		double t0 = now_ms();
+		int i;
+
+		if (recv_req(&w, conn, &r))
+			status = handle(&r, &kind);
+		(void)write_full(conn, (char *)&status, sizeof(status));
+		close(conn);
+		for (i = 0; i < 3; i++)
+			if (r.fds[i] >= 0)
+				close(r.fds[i]);
+		if (log_requests)
+			fprintf(stderr, "vccd %-10s %7.2f ms rc=%d %s\n", kind, now_ms() - t0,
+				status, kind[0] == 'b' ? "" : r.argc > 1 ? r.argv[1] : "");
+	}
+	return NULL;
+}
+
+int main(int argc, char **argv)
+{
+	const char *sock = "/tmp/vccd.sock";
+	struct sockaddr_un sa = { .sun_family = AF_UNIX };
+	struct kevent ev;
+	int nworkers = 64, ls, kq, i;
+
+	for (i = 1; i < argc; i++) {
+		if (!strcmp(argv[i], "--sock") && i + 1 < argc)
+			sock = argv[++i];
+		else if (!strcmp(argv[i], "--backend-sock") && i + 1 < argc)
+			backend_sock = argv[++i];
+		else if (!strcmp(argv[i], "--ld") && i + 1 < argc)
+			ld_backend = argv[++i];
+		else if (!strcmp(argv[i], "--lld") && i + 1 < argc)
+			lld = argv[++i];
+		else if (!strcmp(argv[i], "-j") && i + 1 < argc)
+			nworkers = atoi(argv[++i]);
+		else {
+			fprintf(stderr, "usage: vccd [--sock P] [--backend-sock P] [--ld P] [--lld P] [-j N]\n");
+			return 2;
+		}
+	}
+	log_requests = getenv("VCC_LOG");
+	signal(SIGPIPE, SIG_IGN);
+
+	unlink(sock);
+	strncpy(sa.sun_path, sock, sizeof(sa.sun_path) - 1);
+	ls = socket(AF_UNIX, SOCK_STREAM, 0);
+	if (ls < 0 || bind(ls, (struct sockaddr *)&sa, sizeof(sa)) || listen(ls, 1024)) {
+		perror("vccd: socket");
+		return 1;
+	}
+	fcntl(ls, F_SETFL, O_NONBLOCK);
+
+	for (i = 0; i < nworkers; i++) {
+		pthread_t t;
+		pthread_attr_t at;
+
+		pthread_attr_init(&at);
+		pthread_attr_setstacksize(&at, 256 << 10);
+		pthread_create(&t, &at, worker_main, NULL);
+		pthread_attr_destroy(&at);
+	}
+
+	/* accept thread: kqueue, drain the backlog on every wakeup */
+	kq = kqueue();
+	EV_SET(&ev, ls, EVFILT_READ, EV_ADD, 0, 0, NULL);
+	if (kq < 0 || kevent(kq, &ev, 1, NULL, 0, NULL) < 0) {
+		perror("vccd: kqueue");
+		return 1;
+	}
+	for (;;) {
+		struct kevent out;
+
+		if (kevent(kq, NULL, 0, &out, 1, NULL) < 0) {
+			if (errno == EINTR)
+				continue;
+			perror("vccd: kevent");
+			return 1;
+		}
+		for (;;) {
+			int c = accept(ls, NULL, NULL);
+
+			if (c < 0)
+				break;
+			fcntl(c, F_SETFL, 0);	/* BSD: accept() inherits O_NONBLOCK */
+			fcntl(c, F_SETFD, FD_CLOEXEC);
+			queue_push(c);
+		}
+	}
+}

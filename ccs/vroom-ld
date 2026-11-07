@@ -1,0 +1,52 @@
+#!/usr/bin/env python3
+"""vroom-ld: ld.lld-omslag för kärnbyggen med -O0.
+
+Vid -O0 tas död kod inte bort. Grenar som -O2 bevisar döda med aktuell config
+(t.ex. `if (system_supports_sme())` när SME är avslaget) refererar då symboler som
+inte finns, och länkningen faller. Om lld bara klagar på odefinierade symboler
+genereras ett stubobjekt: varje symbol blir 64 nollbyte i .data (skrivbar, så att statiska
+nycklar fungerar; ej körbar). 0x00000000 är
+`udf #0` på arm64 och .data är NX, så om en sådan gren ändå körs blir det ett
+undantag (som BUG()), och läsningar ger 0.
+
+Listan över stubbade symboler skrivs till <utfil>.vroom-stubs.
+"""
+import os
+import re
+import subprocess
+import sys
+
+LLD = os.environ.get("VROOM_REAL_LD", "/opt/homebrew/opt/lld/bin/ld.lld")
+CLANG = os.environ.get("VROOM_REAL_CC", "/opt/homebrew/opt/llvm/bin/clang")
+
+
+def main():
+    args = sys.argv[1:]
+    p = subprocess.run([LLD, "--error-limit=0"] + args, stderr=subprocess.PIPE)
+    if p.returncode == 0:
+        sys.stderr.buffer.write(p.stderr)
+        return 0
+    err = p.stderr.decode(errors="replace")
+    errors = [l for l in err.splitlines() if "error:" in l]
+    undef = sorted({m.group(1) for m in re.finditer(r"error: undefined symbol: (\S+)", err)})
+    # Bara odefinierade symboler – allt annat är riktiga fel.
+    if not undef or any("undefined symbol" not in l for l in errors) or "-r" in args:
+        sys.stderr.write(err)
+        return p.returncode
+    out = args[args.index("-o") + 1] if "-o" in args else "a.out"
+    asm = [".data", ".balign 16"]
+    for s in undef:
+        asm += [f".globl {s}", f"{s}:", ".space 64"]
+    stub_s = out + ".vroom-stubs.S"
+    stub_o = out + ".vroom-stubs.o"
+    with open(stub_s, "w") as f:
+        f.write("\n".join(asm) + "\n")
+    subprocess.run([CLANG, "--target=aarch64-linux-gnu", "-c", stub_s, "-o", stub_o], check=True)
+    with open(out + ".vroom-stubs", "w") as f:
+        f.write("\n".join(undef) + "\n")
+    p = subprocess.run([LLD] + args + [stub_o])
+    return p.returncode
+
+
+if __name__ == "__main__":
+    sys.exit(main())

@@ -1,0 +1,360 @@
+diff --git a/arch/arm64/include/asm/alternative-macros.h b/arch/arm64/include/asm/alternative-macros.h
+index ee75a2f1a..5e107519a 100644
+--- a/arch/arm64/include/asm/alternative-macros.h
++++ b/arch/arm64/include/asm/alternative-macros.h
+@@ -213,45 +213,50 @@ alternative_endif
+ 
+ #include <linux/types.h>
+ 
+-static __always_inline bool
+-alternative_has_cap_likely(const unsigned long cpucap)
+-{
+-	if (!cpucap_is_possible(cpucap))
+-		return false;
+-
+-	asm goto(
++/*
++ * Makron i stället för __always_inline-funktioner: "i"-operanden måste vara en
++ * konstant redan i frontend, så att kärnan kan byggas med -O0.
++ */
+ #ifdef BUILD_VDSO
+-	ALTERNATIVE("b	%l[l_no]", "nop", %[cpucap])
++#define __ALT_HAS_CAP_LIKELY_ASM(cap)	ALTERNATIVE("b	%l[__l_no]", "nop", %[cpucap])
+ #else
+-	ALTERNATIVE_CB("b	%l[l_no]", %[cpucap], alt_cb_patch_nops)
++#define __ALT_HAS_CAP_LIKELY_ASM(cap)	ALTERNATIVE_CB("b	%l[__l_no]", %[cpucap], alt_cb_patch_nops)
+ #endif
+-	:
+-	: [cpucap] "i" (cpucap)
+-	:
+-	: l_no);
+-
+-	return true;
+-l_no:
+-	return false;
+-}
+-
+-static __always_inline bool
+-alternative_has_cap_unlikely(const unsigned long cpucap)
+-{
+-	if (!cpucap_is_possible(cpucap))
+-		return false;
+-
+-	asm goto(
+-	ALTERNATIVE("nop", "b	%l[l_yes]", %[cpucap])
+-	:
+-	: [cpucap] "i" (cpucap)
+-	:
+-	: l_yes);
+-
+-	return false;
+-l_yes:
+-	return true;
+-}
++
++#define alternative_has_cap_likely(cap) ({				\
++	__label__ __l_no, __l_out;					\
++	bool __ret = false;						\
++	if (!cpucap_is_possible(cap))					\
++		goto __l_out;						\
++	asm goto(__ALT_HAS_CAP_LIKELY_ASM(cap)				\
++		 :							\
++		 : [cpucap] "i" (cap)					\
++		 :							\
++		 : __l_no);						\
++	__ret = true;							\
++	goto __l_out;							\
++__l_no:									\
++	__ret = false;							\
++__l_out:								\
++	__ret;								\
++})
++
++#define alternative_has_cap_unlikely(cap) ({				\
++	__label__ __l_yes, __l_out;					\
++	bool __ret = false;						\
++	if (!cpucap_is_possible(cap))					\
++		goto __l_out;						\
++	asm goto(ALTERNATIVE("nop", "b	%l[__l_yes]", %[cpucap])	\
++		 :							\
++		 : [cpucap] "i" (cap)					\
++		 :							\
++		 : __l_yes);						\
++	goto __l_out;							\
++__l_yes:								\
++	__ret = true;							\
++__l_out:								\
++	__ret;								\
++})
+ 
+ #endif /* __ASSEMBLER__ */
+ 
+diff --git a/arch/arm64/include/asm/cpufeature.h b/arch/arm64/include/asm/cpufeature.h
+index e3c8a1493..fdc0e29b0 100644
+--- a/arch/arm64/include/asm/cpufeature.h
++++ b/arch/arm64/include/asm/cpufeature.h
+@@ -523,13 +523,14 @@ static __always_inline bool cpus_have_cap(unsigned int num)
+  *
+  * @num must be a compile-time constant.
+  */
+-static __always_inline bool cpus_have_final_boot_cap(int num)
+-{
+-	if (boot_capabilities_finalized())
+-		return alternative_has_cap_unlikely(num);
+-	else
+-		BUG();
+-}
++#define cpus_have_final_boot_cap(num) ({					\
++	bool __have_cap;						\
++	if (boot_capabilities_finalized())					\
++		__have_cap = alternative_has_cap_unlikely(num);		\
++	else								\
++		BUG();							\
++	__have_cap;							\
++})
+ 
+ /*
+  * Test for a capability without a runtime check.
+@@ -540,13 +541,14 @@ static __always_inline bool cpus_have_final_boot_cap(int num)
+  *
+  * @num must be a compile-time constant.
+  */
+-static __always_inline bool cpus_have_final_cap(int num)
+-{
+-	if (system_capabilities_finalized())
+-		return alternative_has_cap_unlikely(num);
+-	else
+-		BUG();
+-}
++#define cpus_have_final_cap(num) ({					\
++	bool __have_cap;						\
++	if (system_capabilities_finalized())					\
++		__have_cap = alternative_has_cap_unlikely(num);		\
++	else								\
++		BUG();							\
++	__have_cap;							\
++})
+ 
+ static inline int __attribute_const__
+ cpuid_feature_extract_signed_field_width(u64 features, int field, int width)
+diff --git a/arch/arm64/include/asm/jump_label.h b/arch/arm64/include/asm/jump_label.h
+index 0cb211d36..f61b06001 100644
+--- a/arch/arm64/include/asm/jump_label.h
++++ b/arch/arm64/include/asm/jump_label.h
+@@ -28,35 +28,38 @@
+ 	"1:	nop\n\t"				\
+ 	JUMP_TABLE_ENTRY(key, label)
+ 
+-static __always_inline bool arch_static_branch(struct static_key * const key,
+-					       const bool branch)
+-{
+-	char *k = &((char *)key)[branch];
+-
+-	asm goto(
+-		ARCH_STATIC_BRANCH_ASM("%c0", "%l[l_yes]")
+-		:  :  "i"(k) :  : l_yes
+-		);
+-
+-	return false;
+-l_yes:
+-	return true;
+-}
+-
+-static __always_inline bool arch_static_branch_jump(struct static_key * const key,
+-						    const bool branch)
+-{
+-	char *k = &((char *)key)[branch];
+-
+-	asm goto(
+-		"1:	b		%l[l_yes]		\n\t"
+-		JUMP_TABLE_ENTRY("%c0", "%l[l_yes]")
+-		:  :  "i"(k) :  : l_yes
+-		);
+-	return false;
+-l_yes:
+-	return true;
+-}
++/*
++ * Makron i stället för __always_inline-funktioner: "i"-operanden måste vara en
++ * konstant redan i frontend, så att kärnan kan byggas med -O0.
++ */
++#define arch_static_branch(key, branch) ({				\
++	__label__ __l_yes, __l_out;					\
++	bool __ret = false;						\
++	asm goto(							\
++		ARCH_STATIC_BRANCH_ASM("%c0", "%l[__l_yes]")		\
++		:  :  "i"(&((char *)(key))[branch]) :  : __l_yes	\
++		);							\
++	goto __l_out;							\
++__l_yes:								\
++	__ret = true;							\
++__l_out:								\
++	__ret;								\
++})
++
++#define arch_static_branch_jump(key, branch) ({			\
++	__label__ __l_yes, __l_out;					\
++	bool __ret = false;						\
++	asm goto(							\
++		"1:	b		%l[__l_yes]		\n\t"		\
++		JUMP_TABLE_ENTRY("%c0", "%l[__l_yes]")			\
++		:  :  "i"(&((char *)(key))[branch]) :  : __l_yes	\
++		);							\
++	goto __l_out;							\
++__l_yes:								\
++	__ret = true;							\
++__l_out:								\
++	__ret;								\
++})
+ 
+ #endif  /* __ASSEMBLER__ */
+ #endif	/* __ASM_JUMP_LABEL_H */
+diff --git a/arch/arm64/include/asm/kvm_host.h b/arch/arm64/include/asm/kvm_host.h
+index 97332ffcb..1f0e497c2 100644
+--- a/arch/arm64/include/asm/kvm_host.h
++++ b/arch/arm64/include/asm/kvm_host.h
+@@ -1780,7 +1780,7 @@ static __always_inline enum fgt_group_id __fgt_reg_to_group_id(enum vcpu_sysreg
+ 	case ICH_HFGITR_EL2:
+ 		return ICH_HFGITR_GROUP;
+ 	default:
+-		BUILD_BUG_ON(1);
++		BUILD_BUG();
+ 	}
+ }
+ 
+diff --git a/arch/arm64/include/asm/smp.h b/arch/arm64/include/asm/smp.h
+index 10ea4f543..f8182533e 100644
+--- a/arch/arm64/include/asm/smp.h
++++ b/arch/arm64/include/asm/smp.h
+@@ -72,7 +72,7 @@ enum ipi_msg_type {
+  */
+ extern void set_smp_ipi_range_percpu(int ipi_base, int nr_ipi, int ncpus);
+ 
+-static inline void set_smp_ipi_range(int ipi_base, int n)
++static __always_inline void set_smp_ipi_range(int ipi_base, int n)
+ {
+ 	set_smp_ipi_range_percpu(ipi_base, n, 0);
+ }
+diff --git a/include/linux/build_bug.h b/include/linux/build_bug.h
+index d3dc5dc5f..a9cbcc2eb 100644
+--- a/include/linux/build_bug.h
++++ b/include/linux/build_bug.h
+@@ -57,7 +57,15 @@
+  * build time, you should use BUILD_BUG to detect if it is
+  * unexpectedly used.
+  */
++#ifdef __OPTIMIZE__
+ #define BUILD_BUG() BUILD_BUG_ON_MSG(1, "BUILD_BUG failed")
++#else
++/*
++ * Utan optimering kan BUILD_BUG() inte kontrolleras vid kompilering. Grenen är död
++ * (en optimerad build bryts annars), så fånga den vid körning och gör den noreturn.
++ */
++#define BUILD_BUG() __builtin_trap()
++#endif
+ 
+ /**
+  * static_assert - check integer constant expression at build time
+diff --git a/include/linux/jump_label.h b/include/linux/jump_label.h
+index c95350a10..d3e9e969e 100644
+--- a/include/linux/jump_label.h
++++ b/include/linux/jump_label.h
+@@ -196,15 +196,8 @@ struct module;
+ #define JUMP_TYPE_LINKED	2UL
+ #define JUMP_TYPE_MASK		3UL
+ 
+-static __always_inline bool static_key_false(struct static_key *key)
+-{
+-	return arch_static_branch(key, false);
+-}
+-
+-static __always_inline bool static_key_true(struct static_key *key)
+-{
+-	return !arch_static_branch(key, true);
+-}
++#define static_key_false(key)	arch_static_branch(key, false)
++#define static_key_true(key)	(!arch_static_branch(key, true))
+ 
+ extern struct jump_entry __start___jump_table[];
+ extern struct jump_entry __stop___jump_table[];
+diff --git a/include/linux/memblock.h b/include/linux/memblock.h
+index 40e6e0aa2..6fccc3a3b 100644
+--- a/include/linux/memblock.h
++++ b/include/linux/memblock.h
+@@ -432,7 +432,7 @@ void *__memblock_alloc_or_panic(phys_addr_t size, phys_addr_t align,
+ #define memblock_alloc_or_panic(size, align)    \
+ 	 __memblock_alloc_or_panic(size, align, __func__)
+ 
+-static inline void *memblock_alloc_raw(phys_addr_t size,
++static __always_inline void *memblock_alloc_raw(phys_addr_t size,
+ 					       phys_addr_t align)
+ {
+ 	return memblock_alloc_try_nid_raw(size, align, MEMBLOCK_LOW_LIMIT,
+@@ -448,14 +448,14 @@ static __always_inline void *memblock_alloc_from(phys_addr_t size,
+ 				      MEMBLOCK_ALLOC_ACCESSIBLE, NUMA_NO_NODE);
+ }
+ 
+-static inline void *memblock_alloc_low(phys_addr_t size,
++static __always_inline void *memblock_alloc_low(phys_addr_t size,
+ 					       phys_addr_t align)
+ {
+ 	return memblock_alloc_try_nid(size, align, MEMBLOCK_LOW_LIMIT,
+ 				      ARCH_LOW_ADDRESS_LIMIT, NUMA_NO_NODE);
+ }
+ 
+-static inline void *memblock_alloc_node(phys_addr_t size,
++static __always_inline void *memblock_alloc_node(phys_addr_t size,
+ 						phys_addr_t align, int nid)
+ {
+ 	return memblock_alloc_try_nid(size, align, MEMBLOCK_LOW_LIMIT,
+diff --git a/init/main.c b/init/main.c
+index 7b0c8c34e..45a9b93ed 100644
+--- a/init/main.c
++++ b/init/main.c
+@@ -1386,19 +1386,19 @@ static void __init initcall_debug_enable(void)
+ # define do_trace_initcall_finish	trace_initcall_finish
+ # define do_trace_initcall_level	trace_initcall_level
+ #else
+-static inline void do_trace_initcall_start(initcall_t fn)
++static __always_inline void do_trace_initcall_start(initcall_t fn)
+ {
+ 	if (!initcall_debug)
+ 		return;
+ 	trace_initcall_start_cb(&initcall_calltime, fn);
+ }
+-static inline void do_trace_initcall_finish(initcall_t fn, int ret)
++static __always_inline void do_trace_initcall_finish(initcall_t fn, int ret)
+ {
+ 	if (!initcall_debug)
+ 		return;
+ 	trace_initcall_finish_cb(&initcall_calltime, fn, ret);
+ }
+-static inline void do_trace_initcall_level(const char *level)
++static __always_inline void do_trace_initcall_level(const char *level)
+ {
+ 	if (!initcall_debug)
+ 		return;
+diff --git a/kernel/sched/sched.h b/kernel/sched/sched.h
+index 6c7c56335..cdd49811e 100644
+--- a/kernel/sched/sched.h
++++ b/kernel/sched/sched.h
+@@ -2488,7 +2488,18 @@ static_branch_##name(union sched_feat_key *key) 	\
+ #undef SCHED_FEAT
+ 
+ extern union sched_feat_key sched_feat_keys[__SCHED_FEAT_NR];
+-#define sched_feat(x) (static_branch_##x(&sched_feat_keys[__SCHED_FEAT_##x]))
++
++/* Standardvärdet som konstant, så att nyckeln är en konstant även vid -O0. */
++#define SCHED_FEAT(name, enabled)	__SCHED_FEAT_EN_##name = enabled,
++enum { 
++#include "features.h"
++};
++#undef SCHED_FEAT
++
++#define sched_feat(x)							\
++	(__SCHED_FEAT_EN_##x ?						\
++	 static_branch_likely(&sched_feat_keys[__SCHED_FEAT_##x].key_true) :	\
++	 static_branch_unlikely(&sched_feat_keys[__SCHED_FEAT_##x].key_false))
+ 
+ #else /* !CONFIG_JUMP_LABEL: */
+ 

@@ -1,0 +1,174 @@
+Booting Linux on physical CPU 0x0000000000 [0x610f0000]
+Linux version 7.4.0-rc1 (vroom@vroom) (Homebrew clang version 23.1.4, Homebrew LLD 23.1.4) #1 SMP PREEMPT 2026-11-01 00:00:00
+random: crng init done
+Machine model: linux,dummy-virt
+OF: reserved mem: Reserved memory: No reserved-memory node in the DT
+psci: probing for conduit method from DT.
+psci: PSCIv1.1 detected in firmware.
+psci: Using standard PSCI v0.2 function IDs
+psci: Trusted OS migration not required
+psci: SMC Calling Convention v1.0
+Zone ranges:
+  DMA      [mem 0x0000000040000000-0x00000000bfffffff]
+  DMA32    empty
+  Normal   empty
+Movable zone start for each node
+Early memory node ranges
+  node   0: [mem 0x0000000040000000-0x00000000bfffffff]
+Initmem setup node 0 [mem 0x0000000040000000-0x00000000bfffffff]
+percpu: Embedded 18 pages/cpu s45016 r0 d28712 u73728
+CPU features: detected: Spectre-v4
+CPU features: detected: Spectre-BHB
+alternatives: applying boot alternatives
+Kernel command line: root=/dev/vda1 rw console=ttyAMA0 panic=-1 systemd.firstboot=off systemd.run_success_action=none systemd.run="/bin/sh -c 'echo CmZvciBpIGluICQoc2VxIDEyMCk7IGRvCiAgc3Q9JChzeXN0ZW1jdGwgaXMtc3lzdGVtLXJ1bm5pbmcpCiAgY2FzZSAkc3QgaW4gc3RhcnRpbmd8aW5pdGlhbGl6aW5nKSBzbGVlcCAwLjU7OyAqKSBicmVhazs7IGVzYWMKZG9uZQp7CiAgZWNobyBWUk9PTV9LRVJORUw9JCh1bmFtZSAtcikKICBlY2hvIFZST09NX0RFQklBTj0kKGNhdCAvZXRjL2RlYmlhbl92ZXJzaW9uKQogIGVjaG8gVlJPT01fU1RBVEU9JHN0CiAgZWNobyBWUk9PTV9GQUlMRUQ9JChzeXN0ZW1jdGwgLS1mYWlsZWQgLS1uby1sZWdlbmQgLS1wbGFpbiB8IHdjIC1sKQogIHN5c3RlbWN0bCAtLWZhaWxlZCAtLW5vLWxlZ2VuZCAtLXBsYWluIHwgc2VkICdzL14vVlJPT01fRkFJTEVEX1VOSVQgLycKICBmb3IgdSBpbiAkKHN5c3RlbWN0bCAtLWZhaWxlZCAtLW5vLWxlZ2VuZCAtLXBsYWluIHwgYXdrICd7cHJpbnQgJDF9Jyk7IGRvCiAgICBqb3VybmFsY3RsIC1iIC11ICIkdSIgLS1uby1wYWdlciAtbyBjYXQgfCB0YWlsIC1uIDggfCBzZWQgInMvXi9WUk9PTV9KT1VSTkFMICR1OiAvIgogIGRvbmUKICBlY2hvIFZST09NX0VORF8kKCg0MCsyKSkKfSA+IC9kZXYvdHR5QU1BMCAyPiYxCg== | base64 -d > /run/vroom-check.sh; systemd-run --no-block \
+Kernel command line: --unit=vroom-check -p After=multi-user.target -p Wants=multi-user.target /bin/sh /run/vroom-check.sh'"
+printk: log buffer data + meta data: 131072 + 458752 = 589824 bytes
+Dentry cache hash table entries: 262144 (order: 9, 2097152 bytes, linear)
+Inode-cache hash table entries: 131072 (order: 8, 1048576 bytes, linear)
+software IO TLB: SWIOTLB bounce buffer size adjusted to 2MB
+software IO TLB: area num 4.
+software IO TLB: mapped [mem 0x00000000bd600000-0x00000000bd800000] (2MB)
+Built 1 zonelists, mobility grouping on.  Total pages: 524288
+mem auto-init: stack:all(zero), heap alloc:off, heap free:off
+SLUB: HWalign=64, Order=0-3, MinObjects=0, CPUs=4, Nodes=1
+rcu: Hierarchical RCU implementation.
+rcu: 	RCU restricting CPUs from NR_CPUS=16 to nr_cpu_ids=4.
+	Trampoline variant of Tasks RCU enabled.
+	Tracing variant of Tasks RCU enabled.
+rcu: RCU calculated value of scheduler-enlistment delay is 25 jiffies.
+rcu: Adjusting geometry for rcu_fanout_leaf=16, nr_cpu_ids=4
+RCU Tasks: Setting shift to 2 and lim to 1 rcu_task_cb_adjust=1 rcu_task_cpu_ids=4.
+NR_IRQS: 64, nr_irqs: 64, preallocated irqs: 0
+GICv3: 988 SPIs implemented
+GICv3: 0 Extended SPIs implemented
+Root IRQ handler: gic_handle_irq
+GICv3: GICv3 features: 16 PPIs, RSS
+GICv3: GICD_CTLR.DS=1, SCR_EL3.FIQ=0
+GICv3: CPU0: found redistributor 0 region 0:0x00000000080a0000
+GICv2m: range[mem 0x08020000-0x08020fff], SPI[80:143]
+rcu: srcu_init: Setting srcu_struct sizes based on contention.
+clocksource: jiffies: mask: 0xffffffff max_cycles: 0xffffffff, max_idle_ns: 7645041785100000 ns
+arch_timer: cp15 timer running at 24.00MHz (virt).
+clocksource: arch_sys_counter: mask: 0xffffffffffffff max_cycles: 0x588fe9dc0, max_idle_ns: 440795202592 ns
+sched_clock: 56 bits at 24MHz, resolution 41ns, wraps every 4398046511097ns
+Console: colour dummy device 80x25
+Calibrating delay loop (skipped), value calculated using timer frequency.. 48.00 BogoMIPS (lpj=96000)
+pid_max: default: 32768 minimum: 301
+Mount-cache hash table entries: 4096 (order: 3, 32768 bytes, linear)
+Mountpoint-cache hash table entries: 4096 (order: 3, 32768 bytes, linear)
+VFS: Finished mounting rootfs on nullfs
+rcu: Hierarchical SRCU implementation.
+rcu: 	Max phase no-delay instances is 1000.
+Timer migration: 1 hierarchy levels; 8 children per group; 1 crossnode level
+smp: Bringing up secondary CPUs ...
+GICv3: CPU1: found redistributor 1 region 0:0x00000000080c0000
+CPU1: Booted secondary processor 0x0000000001 [0x610f0000]
+GICv3: CPU2: found redistributor 2 region 0:0x00000000080e0000
+CPU2: Booted secondary processor 0x0000000002 [0x610f0000]
+GICv3: CPU3: found redistributor 3 region 0:0x0000000008100000
+CPU3: Booted secondary processor 0x0000000003 [0x610f0000]
+smp: Brought up 1 node, 4 CPUs
+SMP: Total of 4 processors activated.
+CPU: All CPU(s) started at EL1
+CPU features: detected: ARMv8.4 Translation Table Level
+CPU features: detected: Data cache clean to the PoU not required for I/D coherence
+CPU features: detected: CRC32 instructions
+CPU features: detected: Data independent timing control (DIT)
+CPU features: detected: RCpc load-acquire (LDAPR)
+CPU features: detected: LSE atomic instructions
+CPU features: detected: Privileged Access Never
+CPU features: detected: Speculation barrier (SB)
+CPU features: detected: TLB range maintenance instructions
+CPU features: detected: XNX
+alternatives: applying system-wide alternatives
+Memory: 2040444K/2097152K available (6400K kernel code, 736K rwdata, 1292K rodata, 960K init, 251K bss, 53320K reserved, 0K cma-reserved)
+devtmpfs: initialized
+posixtimers hash table entries: 2048 (order: 3, 32768 bytes, linear)
+futex hash table entries: 1024 (65536 bytes on 1 NUMA nodes, total 64 KiB, linear).
+NET: Registered PF_NETLINK/PF_ROUTE protocol family
+DMA: preallocated 256 KiB GFP_KERNEL|GFP_DMA pool for atomic allocations
+ASID allocator initialised with 256 entries
+Serial: AMBA PL011 UART driver
+9000000.pl011: ttyAMA0 MMIO:0x0000000009000000 (irq = 13, base_baud = 0) is a PL011 rev1
+printk: console [ttyAMA0] enabled
+pps_core: LinuxPPS API ver. 1 registered
+pps_core: Software ver. 5.3.6 - Copyright 2005-2007 Rodolfo Giometti <giometti@linux.it>
+PTP clock support registered
+vgaarb: loaded
+clocksource: Switched to clocksource arch_sys_counter
+NET: Registered PF_INET protocol family
+IP idents hash table entries: 32768 (order: 6, 262144 bytes, linear)
+tcp_listen_portaddr_hash hash table entries: 1024 (order: 2, 16384 bytes, linear)
+Table-perturb hash table entries: 65536 (order: 6, 262144 bytes, linear)
+TCP established hash table entries: 16384 (order: 5, 131072 bytes, linear)
+TCP bind hash table entries: 16384 (order: 7, 524288 bytes, linear)
+TCP: Hash tables configured (established 16384 bind 16384)
+UDP hash table entries: 1024 (order: 4, 65536 bytes, linear)
+NET: Registered PF_UNIX/PF_LOCAL protocol family
+PCI: CLS 0 bytes, default 64
+NET: Registered PF_INET6 protocol family
+Segment Routing with IPv6
+In-situ OAM (IOAM) with IPv6
+workingset: timestamp_bits=46 (anon: 41) max_order=19 bucket_order=0 (anon: 0)
+pci-host-generic 4010000000.pcie: host bridge /pcie@10000000 ranges:
+pci-host-generic 4010000000.pcie:       IO 0x003eff0000..0x003effffff -> 0x0000000000
+pci-host-generic 4010000000.pcie:      MEM 0x0010000000..0x003efeffff -> 0x0010000000
+pci-host-generic 4010000000.pcie:      MEM 0x8000000000..0xffffffffff -> 0x8000000000
+pci-host-generic 4010000000.pcie: Memory resource size exceeds max for 32 bits
+pci-host-generic 4010000000.pcie: ECAM at [mem 0x4010000000-0x401fffffff] for [bus 00-ff]
+pci-host-generic 4010000000.pcie: PCI host bridge to bus 0000:00
+pci_
+** replaying previous printk message **
+pci_bus 0000:00: root bus resource [bus 00-ff]
+pci_bus 0000:00: root bus resource [io  0x0000-0xffff]
+pci_bus 0000:00: root bus resource [mem 0x10000000-0x3efeffff]
+pci_bus 0000:00: root bus resource [mem 0x8000000000-0xffffffffff]
+pci 0000:00:00.0: [1b36:0008] type 00 class 0x060000 conventional PCI endpoint
+pci 0000:00:01.0: [1af4:1000] type 00 class 0x020000 conventional PCI endpoint
+pci 0000:00:01.0: BAR 0 [io  0x0000-0x001f]
+pci 0000:00:01.0: BAR 1 [mem 0x00000000-0x00000fff]
+pci 0000:00:01.0: BAR 4 [mem 0x00000000-0x00003fff 64bit pref]
+pci 0000:00:01.0: ROM [mem 0x00000000-0x0003ffff pref]
+pci 0000:00:01.0: ROM [mem 0x10000000-0x1003ffff pref]: assigned
+pci 0000:00:01.0: BAR 4 [mem 0x8000000000-0x8000003fff 64bit pref]: assigned
+pci 0000:00:01.0: BAR 1 [mem 0x10040000-0x10040fff]: assigned
+pci 0000:00:01.0: BAR 0 [io  0x1000-0x101f]: assigned
+pci_bus 0000:00: resource 4 [io  0x0000-0xffff]
+pci_bus 0000:00: resource 5 [mem 0x10000000-0x3efeffff]
+pci_bus 0000:00: resource 6 [mem 0x8000000000-0xffffffffff]
+virtio-pci 0000:00:01.0: enabling device (0000 -> 0003)
+rtc-pl031 9010000.pl031: registered as rtc0
+rtc-pl031 9010000.pl031: setting system clock to 2026-11-07T10:42:52 UTC (1794048172)
+sit: IPv6, IPv4 and MPLS over IPv4 tunneling driver
+NET: Registered PF_PACKET protocol family
+clk: Disabling unused clocks
+/dev/root: Can't lookup blockdev
+VFS: Cannot open root device "/dev/vda1" or unknown-block(0,0): error -19
+Please append a correct "root=" boot option; here are the available partitions:
+List of all bdev filesystems:
+ ext3
+ ext2
+ ext4
+ vfat
+
+Kernel panic - not syncing: VFS: Unable to mount root fs on unknown-block(0,0)
+CPU: 0 UID: 0 PID: 1 Comm: swapper/0 Not tainted 7.4.0-rc1 #1 PREEMPTLAZY 
+Hardware name: linux,dummy-virt (DT)
+Call trace:
+ show_stack+0x14/0x1c (C)
+ __dump_stack+0x24/0x30
+ dump_stack_lvl+0x20/0x64
+ dump_stack+0x14/0x1c
+ vpanic+0x144/0x334
+ oops_exit+0x0/0x34
+ mount_root_generic+0x264/0x27c
+ mount_block_root+0x4c/0x58
+ mount_root+0x70/0x7c
+ prepare_namespace+0x6c/0xc8
+ kernel_init_freeable+0xa4/0xf8
+ kernel_init+0x20/0x118
+ ret_from_fork+0x10/0x20
+SMP: stopping secondary CPUs
+Kernel Offset: disabled
+CPU features: 0x0,00000000,00300008,88080a00,0804a403
+Memory Limit: none

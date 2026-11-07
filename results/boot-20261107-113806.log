@@ -1,0 +1,23 @@
+Booting Linux on physical CPU 0x0000000000 [0x610f0000]
+Linux version 7.4.0-rc1-dirty (vroom@vroom) (Homebrew clang version 23.1.4, Homebrew LLD 23.1.4) #1 SMP PREEMPT 2026-11-01 00:00:00
+random: crng init done
+Machine model: linux,dummy-virt
+OF: reserved mem: Reserved memory: No reserved-memory node in the DT
+psci: probing for conduit method from DT.
+psci: PSCIv1.1 detected in firmware.
+psci: Using standard PSCI v0.2 function IDs
+psci: Trusted OS migration not required
+psci: SMC Calling Convention v1.0
+Zone ranges:
+  DMA      [mem 0x0000000040000000-0x00000000bfffffff]
+  DMA32    empty
+  Normal   empty
+Movable zone start for each node
+Early memory node ranges
+  node   0: [mem 0x0000000040000000-0x00000000bfffffff]
+Initmem setup node 0 [mem 0x0000000040000000-0x00000000bfffffff]
+percpu: Embedded 17 pages/cpu s38400 r0 d31232 u69632
+CPU features: detected: Spectre-v4
+CPU features: detected: Spectre-BHB
+alternatives: applying boot alternatives
+Kernel command line: root=/dev/vda1 rw console=ttyAMA0 panic=-1 systemd.firstboot=off systemd.run_success_action=none systemd.run="/bin/sh -c 'for i in $(seq 90); do st=$(systemctl is-system-running); case $st in starting|initializing) sleep 1;; *) break;; esac; done; { echo VROOM_KERNEL=$(uname -r); echo VROOM_DEBIAN=$(cat /etc/debian_version); echo VROOM_STATE=$st; echo VROOM_FAILED=$(systemctl --failed --no-legend --plain | wc -l); systemctl --failed --no-legend --plain; echo VROOM_CHECK_END

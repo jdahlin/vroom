@@ -1,0 +1,681 @@
+From 6491bf8f47da39da565b36c06b87914b2fb597bd Mon Sep 17 00:00:00 2001
+From: vroom <vroom@localhost>
+Date: Sat, 7 Nov 2026 14:21:35 +0100
+Subject: [PATCH] kconfig: evaluate $(shell,...) speculatively in parallel
+
+Kconfig runs every $(shell,...) through popen() one at a time; an arm64
+LLVM config runs ~240 commands (compiler/assembler/linker probes, each a
+/bin/sh plus mkdir/cc/rm) and syncconfig spends ~4 s waiting on them.
+
+On a cache miss, fork() a child that inherits the complete parser state
+and continues the parse in "record" mode: $(shell,...) commands are not
+run but written to a pipe.  The parent runs recorded commands in
+parallel (one per CPU), keyed by exact command text, and resumes as soon
+as the result it needs is available, so parsing and probing overlap.
+Commands whose text depends on an earlier result are mispredicted, miss
+again and start another recorder; recording children use known results,
+so each round predicts exactly.  stderr is captured per command and
+replayed when the result is consumed.
+
+Every consumed result comes from running exactly the same command text
+with the same /bin/sh and environment, so the generated .config,
+auto.conf, autoconf.h and auto.conf.cmd are byte-identical to serial
+evaluation.  The child gets private file offsets for the open Kconfig
+files so its read-ahead cannot move the parent's.
+
+KCONFIG_SHELL_JOBS=N limits parallelism (1 disables prefetching);
+KCONFIG_SHELL_DEBUG=1 prints statistics.
+
+syncconfig, conf only, M1 Pro: 4.1 s -> 1.0 s.
+---
+ scripts/kconfig/parser.y     |   1 +
+ scripts/kconfig/preprocess.c | 564 ++++++++++++++++++++++++++++++++++-
+ scripts/kconfig/preprocess.h |   1 +
+ 3 files changed, 553 insertions(+), 13 deletions(-)
+
+diff --git a/scripts/kconfig/parser.y b/scripts/kconfig/parser.y
+index ecb18c213..08f3bd520 100644
+--- a/scripts/kconfig/parser.y
++++ b/scripts/kconfig/parser.y
+@@ -572,6 +572,7 @@ void conf_parse(const char *name)
+ 	if (getenv("ZCONF_DEBUG"))
+ 		yydebug = 1;
+ 	yyparse();
++	preprocess_parse_done();
+ 
+ 	str_printf(&autoconf_cmd,
+ 		   "\n"
+diff --git a/scripts/kconfig/preprocess.c b/scripts/kconfig/preprocess.c
+index 783abcaa5..18abebafb 100644
+--- a/scripts/kconfig/preprocess.c
++++ b/scripts/kconfig/preprocess.c
+@@ -3,11 +3,20 @@
+ // Copyright (C) 2018 Masahiro Yamada <yamada.masahiro@socionext.com>
+ 
+ #include <ctype.h>
++#include <errno.h>
++#include <fcntl.h>
++#include <poll.h>
++#include <signal.h>
++#include <spawn.h>
+ #include <stdarg.h>
+ #include <stdbool.h>
+ #include <stdio.h>
+ #include <stdlib.h>
+ #include <string.h>
++#include <sys/stat.h>
++#include <sys/time.h>
++#include <sys/wait.h>
++#include <unistd.h>
+ 
+ #include <array_size.h>
+ #include <list.h>
+@@ -16,6 +25,8 @@
+ #include "lkc.h"
+ #include "preprocess.h"
+ 
++static bool shell_recording;
++
+ static char *expand_string_with_args(const char *in, int argc, char *argv[]);
+ static char *expand_string(const char *in);
+ 
+@@ -129,7 +140,8 @@ static char *do_filename(int argc, char *argv[])
+ 
+ static char *do_info(int argc, char *argv[])
+ {
+-	printf("%s\n", argv[0]);
++	if (!shell_recording)
++		printf("%s\n", argv[0]);
+ 
+ 	return xstrdup("");
+ }
+@@ -143,15 +155,467 @@ static char *do_lineno(int argc, char *argv[])
+ 	return xstrdup(buf);
+ }
+ 
+-static char *do_shell(int argc, char *argv[])
++/*
++ * $(shell,...) prefetch.
++ *
++ * Kconfig evaluates $(shell,...) serially through popen(); a typical arm64
++ * config runs ~150 commands (each a /bin/sh plus compiler/mkdir/rm) and
++ * spends seconds waiting on them.  On a cache miss we fork(): the child
++ * inherits the complete parser state, continues parsing in "record" mode
++ * (shell commands are not run, only written to a pipe) and exits when the
++ * parse is done.  The parent runs the recorded commands in parallel,
++ * caches the output by exact command string and resumes.  Commands whose
++ * text depends on an earlier result are mispredicted by the child; they
++ * miss again and start another round, so the number of rounds equals the
++ * depth of the dependency chain.  Every command is still run exactly as
++ * before (same string, same /bin/sh, same environment), so the result is
++ * identical to serial evaluation.  KCONFIG_SHELL_JOBS=1 disables it.
++ */
++extern char **environ;
++
++static void *xmemdup(const void *p, size_t len)
+ {
+-	FILE *p;
+-	char buf[4096];
++	void *q = xmalloc(len + 1);
++
++	memcpy(q, p, len);
++	return q;
++}
++
++static void set_cloexec(int fd)
++{
++	fcntl(fd, F_SETFD, FD_CLOEXEC);
++}
++static int shell_record_fd = -1;
++
++struct shell_result {
+ 	char *cmd;
+-	size_t nread;
++	char *out;
++	size_t len;
++	char *err;		/* stderr, replayed when the result is consumed */
++	size_t errlen;
++	unsigned int hash;
++	int state;		/* SR_NEW, SR_RUNNING, SR_DONE */
++};
++
++enum { SR_NEW, SR_RUNNING, SR_DONE };
++
++static bool shell_debug;	/* KCONFIG_SHELL_DEBUG */
++static unsigned int shell_rounds, shell_spawned;
++static double shell_job_ms, shell_t0;
++
++/* open-addressed table of pointers; entries never move once created */
++static struct shell_result **shell_cache;
++static unsigned int shell_cache_size, shell_cache_used;
++
++static unsigned int str_hash(const char *s)
++{
++	unsigned int h = 2166136261u;
++
++	while (*s)
++		h = (h ^ (unsigned char)*s++) * 16777619u;
++	return h;
++}
++
++static struct shell_result **shell_cache_bucket(const char *cmd, unsigned int h)
++{
++	unsigned int i, mask = shell_cache_size - 1;
++
++	for (i = h & mask;; i = (i + 1) & mask) {
++		struct shell_result *r = shell_cache[i];
++
++		if (!r || (r->hash == h && !strcmp(r->cmd, cmd)))
++			return &shell_cache[i];
++	}
++}
++
++static struct shell_result *shell_cache_find(const char *cmd)
++{
++	if (!shell_cache_size)
++		return NULL;
++	return *shell_cache_bucket(cmd, str_hash(cmd));
++}
++
++static struct shell_result *shell_cache_insert(const char *cmd)
++{
++	unsigned int h = str_hash(cmd);
++	struct shell_result **b;
++
++	if ((shell_cache_used + 1) * 2 > shell_cache_size) {
++		struct shell_result **old = shell_cache;
++		unsigned int i, n = shell_cache_size;
++
++		shell_cache_size = n ? n * 2 : 256;
++		shell_cache = xcalloc(shell_cache_size, sizeof(*shell_cache));
++		for (i = 0; i < n; i++)
++			if (old[i])
++				*shell_cache_bucket(old[i]->cmd, old[i]->hash) = old[i];
++		free(old);
++	}
++	b = shell_cache_bucket(cmd, h);
++	if (!*b) {
++		*b = xcalloc(1, sizeof(**b));
++		(*b)->cmd = xstrdup(cmd);
++		(*b)->hash = h;
++		shell_cache_used++;
++	}
++	return *b;
++}
++
++static void shell_record(const char *cmd)
++{
++	size_t len = strlen(cmd) + 1;	/* NUL-terminated records */
++	const char *p = cmd;
++
++	while (len) {
++		ssize_t n = write(shell_record_fd, p, len);
++
++		if (n < 0 && errno == EINTR)
++			continue;
++		if (n <= 0)
++			_exit(0);
++		p += n;
++		len -= n;
++	}
++}
++
++struct shell_job {
++	struct shell_result *res;
++	pid_t pid;
++	int fd[2];		/* stdout, stderr */
++	double t0;
++	char *buf[2];
++	size_t len[2], cap[2];
++};
++
++static pid_t shell_spawn(const char *cmd, int outfd[2])
++{
++	posix_spawn_file_actions_t fa;
++	char *argv[] = { "sh", "-c", (char *)cmd, NULL };
++	int o[2], e[2];
++	pid_t pid;
++
++	if (pipe(o))
++		return -1;
++	if (pipe(e)) {
++		close(o[0]);
++		close(o[1]);
++		return -1;
++	}
++	set_cloexec(o[0]);
++	set_cloexec(e[0]);
++	set_cloexec(o[1]);
++	set_cloexec(e[1]);
++	posix_spawn_file_actions_init(&fa);
++	posix_spawn_file_actions_adddup2(&fa, o[1], 1);
++	posix_spawn_file_actions_adddup2(&fa, e[1], 2);
++	if (posix_spawn(&pid, "/bin/sh", &fa, NULL, argv, environ))
++		pid = -1;
++	posix_spawn_file_actions_destroy(&fa);
++	close(o[1]);
++	close(e[1]);
++	if (pid < 0) {
++		close(o[0]);
++		close(e[0]);
++		return -1;
++	}
++	outfd[0] = o[0];
++	outfd[1] = e[0];
++	return pid;
++}
++
++/*
++ * After fork() the child shares file offsets with the parent for every open
++ * file (the lexer's Kconfig files).  Give the child private descriptors at
++ * the same offsets so its read-ahead does not move the parent's position.
++ */
++static void unshare_file_offsets(void)
++{
++	int fd, maxfd = (int)sysconf(_SC_OPEN_MAX);
++
++	if (maxfd < 0 || maxfd > 4096)
++		maxfd = 4096;
++	for (fd = 3; fd < maxfd; fd++) {
++		char path[4096];
++		struct stat st;
++		off_t off;
++		int nfd, fl;
++
++		if (fstat(fd, &st) || !S_ISREG(st.st_mode))
++			continue;
++		fl = fcntl(fd, F_GETFL);
++		if (fl < 0 || (fl & O_ACCMODE) != O_RDONLY)
++			continue;
++#ifdef F_GETPATH
++		if (fcntl(fd, F_GETPATH, path) < 0)
++			_exit(0);
++#else
++		{
++			char link[64];
++			ssize_t n;
++
++			snprintf(link, sizeof(link), "/proc/self/fd/%d", fd);
++			n = readlink(link, path, sizeof(path) - 1);
++			if (n < 0)
++				_exit(0);
++			path[n] = 0;
++		}
++#endif
++		off = lseek(fd, 0, SEEK_CUR);
++		nfd = open(path, O_RDONLY | O_CLOEXEC);
++		if (nfd < 0 || lseek(nfd, off, SEEK_SET) != off)
++			_exit(0);	/* give up prefetching, parent is unaffected */
++		dup2(nfd, fd);
++		close(nfd);
++	}
++}
++
++static void job_read(struct shell_job *j, int k)
++{
++	ssize_t n;
++
++	if (j->cap[k] - j->len[k] < 4096) {
++		j->cap[k] = j->cap[k] ? j->cap[k] * 2 : 4096;
++		j->buf[k] = xrealloc(j->buf[k], j->cap[k]);
++	}
++	n = read(j->fd[k], j->buf[k] + j->len[k], j->cap[k] - j->len[k]);
++	if (n > 0) {
++		j->len[k] += n;
++	} else if (n == 0 || errno != EINTR) {
++		close(j->fd[k]);
++		j->fd[k] = -1;
++	}
++}
++
++/* recording children (one per prefetch round, possibly overlapping) */
++#define MAX_RECORDERS	8
++
++struct recorder {
++	pid_t pid;
++	int fd;
++	char *buf;
++	size_t len, cap, pos;
++};
++
++static struct recorder recorders[MAX_RECORDERS];
++static int nrecorders;
++static struct shell_job *jobs;
++static int njobs, max_jobs = -1;
++
++static double now_ms(void)
++{
++	struct timeval tv;
++
++	gettimeofday(&tv, NULL);
++	return tv.tv_sec * 1e3 + tv.tv_usec / 1e3;
++}
++
++static bool job_start(struct shell_result *r)
++{
++	struct shell_job *j = &jobs[njobs];
++
++	j->pid = shell_spawn(r->cmd, j->fd);
++	if (j->pid < 0)
++		return false;	/* run synchronously when needed */
++	r->state = SR_RUNNING;
++	j->t0 = now_ms();
++	j->res = r;
++	j->len[0] = j->len[1] = 0;
++	njobs++;
++	shell_spawned++;
++	return true;
++}
++
++static void job_finish(int i)
++{
++	struct shell_job *j = &jobs[i];
++	struct shell_result *r = j->res;
++
++	waitpid(j->pid, NULL, 0);
++	shell_job_ms += now_ms() - j->t0;
++	if (shell_debug && getenv("KCONFIG_SHELL_DEBUG")[0] == '2')
++		fprintf(stderr, "kconfig-job %.1f %s\n", now_ms() - j->t0, r->cmd);
++	r->out = xmemdup(j->buf[0], j->len[0]);
++	r->len = j->len[0];
++	r->err = j->len[1] ? xmemdup(j->buf[1], j->len[1]) : NULL;
++	r->errlen = j->len[1];
++	r->state = SR_DONE;
++	free(j->buf[0]);
++	free(j->buf[1]);
++	*j = jobs[--njobs];
++	memset(&jobs[njobs], 0, sizeof(jobs[njobs]));
++}
++
++/* Start jobs for recorded commands, newest recorder first (most accurate). */
++static void start_recorded(bool allow)
++{
+ 	int i;
+ 
+-	cmd = argv[0];
++	for (i = nrecorders - 1; i >= 0 && njobs < max_jobs; i--) {
++		struct recorder *rc = &recorders[i];
++
++		while (njobs < max_jobs && rc->pos < rc->len) {
++			char *cmd = rc->buf + rc->pos;
++			char *end = memchr(cmd, 0, rc->len - rc->pos);
++			struct shell_result *r;
++
++			if (!end)
++				break;
++			rc->pos = end - rc->buf + 1;
++			r = shell_cache_insert(cmd);
++			if (r->state == SR_NEW && allow)
++				job_start(r);
++		}
++	}
++}
++
++static void recorder_close(int i)
++{
++	int fd = recorders[i].fd;
++
++	close(fd < 0 ? -fd - 1 : fd);
++	waitpid(recorders[i].pid, NULL, 0);
++	free(recorders[i].buf);
++	recorders[i] = recorders[--nrecorders];
++}
++
++/*
++ * Run the event loop until @want is done, or with want == NULL until fewer
++ * than @max_running jobs are running.  @allow: start new speculative jobs.
++ */
++static void shell_pump_until(struct shell_result *want, bool allow, int max_running)
++{
++	struct pollfd pfds[MAX_RECORDERS + 2 * 64];
++
++	for (;;) {
++		int nfds = 0, i, k;
++
++		start_recorded(allow);
++		if (want ? want->state == SR_DONE : njobs < max_running)
++			return;
++		for (i = 0; i < nrecorders; i++) {
++			pfds[nfds].fd = recorders[i].fd;
++			pfds[nfds++].events = POLLIN;
++		}
++		for (i = 0; i < njobs; i++)
++			for (k = 0; k < 2; k++) {
++				pfds[nfds].fd = jobs[i].fd[k];
++				pfds[nfds++].events = POLLIN;
++			}
++		if (poll(pfds, nfds, -1) < 0) {
++			if (errno == EINTR)
++				continue;
++			return;
++		}
++		nfds = 0;
++		for (i = 0; i < nrecorders; i++, nfds++) {
++			struct recorder *rc = &recorders[i];
++			ssize_t n;
++
++			if (!pfds[nfds].revents)
++				continue;
++			if (rc->pos == rc->len)
++				rc->pos = rc->len = 0;
++			if (rc->cap - rc->len < 65536) {
++				rc->cap = rc->cap ? rc->cap * 2 : 65536;
++				rc->buf = xrealloc(rc->buf, rc->cap);
++			}
++			n = read(rc->fd, rc->buf + rc->len, rc->cap - rc->len);
++			if (n > 0)
++				rc->len += n;
++			else if (n == 0 || errno != EINTR)
++				rc->fd = -rc->fd - 1;	/* mark closed */
++		}
++		for (i = 0; i < njobs; i++)
++			for (k = 0; k < 2; k++, nfds++)
++				if (pfds[nfds].revents && jobs[i].fd[k] >= 0)
++					job_read(&jobs[i], k);
++		/* drop finished recorders once their records are consumed */
++		for (i = 0; i < nrecorders;) {
++			if (recorders[i].fd < 0 && recorders[i].pos >= recorders[i].len) {
++				recorder_close(i);
++			} else {
++				i++;
++			}
++		}
++		for (i = 0; i < njobs;) {
++			if (jobs[i].fd[0] < 0 && jobs[i].fd[1] < 0)
++				job_finish(i);
++			else
++				i++;
++		}
++	}
++}
++
++/* Fork a child that continues the parse and records future $(shell,...). */
++static void shell_pump(struct shell_result *want, bool allow)
++{
++	shell_pump_until(want, allow, 1);
++}
++
++static void shell_start_recorder(void)
++{
++	int rec[2], i;
++	pid_t child;
++
++	if (nrecorders == MAX_RECORDERS || pipe(rec))
++		return;
++	fflush(stdout);
++	fflush(stderr);
++	child = fork();
++	if (child < 0) {
++		close(rec[0]);
++		close(rec[1]);
++		return;
++	}
++	if (child == 0) {
++		int null;
++
++		/* the parent owns all jobs and recorders */
++		for (i = 0; i < njobs; i++) {
++			close(jobs[i].fd[0]);
++			close(jobs[i].fd[1]);
++		}
++		for (i = 0; i < nrecorders; i++)
++			close(recorders[i].fd < 0 ? -recorders[i].fd - 1 : recorders[i].fd);
++		njobs = nrecorders = 0;
++		unshare_file_offsets();
++		null = open("/dev/null", O_WRONLY);
++		dup2(null, 1);
++		dup2(null, 2);
++		close(null);
++		close(rec[0]);
++		shell_recording = true;
++		shell_record_fd = rec[1];
++		return;		/* continue the parse, recording */
++	}
++	close(rec[1]);
++	set_cloexec(rec[0]);
++	shell_rounds++;
++	recorders[nrecorders].pid = child;
++	recorders[nrecorders].fd = rec[0];
++	recorders[nrecorders].buf = NULL;
++	recorders[nrecorders].len = recorders[nrecorders].cap = recorders[nrecorders].pos = 0;
++	nrecorders++;
++}
++
++static void shell_init(void)
++{
++	const char *env = getenv("KCONFIG_SHELL_JOBS");
++
++	max_jobs = env && *env ? atoi(env) : (int)sysconf(_SC_NPROCESSORS_ONLN);
++	if (max_jobs > 64)
++		max_jobs = 64;
++	if (max_jobs > 1)
++		jobs = xcalloc(max_jobs, sizeof(*jobs));
++	shell_debug = getenv("KCONFIG_SHELL_DEBUG");
++	shell_t0 = now_ms();
++}
++
++static char *shell_output(const char *cmd, size_t *lenp)
++{
++	char buf[4096];
++	size_t nread;
++	FILE *p;
+ 
+ 	p = popen(cmd, "r");
+ 	if (!p) {
+@@ -160,8 +624,67 @@ static char *do_shell(int argc, char *argv[])
+ 	}
+ 
+ 	nread = fread(buf, 1, sizeof(buf), p);
+-	if (nread == sizeof(buf))
+-		nread--;
++	if (pclose(p) == -1) {
++		perror(cmd);
++		exit(1);
++	}
++	*lenp = nread;
++	return xmemdup(buf, nread);
++}
++
++static char *do_shell(int argc, char *argv[])
++{
++	struct shell_result *r;
++	const char *cmd = argv[0];
++	char *buf;
++	size_t nread;
++	int i;
++
++	if (max_jobs < 0)
++		shell_init();
++	r = shell_cache_find(cmd);
++	if (shell_recording) {
++		/* known results make the rest of the prediction exact */
++		if (r && r->state == SR_DONE) {
++			buf = xmemdup(r->out, r->len);
++			nread = r->len;
++			goto done;
++		}
++		shell_record(cmd);
++		return xstrdup("");
++	}
++	if (max_jobs > 1 && (!r || r->state != SR_DONE)) {
++		if (!r || r->state == SR_NEW) {
++			/* miss: run it now and predict the rest of the parse */
++			r = shell_cache_insert(cmd);
++			if (njobs == max_jobs)
++				shell_pump_until(NULL, false, max_jobs);	/* make room */
++			if (!job_start(r))
++				r = NULL;
++			shell_start_recorder();
++			if (shell_recording) {
++				shell_record(cmd);
++				return xstrdup("");
++			}
++		}
++		if (r)
++			shell_pump(r, true);
++	}
++	if (r && r->state == SR_DONE) {
++		if (r->errlen)
++			fwrite(r->err, 1, r->errlen, stderr);
++		nread = r->len;
++		buf = xmemdup(r->out, nread);
++	} else {
++		if (shell_debug)
++			fprintf(stderr, "kconfig-shell: sync %s\n", cmd);
++		buf = shell_output(cmd, &nread);
++	}
++done:
++	/* same truncation as fread() into a 4096 byte buffer did */
++	if (nread >= 4096)
++		nread = 4095;
++	buf = xrealloc(buf, nread + 1);
+ 
+ 	/* remove trailing new lines */
+ 	while (nread > 0 && buf[nread - 1] == '\n')
+@@ -175,12 +698,27 @@ static char *do_shell(int argc, char *argv[])
+ 			buf[i] = ' ';
+ 	}
+ 
+-	if (pclose(p) == -1) {
+-		perror(cmd);
+-		exit(1);
+-	}
++	return buf;
++}
+ 
+-	return xstrdup(buf);
++/* Called at the end of the parse: a recording child is done. */
++void preprocess_parse_done(void)
++{
++	int i;
++
++	if (shell_recording)
++		_exit(0);
++	/* stop predicting; let speculative jobs finish (they clean up after themselves) */
++	for (i = 0; i < nrecorders; i++)
++		kill(recorders[i].pid, SIGKILL);
++	while (nrecorders)
++		recorder_close(0);
++	if (njobs)
++		shell_pump(NULL, false);
++	if (shell_debug)
++		fprintf(stderr, "kconfig-shell: %u rounds, %u commands run in parallel, %u cached, "
++			"%.0f ms job time, %.0f ms wall\n",
++			shell_rounds, shell_spawned, shell_cache_used, shell_job_ms, now_ms() - shell_t0);
+ }
+ 
+ static char *do_warning_if(int argc, char *argv[])
+diff --git a/scripts/kconfig/preprocess.h b/scripts/kconfig/preprocess.h
+index a7e4a5506..41d2306b5 100644
+--- a/scripts/kconfig/preprocess.h
++++ b/scripts/kconfig/preprocess.h
+@@ -15,5 +15,6 @@ void variable_add(const char *name, const char *value,
+ void variable_all_del(void);
+ char *expand_dollar(const char **str);
+ char *expand_one_token(const char **str);
++void preprocess_parse_done(void);
+ 
+ #endif /* PREPROCESS_H */
+-- 
+2.54.0 (Apple Git-157)
+

@@ -1,0 +1,108 @@
+From 257f57783b99f894d5cf5741f14634ca7a76c18c Mon Sep 17 00:00:00 2001
+From: vroom <vroom@localhost>
+Date: Sat, 7 Nov 2026 14:45:20 +0100
+Subject: [PATCH] kconfig: run $(shell,...) with $CONFIG_SHELL when it is an
+ absolute path
+
+Kbuild exports CONFIG_SHELL.  Using it for $(shell,...) (both the
+prefetch and the synchronous path) lets a faster POSIX shell such as dash
+run the ~240 toolchain probes; /bin/sh remains the default.
+---
+ scripts/kconfig/preprocess.c | 57 +++++++++++++++++++++++++++++++-----
+ 1 file changed, 49 insertions(+), 8 deletions(-)
+
+diff --git a/scripts/kconfig/preprocess.c b/scripts/kconfig/preprocess.c
+index 18abebafb..882a1eee6 100644
+--- a/scripts/kconfig/preprocess.c
++++ b/scripts/kconfig/preprocess.c
+@@ -287,6 +287,19 @@ struct shell_job {
+ 	size_t len[2], cap[2];
+ };
+ 
++/* $CONFIG_SHELL if it is an absolute path (Kbuild exports it), else /bin/sh */
++static const char *shell_path(void)
++{
++	static const char *path;
++
++	if (!path) {
++		const char *s = getenv("CONFIG_SHELL");
++
++		path = s && s[0] == '/' ? s : "/bin/sh";
++	}
++	return path;
++}
++
+ static pid_t shell_spawn(const char *cmd, int outfd[2])
+ {
+ 	posix_spawn_file_actions_t fa;
+@@ -308,7 +321,7 @@ static pid_t shell_spawn(const char *cmd, int outfd[2])
+ 	posix_spawn_file_actions_init(&fa);
+ 	posix_spawn_file_actions_adddup2(&fa, o[1], 1);
+ 	posix_spawn_file_actions_adddup2(&fa, e[1], 2);
+-	if (posix_spawn(&pid, "/bin/sh", &fa, NULL, argv, environ))
++	if (posix_spawn(&pid, shell_path(), &fa, NULL, argv, environ))
+ 		pid = -1;
+ 	posix_spawn_file_actions_destroy(&fa);
+ 	close(o[1]);
+@@ -611,23 +624,51 @@ static void shell_init(void)
+ 	shell_t0 = now_ms();
+ }
+ 
++/* run synchronously, like popen(cmd, "r") but with shell_path() */
+ static char *shell_output(const char *cmd, size_t *lenp)
+ {
++	posix_spawn_file_actions_t fa;
++	char *argv[] = { "sh", "-c", (char *)cmd, NULL };
+ 	char buf[4096];
+-	size_t nread;
+-	FILE *p;
++	size_t nread = 0;
++	ssize_t n;
++	int o[2], st;
++	pid_t pid;
+ 
+-	p = popen(cmd, "r");
+-	if (!p) {
++	fflush(stdout);
++	if (pipe(o)) {
+ 		perror(cmd);
+ 		exit(1);
+ 	}
+-
+-	nread = fread(buf, 1, sizeof(buf), p);
+-	if (pclose(p) == -1) {
++	set_cloexec(o[0]);
++	set_cloexec(o[1]);
++	posix_spawn_file_actions_init(&fa);
++	posix_spawn_file_actions_adddup2(&fa, o[1], 1);
++	if (posix_spawn(&pid, shell_path(), &fa, NULL, argv, environ)) {
+ 		perror(cmd);
+ 		exit(1);
+ 	}
++	posix_spawn_file_actions_destroy(&fa);
++	close(o[1]);
++	/* read up to 4096 bytes like fread() did, then drain */
++	while ((n = read(o[0], buf + nread, sizeof(buf) - nread)) != 0) {
++		if (n < 0) {
++			if (errno == EINTR)
++				continue;
++			break;
++		}
++		nread += n;
++		if (nread == sizeof(buf)) {
++			char sink[4096];
++
++			while ((n = read(o[0], sink, sizeof(sink))) > 0 || (n < 0 && errno == EINTR))
++				;
++			break;
++		}
++	}
++	close(o[0]);
++	while (waitpid(pid, &st, 0) < 0 && errno == EINTR)
++		;
+ 	*lenp = nread;
+ 	return xmemdup(buf, nread);
+ }
+-- 
+2.54.0 (Apple Git-157)
+
