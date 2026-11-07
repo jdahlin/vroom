@@ -896,6 +896,27 @@ static const char predef_darwin[] =
 	"#define __unsafe_unretained \n"
 	"#define __weak __attribute__((objc_gc(weak)))\n"
 	;
+static const char predef_undef_c[] =
+	"#define __STDC_EMBED_EMPTY__ 2\n"
+	"#define __STDC_EMBED_FOUND__ 1\n"
+	"#define __STDC_EMBED_NOT_FOUND__ 0\n"
+	"#define __STDC_HOSTED__ 1\n"
+	"#define __STDC_UTF_16__ 1\n"
+	"#define __STDC_UTF_32__ 1\n"
+	"#define __STDC_VERSION__ 201710L\n"
+	"#define __STDC__ 1\n"
+	;
+static const char predef_undef_asm[] =
+	"#define __ASSEMBLER__ 1\n"
+	"#define __STDC_EMBED_EMPTY__ 2\n"
+	"#define __STDC_EMBED_FOUND__ 1\n"
+	"#define __STDC_EMBED_NOT_FOUND__ 0\n"
+	"#define __STDC_HOSTED__ 1\n"
+	"#define __STDC_UTF_16__ 1\n"
+	"#define __STDC_UTF_32__ 1\n"
+	"#define __STDC_VERSION__ 201710L\n"
+	"#define __STDC__ 1\n"
+	;
 static const char *const sysdirs_darwin[] = {
 	"/opt/homebrew/Cellar/llvm/23.1.4/lib/clang/23/include",
 	"/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",

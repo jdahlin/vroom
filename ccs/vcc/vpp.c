@@ -172,7 +172,7 @@ int main(int argc, char **argv)
 	int nq = 0, ni = 0, ns = 0, na = 0, n = 0;
 	const char *cmp = NULL, *out = NULL, *main_file = NULL;
 	buf pre = { 0 }, cmdl = { 0 }, incl = { 0 }, o = { 0 };
-	int darwin = 1, nostdinc = 0;
+	int darwin = 1, nostdinc = 0, asm_mode = 0, undef = 0;
 	int opt = 2, os = 0, pie = 0, pic = 0, freestanding = 0, cfi = 0, strict_align = 0, tiny = 0;
 	pp_opts po = { 0 };
 	char *pmap = NULL;
@@ -207,6 +207,8 @@ int main(int argc, char **argv)
 		}
 		if (!strncmp(a, "--target=", 9) || !strcmp(a, "-target")) darwin = strstr(a, "darwin") || strstr(a, "apple");
 		else if (!strcmp(a, "-nostdinc")) nostdinc = 1;
+		else if (!strcmp(a, "-undef")) undef = 1;
+		else if (!strcmp(a, "-x") && i + 1 < argc) asm_mode = !strcmp(argv[++i], "assembler-with-cpp");
 		else if (!strcmp(a, "-O0")) opt = 0;
 		else if (!strcmp(a, "-Os") || !strcmp(a, "-Oz")) { opt = 2; os = 1; }
 		else if (!strncmp(a, "-O", 2)) opt = 2;
@@ -220,7 +222,13 @@ int main(int argc, char **argv)
 		else if (!strcmp(a, "-fno-asynchronous-unwind-tables")) cfi = 0;
 		else if (!strcmp(a, "-mstrict-align")) strict_align = 1;
 		else if (!strcmp(a, "-mcmodel=tiny")) tiny = 1;
-		else if (a[0] != '-' && (strstr(a, ".c") || strstr(a, ".S"))) main_file = a;
+		else if (a[0] != '-' && (strstr(a, ".c") || strstr(a, ".S") || strstr(a, ".dts"))) {
+			size_t l = strlen(a);
+
+			main_file = a;
+			if (l > 2 && !strcmp(a + l - 2, ".S"))
+				asm_mode = 1;
+		}
 	}
 	if (!main_file) {
 		fprintf(stderr, "vpp: no input file\n");
@@ -243,7 +251,12 @@ int main(int argc, char **argv)
 	po.dirs = all;
 	po.ndirs = n;
 
-	bstr(&pre, darwin ? predef_darwin : predef_aarch64_linux);
+	if (undef)
+		bstr(&pre, asm_mode ? predef_undef_asm : predef_undef_c);
+	else
+		bstr(&pre, darwin ? predef_darwin : predef_aarch64_linux);
+	if (asm_mode && !undef)
+		bstr(&pre, "#define __ASSEMBLER__ 1\n#undef __STDC_VERSION__\n#define __STDC_VERSION__ 201710L\n");
 	po.target = darwin ? PP_DARWIN : PP_LINUX_AARCH64;
 	if (opt == 0) bstr(&pre, "#undef __OPTIMIZE__\n#define __NO_INLINE__ 1\n");
 	if (os) bstr(&pre, "#define __OPTIMIZE_SIZE__ 1\n");
@@ -268,6 +281,7 @@ int main(int argc, char **argv)
 	po.predef = pre.p;
 	po.main = main_file;
 	po.unsigned_char = !darwin;
+	po.asm_mode = asm_mode;
 	if (pmap) {
 		char *eq = strchr(pmap, '=');
 

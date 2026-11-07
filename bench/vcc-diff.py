@@ -16,18 +16,24 @@ B = f'{R}/work/build-o0'; REF = f'{R}/work/ppref'
 CL = '/opt/homebrew/opt/llvm/bin/clang'; VPP = f'{R}/build/ccs/vpp'
 
 def tu_args(cmd):
+    """(object, clang args without -c/-E/-o/-MMD) for a C TU, a .S file, or a
+    cpp run over a linker script / device tree (kbuild's -E commands)."""
     line = open(cmd, errors='replace').readline()
     m = re.match(r'savedcmd_(\S+) := (.*)', line)
     if not m: return None
-    a = shlex.split(m.group(2))
-    if not a or not a[-1].endswith('.c') or '-c' not in a: return None
-    a = [x for x in a[1:] if not x.startswith('-Wp,-MMD')]
-    i = a.index('-c'); a = a[:i] + a[i+3:]
+    a = shlex.split(m.group(2).split(' ; ')[0])
+    if not a or not re.search(r'\.(c|S|dts)$', a[-1]): return None
+    if '-c' not in a and '-E' not in a: return None
+    a = [x for x in a[1:] if not x.startswith('-Wp,-MMD') and x not in ('-c', '-E')]
+    if '-o' in a: i = a.index('-o'); a = a[:i] + a[i+2:]
     return m.group(1), a
 
 def tus(pat=None):
     out = []
-    for c in sorted(glob.glob(f'{B}/**/.*.o.cmd', recursive=True)):
+    cmds = []
+    for d, dirs, files in os.walk(B):	# no symlinks: build-o0/source leads to other trees
+        cmds += [f'{d}/{f}' for f in files if f.startswith('.') and f.endswith('.cmd')]
+    for c in sorted(cmds):
         t = tu_args(c)
         if t and (not pat or re.search(pat, t[0])): out.append(t)
     return out

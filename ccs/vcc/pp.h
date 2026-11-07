@@ -43,6 +43,7 @@ typedef struct pp_opts {
 	const char *const *fwdirs;	/* framework dirs: <A/b.h> -> DIR/A.framework/Headers/b.h */
 	int nfwdirs;
 	int unsigned_char;
+	int asm_mode;			/* assembler-with-cpp: unknown directives pass, # need not stringify */
 	int target;			/* PP_LINUX_AARCH64 or PP_DARWIN (column of the feature table) */
 } pp_opts;
 

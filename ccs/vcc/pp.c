@@ -945,6 +945,14 @@ static int classify(const char *s, size_t n, int rkind)
 	return -1;
 }
 
+static bool paste_ok(const ptok *l, const ptok *r)
+{
+	char b[l->len + r->len + 1], *w = spell_to(b, l);
+
+	w = spell_to(w, r);
+	return classify(b, (size_t)(w - b), r->kind) >= 0;
+}
+
 static ptok paste(pp *p, const ptok *l, const ptok *r)
 {
 	char *b = alloc(&p->tmp, l->len + r->len + 24), *w;
@@ -1185,7 +1193,17 @@ static int subst(pp *p, const pmacro *m, const ptok *name, margs *a, uint32_t el
 			ptok cur = p->sv[i++];
 
 			while (i + 1 < e && hashhash(&p->sv[i])) {
-				cur = paste(p, &cur, &p->sv[i + 1]);
+				ptok r;
+
+				if (p->o->asm_mode && !paste_ok(&cur, &p->sv[i + 1])) {
+					/* assembler: an invalid paste leaves both tokens */
+					p->sv[w++] = cur;
+					cur = p->sv[i + 1];
+					i += 2;
+					continue;
+				}
+				r = paste(p, &cur, &p->sv[i + 1]);
+				cur = r;
 				i += 2;
 			}
 			p->sv[w++] = cur;
@@ -2063,7 +2081,7 @@ static void define(pp *p, ctx *c, uint32_t b, uint32_t e)
 		error(p, c->loc + vt[b].off, "'##' cannot appear at either end of a macro expansion");
 		return;
 	}
-	if (m->kind == MK_FUNC)
+	if (m->kind == MK_FUNC && !p->o->asm_mode)
 		for (uint32_t j = 0; j < m->nbody; j++)
 			if (m->body[j].kind == T_HASH && !(j + 1 < m->nbody && pidx && pidx[j + 1]) &&
 			    !(j + 1 < m->nbody && m->body[j + 1].kind == T_IDENT && m->body[j + 1].id == KW_VA_OPT)) {
@@ -2435,12 +2453,30 @@ static int directive(pp *p, ctx *c, ptok *out)
 		     (int)(l->off + l->len - f->off), c->src + f->off);
 		return 0;
 	}
-	case D_LINE: case D_LINEMARK:
+	case D_LINEMARK:
+		if (p->o->asm_mode)
+			goto pass;
+		/* fallthrough */
+	case D_LINE:
 		line_directive(p, c, d->kind == D_LINE ? b + 1 : b, e, d->kind == D_LINE, loc);
 		return 0;
 	default:
+		if (p->o->asm_mode)
+			goto pass;
 		error(p, loc, "invalid preprocessing directive");
 		return 0;
+	}
+pass: {
+	/* assembler: the line as written ("# comment") */
+	const vtok *f = &c->vt[b], *l = &c->vt[e - 1];
+
+	memset(out, 0, sizeof(*out));
+	out->kind = P_DIRECTIVE;
+	out->s = c->src + f->off;
+	out->len = l->off + l->len - f->off;
+	out->loc = loc;
+	out->flags = TF_SOL;
+	return 1;
 	}
 }
 

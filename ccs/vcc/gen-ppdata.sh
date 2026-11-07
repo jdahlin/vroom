@@ -28,6 +28,12 @@ RESINC=$(echo "$SYS" | grep -v framework | sed 's/^ *//' | head -1)
 	echo "static const char predef_darwin[] ="
 	$CL $FH -dM -E -x c /dev/null | LC_ALL=C sort | cstr
 	echo "	;"
+	echo "static const char predef_undef_c[] ="
+	$CL -undef -dM -E -x c /dev/null | LC_ALL=C sort | cstr
+	echo "	;"
+	echo "static const char predef_undef_asm[] ="
+	$CL -undef -dM -E -x assembler-with-cpp /dev/null | LC_ALL=C sort | cstr
+	echo "	;"
 	echo "static const char *const sysdirs_darwin[] = {"
 	echo "$SYS" | grep -v framework | sed 's/^ *\(.*\)$/	"\1",/'
 	echo "};"
