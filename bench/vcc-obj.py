@@ -124,7 +124,7 @@ def cmpobj(t):
         if a1 != b1:
             msg = f'relocs {sec}: clang-only {sorted(a1 - b1)[:6]} vcc-only {sorted(b1 - a1)[:6]}'
             (note if TABLES.match(sec) else err).append(msg)
-    return obj, len(err) and 1, '\n'.join(err[:20] + (['(notes)'] + note[:6] if note and os.environ.get('NOTES') else [])), dt, len(note) > 0
+    return obj, len(err) and 1, '\n'.join(err[:20] + (['(notes)'] + note[:6] if note and os.environ.get('NOTES') else [])), dt, len(note) > 0, sorted(extra - dead)
 
 if __name__ == '__main__':
     av = sys.argv[1:]; j = 2
@@ -141,4 +141,21 @@ if __name__ == '__main__':
         print(f'vpp -S total {sum(r[3] for r in res):.1f} s over {len(res)} TUs')
     if mode == 'cmp':
         print(f'{sum(1 for r in res if not r[1] and r[4])} of the ok ones with notes (NOTES=1 shows them)')
+    if mode == 'cmp' and os.path.exists(f'{B}/System.map'):
+        # what vcc leaves undefined that clang folded away must exist in vmlinux, or the link fails
+        have = {l.split()[2] for l in open(f'{B}/System.map')}
+        st = f'{B}/vmlinux.unstripped.vroom-stubs'	# -O0: vroom-ld stubbed these, they do not exist
+        if os.path.exists(st): have -= set(open(st).read().split())
+        lost = {}
+        for r in res:
+            # objcopy prefixes the early-boot and EFI stub objects' symbols
+            pre = '__pi_' if r[0].startswith('arch/arm64/kernel/pi/') else \
+                  '__efistub_' if r[0].startswith('drivers/firmware/efi/libstub/') else ''
+            for n in r[5] if len(r) > 5 else ():
+                if pre + n not in have and n not in have:
+                    lost.setdefault(n, r[0])
+        for n, o in sorted(lost.items())[:40]:
+            print(f'undefined in vmlinux: {n} (from {o})')
+        if lost:
+            print(f'{len(lost)} symbols vcc leaves undefined do not exist in vmlinux (vroom-ld stubs them, as for -O0)')
     print(f'{len(res) - len(bad)}/{len(res)} ok')

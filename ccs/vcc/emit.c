@@ -369,7 +369,8 @@ typedef struct chunk {
 } chunk;
 
 /* analysis bits (prepass, read-only while emitting) */
-enum { SA_WRITTEN = 1, SA_CLEANUP_FN = 2, SA_MUSTFOLD = 4 };	/* per sym; MUSTFOLD: a function that calls an error() function */
+enum { SA_WRITTEN = 1, SA_CLEANUP_FN = 2, SA_MUSTFOLD = 4, SA_CWRITE = 8, SA_CMULTI = 16, SA_USED = 32 };	/* USED: a local or param read */
+/* CWRITE: only ever assigned integer constants (all cwval unless CMULTI) */	/* per sym; MUSTFOLD: a function that calls an error() function */
 enum { NA_LABEL = 1 };				/* per node: statement contains a label or case */
 
 typedef struct emitter {
@@ -378,10 +379,12 @@ typedef struct emitter {
 	_Atomic uint8_t *claimed;	/* per sym: queued for emission */
 	_Atomic uint8_t *strdone;	/* per string: emitted */
 	_Atomic uint8_t *extref;	/* per sym: referenced (for .weak of undefined syms) */
-	_Atomic uint8_t *walked;	/* per function: prepass state (0 no, 1 running, 2 done) */
+	_Atomic uint8_t *walked;
+	uint16_t *fnsize;		/* per function: AST nodes (prepass) */
+	i128 *cwval;		/* per SA_CWRITE variable: the one constant it is assigned */	/* per function: prepass state (0 no, 1 running, 2 done) */
 	uint8_t *sflags;		/* SA_* per sym */
 	uint8_t *nflags;		/* NA_* per node */
-	uint8_t *lref;			/* per label: target of a goto / asm goto / && */
+	uint8_t *lref;			/* per label: LR_* */
 	uint16_t *lcdepth;		/* per label: cleanup depth at its definition */
 	/* work queue (syms) */
 	pthread_mutex_t mu;
@@ -399,7 +402,7 @@ typedef struct emitter {
 	_Atomic uint64_t print_ns, walk_ns, nwalk;
 	uint8_t *mf;			/* per sym: static function to inline everywhere (kept across rounds) */
 	_Atomic uint32_t newmf;		/* marked this round */
-	_Atomic uint32_t nerrcall;	/* error() calls replaced by traps */	/* VCC_EMIT_STATS: time in finish_function */
+	_Atomic uint32_t nerrcall;	/* error() calls dropped (not folded) */	/* VCC_EMIT_STATS: time in finish_function */
 	bool stats;
 	pthread_mutex_t emu;		/* diagnostics */
 } emitter;
@@ -416,10 +419,14 @@ enum { V_NONE, V_CONST, V_ADDR, V_REG, V_REG2 };
 /* per-sym binding inside a function instance */
 enum { B_NONE, B_SLOT, B_CONST, B_INDIRECT };
 
+/* per user label (prepass): referenced, defined so far, target of a jump back (or &&) */
+enum { LR_REF = 1, LR_DEF = 2, LR_BACK = 4 };
+
 typedef struct bind {
 	uint32_t inst;
 	uint8_t kind;
 	uint8_t reg;		/* register variable: asm("xN") (0xff: none) */
+	uint8_t kv;		/* known-value tracking: index + 1 (0: untracked) */
 	int32_t slot;		/* B_SLOT, B_INDIRECT */
 	val v;			/* B_CONST */
 } bind;
@@ -427,6 +434,15 @@ typedef struct bind {
 typedef struct lbl {
 	uint32_t inst, id;
 } lbl;
+
+#define NKV 16
+#define CAPKVS (1u << 18)
+/* lkvi once the label is placed (or dropped): a later edge to it is a jump back */
+enum { LKV_PLACED = UINT32_MAX - 2, LKV_KNOWN = UINT32_MAX - 1, LKV_DROPPED = UINT32_MAX };
+typedef struct kvst {
+	uint16_t valid;
+	int64_t v[NKV];
+} kvst;
 
 typedef struct loopctx {
 	uint32_t brk, cont;	/* local labels (cont 0: switch) */
@@ -469,6 +485,17 @@ typedef struct ecx {
 	uint32_t *caselbl;	/* per node (N_CASE / N_DEFAULT): local label */
 	uint32_t *lrefc;	/* per local label: branches to it */
 	uint32_t nlabel, caplabel;
+	/*
+	 * Known values of locals only ever assigned constants (SA_CWRITE):
+	 * forward edges carry them to their label, which keeps what all
+	 * incoming edges agree on; loop heads and unknown targets drop them.
+	 */
+	uint8_t nkv;
+	uint16_t kvalid;
+	int64_t kval[NKV];
+	uint32_t *lkvi;		/* per local label: kvst index + 1 (0: none) */
+	kvst *kvs;
+	uint32_t nkvs;
 	uint32_t inst_next;
 	/* frame */
 	int32_t foff, fmax;
@@ -1116,13 +1143,80 @@ static uint32_t newlabel(ecx *e)
 		abort();
 	}
 	e->lrefc[e->nlabel] = 0;
+	e->lkvi[e->nlabel] = 0;
 	return e->nlabel++;
+}
+
+static void back_edge(ecx *e, uint32_t l)
+{
+	efatal(e, e->curloc, "internal: jump back to label %u, %s", l,
+	       e->lkvi[l] == LKV_DROPPED ? "dropped as unreachable" : "placed with known values");
+}
+
+/* a reachable edge to l (call before counting it in lrefc) */
+static void kv_edge(ecx *e, uint32_t l)
+{
+	kvst *st;
+
+	if (e->lkvi[l] >= LKV_PLACED) {
+		if (e->lkvi[l] != LKV_PLACED && !e->dry)
+			back_edge(e, l);
+		return;
+	}
+	if (!e->nkv || !e->reach)
+		return;
+	if (!e->lkvi[l]) {
+		if (e->nkvs == CAPKVS) {
+			e->nkv = 0, e->kvalid = 0;	/* out of room: stop tracking */
+			return;
+		}
+		st = &e->kvs[e->nkvs++];
+		e->lkvi[l] = e->nkvs;
+		st->valid = e->lrefc[l] ? 0 : e->kvalid;	/* earlier edges were untracked */
+		memcpy(st->v, e->kval, sizeof(st->v));
+		return;
+	}
+	st = &e->kvs[e->lkvi[l] - 1];
+	for (uint16_t m = st->valid; m; m &= m - 1) {
+		int k = __builtin_ctz(m);
+
+		if (!(e->kvalid >> k & 1) || st->v[k] != e->kval[k])
+			st->valid &= (uint16_t)~(1u << k);
+	}
+}
+
+/* label l is placed: what is known is what every way in agrees on */
+static void kv_join(ecx *e, uint32_t l)
+{
+	const kvst *st;
+
+	if (!e->nkv || !e->lrefc[l])
+		return;
+	if (!e->lkvi[l] || e->lkvi[l] >= LKV_PLACED) {
+		e->kvalid = 0;
+		return;
+	}
+	st = &e->kvs[e->lkvi[l] - 1];
+	if (!e->reach) {
+		e->kvalid = st->valid;
+		memcpy(e->kval, st->v, sizeof(e->kval));
+		return;
+	}
+	for (uint16_t m = e->kvalid; m; m &= m - 1) {
+		int k = __builtin_ctz(m);
+
+		if (!(st->valid >> k & 1) || st->v[k] != e->kval[k])
+			e->kvalid &= (uint16_t)~(1u << k);
+	}
 }
 
 static void deflabel(ecx *e, uint32_t l)
 {
+	kv_join(e, l);
 	if (e->lrefc[l])
 		e->reach = true;
+	if (!e->dry)
+		e->lkvi[l] = !e->reach ? LKV_DROPPED : e->kvalid ? LKV_KNOWN : LKV_PLACED;
 	if (!e->reach)
 		return;
 	put(e, I_LABEL)->label = l;
@@ -1131,14 +1225,28 @@ static void deflabel(ecx *e, uint32_t l)
 /* a label that is reachable from elsewhere whatever the counts say */
 static void deflabel_forced(ecx *e, uint32_t l)
 {
+	e->kvalid = 0;
 	e->reach = true;
+	if (!e->dry)
+		e->lkvi[l] = LKV_PLACED;
 	put(e, I_LABEL)->label = l;
+}
+
+/* a loop head: the back edges come later */
+static void deflabel_loop(ecx *e, uint32_t l, bool forced)
+{
+	e->kvalid = 0;
+	if (forced)
+		deflabel_forced(e, l);
+	else
+		deflabel(e, l);
 }
 
 static void jump(ecx *e, uint32_t l)
 {
 	if (!e->reach)
 		return;
+	kv_edge(e, l);
 	put(e, I_B)->label = l;
 	e->lrefc[l]++;
 	e->reach = false;
@@ -1150,6 +1258,7 @@ static void bcond(ecx *e, int cond, uint32_t l)
 
 	if (!e->reach)
 		return;
+	kv_edge(e, l);
 	i = put(e, I_BC);
 	i->cond = (uint8_t)cond;
 	i->label = l;
@@ -1162,6 +1271,7 @@ static void cbz(ecx *e, bool nz, int x, int r, uint32_t l)
 
 	if (!e->reach)
 		return;
+	kv_edge(e, l);
 	i = put(e, nz ? I_CBNZ : I_CBZ);
 	i->sz = (uint8_t)x, i->rd = (uint8_t)r;
 	i->label = l;
@@ -1674,6 +1784,7 @@ static int32_t bind_slot(ecx *e, uint32_t s)
 		al = c->syms[s].align;
 	b->inst = e->f->inst;
 	b->kind = B_SLOT;
+	b->kv = 0;
 	b->reg = 0xff;
 	b->slot = slot(e, tsize(c, t) ? tsize(c, t) : 1, al);
 	return b->slot;
@@ -2603,17 +2714,18 @@ static val do_call(ecx *e, uint32_t ref, val *fnv, carg *args, int n, qty rty, b
 		/*
 		 * An error() call that folding did not remove.  clang removed it
 		 * (the tree builds with clang), with value ranges vcc does not
-		 * have: trap instead of referencing the undefined function.
+		 * have (min(len, ...) inside while (len > 0)).  Drop the call and
+		 * go on, as the kernel's own -O0 fallback does
+		 * (__compiletime_assert is then ((void)(condition))): a trap
+		 * here would fire on paths clang proved are fine.
 		 */
 		if (!e->dry) {
 			need_fold(e);
 			e->E->nerrcall++;
 			if (e->E->stats)
-				ediag(e, e->curloc, "error() call '%.*s' not folded: trap", (int)vintern_ents[c->syms[RIDX(ref)].name].len,
+				ediag(e, e->curloc, "error() call '%.*s' not folded: dropped", (int)vintern_ents[c->syms[RIDX(ref)].name].len,
 				      vintern_ents[c->syms[RIDX(ref)].name].s);
 		}
-		put(e, I_BRK)->imm = 0x3ea;
-		e->reach = false;
 		return is_void(c, rty) ? vnone() : vconst(0);
 	}
 	spill_live(e, &sp);
@@ -2705,6 +2817,40 @@ static bool on_inline_stack(ecx *e, uint32_t fn)
 
 static void ensure_walked(emitter *E, cc *c, uint32_t s);
 
+/* a local only ever assigned constants: follow its value (v: the initializer, or none) */
+static void kv_track(ecx *e, uint32_t s, const val *v)
+{
+	cc *c = e->c;
+	const sym *y = &c->syms[s];
+	bind *b = binding(e, s);
+	int k;
+
+	if ((e->E->sflags[s] & (SA_WRITTEN | SA_CWRITE)) != SA_CWRITE || !is_integer(c, y->ty) || is_wide(c, y->ty) ||
+	    (QQ(y->ty) & Q_VOLATILE) || sym_attrs(c, s)->cleanup || e->nkv == NKV)
+		return;
+	k = e->nkv++;
+	b->kv = (uint8_t)(k + 1);
+	e->kvalid &= (uint16_t)~(1u << k);
+	if (v && v->k == V_CONST) {
+		e->kval[k] = (int64_t)trunc_to(c, v->i, y->ty);
+		e->kvalid |= (uint16_t)(1u << k);
+	}
+}
+
+/* may variable s (param or local) be bound to the constant v for good? */
+static bool const_var(ecx *e, uint32_t s, const val *v)
+{
+	uint8_t f = e->E->sflags[s];
+
+	if (f & (SA_WRITTEN | SA_CMULTI))
+		return false;
+	if (f & SA_CWRITE)
+		return v->k == V_CONST && trunc_to(e->c, v->i, e->c->syms[s].ty) == e->E->cwval[s];
+	return v->k == V_CONST || v->k == V_ADDR;
+}
+
+#define INLINE_NODES 40	/* AST nodes: a few statements */
+
 static bool can_inline(ecx *e, uint32_t s)
 {
 	cc *c = e->c;
@@ -2724,7 +2870,12 @@ static bool can_inline(ecx *e, uint32_t s)
 			if (!(y->flags & SF_INLINE))
 				return false;
 			ensure_walked(e->E, c, s);
-			if (!(e->E->sflags[s] & SA_MUSTFOLD))
+			/*
+			 * clang -O2 inlines small inline functions, and the kernel
+			 * leans on it: scs_is_enabled() { return false; } guards
+			 * references to objects that only exist when it is true.
+			 */
+			if (!(e->E->sflags[s] & SA_MUSTFOLD) && e->E->fnsize[s] > INLINE_NODES)
 				return false;
 		}
 	}
@@ -2780,10 +2931,11 @@ static val inline_call(ecx *e, uint32_t s, carg *args, int n)
 		bind *b = binding(e, p);
 		val v = i < n ? args[i].v : vconst(0);
 
-		if (!(e->E->sflags[p] & SA_WRITTEN) && (v.k == V_CONST || v.k == V_ADDR) && !is_agg(c, ps->ty) &&
+		if (const_var(e, p, &v) && !is_agg(c, ps->ty) &&
 		    !(QQ(ps->ty) & Q_VOLATILE) && !is_wide(c, ps->ty)) {
 			b->inst = F.inst;
 			b->kind = B_CONST;
+			b->kv = 0;
 			b->v = v;
 			continue;
 		}
@@ -2842,6 +2994,23 @@ static uint32_t direct_callee(cc *c, uint32_t fn, uint32_t *ref)
 	return canon_sym(c, f->a);
 }
 
+static uint32_t strip_casts(cc *c, uint32_t n);
+static bool side_effects(cc *c, uint32_t n);
+
+/* __builtin_strcmp of two string literals (the kernel picks operators by name) */
+static val fold_strcmp(ecx *e, const node *x)
+{
+	cc *c = e->c;
+	uint32_t f = strip_casts(c, x->a), a = strip_casts(c, c->lists[x->b]), b = strip_casts(c, c->lists[x->b + 1]);
+	int r;
+
+	if (N(f)->op != N_VAR || c->syms[N(f)->a].kind != S_BUILTIN || N(a)->op != N_STR || N(b)->op != N_STR ||
+	    strcmp(cc_builtin_name(c->syms[N(f)->a].val), "__builtin_strcmp"))
+		return vnone();
+	r = strcmp(c->strs[N(a)->a].s, c->strs[N(b)->a].s);
+	return vconst(r < 0 ? -1 : r > 0);
+}
+
 static val gen_call(ecx *e, uint32_t n)
 {
 	cc *c = e->c;
@@ -2850,7 +3019,7 @@ static val gen_call(ecx *e, uint32_t n)
 	carg args[MAXARGS];
 	int na = (int)x->c;
 	val fnv = vnone();
-	bool noret = false;
+	bool noret = false, inl;
 
 	if (na > MAXARGS)
 		efatal(e, x->loc, "too many arguments");
@@ -2860,11 +3029,29 @@ static val gen_call(ecx *e, uint32_t n)
 		noret = (y->flags & SF_NORETURN) != 0;
 		/* use the definition's flags (always_inline may be on a later declaration) */
 	}
+	if (!s && ref && na == 2) {
+		val f = fold_strcmp(e, x);
+
+		if (f.k == V_CONST)
+			return f;
+	}
 	if (!s && !ref)
 		fnv = gen(e, x->a);
+	inl = s && can_inline(e, s);
+	if (inl)
+		ensure_walked(e->E, c, s);
 	for (int i = 0; i < na; i++) {
 		uint32_t an = c->lists[x->b + i];
 
+		/* an argument the inlined body never reads: only its side effects count */
+		if (inl && i < (int)N(c->syms[s].body)->aux &&
+		    !(e->E->sflags[c->lists[N(c->syms[s].body)->a + i]] & SA_USED) && !side_effects(c, an) &&
+		    !is_agg(c, c->syms[c->lists[N(c->syms[s].body)->a + i]].ty)) {
+			args[i].v = vconst(0);
+			args[i].t = N(an)->ty;
+			args[i].slot = 1;
+			continue;
+		}
 		args[i].v = gen(e, an);
 		args[i].t = N(an)->ty;
 		args[i].slot = 1;
@@ -2872,9 +3059,8 @@ static val gen_call(ecx *e, uint32_t n)
 		if (__builtin_popcount(e->live) > NTEMP / 2 && (args[i].v.k == V_REG || args[i].v.k == V_REG2))
 			park(e, &args[i]);
 	}
-	if (s && can_inline(e, s)) {
+	if (inl)
 		return inline_call(e, s, args, na);
-	}
 	if (s || ref)
 		return do_call(e, ref, NULL, args, na, x->ty, noret);
 	return do_call(e, 0, &fnv, args, na, x->ty, false);
@@ -2951,17 +3137,23 @@ static bool side_effects(cc *c, uint32_t n)
  */
 static val dry(ecx *e, uint32_t n)
 {
-	uint32_t nin = e->nin, live = e->live, usedcs = e->usedcs, nlabel = e->nlabel;
+	uint32_t nin = e->nin, live = e->live, usedcs = e->usedcs;
 	size_t raw = e->raw.n;
 	int32_t foff = e->foff;
 	bool reach = e->reach, calls = e->calls;
 	int nclean = e->nclean, nloop = e->nloop;
+	uint8_t nkv = e->nkv;
+	uint16_t kvalid = e->kvalid;
+	int64_t kval[NKV];
 	val v;
 
+	memcpy(kval, e->kval, sizeof(kval));
 	e->dry++;
 	v = gen(e, n);
 	e->dry--;
-	e->nin = nin, e->live = live, e->usedcs = usedcs, e->nlabel = nlabel, e->foff = foff;
+	e->nkv = nkv, e->kvalid = kvalid;
+	memcpy(e->kval, kval, sizeof(kval));
+	e->nin = nin, e->live = live, e->usedcs = usedcs, e->foff = foff;	/* labels stay: user labels may map to them */
 	e->reach = reach, e->nclean = nclean, e->nloop = nloop, e->raw.n = raw, e->calls = calls;
 	if (v.k != V_CONST && v.k != V_ADDR)
 		v = vnone();
@@ -3405,6 +3597,8 @@ static val gen_var(ecx *e, uint32_t n)
 
 		if (b->kind == B_CONST && b->inst)
 			return b->v;
+		if (b->kv && (e->kvalid >> (b->kv - 1) & 1))
+			return vconst(e->kval[b->kv - 1]);
 	} else {
 		v = const_global(e, canon_sym(c, s));
 		if (v.k == V_CONST)
@@ -3700,6 +3894,29 @@ static val gen_assign(ecx *e, uint32_t n)
 
 	if (!x->aux) {
 		v = gen(e, x->b);
+		if (N(x->a)->op == N_VAR && (e->E->sflags[N(x->a)->a] & SA_CWRITE)) {
+			bind *b = binding(e, N(x->a)->a);
+
+			if (b->kind == B_CONST && b->inst) {
+				/* the same constant again (note_assign) */
+				vfree(e, &v);
+				return b->v;
+			}
+			if (b->kv) {
+				int k = b->kv - 1;
+				val cv = v;	/* store() may move v into a register */
+
+				l = gen_lval(e, x->a);
+				store(e, &l, lt, &v);
+				lfree(e, &l);
+				e->kvalid &= (uint16_t)~(1u << k);
+				if (cv.k == V_CONST) {
+					e->kval[k] = (int64_t)trunc_to(c, cv.i, lt);
+					e->kvalid |= (uint16_t)(1u << k);
+				}
+				return v;
+			}
+		}
 		l = gen_lval(e, x->a);
 		store(e, &l, lt, &v);
 		lfree(e, &l);
@@ -3900,9 +4117,11 @@ static val gen(ecx *e, uint32_t n)
 	case N_COND:
 		return gen_cond_expr(e, n);
 	case N_COMMA: {
-		val v = gen(e, x->a);
+		if (side_effects(c, x->a)) {
+			val v = gen(e, x->a);
 
-		vfree(e, &v);
+			vfree(e, &v);
+		}
 		return gen(e, x->b);
 	}
 	case N_CALL:
@@ -4229,7 +4448,7 @@ static val gen_block(ecx *e, uint32_t n, bool want)
 			while (N(t)->op == N_LABEL) {
 				uint32_t l = user_label(e, N(t)->a);
 
-				if (e->E->lref[N(t)->a])
+				if (e->E->lref[N(t)->a] & LR_BACK)
 					deflabel_forced(e, l);
 				else
 					deflabel(e, l);
@@ -4471,10 +4690,11 @@ static void gen_decl(ecx *e, const node *x)
 	    !is_wide(c, y->ty) && y->sc != SC_REGISTER && !sym_attrs(c, s)->cleanup) {
 		val v = gen(e, x->b);
 
-		if (v.k == V_CONST || v.k == V_ADDR) {
+		if (const_var(e, s, &v)) {
 			b = binding(e, s);
 			b->inst = e->f->inst;
 			b->kind = B_CONST;
+			b->kv = 0;
 			b->v = v;
 			return;
 		}
@@ -4482,6 +4702,7 @@ static void gen_decl(ecx *e, const node *x)
 			lval l = { .k = L_FRAME, .align = sym_align(c, s) };
 
 			l.off = bind_slot(e, s);
+			kv_track(e, s, &v);
 			store(e, &l, y->ty, &v);
 			vfree(e, &v);
 		}
@@ -4494,6 +4715,8 @@ static void gen_decl(ecx *e, const node *x)
 			binding(e, s)->reg = (uint8_t)rr;
 		if (x->b)
 			gen_init_local(e, &l, y->ty, x->b);
+		else if (rr < 0 && y->sc != SC_REGISTER)
+			kv_track(e, s, NULL);
 	}
 	if (sym_attrs(c, s)->cleanup) {
 		if (e->nclean >= MAXCLEAN)
@@ -4548,7 +4771,8 @@ static void gen_stmt1(ecx *e, uint32_t n)
 		gen_block(e, n, false);
 		return;
 	case N_EXPR:
-		if (x->a) {
+		/* a value thrown away: (void)(RCU) loads nothing (and refers to nothing) */
+		if (x->a && side_effects(c, x->a)) {
 			val v = gen(e, x->a);
 
 			vfree(e, &v);
@@ -4576,10 +4800,7 @@ static void gen_stmt1(ecx *e, uint32_t n)
 	case N_WHILE: {
 		uint32_t lhead = newlabel(e), lbrk = newlabel(e);
 
-		if (e->E->nflags[n] & NA_LABEL)
-			deflabel_forced(e, lhead);
-		else
-			deflabel(e, lhead);
+		deflabel_loop(e, lhead, e->E->nflags[n] & NA_LABEL);
 		gen_cond(e, x->a, false, lbrk);
 		e->foff = mark;
 		e->loops[e->nloop++] = (loopctx){ lbrk, lhead, e->nclean };
@@ -4592,10 +4813,7 @@ static void gen_stmt1(ecx *e, uint32_t n)
 	case N_DO: {
 		uint32_t lhead = newlabel(e), lcont = newlabel(e), lbrk = newlabel(e);
 
-		if (e->E->nflags[n] & NA_LABEL)
-			deflabel_forced(e, lhead);
-		else
-			deflabel(e, lhead);
+		deflabel_loop(e, lhead, e->E->nflags[n] & NA_LABEL);
 		e->loops[e->nloop++] = (loopctx){ lbrk, lcont, e->nclean };
 		gen_stmt(e, x->b);
 		e->nloop--;
@@ -4620,10 +4838,7 @@ static void gen_stmt1(ecx *e, uint32_t n)
 				gen_stmt(e, x->a);
 			}
 		}
-		if (e->E->nflags[n] & NA_LABEL)
-			deflabel_forced(e, lhead);
-		else
-			deflabel(e, lhead);
+		deflabel_loop(e, lhead, e->E->nflags[n] & NA_LABEL);
 		if (x->b) {
 			int32_t m2 = e->foff;
 
@@ -4660,7 +4875,7 @@ static void gen_stmt1(ecx *e, uint32_t n)
 	case N_LABEL: {
 		uint32_t l = user_label(e, x->a);
 
-		if (e->E->lref[x->a] || c->labels[x->a].addr_taken)
+		if (e->E->lref[x->a] & LR_BACK)
 			deflabel_forced(e, l);
 		else
 			deflabel(e, l);
@@ -5108,8 +5323,10 @@ static void gen_asm(ecx *e, uint32_t n)
 	}
 	/* asm goto without outputs: the labels are branch targets */
 	if (!a->nout)
-		for (uint32_t k = 0; k < a->nlabel; k++)
+		for (uint32_t k = 0; k < a->nlabel; k++) {
+			kv_edge(e, tramp[k]);
 			e->lrefc[tramp[k]]++;
+		}
 }
 
 /* ---------------- functions ---------------- */
@@ -5256,6 +5473,7 @@ static void emit_function(ecx *e, uint32_t s)
 	e->nin = 0;
 	e->raw.n = 0;
 	e->nlabel = 0;
+	e->nkv = 0, e->kvalid = 0, e->nkvs = 0;
 	e->foff = e->fmax = e->outmax = 0;
 	e->dyn = e->calls = false;
 	e->live = 0;
@@ -5710,6 +5928,7 @@ typedef struct pre {
 	emitter *E;
 	cc *c;
 	uint32_t fn;		/* the function being walked */
+	uint32_t nodes;		/* nodes seen (inlining size) */
 	int cdepth;		/* cleanup variables in scope */
 } pre;
 
@@ -5740,6 +5959,33 @@ static void mark_written(pre *P, uint32_t n)
 }
 
 /*
+ * `v = CONST` keeps v constant as long as every assignment stores the same
+ * value and the initializer agrees (clang -O2 propagates it: the kernel's
+ * `bool enable_scs = false; ... if (x) enable_scs = false;` guards references
+ * to symbols that do not exist).
+ */
+static void note_assign(pre *P, uint32_t s, uint32_t rhs)
+{
+	cc *c = P->c;
+	emitter *E = P->E;
+	cval cv;
+
+	if (E->sflags[s] & SA_WRITTEN)
+		return;
+	if (!is_integer(c, c->syms[s].ty) || !cc_eval(c, rhs, &cv) || cv.kind != CV_INT) {
+		E->sflags[s] |= SA_WRITTEN;
+		return;
+	}
+	cv.i = trunc_to(c, cv.i, c->syms[s].ty);
+	if (!(E->sflags[s] & SA_CWRITE)) {
+		E->sflags[s] |= SA_CWRITE;
+		E->cwval[s] = cv.i;
+	} else if (E->cwval[s] != cv.i) {
+		E->sflags[s] |= SA_CMULTI;
+	}
+}
+
+/*
  * The prepass runs per function, the first time a function is emitted or
  * inlined: most of a TU's functions are header inlines nobody uses.  The
  * facts it records (writes to params and locals, labels) belong to that
@@ -5755,10 +6001,11 @@ static void ensure_walked(emitter *E, cc *c, uint32_t s)
 		return;
 	st = 0;
 	if (atomic_compare_exchange_strong(&E->walked[s], &st, 1)) {
-		pre P = { E, c, s, 0 };
+		pre P = { E, c, s, 0, 0 };
 		double t = E->stats ? now() : 0;
 
 		walk(&P, c->syms[s].body);
+		E->fnsize[s] = P.nodes > 65535 ? 65535 : (uint16_t)P.nodes;
 		if (E->stats)
 			E->walk_ns += (uint64_t)((now() - t) * 1e9), E->nwalk++;
 		atomic_store_explicit(&E->walked[s], 2, memory_order_release);
@@ -5778,11 +6025,17 @@ static int walk(pre *P, uint32_t n)
 	if (!n)
 		return false;
 	x = N(n);
+	P->nodes++;
 	switch (x->op) {
-	case N_NUM: case N_FNUM: case N_STR: case N_VAR: case N_ZERO: case N_SIZEOF_VLA:
+	case N_VAR:
+		/* locals belong to this walk alone (globals' flags are shared between threads) */
+		if (is_local_var(c, x->a))
+			P->E->sflags[x->a] |= SA_USED;
+		return false;
+	case N_NUM: case N_FNUM: case N_STR: case N_ZERO: case N_SIZEOF_VLA:
 		return false;
 	case N_LABELADDR:
-		P->E->lref[x->a] = 1;
+		P->E->lref[x->a] |= LR_REF | LR_BACK;
 		return false;
 	case N_MEMBER: case N_DEREF: case N_UNARY: case N_VAARG:
 		lab = walk(P, x->a);
@@ -5801,7 +6054,10 @@ static int walk(pre *P, uint32_t n)
 		lab = walk(P, x->a);
 		break;
 	case N_ASSIGN:
-		mark_written(P, x->a);
+		if (!x->aux && N(x->a)->op == N_VAR)
+			note_assign(P, N(x->a)->a, x->b);
+		else
+			mark_written(P, x->a);
 		lab = walk(P, x->a) | walk(P, x->b);
 		break;
 	case N_INDEX: case N_BINARY: case N_LOGAND: case N_LOGOR: case N_COMMA:
@@ -5868,13 +6124,27 @@ static int walk(pre *P, uint32_t n)
 	case N_IF:
 		lab = walk(P, x->a) | walk(P, x->b) | walk(P, x->c);
 		break;
-	case N_WHILE: case N_DO: case N_SWITCH:
+	/* in the order the code is generated: LR_BACK means a jump back */
+	case N_WHILE: case N_SWITCH:
 		lab = walk(P, x->a) | walk(P, x->b);
+		break;
+	case N_DO:
+		lab = walk(P, x->b);
+		lab |= walk(P, x->a);
 		break;
 	case N_FOR: {
 		int cd = P->cdepth;
 
-		lab = walk(P, x->a) | walk(P, x->b) | walk(P, c->lists[x->c]) | walk(P, c->lists[x->c + 1]);
+		/* the init's declarations live in the for statement (gen does not open a block for them) */
+		if (x->a && N(x->a)->op == N_BLOCK) {
+			for (uint32_t i = 0; i < N(x->a)->c; i++)
+				lab |= walk(P, c->lists[N(x->a)->b + i]);
+		} else {
+			lab |= walk(P, x->a);
+		}
+		lab |= walk(P, x->b);
+		lab |= walk(P, c->lists[x->c + 1]);
+		lab |= walk(P, c->lists[x->c]);
 		P->cdepth = cd;
 		break;
 	}
@@ -5884,13 +6154,14 @@ static int walk(pre *P, uint32_t n)
 		break;
 	case N_LABEL:
 		P->E->lcdepth[x->a] = (uint16_t)P->cdepth;
+		P->E->lref[x->a] |= LR_DEF;
 		if (c->labels[x->a].addr_taken)
-			P->E->lref[x->a] = 1;
+			P->E->lref[x->a] |= LR_REF | LR_BACK;
 		walk(P, x->c);
 		lab = 1;
 		break;
 	case N_GOTO:
-		P->E->lref[x->a] = 1;
+		P->E->lref[x->a] |= LR_REF | (P->E->lref[x->a] & LR_DEF ? LR_BACK : 0);
 		break;
 	case N_ASM: {
 		const casm *a = &c->asms[x->a];
@@ -5903,7 +6174,7 @@ static int walk(pre *P, uint32_t n)
 			lab |= walk(P, a->ops[i].expr);
 		}
 		for (uint32_t k = 0; k < a->nlabel; k++)
-			P->E->lref[a->labels[k]] = 1;
+			P->E->lref[a->labels[k]] |= LR_REF | (P->E->lref[a->labels[k]] & LR_DEF ? LR_BACK : 0);
 		break;
 	}
 	default:
@@ -5949,6 +6220,8 @@ static void ecx_init(ecx *e, emitter *E)
 	e->caselbl = reserve((size_t)c->nnode * sizeof(uint32_t) + 4096);
 	e->caplabel = 1u << 22;
 	e->lrefc = reserve((size_t)e->caplabel * sizeof(uint32_t));
+	e->lkvi = reserve((size_t)e->caplabel * sizeof(uint32_t));
+	e->kvs = reserve((size_t)CAPKVS * sizeof(kvst));
 	e->cases = reserve((size_t)1 << 24);
 	e->weakref = reserve((size_t)c->nsym * sizeof(uint32_t) + 4096);
 }
@@ -5966,6 +6239,8 @@ static void ecx_free(ecx *e)
 	munmap(e->lm, (size_t)c->nlabel * sizeof(lbl) + 4096);
 	munmap(e->caselbl, (size_t)c->nnode * sizeof(uint32_t) + 4096);
 	munmap(e->lrefc, (size_t)e->caplabel * sizeof(uint32_t));
+	munmap(e->lkvi, (size_t)e->caplabel * sizeof(uint32_t));
+	munmap(e->kvs, (size_t)CAPKVS * sizeof(kvst));
 	munmap(e->cases, (size_t)1 << 24);
 	/* e->out stays: the chunks point into it (unmapped by emit_tu) */
 }
@@ -6078,6 +6353,8 @@ static int emit_tu1(cc *c, const cc_opts *o, bool write_out, uint8_t *mf, bool *
 	pthread_mutex_init(&E.cmu, NULL);
 	pthread_mutex_init(&E.emu, NULL);
 	E.walked = reserve(c->nsym + 64);
+	E.fnsize = reserve((c->nsym + 64) * sizeof(uint16_t));
+	E.cwval = reserve((c->nsym + 64) * sizeof(i128));
 	E.stats = getenv("VCC_EMIT_STATS") != NULL;
 	/* roots */
 	for (uint32_t i = 0; i < c->ntoplevel; i++) {
@@ -6238,6 +6515,8 @@ static int emit_tu1(cc *c, const cc_opts *o, bool write_out, uint8_t *mf, bool *
 	munmap(E.nflags, c->nnode + 64);
 	munmap(E.lref, c->nlabel + 64);
 	munmap((void *)E.walked, c->nsym + 64);
+	munmap(E.fnsize, (c->nsym + 64) * sizeof(uint16_t));
+	munmap(E.cwval, (c->nsym + 64) * sizeof(i128));
 	munmap(E.lcdepth, (size_t)c->nlabel * 2 + 64);
 	munmap(E.q, ((size_t)c->nsym + c->nstr + 64) * sizeof(uint32_t));
 	munmap(E.chunks, ((size_t)c->nsym + c->nstr + c->ntlasm + 64) * sizeof(chunk));

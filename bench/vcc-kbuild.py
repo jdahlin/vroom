@@ -57,6 +57,15 @@ if __name__ == '__main__':
     print(f'{len(res) - len(bad)}/{len(res)} objects from vcc ({time.time() - t0:.0f} s); fallbacks in {dst}/vcc-fallback.txt')
     for o, e in bad[:20]: print(f'  {o}: {e}')
     env = dict(os.environ)
-    sh = (f'source {R}/env/macos-env.sh && kmake -C {R}/work/linux O={dst} -j{j} Image')
+    # like the -O0 reference build: vroom-ld stubs what only dead code refers to (listed in
+    # vmlinux.unstripped.vroom-stubs; compare with the reference tree's list)
+    sh = (f'source {R}/env/macos-env.sh && kmake -C {R}/work/linux O={dst} -j{j} LD={R}/ccs/vroom-ld Image')
     r = subprocess.run(['zsh', '-c', sh], env=env)
+    st = f'{dst}/vmlinux.unstripped.vroom-stubs'
+    ref = f'{vd.B}/vmlinux.unstripped.vroom-stubs'
+    if r.returncode == 0 and os.path.exists(st):
+        mine = set(open(st).read().split())
+        theirs = set(open(ref).read().split()) if os.path.exists(ref) else set()
+        print(f'{len(mine)} stubbed symbols (clang -O0: {len(theirs)}); not stubbed for clang: '
+              + ' '.join(sorted(mine - theirs)[:30]))
     sys.exit(r.returncode)
