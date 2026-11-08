@@ -55,6 +55,7 @@
 #include "elf.h"
 #include "a64.h"
 #include "ppdriver.h"
+#include "arena.h"
 
 #define N(i) (&c->nodes[i])
 #define T(c, t) CT(c, t)
@@ -7144,47 +7145,63 @@ static void enqueue(emitter *E, uint32_t item)
 	pthread_mutex_unlock(&E->mu);
 }
 
-static void ecx_init(ecx *e, emitter *E)
+/* the per-thread regions of ctx[i] (ecx_init, ecx_free), kept by the job's thread */
+#define NECXR 13
+static _Thread_local vmreg ecxr[64][NECXR];
+
+static void tb_reg(tbuf *b, vmreg *r, size_t cap, const char *name)
+{
+	b->p = vmreg_get(r, cap, name);
+	b->n = 0;
+	b->cap = cap;
+}
+
+static void ecx_init(ecx *e, emitter *E, int ti)
 {
 	cc *c = E->c;
+	vmreg *r = ecxr[ti];
 
 	memset(e, 0, sizeof(*e));
 	e->E = E;
 	e->c = c;
 	e->capin = 1u << 24;
-	e->in = reserve((size_t)e->capin * sizeof(ins));
-	tb_init(&e->raw, (size_t)1 << 28);
-	tb_init(&e->out, (size_t)1 << 32);
-	tb_init(&e->data, (size_t)1 << 28);
-	e->rel = reserve((size_t)1 << 26);
-	e->b = reserve((size_t)c->nsym * sizeof(bind) + 4096);
-	e->lm = reserve((size_t)c->nlabel * sizeof(lbl) + 4096);
-	e->caselbl = reserve((size_t)c->nnode * sizeof(uint32_t) + 4096);
+	e->in = vmreg_get(&r[0], (size_t)e->capin * sizeof(ins), "emit.in");
+	tb_reg(&e->raw, &r[1], (size_t)1 << 28, "emit.raw");
+	tb_reg(&e->out, &r[2], (size_t)1 << 32, "emit.out");
+	tb_reg(&e->data, &r[3], (size_t)1 << 28, "emit.data");
+	e->rel = vmreg_get(&r[4], (size_t)1 << 26, "emit.rel");
+	e->b = vmreg_get(&r[5], (size_t)c->nsym * sizeof(bind) + 4096, "emit.b");
+	e->lm = vmreg_get(&r[6], (size_t)c->nlabel * sizeof(lbl) + 4096, "emit.lm");
+	e->caselbl = vmreg_get(&r[7], (size_t)c->nnode * sizeof(uint32_t) + 4096, "emit.caselbl");
 	e->caplabel = 1u << 22;
-	e->lrefc = reserve((size_t)e->caplabel * sizeof(uint32_t));
-	e->lkvi = reserve((size_t)e->caplabel * sizeof(uint32_t));
-	e->kvs = reserve((size_t)CAPKVS * sizeof(kvst));
-	e->cases = reserve((size_t)1 << 24);
-	e->weakref = reserve((size_t)c->nsym * sizeof(uint32_t) + 4096);
+	e->lrefc = vmreg_get(&r[8], (size_t)e->caplabel * sizeof(uint32_t), "emit.lrefc");
+	e->lkvi = vmreg_get(&r[9], (size_t)e->caplabel * sizeof(uint32_t), "emit.lkvi");
+	e->kvs = vmreg_get(&r[10], (size_t)CAPKVS * sizeof(kvst), "emit.kvs");
+	e->cases = vmreg_get(&r[11], (size_t)1 << 24, "emit.cases");
+	e->weakref = vmreg_get(&r[12], (size_t)c->nsym * sizeof(uint32_t) + 4096, "emit.weakref");
 }
 
-static void ecx_free(ecx *e)
+/* (after the stitch: the chunks point into e->out) */
+static void ecx_free(ecx *e, int ti)
 {
 	cc *c = e->c;
+	vmreg *r = ecxr[ti];
 
-	munmap(e->in, (size_t)e->capin * sizeof(ins));
-	munmap(e->weakref, (size_t)c->nsym * sizeof(uint32_t) + 4096);
-	munmap(e->raw.p, e->raw.cap);
-	munmap(e->data.p, e->data.cap);
-	munmap(e->rel, (size_t)1 << 26);
-	munmap(e->b, (size_t)c->nsym * sizeof(bind) + 4096);
-	munmap(e->lm, (size_t)c->nlabel * sizeof(lbl) + 4096);
-	munmap(e->caselbl, (size_t)c->nnode * sizeof(uint32_t) + 4096);
-	munmap(e->lrefc, (size_t)e->caplabel * sizeof(uint32_t));
-	munmap(e->lkvi, (size_t)e->caplabel * sizeof(uint32_t));
-	munmap(e->kvs, (size_t)CAPKVS * sizeof(kvst));
-	munmap(e->cases, (size_t)1 << 24);
-	/* e->out stays: the chunks point into it (unmapped by emit_tu) */
+	/* written before read (put, newlabel, the case collection, ...): handed back as is */
+	vmreg_put(&r[0], VMREG_SCRATCH);
+	vmreg_put(&r[1], VMREG_SCRATCH);
+	vmreg_put(&r[2], e->out.n);
+	vmreg_put(&r[3], VMREG_SCRATCH);
+	vmreg_put(&r[4], VMREG_SCRATCH);
+	/* per sym / label, found zero */
+	vmreg_put(&r[5], (size_t)c->nsym * sizeof(bind) + 4096);
+	vmreg_put(&r[6], (size_t)c->nlabel * sizeof(lbl) + 4096);
+	vmreg_put(&r[7], VMREG_SCRATCH);
+	vmreg_put(&r[8], VMREG_SCRATCH);
+	vmreg_put(&r[9], VMREG_SCRATCH);
+	vmreg_put(&r[10], VMREG_SCRATCH);
+	vmreg_put(&r[11], VMREG_SCRATCH);
+	vmreg_put(&r[12], VMREG_SCRATCH);
 }
 
 static void do_item(ecx *e, uint32_t it)
@@ -7319,6 +7336,9 @@ static int replay(cc *c, const cc_opts *o, const char *hp, size_t hn, const char
 	return 0;
 }
 
+/* emit_tu1's per-TU tables (E.*) and text buffers, kept by the thread */
+static _Thread_local vmreg er[14];
+
 static int emit_tu1(cc *c, const cc_opts *o, bool write_out, uint8_t *mf, bool *again, bool last)
 {
 	emitter E;
@@ -7333,22 +7353,22 @@ static int emit_tu1(cc *c, const cc_opts *o, bool write_out, uint8_t *mf, bool *
 	E.c = c;
 	E.o = o;
 	E.mf = mf;
-	E.claimed = reserve(c->nsym + 64);
-	E.extref = reserve(c->nsym + 64);
-	E.sflags = reserve(c->nsym + 64);
-	E.strdone = reserve(c->nstr + 64);
-	E.nflags = reserve(c->nnode + 64);
-	E.lref = reserve(c->nlabel + 64);
-	E.lcdepth = reserve((size_t)c->nlabel * 2 + 64);
-	E.q = reserve(((size_t)c->nsym + c->nstr + 64) * sizeof(uint32_t));
-	E.chunks = reserve(((size_t)c->nsym + c->nstr + c->ntlasm + 64) * sizeof(chunk));
+	E.claimed = vmreg_get(&er[0], c->nsym + 64, "emit.claimed");
+	E.extref = vmreg_get(&er[1], c->nsym + 64, "emit.extref");
+	E.sflags = vmreg_get(&er[2], c->nsym + 64, "emit.sflags");
+	E.strdone = vmreg_get(&er[3], c->nstr + 64, "emit.strdone");
+	E.nflags = vmreg_get(&er[4], c->nnode + 64, "emit.nflags");
+	E.lref = vmreg_get(&er[5], c->nlabel + 64, "emit.lref");
+	E.lcdepth = vmreg_get(&er[6], (size_t)c->nlabel * 2 + 64, "emit.lcdepth");
+	E.q = vmreg_get(&er[7], ((size_t)c->nsym + c->nstr + 64) * sizeof(uint32_t), "emit.q");
+	E.chunks = vmreg_get(&er[8], ((size_t)c->nsym + c->nstr + c->ntlasm + 64) * sizeof(chunk), "emit.chunks");
 	pthread_mutex_init(&E.mu, NULL);
 	pthread_cond_init(&E.cv, NULL);
 	pthread_mutex_init(&E.cmu, NULL);
 	pthread_mutex_init(&E.emu, NULL);
-	E.walked = reserve(c->nsym + 64);
-	E.fnsize = reserve((c->nsym + 64) * sizeof(uint16_t));
-	E.cwval = reserve((c->nsym + 64) * sizeof(i128));
+	E.walked = vmreg_get(&er[9], c->nsym + 64, "emit.walked");
+	E.fnsize = vmreg_get(&er[10], (c->nsym + 64) * sizeof(uint16_t), "emit.fnsize");
+	E.cwval = vmreg_get(&er[11], (c->nsym + 64) * sizeof(i128), "emit.cwval");
 	E.stats = getenv("VCC_EMIT_STATS") != NULL;
 	E.objtext = getenv("VCC_OBJ_TEXT") != NULL;
 	/* roots */
@@ -7375,7 +7395,7 @@ static int emit_tu1(cc *c, const cc_opts *o, bool write_out, uint8_t *mf, bool *
 		nthr = 64;
 	ctx = calloc((size_t)nthr, sizeof(ecx));
 	for (int i = 0; i < nthr; i++)
-		ecx_init(&ctx[i], &E);
+		ecx_init(&ctx[i], &E, i);
 	for (int i = 1; i < nthr; i++)
 		pthread_create(&th[i], NULL, worker, &ctx[i]);
 	worker(&ctx[0]);
@@ -7384,7 +7404,7 @@ static int emit_tu1(cc *c, const cc_opts *o, bool write_out, uint8_t *mf, bool *
 	t2 = now();
 	/* stitch */
 	qsort(E.chunks, E.nchunk, sizeof(chunk), chunk_cmp);
-	tb_init(&hdr, (size_t)1 << 26);
+	tb_reg(&hdr, &er[12], (size_t)1 << 26, "emit.hdr");
 	tb_s(&hdr, "\t.text\n");
 	for (uint32_t i = 0; i < c->ntlasm; i++) {
 		const casm *a = &c->asms[N(c->tlasm[i])->a];
@@ -7397,7 +7417,7 @@ static int emit_tu1(cc *c, const cc_opts *o, bool write_out, uint8_t *mf, bool *
 		struct iovec *iov = malloc(((size_t)E.nchunk + 2) * sizeof(struct iovec));
 		int k = 0;
 
-		tb_init(&tail, (size_t)1 << 26);
+		tb_reg(&tail, &er[13], (size_t)1 << 26, "emit.tail");
 		{
 			/* .weak for weak undefined syms, in symbol order whatever the threads did */
 			uint32_t nw = 0, *w;
@@ -7513,27 +7533,25 @@ static int emit_tu1(cc *c, const cc_opts *o, bool write_out, uint8_t *mf, bool *
 				(unsigned long long)E.nins, E.nins * 4 / 1024.0, (t1 - t0) * 1e3, (t2 - t1) * 1e3, nthr,
 				E.print_ns / 1e6, E.walk_ns / 1e6, (unsigned long long)E.nwalk, bytes / 1e6, E.nins * 4 / 1e6 / (t2 - t1));
 		}
-		munmap(tail.p, tail.cap);
+		vmreg_put(&er[13], tail.n);
 	}
-	munmap(hdr.p, hdr.cap);
-	for (int i = 0; i < nthr; i++) {
-		munmap(ctx[i].out.p, ctx[i].out.cap);
-		ecx_free(&ctx[i]);
-	}
+	vmreg_put(&er[12], hdr.n);
+	for (int i = 0; i < nthr; i++)
+		ecx_free(&ctx[i], i);
 	free(ctx);
 	errors = E.errors;
-	munmap(E.claimed, c->nsym + 64);
-	munmap(E.extref, c->nsym + 64);
-	munmap(E.sflags, c->nsym + 64);
-	munmap(E.strdone, c->nstr + 64);
-	munmap(E.nflags, c->nnode + 64);
-	munmap(E.lref, c->nlabel + 64);
-	munmap((void *)E.walked, c->nsym + 64);
-	munmap(E.fnsize, (c->nsym + 64) * sizeof(uint16_t));
-	munmap(E.cwval, (c->nsym + 64) * sizeof(i128));
-	munmap(E.lcdepth, (size_t)c->nlabel * 2 + 64);
-	munmap(E.q, ((size_t)c->nsym + c->nstr + 64) * sizeof(uint32_t));
-	munmap(E.chunks, ((size_t)c->nsym + c->nstr + c->ntlasm + 64) * sizeof(chunk));
+	vmreg_put(&er[0], c->nsym + 64);
+	vmreg_put(&er[1], c->nsym + 64);
+	vmreg_put(&er[2], c->nsym + 64);
+	vmreg_put(&er[3], c->nstr + 64);
+	vmreg_put(&er[4], c->nnode + 64);
+	vmreg_put(&er[5], c->nlabel + 64);
+	vmreg_put(&er[6], (size_t)c->nlabel * 2 + 64);
+	vmreg_put(&er[7], VMREG_SCRATCH);	/* the queue and the chunks: written before read */
+	vmreg_put(&er[8], VMREG_SCRATCH);
+	vmreg_put(&er[9], c->nsym + 64);
+	vmreg_put(&er[10], (c->nsym + 64) * sizeof(uint16_t));
+	vmreg_put(&er[11], (c->nsym + 64) * sizeof(i128));
 	return errors;
 }
 
@@ -7549,7 +7567,8 @@ int emit_tu(cc *c, const cc_opts *o)
 	vperf v0 = vperf_now();
 	const char *r = getenv("VCC_EMIT_REPEAT");
 	int n = r ? atoi(r) : 1, err = 0;
-	uint8_t *mf = reserve(c->nsym + 64);
+	static _Thread_local vmreg mfr;
+	uint8_t *mf = vmreg_get(&mfr, c->nsym + 64, "emit.mf");
 	bool again = false;
 
 	for (int i = 1; i < n; i++)
@@ -7560,7 +7579,7 @@ int emit_tu(cc *c, const cc_opts *o)
 		if (err || !again)
 			break;
 	}
-	munmap(mf, c->nsym + 64);
+	vmreg_put(&mfr, c->nsym + 64);
 	ppd_ns_emit += (unsigned long long)((now() - t0) * 1e9);
 	ppd_ph_add(PPD_PH_EMIT, v0);
 	return err;

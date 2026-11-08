@@ -28,17 +28,10 @@
 #include "ccint.h"
 #include "emit.h"
 #include "ccsnap.h"
+#include "arena.h"
 
-static void *reserve(size_t n)
-{
-	void *p = mmap(NULL, n, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANON | MAP_NORESERVE, -1, 0);
-
-	if (p == MAP_FAILED) {
-		perror("vcc: mmap");
-		abort();
-	}
-	return p;
-}
+/* the per-TU tables, mapped once per thread (cc_init / cc_free) */
+static _Thread_local vmreg ccr[16];
 
 static void *halloc(cc *c, size_t n)
 {
@@ -6561,22 +6554,22 @@ static void cc_init(cc *c, pp *p, const cc_opts *o)
 	memset(c, 0, sizeof(*c));
 	c->p = p;
 	c->o = o;
-	c->ty = reserve((size_t)1 << 30);
-	c->params = reserve((size_t)1 << 28);
-	c->tags = reserve((size_t)1 << 28);
-	c->syms = reserve((size_t)1 << 30);
-	c->nodes = reserve((size_t)1 << 32);
-	c->lists = reserve((size_t)1 << 30);
-	c->ipool = reserve((size_t)1 << 30);
-	c->fpool = reserve((size_t)1 << 26);
-	c->strs = reserve((size_t)1 << 28);
-	c->labels = reserve((size_t)1 << 26);
-	c->attr = reserve((size_t)1 << 28);
-	c->asms = reserve((size_t)1 << 28);
-	c->sstack = reserve((size_t)1 << 28);
-	c->toplevel = reserve((size_t)1 << 26);
-	c->tlasm = reserve((size_t)1 << 24);
-	c->heap = c->hp = reserve((size_t)1 << 32);
+	c->ty = vmreg_get(&ccr[0], (size_t)1 << 30, "cc.ty");
+	c->params = vmreg_get(&ccr[1], (size_t)1 << 28, "cc.params");
+	c->tags = vmreg_get(&ccr[2], (size_t)1 << 28, "cc.tags");
+	c->syms = vmreg_get(&ccr[3], (size_t)1 << 30, "cc.syms");
+	c->nodes = vmreg_get(&ccr[4], (size_t)1 << 32, "cc.nodes");
+	c->lists = vmreg_get(&ccr[5], (size_t)1 << 30, "cc.lists");
+	c->ipool = vmreg_get(&ccr[6], (size_t)1 << 30, "cc.ipool");
+	c->fpool = vmreg_get(&ccr[7], (size_t)1 << 26, "cc.fpool");
+	c->strs = vmreg_get(&ccr[8], (size_t)1 << 28, "cc.strs");
+	c->labels = vmreg_get(&ccr[9], (size_t)1 << 26, "cc.labels");
+	c->attr = vmreg_get(&ccr[10], (size_t)1 << 28, "cc.attr");
+	c->asms = vmreg_get(&ccr[11], (size_t)1 << 28, "cc.asms");
+	c->sstack = vmreg_get(&ccr[12], (size_t)1 << 28, "cc.sstack");
+	c->toplevel = vmreg_get(&ccr[13], (size_t)1 << 26, "cc.toplevel");
+	c->tlasm = vmreg_get(&ccr[14], (size_t)1 << 24, "cc.tlasm");
+	c->heap = c->hp = vmreg_get(&ccr[15], (size_t)1 << 32, "cc.heap");
 	c->hend = c->heap + ((size_t)1 << 32);
 	tl_dops = halloc(c, DOPS_MAX * sizeof(dop));
 	tl_ndops = 0;
@@ -6653,24 +6646,27 @@ static void cc_init(cc *c, pp *p, const cc_opts *o)
 	}
 }
 
+/* the tables back to the thread, zeroed up to what the TU used (+ one element) */
 static void cc_free(cc *c)
 {
-	munmap(c->ty, (size_t)1 << 30);
-	munmap(c->params, (size_t)1 << 28);
-	munmap(c->tags, (size_t)1 << 28);
-	munmap(c->syms, (size_t)1 << 30);
-	munmap(c->nodes, (size_t)1 << 32);
-	munmap(c->lists, (size_t)1 << 30);
-	munmap(c->ipool, (size_t)1 << 30);
-	munmap(c->fpool, (size_t)1 << 26);
-	munmap(c->strs, (size_t)1 << 28);
-	munmap(c->labels, (size_t)1 << 26);
-	munmap(c->attr, (size_t)1 << 28);
-	munmap(c->asms, (size_t)1 << 28);
-	munmap(c->sstack, (size_t)1 << 28);
-	munmap(c->toplevel, (size_t)1 << 26);
-	munmap(c->tlasm, (size_t)1 << 24);
-	munmap(c->heap, (size_t)1 << 32);
+#define USED(n, a) (((size_t)(n) + 2) * sizeof(*(a)))
+	vmreg_put(&ccr[0], USED(c->nty, c->ty));
+	vmreg_put(&ccr[1], USED(c->nparams, c->params));
+	vmreg_put(&ccr[2], USED(c->ntag, c->tags));
+	vmreg_put(&ccr[3], USED(c->nsym, c->syms));
+	vmreg_put(&ccr[4], USED(c->nnode, c->nodes));
+	vmreg_put(&ccr[5], USED(c->nlist, c->lists));
+	vmreg_put(&ccr[6], USED(c->nipool, c->ipool));
+	vmreg_put(&ccr[7], USED(c->nfpool, c->fpool));
+	vmreg_put(&ccr[8], USED(c->nstr, c->strs));
+	vmreg_put(&ccr[9], USED(c->nlabel, c->labels));
+	vmreg_put(&ccr[10], USED(c->nattr, c->attr));
+	vmreg_put(&ccr[11], USED(c->nasm, c->asms));
+	vmreg_put(&ccr[12], VMREG_SCRATCH);	/* a stack: written before read */
+	vmreg_put(&ccr[13], USED(c->ntoplevel, c->toplevel));
+	vmreg_put(&ccr[14], USED(c->ntlasm, c->tlasm));
+	vmreg_put(&ccr[15], (size_t)(c->hp - c->heap) + 64);
+#undef USED
 }
 
 static void init_tables(void)

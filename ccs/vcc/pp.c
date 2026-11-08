@@ -36,6 +36,7 @@
 #include "intern.h"
 #include "pp.h"
 #include "ppdata.inc"
+#include "arena.h"
 
 #define unlikely(x) __builtin_expect(!!(x), 0)
 #define likely(x) __builtin_expect(!!(x), 1)
@@ -279,12 +280,6 @@ static uint32_t file_line(const vlex_file *f, const pfile *cfi, uint32_t off)
 typedef struct arena {
 	char *base, *p, *end;
 } arena;
-
-static void arena_init(arena *a, size_t n)
-{
-	a->base = a->p = vm(n);
-	a->end = a->base + n;
-}
 
 static inline void *alloc(arena *a, size_t n)
 {
@@ -4184,9 +4179,12 @@ static void bi_init(void)
 	}
 }
 
+/* a TU's tables, kept by the thread from one pp_open to the next (pp_close) */
+static _Thread_local vmreg ppr[8];
+
 pp *pp_open(const pp_opts *o)
 {
-	pp *p = vm(sizeof(pp));
+	pp *p = vmreg_get(&ppr[0], sizeof(pp), "pp");
 	const vlex_file *mf;
 	size_t n = strlen(o->predef);
 	char *src;
@@ -4195,17 +4193,19 @@ pp *pp_open(const pp_opts *o)
 
 	vintern_init();
 	p->o = o;
-	p->cx = vm(MAXCTX * sizeof(ctx));
-	arena_init(&p->perm, 1ull << 30);
-	arena_init(&p->tmp, 1ull << 32);
+	p->cx = vmreg_get(&ppr[1], MAXCTX * sizeof(ctx), "pp.cx");
+	p->perm.base = p->perm.p = vmreg_get(&ppr[2], 1ull << 30, "pp.perm");
+	p->perm.end = p->perm.base + (1ull << 30);
+	p->tmp.base = p->tmp.p = vmreg_get(&ppr[3], 1ull << 32, "pp.tmp");
+	p->tmp.end = p->tmp.base + (1ull << 32);
 	p->psig = alloc(&p->perm, ((size_t)o->ndirs + 1) * sizeof(uint32_t));
 	if (!sig_of(o, &p->sig, p->psig))
 		p->sig = HNONE;
-	p->sv = vm(SVMAX * sizeof(ptok));
-	p->fe = vm((1u << 20) * sizeof(fent));
+	p->sv = vmreg_get(&ppr[4], SVMAX * sizeof(ptok), "pp.sv");
+	p->fe = vmreg_get(&ppr[5], (1u << 20) * sizeof(fent), "pp.fe");
 	p->once = alloc(&p->perm, 4096 * sizeof(*p->once));
 	p->pushed = alloc(&p->perm, 4096 * sizeof(*p->pushed));
-	p->lm = vm(65536 * sizeof(*p->lm));
+	p->lm = vmreg_get(&ppr[6], 65536 * sizeof(*p->lm), "pp.lm");
 	{
 		static pthread_once_t once = PTHREAD_ONCE_INIT;
 
@@ -4232,13 +4232,13 @@ pp *pp_open(const pp_opts *o)
 	memcpy(src, o->predef, n);
 	memset(src + n, 0, 129);
 	tok = alloc(&p->perm, (n + 2) * sizeof(vtok));
-	scratch = vm(vlex_scratch_size(n) + 4096);
+	scratch = vmreg_get(&ppr[7], vlex_scratch_size(n) + 4096, "pp.lexscratch");
 	p->builtin.path = "<built-in>";
 	p->builtin.src = src;
 	p->builtin.size = (uint32_t)n;
 	p->builtin.ntok = vlex(src, n, tok, scratch);
 	p->builtin.tok = tok;
-	munmap(scratch, vlex_scratch_size(n) + 4096);
+	vmreg_put(&ppr[7], VMREG_SCRATCH);
 	enter_file(p, &p->builtin, "<built-in>", -1);
 	return p;
 }
@@ -4442,12 +4442,13 @@ size_t pp_files(const pp *p, const char **names, size_t max)
 
 void pp_close(pp *p)
 {
-	if (p->cx) munmap(p->cx, MAXCTX * sizeof(ctx));
-	if (p->perm.base) munmap(p->perm.base, (size_t)(p->perm.end - p->perm.base));
-	if (p->tmp.base) munmap(p->tmp.base, (size_t)(p->tmp.end - p->tmp.base));
-	if (p->sv) munmap(p->sv, SVMAX * sizeof(ptok));
-	if (p->fe) munmap(p->fe, (1u << 20) * sizeof(fent));
-	if (p->lm) munmap(p->lm, 65536 * sizeof(*p->lm));
+	/* back to the thread: the stacks and tmp (reused all along the TU) as they are */
+	vmreg_put(&ppr[1], VMREG_SCRATCH);
+	vmreg_put(&ppr[2], (size_t)(p->perm.p - p->perm.base) + 64);
+	vmreg_put(&ppr[3], VMREG_SCRATCH);
+	vmreg_put(&ppr[4], VMREG_SCRATCH);
+	vmreg_put(&ppr[5], ((size_t)p->nfe + 1) * sizeof(fent));
+	vmreg_put(&ppr[6], ((size_t)p->nlm + 1) * sizeof(*p->lm));
 	if (p->out) {
 		if (out_spare_cap < p->capout) {
 			if (out_spare)
@@ -4476,5 +4477,5 @@ void pp_close(pp *p)
 		munmap(p->rec.seg, HC_MAXSEG * sizeof(hsegr));
 		munmap(p->rec.cp, (HC_MAXCP + 1) * sizeof(cprov));
 	}
-	munmap(p, sizeof(pp));
+	vmreg_put(&ppr[0], sizeof(pp));
 }
