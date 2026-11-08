@@ -1441,11 +1441,13 @@ static size_t expand_bound(Sv body, const Sv *args, uint32_t np)
 static int d_macro(As *a, const char *p, const char *e)
 {
 	Sv name;
+	/* names from file text (not a->sb) stay valid; others are copied */
+	int keep = a->fr[a->nfr - 1].kind == FR_FILE && !((const uint8_t *)p >= a->sb.base && (const uint8_t *)p < a->sb.base + a->sb.cap);
 	p = ws(p, e);
 	const char *s = p;
 	while (p < e && isidc((unsigned char)*p)) p++;
 	if (p == s) return err(a, "expected identifier in '.macro' directive");
-	name = svdup(a, s, (size_t)(p - s));
+	name = keep ? (Sv){ s, (uint32_t)(p - s) } : svdup(a, s, (size_t)(p - s));
 	Param ps[64]; uint32_t np = 0;
 	p = ws(p, e);
 	if (p < e && *p == ',') p = ws(p + 1, e);
@@ -1456,7 +1458,7 @@ static int d_macro(As *a, const char *p, const char *e)
 		s = p;
 		while (p < e && isidc((unsigned char)*p)) p++;
 		if (p == s) return err(a, "expected identifier in '.macro' directive");
-		q->name = svdup(a, s, (size_t)(p - s));
+		q->name = keep ? (Sv){ s, (uint32_t)(p - s) } : svdup(a, s, (size_t)(p - s));
 		p = ws(p, e);
 		if (p < e && *p == ':') {
 			p = ws(p + 1, e);
@@ -1498,8 +1500,9 @@ static int d_macro(As *a, const char *p, const char *e)
 			for (Macro *x = a->mtab[i], *nx; x; x = nx) { nx = x->next; uint32_t h = hsv(x->name.s, x->name.n) & nm; x->next = t[h]; t[h] = x; }
 		a->mtab = t; a->mmask = nm;
 	}
-	if (find_macro(a, name.s, name.n)) return err(a, "macro '%.*s' is already defined", (int)name.n, name.s);
 	uint32_t h = hsv(name.s, name.n) & a->mmask;
+	for (Macro *x = a->mtab[h]; x; x = x->next)
+		if (x->name.n == name.n && !memcmp(x->name.s, name.s, name.n)) return err(a, "macro '%.*s' is already defined", (int)name.n, name.s);
 	m->next = a->mtab[h]; a->mtab[h] = m; a->mcount++;
 	return 0;
 }
