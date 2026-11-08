@@ -58,7 +58,7 @@ int a64_sysreg(const char *name, size_t len, int write)
 			k++;
 			if (p < e) p++;
 		}
-		if (k != 5 || f[0] < 2 || f[0] > 3 || f[1] > 7 || f[4] > 7) return -1;
+		if (k != 5 || f[0] > 3 || f[1] > 7 || f[4] > 7) return -1;
 		return f[0] << 14 | f[1] << 11 | f[2] << 7 | f[3] << 3 | f[4];
 	}
 	return -1;
@@ -163,13 +163,15 @@ enum {
 	K_LDX, K_STX, K_PRFM, K_FIXED, K_HINT, K_BTI, K_EXC, K_BARRIER, K_MSR, K_MRS,
 	K_DC, K_IC, K_TLBI, K_SYS, K_CSEL, K_CSET, K_CNEG, K_CCMP, K_DP1, K_MUL, K_CRC,
 	K_DP2, K_EXTR, K_VLD1, K_VREV, K_DUP, K_EXT, K_MOVI, K_VSHIFT, K_VPERM, K_PMULL,
-	K_FMOV, K_SHA3, K_SHA2, K_CPY, K_SET, K_V3, K_UMOV,
+	K_FMOV, K_SHA3, K_SHA2, K_CPY, K_SET, K_V3, K_UMOV, K_AT, K_RDVL, K_PREG,
 };
 
 typedef struct { const char *name; uint8_t k; uint32_t base; uint32_t x; } Mn;
 
 /* sorted by name */
 static const Mn mns[] = {
+	{ "adc", K_DP2, 0x1a000000, 0 },
+	{ "adcs", K_DP2, 0x3a000000, 0 },
 	{ "add", K_ADDSUB, 0, 0 },
 	{ "adds", K_ADDSUB, 1, 0 },
 	{ "adr", K_ADR, 0x10000000, 0 },
@@ -177,6 +179,7 @@ static const Mn mns[] = {
 	{ "and", K_LOGIC, 0, 0 },
 	{ "ands", K_LOGIC, 3, 0 },
 	{ "asr", K_SHIFT, 2, 0 },
+	{ "at", K_AT, 0, 0 },
 	{ "b", K_B, 0x14000000, R_AARCH64_JUMP26 },
 	{ "bfi", K_BFI, 1, 0 },
 	{ "bfm", K_BFM, 1, 0 },
@@ -275,10 +278,14 @@ static const Mn mns[] = {
 	{ "nop", K_FIXED, 0xd503201f, 0 },
 	{ "orn", K_LOGIC, 1, 1 },
 	{ "orr", K_LOGIC, 1, 0 },
+	{ "pfalse", K_PREG, 0x2518e400, 0 },
 	{ "pmull", K_PMULL, 0x0e20e000, 0 },
 	{ "pmull2", K_PMULL, 0x4e20e000, 0 },
 	{ "prfm", K_PRFM, 0, 0 },
 	{ "rbit", K_DP1, 0x5ac00000, 0 },
+
+	{ "rdffr", K_PREG, 0x2519f000, 0 },
+	{ "rdvl", K_RDVL, 0x04bf5000, 0 },
 	{ "ret", K_RET, 0xd65f0000, 0 },
 	{ "rev", K_DP1, 0x5ac00800, 1 },
 	{ "rev16", K_VREV, 0x0e201800, 0x5ac00400 },
@@ -286,12 +293,15 @@ static const Mn mns[] = {
 	{ "rev64", K_VREV, 0x0e200800, 0 },
 	{ "ror", K_SHIFT, 3, 0 },
 	{ "sb", K_FIXED, 0xd50330ff, 0 },
+	{ "sbc", K_DP2, 0x5a000000, 0 },
+	{ "sbcs", K_DP2, 0x7a000000, 0 },
 	{ "sbfiz", K_BFI, 0, 0 },
 	{ "sbfm", K_BFM, 0, 0 },
 	{ "sbfx", K_BFX, 0, 0 },
 	{ "sdiv", K_DP2, 0x1ac00c00, 0 },
 	{ "sete", K_SET, 0x19c08400, 0 }, { "seten", K_SET, 0x19c08400, 2 }, { "setet", K_SET, 0x19c08400, 1 },
 	{ "setetn", K_SET, 0x19c08400, 3 },
+	{ "setffr", K_FIXED, 0x252c9000, 0 },
 	{ "setm", K_SET, 0x19c04400, 0 }, { "setmn", K_SET, 0x19c04400, 2 }, { "setmt", K_SET, 0x19c04400, 1 },
 	{ "setmtn", K_SET, 0x19c04400, 3 },
 	{ "setp", K_SET, 0x19c00400, 0 }, { "setpn", K_SET, 0x19c00400, 2 }, { "setpt", K_SET, 0x19c00400, 1 },
@@ -310,7 +320,10 @@ static const Mn mns[] = {
 	{ "sha256su1", K_SHA3, 0x5e006000, 1 },
 	{ "shl", K_VSHIFT, 0x0f005400, 0 },
 	{ "sli", K_VSHIFT, 0x2f005400, 0 },
+	{ "smaddl", K_MUL, 0x9b200000, 3 },
 	{ "smc", K_EXC, 0xd4000003, 0 },
+	{ "smulh", K_DP2, 0x9b407c00, 1 },
+	{ "smull", K_MUL, 0x9b207c00, 2 },
 	{ "sri", K_VSHIFT, 0x2f004400, 1 },
 	{ "sshr", K_VSHIFT, 0x0f000400, 1 },
 	{ "st1", K_VLD1, 0x0c000000, 0 },
@@ -339,12 +352,16 @@ static const Mn mns[] = {
 	{ "ubfm", K_BFM, 2, 0 },
 	{ "ubfx", K_BFX, 2, 0 },
 	{ "udiv", K_DP2, 0x1ac00800, 0 },
+	{ "umaddl", K_MUL, 0x9ba00000, 3 },
 	{ "umov", K_UMOV, 0, 0 },
+	{ "umulh", K_DP2, 0x9bc07c00, 1 },
+	{ "umull", K_MUL, 0x9ba07c00, 2 },
 	{ "ushr", K_VSHIFT, 0x2f000400, 1 },
 	{ "uzp1", K_VPERM, 0x0e001800, 0 },
 	{ "uzp2", K_VPERM, 0x0e005800, 0 },
 	{ "wfe", K_FIXED, 0xd503205f, 0 },
 	{ "wfi", K_FIXED, 0xd503207f, 0 },
+	{ "wrffr", K_PREG, 0x25289000, 5 },
 	{ "yield", K_FIXED, 0xd503203f, 0 },
 	{ "zip1", K_VPERM, 0x0e003800, 0 },
 	{ "zip2", K_VPERM, 0x0e007800, 0 },
@@ -445,7 +462,7 @@ static int k_addsub(Ctx *c, const Mn *m)
 	int sf = isx(&o[0]);
 	if (isx(&o[1]) != sf) BADOPS;
 	if (isimm(&o[2])) {
-		if ((s && issp(&o[0])) || iszr(&o[0]) || iszr(&o[1])) BADOPS;
+		if ((s && issp(&o[0])) || (!s && iszr(&o[0])) || iszr(&o[1])) BADOPS;
 		return addsub_imm(c, sf, op, s, R(&o[0]), R(&o[1]), &o[2], c->n == 4 ? &o[3] : 0);
 	}
 	if (!isgpr(&o[2])) BADOPS;
@@ -765,6 +782,7 @@ static int k_dp2(Ctx *c, const Mn *m)
 {
 	const A64Op *o = c->op;
 	if (c->n != 3 || !gpr_nosp(&o[0]) || !gpr_nosp(&o[1]) || !gpr_nosp(&o[2])) BADOPS;
+	if (m->x && (!isx(&o[0]) || !isx(&o[1]) || !isx(&o[2]))) BADOPS;
 	*c->out = m->base | (uint32_t)isx(&o[0]) << 31 | R(&o[2]) << 16 | R(&o[1]) << 5 | R(&o[0]);
 	return 0;
 }
@@ -772,9 +790,14 @@ static int k_dp2(Ctx *c, const Mn *m)
 static int k_mul(Ctx *c, const Mn *m)
 {
 	const A64Op *o = c->op;
-	int n = m->x ? 4 : 3;
+	int n = m->x == 1 || m->x == 3 ? 4 : 3;
 	if (c->n != n) BADOPS;
 	for (int i = 0; i < n; i++) if (!gpr_nosp(&o[i])) BADOPS;
+	if (m->x >= 2) {
+		if (!isx(&o[0]) || !isw(&o[1]) || !isw(&o[2]) || (n == 4 && !isx(&o[3]))) BADOPS;
+		*c->out = m->base | R(&o[2]) << 16 | (n == 4 ? R(&o[3]) << 10 : 0) | R(&o[1]) << 5 | R(&o[0]);
+		return 0;
+	}
 	*c->out = m->base | (uint32_t)isx(&o[0]) << 31 | R(&o[2]) << 16 | (n == 4 ? R(&o[3]) << 10 : 0) | R(&o[1]) << 5 | R(&o[0]);
 	return 0;
 }
@@ -850,6 +873,7 @@ static int k_adr(Ctx *c, const Mn *m)
 	*c->out = m->base | R(&o[0]);
 	if (!o[1].hassym) FAIL("unsupported constant adr/adrp target");
 	if (m->x) {
+		if (o[1].mod == A64_MOD_GOT) return setfix(c, R_AARCH64_ADR_GOT_PAGE, &o[1]);
 		if (o[1].mod && o[1].mod != A64_MOD_PG_HI21) FAIL("invalid relocation specifier");
 		return setfix(c, R_AARCH64_ADR_PREL_PG_HI21, &o[1]);
 	}
@@ -961,6 +985,11 @@ static int ldst_common(Ctx *c, unsigned size, unsigned v, unsigned opc, int scal
 		*c->out = 0x38200800u | size << 30 | v << 26 | opc << 22 | (unsigned)mem->index << 16 | option << 13 | s << 12 | rn << 5 | rt;
 		return 0;
 	}
+	if (mem->mod == A64_MOD_GOT_LO12 && scale == 3 && opc == 1 && !v && mem->mode == A64M_OFF && !unscaled_only) {
+		*c->out = a64_ldst_uoff(size, 0, opc, rt, rn, 0);
+		c->fix->type = R_AARCH64_LD64_GOT_LO12_NC; c->fix->v = mem->v;
+		return 0;
+	}
 	if (mem->hassym || mem->mod) {
 		if (mem->mod != A64_MOD_LO12 || mem->mode != A64M_OFF || unscaled_only) return -1;
 		*c->out = a64_ldst_uoff(size, (int)v, opc, rt, rn, 0);
@@ -993,6 +1022,16 @@ static int k_ldst(Ctx *c, const Mn *m)
 	unsigned size, v, opc;
 	int scale;
 	if (c->n < 2 || c->n > 3) BADOPS;
+	if (m->x == 0xff && c->n == 2 && isreg(&o[0]) && (o[0].cls == A64_Z || o[0].cls == A64_P)) {
+		/* SVE ldr/str Zt|Pt, [Xn{, #imm, mul vl}] */
+		const A64Op *mm = &o[1];
+		if (o[0].arr || mm->kind != A64O_MEM || mm->mode != A64M_OFF || mm->hassym || mm->mod ||
+		    (mm->imm && !mm->mulvl) || mm->imm < -256 || mm->imm > 255) BADOPS;
+		uint32_t i9 = (uint32_t)mm->imm & 0x1ff;
+		*c->out = (load ? 0x85800000u : 0xe5800000u) | (o[0].cls == A64_Z ? 0x4000u : 0) |
+			  (i9 >> 3) << 16 | (i9 & 7) << 10 | (unsigned)mm->reg << 5 | R(&o[0]);
+		return 0;
+	}
 	if (m->x == 0xff) {
 		/* ldr literal */
 		if (load && c->n == 2 && isimm(&o[1])) {
@@ -1240,7 +1279,7 @@ static int k_msr(Ctx *c, const Mn *m)
 	if (!gpr_nosp(&o[1]) || !isx(&o[1])) BADOPS;
 	int r = a64_sysreg(o[0].name, o[0].nlen, 1);
 	if (r < 0) FAIL("expected writable system register or pstate");
-	*c->out = m->base | ((unsigned)r & 0x7fff) << 5 | R(&o[1]);
+	*c->out = (m->base & 0xffe7ffffu) | ((unsigned)r & 0xffff) << 5 | R(&o[1]);
 	return 0;
 }
 
@@ -1250,7 +1289,7 @@ static int k_mrs(Ctx *c, const Mn *m)
 	if (c->n != 2 || !isx(&o[0]) || o[0].sp || o[1].kind != A64O_NAME) BADOPS;
 	int r = a64_sysreg(o[1].name, o[1].nlen, 0);
 	if (r < 0) FAIL("expected readable system register");
-	*c->out = m->base | ((unsigned)r & 0x7fff) << 5 | R(&o[0]);
+	*c->out = (m->base & 0xffe7ffffu) | ((unsigned)r & 0xffff) << 5 | R(&o[0]);
 	return 0;
 }
 
@@ -1296,6 +1335,27 @@ static int sysop(Ctx *c, const SysOp *t, size_t nt)
 	FAIL("invalid operand for system instruction");
 }
 
+static const SysOp atops[] = {
+	{ "s1e1r", 0, 7, 8, 0, 1 }, { "s1e1w", 0, 7, 8, 1, 1 }, { "s1e0r", 0, 7, 8, 2, 1 }, { "s1e0w", 0, 7, 8, 3, 1 },
+	{ "s1e1rp", 0, 7, 9, 0, 1 }, { "s1e1wp", 0, 7, 9, 1, 1 }, { "s1e2r", 4, 7, 8, 0, 1 }, { "s1e2w", 4, 7, 8, 1, 1 },
+	{ "s12e1r", 4, 7, 8, 4, 1 }, { "s12e1w", 4, 7, 8, 5, 1 }, { "s12e0r", 4, 7, 8, 6, 1 }, { "s12e0w", 4, 7, 8, 7, 1 },
+};
+static int k_at(Ctx *c, const Mn *m) { (void)m; return sysop(c, atops, sizeof atops / sizeof atops[0]); }
+static int k_rdvl(Ctx *c, const Mn *m)
+{
+	const A64Op *o = c->op;
+	if (c->n != 2 || !isx(&o[0]) || o[0].sp || !iscimm(&o[1]) || o[1].imm < -32 || o[1].imm > 31) BADOPS;
+	*c->out = m->base | ((unsigned)o[1].imm & 0x3f) << 5 | R(&o[0]);
+	return 0;
+}
+/* SVE predicate ops with one Pn.b operand: x = bit position of the register */
+static int k_preg(Ctx *c, const Mn *m)
+{
+	const A64Op *o = c->op;
+	if (c->n != 1 || !isreg(&o[0]) || o[0].cls != A64_P || o[0].arr != A64_ELB) BADOPS;
+	*c->out = m->base | R(&o[0]) << m->x;
+	return 0;
+}
 static int k_dc(Ctx *c, const Mn *m) { (void)m; return sysop(c, dcops, sizeof dcops / sizeof dcops[0]); }
 static int k_ic(Ctx *c, const Mn *m) { (void)m; return sysop(c, icops, sizeof icops / sizeof icops[0]); }
 static int k_tlbi(Ctx *c, const Mn *m) { (void)m; return sysop(c, tlbiops, sizeof tlbiops / sizeof tlbiops[0]); }
@@ -1493,6 +1553,122 @@ static int k_sha2(Ctx *c, const Mn *m)
 	return 0;
 }
 
+
+/* ---------------------------------------------------------------- atomics (parsed, not tabled) */
+
+static int mem0(const A64Op *o) { return o->kind == A64O_MEM && o->mode == A64M_OFF && !o->imm && !o->hassym; }
+
+/* size suffix b/h at s[0..n): -1 none, else size; *rest = chars consumed */
+static int sfx(const char *s, size_t n, size_t *k)
+{
+	if (*k < n && (s[*k] | 32) == 'b') { (*k)++; return 0; }
+	if (*k < n && (s[*k] | 32) == 'h') { (*k)++; return 1; }
+	return -1;
+}
+
+static int pre(const char *s, size_t n, size_t *k, const char *p)
+{
+	size_t l = strlen(p);
+	if (*k + l > n || lc_cmp(s + *k, l, p)) return 0;
+	*k += l;
+	return 1;
+}
+
+/* LSE (cas, ld<op>, st<op>, swp), load-acquire/store-release and exclusives.
+ * Returns 1 if mn is one of them (result in *r), 0 otherwise. */
+static int k_atomic(Ctx *c, const char *mn, size_t n, int *r)
+{
+	static const char *const ops[] = { "add", "clr", "eor", "set", "smax", "smin", "umax", "umin" };
+	const A64Op *o = c->op;
+	size_t k = 0;
+	int a = 0, l = 0, sz, cls = -1;	/* cls: 0 cas 1 ld<op> 2 st<op> 3 swp 4 ldar 5 stlr 6 ldapr 7 ldxr 8 ldaxr 9 stxr 10 stlxr */
+	unsigned opc = 0;
+
+	if (pre(mn, n, &k, "ldaxp")) cls = 12;
+	else if (pre(mn, n, &k, "ldxp")) cls = 13;
+	else if (pre(mn, n, &k, "stlxp")) cls = 14;
+	else if (pre(mn, n, &k, "stxp")) cls = 15;
+	else if (pre(mn, n, &k, "casp")) cls = 11;
+	else if (pre(mn, n, &k, "cas")) cls = 0;
+	else if (pre(mn, n, &k, "swp")) cls = 3;
+	else if (pre(mn, n, &k, "ldapr")) cls = 6;
+	else if (pre(mn, n, &k, "ldaxr")) cls = 8;
+	else if (pre(mn, n, &k, "ldar")) cls = 4;
+	else if (pre(mn, n, &k, "ldxr")) cls = 7;
+	else if (pre(mn, n, &k, "stlxr")) cls = 10;
+	else if (pre(mn, n, &k, "stlr")) cls = 5;
+	else if (pre(mn, n, &k, "stxr")) cls = 9;
+	else if (n > 2 && (pre(mn, n, &k, "ld") || pre(mn, n, &k, "st"))) {
+		int st = (mn[0] | 32) == 's';
+		for (opc = 0; opc < 8; opc++) {
+			size_t k2 = k;
+			if (pre(mn, n, &k2, ops[opc])) { k = k2; break; }
+		}
+		if (opc == 8) return 0;
+		cls = st ? 2 : 1;
+	} else
+		return 0;
+	if (cls <= 3 || cls == 11) {
+		if (cls != 2 && k < n && (mn[k] | 32) == 'a') { a = 1; k++; }
+		if (k < n && (mn[k] | 32) == 'l') { l = 1; k++; }
+	}
+	sz = sfx(mn, n, &k);
+	if (k != n) return 0;
+	*r = -1;
+	*c->err = "invalid operand for instruction";
+	switch (cls) {
+	case 0: case 1: case 3:	/* Rs, Rt, [Xn] */
+		if (c->n != 3 || !gpr_nosp(&o[0]) || !gpr_nosp(&o[1]) || !mem0(&o[2])) return 1;
+		if (sz < 0) sz = isx(&o[1]) ? 3 : 2;
+		else if (!isw(&o[0]) || !isw(&o[1])) return 1;
+		if (isx(&o[0]) != isx(&o[1])) return 1;
+		if (cls == 0)
+			*c->out = 0x08a07c00u | (uint32_t)sz << 30 | (uint32_t)a << 22 | R(&o[0]) << 16 | (uint32_t)l << 15 | (unsigned)o[2].reg << 5 | R(&o[1]);
+		else
+			*c->out = 0x38200000u | (uint32_t)sz << 30 | (uint32_t)a << 23 | (uint32_t)l << 22 | R(&o[0]) << 16 |
+				  (cls == 3 ? 0x8000u : opc << 12) | (unsigned)o[2].reg << 5 | R(&o[1]);
+		break;
+	case 2:			/* st<op>: Rs, [Xn] = ld<op> with Rt = zr */
+		if (c->n != 2 || !gpr_nosp(&o[0]) || !mem0(&o[1])) return 1;
+		if (sz < 0) sz = isx(&o[0]) ? 3 : 2;
+		else if (!isw(&o[0])) return 1;
+		*c->out = 0x3820001fu | (uint32_t)sz << 30 | (uint32_t)l << 22 | R(&o[0]) << 16 | opc << 12 | (unsigned)o[1].reg << 5;
+		break;
+	case 4: case 5: case 6: case 7: case 8: {	/* Rt, [Xn] */
+		static const uint32_t base[] = { 0, 0, 0, 0, 0x08dffc00, 0x089ffc00, 0x38bfc000, 0x085f7c00, 0x085ffc00 };
+		if (c->n != 2 || !gpr_nosp(&o[0]) || !mem0(&o[1])) return 1;
+		if (sz < 0) sz = isx(&o[0]) ? 3 : 2;
+		else if (!isw(&o[0])) return 1;
+		*c->out = base[cls] | (uint32_t)sz << 30 | (unsigned)o[1].reg << 5 | R(&o[0]);
+		break;
+	}
+	case 11:		/* casp: Rs, Rs+1, Rt, Rt+1, [Xn] */
+		if (sz >= 0 || c->n != 5 || !mem0(&o[4])) return 1;
+		for (int i = 0; i < 4; i++)
+			if (!gpr_nosp(&o[i]) || isx(&o[i]) != isx(&o[0])) return 1;
+		if ((R(&o[0]) & 1) || R(&o[1]) != R(&o[0]) + 1 || (R(&o[2]) & 1) || R(&o[3]) != R(&o[2]) + 1) return 1;
+		*c->out = 0x08207c00u | (uint32_t)isx(&o[0]) << 30 | (uint32_t)a << 22 | R(&o[0]) << 16 | (uint32_t)l << 15 | (unsigned)o[4].reg << 5 | R(&o[2]);
+		break;
+	case 12: case 13:	/* ldxp Rt, Rt2, [Xn] */
+		if (sz >= 0 || c->n != 3 || !gpr_nosp(&o[0]) || !gpr_nosp(&o[1]) || isx(&o[0]) != isx(&o[1]) || !mem0(&o[2])) return 1;
+		*c->out = 0x887f0000u | (uint32_t)isx(&o[0]) << 30 | (cls == 12 ? 0x8000u : 0) | R(&o[1]) << 10 | (unsigned)o[2].reg << 5 | R(&o[0]);
+		break;
+	case 14: case 15:	/* stxp Ws, Rt, Rt2, [Xn] */
+		if (sz >= 0 || c->n != 4 || !isw(&o[0]) || !gpr_nosp(&o[1]) || !gpr_nosp(&o[2]) || isx(&o[1]) != isx(&o[2]) || !mem0(&o[3])) return 1;
+		*c->out = 0x88200000u | (uint32_t)isx(&o[1]) << 30 | R(&o[0]) << 16 | (cls == 14 ? 0x8000u : 0) | R(&o[2]) << 10 | (unsigned)o[3].reg << 5 | R(&o[1]);
+		break;
+	default:		/* stxr/stlxr: Ws, Rt, [Xn] */
+		if (c->n != 3 || !isw(&o[0]) || !gpr_nosp(&o[1]) || !mem0(&o[2])) return 1;
+		if (sz < 0) sz = isx(&o[1]) ? 3 : 2;
+		else if (!isw(&o[1])) return 1;
+		*c->out = (cls == 10 ? 0x0800fc00u : 0x08007c00u) | (uint32_t)sz << 30 | R(&o[0]) << 16 | (unsigned)o[2].reg << 5 | R(&o[1]);
+		break;
+	}
+	*c->err = 0;
+	*r = 0;
+	return 1;
+}
+
 /* ---------------------------------------------------------------- dispatch */
 
 int a64_asm(const char *mn, size_t n, const A64Op *op, int nop, uint32_t *out, A64Fix *fix, const char **err)
@@ -1506,6 +1682,10 @@ int a64_asm(const char *mn, size_t n, const A64Op *op, int nop, uint32_t *out, A
 		if (mn[1] == '.' && n == 4) cc = a64_cond(mn + 2, 2);
 		else if (n == 3) cc = a64_cond(mn + 1, 2);
 		if (cc >= 0) return bcond(&c, cc);
+	}
+	{
+		int r;
+		if (k_atomic(&c, mn, n, &r)) return r;
 	}
 	const Mn *m = lookup(mn, n);
 	if (!m) { *err = "unrecognized instruction mnemonic"; return -1; }
@@ -1568,6 +1748,9 @@ int a64_asm(const char *mn, size_t n, const A64Op *op, int nop, uint32_t *out, A
 	case K_CPY: return k_cpy(&c, m);
 	case K_SET: return k_set(&c, m);
 	case K_UMOV: return k_umov(&c, m);
+	case K_AT: return k_at(&c, m);
+	case K_RDVL: return k_rdvl(&c, m);
+	case K_PREG: return k_preg(&c, m);
 	}
 	*err = "internal: unhandled class";
 	return -1;

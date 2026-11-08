@@ -1576,7 +1576,17 @@ static int parse_reg(As *a, const char *s, size_t n, A64Op *op, int depth)
 		if (c == 'v' && (r = parse_regnum(s + 1, n - 1, 31)) >= 0) {
 			op->kind = A64O_VREG; op->cls = A64_V; op->reg = (uint8_t)r; op->arr = A64_ARR_NONE; return 1;
 		}
+		if ((c == 'z' || c == 'p') && (r = parse_regnum(s + 1, n - 1, c == 'z' ? 31 : 15)) >= 0) {
+			op->kind = A64O_REG; op->cls = c == 'z' ? A64_Z : A64_P; op->reg = (uint8_t)r; return 1;
+		}
 		return 0;
+	}
+	if (c == 'p' || c == 'z') {	/* SVE: p0.b, z1.d */
+		int r = parse_regnum(s + 1, bn - 1, c == 'z' ? 31 : 15);
+		int ar = r < 0 ? -1 : arrangement(dot + 1, n - bn - 1);
+		if (ar < A64_ELB || ar > A64_ELQ) return 0;
+		op->kind = A64O_REG; op->cls = c == 'z' ? A64_Z : A64_P; op->reg = (uint8_t)r; op->arr = (uint8_t)ar;
+		return 1;
 	}
 	if (c != 'v') return 0;
 	int r = parse_regnum(s + 1, bn - 1, 31);
@@ -1688,6 +1698,14 @@ static int parse_mem(As *a, const char **pp, const char *e, A64Op *op)
 			A64Op im; memset(&im, 0, sizeof im);
 			if (parse_imm(a, &p, e, &im)) return -1;
 			op->imm = im.imm; op->v = im.v; op->hassym = im.hassym; op->mod = im.mod; op->hasamt = 1;
+			p = ws(p, e);
+			if (p < e && *p == ',') {	/* SVE: #imm, mul vl */
+				const char *q = ws(p + 1, e);
+				if (e - q >= 3 && sveqi(q, 3, "mul")) {
+					q = ws(q + 3, e);
+					if (e - q >= 2 && sveqi(q, 2, "vl")) { op->mulvl = 1; p = q + 2; }
+				}
+			}
 		}
 	}
 	p = ws(p, e);
