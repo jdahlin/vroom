@@ -75,7 +75,8 @@ struct cc {
 	ptok tk[4];
 	int ntk;
 	uint32_t prevloc;
-	uint8_t prevflags;	/* the previous token's flags (PF_MACRO: diagnostics) */
+	uint8_t prevflags;
+	uint32_t dead;		/* inside if (0) ... (and the like): no runtime-behaviour warnings */	/* the previous token's flags (PF_MACRO: diagnostics) */
 	uint8_t cv_what;		/* context of the conversion being checked: CX_* (diagnostics) */
 	uint32_t cv_loc, cv_fn, cv_arg;	/* CX_PASS: the callee's sym (0: unknown) and the argument */
 

@@ -2292,9 +2292,13 @@ static uint32_t cast_node(cc *c, uint32_t n, qty to, int kind)
 }
 
 /* array/function designators to pointers (C11 6.3.2.1p3-4) */
+static void bounds_warn(cc *c, uint32_t n, bool addr);
+
 static uint32_t decay(cc *c, uint32_t n)
 {
 	qty t = N(n)->ty;
+
+	bounds_warn(c, n, false);
 	int k = KIND(c, t);
 
 	if (k == TY_ARRAY)
@@ -2572,6 +2576,67 @@ static uint32_t convert(cc *c, uint32_t n, qty to)
 }
 
 /* value of n as an rvalue of its promoted type */
+/* clang spells the array type of this warning without the space: 'int[4]' */
+static const char *arr_tyname(cc *c, qty t)
+{
+	const char *s = tyname(c, t), *sp = strstr(s, " [");
+	char *o;
+
+	if (!sp)
+		return s;
+	o = halloc(c, strlen(s) + 1);
+	memcpy(o, s, (size_t)(sp - s));
+	strcpy(o + (sp - s), sp + 1);
+	return o;
+}
+
+/* -Warray-bounds: a[CONST] outside a's array type (addr: &a[n] may point one past the end) */
+static void bounds_warn(cc *c, uint32_t n, bool addr)
+{
+	const node *x = N(n);
+	uint32_t a, s = 0;
+	const ctype *at;
+	cval cv;
+	i128 i;
+
+	if (x->op != N_INDEX || (x->flags & NF_BOUNDS) || c->dead)
+		return;
+	N(n)->flags |= NF_BOUNDS;
+	a = x->a;
+	if (N(a)->op != N_CAST || N(a)->aux != CK_DECAY)
+		return;
+	a = N(a)->a;
+	at = T(c, N(a)->ty);
+	if (at->kind != TY_ARRAY || (at->flags & (TF_VLA | TF_INCOMPLETE)) || at->n < 2 ||
+	    !cc_eval(c, x->b, &cv) || cv.kind != CV_INT)
+		return;
+	if (N(a)->op == N_VAR)
+		s = N(a)->a;
+	else if (N(a)->op != N_MEMBER)
+		return;
+	i = cv.i;
+	if (i >= 0 && (i < (i128)at->n || (addr && i == (i128)at->n)))
+		return;
+	{
+		pp_span r[2] = { rng(c, a), rng(c, x->b) };
+		bool on;
+
+		if (i < 0)
+			on = warnx(c, "array-bounds", true, NULL, r[0].b, &r[1], 1, NULL, 0,
+				   "array index %lld is before the beginning of the array", (long long)i);
+		else
+			on = warnx(c, "array-bounds", true, NULL, r[0].b, &r[1], 1, NULL, 0,
+				   "array index %lld is past the end of the array (that has type '%s')", (long long)i,
+				   arr_tyname(c, N(a)->ty));
+		if (on && s) {
+			int m;
+			const char *nm = idname(c->syms[s].name, &m);
+
+			note(c, c->syms[s].ple ? c->syms[s].plb : c->syms[s].loc, "array '%.*s' declared here", m, nm);
+		}
+	}
+}
+
 static uint32_t rvalue(cc *c, uint32_t n)
 {
 	n = decay(c, n);
@@ -2980,6 +3045,7 @@ static uint32_t assign(cc *c, int op, uint32_t l, uint32_t r, uint32_t loc)
 	uint32_t n;
 
 	need_lvalue(c, l, loc);
+	bounds_warn(c, l, false);
 	r = decay(c, r);
 	if (op && (is_complex(c, lt) || is_complex(c, N(r)->ty)))	/* l = l op r (l evaluated twice) */
 		return assign(c, 0, l, cplx_binop(c, op, rvalue(c, l), rvalue(c, r), loc), loc);
@@ -4278,6 +4344,7 @@ static uint32_t unary_(cc *c)
 	case T_AMP:
 		next(c);
 		n = cast_expr(c);
+		bounds_warn(c, n, true);
 		return addr_of(c, n, loc);
 	case T_STAR:
 		next(c);
@@ -4520,6 +4587,28 @@ static int binprec(int k)
 	}
 }
 
+/* -Wdivision-by-zero, -Wshift-count-*: l op r with a constant r */
+static void runtime_warn(cc *c, int op, uint32_t l, uint32_t r, uint32_t loc)
+{
+	cval cv;
+	pp_span rr;
+
+	if (c->dead || (op != T_SLASH && op != T_PERCENT && op != T_LESSLESS && op != T_GREATERGREATER) ||
+	    !is_integer(c, N(l)->ty) || !is_integer(c, N(r)->ty) || !cc_eval(c, r, &cv) || cv.kind != CV_INT)
+		return;
+	rr = rng(c, r);
+	if (op == T_SLASH || op == T_PERCENT) {
+		if (!cv.i)
+			warnx(c, "division-by-zero", true, NULL, loc, &rr, 1, NULL, 0, "%s by zero is undefined",
+			      op == T_SLASH ? "division" : "remainder");
+		return;
+	}
+	if (cv.i < 0)
+		warnx(c, "shift-count-negative", true, NULL, loc, &rr, 1, NULL, 0, "shift count is negative");
+	else if (cv.i >= (i128)ty_size(c, promoted(c, l)) * 8)
+		warnx(c, "shift-count-overflow", true, NULL, loc, &rr, 1, NULL, 0, "shift count >= width of type");
+}
+
 static uint32_t binary(cc *c, int minp)
 {
 	uint32_t b = tok(c)->loc, l = cast_expr(c);
@@ -4534,7 +4623,17 @@ static uint32_t binary(cc *c, int minp)
 
 		loc = tok(c)->loc;
 		next(c);
-		r = binary(c, p + 1);
+		{
+			/* 0 && r, 1 || r: r is not evaluated (no runtime-behaviour warnings) */
+			cval cv;
+			bool dead = (op == T_AMPAMP || op == T_PIPEPIPE) && cc_eval(c, l, &cv) && cv.kind == CV_INT &&
+				    (cv.i != 0) == (op == T_PIPEPIPE);
+
+			c->dead += dead;
+			r = binary(c, p + 1);
+			c->dead -= dead;
+		}
+		runtime_warn(c, op, l, r, loc);
 		l = binop(c, op, l, r, loc);
 		if (mac)
 			N(l)->flags |= NF_MACRO;
@@ -4549,12 +4648,20 @@ static uint32_t cond_expr(cc *c)
 	if (is(c, T_QUESTION)) {
 		uint32_t loc = tok(c)->loc, a = 0, b;
 
+		cval cv;
+		int k;
+
 		next(c);
 		cnd = scalar_cond(c, decay(c, cnd), "conditional");
+		k = cc_eval(c, cnd, &cv) && cv.kind == CV_INT ? cv.i != 0 : -1;
+		c->dead += k == 0;
 		if (!is(c, T_COLON))
 			a = expr(c);
+		c->dead -= k == 0;
 		expect(c, T_COLON, "':'");
+		c->dead += k == 1;
 		b = cond_expr(c);
+		c->dead -= k == 1;
 		return conditional(c, cnd, a, b, loc);
 	}
 	return cnd;
@@ -6930,6 +7037,7 @@ static void kr_params(cc *c, const declr *fd)
 static void declaration(cc *c, vec *out, bool file)
 {
 	dspec ds;
+	uint32_t dbeg = tok(c)->loc;
 
 	if (iskw(c, KW__Static_assert)) {
 		static_assert_decl(c);
@@ -7055,7 +7163,7 @@ static void declaration(cc *c, vec *out, bool file)
 			}
 		}
 		if (c->syms[s].kind == S_VAR)	/* the declaration's range, for notes */
-			c->syms[s].plb = ds.loc, c->syms[s].ple = c->prevloc;
+			c->syms[s].plb = dbeg, c->syms[s].ple = c->prevloc;
 		if (accept(c, T_COMMA))
 			continue;
 		expect_semi(c, "at end of declaration");
@@ -7434,10 +7542,20 @@ static uint32_t statement(cc *c)
 		next(c);
 		scope_open(c);	/* C99 6.8.4p3: a selection statement is a block, and so is each substatement */
 		cnd = cond_of(c);
-		th = sub_statement(c);
-		if (iskw(c, KW_else)) {
-			next(c);
-			el = sub_statement(c);
+		{
+			/* clang: runtime-behaviour warnings only in reachable code */
+			cval cv;
+			int k = cc_eval(c, cnd, &cv) && cv.kind == CV_INT ? cv.i != 0 : -1;
+
+			c->dead += k == 0;
+			th = sub_statement(c);
+			c->dead -= k == 0;
+			if (iskw(c, KW_else)) {
+				next(c);
+				c->dead += k == 1;
+				el = sub_statement(c);
+				c->dead -= k == 1;
+			}
 		}
 		scope_close(c);
 		return mkstmt(c, N_IF, loc, cnd, th, el);
