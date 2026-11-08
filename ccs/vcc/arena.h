@@ -98,7 +98,7 @@ __attribute__((noinline, cold)) static void vmreg_dbg_put(vmreg *r, size_t used)
 	char *vec = malloc(np);
 	int i;
 
-	mincore(r->p, lim, vec);
+	mincore(r->p, lim, (void *)vec);	/* char * on Darwin, unsigned char * on Linux */
 	for (size_t k = 0; k < np; k++) {
 		char *pp = r->p + k * pg;
 

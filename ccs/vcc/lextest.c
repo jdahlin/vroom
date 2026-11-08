@@ -13,7 +13,11 @@
  *                                 touched: pure lexing speed of one core
  */
 #include <pthread.h>
+#ifdef __APPLE__
 #include <pthread/qos.h>
+#else
+#define pthread_set_qos_class_self_np(c, p) ((void)0)
+#endif
 #include <stdatomic.h>
 #include <stdio.h>
 #include <stdlib.h>

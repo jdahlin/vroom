@@ -499,6 +499,75 @@ klarar inte runtimen 34, tcc-specifika 32, kompilatorspecifikt 1).
 - **Acceptans** (efter merge av main): ASan+UBSan (`UBSAN_OPTIONS=halt_on_error=1`) och TSan: `vcc-diff.py cmp --kernel` 873/873, `batch --cmp` 873/873, `vcc-sema.py run` 878/879, `vcc-cbatch.py` 840/840, `vccd-cc.py` 174/175 (vDSO-skriptet ska till backend), lextest `bench -p`/`idcheck`, vlink `-r` + slutlänk och vobjcopy/vnm byte-identiska med normalbygget; 0 rapporter, inga suppressions (`ccs/tsan.supp` behövs inte). Normalbygget: `vcc-diff.py cmp` 911/912, `vcc-sema.py run`/`layout` 878/879. TSan-batch ~65–100 s, ASan 12–24 s per svit.
 - **Kvar:** ASan ser inte överläsningar inuti egna mmap-arenor (ogiftade); manuell förgiftning (`ASAN_POISON_MEMORY_REGION` bakom arenornas `used`) under `__has_feature(address_sanitizer)` vore nästa steg. Fuzzmålen kunde också byggas med TSan.
 
+## Linux aarch64 som värd (påbörjat 2026-11-08)
+
+**Mål:** hela verktygskedjan (vcc, vccd, vld, vas) och kärnbygget körs på Linux aarch64
+med samma resultat som på macOS. Testmiljö: Debian 13 arm64 i Docker Desktop
+(`env/linux/`), som på M1 kör en Virtualization.framework-VM med native arm64, alltså
+ingen emulering. Samma image fungerar i en qemu-system-aarch64-gäst med `-accel hvf`.
+
+**Status:**
+- Klart: `make -C ccs vcc` bygger på båda (Linux: `-D_GNU_SOURCE`, `-lm`, `-mcpu=apple-m1`
+  på Apple-kärnor, annars `-mcpu=native`, utdata i `build/linux/ccs`). vccd använder
+  epoll + signalfd i stället för kqueue. QoS, `sysctlbyname` och kperf (pmc.c) ligger
+  bakom `__APPLE__`; pmc är en stubbe på Linux (perf_event_open återstår).
+  `ppdata.inc` hade en icke-numerisk rad (`__has_cpp_attribute(clang::…)`), som
+  gen-ppdata.sh nu filtrerar bort.
+- Harnesses hittar LLVM och byggkatalog via `bench/hostenv.py`.
+  `env/linux/run.sh CMD` kör i containern, och `--seed-work` kopierar kärnträden till
+  volymen `vroom-work` (Docker Desktop kan inte dela work.sparsebundle-monteringen).
+- Verifierat i containern mot Mac-trädet (build-o0): ctests 1706/1706 (2 fler ref-fail
+  än på Mac: clang 23.1.6 mot 23.1.4) och kärnparitet 873/873. Mac-trädets host-TU:er
+  behöver macOS SDK, så de testas i stället i Linux-trädet nedan.
+- Prestanda (kernel/sched/core.o, -fsyntax-only, bästa av 5): macOS 115 ms, container
+  138 ms med `-march=armv8.4-a`, 125–128 ms med `-mcpu=apple-m1`. Resterande ~10 % är
+  troligen 4K-sidor (linuxkit) mot 16K på macOS, plus glibc malloc/memcpy.
+  ctests: container 79 s, macOS 105 s.
+
+- Linux-byggträd (2026-11-08): `work/build-linux` i volymen, byggt med clang 23.1.6 och
+  env/vroom.config (efter `olddefconfig`, som bara lägger till CC_CAN_LINK och RELR).
+  Kommando: `env/linux/run.sh python3 bench/kbuild.py --dotconfig env/vroom.config
+  --out /vroom/work/build-linux -j 8`, som tar 97 s med ren clang. Referenserna ligger i
+  `work/ppref-linux`. Harnesses väljer träd via `bench/hostenv.py` (KTREE/PPREF/ASREF).
+- vcc utan `--target` på Linux betyder hostat aarch64-Linux, alltså glibcs
+  sökvägar och clangs resurskatalog (VCC_RESDIR, satt vid bygget). PIE och CFI är på som
+  standard. NEON-makron definieras utan `-mgeneral-regs-only`, vilket också rättar
+  kärn-TU:er och .S som saknar flaggan. `-fpic`/`-fpie` tar ut varandra som i clang.
+- gen-ppdata.sh tar `EXTRA_INC` (en kopia av glibcs /usr/include i `work/glibc-include`),
+  vilket gav 213 nya nollskilda svar (`__builtin_*f128`, `__builtin_stdc_*`,
+  `__has_extension(__attribute_deprecated_with_message__)`, ...). Numeriska svar med
+  L-suffix behålls.
+- I/O: källor, byggträd och referenser ligger på ext4 (volymen vroom-work), och
+  `build/linux` på volymen vroom-build. `/tmp` är tmpfs. Bara repots källfiler läses över
+  virtiofs. ctests: 79 s över virtiofs, 64 s på ext4.
+- Verifierat på Linux: kärn- och hostparitet 920/920, vcc-sema run och layout 887/887
+  (median 94 ms), ctests 1706/1706, vcc-diag 63/63.
+
+- **vccd-kärnbygge på Linux (2026-11-08):** `env/linux/run.sh sh bench/vccd-kbuild.sh
+  /vroom/work/build-vccd -j 8` (work/linux-pf, även den i volymen). vroomd byggs mot
+  Debians LLVM 23 (libclang-cpp23-dev). Verktygsvägar på Linux kommer från
+  `VROOM_LLVM_BIN` (Makefile: LLVM-katalogen för `clang` på PATH) i vccd, vroomd och
+  vroom-cc. vroom-ld letar på PATH. caps.c svarar `-print-file-name=include` med
+  VCC_RESDIR. Rättat: vroomds barn ärvde `SIGCHLD = SIG_IGN`, så Linux skördade
+  driverns cc1/ld själv och `waitpid` gav ECHILD; barnet återställer nu SIG_DFL.
+  Före merge av main (3ec10bf: ccsnap-återställda TU:er får egna span- och case-tabeller)
+  gav bygget på Linux slumpvisa "duplicate case value" och en glibc-malloc-assert, och på
+  macOS märktes inget. glibcs allokator återanvänder frigjort minne snabbare.
+  - Resultat: **877 kompilerade av vcc, 0 till clang** (två körningar). Kallt bygge
+    **8,2–8,3 s** (user 6 s, sys 2 s). Samma kod och träd på macOS med -j 8: 12,5–13,9 s
+    (user 9–10 s, sys 17–18 s, last ~4 från andra sessioner). Skillnaden är
+    systemtiden: process-spawn och fil-syscalls är billigare i Linux-VM:en. Image från
+    Linux **bootar Debian till `running`, 0 felande enheter** (`results/boot-20261108-184214.log`).
+  - Kärnobjekten är byte-identiska med Mac-bygget, utom versionssträngen (`7.4.0-rc1` mot
+    `-rc1+`: .git saknas i volymen) och vDSO:n (clang 23.1.6 mot 23.1.4 via vroomd).
+
+**Nästa:**
+1. Profilera bygget på Linux (perf finns; pmc.c via perf_event_open), nu när
+   systemtiden inte dominerar.
+2. Mät en 16K-sidkärna (egen VM-kärna) mot linuxkits 4K.
+3. vroom-build.sh (zsh, perl för tid) portabelt, och shimmen statisk utan libc-init på
+   Linux.
+
 ## Risker
 - **GNU C-ytan och inline asm** är det stora jobbet. Uppskattat: lexer + pp ~2 kloc,
   parser + sema ~10–15 kloc, emitter ~5 kloc, assembler ~4 kloc, länkare ~3 kloc.

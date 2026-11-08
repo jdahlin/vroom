@@ -416,8 +416,14 @@ int ppd_run(int argc, char **argv, const ppd_env *env)
 	jmp_buf jb;
 	vmreg *br = bufr = vmpool_take(&bufpool);
 	buf pre = { .r = &br[0] }, cmdl = { .r = &br[1] }, incl = { .r = &br[2] }, o = { 0 };
-	int darwin = 1, nostdinc = 0, asm_mode = 0, undef = 0;
-	int opt = 2, os = 0, pie = 0, pic = 0, freestanding = 0, nobuiltin = 0, instr = 0, cfi = 0, strict_align = 0, tiny = 0, gregs = 0;
+	/* no --target: the host's own userland (Darwin on a Mac, glibc aarch64 on Linux) */
+#ifdef __APPLE__
+	int darwin = 1;
+#else
+	int darwin = 0;
+#endif
+	int hosted = 1, nostdinc = 0, asm_mode = 0, undef = 0;
+	int opt = 2, os = 0, pie = -1, pic = 0, freestanding = 0, nobuiltin = 0, instr = 0, cfi = -1, strict_align = 0, tiny = 0, gregs = 0;
 	pp_opts po = { 0 };
 	char *pmap = NULL;
 	double t0;
@@ -497,17 +503,17 @@ int ppd_run(int argc, char **argv, const ppd_env *env)
 			pmap = pmapbuf;
 			continue;
 		}
-		if (!strncmp(a, "--target=", 9) || !strcmp(a, "-target")) darwin = strstr(a, "darwin") || strstr(a, "apple");
+		if (!strncmp(a, "--target=", 9) || !strcmp(a, "-target")) { darwin = strstr(a, "darwin") || strstr(a, "apple"); hosted = 0; }
 		else if (!strcmp(a, "-nostdinc")) nostdinc = 1;
 		else if (!strcmp(a, "-undef")) undef = 1;
 		else if (!strcmp(a, "-x") && i + 1 < argc) asm_mode = !strcmp(argv[++i], "assembler-with-cpp");
 		else if (!strcmp(a, "-O0")) opt = 0;
 		else if (!strcmp(a, "-Os") || !strcmp(a, "-Oz")) { opt = 2; os = 1; }
 		else if (!strncmp(a, "-O", 2)) opt = 2;
-		else if (!strcmp(a, "-fpie")) pie = 1;
-		else if (!strcmp(a, "-fPIE")) pie = 2;
-		else if (!strcmp(a, "-fpic")) pic = 1;
-		else if (!strcmp(a, "-fPIC")) pic = 2;
+		else if (!strcmp(a, "-fpie")) pie = 1, pic = 0;
+		else if (!strcmp(a, "-fPIE")) pie = 2, pic = 0;
+		else if (!strcmp(a, "-fpic")) pic = 1, pie = 0;
+		else if (!strcmp(a, "-fPIC")) pic = 2, pie = 0;
 		else if (!strcmp(a, "-fno-PIE") || !strcmp(a, "-fno-pie")) pie = 0;
 		else if (!strcmp(a, "-ffreestanding")) freestanding = 1;
 		else if (!strcmp(a, "-fno-builtin")) nobuiltin = 1;
@@ -540,6 +546,15 @@ int ppd_run(int argc, char **argv, const ppd_env *env)
 			emit = 2;
 		}
 	}
+	/* hosted Linux defaults as clang's: PIE, asynchronous unwind tables (CFI) */
+	{
+		int hl = hosted && !darwin;
+
+		if (pie < 0)
+			pie = hl && !pic ? 2 : 0;
+		if (cfi < 0)
+			cfi = hl;
+	}
 	/* search path: -iquote, -I, -isystem, -idirafter; exact duplicates dropped */
 	for (int k = 0; k < nq; k++) all[n++] = dirs_q[k];
 	po.nquote = n;
@@ -559,6 +574,15 @@ int ppd_run(int argc, char **argv, const ppd_env *env)
 	if (darwin && !nostdinc)
 		for (size_t k = 0; k < sizeof(sysdirs_darwin) / sizeof(sysdirs_darwin[0]); k++)
 			ADD(sysdirs_darwin[k]);
+#ifdef VCC_RESDIR
+	/* hosted Linux: clang's resource headers, then glibc's (multiarch first) */
+	if (hosted && !darwin && !nostdinc) {
+		ADD(VCC_RESDIR);
+		ADD("/usr/local/include");
+		ADD("/usr/include/aarch64-linux-gnu");
+		ADD("/usr/include");
+	}
+#endif
 	for (int k = 0; k < na; k++) ADD(dirs_a[k]);
 	if (darwin && !nostdinc) {
 		po.fwdirs = fwdirs_darwin;
@@ -619,6 +643,9 @@ int ppd_run(int argc, char **argv, const ppd_env *env)
 			   "#undef __WCHAR_WIDTH__\n#define __WCHAR_WIDTH__ 32\n"
 			   "#undef __clang_wide_literal_encoding__\n#define __clang_wide_literal_encoding__ \"UTF-32\"\n");
 	if (cfi) bstr(&pre, "#define __GCC_HAVE_DWARF2_CFI_ASM 1\n");
+	/* the Linux table is for the kernel's -mgeneral-regs-only */
+	if (!darwin && !gregs && !undef)
+		bstr(&pre, "#define __ARM_FP 0xE\n#define __ARM_NEON 1\n#define __ARM_NEON_FP 0xE\n");
 	if (strict_align) bstr(&pre, "#undef __ARM_FEATURE_UNALIGNED\n");
 	if (tiny) bstr(&pre, "#undef __AARCH64_CMODEL_SMALL__\n#define __AARCH64_CMODEL_TINY__ 1\n");
 	if (cmdl.n) bput(&pre, cmdl.p, cmdl.n);

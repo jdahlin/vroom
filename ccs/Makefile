@@ -1,15 +1,26 @@
+# LLVM: Homebrew's on macOS; on Linux the one that `clang` on PATH belongs to
+# (the container puts /usr/lib/llvm-NN/bin first).  Its bin/ is where vroomd,
+# vroom-cc and vccd find clang and ld.lld on Linux.
+ifeq ($(shell uname -s),Darwin)
 LLVM ?= /opt/homebrew/opt/llvm
-OUT  ?= ../build/ccs
+SYS_CC = /usr/bin/clang
+else
+LLVM ?= $(patsubst %/bin/,%,$(dir $(realpath $(shell command -v clang))))
+SYS_CC = clang
+TOOL_DEFS = -DVROOM_LLVM_BIN='"$(LLVM)/bin"'
+endif
+# Linux builds go to their own tree: the checkout may be shared with a Mac
+OUT  ?= $(if $(filter Linux,$(shell uname -s)),../build/linux/ccs,../build/ccs)
 
 all: $(OUT)/vroomd $(OUT)/vroom-cc vcc
 
 $(OUT)/vroomd: vroomd.cpp protocol.h | $(OUT)
-	$(LLVM)/bin/clang++ -std=c++17 -O2 -fno-rtti -I$(LLVM)/include \
+	$(LLVM)/bin/clang++ -std=c++17 -O2 -fno-rtti -I$(LLVM)/include $(TOOL_DEFS) \
 		-DVROOM_PREFIX_DEFAULT='"$(abspath pch/vroom-prefix.h)"' $< -o $@ \
 		-L$(LLVM)/lib -lclang-cpp -lLLVM -Wl,-rpath,$(LLVM)/lib
 
 $(OUT)/vroom-cc: vroom-cc.c protocol.h | $(OUT)
-	/usr/bin/clang -O2 -Wall $< -o $@
+	$(SYS_CC) -O2 -Wall $(TOOL_DEFS) $< -o $@
 
 $(OUT):
 	mkdir -p $@
@@ -21,12 +32,27 @@ clean:
 # One object per source file, shared between the tools, so `make -j` builds
 # them in parallel and an edit recompiles one file.  Header dependencies come
 # from -MMD.  ccache is used when installed; disable with `make CCACHE=`.
+# Host: macOS (Apple clang, M1) or Linux aarch64 (clang from the distro).
 CCACHE    ?= $(shell command -v ccache 2>/dev/null)
-VCC_CC     = $(CCACHE) /usr/bin/clang
+HOST_OS   := $(shell uname -s)
+ifeq ($(HOST_OS),Darwin)
+HOST_CC    = /usr/bin/clang
+HOST_DEFS  = -D_DARWIN_C_SOURCE
+HOST_LIBS  =
+HOST_CPU   = -mcpu=apple-m1
+else
+HOST_CC    = clang
+HOST_DEFS  = -D_GNU_SOURCE -DVCC_RESDIR='"$(shell $(HOST_CC) -print-resource-dir)/include"' $(TOOL_DEFS)
+HOST_LIBS  = -lm
+# Apple cores (implementer 0x61: Docker Desktop, Asahi, a VM on a Mac) report no
+# CPU part, so -mcpu=native falls back to generic; name the core instead.
+HOST_CPU  ?= $(if $(shell grep -qm1 'implementer.*0x61' /proc/cpuinfo && echo y),-mcpu=apple-m1,-mcpu=native)
+endif
+VCC_CC     = $(CCACHE) $(HOST_CC)
 # VCC_SAN/VCC_OPT: set by the sanitizer variants (vcc-asan, vcc-tsan below)
 VCC_SAN   ?=
-VCC_OPT   ?= -O3 -mcpu=apple-m1
-VCC_CFLAGS = -std=c11 -O2 -Wall -Wextra -Wno-unused-parameter -D_DARWIN_C_SOURCE -DVCC_INCDIR='"$(abspath vcc/include)"' $(VCC_SAN)
+VCC_OPT   ?= -O3 $(HOST_CPU)
+VCC_CFLAGS = -std=c11 -O2 -Wall -Wextra -Wno-unused-parameter $(HOST_DEFS) -DVCC_INCDIR='"$(abspath vcc/include)"' $(VCC_SAN)
 VCC_FAST   = $(VCC_CFLAGS) $(VCC_OPT) -pthread
 # -O3 also at link time: the driver passes it to ld, which then folds code
 VCC_LDFLAGS = -O3 $(VCC_SAN)
@@ -50,10 +76,10 @@ $(OBJ)/no/%.o: vcc/%.c | $(OBJ)
 $(OBJ)/ld.o: XFLAGS = -DVLD_MAIN
 
 $(OUT)/vpp: $(call o,vcc/vpp.c $(PP_SRC) $(LEX_SRC) $(AS_SRC))
-	$(VCC_CC) $(VCC_LDFLAGS) -pthread $^ -o $@
+	$(VCC_CC) $(VCC_LDFLAGS) -pthread $^ -o $@ $(HOST_LIBS)
 
 $(OUT)/vccd: $(call o,vcc/vccd.c vcc/caps.c vcc/fixdep.c vcc/ar.c $(PP_SRC) $(LEX_SRC) $(AS_SRC))
-	$(VCC_CC) $(VCC_LDFLAGS) -pthread $^ -o $@
+	$(VCC_CC) $(VCC_LDFLAGS) -pthread $^ -o $@ $(HOST_LIBS)
 
 $(OUT)/lextest: $(patsubst vcc/%.c,$(OBJ)/no/%.o,vcc/lextest.c vcc/pmc.c $(LEX_SRC))
 	$(VCC_CC) $(VCC_LDFLAGS) -pthread $^ -o $@
@@ -82,10 +108,10 @@ $(OBJ):
 # Own OUT (and so own obj/), -O1 -g; the normal build is unchanged.
 SAN_COMMON = -O1 -g -fno-omit-frame-pointer -Wno-deprecated-declarations
 vcc-asan:
-	$(MAKE) vcc OUT=../build/ccs-asan VCC_OPT="-O1 -mcpu=apple-m1" \
+	$(MAKE) vcc OUT=$(OUT)-asan VCC_OPT="-O1 $(HOST_CPU)" \
 		VCC_SAN="$(SAN_COMMON) -fsanitize=address,undefined"
 vcc-tsan:
-	$(MAKE) vcc OUT=../build/ccs-tsan VCC_OPT="-O1 -mcpu=apple-m1" \
+	$(MAKE) vcc OUT=$(OUT)-tsan VCC_OPT="-O1 $(HOST_CPU)" \
 		VCC_SAN="$(SAN_COMMON) -fsanitize=thread"
 
 .PHONY: vcc-asan vcc-tsan

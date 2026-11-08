@@ -19,7 +19,11 @@ static void fallback(char **argv)
 {
 	const char *real = getenv("VROOM_REAL_CC");
 	if (!real)
+#ifdef VROOM_LLVM_BIN
+		real = VROOM_LLVM_BIN "/clang";
+#else
 		real = "/opt/homebrew/opt/llvm/bin/clang";
+#endif
 	argv[0] = (char *)real;
 	execv(real, argv);
 	perror("vroom-cc: execv");

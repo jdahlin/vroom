@@ -16,23 +16,15 @@ e.g. build/ccs-asan or build/ccs-tsan (AGENTS.md, "Sanitizers").
 """
 import glob, hashlib, os, re, shlex, subprocess, sys
 from multiprocessing import Pool
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from hostenv import llvm, BUILD, KTREE, PPREF
 R = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-def work_dir():
-    """work/ of this checkout, else of the main checkout (git worktrees share it)"""
-    if os.path.isdir(f'{R}/work'): return f'{R}/work'
-    try:
-        c = subprocess.run(['git', '-C', R, 'rev-parse', '--git-common-dir'], capture_output=True, text=True).stdout.strip()
-        w = os.path.join(os.path.dirname(os.path.abspath(os.path.join(R, c))), 'work')
-        if os.path.isdir(w): return w
-    except OSError: pass
-    return f'{R}/work'
-W = os.environ.get('VROOM_WORK') or work_dir()
-B = f'{W}/build-o0'; REF = f'{W}/ppref'
-CL = '/opt/homebrew/opt/llvm/bin/clang'
+B = KTREE; REF = PPREF
+CL = llvm('clang')
 
 def bin_dir():
-    """build/ccs, or --bin-dir DIR / VCC_BIN=DIR (removed from sys.argv)"""
-    d = os.environ.get('VCC_BIN', f'{R}/build/ccs')
+    """build/ccs (build/linux/ccs on Linux), or --bin-dir DIR / VCC_BIN=DIR (removed from sys.argv)"""
+    d = os.environ.get('VCC_BIN', BUILD)
     if '--bin-dir' in sys.argv:
         k = sys.argv.index('--bin-dir'); d = sys.argv[k+1]; del sys.argv[k:k+2]
     return os.path.abspath(d)
@@ -88,6 +80,7 @@ if __name__ == '__main__':
             for obj, a in ts: f.write('\x1f'.join([refname(obj)] + a) + '\n')
         r = subprocess.run([VPP, '--batch', jf, '-j', str(j), '-C', B] + (['--cmp'] if '--cmp' in sys.argv else []))
         os.unlink(jf); sys.exit(r.returncode)
+    if mode == 'ref': os.makedirs(REF, exist_ok=True)
     with Pool(j) as pool:
         res = pool.map(mkref if mode == 'ref' else cmp, ts, chunksize=4)
     bad = [r for r in res if r[1]]

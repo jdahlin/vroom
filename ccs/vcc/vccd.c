@@ -1,7 +1,7 @@
 /*
  * vccd: the vcc server.
  *
- * One process.  The main thread waits in kqueue for connections from the
+ * One process.  The main thread waits in kqueue (epoll on Linux) for connections from the
  * shims (vcc, vld) and hands each accepted socket to a pool of I/O worker
  * threads.  A worker receives the request (argv, env, cwd, fds 0-2) into a
  * per-thread buffer, then
@@ -33,13 +33,21 @@
 #include <pthread.h>
 #include <signal.h>
 #include <spawn.h>
+#if defined(__GLIBC__) && !defined(__APPLE__)
+#define posix_spawn_file_actions_addchdir posix_spawn_file_actions_addchdir_np
+#endif
 #include <stdatomic.h>
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#ifdef __APPLE__
 #include <sys/event.h>
+#else
+#include <sys/epoll.h>
+#include <sys/signalfd.h>
+#endif
 #include <sys/mman.h>
 #include <sys/socket.h>
 #include <sys/stat.h>
@@ -58,7 +66,11 @@
 
 static const char *backend_sock = "/tmp/vroomd.sock";
 static const char *ld_backend;		/* full links (vroom-ld) */
+#ifdef VROOM_LLVM_BIN
+static const char *lld = VROOM_LLVM_BIN "/ld.lld";
+#else
 static const char *lld = "/opt/homebrew/bin/ld.lld";
+#endif
 static bool log_requests, own_pp = true, own_cc = true;
 
 static atomic_ulong n_probe, n_fwd, n_spawn, n_pp, n_cc, n_fallback, n_ar;
@@ -711,7 +723,9 @@ int main(int argc, char **argv)
 {
 	const char *sock = "/tmp/vccd.sock";
 	struct sockaddr_un sa = { .sun_family = AF_UNIX };
+#ifdef __APPLE__
 	struct kevent ev;
+#endif
 	/* make never has more than -j requests in flight, and compiles are CPU bound:
 	 * two per core leaves room for the ones that block (forwarded to vroomd,
 	 * spawned tools) without a thread per possible connection */
@@ -746,6 +760,16 @@ int main(int argc, char **argv)
 		return 1;
 	}
 	fcntl(ls, F_SETFL, O_NONBLOCK);
+#ifndef __APPLE__
+	{	/* USR1/TERM go to the signalfd below: block them before the workers inherit the mask */
+		sigset_t ss;
+
+		sigemptyset(&ss);
+		sigaddset(&ss, SIGUSR1);
+		sigaddset(&ss, SIGTERM);
+		pthread_sigmask(SIG_BLOCK, &ss, NULL);
+	}
+#endif
 
 	for (i = 0; i < nworkers; i++) {
 		pthread_t t;
@@ -757,7 +781,8 @@ int main(int argc, char **argv)
 		pthread_attr_destroy(&at);
 	}
 
-	/* accept thread: kqueue, drain the backlog on every wakeup */
+	/* accept thread: kqueue (epoll on Linux), drain the backlog on every wakeup */
+#ifdef __APPLE__
 	kq = kqueue();
 	EV_SET(&ev, ls, EVFILT_READ, EV_ADD, 0, 0, NULL);
 	if (kq < 0 || kevent(kq, &ev, 1, NULL, 0, NULL) < 0) {
@@ -785,6 +810,45 @@ int main(int argc, char **argv)
 				exit(0);
 			continue;
 		}
+#else
+	/* Linux: epoll on the listening socket and a signalfd for USR1/TERM */
+	{
+		sigset_t ss;
+		struct epoll_event e = { .events = EPOLLIN };
+		int sfd;
+
+		sigemptyset(&ss);
+		sigaddset(&ss, SIGUSR1);
+		sigaddset(&ss, SIGTERM);
+		sfd = signalfd(-1, &ss, SFD_CLOEXEC);
+		kq = epoll_create1(EPOLL_CLOEXEC);
+		e.data.fd = ls;
+		if (kq < 0 || sfd < 0 || epoll_ctl(kq, EPOLL_CTL_ADD, ls, &e) < 0) {
+			perror("vccd: epoll");
+			return 1;
+		}
+		e.data.fd = sfd;
+		epoll_ctl(kq, EPOLL_CTL_ADD, sfd, &e);
+		for (;;) {
+			struct epoll_event out;
+
+			if (epoll_wait(kq, &out, 1, -1) < 0) {
+				if (errno == EINTR)
+					continue;
+				perror("vccd: epoll_wait");
+				return 1;
+			}
+			if (out.data.fd == sfd) {
+				struct signalfd_siginfo si;
+
+				if (read(sfd, &si, sizeof si) != sizeof si)
+					continue;
+				print_counts();
+				if (si.ssi_signo == SIGTERM)
+					exit(0);
+				continue;
+			}
+#endif
 		for (;;) {
 			int c = accept(ls, NULL, NULL);
 
@@ -795,4 +859,7 @@ int main(int argc, char **argv)
 			queue_push(c);
 		}
 	}
+#ifndef __APPLE__
+	}
+#endif
 }

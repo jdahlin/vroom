@@ -164,7 +164,11 @@ const char cc_version_text[] = "Homebrew clang version 23.1.4\n";
 const char ld_version_text[] = "Homebrew LLD 23.1.4 (compatible with GNU linkers)\n";
 
 /* `-print-file-name=include`: the compiler's own headers (stddef.h, ...) */
+#ifdef VCC_RESDIR
+const char cc_resource_include[] = VCC_RESDIR;
+#else
 const char cc_resource_include[] = "/opt/homebrew/opt/llvm/lib/clang/23/include";
+#endif
 
 /* vcc builds the kernel only: no target libc, so no user-space links */
 const bool cc_can_link = false;

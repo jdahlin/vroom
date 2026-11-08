@@ -47,7 +47,9 @@
 #include <sys/mman.h>
 #include <sys/resource.h>
 #include <sys/stat.h>
+#ifdef __APPLE__
 #include <sys/sysctl.h>
+#endif
 #include <time.h>
 #include <unistd.h>
 
@@ -4260,8 +4262,14 @@ static int run(int argc, char **argv)
 	{
 		int n = 0;
 		size_t len = sizeof n;
+#ifdef __APPLE__
 		if (!sysctlbyname("hw.perflevel0.physicalcpu", &n, &len, NULL, 0) && n > 0)
 			nthreads = n;
+#else
+		(void)len;
+		if ((n = (int)sysconf(_SC_NPROCESSORS_ONLN)) > 0)
+			nthreads = n;
+#endif
 		else
 			nthreads = 4;
 		if (nthreads > 64)
