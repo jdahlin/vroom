@@ -26,12 +26,6 @@ VPRIV int treg(ecx *e)
 	}
 }
 
-static const int8_t tidx_of[34] = {
-	-1, -1, -1, -1, -1, -1, -1, -1, -1, 0, 1, 2, 3, 4, 5, 6, -1, -1, -1,
-	7, 8, 9, 10, 11, 12, 13, 14, 15, 16, -1, -1, -1, -1, -1,
-};
-
-static inline int tidx(int r) { return (unsigned)r < 34 ? tidx_of[r] : -1; }
 
 VPRIV void tfree(ecx *e, int r)
 {

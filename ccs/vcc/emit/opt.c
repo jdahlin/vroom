@@ -9,7 +9,9 @@
  *     dies, becomes those reads of v (t a temporary, v not written meanwhile);
  *   - backward: `op t, ...; ...; mov v, t` with t dead after becomes
  *     `op v, ...` (nothing between reads or writes v, or reads t);
- *   - a mov to a dead register goes.
+ *   - a mov to a dead register goes;
+ *   - a temporary spilled around a call (SPILL_REC) and dead after the
+ *     restore is neither stored nor restored.
  *
  * The emitter reads a register variable (B_LREG) into a fresh temporary and
  * stores one through a mov; these undo most of that.  Records the pass
@@ -343,6 +345,16 @@ VPRIV void opt_function(ecx *e)
 
 	if (!liveness(e))
 		return;
+	/* a temporary saved around a call and dead after its restore: neither */
+	for (uint32_t k = 0; k < e->nin; k++)
+		if (in[k].op == I_LD && in[k].sh == SPILL_REC && !(W.la[k] & RB(in[k].rd))) {
+			for (uint32_t j = k; j-- > W.bs[W.blk[k]];)
+				if (in[j].op == I_ST && in[j].sh == SPILL_REC && in[j].rd == in[k].rd && in[j].imm == in[k].imm) {
+					in[j].op = DELETED;
+					break;
+				}
+			in[k].op = DELETED;
+		}
 	for (uint32_t k = 0; k < e->nin; k++)
 		if (is_copy(&in[k])) {
 			if (!(W.la[k] & RB(in[k].rd)) && in[k].rd != 29 && in[k].rd != 30)

@@ -464,6 +464,9 @@ typedef struct abiarg {
 
 /* ---------------- spilling caller-saved temporaries around calls ---------------- */
 
+/* ins.sh of the I_ST/I_LD pair spill_live/unspill put around a call (opt.c drops dead ones) */
+#define SPILL_REC 1
+
 typedef struct spill {
 	uint32_t mask;
 	int32_t slot[NTEMP];
@@ -523,6 +526,17 @@ VPRIV bool logimm_ok(uint64_t v, int x);
 static inline void reg(tbuf *b, int r, int x);
 /* tu.c */
 extern const uint8_t tempregs[NTEMP];
+
+/* the tempregs index of x<r>, or -1 */
+static inline int tidx(int r)
+{
+	static const int8_t tidx_of[34] = {
+		-1, -1, -1, -1, -1, -1, -1, -1, -1, 0, 1, 2, 3, 4, 5, 6, -1, -1, -1,
+		7, 8, 9, 10, 11, 12, 13, 14, 15, 16, -1, -1, -1, -1, -1,
+	};
+
+	return (unsigned)r < 34 ? tidx_of[r] : -1;
+}
 VPRIV __attribute__((format(printf, 3, 4))) void ediag(ecx *e, uint32_t loc, const char *fmt, ...);
 VPRIV __attribute__((format(printf, 3, 4), noreturn)) void efatal(ecx *e, uint32_t loc, const char *fmt, ...);
 /* type.c */

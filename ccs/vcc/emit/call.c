@@ -41,7 +41,9 @@ static void arg_word(ecx *e, const carg *a, int k, int rd)
 		mem(e, I_LD, 3, 0, rd, FRAME, a->slot + 8 * k);
 		return;
 	}
-	if (a->v.k == V_CONST) {
+	if (a->v.k == V_REG || a->v.k == V_REG2) {	/* kept in its temporary (do_call) */
+		mov(e, 1, rd, k ? a->v.r2 : a->v.r);
+	} else if (a->v.k == V_CONST) {
 		movi(e, 1, rd, (int64_t)(uint64_t)((u128)a->v.i >> (64 * k)));
 	} else if (a->v.k == V_ADDR) {
 		addr_of_ref(e, rd, a->v.ref, (int64_t)a->v.i);
@@ -81,6 +83,7 @@ VPRIV val do_call(ecx *e, uint32_t ref, val *fnv, carg *args, int n, qty rty, bo
 	int ngrn = 0, nsaa = 0;
 	int32_t fslot = 1, rslot = 1;
 	bool sret = is_sret(c, rty);
+	uint32_t keep = 0;	/* temporaries holding register arguments: moved, not parked or spilled */
 	spill sp;
 	val res = vnone();
 	int hn;
@@ -102,11 +105,24 @@ VPRIV val do_call(ecx *e, uint32_t ref, val *fnv, carg *args, int n, qty rty, bo
 	}
 	e->nsrn = 0;
 	for (int i = 0; i < n; i++) {
-		park(e, &args[i]);
+		carg *a = &args[i];
+
 		if (nfix >= 0 && i >= nfix && DARWIN(c))
-			classify_va(e, args[i].t, &nsaa, &args[i].a);
+			classify_va(e, a->t, &nsaa, &a->a);
 		else
-			classify(e, args[i].t, &ngrn, &nsaa, &args[i].a);
+			classify(e, a->t, &ngrn, &nsaa, &a->a);
+		/* a scalar for x0-x7 in a temporary stays there until its mov (the moves
+		 * write only x0-x7, never a temporary, so their order does not matter) */
+		if (e->E->o->opt >= 1 && a->slot == 1 && a->a.kind == A_REG && !is_agg(c, a->t) &&
+		    ((a->v.k == V_REG && a->a.nreg == 1) || (a->v.k == V_REG2 && a->a.nreg == 2)) &&
+		    tidx(a->v.r) >= 0 && !(e->resv & (1u << tidx(a->v.r))) &&
+		    (a->v.k == V_REG || (tidx(a->v.r2) >= 0 && !(e->resv & (1u << tidx(a->v.r2)))))) {
+			keep |= 1u << tidx(a->v.r);
+			if (a->v.k == V_REG2)
+				keep |= 1u << tidx(a->v.r2);
+			continue;
+		}
+		park(e, a);
 	}
 	if (DARWIN(c))
 		nsaa = (nsaa + 7) & ~7;
@@ -134,7 +150,9 @@ VPRIV val do_call(ecx *e, uint32_t ref, val *fnv, carg *args, int n, qty rty, bo
 		}
 		return is_void(c, rty) ? vnone() : vconst(0);
 	}
+	e->live &= ~keep;	/* dead after their moves: not spilled */
 	spill_live(e, &sp);
+	e->live |= keep;
 	for (int i = 0; i < n; i++) {
 		carg *a = &args[i];
 
@@ -175,6 +193,9 @@ VPRIV val do_call(ecx *e, uint32_t ref, val *fnv, carg *args, int n, qty rty, bo
 			break;
 		}
 	}
+	for (int i = 0; i < n && keep; i++)
+		if (args[i].slot == 1 && (args[i].v.k == V_REG || args[i].v.k == V_REG2) && args[i].a.kind == A_REG)
+			val_free(e, &args[i].v);
 	if (sret)
 		opi(e, I_ADDI, 1, 8, FRAME, rslot);
 	if (fslot != 1) {
