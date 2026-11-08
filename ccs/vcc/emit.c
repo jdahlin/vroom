@@ -373,7 +373,34 @@ typedef struct chunk {
 	uint64_t key;		/* output order */
 	const char *p;
 	size_t n;
+	const uint32_t *log;	/* the item's log (ecx.rlog): what a later round needs to reuse it */
+	uint32_t nlog;
 } chunk;
+
+/*
+ * A round that marks functions for inlining (need_fold) is followed by
+ * another; a function whose generation never asked about a function marked
+ * since then comes out the same, so the next round reuses its chunk.  The
+ * log says what its generation did outside the chunk: references (claims of
+ * statics and strings, weak undefined syms), prepass walks (which queue
+ * __used static locals), and the static functions whose mark it read.
+ */
+enum { RL_REF, RL_DEP, RL_WALK };
+typedef struct kent {
+	uint64_t key;
+	const char *p;
+	size_t n;
+	const uint32_t *log;
+	uint32_t nlog;
+} kent;
+typedef struct keep {
+	uint32_t *idx;		/* per sym: kent index + 1 */
+	kent *ent;
+	char *bytes;
+	uint32_t *logs;
+	size_t nidx, nent, nbytes, nlogs;
+	uint32_t asmno;		/* inline asm %= numbers go on from here */
+} keep;
 
 /* analysis bits (prepass, read-only while emitting) */
 enum { SA_WRITTEN = 1, SA_CLEANUP_FN = 2, SA_MUSTFOLD = 4, SA_CWRITE = 8, SA_CMULTI = 16, SA_USED = 32 };	/* USED: a local or param read */
@@ -410,6 +437,7 @@ typedef struct emitter {
 	uint8_t *mf;			/* per sym: static function to inline everywhere (kept across rounds) */
 	_Atomic uint32_t newmf;		/* marked this round */
 	_Atomic uint32_t nerrcall;	/* error() calls dropped (not folded) */	/* VCC_EMIT_STATS: time in finish_function */
+	const keep *K;			/* the previous round's functions, or NULL */
 	bool stats;
 	bool objtext;			/* VCC_OBJ_TEXT: objects through the printer and as_run (checks the object backend) */
 	pthread_mutex_t emu;		/* diagnostics */
@@ -528,6 +556,8 @@ typedef struct ecx {
 	uint32_t *weakref;	/* weak undefined syms this thread referenced first */
 	uint32_t nweakref;
 	uint32_t ncases;
+	uint32_t *rlog;		/* this round's item logs: (RL_*, value) pairs */
+	size_t nrlog, rlog0;	/* ... and where the current item's starts */
 	jmp_buf bail;
 } ecx;
 
@@ -2317,13 +2347,32 @@ static void enqueue(emitter *E, uint32_t item);
 
 static inline int X(cc *c, qty t) { return tsize(c, t) == 8 || is_ptr(c, t) || is_func(c, t) ? 1 : 0; }
 
+#define RLOG_CAP ((size_t)1 << 28)
+static inline void rlog(ecx *e, uint32_t tag, uint32_t v)
+{
+	if (unlikely(e->nrlog + 2 > RLOG_CAP)) {
+		fputs("vcc: emit log full\n", stderr);
+		abort();
+	}
+	e->rlog[e->nrlog++] = tag;
+	e->rlog[e->nrlog++] = v;
+}
+
+static void claim_ref(ecx *e, uint32_t ref);
+
 static void note_ref(ecx *e, uint32_t ref)
+{
+	if (!e->reach || e->dry)
+		return;
+	claim_ref(e, ref);
+}
+
+static void claim_ref(ecx *e, uint32_t ref)
 {
 	emitter *E = e->E;
 	cc *c = e->c;
 
-	if (!e->reach || e->dry)
-		return;
+	rlog(e, RL_REF, ref);
 	if (RKIND(ref) == RK_STR) {
 		uint32_t i = RIDX(ref);
 
@@ -3421,6 +3470,12 @@ static bool on_inline_stack(ecx *e, uint32_t fn)
 
 static void ensure_walked(emitter *E, cc *c, uint32_t s);
 
+static void walk_fn(ecx *e, uint32_t s)
+{
+	rlog(e, RL_WALK, s);
+	ensure_walked(e->E, e->c, s);
+}
+
 /* a local only ever assigned constants: follow its value (v: the initializer, or none) */
 static void kv_track(ecx *e, uint32_t s, const val *v)
 {
@@ -3471,9 +3526,11 @@ static bool can_inline(ecx *e, uint32_t s)
 		if (y->flags & SF_NOINLINE)
 			return false;
 		if (!e->E->mf[s]) {
+			if (y->sc == SC_STATIC)
+				rlog(e, RL_DEP, s);
 			if (!(y->flags & SF_INLINE))
 				return false;
-			ensure_walked(e->E, c, s);
+			walk_fn(e, s);
 			/*
 			 * clang -O2 inlines small inline functions, and the kernel
 			 * leans on it: scs_is_enabled() { return false; } guards
@@ -3502,7 +3559,7 @@ static val inline_call(ecx *e, uint32_t s, carg *args, int n)
 	qty rty = T(c, y->ty)->base;
 	val res;
 
-	ensure_walked(e->E, c, s);
+	walk_fn(e, s);
 	memset(&F, 0, sizeof(F));
 	F.fn = s;
 	F.inst = ++e->inst_next;
@@ -3643,7 +3700,7 @@ static val gen_call(ecx *e, uint32_t n)
 		fnv = gen(e, x->a);
 	inl = s && can_inline(e, s);
 	if (inl)
-		ensure_walked(e->E, c, s);
+		walk_fn(e, s);
 	for (int i = 0; i < na; i++) {
 		uint32_t an = c->lists[x->b + i];
 
@@ -6153,7 +6210,8 @@ static void out_chunk(ecx *e, uint64_t key, size_t start)
 	emitter *E = e->E;
 
 	pthread_mutex_lock(&E->cmu);
-	E->chunks[E->nchunk++] = (chunk){ key, e->out.p + start, e->out.n - start };
+	E->chunks[E->nchunk++] = (chunk){ key, e->out.p + start, e->out.n - start, e->rlog + e->rlog0,
+					  (uint32_t)((e->nrlog - e->rlog0) / 2) };
 	pthread_mutex_unlock(&E->cmu);
 }
 
@@ -6356,7 +6414,7 @@ static void emit_function(ecx *e, uint32_t s)
 	fnctx F;
 	int ngrn = 0, nsaa = 0;
 
-	ensure_walked(e->E, c, s);
+	walk_fn(e, s);
 	e->nin = 0;
 	e->raw.n = 0;
 	e->nlabel = 0;
@@ -7185,6 +7243,7 @@ static void ecx_init(ecx *e, emitter *E)
 	e->kvs = reserve((size_t)CAPKVS * sizeof(kvst));
 	e->cases = reserve((size_t)1 << 24);
 	e->weakref = reserve((size_t)c->nsym * sizeof(uint32_t) + 4096);
+	e->rlog = reserve(RLOG_CAP * sizeof(uint32_t));
 }
 
 static void ecx_free(ecx *e)
@@ -7203,21 +7262,55 @@ static void ecx_free(ecx *e)
 	munmap(e->lkvi, (size_t)e->caplabel * sizeof(uint32_t));
 	munmap(e->kvs, (size_t)CAPKVS * sizeof(kvst));
 	munmap(e->cases, (size_t)1 << 24);
+	munmap(e->rlog, RLOG_CAP * sizeof(uint32_t));
 	/* e->out stays: the chunks point into it (unmapped by emit_tu) */
+}
+
+/* a function the previous round generated, if nothing it asked about has been marked since */
+static bool reuse(ecx *e, uint32_t s)
+{
+	const keep *K = e->E->K;
+	const kent *k;
+	tbuf *b = &e->out;
+	size_t start;
+
+	if (!K || s >= K->nidx || !K->idx[s])
+		return false;
+	k = &K->ent[K->idx[s] - 1];
+	for (uint32_t j = 0; j < k->nlog; j++)
+		if (k->log[2 * j] == RL_DEP && e->E->mf[k->log[2 * j + 1]])
+			return false;
+	for (uint32_t j = 0; j < k->nlog; j++) {
+		uint32_t v = k->log[2 * j + 1];
+
+		switch (k->log[2 * j]) {
+		case RL_REF: claim_ref(e, v); break;
+		case RL_DEP: rlog(e, RL_DEP, v); break;
+		case RL_WALK: walk_fn(e, v); break;
+		}
+	}
+	b->n = (b->n + 7) & ~(size_t)7;
+	start = b->n;
+	memcpy(it_room(e, k->n), k->p, k->n);
+	out_chunk(e, k->key, start);
+	return true;
 }
 
 static void do_item(ecx *e, uint32_t it)
 {
 	cc *c = e->c;
 
+	e->rlog0 = e->nrlog;
 	if (it & 0x80000000u) {
 		emit_string(e, it & 0x7fffffffu);
 		return;
 	}
-	if (c->syms[it].kind == S_FUNC)
-		emit_function(e, it);
-	else
+	if (c->syms[it].kind == S_FUNC) {
+		if (!reuse(e, it))
+			emit_function(e, it);
+	} else {
 		emit_object(e, it);
+	}
 }
 
 static void *worker(void *arg)
@@ -7343,7 +7436,65 @@ static int replay(cc *c, const cc_opts *o, const char *hp, size_t hn, const char
 	return 0;
 }
 
-static int emit_tu1(cc *c, const cc_opts *o, bool write_out, uint8_t *mf, bool *again, bool last)
+/* what the next round may reuse: this round's functions (their chunks and logs, copied) */
+static void keep_free(keep *K)
+{
+	if (K->idx) {
+		munmap(K->idx, K->nidx * sizeof(uint32_t));
+		munmap(K->ent, K->nent * sizeof(kent) + 64);
+		munmap(K->bytes, K->nbytes + 64);
+		munmap(K->logs, K->nlogs * sizeof(uint32_t) + 64);
+	}
+	memset(K, 0, sizeof(*K));
+}
+
+static void keep_make(keep *K, cc *c, const emitter *E)
+{
+	size_t nb = 0, nl = 0, ob = 0, ol = 0;
+	uint32_t ne = 0;
+
+	memset(K, 0, sizeof(*K));
+	for (uint32_t i = 0; i < E->nchunk; i++) {
+		const chunk *ch = &E->chunks[i];
+
+		if (ch->key >> 62 || (ch->key & 1))
+			continue;	/* strings, objects: generated again */
+		nb += (ch->n + 7) & ~(size_t)7;
+		nl += 2 * (size_t)ch->nlog;
+		ne++;
+	}
+	K->nidx = c->nsym;
+	K->idx = reserve(K->nidx * sizeof(uint32_t));
+	K->nent = ne;
+	K->ent = reserve(ne * sizeof(kent) + 64);
+	K->nbytes = nb;
+	K->bytes = reserve(nb + 64);
+	K->nlogs = nl;
+	K->logs = reserve(nl * sizeof(uint32_t) + 64);
+	K->asmno = E->asmno;
+	ne = 0;
+	for (uint32_t i = 0; i < E->nchunk; i++) {
+		const chunk *ch = &E->chunks[i];
+		kent *k;
+
+		if (ch->key >> 62 || (ch->key & 1))
+			continue;
+		k = &K->ent[ne++];
+		k->key = ch->key;
+		k->p = K->bytes + ob;
+		k->n = ch->n;
+		memcpy(K->bytes + ob, ch->p, ch->n);
+		ob += (ch->n + 7) & ~(size_t)7;
+		k->log = K->logs + ol;
+		k->nlog = ch->nlog;
+		memcpy(K->logs + ol, ch->log, 2 * (size_t)ch->nlog * sizeof(uint32_t));
+		ol += 2 * (size_t)ch->nlog;
+		K->idx[ch->key >> 1] = ne;
+	}
+}
+
+static int emit_tu1(cc *c, const cc_opts *o, bool write_out, uint8_t *mf, bool *again, bool last,
+		    const keep *K, keep *next)
 {
 	emitter E;
 	int nthr = o->nthreads > 0 ? o->nthreads : 1;
@@ -7357,6 +7508,8 @@ static int emit_tu1(cc *c, const cc_opts *o, bool write_out, uint8_t *mf, bool *
 	E.c = c;
 	E.o = o;
 	E.mf = mf;
+	E.K = K;
+	E.asmno = K ? K->asmno : 0;
 	E.claimed = reserve(c->nsym + 64);
 	E.extref = reserve(c->nsym + 64);
 	E.sflags = reserve(c->nsym + 64);
@@ -7471,6 +7624,8 @@ static int emit_tu1(cc *c, const cc_opts *o, bool write_out, uint8_t *mf, bool *
 			iov[k++] = (struct iovec){ (void *)E.chunks[i].p, E.chunks[i].n };
 		iov[k++] = (struct iovec){ tail.p, tail.n };
 		*again = E.newmf != 0 && !last;
+		if (*again && next && !E.errors)
+			keep_make(next, c, &E);
 		if (!E.errors && write_out && !*again && o->emit == 2) {
 			if (E.objtext) {
 				/* the text, gathered once, through the assembler */
@@ -7575,15 +7730,22 @@ int emit_tu(cc *c, const cc_opts *o)
 	int n = r ? atoi(r) : 1, err = 0;
 	uint8_t *mf = reserve(c->nsym + 64);
 	bool again = false;
+	keep K[2];
 
+	memset(K, 0, sizeof(K));
 	for (int i = 1; i < n; i++)
-		if (emit_tu1(c, o, false, mf, &again, false))
+		if (emit_tu1(c, o, false, mf, &again, false, NULL, NULL))
 			break;
 	for (int round = 0; round < 8; round++) {
-		err = emit_tu1(c, o, true, mf, &again, round == 7);
+		keep *prev = &K[round & 1], *next = &K[(round + 1) & 1];
+
+		keep_free(next);
+		err = emit_tu1(c, o, true, mf, &again, round == 7, round ? prev : NULL, next);
 		if (err || !again)
 			break;
 	}
+	keep_free(&K[0]);
+	keep_free(&K[1]);
 	munmap(mf, c->nsym + 64);
 	ppd_ns_emit += (unsigned long long)((now() - t0) * 1e9);
 	ppd_ph_add(PPD_PH_EMIT, v0);
