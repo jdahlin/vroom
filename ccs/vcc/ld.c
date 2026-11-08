@@ -36,6 +36,7 @@
 #include <errno.h>
 #include <fcntl.h>
 #include <pthread.h>
+#include <sched.h>
 #include <stdarg.h>
 #include <stdatomic.h>
 #include <stdbool.h>
@@ -396,11 +397,13 @@ typedef struct G {
 	uint32_t thunk;
 } G;
 
-static _Atomic(const char *) *hnames;
-static uint32_t *hhash;
-static G *gsyms;
+static _Atomic(const char *) *hnames;	/* per slot */
+static _Atomic uint64_t *hword;		/* per slot: hash << 32 | id + 1, 0 until published */
+static const char **gnames;		/* per id */
+static G *gsyms;			/* per id */
+static _Atomic uint32_t ngsyms;
 static uint32_t hmask;
-static VEC(uint32_t) gorder;		/* slots in insertion order */
+static VEC(uint32_t) gorder;		/* ids in symbol table order */
 
 static inline uint32_t strhash(const char *s, size_t n) { return (uint32_t)ld_xxh3(s, n); }
 
@@ -444,7 +447,13 @@ static inline uint32_t vget(_Atomic uint8_t *p)
 	return r > 3 ? 3 : r;
 }
 
-/* slot of name, inserting if needed (lock-free) */
+/*
+ * Id of name, inserting if needed (lock-free).  The open-addressing slots
+ * hold only the name and a published word (hash << 32 | id + 1); symbol
+ * state lives in a dense array indexed by id, so the ~12k globals touch
+ * ~1 MB instead of a sparse 100-byte-per-slot table.  Ids depend on thread
+ * timing; nothing orders by them.
+ */
 static uint32_t gintern(const char *name)
 {
 	size_t n = strlen(name);
@@ -453,12 +462,22 @@ static uint32_t gintern(const char *name)
 		const char *cur = atomic_load_explicit(&hnames[i], memory_order_acquire);
 		if (!cur) {
 			if (atomic_compare_exchange_strong(&hnames[i], &cur, name)) {
-				hhash[i] = h;
-				return i;
+				uint32_t d = atomic_fetch_add_explicit(&ngsyms, 1, memory_order_relaxed);
+				gnames[d] = name;
+				atomic_store_explicit(&hword[i], (uint64_t)h << 32 | (d + 1), memory_order_release);
+				return d;
 			}
 		}
-		if (cur == name || !strcmp(cur, name))
-			return i;
+		uint64_t w = atomic_load_explicit(&hword[i], memory_order_acquire);
+		if (w && (uint32_t)(w >> 32) != h)
+			continue;
+		if (cur == name || !strcmp(cur, name)) {
+			while (!w) {
+				sched_yield();
+				w = atomic_load_explicit(&hword[i], memory_order_acquire);
+			}
+			return (uint32_t)w - 1;
+		}
 	}
 }
 static uint32_t gfind(const char *name)
@@ -469,11 +488,12 @@ static uint32_t gfind(const char *name)
 		const char *cur = atomic_load(&hnames[i]);
 		if (!cur)
 			return NONE;
-		if (!strcmp(cur, name))
-			return i;
+		uint64_t w = atomic_load(&hword[i]);
+		if ((uint32_t)(w >> 32) == h && !strcmp(cur, name))
+			return (uint32_t)w - 1;
 	}
 }
-static inline const char *gname(uint32_t g) { return hnames[g]; }
+static inline const char *gname(uint32_t g) { return gnames[g]; }
 
 /* ---------------- linker script ---------------- */
 
@@ -3135,14 +3155,17 @@ static void gtable_init(void)
 		cap *= 2;
 	hmask = cap - 1;
 	hnames = bigalloc((size_t)cap * sizeof(*hnames));
-	hhash = bigalloc((size_t)cap * sizeof(*hhash));
+	hword = bigalloc((size_t)cap * sizeof(*hword));
+	gnames = bigalloc((size_t)cap * sizeof(*gnames));
 	gsyms = bigalloc((size_t)cap * sizeof(G));
+	atomic_store(&ngsyms, 0);
 }
 
 static void gtable_free(void)
 {
 	munmap((void *)hnames, (size_t)(hmask + 1) * sizeof(*hnames));
-	munmap(hhash, (size_t)(hmask + 1) * sizeof(*hhash));
+	munmap((void *)hword, (size_t)(hmask + 1) * sizeof(*hword));
+	munmap(gnames, (size_t)(hmask + 1) * sizeof(*gnames));
 	munmap(gsyms, (size_t)(hmask + 1) * sizeof(G));
 	hnames = NULL;
 }

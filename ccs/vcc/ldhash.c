@@ -199,11 +199,12 @@ static const uint8_t B3SCHED[7][16] = {
 };
 #define R16(x) vreinterpretq_u32_u16(vrev32q_u16(vreinterpretq_u16_u32(x)))
 #define RN(x, n) vsriq_n_u32(vshlq_n_u32(x, 32 - (n)), x, n)
+#define R8(x) vreinterpretq_u32_u8(vqtbl1q_u8(vreinterpretq_u8_u32(x), rot8))
 #define G4(a, b, c, d, x, y)                                                                       \
     do {                                                                                           \
         v[a] = vaddq_u32(vaddq_u32(v[a], v[b]), x); v[d] = R16(veorq_u32(v[d], v[a]));             \
         v[c] = vaddq_u32(v[c], v[d]); v[b] = RN(veorq_u32(v[b], v[c]), 12);                        \
-        v[a] = vaddq_u32(vaddq_u32(v[a], v[b]), y); v[d] = RN(veorq_u32(v[d], v[a]), 8);           \
+        v[a] = vaddq_u32(vaddq_u32(v[a], v[b]), y); v[d] = R8(veorq_u32(v[d], v[a]));           \
         v[c] = vaddq_u32(v[c], v[d]); v[b] = RN(veorq_u32(v[b], v[c]), 7);                         \
     } while (0)
 #define ROUND4(r)                                                                                  \
@@ -226,6 +227,8 @@ static inline void tr4(uint32x4_t *a, uint32x4_t *b, uint32x4_t *c, uint32x4_t *
 
 static void b3hash4(const uint8_t *const in[4], size_t nblocks, uint64_t ctr, int inc,
                     uint32_t flags, uint32_t fstart, uint32_t fend, uint8_t *out) {
+    static const uint8_t r8[16] = {1, 2, 3, 0, 5, 6, 7, 4, 9, 10, 11, 8, 13, 14, 15, 12};
+    const uint8x16_t rot8 = vld1q_u8(r8);
     uint32x4_t h[8], m[16], v[16];
     for (int i = 0; i < 8; i++) h[i] = vdupq_n_u32(B3IV[i]);
     uint32_t lo[4], hi[4];
