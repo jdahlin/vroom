@@ -13,7 +13,13 @@ static char *pstrdup(pp *p, const char *s, size_t n)
 _Atomic unsigned long pp_stat_try;
 _Atomic unsigned long pp_stat_skip;	/* VPP_TIME */
 
-/* the file at a candidate path, if any: misses in missing directories cost no syscall */
+/*
+ * The file at a candidate path, if any: misses in missing directories cost
+ * no syscall.  A directory is looked at once per process (dircache.c), so
+ * it must not appear during a build: kbuild and meson both create every
+ * build-tree directory an include search can look in before compiling
+ * (PostgreSQL: all of them exist right after `meson setup`).
+ */
 VPRIV const vlex_file *try_path(const char *cwd, const char *path, size_t len)
 {
 	static _Atomic int off_ = -1;
@@ -38,6 +44,11 @@ VPRIV const vlex_file *try_path(const char *cwd, const char *path, size_t len)
 		abs[cl] = '/';
 		memcpy(abs + cl + 1, path, len);
 		abs[cl + 1 + len] = 0;
+		/* relative -I (meson): the same skip, on the joined path */
+		if (!off && !vdir_exists(abs, cl + 1 + len)) {
+			atomic_fetch_add_explicit(&pp_stat_skip, 1, memory_order_relaxed);
+			return NULL;
+		}
 		return vlex_get(abs, cl + 1 + len);
 	}
 	f = vlex_get(path, len);
