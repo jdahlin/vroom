@@ -483,6 +483,12 @@ som aldrig flyr, fabs-icke-negativa flyttalslokaler.
 → **1708/1708 (100 %)**, 136 överhoppade (clang avvisar 69, clangs bygge
 klarar inte runtimen 34, tcc-specifika 32, kompilatorspecifikt 1).
 
+### Status fuzzning (2026-11-08): lexer och preprocessor
+- `ccs/fuzz/`: `fuzz-lex` och `fuzz-pp` (libFuzzer från Homebrew LLVM, ASan+UBSan; fristående drivare utan libFuzzer), korpus genererad ur kärnheaders (`gen-corpus.py`, inget kärntext incheckat), ordbok `c.dict`, differentiell kontroll mot `clang -E -P` (`pp-diff.py`), regressionsfall som `make -C ccs fuzz-regress` spelar upp. lex.c fick `vlex_get_hook` (filer ur minnet) och `VLEX_SCALAR` (skalär referens).
+- Fynd, rättade: (1) `vintern_copy` läste 16 byte ur nyckelords- och builtin-literaler (ASan, vid start); (2) fatalt fel i huvudfilen (obalanserad `#if`) gjorde `exit(1)` i `pp_open`, vilket hade dödat vccd: nu NULL; (3) `, ## __VA_ARGS__` tog bort kommat även när variadiska argumentet var tomt men angivet (`VA(x,)`); clang gör det bara när det är utelämnat.
+- Körningar: 3 min × 2 arbetare per mål; fuzz-lex utan fynd; fuzz-pp bara falsklarm från en egen kontroll (`#line 0` ger rad 0, borttagen); fynd (2) och (3) kom från seed-korpusen och pp-diff. En andra runda avbröts (maskinen upptagen). Paritet 911/912 (modpost.c) efter varje rättning.
+- **Kvar:** längre körningar när maskinen har lediga kärnor; pp-diff över hela fuzz-korpusen.
+
 ## Risker
 - **GNU C-ytan och inline asm** är det stora jobbet. Uppskattat: lexer + pp ~2 kloc,
   parser + sema ~10–15 kloc, emitter ~5 kloc, assembler ~4 kloc, länkare ~3 kloc.

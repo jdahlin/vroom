@@ -1898,6 +1898,7 @@ typedef struct margs {
 	uint32_t *preln;
 	uint8_t *prest;		/* 0: not computed, 1: done */
 	const ptok **str;	/* stringified */
+	bool elided;		/* the variadic argument was left out (clang's isVarargsElidedUse) */
 } margs;
 
 /* "macro 'X' defined here": the #define's name, found from the body's file (errors only) */
@@ -1938,6 +1939,7 @@ static bool collect_(pp *p, const pmacro *m, const ptok *name, margs *a, ptok *r
 	bool va = m->flags & MF_VARIADIC;
 	ptok t;
 
+	a->elided = false;
 	a->st = alloc(&p->tmp, slots * sizeof(uint32_t));
 	a->ln = alloc(&p->tmp, slots * sizeof(uint32_t));
 	raw(p, &t);		/* '(' */
@@ -1981,12 +1983,15 @@ static bool collect_(pp *p, const pmacro *m, const ptok *name, margs *a, ptok *r
 			/* GNU: the variadic argument left out entirely */
 			a->st[k + 1] = (uint32_t)(p->svn - base);
 			a->ln[k + 1] = 0;
+			a->elided = true;
 		} else {
 			error(p, t.loc, "too few arguments provided to function-like macro invocation");
 			macro_note(p, m);
 			p->svn = base;
 			return false;
 		}
+	} else if (np == 1 && va && !a->ln[0]) {
+		a->elided = true;	/* F() for F(...): no arguments at all */
 	} else if (np == 0 && a->ln[0]) {
 		error(p, name->loc, "too many arguments provided to function-like macro invocation");
 		p->svn = base;
@@ -2247,7 +2252,7 @@ static inline bool hashhash(const ptok *t)
 	return t->kind == T_HASHHASH && !(t->flags & PF_NOPASTE);
 }
 
-/* clang's maybeRemoveCommaBeforeVaArgs (gnu mode) */
+/* clang's maybeRemoveCommaBeforeVaArgs (gnu mode), only if the argument was elided */
 static void remove_va_comma(pp *p, size_t base, bool *ngs)
 {
 	if (p->svn == base || p->sv[p->svn - 1].kind != T_COMMA)
@@ -2366,7 +2371,7 @@ static void subst_range(pp *p, const pmacro *m, margs *a, uint32_t from, uint32_
 		}
 		if (before_nonempty)
 			p->svn--;
-		if (va && k == np - 1)
+		if (va && k == np - 1 && a->elided)
 			remove_va_comma(p, base, &ngs);
 	}
 	*ngsp = ngs;
@@ -4840,7 +4845,18 @@ pp *pp_open(const pp_opts *o)
 		pp_close(p);
 		return NULL;
 	}
-	enter_file(p, mf, o->main, -1);
+	{
+		/* a fatal error here (unbalanced conditionals) ends the TU, not the process (vccd) */
+		jmp_buf jb;
+
+		p->fatal_jb = &jb;
+		if (setjmp(jb)) {
+			pp_close(p);
+			return NULL;
+		}
+		enter_file(p, mf, o->main, -1);
+		p->fatal_jb = NULL;
+	}
 	p->base_name = p->fe[0].name;
 	p->base_namelen = p->fe[0].namelen;
 

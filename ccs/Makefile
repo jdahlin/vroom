@@ -119,3 +119,44 @@ self-check: self
 	@echo "self-check: stage 2 and stage 3 objects identical"
 
 .PHONY: self self-check
+
+# ---- fuzzing (fuzz/; see AGENTS.md) ----
+# libFuzzer from Homebrew LLVM when it has one, else the standalone driver
+# (fuzz/driver.c: replay + blind mutation) with Apple clang.
+FUZZ_LIBFUZZER := $(wildcard $(LLVM)/lib/clang/*/lib/darwin/libclang_rt.fuzzer_osx.a)
+ifneq ($(FUZZ_LIBFUZZER),)
+FUZZ_CC = $(LLVM)/bin/clang
+FUZZ_ENGINE = -fsanitize=fuzzer
+FUZZ_DRIVER =
+else
+FUZZ_CC = /usr/bin/clang
+FUZZ_ENGINE =
+FUZZ_DRIVER = fuzz/driver.c
+endif
+FUZZ_CFLAGS = -std=gnu11 -g -O1 -mcpu=apple-m1 -D_DARWIN_C_SOURCE -pthread \
+	-fsanitize=address,undefined -fno-sanitize-recover=undefined -fno-omit-frame-pointer \
+	-Wall -Wno-unused-parameter
+FUZZ_OUT = $(OUT)/fuzz
+FUZZ_HDR = vcc/lex.h vcc/intern.h vcc/pp.h vcc/dircache.h
+
+fuzz: $(FUZZ_OUT)/fuzz-lex $(FUZZ_OUT)/fuzz-pp
+
+$(FUZZ_OUT):
+	mkdir -p $@
+
+$(FUZZ_OUT)/fuzz-lex: fuzz/fuzz-lex.c fuzz/lexref.c fuzz/fuzz.h $(FUZZ_DRIVER) $(LEX_SRC) $(FUZZ_HDR) | $(FUZZ_OUT)
+	$(FUZZ_CC) $(FUZZ_CFLAGS) $(FUZZ_ENGINE) fuzz/fuzz-lex.c fuzz/lexref.c $(FUZZ_DRIVER) $(LEX_SRC) -o $@
+
+$(FUZZ_OUT)/fuzz-pp: fuzz/fuzz-pp.c fuzz/fuzz.h $(FUZZ_DRIVER) vcc/pp.c vcc/dircache.c $(LEX_SRC) $(FUZZ_HDR) | $(FUZZ_OUT)
+	$(FUZZ_CC) $(FUZZ_CFLAGS) $(FUZZ_ENGINE) fuzz/fuzz-pp.c $(FUZZ_DRIVER) vcc/pp.c vcc/dircache.c $(LEX_SRC) -o $@
+
+# replay the regression inputs (fuzz/regress/{lex,pp}/): every one must pass
+fuzz-regress: fuzz
+	$(FUZZ_OUT)/fuzz-lex -runs=0 fuzz/regress/lex
+	$(FUZZ_OUT)/fuzz-pp -runs=0 -timeout=10 fuzz/regress/pp
+
+# the differential check (vpp against clang -E -P) on the regression and seed inputs
+fuzz-diff: $(OUT)/vpp
+	fuzz/pp-diff.py -j 4 fuzz/regress/pp fuzz/seeds/pp
+
+.PHONY: fuzz fuzz-regress fuzz-diff
