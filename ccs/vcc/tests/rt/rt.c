@@ -223,6 +223,32 @@ double strtod(const char *s, char **e)
 }
 double atof(const char *s) { return strtod(s, 0); }
 
+/* ---- 128-bit division (libgcc's; clang only calls these when it cannot fold) ---- */
+typedef unsigned __int128 u128_t;
+static u128_t udivmod128(u128_t n, u128_t d, u128_t *rem)
+{
+	u128_t q = 0, r = 0;
+	for (int i = 127; i >= 0; i--) {
+		r = r << 1 | ((n >> i) & 1);
+		if (r >= d) { r -= d; q |= (u128_t)1 << i; }
+	}
+	if (rem) *rem = r;
+	return q;
+}
+u128_t __udivti3(u128_t a, u128_t b) { return udivmod128(a, b, 0); }
+u128_t __umodti3(u128_t a, u128_t b) { u128_t r; udivmod128(a, b, &r); return r; }
+__int128 __divti3(__int128 a, __int128 b)
+{
+	u128_t q = udivmod128(a < 0 ? -(u128_t)a : (u128_t)a, b < 0 ? -(u128_t)b : (u128_t)b, 0);
+	return (a < 0) != (b < 0) ? -(__int128)q : (__int128)q;
+}
+__int128 __modti3(__int128 a, __int128 b)
+{
+	u128_t r;
+	udivmod128(a < 0 ? -(u128_t)a : (u128_t)a, b < 0 ? -(u128_t)b : (u128_t)b, &r);
+	return a < 0 ? -(__int128)r : (__int128)r;
+}
+
 /* ---- math (just what the tests use) ---- */
 double fabs(double x) { return __builtin_fabs(x); }
 float fabsf(float x) { return __builtin_fabsf(x); }

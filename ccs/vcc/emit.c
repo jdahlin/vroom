@@ -4203,6 +4203,8 @@ static bool side_effects(cc *c, uint32_t n)
 		switch (x->aux) {
 		case BI_VA_START: case BI_VA_COPY: case BI_VA_END: case BI_ALLOCA: case BI_TRAP:
 		case BI_UNREACHABLE:
+		case BI_ADD_OVERFLOW: case BI_SUB_OVERFLOW: case BI_MUL_OVERFLOW:	/* store the result */
+		case BI_ADDC: case BI_SUBC:
 			return true;
 		default:
 			if (x->aux >= BI_ATOMIC_LOAD_N && x->aux <= BI_ATOMIC_SIGNAL_FENCE)
@@ -4309,7 +4311,7 @@ static val gen_overflow(ecx *e, const node *x, const uint32_t *arg)
 	int lo, hi, t, ok;
 	lval l;
 
-	if (tsize(c, ta) > 8 || tsize(c, tb) > 8 || bits > 64)
+	if (tsize(c, ta) > 8 || tsize(c, tb) > 8)
 		efatal(e, x->loc, "128-bit overflow builtins are not supported");
 	/* exact result in 128 bits */
 	{
@@ -4338,6 +4340,27 @@ static val gen_overflow(ecx *e, const node *x, const uint32_t *arg)
 		break;
 	}
 	vfree(e, &b);
+	if (bits == 128) {
+		/*
+		 * Operands of at most 64 bits: the 128 bits are the exact result,
+		 * signed if an operand is.  Signed into unsigned overflows when
+		 * negative; unsigned into signed when the top bit is set.
+		 */
+		bool sx = is_signed(c, ta) || is_signed(c, tb);
+		val r = { .k = V_REG2, .r = (uint8_t)lo, .r2 = (uint8_t)hi };
+
+		ok = treg(e);
+		if (sx != sr)
+			shift_imm(e, I_LSRV, 1, ok, hi, 63);
+		else
+			movi(e, 0, ok, 0);
+		l = lfromval(e, p, talign(c, tr));
+		store(e, &l, tr, &r);
+		lfree(e, &l);
+		tfree(e, lo);
+		tfree(e, hi);
+		return vreg(ok);
+	}
 	/* fits iff ext(lo) == lo && hi == (signed ? lo >> 63 : 0) */
 	t = treg(e);
 	ok = treg(e);

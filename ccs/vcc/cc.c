@@ -2191,6 +2191,29 @@ static bool union_member_for(cc *c, qty u, uint32_t n)
 	return false;
 }
 
+/* an expression that changes something (for sizes evaluated only for their effects) */
+static bool has_side_effects(cc *c, uint32_t n)
+{
+	const node *x;
+
+	if (!n)
+		return false;
+	x = N(n);
+	switch (x->op) {
+	case N_CALL: case N_ASSIGN: case N_PREINC: case N_PREDEC: case N_POSTINC: case N_POSTDEC: case N_STMTEXPR:
+	case N_BUILTIN: case N_VAARG:
+		return true;
+	case N_CAST: case N_UNARY: case N_ADDR: case N_DEREF: case N_MEMBER: case N_SIZEOF_VLA:
+		return has_side_effects(c, x->a);
+	case N_INDEX: case N_BINARY: case N_LOGAND: case N_LOGOR: case N_COMMA: case N_CPLX:
+		return has_side_effects(c, x->a) || has_side_effects(c, x->b);
+	case N_COND:
+		return has_side_effects(c, x->a) || has_side_effects(c, x->b) || has_side_effects(c, x->c);
+	default:
+		return false;
+	}
+}
+
 static uint32_t to_complex(cc *c, uint32_t n, qty t);
 static uint32_t cplx_bool(cc *c, uint32_t n);
 static uint32_t cplx_part(cc *c, uint32_t n, int k);
@@ -4845,10 +4868,15 @@ static void param_list(cc *c, dop *op)
 			t = apply_declarator(c, ds.ty, first, nops);
 			tl_ndops = first;
 			/* adjustments (C11 6.7.6.3p7-8) */
+			uint32_t vsize = 0;
+
 			if (is_array(c, t)) {
 				const dop *ad = nops ? &tl_dops[first + nops - 1] : NULL;
 				int q = ad && ad->kind == 1 ? ad->q : 0;
 
+				/* int a[n++]: the size is still evaluated on entry (function_def) */
+				if ((T(c, t)->flags & TF_VLA) && T(c, t)->n && has_side_effects(c, T(c, t)->n))
+					vsize = T(c, t)->n;
 				t = QT(QI(ty_ptr(c, T(c, t)->base)), q);
 			} else if (is_func(c, t)) {
 				t = ty_ptr(c, t);
@@ -4856,6 +4884,7 @@ static void param_list(cc *c, dop *op)
 			vpush(c, &ptys, t);
 			s = sym_new(c, S_VAR, d.name, t, d.loc ? d.loc : ds.loc);
 			c->syms[s].flags |= SF_PARAM;
+			c->syms[s].body = vsize;	/* parameters: a decayed VLA's size expression with side effects */
 			c->syms[s].sc = ds.sc == SC_REGISTER ? SC_REGISTER : SC_AUTO;
 			bind(c, s);
 			vpush(c, &psyms, s);
@@ -5831,7 +5860,7 @@ static uint32_t initializer(cc *c, qty *ty, bool st)
 				*ty = QT(QI(ty_array(c, T(c, t)->base, c->strs[N(v)->a].n, 0)), QQ(t));
 			return v;
 		}
-		if (is_record(c, t)) {
+		if (is_record(c, t) && !is_complex(c, t)) {
 			if (!compatible(c, N(v)->ty, t))
 				error(c, loc, "initializing with an expression of incompatible type");
 			return v;
@@ -6918,6 +6947,23 @@ static void function_def(cc *c, uint32_t s, const declr *d)
 	c->in_loop = c->in_switch = 0;
 	body = compound_stmt(c, NULL);
 	scope_close(c);
+	{
+		/* side effects of decayed VLA parameter sizes run first, in order */
+		vec items;
+
+		vinit(&items);
+		for (uint32_t i = 0; i < d->npsyms; i++) {
+			uint32_t p = c->lists[d->psyms + i];
+
+			if (c->syms[p].body)
+				vpush(c, &items, mkstmt(c, N_EXPR, c->syms[p].loc, c->syms[p].body, 0, 0));
+		}
+		if (items.n) {
+			for (uint32_t i = 0; i < N(body)->c; i++)
+				vpush(c, &items, c->lists[N(body)->b + i]);
+			body = mkstmt(c, N_BLOCK, N(body)->loc, 0, vfreeze(c, &items), items.n);
+		}
+	}
 	for (uint32_t l = first_label; l < c->nlabel; l++) {
 		label *lb = &c->labels[l];
 
