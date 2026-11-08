@@ -237,7 +237,17 @@ VPRIV hvec hc_vec(pp *p, const void *a, uint32_t n, uint32_t esz)
 
 		memcpy(&id, b + (size_t)i * esz, 4);
 		if (((id * 0x9E3779B1u) >> 27) == 0 || i + 1 - st == 256 || i + 1 == n) {
-			tmp[nc++] = hck_get(p, b + (size_t)st * esz, i + 1 - st, esz);
+			/* a chunk this TU met lately, found by its ids before any hashing */
+			uint32_t m = i + 1 - st, id0;
+			const char *q = b + (size_t)st * esz;
+			const hck **vc;
+
+			memcpy(&id0, q, 4);
+			vc = &p->vkc[(((uint64_t)id0 * 0x9E3779B97F4A7C15ull) ^ ((uint64_t)id * 0xc2b2ae3d27d4eb4full) ^
+				      ((uint64_t)m << 8 | esz)) * 0xff51afd7ed558ccdull >> 52];
+			if (!*vc || (*vc)->n != m || (*vc)->esz != esz || memcmp((*vc)->d, q, (size_t)m * esz))
+				*vc = hck_get(p, q, m, esz);
+			tmp[nc++] = *vc;
 			st = i + 1;
 		}
 	}

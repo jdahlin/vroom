@@ -398,16 +398,33 @@ static void *hcopy(pp *p, const void *s, size_t n)
 
 static const char *hstrdup(pp *p, const char *s, size_t n)
 {
+	const char *sb = shared_base0();
+
+	if (s >= sb && s < sb + (1ull << 34) && !s[n])
+		return s;	/* already shared (a replayed entry's): immortal */
 	return hc_blob(p, s, n);	/* NUL-terminated, shared */
 }
 
 /* hc_blob of a token's spelling, through a small cache of recent ones */
-static const char *spell_blob(pp *p, const char *s, uint32_t len)
+static const char *spell_blob(pp *p, const char *s, uint32_t len, uint8_t kind)
 {
 	uint64_t w;
 	uint32_t h;
 	const char *d;
 
+	if (kind >= T_LSQUARE && kind < T_NKINDS && len <= 4) {
+		/* punctuators: one spelling per kind (digraphs aside) */
+		uint32_t x, y, mk = len == 4 ? ~0u : (1u << (8 * len)) - 1;
+
+		d = p->kspell[kind];
+		memcpy(&x, s, 4);	/* (readable past the end) */
+		if (d) {
+			memcpy(&y, d, 4);
+			if (((const hck *)(const void *)(d - offsetof(hck, d)))->n == len && !((x ^ y) & mk))
+				return d;
+		}
+		return p->kspell[kind] = hc_blob(p, s, len);
+	}
 	memcpy(&w, s, 8);	/* (spellings are readable 16 bytes past their end) */
 	if (len < 8)
 		w &= ~(~0ull << (8 * len));
@@ -456,7 +473,7 @@ static void publish_tok(pp *p, const hlev *L, size_t end, hent *e)
 				continue;
 			}
 			if (t.kind != T_IDENT && !t.id && t.len <= 0xffff && !(t.flags & HF_X)) {
-				const char *d = spell_blob(p, t.s, t.len);
+				const char *d = spell_blob(p, t.s, t.len, t.kind);
 
 				if (!sb)
 					sb = shared_base0();

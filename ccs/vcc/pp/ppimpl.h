@@ -463,7 +463,9 @@ struct pp {
 	uint64_t *rst[NMDIR];	/* per id: serial << 32 | index in rec.t */
 	size_t hc_bytes;	/* what the entry being published allocated */
 	const void *bcache[4096];	/* recent spelling blobs, by hash */
-	const hck *ckc[4096];	/* recent chunks, by hash (most repeats are a child's) */
+	const char *kspell[256];	/* punctuator spelling blobs, by kind */
+	const hck *ckc[4096];
+	const hck *vkc[4096];	/* recent chunks, by (first id, last id, length) */	/* recent chunks, by hash (most repeats are a child's) */
 };
 
 #define error(p, loc, ...) pp_diag(p, loc, "error", __VA_ARGS__)
