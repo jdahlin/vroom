@@ -50,6 +50,7 @@
 #include "../protocol.h"
 #include "caps.h"
 #include "ppdriver.h"
+#include "fixdep.h"
 
 #define MAX_STRS	(VROOM_MAX_PAYLOAD / 2)
 
@@ -530,7 +531,50 @@ static double now_ms(void)
 	return ts.tv_sec * 1e3 + ts.tv_nsec / 1e6;
 }
 
+static const char *req_env(const struct req *r, const char *name)
+{
+	size_t n = strlen(name);
+
+	for (char **e = r->envp; *e; e++)
+		if (!strncmp(*e, name, n) && (*e)[n] == '=')
+			return *e + n + 1;
+	return NULL;
+}
+
+/*
+ * Kbuild's cmd_and_fixdep done here (patches/0008): a compile whose request
+ * carries VCC_FIXDEP_D/T/O/CMD (dep file, target, .cmd file, saved command
+ * line) gets fixdep's .cmd written and its dep file removed once it has
+ * succeeded, so the recipe runs no fixdep and no rm.
+ */
+static int fixdep_after(const struct req *r, int status)
+{
+	const char *d = req_env(r, "VCC_FIXDEP_D"), *t, *o, *c;
+
+	if (status || !d)
+		return status;
+	t = req_env(r, "VCC_FIXDEP_T");
+	o = req_env(r, "VCC_FIXDEP_O");
+	c = req_env(r, "VCC_FIXDEP_CMD");
+	if (!t || !o || !c) {
+		say(r, "vccd: %s without VCC_FIXDEP_T/O/CMD\n", "VCC_FIXDEP_D");
+		return 2;
+	}
+	return vfixdep(r->cwd, d, t, c, o, r->fds[2]);
+}
+
+static int handle1(const struct req *r, const char **kind);
+
 static int handle(const struct req *r, const char **kind)
+{
+	int status = handle1(r, kind);
+
+	if (!strcmp(*kind, "cc-own") || !strcmp(*kind, "cc") || !strcmp(*kind, "cc-fallbk"))
+		status = fixdep_after(r, status);
+	return status;
+}
+
+static int handle1(const struct req *r, const char **kind)
 {
 	int probe;
 

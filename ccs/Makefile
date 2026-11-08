@@ -49,7 +49,7 @@ $(OBJ)/ld.o: XFLAGS = -DVLD_MAIN
 $(OUT)/vpp: $(call o,vcc/vpp.c $(PP_SRC) $(LEX_SRC) $(AS_SRC))
 	$(VCC_CC) $(VCC_LDFLAGS) -pthread $^ -o $@
 
-$(OUT)/vccd: $(call o,vcc/vccd.c vcc/caps.c $(PP_SRC) $(LEX_SRC) $(AS_SRC))
+$(OUT)/vccd: $(call o,vcc/vccd.c vcc/caps.c vcc/fixdep.c $(PP_SRC) $(LEX_SRC) $(AS_SRC))
 	$(VCC_CC) $(VCC_LDFLAGS) -pthread $^ -o $@
 
 $(OUT)/lextest: $(patsubst vcc/%.c,$(OBJ)/no/%.o,vcc/lextest.c vcc/pmc.c $(LEX_SRC))
