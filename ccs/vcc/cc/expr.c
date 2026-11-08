@@ -396,6 +396,9 @@ static inline __attribute__((always_inline)) uint32_t primary_sym(cc *c, uint32_
 		N(n)->flags = y->kind == S_VAR ? NF_LVALUE : 0;
 		if (!c->unevaluated && !((y->flags & SF_OVERLOAD) && is(c, T_LPAREN)))
 			y->flags |= SF_USED;
+		y->flags |= SF_REF;
+		if (unlikely(y->next) && y->depth)
+			c->syms[y->next].flags |= SF_REF;	/* a block-scope extern: the global */
 		return n;
 	}
 }
@@ -653,6 +656,7 @@ static __attribute__((noinline)) uint32_t call(cc *c, uint32_t fn, uint32_t loc)
 		N(fn)->ty = c->syms[s].ty;
 		if (!c->unevaluated)
 			c->syms[s].flags |= SF_USED;
+		c->syms[s].flags |= SF_REF;
 	}
 	fn = rvalue(c, fn);
 	callee = fn;

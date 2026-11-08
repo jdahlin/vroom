@@ -86,6 +86,8 @@ int pp_errors(const pp *p);
 
 /* is loc in a system header */
 int pp_in_system_header(const pp *p, uint32_t loc);
+/* is loc in the main file (not a header, not <built-in>) */
+int pp_in_main_file(const pp *p, uint32_t loc);
 /* presumed file name, line and column of a location; 0 if it has none */
 int pp_where(const pp *p, uint32_t loc, const char **name, uint32_t *namelen, uint32_t *line, uint32_t *col);
 /* a diagnostic at loc ("error", "warning", "note", "fatal error": longjmp/exit) */

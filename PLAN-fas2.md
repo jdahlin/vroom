@@ -740,6 +740,35 @@ ingen emulering. Samma image fungerar i en qemu-system-aarch64-gäst med `-accel
      array, inget globalt lås.
   4. Småsaker: `VCC_LOG`:s `fprintf` tar `flockfile`-lås (bara profilering); `open()` vid
      skrivning 1 %.
+- **Lata kroppar, steg 1: på parsernivå (klart, 2026-11-08).** `cc/lazy.c`: en `static`
+  funktion som definieras i en header (inte huvudfilen; utan used/constructor/destructor/alias,
+  inte overloadable, ingen `#pragma pack` aktiv) får sin kropp sparad som tokens (`lztok`,
+  16 byte; identifierare som internerat id, övrigas stavning i `lzs`), `SF_DEFINED | SF_LAZY`,
+  och tokenströmmen fortsätter efter `}`. Efter TU:n parsas de kroppar som något namnger
+  (`SF_REF`: varje `N_VAR`, även i sizeof/typeof, block-scope-`extern` märker den globala,
+  `cleanup()`, alias-mål), tills inget nytt namnges. Namnuppslag i en sen kropp hoppar över
+  filskopssymboler skapade efter definitionen (`lz_wm`, längs `shadow`), alltså exakt det
+  som syntes där. `#pragma` i kroppen sparas som `P_DIRECTIVE` och verkställs när kroppen
+  parsas (`fetch_directive` läser vidare ur kroppen). Deklarationscachens bilder har tre nya
+  arrayer (platser kodas). Emit avbryter med internt fel om en aldrig parsad kropp refereras.
+  `VCC_EAGER=1` = som förut.
+  - **Mätt** (840 kärn-TU:er, en process, `-j 6`, samma binär med/utan `VCC_EAGER`):
+    137,6 → **101,7 G instruktioner (−26 %)**, 43,8 → 35,1 G cykler, user 14,1 → 10,9 s.
+    4,39 M kroppar sparade (264,6 M tokens), **85,6 k parsade (6,5 M tokens, 2 %)**. Cyklerna
+    sjunker mindre än instruktionerna: kopieringen av tokens är minnesbunden, och de dras
+    fortfarande genom `pp_next` (steg 2). Kallt bygge (`-j 14`, alternerande ×3, last 7–9):
+    vccd user 14,5–15,1 → **12,1–12,3 s**, summerad jobbtid 26–28 → 22–24 s; väggtiden
+    10,8–11,0 → 10,4–10,9 s (make-bunden, som väntat).
+  - **Verifierat:** cbatch 840/840 (även ASan+UBSan), vcc-obj 840/840 med samma 31 odefinierade
+    symboler som utan lata kroppar, sema run 878/879, layout 878/879 (18,8 M kontroller),
+    fpcheck 840/840, diag 63/63, ctests 1708/1708, paritet 911/912. Objekten mot `VCC_EAGER=1`:
+    maskinkoden identisk i alla 839; 284 skiljer i byte-form, bara placering: strängar i
+    `.rodata.str1.1`, ordningen av statiska lokala objekt (`__msg`) i `.rodata`/`.data`,
+    suffixet på statiska lokalas namn (sym-index) — de skapas när kroppen parsas. Debian
+    bootar till `running`, 0 felande enheter (`results/boot-20261108-214004.log`).
+  - **Steg 2 (nästa):** låt huvudcachens poster bära kroppsintervallen så att uppspelningen
+    hoppar över en kropp utan att dela ut dess tokens, och den sena parsningen läser postens
+    tokenarray direkt (ingen kopia).
 - **Inkrementellt:** make-nivån fungerar redan (vccd:s `.cmd` = fixdeps, `touch` på ett huvud
   bygger om exakt beroende objekt; no-op 2,7 s, nästan bara undermakes). En vccd som lever
   mellan byggen ger −20 % instruktioner. Det som ger mycket är en **innehållsadresserad
