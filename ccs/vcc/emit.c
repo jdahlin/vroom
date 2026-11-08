@@ -3917,6 +3917,13 @@ static val gen_builtin(ecx *e, uint32_t n)
 	}
 	case BI_EXPECT:
 	case BI_EXPECT_PROB:
+		/* the hint is still evaluated (argument order is unspecified: first, so that
+		 * nothing is live across it) */
+		for (uint32_t i = 1; i < x->c; i++)
+			if (side_effects(c, arg[i])) {
+				v = gen(e, arg[i]);
+				vfree(e, &v);
+			}
 		v = gen(e, arg[0]);
 		return v;
 	case BI_ASSUME_ALIGNED:
