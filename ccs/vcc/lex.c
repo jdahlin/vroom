@@ -709,6 +709,17 @@ static __attribute__((noinline)) uint32_t intern_dirty(const char *s, size_t st,
 	return vintern_copy(tmp, l);
 }
 
+/* intern the identifiers out[il[0..ni)] (a loop of its own: registers) */
+static __attribute__((noinline)) void intern_list(vintern_cache *ic, const char *s, vtok *out,
+						  const uint32_t *il, uint32_t ni)
+{
+	for (uint32_t i = 0; i < ni; i++) {
+		vtok *k = &out[il[i]];
+
+		k->id = vintern_fast(ic, s + k->off, k->len);
+	}
+}
+
 /*
  * Classify blocks [from, to) clamped to the file's nblk blocks; the block
  * holding the end gets nothing but X past it.  Returns the new end.
@@ -1212,11 +1223,7 @@ done:
 	/* intern the clean identifiers: no unpredictable branches left here */
 	STAT_T0();
 	if (!vlex_no_intern)
-		for (uint32_t i = 0; i < ni; i++) {
-			vtok *k = &out[il[i]];
-
-			k->id = vintern_fast(ic, s + k->off, k->len);
-		}
+		intern_list(ic, s, out, il, ni);
 	STAT_T1(320);
 	return (uint32_t)(t - out);
 }
