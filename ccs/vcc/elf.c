@@ -76,6 +76,7 @@ void elf_reset(ElfObj *o)
 	o->arena.used = 0;
 	o->syms.used = sizeof(ElfSym); o->secs.used = sizeof(ElfSec); o->fixes.used = sizeof(ElfFix);
 	o->nsec = 1; o->nfrag = FRAG_CAP - 1; o->nsym = 1; o->nfix = 1; o->nreg = 0; o->regs.used = 0;
+	o->expr = 0; o->expr_tail = &o->expr;
 	memset(o->secs.base, 0, sizeof(ElfSec));
 	memset(o->syms.base, 0, sizeof(ElfSym));
 	memset(o->fixes.base, 0, sizeof(ElfFix));
@@ -173,6 +174,18 @@ void elf_define_abs(ElfObj *o, uint32_t s, uint64_t v)
 {
 	ElfSym *y = elf_symp(o, s);
 	y->flags |= ESYM_DEFINED | ESYM_ABS; y->frag = 0; y->value = v;
+}
+
+typedef struct ElfExpr { uint32_t sym; int op; ElfVal x, y; struct ElfExpr *next; } ElfExpr;
+
+void elf_expr_sym(ElfObj *o, uint32_t s, int op, ElfVal x, ElfVal y)
+{
+	ElfExpr *e = rpush(&o->arena, sizeof *e, 8);
+
+	*e = (ElfExpr){ s, op, x, y, 0 };
+	if (!o->expr_tail) o->expr_tail = &o->expr;
+	*o->expr_tail = e;
+	o->expr_tail = &e->next;
 }
 
 void elf_size_expr(ElfObj *o, uint32_t s, ElfVal v)
@@ -578,6 +591,33 @@ size_t elf_finish(ElfObj *o)
 				elf_error(o, ".size expression for '%s' is not absolute", y->name);
 		}
 		y->size = (uint64_t)v;
+	}
+	/* symbols defined as expressions over label differences: in creation order (later ones may use earlier ones) */
+	for (ElfExpr *e = o->expr; e; e = e->next) {
+		int64_t v[2];
+		const ElfVal *xv[2] = { &e->x, &e->y };
+		int ok = 1;
+		for (int k = 0; k < 2 && ok; k++) {
+			ElfSym *a = xv[k]->add ? elf_symp(o, xv[k]->add) : 0, *b = xv[k]->sub ? elf_symp(o, xv[k]->sub) : 0;
+			v[k] = xv[k]->c;
+			if (a) { if (a->flags & ESYM_ABS) v[k] += (int64_t)a->value; else if (insec(a) && b && insec(b) && symsec(o, a) == symsec(o, b)) v[k] += (int64_t)symoff(o, a); else ok = 0; }
+			if (b && ok) { if (b->flags & ESYM_ABS) v[k] -= (int64_t)b->value; else if (insec(b) && a) v[k] -= (int64_t)symoff(o, b); else ok = 0; }
+		}
+		if (!ok) { elf_error(o, "expected absolute expression"); continue; }
+		int64_t p = v[0], q = v[1], r = 0;
+		switch (e->op) {
+		case '*': r = (int64_t)((uint64_t)p * (uint64_t)q); break;
+		case '/': if (!q) { elf_error(o, "division by zero"); continue; } r = p / q; break;
+		case '%': if (!q) { elf_error(o, "division by zero"); continue; } r = p % q; break;
+		case 'L': r = (int64_t)((uint64_t)p << (q & 63)); break;
+		case 'R': r = (int64_t)((uint64_t)p >> (q & 63)); break;
+		case '&': r = p & q; break;
+		case '|': r = p | q; break;
+		case '^': r = p ^ q; break;
+		case '!': r = p | ~q; break;
+		default: elf_error(o, "bad operator in deferred expression"); continue;
+		}
+		elf_define_abs(o, e->sym, (uint64_t)r);
 	}
 	/* fixups, in layout order */
 	w->rel = rpush(&o->arena, sizeof(Rel) * (o->nfix + 1), 8);

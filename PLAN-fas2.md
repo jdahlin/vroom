@@ -390,6 +390,16 @@ aldrig i bygget. Ett TU-test (`bench/vcc-diff.py`) körs över alla kärnfiler.
 - **Var tiden går:** batch med `-j 6` (last ~4): 3,3 s vägg, 16,9 s user + 3,1 s sys; `cc_run` 19,5 s jobbtid, varav kodgenerering + objekt **0,99 s** (text + as_run: 2,04 s), finish + write 0,25 s, 25,5 MB objekt. Front end (pp + parse/sema) är ~90 %. (Briefens "~4,3 CPU-s" för front end var väggtid; CPU är ~20 s, jfr Status 2.4: 22,6 s.) `kernel/sched/core.c` ensam: emit 2,5 ms mot 3,3 ms (utskrift 1,0 → 0,25 ms). I bygget summerar vcc-jobben till 34,3 s (medel 39 ms, max 247 ms `net/core/sock.c`) över 11,7 s, alltså ~3 jobb i luften av 14: kompileringsfasen begränsas nu av make, shim och beroendeordningen, inte av vccd (clang-jobben summerar till 106 s).
 - **Kvar:** front end-kostnaden (deklarationsåteruppspelning, RESEARCH-preprocessor §6.4); per-TU mmap/munmap i emit.c och cc.c (sys 3 s) → arenor per tråd som nollställs per jobb; vDSO (PIC) och värdprogram (Mach-O) går fortfarande till clang; varför bara ~3 jobb är i luften under make `-j 14`.
 
+### Status 2.10 (2026-11-08): defconfig med moduler, allt av vcc
+- Konfiguration: defconfig med `CONFIG_MODULES=y` (1590 `=m`), utan debuginfo och LTO; bygget `Image` + `modules`.
+- **cc.c:** `overloadable` (Itanium-mangling, clangs rangordning); GNU-vektortyper (`vector_size`, initierare, kast mellan lika stora vektorer, `v[i]`, `+ - & | ^` och sammansatt tilldelning); `__builtin_{add,sub}c*` och typade overflow-builtins; `((`-deklaratorer; konstantvikning av adress + heltal, `strlen("…")`, skalära sammansatta literaler, float → heltal; `__builtin_types_compatible_p` på kvalificerade arrayer.
+- **emit.c:** `x && 0` / `x || 1` viks (döda anrop försvann, modpost godtog moduler); registervariabler utan initierare får sitt register (`fpsimd.c`, `w12`); `:lo12:`-laddningar bara när objektet verkligen är så justerat (ACPI:s `*(u32 *)"SSDT"`); vektorer i v16+, `"w"`-asmoperander, vektorer som 16-byte-poster i vcc:s egen anropskonvention.
+- **Egen `ccs/vcc/include/arm_neon.h`** (före clangs resurskatalog i sökvägen): de ~25 intrinsics kärnan använder som makron kring vektoroperationer och inline asm; körtest på värden mot clang med riktiga `arm_neon.h`: 34 000 fall, 0 fel.
+- **vas:** SME `ldr/str za[…]`, `eor3`/`bcax`, NEON-, AES-, SHA512- och MTE-instruktioner, `.octa`, `.reloc`, `.ltorg`, fördröjda uttryck på etikettskillnader; kodningarna kontrollerade mot llvm-mc.
+- Identifierartabellen 2²³, delad pp-region 16 GB.
+- **Acceptans:** `Image` + `modules` byggs, **10 990 kompilerade av vcc, 0 till clang** (215,6 s med last från annat; tidigare körningar ~150 s). Sviterna gröna: paritet 911/912, sema 878/879 + 878/879, obj 840/840, cbatch 840/840, vas 30/30.
+- **Kvar:** boottest av modulkärnan; tidsjämförelse mot clang-baslinjen (575,6 s) på en lugn maskin.
+
 ## Risker
 - **GNU C-ytan och inline asm** är det stora jobbet. Uppskattat: lexer + pp ~2 kloc,
   parser + sema ~10–15 kloc, emitter ~5 kloc, assembler ~4 kloc, länkare ~3 kloc.

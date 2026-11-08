@@ -445,7 +445,13 @@ int ppd_run(int argc, char **argv, const ppd_env *env)
 #define ADD(d) do { int dup_ = 0; for (int j = po.nquote; j < n; j++) dup_ |= !strcmp(all[j], d); if (!dup_) all[n++] = d; } while (0)
 	for (int k = 0; k < ni; k++) ADD(dirs_i[k]);
 	po.nsys = n;
-	for (int k = 0; k < ns; k++) ADD(dirs_s[k]);
+	for (int k = 0; k < ns; k++) {
+		/* vcc's own headers (arm_neon.h) go before the clang resource directory */
+		if (strstr(dirs_s[k], "/lib/clang/") && strlen(dirs_s[k]) > 8 &&
+		    !strcmp(dirs_s[k] + strlen(dirs_s[k]) - 8, "/include"))
+			ADD(VCC_INCDIR);
+		ADD(dirs_s[k]);
+	}
 	if (darwin && !nostdinc)
 		for (size_t k = 0; k < sizeof(sysdirs_darwin) / sizeof(sysdirs_darwin[0]); k++)
 			ADD(sysdirs_darwin[k]);

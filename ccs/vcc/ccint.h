@@ -18,7 +18,7 @@ typedef unsigned __int128 u128;
 
 #define DIR_BITS 11
 #define DIR_PAGE (1u << DIR_BITS)
-#define NDIR ((1u << 21) >> DIR_BITS)
+#define NDIR ((1u << VINTERN_ID_BITS) >> DIR_BITS)
 
 typedef struct cstr {		/* a string literal */
 	const char *s;		/* bytes, element size each, zero terminated */
@@ -41,6 +41,7 @@ typedef struct attrs {		/* the attributes of one declaration */
 	uint32_t section, alias, asmname;	/* string index + 1, 0: none */
 	uint32_t cleanup;	/* sym */
 	uint32_t mode;		/* 0, or the integer type kind from mode() */
+	uint32_t vecsize;	/* vector_size(n) bytes, 0: none */
 	uint32_t counted_by;	/* identifier id */
 	uint32_t visibility;
 	uint32_t flags;		/* SF_* */
@@ -152,7 +153,7 @@ enum {
 	BI_CLRSB, BI_CLRSBL, BI_CLRSBLL,
 	BI_BSWAP16, BI_BSWAP32, BI_BSWAP64, BI_BITREVERSE8, BI_BITREVERSE16, BI_BITREVERSE32, BI_BITREVERSE64,
 	BI_UNREACHABLE, BI_TRAP, BI_DEBUGTRAP, BI_RETURN_ADDRESS, BI_FRAME_ADDRESS, BI_EXTRACT_RETURN_ADDR,
-	BI_ADD_OVERFLOW, BI_SUB_OVERFLOW, BI_MUL_OVERFLOW,
+	BI_ADD_OVERFLOW, BI_SUB_OVERFLOW, BI_MUL_OVERFLOW, BI_ADDC, BI_SUBC,
 	BI_OBJECT_SIZE, BI_DYNAMIC_OBJECT_SIZE, BI_COUNTED_BY_REF,
 	BI_ALLOCA, BI_ALLOCA_UNINIT, BI_PREFETCH, BI_ASSUME_ALIGNED, BI_ASSUME,
 	BI_CLASSIFY_TYPE, BI_IS_CONSTANT_EVALUATED, BI_STRLEN,

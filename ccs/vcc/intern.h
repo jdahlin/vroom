@@ -82,6 +82,9 @@ uint32_t vintern_count(void);
 #include <arm_acle.h>
 #include <string.h>
 
+/* identifier ids are below 1 << VINTERN_ID_BITS: tables indexed by id are sized by it */
+#define VINTERN_ID_BITS 23
+
 #define VIC_BITS 11
 typedef struct vintern_cache {
 	struct { uint64_t w0, w1; uint32_t hash, id; uint64_t _pad; } e[1u << VIC_BITS];

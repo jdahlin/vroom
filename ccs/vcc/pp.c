@@ -336,7 +336,7 @@ struct pmacro {
 
 #define MPAGE_BITS 11
 #define MPAGE (1u << MPAGE_BITS)
-#define NMDIR ((1u << 20) >> MPAGE_BITS)
+#define NMDIR ((1u << VINTERN_ID_BITS) >> MPAGE_BITS)
 
 /* ---------------- contexts ---------------- */
 

@@ -32,6 +32,7 @@ int main(int argc, char **argv)
 	int bench = 0, first = 1;
 	if (argc > 2 && !strcmp(argv[1], "--bench")) { bench = atoi(argv[2]); first = 3; }
 	if (argc > 1 && !strcmp(argv[1], "--trace")) { as_trace = 1; argv++; argc--; }
+	else if (argc > 1 && !strcmp(argv[1], "--trace-all")) { as_trace = 2; argv++; argc--; }
 	As *a = as_new();
 	ElfObj *o = elf_new();
 	if (bench) {

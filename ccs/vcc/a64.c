@@ -164,6 +164,7 @@ enum {
 	K_DC, K_IC, K_TLBI, K_SYS, K_CSEL, K_CSET, K_CNEG, K_CCMP, K_DP1, K_MUL, K_CRC,
 	K_DP2, K_EXTR, K_VLD1, K_VREV, K_DUP, K_EXT, K_MOVI, K_VSHIFT, K_VPERM, K_PMULL,
 	K_FMOV, K_SHA3, K_SHA2, K_CPY, K_SET, K_V3, K_UMOV, K_AT, K_RDVL, K_PREG,
+	K_V2, K_TBL, K_SHA512, K_LDR_REP, K_INS, K_MTE, K_MTEM, K_VNOT, K_SMOV, K_ACROSS,
 };
 
 typedef struct { const char *name; uint8_t k; uint32_t base; uint32_t x; } Mn;
@@ -174,22 +175,31 @@ static const Mn mns[] = {
 	{ "adcs", K_DP2, 0x3a000000, 0 },
 	{ "add", K_ADDSUB, 0, 0 },
 	{ "adds", K_ADDSUB, 1, 0 },
+	{ "addv", K_ACROSS, 0x0e31b800, 0 },
 	{ "adr", K_ADR, 0x10000000, 0 },
 	{ "adrp", K_ADR, 0x90000000, 1 },
+	{ "aesd", K_V2, 0x4e285800, 0 },
+	{ "aese", K_V2, 0x4e284800, 0 },
+	{ "aesimc", K_V2, 0x4e287800, 0 },
+	{ "aesmc", K_V2, 0x4e286800, 0 },
 	{ "and", K_LOGIC, 0, 0 },
 	{ "ands", K_LOGIC, 3, 0 },
 	{ "asr", K_SHIFT, 2, 0 },
 	{ "at", K_AT, 0, 0 },
 	{ "b", K_B, 0x14000000, R_AARCH64_JUMP26 },
+	{ "bcax", K_SHA512, 0xce200000, 3 },
 	{ "bfi", K_BFI, 1, 0 },
 	{ "bfm", K_BFM, 1, 0 },
 	{ "bfxil", K_BFX, 1, 0 },
 	{ "bic", K_LOGIC, 0, 1 },
 	{ "bics", K_LOGIC, 3, 1 },
+	{ "bif", K_V3, 0x2ee01c00, 0 },
+	{ "bit", K_V3, 0x2ea01c00, 0 },
 	{ "bl", K_B, 0x94000000, R_AARCH64_CALL26 },
 	{ "blr", K_BR, 0xd63f0000, 0 },
 	{ "br", K_BR, 0xd61f0000, 0 },
 	{ "brk", K_EXC, 0xd4200000, 0 },
+	{ "bsl", K_V3, 0x2e601c00, 0 },
 	{ "bti", K_BTI, 0xd503241f, 0 },
 	{ "cbnz", K_CBZ, 0x35000000, 0 },
 	{ "cbz", K_CBZ, 0x34000000, 0 },
@@ -200,21 +210,51 @@ static const Mn mns[] = {
 	{ "clrbhb", K_FIXED, 0xd50322df, 0 },
 	{ "clrex", K_FIXED, 0xd5033f5f, 0 },
 	{ "clz", K_DP1, 0x5ac01000, 0 },
+	{ "cmeq", K_VPERM, 0x2e208c00, 0 },
+	{ "cmge", K_VPERM, 0x0e203c00, 0 },
+	{ "cmgt", K_VPERM, 0x0e203400, 0 },
+	{ "cmhi", K_VPERM, 0x2e203400, 0 },
+	{ "cmhs", K_VPERM, 0x2e203c00, 0 },
 	{ "cmn", K_CMP, 1, 0 },
 	{ "cmp", K_CMP, 3, 0 },
+	{ "cmtst", K_VPERM, 0x0e208c00, 0 },
 	{ "cneg", K_CNEG, 0x5a800400, 0 },
-	{ "cpye", K_CPY, 0x1d800400, 0 }, { "cpyen", K_CPY, 0x1d800400, 12 }, { "cpyern", K_CPY, 0x1d800400, 8 },
-	{ "cpyert", K_CPY, 0x1d800400, 2 }, { "cpyewn", K_CPY, 0x1d800400, 4 }, { "cpyewt", K_CPY, 0x1d800400, 1 },
-	{ "cpyfe", K_CPY, 0x19800400, 0 }, { "cpyfen", K_CPY, 0x19800400, 12 }, { "cpyfern", K_CPY, 0x19800400, 8 },
-	{ "cpyfert", K_CPY, 0x19800400, 2 }, { "cpyfewn", K_CPY, 0x19800400, 4 }, { "cpyfewt", K_CPY, 0x19800400, 1 },
-	{ "cpyfm", K_CPY, 0x19400400, 0 }, { "cpyfmn", K_CPY, 0x19400400, 12 }, { "cpyfmrn", K_CPY, 0x19400400, 8 },
-	{ "cpyfmrt", K_CPY, 0x19400400, 2 }, { "cpyfmwn", K_CPY, 0x19400400, 4 }, { "cpyfmwt", K_CPY, 0x19400400, 1 },
-	{ "cpyfp", K_CPY, 0x19000400, 0 }, { "cpyfpn", K_CPY, 0x19000400, 12 }, { "cpyfprn", K_CPY, 0x19000400, 8 },
-	{ "cpyfprt", K_CPY, 0x19000400, 2 }, { "cpyfpwn", K_CPY, 0x19000400, 4 }, { "cpyfpwt", K_CPY, 0x19000400, 1 },
-	{ "cpym", K_CPY, 0x1d400400, 0 }, { "cpymn", K_CPY, 0x1d400400, 12 }, { "cpymrn", K_CPY, 0x1d400400, 8 },
-	{ "cpymrt", K_CPY, 0x1d400400, 2 }, { "cpymwn", K_CPY, 0x1d400400, 4 }, { "cpymwt", K_CPY, 0x1d400400, 1 },
-	{ "cpyp", K_CPY, 0x1d000400, 0 }, { "cpypn", K_CPY, 0x1d000400, 12 }, { "cpyprn", K_CPY, 0x1d000400, 8 },
-	{ "cpyprt", K_CPY, 0x1d000400, 2 }, { "cpypwn", K_CPY, 0x1d000400, 4 }, { "cpypwt", K_CPY, 0x1d000400, 1 },
+	{ "cpye", K_CPY, 0x1d800400, 0 },
+	{ "cpyen", K_CPY, 0x1d800400, 12 },
+	{ "cpyern", K_CPY, 0x1d800400, 8 },
+	{ "cpyert", K_CPY, 0x1d800400, 2 },
+	{ "cpyewn", K_CPY, 0x1d800400, 4 },
+	{ "cpyewt", K_CPY, 0x1d800400, 1 },
+	{ "cpyfe", K_CPY, 0x19800400, 0 },
+	{ "cpyfen", K_CPY, 0x19800400, 12 },
+	{ "cpyfern", K_CPY, 0x19800400, 8 },
+	{ "cpyfert", K_CPY, 0x19800400, 2 },
+	{ "cpyfewn", K_CPY, 0x19800400, 4 },
+	{ "cpyfewt", K_CPY, 0x19800400, 1 },
+	{ "cpyfm", K_CPY, 0x19400400, 0 },
+	{ "cpyfmn", K_CPY, 0x19400400, 12 },
+	{ "cpyfmrn", K_CPY, 0x19400400, 8 },
+	{ "cpyfmrt", K_CPY, 0x19400400, 2 },
+	{ "cpyfmwn", K_CPY, 0x19400400, 4 },
+	{ "cpyfmwt", K_CPY, 0x19400400, 1 },
+	{ "cpyfp", K_CPY, 0x19000400, 0 },
+	{ "cpyfpn", K_CPY, 0x19000400, 12 },
+	{ "cpyfprn", K_CPY, 0x19000400, 8 },
+	{ "cpyfprt", K_CPY, 0x19000400, 2 },
+	{ "cpyfpwn", K_CPY, 0x19000400, 4 },
+	{ "cpyfpwt", K_CPY, 0x19000400, 1 },
+	{ "cpym", K_CPY, 0x1d400400, 0 },
+	{ "cpymn", K_CPY, 0x1d400400, 12 },
+	{ "cpymrn", K_CPY, 0x1d400400, 8 },
+	{ "cpymrt", K_CPY, 0x1d400400, 2 },
+	{ "cpymwn", K_CPY, 0x1d400400, 4 },
+	{ "cpymwt", K_CPY, 0x1d400400, 1 },
+	{ "cpyp", K_CPY, 0x1d000400, 0 },
+	{ "cpypn", K_CPY, 0x1d000400, 12 },
+	{ "cpyprn", K_CPY, 0x1d000400, 8 },
+	{ "cpyprt", K_CPY, 0x1d000400, 2 },
+	{ "cpypwn", K_CPY, 0x1d000400, 4 },
+	{ "cpypwt", K_CPY, 0x1d000400, 1 },
 	{ "crc32b", K_CRC, 0x1ac04000, 0 },
 	{ "crc32cb", K_CRC, 0x1ac05000, 0 },
 	{ "crc32ch", K_CRC, 0x1ac05400, 0 },
@@ -235,6 +275,7 @@ static const Mn mns[] = {
 	{ "dup", K_DUP, 0, 0 },
 	{ "eon", K_LOGIC, 2, 1 },
 	{ "eor", K_LOGIC, 2, 0 },
+	{ "eor3", K_SHA512, 0xce000000, 3 },
 	{ "eret", K_FIXED, 0xd69f03e0, 0 },
 	{ "ext", K_EXT, 0x2e000000, 0 },
 	{ "extr", K_EXTR, 0x13800000, 0 },
@@ -242,12 +283,19 @@ static const Mn mns[] = {
 	{ "hint", K_HINT, 0xd503201f, 0 },
 	{ "hvc", K_EXC, 0xd4000002, 0 },
 	{ "ic", K_IC, 0, 0 },
+	{ "ins", K_INS, 0, 0 },
 	{ "isb", K_BARRIER, 0xd50330df, 1 },
 	{ "ld1", K_VLD1, 0x0c400000, 0 },
+	{ "ld1r", K_LDR_REP, 0x0d40c000, 1 },
+	{ "ld2r", K_LDR_REP, 0x0d60c000, 2 },
+	{ "ld3r", K_LDR_REP, 0x0d40e000, 3 },
+	{ "ld4r", K_LDR_REP, 0x0d60e000, 4 },
 	{ "ldaxr", K_LDX, 0x085ffc00, 0 },
+	{ "ldg", K_MTE, 0xd9600000, 1 },
+	{ "ldgm", K_MTEM, 0xd9e00000, 0 },
 	{ "ldnp", K_LDP, 0, 1 | 2 },
 	{ "ldp", K_LDP, 0, 1 },
-	{ "ldr", K_LDST, 0x01, 0xff },	/* x: (size|opc) table selector */
+	{ "ldr", K_LDST, 0x01, 0xff },
 	{ "ldrb", K_LDST, 0x01, 0 },
 	{ "ldrh", K_LDST, 0x01, 1 },
 	{ "ldrsb", K_LDST, 0x02, 0 },
@@ -276,15 +324,17 @@ static const Mn mns[] = {
 	{ "neg", K_NEG, 0x4b0003e0, 0 },
 	{ "negs", K_NEG, 0x6b0003e0, 0 },
 	{ "nop", K_FIXED, 0xd503201f, 0 },
+	{ "not", K_VNOT, 0x2e205800, 0 },
 	{ "orn", K_LOGIC, 1, 1 },
 	{ "orr", K_LOGIC, 1, 0 },
 	{ "pfalse", K_PREG, 0x2518e400, 0 },
+	{ "pmul", K_V3, 0x2e209c00, 1 },
 	{ "pmull", K_PMULL, 0x0e20e000, 0 },
 	{ "pmull2", K_PMULL, 0x4e20e000, 0 },
 	{ "prfm", K_PRFM, 0, 0 },
 	{ "rbit", K_DP1, 0x5ac00000, 0 },
-
 	{ "rdffr", K_PREG, 0x2519f000, 0 },
+	{ "rdsvl", K_RDVL, 0x04bf5800, 0 },
 	{ "rdvl", K_RDVL, 0x04bf5000, 0 },
 	{ "ret", K_RET, 0xd65f0000, 0 },
 	{ "rev", K_DP1, 0x5ac00800, 1 },
@@ -299,12 +349,18 @@ static const Mn mns[] = {
 	{ "sbfm", K_BFM, 0, 0 },
 	{ "sbfx", K_BFX, 0, 0 },
 	{ "sdiv", K_DP2, 0x1ac00c00, 0 },
-	{ "sete", K_SET, 0x19c08400, 0 }, { "seten", K_SET, 0x19c08400, 2 }, { "setet", K_SET, 0x19c08400, 1 },
+	{ "sete", K_SET, 0x19c08400, 0 },
+	{ "seten", K_SET, 0x19c08400, 2 },
+	{ "setet", K_SET, 0x19c08400, 1 },
 	{ "setetn", K_SET, 0x19c08400, 3 },
 	{ "setffr", K_FIXED, 0x252c9000, 0 },
-	{ "setm", K_SET, 0x19c04400, 0 }, { "setmn", K_SET, 0x19c04400, 2 }, { "setmt", K_SET, 0x19c04400, 1 },
+	{ "setm", K_SET, 0x19c04400, 0 },
+	{ "setmn", K_SET, 0x19c04400, 2 },
+	{ "setmt", K_SET, 0x19c04400, 1 },
 	{ "setmtn", K_SET, 0x19c04400, 3 },
-	{ "setp", K_SET, 0x19c00400, 0 }, { "setpn", K_SET, 0x19c00400, 2 }, { "setpt", K_SET, 0x19c00400, 1 },
+	{ "setp", K_SET, 0x19c00400, 0 },
+	{ "setpn", K_SET, 0x19c00400, 2 },
+	{ "setpt", K_SET, 0x19c00400, 1 },
 	{ "setptn", K_SET, 0x19c00400, 3 },
 	{ "sev", K_FIXED, 0xd503209f, 0 },
 	{ "sevl", K_FIXED, 0xd50320bf, 0 },
@@ -318,15 +374,25 @@ static const Mn mns[] = {
 	{ "sha256h2", K_SHA3, 0x5e005000, 2 },
 	{ "sha256su0", K_SHA2, 0x5e282800, 1 },
 	{ "sha256su1", K_SHA3, 0x5e006000, 1 },
+	{ "sha512h", K_SHA512, 0xce608000, 0 },
+	{ "sha512h2", K_SHA512, 0xce608400, 0 },
+	{ "sha512su0", K_SHA512, 0xcec08000, 1 },
+	{ "sha512su1", K_SHA512, 0xce608800, 2 },
 	{ "shl", K_VSHIFT, 0x0f005400, 0 },
 	{ "sli", K_VSHIFT, 0x2f005400, 0 },
 	{ "smaddl", K_MUL, 0x9b200000, 3 },
+	{ "smaxv", K_ACROSS, 0x0e30a800, 0 },
 	{ "smc", K_EXC, 0xd4000003, 0 },
+	{ "sminv", K_ACROSS, 0x0e31a800, 0 },
+	{ "smov", K_SMOV, 0x0e002c00, 0 },
 	{ "smulh", K_DP2, 0x9b407c00, 1 },
 	{ "smull", K_MUL, 0x9b207c00, 2 },
 	{ "sri", K_VSHIFT, 0x2f004400, 1 },
 	{ "sshr", K_VSHIFT, 0x0f000400, 1 },
 	{ "st1", K_VLD1, 0x0c000000, 0 },
+	{ "st2g", K_MTE, 0xd9a00000, 0 },
+	{ "stg", K_MTE, 0xd9200000, 0 },
+	{ "stgm", K_MTEM, 0xd9a00000, 0 },
 	{ "stlxr", K_STX, 0x0800fc00, 0 },
 	{ "stnp", K_LDP, 0, 2 },
 	{ "stp", K_LDP, 0, 0 },
@@ -340,19 +406,28 @@ static const Mn mns[] = {
 	{ "sturb", K_LDSTU, 0x00, 0 },
 	{ "sturh", K_LDSTU, 0x00, 1 },
 	{ "stxr", K_STX, 0x08007c00, 0 },
+	{ "stz2g", K_MTE, 0xd9e00000, 0 },
+	{ "stzg", K_MTE, 0xd9600000, 0 },
+	{ "stzgm", K_MTEM, 0xd9200000, 0 },
 	{ "sub", K_ADDSUB, 2, 0 },
 	{ "subs", K_ADDSUB, 3, 0 },
 	{ "svc", K_EXC, 0xd4000001, 0 },
 	{ "sys", K_SYS, 0xd5080000, 0 },
+	{ "tbl", K_TBL, 0x0e000000, 0 },
 	{ "tbnz", K_TBZ, 0x37000000, 0 },
+	{ "tbx", K_TBL, 0x0e001000, 0 },
 	{ "tbz", K_TBZ, 0x36000000, 0 },
 	{ "tlbi", K_TLBI, 0, 0 },
+	{ "trn1", K_VPERM, 0x0e002800, 0 },
+	{ "trn2", K_VPERM, 0x0e006800, 0 },
 	{ "tst", K_TST, 0, 0 },
 	{ "ubfiz", K_BFI, 2, 0 },
 	{ "ubfm", K_BFM, 2, 0 },
 	{ "ubfx", K_BFX, 2, 0 },
 	{ "udiv", K_DP2, 0x1ac00800, 0 },
 	{ "umaddl", K_MUL, 0x9ba00000, 3 },
+	{ "umaxv", K_ACROSS, 0x2e30a800, 0 },
+	{ "uminv", K_ACROSS, 0x2e31a800, 0 },
 	{ "umov", K_UMOV, 0, 0 },
 	{ "umulh", K_DP2, 0x9bc07c00, 1 },
 	{ "umull", K_MUL, 0x9ba07c00, 2 },
@@ -481,9 +556,15 @@ static int k_cmp(Ctx *c, const Mn *m)
 	return addsub_reg(c, sf, op, 1, &zr, &o[0], &o[1], c->n == 3 ? &o[2] : 0);
 }
 
+static int k_vnot(Ctx *c, const Mn *m);
+
 static int k_neg(Ctx *c, const Mn *m)
 {
 	const A64Op *o = c->op;
+	if (m->x && c->n == 2 && o[0].kind == A64O_VREG) {	/* mvn Vd.T, Vn.T = not */
+		static const Mn vnot = { "not", K_VNOT, 0x2e205800, 0 };
+		return k_vnot(c, &vnot);
+	}
 	if (c->n < 2 || c->n > 3 || !gpr_nosp(&o[0]) || !gpr_nosp(&o[1])) BADOPS;
 	int sf = isx(&o[0]);
 	unsigned st = 0, amt = 0;
@@ -512,6 +593,22 @@ static int k_logic(Ctx *c, const Mn *m)
 	const A64Op *o = c->op;
 	unsigned opc = m->base;
 	int inv = (int)m->x;
+	if (o[0].kind == A64O_VREG && c->n >= 2 && iscimm(&o[1]) && (opc == 1 && !inv ? 1 : opc == 0 && inv)) {
+		/* orr/bic Vd.T, #imm8{, lsl #n}: modified immediate */
+		int sz = arr_size(o[0].arr);
+		unsigned sh = 0, cmode;
+		uint64_t v = (uint64_t)o[1].imm;
+		if (c->n == 3) {
+			if (o[2].kind != A64O_SHIFT || o[2].shift != A64_LSL) BADOPS;
+			sh = (unsigned)o[2].imm;
+		} else if (c->n != 2) BADOPS;
+		if (v > 0xff) FAIL("immediate out of range");
+		if (sz == 1) { if (sh != 0 && sh != 8) BADOPS; cmode = 9 | (sh / 8) << 1; }
+		else if (sz == 2) { if (sh & 7 || sh > 24) BADOPS; cmode = 1 | (sh / 8) << 1; }
+		else BADOPS;
+		*c->out = 0x0f000400u | arr_q(o[0].arr) << 30 | (unsigned)inv << 29 | (unsigned)(v >> 5 & 7) << 16 | cmode << 12 | (unsigned)(v & 31) << 5 | R(&o[0]);
+		return 0;
+	}
 	if (c->n == 3 && o[0].kind == A64O_VREG) {
 		static const uint32_t vb[4][2] = { { 0x0e201c00, 0x0e601c00 }, { 0x0ea01c00, 0x0ee01c00 }, { 0x2e201c00, 0 }, { 0, 0 } };
 		uint32_t b = vb[opc][inv];
@@ -1316,6 +1413,12 @@ static const SysOp tlbiops[] = {
 	{ "rvae1is", 0, 8, 2, 1, 1 }, { "rvale1is", 0, 8, 2, 5, 1 }, { "rvaae1is", 0, 8, 2, 3, 1 }, { "rvaale1is", 0, 8, 2, 7, 1 },
 	{ "rvae1", 0, 8, 6, 1, 1 }, { "rvale1", 0, 8, 6, 5, 1 }, { "rvaae1", 0, 8, 6, 3, 1 }, { "rvaale1", 0, 8, 6, 7, 1 },
 	{ "rvae1os", 0, 8, 5, 1, 1 }, { "rvale1os", 0, 8, 5, 5, 1 },
+	{ "ripas2e1is", 4, 8, 0, 2, 1 }, { "ripas2le1is", 4, 8, 0, 6, 1 }, { "ripas2e1", 4, 8, 4, 2, 1 },
+	{ "ripas2le1", 4, 8, 4, 6, 1 }, { "ripas2e1os", 4, 8, 4, 3, 1 }, { "ripas2le1os", 4, 8, 4, 7, 1 },
+	{ "ipas2e1os", 4, 8, 4, 0, 1 }, { "ipas2le1os", 4, 8, 4, 4, 1 }, { "ipas2le1", 4, 8, 4, 5, 1 },
+	{ "vmalls12e1os", 4, 8, 1, 6, 0 }, { "alle1os", 4, 8, 1, 4, 0 }, { "alle2os", 4, 8, 1, 0, 0 },
+	{ "vae2", 4, 8, 7, 1, 1 }, { "vale2", 4, 8, 7, 5, 1 }, { "vae2os", 4, 8, 1, 1, 1 }, { "vale2os", 4, 8, 1, 5, 1 },
+	{ "rvaae1os", 0, 8, 5, 3, 1 }, { "rvaale1os", 0, 8, 5, 7, 1 },
 };
 
 static int sysop(Ctx *c, const SysOp *t, size_t nt)
@@ -1669,6 +1772,192 @@ static int k_atomic(Ctx *c, const char *mn, size_t n, int *r)
 	return 1;
 }
 
+/* smov Wd|Xd, Vn.T[i] (T: b, h; s only into Xd) */
+static int k_smov(Ctx *c, const Mn *m)
+{
+	const A64Op *o = c->op;
+	unsigned imm5;
+	if (c->n != 2 || !gpr_nosp(&o[0]) || o[1].kind != A64O_VELEM) BADOPS;
+	int sz = velem_imm5(&o[1], &imm5);
+	if (sz < 0 || sz > 2 || (sz == 2 && !isx(&o[0]))) BADOPS;
+	*c->out = m->base | (uint32_t)isx(&o[0]) << 30 | imm5 << 16 | R(&o[1]) << 5 | R(&o[0]);
+	return 0;
+}
+
+/* across lanes: sminv/smaxv/uminv/umaxv/addv Bd|Hd|Sd, Vn.T */
+static int k_across(Ctx *c, const Mn *m)
+{
+	const A64Op *o = c->op;
+	static const uint8_t cls_of[3] = { A64_B, A64_H, A64_S };
+	if (c->n != 2 || !isreg(&o[0]) || o[1].kind != A64O_VREG) BADOPS;
+	int sz = arr_size(o[1].arr);
+	if (sz < 0 || sz > 2 || (sz == 2 && !arr_q(o[1].arr)) || o[0].cls != cls_of[sz]) BADOPS;
+	*c->out = m->base | arr_q(o[1].arr) << 30 | (uint32_t)sz << 22 | R(&o[1]) << 5 | R(&o[0]);
+	return 0;
+}
+
+/* not Vd.8b/16b, Vn.T (mvn's vector form) */
+static int k_vnot(Ctx *c, const Mn *m)
+{
+	const A64Op *o = c->op;
+	if (c->n != 2 || o[0].kind != A64O_VREG || o[1].kind != A64O_VREG || (o[0].arr != A64_8B && o[0].arr != A64_16B) || o[1].arr != o[0].arr) BADOPS;
+	*c->out = m->base | arr_q(o[0].arr) << 30 | R(&o[1]) << 5 | R(&o[0]);
+	return 0;
+}
+
+/* AdvSIMD two-register (aese/aesd/aesmc/aesimc: .16b only) */
+static int k_v2(Ctx *c, const Mn *m)
+{
+	const A64Op *o = c->op;
+	if (c->n != 2 || o[0].kind != A64O_VREG || o[1].kind != A64O_VREG || o[0].arr != A64_16B || o[1].arr != A64_16B) BADOPS;
+	*c->out = m->base | R(&o[1]) << 5 | R(&o[0]);
+	return 0;
+}
+
+/* AdvSIMD three-same without size (bsl/bit/bif: .8b/.16b) or byte-only sized (pmul) */
+static int k_v3(Ctx *c, const Mn *m)
+{
+	const A64Op *o = c->op;
+	if (c->n != 3 || o[0].kind != A64O_VREG || o[1].kind != A64O_VREG || o[2].kind != A64O_VREG) BADOPS;
+	if (o[0].arr != A64_8B && o[0].arr != A64_16B) BADOPS;
+	if (o[1].arr != o[0].arr || o[2].arr != o[0].arr) BADOPS;
+	*c->out = m->base | arr_q(o[0].arr) << 30 | R(&o[2]) << 16 | R(&o[1]) << 5 | R(&o[0]);
+	return 0;
+}
+
+/* tbl/tbx Vd.T, {Vn.16b, ...}, Vm.T */
+static int k_tbl(Ctx *c, const Mn *m)
+{
+	const A64Op *o = c->op;
+	if (c->n != 3 || o[0].kind != A64O_VREG || o[1].kind != A64O_LIST || o[2].kind != A64O_VREG) BADOPS;
+	if ((o[0].arr != A64_8B && o[0].arr != A64_16B) || o[2].arr != o[0].arr || o[1].arr != A64_16B || o[1].hasidx) BADOPS;
+	if (o[1].nregs < 1 || o[1].nregs > 4) BADOPS;
+	*c->out = m->base | arr_q(o[0].arr) << 30 | R(&o[2]) << 16 | (unsigned)(o[1].nregs - 1) << 13 | (unsigned)o[1].reg << 5 | R(&o[0]);
+	return 0;
+}
+
+/* sha512h/h2 Qd, Qn, Vm.2d; sha512su0 Vd.2d, Vn.2d; sha512su1 Vd.2d, Vn.2d, Vm.2d */
+static int k_sha512(Ctx *c, const Mn *m)
+{
+	const A64Op *o = c->op;
+	if (m->x == 3) {	/* eor3/bcax Vd.16b, Vn.16b, Vm.16b, Va.16b */
+		if (c->n != 4) BADOPS;
+		for (int i = 0; i < 4; i++)
+			if (o[i].kind != A64O_VREG || o[i].arr != A64_16B) BADOPS;
+		*c->out = m->base | R(&o[2]) << 16 | R(&o[3]) << 10 | R(&o[1]) << 5 | R(&o[0]);
+		return 0;
+	}
+	if (m->x == 1) {
+		if (c->n != 2 || o[0].kind != A64O_VREG || o[1].kind != A64O_VREG || o[0].arr != A64_2D || o[1].arr != A64_2D) BADOPS;
+		*c->out = m->base | R(&o[1]) << 5 | R(&o[0]);
+		return 0;
+	}
+	if (c->n != 3 || o[2].kind != A64O_VREG || o[2].arr != A64_2D) BADOPS;
+	if (m->x == 2) { if (o[0].kind != A64O_VREG || o[1].kind != A64O_VREG || o[0].arr != A64_2D || o[1].arr != A64_2D) BADOPS; }
+	else if (!isreg(&o[0]) || o[0].cls != A64_Q || !isreg(&o[1]) || o[1].cls != A64_Q) BADOPS;
+	*c->out = m->base | R(&o[2]) << 16 | R(&o[1]) << 5 | R(&o[0]);
+	return 0;
+}
+
+/* ld1r..ld4r {Vt.T, ...}, [Xn] / [Xn], #imm / [Xn], Xm */
+static int k_ldr_rep(Ctx *c, const Mn *m)
+{
+	const A64Op *o = c->op;
+	if (c->n < 2 || c->n > 3 || o[0].kind != A64O_LIST || o[0].hasidx || o[1].kind != A64O_MEM || o[1].mode != A64M_OFF || o[1].hasamt || o[1].imm) BADOPS;
+	unsigned nr = o[0].nregs;
+	int sz = arr_size(o[0].arr);
+	if (nr != m->x || sz < 0 || sz > 3) BADOPS;
+	uint32_t w = m->base | arr_q(o[0].arr) << 30 | (unsigned)sz << 10 | (unsigned)o[1].reg << 5 | R(&o[0]);
+	if (c->n == 3) {
+		w |= 0x00800000;
+		if (iscimm(&o[2])) {
+			if (o[2].imm != (int64_t)nr << sz) FAIL("invalid post-increment");
+			w |= 31u << 16;
+		} else if (gpr_nosp(&o[2]) && isx(&o[2]) && o[2].reg != 31) w |= R(&o[2]) << 16;
+		else BADOPS;
+	}
+	*c->out = w;
+	return 0;
+}
+
+/* ins Vd.T[i], Rn / ins Vd.T[i], Vn.T[j]: the mov aliases */
+static int k_ins(Ctx *c, const Mn *m)
+{
+	if (c->n != 2 || c->op[0].kind != A64O_VELEM) BADOPS;
+	return k_mov(c, m);
+}
+
+/* MTE: stg/stzg/st2g/stz2g Xt|sp, [Xn|sp{, #simm}]{!} / [Xn], #simm; ldg Xt, [Xn{, #simm}] */
+static int k_mte(Ctx *c, const Mn *m)
+{
+	const A64Op *o = c->op;
+	if (c->n < 2 || c->n > 3 || !isx(&o[0]) || o[1].kind != A64O_MEM || o[1].mode == A64M_REG || o[1].hassym) BADOPS;
+	int64_t off = o[1].imm;
+	unsigned mode = 2;	/* signed offset */
+	if (c->n == 3) {
+		if (o[1].mode != A64M_OFF || off || !iscimm(&o[2])) BADOPS;
+		off = o[2].imm, mode = 1;
+	} else if (o[1].mode == A64M_PRE)
+		mode = 3;
+	if (off & 15 || off < -4096 || off > 4080) FAIL("index must be a multiple of 16 in range [-4096, 4080]");
+	if (m->x == 1 && mode != 2) BADOPS;	/* ldg: offset form only */
+	*c->out = m->base | ((unsigned)(off / 16) & 0x1ff) << 12 | (m->x == 1 ? 0 : mode << 10) | (unsigned)o[1].reg << 5 | R(&o[0]);
+	return 0;
+}
+
+/* stgm/stzgm/ldgm Xt, [Xn|sp] */
+static int k_mtem(Ctx *c, const Mn *m)
+{
+	const A64Op *o = c->op;
+	if (c->n != 2 || !isx(&o[0]) || o[0].sp || o[1].kind != A64O_MEM || o[1].mode != A64M_OFF || o[1].imm || o[1].hassym) BADOPS;
+	*c->out = m->base | (unsigned)o[1].reg << 5 | R(&o[0]);
+	return 0;
+}
+
+/* FEAT_LSUI: cas{a}{l}t, swp{a}{l}t, ldt<add|clr|set>{a}{l}, stt<add|clr|set>{l} */
+static int k_lsui(Ctx *c, const char *mn, size_t n, int *r)
+{
+	static const char *const ops[] = { "add", "clr", 0, "set" };
+	const A64Op *o = c->op;
+	size_t k = 0;
+	int cls = -1, a = 0, l = 0;
+	unsigned opc = 0;
+
+	if (pre(mn, n, &k, "cas")) cls = 0;
+	else if (pre(mn, n, &k, "swpt")) cls = 1;	/* swpt{a}{l}: the t comes first */
+	else if (pre(mn, n, &k, "ldt") || pre(mn, n, &k, "stt")) {
+		cls = (mn[0] | 32) == 's' ? 3 : 2;
+		for (opc = 0; opc < 4; opc++) {
+			size_t k2 = k;
+			if (ops[opc] && pre(mn, n, &k2, ops[opc])) { k = k2; break; }
+		}
+		if (opc == 4) return 0;
+	} else
+		return 0;
+	if (cls != 3 && k < n && (mn[k] | 32) == 'a') { a = 1; k++; }
+	if (k < n && (mn[k] | 32) == 'l') { l = 1; k++; }
+	if (cls == 0) {
+		if (k + 1 != n || (mn[k] | 32) != 't') return 0;
+	} else if (k != n)
+		return 0;
+	*r = -1;
+	*c->err = "invalid operand for instruction";
+	if (cls == 3) {		/* stt<op> Rs, [Xn] = ldt<op> with Rt = zr */
+		if (c->n != 2 || !gpr_nosp(&o[0]) || !mem0(&o[1])) return 1;
+		*c->out = 0x1920041fu | (uint32_t)isx(&o[0]) << 30 | (uint32_t)l << 22 | R(&o[0]) << 16 | opc << 12 | (unsigned)o[1].reg << 5;
+	} else {
+		if (c->n != 3 || !gpr_nosp(&o[0]) || !gpr_nosp(&o[1]) || isx(&o[0]) != isx(&o[1]) || !mem0(&o[2])) return 1;
+		if (cls == 0)
+			*c->out = 0x89807c00u | (uint32_t)isx(&o[0]) << 30 | (uint32_t)a << 22 | R(&o[0]) << 16 | (uint32_t)l << 15 | (unsigned)o[2].reg << 5 | R(&o[1]);
+		else
+			*c->out = (cls == 1 ? 0x19208400u : 0x19200400u | opc << 12) | (uint32_t)isx(&o[0]) << 30 | (uint32_t)a << 23 | (uint32_t)l << 22 |
+				  R(&o[0]) << 16 | (unsigned)o[2].reg << 5 | R(&o[1]);
+	}
+	*c->err = 0;
+	*r = 0;
+	return 1;
+}
+
 /* ---------------------------------------------------------------- dispatch */
 
 int a64_asm(const char *mn, size_t n, const A64Op *op, int nop, uint32_t *out, A64Fix *fix, const char **err)
@@ -1686,6 +1975,7 @@ int a64_asm(const char *mn, size_t n, const A64Op *op, int nop, uint32_t *out, A
 	{
 		int r;
 		if (k_atomic(&c, mn, n, &r)) return r;
+		if (k_lsui(&c, mn, n, &r)) return r;
 	}
 	const Mn *m = lookup(mn, n);
 	if (!m) { *err = "unrecognized instruction mnemonic"; return -1; }
@@ -1751,6 +2041,17 @@ int a64_asm(const char *mn, size_t n, const A64Op *op, int nop, uint32_t *out, A
 	case K_AT: return k_at(&c, m);
 	case K_RDVL: return k_rdvl(&c, m);
 	case K_PREG: return k_preg(&c, m);
+	case K_V2: return k_v2(&c, m);
+	case K_V3: return k_v3(&c, m);
+	case K_TBL: return k_tbl(&c, m);
+	case K_SHA512: return k_sha512(&c, m);
+	case K_LDR_REP: return k_ldr_rep(&c, m);
+	case K_INS: return k_ins(&c, m);
+	case K_MTE: return k_mte(&c, m);
+	case K_MTEM: return k_mtem(&c, m);
+	case K_VNOT: return k_vnot(&c, m);
+	case K_SMOV: return k_smov(&c, m);
+	case K_ACROSS: return k_across(&c, m);
 	}
 	*err = "internal: unhandled class";
 	return -1;

@@ -139,6 +139,7 @@ typedef struct ElfObj {
 	uint32_t nsec, nfrag, nsym, nfix, nreg;
 	uint32_t *htab; uint32_t hmask, hcount;	/* name -> symbol */
 	void *fin;		/* elf_finish() results for elf_emit() */
+	struct ElfExpr *expr, **expr_tail;	/* symbols defined as x op y, valued after layout */
 	char err[256];
 	int has_err;
 } ElfObj;
@@ -201,6 +202,8 @@ static inline void elf_bind(ElfObj *o, uint32_t s, int bind)
 static inline void elf_type(ElfObj *o, uint32_t s, int type) { elf_symp(o, s)->type = (uint8_t)type; }
 static inline void elf_vis(ElfObj *o, uint32_t s, int vis) { elf_symp(o, s)->vis = (uint8_t)vis; }
 void elf_size_expr(ElfObj *o, uint32_t sym, ElfVal v);	/* .size sym, expr */
+/* sym = x op y (op: as.c's operator codes), x and y absolute once the layout is known */
+void elf_expr_sym(ElfObj *o, uint32_t sym, int op, ElfVal x, ElfVal y);
 /* Registration fixes symbol-table order (MC registers a symbol when it is
  * defined, given an attribute, or used in an emitted value/instruction).
  * elf_define(), elf_fixup() and the mapping symbols register on their own. */
