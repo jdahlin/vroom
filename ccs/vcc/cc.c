@@ -56,6 +56,21 @@ static void *halloc(cc *c, size_t n)
 
 /* ---------------- diagnostics ---------------- */
 
+/* clang's -ferror-limit (default 20, 0: none): stop the TU with its fatal error */
+static void error_limit(cc *c)
+{
+	int lim = pp_error_limit(c->p);
+
+	if (!lim)
+		lim = 20;
+	if (lim > 0 && pp_errors(c->p) + 1 >= lim) {
+		pp_dinfo d = { "fatal error", UINT32_MAX, NULL, 0, NULL, 0 };
+
+		pp_diagx(c->p, &d, "too many errors emitted, stopping now [-ferror-limit=]");
+		longjmp(c->bail, 1);
+	}
+}
+
 static void diag(cc *c, uint32_t loc, const char *what, const char *fmt, va_list ap)
 {
 	c->ndiag++;
@@ -67,14 +82,11 @@ static void error(cc *c, uint32_t loc, const char *fmt, ...)
 {
 	va_list ap;
 
+	error_limit(c);
 	va_start(ap, fmt);
 	diag(c, loc, "error", fmt, ap);
 	va_end(ap);
-	if (++c->errors >= 20) {
-		va_start(ap, fmt);
-		pp_vdiag(c->p, loc, "fatal error", "too many errors emitted, stopping now", ap);
-		va_end(ap);
-	}
+	c->errors++;
 }
 
 __attribute__((format(printf, 3, 4), noreturn))
@@ -100,16 +112,12 @@ static void report(cc *c, const char *what, uint32_t loc, const pp_span *r, int 
 	va_list ap;
 
 	if (!strcmp(what, "error"))
-		c->errors++;
+		error_limit(c), c->errors++;
 	if (strcmp(what, "note"))
 		c->ndiag++;
 	va_start(ap, fmt);
 	pp_vdiagx(c->p, &d, fmt, ap);
 	va_end(ap);
-	if (c->errors >= 20 && !strcmp(what, "error")) {
-		fputs("fatal error: too many errors emitted, stopping now [-ferror-limit=]\n", stderr);
-		longjmp(c->bail, 1);
-	}
 }
 
 __attribute__((format(printf, 3, 4)))
@@ -121,6 +129,23 @@ static void note(cc *c, uint32_t loc, const char *fmt, ...)
 	va_start(ap, fmt);
 	pp_vdiagx(c->p, &d, fmt, ap);
 	va_end(ap);
+}
+
+static const char *const w_all[] = { "all", "most", NULL };
+
+/* a warning of clang's flag (on: on by default); false if it is off */
+__attribute__((format(printf, 10, 11)))
+static bool warnx(cc *c, const char *flag, bool on, const char *const *groups, uint32_t loc,
+		  const pp_span *r, int nr, const pp_fixit *fx, int nfx, const char *fmt, ...)
+{
+	pp_dinfo d = { "warning", loc, r, nr, fx, nfx };
+	char msg[1024];
+	va_list ap;
+
+	va_start(ap, fmt);
+	vsnprintf(msg, sizeof(msg), fmt, ap);
+	va_end(ap);
+	return pp_warnx(c->p, flag, on, groups, &d, "%s", msg);
 }
 
 static const char *idname(uint32_t id, int *len)
@@ -2552,8 +2577,10 @@ static bool need_lvalue(cc *c, uint32_t n, uint32_t loc)
 	if (QQ(N(n)->ty) & Q_CONST) {
 		if (N(n)->op == N_VAR) {
 			const sym *v = &c->syms[N(n)->a];
-			pp_span vr = { v->loc, pp_tok_end(c->p, v->loc) };
+			pp_span vr = { v->plb, pp_tok_end(c->p, v->ple) };
 
+			if (!v->ple)
+				vr = (pp_span){ v->loc, v->loc };
 			report(c, "error", loc, &r, 1, NULL, 0, "cannot assign to variable '%.*s' with const-qualified type '%s'",
 			       IDF(v->name), tyname(c, N(n)->ty));
 			report(c, "note", v->loc, &vr, 1, NULL, 0, "variable '%.*s' declared const here", IDF(v->name));
@@ -3707,7 +3734,9 @@ static uint32_t primary_(cc *c)
 
 			if (!c->fn)
 				error(c, loc, "statement expression not allowed at file scope");
+			c->in_stmtexpr++;
 			b = compound_stmt(c, &last);
+			c->in_stmtexpr--;
 			expect(c, T_RPAREN, "')'");
 			n = mk(c, N_STMTEXPR, last, loc);
 			N(n)->a = b;
@@ -3940,20 +3969,42 @@ static uint32_t call(cc *c, uint32_t fn, uint32_t loc)
 	if (!(f->flags & TF_NOPROTO)) {
 		if (args.n < f->n || (args.n > f->n && !(f->flags & TF_VARIADIC))) {
 			const char *v = f->flags & TF_VARIADIC ? "at least " : "";
+			uint32_t fs = N(callee)->op == N_VAR && c->syms[N(callee)->a].kind == S_FUNC ? N(callee)->a : 0;
+			uint32_t p1 = fs && c->syms[fs].psyms && f->n == 1 ? c->lists[c->syms[fs].psyms - 1] : 0;
+			pp_span cr = rng(c, callee);
 
+			if (p1 && !c->syms[p1].name)
+				p1 = 0;
 			if (args.n < f->n) {
-				pp_span r = rng(c, callee);
-
-				report(c, "error", c->prevloc, &r, 1, NULL, 0, "too few arguments to function call, %sexpected %u, have %u",
-				       v, f->n, args.n);
+				if (p1)
+					report(c, "error", c->prevloc, &cr, 1, NULL, 0, "too few arguments to function call, single argument '%.*s' was not specified",
+					       IDF(c->syms[p1].name));
+				else
+					report(c, "error", c->prevloc, &cr, 1, NULL, 0, "too few arguments to function call, %sexpected %u, have %u",
+					       v, f->n, args.n);
 			} else {
-				pp_span r = { rng(c, args.v[f->n]).b, rng(c, args.v[args.n - 1]).e };
+				pp_span r[2] = { cr, { rng(c, args.v[f->n]).b, rng(c, args.v[args.n - 1]).e } };
 
-				report(c, "error", r.b, &r, 1, NULL, 0, "too many arguments to function call, expected %u, have %u",
-				       f->n, args.n);
+				if (p1)
+					report(c, "error", r[1].b, r, 2, NULL, 0, "too many arguments to function call, expected single argument '%.*s', have %u arguments",
+					       IDF(c->syms[p1].name), args.n);
+				else
+					report(c, "error", r[1].b, r, 2, NULL, 0, "too many arguments to function call, expected %u, have %u",
+					       f->n, args.n);
 			}
-			if (N(callee)->op == N_VAR && c->syms[N(callee)->a].kind == S_FUNC)
-				note(c, c->syms[N(callee)->a].loc, "'%.*s' declared here", IDF(c->syms[N(callee)->a].name));
+			if (fs) {
+				const sym *y = &c->syms[fs];
+				pp_span pr = { y->plb, y->ple };
+				size_t len;
+				const char *t = y->ple > y->plb ? pp_src(c->p, y->plb, y->ple, &len) : NULL;
+
+				if (t) {
+					while (len && (t[len - 1] == ' ' || t[len - 1] == '\t' || t[len - 1] == '\n'))
+						len--;
+					pr.e = pr.b + (uint32_t)len;
+				}
+				report(c, "note", y->loc, &pr, t && len ? 1 : 0, NULL, 0, "'%.*s' declared here", IDF(y->name));
+			}
 		}
 	}
 	for (uint32_t i = 0; i < args.n; i++) {
@@ -4421,10 +4472,14 @@ static uint32_t binary(cc *c, int minp)
 
 		if (!p || p < minp)
 			return l;
+		bool mac = tok(c)->flags & PF_MACRO;
+
 		loc = tok(c)->loc;
 		next(c);
 		r = binary(c, p + 1);
 		l = binop(c, op, l, r, loc);
+		if (mac)
+			N(l)->flags |= NF_MACRO;
 		setspan(c, l, b);
 	}
 }
@@ -4472,10 +4527,14 @@ static uint32_t assign_expr(cc *c)
 
 	if (op) {
 		uint32_t loc = tok(c)->loc, r;
+		bool mac = tok(c)->flags & PF_MACRO;
 
 		next(c);
 		r = assign_expr(c);
-		return assign(c, op < 0 ? 0 : op, l, r, loc);
+		r = assign(c, op < 0 ? 0 : op, l, r, loc);
+		if (mac)
+			N(r)->flags |= NF_MACRO;
+		return r;
 	}
 	return l;
 }
@@ -4987,6 +5046,7 @@ typedef struct declr {
 	uint32_t name, loc;
 	attrs at;
 	uint32_t psyms, npsyms;	/* the outermost function declarator's parameter syms (list) */
+	uint32_t plb, ple;	/* ... its parameter list: first token, the ')' */
 	bool kr;		/* ... from a K&R identifier list (types follow the declarator) */
 	bool has_func;
 } declr;
@@ -5512,6 +5572,7 @@ static void declarator(cc *c, declr *d, bool abstract_ok, uint32_t *first, uint3
 		merge_attrs(&d->at, &id.at);
 		if (id.has_func) {
 			d->psyms = id.psyms, d->npsyms = id.npsyms, d->kr = id.kr, d->has_func = true;
+			d->plb = id.plb, d->ple = id.ple;
 		}
 		inner = true;
 	} else if (is(c, T_IDENT) && !kwof(tok(c))) {
@@ -5530,7 +5591,10 @@ static void declarator(cc *c, declr *d, bool abstract_ok, uint32_t *first, uint3
 				fatal(c, tok(c)->loc, "declarator too complex");
 			array_suffix(c, &sufs[ns++], d->name);
 		} else if (is(c, T_LPAREN)) {
+			uint32_t plb;
+
 			next(c);
+			plb = tok(c)->loc;
 			if (ns >= 64)
 				fatal(c, tok(c)->loc, "declarator too complex");
 			param_list(c, &sufs[ns]);
@@ -5540,6 +5604,7 @@ static void declarator(cc *c, declr *d, bool abstract_ok, uint32_t *first, uint3
 				d->npsyms = sufs[ns].np;
 				d->kr = sufs[ns].kr;
 				d->has_func = true;
+				d->plb = plb, d->ple = c->prevloc;
 			}
 			ns++;
 		} else {
@@ -5841,6 +5906,8 @@ static void enum_body(cc *c, uint32_t ti, attrs *after)
 			else
 				y->ty = prim(TY_INT);
 		}
+		c->tags[ti].enums = vfreeze(c, &cs);
+		c->tags[ti].nenum = cs.n;
 	}
 }
 
@@ -6869,7 +6936,7 @@ static void declaration(cc *c, vec *out, bool file)
 		s = declare(c, &ds, &d, t, file);
 		if (d.has_func && c->syms[s].kind == S_FUNC && is_func(c, c->syms[s].ty) &&
 		    d.npsyms == T(c, c->syms[s].ty)->n)
-			c->syms[s].psyms = d.psyms + 1;
+			c->syms[s].psyms = d.psyms + 1, c->syms[s].plb = d.plb, c->syms[s].ple = d.ple;
 		if (d.at.vecsize || ds.at.vecsize || d.at.mode || ds.at.mode)
 			t = c->syms[s].ty;	/* declare made it a vector / applied mode: initialize that */
 		if (is_func(c, t) && is(c, T_LBRACE)) {
@@ -6927,6 +6994,8 @@ static void declaration(cc *c, vec *out, bool file)
 				}
 			}
 		}
+		if (c->syms[s].kind == S_VAR)	/* the declaration's range, for notes */
+			c->syms[s].plb = ds.loc, c->syms[s].ple = c->prevloc;
 		if (accept(c, T_COMMA))
 			continue;
 		expect_semi(c, "at end of declaration");
@@ -6959,12 +7028,75 @@ static uint32_t mkstmt(cc *c, int op, uint32_t loc, uint32_t a, uint32_t b, uint
 	return n;
 }
 
+/* -Wparentheses: "if (x = 1)" */
+static void assign_cond_warn(cc *c, uint32_t e)
+{
+	if (N(e)->op == N_ASSIGN && !N(e)->aux && !(N(e)->flags & (NF_PAREN | NF_MACRO | NF_ERR))) {
+		uint32_t op = N(e)->loc;
+		pp_span r[2] = { rng(c, N(e)->a), rng(c, N(e)->b) };
+		pp_span all = { r[0].b, r[1].e };
+		pp_fixit p2[2] = { { all.b, all.b, "(" }, { all.e, all.e, ")" } };
+		pp_fixit eq = { op, op + 1, "==" };
+
+		if (warnx(c, "parentheses", true, w_all, op, &all, 1, NULL, 0,
+			  "using the result of an assignment as a condition without parentheses")) {
+			pp_dinfo d1 = { "note", op, NULL, 0, p2, 2 }, d2 = { "note", op, NULL, 0, &eq, 1 };
+
+			pp_diagx(c->p, &d1, "place parentheses around the assignment to silence this warning");
+			pp_diagx(c->p, &d2, "use '==' to turn this assignment into an equality comparison");
+		}
+	}
+}
+
+/* -Wswitch: "enumeration value 'B' not handled in switch" (no default label) */
+static void switch_enum_warn(cc *c, qty et, uint32_t cnd)
+{
+	const tag *t = &c->tags[T(c, et)->aux];
+	uint32_t miss[3], nmiss = 0;
+	char b[512];
+	size_t k = 0;
+
+	for (uint32_t i = 0; i < t->nenum; i++) {
+		const sym *y = &c->syms[c->lists[t->enums + i]];
+		bool seen = false;
+
+		for (uint32_t j = c->case_base; j < c->ncase && !seen; j++)
+			seen = c->cases[j].lo <= y->val && y->val <= c->cases[j].hi;
+		/* an enumerator repeating an earlier one's value counts once */
+		for (uint32_t j = 0; j < i && !seen; j++)
+			seen = c->syms[c->lists[t->enums + j]].val == y->val;
+		if (!seen) {
+			if (nmiss < 3)
+				miss[nmiss] = c->lists[t->enums + i];
+			nmiss++;
+		}
+	}
+	if (!nmiss)
+		return;
+	for (uint32_t i = 0; i < nmiss && i < 3; i++) {
+		const char *sep = i == 0 ? "" : nmiss == 2 ? " and " : (i == 2 && nmiss == 3) ? ", and " : ", ";
+
+		k += (size_t)snprintf(b + k, sizeof(b) - k, "%s'%.*s'", sep, IDF(c->syms[miss[i]].name));
+		if (k >= sizeof(b))
+			return;
+	}
+	if (nmiss > 3)
+		snprintf(b + k, sizeof(b) - k, ", and %u more", nmiss - 3);
+	{
+		pp_span r = rng(c, cnd);
+
+		warnx(c, "switch", true, w_all, r.b, NULL, 0, NULL, 0, "enumeration value%s %s not handled in switch",
+		      nmiss > 1 ? "s" : "", b);
+	}
+}
+
 static uint32_t cond_of(cc *c)
 {
 	uint32_t e;
 
 	expect(c, T_LPAREN, "'('");
 	e = decay(c, expr(c));
+	assign_cond_warn(c, e);
 	expect(c, T_RPAREN, "')'");
 	return scalar_cond(c, e, "statement");
 }
@@ -7297,7 +7429,9 @@ static uint32_t statement(cc *c)
 			expect_semi(c, "in 'for' statement specifier");
 		}
 		if (!is(c, T_SEMI)) {
-			cnd = scalar_cond(c, decay(c, expr(c)), "for");
+			cnd = decay(c, expr(c));
+			assign_cond_warn(c, cnd);
+			cnd = scalar_cond(c, cnd, "for");
 		}
 		expect_semi(c, "in 'for' statement specifier");
 		if (!is(c, T_RPAREN))
@@ -7315,12 +7449,17 @@ static uint32_t statement(cc *c)
 	}
 	case KW_switch: {
 		uint32_t cnd, body;
+		qty et;
 		qty saved = c->switch_ty;
 
 		next(c);
 		scope_open(c);
 		expect(c, T_LPAREN, "'('");
-		cnd = rvalue(c, expr(c));
+		cnd = expr(c);
+		et = N(cnd)->ty;
+		while (N(cnd)->op == N_CAST && N(cnd)->a && !c->span[cnd].e && KIND(c, N(N(cnd)->a)->ty) == TY_ENUM)
+			cnd = N(cnd)->a, et = N(cnd)->ty;	/* -Wswitch looks at the enum before promotion */
+		cnd = rvalue(c, cnd);
 		expect(c, T_RPAREN, "')'");
 		if (!is_integer(c, N(cnd)->ty))
 			error(c, loc, "statement requires expression of integer type");
@@ -7328,10 +7467,15 @@ static uint32_t statement(cc *c)
 		c->in_switch++;
 		{
 			uint32_t sb = c->case_base;
+			bool sd = c->sw_default;
 
 			c->case_base = c->ncase;
+			c->sw_default = false;
 			body = sub_statement(c);
+			if (!c->sw_default && KIND(c, et) == TY_ENUM)
+				switch_enum_warn(c, et, cnd);
 			c->ncase = c->case_base, c->case_base = sb;
+			c->sw_default = sd;
 		}
 		c->in_switch--;
 		c->switch_ty = saved;
@@ -7390,6 +7534,7 @@ static uint32_t statement(cc *c)
 		expect(c, T_COLON, "':'");
 		if (!c->in_switch)
 			error(c, loc, "'default' statement not in switch statement");
+		c->sw_default = true;
 		s = is(c, T_RBRACE) ? mkstmt(c, N_EXPR, loc, 0, 0, 0) : statement(c);
 		return mkstmt(c, N_DEFAULT, loc, 0, 0, s);
 	}
@@ -7469,6 +7614,22 @@ static uint32_t statement(cc *c)
 	{
 		uint32_t e = expr(c);
 
+		if (N(e)->op == N_BINARY && is_cmp(N(e)->aux) && !c->in_stmtexpr &&
+		    !(N(e)->flags & (NF_PAREN | NF_MACRO | NF_ERR))) {
+			int k = N(e)->aux;
+			uint32_t op = N(e)->loc;
+			pp_span r = { rng(c, N(e)->a).b, rng(c, N(e)->b).e };
+			bool eq = k == T_EQUALEQUAL || k == T_EXCLAIMEQ;
+
+			if (warnx(c, "unused-comparison", true, w_all, op, &r, 1, NULL, 0, "%s comparison result unused",
+				  eq ? "equality" : "relational") && k == T_EQUALEQUAL) {
+				pp_span orr = { op, op + 2 };
+				pp_fixit fx = { op, op + 2, "=" };
+				pp_dinfo d = { "note", op, &orr, 1, &fx, 1 };
+
+				pp_diagx(c->p, &d, "use '=' to turn this equality comparison into an assignment");
+			}
+		}
 		expect_semi(c, "after expression");
 		return mkstmt(c, N_EXPR, loc, e, 0, 0);
 	}

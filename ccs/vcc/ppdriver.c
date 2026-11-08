@@ -355,7 +355,8 @@ int ppd_run(int argc, char **argv, const ppd_env *env)
 	const char *dirs_q[256], *dirs_i[1024], *dirs_s[256], *dirs_a[256], *all[2048];
 	int nq = 0, ni = 0, ns = 0, na = 0, n = 0;
 	const char *cmp = NULL, *out = NULL, *main_file = NULL, *depfile = NULL, *deptarget = NULL;
-	int errfd = env->errfd, status = 0, md = 0, dcolor = 0, nocaret = 0;
+	int errfd = env->errfd, status = 0, md = 0, dcolor = 0, nocaret = 0, elimit = 0, nwargs = 0;
+	const char **wargs = NULL;
 	char pmapbuf[4096];
 	jmp_buf jb;
 	buf pre = { 0 }, cmdl = { 0 }, incl = { 0 }, o = { 0 };
@@ -385,6 +386,7 @@ int ppd_run(int argc, char **argv, const ppd_env *env)
 		if (!strcmp(a, "-fdiagnostics-color=auto")) { dcolor = 0; continue; }
 		if (!strcmp(a, "-fno-caret-diagnostics")) { nocaret = 1; continue; }
 		if (!strcmp(a, "-fcaret-diagnostics")) { nocaret = 0; continue; }
+		if (!strncmp(a, "-ferror-limit=", 14)) { elimit = atoi(a + 14); elimit = elimit ? elimit : -1; continue; }
 		if (!strncmp(a, "-std=", 5)) {
 			/* clang's spellings: c89 c90 iso9899:1990 gnu89 gnu90 c99 gnu99 c11 gnu11 c17 c18 gnu17 c23 c2x gnu23 ... */
 			static const struct { const char *s; int v; } stds[] = {
@@ -404,6 +406,12 @@ int ppd_run(int argc, char **argv, const ppd_env *env)
 		if (!strcmp(a, "-ansi")) { std = 89; strict = 1; continue; }
 		if (!strcmp(a, "-fgnu89-inline")) { gnu89_inline = 1; continue; }
 		if (!strcmp(a, "-fno-gnu89-inline")) { gnu89_inline = 0; continue; }
+		if ((a[1] == 'W' && a[2] && a[3] != ',') || !strcmp(a, "-w")) {
+			/* warning options, in order, for pp_wstate (some are also handled below) */
+			if (!wargs)
+				wargs = calloc((size_t)argc + 1, sizeof(*wargs));
+			wargs[nwargs++] = a;
+		}
 		if (!strcmp(a, "-Wno-implicit-int") || !strcmp(a, "-Wno-error=implicit-int")) { wimpl_int = 1; continue; }
 		if (!strcmp(a, "-Wno-implicit-function-declaration") || !strcmp(a, "-Wno-error=implicit-function-declaration")) {
 			wimpl_fn = 1;
@@ -563,6 +571,8 @@ int ppd_run(int argc, char **argv, const ppd_env *env)
 	po.errfd = errfd;
 	po.diag_color = dcolor;
 	po.diag_nocaret = nocaret;
+	po.error_limit = elimit;
+	po.wargs = wargs, po.nwargs = nwargs;
 	po.asm_mode = asm_mode;
 	if (pmap) {
 		char *eq = strchr(pmap, '=');

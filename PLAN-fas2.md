@@ -490,17 +490,28 @@ test som kräver en optimerare (värdeintervall, DCE), **run 3** = bcp-1
 ### Felmeddelanden (clang-format)
 
 Status: `bench/vcc-diag.py` jämför vccs stderr med clangs (-fsyntax-only) på
-`ccs/vcc/tests/diag/*.c`: 51/55 identiska (från 4/48).  Motorn i pp.c skriver
-clangs format (källrad, caret, intervall `~`, fix-it-rad, "In file included
-from", färger, "N errors generated.").  cc.c har intervall per nod
-(`c->span`, första/sista token), `report()`/`note()`, typnamn i meddelanden,
-stavningsförslag (`did you mean`, redigeringsavstånd ≤ (len+2)/3, återhämtning
-med det föreslagna namnet), NF_ERR mot följdfel, "expected ';' after …" med
-fix-it, int-conversion/incompatible-pointer-types per sammanhang (initiering,
-argument med parameternot, retur, tilldelning), dubbla case-värden och
-medlemmar, tentativa definitioner av ofullständiga typer, static_assert med
-"expression evaluates to", `.`/`->`-förväxling, omatchade parenteser.  pp:
-#error/#warning, oavslutade villkor, saknad include med intervall.
-Kvar: parameterlistans intervall i "declared here", "expected single argument
-'a'", deklarationsintervall i "declared const here", "expanded from macro"-
-noter, varningar (-W-flaggor, -Wall-grupper) och -ferror-limit.
+`ccs/vcc/tests/diag/*.c`: 61/61 identiska (från 4/48).  `bench/vcc-sema.py
+warn` kör vcc och clang med kärnans flaggor på alla 879 TU:er och kräver att
+varje diagnostik vcc skriver också skrivs av clang: 879/879 (inga falska
+varningar).
+
+Motorn i pp.c skriver clangs format (källrad, caret, intervall `~`, fix-it-rad
+med clangs utfyllnad, "In file included from", färger, "N errors generated.",
+sökvägen som den stavats, "./a.h" för includes från en fil utan katalog, även
+i `__FILE__` som i clang).  cc.c: intervall per nod (`c->span`),
+`report()`/`note()`/`warnx()`, typnamn, stavningsförslag med återhämtning,
+NF_ERR mot följdfel, "expected ';' after …" med fix-it, int-conversion och
+incompatible-pointer-types per sammanhang med parameternot, antal argument
+("expected single argument 'a'", parameterlistans intervall i "declared
+here"), dubbla case-värden/medlemmar, tentativa ofullständiga typer,
+static_assert med "expression evaluates to", `.`/`->`, omatchade parenteser,
+"declared const here" med deklarationens intervall, -ferror-limit (19 fel +
+fatal utan position).  Varningsramverk: -W/-Wno-/-Werror(=)/-Wno-error=/-w i
+ordning, grupper (all, most, everything), tysta i systemhuvuden och för
+operatorer från makron (PF_MACRO): -Wparentheses, -Wunused-comparison,
+-Wswitch, -Wmacro-redefined.  pp: #error/#warning, oavslutade villkor,
+saknad include, makroargument med "macro 'X' defined here".
+
+Kvar: "expanded from macro"-noter (kräver makropositioner i pp:s
+platsrymd), varningar som clang avgör efter nåbarhet (-Wdivision-by-zero,
+-Wshift-count-overflow, -Warray-bounds), fler -Wall-varningar.

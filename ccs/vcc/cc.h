@@ -100,6 +100,7 @@ typedef struct tag {
 	uint32_t align;		/* bytes */
 	uint32_t maxalign;	/* aligned() on the record, bytes */
 	uint32_t typedef_name;	/* for anonymous records: first typedef naming it */
+	uint32_t enums, nenum;	/* enum: its enumerator syms (list) */
 } tag;
 
 /* ---------------- symbols ---------------- */
@@ -142,6 +143,7 @@ typedef struct sym {
 	uint32_t next;		/* previous declaration of the same entity (0: none) */
 	uint32_t ovl;		/* overloadable: the next function of the set (0: none); the set's
 				   first function is the one bound in the scope table */
+	uint32_t plb, ple;	/* function: its parameter list's first token and ')'; variable: its declaration's first and last token */
 	uint32_t psyms;		/* function: its latest prototype's parameter syms (list index + 1, 0: none) */
 } sym;
 
@@ -210,7 +212,8 @@ enum {
 };
 
 enum { NF_LVALUE = 1, NF_BITFIELD = 2, NF_PAREN = 4, NF_NPC = 8,
-       NF_ERR = 16 };	/* NF_ERR: stands in for an expression already diagnosed (no follow-on errors) */
+       NF_ERR = 16,
+       NF_MACRO = 32 };	/* NF_MACRO: the operator came from a macro expansion (no style warnings) */	/* NF_ERR: stands in for an expression already diagnosed (no follow-on errors) */
 
 typedef struct node {
 	uint8_t op, flags;

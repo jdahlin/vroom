@@ -666,7 +666,7 @@ static void diag(pp *p, uint32_t loc, const char *what, const char *fmt, ...)
 	va_end(ap);
 }
 
-static void pp_diagx(pp *p, const pp_dinfo *d, const char *fmt, ...)
+void pp_diagx(pp *p, const pp_dinfo *d, const char *fmt, ...)
 {
 	va_list ap;
 
@@ -765,6 +765,63 @@ static bool loc_ok(const pp *p, uint32_t loc, const fent **e)
 	return *e && loc >= (*e)->base && loc - (*e)->base <= (*e)->f->size;
 }
 
+int pp_error_limit(const pp *p) { return p->o->error_limit; }
+
+int pp_wstate(const pp *p, const char *flag, bool on, const char *const *groups)
+{
+	bool err = false, allerr = false, noerr = false;
+
+	for (int i = 0; i < p->o->nwargs; i++) {
+		const char *a = p->o->wargs[i];
+		bool no = !strncmp(a, "-Wno-", 5);
+		const char *n = a + (no ? 5 : 2);
+		bool hit;
+
+		if (!strcmp(a, "-w")) {
+			on = false;
+			continue;
+		}
+		if (!strcmp(a, "-Werror")) { allerr = true; continue; }
+		if (!strcmp(a, "-Wno-error")) { allerr = false; continue; }
+		if (!strncmp(n, "error=", 6)) {
+			if (!strcmp(n + 6, flag)) {
+				if (no)
+					noerr = true, err = false;
+				else
+					err = true, on = true, noerr = false;
+			}
+			continue;
+		}
+		hit = !strcmp(n, flag) || !strcmp(n, "everything");
+		for (int g = 0; !hit && groups && groups[g]; g++)
+			hit = !strcmp(n, groups[g]);
+		if (hit)
+			on = !no;
+	}
+	for (int i = 0; i < p->o->nwargs; i++)
+		if (!strcmp(p->o->wargs[i], "-w"))
+			return 0;
+	if (!on)
+		return 0;
+	return err || (allerr && !noerr) ? 2 : 1;
+}
+
+bool pp_warnx(pp *p, const char *flag, bool on, const char *const *groups, pp_dinfo *d, const char *fmt, ...)
+{
+	int st = pp_wstate(p, flag, on, groups);
+	char msg[1024];
+	va_list ap;
+
+	if (!st || (d->loc != UINT32_MAX && pp_in_system_header(p, d->loc)))
+		return false;
+	va_start(ap, fmt);
+	vsnprintf(msg, sizeof(msg), fmt, ap);
+	va_end(ap);
+	d->what = st == 2 ? "error" : "warning";
+	pp_diagx(p, d, "%s [%s-W%s]", msg, st == 2 ? "-Werror," : "", flag);
+	return true;
+}
+
 const char *pp_src(const pp *p, uint32_t b, uint32_t e, size_t *len)
 {
 	const fent *f;
@@ -841,6 +898,17 @@ static uint32_t dcols(const char *s, uint32_t b, uint32_t e, uint32_t col)
 }
 
 /* "In file included from" for each level of loc's include stack, outermost first */
+/* pp_where with the file's path as spelled (clang's diagnostics ignore -fmacro-prefix-map) */
+static int diag_where(const pp *p, uint32_t loc, const char **name, uint32_t *nl, uint32_t *line, uint32_t *col)
+{
+	int r = pp_where(p, loc, name, nl, line, col);
+	const fent *e = loc_fent(p, loc);
+
+	if (r && e && e->spath && loc - e->base <= e->f->size)
+		*name = e->spath, *nl = (uint32_t)strlen(e->spath);
+	return r;
+}
+
 static void include_stack(pp *p, dbuf *b, const fent *e)
 {
 	const fent *chain[64];
@@ -856,7 +924,7 @@ static void include_stack(pp *p, dbuf *b, const fent *e)
 		const char *name;
 		uint32_t nl, line, col;
 
-		if (pp_where(p, chain[i]->from, &name, &nl, &line, &col))
+		if (diag_where(p, chain[i]->from, &name, &nl, &line, &col))
 			db_f(b, "In file included from %.*s:%u:\n", (int)nl, name, line);
 	}
 }
@@ -927,6 +995,16 @@ static void snippet(pp *p, dbuf *b, const fent *e, const pp_dinfo *d)
 			while (n > 0 && m[n - 1] == ' ')
 				n--;
 			db_put(&cl, m, n);
+			/* clang pads the caret line out to the last fix-it's column */
+			for (int i = 0; i < d->nfx; i++) {
+				uint32_t fb = d->fx[i].b, c0;
+
+				if (fb < e->base || fb - e->base < ls || fb - e->base > le)
+					continue;
+				c0 = dcols(s, ls, fb - e->base, 0);
+				if (c0 > cl.n)
+					db_c(&cl, ' ', (int)(c0 - cl.n));
+			}
 		}
 		free(m);
 	}
@@ -973,7 +1051,7 @@ void pp_vdiagx(pp *p, const pp_dinfo *d, const char *fmt, va_list ap)
 	const char *name, *what = d->what;
 	uint32_t nl, line, col;
 	const fent *e;
-	bool has = loc_ok(p, d->loc, &e);
+	bool has = d->loc != UINT32_MAX && loc_ok(p, d->loc, &e);	/* UINT32_MAX: no location */
 	bool note = what[0] == 'n';
 	char msg[2048];
 	dbuf b = { 0 };
@@ -985,9 +1063,9 @@ void pp_vdiagx(pp *p, const pp_dinfo *d, const char *fmt, va_list ap)
 		p->diag_fe = (uint32_t)(e - p->fe) + 1;
 	if (p->color)
 		db_s(&b, DC_BOLD);
-	if (has && pp_where(p, d->loc, &name, &nl, &line, &col))
+	if (has && diag_where(p, d->loc, &name, &nl, &line, &col))
 		db_f(&b, "%.*s:%u:%u: ", (int)nl, name, line, col);
-	else if (!d->loc && what[0] == 'f')
+	else if (d->loc == UINT32_MAX)
 		;	/* "fatal error: too many errors emitted" has no location */
 	else if (!has)
 		db_s(&b, "vcc: ");
@@ -1680,6 +1758,37 @@ typedef struct margs {
 	const ptok **str;	/* stringified */
 } margs;
 
+/* "macro 'X' defined here": the #define's name, found from the body's file (errors only) */
+static void macro_note_(pp *p, const pmacro *m, uint32_t before, const char *msg)
+{
+	uint32_t loc = 0, len = 0;
+	const char *src = NULL;
+
+	/* the last "#define NAME" seen (a redefinition replaces the earlier one) */
+	for (uint32_t i = 0; i < p->nfe; i++) {
+		const vlex_file *f = p->fe[i].f;
+		const vtok *q;
+
+		if (!f || !f->tok)
+			continue;
+		q = f->tok;
+		for (uint32_t k = 2; k < f->ntok; k++)
+			if (q[k].kind == T_IDENT && q[k].id == m->name && q[k - 1].id == KW_define &&
+			    q[k - 2].kind == T_HASH && (q[k - 2].flags & TF_SOL) && p->fe[i].base + q[k].off < before)
+				loc = p->fe[i].base + q[k].off, len = q[k].len, src = f->src + q[k].off;
+	}
+	if (src) {
+		pp_dinfo d = { "note", loc, NULL, 0, NULL, 0 };
+
+		pp_diagx(p, &d, msg, (int)len, src);
+	}
+}
+
+static void macro_note(pp *p, const pmacro *m)
+{
+	macro_note_(p, m, UINT32_MAX, "macro '%.*s' defined here");
+}
+
 static bool collect_(pp *p, const pmacro *m, const ptok *name, margs *a, ptok *rp)
 {
 	uint32_t np = m->nparam, slots = np ? np : 1, k = 0, depth = 0, n;
@@ -1731,7 +1840,8 @@ static bool collect_(pp *p, const pmacro *m, const ptok *name, margs *a, ptok *r
 			a->st[k + 1] = (uint32_t)(p->svn - base);
 			a->ln[k + 1] = 0;
 		} else {
-			error(p, name->loc, "too few arguments provided to function-like macro invocation");
+			error(p, t.loc, "too few arguments provided to function-like macro invocation");
+			macro_note(p, m);
 			p->svn = base;
 			return false;
 		}
@@ -2066,6 +2176,7 @@ static void subst_range(pp *p, const pmacro *m, margs *a, uint32_t from, uint32_
 		after = i + 1 < to && body[i + 1].kind == T_HASHHASH;
 		if (!k) {
 			vfill(&t, cur, m->src, eloc);
+			t.flags |= PF_MACRO;
 			t.flags &= ~(TF_SOL | TF_SPACE);
 			if (ngs) {
 				t.flags |= TF_SPACE;
@@ -2100,7 +2211,7 @@ static void subst_range(pp *p, const pmacro *m, margs *a, uint32_t from, uint32_
 			f = append(p, a->tok + a->st[k], a->ln[k]);
 			/* clang: unexpanded argument tokens take the expansion's location */
 			for (size_t j = f; j < p->svn; j++)
-				p->sv[j].loc = eloc;
+				p->sv[j].loc = eloc, p->sv[j].flags |= PF_MACRO;
 			if (!pseudo)
 				p->sv[f].flags = (p->sv[f].flags & ~(TF_SOL | TF_SPACE)) | (ngs ? TF_SPACE : 0);
 			ngs = false;
@@ -2254,6 +2365,7 @@ static void single(pp *p, const pmacro *m, ptok *t, uint8_t nf, uint32_t eloc)
 	uintptr_t e;
 
 	vfill(t, &m->body[0], m->src, eloc);
+	t->flags |= PF_MACRO;
 	t->flags = (t->flags & ~(TF_SOL | TF_SPACE)) | nf;
 	if (t->kind == T_IDENT && (e = mread(p, t->id)) && ((e & 1) || (const pmacro *)(e & ~(uintptr_t)1) == m))
 		t->flags |= PF_NOEXP;
@@ -3255,6 +3367,21 @@ static void define(pp *p, ctx *c, uint32_t b, uint32_t e)
 		error(p, c->loc + (j < m->nbody ? m->body[j].off : vt[b].off), "'#' is not followed by a macro parameter");
 		return;
 	}
+	{
+		/* -Wmacro-redefined: a different definition replacing a live one */
+		uintptr_t o = mget(p, m->name);
+		const pmacro *om = (const pmacro *)(o & ~(uintptr_t)1);
+
+		if (unlikely(o && !(o & 1) && om != m && !om->builtin && !macro_same(om, m))) {
+			uint32_t nloc = c->loc + vt[b].off;
+			pp_span r = { nloc, nloc + vt[b].len };
+			pp_dinfo d = { "warning", nloc, &r, 0, NULL, 0 };
+
+			if (c->f != &p->builtin && pp_warnx(p, "macro-redefined", true, NULL, &d, "'%.*s' macro redefined",
+							    (int)vt[b].len, c->src + vt[b].off))
+				macro_note_(p, om, nloc, "previous definition is here");
+		}
+	}
 	mdef(p, m->name, m);
 }
 
@@ -3323,6 +3450,8 @@ static const vlex_file *find_include_(pp *p, const ctx *from, const char *name, 
 		const char *sl = strrchr(fp, '/');
 		size_t dl = sl ? (size_t)(sl - fp) + 1 : 0;
 
+		if (!sl && fp[0])
+			fp = "./", dl = 2;	/* clang: the includer's directory, "." spelled out */
 		if (dl + nlen + 1 < sizeof(buf)) {
 			memcpy(buf, fp, dl);
 			memcpy(buf + dl, name, nlen);

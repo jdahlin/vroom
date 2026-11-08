@@ -122,7 +122,8 @@ struct cc {
 	uint32_t fn;		/* sym */
 	uint32_t fn_labels;	/* first label of this function */
 	uint32_t *switch_cases;	/* N_CASE/N_DEFAULT nodes of the innermost switch */
-	int in_loop, in_switch;
+	int in_loop, in_switch, in_stmtexpr;
+	bool sw_default;	/* the innermost switch has a default label */
 	struct swcase { i128 lo, hi; uint32_t loc; } *cases;	/* the open switches' case labels */
 	uint32_t ncase, capcase, case_base;
 	qty switch_ty;
