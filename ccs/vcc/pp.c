@@ -4178,7 +4178,7 @@ static void bi_init(void)
 		memset(m, 0, sizeof(*m));
 		m->kind = MK_BUILTIN;
 		m->builtin = (uint8_t)bi[i].b;
-		m->name = vintern_copy(bi[i].n, strlen(bi[i].n));
+		m->name = vintern_cstr(bi[i].n);
 		m->body = no_body;
 		bi_macro[i] = m;
 	}
