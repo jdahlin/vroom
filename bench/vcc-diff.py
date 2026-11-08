@@ -26,7 +26,7 @@ def bin_dir():
     if '--bin-dir' in sys.argv:
         k = sys.argv.index('--bin-dir'); d = sys.argv[k+1]; del sys.argv[k:k+2]
     return os.path.abspath(d)
-BIN = bin_dir(); VPP = f'{BIN}/vpp'
+BIN = bin_dir(); VPP = os.environ.get('VPP', f'{BIN}/vpp')
 
 def tu_args(cmd):
     """(object, clang args without -c/-E/-o/-MMD) for a C TU, a .S file, or a

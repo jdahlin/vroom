@@ -56,6 +56,9 @@
 #include "a64.h"
 
 #define N(i) (&c->nodes[i])
+/* Apple arm64 (Mach-O): '_' names, GOT for symbols outside the TU, variadic
+ * arguments on the stack, va_list a char *, stack arguments packed */
+#define DARWIN(c) ((c)->o->target == PP_DARWIN)
 #define T(c, t) CT(c, t)
 #define KIND(c, t) CKIND(c, t)
 
@@ -89,11 +92,16 @@ static inline bool is_record(cc *c, qty t) { int k = KIND(c, t); return k == TY_
 static inline bool is_array(cc *c, qty t) { return KIND(c, t) == TY_ARRAY; }
 static inline bool is_func(cc *c, qty t) { return KIND(c, t) == TY_FUNC; }
 static inline bool is_void(cc *c, qty t) { return KIND(c, t) == TY_VOID; }
-static inline bool is_agg(cc *c, qty t) { return is_record(c, t) || is_array(c, t); }
+static inline bool is_vec(cc *c, qty t) { return KIND(c, t) == TY_VECTOR; }
+/* passed and returned like a record (vcc's own convention for vectors) */
+static inline bool is_recabi(cc *c, qty t) { return is_record(c, t) || is_vec(c, t); }
+static inline bool is_agg(cc *c, qty t) { return is_record(c, t) || is_array(c, t) || is_vec(c, t); }
 static inline uint64_t tsize(cc *c, qty t) { return T(c, t)->size; }
 static inline uint32_t talign(cc *c, qty t) { return T(c, t)->align; }
 static inline bool is_signed(cc *c, qty t) { return cc_is_signed(c, t); }
-static inline bool is_wide(cc *c, qty t) { return is_integer(c, t) && tsize(c, t) == 16; }
+/* long double: binary128, kept as its bits in a register pair (arithmetic: the __*tf* helpers) */
+static inline bool is_ld(cc *c, qty t) { return is_flt(c, t) && tsize(c, t) == 16; }
+static inline bool is_wide(cc *c, qty t) { return (is_integer(c, t) || is_flt(c, t)) && tsize(c, t) == 16; }
 
 static i128 trunc_to(cc *c, i128 v, qty t)
 {
@@ -156,6 +164,8 @@ enum {
 	I_MRS,		/* rd, ref: raw text (system register name) */
 	I_MOVSP,	/* frame setup pseudo (see finish) */
 	I_NOP,
+	I_WORD,		/* imm: an encoded instruction (registers already in it) */
+	I_TLV,		/* x0 = address of thread-local ref (Darwin TLV descriptor call; clobbers x16, lr) */
 };
 
 enum { C_EQ, C_NE, C_HS, C_LO, C_MI, C_PL, C_VS, C_VC, C_HI, C_LS, C_GE, C_LT, C_GT, C_LE, C_AL };
@@ -372,7 +382,10 @@ typedef struct chunk {
 } chunk;
 
 /* analysis bits (prepass, read-only while emitting) */
-enum { SA_WRITTEN = 1, SA_CLEANUP_FN = 2, SA_MUSTFOLD = 4, SA_CWRITE = 8, SA_CMULTI = 16, SA_USED = 32 };	/* USED: a local or param read */
+enum { FF_SEEN = 1, FF_NONNEG = 2, FF_ZERO = 4, FF_BAD = 8 };
+enum { SA_WRITTEN = 1, SA_CLEANUP_FN = 2, SA_MUSTFOLD = 4, SA_CWRITE = 8, SA_CMULTI = 16, SA_USED = 32, SA_NOINL = 64,
+       SA_AESC = 128 /* a local array used other than as a[CONST] */ };
+/* USED: a local or param read; NOINL: a static local holds a label address (one copy of the code only) */
 /* CWRITE: only ever assigned integer constants (all cwval unless CMULTI) */	/* per sym; MUSTFOLD: a function that calls an error() function */
 enum { NA_LABEL = 1 };				/* per node: statement contains a label or case */
 
@@ -386,6 +399,7 @@ typedef struct emitter {
 	uint16_t *fnsize;		/* per function: AST nodes (prepass) */
 	i128 *cwval;		/* per SA_CWRITE variable: the one constant it is assigned */	/* per function: prepass state (0 no, 1 running, 2 done) */
 	uint8_t *sflags;		/* SA_* per sym */
+	uint8_t *ffacts;		/* FF_* per floating local: what every write stores */
 	uint8_t *nflags;		/* NA_* per node */
 	uint8_t *lref;			/* per label: LR_* */
 	uint16_t *lcdepth;		/* per label: cleanup depth at its definition */
@@ -480,7 +494,7 @@ typedef struct ecx {
 	tbuf raw;		/* inline asm text */
 	tbuf out;		/* this thread's output text */
 	tbuf data;		/* scratch: data object bytes */
-	struct reloc { uint64_t off; uint32_t ref, seq; int64_t add; } *rel;
+	struct reloc { uint64_t off; uint32_t ref, seq; int64_t add; uint32_t sub, sz; } *rel;	/* sub: ref subtracted (0: none); sz 4 or 8 (0: 8) */
 	uint32_t nrel;
 	uint64_t relend;	/* end of the highest relocated word */
 	/* bindings */
@@ -497,16 +511,22 @@ typedef struct ecx {
 	uint8_t nkv;
 	uint16_t kvalid;
 	int64_t kval[NKV];
+	/* elements a[CONST] of local arrays that do not escape (no SA_AESC), tracked like those locals */
+	uint8_t nael;
+	struct { uint32_t s; uint32_t idx; uint8_t kv; } ael[NKV];
 	uint32_t *lkvi;		/* per local label: kvst index + 1 (0: none) */
 	kvst *kvs;
 	uint32_t nkvs;
 	uint32_t inst_next;
 	/* frame */
 	int32_t foff, fmax;
+	int32_t cl_top;		/* frame offset above the block's compound literals (kept past statements) */
 	int32_t outmax;		/* outgoing stack argument bytes */
 	bool dyn, calls, vararg;
 	int32_t vaslot;		/* variadic register save area */
 	int ngr_named, nstk_named;	/* variadic: named GPR args, named stack bytes */
+	int nvr_named, vrslot;		/* variadic (Linux): named FP/SIMD args, the v0-v7 save area */
+	int nsrn;		/* classify: next SIMD/FP argument register */
 	/* temporaries */
 	uint32_t live;		/* bit i: tempregs[i] in use */
 	uint32_t usedcs;	/* callee-saved registers used (bit = x number) */
@@ -572,10 +592,20 @@ static void efatal(ecx *e, uint32_t loc, const char *fmt, ...)
 
 static const char *const fixed_names[] = {
 	"memcpy", "memset", "memmove", "__udivti3", "__divti3", "__umodti3", "__modti3", "strlen",
-	"__ashlti3", "__lshrti3", "__ashrti3",
+	"__ashlti3", "__lshrti3", "__ashrti3", "__floattisf", "__floattidf", "__floatuntisf", "__floatuntidf",
+	"__fixsfti", "__fixdfti", "__fixunssfti", "__fixunsdfti",
+	"__addtf3", "__subtf3", "__multf3", "__divtf3", "__eqtf2", "__netf2", "__lttf2", "__letf2", "__gttf2", "__getf2",
+	"__extenddftf2", "__extendsftf2", "__trunctfdf2", "__trunctfsf2", "__floatsitf", "__floatditf", "__floatunsitf",
+	"__floatunditf", "__floattitf", "__floatuntitf", "__fixtfsi", "__fixtfdi", "__fixunstfsi", "__fixunstfdi",
+	"__fixtfti", "__fixunstfti",
 };
 enum { FN_MEMCPY, FN_MEMSET, FN_MEMMOVE, FN_UDIVTI3, FN_DIVTI3, FN_UMODTI3, FN_MODTI3, FN_STRLEN,
-       FN_ASHLTI3, FN_LSHRTI3, FN_ASHRTI3 };
+       FN_ASHLTI3, FN_LSHRTI3, FN_ASHRTI3, FN_FLOATTISF, FN_FLOATTIDF, FN_FLOATUNTISF, FN_FLOATUNTIDF,
+       FN_FIXSFTI, FN_FIXDFTI, FN_FIXUNSSFTI, FN_FIXUNSDFTI,
+       FN_ADDTF3, FN_SUBTF3, FN_MULTF3, FN_DIVTF3, FN_EQTF2, FN_NETF2, FN_LTTF2, FN_LETF2, FN_GTTF2, FN_GETF2,
+       FN_EXTENDDFTF2, FN_EXTENDSFTF2, FN_TRUNCTFDF2, FN_TRUNCTFSF2, FN_FLOATSITF, FN_FLOATDITF, FN_FLOATUNSITF,
+       FN_FLOATUNDITF, FN_FLOATTITF, FN_FLOATUNTITF, FN_FIXTFSI, FN_FIXTFDI, FN_FIXUNSTFSI, FN_FIXUNSTFDI,
+       FN_FIXTFTI, FN_FIXUNSTFTI };
 #define FIXED(k) REF(RK_NAME, 0x8000000u + (k))
 
 static uint32_t canon_sym(cc *c, uint32_t s)
@@ -609,6 +639,8 @@ static void sym_name(cc *c, tbuf *b, uint32_t s)
 		tb_u(b, s);
 		return;
 	}
+	if (DARWIN(c))
+		tb_c(b, '_');
 	tb_put(b, vintern_ents[y->name].s, vintern_ents[y->name].len);
 	if (y->depth > 0 && y->kind == S_VAR && y->sc == SC_STATIC) {
 		tb_c(b, '.');
@@ -633,6 +665,8 @@ static void ref_name(cc *c, tbuf *b, uint32_t r)
 		tb_u(b, i);
 		break;
 	case RK_NAME:
+		if (DARWIN(c))
+			tb_c(b, '_');
 		if (i >= 0x8000000u) {
 			tb_s(b, fixed_names[i - 0x8000000u]);
 		} else {
@@ -1028,6 +1062,16 @@ static void print_ins(cc *c, tbuf *b, const ins *i, uint32_t fid, const char *ra
 		return;
 	case I_NOP:
 		return;
+	case I_WORD:
+		tb_s(b, "\t.inst\t");
+		tb_hex(b, (uint32_t)i->imm);
+		tb_c(b, '\n');
+		return;
+	case I_TLV:
+		tb_s(b, "\t// tlv ");
+		ref_name(c, b, i->ref);
+		tb_c(b, '\n');
+		return;
 	default:
 		tb_s(b, "\t// ?\n");
 		return;
@@ -1058,7 +1102,7 @@ enum { IT_TEXT = 1, IT_CODE, IT_DATA, IT_LABEL, IT_BYTES };
 typedef struct item { uint32_t kind, len; } item;	/* len payload bytes follow, padded to 8 */
 typedef struct code_hdr { uint32_t fid, nin, nraw, nlabel, sym_labels, pad; } code_hdr;
 typedef struct data_hdr { uint64_t size, n; uint32_t nrel, zero; } data_hdr;
-typedef struct ireloc { uint64_t off; uint32_t ref, seq; int64_t add; } ireloc;
+typedef struct ireloc { uint64_t off; uint32_t ref, seq; int64_t add; uint32_t sub, sz; } ireloc;
 
 static inline bool direct(const ecx *e) { return e->E->o->emit == 2 && !e->E->objtext; }
 
@@ -1391,6 +1435,17 @@ static unsigned enc(const ins *i, uint32_t *w, pfix *f, const uint32_t *loff, ui
 	case I_MRS:
 		w[0] = 0;	/* the caller looks the register up */
 		return 1;
+	case I_WORD:
+		w[0] = (uint32_t)i->imm;
+		return 1;
+	case I_TLV:
+		/* adrp x0, ref@TLVPPAGE; ldr x0, [x0, ref@TLVPPAGEOFF]; ldr x16, [x0]; blr x16 */
+		w[0] = 0x90000000u;
+		w[1] = a64_ldst_uoff(3, 0, 1, 0, 0, 0);
+		w[2] = a64_ldst_uoff(3, 0, 1, 16, 0, 0);
+		w[3] = a64_blr(16);
+		*f = (pfix){ 0, 0, R_VCC_TLVP_PAGE21, i->ref, 0 };
+		return 4;
 	}
 	return 0;
 }
@@ -1417,8 +1472,9 @@ static void r_words(rctx *R, uint32_t frag, const uint32_t *w, unsigned n, const
 		uint32_t y = f->lbl ? r_label(R, fid, f->ref) : r_sym(R, f->ref);
 
 		elf_fixup(o, frag, off + 4u * f->k, p + 4 * f->k, f->type, as_val(R->as, y, f->off));
-		if (i->op == I_LDGOT)
-			elf_fixup(o, frag, off + 4, p + 4, R_AARCH64_LD64_GOT_LO12_NC, as_val(R->as, y, 0));
+		if (i->op == I_LDGOT || i->op == I_TLV)
+			elf_fixup(o, frag, off + 4, p + 4, i->op == I_TLV ? R_VCC_TLVP_PAGEOFF12 : R_AARCH64_LD64_GOT_LO12_NC,
+				  as_val(R->as, y, 0));
 	}
 }
 
@@ -1462,8 +1518,9 @@ static int r_code(rctx *R, const code_hdr *h)
 				uint32_t y = r_sym(R, f.ref);
 
 				elf_fixup(o, frag, base + 4u * at, p + 4 * at, f.type, as_val(R->as, y, f.off));
-				if (i->op == I_LDGOT)
-					elf_fixup(o, frag, base + 4u * at + 4, p + 4 * at + 4, R_AARCH64_LD64_GOT_LO12_NC,
+				if (i->op == I_LDGOT || i->op == I_TLV)
+					elf_fixup(o, frag, base + 4u * at + 4, p + 4 * at + 4,
+						  i->op == I_TLV ? R_VCC_TLVP_PAGEOFF12 : R_AARCH64_LD64_GOT_LO12_NC,
 						  as_val(R->as, y, 0));
 			}
 			at += n;
@@ -1533,18 +1590,24 @@ static int r_data(rctx *R, const data_hdr *h)
 			at = end;
 		}
 		if (k < h->nrel) {
+			uint32_t sz = rel[k].sz ? rel[k].sz : 8;
 			uint64_t off = elf_frag(o, frag)->size;
-			uint8_t *p = elf_grow(o, frag, 8);
+			uint8_t *p = elf_grow(o, frag, sz);
 			ElfVal v = as_val(R->as, r_sym(R, rel[k].ref), rel[k].add);
 
+			if (rel[k].sub) {
+				ElfVal s = as_val(R->as, r_sym(R, rel[k].sub - 1), 0);
+
+				v.sub = s.add, v.c -= s.c;
+			}
 			if (!v.add && !v.sub) {
-				for (int b = 0; b < 8; b++)
+				for (uint32_t b = 0; b < sz; b++)
 					p[b] = (uint8_t)((uint64_t)v.c >> 8 * b);
 			} else {
-				memset(p, 0, 8);
-				elf_fixup(o, frag, off, p, R_AARCH64_ABS64, v);
+				memset(p, 0, sz);
+				elf_fixup(o, frag, off, p, sz == 4 ? R_AARCH64_ABS32 : R_AARCH64_ABS64, v);
 			}
-			at += 8;
+			at += sz;
 		}
 	}
 	return 0;
@@ -1724,7 +1787,7 @@ static void kv_edge(ecx *e, uint32_t l)
 		return;
 	if (!e->lkvi[l]) {
 		if (e->nkvs == CAPKVS) {
-			e->nkv = 0, e->kvalid = 0;	/* out of room: stop tracking */
+			e->nkv = 0, e->kvalid = 0, e->nael = 0;	/* out of room: stop tracking */
 			return;
 		}
 		st = &e->kvs[e->nkvs++];
@@ -1904,6 +1967,7 @@ static inline val vaddr(uint32_t ref, i128 off) { val v = { .k = V_ADDR, .ref = 
 static inline val vnone(void) { val v = { .k = V_NONE }; return v; }
 
 static void note_ref(ecx *e, uint32_t ref);
+static bool sym_needs_got(cc *c, uint32_t ref);
 
 /* address of a symbol into rd */
 static void addr_of_ref(ecx *e, int rd, uint32_t ref, int64_t off)
@@ -1911,16 +1975,11 @@ static void addr_of_ref(ecx *e, int rd, uint32_t ref, int64_t off)
 	cc *c = e->c;
 
 	note_ref(e, ref);
-	if (RKIND(ref) == RK_SYM) {
-		uint32_t s = canon_sym(c, RIDX(ref));
-		const sym *y = &c->syms[s];
-
-		if ((y->flags & SF_WEAK) && !(y->flags & SF_DEFINED)) {
-			symop(e, I_LDGOT, 1, 0, rd, 0, ref, 0);
-			if (off)
-				opi(e, I_ADDI, 1, rd, rd, off);
-			return;
-		}
+	if (sym_needs_got(c, ref)) {
+		symop(e, I_LDGOT, 1, 0, rd, 0, ref, 0);
+		if (off)
+			opi(e, I_ADDI, 1, rd, rd, off);
+		return;
 	}
 	if (off < INT32_MIN || off > INT32_MAX) {
 		symop(e, I_ADRP, 1, 0, rd, 0, ref, 0);
@@ -2029,13 +2088,35 @@ static int log2sz(uint64_t n) { return n == 1 ? 0 : n == 2 ? 1 : n == 4 ? 2 : 3;
 
 static bool sym_needs_got(cc *c, uint32_t ref)
 {
+	if (RKIND(ref) == RK_NAME)
+		return DARWIN(c);
 	if (RKIND(ref) != RK_SYM)
 		return false;
 	{
 		const sym *y = &c->syms[canon_sym(c, RIDX(ref))];
 
+		if (DARWIN(c) && y->name && y->sc != SC_STATIC && (y->kind == S_FUNC || y->kind == S_VAR) &&
+		    (!(y->flags & (SF_DEFINED | SF_TENTATIVE)) || (y->flags & SF_WEAK) || (y->kind == S_FUNC && !y->body)))
+			return true;	/* may live in a dylib: ld64 relaxes the GOT load when it does not */
 		return (y->flags & SF_WEAK) && !(y->flags & SF_DEFINED);
 	}
+}
+
+static uint32_t sym_align(cc *c, uint32_t s);
+
+/* the alignment the object a reference names is known to have */
+static uint32_t ref_align(ecx *e, const lval *l)
+{
+	cc *c = e->c;
+	uint32_t a;
+
+	switch (RKIND(l->ref)) {
+	case RK_SYM: a = sym_align(c, canon_sym(c, RIDX(l->ref))); break;
+	case RK_STR: a = c->strs[RIDX(l->ref)].esz; break;
+	case RK_LBL: a = 1; break;
+	default: return l->align;
+	}
+	return a < l->align ? a : l->align;
 }
 
 /* load a scalar of size n (1,2,4,8) into rd; ext: 0 zero, 1 sign to x */
@@ -2044,7 +2125,7 @@ static void load_n(ecx *e, int rd, const lval *l, int n, int ext)
 	int64_t off;
 	int sz = log2sz((uint64_t)n);
 
-	if (l->k == L_SYM && !sym_needs_got(e->c, l->ref) && l->align >= (uint32_t)n && (l->off & (n - 1)) == 0 &&
+	if (l->k == L_SYM && !sym_needs_got(e->c, l->ref) && ref_align(e, l) >= (uint32_t)n && (l->off & (n - 1)) == 0 &&
 	    l->off >= INT32_MIN && l->off <= INT32_MAX) {
 		note_ref(e, l->ref);
 		symop(e, I_ADRP, 1, 0, R_X16, 0, l->ref, l->off);
@@ -2063,7 +2144,7 @@ static void store_n(ecx *e, int rs, const lval *l, int64_t extra, int n)
 	int64_t off;
 	int sz = log2sz((uint64_t)n);
 
-	if (l->k == L_SYM && !sym_needs_got(e->c, l->ref) && l->align >= (uint32_t)n && ((l->off + extra) & (n - 1)) == 0 &&
+	if (l->k == L_SYM && !sym_needs_got(e->c, l->ref) && ref_align(e, l) >= (uint32_t)n && ((l->off + extra) & (n - 1)) == 0 &&
 	    l->off + extra >= INT32_MIN && l->off + extra <= INT32_MAX) {
 		note_ref(e, l->ref);
 		symop(e, I_ADRP, 1, 0, R_X16, 0, l->ref, l->off + extra);
@@ -2155,15 +2236,109 @@ static void zero_mem(ecx *e, int dst, uint64_t n)
 	call_fixed(e, FN_MEMSET, dst, -2, -1, (int64_t)n);
 }
 
-/* ---------------- AAPCS64 (integer registers only: -mgeneral-regs-only) ---------------- */
+static int fpk(ecx *e, qty t);
+static int f_cmp(ecx *e, int op, int d, val *a, val *b);
+static val f_tobool(ecx *e, val v, qty t);
+static val ld_compare(ecx *e, int op, qty t, val a, val b);
+static val ld_cast(ecx *e, val v, qty from, qty to);
+static val call_named(ecx *e, uint32_t ref, val *vals, qty *tys, int n, qty rty, bool noret);
 
-enum { A_IGNORE, A_REG, A_STACK, A_REF_REG, A_REF_STACK };
+/* ---------------- AAPCS64 (floating point and HFAs in v0-v7) ---------------- */
+
+/*
+ * A homogeneous floating-point aggregate: a record (nested records and
+ * arrays included) whose leaves are 1-4 floats or 1-4 doubles, with no
+ * padding.  Returns the member size (4 or 8) and sets *n, or 0.
+ */
+static int hfa_walk(cc *c, qty t, int *base, uint64_t *n)
+{
+	const ctype *y = T(c, t);
+
+	if (y->kind == TY_FLOAT || y->kind == TY_DOUBLE || (y->kind == TY_LDOUBLE && y->size == 16)) {
+		int b = (int)y->size;
+
+		if (*base && *base != b)
+			return 0;
+		*base = b;
+		*n = 1;
+		return 1;
+	}
+	if (y->kind == TY_ARRAY) {
+		uint64_t m;
+
+		if (y->flags & (TF_VLA | TF_INCOMPLETE) || !hfa_walk(c, y->base, base, &m))
+			return 0;
+		*n = m * y->n;
+		return y->n > 0;
+	}
+	if (y->kind == TY_STRUCT || y->kind == TY_UNION) {
+		const tag *g = &c->tags[y->aux];
+		uint64_t tot = 0;
+
+		for (uint32_t k = 0; k < g->nfield; k++) {
+			uint64_t m;
+
+			if (g->f[k].bitfield || !hfa_walk(c, g->f[k].ty, base, &m))
+				return 0;
+			if (y->kind == TY_UNION)
+				tot = m > tot ? m : tot;
+			else
+				tot += m;
+		}
+		*n = tot;
+		return tot > 0 && *base && tot * (uint64_t)*base == g->size;
+	}
+	return 0;
+}
+
+static int hfa(cc *c, qty t, int *n)
+{
+	int base = 0;
+	uint64_t m = 0;
+
+	if (!is_record(c, t) || !hfa_walk(c, t, &base, &m) || m > 4)
+		return 0;
+	*n = (int)m;
+	return base;
+}
+
+/* a record result returned through x8 */
+static bool is_sret(cc *c, qty t)
+{
+	int n;
+
+	return is_recabi(c, t) && tsize(c, t) > 16 && !hfa(c, t, &n);
+}
+
+enum { A_IGNORE, A_REG, A_STACK, A_REF_REG, A_REF_STACK, A_VREG, A_HFA };	/* A_VREG: float/double in v<reg>; A_HFA: nreg members of fsz bytes in v<reg>.. */
 
 typedef struct abiarg {
-	uint8_t kind, reg, nreg;
+	uint8_t kind, reg, nreg, fsz;
 	int32_t stk;		/* A_STACK / A_REF_STACK: offset in the argument area */
 	uint32_t size;
 } abiarg;
+
+/* Apple: an anonymous (variadic) argument always goes on the stack in 8-byte slots */
+static void classify_va(ecx *e, qty t, int *nsaa, abiarg *a)
+{
+	cc *c = e->c;
+	uint64_t size = tsize(c, t);
+	uint32_t al = talign(c, t) > 8 ? 16 : 8;
+
+	memset(a, 0, sizeof(*a));
+	a->size = (uint32_t)size;
+	if (is_record(c, t) && size > 16) {
+		a->kind = A_REF_STACK;
+		a->stk = *nsaa;
+		*nsaa += 8;
+		return;
+	}
+	*nsaa = (int)(((uint32_t)*nsaa + al - 1) & ~(al - 1));
+	a->kind = A_STACK;
+	a->stk = *nsaa;
+	a->nreg = (uint8_t)(size > 8 ? 2 : 1);
+	*nsaa += a->nreg * 8;
+}
 
 static void classify(ecx *e, qty t, int *ngrn, int *nsaa, abiarg *a)
 {
@@ -2174,9 +2349,35 @@ static void classify(ecx *e, qty t, int *ngrn, int *nsaa, abiarg *a)
 
 	memset(a, 0, sizeof(*a));
 	a->size = (uint32_t)size;
-	if (is_flt(c, t))
-		efatal(e, 0, "floating point arguments are not supported");
-	if (is_record(c, t)) {
+	if (is_flt(c, t)) {
+		if (!is_ld(c, t))
+			(void)fpk(e, t);
+		if (e->nsrn < 8) {
+			a->kind = A_VREG;
+			a->reg = (uint8_t)e->nsrn++;
+			a->nreg = 1;
+			return;
+		}
+		e->nsrn = 8;
+		n = size == 16 ? 2 : 1;
+		goto stack;
+	}
+	if (is_recabi(c, t)) {
+		int hn, hb = hfa(c, t, &hn);
+
+		if (hb) {
+			if (e->nsrn + hn <= 8) {
+				a->kind = A_HFA;
+				a->reg = (uint8_t)e->nsrn;
+				a->nreg = (uint8_t)hn;
+				a->fsz = (uint8_t)hb;
+				e->nsrn += hn;
+				return;
+			}
+			e->nsrn = 8;
+			n = (int)((size + 7) / 8);
+			goto stack;
+		}
 		if (size == 0) {
 			a->kind = A_IGNORE;
 			return;
@@ -2207,6 +2408,17 @@ static void classify(ecx *e, qty t, int *ngrn, int *nsaa, abiarg *a)
 		return;
 	}
 	*ngrn = 8;
+stack:
+	if (DARWIN(c) && !is_record(c, t)) {
+		/* Apple: scalars on the stack take their natural size and alignment */
+		*nsaa = (int)(((uint32_t)*nsaa + al - 1) & ~(al - 1));
+		a->kind = A_STACK;
+		a->stk = *nsaa;
+		a->nreg = (uint8_t)n;
+		a->size = (uint32_t)size;
+		*nsaa += (int)size;
+		return;
+	}
 	if (al < 8)
 		al = 8;
 	if (al > 16)
@@ -2268,9 +2480,17 @@ static void call_fixed(ecx *e, int fn, int a0, int a1, int a2, int64_t n)
 /* ---------------- the emitter proper ---------------- */
 
 static val gen(ecx *e, uint32_t n);
+static val vla_bytes(ecx *e, qty t);
 static lval gen_lval(ecx *e, uint32_t n);
 static void gen_stmt(ecx *e, uint32_t n);
+
+/* a statement's temporaries end with it; compound literals live on to the end of their block */
+static inline int32_t keep_cl(const ecx *e, int32_t mark)
+{
+	return mark > e->cl_top ? mark : e->cl_top;
+}
 static void gen_cond(ecx *e, uint32_t n, bool jump_if, uint32_t l);
+static int cond_fold(ecx *e, uint32_t n);
 static val gen_block(ecx *e, uint32_t n, bool want);
 static void gen_init_local(ecx *e, const lval *dst, qty ty, uint32_t init);
 static void enqueue(emitter *E, uint32_t item);
@@ -2330,6 +2550,21 @@ static bind *binding(ecx *e, uint32_t s)
 	return &e->b[s];
 }
 
+static int regvar_reg(cc *c, uint32_t s)
+{
+	const attrs *a = sym_attrs(c, s);
+	const char *n;
+
+	if (c->syms[s].sc != SC_REGISTER || !a->asmname)
+		return -1;
+	n = c->strs[a->asmname - 1].s;
+	if (!strcmp(n, "sp"))
+		return SP;
+	if ((n[0] == 'x' || n[0] == 'w') && n[1] >= '0' && n[1] <= '9')
+		return atoi(n + 1);
+	return -1;
+}
+
 static int32_t bind_slot(ecx *e, uint32_t s)
 {
 	cc *c = e->c;
@@ -2343,6 +2578,12 @@ static int32_t bind_slot(ecx *e, uint32_t s)
 	b->kind = B_SLOT;
 	b->kv = 0;
 	b->reg = 0xff;
+	if (c->syms[s].sc == SC_REGISTER) {
+		int rr = regvar_reg(c, s);
+
+		if (rr >= 0)
+			b->reg = (uint8_t)rr;
+	}
 	b->slot = slot(e, tsize(c, t) ? tsize(c, t) : 1, al);
 	return b->slot;
 }
@@ -2404,20 +2645,6 @@ static bool is_local_var(cc *c, uint32_t s)
 						   (y->sc == SC_NONE && !(y->flags & SF_GLOBAL)));
 }
 
-static int regvar_reg(cc *c, uint32_t s)
-{
-	const attrs *a = sym_attrs(c, s);
-	const char *n;
-
-	if (c->syms[s].sc != SC_REGISTER || !a->asmname)
-		return -1;
-	n = c->strs[a->asmname - 1].s;
-	if (!strcmp(n, "sp"))
-		return SP;
-	if ((n[0] == 'x' || n[0] == 'w') && n[1] >= '0' && n[1] <= '9')
-		return atoi(n + 1);
-	return -1;
-}
 
 /* ---------------- lvalues from expressions ---------------- */
 
@@ -2473,6 +2700,26 @@ static val ptr_add(ecx *e, val p, val i, int64_t scale, bool sub)
 	}
 }
 
+static val vla_bytes(ecx *e, qty t);
+
+/* p + i elements of a pointer to a VLA: the element size is computed now */
+static val ptr_add_vla(ecx *e, val p, val i, qty ptr, bool sub)
+{
+	val b = vla_bytes(e, e->c->ty[QI(ptr)].base);
+	int ri = toreg(e, &i), rb = toreg(e, &b);
+
+	op4(e, I_MADD, 1, ri, ri, rb, ZR);
+	vfree(e, &b);
+	return ptr_add(e, p, i, 1, sub);
+}
+
+static bool ptr_to_vla(cc *c, qty ptr)
+{
+	const ctype *b = T(c, T(c, ptr)->base);
+
+	return b->kind == TY_ARRAY && (b->flags & TF_VLA);
+}
+
 static lval gen_lval(ecx *e, uint32_t n)
 {
 	cc *c = e->c;
@@ -2493,6 +2740,21 @@ static lval gen_lval(ecx *e, uint32_t n)
 				efatal(e, x->loc, "unsupported global register variable");
 			l.k = L_GLOBREG;
 			l.r = (uint8_t)r;
+			return l;
+		}
+		if (DARWIN(c) && ((c->syms[cs].flags | c->syms[s].flags) & SF_THREAD)) {
+			/* Darwin TLV: the descriptor's thunk returns the address in x0 */
+			int r;
+
+			note_ref(e, REF(RK_SYM, cs));
+			e->calls = true;
+			if (e->reach)
+				put(e, I_TLV)->ref = REF(RK_SYM, cs);
+			r = treg(e);
+			mov(e, 1, r, 0);
+			l.k = L_REG;
+			l.r = (uint8_t)r;
+			l.align = sym_align(c, cs);
 			return l;
 		}
 		l.k = L_SYM;
@@ -2537,6 +2799,8 @@ static lval gen_lval(ecx *e, uint32_t n)
 		uint64_t es = elem_size(c, N(x->a)->ty);
 		qty et = T(c, N(x->a)->ty)->base;
 
+		if (ptr_to_vla(c, N(x->a)->ty))
+			return lfromval(e, ptr_add_vla(e, p, i, N(x->a)->ty, false), talign(c, et));
 		if (i.k == V_CONST && (p.k == V_ADDR)) {
 			l.k = L_SYM;
 			l.ref = p.ref;
@@ -2566,6 +2830,10 @@ static lval gen_lval(ecx *e, uint32_t n)
 		}
 		{
 			int32_t sl = bind_slot(e, s);
+
+			/* it lives until the end of the block, past the statement's temporaries */
+			if (e->foff > e->cl_top)
+				e->cl_top = e->foff;
 			lval d = { .k = L_FRAME, .off = sl, .align = sym_align(c, s) };
 
 			gen_init_local(e, &d, y->ty, x->a);
@@ -2588,6 +2856,7 @@ static lval gen_lval(ecx *e, uint32_t n)
 
 /* ---------------- loads and stores of typed values ---------------- */
 
+static void shift_imm(ecx *e, int op, int x, int rd, int rn, int k);
 static int bf_bytes(int bits) { return bits <= 8 ? 1 : bits <= 16 ? 2 : bits <= 32 ? 4 : 8; }
 
 static val load(ecx *e, lval *l, qty t)
@@ -2598,8 +2867,8 @@ static val load(ecx *e, lval *l, qty t)
 
 	if (is_agg(c, t) || is_func(c, t))
 		return laddr(e, l);
-	if (is_flt(c, t))
-		efatal(e, 0, "floating point is not supported");
+	if (is_flt(c, t) && !is_ld(c, t))
+		fpk(e, t);	/* bits, zero-extended (below: not signed) */
 	if (l->k == L_GLOBREG) {
 		r = treg(e);
 		mov(e, 1, r, l->r);
@@ -2608,8 +2877,23 @@ static val load(ecx *e, lval *l, qty t)
 	if (l->bf) {
 		int bits = l->bitoff + l->width, nb = bf_bytes(bits);
 
-		if (bits > 64)
-			efatal(e, 0, "unsupported bit-field layout");
+		if (bits > 64) {
+			/* straddles 8 bytes (packed): the low 64 - bitoff bits, then the rest from byte 8 on */
+			lval l2 = *l;
+			int h = treg(e);
+
+			if (bits - 64 > 64)
+				efatal(e, 0, "unsupported bit-field layout");
+			r = treg(e);
+			load_n(e, r, l, 8, 0);
+			l2.off += 8;
+			load_n(e, h, &l2, bf_bytes(bits - 64), 0);
+			opbf(e, I_UBFM, 1, r, r, l->bitoff, 63);
+			opbf(e, I_BFM, 1, r, h, l->bitoff, bits - 64 - 1);	/* bfi r, h, #(64 - bitoff), #(bits - 64) */
+			tfree(e, h);
+			opbf(e, l->sgn ? I_SBFM : I_UBFM, 1, r, r, 0, l->width - 1);
+			return vreg(r);
+		}
 		r = treg(e);
 		load_n(e, r, l, nb, 0);
 		opbf(e, l->sgn ? I_SBFM : I_UBFM, 1, r, r, l->bitoff, l->bitoff + l->width - 1);
@@ -2630,7 +2914,7 @@ static val load(ecx *e, lval *l, qty t)
 	if (size == 0)
 		movi(e, 1, r, 0);
 	else
-		load_n(e, r, l, (int)size, size < 8 && is_signed(c, t) ? 1 : 0);
+		load_n(e, r, l, (int)size, size < 8 && !is_flt(c, t) && is_signed(c, t) ? 1 : 0);
 	return vreg(r);
 }
 
@@ -2652,6 +2936,23 @@ static void store(ecx *e, lval *l, qty t, val *v)
 		int r = toreg(e, v);
 
 		mov(e, 1, l->r, r);
+		return;
+	}
+	if (l->bf && l->bitoff + l->width > 64) {
+		/* straddles 8 bytes: see load() */
+		int bits = l->bitoff + l->width, nb = bf_bytes(bits - 64);
+		int r = toreg(e, v), w = treg(e), lo = 64 - l->bitoff;
+		lval l2 = *l;
+
+		load_n(e, w, l, 8, 0);
+		opbf(e, I_BFM, 1, w, r, (64 - l->bitoff) & 63, lo - 1);
+		store_n(e, w, l, 0, 8);
+		l2.off += 8;
+		load_n(e, w, &l2, nb, 0);
+		shift_imm(e, I_LSRV, 1, R_X16, r, lo);
+		opbf(e, I_BFM, 1, w, R_X16, 0, bits - 64 - 1);
+		store_n(e, w, l, 8, nb);
+		tfree(e, w);
 		return;
 	}
 	if (l->bf) {
@@ -2838,6 +3139,18 @@ static int test_zero(ecx *e, val *v, qty t, uint32_t l, bool nz)
 	}
 	if (v->k == V_NONE)
 		return -1;
+	if (is_ld(c, t)) {
+		*v = ld_compare(e, T_EXCLAIMEQ, t, *v, vconst(0));
+		t = prim(TY_INT);
+		sz = 4;
+	}
+	if (is_flt(c, t)) {
+		int d = fpk(e, t), cond = f_cmp(e, T_EXCLAIMEQ, d, v, NULL);
+
+		bcond(e, nz ? cond : C_EQ, l);
+		vfree(e, v);
+		return -1;
+	}
 	if (v->k == V_REG2) {
 		op3(e, I_ORR, 1, R_X16, v->r, v->r2);
 		cbz(e, nz, 1, R_X16, l);
@@ -2864,6 +3177,8 @@ static val tobool(ecx *e, val v, qty t)
 	uint64_t sz = tsize(c, t);
 	int r;
 
+	if (is_flt(c, t))
+		return f_tobool(e, v, t);
 	if (v.k == V_CONST)
 		return vconst(v.i != 0);
 	if (v.k == V_ADDR)
@@ -2887,6 +3202,458 @@ static val tobool(ecx *e, val v, qty t)
 	return v;
 }
 
+/* ---------------- floating point ---------------- */
+
+/*
+ * float and double values live in general registers as their bit patterns
+ * (a float zero-extended); an operation moves them to the scratch FP/SIMD
+ * registers v16-v18 with fmov, works there and moves the result back.  So
+ * registers, spills, loads, stores and calls stay integer code.  Constants
+ * are folded with the host's IEEE arithmetic.  long double is double on
+ * Darwin; _Float16 and 128-bit long double are not supported.
+ */
+static inline void word(ecx *e, uint32_t w)
+{
+	if (e->reach)
+		put(e, I_WORD)->imm = w;
+}
+
+enum { FV0 = 16, FV1 = 17 };
+
+static int fpk(ecx *e, qty t)
+{
+	uint64_t sz = tsize(e->c, t);
+
+	if (sz != 4 && sz != 8)
+		efatal(e, e->curloc, "%s floating point is not supported", sz == 2 ? "16-bit" : "128-bit");
+	return sz == 8;
+}
+
+static inline uint32_t f_in(int d, int vr, int r) { return (d ? 0x9e670000u : 0x1e270000u) | (unsigned)r << 5 | (unsigned)vr; }	/* fmov v, x/w */
+static inline uint32_t f_out(int d, int r, int vr) { return (d ? 0x9e660000u : 0x1e260000u) | (unsigned)vr << 5 | (unsigned)r; }	/* fmov x/w, v */
+
+static double f_val(int d, i128 bits)
+{
+	if (d) {
+		uint64_t u = (uint64_t)bits;
+		double x;
+
+		memcpy(&x, &u, 8);
+		return x;
+	} else {
+		uint32_t u = (uint32_t)bits;
+		float x;
+
+		memcpy(&x, &u, 4);
+		return x;
+	}
+}
+
+static val f_const(int d, double x)
+{
+	if (d) {
+		uint64_t u;
+
+		memcpy(&u, &x, 8);
+		return vconst((i128)u);
+	} else {
+		float f = (float)x;
+		uint32_t u;
+
+		memcpy(&u, &f, 4);
+		return vconst((i128)u);
+	}
+}
+
+/* v into FP register vr */
+static void f_load(ecx *e, int d, int vr, val *v)
+{
+	int r = toreg(e, v);
+
+	word(e, f_in(d, vr, r));
+}
+
+/* fmov v<vr>.d[1], x<r> / fmov x<r>, v<vr>.d[1] */
+static inline uint32_t q_in_hi(int vr, int r) { return 0x9eaf0000u | (unsigned)r << 5 | (unsigned)vr; }
+static inline uint32_t q_out_hi(int r, int vr) { return 0x9eae0000u | (unsigned)vr << 5 | (unsigned)r; }
+
+/* an FP value of sz bytes (4, 8, 16) between v<vr> and memory at base + off, through x16 */
+static void vr_store(ecx *e, int sz, int vr, int base, int32_t off)
+{
+	word(e, f_out(sz >= 8, R_X16, vr));
+	mem(e, I_ST, sz >= 8 ? 3 : 2, 0, R_X16, base, off);
+	if (sz == 16) {
+		word(e, q_out_hi(R_X16, vr));
+		mem(e, I_ST, 3, 0, R_X16, base, off + 8);
+	}
+}
+static void vr_load(ecx *e, int sz, int vr, int base, int32_t off)
+{
+	mem(e, I_LD, sz >= 8 ? 3 : 2, 0, R_X16, base, off);
+	word(e, f_in(sz >= 8, vr, R_X16));
+	if (sz == 16) {
+		mem(e, I_LD, 3, 0, R_X16, base, off + 8);
+		word(e, q_in_hi(vr, R_X16));
+	}
+}
+
+/* host side: binary128 bits of a double (exact), of an integer (truncated), and back (nearest) */
+static i128 ld_of_d(double x)
+{
+	uint64_t u;
+	int s, ex;
+	u128 m;
+
+	memcpy(&u, &x, 8);
+	s = (int)(u >> 63), ex = (int)(u >> 52) & 0x7ff, m = u & ((1ull << 52) - 1);
+	if (ex == 0x7ff)
+		return (i128)((u128)s << 127 | (u128)0x7fff << 112 | m << 60 | (m ? (u128)1 << 111 : 0));
+	if (!ex) {
+		if (!m)
+			return (i128)((u128)s << 127);
+		ex = 1;
+		while (!(m >> 52))
+			m <<= 1, ex--;
+		m &= (1ull << 52) - 1;
+	}
+	return (i128)((u128)s << 127 | (u128)(ex - 1023 + 16383) << 112 | m << 60);
+}
+static i128 ld_of_u(int s, u128 m)
+{
+	int t = 127;
+
+	if (!m)
+		return (i128)((u128)s << 127);
+	while (!(m >> t))
+		t--;
+	m = t <= 112 ? m << (112 - t) : m >> (t - 112);
+	return (i128)((u128)s << 127 | (u128)(16383 + t) << 112 | (m & (((u128)1 << 112) - 1)));
+}
+static double ld_to_d(i128 b)
+{
+	u128 u = (u128)b, m = u & (((u128)1 << 112) - 1);
+	int ex = (int)(u >> 112) & 0x7fff;
+	double x;
+
+	if (ex == 0x7fff)
+		x = m ? __builtin_nan("") : __builtin_inf();
+	else
+		x = __builtin_ldexp((double)(m | (ex ? (u128)1 << 112 : 0)), (ex ? ex : 1) - 16383 - 112);
+	return u >> 127 ? -x : x;
+}
+
+/* a floating constant of type t */
+static val f_const_t(ecx *e, qty t, double x)
+{
+	if (is_ld(e->c, t))
+		return vconst(ld_of_d(x));
+	return f_const(fpk(e, t), x);
+}
+
+static val ld_call(ecx *e, int fn, val *v, qty *t, int n, qty rty)
+{
+	return call_named(e, FIXED(fn), v, t, n, rty, false);
+}
+
+static val ld_compare(ecx *e, int op, qty t, val a, val b)
+{
+	val v[2] = { a, b };
+	qty ts[2] = { t, t };
+	int fn, cond, r;
+	val res;
+
+	switch (op) {
+	case T_EQUALEQUAL: fn = FN_EQTF2, cond = C_EQ; break;
+	case T_EXCLAIMEQ: fn = FN_NETF2, cond = C_NE; break;
+	case T_LESS: fn = FN_LTTF2, cond = C_LT; break;
+	case T_LESSEQ: fn = FN_LETF2, cond = C_LE; break;
+	case T_GREATER: fn = FN_GTTF2, cond = C_GT; break;
+	case T_GREATEREQ: fn = FN_GETF2, cond = C_GE; break;
+	default: efatal(e, e->curloc, "unsupported floating point comparison");
+	}
+	res = ld_call(e, fn, v, ts, 2, prim(TY_INT));
+	r = toreg(e, &res);
+	opi(e, I_SUBSI, 0, ZR, r, 0);
+	cset(e, r, cond);
+	return vreg(r);
+}
+
+static val f_arith(ecx *e, int op, qty ty, val a, val b)
+{
+	int d, ra;
+	uint32_t w;
+
+	if (is_ld(e->c, ty)) {
+		val v[2] = { a, b };
+		qty ts[2] = { ty, ty };
+		int fn = op == T_PLUS ? FN_ADDTF3 : op == T_MINUS ? FN_SUBTF3 : op == T_STAR ? FN_MULTF3 : FN_DIVTF3;
+
+		if (op != T_PLUS && op != T_MINUS && op != T_STAR && op != T_SLASH)
+			efatal(e, e->curloc, "unsupported floating point operator");
+		return ld_call(e, fn, v, ts, 2, ty);
+	}
+	d = fpk(e, ty);
+	if (a.k == V_CONST && b.k == V_CONST) {
+		double x = f_val(d, a.i), y = f_val(d, b.i);
+
+		switch (op) {
+		case T_PLUS: return f_const(d, d ? x + y : (double)((float)x + (float)y));
+		case T_MINUS: return f_const(d, d ? x - y : (double)((float)x - (float)y));
+		case T_STAR: return f_const(d, d ? x * y : (double)((float)x * (float)y));
+		case T_SLASH: return f_const(d, d ? x / y : (double)((float)x / (float)y));
+		}
+	}
+	switch (op) {
+	case T_PLUS: w = 0x1e202800u; break;
+	case T_MINUS: w = 0x1e203800u; break;
+	case T_STAR: w = 0x1e200800u; break;
+	case T_SLASH: w = 0x1e201800u; break;
+	default: efatal(e, e->curloc, "unsupported floating point operator");
+	}
+	f_load(e, d, FV0, &a);
+	f_load(e, d, FV1, &b);
+	vfree(e, &b);
+	ra = a.r;
+	word(e, w | (unsigned)d << 22 | FV1 << 16 | FV0 << 5 | FV0);
+	word(e, f_out(d, ra, FV0));
+	return a;
+}
+
+/* fcmp a, b (b none: #0.0); the condition for op */
+static int f_cmp(ecx *e, int op, int d, val *a, val *b)
+{
+	f_load(e, d, FV0, a);
+	if (b) {
+		f_load(e, d, FV1, b);
+		word(e, 0x1e202000u | (unsigned)d << 22 | FV1 << 16 | FV0 << 5);
+	} else {
+		word(e, 0x1e202008u | (unsigned)d << 22 | FV0 << 5);
+	}
+	switch (op) {
+	case T_EQUALEQUAL: return C_EQ;
+	case T_EXCLAIMEQ: return C_NE;	/* true when unordered */
+	case T_LESS: return C_MI;
+	case T_LESSEQ: return C_LS;
+	case T_GREATER: return C_GT;
+	case T_GREATEREQ: return C_GE;
+	}
+	efatal(e, e->curloc, "unsupported floating point comparison");
+}
+
+static val f_compare(ecx *e, int op, qty t, val a, val b)
+{
+	int d, cond;
+
+	if (is_ld(e->c, t))
+		return ld_compare(e, op, t, a, b);
+	d = fpk(e, t);
+
+	if (a.k == V_CONST && b.k == V_CONST) {
+		double x = f_val(d, a.i), y = f_val(d, b.i);
+
+		switch (op) {
+		case T_EQUALEQUAL: return vconst(x == y);
+		case T_EXCLAIMEQ: return vconst(x != y);
+		case T_LESS: return vconst(x < y);
+		case T_LESSEQ: return vconst(x <= y);
+		case T_GREATER: return vconst(x > y);
+		case T_GREATEREQ: return vconst(x >= y);
+		}
+	}
+	cond = f_cmp(e, op, d, &a, &b);
+	vfree(e, &b);
+	cset(e, a.r, cond);
+	return vreg(a.r);
+}
+
+/* x != 0.0 as 0/1 (NaN is true, -0.0 false) */
+static val f_tobool(ecx *e, val v, qty t)
+{
+	int d;
+
+	if (is_ld(e->c, t)) {
+		if (v.k == V_CONST)
+			return vconst(((u128)v.i << 1) != 0);
+		return ld_compare(e, T_EXCLAIMEQ, t, v, vconst(0));
+	}
+	d = fpk(e, t);
+
+	if (v.k == V_CONST)
+		return vconst(f_val(d, v.i) != 0);
+	f_cmp(e, T_EXCLAIMEQ, d, &v, NULL);
+	cset(e, v.r, C_NE);
+	return v;
+}
+
+static val f_neg(ecx *e, val v, qty t)
+{
+	int d;
+
+	if (is_ld(e->c, t)) {
+		if (v.k == V_CONST)
+			return vconst((i128)((u128)v.i ^ (u128)1 << 127));
+		toreg2(e, &v, false);
+		opi(e, I_EORI, 1, v.r2, v.r2, (int64_t)0x8000000000000000ULL);
+		return v;
+	}
+	d = fpk(e, t);
+
+	if (v.k == V_CONST)
+		return f_const(d, -f_val(d, v.i));
+	f_load(e, d, FV0, &v);
+	word(e, 0x1e214000u | (unsigned)d << 22 | FV0 << 5 | FV0);
+	word(e, f_out(d, v.r, FV0));
+	return v;
+}
+
+/* conversions to and from long double (one side is long double, the other not bool) */
+static val ld_cast(ecx *e, val v, qty from, qty to)
+{
+	cc *c = e->c;
+	bool ff = is_flt(c, from), tf = is_flt(c, to);
+
+	if (ff && tf) {
+		if (is_ld(c, from) && is_ld(c, to))
+			return v;
+		if (is_ld(c, to)) {
+			if (v.k == V_CONST)
+				return vconst(ld_of_d(f_val(fpk(e, from), v.i)));
+			return ld_call(e, fpk(e, from) ? FN_EXTENDDFTF2 : FN_EXTENDSFTF2, &v, &from, 1, to);
+		}
+		if (v.k == V_CONST)
+			return f_const(fpk(e, to), ld_to_d(v.i));
+		return ld_call(e, fpk(e, to) ? FN_TRUNCTFDF2 : FN_TRUNCTFSF2, &v, &from, 1, to);
+	}
+	if (tf) {
+		uint64_t fs = tsize(c, from);
+		bool sg = !is_ptr(c, from) && is_signed(c, from);
+		qty at;
+		int fn;
+
+		if (v.k == V_CONST) {
+			i128 x = trunc_to(c, v.i, from);
+
+			return vconst(sg && x < 0 ? ld_of_u(1, -(u128)x) : ld_of_u(0, (u128)x));
+		}
+		if (fs == 16) {
+			fn = sg ? FN_FLOATTITF : FN_FLOATUNTITF, at = sg ? prim(TY_INT128) : prim(TY_UINT128);
+		} else if (fs == 8) {
+			fn = sg ? FN_FLOATDITF : FN_FLOATUNDITF, at = sg ? prim(TY_LONG) : prim(TY_ULONG);
+		} else {
+			toreg(e, &v);
+			if (fs < 4)
+				extend(e, v.r, v.r, (int)fs, sg);
+			fn = sg ? FN_FLOATSITF : FN_FLOATUNSITF, at = sg ? prim(TY_INT) : prim(TY_UINT);
+		}
+		return ld_call(e, fn, &v, &at, 1, to);
+	}
+	{
+		uint64_t ts = tsize(c, to);
+		bool sg = !is_ptr(c, to) && is_signed(c, to);
+		int fn;
+		qty rt;
+		val r;
+
+		if (v.k == V_CONST) {
+			double x = ld_to_d(v.i);
+
+			return vconst(trunc_to(c, sg ? (i128)x : (i128)(u128)x, to));
+		}
+		if (ts == 16)
+			return ld_call(e, sg ? FN_FIXTFTI : FN_FIXUNSTFTI, &v, &from, 1, to);
+		fn = ts == 8 ? (sg ? FN_FIXTFDI : FN_FIXUNSTFDI) : (sg ? FN_FIXTFSI : FN_FIXUNSTFSI);
+		rt = ts == 8 ? (sg ? prim(TY_LONG) : prim(TY_ULONG)) : (sg ? prim(TY_INT) : prim(TY_UINT));
+		r = ld_call(e, fn, &v, &from, 1, rt);
+		if (ts < 4) {
+			toreg(e, &r);
+			extend(e, r.r, r.r, (int)ts, sg);
+		}
+		return r;
+	}
+}
+
+static val f_cast(ecx *e, val v, qty from, qty to)
+{
+	cc *c = e->c;
+	bool ff = is_flt(c, from), tf = is_flt(c, to);
+
+	if (v.k == V_NONE)
+		return v;
+	if (KIND(c, to) == TY_BOOL)
+		return f_tobool(e, v, from);
+	if (is_ld(c, from) || is_ld(c, to))
+		return ld_cast(e, v, from, to);
+	if (ff && tf) {
+		int fd = fpk(e, from), td = fpk(e, to);
+
+		if (fd == td)
+			return v;
+		if (v.k == V_CONST)
+			return f_const(td, f_val(fd, v.i));
+		f_load(e, fd, FV0, &v);
+		word(e, (fd ? 0x1e624000u : 0x1e22c000u) | FV0 << 5 | FV0);	/* fcvt s<-d / d<-s */
+		word(e, f_out(td, v.r, FV0));
+		return v;
+	}
+	if (tf) {
+		/* integer -> floating */
+		int td = fpk(e, to);
+		uint64_t fs = tsize(c, from);
+		bool sg = !is_ptr(c, from) && is_signed(c, from);
+
+		if (fs == 16) {
+			/* __floattidf & co. */
+			val r;
+			qty ft = sg ? prim(TY_INT128) : prim(TY_UINT128);
+
+			if (v.k == V_CONST)
+				return f_const(td, sg ? (double)v.i : (double)(u128)v.i);
+			r = call_named(e, FIXED(sg ? (td ? FN_FLOATTIDF : FN_FLOATTISF) : (td ? FN_FLOATUNTIDF : FN_FLOATUNTISF)),
+				       &v, &ft, 1, to, false);
+			return r;
+		}
+		if (v.k == V_CONST) {
+			i128 x = trunc_to(c, v.i, from);
+
+			return f_const(td, sg ? (double)(int64_t)x : (double)(uint64_t)x);
+		}
+		toreg(e, &v);
+		if (fs < 4)
+			extend(e, v.r, v.r, (int)fs, sg);
+		/* scvtf/ucvtf v16, x/w */
+		word(e, (fs == 8 ? 0x9e220000u : 0x1e220000u) | (sg ? 0 : 0x10000u) | (unsigned)td << 22 | (unsigned)v.r << 5 | FV0);
+		word(e, f_out(td, v.r, FV0));
+		return v;
+	}
+	{
+		/* floating -> integer (fcvtzs/fcvtzu, x or w) */
+		int fd = fpk(e, from);
+		uint64_t ts = tsize(c, to);
+		bool sg = !is_ptr(c, to) && is_signed(c, to);
+
+		if (ts == 16) {
+			/* __fixdfti & co. */
+			if (v.k == V_CONST) {
+				double x = f_val(fd, v.i);
+
+				return vconst(sg ? (i128)x : (i128)(u128)x);
+			}
+			return call_named(e, FIXED(sg ? (fd ? FN_FIXDFTI : FN_FIXSFTI) : (fd ? FN_FIXUNSDFTI : FN_FIXUNSSFTI)),
+					  &v, &from, 1, to, false);
+		}
+		if (v.k == V_CONST) {
+			double x = f_val(fd, v.i);
+
+			return vconst(trunc_to(c, sg ? (i128)(int64_t)x : (i128)(uint64_t)x, to));
+		}
+		f_load(e, fd, FV0, &v);
+		word(e, (ts == 8 ? 0x9e380000u : 0x1e380000u) | (sg ? 0 : 0x10000u) | (unsigned)fd << 22 | FV0 << 5 | (unsigned)v.r);
+		if (ts < 4)
+			extend(e, v.r, v.r, (int)ts, sg);
+		return v;
+	}
+}
+
 /* ---------------- casts ---------------- */
 
 static val cast(ecx *e, val v, qty from, qty to, int kind)
@@ -2895,7 +3662,7 @@ static val cast(ecx *e, val v, qty from, qty to, int kind)
 	uint64_t fs = tsize(c, from), ts = tsize(c, to);
 
 	if ((is_flt(c, from) || is_flt(c, to)) && kind != CK_VOID)
-		efatal(e, 0, "floating point is not supported");
+		return f_cast(e, v, from, to);
 	switch (kind) {
 	case CK_NOP:
 	case CK_P2P:
@@ -3040,7 +3807,6 @@ static val arith(ecx *e, int op, qty ty, val a, val b)
 	return a;
 }
 
-static val call_named(ecx *e, uint32_t ref, val *args, qty *tys, int n, qty rty, bool noret);
 
 /* 128-bit arithmetic on register pairs */
 static val arith2(ecx *e, int op, qty ty, val a, val b)
@@ -3233,14 +3999,16 @@ static void need_fold(ecx *e)
 	}
 }
 
-static val do_call(ecx *e, uint32_t ref, val *fnv, carg *args, int n, qty rty, bool noret)
+/* nfix: the callee's named parameters if it is variadic, else -1 */
+static val do_call(ecx *e, uint32_t ref, val *fnv, carg *args, int n, qty rty, bool noret, int nfix)
 {
 	cc *c = e->c;
 	int ngrn = 0, nsaa = 0;
 	int32_t fslot = 1, rslot = 1;
-	bool sret = is_record(c, rty) && tsize(c, rty) > 16;
+	bool sret = is_sret(c, rty);
 	spill sp;
 	val res = vnone();
+	int hn;
 
 	e->calls = true;
 	if (fnv) {
@@ -3257,10 +4025,16 @@ static val do_call(ecx *e, uint32_t ref, val *fnv, carg *args, int n, qty rty, b
 	} else {
 		note_ref(e, ref);
 	}
+	e->nsrn = 0;
 	for (int i = 0; i < n; i++) {
 		park(e, &args[i]);
-		classify(e, args[i].t, &ngrn, &nsaa, &args[i].a);
+		if (nfix >= 0 && i >= nfix && DARWIN(c))
+			classify_va(e, args[i].t, &nsaa, &args[i].a);
+		else
+			classify(e, args[i].t, &ngrn, &nsaa, &args[i].a);
 	}
+	if (DARWIN(c))
+		nsaa = (nsaa + 7) & ~7;
 	if (nsaa > e->outmax)
 		e->outmax = nsaa;
 	if (sret)
@@ -3295,6 +4069,11 @@ static val do_call(ecx *e, uint32_t ref, val *fnv, carg *args, int n, qty rty, b
 				arg_word(e, a, k, a->a.reg + k);
 			break;
 		case A_STACK:
+			if (DARWIN(c) && a->a.size < 8 && !is_agg(c, a->t)) {	/* Apple: packed */
+				arg_word(e, a, 0, R_X16);
+				mem(e, I_ST, log2sz(a->a.size), 0, R_X16, SP, a->a.stk);
+				break;
+			}
 			for (int k = 0; k < a->a.nreg; k++) {
 				arg_word(e, a, k, R_X16);
 				mem(e, I_ST, 3, 0, R_X16, SP, a->a.stk + 8 * k);
@@ -3306,6 +4085,18 @@ static val do_call(ecx *e, uint32_t ref, val *fnv, carg *args, int n, qty rty, b
 		case A_REF_STACK:
 			opi(e, I_ADDI, 1, R_X16, FRAME, a->slot);
 			mem(e, I_ST, 3, 0, R_X16, SP, a->a.stk);
+			break;
+		case A_VREG:
+			arg_word(e, a, 0, R_X16);
+			word(e, f_in(a->a.size >= 8, a->a.reg, R_X16));
+			if (a->a.size == 16) {
+				arg_word(e, a, 1, R_X16);
+				word(e, q_in_hi(a->a.reg, R_X16));
+			}
+			break;
+		case A_HFA:
+			for (int k = 0; k < a->a.nreg; k++)
+				vr_load(e, a->a.fsz, a->a.reg + k, FRAME, a->slot + a->a.fsz * k);
 			break;
 		}
 	}
@@ -3324,7 +4115,16 @@ static val do_call(ecx *e, uint32_t ref, val *fnv, carg *args, int n, qty rty, b
 
 		opi(e, I_ADDI, 1, r, FRAME, rslot);
 		res = vreg(r);
-	} else if (is_record(c, rty)) {
+	} else if (is_recabi(c, rty) && hfa(c, rty, &hn)) {
+		int hb = hfa(c, rty, &hn);
+		int32_t sl = slot(e, 64, 16);
+		int r = treg(e);
+
+		for (int k = 0; k < hn; k++)
+			vr_store(e, hb, k, FRAME, sl + hb * k);
+		opi(e, I_ADDI, 1, r, FRAME, sl);
+		res = vreg(r);
+	} else if (is_recabi(c, rty)) {
 		int32_t sl = slot(e, 16, 16);
 		int r = treg(e);
 
@@ -3333,12 +4133,23 @@ static val do_call(ecx *e, uint32_t ref, val *fnv, carg *args, int n, qty rty, b
 			mem(e, I_ST, 3, 0, 1, FRAME, sl + 8);
 		opi(e, I_ADDI, 1, r, FRAME, sl);
 		res = vreg(r);
-	} else if (tsize(c, rty) == 16) {
+	} else if (is_ld(c, rty)) {
+		res.k = V_REG2;
+		res.r = (uint8_t)treg(e);
+		res.r2 = (uint8_t)treg(e);
+		word(e, f_out(1, res.r, 0));
+		word(e, q_out_hi(res.r2, 0));
+	} else if (tsize(c, rty) == 16 && !is_flt(c, rty)) {
 		res.k = V_REG2;
 		res.r = (uint8_t)treg(e);
 		res.r2 = (uint8_t)treg(e);
 		mov(e, 1, res.r, 0);
 		mov(e, 1, res.r2, 1);
+	} else if (is_flt(c, rty)) {
+		int r = treg(e);
+
+		word(e, f_out(fpk(e, rty), r, 0));
+		res = vreg(r);
 	} else {
 		int r = treg(e);
 
@@ -3358,8 +4169,9 @@ static val call_named(ecx *e, uint32_t ref, val *vals, qty *tys, int n, qty rty,
 	for (int i = 0; i < n; i++) {
 		a[i].v = vals[i];
 		a[i].t = tys[i];
+		a[i].slot = 1;
 	}
-	return do_call(e, ref, NULL, a, n, rty, noret);
+	return do_call(e, ref, NULL, a, n, rty, noret, -1);
 }
 
 /* ---------------- inline expansion ---------------- */
@@ -3392,6 +4204,41 @@ static void kv_track(ecx *e, uint32_t s, const val *v)
 		e->kval[k] = (int64_t)trunc_to(c, v->i, y->ty);
 		e->kvalid |= (uint16_t)(1u << k);
 	}
+}
+
+static bool is_aconst(cc *c, uint32_t n);
+static uint32_t aconst_idx(cc *c, uint32_t n);
+
+/* the kv slot of a[CONST] (create: allocate one), or -1 */
+static int ael_slot(ecx *e, uint32_t n, bool create)
+{
+	cc *c = e->c;
+	uint32_t s, idx;
+	const sym *y;
+	const ctype *at;
+	qty et;
+
+	if (!is_aconst(c, n))
+		return -1;
+	s = N(N(N(n)->a)->a)->a, y = &c->syms[s];
+	if (!is_local_var(c, s) || y->sc == SC_STATIC || (e->E->sflags[s] & SA_AESC) || sym_attrs(c, s)->cleanup)
+		return -1;
+	at = T(c, y->ty), et = at->base;
+	if (at->kind != TY_ARRAY || (at->flags & (TF_VLA | TF_INCOMPLETE)) || !is_integer(c, et) || is_wide(c, et) ||
+	    (QQ(et) & Q_VOLATILE) || (QQ(y->ty) & Q_VOLATILE))
+		return -1;
+	idx = aconst_idx(c, n);
+	if (idx >= at->n)
+		return -1;
+	for (int i = 0; i < e->nael; i++)
+		if (e->ael[i].s == s && e->ael[i].idx == idx)
+			return e->ael[i].kv;
+	if (!create || e->nkv == NKV || e->nael == NKV)
+		return -1;
+	e->ael[e->nael].s = s, e->ael[e->nael].idx = idx, e->ael[e->nael].kv = e->nkv;
+	e->nael++;
+	e->kvalid &= (uint16_t)~(1u << e->nkv);
+	return e->nkv++;
 }
 
 /* may variable s (param or local) be bound to the constant v for good? */
@@ -3437,6 +4284,9 @@ static bool can_inline(ecx *e, uint32_t s)
 		}
 	}
 	if (T(c, y->ty)->flags & TF_VARIADIC)
+		return false;
+	ensure_walked(e->E, c, s);
+	if (e->E->sflags[s] & SA_NOINL)
 		return false;
 	if (e->inline_depth >= 48 || on_inline_stack(e, s))
 		return false;
@@ -3618,9 +4468,18 @@ static val gen_call(ecx *e, uint32_t n)
 	}
 	if (inl)
 		return inline_call(e, s, args, na);
-	if (s || ref)
-		return do_call(e, ref, NULL, args, na, x->ty, noret);
-	return do_call(e, 0, &fnv, args, na, x->ty, false);
+	{
+		qty ft = N(x->a)->ty;
+		int nfix = -1;
+
+		if (is_ptr(c, ft))
+			ft = T(c, ft)->base;
+		if (is_func(c, ft) && (T(c, ft)->flags & TF_VARIADIC))
+			nfix = (int)T(c, ft)->n;
+		if (s || ref)
+			return do_call(e, ref, NULL, args, na, x->ty, noret, nfix);
+		return do_call(e, 0, &fnv, args, na, x->ty, false, nfix);
+	}
 }
 
 /* ---------------- builtins ---------------- */
@@ -3652,8 +4511,12 @@ static bool side_effects(cc *c, uint32_t n)
 		switch (x->aux) {
 		case BI_VA_START: case BI_VA_COPY: case BI_VA_END: case BI_ALLOCA: case BI_TRAP:
 		case BI_UNREACHABLE:
+		case BI_ADD_OVERFLOW: case BI_SUB_OVERFLOW: case BI_MUL_OVERFLOW:	/* store the result */
+		case BI_ADDC: case BI_SUBC:
 			return true;
 		default:
+			if (x->aux >= BI_ATOMIC_LOAD_N && x->aux <= BI_ATOMIC_SIGNAL_FENCE)
+				return true;
 			if (x->aux == BI_CONSTANT_P)
 				return false;	/* its operand is not evaluated */
 			for (uint32_t i = 0; i < x->c; i++)
@@ -3664,7 +4527,7 @@ static bool side_effects(cc *c, uint32_t n)
 	case N_MEMBER: case N_DEREF: case N_UNARY: case N_CAST: case N_ADDR: case N_COMPLIT:
 	case N_STMTEXPR: case N_EXPR: case N_RETURN:
 		return side_effects(c, x->a);
-	case N_INDEX: case N_BINARY: case N_LOGAND: case N_LOGOR: case N_COMMA:
+	case N_INDEX: case N_BINARY: case N_LOGAND: case N_LOGOR: case N_COMMA: case N_CPLX:
 		return side_effects(c, x->a) || side_effects(c, x->b);
 	case N_COND: case N_IF:
 		return side_effects(c, x->a) || side_effects(c, x->b) || side_effects(c, x->c);
@@ -3709,6 +4572,8 @@ static val dry(ecx *e, uint32_t n)
 	v = gen(e, n);
 	e->dry--;
 	e->nkv = nkv, e->kvalid = kvalid;
+	while (e->nael && e->ael[e->nael - 1].kv >= nkv)
+		e->nael--;
 	memcpy(e->kval, kval, sizeof(kval));
 	e->nin = nin, e->live = live, e->usedcs = usedcs, e->foff = foff;	/* labels stay: user labels may map to them */
 	e->reach = reach, e->nclean = nclean, e->nloop = nloop, e->raw.n = raw, e->calls = calls;
@@ -3756,7 +4621,7 @@ static val gen_overflow(ecx *e, const node *x, const uint32_t *arg)
 	int lo, hi, t, ok;
 	lval l;
 
-	if (tsize(c, ta) > 8 || tsize(c, tb) > 8 || bits > 64)
+	if (tsize(c, ta) > 8 || tsize(c, tb) > 8)
 		efatal(e, x->loc, "128-bit overflow builtins are not supported");
 	/* exact result in 128 bits */
 	{
@@ -3785,6 +4650,27 @@ static val gen_overflow(ecx *e, const node *x, const uint32_t *arg)
 		break;
 	}
 	vfree(e, &b);
+	if (bits == 128) {
+		/*
+		 * Operands of at most 64 bits: the 128 bits are the exact result,
+		 * signed if an operand is.  Signed into unsigned overflows when
+		 * negative; unsigned into signed when the top bit is set.
+		 */
+		bool sx = is_signed(c, ta) || is_signed(c, tb);
+		val r = { .k = V_REG2, .r = (uint8_t)lo, .r2 = (uint8_t)hi };
+
+		ok = treg(e);
+		if (sx != sr)
+			shift_imm(e, I_LSRV, 1, ok, hi, 63);
+		else
+			movi(e, 0, ok, 0);
+		l = lfromval(e, p, talign(c, tr));
+		store(e, &l, tr, &r);
+		lfree(e, &l);
+		tfree(e, lo);
+		tfree(e, hi);
+		return vreg(ok);
+	}
 	/* fits iff ext(lo) == lo && hi == (signed ? lo >> 63 : 0) */
 	t = treg(e);
 	ok = treg(e);
@@ -3817,11 +4703,65 @@ static val gen_overflow(ecx *e, const node *x, const uint32_t *arg)
 	return vreg(ok);
 }
 
+/* __builtin_addc* / __builtin_subc*: x +- y +- carry_in, *carry_out = the carry (borrow) of either step */
+static val gen_carry(ecx *e, const node *x, const uint32_t *arg)
+{
+	cc *c = e->c;
+	qty ty = x->ty, tc = T(c, N(arg[3])->ty)->base;
+	int sz = (int)tsize(c, ty), bits = sz * 8;
+	bool add = x->aux == BI_ADDC;
+	val a = gen(e, arg[0]), b = gen(e, arg[1]), ci = gen(e, arg[2]), p = gen(e, arg[3]);
+	int ra = toreg(e, &a), rb = toreg(e, &b), rc = toreg(e, &ci), co = treg(e);
+	lval l;
+
+	extend(e, ra, ra, sz, false);
+	extend(e, rb, rb, sz, false);
+	extend(e, rc, rc, sz, false);
+	if (bits == 64) {
+		int t = treg(e);
+
+		op3(e, add ? I_ADDS : I_SUBS, 1, ra, ra, rb);
+		cset(e, co, add ? C_HS : C_LO);
+		op3(e, add ? I_ADDS : I_SUBS, 1, ra, ra, rc);
+		cset(e, t, add ? C_HS : C_LO);
+		op3(e, I_ORR, 0, co, co, t);
+		tfree(e, t);
+	} else {
+		op3(e, add ? I_ADD : I_SUB, 1, ra, ra, rb);
+		op3(e, add ? I_ADD : I_SUB, 1, ra, ra, rc);
+		/* add: anything at or above bit 'bits' is the carry; sub: a negative result is the borrow */
+		shift_imm(e, I_LSRV, 1, co, ra, add ? bits : 63);
+		op3(e, I_SUBS, 1, ZR, co, ZR);
+		cset(e, co, C_NE);
+		opbf(e, I_UBFM, 1, ra, ra, 0, bits - 1);
+	}
+	vfree(e, &b);
+	vfree(e, &ci);
+	l = lfromval(e, p, talign(c, tc));
+	{
+		val r = vreg(co);
+
+		store(e, &l, tc, &r);
+	}
+	lfree(e, &l);
+	tfree(e, co);
+	return vreg(ra);
+}
+
 static void va_start_(ecx *e, uint32_t apn)
 {
 	lval l = gen_lval(e, apn);
 	val a = laddr(e, &l);
 	int ra = toreg(e, &a), t = treg(e);
+
+	if (DARWIN(e->c)) {
+		/* char *: the first anonymous argument, after the named stack ones */
+		opi(e, I_ADDI, 1, t, R_FP, 16 + ((e->nstk_named + 7) & ~7));
+		mem(e, I_ST, 3, 0, t, ra, 0);
+		tfree(e, t);
+		vfree(e, &a);
+		return;
+	}
 
 	/* __stack */
 	opi(e, I_ADDI, 1, t, R_FP, 16 + e->nstk_named);
@@ -3829,10 +4769,13 @@ static void va_start_(ecx *e, uint32_t apn)
 	/* __gr_top: end of the register save area */
 	opi(e, I_ADDI, 1, t, FRAME, e->vaslot + 64);
 	mem(e, I_ST, 3, 0, t, ra, 8);
-	mem(e, I_ST, 3, 0, ZR, ra, 16);
+	/* __vr_top, __gr_offs, __vr_offs */
+	opi(e, I_ADDI, 1, t, FRAME, e->vrslot + 128);
+	mem(e, I_ST, 3, 0, t, ra, 16);
 	movi(e, 0, t, -(8 - e->ngr_named) * 8);
 	mem(e, I_ST, 2, 0, t, ra, 24);
-	mem(e, I_ST, 2, 0, ZR, ra, 28);
+	movi(e, 0, t, -(8 - e->nvr_named) * 16);
+	mem(e, I_ST, 2, 0, t, ra, 28);
 	tfree(e, t);
 	vfree(e, &a);
 }
@@ -3842,7 +4785,7 @@ static val va_arg_(ecx *e, const node *x)
 	cc *c = e->c;
 	qty t = x->ty;
 	uint64_t size = tsize(c, t);
-	bool big = is_record(c, t) && size > 16;
+	bool big = is_recabi(c, t) && size > 16;
 	int nreg = big ? 1 : (int)((size + 7) / 8);
 	bool al16 = !big && talign(c, t) == 16;
 	lval l = gen_lval(e, x->a);
@@ -3850,8 +4793,60 @@ static val va_arg_(ecx *e, const node *x)
 	int ra = toreg(e, &a), off = treg(e), addr = treg(e);
 	uint32_t lstack = newlabel(e), ldone = newlabel(e);
 
-	if (is_flt(c, t))
-		efatal(e, x->loc, "floating point va_arg is not supported");
+	if (DARWIN(c)) {
+		mem(e, I_LD, 3, 0, addr, ra, 0);
+		if (al16) {
+			opi(e, I_ADDI, 1, addr, addr, 15);
+			opi(e, I_ANDI, 1, addr, addr, -16);
+		}
+		opi(e, I_ADDI, 1, off, addr, big ? 8 : ((int64_t)size + 7) & ~7);
+		mem(e, I_ST, 3, 0, off, ra, 0);
+	} else {
+	if (is_flt(c, t)) {
+		/* __vr_offs / __vr_top, 16 bytes a register */
+		mem(e, I_LD, 2, 1, off, ra, 28);
+		opi(e, I_SUBSI, 1, ZR, off, 0);
+		bcond(e, C_GE, lstack);
+		opi(e, I_ADDI, 1, addr, off, 16);
+		mem(e, I_ST, 2, 0, addr, ra, 28);
+		opi(e, I_SUBSI, 1, ZR, addr, 0);
+		bcond(e, C_GT, lstack);
+		mem(e, I_LD, 3, 0, addr, ra, 16);
+		op3(e, I_ADD, 1, addr, addr, off);
+		jump(e, ldone);
+		nreg = size > 8 ? 2 : 1;
+		al16 = size > 8;
+		goto stack;
+	}
+	int hn, hb = hfa(c, t, &hn);
+
+	if (hb) {
+		/* an HFA: hn v registers, copied together into a temporary */
+		int32_t sl = slot(e, 64, 16);
+
+		mem(e, I_LD, 2, 1, off, ra, 28);
+		opi(e, I_SUBSI, 1, ZR, off, 0);
+		bcond(e, C_GE, lstack);
+		opi(e, I_ADDI, 1, addr, off, 16 * hn);
+		mem(e, I_ST, 2, 0, addr, ra, 28);
+		opi(e, I_SUBSI, 1, ZR, addr, 0);
+		bcond(e, C_GT, lstack);
+		mem(e, I_LD, 3, 0, addr, ra, 16);
+		op3(e, I_ADD, 1, addr, addr, off);
+		for (int k = 0; k < hn; k++)
+			for (int w = 0; w < hb; w += 8) {
+				int lg = hb >= 8 ? 3 : 2;
+
+				mem(e, I_LD, lg, 0, R_X16, addr, 16 * k + w);
+				mem(e, I_ST, lg, 0, R_X16, FRAME, sl + hb * k + w);
+			}
+		opi(e, I_ADDI, 1, addr, FRAME, sl);
+		jump(e, ldone);
+		nreg = (int)((size + 7) / 8);
+		big = false;
+		al16 = talign(c, t) >= 16;
+		goto stack;
+	}
 	mem(e, I_LD, 2, 1, off, ra, 24);
 	opi(e, I_SUBSI, 1, ZR, off, 0);
 	bcond(e, C_GE, lstack);
@@ -3866,6 +4861,7 @@ static val va_arg_(ecx *e, const node *x)
 	mem(e, I_LD, 3, 0, addr, ra, 8);
 	op3(e, I_ADD, 1, addr, addr, off);
 	jump(e, ldone);
+stack:
 	deflabel(e, lstack);
 	mem(e, I_LD, 3, 0, addr, ra, 0);
 	if (al16) {
@@ -3875,6 +4871,7 @@ static val va_arg_(ecx *e, const node *x)
 	opi(e, I_ADDI, 1, off, addr, nreg * 8);
 	mem(e, I_ST, 3, 0, off, ra, 0);
 	deflabel(e, ldone);
+	}
 	tfree(e, off);
 	vfree(e, &a);
 	if (big)
@@ -3887,6 +4884,157 @@ static val va_arg_(ecx *e, const node *x)
 			tfree(e, addr);
 		return v;
 	}
+}
+
+/*
+ * __atomic_*: LSE instructions, always acquire+release (ldar/stlr, swpal,
+ * casal, ld<op>al), which is at least what any memory order asks for.
+ */
+static val gen_atomic(ecx *e, const node *x, const uint32_t *arg)
+{
+	cc *c = e->c;
+	int id = x->aux;
+	qty t = QUNQ(T(c, N(arg[0])->ty)->base);
+	uint64_t n = tsize(c, t);
+	unsigned sz = (unsigned)log2sz(n), xs = n == 8;
+	bool sg = is_integer(c, t) && is_signed(c, t);
+	val p = gen(e, arg[0]), v1 = vnone(), v2 = vnone(), res = vnone();
+	int rp, nmo = id == BI_ATOMIC_CMPXCHG_N || id == BI_ATOMIC_CMPXCHG ? 2 : 1, nargs = (int)x->c;
+
+	if (n == 16)
+		efatal(e, x->loc, "16-byte atomics are not supported");
+	rp = toreg(e, &p);
+	/* operands, then the memory orders (evaluated for their side effects) */
+	if (nargs - nmo > 1)
+		v1 = gen(e, arg[1]);
+	if (nargs - nmo > 2)
+		v2 = gen(e, arg[2]);
+	for (int k = nargs - nmo; k < nargs; k++) {
+		val m = gen(e, arg[k]);
+
+		vfree(e, &m);
+	}
+	if (nargs - nmo > 3) {	/* weak: ignored */
+		val w = gen(e, arg[3]);
+
+		vfree(e, &w);
+	}
+	switch (id) {
+	case BI_ATOMIC_LOAD_N: case BI_ATOMIC_LOAD: {
+		int r = treg(e);
+
+		word(e, sz << 30 | 0x08dffc00u | (unsigned)rp << 5 | (unsigned)r);	/* ldar */
+		if (id == BI_ATOMIC_LOAD) {
+			int rr = toreg(e, &v1);
+
+			mem(e, I_ST, (int)sz, 0, r, rr, 0);
+			tfree(e, r);
+			break;
+		}
+		if (sg && n < 8)
+			extend(e, r, r, (int)n, true);
+		res = vreg(r);
+		break;
+	}
+	case BI_ATOMIC_STORE_N: case BI_ATOMIC_STORE: {
+		int r;
+
+		if (id == BI_ATOMIC_STORE) {
+			int rv = toreg(e, &v1);
+
+			r = treg(e);
+			mem(e, I_LD, (int)sz, 0, r, rv, 0);
+			tfree(e, r);
+		}
+		r = id == BI_ATOMIC_STORE ? r : toreg(e, &v1);
+		word(e, sz << 30 | 0x089ffc00u | (unsigned)rp << 5 | (unsigned)r);	/* stlr */
+		break;
+	}
+	case BI_ATOMIC_EXCHANGE_N: case BI_ATOMIC_EXCHANGE: {
+		int rs, r = treg(e);
+
+		if (id == BI_ATOMIC_EXCHANGE) {
+			int rv = toreg(e, &v1);
+
+			rs = treg(e);
+			mem(e, I_LD, (int)sz, 0, rs, rv, 0);
+		} else {
+			rs = toreg(e, &v1);
+		}
+		word(e, sz << 30 | 0x38e08000u | (unsigned)rs << 16 | (unsigned)rp << 5 | (unsigned)r);	/* swpal */
+		if (id == BI_ATOMIC_EXCHANGE) {
+			int rr = toreg(e, &v2);
+
+			mem(e, I_ST, (int)sz, 0, r, rr, 0);
+			tfree(e, rs);
+			tfree(e, r);
+			break;
+		}
+		if (sg && n < 8)
+			extend(e, r, r, (int)n, true);
+		res = vreg(r);
+		break;
+	}
+	case BI_ATOMIC_CMPXCHG_N: case BI_ATOMIC_CMPXCHG: {
+		/* old = *expected; casal old, desired, [p]; ok = old == *expected; if !ok *expected = old */
+		int re = toreg(e, &v1), rd, old = treg(e), cmpv = treg(e), ok;
+		uint32_t l = newlabel(e);
+
+		if (id == BI_ATOMIC_CMPXCHG) {
+			int rv = toreg(e, &v2);
+
+			rd = treg(e);
+			mem(e, I_LD, (int)sz, 0, rd, rv, 0);
+		} else {
+			rd = toreg(e, &v2);
+		}
+		mem(e, I_LD, (int)sz, 0, old, re, 0);
+		mov(e, 1, cmpv, old);
+		word(e, sz << 30 | 0x08e0fc00u | (unsigned)old << 16 | (unsigned)rp << 5 | (unsigned)rd);	/* casal */
+		if (n < 4)
+			extend(e, cmpv, cmpv, (int)n, false), extend(e, old, old, (int)n, false);
+		op3(e, I_SUBS, xs, ZR, old, cmpv);
+		ok = treg(e);
+		cset(e, ok, C_EQ);
+		cbz(e, true, 0, ok, l);
+		mem(e, I_ST, (int)sz, 0, old, re, 0);
+		deflabel(e, l);
+		tfree(e, old);
+		tfree(e, cmpv);
+		if (id == BI_ATOMIC_CMPXCHG)
+			tfree(e, rd);
+		res = vreg(ok);
+		break;
+	}
+	default: {
+		/* ld<op>al: add 000, clr 001, eor 010, set 011 */
+		int base = id >= BI_ATOMIC_ADD_FETCH ? id - BI_ATOMIC_ADD_FETCH : id - BI_ATOMIC_FETCH_ADD;	/* add sub and or xor */
+		static const unsigned opc[] = { 0, 0, 1, 3, 2 };
+		int rv = toreg(e, &v1), rs = treg(e), r = treg(e);
+
+		if (base == 1)
+			op3(e, I_SUB, 1, rs, ZR, rv);		/* neg */
+		else if (base == 2)
+			op3(e, I_ORN, 1, rs, ZR, rv);		/* mvn: clear the bits not in v */
+		else
+			mov(e, 1, rs, rv);
+		word(e, sz << 30 | 0x38e00000u | (unsigned)rs << 16 | opc[base] << 12 | (unsigned)rp << 5 | (unsigned)r);
+		tfree(e, rs);
+		if (id >= BI_ATOMIC_ADD_FETCH) {
+			static const int bop[] = { I_ADD, I_SUB, I_AND, I_ORR, I_EOR };
+
+			op3(e, bop[base], 1, r, r, rv);
+		}
+		if (n < 8)
+			extend(e, r, r, (int)n, sg);
+		res = vreg(r);
+		break;
+	}
+	}
+	vfree(e, &v1);
+	vfree(e, &v2);
+	vfree(e, &p);
+	return res;
 }
 
 static val gen_builtin(ecx *e, uint32_t n)
@@ -3912,19 +5060,48 @@ static val gen_builtin(ecx *e, uint32_t n)
 			return vconst(1);
 		if (side_effects(c, arg[0]) || !(is_integer(c, at) || is_flt(c, at)))
 			return vconst(0);
+		{
+			/* "hi"[0]: the optimizer reads a character of a literal */
+			uint32_t r = arg[0];
+			cval ix;
+
+			while (N(r)->op == N_CAST && (N(r)->aux == CK_INT || N(r)->aux == CK_NOP))
+				r = N(r)->a;
+			if (N(r)->op == N_INDEX && cc_eval(c, N(r)->b, &ix) && ix.kind == CV_INT) {
+				uint32_t s = N(r)->a;
+
+				while (N(s)->op == N_CAST && (N(s)->aux == CK_DECAY || N(s)->aux == CK_NOP))
+					s = N(s)->a;
+				if (N(s)->op == N_STR && ix.i >= 0 && (uint64_t)ix.i < c->strs[N(s)->a].n)
+					return vconst(1);
+			}
+		}
 		v = dry(e, arg[0]);
 		return vconst(v.k == V_CONST);
 	}
 	case BI_EXPECT:
 	case BI_EXPECT_PROB:
+		/* the hint is still evaluated (argument order is unspecified: first, so that
+		 * nothing is live across it) */
+		for (uint32_t i = 1; i < x->c; i++)
+			if (side_effects(c, arg[i])) {
+				v = gen(e, arg[i]);
+				vfree(e, &v);
+			}
 		v = gen(e, arg[0]);
 		return v;
 	case BI_ASSUME_ALIGNED:
 	case BI_EXTRACT_RETURN_ADDR:
 		return gen(e, arg[0]);
 	case BI_ASSUME:
-	case BI_VA_END:
 		return vnone();
+	case BI_VA_END: {	/* nothing to do, but the argument's side effects happen */
+		lval l = gen_lval(e, arg[0]);
+		val a = laddr(e, &l);
+
+		vfree(e, &a);
+		return vnone();
+	}
 	case BI_VA_START:
 		va_start_(e, arg[0]);
 		return vnone();
@@ -3933,7 +5110,7 @@ static val gen_builtin(ecx *e, uint32_t n)
 		val dv = laddr(e, &d), sv = laddr(e, &s);
 		int rd = toreg(e, &dv), rs = toreg(e, &sv);
 
-		copy_mem(e, rd, rs, 32);
+		copy_mem(e, rd, rs, tsize(c, c->t_valist));
 		vfree(e, &dv);
 		vfree(e, &sv);
 		return vnone();
@@ -3972,6 +5149,8 @@ static val gen_builtin(ecx *e, uint32_t n)
 		return vconst(0);
 	case BI_ADD_OVERFLOW: case BI_SUB_OVERFLOW: case BI_MUL_OVERFLOW:
 		return gen_overflow(e, x, arg);
+	case BI_ADDC: case BI_SUBC:
+		return gen_carry(e, x, arg);
 	case BI_PREFETCH: {
 		val p = gen(e, arg[0]);
 		int r = toreg(e, &p);
@@ -3996,6 +5175,27 @@ static val gen_builtin(ecx *e, uint32_t n)
 			i->sz = 1, i->rd = (uint8_t)r, i->rn = SP, i->imm = 0, i->cond = 0xee;	/* + outgoing area */
 		}
 		return s;
+	}
+	case BI_ATOMIC_LOAD_N: case BI_ATOMIC_STORE_N: case BI_ATOMIC_EXCHANGE_N: case BI_ATOMIC_CMPXCHG_N:
+	case BI_ATOMIC_LOAD: case BI_ATOMIC_STORE: case BI_ATOMIC_EXCHANGE: case BI_ATOMIC_CMPXCHG:
+	case BI_ATOMIC_FETCH_ADD: case BI_ATOMIC_FETCH_SUB: case BI_ATOMIC_FETCH_AND: case BI_ATOMIC_FETCH_OR:
+	case BI_ATOMIC_FETCH_XOR: case BI_ATOMIC_ADD_FETCH: case BI_ATOMIC_SUB_FETCH: case BI_ATOMIC_AND_FETCH:
+	case BI_ATOMIC_OR_FETCH: case BI_ATOMIC_XOR_FETCH:
+		return gen_atomic(e, x, arg);
+	case BI_ATOMIC_THREAD_FENCE: case BI_ATOMIC_SIGNAL_FENCE: {
+		val m = gen(e, arg[0]);
+
+		vfree(e, &m);
+		if (e->reach && x->aux == BI_ATOMIC_THREAD_FENCE)
+			put(e, I_WORD)->imm = 0xd5033bbf;	/* dmb ish */
+		return vnone();
+	}
+	case BI_ATOMIC_LOCK_FREE: {
+		val a = gen(e, arg[0]), b = gen(e, arg[1]);
+
+		vfree(e, &a);
+		vfree(e, &b);
+		return vconst(1);
 	}
 	case BI_ARM_RSR: {
 		uint32_t sn = strip_casts(c, arg[0]);
@@ -4108,11 +5308,65 @@ runtime:
 		}
 		return v;
 	}
+	case BI_ISNAN: case BI_ISINF: case BI_ISFINITE: case BI_SIGNBIT: case BI_ISNORMAL: {
+		cval cv;
+
+		if (cc_eval(c, n, &cv) && cv.kind == CV_INT)
+			return vconst(cv.i);
+		/* on the bit pattern: sign out (<< 1), then the exponent against all ones */
+		qty at = N(arg[0])->ty;
+		bool ld = is_ld(c, at);
+		int d = ld || fpk(e, at), bits = d ? 64 : 32, mant = ld ? 48 : d ? 52 : 23, r;
+
+		v = gen(e, arg[0]);
+		if (ld) {
+			/* the high word, with a nonzero low word as a sticky bit 0 (below the shift) */
+			toreg2(e, &v, false);
+			r = v.r2;
+			if (x->aux != BI_SIGNBIT) {
+				opi(e, I_SUBSI, 1, ZR, v.r, 0);
+				cset(e, v.r, C_NE);
+				shift_imm(e, T_LESSLESS, 1, r, r, 1);
+				op3(e, I_ORR, 1, r, r, v.r);
+				tfree(e, v.r);
+				if (x->aux == BI_ISNORMAL) {
+					shift_imm(e, I_LSRV, 1, r, r, mant + 1);
+					opi(e, I_SUBI, 1, r, r, 1);
+					opi(e, I_SUBSI, 1, ZR, r, 0x7fff - 1);
+					cset(e, r, C_LO);
+					return vreg(r);
+				}
+				opi(e, I_SUBSI, 1, ZR, r, (int64_t)0xfffe000000000000ULL);
+				cset(e, r, x->aux == BI_ISNAN ? C_HI : x->aux == BI_ISINF ? C_EQ : C_LO);
+				return vreg(r);
+			}
+			tfree(e, v.r);
+		} else {
+			r = toreg(e, &v);
+		}
+		if (x->aux == BI_SIGNBIT) {
+			shift_imm(e, I_LSRV, d, r, r, bits - 1);
+			return vreg(r);
+		}
+		shift_imm(e, T_LESSLESS, d, r, r, 1);
+		if (x->aux == BI_ISNORMAL) {
+			shift_imm(e, I_LSRV, d, r, r, mant + 1);
+			opi(e, I_SUBI, d, r, r, 1);
+			opi(e, I_SUBSI, d, ZR, r, (bits == 64 ? 0x7ff : 0xff) - 1);
+			cset(e, r, C_LO);
+			return vreg(r);
+		}
+		opi(e, I_SUBSI, d, ZR, r, d ? (int64_t)0xffe0000000000000ULL : 0xff000000LL);
+		cset(e, r, x->aux == BI_ISNAN ? C_HI : x->aux == BI_ISINF ? C_EQ : C_LO);
+		return vreg(r);
+	}
 	default: {
 		cval cv;
 
 		if (cc_eval(c, n, &cv) && cv.kind == CV_INT)
 			return vconst(cv.i);
+		if (cc_eval(c, n, &cv) && cv.kind == CV_FLT && is_flt(c, x->ty))
+			return f_const_t(e, x->ty, cv.f);
 		efatal(e, x->loc, "unsupported builtin (%d)", x->aux);
 	}
 	}
@@ -4129,6 +5383,9 @@ static val const_global(ecx *e, uint32_t s)
 	if (y->kind == S_VAR && (QQ(y->ty) & (Q_CONST | Q_VOLATILE)) == Q_CONST && is_integer(c, y->ty) && y->body &&
 	    N(y->body)->op != N_INIT && cc_eval(c, y->body, &cv) && cv.kind == CV_INT)
 		return vconst(trunc_to(c, cv.i, y->ty));
+	if (y->kind == S_VAR && (QQ(y->ty) & (Q_CONST | Q_VOLATILE)) == Q_CONST && is_flt(c, y->ty) &&
+	    tsize(c, y->ty) != 2 && y->body && N(y->body)->op != N_INIT && cc_eval(c, y->body, &cv) && cv.kind == CV_FLT)
+		return f_const_t(e, y->ty, cv.f);
 	return vnone();
 }
 
@@ -4293,6 +5550,14 @@ static val gen_logical(ecx *e, uint32_t n)
 	r = treg(e);
 	test_zero(e, &a, N(x->a)->ty, lshort, !isand);
 	b = tobool(e, gen(e, x->b), N(x->b)->ty);
+	if ((b.k == V_CONST && (isand ? !b.i : b.i)) || (b.k == V_ADDR && !isand)) {
+		/* x && 0, x || 1: x's effects are done, the value is known (clang folds it,
+		   and code it guards, such as calls to functions that do not exist, goes) */
+		vfree(e, &b);
+		deflabel(e, lshort);
+		tfree(e, r);
+		return vconst(isand ? 0 : 1);
+	}
 	move_to(e, r, -1, &b, prim(TY_INT));
 	jump(e, lend);
 	deflabel(e, lshort);
@@ -4301,19 +5566,190 @@ static val gen_logical(ecx *e, uint32_t n)
 	return vreg(r);
 }
 
+/* a lane-wise vector operation on the vectors at ra and rb into a new frame temporary; returns its address */
+static val gen_vbin(ecx *e, int op, int ra, int rb, qty t, uint32_t loc)
+{
+	cc *c = e->c;
+	uint64_t size = tsize(c, t);
+	qty et = T(c, t)->base;
+	unsigned es = (unsigned)tsize(c, et);
+	bool q = size == 16;
+	const char *mn, *arr;
+	char ab[8];
+	tbuf *rb_ = &e->raw;
+	size_t st;
+	int32_t sl;
+	int rd;
+	ins *i;
+
+	if (is_flt(c, et))
+		efatal(e, loc, "floating point vectors are not supported");
+	if (size != 8 && size != 16)
+		efatal(e, loc, "unsupported vector size");
+	switch (op) {
+	case T_AMP: mn = "and"; break;
+	case T_PIPE: mn = "orr"; break;
+	case T_CARET: mn = "eor"; break;
+	case T_PLUS: mn = "add"; break;
+	case T_MINUS: mn = "sub"; break;
+	default: efatal(e, loc, "unsupported vector operator");
+	}
+	if (op == T_AMP || op == T_PIPE || op == T_CARET) {
+		arr = q ? "16b" : "8b";
+	} else {
+		snprintf(ab, sizeof ab, "%u%c", (unsigned)(size / es), es == 1 ? 'b' : es == 2 ? 'h' : es == 4 ? 's' : 'd');
+		arr = ab;
+	}
+	sl = slot(e, size, 16);
+	rd = treg(e);
+	opi(e, I_ADDI, 1, rd, FRAME, sl);
+	st = rb_->n;
+	tb_s(rb_, q ? "\tldr\tq16, [" : "\tldr\td16, [");
+	reg(rb_, ra, 1);
+	tb_s(rb_, q ? "]\n\tldr\tq17, [" : "]\n\tldr\td17, [");
+	reg(rb_, rb, 1);
+	tb_s(rb_, "]\n\t");
+	tb_s(rb_, mn);
+	tb_s(rb_, "\tv16.");
+	tb_s(rb_, arr);
+	tb_s(rb_, ", v16.");
+	tb_s(rb_, arr);
+	tb_s(rb_, ", v17.");
+	tb_s(rb_, arr);
+	tb_s(rb_, q ? "\n\tstr\tq16, [" : "\n\tstr\td16, [");
+	reg(rb_, rd, 1);
+	tb_c(rb_, ']');
+	i = put(e, I_RAW);
+	i->off = (int32_t)st;
+	i->ref = (uint32_t)(rb_->n - st);
+	return vreg(rd);
+}
+
+/* operand k of a lane-wise operation: lane i of a vector at ra, or the scalar in rs (copied) */
+static val vlane(ecx *e, qty t, int r, unsigned i)
+{
+	cc *c = e->c;
+
+	if (is_vec(c, t)) {
+		qty et = T(c, t)->base;
+		lval l = { .k = L_REG, .r = (uint8_t)r, .off = (int64_t)i * (int64_t)tsize(c, et), .align = talign(c, et) };
+
+		return load(e, &l, et);
+	}
+	{
+		int d = treg(e);
+
+		mov(e, 1, d, r);
+		return vreg(d);
+	}
+}
+
+/*
+ * Lane by lane through memory, for what the NEON path (gen_vbin) does not do:
+ * other sizes, *, /, %, shifts, comparisons (-1 / 0 lanes), floating-point
+ * lanes, a scalar operand (each lane against it), unary - and ~ (b NULL).
+ */
+static val gen_vlanes(ecx *e, int op, qty at, val *a, qty bt, val *b, qty rt, bool unary)
+{
+	cc *c = e->c;
+	qty vt = is_vec(c, at) ? at : bt, et = T(c, vt)->base, rte = T(c, rt)->base;
+	unsigned n = (unsigned)(tsize(c, vt) / tsize(c, et));
+	int ra = toreg(e, a), rb = unary ? -1 : toreg(e, b), rd;
+	int32_t sl = slot(e, tsize(c, rt), 16);
+
+	rd = treg(e);
+	opi(e, I_ADDI, 1, rd, FRAME, sl);
+	for (unsigned i = 0; i < n; i++) {
+		val x = vlane(e, at, ra, i), y = unary ? vconst(0) : vlane(e, bt, rb, i), r;
+		qty yt = unary ? et : is_vec(c, bt) ? T(c, bt)->base : bt;
+
+		if (unary) {
+			if (op == T_MINUS)
+				r = is_flt(c, et) ? f_neg(e, x, et) : arith(e, T_MINUS, et, vconst(0), x);
+			else
+				r = arith(e, T_CARET, et, x, vconst(-1));
+		} else if (is_cmp(op)) {
+			if (is_flt(c, et)) {
+				r = f_compare(e, op, et, x, y);
+			} else {
+				int cond = is_wide(c, et) ? emit_cmp2(e, op, is_signed(c, et), &x, &y)
+							  : emit_cmp(e, op, X(c, et), is_signed(c, et), &x, &y);
+				int t;
+
+				vfree(e, &y);
+				t = toreg(e, &x);
+				if (x.k == V_REG2)
+					tfree(e, x.r2);
+				cset(e, t, cond);
+				r = vreg(t);
+			}
+			if (is_wide(c, rte)) {
+				/* 0 / 1 -> 0 / all ones */
+				int h = treg(e);
+
+				op3(e, I_SUB, 1, r.r, ZR, r.r);
+				mov(e, 1, h, r.r);
+				r.k = V_REG2;
+				r.r2 = (uint8_t)h;
+			} else {
+				r = arith(e, T_MINUS, rte, vconst(0), r);
+			}
+		} else if (is_flt(c, et)) {
+			r = f_arith(e, op, et, x, y);
+		} else {
+			(void)yt;
+			r = is_wide(c, et) ? arith2(e, op, et, x, y) : arith(e, op, et, x, y);
+		}
+		{
+			lval l = { .k = L_REG, .r = (uint8_t)rd, .off = (int64_t)i * (int64_t)tsize(c, rte), .align = talign(c, rte) };
+
+			store(e, &l, rte, &r);
+			vfree(e, &r);
+		}
+	}
+	tfree(e, ra);
+	if (rb >= 0)
+		tfree(e, rb);
+	return vreg(rd);
+}
+
+static bool vbin_fast(cc *c, int op, qty lt, qty rt, qty ty)
+{
+	uint64_t size = tsize(c, ty);
+
+	return is_vec(c, lt) && is_vec(c, rt) && (size == 8 || size == 16) && !is_flt(c, T(c, ty)->base) &&
+	       (op == T_AMP || op == T_PIPE || op == T_CARET || op == T_PLUS || op == T_MINUS);
+}
+
 static val gen_binary(ecx *e, uint32_t n)
 {
 	cc *c = e->c;
 	const node *x = N(n);
 	int op = x->aux;
 	qty lt = N(x->a)->ty, rt = N(x->b)->ty, ty = x->ty;
-	val a = gen(e, x->a), b = gen(e, x->b);
+	int known = is_cmp(op) ? cond_fold(e, n) : -1;
+	val a, b;
+
+	if (known >= 0)
+		return vconst(known);
+	a = gen(e, x->a), b = gen(e, x->b);
+	if (is_vec(c, ty) && !vbin_fast(c, op, lt, rt, ty))
+		return gen_vlanes(e, op, lt, &a, rt, &b, ty, false);
+	if (is_vec(c, ty)) {
+		int ra = toreg(e, &a), rb = toreg(e, &b);
+		val r = gen_vbin(e, op, ra, rb, ty, x->loc);
+
+		vfree(e, &a);
+		vfree(e, &b);
+		return r;
+	}
 
 	if (is_flt(c, lt) || is_flt(c, ty))
-		efatal(e, x->loc, "floating point is not supported");
+		return is_cmp(op) ? f_compare(e, op, lt, a, b) : f_arith(e, op, ty, a, b);
 	/* pointer arithmetic */
 	if (is_ptr(c, ty) && (op == T_PLUS || op == T_MINUS) && is_ptr(c, lt))
-		return ptr_add(e, a, b, (int64_t)elem_size(c, lt), op == T_MINUS);
+		return ptr_to_vla(c, lt) ? ptr_add_vla(e, a, b, lt, op == T_MINUS)
+					 : ptr_add(e, a, b, (int64_t)elem_size(c, lt), op == T_MINUS);
 	if (op == T_MINUS && is_ptr(c, lt) && is_ptr(c, rt)) {
 		int64_t es = (int64_t)elem_size(c, lt);
 
@@ -4376,6 +5812,12 @@ static val gen_binary(ecx *e, uint32_t n)
 		if (ok)
 			return v;
 	}
+	/* 0 << x, 0 >> x, -1 >> x (signed): the constant, whatever x is */
+	if ((op == T_LESSLESS || op == T_GREATERGREATER) && a.k == V_CONST && b.k != V_CONST &&
+	    (trunc_to(c, a.i, ty) == 0 || (op == T_GREATERGREATER && is_signed(c, ty) && trunc_to(c, a.i, ty) == -1))) {
+		vfree(e, &b);
+		return vconst(trunc_to(c, a.i, ty));
+	}
 	if (a.k == V_ADDR && b.k == V_CONST && (op == T_PLUS || op == T_MINUS) && tsize(c, ty) == 8) {
 		a.i += op == T_PLUS ? b.i : -b.i;
 		return a;
@@ -4392,10 +5834,14 @@ static val gen_unary(ecx *e, uint32_t n)
 	qty t = N(x->a)->ty;
 	val v = gen(e, x->a);
 
+	if (is_vec(c, x->ty) && (x->aux == T_MINUS || x->aux == T_TILDE))
+		return gen_vlanes(e, x->aux, t, &v, t, NULL, x->ty, true);
 	switch (x->aux) {
 	case T_PLUS:
 		return v;
 	case T_MINUS:
+		if (is_flt(c, x->ty))
+			return f_neg(e, v, x->ty);
 		if (v.k == V_CONST)
 			return vconst(trunc_to(c, -v.i, x->ty));
 		if (is_wide(c, x->ty)) {
@@ -4449,8 +5895,48 @@ static val gen_assign(ecx *e, uint32_t n)
 	lval l;
 	val v, old;
 
+	if (x->aux && is_vec(c, lt)) {
+		/* v op= w */
+		val w = gen(e, x->b), av, r;
+		int ra, rw;
+
+		l = gen_lval(e, x->a);
+		{
+			lval l2 = l;
+
+			av = laddr(e, &l2);
+		}
+		if (!vbin_fast(c, x->aux, lt, N(x->b)->ty, lt)) {
+			qty bt = N(x->b)->ty;
+
+			r = gen_vlanes(e, x->aux, lt, &av, bt, &w, lt, false);
+			store(e, &l, lt, &r);
+			return r;
+		}
+		ra = toreg(e, &av), rw = toreg(e, &w);
+		r = gen_vbin(e, x->aux, ra, rw, lt, x->loc);
+		vfree(e, &w);
+		vfree(e, &av);
+		store(e, &l, lt, &r);
+		return r;
+	}
 	if (!x->aux) {
+		int ak;
+
 		v = gen(e, x->b);
+		if ((ak = ael_slot(e, x->a, true)) >= 0) {
+			val cv = v;
+
+			l = gen_lval(e, x->a);
+			store(e, &l, lt, &v);
+			lfree(e, &l);
+			e->kvalid &= (uint16_t)~(1u << ak);
+			if (cv.k == V_CONST) {
+				e->kval[ak] = (int64_t)trunc_to(c, cv.i, lt);
+				e->kvalid |= (uint16_t)(1u << ak);
+			}
+			return v;
+		}
 		if (N(x->a)->op == N_VAR && (e->E->sflags[N(x->a)->a] & SA_CWRITE)) {
 			bind *b = binding(e, N(x->a)->a);
 
@@ -4492,6 +5978,10 @@ static val gen_assign(ecx *e, uint32_t n)
 		old = load(e, &l, lt);
 		if (is_ptr(c, lt)) {
 			old = ptr_add(e, old, v, (int64_t)elem_size(c, lt), op == T_MINUS);
+		} else if (is_flt(c, pt) || is_flt(c, lt)) {
+			old = cast(e, old, lt, pt, CK_INT);
+			old = is_flt(c, pt) ? f_arith(e, op, pt, old, v) : arith(e, op, pt, old, v);
+			old = cast(e, old, pt, lt, CK_INT);
 		} else {
 			old = conv_back(e, old, lt, pt);
 			if (old.k == V_CONST && v.k == V_CONST) {
@@ -4531,6 +6021,33 @@ static val gen_incdec(ecx *e, uint32_t n)
 
 			opi(e, I_EORI, 0, r, ro, 1);
 			nv = vreg(r);
+		}
+	} else if (is_ld(c, t)) {
+		val one = vconst(ld_of_d(1.0)), cp = old;
+
+		toreg2(e, &cp, false);
+		if (post) {
+			nv.k = V_REG2;
+			nv.r = (uint8_t)treg(e);
+			nv.r2 = (uint8_t)treg(e);
+			mov(e, 1, nv.r, cp.r);
+			mov(e, 1, nv.r2, cp.r2);
+			nv = f_arith(e, inc ? T_PLUS : T_MINUS, t, nv, one);
+			old = cp;
+		} else {
+			nv = old = f_arith(e, inc ? T_PLUS : T_MINUS, t, cp, one);
+		}
+	} else if (is_flt(c, t)) {
+		int d = fpk(e, t);
+
+		toreg(e, &old);
+		if (post) {
+			int r = treg(e);
+
+			mov(e, 1, r, old.r);
+			nv = f_arith(e, inc ? T_PLUS : T_MINUS, t, vreg(r), f_const(d, 1.0));
+		} else {
+			nv = old = f_arith(e, inc ? T_PLUS : T_MINUS, t, old, f_const(d, 1.0));
 		}
 	} else if (is_wide(c, t)) {
 		val one = vconst(1), cp = old;
@@ -4581,7 +6098,7 @@ static val gen(ecx *e, uint32_t n)
 	case N_NUM:
 		return vconst(c->ipool[x->a]);
 	case N_FNUM:
-		efatal(e, x->loc, "floating point is not supported");
+		return f_const_t(e, x->ty, c->fpool[x->a]);
 	case N_STR:
 		note_ref(e, REF(RK_STR, x->a));
 		return vaddr(REF(RK_STR, x->a), 0);
@@ -4590,6 +6107,10 @@ static val gen(ecx *e, uint32_t n)
 	case N_MEMBER:
 	case N_INDEX:
 	case N_DEREF: {
+		int k = x->op == N_INDEX ? ael_slot(e, n, false) : -1;
+
+		if (k >= 0 && (e->kvalid >> k & 1))
+			return vconst(e->kval[k]);
 		lval l = gen_lval(e, n);
 
 		return load_free(e, &l, x->ty);
@@ -4639,6 +6160,18 @@ static val gen(ecx *e, uint32_t n)
 		}
 		case CK_FDECAY:
 			return gen(e, x->a);
+		case CK_VADDR:
+			return gen(e, x->a);	/* a vector value is its address */
+		case CK_VBITS: {
+			/* the vector's bits as a scalar: load from its address */
+			val v = gen(e, x->a);
+			lval l = { .k = L_REG, .align = talign(c, N(x->a)->ty) };
+
+			l.r = (uint8_t)toreg(e, &v);
+			v = load(e, &l, x->ty);
+			lfree(e, &l);
+			return v;
+		}
 		case CK_UNION: {
 			int32_t sl = slot(e, tsize(c, x->ty), talign(c, x->ty));
 			lval l = { .k = L_FRAME, .off = sl, .align = talign(c, x->ty) };
@@ -4691,8 +6224,36 @@ static val gen(ecx *e, uint32_t n)
 		return va_arg_(e, x);
 	case N_ZERO:
 		return vconst(0);
-	case N_SIZEOF_VLA:
-		efatal(e, x->loc, "variable length arrays are not supported");
+	case N_CPLX: {	/* a _Complex value: both parts into a temporary, its address */
+		qty et = c->tags[T(c, x->ty)->aux].f[0].ty;
+		uint64_t es = tsize(c, et);
+		int32_t sl = slot(e, 2 * es, talign(c, x->ty));
+		lval d = { .k = L_FRAME, .off = sl, .align = talign(c, et) };
+		val v = gen(e, x->a);
+		int r;
+
+		store(e, &d, et, &v);
+		vfree(e, &v);
+		v = gen(e, x->b);
+		d.off += (int32_t)es;
+		store(e, &d, et, &v);
+		vfree(e, &v);
+		r = treg(e);
+		opi(e, I_ADDI, 1, r, FRAME, sl);
+		return vreg(r);
+	}
+	case N_SIZEOF_VLA: {
+		const sym *y = x->a && N(x->a)->op == N_VAR ? &c->syms[N(x->a)->a] : NULL;
+
+		if (y && y->kind == S_VAR && binding(e, N(x->a)->a)->kind == B_INDIRECT &&
+		    binding(e, N(x->a)->a)->inst == e->f->inst && (T(c, y->ty)->flags & TF_VLA)) {
+			int r = treg(e);
+
+			mem(e, I_LD, 3, 0, r, FRAME, binding(e, N(x->a)->a)->slot + 16);
+			return vreg(r);
+		}
+		return vla_bytes(e, x->b);
+	}
 	default:
 		efatal(e, x->loc, "unsupported expression (node %d)", x->op);
 	}
@@ -4701,11 +6262,239 @@ static val gen(ecx *e, uint32_t n)
 /* ---------------- conditions ---------------- */
 
 /* jump to l if n's truth == jump_if; returns the constant truth or -1 */
+/* e >> 0, e << 0: e */
+static uint32_t strip_shift0(cc *c, uint32_t n)
+{
+	while (N(n)->op == N_BINARY && (N(n)->aux == T_LESSLESS || N(n)->aux == T_GREATERGREATER) &&
+	       N(N(n)->b)->op == N_NUM && c->ipool[N(N(n)->b)->a] == 0 && QUNQ(N(n)->ty) == QUNQ(N(N(n)->a)->ty))
+		n = N(n)->a;
+	return n;
+}
+
+/* the same value, without side effects (integer or pointer, nothing volatile) */
+static bool same_pure(cc *c, uint32_t a, uint32_t b)
+{
+	const node *x, *y;
+
+	a = strip_shift0(c, a), b = strip_shift0(c, b);
+	x = N(a), y = N(b);
+	if (x->op != y->op || QUNQ(x->ty) != QUNQ(y->ty) || (QQ(x->ty) | QQ(y->ty)) & Q_VOLATILE ||
+	    !(is_integer(c, x->ty) || is_ptr(c, x->ty)))
+		return false;
+	switch (x->op) {
+	case N_VAR:
+		return x->a == y->a && c->syms[x->a].kind == S_VAR && !(QQ(c->syms[x->a].ty) & Q_VOLATILE);
+	case N_NUM:
+		return c->ipool[x->a] == c->ipool[y->a];
+	case N_CAST:
+		return x->aux == y->aux && same_pure(c, x->a, y->a);
+	case N_BINARY:
+		return x->aux == y->aux && !is_cmp(x->aux) && x->aux != T_SLASH && x->aux != T_PERCENT &&
+		       same_pure(c, x->a, y->a) && same_pure(c, x->b, y->b);
+	}
+	return false;
+}
+
+/* a comparison of two integers as the outcomes it holds for (1 <, 2 ==, 4 >) and its operands */
+static int cmp_mask(cc *c, uint32_t n, uint32_t *l, uint32_t *r)
+{
+	const node *x = N(n);
+	int m;
+
+	if (x->op != N_BINARY || !is_cmp(x->aux) || is_flt(c, N(x->a)->ty) || is_wide(c, N(x->a)->ty))
+		return 0;
+	switch (x->aux) {
+	case T_LESS: m = 1; break;
+	case T_EQUALEQUAL: m = 2; break;
+	case T_LESSEQ: m = 3; break;
+	case T_GREATER: m = 4; break;
+	case T_EXCLAIMEQ: m = 5; break;
+	default: m = 6; break;
+	}
+	*l = x->a, *r = x->b;
+	return m;
+}
+
+/* the values of an integer type */
+static bool trange(cc *c, qty t, i128 *lo, i128 *hi)
+{
+	uint64_t sz;
+
+	if (!is_integer(c, t) || is_wide(c, t) || KIND(c, t) == TY_BOOL)
+		return false;
+	sz = tsize(c, t) * 8;
+	if (is_signed(c, t))
+		*lo = -((i128)1 << (sz - 1)), *hi = ((i128)1 << (sz - 1)) - 1;
+	else
+		*lo = 0, *hi = ((i128)1 << sz) - 1;
+	return true;
+}
+
+/* an interval holding every value of pure integer expression n, with variable s in [slo, shi] */
+static bool irange(cc *c, uint32_t n, uint32_t s, i128 slo, i128 shi, i128 *lo, i128 *hi)
+{
+	const node *x = N(n);
+	i128 tlo, thi, alo, ahi, blo, bhi;
+
+	cval cv;
+
+	if (!trange(c, x->ty, &tlo, &thi) || (QQ(x->ty) & Q_VOLATILE))
+		return false;
+	if (x->op != N_VAR && cc_eval(c, n, &cv) && cv.kind == CV_INT) {
+		*lo = *hi = trunc_to(c, cv.i, x->ty);
+		return true;
+	}
+	switch (x->op) {
+	case N_NUM:
+		*lo = *hi = trunc_to(c, c->ipool[x->a], x->ty);
+		return true;
+	case N_VAR:
+		if (x->a == s)
+			*lo = slo, *hi = shi;
+		else
+			*lo = tlo, *hi = thi;
+		return true;
+	case N_CAST:
+		if (!irange(c, x->a, s, slo, shi, &alo, &ahi))
+			return false;
+		break;
+	case N_BINARY:
+		if ((x->aux != T_PLUS && x->aux != T_MINUS) || !irange(c, x->a, s, slo, shi, &alo, &ahi) ||
+		    !irange(c, x->b, s, slo, shi, &blo, &bhi))
+			return false;
+		if (x->aux == T_PLUS)
+			alo += blo, ahi += bhi;
+		else
+			alo -= bhi, ahi -= blo;
+		break;
+	default:
+		return false;
+	}
+	/* out of the type's range: anything (wraps) */
+	if (alo < tlo || ahi > thi)
+		alo = tlo, ahi = thi;
+	*lo = alo, *hi = ahi;
+	return true;
+}
+
+/* comparison n with s in [slo, shi]: 0 or 1 when the intervals decide it, -1 */
+static int irange_cmp(cc *c, uint32_t n, uint32_t s, i128 slo, i128 shi)
+{
+	const node *x = N(n);
+	i128 alo, ahi, blo, bhi;
+
+	if (x->op != N_BINARY || !is_cmp(x->aux) || !irange(c, x->a, s, slo, shi, &alo, &ahi) ||
+	    !irange(c, x->b, s, slo, shi, &blo, &bhi))
+		return -1;
+	switch (x->aux) {
+	case T_LESS: return ahi < blo ? 1 : alo >= bhi ? 0 : -1;
+	case T_LESSEQ: return ahi <= blo ? 1 : alo > bhi ? 0 : -1;
+	case T_GREATER: return alo > bhi ? 1 : ahi <= blo ? 0 : -1;
+	case T_GREATEREQ: return alo >= bhi ? 1 : ahi < blo ? 0 : -1;
+	case T_EQUALEQUAL: return alo == ahi && blo == bhi && alo == blo ? 1 : ahi < blo || bhi < alo ? 0 : -1;
+	case T_EXCLAIMEQ: return alo == ahi && blo == bhi && alo == blo ? 0 : ahi < blo || bhi < alo ? 1 : -1;
+	}
+	return -1;
+}
+
+/* the range of local s where comparison n (s OP constant) has truth t */
+static bool cmp_var_range(cc *c, uint32_t n, bool t, uint32_t *s, i128 *lo, i128 *hi)
+{
+	const node *x = N(n);
+	int op;
+	i128 k;
+
+	if (x->op != N_BINARY || !is_cmp(x->aux) || N(x->a)->op != N_VAR || N(x->b)->op != N_NUM ||
+	    !trange(c, N(x->a)->ty, lo, hi) || (QQ(N(x->a)->ty) & Q_VOLATILE) || c->syms[N(x->a)->a].kind != S_VAR)
+		return false;
+	op = x->aux, k = trunc_to(c, c->ipool[N(x->b)->a], N(x->a)->ty);
+	if (!t)
+		op = op == T_LESS ? T_GREATEREQ : op == T_LESSEQ ? T_GREATER : op == T_GREATER ? T_LESSEQ :
+		     op == T_GREATEREQ ? T_LESS : op == T_EQUALEQUAL ? T_EXCLAIMEQ : T_EQUALEQUAL;
+	*s = N(x->a)->a;
+	switch (op) {
+	case T_LESS: *hi = k - 1; break;
+	case T_LESSEQ: *hi = k; break;
+	case T_GREATER: *lo = k + 1; break;
+	case T_GREATEREQ: *lo = k; break;
+	case T_EQUALEQUAL: *lo = *hi = k; break;
+	default: return false;
+	}
+	return *lo <= *hi;
+}
+
+/* a condition known from its form (x != x, x < y && x > y, ...): 0 or 1; -1 unknown */
+/* a floating local whose every write has fact f (FF_NONNEG / FF_ZERO), or a +-0.0 constant for FF_ZERO */
+static bool ffact(ecx *e, uint32_t n, uint8_t f)
+{
+	cc *c = e->c;
+	const node *x = N(n);
+	cval cv;
+
+	if (x->op == N_VAR && is_local_var(c, x->a) && !(QQ(x->ty) & Q_VOLATILE)) {
+		uint8_t g = e->E->ffacts[x->a];
+
+		return (g & (FF_SEEN | FF_BAD)) == FF_SEEN && (g & f) == f;
+	}
+	return f == FF_ZERO && is_flt(c, x->ty) && cc_eval(c, n, &cv) && cv.kind == CV_FLT && cv.f == 0;
+}
+
+static int cond_fold(ecx *e, uint32_t n)
+{
+	cc *c = e->c;
+	const node *x = N(n);
+	uint32_t l1, r1, l2, r2, s;
+	int m1, m2, m;
+	i128 lo, hi;
+
+	/* a || b with b true wherever a is false (a && b: b false wherever a is true) */
+	if ((x->op == N_LOGAND || x->op == N_LOGOR) && cmp_var_range(c, x->a, x->op == N_LOGAND, &s, &lo, &hi)) {
+		int k = irange_cmp(c, x->b, s, lo, hi);
+
+		if (x->op == N_LOGOR && k == 1)
+			return 1;
+		if (x->op == N_LOGAND && k == 0)
+			return 0;
+	}
+	if (x->op == N_UNARY && x->aux == T_EXCLAIM) {
+		int k = cond_fold(e, x->a);
+
+		return k < 0 ? -1 : !k;
+	}
+	if (x->op == N_LOGAND || x->op == N_LOGOR) {
+		m1 = cmp_mask(c, x->a, &l1, &r1);
+		m2 = cmp_mask(c, x->b, &l2, &r2);
+		if (!m1 || !m2)
+			return -1;
+		if (same_pure(c, l1, r2) && same_pure(c, r1, l2))	/* swapped: < and > trade places */
+			m2 = (m2 & 2) | (m2 & 1) << 2 | (m2 & 4) >> 2;
+		else if (!same_pure(c, l1, l2) || !same_pure(c, r1, r2))
+			return -1;
+		m = x->op == N_LOGAND ? m1 & m2 : m1 | m2;
+		return m == 0 ? 0 : m == 7 ? 1 : -1;
+	}
+	/* fabs(x) < 0.0 (through locals): false, NaN included */
+	if (x->op == N_BINARY && (x->aux == T_LESS || x->aux == T_GREATER) && is_flt(c, N(x->a)->ty) &&
+	    !is_ld(c, N(x->a)->ty) && ffact(e, x->aux == T_LESS ? x->a : x->b, FF_NONNEG) &&
+	    ffact(e, x->aux == T_LESS ? x->b : x->a, FF_ZERO))
+		return 0;
+	m = cmp_mask(c, n, &l1, &r1);
+	if (m && same_pure(c, l1, r1))
+		return (m & 2) != 0;
+	return -1;
+}
+
 static void gen_cond(ecx *e, uint32_t n, bool jump_if, uint32_t l)
 {
 	cc *c = e->c;
 	const node *x = N(n);
+	int k = cond_fold(e, n);
 
+	if (k >= 0) {
+		if (k == (int)jump_if)
+			jump(e, l);
+		return;
+	}
 	switch (x->op) {
 	case N_LOGAND:
 	case N_LOGOR: {
@@ -4929,6 +6718,22 @@ static void run_cleanup(ecx *e, uint32_t s)
 	carg a;
 	lval l;
 
+	if (T(c, c->syms[s].ty)->flags & TF_VLA) {
+		const bind *b = binding(e, s);
+		int r;
+
+		if (!e->reach || b->kind != B_INDIRECT || b->inst != e->f->inst)
+			return;
+		r = treg(e);
+		mem(e, I_LD, 3, 0, r, FRAME, b->slot + 8);
+		mov(e, 1, SP, r);
+		{
+			val v = vreg(r);
+
+			vfree(e, &v);
+		}
+		return;
+	}
 	if (!fn || !e->reach)
 		return;
 	l = local_lval(e, s);
@@ -4943,7 +6748,7 @@ static void run_cleanup(ecx *e, uint32_t s)
 		return;
 	}
 	{
-		val r = do_call(e, REF(RK_SYM, fn), NULL, &a, 1, prim(TY_VOID), false);
+		val r = do_call(e, REF(RK_SYM, fn), NULL, &a, 1, prim(TY_VOID), false, -1);
 
 		vfree(e, &r);
 	}
@@ -4973,7 +6778,7 @@ static val gen_block(ecx *e, uint32_t n, bool want)
 {
 	cc *c = e->c;
 	const node *x = N(n);
-	int32_t mark = e->foff;
+	int32_t mark = e->foff, cl_top = e->cl_top;
 	int cmark = e->nclean;
 	val v = vnone();
 	uint32_t vstmt = 0;
@@ -5031,6 +6836,7 @@ static val gen_block(ecx *e, uint32_t n, bool want)
 		e->nclean = cmark;
 	}
 	e->foff = mark;
+	e->cl_top = cl_top;
 	return v;
 }
 
@@ -5079,8 +6885,6 @@ static void gen_switch(ecx *e, uint32_t n)
 	val v = gen(e, x->a);
 	uint32_t base = e->ncases, dflt = 0, lbrk = newlabel(e);
 
-	if (is_wide(c, ct))
-		efatal(e, x->loc, "128-bit switch is not supported");
 	collect_cases(e, x->b);
 	for (uint32_t k = base; k < e->ncases; k++) {
 		uint32_t cn = e->cases[k];
@@ -5104,6 +6908,32 @@ static void gen_switch(ecx *e, uint32_t n)
 			}
 		}
 		jump(e, target);
+	} else if (is_wide(c, ct)) {
+		/* 128-bit: v - lo <= hi - lo, unsigned, in two words (a single value: hi == lo) */
+		int t0 = treg(e), t1 = treg(e);
+
+		toreg2(e, &v, is_signed(c, ct));
+		for (uint32_t k = base; k < e->ncases; k++) {
+			const node *cn = N(e->cases[k]);
+			u128 lo, d;
+
+			if (cn->op != N_CASE)
+				continue;
+			lo = (u128)c->ipool[cn->a], d = (u128)c->ipool[cn->b] - lo;
+			movi(e, 1, t0, (int64_t)(uint64_t)lo);
+			movi(e, 1, t1, (int64_t)(uint64_t)(lo >> 64));
+			op3(e, I_SUBS, 1, R_X16, v.r, t0);
+			op3(e, I_SBC, 1, R_X17, v.r2, t1);
+			movi(e, 1, t0, (int64_t)(uint64_t)d);
+			movi(e, 1, t1, (int64_t)(uint64_t)(d >> 64));
+			op3(e, I_SUBS, 1, ZR, t0, R_X16);
+			op3(e, I_SBCS, 1, ZR, t1, R_X17);
+			bcond(e, C_HS, e->caselbl[e->cases[k]]);
+		}
+		tfree(e, t0);
+		tfree(e, t1);
+		vfree(e, &v);
+		jump(e, dflt);
 	} else {
 		int r = toreg(e, &v);
 
@@ -5179,7 +7009,11 @@ static void gen_return(ecx *e, const node *x)
 	if (!is_void(c, rt) && x->a && v.k != V_NONE) {
 		if (e->nclean > f->cbase) {
 			/* park the value while the cleanups run */
-			if (is_agg(c, rt)) {
+			if (is_agg(c, rt) && N(x->a)->op == N_VAR && is_local_var(c, N(x->a)->a) &&
+			    c->syms[N(x->a)->a].sc != SC_STATIC) {
+				/* clang returns the local itself (NRVO): its cleanups' changes are seen */
+				run_cleanups(e, f->cbase);
+			} else if (is_agg(c, rt)) {
 				int32_t sl = slot(e, tsize(c, rt), 16);
 				int rs = toreg(e, &v), rd = treg(e);
 
@@ -5201,7 +7035,14 @@ static void gen_return(ecx *e, const node *x)
 				v = load(e, &l, rt);
 			}
 		}
-		if (is_record(c, rt)) {
+		int hn, hb = is_recabi(c, rt) ? hfa(c, rt, &hn) : 0;
+
+		if (hb) {
+			int rs = toreg(e, &v);
+
+			for (int k = 0; k < hn; k++)
+				vr_load(e, hb, k, rs, hb * k);
+		} else if (is_recabi(c, rt)) {
 			int rs = toreg(e, &v);
 
 			if (tsize(c, rt) > 16) {
@@ -5217,10 +7058,17 @@ static void gen_return(ecx *e, const node *x)
 			}
 		} else if (is_wide(c, rt)) {
 			toreg2(e, &v, is_signed(c, rt));
-			mov(e, 1, 0, v.r);
-			mov(e, 1, 1, v.r2);
+			if (is_ld(c, rt)) {
+				word(e, f_in(1, 0, v.r));
+				word(e, q_in_hi(0, v.r2));
+			} else {
+				mov(e, 1, 0, v.r);
+				mov(e, 1, 1, v.r2);
+			}
 		} else {
 			move_to(e, 0, -1, &v, rt);
+			if (is_flt(c, rt))
+				word(e, f_in(fpk(e, rt), 0, 0));	/* fmov d0/s0, x0/w0 */
 		}
 		vfree(e, &v);
 	} else {
@@ -5232,6 +7080,75 @@ static void gen_return(ecx *e, const node *x)
 
 static void gen_asm(ecx *e, uint32_t n);
 
+/*
+ * A variable length array: the slot holds { pointer, sp before the
+ * allocation, size in bytes }.  The array lives below sp like alloca's
+ * memory; leaving its scope (block end, break, goto, return) restores sp
+ * through the cleanup stack.
+ */
+static val vla_bytes(ecx *e, qty t)
+{
+	cc *c = e->c;
+	const ctype *a = T(c, t);
+	val n, b;
+	int r;
+
+	if (a->kind != TY_ARRAY || !(a->flags & TF_VLA))
+		return vconst(tsize(c, t));
+	n = cast(e, gen(e, a->n), N(a->n)->ty, c->t_size, CK_INT);
+	b = vla_bytes(e, a->base);
+	r = toreg(e, &n);
+	if (b.k == V_CONST) {
+		if (b.i != 1) {
+			movi(e, 1, R_X16, (int64_t)b.i);
+			op4(e, I_MADD, 1, r, r, R_X16, ZR);
+		}
+	} else {
+		int rb = toreg(e, &b);
+
+		op4(e, I_MADD, 1, r, r, rb, ZR);
+		vfree(e, &b);
+	}
+	return vreg(r);
+}
+
+static void gen_vla_decl(ecx *e, const node *x, uint32_t s)
+{
+	cc *c = e->c;
+	bind *b = binding(e, s);
+	val n = vla_bytes(e, c->syms[s].ty);
+	int r = toreg(e, &n), t = treg(e);
+	int32_t sl = slot(e, 24, 8);
+	ins *i;
+
+	b->inst = e->f->inst;
+	b->kind = B_INDIRECT;
+	b->kv = 0;
+	b->reg = 0xff;
+	b->slot = sl;
+	e->dyn = true;
+	mem(e, I_ST, 3, 0, r, FRAME, sl + 16);
+	mov(e, 1, t, SP);
+	mem(e, I_ST, 3, 0, t, FRAME, sl + 8);
+	opi(e, I_ADDI, 1, r, r, 15);
+	opi(e, I_ANDI, 1, r, r, -16);
+	op3(e, I_SUB, 1, SP, SP, r);
+	if (e->reach) {
+		i = put(e, I_ADDI);
+		i->sz = 1, i->rd = (uint8_t)t, i->rn = SP, i->imm = 0, i->cond = 0xee;	/* + outgoing area */
+	}
+	mem(e, I_ST, 3, 0, t, FRAME, sl);
+	vfree(e, &n);
+	{
+		val tv = vreg(t);
+
+		vfree(e, &tv);
+	}
+	if (e->nclean >= MAXCLEAN)
+		efatal(e, x->loc, "too many cleanups");
+	e->clean[e->nclean++] = s;
+}
+
 static void gen_decl(ecx *e, const node *x)
 {
 	cc *c = e->c;
@@ -5241,8 +7158,10 @@ static void gen_decl(ecx *e, const node *x)
 
 	if (y->kind != S_VAR || y->sc == SC_STATIC || y->sc == SC_EXTERN || y->sc == SC_TYPEDEF)
 		return;
-	if (T(c, y->ty)->flags & TF_VLA)
-		efatal(e, x->loc, "variable length arrays are not supported");
+	if (T(c, y->ty)->flags & TF_VLA) {
+		gen_vla_decl(e, x, s);
+		return;
+	}
 	if (x->b && !(e->E->sflags[s] & SA_WRITTEN) && !is_agg(c, y->ty) && !(QQ(y->ty) & Q_VOLATILE) &&
 	    !is_wide(c, y->ty) && y->sc != SC_REGISTER && !sym_attrs(c, s)->cleanup) {
 		val v = gen(e, x->b);
@@ -5342,7 +7261,7 @@ static void gen_stmt1(ecx *e, uint32_t n)
 		uint32_t lelse = newlabel(e), lend = newlabel(e);
 
 		gen_cond(e, x->a, false, lelse);
-		e->foff = mark;
+		e->foff = keep_cl(e, mark);
 		gen_stmt(e, x->b);
 		if (x->c) {
 			jump(e, lend);
@@ -5359,7 +7278,7 @@ static void gen_stmt1(ecx *e, uint32_t n)
 
 		deflabel_loop(e, lhead, e->E->nflags[n] & NA_LABEL);
 		gen_cond(e, x->a, false, lbrk);
-		e->foff = mark;
+		e->foff = keep_cl(e, mark);
 		e->loops[e->nloop++] = (loopctx){ lbrk, lhead, e->nclean };
 		gen_stmt(e, x->b);
 		e->nloop--;
@@ -5376,7 +7295,7 @@ static void gen_stmt1(ecx *e, uint32_t n)
 		e->nloop--;
 		deflabel(e, lcont);
 		gen_cond(e, x->a, true, lhead);
-		e->foff = mark;
+		e->foff = keep_cl(e, mark);
 		deflabel(e, lbrk);
 		return;
 	}
@@ -5400,7 +7319,7 @@ static void gen_stmt1(ecx *e, uint32_t n)
 			int32_t m2 = e->foff;
 
 			gen_cond(e, x->b, false, lbrk);
-			e->foff = m2;
+			e->foff = keep_cl(e, m2);
 		}
 		e->loops[e->nloop++] = (loopctx){ lbrk, lcont, e->nclean };
 		gen_stmt(e, body);
@@ -5411,7 +7330,7 @@ static void gen_stmt1(ecx *e, uint32_t n)
 			val v = gen(e, step);
 
 			vfree(e, &v);
-			e->foff = m2;
+			e->foff = keep_cl(e, m2);
 		}
 		jump(e, lhead);
 		deflabel(e, lbrk);
@@ -5483,12 +7402,12 @@ static void gen_stmt1(ecx *e, uint32_t n)
 	default:
 		efatal(e, x->loc, "unsupported statement (node %d)", x->op);
 	}
-	e->foff = mark;
+	e->foff = keep_cl(e, mark);
 }
 
 /* ---------------- inline asm ---------------- */
 
-enum { AO_REG, AO_IMM, AO_MEM, AO_ZERO };
+enum { AO_REG, AO_IMM, AO_MEM, AO_ZERO, AO_VREG };
 
 typedef struct asmopnd {
 	uint8_t kind, reg, fixed, out, inout, wide;
@@ -5525,6 +7444,26 @@ static int clob_reg(const char *s)
 	return -1;
 }
 
+/* a vector register load or store as raw text: op qv|dv, [xr] */
+static void vraw(ecx *e, const char *opn, bool q, int v, int xr)
+{
+	tbuf *rb = &e->raw;
+	size_t st = rb->n;
+	ins *i;
+
+	tb_c(rb, '\t');
+	tb_s(rb, opn);
+	tb_c(rb, '\t');
+	tb_c(rb, q ? 'q' : 'd');
+	tb_u(rb, (uint64_t)v);
+	tb_s(rb, ", [");
+	reg(rb, xr, 1);
+	tb_c(rb, ']');
+	i = put(e, I_RAW);
+	i->off = (int32_t)st;
+	i->ref = (uint32_t)(rb->n - st);
+}
+
 static void gen_asm(ecx *e, uint32_t n)
 {
 	cc *c = e->c;
@@ -5540,6 +7479,7 @@ static void gen_asm(ecx *e, uint32_t n)
 	tbuf *rb = &e->raw;
 	size_t start;
 	uint32_t uniq;
+	int nvreg = 0;
 
 	if (!e->reach)
 		return;
@@ -5573,13 +7513,20 @@ static void gen_asm(ecx *e, uint32_t n)
 		const asmop *ao = &a->ops[i];
 		const char *cs = c->strs[ao->constraint - 1].s;
 		asmopnd *o = &op[i];
-		bool mem_ok = strpbrk(cs, "mQo") != NULL, reg_ok = strpbrk(cs, "r") != NULL;
+		bool mem_ok = strpbrk(cs, "mQog") != NULL, reg_ok = strpbrk(cs, "rg") != NULL;
 		uint32_t en = ao->expr;
 
 		o->out = 1;
 		o->inout = strchr(cs, '+') != NULL;
 		o->t = N(en)->ty;
 		o->name = ao->name;
+		if (is_vec(c, o->t) && strpbrk(cs, "wx")) {
+			/* a vector in v16+: loaded before the template if read, stored after it */
+			o->kind = AO_VREG;
+			o->reg = (uint8_t)(16 + nvreg++);
+			o->l = gen_lval(e, en);
+			continue;
+		}
 		if (strpbrk(cs, "wxy") && !reg_ok)
 			efatal(e, x->loc, "floating point asm operands are not supported");
 		if (mem_ok && !reg_ok) {
@@ -5611,7 +7558,7 @@ static void gen_asm(ecx *e, uint32_t n)
 		const char *cs = c->strs[ao->constraint - 1].s;
 		asmopnd *o = &op[i];
 		uint32_t en = ao->expr;
-		bool reg_ok = strpbrk(cs, "rp") != NULL, mem_ok = strpbrk(cs, "mQo") != NULL;	/* p: address in a register */
+		bool reg_ok = strpbrk(cs, "rpg") != NULL, mem_ok = strpbrk(cs, "mQog") != NULL;	/* p: address in a register */
 		int tied = -1;
 
 		o->t = N(en)->ty;
@@ -5619,6 +7566,15 @@ static void gen_asm(ecx *e, uint32_t n)
 		for (const char *p = cs; *p; p++)
 			if (*p >= '0' && *p <= '9')
 				tied = atoi(p);
+		if (is_vec(c, o->t) && strpbrk(cs, "wx") && tied < 0) {
+			val v = gen(e, en);	/* the vector's address */
+
+			toreg(e, &v);
+			o->kind = AO_VREG;
+			o->reg = (uint8_t)(16 + nvreg++);
+			o->v = v;
+			continue;
+		}
 		if (tied >= 0 && (uint32_t)tied < a->nout) {
 			/* the input goes into the output's register */
 			val v = gen(e, en);
@@ -5655,7 +7611,7 @@ static void gen_asm(ecx *e, uint32_t n)
 					continue;
 				}
 				for (const char *p = cs; *p; p++)
-					if (strchr("iInJKLMNs", *p) && (v.k == V_ADDR ? (*p == 'i' || *p == 's') : imm_fits(*p, v.i)))
+					if (strchr("iInJKLMNsg", *p) && (v.k == V_ADDR ? (*p == 'i' || *p == 's' || *p == 'g') : *p == 'g' || imm_fits(*p, v.i)))
 						imm = true;
 			}
 			if (imm) {
@@ -5730,6 +7686,25 @@ static void gen_asm(ecx *e, uint32_t n)
 	/* asm goto with outputs: the labels go through trampolines that store them */
 	for (uint32_t k = 0; k < a->nlabel; k++)
 		tramp[k] = a->nout ? newlabel(e) : user_label(e, a->labels[k]);
+	/* vector operands into their registers, last so no call in between clobbers them */
+	for (uint32_t i = 0; i < nops; i++) {
+		asmopnd *o = &op[i];
+		bool q = tsize(c, o->t) == 16;
+
+		if (o->kind != AO_VREG)
+			continue;
+		if (!o->out) {
+			vraw(e, "ldr", q, o->reg, o->v.r);
+			vfree(e, &o->v);
+		} else if (o->inout) {
+			lval l2 = o->l;
+			val av = laddr(e, &l2);
+			int r = toreg(e, &av);
+
+			vraw(e, "ldr", q, o->reg, r);
+			vfree(e, &av);
+		}
+	}
 	/* the template */
 	start = rb->n;
 	uniq = atomic_fetch_add(&e->E->asmno, 1);
@@ -5748,7 +7723,7 @@ static void gen_asm(ecx *e, uint32_t n)
 			if (*p == '%') { tb_c(rb, '%'); continue; }
 			if (*p == '=') { tb_u(rb, uniq); continue; }
 			if (*p == '{' || *p == '|' || *p == '}') { tb_c(rb, *p); continue; }
-			if (*p && strchr("wxcalHnPQRs", *p) && (p[1] == '[' || (p[1] >= '0' && p[1] <= '9')))
+			if (*p && strchr("wxcalHnPQRsqdbh", *p) && (p[1] == '[' || (p[1] >= '0' && p[1] <= '9')))
 				mod = *p++;
 			if (*p == '[') {
 				const char *q = strchr(p, ']');
@@ -5790,6 +7765,10 @@ static void gen_asm(ecx *e, uint32_t n)
 				if (o->fixed == 2)
 					o = &op[o->inout];
 				switch (o->kind) {
+				case AO_VREG:
+					tb_c(rb, mod == 'q' || mod == 'd' || mod == 's' || mod == 'h' || mod == 'b' ? mod : 'v');
+					tb_u(rb, o->reg);
+					break;
 				case AO_REG:
 					if (mod == 'H' && o->wide) {
 						reg(rb, o->v.r2, 1);
@@ -5825,6 +7804,18 @@ static void gen_asm(ecx *e, uint32_t n)
 
 		i->off = (int32_t)start;
 		i->ref = (uint32_t)(rb->n - start);
+	}
+	for (uint32_t i = 0; i < a->nout; i++) {
+		asmopnd *o = &op[i];
+
+		if (o->kind == AO_VREG) {
+			lval l2 = o->l;
+			val av = laddr(e, &l2);
+			int r = toreg(e, &av);
+
+			vraw(e, "str", tsize(c, o->t) == 16, o->reg, r);
+			vfree(e, &av);
+		}
 	}
 	/* fixed output registers back into their temporaries */
 	for (uint32_t i = 0; i < a->nout; i++) {
@@ -5939,7 +7930,7 @@ static void sym_header(ecx *e, tbuf *b, uint32_t s, bool fn, const char *defsec,
 }
 
 /* finish_function for the object backend: the same function as items */
-static void finish_direct(ecx *e, uint32_t s, uint32_t align, const int *cs, int ncs, int32_t csave, int32_t total, bool ctor)
+static void finish_direct(ecx *e, uint32_t s, uint32_t align, const int *cs, int ncs, int32_t csave, int32_t total, int ctor)
 {
 	cc *c = e->c;
 	tbuf *b = &e->out;
@@ -5993,8 +7984,13 @@ static void finish_direct(ecx *e, uint32_t s, uint32_t align, const int *cs, int
 	tb_c(b, '-');
 	sym_name(c, b, s);
 	tb_c(b, '\n');
-	if (ctor) {
+	if (ctor & 1) {
 		tb_s(b, "\t.section\t.init_array,\"aw\",@init_array\n\t.p2align\t3\n\t.xword\t");
+		sym_name(c, b, s);
+		tb_c(b, '\n');
+	}
+	if (ctor & 2) {
+		tb_s(b, "\t.section\t.fini_array,\"aw\",@fini_array\n\t.p2align\t3\n\t.xword\t");
 		sym_name(c, b, s);
 		tb_c(b, '\n');
 	}
@@ -6045,7 +8041,7 @@ static void finish_function(ecx *e, uint32_t s)
 	if (c->syms[s].align > align)
 		align = c->syms[s].align;
 	if (direct(e)) {
-		finish_direct(e, s, align, cs, ncs, csave, total, a->constructor != 0);
+		finish_direct(e, s, align, cs, ncs, csave, total, (a->constructor != 0) | (a->destructor != 0) << 1);
 		return;
 	}
 	sym_header(e, b, s, true, "\t.text\n", align);
@@ -6081,6 +8077,11 @@ static void finish_function(ecx *e, uint32_t s)
 		sym_name(c, b, s);
 		tb_c(b, '\n');
 	}
+	if (a->destructor) {
+		tb_s(b, "\t.section\t.fini_array,\"aw\",@fini_array\n\t.p2align\t3\n\t.xword\t");
+		sym_name(c, b, s);
+		tb_c(b, '\n');
+	}
 	e->E->nins += e->nin;
 	e->E->nfn++;
 	out_chunk(e, (uint64_t)s << 1, start);
@@ -6100,8 +8101,8 @@ static void emit_function(ecx *e, uint32_t s)
 	e->nin = 0;
 	e->raw.n = 0;
 	e->nlabel = 0;
-	e->nkv = 0, e->kvalid = 0, e->nkvs = 0;
-	e->foff = e->fmax = e->outmax = 0;
+	e->nkv = 0, e->kvalid = 0, e->nkvs = 0, e->nael = 0;
+	e->foff = e->fmax = e->outmax = e->cl_top = 0;
 	e->dyn = e->calls = false;
 	e->live = 0;
 	e->usedcs = 0;
@@ -6121,11 +8122,12 @@ static void emit_function(ecx *e, uint32_t s)
 		e->f = NULL;
 		return;
 	}
-	if (is_record(c, rty) && tsize(c, rty) > 16) {
+	if (is_sret(c, rty)) {
 		F.retslot = slot(e, 8, 8);
 		mem(e, I_ST, 3, 0, 8, FRAME, F.retslot);
 	}
 	/* parameters */
+	e->nsrn = 0;
 	for (uint32_t i = 0; i < body->aux; i++) {
 		uint32_t p = c->lists[body->a + i];
 		qty pt = c->syms[p].ty;
@@ -6133,7 +8135,14 @@ static void emit_function(ecx *e, uint32_t s)
 		bind *bd = binding(e, p);
 		uint64_t sz = tsize(c, pt);
 
-		classify(e, pt, &ngrn, &nsaa, &ab);
+		/* a K&R definition without a prototype gets a float as a double (default promotions) */
+		bool kfl = (T(c, c->syms[s].ty)->flags & TF_NOPROTO) && KIND(c, pt) == TY_FLOAT;
+
+		classify(e, kfl ? prim(TY_DOUBLE) : pt, &ngrn, &nsaa, &ab);
+		if (kfl && ab.kind == A_VREG) {
+			word(e, 0x1e624000u | (unsigned)ab.reg << 5 | ab.reg);	/* fcvt s, d */
+			ab.size = 4;
+		}
 		bd->inst = F.inst;
 		bd->reg = 0xff;
 		switch (ab.kind) {
@@ -6150,6 +8159,11 @@ static void emit_function(ecx *e, uint32_t s)
 		case A_STACK:
 			bd->kind = B_SLOT;
 			bd->slot = slot(e, (sz + 7) & ~(uint64_t)7, talign(c, pt) > 8 ? 16 : 8);
+			if (DARWIN(c) && sz < 8 && !is_agg(c, pt)) {	/* Apple: packed */
+				mem(e, I_LD, log2sz(sz), 0, R_X16, R_FP, 16 + ab.stk);
+				mem(e, I_ST, log2sz(sz), 0, R_X16, FRAME, bd->slot);
+				break;
+			}
 			for (int k = 0; k < ab.nreg; k++) {
 				mem(e, I_LD, 3, 0, R_X16, R_FP, 16 + ab.stk + 8 * k);
 				mem(e, I_ST, 3, 0, R_X16, FRAME, bd->slot + 8 * k);
@@ -6166,18 +8180,37 @@ static void emit_function(ecx *e, uint32_t s)
 			mem(e, I_LD, 3, 0, R_X16, R_FP, 16 + ab.stk);
 			mem(e, I_ST, 3, 0, R_X16, FRAME, bd->slot);
 			break;
+		case A_VREG:
+			bd->kind = B_SLOT;
+			bd->slot = sz == 16 ? slot(e, 16, 16) : slot(e, 8, 8);
+			vr_store(e, (int)ab.size, ab.reg, FRAME, bd->slot);
+			break;
+		case A_HFA:
+			bd->kind = B_SLOT;
+			bd->slot = slot(e, (sz + 7) & ~(uint64_t)7, talign(c, pt) > 8 ? 16 : 8);
+			for (int k = 0; k < ab.nreg; k++)
+				vr_store(e, ab.fsz, ab.reg + k, FRAME, bd->slot + ab.fsz * k);
+			break;
 		}
 	}
-	if (e->vararg) {
+	if (e->vararg && DARWIN(c)) {
+		e->ngr_named = ngrn;
+		e->nstk_named = nsaa;
+	} else if (e->vararg) {
 		e->ngr_named = ngrn;
 		e->nstk_named = nsaa;
 		e->vaslot = slot(e, 64, 16);
 		for (int r = ngrn; r < 8; r++)
 			mem(e, I_ST, 3, 0, r, FRAME, e->vaslot + 8 * r);
+		/* v0-v7: 16 bytes each (the low 8 hold a float or double) */
+		e->nvr_named = e->nsrn;
+		e->vrslot = slot(e, 128, 16);
+		for (int r = e->nsrn; r < 8; r++)
+			vr_store(e, 16, r, FRAME, e->vrslot + 16 * r);
 	}
 	gen_stmt(e, y->body);
 	/* falling off the end of main returns 0 */
-	if (e->reach && y->name && !strcmp(vintern_ents[y->name].s, "main") && vintern_ents[y->name].len == 4)
+	if (e->reach && y->name && vintern_ents[y->name].len == 4 && !memcmp(vintern_ents[y->name].s, "main", 4))
 		movi(e, 0, 0, 0);
 	deflabel(e, F.retlbl);
 	e->f = NULL;
@@ -6205,7 +8238,7 @@ static void data_put(ecx *e, uint64_t off, uint64_t v, int n)
 		e->data.p[off + (uint64_t)i] = (char)(v >> (8 * i));
 	if (unlikely(n && off < e->relend))
 		for (uint32_t j = 0; j < e->nrel; j++)	/* overwritten: the relocation goes */
-			if (e->rel[j].off < off + (uint64_t)n && off < e->rel[j].off + 8)
+			if (e->rel[j].off < off + (uint64_t)n && off < e->rel[j].off + (e->rel[j].sz ? e->rel[j].sz : 8))
 				e->rel[j].seq = UINT32_MAX;
 }
 
@@ -6220,7 +8253,7 @@ static void data_or(ecx *e, uint64_t off, uint8_t bits)
 static void data_reloc(ecx *e, uint64_t off, uint32_t ref, int64_t add)
 {
 	data_put(e, off, 0, 8);
-	e->rel[e->nrel] = (struct reloc){ off, ref, e->nrel, add };
+	e->rel[e->nrel] = (struct reloc){ off, ref, e->nrel, add, 0, 0 };
 	e->nrel++;
 	if (off + 8 > e->relend)
 		e->relend = off + 8;
@@ -6297,11 +8330,17 @@ static void data_init(ecx *e, uint64_t off, qty ty, uint32_t init)
 			n = cap;
 		for (uint64_t i = 0; i < n; i++)
 			data_put(e, off + i, (uint8_t)s->s[i], 1);
-		data_put(e, off + (cap ? cap - 1 : 0), 0, 1);
 		return;
 	}
 	if (x->op == N_COMPLIT) {
 		data_init(e, off, ty, x->a);
+		return;
+	}
+	if (x->op == N_CPLX) {
+		qty et = c->tags[T(c, x->ty)->aux].f[0].ty;
+
+		data_init(e, off, et, x->a);
+		data_init(e, off + tsize(c, et), et, x->b);
 		return;
 	}
 	if (x->op == N_CAST && x->aux == CK_NOP && is_agg(c, ty)) {
@@ -6342,13 +8381,30 @@ static void data_init(ecx *e, uint64_t off, qty ty, uint32_t init)
 			} else {
 				uint64_t u;
 
+				if (n == 16) {
+					u128 q = (u128)ld_of_d(cv.f);
+
+					data_put(e, off, (uint64_t)q, 8);
+					data_put(e, off + 8, (uint64_t)(q >> 64), 8);
+					return;
+				}
 				memcpy(&u, &cv.f, 8);
 				data_put(e, off, u, 8);
-				if (n == 16)
-					efatal(e, x->loc, "long double initializers are not supported");
 			}
 			return;
 		case CV_ADDR:
+			if (cv.sublabel && (n == 4 || n == 8)) {
+				/* label difference: ref - sub, resolved by the assembler */
+				data_put(e, off, 0, n);
+				e->rel[e->nrel] = (struct reloc){ off, REF(RK_LBL, cv.label - 1), e->nrel, (int64_t)cv.i,
+								  REF(RK_LBL, cv.sublabel - 1) + 1, (uint32_t)n };
+				e->nrel++;
+				if (off + n > e->relend)
+					e->relend = off + n;
+				note_ref(e, REF(RK_LBL, cv.label - 1));
+				note_ref(e, REF(RK_LBL, cv.sublabel - 1));
+				return;
+			}
 			if (n != 8)
 				efatal(e, x->loc, "address initializer for a %d-byte object", n);
 			if (cv.label)
@@ -6421,10 +8477,16 @@ static void data_bytes(ecx *e, tbuf *b, uint64_t size)
 		uint64_t end = ri < e->nrel ? e->rel[ri].off : size;
 
 		if (ri < e->nrel && o == e->rel[ri].off) {
-			tb_s(b, "\t.xword\t");
+			uint32_t sz = e->rel[ri].sz ? e->rel[ri].sz : 8;
+
+			tb_s(b, sz == 4 ? "\t.word\t" : "\t.xword\t");
 			ref_off(e->c, b, e->rel[ri].ref, e->rel[ri].add);
+			if (e->rel[ri].sub) {
+				tb_c(b, '-');
+				ref_name(e->c, b, e->rel[ri].sub - 1);
+			}
 			tb_c(b, '\n');
-			o += 8;
+			o += sz;
 			ri++;
 			continue;
 		}
@@ -6495,8 +8557,45 @@ static void emit_object(ecx *e, uint32_t s)
 	zero = e->nrel == 0;
 	for (uint64_t i = 0; zero && i < e->data.n; i++)
 		zero = !e->data.p[i];
-	if (!a->section && (y->flags & SF_THREAD))
+	if (!a->section && (y->flags & SF_THREAD) && !(DARWIN(c) && direct(e)))
 		efatal(e, y->loc, "thread-local storage is not supported");
+	if (direct(e) && (y->flags & SF_THREAD)) {
+		/*
+		 * Darwin TLV: the initial value in __thread_data/__thread_bss under
+		 * a local label, the symbol itself on a descriptor in
+		 * __thread_vars: { __tlv_bootstrap, 0, initial value }.
+		 */
+		size_t h;
+		bool global = y->sc != SC_STATIC && y->depth == 0 && y->name;
+
+		b->n = (b->n + 7) & ~(size_t)7;
+		start = b->n;
+		h = it_open(e, IT_TEXT);
+		tb_s(b, zero ? "\t.section\t.tbss,\"aw\",@nobits\n" : "\t.section\t.tdata,\"aw\",@progbits\n");
+		tb_s(b, "\t.p2align\t");
+		tb_u(b, (uint64_t)__builtin_ctz(align ? align : 1));
+		tb_s(b, "\n.Ltlvi.");
+		tb_u(b, s);
+		tb_s(b, ":\n");
+		it_close(e, h);
+		data_item(e, zero && !e->nrel ? (size ? size : 1) : size, zero && !e->nrel);
+		h = it_open(e, IT_TEXT);
+		tb_s(b, "\t.section\t.tlv,\"aw\",@progbits\n");
+		if (global) {
+			tb_s(b, (y->flags & SF_WEAK) ? "\t.weak\t" : "\t.globl\t");
+			sym_name(c, b, s);
+			tb_c(b, '\n');
+		}
+		tb_s(b, "\t.p2align\t3\n");
+		sym_name(c, b, s);
+		tb_s(b, ":\n\t.xword\t__tlv_bootstrap\n\t.xword\t0\n\t.xword\t.Ltlvi.");
+		tb_u(b, s);
+		tb_c(b, '\n');
+		it_close(e, h);
+		e->E->nobj++;
+		out_chunk(e, ((uint64_t)s << 1) | 1, start);
+		return;
+	}
 	if (direct(e)) {
 		size_t h;
 
@@ -6633,6 +8732,30 @@ typedef struct pre {
 	int cdepth;		/* cleanup variables in scope */
 } pre;
 
+/* a[CONST], a a variable */
+static bool is_aconst(cc *c, uint32_t n)
+{
+	const node *x = N(n);
+
+	uint32_t b;
+
+	if (x->op != N_INDEX || N(x->a)->op != N_CAST || N(x->a)->aux != CK_DECAY || N(N(x->a)->a)->op != N_VAR)
+		return false;
+	for (b = x->b; N(b)->op == N_CAST && is_integer(c, N(b)->ty) && is_integer(c, N(N(b)->a)->ty); b = N(b)->a)
+		;
+	return N(b)->op == N_NUM && c->ipool[N(b)->a] >= 0 && c->ipool[N(b)->a] < (i128)1 << 32;
+}
+
+/* the index of a[CONST] (is_aconst) */
+static uint32_t aconst_idx(cc *c, uint32_t n)
+{
+	uint32_t b;
+
+	for (b = N(n)->b; N(b)->op == N_CAST; b = N(b)->a)
+		;
+	return (uint32_t)c->ipool[N(b)->a];
+}
+
 static void mark_written(pre *P, uint32_t n)
 {
 	cc *c = P->c;
@@ -6654,7 +8777,7 @@ static void mark_written(pre *P, uint32_t n)
 		}
 	}
 	if (N(n)->op == N_VAR)
-		P->E->sflags[N(n)->a] |= SA_WRITTEN;
+		P->E->sflags[N(n)->a] |= SA_WRITTEN | SA_AESC, P->E->ffacts[N(n)->a] |= FF_BAD;
 	else if (N(n)->op == N_COMPLIT)
 		P->E->sflags[N(n)->b] |= SA_WRITTEN;
 }
@@ -6665,6 +8788,33 @@ static void mark_written(pre *P, uint32_t n)
  * `bool enable_scs = false; ... if (x) enable_scs = false;` guards references
  * to symbols that do not exist).
  */
+/* a floating local's write: fabs(...) is >= 0 or NaN, a constant is what it is */
+static void note_fwrite(pre *P, uint32_t s, uint32_t rhs)
+{
+	cc *c = P->c;
+	uint8_t *f = &P->E->ffacts[s], k = FF_BAD;
+	uint32_t ref, callee;
+	cval cv;
+
+	if (!is_flt(c, c->syms[s].ty) || !is_local_var(c, s))
+		return;
+	while (N(rhs)->op == N_CAST && is_flt(c, N(rhs)->ty) && is_flt(c, N(N(rhs)->a)->ty) &&
+	       tsize(c, N(rhs)->ty) >= tsize(c, N(N(rhs)->a)->ty))
+		rhs = N(rhs)->a;
+	if (cc_eval(c, rhs, &cv) && (cv.kind == CV_FLT || cv.kind == CV_INT)) {
+		double v = cv.kind == CV_FLT ? cv.f : (double)cv.i;
+
+		k = v == 0 && !__builtin_signbit(v) ? FF_NONNEG | FF_ZERO : v >= 0 ? FF_NONNEG : 0;
+	} else if (N(rhs)->op == N_CALL && (callee = direct_callee(c, N(rhs)->a, &ref))) {
+		const vident *nm = &vintern_ents[c->syms[callee].name];
+
+		if ((nm->len == 4 && !memcmp(nm->s, "fabs", 4)) || (nm->len == 5 && !memcmp(nm->s, "fabsf", 5)))
+			k = FF_NONNEG;
+	}
+	*f = (uint8_t)(*f & FF_SEEN ? (*f & ~(FF_NONNEG | FF_ZERO)) | (*f & k & (FF_NONNEG | FF_ZERO)) | (k & FF_BAD)
+				    : FF_SEEN | k);
+}
+
 static void note_assign(pre *P, uint32_t s, uint32_t rhs)
 {
 	cc *c = P->c;
@@ -6716,6 +8866,31 @@ static void ensure_walked(emitter *E, cc *c, uint32_t s)
 		;	/* another thread is walking it: a few microseconds */
 }
 
+/* a static initializer takes a label's address (&&l, &&l - &&m, { &&l }) */
+static bool init_has_labeladdr(cc *c, uint32_t n)
+{
+	const node *x;
+
+	if (!n)
+		return false;
+	x = N(n);
+	switch (x->op) {
+	case N_LABELADDR:
+		return true;
+	case N_INIT:
+		for (uint32_t i = 0; i < x->c; i++)	/* the layout side_effects() reads */
+			if (init_has_labeladdr(c, x->aux == 1 ? c->lists[x->b + 3 * i + 2] : c->lists[x->b + i]))
+				return true;
+		return false;
+	case N_CAST: case N_ADDR: case N_UNARY:
+		return init_has_labeladdr(c, x->a);
+	case N_BINARY:
+		return init_has_labeladdr(c, x->a) || init_has_labeladdr(c, x->b);
+	default:
+		return false;
+	}
+}
+
 /* walks every node; returns whether it contains a label (or case) */
 static int walk(pre *P, uint32_t n)
 {
@@ -6730,8 +8905,16 @@ static int walk(pre *P, uint32_t n)
 	switch (x->op) {
 	case N_VAR:
 		/* locals belong to this walk alone (globals' flags are shared between threads) */
-		if (is_local_var(c, x->a))
+		if (is_local_var(c, x->a)) {
 			P->E->sflags[x->a] |= SA_USED;
+		} else {
+			const sym *y = &c->syms[x->a];
+
+			/* a static local holding a label address: the function has one copy */
+			if (y->kind == S_VAR && y->sc == SC_STATIC && !(y->flags & SF_GLOBAL) && y->body &&
+			    init_has_labeladdr(c, y->body))
+				P->E->sflags[P->fn] |= SA_NOINL;
+		}
 		return false;
 	case N_NUM: case N_FNUM: case N_STR: case N_ZERO: case N_SIZEOF_VLA:
 		return false;
@@ -6756,12 +8939,21 @@ static int walk(pre *P, uint32_t n)
 		break;
 	case N_ASSIGN:
 		if (!x->aux && N(x->a)->op == N_VAR)
-			note_assign(P, N(x->a)->a, x->b);
+			note_assign(P, N(x->a)->a, x->b), note_fwrite(P, N(x->a)->a, x->b);
+		else if (!x->aux && is_aconst(c, x->a))
+			P->E->sflags[N(N(N(x->a)->a)->a)->a] |= SA_WRITTEN;
 		else
 			mark_written(P, x->a);
 		lab = walk(P, x->a) | walk(P, x->b);
 		break;
-	case N_INDEX: case N_BINARY: case N_LOGAND: case N_LOGOR: case N_COMMA:
+	case N_INDEX:
+		if (is_aconst(c, n)) {
+			/* a[CONST]: the array does not escape here */
+			lab = walk(P, N(x->a)->a) | walk(P, x->b);
+			break;
+		}
+		/* fall through */
+	case N_BINARY: case N_LOGAND: case N_LOGOR: case N_COMMA: case N_CPLX:
 		lab = walk(P, x->a) | walk(P, x->b);
 		break;
 	case N_COND:
@@ -6813,7 +9005,9 @@ static int walk(pre *P, uint32_t n)
 		const sym *y = &c->syms[x->a];
 
 		lab = walk(P, x->b);
-		if (sym_attrs(c, x->a)->cleanup)
+		if (x->b && y->kind == S_VAR)
+			note_fwrite(P, x->a, x->b);
+		if (sym_attrs(c, x->a)->cleanup || (y->kind == S_VAR && (T(c, y->ty)->flags & TF_VLA)))
 			P->cdepth++;
 		/* a __used static local is emitted with its function, referenced or not */
 		if (y->kind == S_VAR && y->sc == SC_STATIC && sym_attrs(c, x->a)->used &&
@@ -7009,7 +9203,7 @@ static bool is_root(cc *c, uint32_t s)
 		if ((y->flags & SF_GNU_INLINE) && !(y->flags & SF_INLINE_NOEXTERN))
 			return false;	/* GNU 'extern inline': clang's isInlineDefinitionExternallyVisible */
 		if (y->sc == SC_STATIC)
-			return a->used || a->constructor;
+			return a->used || a->constructor || a->destructor;
 		if ((y->flags & SF_INLINE) && !(y->flags & SF_GNU_INLINE) && y->sc != SC_EXTERN)
 			return false;	/* C99 inline definition */
 		return true;
@@ -7095,6 +9289,7 @@ static int emit_tu1(cc *c, const cc_opts *o, bool write_out, uint8_t *mf, bool *
 	E.claimed = reserve(c->nsym + 64);
 	E.extref = reserve(c->nsym + 64);
 	E.sflags = reserve(c->nsym + 64);
+	E.ffacts = reserve(c->nsym + 64);
 	E.strdone = reserve(c->nstr + 64);
 	E.nflags = reserve(c->nnode + 64);
 	E.lref = reserve(c->nlabel + 64);

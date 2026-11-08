@@ -3,6 +3,7 @@
 
   bench/vcc-sema.py run [-j N] [--kernel] [PAT]     vpp -fsyntax-only on every C TU
   bench/vcc-sema.py layout [-j N] [--kernel] [PAT]  vcc's layout/constant claims, checked by clang
+  bench/vcc-sema.py warn [-j N] [--kernel] [PAT]    vcc's warnings (file:line:col: warning: ... [-Wflag]) against clang's
 
 `layout` has vpp write _Static_assert lines (sizeof/_Alignof/offsetof of every
 file-scope struct, union, enum and typedef, sizeof of every global, every
@@ -51,6 +52,19 @@ def layout(t):
     errs = [l for l in q.stderr.splitlines() if 'error:' in l and 'is unavailable' not in l]
     return obj, len(errs) and 1, '\n'.join(errs[:8]) + (f'\n... {len(errs)} errors' if len(errs) > 8 else ''), n
 
+WLINE = re.compile(r'^(\S+:\d+:\d+: (?:warning|error|fatal error): .*)$', re.M)
+
+def warn(t):
+    """vcc's diagnostic header lines against clang's -fsyntax-only (same flags): ok when
+    every line vcc prints is one clang prints too (vcc may miss some of clang's)."""
+    obj, a = t
+    p = subprocess.run([VPP, '-fsyntax-only', '-fno-color-diagnostics'] + a, cwd=B, capture_output=True, text=True)
+    q = subprocess.run([CL, '-fsyntax-only', '-fno-color-diagnostics'] + [x for x in a if not x.startswith('-Wp,')],
+                       cwd=B, capture_output=True, text=True)
+    v, c = WLINE.findall(p.stderr), WLINE.findall(q.stderr)
+    extra = [l for l in v if l not in c]
+    return obj, len(extra) and 1, '\n'.join(extra[:8]), (len(v) - len(extra), len(c))
+
 if __name__ == '__main__':
     av = [x for x in sys.argv[1:] if x != '--kernel']; j = 6
     if '-j' in av: k = av.index('-j'); j = int(av[k+1]); del av[k:k+2]
@@ -58,7 +72,7 @@ if __name__ == '__main__':
     ts = c_tus(pat)
     if '--kernel' in sys.argv: ts = [t for t in ts if not t[0].startswith('scripts/')]
     with Pool(j) as pool:
-        res = pool.map(run if mode == 'run' else layout, ts, chunksize=2)
+        res = pool.map(run if mode == 'run' else warn if mode == 'warn' else layout, ts, chunksize=2)
     bad = [r for r in res if r[1]]
     show = int(os.environ.get('SHOW', 10))
     if os.environ.get('FIRST'):
@@ -75,6 +89,8 @@ if __name__ == '__main__':
     if mode == 'run':
         tt = sorted(r[3] for r in res)
         print(f'{len(res) - len(bad)}/{len(res)} ok; median {tt[len(tt)//2]*1e3:.0f} ms, total {sum(tt):.1f} s')
+    elif mode == 'warn':
+        print(f'{len(res) - len(bad)}/{len(res)} ok; vcc reproduces {sum(r[3][0] for r in res)} of clang\'s {sum(r[3][1] for r in res)} diagnostics')
     else:
         print(f'{len(res) - len(bad)}/{len(res)} ok; {sum(r[3] for r in res)} checks')
     os.rmdir(TMP)

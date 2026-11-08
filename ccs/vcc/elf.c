@@ -76,6 +76,7 @@ void elf_reset(ElfObj *o)
 	o->arena.used = 0;
 	o->syms.used = sizeof(ElfSym); o->secs.used = sizeof(ElfSec); o->fixes.used = sizeof(ElfFix);
 	o->nsec = 1; o->nfrag = FRAG_CAP - 1; o->nsym = 1; o->nfix = 1; o->nreg = 0; o->regs.used = 0;
+	o->expr = 0; o->expr_tail = &o->expr;
 	memset(o->secs.base, 0, sizeof(ElfSec));
 	memset(o->syms.base, 0, sizeof(ElfSym));
 	memset(o->fixes.base, 0, sizeof(ElfFix));
@@ -173,6 +174,18 @@ void elf_define_abs(ElfObj *o, uint32_t s, uint64_t v)
 {
 	ElfSym *y = elf_symp(o, s);
 	y->flags |= ESYM_DEFINED | ESYM_ABS; y->frag = 0; y->value = v;
+}
+
+typedef struct ElfExpr { uint32_t sym; int op; ElfVal x, y; struct ElfExpr *next; } ElfExpr;
+
+void elf_expr_sym(ElfObj *o, uint32_t s, int op, ElfVal x, ElfVal y)
+{
+	ElfExpr *e = rpush(&o->arena, sizeof *e, 8);
+
+	*e = (ElfExpr){ s, op, x, y, 0 };
+	if (!o->expr_tail) o->expr_tail = &o->expr;
+	*o->expr_tail = e;
+	o->expr_tail = &e->next;
 }
 
 void elf_size_expr(ElfObj *o, uint32_t s, ElfVal v)
@@ -361,6 +374,9 @@ static uint32_t get32(uint8_t *p) { return p[0] | p[1] << 8 | p[2] << 16 | (uint
 static int fits(int64_t v, int bits) { return v >> (bits - 1) == 0 || v >> (bits - 1) == -1; }
 
 /* Apply a resolved value to the field. */
+static void patch(ElfObj *o, ElfFix *x, int64_t v);
+void elf_patch(ElfObj *o, ElfFix *x, int64_t v) { patch(o, x, v); }
+
 static void patch(ElfObj *o, ElfFix *x, int64_t v)
 {
 	uint8_t *p = x->p;
@@ -435,7 +451,11 @@ static Out out_of(ElfObj *o) { (void)o; Out z; memset(&z, 0, sizeof z); return z
 static void reloc(ElfObj *o, Out *w, ElfFix *x, uint64_t P, uint32_t type, ElfSym *a, uint32_t aid, int64_t add)
 {
 	uint32_t s = elf_frag(o, x->frag)->sec;
-	if (a && insec(a) && a->bind == STB_LOCAL && !(a->flags & ESYM_SECTION) && a->type != STT_GNU_IFUNC) {
+	/* local symbols become section + offset, except (MC's shouldRelocateWithSymbol) in a
+	 * SHF_MERGE section with an addend: the linker would find the piece at offset+addend,
+	 * so "" + 1 could land in the next string */
+	if (a && insec(a) && a->bind == STB_LOCAL && !(a->flags & ESYM_SECTION) && a->type != STT_GNU_IFUNC &&
+	    !(add && (elf_sec(o, symsec(o, a))->flags & SHF_MERGE))) {
 		add += (int64_t)symoff(o, a);
 		aid = elf_sec(o, symsec(o, a))->sym;
 		elf_symp(o, aid)->flags |= ESYM_USED;
@@ -537,11 +557,28 @@ static void build_strtab(ElfObj *o, Out *w, Str *v, uint32_t n)
 
 static uint64_t al(uint64_t v, uint64_t a) { return (v + a - 1) & ~(a - 1); }
 
+static size_t elf_finish_tail(ElfObj *o, Out *w);
+
 size_t elf_finish(ElfObj *o)
 {
 	Out *w = rpush(&o->arena, sizeof *w, 8);
 	*w = out_of(o);
 	o->fin = w;
+	uint32_t ns = o->nsec;
+	elf_layout(o);
+	/* fixups, in layout order */
+	w->rel = rpush(&o->arena, sizeof(Rel) * (o->nfix + 1), 8);
+	ElfFix *fx = (ElfFix *)o->fixes.base;
+	for (uint32_t s = 1; s < ns; s++)
+		for (uint32_t f = s; f; f = elf_frag(o, f)->next)
+			for (uint32_t i = elf_frag(o, f)->fix_head; i; i = fx[i].next)
+				resolve(o, w, &fx[i]);
+	return elf_finish_tail(o, w);
+}
+
+/* frag bases, section sizes, .size expressions */
+void elf_layout(ElfObj *o)
+{
 	uint32_t ns = o->nsec;
 	/* layout */
 	for (uint32_t s = 1; s < ns; s++) {
@@ -579,13 +616,38 @@ size_t elf_finish(ElfObj *o)
 		}
 		y->size = (uint64_t)v;
 	}
-	/* fixups, in layout order */
-	w->rel = rpush(&o->arena, sizeof(Rel) * (o->nfix + 1), 8);
-	ElfFix *fx = (ElfFix *)o->fixes.base;
-	for (uint32_t s = 1; s < ns; s++)
-		for (uint32_t f = s; f; f = elf_frag(o, f)->next)
-			for (uint32_t i = elf_frag(o, f)->fix_head; i; i = fx[i].next)
-				resolve(o, w, &fx[i]);
+	/* symbols defined as expressions over label differences: in creation order (later ones may use earlier ones) */
+	for (ElfExpr *e = o->expr; e; e = e->next) {
+		int64_t v[2];
+		const ElfVal *xv[2] = { &e->x, &e->y };
+		int ok = 1;
+		for (int k = 0; k < 2 && ok; k++) {
+			ElfSym *a = xv[k]->add ? elf_symp(o, xv[k]->add) : 0, *b = xv[k]->sub ? elf_symp(o, xv[k]->sub) : 0;
+			v[k] = xv[k]->c;
+			if (a) { if (a->flags & ESYM_ABS) v[k] += (int64_t)a->value; else if (insec(a) && b && insec(b) && symsec(o, a) == symsec(o, b)) v[k] += (int64_t)symoff(o, a); else ok = 0; }
+			if (b && ok) { if (b->flags & ESYM_ABS) v[k] -= (int64_t)b->value; else if (insec(b) && a) v[k] -= (int64_t)symoff(o, b); else ok = 0; }
+		}
+		if (!ok) { elf_error(o, "expected absolute expression"); continue; }
+		int64_t p = v[0], q = v[1], r = 0;
+		switch (e->op) {
+		case '*': r = (int64_t)((uint64_t)p * (uint64_t)q); break;
+		case '/': if (!q) { elf_error(o, "division by zero"); continue; } r = p / q; break;
+		case '%': if (!q) { elf_error(o, "division by zero"); continue; } r = p % q; break;
+		case 'L': r = (int64_t)((uint64_t)p << (q & 63)); break;
+		case 'R': r = (int64_t)((uint64_t)p >> (q & 63)); break;
+		case '&': r = p & q; break;
+		case '|': r = p | q; break;
+		case '^': r = p ^ q; break;
+		case '!': r = p | ~q; break;
+		default: elf_error(o, "bad operator in deferred expression"); continue;
+		}
+		elf_define_abs(o, e->sym, (uint64_t)r);
+	}
+}
+
+static size_t elf_finish_tail(ElfObj *o, Out *w)
+{
+	uint32_t ns = o->nsec;
 	if (o->has_err) return 0;
 	/* relocations are already grouped by section (sections processed in order) */
 	w->relbeg = rpush(&o->arena, sizeof(uint32_t) * (ns + 1), 8);

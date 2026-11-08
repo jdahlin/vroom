@@ -15,6 +15,7 @@
  * clang's argument pre-expansion, paste and whitespace rules.
  */
 #include <setjmp.h>
+#include <stdbool.h>
 #include <stdarg.h>
 
 #include "lex.h"
@@ -26,6 +27,7 @@ enum {
 enum {
 	PF_NOEXP = 16,		/* painted: never expand (C11 6.10.3.4p2) */
 	PF_NOPASTE = 32,	/* a ## that came from an argument */
+	PF_MACRO = 64,		/* from a macro expansion (diagnostics) */
 };
 
 typedef struct ptok {
@@ -51,6 +53,11 @@ typedef struct pp_opts {
 	int errfd;			/* diagnostics (0: stderr) */
 	int asm_mode;			/* assembler-with-cpp: unknown directives pass, # need not stringify */
 	int target;			/* PP_LINUX_AARCH64 or PP_DARWIN (column of the feature table) */
+	int diag_color;			/* diagnostics: 1 colors, -1 none, 0 when errfd is a terminal */
+	int diag_nocaret;		/* -fno-caret-diagnostics: no source lines */
+	const char *const *wargs;	/* -W..., -w options in command-line order */
+	int nwargs;
+	int error_limit;		/* -ferror-limit=: 0 default (20), -1 none */
 } pp_opts;
 
 enum { PP_LINUX_AARCH64, PP_DARWIN };
@@ -81,8 +88,46 @@ int pp_errors(const pp *p);
 int pp_in_system_header(const pp *p, uint32_t loc);
 /* presumed file name, line and column of a location; 0 if it has none */
 int pp_where(const pp *p, uint32_t loc, const char **name, uint32_t *namelen, uint32_t *line, uint32_t *col);
-/* a diagnostic at loc ("error", "warning", "fatal error": longjmp/exit) */
+/* a diagnostic at loc ("error", "warning", "note", "fatal error": longjmp/exit) */
 void pp_vdiag(pp *p, uint32_t loc, const char *what, const char *fmt, va_list ap);
+
+/*
+ * The same with clang's source snippet extras: ranges underlined with ~
+ * (locations [b, e)), and fix-it hints (replace [b, e) with s; b == e
+ * inserts) printed under the caret line.
+ */
+typedef struct pp_span { uint32_t b, e; } pp_span;
+typedef struct pp_fixit { uint32_t b, e; const char *s; } pp_fixit;
+typedef struct pp_dinfo {
+	const char *what;
+	uint32_t loc;
+	const pp_span *r;
+	int nr;
+	const pp_fixit *fx;
+	int nfx;
+	/* the diagnosed token when it came from a macro expansion (loc: the expansion's): its spelling */
+	const char *ms;
+	uint32_t mlen;
+} pp_dinfo;
+void pp_vdiagx(pp *p, const pp_dinfo *d, const char *fmt, va_list ap);
+__attribute__((format(printf, 3, 4)))
+void pp_diagx(pp *p, const pp_dinfo *d, const char *fmt, ...);
+/* a warning's state after the -W options: 0 off, 1 warning, 2 error; on: its default
+   (flag without "-W"; groups: the warning's groups, NULL-terminated, e.g. "all") */
+int pp_wstate(const pp *p, const char *flag, bool on, const char *const *groups);
+/* report a warning of flag (clang's " [-Wflag]" / " [-Werror,-Wflag]" suffix); false if off */
+__attribute__((format(printf, 6, 7)))
+bool pp_warnx(pp *p, const char *flag, bool on, const char *const *groups, pp_dinfo *d, const char *fmt, ...);
+/* -ferror-limit= as given (0: default, -1: none) */
+int pp_error_limit(const pp *p);
+/* "N errors generated." (clang's summary), if there were any */
+void pp_diag_summary(pp *p);
+/* warnings reported so far */
+int pp_warnings(const pp *p);
+/* the end of the token at loc (an identifier, number or punctuator; loc + 1 if unknown) */
+uint32_t pp_tok_end(const pp *p, uint32_t loc);
+/* the source text from loc b to loc e (one file), NULL if unknown */
+const char *pp_src(const pp *p, uint32_t b, uint32_t e, size_t *len);
 
 /*
  * Top-level regions (headers included from the main file, cached or being

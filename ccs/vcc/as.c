@@ -103,6 +103,7 @@ enum { C_D = 1, C_X = 2, C_A = 4, C_S = 8, C_I = 16 };
 static const uint8_t cclass[256] = {
 	['0' ... '9'] = C_D | C_X | C_I, ['a' ... 'f'] = C_A | C_X | C_I, ['A' ... 'F'] = C_A | C_X | C_I,
 	['g' ... 'z'] = C_A | C_I, ['G' ... 'Z'] = C_A | C_I, ['_'] = C_I, ['.'] = C_I, ['$'] = C_I,
+	[0x80 ... 0xff] = C_I,	/* UTF-8 in symbol names (LLVM's lexer takes any byte >= 0x80) */
 	[' '] = C_S, ['\t'] = C_S, ['\n'] = C_S, ['\v'] = C_S, ['\f'] = C_S, ['\r'] = C_S,
 };
 static inline int c_digit(int c) { return (unsigned)c - '0' < 10; }
@@ -435,7 +436,16 @@ static int apply(As *a, int op, Val *x, Val *y)
 		fold(a, x);
 		return 0;
 	}
-	if (!is_abs(a, x) || !is_abs(a, y)) return err(a, "expected absolute expression");
+	if (!is_abs(a, x) || !is_abs(a, y)) {
+		/* (label difference) op constant, e.g. (end - start) >> 5 with end not yet placed:
+		   a temporary symbol that gets its value once the layout is known */
+		int diff_x = is_abs(a, x) || (x->add && x->sub), diff_y = is_abs(a, y) || (y->add && y->sub);
+		if (!diff_x || !diff_y || !strchr("*/%LR&|^!", op)) return err(a, "expected absolute expression");
+		uint32_t t = tmpsym(a);
+		elf_expr_sym(a->o, t, op, *x, *y);
+		*x = (Val){ t, 0, 0 };
+		return 0;
+	}
 	int64_t p = x->c, q = y->c, r;
 	switch (op) {
 	case '*': r = (int64_t)((uint64_t)p * (uint64_t)q); break;
@@ -724,6 +734,83 @@ static int emit_value(As *a, int size, Val *v)
 	uint32_t t = size == 8 ? R_AARCH64_ABS64 : size == 4 ? R_AARCH64_ABS32 : size == 2 ? R_AARCH64_ABS16 : R_VCC_ABS8;
 	elf_fixup(o, a->cur, off, p, t, *v);
 	return 0;
+}
+
+static Sv first_word(const char *p, const char *e);
+static int ltorg(As *a);
+
+/* .octa: 16-byte integer literals (only literals: 128-bit expressions do not exist here) */
+static int d_octa(As *a, const char *p, const char *e)
+{
+	for (p = ws(p, e); p < e;) {
+		unsigned __int128 x = 0;
+		int neg = 0;
+		if (*p == '-') { neg = 1; p++; }
+		if (p + 1 < e && p[0] == '0' && (p[1] | 32) == 'x') {
+			const char *s = p += 2;
+			while (p < e && c_xdigit((unsigned char)*p)) { x = x * 16 + (unsigned)(c_digit((unsigned char)*p) ? *p - '0' : c_lower((unsigned char)*p) - 'a' + 10); p++; }
+			if (p == s) return err(a, "invalid hexadecimal number");
+		} else if (p < e && c_digit((unsigned char)*p)) {
+			while (p < e && c_digit((unsigned char)*p)) x = x * 10 + (unsigned)(*p++ - '0');
+		} else
+			return err(a, "unexpected token in '.octa' directive");
+		if (neg) x = -x;
+		elf_data(a->o, a->cur);
+		uint8_t *q = elf_grow(a->o, a->cur, 16);
+		for (int i = 0; i < 16; i++) q[i] = (uint8_t)(x >> 8 * i);
+		p = ws(p, e);
+		if (p >= e) break;
+		if (*p != ',') return err(a, "unexpected token in directive");
+		p = ws(p + 1, e);
+	}
+	return 0;
+}
+
+/* .reloc offset, R_AARCH64_<type>[, expr]: a relocation at a constant offset of the current section */
+static int d_reloc(As *a, const char *p, const char *e)
+{
+	static const struct { const char *n; uint32_t t; } types[] = {
+		{ "R_AARCH64_ABS64", R_AARCH64_ABS64 }, { "R_AARCH64_ABS32", R_AARCH64_ABS32 }, { "R_AARCH64_ABS16", R_AARCH64_ABS16 },
+		{ "R_AARCH64_PREL64", R_AARCH64_PREL64 }, { "R_AARCH64_PREL32", R_AARCH64_PREL32 }, { "R_AARCH64_PREL16", R_AARCH64_PREL16 },
+	};
+	int64_t off;
+	if (abs_expr(a, &p, e, &off)) return -1;
+	p = ws(p, e);
+	if (p >= e || *p != ',') return err(a, "expected comma");
+	Sv nm = first_word(p + 1, e);
+	uint32_t type = 0, size = 0;
+	for (size_t i = 0; i < sizeof types / sizeof types[0]; i++)
+		if (strlen(types[i].n) == nm.n && !memcmp(types[i].n, nm.s, nm.n)) type = types[i].t;
+	if (!type) return err(a, "unknown relocation name");
+	size = type == R_AARCH64_ABS64 || type == R_AARCH64_PREL64 ? 8 : type == R_AARCH64_ABS32 || type == R_AARCH64_PREL32 ? 4 : 2;
+	p = ws(nm.s + nm.n, e);
+	Val v = { 0, 0, 0 };
+	if (p < e && *p == ',') { p++; if (val_expr(a, &p, e, &v)) return -1; }
+	/* the frag and bytes at section offset off */
+	ElfObj *o = a->o;
+	uint32_t sec = elf_frag(o, a->cur)->sec;
+	uint64_t at = 0;
+	for (uint32_t f = sec; f; f = elf_frag(o, f)->next) {
+		ElfFrag *fr = elf_frag(o, f);
+		if ((uint64_t)off >= at && (uint64_t)off + size <= at + fr->size) {
+			uint64_t k = (uint64_t)off - at;
+			for (ElfChunk *ch = fr->head; ch; ch = ch->next) {
+				if (k + size <= ch->used) {
+					/* llvm-mc keeps the bytes and adds the relocation; the field is not patched */
+					uint8_t keep[8];
+					memcpy(keep, ch->data + k, size);
+					elf_fixup(o, f, (uint64_t)off - at, ch->data + k, type, v);
+					memcpy(ch->data + k, keep, size);
+					return 0;
+				}
+				if (k < ch->used) break;
+				k -= ch->used;
+			}
+			break;
+		}
+		at += fr->size;
+	}
+	return err(a, ".reloc offset is not inside the section's data");
 }
 
 static int d_data(As *a, const char *p, const char *e, int size)
@@ -1784,6 +1871,22 @@ static int flush_pools(As *a)
 	return 0;
 }
 
+/* .ltorg: the current section's literal pool, here */
+static int ltorg(As *a)
+{
+	uint32_t sec = elf_frag(a->o, a->cur)->sec, k = 0;
+	for (uint32_t j = 0; j < a->npool; j++) {
+		Pool *q = &a->pool[j];
+		if (q->sec != sec) { a->pool[k++] = *q; continue; }
+		elf_align(a->o, a->cur, q->size == 8 ? 3 : 2, 0, 0, 0);
+		elf_define(a->o, q->label, a->cur, elf_frag(a->o, a->cur)->size);
+		Val v = q->v;
+		if (emit_value(a, (int)q->size, &v)) return -1;
+	}
+	a->npool = k;
+	return 0;
+}
+
 int as_trace;	/* print each instruction statement and its encoding (testing) */
 
 static int instruction(As *a, const char *p, const char *e)
@@ -1800,7 +1903,23 @@ static int instruction(As *a, const char *p, const char *e)
 	int names = names_ops(mn, mlen);
 	A64Op ops[MAXOPS];
 	int nop = 0;
+	uint32_t w;
+	A64Fix fx; fx.type = 0;
 	p = ws(p, e);
+	/* SME ldr/str za[Wv, #imm], [Xn{, #imm, mul vl}] */
+	if ((!strcmp(mn, "ldr") || !strcmp(mn, "str")) && e - p > 3 && !strncasecmp(p, "za[", 3)) {
+		char buf[96], tail[16] = "";
+		unsigned v, i1, n, i2 = 0;
+		size_t l = (size_t)(e - p) < sizeof buf - 1 ? (size_t)(e - p) : sizeof buf - 1;
+		memcpy(buf, p, l); buf[l] = 0;
+		for (char *q = buf; *q; q++) *q = (char)c_lower((unsigned char)*q);
+		int k = sscanf(buf, "za[w%u , #%u ] , [x%u , #%u , mul vl%15s", &v, &i1, &n, &i2, tail);
+		if (k < 3 && sscanf(buf, "za[w%u , %u ] , [x%u", &v, &i1, &n) == 3) k = 3;
+		if (k < 3 || v < 12 || v > 15 || i1 > 15 || n > 30 || (k >= 4 && i2 != i1))
+			return err(a, "invalid za operand");
+		w = (mn[0] == 'l' ? 0xe1000000u : 0xe1200000u) | (v - 12) << 13 | n << 5 | i1;
+		goto put;
+	}
 	while (p < e) {
 		if (nop >= MAXOPS) return err(a, "too many operands");
 		A64Op *op = &ops[nop++];
@@ -1907,10 +2026,15 @@ static int instruction(As *a, const char *p, const char *e)
 		ops[1].v = (Val){ lab, 0, 0 }; ops[1].hassym = 1; ops[1].hash = 0; ops[1].imm = 0;
 	}
 enc:;
-	uint32_t w;
-	A64Fix fx; fx.type = 0;
 	const char *msg = 0;
-	if (a64_asm(mn, mlen, ops, nop, &w, &fx, &msg)) return err(a, "%s: %s", mn, msg ? msg : "invalid instruction");
+	if (a64_asm(mn, mlen, ops, nop, &w, &fx, &msg)) {
+		if (as_trace != 2)
+			return err(a, "%s: %s", mn, msg ? msg : "invalid instruction");
+		/* --trace-all: report and go on (finding every unsupported form at once) */
+		printf("FAIL %s\t%.*s\n", msg ? msg : "invalid", (int)(e - p0), p0);
+		w = 0, fx.type = 0;
+	}
+put:;
 	ElfObj *o = a->o;
 	elf_code(o, a->cur);
 	uint64_t off = elf_frag(o, a->cur)->size;
@@ -2008,12 +2132,14 @@ static int directive(As *a, Sv w, const char *p, const char *e)
 	case 'l':
 		if (IS("long")) return d_data(a, p, e, 4);
 		if (IS("local")) return d_symattr(a, p, e, 'l');
+		if (IS("ltorg") || IS("pool")) return ltorg(a);
 		break;
 	case 'm':
 		if (IS("macro")) return d_macro(a, p, e);
 		break;
 	case 'o':
 		if (IS("org")) return d_org(a, p, e);
+		if (IS("octa")) return d_octa(a, p, e);
 		break;
 	case 'p':
 		if (IS("pushsection")) return d_section(a, p, e, 1);
@@ -2034,6 +2160,7 @@ static int directive(As *a, Sv w, const char *p, const char *e)
 		break;
 	case 'r':
 		if (IS("rept") || IS("rep")) return d_rept(a, p, e);
+		if (IS("reloc")) return d_reloc(a, p, e);
 		if (IS("rodata")) { switch_to(a, std_section(a, ".rodata")); return 0; }
 		break;
 	case 's':
@@ -2121,6 +2248,7 @@ static int statement(As *a, const char *p, const char *e)
 		break;
 	}
 	if (!w.n) return err(a, "unexpected token at start of statement");
+	if (cond_dir(a, w, w.s + w.n, e, &rc)) return rc;	/* "2: .if ..." */
 	const char *q = ws(w.s + w.n, e);
 	if (q < e && *q == '=' && !(q + 1 < e && q[1] == '=')) return assign(a, w, q + 1, e);
 	if (q + 4 <= e && !memcmp(q, ".req", 4) && (q + 4 == e || !isidc((unsigned char)q[4]))) {
