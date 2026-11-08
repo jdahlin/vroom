@@ -4635,19 +4635,36 @@ void pp_set_fatal(pp *p, jmp_buf *jb)
 
 size_t pp_files(const pp *p, const char **names, size_t max)
 {
-	size_t n = 0;
+	/* first occurrences in order; duplicates found through a hash set (was O(n^2) strcmp) */
+	size_t lim = max < p->nfe ? max : p->nfe, n = 0;
+	uint32_t HB = 4;
+
+	while ((1u << HB) < 2 * lim)
+		HB++;
+	uint32_t *set = calloc(1u << HB, sizeof(uint32_t));	/* index + 1 into names */
+
 
 	for (uint32_t i = 0; i < p->nfe; i++) {
 		const char *s = p->fe[i].spath;
+		uint64_t h = 1469598103934665603ull;
+		uint32_t k;
 		bool dup = false;
 
 		if (p->fe[i].f == &p->builtin)
 			continue;
-		for (size_t j = 0; j < n && !dup; j++)
-			dup = !strcmp(names[j], s);
-		if (!dup && n < max)
+		for (const unsigned char *q = (const unsigned char *)s; *q; q++)
+			h = (h ^ *q) * 1099511628211ull;
+		for (k = (uint32_t)(h ^ h >> 29) & ((1u << HB) - 1); set[k]; k = (k + 1) & ((1u << HB) - 1))
+			if (!strcmp(names[set[k] - 1], s)) {
+				dup = true;
+				break;
+			}
+		if (!dup && n < max) {
 			names[n++] = s;
+			set[k] = (uint32_t)n;
+		}
 	}
+	free(set);
 	return n;
 }
 
