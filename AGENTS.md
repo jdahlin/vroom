@@ -62,6 +62,7 @@ bench/vcc-stress.py [--vccd]        # pathological inputs fail cleanly, vccd sur
 bench/vcc-abi.py                    # cross-compiler calls, clang/vcc x caller/callee, qemu (ccs/vcc/tests/abi, ~3 s)
 bench/vcc-abi.py --host             # the same for the Apple arm64 ABI, run natively
 bench/vcc-bflayout.py               # generated bit-field records, layouts checked by clang, Linux + Apple (~1 s)
+bench/vcc-ldconst.py                # generated long double literals and folds, bits vs clang (~2 s)
 bench/vccd-test.py                  # vccd as a service: socket, bad requests, cache invalidation (~11 s)
 bench/vbench.py gate                # performance gate: instructions vs the merge-base, budget 1 % (~1 min)
 bench/vas-enc.py $PWD/ccs/vcc/tests/vas   # vas encodings vs llvm-mc

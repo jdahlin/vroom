@@ -105,6 +105,21 @@ static bool is_flt_lit(cc *c, uint32_t n)
 	return N(n)->op == N_FNUM;
 }
 
+/* binary128 folding: a value is exact at that precision (ld) or a double or an integer */
+static void set_q(cval *v, u128 q)
+{
+	v->kind = CV_FLT;
+	v->ld = true;
+	v->q = q;
+	v->f = q_to_d(q);
+}
+static u128 get_q(const cval *v, bool sgn)
+{
+	return v->kind == CV_INT ? q_of_i(v->i, sgn) : v->ld ? v->q : q_of_d(v->f);
+}
+/* nonzero, as a condition */
+static bool cv_nz(const cval *v) { return v->ld ? q_nz(v->q) : v->f != 0; }
+
 VPRIV int clz128(u128 x, unsigned bits)
 {
 	int n = 0;
@@ -129,6 +144,8 @@ VPRIV bool eval(cc *c, uint32_t n, cval *v)
 	case N_FNUM:
 		v->kind = CV_FLT;
 		v->f = c->fpool[x->a];
+		if (is_q(c, x->ty))
+			v->q = fnum_q(c, x->a), v->ld = true;
 		v->ice = true;	/* only as the operand of a cast; arithmetic clears it */
 		return true;
 	case N_VAR: {
@@ -178,7 +195,7 @@ VPRIV bool eval(cc *c, uint32_t n, cval *v)
 			if (a.kind == CV_INT)
 				v->i = a.i != 0;
 			else if (a.kind == CV_FLT)
-				v->i = a.f != 0, v->ice = is_flt_lit(c, x->a);
+				v->i = cv_nz(&a), v->ice = is_flt_lit(c, x->a);
 			else
 				v->i = 1, v->ice = false;	/* address of an object is never null */
 			v->sym = v->str = v->label = 0;
@@ -187,24 +204,35 @@ VPRIV bool eval(cc *c, uint32_t n, cval *v)
 			if (a.kind != CV_INT)
 				return false;
 			v->kind = CV_FLT;
+			v->ice = false;
+			if (is_q(c, to)) {
+				set_q(v, q_of_i(a.i, is_signed(c, N(x->a)->ty)));
+				return true;
+			}
 			v->f = is_signed(c, N(x->a)->ty) ? (double)a.i : (double)(u128)a.i;
 			if (KIND(c, to) == TY_FLOAT)
-				v->f = (float)v->f;
-			v->ice = false;
+				v->f = is_signed(c, N(x->a)->ty) ? (double)(float)a.i : (double)(float)(u128)a.i;	/* one rounding */
 			return true;
 		case CK_F2I:
 			if (a.kind != CV_FLT)
 				return false;
 			v->kind = CV_INT;
-			v->i = trunc_to(c, is_signed(c, to) ? (i128)a.f : (i128)(u128)a.f, to);
+			v->i = trunc_to(c, q_to_int(get_q(&a, true), (int)ty_size(c, to) * 8, is_signed(c, to)), to);
+			v->ld = false;
 			v->ice = is_flt_lit(c, x->a);
 			return true;
 		case CK_F2F:
 			if (a.kind != CV_FLT)
 				return false;
-			if (KIND(c, to) == TY_FLOAT)
-				v->f = (float)a.f;
 			v->ice = false;
+			if (is_q(c, to))
+				set_q(v, get_q(&a, true));
+			else if (a.ld && KIND(c, to) == TY_FLOAT)
+				v->f = q_to_f(a.q), v->ld = false;	/* one rounding */
+			else if (KIND(c, to) == TY_FLOAT)
+				v->f = (float)a.f;
+			else
+				v->ld = false;	/* f already holds the nearest double */
 			return true;
 		case CK_P2I:
 			v->ice = false;
@@ -230,9 +258,9 @@ VPRIV bool eval(cc *c, uint32_t n, cval *v)
 		if (a.kind == CV_FLT) {
 			v->ice = false;
 			if (x->aux == T_MINUS)
-				v->f = -a.f;
+				v->f = -a.f, v->q = a.q ^ Q_SIGN;
 			else if (x->aux == T_EXCLAIM)
-				v->kind = CV_INT, v->i = a.f == 0;
+				v->kind = CV_INT, v->i = !cv_nz(&a), v->ld = false;
 			return true;
 		}
 		if (a.kind == CV_ADDR) {
@@ -357,6 +385,30 @@ VPRIV bool eval(cc *c, uint32_t n, cval *v)
 				return false;
 			}
 		}
+		if ((a.kind == CV_FLT || b.kind == CV_FLT) &&
+		    (a.ld || b.ld || is_q(c, x->ty) || is_q(c, N(x->a)->ty) || is_q(c, N(x->b)->ty))) {
+			u128 l = get_q(&a, is_signed(c, N(x->a)->ty)), r = get_q(&b, is_signed(c, N(x->b)->ty));
+			int k = q_cmp(l, r);
+
+			v->ice = false;
+			v->ld = false;
+			switch (op) {
+			case T_PLUS: set_q(v, q_add(l, r)); break;
+			case T_MINUS: set_q(v, q_sub(l, r)); break;
+			case T_STAR: set_q(v, q_mul(l, r)); break;
+			case T_SLASH: set_q(v, q_div(l, r)); break;
+			case T_LESS: v->i = k == -1; break;
+			case T_LESSEQ: v->i = k == -1 || k == 0; break;
+			case T_GREATER: v->i = k == 1; break;
+			case T_GREATEREQ: v->i = k == 1 || k == 0; break;
+			case T_EQUALEQUAL: v->i = k == 0; break;
+			case T_EXCLAIMEQ: v->i = k != 0; break;
+			default: return false;
+			}
+			if (v->kind != CV_FLT)
+				v->kind = CV_INT;
+			return true;
+		}
 		if (a.kind == CV_FLT || b.kind == CV_FLT) {
 			double l = a.kind == CV_FLT ? a.f : (double)a.i, r = b.kind == CV_FLT ? b.f : (double)b.i;
 
@@ -434,7 +486,7 @@ VPRIV bool eval(cc *c, uint32_t n, cval *v)
 
 		if (!eval(c, x->a, &a))
 			return false;
-		t = a.kind == CV_INT ? a.i != 0 : a.kind == CV_FLT ? a.f != 0 : true;
+		t = a.kind == CV_INT ? a.i != 0 : a.kind == CV_FLT ? cv_nz(&a) : true;
 		v->kind = CV_INT;
 		if (a.kind == CV_ADDR)
 			a.ice = false;
@@ -445,7 +497,7 @@ VPRIV bool eval(cc *c, uint32_t n, cval *v)
 		}
 		if (!eval(c, x->b, &b))
 			return false;
-		v->i = b.kind == CV_INT ? b.i != 0 : b.kind == CV_FLT ? b.f != 0 : 1;
+		v->i = b.kind == CV_INT ? b.i != 0 : b.kind == CV_FLT ? cv_nz(&b) : 1;
 		v->ice = a.ice && b.ice && b.kind != CV_ADDR;
 		return true;
 	}
@@ -454,7 +506,7 @@ VPRIV bool eval(cc *c, uint32_t n, cval *v)
 
 		if (!eval(c, x->a, &a))
 			return false;
-		t = a.kind == CV_INT ? a.i != 0 : a.kind == CV_FLT ? a.f != 0 : true;
+		t = a.kind == CV_INT ? a.i != 0 : a.kind == CV_FLT ? cv_nz(&a) : true;
 		ice = a.ice && a.kind != CV_ADDR;
 		if (!x->b) {	/* a ?: c */
 			if (t) {

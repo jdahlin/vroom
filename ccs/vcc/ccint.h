@@ -125,7 +125,7 @@ struct cc {
 	uint32_t nlist;
 	i128 *ipool;
 	uint32_t nipool;
-	double *fpool;
+	double *fpool;		/* a 16-byte long double: its double, then its binary128 bits in the next two */
 	uint32_t nfpool;
 	cstr *strs;
 	uint32_t nstr;
@@ -229,7 +229,9 @@ typedef struct cval {
 	int kind;
 	bool ice;		/* integer constant expression (C11 6.6p6, clang's rules) */
 	i128 i;			/* CV_INT; CV_ADDR: byte offset */
-	double f;
+	double f;		/* CV_FLT; with ld, the nearest double of q */
+	u128 q;			/* CV_FLT with ld: the binary128 value (16-byte long double) */
+	bool ld;
 	uint32_t sym, str;	/* CV_ADDR base: sym or string literal */
 	uint32_t label;		/* CV_ADDR base: &&label */
 	uint32_t sublabel;	/* CV_ADDR: minus &&sublabel (GNU label difference: a constant once laid out) */

@@ -14,7 +14,7 @@ static val const_global(ecx *e, uint32_t s)
 		return vconst(em_trunc_to(c, cv.i, y->ty));
 	if (y->kind == S_VAR && (QQ(y->ty) & (Q_CONST | Q_VOLATILE)) == Q_CONST && is_flt(c, y->ty) &&
 	    tsize(c, y->ty) != 2 && y->body && N(y->body)->op != N_INIT && cc_eval(c, y->body, &cv) && cv.kind == CV_FLT)
-		return f_const_t(e, y->ty, cv.f);
+		return f_const_cv(e, y->ty, &cv);
 	return vnone();
 }
 
@@ -866,6 +866,12 @@ VPRIV val gen(ecx *e, uint32_t n)
 	case N_NUM:
 		return vconst(c->ipool[x->a]);
 	case N_FNUM:
+		if (is_ld(c, x->ty)) {
+			u128 q;
+
+			memcpy(&q, &c->fpool[x->a + 1], 16);	/* its binary128 bits, after its double */
+			return vconst((i128)q);
+		}
 		return f_const_t(e, x->ty, c->fpool[x->a]);
 	case N_STR:
 		note_ref(e, REF(RK_STR, x->a));

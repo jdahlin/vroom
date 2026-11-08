@@ -191,7 +191,9 @@ Existing gates that every change must keep green: `vcc-diff.py cmp`
   *Validate:* layout `_Static_assert` table for `--target=arm64-apple-darwin`
   (extend `vcc-sema.py layout` with a Darwin target over a generated
   bitfield corpus, as for Linux); T2 `bitfield-layout` on Darwin.
-- [ ] **`long double` constants folded with strtod on Linux** [P].
+- [x] **`long double` constants folded with strtod on Linux** [P].  (done:
+  `f128.h`, `bench/vcc-ldconst.py`; also float literals rounded once, and
+  out-of-range float→int folds saturate as clang.)
   `number_s` `cc.c:1296`.  Parse to binary128 (a correctly rounded
   decimal→binary128 converter; the tf soft-float in `tests/rt` can be the
   check), fold in binary128.

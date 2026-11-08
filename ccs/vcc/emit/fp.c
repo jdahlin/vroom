@@ -126,6 +126,14 @@ VPRIV val f_const_t(ecx *e, qty t, double x)
 	return f_const(fpk(e, t), x);
 }
 
+/* a folded floating constant of type t: binary128 values keep their bits */
+VPRIV val f_const_cv(ecx *e, qty t, const cval *cv)
+{
+	if (is_ld(e->c, t))
+		return vconst(cv->ld ? (i128)cv->q : ld_of_d(cv->f));
+	return f_const_t(e, t, cv->f);
+}
+
 static val ld_call(ecx *e, int fn, val *v, qty *t, int n, qty rty)
 {
 	return call_named(e, FIXED(fn), v, t, n, rty, false);

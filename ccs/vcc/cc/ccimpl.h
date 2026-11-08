@@ -33,6 +33,7 @@
 #include "../emit.h"
 #include "../ccsnap.h"
 #include "../arena.h"
+#include "../f128.h"
 
 /* functions one file defines and another calls: static when the directory is
    compiled as one TU (VCC_UNITY, the default build), so they stay internal */
@@ -227,6 +228,7 @@ VPRIV void vpush(cc *c, vec *v, uint32_t x);
 VPRIV uint32_t vfreeze(cc *c, const vec *v);
 VPRIV uint32_t mk_int(cc *c, i128 v, qty ty, uint32_t loc);
 VPRIV uint32_t mk_flt(cc *c, double v, qty ty, uint32_t loc);
+VPRIV uint32_t mk_fltq(cc *c, u128 q, qty ty, uint32_t loc);
 /* lit.c */
 VPRIV uint32_t number(cc *c, const ptok *t);
 VPRIV bool is_strtok(int k);
@@ -357,6 +359,11 @@ VPRIV void layout_checks(cc *c);
 
 static inline bool is_int_kind(int k) { return k >= TY_BOOL && k <= TY_UINT128; }
 static inline bool is_flt_kind(int k) { return k >= TY_FLOAT16 && k <= TY_LDOUBLE; }
+/* long double as binary128 (aarch64 Linux; Apple's is double) */
+static inline bool is_q(cc *c, qty t) { return KIND(c, t) == TY_LDOUBLE && c->ty[QI(t)].size == 16; }
+/* the binary128 bits of a 16-byte long double constant: the two pool slots after its double */
+static inline void fpool_q(cc *c, u128 q) { memcpy(&c->fpool[c->nfpool], &q, 16); c->nfpool += 2; }
+static inline u128 fnum_q(const cc *c, uint32_t a) { u128 q; memcpy(&q, &c->fpool[a + 1], 16); return q; }
 
 static inline int kwof(const ptok *t)
 {

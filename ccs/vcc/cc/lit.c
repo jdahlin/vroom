@@ -74,11 +74,11 @@ static uint32_t number_s(cc *c, const ptok *t, const char *s, size_t n)
 			ty = prim(TY_LDOUBLE);
 		if (k >= sizeof(buf))
 			k = sizeof(buf) - 1;
+		if (is_q(c, ty))
+			return mk_fltq(c, q_parse(s, k), ty, t->loc);
 		memcpy(buf, s, k);
 		buf[k] = 0;
-		d = strtod(buf, NULL);
-		if (KIND(c, ty) == TY_FLOAT)
-			d = (float)d;
+		d = KIND(c, ty) == TY_FLOAT ? (double)strtof(buf, NULL) : strtod(buf, NULL);	/* one rounding */
 		return mk_flt(c, d, ty, t->loc);
 	}
 	if (n > 1 && s[0] == '0' && (s[1] == 'x' || s[1] == 'X'))

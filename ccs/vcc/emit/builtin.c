@@ -912,7 +912,7 @@ runtime:
 		if (cc_eval(c, n, &cv) && cv.kind == CV_INT)
 			return vconst(cv.i);
 		if (cc_eval(c, n, &cv) && cv.kind == CV_FLT && is_flt(c, x->ty))
-			return f_const_t(e, x->ty, cv.f);
+			return f_const_cv(e, x->ty, &cv);
 		efatal(e, x->loc, "unsupported builtin (%d)", x->aux);
 	}
 	}

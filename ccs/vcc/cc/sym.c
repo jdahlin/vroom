@@ -262,5 +262,18 @@ VPRIV uint32_t mk_flt(cc *c, double v, qty ty, uint32_t loc)
 
 	c->fpool[c->nfpool] = v;
 	c->nodes[n].a = c->nfpool++;
+	if (is_q(c, ty))
+		fpool_q(c, q_of_d(v));
+	return n;
+}
+
+/* a 16-byte long double constant from its bits */
+VPRIV uint32_t mk_fltq(cc *c, u128 q, qty ty, uint32_t loc)
+{
+	uint32_t n = mk(c, N_FNUM, ty, loc);
+
+	c->fpool[c->nfpool] = q_to_d(q);
+	c->nodes[n].a = c->nfpool++;
+	fpool_q(c, q);
 	return n;
 }

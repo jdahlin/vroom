@@ -616,6 +616,7 @@ static inline uint32_t q_out_hi(int r, int vr);
 VPRIV void vr_store(ecx *e, int sz, int vr, int base, int32_t off);
 VPRIV void vr_load(ecx *e, int sz, int vr, int base, int32_t off);
 VPRIV i128 ld_of_d(double x);
+VPRIV val f_const_cv(ecx *e, qty t, const cval *cv);
 VPRIV val f_const_t(ecx *e, qty t, double x);
 VPRIV val ld_compare(ecx *e, int op, qty t, val a, val b);
 VPRIV val f_arith(ecx *e, int op, qty ty, val a, val b);
