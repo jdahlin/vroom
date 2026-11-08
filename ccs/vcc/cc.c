@@ -210,9 +210,22 @@ static uint32_t ty_new(cc *c, int kind)
 
 static qty ty_ptr(cc *c, qty base)
 {
-	ctype t = { .kind = TY_PTR, .size = 8, .align = 8, .base = base };
+	uint32_t i = c->ptrc[base];
 
-	return QT(ty_intern(c, &t), 0);
+	/* the cache may be stale (a restored snapshot): the entry must still be the pointer */
+	if (likely(i && i < c->nty)) {
+		const ctype *p = &c->ty[i];
+
+		if (p->kind == TY_PTR && !p->flags && p->base == base && p->align == 8)
+			return QT(i, 0);
+	}
+	{
+		ctype t = { .kind = TY_PTR, .size = 8, .align = 8, .base = base };
+
+		i = ty_intern(c, &t);
+		c->ptrc[base] = i;
+		return QT(i, 0);
+	}
 }
 
 static qty ty_array(cc *c, qty elem, uint64_t n, int flags)
@@ -308,9 +321,15 @@ static qty ty_func(cc *c, qty ret, const qty *par, uint32_t n, int flags)
 		{
 			const ctype *x = &c->ty[e];
 
-			if (x->base == ret && x->n == n && x->flags == flags &&
-			    !memcmp(&c->params[x->aux], par, n * sizeof(qty)))
-				return QT(e, 0);
+			if (x->base == ret && x->n == n && x->flags == flags) {
+				const qty *xp = &c->params[x->aux];	/* (short lists: no memcmp call) */
+				uint32_t k = 0;
+
+				while (k < n && xp[k] == par[k])
+					k++;
+				if (k == n)
+					return QT(e, 0);
+			}
 		}
 	}
 }
@@ -6629,6 +6648,7 @@ static void cc_init(cc *c, pp *p, const cc_opts *o)
 	c->p = p;
 	c->o = o;
 	c->ty = reserve((size_t)1 << 30);
+	c->ptrc = reserve((size_t)1 << 30);
 	c->params = reserve((size_t)1 << 28);
 	c->tags = reserve((size_t)1 << 28);
 	c->syms = reserve((size_t)1 << 30);
@@ -6724,6 +6744,7 @@ static void cc_init(cc *c, pp *p, const cc_opts *o)
 static void cc_free(cc *c)
 {
 	munmap(c->ty, (size_t)1 << 30);
+	munmap(c->ptrc, (size_t)1 << 30);
 	munmap(c->params, (size_t)1 << 28);
 	munmap(c->tags, (size_t)1 << 28);
 	munmap(c->syms, (size_t)1 << 30);

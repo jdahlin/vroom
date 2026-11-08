@@ -83,6 +83,7 @@ struct cc {
 	qty *params;
 	uint32_t nparams;
 	uint32_t *fnhash, fnhcap, nfn;
+	uint32_t *ptrc;		/* qty -> type index of a pointer to it (a cache, checked on use) */
 
 	tag *tags;
 	uint32_t ntag;
