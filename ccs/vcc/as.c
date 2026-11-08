@@ -56,7 +56,8 @@ typedef struct { uint8_t kind, met, ignore; } Cond;	/* kind: 1 if, 2 elseif, 3 e
 
 typedef struct { uint32_t num, cur, fwd; } NumLab;
 
-typedef struct { Sv name; Sv reg; } Alias;
+typedef struct { Sv name; Sv reg; uint32_t next; } Alias;	/* next: older entry in the bucket, index + 1 */
+#define ALH 64
 
 typedef struct { uint32_t sym; ElfVal v; } Var;	/* .set with a non-absolute value */
 
@@ -75,6 +76,7 @@ struct As {
 	Macro **mtab; uint32_t mmask, mcount;
 	NumLab *nl; uint32_t nlmask, nlcount;
 	Alias *al; uint32_t nal, alcap;
+	uint32_t alh[ALH];	/* .req buckets: newest entry, index + 1 */
 	Var *vars; uint32_t vmask, vcount;
 	void *pool_dummy; struct PoolS *pool; uint32_t npool, poolcap;
 	uint32_t ninst;		/* \@ */
@@ -1647,11 +1649,31 @@ static int cond_dir(As *a, Sv w, const char *p, const char *e, int *rc)
 
 /* ---------------------------------------------------------------- instructions */
 
+/* .req names are case-insensitive; buckets chain entries newest first, so
+ * the first match is the newest, as a scan from the end of a->al */
+static uint32_t al_hash(const char *s, size_t n)
+{
+	uint32_t h = (uint32_t)n * 0x9e3779b1u;
+	for (size_t i = 0; i < n; i++) h = (h ^ (uint32_t)c_lower((unsigned char)s[i])) * 16777619u;
+	return (h ^ h >> 16) & (ALH - 1);
+}
+
+static void al_rehash(As *a)
+{
+	memset(a->alh, 0, sizeof a->alh);
+	for (uint32_t i = 0; i < a->nal; i++) {
+		uint32_t h = al_hash(a->al[i].name.s, a->al[i].name.n);
+		a->al[i].next = a->alh[h]; a->alh[h] = i + 1;
+	}
+}
+
 static int reg_alias(As *a, const char *s, size_t n, Sv *out)
 {
-	for (uint32_t i = a->nal; i-- > 0;)
-		if (a->al[i].name.n == n && c_lower((unsigned char)a->al[i].name.s[0]) == c_lower((unsigned char)s[0]) &&
-		    !strncasecmp(a->al[i].name.s, s, n)) { *out = a->al[i].reg; return 1; }
+	if (!a->nal) return 0;
+	for (uint32_t i = a->alh[al_hash(s, n)]; i; i = a->al[i - 1].next) {
+		const Alias *x = &a->al[i - 1];
+		if (x->name.n == n && !strncasecmp(x->name.s, s, n)) { *out = x->reg; return 1; }
+	}
 	return 0;
 }
 
@@ -2237,6 +2259,7 @@ static int directive(As *a, Sv w, const char *p, const char *e)
 			for (uint32_t i = a->nal; i-- > 0;)
 				if (a->al[i].name.n == nm.n && !strncasecmp(a->al[i].name.s, nm.s, nm.n)) {
 					a->al[i] = a->al[--a->nal];
+					al_rehash(a);
 					return 0;
 				}
 			return 0;
@@ -2311,6 +2334,8 @@ static int statement(As *a, const char *p, const char *e)
 		}
 		a->al[a->nal].name = svdup(a, w.s, w.n);
 		a->al[a->nal].reg = svdup(a, reg.s, reg.n);
+		uint32_t h = al_hash(w.s, w.n);
+		a->al[a->nal].next = a->alh[h]; a->alh[h] = a->nal + 1;
 		a->nal++;
 		return 0;
 	}
@@ -2353,6 +2378,7 @@ void as_begin(As *a, ElfObj *o, const char *name)
 {
 	a->o = o; a->nfr = 0; a->ncs = 0; a->nss = 0; a->err = 0; a->msg[0] = 0;
 	a->xs.used = 0; a->defs.used = 0; a->ninst = 0; a->nal = 0; a->alcap = 0; a->al = 0;
+	memset(a->alh, 0, sizeof a->alh);
 	a->fname = name;
 	a->mmask = 255; a->mcount = 0;
 	a->mtab = rget(&a->defs, sizeof(Macro *) * (a->mmask + 1));
