@@ -146,7 +146,7 @@ static void classify(const uint8_t *s, size_t from, size_t to, uint64_t *m[M_COU
 	const uint8x16_t mid = vdupq_n_u8(0x1f), mdg = vdupq_n_u8(0x04);
 	const uint8x16_t mws = vdupq_n_u8(0xe0);
 	const uint8x16_t k64 = vdupq_n_u8(64);
-	const uint8x16_t b1 = vdupq_n_u8(1), b16 = vdupq_n_u8(16);
+	const uint8x16_t b16 = vdupq_n_u8(16);
 	const uint8x16_t pairb = vdupq_n_u8(0x0e);
 
 	for (size_t b = from; b < to; b++) {
@@ -188,7 +188,8 @@ static void classify(const uint8_t *s, size_t from, size_t to, uint64_t *m[M_COU
 		m[j][b] = mm4(r[0], r[1], r[2], r[3]);				\
 	} while (0)
 		MASK(M_P, vtstq_u8(t[k], b16));
-		MASK(M_PAIR, vorrq_u8(vtstq_u8(tg[k], pairb), vandq_u8(vtstq_u8(t[k], b1), vceqq_u8(v.val[k], vn[k]))));
+		/* bit 7: a pair by the tables, or a doubling character doubled (ttab bit 0 shifted up) */
+		MASK(M_PAIR, vorrq_u8(vtstq_u8(tg[k], pairb), vshlq_n_u8(vandq_u8(t[k], vceqq_u8(v.val[k], vn[k])), 7)));
 		/* bit 7: handler, non-ASCII, comment or digraph */
 		MASK(M_X, vorrq_u8(vorrq_u8(t[k], v.val[k]), vshlq_n_u8(tg[k], 1)));
 		MASK(M_ID, vtstq_u8(c[k], mid));

@@ -68,6 +68,8 @@ void vintern_init(void);
 uint32_t vintern_hash(const char *s, size_t len);
 /* s must be immortal and readable to s[len + 7] */
 uint32_t vintern(const char *s, size_t len, uint32_t hash);
+/* vintern(s, len, vintern_hash(s, len)) in one call */
+uint32_t vintern_long(const char *s, size_t len);
 /* the id of s if already interned, else 0 (s readable to s[16]) */
 uint32_t vintern_find(const char *s, size_t len, uint32_t hash);
 /* copies s unless interned (for spellings that are not immortal; s readable to s[16]) */
@@ -87,7 +89,7 @@ uint32_t vintern_count(void);
 
 #define VIC_BITS 11
 typedef struct vintern_cache {
-	struct { uint64_t w0, w1; uint32_t hash, id; uint64_t _pad; } e[1u << VIC_BITS];
+	struct { uint64_t w0, w1; uint32_t _hash, id; uint64_t _pad; } e[1u << VIC_BITS];
 } vintern_cache;
 
 #define unlikely_vi(x) __builtin_expect(!!(x), 0)
@@ -127,7 +129,7 @@ static inline __attribute__((always_inline)) uint32_t vintern_fast(vintern_cache
 
 	if (unlikely_vi(len > 16)) {
 		VI_STAT(2);
-		return vintern(s, len, vintern_hash(s, len));
+		return vintern_long(s, len);
 	}
 	vintern_words16(s, len, &w0, &w1);
 	h = __crc32cd(__crc32cd((uint32_t)len, w0), w1) * 0x9E3779B1u;
@@ -140,7 +142,6 @@ static inline __attribute__((always_inline)) uint32_t vintern_fast(vintern_cache
 			return e->id;
 		VI_STAT(1);
 		e->id = vintern(s, len, h);
-		e->hash = h;
 		e->w0 = w0;
 		e->w1 = w1;
 		return e->id;

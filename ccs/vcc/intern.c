@@ -153,6 +153,11 @@ uint32_t vintern(const char *s, size_t len, uint32_t hash)
 	}
 }
 
+uint32_t vintern_long(const char *s, size_t len)
+{
+	return vintern(s, len, vintern_hash(s, len));
+}
+
 /* the id of s if interned, else 0 (no insert) */
 uint32_t vintern_find(const char *s, size_t len, uint32_t hash)
 {
