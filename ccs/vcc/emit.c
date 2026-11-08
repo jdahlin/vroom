@@ -382,7 +382,9 @@ typedef struct chunk {
 } chunk;
 
 /* analysis bits (prepass, read-only while emitting) */
-enum { SA_WRITTEN = 1, SA_CLEANUP_FN = 2, SA_MUSTFOLD = 4, SA_CWRITE = 8, SA_CMULTI = 16, SA_USED = 32, SA_NOINL = 64 };
+enum { FF_SEEN = 1, FF_NONNEG = 2, FF_ZERO = 4, FF_BAD = 8 };
+enum { SA_WRITTEN = 1, SA_CLEANUP_FN = 2, SA_MUSTFOLD = 4, SA_CWRITE = 8, SA_CMULTI = 16, SA_USED = 32, SA_NOINL = 64,
+       SA_AESC = 128 /* a local array used other than as a[CONST] */ };
 /* USED: a local or param read; NOINL: a static local holds a label address (one copy of the code only) */
 /* CWRITE: only ever assigned integer constants (all cwval unless CMULTI) */	/* per sym; MUSTFOLD: a function that calls an error() function */
 enum { NA_LABEL = 1 };				/* per node: statement contains a label or case */
@@ -397,6 +399,7 @@ typedef struct emitter {
 	uint16_t *fnsize;		/* per function: AST nodes (prepass) */
 	i128 *cwval;		/* per SA_CWRITE variable: the one constant it is assigned */	/* per function: prepass state (0 no, 1 running, 2 done) */
 	uint8_t *sflags;		/* SA_* per sym */
+	uint8_t *ffacts;		/* FF_* per floating local: what every write stores */
 	uint8_t *nflags;		/* NA_* per node */
 	uint8_t *lref;			/* per label: LR_* */
 	uint16_t *lcdepth;		/* per label: cleanup depth at its definition */
@@ -508,6 +511,9 @@ typedef struct ecx {
 	uint8_t nkv;
 	uint16_t kvalid;
 	int64_t kval[NKV];
+	/* elements a[CONST] of local arrays that do not escape (no SA_AESC), tracked like those locals */
+	uint8_t nael;
+	struct { uint32_t s; uint32_t idx; uint8_t kv; } ael[NKV];
 	uint32_t *lkvi;		/* per local label: kvst index + 1 (0: none) */
 	kvst *kvs;
 	uint32_t nkvs;
@@ -1781,7 +1787,7 @@ static void kv_edge(ecx *e, uint32_t l)
 		return;
 	if (!e->lkvi[l]) {
 		if (e->nkvs == CAPKVS) {
-			e->nkv = 0, e->kvalid = 0;	/* out of room: stop tracking */
+			e->nkv = 0, e->kvalid = 0, e->nael = 0;	/* out of room: stop tracking */
 			return;
 		}
 		st = &e->kvs[e->nkvs++];
@@ -2484,7 +2490,7 @@ static inline int32_t keep_cl(const ecx *e, int32_t mark)
 	return mark > e->cl_top ? mark : e->cl_top;
 }
 static void gen_cond(ecx *e, uint32_t n, bool jump_if, uint32_t l);
-static int cond_fold(cc *c, uint32_t n);
+static int cond_fold(ecx *e, uint32_t n);
 static val gen_block(ecx *e, uint32_t n, bool want);
 static void gen_init_local(ecx *e, const lval *dst, qty ty, uint32_t init);
 static void enqueue(emitter *E, uint32_t item);
@@ -4200,6 +4206,41 @@ static void kv_track(ecx *e, uint32_t s, const val *v)
 	}
 }
 
+static bool is_aconst(cc *c, uint32_t n);
+static uint32_t aconst_idx(cc *c, uint32_t n);
+
+/* the kv slot of a[CONST] (create: allocate one), or -1 */
+static int ael_slot(ecx *e, uint32_t n, bool create)
+{
+	cc *c = e->c;
+	uint32_t s, idx;
+	const sym *y;
+	const ctype *at;
+	qty et;
+
+	if (!is_aconst(c, n))
+		return -1;
+	s = N(N(N(n)->a)->a)->a, y = &c->syms[s];
+	if (!is_local_var(c, s) || y->sc == SC_STATIC || (e->E->sflags[s] & SA_AESC) || sym_attrs(c, s)->cleanup)
+		return -1;
+	at = T(c, y->ty), et = at->base;
+	if (at->kind != TY_ARRAY || (at->flags & (TF_VLA | TF_INCOMPLETE)) || !is_integer(c, et) || is_wide(c, et) ||
+	    (QQ(et) & Q_VOLATILE) || (QQ(y->ty) & Q_VOLATILE))
+		return -1;
+	idx = aconst_idx(c, n);
+	if (idx >= at->n)
+		return -1;
+	for (int i = 0; i < e->nael; i++)
+		if (e->ael[i].s == s && e->ael[i].idx == idx)
+			return e->ael[i].kv;
+	if (!create || e->nkv == NKV || e->nael == NKV)
+		return -1;
+	e->ael[e->nael].s = s, e->ael[e->nael].idx = idx, e->ael[e->nael].kv = e->nkv;
+	e->nael++;
+	e->kvalid &= (uint16_t)~(1u << e->nkv);
+	return e->nkv++;
+}
+
 /* may variable s (param or local) be bound to the constant v for good? */
 static bool const_var(ecx *e, uint32_t s, const val *v)
 {
@@ -4531,6 +4572,8 @@ static val dry(ecx *e, uint32_t n)
 	v = gen(e, n);
 	e->dry--;
 	e->nkv = nkv, e->kvalid = kvalid;
+	while (e->nael && e->ael[e->nael - 1].kv >= nkv)
+		e->nael--;
 	memcpy(e->kval, kval, sizeof(kval));
 	e->nin = nin, e->live = live, e->usedcs = usedcs, e->foff = foff;	/* labels stay: user labels may map to them */
 	e->reach = reach, e->nclean = nclean, e->nloop = nloop, e->raw.n = raw, e->calls = calls;
@@ -5684,7 +5727,7 @@ static val gen_binary(ecx *e, uint32_t n)
 	const node *x = N(n);
 	int op = x->aux;
 	qty lt = N(x->a)->ty, rt = N(x->b)->ty, ty = x->ty;
-	int known = is_cmp(op) ? cond_fold(c, n) : -1;
+	int known = is_cmp(op) ? cond_fold(e, n) : -1;
 	val a, b;
 
 	if (known >= 0)
@@ -5878,7 +5921,22 @@ static val gen_assign(ecx *e, uint32_t n)
 		return r;
 	}
 	if (!x->aux) {
+		int ak;
+
 		v = gen(e, x->b);
+		if ((ak = ael_slot(e, x->a, true)) >= 0) {
+			val cv = v;
+
+			l = gen_lval(e, x->a);
+			store(e, &l, lt, &v);
+			lfree(e, &l);
+			e->kvalid &= (uint16_t)~(1u << ak);
+			if (cv.k == V_CONST) {
+				e->kval[ak] = (int64_t)trunc_to(c, cv.i, lt);
+				e->kvalid |= (uint16_t)(1u << ak);
+			}
+			return v;
+		}
 		if (N(x->a)->op == N_VAR && (e->E->sflags[N(x->a)->a] & SA_CWRITE)) {
 			bind *b = binding(e, N(x->a)->a);
 
@@ -6049,6 +6107,10 @@ static val gen(ecx *e, uint32_t n)
 	case N_MEMBER:
 	case N_INDEX:
 	case N_DEREF: {
+		int k = x->op == N_INDEX ? ael_slot(e, n, false) : -1;
+
+		if (k >= 0 && (e->kvalid >> k & 1))
+			return vconst(e->kval[k]);
 		lval l = gen_lval(e, n);
 
 		return load_free(e, &l, x->ty);
@@ -6253,13 +6315,152 @@ static int cmp_mask(cc *c, uint32_t n, uint32_t *l, uint32_t *r)
 	return m;
 }
 
-/* a condition known from its form (x != x, x < y && x > y, ...): 0 or 1; -1 unknown */
-static int cond_fold(cc *c, uint32_t n)
+/* the values of an integer type */
+static bool trange(cc *c, qty t, i128 *lo, i128 *hi)
+{
+	uint64_t sz;
+
+	if (!is_integer(c, t) || is_wide(c, t) || KIND(c, t) == TY_BOOL)
+		return false;
+	sz = tsize(c, t) * 8;
+	if (is_signed(c, t))
+		*lo = -((i128)1 << (sz - 1)), *hi = ((i128)1 << (sz - 1)) - 1;
+	else
+		*lo = 0, *hi = ((i128)1 << sz) - 1;
+	return true;
+}
+
+/* an interval holding every value of pure integer expression n, with variable s in [slo, shi] */
+static bool irange(cc *c, uint32_t n, uint32_t s, i128 slo, i128 shi, i128 *lo, i128 *hi)
 {
 	const node *x = N(n);
-	uint32_t l1, r1, l2, r2;
-	int m1, m2, m;
+	i128 tlo, thi, alo, ahi, blo, bhi;
 
+	cval cv;
+
+	if (!trange(c, x->ty, &tlo, &thi) || (QQ(x->ty) & Q_VOLATILE))
+		return false;
+	if (x->op != N_VAR && cc_eval(c, n, &cv) && cv.kind == CV_INT) {
+		*lo = *hi = trunc_to(c, cv.i, x->ty);
+		return true;
+	}
+	switch (x->op) {
+	case N_NUM:
+		*lo = *hi = trunc_to(c, c->ipool[x->a], x->ty);
+		return true;
+	case N_VAR:
+		if (x->a == s)
+			*lo = slo, *hi = shi;
+		else
+			*lo = tlo, *hi = thi;
+		return true;
+	case N_CAST:
+		if (!irange(c, x->a, s, slo, shi, &alo, &ahi))
+			return false;
+		break;
+	case N_BINARY:
+		if ((x->aux != T_PLUS && x->aux != T_MINUS) || !irange(c, x->a, s, slo, shi, &alo, &ahi) ||
+		    !irange(c, x->b, s, slo, shi, &blo, &bhi))
+			return false;
+		if (x->aux == T_PLUS)
+			alo += blo, ahi += bhi;
+		else
+			alo -= bhi, ahi -= blo;
+		break;
+	default:
+		return false;
+	}
+	/* out of the type's range: anything (wraps) */
+	if (alo < tlo || ahi > thi)
+		alo = tlo, ahi = thi;
+	*lo = alo, *hi = ahi;
+	return true;
+}
+
+/* comparison n with s in [slo, shi]: 0 or 1 when the intervals decide it, -1 */
+static int irange_cmp(cc *c, uint32_t n, uint32_t s, i128 slo, i128 shi)
+{
+	const node *x = N(n);
+	i128 alo, ahi, blo, bhi;
+
+	if (x->op != N_BINARY || !is_cmp(x->aux) || !irange(c, x->a, s, slo, shi, &alo, &ahi) ||
+	    !irange(c, x->b, s, slo, shi, &blo, &bhi))
+		return -1;
+	switch (x->aux) {
+	case T_LESS: return ahi < blo ? 1 : alo >= bhi ? 0 : -1;
+	case T_LESSEQ: return ahi <= blo ? 1 : alo > bhi ? 0 : -1;
+	case T_GREATER: return alo > bhi ? 1 : ahi <= blo ? 0 : -1;
+	case T_GREATEREQ: return alo >= bhi ? 1 : ahi < blo ? 0 : -1;
+	case T_EQUALEQUAL: return alo == ahi && blo == bhi && alo == blo ? 1 : ahi < blo || bhi < alo ? 0 : -1;
+	case T_EXCLAIMEQ: return alo == ahi && blo == bhi && alo == blo ? 0 : ahi < blo || bhi < alo ? 1 : -1;
+	}
+	return -1;
+}
+
+/* the range of local s where comparison n (s OP constant) has truth t */
+static bool cmp_var_range(cc *c, uint32_t n, bool t, uint32_t *s, i128 *lo, i128 *hi)
+{
+	const node *x = N(n);
+	int op;
+	i128 k;
+
+	if (x->op != N_BINARY || !is_cmp(x->aux) || N(x->a)->op != N_VAR || N(x->b)->op != N_NUM ||
+	    !trange(c, N(x->a)->ty, lo, hi) || (QQ(N(x->a)->ty) & Q_VOLATILE) || c->syms[N(x->a)->a].kind != S_VAR)
+		return false;
+	op = x->aux, k = trunc_to(c, c->ipool[N(x->b)->a], N(x->a)->ty);
+	if (!t)
+		op = op == T_LESS ? T_GREATEREQ : op == T_LESSEQ ? T_GREATER : op == T_GREATER ? T_LESSEQ :
+		     op == T_GREATEREQ ? T_LESS : op == T_EQUALEQUAL ? T_EXCLAIMEQ : T_EQUALEQUAL;
+	*s = N(x->a)->a;
+	switch (op) {
+	case T_LESS: *hi = k - 1; break;
+	case T_LESSEQ: *hi = k; break;
+	case T_GREATER: *lo = k + 1; break;
+	case T_GREATEREQ: *lo = k; break;
+	case T_EQUALEQUAL: *lo = *hi = k; break;
+	default: return false;
+	}
+	return *lo <= *hi;
+}
+
+/* a condition known from its form (x != x, x < y && x > y, ...): 0 or 1; -1 unknown */
+/* a floating local whose every write has fact f (FF_NONNEG / FF_ZERO), or a +-0.0 constant for FF_ZERO */
+static bool ffact(ecx *e, uint32_t n, uint8_t f)
+{
+	cc *c = e->c;
+	const node *x = N(n);
+	cval cv;
+
+	if (x->op == N_VAR && is_local_var(c, x->a) && !(QQ(x->ty) & Q_VOLATILE)) {
+		uint8_t g = e->E->ffacts[x->a];
+
+		return (g & (FF_SEEN | FF_BAD)) == FF_SEEN && (g & f) == f;
+	}
+	return f == FF_ZERO && is_flt(c, x->ty) && cc_eval(c, n, &cv) && cv.kind == CV_FLT && cv.f == 0;
+}
+
+static int cond_fold(ecx *e, uint32_t n)
+{
+	cc *c = e->c;
+	const node *x = N(n);
+	uint32_t l1, r1, l2, r2, s;
+	int m1, m2, m;
+	i128 lo, hi;
+
+	/* a || b with b true wherever a is false (a && b: b false wherever a is true) */
+	if ((x->op == N_LOGAND || x->op == N_LOGOR) && cmp_var_range(c, x->a, x->op == N_LOGAND, &s, &lo, &hi)) {
+		int k = irange_cmp(c, x->b, s, lo, hi);
+
+		if (x->op == N_LOGOR && k == 1)
+			return 1;
+		if (x->op == N_LOGAND && k == 0)
+			return 0;
+	}
+	if (x->op == N_UNARY && x->aux == T_EXCLAIM) {
+		int k = cond_fold(e, x->a);
+
+		return k < 0 ? -1 : !k;
+	}
 	if (x->op == N_LOGAND || x->op == N_LOGOR) {
 		m1 = cmp_mask(c, x->a, &l1, &r1);
 		m2 = cmp_mask(c, x->b, &l2, &r2);
@@ -6272,6 +6473,11 @@ static int cond_fold(cc *c, uint32_t n)
 		m = x->op == N_LOGAND ? m1 & m2 : m1 | m2;
 		return m == 0 ? 0 : m == 7 ? 1 : -1;
 	}
+	/* fabs(x) < 0.0 (through locals): false, NaN included */
+	if (x->op == N_BINARY && (x->aux == T_LESS || x->aux == T_GREATER) && is_flt(c, N(x->a)->ty) &&
+	    !is_ld(c, N(x->a)->ty) && ffact(e, x->aux == T_LESS ? x->a : x->b, FF_NONNEG) &&
+	    ffact(e, x->aux == T_LESS ? x->b : x->a, FF_ZERO))
+		return 0;
 	m = cmp_mask(c, n, &l1, &r1);
 	if (m && same_pure(c, l1, r1))
 		return (m & 2) != 0;
@@ -6282,7 +6488,7 @@ static void gen_cond(ecx *e, uint32_t n, bool jump_if, uint32_t l)
 {
 	cc *c = e->c;
 	const node *x = N(n);
-	int k = cond_fold(c, n);
+	int k = cond_fold(e, n);
 
 	if (k >= 0) {
 		if (k == (int)jump_if)
@@ -7895,7 +8101,7 @@ static void emit_function(ecx *e, uint32_t s)
 	e->nin = 0;
 	e->raw.n = 0;
 	e->nlabel = 0;
-	e->nkv = 0, e->kvalid = 0, e->nkvs = 0;
+	e->nkv = 0, e->kvalid = 0, e->nkvs = 0, e->nael = 0;
 	e->foff = e->fmax = e->outmax = e->cl_top = 0;
 	e->dyn = e->calls = false;
 	e->live = 0;
@@ -8526,6 +8732,30 @@ typedef struct pre {
 	int cdepth;		/* cleanup variables in scope */
 } pre;
 
+/* a[CONST], a a variable */
+static bool is_aconst(cc *c, uint32_t n)
+{
+	const node *x = N(n);
+
+	uint32_t b;
+
+	if (x->op != N_INDEX || N(x->a)->op != N_CAST || N(x->a)->aux != CK_DECAY || N(N(x->a)->a)->op != N_VAR)
+		return false;
+	for (b = x->b; N(b)->op == N_CAST && is_integer(c, N(b)->ty) && is_integer(c, N(N(b)->a)->ty); b = N(b)->a)
+		;
+	return N(b)->op == N_NUM && c->ipool[N(b)->a] >= 0 && c->ipool[N(b)->a] < (i128)1 << 32;
+}
+
+/* the index of a[CONST] (is_aconst) */
+static uint32_t aconst_idx(cc *c, uint32_t n)
+{
+	uint32_t b;
+
+	for (b = N(n)->b; N(b)->op == N_CAST; b = N(b)->a)
+		;
+	return (uint32_t)c->ipool[N(b)->a];
+}
+
 static void mark_written(pre *P, uint32_t n)
 {
 	cc *c = P->c;
@@ -8547,7 +8777,7 @@ static void mark_written(pre *P, uint32_t n)
 		}
 	}
 	if (N(n)->op == N_VAR)
-		P->E->sflags[N(n)->a] |= SA_WRITTEN;
+		P->E->sflags[N(n)->a] |= SA_WRITTEN | SA_AESC, P->E->ffacts[N(n)->a] |= FF_BAD;
 	else if (N(n)->op == N_COMPLIT)
 		P->E->sflags[N(n)->b] |= SA_WRITTEN;
 }
@@ -8558,6 +8788,33 @@ static void mark_written(pre *P, uint32_t n)
  * `bool enable_scs = false; ... if (x) enable_scs = false;` guards references
  * to symbols that do not exist).
  */
+/* a floating local's write: fabs(...) is >= 0 or NaN, a constant is what it is */
+static void note_fwrite(pre *P, uint32_t s, uint32_t rhs)
+{
+	cc *c = P->c;
+	uint8_t *f = &P->E->ffacts[s], k = FF_BAD;
+	uint32_t ref, callee;
+	cval cv;
+
+	if (!is_flt(c, c->syms[s].ty) || !is_local_var(c, s))
+		return;
+	while (N(rhs)->op == N_CAST && is_flt(c, N(rhs)->ty) && is_flt(c, N(N(rhs)->a)->ty) &&
+	       tsize(c, N(rhs)->ty) >= tsize(c, N(N(rhs)->a)->ty))
+		rhs = N(rhs)->a;
+	if (cc_eval(c, rhs, &cv) && (cv.kind == CV_FLT || cv.kind == CV_INT)) {
+		double v = cv.kind == CV_FLT ? cv.f : (double)cv.i;
+
+		k = v == 0 && !__builtin_signbit(v) ? FF_NONNEG | FF_ZERO : v >= 0 ? FF_NONNEG : 0;
+	} else if (N(rhs)->op == N_CALL && (callee = direct_callee(c, N(rhs)->a, &ref))) {
+		const vident *nm = &vintern_ents[c->syms[callee].name];
+
+		if ((nm->len == 4 && !memcmp(nm->s, "fabs", 4)) || (nm->len == 5 && !memcmp(nm->s, "fabsf", 5)))
+			k = FF_NONNEG;
+	}
+	*f = (uint8_t)(*f & FF_SEEN ? (*f & ~(FF_NONNEG | FF_ZERO)) | (*f & k & (FF_NONNEG | FF_ZERO)) | (k & FF_BAD)
+				    : FF_SEEN | k);
+}
+
 static void note_assign(pre *P, uint32_t s, uint32_t rhs)
 {
 	cc *c = P->c;
@@ -8682,12 +8939,21 @@ static int walk(pre *P, uint32_t n)
 		break;
 	case N_ASSIGN:
 		if (!x->aux && N(x->a)->op == N_VAR)
-			note_assign(P, N(x->a)->a, x->b);
+			note_assign(P, N(x->a)->a, x->b), note_fwrite(P, N(x->a)->a, x->b);
+		else if (!x->aux && is_aconst(c, x->a))
+			P->E->sflags[N(N(N(x->a)->a)->a)->a] |= SA_WRITTEN;
 		else
 			mark_written(P, x->a);
 		lab = walk(P, x->a) | walk(P, x->b);
 		break;
-	case N_INDEX: case N_BINARY: case N_LOGAND: case N_LOGOR: case N_COMMA: case N_CPLX:
+	case N_INDEX:
+		if (is_aconst(c, n)) {
+			/* a[CONST]: the array does not escape here */
+			lab = walk(P, N(x->a)->a) | walk(P, x->b);
+			break;
+		}
+		/* fall through */
+	case N_BINARY: case N_LOGAND: case N_LOGOR: case N_COMMA: case N_CPLX:
 		lab = walk(P, x->a) | walk(P, x->b);
 		break;
 	case N_COND:
@@ -8739,6 +9005,8 @@ static int walk(pre *P, uint32_t n)
 		const sym *y = &c->syms[x->a];
 
 		lab = walk(P, x->b);
+		if (x->b && y->kind == S_VAR)
+			note_fwrite(P, x->a, x->b);
 		if (sym_attrs(c, x->a)->cleanup || (y->kind == S_VAR && (T(c, y->ty)->flags & TF_VLA)))
 			P->cdepth++;
 		/* a __used static local is emitted with its function, referenced or not */
@@ -9021,6 +9289,7 @@ static int emit_tu1(cc *c, const cc_opts *o, bool write_out, uint8_t *mf, bool *
 	E.claimed = reserve(c->nsym + 64);
 	E.extref = reserve(c->nsym + 64);
 	E.sflags = reserve(c->nsym + 64);
+	E.ffacts = reserve(c->nsym + 64);
 	E.strdone = reserve(c->nstr + 64);
 	E.nflags = reserve(c->nnode + 64);
 	E.lref = reserve(c->nlabel + 64);
