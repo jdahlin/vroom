@@ -1426,6 +1426,66 @@ static bool collect_(pp *p, const pmacro *m, const ptok *name, margs *a, ptok *r
 	raw(p, &t);		/* '(' */
 	a->st[0] = 0;
 	for (;;) {
+		ctx *c = &p->cx[p->depth - 1];
+
+		/* runs of plain tokens straight into sv */
+		if (likely(c->i < c->n && !(c->first | p->pend)) && c->type != C_REPLAY) {
+			bool stop_comma = !(va && k + 1 >= np);
+			uint32_t i = c->i, e = c->n;
+
+			if (c->type == C_PTOK) {
+				const ptok *pt = c->pt;
+
+				for (; i < e; i++) {
+					uint8_t kd = pt[i].kind;
+
+					if (kd == T_LPAREN) {
+						depth++;
+					} else if (kd == T_RPAREN) {
+						if (!depth)
+							break;
+						depth--;
+					} else if (kd == T_COMMA && !depth && stop_comma) {
+						break;
+					}
+				}
+				if (unlikely(p->svn + (i - c->i) > SVMAX)) {
+					fprintf(stderr, "vcc: expansion too large\n");
+					abort();
+				}
+				memcpy(p->sv + p->svn, pt + c->i, (i - c->i) * sizeof(ptok));
+				p->svn += i - c->i;
+			} else {
+				const vtok *vt = c->vt;
+				bool file = c->type == C_FILE;
+				uint32_t loc = c->loc, offloc = file || c->offloc;
+
+				for (; i < e; i++) {
+					const vtok *v = &vt[i];
+					uint8_t kd = v->kind;
+
+					if (kd == T_LPAREN) {
+						depth++;
+					} else if (kd == T_RPAREN) {
+						if (!depth)
+							break;
+						depth--;
+					} else if (kd == T_COMMA && !depth && stop_comma) {
+						break;
+					} else if (file && (v->flags & TF_SOL) && kd == T_HASH) {
+						break;
+					}
+					if (unlikely(p->svn == SVMAX)) {
+						fprintf(stderr, "vcc: expansion too large\n");
+						abort();
+					}
+					vfill(&p->sv[p->svn++], v, c->src, offloc ? loc + v->off : loc);
+				}
+			}
+			c->i = i;
+			if (i == e)
+				continue;
+		}
 		raw_fast(p, &t);
 		if (unlikely(t.kind == T_EOF)) {
 			error(p, name->loc, "unterminated function-like macro invocation");
