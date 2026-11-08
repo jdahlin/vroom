@@ -230,16 +230,19 @@ static pfile *pfile_build(const vlex_file *f)
 	return fi;
 }
 
-static const pfile *pfile_get(const vlex_file *f)
+/* *fresh: built by this call (the file's first entry in the process) */
+static const pfile *pfile_get(const vlex_file *f, bool *fresh)
 {
 	vlex_file *w = (vlex_file *)f;
 	void *fi = __atomic_load_n(&w->pp, __ATOMIC_ACQUIRE), *z = NULL;
 
+	*fresh = false;
 	if (likely(fi != NULL))
 		return fi;
 	fi = pfile_build(f);
 	if (!__atomic_compare_exchange_n(&w->pp, &z, fi, 0, __ATOMIC_ACQ_REL, __ATOMIC_ACQUIRE))
 		return z;	/* lost the race; ours is wasted */
+	*fresh = true;
 	return fi;
 }
 
@@ -3943,9 +3946,100 @@ static void hc_end(pp *p)
 	}
 }
 
+/*
+ * Read-ahead for a file entered for the first time: the first candidate of
+ * each unconditional #include "x" / <x> (the includer's directory, or the
+ * first search directory that exists) goes to the token cache's I/O
+ * threads, so that opening and reading it is off this thread by the time
+ * the lookup gets there.  The lookup tries that path first anyway: no extra
+ * I/O.  VPP_NOPREFETCH=1 turns it off.
+ */
+static int pf_on = -1;
+
+static void prefetch_includes(pp *p, const ctx *c)
+{
+	const pfile *fi = c->fi;
+	const vtok *vt = c->vt;
+	const char *cwd = p->o->cwd;
+	size_t cl = cwd ? strlen(cwd) : 0;
+	char buf[4096 + 16];
+
+	if (cl + 1 >= 2048)
+		return;
+	if (cwd) {
+		memcpy(buf, cwd, cl);
+		buf[cl++] = '/';
+	}
+	for (uint32_t k = 0, depth = 0; k < fi->ndir; k++) {
+		const pdir *d = &fi->dir[k];
+		uint32_t b = d->tok + 2, j;
+		const char *name, *fp;
+		size_t nl, dl;
+		bool angled;
+		int32_t mode, n = 0;
+
+		if (d->kind == D_IF || d->kind == D_IFDEF || d->kind == D_IFNDEF)
+			depth++;
+		else if (d->kind == D_ENDIF && depth)
+			depth--;
+		/* unconditional ones only (inside the include guard): others may not be wanted */
+		if ((d->kind != D_INCLUDE && d->kind != D_INCLUDE_NEXT && d->kind != D_IMPORT) || b >= d->end ||
+		    depth != (fi->guard ? 1u : 0u))
+			continue;
+		if (vt[b].kind == T_STRING && !(vt[b].flags & TF_DIRTY) && vt[b].len > 2) {
+			name = c->src + vt[b].off + 1;
+			nl = vt[b].len - 2;
+			angled = false;
+		} else if (vt[b].kind == T_LESS) {
+			for (j = b + 1; j < d->end && vt[j].kind != T_GREATER; j++)
+				;
+			if (j == d->end)
+				continue;
+			name = c->src + vt[b].off + 1;
+			nl = vt[j].off - vt[b].off - 1;
+			angled = true;
+		} else {
+			continue;
+		}
+		if (!nl || nl >= 1024 || name[0] == '/' || memchr(name, '\n', nl))
+			continue;
+		mode = inc_mode(p, c, angled, d->kind == D_INCLUDE_NEXT, &fp, &dl);
+		if (!angled && !(mode & 1)) {
+			size_t o = cwd && fp[0] != '/' ? cl : 0;
+
+			if (o + dl + nl < 4096) {
+				memcpy(buf + o, fp, dl);
+				memcpy(buf + o + dl, name, nl);
+				buf[o + dl + nl] = 0;
+				if (vdir_exists(buf, o + dl + nl)) {
+					vlex_prefetch(buf, o + dl + nl);
+					n++;
+				}
+			}
+		}
+		for (int32_t i = mode >> 2; i < p->o->ndirs && n < 1; i++) {
+			const char *dd = p->o->dirs[i];
+			size_t l = strlen(dd), o = cwd && dd[0] != '/' ? cl : 0;
+
+			if (o + l + nl + 2 >= 4096)
+				continue;
+			memcpy(buf + o, dd, l);
+			if (l && dd[l - 1] != '/')
+				buf[o + l++] = '/';
+			memcpy(buf + o + l, name, nl);
+			buf[o + l + nl] = 0;
+			if (vdir_exists(buf, o + l + nl)) {
+				vlex_prefetch(buf, o + l + nl);
+				n++;
+			}
+		}
+	}
+}
+
 static void enter_file(pp *p, const vlex_file *f, const char *path, int32_t sdir)
 {
-	const pfile *fi = pfile_get(f);
+	bool fresh;
+	const pfile *fi = pfile_get(f, &fresh);
 	const ctx *from = cur_file(p);
 	hkey *k = NULL;
 	uint8_t sys;
@@ -4006,6 +4100,12 @@ static void enter_file(pp *p, const vlex_file *f, const char *path, int32_t sdir
 	p->nfile++;
 	add_fent(p, c, f, path);
 	p->fe[c->fe].sys = sys;
+	if (fresh) {
+		if (pf_on < 0)
+			pf_on = !getenv("VPP_NOPREFETCH");
+		if (pf_on)
+			prefetch_includes(p, c);
+	}
 	if (k)
 		hc_begin(p, k);
 }
