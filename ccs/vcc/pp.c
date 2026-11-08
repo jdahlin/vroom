@@ -1436,7 +1436,11 @@ static bool collect_(pp *p, const pmacro *m, const ptok *name, margs *a, ptok *r
 
 			if (c->type == C_PTOK) {
 				const ptok *pt = c->pt;
+				ptok *w = p->sv + p->svn;
 
+				/* (no room for the rest of the context: token by token below) */
+				if (unlikely(p->svn + (e - i) > SVMAX))
+					e = i;
 				for (; i < e; i++) {
 					uint8_t kd = pt[i].kind;
 
@@ -1449,13 +1453,10 @@ static bool collect_(pp *p, const pmacro *m, const ptok *name, margs *a, ptok *r
 					} else if (kd == T_COMMA && !depth && stop_comma) {
 						break;
 					}
+					*w++ = pt[i];
 				}
-				if (unlikely(p->svn + (i - c->i) > SVMAX)) {
-					fprintf(stderr, "vcc: expansion too large\n");
-					abort();
-				}
-				memcpy(p->sv + p->svn, pt + c->i, (i - c->i) * sizeof(ptok));
-				p->svn += i - c->i;
+				p->svn = (size_t)(w - p->sv);
+				e = c->n;
 			} else {
 				const vtok *vt = c->vt;
 				bool file = c->type == C_FILE;
@@ -2017,10 +2018,11 @@ static void subst_simple(pp *p, const pmacro *m, margs *a, uint8_t nf, uint32_t 
 
 			if (!an)
 				continue;
-			memcpy(w, at, an * sizeof(ptok));
-			for (uint32_t j = 0; j < an; j++)
-				if (unlikely(w[j].kind == T_HASHHASH))
+			for (uint32_t j = 0; j < an; j++) {
+				w[j] = at[j];
+				if (unlikely(at[j].kind == T_HASHHASH))
 					w[j].flags |= PF_NOPASTE;
+			}
 			w->flags = (w->flags & ~(TF_SOL | TF_SPACE)) | (ngs ? TF_SPACE : 0);
 			ngs = false;
 			w += an;
