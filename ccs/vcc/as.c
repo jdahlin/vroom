@@ -18,6 +18,9 @@
 #include <sys/mman.h>
 #include <sys/stat.h>
 #include <unistd.h>
+#ifdef __aarch64__
+#include <arm_neon.h>
+#endif
 
 #define MAXFR 512
 #define MAXCOND 1024
@@ -521,17 +524,32 @@ static void pop_frame(As *a)
 	if (f->kind != FR_FILE) a->xs.used = f->mark;
 }
 
-/* Copy the next statement of f into a->sb, without comments.  Returns its
- * length; sets *raw to where it started in the frame text. */
 /* bytes next_stmt must look at: newline, ';', comments, strings */
 static const uint8_t sstop[256] = { ['\n'] = 1, [';'] = 1, ['/'] = 1, ['"'] = 1 };
 
-static size_t next_stmt(As *a, Frame *f, const char **raw)
+/* first byte of [p, e) in sstop (or e) */
+static inline const char *find_stop(const char *p, const char *e)
+{
+#ifdef __aarch64__
+	const uint8x16_t nl = vdupq_n_u8('\n'), sc = vdupq_n_u8(';'), sl = vdupq_n_u8('/'), qt = vdupq_n_u8('"');
+	while (e - p >= 16) {
+		uint8x16_t v = vld1q_u8((const uint8_t *)p);
+		uint8x16_t m = vorrq_u8(vorrq_u8(vceqq_u8(v, nl), vceqq_u8(v, sc)), vorrq_u8(vceqq_u8(v, sl), vceqq_u8(v, qt)));
+		uint64_t bits = vget_lane_u64(vreinterpret_u64_u8(vshrn_n_u16(vreinterpretq_u16_u8(m), 4)), 0);
+		if (bits) return p + (__builtin_ctzll(bits) >> 2);
+		p += 16;
+	}
+#endif
+	while (p < e && !sstop[(uint8_t)*p]) p++;
+	return p;
+}
+
+/* The general case: copy the statement into a->sb without comments. */
+static size_t next_stmt_copy(As *a, Frame *f)
 {
 	const char *p = f->p, *e = f->e;
 	char *o = (char *)a->sb.base;
 	size_t n = 0, cap = a->sb.cap - 1;
-	*raw = p;
 	for (;;) {
 		if (p >= e) break;
 		char c = *p;
@@ -545,8 +563,7 @@ static size_t next_stmt(As *a, Frame *f, const char **raw)
 			}
 		}
 		if (!sstop[(uint8_t)c]) {	/* plain run: copy it whole */
-			const char *q = p + 1;
-			while (q < e && !sstop[(uint8_t)*q]) q++;
+			const char *q = find_stop(p + 1, e);
 			size_t k = (size_t)(q - p);
 			if (k > cap - n) k = cap - n;
 			memcpy(o + n, p, k); n += k; p = q;
@@ -578,6 +595,35 @@ static size_t next_stmt(As *a, Frame *f, const char **raw)
 	f->p = p;
 	o[n] = 0;
 	return n;
+}
+
+/* The next statement of f, without comments: *s points at it, either in
+ * the frame text (no comment or string in it, the common case) or in
+ * a->sb.  Returns its length; sets *raw to where it started in the frame
+ * text.  The text is not NUL-terminated. */
+static size_t next_stmt(As *a, Frame *f, const char **raw, const char **s)
+{
+	const char *p = f->p, *e = f->e;
+	*raw = p;
+	const char *q = p;
+	int bol = f->bol;
+	if (bol) {
+		while (q < e && (*q == ' ' || *q == '\t' || *q == '\r')) q++;
+		if (q < e && *q != '\n') bol = 0;
+		if (q < e && *q == '#') goto slow;
+	}
+	q = find_stop(q, e);
+	if (q < e) {
+		if (*q == '\n') { f->line++; bol = 1; }
+		else if (*q != ';') goto slow;
+		f->p = q + 1;
+	} else f->p = q;
+	f->bol = (uint8_t)bol;
+	*s = p;
+	return (size_t)(q - p);
+slow:
+	*s = (const char *)a->sb.base;
+	return next_stmt_copy(a, f);
 }
 
 /* ---------------------------------------------------------------- sections */
@@ -1146,9 +1192,8 @@ static int collect_body(As *a, int macro, Sv *body)
 	const char *start = f->p;
 	int depth = 0;
 	while (f->p < f->e) {
-		const char *raw;
-		size_t n = next_stmt(a, f, &raw);
-		const char *s = (const char *)a->sb.base;
+		const char *raw, *s;
+		size_t n = next_stmt(a, f, &raw, &s);
 		Sv w = first_word(s, s + n);
 		if (macro) {
 			if (sveq(w, ".endm") || sveq(w, ".endmacro")) {
@@ -2330,9 +2375,8 @@ int as_snippet(As *a, const char *text, size_t len)
 	while (a->nfr && !a->err) {
 		Frame *f = &a->fr[a->nfr - 1];
 		if (f->p >= f->e) { pop_frame(a); continue; }
-		const char *raw;
-		size_t n = next_stmt(a, f, &raw);
-		const char *s = (const char *)a->sb.base;
+		const char *raw, *s;
+		size_t n = next_stmt(a, f, &raw, &s);
 		a->nstmt++; a->nstmtb += n + 1;
 		if (statement(a, s, s + n)) {
 			size_t k = strlen(a->msg);
