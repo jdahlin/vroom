@@ -13,9 +13,11 @@ done by vpp itself (it lexes the reference with vcc's lexer).
 """
 import glob, hashlib, os, re, shlex, subprocess, sys
 from multiprocessing import Pool
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from hostenv import llvm, BUILD
 R = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 B = f'{R}/work/build-o0'; REF = f'{R}/work/ppref'
-CL = '/opt/homebrew/opt/llvm/bin/clang'; VPP = os.environ.get('VPP', f'{R}/build/ccs/vpp')
+CL = llvm('clang'); VPP = os.environ.get('VPP', f'{BUILD}/vpp')
 
 def tu_args(cmd):
     """(object, clang args without -c/-E/-o/-MMD) for a C TU, a .S file, or a

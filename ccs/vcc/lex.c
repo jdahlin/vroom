@@ -5,7 +5,9 @@
 #include <errno.h>
 #include <fcntl.h>
 #include <pthread.h>
+#ifdef __APPLE__
 #include <pthread/qos.h>
+#endif
 #include <sched.h>
 #include <stdatomic.h>
 #include <stdbool.h>
@@ -1465,7 +1467,9 @@ static size_t ioq_head, ioq_tail, ioq_cap;
 static void *io_thread(void *arg)
 {
 	(void)arg;
+#ifdef __APPLE__
 	pthread_set_qos_class_self_np(QOS_CLASS_USER_INTERACTIVE, 0);
+#endif
 	for (;;) {
 		centry *e;
 

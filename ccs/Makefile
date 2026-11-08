@@ -1,5 +1,6 @@
 LLVM ?= /opt/homebrew/opt/llvm
-OUT  ?= ../build/ccs
+# Linux builds go to their own tree: the checkout may be shared with a Mac
+OUT  ?= $(if $(filter Linux,$(shell uname -s)),../build/linux/ccs,../build/ccs)
 
 all: $(OUT)/vroomd $(OUT)/vroom-cc vcc
 
@@ -21,10 +22,25 @@ clean:
 # One object per source file, shared between the tools, so `make -j` builds
 # them in parallel and an edit recompiles one file.  Header dependencies come
 # from -MMD.  ccache is used when installed; disable with `make CCACHE=`.
+# Host: macOS (Apple clang, M1) or Linux aarch64 (clang from the distro).
 CCACHE    ?= $(shell command -v ccache 2>/dev/null)
-VCC_CC     = $(CCACHE) /usr/bin/clang
-VCC_CFLAGS = -std=c11 -O2 -Wall -Wextra -Wno-unused-parameter -D_DARWIN_C_SOURCE -DVCC_INCDIR='"$(abspath vcc/include)"'
-VCC_FAST   = $(VCC_CFLAGS) -O3 -mcpu=apple-m1 -pthread
+HOST_OS   := $(shell uname -s)
+ifeq ($(HOST_OS),Darwin)
+HOST_CC    = /usr/bin/clang
+HOST_DEFS  = -D_DARWIN_C_SOURCE
+HOST_LIBS  =
+HOST_CPU   = -mcpu=apple-m1
+else
+HOST_CC    = clang
+HOST_DEFS  = -D_GNU_SOURCE
+HOST_LIBS  = -lm
+# Apple cores (implementer 0x61: Docker Desktop, Asahi, a VM on a Mac) report no
+# CPU part, so -mcpu=native falls back to generic; name the core instead.
+HOST_CPU  ?= $(if $(shell grep -qm1 'implementer.*0x61' /proc/cpuinfo && echo y),-mcpu=apple-m1,-mcpu=native)
+endif
+VCC_CC     = $(CCACHE) $(HOST_CC)
+VCC_CFLAGS = -std=c11 -O2 -Wall -Wextra -Wno-unused-parameter $(HOST_DEFS) -DVCC_INCDIR='"$(abspath vcc/include)"'
+VCC_FAST   = $(VCC_CFLAGS) -O3 $(HOST_CPU) -pthread
 # -O3 also at link time: the driver passes it to ld, which then folds code
 VCC_LDFLAGS = -O3
 OBJ        = $(OUT)/obj
@@ -47,10 +63,10 @@ $(OBJ)/no/%.o: vcc/%.c | $(OBJ)
 $(OBJ)/ld.o: XFLAGS = -DVLD_MAIN
 
 $(OUT)/vpp: $(call o,vcc/vpp.c $(PP_SRC) $(LEX_SRC) $(AS_SRC))
-	$(VCC_CC) $(VCC_LDFLAGS) -pthread $^ -o $@
+	$(VCC_CC) $(VCC_LDFLAGS) -pthread $^ -o $@ $(HOST_LIBS)
 
 $(OUT)/vccd: $(call o,vcc/vccd.c vcc/caps.c $(PP_SRC) $(LEX_SRC) $(AS_SRC))
-	$(VCC_CC) $(VCC_LDFLAGS) -pthread $^ -o $@
+	$(VCC_CC) $(VCC_LDFLAGS) -pthread $^ -o $@ $(HOST_LIBS)
 
 $(OUT)/lextest: $(patsubst vcc/%.c,$(OBJ)/no/%.o,vcc/lextest.c vcc/pmc.c $(LEX_SRC))
 	$(VCC_CC) $(VCC_LDFLAGS) -pthread $^ -o $@

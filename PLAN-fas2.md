@@ -483,6 +483,41 @@ som aldrig flyr, fabs-icke-negativa flyttalslokaler.
 → **1708/1708 (100 %)**, 136 överhoppade (clang avvisar 69, clangs bygge
 klarar inte runtimen 34, tcc-specifika 32, kompilatorspecifikt 1).
 
+## Linux aarch64 som värd (påbörjat 2026-11-08)
+
+**Mål:** hela verktygskedjan (vcc, vccd, vld, vas) och kärnbygget körs på Linux aarch64
+med samma resultat som på macOS. Testmiljö: Debian 13 arm64 i Docker Desktop
+(`env/linux/`), som på M1 kör en Virtualization.framework-VM med native arm64, alltså
+ingen emulering. Samma image fungerar i en qemu-system-aarch64-gäst med `-accel hvf`.
+
+**Status:**
+- Klart: `make -C ccs vcc` bygger på båda (Linux: `-D_GNU_SOURCE`, `-lm`, `-mcpu=apple-m1`
+  på Apple-kärnor, annars `-mcpu=native`, utdata i `build/linux/ccs`). vccd använder
+  epoll + signalfd i stället för kqueue. QoS, `sysctlbyname` och kperf (pmc.c) ligger
+  bakom `__APPLE__`; pmc är en stubbe på Linux (perf_event_open återstår).
+  `ppdata.inc` hade en icke-numerisk rad (`__has_cpp_attribute(clang::…)`), som
+  gen-ppdata.sh nu filtrerar bort.
+- Harnesses hittar LLVM och byggkatalog via `bench/hostenv.py`.
+  `env/linux/run.sh CMD` kör i containern, och `--seed-work` kopierar kärnträden till
+  volymen `vroom-work` (Docker Desktop kan inte dela work.sparsebundle-monteringen).
+- Verifierat i containern: vcc-diag 63/63, ctests 1706/1706 (2 fler ref-fail än på Mac:
+  clang 23.1.6 mot 23.1.4), kärnparitet 873/873, vcc-sema 841/879. De 38 som fallerar
+  är macOS-hostverktyg i `scripts/`, som behöver macOS SDK.
+- Prestanda (kernel/sched/core.o, -fsyntax-only, bästa av 5): macOS 115 ms, container
+  138 ms med `-march=armv8.4-a`, 125–128 ms med `-mcpu=apple-m1`. Resterande ~10 % är
+  troligen 4K-sidor (linuxkit) mot 16K på macOS, plus glibc malloc/memcpy.
+  ctests: container 79 s, macOS 105 s.
+
+**Nästa:**
+1. Ett eget Linux-byggträd (`work/build-linux` i volymen) med HOSTCC = clang för Linux,
+   och egna clang-referenser (`vcc-diff.py ref`), så att host-TU:erna också testas.
+2. vroom-build.sh och vccd-kbuild.sh på Linux: shims, vccd och vld i kärnbygget, och
+   uppmätt kall byggtid i containern.
+3. Boot-test: Image i qemu i containern. Där finns ingen KVM (M1 saknar nästlad
+   virtualisering), så det blir TCG. Alternativt qemu på macOS med hvf, som i dag.
+4. Mät: 16K-sidkärna (en VM med egen kärna, eller Asahi), huge pages för arenor, och
+   `perf stat` via pmc.c.
+
 ## Risker
 - **GNU C-ytan och inline asm** är det stora jobbet. Uppskattat: lexer + pp ~2 kloc,
   parser + sema ~10–15 kloc, emitter ~5 kloc, assembler ~4 kloc, länkare ~3 kloc.

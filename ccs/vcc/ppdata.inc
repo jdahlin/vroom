@@ -2210,7 +2210,6 @@ static const struct { const char *q, *name; int v[2]; /* aarch64-linux, darwin *
 	{ "__has_constexpr_builtin", "wmemcmp", { 1, 1 } },
 	{ "__has_constexpr_builtin", "wmemcpy", { 1, 1 } },
 	{ "__has_constexpr_builtin", "wmemmove", { 1, 1 } },
-	{ "__has_cpp_attribute", "clang::unsafe_buffer_usage", { __has_cpp_attribute(clang::unsafe_buffer_usage), __has_cpp_attribute(clang::unsafe_buffer_usage) } },
 	{ "__has_extension", "assume_nonnull", { 1, 1 } },
 	{ "__has_extension", "attribute_availability", { 1, 1 } },
 	{ "__has_extension", "attribute_availability_app_extension", { 1, 1 } },

@@ -3,6 +3,7 @@
  * for the calling thread, through the private kperf frameworks, as in
  * Instruments' CPU Counters.  Needs root (kpc_force_all_ctrs_set).
  */
+#ifdef __APPLE__
 #include <dlfcn.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -107,3 +108,14 @@ void pmc_read(uint64_t v[PMC_N])
 	for (int i = 0; i < pmc_n; i++)
 		v[i] = have[i] ? c[map[j++]] : 0;
 }
+#else
+/* Linux: no kperf; counters are not available (perf_event_open is a TODO) */
+#include <stdint.h>
+#include "pmc.h"
+
+const char *pmc_names[PMC_N] = { "cycles", "instructions" };
+int pmc_n = 2;
+
+int pmc_init(const char *events) { (void)events; return -1; }
+void pmc_read(uint64_t v[PMC_N]) { for (int i = 0; i < PMC_N; i++) v[i] = 0; }
+#endif

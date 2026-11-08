@@ -27,16 +27,18 @@ source, flags and runtime), so a rerun only builds and runs vcc's side.
 import hashlib, json, os, re, shutil, subprocess, sys, time
 from collections import Counter, defaultdict
 from multiprocessing import Pool
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from hostenv import llvm, BUILD
 
 R = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 T = f'{R}/ccs/vcc/tests'
 RT = f'{T}/rt'
-CL = '/opt/homebrew/opt/llvm/bin/clang'
-VPP = f'{R}/build/ccs/vpp'
-OBJCOPY = '/opt/homebrew/opt/llvm/bin/llvm-objcopy'
-LLD = shutil.which('ld.lld') or '/opt/homebrew/bin/ld.lld'
+CL = llvm('clang')
+VPP = f'{BUILD}/vpp'
+OBJCOPY = llvm('llvm-objcopy')
+LLD = shutil.which('ld.lld') or llvm('ld.lld')
 QEMU = shutil.which('qemu-system-aarch64') or '/opt/homebrew/bin/qemu-system-aarch64'
-OUT = f'{R}/build/ccs/ctests'
+OUT = f'{BUILD}/ctests'
 RES = subprocess.run([CL, '-print-resource-dir'], capture_output=True, text=True).stdout.strip() + '/include'
 
 BASE = ['--target=aarch64-linux-gnu', '-nostdinc', '-I', f'{RT}/include', '-isystem', RES,
@@ -99,7 +101,7 @@ def sh(cmd, timeout=60, **kw):
 
 def qemu(elf):
     rc, out, err = sh([QEMU, '-M', 'virt', '-cpu', 'max', '-m', '256M', '-nographic',
-                       '-monitor', 'none', '-semihosting', '-kernel', elf], timeout=20,
+                       '-monitor', 'none', '-nic', 'none', '-semihosting', '-kernel', elf], timeout=20,
                       stdin=subprocess.DEVNULL)
     return rc, out.decode('latin-1').replace('\r\n', '\n')
 

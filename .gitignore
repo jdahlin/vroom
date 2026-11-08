@@ -4,3 +4,4 @@
 # byggutdata och externa kloner
 /build/
 /third_party/
+__pycache__/

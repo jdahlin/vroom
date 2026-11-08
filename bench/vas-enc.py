@@ -12,8 +12,10 @@ are reported as skipped.
 """
 import glob, os, re, subprocess, sys
 R = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-VAS = os.environ.get('VAS', f'{R}/build/ccs/vasm')
-MC = '/opt/homebrew/opt/llvm/bin/llvm-mc'
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from hostenv import llvm, BUILD
+VAS = os.environ.get('VAS', f'{BUILD}/vasm')
+MC = llvm('llvm-mc')
 B = f'{R}/work/build-o0' if os.path.isdir(f'{R}/work/build-o0') else '/Users/johandahlin/dev/vroom/work/build-o0'
 from multiprocessing import Pool
 def mc(t):

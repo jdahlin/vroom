@@ -12,11 +12,13 @@ the "N errors generated." line) and exits with the same status.
 """
 import difflib, os, re, subprocess, sys
 from multiprocessing import Pool
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from hostenv import llvm, BUILD
 
 R = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 D = f'{R}/ccs/vcc/tests/diag'
-CL = '/opt/homebrew/opt/llvm/bin/clang'
-VPP = f'{R}/build/ccs/vpp'
+CL = llvm('clang')
+VPP = f'{BUILD}/vpp'
 FL = ['--target=aarch64-linux-gnu', '-fsyntax-only', '-fno-color-diagnostics']
 
 
