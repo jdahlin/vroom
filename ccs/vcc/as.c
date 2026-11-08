@@ -1762,11 +1762,12 @@ static int cond_dir(As *a, Sv w, const char *p, const char *e, int *rc)
 
 /* .req names are case-insensitive; buckets chain entries newest first, so
  * the first match is the newest, as a scan from the end of a->al */
-static uint32_t al_hash(const char *s, size_t n)
+static inline uint32_t al_hash(const char *s, size_t n)
 {
-	uint32_t h = (uint32_t)n * 0x9e3779b1u;
-	for (size_t i = 0; i < n; i++) h = (h ^ (uint32_t)c_lower((unsigned char)s[i])) * 16777619u;
-	return (h ^ h >> 16) & (ALH - 1);
+	if (!n) return 0;
+	uint32_t h = (uint32_t)n * 0x9e3779b1u ^ (uint32_t)c_lower((unsigned char)s[0]) * 0x85ebca6bu ^
+		     (uint32_t)c_lower((unsigned char)s[n - 1]) * 0xc2b2ae35u;
+	return (h ^ h >> 15) & (ALH - 1);
 }
 
 static void al_rehash(As *a)
@@ -1783,7 +1784,8 @@ static int reg_alias(As *a, const char *s, size_t n, Sv *out)
 	if (!a->nal) return 0;
 	for (uint32_t i = a->alh[al_hash(s, n)]; i; i = a->al[i - 1].next) {
 		const Alias *x = &a->al[i - 1];
-		if (x->name.n == n && !strncasecmp(x->name.s, s, n)) { *out = x->reg; return 1; }
+		if (x->name.n == n && c_lower((unsigned char)x->name.s[0]) == c_lower((unsigned char)s[0]) &&
+		    !strncasecmp(x->name.s, s, n)) { *out = x->reg; return 1; }
 	}
 	return 0;
 }
@@ -1883,8 +1885,26 @@ static int parse_reg(As *a, const char *s, size_t n, A64Op *op, int depth)
 
 static int shift_kind(const char *s, size_t n)
 {
-	static const char *t[] = { "lsl", "lsr", "asr", "ror", "msl", "uxtb", "uxth", "uxtw", "uxtx", "sxtb", "sxth", "sxtw", "sxtx" };
-	for (int i = 0; i < 13; i++) if (sveqi(s, n, t[i])) return i;
+	if (n != 3 && n != 4) return -1;
+	uint32_t k = 0;
+	for (size_t i = 0; i < n; i++) k |= (uint32_t)c_lower((unsigned char)s[i]) << (8 * i);
+#define P(a, b, c, d) ((uint32_t)(a) | (uint32_t)(b) << 8 | (uint32_t)(c) << 16 | (uint32_t)(d) << 24)
+	switch (k) {	/* the order of A64_LSL ... A64_SXTX */
+	case P('l', 's', 'l', 0): return 0;
+	case P('l', 's', 'r', 0): return 1;
+	case P('a', 's', 'r', 0): return 2;
+	case P('r', 'o', 'r', 0): return 3;
+	case P('m', 's', 'l', 0): return 4;
+	case P('u', 'x', 't', 'b'): return 5;
+	case P('u', 'x', 't', 'h'): return 6;
+	case P('u', 'x', 't', 'w'): return 7;
+	case P('u', 'x', 't', 'x'): return 8;
+	case P('s', 'x', 't', 'b'): return 9;
+	case P('s', 'x', 't', 'h'): return 10;
+	case P('s', 'x', 't', 'w'): return 11;
+	case P('s', 'x', 't', 'x'): return 12;
+	}
+#undef P
 	return -1;
 }
 
