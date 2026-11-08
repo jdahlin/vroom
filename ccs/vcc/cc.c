@@ -31,7 +31,7 @@
 #include "arena.h"
 
 /* the per-TU tables, mapped once and reused (cc_init takes a set, cc_free gives it back) */
-static vmpool ccpool = VMPOOL_INIT(16);
+static vmpool ccpool = VMPOOL_INIT(17);
 static _Thread_local vmreg *ccr;
 
 static void *halloc(cc *c, size_t n)
@@ -204,9 +204,22 @@ static uint32_t ty_new(cc *c, int kind)
 
 static qty ty_ptr(cc *c, qty base)
 {
-	ctype t = { .kind = TY_PTR, .size = 8, .align = 8, .base = base };
+	uint32_t i = c->ptrc[base];
 
-	return QT(ty_intern(c, &t), 0);
+	/* the cache may be stale (a restored snapshot): the entry must still be the pointer */
+	if (likely(i && i < c->nty)) {
+		const ctype *p = &c->ty[i];
+
+		if (p->kind == TY_PTR && !p->flags && p->base == base && p->align == 8)
+			return QT(i, 0);
+	}
+	{
+		ctype t = { .kind = TY_PTR, .size = 8, .align = 8, .base = base };
+
+		i = ty_intern(c, &t);
+		c->ptrc[base] = i;
+		return QT(i, 0);
+	}
 }
 
 static qty ty_array(cc *c, qty elem, uint64_t n, int flags)
@@ -302,9 +315,15 @@ static qty ty_func(cc *c, qty ret, const qty *par, uint32_t n, int flags)
 		{
 			const ctype *x = &c->ty[e];
 
-			if (x->base == ret && x->n == n && x->flags == flags &&
-			    !memcmp(&c->params[x->aux], par, n * sizeof(qty)))
-				return QT(e, 0);
+			if (x->base == ret && x->n == n && x->flags == flags) {
+				const qty *xp = &c->params[x->aux];	/* (short lists: no memcmp call) */
+				uint32_t k = 0;
+
+				while (k < n && xp[k] == par[k])
+					k++;
+				if (k == n)
+					return QT(e, 0);
+			}
 		}
 	}
 }
@@ -3699,9 +3718,16 @@ static int mode_kind(cc *c, uint32_t id, bool sgn)
 	return 0;
 }
 
-static void attribute_list(cc *c, attrs *a)
+static inline bool at_attribute(cc *c)
 {
-	while (iskw(c, KW___attribute__) || iskw(c, KW___attribute)) {
+	int kw = kwof(tok(c));
+
+	return kw == KW___attribute__ || kw == KW___attribute;
+}
+
+__attribute__((noinline)) static void attribute_list_(cc *c, attrs *a)
+{
+	while (at_attribute(c)) {
 		next(c);
 		expect(c, T_LPAREN, "'('");
 		expect(c, T_LPAREN, "'('");
@@ -3813,8 +3839,33 @@ static void attribute_list(cc *c, attrs *a)
 	}
 }
 
+/* most declarators have none: keep the check inline */
+static inline void attribute_list(cc *c, attrs *a)
+{
+	if (at_attribute(c))
+		attribute_list_(c, a);
+}
+
+/* the 0/1 flags packed .. overloadable are 17 contiguous bytes after the u32 fields */
+_Static_assert(offsetof(attrs, packed) == 10 * sizeof(uint32_t) &&
+	       offsetof(attrs, overloadable) == offsetof(attrs, packed) + 16, "attrs layout");
+
+/* no attribute at all (padding excluded) */
+static inline bool attrs_empty(const attrs *a)
+{
+	const char *p = (const char *)a;
+	uint64_t w[7], o = 0;
+
+	memcpy(w, p, sizeof(w));
+	for (int i = 0; i < 7; i++)
+		o |= w[i];
+	return !o && !p[56];
+}
+
 static void merge_attrs(attrs *to, const attrs *from)
 {
+	if (attrs_empty(from))
+		return;
 	if (from->aligned > to->aligned)
 		to->aligned = from->aligned;
 	if (from->section) to->section = from->section;
@@ -3825,12 +3876,16 @@ static void merge_attrs(attrs *to, const attrs *from)
 	if (from->vecsize) to->vecsize = from->vecsize;
 	if (from->counted_by) to->counted_by = from->counted_by;
 	if (from->visibility) to->visibility = from->visibility;
-	to->packed |= from->packed, to->transparent |= from->transparent, to->used |= from->used;
-	to->unused |= from->unused, to->weak |= from->weak, to->noreturn |= from->noreturn;
-	to->constructor |= from->constructor, to->destructor |= from->destructor;
-	to->nonstring |= from->nonstring, to->may_alias |= from->may_alias, to->cold |= from->cold, to->error_fn |= from->error_fn;
-	to->gnu_inline |= from->gnu_inline, to->always_inline |= from->always_inline;
-	to->noinline |= from->noinline, to->overloadable |= from->overloadable;
+	/* the 0/1 flags packed .. overloadable: or them bytewise */
+	{
+		char *t = (char *)&to->packed;
+		const char *f = (const char *)&from->packed;
+		uint64_t a, b;
+
+		memcpy(&a, t, 8), memcpy(&b, f, 8), a |= b, memcpy(t, &a, 8);
+		memcpy(&a, t + 8, 8), memcpy(&b, f + 8, 8), a |= b, memcpy(t + 8, &a, 8);
+		t[16] |= f[16];
+	}
 }
 
 /* GNU asm("label") after a declarator */
@@ -3983,9 +4038,6 @@ static void struct_body(cc *c, uint32_t ti);
 static void enum_body(cc *c, uint32_t ti, attrs *after);
 static void declarator(cc *c, declr *d, bool abstract_ok, uint32_t *first, uint32_t *nops);
 
-/* in the cc, not _Thread_local: each such access was a call to _tlv_get_addr */
-#define tl_dops (c->dops)
-#define tl_ndops (c->ndops)
 
 static qty int_type(cc *c, int nlong, int sgn, int base, uint32_t loc)
 {
@@ -4285,10 +4337,10 @@ static void param_list(cc *c, dop *op)
 			declarator(c, &d, true, &first, &nops);
 			attribute_list(c, &d.at);
 			t = apply_declarator(c, ds.ty, first, nops);
-			tl_ndops = first;
+			c->ndops = first;
 			/* adjustments (C11 6.7.6.3p7-8) */
 			if (is_array(c, t)) {
-				const dop *ad = nops ? &tl_dops[first + nops - 1] : NULL;
+				const dop *ad = nops ? &c->dops[first + nops - 1] : NULL;
 				int q = ad && ad->kind == 1 ? ad->q : 0;
 
 				t = QT(QI(ty_ptr(c, T(c, t)->base)), q);
@@ -4485,7 +4537,7 @@ static void declarator(cc *c, declr *d, bool abstract_ok, uint32_t *first, uint3
 	}
 	/* assemble: pointers, suffixes reversed, inner ops */
 	{
-		uint32_t at = tl_ndops;
+		uint32_t at = c->ndops;
 		uint32_t n = (uint32_t)np + (uint32_t)ns + inops;
 
 		if (at + n > DOPS_MAX)
@@ -4494,29 +4546,29 @@ static void declarator(cc *c, declr *d, bool abstract_ok, uint32_t *first, uint3
 		if (inner) {
 			dop tmp[inops ? inops : 1];
 
-			memcpy(tmp, &tl_dops[ifirst], inops * sizeof(dop));
+			memcpy(tmp, &c->dops[ifirst], inops * sizeof(dop));
 			at = ifirst;
 			for (int i = 0; i < np; i++)
-				tl_dops[at + (uint32_t)i] = ptrs[i];
+				c->dops[at + (uint32_t)i] = ptrs[i];
 			for (int i = 0; i < ns; i++)
-				tl_dops[at + (uint32_t)np + (uint32_t)i] = sufs[ns - 1 - i];
-			memcpy(&tl_dops[at + (uint32_t)np + (uint32_t)ns], tmp, inops * sizeof(dop));
+				c->dops[at + (uint32_t)np + (uint32_t)i] = sufs[ns - 1 - i];
+			memcpy(&c->dops[at + (uint32_t)np + (uint32_t)ns], tmp, inops * sizeof(dop));
 		} else {
 			for (int i = 0; i < np; i++)
-				tl_dops[at + (uint32_t)i] = ptrs[i];
+				c->dops[at + (uint32_t)i] = ptrs[i];
 			for (int i = 0; i < ns; i++)
-				tl_dops[at + (uint32_t)np + (uint32_t)i] = sufs[ns - 1 - i];
+				c->dops[at + (uint32_t)np + (uint32_t)i] = sufs[ns - 1 - i];
 		}
 		*first = at;
 		*nops = n;
-		tl_ndops = at + n;
+		c->ndops = at + n;
 	}
 }
 
 static qty apply_declarator(cc *c, qty t, uint32_t first, uint32_t nops)
 {
 	for (uint32_t i = 0; i < nops; i++) {
-		const dop *o = &tl_dops[first + i];
+		const dop *o = &c->dops[first + i];
 
 		switch (o->kind) {
 		case 0:
@@ -4557,7 +4609,7 @@ static qty type_name(cc *c)
 		fatal(c, tok(c)->loc, "expected a type");
 	declarator(c, &d, true, &first, &nops);
 	t = apply_declarator(c, ds.ty, first, nops);
-	tl_ndops = first;
+	c->ndops = first;
 	if (d.name)
 		error(c, d.loc, "unexpected identifier in type name");
 	return t;
@@ -4565,12 +4617,38 @@ static qty type_name(cc *c)
 
 /* ---------------- struct / union / enum bodies ---------------- */
 
-static void struct_body(cc *c, uint32_t ti)
+/* member scratch for struct_body, per thread and kept across TUs: a stack
+ * (a nested body pushes its members above the enclosing one's) */
+typedef struct fscratch {
+	field *fs;
+	uint32_t *fa;		/* aligned() per member */
+	uint8_t *fp;		/* packed per member */
+	uint32_t n, cap;
+} fscratch;
+
+static _Thread_local fscratch tl_fscr;
+
+static void fscr_grow(fscratch *x, uint32_t need)
 {
-	uint32_t *fa = malloc(4096 * sizeof(uint32_t));
-	uint8_t *fp = malloc(4096);
-	field *fs = malloc(4096 * sizeof(field));
-	uint32_t nf = 0;
+	uint32_t cap = x->cap ? x->cap : 1024;
+
+	while (cap < need)
+		cap *= 2;
+	x->fs = realloc(x->fs, cap * sizeof(field));
+	x->fa = realloc(x->fa, cap * sizeof(uint32_t));
+	x->fp = realloc(x->fp, cap);
+	if (!x->fs || !x->fa || !x->fp) {
+		fputs("vcc: out of memory\n", stderr);
+		abort();
+	}
+	x->cap = cap;
+}
+
+__attribute__((noinline)) static void struct_body(cc *c, uint32_t ti)
+{
+	fscratch *x = &tl_fscr;
+	uint32_t base = x->n, nf = 0;
+	field *fs;
 	tag *r;
 	attrs post = { 0 };
 
@@ -4596,10 +4674,14 @@ static void struct_body(cc *c, uint32_t ti)
 			 * tagged or typedef'd complete record */
 			if (is_record(c, ds.ty) && (!c->tags[T(c, ds.ty)->aux].name ||
 						    (c->o->ms_anon && complete(c, ds.ty)))) {
-				fs[nf] = (field){ .ty = ds.ty, .loc = ds.loc };
-				fa[nf] = ds.at.aligned > ds.align ? ds.at.aligned : ds.align;
-				fp[nf] = ds.at.packed;
-				nf++;
+				if (nf >= 4096)
+					fatal(c, ds.loc, "too many members");
+				if (base + nf >= x->cap)
+					fscr_grow(x, base + nf + 1);
+				x->fs[base + nf] = (field){ .ty = ds.ty, .loc = ds.loc };
+				x->fa[base + nf] = ds.at.aligned > ds.align ? ds.at.aligned : ds.align;
+				x->fp[base + nf] = ds.at.packed;
+				x->n = base + ++nf;
 			}
 			next(c);
 			continue;
@@ -4613,7 +4695,7 @@ static void struct_body(cc *c, uint32_t ti)
 			if (!is(c, T_COLON)) {
 				declarator(c, &d, false, &first, &nops);
 				t = apply_declarator(c, ds.ty, first, nops);
-				tl_ndops = first;
+				c->ndops = first;
 			} else {
 				memset(&d, 0, sizeof(d));
 				d.loc = tok(c)->loc;
@@ -4651,9 +4733,12 @@ static void struct_body(cc *c, uint32_t ti)
 				error(c, d.loc, "field has incomplete type");
 			if (nf >= 4096)
 				fatal(c, d.loc, "too many members");
-			fa[nf] = d.at.aligned > ds.align ? d.at.aligned : ds.align;
-			fp[nf] = d.at.packed;
-			fs[nf++] = f;
+			if (base + nf >= x->cap)
+				fscr_grow(x, base + nf + 1);
+			x->fa[base + nf] = d.at.aligned > ds.align ? d.at.aligned : ds.align;
+			x->fp[base + nf] = d.at.packed;
+			x->fs[base + nf] = f;
+			x->n = base + ++nf;
 			if (!accept(c, T_COMMA))
 				break;
 		}
@@ -4664,8 +4749,7 @@ static void struct_body(cc *c, uint32_t ti)
 	attribute_list(c, &post);
 	r = &c->tags[ti];
 	r->f = halloc(c, (nf + 1) * sizeof(field));
-	memcpy(r->f, fs, nf * sizeof(field));
-	free(fs);
+	memcpy(r->f, &x->fs[base], nf * sizeof(field));
 	fs = r->f;
 	r->nfield = nf;
 	if (post.packed)
@@ -4680,10 +4764,9 @@ static void struct_body(cc *c, uint32_t ti)
 				;	/* GNU: flexible array not at the end */
 			r->flags |= RF_FLEX;
 		}
-	lay_record(c, r, fa, fp);
+	lay_record(c, r, &x->fa[base], &x->fp[base]);
 	r->flags = (r->flags | RF_COMPLETE) & ~(uint32_t)RF_BEING_DEFINED;
-	free(fa);
-	free(fp);
+	x->n = base;
 }
 
 static void enum_body(cc *c, uint32_t ti, attrs *after)
@@ -5279,6 +5362,8 @@ static uint32_t new_attrs(cc *c, const attrs *a)
 
 static void apply_sym_attrs(cc *c, sym *s, const attrs *a)
 {
+	if (attrs_empty(a))
+		return;		/* (no record: sym_attrs() in emit.c reads attrs 0 as none) */
 	if (s->attrs)
 		merge_attrs(&c->attr[s->attrs], a);
 	else
@@ -5671,7 +5756,7 @@ static void declaration(cc *c, vec *out, bool file)
 
 		declarator(c, &d, false, &first, &nops);
 		t = apply_declarator(c, ds.ty, first, nops);
-		tl_ndops = first;
+		c->ndops = first;
 		asm_label(c, &d.at);
 		attribute_list(c, &d.at);
 		if (ds.auto_type) {
@@ -6272,7 +6357,7 @@ static void translation_unit(cc *c)
 			continue;
 		}
 		declaration(c, NULL, true);
-		tl_ndops = 0;
+		c->ndops = 0;
 	}
 }
 
@@ -6602,9 +6687,11 @@ static void cc_init(cc *c, pp *p, const cc_opts *o)
 	c->toplevel = vmreg_get(&ccr[13], (size_t)1 << 26, "cc.toplevel");
 	c->tlasm = vmreg_get(&ccr[14], (size_t)1 << 24, "cc.tlasm");
 	c->heap = c->hp = vmreg_get(&ccr[15], (size_t)1 << 32, "cc.heap");
+	c->ptrc = vmreg_get(&ccr[16], (size_t)1 << 30, "cc.ptrc");
 	c->hend = c->heap + ((size_t)1 << 32);
 	c->dops = halloc(c, DOPS_MAX * sizeof(dop));
-	tl_ndops = 0;
+	c->ndops = 0;
+	tl_fscr.n = 0;
 	c->tyhcap = 1 << 16;
 	c->tyhash = halloc(c, c->tyhcap * sizeof(uint32_t));
 	memset(c->tyhash, 0, c->tyhcap * sizeof(uint32_t));
@@ -6698,6 +6785,7 @@ static void cc_free(cc *c)
 	vmreg_put(&ccr[13], USED(c->ntoplevel, c->toplevel));
 	vmreg_put(&ccr[14], USED(c->ntlasm, c->tlasm));
 	vmreg_put(&ccr[15], (size_t)(c->hp - c->heap) + 64);
+	vmreg_put(&ccr[16], ((size_t)c->nty + 2) * 8 * sizeof(*c->ptrc));	/* indexed by qty */
 #undef USED
 	vmpool_give(&ccpool, ccr);
 	ccr = NULL;

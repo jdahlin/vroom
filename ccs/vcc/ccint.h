@@ -83,6 +83,7 @@ struct cc {
 	qty *params;
 	uint32_t nparams;
 	uint32_t *fnhash, fnhcap, nfn;
+	uint32_t *ptrc;		/* qty -> type index of a pointer to it (a cache, checked on use) */
 
 	tag *tags;
 	uint32_t ntag;
@@ -106,6 +107,8 @@ struct cc {
 	uint32_t nasm;
 
 	char *heap, *hp, *hend;	/* bump allocator for everything else */
+	struct dop *dops;	/* declarator op stack (cc.c) */
+	uint32_t ndops;
 
 	/* scopes: identifier id -> innermost binding (sym index) */
 	uint32_t *odir[NDIR], *tdir[NDIR], *ldir[NDIR];
@@ -140,8 +143,6 @@ struct cc {
 	uint32_t ntlasm;
 	uint32_t ndiag;		/* diagnostics reported */
 	struct dcst *dc;	/* declaration cache (ccsnap.c), NULL: off */
-	struct dop *dops;	/* declarator operations (cc.c): a per-TU stack in the heap */
-	uint32_t ndops;
 };
 
 

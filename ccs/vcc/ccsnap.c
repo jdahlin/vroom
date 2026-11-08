@@ -182,7 +182,7 @@ static void code_cc(coder *k, cc *s, bool enc)
 {
 #define P(x) ((x) = enc ? enc_ptr(k, (x)) : dec_ptr(k, (x)))
 	P(s->tyhash);
-	P(s->fnhash);
+	P(s->fnhash);	/* (dops: the TU keeps its own, see snap_restore) */
 	for (uint32_t i = 0; i < NDIR; i++) {
 		P(s->odir[i]);
 		P(s->tdir[i]);
@@ -327,7 +327,7 @@ static void snap_restore(cc *c, const dcsnap *s, uint32_t base)
 	c->nodes = keep.nodes, c->lists = keep.lists, c->ipool = keep.ipool, c->fpool = keep.fpool;
 	c->strs = keep.strs, c->labels = keep.labels, c->attr = keep.attr, c->asms = keep.asms;
 	c->sstack = keep.sstack, c->toplevel = keep.toplevel, c->tlasm = keep.tlasm;
-	c->heap = keep.heap, c->hend = keep.hend;
+	c->heap = keep.heap, c->hend = keep.hend, c->ptrc = keep.ptrc;
 	c->hp = c->heap + s->a[A_HEAP].n;
 	c->dc = keep.dc;
 	c->dops = keep.dops, c->ndops = keep.ndops;	/* (scratch in this TU's heap) */
