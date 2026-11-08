@@ -1380,9 +1380,15 @@ static __attribute__((noinline)) void next_exp_slow(pp *p, ptok *t, uintptr_t e)
 		m = (const pmacro *)e;
 		if (m->kind == MK_FUNC && !peek_lparen(p))
 			return;
-		if (expand(p, m, t))
-			return;
-		raw_fast(p, t);
+		switch (expand(p, m, t)) {
+		case 1:
+			return;		/* t is the result */
+		case 0:
+			raw_fast(p, t);
+			break;
+		default:
+			break;		/* t is the next raw token */
+		}
 		if (t->kind != T_IDENT || (t->flags & PF_NOEXP))
 			return;
 		e = mread_tok(p, t, 0);
@@ -1998,11 +2004,14 @@ static void subst_simple(pp *p, const pmacro *m, margs *a, uint8_t nf, uint32_t 
 		for (uint32_t i = 0; i < nb; i++) {
 			uint32_t k = pidx[i];
 
-			if (k && !a->prest[k - 1])
+			if (!k) {
+				n++;
+				continue;
+			}
+			if (!a->prest[k - 1])
 				preexpand(p, a, k - 1);
+			n += a->preln[k - 1];
 		}
-		for (uint32_t i = 0; i < nb; i++)
-			n += pidx[i] ? a->preln[pidx[i] - 1] : 1;
 	} else {
 		n = nb;
 	}
@@ -2148,7 +2157,7 @@ static void single(pp *p, const pmacro *m, ptok *t, uint8_t nf, uint32_t eloc)
 
 static int builtin(pp *p, const pmacro *m, ptok *t);
 
-/* expand macro m named by t; 1 if t now holds the result token */
+/* expand macro m named by t; 1 if t now holds the result token, 2 if the next raw one */
 static int expand(pp *p, const pmacro *m, ptok *t)
 {
 	uint8_t nf = t->flags & (TF_SOL | TF_SPACE);
@@ -2177,9 +2186,13 @@ static int expand(pp *p, const pmacro *m, ptok *t)
 		c->src = m->src;
 		c->loc = t->loc;
 		c->mid = m->name;
-		c->first = 0x80 | nf;
 		mdisable(p, m->name);
-		return 0;
+		/* its first token, as raw() would read it next (the context's "first" applied) */
+		c->i = 1;
+		vfill(t, &m->body[0], m->src, c->loc);
+		t->flags = (t->flags & ~(TF_SOL | TF_SPACE)) | nf | p->pend;
+		p->pend = 0;
+		return 2;
 	}
 	if (!collect(p, m, t, &a, &rp))
 		return 1;
