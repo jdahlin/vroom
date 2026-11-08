@@ -9,4 +9,7 @@ typedef struct ppd_env {
 int ppd_run(int argc, char **argv, const ppd_env *env);
 /* token-by-token comparison of ours[0..on) with the file refpath (0: same) */
 int ppd_compare(const char *ours, size_t on, const char *refpath);
+/* -c phase totals (ns): cc_run (pp + parse + codegen; ppd_ns_emit: codegen
+ * + assembler alone), finishing and writing objects; object bytes */
+extern _Atomic unsigned long long ppd_ns_cc, ppd_ns_emit, ppd_ns_obj, ppd_bytes_obj;
 #endif

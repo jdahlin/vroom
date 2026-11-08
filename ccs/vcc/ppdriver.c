@@ -10,6 +10,10 @@
  * output is compared with REF.i token by token instead (vcc's lexer: kind
  * and spelling); the first difference is shown, status 1.
  *
+ * With -c the TU is compiled (C: cc.c + emit.c, .S: as.c) into an ELF
+ * object, written with one write(); the dependency file is written as for -E.
+ * Each thread keeps one assembler, one ElfObj and one output buffer.
+ *
  *   VPP_TIME=1   report the preprocessing time on the error fd
  */
 #include <errno.h>
@@ -27,6 +31,8 @@
 #include "pp.h"
 #include "cc.h"
 #include "ppdriver.h"
+#include "as.h"
+#include "elf.h"
 #include "ppdata-predef.inc"
 
 typedef struct buf {
@@ -281,6 +287,66 @@ static int write_deps(const pp *p, const char *cwd, const char *depfile, const c
 	return r;
 }
 
+/* phase times over all -c jobs (ns): front end + codegen, assembler, finish + write */
+_Atomic unsigned long long ppd_ns_cc, ppd_ns_emit, ppd_ns_obj, ppd_bytes_obj;
+
+static unsigned long long nsnow(void)
+{
+	struct timespec ts;
+
+	clock_gettime(CLOCK_MONOTONIC, &ts);
+	return (unsigned long long)ts.tv_sec * 1000000000ull + (unsigned long long)ts.tv_nsec;
+}
+
+/* per-thread object state: assembler, ELF writer, serialised output */
+static _Thread_local As *tl_as;
+static _Thread_local ElfObj *tl_obj;
+static _Thread_local uint8_t *tl_objbuf;
+#define OBJBUF_CAP ((size_t)1 << 32)
+
+static void obj_state(void)
+{
+	if (tl_as)
+		return;
+	tl_as = as_new();
+	tl_obj = elf_new();
+	tl_objbuf = mmap(NULL, OBJBUF_CAP, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANON | MAP_NORESERVE, -1, 0);
+	if (tl_objbuf == MAP_FAILED)
+		abort();
+}
+
+/* lay out tl_obj and write it to out */
+static int write_obj(const char *cwd, const char *out, int outfd, int errfd)
+{
+	unsigned long long t0 = nsnow();
+	size_t n = elf_finish(tl_obj);
+	int r;
+
+	if (!n || tl_obj->has_err) {
+		dprintf(errfd, "vcc: error: %s\n", tl_obj->err[0] ? tl_obj->err : "cannot lay out the object");
+		return 1;
+	}
+	if (n > OBJBUF_CAP) {
+		dprintf(errfd, "vcc: error: object too large\n");
+		return 1;
+	}
+	elf_emit(tl_obj, tl_objbuf);
+	r = write_out(cwd, out, outfd, (const char *)tl_objbuf, n, errfd);
+	ppd_ns_obj += nsnow() - t0;
+	ppd_bytes_obj += n;
+	return r;
+}
+
+/* the default object name: the source's basename with .o */
+static const char *obj_name(const char *main_file, char *buf, size_t cap)
+{
+	const char *b = strrchr(main_file, '/') ? strrchr(main_file, '/') + 1 : main_file;
+	const char *dot = strrchr(b, '.');
+
+	snprintf(buf, cap, "%.*s.o", (int)(dot ? dot - b : (long)strlen(b)), b);
+	return buf;
+}
+
 int ppd_run(int argc, char **argv, const ppd_env *env)
 {
 	const char *dirs_q[256], *dirs_i[1024], *dirs_s[256], *dirs_a[256], *all[2048];
@@ -296,7 +362,8 @@ int ppd_run(int argc, char **argv, const ppd_env *env)
 	char *pmap = NULL;
 	double t0;
 	pp *p;
-	int syntax = 0, layout = 0, ms_anon = 0, short_wchar = 0, tokhash = 0, emit = 0;
+	int syntax = 0, layout = 0, ms_anon = 0, short_wchar = 0, tokhash = 0, emit = 0, objmode = 0;
+	char objbuf[1024];
 
 	for (int i = 1; i < argc; i++) {
 		const char *a = argv[i];
@@ -306,6 +373,7 @@ int ppd_run(int argc, char **argv, const ppd_env *env)
 		if (!strcmp(a, "--cmp") && i + 1 < argc) { cmp = argv[++i]; continue; }
 		if (!strcmp(a, "-fsyntax-only")) { syntax = 1; continue; }
 		if (!strcmp(a, "-S")) { syntax = 1; emit = 1; continue; }
+		if (!strcmp(a, "-c")) { objmode = 1; continue; }
 		if (!strcmp(a, "-fms-anonymous-structs") || !strcmp(a, "-fms-extensions")) { ms_anon = 1; continue; }
 		if (!strcmp(a, "-fshort-wchar")) { short_wchar = 1; continue; }
 		if (!strcmp(a, "--vcc-layout-checks")) { syntax = 1; layout = 1; continue; }
@@ -361,6 +429,15 @@ int ppd_run(int argc, char **argv, const ppd_env *env)
 	if (!main_file) {
 		dprintf(errfd, "vcc: error: no input file\n");
 		return 2;
+	}
+	if (objmode) {
+		obj_state();
+		if (!out)
+			out = obj_name(main_file, objbuf, sizeof(objbuf));
+		if (!asm_mode) {
+			syntax = 1;
+			emit = 2;
+		}
 	}
 	/* search path: -iquote, -I, -isystem, -idirafter; exact duplicates dropped */
 	for (int k = 0; k < nq; k++) all[n++] = dirs_q[k];
@@ -480,7 +557,9 @@ int ppd_run(int argc, char **argv, const ppd_env *env)
 
 		co.emit = emit;
 		co.nthreads = getenv("VCC_THREADS") ? atoi(getenv("VCC_THREADS")) : 1;
-		if ((layout || emit) && out && strcmp(out, "-")) {
+		co.obj = tl_obj;
+		co.as = tl_as;
+		if ((layout || emit == 1) && out && strcmp(out, "-")) {
 			char path[4096];
 
 			if (out[0] != '/' && env->cwd)
@@ -495,9 +574,18 @@ int ppd_run(int argc, char **argv, const ppd_env *env)
 			}
 			co.outfd = fd;
 		}
-		status = cc_run(p, &co) || pp_errors(p) ? 1 : 0;
+		{
+			unsigned long long t1 = nsnow();
+
+			status = cc_run(p, &co) || pp_errors(p) ? 1 : 0;
+			ppd_ns_cc += nsnow() - t1;
+		}
 		if (fd >= 0)
 			close(fd);
+		if (!status && emit == 2)
+			status = write_obj(env->cwd, out, env->outfd, errfd);
+		if (!status && emit == 2 && depfile)
+			status = write_deps(p, env->cwd, depfile, deptarget ? deptarget : out, errfd);
 		if (getenv("VPP_TIME"))
 			dprintf(errfd, "vcc: %.1f ms\n", (now() - t0) * 1e3);
 		goto done;
@@ -520,6 +608,18 @@ int ppd_run(int argc, char **argv, const ppd_env *env)
 		status = 1;
 	} else if (cmp) {
 		status = ppd_compare(o.p, o.n, cmp);
+	} else if (objmode) {
+		const char *msg;
+
+		as_set_dir(tl_as, env->cwd);
+		if (as_run(tl_as, tl_obj, o.p, o.n, main_file, &msg)) {
+			dprintf(errfd, "vcc: error: %s\n", msg);
+			status = 1;
+		} else {
+			status = write_obj(env->cwd, out, env->outfd, errfd);
+		}
+		if (!status && depfile)
+			status = write_deps(p, env->cwd, depfile, deptarget ? deptarget : out, errfd);
 	} else {
 		status = write_out(env->cwd, out, env->outfd, o.p, o.n, errfd);
 		if (!status && depfile)

@@ -17,7 +17,7 @@
 #include "elf.h"
 
 /* ---- registers ---- */
-enum { A64_X, A64_W, A64_V, A64_Q, A64_D, A64_S, A64_H, A64_B };	/* A64Op.cls */
+enum { A64_X, A64_W, A64_V, A64_Q, A64_D, A64_S, A64_H, A64_B, A64_Z, A64_P };	/* A64Op.cls (Z/P: SVE) */
 #define A64_ZR 31	/* xzr/wzr (A64Op.sp == 0) */
 #define A64_SP 31	/* sp/wsp  (A64Op.sp == 1) */
 
@@ -64,6 +64,7 @@ typedef struct {
 	uint8_t hassym;		/* IMM/MEM offset: v has symbols (not a constant) */
 	uint8_t hash;		/* IMM: written with '#' */
 	uint8_t wb;		/* REG: followed by '!' (MOPS) */
+	uint8_t mulvl;		/* MEM: offset followed by ', mul vl' (SVE) */
 	int64_t imm;		/* IMM value, MEM offset, SHIFT amount */
 	double fimm;		/* FIMM */
 	ElfVal v;		/* symbolic part (v.c holds the constant part) */

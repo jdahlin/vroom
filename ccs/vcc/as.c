@@ -61,6 +61,7 @@ typedef struct { uint8_t *base; size_t used, cap; } Region;
 
 struct As {
 	ElfObj *o;
+	const char *dir;	/* relative .incbin paths (NULL: process cwd) */
 	Frame fr[MAXFR]; int nfr;
 	Cond cs[MAXCOND]; int ncs;
 	uint32_t cur, prev;	/* current/previous frag */
@@ -883,7 +884,13 @@ static int d_incbin(As *a, const char *p, const char *e)
 		p = ws(p, e);
 		if (p < e && *p == ',') { p++; if (abs_expr(a, &p, e, &count)) return -1; }
 	}
-	int fd = open(path, O_RDONLY);
+	int fd;
+	if (a->dir && path[0] != '/') {
+		char full[2048];
+		snprintf(full, sizeof full, "%s/%s", a->dir, path);
+		fd = open(full, O_RDONLY | O_CLOEXEC);
+	} else
+		fd = open(path, O_RDONLY | O_CLOEXEC);
 	if (fd < 0) return err(a, "Could not find incbin file '%s'", path);
 	struct stat st;
 	fstat(fd, &st);
@@ -1576,7 +1583,17 @@ static int parse_reg(As *a, const char *s, size_t n, A64Op *op, int depth)
 		if (c == 'v' && (r = parse_regnum(s + 1, n - 1, 31)) >= 0) {
 			op->kind = A64O_VREG; op->cls = A64_V; op->reg = (uint8_t)r; op->arr = A64_ARR_NONE; return 1;
 		}
+		if ((c == 'z' || c == 'p') && (r = parse_regnum(s + 1, n - 1, c == 'z' ? 31 : 15)) >= 0) {
+			op->kind = A64O_REG; op->cls = c == 'z' ? A64_Z : A64_P; op->reg = (uint8_t)r; return 1;
+		}
 		return 0;
+	}
+	if (c == 'p' || c == 'z') {	/* SVE: p0.b, z1.d */
+		int r = parse_regnum(s + 1, bn - 1, c == 'z' ? 31 : 15);
+		int ar = r < 0 ? -1 : arrangement(dot + 1, n - bn - 1);
+		if (ar < A64_ELB || ar > A64_ELQ) return 0;
+		op->kind = A64O_REG; op->cls = c == 'z' ? A64_Z : A64_P; op->reg = (uint8_t)r; op->arr = (uint8_t)ar;
+		return 1;
 	}
 	if (c != 'v') return 0;
 	int r = parse_regnum(s + 1, bn - 1, 31);
@@ -1688,6 +1705,14 @@ static int parse_mem(As *a, const char **pp, const char *e, A64Op *op)
 			A64Op im; memset(&im, 0, sizeof im);
 			if (parse_imm(a, &p, e, &im)) return -1;
 			op->imm = im.imm; op->v = im.v; op->hassym = im.hassym; op->mod = im.mod; op->hasamt = 1;
+			p = ws(p, e);
+			if (p < e && *p == ',') {	/* SVE: #imm, mul vl */
+				const char *q = ws(p + 1, e);
+				if (e - q >= 3 && sveqi(q, 3, "mul")) {
+					q = ws(q + 3, e);
+					if (e - q >= 2 && sveqi(q, 2, "vl")) { op->mulvl = 1; p = q + 2; }
+				}
+			}
 		}
 	}
 	p = ws(p, e);
@@ -2139,7 +2164,17 @@ void as_free(As *a)
 	munmap(a, sizeof *a);
 }
 
-int as_run(As *a, ElfObj *o, const char *text, size_t len, const char *name, const char **msg)
+void as_set_dir(As *a, const char *dir) { a->dir = dir; }
+
+/*
+ * A persistent assembler bound to one ElfObj for a whole TU: as_begin()
+ * resets both, as_snippet() runs statements in the current section
+ * (macros, .set variables, numeric labels and the section stack persist
+ * across snippets, as in one source file), as_end() flushes literal pools
+ * and resolves variables.  The text of every snippet must stay valid until
+ * as_end() (macro bodies point into it).  as_run() is the three in one.
+ */
+void as_begin(As *a, ElfObj *o, const char *name)
 {
 	a->o = o; a->nfr = 0; a->ncs = 0; a->nss = 0; a->err = 0; a->msg[0] = 0;
 	a->xs.used = 0; a->defs.used = 0; a->ninst = 0; a->nal = 0; a->alcap = 0; a->al = 0;
@@ -2158,6 +2193,12 @@ int as_run(As *a, ElfObj *o, const char *text, size_t len, const char *name, con
 	uint32_t text_sec = std_section(a, ".text");
 	elf_sec(o, text_sec)->align = 2;
 	a->cur = a->prev = text_sec;
+}
+
+int as_snippet(As *a, const char *text, size_t len)
+{
+	ElfObj *o = a->o;
+	if (a->err) return -1;
 	push_frame(a, text, len, FR_FILE, 0);
 	while (a->nfr && !a->err) {
 		Frame *f = &a->fr[a->nfr - 1];
@@ -2173,6 +2214,13 @@ int as_run(As *a, ElfObj *o, const char *text, size_t len, const char *name, con
 		}
 		if (o->has_err) { err(a, "%s", o->err); break; }
 	}
+	a->nfr = 0;
+	return a->err ? -1 : 0;
+}
+
+int as_end(As *a)
+{
+	ElfObj *o = a->o;
 	if (!a->err && a->ncs) err(a, "unmatched .ifs or .elses");
 	if (!a->err && a->npool) flush_pools(a);
 	if (!a->err) {
@@ -2196,6 +2244,42 @@ int as_run(As *a, ElfObj *o, const char *text, size_t len, const char *name, con
 			else { err(a, "unsupported variable '%s'", s->name); break; }
 		}
 	}
-	if (a->err) { *msg = a->msg; return -1; }
+	return a->err ? -1 : 0;
+}
+
+const char *as_msg(const As *a) { return a->msg; }
+uint32_t as_frag(const As *a) { return a->cur; }
+int as_failed(const As *a) { return a->err; }
+
+/* a symbol as an operand names it (".L" names are temporary) */
+uint32_t as_sym(As *a, const char *name, size_t len) { return sym(a, name, len); }
+
+/* sym + c as an operand expression: .set variables substituted, folded */
+ElfVal as_val(As *a, uint32_t y, int64_t c)
+{
+	Val v = { y, 0, 0 };
+	if (a->vcount) {
+		Var *vr = var_slot(a, y, 0);
+		if (vr && vr->v.add != (uint32_t)-1) v = vr->v;
+	}
+	fold(a, &v);
+	v.c += c;
+	fold(a, &v);
+	return v;
+}
+
+/* "y:" at the current position */
+int as_label(As *a, uint32_t y)
+{
+	ElfSym *ys = elf_symp(a->o, y);
+	if (ys->flags & ESYM_DEFINED) return err(a, "invalid symbol redefinition");
+	elf_define(a->o, y, a->cur, elf_frag(a->o, a->cur)->size);
+	return 0;
+}
+
+int as_run(As *a, ElfObj *o, const char *text, size_t len, const char *name, const char **msg)
+{
+	as_begin(a, o, name);
+	if (as_snippet(a, text, len) || as_end(a)) { *msg = a->msg; return -1; }
 	return 0;
 }

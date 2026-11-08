@@ -12,15 +12,20 @@
  *     -print-file-name, and links with options vld refuses;
  *   - runs preprocessing jobs (-E: kbuild's linker scripts and device
  *     trees) itself, with vcc's preprocessor (ppdriver.c), in this thread;
- *   - forwards everything else to the current backend: C compiles to
- *     vroomd (clang, temporary until vcc's own compiler exists), links to
- *     vroom-ld/ld.lld.
+ *   - compiles -c of .c (pp.c + cc.c + emit.c) and .S (pp.c + as.c) itself,
+ *     in this thread, into the .o and dependency file kbuild names; the
+ *     header cache is shared by all jobs, everything else is per thread;
+ *   - forwards everything else to the current backend: compiles vcc cannot
+ *     do (the vDSO: -mcmodel=tiny/PIC; any TU vcc fails on) to vroomd
+ *     (clang), links to vroom-ld/ld.lld.
  *
  * No allocation per request: buffers are mmap'ed once per worker.
  *
  *   vccd [--sock PATH] [--backend-sock PATH] [--ld PATH] [--lld PATH] [-j N]
  *   VCC_LOG=1   log one line per request to stderr (kind, ms, argv[0..2])
  *   VCC_PP=0    send -E jobs to the backend too (clang)
+ *   VCC_CC=0    send -c jobs to the backend too (clang)
+ * On SIGUSR1 (and at exit) the counts are printed: own compiles, fallbacks.
  */
 #include <errno.h>
 #include <fcntl.h>
@@ -51,9 +56,9 @@
 static const char *backend_sock = "/tmp/vroomd.sock";
 static const char *ld_backend;		/* full links (vroom-ld) */
 static const char *lld = "/opt/homebrew/bin/ld.lld";
-static bool log_requests, own_pp = true;
+static bool log_requests, own_pp = true, own_cc = true;
 
-static atomic_ulong n_probe, n_fwd, n_spawn, n_pp;
+static atomic_ulong n_probe, n_fwd, n_spawn, n_pp, n_cc, n_fallback;
 
 /* ---------------- work queue: accepted sockets ---------------- */
 
@@ -412,6 +417,40 @@ static bool cc_is_pp(const struct req *r)
 						  strstr(last, ".dts") || strstr(last, ".lds"));
 }
 
+/* ---------------- compiling ---------------- */
+
+/*
+ * -c of a named .c or .S file for aarch64 Linux: vcc compiles it.  Not:
+ * host programs (Mach-O), the vDSO (-mcmodel=tiny, position independent),
+ * stdin, anything with -x other than c/assembler-with-cpp.
+ */
+static bool cc_is_compile(const struct req *r)
+{
+	bool c = false, linux_target = false;
+	const char *last = r->argv[r->argc - 1];
+	size_t n = strlen(last);
+
+	if (!own_cc || last[0] == '-' || n < 3 || last[n - 2] != '.' || (last[n - 1] != 'c' && last[n - 1] != 'S'))
+		return false;
+	for (int i = 1; i < r->argc; i++) {
+		const char *a = r->argv[i];
+
+		if (a[0] != '-')
+			continue;
+		if (!strcmp(a, "-c"))
+			c = true;
+		else if (!strncmp(a, "--target=aarch64-", 17) && strstr(a, "-linux"))
+			linux_target = true;
+		else if (!strcmp(a, "-E") || !strcmp(a, "-S") || !strcmp(a, "-") || !strcmp(a, "-mcmodel=tiny") ||
+			 !strcmp(a, "-fpic") || !strcmp(a, "-fPIC") || !strcmp(a, "-shared") || !strcmp(a, "-emit-llvm"))
+			return false;
+		else if (!strcmp(a, "-x") && i + 1 < r->argc && strcmp(r->argv[i + 1], "c") &&
+			 strcmp(r->argv[i + 1], "assembler-with-cpp"))
+			return false;
+	}
+	return c && linux_target;
+}
+
 /* ---------------- forwarding ---------------- */
 
 /* relay the request unchanged to another vroom-protocol server */
@@ -549,9 +588,31 @@ static int handle(const struct req *r, const char **kind)
 		atomic_fetch_add(&n_pp, 1);
 		return ppd_run(r->argc, r->argv, &e);
 	}
-	*kind = "cc";
+	if (cc_is_compile(r)) {
+		/* diagnostics only in the log: a TU vcc fails on goes to clang, which reports */
+		ppd_env e = { r->cwd, r->fds[1], log_requests ? 2 : -1 };
+
+		if (ppd_run(r->argc, r->argv, &e) == 0) {
+			*kind = "cc-own";
+			atomic_fetch_add(&n_cc, 1);
+			return 0;
+		}
+		atomic_fetch_add(&n_fallback, 1);
+		if (log_requests)
+			fprintf(stderr, "vccd fallback to clang: %s\n", r->argv[r->argc - 1]);
+		*kind = "cc-fallbk";
+	} else {
+		*kind = "cc";
+	}
 	atomic_fetch_add(&n_fwd, 1);
 	return forward(r, backend_sock);
+}
+
+static void print_counts(void)
+{
+	fprintf(stderr, "vccd: %lu probes, %lu -E, %lu compiled by vcc, %lu fell back to clang, %lu forwarded in all, %lu spawned\n",
+		atomic_load(&n_probe), atomic_load(&n_pp), atomic_load(&n_cc), atomic_load(&n_fallback),
+		atomic_load(&n_fwd), atomic_load(&n_spawn));
 }
 
 static void *worker_main(void *arg)
@@ -614,6 +675,7 @@ int main(int argc, char **argv)
 	}
 	log_requests = getenv("VCC_LOG");
 	own_pp = !getenv("VCC_PP") || strcmp(getenv("VCC_PP"), "0");
+	own_cc = !getenv("VCC_CC") || strcmp(getenv("VCC_CC"), "0");
 	signal(SIGPIPE, SIG_IGN);
 
 	unlink(sock);
@@ -630,7 +692,7 @@ int main(int argc, char **argv)
 		pthread_attr_t at;
 
 		pthread_attr_init(&at);
-		pthread_attr_setstacksize(&at, 256 << 10);
+		pthread_attr_setstacksize(&at, 16 << 20);	/* compiles recurse (parser, emitter) */
 		pthread_create(&t, &at, worker_main, NULL);
 		pthread_attr_destroy(&at);
 	}
@@ -642,6 +704,12 @@ int main(int argc, char **argv)
 		perror("vccd: kqueue");
 		return 1;
 	}
+	signal(SIGUSR1, SIG_IGN);
+	signal(SIGTERM, SIG_IGN);
+	EV_SET(&ev, SIGUSR1, EVFILT_SIGNAL, EV_ADD, 0, 0, NULL);
+	kevent(kq, &ev, 1, NULL, 0, NULL);
+	EV_SET(&ev, SIGTERM, EVFILT_SIGNAL, EV_ADD, 0, 0, NULL);
+	kevent(kq, &ev, 1, NULL, 0, NULL);
 	for (;;) {
 		struct kevent out;
 
@@ -650,6 +718,12 @@ int main(int argc, char **argv)
 				continue;
 			perror("vccd: kevent");
 			return 1;
+		}
+		if (out.filter == EVFILT_SIGNAL) {
+			print_counts();
+			if (out.ident == SIGTERM)
+				exit(0);
+			continue;
 		}
 		for (;;) {
 			int c = accept(ls, NULL, NULL);

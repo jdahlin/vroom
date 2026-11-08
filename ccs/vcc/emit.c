@@ -51,6 +51,9 @@
 
 #include "ccint.h"
 #include "emit.h"
+#include "as.h"
+#include "elf.h"
+#include "a64.h"
 
 #define N(i) (&c->nodes[i])
 #define T(c, t) CT(c, t)
@@ -404,6 +407,7 @@ typedef struct emitter {
 	_Atomic uint32_t newmf;		/* marked this round */
 	_Atomic uint32_t nerrcall;	/* error() calls dropped (not folded) */	/* VCC_EMIT_STATS: time in finish_function */
 	bool stats;
+	bool objtext;			/* VCC_OBJ_TEXT: objects through the printer and as_run (checks the object backend) */
 	pthread_mutex_t emu;		/* diagnostics */
 } emitter;
 
@@ -1028,6 +1032,559 @@ static void print_ins(cc *c, tbuf *b, const ins *i, uint32_t fid, const char *ra
 		tb_s(b, "\t// ?\n");
 		return;
 	}
+}
+
+/* ---------------- object backend: records -> machine code ---------------- */
+
+/*
+ * With cc_opts.emit == 2 a chunk is a stream of items instead of text:
+ *
+ *   IT_TEXT   directives (section switches, .globl/.type/.size, aliases,
+ *             top-level asm), run by the TU's assembler (as_snippet);
+ *   IT_CODE   a function's records (prologue and epilogue included) and its
+ *             inline asm text, encoded here with a64.h straight into the
+ *             current frag; asm statements go through as_snippet in place;
+ *   IT_DATA   an object's bytes and relocations; IT_LABEL + IT_BYTES: a
+ *             string literal.
+ *
+ * Replaying the chunks in output order makes exactly the ElfObj calls the
+ * assembler makes for the text the printer would have written (sections,
+ * symbol registration order, mapping symbols, fixups), so the object is
+ * byte-identical with the text path; bench/vcc-asdiff.py checks that.
+ * Branches inside a function without inline asm are resolved here; with
+ * inline asm (which may name the labels: asm goto) labels are .LBB symbols.
+ */
+enum { IT_TEXT = 1, IT_CODE, IT_DATA, IT_LABEL, IT_BYTES };
+typedef struct item { uint32_t kind, len; } item;	/* len payload bytes follow, padded to 8 */
+typedef struct code_hdr { uint32_t fid, nin, nraw, nlabel, sym_labels, pad; } code_hdr;
+typedef struct data_hdr { uint64_t size, n; uint32_t nrel, zero; } data_hdr;
+typedef struct ireloc { uint64_t off; uint32_t ref, seq; int64_t add; } ireloc;
+
+static inline bool direct(const ecx *e) { return e->E->o->emit == 2 && !e->E->objtext; }
+
+static size_t it_open(ecx *e, uint32_t kind)
+{
+	tbuf *b = &e->out;
+	size_t h;
+
+	if (!direct(e))
+		return SIZE_MAX;
+	tb_need(b, 16);
+	b->n = (b->n + 7) & ~(size_t)7;
+	h = b->n;
+	((item *)(b->p + h))->kind = kind;
+	b->n += sizeof(item);
+	return h;
+}
+
+static void it_close(ecx *e, size_t h)
+{
+	tbuf *b = &e->out;
+
+	if (h == SIZE_MAX)
+		return;
+	((item *)(b->p + h))->len = (uint32_t)(b->n - h - sizeof(item));
+	tb_need(b, 8);
+	while (b->n & 7)
+		b->p[b->n++] = 0;
+}
+
+static void *it_room(ecx *e, size_t n)
+{
+	void *p;
+
+	tb_need(&e->out, n + 8);
+	p = e->out.p + e->out.n;
+	e->out.n += n;
+	return p;
+}
+
+/* replay state: one per TU */
+typedef struct rctx {
+	cc *c;
+	As *as;
+	ElfObj *o;
+	uint32_t *symc, *strc, *lblc;	/* ref -> ElfSym (0: not yet) */
+	uint32_t *loff;			/* direct labels: word offset in the function */
+	tbuf nb;			/* name scratch */
+} rctx;
+
+/* the assembler's symbol for a reference (named as the printer names it) */
+static uint32_t r_sym(rctx *R, uint32_t ref)
+{
+	uint32_t *slot = NULL, i = RIDX(ref), y;
+
+	switch (RKIND(ref)) {
+	case RK_SYM: slot = &R->symc[canon_sym(R->c, i)]; break;
+	case RK_STR: slot = &R->strc[i]; break;
+	case RK_LBL: slot = &R->lblc[i]; break;
+	}
+	if (slot && *slot)
+		return *slot;
+	R->nb.n = 0;
+	ref_name(R->c, &R->nb, ref);
+	y = as_sym(R->as, R->nb.p, R->nb.n);
+	if (slot)
+		*slot = y;
+	return y;
+}
+
+static uint32_t r_label(rctx *R, uint32_t fid, uint32_t l)
+{
+	R->nb.n = 0;
+	p_lbl(&R->nb, fid, l);
+	return as_sym(R->as, R->nb.p, R->nb.n);
+}
+
+/* a pending fixup on word k of an instruction */
+typedef struct pfix { uint8_t k, lbl; uint32_t type, ref; int64_t off; } pfix;
+
+static unsigned e_movi(uint32_t *w, int rd, int x, uint64_t v)
+{
+	int nz = 0, nf = 0, chunks = x ? 4 : 2, n = 0;
+	bool neg, first = true;
+	uint64_t mask = x ? ~0ull : 0xffffffffull;
+
+	v &= mask;
+	for (int i = 0; i < chunks; i++) {
+		uint16_t h = (uint16_t)(v >> (16 * i));
+
+		nz += h != 0;
+		nf += h == 0xffff;
+	}
+	if (nz <= 1 || (chunks - nf) <= 1 || logimm_ok(v, x)) {
+		/* mov: movz, movn, or orr with a bitmask immediate (as.c mov_imm) */
+		unsigned hw;
+
+		if (rd != SP) {
+			for (hw = 0; hw < (unsigned)chunks; hw++)
+				if (!(v & ~(0xffffull << 16 * hw))) {
+					w[0] = a64_movz(x, (unsigned)rd, (unsigned)(v >> 16 * hw) & 0xffff, hw);
+					return 1;
+				}
+			for (hw = 0; hw < (unsigned)chunks; hw++)
+				if (!(~v & mask & ~(0xffffull << 16 * hw))) {
+					w[0] = a64_movn(x, (unsigned)rd, (unsigned)(~v >> 16 * hw) & 0xffff, hw);
+					return 1;
+				}
+		}
+		w[0] = a64_logic_imm(x, 1, (unsigned)rd & 31, 31, (unsigned)a64_logimm(v, x));
+		return 1;
+	}
+	neg = nf > nz;
+	for (int i = 0; i < chunks; i++) {
+		uint16_t h = (uint16_t)(v >> (16 * i));
+
+		if (h == (neg ? 0xffff : 0))
+			continue;
+		if (first) {
+			w[n++] = neg ? a64_movn(x, (unsigned)rd, (uint16_t)~h, (unsigned)i) : a64_movz(x, (unsigned)rd, h, (unsigned)i);
+			first = false;
+		} else {
+			w[n++] = a64_movk(x, (unsigned)rd, h, (unsigned)i);
+		}
+	}
+	return (unsigned)n;
+}
+
+static inline unsigned R5(int r) { return r == SP ? 31u : (unsigned)r & 31; }	/* SP and ZR are both 31 */
+
+/* add/sub (register), the extended form when sp is involved (as.c addsub_reg) */
+static uint32_t e_addsub_reg(int sf, int op, int s, int rd, int rn, int rm, unsigned kind, unsigned amt)
+{
+	if (rd == SP || rn == SP)
+		return 0x0b200000u | (uint32_t)sf << 31 | (uint32_t)op << 30 | (uint32_t)s << 29 | R5(rm) << 16 |
+		       (sf ? 3u : 2u) << 13 | (amt & 7) << 10 | R5(rn) << 5 | R5(rd);
+	return a64_addsub_reg(sf, op, s, R5(rd), R5(rn), R5(rm), kind, amt);
+}
+
+static const uint8_t ld_opc[4][3] = { { 1, 2, 3 }, { 1, 2, 3 }, { 1, 2, 1 }, { 1, 1, 1 } };
+
+/* encode one record into w (returns the word count; the fixup, if any, in *f) */
+static unsigned enc(const ins *i, uint32_t *w, pfix *f, const uint32_t *loff, uint32_t at)
+{
+	int sf = i->sz;
+
+	f->type = 0;
+	switch (i->op) {
+	case I_LABEL: case I_RAW: case I_NOP: case I_MOVSP:
+		return 0;
+	case I_ADD: case I_SUB: case I_ADDS: case I_SUBS:
+		w[0] = e_addsub_reg(sf, i->op == I_SUB || i->op == I_SUBS, i->op == I_ADDS || i->op == I_SUBS,
+				    i->rd, i->rn, i->rm, i->sh ? i->cond : 0, i->sh);
+		return 1;
+	case I_AND: case I_ORR: case I_EOR: case I_ANDS: case I_BIC: case I_ORN: {
+		static const uint8_t opc[] = { [I_AND] = 0, [I_ORR] = 1, [I_EOR] = 2, [I_ANDS] = 3, [I_BIC] = 0, [I_ORN] = 1 };
+
+		w[0] = a64_logic_reg(sf, opc[i->op], i->op == I_BIC || i->op == I_ORN, R5(i->rd), R5(i->rn), R5(i->rm),
+				     i->sh ? i->cond : 0, i->sh);
+		return 1;
+	}
+	case I_ADC: case I_SBC: case I_ADCS: case I_SBCS: {
+		static const uint32_t b[] = { [I_ADC] = 0x1a000000, [I_SBC] = 0x5a000000, [I_ADCS] = 0x3a000000, [I_SBCS] = 0x7a000000 };
+
+		w[0] = b[i->op] | (uint32_t)sf << 31 | R5(i->rm) << 16 | R5(i->rn) << 5 | R5(i->rd);
+		return 1;
+	}
+	case I_ADDI: case I_SUBI: case I_ADDSI: case I_SUBSI: {
+		int64_t v = i->imm;
+		bool flags = i->op == I_ADDSI || i->op == I_SUBSI;
+		bool sub = i->op == I_SUBI || i->op == I_SUBSI;
+		unsigned n;
+
+		if (v < 0 && v != INT64_MIN) {
+			v = -v;
+			sub = !sub;
+		}
+		if (!sf)
+			v &= 0xffffffff;
+		if (v >= 0 && (v < 4096 || ((v & 0xfff) == 0 && v < (1 << 24)) || (!flags && v < (1 << 24)))) {
+			int rn = i->rn;
+
+			n = 0;
+			if (v >= 4096 && (v & 0xfff)) {
+				w[n++] = a64_addsub_imm(sf, sub, flags, R5(i->rd), R5(rn), (unsigned)(v >> 12), 1);
+				rn = i->rd;
+				v &= 0xfff;
+			}
+			if ((v & 0xfff) == 0 && v)
+				w[n++] = a64_addsub_imm(sf, sub, flags, R5(i->rd), R5(rn), (unsigned)(v >> 12), 1);
+			else
+				w[n++] = a64_addsub_imm(sf, sub, flags, R5(i->rd), R5(rn), (unsigned)v, 0);
+			return n;
+		}
+		n = e_movi(w, R_X17, sf, (uint64_t)v);
+		w[n] = e_addsub_reg(sf, sub, flags, i->rd, i->rn, R_X17, 0, 0);
+		return n + 1;
+	}
+	case I_ANDI: case I_ORRI: case I_EORI: case I_ANDSI: {
+		static const uint8_t opc[] = { [I_ANDI] = 0, [I_ORRI] = 1, [I_EORI] = 2, [I_ANDSI] = 3 };
+		uint64_t v = sf ? (uint64_t)i->imm : (uint32_t)i->imm;
+
+		w[0] = a64_logic_imm(sf, opc[i->op], R5(i->rd), R5(i->rn), (unsigned)a64_logimm(v, sf));
+		return 1;
+	}
+	case I_MOVI:
+		return e_movi(w, i->rd, sf, (uint64_t)i->imm);
+	case I_MOV:
+		if (i->rd == SP || i->rn == SP)
+			w[0] = a64_addsub_imm(sf, 0, 0, R5(i->rd), R5(i->rn), 0, 0);
+		else
+			w[0] = a64_logic_reg(sf, 1, 0, R5(i->rd), 31, R5(i->rn), 0, 0);
+		return 1;
+	case I_MADD: case I_MSUB:
+		w[0] = a64_madd(sf, i->op == I_MSUB, R5(i->rd), R5(i->rn), R5(i->rm), R5(i->ra));
+		return 1;
+	case I_SDIV: case I_UDIV: case I_LSLV: case I_LSRV: case I_ASRV: {
+		static const uint8_t opc[] = { [I_SDIV] = 3, [I_UDIV] = 2, [I_LSLV] = 8, [I_LSRV] = 9, [I_ASRV] = 10 };
+
+		w[0] = a64_dp2(sf, opc[i->op], R5(i->rd), R5(i->rn), R5(i->rm));
+		return 1;
+	}
+	case I_SMULH: case I_UMULH:
+		w[0] = (i->op == I_SMULH ? 0x9b407c00u : 0x9bc07c00u) | R5(i->rm) << 16 | R5(i->rn) << 5 | R5(i->rd);
+		return 1;
+	case I_SBFM: case I_UBFM: case I_BFM:
+		w[0] = a64_bfm(sf, i->op == I_SBFM ? 0 : i->op == I_BFM ? 1 : 2, R5(i->rd), R5(i->rn), (unsigned)i->imm, i->sh);
+		return 1;
+	case I_CSEL: case I_CSINC: case I_CSINV: case I_CSNEG:
+		w[0] = a64_csel(sf, i->op == I_CSINV || i->op == I_CSNEG, i->op == I_CSINC || i->op == I_CSNEG,
+				R5(i->rd), R5(i->rn), R5(i->rm), i->cond);
+		return 1;
+	case I_CLZ: case I_CLS: case I_RBIT: case I_REV: case I_REV16: case I_REV32: {
+		uint32_t b;
+
+		switch (i->op) {
+		case I_CLZ: b = 0x5ac01000u | (uint32_t)sf << 31; break;
+		case I_CLS: b = 0x5ac01400u | (uint32_t)sf << 31; break;
+		case I_RBIT: b = 0x5ac00000u | (uint32_t)sf << 31; break;
+		case I_REV: b = 0x5ac00800u | (uint32_t)sf << 31 | (sf ? 0x400u : 0); break;
+		case I_REV16: b = 0x5ac00400u | (uint32_t)sf << 31; break;
+		default: b = 0xdac00800u; break;
+		}
+		w[0] = b | R5(i->rn) << 5 | R5(i->rd);
+		return 1;
+	}
+	case I_LD: case I_ST: {
+		int64_t off = i->imm;
+		int sz = i->sz, base = i->rn;
+		unsigned n = 0, opc = i->op == I_ST ? 0 : ld_opc[sz][i->cond];
+		bool scaled = off >= 0 && (off & ((1 << sz) - 1)) == 0 && (off >> sz) < 4096;
+
+		if (!scaled && !(off >= -256 && off < 256)) {
+			n = e_movi(w, R_X17, 1, (uint64_t)off);
+			w[n++] = e_addsub_reg(1, 0, 0, R_X17, base, R_X17, 0, 0);
+			base = R_X17;
+			off = 0;
+			scaled = true;
+		}
+		w[n++] = scaled ? a64_ldst_uoff((unsigned)sz, 0, opc, R5(i->rd), R5(base), (unsigned)(off >> sz))
+				: a64_ldst_imm9((unsigned)sz, 0, opc, 0, R5(i->rd), R5(base), (int)off);
+		return n;
+	}
+	case I_LDP: case I_STP:
+		w[0] = a64_ldstp(2, 0, i->cond == 0 ? 2 : i->cond == 1 ? 3 : 1, i->op == I_LDP, R5(i->rd), R5(i->ra), R5(i->rn),
+				 (int)(i->imm / 8));
+		return 1;
+	case I_ADRP:
+		w[0] = 0x90000000u | R5(i->rd);
+		*f = (pfix){ 0, 0, R_AARCH64_ADR_PREL_PG_HI21, i->ref, i->off };
+		return 1;
+	case I_ADDLO:
+		w[0] = a64_addsub_imm(1, 0, 0, R5(i->rd), R5(i->rn), 0, 0);
+		*f = (pfix){ 0, 0, R_AARCH64_ADD_ABS_LO12_NC, i->ref, i->off };
+		return 1;
+	case I_LDLO: case I_STLO: {
+		static const uint32_t lo12[] = { R_AARCH64_LDST8_ABS_LO12_NC, R_AARCH64_LDST16_ABS_LO12_NC,
+						 R_AARCH64_LDST32_ABS_LO12_NC, R_AARCH64_LDST64_ABS_LO12_NC };
+		unsigned opc = i->op == I_STLO ? 0 : ld_opc[i->sz][i->cond];
+
+		w[0] = a64_ldst_uoff(i->sz, 0, opc, R5(i->rd), R5(i->rn), 0);
+		*f = (pfix){ 0, 0, lo12[i->sz], i->ref, i->off };
+		return 1;
+	}
+	case I_LDGOT:
+		/* two fixups: the caller handles I_LDGOT's second word */
+		w[0] = 0x90000000u | R5(i->rd);
+		w[1] = a64_ldst_uoff(3, 0, 1, R5(i->rd), R5(i->rd), 0);
+		*f = (pfix){ 0, 0, R_AARCH64_ADR_GOT_PAGE, i->ref, 0 };
+		return 2;
+	case I_ADR:
+		if (loff) {
+			w[0] = a64_adr(R5(i->rd), ((int64_t)loff[i->label] - at) * 4);
+			return 1;
+		}
+		w[0] = 0x10000000u | R5(i->rd);
+		*f = (pfix){ 0, 1, R_AARCH64_ADR_PREL_LO21, i->label, 0 };
+		return 1;
+	case I_B: case I_BC: case I_CBZ: case I_CBNZ: {
+		int64_t d = loff ? ((int64_t)loff[i->label] - at) * 4 : 0;
+
+		switch (i->op) {
+		case I_B: w[0] = a64_b(d); break;
+		case I_BC: w[0] = a64_bcond(i->cond, d); break;
+		default: w[0] = a64_cbz(sf, i->op == I_CBNZ, R5(i->rd), d); break;
+		}
+		if (!loff)
+			*f = (pfix){ 0, 1, i->op == I_B ? R_AARCH64_JUMP26 : R_AARCH64_CONDBR19, i->label, 0 };
+		return 1;
+	}
+	case I_BL:
+		w[0] = 0x94000000u;
+		*f = (pfix){ 0, 0, R_AARCH64_CALL26, i->ref, 0 };
+		return 1;
+	case I_BLR:
+		w[0] = a64_blr(R5(i->rn));
+		return 1;
+	case I_BR:
+		w[0] = a64_br(R5(i->rn));
+		return 1;
+	case I_RET:
+		w[0] = a64_ret(30);
+		return 1;
+	case I_BRK:
+		w[0] = 0xd4200000u | ((uint32_t)i->imm & 0xffff) << 5;
+		return 1;
+	case I_PRFM:
+		w[0] = 0xf9800000u | R5(i->rn) << 5;	/* prfm pldl1keep */
+		return 1;
+	case I_MRS:
+		w[0] = 0;	/* the caller looks the register up */
+		return 1;
+	}
+	return 0;
+}
+
+static int r_fail(rctx *R, const char *msg)
+{
+	elf_error(R->o, "%s", msg);
+	return -1;
+}
+
+/* emit one instruction's words at the end of frag, with its fixup(s) */
+static void r_words(rctx *R, uint32_t frag, const uint32_t *w, unsigned n, const pfix *f, uint32_t fid, const ins *i)
+{
+	ElfObj *o = R->o;
+	uint64_t off;
+	uint8_t *p;
+
+	elf_code(o, frag);
+	off = elf_frag(o, frag)->size;
+	p = elf_grow(o, frag, (size_t)n * 4);
+	for (unsigned k = 0; k < n; k++)
+		memcpy(p + 4 * k, &w[k], 4);
+	if (f->type) {
+		uint32_t y = f->lbl ? r_label(R, fid, f->ref) : r_sym(R, f->ref);
+
+		elf_fixup(o, frag, off + 4u * f->k, p + 4 * f->k, f->type, as_val(R->as, y, f->off));
+		if (i->op == I_LDGOT)
+			elf_fixup(o, frag, off + 4, p + 4, R_AARCH64_LD64_GOT_LO12_NC, as_val(R->as, y, 0));
+	}
+}
+
+static int r_code(rctx *R, const code_hdr *h)
+{
+	const ins *in = (const ins *)(h + 1);
+	const char *raw = (const char *)(in + h->nin);
+	uint32_t w[16];
+	pfix f;
+
+	if (!h->sym_labels) {
+		/* one block, branches resolved here */
+		uint32_t at = 0, frag = as_frag(R->as), *loff = R->loff;
+		ElfObj *o = R->o;
+		uint64_t base;
+		uint8_t *p;
+
+		for (uint32_t k = 0; k < h->nin; k++) {
+			if (in[k].op == I_LABEL)
+				loff[in[k].label] = at;
+			else
+				at += enc(&in[k], w, &f, NULL, 0);
+		}
+		elf_code(o, frag);
+		base = elf_frag(o, frag)->size;
+		p = elf_grow(o, frag, (size_t)at * 4);
+		at = 0;
+		for (uint32_t k = 0; k < h->nin; k++) {
+			const ins *i = &in[k];
+			unsigned n = enc(i, w, &f, loff, at);
+
+			if (unlikely(i->op == I_MRS)) {
+				int r = a64_sysreg(R->c->strs[i->ref].s, strlen(R->c->strs[i->ref].s), 0);
+
+				if (r < 0)
+					return r_fail(R, "mrs: expected readable system register");
+				w[0] = 0xd5200000u | ((unsigned)r & 0xffff) << 5 | R5(i->rd);
+			}
+			memcpy(p + 4 * at, w, (size_t)n * 4);
+			if (f.type) {
+				uint32_t y = r_sym(R, f.ref);
+
+				elf_fixup(o, frag, base + 4u * at, p + 4 * at, f.type, as_val(R->as, y, f.off));
+				if (i->op == I_LDGOT)
+					elf_fixup(o, frag, base + 4u * at + 4, p + 4 * at + 4, R_AARCH64_LD64_GOT_LO12_NC,
+						  as_val(R->as, y, 0));
+			}
+			at += n;
+		}
+		return 0;
+	}
+	/* inline asm: in order, labels are symbols */
+	for (uint32_t k = 0; k < h->nin; k++) {
+		const ins *i = &in[k];
+		unsigned n;
+
+		if (i->op == I_RAW) {
+			if (as_snippet(R->as, raw + i->off, i->ref))
+				return -1;
+			continue;
+		}
+		if (i->op == I_LABEL) {
+			if (as_label(R->as, r_label(R, h->fid, i->label)))
+				return -1;
+			continue;
+		}
+		n = enc(i, w, &f, NULL, 0);
+		if (unlikely(i->op == I_MRS)) {
+			int r = a64_sysreg(R->c->strs[i->ref].s, strlen(R->c->strs[i->ref].s), 0);
+
+			if (r < 0)
+				return r_fail(R, "mrs: expected readable system register");
+			w[0] = 0xd5200000u | ((unsigned)r & 0xffff) << 5 | R5(i->rd);
+		}
+		if (n)
+			r_words(R, as_frag(R->as), w, n, &f, h->fid, i);
+	}
+	return 0;
+}
+
+static void r_zero(ElfObj *o, uint32_t frag, uint64_t n)
+{
+	if (n)
+		elf_fill(o, frag, n, 0);
+}
+
+static int r_data(rctx *R, const data_hdr *h)
+{
+	const ireloc *rel = (const ireloc *)(h + 1);
+	const uint8_t *d = (const uint8_t *)(rel + h->nrel);
+	ElfObj *o = R->o;
+	uint32_t frag = as_frag(R->as);
+	uint64_t at = 0;
+
+	if (!h->size)
+		return 0;
+	elf_data(o, frag);
+	if (h->zero) {
+		elf_fill(o, frag, h->size, 0);
+		return 0;
+	}
+	for (uint32_t k = 0; k <= h->nrel; k++) {
+		uint64_t end = k < h->nrel ? rel[k].off : h->size;
+
+		if (end > at) {
+			/* bytes in [at, end): what was initialised, then zeros */
+			uint64_t have = at < h->n ? (end < h->n ? end : h->n) - at : 0;
+
+			if (have)
+				elf_bytes(o, frag, d + at, have);
+			r_zero(o, frag, end - at - have);
+			at = end;
+		}
+		if (k < h->nrel) {
+			uint64_t off = elf_frag(o, frag)->size;
+			uint8_t *p = elf_grow(o, frag, 8);
+			ElfVal v = as_val(R->as, r_sym(R, rel[k].ref), rel[k].add);
+
+			if (!v.add && !v.sub) {
+				for (int b = 0; b < 8; b++)
+					p[b] = (uint8_t)((uint64_t)v.c >> 8 * b);
+			} else {
+				memset(p, 0, 8);
+				elf_fixup(o, frag, off, p, R_AARCH64_ABS64, v);
+			}
+			at += 8;
+		}
+	}
+	return 0;
+}
+
+/* replay one chunk's items */
+static int r_chunk(rctx *R, const char *p, size_t n)
+{
+	const char *e = p + n;
+
+	while (p < e) {
+		const item *it = (const item *)p;
+		const char *q = (const char *)(it + 1);
+		int r = 0;
+
+		switch (it->kind) {
+		case IT_TEXT:
+			r = as_snippet(R->as, q, it->len);
+			break;
+		case IT_CODE:
+			r = r_code(R, (const code_hdr *)q);
+			break;
+		case IT_DATA:
+			r = r_data(R, (const data_hdr *)q);
+			break;
+		case IT_LABEL:
+			r = as_label(R->as, r_sym(R, *(const uint32_t *)q));
+			break;
+		case IT_BYTES:
+			if (it->len) {
+				elf_data(R->o, as_frag(R->as));
+				elf_bytes(R->o, as_frag(R->as), q, it->len);
+			}
+			break;
+		}
+		if (r || R->o->has_err || as_failed(R->as))
+			return -1;
+		p = q + ((it->len + 7) & ~7u);
+	}
+	return 0;
 }
 
 /* ---------------- record emission ---------------- */
@@ -5381,6 +5938,72 @@ static void sym_header(ecx *e, tbuf *b, uint32_t s, bool fn, const char *defsec,
 	tb_s(b, ":\n");
 }
 
+/* finish_function for the object backend: the same function as items */
+static void finish_direct(ecx *e, uint32_t s, uint32_t align, const int *cs, int ncs, int32_t csave, int32_t total, bool ctor)
+{
+	cc *c = e->c;
+	tbuf *b = &e->out;
+	size_t start, h;
+	code_hdr *ch;
+	ins *in;
+	uint32_t n = 0, sym_labels = 0;
+
+	b->n = (b->n + 7) & ~(size_t)7;
+	start = b->n;
+	h = it_open(e, IT_TEXT);
+	sym_header(e, b, s, true, "\t.text\n", align);
+	it_close(e, h);
+	for (uint32_t k = 0; k < e->nin && !sym_labels; k++)
+		sym_labels = e->in[k].op == I_RAW;
+	h = it_open(e, IT_CODE);
+	ch = it_room(e, sizeof *ch);
+	in = it_room(e, ((size_t)e->nin + 2 * (size_t)ncs + 8) * sizeof(ins));
+#define PUT(...) (in[n++] = (ins){ __VA_ARGS__ })
+	PUT(.op = I_STP, .sz = 1, .rd = R_FP, .ra = R_LR, .rn = SP, .cond = 1, .imm = -16);
+	PUT(.op = I_MOV, .sz = 1, .rd = R_FP, .rn = SP);
+	if (total > 16)
+		PUT(.op = I_SUBI, .sz = 1, .rd = SP, .rn = SP, .imm = total - 16);
+	for (int k = 0; k + 1 < ncs; k += 2)
+		PUT(.op = I_STP, .sz = 1, .rd = (uint8_t)cs[k], .ra = (uint8_t)cs[k + 1], .rn = R_FP, .imm = -csave + 8 * k);
+	if (ncs & 1)
+		PUT(.op = I_ST, .sz = 3, .rd = (uint8_t)cs[ncs - 1], .rn = R_FP, .imm = -csave + 8 * (ncs - 1));
+	memcpy(in + n, e->in, (size_t)e->nin * sizeof(ins));
+	n += e->nin;
+	for (int k = 0; k + 1 < ncs; k += 2)
+		PUT(.op = I_LDP, .sz = 1, .rd = (uint8_t)cs[k], .ra = (uint8_t)cs[k + 1], .rn = R_FP, .imm = -csave + 8 * k);
+	if (ncs & 1)
+		PUT(.op = I_LD, .sz = 3, .rd = (uint8_t)cs[ncs - 1], .rn = R_FP, .imm = -csave + 8 * (ncs - 1));
+	PUT(.op = I_MOV, .sz = 1, .rd = SP, .rn = R_FP);
+	PUT(.op = I_LDP, .sz = 1, .rd = R_FP, .ra = R_LR, .rn = SP, .cond = 2, .imm = 16);
+	PUT(.op = I_RET);
+#undef PUT
+	/* give back the unused room, then the inline asm text */
+	b->n -= ((size_t)e->nin + 2 * (size_t)ncs + 8 - n) * sizeof(ins);
+	*ch = (code_hdr){ .fid = s, .nin = n, .nraw = sym_labels ? (uint32_t)e->raw.n : 0, .nlabel = e->nlabel, .sym_labels = sym_labels };
+	if (sym_labels)
+		memcpy(it_room(e, e->raw.n), e->raw.p, e->raw.n);
+	it_close(e, h);
+	h = it_open(e, IT_TEXT);
+	tb_s(b, ".Lfe");
+	tb_u(b, s);
+	tb_s(b, ":\n\t.size\t");
+	sym_name(c, b, s);
+	tb_s(b, ", .Lfe");
+	tb_u(b, s);
+	tb_c(b, '-');
+	sym_name(c, b, s);
+	tb_c(b, '\n');
+	if (ctor) {
+		tb_s(b, "\t.section\t.init_array,\"aw\",@init_array\n\t.p2align\t3\n\t.xword\t");
+		sym_name(c, b, s);
+		tb_c(b, '\n');
+	}
+	it_close(e, h);
+	e->E->nins += e->nin;
+	e->E->nfn++;
+	out_chunk(e, (uint64_t)s << 1, start);
+}
+
 static void finish_function(ecx *e, uint32_t s)
 {
 	cc *c = e->c;
@@ -5421,6 +6044,10 @@ static void finish_function(ecx *e, uint32_t s)
 		align = a->aligned;
 	if (c->syms[s].align > align)
 		align = c->syms[s].align;
+	if (direct(e)) {
+		finish_direct(e, s, align, cs, ncs, csave, total, a->constructor != 0);
+		return;
+	}
 	sym_header(e, b, s, true, "\t.text\n", align);
 	/* prologue */
 	tb_s(b, "\tstp\tx29, x30, [sp, #-16]!\n\tmov\tx29, sp\n");
@@ -5746,6 +6373,42 @@ static int rel_cmp(const void *a, const void *b)
 	return x->seq < y->seq ? -1 : x->seq > y->seq;
 }
 
+/* sort e->rel by offset; a later initializer for the same element overrides: keep the last */
+static void rel_prep(ecx *e)
+{
+	uint32_t k = 0;
+
+	qsort(e->rel, e->nrel, sizeof(e->rel[0]), rel_cmp);
+	for (uint32_t j = 0; j < e->nrel; j++) {
+		if (e->rel[j].seq == UINT32_MAX)
+			continue;
+		if (k && e->rel[k - 1].off == e->rel[j].off)
+			k--;
+		e->rel[k++] = e->rel[j];
+	}
+	e->nrel = k;
+}
+
+/* the object backend's data item: what data_bytes / .zero would assemble to */
+static void data_item(ecx *e, uint64_t size, bool zero)
+{
+	size_t h = it_open(e, IT_DATA);
+	data_hdr *dh = it_room(e, sizeof *dh);
+	uint32_t nrel = 0;
+
+	if (zero) {
+		*dh = (data_hdr){ .size = size, .zero = 1 };
+	} else {
+		rel_prep(e);
+		while (nrel < e->nrel && e->rel[nrel].off < size)
+			nrel++;
+		*dh = (data_hdr){ .size = size, .n = e->data.n < size ? e->data.n : size, .nrel = nrel };
+		memcpy(it_room(e, nrel * sizeof(ireloc)), e->rel, nrel * sizeof(ireloc));
+		memcpy(it_room(e, dh->n), e->data.p, dh->n);
+	}
+	it_close(e, h);
+}
+
 /* the bytes in e->data with e->rel, as directives */
 static void data_bytes(ecx *e, tbuf *b, uint64_t size)
 {
@@ -5753,20 +6416,7 @@ static void data_bytes(ecx *e, tbuf *b, uint64_t size)
 	uint32_t ri = 0;
 	const unsigned char *d = (const unsigned char *)e->data.p;
 
-	qsort(e->rel, e->nrel, sizeof(e->rel[0]), rel_cmp);
-	{
-		/* a later initializer for the same element overrides: keep the last */
-		uint32_t k = 0;
-
-		for (uint32_t j = 0; j < e->nrel; j++) {
-			if (e->rel[j].seq == UINT32_MAX)
-				continue;
-			if (k && e->rel[k - 1].off == e->rel[j].off)
-				k--;
-			e->rel[k++] = e->rel[j];
-		}
-		e->nrel = k;
-	}
+	rel_prep(e);
 	while (o < size) {
 		uint64_t end = ri < e->nrel ? e->rel[ri].off : size;
 
@@ -5793,9 +6443,10 @@ static void data_bytes(ecx *e, tbuf *b, uint64_t size)
 				continue;
 			}
 			if (!(o & 7) && o + 8 <= end) {
-				uint64_t w;
+				uint64_t w = 0;
 
-				memcpy(&w, d + o, 8);
+				/* o < data.n here; past it the bytes are zero, not what the buffer holds */
+				memcpy(&w, d + o, o + 8 <= e->data.n ? 8 : e->data.n - o);
 				tb_s(b, "\t.xword\t");
 				tb_hex(b, w);
 				tb_c(b, '\n');
@@ -5846,6 +6497,27 @@ static void emit_object(ecx *e, uint32_t s)
 		zero = !e->data.p[i];
 	if (!a->section && (y->flags & SF_THREAD))
 		efatal(e, y->loc, "thread-local storage is not supported");
+	if (direct(e)) {
+		size_t h;
+
+		b->n = (b->n + 7) & ~(size_t)7;
+		start = b->n;
+		h = it_open(e, IT_TEXT);
+		sym_header(e, b, s, false,
+			   all_const(c, y->ty) ? "\t.section\t.rodata,\"a\",@progbits\n" : zero ? "\t.bss\n" : "\t.data\n", align);
+		it_close(e, h);
+		data_item(e, zero && !e->nrel ? (size ? size : 1) : size, zero && !e->nrel);
+		h = it_open(e, IT_TEXT);
+		tb_s(b, "\t.size\t");
+		sym_name(c, b, s);
+		tb_s(b, ", ");
+		tb_u(b, size);
+		tb_c(b, '\n');
+		it_close(e, h);
+		e->E->nobj++;
+		out_chunk(e, ((uint64_t)s << 1) | 1, start);
+		return;
+	}
 	sym_header(e, b, s, false,
 		   all_const(c, y->ty) ? "\t.section\t.rodata,\"a\",@progbits\n" : zero ? "\t.bss\n" : "\t.data\n", align);
 	if (zero && !e->nrel) {
@@ -5882,6 +6554,35 @@ static void emit_string(ecx *e, uint32_t i)
 	for (uint64_t k = 0; k + s->esz < n; k++)
 		if (!s->s[k] && s->esz == 1)
 			nul = true;
+	if (direct(e)) {
+		size_t h;
+		uint32_t ref = REF(RK_STR, i);
+		bool asciz = s->esz == 1 && !nul;
+		uint64_t m = asciz ? (n ? n - 1 : 0) : n;
+		char *q;
+
+		b->n = (b->n + 7) & ~(size_t)7;
+		start = b->n;
+		h = it_open(e, IT_TEXT);
+		if (nul)
+			tb_s(b, "\t.section\t.rodata,\"a\",@progbits\n");
+		else
+			tb_f(b, "\t.section\t.rodata.str%u.%u,\"aMS\",@progbits,%u\n", s->esz, s->esz, s->esz);
+		if (s->esz > 1)
+			tb_f(b, "\t.p2align\t%d\n", s->esz == 2 ? 1 : 2);
+		it_close(e, h);
+		h = it_open(e, IT_LABEL);
+		memcpy(it_room(e, 4), &ref, 4);
+		it_close(e, h);
+		h = it_open(e, IT_BYTES);
+		q = it_room(e, m + asciz);
+		memcpy(q, s->s, m);
+		if (asciz)
+			q[m] = 0;
+		it_close(e, h);
+		out_chunk(e, ((uint64_t)1 << 62) | i, start);
+		return;
+	}
 	if (nul)
 		tb_s(b, "\t.section\t.rodata,\"a\",@progbits\n");
 	else
@@ -6325,6 +7026,58 @@ static bool is_root(cc *c, uint32_t s)
 	return false;
 }
 
+__attribute__((format(printf, 2, 3)))
+static void as_error(cc *c, const char *fmt, ...)
+{
+	va_list ap;
+
+	va_start(ap, fmt);
+	pp_vdiag(c->p, 0, "error", fmt, ap);
+	va_end(ap);
+}
+
+/* the object backend: header text, chunks (items), tail text */
+static int replay(cc *c, const cc_opts *o, const char *hp, size_t hn, const char *tp, size_t tn, const chunk *ch, uint32_t nch)
+{
+	static _Thread_local uint32_t *loff, *cache;
+	static _Thread_local size_t ncache;
+	size_t need = (size_t)c->nsym + c->nstr + c->nlabel + 192;
+	rctx R = { .c = c, .as = o->as, .o = o->obj };
+	int r = 0;
+
+	static _Thread_local tbuf nb;
+
+	if (!loff) {
+		loff = reserve((size_t)1 << 32);	/* labels of one function */
+		tb_init(&nb, 1 << 20);
+	}
+	R.nb = nb;
+	if (need > ncache) {
+		if (cache)
+			munmap(cache, ncache * sizeof(uint32_t));
+		ncache = need * 2;
+		cache = reserve(ncache * sizeof(uint32_t));
+	} else {
+		memset(cache, 0, need * sizeof(uint32_t));
+	}
+	R.symc = cache;
+	R.strc = cache + c->nsym + 64;
+	R.lblc = R.strc + c->nstr + 64;
+	R.loff = loff;
+	as_begin(R.as, R.o, "<vcc>");
+	if (as_snippet(R.as, hp, hn))
+		r = -1;
+	for (uint32_t i = 0; !r && i < nch; i++)
+		r = r_chunk(&R, ch[i].p, ch[i].n);
+	if (!r && (as_snippet(R.as, tp, tn) || as_end(R.as)))
+		r = -1;
+	if (r || R.o->has_err || as_failed(R.as)) {
+		as_error(c, "assembler: %s", as_failed(R.as) ? as_msg(R.as) : R.o->err);
+		return -1;
+	}
+	return 0;
+}
+
 static int emit_tu1(cc *c, const cc_opts *o, bool write_out, uint8_t *mf, bool *again, bool last)
 {
 	emitter E;
@@ -6356,6 +7109,7 @@ static int emit_tu1(cc *c, const cc_opts *o, bool write_out, uint8_t *mf, bool *
 	E.fnsize = reserve((c->nsym + 64) * sizeof(uint16_t));
 	E.cwval = reserve((c->nsym + 64) * sizeof(i128));
 	E.stats = getenv("VCC_EMIT_STATS") != NULL;
+	E.objtext = getenv("VCC_OBJ_TEXT") != NULL;
 	/* roots */
 	for (uint32_t i = 0; i < c->ntoplevel; i++) {
 		uint32_t s = c->toplevel[i];
@@ -6452,7 +7206,26 @@ static int emit_tu1(cc *c, const cc_opts *o, bool write_out, uint8_t *mf, bool *
 			iov[k++] = (struct iovec){ (void *)E.chunks[i].p, E.chunks[i].n };
 		iov[k++] = (struct iovec){ tail.p, tail.n };
 		*again = E.newmf != 0 && !last;
-		if (!E.errors && write_out && !*again) {
+		if (!E.errors && write_out && !*again && o->emit == 2) {
+			if (E.objtext) {
+				/* the text, gathered once, through the assembler */
+				static _Thread_local tbuf all;
+				const char *msg;
+
+				if (!all.p)
+					tb_init(&all, (size_t)1 << 32);
+				all.n = 0;
+				for (int i = 0; i < k; i++)
+					tb_put(&all, iov[i].iov_base, iov[i].iov_len);
+				if (as_run(o->as, o->obj, all.p, all.n, "<vcc>", &msg)) {
+					as_error(c, "assembler: %s", msg);
+					E.errors++;
+				}
+			} else if (replay(c, o, hdr.p, hdr.n, tail.p, tail.n, E.chunks, E.nchunk)) {
+				/* object: the items replayed into the TU's assembler and ElfObj */
+				E.errors++;
+			}
+		} else if (!E.errors && write_out && !*again) {
 			for (int i = 0; i < k;) {
 				int m = k - i > 1024 ? 1024 : k - i;
 				ssize_t w = writev(o->outfd, iov + i, m);
@@ -6527,8 +7300,11 @@ static int emit_tu1(cc *c, const cc_opts *o, bool write_out, uint8_t *mf, bool *
  * VCC_EMIT_REPEAT=N: generate N times over the same AST (profiling), write once.
  * A round that marks functions for inlining (need_fold) is generated again.
  */
+extern _Atomic unsigned long long ppd_ns_emit;
+
 int emit_tu(cc *c, const cc_opts *o)
 {
+	double t0 = now();
 	const char *r = getenv("VCC_EMIT_REPEAT");
 	int n = r ? atoi(r) : 1, err = 0;
 	uint8_t *mf = reserve(c->nsym + 64);
@@ -6543,5 +7319,6 @@ int emit_tu(cc *c, const cc_opts *o)
 			break;
 	}
 	munmap(mf, c->nsym + 64);
+	ppd_ns_emit += (unsigned long long)((now() - t0) * 1e9);
 	return err;
 }

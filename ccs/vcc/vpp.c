@@ -18,6 +18,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/mman.h>
+#include <sys/resource.h>
 #include <sys/stat.h>
 #include <time.h>
 #include <unistd.h>
@@ -138,7 +139,16 @@ static int batch(const char *file, int nthr)
 		dc_stats(hs, sizeof(hs));
 		printf("%s\n", hs);
 	}
-	printf("%d/%d ok; wall %.0f ms on %d threads, cpu sum %.0f ms\n", njobs - bad, njobs, wall * 1e3, nthr, sum);
+	{
+		struct rusage ru;
+
+		getrusage(RUSAGE_SELF, &ru);
+		printf("%d/%d ok; wall %.0f ms on %d threads, job sum %.0f ms; cpu user %.2f s sys %.2f s\n", njobs - bad, njobs,
+		       wall * 1e3, nthr, sum, ru.ru_utime.tv_sec + ru.ru_utime.tv_usec * 1e-6, ru.ru_stime.tv_sec + ru.ru_stime.tv_usec * 1e-6);
+		if (ppd_bytes_obj)
+			printf("-c: cc_run %.0f ms (codegen+as %.0f ms), finish+write %.0f ms, %.1f MB objects\n", ppd_ns_cc / 1e6,
+			       ppd_ns_emit / 1e6, ppd_ns_obj / 1e6, ppd_bytes_obj / 1e6);
+	}
 	return bad != 0;
 }
 

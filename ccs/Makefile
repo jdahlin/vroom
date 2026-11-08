@@ -22,19 +22,19 @@ VCC_CFLAGS = -std=c11 -O2 -Wall -Wextra -Wno-unused-parameter -D_DARWIN_C_SOURCE
 
 vcc: $(OUT)/vcc $(OUT)/vld $(OUT)/vas $(OUT)/vccd $(OUT)/lextest $(OUT)/vpp $(OUT)/vlink $(OUT)/vasm
 
+AS_SRC = vcc/as.c vcc/a64.c vcc/elf.c
+AS_HDR = vcc/as.h vcc/a64.h vcc/elf.h vcc/a64sysreg.inc
 LEX_SRC = vcc/lex.c vcc/intern.c
 LEX_HDR = vcc/lex.h vcc/intern.h
 PP_SRC = vcc/pp.c vcc/dircache.c vcc/ppdriver.c vcc/cc.c vcc/ccsnap.c vcc/emit.c
 PP_HDR = vcc/pp.h vcc/cc.h vcc/ccint.h vcc/ccsnap.h vcc/emit.h vcc/dircache.h vcc/ppdriver.h vcc/ppdata.inc vcc/ppdata-predef.inc
 
-$(OUT)/vpp: vcc/vpp.c vcc/ppdata-predef.inc $(PP_SRC) $(PP_HDR) $(LEX_SRC) $(LEX_HDR) | $(OUT)
-	/usr/bin/clang $(VCC_CFLAGS) -O3 -mcpu=apple-m1 -pthread vcc/vpp.c $(PP_SRC) $(LEX_SRC) -o $@
+$(OUT)/vpp: vcc/vpp.c vcc/ppdata-predef.inc $(PP_SRC) $(PP_HDR) $(LEX_SRC) $(LEX_HDR) $(AS_SRC) $(AS_HDR) | $(OUT)
+	/usr/bin/clang $(VCC_CFLAGS) -O3 -mcpu=apple-m1 -pthread vcc/vpp.c $(PP_SRC) $(LEX_SRC) $(AS_SRC) -o $@
 
 $(OUT)/lextest: vcc/lextest.c vcc/pmc.c vcc/pmc.h $(LEX_SRC) $(LEX_HDR) | $(OUT)
 	/usr/bin/clang $(VCC_CFLAGS) -O3 -mcpu=apple-m1 -mno-outline -pthread vcc/lextest.c vcc/pmc.c $(LEX_SRC) -o $@
 
-AS_SRC = vcc/as.c vcc/a64.c vcc/elf.c
-AS_HDR = vcc/as.h vcc/a64.h vcc/elf.h vcc/a64sysreg.inc
 
 $(OUT)/vasm: vcc/vasm.c $(AS_SRC) $(AS_HDR) | $(OUT)
 	/usr/bin/clang $(VCC_CFLAGS) -O3 -mcpu=apple-m1 vcc/vasm.c $(AS_SRC) -o $@
@@ -53,5 +53,5 @@ $(OUT)/vlink: $(LD_SRC) $(LD_HDR) | $(OUT)
 	ln -sf vlink $(OUT)/vobjcopy
 	ln -sf vlink $(OUT)/vnm
 
-$(OUT)/vccd: vcc/vccd.c vcc/caps.c vcc/caps.h vcc/warnings.inc protocol.h $(PP_SRC) $(PP_HDR) $(LEX_SRC) $(LEX_HDR) | $(OUT)
-	/usr/bin/clang $(VCC_CFLAGS) -O3 -mcpu=apple-m1 -pthread vcc/vccd.c vcc/caps.c $(PP_SRC) $(LEX_SRC) -o $@
+$(OUT)/vccd: vcc/vccd.c vcc/caps.c vcc/caps.h vcc/warnings.inc protocol.h $(PP_SRC) $(PP_HDR) $(LEX_SRC) $(LEX_HDR) $(AS_SRC) $(AS_HDR) | $(OUT)
+	/usr/bin/clang $(VCC_CFLAGS) -O3 -mcpu=apple-m1 -pthread vcc/vccd.c vcc/caps.c $(PP_SRC) $(LEX_SRC) $(AS_SRC) -o $@
