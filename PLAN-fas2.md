@@ -333,7 +333,12 @@ aldrig i bygget. Ett TU-test (`bench/vcc-diff.py`) körs över alla kärnfiler.
     - Minnet är 256 MB (`VCC_DC_MAX_MB`).
     - Kvar är omlokaliserbar uppspelning per region på alla djup, som täcker resterande 84 %;
   - ~~läsordning per region mot guard-missarna~~: provat och lagt på hyllan (RESEARCH-preprocessor §6.6). Med splitsning blev det 6–8 % färre missar, men 4× långsammare `-E` och 101 TU:er med fel utdata;
-  - minnet: 2,8 GB lagrat vid `-j 6`, taket är `VPP_HC_MAX_MB`;
+  - ~~minnet: 2,8 GB lagrat vid `-j 6`~~ (2026-11-08): taket är fortfarande `VPP_HC_MAX_MB`, men en post lagrar nu mycket mindre:
+    - Profil först (`VPP_HC_DEBUG=1` skriver bytes per slag, `VPP_HC_PUB=1` en rad per post): i `-E`-läget var 1,33 GB postdata, varav makrodelta 628 MB, läsningar 308 MB, egen text 233 MB och filposter 141 MB. Det gamla "lagrat"-talet räknade med andra trådars allokeringar (`shared_used`); nu räknas exakt (`hsalloc`).
+    - Läsningar och delta upprepar barnens körningar i varje omslutande header. De delas nu i innehållsdefinierade bitar (snitt efter id, ~32 element, högst 256) som lagras en gång i en låsfri tabell; filnamn, egen `-E`-text och tokenarrayer lagras också en gång (`hc_blob`).
+    - Lagrade tokens är 12 byte (`htok`) i stället för 24 (`ptok`): identifierare som id, andra spellningar som 32-bitars offset till en delad blob, plats relativt posten, art/flaggor/16-bitars längd. Skarvade identifierare och långa spellningar går till en full `ptok` (HF_X).
+    - **Mätt (`-j 6`, load 10–13), main mot nu:** `vcc-diff.py batch --cmp --kernel` 1,33 GB → 0,33 GB lagrat, max RSS 2,07 → 1,04 GB, 3,2 s vägg och ~19 s CPU båda. `-fsyntax-only`-batch (840 TU:er) 3,6 GB (racy tal; ~1,1 GB tokens) → 0,44 GB lagrat, max RSS 3,21 → 1,36 GB, vägg 1,39 → 1,48 s, CPU 8,3 → 8,9 s. Kostnaden ligger i publiceringen (hash och jämförelse av bitar); ren uppspelning (`--warm 1`) gick 2,98 → 2,54 s vägg vid lika många cykler.
+    - Verifiering: `--vcc-tokhash` identisk med `VPP_NOHC=1` för alla C-TU:er, `vcc-diff.py cmp -j 6` 911/912, batch `--cmp` 873/873, `vcc-sema.py run` och `layout` 878/879, `fuzz-regress` grönt. TSan-körningen avbröts (för långsam på den delade maskinen) och är inte gjord.
   - vccd tar inte om filer och litar redan på att de är oföränderliga, och cachen ärver det.
 ### Status 2.5 (2026-11-07): parser + sema, första version klar
 - 2.4 (header-cache) är medvetet uppskjuten: först hela kedjan, sedan fart.
