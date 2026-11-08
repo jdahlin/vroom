@@ -44,7 +44,7 @@ import importlib.util
 R = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 spec = importlib.util.spec_from_file_location('vd', f'{R}/bench/vcc-diff.py')
 vd = importlib.util.module_from_spec(spec); spec.loader.exec_module(vd)
-W, B = vd.W, vd.B
+sys.path.insert(0, f"{R}/bench"); from hostenv import WORK as W; B = vd.B
 VB = f'{W}/vbench'
 CORPUS = f'{R}/bench/vbench-corpus.txt'
 MODES = ['lex', 'pp', 'pphc', 'fe', 'cc', 'emit', 'real', 'as', 'ld']

@@ -53,9 +53,19 @@ VCC_CC     = $(CCACHE) $(HOST_CC)
 VCC_SAN   ?=
 VCC_OPT   ?= -O3 $(HOST_CPU)
 VCC_CFLAGS = -std=c11 -O2 -Wall -Wextra -Wno-unused-parameter $(HOST_DEFS) -DVCC_INCDIR='"$(abspath vcc/include)"' $(VCC_SAN)
+# ThinLTO: the sources are split into many files (vcc/cc/, vcc/pp/, vcc/emit/);
+# LTO gives back the cross-file inlining one big TU had.  Off with `make VCC_LTO=`.
+ifeq ($(HOST_OS),Darwin)
+VCC_LTO   ?= -flto=thin
+LTO_LINK   = -Wl,-cache_path_lto,$(OBJ)/lto-cache
+else
+VCC_LTO   ?= -flto=thin -fuse-ld=lld
+LTO_LINK   = -Wl,--thinlto-cache-dir=$(OBJ)/lto-cache
+endif
 VCC_FAST   = $(VCC_CFLAGS) $(VCC_OPT) -pthread
 # -O3 also at link time: the driver passes it to ld, which then folds code
-VCC_LDFLAGS = -O3 $(VCC_SAN)
+# (and, with LTO, optimises and generates the code itself)
+VCC_LDFLAGS = -O3 $(VCC_SAN) $(VCC_LTO) $(if $(VCC_LTO),$(LTO_LINK))
 OBJ        = $(OUT)/obj
 
 vcc: $(OUT)/vcc $(OUT)/vsh/sh $(OUT)/vld $(OUT)/vas $(OUT)/var $(OUT)/vccd $(OUT)/lextest $(OUT)/vpp $(OUT)/vlink $(OUT)/vasm
@@ -67,9 +77,11 @@ PP_SRC  = vcc/pp.c vcc/dircache.c vcc/ppdriver.c vcc/cc.c vcc/ccsnap.c vcc/emit.
 LD_SRC  = vcc/ld.c vcc/ldhash.c vcc/objcopy.c
 
 $(OBJ)/%.o: vcc/%.c | $(OBJ)
-	$(VCC_CC) $(VCC_FAST) $(XFLAGS) -MMD -MP -c $< -o $@
+	@mkdir -p $(dir $@)
+	$(VCC_CC) $(VCC_FAST) $(VCC_LTO) $(XFLAGS) -MMD -MP -c $< -o $@
 
-# lextest is built with -mno-outline (stable code layout for PMC runs)
+# lextest is built with -mno-outline (stable code layout for PMC runs); no LTO,
+# since -mno-outline is a code generator option the bitcode does not keep
 $(OBJ)/no/%.o: vcc/%.c | $(OBJ)
 	$(VCC_CC) $(VCC_FAST) -mno-outline -MMD -MP -c $< -o $@
 
@@ -82,7 +94,7 @@ $(OUT)/vccd: $(call o,vcc/vccd.c vcc/caps.c vcc/fixdep.c vcc/ar.c vcc/rsh.c $(PP
 	$(VCC_CC) $(VCC_LDFLAGS) -pthread $^ -o $@ $(HOST_LIBS)
 
 $(OUT)/lextest: $(patsubst vcc/%.c,$(OBJ)/no/%.o,vcc/lextest.c vcc/pmc.c $(LEX_SRC))
-	$(VCC_CC) $(VCC_LDFLAGS) -pthread $^ -o $@
+	$(VCC_CC) -O3 $(VCC_SAN) -pthread $^ -o $@
 
 $(OUT)/vasm: $(call o,vcc/vasm.c $(AS_SRC))
 	$(VCC_CC) $(VCC_LDFLAGS) $^ -o $@
@@ -113,10 +125,10 @@ $(OBJ):
 # Own OUT (and so own obj/), -O1 -g; the normal build is unchanged.
 SAN_COMMON = -O1 -g -fno-omit-frame-pointer -Wno-deprecated-declarations
 vcc-asan:
-	$(MAKE) vcc OUT=$(OUT)-asan VCC_OPT="-O1 $(HOST_CPU)" \
+	$(MAKE) vcc OUT=$(OUT)-asan VCC_OPT="-O1 $(HOST_CPU)" VCC_LTO= \
 		VCC_SAN="$(SAN_COMMON) -fsanitize=address,undefined"
 vcc-tsan:
-	$(MAKE) vcc OUT=$(OUT)-tsan VCC_OPT="-O1 $(HOST_CPU)" \
+	$(MAKE) vcc OUT=$(OUT)-tsan VCC_OPT="-O1 $(HOST_CPU)" VCC_LTO= \
 		VCC_SAN="$(SAN_COMMON) -fsanitize=thread"
 
 .PHONY: vcc-asan vcc-tsan
