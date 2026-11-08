@@ -158,11 +158,21 @@ static inline int sveqi(const char *p, size_t n, const char *s)
 	return 1;
 }
 
-static uint32_t hsv(const char *s, size_t n)
+/* word-at-a-time hash; the tail is read with overlapping loads (with n
+ * in the seed they determine every byte) */
+static inline uint32_t hsv(const char *s, size_t n)
 {
-	uint32_t h = 2166136261u;
-	for (size_t i = 0; i < n; i++) h = (h ^ (uint8_t)s[i]) * 16777619u;
-	return h;
+	uint64_t h = 0x9e3779b97f4a7c15ull ^ n, w;
+	const char *e = s + n;
+	if (n >= 8) {
+		for (; e - s > 8; s += 8) { memcpy(&w, s, 8); h = (h ^ w) * 0xff51afd7ed558ccdull; h ^= h >> 32; }
+		memcpy(&w, e - 8, 8);
+	} else if (n >= 4) {
+		uint32_t x, y; memcpy(&x, s, 4); memcpy(&y, e - 4, 4);
+		w = x | (uint64_t)y << 32;
+	} else w = n ? (uint8_t)s[0] | (uint64_t)(uint8_t)s[n / 2] << 8 | (uint64_t)(uint8_t)e[-1] << 16 : 0;
+	h = (h ^ w) * 0xc4ceb9fe1a85ec53ull;
+	return (uint32_t)(h ^ h >> 29);
 }
 
 /* ---------------------------------------------------------------- symbols */
@@ -1735,7 +1745,8 @@ static int arrangement(const char *s, size_t n)
 static int parse_reg(As *a, const char *s, size_t n, A64Op *op, int depth)
 {
 	Sv al;
-	const char *dot = memchr(s, '.', n);
+	const char *dot = 0;
+	for (size_t i = 0; i < n; i++) if (s[i] == '.') { dot = s + i; break; }
 	size_t bn = dot ? (size_t)(dot - s) : n;
 	if (depth < 4 && reg_alias(a, s, bn, &al)) {
 		char buf[64];
@@ -1746,32 +1757,44 @@ static int parse_reg(As *a, const char *s, size_t n, A64Op *op, int depth)
 	char c = (char)c_lower((unsigned char)s[0]);
 	memset(op, 0, sizeof *op);
 	if (!dot) {
-		int r;
-		if (n >= 2 && c_digit((unsigned char)s[1])) {	/* the common case: x0, w12, v3, q1 ... */
-			if ((c == 'x' || c == 'w') && (r = parse_regnum(s + 1, n - 1, 30)) >= 0) {
+		int r, cl;
+		switch (c) {	/* x0, w12, q1, v3 ... */
+		case 'x': case 'w':
+			if ((r = parse_regnum(s + 1, n - 1, 30)) >= 0) {
 				op->kind = A64O_REG; op->cls = c == 'x' ? A64_X : A64_W; op->reg = (uint8_t)r; return 1;
 			}
-		} else if (n < 2 || n > 3) return 0;
-		if (sveqi(s, n, "sp")) { op->kind = A64O_REG; op->cls = A64_X; op->reg = 31; op->sp = 1; return 1; }
-		if (sveqi(s, n, "wsp")) { op->kind = A64O_REG; op->cls = A64_W; op->reg = 31; op->sp = 1; return 1; }
-		if (sveqi(s, n, "xzr")) { op->kind = A64O_REG; op->cls = A64_X; op->reg = 31; return 1; }
-		if (sveqi(s, n, "wzr")) { op->kind = A64O_REG; op->cls = A64_W; op->reg = 31; return 1; }
-		if (sveqi(s, n, "fp")) { op->kind = A64O_REG; op->cls = A64_X; op->reg = 29; return 1; }
-		if (sveqi(s, n, "lr")) { op->kind = A64O_REG; op->cls = A64_X; op->reg = 30; return 1; }
-		if ((c == 'x' || c == 'w') && (r = parse_regnum(s + 1, n - 1, 30)) >= 0) {
-			op->kind = A64O_REG; op->cls = c == 'x' ? A64_X : A64_W; op->reg = (uint8_t)r; return 1;
+			break;
+		case 'q': cl = A64_Q; goto fpr;
+		case 'd': cl = A64_D; goto fpr;
+		case 's': cl = A64_S; goto fpr;
+		case 'h': cl = A64_H; goto fpr;
+		case 'b': cl = A64_B;
+		fpr:
+			if ((r = parse_regnum(s + 1, n - 1, 31)) >= 0) { op->kind = A64O_REG; op->cls = (uint8_t)cl; op->reg = (uint8_t)r; return 1; }
+			break;
+		case 'v':
+			if ((r = parse_regnum(s + 1, n - 1, 31)) >= 0) {
+				op->kind = A64O_VREG; op->cls = A64_V; op->reg = (uint8_t)r; op->arr = A64_ARR_NONE; return 1;
+			}
+			break;
+		case 'z': case 'p':
+			if ((r = parse_regnum(s + 1, n - 1, c == 'z' ? 31 : 15)) >= 0) {
+				op->kind = A64O_REG; op->cls = c == 'z' ? A64_Z : A64_P; op->reg = (uint8_t)r; return 1;
+			}
+			break;
 		}
-		static const char fp[] = "qdshb";
-		const char *k = strchr(fp, c);
-		if (k && c && (r = parse_regnum(s + 1, n - 1, 31)) >= 0) {
-			static const uint8_t cl[] = { A64_Q, A64_D, A64_S, A64_H, A64_B };
-			op->kind = A64O_REG; op->cls = cl[k - fp]; op->reg = (uint8_t)r; return 1;
-		}
-		if (c == 'v' && (r = parse_regnum(s + 1, n - 1, 31)) >= 0) {
-			op->kind = A64O_VREG; op->cls = A64_V; op->reg = (uint8_t)r; op->arr = A64_ARR_NONE; return 1;
-		}
-		if ((c == 'z' || c == 'p') && (r = parse_regnum(s + 1, n - 1, c == 'z' ? 31 : 15)) >= 0) {
-			op->kind = A64O_REG; op->cls = c == 'z' ? A64_Z : A64_P; op->reg = (uint8_t)r; return 1;
+		if (n == 2 || n == 3) {	/* sp wsp xzr wzr fp lr */
+			uint32_t k = (uint32_t)c << 16 | (uint32_t)c_lower((unsigned char)s[1]) << 8 | (n == 3 ? (uint32_t)c_lower((unsigned char)s[2]) : 0);
+#define K3(x, y, z) ((uint32_t)(x) << 16 | (uint32_t)(y) << 8 | (uint32_t)(z))
+			switch (k) {
+			case K3('s', 'p', 0): op->kind = A64O_REG; op->cls = A64_X; op->reg = 31; op->sp = 1; return 1;
+			case K3('w', 's', 'p'): op->kind = A64O_REG; op->cls = A64_W; op->reg = 31; op->sp = 1; return 1;
+			case K3('x', 'z', 'r'): op->kind = A64O_REG; op->cls = A64_X; op->reg = 31; return 1;
+			case K3('w', 'z', 'r'): op->kind = A64O_REG; op->cls = A64_W; op->reg = 31; return 1;
+			case K3('f', 'p', 0): op->kind = A64O_REG; op->cls = A64_X; op->reg = 29; return 1;
+			case K3('l', 'r', 0): op->kind = A64O_REG; op->cls = A64_X; op->reg = 30; return 1;
+			}
+#undef K3
 		}
 		return 0;
 	}
@@ -1841,6 +1864,17 @@ static int parse_imm(As *a, const char **pp, const char *e, A64Op *op)
 				*pp = p + (end - tmp);
 				return 0;
 			}
+		}
+		/* a plain decimal number on its own: what expr() would fold it to */
+		const char *r = ws(q, e);
+		if (d == p && q > d && q - d <= 18 && !(d[0] == '0' && q - d > 1) && (r == e || *r == ',' || *r == ']')) {
+			int64_t x = 0;
+			for (const char *t = d; t < q; t++) x = x * 10 + (*t - '0');
+			op->v = (Val){ 0, 0, x };
+			op->imm = x;
+			op->hassym = 0;
+			*pp = q;
+			return 0;
 		}
 	}
 	Val v;
