@@ -518,6 +518,14 @@ int ppd_run(int argc, char **argv, const ppd_env *env)
 		}
 	}
 	if (freestanding) bstr(&pre, "#undef __STDC_HOSTED__\n#define __STDC_HOSTED__ 0\n");
+	if (!darwin && !short_wchar && !asm_mode && !undef)	/* the Linux table is for the kernel's -fshort-wchar */
+		bstr(&pre, "#undef __ARM_SIZEOF_WCHAR_T\n#define __ARM_SIZEOF_WCHAR_T 4\n"
+			   "#undef __SIZEOF_WCHAR_T__\n#define __SIZEOF_WCHAR_T__ 4\n"
+			   "#undef __WCHAR_MAX__\n#define __WCHAR_MAX__ 4294967295U\n"
+			   "#undef __WCHAR_MIN__\n#define __WCHAR_MIN__ 0U\n"
+			   "#undef __WCHAR_TYPE__\n#define __WCHAR_TYPE__ unsigned int\n"
+			   "#undef __WCHAR_WIDTH__\n#define __WCHAR_WIDTH__ 32\n"
+			   "#undef __clang_wide_literal_encoding__\n#define __clang_wide_literal_encoding__ \"UTF-32\"\n");
 	if (cfi) bstr(&pre, "#define __GCC_HAVE_DWARF2_CFI_ASM 1\n");
 	if (strict_align) bstr(&pre, "#undef __ARM_FEATURE_UNALIGNED\n");
 	if (tiny) bstr(&pre, "#undef __AARCH64_CMODEL_SMALL__\n#define __AARCH64_CMODEL_TINY__ 1\n");
