@@ -1945,12 +1945,18 @@ static void remove_va_comma(pp *p, size_t base, bool *ngs)
 static size_t append(pp *p, const ptok *t, uint32_t n)
 {
 	size_t first = p->svn;
+	ptok *w = p->sv + first;
 
-	for (uint32_t i = 0; i < n; i++) {
-		svpush(p, &t[i]);
-		if (t[i].kind == T_HASHHASH)
-			p->sv[p->svn - 1].flags |= PF_NOPASTE;
+	if (unlikely(n > SVMAX - p->svn)) {
+		fprintf(stderr, "vcc: expansion too large\n");
+		abort();
 	}
+	for (uint32_t i = 0; i < n; i++) {
+		w[i] = t[i];
+		if (unlikely(t[i].kind == T_HASHHASH))
+			w[i].flags |= PF_NOPASTE;
+	}
+	p->svn = first + n;
 	return first;
 }
 
@@ -1996,9 +2002,6 @@ static void subst_range(pp *p, const pmacro *m, margs *a, uint32_t from, uint32_
 			ngs = false;
 			continue;
 		}
-		before_nonempty = p->svn > base && hashhash(&p->sv[p->svn - 1]);
-		before = i && body[i - 1].kind == T_HASHHASH;
-		after = i + 1 < to && body[i + 1].kind == T_HASHHASH;
 		if (!k) {
 			vfill(&t, cur, m->src, eloc);
 			t.flags &= ~(TF_SOL | TF_SPACE);
@@ -2009,6 +2012,9 @@ static void subst_range(pp *p, const pmacro *m, margs *a, uint32_t from, uint32_
 			svpush(p, &t);
 			continue;
 		}
+		before_nonempty = p->svn > base && hashhash(&p->sv[p->svn - 1]);
+		before = i && body[i - 1].kind == T_HASHHASH;
+		after = i + 1 < to && body[i + 1].kind == T_HASHHASH;
 		k--;
 		if (!before && !after) {
 			const ptok *at = a->pre[k];
