@@ -1412,12 +1412,12 @@ typedef struct margs {
 	const ptok **pre;	/* pre-expanded, lazily */
 	uint32_t *preln;
 	uint8_t *prest;		/* 0: not computed, 1: done */
-	const ptok **str;	/* stringified */
+	size_t base;		/* tok is sv + base */
 } margs;
 
 static bool collect_(pp *p, const pmacro *m, const ptok *name, margs *a, ptok *rp)
 {
-	uint32_t np = m->nparam, slots = np ? np : 1, k = 0, depth = 0, n;
+	uint32_t np = m->nparam, slots = np ? np : 1, k = 0, depth = 0;
 	size_t base = p->svn;
 	bool va = m->flags & MF_VARIADIC;
 	ptok t;
@@ -1535,13 +1535,13 @@ static bool collect_(pp *p, const pmacro *m, const ptok *name, margs *a, ptok *r
 		p->svn = base;
 		return false;
 	}
-	a->tok = svtake(p, base, &n);
+	/* the arguments stay in sv[base, svn) until expand() is done with them */
+	a->tok = p->sv + base;
+	a->base = base;
 	a->pre = alloc(&p->tmp, slots * sizeof(*a->pre));
 	a->preln = alloc(&p->tmp, slots * sizeof(uint32_t));
 	a->prest = alloc(&p->tmp, slots);
-	a->str = alloc(&p->tmp, slots * sizeof(*a->str));
 	memset(a->prest, 0, slots);
-	memset(a->str, 0, slots * sizeof(*a->str));
 	return true;
 }
 
@@ -2159,14 +2159,18 @@ static int expand(pp *p, const pmacro *m, ptok *t)
 	if (!collect(p, m, t, &a, &rp))
 		return 1;
 	if (!m->nbody) {
+		p->svn = a.base;
 		p->pend |= nf;
 		return 0;
 	}
 	if (m->nbody == 1 && trivial(p, m)) {
+		p->svn = a.base;
 		single(p, m, t, nf, rp.loc);
 		return 1;
 	}
-	return subst(p, m, t, &a, rp.loc);
+	subst(p, m, t, &a, rp.loc);
+	p->svn = a.base;
+	return 0;
 }
 
 /* ---------------- builtin macros ---------------- */
