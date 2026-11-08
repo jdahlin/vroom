@@ -81,7 +81,7 @@ static const uint8_t hi_tab[16] = {
  *            '%' or '.', bit 7 '+' or '-'
  * Masks whose property is in bit 7 go to mm4() as they are.
  */
-static uint8_t ttab[128], gtab[64];
+static uint8_t ttab[128], gtab[64], cltab[128];	/* cltab: the byte classes above */
 
 static void init_struct_tables(void)
 {
@@ -105,6 +105,8 @@ static void init_struct_tables(void)
 			t |= 64;
 		ttab[c] = t;
 	}
+	for (int c = 0; c < 128; c++)
+		cltab[c] = lo_tab[c & 15] & hi_tab[c >> 4];
 	gtab['='] = 2;
 	gtab['>'] = 4;
 	gtab[':'] = gtab['%'] = 8 | 64;
@@ -141,8 +143,7 @@ static inline uint64_t mm4(uint8x16_t a0, uint8x16_t a1, uint8x16_t a2, uint8x16
  */
 static void classify(const uint8_t *s, size_t from, size_t to, uint64_t *m[M_COUNT])
 {
-	const uint8x16_t lo = vld1q_u8(lo_tab), hi = vld1q_u8(hi_tab);
-	const uint8x16_t nib = vdupq_n_u8(15), mid = vdupq_n_u8(0x1f), mdg = vdupq_n_u8(0x04);
+	const uint8x16_t mid = vdupq_n_u8(0x1f), mdg = vdupq_n_u8(0x04);
 	const uint8x16_t mws = vdupq_n_u8(0xe0);
 	const uint8x16_t k64 = vdupq_n_u8(64);
 	const uint8x16_t b1 = vdupq_n_u8(1), b16 = vdupq_n_u8(16);
@@ -158,24 +159,29 @@ static void classify(const uint8_t *s, size_t from, size_t to, uint64_t *m[M_COU
 		vn[3] = vextq_u8(v.val[0], vld1q_dup_u8(q + 64), 1);
 		{
 			/*
-			 * The 12 table registers are loaded per block (3 loads)
+			 * The table registers are loaded per block (5 loads)
 			 * instead of being live across the loop: that spilled
 			 * and rematerialized ~60 instructions per block.
 			 */
-			const uint8_t *tp = ttab, *gp = gtab;
+			const uint8_t *tp = ttab, *gp = gtab, *cp = cltab;
+			uint8x16_t hv[4];
 
-			__asm__("" : "+r"(tp), "+r"(gp));
+			__asm__("" : "+r"(tp), "+r"(gp), "+r"(cp));
+			for (int k = 0; k < 4; k++)
+				hv[k] = vsubq_u8(v.val[k], k64);	/* 64..127 -> 0..63 */
 			const uint8x16x4_t t0 = vld1q_u8_x4(tp), t1 = vld1q_u8_x4(tp + 64);
 
 			for (int k = 0; k < 4; k++)
-				t[k] = vorrq_u8(vqtbl4q_u8(t0, v.val[k]), vqtbl4q_u8(t1, vsubq_u8(v.val[k], k64)));
+				t[k] = vqtbx4q_u8(vqtbl4q_u8(t0, v.val[k]), t1, hv[k]);
+			const uint8x16x4_t c0 = vld1q_u8_x4(cp), c1 = vld1q_u8_x4(cp + 64);
+
+			for (int k = 0; k < 4; k++)
+				c[k] = vqtbx4q_u8(vqtbl4q_u8(c0, v.val[k]), c1, hv[k]);
 			const uint8x16x4_t g = vld1q_u8_x4(gp);
 
 			for (int k = 0; k < 4; k++)
 				gn[k] = vqtbl4q_u8(g, vn[k]), tg[k] = vandq_u8(t[k], gn[k]);
 		}
-		for (int k = 0; k < 4; k++)
-			c[k] = vandq_u8(vqtbl1q_u8(lo, vandq_u8(v.val[k], nib)), vqtbl1q_u8(hi, vshrq_n_u8(v.val[k], 4)));
 #define MASK(j, expr) do {						\
 		for (int k = 0; k < 4; k++)					\
 			r[k] = (expr);						\
