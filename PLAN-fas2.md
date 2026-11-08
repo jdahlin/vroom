@@ -766,9 +766,26 @@ ingen emulering. Samma image fungerar i en qemu-system-aarch64-gäst med `-accel
     `.rodata.str1.1`, ordningen av statiska lokala objekt (`__msg`) i `.rodata`/`.data`,
     suffixet på statiska lokalas namn (sym-index) — de skapas när kroppen parsas. Debian
     bootar till `running`, 0 felande enheter (`results/boot-20261108-214004.log`).
-  - **Steg 2 (nästa):** låt huvudcachens poster bära kroppsintervallen så att uppspelningen
-    hoppar över en kropp utan att dela ut dess tokens, och den sena parsningen läser postens
-    tokenarray direkt (ingen kopia).
+- **Lata kroppar, steg 2: i huvudcachen (klart, 2026-11-08).** `publish_tok` sparar per post
+  de yttersta `{`–`}`-paren i postens egna tokens som inte har något barn inskarvat (`hent.br`).
+  När parserns `{` för en lat kropp just spelades upp ur en post och paret finns där
+  (`pp_lazy_skip`; inte under inspelning utom i en `norec`-uppspelning, inget `pend`),
+  flyttas uppspelningen förbi `}`: positionerna räknas (`ntok_out`, deklarationscachen),
+  `__COUNTER__`-posterna hoppas över. Kroppen är då `(post, open, close, bas, cbase, ci)`
+  (`pp_lazy` i `lzfn`), och den sena parsningen läser postens tokens direkt (`pp_lazy_tok`,
+  samma `__COUNTER__`-omskrivning som `replay_tok`, nu `ctr_spell`). Missar i huvudcachen
+  kopierar som i steg 1. `prevloc`/`prevflags` blir `}`:s som förut.
+  - **Mätt** (samma körning som ovan, 840 TU:er, `-j 6`): steg 1 101,7 → **76,0 G
+    instruktioner** (från 137,6 utan lata kroppar: **−45 %**), 35,1 → 27,4 G cykler (−37 %),
+    user 10,9 → 8,3 s, vägg 2,1 → 1,6 s. 4,21 M kroppar sparade, 3,81 M ur huvudcachen,
+    samma 85 647 parsade. Deklarationscachen tar nu 121 bilder (förut 64) inom samma tak.
+    Kallt bygge (`-j 14`, alternerande mot `VCC_EAGER=1` ×3, last 5–13): vccd user
+    14,8–15,1 → **9,4–9,5 s (−37 %)**, summerad jobbtid 30–42 → 19–24 s; väggtiden brus.
+  - **Verifierat:** alla 839 objekt byte-identiska med steg 1; paritet 911/912, batch --cmp
+    873/873, sema run och layout 878/879, fpcheck 840/840, diag 63/63, vcc-obj 840/840 (samma
+    31 odefinierade), cbatch ASan+UBSan 840/840, fuzz-regress, vccd-cc 174/175 (som förut;
+    obs: med ett långt `TMPDIR` blir socketvägen för lång och vccd-cc hänger i `forward`).
+    Debian bootar till `running`, 0 felande enheter (`results/boot-20261108-220251.log`).
 - **Inkrementellt:** make-nivån fungerar redan (vccd:s `.cmd` = fixdeps, `touch` på ett huvud
   bygger om exakt beroende objekt; no-op 2,7 s, nästan bara undermakes). En vccd som lever
   mellan byggen ger −20 % instruktioner. Det som ger mycket är en **innehållsadresserad

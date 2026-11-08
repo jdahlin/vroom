@@ -155,6 +155,8 @@ static inline uint32_t dec_loc(const coder *k, uint32_t l)
 			lf_[i_].loc = FIX(lf_[i_].loc);                                          \
 			lf_[i_].plb = FIX(lf_[i_].plb);                                          \
 			lf_[i_].ple = FIX(lf_[i_].ple);                                          \
+			lf_[i_].z.base = FIX(lf_[i_].z.base);                                    \
+			lf_[i_].z.rloc = FIX(lf_[i_].z.rloc);                                    \
 		}                                                                                \
 		for (uint32_t i_ = 0; i_ < (c)->nsym; i_++) {                                    \
 			sy_[i_].loc = FIX(sy_[i_].loc);                                          \

@@ -85,6 +85,8 @@ typedef struct lzfn {
 	uint32_t wm;		/* nsym at the definition: later file-scope syms are not visible */
 	uint32_t name, loc, psyms, npsyms, plb, ple;	/* the declarator, for function_def */
 	uint8_t done;
+	uint8_t hc;		/* the tokens are z's, in a header cache entry (ntk 0) */
+	pp_lazy z;
 } lzfn;
 
 struct cc {
@@ -182,8 +184,10 @@ struct cc {
 	uint32_t nlzf;
 	char *lzs;
 	uint32_t nlzs;
-	bool lz_on;		/* tokens come from lzt[lzc, lze), then T_EOF */
+	bool lz_on;		/* tokens come from lzt[lzc, lze) or lzz (lz_hc), then T_EOF */
+	bool lz_hc;
 	uint32_t lzc, lze;
+	pp_lazy lzz;
 	uint32_t lz_wm;		/* parsing a lazy body: file-scope syms from here on are hidden (0: none) */
 };
 

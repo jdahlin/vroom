@@ -51,6 +51,18 @@ VPRIV __attribute__((noinline)) void lz_fetch(cc *c, ptok *t)
 {
 	const lztok *z;
 
+	if (c->lz_hc && c->lzz.k <= c->lzz.close) {
+		pp_lazy_tok(c->p, &c->lzz, t);
+		c->lze = t->loc;	/* (the T_EOF's location) */
+		return;
+	}
+	if (c->lz_hc) {
+		memset(t, 0, sizeof(*t));
+		t->kind = T_EOF;
+		t->s = "";
+		t->loc = c->lze;
+		return;
+	}
 	if (c->lzc >= c->lze) {
 		memset(t, 0, sizeof(*t));
 		t->kind = T_EOF;

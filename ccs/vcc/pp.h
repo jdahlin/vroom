@@ -157,6 +157,27 @@ uint64_t pp_skipped(const pp *p);
  */
 int pp_skip_top(pp *p);
 
+/*
+ * Lazy bodies straight from the header cache.  When the token pp_next just
+ * delivered is a '{' replayed from a cached entry, and its matching '}' is in
+ * the same entry's own tokens (no child entry in between), pp_lazy_skip moves
+ * past the '}' as if the tokens had been delivered and fills z; pp_lazy_tok
+ * then hands out '{' .. '}' again, later in the same TU (z is a cursor).
+ * The entry is immutable and lives as long as the process.
+ */
+typedef struct pp_lazy {
+	const void *e;
+	uint32_t open, close;	/* own-token indices of '{' and '}' */
+	uint32_t base;		/* location base of the replay */
+	unsigned cbase;		/* __COUNTER__ at the entry's start */
+	uint32_t ci;		/* the entry's first __COUNTER__ record after '{' */
+	uint32_t k;		/* cursor: next token (pp_lazy_tok) */
+	uint32_t rloc;		/* the '}': location and flags */
+	uint8_t rflags;
+} pp_lazy;
+int pp_lazy_skip(pp *p, const ptok *lbrace, pp_lazy *z);
+void pp_lazy_tok(pp *p, pp_lazy *z, ptok *t);
+
 /* the token's spelling without splices; buf must hold t->len bytes */
 const char *pp_spell(const ptok *t, char *buf, size_t *len);
 
