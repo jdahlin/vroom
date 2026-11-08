@@ -371,6 +371,25 @@ VPRIV bool can_inline(ecx *e, uint32_t s)
 	return true;
 }
 
+/* temporaries an inlined call leaves free when it keeps params and its result in registers */
+#define INLINE_FREE 8
+
+/* an integer or pointer that fits one register (what B_REG and retreg hold) */
+static bool reg_scalar(ecx *e, qty t)
+{
+	cc *c = e->c;
+
+	return (is_integer(c, t) || is_ptr(c, t)) && !is_wide(c, t) && !(QQ(t) & Q_VOLATILE) && tsize(c, t) - 1 < 8;
+}
+
+static bool is_temp(int r)
+{
+	for (int i = 0; i < NTEMP; i++)
+		if (tempregs[i] == r)
+			return true;
+	return false;
+}
+
 VPRIV val inline_call(ecx *e, uint32_t s, carg *args, int n)
 {
 	cc *c = e->c;
@@ -391,7 +410,9 @@ VPRIV val inline_call(ecx *e, uint32_t s, carg *args, int n)
 	F.cbase = e->nclean;
 	F.nloop = e->nloop;
 	F.up = e->f;
-	if (!is_void(c, rty))
+	if (reg_scalar(e, rty) && NTEMP - __builtin_popcount(e->live) > INLINE_FREE)
+		F.retreg = (uint8_t)(treg(e) + 1);	/* returns put the value there: no slot */
+	else if (!is_void(c, rty))
 		F.retslot = slot(e, tsize(c, rty) ? tsize(c, rty) : 8, talign(c, rty) > 16 ? 16 : talign(c, rty));
 	for (int i = 0; i < n; i++)
 		if (args[i].slot != 1) {	/* parked: back in a register */
@@ -421,6 +442,24 @@ VPRIV val inline_call(ecx *e, uint32_t s, carg *args, int n)
 			b->v = v;
 			continue;
 		}
+		/*
+		 * A param the body never writes (nor takes the address of: that
+		 * counts as a write) keeps the argument's register: reads copy it.
+		 * Extended as a load from its slot would be, so it is the same value.
+		 */
+		if (i < n && v.k == V_REG && is_temp(v.r) && !(e->E->sflags[p] & (SA_WRITTEN | SA_CWRITE)) &&
+		    reg_scalar(e, ps->ty) && !sym_attrs(c, p)->cleanup && ps->sc != SC_REGISTER &&
+		    NTEMP - __builtin_popcount(e->live) > INLINE_FREE) {
+			uint64_t sz = tsize(c, ps->ty);
+
+			if (sz < 8)
+				extend(e, v.r, v.r, (int)sz, is_signed(c, ps->ty));
+			b->inst = F.inst;
+			b->kind = B_REG;
+			b->kv = 0;
+			b->v = v;
+			continue;
+		}
 		{
 			int32_t sl;
 			lval l = { .k = L_FRAME };
@@ -441,6 +480,21 @@ VPRIV val inline_call(ecx *e, uint32_t s, carg *args, int n)
 	e->inline_depth--;
 	e->f = F.up;
 	deflabel(e, F.retlbl);
+	for (int i = 0; i < (int)body->aux; i++) {
+		bind *b = binding(e, c->lists[body->a + i]);
+
+		if (b->kind == B_REG && b->inst == F.inst) {
+			tfree(e, b->v.r);
+			b->kind = B_NONE, b->inst = 0;
+		}
+	}
+	if (F.retreg) {
+		if (F.cst_ok && F.any_ret) {
+			tfree(e, F.retreg - 1);
+			return F.cst;
+		}
+		return vreg(F.retreg - 1);
+	}
 	if (is_void(c, rty))
 		return vnone();
 	if (F.cst_ok && F.any_ret)

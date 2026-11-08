@@ -20,7 +20,10 @@
  *   - lazy emission: static functions and objects are emitted only when
  *     emitted code or data refers to them;
  *   - locals live in stack slots; expression temporaries in x9-x15 and
- *     x19-x28.
+ *     x19-x28.  An inlined call's params that its body never writes keep
+ *     the argument's register (B_REG), and its result comes back in a
+ *     register (fnctx.retreg), not through slots;
+ *   - a b to a label right after it is dropped (finish_function).
  *
  * The kernel also relies on what clang -O2 folds beyond that: a
  * BUILD_BUG_ON inside a plain static or inline function that only folds
@@ -235,7 +238,7 @@ typedef struct val {
 enum { V_NONE, V_CONST, V_ADDR, V_REG, V_REG2 };
 
 /* per-sym binding inside a function instance */
-enum { B_NONE, B_SLOT, B_CONST, B_INDIRECT };
+enum { B_NONE, B_SLOT, B_CONST, B_INDIRECT, B_REG };	/* B_REG: an inlined call's read-only param in temporary v.r */
 
 /* per user label (prepass): referenced, defined so far, target of a jump back (or &&) */
 enum { LR_REF = 1, LR_DEF = 2, LR_BACK = 4 };
@@ -271,6 +274,7 @@ typedef struct fnctx {		/* one function instance: the emitted function or an inl
 	uint32_t fn, inst;
 	uint32_t retlbl;
 	int32_t retslot;
+	uint8_t retreg;		/* inlined: the result's temporary + 1 (0: in retslot) */
 	qty rty;
 	bool inl;
 	bool cst_ok, any_ret;

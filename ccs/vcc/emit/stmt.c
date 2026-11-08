@@ -445,7 +445,24 @@ static void gen_return(ecx *e, const node *x)
 				f->cst_ok = false;
 			}
 			f->any_ret = true;
-			store(e, &l, rt, &v);
+			if (f->retreg) {
+				/* what a store to and load from retslot would give */
+				int rr = f->retreg - 1;
+				uint64_t sz = tsize(c, rt);
+
+				if (v.k == V_CONST) {
+					movi(e, 1, rr, (int64_t)em_trunc_to(c, v.i, rt));
+				} else {
+					int r = toreg(e, &v);
+
+					if (sz < 8)
+						extend(e, rr, r, (int)sz, is_signed(c, rt));
+					else
+						mov(e, 1, rr, r);
+				}
+			} else {
+				store(e, &l, rt, &v);
+			}
 		}
 		val_free(e, &v);
 		run_cleanups(e, f->cbase);

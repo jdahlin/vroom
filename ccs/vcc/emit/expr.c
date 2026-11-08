@@ -40,6 +40,12 @@ static val gen_var(ecx *e, uint32_t n)
 
 		if (b->kind == B_CONST && b->inst)
 			return b->v;
+		if (b->kind == B_REG && b->inst) {
+			int r = treg(e);
+
+			mov(e, 1, r, b->v.r);
+			return vreg(r);
+		}
 		if (b->kv && (e->kvalid >> (b->kv - 1) & 1))
 			return vconst(e->kval[b->kv - 1]);
 	} else {

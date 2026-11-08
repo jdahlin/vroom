@@ -138,6 +138,27 @@ static void finish_direct(ecx *e, uint32_t s, uint32_t align, const int *cs, int
 	out_chunk(e, (uint64_t)s << 1, start);
 }
 
+/* drop each b to a label among those right after it: the code falls through anyway */
+static void drop_fallthrough(ecx *e)
+{
+	uint32_t n = 0;
+
+	for (uint32_t k = 0; k < e->nin; k++) {
+		const ins *i = &e->in[k];
+
+		if (i->op == I_B) {
+			uint32_t j = k + 1;
+
+			while (j < e->nin && e->in[j].op == I_LABEL && e->in[j].label != i->label)
+				j++;
+			if (j < e->nin && e->in[j].op == I_LABEL)
+				continue;
+		}
+		e->in[n++] = *i;
+	}
+	e->nin = n;
+}
+
 static void finish_function(ecx *e, uint32_t s)
 {
 	cc *c = e->c;
@@ -148,6 +169,7 @@ static void finish_function(ecx *e, uint32_t s)
 	const attrs *a = sym_attrs(c, s);
 	uint32_t align = 4;
 
+	drop_fallthrough(e);
 	for (int r = 19; r <= 28; r++)
 		if (e->usedcs & (1u << r))
 			cs[ncs++] = r;

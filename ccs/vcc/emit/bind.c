@@ -107,6 +107,13 @@ VPRIV lval local_lval(ecx *e, uint32_t s)
 	qty t = c->syms[s].ty;
 
 	l.align = talign(c, t);
+	if (b->kind == B_REG && b->inst) {
+		/* read-only, its address never taken: a copy in a fresh slot will do */
+		l.k = L_FRAME;
+		l.off = slot(e, 8, 8);
+		mem(e, I_ST, 3, 0, b->v.r, FRAME, l.off);
+		return l;
+	}
 	if (b->kind == B_NONE || b->inst == 0) {
 		/* declaration not executed (jumped over, or dead): give it a slot */
 		bind_slot(e, s);
