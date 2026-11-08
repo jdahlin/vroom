@@ -625,13 +625,17 @@ size_t vlex_scratch_size(size_t size)
 _Thread_local int vlex_no_intern;
 static pthread_once_t tables_once = PTHREAD_ONCE_INIT;
 
-/* 64 mask bits starting at position p (m[(p >> 6) + 1] must exist) */
+/*
+ * Mask bits from position p: one unaligned load at byte p / 8, so only the
+ * low 64 - p % 8 bits are valid, the rest are zero (m[(p >> 6) + 1] must
+ * exist).
+ */
 static inline uint64_t win(const uint64_t *m, size_t p)
 {
-	size_t w = p >> 6;
-	unsigned b = p & 63;
+	uint64_t x;
 
-	return (m[w] >> b) | ((m[w + 1] << 1) << (63 - b));
+	memcpy(&x, (const char *)m + (p >> 3), 8);
+	return x >> (p & 7);
 }
 
 /*
@@ -907,7 +911,9 @@ fast:
 		const uint64_t I = win(m[M_ID], p), W = win(m[M_WS], p), NL = win(m[M_NL], p);
 		const uint64_t DOT = win(m[M_DOT], p), D = win(m[M_DIG], p), P = win(m[M_P], p);
 		const uint64_t PR = win(m[M_PAIR], p);
-		uint64_t X = win(m[M_X], p);
+		/* the bits past the valid ones are an X: the window is 57..64 bytes */
+		const unsigned valid = 64 - (unsigned)(p & 7);
+		uint64_t X = win(m[M_X], p) | ~(~0ull >> (p & 7));
 		/* pp-numbers: from a digit starting a run of [A-Za-z0-9_$.], or
 		 * from a '.' before a digit, to the end of that run */
 		const uint64_t N = I | DOT, A = (D & ~(N << 1)) | (DOT & (D >> 1));
@@ -925,8 +931,6 @@ fast:
 		X |= DD | (DD >> 1) | (DD >> 2) | (ELL & ((ELL >> 1) | (ELL >> 2))) | (PR & (PR >> 1)) |
 		     (NS & NUM) | (DOTp & (DOTp >> 1) & ~ELL & ~(ELL << 1));
 		X |= (X >> 2) & DOT & (DOT >> 1);	/* "..\<newline>." */
-		/* ".." in the last two bits: a third dot would be past the window */
-		X |= DOT & (DOT >> 1) & (1ull << 62);
 
 		const uint64_t IDs = IDp & ~(IDp << 1), NUMs = NUM & ~(NUM << 1);
 		const uint64_t S = IDs | NUMs | ((P | DOTp) & ~((PR << 1) | (ELL << 1) | (ELL << 2)));
@@ -934,7 +938,7 @@ fast:
 		/* whitespace runs that contain a newline, filled to their end */
 		const uint64_t NLF = (W & ~(W + NL)) | NL;
 		const uint64_t SP = W << 1, SOL = NLF << 1;
-		const unsigned lim = X ? (unsigned)__builtin_ctzll(X) : 64;
+		const unsigned lim = X ? (unsigned)__builtin_ctzll(X) : 64;	/* <= valid */
 		uint64_t todo = S;
 		const uint8_t *kt = ktab;
 
@@ -980,7 +984,7 @@ fast:
 			 * Only whitespace up to the X: take it and go to the
 			 * handler, instead of a window that finds just that.
 			 */
-			if (lim < 64 && !(~W & (~0ull << last) & ~(~0ull << lim))) {
+			if (lim < valid && !(~W & (~0ull << last) & ~(~0ull << lim))) {
 				if (lim > last)
 					fl |= TF_SPACE | (NL & (~0ull << last) & ~(~0ull << lim) ? TF_SOL : 0);
 				p = gap = p + lim;
@@ -999,13 +1003,13 @@ fast:
 		}
 		/* whitespace, then an X or the next window */
 		{
-			const unsigned o = ~W ? (unsigned)__builtin_ctzll(~W) : 64;
+			const unsigned o = ~W ? (unsigned)__builtin_ctzll(~W) : 64;	/* <= valid */
 
 			if (o) {
 				fl |= TF_SPACE | (NL & (o == 64 ? ~0ull : (1ull << o) - 1) ? TF_SOL : 0);
 				p = gap = p + o;
 			}
-			if (o == 64)
+			if (o >= valid)
 				goto fast;
 			DISPATCH();
 		}
