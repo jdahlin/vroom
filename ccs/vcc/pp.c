@@ -1322,21 +1322,19 @@ static __attribute__((noinline)) void raw(pp *p, ptok *t)
 	}
 }
 
-/* raw(), inline: a macro context's next token with nothing owed (most tokens) */
-static inline __attribute__((always_inline)) void raw_fast(pp *p, ptok *t)
+/* the next token of the top context if it is plain (nothing owed, no directive) */
+static inline __attribute__((always_inline)) bool raw_plain(pp *p, ctx *c, ptok *t)
 {
-	ctx *c = &p->cx[p->depth - 1];
-
 	if (likely(c->i < c->n && !(c->first | p->pend))) {
 		if (likely(c->type == C_PTOK)) {
 			*t = c->pt[c->i++];
-			return;
+			return true;
 		}
 		if (c->type == C_VTOK) {
 			const vtok *v = &c->vt[c->i++];
 
 			vfill(t, v, c->src, c->offloc ? c->loc + v->off : c->loc);
-			return;
+			return true;
 		}
 		if (c->type == C_FILE) {
 			const vtok *v = &c->vt[c->i];
@@ -1344,11 +1342,37 @@ static inline __attribute__((always_inline)) void raw_fast(pp *p, ptok *t)
 			if (likely(!((v->flags & TF_SOL) && v->kind == T_HASH))) {
 				c->i++;
 				vfill(t, v, c->src, c->loc + v->off);
-				return;
+				return true;
 			}
 		}
 	}
+	return false;
+}
+
+/* raw_fast's fallback: pops exhausted macro contexts (as raw() does) without raw()'s frame */
+static __attribute__((noinline)) void raw_pop(pp *p, ptok *t)
+{
+	ctx *c = &p->cx[p->depth - 1];
+
+	while (c->i >= c->n && (c->type == C_PTOK || c->type == C_VTOK) && !c->barrier) {
+		if (c->mid)
+			menable(p, c->mid);
+		if (c->first)
+			p->pend |= c->first & 3;
+		p->depth--;
+		c--;
+	}
+	if (raw_plain(p, c, t))
+		return;
 	raw(p, t);
+}
+
+/* raw(), inline: a macro context's next token with nothing owed (most tokens) */
+static inline __attribute__((always_inline)) void raw_fast(pp *p, ptok *t)
+{
+	if (likely(raw_plain(p, &p->cx[p->depth - 1], t)))
+		return;
+	raw_pop(p, t);
 }
 
 /* is the next token '(' ?  (clang's isNextPPTokenLParen: no popping) */
@@ -1615,7 +1639,11 @@ static bool needs_pre(pp *p, const ptok *t, uint32_t n)
 	return false;
 }
 
-static void preexpand(pp *p, margs *a, uint32_t k)
+/*
+ * keep: the result stays in sv[base, svn) (it is only read, and only until
+ * expand() resets svn); else it is copied to tmp (va_opt: sv is in use above)
+ */
+static void preexpand(pp *p, margs *a, uint32_t k, bool keep)
 {
 	const ptok *at = a->tok + a->st[k];
 	uint32_t n = a->ln[k];
@@ -1642,7 +1670,12 @@ static void preexpand(pp *p, margs *a, uint32_t k)
 	p->preexp--;
 	pop_to(p, d);
 	p->pend = pend;
-	a->pre[k] = svtake(p, base, &a->preln[k]);
+	if (keep) {
+		a->pre[k] = p->sv + base;
+		a->preln[k] = (uint32_t)(p->svn - base);
+	} else {
+		a->pre[k] = svtake(p, base, &a->preln[k]);
+	}
 }
 
 static bool is_strlit(int k)
@@ -2000,7 +2033,7 @@ static uint32_t va_opt(pp *p, const pmacro *m, margs *a, uint32_t i, uint32_t to
 		return to;
 	}
 	if (!a->prest[k])
-		preexpand(p, a, k);
+		preexpand(p, a, k, false);
 	if (a->preln[k]) {
 		bool ngs = false;
 
@@ -2052,7 +2085,7 @@ static void subst_simple(pp *p, const pmacro *m, margs *a, uint8_t nf, uint32_t 
 				continue;
 			}
 			if (!a->prest[k - 1])
-				preexpand(p, a, k - 1);
+				preexpand(p, a, k - 1, true);
 			n += a->preln[k - 1];
 		}
 	} else {
@@ -2121,7 +2154,7 @@ static int subst(pp *p, const pmacro *m, const ptok *name, margs *a, uint32_t el
 				continue;
 			if ((i && body[i - 1].kind == T_HASHHASH) || (i + 1 < nb && body[i + 1].kind == T_HASHHASH))
 				continue;
-			preexpand(p, a, k - 1);
+			preexpand(p, a, k - 1, true);
 		}
 	}
 	base = p->svn;
