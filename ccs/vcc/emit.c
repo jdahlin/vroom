@@ -2830,6 +2830,7 @@ static lval gen_lval(ecx *e, uint32_t n)
 
 /* ---------------- loads and stores of typed values ---------------- */
 
+static void shift_imm(ecx *e, int op, int x, int rd, int rn, int k);
 static int bf_bytes(int bits) { return bits <= 8 ? 1 : bits <= 16 ? 2 : bits <= 32 ? 4 : 8; }
 
 static val load(ecx *e, lval *l, qty t)
@@ -2850,8 +2851,23 @@ static val load(ecx *e, lval *l, qty t)
 	if (l->bf) {
 		int bits = l->bitoff + l->width, nb = bf_bytes(bits);
 
-		if (bits > 64)
-			efatal(e, 0, "unsupported bit-field layout");
+		if (bits > 64) {
+			/* straddles 8 bytes (packed): the low 64 - bitoff bits, then the rest from byte 8 on */
+			lval l2 = *l;
+			int h = treg(e);
+
+			if (bits - 64 > 64)
+				efatal(e, 0, "unsupported bit-field layout");
+			r = treg(e);
+			load_n(e, r, l, 8, 0);
+			l2.off += 8;
+			load_n(e, h, &l2, bf_bytes(bits - 64), 0);
+			opbf(e, I_UBFM, 1, r, r, l->bitoff, 63);
+			opbf(e, I_BFM, 1, r, h, l->bitoff, bits - 64 - 1);	/* bfi r, h, #(64 - bitoff), #(bits - 64) */
+			tfree(e, h);
+			opbf(e, l->sgn ? I_SBFM : I_UBFM, 1, r, r, 0, l->width - 1);
+			return vreg(r);
+		}
 		r = treg(e);
 		load_n(e, r, l, nb, 0);
 		opbf(e, l->sgn ? I_SBFM : I_UBFM, 1, r, r, l->bitoff, l->bitoff + l->width - 1);
@@ -2894,6 +2910,23 @@ static void store(ecx *e, lval *l, qty t, val *v)
 		int r = toreg(e, v);
 
 		mov(e, 1, l->r, r);
+		return;
+	}
+	if (l->bf && l->bitoff + l->width > 64) {
+		/* straddles 8 bytes: see load() */
+		int bits = l->bitoff + l->width, nb = bf_bytes(bits - 64);
+		int r = toreg(e, v), w = treg(e), lo = 64 - l->bitoff;
+		lval l2 = *l;
+
+		load_n(e, w, l, 8, 0);
+		opbf(e, I_BFM, 1, w, r, (64 - l->bitoff) & 63, lo - 1);
+		store_n(e, w, l, 0, 8);
+		l2.off += 8;
+		load_n(e, w, &l2, nb, 0);
+		shift_imm(e, I_LSRV, 1, R_X16, r, lo);
+		opbf(e, I_BFM, 1, w, R_X16, 0, bits - 64 - 1);
+		store_n(e, w, l, 8, nb);
+		tfree(e, w);
 		return;
 	}
 	if (l->bf) {

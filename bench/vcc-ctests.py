@@ -48,6 +48,9 @@ RTFL = ['--target=aarch64-linux-gnu', '-ffreestanding', '-fno-builtin', '-nostdi
 
 # tcc tests2 that test tcc itself (see tcc-tests2/Makefile): run modes, -dt
 # snippets, bounds checker, other targets, threads/TLS, several files, argv
+# gcc torture tests whose output depends on the compiler, not on correctness
+GCC_SKIP = {'return-addr': 'prints code addresses'}
+
 TCC_SKIP = {
     '31_args': 'argv', '137_funcall_struct_args': 'void main: exit status undefined', '79_vla_continue': 'compares addresses of dead VLAs (clang and tcc differ)', '46_grep': 'argv, files', '34_array_assignment': 'not C (tcc skips it)',
     '60_errors_and_warnings': 'tcc -dt', '96_nodata_wanted': 'tcc -dt', '125_atomic_misc': 'tcc -dt',
@@ -163,6 +166,8 @@ def one(t):
     src = open(path, 'rb').read().decode('latin-1')
     if suite == 'tcc' and name in TCC_SKIP:
         return t, 'skip', 'tcc-specific', TCC_SKIP[name]
+    if suite == 'gcc' and name in GCC_SKIP:
+        return t, 'skip', 'compiler-specific', GCC_SKIP[name]
     flags = dg_flags(src) if suite == 'gcc' else []
     if name.startswith('76_dollars'):
         flags = ['-fdollars-in-identifiers']
