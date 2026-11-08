@@ -1669,6 +1669,29 @@ static __attribute__((noinline)) void preexpand_run(pp *p, margs *a, uint32_t k,
 	p->pend = 0;
 	p->preexp++;
 	for (;;) {
+		ctx *c = &p->cx[p->depth - 1];
+
+		/* runs of tokens that are not macros: as next_exp() returns them, straight into sv */
+		if (c->type == C_PTOK && c->i < c->n && !(c->first | p->pend) && !p->rec.on &&
+		    likely(p->svn + (c->n - c->i) <= SVMAX)) {
+			const ptok *pt = c->pt;
+			ptok *w = p->sv + p->svn;
+			uint32_t i = c->i, e = c->n;
+
+			for (; i < e; i++) {
+				uintptr_t me;
+
+				*w = pt[i];
+				if (pt[i].kind == T_IDENT && !(pt[i].flags & PF_NOEXP) && (me = mget(p, pt[i].id))) {
+					if (!(me & 1))
+						break;	/* a macro: next_exp() */
+					w->flags |= PF_NOEXP;
+				}
+				w++;
+			}
+			p->svn = (size_t)(w - p->sv);
+			c->i = i;
+		}
 		next_exp(p, &t);
 		if (t.kind == T_EOF)
 			break;
