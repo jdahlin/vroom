@@ -49,7 +49,7 @@ RTFL = ['--target=aarch64-linux-gnu', '-ffreestanding', '-fno-builtin', '-nostdi
 # tcc tests2 that test tcc itself (see tcc-tests2/Makefile): run modes, -dt
 # snippets, bounds checker, other targets, threads/TLS, several files, argv
 TCC_SKIP = {
-    '31_args': 'argv', '46_grep': 'argv, files', '34_array_assignment': 'not C (tcc skips it)',
+    '31_args': 'argv', '137_funcall_struct_args': 'void main: exit status undefined', '46_grep': 'argv, files', '34_array_assignment': 'not C (tcc skips it)',
     '60_errors_and_warnings': 'tcc -dt', '96_nodata_wanted': 'tcc -dt', '125_atomic_misc': 'tcc -dt',
     '128_run_atexit': 'tcc -dt', '139_arm64_errors': 'tcc -dt', '112_backtrace': 'tcc -b',
     '113_btdll': 'dll', '114_bound_signal': 'tcc -b', '115_bound_setjmp': 'tcc -b',

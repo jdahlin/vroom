@@ -2217,23 +2217,77 @@ static int f_cmp(ecx *e, int op, int d, val *a, val *b);
 static val f_tobool(ecx *e, val v, qty t);
 static val call_named(ecx *e, uint32_t ref, val *vals, qty *tys, int n, qty rty, bool noret);
 
-/* ---------------- AAPCS64 (floating point in v0-v7, HFAs not done) ---------------- */
+/* ---------------- AAPCS64 (floating point and HFAs in v0-v7) ---------------- */
 
-/* a homogeneous floating-point aggregate (top-level members only): goes in v registers, not done */
-static bool is_hfa(cc *c, qty t)
+/*
+ * A homogeneous floating-point aggregate: a record (nested records and
+ * arrays included) whose leaves are 1-4 floats or 1-4 doubles, with no
+ * padding.  Returns the member size (4 or 8) and sets *n, or 0.
+ */
+static int hfa_walk(cc *c, qty t, int *base, uint64_t *n)
 {
-	const tag *g = &c->tags[T(c, t)->aux];
-	bool hfa = g->nfield > 0 && g->nfield <= 4;
+	const ctype *y = T(c, t);
 
-	for (uint32_t k = 0; hfa && k < g->nfield; k++)
-		hfa = is_flt(c, g->f[k].ty) && KIND(c, g->f[k].ty) == KIND(c, g->f[0].ty);
-	return hfa;
+	if (y->kind == TY_FLOAT || y->kind == TY_DOUBLE) {
+		int b = y->kind == TY_FLOAT ? 4 : 8;
+
+		if (*base && *base != b)
+			return 0;
+		*base = b;
+		*n = 1;
+		return 1;
+	}
+	if (y->kind == TY_ARRAY) {
+		uint64_t m;
+
+		if (y->flags & (TF_VLA | TF_INCOMPLETE) || !hfa_walk(c, y->base, base, &m))
+			return 0;
+		*n = m * y->n;
+		return y->n > 0;
+	}
+	if (y->kind == TY_STRUCT || y->kind == TY_UNION) {
+		const tag *g = &c->tags[y->aux];
+		uint64_t tot = 0;
+
+		for (uint32_t k = 0; k < g->nfield; k++) {
+			uint64_t m;
+
+			if (g->f[k].bitfield || !hfa_walk(c, g->f[k].ty, base, &m))
+				return 0;
+			if (y->kind == TY_UNION)
+				tot = m > tot ? m : tot;
+			else
+				tot += m;
+		}
+		*n = tot;
+		return tot > 0 && *base && tot * (uint64_t)*base == g->size;
+	}
+	return 0;
 }
 
-enum { A_IGNORE, A_REG, A_STACK, A_REF_REG, A_REF_STACK, A_VREG };	/* A_VREG: float/double in v<reg> */
+static int hfa(cc *c, qty t, int *n)
+{
+	int base = 0;
+	uint64_t m = 0;
+
+	if (!is_record(c, t) || !hfa_walk(c, t, &base, &m) || m > 4)
+		return 0;
+	*n = (int)m;
+	return base;
+}
+
+/* a record result returned through x8 */
+static bool is_sret(cc *c, qty t)
+{
+	int n;
+
+	return is_recabi(c, t) && tsize(c, t) > 16 && !hfa(c, t, &n);
+}
+
+enum { A_IGNORE, A_REG, A_STACK, A_REF_REG, A_REF_STACK, A_VREG, A_HFA };	/* A_VREG: float/double in v<reg>; A_HFA: nreg members of fsz bytes in v<reg>.. */
 
 typedef struct abiarg {
-	uint8_t kind, reg, nreg;
+	uint8_t kind, reg, nreg, fsz;
 	int32_t stk;		/* A_STACK / A_REF_STACK: offset in the argument area */
 	uint32_t size;
 } abiarg;
@@ -2282,8 +2336,21 @@ static void classify(ecx *e, qty t, int *ngrn, int *nsaa, abiarg *a)
 		goto stack;
 	}
 	if (is_recabi(c, t)) {
-		if (is_hfa(c, t))
-			efatal(e, e->curloc, "floating-point aggregates as arguments or results are not supported");
+		int hn, hb = hfa(c, t, &hn);
+
+		if (hb) {
+			if (e->nsrn + hn <= 8) {
+				a->kind = A_HFA;
+				a->reg = (uint8_t)e->nsrn;
+				a->nreg = (uint8_t)hn;
+				a->fsz = (uint8_t)hb;
+				e->nsrn += hn;
+				return;
+			}
+			e->nsrn = 8;
+			n = (int)((size + 7) / 8);
+			goto stack;
+		}
 		if (size == 0) {
 			a->kind = A_IGNORE;
 			return;
@@ -3659,9 +3726,10 @@ static val do_call(ecx *e, uint32_t ref, val *fnv, carg *args, int n, qty rty, b
 	cc *c = e->c;
 	int ngrn = 0, nsaa = 0;
 	int32_t fslot = 1, rslot = 1;
-	bool sret = is_recabi(c, rty) && tsize(c, rty) > 16;
+	bool sret = is_sret(c, rty);
 	spill sp;
 	val res = vnone();
+	int hn;
 
 	e->calls = true;
 	if (fnv) {
@@ -3679,8 +3747,6 @@ static val do_call(ecx *e, uint32_t ref, val *fnv, carg *args, int n, qty rty, b
 		note_ref(e, ref);
 	}
 	e->nsrn = 0;
-	if (is_record(c, rty) && is_hfa(c, rty))
-		efatal(e, e->curloc, "floating-point aggregates as arguments or results are not supported");
 	for (int i = 0; i < n; i++) {
 		park(e, &args[i]);
 		if (nfix >= 0 && i >= nfix && DARWIN(c))
@@ -3745,6 +3811,12 @@ static val do_call(ecx *e, uint32_t ref, val *fnv, carg *args, int n, qty rty, b
 			arg_word(e, a, 0, R_X16);
 			word(e, f_in(a->a.size == 8, a->a.reg, R_X16));
 			break;
+		case A_HFA:
+			for (int k = 0; k < a->a.nreg; k++) {
+				mem(e, I_LD, log2sz(a->a.fsz), 0, R_X16, FRAME, a->slot + a->a.fsz * k);
+				word(e, f_in(a->a.fsz == 8, a->a.reg + k, R_X16));
+			}
+			break;
 		}
 	}
 	if (sret)
@@ -3761,6 +3833,17 @@ static val do_call(ecx *e, uint32_t ref, val *fnv, carg *args, int n, qty rty, b
 		int r = treg(e);
 
 		opi(e, I_ADDI, 1, r, FRAME, rslot);
+		res = vreg(r);
+	} else if (is_recabi(c, rty) && hfa(c, rty, &hn)) {
+		int hb = hfa(c, rty, &hn);
+		int32_t sl = slot(e, 32, 16);
+		int r = treg(e);
+
+		for (int k = 0; k < hn; k++) {
+			word(e, f_out(hb == 8, R_X16, k));
+			mem(e, I_ST, log2sz(hb), 0, R_X16, FRAME, sl + hb * k);
+		}
+		opi(e, I_ADDI, 1, r, FRAME, sl);
 		res = vreg(r);
 	} else if (is_recabi(c, rty)) {
 		int32_t sl = slot(e, 16, 16);
@@ -4389,6 +4472,32 @@ static val va_arg_(ecx *e, const node *x)
 		al16 = false;
 		goto stack;
 	}
+	int hn, hb = hfa(c, t, &hn);
+
+	if (hb) {
+		/* an HFA: hn v registers, copied together into a temporary */
+		int32_t sl = slot(e, 32, 16);
+
+		mem(e, I_LD, 2, 1, off, ra, 28);
+		opi(e, I_SUBSI, 1, ZR, off, 0);
+		bcond(e, C_GE, lstack);
+		opi(e, I_ADDI, 1, addr, off, 16 * hn);
+		mem(e, I_ST, 2, 0, addr, ra, 28);
+		opi(e, I_SUBSI, 1, ZR, addr, 0);
+		bcond(e, C_GT, lstack);
+		mem(e, I_LD, 3, 0, addr, ra, 16);
+		op3(e, I_ADD, 1, addr, addr, off);
+		for (int k = 0; k < hn; k++) {
+			mem(e, I_LD, log2sz(hb), 0, R_X16, addr, 16 * k);
+			mem(e, I_ST, log2sz(hb), 0, R_X16, FRAME, sl + hb * k);
+		}
+		opi(e, I_ADDI, 1, addr, FRAME, sl);
+		jump(e, ldone);
+		nreg = (int)((size + 7) / 8);
+		big = false;
+		al16 = talign(c, t) >= 16;
+		goto stack;
+	}
 	mem(e, I_LD, 2, 1, off, ra, 24);
 	opi(e, I_SUBSI, 1, ZR, off, 0);
 	bcond(e, C_GE, lstack);
@@ -4620,8 +4729,14 @@ static val gen_builtin(ecx *e, uint32_t n)
 	case BI_EXTRACT_RETURN_ADDR:
 		return gen(e, arg[0]);
 	case BI_ASSUME:
-	case BI_VA_END:
 		return vnone();
+	case BI_VA_END: {	/* nothing to do, but the argument's side effects happen */
+		lval l = gen_lval(e, arg[0]);
+		val a = laddr(e, &l);
+
+		vfree(e, &a);
+		return vnone();
+	}
 	case BI_VA_START:
 		va_start_(e, arg[0]);
 		return vnone();
@@ -6181,7 +6296,16 @@ static void gen_return(ecx *e, const node *x)
 				v = load(e, &l, rt);
 			}
 		}
-		if (is_recabi(c, rt)) {
+		int hn, hb = is_recabi(c, rt) ? hfa(c, rt, &hn) : 0;
+
+		if (hb) {
+			int rs = toreg(e, &v);
+
+			for (int k = 0; k < hn; k++) {
+				mem(e, I_LD, log2sz(hb), 0, R_X16, rs, hb * k);
+				word(e, f_in(hb == 8, k, R_X16));
+			}
+		} else if (is_recabi(c, rt)) {
 			int rs = toreg(e, &v);
 
 			if (tsize(c, rt) > 16) {
@@ -7246,7 +7370,7 @@ static void emit_function(ecx *e, uint32_t s)
 		e->f = NULL;
 		return;
 	}
-	if (is_recabi(c, rty) && tsize(c, rty) > 16) {
+	if (is_sret(c, rty)) {
 		F.retslot = slot(e, 8, 8);
 		mem(e, I_ST, 3, 0, 8, FRAME, F.retslot);
 	}
@@ -7302,6 +7426,14 @@ static void emit_function(ecx *e, uint32_t s)
 			bd->slot = slot(e, 8, 8);
 			word(e, f_out(sz == 8, R_X16, ab.reg));
 			mem(e, I_ST, log2sz(sz), 0, R_X16, FRAME, bd->slot);
+			break;
+		case A_HFA:
+			bd->kind = B_SLOT;
+			bd->slot = slot(e, (sz + 7) & ~(uint64_t)7, talign(c, pt) > 8 ? 16 : 8);
+			for (int k = 0; k < ab.nreg; k++) {
+				word(e, f_out(ab.fsz == 8, R_X16, ab.reg + k));
+				mem(e, I_ST, log2sz(ab.fsz), 0, R_X16, FRAME, bd->slot + ab.fsz * k);
+			}
 			break;
 		}
 	}
