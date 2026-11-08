@@ -45,6 +45,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/mman.h>
+#include <sys/resource.h>
 #include <sys/stat.h>
 #include <sys/sysctl.h>
 #include <time.h>
@@ -110,6 +111,13 @@ static void warn(const char *fmt, ...)
 static bool timing;
 static double t_last;
 static vperf p_last;			/* main thread's counters at the last phase */
+static long flt_last;			/* process minor faults at the last phase */
+static long minflt(void)
+{
+	struct rusage ru;
+	getrusage(RUSAGE_SELF, &ru);
+	return ru.ru_minflt;
+}
 static double now(void)
 {
 	struct timespec ts;
@@ -122,9 +130,12 @@ static void phase(const char *name)
 		return;
 	double t = now();
 	vperf p = vperf_now(), d = vperf_sub(p, p_last);
-	fprintf(errf, "  %-28s %7.2f ms %8.1f M ins (main thread)\n", name, (t - t_last) * 1e3, d.ins / 1e6);
+	long f = minflt();
+	fprintf(errf, "  %-28s %7.2f ms %8.1f M ins (main thread) %6ld faults\n", name, (t - t_last) * 1e3,
+		d.ins / 1e6, f - flt_last);
 	t_last = t;
 	p_last = p;
+	flt_last = f;
 }
 
 /* ---------------- arenas ---------------- */
@@ -324,6 +335,7 @@ typedef struct Obj {
 	uint32_t idx;
 	/* symbol table output */
 	uint32_t nloc, loc0;		/* kept locals, first output index */
+	uint32_t (*kept)[2];		/* kept locals: symbol index, name length */
 	uint64_t locstr;		/* strtab bytes of kept locals */
 	uint64_t str0;
 	bool mapped;
@@ -2883,18 +2895,32 @@ static bool keep_local(const Obj *o, const Sym *y)
 	return true;
 }
 
+/* which locals go to .symtab, remembered (index, name length) for write_locals */
 static void count_locals(void *arg, size_t i)
 {
 	(void)arg;
+	static __thread uint32_t (*scratch)[2];
+	static __thread uint32_t scap;
 	Obj *o = objs.v[i];
-	uint32_t n = 0;
+	uint32_t n = 0, end = o->firstg < o->nsym ? o->firstg : o->nsym;
 	uint64_t str = 0;
-	if (o->buf)
-		for (uint32_t s = 1; s < o->firstg && s < o->nsym; s++)
+	if (o->buf && end > 1) {
+		if (scap < end) {
+			free(scratch);
+			scap = end < 4096 ? 4096 : end;
+			scratch = malloc((size_t)scap * sizeof *scratch);
+		}
+		for (uint32_t s = 1; s < end; s++)
 			if (keep_local(o, &o->sym[s])) {
+				uint32_t l = (uint32_t)strlen(o->str + o->sym[s].st_name);
+				scratch[n][0] = s;
+				scratch[n][1] = l;
 				n++;
-				str += strlen(o->str + o->sym[s].st_name) + 1;
+				str += l + 1;
 			}
+		o->kept = alloc((size_t)n * sizeof *scratch + 1);
+		memcpy(o->kept, scratch, (size_t)n * sizeof *scratch);
+	}
 	o->nloc = n;
 	o->locstr = str;
 }
@@ -3736,10 +3762,9 @@ static void write_locals(void *arg, size_t i)
 		return;
 	Sym *d = (Sym *)symtab_buf + o->loc0;
 	uint64_t so = o->str0;
-	for (uint32_t s = 1; s < o->firstg && s < o->nsym; s++) {
-		const Sym *y = &o->sym[s];
-		if (!keep_local(o, y))
-			continue;
+	for (uint32_t k = 0; k < o->nloc; k++) {
+		const Sym *y = &o->sym[o->kept[k][0]];
+		uint32_t l = o->kept[k][1];
 		uint16_t shndx;
 		uint64_t val;
 		if (y->st_shndx == SHN_ABS) {
@@ -3750,8 +3775,15 @@ static void write_locals(void *arg, size_t i)
 			shndx = sym_shndx_isec(sec);
 			val = isec_va(sec, y->st_value);
 		}
-		put_sym(d++, strtab_buf, &so, o->str + y->st_name, y->st_info, y->st_other, shndx, val,
-			y->st_size);
+		memcpy(strtab_buf + so, o->str + y->st_name, l + 1);
+		d->st_name = (uint32_t)so;
+		so += l + 1;
+		d->st_info = y->st_info;
+		d->st_other = y->st_other;
+		d->st_shndx = shndx;
+		d->st_value = val;
+		d->st_size = y->st_size;
+		d++;
 	}
 }
 
@@ -4241,6 +4273,7 @@ static int run(int argc, char **argv)
 	double t0 = now();
 	t_last = t0;
 	p_last = vperf_now();
+	flt_last = timing ? minflt() : 0;
 	pic = opt.shared;
 
 	load_inputs();
