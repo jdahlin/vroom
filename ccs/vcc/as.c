@@ -1854,24 +1854,27 @@ static int parse_mem(As *a, const char **pp, const char *e, A64Op *op)
 	return 0;
 }
 
+/* mnemonics whose operands can be names (sysregs, barriers, conditions...);
+ * m is lowercase */
 static int names_ops(const char *m, size_t n)
 {
-	static const char *t[] = { "msr", "mrs", "sys", "sysl", "dmb", "dsb", "isb", "prfm", "prfum", "dc", "ic", "at",
-				   "tlbi", "bti", "csel", "csinc", "csinv", "csneg", "cset", "csetm", "cinc", "cinv",
-				   "cneg", "ccmp", "ccmn", "fcsel", "fccmp", "fccmpe", "hint", "psb", "tsb", "clrex", "sb", 0 };
-	static uint64_t k[sizeof t / sizeof t[0]];	/* names packed little-endian */
-	static int nk;
-	if (n > 8) return 0;
-	if (!nk) {	/* benign race: every thread writes the same values */
-		int j;
-		for (j = 0; t[j]; j++) { uint64_t v = 0; memcpy(&v, t[j], strlen(t[j])); k[j] = v; }
-		__atomic_store_n(&nk, j, __ATOMIC_RELEASE);
+#define N(s) (n == sizeof(s) - 1 && !memcmp(m, s, n))
+	switch (m[0]) {
+	case 'a': return N("at");
+	case 'b': return N("bti");
+	case 'c': return N("csel") || N("csinc") || N("csinv") || N("csneg") || N("cset") || N("csetm") ||
+			 N("cinc") || N("cinv") || N("cneg") || N("ccmp") || N("ccmn") || N("clrex");
+	case 'd': return N("dmb") || N("dsb") || N("dc");
+	case 'f': return N("fcsel") || N("fccmp") || N("fccmpe");
+	case 'h': return N("hint");
+	case 'i': return N("isb") || N("ic");
+	case 'm': return N("msr") || N("mrs");
+	case 'p': return N("prfm") || N("prfum") || N("psb");
+	case 's': return N("sys") || N("sysl") || N("sb");
+	case 't': return N("tlbi") || N("tsb");
 	}
-	uint64_t v = 0;
-	memcpy(&v, m, n);	/* m is lowercase already */
-	int c = __atomic_load_n(&nk, __ATOMIC_ACQUIRE);
-	for (int i = 0; i < c; i++) if (k[i] == v) return 1;
 	return 0;
+#undef N
 }
 
 typedef struct PoolS { uint32_t sec, label; Val v; uint32_t size; } Pool;
