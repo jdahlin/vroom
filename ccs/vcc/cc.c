@@ -4539,12 +4539,38 @@ static qty type_name(cc *c)
 
 /* ---------------- struct / union / enum bodies ---------------- */
 
+/* member scratch for struct_body, per thread and kept across TUs: a stack
+ * (a nested body pushes its members above the enclosing one's) */
+typedef struct fscratch {
+	field *fs;
+	uint32_t *fa;		/* aligned() per member */
+	uint8_t *fp;		/* packed per member */
+	uint32_t n, cap;
+} fscratch;
+
+static _Thread_local fscratch tl_fscr;
+
+static void fscr_grow(fscratch *x, uint32_t need)
+{
+	uint32_t cap = x->cap ? x->cap : 1024;
+
+	while (cap < need)
+		cap *= 2;
+	x->fs = realloc(x->fs, cap * sizeof(field));
+	x->fa = realloc(x->fa, cap * sizeof(uint32_t));
+	x->fp = realloc(x->fp, cap);
+	if (!x->fs || !x->fa || !x->fp) {
+		fputs("vcc: out of memory\n", stderr);
+		abort();
+	}
+	x->cap = cap;
+}
+
 static void struct_body(cc *c, uint32_t ti)
 {
-	uint32_t *fa = malloc(4096 * sizeof(uint32_t));
-	uint8_t *fp = malloc(4096);
-	field *fs = malloc(4096 * sizeof(field));
-	uint32_t nf = 0;
+	fscratch *x = &tl_fscr;
+	uint32_t base = x->n, nf = 0;
+	field *fs;
 	tag *r;
 	attrs post = { 0 };
 
@@ -4570,10 +4596,14 @@ static void struct_body(cc *c, uint32_t ti)
 			 * tagged or typedef'd complete record */
 			if (is_record(c, ds.ty) && (!c->tags[T(c, ds.ty)->aux].name ||
 						    (c->o->ms_anon && complete(c, ds.ty)))) {
-				fs[nf] = (field){ .ty = ds.ty, .loc = ds.loc };
-				fa[nf] = ds.at.aligned > ds.align ? ds.at.aligned : ds.align;
-				fp[nf] = ds.at.packed;
-				nf++;
+				if (nf >= 4096)
+					fatal(c, ds.loc, "too many members");
+				if (base + nf >= x->cap)
+					fscr_grow(x, base + nf + 1);
+				x->fs[base + nf] = (field){ .ty = ds.ty, .loc = ds.loc };
+				x->fa[base + nf] = ds.at.aligned > ds.align ? ds.at.aligned : ds.align;
+				x->fp[base + nf] = ds.at.packed;
+				x->n = base + ++nf;
 			}
 			next(c);
 			continue;
@@ -4625,9 +4655,12 @@ static void struct_body(cc *c, uint32_t ti)
 				error(c, d.loc, "field has incomplete type");
 			if (nf >= 4096)
 				fatal(c, d.loc, "too many members");
-			fa[nf] = d.at.aligned > ds.align ? d.at.aligned : ds.align;
-			fp[nf] = d.at.packed;
-			fs[nf++] = f;
+			if (base + nf >= x->cap)
+				fscr_grow(x, base + nf + 1);
+			x->fa[base + nf] = d.at.aligned > ds.align ? d.at.aligned : ds.align;
+			x->fp[base + nf] = d.at.packed;
+			x->fs[base + nf] = f;
+			x->n = base + ++nf;
 			if (!accept(c, T_COMMA))
 				break;
 		}
@@ -4638,8 +4671,7 @@ static void struct_body(cc *c, uint32_t ti)
 	attribute_list(c, &post);
 	r = &c->tags[ti];
 	r->f = halloc(c, (nf + 1) * sizeof(field));
-	memcpy(r->f, fs, nf * sizeof(field));
-	free(fs);
+	memcpy(r->f, &x->fs[base], nf * sizeof(field));
 	fs = r->f;
 	r->nfield = nf;
 	if (post.packed)
@@ -4654,10 +4686,9 @@ static void struct_body(cc *c, uint32_t ti)
 				;	/* GNU: flexible array not at the end */
 			r->flags |= RF_FLEX;
 		}
-	lay_record(c, r, fa, fp);
+	lay_record(c, r, &x->fa[base], &x->fp[base]);
 	r->flags = (r->flags | RF_COMPLETE) & ~(uint32_t)RF_BEING_DEFINED;
-	free(fa);
-	free(fp);
+	x->n = base;
 }
 
 static void enum_body(cc *c, uint32_t ti, attrs *after)
@@ -6578,6 +6609,7 @@ static void cc_init(cc *c, pp *p, const cc_opts *o)
 	c->hend = c->heap + ((size_t)1 << 32);
 	c->dops = halloc(c, DOPS_MAX * sizeof(dop));
 	c->ndops = 0;
+	tl_fscr.n = 0;
 	c->tyhcap = 1 << 16;
 	c->tyhash = halloc(c, c->tyhcap * sizeof(uint32_t));
 	memset(c->tyhash, 0, c->tyhcap * sizeof(uint32_t));
