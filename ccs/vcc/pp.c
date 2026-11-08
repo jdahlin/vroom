@@ -4422,21 +4422,38 @@ void pp_set_fatal(pp *p, jmp_buf *jb)
 	p->fatal_jb = jb;
 }
 
+/* the distinct file names in entry order (a hash set: TUs enter ~1000 files) */
 size_t pp_files(const pp *p, const char **names, size_t max)
 {
+	uint32_t cap = 64, stk[1024], *tab;
 	size_t n = 0;
 
+	while (cap < 2 * p->nfe)
+		cap *= 2;
+	tab = cap <= 1024 ? stk : malloc(cap * sizeof(*tab));
+	if (!tab)
+		abort();
+	memset(tab, 0, cap * sizeof(*tab));
 	for (uint32_t i = 0; i < p->nfe; i++) {
 		const char *s = p->fe[i].spath;
-		bool dup = false;
+		uint64_t h = 14695981039346656037ull;
+		size_t l = 0;
+		uint32_t k;
 
 		if (p->fe[i].f == &p->builtin)
 			continue;
-		for (size_t j = 0; j < n && !dup; j++)
-			dup = !strcmp(names[j], s);
-		if (!dup && n < max)
+		for (; s[l]; l++)
+			h = (h ^ (unsigned char)s[l]) * 1099511628211ull;
+		for (k = (uint32_t)(h ^ (h >> 32)) & (cap - 1); tab[k]; k = (k + 1) & (cap - 1))
+			if (!strcmp(names[tab[k] - 1], s))
+				break;
+		if (!tab[k] && n < max) {
 			names[n++] = s;
+			tab[k] = (uint32_t)n;
+		}
 	}
+	if (tab != stk)
+		free(tab);
 	return n;
 }
 
