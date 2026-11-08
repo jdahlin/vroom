@@ -520,8 +520,11 @@ klarar inte runtimen 34, tcc-specifika 32, kompilatorspecifikt 1).
   | vpp --batch (en process, 6 trådar, som vccd) | 1,5 s | 5,3 s | 1 074 | 31x |
 
   Batch: 57 610 träffar i huvudcachen, 935 återställda deklarationsregioner, 32 846 lata kroppar aldrig parsade; 38 MB objekt (clang -O0: 36 MB). 4 filer fallerar i vcc-lägena (3 × `pg_popcount_aarch64.c` med SVE ur clangs konfiguration, `norm_test.c` saknar en genererad header; den fallerar även för clang).
+- **vccd i PostgreSQL-bygget** (`bench/pg/build.sh vccd`): CC är vcc:s native shim mot en privat vccd. Med `VCC_DELEGATE=bench/pg/cc` i miljön kompilerar vccd själv `-c` av `.c` (delade huvud- och deklarationscacher) och kör allt annat som `bench/pg/cc` (prober, länkning, `--version`, TU:er vcc fallerar på; `VCC_DELEGATE_SKIP=meson-private` skickar alltid meson-prober dit). Drivern förstår nu `-MQ`. Resultat: 1 504 av 1 504 C-filer av vcc i vccd, 0 reserv; `meson test` 81 ok / 0 fel / 249 överhoppade, som clang.
+  - Helt bygge (`ninja -j 6` efter `ninja -t clean`): vccd 9–12 s, Python-shimmen ~26 s, clang 43 s.
+  - Bara psql (`ninja src/bin/psql/psql` efter clean, 214 steg, bästa av 2, last ~15): clang 4,4 s, Python-shimmen 2,95 s, vccd 1,06 s. I vccd tar de 145 kompileringarna 0,33 s vägg (~10 ms styck mot 125 ms via Python-shimmen, där 50 ms per fil var Python och resten omparsade headers); kvar är genbki.pl (perl, 0,4–1 s, samma för clang) och länksvansen (libpq.dylib, mesons `.symbols`, psql: ~0,3 s), som inte är vcc:s.
 - Kärnan: 22 av 839 objekt ändras (vcc-cbatch, före mot efter): 9 av (5) (t.ex. `call_single_data_t` på stacken är `__aligned(32)`), 13 av (7) (slotplacering). Inte boot-testat.
-- **Kvar:** SVE (`arm_sve.h`-typer, `target("+sve")`); `__has_builtin` svarar 0 för namn som inte finns i kärnan/SDK:n (ppdata.inc, t.ex. `__sync_lock_release`): generera med `EXTRA_INC=work/postgres/src/include`; diagnostiker skriver vektortyper som `''`; TAP-testerna (`-Dtap_tests=enabled`, IPC::Run); vccd för Darwin-jobb i stället för Python-shimmen.
+- **Kvar:** SVE (`arm_sve.h`-typer, `target("+sve")`); `__has_builtin` svarar 0 för namn som inte finns i kärnan/SDK:n (ppdata.inc, t.ex. `__sync_lock_release`): generera med `EXTRA_INC=work/postgres/src/include`; diagnostiker skriver vektortyper som `''`; TAP-testerna (`-Dtap_tests=enabled`, IPC::Run); Mach-O-länkning (ld64 i svansen).
 
 ## Linux aarch64 som värd (påbörjat 2026-11-08)
 

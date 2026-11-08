@@ -574,6 +574,22 @@ int ppd_run(int argc, char **argv, const ppd_env *env)
 		if (!strcmp(a, "-MD") || !strcmp(a, "-MMD")) { md = 1; continue; }
 		if (!strcmp(a, "-MF") && i + 1 < argc) { depfile = argv[++i]; continue; }
 		if (!strcmp(a, "-MT") && i + 1 < argc) { deptarget = argv[++i]; continue; }
+		if (!strcmp(a, "-MQ") && i + 1 < argc) {	/* -MT quoted for make: $ -> $$, space -> \ space */
+			static __thread char q[4096];
+			const char *t = argv[++i];
+			size_t k = 0;
+
+			for (; *t && k + 3 < sizeof(q); t++) {
+				if (*t == '$')
+					q[k++] = '$';
+				else if (*t == ' ' || *t == '\t' || *t == '#')
+					q[k++] = '\\';
+				q[k++] = *t;
+			}
+			q[k] = 0;
+			deptarget = q;
+			continue;
+		}
 		if ((v = ARG("-iquote"))) { dirs_q[nq++] = v; continue; }
 		if ((v = ARG("-isystem"))) { dirs_s[ns++] = v; continue; }
 		if ((v = ARG("-idirafter"))) { dirs_a[na++] = v; continue; }
