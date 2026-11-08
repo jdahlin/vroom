@@ -469,13 +469,19 @@ VLA-parametrars storleksuttryck med sidoeffekter, bitfält över 8 byte, UTF-8 i
 symbolnamn (vas), `__udivti3` m.fl. i test-runtimen, qemu `-cpu max` (LSE).
 → **gcc 1572/1588 (99,0 %), tcc 99/101 (98,0 %)**, totalt 1671/1689 (98,9 %).
 
-Kvar (18): **fp 8** = 128-bitars long double (clang viker aritmetiken, vcc
-behöver mjukflyttal: `__addtf3`/`__multf3`/`__eqtf2`… i runtimen och 16-byte
-flyttalsvärden i q-register i emittern; egen uppgift), **link 6** = `link_error`-
-test som kräver en optimerare (värdeintervall, DCE), **run 3** = bcp-1
-(`__builtin_constant_p` efter inlining), eeprof-1 (`-finstrument-functions`),
-20021127-1 (clang behandlar en egen `llabs` som builtin), **emit 1** = pr70460
-(etikettdifferenser `&&a - &&b` i statiska initierare).
+Därefter (samma gren): `long double` som binary128 (mjukflyttal `__addtf3`,
+`__multf3`, `__divtf3`, jämförelser, konverteringar i test-runtimen, bara
+heltalsoperationer; i emittern registerpar, q-register i ABI:n, HFA:er av
+long double, va_arg), `abs`/`labs`/`llabs` som builtins, `-finstrument-functions`,
+etikettdifferenser i statiska initierare, NRVO-ordning för cleanup vid retur av
+lokal post (som clang), isnan/isinf (vänsterskiftet var ett högerskift),
+libm-funktioner på konstanter viks, const-flyttalsglobaler viks, och små
+optimeringar som `link_error`-testen kräver: skift med 0/0-skift,
+x op x och motsägande/kompletterande jämförelser i &&/||, intervall för
+`a || b` under a:s negation, spårade konstanter i lokala arrayelement `a[K]`
+som aldrig flyr, fabs-icke-negativa flyttalslokaler.
+→ **1708/1708 (100 %)**, 136 överhoppade (clang avvisar 69, clangs bygge
+klarar inte runtimen 34, tcc-specifika 32, kompilatorspecifikt 1).
 
 ## Risker
 - **GNU C-ytan och inline asm** är det stora jobbet. Uppskattat: lexer + pp ~2 kloc,
@@ -490,7 +496,7 @@ test som kräver en optimerare (värdeintervall, DCE), **run 3** = bcp-1
 ### Felmeddelanden (clang-format)
 
 Status: `bench/vcc-diag.py` jämför vccs stderr med clangs (-fsyntax-only) på
-`ccs/vcc/tests/diag/*.c`: 61/61 identiska (från 4/48).  `bench/vcc-sema.py
+`ccs/vcc/tests/diag/*.c`: 63/63 identiska (från 4/48).  `bench/vcc-sema.py
 warn` kör vcc och clang med kärnans flaggor på alla 879 TU:er och kräver att
 varje diagnostik vcc skriver också skrivs av clang: 879/879 (inga falska
 varningar).
@@ -512,6 +518,13 @@ operatorer från makron (PF_MACRO): -Wparentheses, -Wunused-comparison,
 -Wswitch, -Wmacro-redefined.  pp: #error/#warning, oavslutade villkor,
 saknad include, makroargument med "macro 'X' defined here".
 
-Kvar: "expanded from macro"-noter (kräver makropositioner i pp:s
-platsrymd), varningar som clang avgör efter nåbarhet (-Wdivision-by-zero,
--Wshift-count-overflow, -Warray-bounds), fler -Wall-varningar.
+"expanded from macro": caret och intervall över hela anropet, noten vid
+kroppens token (hittas vid diagnosen via `#define`-raden, så tokens bär ingen
+extra position); inga stavningsförslag för namn från makron (som clang).
+Nåbarhetsvarningar: -Wdivision-by-zero, -Wshift-count-overflow/-negative,
+-Warray-bounds ("array 'a' declared here"), tysta i kod som inte nås
+(if/?:/&&/|| på konstanter).  Hittills bara för odeklarerade identifierare i
+makron.
+
+Kvar: noten för fler diagnostiker än odeklarerade namn, nästlade makron (en
+nivå i dag), fler -Wall-varningar.
