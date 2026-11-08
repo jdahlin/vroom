@@ -1212,7 +1212,9 @@ static int collect_body(As *a, int macro, Sv *body)
 	while (f->p < f->e) {
 		const char *raw, *s;
 		size_t n = next_stmt(a, f, &raw, &s);
-		Sv w = first_word(s, s + n);
+		const char *t = ws(s, s + n);
+		if (t == s + n || *t != '.') continue;
+		Sv w = first_word(t, s + n);
 		if (macro) {
 			if (sveq(w, ".endm") || sveq(w, ".endmacro")) {
 				if (!depth) { *body = (Sv){ start, (uint32_t)(raw - start) }; return 0; }
@@ -1484,7 +1486,8 @@ static int d_macro(As *a, const char *p, const char *e)
 	m->params = rget(&a->defs, sizeof(Param) * (np ? np : 1));
 	memcpy(m->params, ps, sizeof(Param) * np);
 	m->np = np;
-	m->body = svdup(a, body.s, body.n);
+	/* file text outlives the macro (as_snippet's contract); expansions do not */
+	m->body = a->fr[a->nfr - 1].kind == FR_FILE ? body : svdup(a, body.s, body.n);
 	m->count = 0;
 	m->t = (Tmpl){ 0, 0 };
 	if (a->mcount * 2 >= a->mmask) {
