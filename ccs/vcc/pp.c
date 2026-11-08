@@ -1097,15 +1097,24 @@ static inline void out_ch(pp *p, char ch)
 
 /* ---------------- tokens ---------------- */
 
+_Static_assert(offsetof(vtok, id) == offsetof(vtok, len) + 4 && offsetof(ptok, id) == offsetof(ptok, len) + 4 &&
+	       offsetof(vtok, flags) == offsetof(vtok, kind) + 1 && offsetof(ptok, kind) == offsetof(ptok, loc) + 4 &&
+	       offsetof(ptok, flags) == offsetof(ptok, kind) + 1 && offsetof(ptok, ctr) == offsetof(ptok, kind) + 2 &&
+	       sizeof(vtok) == offsetof(vtok, kind) + 4, "vfill's layout");
+
+/* three stores: s, len|id, loc|kind|flags|ctr (little endian) */
 static inline void vfill(ptok *t, const vtok *v, const char *src, uint32_t loc)
 {
+	uint64_t li, lk;
+	uint32_t kf;
+
+	memcpy(&li, &v->len, 8);
+	memcpy(&kf, &v->kind, 4);
+	kf &= 0xffu | (uint32_t)(TF_SOL | TF_SPACE | TF_DIRTY | TF_RAW) << 8;	/* ctr = 0 */
+	lk = loc | (uint64_t)kf << 32;
 	t->s = src + v->off;
-	t->len = v->len;
-	t->id = v->id;
-	t->loc = loc;
-	t->kind = v->kind;
-	t->flags = v->flags & (TF_SOL | TF_SPACE | TF_DIRTY | TF_RAW);
-	t->ctr = 0;
+	memcpy(&t->len, &li, 8);
+	memcpy(&t->loc, &lk, 8);
 }
 
 static inline void mkeof(ptok *t)
