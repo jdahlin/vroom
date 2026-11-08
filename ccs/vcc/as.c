@@ -1729,17 +1729,14 @@ static int names_ops(const char *m, size_t n)
 				   "tlbi", "bti", "csel", "csinc", "csinv", "csneg", "cset", "csetm", "cinc", "cinv",
 				   "cneg", "ccmp", "ccmn", "fcsel", "fccmp", "fccmpe", "hint", "psb", "tsb", "clrex", "sb", 0 };
 	static uint64_t k[sizeof t / sizeof t[0]];	/* names packed little-endian */
-	static int nk;
 	if (n > 8) return 0;
-	if (!nk) {	/* benign race: every thread writes the same values */
-		int j;
-		for (j = 0; t[j]; j++) { uint64_t v = 0; memcpy(&v, t[j], strlen(t[j])); k[j] = v; }
-		__atomic_store_n(&nk, j, __ATOMIC_RELEASE);
+	if (!__atomic_load_n(&k[0], __ATOMIC_ACQUIRE)) {	/* every thread writes the same values */
+		for (int j = 1; t[j]; j++) { uint64_t v = 0; memcpy(&v, t[j], strlen(t[j])); __atomic_store_n(&k[j], v, __ATOMIC_RELAXED); }
+		uint64_t v = 0; memcpy(&v, t[0], strlen(t[0])); __atomic_store_n(&k[0], v, __ATOMIC_RELEASE);
 	}
 	uint64_t v = 0;
 	memcpy(&v, m, n);	/* m is lowercase already */
-	int c = __atomic_load_n(&nk, __ATOMIC_ACQUIRE);
-	for (int i = 0; i < c; i++) if (k[i] == v) return 1;
+	for (int i = 0; t[i]; i++) if (__atomic_load_n(&k[i], __ATOMIC_RELAXED) == v) return 1;
 	return 0;
 }
 

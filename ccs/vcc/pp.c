@@ -73,18 +73,21 @@ static _Atomic size_t shared_used;
 
 static void *salloc(size_t n)
 {
+	char *b0 = __atomic_load_n(&shared_base, __ATOMIC_ACQUIRE);
 	size_t off;
 
-	if (unlikely(!__atomic_load_n(&shared_base, __ATOMIC_ACQUIRE))) {
+	if (unlikely(!b0)) {
 		char *b = vm(SHARED_MAX), *z = NULL;
 
-		if (!__atomic_compare_exchange_n(&shared_base, &z, b, 0, __ATOMIC_ACQ_REL, __ATOMIC_ACQUIRE))
-			munmap(b, SHARED_MAX);
+		if (__atomic_compare_exchange_n(&shared_base, &z, b, 0, __ATOMIC_ACQ_REL, __ATOMIC_ACQUIRE))
+			b0 = b;
+		else
+			munmap(b, SHARED_MAX), b0 = z;	/* the winner's; never re-read the base plainly */
 	}
 	off = atomic_fetch_add(&shared_used, (n + 15) & ~(size_t)15);
 	if (off + n > SHARED_MAX)
 		abort();
-	return shared_base + off;
+	return b0 + off;
 }
 
 /* ---------------- per-file skeleton ---------------- */
@@ -256,7 +259,7 @@ static uint32_t file_line(const vlex_file *f, const pfile *cfi, uint32_t off)
 		for (uint32_t i = 0; i < f->size; i++)
 			if (f->src[i] == '\n')
 				l[c++] = i;
-		fi->nlines = c;
+		__atomic_store_n(&fi->nlines, c, __ATOMIC_RELAXED);	/* a loser writes it too */
 		if (!__atomic_compare_exchange_n(&fi->lines, &z, l, 0, __ATOMIC_ACQ_REL, __ATOMIC_ACQUIRE))
 			l = z;
 	}
