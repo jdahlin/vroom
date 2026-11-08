@@ -53,9 +53,10 @@ static void stringify(const char *s, size_t n)
 	}
 }
 
-static int dump(const char *path)
+static int dump(const char *arg)
 {
-	const vlex_file *f = vlex_get(path, strlen(path));
+	char path[4096] = { 0 };	/* padded: vlex_get reads path[len + 7] */
+	const vlex_file *f = strlen(arg) < sizeof(path) - 8 ? vlex_get(strcpy(path, arg), strlen(arg)) : NULL;
 	size_t line = 1, bol = 0, pos = 0;
 	char *buf;
 
@@ -116,7 +117,8 @@ static void read_list(const char *list)
 			plen = realloc(plen, cap * sizeof(*plen));
 		}
 		plen[npaths] = n;
-		paths[npaths++] = strdup(line);
+		paths[npaths] = calloc(1, n + 8);	/* vlex_get hashes by words: path[n + 7] */
+		memcpy(paths[npaths++], line, n);
 	}
 	fclose(fp);
 }

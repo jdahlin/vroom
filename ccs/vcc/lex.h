@@ -84,6 +84,8 @@ size_t vlex_spell(const char *src, const vtok *t, char *buf);
  * Token cache: lex the file at path once per process; NULL if it cannot be
  * read (that is cached too).  Thread safe; concurrent callers for the same
  * path wait for the first.  The result is immutable and lives forever.
+ * path must be readable to path[pathlen + 7] (it is hashed by words), here
+ * and in vlex_prefetch().
  */
 const vlex_file *vlex_get(const char *path, size_t pathlen);
 /*

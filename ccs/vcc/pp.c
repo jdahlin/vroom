@@ -4219,7 +4219,15 @@ pp *pp_open(const pp_opts *o)
 			mset(p, bi_macro[i]->name, bi_macro[i]);
 	}
 
-	mf = try_path(o->cwd, o->main, strlen(o->main));
+	{
+		/* the caller's string is unpadded; vlex_get hashes by words (ASan) */
+		size_t ml = strlen(o->main);
+		char *mp = alloc(&p->perm, ml + 16);
+
+		memcpy(mp, o->main, ml);
+		memset(mp + ml, 0, 16);
+		mf = try_path(o->cwd, mp, ml);
+	}
 	if (!mf) {
 		char m[4200];
 		int l = snprintf(m, sizeof(m), "vcc: error: %s: cannot read\n", o->main);
