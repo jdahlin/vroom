@@ -1110,6 +1110,8 @@ typedef struct rctx {
 	ElfObj *o;
 	uint32_t *symc, *strc, *lblc;	/* ref -> ElfSym (0: not yet) */
 	uint32_t *loff;			/* direct labels: word offset in the function */
+	uint32_t *wb;			/* direct functions: the words, before they go to the frag */
+	struct rpatch *pt;		/* ... and the records with a fixup */
 	tbuf nb;			/* name scratch */
 } rctx;
 
@@ -1142,6 +1144,7 @@ static uint32_t r_label(rctx *R, uint32_t fid, uint32_t l)
 
 /* a pending fixup on word k of an instruction */
 typedef struct pfix { uint8_t k, lbl; uint32_t type, ref; int64_t off; } pfix;
+typedef struct rpatch { uint32_t k, at; pfix f; } rpatch;	/* record k at word at */
 
 static unsigned e_movi(uint32_t *w, int rd, int x, uint64_t v)
 {
@@ -1434,43 +1437,59 @@ static int r_code(rctx *R, const code_hdr *h)
 	pfix f;
 
 	if (!h->sym_labels) {
-		/* one block, branches resolved here */
-		uint32_t at = 0, frag = as_frag(R->as), *loff = R->loff;
+		/*
+		 * One block, branches resolved here: encode everything once into
+		 * R->wb, noting the records that need a label offset (patched
+		 * once the labels are known) or a fixup (applied in order after
+		 * the words are in the frag).
+		 */
+		uint32_t at = 0, frag = as_frag(R->as), *loff = R->loff, *wb = R->wb, npt = 0;
+		rpatch *pt = R->pt;
 		ElfObj *o = R->o;
 		uint64_t base;
 		uint8_t *p;
 
 		for (uint32_t k = 0; k < h->nin; k++) {
-			if (in[k].op == I_LABEL)
-				loff[in[k].label] = at;
-			else
-				at += enc(&in[k], w, &f, NULL, 0);
-		}
-		elf_code(o, frag);
-		base = elf_frag(o, frag)->size;
-		p = elf_grow(o, frag, (size_t)at * 4);
-		at = 0;
-		for (uint32_t k = 0; k < h->nin; k++) {
 			const ins *i = &in[k];
-			unsigned n = enc(i, w, &f, loff, at);
+			unsigned n;
 
+			if (i->op == I_LABEL) {
+				loff[i->label] = at;
+				continue;
+			}
+			n = enc(i, wb + at, &pt[npt].f, NULL, 0);
 			if (unlikely(i->op == I_MRS)) {
 				int r = a64_sysreg(R->c->strs[i->ref].s, strlen(R->c->strs[i->ref].s), 0);
 
 				if (r < 0)
 					return r_fail(R, "mrs: expected readable system register");
-				w[0] = 0xd5200000u | ((unsigned)r & 0xffff) << 5 | R5(i->rd);
+				wb[at] = 0xd5200000u | ((unsigned)r & 0xffff) << 5 | R5(i->rd);
 			}
-			memcpy(p + 4 * at, w, (size_t)n * 4);
-			if (f.type) {
-				uint32_t y = r_sym(R, f.ref);
-
-				elf_fixup(o, frag, base + 4u * at, p + 4 * at, f.type, as_val(R->as, y, f.off));
-				if (i->op == I_LDGOT)
-					elf_fixup(o, frag, base + 4u * at + 4, p + 4 * at + 4, R_AARCH64_LD64_GOT_LO12_NC,
-						  as_val(R->as, y, 0));
+			if (pt[npt].f.type) {
+				pt[npt].k = k;
+				pt[npt].at = at;
+				npt++;
 			}
 			at += n;
+		}
+		elf_code(o, frag);
+		base = elf_frag(o, frag)->size;
+		p = elf_grow(o, frag, (size_t)at * 4);
+		for (uint32_t j = 0; j < npt; j++)
+			if (pt[j].f.lbl)
+				enc(&in[pt[j].k], wb + pt[j].at, &f, loff, pt[j].at);
+		memcpy(p, wb, (size_t)at * 4);
+		for (uint32_t j = 0; j < npt; j++) {
+			const pfix *g = &pt[j].f;
+			uint32_t a = pt[j].at, y;
+
+			if (g->lbl)
+				continue;
+			y = r_sym(R, g->ref);
+			elf_fixup(o, frag, base + 4u * a, p + 4 * a, g->type, as_val(R->as, y, g->off));
+			if (in[pt[j].k].op == I_LDGOT)
+				elf_fixup(o, frag, base + 4u * a + 4, p + 4 * a + 4, R_AARCH64_LD64_GOT_LO12_NC,
+					  as_val(R->as, y, 0));
 		}
 		return 0;
 	}
@@ -7280,7 +7299,8 @@ static void as_error(cc *c, const char *fmt, ...)
 /* the object backend: header text, chunks (items), tail text */
 static int replay(cc *c, const cc_opts *o, const char *hp, size_t hn, const char *tp, size_t tn, const chunk *ch, uint32_t nch)
 {
-	static _Thread_local uint32_t *loff, *cache;
+	static _Thread_local uint32_t *loff, *cache, *wb;
+	static _Thread_local rpatch *pt;
 	static _Thread_local size_t ncache;
 	size_t need = (size_t)c->nsym + c->nstr + c->nlabel + 192;
 	rctx R = { .c = c, .as = o->as, .o = o->obj };
@@ -7290,6 +7310,8 @@ static int replay(cc *c, const cc_opts *o, const char *hp, size_t hn, const char
 
 	if (!loff) {
 		loff = reserve((size_t)1 << 32);	/* labels of one function */
+		wb = reserve((size_t)1 << 32);		/* words of one function (<= 6 per record) */
+		pt = reserve((size_t)1 << 34);		/* fixups of one function (<= 1 per record) */
 		tb_init(&nb, 1 << 20);
 	}
 	R.nb = nb;
@@ -7305,6 +7327,8 @@ static int replay(cc *c, const cc_opts *o, const char *hp, size_t hn, const char
 	R.strc = cache + c->nsym + 64;
 	R.lblc = R.strc + c->nstr + 64;
 	R.loff = loff;
+	R.wb = wb;
+	R.pt = pt;
 	as_begin(R.as, R.o, "<vcc>");
 	if (as_snippet(R.as, hp, hn))
 		r = -1;
