@@ -61,7 +61,7 @@ typedef struct vlex_file {
 	uint32_t size;
 	uint32_t ntok;		/* tokens, excluding the final T_EOF */
 	const vtok *tok;	/* ntok + 1 entries */
-	void *pp;		/* preprocessor's per-file data (pp.c), set once with __atomic */
+	void *pp;		/* preprocessor's per-file data (pp/file.c), set once with __atomic */
 } vlex_file;
 
 /* clang's name for a token kind (as in -dump-raw-tokens) */

@@ -53,13 +53,14 @@ VCC_CC     = $(CCACHE) $(HOST_CC)
 VCC_SAN   ?=
 VCC_OPT   ?= -O3 $(HOST_CPU)
 VCC_CFLAGS = -std=c11 -O2 -Wall -Wextra -Wno-unused-parameter $(HOST_DEFS) -DVCC_INCDIR='"$(abspath vcc/include)"' $(VCC_SAN)
-# ThinLTO: the sources are split into many files (vcc/cc/, vcc/pp/, vcc/emit/);
-# LTO gives back the cross-file inlining one big TU had.  Off with `make VCC_LTO=`.
+# LTO: off; the split modules are one TU each (SPLIT_DIRS), which gives the
+# inlining LTO would.  `make VCC_LTO=-flto=thin` turns it on (vbench: pp +0.5 %,
+# emit -2.5 % instructions, -c as a whole the same).
+VCC_LTO   ?=
 ifeq ($(HOST_OS),Darwin)
-VCC_LTO   ?= -flto=thin
 LTO_LINK   = -Wl,-cache_path_lto,$(OBJ)/lto-cache
 else
-VCC_LTO   ?= -flto=thin -fuse-ld=lld
+LTO_LINK   = -Wl,--thinlto-cache-dir=$(OBJ)/lto-cache -fuse-ld=lld
 LTO_LINK   = -Wl,--thinlto-cache-dir=$(OBJ)/lto-cache
 endif
 VCC_FAST   = $(VCC_CFLAGS) $(VCC_OPT) -pthread
@@ -73,12 +74,36 @@ vcc: $(OUT)/vcc $(OUT)/vsh/sh $(OUT)/vld $(OUT)/vas $(OUT)/var $(OUT)/vccd $(OUT
 o = $(patsubst vcc/%.c,$(OBJ)/%.o,$(1))
 AS_SRC  = vcc/as.c vcc/a64.c vcc/elf.c vcc/macho.c
 LEX_SRC = vcc/lex.c vcc/intern.c
-PP_SRC  = vcc/pp.c vcc/dircache.c vcc/ppdriver.c vcc/cc.c vcc/ccsnap.c vcc/emit.c
+PP_SRC  = vcc/dircache.c vcc/ppdriver.c vcc/ccsnap.c
+# Split modules: one directory of files each.  By default each directory is
+# compiled as one TU (obj/unity/DIR.c #includes its files, as SQLite's
+# amalgamation), so the code generator sees all of it, also in `make self`
+# where there is no LTO, and what the files share stays static (VPRIV in the
+# headers).  `make VCC_UNITY=` compiles the files one by one.
+SPLIT_DIRS = cc pp emit
+VCC_UNITY ?= y
+SPLIT_SRC = $(foreach d,$(SPLIT_DIRS),$(wildcard vcc/$(d)/*.c))
+SPLIT_OBJ = $(if $(VCC_UNITY),$(patsubst %,$(OBJ)/unity/%.o,$(SPLIT_DIRS)),$(call o,$(SPLIT_SRC)))
+PP_OBJ  = $(call o,$(PP_SRC)) $(SPLIT_OBJ)
 LD_SRC  = vcc/ld.c vcc/ldhash.c vcc/objcopy.c
 
 $(OBJ)/%.o: vcc/%.c | $(OBJ)
 	@mkdir -p $(dir $@)
 	$(VCC_CC) $(VCC_FAST) $(VCC_LTO) $(XFLAGS) -MMD -MP -c $< -o $@
+
+# rewritten only when the list of files changes
+UNITY_C = $(patsubst %,$(OBJ)/unity/%.c,$(SPLIT_DIRS))
+$(UNITY_C): $(OBJ)/unity/%.c: FORCE
+	@mkdir -p $(dir $@)
+	@(echo '#define VCC_UNITY 1'; for f in $(abspath $(wildcard vcc/$*/*.c)); do echo "#include \"$$f\""; done) > $@.tmp
+	@if cmp -s $@.tmp $@; then rm $@.tmp; else mv $@.tmp $@; fi
+
+$(UNITY_C:.c=.o): %.o: %.c
+	$(VCC_CC) $(VCC_FAST) $(VCC_LTO) -MMD -MP -c $< -o $@
+
+FORCE:
+.PHONY: FORCE
+.SECONDARY: $(UNITY_C)
 
 # lextest is built with -mno-outline (stable code layout for PMC runs); no LTO,
 # since -mno-outline is a code generator option the bitcode does not keep
@@ -87,10 +112,10 @@ $(OBJ)/no/%.o: vcc/%.c | $(OBJ)
 
 $(OBJ)/ld.o: XFLAGS = -DVLD_MAIN
 
-$(OUT)/vpp: $(call o,vcc/vpp.c $(PP_SRC) $(LEX_SRC) $(AS_SRC))
+$(OUT)/vpp: $(call o,vcc/vpp.c $(LEX_SRC) $(AS_SRC)) $(PP_OBJ)
 	$(VCC_CC) $(VCC_LDFLAGS) -pthread $^ -o $@ $(HOST_LIBS)
 
-$(OUT)/vccd: $(call o,vcc/vccd.c vcc/caps.c vcc/fixdep.c vcc/ar.c vcc/rsh.c $(PP_SRC) $(LEX_SRC) $(AS_SRC))
+$(OUT)/vccd: $(call o,vcc/vccd.c vcc/caps.c vcc/fixdep.c vcc/ar.c vcc/rsh.c $(LEX_SRC) $(AS_SRC)) $(PP_OBJ)
 	$(VCC_CC) $(VCC_LDFLAGS) -pthread $^ -o $@ $(HOST_LIBS)
 
 $(OUT)/lextest: $(patsubst vcc/%.c,$(OBJ)/no/%.o,vcc/lextest.c vcc/pmc.c $(LEX_SRC))
@@ -119,7 +144,7 @@ $(OUT)/vld $(OUT)/vas $(OUT)/var: $(OUT)/vcc
 $(OBJ):
 	mkdir -p $@ $@/no
 
--include $(wildcard $(OBJ)/*.d $(OBJ)/no/*.d)
+-include $(wildcard $(OBJ)/*.d $(OBJ)/*/*.d)
 
 # ---- sanitizer variants of the vcc tools (AGENTS.md, "Sanitizers") ----
 # Own OUT (and so own obj/), -O1 -g; the normal build is unchanged.
@@ -139,15 +164,17 @@ SELF ?= ../build/self
 SELF_CC = $(OUT)/vpp
 SELF_FLAGS = -c -std=c11 -O2 -D_DARWIN_C_SOURCE -DVCC_INCDIR='"$(abspath vcc/include)"'
 SELF_LD = ld -arch arm64 -platform_version macos 14.0 14.0 -syslibroot $$(xcrun --show-sdk-path) -lSystem
-SELF_SRC = $(wildcard vcc/*.c)
+SELF_SRC = $(wildcard vcc/*.c vcc/*/*.c)
 SO = $(SELF)
-SELF_AS = $(SO)/as.o $(SO)/a64.o $(SO)/elf.o $(SO)/macho.o
-SELF_LEX = $(SO)/lex.o $(SO)/intern.o
-SELF_PP = $(SO)/pp.o $(SO)/dircache.o $(SO)/ppdriver.o $(SO)/cc.o $(SO)/ccsnap.o $(SO)/emit.o
+# objects are named after the path below vcc/, / -> - (cc/expr.c -> cc-expr.o)
+so = $(addprefix $(SO)/,$(subst /,-,$(patsubst vcc/%.c,%.o,$(1))))
+SELF_AS = $(call so,$(AS_SRC))
+SELF_LEX = $(call so,$(LEX_SRC))
+SELF_PP = $(call so,$(PP_SRC) $(SPLIT_SRC))
 
 self: $(OUT)/vpp
 	mkdir -p $(SELF)
-	for f in $(SELF_SRC); do $(SELF_CC) $(SELF_FLAGS) $$f -o $(SELF)/$$(basename $$f .c).o || exit 1; done
+	for f in $(SELF_SRC); do o=$$(echo $${f#vcc/} | sed 's,/,-,g'); $(SELF_CC) $(SELF_FLAGS) $$f -o $(SELF)/$${o%.c}.o || exit 1; done
 	$(SELF_CC) $(SELF_FLAGS) -DVLD_MAIN vcc/ld.c -o $(SELF)/ld-main.o
 	$(SELF_LD) $(SO)/vpp.o $(SELF_PP) $(SELF_LEX) $(SELF_AS) -o $(SO)/vpp
 	$(SELF_LD) $(SO)/vccd.o $(SO)/caps.o $(SO)/fixdep.o $(SO)/ar.o $(SO)/rsh.o $(SELF_PP) $(SELF_LEX) $(SELF_AS) -o $(SO)/vccd
@@ -190,8 +217,8 @@ $(FUZZ_OUT):
 $(FUZZ_OUT)/fuzz-lex: fuzz/fuzz-lex.c fuzz/lexref.c fuzz/fuzz.h $(FUZZ_DRIVER) $(LEX_SRC) $(FUZZ_HDR) | $(FUZZ_OUT)
 	$(FUZZ_CC) $(FUZZ_CFLAGS) $(FUZZ_ENGINE) fuzz/fuzz-lex.c fuzz/lexref.c $(FUZZ_DRIVER) $(LEX_SRC) -o $@
 
-$(FUZZ_OUT)/fuzz-pp: fuzz/fuzz-pp.c fuzz/fuzz.h $(FUZZ_DRIVER) vcc/pp.c vcc/dircache.c $(LEX_SRC) $(FUZZ_HDR) | $(FUZZ_OUT)
-	$(FUZZ_CC) $(FUZZ_CFLAGS) $(FUZZ_ENGINE) fuzz/fuzz-pp.c $(FUZZ_DRIVER) vcc/pp.c vcc/dircache.c $(LEX_SRC) -o $@
+$(FUZZ_OUT)/fuzz-pp: fuzz/fuzz-pp.c fuzz/fuzz.h $(FUZZ_DRIVER) $(wildcard vcc/pp/*.c vcc/pp/*.h) vcc/dircache.c $(LEX_SRC) $(FUZZ_HDR) | $(FUZZ_OUT)
+	$(FUZZ_CC) $(FUZZ_CFLAGS) $(FUZZ_ENGINE) fuzz/fuzz-pp.c $(FUZZ_DRIVER) $(wildcard vcc/pp/*.c) vcc/dircache.c $(LEX_SRC) -o $@
 
 # replay the regression inputs (fuzz/regress/{lex,pp}/): every one must pass
 fuzz-regress: fuzz

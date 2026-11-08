@@ -240,7 +240,7 @@ typedef struct cc_opts {
 	int implicit_fn;	/* implicit function declarations allowed (... implicit-function-declaration) */
 	int dump_layouts;	/* append _Static_assert checks for clang to verify */
 	int outfd;
-	int emit;		/* generate code (emit.c): 1 = assembly text to outfd, 2 = object into obj */
+	int emit;		/* generate code (emit/): 1 = assembly text to outfd, 2 = object into obj */
 	int nthreads;		/* emitter threads (0: 1) */
 	struct ElfObj *obj;	/* emit == 2: the object (reset first; the caller finishes it) */
 	struct As *as;		/* emit == 2: the assembler bound to obj (one per thread) */

@@ -10,7 +10,7 @@
  * output is compared with REF.i token by token instead (vcc's lexer: kind
  * and spelling); the first difference is shown, status 1.
  *
- * With -c the TU is compiled (C: cc.c + emit.c, .S: as.c) into an ELF
+ * With -c the TU is compiled (C: cc/ + emit/, .S: as.c) into an ELF
  * object, written with one write(); the dependency file is written as for -E.
  * Each thread keeps one assembler, one ElfObj and one output buffer.
  *

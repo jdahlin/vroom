@@ -20,7 +20,7 @@ void dc_end(cc *c);
 void dc_boundary_slow(cc *c);
 void dc_materialize(cc *c);
 void dc_stats(char *buf, size_t n);
-/* cc.c: the next token, pragmas applied */
+/* cc/token.c: the next token, pragmas applied */
 void cc_fetch(cc *c, ptok *t);
 
 /* at a file-scope declaration boundary (tk[0] fetched, nothing parsed of it) */

@@ -21,8 +21,15 @@ assembler, linker, behind `vcc`/`vas`/`vld` shims and the `vccd` server.
 - `RESEARCH-preprocessor.md`: preprocessor design and prior art.
 - `ccs/`: our code; `ccs/Makefile` builds into `build/ccs/`.
   - `vcc/lex.c`, `intern.c`: SIMD lexer, token cache, identifier interning.
-  - `vcc/pp.c`: preprocessor (pull model, clang-exact expansion).
-  - `vcc/cc.c`: parser + sema (GNU C11, clang's layout and constant rules).
+  - `vcc/pp/`: preprocessor (pull model, clang-exact expansion).
+  - `vcc/cc/`: parser + sema (GNU C11, clang's layout and constant rules).
+  - `vcc/emit/`: code generator (arm64, AAPCS64, straight from the AST).
+  - The three are directories of files by topic, one internal header each
+    (`ppimpl.h`, `ccimpl.h`, `emitimpl.h`) with the types, macros and
+    prototypes the files share; a shared function is `VPRIV` (static in
+    the unity build).  Each directory is compiled as one TU by default
+    (`obj/unity/DIR.c` #includes its files, SQLite style); `make
+    VCC_UNITY=` compiles file by file, and every file must compile alone.
   - `vcc/vpp.c`: preprocessor driver for parity tests.
   - `vcc/shim.c`, `vccd.c`, `caps.c`: the compiler shim and server.
   - `vcc/ar.c`: the archiver (thin archives, llvm-ar-identical), run by
@@ -39,7 +46,8 @@ assembler, linker, behind `vcc`/`vas`/`vld` shims and the `vccd` server.
 
 ## Build and test
 ```
-make -C ccs -j 6 vcc                # all vcc tools (per-file objects, ccache if installed)
+make -C ccs -j 6 vcc                # all vcc tools (pp/ cc/ emit/ one TU each, ccache if installed)
+make -C ccs -j 6 vcc VCC_UNITY= OUT=../build/ccs-parts   # file by file: each file compiles alone
 bench/vcc-diff.py ref -j 6          # clang -E references (once, ~1 min)
 bench/vcc-diff.py cmp -j 6 --kernel # preprocessor parity, kernel TUs
 bench/vcc-diff.py cmp -j 6          # ... including host tools (scripts/)
@@ -50,8 +58,8 @@ bench/vsh-test.py                   # vsh/rsh against dash on small recipes
 bench/vcc-fpcheck.py -j 6           # no generated FP/SIMD code under -mgeneral-regs-only (~10 s)
 ```
 Parity is a token-stream comparison (kind and spelling) of `clang -E -P`
-against `vpp`, both lexed by vcc's lexer.  A change to `pp.c` or `lex.c` is
-only done when the parity run is fully green; a change to `cc.c` when both
+against `vpp`, both lexed by vcc's lexer.  A change to `pp/` or `lex.c` is
+only done when the parity run is fully green; a change to `cc/` when both
 vcc-sema.py runs are green (878/879: modpost.c lacks a generated header).
 
 ## Sanitizers

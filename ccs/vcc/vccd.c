@@ -12,7 +12,7 @@
  *     -print-file-name, and links with options vld refuses;
  *   - runs preprocessing jobs (-E: kbuild's linker scripts and device
  *     trees) itself, with vcc's preprocessor (ppdriver.c), in this thread;
- *   - compiles -c of .c (pp.c + cc.c + emit.c) and .S (pp.c + as.c) itself,
+ *   - compiles -c of .c (pp/ + cc/ + emit/) and .S (pp/ + as.c) itself,
  *     in this thread, into the .o and dependency file kbuild names; the
  *     header cache is shared by all jobs, everything else is per thread;
  *   - forwards everything else to the current backend: compiles vcc cannot

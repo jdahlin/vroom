@@ -1,7 +1,7 @@
 #ifndef VCC_CCINT_H
 #define VCC_CCINT_H
 /*
- * vcc front end internals shared by cc.c (parser + sema) and emit.c (code
+ * vcc front end internals shared by cc/ (parser + sema) and emit/ (code
  * generator): the per-TU state and the AST side tables.
  */
 #include <setjmp.h>
@@ -113,7 +113,7 @@ struct cc {
 	uint32_t nasm;
 
 	char *heap, *hp, *hend;	/* bump allocator for everything else */
-	struct dop *dops;	/* declarator op stack (cc.c) */
+	struct dop *dops;	/* declarator op stack (cc/declarator.c) */
 	uint32_t ndops;
 
 	/* scopes: identifier id -> innermost binding (sym index) */
