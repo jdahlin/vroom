@@ -29,7 +29,7 @@ VCC_FAST   = $(VCC_CFLAGS) -O3 -mcpu=apple-m1 -pthread
 VCC_LDFLAGS = -O3
 OBJ        = $(OUT)/obj
 
-vcc: $(OUT)/vcc $(OUT)/vld $(OUT)/vas $(OUT)/vccd $(OUT)/lextest $(OUT)/vpp $(OUT)/vlink $(OUT)/vasm
+vcc: $(OUT)/vcc $(OUT)/vld $(OUT)/vas $(OUT)/var $(OUT)/vccd $(OUT)/lextest $(OUT)/vpp $(OUT)/vlink $(OUT)/vasm
 
 o = $(patsubst vcc/%.c,$(OBJ)/%.o,$(1))
 AS_SRC  = vcc/as.c vcc/a64.c vcc/elf.c
@@ -49,7 +49,7 @@ $(OBJ)/ld.o: XFLAGS = -DVLD_MAIN
 $(OUT)/vpp: $(call o,vcc/vpp.c $(PP_SRC) $(LEX_SRC) $(AS_SRC))
 	$(VCC_CC) $(VCC_LDFLAGS) -pthread $^ -o $@
 
-$(OUT)/vccd: $(call o,vcc/vccd.c vcc/caps.c vcc/fixdep.c $(PP_SRC) $(LEX_SRC) $(AS_SRC))
+$(OUT)/vccd: $(call o,vcc/vccd.c vcc/caps.c vcc/fixdep.c vcc/ar.c $(PP_SRC) $(LEX_SRC) $(AS_SRC))
 	$(VCC_CC) $(VCC_LDFLAGS) -pthread $^ -o $@
 
 $(OUT)/lextest: $(patsubst vcc/%.c,$(OBJ)/no/%.o,vcc/lextest.c vcc/pmc.c $(LEX_SRC))
@@ -67,7 +67,7 @@ $(OUT)/vlink: $(call o,$(LD_SRC))
 $(OUT)/vcc: vcc/shim.c protocol.h | $(OUT)
 	$(VCC_CC) $(VCC_CFLAGS) $< -o $@
 
-$(OUT)/vld $(OUT)/vas: $(OUT)/vcc
+$(OUT)/vld $(OUT)/vas $(OUT)/var: $(OUT)/vcc
 	ln -sf vcc $@
 
 $(OBJ):

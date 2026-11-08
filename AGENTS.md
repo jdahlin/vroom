@@ -25,6 +25,8 @@ assembler, linker, behind `vcc`/`vas`/`vld` shims and the `vccd` server.
   - `vcc/cc.c`: parser + sema (GNU C11, clang's layout and constant rules).
   - `vcc/vpp.c`: preprocessor driver for parity tests.
   - `vcc/shim.c`, `vccd.c`, `caps.c`: the compiler shim and server.
+  - `vcc/ar.c`: the archiver (thin archives, llvm-ar-identical), run by
+    vccd when the shim is called as `var`; the build uses no llvm-ar.
 - `bench/`: harnesses.  `bench/vcc-diff.py` compares `vpp` with `clang -E`;
   `bench/vcc-sema.py` runs the front end and has clang verify its claims.
 - `work/` (git-ignored, case-sensitive sparsebundle): kernel source in
@@ -39,6 +41,7 @@ bench/vcc-diff.py cmp -j 6 --kernel # preprocessor parity, kernel TUs
 bench/vcc-diff.py cmp -j 6          # ... including host tools (scripts/)
 bench/vcc-sema.py run -j 6          # vpp -fsyntax-only on every C TU
 bench/vcc-sema.py layout -j 6       # layouts/constants/decl types checked by clang (~70 s)
+bench/var-cmp.py work/build-x       # vcc ar against llvm-ar on an llvm-ar-built tree
 ```
 Parity is a token-stream comparison (kind and spelling) of `clang -E -P`
 against `vpp`, both lexed by vcc's lexer.  A change to `pp.c` or `lex.c` is

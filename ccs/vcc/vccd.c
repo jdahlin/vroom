@@ -17,7 +17,8 @@
  *     header cache is shared by all jobs, everything else is per thread;
  *   - forwards everything else to the current backend: compiles vcc cannot
  *     do (the vDSO: -mcmodel=tiny/PIC; any TU vcc fails on) to vroomd
- *     (clang), links to vroom-ld/ld.lld.
+ *     (clang), links to vroom-ld/ld.lld;
+ *   - runs the archiver (ar, var, llvm-ar by argv[0]) itself: ar.c.
  *
  * No allocation per request: buffers are mmap'ed once per worker.
  *
@@ -51,6 +52,7 @@
 #include "caps.h"
 #include "ppdriver.h"
 #include "fixdep.h"
+#include "ar.h"
 
 #define MAX_STRS	(VROOM_MAX_PAYLOAD / 2)
 
@@ -59,7 +61,7 @@ static const char *ld_backend;		/* full links (vroom-ld) */
 static const char *lld = "/opt/homebrew/bin/ld.lld";
 static bool log_requests, own_pp = true, own_cc = true;
 
-static atomic_ulong n_probe, n_fwd, n_spawn, n_pp, n_cc, n_fallback;
+static atomic_ulong n_probe, n_fwd, n_spawn, n_pp, n_cc, n_fallback, n_ar;
 
 /* ---------------- work queue: accepted sockets ---------------- */
 
@@ -578,6 +580,12 @@ static int handle1(const struct req *r, const char **kind)
 {
 	int probe;
 
+	if (!strcmp(r->tool, "var") || !strcmp(r->tool, "ar") || !strcmp(r->tool, "llvm-ar")) {
+		/* the archiver: thin archives written here (ar.c), never llvm-ar */
+		*kind = "ar";
+		atomic_fetch_add(&n_ar, 1);
+		return ar_run(r->cwd, r->argc, r->argv, r->fds[1], r->fds[2]);
+	}
 	if (!strcmp(r->tool, "vld") || !strcmp(r->tool, "ld")) {
 		if (ld_is_probe(r)) {
 			*kind = "ld-probe";
@@ -654,9 +662,9 @@ static int handle1(const struct req *r, const char **kind)
 
 static void print_counts(void)
 {
-	fprintf(stderr, "vccd: %lu probes, %lu -E, %lu compiled by vcc, %lu fell back to clang, %lu forwarded in all, %lu spawned\n",
+	fprintf(stderr, "vccd: %lu probes, %lu -E, %lu compiled by vcc, %lu fell back to clang, %lu forwarded in all, %lu spawned, %lu ar\n",
 		atomic_load(&n_probe), atomic_load(&n_pp), atomic_load(&n_cc), atomic_load(&n_fallback),
-		atomic_load(&n_fwd), atomic_load(&n_spawn));
+		atomic_load(&n_fwd), atomic_load(&n_spawn), atomic_load(&n_ar));
 }
 
 static void *worker_main(void *arg)
