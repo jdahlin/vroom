@@ -135,7 +135,7 @@ enum { R_FP = 29, R_LR = 30, ZR = 31, SP = 32, FRAME = 33, R_X16 = 16, R_X17 = 1
 
 enum {
 	I_LABEL,	/* label */
-	I_RAW,		/* off: text pool offset, ref: length */
+	I_RAW,		/* off: text pool offset, ref: length; cond 1: inline asm (//APP in -S) */
 	/* rd = rn op (rm << sh); cond: shift kind (0 lsl, 1 lsr, 2 asr) */
 	I_ADD, I_SUB, I_ADDS, I_SUBS, I_AND, I_ORR, I_EOR, I_ANDS, I_BIC, I_ORN, I_ADC, I_SBC, I_ADCS, I_SBCS,
 	/* rd = rn op imm (any value: the backend splits or materialises) */
@@ -908,8 +908,12 @@ static void print_ins(cc *c, tbuf *b, const ins *i, uint32_t fid, const char *ra
 		tb_s(b, ":\n");
 		return;
 	case I_RAW:
+		if (i->cond)	/* inline asm between clang's markers (bench/vcc-fpcheck.py) */
+			tb_s(b, "\t//APP\n");
 		tb_put(b, raw + i->off, i->ref);
 		tb_c(b, '\n');
+		if (i->cond)
+			tb_s(b, "\t//NO_APP\n");
 		return;
 	case I_ADD: case I_SUB: case I_ADDS: case I_SUBS: case I_AND: case I_ORR: case I_EOR:
 	case I_ANDS: case I_BIC: case I_ORN: case I_ADC: case I_SBC: case I_ADCS: case I_SBCS:
@@ -8100,6 +8104,7 @@ static void gen_asm(ecx *e, uint32_t n)
 
 		i->off = (int32_t)start;
 		i->ref = (uint32_t)(rb->n - start);
+		i->cond = 1;
 	}
 	for (uint32_t i = 0; i < a->nout; i++) {
 		asmopnd *o = &op[i];
