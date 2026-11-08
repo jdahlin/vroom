@@ -6177,7 +6177,7 @@ static void emit_function(ecx *e, uint32_t s)
 	}
 	gen_stmt(e, y->body);
 	/* falling off the end of main returns 0 */
-	if (e->reach && y->name && !strcmp(vintern_ents[y->name].s, "main") && vintern_ents[y->name].len == 4)
+	if (e->reach && y->name && vintern_ents[y->name].len == 4 && !memcmp(vintern_ents[y->name].s, "main", 4))
 		movi(e, 0, 0, 0);
 	deflabel(e, F.retlbl);
 	e->f = NULL;
