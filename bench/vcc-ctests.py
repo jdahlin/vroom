@@ -6,7 +6,15 @@
 Suites (ccs/vcc/tests/, see the README there):
   gcc  gcc.c-torture/execute: exits 0 on success, abort()s on failure
   tcc  tinycc tests2: prints output, compared with clang's (and tcc's .expect)
-  vcc  our own regression tests (ccs/vcc/tests/vcc): print, and exit 0 or abort()
+  vcc  our own regression tests (ccs/vcc/tests/vcc): exit 0 (or abort()) and
+       print what clang's build prints.  Comments in a test steer the runner:
+         /* vcc-flags: -std=c23 ... */   extra flags for both compilers
+         /* vcc-xfail: TODO item */      known vcc bug: a failure is counted as
+                                         xfail, a pass as XPASS (an error: drop
+                                         the marker in the commit that fixes it)
+       A clang build that does not exit 0 is a broken test (fail:test).
+
+Exit status 1 when anything fails or XPASSes.
 
 Every test is built twice: by clang (the oracle) and by vcc (vpp -c), each
 linked with the bare-metal runtime in ccs/vcc/tests/rt (built by clang) and
@@ -141,6 +149,12 @@ def norm(s):
     # diff -b: trailing blanks and runs of blanks don't count
     return '\n'.join(re.sub(r'[ \t]+', ' ', l).rstrip() for l in s.rstrip('\n').split('\n'))
 
+def exec_marks(src):
+    """(flags, xfail reason or None) from /* vcc-flags: */ and /* vcc-xfail: */"""
+    fl = [x for m in re.finditer(r'/\*\s*vcc-flags:(.*?)\*/', src) for x in m.group(1).split()]
+    m = re.search(r'/\*\s*vcc-xfail:(.*?)\*/', src, re.S)
+    return fl, (' '.join(m.group(1).split()) if m else None)
+
 def reference(suite, name, path, flags, rthash, wd):
     key = hashlib.sha1((open(path, 'rb').read().decode('latin-1') + ' '.join(flags) + rthash + ' '.join(CLFL)).encode()).hexdigest()[:16]
     cf = f'{OUT}/ref/{suite}/{name}.json'
@@ -172,13 +186,26 @@ def reference(suite, name, path, flags, rthash, wd):
     return r
 
 def one(t):
+    t, st, cat, why = one_(t)
+    if t[0] != 'vcc':
+        return t, st, cat, why
+    _, xf = exec_marks(open(t[2], 'rb').read().decode('latin-1'))
+    if st == 'skip':	# our tests must run on clang: a skip is a broken test
+        return t, 'fail', 'test', f'{cat}: {why}'
+    if xf and st == 'fail':
+        return t, 'xfail', cat, f'{xf} [{why}]'
+    if xf and st == 'pass':
+        return t, 'fail', 'xpass', f'passes now: remove vcc-xfail ({xf})'
+    return t, st, cat, why
+
+def one_(t):
     suite, name, path = t
     src = open(path, 'rb').read().decode('latin-1')
     if suite == 'tcc' and name in TCC_SKIP:
         return t, 'skip', 'tcc-specific', TCC_SKIP[name]
     if suite == 'gcc' and name in GCC_SKIP:
         return t, 'skip', 'compiler-specific', GCC_SKIP[name]
-    flags = dg_flags(src) if suite == 'gcc' else []
+    flags = dg_flags(src) if suite == 'gcc' else exec_marks(src)[0] if suite == 'vcc' else []
     if name.startswith('76_dollars'):
         flags = ['-fdollars-in-identifiers']
     wd = f'{OUT}/w/{suite}/{name}'
@@ -256,6 +283,8 @@ if __name__ == '__main__':
     whys = defaultdict(Counter)
     for (s, n, _), st, cat, why in res:
         by[s][st] += 1
+        if verbose and st == 'xfail':
+            print(f'XFAIL {cat:5s} {s}/{n}: {why}')
         if st != 'pass':
             by[s][f'{st}:{cat}'] += 1
             whys[(st, cat)][why] += 1
@@ -274,10 +303,12 @@ if __name__ == '__main__':
     for s, c in sorted(by.items()) + [('all', tot)]:
         run = c['pass'] + c['fail']
         det = ' '.join(f'{k}={v}' for k, v in sorted(c.items()) if ':' in k)
-        print(f'{s:4s} {c["pass"]}/{run} pass ({100 * c["pass"] / max(run, 1):.1f}%), {c["skip"]} skipped   {det}')
+        xf = f', {c["xfail"]} xfail' if c['xfail'] else ''
+        print(f'{s:4s} {c["pass"]}/{run} pass ({100 * c["pass"] / max(run, 1):.1f}%){xf}, {c["skip"]} skipped   {det}')
     if suite in (None, 'tcc') and not fe:
         bad = [n for (s, n, _), st, cat, _ in res if s == 'tcc' and st != 'skip'
                and not json.load(open(f'{OUT}/ref/tcc/{n}.json')).get('expect_ok')]
         if bad:
             print(f'note: clang+rt output differs from tcc .expect for {len(bad)}: {" ".join(bad[:12])}')
     print(f'{time.time() - t0:.1f} s')
+    sys.exit(1 if tot['fail'] else 0)

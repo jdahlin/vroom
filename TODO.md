@@ -18,14 +18,14 @@ Existing gates that every change must keep green: `vcc-diff.py cmp`
 (1708/1708), `vcc-diag.py` (63/63), `vcc-sema.py warn` (879/879),
 `make -C ccs self-check`, `make -C ccs fuzz-regress`, kernel boot.
 
-- [ ] **T0 performance gate.**  Every item below must leave the hot path
+- [x] **T0 performance gate.** (done: `bench/vbench.py gate`.)  Every item below must leave the hot path
   alone: `bench/vbench.py` (kernel front end + emit, fixed corpus) before
   and after each change, budget +1 % per item, numbers in the commit
   message.  Features that cost time when used (`-g`, warnings that need
   dataflow, an optimizer) are measured with the flag on and off separately.
-- [ ] **T1 `exec` suite: self-checking regressions under qemu.**
-  `ccs/vcc/tests/exec/*.c`, gcc-torture style (exit 0 or `abort()`), added as
-  a third suite in `bench/vcc-ctests.py` (`tests()`: `--suite exec`).  Clang
+- [x] **T1 `vcc` suite: self-checking regressions under qemu.** (done: `bench/vcc-ctests.py --suite vcc` with xfail markers, 9 tests added, all xfail today.)
+  `ccs/vcc/tests/vcc/*.c`, gcc-torture style (exit 0 or `abort()`), the
+  suite in `bench/vcc-ctests.py` (`tests()`: `--suite vcc`).  Clang
   is still the oracle, so a test also documents clang's behaviour.  Supports
   `/* vcc-flags: ... */` and `/* vcc-threads */` (link the runtime's tiny
   thread shim, or run on the Darwin host, see T3).  One file per fixed bug.
@@ -35,7 +35,7 @@ Existing gates that every change must keep green: `vcc-diff.py cmp`
   libc).  Covers argument passing, returns, varargs, layout of shared structs.
   A generator (`bench/abi-gen.py`, random signatures with a fixed seed, like
   gcc's `struct-layout-1`) gives breadth; hand-written cases pin known bugs.
-- [ ] **T3 `host` suite: native Darwin runs.**  Same `exec` files built with
+- [ ] **T3 `host` suite: native Darwin runs.**  Same `vcc` suite files built with
   `vpp -c --target=arm64-apple-darwin`, linked with ld64 against libSystem,
   run natively.  Needed for threads, TLV, real libm, and Darwin ABI items.
   `make -C ccs host-tests`.
@@ -44,7 +44,7 @@ Existing gates that every change must keep green: `vcc-diff.py cmp`
   exits non-zero with an error mentioning X" is required (for cases where an
   exact clang message match is not yet the goal).  `// expect-error: REGEX`
   lines; runner `bench/vcc-reject.py`.  Promote to `diag/` once messages match.
-- [ ] **T5 `stress` suite: crash containment.**  `bench/vcc-stress.py`
+- [x] **T5 `stress` suite: crash containment.** (done: `bench/vcc-stress.py [--vccd]`, 19 cases, 15 xfail.)  `bench/vcc-stress.py`
   generates pathological inputs (200k nested parens / unary minus / `?:` /
   `#if` parens / macro calls, 10k struct members, 5000 `-I`, a 2 MB function,
   `.rept 1e8`, 17M-token expansion, 2^31-byte file via sparse file) and
@@ -83,7 +83,7 @@ Existing gates that every change must keep green: `vcc-diff.py cmp`
   command lines → expected (exit status, output files, stderr regex),
   including flags that must be rejected.  Uses `vpp` directly and through a
   private vccd.
-- [ ] **T12 vccd service tests.**  `bench/vccd-test.py`: starts a private
+- [x] **T12 vccd service tests.** (partly done: `bench/vccd-test.py`, 12 tests, 9 xfail, peer check skipped without sudo; not yet: cancel on disconnect, SIGTERM, version mismatch, memory after N builds, fd leaks into children.)  `bench/vccd-test.py`: starts a private
   vccd and checks socket permissions, peer rejection (a second uid via
   `sudo -u nobody` when available, otherwise a forged-uid unit test of the
   check), bad requests (wrong fd count, truncated messages, oversized env),
@@ -99,7 +99,7 @@ Existing gates that every change must keep green: `vcc-diff.py cmp`
   beyond ±1 MB must become `adrp+add`; `tbz` (±32 KB) likewise.  Also assert
   in the encoders (debug builds) that the offset fits.  Assembler too:
   `b.eq 0x100000000` is accepted silently [P].
-  *Validate:* T1 `branch-far.c` (generated: a function > 1.5 MB with
+  *Validate:* T1 `branch_far.c` (generated: a function > 1.5 MB with
   `if`/loops/`switch` around the bulk, plus a > 32 KB `tbz` case); T6 checks
   no out-of-range immediate via `llvm-objdump` targets; T4 for the
   assembler's out-of-range error.
@@ -107,7 +107,7 @@ Existing gates that every change must keep green: `vcc-diff.py cmp`
   Realign: when a function has a local with alignment > 16, align sp
   (`and sp, x?, #-A`) after the frame setup and address such locals off a
   base register (x19 or sp), keeping x29 for the frame.
-  *Validate:* T1 `align-local.c` (`_Alignas(32/64/128/4096)` locals, arrays
+  *Validate:* T1 `align_local.c` (`_Alignas(32/64/128/4096)` locals, arrays
   and VLAs of over-aligned types, inside recursion and alongside alloca;
   check `(uintptr_t)&x % A == 0`).
 - [ ] **`_Atomic` dropped** [P].  `cc.c:5665`, `cc.c:6037`.  Keep the
@@ -121,7 +121,7 @@ Existing gates that every change must keep green: `vcc-diff.py cmp`
   `_Static_assert(sizeof/alignof)` cases in `vcc-sema.py layout` style.
 - [ ] **VLA pointer `++`/`--`/`+=`/`-=`/difference ignore runtime size** [P].
   `ptr_add_vla` `emit.c:6051` only covers binary `+`/`-` and subscripting.
-  *Validate:* T1 `vla-ptr.c` (`int (*q)[n]`: `q++`, `q--`, `q += 2`,
+  *Validate:* T1 `vla_ptr.c` (`int (*q)[n]`: `q++`, `q--`, `q += 2`,
   `q -= 1`, `q3 - q`, `&q[1] - q`, 2-D VLA of VLA).
 - [ ] **VLA with initializer accepted; garbage at run time** [P].  Reject
   as clang does ("variable-sized object may not be initialized"), except
@@ -149,13 +149,13 @@ Existing gates that every change must keep green: `vcc-diff.py cmp`
   `number_s` `cc.c:1296`.  Parse to binary128 (a correctly rounded
   decimal→binary128 converter; the tf soft-float in `tests/rt` can be the
   check), fold in binary128.
-  *Validate:* T1 `ldouble-const.c` (`0.1L != 0.1`, `1e4000L` finite,
+  *Validate:* T1 `ldouble_const.c` (`0.1L != 0.1`, `1e4000L` finite,
   `LDBL_MAX`, `LDBL_MIN`, denormals, hex float `0x1.0000000000000000000000000001p0L`,
   bit patterns compared via `memcpy` against clang's).
 - [ ] **`#pragma weak` ignored** [P].  `cc.c:892` handles only `pack`.
   Implement `#pragma weak sym` and `#pragma weak alias = target`.
-  *Validate:* T6 `pragma-weak.c` (symbol binding WEAK, alias defined);
-  T1 `pragma-weak-undef.c` (`&ext == 0` at run time, not folded to 1).
+  *Validate:* T6 `pragma_weak.c` (symbol binding WEAK, alias defined);
+  T1 `pragma_weak_undef.c` (`&ext == 0` at run time, not folded to 1).
 - [ ] **`#pragma pack(push, ident, N)` ignores N; `pop, ident` pops one** [P].
   `cc.c:919-927`.
   *Validate:* layout `_Static_assert` cases against clang (all forms:
@@ -164,7 +164,7 @@ Existing gates that every change must keep green: `vcc-diff.py cmp`
 - [ ] **Designated-initializer overrides differ from clang** [P].
   `.s = "ab", .s[3] = 'z'` loses "ab"; `.i = iv, .i.y = 99` zeroes `i.x`;
   `[0] = side(), [0] = side()` evaluates both.
-  *Validate:* T1 `desig-override.c`, static and automatic variants, with
+  *Validate:* T1 `desig_override.c`, static and automatic variants, with
   side-effect counters (clang's behaviour is the oracle).
 - [ ] **Header/snapshot cache keys incomplete** [R].  `opt_sig`
   `ccsnap.c:356` misses `-std`, `-fgnu89-inline`, `-finstrument-functions`,
@@ -308,11 +308,11 @@ Existing gates that every change must keep green: `vcc-diff.py cmp`
   built with clang++ for the C++ part).
 - [ ] **DWARF** (`-g`): line tables first, then variables/types.
   *Validate:* T6 (`llvm-dwarfdump --verify`); `llvm-symbolizer` maps
-  addresses to the right lines for `tests/exec`; later a scripted lldb
+  addresses to the right lines for `tests/vcc`; later a scripted lldb
   session (break at file:line, print local).
 - [ ] **Register spilling** [P]: ~18-deep right-nested expression is a
   fatal "out of registers" (`emit.c:2176-2195`).
-  *Validate:* T1 `deep-expr.c` (generated: right-nested depth 10..200,
+  *Validate:* T1 `deep_expr.c` (generated: right-nested depth 10..200,
   mixed int/FP/calls); T5 for depth 10k (no crash).
 - [ ] **`_Float16`** (`emit.c:3520`), **FP vectors** (`float32x4_t`,
   `emit.c:5886`), **`"w"` asm operands** (`emit.c:7831`), **16-byte atomics**
@@ -331,7 +331,7 @@ Existing gates that every change must keep green: `vcc-diff.py cmp`
   *Validate:* T1 `limits.c` (generated: 300 arguments, 1000-deep nested
   loops, 1000 cleanups); T5 for the extremes.
 - [ ] **`-S` on Darwin writes ELF directives** (`.type @function`).
-  *Validate:* T3: `vpp -S` output assembled by `as` (Apple) for the exec
+  *Validate:* T3: `vpp -S` output assembled by `as` (Apple) for the vcc suite
   suite.
 
 ### Front end (`cc.c`)
