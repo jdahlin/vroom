@@ -14,6 +14,7 @@
  * pointer constants depend on the difference: __is_constexpr), and the
  * types of builtins.
  */
+#include <math.h>
 #include <pthread.h>
 #include <setjmp.h>
 #include <stdarg.h>
@@ -31,7 +32,7 @@
 #include "arena.h"
 
 /* the per-TU tables, mapped once and reused (cc_init takes a set, cc_free gives it back) */
-static vmpool ccpool = VMPOOL_INIT(17);
+static vmpool ccpool = VMPOOL_INIT(18);
 static _Thread_local vmreg *ccr;
 
 static void *halloc(cc *c, size_t n)
@@ -50,6 +51,21 @@ static void *halloc(cc *c, size_t n)
 
 /* ---------------- diagnostics ---------------- */
 
+/* clang's -ferror-limit (default 20, 0: none): stop the TU with its fatal error */
+static void error_limit(cc *c)
+{
+	int lim = pp_error_limit(c->p);
+
+	if (!lim)
+		lim = 20;
+	if (lim > 0 && pp_errors(c->p) + 1 >= lim) {
+		pp_dinfo d = { "fatal error", UINT32_MAX, NULL, 0, NULL, 0, NULL, 0 };
+
+		pp_diagx(c->p, &d, "too many errors emitted, stopping now [-ferror-limit=]");
+		longjmp(c->bail, 1);
+	}
+}
+
 static void diag(cc *c, uint32_t loc, const char *what, const char *fmt, va_list ap)
 {
 	c->ndiag++;
@@ -61,14 +77,11 @@ static void error(cc *c, uint32_t loc, const char *fmt, ...)
 {
 	va_list ap;
 
+	error_limit(c);
 	va_start(ap, fmt);
 	diag(c, loc, "error", fmt, ap);
 	va_end(ap);
-	if (++c->errors >= 20) {
-		va_start(ap, fmt);
-		pp_vdiag(c->p, loc, "fatal error", "too many errors emitted, stopping now", ap);
-		va_end(ap);
-	}
+	c->errors++;
 }
 
 __attribute__((format(printf, 3, 4), noreturn))
@@ -83,6 +96,53 @@ static void fatal(cc *c, uint32_t loc, const char *fmt, ...)
 	longjmp(c->bail, 1);
 }
 
+static const char *tyname(cc *c, qty t);
+
+/* a diagnostic with ranges and fix-its (clang's rendering, pp.c) */
+__attribute__((format(printf, 8, 9)))
+static void report(cc *c, const char *what, uint32_t loc, const pp_span *r, int nr,
+		   const pp_fixit *fx, int nfx, const char *fmt, ...)
+{
+	pp_dinfo d = { what, loc, r, nr, fx, nfx, NULL, 0 };
+	va_list ap;
+
+	if (!strcmp(what, "error"))
+		error_limit(c), c->errors++;
+	if (strcmp(what, "note"))
+		c->ndiag++;
+	va_start(ap, fmt);
+	pp_vdiagx(c->p, &d, fmt, ap);
+	va_end(ap);
+}
+
+__attribute__((format(printf, 3, 4)))
+static void note(cc *c, uint32_t loc, const char *fmt, ...)
+{
+	pp_dinfo d = { "note", loc, NULL, 0, NULL, 0, NULL, 0 };
+	va_list ap;
+
+	va_start(ap, fmt);
+	pp_vdiagx(c->p, &d, fmt, ap);
+	va_end(ap);
+}
+
+static const char *const w_all[] = { "all", "most", NULL };
+
+/* a warning of clang's flag (on: on by default); false if it is off */
+__attribute__((format(printf, 10, 11)))
+static bool warnx(cc *c, const char *flag, bool on, const char *const *groups, uint32_t loc,
+		  const pp_span *r, int nr, const pp_fixit *fx, int nfx, const char *fmt, ...)
+{
+	pp_dinfo d = { "warning", loc, r, nr, fx, nfx, NULL, 0 };
+	char msg[1024];
+	va_list ap;
+
+	va_start(ap, fmt);
+	vsnprintf(msg, sizeof(msg), fmt, ap);
+	va_end(ap);
+	return pp_warnx(c->p, flag, on, groups, &d, "%s", msg);
+}
+
 static const char *idname(uint32_t id, int *len)
 {
 	*len = (int)vintern_ents[id].len;
@@ -92,6 +152,8 @@ static const char *idname(uint32_t id, int *len)
 #define IDF(id) idlen_(id), idstr_(id)
 static int idlen_(uint32_t id) { return (int)vintern_ents[id].len; }
 static const char *idstr_(uint32_t id) { return vintern_ents[id].s; }
+
+static uint32_t implicit_func(cc *c, uint32_t id, uint32_t loc);
 
 /* ---------------- types ---------------- */
 
@@ -123,7 +185,8 @@ static bool is_func(cc *c, qty t) { return KIND(c, t) == TY_FUNC; }
 static bool is_record(cc *c, qty t) { int k = KIND(c, t); return k == TY_STRUCT || k == TY_UNION; }
 static bool is_vector(cc *c, qty t) { return KIND(c, t) == TY_VECTOR; }
 /* initialized by a list of elements */
-static bool is_ilagg(cc *c, qty t) { int k = KIND(c, t); return k == TY_STRUCT || k == TY_UNION || k == TY_ARRAY || k == TY_VECTOR; }
+static bool is_complex(cc *c, qty t) { return KIND(c, t) == TY_STRUCT && (c->tags[T(c, t)->aux].flags & RF_COMPLEX); }
+static bool is_ilagg(cc *c, qty t) { int k = KIND(c, t); return (k == TY_STRUCT && !is_complex(c, t)) || k == TY_UNION || k == TY_ARRAY || k == TY_VECTOR; }
 
 static qty canon(cc *c, qty t) { return QT(T(c, t)->canon, QQ(t)); }
 
@@ -408,6 +471,16 @@ static qty unsigned_of(cc *c, qty t)
 	}
 }
 
+/* the result of comparing vectors of type v: signed integers of the lane size */
+static qty vec_mask_type(cc *c, qty v)
+{
+	uint32_t es = (uint32_t)T(c, T(c, v)->base)->size;
+	int k = es == 1 ? TY_SCHAR : es == 2 ? TY_SHORT : es == 4 ? TY_INT : es == 8 ? TY_LONG : TY_INT128;
+
+	return ty_vector(c, prim(k), (uint32_t)T(c, v)->size);
+}
+
+
 /* integer promotion (bit-fields are handled by the caller) */
 static qty promote(cc *c, qty t)
 {
@@ -670,7 +743,7 @@ static void init_keywords(void)
 {
 	static const uint16_t types[] = {
 		KW_void, KW_char, KW_short, KW_int, KW_long, KW_float, KW_double, KW_signed, KW_unsigned,
-		KW__Bool, KW__Complex, KW_struct, KW_union, KW_enum, KW_const, KW_volatile, KW_restrict,
+		KW__Bool, KW__Complex, KW___complex__, KW___complex, KW_struct, KW_union, KW_enum, KW_const, KW_volatile, KW_restrict,
 		KW__Atomic, KW_typeof, KW___typeof__, KW___typeof, KW___typeof_unqual__, KW___const__,
 		KW___const, KW___signed__, KW___signed, KW___volatile__, KW___volatile, KW___restrict__,
 		KW___restrict, KW___int128, KW__Float16, KW___fp16, KW__Alignas, KW___attribute__,
@@ -752,6 +825,7 @@ static __attribute__((noinline)) void next_shift(cc *c)
 static inline __attribute__((always_inline)) void next(cc *c)
 {
 	c->prevloc = c->tk[0].loc;
+	c->prevflags = c->tk[0].flags;
 	if (unlikely(c->ntk > 1))
 		next_shift(c);
 	else
@@ -788,9 +862,7 @@ static const char *tokspell(const ptok *t, char *buf, size_t cap)
 /* the failure path out of line: tokspell's buffer (a VLA) made every call set up a frame */
 static __attribute__((noinline, cold, noreturn)) void expect_fail(cc *c, const char *what)
 {
-	char b[64];
-
-	fatal(c, c->tk[0].loc, "expected %s before '%s'", what, tokspell(&c->tk[0], b, sizeof(b)));
+	fatal(c, c->tk[0].loc, "expected %s", what);
 	abort();
 }
 
@@ -799,6 +871,22 @@ static inline __attribute__((always_inline)) void expect(cc *c, int kind, const 
 	if (unlikely(c->tk[0].kind != kind))
 		expect_fail(c, what);
 	next(c);
+}
+
+/* "expected ';' after X": reported at the end of the previous token with a
+   fix-it, like clang; parsing goes on as if the ';' were there */
+static void expect_semi(cc *c, const char *after)
+{
+	uint32_t e;
+	pp_fixit fx;
+
+	if (likely(c->tk[0].kind == T_SEMI)) {
+		next(c);
+		return;
+	}
+	e = pp_tok_end(c->p, c->prevloc);
+	fx = (pp_fixit){ e, e, ";" };
+	report(c, "error", e, NULL, 0, &fx, 1, "expected ';' %s", after);
 }
 
 /* #pragma: only pack changes semantics; the rest is ignored here */
@@ -935,6 +1023,99 @@ static inline bool typedef_id(cc *c, uint32_t id)
 	return s && c->syms[s].kind == S_TYPEDEF;
 }
 
+/* Levenshtein distance, giving up above max */
+static int edit_dist(const char *a, int na, const char *b, int nb, int max)
+{
+	int row[nb + 1];
+
+	if (na - nb > max || nb - na > max)
+		return max + 1;
+	for (int j = 0; j <= nb; j++)
+		row[j] = j;
+	for (int i = 1; i <= na; i++) {
+		int diag = row[0], best;
+
+		row[0] = best = i;
+		for (int j = 1; j <= nb; j++) {
+			int up = row[j], v = diag + (a[i - 1] != b[j - 1]);
+
+			if (up + 1 < v)
+				v = up + 1;
+			if (row[j - 1] + 1 < v)
+				v = row[j - 1] + 1;
+			diag = up, row[j] = v;
+			if (v < best)
+				best = v;
+		}
+		if (best > max)
+			return max + 1;
+	}
+	return row[nb];
+}
+
+/* clang's typo correction: the visible symbol closest to id (edit distance at most
+   (len + 2) / 3), of a type name (types) or of anything else; 0 if none */
+static uint32_t typo_sym(cc *c, uint32_t id, bool types)
+{
+	int n, max, best;
+	const char *s = idname(id, &n);
+	uint32_t pick = 0;
+
+	max = best = (n + 2) / 3;
+	for (uint32_t i = 1; i < c->nsym; i++) {
+		const sym *y = &c->syms[i];
+		int m, d;
+		const char *t;
+
+		if (!y->name || y->name == id || (y->kind == S_TYPEDEF) != types || y->kind == S_BUILTIN)
+			continue;
+		t = idname(y->name, &m);
+		if (m > 1 && t[0] == '_' && (t[1] == '_' || (t[1] >= 'A' && t[1] <= 'Z')))
+			continue;
+		if (lookup(c, y->name) != i)
+			continue;
+		d = edit_dist(s, n, t, m, max);
+		if (d <= max && (!pick || d < best))
+			pick = i, best = d;
+	}
+	return pick;
+}
+
+/* "<msg> 'id'; did you mean 'x'?" with the fix-it and the "declared here" note,
+   or just "<msg> 'id'"; returns the correction */
+static uint32_t undeclared(cc *c, const char *msg, uint32_t id, uint32_t loc, bool types)
+{
+	/* clang does not correct a name from a macro expansion (and says where it was spelled) */
+	bool mac = (tok(c)->loc == loc ? tok(c)->flags : c->prevflags) & PF_MACRO;
+	uint32_t s = mac ? 0 : typo_sym(c, id, types);
+	pp_span r = { loc, pp_tok_end(c->p, loc) };
+
+	if (mac) {
+		int m;
+		const char *t = idname(id, &m);
+		pp_dinfo d = { "error", loc, &r, 1, NULL, 0, t, (uint32_t)m };
+
+		error_limit(c), c->errors++, c->ndiag++;
+		pp_diagx(c->p, &d, "%s '%.*s'", msg, IDF(id));
+		return 0;
+	}
+
+	if (s) {
+		int m;
+		const char *t = idname(c->syms[s].name, &m);
+		char *fs = halloc(c, (size_t)m + 1);
+		pp_fixit fx;
+
+		memcpy(fs, t, m), fs[m] = 0;
+		fx = (pp_fixit){ r.b, r.e, fs };
+		report(c, "error", loc, &r, 1, &fx, 1, "%s '%.*s'; did you mean '%s'?", msg, IDF(id), fs);
+		note(c, c->syms[s].loc, "'%s' declared here", fs);
+	} else {
+		report(c, "error", loc, &r, 1, NULL, 0, "%s '%.*s'", msg, IDF(id));
+	}
+	return s;
+}
+
 static bool is_typedef_name(cc *c, const ptok *t)
 {
 	if (t->kind != T_IDENT || kwof(t))
@@ -957,6 +1138,25 @@ static uint32_t mk(cc *c, int op, qty ty, uint32_t loc)
 }
 
 #define N(i) (&c->nodes[i])
+
+/* the source range of node n began at token loc b and ends at the previous token */
+static inline void setspan(cc *c, uint32_t n, uint32_t b)
+{
+	if (n && !c->span[n].e)
+		c->span[n] = (pp_span){ b, c->prevloc };
+}
+
+/* the character range of n for a diagnostic (implicit conversions: their operand's) */
+static pp_span rng(cc *c, uint32_t n)
+{
+	while (n && !c->span[n].e && N(n)->op == N_CAST && N(n)->a)
+		n = N(n)->a;
+	if (!n)
+		return (pp_span){ 0, 0 };
+	if (!c->span[n].e)
+		return (pp_span){ N(n)->loc, pp_tok_end(c->p, N(n)->loc) };
+	return (pp_span){ c->span[n].b, pp_tok_end(c->p, c->span[n].e) };
+}
 
 static uint32_t mk2(cc *c, int op, qty ty, uint32_t loc, uint32_t a, uint32_t b)
 {
@@ -1036,11 +1236,35 @@ static inline qty int_lit_type(u128 v, int l, bool u, bool dec)
 	return l <= 1 ? prim(TY_ULONG) : prim(TY_ULLONG);
 }
 
+static uint32_t number_s(cc *c, const ptok *t, const char *s, size_t n);
+static qty ty_complex(cc *c, qty et);
+static uint32_t mk_cplx(cc *c, qty t, uint32_t re, uint32_t im, uint32_t loc);
+static uint32_t zero_of(cc *c, qty t, uint32_t loc);
+
+/* a constant; the GNU suffix i (or j) makes it imaginary: 0 + v i */
 static __attribute__((noinline)) uint32_t number_slow(cc *c, const ptok *t)
 {
 	char tmp[t->len + 1];
-	size_t n, i = 0;
+	size_t n;
 	const char *s = pp_spell(t, tmp, &n);
+
+	for (size_t k = n; k > 0 && strchr("fFlLuUiIjJ", s[k - 1]); k--) {
+		if (strchr("iIjJ", s[k - 1])) {
+			char b[n];
+			uint32_t v;
+
+			memcpy(b, s, k - 1);
+			memcpy(b + k - 1, s + k, n - k);
+			v = number_s(c, t, b, n - 1);
+			return mk_cplx(c, ty_complex(c, N(v)->ty), zero_of(c, N(v)->ty, t->loc), v, t->loc);
+		}
+	}
+	return number_s(c, t, s, n);
+}
+
+static uint32_t number_s(cc *c, const ptok *t, const char *s, size_t n)
+{
+	size_t i = 0;
 	unsigned base = 10;
 	u128 v = 0;
 	bool over = false, u = false, isf = false;
@@ -1535,6 +1759,30 @@ static const builtin builtins[] = {
 	{ "__builtin_isless", BI_ISLESS, 1, "i." }, { "__builtin_islessequal", BI_ISLESSEQUAL, 1, "i." },
 	{ "__builtin_islessgreater", BI_ISLESSGREATER, 1, "i." }, { "__builtin_isunordered", BI_ISUNORDERED, 1, "i." },
 	{ "__builtin_arm_rsr64", BI_ARM_RSR, 0, "WS" },
+	{ "__atomic_load_n", BI_ATOMIC_LOAD_N, 0, "v." }, { "__atomic_store_n", BI_ATOMIC_STORE_N, 0, "v." },
+	{ "__atomic_exchange_n", BI_ATOMIC_EXCHANGE_N, 0, "v." },
+	{ "__atomic_compare_exchange_n", BI_ATOMIC_CMPXCHG_N, 0, "v." },
+	{ "__atomic_load", BI_ATOMIC_LOAD, 0, "v." }, { "__atomic_store", BI_ATOMIC_STORE, 0, "v." },
+	{ "__atomic_exchange", BI_ATOMIC_EXCHANGE, 0, "v." },
+	{ "__atomic_compare_exchange", BI_ATOMIC_CMPXCHG, 0, "v." },
+	{ "__atomic_fetch_add", BI_ATOMIC_FETCH_ADD, 0, "v." }, { "__atomic_fetch_sub", BI_ATOMIC_FETCH_SUB, 0, "v." },
+	{ "__atomic_fetch_and", BI_ATOMIC_FETCH_AND, 0, "v." }, { "__atomic_fetch_or", BI_ATOMIC_FETCH_OR, 0, "v." },
+	{ "__atomic_fetch_xor", BI_ATOMIC_FETCH_XOR, 0, "v." },
+	{ "__atomic_add_fetch", BI_ATOMIC_ADD_FETCH, 0, "v." }, { "__atomic_sub_fetch", BI_ATOMIC_SUB_FETCH, 0, "v." },
+	{ "__atomic_and_fetch", BI_ATOMIC_AND_FETCH, 0, "v." }, { "__atomic_or_fetch", BI_ATOMIC_OR_FETCH, 0, "v." },
+	{ "__atomic_xor_fetch", BI_ATOMIC_XOR_FETCH, 0, "v." },
+	/* legacy __sync_*: the __atomic_* forms with seq_cst (sig "s.": atomic_call appends the order) */
+	{ "__sync_fetch_and_add", BI_ATOMIC_FETCH_ADD, 0, "s." }, { "__sync_fetch_and_sub", BI_ATOMIC_FETCH_SUB, 0, "s." },
+	{ "__sync_fetch_and_and", BI_ATOMIC_FETCH_AND, 0, "s." }, { "__sync_fetch_and_or", BI_ATOMIC_FETCH_OR, 0, "s." },
+	{ "__sync_fetch_and_xor", BI_ATOMIC_FETCH_XOR, 0, "s." },
+	{ "__sync_add_and_fetch", BI_ATOMIC_ADD_FETCH, 0, "s." }, { "__sync_sub_and_fetch", BI_ATOMIC_SUB_FETCH, 0, "s." },
+	{ "__sync_and_and_fetch", BI_ATOMIC_AND_FETCH, 0, "s." }, { "__sync_or_and_fetch", BI_ATOMIC_OR_FETCH, 0, "s." },
+	{ "__sync_xor_and_fetch", BI_ATOMIC_XOR_FETCH, 0, "s." },
+	{ "__sync_lock_test_and_set", BI_ATOMIC_EXCHANGE_N, 0, "s." },
+	{ "__atomic_thread_fence", BI_ATOMIC_THREAD_FENCE, 0, "vi" },
+	{ "__atomic_signal_fence", BI_ATOMIC_SIGNAL_FENCE, 0, "vi" },
+	{ "__atomic_always_lock_free", BI_ATOMIC_LOCK_FREE, 1, "bzP" },
+	{ "__atomic_is_lock_free", BI_ATOMIC_LOCK_FREE, 1, "bzP" },
 	/* library functions */
 	{ "__builtin_memcpy", BI_LIB, 0, "ppPz" }, { "__builtin_memmove", BI_LIB, 0, "ppPz" },
 	{ "__builtin_memset", BI_LIB, 0, "ppiz" }, { "__builtin_memcmp", BI_LIB, 0, "iPPz" },
@@ -1551,6 +1799,9 @@ static const builtin builtins[] = {
 	{ "__builtin_snprintf", BI_LIB, 0, "iszS." }, { "__builtin_vsnprintf", BI_LIB, 0, "iszSV" },
 	{ "__builtin_vsprintf", BI_LIB, 0, "isSV" }, { "__builtin_puts", BI_LIB, 0, "iS" },
 	{ "__builtin_abs", BI_LIB, 1, "ii" }, { "__builtin_labs", BI_LIB, 1, "ll" }, { "__builtin_llabs", BI_LIB, 1, "ww" },
+	{ "__builtin_conj", BI_CONJ, 0, "d." }, { "__builtin_conjf", BI_CONJ, 0, "f." }, { "__builtin_conjl", BI_CONJ, 0, "D." },
+	{ "__builtin_creal", BI_CREAL, 0, "d." }, { "__builtin_crealf", BI_CREAL, 0, "f." }, { "__builtin_creall", BI_CREAL, 0, "D." },
+	{ "__builtin_cimag", BI_CIMAG, 0, "d." }, { "__builtin_cimagf", BI_CIMAG, 0, "f." }, { "__builtin_cimagl", BI_CIMAG, 0, "D." },
 	{ "__builtin_fabs", BI_LIB, 1, "dd" }, { "__builtin_fabsf", BI_LIB, 1, "ff" }, { "__builtin_fabsl", BI_LIB, 1, "DD" },
 	{ "__builtin_copysign", BI_LIB, 1, "ddd" }, { "__builtin_copysignf", BI_LIB, 1, "fff" },
 	{ "__builtin_copysignl", BI_LIB, 1, "DDD" },
@@ -1787,6 +2038,8 @@ static bool eval(cc *c, uint32_t n, cval *v)
 				v->i = trunc_to(c, a.i, to);
 			return true;
 		case CK_INT:
+			if (a.kind == CV_ADDR && a.sublabel && ty_size(c, to) >= 4)
+				return true;	/* a label difference, as a 4- or 8-byte word */
 			if (a.kind != CV_INT)
 				return false;
 			v->i = trunc_to(c, a.i, to);
@@ -1919,6 +2172,15 @@ static bool eval(cc *c, uint32_t n, cval *v)
 				*v = *pv;
 				v->ice = false;
 				v->i += (op == T_MINUS ? -iv->i : iv->i) * (i128)es;
+				return true;
+			}
+			if (op == T_MINUS && is_ptr(c, lt) && is_ptr(c, rt) && a.kind == CV_ADDR && b.kind == CV_ADDR &&
+			    a.label && b.label && a.label != b.label && !a.sublabel && !b.sublabel) {
+				/* &&l1 - &&l0 */
+				*v = a;
+				v->ice = false;
+				v->sublabel = b.label;
+				v->i = a.i - b.i;
 				return true;
 			}
 			if (op == T_MINUS && is_ptr(c, lt) && is_ptr(c, rt)) {
@@ -2170,6 +2432,8 @@ static uint32_t cast_node(cc *c, uint32_t n, qty to, int kind)
 }
 
 /* array/function designators to pointers (C11 6.3.2.1p3-4) */
+static void bounds_warn(cc *c, uint32_t n, bool addr);
+
 static __attribute__((noinline)) uint32_t decay_slow(cc *c, uint32_t n, qty t, int k)
 {
 	if (k == TY_ARRAY)
@@ -2181,6 +2445,9 @@ static inline uint32_t decay(cc *c, uint32_t n)
 {
 	qty t = N(n)->ty;
 	int k = KIND(c, t);
+
+	if (unlikely(N(n)->op == N_INDEX))
+		bounds_warn(c, n, false);	/* returns at once for anything else */
 
 	if (likely(k != TY_ARRAY && k != TY_FUNC))
 		return n;
@@ -2270,19 +2537,246 @@ static bool union_member_for(cc *c, qty u, uint32_t n)
 	return false;
 }
 
+/* an expression that changes something (for sizes evaluated only for their effects) */
+static bool has_side_effects(cc *c, uint32_t n)
+{
+	const node *x;
+
+	if (!n)
+		return false;
+	x = N(n);
+	switch (x->op) {
+	case N_CALL: case N_ASSIGN: case N_PREINC: case N_PREDEC: case N_POSTINC: case N_POSTDEC: case N_STMTEXPR:
+	case N_BUILTIN: case N_VAARG:
+		return true;
+	case N_CAST: case N_UNARY: case N_ADDR: case N_DEREF: case N_MEMBER: case N_SIZEOF_VLA:
+		return has_side_effects(c, x->a);
+	case N_INDEX: case N_BINARY: case N_LOGAND: case N_LOGOR: case N_COMMA: case N_CPLX:
+		return has_side_effects(c, x->a) || has_side_effects(c, x->b);
+	case N_COND:
+		return has_side_effects(c, x->a) || has_side_effects(c, x->b) || has_side_effects(c, x->c);
+	default:
+		return false;
+	}
+}
+
+static uint32_t to_complex(cc *c, uint32_t n, qty t);
+static uint32_t cplx_bool(cc *c, uint32_t n);
+static uint32_t cplx_part(cc *c, uint32_t n, int k);
+static uint32_t rvalue(cc *c, uint32_t n);
+
 /* implicit conversion of an rvalue (already decayed) to type to */
+enum { CX_NONE, CX_INIT, CX_PASS, CX_RETURN, CX_ASSIGN };
+
+static void param_note(cc *c);
+
+/* clang's message for a value of type from that cannot become to */
+static void bad_conversion(cc *c, uint32_t n, qty to)
+{
+	pp_span r = rng(c, n);
+	const char *f = tyname(c, N(n)->ty), *t = tyname(c, to);
+
+	if (N(n)->flags & NF_ERR)
+		return;
+	if (c->cv_what == CX_PASS) {
+		report(c, "error", r.b, &r, 1, NULL, 0, "passing '%s' to parameter of incompatible type '%s'", f, t);
+		param_note(c);
+		return;
+	}
+	switch (c->cv_what) {
+	case CX_INIT:
+		report(c, "error", c->cv_loc, &r, 1, NULL, 0, "initializing '%s' with an expression of incompatible type '%s'", t, f);
+		break;
+	case CX_PASS:
+		report(c, "error", r.b, NULL, 0, NULL, 0, "passing '%s' to parameter of incompatible type '%s'", f, t);
+		break;
+	case CX_RETURN:
+		report(c, "error", r.b, &r, 1, NULL, 0, "returning '%s' from a function with incompatible result type '%s'", f, t);
+		break;
+	case CX_ASSIGN:
+		report(c, "error", c->cv_loc, &r, 1, NULL, 0, "assigning to '%s' from incompatible type '%s'", t, f);
+		break;
+	default:
+		report(c, "error", r.b, &r, 1, NULL, 0, "incompatible types in conversion ('%s' to '%s')", f, t);
+	}
+}
+
+static uint32_t convert(cc *c, uint32_t n, qty to);
+
+/* "passing argument to parameter 'p' here" for the argument being converted */
+static void param_note(cc *c)
+{
+	const sym *f;
+	uint32_t p;
+
+	if (!c->cv_fn || !(f = &c->syms[c->cv_fn])->psyms)
+		return;
+	p = c->lists[f->psyms - 1 + c->cv_arg];
+	if (c->syms[p].name)
+		note(c, c->syms[p].loc, "passing argument to parameter '%.*s' here", IDF(c->syms[p].name));
+	else
+		note(c, c->syms[p].loc, "passing argument to parameter here");
+}
+
+/* "... initializing 'T' with an expression of type 'F'" and the like, per context */
+static void conv_error(cc *c, uint32_t n, qty to, const char *what, const char *flag)
+{
+	pp_span r = rng(c, n);
+	const char *f = tyname(c, N(n)->ty), *t = tyname(c, to);
+
+	switch (c->cv_what) {
+	case CX_INIT:
+		report(c, "error", c->cv_loc, &r, 1, NULL, 0, "%s initializing '%s' with an expression of type '%s' [%s]", what, t, f, flag);
+		break;
+	case CX_PASS:
+		report(c, "error", r.b, &r, 1, NULL, 0, "%s passing '%s' to parameter of type '%s' [%s]", what, f, t, flag);
+		param_note(c);
+		break;
+	case CX_RETURN:
+		report(c, "error", r.b, &r, 1, NULL, 0, "%s returning '%s' from a function with result type '%s' [%s]", what, f, t, flag);
+		break;
+	default:
+		report(c, "error", c->cv_loc, &r, 1, NULL, 0, "%s assigning to '%s' from '%s' [%s]", what, t, f, flag);
+	}
+}
+
+/* pointee types that clang's -Wincompatible-pointer-types accepts: compatible once
+   qualifiers (at every level) and integer signedness are ignored, or one is void */
+static bool ptr_ok(cc *c, qty a, qty b)
+{
+	int ka, kb;
+
+	a = QUNQ(a), b = QUNQ(b);
+	ka = KIND(c, a), kb = KIND(c, b);
+	if (ka == TY_VOID || kb == TY_VOID || compatible(c, a, b))
+		return true;
+	if (ka == TY_PTR && kb == TY_PTR)
+		return ptr_ok(c, T(c, a)->base, T(c, b)->base);
+	if ((is_integer(c, a) || ka == TY_ENUM) && (is_integer(c, b) || kb == TY_ENUM))
+		return ty_size(c, a) == ty_size(c, b);	/* -Wpointer-sign (a warning) */
+	if (ka == TY_ARRAY && kb == TY_ARRAY)
+		return ptr_ok(c, T(c, a)->base, T(c, b)->base);
+	return false;
+}
+
+/* clang's implicit-conversion errors (int-conversion, incompatible pointer types) */
+static uint32_t conv_check(cc *c, uint32_t n, qty to)
+{
+	qty from = N(n)->ty;
+
+	if (N(n)->flags & NF_ERR)
+		return n;
+	if (is_ptr(c, to) && (is_integer(c, from) || KIND(c, from) == TY_ENUM) && !is_npc(c, n) && KIND(c, from) != TY_BOOL) {
+		conv_error(c, n, to, "incompatible integer to pointer conversion", "-Wint-conversion");
+	} else if ((is_integer(c, to) || KIND(c, to) == TY_ENUM) && KIND(c, to) != TY_BOOL && is_ptr(c, from)) {
+		conv_error(c, n, to, "incompatible pointer to integer conversion", "-Wint-conversion");
+	} else if (is_ptr(c, to) && is_ptr(c, from) && !(T(c, to)->flags & TF_BLOCK) && !(T(c, from)->flags & TF_BLOCK) &&
+		   !ptr_ok(c, T(c, to)->base, T(c, from)->base)) {
+		if (is_func(c, T(c, to)->base) && is_func(c, T(c, from)->base))
+			conv_error(c, n, to, "incompatible function pointer types", "-Wincompatible-function-pointer-types");
+		else
+			conv_error(c, n, to, "incompatible pointer types", "-Wincompatible-pointer-types");
+	} else {
+		return n;
+	}
+	N(n)->flags |= NF_ERR;	/* no second message from convert */
+	return n;
+}
+
+/* convert for an initialization, argument, return or assignment at loc */
+static uint32_t convert_as(cc *c, uint32_t n, qty to, int what, uint32_t loc)
+{
+	uint8_t sw = c->cv_what;
+	uint32_t sl = c->cv_loc;
+
+	c->cv_what = (uint8_t)what, c->cv_loc = loc;
+	if (what)
+		n = conv_check(c, n, to);
+	n = convert(c, n, to);
+	c->cv_what = sw, c->cv_loc = sl;
+	return n;
+}
+
 static __attribute__((noinline)) uint32_t convert_slow(cc *c, uint32_t n, qty to)
 {
 	qty from = N(n)->ty;
-	int k = conv_kind(c, from, to, n);
+	int k;
 
+	if (is_complex(c, to) && (is_arith(c, from) || is_complex(c, from)))
+		return to_complex(c, n, to);
+	if (is_complex(c, from) && KIND(c, to) == TY_BOOL)
+		return cplx_bool(c, n);
+	if (is_complex(c, from) && is_arith(c, to))	/* the real part */
+		return convert(c, rvalue(c, cplx_part(c, n, 0)), to);
+	k = conv_kind(c, from, to, n);
 	if (k < 0) {
 		if (KIND(c, to) == TY_UNION && union_member_for(c, to, n))
 			return cast_node(c, n, to, CK_UNION);
-		error(c, N(n)->loc, "incompatible types in conversion");
+		bad_conversion(c, n, to);
 		return n;
 	}
 	return cast_node(c, n, to, k);
+}
+
+/* clang spells the array type of this warning without the space: 'int[4]' */
+static const char *arr_tyname(cc *c, qty t)
+{
+	const char *s = tyname(c, t), *sp = strstr(s, " [");
+	char *o;
+
+	if (!sp)
+		return s;
+	o = halloc(c, strlen(s) + 1);
+	memcpy(o, s, (size_t)(sp - s));
+	strcpy(o + (sp - s), sp + 1);
+	return o;
+}
+
+/* -Warray-bounds: a[CONST] outside a's array type (addr: &a[n] may point one past the end) */
+static void bounds_warn(cc *c, uint32_t n, bool addr)
+{
+	const node *x = N(n);
+	uint32_t a, s = 0;
+	const ctype *at;
+	cval cv;
+	i128 i;
+
+	if (x->op != N_INDEX || (x->flags & NF_BOUNDS) || c->dead)
+		return;
+	N(n)->flags |= NF_BOUNDS;
+	a = x->a;
+	if (N(a)->op != N_CAST || N(a)->aux != CK_DECAY)
+		return;
+	a = N(a)->a;
+	at = T(c, N(a)->ty);
+	if (at->kind != TY_ARRAY || (at->flags & (TF_VLA | TF_INCOMPLETE)) || at->n < 2 ||
+	    !cc_eval(c, x->b, &cv) || cv.kind != CV_INT)
+		return;
+	if (N(a)->op == N_VAR)
+		s = N(a)->a;
+	else if (N(a)->op != N_MEMBER)
+		return;
+	i = cv.i;
+	if (i >= 0 && (i < (i128)at->n || (addr && i == (i128)at->n)))
+		return;
+	{
+		pp_span r[2] = { rng(c, a), rng(c, x->b) };
+		bool on;
+
+		if (i < 0)
+			on = warnx(c, "array-bounds", true, NULL, r[0].b, &r[1], 1, NULL, 0,
+				   "array index %lld is before the beginning of the array", (long long)i);
+		else
+			on = warnx(c, "array-bounds", true, NULL, r[0].b, &r[1], 1, NULL, 0,
+				   "array index %lld is past the end of the array (that has type '%s')", (long long)i,
+				   arr_tyname(c, N(a)->ty));
+		if (on && s) {
+			int m;
+			const char *nm = idname(c->syms[s].name, &m);
+
+			note(c, c->syms[s].ple ? c->syms[s].plb : c->syms[s].loc, "array '%.*s' declared here", m, nm);
+		}
+	}
 }
 
 static inline uint32_t convert(cc *c, uint32_t n, qty to)
@@ -2326,13 +2820,32 @@ static void need_scalar(cc *c, uint32_t n, const char *what)
 		error(c, N(n)->loc, "%s requires a scalar operand", what);
 }
 
-static void need_lvalue(cc *c, uint32_t n, const char *what)
+/* n is assigned (or incremented) by the operator at loc */
+static bool need_lvalue(cc *c, uint32_t n, uint32_t loc)
 {
-	if (!(N(n)->flags & NF_LVALUE))
-		error(c, N(n)->loc, "expression is not assignable (%s)", what);
-}
+	pp_span r = rng(c, n);
 
-/* ---------------- expressions: operators ---------------- */
+	if (!(N(n)->flags & NF_LVALUE)) {
+		report(c, "error", loc, &r, 1, NULL, 0, "expression is not assignable");
+		return false;
+	}
+	if (QQ(N(n)->ty) & Q_CONST) {
+		if (N(n)->op == N_VAR) {
+			const sym *v = &c->syms[N(n)->a];
+			pp_span vr = { v->plb, pp_tok_end(c->p, v->ple) };
+
+			if (!v->ple)
+				vr = (pp_span){ v->loc, v->loc };
+			report(c, "error", loc, &r, 1, NULL, 0, "cannot assign to variable '%.*s' with const-qualified type '%s'",
+			       IDF(v->name), tyname(c, N(n)->ty));
+			report(c, "note", v->loc, &vr, 1, NULL, 0, "variable '%.*s' declared const here", IDF(v->name));
+		} else {
+			report(c, "error", loc, &r, 1, NULL, 0, "read-only variable is not assignable");
+		}
+		return false;
+	}
+	return true;
+}
 
 static uint32_t mk_bin(cc *c, int op, qty ty, uint32_t a, uint32_t b, uint32_t loc)
 {
@@ -2341,6 +2854,274 @@ static uint32_t mk_bin(cc *c, int op, qty ty, uint32_t a, uint32_t b, uint32_t l
 	N(r)->aux = (uint16_t)op;
 	return r;
 }
+
+/* ---------------- _Complex ---------------- */
+
+/*
+ * _Complex T is the record { T re, im; } (RF_COMPLEX): its layout and its
+ * AAPCS64 passing (an HFA for float and double) are a struct's.  The
+ * arithmetic is lowered here to the parts: N_CPLX builds a value from them,
+ * a part is an N_MEMBER.  An operand used more than once that is not a
+ * plain expression is assigned to a temporary first (an N_COMMA).
+ */
+static uint32_t tag_new(cc *c, int kind, uint32_t name, uint32_t loc);
+
+static qty cplx_elem(cc *c, qty t) { return c->tags[T(c, t)->aux].f[0].ty; }
+
+static qty ty_complex(cc *c, qty et)
+{
+	int k;
+
+	et = QUNQ(canon(c, et));
+	if (KIND(c, et) == TY_ENUM)
+		et = QUNQ(T(c, et)->base);
+	k = KIND(c, et);
+	if (!c->cplx[k]) {
+		uint32_t ti = tag_new(c, TY_STRUCT, 0, 0);
+		tag *r = &c->tags[ti];
+
+		r->nfield = 2;
+		r->f = halloc(c, 2 * sizeof(field));
+		memset(r->f, 0, 2 * sizeof(field));
+		r->f[0].ty = r->f[1].ty = prim(k);
+		r->f[1].off = 8 * ty_size(c, prim(k));
+		r->flags |= RF_COMPLETE | RF_COMPLEX;
+		lay_record(c, r, NULL, NULL);
+		c->cplx[k] = r->ty;
+	}
+	return QT(c->cplx[k], 0);
+}
+
+static uint32_t mk_cplx(cc *c, qty t, uint32_t re, uint32_t im, uint32_t loc)
+{
+	return mk2(c, N_CPLX, QUNQ(t), loc, re, im);
+}
+
+static uint32_t zero_of(cc *c, qty t, uint32_t loc)
+{
+	return is_float(c, t) ? mk_flt(c, 0, QUNQ(t), loc) : mk_int(c, 0, QUNQ(t), loc);
+}
+
+/* evaluating n twice is the same as once (and cheap) */
+static bool cplx_pure(cc *c, uint32_t n, int d)
+{
+	const node *x = N(n);
+
+	if (d > 8)
+		return false;
+	switch (x->op) {
+	case N_NUM: case N_FNUM:
+		return true;
+	case N_VAR:
+		return !(QQ(x->ty) & Q_VOLATILE);
+	case N_MEMBER: case N_CAST: case N_UNARY: case N_DEREF:
+		return !(QQ(x->ty) & Q_VOLATILE) && cplx_pure(c, x->a, d + 1);
+	case N_BINARY: case N_INDEX: case N_CPLX:
+		return cplx_pure(c, x->a, d + 1) && cplx_pure(c, x->b, d + 1);
+	default:
+		return false;
+	}
+}
+
+/* n, or a temporary holding it (*pre: the assignment to run first) */
+static uint32_t cplx_reuse(cc *c, uint32_t n, uint32_t *pre)
+{
+	qty t = QUNQ(N(n)->ty);
+	uint32_t s, v;
+
+	*pre = 0;
+	if (cplx_pure(c, n, 0))
+		return n;
+	s = sym_new(c, S_VAR, 0, t, N(n)->loc);
+	c->syms[s].sc = SC_AUTO;
+	v = mk(c, N_VAR, t, N(n)->loc);
+	N(v)->a = s;
+	N(v)->flags = NF_LVALUE;
+	*pre = mk2(c, N_ASSIGN, t, N(n)->loc, v, n);
+	return v;
+}
+
+static uint32_t with_pre(cc *c, uint32_t pre, uint32_t n)
+{
+	return pre ? mk2(c, N_COMMA, N(n)->ty, N(n)->loc, pre, n) : n;
+}
+
+/* part k (0 real, 1 imaginary) of complex n */
+static uint32_t cplx_part(cc *c, uint32_t n, int k)
+{
+	qty t = N(n)->ty;
+	uint32_t m;
+
+	if (N(n)->op == N_CPLX)
+		return k ? N(n)->b : N(n)->a;
+	m = mk(c, N_MEMBER, qualify(c, cplx_elem(c, t), QQ(t)), N(n)->loc);
+	N(m)->a = n;
+	N(m)->b = T(c, t)->aux;
+	N(m)->c = (uint32_t)k;
+	N(m)->flags = N(n)->flags & NF_LVALUE;
+	return m;
+}
+
+/* both parts of complex n, each usable more than once */
+static void cplx_parts(cc *c, uint32_t n, uint32_t *re, uint32_t *im, uint32_t *pre)
+{
+	if (N(n)->op == N_CPLX && !cplx_pure(c, n, 0)) {
+		uint32_t p1, p2;
+
+		*re = cplx_reuse(c, N(n)->a, &p1);
+		*im = cplx_reuse(c, N(n)->b, &p2);
+		*pre = p1 && p2 ? mk2(c, N_COMMA, N(*im)->ty, N(n)->loc, p1, p2) : p1 ? p1 : p2;
+		return;
+	}
+	n = cplx_reuse(c, n, pre);
+	*re = cplx_part(c, n, 0);
+	*im = cplx_part(c, n, 1);
+}
+
+static uint32_t convert(cc *c, uint32_t n, qty to);
+
+/* an arithmetic or complex rvalue as complex type t */
+static uint32_t to_complex(cc *c, uint32_t n, qty t)
+{
+	qty et = cplx_elem(c, t);
+	uint32_t loc = N(n)->loc;
+
+	if (is_complex(c, N(n)->ty)) {
+		uint32_t re, im, pre = 0;
+
+		if (QI(canon(c, N(n)->ty)) == QI(canon(c, t)))
+			return n;
+		if (N(n)->op == N_CPLX) {
+			re = N(n)->a, im = N(n)->b;
+		} else {
+			n = cplx_reuse(c, n, &pre);
+			re = cplx_part(c, n, 0), im = cplx_part(c, n, 1);
+		}
+		return with_pre(c, pre, mk_cplx(c, t, convert(c, rvalue(c, re), et), convert(c, rvalue(c, im), et), loc));
+	}
+	return mk_cplx(c, t, convert(c, n, et), zero_of(c, et, loc), loc);
+}
+
+/* complex n != 0 */
+static uint32_t cplx_bool(cc *c, uint32_t n)
+{
+	uint32_t re, im, pre, loc = N(n)->loc;
+	qty et = cplx_elem(c, N(n)->ty);
+
+	cplx_parts(c, n, &re, &im, &pre);
+	re = mk_bin(c, T_EXCLAIMEQ, prim(TY_INT), re, zero_of(c, et, loc), loc);
+	im = mk_bin(c, T_EXCLAIMEQ, prim(TY_INT), im, zero_of(c, et, loc), loc);
+	return with_pre(c, pre, mk2(c, N_LOGOR, prim(TY_INT), loc, re, im));
+}
+
+/* a condition: complex values test both parts */
+static uint32_t scalar_cond(cc *c, uint32_t n, const char *what)
+{
+	if (is_complex(c, N(n)->ty))
+		return cplx_bool(c, n);
+	need_scalar(c, n, what);
+	return n;
+}
+
+static uint32_t neg(cc *c, uint32_t n)
+{
+	uint32_t r = mk(c, N_UNARY, N(n)->ty, N(n)->loc);
+
+	N(r)->aux = T_MINUS;
+	N(r)->a = n;
+	return r;
+}
+
+/* "invalid operands to binary expression ('L' and 'R')", ranges on both */
+static void bad_operands(cc *c, uint32_t l, uint32_t r, uint32_t loc)
+{
+	pp_span s[2] = { rng(c, l), rng(c, r) };
+
+	if ((N(l)->flags | N(r)->flags) & NF_ERR)
+		return;
+	report(c, "error", loc, s, 2, NULL, 0, "invalid operands to binary expression ('%s' and '%s')",
+	       tyname(c, N(l)->ty), tyname(c, N(r)->ty));
+}
+
+/* l op r with a complex operand: + - * / == != on the parts */
+static uint32_t cplx_binop(cc *c, int op, uint32_t l, uint32_t r, uint32_t loc)
+{
+	qty lt = N(l)->ty, rt = N(r)->ty;
+	bool lc = is_complex(c, lt), rc = is_complex(c, rt);
+	qty le = lc ? cplx_elem(c, lt) : lt, re_ = rc ? cplx_elem(c, rt) : rt, et, ct;
+	uint32_t a, b = 0, cr, d = 0, p1 = 0, p2 = 0, x, y;
+
+	if (!is_arith(c, le) || !is_arith(c, re_) ||
+	    !(op == T_PLUS || op == T_MINUS || op == T_STAR || op == T_SLASH || op == T_EQUALEQUAL || op == T_EXCLAIMEQ)) {
+		bad_operands(c, l, r, loc);
+		return mk_int(c, 0, prim(TY_INT), loc);
+	}
+	et = arith_conv(c, promote(c, QUNQ(le)), promote(c, QUNQ(re_)));
+	ct = ty_complex(c, et);
+	if (lc)
+		cplx_parts(c, to_complex(c, l, ct), &a, &b, &p1);
+	else
+		a = cplx_reuse(c, convert(c, l, et), &p1);
+	if (rc)
+		cplx_parts(c, to_complex(c, r, ct), &cr, &d, &p2);
+	else
+		cr = cplx_reuse(c, convert(c, r, et), &p2);
+#define B(o, u, v) mk_bin(c, o, et, u, v, loc)
+	switch (op) {
+	case T_PLUS: case T_MINUS:
+		x = B(op, a, cr);
+		y = !lc ? (op == T_MINUS ? neg(c, d) : d) : !rc ? b : B(op, b, d);
+		break;
+	case T_STAR:
+		if (!lc)
+			x = B(T_STAR, a, cr), y = B(T_STAR, a, d);
+		else if (!rc)
+			x = B(T_STAR, a, cr), y = B(T_STAR, b, cr);
+		else
+			x = B(T_MINUS, B(T_STAR, a, cr), B(T_STAR, b, d)), y = B(T_PLUS, B(T_STAR, a, d), B(T_STAR, b, cr));
+		break;
+	case T_SLASH:
+		if (!rc) {
+			x = B(T_SLASH, a, cr), y = B(T_SLASH, b, cr);
+		} else {
+			uint32_t den = B(T_PLUS, B(T_STAR, cr, cr), B(T_STAR, d, d));
+
+			if (!lc) {
+				x = B(T_SLASH, B(T_STAR, a, cr), den);
+				y = B(T_SLASH, neg(c, B(T_STAR, a, d)), den);
+			} else {
+				x = B(T_SLASH, B(T_PLUS, B(T_STAR, a, cr), B(T_STAR, b, d)), den);
+				y = B(T_SLASH, B(T_MINUS, B(T_STAR, b, cr), B(T_STAR, a, d)), den);
+			}
+		}
+		break;
+	default: {	/* == != */
+		int lop = op == T_EQUALEQUAL ? N_LOGAND : N_LOGOR;
+		uint32_t z = zero_of(c, et, loc);
+
+		x = mk_bin(c, op, prim(TY_INT), a, cr, loc);
+		y = mk_bin(c, op, prim(TY_INT), lc ? b : z, rc ? d : z, loc);
+		return with_pre(c, p1, with_pre(c, p2, mk2(c, lop, prim(TY_INT), loc, x, y)));
+	}
+	}
+#undef B
+	return with_pre(c, p1, with_pre(c, p2, mk_cplx(c, ct, x, y, loc)));
+}
+
+/* -x, ~x (conjugate), +x of a complex x */
+static uint32_t cplx_unary(cc *c, int op, uint32_t n, uint32_t loc)
+{
+	uint32_t re, im, pre;
+	qty t = QUNQ(N(n)->ty);
+
+	if (op == T_PLUS)
+		return n;
+	cplx_parts(c, n, &re, &im, &pre);
+	return with_pre(c, pre, mk_cplx(c, t, op == T_MINUS ? neg(c, re) : re, neg(c, im), loc));
+}
+
+/* ---------------- expressions: operators ---------------- */
+
 
 static bool is_cmp(int op)
 {
@@ -2353,34 +3134,49 @@ static uint32_t binop(cc *c, int op, uint32_t l, uint32_t r, uint32_t loc)
 	qty lt, rt;
 
 	if (op == T_AMPAMP || op == T_PIPEPIPE) {
-		l = decay(c, l), r = decay(c, r);
-		need_scalar(c, l, "logical operator");
-		need_scalar(c, r, "logical operator");
+		l = scalar_cond(c, decay(c, l), "logical operator");
+		r = scalar_cond(c, decay(c, r), "logical operator");
 		return mk2(c, op == T_AMPAMP ? N_LOGAND : N_LOGOR, prim(TY_INT), loc, l, r);
 	}
 	l = rvalue(c, l), r = rvalue(c, r);
 	lt = N(l)->ty, rt = N(r)->ty;
+	if (is_complex(c, lt) || is_complex(c, rt))
+		return cplx_binop(c, op, l, r, loc);
 	if (is_vector(c, lt) || is_vector(c, rt)) {
-		/* lane-wise on two vectors of one size; the result has the left operand's type */
-		qty vt = QUNQ(is_vector(c, lt) ? lt : rt);
+		/* lane-wise: two vectors of one size, or a vector and a scalar (each lane against it);
+		 * comparisons give the signed integer vector of the same lanes (-1 / 0) */
+		qty vt = QUNQ(is_vector(c, lt) ? lt : rt), et = T(c, vt)->base;
+		bool both = is_vector(c, lt) && is_vector(c, rt);
+		bool shift = op == T_LESSLESS || op == T_GREATERGREATER;
+		qty res = vt;
 
-		if (!is_vector(c, lt) || !is_vector(c, rt) || T(c, lt)->size != T(c, rt)->size || is_cmp(op) ||
-		    op == T_PERCENT || (op != T_PLUS && op != T_MINUS && op != T_STAR && op != T_SLASH &&
-					!is_integer(c, T(c, vt)->base)))
-			error(c, loc, "invalid operands to binary expression");
-		return mk_bin(c, op, vt, convert(c, l, vt), convert(c, r, vt), loc);
+		if ((both && T(c, lt)->size != T(c, rt)->size) ||
+		    (!both && !is_arith(c, is_vector(c, lt) ? rt : lt)) ||
+		    ((op == T_PERCENT || op == T_AMP || op == T_PIPE || op == T_CARET || shift) && !is_integer(c, et)))
+			bad_operands(c, l, r, loc);
+		if (both) {
+			l = convert(c, l, vt);
+			r = convert(c, r, both && shift ? QUNQ(rt) : vt);
+		} else if (is_vector(c, lt)) {
+			r = convert(c, r, et);
+		} else {
+			l = convert(c, l, et);
+		}
+		if (is_cmp(op))
+			res = vec_mask_type(c, vt);
+		return mk_bin(c, op, res, l, r, loc);
 	}
 	if (is_arith(c, lt) && is_arith(c, rt)) {
 		qty ct;
 
 		if (op == T_LESSLESS || op == T_GREATERGREATER) {
 			if (!is_integer(c, lt) || !is_integer(c, rt))
-				error(c, loc, "invalid operands to binary expression");
+				bad_operands(c, l, r, loc);
 			return mk_bin(c, op, lt, l, r, loc);
 		}
 		if ((op == T_PERCENT || op == T_AMP || op == T_PIPE || op == T_CARET) &&
 		    (!is_integer(c, lt) || !is_integer(c, rt)))
-			error(c, loc, "invalid operands to binary expression");
+			bad_operands(c, l, r, loc);
 		ct = arith_conv(c, lt, rt);
 		l = convert(c, l, ct), r = convert(c, r, ct);
 		return mk_bin(c, op, is_cmp(op) ? prim(TY_INT) : ct, l, r, loc);
@@ -2404,7 +3200,7 @@ static uint32_t binop(cc *c, int op, uint32_t l, uint32_t r, uint32_t loc)
 			r = convert(c, r, lt);
 		return mk_bin(c, op, prim(TY_INT), l, r, loc);
 	}
-	error(c, loc, "invalid operands to binary expression");
+	bad_operands(c, l, r, loc);
 	return mk_bin(c, op, prim(TY_INT), l, r, loc);
 }
 
@@ -2413,12 +3209,13 @@ static uint32_t assign(cc *c, int op, uint32_t l, uint32_t r, uint32_t loc)
 	qty lt = QUNQ(N(l)->ty);
 	uint32_t n;
 
-	need_lvalue(c, l, "assignment");
-	if (QQ(N(l)->ty) & Q_CONST)
-		error(c, loc, "cannot assign to variable with const-qualified type");
+	need_lvalue(c, l, loc);
+	bounds_warn(c, l, false);
 	r = decay(c, r);
+	if (op && (is_complex(c, lt) || is_complex(c, N(r)->ty)))	/* l = l op r (l evaluated twice) */
+		return assign(c, 0, l, cplx_binop(c, op, rvalue(c, l), rvalue(c, r), loc), loc);
 	if (!op) {
-		r = convert(c, r, lt);
+		r = convert_as(c, r, lt, CX_ASSIGN, loc);
 		n = mk2(c, N_ASSIGN, lt, loc, l, r);
 		return n;
 	}
@@ -2431,10 +3228,10 @@ static uint32_t assign(cc *c, int op, uint32_t l, uint32_t r, uint32_t loc)
 			r = convert(c, r, prim(TY_LONG));
 			pt = lt;
 		} else if (is_vector(c, lt)) {
-			if (!is_vector(c, rt) || T(c, lt)->size != T(c, rt)->size)
+			if (is_vector(c, rt) ? T(c, lt)->size != T(c, rt)->size : !is_arith(c, rt))
 				error(c, loc, "invalid operands to compound assignment");
-			r = convert(c, r, lt);
-			pt = lt;
+			r = convert(c, r, is_vector(c, rt) ? QUNQ(lt) : T(c, lt)->base);
+			pt = QUNQ(lt);
 		} else if (op == T_LESSLESS || op == T_GREATERGREATER) {
 			/* computation type is the promoted lhs */
 		} else if (is_arith(c, pt) && is_arith(c, rt)) {
@@ -2459,7 +3256,11 @@ static uint32_t conditional(cc *c, uint32_t cond, uint32_t a, uint32_t b, uint32
 	ra = a ? rvalue(c, a) : rvalue(c, cond);
 	rb = rvalue(c, b);
 	at = N(ra)->ty, bt = N(rb)->ty;
-	if (is_arith(c, at) && is_arith(c, bt)) {
+	if ((is_complex(c, at) || is_complex(c, bt)) && (is_arith(c, at) || is_complex(c, at)) &&
+	    (is_arith(c, bt) || is_complex(c, bt))) {
+		t = ty_complex(c, arith_conv(c, is_complex(c, at) ? cplx_elem(c, at) : at, is_complex(c, bt) ? cplx_elem(c, bt) : bt));
+		ra = convert(c, ra, t), rb = convert(c, rb, t);
+	} else if (is_arith(c, at) && is_arith(c, bt)) {
 		t = arith_conv(c, at, bt);
 		ra = convert(c, ra, t), rb = convert(c, rb, t);
 	} else if (is_void(c, at) || is_void(c, bt)) {
@@ -2485,7 +3286,7 @@ static uint32_t conditional(cc *c, uint32_t cond, uint32_t a, uint32_t b, uint32
 	} else if (is_ptr(c, bt) && is_integer(c, at)) {
 		t = bt;
 		ra = convert(c, ra, t);
-	} else if (is_record(c, at) && compatible(c, at, bt)) {
+	} else if ((is_record(c, at) || is_vector(c, at)) && compatible(c, at, bt)) {
 		t = QUNQ(at);
 	} else {
 		error(c, loc, "incompatible operand types in conditional expression");
@@ -2534,7 +3335,9 @@ static __attribute__((noinline)) uint32_t member_slow(cc *c, uint32_t base, uint
 	int d;
 
 	if (!is_record(c, bt)) {
-		error(c, loc, "member reference base type is not a structure or union");
+		pp_span r[2] = { rng(c, base), { loc, pp_tok_end(c->p, c->prevloc) } };
+
+		report(c, "error", loc, r, 2, NULL, 0, "member reference base type '%s' is not a structure or union", tyname(c, bt));
 		return mk_int(c, 0, prim(TY_INT), loc);
 	}
 	ti = T(c, bt)->aux;
@@ -2544,7 +3347,9 @@ static __attribute__((noinline)) uint32_t member_slow(cc *c, uint32_t base, uint
 	}
 	d = find_member(c, ti, name, path, 0);
 	if (d < 0) {
-		error(c, loc, "no member named '%.*s'", IDF(name));
+		pp_span r = rng(c, base);
+
+		report(c, "error", c->prevloc, &r, 1, NULL, 0, "no member named '%.*s' in '%s'", IDF(name), tyname(c, bt));
 		return mk_int(c, 0, prim(TY_INT), loc);
 	}
 	for (int i = 0; i < d; i++) {
@@ -2598,7 +3403,9 @@ static uint32_t deref(cc *c, uint32_t p, uint32_t loc)
 
 	p = rvalue(c, p);
 	if (!is_ptr(c, N(p)->ty)) {
-		error(c, loc, "indirection requires pointer operand");
+		pp_span r = rng(c, p);
+
+		report(c, "error", loc, &r, 1, NULL, 0, "indirection requires pointer operand ('%s' invalid)", tyname(c, N(p)->ty));
 		return p;
 	}
 	t = T(c, N(p)->ty)->base;
@@ -2891,6 +3698,89 @@ static uint32_t offsetof_expr(cc *c, uint32_t loc)
 	return res;
 }
 
+/*
+ * GNU __atomic_* calls.  Argument layout (P: pointer to the atomic object
+ * of type T, size 1/2/4/8/16; M: memory order, converted to int):
+ *   load_n(P, M) -> T            store_n(P, T, M)          exchange_n(P, T, M) -> T
+ *   compare_exchange_n(P, T *expected, T desired, bool weak, M, M) -> bool
+ *   load(P, T *ret, M)           store(P, T *val, M)       exchange(P, T *val, T *ret, M)
+ *   compare_exchange(P, T *expected, T *desired, bool weak, M, M) -> bool
+ *   fetch_op / op_fetch(P, T, M) -> T (integers; pointers: bytes, as GCC)
+ */
+static uint32_t atomic_call(cc *c, const builtin *b, uint32_t loc)
+{
+	static const uint8_t nargs[] = {
+		[BI_ATOMIC_LOAD_N - BI_ATOMIC_LOAD_N] = 2, [BI_ATOMIC_STORE_N - BI_ATOMIC_LOAD_N] = 3,
+		[BI_ATOMIC_EXCHANGE_N - BI_ATOMIC_LOAD_N] = 3, [BI_ATOMIC_CMPXCHG_N - BI_ATOMIC_LOAD_N] = 6,
+		[BI_ATOMIC_LOAD - BI_ATOMIC_LOAD_N] = 3, [BI_ATOMIC_STORE - BI_ATOMIC_LOAD_N] = 3,
+		[BI_ATOMIC_EXCHANGE - BI_ATOMIC_LOAD_N] = 4, [BI_ATOMIC_CMPXCHG - BI_ATOMIC_LOAD_N] = 6,
+	};
+	int id = b->id, want = id <= BI_ATOMIC_CMPXCHG ? nargs[id - BI_ATOMIC_LOAD_N] : 3;
+	vec args;
+	qty pt, t, rt = prim(TY_VOID), tp;
+
+	args_list(c, &args);
+	for (uint32_t i = 0; i < args.n; i++)
+		args.v[i] = decay(c, args.v[i]);
+	if (b->sig[0] == 's' && args.n == 2)	/* __sync_*: sequentially consistent */
+		vpush(c, &args, mk_int(c, 5, prim(TY_INT), loc));
+	if ((int)args.n != want) {
+		error(c, loc, "too %s arguments to function call", (int)args.n < want ? "few" : "many");
+		return mk_int(c, 0, prim(TY_INT), loc);
+	}
+	pt = N(args.v[0])->ty;
+	if (!is_ptr(c, pt)) {
+		error(c, loc, "address argument to atomic builtin must be a pointer");
+		return mk_int(c, 0, prim(TY_INT), loc);
+	}
+	t = QUNQ(T(c, pt)->base);
+	tp = ty_ptr(c, t);
+	if (!(T(c, t)->size == 1 || T(c, t)->size == 2 || T(c, t)->size == 4 || T(c, t)->size == 8 || T(c, t)->size == 16)) {
+		error(c, loc, "address argument to atomic builtin must be a pointer to a 1, 2, 4, 8 or 16 byte type");
+		return mk_int(c, 0, prim(TY_INT), loc);
+	}
+	switch (id) {
+	case BI_ATOMIC_LOAD_N:
+		rt = t;
+		break;
+	case BI_ATOMIC_STORE_N:
+		args.v[1] = convert(c, args.v[1], t);
+		break;
+	case BI_ATOMIC_EXCHANGE_N:
+		args.v[1] = convert(c, args.v[1], t);
+		rt = t;
+		break;
+	case BI_ATOMIC_CMPXCHG_N:
+		args.v[1] = convert(c, args.v[1], tp);
+		args.v[2] = convert(c, args.v[2], t);
+		args.v[3] = convert(c, args.v[3], prim(TY_BOOL));
+		rt = prim(TY_BOOL);
+		break;
+	case BI_ATOMIC_LOAD: case BI_ATOMIC_STORE:
+		args.v[1] = convert(c, args.v[1], tp);
+		break;
+	case BI_ATOMIC_EXCHANGE:
+		args.v[1] = convert(c, args.v[1], tp);
+		args.v[2] = convert(c, args.v[2], tp);
+		break;
+	case BI_ATOMIC_CMPXCHG:
+		args.v[1] = convert(c, args.v[1], tp);
+		args.v[2] = convert(c, args.v[2], tp);
+		args.v[3] = convert(c, args.v[3], prim(TY_BOOL));
+		rt = prim(TY_BOOL);
+		break;
+	default:	/* fetch_op / op_fetch */
+		if (!is_integer(c, t) && !is_ptr(c, t))
+			error(c, loc, "address argument to atomic operation must be a pointer to integer or pointer");
+		args.v[1] = convert(c, args.v[1], is_ptr(c, t) ? c->t_ptrdiff : t);
+		rt = t;
+		break;
+	}
+	for (int i = want - (id == BI_ATOMIC_CMPXCHG_N || id == BI_ATOMIC_CMPXCHG ? 2 : 1); i < want; i++)
+		args.v[i] = convert(c, args.v[i], prim(TY_INT));
+	return mk_builtin(c, id, rt, loc, &args);
+}
+
 static uint32_t builtin_call(cc *c, const builtin *b, uint32_t loc)
 {
 	vec args;
@@ -2950,6 +3840,26 @@ static uint32_t builtin_call(cc *c, const builtin *b, uint32_t loc)
 		n = mk_builtin(c, b->id, prim(TY_INT), loc, &args);
 		return n;
 	}
+	case BI_ATOMIC_LOAD_N: case BI_ATOMIC_STORE_N: case BI_ATOMIC_EXCHANGE_N: case BI_ATOMIC_CMPXCHG_N:
+	case BI_ATOMIC_LOAD: case BI_ATOMIC_STORE: case BI_ATOMIC_EXCHANGE: case BI_ATOMIC_CMPXCHG:
+	case BI_ATOMIC_FETCH_ADD: case BI_ATOMIC_FETCH_SUB: case BI_ATOMIC_FETCH_AND: case BI_ATOMIC_FETCH_OR:
+	case BI_ATOMIC_FETCH_XOR: case BI_ATOMIC_ADD_FETCH: case BI_ATOMIC_SUB_FETCH: case BI_ATOMIC_AND_FETCH:
+	case BI_ATOMIC_OR_FETCH: case BI_ATOMIC_XOR_FETCH:
+		return atomic_call(c, b, loc);
+	case BI_CONJ: case BI_CREAL: case BI_CIMAG: {
+		qty ct = ty_complex(c, sigtype(c, b->sig[0]));
+		uint32_t a;
+
+		args_list(c, &args);
+		if (args.n != 1) {
+			error(c, loc, "too %s arguments to function call", args.n ? "many" : "few");
+			return mk_int(c, 0, prim(TY_INT), loc);
+		}
+		a = convert(c, rvalue(c, args.v[0]), ct);
+		if (b->id == BI_CONJ)
+			return cplx_unary(c, T_TILDE, a, loc);
+		return rvalue(c, cplx_part(c, a, b->id == BI_CIMAG));
+	}
 	case BI_COUNTED_BY_REF: {
 		uint32_t m;
 
@@ -2993,7 +3903,15 @@ static uint32_t builtin_call(cc *c, const builtin *b, uint32_t loc)
 		case BI_ISINF_SIGN: case BI_FPCLASSIFY:
 			break;
 		}
-		if (b->id == BI_LIB) {
+		if (b->id == BI_STRLEN) {
+			/* folds when the string is known; otherwise the library call */
+			uint32_t n = mk_builtin(c, b->id, rt, loc, &args);
+			cval cv;
+
+			if (cc_eval(c, n, &cv) && cv.kind == CV_INT)
+				return n;
+		}
+		if (b->id == BI_LIB || b->id == BI_STRLEN) {
 			/* a call to the library function the builtin names */
 			uint32_t s = sym_new(c, S_BUILTIN, 0, ft, loc), fn, n;
 
@@ -3068,9 +3986,28 @@ static uint32_t func_name(cc *c, uint32_t loc)
 
 static __attribute__((noinline, cold, noreturn)) void bad_primary(cc *c, const ptok *t)
 {
-	char b[64];
+	fatal(c, t->loc, "expected expression");
+	abort();
+}
 
-	fatal(c, t->loc, "expected expression before '%s'", tokspell(t, b, sizeof(b)));
+/* a name bound to s (already consumed) */
+static inline __attribute__((always_inline)) uint32_t primary_sym(cc *c, uint32_t s, uint32_t id, uint32_t loc)
+{
+	sym *y = &c->syms[s];
+
+	if (y->kind == S_ENUMCONST)
+		return mk_int(c, y->val, y->ty, loc);
+	if (unlikely(y->kind == S_TYPEDEF))
+		fatal(c, loc, "unexpected type name '%.*s': expected expression", IDF(id));
+	{
+		uint32_t n = mk(c, N_VAR, y->ty, loc);
+
+		N(n)->a = s;
+		N(n)->flags = y->kind == S_VAR ? NF_LVALUE : 0;
+		if (!c->unevaluated && !((y->flags & SF_OVERLOAD) && is(c, T_LPAREN)))
+			y->flags |= SF_USED;
+		return n;
+	}
 }
 
 /* keywords that start a primary expression (the current token) */
@@ -3116,11 +4053,38 @@ static __attribute__((noinline)) uint32_t primary_unbound(cc *c, uint32_t id, ui
 	}
 	if (id == c->id_func || id == c->id_FUNCTION || id == c->id_PRETTY)
 		return func_name(c, loc);
-	if (is(c, T_LPAREN))
-		error(c, loc, "call to undeclared function '%.*s'; ISO C99 and later do not support implicit function declarations", IDF(id));
-	else
-		error(c, loc, "use of undeclared identifier '%.*s'", IDF(id));
-	return mk_int(c, 0, prim(TY_INT), loc);
+	if (is(c, T_LPAREN)) {
+		if (!c->o->implicit_fn)
+			error(c, loc, "call to undeclared function '%.*s'; ISO C99 and later do not support implicit function declarations [-Wimplicit-function-declaration]", IDF(id));
+		if (idlen_(id) == 6 && !memcmp(idstr_(id), "alloca", 6)) {
+			/* clang: an implicitly declared library builtin is the builtin */
+			uint32_t bid = vintern_find("__builtin_alloca", 16, vintern_hash("__builtin_alloca", 16));
+			const builtin *b = bid ? builtin_of(bid) : NULL;
+
+			if (b)
+				return builtin_call(c, b, loc);
+		}
+		{
+			uint32_t fs = implicit_func(c, id, loc);
+			uint32_t n = mk(c, N_VAR, c->syms[fs].ty, loc);
+
+			N(n)->a = fs;
+			c->syms[fs].flags |= SF_USED;
+			return n;
+		}
+	}
+	{
+		uint32_t s = undeclared(c, "use of undeclared identifier", id, loc, false);
+
+		if (s)
+			return primary_sym(c, s, id, loc);	/* clang recovers with the correction */
+	}
+	{
+		uint32_t n = mk_int(c, 0, prim(TY_INT), loc);
+
+		N(n)->flags |= NF_ERR | NF_LVALUE;
+		return n;
+	}
 }
 
 static __attribute__((noinline)) uint32_t stmt_expr(cc *c, uint32_t loc)
@@ -3130,7 +4094,9 @@ static __attribute__((noinline)) uint32_t stmt_expr(cc *c, uint32_t loc)
 
 	if (!c->fn)
 		error(c, loc, "statement expression not allowed at file scope");
+	c->in_stmtexpr++;
 	b = compound_stmt(c, &last);
+	c->in_stmtexpr--;
 	expect(c, T_RPAREN, "')'");
 	n = mk(c, N_STMTEXPR, last, loc);
 	N(n)->a = b;
@@ -3145,12 +4111,26 @@ static uint32_t paren_expr(cc *c, uint32_t loc)
 	if (is(c, T_LBRACE))
 		return stmt_expr(c, loc);
 	n = expr(c);
-	expect(c, T_RPAREN, "')'");
+	if (!is(c, T_RPAREN)) {
+		report(c, "error", tok(c)->loc, NULL, 0, NULL, 0, "expected ')'");
+		note(c, loc, "to match this '('");
+		longjmp(c->bail, 1);
+	}
+	next(c);
 	N(n)->flags |= NF_PAREN;
 	return n;
 }
+static uint32_t primary_(cc *c);
 
 static uint32_t primary(cc *c)
+{
+	uint32_t b = tok(c)->loc, n = primary_(c);
+
+	setspan(c, n, b);
+	return n;
+}
+
+static uint32_t primary_(cc *c)
 {
 	ptok *t = tok(c);
 	uint32_t loc = t->loc;
@@ -3177,23 +4157,8 @@ static uint32_t primary(cc *c)
 			return primary_kw(c, kw, loc);
 		s = lookup(c, id);
 		next(c);
-		if (s) {
-			sym *y = &c->syms[s];
-
-			if (y->kind == S_ENUMCONST)
-				return mk_int(c, y->val, y->ty, loc);
-			if (unlikely(y->kind == S_TYPEDEF))
-				fatal(c, loc, "unexpected type name '%.*s': expected expression", IDF(id));
-			{
-				uint32_t n = mk(c, N_VAR, y->ty, loc);
-
-				N(n)->a = s;
-				N(n)->flags = y->kind == S_VAR ? NF_LVALUE : 0;
-				if (!c->unevaluated && !((y->flags & SF_OVERLOAD) && is(c, T_LPAREN)))
-					y->flags |= SF_USED;
-				return n;
-			}
-		}
+		if (likely(s))
+			return primary_sym(c, s, id, loc);
 		return primary_unbound(c, id, loc);
 	}
 	default:
@@ -3281,6 +4246,7 @@ static __attribute__((noinline)) uint32_t ovl_pick(cc *c, uint32_t head, const v
 
 static __attribute__((noinline)) uint32_t call(cc *c, uint32_t fn, uint32_t loc)
 {
+	uint32_t callee;
 	vec args;
 	qty ft;
 	const ctype *f;
@@ -3299,9 +4265,12 @@ static __attribute__((noinline)) uint32_t call(cc *c, uint32_t fn, uint32_t loc)
 			c->syms[s].flags |= SF_USED;
 	}
 	fn = rvalue(c, fn);
+	callee = fn;
 	ft = N(fn)->ty;
 	if (!is_ptr(c, ft) || !is_func(c, T(c, ft)->base)) {
-		error(c, loc, "called object type is not a function or function pointer");
+		pp_span r = rng(c, fn);
+
+		report(c, "error", loc, &r, 1, NULL, 0, "called object type '%s' is not a function or function pointer", tyname(c, ft));
 		if (!have_args)
 			args_list(c, &args);
 		return mk_int(c, 0, prim(TY_INT), loc);
@@ -3311,17 +4280,58 @@ static __attribute__((noinline)) uint32_t call(cc *c, uint32_t fn, uint32_t loc)
 	if (!have_args)
 		args_list(c, &args);
 	f = T(c, ft);
+	while (N(callee)->op == N_CAST && !c->span[callee].e)
+		callee = N(callee)->a;
 	if (!(f->flags & TF_NOPROTO)) {
-		if (args.n < f->n || (args.n > f->n && !(f->flags & TF_VARIADIC)))
-			error(c, loc, "too %s arguments to function call, expected %u, have %u",
-			      args.n < f->n ? "few" : "many", f->n, args.n);
+		if (args.n < f->n || (args.n > f->n && !(f->flags & TF_VARIADIC))) {
+			const char *v = f->flags & TF_VARIADIC ? "at least " : "";
+			uint32_t fs = N(callee)->op == N_VAR && c->syms[N(callee)->a].kind == S_FUNC ? N(callee)->a : 0;
+			uint32_t p1 = fs && c->syms[fs].psyms && f->n == 1 ? c->lists[c->syms[fs].psyms - 1] : 0;
+			pp_span cr = rng(c, callee);
+
+			if (p1 && !c->syms[p1].name)
+				p1 = 0;
+			if (args.n < f->n) {
+				if (p1)
+					report(c, "error", c->prevloc, &cr, 1, NULL, 0, "too few arguments to function call, single argument '%.*s' was not specified",
+					       IDF(c->syms[p1].name));
+				else
+					report(c, "error", c->prevloc, &cr, 1, NULL, 0, "too few arguments to function call, %sexpected %u, have %u",
+					       v, f->n, args.n);
+			} else {
+				pp_span r[2] = { cr, { rng(c, args.v[f->n]).b, rng(c, args.v[args.n - 1]).e } };
+
+				if (p1)
+					report(c, "error", r[1].b, r, 2, NULL, 0, "too many arguments to function call, expected single argument '%.*s', have %u arguments",
+					       IDF(c->syms[p1].name), args.n);
+				else
+					report(c, "error", r[1].b, r, 2, NULL, 0, "too many arguments to function call, expected %u, have %u",
+					       f->n, args.n);
+			}
+			if (fs) {
+				const sym *y = &c->syms[fs];
+				pp_span pr = { y->plb, y->ple };
+				size_t len;
+				const char *t = y->ple > y->plb ? pp_src(c->p, y->plb, y->ple, &len) : NULL;
+
+				if (t) {
+					while (len && (t[len - 1] == ' ' || t[len - 1] == '\t' || t[len - 1] == '\n'))
+						len--;
+					pr.e = pr.b + (uint32_t)len;
+				}
+				report(c, "note", y->loc, &pr, t && len ? 1 : 0, NULL, 0, "'%.*s' declared here", IDF(y->name));
+			}
+		}
 	}
 	for (uint32_t i = 0; i < args.n; i++) {
 		uint32_t a = args.v[i];
 
 		f = T(c, ft);
 		if (!(f->flags & TF_NOPROTO) && i < f->n) {
-			a = convert(c, decay(c, a), c->params[f->aux + i]);
+			c->cv_fn = N(callee)->op == N_VAR && c->syms[N(callee)->a].kind == S_FUNC ? N(callee)->a : 0;
+			c->cv_arg = i;
+			a = convert_as(c, decay(c, a), c->params[f->aux + i], CX_PASS, loc);
+			c->cv_fn = 0;
 		} else {
 			/* default argument promotions */
 			a = rvalue(c, a);
@@ -3329,6 +4339,39 @@ static __attribute__((noinline)) uint32_t call(cc *c, uint32_t fn, uint32_t loc)
 				a = cast_node(c, a, prim(TY_DOUBLE), CK_F2F);
 		}
 		args.v[i] = a;
+	}
+	if (!c->o->no_builtin && args.n == 1 && N(callee)->op == N_VAR && c->syms[N(callee)->a].kind == S_FUNC &&
+	    (c->syms[N(callee)->a].flags & SF_GLOBAL)) {
+		/* clang: abs, labs and llabs declared with their library types are builtins (inline) */
+		int nl, k = KIND(c, T(c, ft)->base);
+		const char *nm = idname(c->syms[N(callee)->a].name, &nl);
+		int want = nl == 3 && !memcmp(nm, "abs", 3) ? TY_INT : nl == 4 && !memcmp(nm, "labs", 4) ? TY_LONG :
+			   nl == 5 && !memcmp(nm, "llabs", 5) ? TY_LLONG : -1;
+
+		if (k == want && f->n == 1 && KIND(c, c->params[f->aux]) == want) {
+			qty t = prim(want);
+			uint32_t pre, x = cplx_reuse(c, args.v[0], &pre);
+			uint32_t neg = mk_bin(c, T_MINUS, t, mk_int(c, 0, t, loc), x, loc);
+			uint32_t lt = mk_bin(c, T_LESS, prim(TY_INT), x, mk_int(c, 0, t, loc), loc);
+
+			return with_pre(c, pre, conditional(c, lt, neg, x, loc));
+		}
+		/* clang folds the libm functions on a constant (double f(double)) */
+		static const struct { const char *s; double (*f)(double); } mf[] = {
+			{ "sin", sin }, { "cos", cos }, { "tan", tan }, { "exp", exp }, { "log", log }, { "sqrt", sqrt },
+			{ "fabs", fabs }, { "floor", floor }, { "ceil", ceil }, { "log10", log10 }, { "atan", atan },
+		};
+		cval cv;
+
+		if (k == TY_DOUBLE && f->n == 1 && KIND(c, c->params[f->aux]) == TY_DOUBLE &&
+		    cc_eval(c, args.v[0], &cv) && cv.kind == CV_FLT)
+			for (size_t q = 0; q < sizeof(mf) / sizeof(mf[0]); q++)
+				if ((size_t)nl == strlen(mf[q].s) && !memcmp(nm, mf[q].s, (size_t)nl)) {
+					double r = mf[q].f(cv.f);
+
+					if (r == r && (q != 5 || cv.f >= 0) && (q != 4 && q != 9 ? 1 : cv.f > 0))
+						return mk_flt(c, r, prim(TY_DOUBLE), loc);
+				}
 	}
 	n = mk(c, N_CALL, QUNQ(T(c, ft)->base), loc);
 	N(n)->a = fn;
@@ -3339,7 +4382,9 @@ static __attribute__((noinline)) uint32_t call(cc *c, uint32_t fn, uint32_t loc)
 
 static __attribute__((noinline)) uint32_t postfix_ops(cc *c, uint32_t n)
 {
-	for (;;) {
+	uint32_t b0 = c->span[n].e ? c->span[n].b : N(n)->loc;
+
+	for (;; setspan(c, n, b0)) {
 		uint32_t loc = tok(c)->loc;
 
 		switch (tok(c)->kind) {
@@ -3355,6 +4400,8 @@ static __attribute__((noinline)) uint32_t postfix_ops(cc *c, uint32_t n)
 				qty et = QT(QI(T(c, N(n)->ty)->base), QQ(N(n)->ty));
 
 				n = cast_node(c, addr_of(c, n, loc), ty_ptr(c, et), CK_P2P);
+			} else if (is_vector(c, N(n)->ty)) {
+				n = cast_node(c, rvalue(c, n), ty_ptr(c, T(c, N(n)->ty)->base), CK_VADDR);
 			}
 			n = rvalue(c, n), ix = rvalue(c, ix);
 			at = N(n)->ty, it = N(ix)->ty;
@@ -3365,7 +4412,9 @@ static __attribute__((noinline)) uint32_t postfix_ops(cc *c, uint32_t n)
 				at = N(n)->ty, it = N(ix)->ty;
 			}
 			if (!is_ptr(c, at) || !is_integer(c, it)) {
-				error(c, loc, "subscripted value is not an array, pointer, or vector");
+				pp_span r[2] = { rng(c, n), rng(c, ix) };
+
+				report(c, "error", loc, r, 2, NULL, 0, "subscripted value is not an array, pointer, or vector");
 				break;
 			}
 			r = mk2(c, N_INDEX, T(c, at)->base, loc, n, convert(c, ix, prim(TY_LONG)));
@@ -3384,6 +4433,18 @@ static __attribute__((noinline)) uint32_t postfix_ops(cc *c, uint32_t n)
 				uint32_t id = tok(c)->id;
 
 				next(c);
+				if (is_ptr(c, N(n)->ty) && is_record(c, T(c, N(n)->ty)->base)) {
+					/* clang: fix-it '->', then go on as if it were there */
+					pp_span r = rng(c, n);
+					pp_fixit fx = { loc, loc + 1, "->" };
+					pp_span b = c->span[n];
+
+					report(c, "error", loc, &r, 1, &fx, 1, "member reference type '%s' is a pointer; did you mean to use '->'?",
+					       tyname(c, N(n)->ty));
+					n = deref(c, n, loc);
+					if (b.e && !c->span[n].e)
+						c->span[n] = b;
+				}
 				n = member(c, n, id, loc);
 			}
 			continue;
@@ -3395,7 +4456,22 @@ static __attribute__((noinline)) uint32_t postfix_ops(cc *c, uint32_t n)
 				uint32_t id = tok(c)->id;
 
 				next(c);
-				n = member(c, deref(c, n, loc), id, loc);
+				if (is_record(c, N(n)->ty)) {
+					/* clang: fix-it '.', then go on as if it were there */
+					pp_span r[2] = { rng(c, n), { loc, loc + 2 } };
+					pp_fixit fx = { loc, loc + 2, "." };
+
+					report(c, "error", loc, r, 2, &fx, 1, "member reference type '%s' is not a pointer; did you mean to use '.'?",
+					       tyname(c, N(n)->ty));
+					n = member(c, n, id, loc);
+				} else {
+					pp_span b = c->span[n];
+
+					n = deref(c, n, loc);
+					if (b.e && !c->span[n].e)
+						c->span[n] = b;
+					n = member(c, n, id, loc);
+				}
 			}
 			continue;
 		case T_PLUSPLUS:
@@ -3404,7 +4480,7 @@ static __attribute__((noinline)) uint32_t postfix_ops(cc *c, uint32_t n)
 			uint32_t r;
 
 			next(c);
-			need_lvalue(c, n, "increment");
+			need_lvalue(c, n, loc);
 			need_scalar(c, n, "increment");
 			r = mk(c, op, QUNQ(N(n)->ty), loc);
 			N(r)->a = n;
@@ -3428,7 +4504,7 @@ static inline uint32_t postfix(cc *c, uint32_t n)
 
 /* ---------------- expressions: unary, cast, binary ---------------- */
 
-static uint32_t sizeof_type(cc *c, qty t, uint32_t loc, uint32_t e)
+static uint32_t sizeof_type(cc *c, qty t, uint32_t loc, uint32_t e, pp_span r)
 {
 	int k = KIND(c, t);
 
@@ -3441,8 +4517,11 @@ static uint32_t sizeof_type(cc *c, qty t, uint32_t loc, uint32_t e)
 	}
 	if (k == TY_VOID || k == TY_FUNC)
 		return mk_int(c, 1, c->t_size, loc);
-	if (!complete(c, t))
-		error(c, loc, "invalid application of 'sizeof' to an incomplete type");
+	if (!complete(c, t)) {
+		report(c, "error", loc, &r, 1, NULL, 0, "invalid application of 'sizeof' to an incomplete type '%s'", tyname(c, t));
+		if (is_record(c, t) || k == TY_ENUM)
+			note(c, c->tags[T(c, t)->aux].loc, "forward declaration of '%s'", tyname(c, t));
+	}
 	return mk_int(c, (i128)ty_size(c, t), c->t_size, loc);
 }
 
@@ -3466,9 +4545,10 @@ static uint32_t align_of_expr(cc *c, uint32_t e)
 
 static uint32_t unary(cc *c);
 
-/* the operand of sizeof/_Alignof: "( type-name )" gives UINT32_MAX and *ty,
-   anything else the (unevaluated) unary expression; '(' is consumed before looking at the type */
-static uint32_t sizeof_operand(cc *c, qty *ty)
+/* the operand of sizeof/_Alignof: "( type-name )" gives UINT32_MAX, *ty and its
+   span in *r (if r), anything else the (unevaluated) unary expression; '(' is
+   consumed before looking at the type */
+static uint32_t sizeof_operand(cc *c, qty *ty, pp_span *r)
 {
 	uint32_t n;
 
@@ -3479,6 +4559,8 @@ static uint32_t sizeof_operand(cc *c, qty *ty)
 		if (is_type_start(c, tok(c))) {
 			*ty = type_name(c);
 			expect(c, T_RPAREN, "')'");
+			if (r)
+				*r = (pp_span){ ploc, pp_tok_end(c->p, c->prevloc) };
 			return UINT32_MAX;
 		}
 		c->unevaluated++;
@@ -3505,7 +4587,7 @@ static __attribute__((noinline)) uint32_t unary_op(cc *c)
 
 		next(c);
 		n = unary(c);
-		need_lvalue(c, n, "increment");
+		need_lvalue(c, n, t->loc);
 		need_scalar(c, n, "increment");
 		{
 			uint32_t r = mk(c, op, QUNQ(N(n)->ty), loc);
@@ -3517,6 +4599,7 @@ static __attribute__((noinline)) uint32_t unary_op(cc *c)
 	case T_AMP:
 		next(c);
 		n = cast_expr(c);
+		bounds_warn(c, n, true);
 		return addr_of(c, n, loc);
 	case T_STAR:
 		next(c);
@@ -3531,7 +4614,10 @@ static __attribute__((noinline)) uint32_t unary_op(cc *c)
 
 		next(c);
 		n = rvalue(c, cast_expr(c));
-		if (!is_arith(c, N(n)->ty) || (op == T_TILDE && !is_integer(c, N(n)->ty)))
+		if (is_complex(c, N(n)->ty))
+			return cplx_unary(c, op, n, loc);
+		if (is_vector(c, N(n)->ty) ? op == T_TILDE && !is_integer(c, T(c, N(n)->ty)->base)
+		    : !is_arith(c, N(n)->ty) || (op == T_TILDE && !is_integer(c, N(n)->ty)))
 			error(c, loc, "invalid argument type to unary expression");
 		{
 			uint32_t r = mk(c, N_UNARY, N(n)->ty, loc);
@@ -3545,8 +4631,7 @@ static __attribute__((noinline)) uint32_t unary_op(cc *c)
 		uint32_t r;
 
 		next(c);
-		n = rvalue(c, cast_expr(c));
-		need_scalar(c, n, "'!'");
+		n = scalar_cond(c, rvalue(c, cast_expr(c)), "'!'");
 		r = mk(c, N_UNARY, prim(TY_INT), loc);
 		N(r)->aux = T_EXCLAIM;
 		N(r)->a = n;
@@ -3570,9 +4655,10 @@ static __attribute__((noinline)) uint32_t unary_op(cc *c)
 	switch (kw) {
 	case KW_sizeof: {
 		qty ty;
+		pp_span r;
 
 		next(c);
-		n = sizeof_operand(c, &ty);
+		n = sizeof_operand(c, &ty, &r);
 		if (n == UINT32_MAX) {
 			if (is(c, T_LBRACE)) {	/* sizeof (T){...} */
 				uint32_t init, s, cl;
@@ -3582,13 +4668,13 @@ static __attribute__((noinline)) uint32_t unary_op(cc *c)
 				cl = mk2(c, N_COMPLIT, ty, loc, init, s);
 				N(cl)->flags = NF_LVALUE;
 				n = postfix(c, cl);
-				return sizeof_type(c, N(n)->ty, loc, n);
+				return sizeof_type(c, N(n)->ty, loc, n, rng(c, n));
 			}
-			return sizeof_type(c, ty, loc, 0);
+			return sizeof_type(c, ty, loc, 0, r);
 		}
 		if (bitfield_of(c, n))
 			error(c, loc, "invalid application of 'sizeof' to bit-field");
-		return sizeof_type(c, N(n)->ty, loc, n);
+		return sizeof_type(c, N(n)->ty, loc, n, rng(c, n));
 	}
 	case KW__Alignof:
 	case KW___alignof__:
@@ -3596,7 +4682,7 @@ static __attribute__((noinline)) uint32_t unary_op(cc *c)
 		qty ty;
 
 		next(c);
-		n = sizeof_operand(c, &ty);
+		n = sizeof_operand(c, &ty, NULL);
 		if (n == UINT32_MAX) {
 			while (is_array(c, ty))
 				ty = T(c, ty)->base;
@@ -3607,13 +4693,21 @@ static __attribute__((noinline)) uint32_t unary_op(cc *c)
 	case KW___extension__:
 		next(c);
 		return cast_expr(c);
-	case KW___real__:
-	case KW___imag__:
+	case KW___real__: case KW___real:
+	case KW___imag__: case KW___imag: {
+		bool im = kw == KW___imag__ || kw == KW___imag;
+
 		next(c);
 		n = cast_expr(c);
-		if (kw == KW___imag__)
-			return mk_int(c, 0, QUNQ(N(n)->ty), loc);
+		if (is_complex(c, N(n)->ty))
+			return cplx_part(c, n, im);
+		n = rvalue(c, n);
+		if (!is_arith(c, N(n)->ty))
+			error(c, loc, "invalid type '%s' to %s operator", "", im ? "__imag" : "__real");
+		if (im)	/* of a real value: 0 (the operand still evaluated) */
+			return mk2(c, N_COMMA, QUNQ(N(n)->ty), loc, n, zero_of(c, N(n)->ty, loc));
 		return n;
+	}
 	default:
 		return postfix(c, primary(c));
 	}
@@ -3622,24 +4716,30 @@ static __attribute__((noinline)) uint32_t unary_op(cc *c)
 static uint32_t unary(cc *c)
 {
 	const ptok *t = tok(c);
+	uint32_t b = t->loc, n;
 
 	switch (t->kind) {
 	case T_PLUSPLUS: case T_MINUSMINUS: case T_AMP: case T_STAR: case T_PLUS: case T_MINUS:
 	case T_TILDE: case T_EXCLAIM: case T_AMPAMP:
-		return unary_op(c);
+		n = unary_op(c);
+		break;
 	case T_IDENT:
 		switch (kwof(t)) {
 		case KW_sizeof: case KW__Alignof: case KW___alignof__: case KW___alignof:
-		case KW___extension__: case KW___real__: case KW___imag__:
-			return unary_op(c);
+		case KW___extension__: case KW___real__: case KW___real: case KW___imag__: case KW___imag:
+			n = unary_op(c);
+			break;
 		default:
+			n = postfix(c, primary(c));
 			break;
 		}
 		break;
 	default:
+		n = postfix(c, primary(c));
 		break;
 	}
-	return postfix(c, primary(c));
+	setspan(c, n, b);	/* the whole unary expression, for diagnostics */
+	return n;
 }
 
 static uint32_t explicit_cast(cc *c, uint32_t n, qty to, uint32_t loc)
@@ -3657,6 +4757,26 @@ static uint32_t explicit_cast(cc *c, uint32_t n, qty to, uint32_t loc)
 	}
 	if (is_vector(c, to) && is_vector(c, N(n)->ty) && T(c, to)->size == T(c, N(n)->ty)->size)
 		return cast_node(c, n, QUNQ(to), CK_NOP);
+	if (is_vector(c, to) != is_vector(c, N(n)->ty) && (is_vector(c, to) || is_scalar(c, to))) {
+		/* GNU: a vector and a scalar of the same size reinterpret the bits */
+		uint32_t from = rvalue(c, n);
+
+		if (ty_size(c, to) != ty_size(c, N(from)->ty) || (!is_vector(c, to) && !is_arith(c, to) && !is_ptr(c, to))) {
+			error(c, loc, "invalid conversion between vector type and scalar type");
+			return n;
+		}
+		return cast_node(c, from, QUNQ(to), is_vector(c, to) ? CK_UNION : CK_VBITS);
+	}
+	if (is_complex(c, to) || (is_complex(c, N(n)->ty) && is_arith(c, to))) {
+		uint32_t r;
+
+		if (!is_arith(c, N(n)->ty) && !is_complex(c, N(n)->ty)) {
+			error(c, loc, "used type where arithmetic or pointer type is required");
+			return n;
+		}
+		r = convert(c, rvalue(c, n), QUNQ(to));
+		return r;
+	}
 	if (!is_scalar(c, to) && !compatible(c, to, N(n)->ty)) {
 		error(c, loc, "used type where arithmetic or pointer type is required");
 		return n;
@@ -3664,6 +4784,15 @@ static uint32_t explicit_cast(cc *c, uint32_t n, qty to, uint32_t loc)
 	if (is_integer(c, N(n)->ty))
 		n = rvalue(c, n);
 	k = conv_kind(c, N(n)->ty, QUNQ(to), n);
+	if (k < 0 && is_scalar(c, to) && !is_scalar(c, N(n)->ty)) {
+		pp_span r = rng(c, n);
+
+		report(c, "error", r.b, &r, 1, NULL, 0, "operand of type '%s' where arithmetic or pointer type is required",
+		       tyname(c, N(n)->ty));
+		n = mk_int(c, 0, QUNQ(to), loc);
+		N(n)->flags |= NF_ERR;
+		return n;
+	}
 	if (k < 0) {
 		error(c, loc, "invalid cast");
 		return n;
@@ -3705,16 +4834,20 @@ static __attribute__((noinline)) uint32_t cast_paren(cc *c, uint32_t loc)
 
 static uint32_t cast_expr(cc *c)
 {
+	uint32_t b = tok(c)->loc, n;
+
 	if (is(c, T_LPAREN)) {
 		/* consumed first: no lookahead token to shift out later */
-		uint32_t loc = tok(c)->loc;
-
 		next(c);
 		if (is_type_start(c, tok(c)))
-			return cast_paren(c, loc);
-		return postfix(c, paren_expr(c, loc));
+			n = cast_paren(c, b);
+		else
+			n = postfix(c, paren_expr(c, b));
+	} else {
+		n = unary(c);
 	}
-	return unary(c);
+	setspan(c, n, b);	/* the whole cast expression, for diagnostics */
+	return n;
 }
 
 static int binprec(int k)
@@ -3734,9 +4867,31 @@ static int binprec(int k)
 	}
 }
 
+/* -Wdivision-by-zero, -Wshift-count-*: l op r with a constant r */
+static void runtime_warn(cc *c, int op, uint32_t l, uint32_t r, uint32_t loc)
+{
+	cval cv;
+	pp_span rr;
+
+	if (c->dead || (op != T_SLASH && op != T_PERCENT && op != T_LESSLESS && op != T_GREATERGREATER) ||
+	    !is_integer(c, N(l)->ty) || !is_integer(c, N(r)->ty) || !cc_eval(c, r, &cv) || cv.kind != CV_INT)
+		return;
+	rr = rng(c, r);
+	if (op == T_SLASH || op == T_PERCENT) {
+		if (!cv.i)
+			warnx(c, "division-by-zero", true, NULL, loc, &rr, 1, NULL, 0, "%s by zero is undefined",
+			      op == T_SLASH ? "division" : "remainder");
+		return;
+	}
+	if (cv.i < 0)
+		warnx(c, "shift-count-negative", true, NULL, loc, &rr, 1, NULL, 0, "shift count is negative");
+	else if (cv.i >= (i128)ty_size(c, promoted(c, l)) * 8)
+		warnx(c, "shift-count-overflow", true, NULL, loc, &rr, 1, NULL, 0, "shift count >= width of type");
+}
+
 static uint32_t binary(cc *c, int minp);
 
-static __attribute__((noinline)) uint32_t binary_ops(cc *c, int minp, uint32_t l)
+static __attribute__((noinline)) uint32_t binary_ops(cc *c, int minp, uint32_t l, uint32_t b)
 {
 	for (;;) {
 		int op = tok(c)->kind, p = binprec(op);
@@ -3744,21 +4899,36 @@ static __attribute__((noinline)) uint32_t binary_ops(cc *c, int minp, uint32_t l
 
 		if (!p || p < minp)
 			return l;
+		bool mac = tok(c)->flags & PF_MACRO;
+
 		loc = tok(c)->loc;
 		next(c);
-		r = binary(c, p + 1);
+		{
+			/* 0 && r, 1 || r: r is not evaluated (no runtime-behaviour warnings) */
+			cval cv;
+			bool dead = (op == T_AMPAMP || op == T_PIPEPIPE) && cc_eval(c, l, &cv) && cv.kind == CV_INT &&
+				    (cv.i != 0) == (op == T_PIPEPIPE);
+
+			c->dead += dead;
+			r = binary(c, p + 1);
+			c->dead -= dead;
+		}
+		runtime_warn(c, op, l, r, loc);
 		l = binop(c, op, l, r, loc);
+		if (mac)
+			N(l)->flags |= NF_MACRO;
+		setspan(c, l, b);
 	}
 }
 
 static uint32_t binary(cc *c, int minp)
 {
-	uint32_t l = cast_expr(c);
+	uint32_t b = tok(c)->loc, l = cast_expr(c);
 	int p = binprec(tok(c)->kind);
 
 	if (likely(!p || p < minp))
 		return l;
-	return binary_ops(c, minp, l);
+	return binary_ops(c, minp, l, b);
 }
 
 static __attribute__((noinline)) uint32_t cond_rest(cc *c, uint32_t cnd)
@@ -3766,12 +4936,20 @@ static __attribute__((noinline)) uint32_t cond_rest(cc *c, uint32_t cnd)
 	{
 		uint32_t loc = tok(c)->loc, a = 0, b;
 
+		cval cv;
+		int k;
+
 		next(c);
-		need_scalar(c, decay(c, cnd), "conditional");
+		cnd = scalar_cond(c, decay(c, cnd), "conditional");
+		k = cc_eval(c, cnd, &cv) && cv.kind == CV_INT ? cv.i != 0 : -1;
+		c->dead += k == 0;
 		if (!is(c, T_COLON))
 			a = expr(c);
+		c->dead -= k == 0;
 		expect(c, T_COLON, "':'");
+		c->dead += k == 1;
 		b = cond_expr(c);
+		c->dead -= k == 1;
 		return conditional(c, cnd, a, b, loc);
 	}
 }
@@ -3806,10 +4984,14 @@ static int assign_op(int k)
 static __attribute__((noinline)) uint32_t assign_rest(cc *c, uint32_t l, int op)
 {
 	uint32_t loc = tok(c)->loc, r;
+	bool mac = tok(c)->flags & PF_MACRO;
 
 	next(c);
 	r = assign_expr(c);
-	return assign(c, op < 0 ? 0 : op, l, r, loc);
+	r = assign(c, op < 0 ? 0 : op, l, r, loc);
+	if (mac)
+		N(r)->flags |= NF_MACRO;
+	return r;
 }
 
 static uint32_t assign_expr(cc *c)
@@ -3864,7 +5046,7 @@ enum {
 	A_NONE, A_ALIGNED, A_PACKED, A_SECTION, A_MODE, A_CLEANUP, A_ALIAS, A_WEAK, A_USED, A_UNUSED,
 	A_NORETURN, A_ALWAYS_INLINE, A_NOINLINE, A_GNU_INLINE, A_TRANSPARENT_UNION, A_VISIBILITY,
 	A_CONSTRUCTOR, A_DESTRUCTOR, A_COUNTED_BY, A_VECTOR_SIZE, A_COLD, A_NONSTRING, A_MAY_ALIAS,
-	A_WEAKREF, A_NAKED, A_NOCF, A_ERROR, A_OVERLOADABLE,
+	A_WEAKREF, A_NAKED, A_NOCF, A_ERROR, A_OVERLOADABLE, A_NOINSTR,
 	A_COUNT
 };
 
@@ -3876,7 +5058,7 @@ static const char *const attr_names[A_COUNT] = {
 	[A_VISIBILITY] = "visibility", [A_CONSTRUCTOR] = "constructor", [A_DESTRUCTOR] = "destructor",
 	[A_COUNTED_BY] = "counted_by", [A_VECTOR_SIZE] = "vector_size", [A_COLD] = "cold",
 	[A_NONSTRING] = "nonstring", [A_MAY_ALIAS] = "may_alias", [A_WEAKREF] = "weakref",
-	[A_NAKED] = "naked", [A_NOCF] = "nocf_check", [A_ERROR] = "error",
+	[A_NOINSTR] = "no_instrument_function", [A_NAKED] = "naked", [A_NOCF] = "nocf_check", [A_ERROR] = "error",
 	[A_OVERLOADABLE] = "overloadable",
 };
 
@@ -3969,21 +5151,57 @@ static inline bool at_attribute(cc *c)
 	return kw == KW___attribute__ || kw == KW___attribute;
 }
 
+/* C23 "[[" starts an attribute specifier */
+static inline bool at_std_attr(cc *c)
+{
+	return is(c, T_LSQUARE) && peek(c, 1)->kind == T_LSQUARE;
+}
+
+/* GNU __attribute__((...)) and C23 [[...]] (gnu::name is the GNU attribute) */
 __attribute__((noinline)) static void attribute_list_(cc *c, attrs *a)
 {
-	while (at_attribute(c)) {
+	for (;;) {
+		bool std = at_std_attr(c);
+		int close = std ? T_RSQUARE : T_RPAREN;
+		const char *cs = std ? "']'" : "')'";
+
+		if (!std && !iskw(c, KW___attribute__) && !iskw(c, KW___attribute))
+			break;
 		next(c);
-		expect(c, T_LPAREN, "'('");
-		expect(c, T_LPAREN, "'('");
-		while (!is(c, T_RPAREN)) {
+		if (std) {
+			next(c);
+		} else {
+			expect(c, T_LPAREN, "'('");
+			expect(c, T_LPAREN, "'('");
+		}
+		while (!is(c, close)) {
 			ptok *t = tok(c);
 			int an;
 			uint32_t loc = t->loc;
 
 			if (accept(c, T_COMMA))
 				continue;
-			if (t->kind != T_IDENT)
+			if (t->kind != T_IDENT && !(std && kwof(t)))
 				fatal(c, loc, "expected attribute name");
+			if (std && peek(c, 1)->kind == T_COLONCOLON) {
+				/* vendor::name: gnu and clang name GNU attributes, others are ignored */
+				const vident *ns = &vintern_ents[t->id];
+				bool gnu = (ns->len == 3 && !memcmp(ns->s, "gnu", 3)) || (ns->len == 7 && !memcmp(ns->s, "__gnu__", 7)) ||
+					   (ns->len == 5 && !memcmp(ns->s, "clang", 5));
+
+				next(c);
+				next(c);
+				t = tok(c);
+				loc = t->loc;
+				if (t->kind != T_IDENT && !kwof(t))
+					fatal(c, loc, "expected attribute name");
+				if (!gnu) {
+					next(c);
+					if (is(c, T_LPAREN))
+						skip_balanced(c);
+					continue;
+				}
+			}
 			an = attr_of(t->id);
 			if (!an && kwof(t) == KW_const)
 				an = A_NONE;
@@ -4051,7 +5269,7 @@ __attribute__((noinline)) static void attribute_list_(cc *c, attrs *a)
 				expect(c, T_LPAREN, "'('");
 				const_expr(c, &v, NULL);
 				expect(c, T_RPAREN, "')'");
-				if (v <= 0 || (v & (v - 1)) || v > 64)
+				if (v <= 0 || (v & (v - 1)) || v > 1024)
 					error(c, loc, "invalid vector size");
 				else
 					a->vecsize = (uint32_t)v;
@@ -4064,6 +5282,7 @@ __attribute__((noinline)) static void attribute_list_(cc *c, attrs *a)
 			case A_NORETURN: a->noreturn = 1; break;
 			case A_ALWAYS_INLINE: a->always_inline = 1; break;
 			case A_NOINLINE: a->noinline = 1; break;
+			case A_NOINSTR: a->noinstr = 1; break;
 			case A_OVERLOADABLE: a->overloadable = 1; break;
 			case A_GNU_INLINE: a->gnu_inline = 1; break;
 			case A_TRANSPARENT_UNION: a->transparent = 1; break;
@@ -4078,21 +5297,21 @@ __attribute__((noinline)) static void attribute_list_(cc *c, attrs *a)
 			if (is(c, T_LPAREN))
 				skip_balanced(c);
 		}
-		expect(c, T_RPAREN, "')'");
-		expect(c, T_RPAREN, "')'");
+		expect(c, close, cs);
+		expect(c, close, cs);
 	}
 }
 
 /* most declarators have none: keep the check inline */
 static inline void attribute_list(cc *c, attrs *a)
 {
-	if (at_attribute(c))
+	if (at_attribute(c) || at_std_attr(c))
 		attribute_list_(c, a);
 }
 
-/* the 0/1 flags packed .. overloadable are 17 contiguous bytes after the u32 fields */
+/* the 0/1 flags packed .. noinstr are 18 contiguous bytes after the u32 fields */
 _Static_assert(offsetof(attrs, packed) == 10 * sizeof(uint32_t) &&
-	       offsetof(attrs, overloadable) == offsetof(attrs, packed) + 16, "attrs layout");
+	       offsetof(attrs, noinstr) == offsetof(attrs, packed) + 17, "attrs layout");
 
 /* no attribute at all (padding excluded) */
 static inline bool attrs_empty(const attrs *a)
@@ -4103,7 +5322,7 @@ static inline bool attrs_empty(const attrs *a)
 	memcpy(w, p, sizeof(w));
 	for (int i = 0; i < 7; i++)
 		o |= w[i];
-	return !o && !p[56];
+	return !o && !p[56] && !p[57];
 }
 
 static void merge_attrs(attrs *to, const attrs *from)
@@ -4120,7 +5339,7 @@ static void merge_attrs(attrs *to, const attrs *from)
 	if (from->vecsize) to->vecsize = from->vecsize;
 	if (from->counted_by) to->counted_by = from->counted_by;
 	if (from->visibility) to->visibility = from->visibility;
-	/* the 0/1 flags packed .. overloadable: or them bytewise */
+	/* the 0/1 flags packed .. noinstr: or them bytewise */
 	{
 		char *t = (char *)&to->packed;
 		const char *f = (const char *)&from->packed;
@@ -4128,7 +5347,7 @@ static void merge_attrs(attrs *to, const attrs *from)
 
 		memcpy(&a, t, 8), memcpy(&b, f, 8), a |= b, memcpy(t, &a, 8);
 		memcpy(&a, t + 8, 8), memcpy(&b, f + 8, 8), a |= b, memcpy(t + 8, &a, 8);
-		t[16] |= f[16];
+		t[16] |= f[16], t[17] |= f[17];
 	}
 }
 
@@ -4159,6 +5378,19 @@ typedef struct dspec {
 } dspec;
 
 static bool decl_specs(cc *c, dspec *ds, bool allow_sc);
+
+/* an identifier where a type name must be: clang's "unknown type name" (with typo
+   correction among the typedefs), then on as if it were the correction (or int) */
+static void unknown_type(cc *c, dspec *ds)
+{
+	uint32_t loc = tok(c)->loc, s = undeclared(c, "unknown type name", tok(c)->id, loc, true);
+
+	next(c);
+	memset(ds, 0, sizeof(*ds));
+	ds->ty = s ? c->syms[s].ty : prim(TY_INT);
+	ds->loc = loc;
+	ds->has_type = true;
+}
 static qty apply_declarator(cc *c, qty base, uint32_t first, uint32_t nops);
 
 static bool is_type_start(cc *c, const ptok *t)
@@ -4235,30 +5467,66 @@ static uint32_t tag_lookup_or_new(cc *c, int kind, uint32_t name, uint32_t loc, 
 
 static void static_assert_decl(cc *c)
 {
-	uint32_t loc = tok(c)->loc, n;
+	uint32_t loc = tok(c)->loc, n, e;
 	i128 v;
+	char msg[256] = "";
 
 	next(c);
 	expect(c, T_LPAREN, "'('");
-	n = rvalue(c, assign_expr(c));
+	e = assign_expr(c);
+	n = rvalue(c, e);
 	if (!const_int(c, n, &v)) {
 		error(c, loc, "static assertion expression is not an integral constant expression");
 		v = 1;
 	}
 	if (accept(c, T_COMMA)) {
-		if (!v) {
+		size_t k = 0;
+
+		while (is_strtok(tok(c)->kind)) {
 			char b[256];
+			size_t l;
 
 			tokspell(tok(c), b, sizeof(b));
-			error(c, loc, "static assertion failed: %s", b);
-		}
-		while (is_strtok(tok(c)->kind))
+			l = strlen(b);
+			/* the literal's text without its quotes (escapes as written) */
+			if (l >= 2 && b[l - 1] == '"') {
+				const char *q = strchr(b, '"') + 1;
+
+				l = (size_t)(b + l - 1 - q);
+				if (k + l < sizeof(msg))
+					memcpy(msg + k, q, l), k += l;
+			}
 			next(c);
-	} else if (!v) {
-		error(c, loc, "static assertion failed");
+		}
+		msg[k] = 0;
+	}
+	if (!v) {
+		pp_span r = rng(c, e);
+		size_t len = 0;
+		const char *t = pp_src(c->p, r.b, r.e, &len);
+
+		if (!t)
+			t = "", len = 0;
+		report(c, "error", r.b, &r, 1, NULL, 0, "static assertion failed due to requirement '%.*s'%s%s",
+		       (int)len, t, msg[0] ? ": " : "", msg);
+		while (N(e)->op == N_CAST && !c->span[e].e)
+			e = N(e)->a;
+		if (N(e)->op == N_BINARY && is_cmp(N(e)->aux)) {
+			i128 a, b;
+
+			if (const_int(c, N(e)->a, &a) && const_int(c, N(e)->b, &b)) {
+				pp_span rr[2] = { r, r };
+				size_t ol;
+				const char *op = pp_src(c->p, N(e)->loc, pp_tok_end(c->p, N(e)->loc), &ol);
+
+				if (op)
+					report(c, "note", N(e)->loc, rr, 2, NULL, 0, "expression evaluates to '%lld %.*s %lld'",
+					       (long long)a, (int)ol, op, (long long)b);
+			}
+		}
 	}
 	expect(c, T_RPAREN, "')'");
-	expect(c, T_SEMI, "';'");
+	expect_semi(c, "after static_assert");
 }
 
 typedef struct dop {
@@ -4266,12 +5534,16 @@ typedef struct dop {
 	uint8_t q;		/* ptr quals / array param quals */
 	uint16_t fl;		/* array: TF_*; func: TF_* */
 	uint32_t a, b;		/* array: length lo/hi or vla node; func: params start, count */
+	uint32_t np;		/* func: parameter syms (after the types; K&R: no types) */
+	bool kr;		/* func: K&R identifier list */
 } dop;
 
 typedef struct declr {
 	uint32_t name, loc;
 	attrs at;
 	uint32_t psyms, npsyms;	/* the outermost function declarator's parameter syms (list) */
+	uint32_t plb, ple;	/* ... its parameter list: first token, the ')' */
+	bool kr;		/* ... from a K&R identifier list (types follow the declarator) */
 	bool has_func;
 } declr;
 
@@ -4342,6 +5614,10 @@ static bool decl_specs(cc *c, dspec *ds, bool allow_sc)
 		ptok *t = tok(c);
 		int kw = kwof(t);
 
+		if (at_std_attr(c)) {
+			attribute_list(c, &ds->at);
+			continue;
+		}
 		if (!kw) {
 			if (is_nullability(c, t)) {
 				next(c);
@@ -4449,7 +5725,7 @@ static bool decl_specs(cc *c, dspec *ds, bool allow_sc)
 			sgn = -1;
 			any = true;
 			break;
-		case KW__Complex:
+		case KW__Complex: case KW___complex__: case KW___complex:
 			cplx = true;
 			any = true;
 			break;
@@ -4471,6 +5747,7 @@ static bool decl_specs(cc *c, dspec *ds, bool allow_sc)
 			attribute_list(c, &pre);
 			if (is(c, T_IDENT) && !kwof(tok(c))) {
 				name = tok(c)->id;
+				loc = tok(c)->loc;
 				next(c);
 			}
 			body = is(c, T_LBRACE) || (kind == TY_ENUM && is(c, T_COLON));
@@ -4478,8 +5755,10 @@ static bool decl_specs(cc *c, dspec *ds, bool allow_sc)
 			if (body) {
 				tag *r = &c->tags[ti];
 
-				if (r->flags & RF_COMPLETE)
+				if (r->flags & RF_COMPLETE) {
 					error(c, loc, "redefinition of '%.*s'", IDF(name));
+					note(c, r->loc, "previous definition is here");
+				}
 				if (kind == TY_ENUM) {
 					merge_attrs(&post, &pre);
 					enum_body(c, ti, &post);
@@ -4526,11 +5805,18 @@ done:
 	} else if (base == KW_double) {
 		ds->ty = prim(nlong ? TY_LDOUBLE : TY_DOUBLE);
 	} else {
-		if (!any && !pp_in_system_header(c->p, ds->loc))
+		if (!any && !c->o->implicit_int && !pp_in_system_header(c->p, ds->loc))
 			error(c, ds->loc, "type specifier missing, defaults to 'int'; ISO C99 and later do not support implicit int");
 		ds->ty = int_type(c, nlong, sgn, base, ds->loc);
 	}
-	(void)cplx;
+	if (cplx) {
+		if (!base && !nlong && !sgn && !have_named)
+			ds->ty = prim(TY_DOUBLE);	/* plain _Complex: double (GNU) */
+		if (!is_arith(c, ds->ty))
+			error(c, ds->loc, "_Complex requires an arithmetic element type");
+		else
+			ds->ty = ty_complex(c, ds->ty);
+	}
 	if (ds->at.mode) {
 		int k = mode_kind(c, ds->at.mode, is_signed(c, ds->ty));
 
@@ -4538,6 +5824,8 @@ done:
 			ds->ty = prim(k);
 	}
 	ds->ty = qualify(c, ds->ty, q);
+	if (ds->inline_ && c->o->gnu89_inline)
+		ds->at.gnu_inline = 1;	/* -std=gnu89: gnu_inline semantics */
 	return true;
 }
 
@@ -4551,10 +5839,29 @@ static void param_list(cc *c, dop *op)
 	vinit(&ptys);
 	vinit(&psyms);
 	scope_open(c);
+	op->kr = false;
 	if (is(c, T_RPAREN)) {
 		fl |= TF_NOPROTO;
 	} else if (iskw(c, KW_void) && peek(c, 1)->kind == T_RPAREN) {
 		next(c);
+	} else if (is(c, T_IDENT) && !kwof(tok(c)) && !is_typedef_name(c, tok(c)) &&
+		   (peek(c, 1)->kind == T_COMMA || peek(c, 1)->kind == T_RPAREN)) {
+		/* K&R identifier list: int for now, the declarations before the body set the types */
+		fl |= TF_NOPROTO;
+		op->kr = true;
+		for (;;) {
+			uint32_t s;
+
+			if (!is(c, T_IDENT) || kwof(tok(c)))
+				fatal(c, tok(c)->loc, "expected identifier");
+			s = sym_new(c, S_VAR, tok(c)->id, prim(TY_INT), tok(c)->loc);
+			c->syms[s].flags |= SF_PARAM;
+			c->syms[s].sc = SC_AUTO;
+			vpush(c, &psyms, s);
+			next(c);
+			if (!accept(c, T_COMMA))
+				break;
+		}
 	} else {
 		for (;;) {
 			dspec ds;
@@ -4573,7 +5880,7 @@ static void param_list(cc *c, dop *op)
 					ds.ty = prim(TY_INT);
 					ds.loc = tok(c)->loc;
 				} else if (is(c, T_IDENT)) {
-					fatal(c, tok(c)->loc, "unknown type name '%.*s'", IDF(tok(c)->id));
+					unknown_type(c, &ds);
 				} else {
 					fatal(c, tok(c)->loc, "expected parameter declarator");
 				}
@@ -4583,10 +5890,15 @@ static void param_list(cc *c, dop *op)
 			t = apply_declarator(c, ds.ty, first, nops);
 			c->ndops = first;
 			/* adjustments (C11 6.7.6.3p7-8) */
+			uint32_t vsize = 0;
+
 			if (is_array(c, t)) {
 				const dop *ad = nops ? &c->dops[first + nops - 1] : NULL;
 				int q = ad && ad->kind == 1 ? ad->q : 0;
 
+				/* int a[n++]: the size is still evaluated on entry (function_def) */
+				if ((T(c, t)->flags & TF_VLA) && T(c, t)->n && has_side_effects(c, T(c, t)->n))
+					vsize = T(c, t)->n;
 				t = QT(QI(ty_ptr(c, T(c, t)->base)), q);
 			} else if (is_func(c, t)) {
 				t = ty_ptr(c, t);
@@ -4594,6 +5906,7 @@ static void param_list(cc *c, dop *op)
 			vpush(c, &ptys, t);
 			s = sym_new(c, S_VAR, d.name, t, d.loc ? d.loc : ds.loc);
 			c->syms[s].flags |= SF_PARAM;
+			c->syms[s].body = vsize;	/* parameters: a decayed VLA's size expression with side effects */
 			c->syms[s].sc = ds.sc == SC_REGISTER ? SC_REGISTER : SC_AUTO;
 			bind(c, s);
 			vpush(c, &psyms, s);
@@ -4607,11 +5920,12 @@ static void param_list(cc *c, dop *op)
 	op->fl = (uint16_t)fl;
 	op->a = vfreeze(c, &ptys);
 	op->b = ptys.n;
+	op->np = psyms.n;
 	/* the parameter syms follow the types */
 	vfreeze(c, &psyms);
 }
 
-static void array_suffix(cc *c, dop *op)
+static void array_suffix(cc *c, dop *op, uint32_t name)
 {
 	int q = 0;
 
@@ -4659,7 +5973,12 @@ static void array_suffix(cc *c, dop *op)
 			return;
 		}
 		if (v < 0) {
-			error(c, N(n)->loc, "array has negative size");
+			pp_span r = rng(c, n);
+
+			if (name)
+				report(c, "error", r.b, &r, 1, NULL, 0, "'%.*s' declared as an array with a negative size", IDF(name));
+			else
+				report(c, "error", r.b, &r, 1, NULL, 0, "array size is negative");
 			v = 1;
 		}
 		op->a = (uint32_t)(uint64_t)v;
@@ -4744,7 +6063,8 @@ static void declarator(cc *c, declr *d, bool abstract_ok, uint32_t *first, uint3
 		d->loc = id.loc;
 		merge_attrs(&d->at, &id.at);
 		if (id.has_func) {
-			d->psyms = id.psyms, d->npsyms = id.npsyms, d->has_func = true;
+			d->psyms = id.psyms, d->npsyms = id.npsyms, d->kr = id.kr, d->has_func = true;
+			d->plb = id.plb, d->ple = id.ple;
 		}
 		inner = true;
 	} else if (is(c, T_IDENT) && !kwof(tok(c))) {
@@ -4761,17 +6081,22 @@ static void declarator(cc *c, declr *d, bool abstract_ok, uint32_t *first, uint3
 		if (accept(c, T_LSQUARE)) {
 			if (ns >= 64)
 				fatal(c, tok(c)->loc, "declarator too complex");
-			array_suffix(c, &sufs[ns++]);
+			array_suffix(c, &sufs[ns++], d->name);
 		} else if (is(c, T_LPAREN)) {
+			uint32_t plb;
+
 			next(c);
+			plb = tok(c)->loc;
 			if (ns >= 64)
 				fatal(c, tok(c)->loc, "declarator too complex");
 			param_list(c, &sufs[ns]);
 			/* the innermost function declarator next to the name gives the parameters */
 			if (!inner && !d->has_func && ns == 0) {
 				d->psyms = sufs[ns].a + sufs[ns].b;
-				d->npsyms = sufs[ns].b;
+				d->npsyms = sufs[ns].np;
+				d->kr = sufs[ns].kr;
 				d->has_func = true;
+				d->plb = plb, d->ple = c->prevloc;
 			}
 			ns++;
 		} else {
@@ -4852,10 +6177,18 @@ static qty type_name(cc *c)
 	if (!decl_specs(c, &ds, false))
 		fatal(c, tok(c)->loc, "expected a type");
 	declarator(c, &d, true, &first, &nops);
+	attribute_list(c, &d.at);
 	t = apply_declarator(c, ds.ty, first, nops);
 	c->ndops = first;
 	if (d.name)
 		error(c, d.loc, "unexpected identifier in type name");
+	{
+		uint32_t vs = d.at.vecsize ? d.at.vecsize : ds.at.vecsize;
+
+		/* (__attribute__((vector_size(N))) T) */
+		if (vs && is_arith(c, t) && ty_size(c, t) <= vs && !(vs % ty_size(c, t)))
+			t = QT(QI(ty_vector(c, t, vs)), QQ(t));
+	}
 	return t;
 }
 
@@ -4909,9 +6242,9 @@ __attribute__((noinline)) static void struct_body(cc *c, uint32_t ti)
 			continue;
 		}
 		if (!decl_specs(c, &ds, false)) {
-			if (is(c, T_IDENT))
-				fatal(c, tok(c)->loc, "unknown type name '%.*s'", IDF(tok(c)->id));
-			fatal(c, tok(c)->loc, "expected member declaration");
+			if (!is(c, T_IDENT))
+				fatal(c, tok(c)->loc, "expected member declaration");
+			unknown_type(c, &ds);
 		}
 		if (is(c, T_SEMI)) {
 			/* anonymous struct/union member; with -fms-anonymous-structs also a
@@ -4955,7 +6288,8 @@ __attribute__((noinline)) static void struct_body(cc *c, uint32_t ti)
 				if (w < 0)
 					error(c, d.loc, "bit-field has negative width (%lld)", (long long)w), w = 0;
 				else if ((uint64_t)w > ty_size(c, t) * 8)
-					error(c, d.loc, "width of bit-field (%lld bits) exceeds the width of its type", (long long)w), w = 0;
+					error(c, d.loc, "width of bit-field '%.*s' (%lld bits) exceeds the width of its type (%llu bits)",
+					      IDF(d.name), (long long)w, (unsigned long long)ty_size(c, t) * 8), w = 0;
 				else if (w == 0 && d.name)
 					error(c, d.loc, "named bit-field has zero width");
 				f.bitfield = 1;
@@ -4977,6 +6311,12 @@ __attribute__((noinline)) static void struct_body(cc *c, uint32_t ti)
 				error(c, d.loc, "field has incomplete type");
 			if (nf >= 4096)
 				fatal(c, d.loc, "too many members");
+			for (uint32_t i = 0; f.name && i < nf; i++)
+				if (x->fs[base + i].name == f.name) {
+					error(c, d.loc, "duplicate member '%.*s'", IDF(f.name));
+					note(c, x->fs[base + i].loc, "previous declaration is here");
+					break;
+				}
 			if (base + nf >= x->cap)
 				fscr_grow(x, base + nf + 1);
 			x->fa[base + nf] = d.at.aligned > ds.align ? d.at.aligned : ds.align;
@@ -4986,7 +6326,7 @@ __attribute__((noinline)) static void struct_body(cc *c, uint32_t ti)
 			if (!accept(c, T_COMMA))
 				break;
 		}
-		expect(c, T_SEMI, "';'");
+		expect_semi(c, "at end of declaration");
 	}
 	next(c);
 	c->in_struct--;
@@ -5089,6 +6429,8 @@ static void enum_body(cc *c, uint32_t ti, attrs *after)
 			else
 				y->ty = prim(TY_INT);
 		}
+		c->tags[ti].enums = vfreeze(c, &cs);
+		c->tags[ti].nenum = cs.n;
 	}
 }
 
@@ -5287,7 +6629,15 @@ static void il_elem(cc *c, ilist *l, uint64_t pos, uint32_t v, bool st)
 		il_set(c, l, pos, v, NULL);	/* string literal */
 		return;
 	}
-	il_set(c, l, pos, is_record(c, et) ? v : convert(c, decay(c, v), et), NULL);
+	il_set(c, l, pos, is_record(c, et) && !is_complex(c, et) ? v : convert(c, decay(c, v), et), NULL);
+}
+
+/* a designation starts here: ".f", "[i]" or the old GNU "f:" */
+static bool at_designator(cc *c, int k)
+{
+	int t = peek(c, k)->kind;
+
+	return t == T_PERIOD || t == T_LSQUARE || (t == T_IDENT && peek(c, k + 1)->kind == T_COLON);
 }
 
 /* after an element of an unbraced (elided) list: go on with the next one if it belongs here */
@@ -5297,9 +6647,7 @@ static void il_continue(cc *c, ilist *l, uint64_t pos, bool st)
 	if (il_full(l, pos) || !is(c, T_COMMA))
 		return;
 	{
-		int k = peek(c, 1)->kind;
-
-		if (k == T_RBRACE || k == T_PERIOD || k == T_LSQUARE)
+		if (peek(c, 1)->kind == T_RBRACE || at_designator(c, 1))
 			return;
 	}
 	next(c);
@@ -5313,7 +6661,7 @@ static uint64_t il_designation(cc *c, ilist *l, bool st)
 	uint32_t path[16];
 	int depth = 1;
 
-	if (accept(c, T_PERIOD)) {
+	if (accept(c, T_PERIOD) || (is(c, T_IDENT) && peek(c, 1)->kind == T_COLON)) {
 		uint32_t name;
 		int d;
 
@@ -5369,7 +6717,8 @@ static uint64_t il_designation(cc *c, ilist *l, bool st)
 
 				il_continue(c, t, np, st);
 			} else {
-				accept(c, T_EQUAL);
+				if (!accept(c, T_EQUAL))
+					accept(c, T_COLON);
 				il_elem(c, s, last, 0, st);
 				il_continue(c, s, last + 1, st);
 			}
@@ -5432,8 +6781,7 @@ static void il_fill(cc *c, ilist *l, uint64_t pos, bool braced, uint32_t first, 
 		il_elem(c, l, pos, first, st);
 		pos = il_next_pos(c, l, pos + 1);
 		if (!braced) {
-			if (il_full(l, pos) || !is(c, T_COMMA) || peek(c, 1)->kind == T_RBRACE ||
-			    peek(c, 1)->kind == T_PERIOD || peek(c, 1)->kind == T_LSQUARE)
+			if (il_full(l, pos) || !is(c, T_COMMA) || peek(c, 1)->kind == T_RBRACE || at_designator(c, 1))
 				return;
 			next(c);
 		} else if (!accept(c, T_COMMA)) {
@@ -5443,7 +6791,7 @@ static void il_fill(cc *c, ilist *l, uint64_t pos, bool braced, uint32_t first, 
 	for (;;) {
 		if (is(c, T_RBRACE))
 			return;
-		if (is(c, T_PERIOD) || is(c, T_LSQUARE)) {
+		if (at_designator(c, 0)) {
 			if (!braced)
 				return;
 			pos = il_designation(c, l, st);
@@ -5467,8 +6815,7 @@ static void il_fill(cc *c, ilist *l, uint64_t pos, bool braced, uint32_t first, 
 		}
 		pos = il_next_pos(c, l, pos);
 		if (!braced) {
-			if (il_full(l, pos) || !is(c, T_COMMA) || peek(c, 1)->kind == T_RBRACE ||
-			    peek(c, 1)->kind == T_PERIOD || peek(c, 1)->kind == T_LSQUARE)
+			if (il_full(l, pos) || !is(c, T_COMMA) || peek(c, 1)->kind == T_RBRACE || at_designator(c, 1))
 				return;
 			next(c);
 			continue;
@@ -5524,7 +6871,7 @@ static uint32_t init_braced(cc *c, qty ty, bool st)
 	if (is(c, T_LBRACE))
 		v = init_braced(c, ty, st);
 	else
-		v = convert(c, decay(c, assign_expr(c)), ty);
+		v = convert_as(c, decay(c, assign_expr(c)), ty, c->cv_what == CX_INIT ? CX_INIT : 0, c->cv_loc);
 	while (accept(c, T_COMMA)) {
 		if (is(c, T_RBRACE))
 			break;
@@ -5578,19 +6925,19 @@ static uint32_t initializer(cc *c, qty *ty, bool st)
 
 		if (is_array(c, t)) {
 			if (!string_initializes(c, t, v)) {
-				error(c, loc, "array initializer must be an initializer list or string literal");
+				error(c, c->cv_what == CX_INIT ? c->cv_loc : loc, "array initializer must be an initializer list");
 				return v;
 			}
 			if (T(c, t)->flags & TF_INCOMPLETE)
 				*ty = QT(QI(ty_array(c, T(c, t)->base, c->strs[N(v)->a].n, 0)), QQ(t));
 			return v;
 		}
-		if (is_record(c, t)) {
+		if (is_record(c, t) && !is_complex(c, t)) {
 			if (!compatible(c, N(v)->ty, t))
 				error(c, loc, "initializing with an expression of incompatible type");
 			return v;
 		}
-		return convert(c, decay(c, v), t);
+		return convert_as(c, decay(c, v), t, c->cv_what == CX_INIT ? CX_INIT : 0, c->cv_loc);
 	}
 }
 
@@ -5618,6 +6965,7 @@ static void apply_sym_attrs(cc *c, sym *s, const attrs *a)
 	if (a->noreturn) s->flags |= SF_NORETURN;
 	if (a->always_inline) s->flags |= SF_ALWAYS_INLINE;
 	if (a->noinline) s->flags |= SF_NOINLINE;
+	if (a->noinstr) s->flags |= SF_NOINSTR;
 	if (a->gnu_inline) s->flags |= SF_GNU_INLINE;
 	if (a->used) s->flags |= SF_ATTR_USED;
 	if (a->overloadable) s->flags |= SF_OVERLOAD;
@@ -5873,12 +7221,14 @@ static uint32_t declare(cc *c, const dspec *ds, declr *d, qty t, bool file)
 		bool same = p && c->syms[p].depth == c->depth;
 		bool linkage = file || ds->sc == SC_EXTERN || kind == S_FUNC;
 
-		if (same && linkage)
+		if (same && linkage) {
 			prev = p;
-		else if (same && c->syms[p].kind != S_TYPEDEF)
+		} else if (same && c->syms[p].kind != S_TYPEDEF) {
 			error(c, d->loc, "redefinition of '%.*s'", IDF(d->name));
-		else if (!file && linkage)
+			note(c, c->syms[p].loc, "previous definition is here");
+		} else if (!file && linkage) {
 			prev = file_scope_sym(c, d->name);
+		}
 	}
 	if (prev && kind == S_FUNC && c->syms[prev].kind == S_FUNC &&
 	    (at.overloadable || (c->syms[prev].flags & SF_OVERLOAD))) {
@@ -5921,8 +7271,10 @@ static uint32_t declare(cc *c, const dspec *ds, declr *d, qty t, bool file)
 
 		if (y->kind != kind) {
 			error(c, d->loc, "redefinition of '%.*s' as different kind of symbol", IDF(d->name));
+			note(c, y->loc, "previous definition is here");
 		} else if (!compatible(c, y->ty, t)) {
 			error(c, d->loc, "conflicting types for '%.*s'", IDF(d->name));
+			note(c, y->loc, "previous declaration is here");
 		} else {
 			y->ty = QT(QI(composite(c, y->ty, t)), QQ(y->ty) | QQ(t));
 			if (ds->sc == SC_STATIC && kind == S_FUNC)
@@ -5973,19 +7325,98 @@ static uint32_t declare(cc *c, const dspec *ds, declr *d, qty t, bool file)
 static void function_def(cc *c, uint32_t s, const declr *d);
 static uint32_t statement(cc *c);
 
+/* C89: a call to an undeclared id declares "extern int id();" in this scope */
+static uint32_t implicit_func(cc *c, uint32_t id, uint32_t loc)
+{
+	dspec ds = { .ty = prim(TY_INT), .sc = SC_EXTERN, .loc = loc };
+	declr d = { .name = id, .loc = loc };
+
+	return declare(c, &ds, &d, ty_func(c, prim(TY_INT), NULL, 0, TF_NOPROTO), c->depth == 0);
+}
+
+/* the declarations between a K&R definition's identifier list and its body */
+static void kr_params(cc *c, const declr *fd)
+{
+	uint8_t seen[256] = { 0 };
+
+	/* tags declared here belong to the function, not the file (approximation: not seen by the body) */
+	scope_open(c);
+	while (!is(c, T_LBRACE)) {
+		dspec ds;
+
+		if (!decl_specs(c, &ds, true)) {
+			if (!is(c, T_IDENT) || kwof(tok(c)))
+				fatal(c, tok(c)->loc, "expected ';' after top level declarator");
+			unknown_type(c, &ds);
+		}
+		for (;;) {
+			declr d;
+			uint32_t first, nops, i;
+			qty t;
+
+			declarator(c, &d, false, &first, &nops);
+			attribute_list(c, &d.at);
+			t = apply_declarator(c, ds.ty, first, nops);
+			c->ndops = first;
+			if (is_array(c, t))
+				t = ty_ptr(c, T(c, t)->base);
+			else if (is_func(c, t))
+				t = ty_ptr(c, t);
+			for (i = 0; i < fd->npsyms; i++)
+				if (c->syms[c->lists[fd->psyms + i]].name == d.name)
+					break;
+			if (i == fd->npsyms) {
+				error(c, d.loc, "parameter named '%.*s' is missing", IDF(d.name));
+			} else {
+				sym *y = &c->syms[c->lists[fd->psyms + i]];
+
+				if (i < sizeof(seen) && seen[i]++)
+					error(c, d.loc, "redefinition of parameter '%.*s'", IDF(d.name));
+				y->ty = t;
+				y->loc = d.loc;
+				if (ds.sc == SC_REGISTER)
+					y->sc = SC_REGISTER;
+			}
+			if (!accept(c, T_COMMA))
+				break;
+		}
+		expect_semi(c, "at end of declaration");
+	}
+	scope_close(c);
+	if (!c->o->implicit_int)
+		for (uint32_t i = 0; i < fd->npsyms && i < sizeof(seen); i++)
+			if (!seen[i]) {
+				const sym *y = &c->syms[c->lists[fd->psyms + i]];
+
+				error(c, y->loc, "parameter '%.*s' was not declared, defaults to 'int'; ISO C99 and later do not support implicit int", IDF(y->name));
+			}
+}
+
 /* a declaration; block-scope ones append N_DECL statements to out */
 static void declaration(cc *c, vec *out, bool file)
 {
 	dspec ds;
+	uint32_t dbeg = tok(c)->loc;
 
 	if (iskw(c, KW__Static_assert)) {
 		static_assert_decl(c);
 		return;
 	}
 	if (!decl_specs(c, &ds, true)) {
-		if (is(c, T_IDENT) && !kwof(tok(c)))
-			fatal(c, tok(c)->loc, "unknown type name '%.*s'", IDF(tok(c)->id));
-		{
+		int k = peek(c, 1)->kind;
+
+		if (file && ((is(c, T_IDENT) && !kwof(tok(c)) &&
+			      (k == T_LPAREN || k == T_SEMI || k == T_COMMA || k == T_EQUAL || k == T_LSQUARE)) ||
+			     is(c, T_STAR))) {
+			/* C89 implicit int: "f(x) { ... }", "x;" at file scope */
+			memset(&ds, 0, sizeof(ds));
+			ds.ty = prim(TY_INT);
+			ds.loc = tok(c)->loc;
+			if (!c->o->implicit_int)
+				error(c, ds.loc, "type specifier missing, defaults to 'int'; ISO C99 and later do not support implicit int");
+		} else if (is(c, T_IDENT) && !kwof(tok(c))) {
+			unknown_type(c, &ds);
+		} else {
 			char b[64];
 
 			fatal(c, tok(c)->loc, "expected declaration before '%s'", tokspell(tok(c), b, sizeof(b)));
@@ -6024,10 +7455,17 @@ static void declaration(cc *c, vec *out, bool file)
 			}
 			if (accept(c, T_COMMA))
 				continue;
-			expect(c, T_SEMI, "';'");
+			expect_semi(c, "at end of declaration");
 			return;
 		}
+		if (file && d.kr && is_func(c, t) && !is(c, T_SEMI) && !is(c, T_COMMA) && !is(c, T_EQUAL))
+			kr_params(c, &d);
 		s = declare(c, &ds, &d, t, file);
+		if (d.has_func && c->syms[s].kind == S_FUNC && is_func(c, c->syms[s].ty) &&
+		    d.npsyms == T(c, c->syms[s].ty)->n)
+			c->syms[s].psyms = d.psyms + 1, c->syms[s].plb = d.plb, c->syms[s].ple = d.ple;
+		if (d.at.vecsize || ds.at.vecsize || d.at.mode || ds.at.mode)
+			t = c->syms[s].ty;	/* declare made it a vector / applied mode: initialize that */
 		if (is_func(c, t) && is(c, T_LBRACE)) {
 			if (!file)
 				fatal(c, tok(c)->loc, "function definition is not allowed here");
@@ -6044,14 +7482,23 @@ static void declaration(cc *c, vec *out, bool file)
 				error(c, d.loc, "illegal initializer");
 			if (!file && ds.sc == SC_EXTERN)
 				error(c, d.loc, "declaration of block scope identifier with linkage cannot have an initializer");
-			v = initializer(c, &it, st);
+			{
+				uint8_t sw = c->cv_what;
+				uint32_t sl = c->cv_loc;
+
+				c->cv_what = CX_INIT, c->cv_loc = d.loc;
+				v = initializer(c, &it, st);
+				c->cv_what = sw, c->cv_loc = sl;
+			}
 			y = &c->syms[s];
 			if (QI(it) != QI(t)) {
 				/* array size from the initializer */
 				y->ty = QT(QI(it), QQ(y->ty));
 			}
-			if (y->body && file)
+			if (y->body && file) {
 				error(c, d.loc, "redefinition of '%.*s'", IDF(d.name));
+				note(c, y->loc, "previous definition is here");
+			}
 			y->body = v;
 			y->flags |= SF_DEFINED;
 			if (out && !st) {
@@ -6067,16 +7514,18 @@ static void declaration(cc *c, vec *out, bool file)
 					y->flags |= SF_TENTATIVE;
 				else if (!complete(c, y->ty) && ds.sc != SC_STATIC)
 					error(c, d.loc, "variable has incomplete type");
-				if (out && y->sc == SC_AUTO) {
+				if (out && (y->sc == SC_AUTO || y->sc == SC_REGISTER)) {
 					uint32_t n = mk2(c, N_DECL, prim(TY_VOID), d.loc, s, 0);
 
 					vpush(c, out, n);
 				}
 			}
 		}
+		if (c->syms[s].kind == S_VAR)	/* the declaration's range, for notes */
+			c->syms[s].plb = dbeg, c->syms[s].ple = c->prevloc;
 		if (accept(c, T_COMMA))
 			continue;
-		expect(c, T_SEMI, "';'");
+		expect_semi(c, "at end of declaration");
 		return;
 	}
 }
@@ -6106,15 +7555,77 @@ static uint32_t mkstmt(cc *c, int op, uint32_t loc, uint32_t a, uint32_t b, uint
 	return n;
 }
 
+/* -Wparentheses: "if (x = 1)" */
+static void assign_cond_warn(cc *c, uint32_t e)
+{
+	if (N(e)->op == N_ASSIGN && !N(e)->aux && !(N(e)->flags & (NF_PAREN | NF_MACRO | NF_ERR))) {
+		uint32_t op = N(e)->loc;
+		pp_span r[2] = { rng(c, N(e)->a), rng(c, N(e)->b) };
+		pp_span all = { r[0].b, r[1].e };
+		pp_fixit p2[2] = { { all.b, all.b, "(" }, { all.e, all.e, ")" } };
+		pp_fixit eq = { op, op + 1, "==" };
+
+		if (warnx(c, "parentheses", true, w_all, op, &all, 1, NULL, 0,
+			  "using the result of an assignment as a condition without parentheses")) {
+			pp_dinfo d1 = { "note", op, NULL, 0, p2, 2, NULL, 0 }, d2 = { "note", op, NULL, 0, &eq, 1, NULL, 0 };
+
+			pp_diagx(c->p, &d1, "place parentheses around the assignment to silence this warning");
+			pp_diagx(c->p, &d2, "use '==' to turn this assignment into an equality comparison");
+		}
+	}
+}
+
+/* -Wswitch: "enumeration value 'B' not handled in switch" (no default label) */
+static void switch_enum_warn(cc *c, qty et, uint32_t cnd)
+{
+	const tag *t = &c->tags[T(c, et)->aux];
+	uint32_t miss[3], nmiss = 0;
+	char b[512];
+	size_t k = 0;
+
+	for (uint32_t i = 0; i < t->nenum; i++) {
+		const sym *y = &c->syms[c->lists[t->enums + i]];
+		bool seen = false;
+
+		for (uint32_t j = c->case_base; j < c->ncase && !seen; j++)
+			seen = c->cases[j].lo <= y->val && y->val <= c->cases[j].hi;
+		/* an enumerator repeating an earlier one's value counts once */
+		for (uint32_t j = 0; j < i && !seen; j++)
+			seen = c->syms[c->lists[t->enums + j]].val == y->val;
+		if (!seen) {
+			if (nmiss < 3)
+				miss[nmiss] = c->lists[t->enums + i];
+			nmiss++;
+		}
+	}
+	if (!nmiss)
+		return;
+	for (uint32_t i = 0; i < nmiss && i < 3; i++) {
+		const char *sep = i == 0 ? "" : nmiss == 2 ? " and " : (i == 2 && nmiss == 3) ? ", and " : ", ";
+
+		k += (size_t)snprintf(b + k, sizeof(b) - k, "%s'%.*s'", sep, IDF(c->syms[miss[i]].name));
+		if (k >= sizeof(b))
+			return;
+	}
+	if (nmiss > 3)
+		snprintf(b + k, sizeof(b) - k, ", and %u more", nmiss - 3);
+	{
+		pp_span r = rng(c, cnd);
+
+		warnx(c, "switch", true, w_all, r.b, NULL, 0, NULL, 0, "enumeration value%s %s not handled in switch",
+		      nmiss > 1 ? "s" : "", b);
+	}
+}
+
 static uint32_t cond_of(cc *c)
 {
 	uint32_t e;
 
 	expect(c, T_LPAREN, "'('");
 	e = decay(c, expr(c));
+	assign_cond_warn(c, e);
 	expect(c, T_RPAREN, "')'");
-	need_scalar(c, e, "statement");
-	return e;
+	return scalar_cond(c, e, "statement");
 }
 
 static uint32_t asm_string(cc *c)
@@ -6139,9 +7650,10 @@ static void asm_operands(cc *c, vec *ops, bool out)
 		expect(c, T_LPAREN, "'('");
 		e = expr(c);
 		expect(c, T_RPAREN, "')'");
-		if (out)
-			need_lvalue(c, e, "asm output");
-		else
+		if (out) {
+			if (!(N(e)->flags & NF_LVALUE))
+				error(c, N(e)->loc, "invalid lvalue in asm output");
+		} else
 			e = decay(c, e);
 		vpush(c, ops, name);
 		vpush(c, ops, cons);
@@ -6232,7 +7744,7 @@ static uint32_t asm_stmt(cc *c, bool toplevel)
 	a->nlabel = labs.n;
 	a->labels = halloc(c, (labs.n + 1) * sizeof(uint32_t));
 	memcpy(a->labels, labs.v, labs.n * sizeof(uint32_t));
-	expect(c, T_SEMI, "';'");
+	expect_semi(c, "after asm statement");
 	n = mkstmt(c, N_ASM, loc, ai, 0, 0);
 	return n;
 }
@@ -6271,14 +7783,17 @@ static uint32_t compound_stmt(cc *c, qty *last)
 			vpush(c, &locals, l);
 			next(c);
 		} while (accept(c, T_COMMA));
-		expect(c, T_SEMI, "';'");
+		expect_semi(c, "at end of declaration");
 	}
 	while (!is(c, T_RBRACE)) {
-		if (is(c, T_EOF))
-			fatal(c, tok(c)->loc, "expected '}'");
+		if (is(c, T_EOF)) {
+			report(c, "error", pp_tok_end(c->p, c->prevloc), NULL, 0, NULL, 0, "expected '}'");
+			note(c, loc, "to match this '{'");
+			longjmp(c->bail, 1);
+		}
 		if (iskw(c, KW___extension__) && is_decl_start(c, peek(c, 1)))
 			next(c);
-		if (iskw(c, KW___attribute__) || iskw(c, KW___attribute)) {
+		if (iskw(c, KW___attribute__) || iskw(c, KW___attribute) || at_std_attr(c)) {
 			attrs a = { 0 };
 
 			attribute_list(c, &a);
@@ -6320,6 +7835,17 @@ static uint32_t compound_stmt(cc *c, qty *last)
 	return n;
 }
 
+/* the body of an if, switch or loop: a block of its own (C99 6.8.4p3, 6.8.5p5) */
+static uint32_t sub_statement(cc *c)
+{
+	uint32_t n;
+
+	scope_open(c);
+	n = statement(c);
+	scope_close(c);
+	return n;
+}
+
 static uint32_t statement(cc *c)
 {
 	ptok *t = tok(c);
@@ -6329,6 +7855,14 @@ static uint32_t statement(cc *c)
 	switch (t->kind) {
 	case T_LBRACE:
 		return compound_stmt(c, NULL);
+	case T_LSQUARE:
+		if (at_std_attr(c)) {	/* [[fallthrough]]; and friends: no effect on the statement */
+			attrs a = { 0 };
+
+			attribute_list(c, &a);
+			return statement(c);
+		}
+		break;
 	case T_SEMI:
 		next(c);
 		return mkstmt(c, N_EXPR, loc, 0, 0, 0);
@@ -6365,36 +7899,52 @@ static uint32_t statement(cc *c)
 		uint32_t cnd, th, el = 0;
 
 		next(c);
+		scope_open(c);	/* C99 6.8.4p3: a selection statement is a block, and so is each substatement */
 		cnd = cond_of(c);
-		th = statement(c);
-		if (iskw(c, KW_else)) {
-			next(c);
-			el = statement(c);
+		{
+			/* clang: runtime-behaviour warnings only in reachable code */
+			cval cv;
+			int k = cc_eval(c, cnd, &cv) && cv.kind == CV_INT ? cv.i != 0 : -1;
+
+			c->dead += k == 0;
+			th = sub_statement(c);
+			c->dead -= k == 0;
+			if (iskw(c, KW_else)) {
+				next(c);
+				c->dead += k == 1;
+				el = sub_statement(c);
+				c->dead -= k == 1;
+			}
 		}
+		scope_close(c);
 		return mkstmt(c, N_IF, loc, cnd, th, el);
 	}
 	case KW_while: {
 		uint32_t cnd, body;
 
 		next(c);
+		scope_open(c);
 		cnd = cond_of(c);
 		c->in_loop++;
-		body = statement(c);
+		body = sub_statement(c);
 		c->in_loop--;
+		scope_close(c);
 		return mkstmt(c, N_WHILE, loc, cnd, body, 0);
 	}
 	case KW_do: {
 		uint32_t cnd, body;
 
 		next(c);
+		scope_open(c);
 		c->in_loop++;
-		body = statement(c);
+		body = sub_statement(c);
 		c->in_loop--;
 		if (!iskw(c, KW_while))
 			fatal(c, tok(c)->loc, "expected 'while' in do/while loop");
 		next(c);
 		cnd = cond_of(c);
-		expect(c, T_SEMI, "';'");
+		scope_close(c);
+		expect_semi(c, "after do/while statement");
 		return mkstmt(c, N_DO, loc, cnd, body, 0);
 	}
 	case KW_for: {
@@ -6413,18 +7963,19 @@ static uint32_t statement(cc *c)
 		} else {
 			if (!is(c, T_SEMI))
 				init = mkstmt(c, N_EXPR, loc, expr(c), 0, 0);
-			expect(c, T_SEMI, "';'");
+			expect_semi(c, "in 'for' statement specifier");
 		}
 		if (!is(c, T_SEMI)) {
 			cnd = decay(c, expr(c));
-			need_scalar(c, cnd, "for");
+			assign_cond_warn(c, cnd);
+			cnd = scalar_cond(c, cnd, "for");
 		}
-		expect(c, T_SEMI, "';'");
+		expect_semi(c, "in 'for' statement specifier");
 		if (!is(c, T_RPAREN))
 			step = expr(c);
 		expect(c, T_RPAREN, "')'");
 		c->in_loop++;
-		body = statement(c);
+		body = sub_statement(c);
 		c->in_loop--;
 		scope_close(c);
 		vinit(&sb);
@@ -6435,26 +7986,47 @@ static uint32_t statement(cc *c)
 	}
 	case KW_switch: {
 		uint32_t cnd, body;
+		qty et;
 		qty saved = c->switch_ty;
 
 		next(c);
+		scope_open(c);
 		expect(c, T_LPAREN, "'('");
-		cnd = rvalue(c, expr(c));
+		cnd = expr(c);
+		et = N(cnd)->ty;
+		while (N(cnd)->op == N_CAST && N(cnd)->a && !c->span[cnd].e && KIND(c, N(N(cnd)->a)->ty) == TY_ENUM)
+			cnd = N(cnd)->a, et = N(cnd)->ty;	/* -Wswitch looks at the enum before promotion */
+		cnd = rvalue(c, cnd);
 		expect(c, T_RPAREN, "')'");
 		if (!is_integer(c, N(cnd)->ty))
 			error(c, loc, "statement requires expression of integer type");
 		c->switch_ty = N(cnd)->ty;
 		c->in_switch++;
-		body = statement(c);
+		{
+			uint32_t sb = c->case_base;
+			bool sd = c->sw_default;
+
+			c->case_base = c->ncase;
+			c->sw_default = false;
+			body = sub_statement(c);
+			if (!c->sw_default && KIND(c, et) == TY_ENUM)
+				switch_enum_warn(c, et, cnd);
+			c->ncase = c->case_base, c->case_base = sb;
+			c->sw_default = sd;
+		}
 		c->in_switch--;
 		c->switch_ty = saved;
+		scope_close(c);
 		return mkstmt(c, N_SWITCH, loc, cnd, body, 0);
 	}
 	case KW_case: {
 		i128 lo, hi;
 		uint32_t s, n;
 
+		uint32_t vloc;
+
 		next(c);
+		vloc = tok(c)->loc;
 		if (!c->in_switch)
 			error(c, loc, "'case' statement not in switch statement");
 		const_expr(c, &lo, NULL);
@@ -6464,6 +8036,24 @@ static uint32_t statement(cc *c)
 		expect(c, T_COLON, "':'");
 		if (c->switch_ty)
 			lo = trunc_to(c, lo, c->switch_ty), hi = trunc_to(c, hi, c->switch_ty);
+		if (c->in_switch) {
+			for (uint32_t i = c->case_base; i < c->ncase; i++)
+				if (lo <= c->cases[i].hi && c->cases[i].lo <= hi) {
+					char b[48];
+					i128 d = lo > c->cases[i].lo ? lo : c->cases[i].lo;
+
+					snprintf(b, sizeof(b), "%lld", (long long)d);
+					report(c, "error", vloc, NULL, 0, NULL, 0, lo == hi && c->cases[i].lo == c->cases[i].hi
+					       ? "duplicate case value '%s'" : "duplicate case value '%s' in case range", b);
+					note(c, c->cases[i].loc, "previous case defined here");
+					break;
+				}
+			if (c->ncase == c->capcase) {
+				c->capcase = c->capcase ? c->capcase * 2 : 64;
+				c->cases = realloc(c->cases, c->capcase * sizeof(*c->cases));
+			}
+			c->cases[c->ncase++] = (struct swcase){ lo, hi, vloc };
+		}
 		if (is(c, T_RBRACE))
 			s = mkstmt(c, N_EXPR, loc, 0, 0, 0);
 		else
@@ -6481,6 +8071,7 @@ static uint32_t statement(cc *c)
 		expect(c, T_COLON, "':'");
 		if (!c->in_switch)
 			error(c, loc, "'default' statement not in switch statement");
+		c->sw_default = true;
 		s = is(c, T_RBRACE) ? mkstmt(c, N_EXPR, loc, 0, 0, 0) : statement(c);
 		return mkstmt(c, N_DEFAULT, loc, 0, 0, s);
 	}
@@ -6488,13 +8079,13 @@ static uint32_t statement(cc *c)
 		next(c);
 		if (!c->in_loop && !c->in_switch)
 			error(c, loc, "'break' statement not in loop or switch statement");
-		expect(c, T_SEMI, "';'");
+		expect_semi(c, "after break statement");
 		return mkstmt(c, N_BREAK, loc, 0, 0, 0);
 	case KW_continue:
 		next(c);
 		if (!c->in_loop)
 			error(c, loc, "'continue' statement not in loop statement");
-		expect(c, T_SEMI, "';'");
+		expect_semi(c, "after continue statement");
 		return mkstmt(c, N_CONTINUE, loc, 0, 0, 0);
 	case KW_return: {
 		uint32_t e = 0;
@@ -6504,9 +8095,18 @@ static uint32_t statement(cc *c)
 		if (!is(c, T_SEMI)) {
 			e = decay(c, expr(c));
 			if (!is_void(c, rt) && !is_void(c, N(e)->ty))
-				e = is_record(c, rt) ? e : convert(c, e, rt);
+				e = is_record(c, rt) ? e : convert_as(c, e, rt, CX_RETURN, loc);
+			else if (is_void(c, rt) && !is_void(c, N(e)->ty) && c->fn && !(N(e)->flags & NF_ERR)) {
+				pp_span r = rng(c, e);
+
+				report(c, "error", loc, &r, 1, NULL, 0, "void function '%.*s' should not return a value [-Wreturn-mismatch]",
+				       IDF(c->syms[c->fn].name));
+			}
+		} else if (c->fn && !is_void(c, rt) && !c->o->implicit_int) {
+			report(c, "error", loc, NULL, 0, NULL, 0, "non-void function '%.*s' should return a value [-Wreturn-mismatch]",
+			       IDF(c->syms[c->fn].name));
 		}
-		expect(c, T_SEMI, "';'");
+		expect_semi(c, "after return statement");
 		return mkstmt(c, N_RETURN, loc, e, 0, 0);
 	}
 	case KW_goto:
@@ -6514,7 +8114,7 @@ static uint32_t statement(cc *c)
 		if (accept(c, T_STAR)) {
 			uint32_t e = decay(c, expr(c));
 
-			expect(c, T_SEMI, "';'");
+			expect_semi(c, "after goto statement");
 			return mkstmt(c, N_GOTO_IND, loc, e, 0, 0);
 		}
 		if (!is(c, T_IDENT))
@@ -6523,7 +8123,7 @@ static uint32_t statement(cc *c)
 			uint32_t l = label_ref(c, tok(c)->id, tok(c)->loc);
 
 			next(c);
-			expect(c, T_SEMI, "';'");
+			expect_semi(c, "after goto statement");
 			return mkstmt(c, N_GOTO, loc, l, 0, 0);
 		}
 	case KW_asm: case KW___asm__: case KW___asm:
@@ -6539,12 +8139,144 @@ static uint32_t statement(cc *c)
 	default:
 		break;
 	}
+	if (is(c, T_IDENT) && !kwof(tok(c)) && peek(c, 1)->kind == T_IDENT && !kwof(peek(c, 1)) &&
+	    !lookup(c, tok(c)->id)) {
+		/* "foo_t x;" with foo_t unknown: clang reports the identifier and skips the statement */
+		undeclared(c, "use of undeclared identifier", tok(c)->id, tok(c)->loc, false);
+		while (!is(c, T_SEMI) && !is(c, T_RBRACE) && !is(c, T_EOF))
+			next(c);
+		accept(c, T_SEMI);
+		return mkstmt(c, N_EXPR, loc, 0, 0, 0);
+	}
 	{
 		uint32_t e = expr(c);
 
-		expect(c, T_SEMI, "';'");
+		if (N(e)->op == N_BINARY && is_cmp(N(e)->aux) && !c->in_stmtexpr &&
+		    !(N(e)->flags & (NF_PAREN | NF_MACRO | NF_ERR))) {
+			int k = N(e)->aux;
+			uint32_t op = N(e)->loc;
+			pp_span r = { rng(c, N(e)->a).b, rng(c, N(e)->b).e };
+			bool eq = k == T_EQUALEQUAL || k == T_EXCLAIMEQ;
+
+			if (warnx(c, "unused-comparison", true, w_all, op, &r, 1, NULL, 0, "%s comparison result unused",
+				  eq ? "equality" : "relational") && k == T_EQUALEQUAL) {
+				pp_span orr = { op, op + 2 };
+				pp_fixit fx = { op, op + 2, "=" };
+				pp_dinfo d = { "note", op, &orr, 1, &fx, 1, NULL, 0 };
+
+				pp_diagx(c->p, &d, "use '=' to turn this equality comparison into an assignment");
+			}
+		}
+		expect_semi(c, "after expression");
 		return mkstmt(c, N_EXPR, loc, e, 0, 0);
 	}
+}
+
+/* a call of void name(void *this_fn, void *call_site) (declared if need be) */
+static uint32_t profile_call(cc *c, const char *name, uint32_t fn, uint32_t loc)
+{
+	uint32_t id = vintern_find(name, strlen(name), vintern_hash(name, strlen(name))), f, v, n;
+	qty vp = ty_ptr(c, prim(TY_VOID));
+	vec args;
+
+	f = id ? file_scope_sym(c, id) : 0;
+	if (!f || c->syms[f].kind != S_FUNC) {
+		qty pt[2] = { vp, vp };
+
+		if (!id)
+			id = vintern(name, strlen(name), vintern_hash(name, strlen(name)));
+		f = sym_new(c, S_FUNC, id, ty_func(c, prim(TY_VOID), pt, 2, 0), loc);
+		c->syms[f].sc = SC_EXTERN;
+		c->syms[f].flags |= SF_GLOBAL;
+	}
+	c->syms[f].flags |= SF_USED;
+	vinit(&args);
+	v = mk(c, N_VAR, c->syms[fn].ty, loc);
+	N(v)->a = fn;
+	c->syms[fn].flags |= SF_USED | SF_ADDR_TAKEN;
+	vpush(c, &args, cast_node(c, rvalue(c, v), vp, CK_P2P));
+	{
+		vec ra;
+
+		vinit(&ra);
+		vpush(c, &ra, mk_int(c, 0, prim(TY_UINT), loc));
+		vpush(c, &args, mk_builtin(c, BI_RETURN_ADDRESS, vp, loc, &ra));
+	}
+	v = mk(c, N_VAR, c->syms[f].ty, loc);
+	N(v)->a = f;
+	n = mk(c, N_CALL, prim(TY_VOID), loc);
+	N(n)->a = rvalue(c, v);
+	N(n)->b = vfreeze(c, &args);
+	N(n)->c = args.n;
+	return n;
+}
+
+/* -finstrument-functions: every return of fn (in statements st) calls the exit hook first */
+static void instrument_returns(cc *c, uint32_t fn, uint32_t st)
+{
+	node *x;
+
+	if (!st)
+		return;
+	x = N(st);
+	switch (x->op) {
+	case N_BLOCK:
+		for (uint32_t i = 0; i < x->c; i++)
+			instrument_returns(c, fn, c->lists[x->b + i]);
+		break;
+	case N_IF:
+		instrument_returns(c, fn, x->b);
+		instrument_returns(c, fn, x->c);
+		break;
+	case N_WHILE: case N_DO: case N_SWITCH:
+		instrument_returns(c, fn, x->b);
+		break;
+	case N_FOR:
+		instrument_returns(c, fn, c->lists[x->c + 1]);
+		break;
+	case N_CASE: case N_DEFAULT: case N_LABEL:
+		instrument_returns(c, fn, x->c);
+		break;
+	case N_RETURN: {
+		uint32_t ex = profile_call(c, "__cyg_profile_func_exit", fn, x->loc), e = x->a;
+
+		if (!e || is_void(c, N(e)->ty)) {
+			N(st)->a = e ? mk2(c, N_COMMA, prim(TY_VOID), x->loc, e, ex) : ex;
+		} else {
+			uint32_t pre, t;
+
+			/* return (tmp = e, exit(), tmp) */
+			t = cplx_reuse(c, e, &pre);
+			if (!pre) {
+				uint32_t s = sym_new(c, S_VAR, 0, QUNQ(N(e)->ty), x->loc);
+
+				c->syms[s].sc = SC_AUTO;
+				t = mk(c, N_VAR, QUNQ(N(e)->ty), x->loc);
+				N(t)->a = s;
+				N(t)->flags = NF_LVALUE;
+				pre = mk2(c, N_ASSIGN, QUNQ(N(e)->ty), x->loc, t, e);
+			}
+			N(st)->a = mk2(c, N_COMMA, N(t)->ty, x->loc, pre, mk2(c, N_COMMA, N(t)->ty, x->loc, ex, rvalue(c, t)));
+		}
+		break;
+	}
+	default:
+		break;
+	}
+}
+
+static uint32_t instrument(cc *c, uint32_t fn, uint32_t body)
+{
+	vec items;
+	uint32_t loc = N(body)->loc;
+
+	instrument_returns(c, fn, body);
+	vinit(&items);
+	vpush(c, &items, mkstmt(c, N_EXPR, loc, profile_call(c, "__cyg_profile_func_enter", fn, loc), 0, 0));
+	for (uint32_t i = 0; i < N(body)->c; i++)
+		vpush(c, &items, c->lists[N(body)->b + i]);
+	vpush(c, &items, mkstmt(c, N_EXPR, loc, profile_call(c, "__cyg_profile_func_exit", fn, loc), 0, 0));
+	return mkstmt(c, N_BLOCK, loc, 0, vfreeze(c, &items), items.n);
 }
 
 static void function_def(cc *c, uint32_t s, const declr *d)
@@ -6552,8 +8284,10 @@ static void function_def(cc *c, uint32_t s, const declr *d)
 	uint32_t body, first_label = c->nlabel;
 	uint32_t saved_fn = c->fn;
 
-	if (c->syms[s].flags & SF_DEFINED && !(c->syms[s].flags & SF_GNU_INLINE))
+	if (c->syms[s].flags & SF_DEFINED && !(c->syms[s].flags & SF_GNU_INLINE)) {
 		error(c, d->loc, "redefinition of '%.*s'", IDF(d->name));
+		note(c, c->syms[s].loc, "previous definition is here");
+	}
 	c->syms[s].flags |= SF_DEFINED;
 	c->fn = s;
 	scope_open(c);
@@ -6567,6 +8301,23 @@ static void function_def(cc *c, uint32_t s, const declr *d)
 	c->in_loop = c->in_switch = 0;
 	body = compound_stmt(c, NULL);
 	scope_close(c);
+	{
+		/* side effects of decayed VLA parameter sizes run first, in order */
+		vec items;
+
+		vinit(&items);
+		for (uint32_t i = 0; i < d->npsyms; i++) {
+			uint32_t p = c->lists[d->psyms + i];
+
+			if (c->syms[p].body)
+				vpush(c, &items, mkstmt(c, N_EXPR, c->syms[p].loc, c->syms[p].body, 0, 0));
+		}
+		if (items.n) {
+			for (uint32_t i = 0; i < N(body)->c; i++)
+				vpush(c, &items, c->lists[N(body)->b + i]);
+			body = mkstmt(c, N_BLOCK, N(body)->loc, 0, vfreeze(c, &items), items.n);
+		}
+	}
 	for (uint32_t l = first_label; l < c->nlabel; l++) {
 		label *lb = &c->labels[l];
 
@@ -6575,6 +8326,8 @@ static void function_def(cc *c, uint32_t s, const declr *d)
 		if (!lb->local && dget(c->ldir, lb->name) == l)
 			*dslot(c, c->ldir, lb->name) = 0;
 	}
+	if (c->o->instrument && !(c->syms[s].flags & (SF_NOINSTR | SF_ALWAYS_INLINE)))
+		body = instrument(c, s, body);
 	c->syms[s].body = body;
 	/* for the emitter: the parameter syms, on the body block */
 	N(body)->a = d->psyms;
@@ -6827,6 +8580,19 @@ static void type_str(cc *c, qty t, const char *inner, tbuf *out, bool *ok)
 	tb_put(out, b.s, b.n);
 }
 
+/* t as clang spells it in diagnostics (four buffers in rotation) */
+static const char *tyname(cc *c, qty t)
+{
+	static tbuf b[4];
+	static int k;
+	bool ok = true;
+	tbuf *o = &b[k++ & 3];
+
+	o->n = 0, o->s[0] = 0;
+	type_str(c, t, "", o, &ok);
+	return o->s;
+}
+
 static void layout_checks(cc *c)
 {
 	obuf o = { malloc(1 << 20), 0, 1 << 20, c->o->outfd };
@@ -6932,6 +8698,7 @@ static void cc_init(cc *c, pp *p, const cc_opts *o)
 	c->tlasm = vmreg_get(&ccr[14], (size_t)1 << 24, "cc.tlasm");
 	c->heap = c->hp = vmreg_get(&ccr[15], (size_t)1 << 32, "cc.heap");
 	c->ptrc = vmreg_get(&ccr[16], (size_t)1 << 30, "cc.ptrc");
+	c->span = vmreg_get(&ccr[17], (size_t)1 << 31, "cc.span");
 	c->hend = c->heap + ((size_t)1 << 32);
 	c->dops = halloc(c, DOPS_MAX * sizeof(dop));
 	c->ndops = 0;
@@ -6944,6 +8711,7 @@ static void cc_init(cc *c, pp *p, const cc_opts *o)
 	memset(c->fnhash, 0, c->fnhcap * sizeof(uint32_t));
 	/* index 0 of every table is "none" */
 	c->nsym = c->nnode = c->ntag = c->nlabel = c->nattr = c->nstr = 1;
+	memset(c->cplx, 0, sizeof(c->cplx));
 	c->nlist = 1;
 	/* basic types: index == kind */
 	for (int k = 0; k < TY_PTR; k++) {
@@ -7030,6 +8798,8 @@ static void cc_free(cc *c)
 	vmreg_put(&ccr[14], USED(c->ntlasm, c->tlasm));
 	vmreg_put(&ccr[15], (size_t)(c->hp - c->heap) + 64);
 	vmreg_put(&ccr[16], ((size_t)c->nty + 2) * 8 * sizeof(*c->ptrc));	/* indexed by qty */
+	vmreg_put(&ccr[17], USED(c->nnode, c->span));	/* indexed by node */
+	free(c->cases);
 #undef USED
 	vmpool_give(&ccpool, ccr);
 	ccr = NULL;
@@ -7055,6 +8825,16 @@ int cc_run(pp *p, const cc_opts *o)
 		fetch(c, &c->tk[0]);
 		c->ntk = 1;
 		translation_unit(c);
+		/* clang: a tentative definition of a never completed struct/union/enum */
+		for (uint32_t i = 1; i < c->nsym; i++) {
+			const sym *y = &c->syms[i];
+
+			if ((y->flags & (SF_TENTATIVE | SF_DEFINED)) == SF_TENTATIVE && y->kind == S_VAR &&
+			    (is_record(c, y->ty) || KIND(c, y->ty) == TY_ENUM) && !complete(c, y->ty) && lookup(c, y->name) == i) {
+				error(c, y->loc, "tentative definition has type '%s' that is never completed", tyname(c, y->ty));
+				note(c, c->tags[T(c, y->ty)->aux].loc, "forward declaration of '%s'", tyname(c, y->ty));
+			}
+		}
 	}
 	if (o->dump_layouts && !c->errors)
 		layout_checks(c);

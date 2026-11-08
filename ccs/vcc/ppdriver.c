@@ -368,11 +368,11 @@ static void obj_release(void)
 }
 
 /* lay out tl_obj and write it to out */
-static int write_obj(const char *cwd, const char *out, int outfd, int errfd)
+static int write_obj(const char *cwd, const char *out, int outfd, int errfd, int macho)
 {
 	unsigned long long t0 = nsnow();
 	vperf v0 = vperf_now();
-	size_t n = elf_finish(tl_obj);
+	size_t n = macho ? macho_finish(tl_obj) : elf_finish(tl_obj);
 	int r;
 
 	if (!n || tl_obj->has_err) {
@@ -383,7 +383,10 @@ static int write_obj(const char *cwd, const char *out, int outfd, int errfd)
 		dprintf(errfd, "vcc: error: object too large\n");
 		return 1;
 	}
-	elf_emit(tl_obj, tl_objbuf);
+	if (macho)
+		macho_emit(tl_obj, tl_objbuf);
+	else
+		elf_emit(tl_obj, tl_objbuf);
 	r = write_out(cwd, out, outfd, (const char *)tl_objbuf, n, errfd);
 	ppd_ns_obj += nsnow() - t0;
 	ppd_ph_add(PPD_PH_OBJ, v0);
@@ -406,18 +409,20 @@ int ppd_run(int argc, char **argv, const ppd_env *env)
 	const char *dirs_q[256], *dirs_i[1024], *dirs_s[256], *dirs_a[256], *all[2048];
 	int nq = 0, ni = 0, ns = 0, na = 0, n = 0;
 	const char *cmp = NULL, *out = NULL, *main_file = NULL, *depfile = NULL, *deptarget = NULL;
-	int errfd = env->errfd, status = 0, md = 0;
+	int errfd = env->errfd, status = 0, md = 0, dcolor = 0, nocaret = 0, elimit = 0, nwargs = 0;
+	const char **wargs = NULL;
 	char pmapbuf[4096];
 	jmp_buf jb;
 	vmreg *br = bufr = vmpool_take(&bufpool);
 	buf pre = { .r = &br[0] }, cmdl = { .r = &br[1] }, incl = { .r = &br[2] }, o = { 0 };
 	int darwin = 1, nostdinc = 0, asm_mode = 0, undef = 0;
-	int opt = 2, os = 0, pie = 0, pic = 0, freestanding = 0, cfi = 0, strict_align = 0, tiny = 0;
+	int opt = 2, os = 0, pie = 0, pic = 0, freestanding = 0, nobuiltin = 0, instr = 0, cfi = 0, strict_align = 0, tiny = 0, gregs = 0;
 	pp_opts po = { 0 };
 	char *pmap = NULL;
 	double t0;
 	pp *p;
 	int syntax = 0, layout = 0, ms_anon = 0, short_wchar = 0, tokhash = 0, emit = 0, objmode = 0;
+	int std = 0, strict = 0, wimpl_int = 0, wimpl_fn = 0, gnu89_inline = -1;
 	char objbuf[1024];
 
 	for (int i = 1; i < argc; i++) {
@@ -431,6 +436,42 @@ int ppd_run(int argc, char **argv, const ppd_env *env)
 		if (!strcmp(a, "-c")) { objmode = 1; continue; }
 		if (!strcmp(a, "-fms-anonymous-structs") || !strcmp(a, "-fms-extensions")) { ms_anon = 1; continue; }
 		if (!strcmp(a, "-fshort-wchar")) { short_wchar = 1; continue; }
+		if (!strcmp(a, "-fcolor-diagnostics") || !strcmp(a, "-fdiagnostics-color") || !strcmp(a, "-fdiagnostics-color=always")) { dcolor = 1; continue; }
+		if (!strcmp(a, "-fno-color-diagnostics") || !strcmp(a, "-fno-diagnostics-color") || !strcmp(a, "-fdiagnostics-color=never")) { dcolor = -1; continue; }
+		if (!strcmp(a, "-fdiagnostics-color=auto")) { dcolor = 0; continue; }
+		if (!strcmp(a, "-fno-caret-diagnostics")) { nocaret = 1; continue; }
+		if (!strcmp(a, "-fcaret-diagnostics")) { nocaret = 0; continue; }
+		if (!strncmp(a, "-ferror-limit=", 14)) { elimit = atoi(a + 14); elimit = elimit ? elimit : -1; continue; }
+		if (!strncmp(a, "-std=", 5)) {
+			/* clang's spellings: c89 c90 iso9899:1990 gnu89 gnu90 c99 gnu99 c11 gnu11 c17 c18 gnu17 c23 c2x gnu23 ... */
+			static const struct { const char *s; int v; } stds[] = {
+				{ "89", 89 }, { "90", 89 }, { "1990", 89 }, { "199409", 89 }, { "99", 99 }, { "9x", 99 },
+				{ "1999", 99 }, { "11", 11 }, { "1x", 11 }, { "2011", 11 }, { "17", 17 }, { "18", 17 },
+				{ "2017", 17 }, { "2018", 17 }, { "23", 23 }, { "2x", 23 }, { "2y", 23 }, { "2024", 23 },
+			};
+			const char *v = a + 5;
+
+			strict = strncmp(v, "gnu", 3) != 0;
+			v += strncmp(v, "gnu", 3) == 0 ? 3 : v[0] == 'c' ? 1 : strncmp(v, "iso9899:", 8) == 0 ? 8 : 0;
+			for (size_t k = 0; k < sizeof(stds) / sizeof(stds[0]); k++)
+				if (!strcmp(v, stds[k].s))
+					std = stds[k].v;
+			continue;
+		}
+		if (!strcmp(a, "-ansi")) { std = 89; strict = 1; continue; }
+		if (!strcmp(a, "-fgnu89-inline")) { gnu89_inline = 1; continue; }
+		if (!strcmp(a, "-fno-gnu89-inline")) { gnu89_inline = 0; continue; }
+		if ((a[1] == 'W' && a[2] && a[3] != ',') || !strcmp(a, "-w")) {
+			/* warning options, in order, for pp_wstate (some are also handled below) */
+			if (!wargs)
+				wargs = calloc((size_t)argc + 1, sizeof(*wargs));
+			wargs[nwargs++] = a;
+		}
+		if (!strcmp(a, "-Wno-implicit-int") || !strcmp(a, "-Wno-error=implicit-int")) { wimpl_int = 1; continue; }
+		if (!strcmp(a, "-Wno-implicit-function-declaration") || !strcmp(a, "-Wno-error=implicit-function-declaration")) {
+			wimpl_fn = 1;
+			continue;
+		}
 		if (!strcmp(a, "--vcc-layout-checks")) { syntax = 1; layout = 1; continue; }
 		if (!strcmp(a, "--vcc-tokhash")) { tokhash = 1; continue; }
 		if (!strcmp(a, "-o") && i + 1 < argc) { out = argv[++i]; continue; }
@@ -468,9 +509,12 @@ int ppd_run(int argc, char **argv, const ppd_env *env)
 		else if (!strcmp(a, "-fPIC")) pic = 2;
 		else if (!strcmp(a, "-fno-PIE") || !strcmp(a, "-fno-pie")) pie = 0;
 		else if (!strcmp(a, "-ffreestanding")) freestanding = 1;
+		else if (!strcmp(a, "-fno-builtin")) nobuiltin = 1;
+		else if (!strcmp(a, "-finstrument-functions")) instr = 1;
 		else if (!strcmp(a, "-fasynchronous-unwind-tables")) cfi = 1;
 		else if (!strcmp(a, "-fno-asynchronous-unwind-tables")) cfi = 0;
 		else if (!strcmp(a, "-mstrict-align")) strict_align = 1;
+		else if (!strcmp(a, "-mgeneral-regs-only")) gregs = 1;
 		else if (!strcmp(a, "-mcmodel=tiny")) tiny = 1;
 		else if (a[0] != '-' && (strstr(a, ".c") || strstr(a, ".S") || strstr(a, ".dts"))) {
 			size_t l = strlen(a);
@@ -508,6 +552,9 @@ int ppd_run(int argc, char **argv, const ppd_env *env)
 			ADD(VCC_INCDIR);
 		ADD(dirs_s[k]);
 	}
+	/* Darwin: vcc's own <stdatomic.h>, <arm_neon.h>, <arm_acle.h> ahead of the SDK's */
+	if (darwin && !nostdinc)
+		ADD(VCC_INCDIR);
 	if (darwin && !nostdinc)
 		for (size_t k = 0; k < sizeof(sysdirs_darwin) / sizeof(sysdirs_darwin[0]); k++)
 			ADD(sysdirs_darwin[k]);
@@ -525,6 +572,23 @@ int ppd_run(int argc, char **argv, const ppd_env *env)
 		bstr(&pre, darwin ? predef_darwin : predef_aarch64_linux);
 	if (asm_mode && !undef)
 		bstr(&pre, "#define __ASSEMBLER__ 1\n#undef __STDC_VERSION__\n#define __STDC_VERSION__ 201710L\n");
+	else if (!undef && std) {
+		/* the tables are for -std=gnu11 (the kernel's); other standards as clang predefines them */
+		static const char *const ver[] = { [89] = NULL, [99] = "199901L", [11] = "201112L", [17] = "201710L", [23] = "202311L" };
+
+		bstr(&pre, "#undef __STDC_VERSION__\n");
+		if (ver[std]) {
+			bstr(&pre, "#define __STDC_VERSION__ ");
+			bstr(&pre, ver[std]);
+			bstr(&pre, "\n");
+		} else {
+			bstr(&pre, "#undef __GNUC_STDC_INLINE__\n#define __GNUC_GNU_INLINE__ 1\n");
+		}
+		if (strict)
+			bstr(&pre, "#define __STRICT_ANSI__ 1\n#undef linux\n#undef unix\n");
+	} else if (!undef && !asm_mode) {
+		bstr(&pre, "#undef __STDC_VERSION__\n#define __STDC_VERSION__ 201710L\n");
+	}
 	po.target = darwin ? PP_DARWIN : PP_LINUX_AARCH64;
 	if (opt == 0) bstr(&pre, "#undef __OPTIMIZE__\n#define __NO_INLINE__ 1\n");
 	if (os) bstr(&pre, "#define __OPTIMIZE_SIZE__ 1\n");
@@ -539,7 +603,20 @@ int ppd_run(int argc, char **argv, const ppd_env *env)
 			bstr(&pre, b);
 		}
 	}
+	if (gnu89_inline < 0)
+		gnu89_inline = std == 89;
+	else if (!undef && !asm_mode)
+		bstr(&pre, gnu89_inline ? "#undef __GNUC_STDC_INLINE__\n#undef __GNUC_GNU_INLINE__\n#define __GNUC_GNU_INLINE__ 1\n"
+					: "#undef __GNUC_GNU_INLINE__\n#undef __GNUC_STDC_INLINE__\n#define __GNUC_STDC_INLINE__ 1\n");
 	if (freestanding) bstr(&pre, "#undef __STDC_HOSTED__\n#define __STDC_HOSTED__ 0\n");
+	if (!darwin && !short_wchar && !asm_mode && !undef)	/* the Linux table is for the kernel's -fshort-wchar */
+		bstr(&pre, "#undef __ARM_SIZEOF_WCHAR_T\n#define __ARM_SIZEOF_WCHAR_T 4\n"
+			   "#undef __SIZEOF_WCHAR_T__\n#define __SIZEOF_WCHAR_T__ 4\n"
+			   "#undef __WCHAR_MAX__\n#define __WCHAR_MAX__ 4294967295U\n"
+			   "#undef __WCHAR_MIN__\n#define __WCHAR_MIN__ 0U\n"
+			   "#undef __WCHAR_TYPE__\n#define __WCHAR_TYPE__ unsigned int\n"
+			   "#undef __WCHAR_WIDTH__\n#define __WCHAR_WIDTH__ 32\n"
+			   "#undef __clang_wide_literal_encoding__\n#define __clang_wide_literal_encoding__ \"UTF-32\"\n");
 	if (cfi) bstr(&pre, "#define __GCC_HAVE_DWARF2_CFI_ASM 1\n");
 	if (strict_align) bstr(&pre, "#undef __ARM_FEATURE_UNALIGNED\n");
 	if (tiny) bstr(&pre, "#undef __AARCH64_CMODEL_SMALL__\n#define __AARCH64_CMODEL_TINY__ 1\n");
@@ -551,6 +628,10 @@ int ppd_run(int argc, char **argv, const ppd_env *env)
 	po.unsigned_char = !darwin;
 	po.cwd = env->cwd;
 	po.errfd = errfd;
+	po.diag_color = dcolor;
+	po.diag_nocaret = nocaret;
+	po.error_limit = elimit;
+	po.wargs = wargs, po.nwargs = nwargs;
 	po.asm_mode = asm_mode;
 	if (pmap) {
 		char *eq = strchr(pmap, '=');
@@ -614,6 +695,9 @@ int ppd_run(int argc, char **argv, const ppd_env *env)
 	}
 	if (syntax) {
 		cc_opts co = { .target = po.target, .unsigned_char = po.unsigned_char, .dump_layouts = layout, .ms_anon = ms_anon, .short_wchar = short_wchar,
+				.std = std, .implicit_int = std == 89 || wimpl_int, .implicit_fn = std == 89 || wimpl_fn,
+				.gnu89_inline = gnu89_inline, .no_builtin = freestanding || nobuiltin, .instrument = instr,
+				.general_regs_only = gregs,
 			       .outfd = env->outfd };
 		int fd = -1;
 
@@ -647,7 +731,7 @@ int ppd_run(int argc, char **argv, const ppd_env *env)
 		if (fd >= 0)
 			close(fd);
 		if (!status && emit == 2)
-			status = write_obj(env->cwd, out, env->outfd, errfd);
+			status = write_obj(env->cwd, out, env->outfd, errfd, darwin);
 		if (!status && emit == 2 && depfile)
 			status = write_deps(p, env->cwd, depfile, deptarget ? deptarget : out, errfd);
 		if (getenv("VPP_TIME"))
@@ -680,7 +764,7 @@ int ppd_run(int argc, char **argv, const ppd_env *env)
 			dprintf(errfd, "vcc: error: %s\n", msg);
 			status = 1;
 		} else {
-			status = write_obj(env->cwd, out, env->outfd, errfd);
+			status = write_obj(env->cwd, out, env->outfd, errfd, 0);
 		}
 		if (!status && depfile)
 			status = write_deps(p, env->cwd, depfile, deptarget ? deptarget : out, errfd);
@@ -690,6 +774,7 @@ int ppd_run(int argc, char **argv, const ppd_env *env)
 			status = write_deps(p, env->cwd, depfile, deptarget ? deptarget : out ? out : "-", errfd);
 	}
 done:
+	pp_diag_summary(p);
 	pp_close(p);	/* frees the text in o */
 out:
 	bfree(&pre);

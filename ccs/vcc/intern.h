@@ -29,7 +29,7 @@
 	X(__alignof) X(__auto_type) X(__label__) X(__builtin_va_arg) \
 	X(__builtin_offsetof) X(__builtin_types_compatible_p) \
 	X(__builtin_choose_expr) X(__int128) X(_Float16) X(__fp16) \
-	X(__thread) X(__real__) X(__imag__) X(_Complex) X(static_assert) \
+	X(__thread) X(__real__) X(__imag__) X(_Complex) X(__complex__) X(__complex) X(__real) X(__imag) X(static_assert) \
 	X(bool) X(true) X(false) X(nullptr) X(alignof) X(alignas) \
 	X(thread_local) \
 	/* preprocessor */ \

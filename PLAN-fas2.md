@@ -400,6 +400,89 @@ aldrig i bygget. Ett TU-test (`bench/vcc-diff.py`) körs över alla kärnfiler.
 - **Acceptans:** `Image` + `modules` byggs, **10 990 kompilerade av vcc, 0 till clang** (215,6 s med last från annat; tidigare körningar ~150 s). Sviterna gröna: paritet 911/912, sema 878/879 + 878/879, obj 840/840, cbatch 840/840, vas 30/30.
 - **Kvar:** boottest av modulkärnan; tidsjämförelse mot clang-baslinjen (575,6 s) på en lugn maskin.
 
+### Status 2.11 (2026-11-08): vcc kompilerar sig själv (macOS, Mach-O)
+- `macho.c`: `ElfObj` → Mach-O `MH_OBJECT` (sektioner, symboler, ARM64_RELOC_* med ADDEND/SUBTRACTOR); `elf_finish` delad i layout + fixups så att båda format delar allt utom utskriften. `ppdriver.c` skriver Mach-O för Darwin-mål.
+- `emit.c`, Apples arm64-ABI: `_`-prefix, GOT för allt som inte definieras i TU:n, variadiska argument på stacken, packade stackskalärer; flyttal (bitmönster i GPR, beräkning i v16/v17, argument i v0–v7, konstanter vikta på värden; float↔`__int128` via `__floatti*`/`__fix*ti`); `__atomic_*` (LSE, alltid seq_cst); TLV (`__thread_vars`/`__tlv_bootstrap`); VLA (allokeras under sp som alloca, sp återställs via cleanup-stacken vid block-slut, break, goto, return).
+- `ccs/vcc/include/`: egna `stdatomic.h` och `arm_acle.h`; `arm_neon.h` är 2.10:s (GNU-vektorer) utökad med det vcc:s lexer använder (cmeq/cmtst/cmhs, `vsriq_n_u8`; `vld4q_u8`, `vqtbl4q_u8` och `vshrn_n_u16` per lane eftersom vas saknar ld4/tbl med fyra register/shrn). Katalogen läggs före SDK:n vid Darwin (`VCC_INCDIR`). cc.c: `?:` med två vektorer av samma typ (clang godtar).
+- `make -C ccs self` kompilerar alla 22 källor med vcc och länkar steg 2 (vpp, vccd, vasm, vlink, lextest, vcc) med ld64; `make -C ccs self-check` bygger steg 3 med steg 2 och kräver identiska objekt.
+- **Acceptans:** steg 2 ↔ steg 3 **byte-identiska (22/22 objekt)**; steg 2-`vpp`: paritet 911/912 (modpost.c som förut), `vcc-sema.py run` 878/879, kärnans 840 objekt byte-identiska med steg 1; steg 1 oförändrat mot föregående commit (0 av 840). `bench/vcc-diff.py` tar `VPP=` från miljön.
+- **Tid:** självkompilering 1,5 s (en tråd, sekventiellt). Steg 2-`vpp` är ~2,6× långsammare än clang `-O3`-bygget (kärnbatch `-j 6`: 4,1 → 10,6 s vägg) — vcc har ingen optimerare.
+- **Kvar:** HFA-argument (fatalt fel), `long double` bara som double; optimering i emittern om steg 2 ska ersätta clang-bygget.
+
+### Status testsviter (2026-11-08): gcc c-torture + tcc tests2 importerade
+
+`ccs/vcc/tests/gcc-torture/execute` (gcc e6bf7e6f, 1 701 test, GPL-3) och
+`ccs/vcc/tests/tcc-tests2` (tinycc 70adbb12, 145 test, LGPL-2.1), oförändrade;
+README där om källa, licens, uppdatering och varför just de (självkontrollerande
+körtester i GNU C, utan dejagnu; gcc.dg/clang-lit bundna till sina diagnostiker).
+`bench/vcc-ctests.py -j 6`: varje test byggs av clang (orakel, cachat) och av
+`vpp -c`, länkas med en egen bare-metal-runtime (`tests/rt`: start.S, liten libc,
+byggd av clang) och körs i `qemu-system-aarch64 -M virt` (semihosting ger
+exitkoden); vcc godkänns när utskrift och exitkod är clangs.  Kallt ~2 min,
+med cachade referenser ~40 s.  Hoppar över tcc-specifika test, sådant clang
+avvisar och sådant clangs bygge inte klarar på runtimen (long double utan
+compiler-rt, fil-I/O).
+
+| | gcc | tcc |
+|---|---|---|
+| utgångsläge | 1193/1589 (75,1 %) | 74/103 (71,8 %) |
+| K&R, implicit int/funktion, `-std=` | 1306 (82,2 %) | 75 |
+| main utan return ger 0 (strcmp på ointernerat namn) | 1344 (84,6 %) | 78 |
+| för lång strängstart i char-array | 1348 | 78 |
+| SHF_MERGE-reloc med addend mot symbolen (som MC), `__builtin_expect`-sidoeffekter, wchar_t utan `-fshort-wchar` | **1353 (85,1 %)** | **80 (77,7 %)** |
+
+Kvarvarande fel (gcc+tcc): **fp 131** (flyttal, egen gren pågår), **fe 60**
+(vektortyper 40, `__complex__`/`i`-suffix 10, nästlade/okända konstruktioner),
+**emit 41** (okänd builtin 55 = `__builtin_*_overflow` m.fl. 15, VLA 11, asm-`g`-
+constraint 10, `.Ltmp`-etikett 2, 128-bit switch), **link 14** (implicit `alloca`
+borde bli builtin 3, `link_error`-test som kräver konstantvikning 5,
+`__sync_add_and_fetch`, `__udivti3`), **run 13** (VLA-parametrars storleksuttryck
+med sidoeffekter 970217-1/pr77767, `__builtin_return_address`, beräknad goto i
+comp-goto-1, va-arg-21, konstruktorordning 108_constructor, 39_typedef, 129_scopes).
+Nästa mål: builtins för overflow, VLA, asm `g`, sedan FP när den grenen landar.
+Predef-tabellen för Linux har kärnans flaggor inbakade (`-mgeneral-regs-only`
+tar bort `__ARM_NEON`/`__ARM_FP`); bör justeras när FP finns.
+
+Efter merge med main (FP, vektorer, overflow-builtins, VLA från 2.10/2.11):
+gcc 1453/1589 (91,4 %), tcc 90/103 (87,4 %).  Därefter: implicit `alloca` som
+builtin, pekare till VLA skalar med elementets körtidsstorlek, `register`-lokaler
+utan initierare får N_DECL (platsen allokerades lat inne i en loop och
+återanvändes efter `foff = mark`: 20000801-1/20000815-1 hängde), `-fgnu89-inline`
+→ **gcc 1463 (92,1 %), tcc 90 (87,4 %)**.  Kvar: fe 51 (vektoroperationer,
+`__complex__`), emit 45 (builtin 57/67, asm `g`, HFA-argument 9), fp 21
+(flyttals-va_arg 12, 128-bitars flyttal 6), link 8 (kräver optimerare:
+`link_error`-test), run 14.
+
+Gren claude/vcc-ctests-3 (2026-11-08), en commit per steg, alla grindar gröna
+efter varje: GNU-vektorernas luckor, flyttals-va_arg (v-registrens sparområde,
+`__vr_top`/`__vr_offs`), HFA-argument/-resultat/-va_arg (nästlade poster och
+arrayer; överjusterade på stacken 16-justerade), `va_end` utvärderar sitt
+argument, C23 `[[...]]`-attribut (`gnu::`/`clang::` blir GNU-attribut), gamla
+`fält: värde`-designatorer, `__sync_*`, isnan/isinf/signbit m.fl. i körtid,
+128-bitars switch, K&R-float-parametrar som double, sammansatta literaler lever
+till blockets slut (platsen återanvändes av senare satsers temporärer), C99:s
+satsscope (if/switch/loopar och deras delsatser är block), `destructor`,
+ingen inlining av funktioner vars statiska lokal håller `&&label`, `_Complex`
+(post `{ T re, im; }`, sänkt i sema till delarna: N_CPLX; ABI som HFA/två ord),
+overflow-builtins som satser (ströks förut!), 128-bitars overflow-resultat,
+VLA-parametrars storleksuttryck med sidoeffekter, bitfält över 8 byte, UTF-8 i
+symbolnamn (vas), `__udivti3` m.fl. i test-runtimen, qemu `-cpu max` (LSE).
+→ **gcc 1572/1588 (99,0 %), tcc 99/101 (98,0 %)**, totalt 1671/1689 (98,9 %).
+
+Därefter (samma gren): `long double` som binary128 (mjukflyttal `__addtf3`,
+`__multf3`, `__divtf3`, jämförelser, konverteringar i test-runtimen, bara
+heltalsoperationer; i emittern registerpar, q-register i ABI:n, HFA:er av
+long double, va_arg), `abs`/`labs`/`llabs` som builtins, `-finstrument-functions`,
+etikettdifferenser i statiska initierare, NRVO-ordning för cleanup vid retur av
+lokal post (som clang), isnan/isinf (vänsterskiftet var ett högerskift),
+libm-funktioner på konstanter viks, const-flyttalsglobaler viks, och små
+optimeringar som `link_error`-testen kräver: skift med 0/0-skift,
+x op x och motsägande/kompletterande jämförelser i &&/||, intervall för
+`a || b` under a:s negation, spårade konstanter i lokala arrayelement `a[K]`
+som aldrig flyr, fabs-icke-negativa flyttalslokaler.
+→ **1708/1708 (100 %)**, 136 överhoppade (clang avvisar 69, clangs bygge
+klarar inte runtimen 34, tcc-specifika 32, kompilatorspecifikt 1).
+
 ## Risker
 - **GNU C-ytan och inline asm** är det stora jobbet. Uppskattat: lexer + pp ~2 kloc,
   parser + sema ~10–15 kloc, emitter ~5 kloc, assembler ~4 kloc, länkare ~3 kloc.
@@ -456,3 +539,41 @@ aldrig i bygget. Ett TU-test (`bench/vcc-diff.py`) körs över alla kärnfiler.
 - **Egen `ar` i vccd + dash (klart, 2026-11-08):** `ccs/vcc/ar.c`: tunna arkiv med r/m/t och modifierarna c D P s S T u i b a samt `--thin`, allt Kbuild gör med `$(AR)` (`cDPrST` per katalog, `cDPrsT` för lib.a med symboltabell, `mPi` + `t` för built-in-fixup.a, `cDPrS --thin`). Byte-identiskt med llvm-ar, även dess regler: nästlade tunna arkiv plattas ut, `r` byter ut en befintlig medlem på plats, `m` flyttar i arkivordning före/efter POS (POS jämförs bokstavligt med lagrade namn), symboltabell bara om någon medlem är ELF (tom: 8 byte), sökvägar relativa lexikalt. Shimmen under namnet `var` (även `ar`, `llvm-ar`) → vccd kör den i arbetartråden; **ingen llvm-ar i bygget, ingen reserv**. `bench/kbuild.py --ar/--shell`; `bench/vccd-kbuild.sh` använder `var` och `/bin/dash` som `SHELL`/`CONFIG_SHELL` för hela körningen (`VCC_AR=0`, `KB_SHELL=` = som förut).
   - **Verifierat:** `bench/var-cmp.py` (llvm-ar bara som referens): alla 416 sparade arkivkommandon i ett llvm-ar-träd ger byte-identiska arkiv, `t` identisk för 8 sökvägsformer, 40/40 kantfall (dubbletter, nästlade, saknad fil, r på befintligt arkiv, mPi/mPa/mPb, ELF utan symboler, icke-ELF, arkiv i underkatalog). Kallt bygge: alla 417 `.a`, `vmlinux` och `Image` byte-identiska med llvm-ar + bash-bygget; `.cmd` skiljer bara i AR-sökvägen och `CONFIG_SHELL`; Debian bootar till `running`, 0 felande enheter (`results/boot-20261108-171002.log`).
   - **A/B** (alternerande ×3, last 9 → 22 av andra sessioner, väggtid oanvändbar: 17,4/24,2/25,2 → 18,0/21,9/21,3 s): byggets barnprocesser **18 + 25 → 11 + 20–21 CPU-s (user + sys), ~12 CPU-s (27 %) mindre**. ar i vccd: 422 jobb, i snitt 3,6 ms (förut ~44 ms CPU per llvm-ar-process).
+- **Sammanslagning med main (diagnostik, _Complex, long double, … t.o.m. 8094aeb), 2026-11-08:** main@8094aeb bootade inte (ingen konsolutskrift alls). Bisekterat till 26c2d50 (flyttals-`va_arg`): varje variadisk funktion sparade v0–v7 i prologen även med `-mgeneral-regs-only`, så kärnans första `printk` rörde FP-register innan FP slagits på. Nu som clang: med `-mgeneral-regs-only` ingen v-sparyta, `__vr_offs` 0 och `__vr_top` = `__gr_top` (`cc_opts.general_regs_only`). Dessutom: deklarationscachens ögonblicksbilder bar med sig andra TU:ers `c->cases`/`c->span` (11 felaktiga "duplicate case value" i cbatch); `span` är nu en egen array i bilden (med platskodning), `cases` behålls per TU.
+  - **Verifierat:** paritet 911/912, sema run 878/879, warn 879/879, layout 878/879, ctests 1708/1708, diag 63/63, cbatch 840/840 (samma stderr med och utan deklarationscache), vcc-obj 840/840, vas 30/30, var-cmp 416/416 + 8/8 + 40/40. Kallt bygge 13,9 s (last ~8), 877 av vcc, 0 till clang; Debian bootar till `running` (`results/boot-20261108-174855.log`).
+
+### Felmeddelanden (clang-format)
+
+Status: `bench/vcc-diag.py` jämför vccs stderr med clangs (-fsyntax-only) på
+`ccs/vcc/tests/diag/*.c`: 63/63 identiska (från 4/48).  `bench/vcc-sema.py
+warn` kör vcc och clang med kärnans flaggor på alla 879 TU:er och kräver att
+varje diagnostik vcc skriver också skrivs av clang: 879/879 (inga falska
+varningar).
+
+Motorn i pp.c skriver clangs format (källrad, caret, intervall `~`, fix-it-rad
+med clangs utfyllnad, "In file included from", färger, "N errors generated.",
+sökvägen som den stavats, "./a.h" för includes från en fil utan katalog, även
+i `__FILE__` som i clang).  cc.c: intervall per nod (`c->span`),
+`report()`/`note()`/`warnx()`, typnamn, stavningsförslag med återhämtning,
+NF_ERR mot följdfel, "expected ';' after …" med fix-it, int-conversion och
+incompatible-pointer-types per sammanhang med parameternot, antal argument
+("expected single argument 'a'", parameterlistans intervall i "declared
+here"), dubbla case-värden/medlemmar, tentativa ofullständiga typer,
+static_assert med "expression evaluates to", `.`/`->`, omatchade parenteser,
+"declared const here" med deklarationens intervall, -ferror-limit (19 fel +
+fatal utan position).  Varningsramverk: -W/-Wno-/-Werror(=)/-Wno-error=/-w i
+ordning, grupper (all, most, everything), tysta i systemhuvuden och för
+operatorer från makron (PF_MACRO): -Wparentheses, -Wunused-comparison,
+-Wswitch, -Wmacro-redefined.  pp: #error/#warning, oavslutade villkor,
+saknad include, makroargument med "macro 'X' defined here".
+
+"expanded from macro": caret och intervall över hela anropet, noten vid
+kroppens token (hittas vid diagnosen via `#define`-raden, så tokens bär ingen
+extra position); inga stavningsförslag för namn från makron (som clang).
+Nåbarhetsvarningar: -Wdivision-by-zero, -Wshift-count-overflow/-negative,
+-Warray-bounds ("array 'a' declared here"), tysta i kod som inte nås
+(if/?:/&&/|| på konstanter).  Hittills bara för odeklarerade identifierare i
+makron.
+
+Kvar: noten för fler diagnostiker än odeklarerade namn, nästlade makron (en
+nivå i dag), fler -Wall-varningar.

@@ -61,7 +61,7 @@ static void *worker(void *arg)
 	for (;;) {
 		int k = atomic_fetch_add(&nextjob, 1);
 		job *j;
-		ppd_env e = { bdir, nul, nul };
+		ppd_env e = { bdir, nul, getenv("VPP_BATCH_ERR") ? 2 : nul };
 		double t0;
 
 		if (k >= njobs)

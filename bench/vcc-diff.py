@@ -25,7 +25,7 @@ def work_dir():
     return f'{R}/work'
 W = os.environ.get('VROOM_WORK') or work_dir()
 B = f'{W}/build-o0'; REF = f'{W}/ppref'
-CL = '/opt/homebrew/opt/llvm/bin/clang'; VPP = f'{R}/build/ccs/vpp'
+CL = '/opt/homebrew/opt/llvm/bin/clang'; VPP = os.environ.get('VPP', f'{R}/build/ccs/vpp')
 
 def tu_args(cmd):
     """(object, clang args without -c/-E/-o/-MMD) for a C TU, a .S file, or a

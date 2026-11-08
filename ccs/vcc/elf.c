@@ -381,6 +381,9 @@ static uint32_t get32(uint8_t *p) { return p[0] | p[1] << 8 | p[2] << 16 | (uint
 static int fits(int64_t v, int bits) { return v >> (bits - 1) == 0 || v >> (bits - 1) == -1; }
 
 /* Apply a resolved value to the field. */
+static void patch(ElfObj *o, ElfFix *x, int64_t v);
+void elf_patch(ElfObj *o, ElfFix *x, int64_t v) { patch(o, x, v); }
+
 static void patch(ElfObj *o, ElfFix *x, int64_t v)
 {
 	uint8_t *p = x->p;
@@ -455,7 +458,11 @@ static Out out_of(ElfObj *o) { (void)o; Out z; memset(&z, 0, sizeof z); return z
 static void reloc(ElfObj *o, Out *w, ElfFix *x, uint64_t P, uint32_t type, ElfSym *a, uint32_t aid, int64_t add)
 {
 	uint32_t s = elf_frag(o, x->frag)->sec;
-	if (a && insec(a) && a->bind == STB_LOCAL && !(a->flags & ESYM_SECTION) && a->type != STT_GNU_IFUNC) {
+	/* local symbols become section + offset, except (MC's shouldRelocateWithSymbol) in a
+	 * SHF_MERGE section with an addend: the linker would find the piece at offset+addend,
+	 * so "" + 1 could land in the next string */
+	if (a && insec(a) && a->bind == STB_LOCAL && !(a->flags & ESYM_SECTION) && a->type != STT_GNU_IFUNC &&
+	    !(add && (elf_sec(o, symsec(o, a))->flags & SHF_MERGE))) {
 		add += (int64_t)symoff(o, a);
 		aid = elf_sec(o, symsec(o, a))->sym;
 		elf_symp(o, aid)->flags |= ESYM_USED;
@@ -557,11 +564,28 @@ static void build_strtab(ElfObj *o, Out *w, Str *v, uint32_t n)
 
 static uint64_t al(uint64_t v, uint64_t a) { return (v + a - 1) & ~(a - 1); }
 
+static size_t elf_finish_tail(ElfObj *o, Out *w);
+
 size_t elf_finish(ElfObj *o)
 {
 	Out *w = rpush(&o->arena, sizeof *w, 8);
 	*w = out_of(o);
 	o->fin = w;
+	uint32_t ns = o->nsec;
+	elf_layout(o);
+	/* fixups, in layout order */
+	w->rel = rpush(&o->arena, sizeof(Rel) * (o->nfix + 1), 8);
+	ElfFix *fx = (ElfFix *)o->fixes.base;
+	for (uint32_t s = 1; s < ns; s++)
+		for (uint32_t f = s; f; f = elf_frag(o, f)->next)
+			for (uint32_t i = elf_frag(o, f)->fix_head; i; i = fx[i].next)
+				resolve(o, w, &fx[i]);
+	return elf_finish_tail(o, w);
+}
+
+/* frag bases, section sizes, .size expressions */
+void elf_layout(ElfObj *o)
+{
 	uint32_t ns = o->nsec;
 	/* layout */
 	for (uint32_t s = 1; s < ns; s++) {
@@ -626,13 +650,11 @@ size_t elf_finish(ElfObj *o)
 		}
 		elf_define_abs(o, e->sym, (uint64_t)r);
 	}
-	/* fixups, in layout order */
-	w->rel = rpush(&o->arena, sizeof(Rel) * (o->nfix + 1), 8);
-	ElfFix *fx = (ElfFix *)o->fixes.base;
-	for (uint32_t s = 1; s < ns; s++)
-		for (uint32_t f = s; f; f = elf_frag(o, f)->next)
-			for (uint32_t i = elf_frag(o, f)->fix_head; i; i = fx[i].next)
-				resolve(o, w, &fx[i]);
+}
+
+static size_t elf_finish_tail(ElfObj *o, Out *w)
+{
+	uint32_t ns = o->nsec;
 	if (o->has_err) return 0;
 	/* relocations are already grouped by section (sections processed in order) */
 	w->relbeg = rpush(&o->arena, sizeof(uint32_t) * (ns + 1), 8);

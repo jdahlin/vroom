@@ -86,6 +86,7 @@ typedef struct field {
 enum {
 	RF_COMPLETE = 1, RF_UNION = 2, RF_PACKED = 4, RF_FLEX = 8, RF_ENUM = 16,
 	RF_BEING_DEFINED = 32,
+	RF_COMPLEX = 64,	/* _Complex T: struct { T re, im; } (AAPCS64 passes it like that) */
 };
 
 typedef struct tag {
@@ -99,6 +100,7 @@ typedef struct tag {
 	uint32_t align;		/* bytes */
 	uint32_t maxalign;	/* aligned() on the record, bytes */
 	uint32_t typedef_name;	/* for anonymous records: first typedef naming it */
+	uint32_t enums, nenum;	/* enum: its enumerator syms (list) */
 } tag;
 
 /* ---------------- symbols ---------------- */
@@ -122,6 +124,7 @@ enum {
 	SF_ATTR_USED = 4096,
 	SF_ADDR_TAKEN = 8192,
 	SF_INLINE_NOEXTERN = 16384,	/* some declaration is 'inline' without 'extern' */
+	SF_NOINSTR = 65536,	/* no_instrument_function */
 	SF_OVERLOAD = 32768,	/* __attribute__((overloadable)): mangled name, member of an overload set */
 };
 
@@ -141,6 +144,8 @@ typedef struct sym {
 	uint32_t next;		/* previous declaration of the same entity (0: none) */
 	uint32_t ovl;		/* overloadable: the next function of the set (0: none); the set's
 				   first function is the one bound in the scope table */
+	uint32_t plb, ple;	/* function: its parameter list's first token and ')'; variable: its declaration's first and last token */
+	uint32_t psyms;		/* function: its latest prototype's parameter syms (list index + 1, 0: none) */
 } sym;
 
 /* ---------------- nodes ---------------- */
@@ -173,6 +178,7 @@ enum {
 	N_LABELADDR,	/* &&label: a: label */
 	N_VAARG,	/* a: va_list expr */
 	N_ZERO,		/* implicit zero initialization */
+	N_CPLX,		/* a + b i: a _Complex value from its parts (a, b of the element type) */
 	/* statements */
 	N_BLOCK,	/* b: list, c: count */
 	N_EXPR,		/* a */
@@ -202,9 +208,13 @@ enum {
 	CK_VOID,	/* -> void */
 	CK_UNION,	/* -> transparent union / GNU cast to union */
 	CK_NULL,	/* null pointer constant -> pointer */
+	CK_VBITS,	/* GNU vector -> scalar of the same size (the bits) */
+	CK_VADDR,	/* GNU vector rvalue -> pointer to its first lane (v[i] on an rvalue) */
 };
 
-enum { NF_LVALUE = 1, NF_BITFIELD = 2, NF_PAREN = 4, NF_NPC = 8 };
+enum { NF_LVALUE = 1, NF_BITFIELD = 2, NF_PAREN = 4, NF_NPC = 8,
+       NF_ERR = 16,
+       NF_MACRO = 32, NF_BOUNDS = 64 };	/* NF_BOUNDS: a[CONST] already checked (-Warray-bounds) */	/* NF_MACRO: the operator came from a macro expansion (no style warnings) */	/* NF_ERR: stands in for an expression already diagnosed (no follow-on errors) */
 
 typedef struct node {
 	uint8_t op, flags;
@@ -221,6 +231,13 @@ typedef struct cc_opts {
 	int unsigned_char;
 	int ms_anon;		/* -fms-anonymous-structs / -fms-extensions: "struct S;" members */
 	int short_wchar;	/* -fshort-wchar */
+	int std;		/* -std=: 89, 99, 11, 17, 23 (0: gnu17) */
+	int implicit_int;	/* implicit int allowed (-std=gnu89, -Wno-error=implicit-int) */
+	int gnu89_inline;	/* -std=gnu89 or -fgnu89-inline: plain inline is gnu_inline */
+	int instrument;		/* -finstrument-functions */
+	int general_regs_only;	/* -mgeneral-regs-only: no FP/SIMD registers (variadic: no v0-v7 save area) */
+	int no_builtin;		/* -ffreestanding / -fno-builtin: abs() etc. are plain calls */
+	int implicit_fn;	/* implicit function declarations allowed (... implicit-function-declaration) */
 	int dump_layouts;	/* append _Static_assert checks for clang to verify */
 	int outfd;
 	int emit;		/* generate code (emit.c): 1 = assembly text to outfd, 2 = object into obj */

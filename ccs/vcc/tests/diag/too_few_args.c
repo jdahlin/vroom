@@ -1,0 +1,5 @@
+int f(int a, int b);
+int g(void)
+{
+	return f(1);
+}
