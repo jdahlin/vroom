@@ -30,11 +30,13 @@
  */
 #include "ld.h"
 #include "ldhash.h"
+#include "vperf.h"
 
 #include <ctype.h>
 #include <errno.h>
 #include <fcntl.h>
 #include <pthread.h>
+#include <sched.h>
 #include <stdarg.h>
 #include <stdatomic.h>
 #include <stdbool.h>
@@ -43,6 +45,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/mman.h>
+#include <sys/resource.h>
 #include <sys/stat.h>
 #include <sys/sysctl.h>
 #include <time.h>
@@ -107,6 +110,14 @@ static void warn(const char *fmt, ...)
 
 static bool timing;
 static double t_last;
+static vperf p_last;			/* main thread's counters at the last phase */
+static long flt_last;			/* process minor faults at the last phase */
+static long minflt(void)
+{
+	struct rusage ru;
+	getrusage(RUSAGE_SELF, &ru);
+	return ru.ru_minflt;
+}
 static double now(void)
 {
 	struct timespec ts;
@@ -118,8 +129,13 @@ static void phase(const char *name)
 	if (!timing)
 		return;
 	double t = now();
-	fprintf(errf, "  %-28s %7.2f ms\n", name, (t - t_last) * 1e3);
+	vperf p = vperf_now(), d = vperf_sub(p, p_last);
+	long f = minflt();
+	fprintf(errf, "  %-28s %7.2f ms %8.1f M ins (main thread) %6ld faults\n", name, (t - t_last) * 1e3,
+		d.ins / 1e6, f - flt_last);
 	t_last = t;
+	p_last = p;
+	flt_last = f;
 }
 
 /* ---------------- arenas ---------------- */
@@ -131,6 +147,15 @@ static pthread_mutex_t blocklock = PTHREAD_MUTEX_INITIALIZER;
 static __thread uint8_t *acur, *aend;
 static _Atomic unsigned arena_gen;	/* bumped when all arenas are freed */
 static __thread unsigned my_gen;
+
+/* set by main for the last link of the process: exit tears the mappings down
+ * in bulk, cheaper than ~900 munmap calls */
+static bool keep_maps;
+static void unmap(const void *p, size_t n)
+{
+	if (!keep_maps)
+		munmap((void *)p, n);
+}
 
 static void *bigalloc(size_t n)
 {
@@ -170,7 +195,7 @@ static void free_arenas(void)
 	/* Every thread's current block is in the list; drop all of them. */
 	for (Block *b = blocks, *n; b; b = n) {
 		n = b->next;
-		munmap(b, b->size);
+		unmap(b, b->size);
 	}
 	blocks = NULL;
 	atomic_fetch_add(&arena_gen, 1);
@@ -310,6 +335,7 @@ typedef struct Obj {
 	uint32_t idx;
 	/* symbol table output */
 	uint32_t nloc, loc0;		/* kept locals, first output index */
+	uint32_t (*kept)[2];		/* kept locals: symbol index, name length */
 	uint64_t locstr;		/* strtab bytes of kept locals */
 	uint64_t str0;
 	bool mapped;
@@ -335,6 +361,7 @@ typedef struct ISec {
 	uint32_t ndyn;			/* R_AARCH64_RELATIVE entries produced */
 	uint32_t dyn0;
 	uint8_t kind;
+	bool thunked;			/* some relocation has a tr_put entry */
 } ISec;
 
 #define OS_DISCARD 0xfffffffeu
@@ -390,13 +417,17 @@ typedef struct G {
 	uint32_t order;			/* index among globals in insertion order */
 	uint32_t outidx;		/* index in the output .symtab */
 	uint32_t thunk;
+	uint64_t fva;			/* after layout: gsym_va() */
+	bool fabs, fundef;		/* gsym_isabs(); undefined or demoted */
 } G;
 
-static _Atomic(const char *) *hnames;
-static uint32_t *hhash;
-static G *gsyms;
+static _Atomic(const char *) *hnames;	/* per slot */
+static _Atomic uint64_t *hword;		/* per slot: hash << 32 | id + 1, 0 until published */
+static const char **gnames;		/* per id */
+static G *gsyms;			/* per id */
+static _Atomic uint32_t ngsyms;
 static uint32_t hmask;
-static VEC(uint32_t) gorder;		/* slots in insertion order */
+static VEC(uint32_t) gorder;		/* ids in symbol table order */
 
 static inline uint32_t strhash(const char *s, size_t n) { return (uint32_t)ld_xxh3(s, n); }
 
@@ -440,7 +471,13 @@ static inline uint32_t vget(_Atomic uint8_t *p)
 	return r > 3 ? 3 : r;
 }
 
-/* slot of name, inserting if needed (lock-free) */
+/*
+ * Id of name, inserting if needed (lock-free).  The open-addressing slots
+ * hold only the name and a published word (hash << 32 | id + 1); symbol
+ * state lives in a dense array indexed by id, so the ~12k globals touch
+ * ~1 MB instead of a sparse 100-byte-per-slot table.  Ids depend on thread
+ * timing; nothing orders by them.
+ */
 static uint32_t gintern(const char *name)
 {
 	size_t n = strlen(name);
@@ -449,12 +486,22 @@ static uint32_t gintern(const char *name)
 		const char *cur = atomic_load_explicit(&hnames[i], memory_order_acquire);
 		if (!cur) {
 			if (atomic_compare_exchange_strong(&hnames[i], &cur, name)) {
-				hhash[i] = h;
-				return i;
+				uint32_t d = atomic_fetch_add_explicit(&ngsyms, 1, memory_order_relaxed);
+				gnames[d] = name;
+				atomic_store_explicit(&hword[i], (uint64_t)h << 32 | (d + 1), memory_order_release);
+				return d;
 			}
 		}
-		if (cur == name || !strcmp(cur, name))
-			return i;
+		uint64_t w = atomic_load_explicit(&hword[i], memory_order_acquire);
+		if (w && (uint32_t)(w >> 32) != h)
+			continue;
+		if (cur == name || !strcmp(cur, name)) {
+			while (!w) {
+				sched_yield();
+				w = atomic_load_explicit(&hword[i], memory_order_acquire);
+			}
+			return (uint32_t)w - 1;
+		}
 	}
 }
 static uint32_t gfind(const char *name)
@@ -465,11 +512,12 @@ static uint32_t gfind(const char *name)
 		const char *cur = atomic_load(&hnames[i]);
 		if (!cur)
 			return NONE;
-		if (!strcmp(cur, name))
-			return i;
+		uint64_t w = atomic_load(&hword[i]);
+		if ((uint32_t)(w >> 32) == h && !strcmp(cur, name))
+			return (uint32_t)w - 1;
 	}
 }
-static inline const char *gname(uint32_t g) { return hnames[g]; }
+static inline const char *gname(uint32_t g) { return gnames[g]; }
 
 /* ---------------- linker script ---------------- */
 
@@ -507,6 +555,8 @@ typedef struct ISD {
 	VEC(uint32_t) secs;		/* ISec ids, in final order */
 	uint32_t thunksec;		/* ISec of this ISD's thunk section, or NONE */
 	uint64_t thunk_off;		/* pass-0 isecLimit */
+	struct Call *calls;		/* CALL26/JUMP26 relocations, built by thunk pass 0 */
+	uint32_t ncalls;
 } ISD;
 static VEC(ISD) isds;
 
@@ -813,6 +863,20 @@ static EV eval(Expr *e)
 
 static const char *sp, *sp_end, *sp_file;
 
+/* character classes of the script lexer (NUL behaves as strchr() made it) */
+enum { CT_NAMEEND = 1, CT_PATEND = 2, CT_IDENT = 4, CT_WORD = 8 };
+#define CT_AN (CT_IDENT | CT_WORD)
+static const uint8_t ctab[256] = {
+	[0] = CT_NAMEEND | CT_PATEND | CT_IDENT,
+	[' '] = CT_NAMEEND | CT_PATEND, ['\t'] = CT_NAMEEND | CT_PATEND,
+	['\r'] = CT_NAMEEND | CT_PATEND, ['\n'] = CT_NAMEEND | CT_PATEND,
+	['('] = CT_NAMEEND | CT_PATEND, [')'] = CT_NAMEEND | CT_PATEND,
+	['{'] = CT_NAMEEND, ['}'] = CT_NAMEEND, [':'] = CT_NAMEEND, [';'] = CT_NAMEEND,
+	[','] = CT_NAMEEND, ['='] = CT_NAMEEND,
+	['0' ... '9'] = CT_AN, ['A' ... 'Z'] = CT_AN, ['a' ... 'z'] = CT_AN,
+	['_'] = CT_AN, ['.'] = CT_AN, ['$'] = CT_IDENT,
+};
+
 static void sskip(void)
 {
 	for (;;) {
@@ -870,7 +934,7 @@ static char *sname(void)
 		sp = e + 1;
 		return sdup(b + 1, e);
 	}
-	while (sp < sp_end && !strchr(" \t\r\n(){}:;,=", *sp))
+	while (sp < sp_end && !(ctab[(unsigned char)*sp] & CT_NAMEEND))
 		sp++;
 	return sdup(b, sp);
 }
@@ -879,16 +943,16 @@ static char *spatname(void)
 {
 	sskip();
 	const char *b = sp;
-	while (sp < sp_end && !strchr(" \t\r\n()", *sp))
+	while (sp < sp_end && !(ctab[(unsigned char)*sp] & CT_PATEND))
 		sp++;
 	return sdup(b, sp);
 }
-static bool sword(const char *w)
+static inline __attribute__((always_inline)) bool sword(const char *w)
 {
 	sskip();
 	size_t n = strlen(w);
 	if ((size_t)(sp_end - sp) >= n && !memcmp(sp, w, n) &&
-	    (sp + n == sp_end || !(isalnum((unsigned char)sp[n]) || sp[n] == '_' || sp[n] == '.'))) {
+	    (sp + n == sp_end || !(ctab[(unsigned char)sp[n]] & CT_WORD))) {
 		sp += n;
 		return true;
 	}
@@ -917,31 +981,43 @@ static void note_ref(uint32_t g)
 
 static int prec(const char *op)
 {
-	static const struct { const char *op; int p; } t[] = {
-		{"*", 11}, {"/", 11}, {"%", 11}, {"+", 10}, {"-", 10}, {"<<", 9}, {">>", 9},
-		{"<", 8}, {"<=", 8}, {">", 8}, {">=", 8}, {"==", 7}, {"!=", 7}, {"&", 6},
-		{"^", 5}, {"|", 4}, {"&&", 3}, {"||", 2}, {"?", 1},
-	};
-	for (size_t i = 0; i < sizeof t / sizeof *t; i++)
-		if (!strcmp(op, t[i].op))
-			return t[i].p;
-	return -1;
+	char c = op[0], c1 = c ? op[1] : 0;
+	if (c1 && op[2])
+		return -1;
+	switch (c) {
+	case '*': case '/': case '%': return c1 ? -1 : 11;
+	case '+': case '-': return c1 ? -1 : 10;
+	case '<': case '>': return c1 == c ? 9 : !c1 || c1 == '=' ? 8 : -1;
+	case '=': case '!': return c1 == '=' ? 7 : -1;
+	case '&': return !c1 ? 6 : c1 == '&' ? 3 : -1;
+	case '^': return c1 ? -1 : 5;
+	case '|': return !c1 ? 4 : c1 == '|' ? 2 : -1;
+	case '?': return c1 ? -1 : 1;
+	default: return -1;
+	}
 }
-/* peek an operator token; returns length or 0 */
+/* peek an operator token (longest match of << >> <= >= == != && || op= and
+ * the single-character operators); returns length or 0 */
 static int peekop(char out[4])
 {
 	sskip();
-	static const char *ops[] = {"<<=", ">>=", "<<", ">>", "<=", ">=", "==", "!=", "&&", "||",
-				    "+=", "-=", "*=", "/=", "&=", "|=", "^=",
-				    "*", "/", "%", "+", "-", "<", ">", "&", "^", "|", "?", ":", "=", NULL};
-	for (int i = 0; ops[i]; i++) {
-		size_t n = strlen(ops[i]);
-		if ((size_t)(sp_end - sp) >= n && !memcmp(sp, ops[i], n)) {
-			strcpy(out, ops[i]);
-			return (int)n;
-		}
+	size_t left = (size_t)(sp_end - sp);
+	if (!left)
+		return 0;
+	char c = sp[0], c1 = left > 1 ? sp[1] : 0, c2 = left > 2 ? sp[2] : 0;
+	int n;
+	switch (c) {
+	case '<': case '>': n = c1 == c ? (c2 == '=' ? 3 : 2) : c1 == '=' ? 2 : 1; break;
+	case '=': n = c1 == '=' ? 2 : 1; break;
+	case '!': n = c1 == '=' ? 2 : 0; break;
+	case '&': case '|': n = c1 == c || c1 == '=' ? 2 : 1; break;
+	case '+': case '-': case '*': case '/': case '^': n = c1 == '=' ? 2 : 1; break;
+	case '%': case '?': case ':': n = 1; break;
+	default: n = 0;
 	}
-	return 0;
+	memcpy(out, sp, (size_t)n);
+	out[n] = 0;
+	return n;
 }
 
 static Expr *pprimary(void);
@@ -1018,7 +1094,7 @@ static Expr *pprimary(void)
 		e->sym = g;
 		return e;
 	}
-	while (sp < sp_end && (isalnum((unsigned char)*sp) || strchr("_.$", *sp)))
+	while (sp < sp_end && (ctab[(unsigned char)*sp] & CT_IDENT))
 		sp++;
 	if (sp == b) {
 		serr("expected expression");
@@ -1850,6 +1926,70 @@ static void reloc_target(const Obj *o, uint32_t symidx, int64_t addend, Target *
 	t->va = t->s + addend;
 }
 
+/*
+ * Final addresses, once layout is done: reloc_target() for the copy pass
+ * from per-symbol and per-section values computed once (fin_*), falling
+ * back to reloc_target() for undefined, discarded and merge-piece targets.
+ */
+static uint64_t *isec_fva;		/* isec_va(s, 0), or UINT64_MAX: take reloc_target */
+
+static void fin_isec(void *arg, size_t i)
+{
+	(void)arg;
+	ISec *is = &isecs.v[i];
+	uint32_t os = isec_osec(i);
+	isec_fva[i] = is->kind == K_NONE || is->kind == K_MERGE_IN || os == NONE || os == OS_DISCARD
+			      ? UINT64_MAX : osecs.v[os].va + is->off;
+}
+static void fin_gsym(void *arg, size_t g)
+{
+	(void)arg;
+	G *s = &gsyms[g];
+	s->fundef = s->state == GS_UNDEF || s->demoted;
+	if (!s->fundef) {
+		s->fabs = gsym_isabs((uint32_t)g);
+		s->fva = gsym_va((uint32_t)g);
+	}
+}
+static void final_addresses(void)
+{
+	isec_fva = alloc((size_t)isecs.n * sizeof(uint64_t));
+	pfor(isecs.n, fin_isec, NULL);
+	pfor(atomic_load(&ngsyms), fin_gsym, NULL);
+}
+
+static inline void reloc_target_final(const Obj *o, uint32_t symidx, int64_t addend, Target *t)
+{
+	if (symidx >= o->firstg) {
+		uint32_t g = o->gs[symidx - o->firstg];
+		const G *s = &gsyms[g];
+		if (!s->fundef) {
+			t->undef = t->discarded = false;
+			t->key = g;
+			t->global = true;
+			t->abs = s->fabs;
+			t->s = s->fva;
+			t->va = s->fva + addend;
+			return;
+		}
+	} else {
+		const Sym *y = &o->sym[symidx];
+		if (y->st_shndx != SHN_UNDEF && y->st_shndx < 0xff00) {
+			uint64_t b = isec_fva[o->isec0 + y->st_shndx];
+			if (b != UINT64_MAX) {
+				t->undef = t->discarded = false;
+				t->key = symidx;
+				t->global = false;
+				t->abs = false;
+				t->s = b + ((y->st_info & 15) == STT_SECTION ? 0 : y->st_value);
+				t->va = t->s + addend;
+				return;
+			}
+		}
+	}
+	reloc_target(o, symidx, addend, t);
+}
+
 /* ---------------- output state ---------------- */
 
 static uint8_t *out;			/* output file image */
@@ -1912,6 +2052,7 @@ static void tr_put(uint32_t isec, uint32_t ri, uint32_t th)
 		tr_vals = nv;
 		tr_mask = nm;
 	}
+	isecs.v[isec].thunked = true;
 	uint64_t k = (uint64_t)isec << 32 | ri;
 	uint32_t j = (uint32_t)(k * 0x9E3779B97F4A7C15ULL >> 32) & tr_mask;
 	while (tr_keys[j] != UINT64_MAX && tr_keys[j] != k)
@@ -2352,6 +2493,35 @@ static void finalize_merges(void)
 
 static bool pic;
 
+/* reloc_target()'s abs/undef/discarded without computing the address */
+static void reloc_class(const Obj *o, uint32_t symidx, Target *t)
+{
+	t->undef = t->discarded = false;
+	if (symidx >= o->firstg) {
+		uint32_t g = o->gs[symidx - o->firstg];
+		G *s = &gsyms[g];
+		if (s->state == GS_UNDEF || s->demoted) {
+			t->undef = t->abs = true;
+			return;
+		}
+		t->abs = gsym_isabs(g);
+		return;
+	}
+	const Sym *y = &o->sym[symidx];
+	if (y->st_shndx == SHN_ABS) {
+		t->abs = true;
+		return;
+	}
+	if (y->st_shndx == SHN_UNDEF || y->st_shndx >= 0xff00) {
+		t->undef = t->abs = true;
+		return;
+	}
+	uint32_t sec = o->isec0 + y->st_shndx;
+	uint32_t os = isec_osec(sec);
+	t->abs = false;
+	t->discarded = isecs.v[sec].kind == K_NONE || os == OS_DISCARD || os == NONE;
+}
+
 static void scan_relocs(void *arg, size_t i)
 {
 	(void)arg;
@@ -2371,7 +2541,7 @@ static void scan_relocs(void *arg, size_t i)
 			error("%s: bad symbol index in relocation", o->path);
 			continue;
 		}
-		reloc_target(o, symi, rl->r_addend, &t);
+		reloc_class(o, symi, &t);
 		if (t.discarded && (is->flags & SHF_ALLOC))
 			error("%s:(%s+0x%llx): relocation refers to a discarded section", o->path, is->name,
 			      (unsigned long long)rl->r_offset);
@@ -2403,6 +2573,68 @@ static void scan_relocs(void *arg, size_t i)
 
 /* ---------------- thunk pass ---------------- */
 
+/* call relocations of an ISD in thunk-pass order, with the destination
+ * resolved to (plain input section, offset) where the layout cannot change
+ * which section it is; anything else (script symbols, merge sections,
+ * undefined, absolute, discarded) takes reloc_target() every pass */
+typedef struct Call { uint32_t si, r, dsec, th; uint64_t doff; } Call;
+static void collect_calls(ISD *d)
+{
+	uint32_t n = 0;
+	for (uint32_t s = 0; s < d->secs.n; s++) {
+		ISec *is = &isecs.v[d->secs.v[s]];
+		if (is->obj == NONE)
+			continue;
+		for (uint32_t r = 0; r < is->nrela; r++) {
+			uint32_t type = (uint32_t)is->rela[r].r_info;
+			n += type == R_AARCH64_CALL26 || type == R_AARCH64_JUMP26;
+		}
+	}
+	d->calls = alloc((size_t)n * sizeof(Call) + 1);
+	d->ncalls = 0;
+	for (uint32_t s = 0; s < d->secs.n; s++) {
+		uint32_t si = d->secs.v[s];
+		ISec *is = &isecs.v[si];
+		if (is->obj == NONE)
+			continue;
+		Obj *o = objs.v[is->obj];
+		for (uint32_t r = 0; r < is->nrela; r++) {
+			const Rela *rl = &is->rela[r];
+			uint32_t type = (uint32_t)rl->r_info;
+			if (type != R_AARCH64_CALL26 && type != R_AARCH64_JUMP26)
+				continue;
+			Call *c = &d->calls[d->ncalls++];
+			c->si = si;
+			c->r = r;
+			c->dsec = NONE;
+			c->th = NONE;		/* tr_get(si, r), kept in step with tr_put */
+			uint32_t symi = rl->r_info >> 32;
+			uint32_t sec = NONE;
+			uint64_t val = 0;
+			if (symi >= o->firstg) {
+				G *g = &gsyms[o->gs[symi - o->firstg]];
+				if (g->state == GS_OBJ && !g->demoted && g->sec != NONE) {
+					sec = g->sec;
+					val = g->val;
+				}
+			} else {
+				const Sym *y = &o->sym[symi];
+				if (y->st_shndx != SHN_UNDEF && y->st_shndx < 0xff00) {
+					sec = o->isec0 + y->st_shndx;
+					val = (y->st_info & 15) == STT_SECTION ? 0 : y->st_value;
+				}
+			}
+			if (sec == NONE)
+				continue;
+			ISec *ds = &isecs.v[sec];
+			if (ds->kind != K_NORMAL || ds->osec == NONE || ds->osec == OS_DISCARD)
+				continue;
+			c->dsec = sec;
+			c->doff = val + (uint64_t)rl->r_addend;
+		}
+	}
+}
+
 static bool create_thunks(int pass)
 {
 	bool changed = false;
@@ -2423,26 +2655,36 @@ static bool create_thunks(int pass)
 				ISec *last = &isecs.v[d->secs.v[d->secs.n - 1]];
 				d->thunk_off = last->off + last->size;
 			}
-			for (uint32_t s = 0; s < d->secs.n; s++) {
-				uint32_t si = d->secs.v[s];
+			if (pass == 0)
+				collect_calls(d);
+			uint32_t cur = NONE;
+			uint64_t base = 0;
+			for (uint32_t ci = 0; ci < d->ncalls; ci++) {
+				Call *c = &d->calls[ci];
+				uint32_t si = c->si, r = c->r;
 				ISec *is = &isecs.v[si];
-				if (is->obj == NONE || !is->nrela)
-					continue;
 				Obj *o = objs.v[is->obj];
-				for (uint32_t r = 0; r < is->nrela; r++) {
-					const Rela *rl = &is->rela[r];
-					uint32_t type = (uint32_t)rl->r_info;
-					if (type != R_AARCH64_CALL26 && type != R_AARCH64_JUMP26)
-						continue;
-					uint64_t src = isec_va(si, rl->r_offset);
-					uint32_t th = tr_get(si, r);
+				if (si != cur) {
+					cur = si;
+					base = isec_va(si, 0);
+				}
+				const Rela *rl = &is->rela[r];
+				uint64_t src = base + rl->r_offset;
+				{
+					uint32_t th = c->th;
 					if (th != NONE) {
 						if (in_branch_range(src, thunk_va(th)))
 							continue;
 					}
-					reloc_target(o, rl->r_info >> 32, rl->r_addend, &t);
-					if (t.undef)
-						continue;
+					if (c->dsec != NONE) {
+						/* same value as reloc_target(): a plain input section */
+						const ISec *ds = &isecs.v[c->dsec];
+						t.va = osecs.v[ds->osec].va + ds->off + c->doff;
+					} else {
+						reloc_target(o, rl->r_info >> 32, rl->r_addend, &t);
+						if (t.undef)
+							continue;
+					}
 					if (in_branch_range(src, t.va))
 						continue;
 					/* find a compatible thunk in range */
@@ -2500,6 +2742,7 @@ static bool create_thunks(int pass)
 						changed = true;
 					}
 					tr_put(si, r, found);
+					c->th = found;
 				}
 			}
 			/* assign thunk offsets in this ISD's thunk section */
@@ -2652,18 +2895,32 @@ static bool keep_local(const Obj *o, const Sym *y)
 	return true;
 }
 
+/* which locals go to .symtab, remembered (index, name length) for write_locals */
 static void count_locals(void *arg, size_t i)
 {
 	(void)arg;
+	static __thread uint32_t (*scratch)[2];
+	static __thread uint32_t scap;
 	Obj *o = objs.v[i];
-	uint32_t n = 0;
+	uint32_t n = 0, end = o->firstg < o->nsym ? o->firstg : o->nsym;
 	uint64_t str = 0;
-	if (o->buf)
-		for (uint32_t s = 1; s < o->firstg && s < o->nsym; s++)
+	if (o->buf && end > 1) {
+		if (scap < end) {
+			free(scratch);
+			scap = end < 4096 ? 4096 : end;
+			scratch = malloc((size_t)scap * sizeof *scratch);
+		}
+		for (uint32_t s = 1; s < end; s++)
 			if (keep_local(o, &o->sym[s])) {
+				uint32_t l = (uint32_t)strlen(o->str + o->sym[s].st_name);
+				scratch[n][0] = s;
+				scratch[n][1] = l;
 				n++;
-				str += strlen(o->str + o->sym[s].st_name) + 1;
+				str += l + 1;
 			}
+		o->kept = alloc((size_t)n * sizeof *scratch + 1);
+		memcpy(o->kept, scratch, (size_t)n * sizeof *scratch);
+	}
 	o->nloc = n;
 	o->locstr = str;
 }
@@ -2729,7 +2986,7 @@ static void relocate_isec(uint32_t si, uint8_t *buf)
 			error("%s:(%s): relocation offset out of range", o->path, is->name);
 			continue;
 		}
-		reloc_target(o, symi, rl->r_addend, &t);
+		reloc_target_final(o, symi, rl->r_addend, &t);
 		int64_t v;
 		switch (type) {
 		case R_AARCH64_NONE:
@@ -2775,7 +3032,7 @@ static void relocate_isec(uint32_t si, uint8_t *buf)
 		}
 		case R_AARCH64_CALL26:
 		case R_AARCH64_JUMP26: {
-			uint32_t th = tr_get(si, r);
+			uint32_t th = is->thunked ? tr_get(si, r) : NONE;
 			uint64_t dst = th != NONE ? thunk_va(th) : t.va;
 			if (t.undef && th == NONE)
 				dst = P + 4;	/* undefined weak: next instruction */
@@ -2797,7 +3054,7 @@ static void relocate_isec(uint32_t si, uint8_t *buf)
 					uint32_t rd = adrp & 0x1f;
 					if ((adrp & 0x9f000000) == 0x90000000 && (add & 0xffc00000) == 0x91000000 &&
 					    rd == (add & 0x1f) && rd == ((add >> 5) & 0x1f)) {
-						reloc_target(o, r2->r_info >> 32, 0, &t2);
+						reloc_target_final(o, r2->r_info >> 32, 0, &t2);
 						int64_t d = (int64_t)(t2.s - (secva + r2->r_offset));
 						if (d >= -1024 * 1024 && d < 1024 * 1024 && !t2.undef) {
 							wr32(loc, 0xd503201f);
@@ -3131,15 +3388,18 @@ static void gtable_init(void)
 		cap *= 2;
 	hmask = cap - 1;
 	hnames = bigalloc((size_t)cap * sizeof(*hnames));
-	hhash = bigalloc((size_t)cap * sizeof(*hhash));
+	hword = bigalloc((size_t)cap * sizeof(*hword));
+	gnames = bigalloc((size_t)cap * sizeof(*gnames));
 	gsyms = bigalloc((size_t)cap * sizeof(G));
+	atomic_store(&ngsyms, 0);
 }
 
 static void gtable_free(void)
 {
-	munmap((void *)hnames, (size_t)(hmask + 1) * sizeof(*hnames));
-	munmap(hhash, (size_t)(hmask + 1) * sizeof(*hhash));
-	munmap(gsyms, (size_t)(hmask + 1) * sizeof(G));
+	unmap((void *)hnames, (size_t)(hmask + 1) * sizeof(*hnames));
+	unmap((void *)hword, (size_t)(hmask + 1) * sizeof(*hword));
+	unmap(gnames, (size_t)(hmask + 1) * sizeof(*gnames));
+	unmap(gsyms, (size_t)(hmask + 1) * sizeof(G));
 	hnames = NULL;
 }
 
@@ -3466,7 +3726,8 @@ static void finish_phdrs(void)
 typedef struct { uint32_t g; uint32_t idx; uint64_t str; bool local; } GOut;
 static GOut *gouts;
 static uint32_t ngouts;
-static uint8_t *symtab_buf, *strtab_buf;
+static uint8_t *symtab_buf, *strtab_buf;	/* in the output image (fill_symtab) */
+static uint64_t thunk_sym0, thunk_str0;		/* first thunk symbol and its string */
 static uint64_t nsymout, strsize;
 static uint32_t nlocal_out;
 
@@ -3501,10 +3762,9 @@ static void write_locals(void *arg, size_t i)
 		return;
 	Sym *d = (Sym *)symtab_buf + o->loc0;
 	uint64_t so = o->str0;
-	for (uint32_t s = 1; s < o->firstg && s < o->nsym; s++) {
-		const Sym *y = &o->sym[s];
-		if (!keep_local(o, y))
-			continue;
+	for (uint32_t k = 0; k < o->nloc; k++) {
+		const Sym *y = &o->sym[o->kept[k][0]];
+		uint32_t l = o->kept[k][1];
 		uint16_t shndx;
 		uint64_t val;
 		if (y->st_shndx == SHN_ABS) {
@@ -3515,8 +3775,15 @@ static void write_locals(void *arg, size_t i)
 			shndx = sym_shndx_isec(sec);
 			val = isec_va(sec, y->st_value);
 		}
-		put_sym(d++, strtab_buf, &so, o->str + y->st_name, y->st_info, y->st_other, shndx, val,
-			y->st_size);
+		memcpy(strtab_buf + so, o->str + y->st_name, l + 1);
+		d->st_name = (uint32_t)so;
+		so += l + 1;
+		d->st_info = y->st_info;
+		d->st_other = y->st_other;
+		d->st_shndx = shndx;
+		d->st_value = val;
+		d->st_size = y->st_size;
+		d++;
 	}
 }
 
@@ -3632,22 +3899,24 @@ static void build_symtab(void)
 	ISec *st = &isecs.v[symtab_isec], *ss = &isecs.v[strtab_isec];
 	st->size = nsymout * sizeof(Sym);
 	ss->size = strsize;
-	/* thunk symbols are written now: their values are final */
-	symtab_buf = alloc(st->size);
-	strtab_buf = alloc(ss->size);
-	uint64_t so = gstr;
+	thunk_sym0 = thunk0;
+	thunk_str0 = gstr;
+	(void)nhid;
+}
+
+/* .symtab and .strtab are written in place in the output image */
+static void fill_symtab(void)
+{
+	symtab_buf = out + osecs.v[isec_osec(symtab_isec)].offset + isecs.v[symtab_isec].off;
+	strtab_buf = out + osecs.v[isec_osec(strtab_isec)].offset + isecs.v[strtab_isec].off;
+	uint64_t so = thunk_str0;
 	for (uint32_t t = 0; t < thunks.n; t++) {
 		Thunk *th = &thunks.v[t];
-		Sym *d = (Sym *)symtab_buf + thunk0 + 2 * t;
+		Sym *d = (Sym *)(void *)symtab_buf + thunk_sym0 + 2 * t;
 		uint16_t shndx = sym_shndx_isec(th->tsec);
 		put_sym(d, strtab_buf, &so, th->name, STB_LOCAL << 4 | STT_FUNC, 0, shndx, thunk_va(t), th->size);
 		put_sym(d + 1, strtab_buf, &so, "$x", STB_LOCAL << 4 | STT_NOTYPE, 0, shndx, thunk_va(t), 0);
 	}
-	(void)nhid;
-}
-
-static void fill_symtab(void)
-{
 	pfor(objs.n, write_locals, NULL);
 	pfor((ngouts + 4095) / 4096, write_globals, NULL);
 }
@@ -3723,14 +3992,8 @@ static void write_headers(void)
 
 static void write_synthetic(void)
 {
-	ISec *is;
-	if (reladyn_isec != NONE && (is = &isecs.v[reladyn_isec])->size)
-		memcpy(out + osecs.v[isec_osec(reladyn_isec)].offset + is->off, reladyn_buf, is->size);
-	is = &isecs.v[symtab_isec];
-	memcpy(out + osecs.v[isec_osec(symtab_isec)].offset + is->off, symtab_buf, is->size);
-	is = &isecs.v[strtab_isec];
-	memcpy(out + osecs.v[isec_osec(strtab_isec)].offset + is->off, strtab_buf, is->size);
-	is = &isecs.v[shstrtab_isec];
+	/* .rela.dyn, .symtab and .strtab were written in place */
+	ISec *is = &isecs.v[shstrtab_isec];
 	memcpy(out + osecs.v[isec_osec(shstrtab_isec)].offset + is->off, shstrtab_buf, is->size);
 }
 
@@ -3764,45 +4027,7 @@ static void write_build_id(void)
 
 /* ---------------- the final link ---------------- */
 
-static void reset_state(void)
-{
-	memset(&opt, 0, sizeof opt);
-	memset(&objs, 0, sizeof objs);
-	memset(&isecs, 0, sizeof isecs);
-	memset(&mergeins, 0, sizeof mergeins);
-	memset(&merges, 0, sizeof merges);
-	memset(&gorder, 0, sizeof gorder);
-	memset(&isds, 0, sizeof isds);
-	memset(&osecs, 0, sizeof osecs);
-	memset(&topcmds, 0, sizeof topcmds);
-	memset(&refsyms, 0, sizeof refsyms);
-	memset(&provides, 0, sizeof provides);
-	memset(&pending, 0, sizeof pending);
-	memset(&orphans, 0, sizeof orphans);
-	memset(&thunks, 0, sizeof thunks);
-	memset(&thunksecs, 0, sizeof thunksecs);
-	memset(&phdrs, 0, sizeof phdrs);
-	memset(&phsecs, 0, sizeof phsecs);
-	memset(&outsecs, 0, sizeof outsecs);
-	memset(&wjobs, 0, sizeof wjobs);
-	memset(&assert_fail, 0, sizeof assert_fail);
-	memset(&recorded, 0, sizeof recorded);
-	tr_keys = NULL;
-	tr_vals = NULL;
-	tr_mask = tr_n = 0;
-	entry_name = NULL;
-	reladyn_isec = buildid_isec = comment_isec = NONE;
-	symtab_isec = strtab_isec = shstrtab_isec = NONE;
-	reladyn_buf = NULL;
-	out = NULL;
-	ndyn = 0;
-	cur_provide = NULL;
-	gouts = NULL;
-	ngouts = 0;
-	atomic_store(&nerrors, 0);
-	error_limit = 20;
-	timing = getenv("VLD_TIME") != NULL;
-}
+static void reset_state(void);
 
 static void add_synthetic_sections(void)
 {
@@ -4047,6 +4272,8 @@ static int run(int argc, char **argv)
 		return 1;
 	double t0 = now();
 	t_last = t0;
+	p_last = vperf_now();
+	flt_last = timing ? minflt() : 0;
 	pic = opt.shared;
 
 	load_inputs();
@@ -4203,7 +4430,9 @@ static int run(int argc, char **argv)
 			isecs.v[dl.v[i]].dyn0 = at;
 			at += isecs.v[dl.v[i]].ndyn;
 		}
-		reladyn_buf = bigalloc(ndyn * sizeof(Rela));
+		/* built in place in the output image */
+		reladyn_buf = (Rela *)(void *)(out + osecs.v[isec_osec(reladyn_isec)].offset +
+					       isecs.v[reladyn_isec].off);
 	}
 	wjobs.n = 0;
 	for (uint32_t c = 0; c < topcmds.n; c++) {
@@ -4217,6 +4446,7 @@ static int run(int argc, char **argv)
 					VPUSH(wjobs, d->secs.v[s]);
 			}
 	}
+	final_addresses();
 	pfor(wjobs.n, write_isec, NULL);
 	phase("copy + relocate");
 	fill_symtab();
@@ -4233,12 +4463,10 @@ static int run(int argc, char **argv)
 		fprintf(errf, "  %-28s %7.2f ms (%u objects, %u sections, %u globals, %llu MB out, %d threads)\n",
 			"total", (now() - t0) * 1e3, objs.n, isecs.n, gorder.n,
 			(unsigned long long)(filesize >> 20), nthreads);
-	munmap(out, filesize);
-	if (reladyn_buf)
-		munmap(reladyn_buf, ndyn * sizeof(Rela));
+	unmap(out, filesize);
 	for (uint32_t i = 0; i < objs.n; i++)
 		if (objs.v[i]->mapped && objs.v[i]->buf)
-			munmap((void *)objs.v[i]->buf, objs.v[i]->size);
+			unmap(objs.v[i]->buf, objs.v[i]->size);
 	gtable_free();
 	return rc || atomic_load(&nerrors) ? 1 : 0;
 }
@@ -4593,14 +4821,59 @@ static int ld_relocatable(void)
 	filesize = fsize;
 	int rc = write_output();
 	phase("-r: write");
-	munmap(rbuf, fsize);
+	unmap(rbuf, fsize);
 	out = NULL;
 	for (uint32_t i = 0; i < objs.n; i++)
 		if (objs.v[i]->mapped && objs.v[i]->buf)
-			munmap((void *)objs.v[i]->buf, objs.v[i]->size);
+			unmap(objs.v[i]->buf, objs.v[i]->size);
 	gtable_free();
 	memset(&routs, 0, sizeof routs);
 	return rc || atomic_load(&nerrors) ? 1 : 0;
+}
+
+/* all per-link state, so ld_main can be called again (vccd, VLD_REPEAT) */
+static void reset_state(void)
+{
+	memset(&opt, 0, sizeof opt);
+	memset(&objs, 0, sizeof objs);
+	memset(&isecs, 0, sizeof isecs);
+	memset(&mergeins, 0, sizeof mergeins);
+	memset(&merges, 0, sizeof merges);
+	memset(&gorder, 0, sizeof gorder);
+	memset(&isds, 0, sizeof isds);
+	memset(&osecs, 0, sizeof osecs);
+	memset(&topcmds, 0, sizeof topcmds);
+	memset(&refsyms, 0, sizeof refsyms);
+	memset(&provides, 0, sizeof provides);
+	memset(&pending, 0, sizeof pending);
+	memset(&orphans, 0, sizeof orphans);
+	memset(&thunks, 0, sizeof thunks);
+	memset(&thunksecs, 0, sizeof thunksecs);
+	memset(&phdrs, 0, sizeof phdrs);
+	memset(&phsecs, 0, sizeof phsecs);
+	memset(&outsecs, 0, sizeof outsecs);
+	memset(&wjobs, 0, sizeof wjobs);
+	memset(&assert_fail, 0, sizeof assert_fail);
+	memset(&recorded, 0, sizeof recorded);
+	memset(&script_new, 0, sizeof script_new);
+	memset(&routs, 0, sizeof routs);
+	stub_names = NULL;
+	nstubs = 0;
+	tr_keys = NULL;
+	tr_vals = NULL;
+	tr_mask = tr_n = 0;
+	entry_name = NULL;
+	reladyn_isec = buildid_isec = comment_isec = NONE;
+	symtab_isec = strtab_isec = shstrtab_isec = NONE;
+	reladyn_buf = NULL;
+	out = NULL;
+	ndyn = 0;
+	cur_provide = NULL;
+	gouts = NULL;
+	ngouts = 0;
+	atomic_store(&nerrors, 0);
+	error_limit = 20;
+	timing = getenv("VLD_TIME") != NULL;
 }
 
 static pthread_mutex_t ldlock = PTHREAD_MUTEX_INITIALIZER;
@@ -4625,6 +4898,12 @@ int main(int argc, char **argv)
 		return objcopy_main(argc, argv, AT_FDCWD, stderr);
 	if (strstr(b, "nm") && !strstr(b, "link"))
 		return nm_main(argc, argv, AT_FDCWD, stdout, stderr);
+	/* VLD_REPEAT=N: link N times in one process (for profilers) */
+	const char *rep = getenv("VLD_REPEAT");
+	for (int i = rep ? atoi(rep) : 1; i > 1; i--)
+		if (ld_main(argc, argv, AT_FDCWD, stderr))
+			return 1;
+	keep_maps = true;
 	return ld_main(argc, argv, AT_FDCWD, stderr);
 }
 #endif
