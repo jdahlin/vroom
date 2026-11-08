@@ -2111,7 +2111,7 @@ static int instruction(As *a, const char *p, const char *e)
 	A64Fix fx; fx.type = 0;
 	p = ws(p, e);
 	/* SME ldr/str za[Wv, #imm], [Xn{, #imm, mul vl}] */
-	if ((!strcmp(mn, "ldr") || !strcmp(mn, "str")) && e - p > 3 && !strncasecmp(p, "za[", 3)) {
+	if (mlen == 3 && (!memcmp(mn, "ldr", 3) || !memcmp(mn, "str", 3)) && e - p > 3 && (p[0] | 32) == 'z' && (p[1] | 32) == 'a' && p[2] == '[') {
 		char buf[96], tail[16] = "";
 		unsigned v, i1, n, i2 = 0;
 		size_t l = (size_t)(e - p) < sizeof buf - 1 ? (size_t)(e - p) : sizeof buf - 1;
@@ -2433,13 +2433,14 @@ static int statement(As *a, const char *p, const char *e)
 	p = ws(p, e);
 	if (p >= e) return 0;
 	Sv w = first_word(p, e);
-	int rc;
-	if (cond_dir(a, w, w.s + w.n, e, &rc)) return rc;
+	int rc, lab = 0;
+	if (w.s[0] == '.' && cond_dir(a, w, w.s + w.n, e, &rc)) return rc;
 	if (cond_ignore(a)) return 0;
 	/* labels */
+	const char *q;
 	for (;;) {
+		q = ws(w.s + w.n, e);
 		if (!w.n) break;
-		const char *q = ws(w.s + w.n, e);
 		if (q < e && *q == ':') {
 			int numeric = 1;
 			for (uint32_t i = 0; i < w.n; i++) if (!c_digit((unsigned char)w.s[i])) numeric = 0;
@@ -2448,13 +2449,13 @@ static int statement(As *a, const char *p, const char *e)
 			p = ws(q + 1, e);
 			if (p >= e) return 0;
 			w = first_word(p, e);
+			lab = 1;
 			continue;
 		}
 		break;
 	}
 	if (!w.n) return err(a, "unexpected token at start of statement");
-	if (cond_dir(a, w, w.s + w.n, e, &rc)) return rc;	/* "2: .if ..." */
-	const char *q = ws(w.s + w.n, e);
+	if (lab && w.s[0] == '.' && cond_dir(a, w, w.s + w.n, e, &rc)) return rc;	/* "2: .if ..." */
 	if (q < e && *q == '=' && !(q + 1 < e && q[1] == '=')) return assign(a, w, q + 1, e);
 	if (q + 4 <= e && !memcmp(q, ".req", 4) && (q + 4 == e || !isidc((unsigned char)q[4]))) {
 		Sv reg = trim(q + 4, e);

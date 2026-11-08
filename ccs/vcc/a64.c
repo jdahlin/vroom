@@ -36,15 +36,34 @@ static int cinum(const char *s, size_t n, int max)
 	return v <= max ? v : -1;
 }
 
+/* case-insensitive FNV-1a, for the lookup tables built once below */
+static uint32_t lc_hash(const char *s, size_t n)
+{
+	uint32_t h = 2166136261u;
+	for (size_t i = 0; i < n; i++) h = (h ^ ((uint8_t)s[i] | 32)) * 16777619u;
+	return h ^ h >> 15;
+}
+
+#define SRH 4096
+static uint16_t srh[SRH];	/* sysregs index + 1, 0 = empty */
+static pthread_once_t srh_once = PTHREAD_ONCE_INIT;
+
+static void srh_build(void)
+{
+	for (size_t i = 0; i < sizeof sysregs / sizeof sysregs[0]; i++) {
+		uint32_t j = lc_hash(sysregs[i].name, strlen(sysregs[i].name)) & (SRH - 1);
+		while (srh[j]) j = (j + 1) & (SRH - 1);
+		srh[j] = (uint16_t)(i + 1);
+	}
+}
+
 int a64_sysreg(const char *name, size_t len, int write)
 {
 	(void)write;
-	size_t lo = 0, hi = sizeof sysregs / sizeof sysregs[0];
-	while (lo < hi) {
-		size_t mid = (lo + hi) / 2;
-		int c = lc_cmp(name, len, sysregs[mid].name);
-		if (!c) return sysregs[mid].enc;
-		if (c < 0) hi = mid; else lo = mid + 1;
+	pthread_once(&srh_once, srh_build);
+	for (uint32_t j = lc_hash(name, len) & (SRH - 1); srh[j]; j = (j + 1) & (SRH - 1)) {
+		const SysReg *r = &sysregs[srh[j] - 1];
+		if (!lc_cmp(name, len, r->name)) return r->enc;
 	}
 	/* generic S<op0>_<op1>_C<n>_C<m>_<op2> */
 	if (len >= 11 && (name[0] == 's' || name[0] == 'S')) {
@@ -448,12 +467,7 @@ static const Mn mns[] = {
 static uint16_t mnh[MNH];	/* index + 1, 0 = empty */
 static pthread_once_t mnh_once = PTHREAD_ONCE_INIT;
 
-static uint32_t mn_hash(const char *s, size_t n)
-{
-	uint32_t h = 2166136261u;
-	for (size_t i = 0; i < n; i++) h = (h ^ ((uint8_t)s[i] | 32)) * 16777619u;
-	return h ^ h >> 15;
-}
+#define mn_hash lc_hash
 
 static void mnh_build(void)
 {
