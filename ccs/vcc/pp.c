@@ -4437,6 +4437,23 @@ static void hc_mode(pp *p, int mode)
 	p->tokmode = mode;
 }
 
+static __attribute__((noinline)) void pp_next_slow(pp *p, ptok *t)
+{
+	if (unlikely(!p->tokmode))
+		hc_mode(p, 2);
+	next_tok(p, t);
+	p->ntok_out++;
+	if (unlikely(p->rec.on))
+		rec_tok(p, t);
+}
+
+/* t names a macro (entry e): pp_next's expansion path (not recording) */
+static __attribute__((noinline)) void pp_next_mac(pp *p, ptok *t, uintptr_t e)
+{
+	next_exp_slow(p, t, e);
+	p->ntok_out++;
+}
+
 void pp_next(pp *p, ptok *t)
 {
 	ctx *c = &p->cx[p->depth - 1];
@@ -4456,12 +4473,34 @@ void pp_next(pp *p, ptok *t)
 			return;
 		}
 	}
-	if (unlikely(!p->tokmode))
-		hc_mode(p, 2);
-	next_tok(p, t);
-	p->ntok_out++;
-	if (unlikely(p->rec.on))
-		rec_tok(p, t);
+	/* a plain token with nothing owed and no macro: inline, no frame (the rest are tail calls) */
+	if (likely(p->tokmode && !p->rec.on && c->i < c->n && !(c->first | p->pend))) {
+		uintptr_t m;
+
+		if (c->type == C_PTOK) {
+			*t = c->pt[c->i++];
+		} else if (c->type == C_VTOK) {
+			const vtok *v = &c->vt[c->i++];
+
+			vfill(t, v, c->src, c->offloc ? c->loc + v->off : c->loc);
+		} else if (c->type == C_FILE && !((c->vt[c->i].flags & TF_SOL) && c->vt[c->i].kind == T_HASH)) {
+			const vtok *v = &c->vt[c->i++];
+
+			if (p->depth == p->nfile && !p->svn)
+				p->tmp.p = p->tmp.base;	/* nothing above file level refers to tmp */
+			vfill(t, v, c->src, c->loc + v->off);
+		} else {
+			pp_next_slow(p, t);
+			return;
+		}
+		if (t->kind == T_IDENT && !(t->flags & PF_NOEXP) && (m = mget(p, t->id))) {
+			pp_next_mac(p, t, m);
+			return;
+		}
+		p->ntok_out++;
+		return;
+	}
+	pp_next_slow(p, t);
 }
 
 const pp_topev *pp_top_events(const pp *p, uint32_t *n)
