@@ -944,19 +944,23 @@ fast:
 		 * boundary.  Below lim they pair up with the starts in todo.
 		 */
 		uint64_t ends = ~W & ((B >> 1) | 1ull << 63);
-		unsigned last = 0, sflags = 0, pend = fl;
-		bool any = false;
+		unsigned last = 0, pend = fl;
 
-		while (todo) {
-			const unsigned o = (unsigned)__builtin_ctzll(todo);
+		/*
+		 * No test of todo: when the starts run out, the next end is at
+		 * or past lim (ends keeps bit 63 until then, so it is never 0).
+		 */
+		for (;;) {
 			const unsigned e = 1 + (unsigned)__builtin_ctzll(ends);
+
+			if (e >= lim)
+				break;	/* reaches X or past the window */
+
+			const unsigned o = (unsigned)__builtin_ctzll(todo);
 			const size_t at = p + o;
 			const unsigned f = ((SP >> o) & 1) * TF_SPACE | ((SOL >> o) & 1) * TF_SOL;
 			uint16_t c01;
 
-			sflags = f;
-			if (e >= lim)
-				break;	/* reaches X or past the window */
 			memcpy(&c01, s + at, 2);
 			/* kind without branches: ktab knows identifiers and numbers too */
 			const unsigned kind = kt[c01];
@@ -970,12 +974,11 @@ fast:
 			ni += kind == T_IDENT;
 			t++;
 			last = e;
-			any = true;
 			todo &= todo - 1;
 			ends &= ends - 1;
 		}
 		fl = pend;
-		if (likely(any)) {
+		if (likely(last)) {
 			/*
 			 * Only whitespace up to the X: take it and go to the
 			 * handler, instead of a window that finds just that.
@@ -993,7 +996,7 @@ fast:
 			/* the first token needs a handler (or is longer than the window) */
 			const unsigned o = (unsigned)__builtin_ctzll(todo);
 
-			fl |= sflags;
+			fl |= ((SP >> o) & 1) * TF_SPACE | ((SOL >> o) & 1) * TF_SOL;
 			p = gap = p + o;
 			DISPATCH();
 		}
