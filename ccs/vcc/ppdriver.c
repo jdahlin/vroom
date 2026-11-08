@@ -449,6 +449,11 @@ int ppd_run(int argc, char **argv, const ppd_env *env)
 	for (int k = 0; k < ni; k++) ADD(dirs_i[k]);
 	po.nsys = n;
 	for (int k = 0; k < ns; k++) ADD(dirs_s[k]);
+#ifdef VCC_INCLUDE
+	/* vcc's own <stdatomic.h>, <arm_neon.h>, <arm_acle.h>: ahead of clang's */
+	if (darwin && !nostdinc)
+		ADD(VCC_INCLUDE);
+#endif
 	if (darwin && !nostdinc)
 		for (size_t k = 0; k < sizeof(sysdirs_darwin) / sizeof(sysdirs_darwin[0]); k++)
 			ADD(sysdirs_darwin[k]);

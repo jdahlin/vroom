@@ -390,6 +390,15 @@ aldrig i bygget. Ett TU-test (`bench/vcc-diff.py`) körs över alla kärnfiler.
 - **Var tiden går:** batch med `-j 6` (last ~4): 3,3 s vägg, 16,9 s user + 3,1 s sys; `cc_run` 19,5 s jobbtid, varav kodgenerering + objekt **0,99 s** (text + as_run: 2,04 s), finish + write 0,25 s, 25,5 MB objekt. Front end (pp + parse/sema) är ~90 %. (Briefens "~4,3 CPU-s" för front end var väggtid; CPU är ~20 s, jfr Status 2.4: 22,6 s.) `kernel/sched/core.c` ensam: emit 2,5 ms mot 3,3 ms (utskrift 1,0 → 0,25 ms). I bygget summerar vcc-jobben till 34,3 s (medel 39 ms, max 247 ms `net/core/sock.c`) över 11,7 s, alltså ~3 jobb i luften av 14: kompileringsfasen begränsas nu av make, shim och beroendeordningen, inte av vccd (clang-jobben summerar till 106 s).
 - **Kvar:** front end-kostnaden (deklarationsåteruppspelning, RESEARCH-preprocessor §6.4); per-TU mmap/munmap i emit.c och cc.c (sys 3 s) → arenor per tråd som nollställs per jobb; vDSO (PIC) och värdprogram (Mach-O) går fortfarande till clang; varför bara ~3 jobb är i luften under make `-j 14`.
 
+### Status 2.10 (2026-11-08): vcc kompilerar sig själv (macOS, Mach-O)
+- `macho.c`: `ElfObj` → Mach-O `MH_OBJECT` (sektioner, symboler, ARM64_RELOC_* med ADDEND/SUBTRACTOR); `elf_finish` delad i layout + fixups så att båda format delar allt utom utskriften. `ppdriver.c` skriver Mach-O för Darwin-mål.
+- `emit.c`, Apples arm64-ABI: `_`-prefix, GOT för allt som inte definieras i TU:n, variadiska argument på stacken, packade stackskalärer; flyttal (bitmönster i GPR, beräkning i v16/v17, argument i v0–v7, konstanter vikta på värden; float↔`__int128` via `__floatti*`/`__fix*ti`); `__atomic_*` (LSE, alltid seq_cst); TLV (`__thread_vars`/`__tlv_bootstrap`); VLA (allokeras under sp som alloca, sp återställs via cleanup-stacken vid block-slut, break, goto, return).
+- `ccs/vcc/include/`: egna `stdatomic.h`, `arm_acle.h`, `arm_neon.h` (vektorer som justerade structar, intrinsics som inline asm/`.inst`), före SDK:ns sökväg vid Darwin.
+- `make -C ccs self` kompilerar alla 22 källor med vcc och länkar steg 2 (vpp, vccd, vasm, vlink, lextest, vcc) med ld64; `make -C ccs self-check` bygger steg 3 med steg 2 och kräver identiska objekt.
+- **Acceptans:** steg 2 ↔ steg 3 **byte-identiska (22/22 objekt)**; steg 2-`vpp`: paritet 911/912 (modpost.c som förut), `vcc-sema.py run` 878/879, kärnans 840 objekt byte-identiska med steg 1; steg 1 oförändrat mot föregående commit (0 av 840). `bench/vcc-diff.py` tar `VPP=` från miljön.
+- **Tid:** självkompilering 1,5 s (en tråd, sekventiellt). Steg 2-`vpp` är ~2,6× långsammare än clang `-O3`-bygget (kärnbatch `-j 6`: 4,1 → 10,6 s vägg) — vcc har ingen optimerare.
+- **Kvar:** HFA-argument (fatalt fel), `long double` bara som double; optimering i emittern om steg 2 ska ersätta clang-bygget.
+
 ## Risker
 - **GNU C-ytan och inline asm** är det stora jobbet. Uppskattat: lexer + pp ~2 kloc,
   parser + sema ~10–15 kloc, emitter ~5 kloc, assembler ~4 kloc, länkare ~3 kloc.

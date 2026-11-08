@@ -579,9 +579,11 @@ static void efatal(ecx *e, uint32_t loc, const char *fmt, ...)
 static const char *const fixed_names[] = {
 	"memcpy", "memset", "memmove", "__udivti3", "__divti3", "__umodti3", "__modti3", "strlen",
 	"__ashlti3", "__lshrti3", "__ashrti3", "__floattisf", "__floattidf", "__floatuntisf", "__floatuntidf",
+	"__fixsfti", "__fixdfti", "__fixunssfti", "__fixunsdfti",
 };
 enum { FN_MEMCPY, FN_MEMSET, FN_MEMMOVE, FN_UDIVTI3, FN_DIVTI3, FN_UMODTI3, FN_MODTI3, FN_STRLEN,
-       FN_ASHLTI3, FN_LSHRTI3, FN_ASHRTI3, FN_FLOATTISF, FN_FLOATTIDF, FN_FLOATUNTISF, FN_FLOATUNTIDF };
+       FN_ASHLTI3, FN_LSHRTI3, FN_ASHRTI3, FN_FLOATTISF, FN_FLOATTIDF, FN_FLOATUNTISF, FN_FLOATUNTIDF,
+       FN_FIXSFTI, FN_FIXDFTI, FN_FIXUNSSFTI, FN_FIXUNSDFTI };
 #define FIXED(k) REF(RK_NAME, 0x8000000u + (k))
 
 static uint32_t canon_sym(cc *c, uint32_t s)
@@ -2363,6 +2365,7 @@ static void call_fixed(ecx *e, int fn, int a0, int a1, int a2, int64_t n)
 /* ---------------- the emitter proper ---------------- */
 
 static val gen(ecx *e, uint32_t n);
+static val vla_bytes(ecx *e, qty t);
 static lval gen_lval(ecx *e, uint32_t n);
 static void gen_stmt(ecx *e, uint32_t n);
 static void gen_cond(ecx *e, uint32_t n, bool jump_if, uint32_t l);
@@ -3232,8 +3235,16 @@ static val f_cast(ecx *e, val v, qty from, qty to)
 		uint64_t ts = tsize(c, to);
 		bool sg = !is_ptr(c, to) && is_signed(c, to);
 
-		if (ts == 16)
-			efatal(e, e->curloc, "floating point to 128-bit integer conversion is not supported");
+		if (ts == 16) {
+			/* __fixdfti & co. */
+			if (v.k == V_CONST) {
+				double x = f_val(fd, v.i);
+
+				return vconst(sg ? (i128)x : (i128)(u128)x);
+			}
+			return call_named(e, FIXED(sg ? (fd ? FN_FIXDFTI : FN_FIXSFTI) : (fd ? FN_FIXUNSDFTI : FN_FIXUNSSFTI)),
+					  &v, &from, 1, to, false);
+		}
 		if (v.k == V_CONST) {
 			double x = f_val(fd, v.i);
 
@@ -5296,8 +5307,18 @@ static val gen(ecx *e, uint32_t n)
 		return va_arg_(e, x);
 	case N_ZERO:
 		return vconst(0);
-	case N_SIZEOF_VLA:
-		efatal(e, x->loc, "variable length arrays are not supported");
+	case N_SIZEOF_VLA: {
+		const sym *y = x->a && N(x->a)->op == N_VAR ? &c->syms[N(x->a)->a] : NULL;
+
+		if (y && y->kind == S_VAR && binding(e, N(x->a)->a)->kind == B_INDIRECT &&
+		    binding(e, N(x->a)->a)->inst == e->f->inst && (T(c, y->ty)->flags & TF_VLA)) {
+			int r = treg(e);
+
+			mem(e, I_LD, 3, 0, r, FRAME, binding(e, N(x->a)->a)->slot + 16);
+			return vreg(r);
+		}
+		return vla_bytes(e, x->b);
+	}
 	default:
 		efatal(e, x->loc, "unsupported expression (node %d)", x->op);
 	}
@@ -5534,6 +5555,22 @@ static void run_cleanup(ecx *e, uint32_t s)
 	carg a;
 	lval l;
 
+	if (T(c, c->syms[s].ty)->flags & TF_VLA) {
+		const bind *b = binding(e, s);
+		int r;
+
+		if (!e->reach || b->kind != B_INDIRECT || b->inst != e->f->inst)
+			return;
+		r = treg(e);
+		mem(e, I_LD, 3, 0, r, FRAME, b->slot + 8);
+		mov(e, 1, SP, r);
+		{
+			val v = vreg(r);
+
+			vfree(e, &v);
+		}
+		return;
+	}
 	if (!fn || !e->reach)
 		return;
 	l = local_lval(e, s);
@@ -5839,6 +5876,75 @@ static void gen_return(ecx *e, const node *x)
 
 static void gen_asm(ecx *e, uint32_t n);
 
+/*
+ * A variable length array: the slot holds { pointer, sp before the
+ * allocation, size in bytes }.  The array lives below sp like alloca's
+ * memory; leaving its scope (block end, break, goto, return) restores sp
+ * through the cleanup stack.
+ */
+static val vla_bytes(ecx *e, qty t)
+{
+	cc *c = e->c;
+	const ctype *a = T(c, t);
+	val n, b;
+	int r;
+
+	if (a->kind != TY_ARRAY || !(a->flags & TF_VLA))
+		return vconst(tsize(c, t));
+	n = cast(e, gen(e, a->n), N(a->n)->ty, c->t_size, CK_INT);
+	b = vla_bytes(e, a->base);
+	r = toreg(e, &n);
+	if (b.k == V_CONST) {
+		if (b.i != 1) {
+			movi(e, 1, R_X16, (int64_t)b.i);
+			op4(e, I_MADD, 1, r, r, R_X16, ZR);
+		}
+	} else {
+		int rb = toreg(e, &b);
+
+		op4(e, I_MADD, 1, r, r, rb, ZR);
+		vfree(e, &b);
+	}
+	return vreg(r);
+}
+
+static void gen_vla_decl(ecx *e, const node *x, uint32_t s)
+{
+	cc *c = e->c;
+	bind *b = binding(e, s);
+	val n = vla_bytes(e, c->syms[s].ty);
+	int r = toreg(e, &n), t = treg(e);
+	int32_t sl = slot(e, 24, 8);
+	ins *i;
+
+	b->inst = e->f->inst;
+	b->kind = B_INDIRECT;
+	b->kv = 0;
+	b->reg = 0xff;
+	b->slot = sl;
+	e->dyn = true;
+	mem(e, I_ST, 3, 0, r, FRAME, sl + 16);
+	mov(e, 1, t, SP);
+	mem(e, I_ST, 3, 0, t, FRAME, sl + 8);
+	opi(e, I_ADDI, 1, r, r, 15);
+	opi(e, I_ANDI, 1, r, r, -16);
+	op3(e, I_SUB, 1, SP, SP, r);
+	if (e->reach) {
+		i = put(e, I_ADDI);
+		i->sz = 1, i->rd = (uint8_t)t, i->rn = SP, i->imm = 0, i->cond = 0xee;	/* + outgoing area */
+	}
+	mem(e, I_ST, 3, 0, t, FRAME, sl);
+	vfree(e, &n);
+	{
+		val tv = vreg(t);
+
+		vfree(e, &tv);
+	}
+	if (e->nclean >= MAXCLEAN)
+		efatal(e, x->loc, "too many cleanups");
+	e->clean[e->nclean++] = s;
+}
+
 static void gen_decl(ecx *e, const node *x)
 {
 	cc *c = e->c;
@@ -5848,8 +5954,10 @@ static void gen_decl(ecx *e, const node *x)
 
 	if (y->kind != S_VAR || y->sc == SC_STATIC || y->sc == SC_EXTERN || y->sc == SC_TYPEDEF)
 		return;
-	if (T(c, y->ty)->flags & TF_VLA)
-		efatal(e, x->loc, "variable length arrays are not supported");
+	if (T(c, y->ty)->flags & TF_VLA) {
+		gen_vla_decl(e, x, s);
+		return;
+	}
 	if (x->b && !(e->E->sflags[s] & SA_WRITTEN) && !is_agg(c, y->ty) && !(QQ(y->ty) & Q_VOLATILE) &&
 	    !is_wide(c, y->ty) && y->sc != SC_REGISTER && !sym_attrs(c, s)->cleanup) {
 		val v = gen(e, x->b);
@@ -7472,7 +7580,7 @@ static int walk(pre *P, uint32_t n)
 		const sym *y = &c->syms[x->a];
 
 		lab = walk(P, x->b);
-		if (sym_attrs(c, x->a)->cleanup)
+		if (sym_attrs(c, x->a)->cleanup || (y->kind == S_VAR && (T(c, y->ty)->flags & TF_VLA)))
 			P->cdepth++;
 		/* a __used static local is emitted with its function, referenced or not */
 		if (y->kind == S_VAR && y->sc == SC_STATIC && sym_attrs(c, x->a)->used &&
