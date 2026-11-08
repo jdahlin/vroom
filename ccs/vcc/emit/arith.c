@@ -173,6 +173,16 @@ VPRIV int test_zero(ecx *e, val *v, qty t, uint32_t l, bool nz)
 		return -1;
 	}
 	r = v->r;
+	{
+		int cond = last_cset(e, v);
+
+		if (cond >= 0) {
+			e->nin--;
+			bcond(e, nz ? cond : cond ^ 1, l);
+			val_free(e, v);
+			return -1;
+		}
+	}
 	if (is_ptr(c, t) || sz == 8) {
 		cbz(e, nz, 1, r, l);
 	} else if (sz == 4) {
@@ -205,7 +215,7 @@ VPRIV val tobool(ecx *e, val v, qty t)
 		sz = 8;
 	}
 	r = toreg(e, &v);
-	if (KIND(c, t) == TY_BOOL)
+	if (KIND(c, t) == TY_BOOL || last_cset(e, &v) >= 0)
 		return v;
 	if (is_ptr(c, t) || sz == 8)
 		op3(e, I_SUBS, 1, ZR, r, ZR);
@@ -268,7 +278,7 @@ VPRIV val cast(ecx *e, val v, qty from, qty to, int kind)
 			}
 			return v;
 		}
-		if (ts > fs) {
+		if (ts > fs && last_cset(e, &v) < 0) {	/* a cset's 0/1 is already extended */
 			int r = toreg(e, &v);
 
 			extend(e, r, r, (int)fs, kind != CK_P2I && is_signed(c, from));

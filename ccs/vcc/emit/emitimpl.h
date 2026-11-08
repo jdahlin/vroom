@@ -550,6 +550,7 @@ static inline void opbf(ecx *e, int op, int x, int rd, int rn, int immr, int imm
 static inline void movi(ecx *e, int x, int rd, int64_t v);
 static inline void mov(ecx *e, int x, int rd, int rn);
 static inline void cset(ecx *e, int rd, int cond);
+static inline int last_cset(ecx *e, const val *v);
 static inline void mem(ecx *e, int op, int sz, int ext, int rd, int base, int64_t off);
 static inline void symop(ecx *e, int op, int sz, int ext, int rd, int rn, uint32_t ref, int64_t off);
 VPRIV uint32_t newlabel(ecx *e);
@@ -886,6 +887,20 @@ static inline void cset(ecx *e, int rd, int cond)
 		return;
 	i = put(e, I_CSINC);
 	i->sz = 0, i->rd = (uint8_t)rd, i->rn = ZR, i->rm = ZR, i->cond = (uint8_t)(cond ^ 1);
+}
+
+/* the last record is `cset v.r, cond` (nothing since, no label: the flags still say it): cond, else -1.
+ * The value is then 0/1 already, and a test of it can use the flags. */
+static inline int last_cset(ecx *e, const val *v)
+{
+	const ins *i;
+
+	if (v->k != V_REG || !e->reach || !e->nin || e->E->o->opt < 1)
+		return -1;
+	i = &e->in[e->nin - 1];
+	if (i->op != I_CSINC || i->rn != ZR || i->rm != ZR || i->rd != v->r)
+		return -1;
+	return i->cond ^ 1;
 }
 
 static inline void mem(ecx *e, int op, int sz, int ext, int rd, int base, int64_t off)
