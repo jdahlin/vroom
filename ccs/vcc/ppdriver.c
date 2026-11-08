@@ -316,10 +316,10 @@ static void obj_state(void)
 }
 
 /* lay out tl_obj and write it to out */
-static int write_obj(const char *cwd, const char *out, int outfd, int errfd)
+static int write_obj(const char *cwd, const char *out, int outfd, int errfd, int macho)
 {
 	unsigned long long t0 = nsnow();
-	size_t n = elf_finish(tl_obj);
+	size_t n = macho ? macho_finish(tl_obj) : elf_finish(tl_obj);
 	int r;
 
 	if (!n || tl_obj->has_err) {
@@ -330,7 +330,10 @@ static int write_obj(const char *cwd, const char *out, int outfd, int errfd)
 		dprintf(errfd, "vcc: error: object too large\n");
 		return 1;
 	}
-	elf_emit(tl_obj, tl_objbuf);
+	if (macho)
+		macho_emit(tl_obj, tl_objbuf);
+	else
+		elf_emit(tl_obj, tl_objbuf);
 	r = write_out(cwd, out, outfd, (const char *)tl_objbuf, n, errfd);
 	ppd_ns_obj += nsnow() - t0;
 	ppd_bytes_obj += n;
@@ -583,7 +586,7 @@ int ppd_run(int argc, char **argv, const ppd_env *env)
 		if (fd >= 0)
 			close(fd);
 		if (!status && emit == 2)
-			status = write_obj(env->cwd, out, env->outfd, errfd);
+			status = write_obj(env->cwd, out, env->outfd, errfd, darwin);
 		if (!status && emit == 2 && depfile)
 			status = write_deps(p, env->cwd, depfile, deptarget ? deptarget : out, errfd);
 		if (getenv("VPP_TIME"))
@@ -616,7 +619,7 @@ int ppd_run(int argc, char **argv, const ppd_env *env)
 			dprintf(errfd, "vcc: error: %s\n", msg);
 			status = 1;
 		} else {
-			status = write_obj(env->cwd, out, env->outfd, errfd);
+			status = write_obj(env->cwd, out, env->outfd, errfd, 0);
 		}
 		if (!status && depfile)
 			status = write_deps(p, env->cwd, depfile, deptarget ? deptarget : out, errfd);

@@ -69,6 +69,8 @@ enum {
 	R_AARCH64_ADR_GOT_PAGE = 311, R_AARCH64_LD64_GOT_LO12_NC = 312,
 	/* internal: 1-byte data (no ELF relocation exists; must resolve) */
 	R_VCC_ABS8 = 0x10001,
+	/* internal, Mach-O only: thread-local variable descriptor (TLVP) page / page offset */
+	R_VCC_TLVP_PAGE21 = 0x10002, R_VCC_TLVP_PAGEOFF12 = 0x10003,
 };
 
 typedef struct ElfChunk {
@@ -217,6 +219,17 @@ void elf_fixup(ElfObj *o, uint32_t frag, uint64_t off, uint8_t *p, uint32_t type
 size_t elf_finish(ElfObj *o);
 void elf_emit(ElfObj *o, uint8_t *out);
 int elf_write_file(ElfObj *o, const char *path);	/* finish + emit + write */
+
+/* elf_finish's first steps (frag bases, section sizes, .size expressions)
+ * and its field patcher: for other object formats (macho.c). */
+void elf_layout(ElfObj *o);
+void elf_patch(ElfObj *o, ElfFix *x, int64_t v);
+
+/* Mach-O (arm64, MH_OBJECT) from the same model (macho.c): ELF section
+ * names map to Mach-O sections, R_AARCH64_* fixups to ARM64_RELOC_*.  The
+ * names are written as they are (the code generator adds the '_'). */
+size_t macho_finish(ElfObj *o);
+void macho_emit(ElfObj *o, uint8_t *out);
 
 /* Section-relative value of a defined symbol after layout (valid only in
  * elf_finish and later); for same-frag symbols at any time. */

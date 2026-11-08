@@ -1360,6 +1360,22 @@ static const builtin builtins[] = {
 	{ "__builtin_isless", BI_ISLESS, 1, "i." }, { "__builtin_islessequal", BI_ISLESSEQUAL, 1, "i." },
 	{ "__builtin_islessgreater", BI_ISLESSGREATER, 1, "i." }, { "__builtin_isunordered", BI_ISUNORDERED, 1, "i." },
 	{ "__builtin_arm_rsr64", BI_ARM_RSR, 0, "WS" },
+	{ "__atomic_load_n", BI_ATOMIC_LOAD_N, 0, "v." }, { "__atomic_store_n", BI_ATOMIC_STORE_N, 0, "v." },
+	{ "__atomic_exchange_n", BI_ATOMIC_EXCHANGE_N, 0, "v." },
+	{ "__atomic_compare_exchange_n", BI_ATOMIC_CMPXCHG_N, 0, "v." },
+	{ "__atomic_load", BI_ATOMIC_LOAD, 0, "v." }, { "__atomic_store", BI_ATOMIC_STORE, 0, "v." },
+	{ "__atomic_exchange", BI_ATOMIC_EXCHANGE, 0, "v." },
+	{ "__atomic_compare_exchange", BI_ATOMIC_CMPXCHG, 0, "v." },
+	{ "__atomic_fetch_add", BI_ATOMIC_FETCH_ADD, 0, "v." }, { "__atomic_fetch_sub", BI_ATOMIC_FETCH_SUB, 0, "v." },
+	{ "__atomic_fetch_and", BI_ATOMIC_FETCH_AND, 0, "v." }, { "__atomic_fetch_or", BI_ATOMIC_FETCH_OR, 0, "v." },
+	{ "__atomic_fetch_xor", BI_ATOMIC_FETCH_XOR, 0, "v." },
+	{ "__atomic_add_fetch", BI_ATOMIC_ADD_FETCH, 0, "v." }, { "__atomic_sub_fetch", BI_ATOMIC_SUB_FETCH, 0, "v." },
+	{ "__atomic_and_fetch", BI_ATOMIC_AND_FETCH, 0, "v." }, { "__atomic_or_fetch", BI_ATOMIC_OR_FETCH, 0, "v." },
+	{ "__atomic_xor_fetch", BI_ATOMIC_XOR_FETCH, 0, "v." },
+	{ "__atomic_thread_fence", BI_ATOMIC_THREAD_FENCE, 0, "vi" },
+	{ "__atomic_signal_fence", BI_ATOMIC_SIGNAL_FENCE, 0, "vi" },
+	{ "__atomic_always_lock_free", BI_ATOMIC_LOCK_FREE, 1, "bzP" },
+	{ "__atomic_is_lock_free", BI_ATOMIC_LOCK_FREE, 1, "bzP" },
 	/* library functions */
 	{ "__builtin_memcpy", BI_LIB, 0, "ppPz" }, { "__builtin_memmove", BI_LIB, 0, "ppPz" },
 	{ "__builtin_memset", BI_LIB, 0, "ppiz" }, { "__builtin_memcmp", BI_LIB, 0, "iPPz" },
@@ -2569,6 +2585,87 @@ static uint32_t offsetof_expr(cc *c, uint32_t loc)
 	return res;
 }
 
+/*
+ * GNU __atomic_* calls.  Argument layout (P: pointer to the atomic object
+ * of type T, size 1/2/4/8/16; M: memory order, converted to int):
+ *   load_n(P, M) -> T            store_n(P, T, M)          exchange_n(P, T, M) -> T
+ *   compare_exchange_n(P, T *expected, T desired, bool weak, M, M) -> bool
+ *   load(P, T *ret, M)           store(P, T *val, M)       exchange(P, T *val, T *ret, M)
+ *   compare_exchange(P, T *expected, T *desired, bool weak, M, M) -> bool
+ *   fetch_op / op_fetch(P, T, M) -> T (integers; pointers: bytes, as GCC)
+ */
+static uint32_t atomic_call(cc *c, const builtin *b, uint32_t loc)
+{
+	static const uint8_t nargs[] = {
+		[BI_ATOMIC_LOAD_N - BI_ATOMIC_LOAD_N] = 2, [BI_ATOMIC_STORE_N - BI_ATOMIC_LOAD_N] = 3,
+		[BI_ATOMIC_EXCHANGE_N - BI_ATOMIC_LOAD_N] = 3, [BI_ATOMIC_CMPXCHG_N - BI_ATOMIC_LOAD_N] = 6,
+		[BI_ATOMIC_LOAD - BI_ATOMIC_LOAD_N] = 3, [BI_ATOMIC_STORE - BI_ATOMIC_LOAD_N] = 3,
+		[BI_ATOMIC_EXCHANGE - BI_ATOMIC_LOAD_N] = 4, [BI_ATOMIC_CMPXCHG - BI_ATOMIC_LOAD_N] = 6,
+	};
+	int id = b->id, want = id <= BI_ATOMIC_CMPXCHG ? nargs[id - BI_ATOMIC_LOAD_N] : 3;
+	vec args;
+	qty pt, t, rt = prim(TY_VOID), tp;
+
+	args_list(c, &args);
+	for (uint32_t i = 0; i < args.n; i++)
+		args.v[i] = decay(c, args.v[i]);
+	if ((int)args.n != want) {
+		error(c, loc, "too %s arguments to function call", (int)args.n < want ? "few" : "many");
+		return mk_int(c, 0, prim(TY_INT), loc);
+	}
+	pt = N(args.v[0])->ty;
+	if (!is_ptr(c, pt)) {
+		error(c, loc, "address argument to atomic builtin must be a pointer");
+		return mk_int(c, 0, prim(TY_INT), loc);
+	}
+	t = QUNQ(T(c, pt)->base);
+	tp = ty_ptr(c, t);
+	if (!(T(c, t)->size == 1 || T(c, t)->size == 2 || T(c, t)->size == 4 || T(c, t)->size == 8 || T(c, t)->size == 16)) {
+		error(c, loc, "address argument to atomic builtin must be a pointer to a 1, 2, 4, 8 or 16 byte type");
+		return mk_int(c, 0, prim(TY_INT), loc);
+	}
+	switch (id) {
+	case BI_ATOMIC_LOAD_N:
+		rt = t;
+		break;
+	case BI_ATOMIC_STORE_N:
+		args.v[1] = convert(c, args.v[1], t);
+		break;
+	case BI_ATOMIC_EXCHANGE_N:
+		args.v[1] = convert(c, args.v[1], t);
+		rt = t;
+		break;
+	case BI_ATOMIC_CMPXCHG_N:
+		args.v[1] = convert(c, args.v[1], tp);
+		args.v[2] = convert(c, args.v[2], t);
+		args.v[3] = convert(c, args.v[3], prim(TY_BOOL));
+		rt = prim(TY_BOOL);
+		break;
+	case BI_ATOMIC_LOAD: case BI_ATOMIC_STORE:
+		args.v[1] = convert(c, args.v[1], tp);
+		break;
+	case BI_ATOMIC_EXCHANGE:
+		args.v[1] = convert(c, args.v[1], tp);
+		args.v[2] = convert(c, args.v[2], tp);
+		break;
+	case BI_ATOMIC_CMPXCHG:
+		args.v[1] = convert(c, args.v[1], tp);
+		args.v[2] = convert(c, args.v[2], tp);
+		args.v[3] = convert(c, args.v[3], prim(TY_BOOL));
+		rt = prim(TY_BOOL);
+		break;
+	default:	/* fetch_op / op_fetch */
+		if (!is_integer(c, t) && !is_ptr(c, t))
+			error(c, loc, "address argument to atomic operation must be a pointer to integer or pointer");
+		args.v[1] = convert(c, args.v[1], is_ptr(c, t) ? c->t_ptrdiff : t);
+		rt = t;
+		break;
+	}
+	for (int i = want - (id == BI_ATOMIC_CMPXCHG_N || id == BI_ATOMIC_CMPXCHG ? 2 : 1); i < want; i++)
+		args.v[i] = convert(c, args.v[i], prim(TY_INT));
+	return mk_builtin(c, id, rt, loc, &args);
+}
+
 static uint32_t builtin_call(cc *c, const builtin *b, uint32_t loc)
 {
 	vec args;
@@ -2628,6 +2725,12 @@ static uint32_t builtin_call(cc *c, const builtin *b, uint32_t loc)
 		n = mk_builtin(c, b->id, prim(TY_INT), loc, &args);
 		return n;
 	}
+	case BI_ATOMIC_LOAD_N: case BI_ATOMIC_STORE_N: case BI_ATOMIC_EXCHANGE_N: case BI_ATOMIC_CMPXCHG_N:
+	case BI_ATOMIC_LOAD: case BI_ATOMIC_STORE: case BI_ATOMIC_EXCHANGE: case BI_ATOMIC_CMPXCHG:
+	case BI_ATOMIC_FETCH_ADD: case BI_ATOMIC_FETCH_SUB: case BI_ATOMIC_FETCH_AND: case BI_ATOMIC_FETCH_OR:
+	case BI_ATOMIC_FETCH_XOR: case BI_ATOMIC_ADD_FETCH: case BI_ATOMIC_SUB_FETCH: case BI_ATOMIC_AND_FETCH:
+	case BI_ATOMIC_OR_FETCH: case BI_ATOMIC_XOR_FETCH:
+		return atomic_call(c, b, loc);
 	case BI_COUNTED_BY_REF: {
 		uint32_t m;
 

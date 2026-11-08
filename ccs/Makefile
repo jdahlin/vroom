@@ -22,7 +22,7 @@ VCC_CFLAGS = -std=c11 -O2 -Wall -Wextra -Wno-unused-parameter -D_DARWIN_C_SOURCE
 
 vcc: $(OUT)/vcc $(OUT)/vld $(OUT)/vas $(OUT)/vccd $(OUT)/lextest $(OUT)/vpp $(OUT)/vlink $(OUT)/vasm
 
-AS_SRC = vcc/as.c vcc/a64.c vcc/elf.c
+AS_SRC = vcc/as.c vcc/a64.c vcc/elf.c vcc/macho.c
 AS_HDR = vcc/as.h vcc/a64.h vcc/elf.h vcc/a64sysreg.inc
 LEX_SRC = vcc/lex.c vcc/intern.c
 LEX_HDR = vcc/lex.h vcc/intern.h
