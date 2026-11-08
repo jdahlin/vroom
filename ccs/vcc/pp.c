@@ -375,6 +375,7 @@ typedef struct fent {
 	uint32_t namelen;
 	const char *spath;	/* as spelled, for dependency files */
 	uint8_t sys;		/* a system header (found in a system directory, or included by one) */
+	uint32_t from;		/* the #include's location (0: the main file, <built-in>, or a cached replay) */
 } fent;
 
 #define MAXCTX (1u << 15)
@@ -559,6 +560,8 @@ struct pp {
 	const char *base_name;
 	uint32_t base_namelen;
 	jmp_buf *fatal_jb;	/* fatal errors end the TU here */
+	int color;		/* diagnostics in colour */
+	uint32_t diag_fe;	/* the file of the last diagnostic + 1 (for "In file included from") */
 	struct lmark {		/* #line / GNU line markers */
 		uint32_t fe, off;	/* in fent fe, from byte offset off on */
 		uint32_t pline, line;	/* physical line pline is line */
@@ -650,34 +653,16 @@ static const char *presumed_name(const pp *p, uint32_t fe, uint32_t loc, uint32_
 	return e->name;
 }
 
+void pp_vdiag(pp *p, uint32_t loc, const char *what, const char *fmt, va_list ap);
+
+__attribute__((format(printf, 4, 5)))
 static void diag(pp *p, uint32_t loc, const char *what, const char *fmt, ...)
 {
-	const fent *e = loc_fent(p, loc);
-	int fd = p->o->errfd ? p->o->errfd : 2;
-	char line[2048];
-	int n;
 	va_list ap;
 
-	if (e)
-		n = snprintf(line, sizeof(line), "%s:%u: %s: ", e->name, loc_line(p, loc), what);
-	else
-		n = snprintf(line, sizeof(line), "vcc: %s: ", what);
 	va_start(ap, fmt);
-	n += vsnprintf(line + n, sizeof(line) - (size_t)n - 1, fmt, ap);
+	pp_vdiag(p, loc, what, fmt, ap);
 	va_end(ap);
-	if (n > (int)sizeof(line) - 2)
-		n = (int)sizeof(line) - 2;
-	line[n++] = '\n';
-	(void)!write(fd, line, (size_t)n);
-	if (what[0] == 'e' || what[0] == 'f')
-		p->errors++;
-	else
-		p->warns++;
-	if (what[0] == 'f') {
-		if (p->fatal_jb)
-			longjmp(*p->fatal_jb, 1);
-		exit(1);
-	}
 }
 
 /* ---------------- exported for the parser ---------------- */
@@ -707,32 +692,335 @@ int pp_where(const pp *p, uint32_t loc, const char **name, uint32_t *namelen, ui
 	return 1;
 }
 
-void pp_vdiag(pp *p, uint32_t loc, const char *what, const char *fmt, va_list ap)
+/* ---------------- diagnostics in clang's text format ---------------- */
+
+typedef struct dbuf {
+	char *p;
+	size_t n, cap;
+} dbuf;
+
+static void db_put(dbuf *b, const char *s, size_t n)
 {
-	int fd = p->o->errfd ? p->o->errfd : 2;
-	const char *name;
-	uint32_t nl, line, col;
-	char buf[2048];
+	if (b->n + n > b->cap) {
+		size_t c = b->cap ? b->cap * 2 : 4096;
+
+		while (c < b->n + n)
+			c *= 2;
+		b->p = realloc(b->p, c);
+		b->cap = c;
+	}
+	memcpy(b->p + b->n, s, n);
+	b->n += n;
+}
+
+static void db_s(dbuf *b, const char *s) { db_put(b, s, strlen(s)); }
+
+__attribute__((format(printf, 2, 3)))
+static void db_f(dbuf *b, const char *fmt, ...)
+{
+	char t[1024];
+	va_list ap;
 	int n;
 
-	if (pp_where(p, loc, &name, &nl, &line, &col))
-		n = snprintf(buf, sizeof(buf), "%.*s:%u:%u: %s: ", (int)nl, name, line, col, what);
-	else
-		n = snprintf(buf, sizeof(buf), "vcc: %s: ", what);
-	n += vsnprintf(buf + n, sizeof(buf) - (size_t)n - 1, fmt, ap);
-	if (n > (int)sizeof(buf) - 2)
-		n = (int)sizeof(buf) - 2;
-	buf[n++] = '\n';
-	(void)!write(fd, buf, (size_t)n);
+	va_start(ap, fmt);
+	n = vsnprintf(t, sizeof(t), fmt, ap);
+	va_end(ap);
+	db_put(b, t, n < (int)sizeof(t) ? (size_t)n : sizeof(t) - 1);
+}
+
+static void db_c(dbuf *b, char c, int n)
+{
+	while (n-- > 0)
+		db_put(b, &c, 1);
+}
+
+/* clang's colours (TextDiagnostic.cpp) */
+#define DC_RESET "\033[0m"
+#define DC_BOLD "\033[1m"
+static const char *dcolor(const char *what)
+{
+	switch (what[0]) {
+	case 'e': case 'f': return "\033[0;1;31m";	/* bold red */
+	case 'w': return "\033[0;1;35m";		/* bold magenta */
+	case 'r': return "\033[0;1;34m";		/* remark: bold blue */
+	default: return "\033[0;1;30m";			/* note: bold black */
+	}
+}
+#define DC_CARET "\033[0;1;32m"	/* bold green */
+#define DC_FIXIT "\033[0;32m"	/* green */
+
+static bool loc_ok(const pp *p, uint32_t loc, const fent **e)
+{
+	*e = loc_fent(p, loc);
+	return *e && loc >= (*e)->base && loc - (*e)->base <= (*e)->f->size;
+}
+
+uint32_t pp_tok_end(const pp *p, uint32_t loc)
+{
+	const fent *e;
+	const char *s, *end;
+	uint32_t off;
+
+	if (!loc_ok(p, loc, &e))
+		return loc + 1;
+	s = e->f->src, off = loc - e->base, end = s + e->f->size;
+	if (s + off >= end)
+		return loc + 1;
+	{
+		const char *q = s + off;
+		unsigned char ch = (unsigned char)*q;
+
+		if (ch == '_' || ch == '$' || ch >= 0x80 || (ch | 0x20) - 'a' < 26u || ch - '0' < 10u) {
+			/* identifier or pp-number (1e+5, 0x1p-3) */
+			bool num = ch - '0' < 10u;
+
+			for (q++; q < end; q++) {
+				unsigned char d = (unsigned char)*q;
+
+				if (d == '_' || d == '$' || d >= 0x80 || (d | 0x20) - 'a' < 26u || d - '0' < 10u || (num && d == '.'))
+					continue;
+				if (num && (d == '+' || d == '-') && strchr("eEpP", q[-1]))
+					continue;
+				break;
+			}
+			return loc + (uint32_t)(q - (s + off));
+		}
+		if (ch == '"' || ch == '\'') {
+			for (q++; q < end && *q != (char)ch && *q != '\n'; q++)
+				if (*q == '\\')
+					q++;
+			return loc + (uint32_t)(q + 1 - (s + off));
+		}
+		{
+			static const char *const ops[] = { "<<=", ">>=", "...", "->", "++", "--", "<<", ">>", "<=", ">=", "==", "!=",
+							   "&&", "||", "*=", "/=", "%=", "+=", "-=", "&=", "^=", "|=", "##" };
+
+			for (size_t i = 0; i < sizeof(ops) / sizeof(ops[0]); i++) {
+				size_t l = strlen(ops[i]);
+
+				if ((size_t)(end - q) >= l && !memcmp(q, ops[i], l))
+					return loc + (uint32_t)l;
+			}
+		}
+	}
+	return loc + 1;
+}
+
+/* display columns of src[b, e): tabs to the next multiple of 8, UTF-8 continuation bytes take none */
+static uint32_t dcols(const char *s, uint32_t b, uint32_t e, uint32_t col)
+{
+	for (uint32_t i = b; i < e; i++) {
+		unsigned char ch = (unsigned char)s[i];
+
+		if (ch == '\t')
+			col = (col / 8 + 1) * 8;
+		else if ((ch & 0xc0) != 0x80)
+			col++;
+	}
+	return col;
+}
+
+/* "In file included from" for each level of loc's include stack, outermost first */
+static void include_stack(pp *p, dbuf *b, const fent *e)
+{
+	const fent *chain[64];
+	int n = 0;
+
+	for (const fent *x = e; x && x->from && n < 64; ) {
+		const fent *y = loc_fent(p, x->from);
+
+		chain[n++] = x;
+		x = y;
+	}
+	for (int i = n; i-- > 0;) {
+		const char *name;
+		uint32_t nl, line, col;
+
+		if (pp_where(p, chain[i]->from, &name, &nl, &line, &col))
+			db_f(b, "In file included from %.*s:%u:\n", (int)nl, name, line);
+	}
+}
+
+static void snippet(pp *p, dbuf *b, const fent *e, const pp_dinfo *d)
+{
+	const char *s = e->f->src;
+	uint32_t off = d->loc - e->base, size = e->f->size, ls, le, line, width, nd;
+	char num[16];
+	dbuf cl = { 0 }, fl = { 0 };
+	uint32_t ccol;
+	bool anyfix = false;
+
+	for (ls = off; ls > 0 && s[ls - 1] != '\n'; ls--)
+		;
+	for (le = off; le < size && s[le] != '\n'; le++)
+		;
+	if (le > ls && s[le - 1] == '\r')
+		le--;
+	line = loc_line(p, d->loc);
+	nd = (uint32_t)snprintf(num, sizeof(num), "%u", line + 16);
+	width = nd > 4 ? nd : 4;
+	nd = (uint32_t)snprintf(num, sizeof(num), "%u", line);
+	/* the source line, tabs expanded */
+	db_c(b, ' ', (int)(width - nd + 1));
+	db_s(b, num);
+	db_s(b, " | ");
+	for (uint32_t i = ls, col = 0; i < le; i++) {
+		if (s[i] == '\t') {
+			uint32_t to = (col / 8 + 1) * 8;
+
+			db_c(b, ' ', (int)(to - col));
+			col = to;
+		} else {
+			db_put(b, s + i, 1);
+			if (((unsigned char)s[i] & 0xc0) != 0x80)
+				col++;
+		}
+	}
+	db_s(b, "\n");
+	/* the caret line: ~ under the ranges, ^ at loc */
+	ccol = dcols(s, ls, off, 0);
+	{
+		uint32_t lw = dcols(s, ls, le, 0) + 1;
+		char *m = calloc(lw + 1, 1);
+
+		memset(m, ' ', lw);
+		for (int i = 0; i < d->nr; i++) {
+			uint32_t rb = d->r[i].b, re = d->r[i].e;
+
+			if (rb < e->base || re < rb)
+				continue;
+			rb -= e->base, re -= e->base;
+			if (re <= ls || rb >= le)
+				continue;
+			if (rb < ls)
+				rb = ls;
+			if (re > le)
+				re = le;
+			for (uint32_t c0 = dcols(s, ls, rb, 0), c1 = dcols(s, ls, re, 0); c0 < c1 && c0 < lw; c0++)
+				m[c0] = '~';
+		}
+		if (ccol < lw)
+			m[ccol] = '^';
+		{
+			uint32_t n = lw;
+
+			while (n > 0 && m[n - 1] == ' ')
+				n--;
+			db_put(&cl, m, n);
+		}
+		free(m);
+	}
+	db_c(b, ' ', (int)width + 2);
+	db_s(b, "| ");
+	if (p->color)
+		db_s(b, DC_CARET);
+	db_put(b, cl.p, cl.n);
+	if (p->color)
+		db_s(b, DC_RESET);
+	db_s(b, "\n");
+	/* fix-it hints on this line */
+	for (int i = 0; i < d->nfx; i++) {
+		uint32_t fb = d->fx[i].b;
+		uint32_t c0, have;
+
+		if (fb < e->base || fb - e->base < ls || fb - e->base > le)
+			continue;
+		c0 = dcols(s, ls, fb - e->base, 0);
+		have = (uint32_t)fl.n;
+		if (c0 < have)
+			c0 = have;
+		db_c(&fl, ' ', (int)(c0 - have));
+		db_s(&fl, d->fx[i].s);
+		anyfix = true;
+	}
+	if (anyfix) {
+		db_c(b, ' ', (int)width + 2);
+		db_s(b, "| ");
+		if (p->color)
+			db_s(b, DC_FIXIT);
+		db_put(b, fl.p, fl.n);
+		if (p->color)
+			db_s(b, DC_RESET);
+		db_s(b, "\n");
+	}
+	free(cl.p);
+	free(fl.p);
+}
+
+void pp_vdiagx(pp *p, const pp_dinfo *d, const char *fmt, va_list ap)
+{
+	int fd = p->o->errfd ? p->o->errfd : 2;
+	const char *name, *what = d->what;
+	uint32_t nl, line, col;
+	const fent *e;
+	bool has = loc_ok(p, d->loc, &e);
+	bool note = what[0] == 'n';
+	char msg[2048];
+	dbuf b = { 0 };
+
+	vsnprintf(msg, sizeof(msg), fmt, ap);
+	if (has && what[0] != 'n' && (uint32_t)(e - p->fe) + 1 != p->diag_fe)
+		include_stack(p, &b, e);
+	if (has && what[0] != 'n')
+		p->diag_fe = (uint32_t)(e - p->fe) + 1;
+	if (p->color)
+		db_s(&b, DC_BOLD);
+	if (has && pp_where(p, d->loc, &name, &nl, &line, &col))
+		db_f(&b, "%.*s:%u:%u: ", (int)nl, name, line, col);
+	else if (!d->loc && what[0] == 'f')
+		;	/* "fatal error: too many errors emitted" has no location */
+	else if (!has)
+		db_s(&b, "vcc: ");
+	if (p->color)
+		db_s(&b, dcolor(what));
+	db_s(&b, what);
+	db_s(&b, ": ");
+	if (p->color)
+		db_s(&b, note ? DC_RESET : DC_RESET DC_BOLD);
+	db_s(&b, msg);
+	if (p->color)
+		db_s(&b, DC_RESET);
+	db_s(&b, "\n");
+	if (has && !p->o->diag_nocaret && d->loc - e->base < e->f->size)
+		snippet(p, &b, e, d);
+	(void)!write(fd, b.p, b.n);
+	free(b.p);
 	if (what[0] == 'e' || what[0] == 'f')
 		p->errors++;
-	else
+	else if (what[0] == 'w')
 		p->warns++;
 	if (what[0] == 'f') {
 		if (p->fatal_jb)
 			longjmp(*p->fatal_jb, 1);
 		exit(1);
 	}
+}
+
+void pp_vdiag(pp *p, uint32_t loc, const char *what, const char *fmt, va_list ap)
+{
+	pp_span r;
+	pp_dinfo d = { what, loc, &r, 0, NULL, 0 };
+
+	pp_vdiagx(p, &d, fmt, ap);
+}
+
+int pp_warnings(const pp *p) { return p->warns; }
+
+void pp_diag_summary(pp *p)
+{
+	int fd = p->o->errfd ? p->o->errfd : 2;
+	char b[128];
+	int n = 0;
+
+	if (p->warns && p->errors)
+		n = snprintf(b, sizeof(b), "%d warning%s and %d error%s generated.\n", p->warns, p->warns > 1 ? "s" : "",
+			     p->errors, p->errors > 1 ? "s" : "");
+	else if (p->errors)
+		n = snprintf(b, sizeof(b), "%d error%s generated.\n", p->errors, p->errors > 1 ? "s" : "");
+	else if (p->warns)
+		n = snprintf(b, sizeof(b), "%d warning%s generated.\n", p->warns, p->warns > 1 ? "s" : "");
+	if (n)
+		(void)!write(fd, b, (size_t)n);
 }
 
 #define error(p, loc, ...) diag(p, loc, "error", __VA_ARGS__)
@@ -3876,6 +4164,7 @@ static void enter_file(pp *p, const vlex_file *f, const char *path, int32_t sdir
 	p->nfile++;
 	add_fent(p, c, f, path);
 	p->fe[c->fe].sys = sys;
+	p->fe[c->fe].from = from && from->f != &p->builtin && from->i ? from->loc + from->vt[from->i - 1].off : 0;
 	if (k)
 		hc_begin(p, k);
 }
@@ -4195,6 +4484,7 @@ pp *pp_open(const pp_opts *o)
 
 	vintern_init();
 	p->o = o;
+	p->color = o->diag_color > 0 || (o->diag_color == 0 && isatty(o->errfd ? o->errfd : 2));
 	p->cx = vm(MAXCTX * sizeof(ctx));
 	arena_init(&p->perm, 1ull << 30);
 	arena_init(&p->tmp, 1ull << 32);

@@ -355,7 +355,7 @@ int ppd_run(int argc, char **argv, const ppd_env *env)
 	const char *dirs_q[256], *dirs_i[1024], *dirs_s[256], *dirs_a[256], *all[2048];
 	int nq = 0, ni = 0, ns = 0, na = 0, n = 0;
 	const char *cmp = NULL, *out = NULL, *main_file = NULL, *depfile = NULL, *deptarget = NULL;
-	int errfd = env->errfd, status = 0, md = 0;
+	int errfd = env->errfd, status = 0, md = 0, dcolor = 0, nocaret = 0;
 	char pmapbuf[4096];
 	jmp_buf jb;
 	buf pre = { 0 }, cmdl = { 0 }, incl = { 0 }, o = { 0 };
@@ -380,6 +380,11 @@ int ppd_run(int argc, char **argv, const ppd_env *env)
 		if (!strcmp(a, "-c")) { objmode = 1; continue; }
 		if (!strcmp(a, "-fms-anonymous-structs") || !strcmp(a, "-fms-extensions")) { ms_anon = 1; continue; }
 		if (!strcmp(a, "-fshort-wchar")) { short_wchar = 1; continue; }
+		if (!strcmp(a, "-fcolor-diagnostics") || !strcmp(a, "-fdiagnostics-color") || !strcmp(a, "-fdiagnostics-color=always")) { dcolor = 1; continue; }
+		if (!strcmp(a, "-fno-color-diagnostics") || !strcmp(a, "-fno-diagnostics-color") || !strcmp(a, "-fdiagnostics-color=never")) { dcolor = -1; continue; }
+		if (!strcmp(a, "-fdiagnostics-color=auto")) { dcolor = 0; continue; }
+		if (!strcmp(a, "-fno-caret-diagnostics")) { nocaret = 1; continue; }
+		if (!strcmp(a, "-fcaret-diagnostics")) { nocaret = 0; continue; }
 		if (!strncmp(a, "-std=", 5)) {
 			/* clang's spellings: c89 c90 iso9899:1990 gnu89 gnu90 c99 gnu99 c11 gnu11 c17 c18 gnu17 c23 c2x gnu23 ... */
 			static const struct { const char *s; int v; } stds[] = {
@@ -556,6 +561,8 @@ int ppd_run(int argc, char **argv, const ppd_env *env)
 	po.unsigned_char = !darwin;
 	po.cwd = env->cwd;
 	po.errfd = errfd;
+	po.diag_color = dcolor;
+	po.diag_nocaret = nocaret;
 	po.asm_mode = asm_mode;
 	if (pmap) {
 		char *eq = strchr(pmap, '=');
@@ -695,6 +702,7 @@ int ppd_run(int argc, char **argv, const ppd_env *env)
 			status = write_deps(p, env->cwd, depfile, deptarget ? deptarget : out ? out : "-", errfd);
 	}
 done:
+	pp_diag_summary(p);
 	pp_close(p);	/* frees the text in o */
 out:
 	bfree(&pre);

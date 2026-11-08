@@ -51,6 +51,8 @@ typedef struct pp_opts {
 	int errfd;			/* diagnostics (0: stderr) */
 	int asm_mode;			/* assembler-with-cpp: unknown directives pass, # need not stringify */
 	int target;			/* PP_LINUX_AARCH64 or PP_DARWIN (column of the feature table) */
+	int diag_color;			/* diagnostics: 1 colors, -1 none, 0 when errfd is a terminal */
+	int diag_nocaret;		/* -fno-caret-diagnostics: no source lines */
 } pp_opts;
 
 enum { PP_LINUX_AARCH64, PP_DARWIN };
@@ -81,8 +83,31 @@ int pp_errors(const pp *p);
 int pp_in_system_header(const pp *p, uint32_t loc);
 /* presumed file name, line and column of a location; 0 if it has none */
 int pp_where(const pp *p, uint32_t loc, const char **name, uint32_t *namelen, uint32_t *line, uint32_t *col);
-/* a diagnostic at loc ("error", "warning", "fatal error": longjmp/exit) */
+/* a diagnostic at loc ("error", "warning", "note", "fatal error": longjmp/exit) */
 void pp_vdiag(pp *p, uint32_t loc, const char *what, const char *fmt, va_list ap);
+
+/*
+ * The same with clang's source snippet extras: ranges underlined with ~
+ * (locations [b, e)), and fix-it hints (replace [b, e) with s; b == e
+ * inserts) printed under the caret line.
+ */
+typedef struct pp_span { uint32_t b, e; } pp_span;
+typedef struct pp_fixit { uint32_t b, e; const char *s; } pp_fixit;
+typedef struct pp_dinfo {
+	const char *what;
+	uint32_t loc;
+	const pp_span *r;
+	int nr;
+	const pp_fixit *fx;
+	int nfx;
+} pp_dinfo;
+void pp_vdiagx(pp *p, const pp_dinfo *d, const char *fmt, va_list ap);
+/* "N errors generated." (clang's summary), if there were any */
+void pp_diag_summary(pp *p);
+/* warnings reported so far */
+int pp_warnings(const pp *p);
+/* the end of the token at loc (an identifier, number or punctuator; loc + 1 if unknown) */
+uint32_t pp_tok_end(const pp *p, uint32_t loc);
 
 /*
  * Top-level regions (headers included from the main file, cached or being
