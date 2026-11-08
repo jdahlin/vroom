@@ -390,6 +390,12 @@ aldrig i bygget. Ett TU-test (`bench/vcc-diff.py`) körs över alla kärnfiler.
 - **Var tiden går:** batch med `-j 6` (last ~4): 3,3 s vägg, 16,9 s user + 3,1 s sys; `cc_run` 19,5 s jobbtid, varav kodgenerering + objekt **0,99 s** (text + as_run: 2,04 s), finish + write 0,25 s, 25,5 MB objekt. Front end (pp + parse/sema) är ~90 %. (Briefens "~4,3 CPU-s" för front end var väggtid; CPU är ~20 s, jfr Status 2.4: 22,6 s.) `kernel/sched/core.c` ensam: emit 2,5 ms mot 3,3 ms (utskrift 1,0 → 0,25 ms). I bygget summerar vcc-jobben till 34,3 s (medel 39 ms, max 247 ms `net/core/sock.c`) över 11,7 s, alltså ~3 jobb i luften av 14: kompileringsfasen begränsas nu av make, shim och beroendeordningen, inte av vccd (clang-jobben summerar till 106 s).
 - **Kvar:** front end-kostnaden (deklarationsåteruppspelning, RESEARCH-preprocessor §6.4); per-TU mmap/munmap i emit.c och cc.c (sys 3 s) → arenor per tråd som nollställs per jobb; vDSO (PIC) och värdprogram (Mach-O) går fortfarande till clang; varför bara ~3 jobb är i luften under make `-j 14`.
 
+### Status fuzzning (2026-11-08): lexer och preprocessor
+- `ccs/fuzz/`: `fuzz-lex` och `fuzz-pp` (libFuzzer från Homebrew LLVM, ASan+UBSan; fristående drivare utan libFuzzer), korpus genererad ur kärnheaders (`gen-corpus.py`, inget kärntext incheckat), ordbok `c.dict`, differentiell kontroll mot `clang -E -P` (`pp-diff.py`), regressionsfall som `make -C ccs fuzz-regress` spelar upp. lex.c fick `vlex_get_hook` (filer ur minnet) och `VLEX_SCALAR` (skalär referens).
+- Fynd, rättade: (1) `vintern_copy` läste 16 byte ur nyckelords- och builtin-literaler (ASan, vid start); (2) fatalt fel i huvudfilen (obalanserad `#if`) gjorde `exit(1)` i `pp_open`, vilket hade dödat vccd: nu NULL; (3) `, ## __VA_ARGS__` tog bort kommat även när variadiska argumentet var tomt men angivet (`VA(x,)`); clang gör det bara när det är utelämnat.
+- Körningar: 3 min × 2 arbetare per mål; fuzz-lex utan fynd; fuzz-pp bara falsklarm från en egen kontroll (`#line 0` ger rad 0, borttagen); fynd (2) och (3) kom från seed-korpusen och pp-diff. En andra runda avbröts (maskinen upptagen). Paritet 911/912 (modpost.c) efter varje rättning.
+- **Kvar:** längre körningar när maskinen har lediga kärnor; pp-diff över hela fuzz-korpusen.
+
 ## Risker
 - **GNU C-ytan och inline asm** är det stora jobbet. Uppskattat: lexer + pp ~2 kloc,
   parser + sema ~10–15 kloc, emitter ~5 kloc, assembler ~4 kloc, länkare ~3 kloc.
