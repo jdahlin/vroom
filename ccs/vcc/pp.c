@@ -1045,7 +1045,146 @@ static void snippet(pp *p, dbuf *b, const fent *e, const pp_dinfo *d)
 	free(fl.p);
 }
 
+static inline uintptr_t mget(const pp *p, uint32_t id);
+
+/* the token of file entry e at offset off, or NULL */
+static const vtok *tok_at(const fent *e, uint32_t off, uint32_t *ix)
+{
+	const vlex_file *f = e->f;
+	uint32_t n = f && f->tok ? f->ntok : 0, lo = 0, hi = n;
+
+	while (lo < hi) {
+		uint32_t mid = (lo + hi) / 2;
+
+		if (f->tok[mid].off < off)
+			lo = mid + 1;
+		else
+			hi = mid;
+	}
+	if (lo < n && f->tok[lo].off == off) {
+		*ix = lo;
+		return &f->tok[lo];
+	}
+	return NULL;
+}
+
+/*
+ * A token from a macro expansion carries the expansion's location: the
+ * macro's name (object-like) or the invocation's ')' (function-like).  Find
+ * the macro and the invocation's range [*b, *ee).
+ */
+static const pmacro *expansion_at(pp *p, uint32_t loc, uint32_t *b, uint32_t *ee)
+{
+	const fent *e;
+	const vtok *t;
+	uint32_t i;
+	uintptr_t m;
+
+	if (!loc_ok(p, loc, &e) || !(t = tok_at(e, loc - e->base, &i)))
+		return NULL;
+	*ee = loc + t->len;
+	if (t->kind == T_RPAREN) {
+		int depth = 0;
+
+		for (;; i--) {
+			if (e->f->tok[i].kind == T_RPAREN)
+				depth++;
+			else if (e->f->tok[i].kind == T_LPAREN && !--depth)
+				break;
+			if (!i)
+				return NULL;
+		}
+		if (!i)
+			return NULL;
+		t = &e->f->tok[i - 1];
+	}
+	if (t->kind != T_IDENT || !(m = mget(p, t->id) & ~(uintptr_t)1))
+		return NULL;
+	*b = e->base + t->off;
+	return (const pmacro *)m;
+}
+
+static void vdiagx_(pp *p, const pp_dinfo *d, const char *fmt, va_list ap);
+
+/* "expanded from macro 'M'" at the body token spelled like the diagnosed one (the last #define before) */
+static void expansion_note(pp *p, const pmacro *m, uint32_t before, const char *ms, uint32_t mlen)
+{
+	uint32_t loc = 0, len = 0;
+
+	for (uint32_t i = 0; i < p->nfe; i++) {
+		const vlex_file *f = p->fe[i].f;
+		const vtok *q;
+
+		if (!f || !f->tok)
+			continue;
+		q = f->tok;
+		for (uint32_t k = 2; k < f->ntok; k++) {
+			uint32_t b = k + 1, pb = 0, pe = 0, hit = 0, first = 0;
+
+			if (!(q[k].kind == T_IDENT && q[k].id == m->name && q[k - 1].id == KW_define &&
+			      q[k - 2].kind == T_HASH && (q[k - 2].flags & TF_SOL) && p->fe[i].base + q[k].off < before))
+				continue;
+			if (b < f->ntok && q[b].kind == T_LPAREN && !(q[b].flags & TF_SPACE) && !(q[b].flags & TF_SOL)) {
+				pb = b + 1;
+				while (b < f->ntok && q[b].kind != T_RPAREN && !(q[b].flags & TF_SOL))
+					b++;
+				pe = b++;
+			}
+			for (uint32_t t = b; t < f->ntok && !(q[t].flags & TF_SOL); t++) {
+				bool param = false;
+
+				if (!first)
+					first = t + 1;
+				for (uint32_t a = pb; a < pe && q[t].kind == T_IDENT; a++)
+					param |= q[a].id == q[t].id;
+				if (!param && q[t].len == mlen && !memcmp(f->src + q[t].off, ms, mlen)) {
+					hit = t + 1;
+					break;
+				}
+			}
+			if (hit || first) {
+				uint32_t t = (hit ? hit : first) - 1;
+
+				loc = p->fe[i].base + q[t].off, len = q[t].len;
+			}
+		}
+	}
+	if (loc) {
+		pp_span r = { loc, loc + len };
+		pp_dinfo d = { "note", loc, &r, len > 1, NULL, 0, NULL, 0 };
+
+		pp_diagx(p, &d, "expanded from macro '%.*s'", (int)vintern_ents[m->name].len, vintern_ents[m->name].s);
+	}
+}
+
 void pp_vdiagx(pp *p, const pp_dinfo *d, const char *fmt, va_list ap)
+{
+	const pmacro *xm;
+	uint32_t b, ee;
+
+	if (d->ms && d->loc != UINT32_MAX && (xm = expansion_at(p, d->loc, &b, &ee))) {
+		/* clang: the caret at the invocation, a range at the expansion over all of it */
+		pp_dinfo md = *d;
+		pp_span mr[8];
+
+		md.loc = b;
+		md.nr = d->nr > 8 ? 8 : d->nr;
+		for (int i = 0; i < md.nr; i++) {
+			mr[i] = d->r[i];
+			if (mr[i].b >= b && mr[i].b <= ee)
+				mr[i].b = b, mr[i].e = ee;
+		}
+		if (!md.nr)
+			mr[0].b = b, mr[0].e = ee, md.nr = 1;
+		md.r = mr;
+		vdiagx_(p, &md, fmt, ap);
+		expansion_note(p, xm, b, d->ms, d->mlen);
+		return;
+	}
+	vdiagx_(p, d, fmt, ap);
+}
+
+static void vdiagx_(pp *p, const pp_dinfo *d, const char *fmt, va_list ap)
 {
 	int fd = p->o->errfd ? p->o->errfd : 2;
 	const char *name, *what = d->what;
@@ -1097,7 +1236,7 @@ void pp_vdiagx(pp *p, const pp_dinfo *d, const char *fmt, va_list ap)
 void pp_vdiag(pp *p, uint32_t loc, const char *what, const char *fmt, va_list ap)
 {
 	pp_span r;
-	pp_dinfo d = { what, loc, &r, 0, NULL, 0 };
+	pp_dinfo d = { what, loc, &r, 0, NULL, 0, NULL, 0 };
 
 	pp_vdiagx(p, &d, fmt, ap);
 }
@@ -1778,7 +1917,7 @@ static void macro_note_(pp *p, const pmacro *m, uint32_t before, const char *msg
 				loc = p->fe[i].base + q[k].off, len = q[k].len, src = f->src + q[k].off;
 	}
 	if (src) {
-		pp_dinfo d = { "note", loc, NULL, 0, NULL, 0 };
+		pp_dinfo d = { "note", loc, NULL, 0, NULL, 0, NULL, 0 };
 
 		pp_diagx(p, &d, msg, (int)len, src);
 	}
@@ -3375,7 +3514,7 @@ static void define(pp *p, ctx *c, uint32_t b, uint32_t e)
 		if (unlikely(o && !(o & 1) && om != m && !om->builtin && !macro_same(om, m))) {
 			uint32_t nloc = c->loc + vt[b].off;
 			pp_span r = { nloc, nloc + vt[b].len };
-			pp_dinfo d = { "warning", nloc, &r, 0, NULL, 0 };
+			pp_dinfo d = { "warning", nloc, &r, 0, NULL, 0, NULL, 0 };
 
 			if (c->f != &p->builtin && pp_warnx(p, "macro-redefined", true, NULL, &d, "'%.*s' macro redefined",
 							    (int)vt[b].len, c->src + vt[b].off))
@@ -4362,7 +4501,7 @@ static void include(pp *p, ctx *c, uint32_t b, uint32_t e, int kind, uint32_t lo
 	f = find_include(p, c, buf, n, angled, kind == D_INCLUDE_NEXT, &sd, &path);
 	if (!f) {
 		pp_span r = { floc, floc + (uint32_t)n + 2 };
-		pp_dinfo di = { "fatal error", floc, &r, 1, NULL, 0 };
+		pp_dinfo di = { "fatal error", floc, &r, 1, NULL, 0, NULL, 0 };
 
 		pp_diagx(p, &di, "'%.*s' file not found", (int)n, buf);
 		if (p->fatal_jb)

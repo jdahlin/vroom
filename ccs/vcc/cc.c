@@ -65,7 +65,7 @@ static void error_limit(cc *c)
 	if (!lim)
 		lim = 20;
 	if (lim > 0 && pp_errors(c->p) + 1 >= lim) {
-		pp_dinfo d = { "fatal error", UINT32_MAX, NULL, 0, NULL, 0 };
+		pp_dinfo d = { "fatal error", UINT32_MAX, NULL, 0, NULL, 0, NULL, 0 };
 
 		pp_diagx(c->p, &d, "too many errors emitted, stopping now [-ferror-limit=]");
 		longjmp(c->bail, 1);
@@ -109,7 +109,7 @@ __attribute__((format(printf, 8, 9)))
 static void report(cc *c, const char *what, uint32_t loc, const pp_span *r, int nr,
 		   const pp_fixit *fx, int nfx, const char *fmt, ...)
 {
-	pp_dinfo d = { what, loc, r, nr, fx, nfx };
+	pp_dinfo d = { what, loc, r, nr, fx, nfx, NULL, 0 };
 	va_list ap;
 
 	if (!strcmp(what, "error"))
@@ -124,7 +124,7 @@ static void report(cc *c, const char *what, uint32_t loc, const pp_span *r, int 
 __attribute__((format(printf, 3, 4)))
 static void note(cc *c, uint32_t loc, const char *fmt, ...)
 {
-	pp_dinfo d = { "note", loc, NULL, 0, NULL, 0 };
+	pp_dinfo d = { "note", loc, NULL, 0, NULL, 0, NULL, 0 };
 	va_list ap;
 
 	va_start(ap, fmt);
@@ -139,7 +139,7 @@ __attribute__((format(printf, 10, 11)))
 static bool warnx(cc *c, const char *flag, bool on, const char *const *groups, uint32_t loc,
 		  const pp_span *r, int nr, const pp_fixit *fx, int nfx, const char *fmt, ...)
 {
-	pp_dinfo d = { "warning", loc, r, nr, fx, nfx };
+	pp_dinfo d = { "warning", loc, r, nr, fx, nfx, NULL, 0 };
 	char msg[1024];
 	va_list ap;
 
@@ -775,6 +775,7 @@ static ptok *peek(cc *c, int k)
 static inline void next(cc *c)
 {
 	c->prevloc = c->tk[0].loc;
+	c->prevflags = c->tk[0].flags;
 	if (c->ntk > 1) {
 		memmove(&c->tk[0], &c->tk[1], (size_t)(c->ntk - 1) * sizeof(ptok));
 		c->ntk--;
@@ -1022,8 +1023,20 @@ static uint32_t typo_sym(cc *c, uint32_t id, bool types)
    or just "<msg> 'id'"; returns the correction */
 static uint32_t undeclared(cc *c, const char *msg, uint32_t id, uint32_t loc, bool types)
 {
-	uint32_t s = typo_sym(c, id, types);
+	/* clang does not correct a name from a macro expansion (and says where it was spelled) */
+	bool mac = (tok(c)->loc == loc ? tok(c)->flags : c->prevflags) & PF_MACRO;
+	uint32_t s = mac ? 0 : typo_sym(c, id, types);
 	pp_span r = { loc, pp_tok_end(c->p, loc) };
+
+	if (mac) {
+		int m;
+		const char *t = idname(id, &m);
+		pp_dinfo d = { "error", loc, &r, 1, NULL, 0, t, (uint32_t)m };
+
+		error_limit(c), c->errors++, c->ndiag++;
+		pp_diagx(c->p, &d, "%s '%.*s'", msg, IDF(id));
+		return 0;
+	}
 
 	if (s) {
 		int m;
@@ -7087,7 +7100,7 @@ static void assign_cond_warn(cc *c, uint32_t e)
 
 		if (warnx(c, "parentheses", true, w_all, op, &all, 1, NULL, 0,
 			  "using the result of an assignment as a condition without parentheses")) {
-			pp_dinfo d1 = { "note", op, NULL, 0, p2, 2 }, d2 = { "note", op, NULL, 0, &eq, 1 };
+			pp_dinfo d1 = { "note", op, NULL, 0, p2, 2, NULL, 0 }, d2 = { "note", op, NULL, 0, &eq, 1, NULL, 0 };
 
 			pp_diagx(c->p, &d1, "place parentheses around the assignment to silence this warning");
 			pp_diagx(c->p, &d2, "use '==' to turn this assignment into an equality comparison");
@@ -7672,7 +7685,7 @@ static uint32_t statement(cc *c)
 				  eq ? "equality" : "relational") && k == T_EQUALEQUAL) {
 				pp_span orr = { op, op + 2 };
 				pp_fixit fx = { op, op + 2, "=" };
-				pp_dinfo d = { "note", op, &orr, 1, &fx, 1 };
+				pp_dinfo d = { "note", op, &orr, 1, &fx, 1, NULL, 0 };
 
 				pp_diagx(c->p, &d, "use '=' to turn this equality comparison into an assignment");
 			}

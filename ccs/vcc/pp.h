@@ -105,6 +105,9 @@ typedef struct pp_dinfo {
 	int nr;
 	const pp_fixit *fx;
 	int nfx;
+	/* the diagnosed token when it came from a macro expansion (loc: the expansion's): its spelling */
+	const char *ms;
+	uint32_t mlen;
 } pp_dinfo;
 void pp_vdiagx(pp *p, const pp_dinfo *d, const char *fmt, va_list ap);
 __attribute__((format(printf, 3, 4)))
