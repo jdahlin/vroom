@@ -515,6 +515,7 @@ typedef struct ecx {
 	bool dyn, calls, vararg;
 	int32_t vaslot;		/* variadic register save area */
 	int ngr_named, nstk_named;	/* variadic: named GPR args, named stack bytes */
+	int nvr_named, vrslot;		/* variadic (Linux): named FP/SIMD args, the v0-v7 save area */
 	int nsrn;		/* classify: next SIMD/FP argument register */
 	/* temporaries */
 	uint32_t live;		/* bit i: tempregs[i] in use */
@@ -4337,10 +4338,13 @@ static void va_start_(ecx *e, uint32_t apn)
 	/* __gr_top: end of the register save area */
 	opi(e, I_ADDI, 1, t, FRAME, e->vaslot + 64);
 	mem(e, I_ST, 3, 0, t, ra, 8);
-	mem(e, I_ST, 3, 0, ZR, ra, 16);
+	/* __vr_top, __gr_offs, __vr_offs */
+	opi(e, I_ADDI, 1, t, FRAME, e->vrslot + 128);
+	mem(e, I_ST, 3, 0, t, ra, 16);
 	movi(e, 0, t, -(8 - e->ngr_named) * 8);
 	mem(e, I_ST, 2, 0, t, ra, 24);
-	mem(e, I_ST, 2, 0, ZR, ra, 28);
+	movi(e, 0, t, -(8 - e->nvr_named) * 16);
+	mem(e, I_ST, 2, 0, t, ra, 28);
 	tfree(e, t);
 	vfree(e, &a);
 }
@@ -4367,8 +4371,24 @@ static val va_arg_(ecx *e, const node *x)
 		opi(e, I_ADDI, 1, off, addr, big ? 8 : ((int64_t)size + 7) & ~7);
 		mem(e, I_ST, 3, 0, off, ra, 0);
 	} else {
-	if (is_flt(c, t))
-		efatal(e, x->loc, "floating point va_arg is not supported");
+	if (is_flt(c, t)) {
+		/* __vr_offs / __vr_top, 16 bytes a register */
+		if (size > 8)
+			efatal(e, x->loc, "128-bit floating point va_arg is not supported");
+		mem(e, I_LD, 2, 1, off, ra, 28);
+		opi(e, I_SUBSI, 1, ZR, off, 0);
+		bcond(e, C_GE, lstack);
+		opi(e, I_ADDI, 1, addr, off, 16);
+		mem(e, I_ST, 2, 0, addr, ra, 28);
+		opi(e, I_SUBSI, 1, ZR, addr, 0);
+		bcond(e, C_GT, lstack);
+		mem(e, I_LD, 3, 0, addr, ra, 16);
+		op3(e, I_ADD, 1, addr, addr, off);
+		jump(e, ldone);
+		nreg = 1;
+		al16 = false;
+		goto stack;
+	}
 	mem(e, I_LD, 2, 1, off, ra, 24);
 	opi(e, I_SUBSI, 1, ZR, off, 0);
 	bcond(e, C_GE, lstack);
@@ -4383,6 +4403,7 @@ static val va_arg_(ecx *e, const node *x)
 	mem(e, I_LD, 3, 0, addr, ra, 8);
 	op3(e, I_ADD, 1, addr, addr, off);
 	jump(e, ldone);
+stack:
 	deflabel(e, lstack);
 	mem(e, I_LD, 3, 0, addr, ra, 0);
 	if (al16) {
@@ -7293,6 +7314,13 @@ static void emit_function(ecx *e, uint32_t s)
 		e->vaslot = slot(e, 64, 16);
 		for (int r = ngrn; r < 8; r++)
 			mem(e, I_ST, 3, 0, r, FRAME, e->vaslot + 8 * r);
+		/* v0-v7: 16 bytes each (the low 8 hold a float or double) */
+		e->nvr_named = e->nsrn;
+		e->vrslot = slot(e, 128, 16);
+		for (int r = e->nsrn; r < 8; r++) {
+			word(e, f_out(1, R_X16, r));
+			mem(e, I_ST, 3, 0, R_X16, FRAME, e->vrslot + 16 * r);
+		}
 	}
 	gen_stmt(e, y->body);
 	/* falling off the end of main returns 0 */
