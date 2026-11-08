@@ -36,7 +36,7 @@
 #define LOC_REL (1u << 31)	/* encoded locations: LOC_REL + (loc - base) */
 
 enum { A_TY, A_PARAMS, A_TAGS, A_SYMS, A_NODES, A_LISTS, A_IPOOL, A_FPOOL, A_STRS, A_LABELS, A_ATTR, A_ASMS,
-       A_SSTACK, A_TOPLEVEL, A_TLASM, A_HEAP, A_N };
+       A_SSTACK, A_TOPLEVEL, A_TLASM, A_SPAN, A_HEAP, A_N };
 
 typedef struct dcarr {
 	size_t n;		/* bytes */
@@ -91,6 +91,7 @@ static char *abase(const cc *c, int k, size_t *n)
 	case A_SSTACK: *n = c->nsstack * sizeof(uint32_t); return (char *)c->sstack;
 	case A_TOPLEVEL: *n = c->ntoplevel * sizeof(uint32_t); return (char *)c->toplevel;
 	case A_TLASM: *n = c->ntlasm * sizeof(uint32_t); return (char *)c->tlasm;
+	case A_SPAN: *n = c->nnode * sizeof(pp_span); return (char *)c->span;
 	default: *n = (size_t)(c->hp - c->heap); return c->heap;
 	}
 }
@@ -142,10 +143,17 @@ static inline uint32_t dec_loc(const coder *k, uint32_t l)
 		node *nd_ = (node *)(img)[A_NODES];                                              \
 		tag *tg_ = (tag *)(img)[A_TAGS];                                                 \
 		label *lb_ = (label *)(img)[A_LABELS];                                           \
-		for (uint32_t i_ = 0; i_ < (c)->nsym; i_++)                                      \
+		pp_span *sp_ = (pp_span *)(img)[A_SPAN];                                         \
+		for (uint32_t i_ = 0; i_ < (c)->nsym; i_++) {                                    \
 			sy_[i_].loc = FIX(sy_[i_].loc);                                          \
-		for (uint32_t i_ = 0; i_ < (c)->nnode; i_++)                                     \
+			sy_[i_].plb = FIX(sy_[i_].plb);                                          \
+			sy_[i_].ple = FIX(sy_[i_].ple);                                          \
+		}                                                                                \
+		for (uint32_t i_ = 0; i_ < (c)->nnode; i_++) {                                   \
 			nd_[i_].loc = FIX(nd_[i_].loc);                                          \
+			sp_[i_].b = FIX(sp_[i_].b);                                              \
+			sp_[i_].e = FIX(sp_[i_].e);                                              \
+		}                                                                                \
 		for (uint32_t i_ = 0; i_ < (c)->nlabel; i_++)                                    \
 			lb_[i_].loc = FIX(lb_[i_].loc);                                          \
 		for (uint32_t i_ = 0; i_ < (c)->ntag; i_++) {                                    \
@@ -328,6 +336,9 @@ static void snap_restore(cc *c, const dcsnap *s, uint32_t base)
 	c->nodes = keep.nodes, c->lists = keep.lists, c->ipool = keep.ipool, c->fpool = keep.fpool;
 	c->strs = keep.strs, c->labels = keep.labels, c->attr = keep.attr, c->asms = keep.asms;
 	c->sstack = keep.sstack, c->toplevel = keep.toplevel, c->tlasm = keep.tlasm;
+	c->span = keep.span;
+	/* malloc'd and per TU: the snapshot's would be shared (and realloc'ed) by every TU restoring it */
+	c->cases = keep.cases, c->ncase = keep.ncase, c->capcase = keep.capcase, c->case_base = keep.case_base;
 	c->heap = keep.heap, c->hend = keep.hend;
 	c->hp = c->heap + s->a[A_HEAP].n;
 	c->dc = keep.dc;

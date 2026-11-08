@@ -8422,6 +8422,8 @@ static void cc_free(cc *c)
 	munmap(c->tags, (size_t)1 << 28);
 	munmap(c->syms, (size_t)1 << 30);
 	munmap(c->nodes, (size_t)1 << 32);
+	munmap(c->span, (size_t)1 << 31);
+	free(c->cases);
 	munmap(c->lists, (size_t)1 << 30);
 	munmap(c->ipool, (size_t)1 << 30);
 	munmap(c->fpool, (size_t)1 << 26);
