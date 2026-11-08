@@ -1700,10 +1700,21 @@ static const struct { const char *s; uint8_t k; } puncts[] = {
 	{ "%>", T_RBRACE }, { "%:", T_HASH }, { "%:%:", T_HASHHASH },
 };
 
-static bool idch(unsigned char c)
+#define IDCH_ROW(b) [b] = 1, [b + 1] = 1, [b + 2] = 1, [b + 3] = 1, [b + 4] = 1, [b + 5] = 1, [b + 6] = 1, [b + 7] = 1
+static const uint8_t idch_tab[256] = {	/* [a-zA-Z0-9_$] and >= 0x80 */
+	['0'] = 1, ['1'] = 1, ['2'] = 1, ['3'] = 1, ['4'] = 1, ['5'] = 1, ['6'] = 1, ['7'] = 1, ['8'] = 1, ['9'] = 1,
+	IDCH_ROW('A'), IDCH_ROW('I'), IDCH_ROW('Q'), ['Y'] = 1, ['Z'] = 1,
+	IDCH_ROW('a'), IDCH_ROW('i'), IDCH_ROW('q'), ['y'] = 1, ['z'] = 1,
+	['_'] = 1, ['$'] = 1,
+	IDCH_ROW(0x80), IDCH_ROW(0x88), IDCH_ROW(0x90), IDCH_ROW(0x98), IDCH_ROW(0xa0), IDCH_ROW(0xa8),
+	IDCH_ROW(0xb0), IDCH_ROW(0xb8), IDCH_ROW(0xc0), IDCH_ROW(0xc8), IDCH_ROW(0xd0), IDCH_ROW(0xd8),
+	IDCH_ROW(0xe0), IDCH_ROW(0xe8), IDCH_ROW(0xf0), IDCH_ROW(0xf8),
+};
+#undef IDCH_ROW
+
+static inline bool idch(unsigned char c)
 {
-	return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') ||
-	       c == '_' || c == '$' || c >= 0x80;
+	return idch_tab[c];
 }
 
 /* the kind of the single token spelled s[0..n), or -1 */
@@ -2067,7 +2078,16 @@ static int subst(pp *p, const pmacro *m, const ptok *name, margs *a, uint32_t el
 		size_t w = base, e = p->svn;
 
 		for (size_t i = base; i < e;) {
-			ptok cur = p->sv[i++];
+			ptok cur;
+
+			if (!(i + 2 < e && hashhash(&p->sv[i + 1]))) {
+				/* not pasted: stays (moves down once something was) */
+				if (w != i)
+					p->sv[w] = p->sv[i];
+				w++, i++;
+				continue;
+			}
+			cur = p->sv[i++];
 
 			while (i + 1 < e && hashhash(&p->sv[i])) {
 				ptok r;
