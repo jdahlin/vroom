@@ -1365,19 +1365,12 @@ static bool peek_lparen(const pp *p)
 
 static int expand(pp *p, const pmacro *m, ptok *t);
 
-/* the next fully expanded token */
-static void next_exp(pp *p, ptok *t)
+/* next_exp() from an identifier t whose entry e is a macro (or disabled) */
+static __attribute__((noinline)) void next_exp_slow(pp *p, ptok *t, uintptr_t e)
 {
 	for (;;) {
-		uintptr_t e;
 		const pmacro *m;
 
-		raw_fast(p, t);
-		if (t->kind != T_IDENT || (t->flags & PF_NOEXP))
-			return;
-		e = mread_tok(p, t, 0);
-		if (likely(!e))
-			return;
 		if (e & 1) {
 			t->flags |= PF_NOEXP;
 			return;
@@ -1387,7 +1380,27 @@ static void next_exp(pp *p, ptok *t)
 			return;
 		if (expand(p, m, t))
 			return;
+		raw_fast(p, t);
+		if (t->kind != T_IDENT || (t->flags & PF_NOEXP))
+			return;
+		e = mread_tok(p, t, 0);
+		if (likely(!e))
+			return;
 	}
+}
+
+/* the next fully expanded token */
+static inline __attribute__((always_inline)) void next_exp(pp *p, ptok *t)
+{
+	uintptr_t e;
+
+	raw_fast(p, t);
+	if (t->kind != T_IDENT || (t->flags & PF_NOEXP))
+		return;
+	e = mread_tok(p, t, 0);
+	if (likely(!e))
+		return;
+	next_exp_slow(p, t, e);
 }
 
 /* ---------------- arguments ---------------- */
@@ -4272,7 +4285,7 @@ pp *pp_open(const pp_opts *o)
 	return p;
 }
 
-static inline void next_tok(pp *p, ptok *t)
+static inline __attribute__((always_inline)) void next_tok(pp *p, ptok *t)
 {
 	if (p->depth == p->nfile && !p->svn)
 		p->tmp.p = p->tmp.base;	/* nothing above file level refers to tmp */
