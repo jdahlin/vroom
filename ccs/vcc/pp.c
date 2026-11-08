@@ -4227,7 +4227,18 @@ pp *pp_open(const pp_opts *o)
 		pp_close(p);
 		return NULL;
 	}
-	enter_file(p, mf, o->main, -1);
+	{
+		/* a fatal error here (unbalanced conditionals) ends the TU, not the process (vccd) */
+		jmp_buf jb;
+
+		p->fatal_jb = &jb;
+		if (setjmp(jb)) {
+			pp_close(p);
+			return NULL;
+		}
+		enter_file(p, mf, o->main, -1);
+		p->fatal_jb = NULL;
+	}
 	p->base_name = p->fe[0].name;
 	p->base_namelen = p->fe[0].namelen;
 

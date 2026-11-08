@@ -57,7 +57,7 @@ enum { PP_LINUX_AARCH64, PP_DARWIN };
 
 typedef struct pp pp;
 
-/* NULL if the main file cannot be read (reported) */
+/* NULL if the main file cannot be read or has a fatal error (reported) */
 pp *pp_open(const pp_opts *o);
 void pp_close(pp *p);
 /* fatal errors (missing #include) longjmp here instead of exiting */
