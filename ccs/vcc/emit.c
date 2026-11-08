@@ -2598,6 +2598,26 @@ static val ptr_add(ecx *e, val p, val i, int64_t scale, bool sub)
 	}
 }
 
+static val vla_bytes(ecx *e, qty t);
+
+/* p + i elements of a pointer to a VLA: the element size is computed now */
+static val ptr_add_vla(ecx *e, val p, val i, qty ptr, bool sub)
+{
+	val b = vla_bytes(e, e->c->ty[QI(ptr)].base);
+	int ri = toreg(e, &i), rb = toreg(e, &b);
+
+	op4(e, I_MADD, 1, ri, ri, rb, ZR);
+	vfree(e, &b);
+	return ptr_add(e, p, i, 1, sub);
+}
+
+static bool ptr_to_vla(cc *c, qty ptr)
+{
+	const ctype *b = T(c, T(c, ptr)->base);
+
+	return b->kind == TY_ARRAY && (b->flags & TF_VLA);
+}
+
 static lval gen_lval(ecx *e, uint32_t n)
 {
 	cc *c = e->c;
@@ -2677,6 +2697,8 @@ static lval gen_lval(ecx *e, uint32_t n)
 		uint64_t es = elem_size(c, N(x->a)->ty);
 		qty et = T(c, N(x->a)->ty)->base;
 
+		if (ptr_to_vla(c, N(x->a)->ty))
+			return lfromval(e, ptr_add_vla(e, p, i, N(x->a)->ty, false), talign(c, et));
 		if (i.k == V_CONST && (p.k == V_ADDR)) {
 			l.k = L_SYM;
 			l.ref = p.ref;
@@ -5068,7 +5090,8 @@ static val gen_binary(ecx *e, uint32_t n)
 		return is_cmp(op) ? f_compare(e, op, lt, a, b) : f_arith(e, op, ty, a, b);
 	/* pointer arithmetic */
 	if (is_ptr(c, ty) && (op == T_PLUS || op == T_MINUS) && is_ptr(c, lt))
-		return ptr_add(e, a, b, (int64_t)elem_size(c, lt), op == T_MINUS);
+		return ptr_to_vla(c, lt) ? ptr_add_vla(e, a, b, lt, op == T_MINUS)
+					 : ptr_add(e, a, b, (int64_t)elem_size(c, lt), op == T_MINUS);
 	if (op == T_MINUS && is_ptr(c, lt) && is_ptr(c, rt)) {
 		int64_t es = (int64_t)elem_size(c, lt);
 
