@@ -164,6 +164,106 @@ VPRIV void rec_tok(pp *p, const ptok *t)
 	}
 }
 
+/* ---------------- entries as trees of child entries ---------------- */
+
+typedef struct kexf {
+	const uint32_t *ex;
+	uint32_t n;
+} kexf;
+
+static bool kex_has(const kexf *xs, int nx, uint32_t id)
+{
+	for (int f = 0; f < nx; f++)
+		for (uint32_t i = 0; i < xs[f].n; i++)	/* (short, sorted) */
+			if (xs[f].ex[i] >= id) {
+				if (xs[f].ex[i] == id)
+					return true;
+				break;
+			}
+	return false;
+}
+
+/* id was written by the innermost level so far */
+static inline bool lev_wrote(pp *p, uint32_t id)
+{
+	const uint64_t *st = rslot(p, id);
+
+	return (uint32_t)(*st >> 32) == p->rec.lev[p->rec.n - 1].serial && (p->rec.t[(uint32_t)*st].flags & HT_W);
+}
+
+/* e's reads (all of them, as inputs) that the innermost level wrote already: into rec.kex */
+static void kid_ex(pp *p, const hent *e, kexf *xs, int nx)
+{
+	struct hrec *r = &p->rec;
+
+#define KX(id) do { uint32_t id_ = (id); if (lev_wrote(p, id_) && !(nx && kex_has(xs, nx, id_))) { \
+		if (r->nkex < HC_MAXKEX) r->kex[r->nkex++] = id_; else HC_BAD(p); } } while (0)
+	HV_FOR(e->rg, hread, x)
+		KX(x->id);
+	HV_FOR(e->ru, uint32_t, x)
+		KX(*x);
+	HV_FOR(e->rv, hread, x)
+		KX(x->id);
+#undef KX
+	for (uint32_t i = 0; i < e->nkid; i++) {
+		int m = nx;
+
+		if (e->kid[i].nex && nx < HC_MAXLEV)
+			xs[m++] = (kexf){ e->kid[i].ex, e->kid[i].nex };
+		kid_ex(p, e->kid[i].e, xs, m);
+	}
+}
+
+/* every id e (with its children) writes: the innermost level's, not its own */
+static void kid_writes(pp *p, const hent *e)
+{
+	for (uint32_t i = 0; i < e->nkid; i++)
+		kid_writes(p, e->kid[i].e);
+	HV_FOR(e->dl, hread, x)
+		touch_write_kid(p, x->id);
+}
+
+static int cmp_u32(const void *a, const void *b)
+{
+	uint32_t x = *(const uint32_t *)a, y = *(const uint32_t *)b;
+
+	return x < y ? -1 : x > y;
+}
+
+/* e becomes a child entry of the innermost level (replayed or recorded in it) */
+static void kid_attach(pp *p, const hent *e)
+{
+	struct hrec *r = &p->rec;
+	kexf xs[HC_MAXLEV + 1];
+	uint32_t x0 = r->nkex, n, w = 0;
+
+	if (r->nkid >= HC_MAXKID) {
+		HC_BAD(p);
+		return;
+	}
+	kid_ex(p, e, xs, 0);
+	n = r->nkex - x0;
+	if (n > 1) {
+		qsort(r->kex + x0, n, sizeof(uint32_t), cmp_u32);
+		for (uint32_t i = 0; i < n; i++)
+			if (!w || r->kex[x0 + i] != r->kex[x0 + w - 1])
+				r->kex[x0 + w++] = r->kex[x0 + i];
+		n = w;
+		r->nkex = x0 + n;
+	}
+	r->kid[r->nkid++] = (hkidr){ e, x0, n };
+	kid_writes(p, e);
+}
+
+/* e's delta: its children's in order, then its own */
+static void apply_delta(pp *p, const hent *e)
+{
+	for (uint32_t i = 0; i < e->nkid; i++)
+		apply_delta(p, e->kid[i].e);
+	HV_FOR(e->dl, hread, x)
+		mset(p, x->id, (const pmacro *)x->v);
+}
+
 static void hc_apply(pp *p, const hent *e)
 {
 	unsigned c0 = p->counter;
@@ -218,14 +318,7 @@ static void hc_apply(pp *p, const hent *e)
 			if (r->lev[i].ndirs < e->ndirs)
 				r->lev[i].ndirs = e->ndirs;
 		}
-		HV_FOR(e->rg, hread, x)
-			touch_read(p, x->id, x->v, HT_G);
-		HV_FOR(e->ru, uint32_t, x)
-			touch_read(p, *x, 0, 0);
-		HV_FOR(e->rv, hread, x)
-			touch_read(p, x->id, x->v, 0);
-		HV_FOR(e->dl, hread, x)
-			touch_write(p, x->id);
+		kid_attach(p, e);	/* (its reads and writes stay in it) */
 		for (uint32_t i = 0; i < e->nord; i++) {
 			if (e->ord[i].present && once_index(p, e->ord[i].f) >= (int)L->nonce0)
 				continue;	/* marked by this level itself */
@@ -256,8 +349,7 @@ static void hc_apply(pp *p, const hent *e)
 		d->sys = h->sys;
 	}
 	p->next_base += e->span;
-	HV_FOR(e->dl, hread, x)
-		mset(p, x->id, (const pmacro *)x->v);
+	apply_delta(p, e);
 	for (uint32_t i = 0; i < e->noadd && p->nonce < 4096; i++)
 		p->once[p->nonce++] = e->oadd[i];
 	p->counter += e->counter_delta;
@@ -299,7 +391,7 @@ static void hc_why(const pp *p, const hkey *k, const hent *e)
 		}
 	}
 	if (!n)
-		n = snprintf(b, sizeof(b), "hc-miss %s: counter name\n", k->spath);
+		n = snprintf(b, sizeof(b), "hc-miss %s: counter name or a child entry\n", k->spath);
 	(void)!write(2, b, (size_t)n);
 }
 
@@ -310,6 +402,7 @@ VPRIV bool hc_try(pp *p, hkey *k)
 	int dbg;
 	const hent *h = atomic_load_explicit(&k->head, memory_order_acquire);
 
+	p->hgen++;	/* (child entry verdicts are for one state) */
 	for (const hent *e = h; e; e = e->next)
 		if (hc_valid(p, e)) {
 			hc_apply(p, e);
@@ -336,6 +429,7 @@ VPRIV void hc_begin(pp *p, hkey *k)
 		/* this thread's last pp's buffers: counts are reset below, contents need no clearing */
 		r->t = rec_spare.t, r->ord = rec_spare.ord, r->ctr = rec_spare.ctr;
 		r->crd = rec_spare.crd, r->seg = rec_spare.seg, r->cp = rec_spare.cp;
+		r->kid = rec_spare.kid, r->kex = rec_spare.kex;
 		rec_spare.t = NULL;
 	}
 	if (!r->t) {
@@ -345,6 +439,8 @@ VPRIV void hc_begin(pp *p, hkey *k)
 		r->crd = vm(HC_MAXCRD * sizeof(hcrd));
 		r->seg = vm(HC_MAXSEG * sizeof(hsegr));
 		r->cp = vm((HC_MAXCP + 1) * sizeof(cprov));
+		r->kid = vm(HC_MAXKID * sizeof(hkidr));
+		r->kex = vm(HC_MAXKEX * sizeof(uint32_t));
 	}
 	if (p->tokmode == 2 && !r->tk) {
 		if (tk_spare) {
@@ -357,6 +453,7 @@ VPRIV void hc_begin(pp *p, hkey *k)
 	}
 	if (!r->n) {
 		r->nt = r->nord = r->nctr = r->ncrd = r->nseg = r->ncp = 0;
+		r->nkid = r->nkex = 0;
 		r->ntk = 0;
 		r->nsb = 0;
 		r->nbad = 0;
@@ -371,6 +468,8 @@ VPRIV void hc_begin(pp *p, hkey *k)
 	L->c0 = r->nctr;
 	L->r0 = r->ncrd;
 	L->s0 = r->nseg;
+	L->k0 = r->nkid;
+	L->x0 = r->nkex;
 	L->fe0 = p->cx[p->depth - 1].fe;
 	L->base0 = p->fe[L->fe0].base;
 	L->nonce0 = p->nonce;
@@ -584,7 +683,7 @@ static hent *publish(pp *p, const hlev *L, size_t end)
 			else
 				nru++;
 		}
-		ndl += (t->flags & HT_W) != 0;
+		ndl += (t->flags & HT_O) != 0;
 	}
 	/* scratch in tmp: the stored form is the shared chunks */
 	rg = alloc(&p->tmp, (nrg ? nrg : 1) * sizeof(*rg));
@@ -603,7 +702,7 @@ static hent *publish(pp *p, const hlev *L, size_t end)
 			else
 				ru[nru++] = t->id;
 		}
-		if (t->flags & HT_W)
+		if (t->flags & HT_O)	/* (a child's last write is in the child) */
 			dl[ndl++] = (hread){ t->id, 0, mget(p, t->id) & ~(uintptr_t)1 };
 	}
 	atomic_fetch_add_explicit(&hstat.nru, nru, memory_order_relaxed);
@@ -614,6 +713,18 @@ static hent *publish(pp *p, const hlev *L, size_t end)
 	e->ru = hc_vec(p, ru, nru, sizeof(*ru));
 	e->rv = hc_vec(p, rv, nrv, sizeof(*rv));
 	e->dl = hc_vec(p, dl, ndl, sizeof(*dl));
+	{
+		uint32_t nk = r->nkid - L->k0;
+		hkid *kd = hsalloc(p, (nk ? nk : 1) * sizeof(hkid));
+
+		for (uint32_t i = 0; i < nk; i++) {
+			const hkidr *k = &r->kid[L->k0 + i];
+
+			kd[i] = (hkid){ k->e, k->nex ? hcopy(p, r->kex + k->ex0, k->nex * sizeof(uint32_t)) : NULL, k->nex };
+		}
+		e->kid = kd;
+		e->nkid = nk;
+	}
 	e->ord = hcopy(p, r->ord + L->o0, (r->nord - L->o0) * sizeof(honce));
 	e->nord = r->nord - L->o0;
 	e->oadd = hcopy(p, p->once + L->nonce0, (p->nonce - L->nonce0) * sizeof(*p->once));
@@ -696,6 +807,7 @@ VPRIV void hc_end(pp *p)
 	hlev *L = &r->lev[r->n - 1], *P;
 	hkey *k = L->k;
 	hent *e = NULL;
+	bool linked = false;
 	size_t sz;
 
 	if (r->n - 1 < r->nbad || p->errors != L->errors0 || p->warns != L->warns0 || p->nlm != L->nlm0 ||
@@ -712,24 +824,31 @@ VPRIV void hc_end(pp *p)
 		}
 	} else {
 		sz = (r->nt - L->t0) * 16 + (p->nfe - L->fe0) * (sizeof(hfent) + 64) + sizeof(hent);
-		if (atomic_load_explicit(&k->n, memory_order_relaxed) >= HC_MAXVAR ||
-		    (hc_mem_max && atomic_load_explicit(&hstat.mem, memory_order_relaxed) + sz > hc_mem_max)) {
+		if (hc_mem_max && atomic_load_explicit(&hstat.mem, memory_order_relaxed) + sz > hc_mem_max) {
+			/* full: the enclosing entries would need this one as a child */
 			atomic_fetch_add_explicit(&hstat.full, 1, memory_order_relaxed);
+			r->nbad = r->n;
 		} else {
 			p->hc_bytes = 0;
 			e = publish(p, L, p->tokmode == 2 ? r->ntk : p->nout);
 			atomic_fetch_add_explicit(&hstat.mem, p->hc_bytes, memory_order_relaxed);
-			atomic_fetch_add_explicit(&hstat.rec, 1, memory_order_relaxed);
 			atomic_fetch_add_explicit(&hstat.bytes_rec, e->ntext, memory_order_relaxed);
-			atomic_fetch_add_explicit(&k->n, 1, memory_order_relaxed);
-			e->next = atomic_load_explicit(&k->head, memory_order_relaxed);
-			while (!atomic_compare_exchange_weak_explicit(&k->head, &e->next, e, memory_order_release,
-								      memory_order_relaxed))
-				;
+			if (atomic_load_explicit(&k->n, memory_order_relaxed) >= HC_MAXVAR) {
+				/* not listed (too many variants), but a child of the enclosing entries */
+				atomic_fetch_add_explicit(&hstat.full, 1, memory_order_relaxed);
+			} else {
+				linked = true;
+				atomic_fetch_add_explicit(&hstat.rec, 1, memory_order_relaxed);
+				atomic_fetch_add_explicit(&k->n, 1, memory_order_relaxed);
+				e->next = atomic_load_explicit(&k->head, memory_order_relaxed);
+				while (!atomic_compare_exchange_weak_explicit(&k->head, &e->next, e, memory_order_release,
+									      memory_order_relaxed))
+					;
+			}
 		}
 	}
 	if (r->n == 1 && p->top_rec) {
-		top_event(p, e, 0, 0, 1, 0);
+		top_event(p, linked ? e : NULL, 0, 0, 1, 0);
 		p->top_rec = 0;
 	}
 	r->n--;
@@ -739,31 +858,13 @@ VPRIV void hc_end(pp *p)
 		r->on = 0;
 		return;
 	}
-	/* merge into the enclosing level */
+	/* the level's touches end (its reads and writes are in e, which the enclosing level gets as a child) */
 	P = &r->lev[r->n - 1];
-	{
-		uint32_t w = L->t0;
-
-		for (uint32_t i = L->t0; i < r->nt; i++) {
-			htouch T = r->t[i];
-			uint64_t *st = rslot(p, T.id);
-
-			if ((uint32_t)(T.prev >> 32) == P->serial) {
-				htouch *pt = &r->t[(uint32_t)T.prev];
-
-				if (!(pt->flags & HT_W) && (T.flags & HT_R) && (pt->flags & HT_R) && pt->v == HDEF &&
-				    T.v != HDEF)
-					pt->v = T.v;
-				pt->flags |= T.flags & HT_W;
-				*st = T.prev;
-			} else {
-				r->t[w] = T;
-				*st = (uint64_t)P->serial << 32 | w;
-				w++;
-			}
-		}
-		r->nt = w;
-	}
+	for (uint32_t i = r->nt; i-- > L->t0;)
+		*rslot(p, r->t[i].id) = r->t[i].prev;
+	r->nt = L->t0;
+	r->nkid = L->k0;
+	r->nkex = L->x0;
 	{
 		uint32_t w = L->o0;
 
@@ -779,5 +880,6 @@ VPRIV void hc_end(pp *p)
 		if (e->has_text)
 			r->seg[r->nseg++] = (hsegr){ L->text0, p->tokmode == 2 ? r->ntk : p->nout, e, L->counter0,
 						     L->base0 };
+		kid_attach(p, e);
 	}
 }

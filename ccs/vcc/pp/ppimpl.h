@@ -249,6 +249,12 @@ typedef struct hcread {
 
 typedef struct hent hent;
 
+typedef struct hkid {
+	const hent *e;
+	const uint32_t *ex;
+	uint32_t nex;
+} hkid;
+
 /*
  * A stored token (12 bytes; ptok is 24).  T_IDENT: sp is the id and the
  * spelling the id's.  Others: sp - 1 is the spelling's offset / 16 in the
@@ -327,6 +333,15 @@ struct hent {
 	const hctr *ctr;
 	const hcread *crd;
 	const hseg *seg;
+	/*
+	 * Child entries in order: their reads are this entry's inputs except
+	 * the ids this entry wrote before the child (ex, sorted), and their
+	 * deltas apply before this entry's own (dl: the ids whose last write was
+	 * this entry's own).  Reads and writes are stored once, in the entry
+	 * that made them.
+	 */
+	const struct hkid *kid;
+	uint32_t nkid;
 	size_t ntext, total;	/* own text (tokens); with the children */
 	int32_t level;		/* __INCLUDE_LEVEL__ used: the include depth it ran at (-1: not used) */
 	uint32_t ndirs, psig;	/* leading search directories its lookups depended on; their id */
@@ -349,7 +364,8 @@ typedef struct hkey {
 } hkey;
 
 /* recording, per TU */
-enum { HT_R = 1, HT_W = 2, HT_G = 4 /* the read was an include guard check */ };
+enum { HT_R = 1, HT_W = 2, HT_G = 4 /* the read was an include guard check */,
+       HT_O = 8 /* the last write was the level's own (not a child entry's) */ };
 
 typedef struct htouch {	/* a level's first touch of an id */
 	uint32_t id, flags;	/* HT_* */
@@ -384,7 +400,13 @@ typedef struct hlev {
 	size_t text0;
 	uint8_t first_sol, uses_level;
 	uint32_t nfile, ndirs;
+	uint32_t k0, x0;	/* starts in rec.kid, rec.kex */
 } hlev;
+
+typedef struct hkidr {		/* a child entry of a level while recording */
+	const hent *e;
+	uint32_t ex0, nex;	/* its exclusions in rec.kex */
+} hkidr;
 
 struct pp {
 	uintptr_t *mdir[NMDIR];
@@ -453,6 +475,10 @@ struct pp {
 		uint32_t ncrd;
 		hsegr *seg;
 		uint32_t nseg;
+		hkidr *kid;	/* child entries, in order (their reads and writes are theirs) */
+		uint32_t nkid;
+		uint32_t *kex;
+		uint32_t nkex;
 		cprov *cp;	/* indexed by ptok.ctr */
 		uint32_t ncp;
 		ptok *tk;	/* tokens handed out (token mode) */
@@ -461,6 +487,8 @@ struct pp {
 		size_t nsb;
 	} rec;
 	uint64_t *rst[NMDIR];	/* per id: serial << 32 | index in rec.t */
+	struct { const void *e; uint32_t gen, ok; } hm[4096];	/* child entry verdicts in one hc_try */
+	uint32_t hgen;
 	size_t hc_bytes;	/* what the entry being published allocated */
 	const void *bcache[4096];	/* recent spelling blobs, by hash */
 	const char *kspell[256];	/* punctuator spelling blobs, by kind */
@@ -528,6 +556,8 @@ struct incent {
 
 #define HC_MAXTK (1u << 24)
 #define HC_MAXSB ((size_t)1 << 28)
+#define HC_MAXKID (1u << 20)
+#define HC_MAXKEX (1u << 22)
 
 typedef struct {
 	htouch *t;
@@ -535,6 +565,8 @@ typedef struct {
 	hcpos *ctr;
 	hcrd *crd;
 	hsegr *seg;
+	hkidr *kid;
+	uint32_t *kex;
 	cprov *cp;
 } rec_spare_t;
 
@@ -635,7 +667,7 @@ VPRIV const vlex_file *find_include(pp *p, const ctx *from, const char *name, si
 /* hcache.c */
 VPRIV int once_index(const pp *p, const vlex_file *f);
 VPRIV bool hc_top(const pp *p);
-VPRIV bool hc_valid(const pp *p, const hent *e);
+VPRIV bool hc_valid(pp *p, const hent *e);
 VPRIV void emit(pp *p, const hent *e, unsigned base);
 static inline void text_start(pp *p, uint8_t sol);
 /* hcentry.c */
@@ -754,7 +786,17 @@ static inline void touch_write(pp *p, uint32_t id)
 	htouch *t = touch(p, id, &isnew);
 
 	if (t)
-		t->flags |= HT_W;
+		t->flags |= HT_W | HT_O;
+}
+
+/* a child entry wrote id: not the level's own write any more */
+static inline void touch_write_kid(pp *p, uint32_t id)
+{
+	bool isnew;
+	htouch *t = touch(p, id, &isnew);
+
+	if (t)
+		t->flags = (t->flags | HT_W) & ~(uint32_t)HT_O;
 }
 
 /* the entry for token t's identifier, as an expansion reads it */
