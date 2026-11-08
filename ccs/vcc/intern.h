@@ -68,6 +68,8 @@ void vintern_init(void);
 uint32_t vintern_hash(const char *s, size_t len);
 /* s must be immortal and readable to s[len + 7] */
 uint32_t vintern(const char *s, size_t len, uint32_t hash);
+/* vintern(s, len, vintern_hash(s, len)) in one call */
+uint32_t vintern_long(const char *s, size_t len);
 /* the id of s if already interned, else 0 (s readable to s[16]) */
 uint32_t vintern_find(const char *s, size_t len, uint32_t hash);
 /* copies s unless interned (for spellings that are not immortal; s readable to s[16]) */
@@ -87,7 +89,7 @@ uint32_t vintern_count(void);
 
 #define VIC_BITS 11
 typedef struct vintern_cache {
-	struct { uint64_t w0, w1; uint32_t hash, id; uint64_t _pad; } e[1u << VIC_BITS];
+	struct { uint64_t w0, w1; uint32_t _hash, id; uint64_t _pad; } e[1u << VIC_BITS];
 } vintern_cache;
 
 #define unlikely_vi(x) __builtin_expect(!!(x), 0)
@@ -101,16 +103,22 @@ extern unsigned long vlex_stat[512];
 #define VI_STAT(i) ((void)0)
 #endif
 
+/* vintern_wmask[len]: the bytes of the first 16 kept for len <= 16 */
+extern const uint64_t vintern_wmask[17][2];
+
+/* vintern_words for len <= 16: two loads and a mask from a table */
+static inline __attribute__((always_inline)) void vintern_words16(const char *s, size_t len, uint64_t *w0, uint64_t *w1)
+{
+	memcpy(w0, s, 8);
+	memcpy(w1, s + 8, 8);
+	*w0 &= vintern_wmask[len][0];
+	*w1 &= vintern_wmask[len][1];
+}
+
 /* the first 16 bytes of s, zero past len (s readable to s[16]) */
 static inline __attribute__((always_inline)) void vintern_words(const char *s, size_t len, uint64_t *w0, uint64_t *w1)
 {
-	const unsigned l0 = len < 8 ? (unsigned)len : 8, l1 = len < 16 ? (unsigned)len : 16;
-	const unsigned sh1 = 128 - 8 * l1;	/* 0..128 */
-
-	memcpy(w0, s, 8);
-	memcpy(w1, s + 8, 8);
-	*w0 &= l0 == 8 ? ~0ull : ~(~0ull << (8 * l0));
-	*w1 &= sh1 >= 64 ? 0 : ~0ull >> sh1;
+	vintern_words16(s, len < 16 ? len : 16, w0, w1);
 }
 
 /* s must be readable to s[16]; no data-dependent branch for len <= 16 */
@@ -121,19 +129,19 @@ static inline __attribute__((always_inline)) uint32_t vintern_fast(vintern_cache
 
 	if (unlikely_vi(len > 16)) {
 		VI_STAT(2);
-		return vintern(s, len, vintern_hash(s, len));
+		return vintern_long(s, len);
 	}
-	vintern_words(s, len, &w0, &w1);
+	vintern_words16(s, len, &w0, &w1);
 	h = __crc32cd(__crc32cd((uint32_t)len, w0), w1) * 0x9E3779B1u;
 	{
 		__typeof__(&c->e[0]) e = &c->e[h & ((1u << VIC_BITS) - 1)];
 
 		VI_STAT(0);
-		if (e->hash == h && e->w0 == w0 && e->w1 == w1)
+		/* identifiers hold no NUL: the zero-padded words determine len */
+		if (((e->w0 ^ w0) | (e->w1 ^ w1)) == 0)
 			return e->id;
 		VI_STAT(1);
 		e->id = vintern(s, len, h);
-		e->hash = h;
 		e->w0 = w0;
 		e->w1 = w1;
 		return e->id;
