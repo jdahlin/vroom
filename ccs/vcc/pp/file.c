@@ -26,6 +26,11 @@ VPRIV void *salloc(size_t n)
 	return b0 + off;
 }
 
+VPRIV const char *shared_base0(void)
+{
+	return __atomic_load_n(&shared_base, __ATOMIC_ACQUIRE);
+}
+
 static int spelled(const vlex_file *f, const vtok *v, const char *s)
 {
 	size_t n = strlen(s);
