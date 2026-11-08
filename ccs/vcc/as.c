@@ -110,11 +110,11 @@ static void *rget(Region *r, size_t n)
 }
 
 /* ASCII classes without libc's locale lookups (hot in the scanner) */
-enum { C_D = 1, C_X = 2, C_A = 4, C_S = 8, C_I = 16 };
+enum { C_D = 1, C_X = 2, C_A = 4, C_S = 8, C_I = 16, C_W = 32 };	/* C_W: blanks ws() skips */
 static const uint8_t cclass[256] = {
 	['0' ... '9'] = C_D | C_X | C_I, ['a' ... 'f'] = C_A | C_X | C_I, ['A' ... 'F'] = C_A | C_X | C_I,
 	['g' ... 'z'] = C_A | C_I, ['G' ... 'Z'] = C_A | C_I, ['_'] = C_I, ['.'] = C_I, ['$'] = C_I,
-	[' '] = C_S, ['\t'] = C_S, ['\n'] = C_S, ['\v'] = C_S, ['\f'] = C_S, ['\r'] = C_S,
+	[' '] = C_S | C_W, ['\t'] = C_S | C_W, ['\n'] = C_S, ['\v'] = C_S | C_W, ['\f'] = C_S | C_W, ['\r'] = C_S | C_W,
 };
 static inline int c_digit(int c) { return (unsigned)c - '0' < 10; }
 static inline int c_xdigit(int c) { return cclass[(uint8_t)c] & C_X; }
@@ -147,7 +147,7 @@ static int err(As *a, const char *fmt, ...)
 }
 
 static inline int isids(int c) { return c_alpha(c) || c == '_' || c == '.' || c == '$'; }
-static inline const char *ws(const char *p, const char *e) { while (p < e && (*p == ' ' || *p == '\t' || *p == '\r' || *p == '\f' || *p == '\v')) p++; return p; }
+static inline const char *ws(const char *p, const char *e) { while (p < e && (cclass[(uint8_t)*p] & C_W)) p++; return p; }
 static inline int sveq(Sv a, const char *s) { size_t n = strlen(s); return a.n == n && !memcmp(a.s, s, n); }
 static inline int sveqi(const char *p, size_t n, const char *s)
 {
