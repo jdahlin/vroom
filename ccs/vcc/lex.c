@@ -339,6 +339,20 @@ static void init_tables(void)
 	for (int c = 0; c < 256; c++)
 		for (int d = 0; d < 256; d++)
 			ktab[c | d << 8] = (uint8_t)(ptab[pidx[c]][d] & 0xff);
+	/*
+	 * The structural loop takes every token's kind from ktab: a token
+	 * starting with an identifier character is an identifier or (digit) a
+	 * number, ".5" a number, and ".." an ellipsis (a lone ".." goes to
+	 * the handlers).
+	 */
+	for (int c = 0; c < 256; c++)
+		for (int d = 0; d < 256; d++) {
+			if (isid[c])
+				ktab[c | d << 8] = c >= '0' && c <= '9' ? T_NUMBER : T_IDENT;
+			if (c == '.' && d >= '0' && d <= '9')
+				ktab[c | d << 8] = T_NUMBER;
+		}
+	ktab['.' | '.' << 8] = T_ELLIPSIS;
 }
 
 /* length of the line splice ("\\", horizontal space, newline) at p, or 0 */
@@ -892,7 +906,7 @@ fast:
 
 		/* and 1e+5: the sign belongs to the number */
 		X |= DD | (DD >> 1) | (DD >> 2) | (ELL & ((ELL >> 1) | (ELL >> 2))) | (PR & (PR >> 1)) |
-		     (ES & NUM);
+		     (ES & NUM) | (DOTp & (DOTp >> 1) & ~ELL & ~(ELL << 1));
 		X |= (X >> 2) & DOT & (DOT >> 1);	/* "..\<newline>." */
 		/* ".." in the last two bits: a third dot would be past the window */
 		X |= DOT & (DOT >> 1) & (1ull << 62);
@@ -912,7 +926,6 @@ fast:
 			const unsigned o = (unsigned)__builtin_ctzll(todo);
 			const unsigned e = o + 1 + (unsigned)__builtin_ctzll(((B >> o) >> 1) | 1ull << 63);
 			const size_t at = p + o;
-			const unsigned isI = (IDs >> o) & 1, isN = (NUMs >> o) & 1, isE = (ELL >> o) & 1;
 			const unsigned f = ((SP >> o) & 1) * TF_SPACE | ((SOL >> o) & 1) * TF_SOL;
 			uint16_t c01;
 
@@ -920,16 +933,8 @@ fast:
 			if (e >= lim)
 				break;	/* reaches X or past the window */
 			memcpy(&c01, s + at, 2);
-			/*
-			 * Kind without branches (the compiler would branch on a
-			 * ?: chain): a ktab lookup that is index 0 unless this is
-			 * a punctuator, then masked overrides.
-			 */
-			unsigned kind = ktab[c01 & -(uint32_t)(1 ^ (isI | isN))];
-
-			kind ^= (kind ^ T_ELLIPSIS) & -isE;
-			kind ^= (kind ^ T_NUMBER) & -isN;
-			kind ^= (kind ^ T_IDENT) & -isI;
+			/* kind without branches: ktab knows identifiers and numbers too */
+			const unsigned kind = ktab[c01];
 			t->off = (uint32_t)at;
 			t->len = e - o;
 			t->id = 0;
@@ -937,7 +942,7 @@ fast:
 			t->flags = (uint8_t)(f | pend);
 			pend = 0;
 			il[ni] = (uint32_t)(t - out);
-			ni += isI;
+			ni += kind == T_IDENT;
 			t++;
 			last = e;
 			any = true;
