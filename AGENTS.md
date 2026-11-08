@@ -33,7 +33,7 @@ assembler, linker, behind `vcc`/`vas`/`vld` shims and the `vccd` server.
 
 ## Build and test
 ```
-make -C ccs vcc                     # all vcc tools
+make -C ccs -j 6 vcc                # all vcc tools (per-file objects, ccache if installed)
 bench/vcc-diff.py ref -j 6          # clang -E references (once, ~1 min)
 bench/vcc-diff.py cmp -j 6 --kernel # preprocessor parity, kernel TUs
 bench/vcc-diff.py cmp -j 6          # ... including host tools (scripts/)

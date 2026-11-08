@@ -15,7 +15,7 @@ import glob, hashlib, os, re, shlex, subprocess, sys
 from multiprocessing import Pool
 R = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 B = f'{R}/work/build-o0'; REF = f'{R}/work/ppref'
-CL = '/opt/homebrew/opt/llvm/bin/clang'; VPP = f'{R}/build/ccs/vpp'
+CL = '/opt/homebrew/opt/llvm/bin/clang'; VPP = os.environ.get('VPP', f'{R}/build/ccs/vpp')
 
 def tu_args(cmd):
     """(object, clang args without -c/-E/-o/-MMD) for a C TU, a .S file, or a

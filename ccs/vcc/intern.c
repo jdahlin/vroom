@@ -8,9 +8,10 @@
 
 #include "intern.h"
 
-#define SLOT_BITS 20
+#define SLOT_BITS 23	/* 64 MB of slots, touched as ids arrive */
 #define NSLOT (1u << SLOT_BITS)
 #define MAX_ENT (NSLOT / 4 * 3)
+_Static_assert(MAX_ENT <= (1u << VINTERN_ID_BITS), "ids must fit the id-indexed tables");
 
 static _Atomic uint64_t *slots;
 vident *vintern_ents;

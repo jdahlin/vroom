@@ -69,6 +69,8 @@ enum {
 	R_AARCH64_ADR_GOT_PAGE = 311, R_AARCH64_LD64_GOT_LO12_NC = 312,
 	/* internal: 1-byte data (no ELF relocation exists; must resolve) */
 	R_VCC_ABS8 = 0x10001,
+	/* internal, Mach-O only: thread-local variable descriptor (TLVP) page / page offset */
+	R_VCC_TLVP_PAGE21 = 0x10002, R_VCC_TLVP_PAGEOFF12 = 0x10003,
 };
 
 typedef struct ElfChunk {
@@ -139,6 +141,7 @@ typedef struct ElfObj {
 	uint32_t nsec, nfrag, nsym, nfix, nreg;
 	uint32_t *htab; uint32_t hmask, hcount;	/* name -> symbol */
 	void *fin;		/* elf_finish() results for elf_emit() */
+	struct ElfExpr *expr, **expr_tail;	/* symbols defined as x op y, valued after layout */
 	char err[256];
 	int has_err;
 } ElfObj;
@@ -201,6 +204,8 @@ static inline void elf_bind(ElfObj *o, uint32_t s, int bind)
 static inline void elf_type(ElfObj *o, uint32_t s, int type) { elf_symp(o, s)->type = (uint8_t)type; }
 static inline void elf_vis(ElfObj *o, uint32_t s, int vis) { elf_symp(o, s)->vis = (uint8_t)vis; }
 void elf_size_expr(ElfObj *o, uint32_t sym, ElfVal v);	/* .size sym, expr */
+/* sym = x op y (op: as.c's operator codes), x and y absolute once the layout is known */
+void elf_expr_sym(ElfObj *o, uint32_t sym, int op, ElfVal x, ElfVal y);
 /* Registration fixes symbol-table order (MC registers a symbol when it is
  * defined, given an attribute, or used in an emitted value/instruction).
  * elf_define(), elf_fixup() and the mapping symbols register on their own. */
@@ -217,6 +222,17 @@ void elf_fixup(ElfObj *o, uint32_t frag, uint64_t off, uint8_t *p, uint32_t type
 size_t elf_finish(ElfObj *o);
 void elf_emit(ElfObj *o, uint8_t *out);
 int elf_write_file(ElfObj *o, const char *path);	/* finish + emit + write */
+
+/* elf_finish's first steps (frag bases, section sizes, .size expressions)
+ * and its field patcher: for other object formats (macho.c). */
+void elf_layout(ElfObj *o);
+void elf_patch(ElfObj *o, ElfFix *x, int64_t v);
+
+/* Mach-O (arm64, MH_OBJECT) from the same model (macho.c): ELF section
+ * names map to Mach-O sections, R_AARCH64_* fixups to ARM64_RELOC_*.  The
+ * names are written as they are (the code generator adds the '_'). */
+size_t macho_finish(ElfObj *o);
+void macho_emit(ElfObj *o, uint8_t *out);
 
 /* Section-relative value of a defined symbol after layout (valid only in
  * elf_finish and later); for same-frag symbols at any time. */
