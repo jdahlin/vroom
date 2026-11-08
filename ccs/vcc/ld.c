@@ -137,6 +137,15 @@ static __thread uint8_t *acur, *aend;
 static _Atomic unsigned arena_gen;	/* bumped when all arenas are freed */
 static __thread unsigned my_gen;
 
+/* set by main for the last link of the process: exit tears the mappings down
+ * in bulk, cheaper than ~900 munmap calls */
+static bool keep_maps;
+static void unmap(const void *p, size_t n)
+{
+	if (!keep_maps)
+		munmap((void *)p, n);
+}
+
 static void *bigalloc(size_t n)
 {
 	void *p = mmap(NULL, n, PROT_READ | PROT_WRITE, MAP_ANON | MAP_PRIVATE, -1, 0);
@@ -175,7 +184,7 @@ static void free_arenas(void)
 	/* Every thread's current block is in the list; drop all of them. */
 	for (Block *b = blocks, *n; b; b = n) {
 		n = b->next;
-		munmap(b, b->size);
+		unmap(b, b->size);
 	}
 	blocks = NULL;
 	atomic_fetch_add(&arena_gen, 1);
@@ -3163,10 +3172,10 @@ static void gtable_init(void)
 
 static void gtable_free(void)
 {
-	munmap((void *)hnames, (size_t)(hmask + 1) * sizeof(*hnames));
-	munmap((void *)hword, (size_t)(hmask + 1) * sizeof(*hword));
-	munmap(gnames, (size_t)(hmask + 1) * sizeof(*gnames));
-	munmap(gsyms, (size_t)(hmask + 1) * sizeof(G));
+	unmap((void *)hnames, (size_t)(hmask + 1) * sizeof(*hnames));
+	unmap((void *)hword, (size_t)(hmask + 1) * sizeof(*hword));
+	unmap(gnames, (size_t)(hmask + 1) * sizeof(*gnames));
+	unmap(gsyms, (size_t)(hmask + 1) * sizeof(G));
 	hnames = NULL;
 }
 
@@ -4223,12 +4232,12 @@ static int run(int argc, char **argv)
 		fprintf(errf, "  %-28s %7.2f ms (%u objects, %u sections, %u globals, %llu MB out, %d threads)\n",
 			"total", (now() - t0) * 1e3, objs.n, isecs.n, gorder.n,
 			(unsigned long long)(filesize >> 20), nthreads);
-	munmap(out, filesize);
+	unmap(out, filesize);
 	if (reladyn_buf)
-		munmap(reladyn_buf, ndyn * sizeof(Rela));
+		unmap(reladyn_buf, ndyn * sizeof(Rela));
 	for (uint32_t i = 0; i < objs.n; i++)
 		if (objs.v[i]->mapped && objs.v[i]->buf)
-			munmap((void *)objs.v[i]->buf, objs.v[i]->size);
+			unmap(objs.v[i]->buf, objs.v[i]->size);
 	gtable_free();
 	return rc || atomic_load(&nerrors) ? 1 : 0;
 }
@@ -4583,11 +4592,11 @@ static int ld_relocatable(void)
 	filesize = fsize;
 	int rc = write_output();
 	phase("-r: write");
-	munmap(rbuf, fsize);
+	unmap(rbuf, fsize);
 	out = NULL;
 	for (uint32_t i = 0; i < objs.n; i++)
 		if (objs.v[i]->mapped && objs.v[i]->buf)
-			munmap((void *)objs.v[i]->buf, objs.v[i]->size);
+			unmap(objs.v[i]->buf, objs.v[i]->size);
 	gtable_free();
 	memset(&routs, 0, sizeof routs);
 	return rc || atomic_load(&nerrors) ? 1 : 0;
@@ -4665,6 +4674,7 @@ int main(int argc, char **argv)
 	for (int i = rep ? atoi(rep) : 1; i > 1; i--)
 		if (ld_main(argc, argv, AT_FDCWD, stderr))
 			return 1;
+	keep_maps = true;
 	return ld_main(argc, argv, AT_FDCWD, stderr);
 }
 #endif
