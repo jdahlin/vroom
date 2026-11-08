@@ -76,7 +76,8 @@ static const uint8_t hi_tab[16] = {
  *            bit 5  needs a handler: quotes, '\\', control, '@', '`'
  *            bit 6  '/': with '/' or '*' a comment
  *            bit 7  '%': with ':' or '%' a digraph we leave to the handlers
- *   gtab[c]  bit 1 '=', bit 2 '>', bits 3, 7 ':' or '%', bit 6 '/' or '*'
+ *   gtab[c]  bit 0 '+' or '-', bit 1 '=', bit 2 '>', bits 3, 7 ':' or '%',
+ *            bit 6 '/' or '*'
  */
 static uint8_t ttab[128], gtab[64];
 
@@ -108,9 +109,10 @@ static void init_struct_tables(void)
 	gtab['>'] = 4;
 	gtab[':'] = gtab['%'] = 8 | 128;
 	gtab['/'] = gtab['*'] = 64;
+	gtab['+'] = gtab['-'] = 1;
 }
 
-enum { M_ID, M_WS, M_NL, M_DOT, M_DIG, M_P, M_PAIR, M_X, M_ES, M_COUNT };
+enum { M_ID, M_WS, M_NL, M_DOT, M_DIG, M_P, M_PAIR, M_X, M_NS, M_COUNT };
 
 /*
  * 64 byte masks (0xff/0) to a 64-bit mask, for vectors loaded with vld4q:
@@ -133,7 +135,7 @@ static inline uint64_t mm4(uint8x16_t a0, uint8x16_t a1, uint8x16_t a2, uint8x16
  *   PAIR  bytes i, i+1 form a two-character punctuator
  *   X     the structural pass stops here: literal, comment, splice, UCN,
  *         non-ASCII, NUL, stray character
- *   ES    e, E, p or P before + or - (a sign inside a pp-number)
+ *   NS    the next byte is + or - (maybe a sign inside a pp-number)
  * Blocks [from, to) of the file at s.
  */
 static void classify(const uint8_t *s, size_t from, size_t to, uint64_t *m[M_COUNT])
@@ -148,7 +150,7 @@ static void classify(const uint8_t *s, size_t from, size_t to, uint64_t *m[M_COU
 	for (size_t b = from; b < to; b++) {
 		const uint8_t *q = s + 64 * b;
 		const uint8x16x4_t v = vld4q_u8(q);
-		uint8x16_t vn[4], t[4], tg[4], c[4], r[4];
+		uint8x16_t vn[4], t[4], gn[4], tg[4], c[4], r[4];
 
 		/* the next byte of each lane */
 		vn[0] = v.val[1], vn[1] = v.val[2], vn[2] = v.val[3];
@@ -169,7 +171,7 @@ static void classify(const uint8_t *s, size_t from, size_t to, uint64_t *m[M_COU
 			const uint8x16x4_t g = vld1q_u8_x4(gp);
 
 			for (int k = 0; k < 4; k++)
-				tg[k] = vandq_u8(t[k], vqtbl4q_u8(g, vn[k]));
+				gn[k] = vqtbl4q_u8(g, vn[k]), tg[k] = vandq_u8(t[k], gn[k]);
 		}
 		for (int k = 0; k < 4; k++)
 			c[k] = vandq_u8(vqtbl1q_u8(lo, vandq_u8(v.val[k], nib)), vqtbl1q_u8(hi, vshrq_n_u8(v.val[k], 4)));
@@ -187,9 +189,7 @@ static void classify(const uint8_t *s, size_t from, size_t to, uint64_t *m[M_COU
 		MASK(M_NL, vtstq_u8(c[k], mnl));
 		MASK(M_DIG, vtstq_u8(c[k], mdg));
 		MASK(M_DOT, vceqq_u8(v.val[k], dot));
-		MASK(M_ES, vandq_u8(vorrq_u8(vceqq_u8(vorrq_u8(v.val[k], vdupq_n_u8(0x20)), vdupq_n_u8('e')),
-					     vceqq_u8(vorrq_u8(v.val[k], vdupq_n_u8(0x20)), vdupq_n_u8('p'))),
-				    vorrq_u8(vceqq_u8(vn[k], vdupq_n_u8('+')), vceqq_u8(vn[k], vdupq_n_u8('-')))));
+		MASK(M_NS, vtstq_u8(gn[k], b1));
 #undef MASK
 	}
 }
@@ -916,11 +916,14 @@ fast:
 		const uint64_t ELL = DOTp & (DOTp >> 1) & (DOTp >> 2);
 		/* left to the handlers: "..5", "....", overlapping pairs (<<=) */
 		const uint64_t DD = DOT & (D >> 1) & (DOT << 1);	/* ...5: from the first dot */
-		const uint64_t ES = win(m[M_ES], p);
+		const uint64_t NS = win(m[M_NS], p);
 
-		/* and 1e+5: the sign belongs to the number */
+		/*
+		 * and a number before + or -: in 1e+5 the sign belongs to it
+		 * (the handler decides; numbers before a sign are rare)
+		 */
 		X |= DD | (DD >> 1) | (DD >> 2) | (ELL & ((ELL >> 1) | (ELL >> 2))) | (PR & (PR >> 1)) |
-		     (ES & NUM) | (DOTp & (DOTp >> 1) & ~ELL & ~(ELL << 1));
+		     (NS & NUM) | (DOTp & (DOTp >> 1) & ~ELL & ~(ELL << 1));
 		X |= (X >> 2) & DOT & (DOT >> 1);	/* "..\<newline>." */
 		/* ".." in the last two bits: a third dot would be past the window */
 		X |= DOT & (DOT >> 1) & (1ull << 62);
