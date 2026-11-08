@@ -169,9 +169,11 @@ static void finish_function(ecx *e, uint32_t s)
 	const attrs *a = sym_attrs(c, s);
 	uint32_t align = 4;
 
-	drop_fallthrough(e);
-	if (!e->E->noopt)
-		opt_function(e);
+	if (e->E->o->opt >= 1) {	/* -O1 and up */
+		drop_fallthrough(e);
+		if (!e->E->noopt)
+			opt_function(e);
+	}
 	for (int r = 19; r <= 28; r++)
 		if (e->usedcs & (1u << r))
 			cs[ncs++] = r;
@@ -264,7 +266,7 @@ static void choose_lregs(ecx *e, uint32_t s, int max)
 	uint32_t cand[MAXLREG];
 
 	e->nlr = 0;
-	if (!max || lo > hi || e->vararg)
+	if (!max || lo > hi || e->vararg || e->E->o->opt < 1)
 		return;
 	for (uint32_t v = lo; v <= hi; v++) {
 		const sym *y = &c->syms[v];

@@ -411,7 +411,7 @@ VPRIV val inline_call(ecx *e, uint32_t s, carg *args, int n)
 	F.cbase = e->nclean;
 	F.nloop = e->nloop;
 	F.up = e->f;
-	if (reg_scalar(e, rty) && NTEMP - __builtin_popcount(e->live) > INLINE_FREE)
+	if (e->E->o->opt >= 1 && reg_scalar(e, rty) && NTEMP - __builtin_popcount(e->live) > INLINE_FREE)
 		F.retreg = (uint8_t)(treg(e) + 1);	/* returns put the value there: no slot */
 	else if (!is_void(c, rty))
 		F.retslot = slot(e, tsize(c, rty) ? tsize(c, rty) : 8, talign(c, rty) > 16 ? 16 : talign(c, rty));
@@ -448,7 +448,7 @@ VPRIV val inline_call(ecx *e, uint32_t s, carg *args, int n)
 		 * counts as a write) keeps the argument's register: reads copy it.
 		 * Extended as a load from its slot would be, so it is the same value.
 		 */
-		if (i < n && v.k == V_REG && is_temp(v.r) && !(e->E->sflags[p] & (SA_WRITTEN | SA_CWRITE)) &&
+		if (e->E->o->opt >= 1 && i < n && v.k == V_REG && is_temp(v.r) && !(e->E->sflags[p] & (SA_WRITTEN | SA_CWRITE)) &&
 		    reg_scalar(e, ps->ty) && !sym_attrs(c, p)->cleanup && ps->sc != SC_REGISTER &&
 		    NTEMP - __builtin_popcount(e->live) > INLINE_FREE) {
 			uint64_t sz = tsize(c, ps->ty);

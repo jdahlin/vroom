@@ -19,6 +19,8 @@
  *     return the same constant is that constant to the caller;
  *   - lazy emission: static functions and objects are emitted only when
  *     emitted code or data refers to them;
+ *   - from -O1 on (cc_opts.opt), the three items below; at -O0 locals
+ *     and inlined params and results live in stack slots;
  *   - the emitted function's most used scalar locals and params whose
  *     address is never needed (prepass: luse, lnoreg) live in callee-saved
  *     registers x28 down (B_LREG, L_VREG; VCC_LREGS, default 6), the rest
