@@ -50,7 +50,11 @@ extern char **environ;
 using namespace clang;
 using namespace clang::driver;
 
+#ifdef VROOM_LLVM_BIN
+static std::string g_clang = VROOM_LLVM_BIN "/clang";
+#else
 static std::string g_clang = "/opt/homebrew/opt/llvm/bin/clang";
+#endif
 
 // ---------- cc1 i processen ----------
 
@@ -471,6 +475,9 @@ int main(int argc, char **argv) {
     pid_t pid = fork();
     if (pid == 0) {
       close(ls);
+      // SIG_IGN would be inherited, and Linux then reaps the driver's own
+      // children (cc1, ld) itself: its waitpid() fails with ECHILD
+      signal(SIGCHLD, SIG_DFL);
       child(conn);
     }
     close(conn);

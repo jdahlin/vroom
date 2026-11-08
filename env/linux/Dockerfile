@@ -11,7 +11,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 	&& echo "deb [signed-by=/usr/share/keyrings/llvm.gpg] http://apt.llvm.org/trixie/ llvm-toolchain-trixie-$LLVM main" \
 		> /etc/apt/sources.list.d/llvm.list \
 	&& apt-get update && apt-get install -y --no-install-recommends \
-	clang-$LLVM lld-$LLVM llvm-$LLVM \
+	clang-$LLVM lld-$LLVM llvm-$LLVM llvm-$LLVM-dev libclang-$LLVM-dev libclang-cpp$LLVM-dev \
 	make python3 git ccache file \
 	bc bison flex libssl-dev libelf-dev cpio kmod rsync \
 	qemu-system-arm ipxe-qemu \

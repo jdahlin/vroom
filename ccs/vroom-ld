@@ -16,8 +16,10 @@ import re
 import subprocess
 import sys
 
-LLD = os.environ.get("VROOM_REAL_LD", "/opt/homebrew/opt/lld/bin/ld.lld")
-CLANG = os.environ.get("VROOM_REAL_CC", "/opt/homebrew/opt/llvm/bin/clang")
+import shutil
+_MAC = sys.platform == "darwin"
+LLD = os.environ.get("VROOM_REAL_LD") or ("/opt/homebrew/opt/lld/bin/ld.lld" if _MAC else shutil.which("ld.lld"))
+CLANG = os.environ.get("VROOM_REAL_CC") or ("/opt/homebrew/opt/llvm/bin/clang" if _MAC else shutil.which("clang"))
 
 
 def main():

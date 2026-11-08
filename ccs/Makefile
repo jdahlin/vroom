@@ -1,16 +1,26 @@
+# LLVM: Homebrew's on macOS; on Linux the one that `clang` on PATH belongs to
+# (the container puts /usr/lib/llvm-NN/bin first).  Its bin/ is where vroomd,
+# vroom-cc and vccd find clang and ld.lld on Linux.
+ifeq ($(shell uname -s),Darwin)
 LLVM ?= /opt/homebrew/opt/llvm
+SYS_CC = /usr/bin/clang
+else
+LLVM ?= $(patsubst %/bin/,%,$(dir $(realpath $(shell command -v clang))))
+SYS_CC = clang
+TOOL_DEFS = -DVROOM_LLVM_BIN='"$(LLVM)/bin"'
+endif
 # Linux builds go to their own tree: the checkout may be shared with a Mac
 OUT  ?= $(if $(filter Linux,$(shell uname -s)),../build/linux/ccs,../build/ccs)
 
 all: $(OUT)/vroomd $(OUT)/vroom-cc vcc
 
 $(OUT)/vroomd: vroomd.cpp protocol.h | $(OUT)
-	$(LLVM)/bin/clang++ -std=c++17 -O2 -fno-rtti -I$(LLVM)/include \
+	$(LLVM)/bin/clang++ -std=c++17 -O2 -fno-rtti -I$(LLVM)/include $(TOOL_DEFS) \
 		-DVROOM_PREFIX_DEFAULT='"$(abspath pch/vroom-prefix.h)"' $< -o $@ \
 		-L$(LLVM)/lib -lclang-cpp -lLLVM -Wl,-rpath,$(LLVM)/lib
 
 $(OUT)/vroom-cc: vroom-cc.c protocol.h | $(OUT)
-	/usr/bin/clang -O2 -Wall $< -o $@
+	$(SYS_CC) -O2 -Wall $(TOOL_DEFS) $< -o $@
 
 $(OUT):
 	mkdir -p $@
@@ -32,7 +42,7 @@ HOST_LIBS  =
 HOST_CPU   = -mcpu=apple-m1
 else
 HOST_CC    = clang
-HOST_DEFS  = -D_GNU_SOURCE -DVCC_RESDIR='"$(shell $(HOST_CC) -print-resource-dir)/include"'
+HOST_DEFS  = -D_GNU_SOURCE -DVCC_RESDIR='"$(shell $(HOST_CC) -print-resource-dir)/include"' $(TOOL_DEFS)
 HOST_LIBS  = -lm
 # Apple cores (implementer 0x61: Docker Desktop, Asahi, a VM on a Mac) report no
 # CPU part, so -mcpu=native falls back to generic; name the core instead.

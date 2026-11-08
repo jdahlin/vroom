@@ -63,7 +63,11 @@
 
 static const char *backend_sock = "/tmp/vroomd.sock";
 static const char *ld_backend;		/* full links (vroom-ld) */
+#ifdef VROOM_LLVM_BIN
+static const char *lld = VROOM_LLVM_BIN "/ld.lld";
+#else
 static const char *lld = "/opt/homebrew/bin/ld.lld";
+#endif
 static bool log_requests, own_pp = true, own_cc = true;
 
 static atomic_ulong n_probe, n_fwd, n_spawn, n_pp, n_cc, n_fallback;
