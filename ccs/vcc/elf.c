@@ -435,7 +435,11 @@ static Out out_of(ElfObj *o) { (void)o; Out z; memset(&z, 0, sizeof z); return z
 static void reloc(ElfObj *o, Out *w, ElfFix *x, uint64_t P, uint32_t type, ElfSym *a, uint32_t aid, int64_t add)
 {
 	uint32_t s = elf_frag(o, x->frag)->sec;
-	if (a && insec(a) && a->bind == STB_LOCAL && !(a->flags & ESYM_SECTION) && a->type != STT_GNU_IFUNC) {
+	/* local symbols become section + offset, except (MC's shouldRelocateWithSymbol) in a
+	 * SHF_MERGE section with an addend: the linker would find the piece at offset+addend,
+	 * so "" + 1 could land in the next string */
+	if (a && insec(a) && a->bind == STB_LOCAL && !(a->flags & ESYM_SECTION) && a->type != STT_GNU_IFUNC &&
+	    !(add && (elf_sec(o, symsec(o, a))->flags & SHF_MERGE))) {
 		add += (int64_t)symoff(o, a);
 		aid = elf_sec(o, symsec(o, a))->sym;
 		elf_symp(o, aid)->flags |= ESYM_USED;
