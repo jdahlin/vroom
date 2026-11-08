@@ -124,9 +124,11 @@ static const vlex_file *find_include_(pp *p, const ctx *from, const char *name, 
 static _Atomic(incent *) inc_tab[1u << INC_BITS];
 static _Atomic uint32_t inc_n;
 
-static inline bool inc_same(const incent *e, uint64_t h, uint32_t sig, int32_t mode, const char *k, size_t kl)
+static inline bool inc_same(const incent *e, uint64_t h, uint32_t sig, uint32_t fsig, int32_t mode, const char *k,
+			    size_t kl)
 {
-	return e->hash == h && e->sig == sig && e->mode == mode && e->klen == kl && !memcmp(e->key, k, kl);
+	return e->hash == h && e->sig == sig && e->fsig == fsig && e->mode == mode && e->klen == kl &&
+	       !memcmp(e->key, k, kl);
 }
 
 /* e's answer holds for p: the directories it looked at are p's */
@@ -160,7 +162,7 @@ static inline int32_t inc_mode(const pp *p, const ctx *from, bool angled, bool n
 VPRIV const vlex_file *find_include(pp *p, const ctx *from, const char *name, size_t nlen,
 				     bool angled, bool next, int32_t *sdir, const char **path, const incent **ie)
 {
-	uint32_t used, i, sig = p->sig;
+	uint32_t used, i, sig = p->sig, fsig;
 	const vlex_file *f;
 	char kb[4096 + 16];
 	const char *fp;
@@ -182,7 +184,8 @@ VPRIV const vlex_file *find_include(pp *p, const ctx *from, const char *name, si
 	kl = dl + 1 + nlen;
 	kp = (kl + 8) & ~(size_t)7;
 	memset(kb + kl, 0, 8);
-	h = (uint64_t)sig << 32 ^ ((uint64_t)(uint32_t)mode << 17) ^ kl;
+	fsig = p->psig[p->o->ndirs];
+	h = ((uint64_t)sig << 32 ^ ((uint64_t)(uint32_t)mode << 17) ^ kl) + (uint64_t)fsig * 0xD6E8FEB86659FD93ull;
 	for (size_t j = 0; j < kp; j += 8) {
 		memcpy(&w, kb + j, 8);
 		h = (h ^ w) * 0x9E3779B97F4A7C15ull;
@@ -192,7 +195,7 @@ VPRIV const vlex_file *find_include(pp *p, const ctx *from, const char *name, si
 		e = atomic_load_explicit(&inc_tab[i], memory_order_acquire);
 		if (!e)
 			break;
-		if (inc_same(e, h, sig, mode, kb, kl) && inc_valid(p, e))
+		if (inc_same(e, h, sig, fsig, mode, kb, kl) && inc_valid(p, e))
 			goto hit;
 	}
 	f = find_include_(p, from, name, nlen, angled, next, sdir, path, &used);
@@ -202,7 +205,7 @@ VPRIV const vlex_file *find_include(pp *p, const ctx *from, const char *name, si
 		size_t pl = f ? strlen(*path) : 0;
 		incent *m = salloc(sizeof(*m) + kp + pl + 1);
 
-		m->hash = h, m->sig = sig, m->klen = (uint32_t)kl, m->mode = mode;
+		m->hash = h, m->sig = sig, m->fsig = fsig, m->klen = (uint32_t)kl, m->mode = mode;
 		m->used = used, m->usig = p->psig[used], m->sdir = *sdir, m->f = f;
 		memcpy(m->key, kb, kp);
 		m->path = NULL;
@@ -217,7 +220,7 @@ VPRIV const vlex_file *find_include(pp *p, const ctx *from, const char *name, si
 				e = m;
 				break;
 			}
-			if (inc_same(e, h, sig, mode, kb, kl) && inc_valid(p, e))
+			if (inc_same(e, h, sig, fsig, mode, kb, kl) && inc_valid(p, e))
 				break;	/* another thread's: the same answer */
 		}
 	}

@@ -228,7 +228,7 @@ static void resolve(ElfObj *o, Mo *m, ElfFix *x)
 	elf_error(o, "Mach-O: unsupported relocation type %u", t);
 }
 
-static ElfObj *sort_o;
+static _Thread_local ElfObj *sort_o;	/* qsort has no context: per thread (vccd, vpp --batch) */
 static int name_cmp(const void *pa, const void *pb)
 {
 	const ElfSym *a = elf_symp(sort_o, *(const uint32_t *)pa), *b = elf_symp(sort_o, *(const uint32_t *)pb);
