@@ -737,17 +737,20 @@ static const char *tokspell(const ptok *t, char *buf, size_t cap)
 	return buf;
 }
 
-static void expect(cc *c, int kind, const char *what)
+/* the failure path out of line: tokspell's buffer (a VLA) made every call set up a frame */
+static __attribute__((noinline, cold, noreturn)) void expect_fail(cc *c, const char *what)
 {
-	if (likely(c->tk[0].kind == kind)) {
-		next(c);
-		return;
-	}
-	{
-		char b[64];
+	char b[64];
 
-		fatal(c, c->tk[0].loc, "expected %s before '%s'", what, tokspell(&c->tk[0], b, sizeof(b)));
-	}
+	fatal(c, c->tk[0].loc, "expected %s before '%s'", what, tokspell(&c->tk[0], b, sizeof(b)));
+	abort();
+}
+
+static inline __attribute__((always_inline)) void expect(cc *c, int kind, const char *what)
+{
+	if (unlikely(c->tk[0].kind != kind))
+		expect_fail(c, what);
+	next(c);
 }
 
 /* #pragma: only pack changes semantics; the rest is ignored here */
