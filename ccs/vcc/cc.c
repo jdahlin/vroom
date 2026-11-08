@@ -960,7 +960,23 @@ static uint32_t mk_flt(cc *c, double v, qty ty, uint32_t loc)
 
 /* ---------------- literals ---------------- */
 
-static uint32_t number(cc *c, const ptok *t)
+/* the type of an integer literal (C11 6.4.4.1p5) */
+static inline qty int_lit_type(u128 v, int l, bool u, bool dec)
+{
+	if (l == 0 && !u && v <= INT32_MAX)
+		return prim(TY_INT);
+	if (l == 0 && (u || !dec) && v <= UINT32_MAX)
+		return prim(TY_UINT);
+	if (l <= 1 && !u && v <= INT64_MAX)
+		return prim(TY_LONG);
+	if (l <= 1 && (u || !dec))
+		return prim(TY_ULONG);
+	if (!u && v <= INT64_MAX)
+		return prim(TY_LLONG);
+	return l <= 1 ? prim(TY_ULONG) : prim(TY_ULLONG);
+}
+
+static __attribute__((noinline)) uint32_t number_slow(cc *c, const ptok *t)
 {
 	char tmp[t->len + 1];
 	size_t n, i = 0;
@@ -1043,24 +1059,56 @@ static uint32_t number(cc *c, const ptok *t)
 	}
 	if (over)
 		error(c, t->loc, "integer literal is too large to be represented in any integer type");
-	{
-		qty ty;
-		bool dec = base == 10;
+	return mk_int(c, (i128)v, int_lit_type(v, l, u, base == 10), t->loc);
+}
 
-		if (l == 0 && !u && v <= INT32_MAX)
-			ty = prim(TY_INT);
-		else if (l == 0 && (u || !dec) && v <= UINT32_MAX)
-			ty = prim(TY_UINT);
-		else if (l <= 1 && !u && v <= INT64_MAX)
-			ty = prim(TY_LONG);
-		else if (l <= 1 && (u || !dec))
-			ty = prim(TY_ULONG);
-		else if (!u && v <= INT64_MAX)
-			ty = prim(TY_LLONG);
-		else
-			ty = l <= 1 ? prim(TY_ULONG) : prim(TY_ULLONG);
-		return mk_int(c, (i128)v, ty, t->loc);
+/* the common case: a clean decimal or hex integer with an optional u/l suffix */
+static uint32_t number(cc *c, const ptok *t)
+{
+	const unsigned char *s = (const unsigned char *)t->s, *e = s + t->len;
+	uint64_t v = 0;
+	bool dec = true, u = false;
+	int l = 0;
+
+	if (unlikely(t->flags & TF_DIRTY))
+		return number_slow(c, t);
+	if (s[0] == '0' && e - s > 1) {
+		if ((s[1] | 32) != 'x' || e - s > 18)
+			return number_slow(c, t);	/* octal, binary, 0.5, long hex */
+		dec = false;
+		s += 2;
+		if (s == e)
+			return number_slow(c, t);
+		for (; s < e; s++) {
+			unsigned d = *s - '0', h = (*s | 32) - 'a';
+
+			if (d < 10)
+				v = v << 4 | d;
+			else if (h < 6)
+				v = v << 4 | (h + 10);
+			else
+				break;
+		}
+	} else {
+		if (e - s > 19)
+			return number_slow(c, t);
+		for (; s < e; s++) {
+			unsigned d = *s - '0';
+
+			if (d >= 10)
+				break;
+			v = v * 10 + d;
+		}
 	}
+	for (; s < e; s++) {
+		if ((*s | 32) == 'u' && !u)
+			u = true;
+		else if ((*s | 32) == 'l' && l < 2)
+			l++;
+		else
+			return number_slow(c, t);	/* float, separators, odd suffixes */
+	}
+	return mk_int(c, (i128)v, int_lit_type(v, l, u, dec), t->loc);
 }
 
 /* one (possibly multi-byte UTF-8) escape or character of a literal */
@@ -1154,12 +1202,10 @@ static uint32_t string_lit(cc *c)
 {
 	uint32_t loc = tok(c)->loc;
 	int kind = T_STRING;
-	size_t cap = 256, n = 0;
-	char *buf = malloc(cap);
-	vec parts;
+	size_t n = 0;
+	char *buf = c->hp;	/* built in place at the top of the heap (nothing else allocates meanwhile) */
 	int esz;
 
-	vinit(&parts);
 	/* first pass: the literal kind (any prefixed one wins) */
 	for (int k = 0;; k++) {
 		ptok *t = peek(c, k);
@@ -1175,9 +1221,18 @@ static uint32_t string_lit(cc *c)
 	esz = lit_esz(kind, c->o->short_wchar);
 	while (is_strtok(tok(c)->kind)) {
 		ptok *t = tok(c);
-		char tmp[t->len + 1];
-		size_t sl;
-		const char *sp = pp_spell(t, tmp, &sl), *s = sp, *e = sp + sl - 1;
+		char *tmp = NULL;
+		size_t sl = t->len, used;
+		const char *s = t->s, *e;
+
+		if (unlikely(t->flags & TF_DIRTY))
+			s = pp_spell(t, tmp = malloc(t->len + 1), &sl);
+		e = s + sl - 1;
+		/* each source byte gives at most 4 bytes */
+		if (unlikely(buf + n + sl * 4 + 16 > c->hend)) {
+			fputs("vcc: out of memory\n", stderr);
+			abort();
+		}
 
 		if (t->kind != T_STRING && t->kind != T_U8STRING && t->kind != kind && esz != lit_esz(t->kind, c->o->short_wchar))
 			error(c, t->loc, "unsupported non-standard concatenation of string literals");
@@ -1188,10 +1243,20 @@ static uint32_t string_lit(cc *c)
 		s++;
 		while (s < e) {
 			bool ok;
-			uint32_t v = lit_char(c, &s, e, t->loc, &ok);
+			uint32_t v;
 
-			if (n + 16 > cap)
-				buf = realloc(buf, cap *= 2);
+			if (esz == 1) {
+				const char *q = memchr(s, '\\', (size_t)(e - s));
+
+				if (!q)
+					q = e;
+				memcpy(buf + n, s, (size_t)(q - s));
+				n += (size_t)(q - s);
+				s = q;
+				if (s == e)
+					break;
+			}
+			v = lit_char(c, &s, e, t->loc, &ok);
 			if (esz == 1) {
 				if (v & 0x80000000u)
 					n += utf8_enc(v & 0x7fffffffu, buf + n);
@@ -1224,7 +1289,18 @@ static uint32_t string_lit(cc *c)
 				}
 			}
 		}
+		free(tmp);
+		/* own the bytes while the next token is fetched */
+		used = (n + 15) & ~(size_t)15;
+		c->hp = buf + used;
 		next(c);
+		if (unlikely(c->hp != buf + used)) {
+			char *nb = halloc(c, used);
+
+			memcpy(nb, buf, n);
+			buf = nb;
+		}
+		c->hp = buf;
 	}
 	memset(buf + n, 0, (size_t)esz);
 	n += (size_t)esz;
@@ -1233,8 +1309,6 @@ static uint32_t string_lit(cc *c)
 		uint32_t si = c->nstr++;
 		qty et;
 
-		memcpy(keep, buf, n);
-		free(buf);
 		c->strs[si] = (cstr){ keep, (uint32_t)(n / (size_t)esz), (uint8_t)esz, (uint8_t)kind };
 		et = esz == 1 ? prim(TY_CHAR) : kind == T_WSTRING ? c->t_wchar : kind == T_U16STRING ? c->t_char16 : c->t_char32;
 		{
