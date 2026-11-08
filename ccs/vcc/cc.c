@@ -397,6 +397,16 @@ static qty unsigned_of(cc *c, qty t)
 	}
 }
 
+/* the result of comparing vectors of type v: signed integers of the lane size */
+static qty vec_mask_type(cc *c, qty v)
+{
+	uint32_t es = (uint32_t)T(c, T(c, v)->base)->size;
+	int k = es == 1 ? TY_SCHAR : es == 2 ? TY_SHORT : es == 4 ? TY_INT : es == 8 ? TY_LONG : TY_INT128;
+
+	return ty_vector(c, prim(k), (uint32_t)T(c, v)->size);
+}
+
+
 /* integer promotion (bit-fields are handled by the caller) */
 static qty promote(cc *c, qty t)
 {
@@ -2218,14 +2228,28 @@ static uint32_t binop(cc *c, int op, uint32_t l, uint32_t r, uint32_t loc)
 	l = rvalue(c, l), r = rvalue(c, r);
 	lt = N(l)->ty, rt = N(r)->ty;
 	if (is_vector(c, lt) || is_vector(c, rt)) {
-		/* lane-wise on two vectors of one size; the result has the left operand's type */
-		qty vt = QUNQ(is_vector(c, lt) ? lt : rt);
+		/* lane-wise: two vectors of one size, or a vector and a scalar (each lane against it);
+		 * comparisons give the signed integer vector of the same lanes (-1 / 0) */
+		qty vt = QUNQ(is_vector(c, lt) ? lt : rt), et = T(c, vt)->base;
+		bool both = is_vector(c, lt) && is_vector(c, rt);
+		bool shift = op == T_LESSLESS || op == T_GREATERGREATER;
+		qty res = vt;
 
-		if (!is_vector(c, lt) || !is_vector(c, rt) || T(c, lt)->size != T(c, rt)->size || is_cmp(op) ||
-		    op == T_PERCENT || (op != T_PLUS && op != T_MINUS && op != T_STAR && op != T_SLASH &&
-					!is_integer(c, T(c, vt)->base)))
+		if ((both && T(c, lt)->size != T(c, rt)->size) ||
+		    (!both && !is_arith(c, is_vector(c, lt) ? rt : lt)) ||
+		    ((op == T_PERCENT || op == T_AMP || op == T_PIPE || op == T_CARET || shift) && !is_integer(c, et)))
 			error(c, loc, "invalid operands to binary expression");
-		return mk_bin(c, op, vt, convert(c, l, vt), convert(c, r, vt), loc);
+		if (both) {
+			l = convert(c, l, vt);
+			r = convert(c, r, both && shift ? QUNQ(rt) : vt);
+		} else if (is_vector(c, lt)) {
+			r = convert(c, r, et);
+		} else {
+			l = convert(c, l, et);
+		}
+		if (is_cmp(op))
+			res = vec_mask_type(c, vt);
+		return mk_bin(c, op, res, l, r, loc);
 	}
 	if (is_arith(c, lt) && is_arith(c, rt)) {
 		qty ct;
@@ -2288,10 +2312,10 @@ static uint32_t assign(cc *c, int op, uint32_t l, uint32_t r, uint32_t loc)
 			r = convert(c, r, prim(TY_LONG));
 			pt = lt;
 		} else if (is_vector(c, lt)) {
-			if (!is_vector(c, rt) || T(c, lt)->size != T(c, rt)->size)
+			if (is_vector(c, rt) ? T(c, lt)->size != T(c, rt)->size : !is_arith(c, rt))
 				error(c, loc, "invalid operands to compound assignment");
-			r = convert(c, r, lt);
-			pt = lt;
+			r = convert(c, r, is_vector(c, rt) ? QUNQ(lt) : T(c, lt)->base);
+			pt = QUNQ(lt);
 		} else if (op == T_LESSLESS || op == T_GREATERGREATER) {
 			/* computation type is the promoted lhs */
 		} else if (is_arith(c, pt) && is_arith(c, rt)) {
@@ -2909,7 +2933,15 @@ static uint32_t builtin_call(cc *c, const builtin *b, uint32_t loc)
 		case BI_ISINF_SIGN: case BI_FPCLASSIFY:
 			break;
 		}
-		if (b->id == BI_LIB) {
+		if (b->id == BI_STRLEN) {
+			/* folds when the string is known; otherwise the library call */
+			uint32_t n = mk_builtin(c, b->id, rt, loc, &args);
+			cval cv;
+
+			if (cc_eval(c, n, &cv) && cv.kind == CV_INT)
+				return n;
+		}
+		if (b->id == BI_LIB || b->id == BI_STRLEN) {
 			/* a call to the library function the builtin names */
 			uint32_t s = sym_new(c, S_BUILTIN, 0, ft, loc), fn, n;
 
@@ -3266,6 +3298,8 @@ static uint32_t postfix(cc *c, uint32_t n)
 				qty et = QT(QI(T(c, N(n)->ty)->base), QQ(N(n)->ty));
 
 				n = cast_node(c, addr_of(c, n, loc), ty_ptr(c, et), CK_P2P);
+			} else if (is_vector(c, N(n)->ty)) {
+				n = cast_node(c, rvalue(c, n), ty_ptr(c, T(c, N(n)->ty)->base), CK_VADDR);
 			}
 			n = rvalue(c, n), ix = rvalue(c, ix);
 			at = N(n)->ty, it = N(ix)->ty;
@@ -3405,7 +3439,8 @@ static uint32_t unary(cc *c)
 
 		next(c);
 		n = rvalue(c, cast_expr(c));
-		if (!is_arith(c, N(n)->ty) || (op == T_TILDE && !is_integer(c, N(n)->ty)))
+		if (is_vector(c, N(n)->ty) ? op == T_TILDE && !is_integer(c, T(c, N(n)->ty)->base)
+		    : !is_arith(c, N(n)->ty) || (op == T_TILDE && !is_integer(c, N(n)->ty)))
 			error(c, loc, "invalid argument type to unary expression");
 		{
 			uint32_t r = mk(c, N_UNARY, N(n)->ty, loc);
@@ -3518,6 +3553,16 @@ static uint32_t explicit_cast(cc *c, uint32_t n, qty to, uint32_t loc)
 	}
 	if (is_vector(c, to) && is_vector(c, N(n)->ty) && T(c, to)->size == T(c, N(n)->ty)->size)
 		return cast_node(c, n, QUNQ(to), CK_NOP);
+	if (is_vector(c, to) != is_vector(c, N(n)->ty) && (is_vector(c, to) || is_scalar(c, to))) {
+		/* GNU: a vector and a scalar of the same size reinterpret the bits */
+		uint32_t from = rvalue(c, n);
+
+		if (ty_size(c, to) != ty_size(c, N(from)->ty) || (!is_vector(c, to) && !is_arith(c, to) && !is_ptr(c, to))) {
+			error(c, loc, "invalid conversion between vector type and scalar type");
+			return n;
+		}
+		return cast_node(c, from, QUNQ(to), is_vector(c, to) ? CK_UNION : CK_VBITS);
+	}
 	if (!is_scalar(c, to) && !compatible(c, to, N(n)->ty)) {
 		error(c, loc, "used type where arithmetic or pointer type is required");
 		return n;
@@ -3865,7 +3910,7 @@ static void attribute_list(cc *c, attrs *a)
 				expect(c, T_LPAREN, "'('");
 				const_expr(c, &v, NULL);
 				expect(c, T_RPAREN, "')'");
-				if (v <= 0 || (v & (v - 1)) || v > 64)
+				if (v <= 0 || (v & (v - 1)) || v > 1024)
 					error(c, loc, "invalid vector size");
 				else
 					a->vecsize = (uint32_t)v;
@@ -4680,10 +4725,18 @@ static qty type_name(cc *c)
 	if (!decl_specs(c, &ds, false))
 		fatal(c, tok(c)->loc, "expected a type");
 	declarator(c, &d, true, &first, &nops);
+	attribute_list(c, &d.at);
 	t = apply_declarator(c, ds.ty, first, nops);
 	tl_ndops = first;
 	if (d.name)
 		error(c, d.loc, "unexpected identifier in type name");
+	{
+		uint32_t vs = d.at.vecsize ? d.at.vecsize : ds.at.vecsize;
+
+		/* (__attribute__((vector_size(N))) T) */
+		if (vs && is_arith(c, t) && ty_size(c, t) <= vs && !(vs % ty_size(c, t)))
+			t = QT(QI(ty_vector(c, t, vs)), QQ(t));
+	}
 	return t;
 }
 
@@ -5900,6 +5953,8 @@ static void declaration(cc *c, vec *out, bool file)
 		if (file && d.kr && is_func(c, t) && !is(c, T_SEMI) && !is(c, T_COMMA) && !is(c, T_EQUAL))
 			kr_params(c, &d);
 		s = declare(c, &ds, &d, t, file);
+		if (d.at.vecsize || ds.at.vecsize || d.at.mode || ds.at.mode)
+			t = c->syms[s].ty;	/* declare made it a vector / applied mode: initialize that */
 		if (is_func(c, t) && is(c, T_LBRACE)) {
 			if (!file)
 				fatal(c, tok(c)->loc, "function definition is not allowed here");

@@ -202,6 +202,8 @@ enum {
 	CK_VOID,	/* -> void */
 	CK_UNION,	/* -> transparent union / GNU cast to union */
 	CK_NULL,	/* null pointer constant -> pointer */
+	CK_VBITS,	/* GNU vector -> scalar of the same size (the bits) */
+	CK_VADDR,	/* GNU vector rvalue -> pointer to its first lane (v[i] on an rvalue) */
 };
 
 enum { NF_LVALUE = 1, NF_BITFIELD = 2, NF_PAREN = 4, NF_NPC = 8 };

@@ -5069,6 +5069,102 @@ static val gen_vbin(ecx *e, int op, int ra, int rb, qty t, uint32_t loc)
 	return vreg(rd);
 }
 
+/* operand k of a lane-wise operation: lane i of a vector at ra, or the scalar in rs (copied) */
+static val vlane(ecx *e, qty t, int r, unsigned i)
+{
+	cc *c = e->c;
+
+	if (is_vec(c, t)) {
+		qty et = T(c, t)->base;
+		lval l = { .k = L_REG, .r = (uint8_t)r, .off = (int64_t)i * (int64_t)tsize(c, et), .align = talign(c, et) };
+
+		return load(e, &l, et);
+	}
+	{
+		int d = treg(e);
+
+		mov(e, 1, d, r);
+		return vreg(d);
+	}
+}
+
+/*
+ * Lane by lane through memory, for what the NEON path (gen_vbin) does not do:
+ * other sizes, *, /, %, shifts, comparisons (-1 / 0 lanes), floating-point
+ * lanes, a scalar operand (each lane against it), unary - and ~ (b NULL).
+ */
+static val gen_vlanes(ecx *e, int op, qty at, val *a, qty bt, val *b, qty rt, bool unary)
+{
+	cc *c = e->c;
+	qty vt = is_vec(c, at) ? at : bt, et = T(c, vt)->base, rte = T(c, rt)->base;
+	unsigned n = (unsigned)(tsize(c, vt) / tsize(c, et));
+	int ra = toreg(e, a), rb = unary ? -1 : toreg(e, b), rd;
+	int32_t sl = slot(e, tsize(c, rt), 16);
+
+	rd = treg(e);
+	opi(e, I_ADDI, 1, rd, FRAME, sl);
+	for (unsigned i = 0; i < n; i++) {
+		val x = vlane(e, at, ra, i), y = unary ? vconst(0) : vlane(e, bt, rb, i), r;
+		qty yt = unary ? et : is_vec(c, bt) ? T(c, bt)->base : bt;
+
+		if (unary) {
+			if (op == T_MINUS)
+				r = is_flt(c, et) ? f_neg(e, x, et) : arith(e, T_MINUS, et, vconst(0), x);
+			else
+				r = arith(e, T_CARET, et, x, vconst(-1));
+		} else if (is_cmp(op)) {
+			if (is_flt(c, et)) {
+				r = f_compare(e, op, et, x, y);
+			} else {
+				int cond = is_wide(c, et) ? emit_cmp2(e, op, is_signed(c, et), &x, &y)
+							  : emit_cmp(e, op, X(c, et), is_signed(c, et), &x, &y);
+				int t;
+
+				vfree(e, &y);
+				t = toreg(e, &x);
+				if (x.k == V_REG2)
+					tfree(e, x.r2);
+				cset(e, t, cond);
+				r = vreg(t);
+			}
+			if (is_wide(c, rte)) {
+				/* 0 / 1 -> 0 / all ones */
+				int h = treg(e);
+
+				op3(e, I_SUB, 1, r.r, ZR, r.r);
+				mov(e, 1, h, r.r);
+				r.k = V_REG2;
+				r.r2 = (uint8_t)h;
+			} else {
+				r = arith(e, T_MINUS, rte, vconst(0), r);
+			}
+		} else if (is_flt(c, et)) {
+			r = f_arith(e, op, et, x, y);
+		} else {
+			(void)yt;
+			r = is_wide(c, et) ? arith2(e, op, et, x, y) : arith(e, op, et, x, y);
+		}
+		{
+			lval l = { .k = L_REG, .r = (uint8_t)rd, .off = (int64_t)i * (int64_t)tsize(c, rte), .align = talign(c, rte) };
+
+			store(e, &l, rte, &r);
+			vfree(e, &r);
+		}
+	}
+	tfree(e, ra);
+	if (rb >= 0)
+		tfree(e, rb);
+	return vreg(rd);
+}
+
+static bool vbin_fast(cc *c, int op, qty lt, qty rt, qty ty)
+{
+	uint64_t size = tsize(c, ty);
+
+	return is_vec(c, lt) && is_vec(c, rt) && (size == 8 || size == 16) && !is_flt(c, T(c, ty)->base) &&
+	       (op == T_AMP || op == T_PIPE || op == T_CARET || op == T_PLUS || op == T_MINUS);
+}
+
 static val gen_binary(ecx *e, uint32_t n)
 {
 	cc *c = e->c;
@@ -5077,6 +5173,8 @@ static val gen_binary(ecx *e, uint32_t n)
 	qty lt = N(x->a)->ty, rt = N(x->b)->ty, ty = x->ty;
 	val a = gen(e, x->a), b = gen(e, x->b);
 
+	if (is_vec(c, ty) && !vbin_fast(c, op, lt, rt, ty))
+		return gen_vlanes(e, op, lt, &a, rt, &b, ty, false);
 	if (is_vec(c, ty)) {
 		int ra = toreg(e, &a), rb = toreg(e, &b);
 		val r = gen_vbin(e, op, ra, rb, ty, x->loc);
@@ -5170,6 +5268,8 @@ static val gen_unary(ecx *e, uint32_t n)
 	qty t = N(x->a)->ty;
 	val v = gen(e, x->a);
 
+	if (is_vec(c, x->ty) && (x->aux == T_MINUS || x->aux == T_TILDE))
+		return gen_vlanes(e, x->aux, t, &v, t, NULL, x->ty, true);
 	switch (x->aux) {
 	case T_PLUS:
 		return v;
@@ -5239,6 +5339,13 @@ static val gen_assign(ecx *e, uint32_t n)
 			lval l2 = l;
 
 			av = laddr(e, &l2);
+		}
+		if (!vbin_fast(c, x->aux, lt, N(x->b)->ty, lt)) {
+			qty bt = N(x->b)->ty;
+
+			r = gen_vlanes(e, x->aux, lt, &av, bt, &w, lt, false);
+			store(e, &l, lt, &r);
+			return r;
 		}
 		ra = toreg(e, &av), rw = toreg(e, &w);
 		r = gen_vbin(e, x->aux, ra, rw, lt, x->loc);
@@ -5453,6 +5560,18 @@ static val gen(ecx *e, uint32_t n)
 		}
 		case CK_FDECAY:
 			return gen(e, x->a);
+		case CK_VADDR:
+			return gen(e, x->a);	/* a vector value is its address */
+		case CK_VBITS: {
+			/* the vector's bits as a scalar: load from its address */
+			val v = gen(e, x->a);
+			lval l = { .k = L_REG, .align = talign(c, N(x->a)->ty) };
+
+			l.r = (uint8_t)toreg(e, &v);
+			v = load(e, &l, x->ty);
+			lfree(e, &l);
+			return v;
+		}
 		case CK_UNION: {
 			int32_t sl = slot(e, tsize(c, x->ty), talign(c, x->ty));
 			lval l = { .k = L_FRAME, .off = sl, .align = talign(c, x->ty) };
@@ -6507,7 +6626,7 @@ static void gen_asm(ecx *e, uint32_t n)
 		const asmop *ao = &a->ops[i];
 		const char *cs = c->strs[ao->constraint - 1].s;
 		asmopnd *o = &op[i];
-		bool mem_ok = strpbrk(cs, "mQo") != NULL, reg_ok = strpbrk(cs, "r") != NULL;
+		bool mem_ok = strpbrk(cs, "mQog") != NULL, reg_ok = strpbrk(cs, "rg") != NULL;
 		uint32_t en = ao->expr;
 
 		o->out = 1;
@@ -6552,7 +6671,7 @@ static void gen_asm(ecx *e, uint32_t n)
 		const char *cs = c->strs[ao->constraint - 1].s;
 		asmopnd *o = &op[i];
 		uint32_t en = ao->expr;
-		bool reg_ok = strpbrk(cs, "rp") != NULL, mem_ok = strpbrk(cs, "mQo") != NULL;	/* p: address in a register */
+		bool reg_ok = strpbrk(cs, "rpg") != NULL, mem_ok = strpbrk(cs, "mQog") != NULL;	/* p: address in a register */
 		int tied = -1;
 
 		o->t = N(en)->ty;
@@ -6605,7 +6724,7 @@ static void gen_asm(ecx *e, uint32_t n)
 					continue;
 				}
 				for (const char *p = cs; *p; p++)
-					if (strchr("iInJKLMNs", *p) && (v.k == V_ADDR ? (*p == 'i' || *p == 's') : imm_fits(*p, v.i)))
+					if (strchr("iInJKLMNsg", *p) && (v.k == V_ADDR ? (*p == 'i' || *p == 's' || *p == 'g') : *p == 'g' || imm_fits(*p, v.i)))
 						imm = true;
 			}
 			if (imm) {
