@@ -208,14 +208,15 @@ static inline uint64_t nibmask(uint8x16_t eq)
 	return vget_lane_u64(vreinterpret_u64_u8(vshrn_n_u16(vreinterpretq_u16_u8(eq), 4)), 0);
 }
 
-/* first position >= p holding '*' or NUL */
-static inline size_t find_star(const char *s, size_t p)
+/* first position >= p holding '*' before '/', a backslash or NUL */
+static inline size_t find_cend(const char *s, size_t p)
 {
-	const uint8x16_t star = vdupq_n_u8('*');
+	const uint8x16_t star = vdupq_n_u8('*'), sl = vdupq_n_u8('/'), bs = vdupq_n_u8('\\');
 
 	for (;; p += 16) {
-		uint8x16_t v = vld1q_u8((const uint8_t *)s + p);
-		uint64_t m = nibmask(vorrq_u8(vceqq_u8(v, star), vceqzq_u8(v)));
+		uint8x16_t v = vld1q_u8((const uint8_t *)s + p), w = vld1q_u8((const uint8_t *)s + p + 1);
+		uint64_t m = nibmask(vorrq_u8(vandq_u8(vceqq_u8(v, star), vceqq_u8(w, sl)),
+					      vorrq_u8(vceqq_u8(v, bs), vceqzq_u8(v))));
 
 		if (m)
 			return p + (__builtin_ctzll(m) >> 2);
@@ -1200,18 +1201,20 @@ l_percent:
 l_slash:
 	a = nx(s, p);
 	if (s[a] == '*') {
-		/* block comment */
+		/* block comment: stops at its end, at backslashes (a splice in the end?) and at NULs */
 		for (q = a + 1;; q++) {
-			q = find_star(s, q);
+			q = find_cend(s, q);
 			if (q >= n) {
 				/* unterminated: an error token */
 				p = n;
 				EMIT(T_UNKNOWN);
 			}
-			if (s[q] != '*')
-				continue;	/* embedded NUL */
-			b = nx(s, q);
-			if (s[b] == '/') {
+			if (s[q] == '*') {
+				q += 2;
+				break;
+			}
+			if (s[q] == '\\' && q - 1 > a && s[q - 1] == '*' &&
+			    s[b = skip_splices(s, q)] == '/' && b != q) {
 				q = b + 1;
 				break;
 			}
