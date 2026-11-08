@@ -57,6 +57,7 @@ enum {
 	TF_ALIGNED = 16,	/* aligned typedef variant */
 	TF_TRANSPARENT = 32,	/* transparent_union */
 	TF_BLOCK = 64,		/* pointer: a block pointer (^, Darwin SDK prototypes only) */
+	TF_ATOMIC = 128,	/* _Atomic(T): n is T's index; clang's layout (ty_atomic) */
 };
 
 typedef struct ctype {

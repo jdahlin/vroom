@@ -208,12 +208,83 @@ VPRIV lval gen_lval(ecx *e, uint32_t n)
 }
 static int bf_bytes(int bits) { return bits <= 8 ? 1 : bits <= 16 ? 2 : bits <= 32 ? 4 : 8; }
 
+/*
+ * _Atomic objects (TF_ATOMIC) in memory: every access is sequentially
+ * consistent through LSE, as clang does for armv8.1-a: ldar, stlr, and
+ * casal loops for read-modify-write (expr.c atomic_rmw).
+ */
+VPRIV bool is_atomic_lv(ecx *e, const lval *l, qty t)
+{
+	return unlikely(T(e->c, t)->flags & TF_ATOMIC) && l->k != L_GLOBREG && !l->bf;
+}
+
+/* log2 of an atomic access's size; fatal for what has no single instruction */
+VPRIV int atomic_sz(ecx *e, qty t)
+{
+	cc *c = e->c;
+	uint64_t n = tsize(c, t);
+
+	if (is_agg(c, t))
+		efatal(e, 0, "loads and stores of _Atomic structs and unions are not supported");
+	if (n != 1 && n != 2 && n != 4 && n != 8)
+		efatal(e, 0, "%u-byte _Atomic objects are not supported", (unsigned)n);
+	return log2sz(n);
+}
+
+/* the exact address of l in a register; *own: the caller frees it */
+VPRIV int atomic_addr(ecx *e, lval *l, bool *own)
+{
+	val a;
+
+	if (l->k == L_REG) {
+		if (l->off)
+			opi(e, I_ADDI, 1, l->r, l->r, l->off);
+		l->off = 0;
+		*own = false;
+		return l->r;
+	}
+	a = laddr(e, l);
+	*own = true;
+	return toreg(e, &a);
+}
+
+static val ldar_load(ecx *e, lval *l, qty t)
+{
+	cc *c = e->c;
+	int sz = atomic_sz(e, t), r, ra;
+	bool own;
+
+	if (is_flt(c, t))
+		fpk(e, t);
+	ra = atomic_addr(e, l, &own);
+	r = treg(e);
+	word(e, (unsigned)sz << 30 | 0x08dffc00u | (unsigned)ra << 5 | (unsigned)r);	/* ldar */
+	if (own)
+		tfree(e, ra);
+	if (sz < 3 && !is_flt(c, t) && is_signed(c, t))
+		extend(e, r, r, 1 << sz, true);
+	return vreg(r);
+}
+
+static void stlr_store(ecx *e, lval *l, qty t, val *v)
+{
+	int sz = atomic_sz(e, t), r = v->k == V_CONST && v->i == 0 ? ZR : toreg(e, v), ra;
+	bool own;
+
+	ra = atomic_addr(e, l, &own);
+	word(e, (unsigned)sz << 30 | 0x089ffc00u | (unsigned)ra << 5 | (unsigned)r);	/* stlr */
+	if (own)
+		tfree(e, ra);
+}
+
 VPRIV val load(ecx *e, lval *l, qty t)
 {
 	cc *c = e->c;
 	uint64_t size = tsize(c, t);
 	int r;
 
+	if (is_atomic_lv(e, l, t))
+		return ldar_load(e, l, t);
 	if (is_agg(c, t) || is_func(c, t))
 		return laddr(e, l);
 	if (is_flt(c, t) && !is_ld(c, t))
@@ -273,6 +344,10 @@ VPRIV void store(ecx *e, lval *l, qty t, val *v)
 	cc *c = e->c;
 	uint64_t size = tsize(c, t);
 
+	if (is_atomic_lv(e, l, t)) {
+		stlr_store(e, l, t, v);
+		return;
+	}
 	if (is_agg(c, t)) {
 		val d = laddr(e, l);
 		int rs = toreg(e, v), rd = toreg(e, &d);

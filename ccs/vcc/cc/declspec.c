@@ -198,6 +198,7 @@ VPRIV bool decl_specs(cc *c, dspec *ds, bool allow_sc)
 	bool any = false, cplx = false;
 	qty named = 0;
 	bool have_named = false;
+	uint32_t atomic = 0;	/* the _Atomic qualifier's location */
 
 	memset(ds, 0, sizeof(*ds));
 	ds->loc = tok(c)->loc;
@@ -257,16 +258,21 @@ VPRIV bool decl_specs(cc *c, dspec *ds, bool allow_sc)
 		case KW_restrict: case KW___restrict__: case KW___restrict:
 			q |= Q_RESTRICT;
 			break;
-		case KW__Atomic:
+		case KW__Atomic: {
+			uint32_t aloc = t->loc;
+
 			next(c);
 			if (is(c, T_LPAREN)) {
 				next(c);
-				named = type_name(c);
+				named = ty_atomic(c, type_name(c), aloc);
 				have_named = true;
 				expect(c, T_RPAREN, "')'");
 				any = true;
+			} else {
+				atomic = aloc ? aloc : 1;	/* the qualifier: applied to the type below */
 			}
 			continue;
+		}
 		case KW___attribute__: case KW___attribute:
 			attribute_list(c, &ds->at);
 			continue;
@@ -385,7 +391,7 @@ VPRIV bool decl_specs(cc *c, dspec *ds, bool allow_sc)
 	}
 done:
 	ds->has_type = any;
-	if (!any && !q && !ds->sc && !ds->inline_ && !ds->noreturn && !ds->thread && !ds->align)
+	if (!any && !q && !atomic && !ds->sc && !ds->inline_ && !ds->noreturn && !ds->thread && !ds->align)
 		return false;
 	if (have_named) {
 		ds->ty = named;
@@ -418,6 +424,8 @@ done:
 		if (k)
 			ds->ty = prim(k);
 	}
+	if (atomic)
+		ds->ty = ty_atomic(c, ds->ty, atomic);
 	ds->ty = qualify(c, ds->ty, q);
 	if (ds->inline_ && c->o->gnu89_inline)
 		ds->at.gnu_inline = 1;	/* -std=gnu89: gnu_inline semantics */

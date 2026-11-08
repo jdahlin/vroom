@@ -516,6 +516,131 @@ static val conv_back(ecx *e, val v, qty from, qty to)
 	return cast(e, v, from, to, CK_INT);
 }
 
+/* old op= v (x a compound assignment to an lvalue of type lt): the new value, of type lt */
+static val assign_op(ecx *e, const node *x, qty lt, val old, val v)
+{
+	cc *c = e->c;
+	qty pt = x->c;
+	int op = x->aux;
+
+	if (is_ptr(c, lt)) {
+		old = ptr_add(e, old, v, (int64_t)elem_size(c, lt), op == T_MINUS);
+	} else if (is_flt(c, pt) || is_flt(c, lt)) {
+		old = cast(e, old, lt, pt, CK_INT);
+		old = is_flt(c, pt) ? f_arith(e, op, pt, old, v) : arith(e, op, pt, old, v);
+		old = cast(e, old, pt, lt, CK_INT);
+	} else {
+		old = conv_back(e, old, lt, pt);
+		if (old.k == V_CONST && v.k == V_CONST) {
+			bool ok;
+			val f = fold_int_bin(e, op, (op == T_LESSLESS || op == T_GREATERGREATER) ? pt : pt, pt, old.i, v.i, &ok);
+
+			if (ok)
+				old = f;
+			else
+				old = is_wide(c, pt) ? arith2(e, op, pt, old, v) : arith(e, op, pt, old, v);
+		} else {
+			old = is_wide(c, pt) ? arith2(e, op, pt, old, v) : arith(e, op, pt, old, v);
+		}
+		old = conv_back(e, old, pt, lt);
+	}
+	return old;
+}
+
+static val incdec_op(ecx *e, qty t, bool inc, bool post, val *old);
+
+/* an assignment operator or ++/-- whose operand is an _Atomic object */
+static inline bool atomic_target(ecx *e, uint32_t a, qty t)
+{
+	(void)a;
+	return unlikely(T(e->c, t)->flags & TF_ATOMIC);
+}
+
+/*
+ * x op= v, ++x, x++ ... on an _Atomic x: one atomic read-modify-write.
+ *   ldar  ob, [p]
+ * top:
+ *   new = (copy of ob) op (copy of v)       the operator's usual code
+ *   mov   cmp, ob
+ *   casal cmp, new, [p]                     cmp = what memory held
+ *   cmp   cmp, ob;  mov ob, cmp;  b.ne top
+ * The operator runs outside any exclusive section, so anything it does
+ * (calls included) is fine; v is evaluated once, before the loop.
+ */
+static val atomic_rmw(ecx *e, uint32_t n, bool inc, bool post)
+{
+	cc *c = e->c;
+	const node *x = N(n);
+	bool asg = x->op == N_ASSIGN;
+	qty t = x->ty;
+	val v = vnone(), old, nv;
+	lval l;
+	int sz, ra, ob, cmp, nb;
+	bool own;
+	uint32_t top;
+
+	if (asg) {
+		v = gen(e, x->b);
+		if (v.k == V_REG2)
+			efatal(e, x->loc, "compound assignment to an _Atomic object with a 128-bit operand is not supported");
+		if (v.k != V_CONST)
+			toreg(e, &v);
+	}
+	l = gen_lval(e, x->a);
+	if (!is_atomic_lv(e, &l, t))
+		efatal(e, x->loc, "_Atomic register variables are not supported");
+	sz = atomic_sz(e, t);
+	if (is_flt(c, t))
+		fpk(e, t);
+	ra = atomic_addr(e, &l, &own);
+	ob = treg(e);
+	word(e, (unsigned)sz << 30 | 0x08dffc00u | (unsigned)ra << 5 | (unsigned)ob);	/* ldar */
+	top = newlabel(e);
+	deflabel_loop(e, top, true);
+	{
+		int r = treg(e);
+
+		if (sz < 3 && !is_flt(c, t) && is_signed(c, t))
+			extend(e, r, ob, 1 << sz, true);
+		else
+			mov(e, 1, r, ob);
+		old = vreg(r);
+	}
+	if (asg) {
+		val vc = v;
+
+		if (v.k == V_REG) {
+			int r = treg(e);
+
+			mov(e, 1, r, v.r);
+			vc = vreg(r);
+		}
+		nv = assign_op(e, x, t, old, vc);
+	} else {
+		nv = incdec_op(e, t, inc, post, &old);
+	}
+	nb = nv.k == V_CONST && nv.i == 0 ? ZR : toreg(e, &nv);
+	cmp = treg(e);
+	mov(e, 1, cmp, ob);
+	word(e, (unsigned)sz << 30 | 0x08e0fc00u | (unsigned)cmp << 16 | (unsigned)ra << 5 | (unsigned)nb);	/* casal */
+	op3(e, I_SUBS, sz == 3, ZR, cmp, ob);	/* both zero-extended */
+	mov(e, 1, ob, cmp);
+	bcond(e, C_NE, top);
+	tfree(e, cmp);
+	tfree(e, ob);
+	if (own)
+		tfree(e, ra);
+	lfree(e, &l);
+	val_free(e, &v);
+	if (!asg && post) {
+		val_free(e, &nv);
+		return old;
+	}
+	if (!asg && KIND(c, t) == TY_BOOL)
+		val_free(e, &old);
+	return nv;
+}
+
 static val gen_assign(ecx *e, uint32_t n)
 {
 	cc *c = e->c;
@@ -598,61 +723,35 @@ static val gen_assign(ecx *e, uint32_t n)
 		}
 		return v;
 	}
-	{
-		qty pt = x->c;
-		int op = x->aux;
-
-		v = gen(e, x->b);
-		l = gen_lval(e, x->a);
-		old = load(e, &l, lt);
-		if (is_ptr(c, lt)) {
-			old = ptr_add(e, old, v, (int64_t)elem_size(c, lt), op == T_MINUS);
-		} else if (is_flt(c, pt) || is_flt(c, lt)) {
-			old = cast(e, old, lt, pt, CK_INT);
-			old = is_flt(c, pt) ? f_arith(e, op, pt, old, v) : arith(e, op, pt, old, v);
-			old = cast(e, old, pt, lt, CK_INT);
-		} else {
-			old = conv_back(e, old, lt, pt);
-			if (old.k == V_CONST && v.k == V_CONST) {
-				bool ok;
-				val f = fold_int_bin(e, op, (op == T_LESSLESS || op == T_GREATERGREATER) ? pt : pt, pt, old.i, v.i, &ok);
-
-				if (ok)
-					old = f;
-				else
-					old = is_wide(c, pt) ? arith2(e, op, pt, old, v) : arith(e, op, pt, old, v);
-			} else {
-				old = is_wide(c, pt) ? arith2(e, op, pt, old, v) : arith(e, op, pt, old, v);
-			}
-			old = conv_back(e, old, pt, lt);
-		}
-		store(e, &l, lt, &old);
-		lfree(e, &l);
-		return old;
-	}
+	if (atomic_target(e, x->a, lt))
+		return atomic_rmw(e, n, false, false);
+	v = gen(e, x->b);
+	l = gen_lval(e, x->a);
+	old = load(e, &l, lt);
+	old = assign_op(e, x, lt, old, v);
+	store(e, &l, lt, &old);
+	lfree(e, &l);
+	return old;
 }
 
-static val gen_incdec(ecx *e, uint32_t n)
+/* ++/-- on *old (of type t): returns the new value; *old becomes what a postfix operator yields */
+static val incdec_op(ecx *e, qty t, bool inc, bool post, val *old)
 {
 	cc *c = e->c;
-	const node *x = N(n);
-	qty t = x->ty;
-	bool inc = x->op == N_PREINC || x->op == N_POSTINC, post = x->op == N_POSTINC || x->op == N_POSTDEC;
-	lval l = gen_lval(e, x->a);
-	val old = load(e, &l, t), nv;
+	val nv;
 	int64_t d = is_ptr(c, t) ? (int64_t)elem_size(c, t) : 1;
 
 	if (KIND(c, t) == TY_BOOL) {
 		nv = vconst(1);
 		if (!inc) {
 			/* --b: b = b - 1 != 0, i.e. !b */
-			int r = treg(e), ro = toreg(e, &old);
+			int r = treg(e), ro = toreg(e, old);
 
 			opi(e, I_EORI, 0, r, ro, 1);
 			nv = vreg(r);
 		}
 	} else if (is_ld(c, t)) {
-		val one = vconst(ld_of_d(1.0)), cp = old;
+		val one = vconst(ld_of_d(1.0)), cp = *old;
 
 		toreg2(e, &cp, false);
 		if (post) {
@@ -662,24 +761,24 @@ static val gen_incdec(ecx *e, uint32_t n)
 			mov(e, 1, nv.r, cp.r);
 			mov(e, 1, nv.r2, cp.r2);
 			nv = f_arith(e, inc ? T_PLUS : T_MINUS, t, nv, one);
-			old = cp;
+			*old = cp;
 		} else {
-			nv = old = f_arith(e, inc ? T_PLUS : T_MINUS, t, cp, one);
+			nv = *old = f_arith(e, inc ? T_PLUS : T_MINUS, t, cp, one);
 		}
 	} else if (is_flt(c, t)) {
 		int d = fpk(e, t);
 
-		toreg(e, &old);
+		toreg(e, old);
 		if (post) {
 			int r = treg(e);
 
-			mov(e, 1, r, old.r);
+			mov(e, 1, r, old->r);
 			nv = f_arith(e, inc ? T_PLUS : T_MINUS, t, vreg(r), f_const(d, 1.0));
 		} else {
-			nv = old = f_arith(e, inc ? T_PLUS : T_MINUS, t, old, f_const(d, 1.0));
+			nv = *old = f_arith(e, inc ? T_PLUS : T_MINUS, t, *old, f_const(d, 1.0));
 		}
 	} else if (is_wide(c, t)) {
-		val one = vconst(1), cp = old;
+		val one = vconst(1), cp = *old;
 
 		toreg2(e, &cp, is_signed(c, t));
 		if (post) {
@@ -689,13 +788,13 @@ static val gen_incdec(ecx *e, uint32_t n)
 			mov(e, 1, nv.r, cp.r);
 			mov(e, 1, nv.r2, cp.r2);
 			nv = arith2(e, inc ? T_PLUS : T_MINUS, t, nv, one);
-			old = cp;
+			*old = cp;
 		} else {
 			nv = arith2(e, inc ? T_PLUS : T_MINUS, t, cp, one);
-			old = nv;
+			*old = nv;
 		}
 	} else {
-		int ro = toreg(e, &old);
+		int ro = toreg(e, old);
 
 		if (post) {
 			int r = treg(e);
@@ -704,9 +803,26 @@ static val gen_incdec(ecx *e, uint32_t n)
 			nv = vreg(r);
 		} else {
 			opi(e, inc ? I_ADDI : I_SUBI, X(c, t), ro, ro, d);
-			nv = old;
+			nv = *old;
 		}
 	}
+	return nv;
+}
+
+static val gen_incdec(ecx *e, uint32_t n)
+{
+	cc *c = e->c;
+	const node *x = N(n);
+	qty t = x->ty;
+	bool inc = x->op == N_PREINC || x->op == N_POSTINC, post = x->op == N_POSTINC || x->op == N_POSTDEC;
+	lval l;
+	val old, nv;
+
+	if (atomic_target(e, x->a, t))
+		return atomic_rmw(e, n, inc, post);
+	l = gen_lval(e, x->a);
+	old = load(e, &l, t);
+	nv = incdec_op(e, t, inc, post, &old);
 	store(e, &l, t, &nv);
 	lfree(e, &l);
 	if (post) {

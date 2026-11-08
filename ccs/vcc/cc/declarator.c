@@ -1,6 +1,8 @@
 /* vcc front end: declarators */
 #include "ccimpl.h"
 
+enum { DQ_ATOMIC = 8 };	/* dop.q: _Atomic on a pointer (beside Q_*) */
+
 /* ---------------- declarators ---------------- */
 
 static void param_list(cc *c, dop *op)
@@ -206,7 +208,9 @@ VPRIV void declarator(cc *c, declr *d, bool abstract_ok, uint32_t *first, uint32
 					q |= Q_VOLATILE;
 				else if (kw == KW_restrict || kw == KW___restrict || kw == KW___restrict__)
 					q |= Q_RESTRICT;
-				else if (kw == KW__Atomic || is_nullability(c, tok(c)))
+				else if (kw == KW__Atomic)
+					q |= DQ_ATOMIC;
+				else if (is_nullability(c, tok(c)))
 					;
 				else if (kw == KW___attribute__ || kw == KW___attribute) {
 					attribute_list(c, &d->at);
@@ -316,10 +320,12 @@ VPRIV qty apply_declarator(cc *c, qty t, uint32_t first, uint32_t nops)
 			if (o->fl & TF_BLOCK) {
 				ctype b = { .kind = TY_PTR, .flags = TF_BLOCK, .size = 8, .align = 8, .base = t };
 
-				t = QT(ty_intern(c, &b), o->q);
+				t = QT(ty_intern(c, &b), o->q & Q_MASK);
 			} else {
-				t = QT(QI(ty_ptr(c, t)), o->q);
+				t = QT(QI(ty_ptr(c, t)), o->q & Q_MASK);
 			}
+			if (o->q & DQ_ATOMIC)	/* T *_Atomic */
+				t = ty_atomic(c, t, 0);
 			break;
 		case 1:
 			if (is_func(c, t))

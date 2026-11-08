@@ -585,6 +585,9 @@ VPRIV val ptr_add_vla(ecx *e, val p, val i, qty ptr, bool sub);
 VPRIV bool ptr_to_vla(cc *c, qty ptr);
 VPRIV lval gen_lval(ecx *e, uint32_t n);
 VPRIV val load(ecx *e, lval *l, qty t);
+VPRIV bool is_atomic_lv(ecx *e, const lval *l, qty t);
+VPRIV int atomic_sz(ecx *e, qty t);
+VPRIV int atomic_addr(ecx *e, lval *l, bool *own);
 VPRIV void store(ecx *e, lval *l, qty t, val *v);
 /* arith.c */
 VPRIV void extend(ecx *e, int rd, int rs, int from, bool sgn);

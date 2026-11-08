@@ -2,7 +2,6 @@
    plain loads/stores (TODO.md tier 1, "_Atomic dropped").  One core under
    qemu, so this only checks layout and single-threaded results; the
    threaded counter is in the host suite (T3). */
-/* vcc-xfail: _Atomic dropped */
 #include <stdio.h>
 
 struct s3 { char a[3]; };

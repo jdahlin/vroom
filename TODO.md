@@ -119,12 +119,27 @@ Existing gates that every change must keep green: `vcc-diff.py cmp`
   *Validate:* T1 `align_local.c` (`_Alignas(32/64/128/4096)` locals, arrays
   and VLAs of over-aligned types, inside recursion and alongside alloca;
   check `(uintptr_t)&x % A == 0`).
-- [ ] **`_Atomic` dropped** [P].  `cc.c:5665`, `cc.c:6037`.  Keep the
+- [x] **`_Atomic` dropped** [P].  Done: `_Atomic(T)` and the qualifier
+  (also `T *_Atomic`) make a type of its own (`TF_ATOMIC`, `ty_atomic()` in
+  cc/type.c) with clang's layout; lvalue conversion (`decay_slow`) yields
+  T; emit loads with `ldar`, stores with `stlr`, and every compound
+  assignment and `++`/`--` is a `casal` loop around the operator's usual
+  code (`atomic_rmw`, emit/expr.c).  Tests: `atomic_layout.c`,
+  `atomic_ops.c`.  Left, each a clean error today: 16-byte atomics
+  (`_Atomic __int128`, `long double`; needs `caspal`), loads and stores of
+  whole `_Atomic` structs/unions, `_Atomic` vectors.  Differs from clang on
+  purpose: clang 21/23 zero-extend a signed old value when the compound
+  operation leaves int arithmetic (`x /= -2` on `_Atomic signed char` -2
+  gives -127); vcc gives 1 as C says.  Clang rejects `+=` on an atomic
+  pointer, vcc accepts it.  `ld<op>al` for `+ - & | ^` would save the loop
+  (performance only).
+  Was: keep the
   qualifier on the type; lower loads/stores to `ldar`/`stlr`, compound
   assignment and `++`/`--` to LSE (or CAS loops for types without a
   direct op, and for floating point), and lay out `_Atomic(T)` as clang does
   (size rounded to a power of 2 up to 16, alignment = size).
-  *Validate:* T6 `atomic-ops.c` (no plain `ldr/str` for atomic accesses);
+  *Validate:* T6 `atomic-ops.c` (no plain `ldr/str` for atomic accesses;
+  checked by hand with llvm-objdump until T6 exists);
   T1/T3 `atomic-threads.c` (4 threads × 1M `x++` on `_Atomic int`,
   `_Atomic long double`, `_Atomic struct{char[3]}` → exact count);
   `_Static_assert(sizeof/alignof)` cases in `vcc-sema.py layout` style.

@@ -172,6 +172,8 @@ VPRIV qty qualify(cc *c, qty t, int q);
 VPRIV qty ty_func(cc *c, qty ret, const qty *par, uint32_t n, int flags);
 VPRIV qty ty_vector(cc *c, qty elem, uint32_t size);
 VPRIV qty ty_aligned(cc *c, qty t, uint32_t align);
+VPRIV qty ty_atomic(cc *c, qty t, uint32_t loc);
+static inline qty ty_unatomic(cc *c, qty t);
 VPRIV uint64_t ty_size(cc *c, qty t);
 VPRIV uint32_t ty_align(cc *c, qty t);
 VPRIV bool complete(cc *c, qty t);
@@ -439,9 +441,17 @@ static inline uint32_t decay(cc *c, uint32_t n)
 	if (unlikely(N(n)->op == N_INDEX))
 		bounds_warn(c, n, false);	/* returns at once for anything else */
 
-	if (likely(k != TY_ARRAY && k != TY_FUNC))
+	if (likely(k != TY_ARRAY && k != TY_FUNC && !(T(c, t)->flags & TF_ATOMIC)))
 		return n;
 	return decay_slow(c, n, t, k);
+}
+
+/* the value type of an _Atomic(T) (T, qualifiers kept); anything else unchanged */
+static inline qty ty_unatomic(cc *c, qty t)
+{
+	const ctype *x = T(c, t);
+
+	return x->flags & TF_ATOMIC ? QT(x->n, QQ(t)) : t;
 }
 
 static inline uint32_t convert(cc *c, uint32_t n, qty to)
