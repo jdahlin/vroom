@@ -8,15 +8,19 @@
 Prints, per 0.5 s: sub-make recipes, leaf recipes and vccd compiles in flight;
 recipes by kind (wall sum, user, sys of the shell and its children); and for
 CC/AS recipes the time before the job reaches vccd, in vccd, and after it.
+Also: what is in flight per second (CC split into shell+shim and in-vccd, AR,
+other), and the recipes before the first kernel CC.
 The trace costs ~1-2 s on a 15 s build; commands that make runs without a shell
-(no metacharacters) are not seen.
+(no metacharacters) are not seen.  For where vccd's own CPU goes, see
+bench/vccd-sample.py.
 """
 import collections
+import os
 import re
 import statistics
 import sys
 
-KSRC = '/Users/johandahlin/dev/vroom/work/linux-pf/'
+KSRC = os.environ.get('VROOM_KSRC', '/Users/johandahlin/dev/vroom/work/linux-pf').rstrip('/') + '/'
 
 
 def load(out):
@@ -81,6 +85,27 @@ def main():
     if pre:
         print(f'\nCC/AS recipes matched to vccd jobs: {len(pre)}')
         print(f'  before vccd  {q(pre)}\n  in vccd      {q(comp)}\n  after vccd   {q(post)}')
+    # per second: what holds the job slots
+    st = 1000; m = int((end - t0) / st) + 1
+    pre_i, in_i = [], []
+    for x in T:
+        if x['kind'] in ('CC', 'AS') and x['tgt']:
+            j = own.get(KSRC + x['tgt'][:-2] + '.c') or own.get(KSRC + x['tgt'][:-2] + '.S')
+            if j:
+                pre_i.append((x['s'], j['s'])); in_i.append((j['s'], j['s'] + j['d']))
+    P, I = series(pre_i, t0, m, st), series(in_i, t0, m, st)
+    K = {a: series([(x['s'], x['e']) for x in T if x['kind'] == a], t0, m, st) for a in ('AR', 'other', 'HOSTCC')}
+    print('\nin flight per second:  cc:shell+shim  cc:in-vccd    AR  other  HOSTCC')
+    for i in range(m):
+        print(f'  {i:4d}               {P[i]:8.1f}  {I[i]:10.1f} {K["AR"][i]:5.1f} {K["other"][i]:6.1f} {K["HOSTCC"][i]:7.1f}')
+    kcc = [x['s'] for x in T if x['kind'] == 'CC' and x['tgt'] and not x['tgt'].startswith('scripts')]
+    if kcc:
+        f = min(kcc)
+        early = [x for x in T if x['s'] < f and x['kind'] != 'submake']
+        print(f'\nfirst kernel CC at {(f - t0) / 1e3:.2f} s; {len(early)} leaf recipes before it, longest:')
+        for x in sorted(early, key=lambda x: x['s'] - x['e'])[:10]:
+            lab = f"{x['kind']} {x['tgt']}" if x['tgt'] else x['cmd'][3:80]
+            print(f"  {(x['s'] - t0) / 1e3:5.2f} s {x['e'] - x['s']:6.0f} ms  {lab}")
     kk = collections.defaultdict(lambda: [0, 0.0])
     for x in V:
         kk[x['k']][0] += 1; kk[x['k']][1] += x['d']

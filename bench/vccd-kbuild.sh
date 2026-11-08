@@ -32,6 +32,6 @@ VCC_SOCK="$S/vccd.sock" VROOM_KSRC=${VROOM_KSRC:-$KSRC_DEFAULT} \
 	-- LD="$B/vld" \
 	$([ "${VCC_FIXDEP:-1}" = 0 ] || echo KBUILD_VCC_FIXDEP=1) "$@" || rc=$?
 kill -TERM $CP; sleep 0.3
-grep "^vccd:" "$OUT.vccd.log" | tail -1
+grep "^vccd:" "$OUT.vccd.log" | tail -4
 grep -c "fallback to clang" "$OUT.vccd.log" || true
 exit $rc

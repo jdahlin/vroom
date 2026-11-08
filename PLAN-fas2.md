@@ -627,6 +627,29 @@ ingen emulering. Samma image fungerar i en qemu-system-aarch64-gäst med `-accel
 - **Sammanslagning med main (diagnostik, _Complex, long double, … t.o.m. 8094aeb, sedan sanerare/fuzz t.o.m. f323896), 2026-11-08:** main@8094aeb bootade inte (ingen konsolutskrift alls). Bisekterat till 26c2d50 (flyttals-`va_arg`): varje variadisk funktion sparade v0–v7 i prologen även med `-mgeneral-regs-only`, så kärnans första `printk` rörde FP-register innan FP slagits på. Nu som clang: med `-mgeneral-regs-only` ingen v-sparyta, `__vr_offs` 0 och `__vr_top` = `__gr_top` (`cc_opts.general_regs_only`). Dessutom: deklarationscachens ögonblicksbilder bar med sig andra TU:ers `c->cases`/`c->span` (11 felaktiga "duplicate case value" i cbatch); `span` är nu en egen array i bilden (med platskodning), `cases` behålls per TU.
   - **Verifierat:** paritet 911/912, sema run 878/879, warn 879/879, layout 878/879, ctests 1708/1708, diag 63/63, cbatch 840/840 (samma stderr med och utan deklarationscache), vcc-obj 840/840, vas 30/30, var-cmp 416/416 + 8/8 + 40/40. Kallt bygge 13,9 s (last ~8), 877 av vcc, 0 till clang; Debian bootar till `running` (`results/boot-20261108-174855.log`). Efter andra sammanslagningen (f323896): samma siffror, fuzz-regress 4/4, `pp_open` skriver nu "1 error generated." även när huvudfilen har ett fatalt fel (diag 63/63); kallt bygge 15,3 s (last ~11), bootar (`results/boot-20261108-175726.log`).
 
+### Profil av kallt bygge på macOS, 2026-11-08 (efter Linux-sammanslagningen)
+- Rigg: `TSH_LOG=OUT.tsh bench/vccd-kbuild.sh OUT -j 14 SHELL=…/trace/sh` + `bench/kprof.py OUT`
+  (nu även jobbplatser per sekund och recepten före första CC); `sample <vccd> 25` +
+  `bench/vccd-sample.py` (ny) för vccd:s CPU per steg. vccd skriver vid avslut
+  huvudcachens och deklarationscachens räknare samt sin egen rusage.
+- **15,0 s** (last ~5): konfig 2,9 s (`--config`: allnoconfig + olddefconfig bygger conf/fixdep
+  från noll via vroomd) → 1,9 s till första CC (`conf --syncconfig` 0,39 s, dtc-värdverktygen
+  via vroomd/clang 100–270 ms st.) → kompileringsfas ~7 s → länk 0,7 s.
+- **CPU:** vccd 16,9 s user + 1,7 s sys. Resten av bygget (make, skal, shims) 14 s user +
+  **27 s sys**. Bladrecept: CC 2,7 + 4,5 s, AR 2,3 + 9,5 s; resten (~15 s) är de 432 makeprocesserna.
+- **Kompileringsfasen har två halvor:** först 7–9 TU:er samtidigt i vccd, sedan bestämmer
+  arkiven: upp till 6 AR-recept i luften medan kompileringarna sjunker till 2–3. Ett AR-recept
+  tar ~55 ms vägg (skal + `rm` + `var`-shim + printf), men bara 2 ms i vccd. `built-in.a`
+  kedjar uppåt i katalogträdet, alltså kritisk väg. Per CC: 13 ms (median) före vccd
+  (skal + shim), 34 ms i vccd (p90 94).
+- **vccd:s CPU** (59 k prov): förprocessning som parsern drar 43 %, parse + sema 36 %, fixdep 6 %,
+  emit 5,5 %, I/O-tråd 2 %, skrivning 2 %. Hetast: `rec_tok` 11 % (inspelning till
+  huvudcachen, även av uppspelade barnhuvuden), `pp_next` 9 %, `decl_specs`/`declarator` 4 % var.
+  Huvudcache: 40 790 träffar, 12 095 missar (11 069 inspelade, 43,7 MB), 548 MB uppspelat;
+  deklarationscache 845 återställningar.
+- **Hävstänger:** (1) skal och processer per recept: CC = skal + shim, AR = skal + `rm` + shim
+  (nästa steg); (2) konfigfasen (färdig `.config`); (3) inspelningen i huvudcachen.
+
 ### Felmeddelanden (clang-format)
 
 Status: `bench/vcc-diag.py` jämför vccs stderr med clangs (-fsyntax-only) på

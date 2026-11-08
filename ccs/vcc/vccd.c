@@ -49,6 +49,7 @@
 #include <sys/signalfd.h>
 #endif
 #include <sys/mman.h>
+#include <sys/resource.h>
 #include <sys/socket.h>
 #include <sys/stat.h>
 #include <sys/un.h>
@@ -58,6 +59,8 @@
 
 #include "../protocol.h"
 #include "caps.h"
+#include "ccsnap.h"
+#include "pp.h"
 #include "ppdriver.h"
 #include "fixdep.h"
 #include "ar.h"
@@ -677,6 +680,23 @@ static void print_counts(void)
 	fprintf(stderr, "vccd: %lu probes, %lu -E, %lu compiled by vcc, %lu fell back to clang, %lu forwarded in all, %lu spawned, %lu ar\n",
 		atomic_load(&n_probe), atomic_load(&n_pp), atomic_load(&n_cc), atomic_load(&n_fallback),
 		atomic_load(&n_fwd), atomic_load(&n_spawn), atomic_load(&n_ar));
+	{	/* the shared caches, as vpp --batch prints them */
+		char hs[512];
+		struct rusage ru;
+
+		pp_hc_stats(hs, sizeof(hs));
+		fprintf(stderr, "vccd: %s\n", hs);
+		dc_stats(hs, sizeof(hs));
+		fprintf(stderr, "vccd: %s\n", hs);
+		getrusage(RUSAGE_SELF, &ru);
+		fprintf(stderr, "vccd: cpu user %.2f s sys %.2f s, max rss %.0f MB\n",
+			ru.ru_utime.tv_sec + ru.ru_utime.tv_usec / 1e6, ru.ru_stime.tv_sec + ru.ru_stime.tv_usec / 1e6,
+#ifdef __APPLE__
+			ru.ru_maxrss / 1048576.0);
+#else
+			ru.ru_maxrss / 1024.0);
+#endif
+	}
 }
 
 static void *worker_main(void *arg)
