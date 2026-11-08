@@ -93,7 +93,12 @@ Existing gates that every change must keep green: `vcc-diff.py cmp`
 
 ## Tier 1: silent wrong code
 
-- [ ] **Branch range: no relaxation for b.cond/cbz/tbz/adr** [P].
+- [x] **Branch range: no relaxation for b.cond/cbz/tbz/adr** [P].  Done for
+  functions without inline asm (`r_relax` in emit.c: b.!cond .+8; b label,
+  iterated to a fixed point, only for functions over 1 MB); with inline asm,
+  and for `adr` to a label beyond 1 MB, an error instead of wrapped code
+  (relaxation there is still to do).  The emitter has no tbz.  Left: the
+  assembler's integer targets (`b.eq 0x100000000`), see the assembler section.
   `a64.h:129-140` mask the offset; `enc()` in `emit.c:1484`.  Out-of-range
   conditional branches must become an inverted branch over a `b`; `adr`
   beyond ±1 MB must become `adrp+add`; `tbz` (±32 KB) likewise.  Also assert

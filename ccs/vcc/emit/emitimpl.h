@@ -409,7 +409,7 @@ typedef struct rctx {
 
 /* a pending fixup on word k of an instruction */
 typedef struct pfix { uint8_t k, lbl; uint32_t type, ref; int64_t off; } pfix;
-typedef struct rpatch { uint32_t k, at; pfix f; } rpatch;	/* record k at word at */
+typedef struct rpatch { uint32_t k, at; pfix f; uint8_t lng; } rpatch;	/* record k at word at; lng: relaxed (r_relax) */
 typedef struct rlab { uint32_t ser, flags, frag, off, pend; } rlab;
 typedef struct rpend { uint32_t next, k, frag, off; uint8_t *p; } rpend;	/* a branch waiting for its label */
 

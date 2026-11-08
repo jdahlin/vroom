@@ -3,7 +3,6 @@
    "Branch range").  The bulk is 100k volatile increments, ~1.6 MB.  The
    functions are optnone: clang -O2 takes minutes on such a body, and inline
    asm padding does not work (clang does not relax branches around it). */
-/* vcc-xfail: Branch range: no relaxation for b.cond/cbz/tbz/adr */
 #include <stdio.h>
 
 volatile int v, w;

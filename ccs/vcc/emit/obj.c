@@ -380,6 +380,10 @@ static inline rlab *r_lab(rctx *R, uint32_t l)
 	return L;
 }
 
+/* label-relative ranges, in words: b.cond/cbz/cbnz imm19, adr 21 bits of bytes, b imm26 */
+#define BR19_MAX ((1 << 18) - 1)
+#define BR19_MIN (-(1 << 18))
+
 /* the branch record i at (frag, off, p) to placed label L */
 static bool r_branch(rctx *R, uint32_t fid, const ins *i, rlab *L, uint32_t frag, uint32_t off, uint8_t *p)
 {
@@ -387,6 +391,10 @@ static bool r_branch(rctx *R, uint32_t fid, const ins *i, rlab *L, uint32_t frag
 	pfix f;
 
 	if (L->frag == frag && !(L->off & 3) && !(off & 3)) {
+		int64_t d = ((int64_t)L->off - off) / 4;
+
+		if (i->op != I_B && (d < BR19_MIN || d > BR19_MAX))	/* not relaxed with inline asm in the function */
+			return r_fail(R, "function with inline asm too large: conditional branch or adr beyond 1 MB") == 0;
 		R->loff[i->label] = L->off / 4;
 		enc(i, w, &f, R->loff, off / 4);
 		memcpy(p, w, 4);
@@ -406,6 +414,84 @@ static bool r_branch(rctx *R, uint32_t fid, const ins *i, rlab *L, uint32_t frag
 		elf_fixup(R->o, frag, off, p, f.type, as_val(R->as, y, 0));
 	}
 	return true;
+}
+
+static inline bool is_cbr(unsigned op) { return op == I_BC || op == I_CBZ || op == I_CBNZ; }
+
+/* first rpatch with at >= pos (pt is sorted by at) */
+static uint32_t pt_lb(const rpatch *pt, uint32_t npt, uint32_t pos)
+{
+	uint32_t lo = 0, hi = npt;
+
+	while (lo < hi) {
+		uint32_t m = lo + (hi - lo) / 2;
+
+		if (pt[m].at < pos)
+			lo = m + 1;
+		else
+			hi = m;
+	}
+	return lo;
+}
+
+/*
+ * Branch relaxation for a function encoded in one block (r_code, no inline
+ * asm): a conditional branch whose label is beyond +-1 MB becomes the
+ * inverted branch over an unconditional one (b.!c .+8; b label), as LLVM's
+ * BranchRelaxation does.  Only functions over 1 MB get here.  Relaxing one
+ * branch moves the others, so this iterates until nothing more grows
+ * (branches only ever get longer, so it terminates).  Then the words in wb
+ * are spread out, and labels (loff) and records (pt) move with them.
+ * Returns the number of words added.
+ */
+static uint32_t r_relax(const ins *in, uint32_t nin, uint32_t *wb, uint32_t at, uint32_t *loff, rpatch *pt, uint32_t npt)
+{
+	static _Thread_local uint32_t *cum;	/* cum[j]: relaxed branches among pt[0..j) */
+	uint32_t nl = 0, s;
+	bool grew = true;
+
+	if (!cum)
+		cum = reserve((size_t)1 << 32);
+	while (grew) {
+		grew = false;
+		cum[0] = 0;
+		for (uint32_t j = 0; j < npt; j++)
+			cum[j + 1] = cum[j] + pt[j].lng;
+		for (uint32_t j = 0; j < npt; j++) {
+			const ins *i = &in[pt[j].k];
+			uint32_t t;
+			int64_t d;
+
+			if (pt[j].lng || !pt[j].f.lbl || !is_cbr(i->op))
+				continue;
+			t = loff[i->label];
+			d = (int64_t)t + cum[pt_lb(pt, npt, t)] - ((int64_t)pt[j].at + cum[j]);
+			if (d < BR19_MIN || d > BR19_MAX) {
+				pt[j].lng = 1;
+				grew = true;
+			}
+		}
+	}
+	nl = cum[npt];
+	if (!nl)
+		return 0;
+	/* spread the words: everything after a relaxed branch moves by the relaxed ones up to it */
+	for (uint32_t j = npt, end_ = at; j-- > 0; ) {
+		uint32_t b = pt[j].at;
+
+		if (!pt[j].lng)
+			continue;
+		s = cum[j + 1];
+		memmove(wb + b + 1 + s, wb + b + 1, (size_t)(end_ - b - 1) * 4);
+		wb[b + s - 1] = wb[b];
+		end_ = b;
+	}
+	for (uint32_t k = 0; k < nin; k++)
+		if (in[k].op == I_LABEL)
+			loff[in[k].label] += cum[pt_lb(pt, npt, loff[in[k].label])];
+	for (uint32_t j = 0; j < npt; j++)
+		pt[j].at += cum[j];
+	return nl;
 }
 
 static int r_code(rctx *R, const code_hdr *h)
@@ -447,16 +533,39 @@ static int r_code(rctx *R, const code_hdr *h)
 			if (pt[npt].f.type) {
 				pt[npt].k = k;
 				pt[npt].at = at;
+				pt[npt].lng = 0;
 				npt++;
 			}
 			at += n;
 		}
+		if (unlikely(at > BR19_MAX))	/* a label can be out of a conditional branch's reach */
+			at += r_relax(in, h->nin, wb, at, loff, pt, npt);
 		elf_code(o, frag);
 		base = elf_frag(o, frag)->size;
 		p = elf_grow(o, frag, (size_t)at * 4);
-		for (uint32_t j = 0; j < npt; j++)
-			if (pt[j].f.lbl)
-				enc(&in[pt[j].k], wb + pt[j].at, &f, loff, pt[j].at);
+		for (uint32_t j = 0; j < npt; j++) {
+			const ins *i = &in[pt[j].k];
+			uint32_t a = pt[j].at;
+			int64_t d;
+
+			if (!pt[j].f.lbl)
+				continue;
+			if (pt[j].lng) {
+				/* b.!cond / cbnz<->cbz over the next word (the record was encoded with offset 0) */
+				if (i->op == I_BC && i->cond >= 14)
+					return r_fail(R, "internal: relaxing an unconditional b.al");
+				wb[a] = (i->op == I_BC ? wb[a] ^ 1 : wb[a] ^ 1u << 24) | 2u << 5;
+				wb[a + 1] = a64_b(((int64_t)loff[i->label] - (a + 1)) * 4);
+				continue;
+			}
+			d = (int64_t)loff[i->label] - a;
+			if (is_cbr(i->op) ? d < BR19_MIN || d > BR19_MAX :
+			    i->op == I_ADR ? d < BR19_MIN || d > BR19_MAX :
+			    i->op == I_B ? d < -(1 << 25) || d >= 1 << 25 : false)
+				return r_fail(R, i->op == I_ADR ? "function too large: adr to a label beyond 1 MB" :
+							   "function too large: branch out of range");
+			enc(i, wb + a, &f, loff, a);
+		}
 		memcpy(p, wb, (size_t)at * 4);
 		for (uint32_t j = 0; j < npt; j++) {
 			const pfix *g = &pt[j].f;
