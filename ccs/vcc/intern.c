@@ -13,6 +13,17 @@
 #define MAX_ENT (NSLOT / 4 * 3)
 _Static_assert(MAX_ENT <= (1u << VINTERN_ID_BITS), "ids must fit the id-indexed tables");
 
+#define CL8(n) ((n) < 0 ? 0 : (n) > 8 ? 8 : (n))
+#define BM(n) (((1ull << (4 * CL8(n))) << (4 * CL8(n))) - 1)	/* the low n (0..8) bytes */
+#define WM(n) { BM(n), BM((n) - 8) }
+const uint64_t vintern_wmask[17][2] = {
+	WM(0), WM(1), WM(2), WM(3), WM(4), WM(5), WM(6), WM(7), WM(8),
+	WM(9), WM(10), WM(11), WM(12), WM(13), WM(14), WM(15), WM(16),
+};
+#undef WM
+#undef BM
+#undef CL8
+
 static _Atomic uint64_t *slots;
 vident *vintern_ents;
 static _Atomic uint32_t nent = 1;	/* id 0 = none */

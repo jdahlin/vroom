@@ -101,6 +101,18 @@ extern unsigned long vlex_stat[512];
 #define VI_STAT(i) ((void)0)
 #endif
 
+/* vintern_wmask[len]: the bytes of the first 16 kept for len <= 16 */
+extern const uint64_t vintern_wmask[17][2];
+
+/* vintern_words for len <= 16: two loads and a mask from a table */
+static inline __attribute__((always_inline)) void vintern_words16(const char *s, size_t len, uint64_t *w0, uint64_t *w1)
+{
+	memcpy(w0, s, 8);
+	memcpy(w1, s + 8, 8);
+	*w0 &= vintern_wmask[len][0];
+	*w1 &= vintern_wmask[len][1];
+}
+
 /* the first 16 bytes of s, zero past len (s readable to s[16]) */
 static inline __attribute__((always_inline)) void vintern_words(const char *s, size_t len, uint64_t *w0, uint64_t *w1)
 {
@@ -123,13 +135,14 @@ static inline __attribute__((always_inline)) uint32_t vintern_fast(vintern_cache
 		VI_STAT(2);
 		return vintern(s, len, vintern_hash(s, len));
 	}
-	vintern_words(s, len, &w0, &w1);
+	vintern_words16(s, len, &w0, &w1);
 	h = __crc32cd(__crc32cd((uint32_t)len, w0), w1) * 0x9E3779B1u;
 	{
 		__typeof__(&c->e[0]) e = &c->e[h & ((1u << VIC_BITS) - 1)];
 
 		VI_STAT(0);
-		if (e->hash == h && e->w0 == w0 && e->w1 == w1)
+		/* identifiers hold no NUL: the zero-padded words determine len */
+		if (((e->w0 ^ w0) | (e->w1 ^ w1)) == 0)
 			return e->id;
 		VI_STAT(1);
 		e->id = vintern(s, len, h);
