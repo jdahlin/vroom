@@ -933,9 +933,12 @@ static void vpush(cc *c, vec *v, uint32_t x)
 
 static uint32_t vfreeze(cc *c, const vec *v)
 {
-	uint32_t at = c->nlist;
+	uint32_t at = c->nlist, *d = &c->lists[at];
 
-	memcpy(&c->lists[at], v->v, v->n * sizeof(uint32_t));
+	/* 16-byte blocks, inline: v->v has room for n rounded up to 16 (inl[16], doubling),
+	   and c->lists past nlist is free (reserved) */
+	for (uint32_t i = 0; i < v->n; i += 4)
+		memcpy(d + i, v->v + i, 16);
 	c->nlist += v->n;
 	return at;
 }
@@ -2467,7 +2470,7 @@ static int find_member(cc *c, uint32_t ti, uint32_t name, uint32_t *path, int de
 	return -1;
 }
 
-static uint32_t member(cc *c, uint32_t base, uint32_t name, uint32_t loc)
+static __attribute__((noinline)) uint32_t member_slow(cc *c, uint32_t base, uint32_t name, uint32_t loc)
 {
 	qty bt = N(base)->ty;
 	uint32_t path[16], ti;
@@ -2501,6 +2504,34 @@ static uint32_t member(cc *c, uint32_t base, uint32_t name, uint32_t loc)
 			ti = T(c, bt)->aux;
 	}
 	return base;
+}
+
+/* base.name: a direct member found before any anonymous one is the common case */
+static uint32_t member(cc *c, uint32_t base, uint32_t name, uint32_t loc)
+{
+	qty bt = N(base)->ty;
+	const ctype *t = T(c, bt);
+
+	if (likely(t->kind == TY_STRUCT || t->kind == TY_UNION) && likely(c->tags[t->aux].flags & RF_COMPLETE)) {
+		const tag *r = &c->tags[t->aux];
+
+		for (uint32_t i = 0; i < r->nfield; i++) {
+			const field *f = &r->f[i];
+
+			if (f->name == name) {
+				uint32_t m = mk(c, N_MEMBER, qualify(c, f->ty, QQ(bt)), loc);
+
+				N(m)->a = base;
+				N(m)->b = t->aux;
+				N(m)->c = i;
+				N(m)->flags = (uint8_t)((N(base)->flags & NF_LVALUE) | (f->bitfield ? NF_BITFIELD : 0));
+				return m;
+			}
+			if (!f->name && !f->bitfield && is_record(c, f->ty))
+				break;	/* the name may be in an anonymous member: full search */
+		}
+	}
+	return member_slow(c, base, name, loc);
 }
 
 static uint32_t deref(cc *c, uint32_t p, uint32_t loc)
