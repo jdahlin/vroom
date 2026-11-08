@@ -12,6 +12,8 @@ VPRIV int treg(ecx *e)
 				e->usedcs |= 1u << tempregs[i];
 			return tempregs[i];
 		}
+	if (e->nlr || (e->inlfree && e->inlfree < INLINE_FREE_SAFE))
+		_longjmp(e->bail, 2);	/* emit_function tries again more carefully */
 	{
 		const fnctx *f = e->f;
 
@@ -155,6 +157,8 @@ VPRIV int lbase(ecx *e, const lval *l, int64_t *off, int size)
 	case L_REG:
 		*off = l->off;
 		return l->r;
+	case L_VREG:
+		efatal(e, e->curloc, "internal: memory access to a register variable");
 	default:
 		addr_of_ref(e, R_X16, l->ref, l->off);
 		*off = 0;
@@ -252,6 +256,8 @@ VPRIV val laddr(ecx *e, lval *l)
 			opi(e, I_ADDI, 1, l->r, l->r, l->off);
 		l->off = 0;
 		return vreg(l->r);
+	case L_VREG:
+		efatal(e, e->curloc, "internal: address of a register variable");
 	default:
 		r = treg(e);
 		mov(e, 1, r, l->r);

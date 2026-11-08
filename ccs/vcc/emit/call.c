@@ -371,8 +371,9 @@ VPRIV bool can_inline(ecx *e, uint32_t s)
 	return true;
 }
 
-/* temporaries an inlined call leaves free when it keeps params and its result in registers */
-#define INLINE_FREE 8
+/* temporaries an inlined call leaves free when it keeps params and its result in registers:
+   e->inlfree, INLINE_FREE_FAST first, INLINE_FREE_SAFE when generated again (out of registers) */
+#define INLINE_FREE (e->inlfree ? e->inlfree : INLINE_FREE_SAFE)
 
 /* an integer or pointer that fits one register (what B_REG and retreg hold) */
 static bool reg_scalar(ecx *e, qty t)
@@ -589,7 +590,8 @@ VPRIV val gen_call(ecx *e, uint32_t n)
 		args[i].t = N(an)->ty;
 		args[i].slot = 1;
 		/* many arguments: keep the registers for evaluating the rest */
-		if (__builtin_popcount(e->live) > NTEMP / 2 && (args[i].v.k == V_REG || args[i].v.k == V_REG2))
+		if (__builtin_popcount(e->live & ~e->resv) > (NTEMP - __builtin_popcount(e->resv)) / 2 &&
+		    (args[i].v.k == V_REG || args[i].v.k == V_REG2))
 			park(e, &args[i]);
 	}
 	if (inl)

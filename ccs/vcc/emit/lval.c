@@ -218,7 +218,7 @@ VPRIV val load(ecx *e, lval *l, qty t)
 		return laddr(e, l);
 	if (is_flt(c, t) && !is_ld(c, t))
 		fpk(e, t);	/* bits, zero-extended (below: not signed) */
-	if (l->k == L_GLOBREG) {
+	if (l->k == L_GLOBREG || l->k == L_VREG) {
 		r = treg(e);
 		mov(e, 1, r, l->r);
 		return vreg(r);
@@ -285,6 +285,20 @@ VPRIV void store(ecx *e, lval *l, qty t, val *v)
 		int r = toreg(e, v);
 
 		mov(e, 1, l->r, r);
+		return;
+	}
+	if (l->k == L_VREG) {
+		/* the register holds what a load from a slot would give */
+		if (v->k == V_CONST) {
+			movi(e, 1, l->r, (int64_t)em_trunc_to(c, v->i, t));
+		} else {
+			int r = toreg(e, v);
+
+			if (size < 8)
+				extend(e, l->r, r, (int)size, is_signed(c, t));
+			else
+				mov(e, 1, l->r, r);
+		}
 		return;
 	}
 	if (l->bf && l->bitoff + l->width > 64) {

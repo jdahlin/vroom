@@ -9,7 +9,21 @@ typedef struct pre {
 	uint32_t fn;		/* the function being walked */
 	uint32_t nodes;		/* nodes seen (inlining size) */
 	int cdepth;		/* cleanup variables in scope */
+	int loopd;		/* loops around the node */
+	uint32_t llo, lhi;	/* local syms seen (lspan) */
 } pre;
+
+/* a local is read or written here: count it for register allocation (8x per loop level) */
+static void note_local(pre *P, uint32_t s)
+{
+	uint32_t w = 1u << (3 * (P->loopd < 4 ? P->loopd : 4)), u = P->E->luse[s] + w;
+
+	P->E->luse[s] = (uint16_t)(u > 65535 ? 65535 : u);
+	if (s < P->llo)
+		P->llo = s;
+	if (s > P->lhi)
+		P->lhi = s;
+}
 
 /* a[CONST], a a variable */
 VPRIV bool is_aconst(cc *c, uint32_t n)
@@ -35,7 +49,7 @@ VPRIV uint32_t aconst_idx(cc *c, uint32_t n)
 	return (uint32_t)c->ipool[N(b)->a];
 }
 
-static void mark_written(pre *P, uint32_t n)
+static void mark_written(pre *P, uint32_t n, bool addr)
 {
 	cc *c = P->c;
 
@@ -55,8 +69,11 @@ static void mark_written(pre *P, uint32_t n)
 			break;
 		}
 	}
-	if (N(n)->op == N_VAR)
+	if (N(n)->op == N_VAR) {
 		P->E->sflags[N(n)->a] |= SA_WRITTEN | SA_AESC, P->E->ffacts[N(n)->a] |= FF_BAD;
+		if (addr && is_local_var(P->c, N(n)->a))
+			P->E->lnoreg[N(n)->a] = 1;
+	}
 	else if (N(n)->op == N_COMPLIT)
 		P->E->sflags[N(n)->b] |= SA_WRITTEN;
 }
@@ -131,10 +148,14 @@ VPRIV void ensure_walked(emitter *E, cc *c, uint32_t s)
 		return;
 	st = 0;
 	if (atomic_compare_exchange_strong(&E->walked[s], &st, 1)) {
-		pre P = { E, c, s, 0, 0 };
+		pre P = { E, c, s, 0, 0, 0, UINT32_MAX, 0 };
 		double t = E->stats ? now() : 0;
+		const node *b = &c->nodes[c->syms[s].body];
 
+		for (uint32_t i = 0; i < b->aux; i++)	/* params, used or not */
+			note_local(&P, c->lists[b->a + i]);
 		walk(&P, c->syms[s].body);
+		E->lspan[2 * s] = P.llo, E->lspan[2 * s + 1] = P.lhi;
 		E->fnsize[s] = P.nodes > 65535 ? 65535 : (uint16_t)P.nodes;
 		if (E->stats)
 			E->walk_ns += (uint64_t)((now() - t) * 1e9), E->nwalk++;
@@ -186,6 +207,7 @@ static int walk(pre *P, uint32_t n)
 		/* locals belong to this walk alone (globals' flags are shared between threads) */
 		if (is_local_var(c, x->a)) {
 			P->E->sflags[x->a] |= SA_USED;
+			note_local(P, x->a);
 		} else {
 			const sym *y = &c->syms[x->a];
 
@@ -205,15 +227,15 @@ static int walk(pre *P, uint32_t n)
 		break;
 	case N_CAST:
 		if (x->aux == CK_DECAY)
-			mark_written(P, x->a);
+			mark_written(P, x->a, true);
 		lab = walk(P, x->a);
 		break;
 	case N_ADDR:
-		mark_written(P, x->a);
+		mark_written(P, x->a, true);
 		lab = walk(P, x->a);
 		break;
 	case N_PREINC: case N_PREDEC: case N_POSTINC: case N_POSTDEC:
-		mark_written(P, x->a);
+		mark_written(P, x->a, false);
 		lab = walk(P, x->a);
 		break;
 	case N_ASSIGN:
@@ -222,7 +244,7 @@ static int walk(pre *P, uint32_t n)
 		else if (!x->aux && is_aconst(c, x->a))
 			P->E->sflags[N(N(N(x->a)->a)->a)->a] |= SA_WRITTEN;
 		else
-			mark_written(P, x->a);
+			mark_written(P, x->a, false);
 		lab = walk(P, x->a) | walk(P, x->b);
 		break;
 	case N_INDEX:
@@ -250,7 +272,7 @@ static int walk(pre *P, uint32_t n)
 		for (uint32_t i = 0; i < x->c; i++)
 			lab |= walk(P, c->lists[x->b + i]);
 		if (x->op == N_BUILTIN && (x->aux == BI_VA_START || x->aux == BI_VA_COPY) && x->c)
-			mark_written(P, c->lists[x->b]);
+			mark_written(P, c->lists[x->b], true);
 		break;
 	case N_STMTEXPR:
 		lab = walk(P, x->a);
@@ -286,6 +308,11 @@ static int walk(pre *P, uint32_t n)
 		lab = walk(P, x->b);
 		if (x->b && y->kind == S_VAR)
 			note_fwrite(P, x->a, x->b);
+		if (is_local_var(c, x->a)) {
+			note_local(P, x->a);
+			if (x->b && (N(x->b)->op == N_INIT || N(x->b)->op == N_ZERO || N(x->b)->op == N_STR))
+				P->E->lnoreg[x->a] = 1;	/* gen_init_local works on memory */
+		}
 		if (sym_attrs(c, x->a)->cleanup || (y->kind == S_VAR && (T(c, y->ty)->flags & TF_VLA)))
 			P->cdepth++;
 		/* a __used static local is emitted with its function, referenced or not */
@@ -299,12 +326,19 @@ static int walk(pre *P, uint32_t n)
 		lab = walk(P, x->a) | walk(P, x->b) | walk(P, x->c);
 		break;
 	/* in the order the code is generated: LR_BACK means a jump back */
-	case N_WHILE: case N_SWITCH:
+	case N_SWITCH:
 		lab = walk(P, x->a) | walk(P, x->b);
 		break;
+	case N_WHILE:
+		P->loopd++;
+		lab = walk(P, x->a) | walk(P, x->b);
+		P->loopd--;
+		break;
 	case N_DO:
+		P->loopd++;
 		lab = walk(P, x->b);
 		lab |= walk(P, x->a);
+		P->loopd--;
 		break;
 	case N_FOR: {
 		int cd = P->cdepth;
@@ -316,9 +350,11 @@ static int walk(pre *P, uint32_t n)
 		} else {
 			lab |= walk(P, x->a);
 		}
+		P->loopd++;
 		lab |= walk(P, x->b);
 		lab |= walk(P, c->lists[x->c + 1]);
 		lab |= walk(P, c->lists[x->c]);
+		P->loopd--;
 		P->cdepth = cd;
 		break;
 	}
@@ -342,9 +378,12 @@ static int walk(pre *P, uint32_t n)
 
 		for (uint32_t i = 0; i < a->nout + a->nin; i++) {
 			if (i < a->nout)
-				mark_written(P, a->ops[i].expr);
+				mark_written(P, a->ops[i].expr, true);
 			else if (strpbrk(c->strs[a->ops[i].constraint - 1].s, "mQo"))
-				mark_written(P, a->ops[i].expr);
+				mark_written(P, a->ops[i].expr, true);
+			else if (strpbrk(c->strs[a->ops[i].constraint - 1].s, "gVX<>") && N(a->ops[i].expr)->op == N_VAR &&
+				 is_local_var(c, N(a->ops[i].expr)->a))
+				P->E->lnoreg[N(a->ops[i].expr)->a] = 1;	/* may become a memory operand */
 			lab |= walk(P, a->ops[i].expr);
 		}
 		for (uint32_t k = 0; k < a->nlabel; k++)

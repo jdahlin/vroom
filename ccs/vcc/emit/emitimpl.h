@@ -19,11 +19,16 @@
  *     return the same constant is that constant to the caller;
  *   - lazy emission: static functions and objects are emitted only when
  *     emitted code or data refers to them;
- *   - locals live in stack slots; expression temporaries in x9-x15 and
+ *   - the emitted function's most used scalar locals and params whose
+ *     address is never needed (prepass: luse, lnoreg) live in callee-saved
+ *     registers x28 down (B_LREG, L_VREG; VCC_LREGS, default 6), the rest
+ *     in stack slots; expression temporaries in x9-x15 and the remaining
  *     x19-x28.  An inlined call's params that its body never writes keep
  *     the argument's register (B_REG), and its result comes back in a
- *     register (fnctx.retreg), not through slots;
- *   - a b to a label right after it is dropped (finish_function).
+ *     register (fnctx.retreg), not through slots.  Out of temporaries, a
+ *     function is generated again without either;
+ *   - a b to a label right after it is dropped, and opt.c removes the
+ *     register copies this leaves (liveness, copy propagation).
  *
  * The kernel also relies on what clang -O2 folds beyond that: a
  * BUILD_BUG_ON inside a plain static or inline function that only folds
@@ -199,6 +204,11 @@ typedef struct emitter {
 	_Atomic uint8_t *extref;	/* per sym: referenced (for .weak of undefined syms) */
 	_Atomic uint8_t *walked;
 	uint16_t *fnsize;		/* per function: AST nodes (prepass) */
+	uint16_t *luse;			/* per local: uses weighted by loop depth (prepass) */
+	uint8_t *lnoreg;		/* per local: needs memory (address taken, asm operand, {} init) */
+	uint32_t *lspan;		/* per function: [2s] lowest, [2s+1] highest local sym seen */
+	int nlreg;			/* locals given callee-saved registers per function (VCC_LREGS) */
+	bool noopt;			/* VCC_NOOPT: no opt.c clean-ups (to compare) */
 	i128 *cwval;		/* per SA_CWRITE variable: the one constant it is assigned */	/* per function: prepass state (0 no, 1 running, 2 done) */
 	uint8_t *sflags;		/* SA_* per sym */
 	uint8_t *ffacts;		/* FF_* per floating local: what every write stores */
@@ -238,7 +248,9 @@ typedef struct val {
 enum { V_NONE, V_CONST, V_ADDR, V_REG, V_REG2 };
 
 /* per-sym binding inside a function instance */
-enum { B_NONE, B_SLOT, B_CONST, B_INDIRECT, B_REG };	/* B_REG: an inlined call's read-only param in temporary v.r */
+enum { B_NONE, B_SLOT, B_CONST, B_INDIRECT, B_REG, B_LREG };
+/* B_REG: an inlined call's read-only param in temporary v.r; B_LREG: a local or param of the
+   emitted function that lives in callee-saved register v.r for the whole function */
 
 /* per user label (prepass): referenced, defined so far, target of a jump back (or &&) */
 enum { LR_REF = 1, LR_DEF = 2, LR_BACK = 4 };
@@ -287,6 +299,10 @@ typedef struct fnctx {		/* one function instance: the emitted function or an inl
 #define MAXLOOP 256
 #define MAXCLEAN 256
 #define NTEMP 17
+#define MAXLREG 10	/* x19-x28 */
+#define LREGS_DEFAULT 6	/* the rest stay expression temporaries */
+#define INLINE_FREE_FAST 5
+#define INLINE_FREE_SAFE 8
 
 typedef struct ecx {
 	emitter *E;
@@ -333,6 +349,11 @@ typedef struct ecx {
 	int nsrn;		/* classify: next SIMD/FP argument register */
 	/* temporaries */
 	uint32_t live;		/* bit i: tempregs[i] in use */
+	uint32_t resv;		/* ... of those, held by B_LREG variables for the whole function */
+	int inlfree;		/* free temporaries an inlined call keeps (0: INLINE_FREE_SAFE) */
+	int nlr;		/* B_LREG candidates of the emitted function: sym, register */
+	uint32_t lrsym[MAXLREG];
+	uint8_t lrreg[MAXLREG];
 	uint32_t usedcs;	/* callee-saved registers used (bit = x number) */
 	/* control */
 	bool reach;
@@ -418,7 +439,7 @@ typedef struct rpend { uint32_t next, k, frag, off; uint8_t *p; } rpend;	/* a br
 
 /* ---------------- lvalues ---------------- */
 
-enum { L_FRAME, L_SYM, L_REG, L_GLOBREG };
+enum { L_FRAME, L_SYM, L_REG, L_GLOBREG, L_VREG };	/* L_VREG: a B_LREG variable, value in r (no address) */
 
 typedef struct lval {
 	uint8_t k;
@@ -589,6 +610,9 @@ VPRIV val load(ecx *e, lval *l, qty t);
 VPRIV void store(ecx *e, lval *l, qty t, val *v);
 /* arith.c */
 VPRIV void extend(ecx *e, int rd, int rs, int from, bool sgn);
+VPRIV int lreg_of(ecx *e, uint32_t s);
+VPRIV void opt_function(ecx *e);
+VPRIV lval bind_lreg(ecx *e, uint32_t s);
 VPRIV val fold_int_bin(ecx *e, int op, qty ot, qty rt, i128 l, i128 r, bool *ok);
 VPRIV bool em_is_cmp(int op);
 VPRIV int emit_cmp(ecx *e, int op, int x, bool sg, val *a, val *b);

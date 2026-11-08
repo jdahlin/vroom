@@ -638,7 +638,10 @@ static void gen_decl(ecx *e, const node *x)
 		{
 			lval l = { .k = L_FRAME, .align = sym_align(c, s) };
 
-			l.off = bind_slot(e, s);
+			if (lreg_of(e, s) >= 0)
+				l = bind_lreg(e, s);
+			else
+				l.off = bind_slot(e, s);
 			kv_track(e, s, &v);
 			store(e, &l, y->ty, &v);
 			val_free(e, &v);
@@ -647,7 +650,10 @@ static void gen_decl(ecx *e, const node *x)
 		lval l = { .k = L_FRAME, .align = sym_align(c, s) };
 		int rr = regvar_reg(c, s);
 
-		l.off = bind_slot(e, s);
+		if (lreg_of(e, s) >= 0)
+			l = bind_lreg(e, s);
+		else
+			l.off = bind_slot(e, s);
 		if (rr >= 0)
 			binding(e, s)->reg = (uint8_t)rr;
 		if (x->b)
