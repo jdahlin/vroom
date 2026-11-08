@@ -4179,12 +4179,13 @@ static void bi_init(void)
 	}
 }
 
-/* a TU's tables, kept by the thread from one pp_open to the next (pp_close) */
-static _Thread_local vmreg ppr[8];
+/* a TU's tables, reused from one TU to the next (pp_open takes a set, pp_close gives it back) */
+static vmpool pppool = VMPOOL_INIT(8);
+static _Thread_local vmreg *ppr;
 
 pp *pp_open(const pp_opts *o)
 {
-	pp *p = vmreg_get(&ppr[0], sizeof(pp), "pp");
+	pp *p = vmreg_get(&(ppr = vmpool_take(&pppool))[0], sizeof(pp), "pp");
 	const vlex_file *mf;
 	size_t n = strlen(o->predef);
 	char *src;
@@ -4478,4 +4479,6 @@ void pp_close(pp *p)
 		munmap(p->rec.cp, (HC_MAXCP + 1) * sizeof(cprov));
 	}
 	vmreg_put(&ppr[0], sizeof(pp));
+	vmpool_give(&pppool, ppr);
+	ppr = NULL;
 }

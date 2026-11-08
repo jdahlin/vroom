@@ -30,8 +30,9 @@
 #include "ccsnap.h"
 #include "arena.h"
 
-/* the per-TU tables, mapped once per thread (cc_init / cc_free) */
-static _Thread_local vmreg ccr[16];
+/* the per-TU tables, mapped once and reused (cc_init takes a set, cc_free gives it back) */
+static vmpool ccpool = VMPOOL_INIT(16);
+static _Thread_local vmreg *ccr;
 
 static void *halloc(cc *c, size_t n)
 {
@@ -6554,6 +6555,7 @@ static void cc_init(cc *c, pp *p, const cc_opts *o)
 	memset(c, 0, sizeof(*c));
 	c->p = p;
 	c->o = o;
+	ccr = vmpool_take(&ccpool);
 	c->ty = vmreg_get(&ccr[0], (size_t)1 << 30, "cc.ty");
 	c->params = vmreg_get(&ccr[1], (size_t)1 << 28, "cc.params");
 	c->tags = vmreg_get(&ccr[2], (size_t)1 << 28, "cc.tags");
@@ -6667,6 +6669,8 @@ static void cc_free(cc *c)
 	vmreg_put(&ccr[14], USED(c->ntlasm, c->tlasm));
 	vmreg_put(&ccr[15], (size_t)(c->hp - c->heap) + 64);
 #undef USED
+	vmpool_give(&ccpool, ccr);
+	ccr = NULL;
 }
 
 static void init_tables(void)

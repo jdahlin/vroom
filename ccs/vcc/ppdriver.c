@@ -34,30 +34,46 @@
 #include "as.h"
 #include "elf.h"
 #include "ppdata-predef.inc"
+#include "arena.h"
 
 typedef struct buf {
 	char *p;
 	size_t n, cap;
+	vmreg *r;	/* the first 16 MB come from this per-thread region (bfree puts it back) */
 } buf;
+
+#define BUF_REG (1u << 24)
+static vmpool bufpool = VMPOOL_INIT(4);
+static _Thread_local vmreg *bufr;	/* this job's (ppd_run) */
 
 static void bput(buf *b, const char *s, size_t n)
 {
 	if (b->n + n + 256 > b->cap) {
-		size_t nc = b->cap ? b->cap * 2 : 1u << 24;
+		size_t nc = b->cap ? b->cap * 2 : BUF_REG;
 		char *np;
 
 		while (nc < b->n + n + 256)
 			nc *= 2;
+		if (!b->cap && b->r && nc == BUF_REG) {
+			b->p = vmreg_get(b->r, BUF_REG, "ppdriver.buf");
+			b->cap = BUF_REG;
+			goto put;
+		}
 		np = mmap(NULL, nc, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANON, -1, 0);
 		if (np == MAP_FAILED)
 			abort();
 		if (b->p) {
 			memcpy(np, b->p, b->n);
-			munmap(b->p, b->cap);
+			if (b->r)
+				vmreg_put(b->r, b->n);
+			else
+				munmap(b->p, b->cap);
 		}
+		b->r = NULL;
 		b->p = np;
 		b->cap = nc;
 	}
+put:
 	memcpy(b->p + b->n, s, n);
 	b->n += n;
 }
@@ -210,7 +226,9 @@ static int cmp_toks(const vlex_file *pa, const vlex_file *pb, char *ba, char *bb
 
 static void bfree(buf *b)
 {
-	if (b->p)
+	if (b->p && b->r)
+		vmreg_put(b->r, b->n + 256);
+	else if (b->p)
 		munmap(b->p, b->cap);
 	b->p = NULL;
 	b->n = b->cap = 0;
@@ -268,7 +286,7 @@ static int write_deps(const pp *p, const char *cwd, const char *depfile, const c
 {
 	static _Thread_local const char *names[1 << 16];
 	size_t n = pp_files(p, names, sizeof(names) / sizeof(names[0]));
-	buf d = { 0 };
+	buf d = { .r = &bufr[3] };
 	int r;
 
 	bstr(&d, target);
@@ -299,21 +317,54 @@ static unsigned long long nsnow(void)
 	return (unsigned long long)ts.tv_sec * 1000000000ull + (unsigned long long)ts.tv_nsec;
 }
 
-/* per-thread object state: assembler, ELF writer, serialised output */
+/*
+ * a job's object state: assembler, ELF writer, serialised output; from a
+ * process-wide pool, so it outlives threads (vpp --batch starts some per pass)
+ */
 static _Thread_local As *tl_as;
 static _Thread_local ElfObj *tl_obj;
 static _Thread_local uint8_t *tl_objbuf;
 #define OBJBUF_CAP ((size_t)1 << 32)
 
+static struct objst { As *as; ElfObj *obj; uint8_t *buf; struct objst *next; } *obj_free;
+static _Thread_local struct objst *tl_os;
+static pthread_mutex_t obj_mu = PTHREAD_MUTEX_INITIALIZER;
+
 static void obj_state(void)
 {
-	if (tl_as)
+	struct objst *s;
+
+	if (tl_os)
 		return;
-	tl_as = as_new();
-	tl_obj = elf_new();
-	tl_objbuf = mmap(NULL, OBJBUF_CAP, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANON | MAP_NORESERVE, -1, 0);
-	if (tl_objbuf == MAP_FAILED)
-		abort();
+	pthread_mutex_lock(&obj_mu);
+	s = obj_free;
+	if (s)
+		obj_free = s->next;
+	pthread_mutex_unlock(&obj_mu);
+	if (!s) {
+		s = calloc(1, sizeof(*s));
+		s->as = as_new();
+		s->obj = elf_new();
+		s->buf = mmap(NULL, OBJBUF_CAP, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANON | MAP_NORESERVE, -1, 0);
+		if (s->buf == MAP_FAILED)
+			abort();
+	}
+	tl_os = s;
+	tl_as = s->as, tl_obj = s->obj, tl_objbuf = s->buf;
+}
+
+static void obj_release(void)
+{
+	struct objst *s = tl_os;
+
+	if (!s)
+		return;
+	tl_os = NULL;
+	tl_as = NULL, tl_obj = NULL, tl_objbuf = NULL;
+	pthread_mutex_lock(&obj_mu);
+	s->next = obj_free;
+	obj_free = s;
+	pthread_mutex_unlock(&obj_mu);
 }
 
 /* lay out tl_obj and write it to out */
@@ -358,7 +409,8 @@ int ppd_run(int argc, char **argv, const ppd_env *env)
 	int errfd = env->errfd, status = 0, md = 0;
 	char pmapbuf[4096];
 	jmp_buf jb;
-	buf pre = { 0 }, cmdl = { 0 }, incl = { 0 }, o = { 0 };
+	vmreg *br = bufr = vmpool_take(&bufpool);
+	buf pre = { .r = &br[0] }, cmdl = { .r = &br[1] }, incl = { .r = &br[2] }, o = { 0 };
 	int darwin = 1, nostdinc = 0, asm_mode = 0, undef = 0;
 	int opt = 2, os = 0, pie = 0, pic = 0, freestanding = 0, cfi = 0, strict_align = 0, tiny = 0;
 	pp_opts po = { 0 };
@@ -431,7 +483,8 @@ int ppd_run(int argc, char **argv, const ppd_env *env)
 	(void)md;
 	if (!main_file) {
 		dprintf(errfd, "vcc: error: no input file\n");
-		return 2;
+		status = 2;
+		goto out;
 	}
 	if (objmode) {
 		obj_state();
@@ -642,5 +695,8 @@ out:
 	bfree(&pre);
 	bfree(&cmdl);
 	bfree(&incl);
+	vmpool_give(&bufpool, br);
+	bufr = NULL;
+	obj_release();
 	return status;
 }

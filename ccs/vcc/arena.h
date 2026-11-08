@@ -1,23 +1,30 @@
 /*
- * vmreg: anonymous regions kept by a thread from one compile job to the next.
+ * vmreg: anonymous regions kept from one compile job to the next.
  *
  * A job used to mmap its tables (MAP_NORESERVE, gigabytes of address space)
  * and munmap them at the end: two syscalls per table and a page fault for
- * every page it touched, every job.  A vmreg is mapped once per thread and
- * handed back with vmreg_put, which zeroes the bytes the job may have written
- * (memset of dirty pages: ~0.15 us per 16 KB page against ~1 us for a fault),
- * so the next job on the thread starts on zero, already-faulted memory.
+ * every page it touched, every job.  A vmreg is mapped once and handed back
+ * with vmreg_put, which zeroes the bytes the job may have written (memset of
+ * dirty pages: ~0.15 us per 16 KB page against ~1 us for a fault), so the
+ * next job starts on zero, already-faulted memory.
  *
- *   static _Thread_local vmreg r;
- *   char *p = vmreg_get(&r, n, "name");	// >= n bytes, all zero
+ * The regions of one job come as a set from a process-wide pool (one mutex
+ * operation per job), so they outlive the thread that used them (vpp --batch
+ * starts threads per pass) and there are only as many sets as jobs that ran
+ * at the same time:
+ *
+ *   static vmpool pool = VMPOOL_INIT(3);
+ *   vmreg *r = vmpool_take(&pool);
+ *   char *p = vmreg_get(&r[0], n, "name");	// >= n bytes, all zero
  *   ...
- *   vmreg_put(&r, used);			// bytes [0, used) may be dirty
- *   vmreg_put(&r, VMREG_SCRATCH);		// contents need not be zero next time
+ *   vmreg_put(&r[0], used);			// bytes [0, used) may be dirty
+ *   vmreg_put(&r[1], VMREG_SCRATCH);		// contents need not be zero next time
+ *   vmpool_give(&pool, r);
  *
  * A scratch region is one the code always writes before it reads (stacks,
  * per-function buffers): it is handed back as is.  Beyond VMREG_KEEP bytes a
  * zeroed region gets fresh pages (one mmap) instead, so a huge job does not
- * leave the thread holding its memory.
+ * leave the pool holding its memory.
  *
  * Debugging (environment, read once): VCC_VMREG_CHECK=1 verifies at every put
  * that no resident page past `used` holds a nonzero byte (a wrong hint) and
@@ -44,6 +51,7 @@ typedef struct vmreg {
 
 #define VMREG_SCRATCH ((size_t)-1)
 #define VMREG_KEEP ((size_t)64 << 20)
+#define VMREG_MIN ((size_t)64 << 20)
 #define VMREG_PAGE ((size_t)16384)	/* arm64 macOS; a smaller real page only means more zeroing */
 
 static inline void *vmreg_map(size_t n)
@@ -135,8 +143,8 @@ static inline void *vmreg_get(vmreg *r, size_t n, const char *name)
 		if (r->p)
 			munmap(r->p, r->cap);
 		n = (n + VMREG_PAGE - 1) & ~(VMREG_PAGE - 1);
-		if (r->cap < n)	/* sizes that grow with the TU: double */
-			r->cap = r->cap * 2 > n ? r->cap * 2 : n;
+		if (r->cap < n)	/* sizes that grow with the TU: double, from 64 MB of address space */
+			r->cap = r->cap * 2 > n ? r->cap * 2 : n > VMREG_MIN ? n : VMREG_MIN;
 		r->p = vmreg_map(r->cap);
 	}
 	r->name = name;
@@ -165,6 +173,43 @@ static inline void vmreg_put(vmreg *r, size_t used)
 			abort();
 		}
 	}
+}
+
+/* ---- pools of region sets ---- */
+
+typedef struct vmpool {
+	pthread_mutex_t mu;
+	int n;		/* regions per set */
+	void *free;	/* sets handed back: a list through the word before the set */
+} vmpool;
+
+#define VMPOOL_INIT(nreg) { PTHREAD_MUTEX_INITIALIZER, (nreg), NULL }
+
+static inline vmreg *vmpool_take(vmpool *pl)
+{
+	void **s;
+
+	pthread_mutex_lock(&pl->mu);
+	s = pl->free;
+	if (s)
+		pl->free = *s;
+	pthread_mutex_unlock(&pl->mu);
+	if (!s) {
+		s = calloc(1, sizeof(void *) + (size_t)pl->n * sizeof(vmreg));
+		if (!s)
+			abort();
+	}
+	return (vmreg *)(s + 1);
+}
+
+static inline void vmpool_give(vmpool *pl, vmreg *r)
+{
+	void **s = (void **)r - 1;
+
+	pthread_mutex_lock(&pl->mu);
+	*s = pl->free;
+	pl->free = s;
+	pthread_mutex_unlock(&pl->mu);
 }
 
 #endif

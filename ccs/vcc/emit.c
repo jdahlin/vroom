@@ -197,6 +197,14 @@ static void tb_init(tbuf *b, size_t cap)
 	b->cap = cap;
 }
 
+/* a buffer in a reused region (arena.h) */
+static void tb_reg(tbuf *b, vmreg *r, size_t cap, const char *name)
+{
+	b->p = vmreg_get(r, cap, name);
+	b->n = 0;
+	b->cap = cap;
+}
+
 static inline void tb_need(tbuf *b, size_t n)
 {
 	if (unlikely(b->n + n > b->cap)) {
@@ -7145,21 +7153,12 @@ static void enqueue(emitter *E, uint32_t item)
 	pthread_mutex_unlock(&E->mu);
 }
 
-/* the per-thread regions of ctx[i] (ecx_init, ecx_free), kept by the job's thread */
-#define NECXR 13
-static _Thread_local vmreg ecxr[64][NECXR];
+/* the regions of a ctx[i] (ecx_init takes a set, ecx_free gives it back) */
+static vmpool ecxpool = VMPOOL_INIT(13);
 
-static void tb_reg(tbuf *b, vmreg *r, size_t cap, const char *name)
-{
-	b->p = vmreg_get(r, cap, name);
-	b->n = 0;
-	b->cap = cap;
-}
-
-static void ecx_init(ecx *e, emitter *E, int ti)
+static void ecx_init(ecx *e, emitter *E, vmreg *r)
 {
 	cc *c = E->c;
-	vmreg *r = ecxr[ti];
 
 	memset(e, 0, sizeof(*e));
 	e->E = E;
@@ -7182,10 +7181,9 @@ static void ecx_init(ecx *e, emitter *E, int ti)
 }
 
 /* (after the stitch: the chunks point into e->out) */
-static void ecx_free(ecx *e, int ti)
+static void ecx_free(ecx *e, vmreg *r)
 {
 	cc *c = e->c;
-	vmreg *r = ecxr[ti];
 
 	/* written before read (put, newlabel, the case collection, ...): handed back as is */
 	vmreg_put(&r[0], VMREG_SCRATCH);
@@ -7202,6 +7200,7 @@ static void ecx_free(ecx *e, int ti)
 	vmreg_put(&r[10], VMREG_SCRATCH);
 	vmreg_put(&r[11], VMREG_SCRATCH);
 	vmreg_put(&r[12], VMREG_SCRATCH);
+	vmpool_give(&ecxpool, r);
 }
 
 static void do_item(ecx *e, uint32_t it)
@@ -7295,33 +7294,22 @@ static void as_error(cc *c, const char *fmt, ...)
 }
 
 /* the object backend: header text, chunks (items), tail text */
+static vmpool rpool = VMPOOL_INIT(3);
+
 static int replay(cc *c, const cc_opts *o, const char *hp, size_t hn, const char *tp, size_t tn, const chunk *ch, uint32_t nch)
 {
-	static _Thread_local uint32_t *loff, *cache;
-	static _Thread_local size_t ncache;
 	size_t need = (size_t)c->nsym + c->nstr + c->nlabel + 192;
 	rctx R = { .c = c, .as = o->as, .o = o->obj };
+	vmreg *rr = vmpool_take(&rpool);
+	uint32_t *cache;
 	int r = 0;
 
-	static _Thread_local tbuf nb;
-
-	if (!loff) {
-		loff = reserve((size_t)1 << 32);	/* labels of one function */
-		tb_init(&nb, 1 << 20);
-	}
-	R.nb = nb;
-	if (need > ncache) {
-		if (cache)
-			munmap(cache, ncache * sizeof(uint32_t));
-		ncache = need * 2;
-		cache = reserve(ncache * sizeof(uint32_t));
-	} else {
-		memset(cache, 0, need * sizeof(uint32_t));
-	}
+	R.loff = vmreg_get(&rr[0], (size_t)1 << 32, "emit.loff");	/* labels of one function */
+	tb_reg(&R.nb, &rr[1], 1 << 20, "emit.nb");
+	cache = vmreg_get(&rr[2], need * sizeof(uint32_t), "emit.rcache");
 	R.symc = cache;
 	R.strc = cache + c->nsym + 64;
 	R.lblc = R.strc + c->nstr + 64;
-	R.loff = loff;
 	as_begin(R.as, R.o, "<vcc>");
 	if (as_snippet(R.as, hp, hn))
 		r = -1;
@@ -7329,6 +7317,10 @@ static int replay(cc *c, const cc_opts *o, const char *hp, size_t hn, const char
 		r = r_chunk(&R, ch[i].p, ch[i].n);
 	if (!r && (as_snippet(R.as, tp, tn) || as_end(R.as)))
 		r = -1;
+	vmreg_put(&rr[0], VMREG_SCRATCH);
+	vmreg_put(&rr[1], VMREG_SCRATCH);
+	vmreg_put(&rr[2], need * sizeof(uint32_t));
+	vmpool_give(&rpool, rr);
 	if (r || R.o->has_err || as_failed(R.as)) {
 		as_error(c, "assembler: %s", as_failed(R.as) ? as_msg(R.as) : R.o->err);
 		return -1;
@@ -7336,8 +7328,8 @@ static int replay(cc *c, const cc_opts *o, const char *hp, size_t hn, const char
 	return 0;
 }
 
-/* emit_tu1's per-TU tables (E.*) and text buffers, kept by the thread */
-static _Thread_local vmreg er[14];
+/* emit_tu1's per-TU tables (E.*) and text buffers */
+static vmpool erpool = VMPOOL_INIT(14);
 
 static int emit_tu1(cc *c, const cc_opts *o, bool write_out, uint8_t *mf, bool *again, bool last)
 {
@@ -7348,6 +7340,7 @@ static int emit_tu1(cc *c, const cc_opts *o, bool write_out, uint8_t *mf, bool *
 	double t0 = now(), t1, t2;
 	tbuf hdr;
 	int errors;
+	vmreg *er = vmpool_take(&erpool), *xr[64];
 
 	memset(&E, 0, sizeof(E));
 	E.c = c;
@@ -7395,7 +7388,7 @@ static int emit_tu1(cc *c, const cc_opts *o, bool write_out, uint8_t *mf, bool *
 		nthr = 64;
 	ctx = calloc((size_t)nthr, sizeof(ecx));
 	for (int i = 0; i < nthr; i++)
-		ecx_init(&ctx[i], &E, i);
+		ecx_init(&ctx[i], &E, xr[i] = vmpool_take(&ecxpool));
 	for (int i = 1; i < nthr; i++)
 		pthread_create(&th[i], NULL, worker, &ctx[i]);
 	worker(&ctx[0]);
@@ -7537,7 +7530,7 @@ static int emit_tu1(cc *c, const cc_opts *o, bool write_out, uint8_t *mf, bool *
 	}
 	vmreg_put(&er[12], hdr.n);
 	for (int i = 0; i < nthr; i++)
-		ecx_free(&ctx[i], i);
+		ecx_free(&ctx[i], xr[i]);
 	free(ctx);
 	errors = E.errors;
 	vmreg_put(&er[0], c->nsym + 64);
@@ -7552,6 +7545,7 @@ static int emit_tu1(cc *c, const cc_opts *o, bool write_out, uint8_t *mf, bool *
 	vmreg_put(&er[9], c->nsym + 64);
 	vmreg_put(&er[10], (c->nsym + 64) * sizeof(uint16_t));
 	vmreg_put(&er[11], (c->nsym + 64) * sizeof(i128));
+	vmpool_give(&erpool, er);
 	return errors;
 }
 
@@ -7567,8 +7561,9 @@ int emit_tu(cc *c, const cc_opts *o)
 	vperf v0 = vperf_now();
 	const char *r = getenv("VCC_EMIT_REPEAT");
 	int n = r ? atoi(r) : 1, err = 0;
-	static _Thread_local vmreg mfr;
-	uint8_t *mf = vmreg_get(&mfr, c->nsym + 64, "emit.mf");
+	static vmpool mfpool = VMPOOL_INIT(1);
+	vmreg *mfr = vmpool_take(&mfpool);
+	uint8_t *mf = vmreg_get(mfr, c->nsym + 64, "emit.mf");
 	bool again = false;
 
 	for (int i = 1; i < n; i++)
@@ -7579,7 +7574,8 @@ int emit_tu(cc *c, const cc_opts *o)
 		if (err || !again)
 			break;
 	}
-	vmreg_put(&mfr, c->nsym + 64);
+	vmreg_put(mfr, c->nsym + 64);
+	vmpool_give(&mfpool, mfr);
 	ppd_ns_emit += (unsigned long long)((now() - t0) * 1e9);
 	ppd_ph_add(PPD_PH_EMIT, v0);
 	return err;
