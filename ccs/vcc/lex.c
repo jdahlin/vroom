@@ -970,6 +970,16 @@ fast:
 		}
 		fl = pend;
 		if (likely(any)) {
+			/*
+			 * Only whitespace up to the X: take it and go to the
+			 * handler, instead of a window that finds just that.
+			 */
+			if (lim < 64 && !(~W & (~0ull << last) & ~(~0ull << lim))) {
+				if (lim > last)
+					fl |= TF_SPACE | (NL & (~0ull << last) & ~(~0ull << lim) ? TF_SOL : 0);
+				p = gap = p + lim;
+				DISPATCH();
+			}
 			p = gap = p + last;
 			goto fast;
 		}
