@@ -3084,6 +3084,14 @@ static uint32_t primary(cc *c)
 		if (is(c, T_LPAREN)) {
 			if (!c->o->implicit_fn)
 				error(c, loc, "call to undeclared function '%.*s'; ISO C99 and later do not support implicit function declarations", IDF(id));
+			if (idlen_(id) == 6 && !memcmp(idstr_(id), "alloca", 6)) {
+				/* clang: an implicitly declared library builtin is the builtin */
+				uint32_t bid = vintern_find("__builtin_alloca", 16, vintern_hash("__builtin_alloca", 16));
+				const builtin *b = bid ? builtin_of(bid) : NULL;
+
+				if (b)
+					return builtin_call(c, b, loc);
+			}
 			{
 				uint32_t fs = implicit_func(c, id, loc);
 				uint32_t n = mk(c, N_VAR, c->syms[fs].ty, loc);
@@ -4335,7 +4343,7 @@ done:
 			ds->ty = prim(k);
 	}
 	ds->ty = qualify(c, ds->ty, q);
-	if (ds->inline_ && c->o->std == 89)
+	if (ds->inline_ && c->o->gnu89_inline)
 		ds->at.gnu_inline = 1;	/* -std=gnu89: gnu_inline semantics */
 	return true;
 }
@@ -5931,7 +5939,7 @@ static void declaration(cc *c, vec *out, bool file)
 					y->flags |= SF_TENTATIVE;
 				else if (!complete(c, y->ty) && ds.sc != SC_STATIC)
 					error(c, d.loc, "variable has incomplete type");
-				if (out && y->sc == SC_AUTO) {
+				if (out && (y->sc == SC_AUTO || y->sc == SC_REGISTER)) {
 					uint32_t n = mk2(c, N_DECL, prim(TY_VOID), d.loc, s, 0);
 
 					vpush(c, out, n);

@@ -443,6 +443,16 @@ Nästa mål: builtins för overflow, VLA, asm `g`, sedan FP när den grenen land
 Predef-tabellen för Linux har kärnans flaggor inbakade (`-mgeneral-regs-only`
 tar bort `__ARM_NEON`/`__ARM_FP`); bör justeras när FP finns.
 
+Efter merge med main (FP, vektorer, overflow-builtins, VLA från 2.10/2.11):
+gcc 1453/1589 (91,4 %), tcc 90/103 (87,4 %).  Därefter: implicit `alloca` som
+builtin, pekare till VLA skalar med elementets körtidsstorlek, `register`-lokaler
+utan initierare får N_DECL (platsen allokerades lat inne i en loop och
+återanvändes efter `foff = mark`: 20000801-1/20000815-1 hängde), `-fgnu89-inline`
+→ **gcc 1463 (92,1 %), tcc 90 (87,4 %)**.  Kvar: fe 51 (vektoroperationer,
+`__complex__`), emit 45 (builtin 57/67, asm `g`, HFA-argument 9), fp 21
+(flyttals-va_arg 12, 128-bitars flyttal 6), link 8 (kräver optimerare:
+`link_error`-test), run 14.
+
 ## Risker
 - **GNU C-ytan och inline asm** är det stora jobbet. Uppskattat: lexer + pp ~2 kloc,
   parser + sema ~10–15 kloc, emitter ~5 kloc, assembler ~4 kloc, länkare ~3 kloc.

@@ -366,7 +366,7 @@ int ppd_run(int argc, char **argv, const ppd_env *env)
 	double t0;
 	pp *p;
 	int syntax = 0, layout = 0, ms_anon = 0, short_wchar = 0, tokhash = 0, emit = 0, objmode = 0;
-	int std = 0, strict = 0, wimpl_int = 0, wimpl_fn = 0;
+	int std = 0, strict = 0, wimpl_int = 0, wimpl_fn = 0, gnu89_inline = -1;
 	char objbuf[1024];
 
 	for (int i = 1; i < argc; i++) {
@@ -397,6 +397,8 @@ int ppd_run(int argc, char **argv, const ppd_env *env)
 			continue;
 		}
 		if (!strcmp(a, "-ansi")) { std = 89; strict = 1; continue; }
+		if (!strcmp(a, "-fgnu89-inline")) { gnu89_inline = 1; continue; }
+		if (!strcmp(a, "-fno-gnu89-inline")) { gnu89_inline = 0; continue; }
 		if (!strcmp(a, "-Wno-implicit-int") || !strcmp(a, "-Wno-error=implicit-int")) { wimpl_int = 1; continue; }
 		if (!strcmp(a, "-Wno-implicit-function-declaration") || !strcmp(a, "-Wno-error=implicit-function-declaration")) {
 			wimpl_fn = 1;
@@ -529,6 +531,11 @@ int ppd_run(int argc, char **argv, const ppd_env *env)
 			bstr(&pre, b);
 		}
 	}
+	if (gnu89_inline < 0)
+		gnu89_inline = std == 89;
+	else if (!undef && !asm_mode)
+		bstr(&pre, gnu89_inline ? "#undef __GNUC_STDC_INLINE__\n#undef __GNUC_GNU_INLINE__\n#define __GNUC_GNU_INLINE__ 1\n"
+					: "#undef __GNUC_GNU_INLINE__\n#undef __GNUC_STDC_INLINE__\n#define __GNUC_STDC_INLINE__ 1\n");
 	if (freestanding) bstr(&pre, "#undef __STDC_HOSTED__\n#define __STDC_HOSTED__ 0\n");
 	if (!darwin && !short_wchar && !asm_mode && !undef)	/* the Linux table is for the kernel's -fshort-wchar */
 		bstr(&pre, "#undef __ARM_SIZEOF_WCHAR_T\n#define __ARM_SIZEOF_WCHAR_T 4\n"
@@ -613,6 +620,7 @@ int ppd_run(int argc, char **argv, const ppd_env *env)
 	if (syntax) {
 		cc_opts co = { .target = po.target, .unsigned_char = po.unsigned_char, .dump_layouts = layout, .ms_anon = ms_anon, .short_wchar = short_wchar,
 				.std = std, .implicit_int = std == 89 || wimpl_int, .implicit_fn = std == 89 || wimpl_fn,
+				.gnu89_inline = gnu89_inline,
 			       .outfd = env->outfd };
 		int fd = -1;
 
