@@ -182,8 +182,12 @@ static void init_once(void)
 	vintern_ents = reserve(MAX_ENT * sizeof(*vintern_ents));
 	copy_buf = reserve(COPY_MAX);
 	for (size_t i = 0; i < sizeof(kw) / sizeof(kw[0]); i++) {
+		char b[64] = { 0 };	/* vintern_copy reads 16 bytes: past the literal */
 		size_t n = strlen(kw[i]);
-		uint32_t id = vintern_copy(kw[i], n);
+		uint32_t id;
+
+		memcpy(b, kw[i], n);
+		id = vintern_copy(b, n);
 
 		if (id != i + 1) {
 			fprintf(stderr, "vcc: duplicate keyword %s\n", kw[i]);
