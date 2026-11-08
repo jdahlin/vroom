@@ -144,50 +144,53 @@ static void classify(const uint8_t *s, size_t from, size_t to, uint64_t *m[M_COU
 	const uint8x16_t dot = vdupq_n_u8('.'), k64 = vdupq_n_u8(64);
 	const uint8x16_t b1 = vdupq_n_u8(1), b16 = vdupq_n_u8(16), b32 = vdupq_n_u8(32);
 	const uint8x16_t pairb = vdupq_n_u8(0x0e), cmtb = vdupq_n_u8(0xc0);
-	const uint8x16x4_t t0 = vld1q_u8_x4(ttab), t1 = vld1q_u8_x4(ttab + 64);
-	const uint8x16x4_t g = vld1q_u8_x4(gtab);
 
 	for (size_t b = from; b < to; b++) {
 		const uint8_t *q = s + 64 * b;
 		const uint8x16x4_t v = vld4q_u8(q);
-		uint8x16_t id[4], ws[4], nl[4], dt[4], dg[4], pp[4], pr[4], xx[4], es[4];
+		uint8x16_t vn[4], t[4], tg[4], c[4], r[4];
 
-		for (int k = 0; k < 4; k++) {
-			/* the next byte of each lane */
-			const uint8x16_t vn = k < 3 ? v.val[k + 1] : vextq_u8(v.val[0], vld1q_dup_u8(q + 64), 1);
-			const uint8x16_t c = vandq_u8(vqtbl1q_u8(lo, vandq_u8(v.val[k], nib)),
-						      vqtbl1q_u8(hi, vshrq_n_u8(v.val[k], 4)));
-			const uint8x16_t t = vorrq_u8(vqtbl4q_u8(t0, v.val[k]),
-						      vqtbl4q_u8(t1, vsubq_u8(v.val[k], k64)));
-			const uint8x16_t tg = vandq_u8(t, vqtbl4q_u8(g, vn));
+		/* the next byte of each lane */
+		vn[0] = v.val[1], vn[1] = v.val[2], vn[2] = v.val[3];
+		vn[3] = vextq_u8(v.val[0], vld1q_dup_u8(q + 64), 1);
+		{
+			/*
+			 * The 12 table registers are loaded per block (3 loads)
+			 * instead of being live across the loop: that spilled
+			 * and rematerialized ~60 instructions per block.
+			 */
+			const uint8_t *tp = ttab, *gp = gtab;
 
-			id[k] = vtstq_u8(c, mid);
-			ws[k] = vtstq_u8(c, mws);
-			nl[k] = vtstq_u8(c, mnl);
-			dg[k] = vtstq_u8(c, mdg);
-			dt[k] = vceqq_u8(v.val[k], dot);
-			pp[k] = vtstq_u8(t, b16);
-			pr[k] = vorrq_u8(vtstq_u8(tg, pairb), vandq_u8(vtstq_u8(t, b1), vceqq_u8(v.val[k], vn)));
-			xx[k] = vorrq_u8(vorrq_u8(vtstq_u8(t, b32), vtstq_u8(tg, cmtb)),
-					 vreinterpretq_u8_s8(vshrq_n_s8(vreinterpretq_s8_u8(v.val[k]), 7)));
-			{
-				const uint8x16_t lc = vorrq_u8(v.val[k], vdupq_n_u8(0x20));
+			__asm__("" : "+r"(tp), "+r"(gp));
+			const uint8x16x4_t t0 = vld1q_u8_x4(tp), t1 = vld1q_u8_x4(tp + 64);
 
-				es[k] = vandq_u8(vorrq_u8(vceqq_u8(lc, vdupq_n_u8('e')), vceqq_u8(lc, vdupq_n_u8('p'))),
-						 vorrq_u8(vceqq_u8(vn, vdupq_n_u8('+')), vceqq_u8(vn, vdupq_n_u8('-'))));
-			}
+			for (int k = 0; k < 4; k++)
+				t[k] = vorrq_u8(vqtbl4q_u8(t0, v.val[k]), vqtbl4q_u8(t1, vsubq_u8(v.val[k], k64)));
+			const uint8x16x4_t g = vld1q_u8_x4(gp);
+
+			for (int k = 0; k < 4; k++)
+				tg[k] = vandq_u8(t[k], vqtbl4q_u8(g, vn[k]));
 		}
-#define MM(a) mm4(a[0], a[1], a[2], a[3])
-		m[M_ID][b] = MM(id);
-		m[M_WS][b] = MM(ws);
-		m[M_NL][b] = MM(nl);
-		m[M_DOT][b] = MM(dt);
-		m[M_DIG][b] = MM(dg);
-		m[M_P][b] = MM(pp);
-		m[M_PAIR][b] = MM(pr);
-		m[M_X][b] = MM(xx);
-		m[M_ES][b] = MM(es);
-#undef MM
+		for (int k = 0; k < 4; k++)
+			c[k] = vandq_u8(vqtbl1q_u8(lo, vandq_u8(v.val[k], nib)), vqtbl1q_u8(hi, vshrq_n_u8(v.val[k], 4)));
+#define MASK(j, expr) do {						\
+		for (int k = 0; k < 4; k++)					\
+			r[k] = (expr);						\
+		m[j][b] = mm4(r[0], r[1], r[2], r[3]);				\
+	} while (0)
+		MASK(M_P, vtstq_u8(t[k], b16));
+		MASK(M_PAIR, vorrq_u8(vtstq_u8(tg[k], pairb), vandq_u8(vtstq_u8(t[k], b1), vceqq_u8(v.val[k], vn[k]))));
+		MASK(M_X, vorrq_u8(vorrq_u8(vtstq_u8(t[k], b32), vtstq_u8(tg[k], cmtb)),
+				   vreinterpretq_u8_s8(vshrq_n_s8(vreinterpretq_s8_u8(v.val[k]), 7))));
+		MASK(M_ID, vtstq_u8(c[k], mid));
+		MASK(M_WS, vtstq_u8(c[k], mws));
+		MASK(M_NL, vtstq_u8(c[k], mnl));
+		MASK(M_DIG, vtstq_u8(c[k], mdg));
+		MASK(M_DOT, vceqq_u8(v.val[k], dot));
+		MASK(M_ES, vandq_u8(vorrq_u8(vceqq_u8(vorrq_u8(v.val[k], vdupq_n_u8(0x20)), vdupq_n_u8('e')),
+					     vceqq_u8(vorrq_u8(v.val[k], vdupq_n_u8(0x20)), vdupq_n_u8('p'))),
+				    vorrq_u8(vceqq_u8(vn[k], vdupq_n_u8('+')), vceqq_u8(vn[k], vdupq_n_u8('-')))));
+#undef MASK
 	}
 }
 
