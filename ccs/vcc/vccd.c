@@ -643,9 +643,14 @@ static void *worker_main(void *arg)
 		for (i = 0; i < 3; i++)
 			if (r.fds[i] >= 0)
 				close(r.fds[i]);
-		if (log_requests)
-			fprintf(stderr, "vccd %-10s %7.2f ms rc=%d %s\n", kind, now_ms() - t0,
-				status, kind[0] == 'b' ? "" : r.argc > 1 ? r.argv[1] : "");
+		if (log_requests) {
+			double t1 = now_ms();
+
+			/* @: start time (monotonic ms), for concurrency timelines; last: the input */
+			fprintf(stderr, "vccd %-10s %7.2f ms rc=%d @%.2f %s %s\n", kind, t1 - t0, status, t0,
+				kind[0] == 'b' ? "" : r.argc > 1 ? r.argv[1] : "",
+				kind[0] == 'b' || r.argc < 2 ? "" : r.argv[r.argc - 1]);
+		}
 	}
 	return NULL;
 }
@@ -655,7 +660,10 @@ int main(int argc, char **argv)
 	const char *sock = "/tmp/vccd.sock";
 	struct sockaddr_un sa = { .sun_family = AF_UNIX };
 	struct kevent ev;
-	int nworkers = 64, ls, kq, i;
+	/* make never has more than -j requests in flight, and compiles are CPU bound:
+	 * two per core leaves room for the ones that block (forwarded to vroomd,
+	 * spawned tools) without a thread per possible connection */
+	int nworkers = 2 * (int)sysconf(_SC_NPROCESSORS_ONLN), ls, kq, i;
 
 	for (i = 1; i < argc; i++) {
 		if (!strcmp(argv[i], "--sock") && i + 1 < argc)
