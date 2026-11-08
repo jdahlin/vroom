@@ -116,13 +116,7 @@ static inline __attribute__((always_inline)) void vintern_words16(const char *s,
 /* the first 16 bytes of s, zero past len (s readable to s[16]) */
 static inline __attribute__((always_inline)) void vintern_words(const char *s, size_t len, uint64_t *w0, uint64_t *w1)
 {
-	const unsigned l0 = len < 8 ? (unsigned)len : 8, l1 = len < 16 ? (unsigned)len : 16;
-	const unsigned sh1 = 128 - 8 * l1;	/* 0..128 */
-
-	memcpy(w0, s, 8);
-	memcpy(w1, s + 8, 8);
-	*w0 &= l0 == 8 ? ~0ull : ~(~0ull << (8 * l0));
-	*w1 &= sh1 >= 64 ? 0 : ~0ull >> sh1;
+	vintern_words16(s, len < 16 ? len : 16, w0, w1);
 }
 
 /* s must be readable to s[16]; no data-dependent branch for len <= 16 */

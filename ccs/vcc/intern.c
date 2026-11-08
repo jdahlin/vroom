@@ -83,26 +83,11 @@ static inline int same(const char *a, const char *b, size_t len)
 	return tail(a + i, len - i) == tail(b + i, len - i);
 }
 
-#ifdef VLEX_STATS
-extern unsigned long vlex_stat[512];
-static uint32_t vintern_(const char *s, size_t len, uint32_t hash);
-uint32_t vintern(const char *s, size_t len, uint32_t hash)
+/* the probe from slot i on, inserting at the first empty slot */
+static __attribute__((noinline)) uint32_t insert(const char *s, size_t len, uint32_t hash, uint32_t i,
+						 uint64_t w0, uint64_t w1)
 {
-	uint64_t t0 = __builtin_readcyclecounter();
-	uint32_t r = vintern_(s, len, hash);
-
-	vlex_stat[321] += __builtin_readcyclecounter() - t0;
-	return r;
-}
-#define vintern vintern_
-static
-#endif
-uint32_t vintern(const char *s, size_t len, uint32_t hash)
-{
-	uint32_t i = hash >> (32 - SLOT_BITS), id = 0;
-	uint64_t w0, w1;
-
-	vintern_words(s, len, &w0, &w1);
+	uint32_t id = 0;
 
 	for (;; i = (i + 1) & (NSLOT - 1)) {
 		uint64_t v = atomic_load_explicit(&slots[i], memory_order_acquire);
@@ -128,6 +113,42 @@ uint32_t vintern(const char *s, size_t len, uint32_t hash)
 			if (e->len == len && e->w0 == w0 && e->w1 == w1 &&
 			    (len <= 16 || same(e->s + 16, s + 16, len - 16)))
 				return (uint32_t)v;	/* a reserved id, if any, is wasted */
+		}
+	}
+}
+
+#ifdef VLEX_STATS
+extern unsigned long vlex_stat[512];
+static uint32_t vintern_(const char *s, size_t len, uint32_t hash);
+uint32_t vintern(const char *s, size_t len, uint32_t hash)
+{
+	uint64_t t0 = __builtin_readcyclecounter();
+	uint32_t r = vintern_(s, len, hash);
+
+	vlex_stat[321] += __builtin_readcyclecounter() - t0;
+	return r;
+}
+#define vintern vintern_
+static
+#endif
+/* a lookup loop without the insertion (most identifiers exist already) */
+uint32_t vintern(const char *s, size_t len, uint32_t hash)
+{
+	uint32_t i = hash >> (32 - SLOT_BITS);
+	uint64_t w0, w1;
+
+	vintern_words(s, len, &w0, &w1);
+	for (;; i = (i + 1) & (NSLOT - 1)) {
+		uint64_t v = atomic_load_explicit(&slots[i], memory_order_acquire);
+
+		if (!v)
+			return insert(s, len, hash, i, w0, w1);
+		if ((uint32_t)(v >> 32) == hash) {
+			const vident *e = &vintern_ents[(uint32_t)v];
+
+			if (e->len == len && e->w0 == w0 && e->w1 == w1 &&
+			    (len <= 16 || same(e->s + 16, s + 16, len - 16)))
+				return (uint32_t)v;
 		}
 	}
 }
