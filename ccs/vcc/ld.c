@@ -851,6 +851,20 @@ static EV eval(Expr *e)
 
 static const char *sp, *sp_end, *sp_file;
 
+/* character classes of the script lexer (NUL behaves as strchr() made it) */
+enum { CT_NAMEEND = 1, CT_PATEND = 2, CT_IDENT = 4, CT_WORD = 8 };
+#define CT_AN (CT_IDENT | CT_WORD)
+static const uint8_t ctab[256] = {
+	[0] = CT_NAMEEND | CT_PATEND | CT_IDENT,
+	[' '] = CT_NAMEEND | CT_PATEND, ['\t'] = CT_NAMEEND | CT_PATEND,
+	['\r'] = CT_NAMEEND | CT_PATEND, ['\n'] = CT_NAMEEND | CT_PATEND,
+	['('] = CT_NAMEEND | CT_PATEND, [')'] = CT_NAMEEND | CT_PATEND,
+	['{'] = CT_NAMEEND, ['}'] = CT_NAMEEND, [':'] = CT_NAMEEND, [';'] = CT_NAMEEND,
+	[','] = CT_NAMEEND, ['='] = CT_NAMEEND,
+	['0' ... '9'] = CT_AN, ['A' ... 'Z'] = CT_AN, ['a' ... 'z'] = CT_AN,
+	['_'] = CT_AN, ['.'] = CT_AN, ['$'] = CT_IDENT,
+};
+
 static void sskip(void)
 {
 	for (;;) {
@@ -908,7 +922,7 @@ static char *sname(void)
 		sp = e + 1;
 		return sdup(b + 1, e);
 	}
-	while (sp < sp_end && !strchr(" \t\r\n(){}:;,=", *sp))
+	while (sp < sp_end && !(ctab[(unsigned char)*sp] & CT_NAMEEND))
 		sp++;
 	return sdup(b, sp);
 }
@@ -917,16 +931,16 @@ static char *spatname(void)
 {
 	sskip();
 	const char *b = sp;
-	while (sp < sp_end && !strchr(" \t\r\n()", *sp))
+	while (sp < sp_end && !(ctab[(unsigned char)*sp] & CT_PATEND))
 		sp++;
 	return sdup(b, sp);
 }
-static bool sword(const char *w)
+static inline __attribute__((always_inline)) bool sword(const char *w)
 {
 	sskip();
 	size_t n = strlen(w);
 	if ((size_t)(sp_end - sp) >= n && !memcmp(sp, w, n) &&
-	    (sp + n == sp_end || !(isalnum((unsigned char)sp[n]) || sp[n] == '_' || sp[n] == '.'))) {
+	    (sp + n == sp_end || !(ctab[(unsigned char)sp[n]] & CT_WORD))) {
 		sp += n;
 		return true;
 	}
@@ -955,31 +969,43 @@ static void note_ref(uint32_t g)
 
 static int prec(const char *op)
 {
-	static const struct { const char *op; int p; } t[] = {
-		{"*", 11}, {"/", 11}, {"%", 11}, {"+", 10}, {"-", 10}, {"<<", 9}, {">>", 9},
-		{"<", 8}, {"<=", 8}, {">", 8}, {">=", 8}, {"==", 7}, {"!=", 7}, {"&", 6},
-		{"^", 5}, {"|", 4}, {"&&", 3}, {"||", 2}, {"?", 1},
-	};
-	for (size_t i = 0; i < sizeof t / sizeof *t; i++)
-		if (!strcmp(op, t[i].op))
-			return t[i].p;
-	return -1;
+	char c = op[0], c1 = c ? op[1] : 0;
+	if (c1 && op[2])
+		return -1;
+	switch (c) {
+	case '*': case '/': case '%': return c1 ? -1 : 11;
+	case '+': case '-': return c1 ? -1 : 10;
+	case '<': case '>': return c1 == c ? 9 : !c1 || c1 == '=' ? 8 : -1;
+	case '=': case '!': return c1 == '=' ? 7 : -1;
+	case '&': return !c1 ? 6 : c1 == '&' ? 3 : -1;
+	case '^': return c1 ? -1 : 5;
+	case '|': return !c1 ? 4 : c1 == '|' ? 2 : -1;
+	case '?': return c1 ? -1 : 1;
+	default: return -1;
+	}
 }
-/* peek an operator token; returns length or 0 */
+/* peek an operator token (longest match of << >> <= >= == != && || op= and
+ * the single-character operators); returns length or 0 */
 static int peekop(char out[4])
 {
 	sskip();
-	static const char *ops[] = {"<<=", ">>=", "<<", ">>", "<=", ">=", "==", "!=", "&&", "||",
-				    "+=", "-=", "*=", "/=", "&=", "|=", "^=",
-				    "*", "/", "%", "+", "-", "<", ">", "&", "^", "|", "?", ":", "=", NULL};
-	for (int i = 0; ops[i]; i++) {
-		size_t n = strlen(ops[i]);
-		if ((size_t)(sp_end - sp) >= n && !memcmp(sp, ops[i], n)) {
-			strcpy(out, ops[i]);
-			return (int)n;
-		}
+	size_t left = (size_t)(sp_end - sp);
+	if (!left)
+		return 0;
+	char c = sp[0], c1 = left > 1 ? sp[1] : 0, c2 = left > 2 ? sp[2] : 0;
+	int n;
+	switch (c) {
+	case '<': case '>': n = c1 == c ? (c2 == '=' ? 3 : 2) : c1 == '=' ? 2 : 1; break;
+	case '=': n = c1 == '=' ? 2 : 1; break;
+	case '!': n = c1 == '=' ? 2 : 0; break;
+	case '&': case '|': n = c1 == c || c1 == '=' ? 2 : 1; break;
+	case '+': case '-': case '*': case '/': case '^': n = c1 == '=' ? 2 : 1; break;
+	case '%': case '?': case ':': n = 1; break;
+	default: n = 0;
 	}
-	return 0;
+	memcpy(out, sp, (size_t)n);
+	out[n] = 0;
+	return n;
 }
 
 static Expr *pprimary(void);
@@ -1056,7 +1082,7 @@ static Expr *pprimary(void)
 		e->sym = g;
 		return e;
 	}
-	while (sp < sp_end && (isalnum((unsigned char)*sp) || strchr("_.$", *sp)))
+	while (sp < sp_end && (ctab[(unsigned char)*sp] & CT_IDENT))
 		sp++;
 	if (sp == b) {
 		serr("expected expression");
