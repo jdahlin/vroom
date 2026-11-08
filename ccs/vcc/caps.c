@@ -155,6 +155,85 @@ int ld_option(const char *a, const char **why)
 	return in(a, ld_exact);
 }
 
+/*
+ * Identity.  Kbuild/Kconfig parse these (cc-version.sh takes the version from
+ * __clang_major__ etc., ld-version.sh and CC_VERSION_TEXT from --version), so
+ * they are what clang/lld 23.1.4 print: the .config stays the same.
+ */
+const char cc_version_text[] = "Homebrew clang version 23.1.4\n";
+const char ld_version_text[] = "Homebrew LLD 23.1.4 (compatible with GNU linkers)\n";
+
+/* `-print-file-name=include`: the compiler's own headers (stddef.h, ...) */
+const char cc_resource_include[] = "/opt/homebrew/opt/llvm/lib/clang/23/include";
+
+/* vcc builds the kernel only: no target libc, so no user-space links */
+const bool cc_can_link = false;
+
+/*
+ * Link options vld rejects up front, so that a probe link (Kconfig's
+ * tools-support-relr.sh) fails without running a linker: vld does not pack
+ * relative relocations (RELR), and TOOLS_SUPPORT_RELR stays n.
+ */
+bool ld_rejects(const char *a, const char *next)
+{
+	return prefix(a, "--pack-dyn-relocs=") || !strcmp(a, "-zpack-relative-relocs") ||
+	       (!strcmp(a, "-z") && next && !strcmp(next, "pack-relative-relocs"));
+}
+
+/*
+ * Probe sources: what Kbuild and Kconfig pipe into the compiler to test a
+ * feature (as-instr; `echo '...' | $(CC) -x c - -c`), with vcc's answer.
+ * Compared after printf %b/echo, trailing newlines ignored.  A source that is
+ * not listed is compiled for real (vccd forwards it), so the list only has to
+ * cover the probes on the critical path; all answers equal clang's.
+ */
+struct probe_src {
+	const char *src;
+	bool ok;
+};
+
+static const struct probe_src as_sources[] = {
+	{ "1:\n.inst 0\n.rept . - 1b\n\nnop\n.endr", true },		/* arm64 Kconfig (negated) */
+	{ ".cfi_startproc\n.cfi_negate_ra_state\n.cfi_endproc", true },	/* AS_HAS_CFI_NEGATE_RA_STATE */
+	{ ".arch armv8.5-a+memtag\nstgm xzr,[x0]", true },			/* ARM64_AS_HAS_MTE */
+	{ ".arch_extension mops", true },					/* AS_HAS_MOPS */
+	{ ".arch_extension lsui", true },					/* AS_HAS_LSUI */
+	{ ".arch_extension sme", true },					/* AS_HAS_SME */
+	{ ".uleb128 .Lexpr_end4 - .Lexpr_start3\n.Lexpr_start3:\n.Lexpr_end4:", true }, /* AS_HAS_NON_CONST_ULEB128 */
+	{ NULL, false }
+};
+
+static const struct probe_src c_sources[] = {
+	/* arm64 Makefile: "K" takes a 32-bit logical immediate, 0xffffffff is not one */
+	{ "int main(void) { asm volatile(\"and w0, w0, %w0\" :: \"K\" (4294967295)); return 0; }", false },
+	{ "__attribute__((no_profile_instrument_function)) int x();", true },
+	{ "char tag[][4] __attribute__((__nonstring__)) = { };", true },
+	{ "int foo(int *x) { asm goto (\".long (%l[bar]) - .\": \"+m\"(*x) ::: bar); return *x; bar: return 0; }", true },
+	{ "int foo(int x) { asm goto (\"\": \"=r\"(x) ::: bar); return x; bar: return 0; }", true },
+	{ "void foo(void) { asm inline (\"\"); }", true },
+	{ NULL, false }
+};
+
+static int lookup(const struct probe_src *t, const char *src, size_t n)
+{
+	while (n && src[n - 1] == '\n')
+		n--;
+	for (; t->src; t++)
+		if (strlen(t->src) == n && !memcmp(t->src, src, n))
+			return t->ok;
+	return -1;
+}
+
+int as_source_probe(const char *src, size_t n)
+{
+	return lookup(as_sources, src, n);
+}
+
+int c_source_probe(const char *src, size_t n)
+{
+	return lookup(c_sources, src, n);
+}
+
 /* macros vcc predefines (with a value of its own) */
 bool cc_predefined(const char *def)
 {

@@ -1,0 +1,143 @@
+From d0f4a14cf4c78f087699d5c4c9c1deeef55a0206 Mon Sep 17 00:00:00 2001
+From: vroom <vroom@localhost>
+Date: Sat, 7 Nov 2026 22:23:38 +0100
+Subject: [PATCH 6/6] kconfig: cc-probe without mkdir, rm and sed
+
+Each $(cc-option,...) ran seven processes: a shell, mkdir and rm for a
+private output directory, the compiler, and a nested $(shell,...) of
+echo | sed to turn -Wno-<w> into -W<w>.  The nested call also made every
+probe depend on an earlier result, which costs the parallel evaluation a
+round.
+
+Kconfig now creates one scratch directory before the first $(shell,...),
+exports it as $KCONFIG_TMPDIR and removes it at exit; the probe writes
+$KCONFIG_TMPDIR/$$.o, so side files such as .dwo still land in a
+directory that is cleaned up.  The -Wno- rewrite is a shell parameter
+expansion.  A probe is now a shell and the compiler.
+
+KCONFIG_SHELL_DEBUG=2 also reports how long the parse waited for each
+result.
+
+arm64 syncconfig: 241 -> 143 commands, 9-11 -> 4-6 rounds, .config
+unchanged.
+---
+ scripts/Kconfig.include      |  6 +++--
+ scripts/kconfig/preprocess.c | 52 +++++++++++++++++++++++++++++++++++-
+ 2 files changed, 55 insertions(+), 3 deletions(-)
+
+diff --git a/scripts/Kconfig.include b/scripts/Kconfig.include
+index a7d9201ac..d05c20574 100644
+--- a/scripts/Kconfig.include
++++ b/scripts/Kconfig.include
+@@ -25,8 +25,10 @@ failure = $(if-success,$(1),n,y)
+ 
+ # $(cc-probe,<flag>)
+ # The command $(cc-option) and $(cc-option-str) test <flag> with. Not meant
+-# to be called directly; use one of those two instead.
+-cc-probe = trap "rm -rf .tmp_$$" EXIT; mkdir .tmp_$$; $(CC) -Werror $(CLANG_FLAGS) $(shell,echo $(1) | sed "s;^-Wno-;-W;") -c -x c /dev/null -o .tmp_$$/tmp.o
++# to be called directly; use one of those two instead.  -Wno-<w> is tested
++# as -W<w>, because compilers accept any -Wno-<w>.  $KCONFIG_TMPDIR is a
++# scratch directory that Kconfig creates and removes.
++cc-probe = o="$(1)"; [ "${o#-Wno-}" = "$o" ] || o="-W${o#-Wno-}"; $(CC) -Werror $(CLANG_FLAGS) $o -c -x c /dev/null -o "$KCONFIG_TMPDIR/$$.o"
+ 
+ # $(cc-option,<flag>)
+ # Return y if the compiler supports <flag>, n otherwise
+diff --git a/scripts/kconfig/preprocess.c b/scripts/kconfig/preprocess.c
+index 882a1eee6..ef8dea354 100644
+--- a/scripts/kconfig/preprocess.c
++++ b/scripts/kconfig/preprocess.c
+@@ -3,6 +3,7 @@
+ // Copyright (C) 2018 Masahiro Yamada <yamada.masahiro@socionext.com>
+ 
+ #include <ctype.h>
++#include <dirent.h>
+ #include <errno.h>
+ #include <fcntl.h>
+ #include <poll.h>
+@@ -14,6 +15,7 @@
+ #include <stdlib.h>
+ #include <string.h>
+ #include <sys/stat.h>
++#include <sys/resource.h>
+ #include <sys/time.h>
+ #include <sys/wait.h>
+ #include <unistd.h>
+@@ -611,10 +613,44 @@ static void shell_start_recorder(void)
+ 	nrecorders++;
+ }
+ 
++/*
++ * One scratch directory for all $(shell,...) commands, exported as
++ * $KCONFIG_TMPDIR, so that a compiler probe needs no mkdir/rm of its own.
++ * Removed at exit by the process that created it.
++ */
++static char shell_tmpdir[] = ".tmp_kconfig_XXXXXX";
++static pid_t shell_tmpdir_owner;
++
++static void shell_tmpdir_remove(void)
++{
++	struct dirent *e;
++	DIR *d;
++
++	if (getpid() != shell_tmpdir_owner)
++		return;
++	if (shell_debug)
++		fprintf(stderr, "kconfig-shell: exit at %.0f ms\n", now_ms() - shell_t0);
++	d = opendir(shell_tmpdir);
++	if (d) {
++		while ((e = readdir(d)))
++			if (strcmp(e->d_name, ".") && strcmp(e->d_name, ".."))
++				unlinkat(dirfd(d), e->d_name, 0);
++		closedir(d);
++	}
++	rmdir(shell_tmpdir);
++}
++
+ static void shell_init(void)
+ {
+ 	const char *env = getenv("KCONFIG_SHELL_JOBS");
+ 
++	if (!mkdtemp(shell_tmpdir) || setenv("KCONFIG_TMPDIR", shell_tmpdir, 1)) {
++		perror("kconfig: scratch directory");
++		exit(1);
++	}
++	shell_tmpdir_owner = getpid();
++	atexit(shell_tmpdir_remove);
++
+ 	max_jobs = env && *env ? atoi(env) : (int)sysconf(_SC_NPROCESSORS_ONLN);
+ 	if (max_jobs > 64)
+ 		max_jobs = 64;
+@@ -622,6 +658,14 @@ static void shell_init(void)
+ 		jobs = xcalloc(max_jobs, sizeof(*jobs));
+ 	shell_debug = getenv("KCONFIG_SHELL_DEBUG");
+ 	shell_t0 = now_ms();
++	if (shell_debug) {
++		struct rusage ru;
++
++		getrusage(RUSAGE_SELF, &ru);
++		fprintf(stderr, "kconfig-shell: first $(shell) after %.0f ms CPU\n",
++			(ru.ru_utime.tv_sec + ru.ru_stime.tv_sec) * 1e3 +
++			(ru.ru_utime.tv_usec + ru.ru_stime.tv_usec) / 1e3);
++	}
+ }
+ 
+ /* run synchronously, like popen(cmd, "r") but with shell_path() */
+@@ -708,8 +752,14 @@ static char *do_shell(int argc, char *argv[])
+ 				return xstrdup("");
+ 			}
+ 		}
+-		if (r)
++		if (r) {
++			double tw = now_ms();
++
+ 			shell_pump(r, true);
++			if (shell_debug && getenv("KCONFIG_SHELL_DEBUG")[0] == '2')
++				fprintf(stderr, "kconfig-wait %.1f at %.1f %s\n", now_ms() - tw,
++					tw - shell_t0, cmd);
++		}
+ 	}
+ 	if (r && r->state == SR_DONE) {
+ 		if (r->errlen)
+-- 
+2.54.0 (Apple Git-157)
+

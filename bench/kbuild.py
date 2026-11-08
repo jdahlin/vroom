@@ -17,7 +17,7 @@ import sys
 import time
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-KSRC = os.path.join(ROOT, "work/linux")
+KSRC = os.environ.get("VROOM_KSRC", os.path.join(ROOT, "work/linux"))
 B = "/opt/homebrew/opt"
 PATH = ":".join(f"{B}/{p}" for p in [
     "make/libexec/gnubin", "gnu-sed/libexec/gnubin", "findutils/libexec/gnubin",

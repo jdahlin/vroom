@@ -15,7 +15,8 @@ import sys
 import time
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-BASE = os.path.join(ROOT, "work/debian/debian-13-nocloud-arm64.qcow2")
+WORK = os.environ.get("VROOM_WORK", os.path.join(ROOT, "work"))  # t.ex. huvudcheckoutens work/
+BASE = os.path.join(WORK, "debian/debian-13-nocloud-arm64.qcow2")
 
 
 CHECK_SCRIPT = r"""
@@ -55,9 +56,11 @@ def main():
     ap.add_argument("--append", default="")
     ap.add_argument("--allow-degraded", action="store_true")
     ap.add_argument("--no-login", action="store_true", help="nöj dig med login-prompten")
+    ap.add_argument("--overlay", default=os.path.join(WORK, "debian/overlay.qcow2"),
+                    help="egen overlay om flera sessioner bootar samtidigt")
     a = ap.parse_args()
 
-    overlay = os.path.join(ROOT, "work/debian/overlay.qcow2")
+    overlay = a.overlay
     if os.path.exists(overlay):
         os.remove(overlay)
     subprocess.run(["qemu-img", "create", "-q", "-f", "qcow2", "-F", "qcow2", "-b", BASE, overlay],
