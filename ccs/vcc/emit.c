@@ -4217,7 +4217,7 @@ static bool side_effects(cc *c, uint32_t n)
 	case N_MEMBER: case N_DEREF: case N_UNARY: case N_CAST: case N_ADDR: case N_COMPLIT:
 	case N_STMTEXPR: case N_EXPR: case N_RETURN:
 		return side_effects(c, x->a);
-	case N_INDEX: case N_BINARY: case N_LOGAND: case N_LOGOR: case N_COMMA:
+	case N_INDEX: case N_BINARY: case N_LOGAND: case N_LOGOR: case N_COMMA: case N_CPLX:
 		return side_effects(c, x->a) || side_effects(c, x->b);
 	case N_COND: case N_IF:
 		return side_effects(c, x->a) || side_effects(c, x->b) || side_effects(c, x->c);
@@ -5802,6 +5802,24 @@ static val gen(ecx *e, uint32_t n)
 		return va_arg_(e, x);
 	case N_ZERO:
 		return vconst(0);
+	case N_CPLX: {	/* a _Complex value: both parts into a temporary, its address */
+		qty et = c->tags[T(c, x->ty)->aux].f[0].ty;
+		uint64_t es = tsize(c, et);
+		int32_t sl = slot(e, 2 * es, talign(c, x->ty));
+		lval d = { .k = L_FRAME, .off = sl, .align = talign(c, et) };
+		val v = gen(e, x->a);
+		int r;
+
+		store(e, &d, et, &v);
+		vfree(e, &v);
+		v = gen(e, x->b);
+		d.off += (int32_t)es;
+		store(e, &d, et, &v);
+		vfree(e, &v);
+		r = treg(e);
+		opi(e, I_ADDI, 1, r, FRAME, sl);
+		return vreg(r);
+	}
 	case N_SIZEOF_VLA: {
 		const sym *y = x->a && N(x->a)->op == N_VAR ? &c->syms[N(x->a)->a] : NULL;
 
@@ -7666,6 +7684,13 @@ static void data_init(ecx *e, uint64_t off, qty ty, uint32_t init)
 		data_init(e, off, ty, x->a);
 		return;
 	}
+	if (x->op == N_CPLX) {
+		qty et = c->tags[T(c, x->ty)->aux].f[0].ty;
+
+		data_init(e, off, et, x->a);
+		data_init(e, off + tsize(c, et), et, x->b);
+		return;
+	}
 	if (x->op == N_CAST && x->aux == CK_NOP && is_agg(c, ty)) {
 		data_init(e, off, ty, x->a);
 		return;
@@ -8193,7 +8218,7 @@ static int walk(pre *P, uint32_t n)
 			mark_written(P, x->a);
 		lab = walk(P, x->a) | walk(P, x->b);
 		break;
-	case N_INDEX: case N_BINARY: case N_LOGAND: case N_LOGOR: case N_COMMA:
+	case N_INDEX: case N_BINARY: case N_LOGAND: case N_LOGOR: case N_COMMA: case N_CPLX:
 		lab = walk(P, x->a) | walk(P, x->b);
 		break;
 	case N_COND:

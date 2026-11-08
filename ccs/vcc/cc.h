@@ -86,6 +86,7 @@ typedef struct field {
 enum {
 	RF_COMPLETE = 1, RF_UNION = 2, RF_PACKED = 4, RF_FLEX = 8, RF_ENUM = 16,
 	RF_BEING_DEFINED = 32,
+	RF_COMPLEX = 64,	/* _Complex T: struct { T re, im; } (AAPCS64 passes it like that) */
 };
 
 typedef struct tag {
@@ -173,6 +174,7 @@ enum {
 	N_LABELADDR,	/* &&label: a: label */
 	N_VAARG,	/* a: va_list expr */
 	N_ZERO,		/* implicit zero initialization */
+	N_CPLX,		/* a + b i: a _Complex value from its parts (a, b of the element type) */
 	/* statements */
 	N_BLOCK,	/* b: list, c: count */
 	N_EXPR,		/* a */

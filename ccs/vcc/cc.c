@@ -131,7 +131,8 @@ static bool is_func(cc *c, qty t) { return KIND(c, t) == TY_FUNC; }
 static bool is_record(cc *c, qty t) { int k = KIND(c, t); return k == TY_STRUCT || k == TY_UNION; }
 static bool is_vector(cc *c, qty t) { return KIND(c, t) == TY_VECTOR; }
 /* initialized by a list of elements */
-static bool is_ilagg(cc *c, qty t) { int k = KIND(c, t); return k == TY_STRUCT || k == TY_UNION || k == TY_ARRAY || k == TY_VECTOR; }
+static bool is_complex(cc *c, qty t) { return KIND(c, t) == TY_STRUCT && (c->tags[T(c, t)->aux].flags & RF_COMPLEX); }
+static bool is_ilagg(cc *c, qty t) { int k = KIND(c, t); return (k == TY_STRUCT && !is_complex(c, t)) || k == TY_UNION || k == TY_ARRAY || k == TY_VECTOR; }
 
 static qty canon(cc *c, qty t) { return QT(T(c, t)->canon, QQ(t)); }
 
@@ -972,11 +973,35 @@ static uint32_t mk_flt(cc *c, double v, qty ty, uint32_t loc)
 
 /* ---------------- literals ---------------- */
 
+static uint32_t number_s(cc *c, const ptok *t, const char *s, size_t n);
+static qty ty_complex(cc *c, qty et);
+static uint32_t mk_cplx(cc *c, qty t, uint32_t re, uint32_t im, uint32_t loc);
+static uint32_t zero_of(cc *c, qty t, uint32_t loc);
+
+/* a constant; the GNU suffix i (or j) makes it imaginary: 0 + v i */
 static uint32_t number(cc *c, const ptok *t)
 {
 	char tmp[t->len + 1];
-	size_t n, i = 0;
+	size_t n;
 	const char *s = pp_spell(t, tmp, &n);
+
+	for (size_t k = n; k > 0 && strchr("fFlLuUiIjJ", s[k - 1]); k--) {
+		if (strchr("iIjJ", s[k - 1])) {
+			char b[n];
+			uint32_t v;
+
+			memcpy(b, s, k - 1);
+			memcpy(b + k - 1, s + k, n - k);
+			v = number_s(c, t, b, n - 1);
+			return mk_cplx(c, ty_complex(c, N(v)->ty), zero_of(c, N(v)->ty, t->loc), v, t->loc);
+		}
+	}
+	return number_s(c, t, s, n);
+}
+
+static uint32_t number_s(cc *c, const ptok *t, const char *s, size_t n)
+{
+	size_t i = 0;
 	unsigned base = 10;
 	u128 v = 0;
 	bool over = false, u = false, isf = false;
@@ -1453,6 +1478,9 @@ static const builtin builtins[] = {
 	{ "__builtin_snprintf", BI_LIB, 0, "iszS." }, { "__builtin_vsnprintf", BI_LIB, 0, "iszSV" },
 	{ "__builtin_vsprintf", BI_LIB, 0, "isSV" }, { "__builtin_puts", BI_LIB, 0, "iS" },
 	{ "__builtin_abs", BI_LIB, 1, "ii" }, { "__builtin_labs", BI_LIB, 1, "ll" }, { "__builtin_llabs", BI_LIB, 1, "ww" },
+	{ "__builtin_conj", BI_CONJ, 0, "d." }, { "__builtin_conjf", BI_CONJ, 0, "f." }, { "__builtin_conjl", BI_CONJ, 0, "D." },
+	{ "__builtin_creal", BI_CREAL, 0, "d." }, { "__builtin_crealf", BI_CREAL, 0, "f." }, { "__builtin_creall", BI_CREAL, 0, "D." },
+	{ "__builtin_cimag", BI_CIMAG, 0, "d." }, { "__builtin_cimagf", BI_CIMAG, 0, "f." }, { "__builtin_cimagl", BI_CIMAG, 0, "D." },
 	{ "__builtin_fabs", BI_LIB, 1, "dd" }, { "__builtin_fabsf", BI_LIB, 1, "ff" }, { "__builtin_fabsl", BI_LIB, 1, "DD" },
 	{ "__builtin_copysign", BI_LIB, 1, "ddd" }, { "__builtin_copysignf", BI_LIB, 1, "fff" },
 	{ "__builtin_copysignl", BI_LIB, 1, "DDD" },
@@ -2163,6 +2191,11 @@ static bool union_member_for(cc *c, qty u, uint32_t n)
 	return false;
 }
 
+static uint32_t to_complex(cc *c, uint32_t n, qty t);
+static uint32_t cplx_bool(cc *c, uint32_t n);
+static uint32_t cplx_part(cc *c, uint32_t n, int k);
+static uint32_t rvalue(cc *c, uint32_t n);
+
 /* implicit conversion of an rvalue (already decayed) to type to */
 static uint32_t convert(cc *c, uint32_t n, qty to)
 {
@@ -2172,6 +2205,12 @@ static uint32_t convert(cc *c, uint32_t n, qty to)
 	to = QUNQ(to);
 	if (QI(canon(c, from)) == QI(canon(c, to)) && !bitfield_of(c, n))
 		return n;
+	if (is_complex(c, to) && (is_arith(c, from) || is_complex(c, from)))
+		return to_complex(c, n, to);
+	if (is_complex(c, from) && KIND(c, to) == TY_BOOL)
+		return cplx_bool(c, n);
+	if (is_complex(c, from) && is_arith(c, to))	/* the real part */
+		return convert(c, rvalue(c, cplx_part(c, n, 0)), to);
 	k = conv_kind(c, from, to, n);
 	if (k < 0) {
 		if (KIND(c, to) == TY_UNION && union_member_for(c, to, n))
@@ -2207,8 +2246,6 @@ static void need_lvalue(cc *c, uint32_t n, const char *what)
 		error(c, N(n)->loc, "expression is not assignable (%s)", what);
 }
 
-/* ---------------- expressions: operators ---------------- */
-
 static uint32_t mk_bin(cc *c, int op, qty ty, uint32_t a, uint32_t b, uint32_t loc)
 {
 	uint32_t r = mk2(c, N_BINARY, ty, loc, a, b);
@@ -2216,6 +2253,263 @@ static uint32_t mk_bin(cc *c, int op, qty ty, uint32_t a, uint32_t b, uint32_t l
 	N(r)->aux = (uint16_t)op;
 	return r;
 }
+
+/* ---------------- _Complex ---------------- */
+
+/*
+ * _Complex T is the record { T re, im; } (RF_COMPLEX): its layout and its
+ * AAPCS64 passing (an HFA for float and double) are a struct's.  The
+ * arithmetic is lowered here to the parts: N_CPLX builds a value from them,
+ * a part is an N_MEMBER.  An operand used more than once that is not a
+ * plain expression is assigned to a temporary first (an N_COMMA).
+ */
+static uint32_t tag_new(cc *c, int kind, uint32_t name, uint32_t loc);
+
+static qty cplx_elem(cc *c, qty t) { return c->tags[T(c, t)->aux].f[0].ty; }
+
+static qty ty_complex(cc *c, qty et)
+{
+	int k;
+
+	et = QUNQ(canon(c, et));
+	if (KIND(c, et) == TY_ENUM)
+		et = QUNQ(T(c, et)->base);
+	k = KIND(c, et);
+	if (!c->cplx[k]) {
+		uint32_t ti = tag_new(c, TY_STRUCT, 0, 0);
+		tag *r = &c->tags[ti];
+
+		r->nfield = 2;
+		r->f = halloc(c, 2 * sizeof(field));
+		memset(r->f, 0, 2 * sizeof(field));
+		r->f[0].ty = r->f[1].ty = prim(k);
+		r->f[1].off = 8 * ty_size(c, prim(k));
+		r->flags |= RF_COMPLETE | RF_COMPLEX;
+		lay_record(c, r, NULL, NULL);
+		c->cplx[k] = r->ty;
+	}
+	return QT(c->cplx[k], 0);
+}
+
+static uint32_t mk_cplx(cc *c, qty t, uint32_t re, uint32_t im, uint32_t loc)
+{
+	return mk2(c, N_CPLX, QUNQ(t), loc, re, im);
+}
+
+static uint32_t zero_of(cc *c, qty t, uint32_t loc)
+{
+	return is_float(c, t) ? mk_flt(c, 0, QUNQ(t), loc) : mk_int(c, 0, QUNQ(t), loc);
+}
+
+/* evaluating n twice is the same as once (and cheap) */
+static bool cplx_pure(cc *c, uint32_t n, int d)
+{
+	const node *x = N(n);
+
+	if (d > 8)
+		return false;
+	switch (x->op) {
+	case N_NUM: case N_FNUM:
+		return true;
+	case N_VAR:
+		return !(QQ(x->ty) & Q_VOLATILE);
+	case N_MEMBER: case N_CAST: case N_UNARY: case N_DEREF:
+		return !(QQ(x->ty) & Q_VOLATILE) && cplx_pure(c, x->a, d + 1);
+	case N_BINARY: case N_INDEX: case N_CPLX:
+		return cplx_pure(c, x->a, d + 1) && cplx_pure(c, x->b, d + 1);
+	default:
+		return false;
+	}
+}
+
+/* n, or a temporary holding it (*pre: the assignment to run first) */
+static uint32_t cplx_reuse(cc *c, uint32_t n, uint32_t *pre)
+{
+	qty t = QUNQ(N(n)->ty);
+	uint32_t s, v;
+
+	*pre = 0;
+	if (cplx_pure(c, n, 0))
+		return n;
+	s = sym_new(c, S_VAR, 0, t, N(n)->loc);
+	c->syms[s].sc = SC_AUTO;
+	v = mk(c, N_VAR, t, N(n)->loc);
+	N(v)->a = s;
+	N(v)->flags = NF_LVALUE;
+	*pre = mk2(c, N_ASSIGN, t, N(n)->loc, v, n);
+	return v;
+}
+
+static uint32_t with_pre(cc *c, uint32_t pre, uint32_t n)
+{
+	return pre ? mk2(c, N_COMMA, N(n)->ty, N(n)->loc, pre, n) : n;
+}
+
+/* part k (0 real, 1 imaginary) of complex n */
+static uint32_t cplx_part(cc *c, uint32_t n, int k)
+{
+	qty t = N(n)->ty;
+	uint32_t m;
+
+	if (N(n)->op == N_CPLX)
+		return k ? N(n)->b : N(n)->a;
+	m = mk(c, N_MEMBER, qualify(c, cplx_elem(c, t), QQ(t)), N(n)->loc);
+	N(m)->a = n;
+	N(m)->b = T(c, t)->aux;
+	N(m)->c = (uint32_t)k;
+	N(m)->flags = N(n)->flags & NF_LVALUE;
+	return m;
+}
+
+/* both parts of complex n, each usable more than once */
+static void cplx_parts(cc *c, uint32_t n, uint32_t *re, uint32_t *im, uint32_t *pre)
+{
+	if (N(n)->op == N_CPLX && !cplx_pure(c, n, 0)) {
+		uint32_t p1, p2;
+
+		*re = cplx_reuse(c, N(n)->a, &p1);
+		*im = cplx_reuse(c, N(n)->b, &p2);
+		*pre = p1 && p2 ? mk2(c, N_COMMA, N(*im)->ty, N(n)->loc, p1, p2) : p1 ? p1 : p2;
+		return;
+	}
+	n = cplx_reuse(c, n, pre);
+	*re = cplx_part(c, n, 0);
+	*im = cplx_part(c, n, 1);
+}
+
+static uint32_t convert(cc *c, uint32_t n, qty to);
+
+/* an arithmetic or complex rvalue as complex type t */
+static uint32_t to_complex(cc *c, uint32_t n, qty t)
+{
+	qty et = cplx_elem(c, t);
+	uint32_t loc = N(n)->loc;
+
+	if (is_complex(c, N(n)->ty)) {
+		uint32_t re, im, pre = 0;
+
+		if (QI(canon(c, N(n)->ty)) == QI(canon(c, t)))
+			return n;
+		if (N(n)->op == N_CPLX) {
+			re = N(n)->a, im = N(n)->b;
+		} else {
+			n = cplx_reuse(c, n, &pre);
+			re = cplx_part(c, n, 0), im = cplx_part(c, n, 1);
+		}
+		return with_pre(c, pre, mk_cplx(c, t, convert(c, rvalue(c, re), et), convert(c, rvalue(c, im), et), loc));
+	}
+	return mk_cplx(c, t, convert(c, n, et), zero_of(c, et, loc), loc);
+}
+
+/* complex n != 0 */
+static uint32_t cplx_bool(cc *c, uint32_t n)
+{
+	uint32_t re, im, pre, loc = N(n)->loc;
+	qty et = cplx_elem(c, N(n)->ty);
+
+	cplx_parts(c, n, &re, &im, &pre);
+	re = mk_bin(c, T_EXCLAIMEQ, prim(TY_INT), re, zero_of(c, et, loc), loc);
+	im = mk_bin(c, T_EXCLAIMEQ, prim(TY_INT), im, zero_of(c, et, loc), loc);
+	return with_pre(c, pre, mk2(c, N_LOGOR, prim(TY_INT), loc, re, im));
+}
+
+/* a condition: complex values test both parts */
+static uint32_t scalar_cond(cc *c, uint32_t n, const char *what)
+{
+	if (is_complex(c, N(n)->ty))
+		return cplx_bool(c, n);
+	need_scalar(c, n, what);
+	return n;
+}
+
+static uint32_t neg(cc *c, uint32_t n)
+{
+	uint32_t r = mk(c, N_UNARY, N(n)->ty, N(n)->loc);
+
+	N(r)->aux = T_MINUS;
+	N(r)->a = n;
+	return r;
+}
+
+/* l op r with a complex operand: + - * / == != on the parts */
+static uint32_t cplx_binop(cc *c, int op, uint32_t l, uint32_t r, uint32_t loc)
+{
+	qty lt = N(l)->ty, rt = N(r)->ty;
+	bool lc = is_complex(c, lt), rc = is_complex(c, rt);
+	qty le = lc ? cplx_elem(c, lt) : lt, re_ = rc ? cplx_elem(c, rt) : rt, et, ct;
+	uint32_t a, b = 0, cr, d = 0, p1 = 0, p2 = 0, x, y;
+
+	if (!is_arith(c, le) || !is_arith(c, re_) ||
+	    !(op == T_PLUS || op == T_MINUS || op == T_STAR || op == T_SLASH || op == T_EQUALEQUAL || op == T_EXCLAIMEQ)) {
+		error(c, loc, "invalid operands to binary expression");
+		return mk_int(c, 0, prim(TY_INT), loc);
+	}
+	et = arith_conv(c, promote(c, QUNQ(le)), promote(c, QUNQ(re_)));
+	ct = ty_complex(c, et);
+	if (lc)
+		cplx_parts(c, to_complex(c, l, ct), &a, &b, &p1);
+	else
+		a = cplx_reuse(c, convert(c, l, et), &p1);
+	if (rc)
+		cplx_parts(c, to_complex(c, r, ct), &cr, &d, &p2);
+	else
+		cr = cplx_reuse(c, convert(c, r, et), &p2);
+#define B(o, u, v) mk_bin(c, o, et, u, v, loc)
+	switch (op) {
+	case T_PLUS: case T_MINUS:
+		x = B(op, a, cr);
+		y = !lc ? (op == T_MINUS ? neg(c, d) : d) : !rc ? b : B(op, b, d);
+		break;
+	case T_STAR:
+		if (!lc)
+			x = B(T_STAR, a, cr), y = B(T_STAR, a, d);
+		else if (!rc)
+			x = B(T_STAR, a, cr), y = B(T_STAR, b, cr);
+		else
+			x = B(T_MINUS, B(T_STAR, a, cr), B(T_STAR, b, d)), y = B(T_PLUS, B(T_STAR, a, d), B(T_STAR, b, cr));
+		break;
+	case T_SLASH:
+		if (!rc) {
+			x = B(T_SLASH, a, cr), y = B(T_SLASH, b, cr);
+		} else {
+			uint32_t den = B(T_PLUS, B(T_STAR, cr, cr), B(T_STAR, d, d));
+
+			if (!lc) {
+				x = B(T_SLASH, B(T_STAR, a, cr), den);
+				y = B(T_SLASH, neg(c, B(T_STAR, a, d)), den);
+			} else {
+				x = B(T_SLASH, B(T_PLUS, B(T_STAR, a, cr), B(T_STAR, b, d)), den);
+				y = B(T_SLASH, B(T_MINUS, B(T_STAR, b, cr), B(T_STAR, a, d)), den);
+			}
+		}
+		break;
+	default: {	/* == != */
+		int lop = op == T_EQUALEQUAL ? N_LOGAND : N_LOGOR;
+		uint32_t z = zero_of(c, et, loc);
+
+		x = mk_bin(c, op, prim(TY_INT), a, cr, loc);
+		y = mk_bin(c, op, prim(TY_INT), lc ? b : z, rc ? d : z, loc);
+		return with_pre(c, p1, with_pre(c, p2, mk2(c, lop, prim(TY_INT), loc, x, y)));
+	}
+	}
+#undef B
+	return with_pre(c, p1, with_pre(c, p2, mk_cplx(c, ct, x, y, loc)));
+}
+
+/* -x, ~x (conjugate), +x of a complex x */
+static uint32_t cplx_unary(cc *c, int op, uint32_t n, uint32_t loc)
+{
+	uint32_t re, im, pre;
+	qty t = QUNQ(N(n)->ty);
+
+	if (op == T_PLUS)
+		return n;
+	cplx_parts(c, n, &re, &im, &pre);
+	return with_pre(c, pre, mk_cplx(c, t, op == T_MINUS ? neg(c, re) : re, neg(c, im), loc));
+}
+
+/* ---------------- expressions: operators ---------------- */
+
 
 static bool is_cmp(int op)
 {
@@ -2228,13 +2522,14 @@ static uint32_t binop(cc *c, int op, uint32_t l, uint32_t r, uint32_t loc)
 	qty lt, rt;
 
 	if (op == T_AMPAMP || op == T_PIPEPIPE) {
-		l = decay(c, l), r = decay(c, r);
-		need_scalar(c, l, "logical operator");
-		need_scalar(c, r, "logical operator");
+		l = scalar_cond(c, decay(c, l), "logical operator");
+		r = scalar_cond(c, decay(c, r), "logical operator");
 		return mk2(c, op == T_AMPAMP ? N_LOGAND : N_LOGOR, prim(TY_INT), loc, l, r);
 	}
 	l = rvalue(c, l), r = rvalue(c, r);
 	lt = N(l)->ty, rt = N(r)->ty;
+	if (is_complex(c, lt) || is_complex(c, rt))
+		return cplx_binop(c, op, l, r, loc);
 	if (is_vector(c, lt) || is_vector(c, rt)) {
 		/* lane-wise: two vectors of one size, or a vector and a scalar (each lane against it);
 		 * comparisons give the signed integer vector of the same lanes (-1 / 0) */
@@ -2306,6 +2601,8 @@ static uint32_t assign(cc *c, int op, uint32_t l, uint32_t r, uint32_t loc)
 	if (QQ(N(l)->ty) & Q_CONST)
 		error(c, loc, "cannot assign to variable with const-qualified type");
 	r = decay(c, r);
+	if (op && (is_complex(c, lt) || is_complex(c, N(r)->ty)))	/* l = l op r (l evaluated twice) */
+		return assign(c, 0, l, cplx_binop(c, op, rvalue(c, l), rvalue(c, r), loc), loc);
 	if (!op) {
 		r = convert(c, r, lt);
 		n = mk2(c, N_ASSIGN, lt, loc, l, r);
@@ -2348,7 +2645,11 @@ static uint32_t conditional(cc *c, uint32_t cond, uint32_t a, uint32_t b, uint32
 	ra = a ? rvalue(c, a) : rvalue(c, cond);
 	rb = rvalue(c, b);
 	at = N(ra)->ty, bt = N(rb)->ty;
-	if (is_arith(c, at) && is_arith(c, bt)) {
+	if ((is_complex(c, at) || is_complex(c, bt)) && (is_arith(c, at) || is_complex(c, at)) &&
+	    (is_arith(c, bt) || is_complex(c, bt))) {
+		t = ty_complex(c, arith_conv(c, is_complex(c, at) ? cplx_elem(c, at) : at, is_complex(c, bt) ? cplx_elem(c, bt) : bt));
+		ra = convert(c, ra, t), rb = convert(c, rb, t);
+	} else if (is_arith(c, at) && is_arith(c, bt)) {
 		t = arith_conv(c, at, bt);
 		ra = convert(c, ra, t), rb = convert(c, rb, t);
 	} else if (is_void(c, at) || is_void(c, bt)) {
@@ -2900,6 +3201,20 @@ static uint32_t builtin_call(cc *c, const builtin *b, uint32_t loc)
 	case BI_ATOMIC_FETCH_XOR: case BI_ATOMIC_ADD_FETCH: case BI_ATOMIC_SUB_FETCH: case BI_ATOMIC_AND_FETCH:
 	case BI_ATOMIC_OR_FETCH: case BI_ATOMIC_XOR_FETCH:
 		return atomic_call(c, b, loc);
+	case BI_CONJ: case BI_CREAL: case BI_CIMAG: {
+		qty ct = ty_complex(c, sigtype(c, b->sig[0]));
+		uint32_t a;
+
+		args_list(c, &args);
+		if (args.n != 1) {
+			error(c, loc, "too %s arguments to function call", args.n ? "many" : "few");
+			return mk_int(c, 0, prim(TY_INT), loc);
+		}
+		a = convert(c, rvalue(c, args.v[0]), ct);
+		if (b->id == BI_CONJ)
+			return cplx_unary(c, T_TILDE, a, loc);
+		return rvalue(c, cplx_part(c, a, b->id == BI_CIMAG));
+	}
 	case BI_COUNTED_BY_REF: {
 		uint32_t m;
 
@@ -3449,6 +3764,8 @@ static uint32_t unary(cc *c)
 
 		next(c);
 		n = rvalue(c, cast_expr(c));
+		if (is_complex(c, N(n)->ty))
+			return cplx_unary(c, op, n, loc);
 		if (is_vector(c, N(n)->ty) ? op == T_TILDE && !is_integer(c, T(c, N(n)->ty)->base)
 		    : !is_arith(c, N(n)->ty) || (op == T_TILDE && !is_integer(c, N(n)->ty)))
 			error(c, loc, "invalid argument type to unary expression");
@@ -3464,8 +3781,7 @@ static uint32_t unary(cc *c)
 		uint32_t r;
 
 		next(c);
-		n = rvalue(c, cast_expr(c));
-		need_scalar(c, n, "'!'");
+		n = scalar_cond(c, rvalue(c, cast_expr(c)), "'!'");
 		r = mk(c, N_UNARY, prim(TY_INT), loc);
 		N(r)->aux = T_EXCLAIM;
 		N(r)->a = n;
@@ -3536,13 +3852,21 @@ static uint32_t unary(cc *c)
 	case KW___extension__:
 		next(c);
 		return cast_expr(c);
-	case KW___real__:
-	case KW___imag__:
+	case KW___real__: case KW___real:
+	case KW___imag__: case KW___imag: {
+		bool im = kw == KW___imag__ || kw == KW___imag;
+
 		next(c);
 		n = cast_expr(c);
-		if (kw == KW___imag__)
-			return mk_int(c, 0, QUNQ(N(n)->ty), loc);
+		if (is_complex(c, N(n)->ty))
+			return cplx_part(c, n, im);
+		n = rvalue(c, n);
+		if (!is_arith(c, N(n)->ty))
+			error(c, loc, "invalid type '%s' to %s operator", "", im ? "__imag" : "__real");
+		if (im)	/* of a real value: 0 (the operand still evaluated) */
+			return mk2(c, N_COMMA, QUNQ(N(n)->ty), loc, n, zero_of(c, N(n)->ty, loc));
 		return n;
+	}
 	default:
 		return postfix(c, primary(c));
 	}
@@ -3572,6 +3896,16 @@ static uint32_t explicit_cast(cc *c, uint32_t n, qty to, uint32_t loc)
 			return n;
 		}
 		return cast_node(c, from, QUNQ(to), is_vector(c, to) ? CK_UNION : CK_VBITS);
+	}
+	if (is_complex(c, to) || (is_complex(c, N(n)->ty) && is_arith(c, to))) {
+		uint32_t r;
+
+		if (!is_arith(c, N(n)->ty) && !is_complex(c, N(n)->ty)) {
+			error(c, loc, "used type where arithmetic or pointer type is required");
+			return n;
+		}
+		r = convert(c, rvalue(c, n), QUNQ(to));
+		return r;
 	}
 	if (!is_scalar(c, to) && !compatible(c, to, N(n)->ty)) {
 		error(c, loc, "used type where arithmetic or pointer type is required");
@@ -3662,7 +3996,7 @@ static uint32_t cond_expr(cc *c)
 		uint32_t loc = tok(c)->loc, a = 0, b;
 
 		next(c);
-		need_scalar(c, decay(c, cnd), "conditional");
+		cnd = scalar_cond(c, decay(c, cnd), "conditional");
 		if (!is(c, T_COLON))
 			a = expr(c);
 		expect(c, T_COLON, "':'");
@@ -4041,7 +4375,7 @@ static bool is_type_start(cc *c, const ptok *t)
 {
 	switch (kwof(t)) {
 	case KW_void: case KW_char: case KW_short: case KW_int: case KW_long: case KW_float:
-	case KW_double: case KW_signed: case KW_unsigned: case KW__Bool: case KW__Complex:
+	case KW_double: case KW_signed: case KW_unsigned: case KW__Bool: case KW__Complex: case KW___complex__: case KW___complex:
 	case KW_struct: case KW_union: case KW_enum: case KW_const: case KW_volatile:
 	case KW_restrict: case KW__Atomic: case KW_typeof: case KW___typeof__: case KW___typeof:
 	case KW___typeof_unqual__: case KW___const__: case KW___const: case KW___signed__:
@@ -4349,7 +4683,7 @@ static bool decl_specs(cc *c, dspec *ds, bool allow_sc)
 			sgn = -1;
 			any = true;
 			break;
-		case KW__Complex:
+		case KW__Complex: case KW___complex__: case KW___complex:
 			cplx = true;
 			any = true;
 			break;
@@ -4430,7 +4764,14 @@ done:
 			error(c, ds->loc, "type specifier missing, defaults to 'int'; ISO C99 and later do not support implicit int");
 		ds->ty = int_type(c, nlong, sgn, base, ds->loc);
 	}
-	(void)cplx;
+	if (cplx) {
+		if (!base && !nlong && !sgn && !have_named)
+			ds->ty = prim(TY_DOUBLE);	/* plain _Complex: double (GNU) */
+		if (!is_arith(c, ds->ty))
+			error(c, ds->loc, "_Complex requires an arithmetic element type");
+		else
+			ds->ty = ty_complex(c, ds->ty);
+	}
 	if (ds->at.mode) {
 		int k = mode_kind(c, ds->at.mode, is_signed(c, ds->ty));
 
@@ -5187,7 +5528,7 @@ static void il_elem(cc *c, ilist *l, uint64_t pos, uint32_t v, bool st)
 		il_set(c, l, pos, v, NULL);	/* string literal */
 		return;
 	}
-	il_set(c, l, pos, is_record(c, et) ? v : convert(c, decay(c, v), et), NULL);
+	il_set(c, l, pos, is_record(c, et) && !is_complex(c, et) ? v : convert(c, decay(c, v), et), NULL);
 }
 
 /* a designation starts here: ".f", "[i]" or the old GNU "f:" */
@@ -6098,8 +6439,7 @@ static uint32_t cond_of(cc *c)
 	expect(c, T_LPAREN, "'('");
 	e = decay(c, expr(c));
 	expect(c, T_RPAREN, "')'");
-	need_scalar(c, e, "statement");
-	return e;
+	return scalar_cond(c, e, "statement");
 }
 
 static uint32_t asm_string(cc *c)
@@ -6426,8 +6766,7 @@ static uint32_t statement(cc *c)
 			expect(c, T_SEMI, "';'");
 		}
 		if (!is(c, T_SEMI)) {
-			cnd = decay(c, expr(c));
-			need_scalar(c, cnd, "for");
+			cnd = scalar_cond(c, decay(c, expr(c)), "for");
 		}
 		expect(c, T_SEMI, "';'");
 		if (!is(c, T_RPAREN))
@@ -6953,6 +7292,7 @@ static void cc_init(cc *c, pp *p, const cc_opts *o)
 	memset(c->fnhash, 0, c->fnhcap * sizeof(uint32_t));
 	/* index 0 of every table is "none" */
 	c->nsym = c->nnode = c->ntag = c->nlabel = c->nattr = c->nstr = 1;
+	memset(c->cplx, 0, sizeof(c->cplx));
 	c->nlist = 1;
 	/* basic types: index == kind */
 	for (int k = 0; k < TY_PTR; k++) {

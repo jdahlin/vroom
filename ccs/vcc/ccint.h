@@ -86,6 +86,7 @@ struct cc {
 
 	tag *tags;
 	uint32_t ntag;
+	uint32_t cplx[TY_NKINDS];	/* _Complex <kind>: its record type (0: not made yet) */
 	sym *syms;
 	uint32_t nsym;
 	node *nodes;
@@ -167,6 +168,7 @@ enum {
 	BI_ATOMIC_FETCH_ADD, BI_ATOMIC_FETCH_SUB, BI_ATOMIC_FETCH_AND, BI_ATOMIC_FETCH_OR, BI_ATOMIC_FETCH_XOR,
 	BI_ATOMIC_ADD_FETCH, BI_ATOMIC_SUB_FETCH, BI_ATOMIC_AND_FETCH, BI_ATOMIC_OR_FETCH, BI_ATOMIC_XOR_FETCH,
 	BI_ATOMIC_THREAD_FENCE, BI_ATOMIC_SIGNAL_FENCE, BI_ATOMIC_LOCK_FREE,
+	BI_CONJ, BI_CREAL, BI_CIMAG,	/* complex parts (the element type is the signature's return) */
 	BI_LIB,	/* plain library call with a prototype */
 	BI_COUNT
 };
