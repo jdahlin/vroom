@@ -25,8 +25,11 @@ assembler, linker, behind `vcc`/`vas`/`vld` shims and the `vccd` server.
   - `vcc/cc.c`: parser + sema (GNU C11, clang's layout and constant rules).
   - `vcc/vpp.c`: preprocessor driver for parity tests.
   - `vcc/shim.c`, `vccd.c`, `caps.c`: the compiler shim and server.
+  - `vcc/ar.c`: the archiver (thin archives, llvm-ar-identical), run by
+    vccd when the shim is called as `var`; the build uses no llvm-ar.
 - `bench/`: harnesses.  `bench/vcc-diff.py` compares `vpp` with `clang -E`;
-  `bench/vcc-sema.py` runs the front end and has clang verify its claims.
+  `bench/vcc-sema.py` runs the front end and has clang verify its claims;
+  `bench/vccd-cc.py` drives a private vccd with `-c` jobs.
 - `work/` (git-ignored, case-sensitive sparsebundle): kernel source in
   `work/linux`, build tree in `work/build-o0` (TU command lines in
   `**/.*.o.cmd`), clang reference outputs in `work/ppref/`.
@@ -39,11 +42,55 @@ bench/vcc-diff.py cmp -j 6 --kernel # preprocessor parity, kernel TUs
 bench/vcc-diff.py cmp -j 6          # ... including host tools (scripts/)
 bench/vcc-sema.py run -j 6          # vpp -fsyntax-only on every C TU
 bench/vcc-sema.py layout -j 6       # layouts/constants/decl types checked by clang (~70 s)
+bench/var-cmp.py work/build-x       # vcc ar against llvm-ar on an llvm-ar-built tree
 ```
 Parity is a token-stream comparison (kind and spelling) of `clang -E -P`
 against `vpp`, both lexed by vcc's lexer.  A change to `pp.c` or `lex.c` is
 only done when the parity run is fully green; a change to `cc.c` when both
 vcc-sema.py runs are green (878/879: modpost.c lacks a generated header).
+
+## Sanitizers
+```
+make -C ccs -j 6 vcc-asan           # -fsanitize=address,undefined -> build/ccs-asan/
+make -C ccs -j 6 vcc-tsan           # -fsanitize=thread            -> build/ccs-tsan/
+export UBSAN_OPTIONS=halt_on_error=1:print_stacktrace=1   # UB fails the TU
+bench/vcc-sema.py run -j 6 --bin-dir build/ccs-asan       # any harness importing vcc-diff.py
+bench/vcc-diff.py batch -j 6 --cmp --kernel --bin-dir build/ccs-tsan   # shared header cache, 6 threads
+bench/vcc-cbatch.py -j 6 --bin-dir build/ccs-tsan         # -c in one process, as vccd
+bench/vccd-cc.py --bin-dir build/ccs-tsan                 # vccd itself, 150 TUs; report in $LOG
+```
+Both variants are `-O1 -g` with their own `obj/`; the normal build is
+unchanged.  `--bin-dir DIR` (or `VCC_BIN=DIR`) picks the tools in every
+harness that imports `vcc-diff.py`.  The big reservations (16 GB shared pp
+region, 4 GB NORESERVE arenas) need no special handling.  A TSan batch takes
+65-100 s (15-20x the normal build), an ASan suite 12-25 s.  Limits: ASan does
+not see over-reads inside our own mmap'ed arenas (they are never poisoned),
+only in malloc, globals and the stack.  Contract that ASan checks: strings
+handed to `vintern*`/`vlex_get` must be readable 16 (or 8) bytes past their
+length (`vintern_cstr` pads a literal).  No suppressions are needed today;
+put any in `ccs/tsan.supp`, one reason per entry, and run with
+`TSAN_OPTIONS=suppressions=$PWD/ccs/tsan.supp`.
+
+## Fuzzing (`ccs/fuzz/`)
+Targets build with Homebrew LLVM's libFuzzer and ASan+UBSan into
+`build/ccs/fuzz/` (without libFuzzer, `driver.c` gives the same command line
+minus coverage feedback).
+- `fuzz-lex`: vlex on raw bytes; checks token-array invariants, spelling,
+  interning, NEON vs a scalar build of lex.c (`lexref.c`), buffer alignment.
+- `fuzz-pp`: one in-memory TU served by `vlex_get_hook`: main `\x01` a.h
+  `\x01` b.h `\x01` sys/c.h, leading `\x02` for asm mode.
+  `FUZZ_PP_PRINT=1` prints output and diagnostics.
+```
+make -C ccs fuzz                    # build both targets
+ccs/fuzz/gen-corpus.py              # seed corpora from work/linux headers -> build/ccs/fuzz/corpus
+cd build/ccs/fuzz && ./fuzz-pp -fork=2 -max_total_time=180 -dict=../../../ccs/fuzz/c.dict \
+    -max_len=4096 -timeout=5 -artifact_prefix=art/ run-pp corpus/pp   # same for fuzz-lex
+make -C ccs fuzz-regress            # replay ccs/fuzz/regress/{lex,pp}
+make -C ccs fuzz-diff               # vpp vs clang -E -P on regress + seeds
+ccs/fuzz/pp-diff.py -j 4 DIR...     # ... on any corpus; mismatches -> build/ccs/fuzz/diff/
+```
+Keep runs to minutes with `-fork=2`.  Every fixed finding gets a minimal
+input in `regress/lex` or `regress/pp`.
 
 ## Working conventions
 - Commit after each completed step (small, self-contained commits with a

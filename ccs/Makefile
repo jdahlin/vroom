@@ -49,13 +49,16 @@ HOST_LIBS  = -lm
 HOST_CPU  ?= $(if $(shell grep -qm1 'implementer.*0x61' /proc/cpuinfo && echo y),-mcpu=apple-m1,-mcpu=native)
 endif
 VCC_CC     = $(CCACHE) $(HOST_CC)
-VCC_CFLAGS = -std=c11 -O2 -Wall -Wextra -Wno-unused-parameter $(HOST_DEFS) -DVCC_INCDIR='"$(abspath vcc/include)"'
-VCC_FAST   = $(VCC_CFLAGS) -O3 $(HOST_CPU) -pthread
+# VCC_SAN/VCC_OPT: set by the sanitizer variants (vcc-asan, vcc-tsan below)
+VCC_SAN   ?=
+VCC_OPT   ?= -O3 $(HOST_CPU)
+VCC_CFLAGS = -std=c11 -O2 -Wall -Wextra -Wno-unused-parameter $(HOST_DEFS) -DVCC_INCDIR='"$(abspath vcc/include)"' $(VCC_SAN)
+VCC_FAST   = $(VCC_CFLAGS) $(VCC_OPT) -pthread
 # -O3 also at link time: the driver passes it to ld, which then folds code
-VCC_LDFLAGS = -O3
+VCC_LDFLAGS = -O3 $(VCC_SAN)
 OBJ        = $(OUT)/obj
 
-vcc: $(OUT)/vcc $(OUT)/vld $(OUT)/vas $(OUT)/vccd $(OUT)/lextest $(OUT)/vpp $(OUT)/vlink $(OUT)/vasm
+vcc: $(OUT)/vcc $(OUT)/vld $(OUT)/vas $(OUT)/var $(OUT)/vccd $(OUT)/lextest $(OUT)/vpp $(OUT)/vlink $(OUT)/vasm
 
 o = $(patsubst vcc/%.c,$(OBJ)/%.o,$(1))
 AS_SRC  = vcc/as.c vcc/a64.c vcc/elf.c vcc/macho.c
@@ -75,7 +78,7 @@ $(OBJ)/ld.o: XFLAGS = -DVLD_MAIN
 $(OUT)/vpp: $(call o,vcc/vpp.c $(PP_SRC) $(LEX_SRC) $(AS_SRC))
 	$(VCC_CC) $(VCC_LDFLAGS) -pthread $^ -o $@ $(HOST_LIBS)
 
-$(OUT)/vccd: $(call o,vcc/vccd.c vcc/caps.c $(PP_SRC) $(LEX_SRC) $(AS_SRC))
+$(OUT)/vccd: $(call o,vcc/vccd.c vcc/caps.c vcc/fixdep.c vcc/ar.c $(PP_SRC) $(LEX_SRC) $(AS_SRC))
 	$(VCC_CC) $(VCC_LDFLAGS) -pthread $^ -o $@ $(HOST_LIBS)
 
 $(OUT)/lextest: $(patsubst vcc/%.c,$(OBJ)/no/%.o,vcc/lextest.c vcc/pmc.c $(LEX_SRC))
@@ -93,13 +96,25 @@ $(OUT)/vlink: $(call o,$(LD_SRC))
 $(OUT)/vcc: vcc/shim.c protocol.h | $(OUT)
 	$(VCC_CC) $(VCC_CFLAGS) $< -o $@
 
-$(OUT)/vld $(OUT)/vas: $(OUT)/vcc
+$(OUT)/vld $(OUT)/vas $(OUT)/var: $(OUT)/vcc
 	ln -sf vcc $@
 
 $(OBJ):
 	mkdir -p $@ $@/no
 
 -include $(wildcard $(OBJ)/*.d $(OBJ)/no/*.d)
+
+# ---- sanitizer variants of the vcc tools (AGENTS.md, "Sanitizers") ----
+# Own OUT (and so own obj/), -O1 -g; the normal build is unchanged.
+SAN_COMMON = -O1 -g -fno-omit-frame-pointer -Wno-deprecated-declarations
+vcc-asan:
+	$(MAKE) vcc OUT=$(OUT)-asan VCC_OPT="-O1 $(HOST_CPU)" \
+		VCC_SAN="$(SAN_COMMON) -fsanitize=address,undefined"
+vcc-tsan:
+	$(MAKE) vcc OUT=$(OUT)-tsan VCC_OPT="-O1 $(HOST_CPU)" \
+		VCC_SAN="$(SAN_COMMON) -fsanitize=thread"
+
+.PHONY: vcc-asan vcc-tsan
 
 # self: vcc compiles its own sources (Mach-O) and ld64 links stage 2 into
 # $(SELF); self-check builds stage 3 with stage 2 and requires identical objects.
@@ -130,3 +145,44 @@ self-check: self
 	@echo "self-check: stage 2 and stage 3 objects identical"
 
 .PHONY: self self-check
+
+# ---- fuzzing (fuzz/; see AGENTS.md) ----
+# libFuzzer from Homebrew LLVM when it has one, else the standalone driver
+# (fuzz/driver.c: replay + blind mutation) with Apple clang.
+FUZZ_LIBFUZZER := $(wildcard $(LLVM)/lib/clang/*/lib/darwin/libclang_rt.fuzzer_osx.a)
+ifneq ($(FUZZ_LIBFUZZER),)
+FUZZ_CC = $(LLVM)/bin/clang
+FUZZ_ENGINE = -fsanitize=fuzzer
+FUZZ_DRIVER =
+else
+FUZZ_CC = /usr/bin/clang
+FUZZ_ENGINE =
+FUZZ_DRIVER = fuzz/driver.c
+endif
+FUZZ_CFLAGS = -std=gnu11 -g -O1 -mcpu=apple-m1 -D_DARWIN_C_SOURCE -pthread \
+	-fsanitize=address,undefined -fno-sanitize-recover=undefined -fno-omit-frame-pointer \
+	-Wall -Wno-unused-parameter
+FUZZ_OUT = $(OUT)/fuzz
+FUZZ_HDR = vcc/lex.h vcc/intern.h vcc/pp.h vcc/dircache.h
+
+fuzz: $(FUZZ_OUT)/fuzz-lex $(FUZZ_OUT)/fuzz-pp
+
+$(FUZZ_OUT):
+	mkdir -p $@
+
+$(FUZZ_OUT)/fuzz-lex: fuzz/fuzz-lex.c fuzz/lexref.c fuzz/fuzz.h $(FUZZ_DRIVER) $(LEX_SRC) $(FUZZ_HDR) | $(FUZZ_OUT)
+	$(FUZZ_CC) $(FUZZ_CFLAGS) $(FUZZ_ENGINE) fuzz/fuzz-lex.c fuzz/lexref.c $(FUZZ_DRIVER) $(LEX_SRC) -o $@
+
+$(FUZZ_OUT)/fuzz-pp: fuzz/fuzz-pp.c fuzz/fuzz.h $(FUZZ_DRIVER) vcc/pp.c vcc/dircache.c $(LEX_SRC) $(FUZZ_HDR) | $(FUZZ_OUT)
+	$(FUZZ_CC) $(FUZZ_CFLAGS) $(FUZZ_ENGINE) fuzz/fuzz-pp.c $(FUZZ_DRIVER) vcc/pp.c vcc/dircache.c $(LEX_SRC) -o $@
+
+# replay the regression inputs (fuzz/regress/{lex,pp}/): every one must pass
+fuzz-regress: fuzz
+	$(FUZZ_OUT)/fuzz-lex -runs=0 fuzz/regress/lex
+	$(FUZZ_OUT)/fuzz-pp -runs=0 -timeout=10 fuzz/regress/pp
+
+# the differential check (vpp against clang -E -P) on the regression and seed inputs
+fuzz-diff: $(OUT)/vpp
+	fuzz/pp-diff.py -j 4 fuzz/regress/pp fuzz/seeds/pp
+
+.PHONY: fuzz fuzz-regress fuzz-diff

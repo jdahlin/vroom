@@ -483,6 +483,22 @@ som aldrig flyr, fabs-icke-negativa flyttalslokaler.
 → **1708/1708 (100 %)**, 136 överhoppade (clang avvisar 69, clangs bygge
 klarar inte runtimen 34, tcc-specifika 32, kompilatorspecifikt 1).
 
+### Status fuzzning (2026-11-08): lexer och preprocessor
+- `ccs/fuzz/`: `fuzz-lex` och `fuzz-pp` (libFuzzer från Homebrew LLVM, ASan+UBSan; fristående drivare utan libFuzzer), korpus genererad ur kärnheaders (`gen-corpus.py`, inget kärntext incheckat), ordbok `c.dict`, differentiell kontroll mot `clang -E -P` (`pp-diff.py`), regressionsfall som `make -C ccs fuzz-regress` spelar upp. lex.c fick `vlex_get_hook` (filer ur minnet) och `VLEX_SCALAR` (skalär referens).
+- Fynd, rättade: (1) `vintern_copy` läste 16 byte ur nyckelords- och builtin-literaler (ASan, vid start); (2) fatalt fel i huvudfilen (obalanserad `#if`) gjorde `exit(1)` i `pp_open`, vilket hade dödat vccd: nu NULL; (3) `, ## __VA_ARGS__` tog bort kommat även när variadiska argumentet var tomt men angivet (`VA(x,)`); clang gör det bara när det är utelämnat.
+- Körningar: 3 min × 2 arbetare per mål; fuzz-lex utan fynd; fuzz-pp bara falsklarm från en egen kontroll (`#line 0` ger rad 0, borttagen); fynd (2) och (3) kom från seed-korpusen och pp-diff. En andra runda avbröts (maskinen upptagen). Paritet 911/912 (modpost.c) efter varje rättning.
+- **Kvar:** längre körningar när maskinen har lediga kärnor; pp-diff över hela fuzz-korpusen.
+
+### Status sanitizers (2026-11-08): ASan+UBSan och TSan, alla fynd rättade
+- `make -C ccs vcc-asan` / `vcc-tsan` (`-O1 -g`, egna `build/ccs-asan/`, `build/ccs-tsan/`; normalbyggets kommandon oförändrade). Harnessarna tar `--bin-dir DIR`/`VCC_BIN`; `bench/vccd-cc.py` kör 150 TU:er `-c` genom shimmen mot en egen vccd. De stora reservationerna (16 GB delad pp-region, 4 GB NORESERVE) fungerar utan ändringar. AGENTS.md, "Sanitizers".
+- Fynd, rättade (en commit var):
+  - ASan: nyckelords- och builtin-namn internades ur ovadderade literaler (`vintern_cstr`; fuzz-sessionen hittade samma); `pp_open` gav anroparens huvudfilssträng (malloc:ad jobbfil i `vpp --batch`) till `vlex_get`, som läser 8 byte förbi; lextest likadant. Kontraktet står i lex.h.
+  - TSan: `hc_mode` satte flaggan före `hc_mem_max` utan ordning, så en tråd kunde lagra i header-cachen utan tak (nu `pthread_once`), samma mönster i `dc_begin`; lata env-flaggor och `VPP_TIME`-räknare (`pp_stat_*`, `vdir_probes`) var vanliga `++` från alla trådar; `salloc` (16 GB-regionen) och dircache `dalloc` läste basen med vanlig load efter CAS; `file_line` skrev `nlines` icke-atomiskt även hos förloraren; as.c `names_ops` "benign race".
+  - Efter merge av diagnostikarbetet (ASan 7, TSan 19 felande TU:er i vcc-cbatch, 731 TSan-rapporter): `snap_restore` (deklarationscachen) tog snapshotens `c->cases` (malloc) och `c->span`, så alla TU:er som återställde samma snapshot realloc:ade samma block från flera trådar (heap-korruption) och skrev spans i en annan TU:s array; `sym.plb/ple` flyttades inte. Nu egna per TU, spans är en snapshotarray med flyttade platser, och `cc_free` släpper dem (2 GB adressrymd läckte per TU). Objekten byte-identiska med `VCC_NODC=1`.
+  - Header-cachens låsfria CAS-publicering, tokencachen, intern-tabellen och vlink:s trådpool gav inga rapporter.
+- **Acceptans** (efter merge av main): ASan+UBSan (`UBSAN_OPTIONS=halt_on_error=1`) och TSan: `vcc-diff.py cmp --kernel` 873/873, `batch --cmp` 873/873, `vcc-sema.py run` 878/879, `vcc-cbatch.py` 840/840, `vccd-cc.py` 174/175 (vDSO-skriptet ska till backend), lextest `bench -p`/`idcheck`, vlink `-r` + slutlänk och vobjcopy/vnm byte-identiska med normalbygget; 0 rapporter, inga suppressions (`ccs/tsan.supp` behövs inte). Normalbygget: `vcc-diff.py cmp` 911/912, `vcc-sema.py run`/`layout` 878/879. TSan-batch ~65–100 s, ASan 12–24 s per svit.
+- **Kvar:** ASan ser inte överläsningar inuti egna mmap-arenor (ogiftade); manuell förgiftning (`ASAN_POISON_MEMORY_REGION` bakom arenornas `used`) under `__has_feature(address_sanitizer)` vore nästa steg. Fuzzmålen kunde också byggas med TSan.
+
 ## Linux aarch64 som värd (påbörjat 2026-11-08)
 
 **Mål:** hela verktygskedjan (vcc, vccd, vld, vas) och kärnbygget körs på Linux aarch64
@@ -527,14 +543,30 @@ ingen emulering. Samma image fungerar i en qemu-system-aarch64-gäst med `-accel
 - Verifierat på Linux: kärn- och hostparitet 920/920, vcc-sema run och layout 887/887
   (median 94 ms), ctests 1706/1706, vcc-diag 63/63.
 
+- **vccd-kärnbygge på Linux (2026-11-08):** `env/linux/run.sh sh bench/vccd-kbuild.sh
+  /vroom/work/build-vccd -j 8` (work/linux-pf, även den i volymen). vroomd byggs mot
+  Debians LLVM 23 (libclang-cpp23-dev). Verktygsvägar på Linux kommer från
+  `VROOM_LLVM_BIN` (Makefile: LLVM-katalogen för `clang` på PATH) i vccd, vroomd och
+  vroom-cc. vroom-ld letar på PATH. caps.c svarar `-print-file-name=include` med
+  VCC_RESDIR. Rättat: vroomds barn ärvde `SIGCHLD = SIG_IGN`, så Linux skördade
+  driverns cc1/ld själv och `waitpid` gav ECHILD; barnet återställer nu SIG_DFL.
+  Före merge av main (3ec10bf: ccsnap-återställda TU:er får egna span- och case-tabeller)
+  gav bygget på Linux slumpvisa "duplicate case value" och en glibc-malloc-assert, och på
+  macOS märktes inget. glibcs allokator återanvänder frigjort minne snabbare.
+  - Resultat: **877 kompilerade av vcc, 0 till clang** (två körningar). Kallt bygge
+    **8,2–8,3 s** (user 6 s, sys 2 s). Samma kod och träd på macOS med -j 8: 12,5–13,9 s
+    (user 9–10 s, sys 17–18 s, last ~4 från andra sessioner). Skillnaden är
+    systemtiden: process-spawn och fil-syscalls är billigare i Linux-VM:en. Image från
+    Linux **bootar Debian till `running`, 0 felande enheter** (`results/boot-20261108-184214.log`).
+  - Kärnobjekten är byte-identiska med Mac-bygget, utom versionssträngen (`7.4.0-rc1` mot
+    `-rc1+`: .git saknas i volymen) och vDSO:n (clang 23.1.6 mot 23.1.4 via vroomd).
+
 **Nästa:**
-1. vroom-build.sh och vccd-kbuild.sh på Linux: shims, vccd och vld i kärnbygget, och
-   uppmätt kall byggtid i containern. Host-TU:er via vccd kräver ELF-objekt som länkas
-   mot glibc.
-2. Boot-test: Image i qemu i containern. Där finns ingen KVM (M1 saknar nästlad
-   virtualisering), så det blir TCG. Alternativt qemu på macOS med hvf, som i dag.
-3. Mät: 16K-sidkärna (en VM med egen kärna, eller Asahi), huge pages för arenor, och
-   `perf stat` via pmc.c.
+1. Profilera bygget på Linux (perf finns; pmc.c via perf_event_open), nu när
+   systemtiden inte dominerar.
+2. Mät en 16K-sidkärna (egen VM-kärna) mot linuxkits 4K.
+3. vroom-build.sh (zsh, perl för tid) portabelt, och shimmen statisk utan libc-init på
+   Linux.
 
 ## Risker
 - **GNU C-ytan och inline asm** är det stora jobbet. Uppskattat: lexer + pp ~2 kloc,
@@ -545,6 +577,55 @@ ingen emulering. Samma image fungerar i en qemu-system-aarch64-gäst med `-accel
   ~1 000 jobb. Shimsens latens och make `-j` blir golvet.
 - **Mätbrus.** Maskinen används till annat. Bara A/B-mätningar körda direkt efter
   varandra jämförs.
+
+### Optimeringsrigg (2026-11-08): `bench/vbench.py`
+- Mått: **instruktioner** per tråd via `thread_selfcounts` (`ccs/vcc/vperf.h`, ingen root, ~1 600 instr per läsning), brus 0,03–0,6 % även med last 15; cykler/vägg bara i `ab` (alternerande). Räknarna inkluderar kärnläge (sidfel), därför är `emit` brusigare (~1–2 %).
+- `vpp --batch` fick `--warm N` och `--stats F` (per jobb: ms, instr, cykler, instr i cc_run/emit/obj).
+- Korpus `bench/vbench-corpus.txt`: 24 kärn-TU:er (16 kvantiler + emit- och parse-tunga), 9 `quick`.
+- Lägen: lex, pp, pphc, fe, cc, emit, real, as, ld. `check` hashar -E, tokenström, layout, objekt (med och utan cache), lexer, .S, vmlinux mot en bas (`mkbase REV`, cache i `work/vbench/golden/`).
+- Utgångsläge, full korpus, en tråd: lex 783 M, pp 8 074 M, pphc 7 187 M, fe 11 463 M, cc 12 080 M (emit 600 M, obj 14 M), real 11 212 M, as 57 M, ld 763 M instruktioner. Alla 840 TU:er `-c` utan cache: 330 G instr, varav pp ~86 % (med kall tokencache).
+- **Tio parallella optimeringsagenter (2026-11-08)**, en per bana (lexer, pp-makron, pp-direktiv, cc.c deklarationer / uttryck / symboler+tokens, emit, arenor, as/a64/elf, länkare), var och en i egen worktree mot bas 32bc779, regel: ≥ 1 % färre instruktioner och `vbench check` identisk. Alla tio sammanslagna; konflikter lösta mot arenornas `vmreg`-pooler (`ccs/vcc/arena.h`). En sammanslagningsbugg (två banor flyttade `dops` in i cc med olika snapshot-hantering → krasch med deklarationscachen) fångades av `check`. Fullt korpus, bas → nu (instruktioner / cykler):
+
+  | läge | bas M | nu M | instr | cykler |
+  |---|---|---|---|---|
+  | lex | 783 | 424 | −45,8 % | −26,5 % |
+  | pp | 8 066 | 3 245 | −59,8 % | −53,0 % |
+  | pphc | 7 125 | 4 706 | −34,0 % | −22,4 % |
+  | fe | 11 450 | 5 453 | −52,4 % | −48,3 % |
+  | cc | 12 036 | 5 817 | −51,7 % | −45,6 % |
+  | emit | 601 | 353 | −41,2 % | −37,0 % |
+  | real | 11 232 | 7 354 | −34,5 % | −25,3 % |
+  | as | 57,4 | 31,6 | −45,0 % | −45,3 % |
+  | ld | 762 | 378 | −50,4 % | −34,4 % |
+
+  Kvar enligt agenterna: lat/överhoppad parsning av oanvända `static inline`-kroppar (1,8 G av fe, ändrar numrering → kräver design), interneringsmissar i den globala tabellen (~hälften av lex-cyklerna), cache för inline-asm-snippets i emit (~93 M), en-pass-tokenisering per sats i as.c, open() dominerar länkarens kärntid.
+
+  Alla kärn-TU:er `-c` i en process (`vcc-cbatch.py -j 4`, alla cacher på): 124,6 G instruktioner / 11,9 s user + 0,8 s sys / 3,2 s vägg (före: 186 G, 17,4 + 2,8 s vid `-j 6`). Sviterna på det sammanslagna trädet: paritet 873/873 (kärna) och 911/912, sema 878/879 + layout 878/879 (18,8 M kontroller), cbatch 840/840, vcc-obj 840/840, vas 30/30. **Kallt bygge + boot** (`bench/vccd-kbuild.sh`, `-j 14`, alternerande bas/ny, last ~8): 877 kompilerade av vcc, 0 till clang; vccd:s jobbtid summerad 65,6 → 43,6 s (medel 75 → 50 ms, max 484 → 327 ms), men väggtiden rör sig inte (totalt 31,1/31,2 → 27,5/42,9 s, kompileringsfasen 19,3/23,6 → 17,6/24,6 s; konfigfasen ensam varierar 4,6–11,6 s): kompileringsfasen begränsas av make/shim/beroendeordning, inte av vccd (jfr Status 2.9). Debian 13 bootar till `running`, 0 felande enheter (`results/boot-20261108-160427.log`). **Nästa hävstång för väggtiden är alltså hur många jobb make håller i luften, inte kompilatorn.**
+
+### Varför make bara håller ~3 jobb i luften (2026-11-08)
+- vccd loggar nu starttid per jobb (`@ms`, sista argv). Tidslinje över ett kallt bygge (`-j 14`): **jobben startar i jämn takt, ~100/s, oavsett hur lång tid de tar**; i snitt 2,2 i vccd samtidigt, 3,9 s helt utan jobb (varav 1,5 s i slutet). Det är en starttaktsgräns, inte vccd (64 → nu 2 × kärnor arbetstrådar; ingen kö i vccd).
+- Processprov (`ps` var ~0,1 s) under kompileringsfasen: i snitt 8,4 `make`, ~6,4 skal (`sh` = bash), ~3 `vcc`-shims, ~1 `fixdep`. Kbuild går ned i kataloger med recept som kör `$(MAKE)`, och varje sådant håller en jobbplats medan undermaken lever: med `-j 14` går ~8 platser till make-nästlingen.
+- Byggets barnprocesser (utan vccd) kostar stabilt **~25 s user + ~50 s sys** per kallt bygge, mer än vccd:s egen kompilering (29–48 s jobbtid). Per C-TU kör receptet `sh -c` + vcc-shim + `fixdep` + `rm`; `fixdep` ensam ~37 ms vägg / ~29 ms CPU per TU (öppnar alla ~930 headers i dep-filen för att leta `CONFIG_`), en tom process ~8 ms. En no-op-ombyggnad (inga CC) tar 8,3–8,9 s / 10 CPU-s.
+- `-j 32`/`-j 64` gick inte att bedöma: maskinen hade last 16 av andra sessioner och samma `-j 14` tog 31–52 s.
+- **Nästa steg:** (1) fixdep i vccd: vccd har redan dep-listan och alla headers lexade i tokencachen, så `CONFIG_`-uppsättningen per fil kan räknas en gång och `.cmd` skrivas av vccd; receptet blir ett enda kommando (inget `fixdep`, `rm`, helst inget skal) via en Kbuild-patch i `cmd_and_fixdep` när CC är vcc. (2) mäta `-j` på en lugn maskin. (3) färre undermakes / nästlingsnivåer.
+- **fixdep i vccd (klart, 2026-11-08):** `ccs/vcc/fixdep.c` är en rak port av `scripts/basic/fixdep` (samma dep-filsparser, samma råtextsökning efter `CONFIG_`, även i kommentarer), men filerna läses genom tokencachen och varje fils `CONFIG_`-namn räknas en gång per process. vccd kör den efter varje lyckad kompilering (egen eller vidarebefordrad) när förfrågan har `VCC_FIXDEP_D/T/O/CMD`, skriver `.cmd` och tar bort dep-filen. Kärnpatch `patches/0008-kbuild-vcc-fixdep.patch` (gren `vroom-pf`): `cmd_and_vccdep` för `rule_cc_o_c`/`rule_as_o_S` när `KBUILD_VCC_FIXDEP=1` (vccd-kbuild.sh sätter den; `VCC_FIXDEP=0` = som förut). Receptet kör nu skal + shim, inte `fixdep` och `rm`.
+  - **Verifierat:** alla 1 387 `.cmd`-filer byte-identiska med fixdeps; inga `.d` kvar; no-op-ombyggnad kompilerar inget; `touch include/linux/delayacct.h` bygger om exakt de 13 objekt som listar den; Debian bootar till `running` (`results/boot-20261108-162531.log`).
+  - **A/B** (alternerande, last 21–47, väggtid oanvändbar): byggets barnprocesser 26 + 48 / 27 + 50 s (user + sys) → 20 + 28 / 18 + 26 s, alltså **~30 CPU-s (40 %) mindre per kallt bygge**.
+
+### Profil av det kalla bygget efter fixdep i vccd (2026-11-08)
+- Rigg: `bench/tsh.c` är ett spårande `SHELL` (kör `/bin/sh`, loggar start/slut i `CLOCK_MONOTONIC` som vccd:s `@ms` samt skalets och barnens rusage); binären ska heta `sh` så att make behåller sin snabbväg. `TSH_LOG=OUT.tsh bench/vccd-kbuild.sh OUT -j 14 SHELL=…/trace/sh` (skriptet skickar nu vidare extra make-argument), sedan `bench/kprof.py OUT`. Spårningen kostar ~1–2 s. Last 4–28 av andra sessioner under mätningarna.
+- **Kallt bygge nu (denna gren, `-j 14`):** 15,2/14,5/14,0 s (main utan grenens arbete: 24,0 s vid samma last). Uppdelning: **konfig 3,5 s** (kbuild.py före huvudmaken: `allnoconfig` 2,2 s, som bygger fixdep/conf/bison/flex från noll med värdkompilering via vroomd; `olddefconfig` 0,7 s; `merge_config` 0,05 s) → **1,5–1,9 s till första CC** (makefile-parsning, `conf --syncconfig` 0,9 s, genererade headers) → **kompileringsfasen ~8,5 s** → **länk 0,6–0,9 s**.
+- **Kompileringsfasen är CPU-bunden, inte jobbplatsbunden:** `-j 28` gav 17,0/17,3 s mot `-j 14` 15,2/17,5 s. Under fasen kör ~12 lövrecept och ~20–25 undermake-recept samtidigt, men bara 2–7 kompileringar i vccd. Byggets barnprocesser (allt utom vccd) kostar 17 s user + 23 s sys = **40 CPU-s, mer än vccd:s 32 s jobbtid**.
+- Per CC-recept: **15 ms (median) innan jobbet når vccd** (bash + shim + anslutning), 28 ms i vccd (p90 74 ms), ~2 ms efter (fixdep är borta). Summerat 17 s före mot 32 s i vccd.
+- **`llvm-ar` är den största enskilda processkostnaden:** 416 `AR built-in.a`, 29 s jobbplatstid, median 43 ms, p90 149 ms (upp till 290 ms), 44 ms CPU var under bygget. Ett anrop kostar **167 M instruktioner** (dyld binder `libLLVM.dylib`; 1 800 sidfel), mot 12 M för vcc-shimmen, 22 M för `/bin/sh` (bash) och 8 M för `/bin/dash`. 416 × 167 M ≈ 70 G instruktioner, mer än halva kärnkompileringens 124,6 G.
+- **Undermakes:** 432 rekursiva make (en per katalog). En no-op-ombyggnad tar 2,7 s / 8 CPU-s nästan bara i dem (plus 400 `depcheck`).
+- **`SHELL=/bin/dash CONFIG_SHELL=/bin/dash`** (alternerande A/B): 14,5/14,0 → **13,0/13,4 s**, barn-CPU 40 → 36 s. `/bin/sh` på macOS är bash.
+- **Hävstänger i ordning:** (1) egen `ar` för tunna arkiv (`cDPrST`, platta ut nästlade tunna arkiv) som vcc-shim/vccd-förfrågan i stället för `llvm-ar`: ~70 G instr och ~29 s jobbplatstid; (2) dash som `SHELL`/`CONFIG_SHELL` i bygget: ~1 s, inga ändringar i koden; (3) konfigfasen 3,5 s: värdverktygen (conf, fixdep, …) byggs av clang via vroomd från noll, och `allnoconfig` + `olddefconfig` är två extra toppnivå-make (antingen `--dotconfig` med färdig `.config`, eller värdverktyg från vcc/cache); (4) färre undermakes; (5) skalet + shimmen per CC (15 ms): receptet utan skal när kommandot är ett enda vcc-anrop.
+- **Egen `ar` i vccd + dash (klart, 2026-11-08):** `ccs/vcc/ar.c`: tunna arkiv med r/m/t och modifierarna c D P s S T u i b a samt `--thin`, allt Kbuild gör med `$(AR)` (`cDPrST` per katalog, `cDPrsT` för lib.a med symboltabell, `mPi` + `t` för built-in-fixup.a, `cDPrS --thin`). Byte-identiskt med llvm-ar, även dess regler: nästlade tunna arkiv plattas ut, `r` byter ut en befintlig medlem på plats, `m` flyttar i arkivordning före/efter POS (POS jämförs bokstavligt med lagrade namn), symboltabell bara om någon medlem är ELF (tom: 8 byte), sökvägar relativa lexikalt. Shimmen under namnet `var` (även `ar`, `llvm-ar`) → vccd kör den i arbetartråden; **ingen llvm-ar i bygget, ingen reserv**. `bench/kbuild.py --ar/--shell`; `bench/vccd-kbuild.sh` använder `var` och `/bin/dash` som `SHELL`/`CONFIG_SHELL` för hela körningen (`VCC_AR=0`, `KB_SHELL=` = som förut).
+  - **Verifierat:** `bench/var-cmp.py` (llvm-ar bara som referens): alla 416 sparade arkivkommandon i ett llvm-ar-träd ger byte-identiska arkiv, `t` identisk för 8 sökvägsformer, 40/40 kantfall (dubbletter, nästlade, saknad fil, r på befintligt arkiv, mPi/mPa/mPb, ELF utan symboler, icke-ELF, arkiv i underkatalog). Kallt bygge: alla 417 `.a`, `vmlinux` och `Image` byte-identiska med llvm-ar + bash-bygget; `.cmd` skiljer bara i AR-sökvägen och `CONFIG_SHELL`; Debian bootar till `running`, 0 felande enheter (`results/boot-20261108-171002.log`).
+  - **A/B** (alternerande ×3, last 9 → 22 av andra sessioner, väggtid oanvändbar: 17,4/24,2/25,2 → 18,0/21,9/21,3 s): byggets barnprocesser **18 + 25 → 11 + 20–21 CPU-s (user + sys), ~12 CPU-s (27 %) mindre**. ar i vccd: 422 jobb, i snitt 3,6 ms (förut ~44 ms CPU per llvm-ar-process).
+- **Sammanslagning med main (diagnostik, _Complex, long double, … t.o.m. 8094aeb, sedan sanerare/fuzz t.o.m. f323896), 2026-11-08:** main@8094aeb bootade inte (ingen konsolutskrift alls). Bisekterat till 26c2d50 (flyttals-`va_arg`): varje variadisk funktion sparade v0–v7 i prologen även med `-mgeneral-regs-only`, så kärnans första `printk` rörde FP-register innan FP slagits på. Nu som clang: med `-mgeneral-regs-only` ingen v-sparyta, `__vr_offs` 0 och `__vr_top` = `__gr_top` (`cc_opts.general_regs_only`). Dessutom: deklarationscachens ögonblicksbilder bar med sig andra TU:ers `c->cases`/`c->span` (11 felaktiga "duplicate case value" i cbatch); `span` är nu en egen array i bilden (med platskodning), `cases` behålls per TU.
+  - **Verifierat:** paritet 911/912, sema run 878/879, warn 879/879, layout 878/879, ctests 1708/1708, diag 63/63, cbatch 840/840 (samma stderr med och utan deklarationscache), vcc-obj 840/840, vas 30/30, var-cmp 416/416 + 8/8 + 40/40. Kallt bygge 13,9 s (last ~8), 877 av vcc, 0 till clang; Debian bootar till `running` (`results/boot-20261108-174855.log`). Efter andra sammanslagningen (f323896): samma siffror, fuzz-regress 4/4, `pp_open` skriver nu "1 error generated." även när huvudfilen har ett fatalt fel (diag 63/63); kallt bygge 15,3 s (last ~11), bootar (`results/boot-20261108-175726.log`).
 
 ### Felmeddelanden (clang-format)
 

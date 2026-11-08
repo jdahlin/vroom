@@ -235,6 +235,7 @@ typedef struct cc_opts {
 	int implicit_int;	/* implicit int allowed (-std=gnu89, -Wno-error=implicit-int) */
 	int gnu89_inline;	/* -std=gnu89 or -fgnu89-inline: plain inline is gnu_inline */
 	int instrument;		/* -finstrument-functions */
+	int general_regs_only;	/* -mgeneral-regs-only: no FP/SIMD registers (variadic: no v0-v7 save area) */
 	int no_builtin;		/* -ffreestanding / -fno-builtin: abs() etc. are plain calls */
 	int implicit_fn;	/* implicit function declarations allowed (... implicit-function-declaration) */
 	int dump_layouts;	/* append _Static_assert checks for clang to verify */

@@ -17,7 +17,8 @@
  *     header cache is shared by all jobs, everything else is per thread;
  *   - forwards everything else to the current backend: compiles vcc cannot
  *     do (the vDSO: -mcmodel=tiny/PIC; any TU vcc fails on) to vroomd
- *     (clang), links to vroom-ld/ld.lld.
+ *     (clang), links to vroom-ld/ld.lld;
+ *   - runs the archiver (ar, var, llvm-ar by argv[0]) itself: ar.c.
  *
  * No allocation per request: buffers are mmap'ed once per worker.
  *
@@ -58,6 +59,8 @@
 #include "../protocol.h"
 #include "caps.h"
 #include "ppdriver.h"
+#include "fixdep.h"
+#include "ar.h"
 
 #define MAX_STRS	(VROOM_MAX_PAYLOAD / 2)
 
@@ -70,7 +73,7 @@ static const char *lld = "/opt/homebrew/bin/ld.lld";
 #endif
 static bool log_requests, own_pp = true, own_cc = true;
 
-static atomic_ulong n_probe, n_fwd, n_spawn, n_pp, n_cc, n_fallback;
+static atomic_ulong n_probe, n_fwd, n_spawn, n_pp, n_cc, n_fallback, n_ar;
 
 /* ---------------- work queue: accepted sockets ---------------- */
 
@@ -542,10 +545,59 @@ static double now_ms(void)
 	return ts.tv_sec * 1e3 + ts.tv_nsec / 1e6;
 }
 
+static const char *req_env(const struct req *r, const char *name)
+{
+	size_t n = strlen(name);
+
+	for (char **e = r->envp; *e; e++)
+		if (!strncmp(*e, name, n) && (*e)[n] == '=')
+			return *e + n + 1;
+	return NULL;
+}
+
+/*
+ * Kbuild's cmd_and_fixdep done here (patches/0008): a compile whose request
+ * carries VCC_FIXDEP_D/T/O/CMD (dep file, target, .cmd file, saved command
+ * line) gets fixdep's .cmd written and its dep file removed once it has
+ * succeeded, so the recipe runs no fixdep and no rm.
+ */
+static int fixdep_after(const struct req *r, int status)
+{
+	const char *d = req_env(r, "VCC_FIXDEP_D"), *t, *o, *c;
+
+	if (status || !d)
+		return status;
+	t = req_env(r, "VCC_FIXDEP_T");
+	o = req_env(r, "VCC_FIXDEP_O");
+	c = req_env(r, "VCC_FIXDEP_CMD");
+	if (!t || !o || !c) {
+		say(r, "vccd: %s without VCC_FIXDEP_T/O/CMD\n", "VCC_FIXDEP_D");
+		return 2;
+	}
+	return vfixdep(r->cwd, d, t, c, o, r->fds[2]);
+}
+
+static int handle1(const struct req *r, const char **kind);
+
 static int handle(const struct req *r, const char **kind)
+{
+	int status = handle1(r, kind);
+
+	if (!strcmp(*kind, "cc-own") || !strcmp(*kind, "cc") || !strcmp(*kind, "cc-fallbk"))
+		status = fixdep_after(r, status);
+	return status;
+}
+
+static int handle1(const struct req *r, const char **kind)
 {
 	int probe;
 
+	if (!strcmp(r->tool, "var") || !strcmp(r->tool, "ar") || !strcmp(r->tool, "llvm-ar")) {
+		/* the archiver: thin archives written here (ar.c), never llvm-ar */
+		*kind = "ar";
+		atomic_fetch_add(&n_ar, 1);
+		return ar_run(r->cwd, r->argc, r->argv, r->fds[1], r->fds[2]);
+	}
 	if (!strcmp(r->tool, "vld") || !strcmp(r->tool, "ld")) {
 		if (ld_is_probe(r)) {
 			*kind = "ld-probe";
@@ -622,9 +674,9 @@ static int handle(const struct req *r, const char **kind)
 
 static void print_counts(void)
 {
-	fprintf(stderr, "vccd: %lu probes, %lu -E, %lu compiled by vcc, %lu fell back to clang, %lu forwarded in all, %lu spawned\n",
+	fprintf(stderr, "vccd: %lu probes, %lu -E, %lu compiled by vcc, %lu fell back to clang, %lu forwarded in all, %lu spawned, %lu ar\n",
 		atomic_load(&n_probe), atomic_load(&n_pp), atomic_load(&n_cc), atomic_load(&n_fallback),
-		atomic_load(&n_fwd), atomic_load(&n_spawn));
+		atomic_load(&n_fwd), atomic_load(&n_spawn), atomic_load(&n_ar));
 }
 
 static void *worker_main(void *arg)
@@ -655,9 +707,14 @@ static void *worker_main(void *arg)
 		for (i = 0; i < 3; i++)
 			if (r.fds[i] >= 0)
 				close(r.fds[i]);
-		if (log_requests)
-			fprintf(stderr, "vccd %-10s %7.2f ms rc=%d %s\n", kind, now_ms() - t0,
-				status, kind[0] == 'b' ? "" : r.argc > 1 ? r.argv[1] : "");
+		if (log_requests) {
+			double t1 = now_ms();
+
+			/* @: start time (monotonic ms), for concurrency timelines; last: the input */
+			fprintf(stderr, "vccd %-10s %7.2f ms rc=%d @%.2f %s %s\n", kind, t1 - t0, status, t0,
+				kind[0] == 'b' ? "" : r.argc > 1 ? r.argv[1] : "",
+				kind[0] == 'b' || r.argc < 2 ? "" : r.argv[r.argc - 1]);
+		}
 	}
 	return NULL;
 }
@@ -669,7 +726,10 @@ int main(int argc, char **argv)
 #ifdef __APPLE__
 	struct kevent ev;
 #endif
-	int nworkers = 64, ls, kq, i;
+	/* make never has more than -j requests in flight, and compiles are CPU bound:
+	 * two per core leaves room for the ones that block (forwarded to vroomd,
+	 * spawned tools) without a thread per possible connection */
+	int nworkers = 2 * (int)sysconf(_SC_NPROCESSORS_ONLN), ls, kq, i;
 
 	for (i = 1; i < argc; i++) {
 		if (!strcmp(argv[i], "--sock") && i + 1 < argc)
@@ -721,9 +781,8 @@ int main(int argc, char **argv)
 		pthread_attr_destroy(&at);
 	}
 
-	/* accept thread: kqueue, drain the backlog on every wakeup */
+	/* accept thread: kqueue (epoll on Linux), drain the backlog on every wakeup */
 #ifdef __APPLE__
-	/* accept thread: kqueue, drain the backlog on every wakeup */
 	kq = kqueue();
 	EV_SET(&ev, ls, EVFILT_READ, EV_ADD, 0, 0, NULL);
 	if (kq < 0 || kevent(kq, &ev, 1, NULL, 0, NULL) < 0) {

@@ -1,6 +1,10 @@
 #!/bin/sh
 # Cold kernel build through the vcc shims with a private vroomd + vccd.
-#   bench/vccd-kbuild.sh OUT [VCC_CC=0 to forward -c to clang] [-j N]
+#   bench/vccd-kbuild.sh OUT [VCC_CC=0 to forward -c to clang] [-j N] [make args...]
+# VCC_FIXDEP=0: kbuild runs fixdep itself (default: vccd writes the .cmd files,
+# patches/0008).  VCC_AR=0: llvm-ar as AR (default: vcc's ar in vccd, ar.c).
+# KB_SHELL: SHELL/CONFIG_SHELL (default /bin/dash; KB_SHELL= for make's /bin/sh,
+# which is bash on macOS).
 # vccd's log goes to OUT.vccd.log (VCC_LOG=1); its counts are printed at the end.
 set -e
 R=$(cd "$(dirname "$0")/.." && pwd)
@@ -10,7 +14,7 @@ J=14
 S=${TMPDIR:-/tmp}/vk.$$
 B=$R/build/ccs
 KSRC_DEFAULT=/Users/johandahlin/dev/vroom/work/linux-pf
-[ "$(uname -s)" = Linux ] && { B=$R/build/linux/ccs; KSRC_DEFAULT=$R/work/linux; }
+[ "$(uname -s)" = Linux ] && { B=$R/build/linux/ccs; KSRC_DEFAULT=$R/work/linux-pf; }
 mkdir -p "$S"
 "$B/vroomd" --sock "$S/vroomd.sock" --opt -O0 >"$OUT.vroomd.log" 2>&1 &
 VP=$!
@@ -22,7 +26,11 @@ sleep 0.5
 rc=0
 VCC_SOCK="$S/vccd.sock" VROOM_KSRC=${VROOM_KSRC:-$KSRC_DEFAULT} \
 	python3 "$R/bench/kbuild.py" --config "$R/env/vroom.config" --out "$OUT" \
-	--cc "$B/vcc" -j "$J" -- LD="$B/vld" || rc=$?
+	--cc "$B/vcc" -j "$J" \
+	$([ "${VCC_AR:-1}" = 0 ] || echo --ar "$B/var") \
+	$([ -n "${KB_SHELL-/bin/dash}" ] && echo --shell "${KB_SHELL-/bin/dash}") \
+	-- LD="$B/vld" \
+	$([ "${VCC_FIXDEP:-1}" = 0 ] || echo KBUILD_VCC_FIXDEP=1) "$@" || rc=$?
 kill -TERM $CP; sleep 0.3
 grep "^vccd:" "$OUT.vccd.log" | tail -1
 grep -c "fallback to clang" "$OUT.vccd.log" || true

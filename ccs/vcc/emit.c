@@ -54,6 +54,8 @@
 #include "as.h"
 #include "elf.h"
 #include "a64.h"
+#include "ppdriver.h"
+#include "arena.h"
 
 #define N(i) (&c->nodes[i])
 /* Apple arm64 (Mach-O): '_' names, GOT for symbols outside the TU, variadic
@@ -198,6 +200,14 @@ typedef struct tbuf {
 static void tb_init(tbuf *b, size_t cap)
 {
 	b->p = reserve(cap);
+	b->n = 0;
+	b->cap = cap;
+}
+
+/* a buffer in a reused region (arena.h) */
+static void tb_reg(tbuf *b, vmreg *r, size_t cap, const char *name)
+{
+	b->p = vmreg_get(r, cap, name);
 	b->n = 0;
 	b->cap = cap;
 }
@@ -379,7 +389,34 @@ typedef struct chunk {
 	uint64_t key;		/* output order */
 	const char *p;
 	size_t n;
+	const uint32_t *log;	/* the item's log (ecx.rlog): what a later round needs to reuse it */
+	uint32_t nlog;
 } chunk;
+
+/*
+ * A round that marks functions for inlining (need_fold) is followed by
+ * another; a function whose generation never asked about a function marked
+ * since then comes out the same, so the next round reuses its chunk.  The
+ * log says what its generation did outside the chunk: references (claims of
+ * statics and strings, weak undefined syms), prepass walks (which queue
+ * __used static locals), and the static functions whose mark it read.
+ */
+enum { RL_REF, RL_DEP, RL_WALK };
+typedef struct kent {
+	uint64_t key;
+	const char *p;
+	size_t n;
+	const uint32_t *log;
+	uint32_t nlog;
+} kent;
+typedef struct keep {
+	uint32_t *idx;		/* per sym: kent index + 1 */
+	kent *ent;
+	char *bytes;
+	uint32_t *logs;
+	size_t nidx, nent, nbytes, nlogs;
+	uint32_t asmno;		/* inline asm %= numbers go on from here */
+} keep;
 
 /* analysis bits (prepass, read-only while emitting) */
 enum { FF_SEEN = 1, FF_NONNEG = 2, FF_ZERO = 4, FF_BAD = 8 };
@@ -420,6 +457,7 @@ typedef struct emitter {
 	uint8_t *mf;			/* per sym: static function to inline everywhere (kept across rounds) */
 	_Atomic uint32_t newmf;		/* marked this round */
 	_Atomic uint32_t nerrcall;	/* error() calls dropped (not folded) */	/* VCC_EMIT_STATS: time in finish_function */
+	const keep *K;			/* the previous round's functions, or NULL */
 	bool stats;
 	bool objtext;			/* VCC_OBJ_TEXT: objects through the printer and as_run (checks the object backend) */
 	pthread_mutex_t emu;		/* diagnostics */
@@ -544,6 +582,8 @@ typedef struct ecx {
 	uint32_t *weakref;	/* weak undefined syms this thread referenced first */
 	uint32_t nweakref;
 	uint32_t ncases;
+	uint32_t *rlog;		/* this round's item logs: (RL_*, value) pairs */
+	size_t nrlog, rlog0;	/* ... and where the current item's starts */
 	jmp_buf bail;
 } ecx;
 
@@ -1098,11 +1138,19 @@ static void print_ins(cc *c, tbuf *b, const ins *i, uint32_t fid, const char *ra
  * Branches inside a function without inline asm are resolved here; with
  * inline asm (which may name the labels: asm goto) labels are .LBB symbols.
  */
-enum { IT_TEXT = 1, IT_CODE, IT_DATA, IT_LABEL, IT_BYTES };
+enum { IT_TEXT = 1, IT_CODE, IT_DATA, IT_LABEL, IT_BYTES, IT_SYMHDR, IT_FEND, IT_OSIZE };
 typedef struct item { uint32_t kind, len; } item;	/* len payload bytes follow, padded to 8 */
 typedef struct code_hdr { uint32_t fid, nin, nraw, nlabel, sym_labels, pad; } code_hdr;
 typedef struct data_hdr { uint64_t size, n; uint32_t nrel, zero; } data_hdr;
 typedef struct ireloc { uint64_t off; uint32_t ref, seq; int64_t add; uint32_t sub, sz; } ireloc;
+/*
+ * A symbol's header after its section directive, what the assembler does
+ * for ".globl/.weak s; .hidden/.protected s; .p2align p2; .type s,@function
+ * or @object; s:" (IT_SYMHDR), for ".Lfe<s>: .size s, .Lfe<s>-s" (IT_FEND)
+ * and ".size s, n" (IT_OSIZE), without the text.
+ */
+typedef struct symhdr { uint32_t sym; uint8_t bind, vis, p2, fn; } symhdr;	/* bind: 0, STB_GLOBAL, STB_WEAK */
+typedef struct osize { uint32_t sym, pad; uint64_t size; } osize;
 
 static inline bool direct(const ecx *e) { return e->E->o->emit == 2 && !e->E->objtext; }
 
@@ -1150,6 +1198,11 @@ typedef struct rctx {
 	ElfObj *o;
 	uint32_t *symc, *strc, *lblc;	/* ref -> ElfSym (0: not yet) */
 	uint32_t *loff;			/* direct labels: word offset in the function */
+	uint32_t *wb;			/* direct functions: the words, before they go to the frag */
+	struct rpatch *pt;		/* ... and the records with a fixup */
+	uint32_t *lsym, *lser, ser;	/* functions with inline asm: label -> .LBB symbol (valid if lser == ser) */
+	struct rlab *lab;		/* ... label state */
+	struct rpend *pend;		/* ... branches waiting for their label */
 	tbuf nb;			/* name scratch */
 } rctx;
 
@@ -1175,13 +1228,17 @@ static uint32_t r_sym(rctx *R, uint32_t ref)
 
 static uint32_t r_label(rctx *R, uint32_t fid, uint32_t l)
 {
+	if (R->lser[l] == R->ser)
+		return R->lsym[l];
 	R->nb.n = 0;
 	p_lbl(&R->nb, fid, l);
-	return as_sym(R->as, R->nb.p, R->nb.n);
+	R->lser[l] = R->ser;
+	return R->lsym[l] = as_sym(R->as, R->nb.p, R->nb.n);
 }
 
 /* a pending fixup on word k of an instruction */
 typedef struct pfix { uint8_t k, lbl; uint32_t type, ref; int64_t off; } pfix;
+typedef struct rpatch { uint32_t k, at; pfix f; } rpatch;	/* record k at word at */
 
 static unsigned e_movi(uint32_t *w, int rd, int x, uint64_t v)
 {
@@ -1478,6 +1535,53 @@ static void r_words(rctx *R, uint32_t frag, const uint32_t *w, unsigned n, const
 	}
 }
 
+static inline int hexval(char ch)
+{
+	return ch >= '0' && ch <= '9' ? ch - '0' : ch >= 'a' && ch <= 'f' ? ch - 'a' + 10 : -1;	/* tb_x: lower case */
+}
+
+/* per label of a function with inline asm (valid if ser == rctx.ser) */
+enum { RL_NAMED = 1, RL_PLACED = 2, RL_DEFSYM = 4 };
+typedef struct rlab { uint32_t ser, flags, frag, off, pend; } rlab;
+typedef struct rpend { uint32_t next, k, frag, off; uint8_t *p; } rpend;	/* a branch waiting for its label */
+
+static inline rlab *r_lab(rctx *R, uint32_t l)
+{
+	rlab *L = &R->lab[l];
+
+	if (L->ser != R->ser)
+		*L = (rlab){ R->ser, 0, 0, 0, 0 };
+	return L;
+}
+
+/* the branch record i at (frag, off, p) to placed label L */
+static bool r_branch(rctx *R, uint32_t fid, const ins *i, rlab *L, uint32_t frag, uint32_t off, uint8_t *p)
+{
+	uint32_t w[4];
+	pfix f;
+
+	if (L->frag == frag && !(L->off & 3) && !(off & 3)) {
+		R->loff[i->label] = L->off / 4;
+		enc(i, w, &f, R->loff, off / 4);
+		memcpy(p, w, 4);
+		return true;
+	}
+	{
+		uint32_t y = r_label(R, fid, i->label);
+
+		if (!(L->flags & RL_DEFSYM)) {
+			if (elf_symp(R->o, y)->flags & ESYM_DEFINED)
+				return r_fail(R, "invalid symbol redefinition") == 0;
+			elf_define(R->o, y, L->frag, L->off);
+			L->flags |= RL_DEFSYM;
+		}
+		enc(i, w, &f, NULL, 0);
+		memcpy(p, w, 4);
+		elf_fixup(R->o, frag, off, p, f.type, as_val(R->as, y, 0));
+	}
+	return true;
+}
+
 static int r_code(rctx *R, const code_hdr *h)
 {
 	const ins *in = (const ins *)(h + 1);
@@ -1486,26 +1590,144 @@ static int r_code(rctx *R, const code_hdr *h)
 	pfix f;
 
 	if (!h->sym_labels) {
-		/* one block, branches resolved here */
-		uint32_t at = 0, frag = as_frag(R->as), *loff = R->loff;
+		/*
+		 * One block, branches resolved here: encode everything once into
+		 * R->wb, noting the records that need a label offset (patched
+		 * once the labels are known) or a fixup (applied in order after
+		 * the words are in the frag).
+		 */
+		uint32_t at = 0, frag = as_frag(R->as), *loff = R->loff, *wb = R->wb, npt = 0;
+		rpatch *pt = R->pt;
 		ElfObj *o = R->o;
 		uint64_t base;
 		uint8_t *p;
 
 		for (uint32_t k = 0; k < h->nin; k++) {
-			if (in[k].op == I_LABEL)
-				loff[in[k].label] = at;
-			else
-				at += enc(&in[k], w, &f, NULL, 0);
+			const ins *i = &in[k];
+			unsigned n;
+
+			if (i->op == I_LABEL) {
+				loff[i->label] = at;
+				continue;
+			}
+			n = enc(i, wb + at, &pt[npt].f, NULL, 0);
+			if (unlikely(i->op == I_MRS)) {
+				int r = a64_sysreg(R->c->strs[i->ref].s, strlen(R->c->strs[i->ref].s), 0);
+
+				if (r < 0)
+					return r_fail(R, "mrs: expected readable system register");
+				wb[at] = 0xd5200000u | ((unsigned)r & 0xffff) << 5 | R5(i->rd);
+			}
+			if (pt[npt].f.type) {
+				pt[npt].k = k;
+				pt[npt].at = at;
+				npt++;
+			}
+			at += n;
 		}
 		elf_code(o, frag);
 		base = elf_frag(o, frag)->size;
 		p = elf_grow(o, frag, (size_t)at * 4);
-		at = 0;
+		for (uint32_t j = 0; j < npt; j++)
+			if (pt[j].f.lbl)
+				enc(&in[pt[j].k], wb + pt[j].at, &f, loff, pt[j].at);
+		memcpy(p, wb, (size_t)at * 4);
+		for (uint32_t j = 0; j < npt; j++) {
+			const pfix *g = &pt[j].f;
+			uint32_t a = pt[j].at, y;
+
+			if (g->lbl)
+				continue;
+			y = r_sym(R, g->ref);
+			elf_fixup(o, frag, base + 4u * a, p + 4 * a, g->type, as_val(R->as, y, g->off));
+			if (in[pt[j].k].op == I_LDGOT || in[pt[j].k].op == I_TLV)
+				elf_fixup(o, frag, base + 4u * a + 4, p + 4 * a + 4,
+					  in[pt[j].k].op == I_TLV ? R_VCC_TLVP_PAGEOFF12 : R_AARCH64_LD64_GOT_LO12_NC,
+					  as_val(R->as, y, 0));
+		}
+		return 0;
+	}
+	/*
+	 * Inline asm: in order.  Labels the asm text names (asm goto) are
+	 * symbols; branches to the others are resolved here when label and
+	 * branch end up in the same frag, else through the label's symbol.
+	 */
+	{
+		ElfObj *o = R->o;
+		uint32_t npend = 0;
+
+		R->ser++;
+		for (const char *q = raw, *qe = raw + h->nraw; (q = memmem(q, (size_t)(qe - q), ".LBB", 4)); ) {
+			uint32_t fid = 0, l = 0;
+			const char *d = q += 4;
+
+			for (int v; q < qe && (v = hexval(*q)) >= 0; q++)
+				fid = fid * 16 + (uint32_t)v;
+			if (q == d || q >= qe || *q != '_' || fid != h->fid)
+				continue;
+			d = ++q;
+			for (int v; q < qe && (v = hexval(*q)) >= 0; q++)
+				l = l * 16 + (uint32_t)v;
+			if (q > d && l < h->nlabel) {
+				rlab *L = r_lab(R, l);
+
+				L->flags |= RL_NAMED;
+			}
+		}
 		for (uint32_t k = 0; k < h->nin; k++) {
 			const ins *i = &in[k];
-			unsigned n = enc(i, w, &f, loff, at);
+			unsigned n;
 
+			if (i->op == I_RAW) {
+				if (as_snippet(R->as, raw + i->off, i->ref))
+					return -1;
+				continue;
+			}
+			if (i->op == I_LABEL) {
+				rlab *L = r_lab(R, i->label);
+				uint32_t frag = as_frag(R->as);
+
+				if (L->flags & RL_NAMED) {
+					if (as_label(R->as, r_label(R, h->fid, i->label)))
+						return -1;
+					continue;
+				}
+				L->flags |= RL_PLACED;
+				L->frag = frag;
+				L->off = (uint32_t)elf_frag(o, frag)->size;
+				for (uint32_t j = L->pend; j; j = R->pend[j - 1].next) {
+					const rpend *pd = &R->pend[j - 1];
+
+					if (!r_branch(R, h->fid, &in[pd->k], L, pd->frag, pd->off, pd->p))
+						return -1;
+				}
+				continue;
+			}
+			if (i->op == I_ADR || i->op == I_B || i->op == I_BC || i->op == I_CBZ || i->op == I_CBNZ) {
+				rlab *L = r_lab(R, i->label);
+
+				if (!(L->flags & RL_NAMED)) {
+					uint32_t frag = as_frag(R->as), off;
+					uint8_t *p;
+
+					elf_code(o, frag);
+					off = (uint32_t)elf_frag(o, frag)->size;
+					p = elf_grow(o, frag, 4);
+					if (L->flags & RL_PLACED) {
+						if (!r_branch(R, h->fid, i, L, frag, off, p))
+							return -1;
+					} else {
+						rpend *pd = &R->pend[npend++];
+
+						*pd = (rpend){ L->pend, k, frag, off, p };
+						L->pend = npend;
+						enc(i, w, &f, NULL, 0);
+						memcpy(p, w, 4);
+					}
+					continue;
+				}
+			}
+			n = enc(i, w, &f, NULL, 0);
 			if (unlikely(i->op == I_MRS)) {
 				int r = a64_sysreg(R->c->strs[i->ref].s, strlen(R->c->strs[i->ref].s), 0);
 
@@ -1513,45 +1735,19 @@ static int r_code(rctx *R, const code_hdr *h)
 					return r_fail(R, "mrs: expected readable system register");
 				w[0] = 0xd5200000u | ((unsigned)r & 0xffff) << 5 | R5(i->rd);
 			}
-			memcpy(p + 4 * at, w, (size_t)n * 4);
-			if (f.type) {
-				uint32_t y = r_sym(R, f.ref);
+			if (n)
+				r_words(R, as_frag(R->as), w, n, &f, h->fid, i);
+		}
+		/* branches to labels never placed: through the (undefined) symbol, as the text would */
+		for (uint32_t j = 0; j < npend; j++) {
+			const rpend *pd = &R->pend[j];
+			const ins *i = &in[pd->k];
 
-				elf_fixup(o, frag, base + 4u * at, p + 4 * at, f.type, as_val(R->as, y, f.off));
-				if (i->op == I_LDGOT || i->op == I_TLV)
-					elf_fixup(o, frag, base + 4u * at + 4, p + 4 * at + 4,
-						  i->op == I_TLV ? R_VCC_TLVP_PAGEOFF12 : R_AARCH64_LD64_GOT_LO12_NC,
-						  as_val(R->as, y, 0));
+			if (!(r_lab(R, i->label)->flags & RL_PLACED)) {
+				enc(i, w, &f, NULL, 0);
+				elf_fixup(o, pd->frag, pd->off, pd->p, f.type, as_val(R->as, r_label(R, h->fid, i->label), 0));
 			}
-			at += n;
 		}
-		return 0;
-	}
-	/* inline asm: in order, labels are symbols */
-	for (uint32_t k = 0; k < h->nin; k++) {
-		const ins *i = &in[k];
-		unsigned n;
-
-		if (i->op == I_RAW) {
-			if (as_snippet(R->as, raw + i->off, i->ref))
-				return -1;
-			continue;
-		}
-		if (i->op == I_LABEL) {
-			if (as_label(R->as, r_label(R, h->fid, i->label)))
-				return -1;
-			continue;
-		}
-		n = enc(i, w, &f, NULL, 0);
-		if (unlikely(i->op == I_MRS)) {
-			int r = a64_sysreg(R->c->strs[i->ref].s, strlen(R->c->strs[i->ref].s), 0);
-
-			if (r < 0)
-				return r_fail(R, "mrs: expected readable system register");
-			w[0] = 0xd5200000u | ((unsigned)r & 0xffff) << 5 | R5(i->rd);
-		}
-		if (n)
-			r_words(R, as_frag(R->as), w, n, &f, h->fid, i);
 	}
 	return 0;
 }
@@ -1613,6 +1809,65 @@ static int r_data(rctx *R, const data_hdr *h)
 	return 0;
 }
 
+static int r_symhdr(rctx *R, const symhdr *h)
+{
+	ElfObj *o = R->o;
+	uint32_t y = r_sym(R, REF(RK_SYM, h->sym)), frag;
+
+	if (h->bind) {
+		elf_reg(o, y);
+		elf_bind(o, y, h->bind);
+		elf_symp(o, y)->flags &= ~ESYM_TEMP;
+	}
+	if (h->vis) {
+		elf_reg(o, y);
+		elf_vis(o, y, h->vis);
+		elf_symp(o, y)->flags &= ~ESYM_TEMP;
+	}
+	frag = as_frag(R->as);
+	elf_align(o, frag, h->p2, (elf_sec(o, elf_frag(o, frag)->sec)->flags & SHF_EXECINSTR) != 0, 0, 0);
+	elf_reg(o, y);
+	elf_type(o, y, h->fn ? STT_FUNC : STT_OBJECT);
+	return as_label(R->as, y);
+}
+
+static int r_fend(rctx *R, uint32_t s)
+{
+	ElfObj *o = R->o;
+	uint32_t y = r_sym(R, REF(RK_SYM, s)), l;
+	ElfVal a, b;
+
+	R->nb.n = 0;
+	tb_s(&R->nb, ".Lfe");
+	tb_u(&R->nb, s);
+	l = as_sym(R->as, R->nb.p, R->nb.n);
+	if (as_label(R->as, l))
+		return -1;
+	/* .size s, .Lfe<s>-s: the operands as the expression parser sees them, then folded */
+	a = as_val(R->as, l, 0);
+	b = as_val(R->as, y, 0);
+	if (a.sub || b.sub || (!b.add && b.c))
+		return r_fail(R, "vcc: unexpected .size operands");
+	{
+		ElfVal v = { a.add, b.add, a.c - b.c };
+		ElfSym *x = v.add ? elf_symp(o, v.add) : NULL, *z = v.sub ? elf_symp(o, v.sub) : NULL;
+
+		if (v.add && v.add == v.sub) {
+			v.add = v.sub = 0;
+		} else if (x && z && (x->flags & ESYM_DEFINED) && (z->flags & ESYM_DEFINED) && x->frag == z->frag) {
+			v.c += (int64_t)x->value - (int64_t)z->value;
+			v.add = v.sub = 0;
+		}
+		if (!v.add && !v.sub) {
+			elf_symp(o, y)->size = (uint64_t)v.c;
+			elf_symp(o, y)->flags &= ~ESYM_SIZE_EXPR;
+		} else {
+			elf_size_expr(o, y, v);
+		}
+	}
+	return 0;
+}
+
 /* replay one chunk's items */
 static int r_chunk(rctx *R, const char *p, size_t n)
 {
@@ -1636,6 +1891,20 @@ static int r_chunk(rctx *R, const char *p, size_t n)
 		case IT_LABEL:
 			r = as_label(R->as, r_sym(R, *(const uint32_t *)q));
 			break;
+		case IT_SYMHDR:
+			r = r_symhdr(R, (const symhdr *)q);
+			break;
+		case IT_FEND:
+			r = r_fend(R, *(const uint32_t *)q);
+			break;
+		case IT_OSIZE: {
+			const osize *z = (const osize *)q;
+			ElfSym *y = elf_symp(R->o, r_sym(R, REF(RK_SYM, z->sym)));
+
+			y->size = z->size;
+			y->flags &= ~ESYM_SIZE_EXPR;
+			break;
+		}
 		case IT_BYTES:
 			if (it->len) {
 				elf_data(R->o, as_frag(R->as));
@@ -2497,13 +2766,32 @@ static void enqueue(emitter *E, uint32_t item);
 
 static inline int X(cc *c, qty t) { return tsize(c, t) == 8 || is_ptr(c, t) || is_func(c, t) ? 1 : 0; }
 
+#define RLOG_CAP ((size_t)1 << 28)
+static inline void rlog(ecx *e, uint32_t tag, uint32_t v)
+{
+	if (unlikely(e->nrlog + 2 > RLOG_CAP)) {
+		fputs("vcc: emit log full\n", stderr);
+		abort();
+	}
+	e->rlog[e->nrlog++] = tag;
+	e->rlog[e->nrlog++] = v;
+}
+
+static void claim_ref(ecx *e, uint32_t ref);
+
 static void note_ref(ecx *e, uint32_t ref)
+{
+	if (!e->reach || e->dry)
+		return;
+	claim_ref(e, ref);
+}
+
+static void claim_ref(ecx *e, uint32_t ref)
 {
 	emitter *E = e->E;
 	cc *c = e->c;
 
-	if (!e->reach || e->dry)
-		return;
+	rlog(e, RL_REF, ref);
 	if (RKIND(ref) == RK_STR) {
 		uint32_t i = RIDX(ref);
 
@@ -4186,6 +4474,12 @@ static bool on_inline_stack(ecx *e, uint32_t fn)
 
 static void ensure_walked(emitter *E, cc *c, uint32_t s);
 
+static void walk_fn(ecx *e, uint32_t s)
+{
+	rlog(e, RL_WALK, s);
+	ensure_walked(e->E, e->c, s);
+}
+
 /* a local only ever assigned constants: follow its value (v: the initializer, or none) */
 static void kv_track(ecx *e, uint32_t s, const val *v)
 {
@@ -4271,9 +4565,11 @@ static bool can_inline(ecx *e, uint32_t s)
 		if (y->flags & SF_NOINLINE)
 			return false;
 		if (!e->E->mf[s]) {
+			if (y->sc == SC_STATIC)
+				rlog(e, RL_DEP, s);
 			if (!(y->flags & SF_INLINE))
 				return false;
-			ensure_walked(e->E, c, s);
+			walk_fn(e, s);
 			/*
 			 * clang -O2 inlines small inline functions, and the kernel
 			 * leans on it: scs_is_enabled() { return false; } guards
@@ -4305,7 +4601,7 @@ static val inline_call(ecx *e, uint32_t s, carg *args, int n)
 	qty rty = T(c, y->ty)->base;
 	val res;
 
-	ensure_walked(e->E, c, s);
+	walk_fn(e, s);
 	memset(&F, 0, sizeof(F));
 	F.fn = s;
 	F.inst = ++e->inst_next;
@@ -4446,7 +4742,7 @@ static val gen_call(ecx *e, uint32_t n)
 		fnv = gen(e, x->a);
 	inl = s && can_inline(e, s);
 	if (inl)
-		ensure_walked(e->E, c, s);
+		walk_fn(e, s);
 	for (int i = 0; i < na; i++) {
 		uint32_t an = c->lists[x->b + i];
 
@@ -7210,7 +7506,7 @@ static int find_loop(ecx *e, bool cont)
 }
 
 static void gen_stmt1(ecx *e, uint32_t n);
-static int leakchk = -1;
+static _Thread_local int leakchk = -1;	/* VCC_LEAKCHK: first leak per thread */
 
 /* every statement leaves the temporaries it found; VCC_LEAKCHK reports the first that does not */
 static void gen_stmt(ecx *e, uint32_t n)
@@ -7884,7 +8180,8 @@ static void out_chunk(ecx *e, uint64_t key, size_t start)
 	emitter *E = e->E;
 
 	pthread_mutex_lock(&E->cmu);
-	E->chunks[E->nchunk++] = (chunk){ key, e->out.p + start, e->out.n - start };
+	E->chunks[E->nchunk++] = (chunk){ key, e->out.p + start, e->out.n - start, e->rlog + e->rlog0,
+					  (uint32_t)((e->nrlog - e->rlog0) / 2) };
 	pthread_mutex_unlock(&E->cmu);
 }
 
@@ -7894,6 +8191,7 @@ static void sym_header(ecx *e, tbuf *b, uint32_t s, bool fn, const char *defsec,
 	const sym *y = &c->syms[s];
 	const attrs *a = sym_attrs(c, s);
 	bool global = y->sc != SC_STATIC && y->depth == 0 && y->name;
+	size_t h = it_open(e, IT_TEXT);
 
 	if (a->section) {
 		const char *sn = c->strs[a->section - 1].s;
@@ -7905,6 +8203,24 @@ static void sym_header(ecx *e, tbuf *b, uint32_t s, bool fn, const char *defsec,
 			 (QQ(y->ty) & Q_CONST) && !strncmp(sn, ".rodata", 7) ? "\",\"a\",@progbits\n" : "\",\"aw\",@progbits\n");
 	} else {
 		tb_s(b, defsec);
+	}
+	if (h != SIZE_MAX) {
+		symhdr *sh;
+
+		it_close(e, h);
+		h = it_open(e, IT_SYMHDR);
+		sh = it_room(e, sizeof *sh);
+		*sh = (symhdr){ .sym = s, .p2 = (uint8_t)__builtin_ctz(align ? align : 1), .fn = fn };
+		if (global) {
+			sh->bind = (y->flags & SF_WEAK) ? STB_WEAK : STB_GLOBAL;
+			if (a->visibility) {
+				const char *v = c->strs[a->visibility - 1].s;
+
+				sh->vis = !strcmp(v, "hidden") ? STV_HIDDEN : !strcmp(v, "protected") ? STV_PROTECTED : 0;
+			}
+		}
+		it_close(e, h);
+		return;
 	}
 	if (global) {
 		tb_s(b, (y->flags & SF_WEAK) ? "\t.weak\t" : "\t.globl\t");
@@ -7941,9 +8257,7 @@ static void finish_direct(ecx *e, uint32_t s, uint32_t align, const int *cs, int
 
 	b->n = (b->n + 7) & ~(size_t)7;
 	start = b->n;
-	h = it_open(e, IT_TEXT);
 	sym_header(e, b, s, true, "\t.text\n", align);
-	it_close(e, h);
 	for (uint32_t k = 0; k < e->nin && !sym_labels; k++)
 		sym_labels = e->in[k].op == I_RAW;
 	h = it_open(e, IT_CODE);
@@ -7974,27 +8288,23 @@ static void finish_direct(ecx *e, uint32_t s, uint32_t align, const int *cs, int
 	if (sym_labels)
 		memcpy(it_room(e, e->raw.n), e->raw.p, e->raw.n);
 	it_close(e, h);
-	h = it_open(e, IT_TEXT);
-	tb_s(b, ".Lfe");
-	tb_u(b, s);
-	tb_s(b, ":\n\t.size\t");
-	sym_name(c, b, s);
-	tb_s(b, ", .Lfe");
-	tb_u(b, s);
-	tb_c(b, '-');
-	sym_name(c, b, s);
-	tb_c(b, '\n');
+	h = it_open(e, IT_FEND);
+	*(uint32_t *)it_room(e, sizeof(uint32_t)) = s;
+	it_close(e, h);
 	if (ctor & 1) {
+		h = it_open(e, IT_TEXT);
 		tb_s(b, "\t.section\t.init_array,\"aw\",@init_array\n\t.p2align\t3\n\t.xword\t");
 		sym_name(c, b, s);
 		tb_c(b, '\n');
+		it_close(e, h);
 	}
 	if (ctor & 2) {
+		h = it_open(e, IT_TEXT);
 		tb_s(b, "\t.section\t.fini_array,\"aw\",@fini_array\n\t.p2align\t3\n\t.xword\t");
 		sym_name(c, b, s);
 		tb_c(b, '\n');
+		it_close(e, h);
 	}
-	it_close(e, h);
 	e->E->nins += e->nin;
 	e->E->nfn++;
 	out_chunk(e, (uint64_t)s << 1, start);
@@ -8097,7 +8407,7 @@ static void emit_function(ecx *e, uint32_t s)
 	fnctx F;
 	int ngrn = 0, nsaa = 0;
 
-	ensure_walked(e->E, c, s);
+	walk_fn(e, s);
 	e->nin = 0;
 	e->raw.n = 0;
 	e->nlabel = 0;
@@ -8202,11 +8512,18 @@ static void emit_function(ecx *e, uint32_t s)
 		e->vaslot = slot(e, 64, 16);
 		for (int r = ngrn; r < 8; r++)
 			mem(e, I_ST, 3, 0, r, FRAME, e->vaslot + 8 * r);
-		/* v0-v7: 16 bytes each (the low 8 hold a float or double) */
-		e->nvr_named = e->nsrn;
-		e->vrslot = slot(e, 128, 16);
-		for (int r = e->nsrn; r < 8; r++)
-			vr_store(e, 16, r, FRAME, e->vrslot + 16 * r);
+		if (c->o->general_regs_only) {
+			/* as clang: no FP/SIMD save area (the kernel may not touch v regs),
+			   __vr_offs 0 and __vr_top = __gr_top */
+			e->nvr_named = 8;
+			e->vrslot = e->vaslot - 64;
+		} else {
+			/* v0-v7: 16 bytes each (the low 8 hold a float or double) */
+			e->nvr_named = e->nsrn;
+			e->vrslot = slot(e, 128, 16);
+			for (int r = e->nsrn; r < 8; r++)
+				vr_store(e, 16, r, FRAME, e->vrslot + 16 * r);
+		}
 	}
 	gen_stmt(e, y->body);
 	/* falling off the end of main returns 0 */
@@ -8601,17 +8918,11 @@ static void emit_object(ecx *e, uint32_t s)
 
 		b->n = (b->n + 7) & ~(size_t)7;
 		start = b->n;
-		h = it_open(e, IT_TEXT);
 		sym_header(e, b, s, false,
 			   all_const(c, y->ty) ? "\t.section\t.rodata,\"a\",@progbits\n" : zero ? "\t.bss\n" : "\t.data\n", align);
-		it_close(e, h);
 		data_item(e, zero && !e->nrel ? (size ? size : 1) : size, zero && !e->nrel);
-		h = it_open(e, IT_TEXT);
-		tb_s(b, "\t.size\t");
-		sym_name(c, b, s);
-		tb_s(b, ", ");
-		tb_u(b, size);
-		tb_c(b, '\n');
+		h = it_open(e, IT_OSIZE);
+		*(osize *)it_room(e, sizeof(osize)) = (osize){ .sym = s, .size = size };
 		it_close(e, h);
 		e->E->nobj++;
 		out_chunk(e, ((uint64_t)s << 1) | 1, start);
@@ -9097,7 +9408,10 @@ static void enqueue(emitter *E, uint32_t item)
 	pthread_mutex_unlock(&E->mu);
 }
 
-static void ecx_init(ecx *e, emitter *E)
+/* the regions of a ctx[i] (ecx_init takes a set, ecx_free gives it back) */
+static vmpool ecxpool = VMPOOL_INIT(14);
+
+static void ecx_init(ecx *e, emitter *E, vmreg *r)
 {
 	cc *c = E->c;
 
@@ -9105,53 +9419,92 @@ static void ecx_init(ecx *e, emitter *E)
 	e->E = E;
 	e->c = c;
 	e->capin = 1u << 24;
-	e->in = reserve((size_t)e->capin * sizeof(ins));
-	tb_init(&e->raw, (size_t)1 << 28);
-	tb_init(&e->out, (size_t)1 << 32);
-	tb_init(&e->data, (size_t)1 << 28);
-	e->rel = reserve((size_t)1 << 26);
-	e->b = reserve((size_t)c->nsym * sizeof(bind) + 4096);
-	e->lm = reserve((size_t)c->nlabel * sizeof(lbl) + 4096);
-	e->caselbl = reserve((size_t)c->nnode * sizeof(uint32_t) + 4096);
+	e->in = vmreg_get(&r[0], (size_t)e->capin * sizeof(ins), "emit.in");
+	tb_reg(&e->raw, &r[1], (size_t)1 << 28, "emit.raw");
+	tb_reg(&e->out, &r[2], (size_t)1 << 32, "emit.out");
+	tb_reg(&e->data, &r[3], (size_t)1 << 28, "emit.data");
+	e->rel = vmreg_get(&r[4], (size_t)1 << 26, "emit.rel");
+	e->b = vmreg_get(&r[5], (size_t)c->nsym * sizeof(bind) + 4096, "emit.b");
+	e->lm = vmreg_get(&r[6], (size_t)c->nlabel * sizeof(lbl) + 4096, "emit.lm");
+	e->caselbl = vmreg_get(&r[7], (size_t)c->nnode * sizeof(uint32_t) + 4096, "emit.caselbl");
 	e->caplabel = 1u << 22;
-	e->lrefc = reserve((size_t)e->caplabel * sizeof(uint32_t));
-	e->lkvi = reserve((size_t)e->caplabel * sizeof(uint32_t));
-	e->kvs = reserve((size_t)CAPKVS * sizeof(kvst));
-	e->cases = reserve((size_t)1 << 24);
-	e->weakref = reserve((size_t)c->nsym * sizeof(uint32_t) + 4096);
+	e->lrefc = vmreg_get(&r[8], (size_t)e->caplabel * sizeof(uint32_t), "emit.lrefc");
+	e->lkvi = vmreg_get(&r[9], (size_t)e->caplabel * sizeof(uint32_t), "emit.lkvi");
+	e->kvs = vmreg_get(&r[10], (size_t)CAPKVS * sizeof(kvst), "emit.kvs");
+	e->cases = vmreg_get(&r[11], (size_t)1 << 24, "emit.cases");
+	e->weakref = vmreg_get(&r[12], (size_t)c->nsym * sizeof(uint32_t) + 4096, "emit.weakref");
+	e->rlog = vmreg_get(&r[13], RLOG_CAP * sizeof(uint32_t), "emit.rlog");
 }
 
-static void ecx_free(ecx *e)
+/* (after the stitch: the chunks point into e->out) */
+static void ecx_free(ecx *e, vmreg *r)
 {
 	cc *c = e->c;
 
-	munmap(e->in, (size_t)e->capin * sizeof(ins));
-	munmap(e->weakref, (size_t)c->nsym * sizeof(uint32_t) + 4096);
-	munmap(e->raw.p, e->raw.cap);
-	munmap(e->data.p, e->data.cap);
-	munmap(e->rel, (size_t)1 << 26);
-	munmap(e->b, (size_t)c->nsym * sizeof(bind) + 4096);
-	munmap(e->lm, (size_t)c->nlabel * sizeof(lbl) + 4096);
-	munmap(e->caselbl, (size_t)c->nnode * sizeof(uint32_t) + 4096);
-	munmap(e->lrefc, (size_t)e->caplabel * sizeof(uint32_t));
-	munmap(e->lkvi, (size_t)e->caplabel * sizeof(uint32_t));
-	munmap(e->kvs, (size_t)CAPKVS * sizeof(kvst));
-	munmap(e->cases, (size_t)1 << 24);
-	/* e->out stays: the chunks point into it (unmapped by emit_tu) */
+	/* written before read (put, newlabel, the case collection, ...): handed back as is */
+	vmreg_put(&r[0], VMREG_SCRATCH);
+	vmreg_put(&r[1], VMREG_SCRATCH);
+	vmreg_put(&r[2], e->out.n);
+	vmreg_put(&r[3], VMREG_SCRATCH);
+	vmreg_put(&r[4], VMREG_SCRATCH);
+	/* per sym / label, found zero */
+	vmreg_put(&r[5], (size_t)c->nsym * sizeof(bind) + 4096);
+	vmreg_put(&r[6], (size_t)c->nlabel * sizeof(lbl) + 4096);
+	vmreg_put(&r[7], VMREG_SCRATCH);
+	vmreg_put(&r[8], VMREG_SCRATCH);
+	vmreg_put(&r[9], VMREG_SCRATCH);
+	vmreg_put(&r[10], VMREG_SCRATCH);
+	vmreg_put(&r[11], VMREG_SCRATCH);
+	vmreg_put(&r[12], VMREG_SCRATCH);
+	vmreg_put(&r[13], VMREG_SCRATCH);	/* (copied by keep_make before this) */
+	vmpool_give(&ecxpool, r);
+}
+
+/* a function the previous round generated, if nothing it asked about has been marked since */
+static bool reuse(ecx *e, uint32_t s)
+{
+	const keep *K = e->E->K;
+	const kent *k;
+	tbuf *b = &e->out;
+	size_t start;
+
+	if (!K || s >= K->nidx || !K->idx[s])
+		return false;
+	k = &K->ent[K->idx[s] - 1];
+	for (uint32_t j = 0; j < k->nlog; j++)
+		if (k->log[2 * j] == RL_DEP && e->E->mf[k->log[2 * j + 1]])
+			return false;
+	for (uint32_t j = 0; j < k->nlog; j++) {
+		uint32_t v = k->log[2 * j + 1];
+
+		switch (k->log[2 * j]) {
+		case RL_REF: claim_ref(e, v); break;
+		case RL_DEP: rlog(e, RL_DEP, v); break;
+		case RL_WALK: walk_fn(e, v); break;
+		}
+	}
+	b->n = (b->n + 7) & ~(size_t)7;
+	start = b->n;
+	memcpy(it_room(e, k->n), k->p, k->n);
+	out_chunk(e, k->key, start);
+	return true;
 }
 
 static void do_item(ecx *e, uint32_t it)
 {
 	cc *c = e->c;
 
+	e->rlog0 = e->nrlog;
 	if (it & 0x80000000u) {
 		emit_string(e, it & 0x7fffffffu);
 		return;
 	}
-	if (c->syms[it].kind == S_FUNC)
-		emit_function(e, it);
-	else
+	if (c->syms[it].kind == S_FUNC) {
+		if (!reuse(e, it))
+			emit_function(e, it);
+	} else {
 		emit_object(e, it);
+	}
 }
 
 static void *worker(void *arg)
@@ -9231,40 +9584,54 @@ static void as_error(cc *c, const char *fmt, ...)
 }
 
 /* the object backend: header text, chunks (items), tail text */
+static vmpool rpool = VMPOOL_INIT(3);
+
 static int replay(cc *c, const cc_opts *o, const char *hp, size_t hn, const char *tp, size_t tn, const chunk *ch, uint32_t nch)
 {
-	static _Thread_local uint32_t *loff, *cache;
-	static _Thread_local size_t ncache;
+	/* per function, written before read: reserved once per thread */
+	static _Thread_local uint32_t *wb, *lsym, *lser, ser;
+	static _Thread_local rlab *lab;
+	static _Thread_local rpend *pend;
+	static _Thread_local rpatch *pt;
 	size_t need = (size_t)c->nsym + c->nstr + c->nlabel + 192;
 	rctx R = { .c = c, .as = o->as, .o = o->obj };
+	vmreg *rr = vmpool_take(&rpool);
+	uint32_t *cache;
 	int r = 0;
 
-	static _Thread_local tbuf nb;
-
-	if (!loff) {
-		loff = reserve((size_t)1 << 32);	/* labels of one function */
-		tb_init(&nb, 1 << 20);
-	}
-	R.nb = nb;
-	if (need > ncache) {
-		if (cache)
-			munmap(cache, ncache * sizeof(uint32_t));
-		ncache = need * 2;
-		cache = reserve(ncache * sizeof(uint32_t));
-	} else {
-		memset(cache, 0, need * sizeof(uint32_t));
-	}
+	R.loff = vmreg_get(&rr[0], (size_t)1 << 32, "emit.loff");	/* labels of one function */
+	tb_reg(&R.nb, &rr[1], 1 << 20, "emit.nb");
+	cache = vmreg_get(&rr[2], need * sizeof(uint32_t), "emit.rcache");
 	R.symc = cache;
 	R.strc = cache + c->nsym + 64;
 	R.lblc = R.strc + c->nstr + 64;
-	R.loff = loff;
+	if (!wb) {
+		wb = reserve((size_t)1 << 32);		/* words of one function (<= 6 per record) */
+		lsym = reserve((size_t)1 << 32);
+		lser = reserve((size_t)1 << 32);
+		lab = reserve((size_t)1 << 34);		/* per label */
+		pend = reserve((size_t)1 << 34);	/* per branch record */
+		pt = reserve((size_t)1 << 34);		/* fixups of one function (<= 1 per record) */
+	}
+	R.wb = wb;
+	R.lsym = lsym;
+	R.lser = lser;
+	R.lab = lab;
+	R.pend = pend;
+	R.ser = ser;
+	R.pt = pt;
 	as_begin(R.as, R.o, "<vcc>");
 	if (as_snippet(R.as, hp, hn))
 		r = -1;
 	for (uint32_t i = 0; !r && i < nch; i++)
 		r = r_chunk(&R, ch[i].p, ch[i].n);
+	ser = R.ser;
 	if (!r && (as_snippet(R.as, tp, tn) || as_end(R.as)))
 		r = -1;
+	vmreg_put(&rr[0], VMREG_SCRATCH);
+	vmreg_put(&rr[1], VMREG_SCRATCH);
+	vmreg_put(&rr[2], need * sizeof(uint32_t));
+	vmpool_give(&rpool, rr);
 	if (r || R.o->has_err || as_failed(R.as)) {
 		as_error(c, "assembler: %s", as_failed(R.as) ? as_msg(R.as) : R.o->err);
 		return -1;
@@ -9272,7 +9639,68 @@ static int replay(cc *c, const cc_opts *o, const char *hp, size_t hn, const char
 	return 0;
 }
 
-static int emit_tu1(cc *c, const cc_opts *o, bool write_out, uint8_t *mf, bool *again, bool last)
+/* what the next round may reuse: this round's functions (their chunks and logs, copied) */
+static void keep_free(keep *K)
+{
+	if (K->idx) {
+		munmap(K->idx, K->nidx * sizeof(uint32_t));
+		munmap(K->ent, K->nent * sizeof(kent) + 64);
+		munmap(K->bytes, K->nbytes + 64);
+		munmap(K->logs, K->nlogs * sizeof(uint32_t) + 64);
+	}
+	memset(K, 0, sizeof(*K));
+}
+
+static void keep_make(keep *K, cc *c, const emitter *E)
+{
+	size_t nb = 0, nl = 0, ob = 0, ol = 0;
+	uint32_t ne = 0;
+
+	memset(K, 0, sizeof(*K));
+	for (uint32_t i = 0; i < E->nchunk; i++) {
+		const chunk *ch = &E->chunks[i];
+
+		if (ch->key >> 62 || (ch->key & 1))
+			continue;	/* strings, objects: generated again */
+		nb += (ch->n + 7) & ~(size_t)7;
+		nl += 2 * (size_t)ch->nlog;
+		ne++;
+	}
+	K->nidx = c->nsym;
+	K->idx = reserve(K->nidx * sizeof(uint32_t));
+	K->nent = ne;
+	K->ent = reserve(ne * sizeof(kent) + 64);
+	K->nbytes = nb;
+	K->bytes = reserve(nb + 64);
+	K->nlogs = nl;
+	K->logs = reserve(nl * sizeof(uint32_t) + 64);
+	K->asmno = E->asmno;
+	ne = 0;
+	for (uint32_t i = 0; i < E->nchunk; i++) {
+		const chunk *ch = &E->chunks[i];
+		kent *k;
+
+		if (ch->key >> 62 || (ch->key & 1))
+			continue;
+		k = &K->ent[ne++];
+		k->key = ch->key;
+		k->p = K->bytes + ob;
+		k->n = ch->n;
+		memcpy(K->bytes + ob, ch->p, ch->n);
+		ob += (ch->n + 7) & ~(size_t)7;
+		k->log = K->logs + ol;
+		k->nlog = ch->nlog;
+		memcpy(K->logs + ol, ch->log, 2 * (size_t)ch->nlog * sizeof(uint32_t));
+		ol += 2 * (size_t)ch->nlog;
+		K->idx[ch->key >> 1] = ne;
+	}
+}
+
+/* emit_tu1's per-TU tables (E.*) and text buffers */
+static vmpool erpool = VMPOOL_INIT(15);
+
+static int emit_tu1(cc *c, const cc_opts *o, bool write_out, uint8_t *mf, bool *again, bool last,
+		    const keep *K, keep *next)
 {
 	emitter E;
 	int nthr = o->nthreads > 0 ? o->nthreads : 1;
@@ -9281,28 +9709,31 @@ static int emit_tu1(cc *c, const cc_opts *o, bool write_out, uint8_t *mf, bool *
 	double t0 = now(), t1, t2;
 	tbuf hdr;
 	int errors;
+	vmreg *er = vmpool_take(&erpool), *xr[64];
 
 	memset(&E, 0, sizeof(E));
 	E.c = c;
 	E.o = o;
 	E.mf = mf;
-	E.claimed = reserve(c->nsym + 64);
-	E.extref = reserve(c->nsym + 64);
-	E.sflags = reserve(c->nsym + 64);
-	E.ffacts = reserve(c->nsym + 64);
-	E.strdone = reserve(c->nstr + 64);
-	E.nflags = reserve(c->nnode + 64);
-	E.lref = reserve(c->nlabel + 64);
-	E.lcdepth = reserve((size_t)c->nlabel * 2 + 64);
-	E.q = reserve(((size_t)c->nsym + c->nstr + 64) * sizeof(uint32_t));
-	E.chunks = reserve(((size_t)c->nsym + c->nstr + c->ntlasm + 64) * sizeof(chunk));
+	E.K = K;
+	E.asmno = K ? K->asmno : 0;
+	E.claimed = vmreg_get(&er[0], c->nsym + 64, "emit.claimed");
+	E.extref = vmreg_get(&er[1], c->nsym + 64, "emit.extref");
+	E.sflags = vmreg_get(&er[2], c->nsym + 64, "emit.sflags");
+	E.ffacts = vmreg_get(&er[14], c->nsym + 64, "emit.ffacts");
+	E.strdone = vmreg_get(&er[3], c->nstr + 64, "emit.strdone");
+	E.nflags = vmreg_get(&er[4], c->nnode + 64, "emit.nflags");
+	E.lref = vmreg_get(&er[5], c->nlabel + 64, "emit.lref");
+	E.lcdepth = vmreg_get(&er[6], (size_t)c->nlabel * 2 + 64, "emit.lcdepth");
+	E.q = vmreg_get(&er[7], ((size_t)c->nsym + c->nstr + 64) * sizeof(uint32_t), "emit.q");
+	E.chunks = vmreg_get(&er[8], ((size_t)c->nsym + c->nstr + c->ntlasm + 64) * sizeof(chunk), "emit.chunks");
 	pthread_mutex_init(&E.mu, NULL);
 	pthread_cond_init(&E.cv, NULL);
 	pthread_mutex_init(&E.cmu, NULL);
 	pthread_mutex_init(&E.emu, NULL);
-	E.walked = reserve(c->nsym + 64);
-	E.fnsize = reserve((c->nsym + 64) * sizeof(uint16_t));
-	E.cwval = reserve((c->nsym + 64) * sizeof(i128));
+	E.walked = vmreg_get(&er[9], c->nsym + 64, "emit.walked");
+	E.fnsize = vmreg_get(&er[10], (c->nsym + 64) * sizeof(uint16_t), "emit.fnsize");
+	E.cwval = vmreg_get(&er[11], (c->nsym + 64) * sizeof(i128), "emit.cwval");
 	E.stats = getenv("VCC_EMIT_STATS") != NULL;
 	E.objtext = getenv("VCC_OBJ_TEXT") != NULL;
 	/* roots */
@@ -9329,7 +9760,7 @@ static int emit_tu1(cc *c, const cc_opts *o, bool write_out, uint8_t *mf, bool *
 		nthr = 64;
 	ctx = calloc((size_t)nthr, sizeof(ecx));
 	for (int i = 0; i < nthr; i++)
-		ecx_init(&ctx[i], &E);
+		ecx_init(&ctx[i], &E, xr[i] = vmpool_take(&ecxpool));
 	for (int i = 1; i < nthr; i++)
 		pthread_create(&th[i], NULL, worker, &ctx[i]);
 	worker(&ctx[0]);
@@ -9338,7 +9769,7 @@ static int emit_tu1(cc *c, const cc_opts *o, bool write_out, uint8_t *mf, bool *
 	t2 = now();
 	/* stitch */
 	qsort(E.chunks, E.nchunk, sizeof(chunk), chunk_cmp);
-	tb_init(&hdr, (size_t)1 << 26);
+	tb_reg(&hdr, &er[12], (size_t)1 << 26, "emit.hdr");
 	tb_s(&hdr, "\t.text\n");
 	for (uint32_t i = 0; i < c->ntlasm; i++) {
 		const casm *a = &c->asms[N(c->tlasm[i])->a];
@@ -9351,7 +9782,7 @@ static int emit_tu1(cc *c, const cc_opts *o, bool write_out, uint8_t *mf, bool *
 		struct iovec *iov = malloc(((size_t)E.nchunk + 2) * sizeof(struct iovec));
 		int k = 0;
 
-		tb_init(&tail, (size_t)1 << 26);
+		tb_reg(&tail, &er[13], (size_t)1 << 26, "emit.tail");
 		{
 			/* .weak for weak undefined syms, in symbol order whatever the threads did */
 			uint32_t nw = 0, *w;
@@ -9401,6 +9832,8 @@ static int emit_tu1(cc *c, const cc_opts *o, bool write_out, uint8_t *mf, bool *
 			iov[k++] = (struct iovec){ (void *)E.chunks[i].p, E.chunks[i].n };
 		iov[k++] = (struct iovec){ tail.p, tail.n };
 		*again = E.newmf != 0 && !last;
+		if (*again && next && !E.errors)
+			keep_make(next, c, &E);
 		if (!E.errors && write_out && !*again && o->emit == 2) {
 			if (E.objtext) {
 				/* the text, gathered once, through the assembler */
@@ -9467,27 +9900,27 @@ static int emit_tu1(cc *c, const cc_opts *o, bool write_out, uint8_t *mf, bool *
 				(unsigned long long)E.nins, E.nins * 4 / 1024.0, (t1 - t0) * 1e3, (t2 - t1) * 1e3, nthr,
 				E.print_ns / 1e6, E.walk_ns / 1e6, (unsigned long long)E.nwalk, bytes / 1e6, E.nins * 4 / 1e6 / (t2 - t1));
 		}
-		munmap(tail.p, tail.cap);
+		vmreg_put(&er[13], tail.n);
 	}
-	munmap(hdr.p, hdr.cap);
-	for (int i = 0; i < nthr; i++) {
-		munmap(ctx[i].out.p, ctx[i].out.cap);
-		ecx_free(&ctx[i]);
-	}
+	vmreg_put(&er[12], hdr.n);
+	for (int i = 0; i < nthr; i++)
+		ecx_free(&ctx[i], xr[i]);
 	free(ctx);
 	errors = E.errors;
-	munmap(E.claimed, c->nsym + 64);
-	munmap(E.extref, c->nsym + 64);
-	munmap(E.sflags, c->nsym + 64);
-	munmap(E.strdone, c->nstr + 64);
-	munmap(E.nflags, c->nnode + 64);
-	munmap(E.lref, c->nlabel + 64);
-	munmap((void *)E.walked, c->nsym + 64);
-	munmap(E.fnsize, (c->nsym + 64) * sizeof(uint16_t));
-	munmap(E.cwval, (c->nsym + 64) * sizeof(i128));
-	munmap(E.lcdepth, (size_t)c->nlabel * 2 + 64);
-	munmap(E.q, ((size_t)c->nsym + c->nstr + 64) * sizeof(uint32_t));
-	munmap(E.chunks, ((size_t)c->nsym + c->nstr + c->ntlasm + 64) * sizeof(chunk));
+	vmreg_put(&er[0], c->nsym + 64);
+	vmreg_put(&er[1], c->nsym + 64);
+	vmreg_put(&er[2], c->nsym + 64);
+	vmreg_put(&er[3], c->nstr + 64);
+	vmreg_put(&er[4], c->nnode + 64);
+	vmreg_put(&er[5], c->nlabel + 64);
+	vmreg_put(&er[6], (size_t)c->nlabel * 2 + 64);
+	vmreg_put(&er[7], VMREG_SCRATCH);	/* the queue and the chunks: written before read */
+	vmreg_put(&er[8], VMREG_SCRATCH);
+	vmreg_put(&er[9], c->nsym + 64);
+	vmreg_put(&er[10], (c->nsym + 64) * sizeof(uint16_t));
+	vmreg_put(&er[11], (c->nsym + 64) * sizeof(i128));
+	vmreg_put(&er[14], c->nsym + 64);
+	vmpool_give(&erpool, er);
 	return errors;
 }
 
@@ -9500,20 +9933,32 @@ extern _Atomic unsigned long long ppd_ns_emit;
 int emit_tu(cc *c, const cc_opts *o)
 {
 	double t0 = now();
+	vperf v0 = vperf_now();
 	const char *r = getenv("VCC_EMIT_REPEAT");
 	int n = r ? atoi(r) : 1, err = 0;
-	uint8_t *mf = reserve(c->nsym + 64);
+	static vmpool mfpool = VMPOOL_INIT(1);
+	vmreg *mfr = vmpool_take(&mfpool);
+	uint8_t *mf = vmreg_get(mfr, c->nsym + 64, "emit.mf");
 	bool again = false;
+	keep K[2];
 
+	memset(K, 0, sizeof(K));
 	for (int i = 1; i < n; i++)
-		if (emit_tu1(c, o, false, mf, &again, false))
+		if (emit_tu1(c, o, false, mf, &again, false, NULL, NULL))
 			break;
 	for (int round = 0; round < 8; round++) {
-		err = emit_tu1(c, o, true, mf, &again, round == 7);
+		keep *prev = &K[round & 1], *next = &K[(round + 1) & 1];
+
+		keep_free(next);
+		err = emit_tu1(c, o, true, mf, &again, round == 7, round ? prev : NULL, next);
 		if (err || !again)
 			break;
 	}
-	munmap(mf, c->nsym + 64);
+	keep_free(&K[0]);
+	keep_free(&K[1]);
+	vmreg_put(mfr, c->nsym + 64);
+	vmpool_give(&mfpool, mfr);
 	ppd_ns_emit += (unsigned long long)((now() - t0) * 1e9);
+	ppd_ph_add(PPD_PH_EMIT, v0);
 	return err;
 }

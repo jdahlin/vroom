@@ -36,6 +36,7 @@
 #include "intern.h"
 #include "pp.h"
 #include "ppdata.inc"
+#include "arena.h"
 
 #define unlikely(x) __builtin_expect(!!(x), 0)
 #define likely(x) __builtin_expect(!!(x), 1)
@@ -73,18 +74,21 @@ static _Atomic size_t shared_used;
 
 static void *salloc(size_t n)
 {
+	char *b0 = __atomic_load_n(&shared_base, __ATOMIC_ACQUIRE);
 	size_t off;
 
-	if (unlikely(!__atomic_load_n(&shared_base, __ATOMIC_ACQUIRE))) {
+	if (unlikely(!b0)) {
 		char *b = vm(SHARED_MAX), *z = NULL;
 
-		if (!__atomic_compare_exchange_n(&shared_base, &z, b, 0, __ATOMIC_ACQ_REL, __ATOMIC_ACQUIRE))
-			munmap(b, SHARED_MAX);
+		if (__atomic_compare_exchange_n(&shared_base, &z, b, 0, __ATOMIC_ACQ_REL, __ATOMIC_ACQUIRE))
+			b0 = b;
+		else
+			munmap(b, SHARED_MAX), b0 = z;	/* the winner's; never re-read the base plainly */
 	}
 	off = atomic_fetch_add(&shared_used, (n + 15) & ~(size_t)15);
 	if (off + n > SHARED_MAX)
 		abort();
-	return shared_base + off;
+	return b0 + off;
 }
 
 /* ---------------- per-file skeleton ---------------- */
@@ -103,10 +107,12 @@ typedef struct pdir {
 } pdir;
 
 typedef struct pmacro pmacro;
+typedef struct incent incent;
 
 typedef struct pfile {
 	const pdir *dir;
 	_Atomic(const pmacro *) *mac;	/* per directive: the #define's macro, built once */
+	_Atomic(const incent *) *inc;	/* per directive: #include "x" / <x>, its last answer */
 	uint32_t ndir;
 	uint32_t guard;		/* controlling macro id, 0 if none */
 	int bad;		/* unbalanced conditionals */
@@ -200,6 +206,7 @@ static pfile *pfile_build(const vlex_file *f)
 	free(stk);
 	fi->dir = d;
 	fi->mac = salloc((nd + 1) * sizeof(*fi->mac));	/* fresh: zero */
+	fi->inc = salloc((nd + 1) * sizeof(*fi->inc));
 	fi->ndir = nd;
 	/*
 	 * Include guard: the file is one #ifndef X / #if !defined(X) group
@@ -228,16 +235,19 @@ static pfile *pfile_build(const vlex_file *f)
 	return fi;
 }
 
-static const pfile *pfile_get(const vlex_file *f)
+/* *fresh: built by this call (the file's first entry in the process) */
+static const pfile *pfile_get(const vlex_file *f, bool *fresh)
 {
 	vlex_file *w = (vlex_file *)f;
 	void *fi = __atomic_load_n(&w->pp, __ATOMIC_ACQUIRE), *z = NULL;
 
+	*fresh = false;
 	if (likely(fi != NULL))
 		return fi;
 	fi = pfile_build(f);
 	if (!__atomic_compare_exchange_n(&w->pp, &z, fi, 0, __ATOMIC_ACQ_REL, __ATOMIC_ACQUIRE))
 		return z;	/* lost the race; ours is wasted */
+	*fresh = true;
 	return fi;
 }
 
@@ -257,7 +267,7 @@ static uint32_t file_line(const vlex_file *f, const pfile *cfi, uint32_t off)
 		for (uint32_t i = 0; i < f->size; i++)
 			if (f->src[i] == '\n')
 				l[c++] = i;
-		fi->nlines = c;
+		__atomic_store_n(&fi->nlines, c, __ATOMIC_RELAXED);	/* a loser writes it too */
 		if (!__atomic_compare_exchange_n(&fi->lines, &z, l, 0, __ATOMIC_ACQ_REL, __ATOMIC_ACQUIRE))
 			l = z;
 	}
@@ -281,12 +291,6 @@ typedef struct arena {
 	char *base, *p, *end;
 } arena;
 
-static void arena_init(arena *a, size_t n)
-{
-	a->base = a->p = vm(n);
-	a->end = a->base + n;
-}
-
 static inline void *alloc(arena *a, size_t n)
 {
 	char *r = a->p;
@@ -306,6 +310,7 @@ enum { MK_OBJ, MK_FUNC, MK_BUILTIN };
 enum {
 	MF_VARIADIC = 1, MF_PASTE = 2, MF_VAOPT = 4,
 	MF_BADHASH = 8,		/* '#' not before a parameter: an error unless assembler */
+	MF_HASH = 16,		/* a '#' in the body */
 };
 enum {
 	B_NONE, B_FILE, B_LINE, B_COUNTER, B_DATE, B_TIME, B_TIMESTAMP,
@@ -361,6 +366,7 @@ typedef struct ctx {
 	int32_t sdir;		/* search dir it was found in, -1 if none */
 	uint32_t fe;		/* fent index */
 	const char *spath;	/* the path as clang spells it (f->path is the cache key) */
+	uint32_t sdl;		/* length of spath's directory part, '/' included */
 	/* C_REPLAY: a header cache entry's tokens (pt, n), its children spliced in */
 	const struct hent *he;
 	uint32_t si, ci;	/* next segment, next __COUNTER__ record */
@@ -1289,8 +1295,9 @@ static inline void mset(pp *p, uint32_t id, const pmacro *m)
 	*mslot(p, id) = (uintptr_t)m;
 }
 
-static inline void mdisable(pp *p, uint32_t id) { *mslot(p, id) |= 1; }
-static inline void menable(pp *p, uint32_t id) { *mslot(p, id) &= ~(uintptr_t)1; }
+/* id is a macro being expanded: its page exists (it was read, defined) */
+static inline void mdisable(pp *p, uint32_t id) { p->mdir[id >> MPAGE_BITS][id & (MPAGE - 1)] |= 1; }
+static inline void menable(pp *p, uint32_t id) { p->mdir[id >> MPAGE_BITS][id & (MPAGE - 1)] &= ~(uintptr_t)1; }
 
 /* ---------------- header cache: recording reads and writes ---------------- */
 
@@ -1620,15 +1627,24 @@ static inline void out_ch(pp *p, char ch)
 
 /* ---------------- tokens ---------------- */
 
+_Static_assert(offsetof(vtok, id) == offsetof(vtok, len) + 4 && offsetof(ptok, id) == offsetof(ptok, len) + 4 &&
+	       offsetof(vtok, flags) == offsetof(vtok, kind) + 1 && offsetof(ptok, kind) == offsetof(ptok, loc) + 4 &&
+	       offsetof(ptok, flags) == offsetof(ptok, kind) + 1 && offsetof(ptok, ctr) == offsetof(ptok, kind) + 2 &&
+	       sizeof(vtok) == offsetof(vtok, kind) + 4, "vfill's layout");
+
+/* three stores: s, len|id, loc|kind|flags|ctr (little endian) */
 static inline void vfill(ptok *t, const vtok *v, const char *src, uint32_t loc)
 {
+	uint64_t li, lk;
+	uint32_t kf;
+
+	memcpy(&li, &v->len, 8);
+	memcpy(&kf, &v->kind, 4);
+	kf &= 0xffu | (uint32_t)(TF_SOL | TF_SPACE | TF_DIRTY | TF_RAW) << 8;	/* ctr = 0 */
+	lk = loc | (uint64_t)kf << 32;
 	t->s = src + v->off;
-	t->len = v->len;
-	t->id = v->id;
-	t->loc = loc;
-	t->kind = v->kind;
-	t->flags = v->flags & (TF_SOL | TF_SPACE | TF_DIRTY | TF_RAW);
-	t->ctr = 0;
+	memcpy(&t->len, &li, 8);
+	memcpy(&t->loc, &lk, 8);
 }
 
 static inline void mkeof(ptok *t)
@@ -1680,6 +1696,20 @@ static char *spell_to(char *dst, const ptok *t)
 	if (s != dst)
 		memcpy(dst, s, n);
 	return dst + n;
+}
+
+/*
+ * spell_to() where dst has 16 bytes of room past the spelling: a short clean
+ * spelling is copied as 16 bytes (spellings are readable 16 bytes past their
+ * end: file text is padded, and so is every spelling pp makes)
+ */
+static inline char *spell_to16(char *dst, const ptok *t)
+{
+	if (likely(!(t->flags & TF_DIRTY) && t->len <= 16)) {
+		memcpy(dst, t->s, 16);
+		return dst + t->len;
+	}
+	return spell_to(dst, t);
 }
 
 static inline void svpush(pp *p, const ptok *t)
@@ -1775,7 +1805,7 @@ static void top_event(pp *p, const void *e, uint32_t base, unsigned ctr, uint8_t
 }
 
 /* the next token, no macro expansion; runs directives in file contexts */
-static void raw(pp *p, ptok *t)
+static __attribute__((noinline)) void raw(pp *p, ptok *t)
 {
 	for (;;) {
 		ctx *c = &p->cx[p->depth - 1];
@@ -1845,6 +1875,59 @@ static void raw(pp *p, ptok *t)
 	}
 }
 
+/* the next token of the top context if it is plain (nothing owed, no directive) */
+static inline __attribute__((always_inline)) bool raw_plain(pp *p, ctx *c, ptok *t)
+{
+	if (likely(c->i < c->n && !(c->first | p->pend))) {
+		if (likely(c->type == C_PTOK)) {
+			*t = c->pt[c->i++];
+			return true;
+		}
+		if (c->type == C_VTOK) {
+			const vtok *v = &c->vt[c->i++];
+
+			vfill(t, v, c->src, c->offloc ? c->loc + v->off : c->loc);
+			return true;
+		}
+		if (c->type == C_FILE) {
+			const vtok *v = &c->vt[c->i];
+
+			if (likely(!((v->flags & TF_SOL) && v->kind == T_HASH))) {
+				c->i++;
+				vfill(t, v, c->src, c->loc + v->off);
+				return true;
+			}
+		}
+	}
+	return false;
+}
+
+/* raw_fast's fallback: pops exhausted macro contexts (as raw() does) without raw()'s frame */
+static __attribute__((noinline)) void raw_pop(pp *p, ptok *t)
+{
+	ctx *c = &p->cx[p->depth - 1];
+
+	while (c->i >= c->n && (c->type == C_PTOK || c->type == C_VTOK) && !c->barrier) {
+		if (c->mid)
+			menable(p, c->mid);
+		if (c->first)
+			p->pend |= c->first & 3;
+		p->depth--;
+		c--;
+	}
+	if (raw_plain(p, c, t))
+		return;
+	raw(p, t);
+}
+
+/* raw(), inline: a macro context's next token with nothing owed (most tokens) */
+static inline __attribute__((always_inline)) void raw_fast(pp *p, ptok *t)
+{
+	if (likely(raw_plain(p, &p->cx[p->depth - 1], t)))
+		return;
+	raw_pop(p, t);
+}
+
 /* is the next token '(' ?  (clang's isNextPPTokenLParen: no popping) */
 static bool peek_lparen(const pp *p)
 {
@@ -1861,19 +1944,12 @@ static bool peek_lparen(const pp *p)
 
 static int expand(pp *p, const pmacro *m, ptok *t);
 
-/* the next fully expanded token */
-static void next_exp(pp *p, ptok *t)
+/* next_exp() from an identifier t whose entry e is a macro (or disabled) */
+static __attribute__((noinline)) void next_exp_slow(pp *p, ptok *t, uintptr_t e)
 {
 	for (;;) {
-		uintptr_t e;
 		const pmacro *m;
 
-		raw(p, t);
-		if (t->kind != T_IDENT || (t->flags & PF_NOEXP))
-			return;
-		e = mread_tok(p, t, 0);
-		if (likely(!e))
-			return;
 		if (e & 1) {
 			t->flags |= PF_NOEXP;
 			return;
@@ -1881,9 +1957,35 @@ static void next_exp(pp *p, ptok *t)
 		m = (const pmacro *)e;
 		if (m->kind == MK_FUNC && !peek_lparen(p))
 			return;
-		if (expand(p, m, t))
+		switch (expand(p, m, t)) {
+		case 1:
+			return;		/* t is the result */
+		case 0:
+			raw_fast(p, t);
+			break;
+		default:
+			break;		/* t is the next raw token */
+		}
+		if (t->kind != T_IDENT || (t->flags & PF_NOEXP))
+			return;
+		e = mread_tok(p, t, 0);
+		if (likely(!e))
 			return;
 	}
+}
+
+/* the next fully expanded token */
+static inline __attribute__((always_inline)) void next_exp(pp *p, ptok *t)
+{
+	uintptr_t e;
+
+	raw_fast(p, t);
+	if (t->kind != T_IDENT || (t->flags & PF_NOEXP))
+		return;
+	e = mread_tok(p, t, 0);
+	if (likely(!e))
+		return;
+	next_exp_slow(p, t, e);
 }
 
 /* ---------------- arguments ---------------- */
@@ -1894,7 +1996,8 @@ typedef struct margs {
 	const ptok **pre;	/* pre-expanded, lazily */
 	uint32_t *preln;
 	uint8_t *prest;		/* 0: not computed, 1: done */
-	const ptok **str;	/* stringified */
+	size_t base;		/* tok is sv + base */
+	bool elided;		/* the variadic argument was left out (clang's isVarargsElidedUse) */
 } margs;
 
 /* "macro 'X' defined here": the #define's name, found from the body's file (errors only) */
@@ -1930,17 +2033,127 @@ static void macro_note(pp *p, const pmacro *m)
 
 static bool collect_(pp *p, const pmacro *m, const ptok *name, margs *a, ptok *rp)
 {
-	uint32_t np = m->nparam, slots = np ? np : 1, k = 0, depth = 0, n;
+	uint32_t np = m->nparam, slots = np ? np : 1, k = 0, depth = 0, end;
 	size_t base = p->svn;
 	bool va = m->flags & MF_VARIADIC;
+	const ptok *tok;
 	ptok t;
 
-	a->st = alloc(&p->tmp, slots * sizeof(uint32_t));
-	a->ln = alloc(&p->tmp, slots * sizeof(uint32_t));
+	a->elided = false;
+	/* pre, then st, ln, preln, then prest: one allocation */
+	{
+		char *b = alloc(&p->tmp, slots * (sizeof(*a->pre) + 3 * sizeof(uint32_t) + 1));
+
+		a->pre = (const ptok **)b;
+		a->st = (uint32_t *)(b + slots * sizeof(*a->pre));
+		a->ln = a->st + slots;
+		a->preln = a->ln + slots;
+		a->prest = (uint8_t *)(a->preln + slots);
+	}
 	raw(p, &t);		/* '(' */
 	a->st[0] = 0;
+	/*
+	 * The whole invocation in the top expansion context (nested macros):
+	 * the arguments are slices of its tokens, which outlive the expansion
+	 * (tmp) and are not written; nothing is copied.
+	 */
+	{
+		ctx *c = &p->cx[p->depth - 1];
+
+		if (c->type == C_PTOK && !(c->first | p->pend)) {
+			const ptok *pt = c->pt + c->i;
+			uint32_t e = c->n - c->i;
+
+			for (uint32_t i = 0; i < e; i++) {
+				uint8_t kd = pt[i].kind;
+
+				if (kd == T_LPAREN) {
+					depth++;
+				} else if (kd == T_RPAREN) {
+					if (depth) {
+						depth--;
+						continue;
+					}
+					c->i += i + 1;
+					*rp = pt[i];
+					tok = pt;
+					end = i;
+					goto done;
+				} else if (kd == T_COMMA && !depth && !(va && k + 1 >= np)) {
+					if (k + 1 >= slots) {
+						k++;	/* too many: counted, reported below */
+						continue;
+					}
+					a->ln[k] = i - a->st[k];
+					a->st[++k] = i + 1;
+				}
+			}
+			k = depth = 0;	/* not all there: collect into sv */
+		}
+	}
 	for (;;) {
-		raw(p, &t);
+		ctx *c = &p->cx[p->depth - 1];
+
+		/* runs of plain tokens straight into sv */
+		if (likely(c->i < c->n && !(c->first | p->pend)) && c->type != C_REPLAY) {
+			bool stop_comma = !(va && k + 1 >= np);
+			uint32_t i = c->i, e = c->n;
+
+			if (c->type == C_PTOK) {
+				const ptok *pt = c->pt;
+				ptok *w = p->sv + p->svn;
+
+				/* (no room for the rest of the context: token by token below) */
+				if (unlikely(p->svn + (e - i) > SVMAX))
+					e = i;
+				for (; i < e; i++) {
+					uint8_t kd = pt[i].kind;
+
+					if (kd == T_LPAREN) {
+						depth++;
+					} else if (kd == T_RPAREN) {
+						if (!depth)
+							break;
+						depth--;
+					} else if (kd == T_COMMA && !depth && stop_comma) {
+						break;
+					}
+					*w++ = pt[i];
+				}
+				p->svn = (size_t)(w - p->sv);
+				e = c->n;
+			} else {
+				const vtok *vt = c->vt;
+				bool file = c->type == C_FILE;
+				uint32_t loc = c->loc, offloc = file || c->offloc;
+
+				for (; i < e; i++) {
+					const vtok *v = &vt[i];
+					uint8_t kd = v->kind;
+
+					if (kd == T_LPAREN) {
+						depth++;
+					} else if (kd == T_RPAREN) {
+						if (!depth)
+							break;
+						depth--;
+					} else if (kd == T_COMMA && !depth && stop_comma) {
+						break;
+					} else if (file && (v->flags & TF_SOL) && kd == T_HASH) {
+						break;
+					}
+					if (unlikely(p->svn == SVMAX)) {
+						fprintf(stderr, "vcc: expansion too large\n");
+						abort();
+					}
+					vfill(&p->sv[p->svn++], v, c->src, offloc ? loc + v->off : loc);
+				}
+			}
+			c->i = i;
+			if (i == e)
+				continue;
+		}
+		raw_fast(p, &t);
 		if (unlikely(t.kind == T_EOF)) {
 			error(p, name->loc, "unterminated function-like macro invocation");
 			p->svn = base;
@@ -1967,35 +2180,38 @@ static bool collect_(pp *p, const pmacro *m, const ptok *name, margs *a, ptok *r
 		svpush(p, &t);
 	}
 	*rp = t;
+	/* the arguments stay in sv[base, svn) until expand() is done with them */
+	tok = p->sv + base;
+	end = (uint32_t)(p->svn - base);
+done:
 	if (k >= slots) {
 		error(p, name->loc, "too many arguments provided to function-like macro invocation");
 		p->svn = base;
 		return false;
 	}
-	a->ln[k] = (uint32_t)(p->svn - base) - a->st[k];
+	a->ln[k] = end - a->st[k];
 	if (k + 1 < np) {
 		if (va && k + 2 == np) {
 			/* GNU: the variadic argument left out entirely */
-			a->st[k + 1] = (uint32_t)(p->svn - base);
+			a->st[k + 1] = end;
 			a->ln[k + 1] = 0;
+			a->elided = true;
 		} else {
 			error(p, t.loc, "too few arguments provided to function-like macro invocation");
 			macro_note(p, m);
 			p->svn = base;
 			return false;
 		}
+	} else if (np == 1 && va && !a->ln[0]) {
+		a->elided = true;	/* F() for F(...): no arguments at all */
 	} else if (np == 0 && a->ln[0]) {
 		error(p, name->loc, "too many arguments provided to function-like macro invocation");
 		p->svn = base;
 		return false;
 	}
-	a->tok = svtake(p, base, &n);
-	a->pre = alloc(&p->tmp, slots * sizeof(*a->pre));
-	a->preln = alloc(&p->tmp, slots * sizeof(uint32_t));
-	a->prest = alloc(&p->tmp, slots);
-	a->str = alloc(&p->tmp, slots * sizeof(*a->str));
+	a->tok = tok;
+	a->base = base;
 	memset(a->prest, 0, slots);
-	memset(a->str, 0, slots * sizeof(*a->str));
 	return true;
 }
 
@@ -2018,25 +2234,45 @@ static bool needs_pre(pp *p, const ptok *t, uint32_t n)
 	return false;
 }
 
-static void preexpand(pp *p, margs *a, uint32_t k)
+/*
+ * keep: the result stays in sv[base, svn) (it is only read, and only until
+ * expand() resets svn); else it is copied to tmp (va_opt: sv is in use above)
+ */
+static __attribute__((noinline)) void preexpand_run(pp *p, margs *a, uint32_t k, bool keep,
+						       const ptok *at, uint32_t n)
 {
-	const ptok *at = a->tok + a->st[k];
-	uint32_t n = a->ln[k];
 	uint8_t pend = p->pend;
 	int d = p->depth;
 	size_t base = p->svn;
 	ptok t;
 
-	a->prest[k] = 1;
-	if (!needs_pre(p, at, n)) {
-		a->pre[k] = at;
-		a->preln[k] = n;
-		return;
-	}
 	push_ptok(p, at, n, 0, 0, 1);
 	p->pend = 0;
 	p->preexp++;
 	for (;;) {
+		ctx *c = &p->cx[p->depth - 1];
+
+		/* runs of tokens that are not macros: as next_exp() returns them, straight into sv */
+		if (c->type == C_PTOK && c->i < c->n && !(c->first | p->pend) && !p->rec.on &&
+		    likely(p->svn + (c->n - c->i) <= SVMAX)) {
+			const ptok *pt = c->pt;
+			ptok *w = p->sv + p->svn;
+			uint32_t i = c->i, e = c->n;
+
+			for (; i < e; i++) {
+				uintptr_t me;
+
+				*w = pt[i];
+				if (pt[i].kind == T_IDENT && !(pt[i].flags & PF_NOEXP) && (me = mget(p, pt[i].id))) {
+					if (!(me & 1))
+						break;	/* a macro: next_exp() */
+					w->flags |= PF_NOEXP;
+				}
+				w++;
+			}
+			p->svn = (size_t)(w - p->sv);
+			c->i = i;
+		}
 		next_exp(p, &t);
 		if (t.kind == T_EOF)
 			break;
@@ -2045,7 +2281,27 @@ static void preexpand(pp *p, margs *a, uint32_t k)
 	p->preexp--;
 	pop_to(p, d);
 	p->pend = pend;
-	a->pre[k] = svtake(p, base, &a->preln[k]);
+	if (keep) {
+		a->pre[k] = p->sv + base;
+		a->preln[k] = (uint32_t)(p->svn - base);
+	} else {
+		a->pre[k] = svtake(p, base, &a->preln[k]);
+	}
+}
+
+/* most arguments need no pre-expansion: that check inline, the rest in preexpand_run */
+static inline void preexpand(pp *p, margs *a, uint32_t k, bool keep)
+{
+	const ptok *at = a->tok + a->st[k];
+	uint32_t n = a->ln[k];
+
+	a->prest[k] = 1;
+	if (!needs_pre(p, at, n)) {
+		a->pre[k] = at;
+		a->preln[k] = n;
+		return;
+	}
+	preexpand_run(p, a, k, keep, at, n);
 }
 
 static bool is_strlit(int k)
@@ -2108,7 +2364,7 @@ static void stringify(pp *p, const ptok *t, uint32_t n, ptok *out)
 					HC_BAD(p);
 				}
 			}
-			w = spell_to(w, &t[i]);
+			w = spell_to16(w, &t[i]);	/* (cap has 16 to spare) */
 		}
 	}
 	/* a trailing unescaped backslash would escape the quote: drop it */
@@ -2153,10 +2409,21 @@ static const struct { const char *s; uint8_t k; } puncts[] = {
 	{ "%>", T_RBRACE }, { "%:", T_HASH }, { "%:%:", T_HASHHASH },
 };
 
-static bool idch(unsigned char c)
+#define IDCH_ROW(b) [b] = 1, [b + 1] = 1, [b + 2] = 1, [b + 3] = 1, [b + 4] = 1, [b + 5] = 1, [b + 6] = 1, [b + 7] = 1
+static const uint8_t idch_tab[256] = {	/* [a-zA-Z0-9_$] and >= 0x80 */
+	['0'] = 1, ['1'] = 1, ['2'] = 1, ['3'] = 1, ['4'] = 1, ['5'] = 1, ['6'] = 1, ['7'] = 1, ['8'] = 1, ['9'] = 1,
+	IDCH_ROW('A'), IDCH_ROW('I'), IDCH_ROW('Q'), ['Y'] = 1, ['Z'] = 1,
+	IDCH_ROW('a'), IDCH_ROW('i'), IDCH_ROW('q'), ['y'] = 1, ['z'] = 1,
+	['_'] = 1, ['$'] = 1,
+	IDCH_ROW(0x80), IDCH_ROW(0x88), IDCH_ROW(0x90), IDCH_ROW(0x98), IDCH_ROW(0xa0), IDCH_ROW(0xa8),
+	IDCH_ROW(0xb0), IDCH_ROW(0xb8), IDCH_ROW(0xc0), IDCH_ROW(0xc8), IDCH_ROW(0xd0), IDCH_ROW(0xd8),
+	IDCH_ROW(0xe0), IDCH_ROW(0xe8), IDCH_ROW(0xf0), IDCH_ROW(0xf8),
+};
+#undef IDCH_ROW
+
+static inline bool idch(unsigned char c)
 {
-	return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') ||
-	       c == '_' || c == '$' || c >= 0x80;
+	return idch_tab[c];
 }
 
 /* the kind of the single token spelled s[0..n), or -1 */
@@ -2218,9 +2485,9 @@ static ptok paste(pp *p, const ptok *l, const ptok *r)
 	int k;
 	uint32_t ll;
 
-	w = spell_to(b, l);
+	w = spell_to16(b, l);	/* (24 to spare) */
 	ll = (uint32_t)(w - b);
-	w = spell_to(w, r);
+	w = spell_to16(w, r);
 	memset(w, 0, 17);
 	k = classify(b, (size_t)(w - b), r->kind);
 	if (k < 0) {
@@ -2244,7 +2511,7 @@ static inline bool hashhash(const ptok *t)
 	return t->kind == T_HASHHASH && !(t->flags & PF_NOPASTE);
 }
 
-/* clang's maybeRemoveCommaBeforeVaArgs (gnu mode) */
+/* clang's maybeRemoveCommaBeforeVaArgs (gnu mode), only if the argument was elided */
 static void remove_va_comma(pp *p, size_t base, bool *ngs)
 {
 	if (p->svn == base || p->sv[p->svn - 1].kind != T_COMMA)
@@ -2259,12 +2526,18 @@ static void remove_va_comma(pp *p, size_t base, bool *ngs)
 static size_t append(pp *p, const ptok *t, uint32_t n)
 {
 	size_t first = p->svn;
+	ptok *w = p->sv + first;
 
-	for (uint32_t i = 0; i < n; i++) {
-		svpush(p, &t[i]);
-		if (t[i].kind == T_HASHHASH)
-			p->sv[p->svn - 1].flags |= PF_NOPASTE;
+	if (unlikely(n > SVMAX - p->svn)) {
+		fprintf(stderr, "vcc: expansion too large\n");
+		abort();
 	}
+	for (uint32_t i = 0; i < n; i++) {
+		w[i] = t[i];
+		if (unlikely(t[i].kind == T_HASHHASH))
+			w[i].flags |= PF_NOPASTE;
+	}
+	p->svn = first + n;
 	return first;
 }
 
@@ -2282,6 +2555,8 @@ static void subst_range(pp *p, const pmacro *m, margs *a, uint32_t from, uint32_
 	bool ngs = *ngsp, va = m->flags & MF_VARIADIC;
 	ptok t;
 
+	bool special = m->flags & (MF_VAOPT | MF_HASH);
+
 	for (uint32_t i = from; i < to; i++) {
 		const vtok *cur = &body[i];
 		uint32_t k = pidx ? pidx[i] : 0;
@@ -2289,6 +2564,8 @@ static void subst_range(pp *p, const pmacro *m, margs *a, uint32_t from, uint32_
 
 		if (i && (cur->flags & TF_SPACE))
 			ngs = true;
+		if (!special)
+			goto plain;	/* no __VA_OPT__, no '#' */
 		if (unlikely(cur->kind == T_IDENT && cur->id == KW_VA_OPT && va)) {
 			i = va_opt(p, m, a, i, to, base, eloc, &ngs, false);
 			continue;
@@ -2310,20 +2587,23 @@ static void subst_range(pp *p, const pmacro *m, margs *a, uint32_t from, uint32_
 			ngs = false;
 			continue;
 		}
+plain:
+		if (!k) {
+			ptok *w;
+
+			if (unlikely(p->svn == SVMAX)) {
+				fprintf(stderr, "vcc: expansion too large\n");
+				abort();
+			}
+			w = &p->sv[p->svn++];
+			vfill(w, cur, m->src, eloc);
+			w->flags = (w->flags & ~(TF_SOL | TF_SPACE)) | (ngs ? TF_SPACE : 0) | PF_MACRO;
+			ngs = false;
+			continue;
+		}
 		before_nonempty = p->svn > base && hashhash(&p->sv[p->svn - 1]);
 		before = i && body[i - 1].kind == T_HASHHASH;
 		after = i + 1 < to && body[i + 1].kind == T_HASHHASH;
-		if (!k) {
-			vfill(&t, cur, m->src, eloc);
-			t.flags |= PF_MACRO;
-			t.flags &= ~(TF_SOL | TF_SPACE);
-			if (ngs) {
-				t.flags |= TF_SPACE;
-				ngs = false;
-			}
-			svpush(p, &t);
-			continue;
-		}
 		k--;
 		if (!before && !after) {
 			const ptok *at = a->pre[k];
@@ -2363,7 +2643,7 @@ static void subst_range(pp *p, const pmacro *m, margs *a, uint32_t from, uint32_
 		}
 		if (before_nonempty)
 			p->svn--;
-		if (va && k == np - 1)
+		if (va && k == np - 1 && a->elided)
 			remove_va_comma(p, base, &ngs);
 	}
 	*ngsp = ngs;
@@ -2393,7 +2673,7 @@ static uint32_t va_opt(pp *p, const pmacro *m, margs *a, uint32_t i, uint32_t to
 		return to;
 	}
 	if (!a->prest[k])
-		preexpand(p, a, k);
+		preexpand(p, a, k, false);
 	if (a->preln[k]) {
 		bool ngs = false;
 
@@ -2422,6 +2702,73 @@ static uint32_t va_opt(pp *p, const pmacro *m, margs *a, uint32_t i, uint32_t to
 	return e;
 }
 
+/*
+ * subst() for a function-like macro without '#', '##' or __VA_OPT__ (most):
+ * every parameter is replaced by its pre-expanded argument, so the result's
+ * size is known and it is built in place, without sv.
+ */
+static void subst_simple(pp *p, const pmacro *m, margs *a, uint8_t nf, uint32_t eloc)
+{
+	const vtok *body = m->body;
+	const uint8_t *pidx = m->pidx;
+	const char *src = m->src;
+	uint32_t nb = m->nbody, n = 0;
+	bool ngs = false;
+	ptok *r, *w;
+
+	if (pidx) {
+		for (uint32_t i = 0; i < nb; i++) {
+			uint32_t k = pidx[i];
+
+			if (!k) {
+				n++;
+				continue;
+			}
+			if (!a->prest[k - 1])
+				preexpand(p, a, k - 1, true);
+			n += a->preln[k - 1];
+		}
+	} else {
+		n = nb;
+	}
+	if (!n) {
+		p->pend |= nf;
+		return;
+	}
+	r = w = alloc(&p->tmp, n * sizeof(ptok));
+	for (uint32_t i = 0; i < nb; i++) {
+		const vtok *cur = &body[i];
+		uint32_t k = pidx ? pidx[i] : 0;
+
+		if (i && (cur->flags & TF_SPACE))
+			ngs = true;
+		if (!k) {
+			vfill(w, cur, src, eloc);
+			w->flags = (w->flags & ~(TF_SOL | TF_SPACE)) | (w == r ? nf : ngs ? TF_SPACE : 0) | PF_MACRO;
+			ngs = false;
+			w++;
+			continue;
+		}
+		{
+			const ptok *at = a->pre[k - 1];
+			uint32_t an = a->preln[k - 1];
+
+			if (!an)
+				continue;
+			for (uint32_t j = 0; j < an; j++) {
+				w[j] = at[j];
+				if (unlikely(at[j].kind == T_HASHHASH))
+					w[j].flags |= PF_NOPASTE;
+			}
+			w->flags = (w->flags & ~(TF_SOL | TF_SPACE)) | (w == r ? nf : ngs ? TF_SPACE : 0);
+			ngs = false;
+			w += an;
+		}
+	}
+	push_ptok(p, r, n, m->name, 0, 0);	/* r[0] took the name's SOL/SPACE (the context's "first") */
+	mdisable(p, m->name);
+}
+
 static int subst(pp *p, const pmacro *m, const ptok *name, margs *a, uint32_t eloc)
 {
 	const vtok *body = m->body;
@@ -2432,6 +2779,10 @@ static int subst(pp *p, const pmacro *m, const ptok *name, margs *a, uint32_t el
 	size_t base;
 	ptok *r;
 
+	if (a && !(m->flags & (MF_PASTE | MF_VAOPT | MF_HASH))) {
+		subst_simple(p, m, a, nf, eloc);
+		return 0;
+	}
 	/* pre-expand first: it pushes contexts and uses sv */
 	if (a && pidx) {
 		for (uint32_t i = 0; i < nb; i++) {
@@ -2443,7 +2794,7 @@ static int subst(pp *p, const pmacro *m, const ptok *name, margs *a, uint32_t el
 				continue;
 			if ((i && body[i - 1].kind == T_HASHHASH) || (i + 1 < nb && body[i + 1].kind == T_HASHHASH))
 				continue;
-			preexpand(p, a, k - 1);
+			preexpand(p, a, k - 1, true);
 		}
 	}
 	base = p->svn;
@@ -2453,7 +2804,16 @@ static int subst(pp *p, const pmacro *m, const ptok *name, margs *a, uint32_t el
 		size_t w = base, e = p->svn;
 
 		for (size_t i = base; i < e;) {
-			ptok cur = p->sv[i++];
+			ptok cur;
+
+			if (!(i + 2 < e && hashhash(&p->sv[i + 1]))) {
+				/* not pasted: stays (moves down once something was) */
+				if (w != i)
+					p->sv[w] = p->sv[i];
+				w++, i++;
+				continue;
+			}
+			cur = p->sv[i++];
 
 			while (i + 1 < e && hashhash(&p->sv[i])) {
 				ptok r;
@@ -2478,7 +2838,9 @@ static int subst(pp *p, const pmacro *m, const ptok *name, margs *a, uint32_t el
 		p->pend |= nf;
 		return 0;
 	}
-	push_ptok(p, r, n, m->name, 0x80 | nf, 0);
+	/* the context's "first" (the name's SOL/SPACE), applied now: r is ours */
+	r[0].flags = (r[0].flags & ~(TF_SOL | TF_SPACE)) | nf;
+	push_ptok(p, r, n, m->name, 0, 0);
 	mdisable(p, m->name);
 	return 0;
 }
@@ -2512,7 +2874,7 @@ static void single(pp *p, const pmacro *m, ptok *t, uint8_t nf, uint32_t eloc)
 
 static int builtin(pp *p, const pmacro *m, ptok *t);
 
-/* expand macro m named by t; 1 if t now holds the result token */
+/* expand macro m named by t; 1 if t now holds the result token, 2 if the next raw one */
 static int expand(pp *p, const pmacro *m, ptok *t)
 {
 	uint8_t nf = t->flags & (TF_SOL | TF_SPACE);
@@ -2541,21 +2903,29 @@ static int expand(pp *p, const pmacro *m, ptok *t)
 		c->src = m->src;
 		c->loc = t->loc;
 		c->mid = m->name;
-		c->first = 0x80 | nf;
 		mdisable(p, m->name);
-		return 0;
+		/* its first token, as raw() would read it next (the context's "first" applied) */
+		c->i = 1;
+		vfill(t, &m->body[0], m->src, c->loc);
+		t->flags = (t->flags & ~(TF_SOL | TF_SPACE)) | nf | p->pend;
+		p->pend = 0;
+		return 2;
 	}
 	if (!collect(p, m, t, &a, &rp))
 		return 1;
 	if (!m->nbody) {
+		p->svn = a.base;
 		p->pend |= nf;
 		return 0;
 	}
 	if (m->nbody == 1 && trivial(p, m)) {
+		p->svn = a.base;
 		single(p, m, t, nf, rp.loc);
 		return 1;
 	}
-	return subst(p, m, t, &a, rp.loc);
+	subst(p, m, t, &a, rp.loc);
+	p->svn = a.base;
+	return 0;
 }
 
 /* ---------------- builtin macros ---------------- */
@@ -2612,7 +2982,7 @@ static void unread(pp *p, const ptok *t)
 }
 
 static const vlex_file *find_include(pp *p, const ctx *from, const char *name, size_t nlen,
-				     bool angled, bool next, int32_t *sdir, const char **path);
+				     bool angled, bool next, int32_t *sdir, const char **path, const incent **ie);
 static void enter_file(pp *p, const vlex_file *f, const char *path, int32_t sdir);
 
 /*
@@ -2868,7 +3238,7 @@ static int builtin(pp *p, const pmacro *m, ptok *t)
 		raw(p, &r);
 		if (r.kind != T_RPAREN)
 			error(p, t->loc, "missing ')' after __has_include");
-		mknum(p, t, find_include(p, fc, buf, n, angled, m->builtin == B_HAS_INCLUDE_NEXT, &sd, &path) != NULL);
+		mknum(p, t, find_include(p, fc, buf, n, angled, m->builtin == B_HAS_INCLUDE_NEXT, &sd, &path, NULL) != NULL);
 		break;
 	}
 	case B_IS_IDENTIFIER:
@@ -3339,6 +3709,8 @@ static const char *parse_define(const vtok *vt, uint32_t b, uint32_t e, pmacro *
 			m->flags |= MF_PASTE;
 		if (vt[j].kind == T_IDENT && vt[j].id == KW_VA_OPT)
 			m->flags |= MF_VAOPT;
+		if (vt[j].kind == T_HASH)
+			m->flags |= MF_HASH;
 	}
 	if (m->nbody && (m->body[0].kind == T_HASHHASH || m->body[m->nbody - 1].kind == T_HASHHASH))
 		return "'##' cannot appear at either end of a macro expansion";
@@ -3533,20 +3905,21 @@ static char *pstrdup(pp *p, const char *s, size_t n)
 	return d;
 }
 
-unsigned long pp_stat_try, pp_stat_skip;
+_Atomic unsigned long pp_stat_try, pp_stat_skip;	/* VPP_TIME */
 
 /* the file at a candidate path, if any: misses in missing directories cost no syscall */
 static const vlex_file *try_path(const char *cwd, const char *path, size_t len)
 {
-	static int off = -1;
+	static _Atomic int off_ = -1;
+	int off = atomic_load_explicit(&off_, memory_order_relaxed);
 
 	if (off < 0)
-		off = getenv("VPP_NODIRCACHE") != NULL;
-	pp_stat_try++;
+		atomic_store_explicit(&off_, off = getenv("VPP_NODIRCACHE") != NULL, memory_order_relaxed);
+	atomic_fetch_add_explicit(&pp_stat_try, 1, memory_order_relaxed);
 	const vlex_file *f;
 
 	if (!off && (!cwd || path[0] == '/') && !vdir_exists(path, len)) {
-		pp_stat_skip++;
+		atomic_fetch_add_explicit(&pp_stat_skip, 1, memory_order_relaxed);
 		return NULL;
 	}
 	if (cwd && path[0] != '/') {
@@ -3641,17 +4014,138 @@ static const vlex_file *find_include_(pp *p, const ctx *from, const char *name, 
 	return NULL;
 }
 
-/* (the search path prefix the lookup depended on is an input of the open regions) */
-static const vlex_file *find_include(pp *p, const ctx *from, const char *name, size_t nlen,
-				     bool angled, bool next, int32_t *sdir, const char **path)
-{
-	uint32_t used;
-	const vlex_file *f = find_include_(p, from, name, nlen, angled, next, sdir, path, &used);
+/*
+ * Include resolution, process-wide.  A lookup's answer depends only on the
+ * options' signature (cwd, frameworks, ...), the mode (where the search
+ * starts, angled, include_next), the includer's directory (quoted), the name
+ * and the search directories it looked at: the ones up to where it found
+ * the file (all if not found), whose prefix signature (psig) it keeps.
+ * Files never change under the token cache (vlex_get caches misses too).
+ * Kbuild puts the per-directory -I last, so one entry serves every TU.  A
+ * warm lookup is one probe instead of a path build, directory-cache probe
+ * and token-cache probe per search directory.
+ */
+struct incent {
+	uint64_t hash;
+	uint32_t sig, klen;
+	int32_t mode;		/* start * 4 + angled * 2 + next */
+	uint32_t used, usig;	/* directories looked at, psig[used] */
+	int32_t sdir;
+	const vlex_file *f;
+	const char *path;
+	char key[];		/* includer's directory, '\0', name; zero padded to 8 */
+};
 
+#define INC_BITS 17
+static _Atomic(incent *) inc_tab[1u << INC_BITS];
+static _Atomic uint32_t inc_n;
+
+static inline bool inc_same(const incent *e, uint64_t h, uint32_t sig, int32_t mode, const char *k, size_t kl)
+{
+	return e->hash == h && e->sig == sig && e->mode == mode && e->klen == kl && !memcmp(e->key, k, kl);
+}
+
+/* e's answer holds for p: the directories it looked at are p's */
+static inline bool inc_valid(const pp *p, const incent *e)
+{
+	return e->used <= (uint32_t)p->o->ndirs && p->psig[e->used] == e->usig;
+}
+
+/* the search path prefix the lookup depended on is an input of the open regions */
+static inline void inc_used(pp *p, uint32_t used)
+{
 	if (unlikely(p->rec.on))
 		for (int i = 0; i < p->rec.n; i++)
 			if (p->rec.lev[i].ndirs < used)
 				p->rec.lev[i].ndirs = used;
+}
+
+/* the lookup's mode and, for a quoted one, the includer's directory (*fp, *dl) */
+static inline int32_t inc_mode(const pp *p, const ctx *from, bool angled, bool next, const char **fp, size_t *dl)
+{
+	bool nx = next && from->sdir >= 0;
+	int32_t start = nx ? from->sdir + 1 : angled ? p->o->nquote : 0;
+
+	*fp = "", *dl = 0;
+	if (!angled && !nx && from->f != &p->builtin)
+		*fp = from->spath, *dl = from->sdl;
+	return start * 4 + angled * 2 + nx;
+}
+
+/* *ie: the cache entry of the answer, if it has one */
+static const vlex_file *find_include(pp *p, const ctx *from, const char *name, size_t nlen,
+				     bool angled, bool next, int32_t *sdir, const char **path, const incent **ie)
+{
+	uint32_t used, i, sig = p->sig;
+	const vlex_file *f;
+	char kb[4096 + 16];
+	const char *fp;
+	size_t dl, kl, kp;
+	int32_t mode;
+	incent *e;
+	uint64_t h, w;
+
+	if (ie)
+		*ie = NULL;
+	if (name[0] == '/' || sig == HNONE || !from || nlen >= 2048)
+		goto slow;
+	mode = inc_mode(p, from, angled, next, &fp, &dl);
+	if (dl >= 2048)
+		goto slow;
+	memcpy(kb, fp, dl);
+	kb[dl] = 0;
+	memcpy(kb + dl + 1, name, nlen);
+	kl = dl + 1 + nlen;
+	kp = (kl + 8) & ~(size_t)7;
+	memset(kb + kl, 0, 8);
+	h = (uint64_t)sig << 32 ^ ((uint64_t)(uint32_t)mode << 17) ^ kl;
+	for (size_t j = 0; j < kp; j += 8) {
+		memcpy(&w, kb + j, 8);
+		h = (h ^ w) * 0x9E3779B97F4A7C15ull;
+		h ^= h >> 29;
+	}
+	for (i = (uint32_t)(h >> (64 - INC_BITS));; i = (i + 1) & ((1u << INC_BITS) - 1)) {
+		e = atomic_load_explicit(&inc_tab[i], memory_order_acquire);
+		if (!e)
+			break;
+		if (inc_same(e, h, sig, mode, kb, kl) && inc_valid(p, e))
+			goto hit;
+	}
+	f = find_include_(p, from, name, nlen, angled, next, sdir, path, &used);
+	if (p->psig[used] == HNONE || atomic_fetch_add(&inc_n, 1) >= (3u << INC_BITS) / 4)
+		goto done;
+	{
+		size_t pl = f ? strlen(*path) : 0;
+		incent *m = salloc(sizeof(*m) + kp + pl + 1);
+
+		m->hash = h, m->sig = sig, m->klen = (uint32_t)kl, m->mode = mode;
+		m->used = used, m->usig = p->psig[used], m->sdir = *sdir, m->f = f;
+		memcpy(m->key, kb, kp);
+		m->path = NULL;
+		if (f) {
+			memcpy(m->key + kp, *path, pl + 1);
+			m->path = m->key + kp;
+		}
+		for (;; i = (i + 1) & ((1u << INC_BITS) - 1)) {
+			e = NULL;
+			if (atomic_compare_exchange_strong_explicit(&inc_tab[i], &e, m, memory_order_acq_rel,
+								    memory_order_acquire)) {
+				e = m;
+				break;
+			}
+			if (inc_same(e, h, sig, mode, kb, kl) && inc_valid(p, e))
+				break;	/* another thread's: the same answer */
+		}
+	}
+hit:
+	f = e->f, *sdir = e->sdir, *path = e->path, used = e->used;
+	if (ie)
+		*ie = e;
+	goto done;
+slow:
+	f = find_include_(p, from, name, nlen, angled, next, sdir, path, &used);
+done:
+	inc_used(p, used);
 	return f;
 }
 
@@ -4016,7 +4510,8 @@ static void hc_why(const pp *p, const hkey *k, const hent *e)
 /* replay a matching entry for this #include; true if done */
 static bool hc_try(pp *p, hkey *k)
 {
-	static int dbg = -1;
+	static _Atomic int dbg_ = -1;
+	int dbg;
 	const hent *h = atomic_load_explicit(&k->head, memory_order_acquire);
 
 	for (const hent *e = h; e; e = e->next)
@@ -4024,8 +4519,8 @@ static bool hc_try(pp *p, hkey *k)
 			hc_apply(p, e);
 			return true;
 		}
-	if (dbg < 0)
-		dbg = getenv("VPP_HC_DEBUG") != NULL;
+	if ((dbg = atomic_load_explicit(&dbg_, memory_order_relaxed)) < 0)
+		atomic_store_explicit(&dbg_, dbg = getenv("VPP_HC_DEBUG") != NULL, memory_order_relaxed);
 	if (dbg && h)
 		hc_why(p, k, h);
 	return false;
@@ -4394,9 +4889,100 @@ static void hc_end(pp *p)
 	}
 }
 
+/*
+ * Read-ahead for a file entered for the first time: the first candidate of
+ * each unconditional #include "x" / <x> (the includer's directory, or the
+ * first search directory that exists) goes to the token cache's I/O
+ * threads, so that opening and reading it is off this thread by the time
+ * the lookup gets there.  The lookup tries that path first anyway: no extra
+ * I/O.  VPP_NOPREFETCH=1 turns it off.
+ */
+static int pf_on = -1;
+
+static void prefetch_includes(pp *p, const ctx *c)
+{
+	const pfile *fi = c->fi;
+	const vtok *vt = c->vt;
+	const char *cwd = p->o->cwd;
+	size_t cl = cwd ? strlen(cwd) : 0;
+	char buf[4096 + 16];
+
+	if (cl + 1 >= 2048)
+		return;
+	if (cwd) {
+		memcpy(buf, cwd, cl);
+		buf[cl++] = '/';
+	}
+	for (uint32_t k = 0, depth = 0; k < fi->ndir; k++) {
+		const pdir *d = &fi->dir[k];
+		uint32_t b = d->tok + 2, j;
+		const char *name, *fp;
+		size_t nl, dl;
+		bool angled;
+		int32_t mode, n = 0;
+
+		if (d->kind == D_IF || d->kind == D_IFDEF || d->kind == D_IFNDEF)
+			depth++;
+		else if (d->kind == D_ENDIF && depth)
+			depth--;
+		/* unconditional ones only (inside the include guard): others may not be wanted */
+		if ((d->kind != D_INCLUDE && d->kind != D_INCLUDE_NEXT && d->kind != D_IMPORT) || b >= d->end ||
+		    depth != (fi->guard ? 1u : 0u))
+			continue;
+		if (vt[b].kind == T_STRING && !(vt[b].flags & TF_DIRTY) && vt[b].len > 2) {
+			name = c->src + vt[b].off + 1;
+			nl = vt[b].len - 2;
+			angled = false;
+		} else if (vt[b].kind == T_LESS) {
+			for (j = b + 1; j < d->end && vt[j].kind != T_GREATER; j++)
+				;
+			if (j == d->end)
+				continue;
+			name = c->src + vt[b].off + 1;
+			nl = vt[j].off - vt[b].off - 1;
+			angled = true;
+		} else {
+			continue;
+		}
+		if (!nl || nl >= 1024 || name[0] == '/' || memchr(name, '\n', nl))
+			continue;
+		mode = inc_mode(p, c, angled, d->kind == D_INCLUDE_NEXT, &fp, &dl);
+		if (!angled && !(mode & 1)) {
+			size_t o = cwd && fp[0] != '/' ? cl : 0;
+
+			if (o + dl + nl < 4096) {
+				memcpy(buf + o, fp, dl);
+				memcpy(buf + o + dl, name, nl);
+				buf[o + dl + nl] = 0;
+				if (vdir_exists(buf, o + dl + nl)) {
+					vlex_prefetch(buf, o + dl + nl);
+					n++;
+				}
+			}
+		}
+		for (int32_t i = mode >> 2; i < p->o->ndirs && n < 1; i++) {
+			const char *dd = p->o->dirs[i];
+			size_t l = strlen(dd), o = cwd && dd[0] != '/' ? cl : 0;
+
+			if (o + l + nl + 2 >= 4096)
+				continue;
+			memcpy(buf + o, dd, l);
+			if (l && dd[l - 1] != '/')
+				buf[o + l++] = '/';
+			memcpy(buf + o + l, name, nl);
+			buf[o + l + nl] = 0;
+			if (vdir_exists(buf, o + l + nl)) {
+				vlex_prefetch(buf, o + l + nl);
+				n++;
+			}
+		}
+	}
+}
+
 static void enter_file(pp *p, const vlex_file *f, const char *path, int32_t sdir)
 {
-	const pfile *fi = pfile_get(f);
+	bool fresh;
+	const pfile *fi = pfile_get(f, &fresh);
 	const ctx *from = cur_file(p);
 	hkey *k = NULL;
 	uint8_t sys;
@@ -4447,6 +5033,11 @@ static void enter_file(pp *p, const vlex_file *f, const char *path, int32_t sdir
 	c->di = 0;
 	c->sdir = sdir;
 	c->spath = path;
+	{
+		const char *sl = strrchr(path, '/');
+
+		c->sdl = sl ? (uint32_t)(sl - path) + 1 : 0;
+	}
 	p->nfile++;
 	add_fent(p, c, f, path);
 	p->fe[c->fe].sys = sys;
@@ -4461,6 +5052,12 @@ static void enter_file(pp *p, const vlex_file *f, const char *path, int32_t sdir
 			error(p, p->fe[c->fe].base + t->off, "#%.*s without #if", (int)t->len, f->src + t->off);
 		if (p->fatal_jb)
 			longjmp(*p->fatal_jb, 1);
+	}
+	if (fresh) {
+		if (pf_on < 0)
+			pf_on = !getenv("VPP_NOPREFETCH");
+		if (pf_on)
+			prefetch_includes(p, c);
 	}
 	if (k)
 		hc_begin(p, k);
@@ -4477,7 +5074,24 @@ static void include(pp *p, ctx *c, uint32_t b, uint32_t e, int kind, uint32_t lo
 	uint32_t floc;
 	int d = p->depth;
 	ptok t;
+	const incent *ie;
+	/* "x" or <x> as written: the name is the site's, so is the answer while the options and directory are */
+	_Atomic(const incent *) *site = b < e && (c->vt[b].kind == T_STRING || c->vt[b].kind == T_LESS) &&
+						p->sig != HNONE
+					    ? &((pfile *)c->fi)->inc[c->di - 1] : NULL;
 
+	if (site && (ie = atomic_load_explicit(site, memory_order_acquire))) {
+		const char *fp;
+		size_t dl;
+		int32_t mode = inc_mode(p, c, c->vt[b].kind == T_LESS, kind == D_INCLUDE_NEXT, &fp, &dl);
+
+		if (ie->sig == p->sig && ie->mode == mode && inc_valid(p, ie) && dl < ie->klen && !ie->key[dl] &&
+		    !memcmp(ie->key, fp, dl)) {
+			inc_used(p, ie->used);
+			enter_file(p, ie->f, ie->path, ie->sdir);
+			return;
+		}
+	}
 	push_line(p, c, b, e);
 	raw(p, &t);
 	floc = t.loc;
@@ -4498,7 +5112,7 @@ static void include(pp *p, ctx *c, uint32_t b, uint32_t e, int kind, uint32_t lo
 		return;
 	}
 	pop_to(p, d);
-	f = find_include(p, c, buf, n, angled, kind == D_INCLUDE_NEXT, &sd, &path);
+	f = find_include(p, c, buf, n, angled, kind == D_INCLUDE_NEXT, &sd, &path, &ie);
 	if (!f) {
 		pp_span r = { floc, floc + (uint32_t)n + 2 };
 		pp_dinfo di = { "fatal error", floc, &r, 1, NULL, 0, NULL, 0 };
@@ -4508,6 +5122,8 @@ static void include(pp *p, ctx *c, uint32_t b, uint32_t e, int kind, uint32_t lo
 			longjmp(*p->fatal_jb, 1);
 		return;
 	}
+	if (site && ie)
+		atomic_store_explicit(site, ie, memory_order_release);
 	enter_file(p, f, path, sd);
 }
 
@@ -4781,15 +5397,19 @@ static void bi_init(void)
 		memset(m, 0, sizeof(*m));
 		m->kind = MK_BUILTIN;
 		m->builtin = (uint8_t)bi[i].b;
-		m->name = vintern_copy(bi[i].n, strlen(bi[i].n));
+		m->name = vintern_cstr(bi[i].n);
 		m->body = no_body;
 		bi_macro[i] = m;
 	}
 }
 
+/* a TU's tables, reused from one TU to the next (pp_open takes a set, pp_close gives it back) */
+static vmpool pppool = VMPOOL_INIT(8);
+static _Thread_local vmreg *ppr;
+
 pp *pp_open(const pp_opts *o)
 {
-	pp *p = vm(sizeof(pp));
+	pp *p = vmreg_get(&(ppr = vmpool_take(&pppool))[0], sizeof(pp), "pp");
 	const vlex_file *mf;
 	size_t n = strlen(o->predef);
 	char *src;
@@ -4799,17 +5419,19 @@ pp *pp_open(const pp_opts *o)
 	vintern_init();
 	p->o = o;
 	p->color = o->diag_color > 0 || (o->diag_color == 0 && isatty(o->errfd ? o->errfd : 2));
-	p->cx = vm(MAXCTX * sizeof(ctx));
-	arena_init(&p->perm, 1ull << 30);
-	arena_init(&p->tmp, 1ull << 32);
+	p->cx = vmreg_get(&ppr[1], MAXCTX * sizeof(ctx), "pp.cx");
+	p->perm.base = p->perm.p = vmreg_get(&ppr[2], 1ull << 30, "pp.perm");
+	p->perm.end = p->perm.base + (1ull << 30);
+	p->tmp.base = p->tmp.p = vmreg_get(&ppr[3], 1ull << 32, "pp.tmp");
+	p->tmp.end = p->tmp.base + (1ull << 32);
 	p->psig = alloc(&p->perm, ((size_t)o->ndirs + 1) * sizeof(uint32_t));
 	if (!sig_of(o, &p->sig, p->psig))
 		p->sig = HNONE;
-	p->sv = vm(SVMAX * sizeof(ptok));
-	p->fe = vm((1u << 20) * sizeof(fent));
+	p->sv = vmreg_get(&ppr[4], SVMAX * sizeof(ptok), "pp.sv");
+	p->fe = vmreg_get(&ppr[5], (1u << 20) * sizeof(fent), "pp.fe");
 	p->once = alloc(&p->perm, 4096 * sizeof(*p->once));
 	p->pushed = alloc(&p->perm, 4096 * sizeof(*p->pushed));
-	p->lm = vm(65536 * sizeof(*p->lm));
+	p->lm = vmreg_get(&ppr[6], 65536 * sizeof(*p->lm), "pp.lm");
 	{
 		static pthread_once_t once = PTHREAD_ONCE_INIT;
 
@@ -4818,7 +5440,15 @@ pp *pp_open(const pp_opts *o)
 			mset(p, bi_macro[i]->name, bi_macro[i]);
 	}
 
-	mf = try_path(o->cwd, o->main, strlen(o->main));
+	{
+		/* the caller's string is unpadded; vlex_get hashes by words (ASan) */
+		size_t ml = strlen(o->main);
+		char *mp = alloc(&p->perm, ml + 16);
+
+		memcpy(mp, o->main, ml);
+		memset(mp + ml, 0, 16);
+		mf = try_path(o->cwd, mp, ml);
+	}
 	if (!mf) {
 		char m[4200];
 		int l = snprintf(m, sizeof(m), "vcc: error: %s: cannot read\n", o->main);
@@ -4827,7 +5457,19 @@ pp *pp_open(const pp_opts *o)
 		pp_close(p);
 		return NULL;
 	}
-	enter_file(p, mf, o->main, -1);
+	{
+		/* a fatal error here (unbalanced conditionals) ends the TU, not the process (vccd) */
+		jmp_buf jb;
+
+		p->fatal_jb = &jb;
+		if (setjmp(jb)) {
+			pp_diag_summary(p);	/* ("1 error generated.", as clang) */
+			pp_close(p);
+			return NULL;
+		}
+		enter_file(p, mf, o->main, -1);
+		p->fatal_jb = NULL;
+	}
 	p->base_name = p->fe[0].name;
 	p->base_namelen = p->fe[0].namelen;
 
@@ -4836,18 +5478,18 @@ pp *pp_open(const pp_opts *o)
 	memcpy(src, o->predef, n);
 	memset(src + n, 0, 129);
 	tok = alloc(&p->perm, (n + 2) * sizeof(vtok));
-	scratch = vm(vlex_scratch_size(n) + 4096);
+	scratch = vmreg_get(&ppr[7], vlex_scratch_size(n) + 4096, "pp.lexscratch");
 	p->builtin.path = "<built-in>";
 	p->builtin.src = src;
 	p->builtin.size = (uint32_t)n;
 	p->builtin.ntok = vlex(src, n, tok, scratch);
 	p->builtin.tok = tok;
-	munmap(scratch, vlex_scratch_size(n) + 4096);
+	vmreg_put(&ppr[7], VMREG_SCRATCH);
 	enter_file(p, &p->builtin, "<built-in>", -1);
 	return p;
 }
 
-static inline void next_tok(pp *p, ptok *t)
+static inline __attribute__((always_inline)) void next_tok(pp *p, ptok *t)
 {
 	if (p->depth == p->nfile && !p->svn)
 		p->tmp.p = p->tmp.base;	/* nothing above file level refers to tmp */
@@ -4855,18 +5497,41 @@ static inline void next_tok(pp *p, ptok *t)
 }
 
 /* the header cache's mode: text for pp_text, tokens for pp_next */
+static int hc_off;
+
+/* once: a thread that saw the flag but not hc_mem_max stored without a cap (TSan) */
+static void hc_env(void)
+{
+	const char *m = getenv("VPP_HC_MAX_MB");
+
+	hc_mem_max = m ? (size_t)atol(m) << 20 : (size_t)8 << 30;
+	hc_off = getenv("VPP_NOHC") != NULL;
+}
+
 static void hc_mode(pp *p, int mode)
 {
-	static int env = -1;
+	static pthread_once_t once = PTHREAD_ONCE_INIT;
 
-	if (env < 0) {
-		const char *m = getenv("VPP_HC_MAX_MB");
-
-		hc_mem_max = m ? (size_t)atol(m) << 20 : (size_t)8 << 30;
-		env = getenv("VPP_NOHC") != NULL;
-	}
-	p->hc = !env;
+	pthread_once(&once, hc_env);
+	p->hc = !hc_off;
 	p->tokmode = mode;
+}
+
+static __attribute__((noinline)) void pp_next_slow(pp *p, ptok *t)
+{
+	if (unlikely(!p->tokmode))
+		hc_mode(p, 2);
+	next_tok(p, t);
+	p->ntok_out++;
+	if (unlikely(p->rec.on))
+		rec_tok(p, t);
+}
+
+/* t names a macro (entry e): pp_next's expansion path (not recording) */
+static __attribute__((noinline)) void pp_next_mac(pp *p, ptok *t, uintptr_t e)
+{
+	next_exp_slow(p, t, e);
+	p->ntok_out++;
 }
 
 void pp_next(pp *p, ptok *t)
@@ -4888,12 +5553,34 @@ void pp_next(pp *p, ptok *t)
 			return;
 		}
 	}
-	if (unlikely(!p->tokmode))
-		hc_mode(p, 2);
-	next_tok(p, t);
-	p->ntok_out++;
-	if (unlikely(p->rec.on))
-		rec_tok(p, t);
+	/* a plain token with nothing owed and no macro: inline, no frame (the rest are tail calls) */
+	if (likely(p->tokmode && !p->rec.on && c->i < c->n && !(c->first | p->pend))) {
+		uintptr_t m;
+
+		if (c->type == C_PTOK) {
+			*t = c->pt[c->i++];
+		} else if (c->type == C_VTOK) {
+			const vtok *v = &c->vt[c->i++];
+
+			vfill(t, v, c->src, c->offloc ? c->loc + v->off : c->loc);
+		} else if (c->type == C_FILE && !((c->vt[c->i].flags & TF_SOL) && c->vt[c->i].kind == T_HASH)) {
+			const vtok *v = &c->vt[c->i++];
+
+			if (p->depth == p->nfile && !p->svn)
+				p->tmp.p = p->tmp.base;	/* nothing above file level refers to tmp */
+			vfill(t, v, c->src, c->loc + v->off);
+		} else {
+			pp_next_slow(p, t);
+			return;
+		}
+		if (t->kind == T_IDENT && !(t->flags & PF_NOEXP) && (m = mget(p, t->id))) {
+			pp_next_mac(p, t, m);
+			return;
+		}
+		p->ntok_out++;
+		return;
+	}
+	pp_next_slow(p, t);
 }
 
 const pp_topev *pp_top_events(const pp *p, uint32_t *n)
@@ -5026,32 +5713,50 @@ void pp_set_fatal(pp *p, jmp_buf *jb)
 	p->fatal_jb = jb;
 }
 
+/* the distinct file names in entry order (a hash set: TUs enter ~1000 files) */
 size_t pp_files(const pp *p, const char **names, size_t max)
 {
+	uint32_t cap = 64, stk[1024], *tab;
 	size_t n = 0;
 
+	while (cap < 2 * p->nfe)
+		cap *= 2;
+	tab = cap <= 1024 ? stk : malloc(cap * sizeof(*tab));
+	if (!tab)
+		abort();
+	memset(tab, 0, cap * sizeof(*tab));
 	for (uint32_t i = 0; i < p->nfe; i++) {
 		const char *s = p->fe[i].spath;
-		bool dup = false;
+		uint64_t h = 14695981039346656037ull;
+		size_t l = 0;
+		uint32_t k;
 
 		if (p->fe[i].f == &p->builtin)
 			continue;
-		for (size_t j = 0; j < n && !dup; j++)
-			dup = !strcmp(names[j], s);
-		if (!dup && n < max)
+		for (; s[l]; l++)
+			h = (h ^ (unsigned char)s[l]) * 1099511628211ull;
+		for (k = (uint32_t)(h ^ (h >> 32)) & (cap - 1); tab[k]; k = (k + 1) & (cap - 1))
+			if (!strcmp(names[tab[k] - 1], s))
+				break;
+		if (!tab[k] && n < max) {
 			names[n++] = s;
+			tab[k] = (uint32_t)n;
+		}
 	}
+	if (tab != stk)
+		free(tab);
 	return n;
 }
 
 void pp_close(pp *p)
 {
-	if (p->cx) munmap(p->cx, MAXCTX * sizeof(ctx));
-	if (p->perm.base) munmap(p->perm.base, (size_t)(p->perm.end - p->perm.base));
-	if (p->tmp.base) munmap(p->tmp.base, (size_t)(p->tmp.end - p->tmp.base));
-	if (p->sv) munmap(p->sv, SVMAX * sizeof(ptok));
-	if (p->fe) munmap(p->fe, (1u << 20) * sizeof(fent));
-	if (p->lm) munmap(p->lm, 65536 * sizeof(*p->lm));
+	/* back to the thread: the stacks and tmp (reused all along the TU) as they are */
+	vmreg_put(&ppr[1], VMREG_SCRATCH);
+	vmreg_put(&ppr[2], (size_t)(p->perm.p - p->perm.base) + 64);
+	vmreg_put(&ppr[3], VMREG_SCRATCH);
+	vmreg_put(&ppr[4], VMREG_SCRATCH);
+	vmreg_put(&ppr[5], ((size_t)p->nfe + 1) * sizeof(fent));
+	vmreg_put(&ppr[6], ((size_t)p->nlm + 1) * sizeof(*p->lm));
 	if (p->out) {
 		if (out_spare_cap < p->capout) {
 			if (out_spare)
@@ -5080,5 +5785,7 @@ void pp_close(pp *p)
 		munmap(p->rec.seg, HC_MAXSEG * sizeof(hsegr));
 		munmap(p->rec.cp, (HC_MAXCP + 1) * sizeof(cprov));
 	}
-	munmap(p, sizeof(pp));
+	vmreg_put(&ppr[0], sizeof(pp));
+	vmpool_give(&pppool, ppr);
+	ppr = NULL;
 }

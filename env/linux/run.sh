@@ -24,7 +24,7 @@ IMG=vroom-linux
 docker image inspect $IMG >/dev/null 2>&1 || docker build -t $IMG "$R/env/linux"
 if [ "$1" = --seed-work ]; then
 	docker volume create vroom-work >/dev/null
-	COPYFILE_DISABLE=1 tar -C "$W" --no-xattrs --exclude=linux/.git -cf - linux build-o0 ppref |
+	COPYFILE_DISABLE=1 tar -C "$W" --no-xattrs --exclude=linux/.git --exclude=linux-pf/.git -cf - linux linux-pf build-o0 ppref |
 		docker run --rm -i -v vroom-work:"$W" $IMG tar -xf - -C "$W"
 	exit
 fi

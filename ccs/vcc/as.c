@@ -18,6 +18,9 @@
 #include <sys/mman.h>
 #include <sys/stat.h>
 #include <unistd.h>
+#ifdef __aarch64__
+#include <arm_neon.h>
+#endif
 
 #define MAXFR 512
 #define MAXCOND 1024
@@ -31,11 +34,17 @@ typedef struct {
 	uint8_t req, vararg;
 } Param;
 
+/* a body split at its substitutions: body[off, off + len), then k (-1 nothing,
+ * -2 \@, -3 \+, >= 0 argument k) */
+typedef struct { uint32_t off, len; int32_t k; } Piece;
+typedef struct { Piece *p; uint32_t n; } Tmpl;
+
 typedef struct Macro {
 	Sv name;
 	Param *params; uint32_t np;
 	Sv body;
 	uint32_t count;
+	Tmpl t;			/* compiled at the first instantiation (t.p == 0 before) */
 	struct Macro *next;
 } Macro;
 
@@ -53,7 +62,8 @@ typedef struct { uint8_t kind, met, ignore; } Cond;	/* kind: 1 if, 2 elseif, 3 e
 
 typedef struct { uint32_t num, cur, fwd; } NumLab;
 
-typedef struct { Sv name; Sv reg; } Alias;
+typedef struct { Sv name; Sv reg; uint32_t next; } Alias;	/* next: older entry in the bucket, index + 1 */
+#define ALH 64
 
 typedef struct { uint32_t sym; ElfVal v; } Var;	/* .set with a non-absolute value */
 
@@ -72,6 +82,7 @@ struct As {
 	Macro **mtab; uint32_t mmask, mcount;
 	NumLab *nl; uint32_t nlmask, nlcount;
 	Alias *al; uint32_t nal, alcap;
+	uint32_t alh[ALH];	/* .req buckets: newest entry, index + 1 */
 	Var *vars; uint32_t vmask, vcount;
 	void *pool_dummy; struct PoolS *pool; uint32_t npool, poolcap;
 	uint32_t ninst;		/* \@ */
@@ -99,18 +110,18 @@ static void *rget(Region *r, size_t n)
 }
 
 /* ASCII classes without libc's locale lookups (hot in the scanner) */
-enum { C_D = 1, C_X = 2, C_A = 4, C_S = 8, C_I = 16 };
+enum { C_D = 1, C_X = 2, C_A = 4, C_S = 8, C_I = 16, C_W = 32, C_E = 64 };	/* C_W: blanks ws() skips; C_E: starts an immediate operand */
 static const uint8_t cclass[256] = {
-	['0' ... '9'] = C_D | C_X | C_I, ['a' ... 'f'] = C_A | C_X | C_I, ['A' ... 'F'] = C_A | C_X | C_I,
+	['0' ... '9'] = C_D | C_X | C_I | C_E, ['#'] = C_E, [':'] = C_E, ['('] = C_E, ['-'] = C_E, ['+'] = C_E, ['~'] = C_E, ['a' ... 'f'] = C_A | C_X | C_I, ['A' ... 'F'] = C_A | C_X | C_I,
 	['g' ... 'z'] = C_A | C_I, ['G' ... 'Z'] = C_A | C_I, ['_'] = C_I, ['.'] = C_I, ['$'] = C_I,
 	[0x80 ... 0xff] = C_I,	/* UTF-8 in symbol names (LLVM's lexer takes any byte >= 0x80) */
-	[' '] = C_S, ['\t'] = C_S, ['\n'] = C_S, ['\v'] = C_S, ['\f'] = C_S, ['\r'] = C_S,
+	[' '] = C_S | C_W, ['\t'] = C_S | C_W, ['\n'] = C_S, ['\v'] = C_S | C_W, ['\f'] = C_S | C_W, ['\r'] = C_S | C_W,
 };
 static inline int c_digit(int c) { return (unsigned)c - '0' < 10; }
 static inline int c_xdigit(int c) { return cclass[(uint8_t)c] & C_X; }
-static inline int c_alpha(int c) { return cclass[(uint8_t)c] & C_A; }
 static inline int c_lower(int c) { return (unsigned)c - 'A' < 26 ? c | 0x20 : c; }
 static inline int isidc(int c) { return cclass[(uint8_t)c] & C_I; }
+
 
 static Sv svdup(As *a, const char *s, size_t n)
 {
@@ -136,8 +147,8 @@ static int err(As *a, const char *fmt, ...)
 	return -1;
 }
 
-static inline int isids(int c) { return c_alpha(c) || c == '_' || c == '.' || c == '$'; }
-static inline const char *ws(const char *p, const char *e) { while (p < e && (*p == ' ' || *p == '\t' || *p == '\r' || *p == '\f' || *p == '\v')) p++; return p; }
+static inline int isids(int c) { return (cclass[(uint8_t)c] & (C_I | C_D)) == C_I; }	/* letter _ . $ */
+static inline const char *ws(const char *p, const char *e) { while (p < e && (cclass[(uint8_t)*p] & C_W)) p++; return p; }
 static inline int sveq(Sv a, const char *s) { size_t n = strlen(s); return a.n == n && !memcmp(a.s, s, n); }
 static inline int sveqi(const char *p, size_t n, const char *s)
 {
@@ -148,11 +159,21 @@ static inline int sveqi(const char *p, size_t n, const char *s)
 	return 1;
 }
 
-static uint32_t hsv(const char *s, size_t n)
+/* word-at-a-time hash */
+static inline uint32_t hsv(const char *s, size_t n)
 {
-	uint32_t h = 2166136261u;
-	for (size_t i = 0; i < n; i++) h = (h ^ (uint8_t)s[i]) * 16777619u;
-	return h;
+	uint64_t h = 0x9e3779b97f4a7c15ull ^ n, w;
+	const char *e = s + n;
+	size_t n0 = n, r = n & 7;
+	while (n >= 8) { memcpy(&w, s, 8); h = (h ^ w) * 0xff51afd7ed558ccdull; h ^= h >> 32; s += 8; n -= 8; }
+	/* the tail (n % 8 bytes, little-endian in the low bits, as a
+	 * memcpy into a zeroed word would put them) from whole loads */
+	if (r && n0 >= 8) { memcpy(&w, e - 8, 8); w >>= 8 * (8 - r); }
+	else if (r >= 4) { uint32_t x, y; memcpy(&x, s, 4); memcpy(&y, e - 4, 4); w = x | (uint64_t)y << (8 * (r - 4)); }
+	else if (r) w = (uint64_t)(uint8_t)s[0] | (uint64_t)(uint8_t)s[r / 2] << (8 * (r / 2)) | (uint64_t)(uint8_t)e[-1] << (8 * (r - 1));
+	else w = 0;
+	h = (h ^ w) * 0xc4ceb9fe1a85ec53ull;
+	return (uint32_t)(h ^ h >> 29);
 }
 
 /* ---------------------------------------------------------------- symbols */
@@ -522,17 +543,32 @@ static void pop_frame(As *a)
 	if (f->kind != FR_FILE) a->xs.used = f->mark;
 }
 
-/* Copy the next statement of f into a->sb, without comments.  Returns its
- * length; sets *raw to where it started in the frame text. */
 /* bytes next_stmt must look at: newline, ';', comments, strings */
 static const uint8_t sstop[256] = { ['\n'] = 1, [';'] = 1, ['/'] = 1, ['"'] = 1 };
 
-static size_t next_stmt(As *a, Frame *f, const char **raw)
+/* first byte of [p, e) in sstop (or e) */
+static inline const char *find_stop(const char *p, const char *e)
+{
+#ifdef __aarch64__
+	const uint8x16_t nl = vdupq_n_u8('\n'), sc = vdupq_n_u8(';'), sl = vdupq_n_u8('/'), qt = vdupq_n_u8('"');
+	while (e - p >= 16) {
+		uint8x16_t v = vld1q_u8((const uint8_t *)p);
+		uint8x16_t m = vorrq_u8(vorrq_u8(vceqq_u8(v, nl), vceqq_u8(v, sc)), vorrq_u8(vceqq_u8(v, sl), vceqq_u8(v, qt)));
+		uint64_t bits = vget_lane_u64(vreinterpret_u64_u8(vshrn_n_u16(vreinterpretq_u16_u8(m), 4)), 0);
+		if (bits) return p + (__builtin_ctzll(bits) >> 2);
+		p += 16;
+	}
+#endif
+	while (p < e && !sstop[(uint8_t)*p]) p++;
+	return p;
+}
+
+/* The general case: copy the statement into a->sb without comments. */
+static __attribute__((noinline)) size_t next_stmt_copy(As *a, Frame *f)
 {
 	const char *p = f->p, *e = f->e;
 	char *o = (char *)a->sb.base;
 	size_t n = 0, cap = a->sb.cap - 1;
-	*raw = p;
 	for (;;) {
 		if (p >= e) break;
 		char c = *p;
@@ -546,8 +582,7 @@ static size_t next_stmt(As *a, Frame *f, const char **raw)
 			}
 		}
 		if (!sstop[(uint8_t)c]) {	/* plain run: copy it whole */
-			const char *q = p + 1;
-			while (q < e && !sstop[(uint8_t)*q]) q++;
+			const char *q = find_stop(p + 1, e);
 			size_t k = (size_t)(q - p);
 			if (k > cap - n) k = cap - n;
 			memcpy(o + n, p, k); n += k; p = q;
@@ -579,6 +614,35 @@ static size_t next_stmt(As *a, Frame *f, const char **raw)
 	f->p = p;
 	o[n] = 0;
 	return n;
+}
+
+/* The next statement of f, without comments: *s points at it, either in
+ * the frame text (no comment or string in it, the common case) or in
+ * a->sb.  Returns its length; sets *raw to where it started in the frame
+ * text.  The text is not NUL-terminated. */
+static inline __attribute__((always_inline)) size_t next_stmt(As *a, Frame *f, const char **raw, const char **s)
+{
+	const char *p = f->p, *e = f->e;
+	*raw = p;
+	const char *q = p;
+	int bol = f->bol;
+	if (bol) {
+		while (q < e && (*q == ' ' || *q == '\t' || *q == '\r')) q++;
+		if (q < e && *q != '\n') bol = 0;
+		if (q < e && *q == '#') goto slow;
+	}
+	q = find_stop(q, e);
+	if (q < e) {
+		if (*q == '\n') { f->line++; bol = 1; }
+		else if (*q != ';') goto slow;
+		f->p = q + 1;
+	} else f->p = q;
+	f->bol = (uint8_t)bol;
+	*s = p;
+	return (size_t)(q - p);
+slow:
+	*s = (const char *)a->sb.base;
+	return next_stmt_copy(a, f);
 }
 
 /* ---------------------------------------------------------------- sections */
@@ -1147,10 +1211,11 @@ static int collect_body(As *a, int macro, Sv *body)
 	const char *start = f->p;
 	int depth = 0;
 	while (f->p < f->e) {
-		const char *raw;
-		size_t n = next_stmt(a, f, &raw);
-		const char *s = (const char *)a->sb.base;
-		Sv w = first_word(s, s + n);
+		const char *raw, *s;
+		size_t n = next_stmt(a, f, &raw, &s);
+		const char *t = ws(s, s + n);
+		if (t == s + n || *t != '.') continue;
+		Sv w = first_word(t, s + n);
 		if (macro) {
 			if (sveq(w, ".endm") || sveq(w, ".endmacro")) {
 				if (!depth) { *body = (Sv){ start, (uint32_t)(raw - start) }; return 0; }
@@ -1186,6 +1251,54 @@ static int op_len(const char *p, const char *e)
 	if ((c == '=' && d == '=') || (c == '|' && d == '|') || (c == '&' && d == '&') || (c == '!' && d == '=') ||
 	    (c == '<' && (d == '=' || d == '<' || d == '>')) || (c == '>' && (d == '=' || d == '>')))
 		return 2;
+	return 1;
+}
+
+/* macro_arg when the argument is a contiguous piece of the text (no
+ * string, no blanks around an operator, no error): *out points into the
+ * text.  Returns 0 if macro_arg must do it. */
+static int macro_arg_plain(const char **pp, const char *e, int vararg, Sv *out)
+{
+	const char *p = *pp, *end;
+	if (vararg) {
+		p = ws(p, e);
+		const char *q = e;
+		while (q > p && (q[-1] == ' ' || q[-1] == '\t')) q--;
+		*pp = e;
+		*out = (Sv){ p, (uint32_t)(q - p) };
+		return 1;
+	}
+	const char *s = p;
+	int depth = 0;
+	for (;;) {
+		if (depth == 0) {
+			if (p < e && *p == ',') { end = p; break; }
+			if (p < e && (*p == ' ' || *p == '\t')) {
+				end = p;
+				p = ws(p, e);
+				if (p < e && is_op_start(p, e)) return 0;
+				break;
+			}
+			if (p < e && is_op_start(p, e)) {
+				if (*p == '=' && p + 1 < e && p[1] != '=') return 0;
+				p += op_len(p, e);
+				if (p < e && (*p == ' ' || *p == '\t' || *p == '\r' || *p == '\f' || *p == '\v')) return 0;
+				continue;
+			}
+		}
+		if (p >= e) { end = p; break; }
+		char c = *p;
+		if (c == '(') depth++;
+		else if (c == ')' && depth) depth--;
+		if (c == '"') return 0;
+		if (c == ' ' || c == '\t') { p = ws(p, e); continue; }
+		if (isidc((unsigned char)c)) { while (p < e && isidc((unsigned char)*p)) p++; continue; }
+		if (c == '=' && depth == 0) return 0;
+		p++;
+	}
+	if (depth) return 0;
+	*pp = p;
+	*out = (Sv){ s, (uint32_t)(end - s) };
 	return 1;
 }
 
@@ -1250,37 +1363,72 @@ static int macro_arg(As *a, const char **pp, const char *e, int vararg, Sv *out)
 	return 0;
 }
 
-static void xput(As *a, char **o, const char *s, size_t n)
+/* expandMacro: body with \param, \@, \+, \() substitutions.  The body is
+ * compiled once into pieces (r is the region for them), then each
+ * expansion is copies. */
+static Tmpl tmpl_compile(As *a, Region *r, Sv body, const Param *ps, uint32_t np, int at)
 {
+	const char *b = body.s;
+	size_t n = body.n, nbs = 0;
+	for (const char *q = b; (q = memchr(q, '\\', (size_t)(b + n - q))); q++) nbs++;
+	Tmpl t = { rget(r, sizeof(Piece) * (nbs + 1)), 0 };
+	size_t lit = 0, i = 0;
+	while (i < n) {
+		const char *q = memchr(b + i, '\\', n - i);
+		if (!q) break;
+		i = (size_t)(q - b);
+		if (i + 1 == n) break;
+		int32_t k;
+		size_t skip;
+		if (at && b[i + 1] == '@') k = -2, skip = 2;
+		else if (b[i + 1] == '+') k = -3, skip = 2;
+		else if (b[i + 1] == '(' && i + 2 < n && b[i + 2] == ')') k = -1, skip = 3;
+		else {
+			size_t pos = i + 1, j = pos;
+			while (j < n && isidc((unsigned char)b[j])) j++;
+			uint32_t m;
+			for (m = 0; m < np; m++) if (ps[m].name.n == j - pos && !memcmp(ps[m].name.s, b + pos, j - pos)) break;
+			if (m == np) { i = pos; continue; }	/* '\' and the name stay as they are */
+			k = (int32_t)m, skip = j - i;
+		}
+		t.p[t.n++] = (Piece){ (uint32_t)lit, (uint32_t)(i - lit), k };
+		i += skip;
+		lit = i;
+	}
+	if (lit < n) t.p[t.n++] = (Piece){ (uint32_t)lit, (uint32_t)(n - lit), -1 };
 	(void)a;
-	memcpy(*o, s, n); *o += n;
+	return t;
 }
 
-/* expandMacro: body with \param, \@, \+, \() substitutions */
-static size_t expand(As *a, char *o, Sv body, const Param *ps, const Sv *args, uint32_t np, int at, uint32_t count)
+static char *utoa(char *o, uint32_t v)
+{
+	char tmp[10]; int k = 0;
+	do tmp[k++] = (char)('0' + v % 10), v /= 10; while (v);
+	while (k) *o++ = tmp[--k];
+	return o;
+}
+
+/* copy n bytes to o, which may be overwritten up to 16 bytes past n (the
+ * expansion stack has room); short copies are one 16-byte load when that
+ * stays in the source's page */
+static inline void xcopy(char *o, const char *s, size_t n)
+{
+#ifdef __aarch64__
+	if (n <= 16 && ((uintptr_t)s & 4095) <= 4096 - 16) { vst1q_u8((uint8_t *)o, vld1q_u8((const uint8_t *)s)); return; }
+#endif
+	memcpy(o, s, n);
+}
+
+static size_t expand(As *a, char *o, const char *b, Tmpl t, const Sv *args, uint32_t count)
 {
 	char *o0 = o;
-	const char *b = body.s, *e = body.s + body.n;
-	size_t i = 0, n = body.n;
-	while (i < n) {
-		if (b[i] == '\\' && i + 1 != n) {
-			if (at && b[i + 1] == '@') { o += sprintf(o, "%u", a->ninst); i += 2; continue; }
-			if (b[i + 1] == '+') { o += sprintf(o, "%u", count); i += 2; continue; }
-			if (b[i + 1] == '(' && i + 2 < n && b[i + 2] == ')') { i += 3; continue; }
-			size_t pos = ++i;
-			while (i < n && isidc((unsigned char)b[i])) i++;
-			Sv arg = { b + pos, (uint32_t)(i - pos) };
-			uint32_t k;
-			for (k = 0; k < np; k++) if (ps[k].name.n == arg.n && !memcmp(ps[k].name.s, arg.s, arg.n)) break;
-			if (k == np) { *o++ = '\\'; xput(a, &o, arg.s, arg.n); }
-			else xput(a, &o, args[k].s, args[k].n);
-			continue;
-		}
-		const char *q = memchr(b + i + 1, '\\', n - i - 1);
-		size_t k = (q ? (size_t)(q - b) : n) - i;
-		memcpy(o, b + i, k); o += k; i += k;
+	for (uint32_t i = 0; i < t.n; i++) {
+		const Piece *p = &t.p[i];
+		xcopy(o, b + p->off, p->len); o += p->len;
+		if (p->k >= 0) { xcopy(o, args[p->k].s, args[p->k].n); o += args[p->k].n; }
+		else if (p->k == -2) o = utoa(o, a->ninst);
+		else if (p->k == -3) o = utoa(o, count);
 	}
-	(void)e;
 	return (size_t)(o - o0);
 }
 
@@ -1294,11 +1442,13 @@ static size_t expand_bound(Sv body, const Sv *args, uint32_t np)
 static int d_macro(As *a, const char *p, const char *e)
 {
 	Sv name;
+	/* names from file text (not a->sb) stay valid; others are copied */
+	int keep = a->fr[a->nfr - 1].kind == FR_FILE && !((const uint8_t *)p >= a->sb.base && (const uint8_t *)p < a->sb.base + a->sb.cap);
 	p = ws(p, e);
 	const char *s = p;
 	while (p < e && isidc((unsigned char)*p)) p++;
 	if (p == s) return err(a, "expected identifier in '.macro' directive");
-	name = svdup(a, s, (size_t)(p - s));
+	name = keep ? (Sv){ s, (uint32_t)(p - s) } : svdup(a, s, (size_t)(p - s));
 	Param ps[64]; uint32_t np = 0;
 	p = ws(p, e);
 	if (p < e && *p == ',') p = ws(p + 1, e);
@@ -1309,7 +1459,7 @@ static int d_macro(As *a, const char *p, const char *e)
 		s = p;
 		while (p < e && isidc((unsigned char)*p)) p++;
 		if (p == s) return err(a, "expected identifier in '.macro' directive");
-		q->name = svdup(a, s, (size_t)(p - s));
+		q->name = keep ? (Sv){ s, (uint32_t)(p - s) } : svdup(a, s, (size_t)(p - s));
 		p = ws(p, e);
 		if (p < e && *p == ':') {
 			p = ws(p + 1, e);
@@ -1339,8 +1489,10 @@ static int d_macro(As *a, const char *p, const char *e)
 	m->params = rget(&a->defs, sizeof(Param) * (np ? np : 1));
 	memcpy(m->params, ps, sizeof(Param) * np);
 	m->np = np;
-	m->body = svdup(a, body.s, body.n);
+	/* file text outlives the macro (as_snippet's contract); expansions do not */
+	m->body = a->fr[a->nfr - 1].kind == FR_FILE ? body : svdup(a, body.s, body.n);
 	m->count = 0;
+	m->t = (Tmpl){ 0, 0 };
 	if (a->mcount * 2 >= a->mmask) {
 		uint32_t nm = a->mmask * 2 + 1;
 		Macro **t = rget(&a->defs, sizeof *t * (nm + 1));
@@ -1349,8 +1501,9 @@ static int d_macro(As *a, const char *p, const char *e)
 			for (Macro *x = a->mtab[i], *nx; x; x = nx) { nx = x->next; uint32_t h = hsv(x->name.s, x->name.n) & nm; x->next = t[h]; t[h] = x; }
 		a->mtab = t; a->mmask = nm;
 	}
-	if (find_macro(a, name.s, name.n)) return err(a, "macro '%.*s' is already defined", (int)name.n, name.s);
 	uint32_t h = hsv(name.s, name.n) & a->mmask;
+	for (Macro *x = a->mtab[h]; x; x = x->next)
+		if (x->name.n == name.n && !memcmp(x->name.s, name.s, name.n)) return err(a, "macro '%.*s' is already defined", (int)name.n, name.s);
 	m->next = a->mtab[h]; a->mtab[h] = m; a->mcount++;
 	return 0;
 }
@@ -1392,7 +1545,9 @@ static int invoke(As *a, Macro *m, const char *p, const char *e)
 				}
 				k = pi++;
 			}
-			if (macro_arg(a, &p, e, hasvararg && k == np - 1, &args[k])) return -1;
+			/* the arguments are used before the statement text changes */
+			int va = hasvararg && k == np - 1;
+			if (!macro_arg_plain(&p, e, va, &args[k]) && macro_arg(a, &p, e, va, &args[k])) return -1;
 			set[k] = 1;
 			p = ws(p, e);
 			if (p >= e) break;
@@ -1408,7 +1563,8 @@ static int invoke(As *a, Macro *m, const char *p, const char *e)
 		}
 	}
 	char *o = (char *)rget(&a->xs, expand_bound(m->body, args, np));
-	size_t n = expand(a, o, m->body, m->params, args, np, 1, m->count);
+	if (!m->t.p) m->t = tmpl_compile(a, &a->defs, m->body, m->params, np, 1);
+	size_t n = expand(a, o, m->body.s, m->t, args, m->count);
 	a->xs.used = (size_t)((uint8_t *)o - a->xs.base) + n;
 	a->ninst++;
 	m->count++;
@@ -1423,9 +1579,10 @@ static int d_rept(As *a, const char *p, const char *e)
 	Sv body;
 	if (collect_body(a, 0, &body)) return -1;
 	size_t mark = a->xs.used;
+	Tmpl t = tmpl_compile(a, &a->xs, body, 0, 0, 0);
 	char *o = (char *)rget(&a->xs, expand_bound(body, 0, 0) * (size_t)(cnt ? cnt : 1));
 	size_t n = 0;
-	for (int64_t i = 0; i < cnt; i++) n += expand(a, o + n, body, 0, 0, 0, 0, 0);
+	for (int64_t i = 0; i < cnt; i++) n += expand(a, o + n, body.s, t, 0, 0);
 	a->xs.used = (size_t)((uint8_t *)o - a->xs.base) + n;
 	return push_frame(a, o, n, FR_LOOP, mark);
 }
@@ -1463,9 +1620,10 @@ static int d_irp(As *a, const char *p, const char *e, int chars)
 	}
 	size_t tot = 0;
 	for (uint32_t i = 0; i < nv; i++) tot += expand_bound(body, &vals[i], 1);
+	Tmpl t = tmpl_compile(a, &a->xs, body, &par, 1, 1);
 	char *o = (char *)rget(&a->xs, tot + 1);
 	size_t n = 0;
-	for (uint32_t i = 0; i < nv; i++) n += expand(a, o + n, body, &par, &vals[i], 1, 1, 0);
+	for (uint32_t i = 0; i < nv; i++) n += expand(a, o + n, body.s, t, &vals[i], 0);
 	a->xs.used = (size_t)((uint8_t *)o - a->xs.base) + n;
 	return push_frame(a, o, n, FR_LOOP, mark);
 }
@@ -1525,7 +1683,7 @@ static Sv ifc_str(const char **pp, const char *e)
 /* conditional directives; returns 1 if w was one */
 static int cond_dir(As *a, Sv w, const char *p, const char *e, int *rc)
 {
-	if (w.n < 3 || w.s[0] != '.') return 0;
+	if (w.n < 3 || w.s[0] != '.' || (w.s[1] != 'e' && w.s[1] != 'i')) return 0;
 	*rc = 0;
 	if (sveq(w, ".endif")) {
 		if (!a->ncs) { *rc = err(a, "Encountered a .endif that doesn't follow an .if or .else"); return 1; }
@@ -1603,11 +1761,33 @@ static int cond_dir(As *a, Sv w, const char *p, const char *e, int *rc)
 
 /* ---------------------------------------------------------------- instructions */
 
+/* .req names are case-insensitive; buckets chain entries newest first, so
+ * the first match is the newest, as a scan from the end of a->al */
+static inline uint32_t al_hash(const char *s, size_t n)
+{
+	if (!n) return 0;
+	uint32_t h = (uint32_t)n * 0x9e3779b1u ^ (uint32_t)c_lower((unsigned char)s[0]) * 0x85ebca6bu ^
+		     (uint32_t)c_lower((unsigned char)s[n - 1]) * 0xc2b2ae35u;
+	return (h ^ h >> 15) & (ALH - 1);
+}
+
+static void al_rehash(As *a)
+{
+	memset(a->alh, 0, sizeof a->alh);
+	for (uint32_t i = 0; i < a->nal; i++) {
+		uint32_t h = al_hash(a->al[i].name.s, a->al[i].name.n);
+		a->al[i].next = a->alh[h]; a->alh[h] = i + 1;
+	}
+}
+
 static int reg_alias(As *a, const char *s, size_t n, Sv *out)
 {
-	for (uint32_t i = a->nal; i-- > 0;)
-		if (a->al[i].name.n == n && c_lower((unsigned char)a->al[i].name.s[0]) == c_lower((unsigned char)s[0]) &&
-		    !strncasecmp(a->al[i].name.s, s, n)) { *out = a->al[i].reg; return 1; }
+	if (!a->nal) return 0;
+	for (uint32_t i = a->alh[al_hash(s, n)]; i; i = a->al[i - 1].next) {
+		const Alias *x = &a->al[i - 1];
+		if (x->name.n == n && c_lower((unsigned char)x->name.s[0]) == c_lower((unsigned char)s[0]) &&
+		    !strncasecmp(x->name.s, s, n)) { *out = x->reg; return 1; }
+	}
 	return 0;
 }
 
@@ -1635,7 +1815,8 @@ static int arrangement(const char *s, size_t n)
 static int parse_reg(As *a, const char *s, size_t n, A64Op *op, int depth)
 {
 	Sv al;
-	const char *dot = memchr(s, '.', n);
+	const char *dot = 0;
+	for (size_t i = 0; i < n; i++) if (s[i] == '.') { dot = s + i; break; }
 	size_t bn = dot ? (size_t)(dot - s) : n;
 	if (depth < 4 && reg_alias(a, s, bn, &al)) {
 		char buf[64];
@@ -1646,32 +1827,44 @@ static int parse_reg(As *a, const char *s, size_t n, A64Op *op, int depth)
 	char c = (char)c_lower((unsigned char)s[0]);
 	memset(op, 0, sizeof *op);
 	if (!dot) {
-		int r;
-		if (n >= 2 && c_digit((unsigned char)s[1])) {	/* the common case: x0, w12, v3, q1 ... */
-			if ((c == 'x' || c == 'w') && (r = parse_regnum(s + 1, n - 1, 30)) >= 0) {
+		int r, cl;
+		switch (c) {	/* x0, w12, q1, v3 ... */
+		case 'x': case 'w':
+			if ((r = parse_regnum(s + 1, n - 1, 30)) >= 0) {
 				op->kind = A64O_REG; op->cls = c == 'x' ? A64_X : A64_W; op->reg = (uint8_t)r; return 1;
 			}
-		} else if (n < 2 || n > 3) return 0;
-		if (sveqi(s, n, "sp")) { op->kind = A64O_REG; op->cls = A64_X; op->reg = 31; op->sp = 1; return 1; }
-		if (sveqi(s, n, "wsp")) { op->kind = A64O_REG; op->cls = A64_W; op->reg = 31; op->sp = 1; return 1; }
-		if (sveqi(s, n, "xzr")) { op->kind = A64O_REG; op->cls = A64_X; op->reg = 31; return 1; }
-		if (sveqi(s, n, "wzr")) { op->kind = A64O_REG; op->cls = A64_W; op->reg = 31; return 1; }
-		if (sveqi(s, n, "fp")) { op->kind = A64O_REG; op->cls = A64_X; op->reg = 29; return 1; }
-		if (sveqi(s, n, "lr")) { op->kind = A64O_REG; op->cls = A64_X; op->reg = 30; return 1; }
-		if ((c == 'x' || c == 'w') && (r = parse_regnum(s + 1, n - 1, 30)) >= 0) {
-			op->kind = A64O_REG; op->cls = c == 'x' ? A64_X : A64_W; op->reg = (uint8_t)r; return 1;
+			break;
+		case 'q': cl = A64_Q; goto fpr;
+		case 'd': cl = A64_D; goto fpr;
+		case 's': cl = A64_S; goto fpr;
+		case 'h': cl = A64_H; goto fpr;
+		case 'b': cl = A64_B;
+		fpr:
+			if ((r = parse_regnum(s + 1, n - 1, 31)) >= 0) { op->kind = A64O_REG; op->cls = (uint8_t)cl; op->reg = (uint8_t)r; return 1; }
+			break;
+		case 'v':
+			if ((r = parse_regnum(s + 1, n - 1, 31)) >= 0) {
+				op->kind = A64O_VREG; op->cls = A64_V; op->reg = (uint8_t)r; op->arr = A64_ARR_NONE; return 1;
+			}
+			break;
+		case 'z': case 'p':
+			if ((r = parse_regnum(s + 1, n - 1, c == 'z' ? 31 : 15)) >= 0) {
+				op->kind = A64O_REG; op->cls = c == 'z' ? A64_Z : A64_P; op->reg = (uint8_t)r; return 1;
+			}
+			break;
 		}
-		static const char fp[] = "qdshb";
-		const char *k = strchr(fp, c);
-		if (k && c && (r = parse_regnum(s + 1, n - 1, 31)) >= 0) {
-			static const uint8_t cl[] = { A64_Q, A64_D, A64_S, A64_H, A64_B };
-			op->kind = A64O_REG; op->cls = cl[k - fp]; op->reg = (uint8_t)r; return 1;
-		}
-		if (c == 'v' && (r = parse_regnum(s + 1, n - 1, 31)) >= 0) {
-			op->kind = A64O_VREG; op->cls = A64_V; op->reg = (uint8_t)r; op->arr = A64_ARR_NONE; return 1;
-		}
-		if ((c == 'z' || c == 'p') && (r = parse_regnum(s + 1, n - 1, c == 'z' ? 31 : 15)) >= 0) {
-			op->kind = A64O_REG; op->cls = c == 'z' ? A64_Z : A64_P; op->reg = (uint8_t)r; return 1;
+		if (n == 2 || n == 3) {	/* sp wsp xzr wzr fp lr */
+			uint32_t k = (uint32_t)c << 16 | (uint32_t)c_lower((unsigned char)s[1]) << 8 | (n == 3 ? (uint32_t)c_lower((unsigned char)s[2]) : 0);
+#define K3(x, y, z) ((uint32_t)(x) << 16 | (uint32_t)(y) << 8 | (uint32_t)(z))
+			switch (k) {
+			case K3('s', 'p', 0): op->kind = A64O_REG; op->cls = A64_X; op->reg = 31; op->sp = 1; return 1;
+			case K3('w', 's', 'p'): op->kind = A64O_REG; op->cls = A64_W; op->reg = 31; op->sp = 1; return 1;
+			case K3('x', 'z', 'r'): op->kind = A64O_REG; op->cls = A64_X; op->reg = 31; return 1;
+			case K3('w', 'z', 'r'): op->kind = A64O_REG; op->cls = A64_W; op->reg = 31; return 1;
+			case K3('f', 'p', 0): op->kind = A64O_REG; op->cls = A64_X; op->reg = 29; return 1;
+			case K3('l', 'r', 0): op->kind = A64O_REG; op->cls = A64_X; op->reg = 30; return 1;
+			}
+#undef K3
 		}
 		return 0;
 	}
@@ -1693,8 +1886,26 @@ static int parse_reg(As *a, const char *s, size_t n, A64Op *op, int depth)
 
 static int shift_kind(const char *s, size_t n)
 {
-	static const char *t[] = { "lsl", "lsr", "asr", "ror", "msl", "uxtb", "uxth", "uxtw", "uxtx", "sxtb", "sxth", "sxtw", "sxtx" };
-	for (int i = 0; i < 13; i++) if (sveqi(s, n, t[i])) return i;
+	if (n != 3 && n != 4) return -1;
+	uint32_t k = 0;
+	for (size_t i = 0; i < n; i++) k |= (uint32_t)c_lower((unsigned char)s[i]) << (8 * i);
+#define P(a, b, c, d) ((uint32_t)(a) | (uint32_t)(b) << 8 | (uint32_t)(c) << 16 | (uint32_t)(d) << 24)
+	switch (k) {	/* the order of A64_LSL ... A64_SXTX */
+	case P('l', 's', 'l', 0): return 0;
+	case P('l', 's', 'r', 0): return 1;
+	case P('a', 's', 'r', 0): return 2;
+	case P('r', 'o', 'r', 0): return 3;
+	case P('m', 's', 'l', 0): return 4;
+	case P('u', 'x', 't', 'b'): return 5;
+	case P('u', 'x', 't', 'h'): return 6;
+	case P('u', 'x', 't', 'w'): return 7;
+	case P('u', 'x', 't', 'x'): return 8;
+	case P('s', 'x', 't', 'b'): return 9;
+	case P('s', 'x', 't', 'h'): return 10;
+	case P('s', 'x', 't', 'w'): return 11;
+	case P('s', 'x', 't', 'x'): return 12;
+	}
+#undef P
 	return -1;
 }
 
@@ -1741,6 +1952,17 @@ static int parse_imm(As *a, const char **pp, const char *e, A64Op *op)
 				*pp = p + (end - tmp);
 				return 0;
 			}
+		}
+		/* a plain decimal number on its own: what expr() would fold it to */
+		const char *r = ws(q, e);
+		if (d == p && q > d && q - d <= 18 && !(d[0] == '0' && q - d > 1) && (r == e || *r == ',' || *r == ']')) {
+			int64_t x = 0;
+			for (const char *t = d; t < q; t++) x = x * 10 + (*t - '0');
+			op->v = (Val){ 0, 0, x };
+			op->imm = x;
+			op->hassym = 0;
+			*pp = q;
+			return 0;
 		}
 	}
 	Val v;
@@ -1810,24 +2032,27 @@ static int parse_mem(As *a, const char **pp, const char *e, A64Op *op)
 	return 0;
 }
 
+/* mnemonics whose operands can be names (sysregs, barriers, conditions...);
+ * m is lowercase */
 static int names_ops(const char *m, size_t n)
 {
-	static const char *t[] = { "msr", "mrs", "sys", "sysl", "dmb", "dsb", "isb", "prfm", "prfum", "dc", "ic", "at",
-				   "tlbi", "bti", "csel", "csinc", "csinv", "csneg", "cset", "csetm", "cinc", "cinv",
-				   "cneg", "ccmp", "ccmn", "fcsel", "fccmp", "fccmpe", "hint", "psb", "tsb", "clrex", "sb", 0 };
-	static uint64_t k[sizeof t / sizeof t[0]];	/* names packed little-endian */
-	static int nk;
-	if (n > 8) return 0;
-	if (!nk) {	/* benign race: every thread writes the same values */
-		int j;
-		for (j = 0; t[j]; j++) { uint64_t v = 0; memcpy(&v, t[j], strlen(t[j])); k[j] = v; }
-		__atomic_store_n(&nk, j, __ATOMIC_RELEASE);
+#define N(s) (n == sizeof(s) - 1 && !memcmp(m, s, n))
+	switch (m[0]) {
+	case 'a': return N("at");
+	case 'b': return N("bti");
+	case 'c': return N("csel") || N("csinc") || N("csinv") || N("csneg") || N("cset") || N("csetm") ||
+			 N("cinc") || N("cinv") || N("cneg") || N("ccmp") || N("ccmn") || N("clrex");
+	case 'd': return N("dmb") || N("dsb") || N("dc");
+	case 'f': return N("fcsel") || N("fccmp") || N("fccmpe");
+	case 'h': return N("hint");
+	case 'i': return N("isb") || N("ic");
+	case 'm': return N("msr") || N("mrs");
+	case 'p': return N("prfm") || N("prfum") || N("psb");
+	case 's': return N("sys") || N("sysl") || N("sb");
+	case 't': return N("tlbi") || N("tsb");
 	}
-	uint64_t v = 0;
-	memcpy(&v, m, n);	/* m is lowercase already */
-	int c = __atomic_load_n(&nk, __ATOMIC_ACQUIRE);
-	for (int i = 0; i < c; i++) if (k[i] == v) return 1;
 	return 0;
+#undef N
 }
 
 typedef struct PoolS { uint32_t sec, label; Val v; uint32_t size; } Pool;
@@ -1892,14 +2117,14 @@ static int ltorg(As *a)
 
 int as_trace;	/* print each instruction statement and its encoding (testing) */
 
-static int instruction(As *a, const char *p, const char *e)
+/* p: the statement from its mnemonic, which is wn bytes long */
+static int instruction(As *a, const char *p, const char *e, size_t wn)
 {
 	const char *p0 = p;
 	const char *s = p;
-	while (p < e && (isidc((unsigned char)*p))) p++;
+	p += wn;
 	char mn[32];
-	(void)0;
-	size_t mlen = (size_t)(p - s);
+	size_t mlen = wn;
 	if (mlen >= sizeof mn) return err(a, "invalid instruction mnemonic");
 	for (size_t i = 0; i < mlen; i++) mn[i] = (char)c_lower((unsigned char)s[i]);
 	mn[mlen] = 0;
@@ -1910,7 +2135,7 @@ static int instruction(As *a, const char *p, const char *e)
 	A64Fix fx; fx.type = 0;
 	p = ws(p, e);
 	/* SME ldr/str za[Wv, #imm], [Xn{, #imm, mul vl}] */
-	if ((!strcmp(mn, "ldr") || !strcmp(mn, "str")) && e - p > 3 && !strncasecmp(p, "za[", 3)) {
+	if (mlen == 3 && (!memcmp(mn, "ldr", 3) || !memcmp(mn, "str", 3)) && e - p > 3 && (p[0] | 32) == 'z' && (p[1] | 32) == 'a' && p[2] == '[') {
 		char buf[96], tail[16] = "";
 		unsigned v, i1, n, i2 = 0;
 		size_t l = (size_t)(e - p) < sizeof buf - 1 ? (size_t)(e - p) : sizeof buf - 1;
@@ -1965,7 +2190,7 @@ static int instruction(As *a, const char *p, const char *e)
 				p++;
 				op->idx = (uint8_t)ix; op->hasidx = 1;
 			}
-		} else if (c == '#' || c == ':' || c == '(' || c == '-' || c == '+' || c == '~' || c_digit((unsigned char)c)) {
+		} else if (cclass[(uint8_t)c] & C_E) {	/* # : ( - + ~ digit */
 			if (parse_imm(a, &p, e, op)) return -1;
 		} else if (isids((unsigned char)c)) {
 			const char *t = p;
@@ -2190,6 +2415,7 @@ static int directive(As *a, Sv w, const char *p, const char *e)
 			for (uint32_t i = a->nal; i-- > 0;)
 				if (a->al[i].name.n == nm.n && !strncasecmp(a->al[i].name.s, nm.s, nm.n)) {
 					a->al[i] = a->al[--a->nal];
+					al_rehash(a);
 					return 0;
 				}
 			return 0;
@@ -2231,13 +2457,14 @@ static int statement(As *a, const char *p, const char *e)
 	p = ws(p, e);
 	if (p >= e) return 0;
 	Sv w = first_word(p, e);
-	int rc;
-	if (cond_dir(a, w, w.s + w.n, e, &rc)) return rc;
+	int rc, lab = 0;
+	if (w.s[0] == '.' && cond_dir(a, w, w.s + w.n, e, &rc)) return rc;
 	if (cond_ignore(a)) return 0;
 	/* labels */
+	const char *q;
 	for (;;) {
+		q = ws(w.s + w.n, e);
 		if (!w.n) break;
-		const char *q = ws(w.s + w.n, e);
 		if (q < e && *q == ':') {
 			int numeric = 1;
 			for (uint32_t i = 0; i < w.n; i++) if (!c_digit((unsigned char)w.s[i])) numeric = 0;
@@ -2246,13 +2473,13 @@ static int statement(As *a, const char *p, const char *e)
 			p = ws(q + 1, e);
 			if (p >= e) return 0;
 			w = first_word(p, e);
+			lab = 1;
 			continue;
 		}
 		break;
 	}
 	if (!w.n) return err(a, "unexpected token at start of statement");
-	if (cond_dir(a, w, w.s + w.n, e, &rc)) return rc;	/* "2: .if ..." */
-	const char *q = ws(w.s + w.n, e);
+	if (lab && w.s[0] == '.' && cond_dir(a, w, w.s + w.n, e, &rc)) return rc;	/* "2: .if ..." */
 	if (q < e && *q == '=' && !(q + 1 < e && q[1] == '=')) return assign(a, w, q + 1, e);
 	if (q + 4 <= e && !memcmp(q, ".req", 4) && (q + 4 == e || !isidc((unsigned char)q[4]))) {
 		Sv reg = trim(q + 4, e);
@@ -2264,13 +2491,15 @@ static int statement(As *a, const char *p, const char *e)
 		}
 		a->al[a->nal].name = svdup(a, w.s, w.n);
 		a->al[a->nal].reg = svdup(a, reg.s, reg.n);
+		uint32_t h = al_hash(w.s, w.n);
+		a->al[a->nal].next = a->alh[h]; a->alh[h] = a->nal + 1;
 		a->nal++;
 		return 0;
 	}
 	Macro *m = find_macro(a, w.s, w.n);
 	if (m) return invoke(a, m, w.s + w.n, e);
 	if (w.s[0] == '.') return directive(a, w, w.s + w.n, e);
-	return instruction(a, p, e);
+	return instruction(a, w.s, e, w.n);
 }
 
 /* ---------------------------------------------------------------- driver */
@@ -2306,6 +2535,7 @@ void as_begin(As *a, ElfObj *o, const char *name)
 {
 	a->o = o; a->nfr = 0; a->ncs = 0; a->nss = 0; a->err = 0; a->msg[0] = 0;
 	a->xs.used = 0; a->defs.used = 0; a->ninst = 0; a->nal = 0; a->alcap = 0; a->al = 0;
+	memset(a->alh, 0, sizeof a->alh);
 	a->fname = name;
 	a->mmask = 255; a->mcount = 0;
 	a->mtab = rget(&a->defs, sizeof(Macro *) * (a->mmask + 1));
@@ -2331,9 +2561,8 @@ int as_snippet(As *a, const char *text, size_t len)
 	while (a->nfr && !a->err) {
 		Frame *f = &a->fr[a->nfr - 1];
 		if (f->p >= f->e) { pop_frame(a); continue; }
-		const char *raw;
-		size_t n = next_stmt(a, f, &raw);
-		const char *s = (const char *)a->sb.base;
+		const char *raw, *s;
+		size_t n = next_stmt(a, f, &raw, &s);
 		a->nstmt++; a->nstmtb += n + 1;
 		if (statement(a, s, s + n)) {
 			size_t k = strlen(a->msg);

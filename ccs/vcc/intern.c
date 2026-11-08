@@ -13,6 +13,17 @@
 #define MAX_ENT (NSLOT / 4 * 3)
 _Static_assert(MAX_ENT <= (1u << VINTERN_ID_BITS), "ids must fit the id-indexed tables");
 
+#define CL8(n) ((n) < 0 ? 0 : (n) > 8 ? 8 : (n))
+#define BM(n) (((1ull << (4 * CL8(n))) << (4 * CL8(n))) - 1)	/* the low n (0..8) bytes */
+#define WM(n) { BM(n), BM((n) - 8) }
+const uint64_t vintern_wmask[17][2] = {
+	WM(0), WM(1), WM(2), WM(3), WM(4), WM(5), WM(6), WM(7), WM(8),
+	WM(9), WM(10), WM(11), WM(12), WM(13), WM(14), WM(15), WM(16),
+};
+#undef WM
+#undef BM
+#undef CL8
+
 static _Atomic uint64_t *slots;
 vident *vintern_ents;
 static _Atomic uint32_t nent = 1;	/* id 0 = none */
@@ -72,26 +83,11 @@ static inline int same(const char *a, const char *b, size_t len)
 	return tail(a + i, len - i) == tail(b + i, len - i);
 }
 
-#ifdef VLEX_STATS
-extern unsigned long vlex_stat[512];
-static uint32_t vintern_(const char *s, size_t len, uint32_t hash);
-uint32_t vintern(const char *s, size_t len, uint32_t hash)
+/* the probe from slot i on, inserting at the first empty slot */
+static __attribute__((noinline)) uint32_t insert(const char *s, size_t len, uint32_t hash, uint32_t i,
+						 uint64_t w0, uint64_t w1)
 {
-	uint64_t t0 = __builtin_readcyclecounter();
-	uint32_t r = vintern_(s, len, hash);
-
-	vlex_stat[321] += __builtin_readcyclecounter() - t0;
-	return r;
-}
-#define vintern vintern_
-static
-#endif
-uint32_t vintern(const char *s, size_t len, uint32_t hash)
-{
-	uint32_t i = hash >> (32 - SLOT_BITS), id = 0;
-	uint64_t w0, w1;
-
-	vintern_words(s, len, &w0, &w1);
+	uint32_t id = 0;
 
 	for (;; i = (i + 1) & (NSLOT - 1)) {
 		uint64_t v = atomic_load_explicit(&slots[i], memory_order_acquire);
@@ -119,6 +115,47 @@ uint32_t vintern(const char *s, size_t len, uint32_t hash)
 				return (uint32_t)v;	/* a reserved id, if any, is wasted */
 		}
 	}
+}
+
+#ifdef VLEX_STATS
+extern unsigned long vlex_stat[512];
+static uint32_t vintern_(const char *s, size_t len, uint32_t hash);
+uint32_t vintern(const char *s, size_t len, uint32_t hash)
+{
+	uint64_t t0 = __builtin_readcyclecounter();
+	uint32_t r = vintern_(s, len, hash);
+
+	vlex_stat[321] += __builtin_readcyclecounter() - t0;
+	return r;
+}
+#define vintern vintern_
+static
+#endif
+/* a lookup loop without the insertion (most identifiers exist already) */
+uint32_t vintern(const char *s, size_t len, uint32_t hash)
+{
+	uint32_t i = hash >> (32 - SLOT_BITS);
+	uint64_t w0, w1;
+
+	vintern_words(s, len, &w0, &w1);
+	for (;; i = (i + 1) & (NSLOT - 1)) {
+		uint64_t v = atomic_load_explicit(&slots[i], memory_order_acquire);
+
+		if (!v)
+			return insert(s, len, hash, i, w0, w1);
+		if ((uint32_t)(v >> 32) == hash) {
+			const vident *e = &vintern_ents[(uint32_t)v];
+
+			if (e->len == len && e->w0 == w0 && e->w1 == w1 &&
+			    (len <= 16 || same(e->s + 16, s + 16, len - 16)))
+				return (uint32_t)v;
+		}
+	}
+}
+
+uint32_t vintern_long(const char *s, size_t len)
+{
+	return vintern(s, len, vintern_hash(s, len));
 }
 
 /* the id of s if interned, else 0 (no insert) */
@@ -164,6 +201,17 @@ uint32_t vintern_copy(const char *s, size_t len)
 	return vintern(d, len, h);
 }
 
+uint32_t vintern_cstr(const char *s)
+{
+	char b[80] = { 0 };
+	size_t n = strlen(s);
+
+	if (n + 16 > sizeof(b))
+		abort();
+	memcpy(b, s, n);
+	return vintern_copy(b, n);
+}
+
 uint32_t vintern_count(void)
 {
 	return atomic_load(&nent) - 1;
@@ -183,8 +231,7 @@ static void init_once(void)
 	vintern_ents = reserve(MAX_ENT * sizeof(*vintern_ents));
 	copy_buf = reserve(COPY_MAX);
 	for (size_t i = 0; i < sizeof(kw) / sizeof(kw[0]); i++) {
-		size_t n = strlen(kw[i]);
-		uint32_t id = vintern_copy(kw[i], n);
+		uint32_t id = vintern_cstr(kw[i]);
 
 		if (id != i + 1) {
 			fprintf(stderr, "vcc: duplicate keyword %s\n", kw[i]);

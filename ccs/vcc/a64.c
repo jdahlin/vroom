@@ -10,6 +10,7 @@
 #include "a64.h"
 #include <string.h>
 #include <strings.h>
+#include <pthread.h>
 
 typedef struct { const char *name; uint16_t enc; uint8_t rw; } SysReg;
 static const SysReg sysregs[] = {
@@ -35,15 +36,34 @@ static int cinum(const char *s, size_t n, int max)
 	return v <= max ? v : -1;
 }
 
+/* case-insensitive FNV-1a, for the lookup tables built once below */
+static uint32_t lc_hash(const char *s, size_t n)
+{
+	uint32_t h = 2166136261u;
+	for (size_t i = 0; i < n; i++) h = (h ^ ((uint8_t)s[i] | 32)) * 16777619u;
+	return h ^ h >> 15;
+}
+
+#define SRH 4096
+static uint16_t srh[SRH];	/* sysregs index + 1, 0 = empty */
+static pthread_once_t srh_once = PTHREAD_ONCE_INIT;
+
+static void srh_build(void)
+{
+	for (size_t i = 0; i < sizeof sysregs / sizeof sysregs[0]; i++) {
+		uint32_t j = lc_hash(sysregs[i].name, strlen(sysregs[i].name)) & (SRH - 1);
+		while (srh[j]) j = (j + 1) & (SRH - 1);
+		srh[j] = (uint16_t)(i + 1);
+	}
+}
+
 int a64_sysreg(const char *name, size_t len, int write)
 {
 	(void)write;
-	size_t lo = 0, hi = sizeof sysregs / sizeof sysregs[0];
-	while (lo < hi) {
-		size_t mid = (lo + hi) / 2;
-		int c = lc_cmp(name, len, sysregs[mid].name);
-		if (!c) return sysregs[mid].enc;
-		if (c < 0) hi = mid; else lo = mid + 1;
+	pthread_once(&srh_once, srh_build);
+	for (uint32_t j = lc_hash(name, len) & (SRH - 1); srh[j]; j = (j + 1) & (SRH - 1)) {
+		const SysReg *r = &sysregs[srh[j] - 1];
+		if (!lc_cmp(name, len, r->name)) return r->enc;
 	}
 	/* generic S<op0>_<op1>_C<n>_C<m>_<op2> */
 	if (len >= 11 && (name[0] == 's' || name[0] == 'S')) {
@@ -442,14 +462,28 @@ static const Mn mns[] = {
 	{ "zip2", K_VPERM, 0x0e007800, 0 },
 };
 
+/* case-insensitive hash table over mns (built once) */
+#define MNH 1024
+static uint16_t mnh[MNH];	/* index + 1, 0 = empty */
+static pthread_once_t mnh_once = PTHREAD_ONCE_INIT;
+
+#define mn_hash lc_hash
+
+static void mnh_build(void)
+{
+	for (size_t i = 0; i < sizeof mns / sizeof mns[0]; i++) {
+		uint32_t j = mn_hash(mns[i].name, strlen(mns[i].name)) & (MNH - 1);
+		while (mnh[j]) j = (j + 1) & (MNH - 1);
+		mnh[j] = (uint16_t)(i + 1);
+	}
+}
+
 static const Mn *lookup(const char *s, size_t n)
 {
-	size_t lo = 0, hi = sizeof mns / sizeof mns[0];
-	while (lo < hi) {
-		size_t mid = (lo + hi) / 2;
-		int c = lc_cmp(s, n, mns[mid].name);
-		if (!c) return &mns[mid];
-		if (c < 0) hi = mid; else lo = mid + 1;
+	pthread_once(&mnh_once, mnh_build);
+	for (uint32_t j = mn_hash(s, n) & (MNH - 1); mnh[j]; j = (j + 1) & (MNH - 1)) {
+		const Mn *m = &mns[mnh[j] - 1];
+		if (!lc_cmp(s, n, m->name)) return m;
 	}
 	return 0;
 }
@@ -1965,19 +1999,21 @@ int a64_asm(const char *mn, size_t n, const A64Op *op, int nop, uint32_t *out, A
 	Ctx c = { op, nop, out, fix, err, mn };
 	fix->type = 0;
 	*err = 0;
-	/* b.cond / bcond */
-	if (n >= 3 && (mn[0] | 32) == 'b') {
-		int cc = -1;
-		if (mn[1] == '.' && n == 4) cc = a64_cond(mn + 2, 2);
-		else if (n == 3) cc = a64_cond(mn + 1, 2);
-		if (cc >= 0) return bcond(&c, cc);
-	}
-	{
+	const Mn *m = lookup(mn, n);
+	/* none of the table's names is a b.cond, an LSUI form or an atomic,
+	 * except the exclusives, which k_atomic encodes */
+	if (!m || m->k == K_LDX || m->k == K_STX) {
+		/* b.cond / bcond */
+		if (n >= 3 && (mn[0] | 32) == 'b') {
+			int cc = -1;
+			if (mn[1] == '.' && n == 4) cc = a64_cond(mn + 2, 2);
+			else if (n == 3) cc = a64_cond(mn + 1, 2);
+			if (cc >= 0) return bcond(&c, cc);
+		}
 		int r;
 		if (k_atomic(&c, mn, n, &r)) return r;
 		if (k_lsui(&c, mn, n, &r)) return r;
 	}
-	const Mn *m = lookup(mn, n);
 	if (!m) { *err = "unrecognized instruction mnemonic"; return -1; }
 	switch (m->k) {
 	case K_ADDSUB: return k_addsub(&c, m);

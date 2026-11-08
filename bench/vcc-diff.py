@@ -10,6 +10,9 @@
 TUs come from work/build-o0/**/.*.o.cmd (savedcmd_X := ...); each command
 runs in work/build-o0.  The comparison is a token stream (kind, spelling),
 done by vpp itself (it lexes the reference with vcc's lexer).
+
+--bin-dir DIR (or VCC_BIN=DIR) runs the tools from DIR instead of build/ccs,
+e.g. build/ccs-asan or build/ccs-tsan (AGENTS.md, "Sanitizers").
 """
 import glob, hashlib, os, re, shlex, subprocess, sys
 from multiprocessing import Pool
@@ -17,7 +20,15 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from hostenv import llvm, BUILD, KTREE, PPREF
 R = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 B = KTREE; REF = PPREF
-CL = llvm('clang'); VPP = os.environ.get('VPP', f'{BUILD}/vpp')
+CL = llvm('clang')
+
+def bin_dir():
+    """build/ccs (build/linux/ccs on Linux), or --bin-dir DIR / VCC_BIN=DIR (removed from sys.argv)"""
+    d = os.environ.get('VCC_BIN', BUILD)
+    if '--bin-dir' in sys.argv:
+        k = sys.argv.index('--bin-dir'); d = sys.argv[k+1]; del sys.argv[k:k+2]
+    return os.path.abspath(d)
+BIN = bin_dir(); VPP = os.environ.get('VPP', f'{BIN}/vpp')
 
 def tu_args(cmd):
     """(object, clang args without -c/-E/-o/-MMD) for a C TU, a .S file, or a

@@ -48,6 +48,8 @@ def main():
     ap.add_argument("--kcflags", default="")
     ap.add_argument("--dotconfig", help="färdig .config; hoppar över allnoconfig/merge/olddefconfig")
     ap.add_argument("--cc", help="CC och HOSTCC (t.ex. build/ccs/vroom-cc)")
+    ap.add_argument("--ar", help="AR (t.ex. build/ccs/var)")
+    ap.add_argument("--shell", help="SHELL och CONFIG_SHELL för hela bygget (t.ex. /bin/dash; /bin/sh är bash)")
     ap.add_argument("--keep", action="store_true", help="ta inte bort byggkatalogen")
     ap.add_argument("--target", default="Image")
     ap.add_argument("extra", nargs="*")
@@ -65,6 +67,10 @@ def main():
     if a.cc:
         cc = os.path.abspath(a.cc)
         mk += [f"CC={cc}", f"HOSTCC={cc}"]
+    if a.ar:
+        mk.append(f"AR={os.path.abspath(a.ar)}")
+    if a.shell:
+        mk += [f"SHELL={a.shell}", f"CONFIG_SHELL={a.shell}"]
     mk.append("RUSTC=/usr/bin/false")
 
     t0 = time.monotonic()
@@ -108,7 +114,7 @@ def main():
     with open(os.path.join(ROOT, "results/kbuild-runs.txt"), "a") as f:
         f.write(f"{time.strftime('%Y-%m-%d %H:%M:%S')} out={os.path.basename(a.out)} "
                 f"configs={','.join(os.path.basename(c) for c in configs)} "
-                f"kcflags='{a.kcflags}' cc={a.cc or 'clang'} j={a.j} {summary}\n")
+                f"kcflags='{a.kcflags}' cc={a.cc or 'clang'} ar={a.ar or 'llvm-ar'} sh={a.shell or 'sh'} j={a.j} {summary}\n")
     if rc:
         os.system(f"grep -E -i ' error|\\*\\*\\*' {a.out}.log | head -20")
     sys.exit(rc)

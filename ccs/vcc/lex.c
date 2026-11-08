@@ -55,14 +55,14 @@ const char *vtok_name(int kind)
  *   bit 1  hi 5,7  lo 0-a   P-Z p-z
  *   bit 2  hi 3    lo 0-9   0-9
  *   bit 3  hi 5    lo f     _
- *   bit 4  hi 2    lo 4     $
+ *   bit 4  hi 2    lo 4,e   $ .  ('.' is in the ID mask, and in P: see fast)
  *   bit 5  hi 2    lo 0     space
  *   bit 6  hi 0    lo 9,b,c tab vt ff
  *   bit 7  hi 0    lo a,d   newline, carriage return
  */
 static const uint8_t lo_tab[16] = {
 	0x26, 0x07, 0x07, 0x07, 0x17, 0x07, 0x07, 0x07,
-	0x07, 0x47, 0x83, 0x41, 0x41, 0x81, 0x01, 0x09,
+	0x07, 0x47, 0x83, 0x41, 0x41, 0x81, 0x11, 0x09,
 };
 static const uint8_t hi_tab[16] = {
 	0xc0, 0x00, 0x30, 0x04, 0x01, 0x0a, 0x01, 0x02,
@@ -74,13 +74,16 @@ static const uint8_t hi_tab[16] = {
  *            bit 1  may take '=' (&= |= += -= *= ^= == != <= >= %= /=)
  *            bit 2  may take '>' (-> :> %>)
  *            bit 3  may take ':' or '%' (<: <%)
- *            bit 4  punctuator (not '.')
- *            bit 5  needs a handler: quotes, '\\', control, '@', '`'
- *            bit 6  '/': with '/' or '*' a comment
- *            bit 7  '%': with ':' or '%' a digraph we leave to the handlers
- *   gtab[c]  bit 1 '=', bit 2 '>', bits 3, 7 ':' or '%', bit 6 '/' or '*'
+ *            bit 4  punctuator or '.'
+ *            bit 6  '/', '%' or '.': with '/', '*', ':', '%' or '.' left
+ *                   to the handlers (comments, digraphs, "..", and the
+ *                   rare "%/", "/:", "./", "/." too)
+ *            bit 7  needs a handler: quotes, '\\', control, '@', '`'
+ *   gtab[c]  bit 1 '=', bit 2 '>', bit 3 ':' or '%', bit 6 '/', '*', ':',
+ *            '%' or '.', bit 7 '+' or '-'
+ * Masks whose property is in bit 7 go to mm4() as they are.
  */
-static uint8_t ttab[128], gtab[64];
+static uint8_t ttab[128], gtab[64], cltab[128];	/* cltab: the byte classes above */
 
 static void init_struct_tables(void)
 {
@@ -95,27 +98,29 @@ static void init_struct_tables(void)
 			t |= 4;
 		if (c == '<')
 			t |= 8;
-		if (c && strchr("[](){}~?;,&|+-*^=!#:<>%/", c))
+		if (c && strchr("[](){}~?;,&|+-*^=!#:<>%/.", c))
 			t |= 16;
 		if (c == '"' || c == '\'' || c == '\\' || c == '@' || c == '`' || c == 0x7f ||
 		    (c < 0x20 && !strchr(" \t\v\f\n\r", c)) || c == 0)
-			t |= 32;
-		if (c == '/')
-			t |= 64;
-		if (c == '%')
 			t |= 128;
+		if (c == '/' || c == '%' || c == '.')
+			t |= 64;
 		ttab[c] = t;
 	}
+	for (int c = 0; c < 128; c++)
+		cltab[c] = lo_tab[c & 15] & hi_tab[c >> 4];
 	gtab['='] = 2;
 	gtab['>'] = 4;
-	gtab[':'] = gtab['%'] = 8 | 128;
-	gtab['/'] = gtab['*'] = 64;
+	gtab[':'] = gtab['%'] = 8 | 64;
+	gtab['/'] = gtab['*'] = gtab['.'] = 64;
+	gtab['+'] = gtab['-'] = 128;
 }
 
-enum { M_ID, M_WS, M_NL, M_DOT, M_DIG, M_P, M_PAIR, M_X, M_ES, M_COUNT };
+enum { M_ID, M_WS, M_NL, M_DIG, M_P, M_PAIR, M_X, M_NS, M_COUNT };
 
 /*
- * 64 byte masks (0xff/0) to a 64-bit mask, for vectors loaded with vld4q:
+ * 64 byte masks to a 64-bit mask, for vectors loaded with vld4q (only bit
+ * 7 of each byte counts):
  * a[k] lane j is byte 4j + k, which the shift-insert chain puts at bit
  * 4j + k.  Five instructions instead of the eight of a pairwise-add tree.
  */
@@ -129,67 +134,72 @@ static inline uint64_t mm4(uint8x16_t a0, uint8x16_t a1, uint8x16_t a2, uint8x16
 
 /*
  * Per 64-byte block, bit i of each mask describes byte i:
- *   ID    identifier character       WS   whitespace incl. newlines
- *   NL    \n or \r                   DOT  '.'        DIG  digit
- *   P     punctuator character (not '.')
+ *   ID    identifier character or '.'  WS   whitespace incl. newlines
+ *   NL    \n or \r                   DIG  digit
+ *   P     punctuator character or '.'
  *   PAIR  bytes i, i+1 form a two-character punctuator
  *   X     the structural pass stops here: literal, comment, splice, UCN,
  *         non-ASCII, NUL, stray character
- *   ES    e, E, p or P before + or - (a sign inside a pp-number)
+ *   NS    the next byte is + or - (maybe a sign inside a pp-number)
  * Blocks [from, to) of the file at s.
  */
 static void classify(const uint8_t *s, size_t from, size_t to, uint64_t *m[M_COUNT])
 {
-	const uint8x16_t lo = vld1q_u8(lo_tab), hi = vld1q_u8(hi_tab);
-	const uint8x16_t nib = vdupq_n_u8(15), mid = vdupq_n_u8(0x1f), mdg = vdupq_n_u8(0x04);
-	const uint8x16_t mws = vdupq_n_u8(0xe0), mnl = vdupq_n_u8(0x80);
-	const uint8x16_t dot = vdupq_n_u8('.'), k64 = vdupq_n_u8(64);
-	const uint8x16_t b1 = vdupq_n_u8(1), b16 = vdupq_n_u8(16), b32 = vdupq_n_u8(32);
-	const uint8x16_t pairb = vdupq_n_u8(0x0e), cmtb = vdupq_n_u8(0xc0);
-	const uint8x16x4_t t0 = vld1q_u8_x4(ttab), t1 = vld1q_u8_x4(ttab + 64);
-	const uint8x16x4_t g = vld1q_u8_x4(gtab);
+	const uint8x16_t mid = vdupq_n_u8(0x1f), mdg = vdupq_n_u8(0x04);
+	const uint8x16_t mws = vdupq_n_u8(0xe0);
+	const uint8x16_t k64 = vdupq_n_u8(64);
+	const uint8x16_t b16 = vdupq_n_u8(16);
+	const uint8x16_t pairb = vdupq_n_u8(0x0e);
 
 	for (size_t b = from; b < to; b++) {
 		const uint8_t *q = s + 64 * b;
 		const uint8x16x4_t v = vld4q_u8(q);
-		uint8x16_t id[4], ws[4], nl[4], dt[4], dg[4], pp[4], pr[4], xx[4], es[4];
+		uint8x16_t vn[4], t[4], gn[4], tg[4], c[4], r[4];
 
-		for (int k = 0; k < 4; k++) {
-			/* the next byte of each lane */
-			const uint8x16_t vn = k < 3 ? v.val[k + 1] : vextq_u8(v.val[0], vld1q_dup_u8(q + 64), 1);
-			const uint8x16_t c = vandq_u8(vqtbl1q_u8(lo, vandq_u8(v.val[k], nib)),
-						      vqtbl1q_u8(hi, vshrq_n_u8(v.val[k], 4)));
-			const uint8x16_t t = vorrq_u8(vqtbl4q_u8(t0, v.val[k]),
-						      vqtbl4q_u8(t1, vsubq_u8(v.val[k], k64)));
-			const uint8x16_t tg = vandq_u8(t, vqtbl4q_u8(g, vn));
+		/* the next byte of each lane */
+		vn[0] = v.val[1], vn[1] = v.val[2], vn[2] = v.val[3];
+		vn[3] = vextq_u8(v.val[0], vld1q_dup_u8(q + 64), 1);
+		{
+			/*
+			 * The table registers are loaded per block (5 loads)
+			 * instead of being live across the loop: that spilled
+			 * and rematerialized ~60 instructions per block.
+			 */
+			const uint8_t *tp = ttab, *gp = gtab, *cp = cltab;
+			uint8x16_t hv[4];
 
-			id[k] = vtstq_u8(c, mid);
-			ws[k] = vtstq_u8(c, mws);
-			nl[k] = vtstq_u8(c, mnl);
-			dg[k] = vtstq_u8(c, mdg);
-			dt[k] = vceqq_u8(v.val[k], dot);
-			pp[k] = vtstq_u8(t, b16);
-			pr[k] = vorrq_u8(vtstq_u8(tg, pairb), vandq_u8(vtstq_u8(t, b1), vceqq_u8(v.val[k], vn)));
-			xx[k] = vorrq_u8(vorrq_u8(vtstq_u8(t, b32), vtstq_u8(tg, cmtb)),
-					 vreinterpretq_u8_s8(vshrq_n_s8(vreinterpretq_s8_u8(v.val[k]), 7)));
-			{
-				const uint8x16_t lc = vorrq_u8(v.val[k], vdupq_n_u8(0x20));
+			__asm__("" : "+r"(tp), "+r"(gp), "+r"(cp));
+			for (int k = 0; k < 4; k++)
+				hv[k] = vsubq_u8(v.val[k], k64);	/* 64..127 -> 0..63 */
+			const uint8x16x4_t t0 = vld1q_u8_x4(tp), t1 = vld1q_u8_x4(tp + 64);
 
-				es[k] = vandq_u8(vorrq_u8(vceqq_u8(lc, vdupq_n_u8('e')), vceqq_u8(lc, vdupq_n_u8('p'))),
-						 vorrq_u8(vceqq_u8(vn, vdupq_n_u8('+')), vceqq_u8(vn, vdupq_n_u8('-'))));
-			}
+			for (int k = 0; k < 4; k++)
+				t[k] = vqtbx4q_u8(vqtbl4q_u8(t0, v.val[k]), t1, hv[k]);
+			const uint8x16x4_t c0 = vld1q_u8_x4(cp), c1 = vld1q_u8_x4(cp + 64);
+
+			for (int k = 0; k < 4; k++)
+				c[k] = vqtbx4q_u8(vqtbl4q_u8(c0, v.val[k]), c1, hv[k]);
+			const uint8x16x4_t g = vld1q_u8_x4(gp);
+
+			for (int k = 0; k < 4; k++)
+				gn[k] = vqtbl4q_u8(g, vn[k]), tg[k] = vandq_u8(t[k], gn[k]);
 		}
-#define MM(a) mm4(a[0], a[1], a[2], a[3])
-		m[M_ID][b] = MM(id);
-		m[M_WS][b] = MM(ws);
-		m[M_NL][b] = MM(nl);
-		m[M_DOT][b] = MM(dt);
-		m[M_DIG][b] = MM(dg);
-		m[M_P][b] = MM(pp);
-		m[M_PAIR][b] = MM(pr);
-		m[M_X][b] = MM(xx);
-		m[M_ES][b] = MM(es);
-#undef MM
+#define MASK(j, expr) do {						\
+		for (int k = 0; k < 4; k++)					\
+			r[k] = (expr);						\
+		m[j][b] = mm4(r[0], r[1], r[2], r[3]);				\
+	} while (0)
+		MASK(M_P, vtstq_u8(t[k], b16));
+		/* bit 7: a pair by the tables, or a doubling character doubled (ttab bit 0 shifted up) */
+		MASK(M_PAIR, vorrq_u8(vtstq_u8(tg[k], pairb), vshlq_n_u8(vandq_u8(t[k], vceqq_u8(v.val[k], vn[k])), 7)));
+		/* bit 7: handler, non-ASCII, comment or digraph */
+		MASK(M_X, vorrq_u8(vorrq_u8(t[k], v.val[k]), vshlq_n_u8(tg[k], 1)));
+		MASK(M_ID, vtstq_u8(c[k], mid));
+		MASK(M_WS, vtstq_u8(c[k], mws));
+		MASK(M_NL, c[k]);
+		MASK(M_DIG, vtstq_u8(c[k], mdg));
+		MASK(M_NS, gn[k]);
+#undef MASK
 	}
 }
 
@@ -201,14 +211,15 @@ static inline uint64_t nibmask(uint8x16_t eq)
 	return vget_lane_u64(vreinterpret_u64_u8(vshrn_n_u16(vreinterpretq_u16_u8(eq), 4)), 0);
 }
 
-/* first position >= p holding '*' or NUL */
-static inline size_t find_star(const char *s, size_t p)
+/* first position >= p holding '*' before '/', a backslash or NUL */
+static inline size_t find_cend(const char *s, size_t p)
 {
-	const uint8x16_t star = vdupq_n_u8('*');
+	const uint8x16_t star = vdupq_n_u8('*'), sl = vdupq_n_u8('/'), bs = vdupq_n_u8('\\');
 
 	for (;; p += 16) {
-		uint8x16_t v = vld1q_u8((const uint8_t *)s + p);
-		uint64_t m = nibmask(vorrq_u8(vceqq_u8(v, star), vceqzq_u8(v)));
+		uint8x16_t v = vld1q_u8((const uint8_t *)s + p), w = vld1q_u8((const uint8_t *)s + p + 1);
+		uint64_t m = nibmask(vorrq_u8(vandq_u8(vceqq_u8(v, star), vceqq_u8(w, sl)),
+					      vorrq_u8(vceqq_u8(v, bs), vceqzq_u8(v))));
 
 		if (m)
 			return p + (__builtin_ctzll(m) >> 2);
@@ -341,6 +352,18 @@ static void init_tables(void)
 	for (int c = 0; c < 256; c++)
 		for (int d = 0; d < 256; d++)
 			ktab[c | d << 8] = (uint8_t)(ptab[pidx[c]][d] & 0xff);
+	/*
+	 * The structural loop takes every token's kind from ktab: a token
+	 * starting with an identifier character is an identifier or (digit) a
+	 * number, and ".5" a number (".." always goes to the handlers).
+	 */
+	for (int c = 0; c < 256; c++)
+		for (int d = 0; d < 256; d++) {
+			if (isid[c])
+				ktab[c | d << 8] = c >= '0' && c <= '9' ? T_NUMBER : T_IDENT;
+			if (c == '.' && d >= '0' && d <= '9')
+				ktab[c | d << 8] = T_NUMBER;
+		}
 }
 
 /* length of the line splice ("\\", horizontal space, newline) at p, or 0 */
@@ -610,13 +633,17 @@ size_t vlex_scratch_size(size_t size)
 _Thread_local int vlex_no_intern;
 static pthread_once_t tables_once = PTHREAD_ONCE_INIT;
 
-/* 64 mask bits starting at position p (m[(p >> 6) + 1] must exist) */
+/*
+ * Mask bits from position p: one unaligned load at byte p / 8, so only the
+ * low 64 - p % 8 bits are valid, the rest are zero (m[(p >> 6) + 1] must
+ * exist).
+ */
 static inline uint64_t win(const uint64_t *m, size_t p)
 {
-	size_t w = p >> 6;
-	unsigned b = p & 63;
+	uint64_t x;
 
-	return (m[w] >> b) | ((m[w + 1] << 1) << (63 - b));
+	memcpy(&x, (const char *)m + (p >> 3), 8);
+	return x >> (p & 7);
 }
 
 /*
@@ -698,6 +725,20 @@ static __attribute__((noinline)) uint32_t intern_dirty(const char *s, size_t st,
 }
 
 /*
+ * intern the identifiers il[0..ni): their token addresses truncated to 32
+ * bits, taken relative to out (a loop of its own: registers)
+ */
+static __attribute__((noinline)) void intern_list(vintern_cache *ic, const char *s, vtok *out,
+						  const uint32_t *il, uint32_t ni)
+{
+	for (uint32_t i = 0; i < ni; i++) {
+		vtok *k = (vtok *)((char *)out + (uint32_t)(il[i] - (uint32_t)(uintptr_t)out));
+
+		k->id = vintern_fast(ic, s + k->off, k->len);
+	}
+}
+
+/*
  * Classify blocks [from, to) clamped to the file's nblk blocks; the block
  * holding the end gets nothing but X past it.  Returns the new end.
  */
@@ -775,7 +816,7 @@ __attribute__((destructor)) static void stat_dump(void)
 	else if (fl & TF_DIRTY)						\
 		i_ = intern_dirty(s, st, p);				\
 	else if (gap == st)						\
-		il[ni++] = (uint32_t)(t - out);				\
+		il[ni++] = (uint32_t)(uintptr_t)t;			\
 	else								\
 		i_ = vintern_fast(ic, s + st, p - st);			\
 	t->off = (uint32_t)gap;						\
@@ -874,99 +915,122 @@ uint32_t vlex(const char *s, size_t n, vtok *out, void *scratch)
 	 * take over for a token and come back here.
 	 */
 fast:
+#ifdef VLEX_SCALAR
+	DISPATCH();	/* reference build (fuzz/lexref.c): every token by its handler */
+#endif
 	if (unlikely(gap != p))
 		DISPATCH();	/* a token directly after a splice */
 	ENSURE((p >> 6) + 1);
 	{
-		const uint64_t I = win(m[M_ID], p), W = win(m[M_WS], p), NL = win(m[M_NL], p);
-		const uint64_t DOT = win(m[M_DOT], p), D = win(m[M_DIG], p), P = win(m[M_P], p);
+		/* N: [A-Za-z0-9_$.], P: punctuator characters and '.' */
+		const uint64_t N = win(m[M_ID], p), W = win(m[M_WS], p), NL = win(m[M_NL], p);
+		const uint64_t D = win(m[M_DIG], p), P = win(m[M_P], p), DOT = N & P;
 		const uint64_t PR = win(m[M_PAIR], p);
-		uint64_t X = win(m[M_X], p);
+		/* the bits past the valid ones are an X: the window is 57..64 bytes */
+		const unsigned valid = 64 - (unsigned)(p & 7);
+		uint64_t X = win(m[M_X], p) | ~(~0ull >> (p & 7));
 		/* pp-numbers: from a digit starting a run of [A-Za-z0-9_$.], or
 		 * from a '.' before a digit, to the end of that run */
-		const uint64_t N = I | DOT, A = (D & ~(N << 1)) | (DOT & (D >> 1));
+		const uint64_t A = (D & ~(N << 1)) | (DOT & (D >> 1));
 		const uint64_t NUM = (N & ~(N + A)) | A;
-		const uint64_t IDp = I & ~NUM, DOTp = DOT & ~NUM;
-		const uint64_t ELL = DOTp & (DOTp >> 1) & (DOTp >> 2);
-		/* left to the handlers: "..5", "....", overlapping pairs (<<=) */
-		const uint64_t DD = DOT & (D >> 1) & (DOT << 1);	/* ...5: from the first dot */
-		const uint64_t ES = win(m[M_ES], p);
+		const uint64_t IDp = N & ~(NUM | P);
+		const uint64_t NS = win(m[M_NS], p);
 
-		/* and 1e+5: the sign belongs to the number */
-		X |= DD | (DD >> 1) | (DD >> 2) | (ELL & ((ELL >> 1) | (ELL >> 2))) | (PR & (PR >> 1)) |
-		     (ES & NUM);
-		X |= (X >> 2) & DOT & (DOT >> 1);	/* "..\<newline>." */
-		/* ".." in the last two bits: a third dot would be past the window */
-		X |= DOT & (DOT >> 1) & (1ull << 62);
+		/*
+		 * Left to the handlers (besides the X of classify(), which has
+		 * every ".." with ellipses, "..5" and "..\<newline>."):
+		 * overlapping pairs (<<=, ->=) and a number before + or -: in
+		 * 1e+5 the sign belongs to it (numbers before a sign are rare).
+		 */
+		X |= (PR & (PR >> 1)) | (NS & NUM);
 
 		const uint64_t IDs = IDp & ~(IDp << 1), NUMs = NUM & ~(NUM << 1);
-		const uint64_t S = IDs | NUMs | ((P | DOTp) & ~((PR << 1) | (ELL << 1) | (ELL << 2)));
+		const uint64_t S = IDs | NUMs | (P & ~NUM & ~(PR << 1));
 		const uint64_t B = S | W | X;
 		/* whitespace runs that contain a newline, filled to their end */
 		const uint64_t NLF = (W & ~(W + NL)) | NL;
 		const uint64_t SP = W << 1, SOL = NLF << 1;
-		const unsigned lim = X ? (unsigned)__builtin_ctzll(X) : 64;
-		uint64_t todo = S;
-		unsigned last = 0, sflags = 0, pend = fl;
-		bool any = false;
+		const unsigned lim = X ? (unsigned)__builtin_ctzll(X) : 64;	/* <= valid */
+		const uint8_t *kt = ktab;
 
-		while (todo) {
-			const unsigned o = (unsigned)__builtin_ctzll(todo);
-			const unsigned e = o + 1 + (unsigned)__builtin_ctzll(((B >> o) >> 1) | 1ull << 63);
+		__asm__("" : "+r"(kt));	/* in a register, not rematerialized per token */
+		/*
+		 * The token starts S and the token ends: boundaries after a
+		 * non-blank byte.  Below lim they pair up.  Both bit-reversed,
+		 * so that clz finds the next one (M1 has no ctz).
+		 */
+		uint64_t rs = __builtin_bitreverse64(S);
+		uint64_t re = __builtin_bitreverse64(B & ~((W << 1) | 1));
+		unsigned pend = fl;
+		vtok *const t0 = t;
+
+		/*
+		 * No test of rs: when the starts run out, the next end is at
+		 * or past lim (64 if there is none).
+		 */
+		for (;;) {
+			const unsigned e = (unsigned)__builtin_clzg(re, 64);
+
+			if (e >= lim)
+				break;	/* reaches X or past the window */
+
+			const unsigned o = (unsigned)__builtin_clzll(rs);
 			const size_t at = p + o;
-			const unsigned isI = (IDs >> o) & 1, isN = (NUMs >> o) & 1, isE = (ELL >> o) & 1;
 			const unsigned f = ((SP >> o) & 1) * TF_SPACE | ((SOL >> o) & 1) * TF_SOL;
 			uint16_t c01;
 
-			sflags = f;
-			if (e >= lim)
-				break;	/* reaches X or past the window */
 			memcpy(&c01, s + at, 2);
-			/*
-			 * Kind without branches (the compiler would branch on a
-			 * ?: chain): a ktab lookup that is index 0 unless this is
-			 * a punctuator, then masked overrides.
-			 */
-			unsigned kind = ktab[c01 & -(uint32_t)(1 ^ (isI | isN))];
-
-			kind ^= (kind ^ T_ELLIPSIS) & -isE;
-			kind ^= (kind ^ T_NUMBER) & -isN;
-			kind ^= (kind ^ T_IDENT) & -isI;
+			/* kind without branches: ktab knows identifiers and numbers too */
+			const unsigned kind = kt[c01];
 			t->off = (uint32_t)at;
 			t->len = e - o;
 			t->id = 0;
 			t->kind = (uint8_t)kind;
 			t->flags = (uint8_t)(f | pend);
 			pend = 0;
-			il[ni] = (uint32_t)(t - out);
-			ni += isI;
+			/* see intern_list(); the asm keeps the compiler from a second induction variable */
+			__asm__("" : "+r"(t));
+			il[ni] = (uint32_t)(uintptr_t)t;
+			ni += kind == T_IDENT;
 			t++;
-			last = e;
-			any = true;
-			todo &= todo - 1;
+			rs ^= (1ull << 63) >> o;
+			re ^= (1ull << 63) >> e;
 		}
 		fl = pend;
-		if (likely(any)) {
+		if (likely(t != t0)) {
+			/* the end of the last token */
+			const unsigned last = (unsigned)(t[-1].off + t[-1].len - p);
+
+			/*
+			 * Only whitespace up to the X: take it and go to the
+			 * handler, instead of a window that finds just that.
+			 */
+			if (lim < valid && !(~W & (~0ull << last) & ~(~0ull << lim))) {
+				if (lim > last)
+					fl |= TF_SPACE | (NL & (~0ull << last) & ~(~0ull << lim) ? TF_SOL : 0);
+				p = gap = p + lim;
+				DISPATCH();
+			}
 			p = gap = p + last;
 			goto fast;
 		}
-		if (todo && (unsigned)__builtin_ctzll(todo) < lim) {
+		if (S && (unsigned)__builtin_ctzll(S) < lim) {
 			/* the first token needs a handler (or is longer than the window) */
-			const unsigned o = (unsigned)__builtin_ctzll(todo);
+			const unsigned o = (unsigned)__builtin_ctzll(S);
 
-			fl |= sflags;
+			fl |= ((SP >> o) & 1) * TF_SPACE | ((SOL >> o) & 1) * TF_SOL;
 			p = gap = p + o;
 			DISPATCH();
 		}
 		/* whitespace, then an X or the next window */
 		{
-			const unsigned o = ~W ? (unsigned)__builtin_ctzll(~W) : 64;
+			const unsigned o = ~W ? (unsigned)__builtin_ctzll(~W) : 64;	/* <= valid */
 
 			if (o) {
 				fl |= TF_SPACE | (NL & (o == 64 ? ~0ull : (1ull << o) - 1) ? TF_SOL : 0);
 				p = gap = p + o;
 			}
-			if (o == 64)
+			if (o >= valid)
 				goto fast;
 			DISPATCH();
 		}
@@ -1143,18 +1207,20 @@ l_percent:
 l_slash:
 	a = nx(s, p);
 	if (s[a] == '*') {
-		/* block comment */
+		/* block comment: stops at its end, at backslashes (a splice in the end?) and at NULs */
 		for (q = a + 1;; q++) {
-			q = find_star(s, q);
+			q = find_cend(s, q);
 			if (q >= n) {
 				/* unterminated: an error token */
 				p = n;
 				EMIT(T_UNKNOWN);
 			}
-			if (s[q] != '*')
-				continue;	/* embedded NUL */
-			b = nx(s, q);
-			if (s[b] == '/') {
+			if (s[q] == '*') {
+				q += 2;
+				break;
+			}
+			if (s[q] == '\\' && q - 1 > a && s[q - 1] == '*' &&
+			    s[b = skip_splices(s, q)] == '/' && b != q) {
 				q = b + 1;
 				break;
 			}
@@ -1203,11 +1269,7 @@ done:
 	/* intern the clean identifiers: no unpredictable branches left here */
 	STAT_T0();
 	if (!vlex_no_intern)
-		for (uint32_t i = 0; i < ni; i++) {
-			vtok *k = &out[il[i]];
-
-			k->id = vintern_fast(ic, s + k->off, k->len);
-		}
+		intern_list(ic, s, out, il, ni);
 	STAT_T1(320);
 	return (uint32_t)(t - out);
 }
@@ -1417,10 +1479,16 @@ static void publish(centry *e, bool ok)
 	atomic_store_explicit(&e->state, ok ? CE_OK : CE_MISSING, memory_order_release);
 }
 
+const vlex_file *(*vlex_get_hook)(const char *path, size_t len);
+
 const vlex_file *vlex_get(const char *path, size_t len)
 {
 	bool ins;
-	centry *e = centry_get(path, len, CE_LOADING, &ins);
+	centry *e;
+
+	if (unlikely(vlex_get_hook != NULL))
+		return vlex_get_hook(path, len);
+	e = centry_get(path, len, CE_LOADING, &ins);
 
 	if (ins) {
 		bool ok = load(&e->f, e->path);

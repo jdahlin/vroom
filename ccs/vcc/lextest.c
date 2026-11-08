@@ -29,6 +29,7 @@
 #include "intern.h"
 #include "lex.h"
 #include "pmc.h"
+#include "vperf.h"
 
 static double now(clockid_t c)
 {
@@ -57,9 +58,10 @@ static void stringify(const char *s, size_t n)
 	}
 }
 
-static int dump(const char *path)
+static int dump(const char *arg)
 {
-	const vlex_file *f = vlex_get(path, strlen(path));
+	char path[4096] = { 0 };	/* padded: vlex_get reads path[len + 7] */
+	const vlex_file *f = strlen(arg) < sizeof(path) - 8 ? vlex_get(strcpy(path, arg), strlen(arg)) : NULL;
 	size_t line = 1, bol = 0, pos = 0;
 	char *buf;
 
@@ -120,7 +122,8 @@ static void read_list(const char *list)
 			plen = realloc(plen, cap * sizeof(*plen));
 		}
 		plen[npaths] = n;
-		paths[npaths++] = strdup(line);
+		paths[npaths] = calloc(1, n + 8);	/* vlex_get hashes by words: path[n + 7] */
+		memcpy(paths[npaths++], line, n);
 	}
 	fclose(fp);
 }
@@ -200,16 +203,22 @@ static int core(const char *list, int reps)
 	vlex_no_intern = getenv("NOINTERN") ? atoi(getenv("NOINTERN")) : 0;
 	int pmc = getenv("PMC") && !pmc_init(getenv("PMC"));
 	uint64_t c0[PMC_N], c1[PMC_N], cb[PMC_N] = { 0 };
+	vperf vbest = { ~0ull, ~0ull }, v0;
+	uint64_t h = 1469598103934665603ull;
 
 	for (int r = 0; r < reps; r++) {
 		toks = 0;
 		if (pmc)
 			pmc_read(c0);
+		v0 = vperf_now();
 		t0 = now(CLOCK_THREAD_CPUTIME_ID);
 		for (size_t i = 0; i < npaths; i++)
 			if (src[i])
 				toks += vlex(src[i], sz[i], out, scratch);
 		t0 = now(CLOCK_THREAD_CPUTIME_ID) - t0;
+		v0 = vperf_sub(vperf_now(), v0);
+		vbest.ins = v0.ins < vbest.ins ? v0.ins : vbest.ins;
+		vbest.cyc = v0.cyc < vbest.cyc ? v0.cyc : vbest.cyc;
 		if (pmc)
 			pmc_read(c1);
 		if (t0 < best) {
@@ -218,8 +227,19 @@ static int core(const char *list, int reps)
 				cb[j] = c1[j] - c0[j];
 		}
 	}
+	/* untimed: a hash of every token record (bench/vbench.py's correctness check) */
+	for (size_t i = 0; i < npaths; i++)
+		if (src[i]) {
+			size_t n = vlex(src[i], sz[i], out, scratch);
+			const unsigned char *q = (const unsigned char *)out;
+
+			for (size_t k = 0; k < n * sizeof(vtok); k++)
+				h = (h ^ q[k]) * 1099511628211ull;
+		}
 	printf("%.1f MB, %.2f M tokens: best of %d %.1f ms = %.2f GB/s, %.1f ns/token\n",
 	       bytes / 1e6, toks / 1e6, reps, best * 1e3, bytes / best / 1e9, best * 1e9 / toks);
+	printf("perf: %llu instructions, %llu cycles (min of %d passes)\nhash: %016llx\n", (unsigned long long)vbest.ins,
+	       (unsigned long long)vbest.cyc, reps, (unsigned long long)h);
 	if (pmc)
 		for (int j = 0; j < pmc_n; j++)
 			printf("  %-28s %14llu  %8.3f /token  %8.4f /byte\n", pmc_names[j],

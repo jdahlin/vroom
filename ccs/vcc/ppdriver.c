@@ -19,6 +19,7 @@
 #include <errno.h>
 #include <fcntl.h>
 #include <setjmp.h>
+#include <stdatomic.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -34,30 +35,46 @@
 #include "as.h"
 #include "elf.h"
 #include "ppdata-predef.inc"
+#include "arena.h"
 
 typedef struct buf {
 	char *p;
 	size_t n, cap;
+	vmreg *r;	/* the first 16 MB come from this per-thread region (bfree puts it back) */
 } buf;
+
+#define BUF_REG (1u << 24)
+static vmpool bufpool = VMPOOL_INIT(4);
+static _Thread_local vmreg *bufr;	/* this job's (ppd_run) */
 
 static void bput(buf *b, const char *s, size_t n)
 {
 	if (b->n + n + 256 > b->cap) {
-		size_t nc = b->cap ? b->cap * 2 : 1u << 24;
+		size_t nc = b->cap ? b->cap * 2 : BUF_REG;
 		char *np;
 
 		while (nc < b->n + n + 256)
 			nc *= 2;
+		if (!b->cap && b->r && nc == BUF_REG) {
+			b->p = vmreg_get(b->r, BUF_REG, "ppdriver.buf");
+			b->cap = BUF_REG;
+			goto put;
+		}
 		np = mmap(NULL, nc, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANON, -1, 0);
 		if (np == MAP_FAILED)
 			abort();
 		if (b->p) {
 			memcpy(np, b->p, b->n);
-			munmap(b->p, b->cap);
+			if (b->r)
+				vmreg_put(b->r, b->n);
+			else
+				munmap(b->p, b->cap);
 		}
+		b->r = NULL;
 		b->p = np;
 		b->cap = nc;
 	}
+put:
 	memcpy(b->p + b->n, s, n);
 	b->n += n;
 }
@@ -210,7 +227,9 @@ static int cmp_toks(const vlex_file *pa, const vlex_file *pb, char *ba, char *bb
 
 static void bfree(buf *b)
 {
-	if (b->p)
+	if (b->p && b->r)
+		vmreg_put(b->r, b->n + 256);
+	else if (b->p)
 		munmap(b->p, b->cap);
 	b->p = NULL;
 	b->n = b->cap = 0;
@@ -268,7 +287,7 @@ static int write_deps(const pp *p, const char *cwd, const char *depfile, const c
 {
 	static _Thread_local const char *names[1 << 16];
 	size_t n = pp_files(p, names, sizeof(names) / sizeof(names[0]));
-	buf d = { 0 };
+	buf d = { .r = &bufr[3] };
 	int r;
 
 	bstr(&d, target);
@@ -289,6 +308,7 @@ static int write_deps(const pp *p, const char *cwd, const char *depfile, const c
 
 /* phase times over all -c jobs (ns): front end + codegen, assembler, finish + write */
 _Atomic unsigned long long ppd_ns_cc, ppd_ns_emit, ppd_ns_obj, ppd_bytes_obj;
+_Thread_local vperf ppd_ph[PPD_NPH];
 
 static unsigned long long nsnow(void)
 {
@@ -298,27 +318,61 @@ static unsigned long long nsnow(void)
 	return (unsigned long long)ts.tv_sec * 1000000000ull + (unsigned long long)ts.tv_nsec;
 }
 
-/* per-thread object state: assembler, ELF writer, serialised output */
+/*
+ * a job's object state: assembler, ELF writer, serialised output; from a
+ * process-wide pool, so it outlives threads (vpp --batch starts some per pass)
+ */
 static _Thread_local As *tl_as;
 static _Thread_local ElfObj *tl_obj;
 static _Thread_local uint8_t *tl_objbuf;
 #define OBJBUF_CAP ((size_t)1 << 32)
 
+static struct objst { As *as; ElfObj *obj; uint8_t *buf; struct objst *next; } *obj_free;
+static _Thread_local struct objst *tl_os;
+static pthread_mutex_t obj_mu = PTHREAD_MUTEX_INITIALIZER;
+
 static void obj_state(void)
 {
-	if (tl_as)
+	struct objst *s;
+
+	if (tl_os)
 		return;
-	tl_as = as_new();
-	tl_obj = elf_new();
-	tl_objbuf = mmap(NULL, OBJBUF_CAP, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANON | MAP_NORESERVE, -1, 0);
-	if (tl_objbuf == MAP_FAILED)
-		abort();
+	pthread_mutex_lock(&obj_mu);
+	s = obj_free;
+	if (s)
+		obj_free = s->next;
+	pthread_mutex_unlock(&obj_mu);
+	if (!s) {
+		s = calloc(1, sizeof(*s));
+		s->as = as_new();
+		s->obj = elf_new();
+		s->buf = mmap(NULL, OBJBUF_CAP, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANON | MAP_NORESERVE, -1, 0);
+		if (s->buf == MAP_FAILED)
+			abort();
+	}
+	tl_os = s;
+	tl_as = s->as, tl_obj = s->obj, tl_objbuf = s->buf;
+}
+
+static void obj_release(void)
+{
+	struct objst *s = tl_os;
+
+	if (!s)
+		return;
+	tl_os = NULL;
+	tl_as = NULL, tl_obj = NULL, tl_objbuf = NULL;
+	pthread_mutex_lock(&obj_mu);
+	s->next = obj_free;
+	obj_free = s;
+	pthread_mutex_unlock(&obj_mu);
 }
 
 /* lay out tl_obj and write it to out */
 static int write_obj(const char *cwd, const char *out, int outfd, int errfd, int macho)
 {
 	unsigned long long t0 = nsnow();
+	vperf v0 = vperf_now();
 	size_t n = macho ? macho_finish(tl_obj) : elf_finish(tl_obj);
 	int r;
 
@@ -336,6 +390,7 @@ static int write_obj(const char *cwd, const char *out, int outfd, int errfd, int
 		elf_emit(tl_obj, tl_objbuf);
 	r = write_out(cwd, out, outfd, (const char *)tl_objbuf, n, errfd);
 	ppd_ns_obj += nsnow() - t0;
+	ppd_ph_add(PPD_PH_OBJ, v0);
 	ppd_bytes_obj += n;
 	return r;
 }
@@ -359,15 +414,16 @@ int ppd_run(int argc, char **argv, const ppd_env *env)
 	const char **wargs = NULL;
 	char pmapbuf[4096];
 	jmp_buf jb;
-	buf pre = { 0 }, cmdl = { 0 }, incl = { 0 }, o = { 0 };
+	vmreg *br = bufr = vmpool_take(&bufpool);
+	buf pre = { .r = &br[0] }, cmdl = { .r = &br[1] }, incl = { .r = &br[2] }, o = { 0 };
 	/* no --target: the host's own userland (Darwin on a Mac, glibc aarch64 on Linux) */
 #ifdef __APPLE__
 	int darwin = 1;
 #else
 	int darwin = 0;
 #endif
-	int hosted = 1, gro = 0, nostdinc = 0, asm_mode = 0, undef = 0;
-	int opt = 2, os = 0, pie = -1, pic = 0, freestanding = 0, nobuiltin = 0, instr = 0, cfi = -1, strict_align = 0, tiny = 0;
+	int hosted = 1, nostdinc = 0, asm_mode = 0, undef = 0;
+	int opt = 2, os = 0, pie = -1, pic = 0, freestanding = 0, nobuiltin = 0, instr = 0, cfi = -1, strict_align = 0, tiny = 0, gregs = 0;
 	pp_opts po = { 0 };
 	char *pmap = NULL;
 	double t0;
@@ -448,7 +504,6 @@ int ppd_run(int argc, char **argv, const ppd_env *env)
 			continue;
 		}
 		if (!strncmp(a, "--target=", 9) || !strcmp(a, "-target")) { darwin = strstr(a, "darwin") || strstr(a, "apple"); hosted = 0; }
-		else if (!strcmp(a, "-mgeneral-regs-only")) gro = 1;
 		else if (!strcmp(a, "-nostdinc")) nostdinc = 1;
 		else if (!strcmp(a, "-undef")) undef = 1;
 		else if (!strcmp(a, "-x") && i + 1 < argc) asm_mode = !strcmp(argv[++i], "assembler-with-cpp");
@@ -466,6 +521,7 @@ int ppd_run(int argc, char **argv, const ppd_env *env)
 		else if (!strcmp(a, "-fasynchronous-unwind-tables")) cfi = 1;
 		else if (!strcmp(a, "-fno-asynchronous-unwind-tables")) cfi = 0;
 		else if (!strcmp(a, "-mstrict-align")) strict_align = 1;
+		else if (!strcmp(a, "-mgeneral-regs-only")) gregs = 1;
 		else if (!strcmp(a, "-mcmodel=tiny")) tiny = 1;
 		else if (a[0] != '-' && (strstr(a, ".c") || strstr(a, ".S") || strstr(a, ".dts"))) {
 			size_t l = strlen(a);
@@ -478,7 +534,8 @@ int ppd_run(int argc, char **argv, const ppd_env *env)
 	(void)md;
 	if (!main_file) {
 		dprintf(errfd, "vcc: error: no input file\n");
-		return 2;
+		status = 2;
+		goto out;
 	}
 	if (objmode) {
 		obj_state();
@@ -587,7 +644,7 @@ int ppd_run(int argc, char **argv, const ppd_env *env)
 			   "#undef __clang_wide_literal_encoding__\n#define __clang_wide_literal_encoding__ \"UTF-32\"\n");
 	if (cfi) bstr(&pre, "#define __GCC_HAVE_DWARF2_CFI_ASM 1\n");
 	/* the Linux table is for the kernel's -mgeneral-regs-only */
-	if (!darwin && !gro && !undef)
+	if (!darwin && !gregs && !undef)
 		bstr(&pre, "#define __ARM_FP 0xE\n#define __ARM_NEON 1\n#define __ARM_NEON_FP 0xE\n");
 	if (strict_align) bstr(&pre, "#undef __ARM_FEATURE_UNALIGNED\n");
 	if (tiny) bstr(&pre, "#undef __AARCH64_CMODEL_SMALL__\n#define __AARCH64_CMODEL_TINY__ 1\n");
@@ -668,6 +725,7 @@ int ppd_run(int argc, char **argv, const ppd_env *env)
 		cc_opts co = { .target = po.target, .unsigned_char = po.unsigned_char, .dump_layouts = layout, .ms_anon = ms_anon, .short_wchar = short_wchar,
 				.std = std, .implicit_int = std == 89 || wimpl_int, .implicit_fn = std == 89 || wimpl_fn,
 				.gnu89_inline = gnu89_inline, .no_builtin = freestanding || nobuiltin, .instrument = instr,
+				.general_regs_only = gregs,
 			       .outfd = env->outfd };
 		int fd = -1;
 
@@ -692,9 +750,11 @@ int ppd_run(int argc, char **argv, const ppd_env *env)
 		}
 		{
 			unsigned long long t1 = nsnow();
+			vperf v1 = vperf_now();
 
 			status = cc_run(p, &co) || pp_errors(p) ? 1 : 0;
 			ppd_ns_cc += nsnow() - t1;
+			ppd_ph_add(PPD_PH_CC, v1);
 		}
 		if (fd >= 0)
 			close(fd);
@@ -715,10 +775,11 @@ int ppd_run(int argc, char **argv, const ppd_env *env)
 		o.n = l;
 	}
 	if (getenv("VPP_TIME")) {
-		extern unsigned long pp_stat_try, pp_stat_skip, vdir_probes;
+		extern _Atomic unsigned long pp_stat_try, pp_stat_skip, vdir_probes;
 
 		dprintf(errfd, "vpp: %.1f ms, %zu bytes out; include candidates %lu, %lu ruled out by the directory cache (%lu dirs probed)\n",
-			(now() - t0) * 1e3, o.n, pp_stat_try, pp_stat_skip, vdir_probes);
+			(now() - t0) * 1e3, o.n, atomic_load(&pp_stat_try), atomic_load(&pp_stat_skip),
+			atomic_load(&vdir_probes));
 	}
 	if (pp_errors(p)) {
 		status = 1;
@@ -748,5 +809,8 @@ out:
 	bfree(&pre);
 	bfree(&cmdl);
 	bfree(&incl);
+	vmpool_give(&bufpool, br);
+	bufr = NULL;
+	obj_release();
 	return status;
 }

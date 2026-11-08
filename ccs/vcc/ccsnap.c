@@ -22,6 +22,7 @@
  *
  * VCC_NODC=1 turns it off; VCC_DC_MAX_MB caps the memory (default 256).
  */
+#include <pthread.h>
 #include <stdatomic.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -35,7 +36,7 @@
 #define LOC_REL (1u << 31)	/* encoded locations: LOC_REL + (loc - base) */
 
 enum { A_TY, A_PARAMS, A_TAGS, A_SYMS, A_NODES, A_LISTS, A_IPOOL, A_FPOOL, A_STRS, A_LABELS, A_ATTR, A_ASMS,
-       A_SSTACK, A_TOPLEVEL, A_TLASM, A_HEAP, A_N };
+       A_SSTACK, A_TOPLEVEL, A_TLASM, A_SPAN, A_HEAP, A_N };
 
 typedef struct dcarr {
 	size_t n;		/* bytes */
@@ -66,7 +67,7 @@ static struct dcroot {
 
 static _Atomic uint64_t dc_mem, dc_max;
 static _Atomic unsigned long st_snap, st_restore, st_regions;
-static int dc_off = -1;
+static int dc_off;
 static _Atomic uint64_t tok_skip;
 
 
@@ -90,6 +91,7 @@ static char *abase(const cc *c, int k, size_t *n)
 	case A_SSTACK: *n = c->nsstack * sizeof(uint32_t); return (char *)c->sstack;
 	case A_TOPLEVEL: *n = c->ntoplevel * sizeof(uint32_t); return (char *)c->toplevel;
 	case A_TLASM: *n = c->ntlasm * sizeof(uint32_t); return (char *)c->tlasm;
+	case A_SPAN: *n = c->nnode * sizeof(pp_span); return (char *)c->span;
 	default: *n = (size_t)(c->hp - c->heap); return c->heap;
 	}
 }
@@ -141,10 +143,17 @@ static inline uint32_t dec_loc(const coder *k, uint32_t l)
 		node *nd_ = (node *)(img)[A_NODES];                                              \
 		tag *tg_ = (tag *)(img)[A_TAGS];                                                 \
 		label *lb_ = (label *)(img)[A_LABELS];                                           \
-		for (uint32_t i_ = 0; i_ < (c)->nsym; i_++)                                      \
+		pp_span *sp_ = (pp_span *)(img)[A_SPAN];                                         \
+		for (uint32_t i_ = 0; i_ < (c)->nsym; i_++) {                                    \
 			sy_[i_].loc = FIX(sy_[i_].loc);                                          \
-		for (uint32_t i_ = 0; i_ < (c)->nnode; i_++)                                     \
+			sy_[i_].plb = FIX(sy_[i_].plb);                                          \
+			sy_[i_].ple = FIX(sy_[i_].ple);                                          \
+		}                                                                                \
+		for (uint32_t i_ = 0; i_ < (c)->nnode; i_++) {                                   \
 			nd_[i_].loc = FIX(nd_[i_].loc);                                          \
+			sp_[i_].b = FIX(sp_[i_].b);                                              \
+			sp_[i_].e = FIX(sp_[i_].e);                                              \
+		}                                                                                \
 		for (uint32_t i_ = 0; i_ < (c)->nlabel; i_++)                                    \
 			lb_[i_].loc = FIX(lb_[i_].loc);                                          \
 		for (uint32_t i_ = 0; i_ < (c)->ntag; i_++) {                                    \
@@ -182,7 +191,7 @@ static void code_cc(coder *k, cc *s, bool enc)
 {
 #define P(x) ((x) = enc ? enc_ptr(k, (x)) : dec_ptr(k, (x)))
 	P(s->tyhash);
-	P(s->fnhash);
+	P(s->fnhash);	/* (dops: the TU keeps its own, see snap_restore) */
 	for (uint32_t i = 0; i < NDIR; i++) {
 		P(s->odir[i]);
 		P(s->tdir[i]);
@@ -327,9 +336,13 @@ static void snap_restore(cc *c, const dcsnap *s, uint32_t base)
 	c->nodes = keep.nodes, c->lists = keep.lists, c->ipool = keep.ipool, c->fpool = keep.fpool;
 	c->strs = keep.strs, c->labels = keep.labels, c->attr = keep.attr, c->asms = keep.asms;
 	c->sstack = keep.sstack, c->toplevel = keep.toplevel, c->tlasm = keep.tlasm;
-	c->heap = keep.heap, c->hend = keep.hend;
+	c->span = keep.span;
+	/* malloc'd and per TU: the snapshot's would be shared (and realloc'ed) by every TU restoring it */
+	c->cases = keep.cases, c->ncase = keep.ncase, c->capcase = keep.capcase, c->case_base = keep.case_base;
+	c->heap = keep.heap, c->hend = keep.hend, c->ptrc = keep.ptrc;
 	c->hp = c->heap + s->a[A_HEAP].n;
 	c->dc = keep.dc;
+	c->dops = keep.dops, c->ndops = keep.ndops;	/* (scratch in this TU's heap) */
 	code_cc(&k, c, false);
 	c->prevloc = dec_loc(&k, s->c.prevloc);
 #define DEC(l) dec_loc(&k, (l))
@@ -388,14 +401,19 @@ static dcnode *child(dcnode *n, const void *e, unsigned ctr, bool make)
 
 /* ---------------- per TU ---------------- */
 
+static void dc_env(void)
+{
+	const char *m = getenv("VCC_DC_MAX_MB");
+
+	atomic_store(&dc_max, (uint64_t)(m ? atoll(m) : 256) << 20);
+	dc_off = getenv("VCC_NODC") != NULL;
+}
+
 void dc_begin(cc *c)
 {
-	if (dc_off < 0) {
-		const char *m = getenv("VCC_DC_MAX_MB");
+	static pthread_once_t once = PTHREAD_ONCE_INIT;
 
-		atomic_store(&dc_max, (uint64_t)(m ? atoll(m) : 256) << 20);
-		dc_off = getenv("VCC_NODC") != NULL;
-	}
+	pthread_once(&once, dc_env);	/* worker threads race to the first TU */
 	c->dc = NULL;
 	if (dc_off)
 		return;
