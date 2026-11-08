@@ -127,6 +127,9 @@ static bool is_void(cc *c, qty t) { return KIND(c, t) == TY_VOID; }
 static bool is_array(cc *c, qty t) { return KIND(c, t) == TY_ARRAY; }
 static bool is_func(cc *c, qty t) { return KIND(c, t) == TY_FUNC; }
 static bool is_record(cc *c, qty t) { int k = KIND(c, t); return k == TY_STRUCT || k == TY_UNION; }
+static bool is_vector(cc *c, qty t) { return KIND(c, t) == TY_VECTOR; }
+/* initialized by a list of elements */
+static bool is_ilagg(cc *c, qty t) { int k = KIND(c, t); return k == TY_STRUCT || k == TY_UNION || k == TY_ARRAY || k == TY_VECTOR; }
 
 static qty canon(cc *c, qty t) { return QT(T(c, t)->canon, QQ(t)); }
 
@@ -310,6 +313,16 @@ static qty ty_func(cc *c, qty ret, const qty *par, uint32_t n, int flags)
 				return QT(e, 0);
 		}
 	}
+}
+
+/* GNU vector of total size bytes with elements elem */
+static qty ty_vector(cc *c, qty elem, uint32_t size)
+{
+	const ctype *e = T(c, elem);
+	ctype t = { .kind = TY_VECTOR, .base = QUNQ(elem), .size = size, .align = size > 16 ? 16 : size };
+
+	t.n = e->size ? (uint32_t)(size / e->size) : 0;
+	return QT(ty_intern(c, &t), 0);
 }
 
 /* aligned typedef variant: same type, other alignment */
@@ -1337,6 +1350,34 @@ static const builtin builtins[] = {
 	{ "__builtin_add_overflow", BI_ADD_OVERFLOW, 0, "b." },
 	{ "__builtin_sub_overflow", BI_SUB_OVERFLOW, 0, "b." },
 	{ "__builtin_mul_overflow", BI_MUL_OVERFLOW, 0, "b." },
+	{ "__builtin_sadd_overflow", BI_ADD_OVERFLOW, 0, "bii." },
+	{ "__builtin_saddl_overflow", BI_ADD_OVERFLOW, 0, "bll." },
+	{ "__builtin_saddll_overflow", BI_ADD_OVERFLOW, 0, "bww." },
+	{ "__builtin_uadd_overflow", BI_ADD_OVERFLOW, 0, "buu." },
+	{ "__builtin_uaddl_overflow", BI_ADD_OVERFLOW, 0, "bLL." },
+	{ "__builtin_uaddll_overflow", BI_ADD_OVERFLOW, 0, "bWW." },
+	{ "__builtin_ssub_overflow", BI_SUB_OVERFLOW, 0, "bii." },
+	{ "__builtin_ssubl_overflow", BI_SUB_OVERFLOW, 0, "bll." },
+	{ "__builtin_ssubll_overflow", BI_SUB_OVERFLOW, 0, "bww." },
+	{ "__builtin_usub_overflow", BI_SUB_OVERFLOW, 0, "buu." },
+	{ "__builtin_usubl_overflow", BI_SUB_OVERFLOW, 0, "bLL." },
+	{ "__builtin_usubll_overflow", BI_SUB_OVERFLOW, 0, "bWW." },
+	{ "__builtin_smul_overflow", BI_MUL_OVERFLOW, 0, "bii." },
+	{ "__builtin_smull_overflow", BI_MUL_OVERFLOW, 0, "bll." },
+	{ "__builtin_smulll_overflow", BI_MUL_OVERFLOW, 0, "bww." },
+	{ "__builtin_umul_overflow", BI_MUL_OVERFLOW, 0, "buu." },
+	{ "__builtin_umull_overflow", BI_MUL_OVERFLOW, 0, "bLL." },
+	{ "__builtin_umulll_overflow", BI_MUL_OVERFLOW, 0, "bWW." },
+	{ "__builtin_addcb", BI_ADDC, 0, "CCCC." },
+	{ "__builtin_addcs", BI_ADDC, 0, "hhhh." },
+	{ "__builtin_addc", BI_ADDC, 0, "uuuu." },
+	{ "__builtin_addcl", BI_ADDC, 0, "LLLL." },
+	{ "__builtin_addcll", BI_ADDC, 0, "WWWW." },
+	{ "__builtin_subcb", BI_SUBC, 0, "CCCC." },
+	{ "__builtin_subcs", BI_SUBC, 0, "hhhh." },
+	{ "__builtin_subc", BI_SUBC, 0, "uuuu." },
+	{ "__builtin_subcl", BI_SUBC, 0, "LLLL." },
+	{ "__builtin_subcll", BI_SUBC, 0, "WWWW." },
 	{ "__builtin_object_size", BI_OBJECT_SIZE, 0, "zPi" },
 	{ "__builtin_dynamic_object_size", BI_DYNAMIC_OBJECT_SIZE, 0, "zPi" },
 	{ "__builtin_counted_by_ref", BI_COUNTED_BY_REF, 0, "p." },
@@ -1707,6 +1748,37 @@ static bool eval(cc *c, uint32_t n, cval *v)
 		case T_EXCLAIM: v->i = a.i == 0; break;
 		}
 		return true;
+	case N_COMPLIT:	/* (T){ v } of scalar type: its value */
+		if (!is_scalar(c, x->ty) || !x->a)
+			return false;
+		if (N(x->a)->op == N_INIT)
+			return false;
+		if (!eval(c, x->a, v))
+			return false;
+		v->ice = false;
+		return true;
+	case N_CALL: {	/* strlen("literal"): clang folds the library builtin */
+		uint32_t f = x->a, s;
+		int l;
+		const char *nm;
+
+		while (N(f)->op == N_CAST || N(f)->op == N_ADDR)
+			f = N(f)->a;
+		if (N(f)->op != N_VAR || x->c != 1 || c->syms[N(f)->a].kind != S_FUNC || c->syms[N(f)->a].sc == SC_STATIC)
+			return false;
+		nm = idname(c->syms[N(f)->a].name, &l);
+		if (l != 6 || memcmp(nm, "strlen", 6))
+			return false;
+		s = c->lists[x->b];
+		while (N(s)->op == N_CAST)
+			s = N(s)->a;
+		if (N(s)->op != N_STR || c->strs[N(s)->a].esz != 1)
+			return false;
+		v->kind = CV_INT;
+		v->ice = false;
+		v->i = (i128)strlen(c->strs[N(s)->a].s);
+		return true;
+	}
 	case N_BINARY: {
 		int op = x->aux;
 		qty lt = N(x->a)->ty, rt;
@@ -1735,6 +1807,17 @@ static bool eval(cc *c, uint32_t n, cval *v)
 				if (a.kind != b.kind || a.sym != b.sym || a.str != b.str || a.label != b.label)
 					return false;
 				v->i = (a.i - b.i) / (i128)elem_size(c, lt);
+				return true;
+			}
+			/* an address cast to a 64-bit integer, plus or minus an integer: a relocation */
+			if ((op == T_PLUS || op == T_MINUS) && ty_size(c, x->ty) == 8 &&
+			    ((a.kind == CV_ADDR && b.kind == CV_INT) || (op == T_PLUS && a.kind == CV_INT && b.kind == CV_ADDR))) {
+				const cval *pv = a.kind == CV_ADDR ? &a : &b, *iv = a.kind == CV_ADDR ? &b : &a;
+				i128 d = op == T_MINUS ? -iv->i : iv->i;
+
+				*v = *pv;
+				v->ice = false;
+				v->i += d;
 				return true;
 			}
 			/* comparison */
@@ -1944,7 +2027,20 @@ static uint32_t label_ref(cc *c, uint32_t name, uint32_t loc);
 
 static uint32_t cast_node(cc *c, uint32_t n, qty to, int kind)
 {
-	uint32_t r = mk(c, N_CAST, to, N(n)->loc);
+	uint32_t r;
+
+	if (kind == CK_F2I) {
+		/* a floating constant to an integer: folded, as clang does (the kernel has no FP code) */
+		cval v;
+
+		if (eval(c, n, &v) && v.kind == CV_FLT && v.f > -9.3e18 && v.f < 1.8e19) {
+			i128 i = v.f < 0 ? (i128)(int64_t)v.f : (i128)(uint64_t)v.f;
+
+			r = mk_int(c, trunc_to(c, i, to), to, N(n)->loc);
+			return r;
+		}
+	}
+	r = mk(c, N_CAST, to, N(n)->loc);
 
 	N(r)->a = n;
 	N(r)->aux = (uint16_t)kind;
@@ -2023,6 +2119,9 @@ static int conv_kind(cc *c, qty from, qty to, uint32_t n)
 		return -1;
 	}
 	if ((tk == TY_STRUCT || tk == TY_UNION) && compatible(c, from, to))
+		return CK_NOP;
+	/* vectors of one size convert lane-agnostically (clang's lax integer vector conversions) */
+	if (tk == TY_VECTOR && fk == TY_VECTOR && T(c, to)->size == T(c, from)->size)
 		return CK_NOP;
 	return -1;
 }
@@ -2116,6 +2215,16 @@ static uint32_t binop(cc *c, int op, uint32_t l, uint32_t r, uint32_t loc)
 	}
 	l = rvalue(c, l), r = rvalue(c, r);
 	lt = N(l)->ty, rt = N(r)->ty;
+	if (is_vector(c, lt) || is_vector(c, rt)) {
+		/* lane-wise on two vectors of one size; the result has the left operand's type */
+		qty vt = QUNQ(is_vector(c, lt) ? lt : rt);
+
+		if (!is_vector(c, lt) || !is_vector(c, rt) || T(c, lt)->size != T(c, rt)->size || is_cmp(op) ||
+		    op == T_PERCENT || (op != T_PLUS && op != T_MINUS && op != T_STAR && op != T_SLASH &&
+					!is_integer(c, T(c, vt)->base)))
+			error(c, loc, "invalid operands to binary expression");
+		return mk_bin(c, op, vt, convert(c, l, vt), convert(c, r, vt), loc);
+	}
 	if (is_arith(c, lt) && is_arith(c, rt)) {
 		qty ct;
 
@@ -2176,6 +2285,11 @@ static uint32_t assign(cc *c, int op, uint32_t l, uint32_t r, uint32_t loc)
 		if (is_ptr(c, lt) && (op == T_PLUS || op == T_MINUS)) {
 			r = convert(c, r, prim(TY_LONG));
 			pt = lt;
+		} else if (is_vector(c, lt)) {
+			if (!is_vector(c, rt) || T(c, lt)->size != T(c, rt)->size)
+				error(c, loc, "invalid operands to compound assignment");
+			r = convert(c, r, lt);
+			pt = lt;
 		} else if (op == T_LESSLESS || op == T_GREATERGREATER) {
 			/* computation type is the promoted lhs */
 		} else if (is_arith(c, pt) && is_arith(c, rt)) {
@@ -2226,7 +2340,7 @@ static uint32_t conditional(cc *c, uint32_t cond, uint32_t a, uint32_t b, uint32
 	} else if (is_ptr(c, bt) && is_integer(c, at)) {
 		t = bt;
 		ra = convert(c, ra, t);
-	} else if (is_record(c, at) && compatible(c, at, bt)) {
+	} else if ((is_record(c, at) || is_vector(c, at)) && compatible(c, at, bt)) {
 		t = QUNQ(at);
 	} else {
 		error(c, loc, "incompatible operand types in conditional expression");
@@ -2508,6 +2622,25 @@ static uint32_t args_list(cc *c, vec *args)
 	return args->n;
 }
 
+/* t without qualifiers, down through array element types (clang's unqualified array type) */
+static qty unqual_array(cc *c, qty t)
+{
+	const ctype *x;
+
+	t = QUNQ(t);
+	if (!is_array(c, t))
+		return t;
+	x = T(c, t);
+	if (x->flags & TF_VLA)
+		return t;
+	{
+		qty e = x->base, ue = unqual_array(c, e);
+		int fl = x->flags & TF_INCOMPLETE;
+
+		return ue == e ? t : ty_array(c, ue, fl ? 0 : arr_len(c, t), fl);
+	}
+}
+
 static uint32_t mk_builtin(cc *c, int id, qty ty, uint32_t loc, const vec *args)
 {
 	uint32_t n = mk(c, N_BUILTIN, ty, loc);
@@ -2695,7 +2828,7 @@ static uint32_t builtin_call(cc *c, const builtin *b, uint32_t loc)
 		expect(c, T_COMMA, "','");
 		t = type_name(c);
 		expect(c, T_RPAREN, "')'");
-		return mk_int(c, compatible(c, QUNQ(a), QUNQ(t)), prim(TY_INT), loc);
+		return mk_int(c, compatible(c, unqual_array(c, a), unqual_array(c, t)), prim(TY_INT), loc);
 	}
 	case BI_OFFSETOF:
 		return offsetof_expr(c, loc);
@@ -2765,6 +2898,10 @@ static uint32_t builtin_call(cc *c, const builtin *b, uint32_t loc)
 		case BI_ADD_OVERFLOW: case BI_SUB_OVERFLOW: case BI_MUL_OVERFLOW:
 			if (args.n != 3 || !is_ptr(c, N(args.v[2])->ty))
 				error(c, loc, "result argument to overflow builtin must be a pointer");
+			break;
+		case BI_ADDC: case BI_SUBC:
+			if (args.n != 4 || !is_ptr(c, N(args.v[3])->ty))
+				error(c, loc, "carry-out argument to builtin must be a pointer");
 			break;
 		case BI_ISNAN: case BI_ISINF: case BI_ISFINITE: case BI_SIGNBIT: case BI_ISNORMAL:
 		case BI_ISINF_SIGN: case BI_FPCLASSIFY:
@@ -3105,6 +3242,12 @@ static uint32_t postfix(cc *c, uint32_t n)
 			next(c);
 			ix = expr(c);
 			expect(c, T_RSQUARE, "']'");
+			if (is_vector(c, N(n)->ty) && (N(n)->flags & NF_LVALUE)) {
+				/* v[i]: lane i of the vector object */
+				qty et = QT(QI(T(c, N(n)->ty)->base), QQ(N(n)->ty));
+
+				n = cast_node(c, addr_of(c, n, loc), ty_ptr(c, et), CK_P2P);
+			}
 			n = rvalue(c, n), ix = rvalue(c, ix);
 			at = N(n)->ty, it = N(ix)->ty;
 			if (!is_ptr(c, at) && is_ptr(c, it)) {
@@ -3354,6 +3497,8 @@ static uint32_t explicit_cast(cc *c, uint32_t n, qty to, uint32_t loc)
 			error(c, loc, "cast to union type from type not present in union");
 		return cast_node(c, n, QUNQ(to), CK_UNION);
 	}
+	if (is_vector(c, to) && is_vector(c, N(n)->ty) && T(c, to)->size == T(c, N(n)->ty)->size)
+		return cast_node(c, n, QUNQ(to), CK_NOP);
 	if (!is_scalar(c, to) && !compatible(c, to, N(n)->ty)) {
 		error(c, loc, "used type where arithmetic or pointer type is required");
 		return n;
@@ -3695,9 +3840,18 @@ static void attribute_list(cc *c, attrs *a)
 				next(c);
 				expect(c, T_RPAREN, "')'");
 				continue;
-			case A_VECTOR_SIZE:
-				error(c, loc, "vector types are not supported");
-				break;
+			case A_VECTOR_SIZE: {
+				i128 v;
+
+				expect(c, T_LPAREN, "'('");
+				const_expr(c, &v, NULL);
+				expect(c, T_RPAREN, "')'");
+				if (v <= 0 || (v & (v - 1)) || v > 64)
+					error(c, loc, "invalid vector size");
+				else
+					a->vecsize = (uint32_t)v;
+				continue;
+			}
 			case A_PACKED: a->packed = 1; break;
 			case A_WEAK: a->weak = 1; break;
 			case A_USED: a->used = 1; break;
@@ -3733,6 +3887,7 @@ static void merge_attrs(attrs *to, const attrs *from)
 	if (from->asmname) to->asmname = from->asmname;
 	if (from->cleanup) to->cleanup = from->cleanup;
 	if (from->mode) to->mode = from->mode;
+	if (from->vecsize) to->vecsize = from->vecsize;
 	if (from->counted_by) to->counted_by = from->counted_by;
 	if (from->visibility) to->visibility = from->visibility;
 	to->packed |= from->packed, to->transparent |= from->transparent, to->used |= from->used;
@@ -4302,7 +4457,9 @@ static bool nested_declarator(cc *c, bool abstract_ok)
 
 	if (t->kind == T_STAR || t->kind == T_CARET)
 		return true;
-	if (t->kind == T_LPAREN || t->kind == T_LSQUARE)
+	if (t->kind == T_LPAREN)
+		return true;	/* "((": only a nested declarator (an abstract one or a named one) */
+	if (t->kind == T_LSQUARE)
 		return abstract_ok;
 	if (kw == KW___attribute__ || kw == KW___attribute)
 		return true;
@@ -4714,7 +4871,10 @@ static ilist *il_new(cc *c, qty ty)
 
 	memset(l, 0, sizeof(*l));
 	l->ty = ty;
-	if (is_array(c, ty)) {
+	if (is_vector(c, ty)) {
+		l->array = true;
+		l->n = T(c, ty)->n;
+	} else if (is_array(c, ty)) {
 		l->array = true;
 		l->unknown = (T(c, ty)->flags & TF_INCOMPLETE) != 0;
 		l->n = l->unknown ? 0 : arr_len(c, ty);
@@ -4843,7 +5003,17 @@ static void il_elem(cc *c, ilist *l, uint64_t pos, uint32_t v, bool st)
 	qty et = il_elem_type(c, l, pos);
 
 	if (!v && is(c, T_LBRACE)) {
-		if (is_record(c, et) || is_array(c, et)) {
+		if (is_char_array(c, et) && is_strtok(peek(c, 1)->kind)) {	/* { "string" } */
+			uint32_t sv;
+
+			next(c);
+			sv = string_lit(c);
+			accept(c, T_COMMA);
+			expect(c, T_RBRACE, "'}'");
+			il_set(c, l, pos, sv, NULL);
+			return;
+		}
+		if (is_ilagg(c, et)) {
 			ilist *s = il_new(c, et);
 
 			next(c);
@@ -4857,8 +5027,8 @@ static void il_elem(cc *c, ilist *l, uint64_t pos, uint32_t v, bool st)
 	}
 	if (!v)
 		v = assign_expr(c);
-	if ((is_record(c, et) || is_array(c, et)) && !string_initializes(c, et, v) &&
-	    !(is_record(c, et) && compatible(c, N(v)->ty, et))) {
+	if ((is_ilagg(c, et)) && !string_initializes(c, et, v) &&
+	    !((is_record(c, et) || is_vector(c, et)) && compatible(c, N(v)->ty, et))) {
 		ilist *s = il_new(c, et);
 
 		il_fill(c, s, 0, false, v, st);
@@ -4977,7 +5147,7 @@ static uint64_t il_designation(cc *c, ilist *l, bool st)
 		uint32_t v;
 
 		if (is(c, T_LBRACE)) {
-			if (is_record(c, et) || is_array(c, et)) {
+			if (is_ilagg(c, et)) {
 				ilist *s = il_new(c, et);
 
 				next(c);
@@ -4989,14 +5159,14 @@ static uint64_t il_designation(cc *c, ilist *l, bool st)
 			}
 		} else {
 			v = assign_expr(c);
-			if ((is_record(c, et) || is_array(c, et)) && !string_initializes(c, et, v) &&
-			    !(is_record(c, et) && compatible(c, N(v)->ty, et))) {
+			if ((is_ilagg(c, et)) && !string_initializes(c, et, v) &&
+			    !((is_record(c, et) || is_vector(c, et)) && compatible(c, N(v)->ty, et))) {
 				ilist *s = il_new(c, et);
 
 				il_fill(c, s, 0, false, v, st);
 				il_run(c, l, lo, hi, 0, s);
 			} else {
-				il_run(c, l, lo, hi, is_array(c, et) || is_record(c, et) ? v : convert(c, decay(c, v), et), NULL);
+				il_run(c, l, lo, hi, is_array(c, et) || is_record(c, et) || is_vector(c, et) ? v : convert(c, decay(c, v), et), NULL);
 			}
 		}
 	}
@@ -5136,7 +5306,7 @@ static uint32_t initializer(cc *c, qty *ty, bool st)
 				*ty = QT(QI(ty_array(c, T(c, t)->base, c->strs[N(s)->a].n, 0)), QQ(t));
 			return s;
 		}
-		if (is_record(c, t) || is_array(c, t)) {
+		if (is_ilagg(c, t)) {
 			ilist *l;
 			uint32_t n;
 
@@ -5412,6 +5582,12 @@ static uint32_t declare(cc *c, const dspec *ds, declr *d, qty t, bool file)
 
 		if (k)
 			t = QT(k, QQ(t));
+	}
+	if (at.vecsize) {
+		if (!is_arith(c, t) || ty_size(c, t) > at.vecsize || at.vecsize % ty_size(c, t))
+			error(c, d->loc, "invalid vector element type");
+		else
+			t = QT(QI(ty_vector(c, t, at.vecsize)), QQ(t));
 	}
 	if (ds->sc == SC_TYPEDEF) {
 		if (at.aligned)

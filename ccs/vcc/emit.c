@@ -92,7 +92,10 @@ static inline bool is_record(cc *c, qty t) { int k = KIND(c, t); return k == TY_
 static inline bool is_array(cc *c, qty t) { return KIND(c, t) == TY_ARRAY; }
 static inline bool is_func(cc *c, qty t) { return KIND(c, t) == TY_FUNC; }
 static inline bool is_void(cc *c, qty t) { return KIND(c, t) == TY_VOID; }
-static inline bool is_agg(cc *c, qty t) { return is_record(c, t) || is_array(c, t); }
+static inline bool is_vec(cc *c, qty t) { return KIND(c, t) == TY_VECTOR; }
+/* passed and returned like a record (vcc's own convention for vectors) */
+static inline bool is_recabi(cc *c, qty t) { return is_record(c, t) || is_vec(c, t); }
+static inline bool is_agg(cc *c, qty t) { return is_record(c, t) || is_array(c, t) || is_vec(c, t); }
 static inline uint64_t tsize(cc *c, qty t) { return T(c, t)->size; }
 static inline uint32_t talign(cc *c, qty t) { return T(c, t)->align; }
 static inline bool is_signed(cc *c, qty t) { return cc_is_signed(c, t); }
@@ -2074,13 +2077,30 @@ static bool sym_needs_got(cc *c, uint32_t ref)
 	}
 }
 
+static uint32_t sym_align(cc *c, uint32_t s);
+
+/* the alignment the object a reference names is known to have */
+static uint32_t ref_align(ecx *e, const lval *l)
+{
+	cc *c = e->c;
+	uint32_t a;
+
+	switch (RKIND(l->ref)) {
+	case RK_SYM: a = sym_align(c, canon_sym(c, RIDX(l->ref))); break;
+	case RK_STR: a = c->strs[RIDX(l->ref)].esz; break;
+	case RK_LBL: a = 1; break;
+	default: return l->align;
+	}
+	return a < l->align ? a : l->align;
+}
+
 /* load a scalar of size n (1,2,4,8) into rd; ext: 0 zero, 1 sign to x */
 static void load_n(ecx *e, int rd, const lval *l, int n, int ext)
 {
 	int64_t off;
 	int sz = log2sz((uint64_t)n);
 
-	if (l->k == L_SYM && !sym_needs_got(e->c, l->ref) && l->align >= (uint32_t)n && (l->off & (n - 1)) == 0 &&
+	if (l->k == L_SYM && !sym_needs_got(e->c, l->ref) && ref_align(e, l) >= (uint32_t)n && (l->off & (n - 1)) == 0 &&
 	    l->off >= INT32_MIN && l->off <= INT32_MAX) {
 		note_ref(e, l->ref);
 		symop(e, I_ADRP, 1, 0, R_X16, 0, l->ref, l->off);
@@ -2099,7 +2119,7 @@ static void store_n(ecx *e, int rs, const lval *l, int64_t extra, int n)
 	int64_t off;
 	int sz = log2sz((uint64_t)n);
 
-	if (l->k == L_SYM && !sym_needs_got(e->c, l->ref) && l->align >= (uint32_t)n && ((l->off + extra) & (n - 1)) == 0 &&
+	if (l->k == L_SYM && !sym_needs_got(e->c, l->ref) && ref_align(e, l) >= (uint32_t)n && ((l->off + extra) & (n - 1)) == 0 &&
 	    l->off + extra >= INT32_MIN && l->off + extra <= INT32_MAX) {
 		note_ref(e, l->ref);
 		symop(e, I_ADRP, 1, 0, R_X16, 0, l->ref, l->off + extra);
@@ -2260,7 +2280,7 @@ static void classify(ecx *e, qty t, int *ngrn, int *nsaa, abiarg *a)
 		n = 1;
 		goto stack;
 	}
-	if (is_record(c, t)) {
+	if (is_recabi(c, t)) {
 		if (is_hfa(c, t))
 			efatal(e, e->curloc, "floating-point aggregates as arguments or results are not supported");
 		if (size == 0) {
@@ -2428,6 +2448,21 @@ static bind *binding(ecx *e, uint32_t s)
 	return &e->b[s];
 }
 
+static int regvar_reg(cc *c, uint32_t s)
+{
+	const attrs *a = sym_attrs(c, s);
+	const char *n;
+
+	if (c->syms[s].sc != SC_REGISTER || !a->asmname)
+		return -1;
+	n = c->strs[a->asmname - 1].s;
+	if (!strcmp(n, "sp"))
+		return SP;
+	if ((n[0] == 'x' || n[0] == 'w') && n[1] >= '0' && n[1] <= '9')
+		return atoi(n + 1);
+	return -1;
+}
+
 static int32_t bind_slot(ecx *e, uint32_t s)
 {
 	cc *c = e->c;
@@ -2441,6 +2476,12 @@ static int32_t bind_slot(ecx *e, uint32_t s)
 	b->kind = B_SLOT;
 	b->kv = 0;
 	b->reg = 0xff;
+	if (c->syms[s].sc == SC_REGISTER) {
+		int rr = regvar_reg(c, s);
+
+		if (rr >= 0)
+			b->reg = (uint8_t)rr;
+	}
 	b->slot = slot(e, tsize(c, t) ? tsize(c, t) : 1, al);
 	return b->slot;
 }
@@ -2502,20 +2543,6 @@ static bool is_local_var(cc *c, uint32_t s)
 						   (y->sc == SC_NONE && !(y->flags & SF_GLOBAL)));
 }
 
-static int regvar_reg(cc *c, uint32_t s)
-{
-	const attrs *a = sym_attrs(c, s);
-	const char *n;
-
-	if (c->syms[s].sc != SC_REGISTER || !a->asmname)
-		return -1;
-	n = c->strs[a->asmname - 1].s;
-	if (!strcmp(n, "sp"))
-		return SP;
-	if ((n[0] == 'x' || n[0] == 'w') && n[1] >= '0' && n[1] <= '9')
-		return atoi(n + 1);
-	return -1;
-}
 
 /* ---------------- lvalues from expressions ---------------- */
 
@@ -3609,7 +3636,7 @@ static val do_call(ecx *e, uint32_t ref, val *fnv, carg *args, int n, qty rty, b
 	cc *c = e->c;
 	int ngrn = 0, nsaa = 0;
 	int32_t fslot = 1, rslot = 1;
-	bool sret = is_record(c, rty) && tsize(c, rty) > 16;
+	bool sret = is_recabi(c, rty) && tsize(c, rty) > 16;
 	spill sp;
 	val res = vnone();
 
@@ -3712,7 +3739,7 @@ static val do_call(ecx *e, uint32_t ref, val *fnv, carg *args, int n, qty rty, b
 
 		opi(e, I_ADDI, 1, r, FRAME, rslot);
 		res = vreg(r);
-	} else if (is_record(c, rty)) {
+	} else if (is_recabi(c, rty)) {
 		int32_t sl = slot(e, 16, 16);
 		int r = treg(e);
 
@@ -4222,6 +4249,51 @@ static val gen_overflow(ecx *e, const node *x, const uint32_t *arg)
 	return vreg(ok);
 }
 
+/* __builtin_addc* / __builtin_subc*: x +- y +- carry_in, *carry_out = the carry (borrow) of either step */
+static val gen_carry(ecx *e, const node *x, const uint32_t *arg)
+{
+	cc *c = e->c;
+	qty ty = x->ty, tc = T(c, N(arg[3])->ty)->base;
+	int sz = (int)tsize(c, ty), bits = sz * 8;
+	bool add = x->aux == BI_ADDC;
+	val a = gen(e, arg[0]), b = gen(e, arg[1]), ci = gen(e, arg[2]), p = gen(e, arg[3]);
+	int ra = toreg(e, &a), rb = toreg(e, &b), rc = toreg(e, &ci), co = treg(e);
+	lval l;
+
+	extend(e, ra, ra, sz, false);
+	extend(e, rb, rb, sz, false);
+	extend(e, rc, rc, sz, false);
+	if (bits == 64) {
+		int t = treg(e);
+
+		op3(e, add ? I_ADDS : I_SUBS, 1, ra, ra, rb);
+		cset(e, co, add ? C_HS : C_LO);
+		op3(e, add ? I_ADDS : I_SUBS, 1, ra, ra, rc);
+		cset(e, t, add ? C_HS : C_LO);
+		op3(e, I_ORR, 0, co, co, t);
+		tfree(e, t);
+	} else {
+		op3(e, add ? I_ADD : I_SUB, 1, ra, ra, rb);
+		op3(e, add ? I_ADD : I_SUB, 1, ra, ra, rc);
+		/* add: anything at or above bit 'bits' is the carry; sub: a negative result is the borrow */
+		shift_imm(e, I_LSRV, 1, co, ra, add ? bits : 63);
+		op3(e, I_SUBS, 1, ZR, co, ZR);
+		cset(e, co, C_NE);
+		opbf(e, I_UBFM, 1, ra, ra, 0, bits - 1);
+	}
+	vfree(e, &b);
+	vfree(e, &ci);
+	l = lfromval(e, p, talign(c, tc));
+	{
+		val r = vreg(co);
+
+		store(e, &l, tc, &r);
+	}
+	lfree(e, &l);
+	tfree(e, co);
+	return vreg(ra);
+}
+
 static void va_start_(ecx *e, uint32_t apn)
 {
 	lval l = gen_lval(e, apn);
@@ -4256,7 +4328,7 @@ static val va_arg_(ecx *e, const node *x)
 	cc *c = e->c;
 	qty t = x->ty;
 	uint64_t size = tsize(c, t);
-	bool big = is_record(c, t) && size > 16;
+	bool big = is_recabi(c, t) && size > 16;
 	int nreg = big ? 1 : (int)((size + 7) / 8);
 	bool al16 = !big && talign(c, t) == 16;
 	lval l = gen_lval(e, x->a);
@@ -4547,6 +4619,8 @@ static val gen_builtin(ecx *e, uint32_t n)
 		return vconst(0);
 	case BI_ADD_OVERFLOW: case BI_SUB_OVERFLOW: case BI_MUL_OVERFLOW:
 		return gen_overflow(e, x, arg);
+	case BI_ADDC: case BI_SUBC:
+		return gen_carry(e, x, arg);
 	case BI_PREFETCH: {
 		val p = gen(e, arg[0]);
 		int r = toreg(e, &p);
@@ -4891,12 +4965,79 @@ static val gen_logical(ecx *e, uint32_t n)
 	r = treg(e);
 	test_zero(e, &a, N(x->a)->ty, lshort, !isand);
 	b = tobool(e, gen(e, x->b), N(x->b)->ty);
+	if ((b.k == V_CONST && (isand ? !b.i : b.i)) || (b.k == V_ADDR && !isand)) {
+		/* x && 0, x || 1: x's effects are done, the value is known (clang folds it,
+		   and code it guards, such as calls to functions that do not exist, goes) */
+		vfree(e, &b);
+		deflabel(e, lshort);
+		tfree(e, r);
+		return vconst(isand ? 0 : 1);
+	}
 	move_to(e, r, -1, &b, prim(TY_INT));
 	jump(e, lend);
 	deflabel(e, lshort);
 	movi(e, 0, r, isand ? 0 : 1);
 	deflabel(e, lend);
 	return vreg(r);
+}
+
+/* a lane-wise vector operation on the vectors at ra and rb into a new frame temporary; returns its address */
+static val gen_vbin(ecx *e, int op, int ra, int rb, qty t, uint32_t loc)
+{
+	cc *c = e->c;
+	uint64_t size = tsize(c, t);
+	qty et = T(c, t)->base;
+	unsigned es = (unsigned)tsize(c, et);
+	bool q = size == 16;
+	const char *mn, *arr;
+	char ab[8];
+	tbuf *rb_ = &e->raw;
+	size_t st;
+	int32_t sl;
+	int rd;
+	ins *i;
+
+	if (is_flt(c, et))
+		efatal(e, loc, "floating point vectors are not supported");
+	if (size != 8 && size != 16)
+		efatal(e, loc, "unsupported vector size");
+	switch (op) {
+	case T_AMP: mn = "and"; break;
+	case T_PIPE: mn = "orr"; break;
+	case T_CARET: mn = "eor"; break;
+	case T_PLUS: mn = "add"; break;
+	case T_MINUS: mn = "sub"; break;
+	default: efatal(e, loc, "unsupported vector operator");
+	}
+	if (op == T_AMP || op == T_PIPE || op == T_CARET) {
+		arr = q ? "16b" : "8b";
+	} else {
+		snprintf(ab, sizeof ab, "%u%c", (unsigned)(size / es), es == 1 ? 'b' : es == 2 ? 'h' : es == 4 ? 's' : 'd');
+		arr = ab;
+	}
+	sl = slot(e, size, 16);
+	rd = treg(e);
+	opi(e, I_ADDI, 1, rd, FRAME, sl);
+	st = rb_->n;
+	tb_s(rb_, q ? "\tldr\tq16, [" : "\tldr\td16, [");
+	reg(rb_, ra, 1);
+	tb_s(rb_, q ? "]\n\tldr\tq17, [" : "]\n\tldr\td17, [");
+	reg(rb_, rb, 1);
+	tb_s(rb_, "]\n\t");
+	tb_s(rb_, mn);
+	tb_s(rb_, "\tv16.");
+	tb_s(rb_, arr);
+	tb_s(rb_, ", v16.");
+	tb_s(rb_, arr);
+	tb_s(rb_, ", v17.");
+	tb_s(rb_, arr);
+	tb_s(rb_, q ? "\n\tstr\tq16, [" : "\n\tstr\td16, [");
+	reg(rb_, rd, 1);
+	tb_c(rb_, ']');
+	i = put(e, I_RAW);
+	i->off = (int32_t)st;
+	i->ref = (uint32_t)(rb_->n - st);
+	return vreg(rd);
 }
 
 static val gen_binary(ecx *e, uint32_t n)
@@ -4906,6 +5047,15 @@ static val gen_binary(ecx *e, uint32_t n)
 	int op = x->aux;
 	qty lt = N(x->a)->ty, rt = N(x->b)->ty, ty = x->ty;
 	val a = gen(e, x->a), b = gen(e, x->b);
+
+	if (is_vec(c, ty)) {
+		int ra = toreg(e, &a), rb = toreg(e, &b);
+		val r = gen_vbin(e, op, ra, rb, ty, x->loc);
+
+		vfree(e, &a);
+		vfree(e, &b);
+		return r;
+	}
 
 	if (is_flt(c, lt) || is_flt(c, ty))
 		return is_cmp(op) ? f_compare(e, op, lt, a, b) : f_arith(e, op, ty, a, b);
@@ -5049,6 +5199,24 @@ static val gen_assign(ecx *e, uint32_t n)
 	lval l;
 	val v, old;
 
+	if (x->aux && is_vec(c, lt)) {
+		/* v op= w */
+		val w = gen(e, x->b), av, r;
+		int ra, rw;
+
+		l = gen_lval(e, x->a);
+		{
+			lval l2 = l;
+
+			av = laddr(e, &l2);
+		}
+		ra = toreg(e, &av), rw = toreg(e, &w);
+		r = gen_vbin(e, x->aux, ra, rw, lt, x->loc);
+		vfree(e, &w);
+		vfree(e, &av);
+		store(e, &l, lt, &r);
+		return r;
+	}
 	if (!x->aux) {
 		v = gen(e, x->b);
 		if (N(x->a)->op == N_VAR && (e->E->sflags[N(x->a)->a] & SA_CWRITE)) {
@@ -5843,7 +6011,7 @@ static void gen_return(ecx *e, const node *x)
 				v = load(e, &l, rt);
 			}
 		}
-		if (is_record(c, rt)) {
+		if (is_recabi(c, rt)) {
 			int rs = toreg(e, &v);
 
 			if (tsize(c, rt) > 16) {
@@ -6203,7 +6371,7 @@ static void gen_stmt1(ecx *e, uint32_t n)
 
 /* ---------------- inline asm ---------------- */
 
-enum { AO_REG, AO_IMM, AO_MEM, AO_ZERO };
+enum { AO_REG, AO_IMM, AO_MEM, AO_ZERO, AO_VREG };
 
 typedef struct asmopnd {
 	uint8_t kind, reg, fixed, out, inout, wide;
@@ -6240,6 +6408,26 @@ static int clob_reg(const char *s)
 	return -1;
 }
 
+/* a vector register load or store as raw text: op qv|dv, [xr] */
+static void vraw(ecx *e, const char *opn, bool q, int v, int xr)
+{
+	tbuf *rb = &e->raw;
+	size_t st = rb->n;
+	ins *i;
+
+	tb_c(rb, '\t');
+	tb_s(rb, opn);
+	tb_c(rb, '\t');
+	tb_c(rb, q ? 'q' : 'd');
+	tb_u(rb, (uint64_t)v);
+	tb_s(rb, ", [");
+	reg(rb, xr, 1);
+	tb_c(rb, ']');
+	i = put(e, I_RAW);
+	i->off = (int32_t)st;
+	i->ref = (uint32_t)(rb->n - st);
+}
+
 static void gen_asm(ecx *e, uint32_t n)
 {
 	cc *c = e->c;
@@ -6255,6 +6443,7 @@ static void gen_asm(ecx *e, uint32_t n)
 	tbuf *rb = &e->raw;
 	size_t start;
 	uint32_t uniq;
+	int nvreg = 0;
 
 	if (!e->reach)
 		return;
@@ -6295,6 +6484,13 @@ static void gen_asm(ecx *e, uint32_t n)
 		o->inout = strchr(cs, '+') != NULL;
 		o->t = N(en)->ty;
 		o->name = ao->name;
+		if (is_vec(c, o->t) && strpbrk(cs, "wx")) {
+			/* a vector in v16+: loaded before the template if read, stored after it */
+			o->kind = AO_VREG;
+			o->reg = (uint8_t)(16 + nvreg++);
+			o->l = gen_lval(e, en);
+			continue;
+		}
 		if (strpbrk(cs, "wxy") && !reg_ok)
 			efatal(e, x->loc, "floating point asm operands are not supported");
 		if (mem_ok && !reg_ok) {
@@ -6334,6 +6530,15 @@ static void gen_asm(ecx *e, uint32_t n)
 		for (const char *p = cs; *p; p++)
 			if (*p >= '0' && *p <= '9')
 				tied = atoi(p);
+		if (is_vec(c, o->t) && strpbrk(cs, "wx") && tied < 0) {
+			val v = gen(e, en);	/* the vector's address */
+
+			toreg(e, &v);
+			o->kind = AO_VREG;
+			o->reg = (uint8_t)(16 + nvreg++);
+			o->v = v;
+			continue;
+		}
 		if (tied >= 0 && (uint32_t)tied < a->nout) {
 			/* the input goes into the output's register */
 			val v = gen(e, en);
@@ -6445,6 +6650,25 @@ static void gen_asm(ecx *e, uint32_t n)
 	/* asm goto with outputs: the labels go through trampolines that store them */
 	for (uint32_t k = 0; k < a->nlabel; k++)
 		tramp[k] = a->nout ? newlabel(e) : user_label(e, a->labels[k]);
+	/* vector operands into their registers, last so no call in between clobbers them */
+	for (uint32_t i = 0; i < nops; i++) {
+		asmopnd *o = &op[i];
+		bool q = tsize(c, o->t) == 16;
+
+		if (o->kind != AO_VREG)
+			continue;
+		if (!o->out) {
+			vraw(e, "ldr", q, o->reg, o->v.r);
+			vfree(e, &o->v);
+		} else if (o->inout) {
+			lval l2 = o->l;
+			val av = laddr(e, &l2);
+			int r = toreg(e, &av);
+
+			vraw(e, "ldr", q, o->reg, r);
+			vfree(e, &av);
+		}
+	}
 	/* the template */
 	start = rb->n;
 	uniq = atomic_fetch_add(&e->E->asmno, 1);
@@ -6463,7 +6687,7 @@ static void gen_asm(ecx *e, uint32_t n)
 			if (*p == '%') { tb_c(rb, '%'); continue; }
 			if (*p == '=') { tb_u(rb, uniq); continue; }
 			if (*p == '{' || *p == '|' || *p == '}') { tb_c(rb, *p); continue; }
-			if (*p && strchr("wxcalHnPQRs", *p) && (p[1] == '[' || (p[1] >= '0' && p[1] <= '9')))
+			if (*p && strchr("wxcalHnPQRsqdbh", *p) && (p[1] == '[' || (p[1] >= '0' && p[1] <= '9')))
 				mod = *p++;
 			if (*p == '[') {
 				const char *q = strchr(p, ']');
@@ -6505,6 +6729,10 @@ static void gen_asm(ecx *e, uint32_t n)
 				if (o->fixed == 2)
 					o = &op[o->inout];
 				switch (o->kind) {
+				case AO_VREG:
+					tb_c(rb, mod == 'q' || mod == 'd' || mod == 's' || mod == 'h' || mod == 'b' ? mod : 'v');
+					tb_u(rb, o->reg);
+					break;
 				case AO_REG:
 					if (mod == 'H' && o->wide) {
 						reg(rb, o->v.r2, 1);
@@ -6540,6 +6768,18 @@ static void gen_asm(ecx *e, uint32_t n)
 
 		i->off = (int32_t)start;
 		i->ref = (uint32_t)(rb->n - start);
+	}
+	for (uint32_t i = 0; i < a->nout; i++) {
+		asmopnd *o = &op[i];
+
+		if (o->kind == AO_VREG) {
+			lval l2 = o->l;
+			val av = laddr(e, &l2);
+			int r = toreg(e, &av);
+
+			vraw(e, "str", tsize(c, o->t) == 16, o->reg, r);
+			vfree(e, &av);
+		}
 	}
 	/* fixed output registers back into their temporaries */
 	for (uint32_t i = 0; i < a->nout; i++) {
@@ -6836,7 +7076,7 @@ static void emit_function(ecx *e, uint32_t s)
 		e->f = NULL;
 		return;
 	}
-	if (is_record(c, rty) && tsize(c, rty) > 16) {
+	if (is_recabi(c, rty) && tsize(c, rty) > 16) {
 		F.retslot = slot(e, 8, 8);
 		mem(e, I_ST, 3, 0, 8, FRAME, F.retslot);
 	}
