@@ -3958,8 +3958,6 @@ static void struct_body(cc *c, uint32_t ti);
 static void enum_body(cc *c, uint32_t ti, attrs *after);
 static void declarator(cc *c, declr *d, bool abstract_ok, uint32_t *first, uint32_t *nops);
 
-static _Thread_local dop *tl_dops;
-static _Thread_local uint32_t tl_ndops;
 
 static qty int_type(cc *c, int nlong, int sgn, int base, uint32_t loc)
 {
@@ -4261,10 +4259,10 @@ static void param_list(cc *c, dop *op)
 			declarator(c, &d, true, &first, &nops);
 			attribute_list(c, &d.at);
 			t = apply_declarator(c, ds.ty, first, nops);
-			tl_ndops = first;
+			c->ndops = first;
 			/* adjustments (C11 6.7.6.3p7-8) */
 			if (is_array(c, t)) {
-				const dop *ad = nops ? &tl_dops[first + nops - 1] : NULL;
+				const dop *ad = nops ? &c->dops[first + nops - 1] : NULL;
 				int q = ad && ad->kind == 1 ? ad->q : 0;
 
 				t = QT(QI(ty_ptr(c, T(c, t)->base)), q);
@@ -4461,7 +4459,7 @@ static void declarator(cc *c, declr *d, bool abstract_ok, uint32_t *first, uint3
 	}
 	/* assemble: pointers, suffixes reversed, inner ops */
 	{
-		uint32_t at = tl_ndops;
+		uint32_t at = c->ndops;
 		uint32_t n = (uint32_t)np + (uint32_t)ns + inops;
 
 		if (at + n > DOPS_MAX)
@@ -4470,29 +4468,29 @@ static void declarator(cc *c, declr *d, bool abstract_ok, uint32_t *first, uint3
 		if (inner) {
 			dop tmp[inops ? inops : 1];
 
-			memcpy(tmp, &tl_dops[ifirst], inops * sizeof(dop));
+			memcpy(tmp, &c->dops[ifirst], inops * sizeof(dop));
 			at = ifirst;
 			for (int i = 0; i < np; i++)
-				tl_dops[at + (uint32_t)i] = ptrs[i];
+				c->dops[at + (uint32_t)i] = ptrs[i];
 			for (int i = 0; i < ns; i++)
-				tl_dops[at + (uint32_t)np + (uint32_t)i] = sufs[ns - 1 - i];
-			memcpy(&tl_dops[at + (uint32_t)np + (uint32_t)ns], tmp, inops * sizeof(dop));
+				c->dops[at + (uint32_t)np + (uint32_t)i] = sufs[ns - 1 - i];
+			memcpy(&c->dops[at + (uint32_t)np + (uint32_t)ns], tmp, inops * sizeof(dop));
 		} else {
 			for (int i = 0; i < np; i++)
-				tl_dops[at + (uint32_t)i] = ptrs[i];
+				c->dops[at + (uint32_t)i] = ptrs[i];
 			for (int i = 0; i < ns; i++)
-				tl_dops[at + (uint32_t)np + (uint32_t)i] = sufs[ns - 1 - i];
+				c->dops[at + (uint32_t)np + (uint32_t)i] = sufs[ns - 1 - i];
 		}
 		*first = at;
 		*nops = n;
-		tl_ndops = at + n;
+		c->ndops = at + n;
 	}
 }
 
 static qty apply_declarator(cc *c, qty t, uint32_t first, uint32_t nops)
 {
 	for (uint32_t i = 0; i < nops; i++) {
-		const dop *o = &tl_dops[first + i];
+		const dop *o = &c->dops[first + i];
 
 		switch (o->kind) {
 		case 0:
@@ -4533,7 +4531,7 @@ static qty type_name(cc *c)
 		fatal(c, tok(c)->loc, "expected a type");
 	declarator(c, &d, true, &first, &nops);
 	t = apply_declarator(c, ds.ty, first, nops);
-	tl_ndops = first;
+	c->ndops = first;
 	if (d.name)
 		error(c, d.loc, "unexpected identifier in type name");
 	return t;
@@ -4589,7 +4587,7 @@ static void struct_body(cc *c, uint32_t ti)
 			if (!is(c, T_COLON)) {
 				declarator(c, &d, false, &first, &nops);
 				t = apply_declarator(c, ds.ty, first, nops);
-				tl_ndops = first;
+				c->ndops = first;
 			} else {
 				memset(&d, 0, sizeof(d));
 				d.loc = tok(c)->loc;
@@ -5647,7 +5645,7 @@ static void declaration(cc *c, vec *out, bool file)
 
 		declarator(c, &d, false, &first, &nops);
 		t = apply_declarator(c, ds.ty, first, nops);
-		tl_ndops = first;
+		c->ndops = first;
 		asm_label(c, &d.at);
 		attribute_list(c, &d.at);
 		if (ds.auto_type) {
@@ -6248,7 +6246,7 @@ static void translation_unit(cc *c)
 			continue;
 		}
 		declaration(c, NULL, true);
-		tl_ndops = 0;
+		c->ndops = 0;
 	}
 }
 
@@ -6578,8 +6576,8 @@ static void cc_init(cc *c, pp *p, const cc_opts *o)
 	c->tlasm = reserve((size_t)1 << 24);
 	c->heap = c->hp = reserve((size_t)1 << 32);
 	c->hend = c->heap + ((size_t)1 << 32);
-	tl_dops = halloc(c, DOPS_MAX * sizeof(dop));
-	tl_ndops = 0;
+	c->dops = halloc(c, DOPS_MAX * sizeof(dop));
+	c->ndops = 0;
 	c->tyhcap = 1 << 16;
 	c->tyhash = halloc(c, c->tyhcap * sizeof(uint32_t));
 	memset(c->tyhash, 0, c->tyhcap * sizeof(uint32_t));

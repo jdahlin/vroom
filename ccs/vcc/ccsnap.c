@@ -183,6 +183,7 @@ static void code_cc(coder *k, cc *s, bool enc)
 #define P(x) ((x) = enc ? enc_ptr(k, (x)) : dec_ptr(k, (x)))
 	P(s->tyhash);
 	P(s->fnhash);
+	P(s->dops);
 	for (uint32_t i = 0; i < NDIR; i++) {
 		P(s->odir[i]);
 		P(s->tdir[i]);

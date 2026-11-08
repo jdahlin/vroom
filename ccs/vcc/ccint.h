@@ -106,6 +106,8 @@ struct cc {
 	uint32_t nasm;
 
 	char *heap, *hp, *hend;	/* bump allocator for everything else */
+	struct dop *dops;	/* declarator op stack (cc.c) */
+	uint32_t ndops;
 
 	/* scopes: identifier id -> innermost binding (sym index) */
 	uint32_t *odir[NDIR], *tdir[NDIR], *ldir[NDIR];
