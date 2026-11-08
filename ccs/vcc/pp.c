@@ -104,10 +104,12 @@ typedef struct pdir {
 } pdir;
 
 typedef struct pmacro pmacro;
+typedef struct incent incent;
 
 typedef struct pfile {
 	const pdir *dir;
 	_Atomic(const pmacro *) *mac;	/* per directive: the #define's macro, built once */
+	_Atomic(const incent *) *inc;	/* per directive: #include "x" / <x>, its last answer */
 	uint32_t ndir;
 	uint32_t guard;		/* controlling macro id, 0 if none */
 	int bad;		/* unbalanced conditionals */
@@ -200,6 +202,7 @@ static pfile *pfile_build(const vlex_file *f)
 	free(stk);
 	fi->dir = d;
 	fi->mac = salloc((nd + 1) * sizeof(*fi->mac));	/* fresh: zero */
+	fi->inc = salloc((nd + 1) * sizeof(*fi->inc));
 	fi->ndir = nd;
 	/*
 	 * Include guard: the file is one #ifndef X / #if !defined(X) group
@@ -228,16 +231,19 @@ static pfile *pfile_build(const vlex_file *f)
 	return fi;
 }
 
-static const pfile *pfile_get(const vlex_file *f)
+/* *fresh: built by this call (the file's first entry in the process) */
+static const pfile *pfile_get(const vlex_file *f, bool *fresh)
 {
 	vlex_file *w = (vlex_file *)f;
 	void *fi = __atomic_load_n(&w->pp, __ATOMIC_ACQUIRE), *z = NULL;
 
+	*fresh = false;
 	if (likely(fi != NULL))
 		return fi;
 	fi = pfile_build(f);
 	if (!__atomic_compare_exchange_n(&w->pp, &z, fi, 0, __ATOMIC_ACQ_REL, __ATOMIC_ACQUIRE))
 		return z;	/* lost the race; ours is wasted */
+	*fresh = true;
 	return fi;
 }
 
@@ -355,6 +361,7 @@ typedef struct ctx {
 	int32_t sdir;		/* search dir it was found in, -1 if none */
 	uint32_t fe;		/* fent index */
 	const char *spath;	/* the path as clang spells it (f->path is the cache key) */
+	uint32_t sdl;		/* length of spath's directory part, '/' included */
 	/* C_REPLAY: a header cache entry's tokens (pt, n), its children spliced in */
 	const struct hent *he;
 	uint32_t si, ci;	/* next segment, next __COUNTER__ record */
@@ -2048,7 +2055,7 @@ static void unread(pp *p, const ptok *t)
 }
 
 static const vlex_file *find_include(pp *p, const ctx *from, const char *name, size_t nlen,
-				     bool angled, bool next, int32_t *sdir, const char **path);
+				     bool angled, bool next, int32_t *sdir, const char **path, const incent **ie);
 static void enter_file(pp *p, const vlex_file *f, const char *path, int32_t sdir);
 
 /*
@@ -2304,7 +2311,7 @@ static int builtin(pp *p, const pmacro *m, ptok *t)
 		raw(p, &r);
 		if (r.kind != T_RPAREN)
 			error(p, t->loc, "missing ')' after __has_include");
-		mknum(p, t, find_include(p, fc, buf, n, angled, m->builtin == B_HAS_INCLUDE_NEXT, &sd, &path) != NULL);
+		mknum(p, t, find_include(p, fc, buf, n, angled, m->builtin == B_HAS_INCLUDE_NEXT, &sd, &path, NULL) != NULL);
 		break;
 	}
 	case B_IS_IDENTIFIER:
@@ -3060,17 +3067,138 @@ static const vlex_file *find_include_(pp *p, const ctx *from, const char *name, 
 	return NULL;
 }
 
-/* (the search path prefix the lookup depended on is an input of the open regions) */
-static const vlex_file *find_include(pp *p, const ctx *from, const char *name, size_t nlen,
-				     bool angled, bool next, int32_t *sdir, const char **path)
-{
-	uint32_t used;
-	const vlex_file *f = find_include_(p, from, name, nlen, angled, next, sdir, path, &used);
+/*
+ * Include resolution, process-wide.  A lookup's answer depends only on the
+ * options' signature (cwd, frameworks, ...), the mode (where the search
+ * starts, angled, include_next), the includer's directory (quoted), the name
+ * and the search directories it looked at: the ones up to where it found
+ * the file (all if not found), whose prefix signature (psig) it keeps.
+ * Files never change under the token cache (vlex_get caches misses too).
+ * Kbuild puts the per-directory -I last, so one entry serves every TU.  A
+ * warm lookup is one probe instead of a path build, directory-cache probe
+ * and token-cache probe per search directory.
+ */
+struct incent {
+	uint64_t hash;
+	uint32_t sig, klen;
+	int32_t mode;		/* start * 4 + angled * 2 + next */
+	uint32_t used, usig;	/* directories looked at, psig[used] */
+	int32_t sdir;
+	const vlex_file *f;
+	const char *path;
+	char key[];		/* includer's directory, '\0', name; zero padded to 8 */
+};
 
+#define INC_BITS 17
+static _Atomic(incent *) inc_tab[1u << INC_BITS];
+static _Atomic uint32_t inc_n;
+
+static inline bool inc_same(const incent *e, uint64_t h, uint32_t sig, int32_t mode, const char *k, size_t kl)
+{
+	return e->hash == h && e->sig == sig && e->mode == mode && e->klen == kl && !memcmp(e->key, k, kl);
+}
+
+/* e's answer holds for p: the directories it looked at are p's */
+static inline bool inc_valid(const pp *p, const incent *e)
+{
+	return e->used <= (uint32_t)p->o->ndirs && p->psig[e->used] == e->usig;
+}
+
+/* the search path prefix the lookup depended on is an input of the open regions */
+static inline void inc_used(pp *p, uint32_t used)
+{
 	if (unlikely(p->rec.on))
 		for (int i = 0; i < p->rec.n; i++)
 			if (p->rec.lev[i].ndirs < used)
 				p->rec.lev[i].ndirs = used;
+}
+
+/* the lookup's mode and, for a quoted one, the includer's directory (*fp, *dl) */
+static inline int32_t inc_mode(const pp *p, const ctx *from, bool angled, bool next, const char **fp, size_t *dl)
+{
+	bool nx = next && from->sdir >= 0;
+	int32_t start = nx ? from->sdir + 1 : angled ? p->o->nquote : 0;
+
+	*fp = "", *dl = 0;
+	if (!angled && !nx && from->f != &p->builtin)
+		*fp = from->spath, *dl = from->sdl;
+	return start * 4 + angled * 2 + nx;
+}
+
+/* *ie: the cache entry of the answer, if it has one */
+static const vlex_file *find_include(pp *p, const ctx *from, const char *name, size_t nlen,
+				     bool angled, bool next, int32_t *sdir, const char **path, const incent **ie)
+{
+	uint32_t used, i, sig = p->sig;
+	const vlex_file *f;
+	char kb[4096 + 16];
+	const char *fp;
+	size_t dl, kl, kp;
+	int32_t mode;
+	incent *e;
+	uint64_t h, w;
+
+	if (ie)
+		*ie = NULL;
+	if (name[0] == '/' || sig == HNONE || !from || nlen >= 2048)
+		goto slow;
+	mode = inc_mode(p, from, angled, next, &fp, &dl);
+	if (dl >= 2048)
+		goto slow;
+	memcpy(kb, fp, dl);
+	kb[dl] = 0;
+	memcpy(kb + dl + 1, name, nlen);
+	kl = dl + 1 + nlen;
+	kp = (kl + 8) & ~(size_t)7;
+	memset(kb + kl, 0, 8);
+	h = (uint64_t)sig << 32 ^ ((uint64_t)(uint32_t)mode << 17) ^ kl;
+	for (size_t j = 0; j < kp; j += 8) {
+		memcpy(&w, kb + j, 8);
+		h = (h ^ w) * 0x9E3779B97F4A7C15ull;
+		h ^= h >> 29;
+	}
+	for (i = (uint32_t)(h >> (64 - INC_BITS));; i = (i + 1) & ((1u << INC_BITS) - 1)) {
+		e = atomic_load_explicit(&inc_tab[i], memory_order_acquire);
+		if (!e)
+			break;
+		if (inc_same(e, h, sig, mode, kb, kl) && inc_valid(p, e))
+			goto hit;
+	}
+	f = find_include_(p, from, name, nlen, angled, next, sdir, path, &used);
+	if (p->psig[used] == HNONE || atomic_fetch_add(&inc_n, 1) >= (3u << INC_BITS) / 4)
+		goto done;
+	{
+		size_t pl = f ? strlen(*path) : 0;
+		incent *m = salloc(sizeof(*m) + kp + pl + 1);
+
+		m->hash = h, m->sig = sig, m->klen = (uint32_t)kl, m->mode = mode;
+		m->used = used, m->usig = p->psig[used], m->sdir = *sdir, m->f = f;
+		memcpy(m->key, kb, kp);
+		m->path = NULL;
+		if (f) {
+			memcpy(m->key + kp, *path, pl + 1);
+			m->path = m->key + kp;
+		}
+		for (;; i = (i + 1) & ((1u << INC_BITS) - 1)) {
+			e = NULL;
+			if (atomic_compare_exchange_strong_explicit(&inc_tab[i], &e, m, memory_order_acq_rel,
+								    memory_order_acquire)) {
+				e = m;
+				break;
+			}
+			if (inc_same(e, h, sig, mode, kb, kl) && inc_valid(p, e))
+				break;	/* another thread's: the same answer */
+		}
+	}
+hit:
+	f = e->f, *sdir = e->sdir, *path = e->path, used = e->used;
+	if (ie)
+		*ie = e;
+	goto done;
+slow:
+	f = find_include_(p, from, name, nlen, angled, next, sdir, path, &used);
+done:
+	inc_used(p, used);
 	return f;
 }
 
@@ -3813,9 +3941,100 @@ static void hc_end(pp *p)
 	}
 }
 
+/*
+ * Read-ahead for a file entered for the first time: the first candidate of
+ * each unconditional #include "x" / <x> (the includer's directory, or the
+ * first search directory that exists) goes to the token cache's I/O
+ * threads, so that opening and reading it is off this thread by the time
+ * the lookup gets there.  The lookup tries that path first anyway: no extra
+ * I/O.  VPP_NOPREFETCH=1 turns it off.
+ */
+static int pf_on = -1;
+
+static void prefetch_includes(pp *p, const ctx *c)
+{
+	const pfile *fi = c->fi;
+	const vtok *vt = c->vt;
+	const char *cwd = p->o->cwd;
+	size_t cl = cwd ? strlen(cwd) : 0;
+	char buf[4096 + 16];
+
+	if (cl + 1 >= 2048)
+		return;
+	if (cwd) {
+		memcpy(buf, cwd, cl);
+		buf[cl++] = '/';
+	}
+	for (uint32_t k = 0, depth = 0; k < fi->ndir; k++) {
+		const pdir *d = &fi->dir[k];
+		uint32_t b = d->tok + 2, j;
+		const char *name, *fp;
+		size_t nl, dl;
+		bool angled;
+		int32_t mode, n = 0;
+
+		if (d->kind == D_IF || d->kind == D_IFDEF || d->kind == D_IFNDEF)
+			depth++;
+		else if (d->kind == D_ENDIF && depth)
+			depth--;
+		/* unconditional ones only (inside the include guard): others may not be wanted */
+		if ((d->kind != D_INCLUDE && d->kind != D_INCLUDE_NEXT && d->kind != D_IMPORT) || b >= d->end ||
+		    depth != (fi->guard ? 1u : 0u))
+			continue;
+		if (vt[b].kind == T_STRING && !(vt[b].flags & TF_DIRTY) && vt[b].len > 2) {
+			name = c->src + vt[b].off + 1;
+			nl = vt[b].len - 2;
+			angled = false;
+		} else if (vt[b].kind == T_LESS) {
+			for (j = b + 1; j < d->end && vt[j].kind != T_GREATER; j++)
+				;
+			if (j == d->end)
+				continue;
+			name = c->src + vt[b].off + 1;
+			nl = vt[j].off - vt[b].off - 1;
+			angled = true;
+		} else {
+			continue;
+		}
+		if (!nl || nl >= 1024 || name[0] == '/' || memchr(name, '\n', nl))
+			continue;
+		mode = inc_mode(p, c, angled, d->kind == D_INCLUDE_NEXT, &fp, &dl);
+		if (!angled && !(mode & 1)) {
+			size_t o = cwd && fp[0] != '/' ? cl : 0;
+
+			if (o + dl + nl < 4096) {
+				memcpy(buf + o, fp, dl);
+				memcpy(buf + o + dl, name, nl);
+				buf[o + dl + nl] = 0;
+				if (vdir_exists(buf, o + dl + nl)) {
+					vlex_prefetch(buf, o + dl + nl);
+					n++;
+				}
+			}
+		}
+		for (int32_t i = mode >> 2; i < p->o->ndirs && n < 1; i++) {
+			const char *dd = p->o->dirs[i];
+			size_t l = strlen(dd), o = cwd && dd[0] != '/' ? cl : 0;
+
+			if (o + l + nl + 2 >= 4096)
+				continue;
+			memcpy(buf + o, dd, l);
+			if (l && dd[l - 1] != '/')
+				buf[o + l++] = '/';
+			memcpy(buf + o + l, name, nl);
+			buf[o + l + nl] = 0;
+			if (vdir_exists(buf, o + l + nl)) {
+				vlex_prefetch(buf, o + l + nl);
+				n++;
+			}
+		}
+	}
+}
+
 static void enter_file(pp *p, const vlex_file *f, const char *path, int32_t sdir)
 {
-	const pfile *fi = pfile_get(f);
+	bool fresh;
+	const pfile *fi = pfile_get(f, &fresh);
 	const ctx *from = cur_file(p);
 	hkey *k = NULL;
 	uint8_t sys;
@@ -3868,9 +4087,20 @@ static void enter_file(pp *p, const vlex_file *f, const char *path, int32_t sdir
 	c->di = 0;
 	c->sdir = sdir;
 	c->spath = path;
+	{
+		const char *sl = strrchr(path, '/');
+
+		c->sdl = sl ? (uint32_t)(sl - path) + 1 : 0;
+	}
 	p->nfile++;
 	add_fent(p, c, f, path);
 	p->fe[c->fe].sys = sys;
+	if (fresh) {
+		if (pf_on < 0)
+			pf_on = !getenv("VPP_NOPREFETCH");
+		if (pf_on)
+			prefetch_includes(p, c);
+	}
 	if (k)
 		hc_begin(p, k);
 }
@@ -3885,7 +4115,24 @@ static void include(pp *p, ctx *c, uint32_t b, uint32_t e, int kind, uint32_t lo
 	const vlex_file *f;
 	int d = p->depth;
 	ptok t;
+	const incent *ie;
+	/* "x" or <x> as written: the name is the site's, so is the answer while the options and directory are */
+	_Atomic(const incent *) *site = b < e && (c->vt[b].kind == T_STRING || c->vt[b].kind == T_LESS) &&
+						p->sig != HNONE
+					    ? &((pfile *)c->fi)->inc[c->di - 1] : NULL;
 
+	if (site && (ie = atomic_load_explicit(site, memory_order_acquire))) {
+		const char *fp;
+		size_t dl;
+		int32_t mode = inc_mode(p, c, c->vt[b].kind == T_LESS, kind == D_INCLUDE_NEXT, &fp, &dl);
+
+		if (ie->sig == p->sig && ie->mode == mode && inc_valid(p, ie) && dl < ie->klen && !ie->key[dl] &&
+		    !memcmp(ie->key, fp, dl)) {
+			inc_used(p, ie->used);
+			enter_file(p, ie->f, ie->path, ie->sdir);
+			return;
+		}
+	}
 	push_line(p, c, b, e);
 	raw(p, &t);
 	if (t.kind == T_STRING || t.kind == T_LESS || t.kind == T_IDENT) {
@@ -3905,9 +4152,11 @@ static void include(pp *p, ctx *c, uint32_t b, uint32_t e, int kind, uint32_t lo
 		return;
 	}
 	pop_to(p, d);
-	f = find_include(p, c, buf, n, angled, kind == D_INCLUDE_NEXT, &sd, &path);
+	f = find_include(p, c, buf, n, angled, kind == D_INCLUDE_NEXT, &sd, &path, &ie);
 	if (!f)
 		fatal(p, loc, "'%.*s' file not found", (int)n, buf);
+	if (site && ie)
+		atomic_store_explicit(site, ie, memory_order_release);
 	enter_file(p, f, path, sd);
 }
 
@@ -4423,21 +4672,38 @@ void pp_set_fatal(pp *p, jmp_buf *jb)
 	p->fatal_jb = jb;
 }
 
+/* the distinct file names in entry order (a hash set: TUs enter ~1000 files) */
 size_t pp_files(const pp *p, const char **names, size_t max)
 {
+	uint32_t cap = 64, stk[1024], *tab;
 	size_t n = 0;
 
+	while (cap < 2 * p->nfe)
+		cap *= 2;
+	tab = cap <= 1024 ? stk : malloc(cap * sizeof(*tab));
+	if (!tab)
+		abort();
+	memset(tab, 0, cap * sizeof(*tab));
 	for (uint32_t i = 0; i < p->nfe; i++) {
 		const char *s = p->fe[i].spath;
-		bool dup = false;
+		uint64_t h = 14695981039346656037ull;
+		size_t l = 0;
+		uint32_t k;
 
 		if (p->fe[i].f == &p->builtin)
 			continue;
-		for (size_t j = 0; j < n && !dup; j++)
-			dup = !strcmp(names[j], s);
-		if (!dup && n < max)
+		for (; s[l]; l++)
+			h = (h ^ (unsigned char)s[l]) * 1099511628211ull;
+		for (k = (uint32_t)(h ^ (h >> 32)) & (cap - 1); tab[k]; k = (k + 1) & (cap - 1))
+			if (!strcmp(names[tab[k] - 1], s))
+				break;
+		if (!tab[k] && n < max) {
 			names[n++] = s;
+			tab[k] = (uint32_t)n;
+		}
 	}
+	if (tab != stk)
+		free(tab);
 	return n;
 }
 
