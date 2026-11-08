@@ -74,18 +74,21 @@ static _Atomic size_t shared_used;
 
 static void *salloc(size_t n)
 {
+	char *b0 = __atomic_load_n(&shared_base, __ATOMIC_ACQUIRE);
 	size_t off;
 
-	if (unlikely(!__atomic_load_n(&shared_base, __ATOMIC_ACQUIRE))) {
+	if (unlikely(!b0)) {
 		char *b = vm(SHARED_MAX), *z = NULL;
 
-		if (!__atomic_compare_exchange_n(&shared_base, &z, b, 0, __ATOMIC_ACQ_REL, __ATOMIC_ACQUIRE))
-			munmap(b, SHARED_MAX);
+		if (__atomic_compare_exchange_n(&shared_base, &z, b, 0, __ATOMIC_ACQ_REL, __ATOMIC_ACQUIRE))
+			b0 = b;
+		else
+			munmap(b, SHARED_MAX), b0 = z;	/* the winner's; never re-read the base plainly */
 	}
 	off = atomic_fetch_add(&shared_used, (n + 15) & ~(size_t)15);
 	if (off + n > SHARED_MAX)
 		abort();
-	return shared_base + off;
+	return b0 + off;
 }
 
 /* ---------------- per-file skeleton ---------------- */
@@ -264,7 +267,7 @@ static uint32_t file_line(const vlex_file *f, const pfile *cfi, uint32_t off)
 		for (uint32_t i = 0; i < f->size; i++)
 			if (f->src[i] == '\n')
 				l[c++] = i;
-		fi->nlines = c;
+		__atomic_store_n(&fi->nlines, c, __ATOMIC_RELAXED);	/* a loser writes it too */
 		if (!__atomic_compare_exchange_n(&fi->lines, &z, l, 0, __ATOMIC_ACQ_REL, __ATOMIC_ACQUIRE))
 			l = z;
 	}
@@ -1994,6 +1997,7 @@ typedef struct margs {
 	uint32_t *preln;
 	uint8_t *prest;		/* 0: not computed, 1: done */
 	size_t base;		/* tok is sv + base */
+	bool elided;		/* the variadic argument was left out (clang's isVarargsElidedUse) */
 } margs;
 
 /* "macro 'X' defined here": the #define's name, found from the body's file (errors only) */
@@ -2035,6 +2039,7 @@ static bool collect_(pp *p, const pmacro *m, const ptok *name, margs *a, ptok *r
 	const ptok *tok;
 	ptok t;
 
+	a->elided = false;
 	/* pre, then st, ln, preln, then prest: one allocation */
 	{
 		char *b = alloc(&p->tmp, slots * (sizeof(*a->pre) + 3 * sizeof(uint32_t) + 1));
@@ -2190,12 +2195,15 @@ done:
 			/* GNU: the variadic argument left out entirely */
 			a->st[k + 1] = end;
 			a->ln[k + 1] = 0;
+			a->elided = true;
 		} else {
 			error(p, t.loc, "too few arguments provided to function-like macro invocation");
 			macro_note(p, m);
 			p->svn = base;
 			return false;
 		}
+	} else if (np == 1 && va && !a->ln[0]) {
+		a->elided = true;	/* F() for F(...): no arguments at all */
 	} else if (np == 0 && a->ln[0]) {
 		error(p, name->loc, "too many arguments provided to function-like macro invocation");
 		p->svn = base;
@@ -2503,7 +2511,7 @@ static inline bool hashhash(const ptok *t)
 	return t->kind == T_HASHHASH && !(t->flags & PF_NOPASTE);
 }
 
-/* clang's maybeRemoveCommaBeforeVaArgs (gnu mode) */
+/* clang's maybeRemoveCommaBeforeVaArgs (gnu mode), only if the argument was elided */
 static void remove_va_comma(pp *p, size_t base, bool *ngs)
 {
 	if (p->svn == base || p->sv[p->svn - 1].kind != T_COMMA)
@@ -2635,7 +2643,7 @@ plain:
 		}
 		if (before_nonempty)
 			p->svn--;
-		if (va && k == np - 1)
+		if (va && k == np - 1 && a->elided)
 			remove_va_comma(p, base, &ngs);
 	}
 	*ngsp = ngs;
@@ -3897,20 +3905,21 @@ static char *pstrdup(pp *p, const char *s, size_t n)
 	return d;
 }
 
-unsigned long pp_stat_try, pp_stat_skip;
+_Atomic unsigned long pp_stat_try, pp_stat_skip;	/* VPP_TIME */
 
 /* the file at a candidate path, if any: misses in missing directories cost no syscall */
 static const vlex_file *try_path(const char *cwd, const char *path, size_t len)
 {
-	static int off = -1;
+	static _Atomic int off_ = -1;
+	int off = atomic_load_explicit(&off_, memory_order_relaxed);
 
 	if (off < 0)
-		off = getenv("VPP_NODIRCACHE") != NULL;
-	pp_stat_try++;
+		atomic_store_explicit(&off_, off = getenv("VPP_NODIRCACHE") != NULL, memory_order_relaxed);
+	atomic_fetch_add_explicit(&pp_stat_try, 1, memory_order_relaxed);
 	const vlex_file *f;
 
 	if (!off && (!cwd || path[0] == '/') && !vdir_exists(path, len)) {
-		pp_stat_skip++;
+		atomic_fetch_add_explicit(&pp_stat_skip, 1, memory_order_relaxed);
 		return NULL;
 	}
 	if (cwd && path[0] != '/') {
@@ -4501,7 +4510,8 @@ static void hc_why(const pp *p, const hkey *k, const hent *e)
 /* replay a matching entry for this #include; true if done */
 static bool hc_try(pp *p, hkey *k)
 {
-	static int dbg = -1;
+	static _Atomic int dbg_ = -1;
+	int dbg;
 	const hent *h = atomic_load_explicit(&k->head, memory_order_acquire);
 
 	for (const hent *e = h; e; e = e->next)
@@ -4509,8 +4519,8 @@ static bool hc_try(pp *p, hkey *k)
 			hc_apply(p, e);
 			return true;
 		}
-	if (dbg < 0)
-		dbg = getenv("VPP_HC_DEBUG") != NULL;
+	if ((dbg = atomic_load_explicit(&dbg_, memory_order_relaxed)) < 0)
+		atomic_store_explicit(&dbg_, dbg = getenv("VPP_HC_DEBUG") != NULL, memory_order_relaxed);
 	if (dbg && h)
 		hc_why(p, k, h);
 	return false;
@@ -5387,7 +5397,7 @@ static void bi_init(void)
 		memset(m, 0, sizeof(*m));
 		m->kind = MK_BUILTIN;
 		m->builtin = (uint8_t)bi[i].b;
-		m->name = vintern_copy(bi[i].n, strlen(bi[i].n));
+		m->name = vintern_cstr(bi[i].n);
 		m->body = no_body;
 		bi_macro[i] = m;
 	}
@@ -5430,7 +5440,15 @@ pp *pp_open(const pp_opts *o)
 			mset(p, bi_macro[i]->name, bi_macro[i]);
 	}
 
-	mf = try_path(o->cwd, o->main, strlen(o->main));
+	{
+		/* the caller's string is unpadded; vlex_get hashes by words (ASan) */
+		size_t ml = strlen(o->main);
+		char *mp = alloc(&p->perm, ml + 16);
+
+		memcpy(mp, o->main, ml);
+		memset(mp + ml, 0, 16);
+		mf = try_path(o->cwd, mp, ml);
+	}
 	if (!mf) {
 		char m[4200];
 		int l = snprintf(m, sizeof(m), "vcc: error: %s: cannot read\n", o->main);
@@ -5439,7 +5457,19 @@ pp *pp_open(const pp_opts *o)
 		pp_close(p);
 		return NULL;
 	}
-	enter_file(p, mf, o->main, -1);
+	{
+		/* a fatal error here (unbalanced conditionals) ends the TU, not the process (vccd) */
+		jmp_buf jb;
+
+		p->fatal_jb = &jb;
+		if (setjmp(jb)) {
+			pp_diag_summary(p);	/* ("1 error generated.", as clang) */
+			pp_close(p);
+			return NULL;
+		}
+		enter_file(p, mf, o->main, -1);
+		p->fatal_jb = NULL;
+	}
 	p->base_name = p->fe[0].name;
 	p->base_namelen = p->fe[0].namelen;
 
@@ -5467,17 +5497,23 @@ static inline __attribute__((always_inline)) void next_tok(pp *p, ptok *t)
 }
 
 /* the header cache's mode: text for pp_text, tokens for pp_next */
+static int hc_off;
+
+/* once: a thread that saw the flag but not hc_mem_max stored without a cap (TSan) */
+static void hc_env(void)
+{
+	const char *m = getenv("VPP_HC_MAX_MB");
+
+	hc_mem_max = m ? (size_t)atol(m) << 20 : (size_t)8 << 30;
+	hc_off = getenv("VPP_NOHC") != NULL;
+}
+
 static void hc_mode(pp *p, int mode)
 {
-	static int env = -1;
+	static pthread_once_t once = PTHREAD_ONCE_INIT;
 
-	if (env < 0) {
-		const char *m = getenv("VPP_HC_MAX_MB");
-
-		hc_mem_max = m ? (size_t)atol(m) << 20 : (size_t)8 << 30;
-		env = getenv("VPP_NOHC") != NULL;
-	}
-	p->hc = !env;
+	pthread_once(&once, hc_env);
+	p->hc = !hc_off;
 	p->tokmode = mode;
 }
 

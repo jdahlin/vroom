@@ -201,6 +201,17 @@ uint32_t vintern_copy(const char *s, size_t len)
 	return vintern(d, len, h);
 }
 
+uint32_t vintern_cstr(const char *s)
+{
+	char b[80] = { 0 };
+	size_t n = strlen(s);
+
+	if (n + 16 > sizeof(b))
+		abort();
+	memcpy(b, s, n);
+	return vintern_copy(b, n);
+}
+
 uint32_t vintern_count(void)
 {
 	return atomic_load(&nent) - 1;
@@ -220,8 +231,7 @@ static void init_once(void)
 	vintern_ents = reserve(MAX_ENT * sizeof(*vintern_ents));
 	copy_buf = reserve(COPY_MAX);
 	for (size_t i = 0; i < sizeof(kw) / sizeof(kw[0]); i++) {
-		size_t n = strlen(kw[i]);
-		uint32_t id = vintern_copy(kw[i], n);
+		uint32_t id = vintern_cstr(kw[i]);
 
 		if (id != i + 1) {
 			fprintf(stderr, "vcc: duplicate keyword %s\n", kw[i]);

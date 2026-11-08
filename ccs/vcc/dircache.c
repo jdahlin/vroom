@@ -41,24 +41,27 @@ static char *base;
 static _Atomic size_t used;
 #define DC_MAX (64ull << 20)
 
-unsigned long vdir_probes;
+_Atomic unsigned long vdir_probes;	/* VPP_TIME */
 
 static void *dalloc(size_t n)
 {
+	char *b0 = __atomic_load_n(&base, __ATOMIC_ACQUIRE);
 	size_t off;
 
-	if (!__atomic_load_n(&base, __ATOMIC_ACQUIRE)) {
+	if (!b0) {
 		char *b = mmap(NULL, DC_MAX, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANON, -1, 0), *z = NULL;
 
 		if (b == MAP_FAILED)
 			abort();
-		if (!__atomic_compare_exchange_n(&base, &z, b, 0, __ATOMIC_ACQ_REL, __ATOMIC_ACQUIRE))
-			munmap(b, DC_MAX);
+		if (__atomic_compare_exchange_n(&base, &z, b, 0, __ATOMIC_ACQ_REL, __ATOMIC_ACQUIRE))
+			b0 = b;
+		else
+			munmap(b, DC_MAX), b0 = z;	/* the winner's; never re-read base plainly (TSan) */
 	}
 	off = atomic_fetch_add(&used, (n + 15) & ~(size_t)15);
 	if (off + n > DC_MAX)
 		abort();
-	return base + off;
+	return b0 + off;
 }
 
 static dnode *node_get(const char *path, size_t plen)
@@ -94,7 +97,7 @@ static int dir_state(dnode *n)
 	if (s == D_EXISTS || s == D_MISSING)
 		return s;
 	if (s == D_UNKNOWN && atomic_compare_exchange_strong(&n->state, &s, D_PROBING)) {
-		vdir_probes++;
+		atomic_fetch_add_explicit(&vdir_probes, 1, memory_order_relaxed);
 		s = !stat(n->plen ? n->path : ".", &st) && S_ISDIR(st.st_mode) ? D_EXISTS : D_MISSING;
 		atomic_store_explicit(&n->state, s, memory_order_release);
 		return s;

@@ -913,6 +913,9 @@ uint32_t vlex(const char *s, size_t n, vtok *out, void *scratch)
 	 * take over for a token and come back here.
 	 */
 fast:
+#ifdef VLEX_SCALAR
+	DISPATCH();	/* reference build (fuzz/lexref.c): every token by its handler */
+#endif
 	if (unlikely(gap != p))
 		DISPATCH();	/* a token directly after a splice */
 	ENSURE((p >> 6) + 1);
@@ -1474,10 +1477,16 @@ static void publish(centry *e, bool ok)
 	atomic_store_explicit(&e->state, ok ? CE_OK : CE_MISSING, memory_order_release);
 }
 
+const vlex_file *(*vlex_get_hook)(const char *path, size_t len);
+
 const vlex_file *vlex_get(const char *path, size_t len)
 {
 	bool ins;
-	centry *e = centry_get(path, len, CE_LOADING, &ins);
+	centry *e;
+
+	if (unlikely(vlex_get_hook != NULL))
+		return vlex_get_hook(path, len);
+	e = centry_get(path, len, CE_LOADING, &ins);
 
 	if (ins) {
 		bool ok = load(&e->f, e->path);

@@ -7506,7 +7506,7 @@ static int find_loop(ecx *e, bool cont)
 }
 
 static void gen_stmt1(ecx *e, uint32_t n);
-static int leakchk = -1;
+static _Thread_local int leakchk = -1;	/* VCC_LEAKCHK: first leak per thread */
 
 /* every statement leaves the temporaries it found; VCC_LEAKCHK reports the first that does not */
 static void gen_stmt(ecx *e, uint32_t n)

@@ -22,6 +22,7 @@
  *
  * VCC_NODC=1 turns it off; VCC_DC_MAX_MB caps the memory (default 256).
  */
+#include <pthread.h>
 #include <stdatomic.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -66,7 +67,7 @@ static struct dcroot {
 
 static _Atomic uint64_t dc_mem, dc_max;
 static _Atomic unsigned long st_snap, st_restore, st_regions;
-static int dc_off = -1;
+static int dc_off;
 static _Atomic uint64_t tok_skip;
 
 
@@ -143,12 +144,16 @@ static inline uint32_t dec_loc(const coder *k, uint32_t l)
 		tag *tg_ = (tag *)(img)[A_TAGS];                                                 \
 		label *lb_ = (label *)(img)[A_LABELS];                                           \
 		pp_span *sp_ = (pp_span *)(img)[A_SPAN];                                         \
-		for (uint32_t i_ = 0; i_ < (c)->nsym; i_++)                                      \
+		for (uint32_t i_ = 0; i_ < (c)->nsym; i_++) {                                    \
 			sy_[i_].loc = FIX(sy_[i_].loc);                                          \
-		for (uint32_t i_ = 0; i_ < (c)->nnode; i_++)                                     \
+			sy_[i_].plb = FIX(sy_[i_].plb);                                          \
+			sy_[i_].ple = FIX(sy_[i_].ple);                                          \
+		}                                                                                \
+		for (uint32_t i_ = 0; i_ < (c)->nnode; i_++) {                                   \
 			nd_[i_].loc = FIX(nd_[i_].loc);                                          \
-		for (uint32_t i_ = 0; i_ < (c)->nnode; i_++)                                     \
-			sp_[i_].b = FIX(sp_[i_].b), sp_[i_].e = FIX(sp_[i_].e);                  \
+			sp_[i_].b = FIX(sp_[i_].b);                                              \
+			sp_[i_].e = FIX(sp_[i_].e);                                              \
+		}                                                                                \
 		for (uint32_t i_ = 0; i_ < (c)->nlabel; i_++)                                    \
 			lb_[i_].loc = FIX(lb_[i_].loc);                                          \
 		for (uint32_t i_ = 0; i_ < (c)->ntag; i_++) {                                    \
@@ -330,9 +335,10 @@ static void snap_restore(cc *c, const dcsnap *s, uint32_t base)
 	c->ty = keep.ty, c->params = keep.params, c->tags = keep.tags, c->syms = keep.syms;
 	c->nodes = keep.nodes, c->lists = keep.lists, c->ipool = keep.ipool, c->fpool = keep.fpool;
 	c->strs = keep.strs, c->labels = keep.labels, c->attr = keep.attr, c->asms = keep.asms;
-	c->sstack = keep.sstack, c->toplevel = keep.toplevel, c->tlasm = keep.tlasm, c->span = keep.span;
-	c->cases = keep.cases, c->capcase = keep.capcase;	/* (malloc'd by this TU; no switch is open here) */
-	c->ncase = c->case_base = 0;
+	c->sstack = keep.sstack, c->toplevel = keep.toplevel, c->tlasm = keep.tlasm;
+	c->span = keep.span;
+	/* malloc'd and per TU: the snapshot's would be shared (and realloc'ed) by every TU restoring it */
+	c->cases = keep.cases, c->ncase = keep.ncase, c->capcase = keep.capcase, c->case_base = keep.case_base;
 	c->heap = keep.heap, c->hend = keep.hend, c->ptrc = keep.ptrc;
 	c->hp = c->heap + s->a[A_HEAP].n;
 	c->dc = keep.dc;
@@ -395,14 +401,19 @@ static dcnode *child(dcnode *n, const void *e, unsigned ctr, bool make)
 
 /* ---------------- per TU ---------------- */
 
+static void dc_env(void)
+{
+	const char *m = getenv("VCC_DC_MAX_MB");
+
+	atomic_store(&dc_max, (uint64_t)(m ? atoll(m) : 256) << 20);
+	dc_off = getenv("VCC_NODC") != NULL;
+}
+
 void dc_begin(cc *c)
 {
-	if (dc_off < 0) {
-		const char *m = getenv("VCC_DC_MAX_MB");
+	static pthread_once_t once = PTHREAD_ONCE_INIT;
 
-		atomic_store(&dc_max, (uint64_t)(m ? atoll(m) : 256) << 20);
-		dc_off = getenv("VCC_NODC") != NULL;
-	}
+	pthread_once(&once, dc_env);	/* worker threads race to the first TU */
 	c->dc = NULL;
 	if (dc_off)
 		return;

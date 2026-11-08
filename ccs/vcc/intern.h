@@ -74,6 +74,8 @@ uint32_t vintern_long(const char *s, size_t len);
 uint32_t vintern_find(const char *s, size_t len, uint32_t hash);
 /* copies s unless interned (for spellings that are not immortal; s readable to s[16]) */
 uint32_t vintern_copy(const char *s, size_t len);
+/* vintern_copy of a NUL-terminated string with no padding (< 64 bytes) */
+uint32_t vintern_cstr(const char *s);
 uint32_t vintern_count(void);
 
 /*

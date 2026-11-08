@@ -23,10 +23,13 @@ clean:
 # from -MMD.  ccache is used when installed; disable with `make CCACHE=`.
 CCACHE    ?= $(shell command -v ccache 2>/dev/null)
 VCC_CC     = $(CCACHE) /usr/bin/clang
-VCC_CFLAGS = -std=c11 -O2 -Wall -Wextra -Wno-unused-parameter -D_DARWIN_C_SOURCE -DVCC_INCDIR='"$(abspath vcc/include)"'
-VCC_FAST   = $(VCC_CFLAGS) -O3 -mcpu=apple-m1 -pthread
+# VCC_SAN/VCC_OPT: set by the sanitizer variants (vcc-asan, vcc-tsan below)
+VCC_SAN   ?=
+VCC_OPT   ?= -O3 -mcpu=apple-m1
+VCC_CFLAGS = -std=c11 -O2 -Wall -Wextra -Wno-unused-parameter -D_DARWIN_C_SOURCE -DVCC_INCDIR='"$(abspath vcc/include)"' $(VCC_SAN)
+VCC_FAST   = $(VCC_CFLAGS) $(VCC_OPT) -pthread
 # -O3 also at link time: the driver passes it to ld, which then folds code
-VCC_LDFLAGS = -O3
+VCC_LDFLAGS = -O3 $(VCC_SAN)
 OBJ        = $(OUT)/obj
 
 vcc: $(OUT)/vcc $(OUT)/vld $(OUT)/vas $(OUT)/var $(OUT)/vccd $(OUT)/lextest $(OUT)/vpp $(OUT)/vlink $(OUT)/vasm
@@ -75,6 +78,18 @@ $(OBJ):
 
 -include $(wildcard $(OBJ)/*.d $(OBJ)/no/*.d)
 
+# ---- sanitizer variants of the vcc tools (AGENTS.md, "Sanitizers") ----
+# Own OUT (and so own obj/), -O1 -g; the normal build is unchanged.
+SAN_COMMON = -O1 -g -fno-omit-frame-pointer -Wno-deprecated-declarations
+vcc-asan:
+	$(MAKE) vcc OUT=../build/ccs-asan VCC_OPT="-O1 -mcpu=apple-m1" \
+		VCC_SAN="$(SAN_COMMON) -fsanitize=address,undefined"
+vcc-tsan:
+	$(MAKE) vcc OUT=../build/ccs-tsan VCC_OPT="-O1 -mcpu=apple-m1" \
+		VCC_SAN="$(SAN_COMMON) -fsanitize=thread"
+
+.PHONY: vcc-asan vcc-tsan
+
 # self: vcc compiles its own sources (Mach-O) and ld64 links stage 2 into
 # $(SELF); self-check builds stage 3 with stage 2 and requires identical objects.
 SELF ?= ../build/self
@@ -104,3 +119,44 @@ self-check: self
 	@echo "self-check: stage 2 and stage 3 objects identical"
 
 .PHONY: self self-check
+
+# ---- fuzzing (fuzz/; see AGENTS.md) ----
+# libFuzzer from Homebrew LLVM when it has one, else the standalone driver
+# (fuzz/driver.c: replay + blind mutation) with Apple clang.
+FUZZ_LIBFUZZER := $(wildcard $(LLVM)/lib/clang/*/lib/darwin/libclang_rt.fuzzer_osx.a)
+ifneq ($(FUZZ_LIBFUZZER),)
+FUZZ_CC = $(LLVM)/bin/clang
+FUZZ_ENGINE = -fsanitize=fuzzer
+FUZZ_DRIVER =
+else
+FUZZ_CC = /usr/bin/clang
+FUZZ_ENGINE =
+FUZZ_DRIVER = fuzz/driver.c
+endif
+FUZZ_CFLAGS = -std=gnu11 -g -O1 -mcpu=apple-m1 -D_DARWIN_C_SOURCE -pthread \
+	-fsanitize=address,undefined -fno-sanitize-recover=undefined -fno-omit-frame-pointer \
+	-Wall -Wno-unused-parameter
+FUZZ_OUT = $(OUT)/fuzz
+FUZZ_HDR = vcc/lex.h vcc/intern.h vcc/pp.h vcc/dircache.h
+
+fuzz: $(FUZZ_OUT)/fuzz-lex $(FUZZ_OUT)/fuzz-pp
+
+$(FUZZ_OUT):
+	mkdir -p $@
+
+$(FUZZ_OUT)/fuzz-lex: fuzz/fuzz-lex.c fuzz/lexref.c fuzz/fuzz.h $(FUZZ_DRIVER) $(LEX_SRC) $(FUZZ_HDR) | $(FUZZ_OUT)
+	$(FUZZ_CC) $(FUZZ_CFLAGS) $(FUZZ_ENGINE) fuzz/fuzz-lex.c fuzz/lexref.c $(FUZZ_DRIVER) $(LEX_SRC) -o $@
+
+$(FUZZ_OUT)/fuzz-pp: fuzz/fuzz-pp.c fuzz/fuzz.h $(FUZZ_DRIVER) vcc/pp.c vcc/dircache.c $(LEX_SRC) $(FUZZ_HDR) | $(FUZZ_OUT)
+	$(FUZZ_CC) $(FUZZ_CFLAGS) $(FUZZ_ENGINE) fuzz/fuzz-pp.c $(FUZZ_DRIVER) vcc/pp.c vcc/dircache.c $(LEX_SRC) -o $@
+
+# replay the regression inputs (fuzz/regress/{lex,pp}/): every one must pass
+fuzz-regress: fuzz
+	$(FUZZ_OUT)/fuzz-lex -runs=0 fuzz/regress/lex
+	$(FUZZ_OUT)/fuzz-pp -runs=0 -timeout=10 fuzz/regress/pp
+
+# the differential check (vpp against clang -E -P) on the regression and seed inputs
+fuzz-diff: $(OUT)/vpp
+	fuzz/pp-diff.py -j 4 fuzz/regress/pp fuzz/seeds/pp
+
+.PHONY: fuzz fuzz-regress fuzz-diff
