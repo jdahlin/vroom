@@ -73,11 +73,12 @@ static const uint8_t hi_tab[16] = {
  *            bit 2  may take '>' (-> :> %>)
  *            bit 3  may take ':' or '%' (<: <%)
  *            bit 4  punctuator (not '.')
- *            bit 5  needs a handler: quotes, '\\', control, '@', '`'
- *            bit 6  '/': with '/' or '*' a comment
- *            bit 7  '%': with ':' or '%' a digraph we leave to the handlers
- *   gtab[c]  bit 0 '+' or '-', bit 1 '=', bit 2 '>', bits 3, 7 ':' or '%',
- *            bit 6 '/' or '*'
+ *            bit 6  '/' or '%': with '/', '*', ':' or '%' left to the
+ *                   handlers (comments, digraphs; "%/" and "/:" too)
+ *            bit 7  needs a handler: quotes, '\\', control, '@', '`'
+ *   gtab[c]  bit 1 '=', bit 2 '>', bit 3 ':' or '%', bit 6 '/', '*', ':'
+ *            or '%', bit 7 '+' or '-'
+ * Masks whose property is in bit 7 go to mm4() as they are.
  */
 static uint8_t ttab[128], gtab[64];
 
@@ -98,24 +99,23 @@ static void init_struct_tables(void)
 			t |= 16;
 		if (c == '"' || c == '\'' || c == '\\' || c == '@' || c == '`' || c == 0x7f ||
 		    (c < 0x20 && !strchr(" \t\v\f\n\r", c)) || c == 0)
-			t |= 32;
-		if (c == '/')
-			t |= 64;
-		if (c == '%')
 			t |= 128;
+		if (c == '/' || c == '%')
+			t |= 64;
 		ttab[c] = t;
 	}
 	gtab['='] = 2;
 	gtab['>'] = 4;
-	gtab[':'] = gtab['%'] = 8 | 128;
+	gtab[':'] = gtab['%'] = 8 | 64;
 	gtab['/'] = gtab['*'] = 64;
-	gtab['+'] = gtab['-'] = 1;
+	gtab['+'] = gtab['-'] = 128;
 }
 
 enum { M_ID, M_WS, M_NL, M_DOT, M_DIG, M_P, M_PAIR, M_X, M_NS, M_COUNT };
 
 /*
- * 64 byte masks (0xff/0) to a 64-bit mask, for vectors loaded with vld4q:
+ * 64 byte masks to a 64-bit mask, for vectors loaded with vld4q (only bit
+ * 7 of each byte counts):
  * a[k] lane j is byte 4j + k, which the shift-insert chain puts at bit
  * 4j + k.  Five instructions instead of the eight of a pairwise-add tree.
  */
@@ -142,10 +142,10 @@ static void classify(const uint8_t *s, size_t from, size_t to, uint64_t *m[M_COU
 {
 	const uint8x16_t lo = vld1q_u8(lo_tab), hi = vld1q_u8(hi_tab);
 	const uint8x16_t nib = vdupq_n_u8(15), mid = vdupq_n_u8(0x1f), mdg = vdupq_n_u8(0x04);
-	const uint8x16_t mws = vdupq_n_u8(0xe0), mnl = vdupq_n_u8(0x80);
+	const uint8x16_t mws = vdupq_n_u8(0xe0);
 	const uint8x16_t dot = vdupq_n_u8('.'), k64 = vdupq_n_u8(64);
-	const uint8x16_t b1 = vdupq_n_u8(1), b16 = vdupq_n_u8(16), b32 = vdupq_n_u8(32);
-	const uint8x16_t pairb = vdupq_n_u8(0x0e), cmtb = vdupq_n_u8(0xc0);
+	const uint8x16_t b1 = vdupq_n_u8(1), b16 = vdupq_n_u8(16);
+	const uint8x16_t pairb = vdupq_n_u8(0x0e);
 
 	for (size_t b = from; b < to; b++) {
 		const uint8_t *q = s + 64 * b;
@@ -182,14 +182,14 @@ static void classify(const uint8_t *s, size_t from, size_t to, uint64_t *m[M_COU
 	} while (0)
 		MASK(M_P, vtstq_u8(t[k], b16));
 		MASK(M_PAIR, vorrq_u8(vtstq_u8(tg[k], pairb), vandq_u8(vtstq_u8(t[k], b1), vceqq_u8(v.val[k], vn[k]))));
-		MASK(M_X, vorrq_u8(vorrq_u8(vtstq_u8(t[k], b32), vtstq_u8(tg[k], cmtb)),
-				   vreinterpretq_u8_s8(vshrq_n_s8(vreinterpretq_s8_u8(v.val[k]), 7))));
+		/* bit 7: handler, non-ASCII, comment or digraph */
+		MASK(M_X, vorrq_u8(vorrq_u8(t[k], v.val[k]), vshlq_n_u8(tg[k], 1)));
 		MASK(M_ID, vtstq_u8(c[k], mid));
 		MASK(M_WS, vtstq_u8(c[k], mws));
-		MASK(M_NL, vtstq_u8(c[k], mnl));
+		MASK(M_NL, c[k]);
 		MASK(M_DIG, vtstq_u8(c[k], mdg));
 		MASK(M_DOT, vceqq_u8(v.val[k], dot));
-		MASK(M_NS, vtstq_u8(gn[k], b1));
+		MASK(M_NS, gn[k]);
 #undef MASK
 	}
 }
