@@ -93,7 +93,7 @@ def sh(cmd, timeout=60, **kw):
         return 'timeout', e.stdout or b'', e.stderr or b''
 
 def qemu(elf):
-    rc, out, err = sh([QEMU, '-M', 'virt', '-cpu', 'cortex-a57', '-m', '256M', '-nographic',
+    rc, out, err = sh([QEMU, '-M', 'virt', '-cpu', 'max', '-m', '256M', '-nographic',
                        '-monitor', 'none', '-semihosting', '-kernel', elf], timeout=20,
                       stdin=subprocess.DEVNULL)
     return rc, out.decode('latin-1').replace('\r\n', '\n')

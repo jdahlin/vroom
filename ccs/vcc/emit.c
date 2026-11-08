@@ -4943,6 +4943,33 @@ runtime:
 		}
 		return v;
 	}
+	case BI_ISNAN: case BI_ISINF: case BI_ISFINITE: case BI_SIGNBIT: case BI_ISNORMAL: {
+		cval cv;
+
+		if (cc_eval(c, n, &cv) && cv.kind == CV_INT)
+			return vconst(cv.i);
+		/* on the bit pattern: sign out (<< 1), then the exponent against all ones */
+		qty at = N(arg[0])->ty;
+		int d = fpk(e, at), bits = d ? 64 : 32, mant = d ? 52 : 23, r;
+
+		v = gen(e, arg[0]);
+		r = toreg(e, &v);
+		if (x->aux == BI_SIGNBIT) {
+			shift_imm(e, I_LSRV, d, r, r, bits - 1);
+			return vreg(r);
+		}
+		shift_imm(e, I_LSLV, d, r, r, 1);
+		if (x->aux == BI_ISNORMAL) {
+			shift_imm(e, I_LSRV, d, r, r, mant + 1);
+			opi(e, I_SUBI, d, r, r, 1);
+			opi(e, I_SUBSI, d, ZR, r, (bits == 64 ? 0x7ff : 0xff) - 1);
+			cset(e, r, C_LO);
+			return vreg(r);
+		}
+		opi(e, I_SUBSI, d, ZR, r, d ? (int64_t)0xffe0000000000000ULL : 0xff000000LL);
+		cset(e, r, x->aux == BI_ISNAN ? C_HI : x->aux == BI_ISINF ? C_EQ : C_LO);
+		return vreg(r);
+	}
 	default: {
 		cval cv;
 
@@ -6174,8 +6201,6 @@ static void gen_switch(ecx *e, uint32_t n)
 	val v = gen(e, x->a);
 	uint32_t base = e->ncases, dflt = 0, lbrk = newlabel(e);
 
-	if (is_wide(c, ct))
-		efatal(e, x->loc, "128-bit switch is not supported");
 	collect_cases(e, x->b);
 	for (uint32_t k = base; k < e->ncases; k++) {
 		uint32_t cn = e->cases[k];
@@ -6199,6 +6224,32 @@ static void gen_switch(ecx *e, uint32_t n)
 			}
 		}
 		jump(e, target);
+	} else if (is_wide(c, ct)) {
+		/* 128-bit: v - lo <= hi - lo, unsigned, in two words (a single value: hi == lo) */
+		int t0 = treg(e), t1 = treg(e);
+
+		toreg2(e, &v, is_signed(c, ct));
+		for (uint32_t k = base; k < e->ncases; k++) {
+			const node *cn = N(e->cases[k]);
+			u128 lo, d;
+
+			if (cn->op != N_CASE)
+				continue;
+			lo = (u128)c->ipool[cn->a], d = (u128)c->ipool[cn->b] - lo;
+			movi(e, 1, t0, (int64_t)(uint64_t)lo);
+			movi(e, 1, t1, (int64_t)(uint64_t)(lo >> 64));
+			op3(e, I_SUBS, 1, R_X16, v.r, t0);
+			op3(e, I_SBC, 1, R_X17, v.r2, t1);
+			movi(e, 1, t0, (int64_t)(uint64_t)d);
+			movi(e, 1, t1, (int64_t)(uint64_t)(d >> 64));
+			op3(e, I_SUBS, 1, ZR, t0, R_X16);
+			op3(e, I_SBCS, 1, ZR, t1, R_X17);
+			bcond(e, C_HS, e->caselbl[e->cases[k]]);
+		}
+		tfree(e, t0);
+		tfree(e, t1);
+		vfree(e, &v);
+		jump(e, dflt);
 	} else {
 		int r = toreg(e, &v);
 
@@ -7383,7 +7434,14 @@ static void emit_function(ecx *e, uint32_t s)
 		bind *bd = binding(e, p);
 		uint64_t sz = tsize(c, pt);
 
-		classify(e, pt, &ngrn, &nsaa, &ab);
+		/* a K&R definition without a prototype gets a float as a double (default promotions) */
+		bool kfl = (T(c, c->syms[s].ty)->flags & TF_NOPROTO) && KIND(c, pt) == TY_FLOAT;
+
+		classify(e, kfl ? prim(TY_DOUBLE) : pt, &ngrn, &nsaa, &ab);
+		if (kfl && ab.kind == A_VREG) {
+			word(e, 0x1e624000u | (unsigned)ab.reg << 5 | ab.reg);	/* fcvt s, d */
+			ab.size = 4;
+		}
 		bd->inst = F.inst;
 		bd->reg = 0xff;
 		switch (ab.kind) {

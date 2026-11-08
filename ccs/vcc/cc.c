@@ -1425,6 +1425,14 @@ static const builtin builtins[] = {
 	{ "__atomic_add_fetch", BI_ATOMIC_ADD_FETCH, 0, "v." }, { "__atomic_sub_fetch", BI_ATOMIC_SUB_FETCH, 0, "v." },
 	{ "__atomic_and_fetch", BI_ATOMIC_AND_FETCH, 0, "v." }, { "__atomic_or_fetch", BI_ATOMIC_OR_FETCH, 0, "v." },
 	{ "__atomic_xor_fetch", BI_ATOMIC_XOR_FETCH, 0, "v." },
+	/* legacy __sync_*: the __atomic_* forms with seq_cst (sig "s.": atomic_call appends the order) */
+	{ "__sync_fetch_and_add", BI_ATOMIC_FETCH_ADD, 0, "s." }, { "__sync_fetch_and_sub", BI_ATOMIC_FETCH_SUB, 0, "s." },
+	{ "__sync_fetch_and_and", BI_ATOMIC_FETCH_AND, 0, "s." }, { "__sync_fetch_and_or", BI_ATOMIC_FETCH_OR, 0, "s." },
+	{ "__sync_fetch_and_xor", BI_ATOMIC_FETCH_XOR, 0, "s." },
+	{ "__sync_add_and_fetch", BI_ATOMIC_ADD_FETCH, 0, "s." }, { "__sync_sub_and_fetch", BI_ATOMIC_SUB_FETCH, 0, "s." },
+	{ "__sync_and_and_fetch", BI_ATOMIC_AND_FETCH, 0, "s." }, { "__sync_or_and_fetch", BI_ATOMIC_OR_FETCH, 0, "s." },
+	{ "__sync_xor_and_fetch", BI_ATOMIC_XOR_FETCH, 0, "s." },
+	{ "__sync_lock_test_and_set", BI_ATOMIC_EXCHANGE_N, 0, "s." },
 	{ "__atomic_thread_fence", BI_ATOMIC_THREAD_FENCE, 0, "vi" },
 	{ "__atomic_signal_fence", BI_ATOMIC_SIGNAL_FENCE, 0, "vi" },
 	{ "__atomic_always_lock_free", BI_ATOMIC_LOCK_FREE, 1, "bzP" },
@@ -2768,6 +2776,8 @@ static uint32_t atomic_call(cc *c, const builtin *b, uint32_t loc)
 	args_list(c, &args);
 	for (uint32_t i = 0; i < args.n; i++)
 		args.v[i] = decay(c, args.v[i]);
+	if (b->sig[0] == 's' && args.n == 2)	/* __sync_*: sequentially consistent */
+		vpush(c, &args, mk_int(c, 5, prim(TY_INT), loc));
 	if ((int)args.n != want) {
 		error(c, loc, "too %s arguments to function call", (int)args.n < want ? "few" : "many");
 		return mk_int(c, 0, prim(TY_INT), loc);
@@ -5880,6 +5890,8 @@ static void kr_params(cc *c, const declr *fd)
 {
 	uint8_t seen[256] = { 0 };
 
+	/* tags declared here belong to the function, not the file (approximation: not seen by the body) */
+	scope_open(c);
 	while (!is(c, T_LBRACE)) {
 		dspec ds;
 
@@ -5921,6 +5933,7 @@ static void kr_params(cc *c, const declr *fd)
 		}
 		expect(c, T_SEMI, "';'");
 	}
+	scope_close(c);
 	if (!c->o->implicit_int)
 		for (uint32_t i = 0; i < fd->npsyms && i < sizeof(seen); i++)
 			if (!seen[i]) {
