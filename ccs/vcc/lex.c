@@ -720,12 +720,15 @@ static __attribute__((noinline)) uint32_t intern_dirty(const char *s, size_t st,
 	return vintern_copy(tmp, l);
 }
 
-/* intern the identifiers at byte offsets il[0..ni) of out (a loop of its own: registers) */
+/*
+ * intern the identifiers il[0..ni): their token addresses truncated to 32
+ * bits, taken relative to out (a loop of its own: registers)
+ */
 static __attribute__((noinline)) void intern_list(vintern_cache *ic, const char *s, vtok *out,
 						  const uint32_t *il, uint32_t ni)
 {
 	for (uint32_t i = 0; i < ni; i++) {
-		vtok *k = (vtok *)((char *)out + il[i]);
+		vtok *k = (vtok *)((char *)out + (uint32_t)(il[i] - (uint32_t)(uintptr_t)out));
 
 		k->id = vintern_fast(ic, s + k->off, k->len);
 	}
@@ -809,7 +812,7 @@ __attribute__((destructor)) static void stat_dump(void)
 	else if (fl & TF_DIRTY)						\
 		i_ = intern_dirty(s, st, p);				\
 	else if (gap == st)						\
-		il[ni++] = (uint32_t)((char *)t - (char *)out);		\
+		il[ni++] = (uint32_t)(uintptr_t)t;			\
 	else								\
 		i_ = vintern_fast(ic, s + st, p - st);			\
 	t->off = (uint32_t)gap;						\
@@ -951,7 +954,8 @@ fast:
 		 */
 		uint64_t rs = __builtin_bitreverse64(S);
 		uint64_t re = __builtin_bitreverse64(B & ~((W << 1) | 1));
-		unsigned last = 0, pend = fl;
+		unsigned pend = fl;
+		vtok *const t0 = t;
 
 		/*
 		 * No test of rs: when the starts run out, the next end is at
@@ -977,15 +981,19 @@ fast:
 			t->kind = (uint8_t)kind;
 			t->flags = (uint8_t)(f | pend);
 			pend = 0;
-			il[ni] = (uint32_t)((char *)t - (char *)out);
+			/* see intern_list(); the asm keeps the compiler from a second induction variable */
+			__asm__("" : "+r"(t));
+			il[ni] = (uint32_t)(uintptr_t)t;
 			ni += kind == T_IDENT;
 			t++;
-			last = e;
 			rs ^= (1ull << 63) >> o;
 			re ^= (1ull << 63) >> e;
 		}
 		fl = pend;
-		if (likely(last)) {
+		if (likely(t != t0)) {
+			/* the end of the last token */
+			const unsigned last = (unsigned)(t[-1].off + t[-1].len - p);
+
 			/*
 			 * Only whitespace up to the X: take it and go to the
 			 * handler, instead of a window that finds just that.
