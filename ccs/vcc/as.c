@@ -110,17 +110,17 @@ static void *rget(Region *r, size_t n)
 }
 
 /* ASCII classes without libc's locale lookups (hot in the scanner) */
-enum { C_D = 1, C_X = 2, C_A = 4, C_S = 8, C_I = 16, C_W = 32 };	/* C_W: blanks ws() skips */
+enum { C_D = 1, C_X = 2, C_A = 4, C_S = 8, C_I = 16, C_W = 32, C_E = 64 };	/* C_W: blanks ws() skips; C_E: starts an immediate operand */
 static const uint8_t cclass[256] = {
-	['0' ... '9'] = C_D | C_X | C_I, ['a' ... 'f'] = C_A | C_X | C_I, ['A' ... 'F'] = C_A | C_X | C_I,
+	['0' ... '9'] = C_D | C_X | C_I | C_E, ['#'] = C_E, [':'] = C_E, ['('] = C_E, ['-'] = C_E, ['+'] = C_E, ['~'] = C_E, ['a' ... 'f'] = C_A | C_X | C_I, ['A' ... 'F'] = C_A | C_X | C_I,
 	['g' ... 'z'] = C_A | C_I, ['G' ... 'Z'] = C_A | C_I, ['_'] = C_I, ['.'] = C_I, ['$'] = C_I,
 	[' '] = C_S | C_W, ['\t'] = C_S | C_W, ['\n'] = C_S, ['\v'] = C_S | C_W, ['\f'] = C_S | C_W, ['\r'] = C_S | C_W,
 };
 static inline int c_digit(int c) { return (unsigned)c - '0' < 10; }
 static inline int c_xdigit(int c) { return cclass[(uint8_t)c] & C_X; }
-static inline int c_alpha(int c) { return cclass[(uint8_t)c] & C_A; }
 static inline int c_lower(int c) { return (unsigned)c - 'A' < 26 ? c | 0x20 : c; }
 static inline int isidc(int c) { return cclass[(uint8_t)c] & C_I; }
+
 
 static Sv svdup(As *a, const char *s, size_t n)
 {
@@ -146,7 +146,7 @@ static int err(As *a, const char *fmt, ...)
 	return -1;
 }
 
-static inline int isids(int c) { return c_alpha(c) || c == '_' || c == '.' || c == '$'; }
+static inline int isids(int c) { return (cclass[(uint8_t)c] & (C_I | C_D)) == C_I; }	/* letter _ . $ */
 static inline const char *ws(const char *p, const char *e) { while (p < e && (cclass[(uint8_t)*p] & C_W)) p++; return p; }
 static inline int sveq(Sv a, const char *s) { size_t n = strlen(s); return a.n == n && !memcmp(a.s, s, n); }
 static inline int sveqi(const char *p, size_t n, const char *s)
@@ -2116,14 +2116,14 @@ static int ltorg(As *a)
 
 int as_trace;	/* print each instruction statement and its encoding (testing) */
 
-static int instruction(As *a, const char *p, const char *e)
+/* p: the statement from its mnemonic, which is wn bytes long */
+static int instruction(As *a, const char *p, const char *e, size_t wn)
 {
 	const char *p0 = p;
 	const char *s = p;
-	while (p < e && (isidc((unsigned char)*p))) p++;
+	p += wn;
 	char mn[32];
-	(void)0;
-	size_t mlen = (size_t)(p - s);
+	size_t mlen = wn;
 	if (mlen >= sizeof mn) return err(a, "invalid instruction mnemonic");
 	for (size_t i = 0; i < mlen; i++) mn[i] = (char)c_lower((unsigned char)s[i]);
 	mn[mlen] = 0;
@@ -2189,7 +2189,7 @@ static int instruction(As *a, const char *p, const char *e)
 				p++;
 				op->idx = (uint8_t)ix; op->hasidx = 1;
 			}
-		} else if (c == '#' || c == ':' || c == '(' || c == '-' || c == '+' || c == '~' || c_digit((unsigned char)c)) {
+		} else if (cclass[(uint8_t)c] & C_E) {	/* # : ( - + ~ digit */
 			if (parse_imm(a, &p, e, op)) return -1;
 		} else if (isids((unsigned char)c)) {
 			const char *t = p;
@@ -2498,7 +2498,7 @@ static int statement(As *a, const char *p, const char *e)
 	Macro *m = find_macro(a, w.s, w.n);
 	if (m) return invoke(a, m, w.s + w.n, e);
 	if (w.s[0] == '.') return directive(a, w, w.s + w.n, e);
-	return instruction(a, p, e);
+	return instruction(a, w.s, e, w.n);
 }
 
 /* ---------------------------------------------------------------- driver */
