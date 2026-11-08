@@ -9,6 +9,8 @@ file-scope struct, union, enum and typedef, sizeof of every global, every
 enumerator's value and type) and appends them to clang's own -E output of the
 TU (work/ppref, from vcc-diff.py ref); clang -fsyntax-only on that file then
 fails on any claim vcc got wrong.
+
+--bin-dir DIR (or VCC_BIN=DIR) picks the vpp binary, as in vcc-diff.py.
 """
 import os, re, subprocess, sys, tempfile, time
 from multiprocessing import Pool
