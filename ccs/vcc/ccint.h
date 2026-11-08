@@ -140,6 +140,8 @@ struct cc {
 	uint32_t ntlasm;
 	uint32_t ndiag;		/* diagnostics reported */
 	struct dcst *dc;	/* declaration cache (ccsnap.c), NULL: off */
+	struct dop *dops;	/* declarator operations (cc.c): a per-TU stack in the heap */
+	uint32_t ndops;
 };
 
 

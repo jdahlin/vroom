@@ -4035,8 +4035,9 @@ static void struct_body(cc *c, uint32_t ti);
 static void enum_body(cc *c, uint32_t ti, attrs *after);
 static void declarator(cc *c, declr *d, bool abstract_ok, uint32_t *first, uint32_t *nops);
 
-static _Thread_local dop *tl_dops;
-static _Thread_local uint32_t tl_ndops;
+/* in the cc, not _Thread_local: each such access was a call to _tlv_get_addr */
+#define tl_dops (c->dops)
+#define tl_ndops (c->ndops)
 
 static qty int_type(cc *c, int nlong, int sgn, int base, uint32_t loc)
 {
@@ -6638,7 +6639,7 @@ static void cc_init(cc *c, pp *p, const cc_opts *o)
 	c->o = o;
 	cc_reserve(c);
 	c->hend = c->heap + ((size_t)1 << 32);
-	tl_dops = halloc(c, DOPS_MAX * sizeof(dop));
+	c->dops = halloc(c, DOPS_MAX * sizeof(dop));
 	tl_ndops = 0;
 	c->tyhcap = 1 << 16;
 	c->tyhash = halloc(c, c->tyhcap * sizeof(uint32_t));
