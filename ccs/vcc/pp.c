@@ -305,6 +305,7 @@ enum { MK_OBJ, MK_FUNC, MK_BUILTIN };
 enum {
 	MF_VARIADIC = 1, MF_PASTE = 2, MF_VAOPT = 4,
 	MF_BADHASH = 8,		/* '#' not before a parameter: an error unless assembler */
+	MF_HASH = 16,		/* a '#' in the body */
 };
 enum {
 	B_NONE, B_FILE, B_LINE, B_COUNTER, B_DATE, B_TIME, B_TIMESTAMP,
@@ -1966,6 +1967,69 @@ static uint32_t va_opt(pp *p, const pmacro *m, margs *a, uint32_t i, uint32_t to
 	return e;
 }
 
+/*
+ * subst() for a function-like macro without '#', '##' or __VA_OPT__ (most):
+ * every parameter is replaced by its pre-expanded argument, so the result's
+ * size is known and it is built in place, without sv.
+ */
+static void subst_simple(pp *p, const pmacro *m, margs *a, uint8_t nf, uint32_t eloc)
+{
+	const vtok *body = m->body;
+	const uint8_t *pidx = m->pidx;
+	const char *src = m->src;
+	uint32_t nb = m->nbody, n = 0;
+	bool ngs = false;
+	ptok *r, *w;
+
+	if (pidx) {
+		for (uint32_t i = 0; i < nb; i++) {
+			uint32_t k = pidx[i];
+
+			if (k && !a->prest[k - 1])
+				preexpand(p, a, k - 1);
+		}
+		for (uint32_t i = 0; i < nb; i++)
+			n += pidx[i] ? a->preln[pidx[i] - 1] : 1;
+	} else {
+		n = nb;
+	}
+	if (!n) {
+		p->pend |= nf;
+		return;
+	}
+	r = w = alloc(&p->tmp, n * sizeof(ptok));
+	for (uint32_t i = 0; i < nb; i++) {
+		const vtok *cur = &body[i];
+		uint32_t k = pidx ? pidx[i] : 0;
+
+		if (i && (cur->flags & TF_SPACE))
+			ngs = true;
+		if (!k) {
+			vfill(w, cur, src, eloc);
+			w->flags = (w->flags & ~(TF_SOL | TF_SPACE)) | (ngs ? TF_SPACE : 0);
+			ngs = false;
+			w++;
+			continue;
+		}
+		{
+			const ptok *at = a->pre[k - 1];
+			uint32_t an = a->preln[k - 1];
+
+			if (!an)
+				continue;
+			memcpy(w, at, an * sizeof(ptok));
+			for (uint32_t j = 0; j < an; j++)
+				if (unlikely(w[j].kind == T_HASHHASH))
+					w[j].flags |= PF_NOPASTE;
+			w->flags = (w->flags & ~(TF_SOL | TF_SPACE)) | (ngs ? TF_SPACE : 0);
+			ngs = false;
+			w += an;
+		}
+	}
+	push_ptok(p, r, n, m->name, 0x80 | nf, 0);
+	mdisable(p, m->name);
+}
+
 static int subst(pp *p, const pmacro *m, const ptok *name, margs *a, uint32_t eloc)
 {
 	const vtok *body = m->body;
@@ -1976,6 +2040,10 @@ static int subst(pp *p, const pmacro *m, const ptok *name, margs *a, uint32_t el
 	size_t base;
 	ptok *r;
 
+	if (a && !(m->flags & (MF_PASTE | MF_VAOPT | MF_HASH))) {
+		subst_simple(p, m, a, nf, eloc);
+		return 0;
+	}
 	/* pre-expand first: it pushes contexts and uses sv */
 	if (a && pidx) {
 		for (uint32_t i = 0; i < nb; i++) {
@@ -2882,6 +2950,8 @@ static const char *parse_define(const vtok *vt, uint32_t b, uint32_t e, pmacro *
 			m->flags |= MF_PASTE;
 		if (vt[j].kind == T_IDENT && vt[j].id == KW_VA_OPT)
 			m->flags |= MF_VAOPT;
+		if (vt[j].kind == T_HASH)
+			m->flags |= MF_HASH;
 	}
 	if (m->nbody && (m->body[0].kind == T_HASHHASH || m->body[m->nbody - 1].kind == T_HASHHASH))
 		return "'##' cannot appear at either end of a macro expansion";
