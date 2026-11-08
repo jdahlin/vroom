@@ -1088,11 +1088,19 @@ static void print_ins(cc *c, tbuf *b, const ins *i, uint32_t fid, const char *ra
  * Branches inside a function without inline asm are resolved here; with
  * inline asm (which may name the labels: asm goto) labels are .LBB symbols.
  */
-enum { IT_TEXT = 1, IT_CODE, IT_DATA, IT_LABEL, IT_BYTES };
+enum { IT_TEXT = 1, IT_CODE, IT_DATA, IT_LABEL, IT_BYTES, IT_SYMHDR, IT_FEND, IT_OSIZE };
 typedef struct item { uint32_t kind, len; } item;	/* len payload bytes follow, padded to 8 */
 typedef struct code_hdr { uint32_t fid, nin, nraw, nlabel, sym_labels, pad; } code_hdr;
 typedef struct data_hdr { uint64_t size, n; uint32_t nrel, zero; } data_hdr;
 typedef struct ireloc { uint64_t off; uint32_t ref, seq; int64_t add; } ireloc;
+/*
+ * A symbol's header after its section directive, what the assembler does
+ * for ".globl/.weak s; .hidden/.protected s; .p2align p2; .type s,@function
+ * or @object; s:" (IT_SYMHDR), for ".Lfe<s>: .size s, .Lfe<s>-s" (IT_FEND)
+ * and ".size s, n" (IT_OSIZE), without the text.
+ */
+typedef struct symhdr { uint32_t sym; uint8_t bind, vis, p2, fn; } symhdr;	/* bind: 0, STB_GLOBAL, STB_WEAK */
+typedef struct osize { uint32_t sym, pad; uint64_t size; } osize;
 
 static inline bool direct(const ecx *e) { return e->E->o->emit == 2 && !e->E->objtext; }
 
@@ -1732,6 +1740,65 @@ static int r_data(rctx *R, const data_hdr *h)
 	return 0;
 }
 
+static int r_symhdr(rctx *R, const symhdr *h)
+{
+	ElfObj *o = R->o;
+	uint32_t y = r_sym(R, REF(RK_SYM, h->sym)), frag;
+
+	if (h->bind) {
+		elf_reg(o, y);
+		elf_bind(o, y, h->bind);
+		elf_symp(o, y)->flags &= ~ESYM_TEMP;
+	}
+	if (h->vis) {
+		elf_reg(o, y);
+		elf_vis(o, y, h->vis);
+		elf_symp(o, y)->flags &= ~ESYM_TEMP;
+	}
+	frag = as_frag(R->as);
+	elf_align(o, frag, h->p2, (elf_sec(o, elf_frag(o, frag)->sec)->flags & SHF_EXECINSTR) != 0, 0, 0);
+	elf_reg(o, y);
+	elf_type(o, y, h->fn ? STT_FUNC : STT_OBJECT);
+	return as_label(R->as, y);
+}
+
+static int r_fend(rctx *R, uint32_t s)
+{
+	ElfObj *o = R->o;
+	uint32_t y = r_sym(R, REF(RK_SYM, s)), l;
+	ElfVal a, b;
+
+	R->nb.n = 0;
+	tb_s(&R->nb, ".Lfe");
+	tb_u(&R->nb, s);
+	l = as_sym(R->as, R->nb.p, R->nb.n);
+	if (as_label(R->as, l))
+		return -1;
+	/* .size s, .Lfe<s>-s: the operands as the expression parser sees them, then folded */
+	a = as_val(R->as, l, 0);
+	b = as_val(R->as, y, 0);
+	if (a.sub || b.sub || (!b.add && b.c))
+		return r_fail(R, "vcc: unexpected .size operands");
+	{
+		ElfVal v = { a.add, b.add, a.c - b.c };
+		ElfSym *x = v.add ? elf_symp(o, v.add) : NULL, *z = v.sub ? elf_symp(o, v.sub) : NULL;
+
+		if (v.add && v.add == v.sub) {
+			v.add = v.sub = 0;
+		} else if (x && z && (x->flags & ESYM_DEFINED) && (z->flags & ESYM_DEFINED) && x->frag == z->frag) {
+			v.c += (int64_t)x->value - (int64_t)z->value;
+			v.add = v.sub = 0;
+		}
+		if (!v.add && !v.sub) {
+			elf_symp(o, y)->size = (uint64_t)v.c;
+			elf_symp(o, y)->flags &= ~ESYM_SIZE_EXPR;
+		} else {
+			elf_size_expr(o, y, v);
+		}
+	}
+	return 0;
+}
+
 /* replay one chunk's items */
 static int r_chunk(rctx *R, const char *p, size_t n)
 {
@@ -1755,6 +1822,20 @@ static int r_chunk(rctx *R, const char *p, size_t n)
 		case IT_LABEL:
 			r = as_label(R->as, r_sym(R, *(const uint32_t *)q));
 			break;
+		case IT_SYMHDR:
+			r = r_symhdr(R, (const symhdr *)q);
+			break;
+		case IT_FEND:
+			r = r_fend(R, *(const uint32_t *)q);
+			break;
+		case IT_OSIZE: {
+			const osize *z = (const osize *)q;
+			ElfSym *y = elf_symp(R->o, r_sym(R, REF(RK_SYM, z->sym)));
+
+			y->size = z->size;
+			y->flags &= ~ESYM_SIZE_EXPR;
+			break;
+		}
 		case IT_BYTES:
 			if (it->len) {
 				elf_data(R->o, as_frag(R->as));
@@ -6350,6 +6431,7 @@ static void sym_header(ecx *e, tbuf *b, uint32_t s, bool fn, const char *defsec,
 	const sym *y = &c->syms[s];
 	const attrs *a = sym_attrs(c, s);
 	bool global = y->sc != SC_STATIC && y->depth == 0 && y->name;
+	size_t h = it_open(e, IT_TEXT);
 
 	if (a->section) {
 		const char *sn = c->strs[a->section - 1].s;
@@ -6361,6 +6443,24 @@ static void sym_header(ecx *e, tbuf *b, uint32_t s, bool fn, const char *defsec,
 			 (QQ(y->ty) & Q_CONST) && !strncmp(sn, ".rodata", 7) ? "\",\"a\",@progbits\n" : "\",\"aw\",@progbits\n");
 	} else {
 		tb_s(b, defsec);
+	}
+	if (h != SIZE_MAX) {
+		symhdr *sh;
+
+		it_close(e, h);
+		h = it_open(e, IT_SYMHDR);
+		sh = it_room(e, sizeof *sh);
+		*sh = (symhdr){ .sym = s, .p2 = (uint8_t)__builtin_ctz(align ? align : 1), .fn = fn };
+		if (global) {
+			sh->bind = (y->flags & SF_WEAK) ? STB_WEAK : STB_GLOBAL;
+			if (a->visibility) {
+				const char *v = c->strs[a->visibility - 1].s;
+
+				sh->vis = !strcmp(v, "hidden") ? STV_HIDDEN : !strcmp(v, "protected") ? STV_PROTECTED : 0;
+			}
+		}
+		it_close(e, h);
+		return;
 	}
 	if (global) {
 		tb_s(b, (y->flags & SF_WEAK) ? "\t.weak\t" : "\t.globl\t");
@@ -6397,9 +6497,7 @@ static void finish_direct(ecx *e, uint32_t s, uint32_t align, const int *cs, int
 
 	b->n = (b->n + 7) & ~(size_t)7;
 	start = b->n;
-	h = it_open(e, IT_TEXT);
 	sym_header(e, b, s, true, "\t.text\n", align);
-	it_close(e, h);
 	for (uint32_t k = 0; k < e->nin && !sym_labels; k++)
 		sym_labels = e->in[k].op == I_RAW;
 	h = it_open(e, IT_CODE);
@@ -6430,22 +6528,16 @@ static void finish_direct(ecx *e, uint32_t s, uint32_t align, const int *cs, int
 	if (sym_labels)
 		memcpy(it_room(e, e->raw.n), e->raw.p, e->raw.n);
 	it_close(e, h);
-	h = it_open(e, IT_TEXT);
-	tb_s(b, ".Lfe");
-	tb_u(b, s);
-	tb_s(b, ":\n\t.size\t");
-	sym_name(c, b, s);
-	tb_s(b, ", .Lfe");
-	tb_u(b, s);
-	tb_c(b, '-');
-	sym_name(c, b, s);
-	tb_c(b, '\n');
+	h = it_open(e, IT_FEND);
+	*(uint32_t *)it_room(e, sizeof(uint32_t)) = s;
+	it_close(e, h);
 	if (ctor) {
+		h = it_open(e, IT_TEXT);
 		tb_s(b, "\t.section\t.init_array,\"aw\",@init_array\n\t.p2align\t3\n\t.xword\t");
 		sym_name(c, b, s);
 		tb_c(b, '\n');
+		it_close(e, h);
 	}
-	it_close(e, h);
 	e->E->nins += e->nin;
 	e->E->nfn++;
 	out_chunk(e, (uint64_t)s << 1, start);
@@ -6949,17 +7041,11 @@ static void emit_object(ecx *e, uint32_t s)
 
 		b->n = (b->n + 7) & ~(size_t)7;
 		start = b->n;
-		h = it_open(e, IT_TEXT);
 		sym_header(e, b, s, false,
 			   all_const(c, y->ty) ? "\t.section\t.rodata,\"a\",@progbits\n" : zero ? "\t.bss\n" : "\t.data\n", align);
-		it_close(e, h);
 		data_item(e, zero && !e->nrel ? (size ? size : 1) : size, zero && !e->nrel);
-		h = it_open(e, IT_TEXT);
-		tb_s(b, "\t.size\t");
-		sym_name(c, b, s);
-		tb_s(b, ", ");
-		tb_u(b, size);
-		tb_c(b, '\n');
+		h = it_open(e, IT_OSIZE);
+		*(osize *)it_room(e, sizeof(osize)) = (osize){ .sym = s, .size = size };
 		it_close(e, h);
 		e->E->nobj++;
 		out_chunk(e, ((uint64_t)s << 1) | 1, start);
