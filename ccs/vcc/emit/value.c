@@ -6,7 +6,7 @@
 VPRIV int treg(ecx *e)
 {
 	for (int i = 0; i < NTEMP; i++)
-		if (!(e->live & (1u << i))) {
+		if (!((e->live | e->resv) & (1u << i))) {
 			e->live |= 1u << i;
 			if (tempregs[i] >= 19)
 				e->usedcs |= 1u << tempregs[i];
@@ -52,6 +52,8 @@ VPRIV int32_t slot(ecx *e, uint64_t size, uint32_t align)
 {
 	if (align < 1)
 		align = 1;
+	if (align > 16 && !e->resv)
+		e->resv = 1u << tidx(R_BP);	/* the base of the realigned frame if it turns out dynamic */
 	if (align > e->falign)
 		e->falign = align;	/* over 16: finish_function realigns sp to it */
 	if (size > (1u << 28))

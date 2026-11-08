@@ -1,5 +1,4 @@
 /* Locals with alignment above 16 (TODO.md tier 1, "Over-aligned locals"). */
-/* vcc-xfail: Over-aligned locals clamped to 16 */
 #include <stdint.h>
 #include <stdio.h>
 #include <string.h>
@@ -29,11 +28,36 @@ __attribute__((noinline)) void f(int depth, int n)
 		f(depth - 1, n + 1);	/* different sp at every level */
 }
 
+/* inline asm in the function: the records are encoded in order (another path) */
+__attribute__((noinline)) void with_asm(void)
+{
+	_Alignas(256) char buf[8];
+
+	__asm__ volatile("" : : "r"(buf) : "memory");
+	use(buf);
+	CHECK(buf, 256);
+}
+
+/* stack arguments in and out, a VLA and an over-aligned local together */
+__attribute__((noinline)) long many(long a, long b, long c, long d, long e, long f, long g, long h, long i, long j)
+{
+	_Alignas(64) long x;
+	long v[a];
+
+	use(&x); use(v);
+	x = a + j;
+	CHECK(&x, 64);
+	return x + i;
+}
+
 int main(void)
 {
 	char *p = __builtin_alloca(24);
 
 	use(p);
 	f(5, 1);
+	with_asm();
+	if (many(1, 2, 3, 4, 5, 6, 7, 8, 9, 10) != 20)
+		bad = 1, printf("many: wrong result\n");
 	return bad;
 }

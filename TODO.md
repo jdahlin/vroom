@@ -108,7 +108,11 @@ Existing gates that every change must keep green: `vcc-diff.py cmp`
   `if`/loops/`switch` around the bulk, plus a > 32 KB `tbz` case); T6 checks
   no out-of-range immediate via `llvm-objdump` targets; T4 for the
   assembler's out-of-range error.
-- [ ] **Over-aligned locals clamped to 16** [P].  `slot()` `emit.c:2224`.
+- [x] **Over-aligned locals clamped to 16** [P].  Done: the prologue
+  realigns sp (42ecfb3, from PostgreSQL); in a function with a VLA or
+  alloca x28 holds that realigned sp and addresses the frame slots
+  (finish_function); VLAs of over-aligned types round their address up
+  (emit/stmt.c).  `slot()` `emit.c:2224`.
   Realign: when a function has a local with alignment > 16, align sp
   (`and sp, x?, #-A`) after the frame setup and address such locals off a
   base register (x19 or sp), keeping x29 for the frame.

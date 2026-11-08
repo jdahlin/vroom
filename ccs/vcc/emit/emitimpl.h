@@ -81,6 +81,7 @@
 
 /* registers: 0-30 x0-x30, ZR, SP, FRAME (pseudo base of stack slots) */
 enum { R_FP = 29, R_LR = 30, ZR = 31, SP = 32, FRAME = 33, R_X16 = 16, R_X17 = 17 };
+#define R_BP 28		/* frame base of a realigned dynamic frame (ecx.falign, finish_function) */
 
 enum {
 	I_LABEL,	/* label */
@@ -321,6 +322,7 @@ typedef struct ecx {
 	/* frame */
 	int32_t foff, fmax;
 	uint32_t falign;	/* largest slot alignment; over 16 the prologue realigns sp */
+	uint32_t resv;		/* temporaries never handed out (tidx bits): x28 once falign > 16 */
 	int32_t cl_top;		/* frame offset above the block's compound literals (kept past statements) */
 	int32_t outmax;		/* outgoing stack argument bytes */
 	bool dyn, calls, vararg;

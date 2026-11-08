@@ -74,6 +74,7 @@ VPRIV void sym_header(ecx *e, tbuf *b, uint32_t s, bool fn, const char *defsec, 
 }
 
 /* finish_function for the object backend: the same function as items */
+/* ctor: 1 constructor, 2 destructor, 4 x28 is the frame base (mov x28, sp after the saves) */
 static void finish_direct(ecx *e, uint32_t s, uint32_t align, const int *cs, int ncs, int32_t csave, int32_t total, int ctor)
 {
 	cc *c = e->c;
@@ -104,6 +105,8 @@ static void finish_direct(ecx *e, uint32_t s, uint32_t align, const int *cs, int
 		PUT(.op = I_STP, .sz = 1, .rd = (uint8_t)cs[k], .ra = (uint8_t)cs[k + 1], .rn = R_FP, .imm = -csave + 8 * k);
 	if (ncs & 1)
 		PUT(.op = I_ST, .sz = 3, .rd = (uint8_t)cs[ncs - 1], .rn = R_FP, .imm = -csave + 8 * (ncs - 1));
+	if (ctor & 4)
+		PUT(.op = I_MOV, .sz = 1, .rd = R_BP, .rn = SP);
 	memcpy(in + n, e->in, (size_t)e->nin * sizeof(ins));
 	n += e->nin;
 	for (int k = 0; k + 1 < ncs; k += 2)
@@ -152,22 +155,29 @@ static void finish_function(ecx *e, uint32_t s)
 	const attrs *a = sym_attrs(c, s);
 	uint32_t align = 4;
 
-	for (int r = 19; r <= 28; r++)
-		if (e->usedcs & (1u << r))
-			cs[ncs++] = r;
+	bool bp = e->falign > 16 && e->dyn;
+
 	/*
 	 * Frame below x29: callee saves, locals, outgoing arguments.  Slots are
 	 * addressed from sp, so with locals over-aligned (falign > 16) the
 	 * prologue rounds sp down to falign and locals/outs are multiples of
 	 * it: the top of the locals is then falign-aligned too.  A frame
-	 * addressed from x29 (VLA, alloca) would need a base register.
+	 * addressed from x29 (VLA, alloca: sp moves) uses x28 instead, set to
+	 * the realigned sp in the prologue; x28 has been kept out of the
+	 * temporaries since the first over-aligned slot (value.c slot()).
 	 */
+	if (bp) {
+		if (e->usedcs & (1u << R_BP))
+			efatal(e, c->syms[s].loc, "over-aligned local in a function with a VLA or alloca that needs every temporary register");
+		e->usedcs |= 1u << R_BP;
+	}
+	for (int r = 19; r <= 28; r++)
+		if (e->usedcs & (1u << r))
+			cs[ncs++] = r;
 	csave = (ncs * 8 + 15) & ~15;
 	locals = (int32_t)(((uint32_t)e->fmax + e->falign - 1) & ~(e->falign - 1));
 	outs = (int32_t)(((uint32_t)e->outmax + e->falign - 1) & ~(e->falign - 1));
 	total = 16 + csave + locals + outs;
-	if (e->falign > 16 && e->dyn)
-		efatal(e, c->syms[s].loc, "local variables aligned to more than 16 bytes in a function with a VLA or alloca are not supported");
 	/* rewrite frame-slot references */
 	for (uint32_t k = 0; k < e->nin; k++) {
 		ins *i = &e->in[k];
@@ -179,7 +189,10 @@ static void finish_function(ecx *e, uint32_t s)
 		}
 		if (i->rn != FRAME)
 			continue;
-		if (e->dyn) {
+		if (bp) {
+			i->rn = R_BP;
+			i->imm = i->imm - csave + (total - 16);
+		} else if (e->dyn) {
 			i->rn = R_FP;
 			i->imm = i->imm - csave;
 		} else {
@@ -192,7 +205,7 @@ static void finish_function(ecx *e, uint32_t s)
 	if (c->syms[s].align > align)
 		align = c->syms[s].align;
 	if (direct(e)) {
-		finish_direct(e, s, align, cs, ncs, csave, total, (a->constructor != 0) | (a->destructor != 0) << 1);
+		finish_direct(e, s, align, cs, ncs, csave, total, (a->constructor != 0) | (a->destructor != 0) << 1 | bp << 2);
 		return;
 	}
 	sym_header(e, b, s, true, "\t.text\n", align);
@@ -213,6 +226,8 @@ static void finish_function(ecx *e, uint32_t s)
 		tb_f(b, "\tstp\tx%d, x%d, [x29, #%d]\n", cs[k], cs[k + 1], -csave + 8 * k);
 	if (ncs & 1)
 		tb_f(b, "\tstr\tx%d, [x29, #%d]\n", cs[ncs - 1], -csave + 8 * (ncs - 1));
+	if (bp)
+		tb_s(b, "\tmov\tx28, sp\n");
 	for (uint32_t k = 0; k < e->nin; k++)
 		print_ins(c, b, &e->in[k], s, e->raw.p);
 	/* epilogue */
@@ -260,7 +275,7 @@ VPRIV void emit_function(ecx *e, uint32_t s)
 	e->nlabel = 0;
 	e->nkv = 0, e->kvalid = 0, e->nkvs = 0, e->nael = 0;
 	e->foff = e->fmax = e->outmax = e->cl_top = 0;
-	e->falign = 16;
+	e->falign = 16, e->resv = 0;
 	e->dyn = e->calls = false;
 	e->live = 0;
 	e->usedcs = 0;

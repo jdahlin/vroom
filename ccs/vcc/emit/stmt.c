@@ -563,8 +563,11 @@ static void gen_vla_decl(ecx *e, const node *x, uint32_t s)
 	val n = vla_bytes(e, c->syms[s].ty);
 	int r = toreg(e, &n), t = treg(e);
 	int32_t sl = slot(e, 24, 8);
+	uint32_t al = talign(c, c->syms[s].ty);
 	ins *i;
 
+	if (sym_align(c, s) > al)
+		al = sym_align(c, s);
 	b->inst = e->f->inst;
 	b->kind = B_INDIRECT;
 	b->kv = 0;
@@ -574,12 +577,17 @@ static void gen_vla_decl(ecx *e, const node *x, uint32_t s)
 	mem(e, I_ST, 3, 0, r, FRAME, sl + 16);
 	mov(e, 1, t, SP);
 	mem(e, I_ST, 3, 0, t, FRAME, sl + 8);
-	opi(e, I_ADDI, 1, r, r, 15);
+	/* sp is 16-aligned: a larger alignment allocates align - 16 more and rounds the address up */
+	opi(e, I_ADDI, 1, r, r, 15 + (al > 16 ? al - 16 : 0));
 	opi(e, I_ANDI, 1, r, r, -16);
 	op3(e, I_SUB, 1, SP, SP, r);
 	if (e->reach) {
 		i = put(e, I_ADDI);
 		i->sz = 1, i->rd = (uint8_t)t, i->rn = SP, i->imm = 0, i->cond = 0xee;	/* + outgoing area */
+	}
+	if (al > 16) {
+		opi(e, I_ADDI, 1, t, t, al - 1);
+		opi(e, I_ANDI, 1, t, t, -(int64_t)al);
 	}
 	mem(e, I_ST, 3, 0, t, FRAME, sl);
 	val_free(e, &n);
