@@ -489,6 +489,16 @@ klarar inte runtimen 34, tcc-specifika 32, kompilatorspecifikt 1).
 - Körningar: 3 min × 2 arbetare per mål; fuzz-lex utan fynd; fuzz-pp bara falsklarm från en egen kontroll (`#line 0` ger rad 0, borttagen); fynd (2) och (3) kom från seed-korpusen och pp-diff. En andra runda avbröts (maskinen upptagen). Paritet 911/912 (modpost.c) efter varje rättning.
 - **Kvar:** längre körningar när maskinen har lediga kärnor; pp-diff över hela fuzz-korpusen.
 
+### Status sanitizers (2026-11-08): ASan+UBSan och TSan, alla fynd rättade
+- `make -C ccs vcc-asan` / `vcc-tsan` (`-O1 -g`, egna `build/ccs-asan/`, `build/ccs-tsan/`; normalbyggets kommandon oförändrade). Harnessarna tar `--bin-dir DIR`/`VCC_BIN`; `bench/vccd-cc.py` kör 150 TU:er `-c` genom shimmen mot en egen vccd. De stora reservationerna (16 GB delad pp-region, 4 GB NORESERVE) fungerar utan ändringar. AGENTS.md, "Sanitizers".
+- Fynd, rättade (en commit var):
+  - ASan: nyckelords- och builtin-namn internades ur ovadderade literaler (`vintern_cstr`; fuzz-sessionen hittade samma); `pp_open` gav anroparens huvudfilssträng (malloc:ad jobbfil i `vpp --batch`) till `vlex_get`, som läser 8 byte förbi; lextest likadant. Kontraktet står i lex.h.
+  - TSan: `hc_mode` satte flaggan före `hc_mem_max` utan ordning, så en tråd kunde lagra i header-cachen utan tak (nu `pthread_once`), samma mönster i `dc_begin`; lata env-flaggor och `VPP_TIME`-räknare (`pp_stat_*`, `vdir_probes`) var vanliga `++` från alla trådar; `salloc` (16 GB-regionen) och dircache `dalloc` läste basen med vanlig load efter CAS; `file_line` skrev `nlines` icke-atomiskt även hos förloraren; as.c `names_ops` "benign race".
+  - Efter merge av diagnostikarbetet (ASan 7, TSan 19 felande TU:er i vcc-cbatch, 731 TSan-rapporter): `snap_restore` (deklarationscachen) tog snapshotens `c->cases` (malloc) och `c->span`, så alla TU:er som återställde samma snapshot realloc:ade samma block från flera trådar (heap-korruption) och skrev spans i en annan TU:s array; `sym.plb/ple` flyttades inte. Nu egna per TU, spans är en snapshotarray med flyttade platser, och `cc_free` släpper dem (2 GB adressrymd läckte per TU). Objekten byte-identiska med `VCC_NODC=1`.
+  - Header-cachens låsfria CAS-publicering, tokencachen, intern-tabellen och vlink:s trådpool gav inga rapporter.
+- **Acceptans** (efter merge av main): ASan+UBSan (`UBSAN_OPTIONS=halt_on_error=1`) och TSan: `vcc-diff.py cmp --kernel` 873/873, `batch --cmp` 873/873, `vcc-sema.py run` 878/879, `vcc-cbatch.py` 840/840, `vccd-cc.py` 174/175 (vDSO-skriptet ska till backend), lextest `bench -p`/`idcheck`, vlink `-r` + slutlänk och vobjcopy/vnm byte-identiska med normalbygget; 0 rapporter, inga suppressions (`ccs/tsan.supp` behövs inte). Normalbygget: `vcc-diff.py cmp` 911/912, `vcc-sema.py run`/`layout` 878/879. TSan-batch ~65–100 s, ASan 12–24 s per svit.
+- **Kvar:** ASan ser inte överläsningar inuti egna mmap-arenor (ogiftade); manuell förgiftning (`ASAN_POISON_MEMORY_REGION` bakom arenornas `used`) under `__has_feature(address_sanitizer)` vore nästa steg. Fuzzmålen kunde också byggas med TSan.
+
 ## Risker
 - **GNU C-ytan och inline asm** är det stora jobbet. Uppskattat: lexer + pp ~2 kloc,
   parser + sema ~10–15 kloc, emitter ~5 kloc, assembler ~4 kloc, länkare ~3 kloc.
