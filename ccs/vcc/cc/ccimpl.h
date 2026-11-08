@@ -100,7 +100,7 @@ typedef struct dop {
 	uint8_t q;		/* ptr quals / array param quals */
 	uint16_t fl;		/* array: TF_*; func: TF_* */
 	uint32_t a, b;		/* array: length lo/hi or vla node; func: params start, count */
-	uint32_t np;		/* func: parameter syms (after the types; K&R: no types) */
+	uint32_t np;		/* func: parameter syms (after the types; K&R: no types); array: the size's location */
 	bool kr;		/* func: K&R identifier list */
 } dop;
 

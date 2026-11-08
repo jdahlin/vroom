@@ -153,7 +153,12 @@ Existing gates that every change must keep green: `vcc-diff.py cmp`
   Was: `ptr_add_vla` `emit.c:6051` only covers binary `+`/`-` and subscripting.
   *Validate:* T1 `vla_ptr.c` (`int (*q)[n]`: `q++`, `q--`, `q += 2`,
   `q -= 1`, `q3 - q`, `&q[1] - q`, 2-D VLA of VLA).
-- [ ] **VLA with initializer accepted; garbage at run time** [P].  Reject
+- [x] **VLA with initializer accepted; garbage at run time** [P].  Done:
+  rejected as clang does, same location and range (cc/decl.c); `= {}`
+  (accepted by clang in every mode) zeroes the array at run time
+  (emit/stmt.c gen_vla_decl).  Tests: `tests/diag/vla_init.c`,
+  `tests/vcc/vla_zero.c`.
+  Was: reject
   as clang does ("variable-sized object may not be initialized"), except
   `= {}` in C23 which zeroes.
   *Validate:* T4 (`int a[n] = {1};` errors); `tests/diag/vla_init.c` once

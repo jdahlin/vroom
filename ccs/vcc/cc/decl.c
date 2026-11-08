@@ -1,6 +1,22 @@
 /* vcc front end: declarations */
 #include "ccimpl.h"
 
+/* the braced initializer of a VLA, already diagnosed: skipped unchecked */
+static void skip_vla_init(cc *c)
+{
+	int depth = 0;
+
+	do {
+		if (is(c, T_LBRACE))
+			depth++;
+		else if (is(c, T_RBRACE))
+			depth--;
+		else if (is(c, T_EOF))
+			fatal(c, tok(c)->loc, "expected '}'");
+		next(c);
+	} while (depth > 0);
+}
+
 /* ---------------- declarations ---------------- */
 
 static uint32_t new_attrs(cc *c, const attrs *a)
@@ -365,7 +381,24 @@ VPRIV void declaration(cc *c, vec *out, bool file)
 				cc_error(c, d.loc, "illegal initializer");
 			if (!file && ds.sc == SC_EXTERN)
 				cc_error(c, d.loc, "declaration of block scope identifier with linkage cannot have an initializer");
-			{
+			if (unlikely(T(c, t)->flags & TF_VLA)) {
+				/* only = {} (C23, a GNU extension before): zero it at run time (emit gen_vla_decl) */
+				if (is(c, T_LBRACE) && peek(c, 1)->kind == T_RBRACE) {
+					next(c), next(c);
+					v = mk(c, N_ZERO, t, d.loc);
+				} else if (is(c, T_LBRACE)) {
+					/* clang: at the outermost size, no range */
+					cc_error(c, N(T(c, t)->n)->loc, "variable-sized object may not be initialized");
+					skip_vla_init(c);
+					v = 0;
+				} else {
+					/* clang: at the name, the initializer underlined */
+					pp_span r = rng(c, assign_expr(c));
+
+					report(c, "error", d.loc, &r, 1, NULL, 0, "variable-sized object may not be initialized");
+					v = 0;
+				}
+			} else {
 				uint8_t sw = c->cv_what;
 				uint32_t sl = c->cv_loc;
 

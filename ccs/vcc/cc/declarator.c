@@ -123,6 +123,7 @@ static void array_suffix(cc *c, dop *op, uint32_t name)
 		}
 	}
 	op->q = (uint8_t)q;
+	op->np = tok(c)->loc;	/* where the size is written (an array of VLAs: its size node) */
 	if (accept(c, T_RSQUARE)) {
 		op->fl = TF_INCOMPLETE;
 		return;
@@ -334,7 +335,7 @@ VPRIV qty apply_declarator(cc *c, qty t, uint32_t first, uint32_t nops)
 				t = ty_vla(c, t, o->a);
 			else if ((T(c, t)->flags & TF_VLA) && !(o->fl & TF_INCOMPLETE))
 				/* int a[6][n]: an array of VLAs is one too (its size is known only at run time) */
-				t = ty_vla(c, t, mk_int(c, (i128)((uint64_t)o->a | (uint64_t)o->b << 32), prim(TY_ULONG), tok(c)->loc));
+				t = ty_vla(c, t, mk_int(c, (i128)((uint64_t)o->a | (uint64_t)o->b << 32), prim(TY_ULONG), o->np));
 			else
 				t = ty_array(c, t, (uint64_t)o->a | (uint64_t)o->b << 32, o->fl);
 			break;

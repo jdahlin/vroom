@@ -642,6 +642,23 @@ static void gen_vla_decl(ecx *e, const node *x, uint32_t s)
 		opi(e, I_ANDI, 1, t, t, -(int64_t)al);
 	}
 	mem(e, I_ST, 3, 0, t, FRAME, sl);
+	if (x->b) {
+		/* = {}: zero the array's bytes, rounded up to 8 (still inside the allocation) */
+		int k = treg(e);
+		uint32_t lt = newlabel(e), ld = newlabel(e);
+
+		mem(e, I_LD, 3, 0, k, FRAME, sl + 16);
+		opi(e, I_ADDI, 1, k, k, 7);
+		opi(e, I_ANDI, 1, k, k, -8);
+		cbz(e, false, 1, k, ld);
+		deflabel_loop(e, lt, true);
+		mem(e, I_ST, 3, 0, ZR, t, 0);
+		opi(e, I_ADDI, 1, t, t, 8);
+		opi(e, I_SUBI, 1, k, k, 8);
+		cbz(e, true, 1, k, lt);
+		deflabel(e, ld);
+		tfree(e, k);
+	}
 	val_free(e, &n);
 	{
 		val tv = vreg(t);
