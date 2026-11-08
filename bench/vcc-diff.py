@@ -14,7 +14,17 @@ done by vpp itself (it lexes the reference with vcc's lexer).
 import glob, hashlib, os, re, shlex, subprocess, sys
 from multiprocessing import Pool
 R = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-B = f'{R}/work/build-o0'; REF = f'{R}/work/ppref'
+def work_dir():
+    """work/ of this checkout, else of the main checkout (git worktrees share it)"""
+    if os.path.isdir(f'{R}/work'): return f'{R}/work'
+    try:
+        c = subprocess.run(['git', '-C', R, 'rev-parse', '--git-common-dir'], capture_output=True, text=True).stdout.strip()
+        w = os.path.join(os.path.dirname(os.path.abspath(os.path.join(R, c))), 'work')
+        if os.path.isdir(w): return w
+    except OSError: pass
+    return f'{R}/work'
+W = os.environ.get('VROOM_WORK') or work_dir()
+B = f'{W}/build-o0'; REF = f'{W}/ppref'
 CL = '/opt/homebrew/opt/llvm/bin/clang'; VPP = f'{R}/build/ccs/vpp'
 
 def tu_args(cmd):

@@ -409,3 +409,10 @@ aldrig i bygget. Ett TU-test (`bench/vcc-diff.py`) körs över alla kärnfiler.
   ~1 000 jobb. Shimsens latens och make `-j` blir golvet.
 - **Mätbrus.** Maskinen används till annat. Bara A/B-mätningar körda direkt efter
   varandra jämförs.
+
+### Optimeringsrigg (2026-11-08): `bench/vbench.py`
+- Mått: **instruktioner** per tråd via `thread_selfcounts` (`ccs/vcc/vperf.h`, ingen root, ~1 600 instr per läsning), brus 0,03–0,6 % även med last 15; cykler/vägg bara i `ab` (alternerande). Räknarna inkluderar kärnläge (sidfel), därför är `emit` brusigare (~1–2 %).
+- `vpp --batch` fick `--warm N` och `--stats F` (per jobb: ms, instr, cykler, instr i cc_run/emit/obj).
+- Korpus `bench/vbench-corpus.txt`: 24 kärn-TU:er (16 kvantiler + emit- och parse-tunga), 9 `quick`.
+- Lägen: lex, pp, pphc, fe, cc, emit, real, as, ld. `check` hashar -E, tokenström, layout, objekt (med och utan cache), lexer, .S, vmlinux mot en bas (`mkbase REV`, cache i `work/vbench/golden/`).
+- Utgångsläge, full korpus, en tråd: lex 783 M, pp 8 074 M, pphc 7 187 M, fe 11 463 M, cc 12 080 M (emit 600 M, obj 14 M), real 11 212 M, as 57 M, ld 763 M instruktioner. Alla 840 TU:er `-c` utan cache: 330 G instr, varav pp ~86 % (med kall tokencache).

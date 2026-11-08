@@ -4,6 +4,7 @@
  */
 #include "as.h"
 #include "elf.h"
+#include "vperf.h"
 #include <fcntl.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -44,15 +45,26 @@ int main(int argc, char **argv)
 		volatile unsigned sink = 0;
 		for (int i = 0; i < nf; i++) { ps[i] = map(argv[first + i], &ns[i]); for (size_t j = 0; j < ns[i]; j += 4096) sink += (unsigned char)ps[i][j]; }
 		double best = 1e9;
+		vperf vbest = { ~0ull, ~0ull };
+		uint64_t h = 1469598103934665603ull;
 		for (int r = 0; r < bench; r++) {
 			double t0 = now();
+			vperf v0 = vperf_now();
 			for (int i = 0; i < nf; i++) {
 				const char *msg;
 				if (as_run(a, o, ps[i], ns[i], argv[first + i], &msg)) { fprintf(stderr, "%s\n", msg); return 1; }
 				size_t k = elf_finish(o);
 				if (k > cap) { cap = k * 2; buf = realloc(buf, cap); }
 				elf_emit(o, buf);
-				if (!r) { tin += ns[i]; tout += k; }
+				if (!r) {
+					tin += ns[i]; tout += k;
+					for (size_t b = 0; b < k; b++) h = (h ^ buf[b]) * 1099511628211ull;
+				}
+			}
+			v0 = vperf_sub(vperf_now(), v0);
+			if (r) {	/* the first pass also hashes the objects */
+				vbest.ins = v0.ins < vbest.ins ? v0.ins : vbest.ins;
+				vbest.cyc = v0.cyc < vbest.cyc ? v0.cyc : vbest.cyc;
 			}
 			double t = now() - t0;
 			if (t < best) best = t;
@@ -63,6 +75,8 @@ int main(int argc, char **argv)
 		printf("%.3f ms/pass (best of %d): in %zu B %.1f MB/s, out %zu B %.1f MB/s, %llu statements %.1f M/s, %.1f MB/s expanded\n",
 		       best * 1e3, bench, tin, tin / best / 1e6, tout, tout / best / 1e6,
 		       (unsigned long long)st, st / best / 1e6, sb / best / 1e6);
+		printf("perf: %llu instructions, %llu cycles (min of %d passes after the first)\nhash: %016llx\n",
+		       (unsigned long long)vbest.ins, (unsigned long long)vbest.cyc, bench - 1, (unsigned long long)h);
 		return 0;
 	}
 	for (int i = 1; i < argc; i++) {

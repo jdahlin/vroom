@@ -1,0 +1,26 @@
+# vbench corpus: 24 kernel TUs from c-nohc.tsv; mean 393 M instructions/TU over all 840, 529 M here
+# OBJ  [quick]  # why
+lib/earlycpio.o  # q00
+drivers/of/kobj.o  quick  # q01
+drivers/tty/n_null.o  # q02
+drivers/clk/clk.o  quick  # q03
+kernel/time/tick-broadcast-hrtimer.o  # q04
+.vmlinux.export.o  quick  # q05
+kernel/time/ntp.o  # q06
+block/partitions/efi.o  quick  # q07
+mm/sparse-vmemmap.o  # q08
+fs/fat/namei_vfat.o  quick  # q09
+fs/fat/dir.o  # q10
+fs/ext4/fsmap.o  quick  # q11
+mm/mprotect.o  # q12
+drivers/net/loopback.o  quick  # q13
+fs/select.o  # q14
+arch/arm64/kernel/cpu_errata.o  quick  # q15
+net/core/filter.o  quick  # emit-heavy
+net/ipv4/tcp_input.o  # emit-heavy
+net/core/dev.o  # emit-heavy
+mm/memory.o  # emit-heavy
+arch/arm64/kernel/smp.o  # parse-heavy
+arch/arm64/kernel/cpufeature.o  # parse-heavy
+net/core/skbuff.o  # parse-heavy
+net/ipv4/tcp.o  # parse-heavy

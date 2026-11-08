@@ -54,6 +54,7 @@
 #include "as.h"
 #include "elf.h"
 #include "a64.h"
+#include "ppdriver.h"
 
 #define N(i) (&c->nodes[i])
 #define T(c, t) CT(c, t)
@@ -7545,6 +7546,7 @@ extern _Atomic unsigned long long ppd_ns_emit;
 int emit_tu(cc *c, const cc_opts *o)
 {
 	double t0 = now();
+	vperf v0 = vperf_now();
 	const char *r = getenv("VCC_EMIT_REPEAT");
 	int n = r ? atoi(r) : 1, err = 0;
 	uint8_t *mf = reserve(c->nsym + 64);
@@ -7560,5 +7562,6 @@ int emit_tu(cc *c, const cc_opts *o)
 	}
 	munmap(mf, c->nsym + 64);
 	ppd_ns_emit += (unsigned long long)((now() - t0) * 1e9);
+	ppd_ph_add(PPD_PH_EMIT, v0);
 	return err;
 }

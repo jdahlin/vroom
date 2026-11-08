@@ -289,6 +289,7 @@ static int write_deps(const pp *p, const char *cwd, const char *depfile, const c
 
 /* phase times over all -c jobs (ns): front end + codegen, assembler, finish + write */
 _Atomic unsigned long long ppd_ns_cc, ppd_ns_emit, ppd_ns_obj, ppd_bytes_obj;
+_Thread_local vperf ppd_ph[PPD_NPH];
 
 static unsigned long long nsnow(void)
 {
@@ -319,6 +320,7 @@ static void obj_state(void)
 static int write_obj(const char *cwd, const char *out, int outfd, int errfd)
 {
 	unsigned long long t0 = nsnow();
+	vperf v0 = vperf_now();
 	size_t n = elf_finish(tl_obj);
 	int r;
 
@@ -333,6 +335,7 @@ static int write_obj(const char *cwd, const char *out, int outfd, int errfd)
 	elf_emit(tl_obj, tl_objbuf);
 	r = write_out(cwd, out, outfd, (const char *)tl_objbuf, n, errfd);
 	ppd_ns_obj += nsnow() - t0;
+	ppd_ph_add(PPD_PH_OBJ, v0);
 	ppd_bytes_obj += n;
 	return r;
 }
@@ -582,9 +585,11 @@ int ppd_run(int argc, char **argv, const ppd_env *env)
 		}
 		{
 			unsigned long long t1 = nsnow();
+			vperf v1 = vperf_now();
 
 			status = cc_run(p, &co) || pp_errors(p) ? 1 : 0;
 			ppd_ns_cc += nsnow() - t1;
+			ppd_ph_add(PPD_PH_CC, v1);
 		}
 		if (fd >= 0)
 			close(fd);
