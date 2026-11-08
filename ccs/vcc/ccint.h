@@ -65,6 +65,30 @@ typedef struct casm {
 	uint8_t vol, go, inl;
 } casm;
 
+/*
+ * Lazy function bodies: a static function defined in a header keeps its
+ * body as tokens (lztok, spellings of non-identifiers in lzs) and is parsed
+ * after the TU only if something names it (SF_REF), like clang's deferred
+ * emission one step earlier.  Most of a kernel TU's tokens are such bodies.
+ */
+typedef struct lztok {
+	uint32_t loc;
+	uint32_t v;		/* T_IDENT: interned id; otherwise: offset of the spelling in lzs */
+	uint32_t len;
+	uint8_t kind, flags;
+	uint16_t _pad;
+} lztok;
+
+typedef struct lzfn {
+	uint32_t sym;
+	uint32_t tk, ntk;	/* its tokens in lzt, '{' to '}' */
+	uint32_t wm;		/* nsym at the definition: later file-scope syms are not visible */
+	uint32_t name, loc, psyms, npsyms, plb, ple;	/* the declarator, for function_def */
+	uint8_t done;
+	uint8_t hc;		/* the tokens are z's, in a header cache entry (ntk 0) */
+	pp_lazy z;
+} lzfn;
+
 struct cc {
 	pp *p;
 	const cc_opts *o;
@@ -152,6 +176,19 @@ struct cc {
 	uint32_t ntlasm;
 	uint32_t ndiag;		/* diagnostics reported */
 	struct dcst *dc;	/* declaration cache (ccsnap.c), NULL: off */
+
+	/* lazy bodies */
+	lztok *lzt;
+	uint32_t nlzt;
+	lzfn *lzf;
+	uint32_t nlzf;
+	char *lzs;
+	uint32_t nlzs;
+	bool lz_on;		/* tokens come from lzt[lzc, lze) or lzz (lz_hc), then T_EOF */
+	bool lz_hc;
+	uint32_t lzc, lze;
+	pp_lazy lzz;
+	uint32_t lz_wm;		/* parsing a lazy body: file-scope syms from here on are hidden (0: none) */
 };
 
 

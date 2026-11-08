@@ -349,7 +349,10 @@ VPRIV void declaration(cc *c, vec *out, bool file)
 		if (is_func(c, t) && is(c, T_LBRACE)) {
 			if (!file)
 				fatal(c, tok(c)->loc, "function definition is not allowed here");
-			function_def(c, s, &d);
+			if (lazy_ok(c, s, &d))
+				lazy_capture(c, s, &d);
+			else
+				function_def(c, s, &d);
 			return;
 		}
 		if (accept(c, T_EQUAL)) {

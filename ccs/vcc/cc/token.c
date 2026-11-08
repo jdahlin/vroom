@@ -39,8 +39,50 @@ VPRIV __attribute__((noinline)) void fetch_directive(cc *c, ptok *t)
 		if (unlikely(dc_stale(c)))
 			dc_materialize(c);	/* (the pragma acts on the real state) */
 		pragma(c, t);
-		pp_next(c->p, t);
+		if (unlikely(c->lz_on))
+			lz_fetch(c, t);
+		else
+			pp_next(c->p, t);
 	} while (t->kind == P_DIRECTIVE);
+}
+
+/* a lazy body's next token (lazy.c), T_EOF after its '}' */
+VPRIV __attribute__((noinline)) void lz_fetch(cc *c, ptok *t)
+{
+	const lztok *z;
+
+	if (c->lz_hc && c->lzz.k <= c->lzz.close) {
+		pp_lazy_tok(c->p, &c->lzz, t);
+		c->lze = t->loc;	/* (the T_EOF's location) */
+		return;
+	}
+	if (c->lz_hc) {
+		memset(t, 0, sizeof(*t));
+		t->kind = T_EOF;
+		t->s = "";
+		t->loc = c->lze;
+		return;
+	}
+	if (c->lzc >= c->lze) {
+		memset(t, 0, sizeof(*t));
+		t->kind = T_EOF;
+		t->s = "";
+		t->loc = c->lze ? c->lzt[c->lze - 1].loc : 0;
+		return;
+	}
+	z = &c->lzt[c->lzc++];
+	t->kind = z->kind;
+	t->flags = z->flags;
+	t->loc = z->loc;
+	t->ctr = 0;
+	t->len = z->len;
+	if (z->kind == T_IDENT) {
+		t->id = z->v;
+		t->s = vintern_ents[z->v].s;
+	} else {
+		t->id = 0;
+		t->s = c->lzs + z->v;
+	}
 }
 
 void cc_fetch(cc *c, ptok *t) { fetch(c, t); }

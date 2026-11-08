@@ -167,6 +167,8 @@ static int batch(const char *file, int nthr, const char *statsf)
 		printf("%s\n", hs);
 		dc_stats(hs, sizeof(hs));
 		printf("%s\n", hs);
+		cc_lz_stats(hs, sizeof(hs));
+		printf("%s\n", hs);
 	}
 	{
 		struct rusage ru;

@@ -31,6 +31,30 @@ VPRIV bool replay_seg(pp *p, ctx *c)
 	return true;
 }
 
+/* __COUNTER__ digits in the spelling of own token k: this TU's values */
+static __attribute__((noinline)) void ctr_spell(pp *p, const hent *e, uint32_t *ci, uint32_t k, unsigned cbase, ptok *t)
+{
+	char *b = alloc(&p->perm, t->len + 24 * 4 + 32), *w = b;
+	uint32_t at = 0;
+
+	while (*ci < e->nctr && e->ctr[*ci].off == k) {
+		const hctr *h = &e->ctr[(*ci)++];
+		uint32_t bo = h->len >> 16, bl = h->len & 0xffff;
+
+		memcpy(w, t->s + at, bo - at);
+		w += bo - at;
+		w += utoa(w, cbase + h->rel);
+		at = bo + bl;
+	}
+	memcpy(w, t->s + at, t->len - at);
+	w += t->len - at;
+	memset(w, 0, 16);
+	t->s = b;
+	t->len = (uint32_t)(w - b);
+	if (t->kind == T_IDENT)
+		t->id = vintern_copy(b, t->len);
+}
+
 VPRIV void replay_tok(pp *p, ctx *c, ptok *t)
 {
 	const hent *e = c->he;
@@ -41,29 +65,60 @@ VPRIV void replay_tok(pp *p, ctx *c, ptok *t)
 	p->rep_norec = c->norec;
 	if (t->kind == T_IDENT)
 		t->flags |= PF_NOEXP;	/* handed out as recorded: expanded already */
-	if (unlikely(c->ci < e->nctr && e->ctr[c->ci].off == c->i)) {
-		/* __COUNTER__ digits in the spelling: this TU's values */
-		char *b = alloc(&p->perm, t->len + 24 * 4 + 32), *w = b;
-		uint32_t at = 0;
-
-		while (c->ci < e->nctr && e->ctr[c->ci].off == c->i) {
-			const hctr *h = &e->ctr[c->ci++];
-			uint32_t bo = h->len >> 16, bl = h->len & 0xffff;
-
-			memcpy(w, t->s + at, bo - at);
-			w += bo - at;
-			w += utoa(w, c->cbase + h->rel);
-			at = bo + bl;
-		}
-		memcpy(w, t->s + at, t->len - at);
-		w += t->len - at;
-		memset(w, 0, 16);
-		t->s = b;
-		t->len = (uint32_t)(w - b);
-		if (t->kind == T_IDENT)
-			t->id = vintern_copy(b, t->len);
-	}
+	if (unlikely(c->ci < e->nctr && e->ctr[c->ci].off == c->i))
+		ctr_spell(p, e, &c->ci, c->i, c->cbase, t);
 	c->i++;
+}
+
+/* ---------------- lazy bodies (pp.h) ---------------- */
+
+int pp_lazy_skip(pp *p, const ptok *lb, pp_lazy *z)
+{
+	ctx *c = &p->cx[p->depth - 1];
+	const hent *e;
+	uint32_t k, lo, hi;
+
+	if (c->type != C_REPLAY || !c->i || lb->kind != T_LBRACE || p->pend || (p->rec.on && !c->norec))
+		return 0;
+	e = c->he;
+	k = c->i - 1;
+	if (e->tk[k].kind != T_LBRACE || !e->tk[k].loc || lb->loc != c->loc + e->tk[k].loc - 1)
+		return 0;
+	lo = 0, hi = e->nbr;
+	while (lo < hi) {
+		uint32_t m = (lo + hi) / 2;
+
+		if (e->br[2 * m] < k)
+			lo = m + 1;
+		else
+			hi = m;
+	}
+	if (lo >= e->nbr || e->br[2 * lo] != k)
+		return 0;
+	*z = (pp_lazy){ e, k, e->br[2 * lo + 1], c->loc, c->cbase, c->ci, k, 0, 0 };
+	z->rloc = e->tk[z->close].loc ? c->loc + e->tk[z->close].loc - 1 : 0;
+	z->rflags = e->tk[z->close].flags;
+	c->i = z->close + 1;
+	while (c->ci < e->nctr && e->ctr[c->ci].off <= z->close)
+		c->ci++;
+	p->ntok_out += z->close - k;
+	return 1;
+}
+
+void pp_lazy_tok(pp *p, pp_lazy *z, ptok *t)
+{
+	const hent *e = z->e;
+	uint32_t k = z->k++;
+
+	*t = e->tk[k];
+	t->loc = t->loc ? z->base + t->loc - 1 : 0;
+	t->ctr = 0;
+	if (t->kind == T_IDENT)
+		t->flags |= PF_NOEXP;
+	while (z->ci < e->nctr && e->ctr[z->ci].off < k)
+		z->ci++;
+	if (unlikely(z->ci < e->nctr && e->ctr[z->ci].off == k))
+		ctr_spell(p, e, &z->ci, k, z->cbase, t);
 }
 
 static inline bool tu_mem(const pp *p, const char *s)
@@ -391,6 +446,28 @@ static void publish_tok(pp *p, const hlev *L, size_t end, hent *e)
 			skipped += r->seg[i].end - r->seg[i].start;
 			at = r->seg[i].end;
 		}
+	}
+	{
+		/* outermost brace pairs with no child spliced in (pp_lazy_skip) */
+		uint32_t nb = 0, depth = 0, open = 0, si = 0, *br;
+
+		for (size_t k = 0; k < w; k++)
+			nb += tk[k].kind == T_LBRACE;
+		br = salloc((nb ? nb : 1) * 2 * sizeof(uint32_t));
+		nb = 0;
+		for (size_t k = 0; k < w; k++) {
+			if (tk[k].kind == T_LBRACE) {
+				if (!depth++)
+					open = (uint32_t)k;
+			} else if (tk[k].kind == T_RBRACE && depth && !--depth) {
+				while (si < ns && sg[si].at <= open)
+					si++;
+				if (si >= ns || sg[si].at > k)
+					br[2 * nb] = open, br[2 * nb + 1] = (uint32_t)k, nb++;
+			}
+		}
+		e->br = br;
+		e->nbr = nb;
 	}
 	e->tk = tk;
 	e->ntext = own;

@@ -2,7 +2,7 @@
 #include "ccimpl.h"
 
 /* the per-TU tables, mapped once and reused (cc_init takes a set, cc_free gives it back) */
-static vmpool ccpool = VMPOOL_INIT(18);
+static vmpool ccpool = VMPOOL_INIT(21);
 static _Thread_local vmreg *ccr;
 
 VPRIV void *halloc(cc *c, size_t n)
@@ -45,6 +45,9 @@ static void cc_init(cc *c, pp *p, const cc_opts *o)
 	c->heap = c->hp = vmreg_get(&ccr[15], (size_t)1 << 32, "cc.heap");
 	c->ptrc = vmreg_get(&ccr[16], (size_t)1 << 30, "cc.ptrc");
 	c->span = vmreg_get(&ccr[17], (size_t)1 << 31, "cc.span");
+	c->lzt = vmreg_get(&ccr[18], (size_t)1 << 32, "cc.lzt");
+	c->lzf = vmreg_get(&ccr[19], (size_t)1 << 28, "cc.lzf");
+	c->lzs = vmreg_get(&ccr[20], (size_t)1 << 31, "cc.lzs");
 	c->hend = c->heap + ((size_t)1 << 32);
 	c->dops = halloc(c, DOPS_MAX * sizeof(dop));
 	c->ndops = 0;
@@ -145,6 +148,9 @@ static void cc_free(cc *c)
 	vmreg_put(&ccr[15], (size_t)(c->hp - c->heap) + 64);
 	vmreg_put(&ccr[16], ((size_t)c->nty + 2) * 8 * sizeof(*c->ptrc));	/* indexed by qty */
 	vmreg_put(&ccr[17], USED(c->nnode, c->span));	/* indexed by node */
+	vmreg_put(&ccr[18], USED(c->nlzt, c->lzt));
+	vmreg_put(&ccr[19], USED(c->nlzf, c->lzf));
+	vmreg_put(&ccr[20], (size_t)c->nlzs + 64);
 	free(c->cases);
 #undef USED
 	vmpool_give(&ccpool, ccr);
@@ -171,6 +177,7 @@ int cc_run(pp *p, const cc_opts *o)
 		fetch(c, &c->tk[0]);
 		c->ntk = 1;
 		translation_unit(c);
+		lazy_closure(c);
 		/* clang: a tentative definition of a never completed struct/union/enum */
 		for (uint32_t i = 1; i < c->nsym; i++) {
 			const sym *y = &c->syms[i];

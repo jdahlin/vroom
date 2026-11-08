@@ -64,8 +64,27 @@ VPRIV void sym_bind(cc *c, uint32_t s)
 	c->sstack[c->nsstack++] = s;
 }
 
-VPRIV uint32_t lookup(cc *c, uint32_t id) { return dget(c->odir, id); }
-VPRIV uint32_t lookup_tag(cc *c, uint32_t id) { return dget(c->tdir, id); }
+/* in a lazy body (lazy.c): the file-scope binding visible at its definition */
+static __attribute__((noinline)) uint32_t lz_visible(cc *c, uint32_t s)
+{
+	while (s >= c->lz_wm && c->syms[s].depth == 0)
+		s = c->syms[s].shadow;
+	return s;
+}
+
+VPRIV uint32_t lookup(cc *c, uint32_t id)
+{
+	uint32_t s = dget(c->odir, id);
+
+	return unlikely(c->lz_wm) && s >= c->lz_wm ? lz_visible(c, s) : s;
+}
+
+VPRIV uint32_t lookup_tag(cc *c, uint32_t id)
+{
+	uint32_t s = dget(c->tdir, id);
+
+	return unlikely(c->lz_wm) && s >= c->lz_wm ? lz_visible(c, s) : s;
+}
 
 /* Levenshtein distance, giving up above max */
 static int edit_dist(const char *a, int na, const char *b, int nb, int max)

@@ -272,6 +272,9 @@ struct hent {
 	size_t ntext, total;	/* own text (tokens); with the children */
 	int32_t level;		/* __INCLUDE_LEVEL__ used: the include depth it ran at (-1: not used) */
 	uint32_t ndirs, psig;	/* leading search directories its lookups depended on; their id */
+	const uint32_t *br;	/* token entries: outermost '{' '}' pairs of the own tokens with no child
+				   inside, (open, close) own-token indices, by open (pp_lazy_skip) */
+	uint32_t nbr;
 	uint32_t nrg, nru, nrv, ndl, nord, noadd, nfe, nctr, ncrd, nseg, span, counter_delta;
 	uint8_t has_text, first_sol, col_end, pend_out;
 };

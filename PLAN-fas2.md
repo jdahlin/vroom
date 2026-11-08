@@ -701,6 +701,107 @@ ingen emulering. Samma image fungerar i en qemu-system-aarch64-gäst med `-accel
     antingen mer sh i rsh eller en Kconfig-patch som frågar vccd direkt; 60 värdkompileringar
     via vroomd före första CC; de 432 undermakes.
 
+### Profil av vcc/vccd:s eget arbete (2026-11-08): vad som bör byggas om
+- Rigg: `bench/vccd-kbuild.sh` (vroom.config, `-j 14`) med `sample <vccd> 25` +
+  `bench/vccd-sample.py`; samma TU:er utan byggsystem i `vpp --batch` (som
+  `vcc-cbatch.py`, `--stats`, `-j 1` under `sample`, `--warm 1`, `VCC_NODC`/`VPP_NOHC`);
+  `bench/vcc-bodies.py` (ny) för vilka tokens parsern får. Last 5–6.
+- **Bygget:** 13,9 s, 877 TU:er av vcc. vccd 15,6 s user + 2,4 s sys; 877 `cc-own` summerar
+  46,4 s vägg (median 39 ms) mot ~13,6 s CPU i batch (median 14 ms): jobben väntar på CPU
+  (9–11 i luften, make och andra sessioner delar kärnorna), inte på lås (84 % av de blockerade
+  proven är lediga arbetare; inga mutexväntor i kompileringen). vccd använder ~2,1 kärnor i
+  snitt under kompileringsfasen, så det är fortfarande make som sätter väggtiden där.
+- **Kompilatorn ensam** (840 kärn-TU:er, en process, kall): 131 G instruktioner, IPC 3,4,
+  12,2 s på en tråd, 2,3 s på 6. cc_run (förprocessning + parse + sema) **98 %**, emit + as
+  3 %, objekt 0,8 %. Proven utan väntan: parse + sema 50 %, förprocessning som parsern drar
+  42 %, emit 5 %, skrivning 2 %. Hög IPC: mikrooptimering är i stort sett gjord; det som
+  återstår är att göra mindre arbete.
+- **Cacharnas värde:** utan båda 189 G; huvudcachen 189 → 151 G (−20 %); deklarationscachen
+  151 → 135 G (−10 %; bara TU:er med samma *prefix* av toppnivåhuvuden, i snitt 1,5 regioner
+  per återställning, ~19 % av tokens). En helt varm process (`--warm 1`, = en vccd som överlever
+  mellan byggen) 133,6 → 106,7 G (−20 %): resten är arbete per TU som ingen cache tar bort.
+- **Vad parsern får** (`vcc-bodies.py`, 24 korpus-TU:er, 20,8 M tokens): 95 % kommer från
+  headers; **51,6 % är kroppar av funktioner i headers och 49,2 % kroppar som TU:n aldrig når**
+  (transitivt från huvudfilen och initierare); huvudfilens egna kroppar 4,1 %. Typisk TU:
+  ~8 000 inline-funktioner i headers, ~7 800 oanvända. I tid: `compound_stmt` inklusive den
+  förprocessning den drar är **55 % av kompileringens CPU** (27 % pp, 28 % parse).
+- **Ombyggnader i ordning:**
+  1. **Lat parsning av funktionskroppar i headers** (~−45–50 % av kompileringens CPU om
+     överhoppet är gratis, ~−25 % om bara parsningen sparas). Vid `{` efter en
+     funktionsdeklarator på filnivå: spara tokenintervallet och hoppa till matchande `}`;
+     parsa när namnet först refereras (anrop, adress, inlining ≤ 40 noder), annars aldrig
+     (emit är redan lat). Det dyra är att tokens fortfarande dras genom `pp_next`; därför
+     ska huvudcachens poster bära kroppsintervallen (räknade vid inspelning: djup 0, `)` `{`)
+     så att uppspelningen hoppar över en kropp i O(1) och parsern senare läser den direkt ur
+     postens tokenarray (nollkopia). Namnuppslag i en sen kropp: symboler bär en
+     deklarationsordning och uppslaget ignorerar senare deklarationer (exakt C-semantik även
+     för sena taggar/omdeklarationer). Kostnad: diagnostik i oanvända kroppar försvinner
+     (clang ger den) → `VCC_EAGER=1` för sema-/diag-sviterna; numrering (strängar, statiska
+     lokala) följer användningsordning, vilket clangs CodeGen också gör (deferred decls).
+  2. **Deklarationscache per huvud i stället för per prefix** (modul-lik): när en huvudpost
+     spelas upp med samma makroingångar och samma *semantiska* ingångar (de namn/taggar dess
+     deklarationer slog upp och vad de band till), applicera postens deklarationsdelta
+     (typer, symboler, taggar) i stället för att parsa. Efter (1) är det som återstår av
+     headers mest deklarationer (~40 % av dagens tid); prefixträdet når bara ~19 % av tokens.
+  3. **fixdep i vccd** 6 % av vccd:s CPU i bygget (`in_hashtable`, mutexväntor i `vfixdep`):
+     `CONFIG_`-mängden per fil som internerade id:n, union per TU med generationsstämplad
+     array, inget globalt lås.
+  4. Småsaker: `VCC_LOG`:s `fprintf` tar `flockfile`-lås (bara profilering); `open()` vid
+     skrivning 1 %.
+- **Lata kroppar, steg 1: på parsernivå (klart, 2026-11-08).** `cc/lazy.c`: en `static`
+  funktion som definieras i en header (inte huvudfilen; utan used/constructor/destructor/alias,
+  inte overloadable, ingen `#pragma pack` aktiv) får sin kropp sparad som tokens (`lztok`,
+  16 byte; identifierare som internerat id, övrigas stavning i `lzs`), `SF_DEFINED | SF_LAZY`,
+  och tokenströmmen fortsätter efter `}`. Efter TU:n parsas de kroppar som något namnger
+  (`SF_REF`: varje `N_VAR`, även i sizeof/typeof, block-scope-`extern` märker den globala,
+  `cleanup()`, alias-mål), tills inget nytt namnges. Namnuppslag i en sen kropp hoppar över
+  filskopssymboler skapade efter definitionen (`lz_wm`, längs `shadow`), alltså exakt det
+  som syntes där. `#pragma` i kroppen sparas som `P_DIRECTIVE` och verkställs när kroppen
+  parsas (`fetch_directive` läser vidare ur kroppen). Deklarationscachens bilder har tre nya
+  arrayer (platser kodas). Emit avbryter med internt fel om en aldrig parsad kropp refereras.
+  `VCC_EAGER=1` = som förut.
+  - **Mätt** (840 kärn-TU:er, en process, `-j 6`, samma binär med/utan `VCC_EAGER`):
+    137,6 → **101,7 G instruktioner (−26 %)**, 43,8 → 35,1 G cykler, user 14,1 → 10,9 s.
+    4,39 M kroppar sparade (264,6 M tokens), **85,6 k parsade (6,5 M tokens, 2 %)**. Cyklerna
+    sjunker mindre än instruktionerna: kopieringen av tokens är minnesbunden, och de dras
+    fortfarande genom `pp_next` (steg 2). Kallt bygge (`-j 14`, alternerande ×3, last 7–9):
+    vccd user 14,5–15,1 → **12,1–12,3 s**, summerad jobbtid 26–28 → 22–24 s; väggtiden
+    10,8–11,0 → 10,4–10,9 s (make-bunden, som väntat).
+  - **Verifierat:** cbatch 840/840 (även ASan+UBSan), vcc-obj 840/840 med samma 31 odefinierade
+    symboler som utan lata kroppar, sema run 878/879, layout 878/879 (18,8 M kontroller),
+    fpcheck 840/840, diag 63/63, ctests 1708/1708, paritet 911/912. Objekten mot `VCC_EAGER=1`:
+    maskinkoden identisk i alla 839; 284 skiljer i byte-form, bara placering: strängar i
+    `.rodata.str1.1`, ordningen av statiska lokala objekt (`__msg`) i `.rodata`/`.data`,
+    suffixet på statiska lokalas namn (sym-index) — de skapas när kroppen parsas. Debian
+    bootar till `running`, 0 felande enheter (`results/boot-20261108-214004.log`).
+- **Lata kroppar, steg 2: i huvudcachen (klart, 2026-11-08).** `publish_tok` sparar per post
+  de yttersta `{`–`}`-paren i postens egna tokens som inte har något barn inskarvat (`hent.br`).
+  När parserns `{` för en lat kropp just spelades upp ur en post och paret finns där
+  (`pp_lazy_skip`; inte under inspelning utom i en `norec`-uppspelning, inget `pend`),
+  flyttas uppspelningen förbi `}`: positionerna räknas (`ntok_out`, deklarationscachen),
+  `__COUNTER__`-posterna hoppas över. Kroppen är då `(post, open, close, bas, cbase, ci)`
+  (`pp_lazy` i `lzfn`), och den sena parsningen läser postens tokens direkt (`pp_lazy_tok`,
+  samma `__COUNTER__`-omskrivning som `replay_tok`, nu `ctr_spell`). Missar i huvudcachen
+  kopierar som i steg 1. `prevloc`/`prevflags` blir `}`:s som förut.
+  - **Mätt** (samma körning som ovan, 840 TU:er, `-j 6`): steg 1 101,7 → **76,0 G
+    instruktioner** (från 137,6 utan lata kroppar: **−45 %**), 35,1 → 27,4 G cykler (−37 %),
+    user 10,9 → 8,3 s, vägg 2,1 → 1,6 s. 4,21 M kroppar sparade, 3,81 M ur huvudcachen,
+    samma 85 647 parsade. Deklarationscachen tar nu 121 bilder (förut 64) inom samma tak.
+    Kallt bygge (`-j 14`, alternerande mot `VCC_EAGER=1` ×3, last 5–13): vccd user
+    14,8–15,1 → **9,4–9,5 s (−37 %)**, summerad jobbtid 30–42 → 19–24 s; väggtiden brus.
+  - **Verifierat:** alla 839 objekt byte-identiska med steg 1; paritet 911/912, batch --cmp
+    873/873, sema run och layout 878/879, fpcheck 840/840, diag 63/63, vcc-obj 840/840 (samma
+    31 odefinierade), cbatch ASan+UBSan 840/840, fuzz-regress, vccd-cc 174/175 (som förut;
+    obs: med ett långt `TMPDIR` blir socketvägen för lång och vccd-cc hänger i `forward`).
+    Debian bootar till `running`, 0 felande enheter (`results/boot-20261108-220251.log`).
+- **Inkrementellt:** make-nivån fungerar redan (vccd:s `.cmd` = fixdeps, `touch` på ett huvud
+  bygger om exakt beroende objekt; no-op 2,7 s, nästan bara undermakes). En vccd som lever
+  mellan byggen ger −20 % instruktioner. Det som ger mycket är en **innehållsadresserad
+  objektcache i vccd** (direktläge som ccache: nyckel = vcc-bygg-id + argv + hash av
+  huvudfilen och varje fil i förra körningens dep-lista; filhash en gång per process i
+  tokencachen; träff = skriv `.o` + `.cmd`), mmap:ad på disk. Ett om-bygge i tom utkatalog
+  blir då nära noll kompileringstid; det första kalla bygget hjälps inte.
+
 ### Felmeddelanden (clang-format)
 
 Status: `bench/vcc-diag.py` jämför vccs stderr med clangs (-fsyntax-only) på

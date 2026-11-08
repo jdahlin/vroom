@@ -190,6 +190,7 @@ extern uint8_t kwclass[KW_END];
 VPRIV void init_keywords(void);
 static inline int kwof(const ptok *t);
 VPRIV __attribute__((noinline)) void fetch_directive(cc *c, ptok *t);
+VPRIV __attribute__((noinline)) void lz_fetch(cc *c, ptok *t);
 static inline __attribute__((always_inline)) void fetch(cc *c, ptok *t);
 static inline ptok *tok(cc *c);
 static inline bool is_nullability(const cc *c, const ptok *t);
@@ -341,6 +342,10 @@ VPRIV uint32_t asm_stmt(cc *c, bool toplevel);
 VPRIV bool at_asm(cc *c);
 VPRIV uint32_t compound_stmt(cc *c, qty *last);
 VPRIV uint32_t statement(cc *c);
+/* lazy.c */
+VPRIV bool lazy_ok(cc *c, uint32_t s, const declr *d);
+VPRIV void lazy_capture(cc *c, uint32_t s, const declr *d);
+VPRIV void lazy_closure(cc *c);
 /* func.c */
 VPRIV void function_def(cc *c, uint32_t s, const declr *d);
 VPRIV void translation_unit(cc *c);
@@ -359,7 +364,10 @@ static inline int kwof(const ptok *t)
 /* inline at every token consumer: a call to pp_next and a test; the rest out of line */
 static inline __attribute__((always_inline)) void fetch(cc *c, ptok *t)
 {
-	pp_next(c->p, t);
+	if (unlikely(c->lz_on))
+		lz_fetch(c, t);
+	else
+		pp_next(c->p, t);
 	if (unlikely(t->kind == P_DIRECTIVE))
 		fetch_directive(c, t);
 }
