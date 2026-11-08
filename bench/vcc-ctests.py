@@ -23,7 +23,9 @@ a call, and vcc has no such pass), run.
 
 --fe stops after the front end (no code, no qemu): fe pass rate only.
 Clang reference results are cached in build/ccs/ctests/ref (keyed by the
-source, flags and runtime), so a rerun only builds and runs vcc's side.
+source, flags and runtime), so a rerun only builds and runs vcc's side.  A vcc object byte-identical
+to one that passed before (build/ccs/ctests/pass, keyed by the object, the
+runtime and the reference) is not linked or run again; --no-cache runs all.
 """
 import hashlib, json, os, re, shutil, subprocess, sys, time
 from collections import Counter, defaultdict
@@ -200,6 +202,17 @@ def one(t):
         e = err.decode(errors='replace')
         cat = 'fp' if re.search(r'floating point|long double', e) else 'emit'
         return t, 'fail', cat, first_err(e) if rc != 'timeout' and rc > 0 else f'vpp: signal/timeout {rc}: ' + first_err(e)
+    # an object byte-identical to one that passed before (same runtime, same
+    # reference) passes again: no link, no qemu (they are ~90% of the time)
+    pk = hashlib.sha1(open(f'{wd}/vcc.o', 'rb').read() + (RTHASH + ref['key']).encode()).hexdigest()
+    pf = f'{OUT}/pass/{suite}/{name}'
+    if not NOCACHE:
+        try:
+            if open(pf).read() == pk:
+                shutil.rmtree(wd, ignore_errors=True)
+                return t, 'pass', '', ''
+        except OSError:
+            pass
     rc, err = link([f'{wd}/vcc.o'], f'{wd}/vcc.elf')
     if rc:
         m = re.search(r'undefined symbol: (\S+)', err)
@@ -208,21 +221,24 @@ def one(t):
         return t, 'fail', 'link', 'undefined ' + m.group(1) if m else first_err(err)
     rc, out = qemu(f'{wd}/vcc.elf')
     if rc == ref['rc'] and out == ref['out']:
+        os.makedirs(os.path.dirname(pf), exist_ok=True)
+        open(pf, 'w').write(pk)
         shutil.rmtree(wd, ignore_errors=True)
         return t, 'pass', '', ''
     why = f'exit {rc} (clang {ref["rc"]})' if rc != ref['rc'] else 'output differs'
     open(f'{wd}/vcc.out', 'w').write(out); open(f'{wd}/ref.out', 'w').write(ref['out'])
     return t, 'fail', 'run', why
 
-def init(fe, rth):
-    global FE_ONLY, RTHASH
-    FE_ONLY, RTHASH = fe, rth
+def init(fe, rth, nocache=False):
+    global FE_ONLY, RTHASH, NOCACHE
+    FE_ONLY, RTHASH, NOCACHE = fe, rth, nocache
 
 if __name__ == '__main__':
     av = sys.argv[1:]
     j, suite, show, verbose = 6, None, None, False
     fe = '--fe' in av
-    av = [a for a in av if a != '--fe']
+    nocache = '--no-cache' in av
+    av = [a for a in av if a not in ('--fe', '--no-cache')]
     if '-v' in av: verbose = True; av.remove('-v')
     for opt in ('-j', '--suite', '--show'):
         if opt in av:
@@ -234,7 +250,7 @@ if __name__ == '__main__':
     rth = build_rt()
     ts = tests(suite, pat)
     t0 = time.time()
-    with Pool(j, initializer=init, initargs=(fe, rth)) as pool:
+    with Pool(j, initializer=init, initargs=(fe, rth, nocache)) as pool:
         res = pool.map(one, ts, chunksize=1)
     by = defaultdict(Counter)
     whys = defaultdict(Counter)

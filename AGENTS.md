@@ -52,6 +52,7 @@ bench/vcc-diff.py ref -j 6          # clang -E references (once, ~1 min)
 bench/vcc-diff.py cmp -j 6 --kernel # preprocessor parity, kernel TUs
 bench/vcc-diff.py cmp -j 6          # ... including host tools (scripts/)
 bench/vcc-sema.py run -j 6          # vpp -fsyntax-only on every C TU
+bench/vcc-sema.py batch -j 6        # the same in one vpp --batch process: ~3 s instead of ~35 s
 bench/vcc-sema.py layout -j 6       # layouts/constants/decl types checked by clang (~70 s)
 bench/var-cmp.py work/build-x       # vcc ar against llvm-ar on an llvm-ar-built tree
 bench/vsh-test.py                   # vsh/rsh against dash on small recipes
@@ -60,6 +61,13 @@ bench/vcc-ctests.py -j 6 --suite vcc # our own regression tests (ccs/vcc/tests/v
 bench/vas-enc.py $PWD/ccs/vcc/tests/vas   # vas encodings vs llvm-mc
 bench/pg/build.sh clang && bench/pg/build.sh vcc   # PostgreSQL (macOS, meson+ninja): build + meson test (~2 min each)
 ```
+Fast loop while iterating (cold numbers on a loaded machine, in brackets):
+`vcc-sema.py batch` (3 s [33 s]), `vcc-diff.py batch --cmp --kernel` (14 s
+[40 s]), `vcc-ctests.py -j 6` (5 s [32 s]: a vcc object byte-identical to one
+that passed is not linked or run again; `--no-cache` runs all) and
+`vcc-sema.py layout` (clang only rechecks TUs whose claims changed;
+`NOCACHE=1` rechecks all).  The batch modes share caches across TUs as vccd
+does, so before a commit also run the per-process `cmp` and `run`.
 PostgreSQL (`work/postgres`, `bench/pg/`) is the second test project: a
 native macOS build where vcc compiles every C file (`bench/pg/cc`) and clang
 links; the reference is Homebrew clang, and both builds must pass the same
