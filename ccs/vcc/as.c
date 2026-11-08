@@ -563,7 +563,7 @@ static inline const char *find_stop(const char *p, const char *e)
 }
 
 /* The general case: copy the statement into a->sb without comments. */
-static size_t next_stmt_copy(As *a, Frame *f)
+static __attribute__((noinline)) size_t next_stmt_copy(As *a, Frame *f)
 {
 	const char *p = f->p, *e = f->e;
 	char *o = (char *)a->sb.base;
@@ -619,7 +619,7 @@ static size_t next_stmt_copy(As *a, Frame *f)
  * the frame text (no comment or string in it, the common case) or in
  * a->sb.  Returns its length; sets *raw to where it started in the frame
  * text.  The text is not NUL-terminated. */
-static size_t next_stmt(As *a, Frame *f, const char **raw, const char **s)
+static inline __attribute__((always_inline)) size_t next_stmt(As *a, Frame *f, const char **raw, const char **s)
 {
 	const char *p = f->p, *e = f->e;
 	*raw = p;
@@ -1679,7 +1679,7 @@ static Sv ifc_str(const char **pp, const char *e)
 /* conditional directives; returns 1 if w was one */
 static int cond_dir(As *a, Sv w, const char *p, const char *e, int *rc)
 {
-	if (w.n < 3 || w.s[0] != '.') return 0;
+	if (w.n < 3 || w.s[0] != '.' || (w.s[1] != 'e' && w.s[1] != 'i')) return 0;
 	*rc = 0;
 	if (sveq(w, ".endif")) {
 		if (!a->ncs) { *rc = err(a, "Encountered a .endif that doesn't follow an .if or .else"); return 1; }
