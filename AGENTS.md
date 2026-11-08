@@ -47,6 +47,7 @@ bench/vcc-sema.py run -j 6          # vpp -fsyntax-only on every C TU
 bench/vcc-sema.py layout -j 6       # layouts/constants/decl types checked by clang (~70 s)
 bench/var-cmp.py work/build-x       # vcc ar against llvm-ar on an llvm-ar-built tree
 bench/vsh-test.py                   # vsh/rsh against dash on small recipes
+bench/vcc-fpcheck.py -j 6           # no generated FP/SIMD code under -mgeneral-regs-only (~10 s)
 ```
 Parity is a token-stream comparison (kind and spelling) of `clang -E -P`
 against `vpp`, both lexed by vcc's lexer.  A change to `pp.c` or `lex.c` is
