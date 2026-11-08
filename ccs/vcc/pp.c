@@ -306,6 +306,7 @@ enum { MK_OBJ, MK_FUNC, MK_BUILTIN };
 enum {
 	MF_VARIADIC = 1, MF_PASTE = 2, MF_VAOPT = 4,
 	MF_BADHASH = 8,		/* '#' not before a parameter: an error unless assembler */
+	MF_HASH = 16,		/* a '#' in the body */
 };
 enum {
 	B_NONE, B_FILE, B_LINE, B_COUNTER, B_DATE, B_TIME, B_TIMESTAMP,
@@ -766,8 +767,9 @@ static inline void mset(pp *p, uint32_t id, const pmacro *m)
 	*mslot(p, id) = (uintptr_t)m;
 }
 
-static inline void mdisable(pp *p, uint32_t id) { *mslot(p, id) |= 1; }
-static inline void menable(pp *p, uint32_t id) { *mslot(p, id) &= ~(uintptr_t)1; }
+/* id is a macro being expanded: its page exists (it was read, defined) */
+static inline void mdisable(pp *p, uint32_t id) { p->mdir[id >> MPAGE_BITS][id & (MPAGE - 1)] |= 1; }
+static inline void menable(pp *p, uint32_t id) { p->mdir[id >> MPAGE_BITS][id & (MPAGE - 1)] &= ~(uintptr_t)1; }
 
 /* ---------------- header cache: recording reads and writes ---------------- */
 
@@ -1097,15 +1099,24 @@ static inline void out_ch(pp *p, char ch)
 
 /* ---------------- tokens ---------------- */
 
+_Static_assert(offsetof(vtok, id) == offsetof(vtok, len) + 4 && offsetof(ptok, id) == offsetof(ptok, len) + 4 &&
+	       offsetof(vtok, flags) == offsetof(vtok, kind) + 1 && offsetof(ptok, kind) == offsetof(ptok, loc) + 4 &&
+	       offsetof(ptok, flags) == offsetof(ptok, kind) + 1 && offsetof(ptok, ctr) == offsetof(ptok, kind) + 2 &&
+	       sizeof(vtok) == offsetof(vtok, kind) + 4, "vfill's layout");
+
+/* three stores: s, len|id, loc|kind|flags|ctr (little endian) */
 static inline void vfill(ptok *t, const vtok *v, const char *src, uint32_t loc)
 {
+	uint64_t li, lk;
+	uint32_t kf;
+
+	memcpy(&li, &v->len, 8);
+	memcpy(&kf, &v->kind, 4);
+	kf &= 0xffu | (uint32_t)(TF_SOL | TF_SPACE | TF_DIRTY | TF_RAW) << 8;	/* ctr = 0 */
+	lk = loc | (uint64_t)kf << 32;
 	t->s = src + v->off;
-	t->len = v->len;
-	t->id = v->id;
-	t->loc = loc;
-	t->kind = v->kind;
-	t->flags = v->flags & (TF_SOL | TF_SPACE | TF_DIRTY | TF_RAW);
-	t->ctr = 0;
+	memcpy(&t->len, &li, 8);
+	memcpy(&t->loc, &lk, 8);
 }
 
 static inline void mkeof(ptok *t)
@@ -1157,6 +1168,20 @@ static char *spell_to(char *dst, const ptok *t)
 	if (s != dst)
 		memcpy(dst, s, n);
 	return dst + n;
+}
+
+/*
+ * spell_to() where dst has 16 bytes of room past the spelling: a short clean
+ * spelling is copied as 16 bytes (spellings are readable 16 bytes past their
+ * end: file text is padded, and so is every spelling pp makes)
+ */
+static inline char *spell_to16(char *dst, const ptok *t)
+{
+	if (likely(!(t->flags & TF_DIRTY) && t->len <= 16)) {
+		memcpy(dst, t->s, 16);
+		return dst + t->len;
+	}
+	return spell_to(dst, t);
 }
 
 static inline void svpush(pp *p, const ptok *t)
@@ -1252,7 +1277,7 @@ static void top_event(pp *p, const void *e, uint32_t base, unsigned ctr, uint8_t
 }
 
 /* the next token, no macro expansion; runs directives in file contexts */
-static void raw(pp *p, ptok *t)
+static __attribute__((noinline)) void raw(pp *p, ptok *t)
 {
 	for (;;) {
 		ctx *c = &p->cx[p->depth - 1];
@@ -1322,6 +1347,59 @@ static void raw(pp *p, ptok *t)
 	}
 }
 
+/* the next token of the top context if it is plain (nothing owed, no directive) */
+static inline __attribute__((always_inline)) bool raw_plain(pp *p, ctx *c, ptok *t)
+{
+	if (likely(c->i < c->n && !(c->first | p->pend))) {
+		if (likely(c->type == C_PTOK)) {
+			*t = c->pt[c->i++];
+			return true;
+		}
+		if (c->type == C_VTOK) {
+			const vtok *v = &c->vt[c->i++];
+
+			vfill(t, v, c->src, c->offloc ? c->loc + v->off : c->loc);
+			return true;
+		}
+		if (c->type == C_FILE) {
+			const vtok *v = &c->vt[c->i];
+
+			if (likely(!((v->flags & TF_SOL) && v->kind == T_HASH))) {
+				c->i++;
+				vfill(t, v, c->src, c->loc + v->off);
+				return true;
+			}
+		}
+	}
+	return false;
+}
+
+/* raw_fast's fallback: pops exhausted macro contexts (as raw() does) without raw()'s frame */
+static __attribute__((noinline)) void raw_pop(pp *p, ptok *t)
+{
+	ctx *c = &p->cx[p->depth - 1];
+
+	while (c->i >= c->n && (c->type == C_PTOK || c->type == C_VTOK) && !c->barrier) {
+		if (c->mid)
+			menable(p, c->mid);
+		if (c->first)
+			p->pend |= c->first & 3;
+		p->depth--;
+		c--;
+	}
+	if (raw_plain(p, c, t))
+		return;
+	raw(p, t);
+}
+
+/* raw(), inline: a macro context's next token with nothing owed (most tokens) */
+static inline __attribute__((always_inline)) void raw_fast(pp *p, ptok *t)
+{
+	if (likely(raw_plain(p, &p->cx[p->depth - 1], t)))
+		return;
+	raw_pop(p, t);
+}
+
 /* is the next token '(' ?  (clang's isNextPPTokenLParen: no popping) */
 static bool peek_lparen(const pp *p)
 {
@@ -1338,19 +1416,12 @@ static bool peek_lparen(const pp *p)
 
 static int expand(pp *p, const pmacro *m, ptok *t);
 
-/* the next fully expanded token */
-static void next_exp(pp *p, ptok *t)
+/* next_exp() from an identifier t whose entry e is a macro (or disabled) */
+static __attribute__((noinline)) void next_exp_slow(pp *p, ptok *t, uintptr_t e)
 {
 	for (;;) {
-		uintptr_t e;
 		const pmacro *m;
 
-		raw(p, t);
-		if (t->kind != T_IDENT || (t->flags & PF_NOEXP))
-			return;
-		e = mread_tok(p, t, 0);
-		if (likely(!e))
-			return;
 		if (e & 1) {
 			t->flags |= PF_NOEXP;
 			return;
@@ -1358,9 +1429,35 @@ static void next_exp(pp *p, ptok *t)
 		m = (const pmacro *)e;
 		if (m->kind == MK_FUNC && !peek_lparen(p))
 			return;
-		if (expand(p, m, t))
+		switch (expand(p, m, t)) {
+		case 1:
+			return;		/* t is the result */
+		case 0:
+			raw_fast(p, t);
+			break;
+		default:
+			break;		/* t is the next raw token */
+		}
+		if (t->kind != T_IDENT || (t->flags & PF_NOEXP))
+			return;
+		e = mread_tok(p, t, 0);
+		if (likely(!e))
 			return;
 	}
+}
+
+/* the next fully expanded token */
+static inline __attribute__((always_inline)) void next_exp(pp *p, ptok *t)
+{
+	uintptr_t e;
+
+	raw_fast(p, t);
+	if (t->kind != T_IDENT || (t->flags & PF_NOEXP))
+		return;
+	e = mread_tok(p, t, 0);
+	if (likely(!e))
+		return;
+	next_exp_slow(p, t, e);
 }
 
 /* ---------------- arguments ---------------- */
@@ -1371,22 +1468,131 @@ typedef struct margs {
 	const ptok **pre;	/* pre-expanded, lazily */
 	uint32_t *preln;
 	uint8_t *prest;		/* 0: not computed, 1: done */
-	const ptok **str;	/* stringified */
+	size_t base;		/* tok is sv + base */
 } margs;
 
 static bool collect_(pp *p, const pmacro *m, const ptok *name, margs *a, ptok *rp)
 {
-	uint32_t np = m->nparam, slots = np ? np : 1, k = 0, depth = 0, n;
+	uint32_t np = m->nparam, slots = np ? np : 1, k = 0, depth = 0, end;
 	size_t base = p->svn;
 	bool va = m->flags & MF_VARIADIC;
+	const ptok *tok;
 	ptok t;
 
-	a->st = alloc(&p->tmp, slots * sizeof(uint32_t));
-	a->ln = alloc(&p->tmp, slots * sizeof(uint32_t));
+	/* pre, then st, ln, preln, then prest: one allocation */
+	{
+		char *b = alloc(&p->tmp, slots * (sizeof(*a->pre) + 3 * sizeof(uint32_t) + 1));
+
+		a->pre = (const ptok **)b;
+		a->st = (uint32_t *)(b + slots * sizeof(*a->pre));
+		a->ln = a->st + slots;
+		a->preln = a->ln + slots;
+		a->prest = (uint8_t *)(a->preln + slots);
+	}
 	raw(p, &t);		/* '(' */
 	a->st[0] = 0;
+	/*
+	 * The whole invocation in the top expansion context (nested macros):
+	 * the arguments are slices of its tokens, which outlive the expansion
+	 * (tmp) and are not written; nothing is copied.
+	 */
+	{
+		ctx *c = &p->cx[p->depth - 1];
+
+		if (c->type == C_PTOK && !(c->first | p->pend)) {
+			const ptok *pt = c->pt + c->i;
+			uint32_t e = c->n - c->i;
+
+			for (uint32_t i = 0; i < e; i++) {
+				uint8_t kd = pt[i].kind;
+
+				if (kd == T_LPAREN) {
+					depth++;
+				} else if (kd == T_RPAREN) {
+					if (depth) {
+						depth--;
+						continue;
+					}
+					c->i += i + 1;
+					*rp = pt[i];
+					tok = pt;
+					end = i;
+					goto done;
+				} else if (kd == T_COMMA && !depth && !(va && k + 1 >= np)) {
+					if (k + 1 >= slots) {
+						k++;	/* too many: counted, reported below */
+						continue;
+					}
+					a->ln[k] = i - a->st[k];
+					a->st[++k] = i + 1;
+				}
+			}
+			k = depth = 0;	/* not all there: collect into sv */
+		}
+	}
 	for (;;) {
-		raw(p, &t);
+		ctx *c = &p->cx[p->depth - 1];
+
+		/* runs of plain tokens straight into sv */
+		if (likely(c->i < c->n && !(c->first | p->pend)) && c->type != C_REPLAY) {
+			bool stop_comma = !(va && k + 1 >= np);
+			uint32_t i = c->i, e = c->n;
+
+			if (c->type == C_PTOK) {
+				const ptok *pt = c->pt;
+				ptok *w = p->sv + p->svn;
+
+				/* (no room for the rest of the context: token by token below) */
+				if (unlikely(p->svn + (e - i) > SVMAX))
+					e = i;
+				for (; i < e; i++) {
+					uint8_t kd = pt[i].kind;
+
+					if (kd == T_LPAREN) {
+						depth++;
+					} else if (kd == T_RPAREN) {
+						if (!depth)
+							break;
+						depth--;
+					} else if (kd == T_COMMA && !depth && stop_comma) {
+						break;
+					}
+					*w++ = pt[i];
+				}
+				p->svn = (size_t)(w - p->sv);
+				e = c->n;
+			} else {
+				const vtok *vt = c->vt;
+				bool file = c->type == C_FILE;
+				uint32_t loc = c->loc, offloc = file || c->offloc;
+
+				for (; i < e; i++) {
+					const vtok *v = &vt[i];
+					uint8_t kd = v->kind;
+
+					if (kd == T_LPAREN) {
+						depth++;
+					} else if (kd == T_RPAREN) {
+						if (!depth)
+							break;
+						depth--;
+					} else if (kd == T_COMMA && !depth && stop_comma) {
+						break;
+					} else if (file && (v->flags & TF_SOL) && kd == T_HASH) {
+						break;
+					}
+					if (unlikely(p->svn == SVMAX)) {
+						fprintf(stderr, "vcc: expansion too large\n");
+						abort();
+					}
+					vfill(&p->sv[p->svn++], v, c->src, offloc ? loc + v->off : loc);
+				}
+			}
+			c->i = i;
+			if (i == e)
+				continue;
+		}
+		raw_fast(p, &t);
 		if (unlikely(t.kind == T_EOF)) {
 			error(p, name->loc, "unterminated function-like macro invocation");
 			p->svn = base;
@@ -1413,16 +1619,20 @@ static bool collect_(pp *p, const pmacro *m, const ptok *name, margs *a, ptok *r
 		svpush(p, &t);
 	}
 	*rp = t;
+	/* the arguments stay in sv[base, svn) until expand() is done with them */
+	tok = p->sv + base;
+	end = (uint32_t)(p->svn - base);
+done:
 	if (k >= slots) {
 		error(p, name->loc, "too many arguments provided to function-like macro invocation");
 		p->svn = base;
 		return false;
 	}
-	a->ln[k] = (uint32_t)(p->svn - base) - a->st[k];
+	a->ln[k] = end - a->st[k];
 	if (k + 1 < np) {
 		if (va && k + 2 == np) {
 			/* GNU: the variadic argument left out entirely */
-			a->st[k + 1] = (uint32_t)(p->svn - base);
+			a->st[k + 1] = end;
 			a->ln[k + 1] = 0;
 		} else {
 			error(p, name->loc, "too few arguments provided to function-like macro invocation");
@@ -1434,13 +1644,9 @@ static bool collect_(pp *p, const pmacro *m, const ptok *name, margs *a, ptok *r
 		p->svn = base;
 		return false;
 	}
-	a->tok = svtake(p, base, &n);
-	a->pre = alloc(&p->tmp, slots * sizeof(*a->pre));
-	a->preln = alloc(&p->tmp, slots * sizeof(uint32_t));
-	a->prest = alloc(&p->tmp, slots);
-	a->str = alloc(&p->tmp, slots * sizeof(*a->str));
+	a->tok = tok;
+	a->base = base;
 	memset(a->prest, 0, slots);
-	memset(a->str, 0, slots * sizeof(*a->str));
 	return true;
 }
 
@@ -1463,25 +1669,45 @@ static bool needs_pre(pp *p, const ptok *t, uint32_t n)
 	return false;
 }
 
-static void preexpand(pp *p, margs *a, uint32_t k)
+/*
+ * keep: the result stays in sv[base, svn) (it is only read, and only until
+ * expand() resets svn); else it is copied to tmp (va_opt: sv is in use above)
+ */
+static __attribute__((noinline)) void preexpand_run(pp *p, margs *a, uint32_t k, bool keep,
+						       const ptok *at, uint32_t n)
 {
-	const ptok *at = a->tok + a->st[k];
-	uint32_t n = a->ln[k];
 	uint8_t pend = p->pend;
 	int d = p->depth;
 	size_t base = p->svn;
 	ptok t;
 
-	a->prest[k] = 1;
-	if (!needs_pre(p, at, n)) {
-		a->pre[k] = at;
-		a->preln[k] = n;
-		return;
-	}
 	push_ptok(p, at, n, 0, 0, 1);
 	p->pend = 0;
 	p->preexp++;
 	for (;;) {
+		ctx *c = &p->cx[p->depth - 1];
+
+		/* runs of tokens that are not macros: as next_exp() returns them, straight into sv */
+		if (c->type == C_PTOK && c->i < c->n && !(c->first | p->pend) && !p->rec.on &&
+		    likely(p->svn + (c->n - c->i) <= SVMAX)) {
+			const ptok *pt = c->pt;
+			ptok *w = p->sv + p->svn;
+			uint32_t i = c->i, e = c->n;
+
+			for (; i < e; i++) {
+				uintptr_t me;
+
+				*w = pt[i];
+				if (pt[i].kind == T_IDENT && !(pt[i].flags & PF_NOEXP) && (me = mget(p, pt[i].id))) {
+					if (!(me & 1))
+						break;	/* a macro: next_exp() */
+					w->flags |= PF_NOEXP;
+				}
+				w++;
+			}
+			p->svn = (size_t)(w - p->sv);
+			c->i = i;
+		}
 		next_exp(p, &t);
 		if (t.kind == T_EOF)
 			break;
@@ -1490,7 +1716,27 @@ static void preexpand(pp *p, margs *a, uint32_t k)
 	p->preexp--;
 	pop_to(p, d);
 	p->pend = pend;
-	a->pre[k] = svtake(p, base, &a->preln[k]);
+	if (keep) {
+		a->pre[k] = p->sv + base;
+		a->preln[k] = (uint32_t)(p->svn - base);
+	} else {
+		a->pre[k] = svtake(p, base, &a->preln[k]);
+	}
+}
+
+/* most arguments need no pre-expansion: that check inline, the rest in preexpand_run */
+static inline void preexpand(pp *p, margs *a, uint32_t k, bool keep)
+{
+	const ptok *at = a->tok + a->st[k];
+	uint32_t n = a->ln[k];
+
+	a->prest[k] = 1;
+	if (!needs_pre(p, at, n)) {
+		a->pre[k] = at;
+		a->preln[k] = n;
+		return;
+	}
+	preexpand_run(p, a, k, keep, at, n);
 }
 
 static bool is_strlit(int k)
@@ -1553,7 +1799,7 @@ static void stringify(pp *p, const ptok *t, uint32_t n, ptok *out)
 					HC_BAD(p);
 				}
 			}
-			w = spell_to(w, &t[i]);
+			w = spell_to16(w, &t[i]);	/* (cap has 16 to spare) */
 		}
 	}
 	/* a trailing unescaped backslash would escape the quote: drop it */
@@ -1598,10 +1844,21 @@ static const struct { const char *s; uint8_t k; } puncts[] = {
 	{ "%>", T_RBRACE }, { "%:", T_HASH }, { "%:%:", T_HASHHASH },
 };
 
-static bool idch(unsigned char c)
+#define IDCH_ROW(b) [b] = 1, [b + 1] = 1, [b + 2] = 1, [b + 3] = 1, [b + 4] = 1, [b + 5] = 1, [b + 6] = 1, [b + 7] = 1
+static const uint8_t idch_tab[256] = {	/* [a-zA-Z0-9_$] and >= 0x80 */
+	['0'] = 1, ['1'] = 1, ['2'] = 1, ['3'] = 1, ['4'] = 1, ['5'] = 1, ['6'] = 1, ['7'] = 1, ['8'] = 1, ['9'] = 1,
+	IDCH_ROW('A'), IDCH_ROW('I'), IDCH_ROW('Q'), ['Y'] = 1, ['Z'] = 1,
+	IDCH_ROW('a'), IDCH_ROW('i'), IDCH_ROW('q'), ['y'] = 1, ['z'] = 1,
+	['_'] = 1, ['$'] = 1,
+	IDCH_ROW(0x80), IDCH_ROW(0x88), IDCH_ROW(0x90), IDCH_ROW(0x98), IDCH_ROW(0xa0), IDCH_ROW(0xa8),
+	IDCH_ROW(0xb0), IDCH_ROW(0xb8), IDCH_ROW(0xc0), IDCH_ROW(0xc8), IDCH_ROW(0xd0), IDCH_ROW(0xd8),
+	IDCH_ROW(0xe0), IDCH_ROW(0xe8), IDCH_ROW(0xf0), IDCH_ROW(0xf8),
+};
+#undef IDCH_ROW
+
+static inline bool idch(unsigned char c)
 {
-	return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') ||
-	       c == '_' || c == '$' || c >= 0x80;
+	return idch_tab[c];
 }
 
 /* the kind of the single token spelled s[0..n), or -1 */
@@ -1663,9 +1920,9 @@ static ptok paste(pp *p, const ptok *l, const ptok *r)
 	int k;
 	uint32_t ll;
 
-	w = spell_to(b, l);
+	w = spell_to16(b, l);	/* (24 to spare) */
 	ll = (uint32_t)(w - b);
-	w = spell_to(w, r);
+	w = spell_to16(w, r);
 	memset(w, 0, 17);
 	k = classify(b, (size_t)(w - b), r->kind);
 	if (k < 0) {
@@ -1704,12 +1961,18 @@ static void remove_va_comma(pp *p, size_t base, bool *ngs)
 static size_t append(pp *p, const ptok *t, uint32_t n)
 {
 	size_t first = p->svn;
+	ptok *w = p->sv + first;
 
-	for (uint32_t i = 0; i < n; i++) {
-		svpush(p, &t[i]);
-		if (t[i].kind == T_HASHHASH)
-			p->sv[p->svn - 1].flags |= PF_NOPASTE;
+	if (unlikely(n > SVMAX - p->svn)) {
+		fprintf(stderr, "vcc: expansion too large\n");
+		abort();
 	}
+	for (uint32_t i = 0; i < n; i++) {
+		w[i] = t[i];
+		if (unlikely(t[i].kind == T_HASHHASH))
+			w[i].flags |= PF_NOPASTE;
+	}
+	p->svn = first + n;
 	return first;
 }
 
@@ -1727,6 +1990,8 @@ static void subst_range(pp *p, const pmacro *m, margs *a, uint32_t from, uint32_
 	bool ngs = *ngsp, va = m->flags & MF_VARIADIC;
 	ptok t;
 
+	bool special = m->flags & (MF_VAOPT | MF_HASH);
+
 	for (uint32_t i = from; i < to; i++) {
 		const vtok *cur = &body[i];
 		uint32_t k = pidx ? pidx[i] : 0;
@@ -1734,6 +1999,8 @@ static void subst_range(pp *p, const pmacro *m, margs *a, uint32_t from, uint32_
 
 		if (i && (cur->flags & TF_SPACE))
 			ngs = true;
+		if (!special)
+			goto plain;	/* no __VA_OPT__, no '#' */
 		if (unlikely(cur->kind == T_IDENT && cur->id == KW_VA_OPT && va)) {
 			i = va_opt(p, m, a, i, to, base, eloc, &ngs, false);
 			continue;
@@ -1755,19 +2022,23 @@ static void subst_range(pp *p, const pmacro *m, margs *a, uint32_t from, uint32_
 			ngs = false;
 			continue;
 		}
+plain:
+		if (!k) {
+			ptok *w;
+
+			if (unlikely(p->svn == SVMAX)) {
+				fprintf(stderr, "vcc: expansion too large\n");
+				abort();
+			}
+			w = &p->sv[p->svn++];
+			vfill(w, cur, m->src, eloc);
+			w->flags = (w->flags & ~(TF_SOL | TF_SPACE)) | (ngs ? TF_SPACE : 0);
+			ngs = false;
+			continue;
+		}
 		before_nonempty = p->svn > base && hashhash(&p->sv[p->svn - 1]);
 		before = i && body[i - 1].kind == T_HASHHASH;
 		after = i + 1 < to && body[i + 1].kind == T_HASHHASH;
-		if (!k) {
-			vfill(&t, cur, m->src, eloc);
-			t.flags &= ~(TF_SOL | TF_SPACE);
-			if (ngs) {
-				t.flags |= TF_SPACE;
-				ngs = false;
-			}
-			svpush(p, &t);
-			continue;
-		}
 		k--;
 		if (!before && !after) {
 			const ptok *at = a->pre[k];
@@ -1837,7 +2108,7 @@ static uint32_t va_opt(pp *p, const pmacro *m, margs *a, uint32_t i, uint32_t to
 		return to;
 	}
 	if (!a->prest[k])
-		preexpand(p, a, k);
+		preexpand(p, a, k, false);
 	if (a->preln[k]) {
 		bool ngs = false;
 
@@ -1866,6 +2137,73 @@ static uint32_t va_opt(pp *p, const pmacro *m, margs *a, uint32_t i, uint32_t to
 	return e;
 }
 
+/*
+ * subst() for a function-like macro without '#', '##' or __VA_OPT__ (most):
+ * every parameter is replaced by its pre-expanded argument, so the result's
+ * size is known and it is built in place, without sv.
+ */
+static void subst_simple(pp *p, const pmacro *m, margs *a, uint8_t nf, uint32_t eloc)
+{
+	const vtok *body = m->body;
+	const uint8_t *pidx = m->pidx;
+	const char *src = m->src;
+	uint32_t nb = m->nbody, n = 0;
+	bool ngs = false;
+	ptok *r, *w;
+
+	if (pidx) {
+		for (uint32_t i = 0; i < nb; i++) {
+			uint32_t k = pidx[i];
+
+			if (!k) {
+				n++;
+				continue;
+			}
+			if (!a->prest[k - 1])
+				preexpand(p, a, k - 1, true);
+			n += a->preln[k - 1];
+		}
+	} else {
+		n = nb;
+	}
+	if (!n) {
+		p->pend |= nf;
+		return;
+	}
+	r = w = alloc(&p->tmp, n * sizeof(ptok));
+	for (uint32_t i = 0; i < nb; i++) {
+		const vtok *cur = &body[i];
+		uint32_t k = pidx ? pidx[i] : 0;
+
+		if (i && (cur->flags & TF_SPACE))
+			ngs = true;
+		if (!k) {
+			vfill(w, cur, src, eloc);
+			w->flags = (w->flags & ~(TF_SOL | TF_SPACE)) | (w == r ? nf : ngs ? TF_SPACE : 0);
+			ngs = false;
+			w++;
+			continue;
+		}
+		{
+			const ptok *at = a->pre[k - 1];
+			uint32_t an = a->preln[k - 1];
+
+			if (!an)
+				continue;
+			for (uint32_t j = 0; j < an; j++) {
+				w[j] = at[j];
+				if (unlikely(at[j].kind == T_HASHHASH))
+					w[j].flags |= PF_NOPASTE;
+			}
+			w->flags = (w->flags & ~(TF_SOL | TF_SPACE)) | (w == r ? nf : ngs ? TF_SPACE : 0);
+			ngs = false;
+			w += an;
+		}
+	}
+	push_ptok(p, r, n, m->name, 0, 0);	/* r[0] took the name's SOL/SPACE (the context's "first") */
+	mdisable(p, m->name);
+}
+
 static int subst(pp *p, const pmacro *m, const ptok *name, margs *a, uint32_t eloc)
 {
 	const vtok *body = m->body;
@@ -1876,6 +2214,10 @@ static int subst(pp *p, const pmacro *m, const ptok *name, margs *a, uint32_t el
 	size_t base;
 	ptok *r;
 
+	if (a && !(m->flags & (MF_PASTE | MF_VAOPT | MF_HASH))) {
+		subst_simple(p, m, a, nf, eloc);
+		return 0;
+	}
 	/* pre-expand first: it pushes contexts and uses sv */
 	if (a && pidx) {
 		for (uint32_t i = 0; i < nb; i++) {
@@ -1887,7 +2229,7 @@ static int subst(pp *p, const pmacro *m, const ptok *name, margs *a, uint32_t el
 				continue;
 			if ((i && body[i - 1].kind == T_HASHHASH) || (i + 1 < nb && body[i + 1].kind == T_HASHHASH))
 				continue;
-			preexpand(p, a, k - 1);
+			preexpand(p, a, k - 1, true);
 		}
 	}
 	base = p->svn;
@@ -1897,7 +2239,16 @@ static int subst(pp *p, const pmacro *m, const ptok *name, margs *a, uint32_t el
 		size_t w = base, e = p->svn;
 
 		for (size_t i = base; i < e;) {
-			ptok cur = p->sv[i++];
+			ptok cur;
+
+			if (!(i + 2 < e && hashhash(&p->sv[i + 1]))) {
+				/* not pasted: stays (moves down once something was) */
+				if (w != i)
+					p->sv[w] = p->sv[i];
+				w++, i++;
+				continue;
+			}
+			cur = p->sv[i++];
 
 			while (i + 1 < e && hashhash(&p->sv[i])) {
 				ptok r;
@@ -1922,7 +2273,9 @@ static int subst(pp *p, const pmacro *m, const ptok *name, margs *a, uint32_t el
 		p->pend |= nf;
 		return 0;
 	}
-	push_ptok(p, r, n, m->name, 0x80 | nf, 0);
+	/* the context's "first" (the name's SOL/SPACE), applied now: r is ours */
+	r[0].flags = (r[0].flags & ~(TF_SOL | TF_SPACE)) | nf;
+	push_ptok(p, r, n, m->name, 0, 0);
 	mdisable(p, m->name);
 	return 0;
 }
@@ -1955,7 +2308,7 @@ static void single(pp *p, const pmacro *m, ptok *t, uint8_t nf, uint32_t eloc)
 
 static int builtin(pp *p, const pmacro *m, ptok *t);
 
-/* expand macro m named by t; 1 if t now holds the result token */
+/* expand macro m named by t; 1 if t now holds the result token, 2 if the next raw one */
 static int expand(pp *p, const pmacro *m, ptok *t)
 {
 	uint8_t nf = t->flags & (TF_SOL | TF_SPACE);
@@ -1984,21 +2337,29 @@ static int expand(pp *p, const pmacro *m, ptok *t)
 		c->src = m->src;
 		c->loc = t->loc;
 		c->mid = m->name;
-		c->first = 0x80 | nf;
 		mdisable(p, m->name);
-		return 0;
+		/* its first token, as raw() would read it next (the context's "first" applied) */
+		c->i = 1;
+		vfill(t, &m->body[0], m->src, c->loc);
+		t->flags = (t->flags & ~(TF_SOL | TF_SPACE)) | nf | p->pend;
+		p->pend = 0;
+		return 2;
 	}
 	if (!collect(p, m, t, &a, &rp))
 		return 1;
 	if (!m->nbody) {
+		p->svn = a.base;
 		p->pend |= nf;
 		return 0;
 	}
 	if (m->nbody == 1 && trivial(p, m)) {
+		p->svn = a.base;
 		single(p, m, t, nf, rp.loc);
 		return 1;
 	}
-	return subst(p, m, t, &a, rp.loc);
+	subst(p, m, t, &a, rp.loc);
+	p->svn = a.base;
+	return 0;
 }
 
 /* ---------------- builtin macros ---------------- */
@@ -2782,6 +3143,8 @@ static const char *parse_define(const vtok *vt, uint32_t b, uint32_t e, pmacro *
 			m->flags |= MF_PASTE;
 		if (vt[j].kind == T_IDENT && vt[j].id == KW_VA_OPT)
 			m->flags |= MF_VAOPT;
+		if (vt[j].kind == T_HASH)
+			m->flags |= MF_HASH;
 	}
 	if (m->nbody && (m->body[0].kind == T_HASHHASH || m->body[m->nbody - 1].kind == T_HASHHASH))
 		return "'##' cannot appear at either end of a macro expansion";
@@ -4493,7 +4856,7 @@ pp *pp_open(const pp_opts *o)
 	return p;
 }
 
-static inline void next_tok(pp *p, ptok *t)
+static inline __attribute__((always_inline)) void next_tok(pp *p, ptok *t)
 {
 	if (p->depth == p->nfile && !p->svn)
 		p->tmp.p = p->tmp.base;	/* nothing above file level refers to tmp */
@@ -4515,6 +4878,23 @@ static void hc_mode(pp *p, int mode)
 	p->tokmode = mode;
 }
 
+static __attribute__((noinline)) void pp_next_slow(pp *p, ptok *t)
+{
+	if (unlikely(!p->tokmode))
+		hc_mode(p, 2);
+	next_tok(p, t);
+	p->ntok_out++;
+	if (unlikely(p->rec.on))
+		rec_tok(p, t);
+}
+
+/* t names a macro (entry e): pp_next's expansion path (not recording) */
+static __attribute__((noinline)) void pp_next_mac(pp *p, ptok *t, uintptr_t e)
+{
+	next_exp_slow(p, t, e);
+	p->ntok_out++;
+}
+
 void pp_next(pp *p, ptok *t)
 {
 	ctx *c = &p->cx[p->depth - 1];
@@ -4534,12 +4914,34 @@ void pp_next(pp *p, ptok *t)
 			return;
 		}
 	}
-	if (unlikely(!p->tokmode))
-		hc_mode(p, 2);
-	next_tok(p, t);
-	p->ntok_out++;
-	if (unlikely(p->rec.on))
-		rec_tok(p, t);
+	/* a plain token with nothing owed and no macro: inline, no frame (the rest are tail calls) */
+	if (likely(p->tokmode && !p->rec.on && c->i < c->n && !(c->first | p->pend))) {
+		uintptr_t m;
+
+		if (c->type == C_PTOK) {
+			*t = c->pt[c->i++];
+		} else if (c->type == C_VTOK) {
+			const vtok *v = &c->vt[c->i++];
+
+			vfill(t, v, c->src, c->offloc ? c->loc + v->off : c->loc);
+		} else if (c->type == C_FILE && !((c->vt[c->i].flags & TF_SOL) && c->vt[c->i].kind == T_HASH)) {
+			const vtok *v = &c->vt[c->i++];
+
+			if (p->depth == p->nfile && !p->svn)
+				p->tmp.p = p->tmp.base;	/* nothing above file level refers to tmp */
+			vfill(t, v, c->src, c->loc + v->off);
+		} else {
+			pp_next_slow(p, t);
+			return;
+		}
+		if (t->kind == T_IDENT && !(t->flags & PF_NOEXP) && (m = mget(p, t->id))) {
+			pp_next_mac(p, t, m);
+			return;
+		}
+		p->ntok_out++;
+		return;
+	}
+	pp_next_slow(p, t);
 }
 
 const pp_topev *pp_top_events(const pp *p, uint32_t *n)
