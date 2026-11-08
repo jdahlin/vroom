@@ -4566,7 +4566,7 @@ static void fscr_grow(fscratch *x, uint32_t need)
 	x->cap = cap;
 }
 
-static void struct_body(cc *c, uint32_t ti)
+__attribute__((noinline)) static void struct_body(cc *c, uint32_t ti)
 {
 	fscratch *x = &tl_fscr;
 	uint32_t base = x->n, nf = 0;
