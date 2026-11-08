@@ -3661,9 +3661,16 @@ static int mode_kind(cc *c, uint32_t id, bool sgn)
 	return 0;
 }
 
-static void attribute_list(cc *c, attrs *a)
+static inline bool at_attribute(cc *c)
 {
-	while (iskw(c, KW___attribute__) || iskw(c, KW___attribute)) {
+	int kw = kwof(tok(c));
+
+	return kw == KW___attribute__ || kw == KW___attribute;
+}
+
+__attribute__((noinline)) static void attribute_list_(cc *c, attrs *a)
+{
+	while (at_attribute(c)) {
 		next(c);
 		expect(c, T_LPAREN, "'('");
 		expect(c, T_LPAREN, "'('");
@@ -3775,8 +3782,33 @@ static void attribute_list(cc *c, attrs *a)
 	}
 }
 
+/* most declarators have none: keep the check inline */
+static inline void attribute_list(cc *c, attrs *a)
+{
+	if (at_attribute(c))
+		attribute_list_(c, a);
+}
+
+/* the 0/1 flags packed .. overloadable are 17 contiguous bytes after the u32 fields */
+_Static_assert(offsetof(attrs, packed) == 10 * sizeof(uint32_t) &&
+	       offsetof(attrs, overloadable) == offsetof(attrs, packed) + 16, "attrs layout");
+
+/* no attribute at all (padding excluded) */
+static inline bool attrs_empty(const attrs *a)
+{
+	const char *p = (const char *)a;
+	uint64_t w[7], o = 0;
+
+	memcpy(w, p, sizeof(w));
+	for (int i = 0; i < 7; i++)
+		o |= w[i];
+	return !o && !p[56];
+}
+
 static void merge_attrs(attrs *to, const attrs *from)
 {
+	if (attrs_empty(from))
+		return;
 	if (from->aligned > to->aligned)
 		to->aligned = from->aligned;
 	if (from->section) to->section = from->section;
@@ -3787,12 +3819,16 @@ static void merge_attrs(attrs *to, const attrs *from)
 	if (from->vecsize) to->vecsize = from->vecsize;
 	if (from->counted_by) to->counted_by = from->counted_by;
 	if (from->visibility) to->visibility = from->visibility;
-	to->packed |= from->packed, to->transparent |= from->transparent, to->used |= from->used;
-	to->unused |= from->unused, to->weak |= from->weak, to->noreturn |= from->noreturn;
-	to->constructor |= from->constructor, to->destructor |= from->destructor;
-	to->nonstring |= from->nonstring, to->may_alias |= from->may_alias, to->cold |= from->cold, to->error_fn |= from->error_fn;
-	to->gnu_inline |= from->gnu_inline, to->always_inline |= from->always_inline;
-	to->noinline |= from->noinline, to->overloadable |= from->overloadable;
+	/* the 0/1 flags packed .. overloadable: or them bytewise */
+	{
+		char *t = (char *)&to->packed;
+		const char *f = (const char *)&from->packed;
+		uint64_t a, b;
+
+		memcpy(&a, t, 8), memcpy(&b, f, 8), a |= b, memcpy(t, &a, 8);
+		memcpy(&a, t + 8, 8), memcpy(&b, f + 8, 8), a |= b, memcpy(t + 8, &a, 8);
+		t[16] |= f[16];
+	}
 }
 
 /* GNU asm("label") after a declarator */
@@ -5284,6 +5320,8 @@ static uint32_t new_attrs(cc *c, const attrs *a)
 
 static void apply_sym_attrs(cc *c, sym *s, const attrs *a)
 {
+	if (attrs_empty(a))
+		return;		/* (no record: sym_attrs() in emit.c reads attrs 0 as none) */
 	if (s->attrs)
 		merge_attrs(&c->attr[s->attrs], a);
 	else
