@@ -169,7 +169,7 @@ def one(t):
     wd = f'{OUT}/w/{suite}/{name}'
     os.makedirs(wd, exist_ok=True)
     cwd = os.path.dirname(path)
-    vfl = BASE + flags
+    vfl = BASE + CLFL + flags   # the same flags as clang (vpp ignores what it does not know)
     if FE_ONLY:
         rc, _, err = sh([CL, '-fsyntax-only'] + BASE + CLFL + flags + [path], cwd=cwd)
         if rc:

@@ -220,6 +220,9 @@ typedef struct cc_opts {
 	int unsigned_char;
 	int ms_anon;		/* -fms-anonymous-structs / -fms-extensions: "struct S;" members */
 	int short_wchar;	/* -fshort-wchar */
+	int std;		/* -std=: 89, 99, 11, 17, 23 (0: gnu17) */
+	int implicit_int;	/* implicit int allowed (-std=gnu89, -Wno-error=implicit-int) */
+	int implicit_fn;	/* implicit function declarations allowed (... implicit-function-declaration) */
 	int dump_layouts;	/* append _Static_assert checks for clang to verify */
 	int outfd;
 	int emit;		/* generate code (emit.c): 1 = assembly text to outfd, 2 = object into obj */
