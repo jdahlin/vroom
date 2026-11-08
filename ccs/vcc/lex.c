@@ -73,11 +73,12 @@ static const uint8_t hi_tab[16] = {
  *            bit 2  may take '>' (-> :> %>)
  *            bit 3  may take ':' or '%' (<: <%)
  *            bit 4  punctuator (not '.')
- *            bit 6  '/' or '%': with '/', '*', ':' or '%' left to the
- *                   handlers (comments, digraphs; "%/" and "/:" too)
+ *            bit 6  '/', '%' or '.': with '/', '*', ':', '%' or '.' left
+ *                   to the handlers (comments, digraphs, "..", and the
+ *                   rare "%/", "/:", "./", "/." too)
  *            bit 7  needs a handler: quotes, '\\', control, '@', '`'
- *   gtab[c]  bit 1 '=', bit 2 '>', bit 3 ':' or '%', bit 6 '/', '*', ':'
- *            or '%', bit 7 '+' or '-'
+ *   gtab[c]  bit 1 '=', bit 2 '>', bit 3 ':' or '%', bit 6 '/', '*', ':',
+ *            '%' or '.', bit 7 '+' or '-'
  * Masks whose property is in bit 7 go to mm4() as they are.
  */
 static uint8_t ttab[128], gtab[64];
@@ -100,14 +101,14 @@ static void init_struct_tables(void)
 		if (c == '"' || c == '\'' || c == '\\' || c == '@' || c == '`' || c == 0x7f ||
 		    (c < 0x20 && !strchr(" \t\v\f\n\r", c)) || c == 0)
 			t |= 128;
-		if (c == '/' || c == '%')
+		if (c == '/' || c == '%' || c == '.')
 			t |= 64;
 		ttab[c] = t;
 	}
 	gtab['='] = 2;
 	gtab['>'] = 4;
 	gtab[':'] = gtab['%'] = 8 | 64;
-	gtab['/'] = gtab['*'] = 64;
+	gtab['/'] = gtab['*'] = gtab['.'] = 64;
 	gtab['+'] = gtab['-'] = 128;
 }
 
@@ -345,8 +346,7 @@ static void init_tables(void)
 	/*
 	 * The structural loop takes every token's kind from ktab: a token
 	 * starting with an identifier character is an identifier or (digit) a
-	 * number, ".5" a number, and ".." an ellipsis (a lone ".." goes to
-	 * the handlers).
+	 * number, and ".5" a number (".." always goes to the handlers).
 	 */
 	for (int c = 0; c < 256; c++)
 		for (int d = 0; d < 256; d++) {
@@ -355,7 +355,6 @@ static void init_tables(void)
 			if (c == '.' && d >= '0' && d <= '9')
 				ktab[c | d << 8] = T_NUMBER;
 		}
-	ktab['.' | '.' << 8] = T_ELLIPSIS;
 }
 
 /* length of the line splice ("\\", horizontal space, newline) at p, or 0 */
@@ -919,21 +918,18 @@ fast:
 		const uint64_t N = I | DOT, A = (D & ~(N << 1)) | (DOT & (D >> 1));
 		const uint64_t NUM = (N & ~(N + A)) | A;
 		const uint64_t IDp = I & ~NUM, DOTp = DOT & ~NUM;
-		const uint64_t ELL = DOTp & (DOTp >> 1) & (DOTp >> 2);
-		/* left to the handlers: "..5", "....", overlapping pairs (<<=) */
-		const uint64_t DD = DOT & (D >> 1) & (DOT << 1);	/* ...5: from the first dot */
 		const uint64_t NS = win(m[M_NS], p);
 
 		/*
-		 * and a number before + or -: in 1e+5 the sign belongs to it
-		 * (the handler decides; numbers before a sign are rare)
+		 * Left to the handlers (besides the X of classify(), which has
+		 * every ".." with ellipses, "..5" and "..\<newline>."):
+		 * overlapping pairs (<<=, ->=) and a number before + or -: in
+		 * 1e+5 the sign belongs to it (numbers before a sign are rare).
 		 */
-		X |= DD | (DD >> 1) | (DD >> 2) | (ELL & ((ELL >> 1) | (ELL >> 2))) | (PR & (PR >> 1)) |
-		     (NS & NUM) | (DOTp & (DOTp >> 1) & ~ELL & ~(ELL << 1));
-		X |= (X >> 2) & DOT & (DOT >> 1);	/* "..\<newline>." */
+		X |= (PR & (PR >> 1)) | (NS & NUM);
 
 		const uint64_t IDs = IDp & ~(IDp << 1), NUMs = NUM & ~(NUM << 1);
-		const uint64_t S = IDs | NUMs | ((P | DOTp) & ~((PR << 1) | (ELL << 1) | (ELL << 2)));
+		const uint64_t S = IDs | NUMs | ((P | DOTp) & ~(PR << 1));
 		const uint64_t B = S | W | X;
 		/* whitespace runs that contain a newline, filled to their end */
 		const uint64_t NLF = (W & ~(W + NL)) | NL;
