@@ -120,6 +120,7 @@ enum {
 	SF_THREAD = 2048,
 	SF_ATTR_USED = 4096,
 	SF_ADDR_TAKEN = 8192,
+	SF_INLINE_NOEXTERN = 16384,	/* some declaration is 'inline' without 'extern' */
 };
 
 typedef struct sym {
@@ -218,6 +219,8 @@ typedef struct cc_opts {
 	int short_wchar;	/* -fshort-wchar */
 	int dump_layouts;	/* append _Static_assert checks for clang to verify */
 	int outfd;
+	int emit;		/* generate code (emit.c): 1 = assembly text to outfd */
+	int nthreads;		/* emitter threads (0: 1) */
 } cc_opts;
 
 typedef struct cc cc;

@@ -296,7 +296,7 @@ int ppd_run(int argc, char **argv, const ppd_env *env)
 	char *pmap = NULL;
 	double t0;
 	pp *p;
-	int syntax = 0, layout = 0, ms_anon = 0, short_wchar = 0, tokhash = 0;
+	int syntax = 0, layout = 0, ms_anon = 0, short_wchar = 0, tokhash = 0, emit = 0;
 
 	for (int i = 1; i < argc; i++) {
 		const char *a = argv[i];
@@ -305,6 +305,7 @@ int ppd_run(int argc, char **argv, const ppd_env *env)
 
 		if (!strcmp(a, "--cmp") && i + 1 < argc) { cmp = argv[++i]; continue; }
 		if (!strcmp(a, "-fsyntax-only")) { syntax = 1; continue; }
+		if (!strcmp(a, "-S")) { syntax = 1; emit = 1; continue; }
 		if (!strcmp(a, "-fms-anonymous-structs") || !strcmp(a, "-fms-extensions")) { ms_anon = 1; continue; }
 		if (!strcmp(a, "-fshort-wchar")) { short_wchar = 1; continue; }
 		if (!strcmp(a, "--vcc-layout-checks")) { syntax = 1; layout = 1; continue; }
@@ -477,7 +478,9 @@ int ppd_run(int argc, char **argv, const ppd_env *env)
 			       .outfd = env->outfd };
 		int fd = -1;
 
-		if (layout && out) {
+		co.emit = emit;
+		co.nthreads = getenv("VCC_THREADS") ? atoi(getenv("VCC_THREADS")) : 1;
+		if ((layout || emit) && out && strcmp(out, "-")) {
 			char path[4096];
 
 			if (out[0] != '/' && env->cwd)

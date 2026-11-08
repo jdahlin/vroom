@@ -24,14 +24,8 @@
 #include <sys/mman.h>
 #include <unistd.h>
 
-#include "cc.h"
-#include "intern.h"
-
-#define unlikely(x) __builtin_expect(!!(x), 0)
-#define likely(x) __builtin_expect(!!(x), 1)
-
-typedef __int128 i128;
-typedef unsigned __int128 u128;
+#include "ccint.h"
+#include "emit.h"
 
 static void *reserve(size_t n)
 {
@@ -43,128 +37,6 @@ static void *reserve(size_t n)
 	}
 	return p;
 }
-
-/* ---------------- per-TU state ---------------- */
-
-#define DIR_BITS 11
-#define DIR_PAGE (1u << DIR_BITS)
-#define NDIR ((1u << 21) >> DIR_BITS)
-
-typedef struct cstr {		/* a string literal */
-	const char *s;		/* bytes, element size each, zero terminated */
-	uint32_t n;		/* elements, terminator included */
-	uint8_t esz;		/* element size: 1, 2, 4 */
-	uint8_t kind;		/* T_STRING / T_WSTRING / ... */
-} cstr;
-
-typedef struct label {
-	uint32_t name, loc;
-	uint32_t defined;	/* node of the N_LABEL, 0 if only referenced */
-	uint32_t shadow;	/* __label__ scoping */
-	uint32_t depth;
-	uint8_t local;		/* declared with __label__ */
-	uint8_t addr_taken;
-} label;
-
-typedef struct attrs {		/* the attributes of one declaration */
-	uint32_t aligned;	/* bytes; 0: none */
-	uint32_t section, alias, asmname;	/* string index + 1, 0: none */
-	uint32_t cleanup;	/* sym */
-	uint32_t mode;		/* 0, or the integer type kind from mode() */
-	uint32_t counted_by;	/* identifier id */
-	uint32_t visibility;
-	uint32_t flags;		/* SF_* */
-	uint8_t packed, transparent, used, unused, weak, noreturn, constructor, destructor;
-	uint8_t nonstring, may_alias, cold, gnu_inline, always_inline, noinline, ainline;
-} attrs;
-
-typedef struct asmop {
-	uint32_t name;		/* [name] id, 0 */
-	uint32_t constraint;	/* string index */
-	uint32_t expr;		/* node */
-} asmop;
-
-typedef struct casm {
-	uint32_t tmpl;		/* string index */
-	uint32_t nout, nin, nclob, nlabel;
-	asmop *ops;		/* outputs then inputs */
-	uint32_t *clob;		/* string indices */
-	uint32_t *labels;	/* label indices */
-	uint8_t vol, go, inl;
-} casm;
-
-struct cc {
-	pp *p;
-	const cc_opts *o;
-	jmp_buf bail;
-	int errors;
-
-	/* tokens: tk[0] is the current one */
-	ptok tk[4];
-	int ntk;
-	uint32_t prevloc;
-
-	ctype *ty;
-	uint32_t nty;
-	uint32_t *tyhash;	/* interning, open addressing */
-	uint32_t tyhcap;
-	qty *params;
-	uint32_t nparams;
-	uint32_t *fnhash, fnhcap, nfn;
-
-	tag *tags;
-	uint32_t ntag;
-	sym *syms;
-	uint32_t nsym;
-	node *nodes;
-	uint32_t nnode;
-	uint32_t *lists;
-	uint32_t nlist;
-	i128 *ipool;
-	uint32_t nipool;
-	double *fpool;
-	uint32_t nfpool;
-	cstr *strs;
-	uint32_t nstr;
-	label *labels;
-	uint32_t nlabel;
-	attrs *attr;
-	uint32_t nattr;
-	casm *asms;
-	uint32_t nasm;
-
-	char *heap, *hp, *hend;	/* bump allocator for everything else */
-
-	/* scopes: identifier id -> innermost binding (sym index) */
-	uint32_t *odir[NDIR], *tdir[NDIR], *ldir[NDIR];
-	uint32_t *sstack;	/* syms bound in open scopes */
-	uint32_t nsstack;
-	uint32_t smark[4096];
-	uint32_t depth;
-
-	/* the function being parsed */
-	uint32_t fn;		/* sym */
-	uint32_t fn_labels;	/* first label of this function */
-	uint32_t *switch_cases;	/* N_CASE/N_DEFAULT nodes of the innermost switch */
-	int in_loop, in_switch;
-	qty switch_ty;
-	int unevaluated;	/* sizeof / typeof / _Alignof operand */
-	attrs pend;		/* attributes before a block-scope declaration */
-	int in_struct;		/* parsing a struct/union body */
-	bool has_pend;
-	uint32_t pack[64];	/* #pragma pack stack (bytes, 0: none) */
-	int npack;
-
-	/* builtin types */
-	qty t_size, t_ptrdiff, t_wchar, t_char16, t_char32, t_valist;
-	uint32_t valist_tag;
-	uint32_t id_func, id_FUNCTION, id_PRETTY, id_main;
-	uint32_t id_int128_t, id_uint128_t, id_valist;
-	uint32_t id_null[4];	/* _Nonnull _Nullable _Null_unspecified _Nullable_result */
-	uint32_t func_name_sym;
-	uint32_t ntoplevel;
-	uint32_t *toplevel;	/* file-scope syms in declaration order */
-};
 
 static void *halloc(cc *c, size_t n)
 {
@@ -1422,26 +1294,6 @@ static uint32_t char_lit(cc *c)
 
 /* ---------------- builtins ---------------- */
 
-enum {
-	BI_NONE,
-	/* special forms (own parsing) */
-	BI_CONSTANT_P, BI_EXPECT, BI_EXPECT_PROB, BI_CHOOSE, BI_TYPES_COMPAT, BI_OFFSETOF,
-	BI_VA_START, BI_VA_END, BI_VA_COPY, BI_VA_ARG,
-	BI_CLZ, BI_CLZL, BI_CLZLL, BI_CTZ, BI_CTZL, BI_CTZLL, BI_FFS, BI_FFSL, BI_FFSLL,
-	BI_POPCOUNT, BI_POPCOUNTL, BI_POPCOUNTLL, BI_PARITY, BI_PARITYL, BI_PARITYLL,
-	BI_CLRSB, BI_CLRSBL, BI_CLRSBLL,
-	BI_BSWAP16, BI_BSWAP32, BI_BSWAP64, BI_BITREVERSE8, BI_BITREVERSE16, BI_BITREVERSE32, BI_BITREVERSE64,
-	BI_UNREACHABLE, BI_TRAP, BI_DEBUGTRAP, BI_RETURN_ADDRESS, BI_FRAME_ADDRESS, BI_EXTRACT_RETURN_ADDR,
-	BI_ADD_OVERFLOW, BI_SUB_OVERFLOW, BI_MUL_OVERFLOW,
-	BI_OBJECT_SIZE, BI_DYNAMIC_OBJECT_SIZE, BI_COUNTED_BY_REF,
-	BI_ALLOCA, BI_ALLOCA_UNINIT, BI_PREFETCH, BI_ASSUME_ALIGNED, BI_ASSUME,
-	BI_CLASSIFY_TYPE, BI_IS_CONSTANT_EVALUATED, BI_STRLEN,
-	BI_HUGE_VAL, BI_HUGE_VALF, BI_INF, BI_INFF, BI_NAN, BI_NANF,
-	BI_ISNAN, BI_ISINF, BI_ISFINITE, BI_SIGNBIT, BI_FPCLASSIFY, BI_ISINF_SIGN, BI_ISNORMAL,
-	BI_ISGREATER, BI_ISGREATEREQUAL, BI_ISLESS, BI_ISLESSEQUAL, BI_ISLESSGREATER, BI_ISUNORDERED,
-	BI_CPU_SUPPORTS, BI_ARM_RSR, BI_LIB,	/* plain library call with a prototype */
-	BI_COUNT
-};
 
 typedef struct builtin {
 	const char *name;
@@ -1534,6 +1386,9 @@ static const builtin builtins[] = {
 	{ NULL, 0, 0, NULL }
 };
 
+/* name of a library builtin (sym val of an S_BUILTIN) */
+const char *cc_builtin_name(int64_t i) { return builtins[i].name; }
+
 static qty sigtype(cc *c, char ch)
 {
 	switch (ch) {
@@ -1579,16 +1434,6 @@ static qty builtin_type(cc *c, const builtin *b)
 
 /* ---------------- constant evaluation ---------------- */
 
-enum { CV_NONE, CV_INT, CV_FLT, CV_ADDR };
-
-typedef struct cval {
-	int kind;
-	bool ice;		/* integer constant expression (C11 6.6p6, clang's rules) */
-	i128 i;			/* CV_INT; CV_ADDR: byte offset */
-	double f;
-	uint32_t sym, str;	/* CV_ADDR base: sym or string literal */
-	uint32_t label;		/* CV_ADDR base: &&label */
-} cval;
 
 static bool eval(cc *c, uint32_t n, cval *v);
 
@@ -2532,6 +2377,9 @@ static int classify_type(cc *c, qty t)
 	}
 }
 
+bool cc_eval(cc *c, uint32_t n, cval *v) { return eval(c, n, v); }
+bool cc_is_signed(cc *c, qty t) { return is_signed(c, t); }
+
 static bool eval_builtin(cc *c, const node *x, cval *v)
 {
 	const uint32_t *arg = &c->lists[x->b];
@@ -3471,7 +3319,7 @@ enum {
 	A_NONE, A_ALIGNED, A_PACKED, A_SECTION, A_MODE, A_CLEANUP, A_ALIAS, A_WEAK, A_USED, A_UNUSED,
 	A_NORETURN, A_ALWAYS_INLINE, A_NOINLINE, A_GNU_INLINE, A_TRANSPARENT_UNION, A_VISIBILITY,
 	A_CONSTRUCTOR, A_DESTRUCTOR, A_COUNTED_BY, A_VECTOR_SIZE, A_COLD, A_NONSTRING, A_MAY_ALIAS,
-	A_WEAKREF, A_NAKED, A_NOCF,
+	A_WEAKREF, A_NAKED, A_NOCF, A_ERROR,
 	A_COUNT
 };
 
@@ -3483,7 +3331,7 @@ static const char *const attr_names[A_COUNT] = {
 	[A_VISIBILITY] = "visibility", [A_CONSTRUCTOR] = "constructor", [A_DESTRUCTOR] = "destructor",
 	[A_COUNTED_BY] = "counted_by", [A_VECTOR_SIZE] = "vector_size", [A_COLD] = "cold",
 	[A_NONSTRING] = "nonstring", [A_MAY_ALIAS] = "may_alias", [A_WEAKREF] = "weakref",
-	[A_NAKED] = "naked", [A_NOCF] = "nocf_check",
+	[A_NAKED] = "naked", [A_NOCF] = "nocf_check", [A_ERROR] = "error",
 };
 
 static uint32_t *attr_dir[NDIR];
@@ -3661,6 +3509,7 @@ static void attribute_list(cc *c, attrs *a)
 			case A_COLD: a->cold = 1; break;
 			case A_NONSTRING: a->nonstring = 1; break;
 			case A_MAY_ALIAS: a->may_alias = 1; break;
+			case A_ERROR: a->error_fn = 1; break;	/* a call left after folding is a build error */
 			default: break;
 			}
 			if (is(c, T_LPAREN))
@@ -3685,7 +3534,7 @@ static void merge_attrs(attrs *to, const attrs *from)
 	to->packed |= from->packed, to->transparent |= from->transparent, to->used |= from->used;
 	to->unused |= from->unused, to->weak |= from->weak, to->noreturn |= from->noreturn;
 	to->constructor |= from->constructor, to->destructor |= from->destructor;
-	to->nonstring |= from->nonstring, to->may_alias |= from->may_alias, to->cold |= from->cold;
+	to->nonstring |= from->nonstring, to->may_alias |= from->may_alias, to->cold |= from->cold, to->error_fn |= from->error_fn;
 	to->gnu_inline |= from->gnu_inline, to->always_inline |= from->always_inline;
 	to->noinline |= from->noinline;
 }
@@ -5158,6 +5007,15 @@ static uint32_t file_scope_sym(cc *c, uint32_t name)
 	return 0;
 }
 
+/* the file-scope sym named s (the emitter: alias targets), or 0 */
+uint32_t cc_global_named(cc *c, const char *s)
+{
+	size_t n = strlen(s);
+	uint32_t id = vintern_find(s, n, vintern_hash(s, n));
+
+	return id ? file_scope_sym(c, id) : 0;
+}
+
 static uint32_t declare(cc *c, const dspec *ds, declr *d, qty t, bool file)
 {
 	attrs at = d->at;
@@ -5226,7 +5084,7 @@ static uint32_t declare(cc *c, const dspec *ds, declr *d, qty t, bool file)
 			if (ds->sc == SC_STATIC && kind == S_FUNC)
 				y->sc = SC_STATIC;
 			if (ds->inline_)
-				y->flags |= SF_INLINE;
+				y->flags |= SF_INLINE | (ds->sc != SC_EXTERN ? SF_INLINE_NOEXTERN : 0);
 			apply_sym_attrs(c, y, &at);
 			if (!file && c->syms[prev].depth != c->depth) {
 				/* block-scope extern: a local binding that names the global */
@@ -5248,7 +5106,7 @@ static uint32_t declare(cc *c, const dspec *ds, declr *d, qty t, bool file)
 		if (file || ds->sc == SC_EXTERN || kind == S_FUNC)
 			y->flags |= SF_GLOBAL;
 		if (ds->inline_)
-			y->flags |= SF_INLINE;
+			y->flags |= SF_INLINE | (ds->sc != SC_EXTERN ? SF_INLINE_NOEXTERN : 0);
 		if (ds->noreturn)
 			y->flags |= SF_NORETURN;
 		if (ds->thread)
@@ -5872,6 +5730,9 @@ static void function_def(cc *c, uint32_t s, const declr *d)
 			*dslot(c, c->ldir, lb->name) = 0;
 	}
 	c->syms[s].body = body;
+	/* for the emitter: the parameter syms, on the body block */
+	N(body)->a = d->psyms;
+	N(body)->aux = (uint16_t)d->npsyms;
 	c->fn = saved_fn;
 }
 
@@ -5887,7 +5748,7 @@ static void translation_unit(cc *c)
 			continue;
 		}
 		if (at_asm(c)) {
-			asm_stmt(c, true);
+			c->tlasm[c->ntlasm++] = asm_stmt(c, true);
 			continue;
 		}
 		declaration(c, NULL, true);
@@ -6218,6 +6079,7 @@ static void cc_init(cc *c, pp *p, const cc_opts *o)
 	c->asms = reserve((size_t)1 << 28);
 	c->sstack = reserve((size_t)1 << 28);
 	c->toplevel = reserve((size_t)1 << 26);
+	c->tlasm = reserve((size_t)1 << 24);
 	c->heap = c->hp = reserve((size_t)1 << 32);
 	c->hend = c->heap + ((size_t)1 << 32);
 	tl_dops = halloc(c, DOPS_MAX * sizeof(dop));
@@ -6311,6 +6173,7 @@ static void cc_free(cc *c)
 	munmap(c->asms, (size_t)1 << 28);
 	munmap(c->sstack, (size_t)1 << 28);
 	munmap(c->toplevel, (size_t)1 << 26);
+	munmap(c->tlasm, (size_t)1 << 24);
 	munmap(c->heap, (size_t)1 << 32);
 }
 
@@ -6330,6 +6193,8 @@ int cc_run(pp *p, const cc_opts *o)
 	}
 	if (o->dump_layouts && !c->errors)
 		layout_checks(c);
+	if (o->emit && !c->errors && !pp_errors(p))
+		c->errors += emit_tu(c, o);
 	errors = c->errors;
 	cc_free(c);
 	free(c);
