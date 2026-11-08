@@ -372,6 +372,7 @@ typedef struct ctx {
 	uint32_t si, ci;	/* next segment, next __COUNTER__ record */
 	unsigned cbase;		/* __COUNTER__ at the entry's start */
 	uint8_t top;		/* outermost: owes the entry's pend_out when done (2: a top-level region) */
+	uint8_t norec;		/* replayed while recording: its token positions are reserved, not copied */
 } ctx;
 
 typedef struct fent {
@@ -556,6 +557,7 @@ struct pp {
 	uint8_t tev_full, top_rec;
 	const void *hc_last;	/* the entry hc_apply applied last */
 	uint8_t pend;		/* SOL/SPACE owed to the next token (empty expansions) */
+	uint8_t rep_norec;	/* the token raw() just gave came from a norec replay */
 	int preexp;		/* in argument pre-expansion */
 	int errors;
 	unsigned counter;
@@ -4270,7 +4272,7 @@ static inline void text_start(pp *p, uint8_t sol)
 
 /* ---------------- header cache: token entries (pp_next) ---------------- */
 
-static void push_replay(pp *p, const hent *e, uint32_t base, unsigned cbase, uint8_t top)
+static void push_replay(pp *p, const hent *e, uint32_t base, unsigned cbase, uint8_t top, uint8_t norec)
 {
 	ctx *c = push(p);
 
@@ -4282,6 +4284,7 @@ static void push_replay(pp *p, const hent *e, uint32_t base, unsigned cbase, uin
 	c->si = c->ci = 0;
 	c->cbase = cbase;
 	c->top = top;
+	c->norec = norec;
 }
 
 /* a child entry's tokens go before the next own token: pushed */
@@ -4293,7 +4296,7 @@ static bool replay_seg(pp *p, ctx *c)
 	if (c->si >= e->nseg || e->seg[c->si].at != c->i)
 		return false;
 	g = &e->seg[c->si++];
-	push_replay(p, g->child, c->loc + g->lbase, c->cbase + g->cdelta, 0);
+	push_replay(p, g->child, c->loc + g->lbase, c->cbase + g->cdelta, 0, c->norec);
 	return true;
 }
 
@@ -4304,6 +4307,7 @@ static void replay_tok(pp *p, ctx *c, ptok *t)
 	*t = c->pt[c->i];
 	t->loc = t->loc ? c->loc + t->loc - 1 : 0;
 	t->ctr = 0;
+	p->rep_norec = c->norec;
 	if (t->kind == T_IDENT)
 		t->flags |= PF_NOEXP;	/* handed out as recorded: expanded already */
 	if (unlikely(c->ci < e->nctr && e->ctr[c->ci].off == c->i)) {
@@ -4388,13 +4392,23 @@ static void hc_apply(pp *p, const hent *e)
 
 	if (p->tokmode == 2) {
 		if (e->has_text) {
+			/*
+			 * Recording: the entry's tokens are a segment of the enclosing
+			 * levels, which publish skips; reserve their positions instead of
+			 * copying every token (rec_tok was ~13% of vccd).
+			 */
+			bool reserve = false;
+
 			if (L) {
-				if (r->nseg < HC_MAXSEG)
+				if (r->nseg < HC_MAXSEG && r->ntk + e->total < HC_MAXTK) {
 					r->seg[r->nseg++] = (hsegr){ r->ntk, r->ntk + e->total, e, c0, p->next_base };
-				else
+					r->ntk += e->total;
+					reserve = true;
+				} else {
 					HC_BAD(p);
+				}
 			}
-			push_replay(p, e, p->next_base, c0, 1);
+			push_replay(p, e, p->next_base, c0, 1, reserve);
 		}
 	} else if (e->has_text) {
 		size_t st;
@@ -5521,9 +5535,10 @@ static __attribute__((noinline)) void pp_next_slow(pp *p, ptok *t)
 {
 	if (unlikely(!p->tokmode))
 		hc_mode(p, 2);
+	p->rep_norec = 0;
 	next_tok(p, t);
 	p->ntok_out++;
-	if (unlikely(p->rec.on))
+	if (unlikely(p->rec.on) && !p->rep_norec)
 		rec_tok(p, t);
 }
 
@@ -5548,7 +5563,7 @@ void pp_next(pp *p, ptok *t)
 			t->loc = t->loc ? c->loc + t->loc - 1 : 0;
 			if (t->kind == T_IDENT)
 				t->flags |= PF_NOEXP;
-			if (unlikely(p->rec.on))
+			if (unlikely(p->rec.on) && !c->norec)
 				rec_tok(p, t);
 			return;
 		}

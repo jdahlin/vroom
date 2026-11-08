@@ -12,6 +12,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/stat.h>
 #include <unistd.h>
 
 #include "rsh.h"
@@ -181,11 +182,11 @@ fail:
 
 /* ---------------- commands ---------------- */
 
-enum { C_NOP, C_SET_E, C_TEXT, C_RM, C_TOOL, C_FIXDEP };
+enum { C_NOP, C_SET_E, C_TEXT, C_RM, C_MKDIR, C_TOOL, C_FIXDEP };
 
 struct cmd {
 	int kind;
-	char **argv;		/* C_RM: the paths; C_TOOL: the tool's argv (owned array) */
+	char **argv;		/* C_RM, C_MKDIR: the paths; C_TOOL: the tool's argv (owned array) */
 	char **assign;		/* C_TOOL: NAME=VALUE (owned array) */
 	const char *redir;	/* C_TEXT: > FILE */
 	char *text;		/* C_TEXT: what echo/printf write (malloc'ed) */
@@ -400,6 +401,16 @@ static bool parse_simple(struct tok *t, int n, struct script *sc, const struct r
 		c->kind = C_RM;
 		c->argv = wordv(w + 2, nw - 2, NULL);
 		return c->argv != NULL;
+	} else if (!strcmp(name, "mkdir") || !strcmp(name, "/bin/mkdir")) {
+		/* mkdir -p: $(shell mkdir -p $(obj)) in every submake */
+		if (nw < 3 || strcmp(w[1].s, "-p") || redir)
+			return false;
+		for (i = 2; i < nw; i++)
+			if (w[i].s[0] == '-' || !w[i].s[0])
+				return false;
+		c->kind = C_MKDIR;
+		c->argv = wordv(w + 2, nw - 2, NULL);
+		return c->argv != NULL;
 	} else if (ops->fixdep && strlen(name) >= 20 && !strcmp(name + strlen(name) - 20, "scripts/basic/fixdep")) {
 		/* fixdep D T CMD > FILE */
 		if (nw != 4 || !redir)
@@ -481,6 +492,37 @@ static void err(int fd, const char *a, const char *b, const char *c)
 		(void)write_all(fd, line, n < (int)sizeof(line) ? n : (int)sizeof(line) - 1);
 }
 
+static bool is_dir(int dir, const char *p)
+{
+	struct stat st;
+
+	return fstatat(dir, p, &st, 0) == 0 && S_ISDIR(st.st_mode);
+}
+
+/* mkdir -p: the whole path, then each missing parent from the top (mode 0777 & ~umask) */
+static bool mkdir_p(int dir, const char *path)
+{
+	char buf[4096];
+	size_t n = strlen(path), i;
+
+	if (mkdirat(dir, path, 0777) == 0 || (errno == EEXIST && is_dir(dir, path)))
+		return true;
+	if (errno != ENOENT || n >= sizeof(buf))
+		return false;
+	memcpy(buf, path, n + 1);
+	for (i = 1; i <= n; i++) {
+		if (buf[i] != '/' && buf[i])
+			continue;
+		if (buf[i - 1] == '/')
+			continue;	/* a//b */
+		buf[i] = 0;
+		if (mkdirat(dir, buf, 0777) < 0 && !(errno == EEXIST && is_dir(dir, buf)))
+			return false;
+		buf[i] = path[i];
+	}
+	return true;
+}
+
 static int run(const char *cwd, struct script *sc, bool errexit, const int fds[3],
 	       const struct rsh_ops *ops)
 {
@@ -489,7 +531,7 @@ static int run(const char *cwd, struct script *sc, bool errexit, const int fds[3
 	for (i = 0; i < sc->n; i++) {
 		struct cmd *c = &sc->c[i];
 
-		if ((c->kind == C_RM || (c->redir && c->kind != C_FIXDEP)) && dir < 0 &&
+		if ((c->kind == C_RM || c->kind == C_MKDIR || (c->redir && c->kind != C_FIXDEP)) && dir < 0 &&
 		    (dir = open(cwd, O_RDONLY | O_DIRECTORY | O_CLOEXEC)) < 0) {
 			err(fds[2], "sh: cannot open ", cwd, "");
 			return 2;
@@ -524,6 +566,15 @@ static int run(const char *cwd, struct script *sc, bool errexit, const int fds[3
 				if (unlinkat(dir, *p, 0) < 0 && errno != ENOENT) {
 					err(fds[2], "rm: cannot remove '", *p,
 					    errno == EISDIR || errno == EPERM ? "': Is a directory" : "': Permission denied");
+					st = 1;
+				}
+			break;
+		case C_MKDIR:
+			st = 0;
+			for (char **p = c->argv; *p; p++)
+				if (!mkdir_p(dir, *p)) {
+					err(fds[2], "mkdir: cannot create directory '", *p,
+					    errno == EEXIST || errno == ENOTDIR ? "': Not a directory" : "': Permission denied");
 					st = 1;
 				}
 			break;

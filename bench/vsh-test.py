@@ -42,6 +42,9 @@ CASES = [
     ("printf reuse", "printf '<%s>\\n' a b c; printf 'n%%\\n'; printf '%s-%s\\n' 1", True, True),
     ("echo words", "echo  a   'b  c' \"d\"e ; : ignored $; true", False, True),
     ("echo words ok", "echo  a   'b  c' \"d\"e ; : ignored; true", True, True),
+    ("mkdir -p", "mkdir -p a/b//c/ sub d; mkdir -p d/e; echo ok", True, True),
+    ("mkdir -p over file", "mkdir -p x.c/y; echo st", True, False),
+    ("mkdir -p file", "set -e; mkdir -p x.c; echo after", True, False),
     ("rm missing ok", "rm -f nope sub/nope; echo done", True, True),
     ("rm dir fails", "set -e; rm -f sub; echo after", True, False),
     ("no errexit", "rm -f sub; echo after", True, False),
@@ -78,7 +81,9 @@ else:
 
 def tree(d):
     out = {}
-    for root, _, files in os.walk(d):
+    for root, dirs, files in os.walk(d):
+        for x in dirs:	# directories too (mkdir -p), empty or not
+            out[os.path.relpath(os.path.join(root, x), d) + "/"] = b"<dir>"
         for f in files:
             p = os.path.join(root, f)
             with open(p, "rb") as fh:

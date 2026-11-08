@@ -675,6 +675,23 @@ ingen emulering. Samma image fungerar i en qemu-system-aarch64-gäst med `-accel
     fork/exec var redan billigt, 9,8/8,9 → 8,8/13,0 s, brus.
   - **Kvar:** de 432 undermakes (≈ 100 CPU-s inkl. barn i spårningen) och `$(shell)` (vsh
     avböjer, en extra rundtur per anrop).
+- **Ny profil med vsh (2026-11-08) och två lågt hängande frukter:**
+  - Bladrecepten är nu billiga (CC + AR ~3 CPU-s). Kvar i spårningen: 422 `$(shell mkdir -p
+    $(obj))`, ett per undermake under parsningen (vsh + dash + mkdir, median 14,5 ms, 6,2 s vägg
+    summerat). **rsh kör nu `mkdir -p`** (mkdirat, föräldrar uppifrån): 1 786 recept i vccd,
+    951 avböjda.
+  - vccd: `rec_tok` 13 % av proven. Under inspelning kopierades varje token från en uppspelad
+    barnpost in i inspelningen, fast publiceringen hoppar över barnsegmenten. **Nu reserveras
+    bara positionerna** (`ctx.norec`, `ntk += total`). cbatch (alla kärn-TU:er `-c` i en
+    process): 150,7 → **135,4 G instruktioner** (−10 %), 48,0 → 41,1 G cykler, user 15,0 → 12,8 s.
+    Kallt bygge: vccd user 16,7 → 14,6 s.
+  - **Verifierat:** paritet 911/912, batch --cmp 873/873, cbatch 840/840 (även ASan), fuzz-regress,
+    vsh-test 35/35 (även ASan); byggträdet (3 478 filer) byte-identiskt med dash-bygget; Debian
+    bootar (`results/boot-20261108-193415.log`). Väggtid 12,1 s vid last ~10 (brus).
+  - **Nästa kandidater:** konfigfasen har två seriella omgångar med 125 Kconfig-`$(success,…)`
+    var (521 + 308 ms), `{ …; } >/dev/null 2>&1 && echo y || echo n` med `${o#-Wno-}` m.m. —
+    antingen mer sh i rsh eller en Kconfig-patch som frågar vccd direkt; 60 värdkompileringar
+    via vroomd före första CC; de 432 undermakes.
 
 ### Felmeddelanden (clang-format)
 
