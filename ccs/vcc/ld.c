@@ -3791,45 +3791,7 @@ static void write_build_id(void)
 
 /* ---------------- the final link ---------------- */
 
-static void reset_state(void)
-{
-	memset(&opt, 0, sizeof opt);
-	memset(&objs, 0, sizeof objs);
-	memset(&isecs, 0, sizeof isecs);
-	memset(&mergeins, 0, sizeof mergeins);
-	memset(&merges, 0, sizeof merges);
-	memset(&gorder, 0, sizeof gorder);
-	memset(&isds, 0, sizeof isds);
-	memset(&osecs, 0, sizeof osecs);
-	memset(&topcmds, 0, sizeof topcmds);
-	memset(&refsyms, 0, sizeof refsyms);
-	memset(&provides, 0, sizeof provides);
-	memset(&pending, 0, sizeof pending);
-	memset(&orphans, 0, sizeof orphans);
-	memset(&thunks, 0, sizeof thunks);
-	memset(&thunksecs, 0, sizeof thunksecs);
-	memset(&phdrs, 0, sizeof phdrs);
-	memset(&phsecs, 0, sizeof phsecs);
-	memset(&outsecs, 0, sizeof outsecs);
-	memset(&wjobs, 0, sizeof wjobs);
-	memset(&assert_fail, 0, sizeof assert_fail);
-	memset(&recorded, 0, sizeof recorded);
-	tr_keys = NULL;
-	tr_vals = NULL;
-	tr_mask = tr_n = 0;
-	entry_name = NULL;
-	reladyn_isec = buildid_isec = comment_isec = NONE;
-	symtab_isec = strtab_isec = shstrtab_isec = NONE;
-	reladyn_buf = NULL;
-	out = NULL;
-	ndyn = 0;
-	cur_provide = NULL;
-	gouts = NULL;
-	ngouts = 0;
-	atomic_store(&nerrors, 0);
-	error_limit = 20;
-	timing = getenv("VLD_TIME") != NULL;
-}
+static void reset_state(void);
 
 static void add_synthetic_sections(void)
 {
@@ -4629,6 +4591,51 @@ static int ld_relocatable(void)
 	gtable_free();
 	memset(&routs, 0, sizeof routs);
 	return rc || atomic_load(&nerrors) ? 1 : 0;
+}
+
+/* all per-link state, so ld_main can be called again (vccd, VLD_REPEAT) */
+static void reset_state(void)
+{
+	memset(&opt, 0, sizeof opt);
+	memset(&objs, 0, sizeof objs);
+	memset(&isecs, 0, sizeof isecs);
+	memset(&mergeins, 0, sizeof mergeins);
+	memset(&merges, 0, sizeof merges);
+	memset(&gorder, 0, sizeof gorder);
+	memset(&isds, 0, sizeof isds);
+	memset(&osecs, 0, sizeof osecs);
+	memset(&topcmds, 0, sizeof topcmds);
+	memset(&refsyms, 0, sizeof refsyms);
+	memset(&provides, 0, sizeof provides);
+	memset(&pending, 0, sizeof pending);
+	memset(&orphans, 0, sizeof orphans);
+	memset(&thunks, 0, sizeof thunks);
+	memset(&thunksecs, 0, sizeof thunksecs);
+	memset(&phdrs, 0, sizeof phdrs);
+	memset(&phsecs, 0, sizeof phsecs);
+	memset(&outsecs, 0, sizeof outsecs);
+	memset(&wjobs, 0, sizeof wjobs);
+	memset(&assert_fail, 0, sizeof assert_fail);
+	memset(&recorded, 0, sizeof recorded);
+	memset(&script_new, 0, sizeof script_new);
+	memset(&routs, 0, sizeof routs);
+	stub_names = NULL;
+	nstubs = 0;
+	tr_keys = NULL;
+	tr_vals = NULL;
+	tr_mask = tr_n = 0;
+	entry_name = NULL;
+	reladyn_isec = buildid_isec = comment_isec = NONE;
+	symtab_isec = strtab_isec = shstrtab_isec = NONE;
+	reladyn_buf = NULL;
+	out = NULL;
+	ndyn = 0;
+	cur_provide = NULL;
+	gouts = NULL;
+	ngouts = 0;
+	atomic_store(&nerrors, 0);
+	error_limit = 20;
+	timing = getenv("VLD_TIME") != NULL;
 }
 
 static pthread_mutex_t ldlock = PTHREAD_MUTEX_INITIALIZER;
