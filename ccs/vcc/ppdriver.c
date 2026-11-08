@@ -366,6 +366,7 @@ int ppd_run(int argc, char **argv, const ppd_env *env)
 	double t0;
 	pp *p;
 	int syntax = 0, layout = 0, ms_anon = 0, short_wchar = 0, tokhash = 0, emit = 0, objmode = 0;
+	int std = 0, strict = 0, wimpl_int = 0, wimpl_fn = 0;
 	char objbuf[1024];
 
 	for (int i = 1; i < argc; i++) {
@@ -379,6 +380,28 @@ int ppd_run(int argc, char **argv, const ppd_env *env)
 		if (!strcmp(a, "-c")) { objmode = 1; continue; }
 		if (!strcmp(a, "-fms-anonymous-structs") || !strcmp(a, "-fms-extensions")) { ms_anon = 1; continue; }
 		if (!strcmp(a, "-fshort-wchar")) { short_wchar = 1; continue; }
+		if (!strncmp(a, "-std=", 5)) {
+			/* clang's spellings: c89 c90 iso9899:1990 gnu89 gnu90 c99 gnu99 c11 gnu11 c17 c18 gnu17 c23 c2x gnu23 ... */
+			static const struct { const char *s; int v; } stds[] = {
+				{ "89", 89 }, { "90", 89 }, { "1990", 89 }, { "199409", 89 }, { "99", 99 }, { "9x", 99 },
+				{ "1999", 99 }, { "11", 11 }, { "1x", 11 }, { "2011", 11 }, { "17", 17 }, { "18", 17 },
+				{ "2017", 17 }, { "2018", 17 }, { "23", 23 }, { "2x", 23 }, { "2y", 23 }, { "2024", 23 },
+			};
+			const char *v = a + 5;
+
+			strict = strncmp(v, "gnu", 3) != 0;
+			v += strncmp(v, "gnu", 3) == 0 ? 3 : v[0] == 'c' ? 1 : strncmp(v, "iso9899:", 8) == 0 ? 8 : 0;
+			for (size_t k = 0; k < sizeof(stds) / sizeof(stds[0]); k++)
+				if (!strcmp(v, stds[k].s))
+					std = stds[k].v;
+			continue;
+		}
+		if (!strcmp(a, "-ansi")) { std = 89; strict = 1; continue; }
+		if (!strcmp(a, "-Wno-implicit-int") || !strcmp(a, "-Wno-error=implicit-int")) { wimpl_int = 1; continue; }
+		if (!strcmp(a, "-Wno-implicit-function-declaration") || !strcmp(a, "-Wno-error=implicit-function-declaration")) {
+			wimpl_fn = 1;
+			continue;
+		}
 		if (!strcmp(a, "--vcc-layout-checks")) { syntax = 1; layout = 1; continue; }
 		if (!strcmp(a, "--vcc-tokhash")) { tokhash = 1; continue; }
 		if (!strcmp(a, "-o") && i + 1 < argc) { out = argv[++i]; continue; }
@@ -475,6 +498,23 @@ int ppd_run(int argc, char **argv, const ppd_env *env)
 		bstr(&pre, darwin ? predef_darwin : predef_aarch64_linux);
 	if (asm_mode && !undef)
 		bstr(&pre, "#define __ASSEMBLER__ 1\n#undef __STDC_VERSION__\n#define __STDC_VERSION__ 201710L\n");
+	else if (!undef && std) {
+		/* the tables are for -std=gnu11 (the kernel's); other standards as clang predefines them */
+		static const char *const ver[] = { [89] = NULL, [99] = "199901L", [11] = "201112L", [17] = "201710L", [23] = "202311L" };
+
+		bstr(&pre, "#undef __STDC_VERSION__\n");
+		if (ver[std]) {
+			bstr(&pre, "#define __STDC_VERSION__ ");
+			bstr(&pre, ver[std]);
+			bstr(&pre, "\n");
+		} else {
+			bstr(&pre, "#undef __GNUC_STDC_INLINE__\n#define __GNUC_GNU_INLINE__ 1\n");
+		}
+		if (strict)
+			bstr(&pre, "#define __STRICT_ANSI__ 1\n#undef linux\n#undef unix\n");
+	} else if (!undef && !asm_mode) {
+		bstr(&pre, "#undef __STDC_VERSION__\n#define __STDC_VERSION__ 201710L\n");
+	}
 	po.target = darwin ? PP_DARWIN : PP_LINUX_AARCH64;
 	if (opt == 0) bstr(&pre, "#undef __OPTIMIZE__\n#define __NO_INLINE__ 1\n");
 	if (os) bstr(&pre, "#define __OPTIMIZE_SIZE__ 1\n");
@@ -490,6 +530,14 @@ int ppd_run(int argc, char **argv, const ppd_env *env)
 		}
 	}
 	if (freestanding) bstr(&pre, "#undef __STDC_HOSTED__\n#define __STDC_HOSTED__ 0\n");
+	if (!darwin && !short_wchar && !asm_mode && !undef)	/* the Linux table is for the kernel's -fshort-wchar */
+		bstr(&pre, "#undef __ARM_SIZEOF_WCHAR_T\n#define __ARM_SIZEOF_WCHAR_T 4\n"
+			   "#undef __SIZEOF_WCHAR_T__\n#define __SIZEOF_WCHAR_T__ 4\n"
+			   "#undef __WCHAR_MAX__\n#define __WCHAR_MAX__ 4294967295U\n"
+			   "#undef __WCHAR_MIN__\n#define __WCHAR_MIN__ 0U\n"
+			   "#undef __WCHAR_TYPE__\n#define __WCHAR_TYPE__ unsigned int\n"
+			   "#undef __WCHAR_WIDTH__\n#define __WCHAR_WIDTH__ 32\n"
+			   "#undef __clang_wide_literal_encoding__\n#define __clang_wide_literal_encoding__ \"UTF-32\"\n");
 	if (cfi) bstr(&pre, "#define __GCC_HAVE_DWARF2_CFI_ASM 1\n");
 	if (strict_align) bstr(&pre, "#undef __ARM_FEATURE_UNALIGNED\n");
 	if (tiny) bstr(&pre, "#undef __AARCH64_CMODEL_SMALL__\n#define __AARCH64_CMODEL_TINY__ 1\n");
@@ -564,6 +612,7 @@ int ppd_run(int argc, char **argv, const ppd_env *env)
 	}
 	if (syntax) {
 		cc_opts co = { .target = po.target, .unsigned_char = po.unsigned_char, .dump_layouts = layout, .ms_anon = ms_anon, .short_wchar = short_wchar,
+				.std = std, .implicit_int = std == 89 || wimpl_int, .implicit_fn = std == 89 || wimpl_fn,
 			       .outfd = env->outfd };
 		int fd = -1;
 

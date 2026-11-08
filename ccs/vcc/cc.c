@@ -99,6 +99,8 @@ static const char *idname(uint32_t id, int *len)
 static int idlen_(uint32_t id) { return (int)vintern_ents[id].len; }
 static const char *idstr_(uint32_t id) { return vintern_ents[id].s; }
 
+static uint32_t implicit_func(cc *c, uint32_t id, uint32_t loc);
+
 /* ---------------- types ---------------- */
 
 static const struct { uint8_t size, align; } basic[TY_PTR] = {
@@ -3079,9 +3081,18 @@ static uint32_t primary(cc *c)
 		}
 		if (id == c->id_func || id == c->id_FUNCTION || id == c->id_PRETTY)
 			return func_name(c, loc);
-		if (is(c, T_LPAREN))
-			error(c, loc, "call to undeclared function '%.*s'; ISO C99 and later do not support implicit function declarations", IDF(id));
-		else
+		if (is(c, T_LPAREN)) {
+			if (!c->o->implicit_fn)
+				error(c, loc, "call to undeclared function '%.*s'; ISO C99 and later do not support implicit function declarations", IDF(id));
+			{
+				uint32_t fs = implicit_func(c, id, loc);
+				uint32_t n = mk(c, N_VAR, c->syms[fs].ty, loc);
+
+				N(n)->a = fs;
+				c->syms[fs].flags |= SF_USED;
+				return n;
+			}
+		} else
 			error(c, loc, "use of undeclared identifier '%.*s'", IDF(id));
 		return mk_int(c, 0, prim(TY_INT), loc);
 	}
@@ -4045,12 +4056,15 @@ typedef struct dop {
 	uint8_t q;		/* ptr quals / array param quals */
 	uint16_t fl;		/* array: TF_*; func: TF_* */
 	uint32_t a, b;		/* array: length lo/hi or vla node; func: params start, count */
+	uint32_t np;		/* func: parameter syms (after the types; K&R: no types) */
+	bool kr;		/* func: K&R identifier list */
 } dop;
 
 typedef struct declr {
 	uint32_t name, loc;
 	attrs at;
 	uint32_t psyms, npsyms;	/* the outermost function declarator's parameter syms (list) */
+	bool kr;		/* ... from a K&R identifier list (types follow the declarator) */
 	bool has_func;
 } declr;
 
@@ -4309,7 +4323,7 @@ done:
 	} else if (base == KW_double) {
 		ds->ty = prim(nlong ? TY_LDOUBLE : TY_DOUBLE);
 	} else {
-		if (!any && !pp_in_system_header(c->p, ds->loc))
+		if (!any && !c->o->implicit_int && !pp_in_system_header(c->p, ds->loc))
 			error(c, ds->loc, "type specifier missing, defaults to 'int'; ISO C99 and later do not support implicit int");
 		ds->ty = int_type(c, nlong, sgn, base, ds->loc);
 	}
@@ -4321,6 +4335,8 @@ done:
 			ds->ty = prim(k);
 	}
 	ds->ty = qualify(c, ds->ty, q);
+	if (ds->inline_ && c->o->std == 89)
+		ds->at.gnu_inline = 1;	/* -std=gnu89: gnu_inline semantics */
 	return true;
 }
 
@@ -4334,10 +4350,29 @@ static void param_list(cc *c, dop *op)
 	vinit(&ptys);
 	vinit(&psyms);
 	scope_open(c);
+	op->kr = false;
 	if (is(c, T_RPAREN)) {
 		fl |= TF_NOPROTO;
 	} else if (iskw(c, KW_void) && peek(c, 1)->kind == T_RPAREN) {
 		next(c);
+	} else if (is(c, T_IDENT) && !kwof(tok(c)) && !is_typedef_name(c, tok(c)) &&
+		   (peek(c, 1)->kind == T_COMMA || peek(c, 1)->kind == T_RPAREN)) {
+		/* K&R identifier list: int for now, the declarations before the body set the types */
+		fl |= TF_NOPROTO;
+		op->kr = true;
+		for (;;) {
+			uint32_t s;
+
+			if (!is(c, T_IDENT) || kwof(tok(c)))
+				fatal(c, tok(c)->loc, "expected identifier");
+			s = sym_new(c, S_VAR, tok(c)->id, prim(TY_INT), tok(c)->loc);
+			c->syms[s].flags |= SF_PARAM;
+			c->syms[s].sc = SC_AUTO;
+			vpush(c, &psyms, s);
+			next(c);
+			if (!accept(c, T_COMMA))
+				break;
+		}
 	} else {
 		for (;;) {
 			dspec ds;
@@ -4390,6 +4425,7 @@ static void param_list(cc *c, dop *op)
 	op->fl = (uint16_t)fl;
 	op->a = vfreeze(c, &ptys);
 	op->b = ptys.n;
+	op->np = psyms.n;
 	/* the parameter syms follow the types */
 	vfreeze(c, &psyms);
 }
@@ -4527,7 +4563,7 @@ static void declarator(cc *c, declr *d, bool abstract_ok, uint32_t *first, uint3
 		d->loc = id.loc;
 		merge_attrs(&d->at, &id.at);
 		if (id.has_func) {
-			d->psyms = id.psyms, d->npsyms = id.npsyms, d->has_func = true;
+			d->psyms = id.psyms, d->npsyms = id.npsyms, d->kr = id.kr, d->has_func = true;
 		}
 		inner = true;
 	} else if (is(c, T_IDENT) && !kwof(tok(c))) {
@@ -4553,7 +4589,8 @@ static void declarator(cc *c, declr *d, bool abstract_ok, uint32_t *first, uint3
 			/* the innermost function declarator next to the name gives the parameters */
 			if (!inner && !d->has_func && ns == 0) {
 				d->psyms = sufs[ns].a + sufs[ns].b;
-				d->npsyms = sufs[ns].b;
+				d->npsyms = sufs[ns].np;
+				d->kr = sufs[ns].kr;
 				d->has_func = true;
 			}
 			ns++;
@@ -5723,6 +5760,70 @@ static uint32_t declare(cc *c, const dspec *ds, declr *d, qty t, bool file)
 static void function_def(cc *c, uint32_t s, const declr *d);
 static uint32_t statement(cc *c);
 
+/* C89: a call to an undeclared id declares "extern int id();" in this scope */
+static uint32_t implicit_func(cc *c, uint32_t id, uint32_t loc)
+{
+	dspec ds = { .ty = prim(TY_INT), .sc = SC_EXTERN, .loc = loc };
+	declr d = { .name = id, .loc = loc };
+
+	return declare(c, &ds, &d, ty_func(c, prim(TY_INT), NULL, 0, TF_NOPROTO), c->depth == 0);
+}
+
+/* the declarations between a K&R definition's identifier list and its body */
+static void kr_params(cc *c, const declr *fd)
+{
+	uint8_t seen[256] = { 0 };
+
+	while (!is(c, T_LBRACE)) {
+		dspec ds;
+
+		if (!decl_specs(c, &ds, true)) {
+			if (is(c, T_IDENT) && !kwof(tok(c)))
+				fatal(c, tok(c)->loc, "unknown type name '%.*s'", IDF(tok(c)->id));
+			fatal(c, tok(c)->loc, "expected ';' after top level declarator");
+		}
+		for (;;) {
+			declr d;
+			uint32_t first, nops, i;
+			qty t;
+
+			declarator(c, &d, false, &first, &nops);
+			attribute_list(c, &d.at);
+			t = apply_declarator(c, ds.ty, first, nops);
+			tl_ndops = first;
+			if (is_array(c, t))
+				t = ty_ptr(c, T(c, t)->base);
+			else if (is_func(c, t))
+				t = ty_ptr(c, t);
+			for (i = 0; i < fd->npsyms; i++)
+				if (c->syms[c->lists[fd->psyms + i]].name == d.name)
+					break;
+			if (i == fd->npsyms) {
+				error(c, d.loc, "parameter named '%.*s' is missing", IDF(d.name));
+			} else {
+				sym *y = &c->syms[c->lists[fd->psyms + i]];
+
+				if (i < sizeof(seen) && seen[i]++)
+					error(c, d.loc, "redefinition of parameter '%.*s'", IDF(d.name));
+				y->ty = t;
+				y->loc = d.loc;
+				if (ds.sc == SC_REGISTER)
+					y->sc = SC_REGISTER;
+			}
+			if (!accept(c, T_COMMA))
+				break;
+		}
+		expect(c, T_SEMI, "';'");
+	}
+	if (!c->o->implicit_int)
+		for (uint32_t i = 0; i < fd->npsyms && i < sizeof(seen); i++)
+			if (!seen[i]) {
+				const sym *y = &c->syms[c->lists[fd->psyms + i]];
+
+				error(c, y->loc, "parameter '%.*s' was not declared, defaults to 'int'; ISO C99 and later do not support implicit int", IDF(y->name));
+			}
+}
+
 /* a declaration; block-scope ones append N_DECL statements to out */
 static void declaration(cc *c, vec *out, bool file)
 {
@@ -5733,9 +5834,20 @@ static void declaration(cc *c, vec *out, bool file)
 		return;
 	}
 	if (!decl_specs(c, &ds, true)) {
-		if (is(c, T_IDENT) && !kwof(tok(c)))
+		int k = peek(c, 1)->kind;
+
+		if (file && ((is(c, T_IDENT) && !kwof(tok(c)) &&
+			      (k == T_LPAREN || k == T_SEMI || k == T_COMMA || k == T_EQUAL || k == T_LSQUARE)) ||
+			     is(c, T_STAR))) {
+			/* C89 implicit int: "f(x) { ... }", "x;" at file scope */
+			memset(&ds, 0, sizeof(ds));
+			ds.ty = prim(TY_INT);
+			ds.loc = tok(c)->loc;
+			if (!c->o->implicit_int)
+				error(c, ds.loc, "type specifier missing, defaults to 'int'; ISO C99 and later do not support implicit int");
+		} else if (is(c, T_IDENT) && !kwof(tok(c))) {
 			fatal(c, tok(c)->loc, "unknown type name '%.*s'", IDF(tok(c)->id));
-		{
+		} else {
 			char b[64];
 
 			fatal(c, tok(c)->loc, "expected declaration before '%s'", tokspell(tok(c), b, sizeof(b)));
@@ -5777,6 +5889,8 @@ static void declaration(cc *c, vec *out, bool file)
 			expect(c, T_SEMI, "';'");
 			return;
 		}
+		if (file && d.kr && is_func(c, t) && !is(c, T_SEMI) && !is(c, T_COMMA) && !is(c, T_EQUAL))
+			kr_params(c, &d);
 		s = declare(c, &ds, &d, t, file);
 		if (is_func(c, t) && is(c, T_LBRACE)) {
 			if (!file)

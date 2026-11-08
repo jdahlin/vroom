@@ -4564,6 +4564,13 @@ static val gen_builtin(ecx *e, uint32_t n)
 	}
 	case BI_EXPECT:
 	case BI_EXPECT_PROB:
+		/* the hint is still evaluated (argument order is unspecified: first, so that
+		 * nothing is live across it) */
+		for (uint32_t i = 1; i < x->c; i++)
+			if (side_effects(c, arg[i])) {
+				v = gen(e, arg[i]);
+				vfree(e, &v);
+			}
 		v = gen(e, arg[0]);
 		return v;
 	case BI_ASSUME_ALIGNED:
@@ -7147,7 +7154,7 @@ static void emit_function(ecx *e, uint32_t s)
 	}
 	gen_stmt(e, y->body);
 	/* falling off the end of main returns 0 */
-	if (e->reach && y->name && !strcmp(vintern_ents[y->name].s, "main") && vintern_ents[y->name].len == 4)
+	if (e->reach && y->name && vintern_ents[y->name].len == 4 && !memcmp(vintern_ents[y->name].s, "main", 4))
 		movi(e, 0, 0, 0);
 	deflabel(e, F.retlbl);
 	e->f = NULL;
@@ -7267,7 +7274,6 @@ static void data_init(ecx *e, uint64_t off, qty ty, uint32_t init)
 			n = cap;
 		for (uint64_t i = 0; i < n; i++)
 			data_put(e, off + i, (uint8_t)s->s[i], 1);
-		data_put(e, off + (cap ? cap - 1 : 0), 0, 1);
 		return;
 	}
 	if (x->op == N_COMPLIT) {

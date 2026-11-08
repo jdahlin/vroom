@@ -409,6 +409,40 @@ aldrig i bygget. Ett TU-test (`bench/vcc-diff.py`) körs över alla kärnfiler.
 - **Tid:** självkompilering 1,5 s (en tråd, sekventiellt). Steg 2-`vpp` är ~2,6× långsammare än clang `-O3`-bygget (kärnbatch `-j 6`: 4,1 → 10,6 s vägg) — vcc har ingen optimerare.
 - **Kvar:** HFA-argument (fatalt fel), `long double` bara som double; optimering i emittern om steg 2 ska ersätta clang-bygget.
 
+### Status testsviter (2026-11-08): gcc c-torture + tcc tests2 importerade
+
+`ccs/vcc/tests/gcc-torture/execute` (gcc e6bf7e6f, 1 701 test, GPL-3) och
+`ccs/vcc/tests/tcc-tests2` (tinycc 70adbb12, 145 test, LGPL-2.1), oförändrade;
+README där om källa, licens, uppdatering och varför just de (självkontrollerande
+körtester i GNU C, utan dejagnu; gcc.dg/clang-lit bundna till sina diagnostiker).
+`bench/vcc-ctests.py -j 6`: varje test byggs av clang (orakel, cachat) och av
+`vpp -c`, länkas med en egen bare-metal-runtime (`tests/rt`: start.S, liten libc,
+byggd av clang) och körs i `qemu-system-aarch64 -M virt` (semihosting ger
+exitkoden); vcc godkänns när utskrift och exitkod är clangs.  Kallt ~2 min,
+med cachade referenser ~40 s.  Hoppar över tcc-specifika test, sådant clang
+avvisar och sådant clangs bygge inte klarar på runtimen (long double utan
+compiler-rt, fil-I/O).
+
+| | gcc | tcc |
+|---|---|---|
+| utgångsläge | 1193/1589 (75,1 %) | 74/103 (71,8 %) |
+| K&R, implicit int/funktion, `-std=` | 1306 (82,2 %) | 75 |
+| main utan return ger 0 (strcmp på ointernerat namn) | 1344 (84,6 %) | 78 |
+| för lång strängstart i char-array | 1348 | 78 |
+| SHF_MERGE-reloc med addend mot symbolen (som MC), `__builtin_expect`-sidoeffekter, wchar_t utan `-fshort-wchar` | **1353 (85,1 %)** | **80 (77,7 %)** |
+
+Kvarvarande fel (gcc+tcc): **fp 131** (flyttal, egen gren pågår), **fe 60**
+(vektortyper 40, `__complex__`/`i`-suffix 10, nästlade/okända konstruktioner),
+**emit 41** (okänd builtin 55 = `__builtin_*_overflow` m.fl. 15, VLA 11, asm-`g`-
+constraint 10, `.Ltmp`-etikett 2, 128-bit switch), **link 14** (implicit `alloca`
+borde bli builtin 3, `link_error`-test som kräver konstantvikning 5,
+`__sync_add_and_fetch`, `__udivti3`), **run 13** (VLA-parametrars storleksuttryck
+med sidoeffekter 970217-1/pr77767, `__builtin_return_address`, beräknad goto i
+comp-goto-1, va-arg-21, konstruktorordning 108_constructor, 39_typedef, 129_scopes).
+Nästa mål: builtins för overflow, VLA, asm `g`, sedan FP när den grenen landar.
+Predef-tabellen för Linux har kärnans flaggor inbakade (`-mgeneral-regs-only`
+tar bort `__ARM_NEON`/`__ARM_FP`); bör justeras när FP finns.
+
 ## Risker
 - **GNU C-ytan och inline asm** är det stora jobbet. Uppskattat: lexer + pp ~2 kloc,
   parser + sema ~10–15 kloc, emitter ~5 kloc, assembler ~4 kloc, länkare ~3 kloc.
