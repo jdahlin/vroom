@@ -330,6 +330,7 @@ static void snap_restore(cc *c, const dcsnap *s, uint32_t base)
 	c->heap = keep.heap, c->hend = keep.hend;
 	c->hp = c->heap + s->a[A_HEAP].n;
 	c->dc = keep.dc;
+	c->dops = keep.dops, c->ndops = keep.ndops;	/* (scratch in this TU's heap) */
 	code_cc(&k, c, false);
 	c->prevloc = dec_loc(&k, s->c.prevloc);
 #define DEC(l) dec_loc(&k, (l))

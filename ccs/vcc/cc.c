@@ -643,36 +643,61 @@ static void lay_record(cc *c, tag *r, const uint32_t *fa, const uint8_t *fp)
 
 /* ---------------- tokens ---------------- */
 
-static bool c_keyword[KW_END];
+/* per keyword id: a keyword in gnu11, starts a type name, starts a declaration */
+enum { KC_KW = 1, KC_TYPE = 2, KC_DECL = 4 };
+static uint8_t kwclass[KW_END];
 
 static void init_keywords(void)
 {
+	static const uint16_t types[] = {
+		KW_void, KW_char, KW_short, KW_int, KW_long, KW_float, KW_double, KW_signed, KW_unsigned,
+		KW__Bool, KW__Complex, KW_struct, KW_union, KW_enum, KW_const, KW_volatile, KW_restrict,
+		KW__Atomic, KW_typeof, KW___typeof__, KW___typeof, KW___typeof_unqual__, KW___const__,
+		KW___const, KW___signed__, KW___signed, KW___volatile__, KW___volatile, KW___restrict__,
+		KW___restrict, KW___int128, KW__Float16, KW___fp16, KW__Alignas, KW___attribute__,
+		KW___attribute, KW___auto_type,
+	};
+	static const uint16_t decls[] = {
+		KW_typedef, KW_extern, KW_static, KW_auto, KW_register, KW_inline, KW___inline__, KW___inline,
+		KW__Noreturn, KW__Thread_local, KW___thread, KW__Static_assert,
+	};
+
 	for (int i = KW_auto; i <= KW_thread_local; i++)
-		c_keyword[i] = true;
+		kwclass[i] = KC_KW;
 	/* C23 keywords that are plain identifiers in gnu11 */
-	c_keyword[KW_bool] = c_keyword[KW_true] = c_keyword[KW_false] = false;
-	c_keyword[KW_nullptr] = c_keyword[KW_alignof] = c_keyword[KW_alignas] = false;
-	c_keyword[KW_thread_local] = c_keyword[KW_static_assert] = false;
-	c_keyword[KW_typeof_unqual] = false;
+	kwclass[KW_bool] = kwclass[KW_true] = kwclass[KW_false] = 0;
+	kwclass[KW_nullptr] = kwclass[KW_alignof] = kwclass[KW_alignas] = 0;
+	kwclass[KW_thread_local] = kwclass[KW_static_assert] = 0;
+	kwclass[KW_typeof_unqual] = 0;
+	for (size_t i = 0; i < sizeof(types) / sizeof(types[0]); i++)
+		kwclass[types[i]] |= KC_TYPE | KC_DECL;
+	for (size_t i = 0; i < sizeof(decls) / sizeof(decls[0]); i++)
+		kwclass[decls[i]] |= KC_DECL;
 }
 
 static inline int kwof(const ptok *t)
 {
-	return t->kind == T_IDENT && t->id < KW_END && c_keyword[t->id] ? (int)t->id : 0;
+	return t->kind == T_IDENT && t->id < KW_END && (kwclass[t->id] & KC_KW) ? (int)t->id : 0;
 }
 
 static void pragma(cc *c, const ptok *t);
 
-static void fetch(cc *c, ptok *t)
+static __attribute__((noinline)) void fetch_directive(cc *c, ptok *t)
 {
-	for (;;) {
-		pp_next(c->p, t);
-		if (likely(t->kind != P_DIRECTIVE))
-			return;
+	do {
 		if (unlikely(dc_stale(c)))
 			dc_materialize(c);	/* (the pragma acts on the real state) */
 		pragma(c, t);
-	}
+		pp_next(c->p, t);
+	} while (t->kind == P_DIRECTIVE);
+}
+
+/* inline at every token consumer: a call to pp_next and a test; the rest out of line */
+static inline __attribute__((always_inline)) void fetch(cc *c, ptok *t)
+{
+	pp_next(c->p, t);
+	if (unlikely(t->kind == P_DIRECTIVE))
+		fetch_directive(c, t);
 }
 
 void cc_fetch(cc *c, ptok *t) { fetch(c, t); }
@@ -693,21 +718,31 @@ static ptok *peek(cc *c, int k)
 	return &c->tk[k];
 }
 
-static inline void next(cc *c)
+/* drop tk[0] with lookahead queued: fixed-size copies (a libc memmove costs more) */
+static __attribute__((noinline)) void next_shift(cc *c)
+{
+	c->tk[0] = c->tk[1];
+	if (c->ntk > 2) {
+		c->tk[1] = c->tk[2];
+		if (c->ntk > 3)
+			c->tk[2] = c->tk[3];
+	}
+	c->ntk--;
+}
+
+static inline __attribute__((always_inline)) void next(cc *c)
 {
 	c->prevloc = c->tk[0].loc;
-	if (c->ntk > 1) {
-		memmove(&c->tk[0], &c->tk[1], (size_t)(c->ntk - 1) * sizeof(ptok));
-		c->ntk--;
-	} else {
+	if (unlikely(c->ntk > 1))
+		next_shift(c);
+	else
 		fetch(c, &c->tk[0]);
-	}
 }
 
 static inline bool is(cc *c, int kind) { return c->tk[0].kind == kind; }
 static inline bool iskw(cc *c, int kw) { return kwof(&c->tk[0]) == kw; }
 
-static bool accept(cc *c, int kind)
+static inline __attribute__((always_inline)) bool accept(cc *c, int kind)
 {
 	if (c->tk[0].kind != kind)
 		return false;
@@ -731,17 +766,20 @@ static const char *tokspell(const ptok *t, char *buf, size_t cap)
 	return buf;
 }
 
-static void expect(cc *c, int kind, const char *what)
+/* the failure path out of line: tokspell's buffer (a VLA) made every call set up a frame */
+static __attribute__((noinline, cold, noreturn)) void expect_fail(cc *c, const char *what)
 {
-	if (likely(c->tk[0].kind == kind)) {
-		next(c);
-		return;
-	}
-	{
-		char b[64];
+	char b[64];
 
-		fatal(c, c->tk[0].loc, "expected %s before '%s'", what, tokspell(&c->tk[0], b, sizeof(b)));
-	}
+	fatal(c, c->tk[0].loc, "expected %s before '%s'", what, tokspell(&c->tk[0], b, sizeof(b)));
+	abort();
+}
+
+static inline __attribute__((always_inline)) void expect(cc *c, int kind, const char *what)
+{
+	if (unlikely(c->tk[0].kind != kind))
+		expect_fail(c, what);
+	next(c);
 }
 
 /* #pragma: only pack changes semantics; the rest is ignored here */
@@ -832,7 +870,8 @@ static void scope_close(cc *c)
 		uint32_t s = c->sstack[--c->nsstack];
 		sym *y = &c->syms[s];
 
-		*dslot(c, y->kind == S_TAG ? c->tdir : c->odir, y->name) = y->shadow;
+		/* (bind allocated the page) */
+		(y->kind == S_TAG ? c->tdir : c->odir)[y->name >> DIR_BITS][y->name & (DIR_PAGE - 1)] = y->shadow;
 	}
 	c->depth--;
 }
@@ -869,14 +908,19 @@ static void bind(cc *c, uint32_t s)
 static uint32_t lookup(cc *c, uint32_t id) { return dget(c->odir, id); }
 static uint32_t lookup_tag(cc *c, uint32_t id) { return dget(c->tdir, id); }
 
+/* an identifier (not a keyword) */
+static inline bool typedef_id(cc *c, uint32_t id)
+{
+	uint32_t s = lookup(c, id);
+
+	return s && c->syms[s].kind == S_TYPEDEF;
+}
+
 static bool is_typedef_name(cc *c, const ptok *t)
 {
-	uint32_t s;
-
 	if (t->kind != T_IDENT || kwof(t))
 		return false;
-	s = lookup(c, t->id);
-	return s && c->syms[s].kind == S_TYPEDEF;
+	return typedef_id(c, t->id);
 }
 
 /* ---------------- nodes ---------------- */
@@ -3820,33 +3864,20 @@ static qty apply_declarator(cc *c, qty base, uint32_t first, uint32_t nops);
 
 static bool is_type_start(cc *c, const ptok *t)
 {
-	switch (kwof(t)) {
-	case KW_void: case KW_char: case KW_short: case KW_int: case KW_long: case KW_float:
-	case KW_double: case KW_signed: case KW_unsigned: case KW__Bool: case KW__Complex:
-	case KW_struct: case KW_union: case KW_enum: case KW_const: case KW_volatile:
-	case KW_restrict: case KW__Atomic: case KW_typeof: case KW___typeof__: case KW___typeof:
-	case KW___typeof_unqual__: case KW___const__: case KW___const: case KW___signed__:
-	case KW___signed: case KW___volatile__: case KW___volatile: case KW___restrict__:
-	case KW___restrict: case KW___int128: case KW__Float16: case KW___fp16: case KW__Alignas:
-	case KW___attribute__: case KW___attribute: case KW___auto_type:
-		return true;
-	case 0:
-		return is_typedef_name(c, t);
-	default:
+	if (t->kind != T_IDENT)
 		return false;
-	}
+	if (t->id < KW_END && (kwclass[t->id] & KC_KW))
+		return kwclass[t->id] & KC_TYPE;
+	return typedef_id(c, t->id);
 }
 
 static bool is_decl_start(cc *c, const ptok *t)
 {
-	switch (kwof(t)) {
-	case KW_typedef: case KW_extern: case KW_static: case KW_auto: case KW_register:
-	case KW_inline: case KW___inline__: case KW___inline: case KW__Noreturn: case KW__Thread_local:
-	case KW___thread: case KW__Static_assert:
-		return true;
-	default:
-		return is_type_start(c, t);
-	}
+	if (t->kind != T_IDENT)
+		return false;
+	if (t->id < KW_END && (kwclass[t->id] & KC_KW))
+		return kwclass[t->id] & KC_DECL;
+	return typedef_id(c, t->id);
 }
 
 static uint32_t tag_new(cc *c, int kind, uint32_t name, uint32_t loc)
@@ -3952,8 +3983,9 @@ static void struct_body(cc *c, uint32_t ti);
 static void enum_body(cc *c, uint32_t ti, attrs *after);
 static void declarator(cc *c, declr *d, bool abstract_ok, uint32_t *first, uint32_t *nops);
 
-static _Thread_local dop *tl_dops;
-static _Thread_local uint32_t tl_ndops;
+/* in the cc, not _Thread_local: each such access was a call to _tlv_get_addr */
+#define tl_dops (c->dops)
+#define tl_ndops (c->ndops)
 
 static qty int_type(cc *c, int nlong, int sgn, int base, uint32_t loc)
 {
@@ -4019,10 +4051,8 @@ static bool decl_specs(cc *c, dspec *ds, bool allow_sc)
 				next(c);
 				continue;
 			}
-			if (!have_named && !base && !nlong && !sgn && is_typedef_name(c, t)) {
-				uint32_t s = lookup(c, t->id);
-
-				named = c->syms[s].ty;
+			if (!have_named && !base && !nlong && !sgn && t->kind == T_IDENT && typedef_id(c, t->id)) {
+				named = c->syms[lookup(c, t->id)].ty;
 				have_named = true;
 				any = true;
 				next(c);
@@ -6573,7 +6603,7 @@ static void cc_init(cc *c, pp *p, const cc_opts *o)
 	c->tlasm = vmreg_get(&ccr[14], (size_t)1 << 24, "cc.tlasm");
 	c->heap = c->hp = vmreg_get(&ccr[15], (size_t)1 << 32, "cc.heap");
 	c->hend = c->heap + ((size_t)1 << 32);
-	tl_dops = halloc(c, DOPS_MAX * sizeof(dop));
+	c->dops = halloc(c, DOPS_MAX * sizeof(dop));
 	tl_ndops = 0;
 	c->tyhcap = 1 << 16;
 	c->tyhash = halloc(c, c->tyhcap * sizeof(uint32_t));
