@@ -182,7 +182,10 @@ Existing gates that every change must keep green: `vcc-diff.py cmp`
   the target is Darwin.
   *Validate:* T2 `narrow-ret` on Darwin (`retc(0x1ff)` → -1, `bool`,
   `unsigned short`, through function pointers and tail position).
-- [ ] **Darwin: unnamed bitfields add alignment** [P].  On Darwin `int :0`
+- [x] **Darwin: unnamed bitfields add alignment** [P].  (done:
+  `bench/vcc-bflayout.py`, both targets, and `tests/abi/bitfield_layout`;
+  it also found two Linux bugs, fixed with it: `aligned()` on a bit-field
+  did not move its offset, and packed bit-fields were byte- not bit-aligned.)  On Darwin `int :0`
   and `int :3` do not affect the struct's alignment.  `struct{char a; int :0;
   char b;}` is 8 in vcc, 5 in Apple clang.
   *Validate:* layout `_Static_assert` table for `--target=arm64-apple-darwin`

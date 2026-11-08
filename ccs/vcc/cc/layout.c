@@ -37,7 +37,7 @@ static void lay_bitfield(cc *c, layout *l, field *f, uint32_t fattr_align, bool 
 	/* AArch64: useBitFieldTypeAlignment and useZeroLengthBitfieldAlignment */
 	ufalign = falign;
 	if (packed && fsize != 0)
-		falign = 8;
+		falign = 1;	/* bits: a packed bit-field starts anywhere */
 	if (explicit_align) {
 		falign = falign > explicit_align ? falign : explicit_align;
 		ufalign = ufalign > explicit_align ? ufalign : explicit_align;
@@ -53,10 +53,16 @@ static void lay_bitfield(cc *c, layout *l, field *f, uint32_t fattr_align, bool 
 	{
 		bool allow_pad = mfa == 0;
 
+		bool exp = explicit_align && (mfa == 0 || explicit_align <= mfa);	/* useExplicitBitFieldAlignment */
+
 		if (fsize == 0 || (allow_pad && (off & (falign - 1)) + fsize > unit))
 			off = align_to(off, falign);
+		else if (exp)
+			off = align_to(off, explicit_align);
 		if (fsize == 0 || (allow_pad && (ufoff & (ufalign - 1)) + fsize > unit))
 			ufoff = align_to(ufoff, ufalign);
+		else if (exp)
+			ufoff = align_to(ufoff, explicit_align);
 	}
 	f->off = off;
 	if (l->is_union) {
@@ -72,6 +78,8 @@ static void lay_bitfield(cc *c, layout *l, field *f, uint32_t fattr_align, bool 
 	}
 	if (l->data_size > l->size)
 		l->size = l->data_size;
+	if (c->o->target == PP_DARWIN && !f->name)
+		falign = ufalign = 8;	/* Apple (no useZeroLengthBitfieldAlignment): unnamed bit-fields leave the record's alignment */
 	lay_update(l, falign, ufalign);
 }
 
