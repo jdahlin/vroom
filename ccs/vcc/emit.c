@@ -6297,7 +6297,6 @@ static void data_init(ecx *e, uint64_t off, qty ty, uint32_t init)
 			n = cap;
 		for (uint64_t i = 0; i < n; i++)
 			data_put(e, off + i, (uint8_t)s->s[i], 1);
-		data_put(e, off + (cap ? cap - 1 : 0), 0, 1);
 		return;
 	}
 	if (x->op == N_COMPLIT) {
