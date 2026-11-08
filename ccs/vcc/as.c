@@ -34,11 +34,17 @@ typedef struct {
 	uint8_t req, vararg;
 } Param;
 
+/* a body split at its substitutions: body[off, off + len), then k (-1 nothing,
+ * -2 \@, -3 \+, >= 0 argument k) */
+typedef struct { uint32_t off, len; int32_t k; } Piece;
+typedef struct { Piece *p; uint32_t n; } Tmpl;
+
 typedef struct Macro {
 	Sv name;
 	Param *params; uint32_t np;
 	Sv body;
 	uint32_t count;
+	Tmpl t;			/* compiled at the first instantiation (t.p == 0 before) */
 	struct Macro *next;
 } Macro;
 
@@ -1296,37 +1302,61 @@ static int macro_arg(As *a, const char **pp, const char *e, int vararg, Sv *out)
 	return 0;
 }
 
-static void xput(As *a, char **o, const char *s, size_t n)
+/* expandMacro: body with \param, \@, \+, \() substitutions.  The body is
+ * compiled once into pieces (r is the region for them), then each
+ * expansion is copies. */
+static Tmpl tmpl_compile(As *a, Region *r, Sv body, const Param *ps, uint32_t np, int at)
 {
+	const char *b = body.s;
+	size_t n = body.n, nbs = 0;
+	for (const char *q = b; (q = memchr(q, '\\', (size_t)(b + n - q))); q++) nbs++;
+	Tmpl t = { rget(r, sizeof(Piece) * (nbs + 1)), 0 };
+	size_t lit = 0, i = 0;
+	while (i < n) {
+		const char *q = memchr(b + i, '\\', n - i);
+		if (!q) break;
+		i = (size_t)(q - b);
+		if (i + 1 == n) break;
+		int32_t k;
+		size_t skip;
+		if (at && b[i + 1] == '@') k = -2, skip = 2;
+		else if (b[i + 1] == '+') k = -3, skip = 2;
+		else if (b[i + 1] == '(' && i + 2 < n && b[i + 2] == ')') k = -1, skip = 3;
+		else {
+			size_t pos = i + 1, j = pos;
+			while (j < n && isidc((unsigned char)b[j])) j++;
+			uint32_t m;
+			for (m = 0; m < np; m++) if (ps[m].name.n == j - pos && !memcmp(ps[m].name.s, b + pos, j - pos)) break;
+			if (m == np) { i = pos; continue; }	/* '\' and the name stay as they are */
+			k = (int32_t)m, skip = j - i;
+		}
+		t.p[t.n++] = (Piece){ (uint32_t)lit, (uint32_t)(i - lit), k };
+		i += skip;
+		lit = i;
+	}
+	if (lit < n) t.p[t.n++] = (Piece){ (uint32_t)lit, (uint32_t)(n - lit), -1 };
 	(void)a;
-	memcpy(*o, s, n); *o += n;
+	return t;
 }
 
-/* expandMacro: body with \param, \@, \+, \() substitutions */
-static size_t expand(As *a, char *o, Sv body, const Param *ps, const Sv *args, uint32_t np, int at, uint32_t count)
+static char *utoa(char *o, uint32_t v)
+{
+	char tmp[10]; int k = 0;
+	do tmp[k++] = (char)('0' + v % 10), v /= 10; while (v);
+	while (k) *o++ = tmp[--k];
+	return o;
+}
+
+static size_t expand(As *a, char *o, const char *b, Tmpl t, const Sv *args, uint32_t count)
 {
 	char *o0 = o;
-	const char *b = body.s, *e = body.s + body.n;
-	size_t i = 0, n = body.n;
-	while (i < n) {
-		if (b[i] == '\\' && i + 1 != n) {
-			if (at && b[i + 1] == '@') { o += sprintf(o, "%u", a->ninst); i += 2; continue; }
-			if (b[i + 1] == '+') { o += sprintf(o, "%u", count); i += 2; continue; }
-			if (b[i + 1] == '(' && i + 2 < n && b[i + 2] == ')') { i += 3; continue; }
-			size_t pos = ++i;
-			while (i < n && isidc((unsigned char)b[i])) i++;
-			Sv arg = { b + pos, (uint32_t)(i - pos) };
-			uint32_t k;
-			for (k = 0; k < np; k++) if (ps[k].name.n == arg.n && !memcmp(ps[k].name.s, arg.s, arg.n)) break;
-			if (k == np) { *o++ = '\\'; xput(a, &o, arg.s, arg.n); }
-			else xput(a, &o, args[k].s, args[k].n);
-			continue;
-		}
-		const char *q = memchr(b + i + 1, '\\', n - i - 1);
-		size_t k = (q ? (size_t)(q - b) : n) - i;
-		memcpy(o, b + i, k); o += k; i += k;
+	for (uint32_t i = 0; i < t.n; i++) {
+		const Piece *p = &t.p[i];
+		memcpy(o, b + p->off, p->len); o += p->len;
+		if (p->k >= 0) { memcpy(o, args[p->k].s, args[p->k].n); o += args[p->k].n; }
+		else if (p->k == -2) o = utoa(o, a->ninst);
+		else if (p->k == -3) o = utoa(o, count);
 	}
-	(void)e;
 	return (size_t)(o - o0);
 }
 
@@ -1387,6 +1417,7 @@ static int d_macro(As *a, const char *p, const char *e)
 	m->np = np;
 	m->body = svdup(a, body.s, body.n);
 	m->count = 0;
+	m->t = (Tmpl){ 0, 0 };
 	if (a->mcount * 2 >= a->mmask) {
 		uint32_t nm = a->mmask * 2 + 1;
 		Macro **t = rget(&a->defs, sizeof *t * (nm + 1));
@@ -1454,7 +1485,8 @@ static int invoke(As *a, Macro *m, const char *p, const char *e)
 		}
 	}
 	char *o = (char *)rget(&a->xs, expand_bound(m->body, args, np));
-	size_t n = expand(a, o, m->body, m->params, args, np, 1, m->count);
+	if (!m->t.p) m->t = tmpl_compile(a, &a->defs, m->body, m->params, np, 1);
+	size_t n = expand(a, o, m->body.s, m->t, args, m->count);
 	a->xs.used = (size_t)((uint8_t *)o - a->xs.base) + n;
 	a->ninst++;
 	m->count++;
@@ -1469,9 +1501,10 @@ static int d_rept(As *a, const char *p, const char *e)
 	Sv body;
 	if (collect_body(a, 0, &body)) return -1;
 	size_t mark = a->xs.used;
+	Tmpl t = tmpl_compile(a, &a->xs, body, 0, 0, 0);
 	char *o = (char *)rget(&a->xs, expand_bound(body, 0, 0) * (size_t)(cnt ? cnt : 1));
 	size_t n = 0;
-	for (int64_t i = 0; i < cnt; i++) n += expand(a, o + n, body, 0, 0, 0, 0, 0);
+	for (int64_t i = 0; i < cnt; i++) n += expand(a, o + n, body.s, t, 0, 0);
 	a->xs.used = (size_t)((uint8_t *)o - a->xs.base) + n;
 	return push_frame(a, o, n, FR_LOOP, mark);
 }
@@ -1509,9 +1542,10 @@ static int d_irp(As *a, const char *p, const char *e, int chars)
 	}
 	size_t tot = 0;
 	for (uint32_t i = 0; i < nv; i++) tot += expand_bound(body, &vals[i], 1);
+	Tmpl t = tmpl_compile(a, &a->xs, body, &par, 1, 1);
 	char *o = (char *)rget(&a->xs, tot + 1);
 	size_t n = 0;
-	for (uint32_t i = 0; i < nv; i++) n += expand(a, o + n, body, &par, &vals[i], 1, 1, 0);
+	for (uint32_t i = 0; i < nv; i++) n += expand(a, o + n, body.s, t, &vals[i], 0);
 	a->xs.used = (size_t)((uint8_t *)o - a->xs.base) + n;
 	return push_frame(a, o, n, FR_LOOP, mark);
 }
