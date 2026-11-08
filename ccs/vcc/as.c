@@ -1251,6 +1251,54 @@ static int op_len(const char *p, const char *e)
 	return 1;
 }
 
+/* macro_arg when the argument is a contiguous piece of the text (no
+ * string, no blanks around an operator, no error): *out points into the
+ * text.  Returns 0 if macro_arg must do it. */
+static int macro_arg_plain(const char **pp, const char *e, int vararg, Sv *out)
+{
+	const char *p = *pp, *end;
+	if (vararg) {
+		p = ws(p, e);
+		const char *q = e;
+		while (q > p && (q[-1] == ' ' || q[-1] == '\t')) q--;
+		*pp = e;
+		*out = (Sv){ p, (uint32_t)(q - p) };
+		return 1;
+	}
+	const char *s = p;
+	int depth = 0;
+	for (;;) {
+		if (depth == 0) {
+			if (p < e && *p == ',') { end = p; break; }
+			if (p < e && (*p == ' ' || *p == '\t')) {
+				end = p;
+				p = ws(p, e);
+				if (p < e && is_op_start(p, e)) return 0;
+				break;
+			}
+			if (p < e && is_op_start(p, e)) {
+				if (*p == '=' && p + 1 < e && p[1] != '=') return 0;
+				p += op_len(p, e);
+				if (p < e && (*p == ' ' || *p == '\t' || *p == '\r' || *p == '\f' || *p == '\v')) return 0;
+				continue;
+			}
+		}
+		if (p >= e) { end = p; break; }
+		char c = *p;
+		if (c == '(') depth++;
+		else if (c == ')' && depth) depth--;
+		if (c == '"') return 0;
+		if (c == ' ' || c == '\t') { p = ws(p, e); continue; }
+		if (isidc((unsigned char)c)) { while (p < e && isidc((unsigned char)*p)) p++; continue; }
+		if (c == '=' && depth == 0) return 0;
+		p++;
+	}
+	if (depth) return 0;
+	*pp = p;
+	*out = (Sv){ s, (uint32_t)(end - s) };
+	return 1;
+}
+
 static int macro_arg(As *a, const char **pp, const char *e, int vararg, Sv *out)
 {
 	const char *p = *pp;
@@ -1357,13 +1405,24 @@ static char *utoa(char *o, uint32_t v)
 	return o;
 }
 
+/* copy n bytes to o, which may be overwritten up to 16 bytes past n (the
+ * expansion stack has room); short copies are one 16-byte load when that
+ * stays in the source's page */
+static inline void xcopy(char *o, const char *s, size_t n)
+{
+#ifdef __aarch64__
+	if (n <= 16 && ((uintptr_t)s & 4095) <= 4096 - 16) { vst1q_u8((uint8_t *)o, vld1q_u8((const uint8_t *)s)); return; }
+#endif
+	memcpy(o, s, n);
+}
+
 static size_t expand(As *a, char *o, const char *b, Tmpl t, const Sv *args, uint32_t count)
 {
 	char *o0 = o;
 	for (uint32_t i = 0; i < t.n; i++) {
 		const Piece *p = &t.p[i];
-		memcpy(o, b + p->off, p->len); o += p->len;
-		if (p->k >= 0) { memcpy(o, args[p->k].s, args[p->k].n); o += args[p->k].n; }
+		xcopy(o, b + p->off, p->len); o += p->len;
+		if (p->k >= 0) { xcopy(o, args[p->k].s, args[p->k].n); o += args[p->k].n; }
 		else if (p->k == -2) o = utoa(o, a->ninst);
 		else if (p->k == -3) o = utoa(o, count);
 	}
@@ -1479,7 +1538,9 @@ static int invoke(As *a, Macro *m, const char *p, const char *e)
 				}
 				k = pi++;
 			}
-			if (macro_arg(a, &p, e, hasvararg && k == np - 1, &args[k])) return -1;
+			/* the arguments are used before the statement text changes */
+			int va = hasvararg && k == np - 1;
+			if (!macro_arg_plain(&p, e, va, &args[k]) && macro_arg(a, &p, e, va, &args[k])) return -1;
 			set[k] = 1;
 			p = ws(p, e);
 			if (p >= e) break;
