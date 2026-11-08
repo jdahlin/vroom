@@ -2083,21 +2083,25 @@ static uint32_t initializer(cc *c, qty *ty, bool is_static);
 static uint32_t compound_stmt(cc *c, qty *last);
 static uint32_t label_ref(cc *c, uint32_t name, uint32_t loc);
 
+/* a floating constant to an integer: folded, as clang does (the kernel has no FP code); UINT32_MAX: not constant */
+static __attribute__((noinline)) uint32_t fold_f2i(cc *c, uint32_t n, qty to)
+{
+	cval v;
+
+	if (eval(c, n, &v) && v.kind == CV_FLT && v.f > -9.3e18 && v.f < 1.8e19) {
+		i128 i = v.f < 0 ? (i128)(int64_t)v.f : (i128)(uint64_t)v.f;
+
+		return mk_int(c, trunc_to(c, i, to), to, N(n)->loc);
+	}
+	return UINT32_MAX;
+}
+
 static uint32_t cast_node(cc *c, uint32_t n, qty to, int kind)
 {
 	uint32_t r;
 
-	if (kind == CK_F2I) {
-		/* a floating constant to an integer: folded, as clang does (the kernel has no FP code) */
-		cval v;
-
-		if (eval(c, n, &v) && v.kind == CV_FLT && v.f > -9.3e18 && v.f < 1.8e19) {
-			i128 i = v.f < 0 ? (i128)(int64_t)v.f : (i128)(uint64_t)v.f;
-
-			r = mk_int(c, trunc_to(c, i, to), to, N(n)->loc);
-			return r;
-		}
-	}
+	if (unlikely(kind == CK_F2I) && (r = fold_f2i(c, n, to)) != UINT32_MAX)
+		return r;
 	r = mk(c, N_CAST, to, N(n)->loc);
 
 	N(r)->a = n;
@@ -2106,16 +2110,21 @@ static uint32_t cast_node(cc *c, uint32_t n, qty to, int kind)
 }
 
 /* array/function designators to pointers (C11 6.3.2.1p3-4) */
-static uint32_t decay(cc *c, uint32_t n)
+static __attribute__((noinline)) uint32_t decay_slow(cc *c, uint32_t n, qty t, int k)
+{
+	if (k == TY_ARRAY)
+		return cast_node(c, n, ty_ptr(c, T(c, t)->base), CK_DECAY);
+	return cast_node(c, n, ty_ptr(c, QUNQ(t)), CK_FDECAY);
+}
+
+static inline uint32_t decay(cc *c, uint32_t n)
 {
 	qty t = N(n)->ty;
 	int k = KIND(c, t);
 
-	if (k == TY_ARRAY)
-		return cast_node(c, n, ty_ptr(c, T(c, t)->base), CK_DECAY);
-	if (k == TY_FUNC)
-		return cast_node(c, n, ty_ptr(c, QUNQ(t)), CK_FDECAY);
-	return n;
+	if (likely(k != TY_ARRAY && k != TY_FUNC))
+		return n;
+	return decay_slow(c, n, t, k);
 }
 
 static const field *bitfield_of(cc *c, uint32_t n)
@@ -2202,15 +2211,11 @@ static bool union_member_for(cc *c, qty u, uint32_t n)
 }
 
 /* implicit conversion of an rvalue (already decayed) to type to */
-static uint32_t convert(cc *c, uint32_t n, qty to)
+static __attribute__((noinline)) uint32_t convert_slow(cc *c, uint32_t n, qty to)
 {
 	qty from = N(n)->ty;
-	int k;
+	int k = conv_kind(c, from, to, n);
 
-	to = QUNQ(to);
-	if (QI(canon(c, from)) == QI(canon(c, to)) && !bitfield_of(c, n))
-		return n;
-	k = conv_kind(c, from, to, n);
 	if (k < 0) {
 		if (KIND(c, to) == TY_UNION && union_member_for(c, to, n))
 			return cast_node(c, n, to, CK_UNION);
@@ -2220,17 +2225,39 @@ static uint32_t convert(cc *c, uint32_t n, qty to)
 	return cast_node(c, n, to, k);
 }
 
-/* value of n as an rvalue of its promoted type */
-static uint32_t rvalue(cc *c, uint32_t n)
+static inline uint32_t convert(cc *c, uint32_t n, qty to)
 {
-	n = decay(c, n);
-	if (is_integer(c, N(n)->ty)) {
+	to = QUNQ(to);
+	if (QI(canon(c, N(n)->ty)) == QI(canon(c, to)) && !bitfield_of(c, n))
+		return n;
+	return convert_slow(c, n, to);
+}
+
+static __attribute__((noinline)) uint32_t rvalue_promote(cc *c, uint32_t n)
+{
+	{
 		qty p = promoted(c, n);
 
 		if (p != QUNQ(N(n)->ty) || bitfield_of(c, n))
 			return cast_node(c, n, p, ty_size(c, p) == ty_size(c, N(n)->ty) && !bitfield_of(c, n) ? CK_NOP : CK_INT);
 	}
 	return n;
+}
+
+/* value of n as an rvalue of its promoted type */
+static uint32_t rvalue(cc *c, uint32_t n)
+{
+	const node *x;
+	const ctype *t;
+
+	n = decay(c, n);
+	x = N(n), t = T(c, x->ty);
+	/* int and wider, not a bit-field: already promoted */
+	if (t->kind >= TY_INT && t->kind <= TY_UINT128 && t->canon == QI(x->ty) && !(x->op == N_MEMBER && (x->flags & NF_BITFIELD)))
+		return n;
+	if (!is_int_kind(t->kind) && t->kind != TY_ENUM)
+		return n;
+	return rvalue_promote(c, n);
 }
 
 static void need_scalar(cc *c, uint32_t n, const char *what)
@@ -2951,6 +2978,77 @@ static uint32_t func_name(cc *c, uint32_t loc)
 	return n;
 }
 
+static __attribute__((noinline, cold, noreturn)) void bad_primary(cc *c, const ptok *t)
+{
+	char b[64];
+
+	fatal(c, t->loc, "expected expression before '%s'", tokspell(t, b, sizeof(b)));
+}
+
+/* keywords that start a primary expression (the current token) */
+static __attribute__((noinline)) uint32_t primary_kw(cc *c, int kw, uint32_t loc)
+{
+	if (kw == KW__Generic) {
+		next(c);
+		return generic_sel(c, loc);
+	}
+	if (kw == KW___builtin_va_arg) {
+		static const builtin va = { "__builtin_va_arg", BI_VA_ARG, 0, "v" };
+
+		next(c);
+		return builtin_call(c, &va, loc);
+	}
+	if (kw == KW___builtin_offsetof) {
+		next(c);
+		return offsetof_expr(c, loc);
+	}
+	if (kw == KW___builtin_types_compatible_p) {
+		static const builtin tc = { "", BI_TYPES_COMPAT, 1, "i" };
+
+		next(c);
+		return builtin_call(c, &tc, loc);
+	}
+	if (kw == KW___builtin_choose_expr) {
+		static const builtin ch = { "", BI_CHOOSE, 1, "i" };
+
+		next(c);
+		return builtin_call(c, &ch, loc);
+	}
+	bad_primary(c, tok(c));
+}
+
+/* an identifier without a binding (already consumed): builtins, __func__, errors */
+static __attribute__((noinline)) uint32_t primary_unbound(cc *c, uint32_t id, uint32_t loc)
+{
+	{
+		const builtin *b = builtin_of(id);
+
+		if (b && is(c, T_LPAREN))
+			return builtin_call(c, b, loc);
+	}
+	if (id == c->id_func || id == c->id_FUNCTION || id == c->id_PRETTY)
+		return func_name(c, loc);
+	if (is(c, T_LPAREN))
+		error(c, loc, "call to undeclared function '%.*s'; ISO C99 and later do not support implicit function declarations", IDF(id));
+	else
+		error(c, loc, "use of undeclared identifier '%.*s'", IDF(id));
+	return mk_int(c, 0, prim(TY_INT), loc);
+}
+
+static __attribute__((noinline)) uint32_t stmt_expr(cc *c, uint32_t loc)
+{
+	qty last = prim(TY_VOID);
+	uint32_t b, n;
+
+	if (!c->fn)
+		error(c, loc, "statement expression not allowed at file scope");
+	b = compound_stmt(c, &last);
+	expect(c, T_RPAREN, "')'");
+	n = mk(c, N_STMTEXPR, last, loc);
+	N(n)->a = b;
+	return n;
+}
+
 static uint32_t primary(cc *c)
 {
 	ptok *t = tok(c);
@@ -2969,18 +3067,8 @@ static uint32_t primary(cc *c)
 		return string_lit(c);
 	case T_LPAREN:
 		next(c);
-		if (is(c, T_LBRACE)) {	/* GNU statement expression */
-			qty last = prim(TY_VOID);
-			uint32_t b, n;
-
-			if (!c->fn)
-				error(c, loc, "statement expression not allowed at file scope");
-			b = compound_stmt(c, &last);
-			expect(c, T_RPAREN, "')'");
-			n = mk(c, N_STMTEXPR, last, loc);
-			N(n)->a = b;
-			return n;
-		}
+		if (is(c, T_LBRACE))	/* GNU statement expression */
+			return stmt_expr(c, loc);
 		{
 			uint32_t n = expr(c);
 
@@ -2992,37 +3080,8 @@ static uint32_t primary(cc *c)
 		uint32_t id = t->id, s;
 		int kw = kwof(t);
 
-		if (kw == KW__Generic) {
-			next(c);
-			return generic_sel(c, loc);
-		}
-		if (kw == KW___builtin_va_arg) {
-			static const builtin va = { "__builtin_va_arg", BI_VA_ARG, 0, "v" };
-
-			next(c);
-			return builtin_call(c, &va, loc);
-		}
-		if (kw == KW___builtin_offsetof) {
-			next(c);
-			return offsetof_expr(c, loc);
-		}
-		if (kw == KW___builtin_types_compatible_p) {
-			static const builtin tc = { "", BI_TYPES_COMPAT, 1, "i" };
-
-			next(c);
-			return builtin_call(c, &tc, loc);
-		}
-		if (kw == KW___builtin_choose_expr) {
-			static const builtin ch = { "", BI_CHOOSE, 1, "i" };
-
-			next(c);
-			return builtin_call(c, &ch, loc);
-		}
-		if (kw) {
-			char b[64];
-
-			fatal(c, loc, "expected expression before '%s'", tokspell(t, b, sizeof(b)));
-		}
+		if (unlikely(kw))
+			return primary_kw(c, kw, loc);
 		s = lookup(c, id);
 		next(c);
 		if (s) {
@@ -3030,7 +3089,7 @@ static uint32_t primary(cc *c)
 
 			if (y->kind == S_ENUMCONST)
 				return mk_int(c, y->val, y->ty, loc);
-			if (y->kind == S_TYPEDEF)
+			if (unlikely(y->kind == S_TYPEDEF))
 				fatal(c, loc, "unexpected type name '%.*s': expected expression", IDF(id));
 			{
 				uint32_t n = mk(c, N_VAR, y->ty, loc);
@@ -3042,25 +3101,10 @@ static uint32_t primary(cc *c)
 				return n;
 			}
 		}
-		{
-			const builtin *b = builtin_of(id);
-
-			if (b && is(c, T_LPAREN))
-				return builtin_call(c, b, loc);
-		}
-		if (id == c->id_func || id == c->id_FUNCTION || id == c->id_PRETTY)
-			return func_name(c, loc);
-		if (is(c, T_LPAREN))
-			error(c, loc, "call to undeclared function '%.*s'; ISO C99 and later do not support implicit function declarations", IDF(id));
-		else
-			error(c, loc, "use of undeclared identifier '%.*s'", IDF(id));
-		return mk_int(c, 0, prim(TY_INT), loc);
+		return primary_unbound(c, id, loc);
 	}
-	default: {
-		char b[64];
-
-		fatal(c, loc, "expected expression before '%s'", tokspell(t, b, sizeof(b)));
-	}
+	default:
+		bad_primary(c, t);
 	}
 }
 
@@ -3102,7 +3146,7 @@ static int ovl_rank(cc *c, uint32_t n, qty p)
 }
 
 /* the member of fn's overload set that a call with args selects */
-static uint32_t ovl_pick(cc *c, uint32_t head, const vec *args, uint32_t loc)
+static __attribute__((noinline)) uint32_t ovl_pick(cc *c, uint32_t head, const vec *args, uint32_t loc)
 {
 	uint32_t best = 0, nbest = 0;
 	int br[64];
@@ -3142,7 +3186,7 @@ static uint32_t ovl_pick(cc *c, uint32_t head, const vec *args, uint32_t loc)
 	return best;
 }
 
-static uint32_t call(cc *c, uint32_t fn, uint32_t loc)
+static __attribute__((noinline)) uint32_t call(cc *c, uint32_t fn, uint32_t loc)
 {
 	vec args;
 	qty ft;
@@ -3200,7 +3244,7 @@ static uint32_t call(cc *c, uint32_t fn, uint32_t loc)
 	return n;
 }
 
-static uint32_t postfix(cc *c, uint32_t n)
+static __attribute__((noinline)) uint32_t postfix_ops(cc *c, uint32_t n)
 {
 	for (;;) {
 		uint32_t loc = tok(c)->loc;
@@ -3280,6 +3324,15 @@ static uint32_t postfix(cc *c, uint32_t n)
 	}
 }
 
+static inline uint32_t postfix(cc *c, uint32_t n)
+{
+	int k = tok(c)->kind;
+
+	if (likely(k != T_LSQUARE && k != T_LPAREN && k != T_PERIOD && k != T_ARROW && k != T_PLUSPLUS && k != T_MINUSMINUS))
+		return n;
+	return postfix_ops(c, n);
+}
+
 /* ---------------- expressions: unary, cast, binary ---------------- */
 
 static uint32_t sizeof_type(cc *c, qty t, uint32_t loc, uint32_t e)
@@ -3318,7 +3371,9 @@ static uint32_t align_of_expr(cc *c, uint32_t e)
 	return a;
 }
 
-static uint32_t unary(cc *c)
+static uint32_t unary(cc *c);
+
+static __attribute__((noinline)) uint32_t unary_op(cc *c)
 {
 	ptok *t = tok(c);
 	uint32_t loc = t->loc, n;
@@ -3455,6 +3510,29 @@ static uint32_t unary(cc *c)
 	}
 }
 
+static uint32_t unary(cc *c)
+{
+	const ptok *t = tok(c);
+
+	switch (t->kind) {
+	case T_PLUSPLUS: case T_MINUSMINUS: case T_AMP: case T_STAR: case T_PLUS: case T_MINUS:
+	case T_TILDE: case T_EXCLAIM: case T_AMPAMP:
+		return unary_op(c);
+	case T_IDENT:
+		switch (kwof(t)) {
+		case KW_sizeof: case KW__Alignof: case KW___alignof__: case KW___alignof:
+		case KW___extension__: case KW___real__: case KW___imag__:
+			return unary_op(c);
+		default:
+			break;
+		}
+		break;
+	default:
+		break;
+	}
+	return postfix(c, primary(c));
+}
+
 static uint32_t explicit_cast(cc *c, uint32_t n, qty to, uint32_t loc)
 {
 	int k;
@@ -3488,9 +3566,9 @@ static uint32_t explicit_cast(cc *c, uint32_t n, qty to, uint32_t loc)
 	return r;
 }
 
-static uint32_t cast_expr(cc *c)
+static __attribute__((noinline)) uint32_t cast_paren(cc *c)
 {
-	if (is(c, T_LPAREN) && is_type_start(c, peek(c, 1))) {
+	{
 		uint32_t loc = tok(c)->loc, n;
 		qty ty;
 
@@ -3514,6 +3592,12 @@ static uint32_t cast_expr(cc *c)
 		n = cast_expr(c);
 		return explicit_cast(c, n, ty, loc);
 	}
+}
+
+static uint32_t cast_expr(cc *c)
+{
+	if (is(c, T_LPAREN) && is_type_start(c, peek(c, 1)))
+		return cast_paren(c);
 	return unary(c);
 }
 
@@ -3534,10 +3618,10 @@ static int binprec(int k)
 	}
 }
 
-static uint32_t binary(cc *c, int minp)
-{
-	uint32_t l = cast_expr(c);
+static uint32_t binary(cc *c, int minp);
 
+static __attribute__((noinline)) uint32_t binary_ops(cc *c, int minp, uint32_t l)
+{
 	for (;;) {
 		int op = tok(c)->kind, p = binprec(op);
 		uint32_t loc, r;
@@ -3551,11 +3635,19 @@ static uint32_t binary(cc *c, int minp)
 	}
 }
 
-static uint32_t cond_expr(cc *c)
+static uint32_t binary(cc *c, int minp)
 {
-	uint32_t cnd = binary(c, 1);
+	uint32_t l = cast_expr(c);
+	int p = binprec(tok(c)->kind);
 
-	if (is(c, T_QUESTION)) {
+	if (likely(!p || p < minp))
+		return l;
+	return binary_ops(c, minp, l);
+}
+
+static __attribute__((noinline)) uint32_t cond_rest(cc *c, uint32_t cnd)
+{
+	{
 		uint32_t loc = tok(c)->loc, a = 0, b;
 
 		next(c);
@@ -3566,7 +3658,15 @@ static uint32_t cond_expr(cc *c)
 		b = cond_expr(c);
 		return conditional(c, cnd, a, b, loc);
 	}
-	return cnd;
+}
+
+static uint32_t cond_expr(cc *c)
+{
+	uint32_t cnd = binary(c, 1);
+
+	if (likely(!is(c, T_QUESTION)))
+		return cnd;
+	return cond_rest(c, cnd);
 }
 
 static int assign_op(int k)
@@ -3587,25 +3687,27 @@ static int assign_op(int k)
 	}
 }
 
+static __attribute__((noinline)) uint32_t assign_rest(cc *c, uint32_t l, int op)
+{
+	uint32_t loc = tok(c)->loc, r;
+
+	next(c);
+	r = assign_expr(c);
+	return assign(c, op < 0 ? 0 : op, l, r, loc);
+}
+
 static uint32_t assign_expr(cc *c)
 {
 	uint32_t l = cond_expr(c);
 	int op = assign_op(tok(c)->kind);
 
-	if (op) {
-		uint32_t loc = tok(c)->loc, r;
-
-		next(c);
-		r = assign_expr(c);
-		return assign(c, op < 0 ? 0 : op, l, r, loc);
-	}
-	return l;
+	if (likely(!op))
+		return l;
+	return assign_rest(c, l, op);
 }
 
-static uint32_t expr(cc *c)
+static __attribute__((noinline)) uint32_t comma_rest(cc *c, uint32_t l)
 {
-	uint32_t l = assign_expr(c);
-
 	while (is(c, T_COMMA)) {
 		uint32_t loc = tok(c)->loc, r;
 
@@ -3614,6 +3716,15 @@ static uint32_t expr(cc *c)
 		l = mk2(c, N_COMMA, QUNQ(N(decay(c, r))->ty), loc, l, decay(c, r));
 	}
 	return l;
+}
+
+static uint32_t expr(cc *c)
+{
+	uint32_t l = assign_expr(c);
+
+	if (likely(!is(c, T_COMMA)))
+		return l;
+	return comma_rest(c, l);
 }
 
 /* a constant expression as an int (array sizes, widths, enum values, cases) */
