@@ -486,3 +486,21 @@ test som kräver en optimerare (värdeintervall, DCE), **run 3** = bcp-1
   ~1 000 jobb. Shimsens latens och make `-j` blir golvet.
 - **Mätbrus.** Maskinen används till annat. Bara A/B-mätningar körda direkt efter
   varandra jämförs.
+
+### Felmeddelanden (clang-format)
+
+Status: `bench/vcc-diag.py` jämför vccs stderr med clangs (-fsyntax-only) på
+`ccs/vcc/tests/diag/*.c`: 51/55 identiska (från 4/48).  Motorn i pp.c skriver
+clangs format (källrad, caret, intervall `~`, fix-it-rad, "In file included
+from", färger, "N errors generated.").  cc.c har intervall per nod
+(`c->span`, första/sista token), `report()`/`note()`, typnamn i meddelanden,
+stavningsförslag (`did you mean`, redigeringsavstånd ≤ (len+2)/3, återhämtning
+med det föreslagna namnet), NF_ERR mot följdfel, "expected ';' after …" med
+fix-it, int-conversion/incompatible-pointer-types per sammanhang (initiering,
+argument med parameternot, retur, tilldelning), dubbla case-värden och
+medlemmar, tentativa definitioner av ofullständiga typer, static_assert med
+"expression evaluates to", `.`/`->`-förväxling, omatchade parenteser.  pp:
+#error/#warning, oavslutade villkor, saknad include med intervall.
+Kvar: parameterlistans intervall i "declared here", "expected single argument
+'a'", deklarationsintervall i "declared const here", "expanded from macro"-
+noter, varningar (-W-flaggor, -Wall-grupper) och -ferror-limit.

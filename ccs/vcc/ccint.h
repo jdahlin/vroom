@@ -75,6 +75,8 @@ struct cc {
 	ptok tk[4];
 	int ntk;
 	uint32_t prevloc;
+	uint8_t cv_what;		/* context of the conversion being checked: CX_* (diagnostics) */
+	uint32_t cv_loc, cv_fn, cv_arg;	/* CX_PASS: the callee's sym (0: unknown) and the argument */
 
 	ctype *ty;
 	uint32_t nty;
@@ -90,6 +92,7 @@ struct cc {
 	sym *syms;
 	uint32_t nsym;
 	node *nodes;
+	pp_span *span;		/* per node: first and last token (start locations), 0: unknown */
 	uint32_t nnode;
 	uint32_t *lists;
 	uint32_t nlist;
@@ -120,6 +123,8 @@ struct cc {
 	uint32_t fn_labels;	/* first label of this function */
 	uint32_t *switch_cases;	/* N_CASE/N_DEFAULT nodes of the innermost switch */
 	int in_loop, in_switch;
+	struct swcase { i128 lo, hi; uint32_t loc; } *cases;	/* the open switches' case labels */
+	uint32_t ncase, capcase, case_base;
 	qty switch_ty;
 	int unevaluated;	/* sizeof / typeof / _Alignof operand */
 	attrs pend;		/* attributes before a block-scope declaration */

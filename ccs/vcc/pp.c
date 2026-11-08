@@ -110,6 +110,7 @@ typedef struct pfile {
 	uint32_t ndir;
 	uint32_t guard;		/* controlling macro id, 0 if none */
 	int bad;		/* unbalanced conditionals */
+	uint32_t badtok;	/* ... the directive name's token */
 	uint32_t *lines;	/* offsets of '\n', built on first __LINE__ (atomic) */
 	uint32_t nlines;
 } pfile;
@@ -182,20 +183,20 @@ static pfile *pfile_build(const vlex_file *f)
 			stk[sp++] = nd;
 			break;
 		case D_ELIF: case D_ELIFDEF: case D_ELIFNDEF: case D_ELSE:
-			if (!sp) { fi->bad = 1; break; }
+			if (!sp) { if (!fi->bad) fi->bad = 1, fi->badtok = i + 1; break; }
 			d[stk[sp - 1]].next = nd;
 			stk[sp - 1] = nd;
 			break;
 		case D_ENDIF:
-			if (!sp) { fi->bad = 1; break; }
+			if (!sp) { if (!fi->bad) fi->bad = 1, fi->badtok = i + 1; break; }
 			d[stk[--sp]].next = nd;
 			break;
 		}
 		nd++;
 		i = e - 1;
 	}
-	if (sp)
-		fi->bad = 1;
+	if (sp && !fi->bad)
+		fi->bad = 2, fi->badtok = d[stk[sp - 1]].tok + 1;
 	free(stk);
 	fi->dir = d;
 	fi->mac = salloc((nd + 1) * sizeof(*fi->mac));	/* fresh: zero */
@@ -665,6 +666,15 @@ static void diag(pp *p, uint32_t loc, const char *what, const char *fmt, ...)
 	va_end(ap);
 }
 
+static void pp_diagx(pp *p, const pp_dinfo *d, const char *fmt, ...)
+{
+	va_list ap;
+
+	va_start(ap, fmt);
+	pp_vdiagx(p, d, fmt, ap);
+	va_end(ap);
+}
+
 /* ---------------- exported for the parser ---------------- */
 
 int pp_in_system_header(const pp *p, uint32_t loc)
@@ -753,6 +763,16 @@ static bool loc_ok(const pp *p, uint32_t loc, const fent **e)
 {
 	*e = loc_fent(p, loc);
 	return *e && loc >= (*e)->base && loc - (*e)->base <= (*e)->f->size;
+}
+
+const char *pp_src(const pp *p, uint32_t b, uint32_t e, size_t *len)
+{
+	const fent *f;
+
+	if (e < b || !loc_ok(p, b, &f) || e - f->base > f->f->size)
+		return NULL;
+	*len = e - b;
+	return f->f->src + (b - f->base);
 }
 
 uint32_t pp_tok_end(const pp *p, uint32_t loc)
@@ -4149,8 +4169,6 @@ static void enter_file(pp *p, const vlex_file *f, const char *path, int32_t sdir
 			p->top_rec = 1;
 		}
 	}
-	if (fi->bad)
-		fatal(p, 0, "%s: unterminated or unbalanced conditional directives", path);
 	c = push(p);
 	c->type = C_FILE;
 	c->vt = f->tok;
@@ -4165,6 +4183,17 @@ static void enter_file(pp *p, const vlex_file *f, const char *path, int32_t sdir
 	add_fent(p, c, f, path);
 	p->fe[c->fe].sys = sys;
 	p->fe[c->fe].from = from && from->f != &p->builtin && from->i ? from->loc + from->vt[from->i - 1].off : 0;
+	if (unlikely(fi->bad)) {
+		/* clang's message at the directive; the file is not processed */
+		const vtok *t = &f->tok[fi->badtok];
+
+		if (fi->bad == 2)
+			error(p, p->fe[c->fe].base + t->off, "unterminated conditional directive");
+		else
+			error(p, p->fe[c->fe].base + t->off, "#%.*s without #if", (int)t->len, f->src + t->off);
+		if (p->fatal_jb)
+			longjmp(*p->fatal_jb, 1);
+	}
 	if (k)
 		hc_begin(p, k);
 }
@@ -4177,11 +4206,13 @@ static void include(pp *p, ctx *c, uint32_t b, uint32_t e, int kind, uint32_t lo
 	int32_t sd;
 	const char *path;
 	const vlex_file *f;
+	uint32_t floc;
 	int d = p->depth;
 	ptok t;
 
 	push_line(p, c, b, e);
 	raw(p, &t);
+	floc = t.loc;
 	if (t.kind == T_STRING || t.kind == T_LESS || t.kind == T_IDENT) {
 		bool ok;
 
@@ -4200,8 +4231,15 @@ static void include(pp *p, ctx *c, uint32_t b, uint32_t e, int kind, uint32_t lo
 	}
 	pop_to(p, d);
 	f = find_include(p, c, buf, n, angled, kind == D_INCLUDE_NEXT, &sd, &path);
-	if (!f)
-		fatal(p, loc, "'%.*s' file not found", (int)n, buf);
+	if (!f) {
+		pp_span r = { floc, floc + (uint32_t)n + 2 };
+		pp_dinfo di = { "fatal error", floc, &r, 1, NULL, 0 };
+
+		pp_diagx(p, &di, "'%.*s' file not found", (int)n, buf);
+		if (p->fatal_jb)
+			longjmp(*p->fatal_jb, 1);
+		return;
+	}
 	enter_file(p, f, path, sd);
 }
 
@@ -4403,8 +4441,16 @@ static int directive(pp *p, ctx *c, ptok *out)
 	case D_ERROR: case D_WARNING: {
 		const vtok *f = &c->vt[b], *l = &c->vt[e - 1];
 
-		diag(p, loc, d->kind == D_ERROR ? "error" : "warning", "#%.*s",
-		     (int)(l->off + l->len - f->off), c->src + f->off);
+		/* clang: the text after the directive name, at the name */
+		uint32_t nloc = loc + (f->off - c->vt[b - 1].off);
+
+		if (e - b > 1)
+			f = &c->vt[b + 1];
+		else
+			f = l + 1;
+		diag(p, nloc, d->kind == D_ERROR ? "error" : "warning", "%.*s%s",
+		     e - b > 1 ? (int)(l->off + l->len - f->off) : 0, e - b > 1 ? c->src + f->off : "",
+		     d->kind == D_WARNING ? " [-W#warnings]" : "");
 		return 0;
 	}
 	case D_LINEMARK:

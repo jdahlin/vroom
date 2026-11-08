@@ -142,6 +142,7 @@ typedef struct sym {
 	uint32_t next;		/* previous declaration of the same entity (0: none) */
 	uint32_t ovl;		/* overloadable: the next function of the set (0: none); the set's
 				   first function is the one bound in the scope table */
+	uint32_t psyms;		/* function: its latest prototype's parameter syms (list index + 1, 0: none) */
 } sym;
 
 /* ---------------- nodes ---------------- */
@@ -208,7 +209,8 @@ enum {
 	CK_VADDR,	/* GNU vector rvalue -> pointer to its first lane (v[i] on an rvalue) */
 };
 
-enum { NF_LVALUE = 1, NF_BITFIELD = 2, NF_PAREN = 4, NF_NPC = 8 };
+enum { NF_LVALUE = 1, NF_BITFIELD = 2, NF_PAREN = 4, NF_NPC = 8,
+       NF_ERR = 16 };	/* NF_ERR: stands in for an expression already diagnosed (no follow-on errors) */
 
 typedef struct node {
 	uint8_t op, flags;
