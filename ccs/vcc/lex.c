@@ -53,14 +53,14 @@ const char *vtok_name(int kind)
  *   bit 1  hi 5,7  lo 0-a   P-Z p-z
  *   bit 2  hi 3    lo 0-9   0-9
  *   bit 3  hi 5    lo f     _
- *   bit 4  hi 2    lo 4     $
+ *   bit 4  hi 2    lo 4,e   $ .  ('.' is in the ID mask, and in P: see fast)
  *   bit 5  hi 2    lo 0     space
  *   bit 6  hi 0    lo 9,b,c tab vt ff
  *   bit 7  hi 0    lo a,d   newline, carriage return
  */
 static const uint8_t lo_tab[16] = {
 	0x26, 0x07, 0x07, 0x07, 0x17, 0x07, 0x07, 0x07,
-	0x07, 0x47, 0x83, 0x41, 0x41, 0x81, 0x01, 0x09,
+	0x07, 0x47, 0x83, 0x41, 0x41, 0x81, 0x11, 0x09,
 };
 static const uint8_t hi_tab[16] = {
 	0xc0, 0x00, 0x30, 0x04, 0x01, 0x0a, 0x01, 0x02,
@@ -72,7 +72,7 @@ static const uint8_t hi_tab[16] = {
  *            bit 1  may take '=' (&= |= += -= *= ^= == != <= >= %= /=)
  *            bit 2  may take '>' (-> :> %>)
  *            bit 3  may take ':' or '%' (<: <%)
- *            bit 4  punctuator (not '.')
+ *            bit 4  punctuator or '.'
  *            bit 6  '/', '%' or '.': with '/', '*', ':', '%' or '.' left
  *                   to the handlers (comments, digraphs, "..", and the
  *                   rare "%/", "/:", "./", "/." too)
@@ -96,7 +96,7 @@ static void init_struct_tables(void)
 			t |= 4;
 		if (c == '<')
 			t |= 8;
-		if (c && strchr("[](){}~?;,&|+-*^=!#:<>%/", c))
+		if (c && strchr("[](){}~?;,&|+-*^=!#:<>%/.", c))
 			t |= 16;
 		if (c == '"' || c == '\'' || c == '\\' || c == '@' || c == '`' || c == 0x7f ||
 		    (c < 0x20 && !strchr(" \t\v\f\n\r", c)) || c == 0)
@@ -112,7 +112,7 @@ static void init_struct_tables(void)
 	gtab['+'] = gtab['-'] = 128;
 }
 
-enum { M_ID, M_WS, M_NL, M_DOT, M_DIG, M_P, M_PAIR, M_X, M_NS, M_COUNT };
+enum { M_ID, M_WS, M_NL, M_DIG, M_P, M_PAIR, M_X, M_NS, M_COUNT };
 
 /*
  * 64 byte masks to a 64-bit mask, for vectors loaded with vld4q (only bit
@@ -130,9 +130,9 @@ static inline uint64_t mm4(uint8x16_t a0, uint8x16_t a1, uint8x16_t a2, uint8x16
 
 /*
  * Per 64-byte block, bit i of each mask describes byte i:
- *   ID    identifier character       WS   whitespace incl. newlines
- *   NL    \n or \r                   DOT  '.'        DIG  digit
- *   P     punctuator character (not '.')
+ *   ID    identifier character or '.'  WS   whitespace incl. newlines
+ *   NL    \n or \r                   DIG  digit
+ *   P     punctuator character or '.'
  *   PAIR  bytes i, i+1 form a two-character punctuator
  *   X     the structural pass stops here: literal, comment, splice, UCN,
  *         non-ASCII, NUL, stray character
@@ -144,7 +144,7 @@ static void classify(const uint8_t *s, size_t from, size_t to, uint64_t *m[M_COU
 	const uint8x16_t lo = vld1q_u8(lo_tab), hi = vld1q_u8(hi_tab);
 	const uint8x16_t nib = vdupq_n_u8(15), mid = vdupq_n_u8(0x1f), mdg = vdupq_n_u8(0x04);
 	const uint8x16_t mws = vdupq_n_u8(0xe0);
-	const uint8x16_t dot = vdupq_n_u8('.'), k64 = vdupq_n_u8(64);
+	const uint8x16_t k64 = vdupq_n_u8(64);
 	const uint8x16_t b1 = vdupq_n_u8(1), b16 = vdupq_n_u8(16);
 	const uint8x16_t pairb = vdupq_n_u8(0x0e);
 
@@ -189,7 +189,6 @@ static void classify(const uint8_t *s, size_t from, size_t to, uint64_t *m[M_COU
 		MASK(M_WS, vtstq_u8(c[k], mws));
 		MASK(M_NL, c[k]);
 		MASK(M_DIG, vtstq_u8(c[k], mdg));
-		MASK(M_DOT, vceqq_u8(v.val[k], dot));
 		MASK(M_NS, gn[k]);
 #undef MASK
 	}
@@ -907,17 +906,18 @@ fast:
 		DISPATCH();	/* a token directly after a splice */
 	ENSURE((p >> 6) + 1);
 	{
-		const uint64_t I = win(m[M_ID], p), W = win(m[M_WS], p), NL = win(m[M_NL], p);
-		const uint64_t DOT = win(m[M_DOT], p), D = win(m[M_DIG], p), P = win(m[M_P], p);
+		/* N: [A-Za-z0-9_$.], P: punctuator characters and '.' */
+		const uint64_t N = win(m[M_ID], p), W = win(m[M_WS], p), NL = win(m[M_NL], p);
+		const uint64_t D = win(m[M_DIG], p), P = win(m[M_P], p), DOT = N & P;
 		const uint64_t PR = win(m[M_PAIR], p);
 		/* the bits past the valid ones are an X: the window is 57..64 bytes */
 		const unsigned valid = 64 - (unsigned)(p & 7);
 		uint64_t X = win(m[M_X], p) | ~(~0ull >> (p & 7));
 		/* pp-numbers: from a digit starting a run of [A-Za-z0-9_$.], or
 		 * from a '.' before a digit, to the end of that run */
-		const uint64_t N = I | DOT, A = (D & ~(N << 1)) | (DOT & (D >> 1));
+		const uint64_t A = (D & ~(N << 1)) | (DOT & (D >> 1));
 		const uint64_t NUM = (N & ~(N + A)) | A;
-		const uint64_t IDp = I & ~NUM, DOTp = DOT & ~NUM;
+		const uint64_t IDp = N & ~(NUM | P);
 		const uint64_t NS = win(m[M_NS], p);
 
 		/*
@@ -929,7 +929,7 @@ fast:
 		X |= (PR & (PR >> 1)) | (NS & NUM);
 
 		const uint64_t IDs = IDp & ~(IDp << 1), NUMs = NUM & ~(NUM << 1);
-		const uint64_t S = IDs | NUMs | ((P | DOTp) & ~(PR << 1));
+		const uint64_t S = IDs | NUMs | (P & ~NUM & ~(PR << 1));
 		const uint64_t B = S | W | X;
 		/* whitespace runs that contain a newline, filled to their end */
 		const uint64_t NLF = (W & ~(W + NL)) | NL;
