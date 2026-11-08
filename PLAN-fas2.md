@@ -416,3 +416,20 @@ aldrig i bygget. Ett TU-test (`bench/vcc-diff.py`) körs över alla kärnfiler.
 - Korpus `bench/vbench-corpus.txt`: 24 kärn-TU:er (16 kvantiler + emit- och parse-tunga), 9 `quick`.
 - Lägen: lex, pp, pphc, fe, cc, emit, real, as, ld. `check` hashar -E, tokenström, layout, objekt (med och utan cache), lexer, .S, vmlinux mot en bas (`mkbase REV`, cache i `work/vbench/golden/`).
 - Utgångsläge, full korpus, en tråd: lex 783 M, pp 8 074 M, pphc 7 187 M, fe 11 463 M, cc 12 080 M (emit 600 M, obj 14 M), real 11 212 M, as 57 M, ld 763 M instruktioner. Alla 840 TU:er `-c` utan cache: 330 G instr, varav pp ~86 % (med kall tokencache).
+- **Tio parallella optimeringsagenter (2026-11-08)**, en per bana (lexer, pp-makron, pp-direktiv, cc.c deklarationer / uttryck / symboler+tokens, emit, arenor, as/a64/elf, länkare), var och en i egen worktree mot bas 32bc779, regel: ≥ 1 % färre instruktioner och `vbench check` identisk. Alla tio sammanslagna; konflikter lösta mot arenornas `vmreg`-pooler (`ccs/vcc/arena.h`). En sammanslagningsbugg (två banor flyttade `dops` in i cc med olika snapshot-hantering → krasch med deklarationscachen) fångades av `check`. Fullt korpus, bas → nu (instruktioner / cykler):
+
+  | läge | bas M | nu M | instr | cykler |
+  |---|---|---|---|---|
+  | lex | 783 | 424 | −45,8 % | −26,5 % |
+  | pp | 8 066 | 3 245 | −59,8 % | −53,0 % |
+  | pphc | 7 125 | 4 706 | −34,0 % | −22,4 % |
+  | fe | 11 450 | 5 453 | −52,4 % | −48,3 % |
+  | cc | 12 036 | 5 817 | −51,7 % | −45,6 % |
+  | emit | 601 | 353 | −41,2 % | −37,0 % |
+  | real | 11 232 | 7 354 | −34,5 % | −25,3 % |
+  | as | 57,4 | 31,6 | −45,0 % | −45,3 % |
+  | ld | 762 | 378 | −50,4 % | −34,4 % |
+
+  Kvar enligt agenterna: lat/överhoppad parsning av oanvända `static inline`-kroppar (1,8 G av fe, ändrar numrering → kräver design), interneringsmissar i den globala tabellen (~hälften av lex-cyklerna), cache för inline-asm-snippets i emit (~93 M), en-pass-tokenisering per sats i as.c, open() dominerar länkarens kärntid.
+
+  Alla kärn-TU:er `-c` i en process (`vcc-cbatch.py -j 4`, alla cacher på): 124,6 G instruktioner / 11,9 s user + 0,8 s sys / 3,2 s vägg (före: 186 G, 17,4 + 2,8 s vid `-j 6`). Sviterna på det sammanslagna trädet: paritet 873/873 (kärna) och 911/912, sema 878/879 + layout 878/879 (18,8 M kontroller), cbatch 840/840, vcc-obj 840/840, vas 30/30. Boottest och kallt bygge med vccd återstår.
