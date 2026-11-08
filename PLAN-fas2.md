@@ -500,22 +500,40 @@ ingen emulering. Samma image fungerar i en qemu-system-aarch64-gäst med `-accel
 - Harnesses hittar LLVM och byggkatalog via `bench/hostenv.py`.
   `env/linux/run.sh CMD` kör i containern, och `--seed-work` kopierar kärnträden till
   volymen `vroom-work` (Docker Desktop kan inte dela work.sparsebundle-monteringen).
-- Verifierat i containern: vcc-diag 63/63, ctests 1706/1706 (2 fler ref-fail än på Mac:
-  clang 23.1.6 mot 23.1.4), kärnparitet 873/873, vcc-sema 841/879. De 38 som fallerar
-  är macOS-hostverktyg i `scripts/`, som behöver macOS SDK.
+- Verifierat i containern mot Mac-trädet (build-o0): ctests 1706/1706 (2 fler ref-fail
+  än på Mac: clang 23.1.6 mot 23.1.4) och kärnparitet 873/873. Mac-trädets host-TU:er
+  behöver macOS SDK, så de testas i stället i Linux-trädet nedan.
 - Prestanda (kernel/sched/core.o, -fsyntax-only, bästa av 5): macOS 115 ms, container
   138 ms med `-march=armv8.4-a`, 125–128 ms med `-mcpu=apple-m1`. Resterande ~10 % är
   troligen 4K-sidor (linuxkit) mot 16K på macOS, plus glibc malloc/memcpy.
   ctests: container 79 s, macOS 105 s.
 
+- Linux-byggträd (2026-11-08): `work/build-linux` i volymen, byggt med clang 23.1.6 och
+  env/vroom.config (efter `olddefconfig`, som bara lägger till CC_CAN_LINK och RELR).
+  Kommando: `env/linux/run.sh python3 bench/kbuild.py --dotconfig env/vroom.config
+  --out /vroom/work/build-linux -j 8`, som tar 97 s med ren clang. Referenserna ligger i
+  `work/ppref-linux`. Harnesses väljer träd via `bench/hostenv.py` (KTREE/PPREF/ASREF).
+- vcc utan `--target` på Linux betyder hostat aarch64-Linux, alltså glibcs
+  sökvägar och clangs resurskatalog (VCC_RESDIR, satt vid bygget). PIE och CFI är på som
+  standard. NEON-makron definieras utan `-mgeneral-regs-only`, vilket också rättar
+  kärn-TU:er och .S som saknar flaggan. `-fpic`/`-fpie` tar ut varandra som i clang.
+- gen-ppdata.sh tar `EXTRA_INC` (en kopia av glibcs /usr/include i `work/glibc-include`),
+  vilket gav 213 nya nollskilda svar (`__builtin_*f128`, `__builtin_stdc_*`,
+  `__has_extension(__attribute_deprecated_with_message__)`, ...). Numeriska svar med
+  L-suffix behålls.
+- I/O: källor, byggträd och referenser ligger på ext4 (volymen vroom-work), och
+  `build/linux` på volymen vroom-build. `/tmp` är tmpfs. Bara repots källfiler läses över
+  virtiofs. ctests: 79 s över virtiofs, 64 s på ext4.
+- Verifierat på Linux: kärn- och hostparitet 920/920, vcc-sema run och layout 887/887
+  (median 94 ms), ctests 1706/1706, vcc-diag 63/63.
+
 **Nästa:**
-1. Ett eget Linux-byggträd (`work/build-linux` i volymen) med HOSTCC = clang för Linux,
-   och egna clang-referenser (`vcc-diff.py ref`), så att host-TU:erna också testas.
-2. vroom-build.sh och vccd-kbuild.sh på Linux: shims, vccd och vld i kärnbygget, och
-   uppmätt kall byggtid i containern.
-3. Boot-test: Image i qemu i containern. Där finns ingen KVM (M1 saknar nästlad
+1. vroom-build.sh och vccd-kbuild.sh på Linux: shims, vccd och vld i kärnbygget, och
+   uppmätt kall byggtid i containern. Host-TU:er via vccd kräver ELF-objekt som länkas
+   mot glibc.
+2. Boot-test: Image i qemu i containern. Där finns ingen KVM (M1 saknar nästlad
    virtualisering), så det blir TCG. Alternativt qemu på macOS med hvf, som i dag.
-4. Mät: 16K-sidkärna (en VM med egen kärna, eller Asahi), huge pages för arenor, och
+3. Mät: 16K-sidkärna (en VM med egen kärna, eller Asahi), huge pages för arenor, och
    `perf stat` via pmc.c.
 
 ## Risker

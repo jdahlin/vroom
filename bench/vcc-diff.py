@@ -14,9 +14,9 @@ done by vpp itself (it lexes the reference with vcc's lexer).
 import glob, hashlib, os, re, shlex, subprocess, sys
 from multiprocessing import Pool
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from hostenv import llvm, BUILD
+from hostenv import llvm, BUILD, KTREE, PPREF
 R = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-B = f'{R}/work/build-o0'; REF = f'{R}/work/ppref'
+B = KTREE; REF = PPREF
 CL = llvm('clang'); VPP = os.environ.get('VPP', f'{BUILD}/vpp')
 
 def tu_args(cmd):
@@ -69,6 +69,7 @@ if __name__ == '__main__':
             for obj, a in ts: f.write('\x1f'.join([refname(obj)] + a) + '\n')
         r = subprocess.run([VPP, '--batch', jf, '-j', str(j), '-C', B] + (['--cmp'] if '--cmp' in sys.argv else []))
         os.unlink(jf); sys.exit(r.returncode)
+    if mode == 'ref': os.makedirs(REF, exist_ok=True)
     with Pool(j) as pool:
         res = pool.map(mkref if mode == 'ref' else cmp, ts, chunksize=4)
     bad = [r for r in res if r[1]]

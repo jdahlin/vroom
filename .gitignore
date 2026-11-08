@@ -1,6 +1,6 @@
 # Skiftlägeskänslig volym med kärnträd och byggkataloger
 /work.sparsebundle/
-/work/
+/work
 # byggutdata och externa kloner
 /build/
 /third_party/

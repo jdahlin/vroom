@@ -69,3 +69,4 @@
 2026-11-08 07:54:12 out=build-vccD configs=vroom.config kcflags='' cc=/Users/johandahlin/dev/vroom/.claude/worktrees/vccd-cc-cc1d5b/build/ccs/vcc j=14 exit=0 total=17.1s config=2.9s first_CC=4.6s last_CC=16.4s tail=0.7s CC=854 user=23s sys=44s load=3.9
 2026-11-08 07:54:35 out=build-vccA configs=vroom.config kcflags='' cc=/Users/johandahlin/dev/vroom/.claude/worktrees/vccd-cc-cc1d5b/build/ccs/vcc j=14 exit=0 total=22.1s config=3.0s first_CC=4.7s last_CC=21.3s tail=0.7s CC=854 user=25s sys=51s load=3.5
 2026-11-08 07:54:53 out=build-vccD configs=vroom.config kcflags='' cc=/Users/johandahlin/dev/vroom/.claude/worktrees/vccd-cc-cc1d5b/build/ccs/vcc j=14 exit=0 total=17.2s config=3.0s first_CC=4.7s last_CC=16.5s tail=0.7s CC=854 user=23s sys=44s load=3.9
+2026-11-08 16:43:44 out=build-linux configs=vroom.config kcflags='' cc=clang j=8 exit=0 total=97.0s config=2.5s first_CC=3.1s last_CC=96.5s tail=0.6s CC=854 user=672s sys=54s load=7.5

@@ -14,13 +14,13 @@ contents, symbols, relocations) using llvm-readelf.
 import os, re, subprocess, sys, difflib, importlib.util
 from multiprocessing import Pool
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from hostenv import llvm, BUILD
+from hostenv import llvm, BUILD, KTREE, ASREF, LINUX
 R = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-ROOT = R if os.path.isdir(f'{R}/work/build-o0') else '/Users/johandahlin/dev/vroom'
+ROOT = R if LINUX or os.path.isdir(f'{R}/work/build-o0') else '/Users/johandahlin/dev/vroom'
 spec = importlib.util.spec_from_file_location('vd', f'{R}/bench/vcc-diff.py')
 vd = importlib.util.module_from_spec(spec); spec.loader.exec_module(vd)
-vd.B = B = f'{ROOT}/work/build-o0'
-REF = os.environ.get('VAS_REF', f'{ROOT}/work/asref')
+vd.B = B = KTREE if LINUX or ROOT == R else f'{ROOT}/work/build-o0'
+REF = ASREF if LINUX or ROOT == R else f'{ROOT}/work/asref'
 CL = llvm('clang'); RE = llvm('llvm-readelf')
 VAS = os.environ.get('VAS', f'{BUILD}/vasm')
 VPP = os.environ.get('VPP', f'{BUILD}/vpp')

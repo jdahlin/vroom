@@ -3,6 +3,11 @@
   LLVM   directory of the reference LLVM tools: $LLVM/bin, else Homebrew's
          llvm on macOS, else the clang on PATH (the Linux container sets
          LLVM=/usr/lib/llvm-NN)
+  KTREE  the configured kernel build tree whose .cmd files the parity and
+         sema harnesses read: work/build-o0 (macOS: vroom-cc/clang, Darwin
+         host tools) or work/build-linux (Linux: clang, glibc host tools);
+         override with $VCC_KTREE.  PPREF/ASREF: clang's reference outputs
+         for that tree (work/ppref, work/asref; -linux suffix on Linux)
   BUILD  where `make -C ccs` puts vcc: build/ccs on macOS, build/linux/ccs
          on Linux (the tree may be shared with a Mac through a bind mount);
          override with $VCC_BUILD
@@ -30,3 +35,9 @@ def llvm(tool):
     """Path of an LLVM tool (clang, llvm-objcopy, ld.lld, ...)."""
     p = f'{LLVM_BIN}/{tool}'
     return p if os.path.exists(p) else (shutil.which(tool) or p)
+
+
+_SFX = '-linux' if LINUX else ''
+KTREE = os.environ.get('VCC_KTREE', f'{R}/work/build-linux' if LINUX else f'{R}/work/build-o0')
+PPREF = os.environ.get('VCC_PPREF', f'{R}/work/ppref{_SFX}')
+ASREF = os.environ.get('VAS_REF', f'{R}/work/asref{_SFX}')

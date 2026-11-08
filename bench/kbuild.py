@@ -18,12 +18,18 @@ import time
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 KSRC = os.environ.get("VROOM_KSRC", os.path.join(ROOT, "work/linux"))
+LINUX = sys.platform.startswith("linux")
 B = "/opt/homebrew/opt"
-PATH = ":".join(f"{B}/{p}" for p in [
+# macOS: GNU tools and LLVM from Homebrew first; Linux: the distro's (the
+# container puts its LLVM on PATH)
+PATH = os.environ["PATH"] if LINUX else ":".join(f"{B}/{p}" for p in [
     "make/libexec/gnubin", "gnu-sed/libexec/gnubin", "findutils/libexec/gnubin",
     "coreutils/libexec/gnubin", "grep/libexec/gnubin", "bison/bin", "flex/bin",
     "llvm/bin", "lld/bin"]) + ":" + os.environ["PATH"]
 HINC = os.path.join(ROOT, "env/host-include")
+# the host-tool prelude papers over Darwin; Linux host tools need nothing
+HOSTCFLAGS = os.environ.get('VROOM_HOSTOPT', '') if LINUX else \
+    f"-I{HINC} -include {HINC}/vroom-prelude.h {os.environ.get('VROOM_HOSTOPT', '')}".rstrip()
 
 
 def build_config(mk, q, a, configs, env):
@@ -53,7 +59,7 @@ def main():
                KBUILD_BUILD_TIMESTAMP="2026-11-01 00:00:00",
                KBUILD_BUILD_USER="vroom", KBUILD_BUILD_HOST="vroom")
     mk = ["make", "-C", KSRC, f"O={a.out}", "ARCH=arm64", "LLVM=1",
-          f"HOSTCFLAGS=-I{HINC} -include {HINC}/vroom-prelude.h {os.environ.get('VROOM_HOSTOPT', '')}".rstrip()]
+          f"HOSTCFLAGS={HOSTCFLAGS}"]
     if a.kcflags:
         mk.append(f"KCFLAGS={a.kcflags}")
     if a.cc:
@@ -68,6 +74,8 @@ def main():
     q = dict(env=env, stdout=subprocess.DEVNULL, check=True)
     if a.dotconfig:
         shutil.copy(a.dotconfig, os.path.join(a.out, ".config"))
+        if LINUX:	# the .config comes from the Mac's clang: settle toolchain-dependent symbols
+            subprocess.run(mk + ["olddefconfig"], **q)
         configs = [os.path.abspath(a.dotconfig)]
     else:
         build_config(mk, q, a, configs, env)
@@ -75,7 +83,7 @@ def main():
 
 
     log = open(a.out + ".log", "w")
-    p = subprocess.Popen(mk + [f"-j{a.j}", a.target] + a.extra, env=env,
+    p = subprocess.Popen(mk + [f"-j{a.j}", a.target] + a.extra, env=env, stdin=subprocess.DEVNULL,
                          stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
     first_cc = last_cc = None
     n_cc = 0

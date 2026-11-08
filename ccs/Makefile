@@ -32,7 +32,7 @@ HOST_LIBS  =
 HOST_CPU   = -mcpu=apple-m1
 else
 HOST_CC    = clang
-HOST_DEFS  = -D_GNU_SOURCE
+HOST_DEFS  = -D_GNU_SOURCE -DVCC_RESDIR='"$(shell $(HOST_CC) -print-resource-dir)/include"'
 HOST_LIBS  = -lm
 # Apple cores (implementer 0x61: Docker Desktop, Asahi, a VM on a Mac) report no
 # CPU part, so -mcpu=native falls back to generic; name the core instead.
