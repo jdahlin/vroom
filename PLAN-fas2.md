@@ -453,6 +453,30 @@ utan initierare får N_DECL (platsen allokerades lat inne i en loop och
 (flyttals-va_arg 12, 128-bitars flyttal 6), link 8 (kräver optimerare:
 `link_error`-test), run 14.
 
+Gren claude/vcc-ctests-3 (2026-11-08), en commit per steg, alla grindar gröna
+efter varje: GNU-vektorernas luckor, flyttals-va_arg (v-registrens sparområde,
+`__vr_top`/`__vr_offs`), HFA-argument/-resultat/-va_arg (nästlade poster och
+arrayer; överjusterade på stacken 16-justerade), `va_end` utvärderar sitt
+argument, C23 `[[...]]`-attribut (`gnu::`/`clang::` blir GNU-attribut), gamla
+`fält: värde`-designatorer, `__sync_*`, isnan/isinf/signbit m.fl. i körtid,
+128-bitars switch, K&R-float-parametrar som double, sammansatta literaler lever
+till blockets slut (platsen återanvändes av senare satsers temporärer), C99:s
+satsscope (if/switch/loopar och deras delsatser är block), `destructor`,
+ingen inlining av funktioner vars statiska lokal håller `&&label`, `_Complex`
+(post `{ T re, im; }`, sänkt i sema till delarna: N_CPLX; ABI som HFA/två ord),
+overflow-builtins som satser (ströks förut!), 128-bitars overflow-resultat,
+VLA-parametrars storleksuttryck med sidoeffekter, bitfält över 8 byte, UTF-8 i
+symbolnamn (vas), `__udivti3` m.fl. i test-runtimen, qemu `-cpu max` (LSE).
+→ **gcc 1572/1588 (99,0 %), tcc 99/101 (98,0 %)**, totalt 1671/1689 (98,9 %).
+
+Kvar (18): **fp 8** = 128-bitars long double (clang viker aritmetiken, vcc
+behöver mjukflyttal: `__addtf3`/`__multf3`/`__eqtf2`… i runtimen och 16-byte
+flyttalsvärden i q-register i emittern; egen uppgift), **link 6** = `link_error`-
+test som kräver en optimerare (värdeintervall, DCE), **run 3** = bcp-1
+(`__builtin_constant_p` efter inlining), eeprof-1 (`-finstrument-functions`),
+20021127-1 (clang behandlar en egen `llabs` som builtin), **emit 1** = pr70460
+(etikettdifferenser `&&a - &&b` i statiska initierare).
+
 ## Risker
 - **GNU C-ytan och inline asm** är det stora jobbet. Uppskattat: lexer + pp ~2 kloc,
   parser + sema ~10–15 kloc, emitter ~5 kloc, assembler ~4 kloc, länkare ~3 kloc.
