@@ -349,6 +349,7 @@ typedef struct ISec {
 	uint32_t ndyn;			/* R_AARCH64_RELATIVE entries produced */
 	uint32_t dyn0;
 	uint8_t kind;
+	bool thunked;			/* some relocation has a tr_put entry */
 } ISec;
 
 #define OS_DISCARD 0xfffffffeu
@@ -404,6 +405,8 @@ typedef struct G {
 	uint32_t order;			/* index among globals in insertion order */
 	uint32_t outidx;		/* index in the output .symtab */
 	uint32_t thunk;
+	uint64_t fva;			/* after layout: gsym_va() */
+	bool fabs, fundef;		/* gsym_isabs(); undefined or demoted */
 } G;
 
 static _Atomic(const char *) *hnames;	/* per slot */
@@ -1885,6 +1888,70 @@ static void reloc_target(const Obj *o, uint32_t symidx, int64_t addend, Target *
 	t->va = t->s + addend;
 }
 
+/*
+ * Final addresses, once layout is done: reloc_target() for the copy pass
+ * from per-symbol and per-section values computed once (fin_*), falling
+ * back to reloc_target() for undefined, discarded and merge-piece targets.
+ */
+static uint64_t *isec_fva;		/* isec_va(s, 0), or UINT64_MAX: take reloc_target */
+
+static void fin_isec(void *arg, size_t i)
+{
+	(void)arg;
+	ISec *is = &isecs.v[i];
+	uint32_t os = isec_osec(i);
+	isec_fva[i] = is->kind == K_NONE || is->kind == K_MERGE_IN || os == NONE || os == OS_DISCARD
+			      ? UINT64_MAX : osecs.v[os].va + is->off;
+}
+static void fin_gsym(void *arg, size_t g)
+{
+	(void)arg;
+	G *s = &gsyms[g];
+	s->fundef = s->state == GS_UNDEF || s->demoted;
+	if (!s->fundef) {
+		s->fabs = gsym_isabs((uint32_t)g);
+		s->fva = gsym_va((uint32_t)g);
+	}
+}
+static void final_addresses(void)
+{
+	isec_fva = alloc((size_t)isecs.n * sizeof(uint64_t));
+	pfor(isecs.n, fin_isec, NULL);
+	pfor(atomic_load(&ngsyms), fin_gsym, NULL);
+}
+
+static inline void reloc_target_final(const Obj *o, uint32_t symidx, int64_t addend, Target *t)
+{
+	if (symidx >= o->firstg) {
+		uint32_t g = o->gs[symidx - o->firstg];
+		const G *s = &gsyms[g];
+		if (!s->fundef) {
+			t->undef = t->discarded = false;
+			t->key = g;
+			t->global = true;
+			t->abs = s->fabs;
+			t->s = s->fva;
+			t->va = s->fva + addend;
+			return;
+		}
+	} else {
+		const Sym *y = &o->sym[symidx];
+		if (y->st_shndx != SHN_UNDEF && y->st_shndx < 0xff00) {
+			uint64_t b = isec_fva[o->isec0 + y->st_shndx];
+			if (b != UINT64_MAX) {
+				t->undef = t->discarded = false;
+				t->key = symidx;
+				t->global = false;
+				t->abs = false;
+				t->s = b + ((y->st_info & 15) == STT_SECTION ? 0 : y->st_value);
+				t->va = t->s + addend;
+				return;
+			}
+		}
+	}
+	reloc_target(o, symidx, addend, t);
+}
+
 /* ---------------- output state ---------------- */
 
 static uint8_t *out;			/* output file image */
@@ -1947,6 +2014,7 @@ static void tr_put(uint32_t isec, uint32_t ri, uint32_t th)
 		tr_vals = nv;
 		tr_mask = nm;
 	}
+	isecs.v[isec].thunked = true;
 	uint64_t k = (uint64_t)isec << 32 | ri;
 	uint32_t j = (uint32_t)(k * 0x9E3779B97F4A7C15ULL >> 32) & tr_mask;
 	while (tr_keys[j] != UINT64_MAX && tr_keys[j] != k)
@@ -2866,7 +2934,7 @@ static void relocate_isec(uint32_t si, uint8_t *buf)
 			error("%s:(%s): relocation offset out of range", o->path, is->name);
 			continue;
 		}
-		reloc_target(o, symi, rl->r_addend, &t);
+		reloc_target_final(o, symi, rl->r_addend, &t);
 		int64_t v;
 		switch (type) {
 		case R_AARCH64_NONE:
@@ -2912,7 +2980,7 @@ static void relocate_isec(uint32_t si, uint8_t *buf)
 		}
 		case R_AARCH64_CALL26:
 		case R_AARCH64_JUMP26: {
-			uint32_t th = tr_get(si, r);
+			uint32_t th = is->thunked ? tr_get(si, r) : NONE;
 			uint64_t dst = th != NONE ? thunk_va(th) : t.va;
 			if (t.undef && th == NONE)
 				dst = P + 4;	/* undefined weak: next instruction */
@@ -2934,7 +3002,7 @@ static void relocate_isec(uint32_t si, uint8_t *buf)
 					uint32_t rd = adrp & 0x1f;
 					if ((adrp & 0x9f000000) == 0x90000000 && (add & 0xffc00000) == 0x91000000 &&
 					    rd == (add & 0x1f) && rd == ((add >> 5) & 0x1f)) {
-						reloc_target(o, r2->r_info >> 32, 0, &t2);
+						reloc_target_final(o, r2->r_info >> 32, 0, &t2);
 						int64_t d = (int64_t)(t2.s - (secva + r2->r_offset));
 						if (d >= -1024 * 1024 && d < 1024 * 1024 && !t2.undef) {
 							wr32(loc, 0xd503201f);
@@ -3606,7 +3674,8 @@ static void finish_phdrs(void)
 typedef struct { uint32_t g; uint32_t idx; uint64_t str; bool local; } GOut;
 static GOut *gouts;
 static uint32_t ngouts;
-static uint8_t *symtab_buf, *strtab_buf;
+static uint8_t *symtab_buf, *strtab_buf;	/* in the output image (fill_symtab) */
+static uint64_t thunk_sym0, thunk_str0;		/* first thunk symbol and its string */
 static uint64_t nsymout, strsize;
 static uint32_t nlocal_out;
 
@@ -3772,22 +3841,24 @@ static void build_symtab(void)
 	ISec *st = &isecs.v[symtab_isec], *ss = &isecs.v[strtab_isec];
 	st->size = nsymout * sizeof(Sym);
 	ss->size = strsize;
-	/* thunk symbols are written now: their values are final */
-	symtab_buf = alloc(st->size);
-	strtab_buf = alloc(ss->size);
-	uint64_t so = gstr;
+	thunk_sym0 = thunk0;
+	thunk_str0 = gstr;
+	(void)nhid;
+}
+
+/* .symtab and .strtab are written in place in the output image */
+static void fill_symtab(void)
+{
+	symtab_buf = out + osecs.v[isec_osec(symtab_isec)].offset + isecs.v[symtab_isec].off;
+	strtab_buf = out + osecs.v[isec_osec(strtab_isec)].offset + isecs.v[strtab_isec].off;
+	uint64_t so = thunk_str0;
 	for (uint32_t t = 0; t < thunks.n; t++) {
 		Thunk *th = &thunks.v[t];
-		Sym *d = (Sym *)symtab_buf + thunk0 + 2 * t;
+		Sym *d = (Sym *)(void *)symtab_buf + thunk_sym0 + 2 * t;
 		uint16_t shndx = sym_shndx_isec(th->tsec);
 		put_sym(d, strtab_buf, &so, th->name, STB_LOCAL << 4 | STT_FUNC, 0, shndx, thunk_va(t), th->size);
 		put_sym(d + 1, strtab_buf, &so, "$x", STB_LOCAL << 4 | STT_NOTYPE, 0, shndx, thunk_va(t), 0);
 	}
-	(void)nhid;
-}
-
-static void fill_symtab(void)
-{
 	pfor(objs.n, write_locals, NULL);
 	pfor((ngouts + 4095) / 4096, write_globals, NULL);
 }
@@ -3863,14 +3934,8 @@ static void write_headers(void)
 
 static void write_synthetic(void)
 {
-	ISec *is;
-	if (reladyn_isec != NONE && (is = &isecs.v[reladyn_isec])->size)
-		memcpy(out + osecs.v[isec_osec(reladyn_isec)].offset + is->off, reladyn_buf, is->size);
-	is = &isecs.v[symtab_isec];
-	memcpy(out + osecs.v[isec_osec(symtab_isec)].offset + is->off, symtab_buf, is->size);
-	is = &isecs.v[strtab_isec];
-	memcpy(out + osecs.v[isec_osec(strtab_isec)].offset + is->off, strtab_buf, is->size);
-	is = &isecs.v[shstrtab_isec];
+	/* .rela.dyn, .symtab and .strtab were written in place */
+	ISec *is = &isecs.v[shstrtab_isec];
 	memcpy(out + osecs.v[isec_osec(shstrtab_isec)].offset + is->off, shstrtab_buf, is->size);
 }
 
@@ -4306,7 +4371,9 @@ static int run(int argc, char **argv)
 			isecs.v[dl.v[i]].dyn0 = at;
 			at += isecs.v[dl.v[i]].ndyn;
 		}
-		reladyn_buf = bigalloc(ndyn * sizeof(Rela));
+		/* built in place in the output image */
+		reladyn_buf = (Rela *)(void *)(out + osecs.v[isec_osec(reladyn_isec)].offset +
+					       isecs.v[reladyn_isec].off);
 	}
 	wjobs.n = 0;
 	for (uint32_t c = 0; c < topcmds.n; c++) {
@@ -4320,6 +4387,7 @@ static int run(int argc, char **argv)
 					VPUSH(wjobs, d->secs.v[s]);
 			}
 	}
+	final_addresses();
 	pfor(wjobs.n, write_isec, NULL);
 	phase("copy + relocate");
 	fill_symtab();
@@ -4337,8 +4405,6 @@ static int run(int argc, char **argv)
 			"total", (now() - t0) * 1e3, objs.n, isecs.n, gorder.n,
 			(unsigned long long)(filesize >> 20), nthreads);
 	unmap(out, filesize);
-	if (reladyn_buf)
-		unmap(reladyn_buf, ndyn * sizeof(Rela));
 	for (uint32_t i = 0; i < objs.n; i++)
 		if (objs.v[i]->mapped && objs.v[i]->buf)
 			unmap(objs.v[i]->buf, objs.v[i]->size);
