@@ -649,6 +649,30 @@ ingen emulering. Samma image fungerar i en qemu-system-aarch64-gäst med `-accel
   deklarationscache 845 återställningar.
 - **Hävstänger:** (1) skal och processer per recept: CC = skal + shim, AR = skal + `rm` + shim
   (nästa steg); (2) konfigfasen (färdig `.config`); (3) inspelningen i huvudcachen.
+- **Recepten i vccd: vsh + rsh (klart, 2026-11-08):** make:s `SHELL` är `build/ccs/vsh/sh`
+  (shim.c med `-DVSH`; heter `sh` så att make behåller snabbvägen). Den skickar `sh -c SKRIPT`
+  till vccd, som tolkar skriptet med `ccs/vcc/rsh.c`: Kbuilds delmängd av sh (`set -e`, `:`,
+  `trap` (ignoreras), `echo`, `printf` med `%s`, `rm -f`, `> FIL`, `NAMN=V verktyg …`,
+  `printf … | xargs verktyg …`, `scripts/basic/fixdep D T CMD > FIL`, citat och `\X`).
+  Verktyg = vcc/vas/vld/var bredvid vccd; de körs som vanliga förfrågningar i samma tråd
+  (fixdep efteråt som i 0008). Hela skriptet parsas innan något körs; allt annat (`$`, `&&`,
+  subskal, glob, `>>`, okända kommandon …) avböjs och vsh kör `$VSH_REAL` (dash) med samma
+  argv. Ingen Kbuild-patch. `bench/vccd-kbuild.sh` använder vsh som standard (`VSH=0` = dash).
+  - **Verifierat:** `bench/vsh-test.py` 32/32 mot dash (status, stdout, stderr, filer; fall som
+    måste köras i vccd får `VSH_REAL=/bin/false`, avböjda räknas), även med ASan och på Linux
+    (29/29 utan byggt fixdep). Kallt bygge: alla 3 477 filer i byggträdet (`.cmd`, `.o`, `.a`,
+    `vmlinux`, `Image`) byte-identiska med dash-bygget; no-op-ombyggnad kompilerar inget;
+    Debian bootar till `running` (`results/boot-20261108-192143.log`). En krasch på vägen:
+    `vfixdep` före första kompileringen (efter en vidarebefordrad värdlänk) internerade utan
+    `vintern_init`.
+  - **Mätt (macOS, `-j 14`, alternerande, last 5–11):** 1 359 recept körs i vccd (alla 854 CC,
+    416 AR, HOSTCC, fixdep-recepten), 1 378 avböjs (mest `$(shell …)` och konfig, 0,1 ms
+    vardera). Totalt 13,6/13,0 s (dash) → **11,6/11,9 s**; byggets barnprocesser 10 + 18 →
+    **8 + 10 CPU-s** (user + sys). kprof: CC före vccd median 13,2 → 5,7 ms (med tsh), AR-recept
+    55 → 8 ms (summa 22,9 → 3,3 s), receptens CPU CC 7,2 → 1,9 s, AR 11,8 → 0,9 s. Linux (`-j 8`):
+    fork/exec var redan billigt, 9,8/8,9 → 8,8/13,0 s, brus.
+  - **Kvar:** de 432 undermakes (≈ 100 CPU-s inkl. barn i spårningen) och `$(shell)` (vsh
+    avböjer, en extra rundtur per anrop).
 
 ### Felmeddelanden (clang-format)
 

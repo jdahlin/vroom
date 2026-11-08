@@ -11,6 +11,8 @@
 
 #define VROOM_MAGIC 0x6d6f6f72u /* "room" */
 #define VROOM_MAX_PAYLOAD (1u << 20)
+/* vccd's answer to a vsh request it leaves to the real shell (not an exit status) */
+#define VROOM_STATUS_DECLINE 0x7fff0000
 
 struct vroom_req_hdr {
 	uint32_t magic;

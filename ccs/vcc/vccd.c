@@ -19,6 +19,9 @@
  *     do (the vDSO: -mcmodel=tiny/PIC; any TU vcc fails on) to vroomd
  *     (clang), links to vroom-ld/ld.lld;
  *   - runs the archiver (ar, var, llvm-ar by argv[0]) itself: ar.c.
+ *   - runs make's recipes for vsh (argv[0] sh): rsh.c interprets kbuild's
+ *     subset of sh and runs the tools in it as requests here; anything else
+ *     is answered VROOM_STATUS_DECLINE and vsh runs the real shell.
  *
  * No allocation per request: buffers are mmap'ed once per worker.
  *
@@ -64,6 +67,7 @@
 #include "ppdriver.h"
 #include "fixdep.h"
 #include "ar.h"
+#include "rsh.h"
 
 #define MAX_STRS	(VROOM_MAX_PAYLOAD / 2)
 
@@ -76,7 +80,8 @@ static const char *lld = "/opt/homebrew/bin/ld.lld";
 #endif
 static bool log_requests, own_pp = true, own_cc = true;
 
-static atomic_ulong n_probe, n_fwd, n_spawn, n_pp, n_cc, n_fallback, n_ar;
+static atomic_ulong n_probe, n_fwd, n_spawn, n_pp, n_cc, n_fallback, n_ar, n_sh, n_sh_decl;
+static char tool_dir[4096];	/* where vccd and its shims live (realpath) */
 
 /* ---------------- work queue: accepted sockets ---------------- */
 
@@ -159,6 +164,8 @@ static bool write_full(int fd, const char *p, size_t n)
 	return true;
 }
 
+static bool split_req(char *raw, char **strs, struct req *r);
+
 static bool recv_req(struct worker *w, int conn, struct req *r)
 {
 	struct vroom_req_hdr *h = (struct vroom_req_hdr *)w->raw;
@@ -166,7 +173,6 @@ static bool recv_req(struct worker *w, int conn, struct req *r)
 	struct iovec iov = { h, sizeof(*h) };
 	struct msghdr m = { 0 };
 	struct cmsghdr *c;
-	size_t off, i, n;
 
 	m.msg_iov = &iov;
 	m.msg_iovlen = 1;
@@ -183,23 +189,32 @@ static bool recv_req(struct worker *w, int conn, struct req *r)
 		return false;
 	if (!read_full(conn, w->raw + sizeof(*h), h->payload_len))
 		return false;
-	r->raw = w->raw;
+	return split_req(w->raw, w->strs, r);
+}
+
+/* the strings of a request in raw (header + payload): cwd, argv..., envp... */
+static bool split_req(char *raw, char **strs, struct req *r)
+{
+	struct vroom_req_hdr *h = (struct vroom_req_hdr *)raw;
+	size_t off, i, n;
+
+	r->raw = raw;
 	r->rawlen = sizeof(*h) + h->payload_len;
 
 	/* split NUL-separated strings: cwd, argv..., envp... */
 	n = 0;
-	for (off = sizeof(*h); off < r->rawlen && n < MAX_STRS - 2; off += strlen(w->raw + off) + 1)
-		w->strs[n++] = w->raw + off;
+	for (off = sizeof(*h); off < r->rawlen && n < MAX_STRS - 2; off += strlen(raw + off) + 1)
+		strs[n++] = raw + off;
 	if (n != 1 + h->argc + h->envc || h->argc < 1)
 		return false;
-	r->cwd = w->strs[0];
-	r->argv = w->strs + 1;
+	r->cwd = strs[0];
+	r->argv = strs + 1;
 	r->argc = h->argc;
 	/* argv and envp each need a NULL terminator: shift envp up by one */
 	for (i = n; i > 1 + h->argc; i--)
-		w->strs[i] = w->strs[i - 1];
-	w->strs[1 + h->argc] = NULL;
-	r->envp = w->strs + 2 + h->argc;
+		strs[i] = strs[i - 1];
+	strs[1 + h->argc] = NULL;
+	r->envp = strs + 2 + h->argc;
 	r->envp[h->envc] = NULL;
 	r->tool = strrchr(r->argv[0], '/') ? strrchr(r->argv[0], '/') + 1 : r->argv[0];
 	return true;
@@ -591,10 +606,20 @@ static int handle(const struct req *r, const char **kind)
 	return status;
 }
 
+static int run_sh(const struct req *r);
+
 static int handle1(const struct req *r, const char **kind)
 {
 	int probe;
 
+	if (!strcmp(r->tool, "sh")) {
+		/* vsh: a recipe, run here if rsh knows all of it */
+		int st = run_sh(r);
+
+		*kind = st == RSH_DECLINE ? "sh-decl" : "sh";
+		atomic_fetch_add(st == RSH_DECLINE ? &n_sh_decl : &n_sh, 1);
+		return st == RSH_DECLINE ? VROOM_STATUS_DECLINE : st;
+	}
 	if (!strcmp(r->tool, "var") || !strcmp(r->tool, "ar") || !strcmp(r->tool, "llvm-ar")) {
 		/* the archiver: thin archives written here (ar.c), never llvm-ar */
 		*kind = "ar";
@@ -675,11 +700,134 @@ static int handle1(const struct req *r, const char **kind)
 	return forward(r, backend_sock);
 }
 
+/* ---------------- recipes (vsh, rsh.c) ---------------- */
+
+static void log_req(const struct req *r, const char *kind, int status, double t0)
+{
+	if (log_requests) {
+		double t1 = now_ms();
+
+		/* @: start time (monotonic ms), for concurrency timelines; last: the input */
+		fprintf(stderr, "vccd %-10s %7.2f ms rc=%d @%.2f %s %.200s\n", kind, t1 - t0, status, t0,
+			kind[0] == 'b' ? "" : r->argc > 1 ? r->argv[1] : "",
+			kind[0] == 'b' || r->argc < 2 ? "" : r->argv[r->argc - 1]);
+	}
+}
+
+/* a shim of ours: vcc, vas, vld or var next to vccd */
+static bool sh_is_tool(void *ctx, const char *argv0)
+{
+	const char *b = strrchr(argv0, '/');
+	char dir[4096], real[4096];
+	size_t n;
+
+	(void)ctx;
+	if (!b || !*tool_dir || (strcmp(b + 1, "vcc") && strcmp(b + 1, "vas") &&
+				 strcmp(b + 1, "vld") && strcmp(b + 1, "var")))
+		return false;
+	n = b - argv0;
+	if (n == strlen(tool_dir) && !memcmp(argv0, tool_dir, n))
+		return true;
+	if (n >= sizeof(dir))
+		return false;
+	memcpy(dir, argv0, n);
+	dir[n] = 0;
+	return realpath(dir, real) && !strcmp(real, tool_dir);
+}
+
+struct sh_ctx {
+	const struct req *r;	/* the vsh request: cwd and env */
+};
+
+/* per thread: the request a recipe's tool call is turned into */
+static _Thread_local char *sh_raw;
+static _Thread_local char **sh_strs;
+
+static int sh_run_tool(void *ctx, char **argv, char **assign, const int fds[3])
+{
+	const struct req *r = ((struct sh_ctx *)ctx)->r;
+	struct vroom_req_hdr *h;
+	struct req q;
+	const char *kind = "bad";
+	double t0 = now_ms();
+	char *p, *end;
+	int st, argc = 0, envc = 0;
+
+	if (!sh_raw) {
+		sh_raw = mmap(NULL, sizeof(struct vroom_req_hdr) + VROOM_MAX_PAYLOAD,
+			      PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANON, -1, 0);
+		sh_strs = mmap(NULL, MAX_STRS * sizeof(char *), PROT_READ | PROT_WRITE,
+			       MAP_PRIVATE | MAP_ANON, -1, 0);
+		if (sh_raw == MAP_FAILED || sh_strs == MAP_FAILED) {
+			sh_raw = NULL;
+			say(r, "%s: error: %s\n", "out of memory");
+			return 127;
+		}
+	}
+	h = (struct vroom_req_hdr *)sh_raw;
+	p = sh_raw + sizeof(*h);
+	end = p + VROOM_MAX_PAYLOAD;
+#define PUT(s) do { size_t n_ = strlen(s) + 1; if (p + n_ > end) goto big; memcpy(p, s, n_); p += n_; } while (0)
+	PUT(r->cwd);
+	for (; argv[argc]; argc++)
+		PUT(argv[argc]);
+	/* the recipe's NAME=VALUE first, then the shell's environment without those names */
+	for (char **a = assign; *a; a++, envc++)
+		PUT(*a);
+	for (char **e = r->envp; *e; e++) {
+		bool dup = false;
+
+		for (char **a = assign; *a && !dup; a++) {
+			size_t n = strchr(*a, '=') - *a + 1;
+
+			dup = !strncmp(*e, *a, n);
+		}
+		if (!dup) {
+			PUT(*e);
+			envc++;
+		}
+	}
+#undef PUT
+	h->magic = VROOM_MAGIC;
+	h->argc = argc;
+	h->envc = envc;
+	h->payload_len = p - (sh_raw + sizeof(*h));
+	if (!split_req(sh_raw, sh_strs, &q)) {
+		say(r, "%s: error: %s\n", "bad tool call in recipe");
+		return 127;
+	}
+	memcpy(q.fds, fds, sizeof(q.fds));
+	st = handle(&q, &kind);
+	log_req(&q, kind, st, t0);
+	return st;
+big:
+	say(r, "%s: error: %s\n", "recipe tool call too large");
+	return 127;
+}
+
+static int sh_fixdep(void *ctx, const char *dep, const char *target, const char *cmd,
+		     const char *cmdfile, int errfd)
+{
+	return vfixdep(((struct sh_ctx *)ctx)->r->cwd, dep, target, cmd, cmdfile, errfd);
+}
+
+/* argv: sh -c SCRIPT or sh -ec SCRIPT (make's .SHELLFLAGS); anything else is the shell's */
+static int run_sh(const struct req *r)
+{
+	struct sh_ctx ctx = { r };
+	struct rsh_ops ops = { &ctx, sh_is_tool, sh_run_tool, sh_fixdep };
+
+	if (r->argc != 3 || (strcmp(r->argv[1], "-c") && strcmp(r->argv[1], "-ec")))
+		return RSH_DECLINE;
+	return rsh_run(r->cwd, r->argv[2], r->argv[1][1] == 'e', r->fds, &ops);
+}
+
 static void print_counts(void)
 {
-	fprintf(stderr, "vccd: %lu probes, %lu -E, %lu compiled by vcc, %lu fell back to clang, %lu forwarded in all, %lu spawned, %lu ar\n",
+	fprintf(stderr, "vccd: %lu probes, %lu -E, %lu compiled by vcc, %lu fell back to clang, %lu forwarded in all, %lu spawned, %lu ar, %lu recipes run, %lu passed to sh\n",
 		atomic_load(&n_probe), atomic_load(&n_pp), atomic_load(&n_cc), atomic_load(&n_fallback),
-		atomic_load(&n_fwd), atomic_load(&n_spawn), atomic_load(&n_ar));
+		atomic_load(&n_fwd), atomic_load(&n_spawn), atomic_load(&n_ar),
+		atomic_load(&n_sh), atomic_load(&n_sh_decl));
 	{	/* the shared caches, as vpp --batch prints them */
 		char hs[512];
 		struct rusage ru;
@@ -727,14 +875,7 @@ static void *worker_main(void *arg)
 		for (i = 0; i < 3; i++)
 			if (r.fds[i] >= 0)
 				close(r.fds[i]);
-		if (log_requests) {
-			double t1 = now_ms();
-
-			/* @: start time (monotonic ms), for concurrency timelines; last: the input */
-			fprintf(stderr, "vccd %-10s %7.2f ms rc=%d @%.2f %s %s\n", kind, t1 - t0, status, t0,
-				kind[0] == 'b' ? "" : r.argc > 1 ? r.argv[1] : "",
-				kind[0] == 'b' || r.argc < 2 ? "" : r.argv[r.argc - 1]);
-		}
+		log_req(&r, kind, status, t0);
 	}
 	return NULL;
 }
@@ -768,6 +909,14 @@ int main(int argc, char **argv)
 		}
 	}
 	log_requests = getenv("VCC_LOG");
+	{	/* the shims next to vccd: recipes may run them here (rsh) */
+		char self[4096], *sl;
+
+		if (realpath(argv[0], self) && (sl = strrchr(self, '/'))) {
+			*sl = 0;
+			snprintf(tool_dir, sizeof(tool_dir), "%s", self);
+		}
+	}
 	own_pp = !getenv("VCC_PP") || strcmp(getenv("VCC_PP"), "0");
 	own_cc = !getenv("VCC_CC") || strcmp(getenv("VCC_CC"), "0");
 	signal(SIGPIPE, SIG_IGN);

@@ -58,7 +58,7 @@ VCC_FAST   = $(VCC_CFLAGS) $(VCC_OPT) -pthread
 VCC_LDFLAGS = -O3 $(VCC_SAN)
 OBJ        = $(OUT)/obj
 
-vcc: $(OUT)/vcc $(OUT)/vld $(OUT)/vas $(OUT)/var $(OUT)/vccd $(OUT)/lextest $(OUT)/vpp $(OUT)/vlink $(OUT)/vasm
+vcc: $(OUT)/vcc $(OUT)/vsh/sh $(OUT)/vld $(OUT)/vas $(OUT)/var $(OUT)/vccd $(OUT)/lextest $(OUT)/vpp $(OUT)/vlink $(OUT)/vasm
 
 o = $(patsubst vcc/%.c,$(OBJ)/%.o,$(1))
 AS_SRC  = vcc/as.c vcc/a64.c vcc/elf.c vcc/macho.c
@@ -78,7 +78,7 @@ $(OBJ)/ld.o: XFLAGS = -DVLD_MAIN
 $(OUT)/vpp: $(call o,vcc/vpp.c $(PP_SRC) $(LEX_SRC) $(AS_SRC))
 	$(VCC_CC) $(VCC_LDFLAGS) -pthread $^ -o $@ $(HOST_LIBS)
 
-$(OUT)/vccd: $(call o,vcc/vccd.c vcc/caps.c vcc/fixdep.c vcc/ar.c $(PP_SRC) $(LEX_SRC) $(AS_SRC))
+$(OUT)/vccd: $(call o,vcc/vccd.c vcc/caps.c vcc/fixdep.c vcc/ar.c vcc/rsh.c $(PP_SRC) $(LEX_SRC) $(AS_SRC))
 	$(VCC_CC) $(VCC_LDFLAGS) -pthread $^ -o $@ $(HOST_LIBS)
 
 $(OUT)/lextest: $(patsubst vcc/%.c,$(OBJ)/no/%.o,vcc/lextest.c vcc/pmc.c $(LEX_SRC))
@@ -95,6 +95,11 @@ $(OUT)/vlink: $(call o,$(LD_SRC))
 
 $(OUT)/vcc: vcc/shim.c protocol.h | $(OUT)
 	$(VCC_CC) $(VCC_CFLAGS) $< -o $@
+
+# vsh: make's SHELL; named sh so make still execs simple commands directly
+$(OUT)/vsh/sh: vcc/shim.c protocol.h | $(OUT)
+	mkdir -p $(OUT)/vsh
+	$(VCC_CC) $(VCC_CFLAGS) -DVSH $< -o $@
 
 $(OUT)/vld $(OUT)/vas $(OUT)/var: $(OUT)/vcc
 	ln -sf vcc $@
@@ -133,7 +138,7 @@ self: $(OUT)/vpp
 	for f in $(SELF_SRC); do $(SELF_CC) $(SELF_FLAGS) $$f -o $(SELF)/$$(basename $$f .c).o || exit 1; done
 	$(SELF_CC) $(SELF_FLAGS) -DVLD_MAIN vcc/ld.c -o $(SELF)/ld-main.o
 	$(SELF_LD) $(SO)/vpp.o $(SELF_PP) $(SELF_LEX) $(SELF_AS) -o $(SO)/vpp
-	$(SELF_LD) $(SO)/vccd.o $(SO)/caps.o $(SELF_PP) $(SELF_LEX) $(SELF_AS) -o $(SO)/vccd
+	$(SELF_LD) $(SO)/vccd.o $(SO)/caps.o $(SO)/fixdep.o $(SO)/ar.o $(SO)/rsh.o $(SELF_PP) $(SELF_LEX) $(SELF_AS) -o $(SO)/vccd
 	$(SELF_LD) $(SO)/vasm.o $(SELF_AS) -o $(SO)/vasm
 	$(SELF_LD) $(SO)/lextest.o $(SO)/pmc.o $(SELF_LEX) -o $(SO)/lextest
 	$(SELF_LD) $(SO)/ld-main.o $(SO)/ldhash.o $(SO)/objcopy.o -o $(SO)/vlink

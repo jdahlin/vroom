@@ -8,6 +8,12 @@
  * pages are only touched as far as the request reaches).
  *
  *   VCC_SOCK   server socket (default /tmp/vccd.sock)
+ *
+ * Built with -DVSH it is vsh, a SHELL for make (installed as .../vsh/sh, so
+ * make keeps its no-shell fast path for simple commands): `sh -c SCRIPT`
+ * goes to vccd, which runs kbuild's object and archive recipes itself
+ * (rsh.c); anything vccd declines, any other argv, and a missing vccd run
+ * the real shell, $VSH_REAL (default /bin/sh), with the same arguments.
  */
 #include <errno.h>
 #include <stdint.h>
@@ -22,6 +28,23 @@
 extern char **environ;
 
 static char buf[sizeof(struct vroom_req_hdr) + VROOM_MAX_PAYLOAD];
+
+#ifdef VSH
+static char **g_argv;
+
+/* the real shell, in this process: nothing has been written or run yet */
+static void real_shell(void)
+{
+	const char *sh = getenv("VSH_REAL");
+
+	if (!sh)
+		sh = "/bin/sh";
+	g_argv[0] = (char *)sh;
+	execv(sh, g_argv);
+	(void)!write(2, "vsh: cannot run the real shell\n", 31);
+	_exit(127);
+}
+#endif
 
 static void die(const char *msg)
 {
@@ -56,12 +79,21 @@ int main(int argc, char **argv)
 	char **e;
 	int s, i;
 
+#ifdef VSH
+	g_argv = argv;
+	if (argc != 3 || (strcmp(argv[1], "-c") && strcmp(argv[1], "-ec")))
+		real_shell();
+#endif
 	if (!path)
 		path = "/tmp/vccd.sock";
 	strncpy(sa.sun_path, path, sizeof(sa.sun_path) - 1);
 	s = socket(AF_UNIX, SOCK_STREAM, 0);
-	if (s < 0 || connect(s, (struct sockaddr *)&sa, sizeof(sa)) < 0)
+	if (s < 0 || connect(s, (struct sockaddr *)&sa, sizeof(sa)) < 0) {
+#ifdef VSH
+		real_shell();
+#endif
 		die("vcc: cannot connect to vccd (VCC_SOCK)\n");
+	}
 
 	if (!getcwd(p, VROOM_MAX_PAYLOAD))
 		die("vcc: getcwd failed\n");
@@ -114,5 +146,11 @@ int main(int argc, char **argv)
 		if (n <= 0)
 			die("vcc: server closed the connection\n");
 	}
+#ifdef VSH
+	if (status == (int32_t)VROOM_STATUS_DECLINE) {
+		close(s);
+		real_shell();
+	}
+#endif
 	return status;
 }

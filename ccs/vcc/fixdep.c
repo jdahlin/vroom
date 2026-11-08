@@ -22,6 +22,7 @@
 #include <sys/stat.h>
 #include <unistd.h>
 
+#include "intern.h"
 #include "lex.h"
 #include "fixdep.h"
 
@@ -377,6 +378,8 @@ int vfixdep(const char *cwd, const char *depfile, const char *target, const char
 	item *configs[HASHSZ] = { 0 };
 	obuf o = { 0 };
 	job j = { .cwd = cwd, .o = &o, .configs = configs };
+
+	vintern_init();	/* the token cache interns; vsh may run fixdep before any compile */
 	char *d = read_at(cwd, depfile, dabs, sizeof(dabs));
 	int fd, rc;
 
