@@ -941,28 +941,29 @@ fast:
 		const uint64_t NLF = (W & ~(W + NL)) | NL;
 		const uint64_t SP = W << 1, SOL = NLF << 1;
 		const unsigned lim = X ? (unsigned)__builtin_ctzll(X) : 64;	/* <= valid */
-		uint64_t todo = S;
 		const uint8_t *kt = ktab;
 
 		__asm__("" : "+r"(kt));	/* in a register, not rematerialized per token */
 		/*
-		 * the last byte of every token: a non-blank byte before a
-		 * boundary.  Below lim they pair up with the starts in todo.
+		 * The token starts S and the token ends: boundaries after a
+		 * non-blank byte.  Below lim they pair up.  Both bit-reversed,
+		 * so that clz finds the next one (M1 has no ctz).
 		 */
-		uint64_t ends = ~W & ((B >> 1) | 1ull << 63);
+		uint64_t rs = __builtin_bitreverse64(S);
+		uint64_t re = __builtin_bitreverse64(B & ~((W << 1) | 1));
 		unsigned last = 0, pend = fl;
 
 		/*
-		 * No test of todo: when the starts run out, the next end is at
-		 * or past lim (ends keeps bit 63 until then, so it is never 0).
+		 * No test of rs: when the starts run out, the next end is at
+		 * or past lim (64 if there is none).
 		 */
 		for (;;) {
-			const unsigned e = 1 + (unsigned)__builtin_ctzll(ends);
+			const unsigned e = (unsigned)__builtin_clzg(re, 64);
 
 			if (e >= lim)
 				break;	/* reaches X or past the window */
 
-			const unsigned o = (unsigned)__builtin_ctzll(todo);
+			const unsigned o = (unsigned)__builtin_clzll(rs);
 			const size_t at = p + o;
 			const unsigned f = ((SP >> o) & 1) * TF_SPACE | ((SOL >> o) & 1) * TF_SOL;
 			uint16_t c01;
@@ -980,8 +981,8 @@ fast:
 			ni += kind == T_IDENT;
 			t++;
 			last = e;
-			todo &= todo - 1;
-			ends &= ends - 1;
+			rs ^= (1ull << 63) >> o;
+			re ^= (1ull << 63) >> e;
 		}
 		fl = pend;
 		if (likely(last)) {
@@ -998,9 +999,9 @@ fast:
 			p = gap = p + last;
 			goto fast;
 		}
-		if (todo && (unsigned)__builtin_ctzll(todo) < lim) {
+		if (S && (unsigned)__builtin_ctzll(S) < lim) {
 			/* the first token needs a handler (or is longer than the window) */
-			const unsigned o = (unsigned)__builtin_ctzll(todo);
+			const unsigned o = (unsigned)__builtin_ctzll(S);
 
 			fl |= ((SP >> o) & 1) * TF_SPACE | ((SOL >> o) & 1) * TF_SOL;
 			p = gap = p + o;
