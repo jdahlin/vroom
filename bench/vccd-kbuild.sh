@@ -1,6 +1,6 @@
 #!/bin/sh
 # Cold kernel build through the vcc shims with a private vroomd + vccd.
-#   bench/vccd-kbuild.sh OUT [VCC_CC=0 to forward -c to clang] [-j N]
+#   bench/vccd-kbuild.sh OUT [VCC_CC=0 to forward -c to clang] [-j N] [make args...]
 # VCC_FIXDEP=0: kbuild runs fixdep itself (default: vccd writes the .cmd files,
 # patches/0008).
 # vccd's log goes to OUT.vccd.log (VCC_LOG=1); its counts are printed at the end.
@@ -22,7 +22,7 @@ rc=0
 VCC_SOCK="$S/vccd.sock" VROOM_KSRC=${VROOM_KSRC:-/Users/johandahlin/dev/vroom/work/linux-pf} \
 	python3 "$R/bench/kbuild.py" --config "$R/env/vroom.config" --out "$OUT" \
 	--cc "$R/build/ccs/vcc" -j "$J" -- LD="$R/build/ccs/vld" \
-	$([ "${VCC_FIXDEP:-1}" = 0 ] || echo KBUILD_VCC_FIXDEP=1) || rc=$?
+	$([ "${VCC_FIXDEP:-1}" = 0 ] || echo KBUILD_VCC_FIXDEP=1) "$@" || rc=$?
 kill -TERM $CP; sleep 0.3
 grep "^vccd:" "$OUT.vccd.log" | tail -1
 grep -c "fallback to clang" "$OUT.vccd.log" || true
