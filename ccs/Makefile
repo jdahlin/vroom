@@ -18,40 +18,59 @@ clean:
 	rm -rf $(OUT)
 
 # ---- vcc: egen verktygskedja (fas 2) ----
+# One object per source file, shared between the tools, so `make -j` builds
+# them in parallel and an edit recompiles one file.  Header dependencies come
+# from -MMD.  ccache is used when installed; disable with `make CCACHE=`.
+CCACHE    ?= $(shell command -v ccache 2>/dev/null)
+VCC_CC     = $(CCACHE) /usr/bin/clang
 VCC_CFLAGS = -std=c11 -O2 -Wall -Wextra -Wno-unused-parameter -D_DARWIN_C_SOURCE -DVCC_INCDIR='"$(abspath vcc/include)"'
+VCC_FAST   = $(VCC_CFLAGS) -O3 -mcpu=apple-m1 -pthread
+# -O3 also at link time: the driver passes it to ld, which then folds code
+VCC_LDFLAGS = -O3
+OBJ        = $(OUT)/obj
 
 vcc: $(OUT)/vcc $(OUT)/vld $(OUT)/vas $(OUT)/vccd $(OUT)/lextest $(OUT)/vpp $(OUT)/vlink $(OUT)/vasm
 
-AS_SRC = vcc/as.c vcc/a64.c vcc/elf.c
-AS_HDR = vcc/as.h vcc/a64.h vcc/elf.h vcc/a64sysreg.inc
+o = $(patsubst vcc/%.c,$(OBJ)/%.o,$(1))
+AS_SRC  = vcc/as.c vcc/a64.c vcc/elf.c
 LEX_SRC = vcc/lex.c vcc/intern.c
-LEX_HDR = vcc/lex.h vcc/intern.h
-PP_SRC = vcc/pp.c vcc/dircache.c vcc/ppdriver.c vcc/cc.c vcc/ccsnap.c vcc/emit.c
-PP_HDR = vcc/pp.h vcc/cc.h vcc/ccint.h vcc/ccsnap.h vcc/emit.h vcc/dircache.h vcc/ppdriver.h vcc/ppdata.inc vcc/ppdata-predef.inc
+PP_SRC  = vcc/pp.c vcc/dircache.c vcc/ppdriver.c vcc/cc.c vcc/ccsnap.c vcc/emit.c
+LD_SRC  = vcc/ld.c vcc/ldhash.c vcc/objcopy.c
 
-$(OUT)/vpp: vcc/vpp.c vcc/ppdata-predef.inc $(PP_SRC) $(PP_HDR) $(LEX_SRC) $(LEX_HDR) $(AS_SRC) $(AS_HDR) | $(OUT)
-	/usr/bin/clang $(VCC_CFLAGS) -O3 -mcpu=apple-m1 -pthread vcc/vpp.c $(PP_SRC) $(LEX_SRC) $(AS_SRC) -o $@
+$(OBJ)/%.o: vcc/%.c | $(OBJ)
+	$(VCC_CC) $(VCC_FAST) $(XFLAGS) -MMD -MP -c $< -o $@
 
-$(OUT)/lextest: vcc/lextest.c vcc/pmc.c vcc/pmc.h $(LEX_SRC) $(LEX_HDR) | $(OUT)
-	/usr/bin/clang $(VCC_CFLAGS) -O3 -mcpu=apple-m1 -mno-outline -pthread vcc/lextest.c vcc/pmc.c $(LEX_SRC) -o $@
+# lextest is built with -mno-outline (stable code layout for PMC runs)
+$(OBJ)/no/%.o: vcc/%.c | $(OBJ)
+	$(VCC_CC) $(VCC_FAST) -mno-outline -MMD -MP -c $< -o $@
 
+$(OBJ)/ld.o: XFLAGS = -DVLD_MAIN
 
-$(OUT)/vasm: vcc/vasm.c $(AS_SRC) $(AS_HDR) | $(OUT)
-	/usr/bin/clang $(VCC_CFLAGS) -O3 -mcpu=apple-m1 vcc/vasm.c $(AS_SRC) -o $@
+$(OUT)/vpp: $(call o,vcc/vpp.c $(PP_SRC) $(LEX_SRC) $(AS_SRC))
+	$(VCC_CC) $(VCC_LDFLAGS) -pthread $^ -o $@
+
+$(OUT)/vccd: $(call o,vcc/vccd.c vcc/caps.c $(PP_SRC) $(LEX_SRC) $(AS_SRC))
+	$(VCC_CC) $(VCC_LDFLAGS) -pthread $^ -o $@
+
+$(OUT)/lextest: $(patsubst vcc/%.c,$(OBJ)/no/%.o,vcc/lextest.c vcc/pmc.c $(LEX_SRC))
+	$(VCC_CC) $(VCC_LDFLAGS) -pthread $^ -o $@
+
+$(OUT)/vasm: $(call o,vcc/vasm.c $(AS_SRC))
+	$(VCC_CC) $(VCC_LDFLAGS) $^ -o $@
+
+# vlink: the linker (ld.c) as a standalone tool; vobjcopy/vnm by argv[0]
+$(OUT)/vlink: $(call o,$(LD_SRC))
+	$(VCC_CC) $(VCC_LDFLAGS) -pthread $^ -o $@
+	ln -sf vlink $(OUT)/vobjcopy
+	ln -sf vlink $(OUT)/vnm
 
 $(OUT)/vcc: vcc/shim.c protocol.h | $(OUT)
-	/usr/bin/clang $(VCC_CFLAGS) $< -o $@
+	$(VCC_CC) $(VCC_CFLAGS) $< -o $@
 
 $(OUT)/vld $(OUT)/vas: $(OUT)/vcc
 	ln -sf vcc $@
 
-# vlink: the linker (ld.c) as a standalone tool; vobjcopy/vnm by argv[0]
-LD_SRC = vcc/ld.c vcc/ldhash.c vcc/objcopy.c
-LD_HDR = vcc/ld.h vcc/ldhash.h vcc/ldelf.h
-$(OUT)/vlink: $(LD_SRC) $(LD_HDR) | $(OUT)
-	/usr/bin/clang $(VCC_CFLAGS) -O3 -mcpu=apple-m1 -pthread -DVLD_MAIN $(LD_SRC) -o $@
-	ln -sf vlink $(OUT)/vobjcopy
-	ln -sf vlink $(OUT)/vnm
+$(OBJ):
+	mkdir -p $@ $@/no
 
-$(OUT)/vccd: vcc/vccd.c vcc/caps.c vcc/caps.h vcc/warnings.inc protocol.h $(PP_SRC) $(PP_HDR) $(LEX_SRC) $(LEX_HDR) $(AS_SRC) $(AS_HDR) | $(OUT)
-	/usr/bin/clang $(VCC_CFLAGS) -O3 -mcpu=apple-m1 -pthread vcc/vccd.c vcc/caps.c $(PP_SRC) $(LEX_SRC) $(AS_SRC) -o $@
+-include $(wildcard $(OBJ)/*.d $(OBJ)/no/*.d)
