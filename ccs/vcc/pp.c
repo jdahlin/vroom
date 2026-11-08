@@ -765,8 +765,9 @@ static inline void mset(pp *p, uint32_t id, const pmacro *m)
 	*mslot(p, id) = (uintptr_t)m;
 }
 
-static inline void mdisable(pp *p, uint32_t id) { *mslot(p, id) |= 1; }
-static inline void menable(pp *p, uint32_t id) { *mslot(p, id) &= ~(uintptr_t)1; }
+/* id is a macro being expanded: its page exists (it was read, defined) */
+static inline void mdisable(pp *p, uint32_t id) { p->mdir[id >> MPAGE_BITS][id & (MPAGE - 1)] |= 1; }
+static inline void menable(pp *p, uint32_t id) { p->mdir[id >> MPAGE_BITS][id & (MPAGE - 1)] &= ~(uintptr_t)1; }
 
 /* ---------------- header cache: recording reads and writes ---------------- */
 
