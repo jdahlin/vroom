@@ -2166,7 +2166,15 @@ void as_free(As *a)
 
 void as_set_dir(As *a, const char *dir) { a->dir = dir; }
 
-int as_run(As *a, ElfObj *o, const char *text, size_t len, const char *name, const char **msg)
+/*
+ * A persistent assembler bound to one ElfObj for a whole TU: as_begin()
+ * resets both, as_snippet() runs statements in the current section
+ * (macros, .set variables, numeric labels and the section stack persist
+ * across snippets, as in one source file), as_end() flushes literal pools
+ * and resolves variables.  The text of every snippet must stay valid until
+ * as_end() (macro bodies point into it).  as_run() is the three in one.
+ */
+void as_begin(As *a, ElfObj *o, const char *name)
 {
 	a->o = o; a->nfr = 0; a->ncs = 0; a->nss = 0; a->err = 0; a->msg[0] = 0;
 	a->xs.used = 0; a->defs.used = 0; a->ninst = 0; a->nal = 0; a->alcap = 0; a->al = 0;
@@ -2185,6 +2193,12 @@ int as_run(As *a, ElfObj *o, const char *text, size_t len, const char *name, con
 	uint32_t text_sec = std_section(a, ".text");
 	elf_sec(o, text_sec)->align = 2;
 	a->cur = a->prev = text_sec;
+}
+
+int as_snippet(As *a, const char *text, size_t len)
+{
+	ElfObj *o = a->o;
+	if (a->err) return -1;
 	push_frame(a, text, len, FR_FILE, 0);
 	while (a->nfr && !a->err) {
 		Frame *f = &a->fr[a->nfr - 1];
@@ -2200,6 +2214,13 @@ int as_run(As *a, ElfObj *o, const char *text, size_t len, const char *name, con
 		}
 		if (o->has_err) { err(a, "%s", o->err); break; }
 	}
+	a->nfr = 0;
+	return a->err ? -1 : 0;
+}
+
+int as_end(As *a)
+{
+	ElfObj *o = a->o;
 	if (!a->err && a->ncs) err(a, "unmatched .ifs or .elses");
 	if (!a->err && a->npool) flush_pools(a);
 	if (!a->err) {
@@ -2223,6 +2244,42 @@ int as_run(As *a, ElfObj *o, const char *text, size_t len, const char *name, con
 			else { err(a, "unsupported variable '%s'", s->name); break; }
 		}
 	}
-	if (a->err) { *msg = a->msg; return -1; }
+	return a->err ? -1 : 0;
+}
+
+const char *as_msg(const As *a) { return a->msg; }
+uint32_t as_frag(const As *a) { return a->cur; }
+int as_failed(const As *a) { return a->err; }
+
+/* a symbol as an operand names it (".L" names are temporary) */
+uint32_t as_sym(As *a, const char *name, size_t len) { return sym(a, name, len); }
+
+/* sym + c as an operand expression: .set variables substituted, folded */
+ElfVal as_val(As *a, uint32_t y, int64_t c)
+{
+	Val v = { y, 0, 0 };
+	if (a->vcount) {
+		Var *vr = var_slot(a, y, 0);
+		if (vr && vr->v.add != (uint32_t)-1) v = vr->v;
+	}
+	fold(a, &v);
+	v.c += c;
+	fold(a, &v);
+	return v;
+}
+
+/* "y:" at the current position */
+int as_label(As *a, uint32_t y)
+{
+	ElfSym *ys = elf_symp(a->o, y);
+	if (ys->flags & ESYM_DEFINED) return err(a, "invalid symbol redefinition");
+	elf_define(a->o, y, a->cur, elf_frag(a->o, a->cur)->size);
+	return 0;
+}
+
+int as_run(As *a, ElfObj *o, const char *text, size_t len, const char *name, const char **msg)
+{
+	as_begin(a, o, name);
+	if (as_snippet(a, text, len) || as_end(a)) { *msg = a->msg; return -1; }
 	return 0;
 }
