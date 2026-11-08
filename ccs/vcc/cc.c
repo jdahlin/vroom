@@ -734,16 +734,22 @@ static inline int kwof(const ptok *t)
 
 static void pragma(cc *c, const ptok *t);
 
-static void fetch(cc *c, ptok *t)
+static __attribute__((noinline)) void fetch_directive(cc *c, ptok *t)
 {
-	for (;;) {
-		pp_next(c->p, t);
-		if (likely(t->kind != P_DIRECTIVE))
-			return;
+	do {
 		if (unlikely(dc_stale(c)))
 			dc_materialize(c);	/* (the pragma acts on the real state) */
 		pragma(c, t);
-	}
+		pp_next(c->p, t);
+	} while (t->kind == P_DIRECTIVE);
+}
+
+/* inline at every token consumer: a call to pp_next and a test; the rest out of line */
+static inline __attribute__((always_inline)) void fetch(cc *c, ptok *t)
+{
+	pp_next(c->p, t);
+	if (unlikely(t->kind == P_DIRECTIVE))
+		fetch_directive(c, t);
 }
 
 void cc_fetch(cc *c, ptok *t) { fetch(c, t); }
@@ -764,27 +770,31 @@ static ptok *peek(cc *c, int k)
 	return &c->tk[k];
 }
 
-static inline void next(cc *c)
+/* drop tk[0] with lookahead queued: fixed-size copies (a libc memmove costs more) */
+static __attribute__((noinline)) void next_shift(cc *c)
+{
+	c->tk[0] = c->tk[1];
+	if (c->ntk > 2) {
+		c->tk[1] = c->tk[2];
+		if (c->ntk > 3)
+			c->tk[2] = c->tk[3];
+	}
+	c->ntk--;
+}
+
+static inline __attribute__((always_inline)) void next(cc *c)
 {
 	c->prevloc = c->tk[0].loc;
-	if (c->ntk > 1) {
-		/* fixed-size copies: a libc memmove per lookahead token costs more */
-		c->tk[0] = c->tk[1];
-		if (unlikely(c->ntk > 2)) {
-			c->tk[1] = c->tk[2];
-			if (c->ntk > 3)
-				c->tk[2] = c->tk[3];
-		}
-		c->ntk--;
-	} else {
+	if (unlikely(c->ntk > 1))
+		next_shift(c);
+	else
 		fetch(c, &c->tk[0]);
-	}
 }
 
 static inline bool is(cc *c, int kind) { return c->tk[0].kind == kind; }
 static inline bool iskw(cc *c, int kw) { return kwof(&c->tk[0]) == kw; }
 
-static bool accept(cc *c, int kind)
+static inline __attribute__((always_inline)) bool accept(cc *c, int kind)
 {
 	if (c->tk[0].kind != kind)
 		return false;
