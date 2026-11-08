@@ -54,6 +54,52 @@ static void *halloc(cc *c, size_t n)
 	return r;
 }
 
+/*
+ * The per-TU reservations are kept by the thread for its next TU: reusing
+ * the pages saves the page faults (one per 16 KB touched) and the munmap.
+ * The next TU zeroes what the previous one wrote (fresh memory is zero, and
+ * the code may rely on it); a TU that used more than RKEEP_MAX gives its
+ * memory back instead.
+ */
+enum { R_TY, R_PARAMS, R_TAGS, R_SYMS, R_NODES, R_LISTS, R_IPOOL, R_FPOOL, R_STRS, R_LABELS, R_ATTR, R_ASMS,
+       R_SSTACK, R_TOPLEVEL, R_TLASM, R_HEAP, R_N };
+static const uint8_t rbits[R_N] = { 30, 28, 28, 30, 32, 30, 30, 26, 28, 26, 28, 28, 28, 26, 24, 32 };
+#define RKEEP_MAX ((size_t)128 << 20)
+#define RPAGE ((size_t)16384)
+static _Thread_local char *rkeep[R_N];
+static _Thread_local size_t rdirty[R_N];	/* bytes to zero before reuse */
+
+static void cc_reserve(cc *c)
+{
+	char *r[R_N];
+
+	for (int k = 0; k < R_N; k++) {
+		if (rkeep[k]) {
+			r[k] = rkeep[k];
+			memset(r[k], 0, rdirty[k]);
+		} else {
+			r[k] = reserve((size_t)1 << rbits[k]);
+		}
+		rkeep[k] = NULL;
+	}
+	c->ty = (ctype *)r[R_TY];
+	c->params = (qty *)r[R_PARAMS];
+	c->tags = (tag *)r[R_TAGS];
+	c->syms = (sym *)r[R_SYMS];
+	c->nodes = (node *)r[R_NODES];
+	c->lists = (uint32_t *)r[R_LISTS];
+	c->ipool = (i128 *)r[R_IPOOL];
+	c->fpool = (double *)r[R_FPOOL];
+	c->strs = (cstr *)r[R_STRS];
+	c->labels = (label *)r[R_LABELS];
+	c->attr = (attrs *)r[R_ATTR];
+	c->asms = (casm *)r[R_ASMS];
+	c->sstack = (uint32_t *)r[R_SSTACK];
+	c->toplevel = (uint32_t *)r[R_TOPLEVEL];
+	c->tlasm = (uint32_t *)r[R_TLASM];
+	c->heap = c->hp = r[R_HEAP];
+}
+
 /* ---------------- diagnostics ---------------- */
 
 static void diag(cc *c, uint32_t loc, const char *what, const char *fmt, va_list ap)
@@ -6580,22 +6626,7 @@ static void cc_init(cc *c, pp *p, const cc_opts *o)
 	memset(c, 0, sizeof(*c));
 	c->p = p;
 	c->o = o;
-	c->ty = reserve((size_t)1 << 30);
-	c->params = reserve((size_t)1 << 28);
-	c->tags = reserve((size_t)1 << 28);
-	c->syms = reserve((size_t)1 << 30);
-	c->nodes = reserve((size_t)1 << 32);
-	c->lists = reserve((size_t)1 << 30);
-	c->ipool = reserve((size_t)1 << 30);
-	c->fpool = reserve((size_t)1 << 26);
-	c->strs = reserve((size_t)1 << 28);
-	c->labels = reserve((size_t)1 << 26);
-	c->attr = reserve((size_t)1 << 28);
-	c->asms = reserve((size_t)1 << 28);
-	c->sstack = reserve((size_t)1 << 28);
-	c->toplevel = reserve((size_t)1 << 26);
-	c->tlasm = reserve((size_t)1 << 24);
-	c->heap = c->hp = reserve((size_t)1 << 32);
+	cc_reserve(c);
 	c->hend = c->heap + ((size_t)1 << 32);
 	tl_dops = halloc(c, DOPS_MAX * sizeof(dop));
 	tl_ndops = 0;
@@ -6674,22 +6705,34 @@ static void cc_init(cc *c, pp *p, const cc_opts *o)
 
 static void cc_free(cc *c)
 {
-	munmap(c->ty, (size_t)1 << 30);
-	munmap(c->params, (size_t)1 << 28);
-	munmap(c->tags, (size_t)1 << 28);
-	munmap(c->syms, (size_t)1 << 30);
-	munmap(c->nodes, (size_t)1 << 32);
-	munmap(c->lists, (size_t)1 << 30);
-	munmap(c->ipool, (size_t)1 << 30);
-	munmap(c->fpool, (size_t)1 << 26);
-	munmap(c->strs, (size_t)1 << 28);
-	munmap(c->labels, (size_t)1 << 26);
-	munmap(c->attr, (size_t)1 << 28);
-	munmap(c->asms, (size_t)1 << 28);
-	munmap(c->sstack, (size_t)1 << 28);
-	munmap(c->toplevel, (size_t)1 << 26);
-	munmap(c->tlasm, (size_t)1 << 24);
-	munmap(c->heap, (size_t)1 << 32);
+	char *r[R_N] = {
+		(char *)c->ty, (char *)c->params, (char *)c->tags, (char *)c->syms, (char *)c->nodes,
+		(char *)c->lists, (char *)c->ipool, (char *)c->fpool, (char *)c->strs, (char *)c->labels,
+		(char *)c->attr, (char *)c->asms, (char *)c->sstack, (char *)c->toplevel, (char *)c->tlasm, c->heap,
+	};
+	/* what the TU wrote: each array up to its count, the heap up to hp; the scope stack holds at
+	 * most two bindings per sym (parameters: the prototype scope, then the function body) */
+	size_t used[R_N] = {
+		c->nty * sizeof(ctype), c->nparams * sizeof(qty), c->ntag * sizeof(tag), c->nsym * sizeof(sym),
+		c->nnode * sizeof(node), c->nlist * sizeof(uint32_t), c->nipool * sizeof(i128),
+		c->nfpool * sizeof(double), c->nstr * sizeof(cstr), c->nlabel * sizeof(label),
+		c->nattr * sizeof(attrs), c->nasm * sizeof(casm), 2 * (size_t)c->nsym * sizeof(uint32_t),
+		c->ntoplevel * sizeof(uint32_t), c->ntlasm * sizeof(uint32_t), (size_t)(c->hp - c->heap),
+	};
+	size_t tot = 0;
+
+	for (int k = 0; k < R_N; k++)
+		tot += used[k];
+	for (int k = 0; k < R_N; k++) {
+		size_t cap = (size_t)1 << rbits[k], n = (used[k] + 2 * RPAGE - 1) & ~(RPAGE - 1);
+
+		if (tot > RKEEP_MAX || rkeep[k]) {
+			munmap(r[k], cap);
+			continue;
+		}
+		rdirty[k] = n < cap ? n : cap;	/* (one page of slack) */
+		rkeep[k] = r[k];
+	}
 }
 
 static void init_tables(void)
