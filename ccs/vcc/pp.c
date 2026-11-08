@@ -3065,12 +3065,106 @@ static const vlex_file *find_include_(pp *p, const ctx *from, const char *name, 
 	return NULL;
 }
 
+/*
+ * Include resolution, process-wide: the result of a lookup depends only on
+ * the options' signature (cwd, frameworks, ...), the search path, where the
+ * search starts, the includer's directory (quoted) and the name, and files
+ * never change under the token cache (vlex_get caches misses too).  Shared
+ * by all TUs, so a warm lookup is one hash probe instead of a path build,
+ * directory-cache probe and token-cache probe per search directory.
+ */
+typedef struct incent {
+	uint64_t hash;
+	uint32_t sig, dsig, klen;
+	int32_t start;
+	const vlex_file *f;
+	const char *path;
+	int32_t sdir;
+	uint32_t used;
+	char key[];		/* includer's directory, '\0', name; zero padded to 8 */
+} incent;
+
+#define INC_BITS 16
+static _Atomic(incent *) inc_tab[1u << INC_BITS];
+
+static inline bool inc_same(const incent *e, uint64_t h, uint32_t sig, uint32_t dsig, int32_t start,
+			    const char *k, size_t kl)
+{
+	return e->hash == h && e->sig == sig && e->dsig == dsig && e->start == start && e->klen == kl &&
+	       !memcmp(e->key, k, kl);
+}
+
 /* (the search path prefix the lookup depended on is an input of the open regions) */
 static const vlex_file *find_include(pp *p, const ctx *from, const char *name, size_t nlen,
 				     bool angled, bool next, int32_t *sdir, const char **path)
 {
-	uint32_t used;
-	const vlex_file *f = find_include_(p, from, name, nlen, angled, next, sdir, path, &used);
+	uint32_t used, i, sig = p->sig, dsig;
+	const vlex_file *f;
+	char kb[4096 + 16];
+	size_t dl = 0, kl, kp;
+	int32_t start;
+	bool nx = next && from && from->sdir >= 0;
+	incent *e;
+	uint64_t h, w;
+
+	if (name[0] == '/' || sig == HNONE || (next && !from) || nlen >= 2048)
+		goto slow;
+	dsig = p->psig[p->o->ndirs];
+	start = nx ? from->sdir + 1 : angled ? p->o->nquote : 0;
+	if (!angled && !nx) {
+		const char *fp = from && from->f != &p->builtin ? from->spath : "";
+		const char *sl = strrchr(fp, '/');
+
+		dl = sl ? (size_t)(sl - fp) + 1 : 0;
+		if (dl >= 2048)
+			goto slow;
+		memcpy(kb, fp, dl);
+	}
+	kb[dl] = 0;
+	memcpy(kb + dl + 1, name, nlen);
+	kl = dl + 1 + nlen;
+	kp = (kl + 8) & ~(size_t)7;
+	memset(kb + kl, 0, 8);
+	h = ((uint64_t)sig << 32 | dsig) ^ ((uint64_t)(uint32_t)start << 17) ^ kl;
+	for (size_t j = 0; j < kp; j += 8) {
+		memcpy(&w, kb + j, 8);
+		h = (h ^ w) * 0x9E3779B97F4A7C15ull;
+		h ^= h >> 29;
+	}
+	for (i = (uint32_t)(h >> (64 - INC_BITS));; i = (i + 1) & ((1u << INC_BITS) - 1)) {
+		e = atomic_load_explicit(&inc_tab[i], memory_order_acquire);
+		if (!e)
+			break;
+		if (inc_same(e, h, sig, dsig, start, kb, kl)) {
+			f = e->f, *sdir = e->sdir, *path = e->path, used = e->used;
+			goto done;
+		}
+	}
+	f = find_include_(p, from, name, nlen, angled, next, sdir, path, &used);
+	{
+		size_t pl = f ? strlen(*path) : 0;
+		incent *m = salloc(sizeof(*m) + kp + pl + 1);
+
+		m->hash = h, m->sig = sig, m->dsig = dsig, m->klen = (uint32_t)kl, m->start = start;
+		m->f = f, m->sdir = *sdir, m->used = used;
+		memcpy(m->key, kb, kp);
+		m->path = NULL;
+		if (f) {
+			memcpy(m->key + kp, *path, pl + 1);
+			m->path = m->key + kp;
+		}
+		for (;; i = (i + 1) & ((1u << INC_BITS) - 1)) {
+			e = NULL;
+			if (atomic_compare_exchange_strong_explicit(&inc_tab[i], &e, m, memory_order_acq_rel,
+								    memory_order_acquire) ||
+			    inc_same(e, h, sig, dsig, start, kb, kl))
+				break;	/* inserted, or another thread's (the same answer) */
+		}
+	}
+	goto done;
+slow:
+	f = find_include_(p, from, name, nlen, angled, next, sdir, path, &used);
+done:
 
 	if (unlikely(p->rec.on))
 		for (int i = 0; i < p->rec.n; i++)
