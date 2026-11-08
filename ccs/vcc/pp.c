@@ -1424,15 +1424,55 @@ typedef struct margs {
 
 static bool collect_(pp *p, const pmacro *m, const ptok *name, margs *a, ptok *rp)
 {
-	uint32_t np = m->nparam, slots = np ? np : 1, k = 0, depth = 0;
+	uint32_t np = m->nparam, slots = np ? np : 1, k = 0, depth = 0, end;
 	size_t base = p->svn;
 	bool va = m->flags & MF_VARIADIC;
+	const ptok *tok;
 	ptok t;
 
 	a->st = alloc(&p->tmp, slots * sizeof(uint32_t));
 	a->ln = alloc(&p->tmp, slots * sizeof(uint32_t));
 	raw(p, &t);		/* '(' */
 	a->st[0] = 0;
+	/*
+	 * The whole invocation in the top expansion context (nested macros):
+	 * the arguments are slices of its tokens, which outlive the expansion
+	 * (tmp) and are not written; nothing is copied.
+	 */
+	{
+		ctx *c = &p->cx[p->depth - 1];
+
+		if (c->type == C_PTOK && !(c->first | p->pend)) {
+			const ptok *pt = c->pt + c->i;
+			uint32_t e = c->n - c->i;
+
+			for (uint32_t i = 0; i < e; i++) {
+				uint8_t kd = pt[i].kind;
+
+				if (kd == T_LPAREN) {
+					depth++;
+				} else if (kd == T_RPAREN) {
+					if (depth) {
+						depth--;
+						continue;
+					}
+					c->i += i + 1;
+					*rp = pt[i];
+					tok = pt;
+					end = i;
+					goto done;
+				} else if (kd == T_COMMA && !depth && !(va && k + 1 >= np)) {
+					if (k + 1 >= slots) {
+						k++;	/* too many: counted, reported below */
+						continue;
+					}
+					a->ln[k] = i - a->st[k];
+					a->st[++k] = i + 1;
+				}
+			}
+			k = depth = 0;	/* not all there: collect into sv */
+		}
+	}
 	for (;;) {
 		ctx *c = &p->cx[p->depth - 1];
 
@@ -1522,16 +1562,20 @@ static bool collect_(pp *p, const pmacro *m, const ptok *name, margs *a, ptok *r
 		svpush(p, &t);
 	}
 	*rp = t;
+	/* the arguments stay in sv[base, svn) until expand() is done with them */
+	tok = p->sv + base;
+	end = (uint32_t)(p->svn - base);
+done:
 	if (k >= slots) {
 		error(p, name->loc, "too many arguments provided to function-like macro invocation");
 		p->svn = base;
 		return false;
 	}
-	a->ln[k] = (uint32_t)(p->svn - base) - a->st[k];
+	a->ln[k] = end - a->st[k];
 	if (k + 1 < np) {
 		if (va && k + 2 == np) {
 			/* GNU: the variadic argument left out entirely */
-			a->st[k + 1] = (uint32_t)(p->svn - base);
+			a->st[k + 1] = end;
 			a->ln[k + 1] = 0;
 		} else {
 			error(p, name->loc, "too few arguments provided to function-like macro invocation");
@@ -1543,8 +1587,7 @@ static bool collect_(pp *p, const pmacro *m, const ptok *name, margs *a, ptok *r
 		p->svn = base;
 		return false;
 	}
-	/* the arguments stay in sv[base, svn) until expand() is done with them */
-	a->tok = p->sv + base;
+	a->tok = tok;
 	a->base = base;
 	a->pre = alloc(&p->tmp, slots * sizeof(*a->pre));
 	a->preln = alloc(&p->tmp, slots * sizeof(uint32_t));
