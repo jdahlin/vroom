@@ -712,12 +712,12 @@ static __attribute__((noinline)) uint32_t intern_dirty(const char *s, size_t st,
 	return vintern_copy(tmp, l);
 }
 
-/* intern the identifiers out[il[0..ni)] (a loop of its own: registers) */
+/* intern the identifiers at byte offsets il[0..ni) of out (a loop of its own: registers) */
 static __attribute__((noinline)) void intern_list(vintern_cache *ic, const char *s, vtok *out,
 						  const uint32_t *il, uint32_t ni)
 {
 	for (uint32_t i = 0; i < ni; i++) {
-		vtok *k = &out[il[i]];
+		vtok *k = (vtok *)((char *)out + il[i]);
 
 		k->id = vintern_fast(ic, s + k->off, k->len);
 	}
@@ -801,7 +801,7 @@ __attribute__((destructor)) static void stat_dump(void)
 	else if (fl & TF_DIRTY)						\
 		i_ = intern_dirty(s, st, p);				\
 	else if (gap == st)						\
-		il[ni++] = (uint32_t)(t - out);				\
+		il[ni++] = (uint32_t)((char *)t - (char *)out);		\
 	else								\
 		i_ = vintern_fast(ic, s + st, p - st);			\
 	t->off = (uint32_t)gap;						\
@@ -933,6 +933,9 @@ fast:
 		const uint64_t SP = W << 1, SOL = NLF << 1;
 		const unsigned lim = X ? (unsigned)__builtin_ctzll(X) : 64;
 		uint64_t todo = S;
+		const uint8_t *kt = ktab;
+
+		__asm__("" : "+r"(kt));	/* in a register, not rematerialized per token */
 		/*
 		 * the last byte of every token: a non-blank byte before a
 		 * boundary.  Below lim they pair up with the starts in todo.
@@ -953,14 +956,14 @@ fast:
 				break;	/* reaches X or past the window */
 			memcpy(&c01, s + at, 2);
 			/* kind without branches: ktab knows identifiers and numbers too */
-			const unsigned kind = ktab[c01];
+			const unsigned kind = kt[c01];
 			t->off = (uint32_t)at;
 			t->len = e - o;
 			t->id = 0;
 			t->kind = (uint8_t)kind;
 			t->flags = (uint8_t)(f | pend);
 			pend = 0;
-			il[ni] = (uint32_t)(t - out);
+			il[ni] = (uint32_t)((char *)t - (char *)out);
 			ni += kind == T_IDENT;
 			t++;
 			last = e;
