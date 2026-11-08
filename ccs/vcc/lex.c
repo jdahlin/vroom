@@ -919,12 +919,17 @@ fast:
 		const uint64_t SP = W << 1, SOL = NLF << 1;
 		const unsigned lim = X ? (unsigned)__builtin_ctzll(X) : 64;
 		uint64_t todo = S;
+		/*
+		 * the last byte of every token: a non-blank byte before a
+		 * boundary.  Below lim they pair up with the starts in todo.
+		 */
+		uint64_t ends = ~W & ((B >> 1) | 1ull << 63);
 		unsigned last = 0, sflags = 0, pend = fl;
 		bool any = false;
 
 		while (todo) {
 			const unsigned o = (unsigned)__builtin_ctzll(todo);
-			const unsigned e = o + 1 + (unsigned)__builtin_ctzll(((B >> o) >> 1) | 1ull << 63);
+			const unsigned e = 1 + (unsigned)__builtin_ctzll(ends);
 			const size_t at = p + o;
 			const unsigned f = ((SP >> o) & 1) * TF_SPACE | ((SOL >> o) & 1) * TF_SOL;
 			uint16_t c01;
@@ -947,6 +952,7 @@ fast:
 			last = e;
 			any = true;
 			todo &= todo - 1;
+			ends &= ends - 1;
 		}
 		fl = pend;
 		if (likely(any)) {
