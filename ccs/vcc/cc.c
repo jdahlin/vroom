@@ -6642,28 +6642,38 @@ static void layout_checks(cc *c)
 
 /* ---------------- driver ---------------- */
 
+/*
+ * The per-TU arrays are reserved once per thread and reused by its next
+ * TU: cc_free zeroes the part a TU used (its counts are high-water marks;
+ * the scope stack is written before it is read), which is much cheaper than
+ * munmap and a fresh page fault per 16 KB page.  A TU that used more than
+ * AR_KEEP bytes of an array gives it back instead.
+ */
+#define AR_KEEP ((size_t)64 << 20)
+#define AR(f, sh) { offsetof(cc, f), sh }
+static const struct { size_t off; uint8_t shift; } arenas[] = {
+	AR(ty, 30), AR(ptrc, 30), AR(params, 28), AR(tags, 28), AR(syms, 30), AR(nodes, 32),
+	AR(lists, 30), AR(ipool, 30), AR(fpool, 26), AR(strs, 28), AR(labels, 26), AR(attr, 28),
+	AR(asms, 28), AR(sstack, 28), AR(toplevel, 26), AR(tlasm, 24), AR(heap, 32),
+};
+#undef AR
+#define NARENA (sizeof(arenas) / sizeof(arenas[0]))
+static _Thread_local void *tl_arena[NARENA];
+
+static void **arena_field(cc *c, size_t i) { return (void **)((char *)c + arenas[i].off); }
+
 static void cc_init(cc *c, pp *p, const cc_opts *o)
 {
 	memset(c, 0, sizeof(*c));
 	c->p = p;
 	c->o = o;
-	c->ty = reserve((size_t)1 << 30);
-	c->ptrc = reserve((size_t)1 << 30);
-	c->params = reserve((size_t)1 << 28);
-	c->tags = reserve((size_t)1 << 28);
-	c->syms = reserve((size_t)1 << 30);
-	c->nodes = reserve((size_t)1 << 32);
-	c->lists = reserve((size_t)1 << 30);
-	c->ipool = reserve((size_t)1 << 30);
-	c->fpool = reserve((size_t)1 << 26);
-	c->strs = reserve((size_t)1 << 28);
-	c->labels = reserve((size_t)1 << 26);
-	c->attr = reserve((size_t)1 << 28);
-	c->asms = reserve((size_t)1 << 28);
-	c->sstack = reserve((size_t)1 << 28);
-	c->toplevel = reserve((size_t)1 << 26);
-	c->tlasm = reserve((size_t)1 << 24);
-	c->heap = c->hp = reserve((size_t)1 << 32);
+	for (size_t i = 0; i < NARENA; i++) {
+		void *a = tl_arena[i];
+
+		*arena_field(c, i) = a ? a : reserve((size_t)1 << arenas[i].shift);
+		tl_arena[i] = NULL;	/* (taken: a TU that bails out keeps its own) */
+	}
+	c->hp = c->heap;
 	c->hend = c->heap + ((size_t)1 << 32);
 	c->dops = halloc(c, DOPS_MAX * sizeof(dop));
 	c->ndops = 0;
@@ -6743,23 +6753,26 @@ static void cc_init(cc *c, pp *p, const cc_opts *o)
 
 static void cc_free(cc *c)
 {
-	munmap(c->ty, (size_t)1 << 30);
-	munmap(c->ptrc, (size_t)1 << 30);
-	munmap(c->params, (size_t)1 << 28);
-	munmap(c->tags, (size_t)1 << 28);
-	munmap(c->syms, (size_t)1 << 30);
-	munmap(c->nodes, (size_t)1 << 32);
-	munmap(c->lists, (size_t)1 << 30);
-	munmap(c->ipool, (size_t)1 << 30);
-	munmap(c->fpool, (size_t)1 << 26);
-	munmap(c->strs, (size_t)1 << 28);
-	munmap(c->labels, (size_t)1 << 26);
-	munmap(c->attr, (size_t)1 << 28);
-	munmap(c->asms, (size_t)1 << 28);
-	munmap(c->sstack, (size_t)1 << 28);
-	munmap(c->toplevel, (size_t)1 << 26);
-	munmap(c->tlasm, (size_t)1 << 24);
-	munmap(c->heap, (size_t)1 << 32);
+	/* the bytes each arena's TU used, in arenas[] order (0: the scope stack) */
+	const size_t used[NARENA] = {
+		(size_t)c->nty * sizeof(ctype), (size_t)c->nty * 8 * sizeof(uint32_t),
+		(size_t)c->nparams * sizeof(qty), (size_t)c->ntag * sizeof(tag), (size_t)c->nsym * sizeof(sym),
+		(size_t)c->nnode * sizeof(node), (size_t)c->nlist * sizeof(uint32_t), (size_t)c->nipool * sizeof(i128),
+		(size_t)c->nfpool * sizeof(double), (size_t)c->nstr * sizeof(cstr), (size_t)c->nlabel * sizeof(label),
+		(size_t)c->nattr * sizeof(attrs), (size_t)c->nasm * sizeof(casm), 0,
+		(size_t)c->ntoplevel * sizeof(uint32_t), (size_t)c->ntlasm * sizeof(uint32_t), (size_t)(c->hp - c->heap),
+	};
+
+	for (size_t i = 0; i < NARENA; i++) {
+		void *a = *arena_field(c, i);
+
+		if (used[i] <= AR_KEEP && !tl_arena[i]) {
+			memset(a, 0, used[i]);
+			tl_arena[i] = a;
+		} else {
+			munmap(a, (size_t)1 << arenas[i].shift);
+		}
+	}
 }
 
 static void init_tables(void)
