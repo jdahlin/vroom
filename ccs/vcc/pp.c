@@ -1250,7 +1250,7 @@ static void top_event(pp *p, const void *e, uint32_t base, unsigned ctr, uint8_t
 }
 
 /* the next token, no macro expansion; runs directives in file contexts */
-static void raw(pp *p, ptok *t)
+static __attribute__((noinline)) void raw(pp *p, ptok *t)
 {
 	for (;;) {
 		ctx *c = &p->cx[p->depth - 1];
@@ -1320,6 +1320,35 @@ static void raw(pp *p, ptok *t)
 	}
 }
 
+/* raw(), inline: a macro context's next token with nothing owed (most tokens) */
+static inline __attribute__((always_inline)) void raw_fast(pp *p, ptok *t)
+{
+	ctx *c = &p->cx[p->depth - 1];
+
+	if (likely(c->i < c->n && !(c->first | p->pend))) {
+		if (likely(c->type == C_PTOK)) {
+			*t = c->pt[c->i++];
+			return;
+		}
+		if (c->type == C_VTOK) {
+			const vtok *v = &c->vt[c->i++];
+
+			vfill(t, v, c->src, c->offloc ? c->loc + v->off : c->loc);
+			return;
+		}
+		if (c->type == C_FILE) {
+			const vtok *v = &c->vt[c->i];
+
+			if (likely(!((v->flags & TF_SOL) && v->kind == T_HASH))) {
+				c->i++;
+				vfill(t, v, c->src, c->loc + v->off);
+				return;
+			}
+		}
+	}
+	raw(p, t);
+}
+
 /* is the next token '(' ?  (clang's isNextPPTokenLParen: no popping) */
 static bool peek_lparen(const pp *p)
 {
@@ -1343,7 +1372,7 @@ static void next_exp(pp *p, ptok *t)
 		uintptr_t e;
 		const pmacro *m;
 
-		raw(p, t);
+		raw_fast(p, t);
 		if (t->kind != T_IDENT || (t->flags & PF_NOEXP))
 			return;
 		e = mread_tok(p, t, 0);
@@ -1384,7 +1413,7 @@ static bool collect_(pp *p, const pmacro *m, const ptok *name, margs *a, ptok *r
 	raw(p, &t);		/* '(' */
 	a->st[0] = 0;
 	for (;;) {
-		raw(p, &t);
+		raw_fast(p, &t);
 		if (unlikely(t.kind == T_EOF)) {
 			error(p, name->loc, "unterminated function-like macro invocation");
 			p->svn = base;
