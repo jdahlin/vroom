@@ -6658,20 +6658,50 @@ static const struct { size_t off; uint8_t shift; } arenas[] = {
 };
 #undef AR
 #define NARENA (sizeof(arenas) / sizeof(arenas[0]))
-static _Thread_local void *tl_arena[NARENA];
+
+/* a thread's cached arenas (thread-specific data: unmapped when the thread exits) */
+typedef struct arena_cache { void *p[NARENA]; } arena_cache;
+static pthread_key_t ar_key;
+static pthread_once_t ar_once = PTHREAD_ONCE_INIT;
+
+static void ar_drop(void *v)
+{
+	arena_cache *ac = v;
+
+	for (size_t i = 0; i < NARENA; i++)
+		if (ac->p[i])
+			munmap(ac->p[i], (size_t)1 << arenas[i].shift);
+	free(ac);
+}
+
+static void ar_key_init(void) { pthread_key_create(&ar_key, ar_drop); }
+
+static arena_cache *ar_cache(void)
+{
+	arena_cache *ac;
+
+	pthread_once(&ar_once, ar_key_init);
+	ac = pthread_getspecific(ar_key);
+	if (!ac && (ac = calloc(1, sizeof(*ac))))
+		pthread_setspecific(ar_key, ac);
+	return ac;
+}
 
 static void **arena_field(cc *c, size_t i) { return (void **)((char *)c + arenas[i].off); }
 
 static void cc_init(cc *c, pp *p, const cc_opts *o)
 {
+	arena_cache *ac = ar_cache();
+
 	memset(c, 0, sizeof(*c));
 	c->p = p;
 	c->o = o;
 	for (size_t i = 0; i < NARENA; i++) {
-		void *a = tl_arena[i];
+		void *a = ac ? ac->p[i] : NULL;
 
 		*arena_field(c, i) = a ? a : reserve((size_t)1 << arenas[i].shift);
-		tl_arena[i] = NULL;	/* (taken: a TU that bails out keeps its own) */
+		if (ac)
+			ac->p[i] = NULL;	/* (taken until cc_free) */
 	}
 	c->hp = c->heap;
 	c->hend = c->heap + ((size_t)1 << 32);
@@ -6762,13 +6792,14 @@ static void cc_free(cc *c)
 		(size_t)c->nattr * sizeof(attrs), (size_t)c->nasm * sizeof(casm), 0,
 		(size_t)c->ntoplevel * sizeof(uint32_t), (size_t)c->ntlasm * sizeof(uint32_t), (size_t)(c->hp - c->heap),
 	};
+	arena_cache *ac = ar_cache();
 
 	for (size_t i = 0; i < NARENA; i++) {
 		void *a = *arena_field(c, i);
 
-		if (used[i] <= AR_KEEP && !tl_arena[i]) {
+		if (ac && used[i] <= AR_KEEP && !ac->p[i]) {
 			memset(a, 0, used[i]);
-			tl_arena[i] = a;
+			ac->p[i] = a;
 		} else {
 			munmap(a, (size_t)1 << arenas[i].shift);
 		}
