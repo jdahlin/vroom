@@ -1142,6 +1142,9 @@ typedef struct rctx {
 	uint32_t *loff;			/* direct labels: word offset in the function */
 	uint32_t *wb;			/* direct functions: the words, before they go to the frag */
 	struct rpatch *pt;		/* ... and the records with a fixup */
+	uint32_t *lsym, *lser, ser;	/* functions with inline asm: label -> .LBB symbol (valid if lser == ser) */
+	struct rlab *lab;		/* ... label state */
+	struct rpend *pend;		/* ... branches waiting for their label */
 	tbuf nb;			/* name scratch */
 } rctx;
 
@@ -1167,9 +1170,12 @@ static uint32_t r_sym(rctx *R, uint32_t ref)
 
 static uint32_t r_label(rctx *R, uint32_t fid, uint32_t l)
 {
+	if (R->lser[l] == R->ser)
+		return R->lsym[l];
 	R->nb.n = 0;
 	p_lbl(&R->nb, fid, l);
-	return as_sym(R->as, R->nb.p, R->nb.n);
+	R->lser[l] = R->ser;
+	return R->lsym[l] = as_sym(R->as, R->nb.p, R->nb.n);
 }
 
 /* a pending fixup on word k of an instruction */
@@ -1459,6 +1465,53 @@ static void r_words(rctx *R, uint32_t frag, const uint32_t *w, unsigned n, const
 	}
 }
 
+static inline int hexval(char ch)
+{
+	return ch >= '0' && ch <= '9' ? ch - '0' : ch >= 'a' && ch <= 'f' ? ch - 'a' + 10 : -1;	/* tb_x: lower case */
+}
+
+/* per label of a function with inline asm (valid if ser == rctx.ser) */
+enum { RL_NAMED = 1, RL_PLACED = 2, RL_DEFSYM = 4 };
+typedef struct rlab { uint32_t ser, flags, frag, off, pend; } rlab;
+typedef struct rpend { uint32_t next, k, frag, off; uint8_t *p; } rpend;	/* a branch waiting for its label */
+
+static inline rlab *r_lab(rctx *R, uint32_t l)
+{
+	rlab *L = &R->lab[l];
+
+	if (L->ser != R->ser)
+		*L = (rlab){ R->ser, 0, 0, 0, 0 };
+	return L;
+}
+
+/* the branch record i at (frag, off, p) to placed label L */
+static bool r_branch(rctx *R, uint32_t fid, const ins *i, rlab *L, uint32_t frag, uint32_t off, uint8_t *p)
+{
+	uint32_t w[4];
+	pfix f;
+
+	if (L->frag == frag && !(L->off & 3) && !(off & 3)) {
+		R->loff[i->label] = L->off / 4;
+		enc(i, w, &f, R->loff, off / 4);
+		memcpy(p, w, 4);
+		return true;
+	}
+	{
+		uint32_t y = r_label(R, fid, i->label);
+
+		if (!(L->flags & RL_DEFSYM)) {
+			if (elf_symp(R->o, y)->flags & ESYM_DEFINED)
+				return r_fail(R, "invalid symbol redefinition") == 0;
+			elf_define(R->o, y, L->frag, L->off);
+			L->flags |= RL_DEFSYM;
+		}
+		enc(i, w, &f, NULL, 0);
+		memcpy(p, w, 4);
+		elf_fixup(R->o, frag, off, p, f.type, as_val(R->as, y, 0));
+	}
+	return true;
+}
+
 static int r_code(rctx *R, const code_hdr *h)
 {
 	const ins *in = (const ins *)(h + 1);
@@ -1523,31 +1576,107 @@ static int r_code(rctx *R, const code_hdr *h)
 		}
 		return 0;
 	}
-	/* inline asm: in order, labels are symbols */
-	for (uint32_t k = 0; k < h->nin; k++) {
-		const ins *i = &in[k];
-		unsigned n;
+	/*
+	 * Inline asm: in order.  Labels the asm text names (asm goto) are
+	 * symbols; branches to the others are resolved here when label and
+	 * branch end up in the same frag, else through the label's symbol.
+	 */
+	{
+		ElfObj *o = R->o;
+		uint32_t npend = 0;
 
-		if (i->op == I_RAW) {
-			if (as_snippet(R->as, raw + i->off, i->ref))
-				return -1;
-			continue;
-		}
-		if (i->op == I_LABEL) {
-			if (as_label(R->as, r_label(R, h->fid, i->label)))
-				return -1;
-			continue;
-		}
-		n = enc(i, w, &f, NULL, 0);
-		if (unlikely(i->op == I_MRS)) {
-			int r = a64_sysreg(R->c->strs[i->ref].s, strlen(R->c->strs[i->ref].s), 0);
+		R->ser++;
+		for (const char *q = raw, *qe = raw + h->nraw; (q = memmem(q, (size_t)(qe - q), ".LBB", 4)); ) {
+			uint32_t fid = 0, l = 0;
+			const char *d = q += 4;
 
-			if (r < 0)
-				return r_fail(R, "mrs: expected readable system register");
-			w[0] = 0xd5200000u | ((unsigned)r & 0xffff) << 5 | R5(i->rd);
+			for (int v; q < qe && (v = hexval(*q)) >= 0; q++)
+				fid = fid * 16 + (uint32_t)v;
+			if (q == d || q >= qe || *q != '_' || fid != h->fid)
+				continue;
+			d = ++q;
+			for (int v; q < qe && (v = hexval(*q)) >= 0; q++)
+				l = l * 16 + (uint32_t)v;
+			if (q > d && l < h->nlabel) {
+				rlab *L = r_lab(R, l);
+
+				L->flags |= RL_NAMED;
+			}
 		}
-		if (n)
-			r_words(R, as_frag(R->as), w, n, &f, h->fid, i);
+		for (uint32_t k = 0; k < h->nin; k++) {
+			const ins *i = &in[k];
+			unsigned n;
+
+			if (i->op == I_RAW) {
+				if (as_snippet(R->as, raw + i->off, i->ref))
+					return -1;
+				continue;
+			}
+			if (i->op == I_LABEL) {
+				rlab *L = r_lab(R, i->label);
+				uint32_t frag = as_frag(R->as);
+
+				if (L->flags & RL_NAMED) {
+					if (as_label(R->as, r_label(R, h->fid, i->label)))
+						return -1;
+					continue;
+				}
+				L->flags |= RL_PLACED;
+				L->frag = frag;
+				L->off = (uint32_t)elf_frag(o, frag)->size;
+				for (uint32_t j = L->pend; j; j = R->pend[j - 1].next) {
+					const rpend *pd = &R->pend[j - 1];
+
+					if (!r_branch(R, h->fid, &in[pd->k], L, pd->frag, pd->off, pd->p))
+						return -1;
+				}
+				continue;
+			}
+			if (i->op == I_ADR || i->op == I_B || i->op == I_BC || i->op == I_CBZ || i->op == I_CBNZ) {
+				rlab *L = r_lab(R, i->label);
+
+				if (!(L->flags & RL_NAMED)) {
+					uint32_t frag = as_frag(R->as), off;
+					uint8_t *p;
+
+					elf_code(o, frag);
+					off = (uint32_t)elf_frag(o, frag)->size;
+					p = elf_grow(o, frag, 4);
+					if (L->flags & RL_PLACED) {
+						if (!r_branch(R, h->fid, i, L, frag, off, p))
+							return -1;
+					} else {
+						rpend *pd = &R->pend[npend++];
+
+						*pd = (rpend){ L->pend, k, frag, off, p };
+						L->pend = npend;
+						enc(i, w, &f, NULL, 0);
+						memcpy(p, w, 4);
+					}
+					continue;
+				}
+			}
+			n = enc(i, w, &f, NULL, 0);
+			if (unlikely(i->op == I_MRS)) {
+				int r = a64_sysreg(R->c->strs[i->ref].s, strlen(R->c->strs[i->ref].s), 0);
+
+				if (r < 0)
+					return r_fail(R, "mrs: expected readable system register");
+				w[0] = 0xd5200000u | ((unsigned)r & 0xffff) << 5 | R5(i->rd);
+			}
+			if (n)
+				r_words(R, as_frag(R->as), w, n, &f, h->fid, i);
+		}
+		/* branches to labels never placed: through the (undefined) symbol, as the text would */
+		for (uint32_t j = 0; j < npend; j++) {
+			const rpend *pd = &R->pend[j];
+			const ins *i = &in[pd->k];
+
+			if (!(r_lab(R, i->label)->flags & RL_PLACED)) {
+				enc(i, w, &f, NULL, 0);
+				elf_fixup(o, pd->frag, pd->off, pd->p, f.type, as_val(R->as, r_label(R, h->fid, i->label), 0));
+			}
+		}
 	}
 	return 0;
 }
@@ -7392,7 +7521,9 @@ static void as_error(cc *c, const char *fmt, ...)
 /* the object backend: header text, chunks (items), tail text */
 static int replay(cc *c, const cc_opts *o, const char *hp, size_t hn, const char *tp, size_t tn, const chunk *ch, uint32_t nch)
 {
-	static _Thread_local uint32_t *loff, *cache, *wb;
+	static _Thread_local uint32_t *loff, *cache, *wb, *lsym, *lser, ser;
+	static _Thread_local rlab *lab;
+	static _Thread_local rpend *pend;
 	static _Thread_local rpatch *pt;
 	static _Thread_local size_t ncache;
 	size_t need = (size_t)c->nsym + c->nstr + c->nlabel + 192;
@@ -7404,6 +7535,10 @@ static int replay(cc *c, const cc_opts *o, const char *hp, size_t hn, const char
 	if (!loff) {
 		loff = reserve((size_t)1 << 32);	/* labels of one function */
 		wb = reserve((size_t)1 << 32);		/* words of one function (<= 6 per record) */
+		lsym = reserve((size_t)1 << 32);
+		lser = reserve((size_t)1 << 32);
+		lab = reserve((size_t)1 << 34);		/* per label */
+		pend = reserve((size_t)1 << 34);	/* per branch record */
 		pt = reserve((size_t)1 << 34);		/* fixups of one function (<= 1 per record) */
 		tb_init(&nb, 1 << 20);
 	}
@@ -7421,12 +7556,18 @@ static int replay(cc *c, const cc_opts *o, const char *hp, size_t hn, const char
 	R.lblc = R.strc + c->nstr + 64;
 	R.loff = loff;
 	R.wb = wb;
+	R.lsym = lsym;
+	R.lser = lser;
+	R.lab = lab;
+	R.pend = pend;
+	R.ser = ser;
 	R.pt = pt;
 	as_begin(R.as, R.o, "<vcc>");
 	if (as_snippet(R.as, hp, hn))
 		r = -1;
 	for (uint32_t i = 0; !r && i < nch; i++)
 		r = r_chunk(&R, ch[i].p, ch[i].n);
+	ser = R.ser;
 	if (!r && (as_snippet(R.as, tp, tn) || as_end(R.as)))
 		r = -1;
 	if (r || R.o->has_err || as_failed(R.as)) {
