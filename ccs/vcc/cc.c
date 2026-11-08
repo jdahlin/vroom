@@ -3080,6 +3080,19 @@ static __attribute__((noinline)) uint32_t stmt_expr(cc *c, uint32_t loc)
 	return n;
 }
 
+/* ( expression ) or a GNU statement expression; '(' (at loc) is consumed */
+static uint32_t paren_expr(cc *c, uint32_t loc)
+{
+	uint32_t n;
+
+	if (is(c, T_LBRACE))
+		return stmt_expr(c, loc);
+	n = expr(c);
+	expect(c, T_RPAREN, "')'");
+	N(n)->flags |= NF_PAREN;
+	return n;
+}
+
 static uint32_t primary(cc *c)
 {
 	ptok *t = tok(c);
@@ -3098,15 +3111,7 @@ static uint32_t primary(cc *c)
 		return string_lit(c);
 	case T_LPAREN:
 		next(c);
-		if (is(c, T_LBRACE))	/* GNU statement expression */
-			return stmt_expr(c, loc);
-		{
-			uint32_t n = expr(c);
-
-			expect(c, T_RPAREN, "')'");
-			N(n)->flags |= NF_PAREN;
-			return n;
-		}
+		return paren_expr(c, loc);
 	case T_IDENT: {
 		uint32_t id = t->id, s;
 		int kw = kwof(t);
@@ -3404,6 +3409,32 @@ static uint32_t align_of_expr(cc *c, uint32_t e)
 
 static uint32_t unary(cc *c);
 
+/* the operand of sizeof/_Alignof: "( type-name )" gives UINT32_MAX and *ty,
+   anything else the (unevaluated) unary expression; '(' is consumed before looking at the type */
+static uint32_t sizeof_operand(cc *c, qty *ty)
+{
+	uint32_t n;
+
+	if (is(c, T_LPAREN)) {
+		uint32_t ploc = tok(c)->loc;
+
+		next(c);
+		if (is_type_start(c, tok(c))) {
+			*ty = type_name(c);
+			expect(c, T_RPAREN, "')'");
+			return UINT32_MAX;
+		}
+		c->unevaluated++;
+		n = postfix(c, paren_expr(c, ploc));
+		c->unevaluated--;
+		return n;
+	}
+	c->unevaluated++;
+	n = unary(c);
+	c->unevaluated--;
+	return n;
+}
+
 static __attribute__((noinline)) uint32_t unary_op(cc *c)
 {
 	ptok *t = tok(c);
@@ -3481,13 +3512,11 @@ static __attribute__((noinline)) uint32_t unary_op(cc *c)
 	}
 	switch (kw) {
 	case KW_sizeof: {
-		next(c);
-		if (is(c, T_LPAREN) && is_type_start(c, peek(c, 1))) {
-			qty ty;
+		qty ty;
 
-			next(c);
-			ty = type_name(c);
-			expect(c, T_RPAREN, "')'");
+		next(c);
+		n = sizeof_operand(c, &ty);
+		if (n == UINT32_MAX) {
 			if (is(c, T_LBRACE)) {	/* sizeof (T){...} */
 				uint32_t init, s, cl;
 
@@ -3500,9 +3529,6 @@ static __attribute__((noinline)) uint32_t unary_op(cc *c)
 			}
 			return sizeof_type(c, ty, loc, 0);
 		}
-		c->unevaluated++;
-		n = unary(c);
-		c->unevaluated--;
 		if (bitfield_of(c, n))
 			error(c, loc, "invalid application of 'sizeof' to bit-field");
 		return sizeof_type(c, N(n)->ty, loc, n);
@@ -3510,20 +3536,15 @@ static __attribute__((noinline)) uint32_t unary_op(cc *c)
 	case KW__Alignof:
 	case KW___alignof__:
 	case KW___alignof: {
-		next(c);
-		if (is(c, T_LPAREN) && is_type_start(c, peek(c, 1))) {
-			qty ty;
+		qty ty;
 
-			next(c);
-			ty = type_name(c);
-			expect(c, T_RPAREN, "')'");
+		next(c);
+		n = sizeof_operand(c, &ty);
+		if (n == UINT32_MAX) {
 			while (is_array(c, ty))
 				ty = T(c, ty)->base;
 			return mk_int(c, ty_align(c, ty), c->t_size, loc);
 		}
-		c->unevaluated++;
-		n = unary(c);
-		c->unevaluated--;
 		return mk_int(c, align_of_expr(c, n), c->t_size, loc);
 	}
 	case KW___extension__:
@@ -3597,13 +3618,13 @@ static uint32_t explicit_cast(cc *c, uint32_t n, qty to, uint32_t loc)
 	return r;
 }
 
-static __attribute__((noinline)) uint32_t cast_paren(cc *c)
+/* (type-name) cast-expression or compound literal; '(' (at loc) is consumed */
+static __attribute__((noinline)) uint32_t cast_paren(cc *c, uint32_t loc)
 {
 	{
-		uint32_t loc = tok(c)->loc, n;
+		uint32_t n;
 		qty ty;
 
-		next(c);
 		ty = type_name(c);
 		expect(c, T_RPAREN, "')'");
 		if (is(c, T_LBRACE)) {	/* compound literal */
@@ -3627,8 +3648,15 @@ static __attribute__((noinline)) uint32_t cast_paren(cc *c)
 
 static uint32_t cast_expr(cc *c)
 {
-	if (is(c, T_LPAREN) && is_type_start(c, peek(c, 1)))
-		return cast_paren(c);
+	if (is(c, T_LPAREN)) {
+		/* consumed first: no lookahead token to shift out later */
+		uint32_t loc = tok(c)->loc;
+
+		next(c);
+		if (is_type_start(c, tok(c)))
+			return cast_paren(c, loc);
+		return postfix(c, paren_expr(c, loc));
+	}
 	return unary(c);
 }
 
