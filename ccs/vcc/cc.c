@@ -14,6 +14,7 @@
  * pointer constants depend on the difference: __is_constexpr), and the
  * types of builtins.
  */
+#include <math.h>
 #include <pthread.h>
 #include <setjmp.h>
 #include <stdarg.h>
@@ -4051,6 +4052,22 @@ static uint32_t call(cc *c, uint32_t fn, uint32_t loc)
 
 			return with_pre(c, pre, conditional(c, lt, neg, x, loc));
 		}
+		/* clang folds the libm functions on a constant (double f(double)) */
+		static const struct { const char *s; double (*f)(double); } mf[] = {
+			{ "sin", sin }, { "cos", cos }, { "tan", tan }, { "exp", exp }, { "log", log }, { "sqrt", sqrt },
+			{ "fabs", fabs }, { "floor", floor }, { "ceil", ceil }, { "log10", log10 }, { "atan", atan },
+		};
+		cval cv;
+
+		if (k == TY_DOUBLE && f->n == 1 && KIND(c, c->params[f->aux]) == TY_DOUBLE &&
+		    cc_eval(c, args.v[0], &cv) && cv.kind == CV_FLT)
+			for (size_t q = 0; q < sizeof(mf) / sizeof(mf[0]); q++)
+				if ((size_t)nl == strlen(mf[q].s) && !memcmp(nm, mf[q].s, (size_t)nl)) {
+					double r = mf[q].f(cv.f);
+
+					if (r == r && (q != 5 || cv.f >= 0) && (q != 4 && q != 9 ? 1 : cv.f > 0))
+						return mk_flt(c, r, prim(TY_DOUBLE), loc);
+				}
 	}
 	n = mk(c, N_CALL, QUNQ(T(c, ft)->base), loc);
 	N(n)->a = fn;

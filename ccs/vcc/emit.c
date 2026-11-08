@@ -99,7 +99,9 @@ static inline bool is_agg(cc *c, qty t) { return is_record(c, t) || is_array(c, 
 static inline uint64_t tsize(cc *c, qty t) { return T(c, t)->size; }
 static inline uint32_t talign(cc *c, qty t) { return T(c, t)->align; }
 static inline bool is_signed(cc *c, qty t) { return cc_is_signed(c, t); }
-static inline bool is_wide(cc *c, qty t) { return is_integer(c, t) && tsize(c, t) == 16; }
+/* long double: binary128, kept as its bits in a register pair (arithmetic: the __*tf* helpers) */
+static inline bool is_ld(cc *c, qty t) { return is_flt(c, t) && tsize(c, t) == 16; }
+static inline bool is_wide(cc *c, qty t) { return (is_integer(c, t) || is_flt(c, t)) && tsize(c, t) == 16; }
 
 static i128 trunc_to(cc *c, i128 v, qty t)
 {
@@ -586,10 +588,18 @@ static const char *const fixed_names[] = {
 	"memcpy", "memset", "memmove", "__udivti3", "__divti3", "__umodti3", "__modti3", "strlen",
 	"__ashlti3", "__lshrti3", "__ashrti3", "__floattisf", "__floattidf", "__floatuntisf", "__floatuntidf",
 	"__fixsfti", "__fixdfti", "__fixunssfti", "__fixunsdfti",
+	"__addtf3", "__subtf3", "__multf3", "__divtf3", "__eqtf2", "__netf2", "__lttf2", "__letf2", "__gttf2", "__getf2",
+	"__extenddftf2", "__extendsftf2", "__trunctfdf2", "__trunctfsf2", "__floatsitf", "__floatditf", "__floatunsitf",
+	"__floatunditf", "__floattitf", "__floatuntitf", "__fixtfsi", "__fixtfdi", "__fixunstfsi", "__fixunstfdi",
+	"__fixtfti", "__fixunstfti",
 };
 enum { FN_MEMCPY, FN_MEMSET, FN_MEMMOVE, FN_UDIVTI3, FN_DIVTI3, FN_UMODTI3, FN_MODTI3, FN_STRLEN,
        FN_ASHLTI3, FN_LSHRTI3, FN_ASHRTI3, FN_FLOATTISF, FN_FLOATTIDF, FN_FLOATUNTISF, FN_FLOATUNTIDF,
-       FN_FIXSFTI, FN_FIXDFTI, FN_FIXUNSSFTI, FN_FIXUNSDFTI };
+       FN_FIXSFTI, FN_FIXDFTI, FN_FIXUNSSFTI, FN_FIXUNSDFTI,
+       FN_ADDTF3, FN_SUBTF3, FN_MULTF3, FN_DIVTF3, FN_EQTF2, FN_NETF2, FN_LTTF2, FN_LETF2, FN_GTTF2, FN_GETF2,
+       FN_EXTENDDFTF2, FN_EXTENDSFTF2, FN_TRUNCTFDF2, FN_TRUNCTFSF2, FN_FLOATSITF, FN_FLOATDITF, FN_FLOATUNSITF,
+       FN_FLOATUNDITF, FN_FLOATTITF, FN_FLOATUNTITF, FN_FIXTFSI, FN_FIXTFDI, FN_FIXUNSTFSI, FN_FIXUNSTFDI,
+       FN_FIXTFTI, FN_FIXUNSTFTI };
 #define FIXED(k) REF(RK_NAME, 0x8000000u + (k))
 
 static uint32_t canon_sym(cc *c, uint32_t s)
@@ -2223,6 +2233,8 @@ static void zero_mem(ecx *e, int dst, uint64_t n)
 static int fpk(ecx *e, qty t);
 static int f_cmp(ecx *e, int op, int d, val *a, val *b);
 static val f_tobool(ecx *e, val v, qty t);
+static val ld_compare(ecx *e, int op, qty t, val a, val b);
+static val ld_cast(ecx *e, val v, qty from, qty to);
 static val call_named(ecx *e, uint32_t ref, val *vals, qty *tys, int n, qty rty, bool noret);
 
 /* ---------------- AAPCS64 (floating point and HFAs in v0-v7) ---------------- */
@@ -2236,8 +2248,8 @@ static int hfa_walk(cc *c, qty t, int *base, uint64_t *n)
 {
 	const ctype *y = T(c, t);
 
-	if (y->kind == TY_FLOAT || y->kind == TY_DOUBLE) {
-		int b = y->kind == TY_FLOAT ? 4 : 8;
+	if (y->kind == TY_FLOAT || y->kind == TY_DOUBLE || (y->kind == TY_LDOUBLE && y->size == 16)) {
+		int b = (int)y->size;
 
 		if (*base && *base != b)
 			return 0;
@@ -2332,7 +2344,8 @@ static void classify(ecx *e, qty t, int *ngrn, int *nsaa, abiarg *a)
 	memset(a, 0, sizeof(*a));
 	a->size = (uint32_t)size;
 	if (is_flt(c, t)) {
-		(void)fpk(e, t);
+		if (!is_ld(c, t))
+			(void)fpk(e, t);
 		if (e->nsrn < 8) {
 			a->kind = A_VREG;
 			a->reg = (uint8_t)e->nsrn++;
@@ -2340,7 +2353,7 @@ static void classify(ecx *e, qty t, int *ngrn, int *nsaa, abiarg *a)
 			return;
 		}
 		e->nsrn = 8;
-		n = 1;
+		n = size == 16 ? 2 : 1;
 		goto stack;
 	}
 	if (is_recabi(c, t)) {
@@ -2471,6 +2484,7 @@ static inline int32_t keep_cl(const ecx *e, int32_t mark)
 	return mark > e->cl_top ? mark : e->cl_top;
 }
 static void gen_cond(ecx *e, uint32_t n, bool jump_if, uint32_t l);
+static int cond_fold(cc *c, uint32_t n);
 static val gen_block(ecx *e, uint32_t n, bool want);
 static void gen_init_local(ecx *e, const lval *dst, qty ty, uint32_t init);
 static void enqueue(emitter *E, uint32_t item);
@@ -2847,7 +2861,7 @@ static val load(ecx *e, lval *l, qty t)
 
 	if (is_agg(c, t) || is_func(c, t))
 		return laddr(e, l);
-	if (is_flt(c, t))
+	if (is_flt(c, t) && !is_ld(c, t))
 		fpk(e, t);	/* bits, zero-extended (below: not signed) */
 	if (l->k == L_GLOBREG) {
 		r = treg(e);
@@ -3119,6 +3133,11 @@ static int test_zero(ecx *e, val *v, qty t, uint32_t l, bool nz)
 	}
 	if (v->k == V_NONE)
 		return -1;
+	if (is_ld(c, t)) {
+		*v = ld_compare(e, T_EXCLAIMEQ, t, *v, vconst(0));
+		t = prim(TY_INT);
+		sz = 4;
+	}
 	if (is_flt(c, t)) {
 		int d = fpk(e, t), cond = f_cmp(e, T_EXCLAIMEQ, d, v, NULL);
 
@@ -3248,11 +3267,126 @@ static void f_load(ecx *e, int d, int vr, val *v)
 	word(e, f_in(d, vr, r));
 }
 
+/* fmov v<vr>.d[1], x<r> / fmov x<r>, v<vr>.d[1] */
+static inline uint32_t q_in_hi(int vr, int r) { return 0x9eaf0000u | (unsigned)r << 5 | (unsigned)vr; }
+static inline uint32_t q_out_hi(int r, int vr) { return 0x9eae0000u | (unsigned)vr << 5 | (unsigned)r; }
+
+/* an FP value of sz bytes (4, 8, 16) between v<vr> and memory at base + off, through x16 */
+static void vr_store(ecx *e, int sz, int vr, int base, int32_t off)
+{
+	word(e, f_out(sz >= 8, R_X16, vr));
+	mem(e, I_ST, sz >= 8 ? 3 : 2, 0, R_X16, base, off);
+	if (sz == 16) {
+		word(e, q_out_hi(R_X16, vr));
+		mem(e, I_ST, 3, 0, R_X16, base, off + 8);
+	}
+}
+static void vr_load(ecx *e, int sz, int vr, int base, int32_t off)
+{
+	mem(e, I_LD, sz >= 8 ? 3 : 2, 0, R_X16, base, off);
+	word(e, f_in(sz >= 8, vr, R_X16));
+	if (sz == 16) {
+		mem(e, I_LD, 3, 0, R_X16, base, off + 8);
+		word(e, q_in_hi(vr, R_X16));
+	}
+}
+
+/* host side: binary128 bits of a double (exact), of an integer (truncated), and back (nearest) */
+static i128 ld_of_d(double x)
+{
+	uint64_t u;
+	int s, ex;
+	u128 m;
+
+	memcpy(&u, &x, 8);
+	s = (int)(u >> 63), ex = (int)(u >> 52) & 0x7ff, m = u & ((1ull << 52) - 1);
+	if (ex == 0x7ff)
+		return (i128)((u128)s << 127 | (u128)0x7fff << 112 | m << 60 | (m ? (u128)1 << 111 : 0));
+	if (!ex) {
+		if (!m)
+			return (i128)((u128)s << 127);
+		ex = 1;
+		while (!(m >> 52))
+			m <<= 1, ex--;
+		m &= (1ull << 52) - 1;
+	}
+	return (i128)((u128)s << 127 | (u128)(ex - 1023 + 16383) << 112 | m << 60);
+}
+static i128 ld_of_u(int s, u128 m)
+{
+	int t = 127;
+
+	if (!m)
+		return (i128)((u128)s << 127);
+	while (!(m >> t))
+		t--;
+	m = t <= 112 ? m << (112 - t) : m >> (t - 112);
+	return (i128)((u128)s << 127 | (u128)(16383 + t) << 112 | (m & (((u128)1 << 112) - 1)));
+}
+static double ld_to_d(i128 b)
+{
+	u128 u = (u128)b, m = u & (((u128)1 << 112) - 1);
+	int ex = (int)(u >> 112) & 0x7fff;
+	double x;
+
+	if (ex == 0x7fff)
+		x = m ? __builtin_nan("") : __builtin_inf();
+	else
+		x = __builtin_ldexp((double)(m | (ex ? (u128)1 << 112 : 0)), (ex ? ex : 1) - 16383 - 112);
+	return u >> 127 ? -x : x;
+}
+
+/* a floating constant of type t */
+static val f_const_t(ecx *e, qty t, double x)
+{
+	if (is_ld(e->c, t))
+		return vconst(ld_of_d(x));
+	return f_const(fpk(e, t), x);
+}
+
+static val ld_call(ecx *e, int fn, val *v, qty *t, int n, qty rty)
+{
+	return call_named(e, FIXED(fn), v, t, n, rty, false);
+}
+
+static val ld_compare(ecx *e, int op, qty t, val a, val b)
+{
+	val v[2] = { a, b };
+	qty ts[2] = { t, t };
+	int fn, cond, r;
+	val res;
+
+	switch (op) {
+	case T_EQUALEQUAL: fn = FN_EQTF2, cond = C_EQ; break;
+	case T_EXCLAIMEQ: fn = FN_NETF2, cond = C_NE; break;
+	case T_LESS: fn = FN_LTTF2, cond = C_LT; break;
+	case T_LESSEQ: fn = FN_LETF2, cond = C_LE; break;
+	case T_GREATER: fn = FN_GTTF2, cond = C_GT; break;
+	case T_GREATEREQ: fn = FN_GETF2, cond = C_GE; break;
+	default: efatal(e, e->curloc, "unsupported floating point comparison");
+	}
+	res = ld_call(e, fn, v, ts, 2, prim(TY_INT));
+	r = toreg(e, &res);
+	opi(e, I_SUBSI, 0, ZR, r, 0);
+	cset(e, r, cond);
+	return vreg(r);
+}
+
 static val f_arith(ecx *e, int op, qty ty, val a, val b)
 {
-	int d = fpk(e, ty), ra;
+	int d, ra;
 	uint32_t w;
 
+	if (is_ld(e->c, ty)) {
+		val v[2] = { a, b };
+		qty ts[2] = { ty, ty };
+		int fn = op == T_PLUS ? FN_ADDTF3 : op == T_MINUS ? FN_SUBTF3 : op == T_STAR ? FN_MULTF3 : FN_DIVTF3;
+
+		if (op != T_PLUS && op != T_MINUS && op != T_STAR && op != T_SLASH)
+			efatal(e, e->curloc, "unsupported floating point operator");
+		return ld_call(e, fn, v, ts, 2, ty);
+	}
+	d = fpk(e, ty);
 	if (a.k == V_CONST && b.k == V_CONST) {
 		double x = f_val(d, a.i), y = f_val(d, b.i);
 
@@ -3302,7 +3436,11 @@ static int f_cmp(ecx *e, int op, int d, val *a, val *b)
 
 static val f_compare(ecx *e, int op, qty t, val a, val b)
 {
-	int d = fpk(e, t), cond;
+	int d, cond;
+
+	if (is_ld(e->c, t))
+		return ld_compare(e, op, t, a, b);
+	d = fpk(e, t);
 
 	if (a.k == V_CONST && b.k == V_CONST) {
 		double x = f_val(d, a.i), y = f_val(d, b.i);
@@ -3325,7 +3463,14 @@ static val f_compare(ecx *e, int op, qty t, val a, val b)
 /* x != 0.0 as 0/1 (NaN is true, -0.0 false) */
 static val f_tobool(ecx *e, val v, qty t)
 {
-	int d = fpk(e, t);
+	int d;
+
+	if (is_ld(e->c, t)) {
+		if (v.k == V_CONST)
+			return vconst(((u128)v.i << 1) != 0);
+		return ld_compare(e, T_EXCLAIMEQ, t, v, vconst(0));
+	}
+	d = fpk(e, t);
 
 	if (v.k == V_CONST)
 		return vconst(f_val(d, v.i) != 0);
@@ -3336,7 +3481,16 @@ static val f_tobool(ecx *e, val v, qty t)
 
 static val f_neg(ecx *e, val v, qty t)
 {
-	int d = fpk(e, t);
+	int d;
+
+	if (is_ld(e->c, t)) {
+		if (v.k == V_CONST)
+			return vconst((i128)((u128)v.i ^ (u128)1 << 127));
+		toreg2(e, &v, false);
+		opi(e, I_EORI, 1, v.r2, v.r2, (int64_t)0x8000000000000000ULL);
+		return v;
+	}
+	d = fpk(e, t);
 
 	if (v.k == V_CONST)
 		return f_const(d, -f_val(d, v.i));
@@ -3344,6 +3498,72 @@ static val f_neg(ecx *e, val v, qty t)
 	word(e, 0x1e214000u | (unsigned)d << 22 | FV0 << 5 | FV0);
 	word(e, f_out(d, v.r, FV0));
 	return v;
+}
+
+/* conversions to and from long double (one side is long double, the other not bool) */
+static val ld_cast(ecx *e, val v, qty from, qty to)
+{
+	cc *c = e->c;
+	bool ff = is_flt(c, from), tf = is_flt(c, to);
+
+	if (ff && tf) {
+		if (is_ld(c, from) && is_ld(c, to))
+			return v;
+		if (is_ld(c, to)) {
+			if (v.k == V_CONST)
+				return vconst(ld_of_d(f_val(fpk(e, from), v.i)));
+			return ld_call(e, fpk(e, from) ? FN_EXTENDDFTF2 : FN_EXTENDSFTF2, &v, &from, 1, to);
+		}
+		if (v.k == V_CONST)
+			return f_const(fpk(e, to), ld_to_d(v.i));
+		return ld_call(e, fpk(e, to) ? FN_TRUNCTFDF2 : FN_TRUNCTFSF2, &v, &from, 1, to);
+	}
+	if (tf) {
+		uint64_t fs = tsize(c, from);
+		bool sg = !is_ptr(c, from) && is_signed(c, from);
+		qty at;
+		int fn;
+
+		if (v.k == V_CONST) {
+			i128 x = trunc_to(c, v.i, from);
+
+			return vconst(sg && x < 0 ? ld_of_u(1, -(u128)x) : ld_of_u(0, (u128)x));
+		}
+		if (fs == 16) {
+			fn = sg ? FN_FLOATTITF : FN_FLOATUNTITF, at = sg ? prim(TY_INT128) : prim(TY_UINT128);
+		} else if (fs == 8) {
+			fn = sg ? FN_FLOATDITF : FN_FLOATUNDITF, at = sg ? prim(TY_LONG) : prim(TY_ULONG);
+		} else {
+			toreg(e, &v);
+			if (fs < 4)
+				extend(e, v.r, v.r, (int)fs, sg);
+			fn = sg ? FN_FLOATSITF : FN_FLOATUNSITF, at = sg ? prim(TY_INT) : prim(TY_UINT);
+		}
+		return ld_call(e, fn, &v, &at, 1, to);
+	}
+	{
+		uint64_t ts = tsize(c, to);
+		bool sg = !is_ptr(c, to) && is_signed(c, to);
+		int fn;
+		qty rt;
+		val r;
+
+		if (v.k == V_CONST) {
+			double x = ld_to_d(v.i);
+
+			return vconst(trunc_to(c, sg ? (i128)x : (i128)(u128)x, to));
+		}
+		if (ts == 16)
+			return ld_call(e, sg ? FN_FIXTFTI : FN_FIXUNSTFTI, &v, &from, 1, to);
+		fn = ts == 8 ? (sg ? FN_FIXTFDI : FN_FIXUNSTFDI) : (sg ? FN_FIXTFSI : FN_FIXUNSTFSI);
+		rt = ts == 8 ? (sg ? prim(TY_LONG) : prim(TY_ULONG)) : (sg ? prim(TY_INT) : prim(TY_UINT));
+		r = ld_call(e, fn, &v, &from, 1, rt);
+		if (ts < 4) {
+			toreg(e, &r);
+			extend(e, r.r, r.r, (int)ts, sg);
+		}
+		return r;
+	}
 }
 
 static val f_cast(ecx *e, val v, qty from, qty to)
@@ -3355,6 +3575,8 @@ static val f_cast(ecx *e, val v, qty from, qty to)
 		return v;
 	if (KIND(c, to) == TY_BOOL)
 		return f_tobool(e, v, from);
+	if (is_ld(c, from) || is_ld(c, to))
+		return ld_cast(e, v, from, to);
 	if (ff && tf) {
 		int fd = fpk(e, from), td = fpk(e, to);
 
@@ -3860,13 +4082,15 @@ static val do_call(ecx *e, uint32_t ref, val *fnv, carg *args, int n, qty rty, b
 			break;
 		case A_VREG:
 			arg_word(e, a, 0, R_X16);
-			word(e, f_in(a->a.size == 8, a->a.reg, R_X16));
+			word(e, f_in(a->a.size >= 8, a->a.reg, R_X16));
+			if (a->a.size == 16) {
+				arg_word(e, a, 1, R_X16);
+				word(e, q_in_hi(a->a.reg, R_X16));
+			}
 			break;
 		case A_HFA:
-			for (int k = 0; k < a->a.nreg; k++) {
-				mem(e, I_LD, log2sz(a->a.fsz), 0, R_X16, FRAME, a->slot + a->a.fsz * k);
-				word(e, f_in(a->a.fsz == 8, a->a.reg + k, R_X16));
-			}
+			for (int k = 0; k < a->a.nreg; k++)
+				vr_load(e, a->a.fsz, a->a.reg + k, FRAME, a->slot + a->a.fsz * k);
 			break;
 		}
 	}
@@ -3887,13 +4111,11 @@ static val do_call(ecx *e, uint32_t ref, val *fnv, carg *args, int n, qty rty, b
 		res = vreg(r);
 	} else if (is_recabi(c, rty) && hfa(c, rty, &hn)) {
 		int hb = hfa(c, rty, &hn);
-		int32_t sl = slot(e, 32, 16);
+		int32_t sl = slot(e, 64, 16);
 		int r = treg(e);
 
-		for (int k = 0; k < hn; k++) {
-			word(e, f_out(hb == 8, R_X16, k));
-			mem(e, I_ST, log2sz(hb), 0, R_X16, FRAME, sl + hb * k);
-		}
+		for (int k = 0; k < hn; k++)
+			vr_store(e, hb, k, FRAME, sl + hb * k);
 		opi(e, I_ADDI, 1, r, FRAME, sl);
 		res = vreg(r);
 	} else if (is_recabi(c, rty)) {
@@ -3905,6 +4127,12 @@ static val do_call(ecx *e, uint32_t ref, val *fnv, carg *args, int n, qty rty, b
 			mem(e, I_ST, 3, 0, 1, FRAME, sl + 8);
 		opi(e, I_ADDI, 1, r, FRAME, sl);
 		res = vreg(r);
+	} else if (is_ld(c, rty)) {
+		res.k = V_REG2;
+		res.r = (uint8_t)treg(e);
+		res.r2 = (uint8_t)treg(e);
+		word(e, f_out(1, res.r, 0));
+		word(e, q_out_hi(res.r2, 0));
 	} else if (tsize(c, rty) == 16 && !is_flt(c, rty)) {
 		res.k = V_REG2;
 		res.r = (uint8_t)treg(e);
@@ -4533,8 +4761,6 @@ static val va_arg_(ecx *e, const node *x)
 	} else {
 	if (is_flt(c, t)) {
 		/* __vr_offs / __vr_top, 16 bytes a register */
-		if (size > 8)
-			efatal(e, x->loc, "128-bit floating point va_arg is not supported");
 		mem(e, I_LD, 2, 1, off, ra, 28);
 		opi(e, I_SUBSI, 1, ZR, off, 0);
 		bcond(e, C_GE, lstack);
@@ -4545,15 +4771,15 @@ static val va_arg_(ecx *e, const node *x)
 		mem(e, I_LD, 3, 0, addr, ra, 16);
 		op3(e, I_ADD, 1, addr, addr, off);
 		jump(e, ldone);
-		nreg = 1;
-		al16 = false;
+		nreg = size > 8 ? 2 : 1;
+		al16 = size > 8;
 		goto stack;
 	}
 	int hn, hb = hfa(c, t, &hn);
 
 	if (hb) {
 		/* an HFA: hn v registers, copied together into a temporary */
-		int32_t sl = slot(e, 32, 16);
+		int32_t sl = slot(e, 64, 16);
 
 		mem(e, I_LD, 2, 1, off, ra, 28);
 		opi(e, I_SUBSI, 1, ZR, off, 0);
@@ -4564,10 +4790,13 @@ static val va_arg_(ecx *e, const node *x)
 		bcond(e, C_GT, lstack);
 		mem(e, I_LD, 3, 0, addr, ra, 16);
 		op3(e, I_ADD, 1, addr, addr, off);
-		for (int k = 0; k < hn; k++) {
-			mem(e, I_LD, log2sz(hb), 0, R_X16, addr, 16 * k);
-			mem(e, I_ST, log2sz(hb), 0, R_X16, FRAME, sl + hb * k);
-		}
+		for (int k = 0; k < hn; k++)
+			for (int w = 0; w < hb; w += 8) {
+				int lg = hb >= 8 ? 3 : 2;
+
+				mem(e, I_LD, lg, 0, R_X16, addr, 16 * k + w);
+				mem(e, I_ST, lg, 0, R_X16, FRAME, sl + hb * k + w);
+			}
 		opi(e, I_ADDI, 1, addr, FRAME, sl);
 		jump(e, ldone);
 		nreg = (int)((size + 7) / 8);
@@ -5043,15 +5272,40 @@ runtime:
 			return vconst(cv.i);
 		/* on the bit pattern: sign out (<< 1), then the exponent against all ones */
 		qty at = N(arg[0])->ty;
-		int d = fpk(e, at), bits = d ? 64 : 32, mant = d ? 52 : 23, r;
+		bool ld = is_ld(c, at);
+		int d = ld || fpk(e, at), bits = d ? 64 : 32, mant = ld ? 48 : d ? 52 : 23, r;
 
 		v = gen(e, arg[0]);
-		r = toreg(e, &v);
+		if (ld) {
+			/* the high word, with a nonzero low word as a sticky bit 0 (below the shift) */
+			toreg2(e, &v, false);
+			r = v.r2;
+			if (x->aux != BI_SIGNBIT) {
+				opi(e, I_SUBSI, 1, ZR, v.r, 0);
+				cset(e, v.r, C_NE);
+				shift_imm(e, T_LESSLESS, 1, r, r, 1);
+				op3(e, I_ORR, 1, r, r, v.r);
+				tfree(e, v.r);
+				if (x->aux == BI_ISNORMAL) {
+					shift_imm(e, I_LSRV, 1, r, r, mant + 1);
+					opi(e, I_SUBI, 1, r, r, 1);
+					opi(e, I_SUBSI, 1, ZR, r, 0x7fff - 1);
+					cset(e, r, C_LO);
+					return vreg(r);
+				}
+				opi(e, I_SUBSI, 1, ZR, r, (int64_t)0xfffe000000000000ULL);
+				cset(e, r, x->aux == BI_ISNAN ? C_HI : x->aux == BI_ISINF ? C_EQ : C_LO);
+				return vreg(r);
+			}
+			tfree(e, v.r);
+		} else {
+			r = toreg(e, &v);
+		}
 		if (x->aux == BI_SIGNBIT) {
 			shift_imm(e, I_LSRV, d, r, r, bits - 1);
 			return vreg(r);
 		}
-		shift_imm(e, I_LSLV, d, r, r, 1);
+		shift_imm(e, T_LESSLESS, d, r, r, 1);
 		if (x->aux == BI_ISNORMAL) {
 			shift_imm(e, I_LSRV, d, r, r, mant + 1);
 			opi(e, I_SUBI, d, r, r, 1);
@@ -5069,7 +5323,7 @@ runtime:
 		if (cc_eval(c, n, &cv) && cv.kind == CV_INT)
 			return vconst(cv.i);
 		if (cc_eval(c, n, &cv) && cv.kind == CV_FLT && is_flt(c, x->ty))
-			return f_const(fpk(e, x->ty), cv.f);
+			return f_const_t(e, x->ty, cv.f);
 		efatal(e, x->loc, "unsupported builtin (%d)", x->aux);
 	}
 	}
@@ -5086,6 +5340,9 @@ static val const_global(ecx *e, uint32_t s)
 	if (y->kind == S_VAR && (QQ(y->ty) & (Q_CONST | Q_VOLATILE)) == Q_CONST && is_integer(c, y->ty) && y->body &&
 	    N(y->body)->op != N_INIT && cc_eval(c, y->body, &cv) && cv.kind == CV_INT)
 		return vconst(trunc_to(c, cv.i, y->ty));
+	if (y->kind == S_VAR && (QQ(y->ty) & (Q_CONST | Q_VOLATILE)) == Q_CONST && is_flt(c, y->ty) &&
+	    tsize(c, y->ty) != 2 && y->body && N(y->body)->op != N_INIT && cc_eval(c, y->body, &cv) && cv.kind == CV_FLT)
+		return f_const_t(e, y->ty, cv.f);
 	return vnone();
 }
 
@@ -5427,8 +5684,12 @@ static val gen_binary(ecx *e, uint32_t n)
 	const node *x = N(n);
 	int op = x->aux;
 	qty lt = N(x->a)->ty, rt = N(x->b)->ty, ty = x->ty;
-	val a = gen(e, x->a), b = gen(e, x->b);
+	int known = is_cmp(op) ? cond_fold(c, n) : -1;
+	val a, b;
 
+	if (known >= 0)
+		return vconst(known);
+	a = gen(e, x->a), b = gen(e, x->b);
 	if (is_vec(c, ty) && !vbin_fast(c, op, lt, rt, ty))
 		return gen_vlanes(e, op, lt, &a, rt, &b, ty, false);
 	if (is_vec(c, ty)) {
@@ -5507,6 +5768,12 @@ static val gen_binary(ecx *e, uint32_t n)
 			v = fold_int_bin(e, op, lt, ty, a.i, b.i, &ok);
 		if (ok)
 			return v;
+	}
+	/* 0 << x, 0 >> x, -1 >> x (signed): the constant, whatever x is */
+	if ((op == T_LESSLESS || op == T_GREATERGREATER) && a.k == V_CONST && b.k != V_CONST &&
+	    (trunc_to(c, a.i, ty) == 0 || (op == T_GREATERGREATER && is_signed(c, ty) && trunc_to(c, a.i, ty) == -1))) {
+		vfree(e, &b);
+		return vconst(trunc_to(c, a.i, ty));
 	}
 	if (a.k == V_ADDR && b.k == V_CONST && (op == T_PLUS || op == T_MINUS) && tsize(c, ty) == 8) {
 		a.i += op == T_PLUS ? b.i : -b.i;
@@ -5697,6 +5964,21 @@ static val gen_incdec(ecx *e, uint32_t n)
 			opi(e, I_EORI, 0, r, ro, 1);
 			nv = vreg(r);
 		}
+	} else if (is_ld(c, t)) {
+		val one = vconst(ld_of_d(1.0)), cp = old;
+
+		toreg2(e, &cp, false);
+		if (post) {
+			nv.k = V_REG2;
+			nv.r = (uint8_t)treg(e);
+			nv.r2 = (uint8_t)treg(e);
+			mov(e, 1, nv.r, cp.r);
+			mov(e, 1, nv.r2, cp.r2);
+			nv = f_arith(e, inc ? T_PLUS : T_MINUS, t, nv, one);
+			old = cp;
+		} else {
+			nv = old = f_arith(e, inc ? T_PLUS : T_MINUS, t, cp, one);
+		}
 	} else if (is_flt(c, t)) {
 		int d = fpk(e, t);
 
@@ -5758,7 +6040,7 @@ static val gen(ecx *e, uint32_t n)
 	case N_NUM:
 		return vconst(c->ipool[x->a]);
 	case N_FNUM:
-		return f_const(fpk(e, x->ty), c->fpool[x->a]);
+		return f_const_t(e, x->ty, c->fpool[x->a]);
 	case N_STR:
 		note_ref(e, REF(RK_STR, x->a));
 		return vaddr(REF(RK_STR, x->a), 0);
@@ -5918,11 +6200,95 @@ static val gen(ecx *e, uint32_t n)
 /* ---------------- conditions ---------------- */
 
 /* jump to l if n's truth == jump_if; returns the constant truth or -1 */
+/* e >> 0, e << 0: e */
+static uint32_t strip_shift0(cc *c, uint32_t n)
+{
+	while (N(n)->op == N_BINARY && (N(n)->aux == T_LESSLESS || N(n)->aux == T_GREATERGREATER) &&
+	       N(N(n)->b)->op == N_NUM && c->ipool[N(N(n)->b)->a] == 0 && QUNQ(N(n)->ty) == QUNQ(N(N(n)->a)->ty))
+		n = N(n)->a;
+	return n;
+}
+
+/* the same value, without side effects (integer or pointer, nothing volatile) */
+static bool same_pure(cc *c, uint32_t a, uint32_t b)
+{
+	const node *x, *y;
+
+	a = strip_shift0(c, a), b = strip_shift0(c, b);
+	x = N(a), y = N(b);
+	if (x->op != y->op || QUNQ(x->ty) != QUNQ(y->ty) || (QQ(x->ty) | QQ(y->ty)) & Q_VOLATILE ||
+	    !(is_integer(c, x->ty) || is_ptr(c, x->ty)))
+		return false;
+	switch (x->op) {
+	case N_VAR:
+		return x->a == y->a && c->syms[x->a].kind == S_VAR && !(QQ(c->syms[x->a].ty) & Q_VOLATILE);
+	case N_NUM:
+		return c->ipool[x->a] == c->ipool[y->a];
+	case N_CAST:
+		return x->aux == y->aux && same_pure(c, x->a, y->a);
+	case N_BINARY:
+		return x->aux == y->aux && !is_cmp(x->aux) && x->aux != T_SLASH && x->aux != T_PERCENT &&
+		       same_pure(c, x->a, y->a) && same_pure(c, x->b, y->b);
+	}
+	return false;
+}
+
+/* a comparison of two integers as the outcomes it holds for (1 <, 2 ==, 4 >) and its operands */
+static int cmp_mask(cc *c, uint32_t n, uint32_t *l, uint32_t *r)
+{
+	const node *x = N(n);
+	int m;
+
+	if (x->op != N_BINARY || !is_cmp(x->aux) || is_flt(c, N(x->a)->ty) || is_wide(c, N(x->a)->ty))
+		return 0;
+	switch (x->aux) {
+	case T_LESS: m = 1; break;
+	case T_EQUALEQUAL: m = 2; break;
+	case T_LESSEQ: m = 3; break;
+	case T_GREATER: m = 4; break;
+	case T_EXCLAIMEQ: m = 5; break;
+	default: m = 6; break;
+	}
+	*l = x->a, *r = x->b;
+	return m;
+}
+
+/* a condition known from its form (x != x, x < y && x > y, ...): 0 or 1; -1 unknown */
+static int cond_fold(cc *c, uint32_t n)
+{
+	const node *x = N(n);
+	uint32_t l1, r1, l2, r2;
+	int m1, m2, m;
+
+	if (x->op == N_LOGAND || x->op == N_LOGOR) {
+		m1 = cmp_mask(c, x->a, &l1, &r1);
+		m2 = cmp_mask(c, x->b, &l2, &r2);
+		if (!m1 || !m2)
+			return -1;
+		if (same_pure(c, l1, r2) && same_pure(c, r1, l2))	/* swapped: < and > trade places */
+			m2 = (m2 & 2) | (m2 & 1) << 2 | (m2 & 4) >> 2;
+		else if (!same_pure(c, l1, l2) || !same_pure(c, r1, r2))
+			return -1;
+		m = x->op == N_LOGAND ? m1 & m2 : m1 | m2;
+		return m == 0 ? 0 : m == 7 ? 1 : -1;
+	}
+	m = cmp_mask(c, n, &l1, &r1);
+	if (m && same_pure(c, l1, r1))
+		return (m & 2) != 0;
+	return -1;
+}
+
 static void gen_cond(ecx *e, uint32_t n, bool jump_if, uint32_t l)
 {
 	cc *c = e->c;
 	const node *x = N(n);
+	int k = cond_fold(c, n);
 
+	if (k >= 0) {
+		if (k == (int)jump_if)
+			jump(e, l);
+		return;
+	}
 	switch (x->op) {
 	case N_LOGAND:
 	case N_LOGOR: {
@@ -6437,7 +6803,11 @@ static void gen_return(ecx *e, const node *x)
 	if (!is_void(c, rt) && x->a && v.k != V_NONE) {
 		if (e->nclean > f->cbase) {
 			/* park the value while the cleanups run */
-			if (is_agg(c, rt)) {
+			if (is_agg(c, rt) && N(x->a)->op == N_VAR && is_local_var(c, N(x->a)->a) &&
+			    c->syms[N(x->a)->a].sc != SC_STATIC) {
+				/* clang returns the local itself (NRVO): its cleanups' changes are seen */
+				run_cleanups(e, f->cbase);
+			} else if (is_agg(c, rt)) {
 				int32_t sl = slot(e, tsize(c, rt), 16);
 				int rs = toreg(e, &v), rd = treg(e);
 
@@ -6464,10 +6834,8 @@ static void gen_return(ecx *e, const node *x)
 		if (hb) {
 			int rs = toreg(e, &v);
 
-			for (int k = 0; k < hn; k++) {
-				mem(e, I_LD, log2sz(hb), 0, R_X16, rs, hb * k);
-				word(e, f_in(hb == 8, k, R_X16));
-			}
+			for (int k = 0; k < hn; k++)
+				vr_load(e, hb, k, rs, hb * k);
 		} else if (is_recabi(c, rt)) {
 			int rs = toreg(e, &v);
 
@@ -6484,8 +6852,13 @@ static void gen_return(ecx *e, const node *x)
 			}
 		} else if (is_wide(c, rt)) {
 			toreg2(e, &v, is_signed(c, rt));
-			mov(e, 1, 0, v.r);
-			mov(e, 1, 1, v.r2);
+			if (is_ld(c, rt)) {
+				word(e, f_in(1, 0, v.r));
+				word(e, q_in_hi(0, v.r2));
+			} else {
+				mov(e, 1, 0, v.r);
+				mov(e, 1, 1, v.r2);
+			}
 		} else {
 			move_to(e, 0, -1, &v, rt);
 			if (is_flt(c, rt))
@@ -7603,17 +7976,14 @@ static void emit_function(ecx *e, uint32_t s)
 			break;
 		case A_VREG:
 			bd->kind = B_SLOT;
-			bd->slot = slot(e, 8, 8);
-			word(e, f_out(sz == 8, R_X16, ab.reg));
-			mem(e, I_ST, log2sz(sz), 0, R_X16, FRAME, bd->slot);
+			bd->slot = sz == 16 ? slot(e, 16, 16) : slot(e, 8, 8);
+			vr_store(e, (int)ab.size, ab.reg, FRAME, bd->slot);
 			break;
 		case A_HFA:
 			bd->kind = B_SLOT;
 			bd->slot = slot(e, (sz + 7) & ~(uint64_t)7, talign(c, pt) > 8 ? 16 : 8);
-			for (int k = 0; k < ab.nreg; k++) {
-				word(e, f_out(ab.fsz == 8, R_X16, ab.reg + k));
-				mem(e, I_ST, log2sz(ab.fsz), 0, R_X16, FRAME, bd->slot + ab.fsz * k);
-			}
+			for (int k = 0; k < ab.nreg; k++)
+				vr_store(e, ab.fsz, ab.reg + k, FRAME, bd->slot + ab.fsz * k);
 			break;
 		}
 	}
@@ -7629,10 +7999,8 @@ static void emit_function(ecx *e, uint32_t s)
 		/* v0-v7: 16 bytes each (the low 8 hold a float or double) */
 		e->nvr_named = e->nsrn;
 		e->vrslot = slot(e, 128, 16);
-		for (int r = e->nsrn; r < 8; r++) {
-			word(e, f_out(1, R_X16, r));
-			mem(e, I_ST, 3, 0, R_X16, FRAME, e->vrslot + 16 * r);
-		}
+		for (int r = e->nsrn; r < 8; r++)
+			vr_store(e, 16, r, FRAME, e->vrslot + 16 * r);
 	}
 	gen_stmt(e, y->body);
 	/* falling off the end of main returns 0 */
@@ -7807,10 +8175,15 @@ static void data_init(ecx *e, uint64_t off, qty ty, uint32_t init)
 			} else {
 				uint64_t u;
 
+				if (n == 16) {
+					u128 q = (u128)ld_of_d(cv.f);
+
+					data_put(e, off, (uint64_t)q, 8);
+					data_put(e, off + 8, (uint64_t)(q >> 64), 8);
+					return;
+				}
 				memcpy(&u, &cv.f, 8);
 				data_put(e, off, u, 8);
-				if (n == 16)
-					efatal(e, x->loc, "long double initializers are not supported");
 			}
 			return;
 		case CV_ADDR:

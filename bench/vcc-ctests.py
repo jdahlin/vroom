@@ -16,7 +16,9 @@ Skips: tcc tests tied to tcc itself (flags, bounds checker, other arches),
 tests clang rejects (clang-rejects), and tests whose clang build does not
 pass on this runtime (ref-fail: no libc function, no long double runtime,
 file I/O ...).  vcc failures are sorted by stage: fe (vpp -fsyntax-only),
-fp (floating point, not in the emitter yet), emit, link, run.
+fp (floating point the emitter rejects), emit, link, opt (an
+undefined link_error/link_failure: the test checks that the optimizer removed
+a call, and vcc has no such pass), run.
 
 --fe stops after the front end (no code, no qemu): fe pass rate only.
 Clang reference results are cached in build/ccs/ctests/ref (keyed by the
@@ -195,6 +197,8 @@ def one(t):
     rc, err = link([f'{wd}/vcc.o'], f'{wd}/vcc.elf')
     if rc:
         m = re.search(r'undefined symbol: (\S+)', err)
+        if m and re.match(r'link_(error|failure)', m.group(1)):
+            return t, 'fail', 'opt', 'undefined ' + m.group(1)
         return t, 'fail', 'link', 'undefined ' + m.group(1) if m else first_err(err)
     rc, out = qemu(f'{wd}/vcc.elf')
     if rc == ref['rc'] and out == ref['out']:

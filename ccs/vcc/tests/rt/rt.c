@@ -523,3 +523,282 @@ int __rt_main(void)
 	exit(r);
 	return r;
 }
+
+/*
+ * ---- binary128 soft float (compiler-rt's names and ABI: q registers) ----
+ * Only integer arithmetic here, so clang does not call these from within.
+ */
+typedef unsigned __int128 tf_u;
+typedef union { long double f; tf_u u; } tf_v;
+#define TF_M112 (((tf_u)1 << 112) - 1)
+
+static long double tf_mk(tf_u u) { tf_v v; v.u = u; return v.f; }
+static tf_u tf_bits(long double f) { tf_v v; v.f = f; return v.u; }
+static int tf_nan(tf_u u) { return (u << 1) > ((tf_u)0x7fff << 113); }
+static long double tf_qnan(void) { return tf_mk((tf_u)0x7fff8 << 108); }
+
+/* sign, biased exponent, significand m whose leading bit belongs at 3 + p; rounds to nearest even */
+static tf_u tf_round(int s, int e, tf_u m, int p, int emax)
+{
+	unsigned g;
+
+	if (!m)
+		return (tf_u)s << (p + (emax == 0x7fff ? 15 : emax == 0x7ff ? 11 : 8));
+	while (m >> (p + 4)) {
+		m = (m >> 1) | (m & 1);
+		e++;
+	}
+	while (!(m >> (p + 3))) {
+		m <<= 1;
+		e--;
+	}
+	if (e <= 0) {
+		int sh = 1 - e;
+
+		m = sh > p + 4 ? 1 : (m >> sh) | ((m & (((tf_u)1 << sh) - 1)) != 0);
+		e = 0;
+	}
+	g = (unsigned)(m & 7);
+	m >>= 3;
+	if (g > 4 || (g == 4 && (m & 1)))
+		m++;
+	if (e && (m >> (p + 1))) {
+		m >>= 1;
+		e++;
+	}
+	if (e >= emax)
+		m = 0, e = emax;
+	else if (e)
+		m &= ((tf_u)1 << p) - 1;
+	{
+		int eb = emax == 0x7fff ? 15 : emax == 0x7ff ? 11 : 8;
+
+		return (tf_u)s << (p + eb) | (tf_u)e << p | m;
+	}
+}
+
+/* exponent (subnormals: 1) and significand with the implicit bit at 112 */
+static void tf_un(tf_u u, int *s, int *e, tf_u *m)
+{
+	*s = (int)(u >> 127);
+	*e = (int)(u >> 112) & 0x7fff;
+	*m = u & TF_M112;
+	if (*e)
+		*m |= (tf_u)1 << 112;
+	else
+		*e = 1;
+}
+
+static int tf_inf(tf_u u) { return (u << 1) == ((tf_u)0x7fff << 113); }
+
+static long double tf_add(tf_u a, tf_u b)
+{
+	int sa, ea, sb, eb, d;
+	tf_u ma, mb, m;
+
+	if (tf_nan(a) || tf_nan(b))
+		return tf_qnan();
+	if (tf_inf(a))
+		return tf_inf(b) && (a ^ b) >> 127 ? tf_qnan() : tf_mk(a);
+	if (tf_inf(b))
+		return tf_mk(b);
+	tf_un(a, &sa, &ea, &ma);
+	tf_un(b, &sb, &eb, &mb);
+	if (!ma && !mb)
+		return tf_mk((tf_u)(sa & sb) << 127);
+	ma <<= 3, mb <<= 3;
+	if (ea < eb || (ea == eb && ma < mb)) {
+		tf_u t = ma; int ti = ea;
+
+		ma = mb, mb = t, ea = eb, eb = ti;
+		ti = sa, sa = sb, sb = ti;
+	}
+	d = ea - eb;
+	if (d > 120)
+		mb = mb != 0;
+	else if (d)
+		mb = (mb >> d) | ((mb & (((tf_u)1 << d) - 1)) != 0);
+	m = sa == sb ? ma + mb : ma - mb;
+	if (!m)
+		return tf_mk(0);
+	return tf_mk(tf_round(sa, ea, m, 112, 0x7fff));
+}
+
+long double __addtf3(long double a, long double b) { return tf_add(tf_bits(a), tf_bits(b)); }
+long double __subtf3(long double a, long double b) { return tf_add(tf_bits(a), tf_bits(b) ^ ((tf_u)1 << 127)); }
+long double __negtf2(long double a) { return tf_mk(tf_bits(a) ^ ((tf_u)1 << 127)); }
+
+static void tf_norm(int *e, tf_u *m)
+{
+	while (*m && !(*m >> 112)) {
+		*m <<= 1;
+		--*e;
+	}
+}
+
+long double __multf3(long double fa, long double fb)
+{
+	tf_u a = tf_bits(fa), b = tf_bits(fb), ma, mb, p00, p01, p10, p11, mid, lo, hi;
+	int sa, ea, sb, eb, s;
+	unsigned long long a0, a1, b0, b1;
+
+	s = (int)((a ^ b) >> 127);
+	if (tf_nan(a) || tf_nan(b))
+		return tf_qnan();
+	tf_un(a, &sa, &ea, &ma);
+	tf_un(b, &sb, &eb, &mb);
+	if (tf_inf(a) || tf_inf(b))
+		return (!ma || !mb) ? tf_qnan() : tf_mk((tf_u)s << 127 | (tf_u)0x7fff << 112);
+	if (!ma || !mb)
+		return tf_mk((tf_u)s << 127);
+	tf_norm(&ea, &ma);
+	tf_norm(&eb, &mb);
+	a0 = (unsigned long long)ma, a1 = (unsigned long long)(ma >> 64);
+	b0 = (unsigned long long)mb, b1 = (unsigned long long)(mb >> 64);
+	p00 = (tf_u)a0 * b0, p01 = (tf_u)a0 * b1, p10 = (tf_u)a1 * b0, p11 = (tf_u)a1 * b1;
+	mid = p01 + p10;
+	lo = p00 + (mid << 64);
+	hi = p11 + (mid >> 64) + (lo < p00);
+	/* product: leading bit at 224 or 225; to 115 */
+	lo = (hi << 19) | (lo >> 109) | ((lo & (((tf_u)1 << 109) - 1)) != 0);
+	return tf_mk(tf_round(s, ea + eb - 16383, lo, 112, 0x7fff));
+}
+
+long double __divtf3(long double fa, long double fb)
+{
+	tf_u a = tf_bits(fa), b = tf_bits(fb), ma, mb, q = 0;
+	int sa, ea, sb, eb, s, e;
+
+	s = (int)((a ^ b) >> 127);
+	if (tf_nan(a) || tf_nan(b))
+		return tf_qnan();
+	tf_un(a, &sa, &ea, &ma);
+	tf_un(b, &sb, &eb, &mb);
+	if (tf_inf(a))
+		return tf_inf(b) ? tf_qnan() : tf_mk((tf_u)s << 127 | (tf_u)0x7fff << 112);
+	if (tf_inf(b))
+		return tf_mk((tf_u)s << 127);
+	if (!mb)
+		return !ma ? tf_qnan() : tf_mk((tf_u)s << 127 | (tf_u)0x7fff << 112);
+	if (!ma)
+		return tf_mk((tf_u)s << 127);
+	tf_norm(&ea, &ma);
+	tf_norm(&eb, &mb);
+	e = ea - eb + 16383;
+	if (ma < mb) {
+		ma <<= 1;
+		e--;
+	}
+	for (int i = 0; i < 116; i++) {
+		q <<= 1;
+		if (ma >= mb) {
+			ma -= mb;
+			q |= 1;
+		}
+		ma <<= 1;
+	}
+	return tf_mk(tf_round(s, e, q | (ma != 0), 112, 0x7fff));
+}
+
+/* -1, 0, 1; unordered: u */
+static int tf_cmp(long double fa, long double fb, int u)
+{
+	tf_u a = tf_bits(fa), b = tf_bits(fb);
+
+	if (tf_nan(a) || tf_nan(b))
+		return u;
+	if (!((a | b) << 1))
+		return 0;
+	if ((a >> 127) != (b >> 127))
+		return a >> 127 ? -1 : 1;
+	if (a == b)
+		return 0;
+	return ((a < b) ^ (int)(a >> 127)) ? -1 : 1;
+}
+int __eqtf2(long double a, long double b) { return tf_cmp(a, b, 1); }
+int __netf2(long double a, long double b) { return tf_cmp(a, b, 1); }
+int __lttf2(long double a, long double b) { return tf_cmp(a, b, 1); }
+int __letf2(long double a, long double b) { return tf_cmp(a, b, 1); }
+int __cmptf2(long double a, long double b) { return tf_cmp(a, b, 1); }
+int __gttf2(long double a, long double b) { return tf_cmp(a, b, -1); }
+int __getf2(long double a, long double b) { return tf_cmp(a, b, -1); }
+int __unordtf2(long double a, long double b) { return tf_nan(tf_bits(a)) || tf_nan(tf_bits(b)); }
+
+long double __extenddftf2(double d)
+{
+	union { double d; unsigned long long u; } v = { d };
+	int s = (int)(v.u >> 63), e = (int)(v.u >> 52) & 0x7ff;
+	tf_u m = v.u & ((1ull << 52) - 1);
+
+	if (e == 0x7ff)
+		return tf_mk((tf_u)s << 127 | (tf_u)0x7fff << 112 | m << 60 | (m ? (tf_u)1 << 111 : 0));
+	if (!e) {
+		if (!m)
+			return tf_mk((tf_u)s << 127);
+		e = 1;
+		while (!(m >> 52)) {
+			m <<= 1;
+			e--;
+		}
+		m &= (1ull << 52) - 1;
+	}
+	return tf_mk((tf_u)s << 127 | (tf_u)(e - 1023 + 16383) << 112 | m << 60);
+}
+long double __extendsftf2(float f) { return __extenddftf2((double)f); }
+
+static tf_u tf_trunc(long double f, int p, int emax, int bias)
+{
+	tf_u a = tf_bits(f), m;
+	int s, e, eb = emax == 0x7ff ? 11 : 8;
+
+	tf_un(a, &s, &e, &m);
+	if (tf_nan(a))
+		return (tf_u)emax << p | (tf_u)1 << (p - 1);
+	if (tf_inf(a))
+		return (tf_u)s << (p + eb) | (tf_u)emax << p;
+	if (!m)
+		return (tf_u)s << (p + eb);
+	tf_norm(&e, &m);
+	/* leading bit to p + 3: shift right 109 - p with sticky */
+	m = (m >> (109 - p)) | ((m & (((tf_u)1 << (109 - p)) - 1)) != 0);
+	return tf_round(s, e - 16383 + bias, m, p, emax);
+}
+double __trunctfdf2(long double f)
+{
+	union { unsigned long long u; double d; } r = { (unsigned long long)tf_trunc(f, 52, 0x7ff, 1023) };
+	return r.d;
+}
+float __trunctfsf2(long double f)
+{
+	union { unsigned u; float f; } r = { (unsigned)tf_trunc(f, 23, 0xff, 127) };
+	return r.f;
+}
+
+static long double tf_fromu(int s, tf_u x) { return tf_mk(tf_round(s, 16383 + 115, x, 112, 0x7fff)); }
+long double __floatditf(long long i) { return tf_fromu(i < 0, i < 0 ? -(tf_u)i : (tf_u)i); }
+long double __floatsitf(int i) { return __floatditf(i); }
+long double __floatunditf(unsigned long long i) { return tf_fromu(0, i); }
+long double __floatunsitf(unsigned i) { return tf_fromu(0, i); }
+long double __floattitf(__int128 i) { return i < 0 ? tf_mk(tf_round(1, 16383 + 115, -(tf_u)i, 112, 0x7fff)) : tf_fromu(0, (tf_u)i); }
+long double __floatuntitf(tf_u i) { return tf_fromu(0, i); }
+
+/* truncated magnitude (saturating at 2^128) */
+static tf_u tf_toint(long double f, int *s)
+{
+	tf_u m;
+	int e;
+
+	tf_un(tf_bits(f), s, &e, &m);
+	if (tf_nan(tf_bits(f)) || e < 16383)
+		return 0;
+	e -= 16383;
+	if (e >= 128)
+		return ~(tf_u)0;
+	return e >= 112 ? m << (e - 112) : m >> (112 - e);
+}
+long long __fixtfdi(long double f) { int s; tf_u m = tf_toint(f, &s); return s ? -(long long)m : (long long)m; }
+int __fixtfsi(long double f) { return (int)__fixtfdi(f); }
+unsigned long long __fixunstfdi(long double f) { int s; tf_u m = tf_toint(f, &s); return s ? 0 : (unsigned long long)m; }
+unsigned __fixunstfsi(long double f) { return (unsigned)__fixunstfdi(f); }
+__int128 __fixtfti(long double f) { int s; tf_u m = tf_toint(f, &s); return s ? -(__int128)m : (__int128)m; }
+tf_u __fixunstfti(long double f) { int s; tf_u m = tf_toint(f, &s); return s ? 0 : m; }
