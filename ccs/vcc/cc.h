@@ -223,6 +223,7 @@ typedef struct cc_opts {
 	int short_wchar;	/* -fshort-wchar */
 	int std;		/* -std=: 89, 99, 11, 17, 23 (0: gnu17) */
 	int implicit_int;	/* implicit int allowed (-std=gnu89, -Wno-error=implicit-int) */
+	int gnu89_inline;	/* -std=gnu89 or -fgnu89-inline: plain inline is gnu_inline */
 	int implicit_fn;	/* implicit function declarations allowed (... implicit-function-declaration) */
 	int dump_layouts;	/* append _Static_assert checks for clang to verify */
 	int outfd;
