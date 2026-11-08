@@ -30,6 +30,7 @@
  */
 #include "ld.h"
 #include "ldhash.h"
+#include "vperf.h"
 
 #include <ctype.h>
 #include <errno.h>
@@ -107,6 +108,7 @@ static void warn(const char *fmt, ...)
 
 static bool timing;
 static double t_last;
+static vperf p_last;			/* main thread's counters at the last phase */
 static double now(void)
 {
 	struct timespec ts;
@@ -118,8 +120,10 @@ static void phase(const char *name)
 	if (!timing)
 		return;
 	double t = now();
-	fprintf(errf, "  %-28s %7.2f ms\n", name, (t - t_last) * 1e3);
+	vperf p = vperf_now(), d = vperf_sub(p, p_last);
+	fprintf(errf, "  %-28s %7.2f ms %8.1f M ins (main thread)\n", name, (t - t_last) * 1e3, d.ins / 1e6);
 	t_last = t;
+	p_last = p;
 }
 
 /* ---------------- arenas ---------------- */
@@ -4047,6 +4051,7 @@ static int run(int argc, char **argv)
 		return 1;
 	double t0 = now();
 	t_last = t0;
+	p_last = vperf_now();
 	pic = opt.shared;
 
 	load_inputs();
@@ -4625,6 +4630,11 @@ int main(int argc, char **argv)
 		return objcopy_main(argc, argv, AT_FDCWD, stderr);
 	if (strstr(b, "nm") && !strstr(b, "link"))
 		return nm_main(argc, argv, AT_FDCWD, stdout, stderr);
+	/* VLD_REPEAT=N: link N times in one process (for profilers) */
+	const char *rep = getenv("VLD_REPEAT");
+	for (int i = rep ? atoi(rep) : 1; i > 1; i--)
+		if (ld_main(argc, argv, AT_FDCWD, stderr))
+			return 1;
 	return ld_main(argc, argv, AT_FDCWD, stderr);
 }
 #endif
