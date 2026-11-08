@@ -51,6 +51,8 @@
 
 #include "ccint.h"
 #include "emit.h"
+#include "as.h"
+#include "elf.h"
 
 #define N(i) (&c->nodes[i])
 #define T(c, t) CT(c, t)
@@ -6325,6 +6327,16 @@ static bool is_root(cc *c, uint32_t s)
 	return false;
 }
 
+__attribute__((format(printf, 2, 3)))
+static void as_error(cc *c, const char *fmt, ...)
+{
+	va_list ap;
+
+	va_start(ap, fmt);
+	pp_vdiag(c->p, 0, "error", fmt, ap);
+	va_end(ap);
+}
+
 static int emit_tu1(cc *c, const cc_opts *o, bool write_out, uint8_t *mf, bool *again, bool last)
 {
 	emitter E;
@@ -6452,7 +6464,24 @@ static int emit_tu1(cc *c, const cc_opts *o, bool write_out, uint8_t *mf, bool *
 			iov[k++] = (struct iovec){ (void *)E.chunks[i].p, E.chunks[i].n };
 		iov[k++] = (struct iovec){ tail.p, tail.n };
 		*again = E.newmf != 0 && !last;
-		if (!E.errors && write_out && !*again) {
+		if (!E.errors && write_out && !*again && o->emit == 2) {
+			/* object: the text, gathered once, through the assembler */
+			static _Thread_local tbuf all;
+			const char *msg;
+
+			if (!all.p)
+				tb_init(&all, (size_t)1 << 32);
+			all.n = 0;
+			for (int i = 0; i < k; i++)
+				tb_put(&all, iov[i].iov_base, iov[i].iov_len);
+			if (as_run(o->as, o->obj, all.p, all.n, "<vcc>", &msg)) {
+				as_error(c, "assembler: %s", msg);
+				E.errors++;
+			}
+			/* keep the pages, drop their contents if this was a big one */
+			if (all.n > ((size_t)64 << 20))
+				madvise(all.p, all.n, MADV_FREE);
+		} else if (!E.errors && write_out && !*again) {
 			for (int i = 0; i < k;) {
 				int m = k - i > 1024 ? 1024 : k - i;
 				ssize_t w = writev(o->outfd, iov + i, m);
@@ -6527,8 +6556,11 @@ static int emit_tu1(cc *c, const cc_opts *o, bool write_out, uint8_t *mf, bool *
  * VCC_EMIT_REPEAT=N: generate N times over the same AST (profiling), write once.
  * A round that marks functions for inlining (need_fold) is generated again.
  */
+extern _Atomic unsigned long long ppd_ns_emit;
+
 int emit_tu(cc *c, const cc_opts *o)
 {
+	double t0 = now();
 	const char *r = getenv("VCC_EMIT_REPEAT");
 	int n = r ? atoi(r) : 1, err = 0;
 	uint8_t *mf = reserve(c->nsym + 64);
@@ -6543,5 +6575,6 @@ int emit_tu(cc *c, const cc_opts *o)
 			break;
 	}
 	munmap(mf, c->nsym + 64);
+	ppd_ns_emit += (unsigned long long)((now() - t0) * 1e9);
 	return err;
 }

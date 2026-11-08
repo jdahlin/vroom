@@ -59,3 +59,4 @@
 2026-11-07 22:47:39 out=build-pfB configs=vroom.config kcflags='' cc=/Users/johandahlin/dev/vroom/build/ccs/vroom-cc j=14 exit=0 total=24.4s config=0.3s first_CC=2.5s last_CC=23.6s tail=0.8s CC=854 user=21s sys=46s load=2.7
 2026-11-07 22:48:03 out=build-pfA configs=vroom.config kcflags='' cc=/Users/johandahlin/dev/vroom/build/ccs/vroom-cc j=14 exit=0 total=24.5s config=0.3s first_CC=4.2s last_CC=23.7s tail=0.8s CC=854 user=21s sys=46s load=2.7
 2026-11-07 22:48:27 out=build-pfB configs=vroom.config kcflags='' cc=/Users/johandahlin/dev/vroom/build/ccs/vroom-cc j=14 exit=0 total=23.5s config=0.3s first_CC=2.6s last_CC=22.7s tail=0.8s CC=854 user=21s sys=45s load=2.8
+2026-11-08 07:31:57 out=build-vcc configs=vroom.config kcflags='' cc=/Users/johandahlin/dev/vroom/.claude/worktrees/vccd-cc-cc1d5b/build/ccs/vcc j=14 exit=0 total=23.0s config=4.1s first_CC=6.4s last_CC=21.9s tail=1.1s CC=854 user=23s sys=48s load=3.1

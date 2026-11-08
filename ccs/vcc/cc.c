@@ -14,6 +14,7 @@
  * pointer constants depend on the difference: __is_constexpr), and the
  * types of builtins.
  */
+#include <pthread.h>
 #include <setjmp.h>
 #include <stdarg.h>
 #include <stdbool.h>
@@ -6177,14 +6178,20 @@ static void cc_free(cc *c)
 	munmap(c->heap, (size_t)1 << 32);
 }
 
-int cc_run(pp *p, const cc_opts *o)
+static void init_tables(void)
 {
-	cc *c = malloc(sizeof(cc));
-	int errors;
-
 	init_keywords();
 	init_builtins();
 	init_attrs();
+}
+
+int cc_run(pp *p, const cc_opts *o)
+{
+	static pthread_once_t once = PTHREAD_ONCE_INIT;
+	cc *c = malloc(sizeof(cc));
+	int errors;
+
+	pthread_once(&once, init_tables);	/* vccd runs TUs on many threads */
 	cc_init(c, p, o);
 	if (!setjmp(c->bail)) {
 		fetch(c, &c->tk[0]);

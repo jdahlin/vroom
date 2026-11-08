@@ -61,6 +61,7 @@ typedef struct { uint8_t *base; size_t used, cap; } Region;
 
 struct As {
 	ElfObj *o;
+	const char *dir;	/* relative .incbin paths (NULL: process cwd) */
 	Frame fr[MAXFR]; int nfr;
 	Cond cs[MAXCOND]; int ncs;
 	uint32_t cur, prev;	/* current/previous frag */
@@ -883,7 +884,13 @@ static int d_incbin(As *a, const char *p, const char *e)
 		p = ws(p, e);
 		if (p < e && *p == ',') { p++; if (abs_expr(a, &p, e, &count)) return -1; }
 	}
-	int fd = open(path, O_RDONLY);
+	int fd;
+	if (a->dir && path[0] != '/') {
+		char full[2048];
+		snprintf(full, sizeof full, "%s/%s", a->dir, path);
+		fd = open(full, O_RDONLY | O_CLOEXEC);
+	} else
+		fd = open(path, O_RDONLY | O_CLOEXEC);
 	if (fd < 0) return err(a, "Could not find incbin file '%s'", path);
 	struct stat st;
 	fstat(fd, &st);
@@ -2156,6 +2163,8 @@ void as_free(As *a)
 	munmap(a->xs.base, a->xs.cap); munmap(a->defs.base, a->defs.cap); munmap(a->sb.base, a->sb.cap);
 	munmap(a, sizeof *a);
 }
+
+void as_set_dir(As *a, const char *dir) { a->dir = dir; }
 
 int as_run(As *a, ElfObj *o, const char *text, size_t len, const char *name, const char **msg)
 {

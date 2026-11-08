@@ -17,6 +17,9 @@ void as_free(As *a);
  * cwd).  Returns 0 on success; on error *msg points at a message. */
 int as_run(As *a, ElfObj *o, const char *text, size_t len, const char *name, const char **msg);
 
+/* directory for relative .incbin paths (NULL: the process cwd) */
+void as_set_dir(As *a, const char *dir);
+
 /* statements run (after macro/loop expansion) and their bytes, cumulative */
 void as_stats(const As *a, uint64_t *stmts, uint64_t *bytes);
 
