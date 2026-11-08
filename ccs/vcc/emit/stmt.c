@@ -593,6 +593,27 @@ static void gen_vla_decl(ecx *e, const node *x, uint32_t s)
 	e->clean[e->nclean++] = s;
 }
 
+/*
+ * A declaration control never reaches (switch (k) { T *p; case 1: ... }):
+ * no code, but its slot is taken here, in its block's part of the frame.
+ * Bound lazily at its first use instead, it would land in that statement's
+ * scratch area, which later temporaries (call arguments) reuse.
+ */
+static void dead_decl(ecx *e, const node *x)
+{
+	cc *c = e->c;
+	uint32_t s = x->a;
+	const sym *y = &c->syms[s];
+	int rr;
+
+	if (y->kind != S_VAR || y->sc == SC_STATIC || y->sc == SC_EXTERN || y->sc == SC_TYPEDEF ||
+	    (T(c, y->ty)->flags & TF_VLA))
+		return;
+	bind_slot(e, s);
+	if ((rr = regvar_reg(c, s)) >= 0)
+		binding(e, s)->reg = (uint8_t)rr;
+}
+
 static void gen_decl(ecx *e, const node *x)
 {
 	cc *c = e->c;
@@ -682,8 +703,11 @@ static void gen_stmt1(ecx *e, uint32_t n)
 
 	if (!n)
 		return;
-	if (!e->reach && !(e->E->nflags[n] & NA_LABEL))
+	if (!e->reach && !(e->E->nflags[n] & NA_LABEL)) {
+		if (N(n)->op == N_DECL)
+			dead_decl(e, N(n));
 		return;
+	}
 	x = N(n);
 	mark = e->foff;
 	switch (x->op) {

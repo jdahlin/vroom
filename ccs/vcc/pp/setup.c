@@ -139,7 +139,7 @@ pp *pp_open(const pp_opts *o)
 
 static inline __attribute__((always_inline)) void next_tok(pp *p, ptok *t)
 {
-	if (p->depth == p->nfile && !p->svn)
+	if (p->depth == p->nfile && !p->svn && !p->hold_tmp)
 		p->tmp.p = p->tmp.base;	/* nothing above file level refers to tmp */
 	next_exp(p, t);
 }
@@ -183,6 +183,8 @@ static __attribute__((noinline)) void pp_next_mac(pp *p, ptok *t, uintptr_t e)
 	p->ntok_out++;
 }
 
+void pp_hold_tmp(pp *p, int on) { p->hold_tmp = on != 0; }
+
 void pp_next(pp *p, ptok *t)
 {
 	ctx *c = &p->cx[p->depth - 1];
@@ -215,7 +217,7 @@ void pp_next(pp *p, ptok *t)
 		} else if (c->type == C_FILE && !((c->vt[c->i].flags & TF_SOL) && c->vt[c->i].kind == T_HASH)) {
 			const vtok *v = &c->vt[c->i++];
 
-			if (p->depth == p->nfile && !p->svn)
+			if (p->depth == p->nfile && !p->svn && !p->hold_tmp)
 				p->tmp.p = p->tmp.base;	/* nothing above file level refers to tmp */
 			vfill(t, v, c->src, c->loc + v->off);
 		} else {

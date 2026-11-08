@@ -74,6 +74,13 @@ size_t pp_files(const pp *p, const char **names, size_t max);
 /* the next token; T_EOF at the end (and ever after) */
 void pp_next(pp *p, ptok *t);
 /*
+ * Spellings of tokens pp made (#x, a##b, __LINE__) live in an arena that
+ * pp_next reuses once expansion is back at file level.  A consumer that
+ * still holds earlier tokens when it asks for the next one (lookahead)
+ * brackets that pp_next with pp_hold_tmp(p, 1) ... (p, 0).
+ */
+void pp_hold_tmp(pp *p, int on);
+/*
  * -E: the whole TU as clang -E -P prints it (instead of pp_next), with the
  * header cache (VPP_NOHC=1: off).  *out stays valid until pp_close.
  * Returns the number of errors.

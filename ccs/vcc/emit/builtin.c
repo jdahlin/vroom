@@ -525,6 +525,32 @@ static val gen_atomic(ecx *e, const node *x, const uint32_t *arg)
 		res = vreg(ok);
 		break;
 	}
+	case BI_SYNC_VAL_CAS: case BI_SYNC_BOOL_CAS: {
+		/* old = expected; casal old, desired, [p]; val: old; bool: old == expected (low n bytes) */
+		int re = toreg(e, &v1), rd = toreg(e, &v2), old = treg(e);
+
+		mov(e, 1, old, re);
+		word(e, sz << 30 | 0x08e0fc00u | (unsigned)old << 16 | (unsigned)rp << 5 | (unsigned)rd);	/* casal */
+		if (id == BI_SYNC_VAL_CAS) {
+			if (sg && n < 8)
+				extend(e, old, old, (int)n, true);
+			res = vreg(old);
+			break;
+		}
+		if (n < 4) {
+			int cmpv = treg(e);
+
+			mov(e, 1, cmpv, re);
+			extend(e, cmpv, cmpv, (int)n, false);
+			op3(e, I_SUBS, 0, ZR, old, cmpv);	/* casal b/h zero-extends old */
+			tfree(e, cmpv);
+		} else {
+			op3(e, I_SUBS, xs, ZR, old, re);
+		}
+		cset(e, old, C_EQ);
+		res = vreg(old);
+		break;
+	}
 	default: {
 		/* ld<op>al: add 000, clr 001, eor 010, set 011 */
 		int base = id >= BI_ATOMIC_ADD_FETCH ? id - BI_ATOMIC_ADD_FETCH : id - BI_ATOMIC_FETCH_ADD;	/* add sub and or xor */
@@ -699,7 +725,7 @@ VPRIV val gen_builtin(ecx *e, uint32_t n)
 	case BI_ATOMIC_LOAD: case BI_ATOMIC_STORE: case BI_ATOMIC_EXCHANGE: case BI_ATOMIC_CMPXCHG:
 	case BI_ATOMIC_FETCH_ADD: case BI_ATOMIC_FETCH_SUB: case BI_ATOMIC_FETCH_AND: case BI_ATOMIC_FETCH_OR:
 	case BI_ATOMIC_FETCH_XOR: case BI_ATOMIC_ADD_FETCH: case BI_ATOMIC_SUB_FETCH: case BI_ATOMIC_AND_FETCH:
-	case BI_ATOMIC_OR_FETCH: case BI_ATOMIC_XOR_FETCH:
+	case BI_ATOMIC_OR_FETCH: case BI_ATOMIC_XOR_FETCH: case BI_SYNC_VAL_CAS: case BI_SYNC_BOOL_CAS:
 		return gen_atomic(e, x, arg);
 	case BI_ATOMIC_THREAD_FENCE: case BI_ATOMIC_SIGNAL_FENCE: {
 		val m = gen(e, arg[0]);

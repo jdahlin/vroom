@@ -320,6 +320,7 @@ typedef struct ecx {
 	uint32_t inst_next;
 	/* frame */
 	int32_t foff, fmax;
+	uint32_t falign;	/* largest slot alignment; over 16 the prologue realigns sp */
 	int32_t cl_top;		/* frame offset above the block's compound literals (kept past statements) */
 	int32_t outmax;		/* outgoing stack argument bytes */
 	bool dyn, calls, vararg;

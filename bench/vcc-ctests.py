@@ -1,11 +1,12 @@
 #!/usr/bin/env python3
 """vcc-ctests.py: run vendored C compiler test suites through vcc.
 
-  bench/vcc-ctests.py [-j N] [--suite gcc|tcc] [--fe] [-v] [--show CAT] [PAT]
+  bench/vcc-ctests.py [-j N] [--suite gcc|tcc|vcc] [--fe] [-v] [--show CAT] [PAT]
 
 Suites (ccs/vcc/tests/, see the README there):
   gcc  gcc.c-torture/execute: exits 0 on success, abort()s on failure
   tcc  tinycc tests2: prints output, compared with clang's (and tcc's .expect)
+  vcc  our own regression tests (ccs/vcc/tests/vcc): print, and exit 0 or abort()
 
 Every test is built twice: by clang (the oracle) and by vcc (vpp -c), each
 linked with the bare-metal runtime in ccs/vcc/tests/rt (built by clang) and
@@ -77,6 +78,9 @@ def tests(suite, pat):
         d = f'{T}/tcc-tests2'
         ts += [('tcc', f[:-2], f'{d}/{f}') for f in sorted(os.listdir(d))
                if re.match(r'\d+_.*\.c$', f) and '+' not in f]
+    if suite in (None, 'vcc'):
+        d = f'{T}/vcc'
+        ts += [('vcc', f[:-2], f'{d}/{f}') for f in sorted(os.listdir(d)) if f.endswith('.c')]
     if pat:
         ts = [t for t in ts if re.search(pat, f'{t[0]}/{t[1]}')]
     return ts
@@ -156,7 +160,7 @@ def reference(suite, name, path, flags, rthash, wd):
         else:
             rc, out = qemu(f'{wd}/ref.elf')
             r['rc'] = rc; r['out'] = out
-            if suite == 'gcc' and rc != 0:
+            if suite in ('gcc', 'vcc') and rc != 0:
                 r['skip'] = 'ref-fail'; r['why'] = f'clang build exits {rc}'
             elif suite == 'tcc':
                 exp = f'{os.path.dirname(path)}/{name}.expect'

@@ -52,8 +52,8 @@ VPRIV int32_t slot(ecx *e, uint64_t size, uint32_t align)
 {
 	if (align < 1)
 		align = 1;
-	if (align > 16)
-		align = 16;	/* the frame is only 16-aligned; larger alignment is approximated */
+	if (align > e->falign)
+		e->falign = align;	/* over 16: finish_function realigns sp to it */
 	if (size > (1u << 28))
 		efatal(e, 0, "stack object too large");
 	e->foff = (int32_t)(((uint64_t)e->foff + size + align - 1) & ~(uint64_t)(align - 1));

@@ -47,8 +47,13 @@ void cc_fetch(cc *c, ptok *t) { fetch(c, t); }
 
 VPRIV ptok *peek(cc *c, int k)
 {
-	while (c->ntk <= k)
-		fetch(c, &c->tk[c->ntk++]);
+	/* tk[0..ntk) may point into pp's tmp arena: keep it while looking ahead */
+	if (c->ntk <= k) {
+		pp_hold_tmp(c->p, 1);
+		while (c->ntk <= k)
+			fetch(c, &c->tk[c->ntk++]);
+		pp_hold_tmp(c->p, 0);
+	}
 	return &c->tk[k];
 }
 

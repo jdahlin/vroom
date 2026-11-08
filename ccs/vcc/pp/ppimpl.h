@@ -331,6 +331,7 @@ struct pp {
 	ctx *cx;
 	int depth, nfile;
 	arena perm, tmp;
+	bool hold_tmp;		/* the consumer holds earlier tokens: tmp is not reset (pp_hold_tmp) */
 	ptok *sv;		/* scratch token stack */
 	size_t svn;
 	fent *fe;

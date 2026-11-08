@@ -94,8 +94,12 @@ static void finish_direct(ecx *e, uint32_t s, uint32_t align, const int *cs, int
 #define PUT(...) (in[n++] = (ins){ __VA_ARGS__ })
 	PUT(.op = I_STP, .sz = 1, .rd = R_FP, .ra = R_LR, .rn = SP, .cond = 1, .imm = -16);
 	PUT(.op = I_MOV, .sz = 1, .rd = R_FP, .rn = SP);
-	if (total > 16)
+	if (e->falign > 16) {	/* sp = (sp - frame) & -falign */
+		PUT(.op = I_SUBI, .sz = 1, .rd = R_X16, .rn = SP, .imm = total - 16);
+		PUT(.op = I_ANDI, .sz = 1, .rd = SP, .rn = R_X16, .imm = -(int64_t)e->falign);
+	} else if (total > 16) {
 		PUT(.op = I_SUBI, .sz = 1, .rd = SP, .rn = SP, .imm = total - 16);
+	}
 	for (int k = 0; k + 1 < ncs; k += 2)
 		PUT(.op = I_STP, .sz = 1, .rd = (uint8_t)cs[k], .ra = (uint8_t)cs[k + 1], .rn = R_FP, .imm = -csave + 8 * k);
 	if (ncs & 1)
@@ -151,10 +155,19 @@ static void finish_function(ecx *e, uint32_t s)
 	for (int r = 19; r <= 28; r++)
 		if (e->usedcs & (1u << r))
 			cs[ncs++] = r;
+	/*
+	 * Frame below x29: callee saves, locals, outgoing arguments.  Slots are
+	 * addressed from sp, so with locals over-aligned (falign > 16) the
+	 * prologue rounds sp down to falign and locals/outs are multiples of
+	 * it: the top of the locals is then falign-aligned too.  A frame
+	 * addressed from x29 (VLA, alloca) would need a base register.
+	 */
 	csave = (ncs * 8 + 15) & ~15;
-	locals = (e->fmax + 15) & ~15;
-	outs = (e->outmax + 15) & ~15;
+	locals = (int32_t)(((uint32_t)e->fmax + e->falign - 1) & ~(e->falign - 1));
+	outs = (int32_t)(((uint32_t)e->outmax + e->falign - 1) & ~(e->falign - 1));
 	total = 16 + csave + locals + outs;
+	if (e->falign > 16 && e->dyn)
+		efatal(e, c->syms[s].loc, "local variables aligned to more than 16 bytes in a function with a VLA or alloca are not supported");
 	/* rewrite frame-slot references */
 	for (uint32_t k = 0; k < e->nin; k++) {
 		ins *i = &e->in[k];
@@ -185,7 +198,13 @@ static void finish_function(ecx *e, uint32_t s)
 	sym_header(e, b, s, true, "\t.text\n", align);
 	/* prologue */
 	tb_s(b, "\tstp\tx29, x30, [sp, #-16]!\n\tmov\tx29, sp\n");
-	if (total > 16) {
+	if (e->falign > 16) {
+		ins i = { .op = I_SUBI, .sz = 1, .rd = R_X16, .rn = SP, .imm = total - 16 };
+		ins a = { .op = I_ANDI, .sz = 1, .rd = SP, .rn = R_X16, .imm = -(int64_t)e->falign };
+
+		print_ins(c, b, &i, s, e->raw.p);
+		print_ins(c, b, &a, s, e->raw.p);
+	} else if (total > 16) {
 		ins i = { .op = I_SUBI, .sz = 1, .rd = SP, .rn = SP, .imm = total - 16 };
 
 		print_ins(c, b, &i, s, e->raw.p);
@@ -241,6 +260,7 @@ VPRIV void emit_function(ecx *e, uint32_t s)
 	e->nlabel = 0;
 	e->nkv = 0, e->kvalid = 0, e->nkvs = 0, e->nael = 0;
 	e->foff = e->fmax = e->outmax = e->cl_top = 0;
+	e->falign = 16;
 	e->dyn = e->calls = false;
 	e->live = 0;
 	e->usedcs = 0;

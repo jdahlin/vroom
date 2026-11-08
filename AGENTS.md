@@ -56,7 +56,14 @@ bench/vcc-sema.py layout -j 6       # layouts/constants/decl types checked by cl
 bench/var-cmp.py work/build-x       # vcc ar against llvm-ar on an llvm-ar-built tree
 bench/vsh-test.py                   # vsh/rsh against dash on small recipes
 bench/vcc-fpcheck.py -j 6           # no generated FP/SIMD code under -mgeneral-regs-only (~10 s)
+bench/vcc-ctests.py -j 6 --suite vcc # our own regression tests (ccs/vcc/tests/vcc), ~1 s
+bench/vas-enc.py $PWD/ccs/vcc/tests/vas   # vas encodings vs llvm-mc
+bench/pg/build.sh clang && bench/pg/build.sh vcc   # PostgreSQL (macOS, meson+ninja): build + meson test (~2 min each)
 ```
+PostgreSQL (`work/postgres`, `bench/pg/`) is the second test project: a
+native macOS build where vcc compiles every C file (`bench/pg/cc`) and clang
+links; the reference is Homebrew clang, and both builds must pass the same
+`meson test` set.  A bug found there gets a test in `ccs/vcc/tests/vcc/`.
 Parity is a token-stream comparison (kind and spelling) of `clang -E -P`
 against `vpp`, both lexed by vcc's lexer.  A change to `pp/` or `lex.c` is
 only done when the parity run is fully green; a change to `cc/` when both
