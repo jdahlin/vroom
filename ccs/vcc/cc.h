@@ -124,6 +124,7 @@ enum {
 	SF_ATTR_USED = 4096,
 	SF_ADDR_TAKEN = 8192,
 	SF_INLINE_NOEXTERN = 16384,	/* some declaration is 'inline' without 'extern' */
+	SF_NOINSTR = 65536,	/* no_instrument_function */
 	SF_OVERLOAD = 32768,	/* __attribute__((overloadable)): mangled name, member of an overload set */
 };
 
@@ -233,6 +234,8 @@ typedef struct cc_opts {
 	int std;		/* -std=: 89, 99, 11, 17, 23 (0: gnu17) */
 	int implicit_int;	/* implicit int allowed (-std=gnu89, -Wno-error=implicit-int) */
 	int gnu89_inline;	/* -std=gnu89 or -fgnu89-inline: plain inline is gnu_inline */
+	int instrument;		/* -finstrument-functions */
+	int no_builtin;		/* -ffreestanding / -fno-builtin: abs() etc. are plain calls */
 	int implicit_fn;	/* implicit function declarations allowed (... implicit-function-declaration) */
 	int dump_layouts;	/* append _Static_assert checks for clang to verify */
 	int outfd;

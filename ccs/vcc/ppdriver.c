@@ -361,7 +361,7 @@ int ppd_run(int argc, char **argv, const ppd_env *env)
 	jmp_buf jb;
 	buf pre = { 0 }, cmdl = { 0 }, incl = { 0 }, o = { 0 };
 	int darwin = 1, nostdinc = 0, asm_mode = 0, undef = 0;
-	int opt = 2, os = 0, pie = 0, pic = 0, freestanding = 0, cfi = 0, strict_align = 0, tiny = 0;
+	int opt = 2, os = 0, pie = 0, pic = 0, freestanding = 0, nobuiltin = 0, instr = 0, cfi = 0, strict_align = 0, tiny = 0;
 	pp_opts po = { 0 };
 	char *pmap = NULL;
 	double t0;
@@ -454,6 +454,8 @@ int ppd_run(int argc, char **argv, const ppd_env *env)
 		else if (!strcmp(a, "-fPIC")) pic = 2;
 		else if (!strcmp(a, "-fno-PIE") || !strcmp(a, "-fno-pie")) pie = 0;
 		else if (!strcmp(a, "-ffreestanding")) freestanding = 1;
+		else if (!strcmp(a, "-fno-builtin")) nobuiltin = 1;
+		else if (!strcmp(a, "-finstrument-functions")) instr = 1;
 		else if (!strcmp(a, "-fasynchronous-unwind-tables")) cfi = 1;
 		else if (!strcmp(a, "-fno-asynchronous-unwind-tables")) cfi = 0;
 		else if (!strcmp(a, "-mstrict-align")) strict_align = 1;
@@ -637,7 +639,7 @@ int ppd_run(int argc, char **argv, const ppd_env *env)
 	if (syntax) {
 		cc_opts co = { .target = po.target, .unsigned_char = po.unsigned_char, .dump_layouts = layout, .ms_anon = ms_anon, .short_wchar = short_wchar,
 				.std = std, .implicit_int = std == 89 || wimpl_int, .implicit_fn = std == 89 || wimpl_fn,
-				.gnu89_inline = gnu89_inline,
+				.gnu89_inline = gnu89_inline, .no_builtin = freestanding || nobuiltin, .instrument = instr,
 			       .outfd = env->outfd };
 		int fd = -1;
 

@@ -1888,6 +1888,8 @@ static bool eval(cc *c, uint32_t n, cval *v)
 				v->i = trunc_to(c, a.i, to);
 			return true;
 		case CK_INT:
+			if (a.kind == CV_ADDR && a.sublabel && ty_size(c, to) >= 4)
+				return true;	/* a label difference, as a 4- or 8-byte word */
 			if (a.kind != CV_INT)
 				return false;
 			v->i = trunc_to(c, a.i, to);
@@ -2020,6 +2022,15 @@ static bool eval(cc *c, uint32_t n, cval *v)
 				*v = *pv;
 				v->ice = false;
 				v->i += (op == T_MINUS ? -iv->i : iv->i) * (i128)es;
+				return true;
+			}
+			if (op == T_MINUS && is_ptr(c, lt) && is_ptr(c, rt) && a.kind == CV_ADDR && b.kind == CV_ADDR &&
+			    a.label && b.label && a.label != b.label && !a.sublabel && !b.sublabel) {
+				/* &&l1 - &&l0 */
+				*v = a;
+				v->ice = false;
+				v->sublabel = b.label;
+				v->i = a.i - b.i;
 				return true;
 			}
 			if (op == T_MINUS && is_ptr(c, lt) && is_ptr(c, rt)) {
@@ -4024,6 +4035,23 @@ static uint32_t call(cc *c, uint32_t fn, uint32_t loc)
 		}
 		args.v[i] = a;
 	}
+	if (!c->o->no_builtin && args.n == 1 && N(callee)->op == N_VAR && c->syms[N(callee)->a].kind == S_FUNC &&
+	    (c->syms[N(callee)->a].flags & SF_GLOBAL)) {
+		/* clang: abs, labs and llabs declared with their library types are builtins (inline) */
+		int nl, k = KIND(c, T(c, ft)->base);
+		const char *nm = idname(c->syms[N(callee)->a].name, &nl);
+		int want = nl == 3 && !memcmp(nm, "abs", 3) ? TY_INT : nl == 4 && !memcmp(nm, "labs", 4) ? TY_LONG :
+			   nl == 5 && !memcmp(nm, "llabs", 5) ? TY_LLONG : -1;
+
+		if (k == want && f->n == 1 && KIND(c, c->params[f->aux]) == want) {
+			qty t = prim(want);
+			uint32_t pre, x = cplx_reuse(c, args.v[0], &pre);
+			uint32_t neg = mk_bin(c, T_MINUS, t, mk_int(c, 0, t, loc), x, loc);
+			uint32_t lt = mk_bin(c, T_LESS, prim(TY_INT), x, mk_int(c, 0, t, loc), loc);
+
+			return with_pre(c, pre, conditional(c, lt, neg, x, loc));
+		}
+	}
 	n = mk(c, N_CALL, QUNQ(T(c, ft)->base), loc);
 	N(n)->a = fn;
 	N(n)->b = vfreeze(c, &args);
@@ -4574,7 +4602,7 @@ enum {
 	A_NONE, A_ALIGNED, A_PACKED, A_SECTION, A_MODE, A_CLEANUP, A_ALIAS, A_WEAK, A_USED, A_UNUSED,
 	A_NORETURN, A_ALWAYS_INLINE, A_NOINLINE, A_GNU_INLINE, A_TRANSPARENT_UNION, A_VISIBILITY,
 	A_CONSTRUCTOR, A_DESTRUCTOR, A_COUNTED_BY, A_VECTOR_SIZE, A_COLD, A_NONSTRING, A_MAY_ALIAS,
-	A_WEAKREF, A_NAKED, A_NOCF, A_ERROR, A_OVERLOADABLE,
+	A_WEAKREF, A_NAKED, A_NOCF, A_ERROR, A_OVERLOADABLE, A_NOINSTR,
 	A_COUNT
 };
 
@@ -4586,7 +4614,7 @@ static const char *const attr_names[A_COUNT] = {
 	[A_VISIBILITY] = "visibility", [A_CONSTRUCTOR] = "constructor", [A_DESTRUCTOR] = "destructor",
 	[A_COUNTED_BY] = "counted_by", [A_VECTOR_SIZE] = "vector_size", [A_COLD] = "cold",
 	[A_NONSTRING] = "nonstring", [A_MAY_ALIAS] = "may_alias", [A_WEAKREF] = "weakref",
-	[A_NAKED] = "naked", [A_NOCF] = "nocf_check", [A_ERROR] = "error",
+	[A_NOINSTR] = "no_instrument_function", [A_NAKED] = "naked", [A_NOCF] = "nocf_check", [A_ERROR] = "error",
 	[A_OVERLOADABLE] = "overloadable",
 };
 
@@ -4803,6 +4831,7 @@ static void attribute_list(cc *c, attrs *a)
 			case A_NORETURN: a->noreturn = 1; break;
 			case A_ALWAYS_INLINE: a->always_inline = 1; break;
 			case A_NOINLINE: a->noinline = 1; break;
+			case A_NOINSTR: a->noinstr = 1; break;
 			case A_OVERLOADABLE: a->overloadable = 1; break;
 			case A_GNU_INLINE: a->gnu_inline = 1; break;
 			case A_TRANSPARENT_UNION: a->transparent = 1; break;
@@ -4839,7 +4868,7 @@ static void merge_attrs(attrs *to, const attrs *from)
 	to->constructor |= from->constructor, to->destructor |= from->destructor;
 	to->nonstring |= from->nonstring, to->may_alias |= from->may_alias, to->cold |= from->cold, to->error_fn |= from->error_fn;
 	to->gnu_inline |= from->gnu_inline, to->always_inline |= from->always_inline;
-	to->noinline |= from->noinline, to->overloadable |= from->overloadable;
+	to->noinline |= from->noinline, to->overloadable |= from->overloadable, to->noinstr |= from->noinstr;
 }
 
 /* GNU asm("label") after a declarator */
@@ -6440,6 +6469,7 @@ static void apply_sym_attrs(cc *c, sym *s, const attrs *a)
 	if (a->noreturn) s->flags |= SF_NORETURN;
 	if (a->always_inline) s->flags |= SF_ALWAYS_INLINE;
 	if (a->noinline) s->flags |= SF_NOINLINE;
+	if (a->noinstr) s->flags |= SF_NOINSTR;
 	if (a->gnu_inline) s->flags |= SF_GNU_INLINE;
 	if (a->used) s->flags |= SF_ATTR_USED;
 	if (a->overloadable) s->flags |= SF_OVERLOAD;
@@ -7635,6 +7665,113 @@ static uint32_t statement(cc *c)
 	}
 }
 
+/* a call of void name(void *this_fn, void *call_site) (declared if need be) */
+static uint32_t profile_call(cc *c, const char *name, uint32_t fn, uint32_t loc)
+{
+	uint32_t id = vintern_find(name, strlen(name), vintern_hash(name, strlen(name))), f, v, n;
+	qty vp = ty_ptr(c, prim(TY_VOID));
+	vec args;
+
+	f = id ? file_scope_sym(c, id) : 0;
+	if (!f || c->syms[f].kind != S_FUNC) {
+		qty pt[2] = { vp, vp };
+
+		if (!id)
+			id = vintern(name, strlen(name), vintern_hash(name, strlen(name)));
+		f = sym_new(c, S_FUNC, id, ty_func(c, prim(TY_VOID), pt, 2, 0), loc);
+		c->syms[f].sc = SC_EXTERN;
+		c->syms[f].flags |= SF_GLOBAL;
+	}
+	c->syms[f].flags |= SF_USED;
+	vinit(&args);
+	v = mk(c, N_VAR, c->syms[fn].ty, loc);
+	N(v)->a = fn;
+	c->syms[fn].flags |= SF_USED | SF_ADDR_TAKEN;
+	vpush(c, &args, cast_node(c, rvalue(c, v), vp, CK_P2P));
+	{
+		vec ra;
+
+		vinit(&ra);
+		vpush(c, &ra, mk_int(c, 0, prim(TY_UINT), loc));
+		vpush(c, &args, mk_builtin(c, BI_RETURN_ADDRESS, vp, loc, &ra));
+	}
+	v = mk(c, N_VAR, c->syms[f].ty, loc);
+	N(v)->a = f;
+	n = mk(c, N_CALL, prim(TY_VOID), loc);
+	N(n)->a = rvalue(c, v);
+	N(n)->b = vfreeze(c, &args);
+	N(n)->c = args.n;
+	return n;
+}
+
+/* -finstrument-functions: every return of fn (in statements st) calls the exit hook first */
+static void instrument_returns(cc *c, uint32_t fn, uint32_t st)
+{
+	node *x;
+
+	if (!st)
+		return;
+	x = N(st);
+	switch (x->op) {
+	case N_BLOCK:
+		for (uint32_t i = 0; i < x->c; i++)
+			instrument_returns(c, fn, c->lists[x->b + i]);
+		break;
+	case N_IF:
+		instrument_returns(c, fn, x->b);
+		instrument_returns(c, fn, x->c);
+		break;
+	case N_WHILE: case N_DO: case N_SWITCH:
+		instrument_returns(c, fn, x->b);
+		break;
+	case N_FOR:
+		instrument_returns(c, fn, c->lists[x->c + 1]);
+		break;
+	case N_CASE: case N_DEFAULT: case N_LABEL:
+		instrument_returns(c, fn, x->c);
+		break;
+	case N_RETURN: {
+		uint32_t ex = profile_call(c, "__cyg_profile_func_exit", fn, x->loc), e = x->a;
+
+		if (!e || is_void(c, N(e)->ty)) {
+			N(st)->a = e ? mk2(c, N_COMMA, prim(TY_VOID), x->loc, e, ex) : ex;
+		} else {
+			uint32_t pre, t;
+
+			/* return (tmp = e, exit(), tmp) */
+			t = cplx_reuse(c, e, &pre);
+			if (!pre) {
+				uint32_t s = sym_new(c, S_VAR, 0, QUNQ(N(e)->ty), x->loc);
+
+				c->syms[s].sc = SC_AUTO;
+				t = mk(c, N_VAR, QUNQ(N(e)->ty), x->loc);
+				N(t)->a = s;
+				N(t)->flags = NF_LVALUE;
+				pre = mk2(c, N_ASSIGN, QUNQ(N(e)->ty), x->loc, t, e);
+			}
+			N(st)->a = mk2(c, N_COMMA, N(t)->ty, x->loc, pre, mk2(c, N_COMMA, N(t)->ty, x->loc, ex, rvalue(c, t)));
+		}
+		break;
+	}
+	default:
+		break;
+	}
+}
+
+static uint32_t instrument(cc *c, uint32_t fn, uint32_t body)
+{
+	vec items;
+	uint32_t loc = N(body)->loc;
+
+	instrument_returns(c, fn, body);
+	vinit(&items);
+	vpush(c, &items, mkstmt(c, N_EXPR, loc, profile_call(c, "__cyg_profile_func_enter", fn, loc), 0, 0));
+	for (uint32_t i = 0; i < N(body)->c; i++)
+		vpush(c, &items, c->lists[N(body)->b + i]);
+	vpush(c, &items, mkstmt(c, N_EXPR, loc, profile_call(c, "__cyg_profile_func_exit", fn, loc), 0, 0));
+	return mkstmt(c, N_BLOCK, loc, 0, vfreeze(c, &items), items.n);
+}
+
 static void function_def(cc *c, uint32_t s, const declr *d)
 {
 	uint32_t body, first_label = c->nlabel;
@@ -7682,6 +7819,8 @@ static void function_def(cc *c, uint32_t s, const declr *d)
 		if (!lb->local && dget(c->ldir, lb->name) == l)
 			*dslot(c, c->ldir, lb->name) = 0;
 	}
+	if (c->o->instrument && !(c->syms[s].flags & (SF_NOINSTR | SF_ALWAYS_INLINE)))
+		body = instrument(c, s, body);
 	c->syms[s].body = body;
 	/* for the emitter: the parameter syms, on the body block */
 	N(body)->a = d->psyms;

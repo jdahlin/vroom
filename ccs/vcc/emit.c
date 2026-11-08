@@ -489,7 +489,7 @@ typedef struct ecx {
 	tbuf raw;		/* inline asm text */
 	tbuf out;		/* this thread's output text */
 	tbuf data;		/* scratch: data object bytes */
-	struct reloc { uint64_t off; uint32_t ref, seq; int64_t add; } *rel;
+	struct reloc { uint64_t off; uint32_t ref, seq; int64_t add; uint32_t sub, sz; } *rel;	/* sub: ref subtracted (0: none); sz 4 or 8 (0: 8) */
 	uint32_t nrel;
 	uint64_t relend;	/* end of the highest relocated word */
 	/* bindings */
@@ -1086,7 +1086,7 @@ enum { IT_TEXT = 1, IT_CODE, IT_DATA, IT_LABEL, IT_BYTES };
 typedef struct item { uint32_t kind, len; } item;	/* len payload bytes follow, padded to 8 */
 typedef struct code_hdr { uint32_t fid, nin, nraw, nlabel, sym_labels, pad; } code_hdr;
 typedef struct data_hdr { uint64_t size, n; uint32_t nrel, zero; } data_hdr;
-typedef struct ireloc { uint64_t off; uint32_t ref, seq; int64_t add; } ireloc;
+typedef struct ireloc { uint64_t off; uint32_t ref, seq; int64_t add; uint32_t sub, sz; } ireloc;
 
 static inline bool direct(const ecx *e) { return e->E->o->emit == 2 && !e->E->objtext; }
 
@@ -1574,18 +1574,24 @@ static int r_data(rctx *R, const data_hdr *h)
 			at = end;
 		}
 		if (k < h->nrel) {
+			uint32_t sz = rel[k].sz ? rel[k].sz : 8;
 			uint64_t off = elf_frag(o, frag)->size;
-			uint8_t *p = elf_grow(o, frag, 8);
+			uint8_t *p = elf_grow(o, frag, sz);
 			ElfVal v = as_val(R->as, r_sym(R, rel[k].ref), rel[k].add);
 
+			if (rel[k].sub) {
+				ElfVal s = as_val(R->as, r_sym(R, rel[k].sub - 1), 0);
+
+				v.sub = s.add, v.c -= s.c;
+			}
 			if (!v.add && !v.sub) {
-				for (int b = 0; b < 8; b++)
+				for (uint32_t b = 0; b < sz; b++)
 					p[b] = (uint8_t)((uint64_t)v.c >> 8 * b);
 			} else {
-				memset(p, 0, 8);
-				elf_fixup(o, frag, off, p, R_AARCH64_ABS64, v);
+				memset(p, 0, sz);
+				elf_fixup(o, frag, off, p, sz == 4 ? R_AARCH64_ABS32 : R_AARCH64_ABS64, v);
 			}
-			at += 8;
+			at += sz;
 		}
 	}
 	return 0;
@@ -4782,6 +4788,22 @@ static val gen_builtin(ecx *e, uint32_t n)
 			return vconst(1);
 		if (side_effects(c, arg[0]) || !(is_integer(c, at) || is_flt(c, at)))
 			return vconst(0);
+		{
+			/* "hi"[0]: the optimizer reads a character of a literal */
+			uint32_t r = arg[0];
+			cval ix;
+
+			while (N(r)->op == N_CAST && (N(r)->aux == CK_INT || N(r)->aux == CK_NOP))
+				r = N(r)->a;
+			if (N(r)->op == N_INDEX && cc_eval(c, N(r)->b, &ix) && ix.kind == CV_INT) {
+				uint32_t s = N(r)->a;
+
+				while (N(s)->op == N_CAST && (N(s)->aux == CK_DECAY || N(s)->aux == CK_NOP))
+					s = N(s)->a;
+				if (N(s)->op == N_STR && ix.i >= 0 && (uint64_t)ix.i < c->strs[N(s)->a].n)
+					return vconst(1);
+			}
+		}
 		v = dry(e, arg[0]);
 		return vconst(v.k == V_CONST);
 	}
@@ -7642,7 +7664,7 @@ static void data_put(ecx *e, uint64_t off, uint64_t v, int n)
 		e->data.p[off + (uint64_t)i] = (char)(v >> (8 * i));
 	if (unlikely(n && off < e->relend))
 		for (uint32_t j = 0; j < e->nrel; j++)	/* overwritten: the relocation goes */
-			if (e->rel[j].off < off + (uint64_t)n && off < e->rel[j].off + 8)
+			if (e->rel[j].off < off + (uint64_t)n && off < e->rel[j].off + (e->rel[j].sz ? e->rel[j].sz : 8))
 				e->rel[j].seq = UINT32_MAX;
 }
 
@@ -7657,7 +7679,7 @@ static void data_or(ecx *e, uint64_t off, uint8_t bits)
 static void data_reloc(ecx *e, uint64_t off, uint32_t ref, int64_t add)
 {
 	data_put(e, off, 0, 8);
-	e->rel[e->nrel] = (struct reloc){ off, ref, e->nrel, add };
+	e->rel[e->nrel] = (struct reloc){ off, ref, e->nrel, add, 0, 0 };
 	e->nrel++;
 	if (off + 8 > e->relend)
 		e->relend = off + 8;
@@ -7792,6 +7814,18 @@ static void data_init(ecx *e, uint64_t off, qty ty, uint32_t init)
 			}
 			return;
 		case CV_ADDR:
+			if (cv.sublabel && (n == 4 || n == 8)) {
+				/* label difference: ref - sub, resolved by the assembler */
+				data_put(e, off, 0, n);
+				e->rel[e->nrel] = (struct reloc){ off, REF(RK_LBL, cv.label - 1), e->nrel, (int64_t)cv.i,
+								  REF(RK_LBL, cv.sublabel - 1) + 1, (uint32_t)n };
+				e->nrel++;
+				if (off + n > e->relend)
+					e->relend = off + n;
+				note_ref(e, REF(RK_LBL, cv.label - 1));
+				note_ref(e, REF(RK_LBL, cv.sublabel - 1));
+				return;
+			}
 			if (n != 8)
 				efatal(e, x->loc, "address initializer for a %d-byte object", n);
 			if (cv.label)
@@ -7864,10 +7898,16 @@ static void data_bytes(ecx *e, tbuf *b, uint64_t size)
 		uint64_t end = ri < e->nrel ? e->rel[ri].off : size;
 
 		if (ri < e->nrel && o == e->rel[ri].off) {
-			tb_s(b, "\t.xword\t");
+			uint32_t sz = e->rel[ri].sz ? e->rel[ri].sz : 8;
+
+			tb_s(b, sz == 4 ? "\t.word\t" : "\t.xword\t");
 			ref_off(e->c, b, e->rel[ri].ref, e->rel[ri].add);
+			if (e->rel[ri].sub) {
+				tb_c(b, '-');
+				ref_name(e->c, b, e->rel[ri].sub - 1);
+			}
 			tb_c(b, '\n');
-			o += 8;
+			o += sz;
 			ri++;
 			continue;
 		}

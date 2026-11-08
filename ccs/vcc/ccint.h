@@ -47,7 +47,7 @@ typedef struct attrs {		/* the attributes of one declaration */
 	uint32_t flags;		/* SF_* */
 	uint8_t packed, transparent, used, unused, weak, noreturn, constructor, destructor;
 	uint8_t nonstring, may_alias, cold, gnu_inline, always_inline, noinline, ainline, error_fn;
-	uint8_t overloadable;
+	uint8_t overloadable, noinstr;
 } attrs;
 
 typedef struct asmop {
@@ -188,6 +188,7 @@ typedef struct cval {
 	double f;
 	uint32_t sym, str;	/* CV_ADDR base: sym or string literal */
 	uint32_t label;		/* CV_ADDR base: &&label */
+	uint32_t sublabel;	/* CV_ADDR: minus &&sublabel (GNU label difference: a constant once laid out) */
 } cval;
 
 #define CT(c, t) (&(c)->ty[QI(t)])
