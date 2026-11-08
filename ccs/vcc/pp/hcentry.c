@@ -219,14 +219,14 @@ static void hc_apply(pp *p, const hent *e)
 			if (r->lev[i].ndirs < e->ndirs)
 				r->lev[i].ndirs = e->ndirs;
 		}
-		for (uint32_t i = 0; i < e->nrg; i++)
-			touch_read(p, e->rg[i].id, e->rg[i].v, HT_G);
-		for (uint32_t i = 0; i < e->nru; i++)
-			touch_read(p, e->ru[i], 0, 0);
-		for (uint32_t i = 0; i < e->nrv; i++)
-			touch_read(p, e->rv[i].id, e->rv[i].v, 0);
-		for (uint32_t i = 0; i < e->ndl; i++)
-			touch_write(p, e->dl[i].id);
+		HV_FOR(e->rg, hread, x)
+			touch_read(p, x->id, x->v, HT_G);
+		HV_FOR(e->ru, uint32_t, x)
+			touch_read(p, *x, 0, 0);
+		HV_FOR(e->rv, hread, x)
+			touch_read(p, x->id, x->v, 0);
+		HV_FOR(e->dl, hread, x)
+			touch_write(p, x->id);
 		for (uint32_t i = 0; i < e->nord; i++) {
 			if (e->ord[i].present && once_index(p, e->ord[i].f) >= (int)L->nonce0)
 				continue;	/* marked by this level itself */
@@ -257,8 +257,8 @@ static void hc_apply(pp *p, const hent *e)
 		d->sys = h->sys;
 	}
 	p->next_base += e->span;
-	for (uint32_t i = 0; i < e->ndl; i++)
-		mset(p, e->dl[i].id, (const pmacro *)e->dl[i].v);
+	HV_FOR(e->dl, hread, x)
+		mset(p, x->id, (const pmacro *)x->v);
 	for (uint32_t i = 0; i < e->noadd && p->nonce < 4096; i++)
 		p->once[p->nonce++] = e->oadd[i];
 	p->counter += e->counter_delta;
@@ -273,27 +273,27 @@ static void hc_why(const pp *p, const hkey *k, const hent *e)
 	char b[512];
 	int n = 0;
 
-	for (uint32_t i = 0; i < e->nrg && !n; i++)
-		if ((mget(p, e->rg[i].id) != 0) != (e->rg[i].v != 0)) {
-			const vident *d = &vintern_ents[e->rg[i].id];
+	HV_FOR(e->rg, hread, x)
+		if (!n && (mget(p, x->id) != 0) != (x->v != 0)) {
+			const vident *d = &vintern_ents[x->id];
 
 			n = snprintf(b, sizeof(b), "hc-miss %s: guard %.*s %s\n", k->spath, (int)d->len, d->s,
-				     e->rg[i].v ? "def/undef" : "undef/def");
+				     x->v ? "def/undef" : "undef/def");
 		}
 	for (uint32_t i = 0; i < e->nord && !n; i++)
 		if ((once_index(p, e->ord[i].f) >= 0) != (bool)e->ord[i].present)
 			n = snprintf(b, sizeof(b), "hc-miss %s: once %s\n", k->spath, e->ord[i].f->path);
-	for (uint32_t i = 0; i < e->nru && !n; i++)
-		if (mget(p, e->ru[i])) {
-			const vident *d = &vintern_ents[e->ru[i]];
+	HV_FOR(e->ru, uint32_t, x)
+		if (!n && mget(p, *x)) {
+			const vident *d = &vintern_ents[*x];
 
 			n = snprintf(b, sizeof(b), "hc-miss %s: %.*s undef/def\n", k->spath, (int)d->len, d->s);
 		}
-	for (uint32_t i = 0; i < e->nrv && !n; i++) {
-		uintptr_t c = mget(p, e->rv[i].id) & ~(uintptr_t)1, v = e->rv[i].v;
+	HV_FOR(e->rv, hread, x) {
+		uintptr_t c = mget(p, x->id) & ~(uintptr_t)1, v = x->v;
 
-		if (v == HDEF ? !c : c != v) {
-			const vident *d = &vintern_ents[e->rv[i].id];
+		if (!n && (v == HDEF ? !c : c != v)) {
+			const vident *d = &vintern_ents[x->id];
 
 			n = snprintf(b, sizeof(b), "hc-miss %s: %.*s %s/%s\n", k->spath, (int)d->len, d->s,
 				     v == HDEF ? "def" : "val", c ? "def" : "undef");
@@ -390,20 +390,16 @@ VPRIV void hc_begin(pp *p, hkey *k)
 
 static void *hcopy(const void *s, size_t n)
 {
-	void *d = n ? salloc(n) : NULL;
+	void *d = n ? hsalloc(n) : NULL;
 
 	if (n)
 		memcpy(d, s, n);
 	return d;
 }
 
-static char *hstrdup(const char *s, size_t n)
+static const char *hstrdup(const char *s, size_t n)
 {
-	char *d = salloc(n + 1);
-
-	memcpy(d, s, n);
-	d[n] = 0;
-	return d;
+	return hc_blob(s, n);	/* NUL-terminated, shared */
 }
 
 /* tokens [L->text0, end) minus the children's: e's own tokens */
@@ -412,14 +408,14 @@ static void publish_tok(pp *p, const hlev *L, size_t end, hent *e)
 	struct hrec *r = &p->rec;
 	uint32_t ns = r->nseg - L->s0, nc = r->nctr - L->c0;
 	size_t own = end - L->text0, w = 0, at = L->text0, skipped = 0;
-	hseg *sg = salloc((ns ? ns : 1) * sizeof(hseg));
-	hctr *ct = salloc((nc ? nc : 1) * sizeof(hctr));
+	hseg *sg = hsalloc((ns ? ns : 1) * sizeof(hseg));
+	hctr *ct = hsalloc((nc ? nc : 1) * sizeof(hctr));
 	uint32_t ci = L->c0;
 	ptok *tk;
 
 	for (uint32_t i = L->s0; i < r->nseg; i++)
 		own -= r->seg[i].end - r->seg[i].start;
-	tk = salloc((own ? own : 1) * sizeof(ptok));
+	tk = hsalloc((own ? own : 1) * sizeof(ptok));
 	for (uint32_t i = L->s0; i <= r->nseg; i++) {
 		size_t to = i < r->nseg ? r->seg[i].start : end;
 
@@ -432,7 +428,7 @@ static void publish_tok(pp *p, const hlev *L, size_t end, hent *e)
 			t.loc = t.loc ? t.loc - L->base0 + 1 : 0;
 			t.ctr = 0;
 			if (t.s >= r->sb && t.s < r->sb + r->nsb) {
-				char *d = salloc(t.len + 16);
+				char *d = hsalloc(t.len + 16);
 
 				memcpy(d, t.s, t.len);
 				memset(d + t.len, 0, 16);
@@ -479,11 +475,42 @@ static void publish_tok(pp *p, const hlev *L, size_t end, hent *e)
 	e->has_text = 1;
 }
 
+#define R16(n) (((size_t)(n) + 15) & ~(size_t)15)
+/* bytes an entry holds before sharing, by kind (VPP_HC_DEBUG; VPP_HC_PUB=1: a line per entry) */
+static void hc_account(const hent *e, const hkey *k)
+{
+	static _Atomic int pub_ = -1;
+	size_t rd = R16(e->rg.n * sizeof(hread)) + R16(e->ru.n * 4) + R16(e->rv.n * sizeof(hread)) +
+		    R16(e->ncrd * sizeof(hcread));
+	size_t dl = R16(e->dl.n * sizeof(hread)), on = R16(e->nord * sizeof(honce)) + R16(e->noadd * 8);
+	size_t fe = R16(e->nfe * sizeof(hfent)), tx, sg = R16(e->nseg * sizeof(hseg)) + R16(e->nctr * sizeof(hctr));
+	int pub;
+
+	for (uint32_t i = 0; i < e->nfe; i++)
+		fe += R16(e->fe[i].namelen + 1) + R16(strlen(e->fe[i].spath) + 1);
+	tx = e->tk ? R16(e->ntext * sizeof(*e->tk)) : R16(e->ntext + 1);
+	atomic_fetch_add_explicit(&hstat.b_rd, rd, memory_order_relaxed);
+	atomic_fetch_add_explicit(&hstat.b_dl, dl, memory_order_relaxed);
+	atomic_fetch_add_explicit(&hstat.b_once, on, memory_order_relaxed);
+	atomic_fetch_add_explicit(&hstat.b_fe, fe, memory_order_relaxed);
+	atomic_fetch_add_explicit(&hstat.b_text, tx, memory_order_relaxed);
+	atomic_fetch_add_explicit(&hstat.b_seg, sg, memory_order_relaxed);
+	atomic_fetch_add_explicit(&hstat.b_ent, R16(sizeof(hent)), memory_order_relaxed);
+	if ((pub = atomic_load_explicit(&pub_, memory_order_relaxed)) < 0)
+		atomic_store_explicit(&pub_, pub = getenv("VPP_HC_PUB") != NULL, memory_order_relaxed);
+	if (pub) {
+		char b[600];
+		int n = snprintf(b, sizeof(b), "hc-pub %s %zu %zu %zu %zu %zu %zu\n", k->spath, rd, dl, on, fe, tx, sg);
+
+		(void)!write(2, b, (size_t)n);
+	}
+}
+
 /* the entry for the innermost level, which ends at output offset end */
 static hent *publish(pp *p, const hlev *L, size_t end)
 {
 	struct hrec *r = &p->rec;
-	hent *e = salloc(sizeof(*e));
+	hent *e = hsalloc(sizeof(*e));
 	uint32_t nrg = 0, nru = 0, nrv = 0, ndl = 0, *ru;
 	hread *rg, *rv, *dl;
 	hfent *fe;
@@ -502,10 +529,11 @@ static hent *publish(pp *p, const hlev *L, size_t end)
 		}
 		ndl += (t->flags & HT_W) != 0;
 	}
-	rg = salloc((nrg ? nrg : 1) * sizeof(*rg));
-	ru = salloc((nru ? nru : 1) * sizeof(*ru));
-	rv = salloc((nrv ? nrv : 1) * sizeof(*rv));
-	dl = salloc((ndl ? ndl : 1) * sizeof(*dl));
+	/* scratch in tmp: the stored form is the shared chunks */
+	rg = alloc(&p->tmp, (nrg ? nrg : 1) * sizeof(*rg));
+	ru = alloc(&p->tmp, (nru ? nru : 1) * sizeof(*ru));
+	rv = alloc(&p->tmp, (nrv ? nrv : 1) * sizeof(*rv));
+	dl = alloc(&p->tmp, (ndl ? ndl : 1) * sizeof(*dl));
 	nrg = nru = nrv = ndl = 0;
 	for (uint32_t i = L->t0; i < r->nt; i++) {
 		const htouch *t = &r->t[i];
@@ -525,16 +553,16 @@ static hent *publish(pp *p, const hlev *L, size_t end)
 	atomic_fetch_add_explicit(&hstat.nrv, nrv, memory_order_relaxed);
 	atomic_fetch_add_explicit(&hstat.ndl, ndl, memory_order_relaxed);
 	atomic_fetch_add_explicit(&hstat.nfe, p->nfe - L->fe0, memory_order_relaxed);
-	e->rg = rg, e->nrg = nrg;
-	e->ru = ru, e->nru = nru;
-	e->rv = rv, e->nrv = nrv;
-	e->dl = dl, e->ndl = ndl;
+	e->rg = hc_vec(rg, nrg, sizeof(*rg));
+	e->ru = hc_vec(ru, nru, sizeof(*ru));
+	e->rv = hc_vec(rv, nrv, sizeof(*rv));
+	e->dl = hc_vec(dl, ndl, sizeof(*dl));
 	e->ord = hcopy(r->ord + L->o0, (r->nord - L->o0) * sizeof(honce));
 	e->nord = r->nord - L->o0;
 	e->oadd = hcopy(p->once + L->nonce0, (p->nonce - L->nonce0) * sizeof(*p->once));
 	e->noadd = p->nonce - L->nonce0;
 	e->nfe = p->nfe - L->fe0;
-	fe = salloc((e->nfe ? e->nfe : 1) * sizeof(hfent));
+	fe = hsalloc((e->nfe ? e->nfe : 1) * sizeof(hfent));
 	for (uint32_t i = 0; i < e->nfe; i++) {
 		const fent *f = &p->fe[L->fe0 + i];
 
@@ -549,7 +577,7 @@ static hent *publish(pp *p, const hlev *L, size_t end)
 	e->ndirs = L->ndirs;
 	e->psig = p->psig[L->ndirs];
 	{
-		hcread *cr = salloc((r->ncrd - L->r0 ? r->ncrd - L->r0 : 1) * sizeof(hcread));
+		hcread *cr = hsalloc((r->ncrd - L->r0 ? r->ncrd - L->r0 : 1) * sizeof(hcread));
 
 		for (uint32_t i = L->r0; i < r->ncrd; i++) {
 			const hcrd *c = &r->crd[i];
@@ -567,14 +595,14 @@ static hent *publish(pp *p, const hlev *L, size_t end)
 		uint32_t ns = r->nseg - L->s0, nc = r->nctr - L->c0;
 		size_t own = end - L->text0;
 		char *t;
-		hseg *sg = salloc((ns ? ns : 1) * sizeof(hseg));
-		hctr *ct = salloc((nc ? nc : 1) * sizeof(hctr));
+		hseg *sg = hsalloc((ns ? ns : 1) * sizeof(hseg));
+		hctr *ct = hsalloc((nc ? nc : 1) * sizeof(hctr));
 		size_t w = 0, at = L->text0, skipped = 0;
 		uint32_t ci = L->c0;
 
 		for (uint32_t i = L->s0; i < r->nseg; i++)
 			own -= r->seg[i].end - r->seg[i].start;
-		t = salloc(own + 1);
+		t = alloc(&p->tmp, own + 1);
 		for (uint32_t i = L->s0; i <= r->nseg; i++) {
 			size_t to = i < r->nseg ? r->seg[i].start : end;
 
@@ -589,7 +617,7 @@ static hent *publish(pp *p, const hlev *L, size_t end)
 				at = r->seg[i].end;
 			}
 		}
-		e->text = t;
+		e->text = hc_blob(t, own);	/* variants often print the same */
 		e->ntext = own;
 		e->total = end - L->text0;
 		e->seg = sg;
@@ -600,6 +628,7 @@ static hent *publish(pp *p, const hlev *L, size_t end)
 		e->first_sol = L->first_sol;
 		e->col_end = p->col != 0;
 	}
+	hc_account(e, L->k);
 	return e;
 }
 
@@ -625,17 +654,14 @@ VPRIV void hc_end(pp *p)
 			(void)!write(2, b, (size_t)n);
 		}
 	} else {
-		uint64_t m0 = atomic_load_explicit(&shared_used, memory_order_relaxed);
-
 		sz = (r->nt - L->t0) * 16 + (p->nfe - L->fe0) * (sizeof(hfent) + 64) + sizeof(hent);
 		if (atomic_load_explicit(&k->n, memory_order_relaxed) >= HC_MAXVAR ||
 		    (hc_mem_max && atomic_load_explicit(&hstat.mem, memory_order_relaxed) + sz > hc_mem_max)) {
 			atomic_fetch_add_explicit(&hstat.full, 1, memory_order_relaxed);
 		} else {
+			hc_new_bytes = 0;
 			e = publish(p, L, p->tokmode == 2 ? r->ntk : p->nout);
-			/* (other threads allocate too: close enough for a limit) */
-			atomic_fetch_add_explicit(&hstat.mem, atomic_load_explicit(&shared_used, memory_order_relaxed) - m0,
-						  memory_order_relaxed);
+			atomic_fetch_add_explicit(&hstat.mem, hc_new_bytes, memory_order_relaxed);
 			atomic_fetch_add_explicit(&hstat.rec, 1, memory_order_relaxed);
 			atomic_fetch_add_explicit(&hstat.bytes_rec, e->ntext, memory_order_relaxed);
 			atomic_fetch_add_explicit(&k->n, 1, memory_order_relaxed);

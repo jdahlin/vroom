@@ -255,12 +255,34 @@ typedef struct hseg {
 	uint32_t lbase;		/* tokens: child's location base - ours */
 } hseg;
 
+/*
+ * Arrays of reads and writes are stored as chunks deduplicated across all
+ * entries (an enclosing header's arrays repeat its children's runs).  The
+ * cuts are content defined (by id), so the same run of ids cuts the same
+ * way wherever it occurs.
+ */
+typedef struct hck {
+	uint64_t h;
+	uint32_t n, esz;	/* elements, element size (1: a blob of n bytes) */
+	_Alignas(16) char d[];
+} hck;
+
+typedef struct hvec {
+	const hck *const *c;
+	uint32_t nc, n;		/* chunks, elements */
+} hvec;
+
+/* for (const T *x ...) over the elements of v; break leaves only the inner loop */
+#define HV_FOR(v, T, x) \
+	for (uint32_t hvi_ = 0; hvi_ < (v).nc; hvi_++) \
+		for (const T *x = (const T *)(const void *)(v).c[hvi_]->d, *x##_e = x + (v).c[hvi_]->n; x < x##_e; x++)
+
 struct hent {
 	hent *next;
-	const hread *rg;	/* inputs: include guards (v: HDEF or 0); checked first */
-	const uint32_t *ru;	/* inputs: ids read while undefined */
-	const hread *rv;	/* inputs: other reads */
-	const hread *dl;	/* delta: (id, new value) */
+	hvec rg;		/* inputs: include guards (v: HDEF or 0); checked first */
+	hvec ru;		/* inputs: ids read while undefined (uint32_t) */
+	hvec rv;		/* inputs: other reads */
+	hvec dl;		/* delta: (id, new value) */
 	const honce *ord;
 	const vlex_file *const *oadd;
 	const hfent *fe;
@@ -275,7 +297,7 @@ struct hent {
 	const uint32_t *br;	/* token entries: outermost '{' '}' pairs of the own tokens with no child
 				   inside, (open, close) own-token indices, by open (pp_lazy_skip) */
 	uint32_t nbr;
-	uint32_t nrg, nru, nrv, ndl, nord, noadd, nfe, nctr, ncrd, nseg, span, counter_delta;
+	uint32_t nord, noadd, nfe, nctr, ncrd, nseg, span, counter_delta;
 	uint8_t has_text, first_sol, col_end, pend_out;
 };
 
@@ -425,6 +447,7 @@ struct pp {
 typedef struct {
 	_Atomic unsigned long hit, miss, rec, uncacheable, full, bytes_replayed, bytes_rec, mem;
 	_Atomic unsigned long nru, nrv, ndl, nfe, nvalid, nchecked;
+	_Atomic unsigned long b_rd, b_dl, b_once, b_fe, b_text, b_seg, b_ent;	/* bytes stored, by kind */
 } hstat_t;
 
 /* ---------------- #if expressions ---------------- */
@@ -482,6 +505,10 @@ static inline int utoa(char *b, unsigned long long v);
 /* file.c */
 extern _Atomic size_t shared_used;
 VPRIV void *salloc(size_t n);
+VPRIV void *hsalloc(size_t n);
+VPRIV hvec hc_vec(const void *a, uint32_t n, uint32_t esz);
+VPRIV const void *hc_blob(const void *s, size_t n);
+extern _Thread_local size_t hc_new_bytes;
 VPRIV const pfile *pfile_get(const vlex_file *f, bool *fresh);
 VPRIV uint32_t file_line(const vlex_file *f, const pfile *cfi, uint32_t off);
 static inline void *alloc(arena *a, size_t n);

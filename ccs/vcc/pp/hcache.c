@@ -1,5 +1,6 @@
 /* vcc preprocessor: header cache: types, the shared table, regions */
 #include "ppimpl.h"
+#include <arm_acle.h>
 
 hstat_t hstat;
 
@@ -122,6 +123,126 @@ VPRIV int once_index(const pp *p, const vlex_file *f)
 	return -1;
 }
 
+/* ---------------- deduplicated chunks and blobs ---------------- */
+
+_Thread_local size_t hc_new_bytes;	/* what this thread's publish allocated */
+
+VPRIV void *hsalloc(size_t n)
+{
+	hc_new_bytes += (n + 15) & ~(size_t)15;
+	return salloc(n);
+}
+
+#define HCK_BITS 22
+static _Atomic(const hck *) *hck_tab;
+static pthread_once_t hck_once = PTHREAD_ONCE_INIT;
+
+static void hck_init(void)
+{
+	hck_tab = vm(sizeof(*hck_tab) << HCK_BITS);
+}
+
+static uint64_t hck_hash(const void *s, size_t n, uint32_t esz)
+{
+	const unsigned char *b = s;
+	uint32_t h0 = (uint32_t)n, h1 = esz;
+	size_t i = 0;
+
+	for (; i + 16 <= n; i += 16) {
+		uint64_t w0, w1;
+
+		memcpy(&w0, b + i, 8);
+		memcpy(&w1, b + i + 8, 8);
+		h0 = __crc32cd(h0, w0);
+		h1 = __crc32cd(h1, w1);
+	}
+	for (; i < n; i++)
+		h0 = __crc32cb(h0, b[i]);
+	return ((uint64_t)h0 << 32 | h1) * 0x9E3779B97F4A7C15ull;
+}
+
+/* the shared chunk holding n elements of size esz equal to a (stored once) */
+static const hck *hck_get(const void *a, uint32_t n, uint32_t esz)
+{
+	size_t bytes = (size_t)n * esz;
+	uint64_t h = hck_hash(a, bytes, esz);
+	hck *mine = NULL;
+
+	pthread_once(&hck_once, hck_init);
+	for (uint32_t i = (uint32_t)(h >> (64 - HCK_BITS)), k = 0; k < 64; i = (i + 1) & ((1u << HCK_BITS) - 1), k++) {
+		const hck *e = atomic_load_explicit(&hck_tab[i], memory_order_acquire);
+
+		if (!e) {
+			if (!mine) {
+				mine = hsalloc(sizeof(hck) + bytes + 16);
+				mine->h = h;
+				mine->n = n;
+				mine->esz = esz;
+				memcpy(mine->d, a, bytes);
+				memset(mine->d + bytes, 0, 16);
+			}
+			if (atomic_compare_exchange_strong_explicit(&hck_tab[i], &e, mine, memory_order_acq_rel,
+								    memory_order_acquire))
+				return mine;
+		}
+		if (e->h == h && e->n == n && e->esz == esz && !memcmp(e->d, a, bytes))
+			return e;	/* (a chunk of ours that lost a race stays unused) */
+	}
+	if (!mine) {
+		mine = hsalloc(sizeof(hck) + bytes + 16);
+		mine->h = h;
+		mine->n = n;
+		mine->esz = esz;
+		memcpy(mine->d, a, bytes);
+		memset(mine->d + bytes, 0, 16);
+	}
+	return mine;	/* table crowded here: not shared */
+}
+
+/* n bytes equal to s, NUL and 15 more zero bytes after them, stored once */
+VPRIV const void *hc_blob(const void *s, size_t n)
+{
+	if (n >= 0xffffffffu) {
+		char *d = hsalloc(n + 16);
+
+		memcpy(d, s, n);
+		memset(d + n, 0, 16);
+		return d;
+	}
+	return hck_get(s, (uint32_t)n, 1)->d;
+}
+
+/*
+ * Elements whose first 4 bytes are an id, cut into shared chunks after
+ * every id whose hash has its low 5 bits clear (~32 per chunk, at most 256).
+ */
+VPRIV hvec hc_vec(const void *a, uint32_t n, uint32_t esz)
+{
+	const char *b = a;
+	const hck **c;
+	uint32_t nc = 0, st = 0;
+	hvec v = { NULL, 0, n };
+
+#define HV_CUT(i) ({ uint32_t id_; memcpy(&id_, b + (size_t)(i) * esz, 4); \
+		((id_ * 0x9E3779B1u) >> 27) == 0 || (i) + 1 - st == 256 || (i) + 1 == n; })
+	if (!n)
+		return v;
+	for (uint32_t i = 0; i < n; i++)
+		if (HV_CUT(i))
+			nc++, st = i + 1;
+	c = hsalloc(nc * sizeof(*c));
+	nc = st = 0;
+	for (uint32_t i = 0; i < n; i++)
+		if (HV_CUT(i)) {
+			c[nc++] = hck_get(b + (size_t)st * esz, i + 1 - st, esz);
+			st = i + 1;
+		}
+#undef HV_CUT
+	v.c = c;
+	v.nc = nc;
+	return v;
+}
+
 /* can an #include here be a region? */
 VPRIV bool hc_top(const pp *p)
 {
@@ -135,17 +256,17 @@ VPRIV bool hc_valid(const pp *p, const hent *e)
 		return false;
 	if ((int)e->ndirs > p->o->ndirs || p->psig[e->ndirs] != e->psig)
 		return false;
-	for (uint32_t i = 0; i < e->nrg; i++)
-		if ((mget(p, e->rg[i].id) != 0) != (e->rg[i].v != 0))
+	HV_FOR(e->rg, hread, r)
+		if ((mget(p, r->id) != 0) != (r->v != 0))
 			return false;
 	for (uint32_t i = 0; i < e->nord; i++)
 		if ((once_index(p, e->ord[i].f) >= 0) != (bool)e->ord[i].present)
 			return false;
-	for (uint32_t i = 0; i < e->nru; i++)
-		if (mget(p, e->ru[i]))
+	HV_FOR(e->ru, uint32_t, r)
+		if (mget(p, *r))
 			return false;
-	for (uint32_t i = 0; i < e->nrv; i++) {
-		uintptr_t c = mget(p, e->rv[i].id) & ~(uintptr_t)1, v = e->rv[i].v;
+	HV_FOR(e->rv, hread, r) {
+		uintptr_t c = mget(p, r->id) & ~(uintptr_t)1, v = r->v;
 
 		if (v == HDEF ? !c : c != v)
 			return false;
