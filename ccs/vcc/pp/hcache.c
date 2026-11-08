@@ -125,21 +125,19 @@ VPRIV int once_index(const pp *p, const vlex_file *f)
 
 /* ---------------- deduplicated chunks and blobs ---------------- */
 
-_Thread_local size_t hc_new_bytes;	/* what this thread's publish allocated */
-
-VPRIV void *hsalloc(size_t n)
+VPRIV void *hsalloc(pp *p, size_t n)
 {
-	hc_new_bytes += (n + 15) & ~(size_t)15;
+	p->hc_bytes += (n + 15) & ~(size_t)15;
 	return salloc(n);
 }
 
 #define HCK_BITS 22
-static _Atomic(const hck *) *hck_tab;
+static _Atomic(const hck *) *_Atomic hck_tab;
 static pthread_once_t hck_once = PTHREAD_ONCE_INIT;
 
 static void hck_init(void)
 {
-	hck_tab = vm(sizeof(*hck_tab) << HCK_BITS);
+	atomic_store_explicit(&hck_tab, vm(sizeof(_Atomic(const hck *)) << HCK_BITS), memory_order_release);
 }
 
 static uint64_t hck_hash(const void *s, size_t n, uint32_t esz)
@@ -162,34 +160,42 @@ static uint64_t hck_hash(const void *s, size_t n, uint32_t esz)
 }
 
 /* the shared chunk holding n elements of size esz equal to a (stored once) */
-static const hck *hck_get(const void *a, uint32_t n, uint32_t esz)
+static const hck *hck_get(pp *p, const void *a, uint32_t n, uint32_t esz)
 {
 	size_t bytes = (size_t)n * esz;
 	uint64_t h = hck_hash(a, bytes, esz);
 	hck *mine = NULL;
 
-	pthread_once(&hck_once, hck_init);
+	if (unlikely(!atomic_load_explicit(&hck_tab, memory_order_acquire)))
+		pthread_once(&hck_once, hck_init);
+	const hck **cc = &p->ckc[h >> 52];
+	_Atomic(const hck *) *tab;
+
+	if (*cc && (*cc)->h == h && (*cc)->n == n && (*cc)->esz == esz && !memcmp((*cc)->d, a, bytes))
+		return *cc;
+	tab = atomic_load_explicit(&hck_tab, memory_order_relaxed);
+
 	for (uint32_t i = (uint32_t)(h >> (64 - HCK_BITS)), k = 0; k < 64; i = (i + 1) & ((1u << HCK_BITS) - 1), k++) {
-		const hck *e = atomic_load_explicit(&hck_tab[i], memory_order_acquire);
+		const hck *e = atomic_load_explicit(&tab[i], memory_order_acquire);
 
 		if (!e) {
 			if (!mine) {
-				mine = hsalloc(sizeof(hck) + bytes + 16);
+				mine = hsalloc(p, sizeof(hck) + bytes + 16);
 				mine->h = h;
 				mine->n = n;
 				mine->esz = esz;
 				memcpy(mine->d, a, bytes);
 				memset(mine->d + bytes, 0, 16);
 			}
-			if (atomic_compare_exchange_strong_explicit(&hck_tab[i], &e, mine, memory_order_acq_rel,
+			if (atomic_compare_exchange_strong_explicit(&tab[i], &e, mine, memory_order_acq_rel,
 								    memory_order_acquire))
-				return mine;
+				return *cc = mine;
 		}
 		if (e->h == h && e->n == n && e->esz == esz && !memcmp(e->d, a, bytes))
-			return e;	/* (a chunk of ours that lost a race stays unused) */
+			return *cc = e;	/* (a chunk of ours that lost a race stays unused) */
 	}
 	if (!mine) {
-		mine = hsalloc(sizeof(hck) + bytes + 16);
+		mine = hsalloc(p, sizeof(hck) + bytes + 16);
 		mine->h = h;
 		mine->n = n;
 		mine->esz = esz;
@@ -200,44 +206,43 @@ static const hck *hck_get(const void *a, uint32_t n, uint32_t esz)
 }
 
 /* n bytes equal to s, NUL and 15 more zero bytes after them, stored once */
-VPRIV const void *hc_blob(const void *s, size_t n)
+VPRIV const void *hc_blob(pp *p, const void *s, size_t n)
 {
 	if (n >= 0xffffffffu) {
-		char *d = hsalloc(n + 16);
+		char *d = hsalloc(p, n + 16);
 
 		memcpy(d, s, n);
 		memset(d + n, 0, 16);
 		return d;
 	}
-	return hck_get(s, (uint32_t)n, 1)->d;
+	return hck_get(p, s, (uint32_t)n, 1)->d;
 }
 
 /*
  * Elements whose first 4 bytes are an id, cut into shared chunks after
  * every id whose hash has its low 5 bits clear (~32 per chunk, at most 256).
  */
-VPRIV hvec hc_vec(const void *a, uint32_t n, uint32_t esz)
+VPRIV hvec hc_vec(pp *p, const void *a, uint32_t n, uint32_t esz)
 {
 	const char *b = a;
-	const hck **c;
+	const hck **c, **tmp;
 	uint32_t nc = 0, st = 0;
 	hvec v = { NULL, 0, n };
 
-#define HV_CUT(i) ({ uint32_t id_; memcpy(&id_, b + (size_t)(i) * esz, 4); \
-		((id_ * 0x9E3779B1u) >> 27) == 0 || (i) + 1 - st == 256 || (i) + 1 == n; })
 	if (!n)
 		return v;
-	for (uint32_t i = 0; i < n; i++)
-		if (HV_CUT(i))
-			nc++, st = i + 1;
-	c = hsalloc(nc * sizeof(*c));
-	nc = st = 0;
-	for (uint32_t i = 0; i < n; i++)
-		if (HV_CUT(i)) {
-			c[nc++] = hck_get(b + (size_t)st * esz, i + 1 - st, esz);
+	tmp = alloc(&p->tmp, (size_t)n * sizeof(*tmp));
+	for (uint32_t i = 0; i < n; i++) {
+		uint32_t id;
+
+		memcpy(&id, b + (size_t)i * esz, 4);
+		if (((id * 0x9E3779B1u) >> 27) == 0 || i + 1 - st == 256 || i + 1 == n) {
+			tmp[nc++] = hck_get(p, b + (size_t)st * esz, i + 1 - st, esz);
 			st = i + 1;
 		}
-#undef HV_CUT
+	}
+	c = hsalloc(p, nc * sizeof(*c));
+	memcpy(c, tmp, nc * sizeof(*c));
 	v.c = c;
 	v.nc = nc;
 	return v;

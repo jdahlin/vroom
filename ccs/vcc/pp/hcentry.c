@@ -8,7 +8,9 @@ static void push_replay(pp *p, const hent *e, uint32_t base, unsigned cbase, uin
 	ctx *c = push(p);
 
 	c->type = C_REPLAY;
-	c->pt = e->tk;
+	c->ht = e->tk;
+	c->pt = e->xtk;
+	c->src = shared_base0();
 	c->n = (uint32_t)e->ntext;
 	c->loc = base;
 	c->he = e;
@@ -59,8 +61,7 @@ VPRIV void replay_tok(pp *p, ctx *c, ptok *t)
 {
 	const hent *e = c->he;
 
-	*t = c->pt[c->i];
-	t->loc = t->loc ? c->loc + t->loc - 1 : 0;
+	htok_get(t, &c->ht[c->i], c->pt, c->src, c->loc);
 	t->ctr = 0;
 	p->rep_norec = c->norec;
 	if (t->kind == T_IDENT)
@@ -110,9 +111,7 @@ void pp_lazy_tok(pp *p, pp_lazy *z, ptok *t)
 	const hent *e = z->e;
 	uint32_t k = z->k++;
 
-	*t = e->tk[k];
-	t->loc = t->loc ? z->base + t->loc - 1 : 0;
-	t->ctr = 0;
+	htok_get(t, &e->tk[k], e->xtk, shared_base0(), z->base);
 	if (t->kind == T_IDENT)
 		t->flags |= PF_NOEXP;
 	while (z->ci < e->nctr && e->ctr[z->ci].off < k)
@@ -388,18 +387,37 @@ VPRIV void hc_begin(pp *p, hkey *k)
 	atomic_fetch_add_explicit(&hstat.miss, 1, memory_order_relaxed);
 }
 
-static void *hcopy(const void *s, size_t n)
+static void *hcopy(pp *p, const void *s, size_t n)
 {
-	void *d = n ? hsalloc(n) : NULL;
+	void *d = n ? hsalloc(p, n) : NULL;
 
 	if (n)
 		memcpy(d, s, n);
 	return d;
 }
 
-static const char *hstrdup(const char *s, size_t n)
+static const char *hstrdup(pp *p, const char *s, size_t n)
 {
-	return hc_blob(s, n);	/* NUL-terminated, shared */
+	return hc_blob(p, s, n);	/* NUL-terminated, shared */
+}
+
+/* hc_blob of a token's spelling, through a small cache of recent ones */
+static const char *spell_blob(pp *p, const char *s, uint32_t len)
+{
+	uint64_t w;
+	uint32_t h;
+	const char *d;
+
+	memcpy(&w, s, 8);	/* (spellings are readable 16 bytes past their end) */
+	if (len < 8)
+		w &= ~(~0ull << (8 * len));
+	h = (uint32_t)(((w ^ len) * 0x9E3779B97F4A7C15ull) >> 52);
+	d = p->bcache[h];
+	if (d && ((const hck *)(const void *)(d - offsetof(hck, d)))->n == len && !memcmp(d, s, len))
+		return d;
+	d = hc_blob(p, s, len);
+	p->bcache[h] = d;
+	return d;
 }
 
 /* tokens [L->text0, end) minus the children's: e's own tokens */
@@ -408,14 +426,17 @@ static void publish_tok(pp *p, const hlev *L, size_t end, hent *e)
 	struct hrec *r = &p->rec;
 	uint32_t ns = r->nseg - L->s0, nc = r->nctr - L->c0;
 	size_t own = end - L->text0, w = 0, at = L->text0, skipped = 0;
-	hseg *sg = hsalloc((ns ? ns : 1) * sizeof(hseg));
-	hctr *ct = hsalloc((nc ? nc : 1) * sizeof(hctr));
+	hseg *sg = hsalloc(p, (ns ? ns : 1) * sizeof(hseg));
+	hctr *ct = hsalloc(p, (nc ? nc : 1) * sizeof(hctr));
 	uint32_t ci = L->c0;
-	ptok *tk;
+	htok *tk;
+	ptok *xt = NULL;
+	uint32_t nx = 0, xcap = 0;
+	const char *sb = shared_base0();
 
 	for (uint32_t i = L->s0; i < r->nseg; i++)
 		own -= r->seg[i].end - r->seg[i].start;
-	tk = hsalloc((own ? own : 1) * sizeof(ptok));
+	tk = alloc(&p->tmp, (own ? own : 1) * sizeof(htok));
 	for (uint32_t i = L->s0; i <= r->nseg; i++) {
 		size_t to = i < r->nseg ? r->seg[i].start : end;
 
@@ -424,17 +445,35 @@ static void publish_tok(pp *p, const hlev *L, size_t end, hent *e)
 						 r->ctr[ci].val - L->counter0 };
 		for (; at < to; at++, w++) {
 			ptok t = r->tk[at];
+			htok *h = &tk[w];
 
 			t.loc = t.loc ? t.loc - L->base0 + 1 : 0;
 			t.ctr = 0;
-			if (t.s >= r->sb && t.s < r->sb + r->nsb) {
-				char *d = hsalloc(t.len + 16);
-
-				memcpy(d, t.s, t.len);
-				memset(d + t.len, 0, 16);
-				t.s = d;
+			*h = (htok){ 0, t.loc, t.kind, t.flags, (uint16_t)t.len };
+			/* (a clean identifier is spelled as its id: --vcc-tokhash checks both) */
+			if (t.kind == T_IDENT && t.id && !(t.flags & TF_DIRTY) && t.len <= 0xffff) {
+				h->sp = t.id;
+				continue;
 			}
-			tk[w] = t;
+			if (t.kind != T_IDENT && !t.id && t.len <= 0xffff && !(t.flags & HF_X)) {
+				const char *d = spell_blob(p, t.s, t.len);
+
+				if (!sb)
+					sb = shared_base0();
+				h->sp = (uint32_t)((size_t)(d - sb) >> 4) + 1;
+				continue;
+			}
+			/* escape: the full token, its spelling stored */
+			if (nx == xcap) {
+				ptok *n2 = alloc(&p->tmp, (xcap = xcap ? 2 * xcap : 16) * sizeof(ptok));
+
+				if (nx)
+					memcpy(n2, xt, nx * sizeof(ptok));
+				xt = n2;
+			}
+			t.s = hc_blob(p, t.s, t.len);
+			xt[nx] = t;
+			*h = (htok){ nx++, t.loc, t.kind, HF_X, 0 };
 		}
 		if (i < r->nseg) {
 			sg[i - L->s0] = (hseg){ (uint32_t)w, r->seg[i].counter0 - L->counter0, r->seg[i].child,
@@ -449,7 +488,7 @@ static void publish_tok(pp *p, const hlev *L, size_t end, hent *e)
 
 		for (size_t k = 0; k < w; k++)
 			nb += tk[k].kind == T_LBRACE;
-		br = salloc((nb ? nb : 1) * 2 * sizeof(uint32_t));
+		br = hsalloc(p, (nb ? nb : 1) * 2 * sizeof(uint32_t));
 		nb = 0;
 		for (size_t k = 0; k < w; k++) {
 			if (tk[k].kind == T_LBRACE) {
@@ -465,7 +504,8 @@ static void publish_tok(pp *p, const hlev *L, size_t end, hent *e)
 		e->br = br;
 		e->nbr = nb;
 	}
-	e->tk = tk;
+	e->tk = hc_blob(p, tk, own * sizeof(htok));	/* (16-aligned) */
+	e->xtk = nx ? hcopy(p, xt, nx * sizeof(ptok)) : NULL;
 	e->ntext = own;
 	e->total = end - L->text0;
 	e->seg = sg;
@@ -510,7 +550,7 @@ static void hc_account(const hent *e, const hkey *k)
 static hent *publish(pp *p, const hlev *L, size_t end)
 {
 	struct hrec *r = &p->rec;
-	hent *e = hsalloc(sizeof(*e));
+	hent *e = hsalloc(p, sizeof(*e));
 	uint32_t nrg = 0, nru = 0, nrv = 0, ndl = 0, *ru;
 	hread *rg, *rv, *dl;
 	hfent *fe;
@@ -553,20 +593,20 @@ static hent *publish(pp *p, const hlev *L, size_t end)
 	atomic_fetch_add_explicit(&hstat.nrv, nrv, memory_order_relaxed);
 	atomic_fetch_add_explicit(&hstat.ndl, ndl, memory_order_relaxed);
 	atomic_fetch_add_explicit(&hstat.nfe, p->nfe - L->fe0, memory_order_relaxed);
-	e->rg = hc_vec(rg, nrg, sizeof(*rg));
-	e->ru = hc_vec(ru, nru, sizeof(*ru));
-	e->rv = hc_vec(rv, nrv, sizeof(*rv));
-	e->dl = hc_vec(dl, ndl, sizeof(*dl));
-	e->ord = hcopy(r->ord + L->o0, (r->nord - L->o0) * sizeof(honce));
+	e->rg = hc_vec(p, rg, nrg, sizeof(*rg));
+	e->ru = hc_vec(p, ru, nru, sizeof(*ru));
+	e->rv = hc_vec(p, rv, nrv, sizeof(*rv));
+	e->dl = hc_vec(p, dl, ndl, sizeof(*dl));
+	e->ord = hcopy(p, r->ord + L->o0, (r->nord - L->o0) * sizeof(honce));
 	e->nord = r->nord - L->o0;
-	e->oadd = hcopy(p->once + L->nonce0, (p->nonce - L->nonce0) * sizeof(*p->once));
+	e->oadd = hcopy(p, p->once + L->nonce0, (p->nonce - L->nonce0) * sizeof(*p->once));
 	e->noadd = p->nonce - L->nonce0;
 	e->nfe = p->nfe - L->fe0;
-	fe = hsalloc((e->nfe ? e->nfe : 1) * sizeof(hfent));
+	fe = hsalloc(p, (e->nfe ? e->nfe : 1) * sizeof(hfent));
 	for (uint32_t i = 0; i < e->nfe; i++) {
 		const fent *f = &p->fe[L->fe0 + i];
 
-		fe[i] = (hfent){ f->f, f->fi, hstrdup(f->name, f->namelen), hstrdup(f->spath, strlen(f->spath)),
+		fe[i] = (hfent){ f->f, f->fi, hstrdup(p, f->name, f->namelen), hstrdup(p, f->spath, strlen(f->spath)),
 				 f->namelen, f->base - L->base0, f->sys };
 	}
 	e->fe = fe;
@@ -577,12 +617,12 @@ static hent *publish(pp *p, const hlev *L, size_t end)
 	e->ndirs = L->ndirs;
 	e->psig = p->psig[L->ndirs];
 	{
-		hcread *cr = hsalloc((r->ncrd - L->r0 ? r->ncrd - L->r0 : 1) * sizeof(hcread));
+		hcread *cr = hsalloc(p, (r->ncrd - L->r0 ? r->ncrd - L->r0 : 1) * sizeof(hcread));
 
 		for (uint32_t i = L->r0; i < r->ncrd; i++) {
 			const hcrd *c = &r->crd[i];
 
-			cr[i - L->r0] = (hcread){ hstrdup(c->s, c->len), c->len, c->off, c->dlen, c->val - L->counter0 };
+			cr[i - L->r0] = (hcread){ hstrdup(p, c->s, c->len), c->len, c->off, c->dlen, c->val - L->counter0 };
 		}
 		e->crd = cr;
 		e->ncrd = r->ncrd - L->r0;
@@ -595,8 +635,8 @@ static hent *publish(pp *p, const hlev *L, size_t end)
 		uint32_t ns = r->nseg - L->s0, nc = r->nctr - L->c0;
 		size_t own = end - L->text0;
 		char *t;
-		hseg *sg = hsalloc((ns ? ns : 1) * sizeof(hseg));
-		hctr *ct = hsalloc((nc ? nc : 1) * sizeof(hctr));
+		hseg *sg = hsalloc(p, (ns ? ns : 1) * sizeof(hseg));
+		hctr *ct = hsalloc(p, (nc ? nc : 1) * sizeof(hctr));
 		size_t w = 0, at = L->text0, skipped = 0;
 		uint32_t ci = L->c0;
 
@@ -617,7 +657,7 @@ static hent *publish(pp *p, const hlev *L, size_t end)
 				at = r->seg[i].end;
 			}
 		}
-		e->text = hc_blob(t, own);	/* variants often print the same */
+		e->text = hc_blob(p, t, own);	/* variants often print the same */
 		e->ntext = own;
 		e->total = end - L->text0;
 		e->seg = sg;
@@ -659,9 +699,9 @@ VPRIV void hc_end(pp *p)
 		    (hc_mem_max && atomic_load_explicit(&hstat.mem, memory_order_relaxed) + sz > hc_mem_max)) {
 			atomic_fetch_add_explicit(&hstat.full, 1, memory_order_relaxed);
 		} else {
-			hc_new_bytes = 0;
+			p->hc_bytes = 0;
 			e = publish(p, L, p->tokmode == 2 ? r->ntk : p->nout);
-			atomic_fetch_add_explicit(&hstat.mem, hc_new_bytes, memory_order_relaxed);
+			atomic_fetch_add_explicit(&hstat.mem, p->hc_bytes, memory_order_relaxed);
 			atomic_fetch_add_explicit(&hstat.rec, 1, memory_order_relaxed);
 			atomic_fetch_add_explicit(&hstat.bytes_rec, e->ntext, memory_order_relaxed);
 			atomic_fetch_add_explicit(&k->n, 1, memory_order_relaxed);

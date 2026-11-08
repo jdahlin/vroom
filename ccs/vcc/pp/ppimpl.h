@@ -143,7 +143,8 @@ typedef struct ctx {
 	uint32_t mid;		/* macro to re-enable when popped */
 	const vtok *vt;
 	const ptok *pt;
-	const char *src;
+	const struct htok *ht;	/* C_REPLAY: the entry's own tokens (pt: its escapes) */
+	const char *src;	/* (C_REPLAY: the shared region's base) */
 	/* C_FILE */
 	const vlex_file *f;
 	const pfile *fi;
@@ -248,6 +249,40 @@ typedef struct hcread {
 
 typedef struct hent hent;
 
+/*
+ * A stored token (12 bytes; ptok is 24).  T_IDENT: sp is the id and the
+ * spelling the id's.  Others: sp - 1 is the spelling's offset / 16 in the
+ * shared region (hc_blob: stored once).  HF_X: sp indexes the entry's
+ * escapes (full ptoks: spliced identifiers, long spellings, odd ids).
+ */
+typedef struct htok {
+	uint32_t sp;
+	uint32_t loc;		/* offset from the base + 1, 0: none */
+	uint8_t kind, flags;
+	uint16_t len;
+} htok;
+#define HF_X 128
+
+static inline void htok_get(ptok *t, const htok *h, const ptok *xtk, const char *sbase, uint32_t base)
+{
+	if (__builtin_expect(h->flags & HF_X, 0)) {
+		*t = xtk[h->sp];
+	} else {
+		t->kind = h->kind;
+		t->flags = h->flags;
+		t->len = h->len;
+		t->ctr = 0;
+		if (h->kind == T_IDENT) {
+			t->id = h->sp;
+			t->s = vintern_ents[h->sp].s;
+		} else {
+			t->id = 0;
+			t->s = sbase + ((size_t)(h->sp - 1) << 4);
+		}
+	}
+	t->loc = h->loc ? base + h->loc - 1 : 0;
+}
+
 typedef struct hseg {
 	uint32_t at;		/* own-text offset (tokens: own-token index) the child goes before */
 	uint32_t cdelta;	/* child's counter at entry - ours */
@@ -287,7 +322,8 @@ struct hent {
 	const vlex_file *const *oadd;
 	const hfent *fe;
 	const char *text;	/* own text */
-	const ptok *tk;		/* token entries: own tokens (loc: offset from the base + 1, 0: none) */
+	const htok *tk;		/* token entries: own tokens */
+	const ptok *xtk;	/* their escapes (HF_X) */
 	const hctr *ctr;
 	const hcread *crd;
 	const hseg *seg;
@@ -425,6 +461,9 @@ struct pp {
 		size_t nsb;
 	} rec;
 	uint64_t *rst[NMDIR];	/* per id: serial << 32 | index in rec.t */
+	size_t hc_bytes;	/* what the entry being published allocated */
+	const void *bcache[4096];	/* recent spelling blobs, by hash */
+	const hck *ckc[4096];	/* recent chunks, by hash (most repeats are a child's) */
 };
 
 #define error(p, loc, ...) pp_diag(p, loc, "error", __VA_ARGS__)
@@ -505,10 +544,10 @@ static inline int utoa(char *b, unsigned long long v);
 /* file.c */
 extern _Atomic size_t shared_used;
 VPRIV void *salloc(size_t n);
-VPRIV void *hsalloc(size_t n);
-VPRIV hvec hc_vec(const void *a, uint32_t n, uint32_t esz);
-VPRIV const void *hc_blob(const void *s, size_t n);
-extern _Thread_local size_t hc_new_bytes;
+VPRIV const char *shared_base0(void);
+VPRIV void *hsalloc(pp *p, size_t n);
+VPRIV hvec hc_vec(pp *p, const void *a, uint32_t n, uint32_t esz);
+VPRIV const void *hc_blob(pp *p, const void *s, size_t n);
 VPRIV const pfile *pfile_get(const vlex_file *f, bool *fresh);
 VPRIV uint32_t file_line(const vlex_file *f, const pfile *cfi, uint32_t off);
 static inline void *alloc(arena *a, size_t n);

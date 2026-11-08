@@ -195,8 +195,7 @@ void pp_next(pp *p, ptok *t)
 
 		if ((c->si >= e->nseg || e->seg[c->si].at != c->i) && (c->ci >= e->nctr || e->ctr[c->ci].off != c->i)) {
 			p->ntok_out++;
-			*t = c->pt[c->i++];
-			t->loc = t->loc ? c->loc + t->loc - 1 : 0;
+			htok_get(t, &c->ht[c->i++], c->pt, c->src, c->loc);
 			if (t->kind == T_IDENT)
 				t->flags |= PF_NOEXP;
 			if (unlikely(p->rec.on) && !c->norec)
