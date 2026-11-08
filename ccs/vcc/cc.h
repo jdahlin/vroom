@@ -121,6 +121,7 @@ enum {
 	SF_ATTR_USED = 4096,
 	SF_ADDR_TAKEN = 8192,
 	SF_INLINE_NOEXTERN = 16384,	/* some declaration is 'inline' without 'extern' */
+	SF_OVERLOAD = 32768,	/* __attribute__((overloadable)): mangled name, member of an overload set */
 };
 
 typedef struct sym {
@@ -137,6 +138,8 @@ typedef struct sym {
 	uint32_t shadow;	/* binding this one shadows in the scope table */
 	uint32_t depth;		/* scope depth */
 	uint32_t next;		/* previous declaration of the same entity (0: none) */
+	uint32_t ovl;		/* overloadable: the next function of the set (0: none); the set's
+				   first function is the one bound in the scope table */
 } sym;
 
 /* ---------------- nodes ---------------- */

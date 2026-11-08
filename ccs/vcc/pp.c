@@ -69,7 +69,7 @@ static inline int utoa(char *b, unsigned long long v)
 
 static char *shared_base;
 static _Atomic size_t shared_used;
-#define SHARED_MAX (1ull << 32)
+#define SHARED_MAX (1ull << 34)	/* address space; the header cache stops storing at hc_mem_max (8 GB) */
 
 static void *salloc(size_t n)
 {

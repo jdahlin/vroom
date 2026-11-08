@@ -2826,7 +2826,7 @@ static uint32_t primary(cc *c)
 
 				N(n)->a = s;
 				N(n)->flags = y->kind == S_VAR ? NF_LVALUE : 0;
-				if (!c->unevaluated)
+				if (!c->unevaluated && !((y->flags & SF_OVERLOAD) && is(c, T_LPAREN)))
 					y->flags |= SF_USED;
 				return n;
 			}
@@ -2853,23 +2853,115 @@ static uint32_t primary(cc *c)
 	}
 }
 
+/* overloadable: how well argument n converts to parameter type p (clang's C ranks:
+   0 exact, 1 qualification, 2 promotion, 3 conversion, 4 incompatible pointer, 5 ellipsis;
+   -1 not viable) */
+static int ovl_rank(cc *c, uint32_t n, qty p)
+{
+	qty a = QUNQ(canon(c, N(n)->ty));
+	int ak, pk;
+
+	p = QUNQ(canon(c, p));
+	if (is_array(c, a))
+		a = ty_ptr(c, T(c, a)->base);
+	else if (is_func(c, a))
+		a = ty_ptr(c, a);
+	if (compatible(c, a, p))
+		return 0;
+	ak = KIND(c, a), pk = KIND(c, p);
+	if (ak == TY_PTR && pk == TY_PTR) {
+		qty ea = T(c, a)->base, ep = T(c, p)->base;
+
+		if (compatible(c, QUNQ(ea), QUNQ(ep)))
+			return (QQ(ep) & QQ(ea)) == QQ(ea) ? 1 : 4;
+		if ((is_void(c, ea) || is_void(c, ep)) && (QQ(ep) & QQ(ea)) == QQ(ea))
+			return 3;
+		return 4;
+	}
+	if (is_arith(c, a) && is_arith(c, p)) {
+		if (QUNQ(promote(c, a)) == p || (ak == TY_FLOAT && pk == TY_DOUBLE))
+			return 2;
+		return 3;
+	}
+	if (pk == TY_PTR && is_npc(c, n))
+		return 3;
+	if (pk == TY_BOOL && ak == TY_PTR)
+		return 3;
+	return -1;
+}
+
+/* the member of fn's overload set that a call with args selects */
+static uint32_t ovl_pick(cc *c, uint32_t head, const vec *args, uint32_t loc)
+{
+	uint32_t best = 0, nbest = 0;
+	int br[64];
+
+	for (uint32_t s = head; s; s = c->syms[s].ovl) {
+		const ctype *f = T(c, c->syms[s].ty);
+		int r[64];
+		bool ok = args->n <= 64 && (args->n == f->n || (args->n > f->n && (f->flags & TF_VARIADIC)));
+		bool better = false, worse = false;
+
+		for (uint32_t i = 0; ok && i < args->n; i++) {
+			r[i] = i < f->n ? ovl_rank(c, args->v[i], c->params[f->aux + i]) : 5;
+			ok = r[i] >= 0;
+		}
+		if (!ok)
+			continue;
+		if (!best) {
+			best = s, nbest = 1;
+			memcpy(br, r, args->n * sizeof(int));
+			continue;
+		}
+		for (uint32_t i = 0; i < args->n; i++)
+			better |= r[i] < br[i], worse |= r[i] > br[i];
+		if (better && !worse) {
+			best = s, nbest = 1;
+			memcpy(br, r, args->n * sizeof(int));
+		} else if (better == worse) {
+			nbest++;
+		}
+	}
+	if (!best) {
+		error(c, loc, "no matching function for call to '%.*s'", IDF(c->syms[head].name));
+		return head;
+	}
+	if (nbest > 1)
+		error(c, loc, "call to '%.*s' is ambiguous", IDF(c->syms[head].name));
+	return best;
+}
+
 static uint32_t call(cc *c, uint32_t fn, uint32_t loc)
 {
 	vec args;
 	qty ft;
 	const ctype *f;
 	uint32_t n;
+	bool have_args = false;
 
+	if (N(fn)->op == N_VAR && (c->syms[N(fn)->a].flags & SF_OVERLOAD) && c->syms[N(fn)->a].kind == S_FUNC) {
+		uint32_t s;
+
+		args_list(c, &args);
+		have_args = true;
+		s = ovl_pick(c, N(fn)->a, &args, loc);
+		N(fn)->a = s;
+		N(fn)->ty = c->syms[s].ty;
+		if (!c->unevaluated)
+			c->syms[s].flags |= SF_USED;
+	}
 	fn = rvalue(c, fn);
 	ft = N(fn)->ty;
 	if (!is_ptr(c, ft) || !is_func(c, T(c, ft)->base)) {
 		error(c, loc, "called object type is not a function or function pointer");
-		args_list(c, &args);
+		if (!have_args)
+			args_list(c, &args);
 		return mk_int(c, 0, prim(TY_INT), loc);
 	}
 	ft = T(c, ft)->base;
 	f = T(c, ft);
-	args_list(c, &args);
+	if (!have_args)
+		args_list(c, &args);
 	f = T(c, ft);
 	if (!(f->flags & TF_NOPROTO)) {
 		if (args.n < f->n || (args.n > f->n && !(f->flags & TF_VARIADIC)))
@@ -3326,7 +3418,7 @@ enum {
 	A_NONE, A_ALIGNED, A_PACKED, A_SECTION, A_MODE, A_CLEANUP, A_ALIAS, A_WEAK, A_USED, A_UNUSED,
 	A_NORETURN, A_ALWAYS_INLINE, A_NOINLINE, A_GNU_INLINE, A_TRANSPARENT_UNION, A_VISIBILITY,
 	A_CONSTRUCTOR, A_DESTRUCTOR, A_COUNTED_BY, A_VECTOR_SIZE, A_COLD, A_NONSTRING, A_MAY_ALIAS,
-	A_WEAKREF, A_NAKED, A_NOCF, A_ERROR,
+	A_WEAKREF, A_NAKED, A_NOCF, A_ERROR, A_OVERLOADABLE,
 	A_COUNT
 };
 
@@ -3339,6 +3431,7 @@ static const char *const attr_names[A_COUNT] = {
 	[A_COUNTED_BY] = "counted_by", [A_VECTOR_SIZE] = "vector_size", [A_COLD] = "cold",
 	[A_NONSTRING] = "nonstring", [A_MAY_ALIAS] = "may_alias", [A_WEAKREF] = "weakref",
 	[A_NAKED] = "naked", [A_NOCF] = "nocf_check", [A_ERROR] = "error",
+	[A_OVERLOADABLE] = "overloadable",
 };
 
 static uint32_t *attr_dir[NDIR];
@@ -3509,6 +3602,7 @@ static void attribute_list(cc *c, attrs *a)
 			case A_NORETURN: a->noreturn = 1; break;
 			case A_ALWAYS_INLINE: a->always_inline = 1; break;
 			case A_NOINLINE: a->noinline = 1; break;
+			case A_OVERLOADABLE: a->overloadable = 1; break;
 			case A_GNU_INLINE: a->gnu_inline = 1; break;
 			case A_TRANSPARENT_UNION: a->transparent = 1; break;
 			case A_CONSTRUCTOR: a->constructor = 1; break;
@@ -3543,7 +3637,7 @@ static void merge_attrs(attrs *to, const attrs *from)
 	to->constructor |= from->constructor, to->destructor |= from->destructor;
 	to->nonstring |= from->nonstring, to->may_alias |= from->may_alias, to->cold |= from->cold, to->error_fn |= from->error_fn;
 	to->gnu_inline |= from->gnu_inline, to->always_inline |= from->always_inline;
-	to->noinline |= from->noinline;
+	to->noinline |= from->noinline, to->overloadable |= from->overloadable;
 }
 
 /* GNU asm("label") after a declarator */
@@ -5003,6 +5097,184 @@ static void apply_sym_attrs(cc *c, sym *s, const attrs *a)
 	if (a->noinline) s->flags |= SF_NOINLINE;
 	if (a->gnu_inline) s->flags |= SF_GNU_INLINE;
 	if (a->used) s->flags |= SF_ATTR_USED;
+	if (a->overloadable) s->flags |= SF_OVERLOAD;
+}
+
+/* ---------------- overloadable: Itanium mangling as clang does it for C ---------------- */
+
+typedef struct mangler {
+	char b[512];
+	uint32_t n;
+	qty sub[64];		/* substitution candidates, in order: canonical (qualified) types */
+	uint32_t nsub;
+	bool full;
+} mangler;
+
+static void mg_put(mangler *m, const char *s, size_t l)
+{
+	if (m->n + l >= sizeof(m->b)) {
+		m->full = true;
+		return;
+	}
+	memcpy(m->b + m->n, s, l);
+	m->n += (uint32_t)l;
+}
+
+static void mg_s(mangler *m, const char *s) { mg_put(m, s, strlen(s)); }
+
+static void mg_u(mangler *m, uint64_t v)
+{
+	char t[24];
+
+	mg_put(m, t, (size_t)snprintf(t, sizeof(t), "%llu", (unsigned long long)v));
+}
+
+static void mg_src(mangler *m, uint32_t id)
+{
+	int l;
+	const char *s = idname(id, &l);
+
+	mg_u(m, (uint64_t)l);
+	mg_put(m, s, (size_t)l);
+}
+
+/* S_, S0_, S1_ ... SZ_, S10_ for a type seen before; false if t is new */
+static bool mg_subst(mangler *m, qty t)
+{
+	for (uint32_t i = 0; i < m->nsub; i++) {
+		char t2[16], d[8];
+		int k = 0, nd = 0;
+
+		if (m->sub[i] != t)
+			continue;
+		t2[k++] = 'S';
+		if (i)
+			for (uint32_t v = i - 1;; v /= 36) {
+				d[nd++] = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ"[v % 36];
+				if (v < 36)
+					break;
+			}
+		while (nd)
+			t2[k++] = d[--nd];
+		t2[k++] = '_';
+		mg_put(m, t2, (size_t)k);
+		return true;
+	}
+	return false;
+}
+
+static void mg_add(mangler *m, qty t)
+{
+	if (m->nsub < 64)
+		m->sub[m->nsub++] = t;
+}
+
+static void mg_type(cc *c, mangler *m, qty t)
+{
+	static const char *const prim_code[] = {
+		[TY_VOID] = "v", [TY_BOOL] = "b", [TY_CHAR] = "c", [TY_SCHAR] = "a", [TY_UCHAR] = "h",
+		[TY_SHORT] = "s", [TY_USHORT] = "t", [TY_INT] = "i", [TY_UINT] = "j", [TY_LONG] = "l",
+		[TY_ULONG] = "m", [TY_LLONG] = "x", [TY_ULLONG] = "y", [TY_INT128] = "n", [TY_UINT128] = "o",
+		[TY_FLOAT16] = "DF16_", [TY_FLOAT] = "f", [TY_DOUBLE] = "d", [TY_LDOUBLE] = "e",
+	};
+	int q = QQ(t), k;
+	const ctype *x;
+
+	t = canon(c, t);	/* keeps the qualifiers */
+	k = KIND(c, t);
+	if (!q && k < TY_PTR) {
+		mg_s(m, prim_code[k]);
+		return;
+	}
+	if (mg_subst(m, t))
+		return;
+	if (q) {
+		if (q & Q_RESTRICT) mg_s(m, "r");
+		if (q & Q_VOLATILE) mg_s(m, "V");
+		if (q & Q_CONST) mg_s(m, "K");
+		mg_type(c, m, QUNQ(t));
+		mg_add(m, t);
+		return;
+	}
+	x = T(c, t);
+	switch (k) {
+	case TY_PTR:
+		mg_s(m, "P");
+		mg_type(c, m, x->base);
+		break;
+	case TY_ARRAY:
+		mg_s(m, "A");
+		if (!(x->flags & (TF_INCOMPLETE | TF_VLA)))
+			mg_u(m, x->n);
+		mg_s(m, "_");
+		mg_type(c, m, x->base);
+		break;
+	case TY_FUNC:
+		mg_s(m, "F");
+		mg_type(c, m, x->base);
+		if (!x->n && !(x->flags & TF_VARIADIC))
+			mg_s(m, "v");
+		for (uint32_t i = 0; i < x->n; i++)
+			mg_type(c, m, QUNQ(c->params[x->aux + i]));
+		if (x->flags & TF_VARIADIC)
+			mg_s(m, "z");
+		mg_s(m, "E");
+		break;
+	default: {	/* struct, union, enum */
+		const tag *r = &c->tags[x->aux];
+		uint32_t id = r->name ? r->name : r->typedef_name;
+
+		if (id)
+			mg_src(m, id);
+		else
+			mg_s(m, "Ut_");
+		break;
+	}
+	}
+	mg_add(m, t);
+}
+
+/* _Z[L]<name><params> as clang mangles an overloadable C function; 0 if it does not fit */
+static uint32_t mangle_overload(cc *c, uint32_t s)
+{
+	const sym *y = &c->syms[s];
+	const ctype *f = T(c, y->ty);
+	mangler m;
+	uint32_t si;
+	char *keep;
+
+	m.n = m.nsub = 0;
+	m.full = false;
+	mg_s(&m, y->sc == SC_STATIC ? "_ZL" : "_Z");
+	mg_src(&m, y->name);
+	if (!f->n && !(f->flags & TF_VARIADIC))
+		mg_s(&m, "v");
+	for (uint32_t i = 0; i < f->n; i++)
+		mg_type(c, &m, QUNQ(c->params[f->aux + i]));
+	if (f->flags & TF_VARIADIC)
+		mg_s(&m, "z");
+	if (m.full)
+		return 0;
+	keep = halloc(c, m.n + 1);
+	memcpy(keep, m.b, m.n);
+	keep[m.n] = 0;
+	si = c->nstr++;
+	c->strs[si] = (cstr){ keep, m.n + 1, 1, T_STRING };
+	return si + 1;
+}
+
+/* give an overloadable function its mangled name (unless it has an asm label) */
+static void name_overload(cc *c, uint32_t s)
+{
+	sym *y = &c->syms[s];
+	attrs a;
+
+	if (y->attrs && c->attr[y->attrs].asmname)
+		return;
+	memset(&a, 0, sizeof(a));
+	a.asmname = mangle_overload(c, s);
+	if (a.asmname)
+		apply_sym_attrs(c, y, &a);
 }
 
 /* the file-scope entity name refers to, if any */
@@ -5079,6 +5351,42 @@ static uint32_t declare(cc *c, const dspec *ds, declr *d, qty t, bool file)
 		else if (!file && linkage)
 			prev = file_scope_sym(c, d->name);
 	}
+	if (prev && kind == S_FUNC && c->syms[prev].kind == S_FUNC &&
+	    (at.overloadable || (c->syms[prev].flags & SF_OVERLOAD))) {
+		/* overloadable: redeclare the member with this type, or add one to the set */
+		uint32_t head = prev, q;
+
+		for (q = head; q; q = c->syms[q].ovl)
+			if (compatible(c, c->syms[q].ty, t))
+				break;
+		if (q) {
+			prev = q;
+		} else if (at.overloadable && (c->syms[head].flags & SF_OVERLOAD)) {
+			sym *y;
+
+			s = sym_new(c, kind, d->name, t, d->loc);
+			y = &c->syms[s];
+			y->sc = (uint8_t)ds->sc;
+			y->depth = c->syms[head].depth;
+			y->flags |= SF_GLOBAL;
+			if (ds->inline_)
+				y->flags |= SF_INLINE | (ds->sc != SC_EXTERN ? SF_INLINE_NOEXTERN : 0);
+			if (ds->noreturn)
+				y->flags |= SF_NORETURN;
+			apply_sym_attrs(c, y, &at);
+			for (q = head; c->syms[q].ovl; q = c->syms[q].ovl)
+				;
+			c->syms[q].ovl = s;
+			if (file)
+				c->toplevel[c->ntoplevel++] = s;
+			name_overload(c, s);
+			return s;
+		} else {
+			error(c, d->loc, at.overloadable ? "redeclaration of '%.*s' must not have the 'overloadable' attribute"
+			      : "redeclaration of '%.*s' must have the 'overloadable' attribute", IDF(d->name));
+			return head;
+		}
+	}
 	if (prev) {
 		sym *y = &c->syms[prev];
 
@@ -5128,6 +5436,8 @@ static uint32_t declare(cc *c, const dspec *ds, declr *d, qty t, bool file)
 	bind(c, s);
 	if (file)
 		c->toplevel[c->ntoplevel++] = s;
+	if (kind == S_FUNC && at.overloadable)
+		name_overload(c, s);
 	return s;
 }
 
