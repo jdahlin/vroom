@@ -362,7 +362,7 @@ load 5–7.
 
      Locations are a per-entry base plus an offset, as `span`/`rbase` are now.
 3. **Declarations** follow once 2.6 gives the front end a stable state layout. They are
-   the large win for the compile path.
+   the large win for the compile path. The first form, prefix snapshots, is done (§6.7).
 4. ~~**Ordered reads** with child splicing at replay, against the guard-variant misses.~~
    Tried and shelved, see §6.6.
 
@@ -423,6 +423,67 @@ load 5–7.
   - **Not exact.** 101 TUs' output differed. This was not diagnosed, given the cost.
 - **Conclusion.** Guard-variant misses stay recorded. The declaration cache (§6.4 item 3)
   is the next large win. The work-in-progress patch was not kept in the tree.
+
+### 6.7 Declaration cache, first form: parser snapshots after the leading headers (2026-11-08)
+- **Where the shared work is.** All 879 C TUs were logged at `-j 1` with their top-level
+  regions, meaning headers included from the main file or `-include`d.
+  - 30% of all tokens (178 M of 598 M) lie in a leading run of regions that an earlier TU
+    started with too. That run is mostly the three `-include` files plus the first header
+    (depth 4).
+  - 41% lie in some cached top-level region.
+  - 90% are replayed at some depth.
+
+  Only 237 of 4750 prefix-trie nodes are reached by more than one TU.
+- **Parser state.** The front end's state is index-addressed arrays plus one bump heap.
+  Heap pointers survive in only a few places:
+  - in `struct cc`: `tyhash`, `fnhash` and the scope directory pages;
+  - `tag.f`, `cstr.s`, and the asm operand arrays.
+
+  Locations sit in `sym`, `node`, `tag`, `field` and `label`. The parser state is a
+  function of the token stream, and the same header-cache entry means the same tokens. So
+  the state after a TU's leading regions is the same for every TU that starts with the
+  same entries, apart from locations: the main file comes first in location space.
+- **Design** (`ccs/vcc/ccsnap.c`).
+  - **Trie.** It is keyed by (entry, `__COUNTER__` at its start), with one root per
+    front-end option set.
+  - **Events from pp.** pp reports region starts and ends in delivered-token positions
+    (`pp_top_events`).
+  - **Taking a snapshot.** At each file-scope declaration boundary that falls exactly on a
+    region end, the TU's visit is counted. The second visit takes a snapshot, if nothing
+    was diagnosed. The snapshot holds the used part of every array and of the heap, with
+    pointers as heap offsets and locations relative to the first region's base. It is
+    stored as 16 KB pages, shared with the nearest ancestor's where equal.
+  - **Restoring.** When `tk[0]` is the first token of a replayed region whose trie child
+    has a snapshot, pp drops the rest of the region (`pp_skip_top`). Its macros, files and
+    counter were applied at the hit already. Consecutive skips coalesce into one restore:
+    a copy, then a pass over the location fields.
+  - **Pragmas.** One arriving while a restore is pending forces the restore first.
+- **Exactness.**
+  - With and without the cache (`VCC_NODC=1`): `-S` assembly and the
+    `--vcc-layout-checks` output are identical for all 879 TUs in one batch process.
+  - ASan is clean.
+  - Parity, sema and layout runs are green.
+- **Measured** (`-j 6`, load 5–8; 256 MB cap):
+  - 834 of 879 TUs restore;
+  - 98 M tokens skipped (16%);
+  - `-fsyntax-only` 2.96–3.25 s / 17.7–19.4 s CPU, against 3.33–3.81 s / 19.9–22.8 s;
+  - `-S` 3.13 s against 3.51 s.
+
+  Snapshots and restores cost about 0.5 s of CPU in all.
+- **Memory.**
+  - Snapshots average 3.5 MB of their own. Sibling first headers share little, so
+    sharing pages with the parent gains little.
+  - The cap trades memory for coverage: 128 MB gives 55 M tokens skipped, 256 MB 97 M,
+    512 MB 104 M, 1024 MB (690 MB used) 116 M.
+  - The default is 256 MB (`VCC_DC_MAX_MB`).
+- **Limits.**
+  - Only the leading run is covered. The other 84% of tokens, including most of the
+    replayed nested regions, are parsed as before.
+  - The prefix is cheap state: about 2.3 MB per restore, mostly declarations. Skipping
+    16% of tokens therefore saves only about 10% CPU.
+  - The larger step is relocatable per-region declaration replay, which needs parser-side
+    read sets (name lookups, tags) and identity remapping. That is an AST reader in all
+    but name.
 
 ## Sources
 - clang: TokenLexer.cpp, PPMacroExpansion.cpp, Preprocessor.cpp, MacroArgs.cpp,

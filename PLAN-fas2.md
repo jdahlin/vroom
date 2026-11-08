@@ -325,7 +325,12 @@ aldrig i bygget. Ett TU-test (`bench/vcc-diff.py`) körs över alla kärnfiler.
 
     541 M tokens spelas upp, med ~7–8 ns per token som begränsas av minnesbandbredden (24-bytes `ptok`). Parsern är nu den större delen, så deklarationsuppspelning (RESEARCH-preprocessor §6.4) är nästa stora vinst.
 - Kvar:
-  - deklarationer per region för cc-vägen;
+  - deklarationer per region för cc-vägen. Första formen är klar (`ccs/vcc/ccsnap.c`, RESEARCH-preprocessor §6.7): parserns tillstånd efter TU:ns inledande top-level-headers sparas i ett trie per cache-post, och TU:er som börjar likadant återställer det i stället för att parsa.
+    - 834 av 879 TU:er återställer, och 98 M tokens (16 %) hoppas över.
+    - `-fsyntax-only` 2,96–3,25 s mot 3,33–3,81 s, och `-S` 3,13 s mot 3,51 s.
+    - `-S`-utdata och layoutkontroller är identiska med och utan cachen (`VCC_NODC=1`) för alla TU:er.
+    - Minnet är 256 MB (`VCC_DC_MAX_MB`).
+    - Kvar är omlokaliserbar uppspelning per region på alla djup, som täcker resterande 84 %;
   - ~~läsordning per region mot guard-missarna~~: provat och lagt på hyllan (RESEARCH-preprocessor §6.6). Med splitsning blev det 6–8 % färre missar, men 4× långsammare `-E` och 101 TU:er med fel utdata;
   - minnet: 2,8 GB lagrat vid `-j 6`, taket är `VPP_HC_MAX_MB`;
   - vccd tar inte om filer och litar redan på att de är oföränderliga, och cachen ärver det.

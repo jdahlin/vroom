@@ -364,7 +364,7 @@ typedef struct ctx {
 	const struct hent *he;
 	uint32_t si, ci;	/* next segment, next __COUNTER__ record */
 	unsigned cbase;		/* __COUNTER__ at the entry's start */
-	uint8_t top;		/* outermost: owes the entry's pend_out when done */
+	uint8_t top;		/* outermost: owes the entry's pend_out when done (2: a top-level region) */
 } ctx;
 
 typedef struct fent {
@@ -541,6 +541,12 @@ struct pp {
 	size_t svn;
 	fent *fe;
 	uint32_t nfe, next_base;
+	uint64_t ntok_out;	/* tokens pp_next delivered */
+	uint64_t skipped_tok;	/* tokens of regions pp_skip_top dropped */
+	pp_topev *tev;		/* top-level region events (pp_top_events) */
+	uint32_t ntev;
+	uint8_t tev_full, top_rec;
+	const void *hc_last;	/* the entry hc_apply applied last */
 	uint8_t pend;		/* SOL/SPACE owed to the next token (empty expansions) */
 	int preexp;		/* in argument pre-expansion */
 	int errors;
@@ -1229,6 +1235,20 @@ static void hc_end(pp *p);
 static bool replay_seg(pp *p, ctx *c);
 static void replay_tok(pp *p, ctx *c, ptok *t);
 
+/* a top-level region event (pp_top_events) at the current delivered position */
+static void top_event(pp *p, const void *e, uint32_t base, unsigned ctr, uint8_t end, uint8_t hit)
+{
+	if (p->tev_full)
+		return;
+	if (!p->tev)
+		p->tev = alloc(&p->perm, 1024 * sizeof(pp_topev));
+	if (p->ntev == 1024) {
+		p->tev_full = 1;
+		return;
+	}
+	p->tev[p->ntev++] = (pp_topev){ e, p->ntok_out, base, ctr, end, hit };
+}
+
 /* the next token, no macro expansion; runs directives in file contexts */
 static void raw(pp *p, ptok *t)
 {
@@ -1272,6 +1292,8 @@ static void raw(pp *p, ptok *t)
 				continue;
 			if (c->top)
 				p->pend |= c->he->pend_out;
+			if (c->top == 2)
+				top_event(p, c->he, 0, 0, 1, 1);
 			p->depth--;
 			continue;
 		}
@@ -3292,6 +3314,8 @@ static void hc_apply(pp *p, const hent *e)
 	struct hrec *r = &p->rec;
 	hlev *L = r->n ? &r->lev[r->n - 1] : NULL;
 
+	p->hc_last = e;
+
 	if (p->tokmode == 2) {
 		if (e->has_text) {
 			if (L) {
@@ -3740,6 +3764,10 @@ static void hc_end(pp *p)
 				;
 		}
 	}
+	if (r->n == 1 && p->top_rec) {
+		top_event(p, e, 0, 0, 1, 0);
+		p->top_rec = 0;
+	}
 	r->n--;
 	if (r->nbad > r->n)
 		r->nbad = r->n;
@@ -3810,9 +3838,28 @@ static void enter_file(pp *p, const vlex_file *f, const char *path, int32_t sdir
 	sys = sdir == -2 || (sdir >= 0 && p->o->nsys && sdir >= p->o->nsys) ||
 	      (sdir == -1 && from && p->fe[from->fe].sys);
 	if (f != &p->builtin && from && hc_top(p)) {
+		int d0 = p->depth;
+		uint32_t b0 = p->next_base;
+		unsigned c0 = p->counter;
+
 		k = hkey_get(p->sig * 2 + (p->tokmode == 2), f, sdir, 0, path, sys, true);
-		if (k && hc_try(p, k))
+		/* top-level: included from the main file or <built-in> (-include) */
+		bool top = p->tokmode == 2 && (p->nfile == 1 || (p->nfile == 2 && from->f == &p->builtin));
+
+		if (k && hc_try(p, k)) {
+			if (top) {
+				top_event(p, p->hc_last, b0, c0, 0, 1);
+				if (p->depth > d0)
+					p->cx[d0].top = 2;	/* its end comes when the replay does */
+				else
+					top_event(p, p->hc_last, 0, 0, 1, 1);
+			}
 			return;
+		}
+		if (k && top) {
+			top_event(p, NULL, b0, c0, 0, 0);
+			p->top_rec = 1;
+		}
 	}
 	if (fi->bad)
 		fatal(p, 0, "%s: unterminated or unbalanced conditional directives", path);
@@ -4227,6 +4274,7 @@ void pp_next(pp *p, ptok *t)
 		const hent *e = c->he;
 
 		if ((c->si >= e->nseg || e->seg[c->si].at != c->i) && (c->ci >= e->nctr || e->ctr[c->ci].off != c->i)) {
+			p->ntok_out++;
 			*t = c->pt[c->i++];
 			t->loc = t->loc ? c->loc + t->loc - 1 : 0;
 			if (t->kind == T_IDENT)
@@ -4239,8 +4287,50 @@ void pp_next(pp *p, ptok *t)
 	if (unlikely(!p->tokmode))
 		hc_mode(p, 2);
 	next_tok(p, t);
+	p->ntok_out++;
 	if (unlikely(p->rec.on))
 		rec_tok(p, t);
+}
+
+const pp_topev *pp_top_events(const pp *p, uint32_t *n)
+{
+	*n = p->ntev;
+	return p->tev_full ? NULL : p->tev ? p->tev : (const pp_topev *)"";
+}
+
+uint64_t pp_ntok(const pp *p)
+{
+	return p->ntok_out;
+}
+
+uint64_t pp_skipped(const pp *p)
+{
+	return p->skipped_tok;
+}
+
+int pp_skip_top(pp *p)
+{
+	const pp_topev *s = p->ntev && !p->tev_full ? &p->tev[p->ntev - 1] : NULL;
+	int d0 = -1;
+
+	if (!s || s->end || !s->hit || s->pos + 1 != p->ntok_out)
+		return 0;
+	for (int d = p->depth - 1; d >= 0; d--)
+		if (p->cx[d].type == C_REPLAY && p->cx[d].top == 2) {
+			d0 = d;
+			break;
+		}
+	if (d0 < 0 || p->cx[d0].he != s->e)
+		return 0;
+	for (int d = d0 + 1; d < p->depth; d++)
+		if (p->cx[d].type != C_REPLAY)
+			return 0;
+	p->skipped_tok += p->cx[d0].he->total;
+	p->pend |= p->cx[d0].he->pend_out;
+	p->depth = d0;
+	p->ntok_out = s->pos;
+	top_event(p, s->e, 0, 0, 1, 1);
+	return 1;
 }
 
 /* the token as clang -E -P prints it */

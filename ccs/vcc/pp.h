@@ -84,6 +84,32 @@ int pp_where(const pp *p, uint32_t loc, const char **name, uint32_t *namelen, ui
 /* a diagnostic at loc ("error", "warning", "fatal error": longjmp/exit) */
 void pp_vdiag(pp *p, uint32_t loc, const char *what, const char *fmt, va_list ap);
 
+/*
+ * Top-level regions (headers included from the main file, cached or being
+ * recorded), for the front end's declaration cache.  Positions count the
+ * tokens pp_next has delivered.  A region's start comes before its first
+ * token, its end after its last; e identifies the cached entry (the same
+ * pointer means the same tokens), NULL for a region that was not stored.
+ */
+typedef struct pp_topev {
+	const void *e;
+	uint64_t pos;
+	uint32_t base;		/* location base of the region */
+	unsigned ctr;		/* __COUNTER__ at its start */
+	uint8_t end, hit;	/* hit: replayed (can be skipped) */
+} pp_topev;
+/* this TU's events so far; NULL once there were too many */
+const pp_topev *pp_top_events(const pp *p, uint32_t *n);
+/* tokens delivered so far; tokens pp_skip_top dropped */
+uint64_t pp_ntok(const pp *p);
+uint64_t pp_skipped(const pp *p);
+/*
+ * Drop the rest of the replayed region that the last event started, whose
+ * first token was the last one delivered: as if it had been delivered and
+ * the delivered count stood at its start.  0 if that is not the case.
+ */
+int pp_skip_top(pp *p);
+
 /* the token's spelling without splices; buf must hold t->len bytes */
 const char *pp_spell(const ptok *t, char *buf, size_t *len);
 

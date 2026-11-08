@@ -26,6 +26,7 @@
 
 #include "ccint.h"
 #include "emit.h"
+#include "ccsnap.h"
 
 static void *reserve(size_t n)
 {
@@ -56,6 +57,7 @@ static void *halloc(cc *c, size_t n)
 
 static void diag(cc *c, uint32_t loc, const char *what, const char *fmt, va_list ap)
 {
+	c->ndiag++;
 	pp_vdiag(c->p, loc, what, fmt, ap);
 }
 
@@ -659,9 +661,13 @@ static void fetch(cc *c, ptok *t)
 		pp_next(c->p, t);
 		if (likely(t->kind != P_DIRECTIVE))
 			return;
+		if (unlikely(dc_stale(c)))
+			dc_materialize(c);	/* (the pragma acts on the real state) */
 		pragma(c, t);
 	}
 }
+
+void cc_fetch(cc *c, ptok *t) { fetch(c, t); }
 
 static inline ptok *tok(cc *c) { return &c->tk[0]; }
 
@@ -5740,7 +5746,10 @@ static void function_def(cc *c, uint32_t s, const declr *d)
 
 static void translation_unit(cc *c)
 {
-	while (!is(c, T_EOF)) {
+	for (;;) {
+		dc_boundary(c);
+		if (is(c, T_EOF))
+			break;
 		if (accept(c, T_SEMI))
 			continue;
 		if (iskw(c, KW___extension__)) {
@@ -6187,6 +6196,7 @@ int cc_run(pp *p, const cc_opts *o)
 	init_attrs();
 	cc_init(c, p, o);
 	if (!setjmp(c->bail)) {
+		dc_begin(c);
 		fetch(c, &c->tk[0]);
 		c->ntk = 1;
 		translation_unit(c);
@@ -6196,6 +6206,7 @@ int cc_run(pp *p, const cc_opts *o)
 	if (o->emit && !c->errors && !pp_errors(p))
 		c->errors += emit_tu(c, o);
 	errors = c->errors;
+	dc_end(c);
 	cc_free(c);
 	free(c);
 	return errors;

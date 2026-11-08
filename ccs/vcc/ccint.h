@@ -136,6 +136,8 @@ struct cc {
 	uint32_t *toplevel;	/* file-scope syms in declaration order */
 	uint32_t *tlasm;	/* file-scope asm("...") statements (N_ASM nodes) */
 	uint32_t ntlasm;
+	uint32_t ndiag;		/* diagnostics reported */
+	struct dcst *dc;	/* declaration cache (ccsnap.c), NULL: off */
 };
 
 

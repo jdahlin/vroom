@@ -23,6 +23,7 @@
 #include <unistd.h>
 
 #include "pp.h"
+#include "ccsnap.h"
 #include "ppdriver.h"
 
 typedef struct job {
@@ -133,6 +134,8 @@ static int batch(const char *file, int nthr)
 		char hs[512];
 
 		pp_hc_stats(hs, sizeof(hs));
+		printf("%s\n", hs);
+		dc_stats(hs, sizeof(hs));
 		printf("%s\n", hs);
 	}
 	printf("%d/%d ok; wall %.0f ms on %d threads, cpu sum %.0f ms\n", njobs - bad, njobs, wall * 1e3, nthr, sum);
