@@ -3828,21 +3828,57 @@ static int mode_kind(cc *c, uint32_t id, bool sgn)
 	return 0;
 }
 
+/* C23 "[[" starts an attribute specifier */
+static bool at_std_attr(cc *c)
+{
+	return is(c, T_LSQUARE) && peek(c, 1)->kind == T_LSQUARE;
+}
+
+/* GNU __attribute__((...)) and C23 [[...]] (gnu::name is the GNU attribute) */
 static void attribute_list(cc *c, attrs *a)
 {
-	while (iskw(c, KW___attribute__) || iskw(c, KW___attribute)) {
+	for (;;) {
+		bool std = at_std_attr(c);
+		int close = std ? T_RSQUARE : T_RPAREN;
+		const char *cs = std ? "']'" : "')'";
+
+		if (!std && !iskw(c, KW___attribute__) && !iskw(c, KW___attribute))
+			break;
 		next(c);
-		expect(c, T_LPAREN, "'('");
-		expect(c, T_LPAREN, "'('");
-		while (!is(c, T_RPAREN)) {
+		if (std) {
+			next(c);
+		} else {
+			expect(c, T_LPAREN, "'('");
+			expect(c, T_LPAREN, "'('");
+		}
+		while (!is(c, close)) {
 			ptok *t = tok(c);
 			int an;
 			uint32_t loc = t->loc;
 
 			if (accept(c, T_COMMA))
 				continue;
-			if (t->kind != T_IDENT)
+			if (t->kind != T_IDENT && !(std && kwof(t)))
 				fatal(c, loc, "expected attribute name");
+			if (std && peek(c, 1)->kind == T_COLONCOLON) {
+				/* vendor::name: gnu and clang name GNU attributes, others are ignored */
+				const vident *ns = &vintern_ents[t->id];
+				bool gnu = (ns->len == 3 && !memcmp(ns->s, "gnu", 3)) || (ns->len == 7 && !memcmp(ns->s, "__gnu__", 7)) ||
+					   (ns->len == 5 && !memcmp(ns->s, "clang", 5));
+
+				next(c);
+				next(c);
+				t = tok(c);
+				loc = t->loc;
+				if (t->kind != T_IDENT && !kwof(t))
+					fatal(c, loc, "expected attribute name");
+				if (!gnu) {
+					next(c);
+					if (is(c, T_LPAREN))
+						skip_balanced(c);
+					continue;
+				}
+			}
 			an = attr_of(t->id);
 			if (!an && kwof(t) == KW_const)
 				an = A_NONE;
@@ -3937,8 +3973,8 @@ static void attribute_list(cc *c, attrs *a)
 			if (is(c, T_LPAREN))
 				skip_balanced(c);
 		}
-		expect(c, T_RPAREN, "')'");
-		expect(c, T_RPAREN, "')'");
+		expect(c, close, cs);
+		expect(c, close, cs);
 	}
 }
 
@@ -4190,6 +4226,10 @@ static bool decl_specs(cc *c, dspec *ds, bool allow_sc)
 		ptok *t = tok(c);
 		int kw = kwof(t);
 
+		if (at_std_attr(c)) {
+			attribute_list(c, &ds->at);
+			continue;
+		}
 		if (!kw) {
 			if (is_nullability(c, t)) {
 				next(c);
@@ -5140,6 +5180,14 @@ static void il_elem(cc *c, ilist *l, uint64_t pos, uint32_t v, bool st)
 	il_set(c, l, pos, is_record(c, et) ? v : convert(c, decay(c, v), et), NULL);
 }
 
+/* a designation starts here: ".f", "[i]" or the old GNU "f:" */
+static bool at_designator(cc *c, int k)
+{
+	int t = peek(c, k)->kind;
+
+	return t == T_PERIOD || t == T_LSQUARE || (t == T_IDENT && peek(c, k + 1)->kind == T_COLON);
+}
+
 /* after an element of an unbraced (elided) list: go on with the next one if it belongs here */
 static void il_continue(cc *c, ilist *l, uint64_t pos, bool st)
 {
@@ -5147,9 +5195,7 @@ static void il_continue(cc *c, ilist *l, uint64_t pos, bool st)
 	if (il_full(l, pos) || !is(c, T_COMMA))
 		return;
 	{
-		int k = peek(c, 1)->kind;
-
-		if (k == T_RBRACE || k == T_PERIOD || k == T_LSQUARE)
+		if (peek(c, 1)->kind == T_RBRACE || at_designator(c, 1))
 			return;
 	}
 	next(c);
@@ -5163,7 +5209,7 @@ static uint64_t il_designation(cc *c, ilist *l, bool st)
 	uint32_t path[16];
 	int depth = 1;
 
-	if (accept(c, T_PERIOD)) {
+	if (accept(c, T_PERIOD) || (is(c, T_IDENT) && peek(c, 1)->kind == T_COLON)) {
 		uint32_t name;
 		int d;
 
@@ -5219,7 +5265,8 @@ static uint64_t il_designation(cc *c, ilist *l, bool st)
 
 				il_continue(c, t, np, st);
 			} else {
-				accept(c, T_EQUAL);
+				if (!accept(c, T_EQUAL))
+					accept(c, T_COLON);
 				il_elem(c, s, last, 0, st);
 				il_continue(c, s, last + 1, st);
 			}
@@ -5282,8 +5329,7 @@ static void il_fill(cc *c, ilist *l, uint64_t pos, bool braced, uint32_t first, 
 		il_elem(c, l, pos, first, st);
 		pos = il_next_pos(c, l, pos + 1);
 		if (!braced) {
-			if (il_full(l, pos) || !is(c, T_COMMA) || peek(c, 1)->kind == T_RBRACE ||
-			    peek(c, 1)->kind == T_PERIOD || peek(c, 1)->kind == T_LSQUARE)
+			if (il_full(l, pos) || !is(c, T_COMMA) || peek(c, 1)->kind == T_RBRACE || at_designator(c, 1))
 				return;
 			next(c);
 		} else if (!accept(c, T_COMMA)) {
@@ -5293,7 +5339,7 @@ static void il_fill(cc *c, ilist *l, uint64_t pos, bool braced, uint32_t first, 
 	for (;;) {
 		if (is(c, T_RBRACE))
 			return;
-		if (is(c, T_PERIOD) || is(c, T_LSQUARE)) {
+		if (at_designator(c, 0)) {
 			if (!braced)
 				return;
 			pos = il_designation(c, l, st);
@@ -5317,8 +5363,7 @@ static void il_fill(cc *c, ilist *l, uint64_t pos, bool braced, uint32_t first, 
 		}
 		pos = il_next_pos(c, l, pos);
 		if (!braced) {
-			if (il_full(l, pos) || !is(c, T_COMMA) || peek(c, 1)->kind == T_RBRACE ||
-			    peek(c, 1)->kind == T_PERIOD || peek(c, 1)->kind == T_LSQUARE)
+			if (il_full(l, pos) || !is(c, T_COMMA) || peek(c, 1)->kind == T_RBRACE || at_designator(c, 1))
 				return;
 			next(c);
 			continue;
@@ -6205,7 +6250,7 @@ static uint32_t compound_stmt(cc *c, qty *last)
 			fatal(c, tok(c)->loc, "expected '}'");
 		if (iskw(c, KW___extension__) && is_decl_start(c, peek(c, 1)))
 			next(c);
-		if (iskw(c, KW___attribute__) || iskw(c, KW___attribute)) {
+		if (iskw(c, KW___attribute__) || iskw(c, KW___attribute) || at_std_attr(c)) {
 			attrs a = { 0 };
 
 			attribute_list(c, &a);
@@ -6256,6 +6301,14 @@ static uint32_t statement(cc *c)
 	switch (t->kind) {
 	case T_LBRACE:
 		return compound_stmt(c, NULL);
+	case T_LSQUARE:
+		if (at_std_attr(c)) {	/* [[fallthrough]]; and friends: no effect on the statement */
+			attrs a = { 0 };
+
+			attribute_list(c, &a);
+			return statement(c);
+		}
+		break;
 	case T_SEMI:
 		next(c);
 		return mkstmt(c, N_EXPR, loc, 0, 0, 0);
