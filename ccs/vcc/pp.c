@@ -1168,6 +1168,20 @@ static char *spell_to(char *dst, const ptok *t)
 	return dst + n;
 }
 
+/*
+ * spell_to() where dst has 16 bytes of room past the spelling: a short clean
+ * spelling is copied as 16 bytes (spellings are readable 16 bytes past their
+ * end: file text is padded, and so is every spelling pp makes)
+ */
+static inline char *spell_to16(char *dst, const ptok *t)
+{
+	if (likely(!(t->flags & TF_DIRTY) && t->len <= 16)) {
+		memcpy(dst, t->s, 16);
+		return dst + t->len;
+	}
+	return spell_to(dst, t);
+}
+
 static inline void svpush(pp *p, const ptok *t)
 {
 	if (unlikely(p->svn == SVMAX)) {
@@ -1783,7 +1797,7 @@ static void stringify(pp *p, const ptok *t, uint32_t n, ptok *out)
 					HC_BAD(p);
 				}
 			}
-			w = spell_to(w, &t[i]);
+			w = spell_to16(w, &t[i]);	/* (cap has 16 to spare) */
 		}
 	}
 	/* a trailing unescaped backslash would escape the quote: drop it */
@@ -1904,9 +1918,9 @@ static ptok paste(pp *p, const ptok *l, const ptok *r)
 	int k;
 	uint32_t ll;
 
-	w = spell_to(b, l);
+	w = spell_to16(b, l);	/* (24 to spare) */
 	ll = (uint32_t)(w - b);
-	w = spell_to(w, r);
+	w = spell_to16(w, r);
 	memset(w, 0, 17);
 	k = classify(b, (size_t)(w - b), r->kind);
 	if (k < 0) {
@@ -1974,6 +1988,8 @@ static void subst_range(pp *p, const pmacro *m, margs *a, uint32_t from, uint32_
 	bool ngs = *ngsp, va = m->flags & MF_VARIADIC;
 	ptok t;
 
+	bool special = m->flags & (MF_VAOPT | MF_HASH);
+
 	for (uint32_t i = from; i < to; i++) {
 		const vtok *cur = &body[i];
 		uint32_t k = pidx ? pidx[i] : 0;
@@ -1981,6 +1997,8 @@ static void subst_range(pp *p, const pmacro *m, margs *a, uint32_t from, uint32_
 
 		if (i && (cur->flags & TF_SPACE))
 			ngs = true;
+		if (!special)
+			goto plain;	/* no __VA_OPT__, no '#' */
 		if (unlikely(cur->kind == T_IDENT && cur->id == KW_VA_OPT && va)) {
 			i = va_opt(p, m, a, i, to, base, eloc, &ngs, false);
 			continue;
@@ -2002,14 +2020,18 @@ static void subst_range(pp *p, const pmacro *m, margs *a, uint32_t from, uint32_
 			ngs = false;
 			continue;
 		}
+plain:
 		if (!k) {
-			vfill(&t, cur, m->src, eloc);
-			t.flags &= ~(TF_SOL | TF_SPACE);
-			if (ngs) {
-				t.flags |= TF_SPACE;
-				ngs = false;
+			ptok *w;
+
+			if (unlikely(p->svn == SVMAX)) {
+				fprintf(stderr, "vcc: expansion too large\n");
+				abort();
 			}
-			svpush(p, &t);
+			w = &p->sv[p->svn++];
+			vfill(w, cur, m->src, eloc);
+			w->flags = (w->flags & ~(TF_SOL | TF_SPACE)) | (ngs ? TF_SPACE : 0);
+			ngs = false;
 			continue;
 		}
 		before_nonempty = p->svn > base && hashhash(&p->sv[p->svn - 1]);
