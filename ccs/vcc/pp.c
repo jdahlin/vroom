@@ -1454,8 +1454,16 @@ static bool collect_(pp *p, const pmacro *m, const ptok *name, margs *a, ptok *r
 	const ptok *tok;
 	ptok t;
 
-	a->st = alloc(&p->tmp, slots * sizeof(uint32_t));
-	a->ln = alloc(&p->tmp, slots * sizeof(uint32_t));
+	/* pre, then st, ln, preln, then prest: one allocation */
+	{
+		char *b = alloc(&p->tmp, slots * (sizeof(*a->pre) + 3 * sizeof(uint32_t) + 1));
+
+		a->pre = (const ptok **)b;
+		a->st = (uint32_t *)(b + slots * sizeof(*a->pre));
+		a->ln = a->st + slots;
+		a->preln = a->ln + slots;
+		a->prest = (uint8_t *)(a->preln + slots);
+	}
 	raw(p, &t);		/* '(' */
 	a->st[0] = 0;
 	/*
@@ -1613,9 +1621,6 @@ done:
 	}
 	a->tok = tok;
 	a->base = base;
-	a->pre = alloc(&p->tmp, slots * sizeof(*a->pre));
-	a->preln = alloc(&p->tmp, slots * sizeof(uint32_t));
-	a->prest = alloc(&p->tmp, slots);
 	memset(a->prest, 0, slots);
 	return true;
 }
@@ -1643,21 +1648,14 @@ static bool needs_pre(pp *p, const ptok *t, uint32_t n)
  * keep: the result stays in sv[base, svn) (it is only read, and only until
  * expand() resets svn); else it is copied to tmp (va_opt: sv is in use above)
  */
-static void preexpand(pp *p, margs *a, uint32_t k, bool keep)
+static __attribute__((noinline)) void preexpand_run(pp *p, margs *a, uint32_t k, bool keep,
+						       const ptok *at, uint32_t n)
 {
-	const ptok *at = a->tok + a->st[k];
-	uint32_t n = a->ln[k];
 	uint8_t pend = p->pend;
 	int d = p->depth;
 	size_t base = p->svn;
 	ptok t;
 
-	a->prest[k] = 1;
-	if (!needs_pre(p, at, n)) {
-		a->pre[k] = at;
-		a->preln[k] = n;
-		return;
-	}
 	push_ptok(p, at, n, 0, 0, 1);
 	p->pend = 0;
 	p->preexp++;
@@ -1676,6 +1674,21 @@ static void preexpand(pp *p, margs *a, uint32_t k, bool keep)
 	} else {
 		a->pre[k] = svtake(p, base, &a->preln[k]);
 	}
+}
+
+/* most arguments need no pre-expansion: that check inline, the rest in preexpand_run */
+static inline void preexpand(pp *p, margs *a, uint32_t k, bool keep)
+{
+	const ptok *at = a->tok + a->st[k];
+	uint32_t n = a->ln[k];
+
+	a->prest[k] = 1;
+	if (!needs_pre(p, at, n)) {
+		a->pre[k] = at;
+		a->preln[k] = n;
+		return;
+	}
+	preexpand_run(p, a, k, keep, at, n);
 }
 
 static bool is_strlit(int k)
