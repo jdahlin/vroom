@@ -29,7 +29,7 @@ Existing gates that every change must keep green: `vcc-diff.py cmp`
   is still the oracle, so a test also documents clang's behaviour.  Supports
   `/* vcc-flags: ... */` and `/* vcc-threads */` (link the runtime's tiny
   thread shim, or run on the Darwin host, see T3).  One file per fixed bug.
-- [ ] **T2 `abi` suite: cross-compiler calls.** (partial: `bench/vcc-abi.py`, Linux/qemu half, xfail markers; no Darwin half, no generator yet.)  `ccs/vcc/tests/abi/NAME/{caller.c,callee.c}`;
+- [ ] **T2 `abi` suite: cross-compiler calls.** (partial: `bench/vcc-abi.py`, Linux/qemu and `--host` Darwin halves, xfail markers; no generator yet.)  `ccs/vcc/tests/abi/NAME/{caller.c,callee.c}`;
   the runner builds the 4 combinations (clang/vcc × caller/callee) and runs
   each, on Linux (qemu, `tests/rt`) and on the Darwin host (native, system
   libc).  Covers argument passing, returns, varargs, layout of shared structs.
@@ -175,7 +175,8 @@ Existing gates that every change must keep green: `vcc-diff.py cmp`
   classification for structs of them, see tier 3).
   *Validate:* T2 `vec-args` (int32x4, uint8x8, `vector_size(16)` float/int,
   as arguments, returns, varargs, mixed with HFA) both targets.
-- [ ] **Darwin: narrow integer returns not extended** [P].  Apple's ABI
+- [x] **Darwin: narrow integer returns not extended** [P].  (done:
+  `tests/abi/narrow_int`, `bench/vcc-abi.py --host`; arguments too.)  Apple's ABI
   requires the callee to sign/zero-extend `char`/`short`/`bool` returns to
   32 bits (and the caller for arguments).  Extend at return in emit.c when
   the target is Darwin.

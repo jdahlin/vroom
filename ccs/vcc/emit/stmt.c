@@ -517,6 +517,8 @@ static void gen_return(ecx *e, const node *x)
 			move_to(e, 0, -1, &v, rt);
 			if (is_flt(c, rt))
 				word(e, f_in(fpk(e, rt), 0, 0));	/* fmov d0/s0, x0/w0 */
+			else if (darwin_narrow(c, rt))	/* Apple: the callee extends char/short/_Bool to 32 bits */
+				extend(e, 0, 0, (int)tsize(c, rt), is_signed(c, rt));
 		}
 		val_free(e, &v);
 	} else {

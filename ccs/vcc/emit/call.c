@@ -142,6 +142,8 @@ VPRIV val do_call(ecx *e, uint32_t ref, val *fnv, carg *args, int n, qty rty, bo
 		case A_REG:
 			for (int k = 0; k < a->a.nreg; k++)
 				arg_word(e, a, k, a->a.reg + k);
+			if (darwin_narrow(c, a->t))	/* Apple: the caller extends char/short/_Bool to 32 bits */
+				extend(e, a->a.reg, a->a.reg, (int)tsize(c, a->t), is_signed(c, a->t));
 			break;
 		case A_STACK:
 			if (DARWIN(c) && a->a.size < 8 && !is_agg(c, a->t)) {	/* Apple: packed */

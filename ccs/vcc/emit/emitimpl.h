@@ -695,6 +695,9 @@ static inline bool is_recabi(cc *c, qty t) { return is_record(c, t) || is_vec(c,
 static inline bool is_agg(cc *c, qty t) { return is_record(c, t) || is_array(c, t) || is_vec(c, t); }
 static inline uint64_t tsize(cc *c, qty t) { return T(c, t)->size; }
 
+/* Apple arm64: an integer under 4 bytes in a register is extended to 32 bits by its producer */
+static inline bool darwin_narrow(cc *c, qty t) { return DARWIN(c) && T(c, t)->size < 4 && is_integer(c, t); }
+
 /* a VLA somewhere in t's pointer/array chain (int a[n], int (*p)[n][4]) */
 static inline bool vm_type(cc *c, qty t)
 {

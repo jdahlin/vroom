@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""vcc-abi.py: cross-compiler calls (TODO.md T2), Linux under qemu.
+"""vcc-abi.py: cross-compiler calls (TODO.md T2), Linux under qemu or the Darwin host.
 
-  bench/vcc-abi.py [-v] [PAT]
+  bench/vcc-abi.py [-v] [--host] [PAT]
 
 Every ccs/vcc/tests/abi/NAME/ has caller.c (main, the checks) and callee.c
 (the functions it calls, and callbacks into the caller); a header there is
@@ -10,8 +10,10 @@ combinations are linked with the bare-metal runtime (tests/rt) and run as
 bench/vcc-ctests.py does.  A test passes when every combination exits 0
 and prints what clang x clang prints; clang x clang failing is a broken
 test.  A line `/* vcc-xfail: TODO item */` in caller.c marks a known bug
-(a pass is XPASS, an error).  Exit status 1 on any failure.
-The Darwin host half of T2 (native, system libc) is not here yet.
+(a pass is XPASS, an error); `/* vcc-xfail-host: ... */` the same for
+--host only.  Exit status 1 on any failure.
+--host (macOS only): both halves built for the host (Apple arm64 ABI,
+system headers), linked by clang and run natively.
 """
 import importlib.util, os, re, shutil, sys, tempfile
 
@@ -21,18 +23,24 @@ ct = importlib.util.module_from_spec(spec); spec.loader.exec_module(ct)
 D = f'{ct.T}/abi'
 
 
+HOST = False
+HOSTFL = ['-O2', '-fno-stack-protector']
+
+
 def compile_(cc, src, obj, inc):
+    base = HOSTFL if HOST else ct.BASE
     if cc == 'clang':
-        cmd = [ct.CL] + ct.BASE + ct.CLFL + ['-I', inc, '-c', src, '-o', obj]
+        cmd = [ct.CL] + base + ct.CLFL + ['-I', inc, '-c', src, '-o', obj]
     else:
-        cmd = [ct.VPP] + ct.BASE + ['-I', inc, '-c', src, '-o', obj]
+        cmd = [ct.VPP] + base + ['-I', inc, '-c', src, '-o', obj]
     rc, _, err = ct.sh(cmd)
     return rc, err.decode(errors='replace')
 
 
 def one(name, wd, verbose):
     d = f'{D}/{name}'
-    xf = re.search(r'/\*\s*vcc-xfail:(.*?)\*/', open(f'{d}/caller.c').read(), re.S)
+    src = open(f'{d}/caller.c').read()
+    xf = re.search(r'/\*\s*vcc-xfail:(.*?)\*/', src, re.S) or (HOST and re.search(r'/\*\s*vcc-xfail-host:(.*?)\*/', src, re.S))
     xf = ' '.join(xf.group(1).split()) if xf else None
     objs = {}
     for half in ('caller', 'callee'):
@@ -47,10 +55,18 @@ def one(name, wd, verbose):
     for a in ('clang', 'vcc'):
         for b in ('clang', 'vcc'):
             elf = f'{wd}/{a}-{b}.elf'
-            rc, err = ct.link([objs['caller', a], objs['callee', b]], elf)
+            if HOST:
+                rc, _, err = ct.sh([ct.CL, objs['caller', a], objs['callee', b], '-o', elf])
+                err = err.decode(errors='replace')
+            else:
+                rc, err = ct.link([objs['caller', a], objs['callee', b]], elf)
             if rc:
                 return 'fail', f'link {a}x{b}: {ct.first_err(err)}', xf
-            rc, out = ct.qemu(elf)
+            if HOST:
+                rc, out, _ = ct.sh([elf], timeout=20)
+                out = out.decode('latin-1')
+            else:
+                rc, out = ct.qemu(elf)
             if (a, b) == ('clang', 'clang'):
                 if rc != 0:
                     return 'test', f'clang x clang exits {rc}: {out.strip()[:200]}', xf
@@ -61,11 +77,14 @@ def one(name, wd, verbose):
 
 
 def main():
+    global HOST
     av = sys.argv[1:]
     verbose = '-v' in av
-    av = [a for a in av if a != '-v']
+    HOST = '--host' in av
+    av = [a for a in av if a not in ('-v', '--host')]
     pat = av[0] if av else None
-    ct.build_rt()
+    if not HOST:
+        ct.build_rt()
     names = sorted(n for n in os.listdir(D) if os.path.isdir(f'{D}/{n}') and (not pat or re.search(pat, n)))
     tmp = tempfile.mkdtemp(prefix='vcc-abi-')
     fails = passes = xfails = 0
@@ -86,7 +105,7 @@ def main():
         if st != 'pass' or verbose:
             print(f'{st:5} {n}: {why}', flush=True)
     shutil.rmtree(tmp, ignore_errors=True)
-    print(f'abi: {passes} pass, {xfails} xfail, {fails} fail')
+    print(f'abi{" (host)" if HOST else ""}: {passes} pass, {xfails} xfail, {fails} fail')
     sys.exit(1 if fails else 0)
 
 
