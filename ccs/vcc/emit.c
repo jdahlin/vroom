@@ -380,7 +380,8 @@ typedef struct chunk {
 } chunk;
 
 /* analysis bits (prepass, read-only while emitting) */
-enum { SA_WRITTEN = 1, SA_CLEANUP_FN = 2, SA_MUSTFOLD = 4, SA_CWRITE = 8, SA_CMULTI = 16, SA_USED = 32 };	/* USED: a local or param read */
+enum { SA_WRITTEN = 1, SA_CLEANUP_FN = 2, SA_MUSTFOLD = 4, SA_CWRITE = 8, SA_CMULTI = 16, SA_USED = 32, SA_NOINL = 64 };
+/* USED: a local or param read; NOINL: a static local holds a label address (one copy of the code only) */
 /* CWRITE: only ever assigned integer constants (all cwval unless CMULTI) */	/* per sym; MUSTFOLD: a function that calls an error() function */
 enum { NA_LABEL = 1 };				/* per node: statement contains a label or case */
 
@@ -511,6 +512,7 @@ typedef struct ecx {
 	uint32_t inst_next;
 	/* frame */
 	int32_t foff, fmax;
+	int32_t cl_top;		/* frame offset above the block's compound literals (kept past statements) */
 	int32_t outmax;		/* outgoing stack argument bytes */
 	bool dyn, calls, vararg;
 	int32_t vaslot;		/* variadic register save area */
@@ -2456,6 +2458,12 @@ static val gen(ecx *e, uint32_t n);
 static val vla_bytes(ecx *e, qty t);
 static lval gen_lval(ecx *e, uint32_t n);
 static void gen_stmt(ecx *e, uint32_t n);
+
+/* a statement's temporaries end with it; compound literals live on to the end of their block */
+static inline int32_t keep_cl(const ecx *e, int32_t mark)
+{
+	return mark > e->cl_top ? mark : e->cl_top;
+}
 static void gen_cond(ecx *e, uint32_t n, bool jump_if, uint32_t l);
 static val gen_block(ecx *e, uint32_t n, bool want);
 static void gen_init_local(ecx *e, const lval *dst, qty ty, uint32_t init);
@@ -2796,6 +2804,10 @@ static lval gen_lval(ecx *e, uint32_t n)
 		}
 		{
 			int32_t sl = bind_slot(e, s);
+
+			/* it lives until the end of the block, past the statement's temporaries */
+			if (e->foff > e->cl_top)
+				e->cl_top = e->foff;
 			lval d = { .k = L_FRAME, .off = sl, .align = sym_align(c, s) };
 
 			gen_init_local(e, &d, y->ty, x->a);
@@ -3964,6 +3976,9 @@ static bool can_inline(ecx *e, uint32_t s)
 		}
 	}
 	if (T(c, y->ty)->flags & TF_VARIADIC)
+		return false;
+	ensure_walked(e->E, c, s);
+	if (e->E->sflags[s] & SA_NOINL)
 		return false;
 	if (e->inline_depth >= 48 || on_inline_stack(e, s))
 		return false;
@@ -6095,7 +6110,7 @@ static val gen_block(ecx *e, uint32_t n, bool want)
 {
 	cc *c = e->c;
 	const node *x = N(n);
-	int32_t mark = e->foff;
+	int32_t mark = e->foff, cl_top = e->cl_top;
 	int cmark = e->nclean;
 	val v = vnone();
 	uint32_t vstmt = 0;
@@ -6153,6 +6168,7 @@ static val gen_block(ecx *e, uint32_t n, bool want)
 		e->nclean = cmark;
 	}
 	e->foff = mark;
+	e->cl_top = cl_top;
 	return v;
 }
 
@@ -6570,7 +6586,7 @@ static void gen_stmt1(ecx *e, uint32_t n)
 		uint32_t lelse = newlabel(e), lend = newlabel(e);
 
 		gen_cond(e, x->a, false, lelse);
-		e->foff = mark;
+		e->foff = keep_cl(e, mark);
 		gen_stmt(e, x->b);
 		if (x->c) {
 			jump(e, lend);
@@ -6587,7 +6603,7 @@ static void gen_stmt1(ecx *e, uint32_t n)
 
 		deflabel_loop(e, lhead, e->E->nflags[n] & NA_LABEL);
 		gen_cond(e, x->a, false, lbrk);
-		e->foff = mark;
+		e->foff = keep_cl(e, mark);
 		e->loops[e->nloop++] = (loopctx){ lbrk, lhead, e->nclean };
 		gen_stmt(e, x->b);
 		e->nloop--;
@@ -6604,7 +6620,7 @@ static void gen_stmt1(ecx *e, uint32_t n)
 		e->nloop--;
 		deflabel(e, lcont);
 		gen_cond(e, x->a, true, lhead);
-		e->foff = mark;
+		e->foff = keep_cl(e, mark);
 		deflabel(e, lbrk);
 		return;
 	}
@@ -6628,7 +6644,7 @@ static void gen_stmt1(ecx *e, uint32_t n)
 			int32_t m2 = e->foff;
 
 			gen_cond(e, x->b, false, lbrk);
-			e->foff = m2;
+			e->foff = keep_cl(e, m2);
 		}
 		e->loops[e->nloop++] = (loopctx){ lbrk, lcont, e->nclean };
 		gen_stmt(e, body);
@@ -6639,7 +6655,7 @@ static void gen_stmt1(ecx *e, uint32_t n)
 			val v = gen(e, step);
 
 			vfree(e, &v);
-			e->foff = m2;
+			e->foff = keep_cl(e, m2);
 		}
 		jump(e, lhead);
 		deflabel(e, lbrk);
@@ -6711,7 +6727,7 @@ static void gen_stmt1(ecx *e, uint32_t n)
 	default:
 		efatal(e, x->loc, "unsupported statement (node %d)", x->op);
 	}
-	e->foff = mark;
+	e->foff = keep_cl(e, mark);
 }
 
 /* ---------------- inline asm ---------------- */
@@ -7239,7 +7255,7 @@ static void sym_header(ecx *e, tbuf *b, uint32_t s, bool fn, const char *defsec,
 }
 
 /* finish_function for the object backend: the same function as items */
-static void finish_direct(ecx *e, uint32_t s, uint32_t align, const int *cs, int ncs, int32_t csave, int32_t total, bool ctor)
+static void finish_direct(ecx *e, uint32_t s, uint32_t align, const int *cs, int ncs, int32_t csave, int32_t total, int ctor)
 {
 	cc *c = e->c;
 	tbuf *b = &e->out;
@@ -7293,8 +7309,13 @@ static void finish_direct(ecx *e, uint32_t s, uint32_t align, const int *cs, int
 	tb_c(b, '-');
 	sym_name(c, b, s);
 	tb_c(b, '\n');
-	if (ctor) {
+	if (ctor & 1) {
 		tb_s(b, "\t.section\t.init_array,\"aw\",@init_array\n\t.p2align\t3\n\t.xword\t");
+		sym_name(c, b, s);
+		tb_c(b, '\n');
+	}
+	if (ctor & 2) {
+		tb_s(b, "\t.section\t.fini_array,\"aw\",@fini_array\n\t.p2align\t3\n\t.xword\t");
 		sym_name(c, b, s);
 		tb_c(b, '\n');
 	}
@@ -7345,7 +7366,7 @@ static void finish_function(ecx *e, uint32_t s)
 	if (c->syms[s].align > align)
 		align = c->syms[s].align;
 	if (direct(e)) {
-		finish_direct(e, s, align, cs, ncs, csave, total, a->constructor != 0);
+		finish_direct(e, s, align, cs, ncs, csave, total, (a->constructor != 0) | (a->destructor != 0) << 1);
 		return;
 	}
 	sym_header(e, b, s, true, "\t.text\n", align);
@@ -7381,6 +7402,11 @@ static void finish_function(ecx *e, uint32_t s)
 		sym_name(c, b, s);
 		tb_c(b, '\n');
 	}
+	if (a->destructor) {
+		tb_s(b, "\t.section\t.fini_array,\"aw\",@fini_array\n\t.p2align\t3\n\t.xword\t");
+		sym_name(c, b, s);
+		tb_c(b, '\n');
+	}
 	e->E->nins += e->nin;
 	e->E->nfn++;
 	out_chunk(e, (uint64_t)s << 1, start);
@@ -7401,7 +7427,7 @@ static void emit_function(ecx *e, uint32_t s)
 	e->raw.n = 0;
 	e->nlabel = 0;
 	e->nkv = 0, e->kvalid = 0, e->nkvs = 0;
-	e->foff = e->fmax = e->outmax = 0;
+	e->foff = e->fmax = e->outmax = e->cl_top = 0;
 	e->dyn = e->calls = false;
 	e->live = 0;
 	e->usedcs = 0;
@@ -8089,6 +8115,31 @@ static void ensure_walked(emitter *E, cc *c, uint32_t s)
 		;	/* another thread is walking it: a few microseconds */
 }
 
+/* a static initializer takes a label's address (&&l, &&l - &&m, { &&l }) */
+static bool init_has_labeladdr(cc *c, uint32_t n)
+{
+	const node *x;
+
+	if (!n)
+		return false;
+	x = N(n);
+	switch (x->op) {
+	case N_LABELADDR:
+		return true;
+	case N_INIT:
+		for (uint32_t i = 0; i < x->c; i++)	/* the layout side_effects() reads */
+			if (init_has_labeladdr(c, x->aux == 1 ? c->lists[x->b + 3 * i + 2] : c->lists[x->b + i]))
+				return true;
+		return false;
+	case N_CAST: case N_ADDR: case N_UNARY:
+		return init_has_labeladdr(c, x->a);
+	case N_BINARY:
+		return init_has_labeladdr(c, x->a) || init_has_labeladdr(c, x->b);
+	default:
+		return false;
+	}
+}
+
 /* walks every node; returns whether it contains a label (or case) */
 static int walk(pre *P, uint32_t n)
 {
@@ -8103,8 +8154,16 @@ static int walk(pre *P, uint32_t n)
 	switch (x->op) {
 	case N_VAR:
 		/* locals belong to this walk alone (globals' flags are shared between threads) */
-		if (is_local_var(c, x->a))
+		if (is_local_var(c, x->a)) {
 			P->E->sflags[x->a] |= SA_USED;
+		} else {
+			const sym *y = &c->syms[x->a];
+
+			/* a static local holding a label address: the function has one copy */
+			if (y->kind == S_VAR && y->sc == SC_STATIC && !(y->flags & SF_GLOBAL) && y->body &&
+			    init_has_labeladdr(c, y->body))
+				P->E->sflags[P->fn] |= SA_NOINL;
+		}
 		return false;
 	case N_NUM: case N_FNUM: case N_STR: case N_ZERO: case N_SIZEOF_VLA:
 		return false;
@@ -8382,7 +8441,7 @@ static bool is_root(cc *c, uint32_t s)
 		if ((y->flags & SF_GNU_INLINE) && !(y->flags & SF_INLINE_NOEXTERN))
 			return false;	/* GNU 'extern inline': clang's isInlineDefinitionExternallyVisible */
 		if (y->sc == SC_STATIC)
-			return a->used || a->constructor;
+			return a->used || a->constructor || a->destructor;
 		if ((y->flags & SF_INLINE) && !(y->flags & SF_GNU_INLINE) && y->sc != SC_EXTERN)
 			return false;	/* C99 inline definition */
 		return true;

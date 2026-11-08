@@ -6305,6 +6305,17 @@ static uint32_t compound_stmt(cc *c, qty *last)
 	return n;
 }
 
+/* the body of an if, switch or loop: a block of its own (C99 6.8.4p3, 6.8.5p5) */
+static uint32_t sub_statement(cc *c)
+{
+	uint32_t n;
+
+	scope_open(c);
+	n = statement(c);
+	scope_close(c);
+	return n;
+}
+
 static uint32_t statement(cc *c)
 {
 	ptok *t = tok(c);
@@ -6358,35 +6369,41 @@ static uint32_t statement(cc *c)
 		uint32_t cnd, th, el = 0;
 
 		next(c);
+		scope_open(c);	/* C99 6.8.4p3: a selection statement is a block, and so is each substatement */
 		cnd = cond_of(c);
-		th = statement(c);
+		th = sub_statement(c);
 		if (iskw(c, KW_else)) {
 			next(c);
-			el = statement(c);
+			el = sub_statement(c);
 		}
+		scope_close(c);
 		return mkstmt(c, N_IF, loc, cnd, th, el);
 	}
 	case KW_while: {
 		uint32_t cnd, body;
 
 		next(c);
+		scope_open(c);
 		cnd = cond_of(c);
 		c->in_loop++;
-		body = statement(c);
+		body = sub_statement(c);
 		c->in_loop--;
+		scope_close(c);
 		return mkstmt(c, N_WHILE, loc, cnd, body, 0);
 	}
 	case KW_do: {
 		uint32_t cnd, body;
 
 		next(c);
+		scope_open(c);
 		c->in_loop++;
-		body = statement(c);
+		body = sub_statement(c);
 		c->in_loop--;
 		if (!iskw(c, KW_while))
 			fatal(c, tok(c)->loc, "expected 'while' in do/while loop");
 		next(c);
 		cnd = cond_of(c);
+		scope_close(c);
 		expect(c, T_SEMI, "';'");
 		return mkstmt(c, N_DO, loc, cnd, body, 0);
 	}
@@ -6417,7 +6434,7 @@ static uint32_t statement(cc *c)
 			step = expr(c);
 		expect(c, T_RPAREN, "')'");
 		c->in_loop++;
-		body = statement(c);
+		body = sub_statement(c);
 		c->in_loop--;
 		scope_close(c);
 		vinit(&sb);
@@ -6431,6 +6448,7 @@ static uint32_t statement(cc *c)
 		qty saved = c->switch_ty;
 
 		next(c);
+		scope_open(c);
 		expect(c, T_LPAREN, "'('");
 		cnd = rvalue(c, expr(c));
 		expect(c, T_RPAREN, "')'");
@@ -6438,9 +6456,10 @@ static uint32_t statement(cc *c)
 			error(c, loc, "statement requires expression of integer type");
 		c->switch_ty = N(cnd)->ty;
 		c->in_switch++;
-		body = statement(c);
+		body = sub_statement(c);
 		c->in_switch--;
 		c->switch_ty = saved;
+		scope_close(c);
 		return mkstmt(c, N_SWITCH, loc, cnd, body, 0);
 	}
 	case KW_case: {
