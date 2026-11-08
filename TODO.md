@@ -335,12 +335,12 @@ Existing gates that every change must keep green: `vcc-diff.py cmp`
   *Validate:* T6 (canary load/check, `paciasp`/`bti c`, `__fentry__`
   call, nops + `__patchable_function_entries`); T1 for a canary-smash
   detection under qemu.
-- [ ] **Fixed limits** (128 call arguments, 256 nested loops/switches, 256
+- [ ] **Fixed limits** (~~128 call arguments~~ fixed in 42ecfb3, 256 nested loops/switches, 256
   cleanups, 16 tracked constants, 16M instructions / 4M labels per function).
   *Validate:* T1 `limits.c` (generated: 300 arguments, 1000-deep nested
   loops, 1000 cleanups); T5 for the extremes.
 - [ ] **`-S` on Darwin writes ELF directives** (`.type @function`).
-  *Validate:* T3: `vpp -S` output assembled by `as` (Apple) for the vcc suite
+  *Validate:* T3: `vpp -S` output assembled by `as` (Apple) for the vcc
   suite.
 
 ### Front end (`cc.c`)

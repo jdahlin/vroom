@@ -70,8 +70,7 @@ def cases(d):
          xfail='Fixed limits: 64 declarator levels (cc.c)')
     case('anon-nest-20', 'ok', {'a.c': 'struct s { ' + 'struct { ' * 20 + 'int x; ' + '}; ' * 20 + '} v;\nint f(void) { return v.x; }\n'}, 'a.c',
          xfail='Fixed limits: 16 nested anonymous members (find_member)')
-    case('call-300-args', 'ok', {'a.c': 'void g(' + ', '.join(['int'] * 300) + ');\nvoid f(void) { g(' + ', '.join(['1'] * 300) + '); }\n'}, 'a.c',
-         xfail='Fixed limits (emit.c): 128 call arguments')
+    case('call-300-args', 'ok', {'a.c': 'void g(' + ', '.join(['int'] * 300) + ');\nvoid f(void) { g(' + ', '.join(['1'] * 300) + '); }\n'}, 'a.c')
     case('include-dirs-5000', 'ok', {'a.c': 'int x;\n'}, 'a.c', [f'-I{d}/nodir{i}' for i in range(5000)],
          xfail='Unbounded argv arrays (ppdriver.c dirs_i[1024], all[2048])')
     # files
