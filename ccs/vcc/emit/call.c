@@ -199,6 +199,13 @@ VPRIV val do_call(ecx *e, uint32_t ref, val *fnv, carg *args, int n, qty rty, bo
 			vr_store(e, hb, k, FRAME, sl + hb * k);
 		opi(e, I_ADDI, 1, r, FRAME, sl);
 		res = vreg(r);
+	} else if (vec_small(c, rty)) {
+		int32_t sl = slot(e, 8, 8);
+		int r = treg(e);
+
+		vec_small_res(e, rty, sl);
+		opi(e, I_ADDI, 1, r, FRAME, sl);
+		res = vreg(r);
 	} else if (is_recabi(c, rty)) {
 		int32_t sl = slot(e, 16, 16);
 		int r = treg(e);

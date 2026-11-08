@@ -29,7 +29,7 @@ Existing gates that every change must keep green: `vcc-diff.py cmp`
   is still the oracle, so a test also documents clang's behaviour.  Supports
   `/* vcc-flags: ... */` and `/* vcc-threads */` (link the runtime's tiny
   thread shim, or run on the Darwin host, see T3).  One file per fixed bug.
-- [ ] **T2 `abi` suite: cross-compiler calls.**  `ccs/vcc/tests/abi/NAME/{caller.c,callee.c}`;
+- [ ] **T2 `abi` suite: cross-compiler calls.** (partial: `bench/vcc-abi.py`, Linux/qemu half, xfail markers; no Darwin half, no generator yet.)  `ccs/vcc/tests/abi/NAME/{caller.c,callee.c}`;
   the runner builds the 4 combinations (clang/vcc × caller/callee) and runs
   each, on Linux (qemu, `tests/rt`) and on the Darwin host (native, system
   libc).  Covers argument passing, returns, varargs, layout of shared structs.
@@ -163,7 +163,14 @@ Existing gates that every change must keep green: `vcc-diff.py cmp`
   `= {}` in C23 which zeroes.
   *Validate:* T4 (`int a[n] = {1};` errors); `tests/diag/vla_init.c` once
   the message matches; T1 for the C23 `= {}` zeroing when C23 lands.
-- [ ] **Vector types passed in GPRs** [P].  `is_recabi` `emit.c:98`.
+- [x] **Vector types passed in GPRs** [P].  Done: `hfa()` (emit/abi.c)
+  takes short vectors (8/16 bytes) alone and as HVA members (1-4 of one
+  size, never mixed with floats), so arguments, returns and va_arg use v
+  registers; vectors under 8 bytes are returned in v0 as clang/LLVM does
+  (lanes widened to 8 bytes; `vec_small`).  Tests: `tests/abi/vec_args`,
+  `tests/abi/vec_small_ret` (bench/vcc-abi.py, Linux).  Left: the Darwin
+  host half (T2/T3), variadic vectors on Darwin.
+  Was: `is_recabi` `emit.c:98`.
   Short vectors (8/16 bytes) go in v registers per AAPCS64 (and HVA
   classification for structs of them, see tier 3).
   *Validate:* T2 `vec-args` (int32x4, uint8x8, `vector_size(16)` float/int,

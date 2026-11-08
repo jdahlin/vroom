@@ -564,6 +564,9 @@ VPRIV void copy_mem(ecx *e, int dst, int src, uint64_t n);
 VPRIV void zero_mem(ecx *e, int dst, uint64_t n);
 /* abi.c */
 VPRIV int hfa(cc *c, qty t, int *n);
+VPRIV bool vec_small(cc *c, qty t);
+VPRIV void vec_small_ret(ecx *e, qty t, int rs);
+VPRIV void vec_small_res(ecx *e, qty t, int32_t sl);
 VPRIV bool is_sret(cc *c, qty t);
 VPRIV void classify_va(ecx *e, qty t, int *nsaa, abiarg *a);
 VPRIV void classify(ecx *e, qty t, int *ngrn, int *nsaa, abiarg *a);

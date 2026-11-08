@@ -488,6 +488,8 @@ static void gen_return(ecx *e, const node *x)
 
 			for (int k = 0; k < hn; k++)
 				vr_load(e, hb, k, rs, hb * k);
+		} else if (vec_small(c, rt)) {
+			vec_small_ret(e, rt, toreg(e, &v));
 		} else if (is_recabi(c, rt)) {
 			int rs = toreg(e, &v);
 

@@ -4,14 +4,28 @@
 /* ---------------- AAPCS64 (floating point and HFAs in v0-v7) ---------------- */
 
 /*
- * A homogeneous floating-point aggregate: a record (nested records and
- * arrays included) whose leaves are 1-4 floats or 1-4 doubles, with no
- * padding.  Returns the member size (4 or 8) and sets *n, or 0.
+ * A homogeneous floating-point or short-vector aggregate (HFA/HVA): a
+ * record (nested records and arrays included) whose leaves are 1-4 of
+ * the same floating type, or 1-4 short vectors (8 or 16 bytes) of the same
+ * size, with no padding; a short vector alone counts as one.  Returns the
+ * member size (4, 8 or 16) and sets *n, or 0.  In *base a vector size
+ * carries HV, so floats and vectors never mix.
  */
+enum { HV = 0x100 };
+
 static int hfa_walk(cc *c, qty t, int *base, uint64_t *n)
 {
 	const ctype *y = T(c, t);
 
+	if (y->kind == TY_VECTOR) {
+		int b = (int)y->size | HV;
+
+		if ((y->size != 8 && y->size != 16) || (*base && *base != b))
+			return 0;
+		*base = b;
+		*n = 1;
+		return 1;
+	}
 	if (y->kind == TY_FLOAT || y->kind == TY_DOUBLE || (y->kind == TY_LDOUBLE && y->size == 16)) {
 		int b = (int)y->size;
 
@@ -44,7 +58,7 @@ static int hfa_walk(cc *c, qty t, int *base, uint64_t *n)
 				tot += m;
 		}
 		*n = tot;
-		return tot > 0 && *base && tot * (uint64_t)*base == g->size;
+		return tot > 0 && *base && tot * (uint64_t)(*base & ~HV) == g->size;
 	}
 	return 0;
 }
@@ -54,10 +68,61 @@ VPRIV int hfa(cc *c, qty t, int *n)
 	int base = 0;
 	uint64_t m = 0;
 
-	if (!is_record(c, t) || !hfa_walk(c, t, &base, &m) || m > 4)
+	if (!is_recabi(c, t) || !hfa_walk(c, t, &base, &m) || m > 4)
 		return 0;
 	*n = (int)m;
-	return base;
+	return base & ~HV;
+}
+
+/*
+ * A vector under 8 bytes is returned in v0 the way LLVM legalizes it
+ * (clang; AAPCS64 says nothing): with more than one lane, each lane is
+ * widened to 8/n bytes (v4qi as 4h, v2hi and v2qi as 2s), one lane as it
+ * is.  As an argument it goes in a GPR as its bytes (classify).
+ */
+VPRIV bool vec_small(cc *c, qty t) { return is_vec(c, t) && tsize(c, t) < 8; }
+
+/* the vector at [rs] into v0 */
+VPRIV void vec_small_ret(ecx *e, qty t, int rs)
+{
+	cc *c = e->c;
+	uint32_t n = T(c, t)->n, size = (uint32_t)tsize(c, t), es = n ? size / n : size, w = n > 1 ? 8 / n : 0;
+	int acc = treg(e), x = treg(e);
+
+	if (n <= 1) {
+		mem(e, I_LD, log2sz(size), 0, acc, rs, 0);
+		word(e, f_in(0, 0, acc));	/* fmov s0, w */
+	} else {
+		movi(e, 1, acc, 0);
+		for (uint32_t k = 0; k < n; k++) {
+			mem(e, I_LD, log2sz(es), 0, x, rs, (int32_t)(k * es));
+			op3s(e, I_ORR, 1, acc, acc, x, 0, (int)(8 * w * k));
+		}
+		word(e, f_in(1, 0, acc));	/* fmov d0, x */
+	}
+	tfree(e, x);
+	tfree(e, acc);
+}
+
+/* v0 (a call's result) into the slot at sl */
+VPRIV void vec_small_res(ecx *e, qty t, int32_t sl)
+{
+	cc *c = e->c;
+	uint32_t n = T(c, t)->n, size = (uint32_t)tsize(c, t), es = n ? size / n : size, w = n > 1 ? 8 / n : 0;
+	int acc = treg(e), x = treg(e);
+
+	if (n <= 1) {
+		word(e, f_out(0, acc, 0));	/* fmov w, s0 */
+		mem(e, I_ST, log2sz(size), 0, acc, FRAME, sl);
+	} else {
+		word(e, f_out(1, acc, 0));	/* fmov x, d0 */
+		for (uint32_t k = 0; k < n; k++) {
+			opbf(e, I_UBFM, 1, x, acc, (int)(8 * w * k), (int)(8 * w * k + 8 * es - 1));
+			mem(e, I_ST, log2sz(es), 0, x, FRAME, sl + (int32_t)(k * es));
+		}
+	}
+	tfree(e, x);
+	tfree(e, acc);
 }
 
 /* a record result returned through x8 */
