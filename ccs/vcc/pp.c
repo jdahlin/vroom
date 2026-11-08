@@ -4251,7 +4251,10 @@ static inline void render(pp *p, const ptok *t)
 	const char *sp;
 
 	if (p->col) {
-		out_ch(p, sol ? '\n' : ' ');
+		/* assembler-with-cpp: keep the source spacing like clang does, as
+		 * gas syntax is space-sensitive ("\\arg", "1:", ".L x") */
+		if (sol || !p->o->asm_mode || (t->flags & TF_SPACE))
+			out_ch(p, sol ? '\n' : ' ');
 		if (sol)
 			p->col = 0;
 	}
@@ -4288,6 +4291,8 @@ int pp_text(pp *p, const char **out, size_t *len)
 	ptok t;
 
 	hc_mode(p, 1);
+	if (p->o->asm_mode)
+		p->hc = 0;	/* cached text is C-spaced */
 	for (;;) {
 		next_tok(p, &t);
 		if (t.kind == T_EOF)

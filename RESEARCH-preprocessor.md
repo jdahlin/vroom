@@ -363,8 +363,8 @@ load 5–7.
      Locations are a per-entry base plus an offset, as `span`/`rbase` are now.
 3. **Declarations** follow once 2.6 gives the front end a stable state layout. They are
    the large win for the compile path.
-4. **Ordered reads** with child splicing at replay, against the guard-variant misses.
-   This helps every payload, so it lands before 3.
+4. ~~**Ordered reads** with child splicing at replay, against the guard-variant misses.~~
+   Tried and shelved, see §6.6.
 
 ### 6.5 Token payload, measured (step 2 done)
 - **Representation.** Own tokens are copied `ptok`s in shared memory:
@@ -391,6 +391,38 @@ load 5–7.
   would at best halve the token-stream cost. Parsing the replayed tokens now dominates,
   which confirms that declaration replay (step 3) is the large win for the compile
   path.
+
+### 6.6 Ordered reads with child splicing: tried, shelved (2026-11-08)
+- **What was built.**
+  - Every read and write in an entry carries its phase: the number of skip sites before it.
+    A skip site is an `#include` skipped because its guard was defined.
+  - On a miss, a variant could be made exact by splicing a child entry in at each site
+    whose guard is now undefined. The child had to be valid in the state at that site:
+    the TU state at entry, plus e's writes before the site, plus earlier children's
+    writes. Its writes could not conflict with e's reads or writes.
+  - The result was published as a new exact entry, so later TUs would hit it directly.
+  - Children reading `__COUNTER__`-built names were checked at the counter value of the
+    site.
+- **Measured.**
+
+  | | splicing | no splicing | no cache |
+  |---|---|---|---|
+  | misses, 150 TUs | 3966 (247 spliced) | 4215 | — |
+  | `-E`, all TUs, `-j 6` | 4.07 s | 0.98 s | 3.91 s |
+  | files differing from no cache | 101 | 0 | — |
+- **Why it fails.**
+  - **Little coverage.** Most candidate children are themselves invalid at the site
+    because of their own guard reads: 41 k rejections against 247 splices. They would
+    need splicing in turn, which means a layered macro state carried through a nested
+    search.
+  - **Expensive search.** Up to 64 variants per key and per site, each checked through
+    hash overlays, costs far more than recording the miss. That held even with cheap
+    early refusals:
+    - no site guard currently undefined;
+    - a read that only a child's `#undef` could satisfy.
+  - **Not exact.** 101 TUs' output differed. This was not diagnosed, given the cost.
+- **Conclusion.** Guard-variant misses stay recorded. The declaration cache (§6.4 item 3)
+  is the next large win. The work-in-progress patch was not kept in the tree.
 
 ## Sources
 - clang: TokenLexer.cpp, PPMacroExpansion.cpp, Preprocessor.cpp, MacroArgs.cpp,
