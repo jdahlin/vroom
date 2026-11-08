@@ -74,7 +74,7 @@ vcc: $(OUT)/vcc $(OUT)/vsh/sh $(OUT)/vld $(OUT)/vas $(OUT)/var $(OUT)/vccd $(OUT
 o = $(patsubst vcc/%.c,$(OBJ)/%.o,$(1))
 AS_SRC  = vcc/as.c vcc/a64.c vcc/elf.c vcc/macho.c
 LEX_SRC = vcc/lex.c vcc/intern.c
-PP_SRC  = vcc/dircache.c vcc/ppdriver.c vcc/ccsnap.c
+PP_SRC  = vcc/dircache.c vcc/ppdriver.c vcc/ccsnap.c vcc/ldhash.c
 # Split modules: one directory of files each.  By default each directory is
 # compiled as one TU (obj/unity/DIR.c #includes its files, as SQLite's
 # amalgamation), so the code generator sees all of it, also in `make self`

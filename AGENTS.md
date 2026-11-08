@@ -62,8 +62,10 @@ bench/vas-enc.py $PWD/ccs/vcc/tests/vas   # vas encodings vs llvm-mc
 bench/pg/build.sh clang && bench/pg/build.sh vcc   # PostgreSQL (macOS, meson+ninja): build + meson test (~2 min each)
 ```
 Fast loop while iterating (cold numbers on a loaded machine, in brackets):
-`vcc-sema.py batch` (3 s [33 s]), `vcc-diff.py batch --cmp --kernel` (14 s
-[40 s]), `vcc-ctests.py -j 6` (5 s [32 s]: a vcc object byte-identical to one
+`vcc-sema.py batch` (3 s [33 s]), `vcc-diff.py batch --cmp --kernel` (3 s
+[14 s]; `cmp` 16 s [40 s]: each reference's token-stream hash is kept in
+`work/ppref/X.i.th`, keyed by its size and mtime, so a match lexes only our
+side; `VPP_CMP_NOCACHE=1` compares in full), `vcc-ctests.py -j 6` (5 s [32 s]: a vcc object byte-identical to one
 that passed is not linked or run again; `--no-cache` runs all) and
 `vcc-sema.py layout` (clang only rechecks TUs whose claims changed;
 `NOCACHE=1` rechecks all).  The batch modes share caches across TUs as vccd
