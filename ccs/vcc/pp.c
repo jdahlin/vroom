@@ -2018,7 +2018,7 @@ static void subst_simple(pp *p, const pmacro *m, margs *a, uint8_t nf, uint32_t 
 			ngs = true;
 		if (!k) {
 			vfill(w, cur, src, eloc);
-			w->flags = (w->flags & ~(TF_SOL | TF_SPACE)) | (ngs ? TF_SPACE : 0);
+			w->flags = (w->flags & ~(TF_SOL | TF_SPACE)) | (w == r ? nf : ngs ? TF_SPACE : 0);
 			ngs = false;
 			w++;
 			continue;
@@ -2034,12 +2034,12 @@ static void subst_simple(pp *p, const pmacro *m, margs *a, uint8_t nf, uint32_t 
 				if (unlikely(at[j].kind == T_HASHHASH))
 					w[j].flags |= PF_NOPASTE;
 			}
-			w->flags = (w->flags & ~(TF_SOL | TF_SPACE)) | (ngs ? TF_SPACE : 0);
+			w->flags = (w->flags & ~(TF_SOL | TF_SPACE)) | (w == r ? nf : ngs ? TF_SPACE : 0);
 			ngs = false;
 			w += an;
 		}
 	}
-	push_ptok(p, r, n, m->name, 0x80 | nf, 0);
+	push_ptok(p, r, n, m->name, 0, 0);	/* r[0] took the name's SOL/SPACE (the context's "first") */
 	mdisable(p, m->name);
 }
 
@@ -2112,7 +2112,9 @@ static int subst(pp *p, const pmacro *m, const ptok *name, margs *a, uint32_t el
 		p->pend |= nf;
 		return 0;
 	}
-	push_ptok(p, r, n, m->name, 0x80 | nf, 0);
+	/* the context's "first" (the name's SOL/SPACE), applied now: r is ours */
+	r[0].flags = (r[0].flags & ~(TF_SOL | TF_SPACE)) | nf;
+	push_ptok(p, r, n, m->name, 0, 0);
 	mdisable(p, m->name);
 	return 0;
 }
