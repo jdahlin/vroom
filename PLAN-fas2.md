@@ -198,6 +198,7 @@ förprocessas 121 gånger.
 | 2.8 | Länkare + objcopy | `vmlinux` och `Image` utan lld; bootar |
 | | **2.8 klar** (utom vdso-länken): `vlink` byte-identisk med lld (30 ms mot 340 ms), `vobjcopy`/`vnm` identiska med llvm-objcopy/llvm-nm, Image bootar | |
 | 2.9 | Allt i minnet, profilering, finjustering | kallt bygge < 2 s, bootar Debian till `running` |
+| | **vccd kompilerar själv** (se Status 2.9): alla 877 `-c` av kärnans `.c`/`.S` i vccd, 0 till clang; objekt direkt från emittern utan asm-text; kompileringsfasen 16,7 → 11,7 s | |
 
 ### Status 2.2 (2026-11-07)
 - `ccs/vcc/lex.c`, `intern.c`: strukturell lexer i simdjson-stil. 9 masker per 64-byteblock
@@ -372,6 +373,17 @@ aldrig i bygget. Ett TU-test (`bench/vcc-diff.py`) körs över alla kärnfiler.
   - Koppla in `vlink`/`vobjcopy`/`vnm` i bygget: shimmen i stället för vroom-ld och llvm-objcopy/llvm-nm.
   - Kör länken i vccd (ingen process, indata redan i minnet).
   - `Image` kan skrivas direkt från vmlinux.unstripped parallellt med strip.
+
+### Status 2.9 (2026-11-08): vccd kompilerar kärnans `.c` och `.S` själv, objekt utan asm-text
+- `ppdriver.c`: `-c` av en `.c` kör pp (header-cachen delas mellan jobben) + cc.c + emit.c och ger ett ELF-objekt; `-c` av en `.S` kör pp-utdata genom as.c i minnet (`as_set_dir` för relativa `.incbin`). Ett `As`/`ElfObj`/utbuffert (4 GB NORESERVE) per tråd, objektet skrivs med en `write`, `-MD`/`-MMD`-depfilen som clangs. `cc_run`:s tabeller byggs en gång (`pthread_once`).
+- `vccd.c`: `-c` av namngiven `.c`/`.S` med `--target=aarch64-*-linux*` körs i arbetartråden (jobbtyp `cc-own`); värdprogram (Mach-O), vDSO (`-mcmodel=tiny`, kräver PIC), `-fpic`/`-shared`/stdin går till vroomd som förut, och likaså varje TU vcc fallerar på (räknas, loggas med `VCC_LOG`). `VCC_CC=0` vidarebefordrar allt (A/B). Räknare vid SIGUSR1/SIGTERM. Trådstackar 16 MB.
+- vas fick det kärnans inline asm använder: LSE-atomics (cas/casp, ld<op>/st<op>, swp med a/l/b/h), ldar/stlr/ldapr, exklusiva par, adc/sbc, smulh/umulh, umull/smull, `at`, SVE `ldr`/`str` av z/p med `mul vl`, pfalse/rdffr/wrffr/setffr, `:got:`/`:got_lo12:`, sysregs med op0 0–3.
+- **Objektbackend** (`emit.c`): med `-c` är emitterns bitar strömmar av poster i stället för text: direktivtext (sektionsbyten, `.globl`/`.type`/`.size`, asm på toppnivå) går till ett beständigt `As` (as.c delad i `as_begin`/`as_snippet`/`as_end` + `as_sym`/`as_val`/`as_label`/`as_frag`); funktioner kodas med a64.h:s inline-kodare direkt i aktuellt fragment; inline asm körs som snippet på plats; dataobjekt och strängar skrivs med `elf_bytes`/`elf_fill` och ABS64-fixups. Uppspelningen gör samma `ElfObj`-anrop som assemblern gjorde för den utskrivna texten, så objekten är byte-identiska. Hopp i funktioner utan inline asm löses i kodaren; med inline asm är `.LBB`-etiketterna assemblersymboler (asm goto kan namnge dem). `VCC_OBJ_TEXT=1` behåller den gamla vägen (skrivare + `as_run`) för kontroll.
+- Fel som hittades: skrivarens `data_bytes` läste 8 byte förbi `e->data.n` för `.xword` och läckte gamla bytes från föregående objekt (`init_groups.ngroups` blev 1; 19 TU:er). Rättat; kärnan som bootade i 2.6 hade felet.
+- **Acceptans:** `bench/vcc-cbatch.py` (alla TU:er med `-c` i en `vpp`-batch): objektbackend och `VCC_OBJ_TEXT=1` **byte-identiska för alla 839 distinkta objekt** (före backend: text-vägen byte-identisk med clang `-c` av samma text, `bench/vcc-asdiff.py`); `bench/vcc-obj.py cmp` **840/840**. Kallt bygge genom shimsen (`bench/vccd-kbuild.sh`): **877 kompilerade av vcc, 0 till clang**; Debian bootar till `running`, 0 felande enheter (`results/boot-20261108-075239.log`).
+- **A/B** (`bench/vccd-kbuild.sh`, `-j 14`, alternerande, last 10 → 44 av annat på maskinen): kompileringsfasen (första → sista CC) clang via vroomd 16,7/16,6/16,6 s → vcc **11,7/11,8/11,8 s**; totalt 22,1/22,1/22,1 → **17,0/17,1/17,2 s**. Före objektbackenden (text + as_run, en körning): 20,6 → 13,9 s.
+- **Var tiden går:** batch med `-j 6` (last ~4): 3,3 s vägg, 16,9 s user + 3,1 s sys; `cc_run` 19,5 s jobbtid, varav kodgenerering + objekt **0,99 s** (text + as_run: 2,04 s), finish + write 0,25 s, 25,5 MB objekt. Front end (pp + parse/sema) är ~90 %. (Briefens "~4,3 CPU-s" för front end var väggtid; CPU är ~20 s, jfr Status 2.4: 22,6 s.) `kernel/sched/core.c` ensam: emit 2,5 ms mot 3,3 ms (utskrift 1,0 → 0,25 ms). I bygget summerar vcc-jobben till 34,3 s (medel 39 ms, max 247 ms `net/core/sock.c`) över 11,7 s, alltså ~3 jobb i luften av 14: kompileringsfasen begränsas nu av make, shim och beroendeordningen, inte av vccd (clang-jobben summerar till 106 s).
+- **Kvar:** front end-kostnaden (deklarationsåteruppspelning, RESEARCH-preprocessor §6.4); per-TU mmap/munmap i emit.c och cc.c (sys 3 s) → arenor per tråd som nollställs per jobb; vDSO (PIC) och värdprogram (Mach-O) går fortfarande till clang; varför bara ~3 jobb är i luften under make `-j 14`.
 
 ## Risker
 - **GNU C-ytan och inline asm** är det stora jobbet. Uppskattat: lexer + pp ~2 kloc,
