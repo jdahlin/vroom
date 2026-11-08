@@ -22,6 +22,7 @@
  *
  * VCC_NODC=1 turns it off; VCC_DC_MAX_MB caps the memory (default 256).
  */
+#include <pthread.h>
 #include <stdatomic.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -66,7 +67,7 @@ static struct dcroot {
 
 static _Atomic uint64_t dc_mem, dc_max;
 static _Atomic unsigned long st_snap, st_restore, st_regions;
-static int dc_off = -1;
+static int dc_off;
 static _Atomic uint64_t tok_skip;
 
 
@@ -388,14 +389,19 @@ static dcnode *child(dcnode *n, const void *e, unsigned ctr, bool make)
 
 /* ---------------- per TU ---------------- */
 
+static void dc_env(void)
+{
+	const char *m = getenv("VCC_DC_MAX_MB");
+
+	atomic_store(&dc_max, (uint64_t)(m ? atoll(m) : 256) << 20);
+	dc_off = getenv("VCC_NODC") != NULL;
+}
+
 void dc_begin(cc *c)
 {
-	if (dc_off < 0) {
-		const char *m = getenv("VCC_DC_MAX_MB");
+	static pthread_once_t once = PTHREAD_ONCE_INIT;
 
-		atomic_store(&dc_max, (uint64_t)(m ? atoll(m) : 256) << 20);
-		dc_off = getenv("VCC_NODC") != NULL;
-	}
+	pthread_once(&once, dc_env);	/* worker threads race to the first TU */
 	c->dc = NULL;
 	if (dc_off)
 		return;

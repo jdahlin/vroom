@@ -2959,20 +2959,21 @@ static char *pstrdup(pp *p, const char *s, size_t n)
 	return d;
 }
 
-unsigned long pp_stat_try, pp_stat_skip;
+_Atomic unsigned long pp_stat_try, pp_stat_skip;	/* VPP_TIME */
 
 /* the file at a candidate path, if any: misses in missing directories cost no syscall */
 static const vlex_file *try_path(const char *cwd, const char *path, size_t len)
 {
-	static int off = -1;
+	static _Atomic int off_ = -1;
+	int off = atomic_load_explicit(&off_, memory_order_relaxed);
 
 	if (off < 0)
-		off = getenv("VPP_NODIRCACHE") != NULL;
-	pp_stat_try++;
+		atomic_store_explicit(&off_, off = getenv("VPP_NODIRCACHE") != NULL, memory_order_relaxed);
+	atomic_fetch_add_explicit(&pp_stat_try, 1, memory_order_relaxed);
 	const vlex_file *f;
 
 	if (!off && (!cwd || path[0] == '/') && !vdir_exists(path, len)) {
-		pp_stat_skip++;
+		atomic_fetch_add_explicit(&pp_stat_skip, 1, memory_order_relaxed);
 		return NULL;
 	}
 	if (cwd && path[0] != '/') {
@@ -3440,7 +3441,8 @@ static void hc_why(const pp *p, const hkey *k, const hent *e)
 /* replay a matching entry for this #include; true if done */
 static bool hc_try(pp *p, hkey *k)
 {
-	static int dbg = -1;
+	static _Atomic int dbg_ = -1;
+	int dbg;
 	const hent *h = atomic_load_explicit(&k->head, memory_order_acquire);
 
 	for (const hent *e = h; e; e = e->next)
@@ -3448,8 +3450,8 @@ static bool hc_try(pp *p, hkey *k)
 			hc_apply(p, e);
 			return true;
 		}
-	if (dbg < 0)
-		dbg = getenv("VPP_HC_DEBUG") != NULL;
+	if ((dbg = atomic_load_explicit(&dbg_, memory_order_relaxed)) < 0)
+		atomic_store_explicit(&dbg_, dbg = getenv("VPP_HC_DEBUG") != NULL, memory_order_relaxed);
 	if (dbg && h)
 		hc_why(p, k, h);
 	return false;
@@ -4251,17 +4253,23 @@ static inline void next_tok(pp *p, ptok *t)
 }
 
 /* the header cache's mode: text for pp_text, tokens for pp_next */
+static int hc_off;
+
+/* once: a thread that saw the flag but not hc_mem_max stored without a cap (TSan) */
+static void hc_env(void)
+{
+	const char *m = getenv("VPP_HC_MAX_MB");
+
+	hc_mem_max = m ? (size_t)atol(m) << 20 : (size_t)8 << 30;
+	hc_off = getenv("VPP_NOHC") != NULL;
+}
+
 static void hc_mode(pp *p, int mode)
 {
-	static int env = -1;
+	static pthread_once_t once = PTHREAD_ONCE_INIT;
 
-	if (env < 0) {
-		const char *m = getenv("VPP_HC_MAX_MB");
-
-		hc_mem_max = m ? (size_t)atol(m) << 20 : (size_t)8 << 30;
-		env = getenv("VPP_NOHC") != NULL;
-	}
-	p->hc = !env;
+	pthread_once(&once, hc_env);
+	p->hc = !hc_off;
 	p->tokmode = mode;
 }
 

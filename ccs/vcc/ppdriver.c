@@ -19,6 +19,7 @@
 #include <errno.h>
 #include <fcntl.h>
 #include <setjmp.h>
+#include <stdatomic.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -599,10 +600,11 @@ int ppd_run(int argc, char **argv, const ppd_env *env)
 		o.n = l;
 	}
 	if (getenv("VPP_TIME")) {
-		extern unsigned long pp_stat_try, pp_stat_skip, vdir_probes;
+		extern _Atomic unsigned long pp_stat_try, pp_stat_skip, vdir_probes;
 
 		dprintf(errfd, "vpp: %.1f ms, %zu bytes out; include candidates %lu, %lu ruled out by the directory cache (%lu dirs probed)\n",
-			(now() - t0) * 1e3, o.n, pp_stat_try, pp_stat_skip, vdir_probes);
+			(now() - t0) * 1e3, o.n, atomic_load(&pp_stat_try), atomic_load(&pp_stat_skip),
+			atomic_load(&vdir_probes));
 	}
 	if (pp_errors(p)) {
 		status = 1;
