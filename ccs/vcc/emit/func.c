@@ -275,7 +275,7 @@ VPRIV void emit_function(ecx *e, uint32_t s)
 	e->nlabel = 0;
 	e->nkv = 0, e->kvalid = 0, e->nkvs = 0, e->nael = 0;
 	e->foff = e->fmax = e->outmax = e->cl_top = 0;
-	e->falign = 16, e->resv = 0;
+	e->falign = 16, e->resv = 0, e->nvsz = 0;
 	e->dyn = e->calls = false;
 	e->live = 0;
 	e->usedcs = 0;
@@ -365,6 +365,12 @@ VPRIV void emit_function(ecx *e, uint32_t s)
 				vr_store(e, ab.fsz, ab.reg + k, FRAME, bd->slot + ab.fsz * k);
 			break;
 		}
+	}
+	for (uint32_t i = 0; i < body->aux; i++) {	/* int (*a)[n]: n as on entry */
+		qty pt = c->syms[c->lists[body->a + i]].ty;
+
+		if (unlikely(vm_type(c, pt)))
+			vla_fix(e, pt, true);
 	}
 	if (e->vararg && DARWIN(c)) {
 		e->ngr_named = ngrn;

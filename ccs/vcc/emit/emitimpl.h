@@ -285,6 +285,8 @@ typedef struct fnctx {		/* one function instance: the emitted function or an inl
 #define MAXCLEAN 256
 #define NTEMP 17
 
+#define NVSZ 64		/* VLA size expressions live at once in a function */
+
 typedef struct ecx {
 	emitter *E;
 	cc *c;
@@ -322,6 +324,9 @@ typedef struct ecx {
 	/* frame */
 	int32_t foff, fmax;
 	uint32_t falign;	/* largest slot alignment; over 16 the prologue realigns sp */
+	/* VLA sizes, evaluated where their declaration is reached (stmt.c vla_fix) */
+	struct { uint32_t node, inst; int32_t slot; } vsz[NVSZ];
+	uint32_t nvsz;
 	uint32_t resv;		/* temporaries never handed out (tidx bits): x28 once falign > 16 */
 	int32_t cl_top;		/* frame offset above the block's compound literals (kept past statements) */
 	int32_t outmax;		/* outgoing stack argument bytes */
@@ -651,6 +656,7 @@ VPRIV void run_cleanups(ecx *e, int to);
 VPRIV uint32_t user_label(ecx *e, uint32_t l);
 VPRIV val gen_block(ecx *e, uint32_t n, bool want);
 VPRIV val vla_bytes(ecx *e, qty t);
+VPRIV void vla_fix(ecx *e, qty t, bool pure);
 VPRIV void gen_stmt(ecx *e, uint32_t n);
 /* asm.c */
 VPRIV void gen_asm(ecx *e, uint32_t n);
@@ -685,6 +691,20 @@ static inline bool is_vec(cc *c, qty t) { return KIND(c, t) == TY_VECTOR; }
 static inline bool is_recabi(cc *c, qty t) { return is_record(c, t) || is_vec(c, t); }
 static inline bool is_agg(cc *c, qty t) { return is_record(c, t) || is_array(c, t) || is_vec(c, t); }
 static inline uint64_t tsize(cc *c, qty t) { return T(c, t)->size; }
+
+/* a VLA somewhere in t's pointer/array chain (int a[n], int (*p)[n][4]) */
+static inline bool vm_type(cc *c, qty t)
+{
+	for (;;) {
+		const ctype *a = T(c, t);
+
+		if (a->kind == TY_ARRAY && (a->flags & TF_VLA))
+			return true;
+		if (a->kind != TY_ARRAY && a->kind != TY_PTR)
+			return false;
+		t = a->base;
+	}
+}
 static inline uint32_t talign(cc *c, qty t) { return T(c, t)->align; }
 static inline bool is_signed(cc *c, qty t) { return cc_is_signed(c, t); }
 /* long double: binary128, kept as its bits in a register pair (arithmetic: the __*tf* helpers) */

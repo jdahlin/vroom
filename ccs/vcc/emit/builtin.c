@@ -81,6 +81,7 @@ VPRIV val dry(ecx *e, uint32_t n)
 	int32_t foff = e->foff;
 	bool reach = e->reach, calls = e->calls;
 	int nclean = e->nclean, nloop = e->nloop;
+	uint32_t nvsz = e->nvsz;
 	uint8_t nkv = e->nkv;
 	uint16_t kvalid = e->kvalid;
 	int64_t kval[NKV];
@@ -95,7 +96,7 @@ VPRIV val dry(ecx *e, uint32_t n)
 		e->nael--;
 	memcpy(e->kval, kval, sizeof(kval));
 	e->nin = nin, e->live = live, e->usedcs = usedcs, e->foff = foff;	/* labels stay: user labels may map to them */
-	e->reach = reach, e->nclean = nclean, e->nloop = nloop, e->raw.n = raw, e->calls = calls;
+	e->reach = reach, e->nclean = nclean, e->nloop = nloop, e->raw.n = raw, e->calls = calls, e->nvsz = nvsz;
 	if (v.k != V_CONST && v.k != V_ADDR)
 		v = vnone();
 	return v;

@@ -143,8 +143,14 @@ Existing gates that every change must keep green: `vcc-diff.py cmp`
   T1/T3 `atomic-threads.c` (4 threads × 1M `x++` on `_Atomic int`,
   `_Atomic long double`, `_Atomic struct{char[3]}` → exact count);
   `_Static_assert(sizeof/alignof)` cases in `vcc-sema.py layout` style.
-- [ ] **VLA pointer `++`/`--`/`+=`/`-=`/difference ignore runtime size** [P].
-  `ptr_add_vla` `emit.c:6051` only covers binary `+`/`-` and subscripting.
+- [x] **VLA pointer `++`/`--`/`+=`/`-=`/difference ignore runtime size** [P].
+  Done (emit/expr.c: assign_op, incdec_op, pointer difference).  Found
+  with it: `int a[6][n]` (constant outer bound) was laid out as a 0-byte
+  fixed array that overwrote other locals; an array of VLAs is now a VLA
+  (cc/declarator.c).  VLA sizes are evaluated once where the declaration
+  is reached (parameters: on entry) and kept in a slot (emit/stmt.c
+  vla_fix), so a later `n = ...` no longer changes `sizeof` or the step.
+  Was: `ptr_add_vla` `emit.c:6051` only covers binary `+`/`-` and subscripting.
   *Validate:* T1 `vla_ptr.c` (`int (*q)[n]`: `q++`, `q--`, `q += 2`,
   `q -= 1`, `q3 - q`, `&q[1] - q`, 2-D VLA of VLA).
 - [ ] **VLA with initializer accepted; garbage at run time** [P].  Reject

@@ -379,6 +379,17 @@ static val gen_binary(ecx *e, uint32_t n)
 	if (is_ptr(c, ty) && (op == T_PLUS || op == T_MINUS) && is_ptr(c, lt))
 		return ptr_to_vla(c, lt) ? ptr_add_vla(e, a, b, lt, op == T_MINUS)
 					 : ptr_add(e, a, b, (int64_t)elem_size(c, lt), op == T_MINUS);
+	if (op == T_MINUS && is_ptr(c, lt) && is_ptr(c, rt) && ptr_to_vla(c, lt)) {
+		/* (p - q) / the element size, which is known only now */
+		val es = vla_bytes(e, T(c, lt)->base);
+		int ra = toreg(e, &a), rb = toreg(e, &b), rs = toreg(e, &es);
+
+		op3(e, I_SUB, 1, ra, ra, rb);
+		op3(e, I_SDIV, 1, ra, ra, rs);
+		tfree(e, rb);
+		val_free(e, &es);
+		return a;
+	}
 	if (op == T_MINUS && is_ptr(c, lt) && is_ptr(c, rt)) {
 		int64_t es = (int64_t)elem_size(c, lt);
 
@@ -524,7 +535,8 @@ static val assign_op(ecx *e, const node *x, qty lt, val old, val v)
 	int op = x->aux;
 
 	if (is_ptr(c, lt)) {
-		old = ptr_add(e, old, v, (int64_t)elem_size(c, lt), op == T_MINUS);
+		old = ptr_to_vla(c, lt) ? ptr_add_vla(e, old, v, lt, op == T_MINUS)
+					: ptr_add(e, old, v, (int64_t)elem_size(c, lt), op == T_MINUS);
 	} else if (is_flt(c, pt) || is_flt(c, lt)) {
 		old = cast(e, old, lt, pt, CK_INT);
 		old = is_flt(c, pt) ? f_arith(e, op, pt, old, v) : arith(e, op, pt, old, v);
@@ -792,6 +804,17 @@ static val incdec_op(ecx *e, qty t, bool inc, bool post, val *old)
 		} else {
 			nv = arith2(e, inc ? T_PLUS : T_MINUS, t, cp, one);
 			*old = nv;
+		}
+	} else if (is_ptr(c, t) && ptr_to_vla(c, t)) {
+		/* a pointer to a VLA steps by the size computed now */
+		toreg(e, old);
+		if (post) {
+			int r = treg(e);
+
+			mov(e, 1, r, old->r);
+			nv = ptr_add_vla(e, vreg(r), vconst(1), t, !inc);
+		} else {
+			nv = *old = ptr_add_vla(e, *old, vconst(1), t, !inc);
 		}
 	} else {
 		int ro = toreg(e, old);

@@ -530,6 +530,58 @@ static void gen_return(ecx *e, const node *x)
  * memory; leaving its scope (block end, break, goto, return) restores sp
  * through the cleanup stack.
  */
+/* the value of a VLA size expression: from its slot once its declaration ran (vla_fix) */
+static val vla_len(ecx *e, uint32_t sn)
+{
+	cc *c = e->c;
+
+	for (uint32_t k = e->nvsz; k-- > 0;)
+		if (e->vsz[k].node == sn && e->vsz[k].inst == e->f->inst) {
+			int r = treg(e);
+
+			mem(e, I_LD, 3, 0, r, FRAME, e->vsz[k].slot);
+			return vreg(r);
+		}
+	return cast(e, gen(e, sn), N(sn)->ty, c->t_size, CK_INT);
+}
+
+/*
+ * A declaration whose type has VLAs in it (int a[n], int (*p)[n], typedef
+ * int T[n]): each size is evaluated now, once, and kept in a slot of the
+ * block, so a later n = ... does not change the type (C11 6.7.6.2p5).
+ * pure: only sizes without side effects (parameters: function_def already
+ * evaluated the others on entry).
+ */
+VPRIV void vla_fix(ecx *e, qty t, bool pure)
+{
+	cc *c = e->c;
+
+	for (;;) {
+		const ctype *a = T(c, t);
+
+		if (a->kind == TY_PTR) {
+			t = a->base;
+			continue;
+		}
+		if (a->kind != TY_ARRAY)
+			return;
+		if ((a->flags & TF_VLA) && a->n && N(a->n)->op != N_NUM && !(pure && side_effects(c, a->n))) {
+			val v = cast(e, gen(e, a->n), N(a->n)->ty, c->t_size, CK_INT);
+			int r = toreg(e, &v);
+			int32_t sl = slot(e, 8, 8);
+
+			mem(e, I_ST, 3, 0, r, FRAME, sl);
+			val_free(e, &v);
+			if (e->nvsz >= NVSZ)
+				efatal(e, 0, "too many variable length array sizes in one function");
+			e->vsz[e->nvsz].node = a->n;
+			e->vsz[e->nvsz].inst = e->f->inst;
+			e->vsz[e->nvsz++].slot = sl;
+		}
+		t = a->base;
+	}
+}
+
 VPRIV val vla_bytes(ecx *e, qty t)
 {
 	cc *c = e->c;
@@ -539,7 +591,7 @@ VPRIV val vla_bytes(ecx *e, qty t)
 
 	if (a->kind != TY_ARRAY || !(a->flags & TF_VLA))
 		return vconst(tsize(c, t));
-	n = cast(e, gen(e, a->n), N(a->n)->ty, c->t_size, CK_INT);
+	n = vla_len(e, a->n);
 	b = vla_bytes(e, a->base);
 	r = toreg(e, &n);
 	if (b.k == V_CONST) {
@@ -629,6 +681,8 @@ static void gen_decl(ecx *e, const node *x)
 	const sym *y = &c->syms[s];
 	bind *b;
 
+	if (unlikely(vm_type(c, y->ty)))
+		vla_fix(e, y->ty, false);
 	if (y->kind != S_VAR || y->sc == SC_STATIC || y->sc == SC_EXTERN || y->sc == SC_TYPEDEF)
 		return;
 	if (T(c, y->ty)->flags & TF_VLA) {
