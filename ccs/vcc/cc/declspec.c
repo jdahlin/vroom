@@ -18,8 +18,8 @@ VPRIV bool is_type_start(cc *c, const ptok *t)
 {
 	if (t->kind != T_IDENT)
 		return false;
-	if (t->id < KW_END && (kwclass[t->id] & KC_KW))
-		return kwclass[t->id] & KC_TYPE;
+	if (t->id < KW_END && kwmap[t->id])
+		return kwclass[kwmap[t->id]] & KC_TYPE;
 	return typedef_id(c, t->id);
 }
 
@@ -27,8 +27,8 @@ VPRIV bool is_decl_start(cc *c, const ptok *t)
 {
 	if (t->kind != T_IDENT)
 		return false;
-	if (t->id < KW_END && (kwclass[t->id] & KC_KW))
-		return kwclass[t->id] & KC_DECL;
+	if (t->id < KW_END && kwmap[t->id])
+		return kwclass[kwmap[t->id]] & KC_DECL;
 	return typedef_id(c, t->id);
 }
 
@@ -250,6 +250,7 @@ VPRIV bool decl_specs(cc *c, dspec *ds, bool allow_sc)
 			ds->thread = true;
 			break;
 		case KW_const: case KW___const__: case KW___const:
+		case KW_constexpr:	/* C23: a const object with a constant initializer (not checked) */
 			q |= Q_CONST;
 			break;
 		case KW_volatile: case KW___volatile__: case KW___volatile:

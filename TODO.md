@@ -534,7 +534,12 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
   suite.
 
 ### Front end (`cc.c`)
-- [ ] **C23 / per-TU `-std`** [P]: one global keyword table (`kwclass`
+- [ ] **C23 / per-TU `-std`** [P] (partly done: per-TU keyword map `kwmap` (C23 spellings ->
+  GNU keywords; true/false/nullptr/constexpr), `#if true`, digit separators through a
+  translated copy (vlex_digitsep: `-E` and `#x` print them without the `'`, clang keeps them),
+  tests/vcc/c23_keywords.c, c99_ids.c.  Left: `u8'a'` (one token only in C23: the lexer
+  cache needs a per-mode entry, which would also give exact separators), nullptr_t,
+  constexpr checks, `_BitInt`, `#embed`): one global keyword table (`kwclass`
   `cc.c:740-768`), `o->std` never read.  Per-TU keyword set; then `bool`,
   `true`/`false`, `nullptr`, `constexpr`, `typeof_unqual`, single-argument
   `static_assert`, digit separators (lexer), `enum : type`, `_BitInt`,

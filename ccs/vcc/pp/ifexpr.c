@@ -199,6 +199,8 @@ static ival eprimary(ev *e, bool live)
 			eadv(e);
 			return r;
 		}
+		if (p->o->c23 && e->t.id == KW_true)
+			r.v = 1;	/* C23: true is 1 in #if (false is 0 anyway) */
 		eadv(e);	/* an identifier that is not a macro: 0 */
 		return r;
 	default:

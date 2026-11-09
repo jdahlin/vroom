@@ -60,7 +60,9 @@ VPRIV const vlex_file *try_path(const pp_opts *o, const char *path, size_t len)
 {
 	const vlex_file *f = try_path_(o->cwd, path, len);
 
-	return f && o->trigraphs ? vlex_trigraphs(f) : f;
+	if (f && o->trigraphs)
+		f = vlex_trigraphs(f);
+	return f && o->c23 ? vlex_digitsep(f) : f;
 }
 
 static const vlex_file *find_include_(pp *p, const ctx *from, const char *name, size_t nlen,

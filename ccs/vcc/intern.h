@@ -30,7 +30,7 @@
 	X(__builtin_offsetof) X(__builtin_types_compatible_p) \
 	X(__builtin_choose_expr) X(__builtin_shufflevector) X(__builtin_convertvector) X(__int128) X(_Float16) X(__fp16) \
 	X(__thread) X(__real__) X(__imag__) X(_Complex) X(__complex__) X(__complex) X(__real) X(__imag) X(static_assert) \
-	X(bool) X(true) X(false) X(nullptr) X(alignof) X(alignas) \
+	X(bool) X(true) X(false) X(nullptr) X(alignof) X(alignas) X(constexpr) \
 	X(thread_local) \
 	/* preprocessor */ \
 	X(define) X(undef) X(include) X(include_next) X(ifdef) X(ifndef) \

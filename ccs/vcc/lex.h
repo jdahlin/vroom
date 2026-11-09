@@ -92,6 +92,8 @@ const vlex_file *vlex_get(const char *path, size_t pathlen);
 /* f with trigraphs replaced (C phase 1), lexed into a new uncached file;
  * f itself when it has none */
 const vlex_file *vlex_trigraphs(const vlex_file *f);
+/* C23: f with digit separators (1'000) dropped from pp-numbers, as vlex_trigraphs */
+const vlex_file *vlex_digitsep(const vlex_file *f);
 void vlex_cache_flush(void);	/* only with no lookups in flight */
 /*
  * Read-ahead hint: path will probably be needed.  I/O threads open and read

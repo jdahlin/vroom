@@ -192,6 +192,10 @@ VPRIV qty composite(cc *c, qty a, qty b);
 VPRIV void lay_record(cc *c, tag *r, const uint32_t *fa, const uint8_t *fp);
 /* token.c */
 extern uint8_t kwclass[KW_END];
+/* identifier id -> the keyword it is in this TU (0: none): C23 spellings map to the
+ * GNU ones (bool -> _Bool...), so only -std=c23/gnu23 TUs see them (cc_run sets it) */
+extern _Thread_local const uint16_t *kwmap;
+extern uint16_t kwmap_gnu[KW_END], kwmap_c23[KW_END];
 VPRIV void init_keywords(void);
 static inline int kwof(const ptok *t);
 VPRIV __attribute__((noinline)) void fetch_directive(cc *c, ptok *t);
@@ -375,7 +379,7 @@ static inline u128 fnum_q(const cc *c, uint32_t a) { u128 q; memcpy(&q, &c->fpoo
 
 static inline int kwof(const ptok *t)
 {
-	return t->kind == T_IDENT && t->id < KW_END && (kwclass[t->id] & KC_KW) ? (int)t->id : 0;
+	return t->kind == T_IDENT && t->id < KW_END ? (int)kwmap[t->id] : 0;
 }
 
 /* inline at every token consumer: a call to pp_next and a test; the rest out of line */

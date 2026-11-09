@@ -2,6 +2,8 @@
 #include "ccimpl.h"
 
 uint8_t kwclass[KW_END];
+uint16_t kwmap_gnu[KW_END], kwmap_c23[KW_END];
+_Thread_local const uint16_t *kwmap = kwmap_gnu;
 
 VPRIV void init_keywords(void)
 {
@@ -24,11 +26,26 @@ VPRIV void init_keywords(void)
 	kwclass[KW_bool] = kwclass[KW_true] = kwclass[KW_false] = 0;
 	kwclass[KW_nullptr] = kwclass[KW_alignof] = kwclass[KW_alignas] = 0;
 	kwclass[KW_thread_local] = kwclass[KW_static_assert] = 0;
-	kwclass[KW_typeof_unqual] = 0;
+	kwclass[KW_typeof_unqual] = kwclass[KW_constexpr] = 0;
 	for (size_t i = 0; i < sizeof(types) / sizeof(types[0]); i++)
 		kwclass[types[i]] |= KC_TYPE | KC_DECL;
 	for (size_t i = 0; i < sizeof(decls) / sizeof(decls[0]); i++)
 		kwclass[decls[i]] |= KC_DECL;
+	for (int i = 0; i < KW_END; i++)
+		kwmap_gnu[i] = kwmap_c23[i] = (kwclass[i] & KC_KW) ? (uint16_t)i : 0;
+	/* C23 keywords: the GNU keyword with the same meaning, or their own */
+	kwmap_c23[KW_bool] = KW__Bool;
+	kwmap_c23[KW_alignas] = KW__Alignas;
+	kwmap_c23[KW_alignof] = KW__Alignof;
+	kwmap_c23[KW_static_assert] = KW__Static_assert;
+	kwmap_c23[KW_thread_local] = KW__Thread_local;
+	kwmap_c23[KW_typeof_unqual] = KW___typeof_unqual__;
+	kwmap_c23[KW_true] = KW_true;
+	kwmap_c23[KW_false] = KW_false;
+	kwmap_c23[KW_nullptr] = KW_nullptr;
+	kwmap_c23[KW_constexpr] = KW_constexpr;
+	kwclass[KW_constexpr] = KC_KW | KC_DECL;	/* (reached only through kwmap_c23) */
+	kwclass[KW_true] = kwclass[KW_false] = kwclass[KW_nullptr] = KC_KW;
 }
 
 static void pragma(cc *c, const ptok *t);

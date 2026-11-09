@@ -61,6 +61,7 @@ typedef struct pp_opts {
 	int has_epoch;			/* SOURCE_DATE_EPOCH set: __DATE__/__TIME__/__TIMESTAMP__ from epoch, UTC */
 	long long epoch;
 	int trigraphs;			/* strict -std (not c23) or -trigraphs: ??x replaced before lexing */
+	int c23;			/* -std=c23/gnu23: true is 1 in #if */
 } pp_opts;
 
 enum { PP_LINUX_AARCH64, PP_DARWIN };

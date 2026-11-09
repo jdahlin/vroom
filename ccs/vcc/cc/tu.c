@@ -170,6 +170,7 @@ int cc_run(pp *p, const cc_opts *o)
 	int errors;
 
 	pthread_once(&once, init_tables);	/* vccd runs TUs on many threads */
+	kwmap = o->std == 23 ? kwmap_c23 : kwmap_gnu;	/* the TU's keywords (this thread parses it) */
 	cc_init(c, p, o);
 	if (!setjmp(c->bail)) {
 		dc_begin(c);

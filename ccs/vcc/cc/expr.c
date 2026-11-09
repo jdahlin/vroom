@@ -426,6 +426,14 @@ static __attribute__((noinline)) uint32_t primary_kw(cc *c, int kw, uint32_t loc
 		next(c);
 		return builtin_call(c, &tc, loc);
 	}
+	if (kw == KW_true || kw == KW_false) {	/* C23: constants of type bool */
+		next(c);
+		return mk_int(c, kw == KW_true, prim(TY_BOOL), loc);
+	}
+	if (kw == KW_nullptr) {	/* C23: a null pointer constant (nullptr_t is void * here) */
+		next(c);
+		return cast_node(c, mk_int(c, 0, prim(TY_INT), loc), ty_ptr(c, prim(TY_VOID)), CK_NULL);
+	}
 	if (kw == KW___builtin_shufflevector || kw == KW___builtin_convertvector) {
 		next(c);
 		return vector_builtin(c, kw == KW___builtin_shufflevector, loc);

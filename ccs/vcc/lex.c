@@ -1525,6 +1525,97 @@ const vlex_file *vlex_trigraphs(const vlex_file *f)
 	return nf;
 }
 
+static bool lx_alnum(char ch)
+{
+	return (ch >= '0' && ch <= '9') || (ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z') || ch == '_';
+}
+
+/* end of the comment or literal at s[i] (s[i] is '/' or a quote), i + 1 if neither */
+static size_t lx_skip(const char *s, size_t n, size_t i)
+{
+	if (s[i] == '/' && i + 1 < n && s[i + 1] == '/') {
+		while (i < n && s[i] != '\n')
+			i += s[i] == '\\' && i + 1 < n ? 2 : 1;
+		return i;
+	}
+	if (s[i] == '/' && i + 1 < n && s[i + 1] == '*') {
+		const char *e = memmem(s + i + 2, n - i - 2, "*/", 2);
+
+		return e ? (size_t)(e - s) + 2 : n;
+	}
+	if (s[i] == '"' || s[i] == '\'') {
+		char q = s[i++];
+
+		while (i < n && s[i] != q && s[i] != '\n')
+			i += s[i] == '\\' && i + 1 < n ? 2 : 1;
+		return i < n ? i + 1 : n;
+	}
+	return i + 1;
+}
+
+const vlex_file *vlex_digitsep(const vlex_file *f)
+{
+	const char *s = f->src;
+	size_t n = f->size, o = 0, i = 0;
+	bool any = false;
+	char *b;
+	vlex_file *nf;
+
+	/* quick: a ' between two alphanumerics somewhere at all */
+	for (const char *q = memchr(s, '\'', n); q; q = memchr(q + 1, '\'', (size_t)(s + n - q - 1)))
+		if (q > s && q + 1 < s + n && lx_alnum(q[-1]) && lx_alnum(q[1])) {
+			any = true;
+			break;
+		}
+	if (!any)
+		return f;
+	b = arena(n + 128);
+	any = false;
+	while (i < n) {
+		char ch = s[i];
+		size_t j;
+
+		if ((ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z') || ch == '_') {
+			for (j = i; j < n && lx_alnum(s[j]); j++)
+				;
+		} else if ((ch >= '0' && ch <= '9') || (ch == '.' && i + 1 < n && s[i + 1] >= '0' && s[i + 1] <= '9')) {
+			/* a pp-number: digit separators (' between alphanumerics) dropped */
+			for (j = i; j < n;) {
+				if (lx_alnum(s[j]) || s[j] == '.') {
+					if ((s[j] == 'e' || s[j] == 'E' || s[j] == 'p' || s[j] == 'P') && j + 1 < n &&
+					    (s[j + 1] == '+' || s[j + 1] == '-'))
+						b[o++] = s[j++];
+					b[o++] = s[j++];
+				} else if (s[j] == '\'' && j + 1 < n && lx_alnum(s[j + 1])) {
+					j++;
+					any = true;
+				} else {
+					break;
+				}
+			}
+			i = j;
+			continue;
+		} else if (ch == '/' || ch == '"' || ch == '\'') {
+			j = lx_skip(s, n, i);
+		} else {
+			j = i + 1;
+		}
+		memcpy(b + o, s + i, j - i);
+		o += j - i;
+		i = j;
+	}
+	if (!any)
+		return f;
+	memset(b + o, 0, 128);
+	nf = arena(sizeof(*nf));
+	memset(nf, 0, sizeof(*nf));
+	nf->path = f->path;
+	nf->dev = f->dev;
+	nf->ino = f->ino;
+	lex_src(nf, b, o);
+	return nf;
+}
+
 const vlex_file *(*vlex_get_hook)(const char *path, size_t len);
 
 /* forget every file (a new build: vccd, idle): later lookups read and lex

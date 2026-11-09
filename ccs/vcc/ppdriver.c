@@ -870,6 +870,7 @@ int ppd_run(int argc, char **argv, const ppd_env *env)
 	}
 	po.dirs = all;
 	po.ndirs = n;
+	po.c23 = std == 23;
 	po.trigraphs = tri >= 0 ? tri : strict && std != 23;	/* clang: strict modes before C23 */
 	{
 		const char *ep = ppd_getenv(env, "SOURCE_DATE_EPOCH");
