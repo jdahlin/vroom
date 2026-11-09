@@ -8,6 +8,14 @@ an item is done when its test exists, fails before the fix and passes after,
 and the existing gates (AGENTS.md "Build and test") stay green.
 
 Notation: **[P]** confirmed by a probe during the review, **[R]** from reading.
+
+File references: `emit.c:N`, `cc.c:N` and `pp.c:N` predate the split into
+`emit/` (+ `arch/a64/emit/`), `cc/` and `pp/` (2026-11-08), and line numbers
+in `as/as.c`, `obj/obj.c` and `ld/ld.c` predate the restructure of
+2026-11-09 (AGENTS.md "Layout"), which moved parts of them to `arch/a64/`
+and `platform/linux/` and shortened the files whose buffers moved to `lib/`
+(`vccd/ar.c`, `vccd/rsh.c`, `vccd/fixdep.c`, `cc/layout.c`, `pp/diag.c`);
+search for the function named in the item.
 The test kinds referenced below are defined in the "Test infrastructure" section
 first; most items only add a file to one of them.
 
@@ -289,7 +297,7 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
   *Validate:* T1 `desig_override.c`, static and automatic variants, with
   side-effect counters (clang's behaviour is the oracle).
 - [ ] **Header/snapshot cache keys incomplete** [R].  `opt_sig`
-  `ccsnap.c:356` misses `-std`, `-fgnu89-inline`, `-finstrument-functions`,
+  `driver/ccsnap.c:356` misses `-std`, `-fgnu89-inline`, `-finstrument-functions`,
   implicit-int/function flags; `sig_of` `pp.c:1518` misses `-W`/`-Werror`.
   Derive both keys from one struct of all parse-affecting options so a new
   option cannot be forgotten.
@@ -300,7 +308,7 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
   and asserts the signature changes.
 - [x] **Default `-O2` when no `-O` given** [P].  (done: default -O0; `-Os -O2`
   no longer keeps `__OPTIMIZE_SIZE__`; `bench/vcc-driver.py`, the start of T11,
-  checks the -O predefines against clang on both targets.)  `ppdriver.c:426`.  Default
+  checks the -O predefines against clang on both targets.)  `driver/ppdriver.c:426`.  Default
   `opt = 0` (`__NO_INLINE__`, no `__OPTIMIZE__`).
   *Validate:* `vcc-diff.py` predefine check: `vpp -dM -E` (once `-dM`
   exists) vs `clang -dM -E` for `''`, `-O0`, `-O1`, `-O2`, `-Os`, `-Oz`;
@@ -328,14 +336,14 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
 
 ## Tier 2: vccd as a safe long-lived service
 
-- [ ] **Socket has no peer check, lives in /tmp** [R].  `vccd.c:924-927`,
-  `shim.c:85-135`.  Socket in a per-user 0700 directory
+- [ ] **Socket has no peer check, lives in /tmp** [R].  `vccd/vccd.c:924-927`,
+  `vccd/shim.c:85-135`.  Socket in a per-user 0700 directory
   (`$XDG_RUNTIME_DIR` or `$TMPDIR/vccd-$UID/`), check the directory's owner
   and mode before connecting (shim) and before binding (server), and check
   the peer uid with `getpeereid`/`SO_PEERCRED` on every connection.
   *Validate:* T12 (mode 0700 dir, 0600 socket; connection from another uid
   refused; pre-created squatting socket/dir detected by the shim and refused).
-- [ ] **ld.lld spawned with the request's environment** [R]. `vccd.c:543`.
+- [ ] **ld.lld spawned with the request's environment** [R]. `vccd/vccd.c:543`.
   Whitelist (PATH and the few the tools read); drop `LD_*`/`DYLD_*`.
   *Validate:* T12 (`DYLD_INSERT_LIBRARIES=/nonexistent` in the request does
   not change the child; a test helper dumps its env).
@@ -345,9 +353,9 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
   *Validate:* T12 (shim from build A against vccd from build B → clear
   error or restart, never silent service).
 - [ ] **Input-driven `abort()` / stack overflow kill the whole server** [P].
-  Aborts: `emit.c:1934,2036,2778`; `cc.c:44,1518,6219`; `as.c:107`;
-  `elf.c:33,40,234`; `pp.c:89,301,1721,2145,2531,2594`; `intern.c:96,195`;
-  `lex.c:1318,1394`; `ppdriver.c:65`.  Recursion without depth limit: cc.c
+  Aborts: `emit.c:1934,2036,2778`; `cc.c:44,1518,6219`; `as/as.c:107`;
+  `obj/obj.c:33,40,234`; `pp.c:89,301,1721,2145,2531,2594`; `lib/intern.c:96,195`;
+  `lex/lex.c:1318,1394`; `driver/ppdriver.c:65`.  Recursion without depth limit: cc.c
   expression/declarator parser, pp `#if` evaluator and argument
   pre-expansion.  Turn arena/limit failures into per-TU fatal errors
   (longjmp to the job, as `fatal_jb` already does in pp), add depth limits
@@ -355,45 +363,45 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
   check `vmreg` reservations in `mk`/`sym`/`tag`.
   *Validate:* T5 (every generated case: exit 1 with a diagnostic, and in
   `--vccd` mode the server keeps serving).
-- [ ] **Unbounded argv arrays** [P].  `ppdriver.c:410,489-498,561`
+- [ ] **Unbounded argv arrays** [P].  `driver/ppdriver.c:410,489-498,561`
   (`dirs_i[1024]`, `all[2048]` …), `write_deps` 65536 files
-  (`ppdriver.c:288`).  Allocate from the job arena.
+  (`driver/ppdriver.c:288`).  Allocate from the job arena.
   *Validate:* T5 (5000 `-I`, 5000 `-include`, a TU with 100k headers in the
   depfile).
 - [ ] **fd handling: uninitialised cmsg, three fds assumed** [R].
-  `vccd.c:172,186,875-877`.  Zero `cbuf`, take the count from `cmsg_len`,
+  `vccd/vccd.c:172,186,875-877`.  Zero `cbuf`, take the count from `cmsg_len`,
   reject requests without exactly three fds.
   *Validate:* T12 (send 0, 1, 2, 4 fds; server rejects, does not close
   unrelated fds — check that the listening socket and other open connections
   survive).
 - [ ] **fds leak into children** [R].  Use `MSG_CMSG_CLOEXEC` (Linux; on
   macOS set `FD_CLOEXEC` immediately under a lock or spawn with
-  `POSIX_SPAWN_CLOEXEC_DEFAULT`), `O_CLOEXEC` in `ppdriver.c:743`,
-  `fixdep.c:407`.
+  `POSIX_SPAWN_CLOEXEC_DEFAULT`), `O_CLOEXEC` in `driver/ppdriver.c:743`,
+  `vccd/fixdep.c:407`.
   *Validate:* T12 (a spawned child lists its open fds: only 0-2).
 - [ ] **No timeouts; idle connections stall all workers** [R].
-  `vccd.c:182,190,305`.  Read the request with a deadline; don't tie a
+  `vccd/vccd.c:182,190,305`.  Read the request with a deadline; don't tie a
   worker to a connection until the request is complete.
   *Validate:* T12 (open 2×ncpu idle connections, then a real job completes
   within 1 s).
 - [ ] **Jobs not cancelled on client exit; SIGTERM exits mid-job** [R].
-  `vccd.c:979,1017`.  Detect peer close (kqueue EV_EOF / poll POLLHUP) and
+  `vccd/vccd.c:979,1017`.  Detect peer close (kqueue EV_EOF / poll POLLHUP) and
   abandon the job; on SIGTERM stop accepting and drain.
   *Validate:* T12 (kill the shim during a long TU: the output file is not
   written; SIGTERM during a job: the job completes or its output is absent).
-- [ ] **Outputs written in place** [R].  `ppdriver.c:266`.  Write to a
+- [ ] **Outputs written in place** [R].  `driver/ppdriver.c:266`.  Write to a
   temporary next to the target and `rename()` (ar.c already does).
   *Validate:* T12 (interrupt during write: either the old file or none,
   never a truncated one with a new mtime).
 - [ ] **Request environment and umask ignored by in-process jobs** [R].
-  `getenv` at `ppdriver.c:733,765`, `pp.c:5519`.  Pass the request's env
+  `getenv` at `driver/ppdriver.c:733,765`, `pp.c:5519`.  Pass the request's env
   to the job (`CPATH`, `C_INCLUDE_PATH`, `SOURCE_DATE_EPOCH`,
   `VCC_*`), create files with the client's umask (shim sends it).
   *Validate:* T11 run through vccd (`SOURCE_DATE_EPOCH=0` gives
   `__DATE__ "Jan  1 1970"`; `CPATH` adds a directory; a client umask 077
   gives mode 0600 outputs).
 - [ ] **Caches never invalidated** [R].  Token cache keyed by path, caches
-  misses (`lex.c:1484-1505`, comment at `pp.c:4025`); dircache; header
+  misses (`lex/lex.c:1484-1505`, comment at `pp.c:4025`); dircache; header
   cache replays on top.  Either scope all caches to a build (make's
   jobserver lifetime / an explicit generation the shim sends) or validate
   with (dev, ino, size, mtime_ns) on each first use per build and drop
@@ -408,7 +416,7 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
   *Validate:* T12 (compile the kernel's 840 TUs 5× in one server; RSS after
   run 5 within 10% of run 2); T5 (an input with 10M distinct identifiers
   gives an error, not an abort).
-- [ ] **No server → exit 127** [R].  `shim.c:96-99`.  Autostart the server
+- [ ] **No server → exit 127** [R].  `vccd/shim.c:96-99`.  Autostart the server
   (with a lock) or run the job in-process in the shim.
   *Validate:* T11 (no server running: `vcc -c a.c` succeeds).
 - [ ] **Request size capped at 1 MB** [R].  `protocol.h:13`.  Long command
@@ -505,7 +513,7 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
   (`cc.c:7339`).
   *Validate:* T1 `fe-limits.c` (generated, at 2× each limit).
 
-### Preprocessor and lexer (`pp.c`, `lex.c`)
+### Preprocessor and lexer (`pp.c`, `lex/lex.c`)
 - [ ] **`#pragma once` by path string, capped at 4096** [P].
   `pp.c:4189,5191,4479`.  Key on (dev, ino); unbounded set.
   *Validate:* `ccs/fuzz/regress/pp/` style files + `make -C ccs fuzz-diff`
@@ -545,21 +553,21 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
   matrix of targets × flags.
 - [ ] **Hard-coded paths**: Homebrew LLVM 23.1.4 resource dir
   (`ppdata-predef.inc:921`), CommandLineTools SDK (`:922`), multiarch dir
-  (`ppdriver.c:582`).  Discover at run time (`xcrun --show-sdk-path` once,
+  (`driver/ppdriver.c:582`).  Discover at run time (`xcrun --show-sdk-path` once,
   cached; resource dir relative to the vcc binary).
   *Validate:* T11 on a machine/CI image with only Xcode, and after moving
   the install prefix.
-- [ ] **Files ≥ 2 GB reported as missing** (`lex.c:1373`, `uint32` offsets
+- [ ] **Files ≥ 2 GB reported as missing** (`lex/lex.c:1373`, `uint32` offsets
   `lex.h:50,61`).  Clear error.
   *Validate:* T5 (sparse 3 GB file → "file too large").
-- [ ] **x86-64 host build**: `lex.c:4` NEON, `lex.c:1517` `yield`,
-  `intern.c:1` `arm_acle.h`.  Scalar fallback (lexref.c exists) or SSE/AVX2
+- [ ] **x86-64 host build**: `lex/lex.c:4` NEON, `lex/lex.c:1517` `yield`,
+  `lib/intern.c:1` `arm_acle.h`.  Scalar fallback (lexref.c exists) or SSE/AVX2
   port; CRC32 via SSE4.2.
   *Validate:* CI job building and running `fuzz-regress`, `vcc-diff.py cmp`
   on x86-64 Linux (cross-target aarch64); `fuzz-lex` already compares NEON
   vs scalar, add SSE vs scalar.
 
-### Assembler (`as.c`, `a64.c`)
+### Assembler (`as/as.c`, `arch/a64/as/enc.c`)
 - [ ] **`.cfi_*`** → `.eh_frame` [P].  *Validate:* T7 (clang `-S` output
   with CFI assembles, `.eh_frame` byte-identical).
 - [ ] **`.loc`, `.file N`, DWARF line tables, `.uleb128`/`.sleb128`** [P].
@@ -580,113 +588,113 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
   `.float`/`.double`, `.dc.*`, `.eqv`, `.weakref`, `.end`, `.err`,
   `.addrsig`/`.addrsig_sym`, `.variant_pcs`, `.tlsdesccall`, `.nops`,
   `.balignw`/`.p2alignl`, `.base64`, `.inst.n`, COMDAT `"G"` sections
-  (`as.c:722`), `@gnu_unique_object` (`as.c:1125`), full `.reloc` (`as.c:836`).
+  (`as/as.c:722`), `@gnu_unique_object` (`as/as.c:1125`), full `.reloc` (`as/as.c:836`).
   Silently ignored today: `.print`, `.warning`, `.ident`, `.arch`, `.cpu`
-  (`as.c:2307-2440`).
+  (`as/as.c:2307-2440`).
   *Validate:* T7 per directive; `.arch` must gate instructions (T4).
 - [ ] **Relocation operators** (TLS `:tlsdesc:`, `:tprel_*:`,
   `:gottprel*:`, `:dtprel*:`, `:prel_g*:`, literal `ldr x0, :got:v`)
-  (`mod_kind` `as.c:1912`, `elf.h:53-72`) [P].  *Validate:* T7 with
+  (`mod_kind` `as/as.c:1912`, `obj/obj.h:53-72`) [P].  *Validate:* T7 with
   `-fPIC` and TLS sources.
 - [ ] **Mach-O syntax** `@PAGE`/`@PAGEOFF`/`@GOTPAGE…`; vasm writes ELF
   only.  *Validate:* T7 with `--target=arm64-apple-darwin` vs clang's Mach-O
   (`llvm-objdump --macho -r -d`).
 - [ ] **Wrong output**: GOT relocs against local symbols converted to
   section+addend [P]; integer branch targets as `*ABS*` relocs; `adr x0, 4`
-  rejected (`a64.c:1005`).  *Validate:* T7 / T6 relocation comparison.
+  rejected (`arch/a64/as/enc.c:1005`).  *Validate:* T7 / T6 relocation comparison.
 - [ ] **Diagnostics**: line numbers off by one (`as.c:575/636/133`), `# N
-  "file"` markers ignored (`as.c:579`), EOF errors at `:0:` [P].
+  "file"` markers ignored (`as/as.c:579`), EOF errors at `:0:` [P].
   *Validate:* T4 for the assembler (`// expect-error: x.S:2:`).
 
-### Linker (`ld.c`) and binutils
-- [ ] **ELF input parsing unchecked** [P]: `parse_obj` `ld.c:1670-1697`,
-  `fill_isecs`, `st_shndx` (`ld.c:1847,2521,2887`), `add_archive`
-  (`ld.c:1609-1655`, long names `ld.c:1633`), reloc width (`ld.c:2987`),
-  objcopy `elf_open` `objcopy.c:113`, misaligned headers in archives
-  (`ld.c:1672`), SHN_XINDEX / `e_shnum == 0` (`ld.c:1684,1850`).
+### Linker (`ld/ld.c`) and binutils
+- [ ] **ELF input parsing unchecked** [P]: `parse_obj` `ld/ld.c:1670-1697`,
+  `fill_isecs`, `st_shndx` (`ld/ld.c:1847,2521,2887`), `add_archive`
+  (`ld/ld.c:1609-1655`, long names `ld/ld.c:1633`), reloc width (`ld/ld.c:2987`),
+  objcopy `elf_open` `ld/objcopy.c:113`, misaligned headers in archives
+  (`ld/ld.c:1672`), SHN_XINDEX / `e_shnum == 0` (`ld/ld.c:1684,1850`).
   *Validate:* T9 `fuzz-elf` (ASan) + `regress/elf/` with the probe's
   corrupt objects (bad `e_shoff`, truncated, `st_shndx=0x500`, oversized
   archive member, ABS64 at `size-1`); T8 with a 70k-section object.
 - [ ] **Crashes on ordinary inputs** [P]: no script / script without
-  `.symtab` (`ld.c:4410`), `/DISCARD/` of a merge section (`ld.c:643`).
+  `.symtab` (`ld/ld.c:4410`), `/DISCARD/` of a merge section (`ld/ld.c:643`).
   *Validate:* T8 cases `no-script`, `discard-comment`.
-- [ ] **Options**: `-znotext` swallowed (`ld.c:3315`), `-m X` unchecked
-  (`ld.c:3296`); rejected `-pie`, `-static`, `-L`/`-l`, `-e`,
+- [ ] **Options**: `-znotext` swallowed (`ld/ld.c:3315`), `-m X` unchecked
+  (`ld/ld.c:3296`); rejected `-pie`, `-static`, `-L`/`-l`, `-e`,
   `--gc-sections`, `--dynamic-linker`, `--version`, `--emit-relocs`
-  (`ld.c:3295`); ignored `--start-group` (`ld.c:3284`), `--eh-frame-hdr`
-  (`ld.c:3285`), `-z now/relro/noexecstack`, `--orphan-handling`.
+  (`ld/ld.c:3295`); ignored `--start-group` (`ld/ld.c:3284`), `--eh-frame-hdr`
+  (`ld/ld.c:3285`), `-z now/relro/noexecstack`, `--orphan-handling`.
   *Validate:* T8 per option; unknown options are errors (T11-style table).
 - [ ] **Relocations**: GOT (`ADR_GOT_PAGE`, `LD64_GOT_LO12_NC`) + relaxation,
   TLS LE/IE/TLSDESC + relaxations + `PT_TLS`, MOVW_*, CONDBR19, TSTBR14,
-  PREL32 to undefined (`ld.c:2560-2570`).
+  PREL32 to undefined (`ld/ld.c:2560-2570`).
   *Validate:* T8 (each against lld, run under qemu where runnable).
-- [ ] **Archives**: lazy member resolution, `-L`/`-l`, groups (`ld.c:3342`);
-  COMMON (`ld.c:1783`); COMDAT groups (`ld.c:1693`).
+- [ ] **Archives**: lazy member resolution, `-L`/`-l`, groups (`ld/ld.c:3342`);
+  COMMON (`ld/ld.c:1783`); COMDAT groups (`ld/ld.c:1693`).
   *Validate:* T8 static link of a musl `libc.a` hello world (run under
   qemu-user); a C++ template object pair.
 - [ ] **Default entry** `_start` when no `ENTRY()`.  *Validate:* T8.
 - [ ] **Dynamic linking**: `.dynamic`, `.dynsym`/`.dynstr`, `.gnu.hash`, PLT,
   `DT_NEEDED`, versioning, RELR, `PT_INTERP`, `PT_GNU_RELRO`,
-  `.eh_frame_hdr`, reading `.so` inputs (`ld.c:1678`).
+  `.eh_frame_hdr`, reading `.so` inputs (`ld/ld.c:1678`).
   *Validate:* T8 (shared lib + PIE executable against glibc's or musl's
   `.so` in a sysroot; run under qemu-user; `llvm-readelf --dynamic` diff vs
   lld); kernel vDSO linked by vlink and boot test.
-- [ ] **Linker script**: MEMORY / `=fill` (`ld.c:1406`), PHDRS (`ld.c:1411`),
-  file patterns (`ld.c:1261`), EXCLUDE_FILE (`ld.c:1277`), mixed SORT
-  (`ld.c:2221`), INSERT/INCLUDE/VERSION (`ld.c:1515`), headers-not-in-segment
-  (`ld.c:3694`).
+- [ ] **Linker script**: MEMORY / `=fill` (`ld/ld.c:1406`), PHDRS (`ld/ld.c:1411`),
+  file patterns (`ld/ld.c:1261`), EXCLUDE_FILE (`ld/ld.c:1277`), mixed SORT
+  (`ld/ld.c:2221`), INSERT/INCLUDE/VERSION (`ld/ld.c:1515`), headers-not-in-segment
+  (`ld/ld.c:3694`).
   *Validate:* T8 per construct vs lld.
-- [ ] **`--gc-sections`, `--icf`, `--build-id` modes (`ld.c:4026`), erratum
-  843419, SHT_REL (`ld.c:1735`)**.
+- [ ] **`--gc-sections`, `--icf`, `--build-id` modes (`ld/ld.c:4026`), erratum
+  843419, SHT_REL (`ld/ld.c:1735`)**.
   *Validate:* T8.
 - [ ] **Diagnostics**: undefined symbol with section+offset and all
-  referencing objects (`ld.c:4231`); `-r` output differs from lld.
+  referencing objects (`ld/ld.c:4231`); `-r` output differs from lld.
   *Validate:* T4-style expected-stderr for vlink; T8 `-r` byte diff.
-- [ ] **var**: only thin archives (`ar.c:286,352,672`), ops `r`/`m`/`t`,
-  32-bit GNU symtab only; ld skips `/SYM64/` (`ld.c:1622`).
+- [ ] **var**: only thin archives (`vccd/ar.c:286,352,672`), ops `r`/`m`/`t`,
+  32-bit GNU symtab only; ld skips `/SYM64/` (`ld/ld.c:1622`).
   *Validate:* `bench/var-cmp.py` extended to regular archives and `x`, `d`,
   `q`, `p`, `s`; round-trip with llvm-ar.
 - [ ] **vobjcopy / vnm**: missing `--strip-debug`, `--add-section`,
   `--only-keep-debug`, `-O elf64-*`, `--add-gnu-debuglink`,
   `--set-section-flags`, `--redefine-sym`, `-I`/`-B`; nm `-u`, `-D`,
   archives, unknown long options taken as files, >64 files dropped
-  (`objcopy.c:1039`).
+  (`ld/objcopy.c:1039`).
   *Validate:* `bench/vobjcopy-cmp.sh` extended with these flags vs
   llvm-objcopy/llvm-nm; unknown options must be errors.
-- [ ] **macho.c**: DWARF dropped (`macho.c:95`), `.eh_frame` to
+- [ ] **macho.c**: DWARF dropped (`platform/darwin/macho.c:95`), `.eh_frame` to
   `__TEXT,__const`, no compact unwind, no `MH_SUBSECTIONS_VIA_SYMBOLS`,
-  `LC_BUILD_VERSION` fixed at 11.0 (`macho.c:428`).
+  `LC_BUILD_VERSION` fixed at 11.0 (`platform/darwin/macho.c:428`).
   Without the flag ld64 cannot replace a weak definition of vcc's by a
   strong one ("duplicate symbol").
   *Validate:* T3 (`ld64 -dead_strip` removes an unused function;
   `dwarfdump` / lldb line lookup; `-mmacosx-version-min=14.0` in
   `otool -l`); `bench/vcc-abi.py --host pragma_weak` (its xfail goes).
 
-### Driver (`ppdriver.c`, `vccd.c`, `caps.c`)
+### Driver (`driver/ppdriver.c`, `vccd/vccd.c`, `vccd/caps.c`)
 - [ ] **vccd compiles only `-c … x.c` for aarch64 Linux; the rest goes to
-  clang** (`vccd.c:460-485`, input must be the last argument).
+  clang** (`vccd/vccd.c:460-485`, input must be the last argument).
   *Validate:* T11 (`-c a.c -o a.o`, flags after the input, `-o` before
   `-c`) all handled by vcc (a counter in vccd's stats, or `VCC_NO_FORWARD=1`
   that turns forwarding into an error).
-- [ ] **No linking, no crt/sysroot discovery** (`caps.c:174`).
+- [ ] **No linking, no crt/sysroot discovery** (`vccd/caps.c:174`).
   *Validate:* T11 `vcc hello.c -o hello` on aarch64 Linux (qemu-user) and
   macOS; then an autoconf project (e.g. GNU hello) and a CMake project
   configure and build with `CC=vcc`, tests pass.
-- [ ] **Unknown flags silently ignored** [P] (`ppdriver.c:435-533`): `-g`,
+- [ ] **Unknown flags silently ignored** [P] (`driver/ppdriver.c:435-533`): `-g`,
   `-fsanitize=*`, `-m32`, `-march=znver4`, `-x c++`, `.cpp` inputs, `@rsp`,
-  several inputs; input detection by `strstr(a, ".c")` (`ppdriver.c:526`).
+  several inputs; input detection by `strstr(a, ".c")` (`driver/ppdriver.c:526`).
   Every option is either implemented, explicitly ignored with a documented
   reason, or an error (`-Wunused-command-line-argument` like clang).
   *Validate:* T11 table generated from clang's option list
   (`clang --help-hidden`): each must be in an explicit table in
   ppdriver.c; a test fails when an option has no entry.
-- [ ] **Missing**: `-print-*` (`-print-file-name` echoes, `vccd.c:665`),
+- [ ] **Missing**: `-print-*` (`-print-file-name` echoes, `vccd/vccd.c:665`),
   `-dumpmachine`, `-v`, `-###`, `-save-temps`, `-shared`, `-l`/`-L`, `-Wl,`.
   *Validate:* T11 rows.
-- [ ] **caps.c probe answers can contradict real compiles** (`vccd.c:291`,
-  `caps.c:199-208`), unmatched sources forwarded to clang (`vccd.c:395`),
-  every stdin link probe false (`vccd.c:353-356`), `.tmp_` heuristic
-  (`vccd.c:252`), `--version` claims clang (`caps.c:163`).
+- [ ] **caps.c probe answers can contradict real compiles** (`vccd/vccd.c:291`,
+  `vccd/caps.c:199-208`), unmatched sources forwarded to clang (`vccd/vccd.c:395`),
+  every stdin link probe false (`vccd/vccd.c:353-356`), `.tmp_` heuristic
+  (`vccd/vccd.c:252`), `--version` claims clang (`vccd/caps.c:163`).
   Make the table a cache of vcc's own answers (generated by running vcc,
   not clang), key it on target+flags, drop the filename heuristic, report
   an honest version string that CMake/Meson can identify (and a
@@ -696,9 +704,9 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
   answer; T11 for `.tmp_` paths compiled for real.
 
 ### rsh
-- [ ] **`trap` is a no-op** (`rsh.c:354`); fall back to the real shell
-  instead.  **fixdep path match by suffix** (`rsh.c:414`): require the
-  configured kernel tree.  **Wrong errno text** (`rsh.c:552,568,577`).
+- [ ] **`trap` is a no-op** (`vccd/rsh.c:354`); fall back to the real shell
+  instead.  **fixdep path match by suffix** (`vccd/rsh.c:414`): require the
+  configured kernel tree.  **Wrong errno text** (`vccd/rsh.c:552,568,577`).
   *Validate:* `bench/vsh-test.py` rows against dash (trap, other fixdep
   paths, ENOENT/EACCES/ENOTDIR messages).
 
@@ -766,3 +774,12 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
   `ldimpl.h` (named vector types, VPRIV globals), as cc/pp/emit, and the
   fragments real files.  *Validate:* `bench/vbench.py check --base` (the
   vmlinux link byte-identical), `bench/vobjcopy-cmp.sh`, gate.
+- [ ] **Target-OS code out of the generic files** (restructure 2026-11-09).
+  `platform/` has whole files only (Mach-O writer, ELF writer); the
+  target-Darwin branches (`DARWIN(c)` and `PP_DARWIN` tests, ~25) are still
+  inline in `emit/tu.c`, `emit/type.c`, `emit/data.c`, `arch/a64/emit/`
+  (call, value, func, builtin, lval, abi), `cc/tu.c`, `cc/layout.c`,
+  `driver/ppdriver.c` and `vccd/vccd.c`.  Give them hooks in `platform/<os>/`
+  once the x86-64 backend shows which differences are per OS and which per
+  CPU (Apple arm64's ABI is both).  *Validate:* outputs byte-identical,
+  `bench/vcc-abi.py --host`.
