@@ -1114,6 +1114,37 @@ pp at a region start, at any depth, as `pp_top_events` gives for the top level.
          5700 times;
        - evicting entries without hits, or smaller own syms (175 MB), would let
          the useful ones in.
+   - *Time, not only instructions (2026-11-09, at 3c).*
+     - **Setup.** Whole process, `vpp --batch -j 1`, mean of two alternating
+       runs, load 6–10. Units are G instructions / G cycles; cycles are noisy,
+       about ±5%.
+
+       | | PG (1574 TUs) | kernel (840 TUs) |
+       |---|---|---|
+       | no caches (`VCC_NODC=1`) | 46.8 / 14.7 | 93.9 / 28.9 |
+       | prefix snapshots only (default) | 42.1 / 14.0 | 85.6 / 27.1 |
+       | replay only (`VCC_NODC=1 VCC_DR=1`) | 40.5 / ~14.4 | 83.9 / ~27.2 |
+       | both (`VCC_DR=1`) | 39.1 / 13.8 | 81.3 / 27.0 |
+
+     - **Instructions.** Replay alone saves more than the snapshots alone (§6.7,
+       vcc's automatic PCH), and the two stack. On top of the snapshots, replay
+       saves 7% (PG) and 5% (kernel).
+     - **Cycles.** On top of the snapshots, replay saves only ~1.4% (PG) and
+       ~0.2% (kernel), within the noise. Wall time at `-j 6` is noisy too: kernel
+       2.26 → 1.97 s, PG no gain. The snapshots alone save 5–6% of cycles.
+     - **Why.** Replay is memory-bound, as the token header cache was (§6.8). It
+       replaces parsing, which has a high IPC, with copies, relocations and W
+       validation over ~500 MB of entries.
+     - **Consequences.**
+       - Steps 2–3c were judged by `cc_run` instructions, and the gain constants
+         were fitted to instructions. From here on replay is judged by cycles
+         (alternating runs; `-j 6` wall time as a check), and a change pays only
+         if it saves cycles.
+       - The gain rule needs re-fitting against cycles.
+       - Memory traffic is the cost. So next: evict entries without hits and
+         shrink entries (own syms, W). Cheaper instructions per replay come
+         after that.
+       - `VCC_DR` stays opt-in until it saves time.
 4. Fold ccsnap into this if per-region replay of the prefix is as cheap as a snapshot
    restore; otherwise keep both, and let a recording coexist with snapshots (the
    region's type table in the heap, or no snapshot inside a recording).
