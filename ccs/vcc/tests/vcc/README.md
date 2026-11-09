@@ -7,6 +7,8 @@ what it checks, not after the bug number.
 
 Markers (C comments anywhere in the file):
 - `/* vcc-flags: ... */` extra flags for both compilers.
+- `/* vcc-timeout: S */` vcc's compile must finish within S seconds (default
+  60): a bound for compile-time regressions (`init_large.c`).
 - `/* vcc-xfail: <TODO.md item> */` a known vcc bug.  The runner counts the
   failure as xfail; once vcc passes, it reports XPASS as an error, so the
   commit that fixes the bug also removes the marker.

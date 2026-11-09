@@ -294,6 +294,8 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
   a struct/array value one member access / element per part, a union value
   is read again through the member the designator picks.  Left, a clean
   error: the overridden value has side effects (clang evaluates it once).
+  Only a run that starts below an earlier one's end scans for covered runs,
+  so in-order lists stay linear (`init_large.c`, `vcc-timeout: 10`).
   Tests `tests/vcc/desig_override.c`, `desig_override2.c`.)
   `.s = "ab", .s[3] = 'z'` loses "ab"; `.i = iv, .i.y = 99` zeroes `i.x`;
   `[0] = side(), [0] = side()` evaluates both.

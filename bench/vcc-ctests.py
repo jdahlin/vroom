@@ -13,6 +13,8 @@ Suites (ccs/vcc/tests/, see the README there):
                                          reference, vcc must exit 0 silently
          /* vcc-threads-same */          -S output must be the same with
                                          VCC_THREADS=1 and 8 (four builds)
+         /* vcc-timeout: S */            vcc's compile must finish in S seconds
+                                         (default 60): a bound on compile time
          /* vcc-xfail: TODO item */      known vcc bug: a failure is counted as
                                          xfail, a pass as XPASS (an error: drop
                                          the marker in the commit that fixes it)
@@ -213,6 +215,8 @@ def one_(t):
     if suite == 'gcc' and name in GCC_SKIP:
         return t, 'skip', 'compiler-specific', GCC_SKIP[name]
     flags = dg_flags(src) if suite == 'gcc' else exec_marks(src)[0] if suite == 'vcc' else []
+    m = re.search(r'/\*\s*vcc-timeout:\s*(\d+)\s*\*/', src) if suite == 'vcc' else None
+    tmo = int(m.group(1)) if m else 60
     if name.startswith('76_dollars'):
         flags = ['-fdollars-in-identifiers']
     wd = f'{OUT}/w/{suite}/{name}'
@@ -223,14 +227,14 @@ def one_(t):
         rc, _, err = sh([CL, '-fsyntax-only'] + BASE + CLFL + flags + [path], cwd=cwd)
         if rc:
             return t, 'skip', 'clang-rejects', first_err(err.decode(errors='replace'))
-        rc, _, err = sh([VPP, '-fsyntax-only'] + vfl + [path], cwd=cwd)
+        rc, _, err = sh([VPP, '-fsyntax-only'] + vfl + [path], cwd=cwd, timeout=tmo)
         return (t, 'pass', '', '') if rc == 0 else (t, 'fail', 'fe', first_err(err.decode(errors='replace')))
     ref = reference(suite, name, path, flags, RTHASH, wd)
     if 'skip' in ref:
         return t, 'skip', ref['skip'], ref['why']
-    rc, _, err = sh([VPP, '-c'] + vfl + [path, '-o', f'{wd}/vcc.o'], cwd=cwd)
+    rc, _, err = sh([VPP, '-c'] + vfl + [path, '-o', f'{wd}/vcc.o'], cwd=cwd, timeout=tmo)
     if rc:
-        rc2, _, err2 = sh([VPP, '-fsyntax-only'] + vfl + [path], cwd=cwd)
+        rc2, _, err2 = sh([VPP, '-fsyntax-only'] + vfl + [path], cwd=cwd, timeout=tmo)
         if rc2:
             return t, 'fail', 'fe', first_err(err2.decode(errors='replace'))
         e = err.decode(errors='replace')
