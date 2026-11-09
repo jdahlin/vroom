@@ -58,10 +58,8 @@ def cases(d):
          xfail='Input-driven abort() / stack overflow kill the whole server (expansion too large aborts)')
     case('pp-include-self', 'error', {'a.c': '#include "a.c"\n'}, 'a.c')
     # fixed limits that reject (or crash on) valid code
-    case('struct-10k-members', 'ok', {'a.c': 'struct s {' + ''.join(f' int m{i};' for i in range(10000)) + ' } v;\n'}, 'a.c',
-         xfail='Fixed limits: 4096 struct members (cc.c)')
-    case('declarator-100-ptrs', 'ok', {'a.c': 'int ' + '*' * 100 + 'p;\n'}, 'a.c',
-         xfail='Fixed limits: 64 declarator levels (cc.c)')
+    case('struct-10k-members', 'ok', {'a.c': 'struct s {' + ''.join(f' int m{i};' for i in range(10000)) + ' } v;\n'}, 'a.c')
+    case('declarator-100-ptrs', 'ok', {'a.c': 'int ' + '*' * 100 + 'p;\n'}, 'a.c')
     case('anon-nest-20', 'ok', {'a.c': 'struct s { ' + 'struct { ' * 20 + 'int x; ' + '}; ' * 20 + '} v;\nint f(void) { return v.x; }\n'}, 'a.c',
          xfail='Fixed limits: 16 nested anonymous members (find_member)')
     case('call-300-args', 'ok', {'a.c': 'void g(' + ', '.join(['int'] * 300) + ');\nvoid f(void) { g(' + ', '.join(['1'] * 300) + '); }\n'}, 'a.c')

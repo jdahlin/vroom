@@ -186,11 +186,14 @@ static bool nested_declarator(cc *c, bool abstract_ok)
  */
 VPRIV void declarator(cc *c, declr *d, bool abstract_ok, uint32_t *first, uint32_t *nops)
 {
-	dop ptrs[64], sufs[64];
+	dop ptrs[1024], sufs[64];	/* (clang: no limit; DOPS_MAX bounds the whole) */
 	int np = 0, ns = 0;
 	uint32_t ifirst = 0, inops = 0;
 	bool inner = false;
 	declr id;
+
+	if (vstack_low())	/* int (((((... nests declarators */
+		fatal(c, tok(c)->loc, "declarator nested too deeply");
 
 	memset(d, 0, sizeof(*d));
 	d->loc = tok(c)->loc;
@@ -220,7 +223,7 @@ VPRIV void declarator(cc *c, declr *d, bool abstract_ok, uint32_t *first, uint32
 					break;
 				next(c);
 			}
-			if (np >= 64)
+			if (np >= 1024)
 				fatal(c, tok(c)->loc, "declarator too complex");
 			ptrs[np++] = (dop){ .kind = 0, .q = (uint8_t)q, .fl = (uint16_t)(blk ? TF_BLOCK : 0) };
 			continue;

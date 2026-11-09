@@ -539,7 +539,8 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
 - [ ] **Scope details**: K&R parameter-list tags (`cc.c:7341`),
   declarations after labels (`cc.c:7886`).
   *Validate:* T1 small cases; T4 for the error cases.
-- [ ] **Fixed limits**: 4096 struct members (`cc.c:6255,6313`), 64
+- [ ] **Fixed limits** (struct members now 1M, pointer levels 1024, nested
+  declarators stack-guarded): 4096 struct members (`cc.c:6255,6313`), 64
   declarator levels (`cc.c:6047-6113`), `DOPS_MAX` 4096 (`cc.c:5551`), 16
   nested anonymous members (`find_member` `cc.c:3310`), 256 K&R params
   (`cc.c:7339`).

@@ -49,7 +49,7 @@ __attribute__((noinline)) VPRIV void struct_body(cc *c, uint32_t ti)
 			 * tagged or typedef'd complete record */
 			if (is_record(c, ds.ty) && (!c->tags[T(c, ds.ty)->aux].name ||
 						    (c->o->ms_anon && complete(c, ds.ty)))) {
-				if (nf >= 4096)
+				if (nf >= (1u << 20))
 					fatal(c, ds.loc, "too many members");
 				if (base + nf >= x->cap)
 					fscr_grow(x, base + nf + 1);
@@ -107,7 +107,7 @@ __attribute__((noinline)) VPRIV void struct_body(cc *c, uint32_t ti)
 				cc_error(c, d.loc, "field has function type");
 			else if (!complete(c, t) && !(is_array(c, t) && (T(c, t)->flags & TF_INCOMPLETE)))
 				cc_error(c, d.loc, "field has incomplete type");
-			if (nf >= 4096)
+			if (nf >= (1u << 20))
 				fatal(c, d.loc, "too many members");
 			for (uint32_t i = 0; f.name && i < nf; i++)
 				if (x->fs[base + i].name == f.name) {
