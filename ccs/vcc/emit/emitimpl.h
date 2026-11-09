@@ -87,6 +87,20 @@
 /* WebAssembly (wasm64): arch/wasm/emit/ generates the functions, data.c the data */
 #define WASM(c) PP_IS_WASM((c)->o->target)
 #define WASM32(c) ((c)->o->target == PP_WASM32)
+
+/*
+ * A C99 inline definition or GNU extern inline: not emitted (another TU
+ * has the definition).  The wasm target has no inliner, so it emits a local
+ * copy of one it calls, as clang's inlining would make it unneeded.
+ */
+static inline bool inline_only(const sym *y)
+{
+	if (y->kind != S_FUNC || !(y->flags & SF_DEFINED) || !y->body)
+		return false;
+	if ((y->flags & SF_GNU_INLINE) && !(y->flags & SF_INLINE_NOEXTERN))
+		return true;
+	return (y->flags & SF_INLINE) && !(y->flags & SF_GNU_INLINE) && y->sc != SC_EXTERN && y->sc != SC_STATIC;
+}
 /* a symbol offset the relocation itself can carry: ELF RELA 32 bits here, a
  * Mach-O ARM64_RELOC_ADDEND 24 bits signed (clang adds the rest in code) */
 #define SYMOFF_OK(c, off) (DARWIN(c) ? (off) >= -(1 << 23) && (off) < (1 << 23) : (off) >= INT32_MIN && (off) <= INT32_MAX)
@@ -686,6 +700,7 @@ VPRIV void emit_string(ecx *e, uint32_t i);
 /* arch/wasm/emit/ */
 VPRIV void wasm_emit_function(ecx *e, uint32_t s);
 VPRIV void wasm_ecx_free(ecx *e);
+VPRIV void wasm_data_ref(ecx *e, uint32_t ref);
 VPRIV void wasm_header(cc *c, tbuf *hdr, ecx *ctx, int nthr);
 /* prepass.c */
 VPRIV bool is_aconst(cc *c, uint32_t n);

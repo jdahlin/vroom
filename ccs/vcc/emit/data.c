@@ -193,8 +193,11 @@ static void data_init(ecx *e, uint64_t off, qty ty, uint32_t init)
 				data_reloc(e, off, REF(RK_LBL, cv.label - 1), (int64_t)cv.i);
 			else if (cv.str)
 				data_reloc(e, off, REF(RK_STR, cv.str - 1), (int64_t)cv.i);
-			else
+			else {
 				data_reloc(e, off, REF(RK_SYM, canon_sym(c, cv.sym)), (int64_t)cv.i);
+				if (WASM(c))
+					wasm_data_ref(e, REF(RK_SYM, canon_sym(c, cv.sym)));
+			}
 			return;
 		default:
 			efatal(e, x->loc, "initializer element is not a compile-time constant");
@@ -261,7 +264,7 @@ static void data_bytes(ecx *e, tbuf *b, uint64_t size)
 		if (ri < e->nrel && o == e->rel[ri].off) {
 			uint32_t sz = e->rel[ri].sz ? e->rel[ri].sz : 8;
 
-			tb_s(b, sz == 4 ? (WASM(e->c) ? "\t.long\t" : "\t.word\t") : WASM(e->c) ? "\t.quad\t" : "\t.xword\t");
+			tb_s(b, sz == 4 ? (WASM(e->c) ? "\t.int32\t" : "\t.word\t") : WASM(e->c) ? "\t.int64\t" : "\t.xword\t");
 			ref_off(e->c, b, e->rel[ri].ref, e->rel[ri].add);
 			if (e->rel[ri].sub) {
 				tb_c(b, '-');
@@ -291,7 +294,7 @@ static void data_bytes(ecx *e, tbuf *b, uint64_t size)
 
 				/* o < data.n here; past it the bytes are zero, not what the buffer holds */
 				memcpy(&w, d + o, o + 8 <= e->data.n ? 8 : e->data.n - o);
-				tb_s(b, WASM(e->c) ? "\t.quad\t" : "\t.xword\t");
+				tb_s(b, WASM(e->c) ? "\t.int64\t" : "\t.xword\t");
 				tb_hex(b, w);
 				tb_c(b, '\n');
 				o += 8;
