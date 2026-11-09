@@ -67,8 +67,10 @@ static void il_run(cc *c, ilist *l, uint64_t lo, uint64_t hi, uint32_t node, ili
 		l->runs = nr;
 		l->caprun = ncap;
 	}
-	/* earlier runs this one covers are dropped, never evaluated (clang) */
-	{
+	/* earlier runs this one covers are dropped, never evaluated (clang);
+	   none can be when the run starts past all of them (the usual in-order
+	   case: no scan, so a long list stays linear) */
+	if (lo < l->max) {
 		uint32_t k = 0;
 
 		for (uint32_t j = 0; j < l->nrun; j++)
@@ -185,7 +187,7 @@ static ilist *il_child(cc *c, ilist *l, uint64_t i)
 	uint32_t old = 0;
 
 	if (l->array) {
-		for (uint32_t k = l->nrun; k-- > 0;)
+		for (uint32_t k = i < l->max ? l->nrun : 0; k-- > 0;)
 			if (l->runs[k].lo <= i && i <= l->runs[k].hi) {
 				if (l->runs[k].sub && l->runs[k].lo == i && l->runs[k].hi == i)
 					return l->runs[k].sub;
