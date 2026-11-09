@@ -294,8 +294,7 @@ VPRIV uint32_t string_lit(cc *c)
 		e = s + sl - 1;
 		/* each source byte gives at most 4 bytes */
 		if (unlikely(buf + n + sl * 4 + 16 > c->hend)) {
-			fputs("vcc: out of memory\n", stderr);
-			abort();
+			fatal(c, t->loc, "translation unit too large (front-end heap full)");
 		}
 
 		if (t->kind != T_STRING && t->kind != T_U8STRING && t->kind != kind && esz != lit_esz(t->kind, c->o->short_wchar))

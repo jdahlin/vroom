@@ -85,16 +85,26 @@ static inline int same(const char *a, const char *b, size_t len)
 
 /* table full: the job's hook (the driver: an error for this TU, longjmp) or abort */
 void (*vintern_full_hook)(void);
-_Atomic int vintern_filled;
+_Atomic int vtables_full;
 
 
-static __attribute__((noreturn, noinline)) void vintern_full(void)
+/* a server-wide table or region is full: an error for this job (and vccd
+   restarts when idle, vtables_full), abort without a job to end */
+void vjob_escape(const char *msg)
 {
-	atomic_store(&vintern_filled, 1);
-	fprintf(stderr, "vcc: error: identifier table full (more than %u distinct identifiers)\n", MAX_ENT);
+	atomic_store(&vtables_full, 1);
+	fprintf(stderr, "vcc: error: %s\n", msg);
 	if (vintern_full_hook)
 		vintern_full_hook();
 	abort();
+}
+
+static __attribute__((noreturn, noinline)) void vintern_full(void)
+{
+	char m[96];
+
+	snprintf(m, sizeof(m), "identifier table full (more than %u distinct identifiers)", MAX_ENT);
+	vjob_escape(m);
 }
 
 /* the probe from slot i on, inserting at the first empty slot */

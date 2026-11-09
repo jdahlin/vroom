@@ -375,8 +375,11 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
   and argument pre-expansion; 128 KB left ends the TU (clang itself crashes
   on these inputs).  Overflow is a per-TU error now too: pp's
   token stack via fatal(), as/elf regions via `vjob_fail` (elf.h, a longjmp
-  the driver sets); vcc-stress 19/19, --vccd 20/20.  Other abort() sites in
-  the list above not yet audited.)
+  the driver sets); vcc-stress 19/19, --vccd 20/20.  Audited the rest: input-driven
+  ones are errors now (front-end heap: fatal; labels: efatal; pp shared region,
+  identifier table: `vjob_escape` in intern.c; ELF sections: vjob_fail); the
+  remaining aborts are mmap failures and internal invariants.  No stress case
+  yet for the front-end heap, labels or sections.)
   Aborts: `emit.c:1934,2036,2778`; `cc.c:44,1518,6219`; `as.c:107`;
   `elf.c:33,40,234`; `pp.c:89,301,1721,2145,2531,2594`; `intern.c:96,195`;
   `lex.c:1318,1394`; `ppdriver.c:65`.  Recursion without depth limit: cc.c

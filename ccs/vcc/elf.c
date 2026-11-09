@@ -242,7 +242,8 @@ uint32_t elf_section(ElfObj *o, const char *name, uint32_t len, uint32_t type,
 	memset(s, 0, sizeof *s);
 	s->name = copyname(o, name, len); s->len = len;
 	s->type = type; s->flags = flags; s->entsize = entsize; s->group = group;
-	if (o->nsec >= o->nfrag) { fprintf(stderr, "vcc: elf: too many sections\n"); abort(); }
+	if (o->nsec >= o->nfrag)
+		vjob_fail("too many sections in the object");
 	newfrag(o, i, i, 0);
 	/* MC registers the section symbol under the section's name unless a
 	 * defined symbol has it; an undefined one becomes the section symbol */

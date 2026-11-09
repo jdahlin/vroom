@@ -22,7 +22,7 @@ VPRIV void *salloc(size_t n)
 	}
 	off = atomic_fetch_add(&shared_used, (n + 15) & ~(size_t)15);
 	if (off + n > SHARED_MAX)
-		abort();
+		vjob_escape("preprocessor memory full (16 GB shared region)");
 	return b0 + off;
 }
 

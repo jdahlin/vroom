@@ -224,7 +224,7 @@ static void do_restart(void)
 		snprintf(fd, sizeof(fd), "%d", g_ls);
 		av[k++] = "--listen-fd", av[k++] = fd, av[k] = NULL;
 		fprintf(stderr, "vccd: restarting (%zu MB resident; identifier table %s)\n", rss_mb(),
-			atomic_load(&vintern_filled) ? "full" : "not full");
+			atomic_load(&vtables_full) ? "full" : "not full");
 		print_counts();
 		fcntl(g_ls, F_SETFD, 0);
 		fcntl(g_ls, F_SETFL, 0);
@@ -248,7 +248,7 @@ static int gen_enter(uint32_t pgrp)
 		pthread_mutex_unlock(&gen_mu);
 		return 1;
 	}
-	if (atomic_load(&vintern_filled) && !gen_running && g_ls >= 0 && self_exe[0]) {
+	if (atomic_load(&vtables_full) && !gen_running && g_ls >= 0 && self_exe[0]) {
 		/* identifiers are never freed: a full table fails every later TU */
 		atomic_store(&gen_restart, 1);
 		pthread_cond_broadcast(&gen_cv);
