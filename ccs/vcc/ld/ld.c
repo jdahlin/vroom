@@ -309,6 +309,7 @@ static struct {
 	VVEC(InputArg) inputs;
 	VVEC(const char *) libdirs;
 	bool bstatic;
+	bool gc, print_gc;		/* --gc-sections, --print-gc-sections */
 } opt;
 
 static int dirfd_base = AT_FDCWD;
@@ -358,6 +359,7 @@ typedef struct ISec {
 	uint8_t kind;
 	bool thunked;			/* some relocation has a tr_put entry */
 	bool dropped;			/* member of a COMDAT group seen before */
+	uint32_t gnext;			/* next member of its section group + 1, 0: none */
 } ISec;
 
 #define OS_DISCARD 0xfffffffeu
@@ -1922,7 +1924,12 @@ static void dedup_comdats(void)
 			const Shdr *h = &o->sh[s];
 			const uint32_t *w = (const uint32_t *)(o->buf + h->sh_offset);
 
-			if (h->sh_type != SHT_GROUP || !(w[0] & 1))	/* GRP_COMDAT */
+			if (h->sh_type != SHT_GROUP)
+				continue;
+			/* members in a ring, for --gc-sections (lld nextInSectionGroup) */
+			for (uint64_t k = 1; k < h->sh_size / 4; k++)
+				isecs.v[o->isec0 + w[k]].gnext = o->isec0 + w[k + 1 < h->sh_size / 4 ? k + 1 : 1] + 1;
+			if (!(w[0] & 1))	/* GRP_COMDAT */
 				continue;
 			const char *name = o->str + o->sym[h->sh_info].st_name;
 			uint32_t len = strlen(name), hh = strhash(name, len);
@@ -2340,13 +2347,109 @@ static int osec_rank(uint32_t oi)
 	return -1;
 }
 
-static void assign_sections(void)
+static void ncache_init(void)
 {
+	if (ncache)
+		return;
 	uint32_t ncap = 1024;
 	while (ncap < isecs.n / 4)
 		ncap *= 2;
 	ncache = alloc(ncap * sizeof *ncache);
 	ncmask = ncap - 1;
+}
+
+/* --gc-sections as lld's MarkLive: roots are the entry symbol, KEEP, SHF_GNU_RETAIN,
+ * non-allocated sections, init/fini/preinit arrays, notes outside groups,
+ * .ctors/.dtors/.init/.fini/.jcr, and under -shared the exported definitions;
+ * relocations, SHF_LINK_ORDER and section groups propagate liveness */
+static void gc_sections(const char *entry)
+{
+	uint8_t *live = calloc(isecs.n, 1);
+	uint32_t *work = malloc(isecs.n * sizeof(uint32_t)), nw = 0;
+#define MARK(x) do { uint32_t m_ = (x); if (m_ < isecs.n && !live[m_] && isecs.v[m_].kind != K_NONE) { live[m_] = 1; work[nw++] = m_; } } while (0)
+
+	ncache_init();
+	for (uint32_t i = 0; i < isecs.n; i++) {
+		ISec *is = &isecs.v[i];
+
+		if (is->kind == K_NONE || is->obj == NONE)
+			continue;
+		if (!strcmp(is->name, ".eh_frame") && (is->flags & SHF_ALLOC)) {
+			error("%s: --gc-sections with .eh_frame is not supported yet", objs.v[is->obj]->path);
+			break;
+		}
+		const char *n = is->name;
+		uint32_t d = match_isd(n);
+		bool root = !(is->flags & SHF_ALLOC) || (is->flags & 0x200000) /* SHF_GNU_RETAIN */ ||
+			    is->type == SHT_INIT_ARRAY || is->type == SHT_FINI_ARRAY || is->type == SHT_PREINIT_ARRAY ||
+			    (is->type == SHT_NOTE && !is->gnext) ||
+			    !strncmp(n, ".ctors", 6) || !strncmp(n, ".dtors", 6) || !strncmp(n, ".init", 5) ||
+			    !strncmp(n, ".fini", 5) || !strncmp(n, ".jcr", 4) || (d != NONE && isds.v[d].keep);
+
+		if (root)
+			MARK(i);
+	}
+	uint32_t eg = gfind(entry);
+
+	if (eg != NONE && gsyms[eg].state == GS_OBJ)
+		MARK(gsyms[eg].sec);
+	for (uint32_t g = 0; opt.shared && g < atomic_load(&ngsyms); g++)
+		if (gsyms[g].state == GS_OBJ && (gsyms[g].vis == STV_DEFAULT || gsyms[g].vis == STV_PROTECTED))
+			MARK(gsyms[g].sec);
+	for (bool again = true; again;) {
+		while (nw) {
+			ISec *is = &isecs.v[work[--nw]];
+			Obj *o = objs.v[is->obj];
+
+			for (uint32_t r = 0; r < is->nrela; r++) {
+				uint32_t y = is->rela[r].r_info >> 32;
+
+				if (!y)
+					continue;
+				if (y >= o->firstg) {
+					G *gs = &gsyms[o->gs[y - o->firstg]];
+
+					if (gs->state == GS_OBJ)
+						MARK(gs->sec);
+				} else if (o->sym[y].st_shndx && o->sym[y].st_shndx < 0xff00)
+					MARK(o->isec0 + o->sym[y].st_shndx);
+			}
+			if (is->gnext)
+				MARK(is->gnext - 1);
+		}
+		/* SHF_LINK_ORDER: live when the section it links to is */
+		again = false;
+		for (uint32_t i = 0; i < isecs.n; i++) {
+			ISec *is = &isecs.v[i];
+
+			if (live[i] || is->kind == K_NONE || is->obj == NONE || !(is->flags & 0x80))
+				continue;
+			const Obj *o = objs.v[is->obj];
+			uint32_t l = o->sh[is->shndx].sh_link;
+
+			if (l && l < o->nsh && live[o->isec0 + l]) {
+				MARK(i);
+				again = true;
+			}
+		}
+	}
+	for (uint32_t i = 0; i < isecs.n; i++) {
+		ISec *is = &isecs.v[i];
+
+		if (live[i] || is->kind == K_NONE || is->obj == NONE)
+			continue;
+		if (opt.print_gc)
+			printf("removing unused section %s:(%s)\n", objs.v[is->obj]->path, is->name);	/* lld: stdout */
+		is->kind = K_NONE;
+	}
+#undef MARK
+	free(live);
+	free(work);
+}
+
+static void assign_sections(void)
+{
+	ncache_init();
 	for (uint32_t i = 0; i < isecs.n; i++) {
 		ISec *is = &isecs.v[i];
 		if (is->kind == K_NONE)
@@ -3044,6 +3147,10 @@ static bool parse_args(int argc, char **argv)
 		if (ARG("--no-apply-dynamic-relocs")) { opt.no_apply_dyn = true; continue; }
 		if (ARG("--apply-dynamic-relocs")) { opt.no_apply_dyn = false; continue; }
 		if (ARG("--no-relax")) { opt.relax = false; continue; }
+		if (ARG("--gc-sections")) { opt.gc = true; continue; }
+		if (ARG("--no-gc-sections")) { opt.gc = false; continue; }
+		if (ARG("--print-gc-sections")) { opt.print_gc = true; continue; }
+		if (ARG("--no-print-gc-sections")) { opt.print_gc = false; continue; }
 		if (ARG("--vroom-stubs")) { opt.stubs = true; continue; }
 		if (ARG("--emit-relocs") || ARG("-q")) { error("--emit-relocs is not supported"); continue; }
 		if ((v = VAL("-m")) || (!strncmp(a, "-m", 2) && a[2] && (v = a + 2))) {
@@ -4012,7 +4119,7 @@ static void find_got(void *arg, size_t i)
 {
 	(void)arg;
 	const ISec *is = &isecs.v[i];
-	if (atomic_load_explicit(&got_seen, memory_order_relaxed))
+	if (is->kind == K_NONE || atomic_load_explicit(&got_seen, memory_order_relaxed))
 		return;
 	for (uint32_t r = 0; r < is->nrela; r++) {
 		uint32_t t = (uint32_t)is->rela[r].r_info;
@@ -4382,6 +4489,8 @@ static int run(int argc, char **argv)
 	pfor(gorder.n, finish_syms, NULL);
 	phase("script symbols, order");
 
+	if (opt.gc && !opt.relocatable)
+		gc_sections(opt.entry ? opt.entry : entry_name ? entry_name : "_start");
 	make_commons();
 	add_synthetic_sections();
 	assign_sections();

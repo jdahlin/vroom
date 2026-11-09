@@ -835,8 +835,13 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
   `-no-pie`; `-L DIR`/`-lNAME`/`-l:FILE` (archives only, "unable to find
   library"); `-pie` and `--dynamic-linker` a clear error until dynamic
   linking.  `bench/vlink-opts.py`: 18/18 against ld.lld, image identical.)
-  Left: `--gc-sections`, `--emit-relocs`, `--eh-frame-hdr` (ignored),
-  `-z relro/now`.
+  `--gc-sections` as lld's MarkLive (roots: entry, KEEP, SHF_GNU_RETAIN,
+  non-alloc, init/fini arrays, notes outside groups, .ctors/.init/...,
+  exported symbols under -shared; relocations, groups and SHF_LINK_ORDER
+  propagate), `--print-gc-sections` on stdout as lld: 6 cases.
+  Left: `--gc-sections` with `.eh_frame` (an error: lld's piecewise FDE
+  handling), `__start_`/`__stop_` symbols, `--emit-relocs`, `--eh-frame-hdr`
+  (ignored), `-z relro/now`.
   *Validate:* `bench/vlink-opts.py` per option; unknown options are errors.
 - [ ] **Relocations**: (done: GOT relaxation adrp+ldr -> adrp+add / nop+adr
   as lld; orphans placed by lld's coarse rank (sections without inputs do not count; nothing with inputs after: at the very end, as lld); `.got` for

@@ -64,6 +64,12 @@ CASES = [
     ('comdat three', '{t}/g1.o {t}/g2.o {t}/g3.o'),
     ('comdat in archive', '{t}/g1.o {a}/libg.a'),
     ('comdat any group', '{t}/g1.o {t}/g4.o'),
+    # --gc-sections: entry, relocations, init_array (a root), groups
+    ('gc', '--gc-sections {t}/gc.o'),
+    ('gc -e', '--gc-sections -e alt {t}/gc.o'),
+    ('gc comdat', '--gc-sections {t}/g1.o {t}/g2.o'),
+    ('gc archive', '--gc-sections {t}/c.o {a}/libch.a'),
+    ('no gc', '--gc-sections --no-gc-sections {t}/gc.o'),
 ]
 MSG = {'-mbad': 'unknown emulation: foo',
        '-l missing': 'unable to find library -lnosuch', '-l no -L': 'unable to find library -lx'}
@@ -88,6 +94,15 @@ ASM = {	# cm: _start uses cv and cw; cm1/cm2 common of other sizes, cmd defines 
     'g3': '.section .text.f,"axG",@progbits,f,comdat\n.globl f\nf: mov w0, #3\n ret\n',
     'g4': '.section .text.h,"axG",@progbits,f\n.globl h\nh: ret\n',
     'cmw': '.data\n.weak cv\n.p2align 3\ncv: .quad 7\n',
+}
+GC = {	# with -ffunction-sections -fdata-sections
+    'gc': 'int used_d = 1, unused_d = 2; static int sd = 3;\n'
+          'int leaf(void) { return used_d; }\n'
+          'int dead(void) { return unused_d + leaf(); }\n'
+          'static int s(void) { return sd; }\n'
+          'int alt(void) { return 7; }\n'
+          '__attribute__((constructor)) void ctor(void) { used_d += s(); }\n'
+          'int _start(void) { return leaf(); }\n',
 }
 LAZY = {	# c -> b1 -> b2 -> b3; w refers to b1 weakly; p1 -> q1 -> p2
     'c': 'int b1(void); int _start(void) { return b1(); }\n',
@@ -115,6 +130,10 @@ def main():
         for name, src in ASM.items():
             open(f'{t}/{name}.s', 'w').write(src)
             subprocess.run([VPP, '--target=aarch64-linux-gnu', '-c', f'{t}/{name}.s', '-o', f'{t}/{name}.o'], check=True)
+        for name, src in GC.items():
+            open(f'{t}/{name}.c', 'w').write(src)
+            subprocess.run([VPP, '--target=aarch64-linux-gnu', '-ffunction-sections', '-fdata-sections',
+                            '-c', f'{t}/{name}.c', '-o', f'{t}/{name}.o'], check=True)
         for name, src in list({'a': SRC, 'x': LIB}.items()) + list(LAZY.items()):
             open(f'{t}/{name}.c', 'w').write(src)
             subprocess.run([VPP, '--target=aarch64-linux-gnu', '-c', f'{t}/{name}.c', '-o', f'{t}/{name}.o'], check=True)
@@ -146,13 +165,25 @@ def main():
                 print(f'FAIL {name}: {why}')
             elif v:
                 print(f'ok   {name}: {ve or "linked"}')
+        # --print-gc-sections: the same sections removed, in the same order
+        pr = []
+        for exe in (VLINK, LLD):
+            p = subprocess.run([exe, '-T', LDS, '--gc-sections', '--print-gc-sections', f'{t}/gc.o', f'{t}/g4.o',
+                                f'{t}/g2.o', '-e', '_start', '-o', f'{t}/pg.out'], capture_output=True, text=True)
+            pr.append([l for l in p.stdout.splitlines() if 'removing' in l])
+        if pr[0] != pr[1] or not pr[0]:
+            bad += 1
+            print(f'FAIL --print-gc-sections:\n  vlink {pr[0]}\n  lld   {pr[1]}')
+        elif v:
+            print(f'ok   --print-gc-sections: {len(pr[0])} removed')
+        n0 = 1
         # --version: the word after LLD is a version (scripts/ld-version.sh)
         p = subprocess.run([VLINK, '--version'], capture_output=True, text=True)
         w = p.stdout.split()
         if p.returncode or 'LLD' not in w or not w[w.index('LLD') + 1][:1].isdigit():
             bad += 1
             print(f'FAIL --version: {p.stdout!r}')
-        n = len(CASES) + 1
+        n = len(CASES) + 1 + n0
         print(f'vlink-opts: {n - bad}/{n} ok')
     sys.exit(1 if bad else 0)
 
