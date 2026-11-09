@@ -167,6 +167,17 @@ def spawned_tool_env_clean():
     finally: v.stop()
 
 @test()
+def request_2mb():
+    """a 2 MB environment (Linux allows more than macOS's 1 MB ARG_MAX) is served"""
+    v = Vccd()
+    try:
+        d = f'{v.dir}/w'; src = tu(d)
+        argv = [SHIM] + TARGET + ['-c', '-o', f'{d}/big.o', src]
+        st = raw_request(v.sock, d, argv, env=['BIG=' + 'x' * (2 << 20), 'PATH=/usr/bin:/bin'])
+        check(st == 0, f'status {st} for a 2 MB request')
+    finally: v.stop()
+
+@test()
 def other_build_refused():
     """a request from another build of the shim gets the mismatch status, not service"""
     v = Vccd()

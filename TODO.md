@@ -454,7 +454,9 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
 - [ ] **No server → exit 127** [R].  `shim.c:96-99`.  Autostart the server
   (with a lock) or run the job in-process in the shim.
   *Validate:* T11 (no server running: `vcc -c a.c` succeeds).
-- [ ] **Request size capped at 1 MB** [R].  `protocol.h:13`.  Long command
+- [x] **Request size capped at 1 MB** [R].  *Done:* 8 MB (above Linux's ARG_MAX
+  with an 8 MB stack); larger still gets the shim's "request too large";
+  vccd-test request-2mb.  Was:  `protocol.h:13`.  Long command
   lines plus env exceed it.  Stream or raise with a clear error.
   *Validate:* T12 (a 2 MB env/argv works or fails with a message).
 

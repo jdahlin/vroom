@@ -14,7 +14,7 @@
 #include <sys/stat.h>
 
 #define VROOM_MAGIC 0x326f6f72u /* "roo2": the header carries a build id */
-#define VROOM_MAX_PAYLOAD (1u << 20)
+#define VROOM_MAX_PAYLOAD (8u << 20)	/* argv + env: above Linux's ARG_MAX with an 8 MB stack (2 MB+), macOS 1 MB */
 /* vccd's answer to a vsh request it leaves to the real shell (not an exit status) */
 #define VROOM_STATUS_DECLINE 0x7fff0000
 /* vccd's answer when the shim's build id is not its own */
