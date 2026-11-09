@@ -1702,9 +1702,11 @@ const vlex_file *vlex_get(const char *path, size_t len)
 			publish(e, true);
 			return &e->f;
 		}
+#ifdef __aarch64__
 		if (spin < 64)
 			__asm__ volatile("yield");
 		else
+#endif
 			sched_yield();
 	}
 }
@@ -1772,8 +1774,12 @@ void vlex_prefetch(const char *path, size_t len)
 {
 	static pthread_once_t once = PTHREAD_ONCE_INIT;
 	bool ins;
-	centry *e = centry_get(path, len, CE_QUEUED, &ins);
+	centry *e;
 
+#ifdef __EMSCRIPTEN__
+	return;	/* no threads: the reader loads the file itself */
+#endif
+	e = centry_get(path, len, CE_QUEUED, &ins);
 	if (!ins)
 		return;
 	pthread_mutex_lock(&ioq_mu);
