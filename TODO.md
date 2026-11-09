@@ -66,7 +66,7 @@ Existing gates that every change must keep green: `vcc-diff.py cmp`
   `llvm-readelf -r -S -s` / `llvm-objdump -d`.  For PIC, TLS, CFI, DWARF,
   section groups, branch ranges — things that are about the object, not
   runtime output.
-- [ ] **T7 `as` corpus: compiler-generated assembly.**  `tests/as/*.c` →
+- [ ] **T7 `as` corpus: compiler-generated assembly.** (started: `bench/vas-corpus.py`: clang -S -O0/-O2 of every test C file, clang -c vs vasm byte for byte; 2026-11-09: 2660/3035 identical before ldurs*/register-named symbols, the rest is scalar FP and AdvSIMD.)  `tests/as/*.c` →
   `clang --target=aarch64-linux-gnu -O2 -S` (and `-g`, `-fPIC`, `-march=armv8.5-a+sve2`)
   → assemble with `vasm` and with clang, compare objects with
   `bench/vas-diff.py` (sections, symbols, relocations, bytes).  Plus
@@ -705,8 +705,9 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
   vs scalar, add SSE vs scalar.
 
 ### Assembler (`as/as.c`, `arch/a64/as/enc.c`)
-- [ ] **`.cfi_*`** → `.eh_frame` [P].  *Validate:* T7 (clang `-S` output
-  with CFI assembles, `.eh_frame` byte-identical).
+- [x] **`.cfi_*`** → `.eh_frame` [P]: every directive but personality/LSDA
+  and `.debug_frame` (an error), CIEs per key, FDEs sorted by CIE key as MC.
+  *Validated:* `vas-obj` `cfi-basic.s`, `cfi-all.s`; `bench/vas-corpus.py`.
 - [ ] **`.loc`, `.file N`, DWARF line tables, `.uleb128`/`.sleb128`** [P].
   *Validate:* T7 with `-g`.
 - [ ] **Scalar FP** (fadd … frint*, `fmov #imm`) [P].  *Validate:* T7

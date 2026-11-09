@@ -157,6 +157,15 @@ static size_t elf_finish_tail(ElfObj *o, Out *w)
 		if (!(y->flags & ESYM_DEFINED) && y->common != 2 && y->bind == STB_LOCAL) y->bind = STB_GLOBAL;
 		if (y->bind == STB_LOCAL) w->symtab[nl++] = i; else glob[ng++] = i;
 	}
+	{	/* STT_FILE symbols first (MC) */
+		uint32_t k = 0;
+		for (uint32_t i = 0; i < nl; i++)
+			if (elf_symp(o, w->symtab[i])->type == STT_FILE) {
+				uint32_t t = w->symtab[i];
+				memmove(w->symtab + k + 1, w->symtab + k, (i - k) * sizeof(uint32_t));
+				w->symtab[k++] = t;
+			}
+	}
 	memmove(w->symtab + nl, glob, ng * sizeof(uint32_t));
 	w->nsymtab = nl + ng; w->nlocal = nl;
 	for (uint32_t k = 0; k < w->nsymtab; k++) elf_symp(o, w->symtab[k])->idx = k + 1;

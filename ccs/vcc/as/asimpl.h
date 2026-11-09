@@ -99,6 +99,12 @@ struct As {
 	int ended;		/* .end seen */
 	int altmacro;		/* .altmacro mode */
 	uint32_t eofline;	/* the line after the input's last (errors at the end) */
+	/* .cfi_*: instructions of all FDEs, the FDEs, the open one */
+	struct Cfi { uint8_t op; uint32_t reg, reg2, lab; int64_t off; const uint8_t *esc; } *cfi;
+	uint32_t ncfi, cficap;
+	struct Fde { uint32_t start, end, first, n, ra; uint8_t simple, sig, bkey; } *fde;
+	uint32_t nfde, fdecap;
+	int infde, cfi_eh;	/* inside .cfi_startproc; .cfi_sections without .eh_frame: 1 */
 	struct { uint32_t orig, ver, rm; } *sv; uint32_t nsv, svcap;	/* .symver */
 	uint32_t *asg; uint32_t nasg, asgcap;	/* .addrsig_sym */
 	char msg[512];

@@ -374,6 +374,9 @@ static const Mn mns[] = {
 	{ "ldur", K_LDSTU, 0x01, 0xff },
 	{ "ldurb", K_LDSTU, 0x01, 0 },
 	{ "ldurh", K_LDSTU, 0x01, 1 },
+	{ "ldursb", K_LDSTU, 0x02, 0 },
+	{ "ldursh", K_LDSTU, 0x02, 1 },
+	{ "ldursw", K_LDSTU, 0x02, 2 },
 	{ "ldxr", K_LDX, 0x085f7c00, 0 },
 	{ "lsl", K_SHIFT, 0, 0 },
 	{ "lsr", K_SHIFT, 1, 0 },
@@ -1369,6 +1372,10 @@ static int k_ldstu(Ctx *c, const Mn *m)
 	int scale;
 	if (c->n != 2 || o[1].kind != A64O_MEM || o[1].mode != A64M_OFF) BADOPS;
 	if (m->x == 0xff) { scale = ldst_reg(&o[0], load, &size, &v, &opc); if (scale < 0) BADOPS; }
+	else if (m->base == 2) {	/* ldurs[bhw] */
+		if (!gpr_nosp(&o[0]) || (m->x == 2 && !isx(&o[0]))) BADOPS;
+		size = m->x; v = 0; opc = isx(&o[0]) ? 2 : 3; scale = (int)size;
+	}
 	else { if (!isw(&o[0])) BADOPS; size = m->x; v = 0; opc = (unsigned)load; scale = (int)size; }
 	int r = ldst_common(c, size, v, opc, scale, R(&o[0]), &o[1], 0, 1);
 	if (r == -1) BADOPS;

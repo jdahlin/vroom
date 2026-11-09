@@ -674,6 +674,12 @@ VPRIV int emit_value(As *a, int size, Val *v)
 {
 	ElfObj *o = a->o;
 	elf_data(o, a->cur);
+	if (elf_sec(o, elf_frag(o, a->cur)->sec)->type == SHT_NOBITS) {	/* zeros only (MC) */
+		fold(a, v);
+		if (v->add || v->sub || v->c) return err(a, "cannot have non-zero initializers in a NOBITS section");
+		elf_fill(o, a->cur, (uint64_t)size, 0);
+		return 0;
+	}
 	uint64_t off = elf_frag(o, a->cur)->size;
 	uint8_t *p = elf_grow(o, a->cur, (size_t)size);
 	fold(a, v);
@@ -1900,6 +1906,7 @@ static int define_label(As *a, const char *s, size_t n)
 }
 
 static int d_symver(As *a, const char *p, const char *e);
+static int d_cfi(As *a, Sv w, const char *p, const char *e);
 static int directive(As *a, Sv w, const char *p, const char *e)
 {
 	const char *d = w.s + 1;
@@ -1935,6 +1942,7 @@ static int directive(As *a, Sv w, const char *p, const char *e)
 		if (IS("bss")) { switch_to(a, std_section(a, ".bss")); return 0; }
 		break;
 	case 'c':
+		if (n > 4 && !memcmp(d, "cfi_", 4)) return d_cfi(a, (Sv){ d, (uint32_t)n }, p, e);
 		if (IS("comm")) return d_comm(a, p, e, 0);
 		if (IS("cpu")) return 0;
 		break;
@@ -1971,7 +1979,19 @@ static int directive(As *a, Sv w, const char *p, const char *e)
 	case 'f':
 		if (IS("fill")) return d_fill(a, p, e);
 		if (IS("float")) return d_float(a, p, e, 4);
-		if (IS("file")) return 0;
+		if (IS("file")) {	/* .file "name": an STT_FILE symbol; .file N "name" (DWARF) is ignored */
+			p = ws(p, e);
+			if (p < e && *p == '"') {
+				const char *q = ++p;
+				while (q < e && *q != '"') q++;
+				uint32_t y = elf_sym_anon(a->o, svdup(a, p, (size_t)(q - p)).s, (uint32_t)(q - p));
+				ElfSym *f = elf_symp(a->o, y);
+				f->type = STT_FILE;
+				elf_define_abs(a->o, y, 0);
+				elf_reg(a->o, y);
+			}
+			return 0;
+		}
 		break;
 	case 'g':
 		if (IS("globl") || IS("global")) return d_symattr(a, p, e, 'g');
@@ -2241,7 +2261,8 @@ void as_begin(As *a, ElfObj *o, const char *name)
 	a->xs.used = 0; a->defs.used = 0; a->ninst = 0; a->nal = 0; a->alcap = 0; a->al = 0;
 	memset(a->alh, 0, sizeof a->alh);
 	a->fname = name;
-	a->nident = 0; a->ended = 0; a->altmacro = 0; a->eofline = 0; a->nsv = a->svcap = 0; a->nasg = a->asgcap = 0;
+	a->nident = 0; a->ended = 0; a->altmacro = 0; a->eofline = 0;
+	a->ncfi = a->cficap = a->nfde = a->fdecap = 0; a->infde = 0; a->cfi_eh = 0; a->nsv = a->svcap = 0; a->nasg = a->asgcap = 0;
 	a->mmask = 255; a->mcount = 0;
 	a->mtab = rget(&a->defs, sizeof(Macro *) * (a->mmask + 1));
 	memset(a->mtab, 0, sizeof(Macro *) * (a->mmask + 1));
@@ -2279,6 +2300,274 @@ int as_snippet(As *a, const char *text, size_t len)
 	}
 	a->nfr = 0;
 	return a->err ? -1 : 0;
+}
+
+/* ---------------------------------------------------------------- CFI */
+
+enum { CF_DEF_CFA, CF_DEF_CFA_OFFSET, CF_DEF_CFA_REGISTER, CF_ADJUST, CF_OFFSET, CF_REL_OFFSET,
+       CF_RESTORE, CF_UNDEFINED, CF_SAME, CF_REGISTER, CF_REMEMBER, CF_RESTORE_STATE, CF_ESCAPE,
+       CF_NEGATE_RA };
+
+/* a DWARF register: x0-x30/w0-w30, sp/wsp, fp, lr, v/b/h/s/d/q 0-31 (64+), or a number */
+static int cfi_reg(As *a, const char **pp, const char *e, uint32_t *r)
+{
+	const char *p = ws(*pp, e), *s = p;
+	while (p < e && isidc((unsigned char)*p)) p++;
+	size_t n = (size_t)(p - s);
+	if (!n) return err(a, "expected register");
+	*pp = p;
+	if (c_digit((unsigned char)s[0])) {
+		uint32_t v = 0;
+		for (size_t i = 0; i < n; i++) { if (!c_digit((unsigned char)s[i])) return err(a, "invalid register number"); v = v * 10 + (uint32_t)(s[i] - '0'); }
+		*r = v; return 0;
+	}
+	if ((n == 2 && !strncasecmp(s, "sp", 2)) || (n == 3 && !strncasecmp(s, "wsp", 3))) { *r = 31; return 0; }
+	if (n == 2 && !strncasecmp(s, "fp", 2)) { *r = 29; return 0; }
+	if (n == 2 && !strncasecmp(s, "lr", 2)) { *r = 30; return 0; }
+	char c = (char)(s[0] | 0x20);
+	if (n >= 2 && n <= 3 && strchr("xwvbhsdq", c) && c_digit((unsigned char)s[1]) && (n == 2 || c_digit((unsigned char)s[2]))) {
+		uint32_t v = (uint32_t)(s[1] - '0');
+		if (n == 3) v = v * 10 + (uint32_t)(s[2] - '0');
+		if ((c == 'x' || c == 'w') ? v > 30 : v > 31) return err(a, "invalid register name");
+		*r = (c == 'x' || c == 'w') ? v : 64 + v;
+		return 0;
+	}
+	return err(a, "invalid register name");
+}
+
+static struct Cfi *cfi_push(As *a, uint8_t op)
+{
+	if (a->ncfi == a->cficap) {
+		uint32_t nc = a->cficap ? a->cficap * 2 : 256;
+		struct Cfi *t = rget(&a->defs, sizeof *t * nc);
+		if (a->ncfi) memcpy(t, a->cfi, sizeof *t * a->ncfi);
+		a->cfi = t; a->cficap = nc;
+	}
+	struct Cfi *c = &a->cfi[a->ncfi++];
+	memset(c, 0, sizeof *c);
+	c->op = op;
+	c->lab = here(a);
+	a->fde[a->nfde - 1].n++;
+	return c;
+}
+
+static int d_cfi(As *a, Sv w, const char *p, const char *e)
+{
+#define CIS(lit) (w.n == sizeof(lit) - 1 && !memcmp(w.s, lit, w.n))
+	p = ws(p, e);
+	if (CIS("cfi_sections")) {
+		int eh = 0, dbg = 0;
+		while (p < e) {
+			const char *s = p;
+			while (p < e && *p != ',' && *p != ' ' && *p != '\t') p++;
+			Sv t = { s, (uint32_t)(p - s) };
+			if (sveq(t, ".eh_frame")) eh = 1;
+			else if (sveq(t, ".debug_frame")) dbg = 1;
+			p = ws(p, e);
+			if (p < e && *p == ',') p = ws(p + 1, e);
+		}
+		if (dbg) return err(a, ".debug_frame is not supported");
+		a->cfi_eh = !eh;
+		return 0;
+	}
+	if (CIS("cfi_startproc")) {
+		if (a->infde) return err(a, "starting new .cfi frame before finishing the previous one");
+		if (a->nfde == a->fdecap) {
+			uint32_t nc = a->fdecap ? a->fdecap * 2 : 64;
+			struct Fde *t = rget(&a->defs, sizeof *t * nc);
+			if (a->nfde) memcpy(t, a->fde, sizeof *t * a->nfde);
+			a->fde = t; a->fdecap = nc;
+		}
+		struct Fde *f = &a->fde[a->nfde++];
+		memset(f, 0, sizeof *f);
+		Sv t = trim(p, e);
+		if (t.n) { if (!sveq(t, "simple")) return err(a, "unexpected token"); f->simple = 1; }
+		f->start = here(a); f->first = a->ncfi; f->ra = 30;
+		a->infde = 1;
+		return 0;
+	}
+	if (!a->infde) return err(a, "this directive must appear between .cfi_startproc and .cfi_endproc directives");
+	struct Fde *f = &a->fde[a->nfde - 1];
+	if (CIS("cfi_endproc")) { f->end = here(a); a->infde = 0; return 0; }
+	if (CIS("cfi_signal_frame")) { f->sig = 1; return 0; }
+	if (CIS("cfi_b_key_frame")) { f->bkey = 1; return 0; }
+	if (CIS("cfi_return_column")) return cfi_reg(a, &p, e, &f->ra);
+	if (CIS("cfi_remember_state")) { cfi_push(a, CF_REMEMBER); return 0; }
+	if (CIS("cfi_restore_state")) { cfi_push(a, CF_RESTORE_STATE); return 0; }
+	if (CIS("cfi_negate_ra_state") || CIS("cfi_window_save")) { cfi_push(a, CF_NEGATE_RA); return 0; }
+	if (CIS("cfi_escape")) {
+		uint8_t *b = rget(&a->defs, (size_t)(e - p) + 1);
+		uint32_t n = 0;
+		while (p < e) {
+			int64_t v;
+			if (abs_expr(a, &p, e, &v)) return -1;
+			b[n++] = (uint8_t)v;
+			p = ws(p, e);
+			if (p < e && *p == ',') p = ws(p + 1, e);
+		}
+		struct Cfi *c = cfi_push(a, CF_ESCAPE);
+		c->esc = b; c->off = n;
+		return 0;
+	}
+	int64_t off = 0;
+	uint32_t r1 = 0, r2 = 0;
+	uint8_t op;
+	if (CIS("cfi_def_cfa_offset") || CIS("cfi_adjust_cfa_offset")) {
+		if (abs_expr(a, &p, e, &off)) return -1;
+		op = CIS("cfi_adjust_cfa_offset") ? CF_ADJUST : CF_DEF_CFA_OFFSET;
+	} else if (CIS("cfi_def_cfa_register") || CIS("cfi_restore") || CIS("cfi_undefined") || CIS("cfi_same_value")) {
+		if (cfi_reg(a, &p, e, &r1)) return -1;
+		op = CIS("cfi_def_cfa_register") ? CF_DEF_CFA_REGISTER : CIS("cfi_restore") ? CF_RESTORE :
+		     CIS("cfi_undefined") ? CF_UNDEFINED : CF_SAME;
+	} else if (CIS("cfi_def_cfa") || CIS("cfi_offset") || CIS("cfi_rel_offset") || CIS("cfi_register")) {
+		if (cfi_reg(a, &p, e, &r1)) return -1;
+		p = ws(p, e);
+		if (p >= e || *p != ',') return err(a, "expected comma");
+		p++;
+		if (CIS("cfi_register")) { if (cfi_reg(a, &p, e, &r2)) return -1; op = CF_REGISTER; }
+		else {
+			if (abs_expr(a, &p, e, &off)) return -1;
+			op = CIS("cfi_def_cfa") ? CF_DEF_CFA : CIS("cfi_offset") ? CF_OFFSET : CF_REL_OFFSET;
+		}
+	} else return err(a, "unknown directive '.%.*s'", (int)w.n, w.s);
+	struct Cfi *c = cfi_push(a, op);
+	c->reg = r1; c->reg2 = r2; c->off = off;
+	return 0;
+#undef CFIS
+}
+
+typedef struct { uint8_t *p; size_t n; } Buf8;
+
+static void uleb(Buf8 *b, uint64_t v) { do { uint8_t c = v & 0x7f; v >>= 7; b->p[b->n++] = (uint8_t)(c | (v ? 0x80 : 0)); } while (v); }
+static void sleb(Buf8 *b, int64_t v)
+{
+	for (;;) {
+		uint8_t c = v & 0x7f; v >>= 7;
+		if ((v == 0 && !(c & 0x40)) || (v == -1 && (c & 0x40))) { b->p[b->n++] = c; return; }
+		b->p[b->n++] = (uint8_t)(c | 0x80);
+	}
+}
+
+/* .eh_frame as MC's FrameEmitterImpl writes it: per FDE, its CIE first when
+ * it is new; entries padded to 4 with DW_CFA_nop */
+static void cfi_finish(As *a)
+{
+	ElfObj *o = a->o;
+	if (a->infde) { err(a, "unfinished frame"); return; }
+	if (!a->nfde || a->cfi_eh) return;
+	uint32_t sec = elf_section(o, ".eh_frame", 9, SHT_PROGBITS, SHF_ALLOC, 0, 0);
+	uint32_t fr = sec;
+	if (elf_sec(o, sec)->align < 3) elf_sec(o, sec)->align = 3;
+	elf_data(o, fr);
+	struct { uint32_t key, off; } cies[8]; uint32_t ncie = 0;
+	size_t cap = 64;
+	for (uint32_t i = 0; i < a->nfde; i++) cap += 64 + 16 * (size_t)a->fde[i].n;
+	for (uint32_t i = 0; i < a->ncfi; i++) if (a->cfi[i].op == CF_ESCAPE) cap += (size_t)a->cfi[i].off;
+	Buf8 b = { rget(&a->defs, cap), 0 };
+	size_t *pcbs = rget(&a->defs, sizeof(size_t) * a->nfde);
+	/* MC stable-sorts the FDEs by CIE key (signal frame, simple, RA column, B key) */
+	uint32_t *ord = rget(&a->defs, sizeof(uint32_t) * a->nfde);
+	for (uint32_t i = 0; i < a->nfde; i++) {
+		struct Fde *f = &a->fde[i];
+		uint32_t key = (uint32_t)f->sig << 30 | (uint32_t)f->simple << 29 | f->ra << 1 | f->bkey;
+		uint32_t k = i;
+		while (k > 0) {
+			struct Fde *g = &a->fde[ord[k - 1]];
+			uint32_t gk = (uint32_t)g->sig << 30 | (uint32_t)g->simple << 29 | g->ra << 1 | g->bkey;
+			if (gk <= key) break;
+			ord[k] = ord[k - 1]; k--;
+		}
+		ord[k] = i;
+	}
+	for (uint32_t oi = 0; oi < a->nfde; oi++) {
+		uint32_t i = ord[oi];
+		struct Fde *f = &a->fde[i];
+		uint32_t key = (uint32_t)f->sig << 30 | (uint32_t)f->simple << 29 | f->ra << 1 | f->bkey;
+		uint32_t ci;
+		for (ci = 0; ci < ncie; ci++) if (cies[ci].key == key) break;
+		if (ci == ncie) {
+			if (ncie == 8) { err(a, "too many distinct CIEs"); return; }
+			cies[ncie].key = key; cies[ncie].off = (uint32_t)b.n; ncie++;
+			size_t st = b.n;
+			b.n += 4;
+			memset(b.p + b.n, 0, 4); b.n += 4;	/* CIE id */
+			b.p[b.n++] = 1;				/* version */
+			b.p[b.n++] = 'z'; b.p[b.n++] = 'R';
+			if (f->sig) b.p[b.n++] = 'S';
+			if (f->bkey) b.p[b.n++] = 'B';
+			b.p[b.n++] = 0;
+			uleb(&b, 1); sleb(&b, -4);
+			b.p[b.n++] = (uint8_t)f->ra;
+			uleb(&b, 1); b.p[b.n++] = 0x1b;	/* augmentation: pcrel sdata4 */
+			if (!f->simple) { b.p[b.n++] = 0x0c; uleb(&b, 31); uleb(&b, 0); }
+			while ((b.n - st) & 3) b.p[b.n++] = 0;
+			uint32_t len = (uint32_t)(b.n - st - 4);
+			memcpy(b.p + st, &len, 4);
+		}
+		size_t st = b.n;
+		b.n += 4;
+		uint32_t cptr = (uint32_t)(b.n - cies[ci].off);
+		memcpy(b.p + b.n, &cptr, 4); b.n += 4;
+		size_t pcb = b.n;
+		memset(b.p + b.n, 0, 8); b.n += 8;	/* pc_begin, pc_range: fixups */
+		uleb(&b, 0);
+		int64_t cfa = 0;
+		uint32_t base = f->start;
+		for (uint32_t k = f->first; k < f->first + f->n; k++) {
+			struct Cfi *c = &a->cfi[k];
+			ElfSym *x = elf_symp(o, base), *y = elf_symp(o, c->lab);
+			if (x->frag != y->frag) { err(a, "CFI across fragments is not supported"); return; }
+			uint64_t d = y->value - x->value;
+			if (d) {
+				if (d < 0x40) b.p[b.n++] = (uint8_t)(0x40 | d);
+				else if (d <= 0xff) { b.p[b.n++] = 2; b.p[b.n++] = (uint8_t)d; }
+				else if (d <= 0xffff) { b.p[b.n++] = 3; b.p[b.n++] = (uint8_t)d; b.p[b.n++] = (uint8_t)(d >> 8); }
+				else { b.p[b.n++] = 4; uint32_t d4 = (uint32_t)d; memcpy(b.p + b.n, &d4, 4); b.n += 4; }
+				base = c->lab;
+			}
+			switch (c->op) {
+			case CF_DEF_CFA: b.p[b.n++] = 0x0c; uleb(&b, c->reg); cfa = c->off; uleb(&b, (uint64_t)cfa); break;
+			case CF_DEF_CFA_OFFSET: case CF_ADJUST:
+				cfa = c->op == CF_ADJUST ? cfa + c->off : c->off;
+				b.p[b.n++] = 0x0e; uleb(&b, (uint64_t)cfa); break;
+			case CF_DEF_CFA_REGISTER: b.p[b.n++] = 0x0d; uleb(&b, c->reg); break;
+			case CF_OFFSET: case CF_REL_OFFSET: {
+				int64_t v = c->off;
+				if (c->op == CF_REL_OFFSET) v -= cfa;
+				v /= -4;
+				if (v < 0) { b.p[b.n++] = 0x11; uleb(&b, c->reg); sleb(&b, v); }
+				else if (c->reg < 64) { b.p[b.n++] = (uint8_t)(0x80 | c->reg); uleb(&b, (uint64_t)v); }
+				else { b.p[b.n++] = 0x05; uleb(&b, c->reg); uleb(&b, (uint64_t)v); }
+				break;
+			}
+			case CF_RESTORE:
+				if (c->reg < 64) b.p[b.n++] = (uint8_t)(0xc0 | c->reg);
+				else { b.p[b.n++] = 0x06; uleb(&b, c->reg); }
+				break;
+			case CF_UNDEFINED: b.p[b.n++] = 0x07; uleb(&b, c->reg); break;
+			case CF_SAME: b.p[b.n++] = 0x08; uleb(&b, c->reg); break;
+			case CF_REGISTER: b.p[b.n++] = 0x09; uleb(&b, c->reg); uleb(&b, c->reg2); break;
+			case CF_REMEMBER: b.p[b.n++] = 0x0a; break;
+			case CF_RESTORE_STATE: b.p[b.n++] = 0x0b; break;
+			case CF_NEGATE_RA: b.p[b.n++] = 0x2d; break;
+			case CF_ESCAPE: memcpy(b.p + b.n, c->esc, (size_t)c->off); b.n += (size_t)c->off; break;
+			}
+		}
+		while ((b.n - st) & 3) b.p[b.n++] = 0;
+		if (oi == a->nfde - 1) while (b.n & 7) b.p[b.n++] = 0;	/* the section ends 8-aligned (MC) */
+		uint32_t len = (uint32_t)(b.n - st - 4);
+		memcpy(b.p + st, &len, 4);
+		pcbs[i] = pcb;
+	}
+	uint64_t at = elf_frag(o, fr)->size;
+	uint8_t *q = elf_grow(o, fr, b.n);
+	memcpy(q, b.p, b.n);
+	for (uint32_t oi = 0; oi < a->nfde; oi++) {
+		uint32_t i = ord[oi];
+		struct Fde *f = &a->fde[i];
+		elf_fixup(o, fr, at + pcbs[i], q + pcbs[i], R_AARCH64_PREL32, (Val){ f->start, 0, 0 });
+		elf_fixup(o, fr, at + pcbs[i] + 4, q + pcbs[i] + 4, R_AARCH64_ABS32, (Val){ f->end, f->start, 0 });
+	}
 }
 
 /* .symver orig, name@[@[@]]ver[, remove|local|hidden]: an alias defined at
@@ -2400,6 +2689,7 @@ int as_end(As *a)
 			else { err(a, "unsupported variable '%s'", s->name); break; }
 		}
 	}
+	if (!a->err && a->nfde) cfi_finish(a);
 	if (!a->err && a->nsv) symver_finish(a);
 	if (!a->err && a->nasg) {
 		o->addrsig = a->asg;	/* in a->defs: lives until the next run, after the object is written */

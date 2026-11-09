@@ -442,7 +442,14 @@ VPRIV int instruction(As *a, const char *p, const char *e, size_t wn)
 			size_t tn = (size_t)(p - t);
 			int k;
 			const char *q = ws(p, e);
-			if (parse_reg(a, t, tn, op, 0)) {
+			if (parse_reg(a, t, tn, op, 0) && nop == 2 && mn[0] == 'a' &&
+			    ((mlen == 3 && !memcmp(mn, "adr", 3)) || (mlen == 4 && !memcmp(mn, "adrp", 4)))) {
+				/* a symbol named like a register (v1, x1, q0): adr/adrp take
+				 * it as the symbol (LLVM; branches reject it) */
+				memset(op, 0, sizeof *op);
+				p = t;
+				if (parse_imm(a, &p, e, op)) return -1;
+			} else if (op->kind) {
 				if (op->kind == A64O_REG && q < e && *q == '!') { op->wb = 1; p = q + 1; }
 				else if (op->kind == A64O_VREG && q < e && *q == '[') {
 					int64_t ix;
