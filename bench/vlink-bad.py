@@ -6,7 +6,7 @@ parsing unchecked").
 
 A good object (two functions, data, relocations) and an archive holding it are
 corrupted one field at a time; vlink must exit 1 with an "error:" line, no
-signal, no sanitizer report.  The unchanged inputs must link.
+signal, no sanitizer report; vobjcopy -O binary and vnm must not crash.  The unchanged inputs must link.
 """
 import argparse, os, struct, subprocess, sys, tempfile
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -89,6 +89,7 @@ def main():
     ap.add_argument('--bin-dir', default=f'{R}/build/ccs-asan')
     a = ap.parse_args()
     vlink, vpp = f'{a.bin_dir}/vlink', f'{a.bin_dir}/vpp'
+    vobjcopy, vnm = f'{a.bin_dir}/vobjcopy', f'{a.bin_dir}/vnm'
     env = dict(os.environ, ASAN_OPTIONS='detect_leaks=0',
                UBSAN_OPTIONS='halt_on_error=1:print_stacktrace=1')
     bad = 0
@@ -122,6 +123,15 @@ def main():
                 print(f'FAIL {name}: {why}\n  ' + '\n  '.join(err.splitlines()[:6]))
             elif os.environ.get('V'):
                 print(f'ok   {name}: {err.splitlines()[0] if err else "linked"}')
+            if ext == '.o':	# vobjcopy, vnm: no crash; a good object works
+                for tool in ([vobjcopy, '-O', 'binary', f, f'{t}/bin'], [vnm, f]):
+                    q = subprocess.run(tool, capture_output=True, text=True, env=env)
+                    e2 = q.stderr
+                    if q.returncode < 0 or q.returncode > 1 or 'Sanitizer' in e2 or 'runtime error' in e2 or \
+                       (ok is True and q.returncode):
+                        bad += 1
+                        print(f'FAIL {name}: {os.path.basename(tool[0])} rc={q.returncode}\n  ' +
+                              '\n  '.join(e2.splitlines()[:6]))
         print(f'vlink-bad: {len(cases) - bad}/{len(cases)} ok')
     sys.exit(1 if bad else 0)
 

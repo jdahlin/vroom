@@ -816,9 +816,10 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
   lld's messages; `e_shnum == 0` takes the count from `sh[0]`; regular
   archive members (at 4 mod 8) are copied to aligned memory; archive headers,
   sizes and long-name offsets checked.  `bench/vlink-bad.py`: 29 corruptions
-  under ASan+UBSan, each a clean error.  Left: objcopy's `elf_open`
-  (`ld/objcopy.c:113`), SHN_XINDEX symbols (rejected), a `fuzz-elf` target, a
-  70k-section object.)
+  under ASan+UBSan, each a clean error; vobjcopy/vnm's `elf_open` checks
+  headers, sections, string and symbol tables (`elf_valid`), the same inputs
+  without a crash.  Left: SHN_XINDEX symbols (rejected), a `fuzz-elf` target,
+  a 70k-section object.)
 - [ ] **Crashes on ordinary inputs** [P]: no script.  (Fixed: a script
   without `.symtab`/`.strtab`/`.shstrtab` places them as orphans, as lld;
   `/DISCARD/` of a merge section (`.comment`): `isec_osec`.  Both found by

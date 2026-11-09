@@ -88,6 +88,71 @@ typedef struct {
 	const char *shstr;
 } Elf;
 
+/* a table of n entries of sz bytes at off, inside the file and 8-aligned */
+static bool in_file(const Elf *e, uint64_t off, uint64_t n, uint64_t sz)
+{
+	return off % 8 == 0 && off <= e->size && n <= (e->size - off) / sz;
+}
+
+/* everything elf_open's users index, checked once (as vlink's obj_valid) */
+static bool elf_valid(Elf *e)
+{
+	const Ehdr *h = e->eh;
+
+	if ((h->e_shnum && h->e_shentsize != sizeof(Shdr)) || (h->e_phnum && h->e_phentsize != sizeof(Phdr)) ||
+	    !in_file(e, h->e_phoff, h->e_phnum, sizeof(Phdr)) || !in_file(e, h->e_shoff, h->e_shnum, sizeof(Shdr)))
+		return false;
+	e->sh = (const Shdr *)(e->buf + h->e_shoff);
+	e->nsh = h->e_shnum;
+	e->ph = (const Phdr *)(e->buf + h->e_phoff);
+	e->nph = h->e_phnum;
+	e->shstr = "";
+	for (uint32_t k = 0; k < e->nph; k++)
+		if (e->ph[k].p_offset > e->size || e->ph[k].p_filesz > e->size - e->ph[k].p_offset)
+			return false;
+	if (!e->nsh)
+		return h->e_shoff == 0 || h->e_shstrndx == 0;
+	if (h->e_shstrndx >= e->nsh)
+		return false;
+	for (uint32_t k = 1; k < e->nsh; k++) {
+		const Shdr *s = &e->sh[k];
+
+		if (s->sh_type != SHT_NOBITS && (s->sh_offset > e->size || s->sh_size > e->size - s->sh_offset))
+			return false;
+		if (s->sh_addralign & (s->sh_addralign - 1))
+			return false;
+	}
+	const Shdr *ss = &e->sh[h->e_shstrndx];
+
+	if (ss->sh_type != SHT_STRTAB || !ss->sh_size || e->buf[ss->sh_offset + ss->sh_size - 1])
+		return false;
+	e->shstr = (const char *)e->buf + ss->sh_offset;
+	for (uint32_t k = 0; k < e->nsh; k++) {
+		const Shdr *s = &e->sh[k];
+
+		if (s->sh_name >= ss->sh_size)
+			return false;
+		if (s->sh_type == SHT_SYMTAB || s->sh_type == SHT_DYNSYM) {
+			if (s->sh_offset % 8 || s->sh_size % sizeof(Sym) || s->sh_link >= e->nsh)
+				return false;
+			const Shdr *st = &e->sh[s->sh_link];
+
+			if (st->sh_type != SHT_STRTAB || !st->sh_size || e->buf[st->sh_offset + st->sh_size - 1])
+				return false;
+			const Sym *y = (const Sym *)(e->buf + s->sh_offset);
+
+			for (uint64_t j = 0; j < s->sh_size / sizeof(Sym); j++)
+				if (y[j].st_name >= st->sh_size ||
+				    (y[j].st_shndx && y[j].st_shndx < 0xff00 && y[j].st_shndx >= e->nsh))
+					return false;
+		}
+		if (s->sh_type == SHT_RELA &&
+		    (s->sh_offset % 8 || s->sh_size % sizeof(Rela) || s->sh_link >= e->nsh || s->sh_info >= e->nsh))
+			return false;
+	}
+	return true;
+}
+
 static int elf_open(Elf *e, int dirfd, const char *path)
 {
 	memset(e, 0, sizeof *e);
@@ -107,11 +172,12 @@ static int elf_open(Elf *e, int dirfd, const char *path)
 		return -1;
 	}
 	e->eh = (const Ehdr *)e->buf;
-	e->sh = (const Shdr *)(e->buf + e->eh->e_shoff);
-	e->nsh = e->eh->e_shnum;
-	e->ph = (const Phdr *)(e->buf + e->eh->e_phoff);
-	e->nph = e->eh->e_phnum;
-	e->shstr = (const char *)e->buf + e->sh[e->eh->e_shstrndx].sh_offset;
+	if (!elf_valid(e)) {
+		oerror("'%s': invalid ELF file", path);
+		munmap((void *)e->buf, e->size);
+		e->buf = NULL;
+		return -1;
+	}
 	return 0;
 }
 static void elf_close(Elf *e)
