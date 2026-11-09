@@ -88,6 +88,10 @@ VPRIV const char *parse_define(const vtok *vt, uint32_t b, uint32_t e, pmacro *m
 	}
 	m->body = vt + i;
 	m->nbody = e - i;
+	if (m->kind == MK_FUNC) {
+		m->plist = vt + b + 1;
+		m->nplist = (uint16_t)(i - b - 1 < 0xffff ? i - b - 1 : 0);
+	}
 	m->nparam = (uint16_t)np;
 	if (va)
 		m->flags |= MF_VARIADIC;

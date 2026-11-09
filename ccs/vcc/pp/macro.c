@@ -152,3 +152,91 @@ VPRIV void define(pp *p, ctx *c, uint32_t b, uint32_t e)
 	}
 	mdef(p, m->name, m);
 }
+
+/* -dM: every defined macro as "#define NAME[(params)] body\n", sorted by
+ * name as clang prints them; builtins (__FILE__, __has_*) are left out.
+ * The text is malloc'ed. */
+static int mname_cmp(const void *a, const void *b)
+{
+	const vident *x = &vintern_ents[*(const uint32_t *)a], *y = &vintern_ents[*(const uint32_t *)b];
+	int c = memcmp(x->s, y->s, x->len < y->len ? x->len : y->len);
+
+	return c ? c : (x->len > y->len) - (x->len < y->len);
+}
+
+static void dm_put(char **b, size_t *n, size_t *cap, const char *s, size_t l)
+{
+	if (*n + l + 1 > *cap) {
+		*cap = (*n + l + 1) * 2;
+		*b = realloc(*b, *cap);
+	}
+	memcpy(*b + *n, s, l);
+	*n += l;
+}
+
+static void dm_tok(char **b, size_t *n, size_t *cap, const char *src, const vtok *t)
+{
+	char tmp[256];
+
+	if ((t->flags & TF_DIRTY) && t->len <= sizeof(tmp)) {
+		size_t l = vlex_spell(src, t, tmp);
+
+		dm_put(b, n, cap, tmp, l);
+	} else {
+		dm_put(b, n, cap, src + t->off, t->len);
+	}
+}
+
+int pp_macros(pp *p, char **out, size_t *len)
+{
+	uint32_t *ids = NULL, nid = 0, capid = 0;
+	char *b = NULL;
+	size_t n = 0, cap = 0;
+
+	for (uint32_t d = 0; d < NMDIR; d++) {
+		const uintptr_t *pg = p->mdir[d];
+
+		if (!pg)
+			continue;
+		for (uint32_t k = 0; k < MPAGE; k++) {
+			const pmacro *m = (const pmacro *)(pg[k] & ~(uintptr_t)1);
+
+			if (!m || m->kind == MK_BUILTIN)
+				continue;
+			if (nid == capid)
+				ids = realloc(ids, (capid = capid ? capid * 2 : 1024) * sizeof(*ids));
+			ids[nid++] = d << MPAGE_BITS | k;
+		}
+	}
+	qsort(ids, nid, sizeof(*ids), mname_cmp);
+	for (uint32_t i = 0; i < nid; i++) {
+		const pmacro *m = (const pmacro *)(mget(p, ids[i]) & ~(uintptr_t)1);
+		const vident *v = &vintern_ents[ids[i]];
+
+		dm_put(&b, &n, &cap, "#define ", 8);
+		dm_put(&b, &n, &cap, v->s, v->len);
+		if (m->kind == MK_FUNC) {
+			/* spelled from kinds and ids: a canonical copy's src is its body's text only */
+			for (uint32_t j = 0; j < m->nplist; j++) {
+				const vtok *q = &m->plist[j];
+
+				if (q->kind == T_IDENT)
+					dm_put(&b, &n, &cap, vintern_ents[q->id].s, vintern_ents[q->id].len);
+				else
+					dm_put(&b, &n, &cap, q->kind == T_LPAREN ? "(" : q->kind == T_RPAREN ? ")" :
+					       q->kind == T_COMMA ? "," : "...", q->kind == T_ELLIPSIS ? 3 : 1);
+			}
+		}
+		dm_put(&b, &n, &cap, " ", 1);
+		for (uint32_t j = 0; j < m->nbody; j++) {
+			if (j && (m->body[j].flags & TF_SPACE))
+				dm_put(&b, &n, &cap, " ", 1);
+			dm_tok(&b, &n, &cap, m->src, &m->body[j]);
+		}
+		dm_put(&b, &n, &cap, "\n", 1);
+	}
+	free(ids);
+	*out = b ? b : calloc(1, 1);
+	*len = n;
+	return 0;
+}

@@ -95,6 +95,8 @@ void pp_hold_tmp(pp *p, int on);
  * Returns the number of errors.
  */
 int pp_text(pp *p, const char **out, size_t *len);
+/* -dM: the defined macros, sorted, as clang prints them (malloc'ed) */
+int pp_macros(pp *p, char **out, size_t *len);
 /* header cache counters (process-wide) */
 void pp_hc_stats(char *buf, size_t n);
 /* errors reported so far */

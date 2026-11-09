@@ -680,7 +680,7 @@ int ppd_run(int argc, char **argv, const ppd_env *env)
 	char *pmap = NULL;
 	double t0;
 	pp *p;
-	int syntax = 0, layout = 0, ms_anon = 0, short_wchar = 0, tokhash = 0, emit = 0, objmode = 0;
+	int dmacros = 0, syntax = 0, layout = 0, ms_anon = 0, short_wchar = 0, tokhash = 0, emit = 0, objmode = 0;
 	int tri = -1, std = 0, strict = 0, wimpl_int = 0, wimpl_fn = 0, gnu89_inline = -1, vcc_kernel = 0;
 	char objbuf[1024];
 
@@ -693,6 +693,7 @@ int ppd_run(int argc, char **argv, const ppd_env *env)
 		if (!strcmp(a, "-fsyntax-only")) { syntax = 1; continue; }
 		if (!strcmp(a, "-S")) { syntax = 1; emit = 1; continue; }
 		if (!strcmp(a, "-c")) { objmode = 1; continue; }
+		if (!strcmp(a, "-dM")) { dmacros = 1; continue; }
 		if (!strcmp(a, "-fms-anonymous-structs") || !strcmp(a, "-fms-extensions")) { ms_anon = 1; continue; }
 		if (!strcmp(a, "-fshort-wchar")) { short_wchar = 1; continue; }
 		if (!strcmp(a, "-fcolor-diagnostics") || !strcmp(a, "-fdiagnostics-color") || !strcmp(a, "-fdiagnostics-color=always")) { dcolor = 1; continue; }
@@ -1100,6 +1101,13 @@ int ppd_run(int argc, char **argv, const ppd_env *env)
 		pp_text(p, &s, &l);
 		o.p = (char *)s;
 		o.n = l;
+		if (dmacros) {
+			char *m;
+
+			pp_macros(p, &m, &l);
+			o.p = m;	/* freed with the process or the next job: small */
+			o.n = l;
+		}
 	}
 	if (getenv("VPP_TIME")) {
 		extern _Atomic unsigned long pp_stat_try, pp_stat_skip, vdir_probes;

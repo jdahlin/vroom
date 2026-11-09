@@ -201,7 +201,16 @@ static ival eprimary(ev *e, bool live)
 		}
 		if (p->o->c23 && e->t.id == KW_true)
 			r.v = 1;	/* C23: true is 1 in #if (false is 0 anyway) */
-		eadv(e);	/* an identifier that is not a macro: 0 */
+		{
+			uint32_t id = e->t.id, loc = e->t.loc;
+
+			eadv(e);	/* an identifier that is not a macro: 0 */
+			if (e->t.kind == T_LPAREN && !e->bad) {
+				error(p, loc, "function-like macro '%.*s' is not defined",
+				      (int)vintern_ents[id].len, vintern_ents[id].s);
+				e->bad = true;
+			}
+		}
 		return r;
 	default:
 		if (!e->bad)

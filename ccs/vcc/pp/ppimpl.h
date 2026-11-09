@@ -114,11 +114,12 @@ enum {
  */
 struct pmacro {
 	const vtok *body;
+	const vtok *plist;	/* function-like: "(" ... ")" (plist[0, nplist)), for -dM */
 	const char *src;
 	const uint8_t *pidx;	/* per body token: parameter index + 1, or 0 */
 	uint32_t nbody, name;
 	uint32_t hash;		/* canon_macro */
-	uint16_t nparam;
+	uint16_t nparam, nplist;
 	uint8_t kind, flags, builtin;
 };
 

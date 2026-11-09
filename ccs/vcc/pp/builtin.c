@@ -180,6 +180,11 @@ static int has_query(pp *p, int b, const char *name, uint32_t loc)
 		else
 			hi = mid;
 	}
+	/* clang: the __is_target_* macros answer 1 too (AvailabilityInternal.h asks) */
+	if (b == B_HAS_BUILTIN && !strncmp(name, "__is_target_", 12))
+		for (int k = B_IS_TARGET_ARCH; k <= B_IS_TARGET_VARIANT_ENVIRONMENT; k++)
+			if (!strcmp(name, q[k]))
+				return 1;
 	/* the table is what the kernel and SDK headers asked clang; the front end knows more */
 	if (b == B_HAS_BUILTIN && pp_builtin_known && pp_builtin_known(name))
 		return 1;

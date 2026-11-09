@@ -65,6 +65,16 @@ def cmp(t):
     p = subprocess.run([VPP, '--cmp', refname(obj)] + a, cwd=B, capture_output=True, text=True)
     return obj, p.returncode, (p.stdout + p.stderr)[-1500:]
 
+def dm(t):
+    """-dM: the macro table at the end of the TU, bytes vs clang"""
+    obj, a = t
+    r = [subprocess.run([x] + a + ['-dM', '-E'], cwd=B, capture_output=True) for x in (CL, VPP)]
+    if r[0].stdout == r[1].stdout: return obj, 0, ''
+    import difflib
+    d = difflib.unified_diff(r[0].stdout.decode(errors='replace').splitlines(),
+                             r[1].stdout.decode(errors='replace').splitlines(), 'clang', 'vpp', n=0, lineterm='')
+    return obj, 1, '\n'.join(list(d)[:12]) + r[1].stderr.decode(errors='replace')[-300:]
+
 if __name__ == '__main__':
     av = [a for a in sys.argv[1:] if a not in ('--kernel', '--cmp')]; j = 6
     if '-j' in av: k = av.index('-j'); j = int(av[k+1]); del av[k:k+2]
@@ -74,6 +84,7 @@ if __name__ == '__main__':
         sys.exit(0)
     ts = tus(pat)
     if '--kernel' in sys.argv: ts = [t for t in ts if not t[0].startswith('scripts/')]
+    if mode == 'dm': ts = [t for t in ts if t[1][-1].endswith('.c')]	# .S: clang's -dM drops macros (TODO.md)
     if mode == 'batch':
         jf = f'/tmp/vcc-batch-{os.getpid()}.jobs'
         with open(jf, 'w') as f:
@@ -82,7 +93,7 @@ if __name__ == '__main__':
         os.unlink(jf); sys.exit(r.returncode)
     if mode == 'ref': os.makedirs(REF, exist_ok=True)
     with Pool(j) as pool:
-        res = pool.map(mkref if mode == 'ref' else cmp, ts, chunksize=4)
+        res = pool.map(mkref if mode == 'ref' else dm if mode == 'dm' else cmp, ts, chunksize=4)
     bad = [r for r in res if r[1]]
     for obj, rc, err in bad[:int(os.environ.get('SHOW', 20))]:
         print(f'--- {obj} (rc {rc})\n{err}')
