@@ -60,6 +60,14 @@ def cases(d):
     case('idents-7M', 'error', {'a.c': ''.join('int ' + ','.join(f'v{j}' for j in range(i, i + 10)) + ';\n'
                                            for i in range(0, 7000000, 10))}, 'a.c', regex='identifier table full')
     # fixed limits that reject (or crash on) valid code
+    def rnest(n):
+        e = 'a[0]'
+        for i in range(n):
+            e = f'a[{i % 64}] + x * ({e})'
+        return 'volatile long a[64];\nlong f(long x) { return ' + e + '; }\n'
+    # right-nested expressions past the temporaries: spilled; far past the stack: an error or code, no crash (clang crashes)
+    case('expr-right-nest-250', 'ok', {'a.c': rnest(250)}, 'a.c')
+    case('expr-right-nest-10k', 'any', {'a.c': rnest(10000)}, 'a.c')	# vccd's stacks are bigger: it compiles
     case('struct-10k-members', 'ok', {'a.c': 'struct s {' + ''.join(f' int m{i};' for i in range(10000)) + ' } v;\n'}, 'a.c')
     case('declarator-100-ptrs', 'ok', {'a.c': 'int ' + '*' * 100 + 'p;\n'}, 'a.c')
     case('anon-nest-20', 'ok', {'a.c': 'struct s { ' + 'struct { ' * 20 + 'int x; ' + '}; ' * 20 + '} v;\nint f(void) { return v.x; }\n'}, 'a.c')

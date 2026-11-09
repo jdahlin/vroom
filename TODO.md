@@ -131,6 +131,9 @@ Existing gates that every change must keep green: `vcc-diff.py cmp`
   sed, gawk, bash, openssl, curl, libxml2, glib), the clang build as
   reference; (3) the whole archive only if (1)-(2) still find bugs at a
   rate that justifies it.
+- [ ] **rt `%Lg` with clang's caller**: `printf("%Lg", f())` of 19.0000000000009L prints
+  `1.9e+01` in the clang+rt reference (vcc's build prints `19`, the right answer).  Seen in tests/vcc/deep_mixed.c,
+  which prints `(double)` with `%.17g` instead.
 - [ ] **T18 runtime gaps hide torture tests.**  34 gcc/tcc tests are
   `ref-fail` (`vcc-ctests.py --show ref-fail`): ~15 only because
   `tests/rt` lacks `pow`, `tanh`, `__divsc3`, `__fixsfti`, `tmpnam`,
@@ -501,7 +504,9 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
   *Validate:* T6 (`llvm-dwarfdump --verify`); `llvm-symbolizer` maps
   addresses to the right lines for `tests/vcc`; later a scripted lldb
   session (break at file:line, print local).
-- [ ] **Register spilling** [P]: ~18-deep right-nested expression is a
+- [x] **Register spilling** [P] (done: a third try of the function spills each binary
+  operator's left value to a frame slot; tests/vcc/deep_expr.c, deep_mixed.c (depth 10..200,
+  long/calls/__int128/double/long double), stress expr-right-nest-250/10k): ~18-deep right-nested expression was a
   fatal "out of registers" (`emit.c:2176-2195`).
   *Validate:* T1 `deep_expr.c` (generated: right-nested depth 10..200,
   mixed int/FP/calls); T5 for depth 10k (no crash).

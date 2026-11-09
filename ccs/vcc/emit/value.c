@@ -12,7 +12,7 @@ VPRIV int treg(ecx *e)
 				e->usedcs |= 1u << tempregs[i];
 			return tempregs[i];
 		}
-	if (e->nlr || (e->inlfree && e->inlfree < INLINE_FREE_SAFE))
+	if (e->nlr || (e->inlfree && e->inlfree < INLINE_FREE_SAFE) || !e->spill)
 		_longjmp(e->bail, 2);	/* emit_function tries again more carefully */
 	{
 		const fnctx *f = e->f;

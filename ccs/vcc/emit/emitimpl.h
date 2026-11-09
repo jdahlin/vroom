@@ -391,6 +391,7 @@ typedef struct ecx {
 	uint32_t live;		/* bit i: tempregs[i] in use */
 	uint32_t resv;		/* ... of those, never handed out: B_LREG variables', x28 once falign > 16 */
 	int inlfree;		/* free temporaries an inlined call keeps (0: INLINE_FREE_SAFE) */
+	int spill;		/* last try: a binary operator's left value waits in a frame slot */
 	int nlr;		/* B_LREG candidates of the emitted function: sym, register */
 	uint32_t lrsym[MAXLREG];
 	uint8_t lrreg[MAXLREG];

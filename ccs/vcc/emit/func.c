@@ -569,7 +569,10 @@ VPRIV void emit_function(ecx *e, uint32_t s)
 	e->inlfree = INLINE_FREE_FAST;
 	if (emit_function1(e, s, e->E->nlreg)) {
 		e->inlfree = INLINE_FREE_SAFE;
-		emit_function1(e, s, 0);
+		if (emit_function1(e, s, 0)) {
+			e->spill = 1;	/* still out: spill (expr.c gen_binary) */
+			emit_function1(e, s, 0);
+		}
 	}
-	e->nlr = 0, e->resv = 0, e->inlfree = 0;	/* out of a function: no register variables */
+	e->nlr = 0, e->resv = 0, e->inlfree = 0, e->spill = 0;	/* out of a function: no register variables */
 }
