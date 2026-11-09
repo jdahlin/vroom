@@ -96,7 +96,7 @@ VPRIV void winit(ecx *e, uint64_t off, qty ty, uint32_t init, bool zeroed)
 		if (!zeroed) {
 			wslot_addr(e, off);
 			wconst(e, WT_I32, 0);
-			wconst(e, WT_I64, (int64_t)tsize(c, ty));
+			wpconst(e, (int64_t)tsize(c, ty));
 			wi(e, "memory.fill\t0");
 		}
 		welems(e, off, ty, init);
@@ -719,11 +719,15 @@ VPRIV void wsj_begin(ecx *e)
 
 	W->sjl = wnewloc(e, WT_I32);
 	W->sjv = wnewloc(e, WT_I32);
-	W->sjsp = wnewloc(e, WT_I64);
-	W->sjp = wnewloc(e, WT_I64);
+	W->sjsp = wnewloc(e, WPT(c));
+	W->sjp = wnewloc(e, WPT(c));
 	W->sjfid = wslot(e, 4, 4);
-	tb_s(&W->decl, "__wasm_setjmp\t(i64, i32, i64) -> ()\n__wasm_setjmp_test\t(i64, i64) -> (i32)\n"
-		       "__wasm_longjmp\t(i64, i32) -> ()\n");
+	if (WASM32(c))
+		tb_s(&W->decl, "__wasm_setjmp\t(i32, i32, i32) -> ()\n__wasm_setjmp_test\t(i32, i32) -> (i32)\n"
+			       "__wasm_longjmp\t(i32, i32) -> ()\n");
+	else
+		tb_s(&W->decl, "__wasm_setjmp\t(i64, i32, i64) -> ()\n__wasm_setjmp_test\t(i64, i64) -> (i32)\n"
+			       "__wasm_longjmp\t(i64, i32) -> ()\n");
 	wi(e, "global.get\t__stack_pointer");
 	wset(e, W->sjsp);
 	W->sjloop = wblock(e, "loop");
@@ -757,17 +761,19 @@ VPRIV void wsj_begin(ecx *e)
 VPRIV void wsj_end(ecx *e)
 {
 	wst *W = e->w;
+	bool w32 = WASM32(e->c);
 	int b;
 
+	/* the exception's payload: { void *env; int val; } */
 	wi(e, "catch\t__c_longjmp");
 	wset(e, W->sjp);
 	wget(e, W->sjsp);
 	wi(e, "global.set\t__stack_pointer");
 	wget(e, W->sjp);
-	wiu(e, "i32.load", 8);
+	wiu(e, "i32.load", w32 ? 4 : 8);
 	wset(e, W->sjv);
 	wget(e, W->sjp);
-	wiu(e, "i64.load", 0);
+	wiu(e, w32 ? "i32.load" : "i64.load", 0);
 	wset(e, W->sjp);
 	b = wblock(e, "block");
 	wget(e, W->sjp);
@@ -869,14 +875,14 @@ static void wdecl_stmt(ecx *e, const node *x)
 		if (b->gen != W->gen) {
 			b->gen = W->gen;
 			b->k = WB_PTR;
-			b->loc = wnewloc(e, WT_I64);
+			b->loc = wnewloc(e, WPT(c));
 		}
 		W->dyn = true;
 		wi(e, "global.get\t__stack_pointer");
 		wvla_bytes(e, y->ty);
-		wi(e, "i64.sub");
-		wconst(e, WT_I64, -(int64_t)al);
-		wi(e, "i64.and");
+		wpop(e, "sub");
+		wpconst(e, -(int64_t)al);
+		wpop(e, "and");
 		wtee(e, b->loc);
 		wi(e, "global.set\t__stack_pointer");
 		if (x->b) {
@@ -1305,7 +1311,7 @@ VPRIV void wstmt(ecx *e, uint32_t n)
 				efatal(e, x->loc, "wasm: too many blocks");
 			W->vb[W->nvb].depth = W->depth;
 			W->vb[W->nvb].first = first;
-			W->vb[W->nvb].sp = wnewloc(e, WT_I64);
+			W->vb[W->nvb].sp = wnewloc(e, WPT(c));
 			W->dyn = true;
 			wi(e, "global.get\t__stack_pointer");
 			wset(e, W->vb[W->nvb++].sp);
@@ -1468,7 +1474,7 @@ VPRIV void wstmt(ecx *e, uint32_t n)
 		break;
 	case N_GOTO_IND: {
 		/* compare with the number of every label whose address is taken */
-		uint32_t t = wtmp(e, WT_I64);
+		uint32_t t = wtmp(e, WPT(c));
 		const wgp *L = W->gp + W->ngp;
 
 		wexpr(e, x->a, true);
@@ -1478,8 +1484,8 @@ VPRIV void wstmt(ecx *e, uint32_t n)
 			    (i && L[i - 1].label == L[i].label))
 				continue;
 			wget(e, t);
-			wconst(e, WT_I64, (int64_t)L[i].label + 1);
-			wi(e, "i64.eq");
+			wpconst(e, (int64_t)L[i].label + 1);
+			wpop(e, "eq");
 			wblock(e, "if");
 			wgoto(e, L[i].label, x->loc);
 			wend(e, "end_if");

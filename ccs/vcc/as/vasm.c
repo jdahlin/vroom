@@ -84,7 +84,7 @@ int main(int argc, char **argv)
 	int wasm = 0;
 	for (int i = 1; i < argc; i++) {
 		if (!strcmp(argv[i], "-o") && i + 1 < argc) out = argv[++i];
-		else if (!strncmp(argv[i], "--target=wasm", 13)) wasm = 1;
+		else if (!strncmp(argv[i], "--target=wasm", 13)) wasm = strncmp(argv[i] + 13, "32", 2) ? 64 : 32;
 		else in = argv[i];
 	}
 	if (!in) { fprintf(stderr, "usage: vasm [--target=wasm64-...] [-o out.o] in.s\n"); return 2; }
@@ -93,7 +93,7 @@ int main(int argc, char **argv)
 	if (wasm) {
 		/* LLVM's wasm .s to a wasm object (arch/wasm/as, platform/wasm) */
 		uint8_t *ob; size_t on; char err[512];
-		if (wasm_assemble(p, n, &ob, &on, err, sizeof err)) { fprintf(stderr, "%s: %s\n", in, err); return 1; }
+		if (wasm_assemble(p, n, wasm == 32, &ob, &on, err, sizeof err)) { fprintf(stderr, "%s: %s\n", in, err); return 1; }
 		FILE *f = fopen(out, "wb");
 		if (!f || fwrite(ob, 1, on, f) != on || fclose(f)) { perror(out); return 1; }
 		free(ob);

@@ -6,8 +6,8 @@
 #include <stdint.h>
 
 /* Assemble LLVM wasm `.s` text into a relocatable wasm object in *out
- * (malloc'ed bytes, the caller frees).  Returns 0, or -1 with a message in
- * err. */
-int wasm_assemble(const char *text, size_t len, uint8_t **out, size_t *outlen, char *err, size_t errcap);
+ * (malloc'ed bytes, the caller frees), for wasm32 (w32) or wasm64.  Returns
+ * 0, or -1 with a message in err. */
+int wasm_assemble(const char *text, size_t len, int w32, uint8_t **out, size_t *outlen, char *err, size_t errcap);
 
 #endif

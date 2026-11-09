@@ -200,21 +200,36 @@ static void conv_error(cc *c, uint32_t n, qty to, const char *what, const char *
 {
 	pp_span r = rng(c, n);
 	const char *f = tyname(c, N(n)->ty), *t = tyname(c, to);
+	uint32_t loc = c->cv_what == CX_PASS || c->cv_what == CX_RETURN ? r.b : c->cv_loc;
+	int bit = !strcmp(flag, "-Wint-conversion") ? 1 : !strcmp(flag, "-Wincompatible-pointer-types") ? 2 : 4;
+	char msg[1024];
 
 	switch (c->cv_what) {
 	case CX_INIT:
-		report(c, "error", c->cv_loc, &r, 1, NULL, 0, "%s initializing '%s' with an expression of type '%s' [%s]", what, t, f, flag);
+		snprintf(msg, sizeof msg, "%s initializing '%s' with an expression of type '%s' [%s]", what, t, f, flag);
 		break;
 	case CX_PASS:
-		report(c, "error", r.b, &r, 1, NULL, 0, "%s passing '%s' to parameter of type '%s' [%s]", what, f, t, flag);
-		param_note(c);
+		snprintf(msg, sizeof msg, "%s passing '%s' to parameter of type '%s' [%s]", what, f, t, flag);
 		break;
 	case CX_RETURN:
-		report(c, "error", r.b, &r, 1, NULL, 0, "%s returning '%s' from a function with result type '%s' [%s]", what, f, t, flag);
+		snprintf(msg, sizeof msg, "%s returning '%s' from a function with result type '%s' [%s]", what, f, t, flag);
 		break;
 	default:
-		report(c, "error", c->cv_loc, &r, 1, NULL, 0, "%s assigning to '%s' from '%s' [%s]", what, t, f, flag);
+		snprintf(msg, sizeof msg, "%s assigning to '%s' from '%s' [%s]", what, t, f, flag);
 	}
+	if (c->o->conv_warn & bit) {
+		/* -Wno-error=...: clang's warning (the message without its flag, which pp_warnx adds) */
+		char *b = strrchr(msg, '[');
+
+		if (b && b > msg)
+			b[-1] = 0;
+		if (cc_warnx(c, flag + 2, true, NULL, loc, &r, 1, NULL, 0, "%s", msg) && c->cv_what == CX_PASS)
+			param_note(c);
+		return;
+	}
+	report(c, "error", loc, &r, 1, NULL, 0, "%s", msg);
+	if (c->cv_what == CX_PASS)
+		param_note(c);
 }
 
 /* pointee types that clang's -Wincompatible-pointer-types accepts: compatible once

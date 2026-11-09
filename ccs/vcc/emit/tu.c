@@ -575,7 +575,7 @@ static int emit_tu1(cc *c, const cc_opts *o, bool write_out, uint8_t *mf, bool *
 					size_t on;
 					char err[512];
 
-					if (wasm_assemble(all.p, all.n, &ob, &on, err, sizeof err)) {
+					if (wasm_assemble(all.p, all.n, o->target == PP_WASM32, &ob, &on, err, sizeof err)) {
 						as_error(c, "assembler: %s", err);
 						E.errors++;
 					} else {

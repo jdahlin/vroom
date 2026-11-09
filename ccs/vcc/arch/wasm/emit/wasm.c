@@ -120,7 +120,7 @@ VPRIV wabi wclassify(cc *c, qty t)
 			if (tsize(c, s) == 16 && !is_array(c, s))
 				return (wabi){ WA_PAIR, WT_I64, s, 2 };
 		}
-		return (wabi){ WA_IND, WT_I64, t, 0 };
+		return (wabi){ WA_IND, (uint8_t)WPT(c), t, 0 };
 	}
 	if (tsize(c, t) == 16 && (is_integer(c, t) || is_flt(c, t)))
 		return (wabi){ WA_PAIR, WT_I64, t, 2 };
@@ -128,9 +128,9 @@ VPRIV wabi wclassify(cc *c, qty t)
 		/* lane by lane (no simd128), as clang */
 		qty b = T(c, t)->base;
 
-		return (wabi){ WA_PAIR, (uint8_t)wrep(wty(c, b)), t, (uint32_t)(tsize(c, t) / tsize(c, b)) };
+		return (wabi){ WA_PAIR, (uint8_t)wrep(c, wty(c, b)), t, (uint32_t)(tsize(c, t) / tsize(c, b)) };
 	}
-	return (wabi){ WA_IND, WT_I64, t, 0 };
+	return (wabi){ WA_IND, (uint8_t)WPT(c), t, 0 };
 }
 
 VPRIV wabi wclassify_ret(cc *c, qty t)
@@ -184,7 +184,7 @@ VPRIV void wsig(ecx *e, tbuf *b, qty ft, uint32_t call, uint32_t def, bool *sret
 
 	tb_c(b, '(');
 	if (r.k == WA_IND) {
-		tb_s(b, "i64");
+		tb_s(b, wt_name[WPT(c)]);
 		first = false;
 	}
 	if (sret)
@@ -206,7 +206,7 @@ VPRIV void wsig(ecx *e, tbuf *b, qty ft, uint32_t call, uint32_t def, bool *sret
 	if (f->flags & TF_VARIADIC) {
 		if (!first)
 			tb_s(b, ", ");
-		tb_s(b, "i64");
+		tb_s(b, wt_name[WPT(c)]);
 	}
 	tb_s(b, ") -> (");
 	if (r.k == WA_SCALAR)
@@ -321,8 +321,10 @@ VPRIV void wasm_tail(cc *c, tbuf *t, _Atomic uint8_t *claimed)
 	}
 	if (!n)
 		return;
+	const char *P = wt_name[WPT(c)];
+
 	qsort(d, n, sizeof *d, wprio_cmp);
-	tb_s(t, "	.functype	__cxa_atexit (i64, i64, i64) -> (i32)\n");
+	wfmt(t, "\t.functype\t__cxa_atexit (%s, %s, %s) -> (i32)\n", P, P, P);
 	for (uint32_t i = 0; i < n;) {
 		uint32_t p = (uint32_t)(d[i] >> 40), j = i;
 		char sfx[16] = "";
@@ -332,7 +334,7 @@ VPRIV void wasm_tail(cc *c, tbuf *t, _Atomic uint8_t *claimed)
 		if (p != 65535)
 			snprintf(sfx, sizeof sfx, ".%u", p);
 		wfmt(t, "\t.section\t.text..Lcall_dtors%s,\"\",@\n\t.type\t.Lcall_dtors%s,@function\n"
-			  ".Lcall_dtors%s:\n\t.functype\t.Lcall_dtors%s (i64) -> ()\n", sfx, sfx, sfx, sfx);
+			  ".Lcall_dtors%s:\n\t.functype\t.Lcall_dtors%s (%s) -> ()\n", sfx, sfx, sfx, sfx, P);
 		for (uint32_t k = j; k-- > i;) {
 			uint32_t s = (uint32_t)d[k];
 
@@ -344,11 +346,11 @@ VPRIV void wasm_tail(cc *c, tbuf *t, _Atomic uint8_t *claimed)
 		}
 		wfmt(t, "\tend_function\n\t.section\t.text..Lregister_call_dtors%s,\"\",@\n"
 			  "\t.type\t.Lregister_call_dtors%s,@function\n.Lregister_call_dtors%s:\n"
-			  "\t.functype\t.Lregister_call_dtors%s () -> ()\n\tblock\n\ti64.const\t.Lcall_dtors%s\n"
-			  "\ti64.const\t0\n\ti64.const\t__dso_handle\n\tcall\t__cxa_atexit\n\ti32.eqz\n"
+			  "\t.functype\t.Lregister_call_dtors%s () -> ()\n\tblock\n\t%s.const\t.Lcall_dtors%s\n"
+			  "\t%s.const\t0\n\t%s.const\t__dso_handle\n\tcall\t__cxa_atexit\n\ti32.eqz\n"
 			  "\tbr_if\t0\n\tunreachable\n\tend_block\n\tend_function\n"
-			  "\t.section\t.init_array%s,\"\",@\n\t.p2align\t3, 0x0\n\t.int64\t.Lregister_call_dtors%s\n",
-			  sfx, sfx, sfx, sfx, sfx, sfx, sfx);
+			  "\t.section\t.init_array%s,\"\",@\n\t.p2align\t%d, 0x0\n\t.int%d\t.Lregister_call_dtors%s\n",
+			  sfx, sfx, sfx, sfx, P, sfx, P, P, sfx, WASM32(c) ? 2 : 3, WASM32(c) ? 32 : 64, sfx);
 		i = j;
 	}
 	tb_s(t, "\t.hidden\t__dso_handle\n\t.weak\t__dso_handle\n");
@@ -361,8 +363,8 @@ VPRIV void wasm_header(cc *c, tbuf *hdr, ecx *ctx, int nthr)
 	bool tag = false;
 	const char **v;
 
-	(void)c;
-	tb_s(hdr, "\t.globaltype\t__stack_pointer, i64\n\t.tabletype\t__indirect_function_table, funcref\n");
+	tb_s(hdr, WASM32(c) ? "\t.globaltype\t__stack_pointer, i32\n" : "\t.globaltype\t__stack_pointer, i64\n");
+	tb_s(hdr, "\t.tabletype\t__indirect_function_table, funcref\n");
 	for (int t = 0; t < nthr; t++)
 		if (ctx[t].w)
 			for (size_t i = 0; i < ctx[t].w->decl.n; i++)
@@ -400,7 +402,7 @@ VPRIV void wasm_header(cc *c, tbuf *hdr, ecx *ctx, int nthr)
 	}
 	/* a function catches longjmp's exception (wsj_end) */
 	if (tag)
-		tb_s(hdr, "\t.tagtype\t__c_longjmp i64\n");
+		tb_s(hdr, WASM32(c) ? "\t.tagtype\t__c_longjmp i32\n" : "\t.tagtype\t__c_longjmp i64\n");
 	free(v);
 }
 
@@ -428,7 +430,7 @@ static void wparams(ecx *e, uint32_t s, uint32_t *np)
 	uint32_t idx = 0;
 
 	if (wclassify_ret(c, ft->base).k == WA_IND) {
-		W->lt[idx] = WT_I64;
+		W->lt[idx] = (uint8_t)WPT(c);
 		W->sret = idx++;
 	}
 	/* the incoming locals first (their indices come before every other local) */
@@ -441,7 +443,7 @@ static void wparams(ecx *e, uint32_t s, uint32_t *np)
 			W->lt[idx++] = a.st;
 	}
 	if (ft->flags & TF_VARIADIC) {
-		W->lt[idx] = WT_I64;
+		W->lt[idx] = (uint8_t)WPT(c);
 		W->vap = idx++;
 	}
 	W->nloc = W->nparam = idx;
@@ -593,7 +595,7 @@ VPRIV void wasm_emit_function(ecx *e, uint32_t s)
 	}
 	wend(e, "end_block");
 	if (W->fp != UINT32_MAX || W->dyn)
-		W->sp0 = wnewloc(e, WT_I64);
+		W->sp0 = wnewloc(e, WPT(c));
 
 	/* the function: header, locals, prologue, body, epilogue */
 	{
@@ -640,14 +642,11 @@ VPRIV void wasm_emit_function(ecx *e, uint32_t s)
 		tb_u(f, W->sp0);
 		tb_s(f, "\n");
 		if (W->fp != UINT32_MAX) {
-			tb_s(f, "\ti64.const\t");
-			tb_u(f, fs);
-			tb_s(f, "\n\ti64.sub\n");
-			if (W->falign > 16) {
-				tb_s(f, "\ti64.const\t");
-				tb_i(f, -(int64_t)W->falign);
-				tb_s(f, "\n\ti64.and\n");
-			}
+			const char *P = wt_name[WPT(c)];
+
+			wfmt(f, "\t%s.const\t%llu\n\t%s.sub\n", P, (unsigned long long)fs, P);
+			if (W->falign > 16)
+				wfmt(f, "\t%s.const\t%lld\n\t%s.and\n", P, -(long long)W->falign, P);
 			tb_s(f, "\tlocal.tee\t");
 			tb_u(f, W->fp);
 			tb_s(f, "\n");
@@ -677,7 +676,7 @@ VPRIV void wasm_emit_function(ecx *e, uint32_t s)
 				tb_c(f, '.');
 				tb_u(f, a->prio);
 			}
-			tb_s(f, ",\"\",@\n\t.p2align\t3, 0x0\n\t.int64\t");
+			tb_s(f, WASM32(c) ? ",\"\",@\n\t.p2align\t2, 0x0\n\t.int32\t" : ",\"\",@\n\t.p2align\t3, 0x0\n\t.int64\t");
 			wfname(c, f, REF(RK_SYM, s));
 			tb_c(f, '\n');
 		}
@@ -685,10 +684,12 @@ VPRIV void wasm_emit_function(ecx *e, uint32_t s)
 	}
 	if (wis_main(c, s) && f->n > 0 && strstr(f->p, "__original_main:")) {
 		/* main(void): what emscripten calls is main(argc, argv) (clang's wrapper) */
-		tb_s(f, "\t.section\t.text.main,\"\",@\n\t.globl\tmain\n\t.type\tmain,@function\nmain:\n"
-			"\t.functype\tmain (i32, i64) -> (i32)\n\tcall\t__original_main\n\tend_function\n"
-			"\t.globl\t__main_void\n\t.type\t__main_void,@function\n__main_void = __original_main\n");
-		tb_s(&W->decl, "main\t(i32, i64) -> (i32)\n");
+		const char *P = wt_name[WPT(c)];
+
+		wfmt(f, "\t.section\t.text.main,\"\",@\n\t.globl\tmain\n\t.type\tmain,@function\nmain:\n"
+			"\t.functype\tmain (i32, %s) -> (i32)\n\tcall\t__original_main\n\tend_function\n"
+			"\t.globl\t__main_void\n\t.type\t__main_void,@function\n__main_void = __original_main\n", P);
+		wfmt(&W->decl, "main\t(i32, %s) -> (i32)\n", P);
 	}
 	e->out.n = (e->out.n + 7) & ~(size_t)7;
 	start = e->out.n;

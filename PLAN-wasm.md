@@ -178,16 +178,35 @@ adresser i data (`.int32`/`.int64`, tabellindex), varargs-platser minst 4 byte.
 - `run` 6: optimeringsberoende (`bcp-1`, `builtin-constant`,
   `frame-address`, `20030125-1`), `complex-6` (`long double _Complex`) och
   `24_math_library` (bibliotekets signaturer för implicit deklarerade).
-- Inte gjort: `setjmp`/`longjmp` (wasm-EH), `bench/vcc-abi.py --target wasm64`
-  (ABI provat med egna skript, alla fyra kombinationerna, men inte som harness).
+- Inte gjort: `bench/vcc-abi.py --target wasm64` (ABI provat med egna skript,
+  alla fyra kombinationerna, men inte som harness).
 
-### W7 (2026-11-09): front end klar, generatorn inte
-`--target=wasm32-unknown-emscripten`: predefines som clang, ILP32 i front end.
-Generatorn, assemblern och länkaren antar 64-bitars pekare (`int *p = &g[1]`
-ger "address initializer for a 4-byte object"). Kvar: pekarbredd 4 genom
-`arch/wasm/emit/`, `.int32`-adresser, `i32`-adressering och
-`__stack_pointer` som i32, objektskrivarens relokeringar (MEMORY_ADDR_SLEB
-m.fl.), `vlink` utan `-mwasm64`, sviterna med `--target=wasm32`.
+Senare samma dag: `setjmp`/`longjmp` genom wasm-EH (`-mllvm -wasm-enable-sjlj`,
+som emscriptens `-sSUPPORT_LONGJMP=wasm`: `__wasm_setjmp`/`__wasm_longjmp`,
+`try`/`catch __c_longjmp`, taggar i assemblern, objektet och vlink;
+`tests/vcc/setjmp_sites.c`), destruktorer, `asm goto` med tom mall, `switch`
+på `__int128`, breda bit-fält, `_Atomic`-objekt, matematikfunktioner som
+instruktioner. `vcc-wasm.py -j 6`: 1 739/1 746 i alla lägen (`-S`, `--objcmp`
+byte för byte, `--obj --vlink`); kvar är de 6 `link_error`-testerna (kräver
+optimering) och `bcp-1`.
+
+### W7 (2026-11-09): klar
+`--target=wasm32-unknown-emscripten`: predefines som clang, ILP32 i front end,
+och nu hela vägen: pekarbredden per mål i generatorn (`WPT(c)`, `wrep()`:
+`i32`-adressering, `__stack_pointer` och tabellindex som i32, `.int32`-
+adresser i data, compiler-rt-signaturer med `P`), sjlj-nyttolasten
+`{env, val}` på 4+4 byte, assemblern med `R_MEMORY_ADDR_LEB` (5 byte) för
+symboler i memarg, objektskrivaren med i32-gränser för minne och tabell och
+`i32.const`-offset, och `vlink` som läser bredden ur objektens minnesimport
+(fel vid blandning).  Två rättelser i front end som wasm32 hittade (ILP32 gör
+`1ul << 40` till ett överskift): konstanta skift viks som clangs C (antal ≥
+bredd blir bredd−1, negativt antal skiftar åt andra hållet,
+`tests/vcc/const_shift.c`), och `-Wno-[error=]int-conversion`,
+`incompatible-pointer-types` och `incompatible-function-pointer-types` gör
+felet till en varning som clang.
+- `vcc-wasm.py -j 6 --wasm32`: 1 739/1 746, `--objcmp` byte för byte med
+  clangs objekt, `--obj --vlink` (`build/ccs/wasmtests32`); samma 7 kvar som
+  wasm64.
 
 ### W8 (2026-11-09): egen länkare, i gren `claude/wasm-w8-linker` (på W5)
 - `ld/wasmld.c`: `vlink` länkar wasm när det anropas som `wasm-ld` eller med

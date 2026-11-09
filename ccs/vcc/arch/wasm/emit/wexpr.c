@@ -110,7 +110,7 @@ VPRIV void wconv(ecx *e, qty from, qty to)
 	}
 	if (fk == WT_I64 && tk == WT_I32) {
 		wi(e, "i32.wrap_i64");
-		wnarrow(e, prim(TY_LONG), to);
+		wnarrow(e, prim(TY_LLONG), to);
 		return;
 	}
 	if (tk == WT_I32)
@@ -123,8 +123,8 @@ VPRIV void wconv(ecx *e, qty from, qty to)
 VPRIV void wfold_off(ecx *e, wlv *l)
 {
 	if (l->k == WL_MEM && l->off) {
-		wconst(e, WT_I64, (int64_t)l->off);
-		wi(e, "i64.add");
+		wpconst(e, (int64_t)l->off);
+		wpop(e, "add");
 		l->off = 0;
 	}
 }
@@ -158,7 +158,7 @@ static bool wvla(cc *c, qty t)
 	return a->kind == TY_ARRAY && (a->flags & TF_VLA);
 }
 
-/* push the value of the VLA size expression sn (an i64): fixed when its declaration ran */
+/* push the value of the VLA size expression sn (a size_t): fixed when its declaration ran */
 static void wvla_len(ecx *e, uint32_t sn)
 {
 	cc *c = e->c;
@@ -173,14 +173,14 @@ static void wvla_len(ecx *e, uint32_t sn)
 	wconv(e, N(sn)->ty, prim(TY_ULONG));
 }
 
-/* push the size of type t in bytes (an i64) */
+/* push the size of type t in bytes (a size_t) */
 VPRIV void wvla_bytes(ecx *e, qty t)
 {
 	cc *c = e->c;
 	const ctype *a = T(c, t);
 
 	if (!wvla(c, t)) {
-		wconst(e, WT_I64, (int64_t)tsize(c, t));
+		wpconst(e, (int64_t)tsize(c, t));
 		return;
 	}
 	if (!a->n)
@@ -188,7 +188,7 @@ VPRIV void wvla_bytes(ecx *e, qty t)
 	wvla_len(e, a->n);
 	if (wvla(c, a->base) || tsize(c, a->base) != 1) {
 		wvla_bytes(e, a->base);
-		wi(e, "i64.mul");
+		wpop(e, "mul");
 	}
 }
 
@@ -221,7 +221,7 @@ VPRIV void wvla_fix(ecx *e, qty t, bool pure)
 				if (W->nvsz >= WMAXGD)
 					efatal(e, e->curloc, "too many variable length array sizes in one function");
 				W->vszn[k] = a->n;
-				W->vszl[k] = wnewloc(e, WT_I64);
+				W->vszl[k] = wnewloc(e, WPT(c));
 			}
 			wexpr(e, a->n, true);
 			wconv(e, N(a->n)->ty, prim(TY_ULONG));
@@ -246,26 +246,31 @@ static uint64_t welem_size(ecx *e, qty ptr)
 	return tsize(c, b);
 }
 
-/* stack: [i64 n] -> n times the element size of ptr (es: welem_size) */
+/* stack: [n, address width] -> n times the element size of ptr (es: welem_size) */
 static void wscale(ecx *e, qty ptr, uint64_t es)
 {
 	if (es == 1)
 		return;
 	if (es)
-		wconst(e, WT_I64, (int64_t)es);
+		wpconst(e, (int64_t)es);
 	else
 		wvla_bytes(e, T(e->c, ptr)->base);
-	wi(e, "i64.mul");
+	wpop(e, "mul");
 }
 
-/* push an integer of type t as an i64 (an index, an offset) */
-VPRIV void wto_i64(ecx *e, qty t)
+/* an integer of type t on the stack to the address width (an index, an offset) */
+VPRIV void wto_ptr(ecx *e, qty t)
 {
 	cc *c = e->c;
+	int k = wty(c, t), p = WPT(c);
 
-	if (wty(c, t) == WT_I32)
+	if (k == p)
+		return;
+	if (k == WT_I32 && p == WT_I64)
 		wi(e, is_signed(c, t) && KIND(c, t) != TY_BOOL ? "i64.extend_i32_s" : "i64.extend_i32_u");
-	else if (wty(c, t) != WT_I64)
+	else if (k == WT_I64 && p == WT_I32)
+		wi(e, "i32.wrap_i64");
+	else
 		efatal(e, e->curloc, "wasm: a 128-bit index is not supported yet");
 }
 
@@ -355,9 +360,9 @@ VPRIV void wlval(ecx *e, uint32_t n, wlv *l, qty t)
 			break;
 		}
 		wexpr(e, x->b, true);
-		wto_i64(e, N(x->b)->ty);
+		wto_ptr(e, N(x->b)->ty);
 		wscale(e, N(x->a)->ty, es);
-		wi(e, "i64.add");
+		wpop(e, "add");
 		break;
 	}
 	case N_COMPLIT: {
@@ -453,7 +458,7 @@ VPRIV void wload(ecx *e, wlv *l, qty t)
 
 		if (nb > 8) {
 			/* low 8 bytes >> bitoff | the high part << (64 - bitoff) */
-			uint32_t ta = wtmp(e, WT_I64);
+			uint32_t ta = wtmp(e, WPT(c));
 
 			wtee(e, ta);
 			wiu(e, "i64.load", l->off);
@@ -517,7 +522,7 @@ VPRIV void wstore(ecx *e, wlv *l, qty t)
 	if (l->bf) {
 		int nb = wbf_bytes(e, l);
 		uint64_t mask = l->width >= 64 ? ~0ull : (1ull << l->width) - 1;
-		uint32_t tv = wtmp(e, wty(c, t)), ta = wtmp(e, WT_I64);
+		uint32_t tv = wtmp(e, wty(c, t)), ta = wtmp(e, WPT(c));
 
 		wset(e, tv);
 		if (nb > 8) {
@@ -587,7 +592,7 @@ VPRIV void wstore(ecx *e, wlv *l, qty t)
 /* stack: [dst src] -> [] */
 VPRIV void wcopy(ecx *e, uint64_t n)
 {
-	wconst(e, WT_I64, (int64_t)n);
+	wpconst(e, (int64_t)n);
 	wi(e, "memory.copy\t0, 0");
 }
 
@@ -634,14 +639,18 @@ VPRIV int w16(cc *c, qty t)
 	}
 }
 
-/* call a compiler-rt routine */
+/* call a compiler-rt routine; P in sig: an address (i32 or i64) */
 static void wrt(ecx *e, const char *name, const char *sig)
 {
 	wst *W = e->w;
 
 	tb_s(&W->decl, name);
 	tb_c(&W->decl, '\t');
-	tb_s(&W->decl, sig);
+	for (; *sig; sig++)
+		if (*sig == 'P')
+			tb_s(&W->decl, wt_name[WPT(e->c)]);
+		else
+			tb_c(&W->decl, *sig);
 	tb_c(&W->decl, '\n');
 	tb_s(&W->b, "\tcall\t");
 	tb_s(&W->b, name);
@@ -658,7 +667,7 @@ static void whalf(ecx *e, uint32_t a, int h)
 /* stack: [address] -> [lo hi] */
 VPRIV void wsplit(ecx *e)
 {
-	uint32_t a = wtmp(e, WT_I64);
+	uint32_t a = wtmp(e, WPT(e->c));
 
 	wset(e, a);
 	whalf(e, a, 0);
@@ -710,7 +719,7 @@ VPRIV void w16arith(ecx *e, int op, qty ty, qty rty)
 		if (rk != WT_I32)
 			wi(e, "i32.wrap_i64");
 		wset(e, n);
-		ta = wtmp(e, WT_I64);
+		ta = wtmp(e, WPT(c));
 		wset(e, ta);
 		{
 			uint64_t sl = wslot(e, 16, 16);
@@ -719,16 +728,16 @@ VPRIV void w16arith(ecx *e, int op, qty ty, qty rty)
 			whalf(e, ta, 0);
 			whalf(e, ta, 1);
 			wget(e, n);
-			wrt(e, op == T_LESSLESS ? "__ashlti3" : sg ? "__ashrti3" : "__lshrti3", "(i64, i64, i64, i32) -> ()");
+			wrt(e, op == T_LESSLESS ? "__ashlti3" : sg ? "__ashrti3" : "__lshrti3", "(P, i64, i64, i32) -> ()");
 			wslot_addr(e, sl);
 		}
 		wfree(e, ta);
 		wfree(e, n);
 		return;
 	}
-	tb = wtmp(e, WT_I64);
+	tb = wtmp(e, WPT(c));
 	wset(e, tb);
-	ta = wtmp(e, WT_I64);
+	ta = wtmp(e, WPT(c));
 	wset(e, ta);
 	switch (op) {
 	case T_PLUS: f = fl ? "__addtf3" : NULL; break;
@@ -747,7 +756,7 @@ VPRIV void w16arith(ecx *e, int op, qty ty, qty rty)
 		whalf(e, ta, 1);
 		whalf(e, tb, 0);
 		whalf(e, tb, 1);
-		wrt(e, f, "(i64, i64, i64, i64, i64) -> ()");
+		wrt(e, f, "(P, i64, i64, i64, i64) -> ()");
 		wslot_addr(e, sl);
 	} else if (fl) {
 		efatal(e, e->curloc, "wasm: unsupported operator on long double");
@@ -796,9 +805,9 @@ VPRIV void w16cmp(ecx *e, int op, qty t)
 	cc *c = e->c;
 	uint32_t ta, tb;
 
-	tb = wtmp(e, WT_I64);
+	tb = wtmp(e, WPT(c));
 	wset(e, tb);
-	ta = wtmp(e, WT_I64);
+	ta = wtmp(e, WPT(c));
 	wset(e, ta);
 	if (w16(c, t) == 2) {
 		static const char *const fn[] = { "__eqtf2", "__netf2", "__lttf2", "__gttf2", "__letf2", "__getf2" };
@@ -876,9 +885,9 @@ VPRIV void w16conv(ecx *e, qty from, qty to)
 			wfree(e, h);
 		}
 		if (t == 2)
-			wrt(e, fsg ? "__floattitf" : "__floatuntitf", "(i64, i64, i64) -> ()");
+			wrt(e, fsg ? "__floattitf" : "__floatuntitf", "(P, i64, i64) -> ()");
 		else
-			wrt(e, tsg ? "__fixtfti" : "__fixunstfti", "(i64, i64, i64) -> ()");
+			wrt(e, tsg ? "__fixtfti" : "__fixunstfti", "(P, i64, i64) -> ()");
 		wslot_addr(e, sl);
 		return;
 	}
@@ -908,7 +917,7 @@ VPRIV void w16conv(ecx *e, qty from, qty to)
 				return;
 			}
 			wiu(e, "i64.load", 0);
-			wconv(e, prim(TY_ULONG), to);
+			wconv(e, prim(TY_ULLONG), to);
 			return;
 		}
 		wsplit(e);
@@ -928,7 +937,7 @@ VPRIV void w16conv(ecx *e, qty from, qty to)
 	if (t == 1 && fk != WT_F32 && fk != WT_F64) {
 		uint32_t l = wtmp(e, WT_I64);
 
-		wconv(e, from, fsg ? prim(TY_LONG) : prim(TY_ULONG));
+		wconv(e, from, fsg ? prim(TY_LLONG) : prim(TY_ULLONG));
 		wtee(e, l);
 		if (fsg) {
 			wget(e, l);
@@ -952,16 +961,16 @@ VPRIV void w16conv(ecx *e, qty from, qty to)
 		wfree(e, v);
 		if (t == 1) {
 			fn = fk == WT_F32 ? (tsg ? "__fixsfti" : "__fixunssfti") : (tsg ? "__fixdfti" : "__fixunsdfti");
-			sig = fk == WT_F32 ? "(i64, f32) -> ()" : "(i64, f64) -> ()";
+			sig = fk == WT_F32 ? "(P, f32) -> ()" : "(P, f64) -> ()";
 		} else if (fk == WT_F32 || fk == WT_F64) {
 			fn = fk == WT_F32 ? "__extendsftf2" : "__extenddftf2";
-			sig = fk == WT_F32 ? "(i64, f32) -> ()" : "(i64, f64) -> ()";
+			sig = fk == WT_F32 ? "(P, f32) -> ()" : "(P, f64) -> ()";
 		} else if (fk == WT_I64) {
 			fn = fsg ? "__floatditf" : "__floatunditf";
-			sig = "(i64, i64) -> ()";
+			sig = "(P, i64) -> ()";
 		} else {
 			fn = fsg || tsize(c, from) < 4 ? "__floatsitf" : "__floatunsitf";
-			sig = "(i64, i32) -> ()";
+			sig = "(P, i32) -> ()";
 		}
 		wrt(e, fn, sig);
 		wslot_addr(e, sl);
@@ -972,7 +981,7 @@ VPRIV void w16conv(ecx *e, qty from, qty to)
 static void w16unary(ecx *e, int op, qty t)
 {
 	cc *c = e->c;
-	uint32_t a = wtmp(e, WT_I64);
+	uint32_t a = wtmp(e, WPT(c));
 
 	wset(e, a);
 	if (op == T_TILDE) {
@@ -1011,7 +1020,7 @@ static int w16incdec(ecx *e, uint32_t n, bool want)
 	const node *x = N(n);
 	qty t = N(x->a)->ty;
 	bool inc = x->op == N_PREINC || x->op == N_POSTINC, post = x->op == N_POSTINC || x->op == N_POSTDEC;
-	uint32_t ta = wtmp(e, WT_I64);
+	uint32_t ta = wtmp(e, WPT(c));
 	uint64_t old = 0;
 	wlv l;
 
@@ -1038,7 +1047,7 @@ static int w16incdec(ecx *e, uint32_t n, bool want)
 			wget(e, ta);
 	}
 	wfree(e, ta);
-	return want ? WT_I64 : WT_NONE;
+	return want ? WPT(c) : WT_NONE;
 }
 
 /* ---------------- GNU vectors ---------------- */
@@ -1066,7 +1075,7 @@ static void wvlanes(ecx *e, int op, qty at, qty bt, qty rt, bool unary)
 		tb = wtmp(e, wty(c, bt));
 		wset(e, tb);
 	}
-	ta = wtmp(e, av ? WT_I64 : wty(c, at));
+	ta = wtmp(e, av ? WPT(c) : wty(c, at));
 	wset(e, ta);
 	for (uint32_t i = 0; i < n; i++) {
 		wlv la = { .k = WL_MEM, .off = i * tsize(c, et) }, lr = { .k = WL_MEM, .off = i * tsize(c, rte) };
@@ -1153,7 +1162,7 @@ VPRIV void warith(ecx *e, int op, qty ty, qty rty)
 	if (!o || (fl && (op == T_PERCENT || op == T_AMP || op == T_PIPE || op == T_CARET || op == T_LESSLESS ||
 			  op == T_GREATERGREATER)))
 		efatal(e, e->curloc, "wasm: unsupported operator");
-	if ((op == T_LESSLESS || op == T_GREATERGREATER) && rty && wrep(wty(c, rty)) != k) {
+	if ((op == T_LESSLESS || op == T_GREATERGREATER) && rty && (wty(c, rty) == WT_MEM || wty(c, rty) != k)) {
 		if (wty(c, rty) == WT_MEM) {
 			wiu(e, "i64.load", 0);
 			if (k == WT_I32)
@@ -1206,7 +1215,7 @@ static int wbinary(ecx *e, uint32_t n)
 		wexpr(e, x->a, true);
 		wexpr(e, x->b, true);
 		wvlanes(e, op, lt, rt, ty, false);
-		return WT_I64;
+		return WPT(c);
 	}
 	if (is_ptr(c, ty) && (op == T_PLUS || op == T_MINUS)) {
 		bool lp = is_ptr(c, lt);
@@ -1214,29 +1223,29 @@ static int wbinary(ecx *e, uint32_t n)
 
 		wexpr(e, x->a, true);
 		if (!lp) {
-			wto_i64(e, lt);
+			wto_ptr(e, lt);
 			wscale(e, rt, es);
 		}
 		wexpr(e, x->b, true);
 		if (lp) {
-			wto_i64(e, rt);
+			wto_ptr(e, rt);
 			wscale(e, lt, es);
 		}
-		wi(e, op == T_PLUS ? "i64.add" : "i64.sub");
-		return WT_I64;
+		wpop(e, op == T_PLUS ? "add" : "sub");
+		return WPT(c);
 	}
 	if (op == T_MINUS && is_ptr(c, lt) && is_ptr(c, rt)) {
 		uint64_t es = welem_size(e, lt);
 
 		wexpr(e, x->a, true);
 		wexpr(e, x->b, true);
-		wi(e, "i64.sub");
+		wpop(e, "sub");
 		if (es != 1) {
 			if (es)
-				wconst(e, WT_I64, (int64_t)es);
+				wpconst(e, (int64_t)es);
 			else
 				wvla_bytes(e, T(c, lt)->base);
-			wi(e, "i64.div_s");
+			wpop(e, "div_s");
 		}
 		wconv(e, prim(TY_LONG), ty);
 		return wty(c, ty);
@@ -1286,6 +1295,8 @@ VPRIV void wtruth(ecx *e, uint32_t n)
 		return;
 	}
 	k = wexpr(e, n, true);
+	if (wty(c, x->ty) == WT_MEM)
+		k = WT_MEM;	/* the address of a 16-byte value */
 	switch (k) {
 	case WT_I32: break;
 	case WT_I64: wi(e, "i64.eqz"); wi(e, "i32.eqz"); break;
@@ -1371,7 +1382,7 @@ static int wcond_expr(ecx *e, uint32_t n, bool want)
 {
 	cc *c = e->c;
 	const node *x = N(n);
-	int k = want ? wrep(wty(c, x->ty)) : WT_NONE, kn;
+	int k = want ? wrep(c, wty(c, x->ty)) : WT_NONE, kn;
 
 	if (x->b && (kn = wknown(e, x->a)) >= 0) {
 		wexpr(e, kn ? x->b : x->c, want);
@@ -1386,7 +1397,7 @@ static int wcond_expr(ecx *e, uint32_t n, bool want)
 
 		wexpr(e, x->a, true);
 		wtee(e, t);
-		switch (wrep(ak)) {
+		switch (wrep(c, ak)) {
 		case WT_I32: break;
 		case WT_I64: wi(e, "i64.eqz"); wi(e, "i32.eqz"); break;
 		case WT_F32: wfconst(e, WT_F32, 0); wi(e, "f32.ne"); break;
@@ -1422,7 +1433,7 @@ static int wassign(ecx *e, uint32_t n, bool want)
 
 	if (is_vec(c, lt) && x->aux) {
 		/* v op= w */
-		uint32_t ta = wtmp(e, WT_I64);
+		uint32_t ta = wtmp(e, WPT(c));
 
 		wlval(e, x->a, &l, lt);
 		wtee(e, ta);
@@ -1433,13 +1444,13 @@ static int wassign(ecx *e, uint32_t n, bool want)
 		if (want)
 			wget(e, ta);
 		wfree(e, ta);
-		return want ? WT_I64 : WT_NONE;
+		return want ? WPT(c) : WT_NONE;
 	}
 	/* _Atomic: plain loads and stores, one thread (clang without the atomics feature) */
 	if (!x->aux) {
 		wlval(e, x->a, &l, lt);
 		if (k == WT_MEM) {
-			uint32_t ta = want ? wtmp(e, WT_I64) : UINT32_MAX;
+			uint32_t ta = want ? wtmp(e, WPT(c)) : UINT32_MAX;
 
 			if (want)
 				wtee(e, ta);
@@ -1449,7 +1460,7 @@ static int wassign(ecx *e, uint32_t n, bool want)
 				wget(e, ta);
 				wfree(e, ta);
 			}
-			return want ? WT_I64 : WT_NONE;
+			return want ? WPT(c) : WT_NONE;
 		}
 		wexpr(e, x->b, true);
 		if (!want) {
@@ -1486,7 +1497,7 @@ static int wassign(ecx *e, uint32_t n, bool want)
 		}
 		wlval(e, x->a, &l, lt);
 		if (l.k == WL_MEM) {
-			ta = wtmp(e, WT_I64);
+			ta = wtmp(e, WPT(c));
 			wtee(e, ta);
 			wget(e, ta);
 		}
@@ -1498,9 +1509,9 @@ static int wassign(ecx *e, uint32_t n, bool want)
 				wget(e, tb);
 			else
 				wexpr(e, x->b, true);
-			wto_i64(e, bt);
+			wto_ptr(e, bt);
 			wscale(e, lt, es);
-			wi(e, op == T_PLUS ? "i64.add" : "i64.sub");
+			wpop(e, op == T_PLUS ? "add" : "sub");
 		} else {
 			if (!pt)
 				pt = lt;
@@ -1552,7 +1563,7 @@ static int wincdec(ecx *e, uint32_t n, bool want)
 		efatal(e, x->loc, "wasm: ++/-- on this type is not supported yet (PLAN-wasm.md W4)");
 	wlval(e, x->a, &l, t);
 	if (l.k == WL_MEM) {
-		ta = wtmp(e, WT_I64);
+		ta = wtmp(e, WPT(c));
 		wtee(e, ta);
 		wget(e, ta);
 	}
@@ -1638,7 +1649,7 @@ static int wstmtexpr(ecx *e, uint32_t n, bool want)
 	}
 	{
 		int k = wty(c, N(N(vs)->a)->ty);
-		uint32_t osv = W->sxv, ost = W->sxt, t = wtmp(e, k == WT_MEM ? WT_I64 : k);
+		uint32_t osv = W->sxv, ost = W->sxt, t = wtmp(e, k);
 
 		/* the whole compound (goto dispatch, VLAs, cleanups); the value into t */
 		W->sxv = vs, W->sxt = t;
@@ -1687,7 +1698,7 @@ static int wexpr1(ecx *e, uint32_t n, bool want)
 			wconst(e, WT_I64, (int64_t)(uint64_t)((u128)v >> 64));
 			wiu(e, "i64.store", 8);
 			wslot_addr(e, sl);
-			return WT_I64;
+			return WPT(c);
 		}
 		if (k == WT_F32 || k == WT_F64) {
 			wfconst(e, k, (double)v);
@@ -1708,7 +1719,7 @@ static int wexpr1(ecx *e, uint32_t n, bool want)
 			wconst(e, WT_I64, (int64_t)q[1]);
 			wiu(e, "i64.store", 8);
 			wslot_addr(e, sl);
-			return WT_I64;
+			return WPT(c);
 		}
 		if (k != WT_F32 && k != WT_F64)
 			efatal(e, x->loc, "wasm: _Float16 is not supported");
@@ -1716,7 +1727,7 @@ static int wexpr1(ecx *e, uint32_t n, bool want)
 		return k;
 	case N_STR:
 		waddr_ref(e, REF(RK_STR, x->a), 0);
-		return WT_I64;
+		return WPT(c);
 	case N_VAR: {
 		const sym *y = &c->syms[x->a];
 
@@ -1726,10 +1737,10 @@ static int wexpr1(ecx *e, uint32_t n, bool want)
 
 			claim_ref(e, r);
 			wdecl(e, r, y->ty, NULL);
-			tb_s(b, "\ti64.const\t");
+			tb_s(b, WASM32(c) ? "\ti32.const\t" : "\ti64.const\t");
 			wfname(c, b, r);
 			tb_c(b, '\n');
-			return WT_I64;
+			return WPT(c);
 		}
 		if (y->kind == S_ENUMCONST) {
 			wconst(e, k, y->val);
@@ -1747,7 +1758,7 @@ static int wexpr1(ecx *e, uint32_t n, bool want)
 		if (l.k != WL_MEM)
 			efatal(e, x->loc, "wasm: address of a register local");
 		wfold_off(e, &l);
-		return WT_I64;
+		return WPT(c);
 	}
 	case N_CAST:
 		switch (x->aux) {
@@ -1758,7 +1769,7 @@ static int wexpr1(ecx *e, uint32_t n, bool want)
 			if (l.k != WL_MEM)
 				efatal(e, x->loc, "wasm: array in a register");
 			wfold_off(e, &l);
-			return WT_I64;
+			return WPT(c);
 		}
 		case CK_FDECAY:
 			return wexpr(e, x->a, want);
@@ -1772,18 +1783,18 @@ static int wexpr1(ecx *e, uint32_t n, bool want)
 
 			wslot_addr(e, sl);
 			wconst(e, WT_I32, 0);
-			wconst(e, WT_I64, (int64_t)tsize(c, x->ty));
+			wpconst(e, (int64_t)tsize(c, x->ty));
 			wi(e, "memory.fill\t0");
 			wslot_addr(e, sl);
 			wexpr(e, x->a, true);
 			wstore(e, &l, at);
 			wslot_addr(e, sl);
-			return WT_I64;
+			return WPT(c);
 		}
 		case CK_VADDR:
 			/* a vector value is already the address of its first lane */
 			wexpr(e, x->a, true);
-			return WT_I64;
+			return WPT(c);
 		case CK_VBITS:
 			wexpr(e, x->a, true);
 			if (k != WT_MEM) {
@@ -1822,7 +1833,7 @@ static int wexpr1(ecx *e, uint32_t n, bool want)
 					wvlanes(e, T_MINUS, x->ty, 0, x->ty, true);
 				else
 					w16unary(e, T_MINUS, x->ty);
-				return WT_I64;
+				return WPT(c);
 			}
 			wconst(e, k, 0);
 			wexpr(e, x->a, true);
@@ -1839,7 +1850,7 @@ static int wexpr1(ecx *e, uint32_t n, bool want)
 					wvlanes(e, T_TILDE, x->ty, 0, x->ty, true);
 				else
 					w16unary(e, T_TILDE, x->ty);
-				return WT_I64;
+				return WPT(c);
 			}
 			wexpr(e, x->a, true);
 			wconst(e, k, -1);
@@ -1915,10 +1926,10 @@ static int wexpr1(ecx *e, uint32_t n, bool want)
 
 			wslot_addr(e, sl);
 			wconst(e, WT_I32, 0);
-			wconst(e, WT_I64, (int64_t)tsize(c, x->ty));
+			wpconst(e, (int64_t)tsize(c, x->ty));
 			wi(e, "memory.fill\t0");
 			wslot_addr(e, sl);
-			return WT_I64;
+			return WPT(c);
 		}
 		if (k == WT_F32 || k == WT_F64)
 			wfconst(e, k, 0);
@@ -1938,14 +1949,14 @@ static int wexpr1(ecx *e, uint32_t n, bool want)
 		wexpr(e, x->b, true);
 		wstore(e, &l, et);
 		wslot_addr(e, sl);
-		return WT_I64;
+		return WPT(c);
 	}
 	case N_VAARG:
 		return wbuiltin(e, n, want);
 	case N_LABELADDR:
 		/* its number (1-based), as in data: goto * compares against these */
-		wconst(e, WT_I64, (int64_t)x->a + 1);
-		return WT_I64;
+		wpconst(e, (int64_t)x->a + 1);
+		return WPT(c);
 	case N_SIZEOF_VLA:
 		wvla_bytes(e, x->b);
 		wconv(e, prim(TY_ULONG), x->ty);
@@ -1961,11 +1972,11 @@ static int wexpr1(ecx *e, uint32_t n, bool want)
 			/* *fp: the function's address (its table index) */
 			wlval(e, n, &l, prim(TY_VOID));
 			wfold_off(e, &l);
-			return WT_I64;
+			return WPT(c);
 		}
 		wlval(e, n, &l, x->ty);
 		wload(e, &l, x->ty);
-		return wrep(k);
+		return wrep(c, k);
 	}
 	}
 	efatal(e, x->loc, "wasm: unsupported expression (node %d)", x->op);

@@ -27,13 +27,14 @@ static void data_or(ecx *e, uint64_t off, uint8_t bits)
 	e->data.p[off] |= (char)bits;
 }
 
-static void data_reloc(ecx *e, uint64_t off, uint32_t ref, int64_t add)
+/* an n-byte address (8; 4 for wasm32) */
+static void data_reloc(ecx *e, uint64_t off, uint32_t ref, int64_t add, int n)
 {
-	data_put(e, off, 0, 8);
-	e->rel[e->nrel] = (struct reloc){ off, ref, e->nrel, add, 0, 0 };
+	data_put(e, off, 0, n);
+	e->rel[e->nrel] = (struct reloc){ off, ref, e->nrel, add, 0, n == 8 ? 0 : (uint32_t)n };
 	e->nrel++;
-	if (off + 8 > e->relend)
-		e->relend = off + 8;
+	if (off + (uint64_t)n > e->relend)
+		e->relend = off + (uint64_t)n;
 	note_ref(e, ref);
 }
 
@@ -187,14 +188,14 @@ static void data_init(ecx *e, uint64_t off, qty ty, uint32_t init)
 				note_ref(e, REF(RK_LBL, cv.sublabel - 1));
 				return;
 			}
-			if (n != 8)
+			if (n != 8 && !(n == 4 && WASM32(c)))
 				efatal(e, x->loc, "address initializer for a %d-byte object", n);
 			if (cv.label)
-				data_reloc(e, off, REF(RK_LBL, cv.label - 1), (int64_t)cv.i);
+				data_reloc(e, off, REF(RK_LBL, cv.label - 1), (int64_t)cv.i, n);
 			else if (cv.str)
-				data_reloc(e, off, REF(RK_STR, cv.str - 1), (int64_t)cv.i);
+				data_reloc(e, off, REF(RK_STR, cv.str - 1), (int64_t)cv.i, n);
 			else {
-				data_reloc(e, off, REF(RK_SYM, canon_sym(c, cv.sym)), (int64_t)cv.i);
+				data_reloc(e, off, REF(RK_SYM, canon_sym(c, cv.sym)), (int64_t)cv.i, n);
 				if (WASM(c))
 					wasm_data_ref(e, REF(RK_SYM, canon_sym(c, cv.sym)));
 			}

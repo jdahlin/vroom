@@ -754,7 +754,7 @@ int ppd_run(int argc, char **argv, const ppd_env *env)
 	int dmacros = 0, showinc = 0, ddefs = 0, syntax = 0, layout = 0, ms_anon = 0, short_wchar = 0, tokhash = 0, emit = 0, objmode = 0;
 	const char *stdver = NULL, *macos_min = NULL;
 	int macos_min_flag = 0, uchar = -1, fmath = 0;	/* fmath: 1 finite-only, 2 no errno, 4 __FAST_MATH__, 8 -pthread, 16 errno, 32 __ARM_FP_FAST */
-	int tri = -1, std = 0, strict = 0, wimpl_int = 0, wimpl_fn = 0, gnu89_inline = -1, vcc_kernel = 0;
+	int tri = -1, std = 0, strict = 0, wimpl_int = 0, wimpl_fn = 0, gnu89_inline = -1, vcc_kernel = 0, conv_warn = 0;
 	char objbuf[1024];
 
 	for (int i = 1; i < argc; i++) {
@@ -832,6 +832,15 @@ int ppd_run(int argc, char **argv, const ppd_env *env)
 			wargs[nwargs++] = a;
 		}
 		if (!strcmp(a, "-Wno-implicit-int") || !strcmp(a, "-Wno-error=implicit-int")) { wimpl_int = 1; continue; }
+		if (!strncmp(a, "-Wno-", 5)) {
+			/* errors clang lets -Wno-error= make warnings (pp_wstate has the -W flags) */
+			const char *f = a + 5;
+
+			if (!strncmp(f, "error=", 6))
+				f += 6;
+			conv_warn |= !strcmp(f, "int-conversion") ? 1 : !strcmp(f, "incompatible-pointer-types") ? 2
+				     : !strcmp(f, "incompatible-function-pointer-types") ? 4 : 0;
+		}
 		if (!strcmp(a, "-Wno-implicit-function-declaration") || !strcmp(a, "-Wno-error=implicit-function-declaration")) {
 			wimpl_fn = 1;
 			continue;
@@ -1337,7 +1346,7 @@ int ppd_run(int argc, char **argv, const ppd_env *env)
 	}
 	if (syntax) {
 		cc_opts co = { .target = po.target, .unsigned_char = po.unsigned_char, .dump_layouts = layout, .ms_anon = ms_anon, .short_wchar = short_wchar,
-				.std = std, .implicit_int = std == 89 || wimpl_int, .implicit_fn = std == 89 || wimpl_fn,
+				.std = std, .implicit_int = std == 89 || wimpl_int, .implicit_fn = std == 89 || wimpl_fn, .conv_warn = conv_warn,
 				.gnu89_inline = gnu89_inline, .no_builtin = freestanding || nobuiltin, .instrument = instr, .wasm_sjlj = sjlj,
 				.general_regs_only = gregs, .vcc_kernel = vcc_kernel, .lse = lse, .opt = olevel, .pic = pic ? 2 : pie ? 1 : 0, .tlsmodel = tlsmodel, .sections = sections, .debug = debug, .dbg_name = main_file,
 			       .outfd = env->outfd };

@@ -252,6 +252,8 @@ typedef struct cc_opts {	/* fields before outfd: parse options, all in the decl 
 	int no_builtin;		/* -ffreestanding / -fno-builtin: abs() etc. are plain calls */
 	int wasm_sjlj;		/* -mllvm -wasm-enable-sjlj: setjmp/longjmp through wasm exceptions */
 	int implicit_fn;	/* implicit function declarations allowed (... implicit-function-declaration) */
+	int conv_warn;		/* -Wno-error= (or -Wno-) of: 1 int-conversion, 2 incompatible-pointer-types,
+				   4 incompatible-function-pointer-types: a warning, not an error */
 	int dump_layouts;	/* append _Static_assert checks for clang to verify */
 	int outfd;
 	int emit;		/* generate code (emit/): 1 = assembly text to outfd, 2 = object into obj */

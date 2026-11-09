@@ -641,8 +641,8 @@ static int instruction(was *a, const winsn *w, lx *l)
 		if (os >= 0) {
 			/* a symbol's address as the offset (clang -O0) */
 			sym_use(a, (uint32_t)os, WS_NONE);
-			fn_rel(a, R_MEMORY_ADDR_LEB64, (uint32_t)os, off);
-			hole(b, 10);
+			fn_rel(a, m->w32 ? R_MEMORY_ADDR_LEB : R_MEMORY_ADDR_LEB64, (uint32_t)os, off);
+			hole(b, m->w32 ? 5 : 10);
 		} else {
 			uleb(b, (uint64_t)off);
 		}
@@ -1194,9 +1194,9 @@ static void mod_free(wmod *m)
 	free(m->fn);
 }
 
-int wasm_assemble(const char *text, size_t len, uint8_t **out, size_t *outlen, char *err, size_t errcap)
+int wasm_assemble(const char *text, size_t len, int w32, uint8_t **out, size_t *outlen, char *err, size_t errcap)
 {
-	wmod m = { .err = err, .errcap = errcap };
+	wmod m = { .err = err, .errcap = errcap, .w32 = w32 != 0 };
 	was a = { .m = &m, .seg = -1, .fn = -1, .label = -1 };
 	const char *p = text, *e = text + len;
 	vbuf o = { 0 };

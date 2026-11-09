@@ -437,7 +437,7 @@ int wasm_write(wmod *m, vbuf *o)
 		str(o, "env");
 		str(o, "__linear_memory");
 		put8(o, 2);
-		put8(o, 0x04);		/* limits: 64-bit, no maximum */
+		put8(o, m->w32 ? 0x00 : 0x04);	/* limits: 64-bit (wasm64), no maximum */
 		uleb(o, (vaddr + 65535) / 65536);
 		for (uint32_t i = 0; i < L.nimps; i++) {
 			wsym *y = &m->sym[L.imps[i]];
@@ -458,7 +458,7 @@ int wasm_write(wmod *m, vbuf *o)
 			} else {
 				put8(o, 1);
 				put8(o, WV_FUNCREF);
-				put8(o, 0x04);
+				put8(o, m->w32 ? 0x00 : 0x04);
 				uleb(o, L.nelems);
 			}
 		}
@@ -479,7 +479,7 @@ int wasm_write(wmod *m, vbuf *o)
 
 		uleb(o, 1);
 		put8(o, 0);
-		put8(o, 0x42);		/* i64.const 1: slot 0 is the null function */
+		put8(o, m->w32 ? 0x41 : 0x42);	/* i64.const 1 (i32 for wasm32): slot 0 is the null function */
 		sleb(o, 1);
 		put8(o, 0x0b);
 		uleb(o, L.nelems);
@@ -542,7 +542,7 @@ int wasm_write(wmod *m, vbuf *o)
 			wseg *g = &m->seg[k];
 
 			put8(o, 0);
-			put8(o, 0x42);
+			put8(o, m->w32 ? 0x41 : 0x42);
 			sleb(o, (int64_t)g->vaddr);
 			put8(o, 0x0b);
 			uleb(o, g->data.n);

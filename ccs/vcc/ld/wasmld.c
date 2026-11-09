@@ -7,7 +7,8 @@
  * __wasm_call_ctors, the memory layout and the synthetic symbols
  * (__stack_pointer, __heap_base, __data_end, __start_/__stop_ sections),
  * garbage collection of functions and data from the roots, and relocations
- * applied in place (relocatable fields are padded LEBs).  wasm64 only.
+ * applied in place (relocatable fields are padded LEBs).  wasm64, or wasm32
+ * when the objects' memory is 32-bit (wasm-ld's default without -mwasm64).
  *
  * vlink runs this when called as wasm-ld or with -mwasm64.
  */
@@ -317,6 +318,7 @@ typedef struct obj {
 	struct { uint32_t prio, sym; } *init;
 	uint32_t ninit;
 	span features;
+	int mem;		/* the imported memory: 32, 64, 0 none */
 	bool loaded;
 } obj;
 
@@ -611,6 +613,7 @@ static obj *parse_obj(const char *name, const uint8_t *p, size_t n)
 				case 2: {
 					uint8_t fl = r8(&s);
 
+					o->mem = fl & 4 ? 64 : 32;
 					ruleb(&s);
 					if (fl & 1)
 						ruleb(&s);
@@ -792,8 +795,16 @@ static void reference(gsym *g, obj *o, uint32_t si, bool weak)
 	}
 }
 
+/* the output's address width: the objects' memory (0 until one has it) */
+static int memw;
+#define W32 (memw == 32)
+
 static void add_obj(obj *o)
 {
+	if (o->mem && memw && o->mem != memw)
+		err("%s: a wasm%d object in a wasm%d link", o->name, o->mem, memw);
+	else if (o->mem)
+		memw = o->mem;
 	GROW(objs, nobjs, cobjs);
 	objs[nobjs++] = o;
 	o->loaded = true;
@@ -1546,7 +1557,7 @@ static int write_module(void)
 			}
 	/* globals: __stack_pointer, then the objects' */
 	GROW(ogl, nog, cog);
-	ogl[nog++] = (struct oglob){ 0x7e, 1, { 0 }, 0, true };
+	ogl[nog++] = (struct oglob){ W32 ? 0x7f : 0x7e, 1, { 0 }, 0, true };
 	sp_global = 0;
 	for (uint32_t k = 0; k < nobjs; k++)
 		for (uint32_t i = 0; i < objs[k]->ngl; i++)
@@ -1565,7 +1576,7 @@ static int write_module(void)
 		else if (!strcmp(g->name, "__tls_base") || !strcmp(g->name, "__tls_size") || !strcmp(g->name, "__tls_align") ||
 			 !strcmp(g->name, "__memory_base") || !strcmp(g->name, "__table_base")) {
 			GROW(ogl, nog, cog);
-			ogl[nog] = (struct oglob){ 0x7e, 0, { 0 }, 0, true };
+			ogl[nog] = (struct oglob){ W32 ? 0x7f : 0x7e, 0, { 0 }, 0, true };
 			g->out = (int32_t)(ngi + nog++);
 		} else {
 			err("undefined global: %s", g->name);
@@ -1714,7 +1725,7 @@ static int write_module(void)
 			else if (t.kind == K_DATA) {
 				/* a data symbol: an immutable global holding its address */
 				GROW(ogl, nog, cog);
-				ogl[nog] = (struct oglob){ 0x7e, 0, { 0 }, t.o->seg[t.y->seg].addr + t.y->off, true };
+				ogl[nog] = (struct oglob){ W32 ? 0x7f : 0x7e, 0, { 0 }, t.o->seg[t.y->seg].addr + t.y->off, true };
 				ex[nex++] = (oexp){ g->name, 3, ngi + nog++ };
 			}
 		next_export:;
@@ -1736,7 +1747,7 @@ static int write_module(void)
 
 		if (g && g->state == G_UNDEF && synth_data(g, &a)) {
 			GROW(ogl, nog, cog);
-			ogl[nog] = (struct oglob){ 0x7e, 0, { 0 }, a, true };
+			ogl[nog] = (struct oglob){ W32 ? 0x7f : 0x7e, 0, { 0 }, a, true };
 			GROW(ex, nex, cex);
 			ex[nex++] = (oexp){ g->name, 3, ngi + nog++ };
 		}
@@ -1821,8 +1832,8 @@ static int write_module(void)
 							return -1;
 					}
 				ob8(&data, 0);
-				ob8(&data, 0x42);
-				osleb(&data, (int64_t)osegs[j].addr);
+				ob8(&data, W32 ? 0x41 : 0x42);
+				osleb(&data, W32 ? (int64_t)(int32_t)osegs[j].addr : (int64_t)osegs[j].addr);
 				ob8(&data, 0x0b);
 				ouleb(&data, osegs[j].size);
 				ob_put(&data, buf, osegs[j].size);
@@ -1879,7 +1890,7 @@ static int write_module(void)
 		at = sec_begin(&o, 4, NULL);
 		ouleb(&o, 1);
 		ob8(&o, 0x70);
-		ob8(&o, opt.growable_table ? 0x04 : 0x05);
+		ob8(&o, (opt.growable_table ? 0x00 : 0x01) | (W32 ? 0 : 0x04));
 		ouleb(&o, opt.table_base + nslots);
 		if (!opt.growable_table)
 			ouleb(&o, opt.table_base + nslots);
@@ -1887,7 +1898,7 @@ static int write_module(void)
 		/* memory */
 		at = sec_begin(&o, 5, NULL);
 		ouleb(&o, 1);
-		ob8(&o, max_pages ? 0x05 : 0x04);
+		ob8(&o, (max_pages ? 0x01 : 0x00) | (W32 ? 0 : 0x04));
 		ouleb(&o, mem_pages);
 		if (max_pages)
 			ouleb(&o, max_pages);
@@ -1910,7 +1921,7 @@ static int write_module(void)
 			ob8(&o, ogl[i].mut);
 			if (ogl[i].has_val) {
 				ob8(&o, ogl[i].type == 0x7f ? 0x41 : 0x42);
-				osleb(&o, (int64_t)ogl[i].val);
+				osleb(&o, ogl[i].type == 0x7f ? (int64_t)(int32_t)ogl[i].val : (int64_t)ogl[i].val);
 				ob8(&o, 0x0b);
 			} else {
 				ob_put(&o, ogl[i].init.p, ogl[i].init.n);
@@ -1931,7 +1942,7 @@ static int write_module(void)
 			at = sec_begin(&o, 9, NULL);
 			ouleb(&o, 1);
 			ob8(&o, 0);
-			ob8(&o, 0x42);
+			ob8(&o, W32 ? 0x41 : 0x42);
 			osleb(&o, (int64_t)opt.table_base);
 			ob8(&o, 0x0b);
 			ouleb(&o, nslots);

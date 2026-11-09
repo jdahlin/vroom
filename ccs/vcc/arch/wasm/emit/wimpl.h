@@ -13,7 +13,7 @@
 #define VCC_WIMPL_H
 #include "../../../emit/emitimpl.h"
 
-/* wasm value types; WT_MEM: a C value in memory, its address (an i64) on the stack */
+/* wasm value types; WT_MEM: a C value in memory, its address (WPT) on the stack */
 enum { WT_NONE, WT_I32, WT_I64, WT_F32, WT_F64, WT_MEM };
 
 /* where a local lives */
@@ -115,6 +115,9 @@ typedef struct wgp { uint32_t label, d, i; } wgp;
 
 static const char *const wt_name[] = { "", "i32", "i64", "f32", "f64", "i64" };
 
+/* the wasm type of an address: i32 for wasm32, i64 for wasm64 */
+#define WPT(c) (WASM32(c) ? WT_I32 : WT_I64)
+
 /* ---------------- types ---------------- */
 
 /* the wasm type of a C value of type t */
@@ -131,7 +134,7 @@ static inline int wty(cc *c, qty t)
 		return WT_F64;
 	case TY_PTR:
 	case TY_FUNC:
-		return WT_I64;
+		return WPT(c);
 	default:
 		if (k_int(y->kind))
 			return y->size <= 4 ? WT_I32 : y->size == 8 ? WT_I64 : WT_MEM;
@@ -140,7 +143,7 @@ static inline int wty(cc *c, qty t)
 }
 
 /* its representation on the operand stack */
-static inline int wrep(int t) { return t == WT_MEM ? WT_I64 : t; }
+static inline int wrep(cc *c, int t) { return t == WT_MEM ? WPT(c) : t; }
 
 /* ---------------- printing ---------------- */
 
@@ -183,7 +186,7 @@ static inline void wop(ecx *e, int t, const char *op)
 	tbuf *b = WB_;
 
 	tb_c(b, '\t');
-	tb_s(b, wt_name[t]);
+	tb_s(b, wt_name[wrep(e->c, t)]);
 	tb_c(b, '.');
 	tb_s(b, op);
 	tb_c(b, '\n');
@@ -215,13 +218,17 @@ static inline void wfconst(ecx *e, int t, double d)
 	}
 }
 
-/* i64.const ref+off: the address of a symbol */
+/* an address operation: i32.<op> for wasm32, i64.<op> for wasm64 */
+static inline void wpop(ecx *e, const char *op) { wop(e, WPT(e->c), op); }
+static inline void wpconst(ecx *e, int64_t v) { wconst(e, WPT(e->c), v); }
+
+/* i64.const ref+off (i32.const for wasm32): the address of a symbol */
 static inline void waddr_ref(ecx *e, uint32_t ref, int64_t off)
 {
 	tbuf *b = WB_;
 
 	claim_ref(e, ref);
-	tb_s(b, "\ti64.const\t");
+	tb_s(b, WASM32(e->c) ? "\ti32.const\t" : "\ti64.const\t");
 	ref_off(e->c, b, ref, off);
 	tb_c(b, '\n');
 }
@@ -234,7 +241,7 @@ static inline uint32_t wnewloc(ecx *e, int t)
 
 	if (W->nloc >= WMAXLOC)
 		efatal(e, e->curloc, "wasm: too many locals");
-	W->lt[W->nloc] = (uint8_t)wrep(t);
+	W->lt[W->nloc] = (uint8_t)wrep(e->c, t);
 	return W->nloc++;
 }
 
@@ -243,7 +250,7 @@ static inline uint32_t wtmp(ecx *e, int t)
 {
 	wst *W = e->w;
 
-	t = wrep(t);
+	t = wrep(e->c, t);
 	if (W->nfl[t])
 		return W->fl[t][--W->nfl[t]];
 	return wnewloc(e, t);
@@ -268,7 +275,7 @@ static inline uint32_t wfp(ecx *e)
 	wst *W = e->w;
 
 	if (W->fp == UINT32_MAX)
-		W->fp = wnewloc(e, WT_I64);
+		W->fp = wnewloc(e, WPT(e->c));
 	return W->fp;
 }
 
@@ -292,8 +299,8 @@ static inline void wslot_addr(ecx *e, uint64_t off)
 {
 	wget(e, wfp(e));
 	if (off) {
-		wconst(e, WT_I64, (int64_t)off);
-		wi(e, "i64.add");
+		wpconst(e, (int64_t)off);
+		wpop(e, "add");
 	}
 }
 
@@ -328,7 +335,7 @@ typedef struct wabi { uint8_t k, st; qty ft; uint32_t n; } wabi;
 static inline uint32_t wparts(wabi a) { return a.k == WA_PAIR ? a.n : a.k == WA_IGNORE ? 0 : 1; }
 
 /* a WA_PAIR part's C type */
-static inline qty wpart_ty(cc *c, wabi a) { return is_vec(c, a.ft) ? T(c, a.ft)->base : prim(TY_ULONG); }
+static inline qty wpart_ty(cc *c, wabi a) { return is_vec(c, a.ft) ? T(c, a.ft)->base : prim(TY_ULLONG); }
 
 /* wasm.c */
 VPRIV bool wis_main(cc *c, uint32_t s);
@@ -341,7 +348,7 @@ VPRIV void wsig(ecx *e, tbuf *b, qty ft, uint32_t call, uint32_t def, bool *sret
 VPRIV qty wpromote(cc *c, qty t);
 /* wexpr.c */
 VPRIV wbind *wlocal(ecx *e, uint32_t s);
-VPRIV void wto_i64(ecx *e, qty t);
+VPRIV void wto_ptr(ecx *e, qty t);
 VPRIV int wexpr(ecx *e, uint32_t n, bool want);
 VPRIV void wtruth(ecx *e, uint32_t n);
 VPRIV void wlval(ecx *e, uint32_t n, wlv *l, qty t);

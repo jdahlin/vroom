@@ -115,6 +115,7 @@ typedef struct wmod {
 	char *err;
 	size_t errcap;
 	uint32_t line;
+	bool w32;		/* wasm32: 32-bit memory and addresses */
 } wmod;
 
 /* platform/wasm/wasm.c */

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """vcc-wasm.py: the C test suites through vcc's WebAssembly target (PLAN-wasm.md).
 
-  bench/vcc-wasm.py [-j N] [--suite gcc|tcc|vcc] [-v] [--show CAT] [--obj] [--objcmp] [--vlink] [PAT]
+  bench/vcc-wasm.py [-j N] [--suite gcc|tcc|vcc] [-v] [--show CAT] [--obj] [--objcmp] [--vlink] [--wasm32] [PAT]
 
 Every test of vcc-ctests.py (gcc torture, tcc tests2, our own) is built for
 wasm64-unknown-emscripten twice: by clang (the oracle) and by vcc, each
@@ -19,6 +19,8 @@ objcmp, link (emcc), run.
 The test runtime headers (ccs/vcc/tests/rt/include) are used on both sides,
 emscripten's libc behind them.  Clang's results are cached in
 build/ccs/wasmtests/ref (keyed by the source and flags).
+--wasm32: wasm32-unknown-emscripten (ILP32, emcc without -sMEMORY64), in
+build/ccs/wasmtests32 (PLAN-wasm.md W7).
 """
 import hashlib, importlib.util, json, os, re, shutil, subprocess, sys, time
 from collections import Counter, defaultdict
@@ -42,6 +44,17 @@ BASE = [TGT, '-nostdinc', '-I', f'{ct.RT}/include', '-isystem', ct.RES, '-O2']
 LINK = [EMCC, '-sMEMORY64=1', '-sEXIT_RUNTIME=1', '-sASSERTIONS=0', '-sSTACK_SIZE=4MB', '-Wno-deprecated']
 # tests that need what the wasm target or emscripten does not have
 WASM_SKIP = {}
+
+def set_target(w32):
+    """wasm32 (W7) instead of wasm64: the target, emcc's memory, the work directory"""
+    global OUT, TGT, BASE, LINK, RTO
+    if not w32:
+        return
+    OUT = f'{BUILD}/wasmtests32'
+    TGT = '--target=wasm32-unknown-emscripten'
+    BASE = [TGT] + BASE[1:]
+    LINK = [a for a in LINK if a != '-sMEMORY64=1']
+    RTO = f'{OUT}/rt.o'
 
 def sh(cmd, timeout=60, **kw):
     return ct.sh(cmd, timeout=timeout, **kw)
@@ -186,8 +199,9 @@ def one(t):
 
 VLENV = None
 
-def init(obj, objcmp=False, vlenv=None):
+def init(obj, objcmp=False, vlenv=None, w32=False):
     global OBJ, OBJCMP, VLENV
+    set_target(w32)
     OBJ = obj
     OBJCMP = objcmp
     VLENV = vlenv
@@ -197,8 +211,10 @@ if __name__ == '__main__':
     j, suite, show, verbose = 6, None, None, False
     obj = '--obj' in av
     objcmp = '--objcmp' in av
+    w32 = '--wasm32' in av
+    set_target(w32)
     vlenv = vlink_env() if '--vlink' in av else None
-    av = [a for a in av if a not in ('--obj', '--objcmp', '--vlink')]
+    av = [a for a in av if a not in ('--obj', '--objcmp', '--vlink', '--wasm32')]
     if '-v' in av: verbose = True; av.remove('-v')
     for opt in ('-j', '--suite', '--show'):
         if opt in av:
@@ -210,7 +226,7 @@ if __name__ == '__main__':
     ts = ct.tests(suite, pat)
     t0 = time.time()
     rt_obj()
-    with Pool(j, initializer=init, initargs=(obj, objcmp, vlenv)) as pool:
+    with Pool(j, initializer=init, initargs=(obj, objcmp, vlenv, w32)) as pool:
         res = pool.map(one, ts, chunksize=1)
     by = defaultdict(Counter)
     whys = defaultdict(Counter)
