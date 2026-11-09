@@ -440,6 +440,8 @@ struct pp {
 	uint32_t diag_fe;	/* the file of the last diagnostic + 1 (for "In file included from") */
 	vdiag *dhead, *dtail;	/* the TU's diagnostic records (in perm) */
 	bool dtrack;		/* VCC_TRACK_DIAG: vcc's call site after each diagnostic */
+	bool dfinished;		/* pp_diag_finish ran (JSON flushed, SARIF written) */
+	vdiag *dpend;		/* -fdiagnostics-format=json: the record not yet written */
 	struct lmark {		/* #line / GNU line markers */
 		uint32_t fe, off;	/* in fent fe, from byte offset off on */
 		uint32_t pline, line;	/* physical line pline is line */
@@ -597,6 +599,13 @@ VPRIV __attribute__((format(printf, 4, 5))) void pp_diag(pp *p, uint32_t loc, co
 void pp_diagx(pp *p, const pp_dinfo *d, const char *fmt, ...);
 bool pp_warnx(pp *p, const char *flag, bool on, const char *const *groups, pp_dinfo *d, const char *fmt, ...);
 void pp_diag_summary(pp *p);
+VPRIV const fent *loc_fent(const pp *p, uint32_t loc);
+VPRIV bool loc_ok(const pp *p, uint32_t loc, const fent **e);
+VPRIV int diag_where(const pp *p, uint32_t loc, const char **name, uint32_t *nl, uint32_t *line, uint32_t *col);
+struct vbuf;
+VPRIV void render_text(pp *p, struct vbuf *b, const vdiag *d);
+/* diagout.c: JSON lines and SARIF */
+VPRIV void diag_json_flush(pp *p);
 /* macro.c */
 static inline uintptr_t mget(const pp *p, uint32_t id);
 static inline uintptr_t *mslot(pp *p, uint32_t id);

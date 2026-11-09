@@ -56,6 +56,10 @@ typedef struct pp_opts {
 	int diag_color;			/* diagnostics: 1 colors, -1 none, 0 when errfd is a terminal */
 	int diag_nocaret;		/* -fno-caret-diagnostics: no source lines */
 	int diag_show_id;		/* -fdiagnostics-show-id: " [id]" after the flag */
+	int diag_format;		/* -fdiagnostics-format=: PP_DIAG_TEXT, _JSON (a record per line), _SARIF */
+	const char *sarif_file;		/* -fdiagnostics-add-output=sarif:file=F: SARIF there too */
+	char *const *argv;		/* the command line (SARIF's invocation) */
+	int argc;
 	const char *const *wargs;	/* -W..., -w options in command-line order */
 	int nwargs;
 	int error_limit;		/* -ferror-limit=: 0 default (20), -1 none */
@@ -208,6 +212,9 @@ const vdiag *pp_diag_records(const pp *p);
 extern _Thread_local const void *pp_diag_pc;
 /* level name as clang prints it ("error", "fatal error", ...) */
 const char *pp_diag_level(int level);
+enum { PP_DIAG_TEXT, PP_DIAG_JSON, PP_DIAG_SARIF };
+/* the end of the TU's diagnostics: the last JSON record, the SARIF log (pp_diag_summary calls it) */
+void pp_diag_finish(pp *p);
 /* -fspell-checking-limit= as given (0: default, -1: none, -2: off) */
 int pp_spell_limit(const pp *p);
 /* -ferror-limit= as given (0: default, -1: none) */

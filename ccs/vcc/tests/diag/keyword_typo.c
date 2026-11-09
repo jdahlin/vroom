@@ -1,3 +1,4 @@
+/* diag-formats: JSON and SARIF snapshots (.json, .sarif) */
 /* a misspelt keyword: corrected (clang's keyword candidates by context) and parsed
    as the keyword, so no follow-on errors */
 struc S1 { int a; };

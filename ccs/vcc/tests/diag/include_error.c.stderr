@@ -1,4 +1,4 @@
-In file included from include_error.c:1:
+In file included from include_error.c:2:
 ./inc_err.h:2:39: error: no member named 'b' in 'struct hdr'
     2 | int hdr_fn(struct hdr *h) { return h->b; }
       |                                    ~  ^

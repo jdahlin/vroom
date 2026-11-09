@@ -10,6 +10,9 @@ passes when
     may be better than clang's), and
   - layer 2: with -fdiagnostics-show-id every diagnostic has an id
     (bench/gen-diagids.py), and
+  - layer 5a: the -fdiagnostics-format=json records rebuild that text
+    exactly (bench/diag-render.py), and the SARIF log passes
+    bench/sarif-check.py, and
   - layer 1: the diagnostics' first lines name the same (file, line, column,
     level, -W flag) as clang's, in order, and the exit status agrees.
 A deliberate difference from clang in layer 1 (a better place, fewer
@@ -21,7 +24,7 @@ The summary also counts the cases whose text is still identical to clang's.
   bench/vcc-diag.py [-v] [-j N] [PATTERN]   -v: the diff of each failure
   bench/vcc-diag.py --bless [PATTERN]       write X.c.stderr from vcc's output
 """
-import difflib, os, re, subprocess, sys
+import difflib, importlib.util, json, os, re, subprocess, sys
 from multiprocessing import Pool
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from hostenv import llvm, BUILD
@@ -31,6 +34,17 @@ D = f'{R}/ccs/vcc/tests/diag'
 CL = llvm('clang')
 VPP = f'{BUILD}/vpp'
 FL = ['--target=aarch64-linux-gnu', '-fsyntax-only', '-fno-color-diagnostics']
+
+
+def _mod(name, file):
+    spec = importlib.util.spec_from_file_location(name, f'{R}/bench/{file}')
+    m = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(m)
+    return m
+
+
+render = _mod('diagrender', 'diag-render.py')
+sarif = _mod('sarifcheck', 'sarif-check.py')
 
 
 def run(cmd, name, extra=()):
@@ -48,6 +62,19 @@ HEAD = re.compile(r'^(\S+):(\d+):(\d+): (error|warning|note|fatal error|remark):
 def heads(out):
     """layer 1: (file, line, col, level, flag) of every diagnostic"""
     return [(m.group(1), m.group(2), m.group(3), m.group(4), m.group(6) or '') for m in HEAD.finditer(out)]
+
+
+def sarif_norm(text):
+    """the SARIF log without what depends on the machine (working directory, compiler path)"""
+    try:
+        doc = json.loads(text)
+    except ValueError:
+        return text
+    run = doc['runs'][0]
+    run['originalUriBaseIds'] = {'%SRCROOT%': {'uri': 'file:///SRCROOT/'}}
+    for inv in run.get('invocations', []):
+        inv['arguments'] = ['vpp'] + inv['arguments'][1:]
+    return json.dumps(doc, indent=1) + '\n'
 
 
 def one(name, bless=False):
@@ -76,6 +103,33 @@ def one(name, bless=False):
     if noid:
         ok = False
         why.append(f'diagnostic without an id: {noid[0]}')
+    # layer 5a: the JSON records rebuild the text exactly (bench/diag-render.py)
+    _, out_j = run([VPP], name, ['-fdiagnostics-format=json'])
+    try:
+        rt = render.render(out_j.splitlines(), D).decode(errors='replace')
+    except (ValueError, KeyError) as e:
+        rt = f'(bad JSON: {e})'
+    if rt != out_v:
+        ok = False
+        why.append('JSON does not rebuild the text (layer 5a)')
+    # D3.2: the SARIF log is well formed
+    _, out_s = run([VPP], name, ['-fdiagnostics-format=sarif'])
+    try:
+        sp = sarif.check(json.loads(out_s))
+    except ValueError as e:
+        sp = [f'bad JSON: {e}']
+    if sp:
+        ok = False
+        why.append(f'SARIF: {sp[0]}')
+    # layer 4 for the other renderers: /* diag-formats */ keeps X.c.json and X.c.sarif
+    if re.search(r'/\*\s*diag-formats', src):
+        for ext, got in (('json', out_j), ('sarif', sarif_norm(out_s))):
+            snapf = os.path.join(D, f'{name}.{ext}')
+            if bless:
+                open(snapf, 'w').write(got)
+            if not os.path.exists(snapf) or open(snapf).read() != got:
+                ok = False
+                why.append(f'{ext} differs from .{ext}')
     return name, ok, out_c, out_v, want or '', ', '.join(why), out_c == out_v
 
 

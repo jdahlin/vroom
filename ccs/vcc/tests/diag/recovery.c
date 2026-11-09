@@ -1,3 +1,4 @@
+/* diag-formats: JSON and SARIF snapshots (.json, .sarif) */
 /* parser recovery (D2.2): each error is reported once, parsing goes on with
    the next statement or declaration, and nothing after it is reported again */
 struct S { int x; };

@@ -1,0 +1,111 @@
+{
+ "$schema": "https://json.schemastore.org/sarif-2.1.0.json",
+ "version": "2.1.0",
+ "runs": [
+  {
+   "tool": {
+    "driver": {
+     "name": "vcc",
+     "rules": [
+      {
+       "id": "err_no_member"
+      }
+     ]
+    }
+   },
+   "columnKind": "unicodeCodePoints",
+   "originalUriBaseIds": {
+    "%SRCROOT%": {
+     "uri": "file:///SRCROOT/"
+    }
+   },
+   "invocations": [
+    {
+     "executionSuccessful": false,
+     "arguments": [
+      "vpp",
+      "--target=aarch64-linux-gnu",
+      "-fsyntax-only",
+      "-fno-color-diagnostics",
+      "-fdiagnostics-format=sarif",
+      "include_error.c"
+     ]
+    }
+   ],
+   "results": [
+    {
+     "ruleId": "err_no_member",
+     "ruleIndex": 0,
+     "level": "error",
+     "message": {
+      "text": "no member named 'b' in 'struct hdr'"
+     },
+     "locations": [
+      {
+       "id": 0,
+       "physicalLocation": {
+        "artifactLocation": {
+         "uri": "./inc_err.h",
+         "uriBaseId": "%SRCROOT%"
+        },
+        "region": {
+         "startLine": 2,
+         "startColumn": 39,
+         "endLine": 2,
+         "endColumn": 40
+        }
+       },
+       "relationships": [
+        {
+         "target": 1,
+         "kinds": [
+          "isIncludedBy"
+         ]
+        }
+       ]
+      }
+     ],
+     "relatedLocations": [
+      {
+       "id": 1,
+       "physicalLocation": {
+        "artifactLocation": {
+         "uri": "include_error.c",
+         "uriBaseId": "%SRCROOT%"
+        },
+        "region": {
+         "startLine": 2,
+         "startColumn": 10,
+         "endLine": 2,
+         "endColumn": 21
+        }
+       },
+       "message": {
+        "text": "included from here"
+       }
+      },
+      {
+       "id": 2,
+       "physicalLocation": {
+        "artifactLocation": {
+         "uri": "./inc_err.h",
+         "uriBaseId": "%SRCROOT%"
+        },
+        "region": {
+         "startLine": 2,
+         "startColumn": 36,
+         "endLine": 2,
+         "endColumn": 37
+        }
+       }
+      }
+     ],
+     "properties": {
+      "vcc/flag": null,
+      "vcc/werror": false
+     }
+    }
+   ]
+  }
+ ]
+}

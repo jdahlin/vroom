@@ -5,7 +5,7 @@
 
 /* ---------------- diagnostics ---------------- */
 
-static const fent *loc_fent(const pp *p, uint32_t loc)
+VPRIV const fent *loc_fent(const pp *p, uint32_t loc)
 {
 	uint32_t lo = 0, hi = p->nfe;
 
@@ -129,7 +129,7 @@ static const char *dcolor(const char *what)
 #define DC_CARET "\033[0;1;32m"	/* bold green */
 #define DC_FIXIT "\033[0;32m"	/* green */
 
-static bool loc_ok(const pp *p, uint32_t loc, const fent **e)
+VPRIV bool loc_ok(const pp *p, uint32_t loc, const fent **e)
 {
 	*e = loc_fent(p, loc);
 	return *e && loc >= (*e)->base && loc - (*e)->base <= (*e)->f->size;
@@ -287,7 +287,7 @@ static uint32_t dcols(const char *s, uint32_t b, uint32_t e, uint32_t col)
 
 /* "In file included from" for each level of loc's include stack, outermost first */
 /* pp_where with the file's path as spelled (clang's diagnostics ignore -fmacro-prefix-map) */
-static int diag_where(const pp *p, uint32_t loc, const char **name, uint32_t *nl, uint32_t *line, uint32_t *col)
+VPRIV int diag_where(const pp *p, uint32_t loc, const char **name, uint32_t *nl, uint32_t *line, uint32_t *col)
 {
 	int r = pp_where(p, loc, name, nl, line, col);
 	const fent *e = loc_fent(p, loc);
@@ -763,7 +763,7 @@ static void track_str(vbuf *b, const void *pc)
 }
 
 /* one record in clang's text format */
-static void render_text(pp *p, vbuf *b, const vdiag *d)
+VPRIV void render_text(pp *p, vbuf *b, const vdiag *d)
 {
 	const char *name, *what = lvname[d->level];
 	uint32_t nl, line, col;
@@ -790,10 +790,20 @@ static void render_text(pp *p, vbuf *b, const vdiag *d)
 	if (p->color)
 		vbuf_s(b, note ? DC_RESET : DC_RESET DC_BOLD);
 	vbuf_s(b, d->msg);
-	if (d->flag)
+	if (d->flag && p->color)	/* OSC 8: the flag links to clang's reference */
+		vbuf_f(b, " [%s\033]8;;https://clang.llvm.org/docs/DiagnosticsReference.html#w%s\033\\-W%s\033]8;;\033\\]",
+		       d->werror ? "-Werror," : "", d->flag, d->flag);
+	else if (d->flag)
 		vbuf_f(b, " [%s-W%s]", d->werror ? "-Werror," : "", d->flag);
-	if (p->o->diag_show_id)
-		vbuf_f(b, " [%s]", d->id ? d->id : "vcc_unknown");
+	if (p->o->diag_show_id) {
+		const char *docs = getenv("VCC_DIAG_DOCS");	/* where `vcc --explain` pages are (D6) */
+		const char *id = d->id ? d->id : "vcc_unknown";
+
+		if (p->color && docs && *docs)
+			vbuf_f(b, " [\033]8;;%s/%s.md\033\\%s\033]8;;\033\\]", docs, id, id);
+		else
+			vbuf_f(b, " [%s]", id);
+	}
 	if (p->dtrack)
 		track_str(b, d->track);
 	if (p->color)
@@ -819,18 +829,25 @@ void pp_diag_emit(pp *p, vdiag *d)
 		p->dtail = d;
 	}
 	macro_adjust(p, top, d);
-	if (!top->emitted)
-		render_text(p, &b, top), top->emitted = 1;
-	for (vdiag *k = top->kids; k; k = k->next)
-		if (!k->emitted)
-			render_text(p, &b, k), k->emitted = 1;
-	(void)!write(fd, b.p, b.n);
-	free(b.p);
+	if (p->o->diag_format == PP_DIAG_JSON) {
+		/* a record is written when it is complete: at the next one or at the end */
+		if (d == top)
+			diag_json_flush(p), p->dpend = d;
+	} else if (p->o->diag_format != PP_DIAG_SARIF) {
+		if (!top->emitted)
+			render_text(p, &b, top), top->emitted = 1;
+		for (vdiag *k = top->kids; k; k = k->next)
+			if (!k->emitted)
+				render_text(p, &b, k), k->emitted = 1;
+		(void)!write(fd, b.p, b.n);
+		free(b.p);
+	}
 	if (d->level >= VDL_ERROR)
 		p->errors++;
 	else if (d->level == VDL_WARNING)
 		p->warns++;
 	if (d->level == VDL_FATAL && !p->o->fatal_continue) {
+		pp_diag_finish(p);
 		if (p->fatal_jb)
 			longjmp(*p->fatal_jb, 1);
 		exit(1);
@@ -864,6 +881,9 @@ void pp_diag_summary(pp *p)
 	char b[128];
 	int n = 0;
 
+	pp_diag_finish(p);
+	if (p->o->diag_format == PP_DIAG_JSON || p->o->diag_format == PP_DIAG_SARIF)
+		return;	/* the records say it */
 	if (p->warns && p->errors)
 		n = snprintf(b, sizeof(b), "%d warning%s and %d error%s generated.\n", p->warns, p->warns > 1 ? "s" : "",
 			     p->errors, p->errors > 1 ? "s" : "");

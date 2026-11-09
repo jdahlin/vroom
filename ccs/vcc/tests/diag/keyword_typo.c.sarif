@@ -1,0 +1,1083 @@
+{
+ "$schema": "https://json.schemastore.org/sarif-2.1.0.json",
+ "version": "2.1.0",
+ "runs": [
+  {
+   "tool": {
+    "driver": {
+     "name": "vcc",
+     "rules": [
+      {
+       "id": "err_unknown_typename_suggest"
+      },
+      {
+       "id": "err_undeclared_var_use_suggest"
+      },
+      {
+       "id": "ext_implicit_function_decl_c99"
+      },
+      {
+       "id": "err_expected"
+      },
+      {
+       "id": "fatal_too_many_errors"
+      }
+     ]
+    }
+   },
+   "columnKind": "unicodeCodePoints",
+   "originalUriBaseIds": {
+    "%SRCROOT%": {
+     "uri": "file:///SRCROOT/"
+    }
+   },
+   "invocations": [
+    {
+     "executionSuccessful": false,
+     "arguments": [
+      "vpp",
+      "--target=aarch64-linux-gnu",
+      "-fsyntax-only",
+      "-fno-color-diagnostics",
+      "-fdiagnostics-format=sarif",
+      "keyword_typo.c"
+     ]
+    }
+   ],
+   "results": [
+    {
+     "ruleId": "err_unknown_typename_suggest",
+     "ruleIndex": 0,
+     "level": "error",
+     "message": {
+      "text": "unknown type name 'struc'; did you mean 'struct'?"
+     },
+     "locations": [
+      {
+       "id": 0,
+       "physicalLocation": {
+        "artifactLocation": {
+         "uri": "keyword_typo.c",
+         "uriBaseId": "%SRCROOT%"
+        },
+        "region": {
+         "startLine": 4,
+         "startColumn": 1,
+         "endLine": 4,
+         "endColumn": 6
+        }
+       }
+      }
+     ],
+     "relatedLocations": [],
+     "fixes": [
+      {
+       "artifactChanges": [
+        {
+         "artifactLocation": {
+          "uri": "keyword_typo.c",
+          "uriBaseId": "%SRCROOT%"
+         },
+         "replacements": [
+          {
+           "deletedRegion": {
+            "startLine": 4,
+            "startColumn": 1,
+            "endLine": 4,
+            "endColumn": 6
+           },
+           "insertedContent": {
+            "text": "struct"
+           }
+          }
+         ]
+        }
+       ]
+      }
+     ],
+     "properties": {
+      "vcc/flag": null,
+      "vcc/werror": false
+     }
+    },
+    {
+     "ruleId": "err_unknown_typename_suggest",
+     "ruleIndex": 0,
+     "level": "error",
+     "message": {
+      "text": "unknown type name 'stati'; did you mean 'static'?"
+     },
+     "locations": [
+      {
+       "id": 0,
+       "physicalLocation": {
+        "artifactLocation": {
+         "uri": "keyword_typo.c",
+         "uriBaseId": "%SRCROOT%"
+        },
+        "region": {
+         "startLine": 5,
+         "startColumn": 1,
+         "endLine": 5,
+         "endColumn": 6
+        }
+       }
+      }
+     ],
+     "relatedLocations": [],
+     "fixes": [
+      {
+       "artifactChanges": [
+        {
+         "artifactLocation": {
+          "uri": "keyword_typo.c",
+          "uriBaseId": "%SRCROOT%"
+         },
+         "replacements": [
+          {
+           "deletedRegion": {
+            "startLine": 5,
+            "startColumn": 1,
+            "endLine": 5,
+            "endColumn": 6
+           },
+           "insertedContent": {
+            "text": "static"
+           }
+          }
+         ]
+        }
+       ]
+      }
+     ],
+     "properties": {
+      "vcc/flag": null,
+      "vcc/werror": false
+     }
+    },
+    {
+     "ruleId": "err_unknown_typename_suggest",
+     "ruleIndex": 0,
+     "level": "error",
+     "message": {
+      "text": "unknown type name 'exter'; did you mean 'extern'?"
+     },
+     "locations": [
+      {
+       "id": 0,
+       "physicalLocation": {
+        "artifactLocation": {
+         "uri": "keyword_typo.c",
+         "uriBaseId": "%SRCROOT%"
+        },
+        "region": {
+         "startLine": 6,
+         "startColumn": 1,
+         "endLine": 6,
+         "endColumn": 6
+        }
+       }
+      }
+     ],
+     "relatedLocations": [],
+     "fixes": [
+      {
+       "artifactChanges": [
+        {
+         "artifactLocation": {
+          "uri": "keyword_typo.c",
+          "uriBaseId": "%SRCROOT%"
+         },
+         "replacements": [
+          {
+           "deletedRegion": {
+            "startLine": 6,
+            "startColumn": 1,
+            "endLine": 6,
+            "endColumn": 6
+           },
+           "insertedContent": {
+            "text": "extern"
+           }
+          }
+         ]
+        }
+       ]
+      }
+     ],
+     "properties": {
+      "vcc/flag": null,
+      "vcc/werror": false
+     }
+    },
+    {
+     "ruleId": "err_unknown_typename_suggest",
+     "ruleIndex": 0,
+     "level": "error",
+     "message": {
+      "text": "unknown type name 'typede'; did you mean 'typedef'?"
+     },
+     "locations": [
+      {
+       "id": 0,
+       "physicalLocation": {
+        "artifactLocation": {
+         "uri": "keyword_typo.c",
+         "uriBaseId": "%SRCROOT%"
+        },
+        "region": {
+         "startLine": 7,
+         "startColumn": 1,
+         "endLine": 7,
+         "endColumn": 7
+        }
+       }
+      }
+     ],
+     "relatedLocations": [],
+     "fixes": [
+      {
+       "artifactChanges": [
+        {
+         "artifactLocation": {
+          "uri": "keyword_typo.c",
+          "uriBaseId": "%SRCROOT%"
+         },
+         "replacements": [
+          {
+           "deletedRegion": {
+            "startLine": 7,
+            "startColumn": 1,
+            "endLine": 7,
+            "endColumn": 7
+           },
+           "insertedContent": {
+            "text": "typedef"
+           }
+          }
+         ]
+        }
+       ]
+      }
+     ],
+     "properties": {
+      "vcc/flag": null,
+      "vcc/werror": false
+     }
+    },
+    {
+     "ruleId": "err_unknown_typename_suggest",
+     "ruleIndex": 0,
+     "level": "error",
+     "message": {
+      "text": "unknown type name 'cons'; did you mean 'const'?"
+     },
+     "locations": [
+      {
+       "id": 0,
+       "physicalLocation": {
+        "artifactLocation": {
+         "uri": "keyword_typo.c",
+         "uriBaseId": "%SRCROOT%"
+        },
+        "region": {
+         "startLine": 8,
+         "startColumn": 1,
+         "endLine": 8,
+         "endColumn": 5
+        }
+       }
+      }
+     ],
+     "relatedLocations": [],
+     "fixes": [
+      {
+       "artifactChanges": [
+        {
+         "artifactLocation": {
+          "uri": "keyword_typo.c",
+          "uriBaseId": "%SRCROOT%"
+         },
+         "replacements": [
+          {
+           "deletedRegion": {
+            "startLine": 8,
+            "startColumn": 1,
+            "endLine": 8,
+            "endColumn": 5
+           },
+           "insertedContent": {
+            "text": "const"
+           }
+          }
+         ]
+        }
+       ]
+      }
+     ],
+     "properties": {
+      "vcc/flag": null,
+      "vcc/werror": false
+     }
+    },
+    {
+     "ruleId": "err_unknown_typename_suggest",
+     "ruleIndex": 0,
+     "level": "error",
+     "message": {
+      "text": "unknown type name 'unsigne'; did you mean 'unsigned'?"
+     },
+     "locations": [
+      {
+       "id": 0,
+       "physicalLocation": {
+        "artifactLocation": {
+         "uri": "keyword_typo.c",
+         "uriBaseId": "%SRCROOT%"
+        },
+        "region": {
+         "startLine": 9,
+         "startColumn": 1,
+         "endLine": 9,
+         "endColumn": 8
+        }
+       }
+      }
+     ],
+     "relatedLocations": [],
+     "fixes": [
+      {
+       "artifactChanges": [
+        {
+         "artifactLocation": {
+          "uri": "keyword_typo.c",
+          "uriBaseId": "%SRCROOT%"
+         },
+         "replacements": [
+          {
+           "deletedRegion": {
+            "startLine": 9,
+            "startColumn": 1,
+            "endLine": 9,
+            "endColumn": 8
+           },
+           "insertedContent": {
+            "text": "unsigned"
+           }
+          }
+         ]
+        }
+       ]
+      }
+     ],
+     "properties": {
+      "vcc/flag": null,
+      "vcc/werror": false
+     }
+    },
+    {
+     "ruleId": "err_unknown_typename_suggest",
+     "ruleIndex": 0,
+     "level": "error",
+     "message": {
+      "text": "unknown type name 'voi'; did you mean 'void'?"
+     },
+     "locations": [
+      {
+       "id": 0,
+       "physicalLocation": {
+        "artifactLocation": {
+         "uri": "keyword_typo.c",
+         "uriBaseId": "%SRCROOT%"
+        },
+        "region": {
+         "startLine": 10,
+         "startColumn": 1,
+         "endLine": 10,
+         "endColumn": 4
+        }
+       }
+      }
+     ],
+     "relatedLocations": [],
+     "fixes": [
+      {
+       "artifactChanges": [
+        {
+         "artifactLocation": {
+          "uri": "keyword_typo.c",
+          "uriBaseId": "%SRCROOT%"
+         },
+         "replacements": [
+          {
+           "deletedRegion": {
+            "startLine": 10,
+            "startColumn": 1,
+            "endLine": 10,
+            "endColumn": 4
+           },
+           "insertedContent": {
+            "text": "void"
+           }
+          }
+         ]
+        }
+       ]
+      }
+     ],
+     "properties": {
+      "vcc/flag": null,
+      "vcc/werror": false
+     }
+    },
+    {
+     "ruleId": "err_unknown_typename_suggest",
+     "ruleIndex": 0,
+     "level": "error",
+     "message": {
+      "text": "unknown type name '_Boo'; did you mean '_Bool'?"
+     },
+     "locations": [
+      {
+       "id": 0,
+       "physicalLocation": {
+        "artifactLocation": {
+         "uri": "keyword_typo.c",
+         "uriBaseId": "%SRCROOT%"
+        },
+        "region": {
+         "startLine": 11,
+         "startColumn": 1,
+         "endLine": 11,
+         "endColumn": 5
+        }
+       }
+      }
+     ],
+     "relatedLocations": [],
+     "fixes": [
+      {
+       "artifactChanges": [
+        {
+         "artifactLocation": {
+          "uri": "keyword_typo.c",
+          "uriBaseId": "%SRCROOT%"
+         },
+         "replacements": [
+          {
+           "deletedRegion": {
+            "startLine": 11,
+            "startColumn": 1,
+            "endLine": 11,
+            "endColumn": 5
+           },
+           "insertedContent": {
+            "text": "_Bool"
+           }
+          }
+         ]
+        }
+       ]
+      }
+     ],
+     "properties": {
+      "vcc/flag": null,
+      "vcc/werror": false
+     }
+    },
+    {
+     "ruleId": "err_unknown_typename_suggest",
+     "ruleIndex": 0,
+     "level": "error",
+     "message": {
+      "text": "unknown type name 'enu'; did you mean 'enum'?"
+     },
+     "locations": [
+      {
+       "id": 0,
+       "physicalLocation": {
+        "artifactLocation": {
+         "uri": "keyword_typo.c",
+         "uriBaseId": "%SRCROOT%"
+        },
+        "region": {
+         "startLine": 12,
+         "startColumn": 1,
+         "endLine": 12,
+         "endColumn": 4
+        }
+       }
+      }
+     ],
+     "relatedLocations": [],
+     "fixes": [
+      {
+       "artifactChanges": [
+        {
+         "artifactLocation": {
+          "uri": "keyword_typo.c",
+          "uriBaseId": "%SRCROOT%"
+         },
+         "replacements": [
+          {
+           "deletedRegion": {
+            "startLine": 12,
+            "startColumn": 1,
+            "endLine": 12,
+            "endColumn": 4
+           },
+           "insertedContent": {
+            "text": "enum"
+           }
+          }
+         ]
+        }
+       ]
+      }
+     ],
+     "properties": {
+      "vcc/flag": null,
+      "vcc/werror": false
+     }
+    },
+    {
+     "ruleId": "err_unknown_typename_suggest",
+     "ruleIndex": 0,
+     "level": "error",
+     "message": {
+      "text": "unknown type name 'voi'; did you mean 'void'?"
+     },
+     "locations": [
+      {
+       "id": 0,
+       "physicalLocation": {
+        "artifactLocation": {
+         "uri": "keyword_typo.c",
+         "uriBaseId": "%SRCROOT%"
+        },
+        "region": {
+         "startLine": 13,
+         "startColumn": 8,
+         "endLine": 13,
+         "endColumn": 11
+        }
+       }
+      }
+     ],
+     "relatedLocations": [],
+     "fixes": [
+      {
+       "artifactChanges": [
+        {
+         "artifactLocation": {
+          "uri": "keyword_typo.c",
+          "uriBaseId": "%SRCROOT%"
+         },
+         "replacements": [
+          {
+           "deletedRegion": {
+            "startLine": 13,
+            "startColumn": 8,
+            "endLine": 13,
+            "endColumn": 11
+           },
+           "insertedContent": {
+            "text": "void"
+           }
+          }
+         ]
+        }
+       ]
+      }
+     ],
+     "properties": {
+      "vcc/flag": null,
+      "vcc/werror": false
+     }
+    },
+    {
+     "ruleId": "err_unknown_typename_suggest",
+     "ruleIndex": 0,
+     "level": "error",
+     "message": {
+      "text": "unknown type name 'unsigne'; did you mean 'unsigned'?"
+     },
+     "locations": [
+      {
+       "id": 0,
+       "physicalLocation": {
+        "artifactLocation": {
+         "uri": "keyword_typo.c",
+         "uriBaseId": "%SRCROOT%"
+        },
+        "region": {
+         "startLine": 14,
+         "startColumn": 7,
+         "endLine": 14,
+         "endColumn": 14
+        }
+       }
+      }
+     ],
+     "relatedLocations": [],
+     "fixes": [
+      {
+       "artifactChanges": [
+        {
+         "artifactLocation": {
+          "uri": "keyword_typo.c",
+          "uriBaseId": "%SRCROOT%"
+         },
+         "replacements": [
+          {
+           "deletedRegion": {
+            "startLine": 14,
+            "startColumn": 7,
+            "endLine": 14,
+            "endColumn": 14
+           },
+           "insertedContent": {
+            "text": "unsigned"
+           }
+          }
+         ]
+        }
+       ]
+      }
+     ],
+     "properties": {
+      "vcc/flag": null,
+      "vcc/werror": false
+     }
+    },
+    {
+     "ruleId": "err_unknown_typename_suggest",
+     "ruleIndex": 0,
+     "level": "error",
+     "message": {
+      "text": "unknown type name 'cha'; did you mean 'char'?"
+     },
+     "locations": [
+      {
+       "id": 0,
+       "physicalLocation": {
+        "artifactLocation": {
+         "uri": "keyword_typo.c",
+         "uriBaseId": "%SRCROOT%"
+        },
+        "region": {
+         "startLine": 15,
+         "startColumn": 14,
+         "endLine": 15,
+         "endColumn": 17
+        }
+       }
+      }
+     ],
+     "relatedLocations": [],
+     "fixes": [
+      {
+       "artifactChanges": [
+        {
+         "artifactLocation": {
+          "uri": "keyword_typo.c",
+          "uriBaseId": "%SRCROOT%"
+         },
+         "replacements": [
+          {
+           "deletedRegion": {
+            "startLine": 15,
+            "startColumn": 14,
+            "endLine": 15,
+            "endColumn": 17
+           },
+           "insertedContent": {
+            "text": "char"
+           }
+          }
+         ]
+        }
+       ]
+      }
+     ],
+     "properties": {
+      "vcc/flag": null,
+      "vcc/werror": false
+     }
+    },
+    {
+     "ruleId": "err_unknown_typename_suggest",
+     "ruleIndex": 0,
+     "level": "error",
+     "message": {
+      "text": "unknown type name 'cons'; did you mean 'const'?"
+     },
+     "locations": [
+      {
+       "id": 0,
+       "physicalLocation": {
+        "artifactLocation": {
+         "uri": "keyword_typo.c",
+         "uriBaseId": "%SRCROOT%"
+        },
+        "region": {
+         "startLine": 16,
+         "startColumn": 12,
+         "endLine": 16,
+         "endColumn": 16
+        }
+       }
+      }
+     ],
+     "relatedLocations": [],
+     "fixes": [
+      {
+       "artifactChanges": [
+        {
+         "artifactLocation": {
+          "uri": "keyword_typo.c",
+          "uriBaseId": "%SRCROOT%"
+         },
+         "replacements": [
+          {
+           "deletedRegion": {
+            "startLine": 16,
+            "startColumn": 12,
+            "endLine": 16,
+            "endColumn": 16
+           },
+           "insertedContent": {
+            "text": "const"
+           }
+          }
+         ]
+        }
+       ]
+      }
+     ],
+     "properties": {
+      "vcc/flag": null,
+      "vcc/werror": false
+     }
+    },
+    {
+     "ruleId": "err_undeclared_var_use_suggest",
+     "ruleIndex": 1,
+     "level": "error",
+     "message": {
+      "text": "use of undeclared identifier 'cha'; did you mean 'char'?"
+     },
+     "locations": [
+      {
+       "id": 0,
+       "physicalLocation": {
+        "artifactLocation": {
+         "uri": "keyword_typo.c",
+         "uriBaseId": "%SRCROOT%"
+        },
+        "region": {
+         "startLine": 19,
+         "startColumn": 2,
+         "endLine": 19,
+         "endColumn": 5
+        }
+       }
+      }
+     ],
+     "relatedLocations": [],
+     "fixes": [
+      {
+       "artifactChanges": [
+        {
+         "artifactLocation": {
+          "uri": "keyword_typo.c",
+          "uriBaseId": "%SRCROOT%"
+         },
+         "replacements": [
+          {
+           "deletedRegion": {
+            "startLine": 19,
+            "startColumn": 2,
+            "endLine": 19,
+            "endColumn": 5
+           },
+           "insertedContent": {
+            "text": "char"
+           }
+          }
+         ]
+        }
+       ]
+      }
+     ],
+     "properties": {
+      "vcc/flag": null,
+      "vcc/werror": false
+     }
+    },
+    {
+     "ruleId": "err_undeclared_var_use_suggest",
+     "ruleIndex": 1,
+     "level": "error",
+     "message": {
+      "text": "use of undeclared identifier 'doubl'; did you mean 'double'?"
+     },
+     "locations": [
+      {
+       "id": 0,
+       "physicalLocation": {
+        "artifactLocation": {
+         "uri": "keyword_typo.c",
+         "uriBaseId": "%SRCROOT%"
+        },
+        "region": {
+         "startLine": 20,
+         "startColumn": 2,
+         "endLine": 20,
+         "endColumn": 7
+        }
+       }
+      }
+     ],
+     "relatedLocations": [],
+     "fixes": [
+      {
+       "artifactChanges": [
+        {
+         "artifactLocation": {
+          "uri": "keyword_typo.c",
+          "uriBaseId": "%SRCROOT%"
+         },
+         "replacements": [
+          {
+           "deletedRegion": {
+            "startLine": 20,
+            "startColumn": 2,
+            "endLine": 20,
+            "endColumn": 7
+           },
+           "insertedContent": {
+            "text": "double"
+           }
+          }
+         ]
+        }
+       ]
+      }
+     ],
+     "properties": {
+      "vcc/flag": null,
+      "vcc/werror": false
+     }
+    },
+    {
+     "ruleId": "err_undeclared_var_use_suggest",
+     "ruleIndex": 1,
+     "level": "error",
+     "message": {
+      "text": "use of undeclared identifier 'struc'; did you mean 'struct'?"
+     },
+     "locations": [
+      {
+       "id": 0,
+       "physicalLocation": {
+        "artifactLocation": {
+         "uri": "keyword_typo.c",
+         "uriBaseId": "%SRCROOT%"
+        },
+        "region": {
+         "startLine": 21,
+         "startColumn": 2,
+         "endLine": 21,
+         "endColumn": 7
+        }
+       }
+      }
+     ],
+     "relatedLocations": [],
+     "fixes": [
+      {
+       "artifactChanges": [
+        {
+         "artifactLocation": {
+          "uri": "keyword_typo.c",
+          "uriBaseId": "%SRCROOT%"
+         },
+         "replacements": [
+          {
+           "deletedRegion": {
+            "startLine": 21,
+            "startColumn": 2,
+            "endLine": 21,
+            "endColumn": 7
+           },
+           "insertedContent": {
+            "text": "struct"
+           }
+          }
+         ]
+        }
+       ]
+      }
+     ],
+     "properties": {
+      "vcc/flag": null,
+      "vcc/werror": false
+     }
+    },
+    {
+     "ruleId": "err_undeclared_var_use_suggest",
+     "ruleIndex": 1,
+     "level": "error",
+     "message": {
+      "text": "use of undeclared identifier 'doubl'; did you mean 'double'?"
+     },
+     "locations": [
+      {
+       "id": 0,
+       "physicalLocation": {
+        "artifactLocation": {
+         "uri": "keyword_typo.c",
+         "uriBaseId": "%SRCROOT%"
+        },
+        "region": {
+         "startLine": 22,
+         "startColumn": 7,
+         "endLine": 22,
+         "endColumn": 12
+        }
+       }
+      }
+     ],
+     "relatedLocations": [],
+     "fixes": [
+      {
+       "artifactChanges": [
+        {
+         "artifactLocation": {
+          "uri": "keyword_typo.c",
+          "uriBaseId": "%SRCROOT%"
+         },
+         "replacements": [
+          {
+           "deletedRegion": {
+            "startLine": 22,
+            "startColumn": 7,
+            "endLine": 22,
+            "endColumn": 12
+           },
+           "insertedContent": {
+            "text": "double"
+           }
+          }
+         ]
+        }
+       ]
+      }
+     ],
+     "properties": {
+      "vcc/flag": null,
+      "vcc/werror": false
+     }
+    },
+    {
+     "ruleId": "ext_implicit_function_decl_c99",
+     "ruleIndex": 2,
+     "level": "error",
+     "message": {
+      "text": "call to undeclared function 'whil'; ISO C99 and later do not support implicit function declarations [-Wimplicit-function-declaration]"
+     },
+     "locations": [
+      {
+       "id": 0,
+       "physicalLocation": {
+        "artifactLocation": {
+         "uri": "keyword_typo.c",
+         "uriBaseId": "%SRCROOT%"
+        },
+        "region": {
+         "startLine": 23,
+         "startColumn": 2,
+         "endLine": 23,
+         "endColumn": 6
+        }
+       }
+      }
+     ],
+     "relatedLocations": [],
+     "properties": {
+      "vcc/flag": null,
+      "vcc/werror": false
+     }
+    },
+    {
+     "ruleId": "err_expected",
+     "ruleIndex": 3,
+     "level": "error",
+     "message": {
+      "text": "expected ';' after expression"
+     },
+     "locations": [
+      {
+       "id": 0,
+       "physicalLocation": {
+        "artifactLocation": {
+         "uri": "keyword_typo.c",
+         "uriBaseId": "%SRCROOT%"
+        },
+        "region": {
+         "startLine": 23,
+         "startColumn": 10,
+         "endLine": 23,
+         "endColumn": 11
+        }
+       }
+      }
+     ],
+     "relatedLocations": [],
+     "fixes": [
+      {
+       "artifactChanges": [
+        {
+         "artifactLocation": {
+          "uri": "keyword_typo.c",
+          "uriBaseId": "%SRCROOT%"
+         },
+         "replacements": [
+          {
+           "deletedRegion": {
+            "startLine": 23,
+            "startColumn": 10,
+            "endLine": 23,
+            "endColumn": 10
+           },
+           "insertedContent": {
+            "text": ";"
+           }
+          }
+         ]
+        }
+       ]
+      }
+     ],
+     "properties": {
+      "vcc/flag": null,
+      "vcc/werror": false
+     }
+    },
+    {
+     "ruleId": "fatal_too_many_errors",
+     "ruleIndex": 4,
+     "level": "error",
+     "message": {
+      "text": "too many errors emitted, stopping now [-ferror-limit=]"
+     },
+     "properties": {
+      "vcc/flag": null,
+      "vcc/werror": false
+     }
+    }
+   ]
+  }
+ ]
+}

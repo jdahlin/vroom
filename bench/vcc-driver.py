@@ -47,10 +47,52 @@ ERR_ROWS = [
     ('--target=aarch64-linux-gnu', '', 'int a;\n#error x\nint b;\n#include "nonexistent.h"\nint c;\n'),
 ]
 
+# diagnostics options (PLAN-diag D1.3, D3): vcc's own, checked on what vcc prints
+DIAG_SRC = 'int counter;\nint a = countr;\nint b = countr;\nint c = 1 +;\n'
+
+
+def diag_rows(d):
+    import json
+    spec = importlib.util.spec_from_file_location('sc', os.path.join(os.path.dirname(os.path.abspath(__file__)), 'sarif-check.py'))
+    sc = importlib.util.module_from_spec(spec); spec.loader.exec_module(sc)
+    src = os.path.join(d, 'diag.c')
+    open(src, 'w').write(DIAG_SRC)
+    sf = os.path.join(d, 'out.sarif')
+
+    def v(*fl):
+        r = subprocess.run([vd.VPP, '--target=aarch64-linux-gnu', '-fsyntax-only', '-fno-color-diagnostics'] + list(fl) + [src],
+                           capture_output=True, text=True)
+        return r.returncode, r.stderr
+
+    def json_lines(err):
+        recs = [json.loads(l) for l in err.splitlines()]
+        return len(recs) == 3 and all(r['id'] and 'rendered' in r for r in recs)
+
+    def sarif_ok(err):
+        return not sc.check(json.loads(err)) and len(json.loads(err)['runs'][0]['results']) == 3
+
+    return [
+        ('-fdiagnostics-format=json', lambda: (lambda rc, e: rc == 1 and json_lines(e))(*v('-fdiagnostics-format=json'))),
+        ('-fdiagnostics-format=sarif', lambda: (lambda rc, e: rc == 1 and sarif_ok(e))(*v('-fdiagnostics-format=sarif'))),
+        ('-fdiagnostics-add-output=sarif:file=F', lambda: (lambda rc, e: rc == 1 and 'errors generated' in e
+                                                          and sarif_ok(open(sf).read()))(*v(f'-fdiagnostics-add-output=sarif:file={sf}'))),
+        ('-fdiagnostics-show-id', lambda: (lambda rc, e: e.count('[err_undeclared_var_use_suggest]') == 2
+                                           and '[err_expected_expression]' in e)(*v('-fdiagnostics-show-id'))),
+        ('-fspell-checking-limit=1', lambda: v('-fspell-checking-limit=1')[1].count('did you mean') == 1),
+        ('-fno-spell-checking', lambda: v('-fno-spell-checking')[1].count('did you mean') == 0),
+    ]
+
+
 def main():
     verbose = '-v' in sys.argv
     bad = 0
     with tempfile.TemporaryDirectory() as d:
+        drows = diag_rows(d)
+        for name, fn in drows:
+            ok = fn()
+            bad += not ok
+            if verbose or not ok:
+                print(f'{"ok  " if ok else "FAIL"} {name}')
         for i, (t, flags, probe) in enumerate(ROWS + ERR_ROWS):
             src = os.path.join(d, f'p{i}.c')
             open(src, 'w').write(probe)
@@ -64,7 +106,7 @@ def main():
             if verbose or not ok:
                 print(f'{"ok  " if ok else "FAIL"} {t} {flags or "(none)"}' +
                       ('' if ok else f'\n  clang: {" ".join(out.split())}\n  vpp:   {" ".join(vout.split())} {verr.strip()}'))
-    n = len(ROWS) + len(ERR_ROWS)
+    n = len(ROWS) + len(ERR_ROWS) + len(drows)
     print(f'vcc-driver: {n - bad}/{n} ok')
     sys.exit(1 if bad else 0)
 

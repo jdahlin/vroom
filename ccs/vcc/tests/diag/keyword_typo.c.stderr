@@ -1,76 +1,76 @@
-keyword_typo.c:3:1: error: unknown type name 'struc'; did you mean 'struct'?
-    3 | struc S1 { int a; };
+keyword_typo.c:4:1: error: unknown type name 'struc'; did you mean 'struct'?
+    4 | struc S1 { int a; };
       | ^~~~~
       | struct
-keyword_typo.c:4:1: error: unknown type name 'stati'; did you mean 'static'?
-    4 | stati int g1;
+keyword_typo.c:5:1: error: unknown type name 'stati'; did you mean 'static'?
+    5 | stati int g1;
       | ^~~~~
       | static
-keyword_typo.c:5:1: error: unknown type name 'exter'; did you mean 'extern'?
-    5 | exter int g2;
+keyword_typo.c:6:1: error: unknown type name 'exter'; did you mean 'extern'?
+    6 | exter int g2;
       | ^~~~~
       | extern
-keyword_typo.c:6:1: error: unknown type name 'typede'; did you mean 'typedef'?
-    6 | typede int T1;
+keyword_typo.c:7:1: error: unknown type name 'typede'; did you mean 'typedef'?
+    7 | typede int T1;
       | ^~~~~~
       | typedef
-keyword_typo.c:7:1: error: unknown type name 'cons'; did you mean 'const'?
-    7 | cons int g4 = 1;
+keyword_typo.c:8:1: error: unknown type name 'cons'; did you mean 'const'?
+    8 | cons int g4 = 1;
       | ^~~~
       | const
-keyword_typo.c:8:1: error: unknown type name 'unsigne'; did you mean 'unsigned'?
-    8 | unsigne g5;
+keyword_typo.c:9:1: error: unknown type name 'unsigne'; did you mean 'unsigned'?
+    9 | unsigne g5;
       | ^~~~~~~
       | unsigned
-keyword_typo.c:9:1: error: unknown type name 'voi'; did you mean 'void'?
-    9 | voi f0(void);
+keyword_typo.c:10:1: error: unknown type name 'voi'; did you mean 'void'?
+   10 | voi f0(void);
       | ^~~
       | void
-keyword_typo.c:10:1: error: unknown type name '_Boo'; did you mean '_Bool'?
-   10 | _Boo g8;
+keyword_typo.c:11:1: error: unknown type name '_Boo'; did you mean '_Bool'?
+   11 | _Boo g8;
       | ^~~~
       | _Bool
-keyword_typo.c:11:1: error: unknown type name 'enu'; did you mean 'enum'?
-   11 | enu E { A };
+keyword_typo.c:12:1: error: unknown type name 'enu'; did you mean 'enum'?
+   12 | enu E { A };
       | ^~~
       | enum
-keyword_typo.c:12:8: error: unknown type name 'voi'; did you mean 'void'?
-   12 | static voi f1(void);
+keyword_typo.c:13:8: error: unknown type name 'voi'; did you mean 'void'?
+   13 | static voi f1(void);
       |        ^~~
       |        void
-keyword_typo.c:13:7: error: unknown type name 'unsigne'; did you mean 'unsigned'?
-   13 | const unsigne long *g9;
+keyword_typo.c:14:7: error: unknown type name 'unsigne'; did you mean 'unsigned'?
+   14 | const unsigne long *g9;
       |       ^~~~~~~
       |       unsigned
-keyword_typo.c:14:14: error: unknown type name 'cha'; did you mean 'char'?
-   14 | int f(int x, cha y);
+keyword_typo.c:15:14: error: unknown type name 'cha'; did you mean 'char'?
+   15 | int f(int x, cha y);
       |              ^~~
       |              char
-keyword_typo.c:15:12: error: unknown type name 'cons'; did you mean 'const'?
-   15 | struct R { cons int m; };
+keyword_typo.c:16:12: error: unknown type name 'cons'; did you mean 'const'?
+   16 | struct R { cons int m; };
       |            ^~~~
       |            const
-keyword_typo.c:18:2: error: use of undeclared identifier 'cha'; did you mean 'char'?
-   18 |         cha c = 1;
+keyword_typo.c:19:2: error: use of undeclared identifier 'cha'; did you mean 'char'?
+   19 |         cha c = 1;
       |         ^~~
       |         char
-keyword_typo.c:19:2: error: use of undeclared identifier 'doubl'; did you mean 'double'?
-   19 |         doubl d = 2;
+keyword_typo.c:20:2: error: use of undeclared identifier 'doubl'; did you mean 'double'?
+   20 |         doubl d = 2;
       |         ^~~~~
       |         double
-keyword_typo.c:20:2: error: use of undeclared identifier 'struc'; did you mean 'struct'?
-   20 |         struc S1 s;
+keyword_typo.c:21:2: error: use of undeclared identifier 'struc'; did you mean 'struct'?
+   21 |         struc S1 s;
       |         ^~~~~
       |         struct
-keyword_typo.c:21:7: error: use of undeclared identifier 'doubl'; did you mean 'double'?
-   21 |         x = (doubl)x;
+keyword_typo.c:22:7: error: use of undeclared identifier 'doubl'; did you mean 'double'?
+   22 |         x = (doubl)x;
       |              ^~~~~
       |              double
-keyword_typo.c:22:2: error: call to undeclared function 'whil'; ISO C99 and later do not support implicit function declarations [-Wimplicit-function-declaration]
-   22 |         whil (x) x--;
+keyword_typo.c:23:2: error: call to undeclared function 'whil'; ISO C99 and later do not support implicit function declarations [-Wimplicit-function-declaration]
+   23 |         whil (x) x--;
       |         ^
-keyword_typo.c:22:10: error: expected ';' after expression
-   22 |         whil (x) x--;
+keyword_typo.c:23:10: error: expected ';' after expression
+   23 |         whil (x) x--;
       |                 ^
       |                 ;
 fatal error: too many errors emitted, stopping now [-ferror-limit=]

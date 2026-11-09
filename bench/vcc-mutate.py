@@ -18,7 +18,8 @@ The seed is fixed, so a run is deterministic; clang's results are cached in
 build/ccs/mutate/clang/ (keyed by the mutant and the flags), so a rerun only
 runs vcc.  Details of every mutant go to build/ccs/mutate/last.jsonl.
 
-  bench/vcc-mutate.py [-j N] [-n N] [--kernel-share F] [--seed S] [--src torture|kernel|all]
+  bench/vcc-mutate.py [-j N] [-n N] [--kernel-share F] [--seed S] [--src torture|kernel|all] [--formats]
+      --formats: also check every mutant's JSON records rebuild its text and its SARIF log (layer 5a)
   bench/vcc-mutate.py show CATEGORY [KIND] [-n N]   mutants of a category from the last run, with both outputs
       CATEGORY: crash timeout missed spurious firstloc firstline more fewer
 
@@ -243,9 +244,30 @@ def clang_cached(args, path, src, cwd):
     return r
 
 
+def formats_check(a, mp, cwd):
+    """layer 5a and D3.2 on a mutant: the JSON records rebuild the text, the SARIF log is well formed"""
+    import importlib.util
+    mods = {}
+    for name, file in (('diagrender', 'diag-render.py'), ('sarifcheck', 'sarif-check.py')):
+        spec = importlib.util.spec_from_file_location(name, os.path.join(os.path.dirname(os.path.abspath(__file__)), file))
+        mods[name] = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mods[name])
+    out = {}
+    for k, extra in (('text', []), ('json', ['-fdiagnostics-format=json']), ('sarif', ['-fdiagnostics-format=sarif'])):
+        p = subprocess.run([VPP] + COMMON + extra + a + [mp], cwd=cwd, capture_output=True, timeout=TIMEOUT)
+        out[k] = p.stderr
+    try:
+        if mods['diagrender'].render(out['json'].decode(errors='replace').splitlines(), cwd or '.') != out['text']:
+            return 'JSON does not rebuild the text'
+        sp = mods['sarifcheck'].check(json.loads(out['sarif']))
+        return f'SARIF: {sp[0]}' if sp else None
+    except (ValueError, KeyError) as e:
+        return f'bad JSON: {e}'
+
+
 def job(arg):
     """one mutant: (source tu, kind, seed) -> record"""
-    tu, kind, seed, tmp = arg
+    tu, kind, seed, tmp, formats = arg
     src_kind, name, path, args, cwd = tu
     try:
         src = open(path, errors='replace').read()
@@ -262,9 +284,12 @@ def job(arg):
     a = args + ['-iquote', os.path.dirname(path)]		# "x.h" next to the original
     c = clang_cached(a, mp, mut, cwd)
     v = compile1(VPP, a, mp, cwd, ids=True)
+    fmt = formats_check(a, mp, cwd) if formats else None
     os.unlink(mp)
     os.rmdir(d)
     rec = {'src': src_kind, 'tu': name, 'kind': kind, 'seed': seed, 'path': path, 'clang': c, 'vcc': v}
+    if formats:
+        rec['formats'] = fmt
     rec['cat'] = classify(c, v)
     # the line that was changed, for show
     ol, nl = src.splitlines(), mut.splitlines()
@@ -321,6 +346,7 @@ def baseline_ok(tu):
 
 def run(argv):
     j, n, share, seed, which = 6, 2000, 0.25, 1, 'all'
+    formats = '--formats' in argv
     if '-j' in argv:
         j = int(argv[argv.index('-j') + 1])
     if '-n' in argv:
@@ -348,11 +374,11 @@ def run(argv):
     tmp = tempfile.mkdtemp(prefix='vcc-mutate-')
     for i in range(nt):
         if good_t:
-            jobs.append((good_t[i % len(good_t)], kinds[i % len(kinds)], seed * 1000003 + i, tmp))
+            jobs.append((good_t[i % len(good_t)], kinds[i % len(kinds)], seed * 1000003 + i, tmp, formats))
     for i in range(nk):
         if good_k:
             # several mutants per kernel TU: they are expensive to pick
-            jobs.append((good_k[i % len(good_k)], kinds[(i * 7) % len(kinds)], seed * 1000003 + nt + i, tmp))
+            jobs.append((good_k[i % len(good_k)], kinds[(i * 7) % len(kinds)], seed * 1000003 + nt + i, tmp, formats))
     with Pool(j) as pool:
         recs = [r for r in pool.imap_unordered(job, jobs, chunksize=2) if r]
     os.rmdir(tmp)
@@ -362,7 +388,12 @@ def run(argv):
         for r in recs:
             f.write(json.dumps(r) + '\n')
     report(recs, len(good_t), len(good_k), time.time() - t0)
-    return 1 if any(r['cat'][0] in ('crash', 'timeout') for r in recs) else 0
+    bad = [r for r in recs if r.get('formats')]
+    if formats:
+        print(f'  formats (JSON rebuilds the text, SARIF well formed): {len(recs) - len(bad)}/{len(recs)} ok')
+        for r in bad[:10]:
+            print(f'    {r["tu"]} seed {r["seed"]}: {r["formats"]}')
+    return 1 if any(r['cat'][0] in ('crash', 'timeout') for r in recs) or bad else 0
 
 
 def report(recs, ntu, nktu, dt):

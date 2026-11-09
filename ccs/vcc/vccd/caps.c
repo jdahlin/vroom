@@ -56,12 +56,18 @@ static const char *const cc_exact[] = {
 	/* language */
 	"-fms-anonymous-structs", "-fms-extensions", "-fstrict-flex-arrays=3",
 	"-std=gnu11", "-std=gnu89", "-std=c11", "-std=gnu99",
+	/* diagnostics (ppdriver.c parses them) */
+	"-fcolor-diagnostics", "-fno-color-diagnostics", "-fdiagnostics-color", "-fno-diagnostics-color",
+	"-fdiagnostics-color=always", "-fdiagnostics-color=never", "-fdiagnostics-color=auto",
+	"-fno-caret-diagnostics", "-fdiagnostics-show-id", "-fno-diagnostics-show-id",
+	"-fdiagnostics-format=json", "-fdiagnostics-format=sarif", "-fdiagnostics-format=clang", "-fno-spell-checking",
 	NULL
 };
 
 static const char *const cc_prefix[] = {
 	"-D", "-U", "-I", "-fmacro-prefix-map=", "-ffile-prefix-map=",
 	"-falign-functions=", "-fno-builtin-", "-Wp,-MMD,", "-Wp,-MD,",
+	"-ferror-limit=", "-fspell-checking-limit=", "-fdiagnostics-add-output=sarif:file=",
 	NULL
 };
 

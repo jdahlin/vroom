@@ -321,6 +321,27 @@ Tio lager; varje steg nedan säger vilka det berör.
 - **D3.3 OSC 8-länkar** på `[-Wflagga]` och id till dokumentationen (D6) när färg är på.
   *Validera:* lager 4 (snapshots), 5a; SARIF valideras mot det officiella schemat
   (vendrat i `bench/`); `vcc-driver.py` för de nya flaggorna.
+  *Klart 2026-11-09.*  `pp/diagout.c`.  **JSON** (`-fdiagnostics-format=json`): en post per
+  rad när den är komplett (vid nästa post eller TU:ns slut), med id, nivå, flagga, `werror`,
+  meddelande, plats, etikett, spann, fix-its med tillämplighet, include-stack, barn och
+  `rendered` (texten med sin include-stack).  En plats har det som texten visar (fil, rad,
+  bytekolumn) och det som behövs för att återskapa den (fysisk sökväg, byteoffset), så
+  `bench/diag-render.py` bygger vcc:s text ur posterna och källan, utan `rendered`.
+  **SARIF** (`-fdiagnostics-format=sarif` i stället för text, `-fdiagnostics-add-output=
+  sarif:file=F` dessutom): regler, resultat med `ruleIndex`, kolumner i kodpunkter,
+  sekundära spann och noter som `relatedLocations`, include-kedjan med `isIncludedBy`,
+  fix-its som `fixes`, argv och arbetskatalog (`%SRCROOT%`).  **OSC 8**: med färg länkar
+  `-Wflagga` till clangs DiagnosticsReference och id:t (med `-fdiagnostics-show-id`) till
+  `$VCC_DIAG_DOCS/ID.md` (D6).  vccd tar diagnosflaggorna (`caps.c`).
+  Schemat: nätet hämtas inte utan att användaren säger till, så `bench/sarif-check.py` gör
+  strukturkontrollen (det SARIF-läsare förlitar sig på: regelindex, regioner, unika
+  plats-id, relationsmål, fix-its) och validerar mot det officiella schemat (en
+  delmängdsvaliderare) när det vendrats med `bench/sarif-check.py fetch`.
+  *Validerat:* `vcc-diag.py` 78/78 med lager 5a och SARIF-kontroll för varje fall och
+  JSON-/SARIF-snapshots för fyra fall (`/* diag-formats */`); `vcc-mutate.py --formats`:
+  1970/1970 mutanter där JSON bygger exakt samma text och SARIF är välformad; include,
+  makronot, tabbar och UTF-8 provade för sig; `vcc-driver.py` 47/47 (sex nya rader för
+  flaggorna); `vccd-test.py` 19/19; `vbench.py gate` ok (cc +0,99 %: budgeten är nästan slut).
 
 ### D4. Bättre textutdata (standard)
 
@@ -402,7 +423,7 @@ D1 och D2 hänger ihop (feltypen behöver posten); D0.2 först så att D2 har en
 - [x] D1.0 — 2026-11-09
 - [x] D1.1 – D1.3 — 2026-11-09
 - [ ] D2.1 – D2.3
-- [ ] D3.1 – D3.3
+- [x] D3.1 – D3.3 — 2026-11-09 (officiella SARIF-schemat ej vendrat)
 - [ ] D4
 - [ ] D5.1 – D5.8
 - [ ] D6

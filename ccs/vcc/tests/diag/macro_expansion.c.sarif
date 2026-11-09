@@ -1,0 +1,137 @@
+{
+ "$schema": "https://json.schemastore.org/sarif-2.1.0.json",
+ "version": "2.1.0",
+ "runs": [
+  {
+   "tool": {
+    "driver": {
+     "name": "vcc",
+     "rules": [
+      {
+       "id": "err_undeclared_var_use"
+      }
+     ]
+    }
+   },
+   "columnKind": "unicodeCodePoints",
+   "originalUriBaseIds": {
+    "%SRCROOT%": {
+     "uri": "file:///SRCROOT/"
+    }
+   },
+   "invocations": [
+    {
+     "executionSuccessful": false,
+     "arguments": [
+      "vpp",
+      "--target=aarch64-linux-gnu",
+      "-fsyntax-only",
+      "-fno-color-diagnostics",
+      "-fdiagnostics-format=sarif",
+      "macro_expansion.c"
+     ]
+    }
+   ],
+   "results": [
+    {
+     "ruleId": "err_undeclared_var_use",
+     "ruleIndex": 0,
+     "level": "error",
+     "message": {
+      "text": "use of undeclared identifier 'x'"
+     },
+     "locations": [
+      {
+       "id": 0,
+       "physicalLocation": {
+        "artifactLocation": {
+         "uri": "macro_expansion.c",
+         "uriBaseId": "%SRCROOT%"
+        },
+        "region": {
+         "startLine": 6,
+         "startColumn": 10,
+         "endLine": 6,
+         "endColumn": 13
+        }
+       }
+      }
+     ],
+     "relatedLocations": [
+      {
+       "id": 1,
+       "physicalLocation": {
+        "artifactLocation": {
+         "uri": "macro_expansion.c",
+         "uriBaseId": "%SRCROOT%"
+        },
+        "region": {
+         "startLine": 2,
+         "startColumn": 13,
+         "endLine": 2,
+         "endColumn": 14
+        }
+       },
+       "message": {
+        "text": "expanded from macro 'USE'"
+       }
+      }
+     ],
+     "properties": {
+      "vcc/flag": null,
+      "vcc/werror": false
+     }
+    },
+    {
+     "ruleId": "err_undeclared_var_use",
+     "ruleIndex": 0,
+     "level": "error",
+     "message": {
+      "text": "use of undeclared identifier 'nope'"
+     },
+     "locations": [
+      {
+       "id": 0,
+       "physicalLocation": {
+        "artifactLocation": {
+         "uri": "macro_expansion.c",
+         "uriBaseId": "%SRCROOT%"
+        },
+        "region": {
+         "startLine": 7,
+         "startColumn": 9,
+         "endLine": 7,
+         "endColumn": 15
+        }
+       }
+      }
+     ],
+     "relatedLocations": [
+      {
+       "id": 1,
+       "physicalLocation": {
+        "artifactLocation": {
+         "uri": "macro_expansion.c",
+         "uriBaseId": "%SRCROOT%"
+        },
+        "region": {
+         "startLine": 3,
+         "startColumn": 23,
+         "endLine": 3,
+         "endColumn": 27
+        }
+       },
+       "message": {
+        "text": "expanded from macro 'ADD'"
+       }
+      }
+     ],
+     "properties": {
+      "vcc/flag": null,
+      "vcc/werror": false
+     }
+    }
+   ]
+  }
+ ]
+}
