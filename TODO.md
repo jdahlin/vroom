@@ -542,6 +542,13 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
   suite.
 
 ### Front end (`cc.c`)
+- [ ] **Runtime-behavior warnings by reachability** (clang's DiagRuntimeBehavior): in a
+  function body clang defers `-Wconstant-conversion`, `-Warray-bounds`, shift and division
+  warnings and drops those in code its CFG finds unreachable.  vcc approximates with
+  `c->dead` (constant `if`/`?:`), so it still warns after `return`/`break`, in `while (0)`
+  bodies and under `v && 0`.  Queue them per function and filter by the flow walk of
+  `-Wreturn-type` (cc/func.c), which would mark reached statements.
+  *Validate:* tests/diag case with each form; `vcc-sema.py warn` stays 879/879.
 - [ ] **C23 / per-TU `-std`** [P] (partly done: per-TU keyword map `kwmap` (C23 spellings ->
   GNU keywords; true/false/nullptr/constexpr), `#if true`, digit separators through a
   translated copy (vlex_digitsep: `-E` and `#x` print them without the `'`, clang keeps them),

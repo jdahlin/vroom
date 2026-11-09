@@ -1,0 +1,52 @@
+const_conversion.c:4:20: warning: implicit conversion from 'int' to 'unsigned char' changes value from 300 to 44 [-Wconstant-conversion]
+    4 | unsigned char uc = 300;
+      |                    ^~~
+      = help: 'unsigned char' holds 0 to 255: cast the value if the wrap to 44 is intended
+const_conversion.c:5:12: warning: implicit conversion from 'int' to 'short' changes value from 70000 to 4464 [-Wconstant-conversion]
+    5 | short sh = 70000;
+      |            ^~~~~
+      = help: 'short' holds -32768 to 32767: cast the value if the wrap to 4464 is intended
+const_conversion.c:6:18: warning: implicit conversion from 'int' to 'signed char' changes value from 128 to -128 [-Wconstant-conversion]
+    6 | signed char sc = 128;
+      |                  ^~~
+      = help: 'signed char' holds -128 to 127: cast the value if the wrap to -128 is intended
+const_conversion.c:9:11: warning: implicit conversion from 'long' to 'int' changes value from 4294967295 to -1 [-Wconstant-conversion]
+    9 | int big = 4294967295L;
+      |           ^~~~~~~~~~~
+      = help: 'int' holds -2147483648 to 2147483647: cast the value if the wrap to -1 is intended
+const_conversion.c:11:19: warning: implicit conversion from 'int' to 'char' changes value from 400 to 144 [-Wconstant-conversion]
+   10 | #define LIMIT 400
+      |               --- expanded from macro 'LIMIT'
+   11 | char from_macro = LIMIT;
+      |                   ^~~~~
+      = help: 'char' holds 0 to 255: cast the value if the wrap to 144 is intended
+const_conversion.c:10:15: note: expanded from macro 'LIMIT'
+const_conversion.c:12:31: warning: implicit conversion from 'int' to 'char' changes value from 999 to 231 [-Wconstant-conversion]
+   12 | char pick(int v) { return v ? 999 : 1; }
+      |                               ^~~
+      = help: 'char' holds 0 to 255: cast the value if the wrap to 231 is intended
+const_conversion.c:14:23: warning: implicit conversion from 'int' to 'short' changes value from 65536 to 0 [-Wconstant-conversion]
+   14 | void use(void) { call(65536); }
+      |                       ^~~~~
+      = help: 'short' holds -32768 to 32767: cast the value if the wrap to 0 is intended
+const_conversion.c:16:20: warning: implicit truncation from 'int' to bit-field changes value from 2 to -2 [-Wbitfield-constant-conversion]
+   16 | struct flags f = { 2, 8, 1 };
+      |                    ^
+      = help: the signed 2-bit bit-field 'mode' holds -2 to 1
+const_conversion.c:16:23: warning: implicit truncation from 'int' to bit-field changes value from 8 to 0 [-Wbitfield-constant-conversion]
+   16 | struct flags f = { 2, 8, 1 };
+      |                       ^
+      = help: the unsigned 3-bit bit-field 'kind' holds 0 to 7
+const_conversion.c:16:26: warning: implicit truncation from 'int' to a one-bit wide bit-field changes value from 1 to -1 [-Wsingle-bit-bitfield-constant-conversion]
+   16 | struct flags f = { 2, 8, 1 };
+      |                          ^
+      = help: a signed 1-bit bit-field holds only 0 and -1: declare it 'unsigned'
+const_conversion.c:17:37: warning: implicit truncation from 'int' to bit-field changes value from 9 to 1 [-Wbitfield-constant-conversion]
+   17 | void set(struct flags *p) { p->kind = 9; p->mode = -3; p->on = 0; }
+      |                                     ^ ~
+      = help: the unsigned 3-bit bit-field 'kind' holds 0 to 7
+const_conversion.c:17:50: warning: implicit truncation from 'int' to bit-field changes value from -3 to 1 [-Wbitfield-constant-conversion]
+   17 | void set(struct flags *p) { p->kind = 9; p->mode = -3; p->on = 0; }
+      |                                                  ^ ~~
+      = help: the signed 2-bit bit-field 'mode' holds -2 to 1
+12 warnings generated.

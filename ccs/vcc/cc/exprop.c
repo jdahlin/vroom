@@ -687,8 +687,11 @@ VPRIV uint32_t expr(cc *c)
 /* a constant expression as an int (array sizes, widths, enum values, cases) */
 VPRIV bool const_expr(cc *c, i128 *v, uint32_t *np)
 {
-	uint32_t n = rvalue(c, cond_expr(c));
+	uint32_t n;
 
+	c->cexpr++;
+	n = rvalue(c, cond_expr(c));
+	c->cexpr--;
 	if (np)
 		*np = n;
 	if (!const_int(c, n, v)) {

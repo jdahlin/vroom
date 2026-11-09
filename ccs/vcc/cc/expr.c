@@ -96,6 +96,10 @@ VPRIV uint32_t assign(cc *c, int op, uint32_t l, uint32_t r, uint32_t loc)
 	if (op && (is_complex(c, lt) || is_complex(c, N(r)->ty)))	/* l = l op r (l evaluated twice) */
 		return assign(c, 0, l, cplx_binop(c, op, rvalue(c, l), rvalue(c, r), loc), loc);
 	if (!op) {
+		const field *bf = bitfield_of(c, l);
+
+		if (unlikely(bf != NULL))
+			bf_const_conv(c, r, bf, loc);
 		r = convert_as(c, r, lt, CX_ASSIGN, loc);
 		n = mk2(c, N_ASSIGN, lt, loc, l, r);
 		return n;

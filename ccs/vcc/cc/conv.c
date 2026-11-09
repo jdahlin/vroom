@@ -267,6 +267,163 @@ static bool ptr_ok(cc *c, qty a, qty b)
 	return false;
 }
 
+/* clang's DiagRuntimeBehavior: nothing in unevaluated operands and constant expressions, and in a
+   function nothing in code its CFG finds unreachable (at file scope a dead ?: branch still warns) */
+static bool quiet_const(const cc *c)
+{
+	return c->unevaluated || c->cexpr || (c->dead && c->fn);
+}
+
+static void i128s(char *b, size_t n, i128 v)
+{
+	char t[48];
+	int k = 0;
+	u128 u = v < 0 ? (u128)0 - (u128)v : (u128)v;
+
+	do
+		t[k++] = (char)('0' + (int)(u % 10)), u /= 10;
+	while (u);
+	if (v < 0)
+		t[k++] = '-';
+	for (int i = 0; i < k && (size_t)i + 1 < n; i++)
+		b[i] = t[k - 1 - i];
+	b[(size_t)k < n ? (size_t)k : n - 1] = 0;
+}
+
+/* clang's -Wconstant-conversion: an integer constant the narrower target type cannot
+   hold.  clang's ranges: unsigned w bits holds -2^(w-1) .. 2^w-1 (the bits fit); signed
+   its signed range, or up to 2^w-1 from an unsigned source; plain char -128 .. 255 */
+static __attribute__((cold, noinline)) void const_conv(cc *c, uint32_t n, qty to)
+{
+	const node *x = N(n);
+	qty from;
+	cval v;
+	uint64_t w = ty_size(c, to) * 8;
+	i128 lo, hi, nv;
+	char a[48], b[48], los[48], his[48];
+	pp_span r;
+	vdiag *d;
+
+	if (quiet_const(c))	/* clang: DiagRuntimeBehavior */
+		return;
+	while (x->op == N_CAST && !c->span[n].e)	/* implicit conversions */
+		n = x->a, x = N(n);
+	if (x->op == N_COND && x->b) {	/* clang: each branch, the taken one of a constant condition */
+		cval k;
+		bool known = c->fn && cc_eval(c, x->a, &k) && k.kind == CV_INT;
+
+		if (!known || k.i)
+			const_conv(c, x->b, to);
+		if (!known || !k.i)
+			const_conv(c, x->c, to);
+		return;
+	}
+	from = x->ty;
+	if (!is_integer(c, from) || KIND(c, from) == TY_BOOL || ty_size(c, to) >= ty_size(c, from) || w > 64 ||
+	    !cc_eval(c, n, &v) || v.kind != CV_INT)
+		return;
+	if (KIND(c, QUNQ(to)) == TY_CHAR || (w == 8 && c->ibr))	/* clang: byte tables in braces */
+		lo = -128, hi = 255;
+	else if (!is_signed(c, to))
+		lo = -((i128)1 << (w - 1)), hi = ((i128)1 << w) - 1;
+	else
+		lo = -((i128)1 << (w - 1)), hi = is_signed(c, from) ? ((i128)1 << (w - 1)) - 1 : ((i128)1 << w) - 1;
+	if (v.i >= lo && v.i <= hi)
+		return;
+	nv = trunc_to(c, v.i, to);
+	r = rng(c, n);
+	i128s(a, sizeof a, v.i), i128s(b, sizeof b, nv);
+	i128s(los, sizeof los, is_signed(c, to) ? -((i128)1 << (w - 1)) : 0);
+	i128s(his, sizeof his, is_signed(c, to) ? ((i128)1 << (w - 1)) - 1 : ((i128)1 << w) - 1);
+	d = cc_warn_begin(c, "constant-conversion", true, NULL, x->loc != UINT32_MAX ? x->loc : r.b, "implicit conversion from '%s' to '%s' changes value from %s to %s",
+			  tyname(c, from), tyname(c, QUNQ(to)), a, b);
+	if (!d)
+		return;
+	pp_diag_label(c->p, d, r.b, r.e, NULL);
+	pp_diag_macro(d, a, (uint32_t)strlen(a));	/* clang: "expanded from macro" at the constant */
+	pp_diag_help(c->p, d, "'%s' holds %s to %s: cast the value if the wrap to %s is intended", tyname(c, QUNQ(to)), los, his, b);
+	pp_diag_emit(c->p, d);
+}
+
+/* -Wconstant-conversion for a conversion of n to the integer type to (gated: narrowing only) */
+VPRIV void const_conv_check(cc *c, uint32_t n, qty to)
+{
+	qty from = N(n)->ty;
+
+	if (unlikely(is_integer(c, to) && KIND(c, to) != TY_BOOL && is_integer(c, from) && ty_size(c, to) < ty_size(c, from)))
+		const_conv(c, n, to);
+}
+
+/* clang's -Wbitfield-constant-conversion: an integer constant stored into bit-field f that
+   does not survive the truncation.  Unsigned w bits hold -2^(w-1) .. 2^w-1, signed ones
+   their signed range; explicit casts count too (the truncation itself is implicit).  at:
+   where clang reports it (an assignment's '='), else UINT32_MAX for the constant */
+VPRIV __attribute__((noinline)) void bf_const_conv(cc *c, uint32_t n, const field *f, uint32_t at)
+{
+	const node *x = N(n);
+	uint64_t w = f->width;
+	qty from;
+	cval v;
+	i128 lo, hi, nv;
+	bool sg;
+	char a[48], b[48], los[48], his[48];
+	pp_span r;
+	vdiag *d;
+
+	if (quiet_const(c))
+		return;
+	while (x->op == N_CAST && !c->span[n].e)
+		n = x->a, x = N(n);
+	if (x->op == N_COND && x->b) {	/* clang: each branch, the taken one of a constant condition */
+		cval k;
+		bool known = c->fn && cc_eval(c, x->a, &k) && k.kind == CV_INT;
+
+		if (!known || k.i)
+			bf_const_conv(c, x->b, f, at);
+		if (!known || !k.i)
+			bf_const_conv(c, x->c, f, at);
+		return;
+	}
+	from = x->ty;
+	if (!w || w > 64 || !is_integer(c, from) || KIND(c, from) == TY_BOOL || KIND(c, f->ty) == TY_BOOL ||
+	    w >= ty_size(c, from) * 8 || !cc_eval(c, n, &v) || v.kind != CV_INT)
+		return;
+	sg = is_signed(c, f->ty);
+	lo = -((i128)1 << (w - 1));
+	hi = sg ? ((i128)1 << (w - 1)) - 1 : ((i128)1 << w) - 1;
+	if (v.i >= lo && v.i <= hi)
+		return;
+	nv = v.i & (((i128)1 << w) - 1);
+	if (sg && nv > ((i128)1 << (w - 1)) - 1)
+		nv -= (i128)1 << w;
+	r = rng(c, n);
+	i128s(a, sizeof a, v.i), i128s(b, sizeof b, nv);
+	if (at == UINT32_MAX)
+		at = x->loc != UINT32_MAX ? x->loc : r.b;
+	if (sg && w == 1 && v.i == 1)
+		d = cc_warn_begin(c, "single-bit-bitfield-constant-conversion", true, NULL, at,
+				  "implicit truncation from '%s' to a one-bit wide bit-field changes value from %s to %s", tyname(c, from), a, b);
+	else
+		d = cc_warn_begin(c, "bitfield-constant-conversion", true, NULL, at,
+				  "implicit truncation from '%s' to bit-field changes value from %s to %s", tyname(c, from), a, b);
+	if (!d)
+		return;
+	pp_diag_label(c->p, d, r.b, r.e, NULL);
+	pp_diag_macro(d, a, (uint32_t)strlen(a));
+	i128s(los, sizeof los, sg ? lo : 0), i128s(his, sizeof his, hi);
+	if (sg && w == 1)
+		pp_diag_help(c->p, d, "a signed 1-bit bit-field holds only 0 and -1: declare it 'unsigned'");
+	else
+	{
+		int nl = 0;
+		const char *nm = f->name ? idname(f->name, &nl) : "";
+
+		pp_diag_help(c->p, d, "the %s %u-bit bit-field '%.*s' holds %s to %s", sg ? "signed" : "unsigned", (unsigned)w, nl, nm,
+			     los, his);
+	}
+	pp_diag_emit(c->p, d);
+}
+
 /* clang's implicit-conversion errors (int-conversion, incompatible pointer types) */
 static uint32_t conv_check(cc *c, uint32_t n, qty to)
 {
@@ -287,6 +444,7 @@ static uint32_t conv_check(cc *c, uint32_t n, qty to)
 			conv_error(c, n, to, "incompatible pointer types", "ext_typecheck_convert_incompatible_pointer",
 				   "incompatible-pointer-types");
 	} else {
+		const_conv_check(c, n, to);
 		return n;
 	}
 	N(n)->flags |= NF_ERR;	/* no second message from convert */

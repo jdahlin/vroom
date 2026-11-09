@@ -174,6 +174,7 @@ struct cc {
 	uint32_t ncase, capcase, case_base;
 	qty switch_ty;
 	int unevaluated;	/* sizeof / typeof / _Alignof operand */
+	int cexpr;		/* in an integer constant expression (clang: no runtime-behavior warnings) */
 	attrs pend;		/* attributes before a block-scope declaration */
 	int in_struct;		/* parsing a struct/union body */
 	int in_tyname;		/* parsing a type name (clang's DSC_type_specifier) */

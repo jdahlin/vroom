@@ -57,6 +57,17 @@ static qty il_elem_type(cc *c, const ilist *l, uint64_t i)
 	return c->tags[T(c, l->ty)->aux].f[i].ty;
 }
 
+/* the constant-conversion warnings of element pos (a bit-field's width included) */
+static void il_check(cc *c, const ilist *l, uint64_t pos, uint32_t v, qty et)
+{
+	const field *f = l->array ? NULL : &c->tags[T(c, l->ty)->aux].f[pos];
+
+	if (unlikely(f && f->bitfield))
+		bf_const_conv(c, v, f, UINT32_MAX);
+	else
+		const_conv_check(c, v, et);
+}
+
 static void il_run(cc *c, ilist *l, uint64_t lo, uint64_t hi, uint32_t node, ilist *sub)
 {
 	if (l->nrun == l->caprun) {
@@ -304,7 +315,13 @@ static void il_elem(cc *c, ilist *l, uint64_t pos, uint32_t v, bool st)
 		il_set(c, l, pos, v, NULL);	/* string literal */
 		return;
 	}
-	il_set(c, l, pos, is_record(c, et) && !is_complex(c, et) ? v : convert(c, decay(c, v), et), NULL);
+	if (is_record(c, et) && !is_complex(c, et)) {
+		il_set(c, l, pos, v, NULL);
+		return;
+	}
+	v = decay(c, v);
+	il_check(c, l, pos, v, et);
+	il_set(c, l, pos, convert(c, v, et), NULL);
 }
 
 /* a designation starts here: ".f", "[i]" or the old GNU "f:" */
@@ -445,7 +462,12 @@ static uint64_t il_designation(cc *c, ilist *l, bool st)
 				il_fill(c, s, 0, false, v, st);
 				il_run(c, l, lo, hi, 0, s);
 			} else {
-				il_run(c, l, lo, hi, is_array(c, et) || is_record(c, et) || is_vector(c, et) ? v : convert(c, decay(c, v), et), NULL);
+				if (!(is_array(c, et) || is_record(c, et) || is_vector(c, et))) {
+					v = decay(c, v);
+					il_check(c, l, lo, v, et);
+					v = convert(c, v, et);
+				}
+				il_run(c, l, lo, hi, v, NULL);
 			}
 		}
 	}

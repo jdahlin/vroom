@@ -425,9 +425,23 @@ Varje delsteg: nya fall i `tests/diag/` (snapshots, och clang som mätpunkt), la
    av en nådd goto, iterat till fixpunkt; asm goto; en enum-switch som täcker alla uppräknare;
    indirekt goto: inget svar), med `help:`.  Kärnan bygger med `-Werror=return-type`:
    `vcc-sema.py warn` 879/879 (inga falska; `scoped_guard`/`scoped_cond_guard` krävde
-   goto-spårning och tryEvaluateBool-vikning), PostgreSQL 0 varningar.  Kvar:
-   `-Wconstant-conversion`, `-Wformat`, `-Wconstant-logical-operand`,
-   `-Wtautological-compare`, sedan `-Wall`:s `-Wunused-*`.
+   goto-spårning och tryEvaluateBool-vikning), PostgreSQL 0 varningar.
+   **`-Wconstant-conversion` klart (2026-11-10):** heltalskonstanter som inte ryms i en
+   smalare måltyp vid initiering (även medlemmar i initierarlistor, som inte kontrollerades
+   alls förut), tilldelning, argument och return, med clangs intervall (osignerat w bitar:
+   -2^(w-1)..2^w-1; signerat från osignerad källa upp till 2^w-1; en byte inom klamrar
+   -128..255), varje `?:`-gren för sig, plats som clangs getExprLoc, "expanded from
+   macro"-not och `help:` med typens intervall.  Bitfält: `-Wbitfield-constant-conversion`
+   och `-Wsingle-bit-bitfield-constant-conversion` (även efter explicit cast, vid `=` för
+   tilldelning).  clangs DiagRuntimeBehavior efterliknas: inget i sizeof/typeof eller
+   konstantuttryck (designatorer, arraystorlekar), i funktioner inget i döda `?:`-grenar och
+   `if`-grenar (på filnivå varnar clang även där).  `vcc-sema.py warn` 879/879 (base64.c:s
+   bytetabeller och ilog2 i designatorer krävde reglerna ovan), PostgreSQL 0, grinden ok
+   (fe +0.40 % mot merge-basen).  Kvar: kod efter return/break och `while (0)` (clangs
+   CFG-nåbarhet, TODO.md), typedef-namn i meddelandet (`'s8' (aka 'signed char')`),
+   flyttalsfallen (`-Wliteral-conversion`, `-Wimplicit-const-int-float-conversion`).
+   Kvar i D5.1: `-Wformat`, `-Wconstant-logical-operand`, `-Wtautological-compare`, sedan
+   `-Wall`:s `-Wunused-*`.
 2. **Makron**: expanderad text med caret i, ramar från systemheaders vikta,
    flernivå-"expanded from" (TODO.md "Diagnostic details").
 3. **`static_assert`**: operanderna utvärderade (`48 == 56`), och för `sizeof` en
