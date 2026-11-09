@@ -111,6 +111,8 @@ static void queue_push(int fd)
 	pthread_mutex_unlock(&qlock);
 }
 
+static _Atomic int n_active;	/* connections taken by a worker, not yet answered */
+
 static int queue_pop(void)
 {
 	int fd;
@@ -119,6 +121,7 @@ static int queue_pop(void)
 	while (qhead == qtail)
 		pthread_cond_wait(&qcond, &qlock);
 	fd = queue[qhead++ % QSIZE];
+	atomic_fetch_add(&n_active, 1);	/* under the lock: drain_exit never sees it in neither place */
 	pthread_mutex_unlock(&qlock);
 	return fd;
 }
@@ -979,7 +982,7 @@ static void *worker_main(void *arg)
 		exit(1);
 	}
 	for (;;) {
-		int conn = queue_pop();
+		int conn = queue_pop();	/* (counts itself in n_active) */
 		struct req r;
 		int32_t status = 127;
 		const char *kind = "bad";
@@ -1000,8 +1003,24 @@ static void *worker_main(void *arg)
 			if (r.fds[i] >= 0)
 				close(r.fds[i]);
 		log_req(&r, kind, status, t0);
+		atomic_fetch_sub(&n_active, 1);
 	}
 	return NULL;
+}
+
+/* SIGTERM: no new connections; the queued and running jobs finish, then exit */
+static __attribute__((noreturn)) void drain_exit(int ls, const char *sock)
+{
+	close(ls);
+	unlink(sock);
+	for (;;) {
+		pthread_mutex_lock(&qlock);
+		bool idle = qhead == qtail && !atomic_load(&n_active);
+		pthread_mutex_unlock(&qlock);
+		if (idle)
+			exit(0);
+		usleep(5000);
+	}
 }
 
 static bool peer_is_us(int c)
@@ -1130,7 +1149,7 @@ int main(int argc, char **argv)
 		if (out.filter == EVFILT_SIGNAL) {
 			print_counts();
 			if (out.ident == SIGTERM)
-				exit(0);
+				drain_exit(ls, sock);
 			continue;
 		}
 #else
@@ -1168,7 +1187,7 @@ int main(int argc, char **argv)
 					continue;
 				print_counts();
 				if (si.ssi_signo == SIGTERM)
-					exit(0);
+					drain_exit(ls, sock);
 				continue;
 			}
 #endif

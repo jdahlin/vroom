@@ -197,6 +197,24 @@ def autostart_default_socket():
         subprocess.run(['pkill', '-f', f'vccd --sock {t}/'])
 
 @test()
+def sigterm_drains():
+    """SIGTERM during a job: the job still completes, then the server exits and its socket is gone"""
+    v = Vccd()
+    try:
+        d = f'{v.dir}/w'
+        src = tu(d, 'big.c', ''.join(f'int f{i}(int x) {{ return x * {i} + (x >> 3) - {i}; }}\n' for i in range(600000)))
+        p = subprocess.Popen([SHIM] + TARGET + ['-c', '-o', 'big.o', src], cwd=d, env=dict(os.environ, VCC_SOCK=v.sock),
+                             stderr=subprocess.PIPE)
+        time.sleep(0.4)
+        v.p.send_signal(signal.SIGTERM)
+        rc = p.wait(timeout=60)
+        check(rc == 0, f'job interrupted: rc {rc} {p.stderr.read()[-300:]}')
+        check(os.path.getsize(f'{d}/big.o') > 0, 'no object')
+        v.p.wait(timeout=10)
+        check(not os.path.exists(v.sock), 'socket left behind')
+    finally: v.stop()
+
+@test()
 def other_build_refused():
     """a request from another build of the shim gets the mismatch status, not service"""
     v = Vccd()
