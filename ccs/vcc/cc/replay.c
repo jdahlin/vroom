@@ -298,7 +298,7 @@ typedef struct xrec { uint32_t w, mask; union { sym s; tag t; attrs r; ctype y; 
 
 /*
  * Own records are kept in A's indices; apply copies them and fixes only the
- * fields that change, by a relocation list built at publish (rel_build): an
+ * fields that change, by a relocation list built at the first valid hit (rel_build): an
  * offset into the array, an op, and for a W reference its W position or for
  * an own type its index in the region.
  */
@@ -310,6 +310,7 @@ typedef struct drrel { uint32_t off; uint8_t op, size, wk, _pad; uint32_t arg; }
 typedef struct drent {
 	struct drent *_Atomic next;
 	_Atomic uint32_t hits;	/* successful validations (tries go by most hits first) */
+	_Atomic uint8_t rst;	/* the relocation lists: 0 not built, 1 being built, 2 built, 3 unmapped (rel_ready) */
 	const void *he;
 	unsigned ctr;
 	uint32_t pack;
@@ -1381,14 +1382,7 @@ typedef VEC(drrel) relvec;
 typedef struct relset { relvec g; VEC(uint32_t) d[RO_DA + 1]; } relset;
 
 /* the relocation of field f (value v64) of an own record at byte offset off; false: unmapped */
-static int64_t rel_w(const struct drrec *r, int k, uint32_t a)
-{
-	uint32_t p = wm_find(&r->wm, (uint64_t)k << 32 | a);
-
-	return p == UINT32_MAX ? -1 : (int64_t)p;
-}
-
-static inline __attribute__((always_inline)) bool rel_one(const drent *e, const struct drrec *r, relset *rl, uint32_t off, fd f, uint64_t v64)
+static inline __attribute__((always_inline)) bool rel_one(const drent *e, relset *rl, uint32_t off, fd f, uint64_t v64)
 {
 	uint32_t v = (uint32_t)v64, ix;
 	int64_t p;
@@ -1407,7 +1401,7 @@ static inline __attribute__((always_inline)) bool rel_one(const drent *e, const 
 			x.op = RO_DS;
 			break;
 		}
-		if ((p = rel_w(r, W_SYM, v)) >= 0) {
+		if ((p = wfind(e, W_SYM, v)) >= 0) {
 			x.op = RO_W, x.wk = W_SYM, x.arg = (uint32_t)p;
 			break;
 		}
@@ -1424,7 +1418,7 @@ static inline __attribute__((always_inline)) bool rel_one(const drent *e, const 
 			x.op = RO_DT;
 			break;
 		}
-		if ((p = rel_w(r, W_TAG, v)) >= 0) {
+		if ((p = wfind(e, W_TAG, v)) >= 0) {
 			x.op = RO_W, x.wk = W_TAG, x.arg = (uint32_t)p;
 			break;
 		}
@@ -1437,7 +1431,7 @@ static inline __attribute__((always_inline)) bool rel_one(const drent *e, const 
 			x.op = k == K_TYPE ? RO_TYOWN : RO_TIOWN, x.arg = ix - e->y0;
 			break;
 		}
-		if ((p = rel_w(r, W_TY, ix)) < 0)
+		if ((p = wfind(e, W_TY, ix)) < 0)
 			return false;
 		x.op = k == K_TYPE ? RO_TYW : RO_TIW, x.arg = (uint32_t)p;
 		break;
@@ -1460,7 +1454,7 @@ static inline __attribute__((always_inline)) bool rel_one(const drent *e, const 
 		}
 		if (!v || k == K_LISTO)
 			return true;
-		if ((p = rel_w(r, W_LIST, v)) < 0)
+		if ((p = wfind(e, W_LIST, v)) < 0)
 			return false;
 		x.op = k == K_LIST1 ? RO_W1 : RO_W, x.wk = W_LIST, x.arg = (uint32_t)p;
 		break;
@@ -1478,7 +1472,7 @@ static inline __attribute__((always_inline)) bool rel_one(const drent *e, const 
 			x.op = RO_DR;
 			break;
 		}
-		if ((p = rel_w(r, W_STR, v)) < 0)
+		if ((p = wfind(e, W_STR, v)) < 0)
 			return false;
 		x.op = k == K_STR1 ? RO_W1 : RO_W, x.wk = W_STR, x.arg = (uint32_t)p;
 		break;
@@ -1489,7 +1483,7 @@ static inline __attribute__((always_inline)) bool rel_one(const drent *e, const 
 			x.op = RO_DA;
 			break;
 		}
-		if ((p = rel_w(r, W_ATTR, v)) < 0)
+		if ((p = wfind(e, W_ATTR, v)) < 0)
 			return false;
 		x.op = RO_W, x.wk = W_ATTR, x.arg = (uint32_t)p;
 		break;
@@ -1503,24 +1497,26 @@ static inline __attribute__((always_inline)) bool rel_one(const drent *e, const 
 	return true;
 }
 
-static inline bool rel_rec(const drent *e, const struct drrec *r, relset *rl, uint32_t off, const void *rec, const fd *f, int n)
+static inline bool rel_rec(const drent *e, relset *rl, uint32_t off, const void *rec, const fd *f, int n)
 {
 	bool ok = true;
 
 	for (int i = 0; i < n; i++)
-		ok &= rel_one(e, r, rl, off, f[i], rd(rec, f[i]));
+		ok &= rel_one(e, rl, off, f[i], rd(rec, f[i]));
 	return ok;
 }
 
-/* the relocation lists of e's own records (e->syms ... and the field pieces of heap h) */
-static bool rel_build(drent *e, const struct drrec *r, const char *h)
+/* the relocation lists of e's own records (e->syms ... and the field pieces of e->heap); built at the
+ * entry's first valid hit (rel_ready: about 40 % of the entries never get one), at publish under VCC_DRCHECK */
+static bool rel_build(drent *e)
 {
+	const char *h = e->heap;
 	relset rl[RA_N] = { 0 };
 	fd f[24], sf[2] = { FD(pp_span, b, K_LOC), FD(pp_span, e, K_LOC) };
 	int n;
 	bool ok = true;
 
-#define R1(T, rec, fl, k) (ok &= rel_one(e, r, rs, off, FD(T, fl, k), rd(rec, FD(T, fl, k))))
+#define R1(T, rec, fl, k) (ok &= rel_one(e, rs, off, FD(T, fl, k), rd(rec, FD(T, fl, k))))
 	for (uint32_t i = 0; i < e->s1 - e->s0; i++) {
 		const sym *y = &e->syms[i];
 		uint32_t off = i * (uint32_t)sizeof(sym);
@@ -1534,7 +1530,7 @@ static bool rel_build(drent *e, const struct drrec *r, const char *h)
 	}
 	for (uint32_t i = 0; i < e->t1 - e->t0; i++) {
 		n = tag_fd(&e->tags[i], f);
-		ok &= rel_rec(e, r, &rl[RA_TAG], i * (uint32_t)sizeof(tag), &e->tags[i], f, n);
+		ok &= rel_rec(e, &rl[RA_TAG], i * (uint32_t)sizeof(tag), &e->tags[i], f, n);
 	}
 	for (uint32_t i = 0; i < e->n1 - e->n0; i++) {
 		const node *y = &e->nodes[i];
@@ -1545,17 +1541,17 @@ static bool rel_build(drent *e, const struct drrec *r, const char *h)
 		node_kinds(y, k);	/* (node_fd: op..aux a value) */
 		R1(node, y, ty, K_TYPE);
 		R1(node, y, loc, K_LOC);
-		ok &= rel_one(e, r, rs, off, FD(node, a, k[0]), y->a);
-		ok &= rel_one(e, r, rs, off, FD(node, b, k[1]), y->b);
-		ok &= rel_one(e, r, rs, off, FD(node, c, k[2]), y->c);
-		ok &= rel_rec(e, r, &rl[RA_SPAN], i * (uint32_t)sizeof(pp_span), &e->spans[i], sf, 2);
+		ok &= rel_one(e, rs, off, FD(node, a, k[0]), y->a);
+		ok &= rel_one(e, rs, off, FD(node, b, k[1]), y->b);
+		ok &= rel_one(e, rs, off, FD(node, c, k[2]), y->c);
+		ok &= rel_rec(e, &rl[RA_SPAN], i * (uint32_t)sizeof(pp_span), &e->spans[i], sf, 2);
 	}
 	for (uint32_t i = 0; i < e->l1 - e->l0; i++)
 		if (e->lk[i] != K_IMM && e->lk[i] != LK_DEAD)
-			ok &= rel_one(e, r, &rl[RA_LIST], i * 4, (fd){ 0, 4, e->lk[i] }, e->lists[i]);
+			ok &= rel_one(e, &rl[RA_LIST], i * 4, (fd){ 0, 4, e->lk[i] }, e->lists[i]);
 	n = attr_fd(f);
 	for (uint32_t i = 0; i < e->a1 - e->a0; i++)
-		ok &= rel_rec(e, r, &rl[RA_ATTR], i * (uint32_t)sizeof(attrs), &e->attr[i], f, n);
+		ok &= rel_rec(e, &rl[RA_ATTR], i * (uint32_t)sizeof(attrs), &e->attr[i], f, n);
 	for (uint32_t i = 0; i < e->nfpc; i += 2)
 		for (uint32_t k = 0; k + 1 < e->fpc[i + 1]; k++) {
 			uint32_t off = e->fpc[i] + k * (uint32_t)sizeof(field);
@@ -1581,6 +1577,31 @@ static bool rel_build(drent *e, const struct drrec *r, const char *h)
 		}
 	}
 	return ok;
+}
+
+/* e's relocation lists are built (by this thread now, if no one has begun); false: unmapped, or another
+ * thread is building them (that hit parses) */
+static bool rel_ready(drent *e)
+{
+	uint8_t s = atomic_load_explicit(&e->rst, memory_order_acquire);
+
+	if (likely(s == 2))
+		return true;
+	if (s == 0 && atomic_compare_exchange_strong_explicit(&e->rst, &s, 1, memory_order_acq_rel, memory_order_acquire)) {
+		uint64_t t0 = ticks(), b = 0;
+		bool ok = rel_build(e);
+
+		for (int k = 0; k < RA_N; k++)
+			b += e->nrel[k] * sizeof(drrel) + e->dn[k][RO_DA + 1] * 4;
+		ADD(dr_mem, b);
+		ADD(st_bytes, b);
+		if (!ok)
+			ADD(st_fail[F_UNMAPPED], 1);
+		ADD(tk_close, ticks() - t0);
+		atomic_store_explicit(&e->rst, ok ? 2 : 3, memory_order_release);
+		return ok;
+	}
+	return false;
 }
 
 /* apply the relocations of array a to its copy at base */
@@ -2216,8 +2237,11 @@ static void rec_close(cc *c, uint64_t endpos)
 	tr(&x, K_LOC, e->prevloc);
 	e->heap = hp.v, e->nheap = hp.n;
 	e->fpc = fpc.v, e->nfpc = fpc.n;
-	if (!rel_build(e, r, hp.v))
-		x.bad = true;
+	if (dr_check) {	/* (VCC_DRCHECK: the lists at publish, so that every recording checks they map) */
+		if (!rel_build(e))
+			x.bad = true;
+		atomic_store_explicit(&e->rst, 2, memory_order_relaxed);
+	}
 	e->xs = xs.v, e->nxs = xs.n, e->xt = xt.v, e->nxt = xt.n, e->xa = xa.v, e->nxa = xa.n, e->xy = xy.v, e->nxy = xy.n;
 	xs.v = xt.v = xa.v = xy.v = NULL;
 	if (x.bad)
@@ -3226,6 +3250,8 @@ VPRIV bool dr_boundary(cc *c)
 				if (!ok)
 					continue;
 			}
+			if (dr_mode == 1 && unlikely(!rel_ready(e)))
+				continue;
 			count(S_HIT, e->ntok);
 			atomic_fetch_add_explicit(&e->hits, 1, memory_order_relaxed);
 			if (dr_mode == 2)

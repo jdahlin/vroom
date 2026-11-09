@@ -1076,6 +1076,44 @@ pp at a region start, at any depth, as `pp_top_events` gives for the top level.
          and fold the location passes into the offset lists;
        - more replay coverage: on PG, 20 833 hits found no entry, most of them
          keys the gain rule turned down.
+   - *3c (2026-11-09): cheaper publish, by building less of it.*
+     - **Measured per phase** (instructions, temporary counters, kernel / PG).
+       - Publish: relocation lists (`rel_build`) 780 / 183 M, own records
+         305 / 71 M, W tag values 212 / 68 M, the type log 109 / 22 M.
+       - Apply: own records (copy, relocations, location passes) 428 / 303 M,
+         the type log 298 / 94 M, bindings 217 / 93 M.
+     - **Most entries are never used.** Hits per published entry:
+
+       | hits | 0 | 1 | 2–3 | 4–15 | 16+ |
+       |---|---|---|---|---|---|
+       | kernel entries (MB) | 678 (278) | 275 (74) | 240 (77) | 247 (65) | 118 (14) |
+       | PG entries (MB) | 330 (43) | 133 (19) | 112 (14) | 142 (19) | 65 (5) |
+
+       Recording later does not help. At the 3rd or 4th sight instead of the
+       2nd, kernel 79.05 / 79.88 G and PG 33.57 / 33.67 G: the lost hits weigh
+       more than the dead entries.
+     - **Relocation lists at the first valid hit.** They need only the entry
+       (W positions from its `wk` tables), so `rel_ready` builds them once,
+       state in `drent.rst`. Another thread finding them being built parses
+       that hit. An entry whose lists do not map is never applied; none were
+       seen. Their bytes are counted when built, so dead entries leave more
+       budget: the kernel publishes 1618 entries instead of 1558.
+       `VCC_DRCHECK` still builds them at publish, so every recording checks
+       they map.
+     - **Apply was left as it is.** Per kernel replay it copies ~900 syms,
+       ~1060 list elements and ~650 general relocations, at ~28 instructions
+       per element. Splitting the type relocations into their own offset lists,
+       or folding the location passes, would save under 0.1%.
+     - **Gain constants unchanged.** Re-fitted: gain 7 / 10 / 15 / 20 gave kernel
+       78.47 / 78.32 / 78.82 / 78.93 G and PG 33.26 / 33.35 / 33.92 / 34.12 G.
+     - **Numbers**, `cc_run`: kernel 78.61 → 78.32 G (−0.4%). PG is unchanged:
+       on the same machine state, 3b measured 33.34 / 33.42 G and 3c measured
+       33.40–33.47 G. Against the default, kernel −5.3% and PG −7%.
+     - **Next.** Coverage, not cost per replay:
+       - the dead entries take half the kernel budget, and the budget ran out
+         5700 times;
+       - evicting entries without hits, or smaller own syms (175 MB), would let
+         the useful ones in.
 4. Fold ccsnap into this if per-region replay of the prefix is as cheap as a snapshot
    restore; otherwise keep both, and let a recording coexist with snapshots (the
    region's type table in the heap, or no snapshot inside a recording).
