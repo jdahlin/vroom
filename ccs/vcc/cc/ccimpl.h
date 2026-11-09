@@ -216,8 +216,34 @@ static inline bool iskw(cc *c, int kw);
 static inline __attribute__((always_inline)) bool accept(cc *c, int kind);
 VPRIV const char *tokspell(const ptok *t, char *buf, size_t cap);
 VPRIV __attribute__((noinline, cold, noreturn)) void expect_fail(cc *c, const char *what);
+/* diag.c: parser recovery.  A recovery point in a block, a struct body or at file
+   scope: a parse error (fatal, a failed expect) reports, jumps back to the innermost
+   one, which restores the parser's state and skips to the end of the statement or
+   declaration (GCC's c_parser_skip_to_end_of_block_or_statement); parsing goes on.
+   One _setjmp per block, none per statement.  REC_ARM is true after a jump. */
+typedef struct recov {
+	jmp_buf jb;
+	struct recov *prev;
+	uint32_t depth, ndops, ncase, case_base, dead, fn;
+	int in_loop, in_switch, in_stmtexpr, unevaluated, in_struct, ibr;
+	uint32_t *switch_cases;
+	qty switch_ty;
+	bool sw_default, has_pend, for_head;
+	uint32_t again;		/* the token of the last recovery: an error there again skips it */
+} recov;
+VPRIV void rec_save(cc *c, recov *r);
+VPRIV void skip_stmt(cc *c, bool top);
+VPRIV void skip_semi(cc *c);
+VPRIV __attribute__((noreturn)) void parse_jump(cc *c);
+VPRIV __attribute__((noinline, cold)) void expect_match_fail(cc *c, int kind, uint32_t open);
+VPRIV void skip_close(cc *c, int kind);
+static inline __attribute__((always_inline)) void expect_match(cc *c, int k, uint32_t open);
+enum { REC_BLOCK, REC_TOP, REC_FOR };
+VPRIV void rec_restore(cc *c, recov *r, int mode);
+#define REC_ARM(c, r) (rec_save(c, r), _setjmp((r)->jb))
+#define REC_POP(c, r) ((c)->rec = (r)->prev)
 static inline __attribute__((always_inline)) void expect(cc *c, int kind, const char *what);
-VPRIV void expect_semi(cc *c, const char *after);
+VPRIV bool expect_semi(cc *c, const char *after);
 VPRIV bool not_expr_start(cc *c, const ptok *t);
 VPRIV bool decl_comma_typo(cc *c);
 /* sym.c */
@@ -439,6 +465,26 @@ static inline __attribute__((always_inline)) void expect(cc *c, int kind, const 
 	if (unlikely(c->tk[0].kind != kind))
 		expect_fail(c, what);
 	next(c);
+}
+
+/* a closing ')' ']' '}' for the opening one at open (clang's "to match this" note) */
+static inline __attribute__((always_inline)) void expect_match(cc *c, int k, uint32_t open)
+{
+	if (unlikely(c->tk[0].kind != k))
+		expect_match_fail(c, k, open);
+	else
+		next(c);
+}
+
+/* the same after the expression e: when e is invalid, the skip is silent (clang) */
+static inline __attribute__((always_inline)) void expect_close(cc *c, int k, uint32_t open, uint32_t e)
+{
+	if (likely(c->tk[0].kind == k))
+		next(c);
+	else if (ISERR(e))
+		skip_close(c, k);
+	else
+		expect_match_fail(c, k, open);
 }
 
 static inline uint32_t dget(uint32_t **dir, uint32_t id)

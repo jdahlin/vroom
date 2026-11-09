@@ -363,13 +363,13 @@ static bool paren_type_typo(cc *c)
 	uint32_t kw;
 	int k;
 
-	if (t->kind != T_IDENT || kwof(t) || peek(c, 1)->kind != T_RPAREN)
-		return false;
+	if (t->kind != T_IDENT || kwof(t) || lookup(c, t->id) || peek(c, 1)->kind != T_RPAREN)
+		return false;	/* declared: no peek */
 	k = peek(c, 2)->kind;
 	if (k != T_IDENT && k != T_NUMBER && k != T_CHAR && k != T_LPAREN)
 		return false;
 	t = tok(c);
-	if (lookup(c, t->id) || !(kw = typo_keyword(c, t->id, KWS_TYPE)) || !(kwclass[kwmap[kw]] & KC_TYPE))
+	if (!(kw = typo_keyword(c, t->id, KWS_TYPE)) || !(kwclass[kwmap[kw]] & KC_TYPE))
 		return false;
 	undeclared(c, "use of undeclared identifier", t->id, t->loc, true, KWS_TYPE, &kw);
 	tok(c)->id = kw;

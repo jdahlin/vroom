@@ -19,6 +19,19 @@ static void fscr_grow(fscratch *x, uint32_t need)
 	x->cap = cap;
 }
 
+/* clang: a member declaration not ended by ';': a warning before the '}' (on as if it
+   were there), else an error and the rest of the member skipped */
+static __attribute__((noinline, cold)) void member_semi(cc *c)
+{
+	uint32_t e = pp_tok_end(c->p, c->prevloc);
+	pp_fixit fx = { e, e, ";" };
+	bool end = is(c, T_RBRACE);
+
+	report(c, end ? "warning" : "error", e, NULL, 0, &fx, 1, "expected ';' at end of declaration list");
+	if (!end)
+		skip_semi(c);
+}
+
 __attribute__((noinline)) VPRIV void struct_body(cc *c, uint32_t ti)
 {
 	fscratch *x = &tl_fscr;
@@ -30,9 +43,19 @@ __attribute__((noinline)) VPRIV void struct_body(cc *c, uint32_t ti)
 	c->tags[ti].flags |= RF_BEING_DEFINED;
 	c->in_struct++;
 	expect(c, T_LBRACE, "'{'");
+	recov rv;
+
+	if (REC_ARM(c, &rv)) {
+		rec_restore(c, &rv, REC_BLOCK);	/* after a parse error: on with the next member */
+		nf = x->n - base;
+	}
 	while (!is(c, T_RBRACE)) {
 		dspec ds;
 
+		if (is(c, T_EOF)) {
+			cc_error(c, pp_tok_end(c->p, c->prevloc), "expected '}'");
+			longjmp(c->bail, 1);
+		}
 		if (accept(c, T_SEMI))
 			continue;
 		if (iskw(c, KW__Static_assert)) {
@@ -40,9 +63,20 @@ __attribute__((noinline)) VPRIV void struct_body(cc *c, uint32_t ti)
 			continue;
 		}
 		if (!decl_specs(c, &ds, false)) {
+			int k = peek(c, 1)->kind;
+
 			if (!is(c, T_IDENT))
 				fatal(c, tok(c)->loc, "expected member declaration");
-			unknown_type(c, &ds, false);
+			if (!kwof(tok(c)) && (k == T_COMMA || k == T_SEMI || k == T_COLON)) {
+				/* clang: "struct { a, b; }": int members */
+				cc_error(c, tok(c)->loc, "type name requires a specifier or qualifier");
+				memset(&ds, 0, sizeof(ds));
+				ds.ty = prim(TY_INT);
+				ds.loc = tok(c)->loc;
+				ds.invalid = true;
+			} else {
+				unknown_type(c, &ds, false);
+			}
 		}
 		if (is(c, T_SEMI)) {
 			/* anonymous struct/union member; with -fms-anonymous-structs also a
@@ -132,8 +166,10 @@ __attribute__((noinline)) VPRIV void struct_body(cc *c, uint32_t ti)
 			if (!accept(c, T_COMMA))
 				break;
 		}
-		expect_semi(c, "at end of declaration");
+		if (unlikely(!accept(c, T_SEMI)))
+			member_semi(c);
 	}
+	REC_POP(c, &rv);
 	next(c);
 	c->in_struct--;
 	attribute_list(c, &post);

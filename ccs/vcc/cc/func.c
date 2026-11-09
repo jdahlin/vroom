@@ -182,12 +182,21 @@ VPRIV void function_def(cc *c, uint32_t s, const declr *d)
 
 VPRIV void translation_unit(cc *c)
 {
+	recov r;
+
+	if (REC_ARM(c, &r))
+		rec_restore(c, &r, REC_TOP);	/* after a parse error: on with the next declaration */
 	for (;;) {
 		dc_boundary(c);
 		if (is(c, T_EOF))
 			break;
 		if (accept(c, T_SEMI))
 			continue;
+		if (unlikely(is(c, T_RBRACE))) {
+			cc_error(c, tok(c)->loc, "extraneous closing brace ('}')");
+			next(c);
+			continue;
+		}
 		if (iskw(c, KW___extension__)) {
 			next(c);
 			continue;
@@ -199,4 +208,5 @@ VPRIV void translation_unit(cc *c)
 		declaration(c, NULL, true);
 		c->ndops = 0;
 	}
+	REC_POP(c, &r);
 }

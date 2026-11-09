@@ -525,9 +525,13 @@ static __attribute__((noinline)) uint32_t stmt_expr(cc *c, uint32_t loc)
 	if (!c->fn)
 		cc_error(c, loc, "statement expression not allowed at file scope");
 	c->in_stmtexpr++;
+	bool fh = c->for_head;
+
+	c->for_head = false;
 	b = compound_stmt(c, &last);
+	c->for_head = fh;
 	c->in_stmtexpr--;
-	expect(c, T_RPAREN, "')'");
+	expect_match(c, T_RPAREN, loc);
 	n = mk(c, N_STMTEXPR, last, loc);
 	N(n)->a = b;
 	return n;
@@ -541,12 +545,7 @@ VPRIV uint32_t paren_expr(cc *c, uint32_t loc)
 	if (is(c, T_LBRACE))
 		return stmt_expr(c, loc);
 	n = expr(c);
-	if (!is(c, T_RPAREN)) {
-		report(c, "error", tok(c)->loc, NULL, 0, NULL, 0, "expected ')'");
-		note(c, loc, "to match this '('");
-		longjmp(c->bail, 1);
-	}
-	next(c);
+	expect_close(c, T_RPAREN, loc, n);
 	N(n)->flags |= NF_PAREN;
 	return n;
 }
@@ -716,6 +715,9 @@ static __attribute__((noinline)) uint32_t call(cc *c, uint32_t fn, uint32_t loc)
 		callee = N(callee)->a;
 	if (!(f->flags & TF_NOPROTO)) {
 		if (args.n < f->n || (args.n > f->n && !(f->flags & TF_VARIADIC))) {
+			for (uint32_t i = 0; i < args.n; i++)
+				if (ISERR(args.v[i]))	/* clang: no count check on an invalid argument list */
+					return err_node(c, loc);
 			const char *v = f->flags & TF_VARIADIC ? "at least " : "";
 			uint32_t fs = N(callee)->op == N_VAR && c->syms[N(callee)->a].kind == S_FUNC ? N(callee)->a : 0;
 			uint32_t p1 = fs && c->syms[fs].psyms && f->n == 1 ? c->lists[c->syms[fs].psyms - 1] : 0;

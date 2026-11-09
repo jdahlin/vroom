@@ -277,9 +277,8 @@ VPRIV void declarator(cc *c, declr *d, bool abstract_ok, uint32_t *first, uint32
 		d->loc = tok(c)->loc;
 		next(c);
 	} else if (!abstract_ok) {
-		char b[64];
-
-		fatal(c, tok(c)->loc, "expected identifier or '(' before '%s'", tokspell(tok(c), b, sizeof(b)));
+		fatal(c, tok(c)->loc, c->in_struct ? "expected member name or ';' after declaration specifiers" :
+			  "expected identifier or '('");
 	}
 	attribute_list(c, &d->at);
 	for (;;) {

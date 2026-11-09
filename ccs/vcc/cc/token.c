@@ -152,15 +152,28 @@ VPRIV __attribute__((noinline, cold, noreturn)) void expect_fail(cc *c, const ch
 }
 
 /* "expected ';' after X": reported at the end of the previous token with a
-   fix-it, like clang; parsing goes on as if the ';' were there */
-VPRIV void expect_semi(cc *c, const char *after)
+   fix-it, like clang; parsing goes on as if the ';' were there.  True when the ';'
+   is missing and nothing stands in for it (clang's ExpectAndConsumeSemi failing) */
+VPRIV bool expect_semi(cc *c, const char *after)
 {
 	uint32_t e;
 	pp_fixit fx;
 
 	if (likely(c->tk[0].kind == T_SEMI)) {
 		next(c);
-		return;
+		return false;
+	}
+	if ((c->tk[0].kind == T_RPAREN || c->tk[0].kind == T_RSQUARE) && peek(c, 1)->kind == T_SEMI) {
+		/* clang: "f);": the stray ')' (or ']') and the ';' are consumed */
+		report(c, "error", c->tk[0].loc, NULL, 0, NULL, 0, "extraneous '%s' before ';'",
+		       c->tk[0].kind == T_RPAREN ? ")" : "]");
+		next(c), next(c);
+		return false;
+	}
+	if (c->for_head) {
+		/* clang: at the token, no fix-it, on as if it were there */
+		report(c, "error", c->tk[0].loc, NULL, 0, NULL, 0, "expected ';' in 'for' statement specifier");
+		return false;
 	}
 	if (c->tk[0].kind == T_COMMA || c->tk[0].kind == T_COLON) {
 		/* clang's common typo: ',' or ':' for ';', replaced; parsing goes on after it */
@@ -168,11 +181,12 @@ VPRIV void expect_semi(cc *c, const char *after)
 		fx = (pp_fixit){ e, pp_tok_end(c->p, e), ";" };
 		report(c, "error", e, NULL, 0, &fx, 1, "expected ';' %s", after);
 		next(c);
-		return;
+		return false;
 	}
 	e = pp_tok_end(c->p, c->prevloc);
 	fx = (pp_fixit){ e, e, ";" };
 	report(c, "error", e, NULL, 0, &fx, 1, "expected ';' %s", after);
+	return true;
 }
 
 /* clang's isNotExpressionStart: after a ',' this ends the expression, the ',' being a

@@ -2,9 +2,13 @@
 #include "ccimpl.h"
 
 /* "too few/many arguments", as clang: the caret after the arguments, the callee's name underlined */
-static void arity(cc *c, uint32_t loc, unsigned want, unsigned have)
+static void arity(cc *c, uint32_t loc, unsigned want, const vec *args)
 {
 	pp_span r = { loc, pp_tok_end(c->p, loc) };
+	unsigned have = args->n;
+
+	if (have && ISERR(args->v[have - 1]))	/* the ')' was missing (args_list): said */
+		return;
 
 	report(c, "error", c->prevloc, &r, 1, NULL, 0, "too %s arguments to function call, expected %u, have %u",
 	       have < want ? "few" : "many", want, have);
@@ -374,6 +378,8 @@ VPRIV bool eval_builtin(cc *c, const node *x, cval *v)
 
 VPRIV uint32_t args_list(cc *c, vec *args)
 {
+	uint32_t open = tok(c)->loc;
+
 	vinit(args);
 	expect(c, T_LPAREN, "'('");
 	if (!is(c, T_RPAREN)) {
@@ -381,7 +387,19 @@ VPRIV uint32_t args_list(cc *c, vec *args)
 			vpush(c, args, assign_expr(c));
 		while (accept(c, T_COMMA));
 	}
-	expect(c, T_RPAREN, "')'");
+	if (unlikely(!is(c, T_RPAREN))) {
+		/* clang: a call without its ')' is invalid; the last argument says so */
+		if (args->n && ISERR(args->v[args->n - 1]))
+			skip_close(c, T_RPAREN);
+		else
+			expect_match_fail(c, T_RPAREN, open);
+		if (args->n)
+			args->v[args->n - 1] = err_node(c, open);
+		else
+			vpush(c, args, err_node(c, open));
+	} else {
+		next(c);
+	}
 	return args->n;
 }
 
@@ -508,7 +526,7 @@ static uint32_t atomic_call(cc *c, const builtin *b, uint32_t loc)
 		args.v[i] = decay(c, args.v[i]);
 	if (id == BI_SYNC_SYNCHRONIZE) {	/* a full barrier: __atomic_thread_fence(seq_cst) */
 		if (args.n)
-			arity(c, loc, 0, args.n);
+			arity(c, loc, 0, &args);
 		args.n = 0;
 		vpush(c, &args, mk_int(c, 5, prim(TY_INT), loc));
 		return mk_builtin(c, BI_ATOMIC_THREAD_FENCE, prim(TY_VOID), loc, &args);
@@ -521,7 +539,7 @@ static uint32_t atomic_call(cc *c, const builtin *b, uint32_t loc)
 	if (b->sig[0] == 's' && (int)args.n == want - 1)	/* __sync_*: sequentially consistent */
 		vpush(c, &args, mk_int(c, 5, prim(TY_INT), loc));
 	if ((int)args.n != want) {
-		arity(c, loc, (unsigned)want, args.n);
+		arity(c, loc, (unsigned)want, &args);
 		return mk_int(c, 0, prim(TY_INT), loc);
 	}
 	pt = N(args.v[0])->ty;
@@ -600,7 +618,7 @@ static uint32_t generic_bitcount(cc *c, int id, uint32_t loc)
 
 	args_list(c, &args);
 	if (args.n < 1 || args.n > (id == BI_POPCOUNTG ? 1u : 2u)) {
-		arity(c, loc, id == BI_POPCOUNTG ? 1u : args.n ? 2u : 1u, args.n);
+		arity(c, loc, id == BI_POPCOUNTG ? 1u : args.n ? 2u : 1u, &args);
 		return mk_int(c, 0, prim(TY_INT), loc);
 	}
 	x = decay(c, args.v[0]);
@@ -748,7 +766,7 @@ VPRIV uint32_t builtin_call(cc *c, const builtin *b, uint32_t loc)
 		args_list(c, &args);
 		c->unevaluated--;
 		if (args.n != 1)
-			arity(c, loc, 1, args.n);
+			arity(c, loc, 1, &args);
 		for (uint32_t i = 0; i < args.n; i++)
 			args.v[i] = decay(c, args.v[i]);
 		n = mk_builtin(c, b->id, prim(TY_INT), loc, &args);
@@ -767,7 +785,7 @@ VPRIV uint32_t builtin_call(cc *c, const builtin *b, uint32_t loc)
 
 		args_list(c, &args);
 		if (args.n != 1) {
-			arity(c, loc, 1, args.n);
+			arity(c, loc, 1, &args);
 			return mk_int(c, 0, prim(TY_INT), loc);
 		}
 		a = convert(c, rvalue(c, args.v[0]), ct);
@@ -806,7 +824,7 @@ VPRIV uint32_t builtin_call(cc *c, const builtin *b, uint32_t loc)
 			args.v[i] = a;
 		}
 		if (args.n < np || (args.n > np && !(f->flags & TF_VARIADIC)))
-			arity(c, loc, np, args.n);
+			arity(c, loc, np, &args);
 		switch (b->id) {
 		case BI_ADD_OVERFLOW: case BI_SUB_OVERFLOW: case BI_MUL_OVERFLOW:
 			if (args.n != 3 || !is_ptr(c, N(args.v[2])->ty))

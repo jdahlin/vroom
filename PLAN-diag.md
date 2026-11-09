@@ -164,7 +164,7 @@ Tio lager; varje steg nedan säger vilka det berör.
   resultattyp i en definition.  Första felet på clangs plats 89,7 → 91,0 % (annanstans
   3,5 → 2,4 %), fler följdfel 13,3 → 11,2 %, missade 27 → 23; `change-type` först på
   clangs plats 54 → 81.  Kvar bland följdfelen är mest parserns återhämtning ("expected
-  X", D3).  Prestanda: `decl_specs` körs för varje deklaration, medlem och parameter
+  X", D2.2).  Prestanda: `decl_specs` körs för varje deklaration, medlem och parameter
   (~100 000 per kernel-TU), så kontrollerna ligger på den felaktiga token i kalla
   funktioner utan pekare till loopens variabler (`&sgn` tvingade dem till minnet: +0,4 %);
   parametrarnas typ läses en gång (`KIND`).  fe +0,27 % mot förra steget; grenen ligger på
@@ -219,6 +219,32 @@ Tio lager; varje steg nedan säger vilka det berör.
 - **D2.2 `expect()` blir icke-fatal.**  Synkronisering på `;`, `}` och början av nästa
   deklaration; saknat `;` efter `struct`; obalanserade klamrar; de 46 `fatal()` gås
   igenom ett och ett.  Målet är **färre följdfel än clang**, med samma första fel.
+
+  *Status (steg 1 klart):* ett parsningsfel (`fatal`, saknad stängare) hoppar till närmaste
+  återhämtningspunkt: en `_setjmp` per block, struct-kropp, for-huvud och TU (aldrig per
+  sats; macOS `setjmp` gör ett systemanrop).  Där återställs räknare och scopes, och resten
+  av satsen hoppas över som GCC:s `skip_to_end_of_block_or_statement` (balanserat, `;` i
+  parenteser hoppas över, initierarnas öppna `{` stängs först, ett `else` efter en
+  överhoppad if går vidare med else-grenen; en `}` direkt efter `(` eller ett operatortecken
+  stänger inget och hoppas över).  Saknad `)`, `]` eller `}` är clangs
+  BalancedDelimiterTracker: felet (en gång per plats) och "to match this", sedan fram till
+  stängaren men inte förbi `;`, och vidare.  Efter ett ogiltigt uttryck tiger vcc som clang
+  (anropet blir ogiltigt, ingen antalskontroll; satsen hoppas över till `;`).  Clangs egna
+  former: "extraneous closing brace ('}')", "extraneous ')' before ';'", "expected
+  identifier or '('", "expected function body after function declarator", "expected ';'
+  after top level declarator" (resten av deklarationen hoppas över om ingen ny börjar),
+  "expected member name or ';' after declaration specifiers", "type name requires a
+  specifier or qualifier" (`struct { a, b; }`), "cannot combine with previous 'struct'
+  declaration specifier" (`int struct S x`), saknat `;` före `}` i en struct är en varning,
+  for-huvudets "expected ';'" hoppar fram till nästa `;` eller `)`.  Hittat på vägen:
+  `skip_balanced` hoppade bara över parenteser (en initierare av ofullständig typ åt bara
+  sin `{`).  Mutationskorpusen (mot 76c0909): första felet på clangs plats 91,0 → 91,7 %,
+  fler följdfel än clang 11,2 → 6,7 %, samma 68,0 → 79,4 %, färre 20,8 → 13,9 %; fel totalt
+  2323 → 3006 (clang 3518); spurious 20 → 17; inga krascher.  `tests/diag/recovery.c`: tolv
+  oberoende fel, exakt clangs utdata.  Prestanda: fe +0,62 % mot merge-basen (nyckelords-
+  korrigeringens ParseImplicitInt-test flyttat till loopens utgång: −0,22 %).
+  Kvar: parameterlistor (`int f(int a, int b { }` deklarerar inte `f`), `f(a; )` (clangs
+  "unexpected ';' before ')'"), avbrutna attribut, de 46 `fatal()` ett och ett, målet ≤ 5 %.
 - **D2.3 dubbletter** (`void v;`, sammansatt literal i parentes, typförslag som kaskaderar:
   TODO.md "Error recovery").
   *Validera:* lager 3: inga krascher, första felet på clangs plats i ≥ 95 %, följdfel

@@ -607,6 +607,16 @@ static void kr_params(cc *c, const declr *fd)
 }
 
 /* a declaration; block-scope ones append N_DECL statements to out */
+/* the ';' ending a declaration; clang's ParseDeclGroup when it is missing: unless a
+   declaration starts here, the rest is skipped through the next ';' */
+static void decl_semi(cc *c, bool file)
+{
+	if (likely(accept(c, T_SEMI)))
+		return;
+	if (expect_semi(c, file ? "after top level declarator" : "at end of declaration") && !is_decl_start(c, tok(c)))
+		skip_stmt(c, false);
+}
+
 VPRIV void declaration(cc *c, vec *out, bool file)
 {
 	dspec ds;
@@ -626,14 +636,18 @@ VPRIV void declaration(cc *c, vec *out, bool file)
 			memset(&ds, 0, sizeof(ds));
 			ds.ty = prim(TY_INT);
 			ds.loc = tok(c)->loc;
-			if (!c->o->implicit_int)
-				cc_error(c, ds.loc, "type specifier missing, defaults to 'int'; ISO C99 and later do not support implicit int");
+			if (!c->o->implicit_int) {
+				uint32_t i = 0;
+
+				while (peek(c, i)->kind == T_STAR)	/* clang: at the name in "*p = 1;" */
+					i++;
+				cc_error(c, peek(c, i)->kind == T_IDENT ? peek(c, i)->loc : ds.loc,
+					 "type specifier missing, defaults to 'int'; ISO C99 and later do not support implicit int [-Wimplicit-int]");
+			}
 		} else if (is(c, T_IDENT) && !kwof(tok(c))) {
 			unknown_type(c, &ds, true);
 		} else {
-			char b[64];
-
-			fatal(c, tok(c)->loc, "expected declaration before '%s'", tokspell(tok(c), b, sizeof(b)));
+			fatal(c, tok(c)->loc, "expected identifier or '('");
 		}
 	}
 	if (accept(c, T_SEMI))
@@ -671,7 +685,7 @@ VPRIV void declaration(cc *c, vec *out, bool file)
 				return;
 			if (accept(c, T_COMMA))
 				continue;
-			expect_semi(c, "at end of declaration");
+			decl_semi(c, file);
 			return;
 		}
 		if (file && d.kr && is_func(c, t) && !is(c, T_SEMI) && !is(c, T_COMMA) && !is(c, T_EQUAL))
@@ -693,6 +707,13 @@ VPRIV void declaration(cc *c, vec *out, bool file)
 				lazy_capture(c, s, &d);
 			else
 				function_def(c, s, &d);
+			return;
+		}
+		if (unlikely(file && d.has_func) && is_func(c, t) && !is(c, T_SEMI) && !is(c, T_COMMA) &&
+		    !is(c, T_EQUAL) && !at_asm(c) && !iskw(c, KW___attribute__) && !iskw(c, KW___attribute)) {
+			/* clang: "int f(int x) return x; }": the '{' is missing */
+			cc_error(c, tok(c)->loc, "expected function body after function declarator");
+			skip_stmt(c, true);
 			return;
 		}
 		if (accept(c, T_EQUAL)) {
@@ -735,6 +756,8 @@ VPRIV void declaration(cc *c, vec *out, bool file)
 				/* array size from the initializer */
 				y->ty = QT(QI(it), QQ(y->ty));
 			}
+			if (unlikely(is_record(c, it) && !complete(c, it)))
+				y->flags |= SF_INVALID;	/* initializer said so: its uses are silent */
 			if (y->body && file) {
 				cc_error(c, d.loc, "redefinition of '%.*s'", IDF(d.name));
 				note(c, y->loc, "previous definition is here");
@@ -772,7 +795,7 @@ VPRIV void declaration(cc *c, vec *out, bool file)
 			return;
 		if (accept(c, T_COMMA))
 			continue;
-		expect_semi(c, "at end of declaration");
+		decl_semi(c, file);
 		return;
 	}
 }

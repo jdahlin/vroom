@@ -132,7 +132,11 @@ static void lazy_parse(cc *c, uint32_t i)
 	fetch(c, &c->tk[0]);
 	c->ntk = 1;
 	c->syms[s].flags &= ~(SF_DEFINED | SF_LAZY);
+	struct recov *rec = c->rec;
+
+	c->rec = NULL;	/* another token stream: no recovery outside the body */
 	function_def(c, s, &d);
+	c->rec = rec;
 	if (!is(c, T_EOF))
 		cc_error(c, tok(c)->loc, "expected end of function body");
 	atomic_fetch_add_explicit(&lz_st_pfn, 1, memory_order_relaxed);

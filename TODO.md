@@ -819,14 +819,15 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
   performance by `bench/vbench.py` and a small benchmark set
   (`bench/micro/`: matmul, hash, interpreter, the vcc self-build), numbers
   in the plan.
-- [ ] **Error recovery**: every `expect()` failure is fatal (80 sites + 32
-  `fatal`), missing `;` after a struct ends the TU, typo correction cascades,
-  duplicated errors (`void v;`, compound literal in parens).
+- [ ] **Error recovery**: parse errors recover per block, struct body, for
+  header and TU, missing closers as clang (PLAN-diag.md D2.2); left: parameter
+  lists (`int f(int a, int b { }` leaves `f` undeclared), `f(a; )`, broken
+  attributes, the remaining `fatal()` sites one by one; mutants with more
+  follow-on errors than clang 6.7 % (goal 5 %).
   *Validate:* `tests/diag/` cases with several independent errors, exact
   clang output (`vcc-diag.py`).
-- [ ] **Clang warns, vcc errors** (`bench/vcc-mutate.py show spurious`): a
-  missing `;` before `}` in a struct (clang: warning "expected ';' at end of
-  declaration list"); `-Wreturn-mismatch` is not in the `return-type` group.
+- [ ] **Clang warns, vcc errors** (`bench/vcc-mutate.py show spurious`):
+  `-Wreturn-mismatch` is not in the `return-type` group.
   *Validate:* `vcc-mutate.py` spurious count; diag tests.
 - [ ] **Warnings as errors not controllable**: `conv_error` (`cc.c:2622`)
   always errors for `-Wincompatible-pointer-types`.

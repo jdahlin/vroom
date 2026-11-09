@@ -62,10 +62,12 @@ VPRIV void skip_balanced(cc *c)
 {
 	int depth = 0;
 
-	do {
-		if (is(c, T_LPAREN))
+	do {	/* (...), [...] or {...} (an initializer's braces) */
+		int k = tok(c)->kind;
+
+		if (k == T_LPAREN || k == T_LSQUARE || k == T_LBRACE)
 			depth++;
-		else if (is(c, T_RPAREN))
+		else if (k == T_RPAREN || k == T_RSQUARE || k == T_RBRACE)
 			depth--;
 		else if (is(c, T_EOF))
 			fatal(c, tok(c)->loc, "unexpected end of file in attribute");

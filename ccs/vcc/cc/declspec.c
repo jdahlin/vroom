@@ -276,6 +276,53 @@ static __attribute__((noinline)) bool base_clash(cc *c, int base, int kw, int nl
 	return kw == KW_int;
 }
 
+/* "int struct S x", "struct S int x": clang's error at the second one, which is
+   skipped (a tag's name and body too); the declaration goes on with the first */
+static __attribute__((noinline, cold)) void spec_clash(cc *c, const dspec *ds, int base)
+{
+	const ptok *t = tok(c);
+	int kw = kwof(t);
+
+	if (base)
+		cc_error(c, t->loc, "cannot combine with previous '%.*s' declaration specifier", IDF(base));
+	else
+		cc_error(c, t->loc, "cannot combine with previous '%s' declaration specifier",
+			 KIND(c, QT(c->tags[ds->tagdecl].ty, 0)) == TY_ENUM ? "enum" :
+			 KIND(c, QT(c->tags[ds->tagdecl].ty, 0)) == TY_UNION ? "union" : "struct");
+	next(c);
+	if (kw == KW_struct || kw == KW_union || kw == KW_enum) {
+		attrs a = { 0 };
+
+		attribute_list(c, &a);
+		if (is(c, T_IDENT) && !kwof(tok(c)))
+			next(c);
+		if (is(c, T_LBRACE))
+			skip_balanced(c);
+	}
+}
+
+/* clang's ParseImplicitInt: "static in f(void)", "const unsigne long *p": after
+   specifiers without a type, an unknown name where only a type fits is an unknown
+   type name.  0: not one; QTY_KW: a keyword typo, rewritten; else the type */
+#define QTY_KW ((qty)~0u)
+static __attribute__((noinline, cold)) qty implicit_int_name(cc *c, dspec *ds)
+{
+	ptok *t;
+	uint32_t kwc, s;
+
+	if (kwof(tok(c)) || after_declarator_id(peek(c, 1)))
+		return 0;
+	t = tok(c);
+	s = undeclared(c, "unknown type name", t->id, t->loc, true, KWS_TYPE, &kwc);
+	if (kwc) {
+		t->id = kwc;	/* on as the keyword */
+		return QTY_KW;
+	}
+	next(c);
+	ds->invalid = !s;
+	return s ? c->syms[s].ty : prim(TY_INT);
+}
+
 VPRIV bool decl_specs(cc *c, dspec *ds, bool allow_sc)
 {
 	int nlong = 0, sgn = 0, base = 0, q = 0;
@@ -290,6 +337,7 @@ VPRIV bool decl_specs(cc *c, dspec *ds, bool allow_sc)
 		ds->at = c->pend;
 		c->has_pend = false;
 	}
+again:
 	for (;;) {
 		ptok *t = tok(c);
 		int kw = kwof(t);
@@ -308,25 +356,6 @@ VPRIV bool decl_specs(cc *c, dspec *ds, bool allow_sc)
 				have_named = true;
 				any = true;
 				next(c);
-				continue;
-			}
-			if (t->kind == T_IDENT && !any && !have_named && !base && !nlong && !sgn && !cplx &&
-			    (q || atomic || ds->sc || ds->inline_ || ds->noreturn || ds->thread) &&
-			    !after_declarator_id(peek(c, 1))) {
-				/* clang's ParseImplicitInt: "static in f(void)", "const unsigne long *p":
-				   an unknown name where only a type fits is an unknown type name */
-				uint32_t kwc, s;
-
-				t = tok(c);
-				s = undeclared(c, "unknown type name", t->id, t->loc, true, KWS_TYPE, &kwc);
-				if (kwc) {
-					t->id = kwc;	/* on as the keyword */
-					continue;
-				}
-				next(c);
-				named = s ? c->syms[s].ty : prim(TY_INT);
-				have_named = any = true;
-				ds->invalid = !s;
 				continue;
 			}
 			break;
@@ -405,8 +434,13 @@ VPRIV bool decl_specs(cc *c, dspec *ds, bool allow_sc)
 		}
 		case KW_void: case KW__Bool: case KW_char: case KW_short: case KW_int: case KW_float:
 		case KW_double: case KW___int128: case KW__Float16: case KW___fp16:
-			if (have_named)
+			if (have_named) {
+				if (unlikely(ds->tagdecl) && !base) {
+					spec_clash(c, ds, 0);
+					continue;
+				}
 				goto done;
+			}
 			if (unlikely(base || (kw == KW_short && nlong)) && base_clash(c, base, kw, nlong, ds->baseloc, t->loc))
 				break;
 			if (unlikely((sgn | nlong) && kw != KW_int)) {
@@ -463,6 +497,10 @@ VPRIV bool decl_specs(cc *c, dspec *ds, bool allow_sc)
 			attrs pre = { 0 }, post = { 0 };
 			bool body;
 
+			if (unlikely(base) && !have_named) {
+				spec_clash(c, ds, base);
+				continue;
+			}
 			if (have_named || base)
 				goto done;
 			if (unlikely(sgn | nlong)) {
@@ -515,6 +553,16 @@ VPRIV bool decl_specs(cc *c, dspec *ds, bool allow_sc)
 		next(c);
 	}
 done:
+	/* any: also a base, width, sign, _Complex or named type */
+	if (unlikely(!any) && is(c, T_IDENT) && (q || atomic || ds->sc || ds->inline_ || ds->noreturn || ds->thread)) {
+		qty it = implicit_int_name(c, ds);
+
+		if (it) {
+			if (it != QTY_KW)
+				named = it, have_named = any = true;
+			goto again;
+		}
+	}
 	ds->has_type = any;
 	if (!any && !q && !atomic && !ds->sc && !ds->inline_ && !ds->noreturn && !ds->thread && !ds->align)
 		return false;
@@ -532,7 +580,7 @@ done:
 		ds->ty = prim(nlong ? TY_LDOUBLE : TY_DOUBLE);
 	} else {
 		if (!any && !c->o->implicit_int && !pp_in_system_header(c->p, ds->loc))
-			cc_error(c, ds->loc, "type specifier missing, defaults to 'int'; ISO C99 and later do not support implicit int");
+			cc_error(c, ds->loc, "type specifier missing, defaults to 'int'; ISO C99 and later do not support implicit int [-Wimplicit-int]");
 		ds->ty = int_type(c, nlong, sgn, base, ds->loc);
 	}
 	if (cplx) {

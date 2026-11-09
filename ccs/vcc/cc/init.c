@@ -269,19 +269,21 @@ static void il_elem(cc *c, ilist *l, uint64_t pos, uint32_t v, bool st)
 		if (is_char_array(c, et) && is_strtok(peek(c, 1)->kind)) {	/* { "string" } */
 			uint32_t sv;
 
-			next(c);
+			next(c), c->ibr++;
 			sv = string_lit(c);
 			accept(c, T_COMMA);
-			expect(c, T_RBRACE, "'}'");
+			expect(c, T_RBRACE, "'}'"), c->ibr--;
 			il_set(c, l, pos, sv, NULL);
 			return;
 		}
 		if (is_ilagg(c, et)) {
 			ilist *s = il_new(c, et);
 
-			next(c);
+			uint32_t ob = tok(c)->loc;
+
+			next(c), c->ibr++;
 			il_fill(c, s, 0, true, 0, st);
-			expect(c, T_RBRACE, "'}'");
+			expect_match(c, T_RBRACE, ob), c->ibr--;
 			il_set(c, l, pos, 0, s);
 		} else {
 			il_set(c, l, pos, init_braced(c, et, st), NULL);
@@ -425,9 +427,11 @@ static uint64_t il_designation(cc *c, ilist *l, bool st)
 			if (is_ilagg(c, et)) {
 				ilist *s = il_new(c, et);
 
-				next(c);
+				uint32_t ob = tok(c)->loc;
+
+				next(c), c->ibr++;
 				il_fill(c, s, 0, true, 0, st);
-				expect(c, T_RBRACE, "'}'");
+				expect_match(c, T_RBRACE, ob), c->ibr--;
 				il_run(c, l, lo, hi, 0, s);
 			} else {
 				il_run(c, l, lo, hi, init_braced(c, et, st), NULL);
@@ -558,6 +562,7 @@ static uint32_t init_braced(cc *c, qty ty, bool st)
 		next(c);
 		return mk(c, N_ZERO, QUNQ(ty), loc);
 	}
+	c->ibr++;
 	if (is(c, T_LBRACE))
 		v = init_braced(c, ty, st);
 	else
@@ -570,7 +575,7 @@ static uint32_t init_braced(cc *c, qty ty, bool st)
 		else
 			assign_expr(c);
 	}
-	expect(c, T_RBRACE, "'}'");
+	expect(c, T_RBRACE, "'}'"), c->ibr--;
 	return v;
 }
 
@@ -583,10 +588,10 @@ VPRIV uint32_t initializer(cc *c, qty *ty, bool st)
 		if (is_char_array(c, t) && is_strtok(peek(c, 1)->kind)) {
 			uint32_t s;
 
-			next(c);
+			next(c), c->ibr++;
 			s = string_lit(c);
 			accept(c, T_COMMA);
-			expect(c, T_RBRACE, "'}'");
+			expect(c, T_RBRACE, "'}'"), c->ibr--;
 			if (T(c, t)->flags & TF_INCOMPLETE)
 				*ty = QT(QI(ty_array(c, T(c, t)->base, c->strs[N(s)->a].n, 0)), QQ(t));
 			return s;
@@ -596,15 +601,17 @@ VPRIV uint32_t initializer(cc *c, qty *ty, bool st)
 			uint32_t n;
 
 			if (is_record(c, t) && !complete(c, t)) {
-				cc_error(c, loc, "variable has incomplete type '%s'", tyname(c, t));
+				cc_error(c, c->cv_what == CX_INIT ? c->cv_loc : loc, "variable has incomplete type '%s'", tyname(c, t));
 				fwd_note(c, t);
 				skip_balanced(c);
 				return mk(c, N_ZERO, t, loc);
 			}
 			l = il_new(c, QUNQ(t));
-			next(c);
+			uint32_t ob = tok(c)->loc;
+
+			next(c), c->ibr++;
 			il_fill(c, l, 0, true, 0, st);
-			expect(c, T_RBRACE, "'}'");
+			expect_match(c, T_RBRACE, ob), c->ibr--;
 			n = il_finish(c, l, loc);
 			*ty = QT(QI(N(n)->ty), QQ(t));
 			return n;
