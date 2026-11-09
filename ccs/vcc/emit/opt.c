@@ -32,8 +32,8 @@ typedef uint64_t rmask;
 
 /* operand roles */
 enum { RD_R = 1, RN_R = 2, RM_R = 4, RA_R = 8, RD_W = 16, RA_W = 32, RN_W = 64, OP_ALL = 128, OP_CALL = 256, OP_ASM = 512,
-       OP_RET = 2048 };
-#define OP_SLOW (OP_ALL | OP_CALL | OP_ASM | OP_RET)	/* reads()/writes() beyond the operand fields */
+       OP_RET = 2048, OP_TLV = 4096 };
+#define OP_SLOW (OP_ALL | OP_CALL | OP_ASM | OP_RET | OP_TLV)	/* reads()/writes() beyond the operand fields */
 
 /* the function's raw text, for the registers of inline asm (RAW_MASKS) */
 static _Thread_local const char *rawp;
@@ -69,8 +69,10 @@ static unsigned roles_sw(const ins *i)
 		return RD_R;
 	case I_PRFM:
 		return RN_R;
-	case I_BL: case I_TLV:
+	case I_BL:
 		return OP_CALL;
+	case I_TLV:	/* Darwin's TLV thunk keeps every register but x0 (the address); blr x16 */
+		return OP_TLV;
 	case I_BLR:
 		return RN_R | OP_CALL;
 	case I_BR:
@@ -167,6 +169,8 @@ __attribute__((noinline)) static rmask writes_slow(const ins *i, unsigned ro)
 	if (ro & RN_W) s |= m(i->rn);
 	if (ro & OP_CALL)
 		s |= CALLW;
+	if (ro & OP_TLV)
+		s |= RB(0) | RB(16) | RB(30);
 	return s;
 }
 
