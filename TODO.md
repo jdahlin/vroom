@@ -759,3 +759,10 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
   OOM policy for code inside vccd (fail the request, never abort) decides
   the buffer.  *Validate:* outputs byte-identical (objects, `-S`, `-E`),
   `bench/vbench.py gate`.
+- [ ] **The linker as a split module** (restructure 2026-11-09).  `ld/ld.c`
+  is one TU of ~4400 lines over process-wide globals (`objs`, `isecs`,
+  `gsyms`, ... of anonymous `VVEC` types); its arm64 parts are fragments
+  (`arch/a64/ld/*.inc`) it #includes.  Make it files by topic with an
+  `ldimpl.h` (named vector types, VPRIV globals), as cc/pp/emit, and the
+  fragments real files.  *Validate:* `bench/vbench.py check --base` (the
+  vmlinux link byte-identical), `bench/vobjcopy-cmp.sh`, gate.

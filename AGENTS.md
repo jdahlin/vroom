@@ -42,7 +42,7 @@ assembler, linker, behind `vcc`/`vas`/`vld` shims and the `vccd` server.
   - `obj/`: the in-memory object (`obj.h`: sections, frags, symbols, fixups)
     and its layout; with `arch/<cpu>/obj/fixup.c` and `platform/linux/elf.c`
     one module (`obj_SRC`, internal header `objimpl.h`).
-  - `ld/`: the linker `vlink` and `vobjcopy`/`vnm`.
+  - `ld/`: the linker `vlink` (`ld.c`, one TU) and `vobjcopy`/`vnm`.
   - `driver/`: one compile job from a clang command line (`ppdriver.c`), the
     declaration cache (`ccsnap.c`) and `vpp`, the driver for parity tests.
   - `vccd/`: the server, the `vcc`/`vas`/`vld`/`var`/`vsh` shim (`shim.c`),
@@ -55,7 +55,9 @@ assembler, linker, behind `vcc`/`vas`/`vld` shims and the `vccd` server.
     registers, `.req`, operands, literal pools), the encoder (`as/enc.c`,
     `a64.h`), system registers,
     relocation types (`reloc.h`), fixups (`obj/fixup.c`: in place or a
-    relocation, as LLVM MC);
+    relocation, as LLVM MC), the linker's relocation scan, relocation
+    application and range-extension thunks (`ld/*.inc`, #included by
+    `ld/ld.c` where they were: the linker is not a split module yet);
     `emit/`: instruction records and register names (`ins.h`, `a64impl.h`,
     included by `emit/emitimpl.h`), expressions, statements, calls (AAPCS64
     and Apple's), builtins, inline asm, the record optimizer (`opt.c`), the
