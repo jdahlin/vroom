@@ -17,4 +17,4 @@
 #define vlex_scratch_size vlex_scratch_size_ref
 #define vlex_spell vlex_spell_ref
 #define vtok_name vtok_name_ref
-#include "../vcc/lex.c"
+#include "../vcc/lex/lex.c"

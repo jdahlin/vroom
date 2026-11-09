@@ -10,7 +10,7 @@ assembler, linker, behind `vcc`/`vas`/`vld` shims and the `vccd` server.
   parallel, minimal allocation, mmap, separate I/O and CPU threads).
 - No clang dependency at run time.  Data taken from clang once (capability
   tables, predefined macros, `__has_*` answers) lives in generated files
-  (`ccs/vcc/caps.c`, `ccs/vcc/ppdata*.inc` via `gen-ppdata.sh`).
+  (`ccs/vcc/vccd/caps.c`, `ccs/vcc/pp/ppdata*.inc` via `gen-ppdata.sh`).
 - Do not replace make.
 - The machine is shared: keep benchmarks short and use `-j 6` for
   parallel diff runs.
@@ -19,24 +19,61 @@ assembler, linker, behind `vcc`/`vas`/`vld` shims and the `vccd` server.
 - `PLAN.md`, `PLAN-fas2.md`: plans and per-step status (Swedish).  Update the
   status section of a step when it changes.
 - `RESEARCH-preprocessor.md`: preprocessor design and prior art.
-- `ccs/`: our code; `ccs/Makefile` builds into `build/ccs/`.
-  - `vcc/lex.c`, `intern.c`: SIMD lexer, token cache, identifier interning.
-  - `vcc/pp/`: preprocessor (pull model, clang-exact expansion).
-  - `vcc/cc/`: parser + sema (GNU C11, clang's layout and constant rules).
-  - `vcc/emit/`: code generator (arm64, AAPCS64, straight from the AST).
-  - The three are directories of files by topic, one internal header each
-    (`ppimpl.h`, `ccimpl.h`, `emitimpl.h`) with the types, macros and
-    prototypes the files share; a shared function is `VPRIV` (static in
-    the unity build).  Each directory is compiled as one TU by default
-    (`obj/unity/DIR.c` #includes its files, SQLite style); `make
-    VCC_UNITY=` compiles file by file, and every file must compile alone.
-  - `vcc/vpp.c`: preprocessor driver for parity tests.
-  - `vcc/shim.c`, `vccd.c`, `caps.c`: the compiler shim and server.
-  - `vcc/ar.c`: the archiver (thin archives, llvm-ar-identical), run by
-    vccd when the shim is called as `var`; the build uses no llvm-ar.
-  - `vcc/rsh.c`: kbuild's recipe subset of sh, run by vccd for `vsh`
-    (`build/ccs/vsh/sh`, shim.c with `-DVSH`), make's SHELL in
+- `ccs/`: our code; `ccs/Makefile` builds into `build/ccs/`.  Under `ccs/vcc/`
+  generic code is in the component directories, code for one target CPU in
+  `arch/<cpu>/<component>/`, code for one target OS in `platform/<os>/`
+  (target, not host: host SIMD and host-OS `#ifdef`s stay with their code).
+  - `lib/`: shared data structures and helpers, header-only unless noted:
+    reservations, regions and arenas (`arena.h`), byte buffers (`buf.h`),
+    the emitter's text buffer (`tbuf.h`), growable arrays (`vec.h`), string
+    hashes (`hash.h`; XXH3/BLAKE3 in `ldhash.c`), file mapping (`mapfile.h`),
+    interning (`intern.c`), binary128 (`f128.h`), thread counters
+    (`vperf.h`).  Variants not yet merged are listed in TODO.md.
+  - `lex/`: SIMD lexer and token cache; `lextest.c` drives it.
+  - `pp/`: preprocessor (pull model, clang-exact expansion), its generated
+    tables (`ppdata*.inc` via `gen-ppdata.sh`) and the include-directory cache.
+  - `cc/`: parser + sema (GNU C11, clang's layout and constant rules).
+  - `emit/`: code generator (straight from the AST): the shared part, state
+    and types (`emitimpl.h`), the work queue and threads (`tu.c`), data
+    objects, the prepass; the arm64 part is `arch/a64/emit/`.
+  - `as/`: GNU as syntax (`as.c`: statements, directives, macros,
+    conditionals, expressions; internal header `asimpl.h`; one module with
+    `arch/<cpu>/as/parse.c`, `as_SRC`) and the standalone `vasm` driver.
+  - `obj/`: the in-memory object (`obj.h`: sections, frags, symbols, fixups)
+    and its layout; with `arch/<cpu>/obj/fixup.c` and `platform/linux/elf.c`
+    one module (`obj_SRC`, internal header `objimpl.h`).
+  - `ld/`: the linker `vlink` (`ld.c`, one TU) and `vobjcopy`/`vnm`.
+  - `driver/`: one compile job from a clang command line (`ppdriver.c`), the
+    declaration cache (`ccsnap.c`) and `vpp`, the driver for parity tests.
+  - `vccd/`: the server, the `vcc`/`vas`/`vld`/`var`/`vsh` shim (`shim.c`),
+    the capability table (`caps.c`), and what runs inside vccd: kbuild's
+    fixdep, the archiver (`ar.c`: thin archives, llvm-ar-identical, so the
+    build uses no llvm-ar) and `rsh.c`, kbuild's recipe subset of sh, run for
+    `vsh` (`build/ccs/vsh/sh`, shim.c with `-DVSH`), make's SHELL in
     `bench/vccd-kbuild.sh`; anything outside the subset goes to `$VSH_REAL`.
+  - `arch/a64/`: arm64: instructions in GNU as syntax (`as/parse.c`:
+    registers, `.req`, operands, literal pools), the encoder (`as/enc.c`,
+    `a64.h`), system registers,
+    relocation types (`reloc.h`), fixups (`obj/fixup.c`: in place or a
+    relocation, as LLVM MC), the linker's relocation scan, relocation
+    application and range-extension thunks (`ld/*.inc`, #included by
+    `ld/ld.c` where they were: the linker is not a split module yet);
+    `emit/`: instruction records and register names (`ins.h`, `a64impl.h`,
+    included by `emit/emitimpl.h`), expressions, statements, calls (AAPCS64
+    and Apple's), builtins, inline asm, the record optimizer (`opt.c`), the
+    printer (`print.c`) and the encoder of records (`obj.c`).  It is compiled
+    in the `emit` unity TU (`emit_SRC`), so VPRIV stays static.
+  - `platform/linux/`: the ELF writer (`elf.c`: relocations, string table,
+    file layout as LLVM MC).
+  - `platform/darwin/`: the Mach-O writer; Apple PMU counters (`pmc.c`).
+  - `pp/`, `cc/` and `emit/` (with `arch/<cpu>/emit/`) are directories of
+    files by topic, one internal header each (`ppimpl.h`, `ccimpl.h`, `emitimpl.h`) with the types, macros
+    and prototypes the files share; a shared function is `VPRIV` (static in
+    the unity build).  Each such module is compiled as one TU by default
+    (`obj/unity/MOD.c` #includes the files in `MOD_SRC`, SQLite style); `make
+    VCC_UNITY=` compiles file by file, and every file must compile alone.
+  - `phase1/`: the clang-based phase 1 tools (`vroomd`, `vroom-cc`, PCH
+    prefix) and `vroom-ld`, the ld.lld wrapper the -O0 kernel build links with.
 - `bench/`: harnesses.  `bench/vcc-diff.py` compares `vpp` with `clang -E`;
   `bench/vcc-sema.py` runs the front end and has clang verify its claims;
   `bench/vccd-cc.py` drives a private vccd with `-c` jobs.

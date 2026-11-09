@@ -24,7 +24,7 @@ VPID=$!
 pkill -f "$ROOT/build/ccs/vccd" 2>/dev/null || true
 export VCC_SOCK=/tmp/vccd.sock
 rm -f "$VCC_SOCK"
-"$ROOT/build/ccs/vccd" --sock "$VCC_SOCK" --backend-sock "$SOCK" --ld "$ROOT/ccs/vroom-ld" \
+"$ROOT/build/ccs/vccd" --sock "$VCC_SOCK" --backend-sock "$SOCK" --ld "$ROOT/ccs/phase1/vroom-ld" \
   </dev/null >/dev/null 2>/tmp/vccd.log &
 CPID=$!
 trap 'kill $VPID $CPID 2>/dev/null || true' EXIT

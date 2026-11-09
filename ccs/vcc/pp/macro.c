@@ -100,7 +100,7 @@ VPRIV void define(pp *p, ctx *c, uint32_t b, uint32_t e)
 	}
 	m = slot ? atomic_load_explicit(slot, memory_order_acquire) : NULL;
 	if (!m) {
-		pmacro *n = site ? salloc(sizeof(*n)) : alloc(&p->perm, sizeof(*n));
+		pmacro *n = site ? salloc(sizeof(*n)) : varena_alloc(&p->perm, sizeof(*n));
 
 		err = parse_define(vt, b, e, n, site ? mem_shared : mem_perm, &p->perm, &eoff);
 		if (err) {

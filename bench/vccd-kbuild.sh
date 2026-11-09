@@ -22,7 +22,7 @@ mkdir -p "$S"
 "$B/vroomd" --sock "$S/vroomd.sock" --opt -O0 >"$OUT.vroomd.log" 2>&1 &
 VP=$!
 VCC_LOG=1 "$B/vccd" --sock "$S/vccd.sock" --backend-sock "$S/vroomd.sock" \
-	--ld "$R/ccs/vroom-ld" >"$OUT.vccd.log" 2>&1 &
+	--ld "$R/ccs/phase1/vroom-ld" >"$OUT.vccd.log" 2>&1 &
 CP=$!
 trap 'kill $VP 2>/dev/null; kill -TERM $CP 2>/dev/null; sleep 0.3; rm -rf "$S"' EXIT
 sleep 0.5

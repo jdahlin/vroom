@@ -62,13 +62,13 @@
 #include <time.h>
 #include <unistd.h>
 
-#include "../ccint.h"
-#include "../emit.h"
-#include "../as.h"
-#include "../elf.h"
-#include "../a64.h"
-#include "../ppdriver.h"
-#include "../arena.h"
+#include "../cc/ccint.h"
+#include "emit.h"
+#include "../as/as.h"
+#include "../obj/obj.h"
+#include "../driver/ppdriver.h"
+#include "../lib/arena.h"
+#include "../lib/tbuf.h"
 
 /* functions one file defines and another calls: static when the directory is
    compiled as one TU (VCC_UNITY, the default build), so they stay internal */
@@ -90,80 +90,13 @@
 #define T(c, t) CT(c, t)
 #define KIND(c, t) CKIND(c, t)
 
-/* ---------------- instruction records ---------------- */
-
-/* registers: 0-30 x0-x30, ZR, SP, FRAME (pseudo base of stack slots) */
-enum { R_FP = 29, R_LR = 30, ZR = 31, SP = 32, FRAME = 33, R_X16 = 16, R_X17 = 17 };
-#define R_BP 28		/* frame base of a realigned dynamic frame (ecx.falign, finish_function) */
-
-enum {
-	I_LABEL,	/* label */
-	I_RAW,		/* off: text pool offset, ref: length; cond 1: inline asm (//APP in -S), RAW_MASKS: with its registers */
-	/* rd = rn op (rm << sh); cond: shift kind (0 lsl, 1 lsr, 2 asr) */
-	I_ADD, I_SUB, I_ADDS, I_SUBS, I_AND, I_ORR, I_EOR, I_ANDS, I_BIC, I_ORN, I_ADC, I_SBC, I_ADCS, I_SBCS,
-	/* rd = rn op imm (any value: the backend splits or materialises) */
-	I_ADDI, I_SUBI, I_ADDSI, I_SUBSI, I_ANDI, I_ORRI, I_EORI, I_ANDSI,
-	I_MOVI,		/* rd = imm */
-	I_MOV,		/* rd = rn (either may be SP) */
-	I_MADD, I_MSUB,	/* rd = ra +- rn * rm */
-	I_SDIV, I_UDIV, I_SMULH, I_UMULH, I_LSLV, I_LSRV, I_ASRV,
-	I_SBFM, I_UBFM, I_BFM,	/* imm: immr, sh: imms */
-	I_CSEL, I_CSINC, I_CSINV, I_CSNEG,	/* cond */
-	I_CLZ, I_CLS, I_RBIT, I_REV, I_REV16, I_REV32,
-	/* memory: sz = log2 bytes; cond: 0 zero-extend, 1 sign-extend to x, 2 to w; [rn + imm] */
-	I_LD, I_ST,
-	I_LDP, I_STP,	/* x regs rd, ra; [rn + imm]; cond: 0 offset, 1 pre-index, 2 post-index */
-	/* symbol references: ref (see refs below), off: addend */
-	I_ADRP,		/* rd = page(ref + off) */
-	I_ADDLO,	/* rd = rn + lo12(ref + off) */
-	I_LDLO, I_STLO,	/* [rn + lo12(ref + off)], sz/cond as I_LD */
-	I_LDGOT,	/* rd = address of ref through the GOT (weak undefined) */
-	I_ADR,		/* rd = local label */
-	I_B, I_BC,	/* label; I_BC: cond */
-	I_CBZ, I_CBNZ,	/* rd, label */
-	I_BL,		/* ref */
-	I_BLR, I_BR,	/* rn */
-	I_RET,
-	I_BRK,		/* imm */
-	I_PRFM,		/* [rn] */
-	I_MRS,		/* rd, ref: raw text (system register name) */
-	I_MOVSP,	/* frame setup pseudo (see finish) */
-	I_NOP,
-	I_WORD,		/* imm: an encoded instruction (registers already in it) */
-	I_TLV,		/* x0 = address of thread-local ref (Darwin TLV descriptor call; clobbers x16, lr) */
-};
-
-enum { C_EQ, C_NE, C_HS, C_LO, C_MI, C_PL, C_VS, C_VC, C_HI, C_LS, C_GE, C_LT, C_GT, C_LE, C_AL };
-
-/* I_RAW cond 2: inline asm whose registers follow its text: uint64_t reads, writes */
-#define RAW_MASKS 2
-
-/* lrefc: a label that inline asm (asm goto) or a label address (&&l) may reach */
-#define LREF_EXT (1u << 31)
-
-typedef struct ins {
-	uint8_t op, sz;		/* sz: 1 = 64-bit (x), 0 = 32-bit (w); memory: log2 bytes */
-	uint8_t rd, rn, rm, ra;
-	uint8_t cond, sh;
-	union {
-		int64_t imm;
-		struct { int32_t off; uint32_t ref; };
-		uint32_t label;
-	};
-} ins;
+#include "../arch/a64/emit/ins.h"
 
 /* references to things with a symbol: kind in the top 4 bits */
 enum { RK_SYM = 0, RK_STR = 1, RK_LBL = 2, RK_NAME = 3 };
 #define REF(k, i) (((uint32_t)(k) << 28) | (uint32_t)(i))
 #define RKIND(r) ((r) >> 28)
 #define RIDX(r) ((r) & 0x0fffffffu)
-
-/* ---------------- byte buffers ---------------- */
-
-typedef struct tbuf {
-	char *p;
-	size_t n, cap;
-} tbuf;
 
 /* ---------------- emitter state ---------------- */
 
@@ -549,19 +482,6 @@ static inline bool is_wide(cc *c, qty t);
 VPRIV i128 em_trunc_to(cc *c, i128 v, qty t);
 /* insn.c */
 extern const char cond_name[][8];
-VPRIV void tb_init(tbuf *b, size_t cap);
-VPRIV void tb_reg(tbuf *b, vmreg *r, size_t cap, const char *name);
-static inline void tb_need(tbuf *b, size_t n);
-static inline void tb_put(tbuf *b, const char *s, size_t n);
-static inline void tb_c(tbuf *b, char ch);
-static inline void tb_s(tbuf *b, const char *s);
-VPRIV void tb_u_slow(tbuf *b, uint64_t v);
-static inline void tb_u(tbuf *b, uint64_t v);
-static inline void tb_x(tbuf *b, uint32_t v);
-static inline void tb_n8(tbuf *b, const char s[8]);
-VPRIV void tb_i(tbuf *b, int64_t v);
-VPRIV void tb_hex(tbuf *b, uint64_t v);
-VPRIV void tb_f(tbuf *b, const char *fmt, ...);
 VPRIV bool logimm_ok(uint64_t v, int x);
 static inline void reg(tbuf *b, int r, int x);
 /* tu.c */
@@ -805,218 +725,7 @@ static inline bool is_signed(cc *c, qty t) { return cc_is_signed(c, t); }
 static inline bool is_ld(cc *c, qty t) { return is_flt(c, t) && tsize(c, t) == 16; }
 static inline bool is_wide(cc *c, qty t) { return (is_integer(c, t) || is_flt(c, t)) && tsize(c, t) == 16; }
 
-static inline void tb_need(tbuf *b, size_t n)
-{
-	if (unlikely(b->n + n > b->cap)) {
-		fputs("vcc: emitter buffer overflow\n", stderr);
-		abort();
-	}
-}
-
-static inline void tb_put(tbuf *b, const char *s, size_t n)
-{
-	tb_need(b, n);
-	memcpy(b->p + b->n, s, n);
-	b->n += n;
-}
-
-static inline void tb_c(tbuf *b, char ch)
-{
-	tb_need(b, 1);
-	b->p[b->n++] = ch;
-}
-
-static inline void tb_s(tbuf *b, const char *s) { tb_put(b, s, strlen(s)); }
-
-static inline void tb_u(tbuf *b, uint64_t v)
-{
-	if (likely(v < 10)) {
-		tb_c(b, (char)('0' + v));
-	} else if (v < 100) {
-		tb_need(b, 2);
-		b->p[b->n] = (char)('0' + v / 10);
-		b->p[b->n + 1] = (char)('0' + v % 10);
-		b->n += 2;
-	} else {
-		tb_u_slow(b, v);
-	}
-}
-
-/* lower-case hex digits, no prefix: label numbers */
-static inline void tb_x(tbuf *b, uint32_t v)
-{
-	int n = v ? (35 - __builtin_clz(v)) >> 2 : 1;
-	char *p;
-
-	tb_need(b, 8);
-	p = b->p + b->n;
-	for (int i = n - 1; i >= 0; i--, v >>= 4)
-		p[i] = "0123456789abcdef"[v & 15];
-	b->n += (size_t)n;
-}
-
-/* a name from a char[8] table: one 8-byte copy, the length from the first zero byte */
-static inline void tb_n8(tbuf *b, const char s[8])
-{
-	uint64_t w, z;
-
-	memcpy(&w, s, 8);
-	tb_need(b, 8);
-	memcpy(b->p + b->n, &w, 8);
-	z = (w - 0x0101010101010101ull) & ~w & 0x8080808080808080ull;
-	b->n += z ? (size_t)(__builtin_ctzll(z) >> 3) : 8;
-}
-
-/* ---------------- register names ---------------- */
-
-static inline void reg(tbuf *b, int r, int x)
-{
-	char *p;
-
-	tb_need(b, 4);
-	p = b->p + b->n;
-	p[0] = x ? 'x' : 'w';
-	if (likely(r < 10)) {
-		p[1] = (char)('0' + r);
-		b->n += 2;
-	} else if (likely(r < 31)) {
-		p[1] = (char)('0' + r / 10);
-		p[2] = (char)('0' + r % 10);
-		b->n += 3;
-	} else if (r == ZR) {
-		p[1] = 'z', p[2] = 'r';
-		b->n += 3;
-	} else {
-		if (x)
-			p[0] = 's', p[1] = 'p', b->n += 2;
-		else
-			p[1] = 's', p[2] = 'p', b->n += 3;
-	}
-}
-
 static inline bool direct(const ecx *e) { return e->E->o->emit == 2 && !e->E->objtext; }
-
-/* ---------------- record emission ---------------- */
-
-static inline ins *put(ecx *e, int op)
-{
-	ins *i;
-
-	if (unlikely(e->nin == e->capin)) {
-		fputs("vcc: function too large\n", stderr);
-		abort();
-	}
-	i = &e->in[e->nin++];
-	memset(i, 0, sizeof(*i));
-	i->op = (uint8_t)op;
-	return i;
-}
-
-static inline void op3(ecx *e, int op, int x, int rd, int rn, int rm)
-{
-	ins *i;
-
-	if (!e->reach)
-		return;
-	i = put(e, op);
-	i->sz = (uint8_t)x, i->rd = (uint8_t)rd, i->rn = (uint8_t)rn, i->rm = (uint8_t)rm;
-}
-
-static inline void op3s(ecx *e, int op, int x, int rd, int rn, int rm, int kind, int sh)
-{
-	ins *i;
-
-	if (!e->reach)
-		return;
-	i = put(e, op);
-	i->sz = (uint8_t)x, i->rd = (uint8_t)rd, i->rn = (uint8_t)rn, i->rm = (uint8_t)rm;
-	i->cond = (uint8_t)kind, i->sh = (uint8_t)sh;
-}
-
-static inline void op4(ecx *e, int op, int x, int rd, int rn, int rm, int ra)
-{
-	ins *i;
-
-	if (!e->reach)
-		return;
-	i = put(e, op);
-	i->sz = (uint8_t)x, i->rd = (uint8_t)rd, i->rn = (uint8_t)rn, i->rm = (uint8_t)rm, i->ra = (uint8_t)ra;
-}
-
-static inline void opi(ecx *e, int op, int x, int rd, int rn, int64_t imm)
-{
-	ins *i;
-
-	if (!e->reach)
-		return;
-	i = put(e, op);
-	i->sz = (uint8_t)x, i->rd = (uint8_t)rd, i->rn = (uint8_t)rn;
-	i->imm = imm;
-	if (rn == FRAME)
-		slot_tag(e, i, imm, -1);	/* an address: may point just past the end */
-}
-
-static inline void opbf(ecx *e, int op, int x, int rd, int rn, int immr, int imms)
-{
-	ins *i;
-
-	if (!e->reach)
-		return;
-	i = put(e, op);
-	i->sz = (uint8_t)x, i->rd = (uint8_t)rd, i->rn = (uint8_t)rn;
-	i->imm = immr, i->sh = (uint8_t)imms;
-}
-
-static inline void movi(ecx *e, int x, int rd, int64_t v) { opi(e, I_MOVI, x, rd, 0, v); }
-static inline void mov(ecx *e, int x, int rd, int rn) { if (rd != rn) op3(e, I_MOV, x, rd, rn, 0); }
-
-static inline void cset(ecx *e, int rd, int cond)
-{
-	ins *i;
-
-	if (!e->reach)
-		return;
-	i = put(e, I_CSINC);
-	i->sz = 0, i->rd = (uint8_t)rd, i->rn = ZR, i->rm = ZR, i->cond = (uint8_t)(cond ^ 1);
-}
-
-/* the last record is `cset v.r, cond` (nothing since, no label: the flags still say it): cond, else -1.
- * The value is then 0/1 already, and a test of it can use the flags. */
-static inline int last_cset(ecx *e, const val *v)
-{
-	const ins *i;
-
-	if (v->k != V_REG || !e->reach || !e->nin || e->E->o->opt < 1)
-		return -1;
-	i = &e->in[e->nin - 1];
-	if (i->op != I_CSINC || i->rn != ZR || i->rm != ZR || i->rd != v->r)
-		return -1;
-	return i->cond ^ 1;
-}
-
-static inline void mem(ecx *e, int op, int sz, int ext, int rd, int base, int64_t off)
-{
-	ins *i;
-
-	if (!e->reach)
-		return;
-	i = put(e, op);
-	i->sz = (uint8_t)sz, i->cond = (uint8_t)ext, i->rd = (uint8_t)rd, i->rn = (uint8_t)base;
-	i->imm = off;
-	if (base == FRAME)
-		slot_tag(e, i, off, (int64_t)1 << sz);
-}
-
-static inline void symop(ecx *e, int op, int sz, int ext, int rd, int rn, uint32_t ref, int64_t off)
-{
-	ins *i;
-
-	if (!e->reach)
-		return;
-	i = put(e, op);
-	i->sz = (uint8_t)sz, i->cond = (uint8_t)ext, i->rd = (uint8_t)rd, i->rn = (uint8_t)rn;
-	i->ref = ref, i->off = (int32_t)off;
-}
 
 /* ---------------- values ---------------- */
 
@@ -1050,27 +759,6 @@ static inline void rlog(ecx *e, uint32_t tag, uint32_t v)
 	e->rlog[e->nrlog++] = v;
 }
 
-/* ---------------- floating point ---------------- */
-
-/*
- * float and double values live in general registers as their bit patterns
- * (a float zero-extended); an operation moves them to the scratch FP/SIMD
- * registers v16-v18 with fmov, works there and moves the result back.  So
- * registers, spills, loads, stores and calls stay integer code.  Constants
- * are folded with the host's IEEE arithmetic.  long double is double on
- * Darwin; _Float16 and 128-bit long double are not supported.
- */
-static inline void word(ecx *e, uint32_t w)
-{
-	if (e->reach)
-		put(e, I_WORD)->imm = w;
-}
-
-static inline uint32_t f_in(int d, int vr, int r) { return (d ? 0x9e670000u : 0x1e270000u) | (unsigned)r << 5 | (unsigned)vr; }	/* fmov v, x/w */
-static inline uint32_t f_out(int d, int r, int vr) { return (d ? 0x9e660000u : 0x1e260000u) | (unsigned)vr << 5 | (unsigned)r; }	/* fmov x/w, v */
-
-/* fmov v<vr>.d[1], x<r> / fmov x<r>, v<vr>.d[1] */
-static inline uint32_t q_in_hi(int vr, int r) { return 0x9eaf0000u | (unsigned)r << 5 | (unsigned)vr; }
-static inline uint32_t q_out_hi(int r, int vr) { return 0x9eae0000u | (unsigned)vr << 5 | (unsigned)r; }
+#include "../arch/a64/emit/a64impl.h"
 
 #endif

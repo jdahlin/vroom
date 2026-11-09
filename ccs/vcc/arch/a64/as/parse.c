@@ -1,0 +1,507 @@
+/* arm64 instructions in GNU as syntax: registers and .req aliases, operands, literal pools, the statement */
+#include "../../../as/asimpl.h"
+
+/* ---------------------------------------------------------------- instructions */
+
+VPRIV void al_rehash(As *a)
+{
+	memset(a->alh, 0, sizeof a->alh);
+	for (uint32_t i = 0; i < a->nal; i++) {
+		uint32_t h = al_hash(a->al[i].name.s, a->al[i].name.n);
+		a->al[i].next = a->alh[h]; a->alh[h] = i + 1;
+	}
+}
+
+static int reg_alias(As *a, const char *s, size_t n, Sv *out)
+{
+	if (!a->nal) return 0;
+	for (uint32_t i = a->alh[al_hash(s, n)]; i; i = a->al[i - 1].next) {
+		const Alias *x = &a->al[i - 1];
+		if (x->name.n == n && c_lower((unsigned char)x->name.s[0]) == c_lower((unsigned char)s[0]) &&
+		    !strncasecmp(x->name.s, s, n)) { *out = x->reg; return 1; }
+	}
+	return 0;
+}
+
+static int parse_regnum(const char *s, size_t n, int max)
+{
+	if (!n || n > 2) return -1;
+	int v = 0;
+	for (size_t i = 0; i < n; i++) { if (!c_digit((unsigned char)s[i])) return -1; v = v * 10 + s[i] - '0'; }
+	if (n == 2 && s[0] == '0') return -1;
+	return v <= max ? v : -1;
+}
+
+static int arrangement(const char *s, size_t n)
+{
+	char b[8];
+	if (n >= sizeof b) return -1;
+	for (size_t i = 0; i < n; i++) b[i] = (char)c_lower((unsigned char)s[i]);
+	b[n] = 0;
+	static const char *t[] = { "", "8b", "16b", "4h", "8h", "2s", "4s", "1d", "2d", "1q", "b", "h", "s", "d", "q" };
+	for (int i = 1; i < 15; i++) if (!strcmp(b, t[i])) return i;
+	return -1;
+}
+
+/* Try to parse a register at p (identifier [s, s+n)); fill op. */
+static int parse_reg(As *a, const char *s, size_t n, A64Op *op, int depth)
+{
+	Sv al;
+	const char *dot = 0;
+	for (size_t i = 0; i < n; i++) if (s[i] == '.') { dot = s + i; break; }
+	size_t bn = dot ? (size_t)(dot - s) : n;
+	if (depth < 4 && reg_alias(a, s, bn, &al)) {
+		char buf[64];
+		if (al.n + (n - bn) >= sizeof buf) return 0;
+		memcpy(buf, al.s, al.n); memcpy(buf + al.n, s + bn, n - bn);
+		return parse_reg(a, buf, al.n + (n - bn), op, depth + 1);
+	}
+	char c = (char)c_lower((unsigned char)s[0]);
+	memset(op, 0, sizeof *op);
+	if (!dot) {
+		int r, cl;
+		switch (c) {	/* x0, w12, q1, v3 ... */
+		case 'x': case 'w':
+			if ((r = parse_regnum(s + 1, n - 1, 30)) >= 0) {
+				op->kind = A64O_REG; op->cls = c == 'x' ? A64_X : A64_W; op->reg = (uint8_t)r; return 1;
+			}
+			break;
+		case 'q': cl = A64_Q; goto fpr;
+		case 'd': cl = A64_D; goto fpr;
+		case 's': cl = A64_S; goto fpr;
+		case 'h': cl = A64_H; goto fpr;
+		case 'b': cl = A64_B;
+		fpr:
+			if ((r = parse_regnum(s + 1, n - 1, 31)) >= 0) { op->kind = A64O_REG; op->cls = (uint8_t)cl; op->reg = (uint8_t)r; return 1; }
+			break;
+		case 'v':
+			if ((r = parse_regnum(s + 1, n - 1, 31)) >= 0) {
+				op->kind = A64O_VREG; op->cls = A64_V; op->reg = (uint8_t)r; op->arr = A64_ARR_NONE; return 1;
+			}
+			break;
+		case 'z': case 'p':
+			if ((r = parse_regnum(s + 1, n - 1, c == 'z' ? 31 : 15)) >= 0) {
+				op->kind = A64O_REG; op->cls = c == 'z' ? A64_Z : A64_P; op->reg = (uint8_t)r; return 1;
+			}
+			break;
+		}
+		if (n == 2 || n == 3) {	/* sp wsp xzr wzr fp lr */
+			uint32_t k = (uint32_t)c << 16 | (uint32_t)c_lower((unsigned char)s[1]) << 8 | (n == 3 ? (uint32_t)c_lower((unsigned char)s[2]) : 0);
+#define K3(x, y, z) ((uint32_t)(x) << 16 | (uint32_t)(y) << 8 | (uint32_t)(z))
+			switch (k) {
+			case K3('s', 'p', 0): op->kind = A64O_REG; op->cls = A64_X; op->reg = 31; op->sp = 1; return 1;
+			case K3('w', 's', 'p'): op->kind = A64O_REG; op->cls = A64_W; op->reg = 31; op->sp = 1; return 1;
+			case K3('x', 'z', 'r'): op->kind = A64O_REG; op->cls = A64_X; op->reg = 31; return 1;
+			case K3('w', 'z', 'r'): op->kind = A64O_REG; op->cls = A64_W; op->reg = 31; return 1;
+			case K3('f', 'p', 0): op->kind = A64O_REG; op->cls = A64_X; op->reg = 29; return 1;
+			case K3('l', 'r', 0): op->kind = A64O_REG; op->cls = A64_X; op->reg = 30; return 1;
+			}
+#undef K3
+		}
+		return 0;
+	}
+	if (c == 'p' || c == 'z') {	/* SVE: p0.b, z1.d */
+		int r = parse_regnum(s + 1, bn - 1, c == 'z' ? 31 : 15);
+		int ar = r < 0 ? -1 : arrangement(dot + 1, n - bn - 1);
+		if (ar < A64_ELB || ar > A64_ELQ) return 0;
+		op->kind = A64O_REG; op->cls = c == 'z' ? A64_Z : A64_P; op->reg = (uint8_t)r; op->arr = (uint8_t)ar;
+		return 1;
+	}
+	if (c != 'v') return 0;
+	int r = parse_regnum(s + 1, bn - 1, 31);
+	if (r < 0) return 0;
+	int ar = arrangement(dot + 1, n - bn - 1);
+	if (ar < 0) return 0;
+	op->kind = A64O_VREG; op->cls = A64_V; op->reg = (uint8_t)r; op->arr = (uint8_t)ar;
+	return 1;
+}
+
+static int shift_kind(const char *s, size_t n)
+{
+	if (n != 3 && n != 4) return -1;
+	uint32_t k = 0;
+	for (size_t i = 0; i < n; i++) k |= (uint32_t)c_lower((unsigned char)s[i]) << (8 * i);
+#define P(a, b, c, d) ((uint32_t)(a) | (uint32_t)(b) << 8 | (uint32_t)(c) << 16 | (uint32_t)(d) << 24)
+	switch (k) {	/* the order of A64_LSL ... A64_SXTX */
+	case P('l', 's', 'l', 0): return 0;
+	case P('l', 's', 'r', 0): return 1;
+	case P('a', 's', 'r', 0): return 2;
+	case P('r', 'o', 'r', 0): return 3;
+	case P('m', 's', 'l', 0): return 4;
+	case P('u', 'x', 't', 'b'): return 5;
+	case P('u', 'x', 't', 'h'): return 6;
+	case P('u', 'x', 't', 'w'): return 7;
+	case P('u', 'x', 't', 'x'): return 8;
+	case P('s', 'x', 't', 'b'): return 9;
+	case P('s', 'x', 't', 'h'): return 10;
+	case P('s', 'x', 't', 'w'): return 11;
+	case P('s', 'x', 't', 'x'): return 12;
+	}
+#undef P
+	return -1;
+}
+
+static int mod_kind(const char *s, size_t n)
+{
+	static const struct { const char *n; int k; } t[] = {
+		{ "lo12", A64_MOD_LO12 }, { "pg_hi21", A64_MOD_PG_HI21 }, { "pg_hi21_nc", A64_MOD_PG_HI21_NC },
+		{ "abs_g0", A64_MOD_ABS_G0 }, { "abs_g0_nc", A64_MOD_ABS_G0_NC }, { "abs_g1", A64_MOD_ABS_G1 },
+		{ "abs_g1_nc", A64_MOD_ABS_G1_NC }, { "abs_g2", A64_MOD_ABS_G2 }, { "abs_g2_nc", A64_MOD_ABS_G2_NC },
+		{ "abs_g3", A64_MOD_ABS_G3 }, { "got", A64_MOD_GOT }, { "got_lo12", A64_MOD_GOT_LO12 },
+		{ "abs_g0_s", A64_MOD_ABS_G0_S }, { "abs_g1_s", A64_MOD_ABS_G1_S }, { "abs_g2_s", A64_MOD_ABS_G2_S },
+	};
+	for (size_t i = 0; i < sizeof t / sizeof t[0]; i++) if (sveqi(s, n, t[i].n)) return t[i].k;
+	return -1;
+}
+
+/* immediate / expression operand, optionally with :mod: */
+static int parse_imm(As *a, const char **pp, const char *e, A64Op *op)
+{
+	const char *p = ws(*pp, e);
+	op->kind = A64O_IMM;
+	if (p < e && *p == '#') { op->hash = 1; p = ws(p + 1, e); }
+	if (p < e && *p == ':') {
+		const char *s = ++p;
+		while (p < e && *p != ':') p++;
+		int m = mod_kind(s, (size_t)(p - s));
+		if (m < 0 || p >= e) return err(a, "invalid relocation specifier");
+		op->mod = (uint8_t)m;
+		p++;
+	}
+	/* floating-point immediate */
+	{
+		const char *q = p;
+		if (q < e && (*q == '-' || *q == '+')) q++;
+		const char *d = q;
+		while (q < e && c_digit((unsigned char)*q)) q++;
+		if (q > d && q < e && (*q == '.' || ((*q == 'e' || *q == 'E') && !(d[0] == '0' && q - d == 1)))) {
+			if (*q == '.' || *q == 'e' || *q == 'E') {
+				char tmp[64]; size_t k = (size_t)(e - p) < 63 ? (size_t)(e - p) : 63;
+				memcpy(tmp, p, k); tmp[k] = 0;
+				char *end;
+				op->fimm = strtod(tmp, &end);
+				op->kind = A64O_FIMM;
+				*pp = p + (end - tmp);
+				return 0;
+			}
+		}
+		/* a plain decimal number on its own: what expr() would fold it to */
+		const char *r = ws(q, e);
+		if (d == p && q > d && q - d <= 18 && !(d[0] == '0' && q - d > 1) && (r == e || *r == ',' || *r == ']')) {
+			int64_t x = 0;
+			for (const char *t = d; t < q; t++) x = x * 10 + (*t - '0');
+			op->v = (Val){ 0, 0, x };
+			op->imm = x;
+			op->hassym = 0;
+			*pp = q;
+			return 0;
+		}
+	}
+	Val v;
+	if (val_expr(a, &p, e, &v)) return -1;
+	fold(a, &v);
+	op->v = v;
+	op->imm = v.c;
+	op->hassym = v.add || v.sub;
+	*pp = p;
+	return 0;
+}
+
+static int parse_mem(As *a, const char **pp, const char *e, A64Op *op)
+{
+	const char *p = ws(*pp + 1, e);
+	const char *s = p;
+	while (p < e && isidc((unsigned char)*p)) p++;
+	A64Op r;
+	if (!parse_reg(a, s, (size_t)(p - s), &r, 0) || r.kind != A64O_REG || r.cls != A64_X)
+		return err(a, "invalid operand for instruction");
+	memset(op, 0, sizeof *op);
+	op->kind = A64O_MEM; op->reg = r.reg; op->mode = A64M_OFF;
+	p = ws(p, e);
+	if (p < e && *p == ',') {
+		p = ws(p + 1, e);
+		s = p;
+		while (p < e && isidc((unsigned char)*p)) p++;
+		if (p > s && parse_reg(a, s, (size_t)(p - s), &r, 0) && r.kind == A64O_REG) {
+			op->mode = A64M_REG; op->index = r.reg; op->idxcls = r.cls; op->shift = A64_LSL;
+			p = ws(p, e);
+			if (p < e && *p == ',') {
+				p = ws(p + 1, e);
+				s = p;
+				while (p < e && isidc((unsigned char)*p)) p++;
+				int k = shift_kind(s, (size_t)(p - s));
+				if (k < 0) return err(a, "expected extend or shift");
+				op->shift = (uint8_t)k;
+				op->hasamt = 2;		/* extend given */
+				p = ws(p, e);
+				if (p < e && *p == '#') {
+					int64_t amt;
+					p++;
+					if (abs_expr(a, &p, e, &amt)) return -1;
+					op->imm = amt; op->hasamt = 3;
+				}
+			}
+		} else {
+			p = s;
+			A64Op im; memset(&im, 0, sizeof im);
+			if (parse_imm(a, &p, e, &im)) return -1;
+			op->imm = im.imm; op->v = im.v; op->hassym = im.hassym; op->mod = im.mod; op->hasamt = 1;
+			p = ws(p, e);
+			if (p < e && *p == ',') {	/* SVE: #imm, mul vl */
+				const char *q = ws(p + 1, e);
+				if (e - q >= 3 && sveqi(q, 3, "mul")) {
+					q = ws(q + 3, e);
+					if (e - q >= 2 && sveqi(q, 2, "vl")) { op->mulvl = 1; p = q + 2; }
+				}
+			}
+		}
+	}
+	p = ws(p, e);
+	if (p >= e || *p != ']') return err(a, "expected ']'");
+	p = ws(p + 1, e);
+	if (p < e && *p == '!') { op->mode = A64M_PRE; p++; }
+	*pp = p;
+	return 0;
+}
+
+/* mnemonics whose operands can be names (sysregs, barriers, conditions...);
+ * m is lowercase */
+static int names_ops(const char *m, size_t n)
+{
+#define N(s) (n == sizeof(s) - 1 && !memcmp(m, s, n))
+	switch (m[0]) {
+	case 'a': return N("at");
+	case 'b': return N("bti");
+	case 'c': return N("csel") || N("csinc") || N("csinv") || N("csneg") || N("cset") || N("csetm") ||
+			 N("cinc") || N("cinv") || N("cneg") || N("ccmp") || N("ccmn") || N("clrex");
+	case 'd': return N("dmb") || N("dsb") || N("dc");
+	case 'f': return N("fcsel") || N("fccmp") || N("fccmpe");
+	case 'h': return N("hint");
+	case 'i': return N("isb") || N("ic");
+	case 'm': return N("msr") || N("mrs");
+	case 'p': return N("prfm") || N("prfum") || N("psb");
+	case 's': return N("sys") || N("sysl") || N("sb");
+	case 't': return N("tlbi") || N("tsb");
+	}
+	return 0;
+#undef N
+}
+
+typedef struct PoolS { uint32_t sec, label; Val v; uint32_t size; } Pool;
+
+static uint32_t pool_entry(As *a, Val v, uint32_t size)
+{
+	uint32_t sec = elf_frag(a->o, a->cur)->sec;
+	int plain = (v.add && !v.sub && !v.c) || (!v.add && !v.sub);
+	if (plain)
+		for (uint32_t i = 0; i < a->npool; i++) {
+			Pool *q = &a->pool[i];
+			if (q->sec == sec && q->size == size && q->v.add == v.add && q->v.sub == v.sub && q->v.c == v.c) return q->label;
+		}
+	if (a->npool == a->poolcap) {
+		uint32_t nc = a->poolcap ? a->poolcap * 2 : 64;
+		Pool *t = rget(&a->defs, sizeof *t * nc);
+		if (a->npool) memcpy(t, a->pool, sizeof *t * a->npool);
+		a->pool = t; a->poolcap = nc;
+	}
+	Pool *q = &a->pool[a->npool++];
+	q->sec = sec; q->label = tmpsym(a); q->v = v; q->size = size;
+	return q->label;
+}
+
+/* emitAll: per section in first-use order, align naturally, label, value */
+VPRIV int flush_pools(As *a)
+{
+	for (uint32_t i = 0; i < a->npool; i++) {
+		uint32_t sec = a->pool[i].sec;
+		int seen = 0;
+		for (uint32_t j = 0; j < i; j++) if (a->pool[j].sec == sec) seen = 1;
+		if (seen) continue;
+		a->cur = sec;
+		for (uint32_t j = i; j < a->npool; j++) {
+			Pool *q = &a->pool[j];
+			if (q->sec != sec) continue;
+			elf_align(a->o, sec, q->size == 8 ? 3 : 2, 0, 0, 0);
+			elf_define(a->o, q->label, sec, elf_frag(a->o, sec)->size);
+			Val v = q->v;
+			if (emit_value(a, (int)q->size, &v)) return -1;
+		}
+	}
+	a->npool = 0;
+	return 0;
+}
+
+/* .ltorg: the current section's literal pool, here */
+VPRIV int ltorg(As *a)
+{
+	uint32_t sec = elf_frag(a->o, a->cur)->sec, k = 0;
+	for (uint32_t j = 0; j < a->npool; j++) {
+		Pool *q = &a->pool[j];
+		if (q->sec != sec) { a->pool[k++] = *q; continue; }
+		elf_align(a->o, a->cur, q->size == 8 ? 3 : 2, 0, 0, 0);
+		elf_define(a->o, q->label, a->cur, elf_frag(a->o, a->cur)->size);
+		Val v = q->v;
+		if (emit_value(a, (int)q->size, &v)) return -1;
+	}
+	a->npool = k;
+	return 0;
+}
+
+int as_trace;	/* print each instruction statement and its encoding (testing) */
+
+/* p: the statement from its mnemonic, which is wn bytes long */
+VPRIV int instruction(As *a, const char *p, const char *e, size_t wn)
+{
+	const char *p0 = p;
+	const char *s = p;
+	p += wn;
+	char mn[32];
+	size_t mlen = wn;
+	if (mlen >= sizeof mn) return err(a, "invalid instruction mnemonic");
+	for (size_t i = 0; i < mlen; i++) mn[i] = (char)c_lower((unsigned char)s[i]);
+	mn[mlen] = 0;
+	int names = names_ops(mn, mlen);
+	A64Op ops[MAXOPS];
+	int nop = 0;
+	uint32_t w;
+	A64Fix fx; fx.type = 0;
+	p = ws(p, e);
+	/* SME ldr/str za[Wv, #imm], [Xn{, #imm, mul vl}] */
+	if (mlen == 3 && (!memcmp(mn, "ldr", 3) || !memcmp(mn, "str", 3)) && e - p > 3 && (p[0] | 32) == 'z' && (p[1] | 32) == 'a' && p[2] == '[') {
+		char buf[96], tail[16] = "";
+		unsigned v, i1, n, i2 = 0;
+		size_t l = (size_t)(e - p) < sizeof buf - 1 ? (size_t)(e - p) : sizeof buf - 1;
+		memcpy(buf, p, l); buf[l] = 0;
+		for (char *q = buf; *q; q++) *q = (char)c_lower((unsigned char)*q);
+		int k = sscanf(buf, "za[w%u , #%u ] , [x%u , #%u , mul vl%15s", &v, &i1, &n, &i2, tail);
+		if (k < 3 && sscanf(buf, "za[w%u , %u ] , [x%u", &v, &i1, &n) == 3) k = 3;
+		if (k < 3 || v < 12 || v > 15 || i1 > 15 || n > 30 || (k >= 4 && i2 != i1))
+			return err(a, "invalid za operand");
+		w = (mn[0] == 'l' ? 0xe1000000u : 0xe1200000u) | (v - 12) << 13 | n << 5 | i1;
+		goto put;
+	}
+	while (p < e) {
+		if (nop >= MAXOPS) return err(a, "too many operands");
+		A64Op *op = &ops[nop++];
+		memset(op, 0, sizeof *op);
+		char c = *p;
+		if (c == '[') {
+			if (parse_mem(a, &p, e, op)) return -1;
+		} else if (c == '{') {
+			p = ws(p + 1, e);
+			op->kind = A64O_LIST;
+			int first = 1;
+			for (;;) {
+				const char *t = p;
+				while (p < e && isidc((unsigned char)*p)) p++;
+				A64Op r;
+				if (!parse_reg(a, t, (size_t)(p - t), &r, 0) || r.kind != A64O_VREG) return err(a, "vector register expected");
+				if (first) { op->reg = r.reg; op->arr = r.arr; op->cls = A64_V; op->nregs = 1; first = 0; }
+				else op->nregs++;
+				p = ws(p, e);
+				if (p < e && *p == '-') {
+					p = ws(p + 1, e);
+					t = p;
+					while (p < e && isidc((unsigned char)*p)) p++;
+					A64Op r2;
+					if (!parse_reg(a, t, (size_t)(p - t), &r2, 0) || r2.kind != A64O_VREG) return err(a, "vector register expected");
+					op->nregs = (uint8_t)(((r2.reg - op->reg) & 31) + 1);
+					p = ws(p, e);
+				}
+				if (p < e && *p == ',') { p = ws(p + 1, e); continue; }
+				break;
+			}
+			if (p >= e || *p != '}') return err(a, "'}' expected");
+			p = ws(p + 1, e);
+			if (p < e && *p == '[') {
+				int64_t ix;
+				p++;
+				if (abs_expr(a, &p, e, &ix)) return -1;
+				p = ws(p, e);
+				if (p >= e || *p != ']') return err(a, "']' expected");
+				p++;
+				op->idx = (uint8_t)ix; op->hasidx = 1;
+			}
+		} else if (cclass[(uint8_t)c] & C_E) {	/* # : ( - + ~ digit */
+			if (parse_imm(a, &p, e, op)) return -1;
+		} else if (isids((unsigned char)c)) {
+			const char *t = p;
+			while (p < e && isidc((unsigned char)*p)) p++;
+			size_t tn = (size_t)(p - t);
+			int k;
+			const char *q = ws(p, e);
+			if (parse_reg(a, t, tn, op, 0)) {
+				if (op->kind == A64O_REG && q < e && *q == '!') { op->wb = 1; p = q + 1; }
+				else if (op->kind == A64O_VREG && q < e && *q == '[') {
+					int64_t ix;
+					q++;
+					if (abs_expr(a, &q, e, &ix)) return -1;
+					q = ws(q, e);
+					if (q >= e || *q != ']') return err(a, "']' expected");
+					op->kind = A64O_VELEM; op->idx = (uint8_t)ix; op->hasidx = 1;
+					p = q + 1;
+				}
+			} else if ((k = shift_kind(t, tn)) >= 0 && (q >= e || *q == '#' || *q == ',' || *q == '(' || c_digit((unsigned char)*q))) {
+				op->kind = A64O_SHIFT; op->shift = (uint8_t)k;
+				p = q;
+				if (p < e && *p != ',') {
+					int64_t amt;
+					if (*p == '#') p++;
+					if (abs_expr(a, &p, e, &amt)) return -1;
+					op->imm = amt; op->hasamt = 1;
+				}
+			} else if (names && (q >= e || *q == ',')) {
+				op->kind = A64O_NAME; op->name = t; op->nlen = (uint32_t)tn;
+			} else {
+				p = t;
+				if (parse_imm(a, &p, e, op)) return -1;
+			}
+		} else if (c == '=') {
+			p++;
+			if (parse_imm(a, &p, e, op)) return -1;
+			op->kind = A64O_IMM; op->hash = 2;	/* =expr */
+		} else if (c == '"' || c == '.') {
+			if (parse_imm(a, &p, e, op)) return -1;
+		} else return err(a, "unexpected token in operand");
+		p = ws(p, e);
+		if (p >= e) break;
+		if (*p != ',') return err(a, "unexpected token in argument list");
+		p = ws(p + 1, e);
+	}
+	/* ldr Rt, =expr: movz if it fits, else a constant-pool entry */
+	if (nop == 2 && ops[1].kind == A64O_IMM && ops[1].hash == 2 && !strcmp(mn, "ldr") && ops[0].kind == A64O_REG) {
+		int x = ops[0].cls == A64_X;
+		if (!ops[1].hassym) {
+			uint64_t imm = (uint64_t)ops[1].imm;
+			unsigned sh = 0, maxsh = x ? 48 : 16;
+			while (imm > 0xffff && __builtin_ctzll(imm) >= 16) { sh += 16; imm >>= 16; }
+			if (sh <= maxsh && imm <= 0xffff) {
+				memcpy(mn, "movz", 5); mlen = 4;
+				ops[1].imm = (int64_t)imm; ops[1].v.c = (int64_t)imm; ops[1].hash = 1;
+				if (sh) { memset(&ops[2], 0, sizeof ops[2]); ops[2].kind = A64O_SHIFT; ops[2].shift = A64_LSL; ops[2].imm = sh; ops[2].hasamt = 1; nop = 3; }
+				goto enc;
+			}
+		}
+		uint32_t lab = pool_entry(a, ops[1].v, x ? 8 : 4);
+		ops[1].v = (Val){ lab, 0, 0 }; ops[1].hassym = 1; ops[1].hash = 0; ops[1].imm = 0;
+	}
+enc:;
+	const char *msg = 0;
+	if (a64_asm(mn, mlen, ops, nop, &w, &fx, &msg)) {
+		if (as_trace != 2)
+			return err(a, "%s: %s", mn, msg ? msg : "invalid instruction");
+		/* --trace-all: report and go on (finding every unsupported form at once) */
+		printf("FAIL %s\t%.*s\n", msg ? msg : "invalid", (int)(e - p0), p0);
+		w = 0, fx.type = 0;
+	}
+put:;
+	ElfObj *o = a->o;
+	elf_code(o, a->cur);
+	uint64_t off = elf_frag(o, a->cur)->size;
+	uint8_t *q = elf_grow(o, a->cur, 4);
+	q[0] = (uint8_t)w; q[1] = (uint8_t)(w >> 8); q[2] = (uint8_t)(w >> 16); q[3] = (uint8_t)(w >> 24);
+	if (fx.type) elf_fixup(o, a->cur, off, q, fx.type, fx.v);
+	if (as_trace) printf("%08x %d\t%.*s\n", w, fx.type != 0, (int)(e - p0), p0);
+	return 0;
+}
+

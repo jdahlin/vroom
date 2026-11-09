@@ -538,6 +538,11 @@ klarar inte runtimen 34, tcc-specifika 32, kompilatorspecifikt 1).
 - Kärnan: 22 av 839 objekt ändras (vcc-cbatch, före mot efter): 9 av (5) (t.ex. `call_single_data_t` på stacken är `__aligned(32)`), 13 av (7) (slotplacering). Inte boot-testat.
 - **Kvar:** SVE (`arm_sve.h`-typer, `target("+sve")`); `__has_builtin` svarar 0 för namn som inte finns i kärnan/SDK:n (ppdata.inc, t.ex. `__sync_lock_release`): generera med `EXTRA_INC=work/postgres/src/include`; diagnostiker skriver vektortyper som `''`; TAP-testerna (`-Dtap_tests=enabled`, IPC::Run); Mach-O-länkning (ld64 i svansen).
 
+### Status katalogstruktur (2026-11-09): inför x86-64
+- `ccs/vcc/` i komponentkataloger (`lib/`, `lex/`, `pp/`, `cc/`, `emit/`, `as/`, `obj/`, `ld/`, `driver/`, `vccd/`), allt CPU-specifikt i `arch/a64/` (emitterns 18 filer, as-parsern, kodaren, fixups, länkarens relokeringar och thunks), OS-specifikt i `platform/{linux,darwin}/` (ELF- och Mach-O-skrivarna), fas 1-verktygen i `ccs/phase1/`. Datastrukturer i `lib/`: identiska kopior sammanslagna (`vreserve` ×4, `vregion` ×2, `vbuf` ×2), övriga varianter sida vid sida (TODO.md). Moduler över flera kataloger: Makefile-listor `MOD_SRC`, fortfarande en unity-TU per modul (cc, pp, emit, as, obj). AGENTS.md "Layout" beskriver strukturen.
+- **Acceptans, varje commit:** 1 326 utdata (`-c` -O0/-O1/-O2, `-S`, `-E`; kärn-TU:er, gcc-torture, tcc, vcc-tester; Linux- och Darwin-mål) byte-identiska med bygget före; `vbench.py check --base` 171/171 (även vmlinux-länkningen); vcc-ctests 1729/1729, paritet 873/873, sema 878/879; gate inom ±0,1 % i alla steg.
+- **Kvar:** länkaren som delad modul (dess arm64-delar är `.inc`-fragment), Darwin-grenarna inne i emittern (`DARWIN(c)`) till `platform/`, gemensamma datastrukturer. Redan före: steg 3 av `make self-check` kraschar (steg 2-`vpp` segfaultar), vasm saknar `ldursh` (vcc-asdiff 839/840).
+
 ## Linux aarch64 som värd (påbörjat 2026-11-08)
 
 **Mål:** hela verktygskedjan (vcc, vccd, vld, vas) och kärnbygget körs på Linux aarch64

@@ -1,7 +1,7 @@
 /* vcc preprocessor: builtin macros and the __has_* queries */
 #include "ppimpl.h"
 #include <sys/stat.h>
-#include "../ppdata.inc"
+#include "ppdata.inc"
 
 /* ---------------- builtin macros ---------------- */
 
@@ -15,7 +15,7 @@ VPRIV const ctx *cur_file(const pp *p)
 
 static void mknum(pp *p, ptok *t, unsigned long long v)
 {
-	char *b = alloc(&p->tmp, 40);
+	char *b = varena_alloc(&p->tmp, 40);
 	int n = utoa(b, v);
 
 	memset(b + n, 0, 16);
@@ -29,7 +29,7 @@ static void mknum(pp *p, ptok *t, unsigned long long v)
 
 static void mkstr(pp *p, ptok *t, const char *s, size_t n)
 {
-	char *b = alloc(&p->tmp, 2 * n + 24), *w = b;
+	char *b = varena_alloc(&p->tmp, 2 * n + 24), *w = b;
 
 	*w++ = '"';
 	for (size_t i = 0; i < n; i++) {
@@ -50,7 +50,7 @@ static void mkstr(pp *p, ptok *t, const char *s, size_t n)
 /* put t back: it is read again next */
 static void unread(pp *p, const ptok *t)
 {
-	ptok *c = alloc(&p->tmp, sizeof(*c));
+	ptok *c = varena_alloc(&p->tmp, sizeof(*c));
 
 	*c = *t;
 	push_ptok(p, c, 1, 0, 0, 0);
@@ -290,7 +290,7 @@ VPRIV int builtin(pp *p, const pmacro *m, ptok *t)
 				sp++;
 				l--;
 			}
-			d = alloc(&p->tmp, l + 16);
+			d = varena_alloc(&p->tmp, l + 16);
 			memcpy(d, "pragma ", 7);
 			dn = 7;
 			for (size_t i = 1; i + 1 < l; i++) {

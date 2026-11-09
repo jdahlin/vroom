@@ -1,5 +1,6 @@
 /* vcc preprocessor: diagnostics in clang's text format */
 #include "ppimpl.h"
+#include "../lib/buf.h"
 
 /* ---------------- diagnostics ---------------- */
 
@@ -104,44 +105,10 @@ int pp_where(const pp *p, uint32_t loc, const char **name, uint32_t *namelen, ui
 
 /* ---------------- diagnostics in clang's text format ---------------- */
 
-typedef struct dbuf {
-	char *p;
-	size_t n, cap;
-} dbuf;
-
-static void db_put(dbuf *b, const char *s, size_t n)
-{
-	if (b->n + n > b->cap) {
-		size_t c = b->cap ? b->cap * 2 : 4096;
-
-		while (c < b->n + n)
-			c *= 2;
-		b->p = realloc(b->p, c);
-		b->cap = c;
-	}
-	memcpy(b->p + b->n, s, n);
-	b->n += n;
-}
-
-static void db_s(dbuf *b, const char *s) { db_put(b, s, strlen(s)); }
-
-__attribute__((format(printf, 2, 3)))
-static void db_f(dbuf *b, const char *fmt, ...)
-{
-	char t[1024];
-	va_list ap;
-	int n;
-
-	va_start(ap, fmt);
-	n = vsnprintf(t, sizeof(t), fmt, ap);
-	va_end(ap);
-	db_put(b, t, n < (int)sizeof(t) ? (size_t)n : sizeof(t) - 1);
-}
-
-static void db_c(dbuf *b, char c, int n)
+static void db_c(vbuf *b, char c, int n)
 {
 	while (n-- > 0)
-		db_put(b, &c, 1);
+		vbuf_put(b, &c, 1);
 }
 
 /* clang's colours (TextDiagnostic.cpp) */
@@ -309,7 +276,7 @@ static int diag_where(const pp *p, uint32_t loc, const char **name, uint32_t *nl
 	return r;
 }
 
-static void include_stack(pp *p, dbuf *b, const fent *e)
+static void include_stack(pp *p, vbuf *b, const fent *e)
 {
 	const fent *chain[64];
 	int n = 0;
@@ -325,16 +292,16 @@ static void include_stack(pp *p, dbuf *b, const fent *e)
 		uint32_t nl, line, col;
 
 		if (diag_where(p, chain[i]->from, &name, &nl, &line, &col))
-			db_f(b, "In file included from %.*s:%u:\n", (int)nl, name, line);
+			vbuf_f(b, "In file included from %.*s:%u:\n", (int)nl, name, line);
 	}
 }
 
-static void snippet(pp *p, dbuf *b, const fent *e, const pp_dinfo *d)
+static void snippet(pp *p, vbuf *b, const fent *e, const pp_dinfo *d)
 {
 	const char *s = e->f->src;
 	uint32_t off = d->loc - e->base, size = e->f->size, ls, le, line, width, nd;
 	char num[16];
-	dbuf cl = { 0 }, fl = { 0 };
+	vbuf cl = { 0 }, fl = { 0 };
 	uint32_t ccol;
 	bool anyfix = false;
 
@@ -350,8 +317,8 @@ static void snippet(pp *p, dbuf *b, const fent *e, const pp_dinfo *d)
 	nd = (uint32_t)snprintf(num, sizeof(num), "%u", line);
 	/* the source line, tabs expanded */
 	db_c(b, ' ', (int)(width - nd + 1));
-	db_s(b, num);
-	db_s(b, " | ");
+	vbuf_s(b, num);
+	vbuf_s(b, " | ");
 	for (uint32_t i = ls, col = 0; i < le; i++) {
 		if (s[i] == '\t') {
 			uint32_t to = (col / 8 + 1) * 8;
@@ -359,12 +326,12 @@ static void snippet(pp *p, dbuf *b, const fent *e, const pp_dinfo *d)
 			db_c(b, ' ', (int)(to - col));
 			col = to;
 		} else {
-			db_put(b, s + i, 1);
+			vbuf_put(b, s + i, 1);
 			if (((unsigned char)s[i] & 0xc0) != 0x80)
 				col++;
 		}
 	}
-	db_s(b, "\n");
+	vbuf_s(b, "\n");
 	/* the caret line: ~ under the ranges, ^ at loc */
 	ccol = dcols(s, ls, off, 0);
 	{
@@ -394,7 +361,7 @@ static void snippet(pp *p, dbuf *b, const fent *e, const pp_dinfo *d)
 
 			while (n > 0 && m[n - 1] == ' ')
 				n--;
-			db_put(&cl, m, n);
+			vbuf_put(&cl, m, n);
 			/* clang pads the caret line out to the last fix-it's column */
 			for (int i = 0; i < d->nfx; i++) {
 				uint32_t fb = d->fx[i].b, c0;
@@ -409,13 +376,13 @@ static void snippet(pp *p, dbuf *b, const fent *e, const pp_dinfo *d)
 		free(m);
 	}
 	db_c(b, ' ', (int)width + 2);
-	db_s(b, "| ");
+	vbuf_s(b, "| ");
 	if (p->color)
-		db_s(b, DC_CARET);
-	db_put(b, cl.p, cl.n);
+		vbuf_s(b, DC_CARET);
+	vbuf_put(b, cl.p, cl.n);
 	if (p->color)
-		db_s(b, DC_RESET);
-	db_s(b, "\n");
+		vbuf_s(b, DC_RESET);
+	vbuf_s(b, "\n");
 	/* fix-it hints on this line */
 	for (int i = 0; i < d->nfx; i++) {
 		uint32_t fb = d->fx[i].b;
@@ -428,18 +395,18 @@ static void snippet(pp *p, dbuf *b, const fent *e, const pp_dinfo *d)
 		if (c0 < have)
 			c0 = have;
 		db_c(&fl, ' ', (int)(c0 - have));
-		db_s(&fl, d->fx[i].s);
+		vbuf_s(&fl, d->fx[i].s);
 		anyfix = true;
 	}
 	if (anyfix) {
 		db_c(b, ' ', (int)width + 2);
-		db_s(b, "| ");
+		vbuf_s(b, "| ");
 		if (p->color)
-			db_s(b, DC_FIXIT);
-		db_put(b, fl.p, fl.n);
+			vbuf_s(b, DC_FIXIT);
+		vbuf_put(b, fl.p, fl.n);
 		if (p->color)
-			db_s(b, DC_RESET);
-		db_s(b, "\n");
+			vbuf_s(b, DC_RESET);
+		vbuf_s(b, "\n");
 	}
 	free(cl.p);
 	free(fl.p);
@@ -591,7 +558,7 @@ static void vdiagx_(pp *p, const pp_dinfo *d, const char *fmt, va_list ap)
 	bool has = d->loc != UINT32_MAX && loc_ok(p, d->loc, &e);	/* UINT32_MAX: no location */
 	bool note = what[0] == 'n';
 	char msg[2048];
-	dbuf b = { 0 };
+	vbuf b = { 0 };
 
 	vsnprintf(msg, sizeof(msg), fmt, ap);
 	if (has && what[0] != 'n' && (uint32_t)(e - p->fe) + 1 != p->diag_fe)
@@ -599,23 +566,23 @@ static void vdiagx_(pp *p, const pp_dinfo *d, const char *fmt, va_list ap)
 	if (has && what[0] != 'n')
 		p->diag_fe = (uint32_t)(e - p->fe) + 1;
 	if (p->color)
-		db_s(&b, DC_BOLD);
+		vbuf_s(&b, DC_BOLD);
 	if (has && diag_where(p, d->loc, &name, &nl, &line, &col))
-		db_f(&b, "%.*s:%u:%u: ", (int)nl, name, line, col);
+		vbuf_f(&b, "%.*s:%u:%u: ", (int)nl, name, line, col);
 	else if (d->loc == UINT32_MAX)
 		;	/* "fatal error: too many errors emitted" has no location */
 	else if (!has)
-		db_s(&b, "vcc: ");
+		vbuf_s(&b, "vcc: ");
 	if (p->color)
-		db_s(&b, dcolor(what));
-	db_s(&b, what);
-	db_s(&b, ": ");
+		vbuf_s(&b, dcolor(what));
+	vbuf_s(&b, what);
+	vbuf_s(&b, ": ");
 	if (p->color)
-		db_s(&b, note ? DC_RESET : DC_RESET DC_BOLD);
-	db_s(&b, msg);
+		vbuf_s(&b, note ? DC_RESET : DC_RESET DC_BOLD);
+	vbuf_s(&b, msg);
 	if (p->color)
-		db_s(&b, DC_RESET);
-	db_s(&b, "\n");
+		vbuf_s(&b, DC_RESET);
+	vbuf_s(&b, "\n");
 	if (has && !p->o->diag_nocaret && d->loc - e->base < e->f->size)
 		snippet(p, &b, e, d);
 	(void)!write(fd, b.p, b.n);
