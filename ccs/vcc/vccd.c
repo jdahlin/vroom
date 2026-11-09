@@ -975,9 +975,25 @@ static void *worker_main(void *arg)
 	return NULL;
 }
 
+static bool peer_is_us(int c)
+{
+#ifdef __APPLE__
+	uid_t u;
+	gid_t g;
+
+	return !getpeereid(c, &u, &g) && u == geteuid();
+#else
+	struct ucred cr;
+	socklen_t l = sizeof(cr);
+
+	return !getsockopt(c, SOL_SOCKET, SO_PEERCRED, &cr, &l) && cr.uid == geteuid();
+#endif
+}
+
 int main(int argc, char **argv)
 {
-	const char *sock = "/tmp/vccd.sock";
+	const char *sock = NULL;
+	char ddir[1024], dsock[1100];
 	struct sockaddr_un sa = { .sun_family = AF_UNIX };
 #ifdef __APPLE__
 	struct kevent ev;
@@ -1016,12 +1032,25 @@ int main(int argc, char **argv)
 	own_cc = !getenv("VCC_CC") || strcmp(getenv("VCC_CC"), "0");
 	signal(SIGPIPE, SIG_IGN);
 
+	if (!sock) {
+		if (vroom_default_sock(ddir, sizeof(ddir), dsock, sizeof(dsock), 1)) {
+			fprintf(stderr, "vccd: %s is not a private directory of ours\n", ddir);
+			return 1;
+		}
+		sock = dsock;
+	}
 	unlink(sock);
 	strncpy(sa.sun_path, sock, sizeof(sa.sun_path) - 1);
 	ls = socket(AF_UNIX, SOCK_STREAM, 0);
-	if (ls < 0 || bind(ls, (struct sockaddr *)&sa, sizeof(sa)) || listen(ls, 1024)) {
-		perror("vccd: socket");
-		return 1;
+	{	/* the socket is 0600 whatever the umask: the peer check below is the real gate */
+		mode_t um = umask(077);
+		int bad = ls < 0 || bind(ls, (struct sockaddr *)&sa, sizeof(sa));
+
+		umask(um);
+		if (bad || listen(ls, 1024)) {
+			perror("vccd: socket");
+			return 1;
+		}
 	}
 	fcntl(ls, F_SETFL, O_NONBLOCK);
 #ifndef __APPLE__
@@ -1118,6 +1147,10 @@ int main(int argc, char **argv)
 
 			if (c < 0)
 				break;
+			if (!peer_is_us(c)) {	/* another user: refused before reading anything */
+				close(c);
+				continue;
+			}
 			fcntl(c, F_SETFL, 0);	/* BSD: accept() inherits O_NONBLOCK */
 			fcntl(c, F_SETFD, FD_CLOEXEC);
 			queue_push(c);

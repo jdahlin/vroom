@@ -346,7 +346,10 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
 
 ## Tier 2: vccd as a safe long-lived service
 
-- [ ] **Socket has no peer check, lives in /tmp** [R].  `vccd.c:924-927`,
+- [x] **Socket has no peer check, lives in /tmp** [R].  *Done:* default socket
+  `$XDG_RUNTIME_DIR/vccd/` or `$TMPDIR/vccd-UID/` (0700, owner and mode checked
+  by shim and server, `protocol.h`), socket bound 0600, peer uid checked on
+  accept (getpeereid / SO_PEERCRED).  The other-uid test needs sudo.  Was:  `vccd.c:924-927`,
   `shim.c:85-135`.  Socket in a per-user 0700 directory
   (`$XDG_RUNTIME_DIR` or `$TMPDIR/vccd-$UID/`), check the directory's owner
   and mode before connecting (shim) and before binding (server), and check

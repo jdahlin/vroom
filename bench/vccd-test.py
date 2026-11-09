@@ -96,7 +96,7 @@ def check(cond, msg):
 
 # ---------------- access ----------------
 
-@test(xfail='Socket has no peer check, lives in /tmp (socket mode follows the umask)')
+@test()
 def socket_mode_ignores_umask(v=None):
     """started with umask 0 in a world-readable directory, the socket must still be private"""
     v = Vccd(umask=0, sockdir_mode=0o755)
@@ -105,7 +105,7 @@ def socket_mode_ignores_umask(v=None):
         check(m & 0o077 == 0, f'socket mode {m:o}: other users can connect')
     finally: v.stop()
 
-@test(xfail='Socket has no peer check, lives in /tmp (default path)')
+@test()
 def default_socket_not_in_tmp():
     """the default socket path (shim and server) is in a per-user directory, not /tmp"""
     for f in ('shim.c', 'vccd.c'):

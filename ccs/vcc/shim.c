@@ -7,7 +7,7 @@
  * No stdio, no malloc: the request is assembled in a static buffer (BSS
  * pages are only touched as far as the request reaches).
  *
- *   VCC_SOCK   server socket (default /tmp/vccd.sock)
+ *   VCC_SOCK   server socket (default: protocol.h vroom_default_sock)
  *
  * Built with -DVSH it is vsh, a SHELL for make (installed as .../vsh/sh, so
  * make keeps its no-shell fast path for simple commands): `sh -c SCRIPT`
@@ -85,8 +85,17 @@ int main(int argc, char **argv)
 	if (argc != 3 || (strcmp(argv[1], "-c") && strcmp(argv[1], "-ec")))
 		real_shell();
 #endif
-	if (!path)
-		path = "/tmp/vccd.sock";
+	char ddir[1024], dsock[1100];
+
+	if (!path) {
+		if (vroom_default_sock(ddir, sizeof(ddir), dsock, sizeof(dsock), 0)) {
+#ifdef VSH
+			real_shell();
+#endif
+			die("vcc: no private vccd directory (set VCC_SOCK or start vccd)\n");
+		}
+		path = dsock;
+	}
 	strncpy(sa.sun_path, path, sizeof(sa.sun_path) - 1);
 	s = socket(AF_UNIX, SOCK_STREAM, 0);
 	if (s < 0 || connect(s, (struct sockaddr *)&sa, sizeof(sa)) < 0) {

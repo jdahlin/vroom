@@ -21,4 +21,29 @@ struct vroom_req_hdr {
 	uint32_t payload_len;
 };
 
+/* the default socket: in a per-user 0700 directory, never a shared /tmp name.
+ * $XDG_RUNTIME_DIR/vccd/vccd.sock, else ${TMPDIR:-/tmp}/vccd-UID/vccd.sock.
+ * The directory goes to dir (created 0700 when make), the socket path to sock.
+ * Returns 0, or -1 when the directory is missing, not ours or open to others. */
+#include <stdio.h>
+#include <stdlib.h>
+#include <unistd.h>
+#include <sys/stat.h>
+static inline int vroom_default_sock(char *dir, size_t dcap, char *sock, size_t scap, int make)
+{
+	const char *x = getenv("XDG_RUNTIME_DIR"), *t = getenv("TMPDIR");
+	struct stat st;
+
+	if (x && *x)
+		snprintf(dir, dcap, "%s/vccd", x);
+	else
+		snprintf(dir, dcap, "%s/vccd-%u", t && *t ? t : "/tmp", (unsigned)getuid());
+	snprintf(sock, scap, "%s/vccd.sock", dir);
+	if (make)
+		mkdir(dir, 0700);
+	if (lstat(dir, &st) || !S_ISDIR(st.st_mode) || st.st_uid != getuid() || (st.st_mode & 077))
+		return -1;
+	return 0;
+}
+
 #endif
