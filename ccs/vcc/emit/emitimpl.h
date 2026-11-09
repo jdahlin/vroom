@@ -84,6 +84,9 @@
 /* Apple arm64 (Mach-O): '_' names, GOT for symbols outside the TU, variadic
  * arguments on the stack, va_list a char *, stack arguments packed */
 #define DARWIN(c) ((c)->o->target == PP_DARWIN)
+/* a symbol offset the relocation itself can carry: ELF RELA 32 bits here, a
+ * Mach-O ARM64_RELOC_ADDEND 24 bits signed (clang adds the rest in code) */
+#define SYMOFF_OK(c, off) (DARWIN(c) ? (off) >= -(1 << 23) && (off) < (1 << 23) : (off) >= INT32_MIN && (off) <= INT32_MAX)
 #define T(c, t) CT(c, t)
 #define KIND(c, t) CKIND(c, t)
 
