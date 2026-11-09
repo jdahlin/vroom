@@ -113,6 +113,61 @@ VPRIV void winit(ecx *e, uint64_t off, qty ty, uint32_t init, bool zeroed)
 	}
 }
 
+/* ---------------- inline asm ---------------- */
+
+/*
+ * Only the empty template (an optimization barrier, common in tests and in
+ * the kernel's headers): inputs are evaluated, an input tied to an output
+ * ("0", "[name]") is stored into it, other outputs keep their value.
+ */
+static void wasm_asm(ecx *e, const node *x)
+{
+	cc *c = e->c;
+	const casm *a = &c->asms[x->a];
+	const char *t = c->strs[a->tmpl - 1].s;
+
+	for (; *t; t++)
+		if (*t != ' ' && *t != '\t' && *t != '\n' && *t != ';')
+			efatal(e, x->loc, "wasm: inline assembly is not supported (only an empty template)");
+	if (a->go)
+		efatal(e, x->loc, "wasm: asm goto is not supported");
+	for (uint32_t i = 0; i < a->nin; i++) {
+		const asmop *in = &a->ops[a->nout + i];
+		const char *cs = c->strs[in->constraint - 1].s;
+		int tie = -1;
+
+		if (*cs >= '0' && *cs <= '9') {
+			tie = atoi(cs);
+		} else if (*cs == '[') {
+			for (uint32_t k = 0; k < a->nout; k++)
+				if (a->ops[k].name && strlen(cs) == 2 + (size_t)vintern_ents[a->ops[k].name].len &&
+				    !memcmp(cs + 1, vintern_ents[a->ops[k].name].s, vintern_ents[a->ops[k].name].len))
+					tie = (int)k;
+		}
+		if (tie >= 0 && (uint32_t)tie < a->nout) {
+			uint32_t on = a->ops[tie].expr;
+			qty ot = N(on)->ty, it = N(in->expr)->ty;
+			wlv l;
+
+			wlval(e, on, &l, ot);
+			wexpr(e, in->expr, true);
+			if (wty(c, ot) != WT_MEM)
+				wconv(e, is_array(c, it) ? prim(TY_ULONG) : it, ot);
+			wstore(e, &l, ot);
+			continue;
+		}
+		wexpr(e, in->expr, false);
+	}
+	for (uint32_t k = 0; k < a->nout; k++) {
+		/* the output's address is computed (side effects); its value stays */
+		wlv l;
+
+		wlval(e, a->ops[k].expr, &l, prim(TY_VOID));
+		if (l.k == WL_MEM)
+			wi(e, "drop");
+	}
+}
+
 /* ---------------- statements ---------------- */
 
 static void wdecl_stmt(ecx *e, const node *x)
@@ -427,13 +482,9 @@ VPRIV void wstmt(ecx *e, uint32_t n)
 	case N_RETURN:
 		wreturn(e, x);
 		break;
-	case N_ASM: {
-		const casm *a = &c->asms[x->a];
-
-		if (a->nout || a->nin || c->strs[a->tmpl - 1].s[0])
-			efatal(e, x->loc, "wasm: inline assembly is not supported");
+	case N_ASM:
+		wasm_asm(e, x);
 		break;
-	}
 	default:
 		efatal(e, x->loc, "wasm: unsupported statement (node %d)", x->op);
 	}
