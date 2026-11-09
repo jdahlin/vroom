@@ -58,6 +58,12 @@ CASES = [
     ('common and weak', '{t}/cm.o {t}/cmw.o {t}/cm1.o'),
     ('common in archive', '{t}/cm.o {a}/libcm.a'),
     ('common, archive def not taken', '{t}/cm.o {t}/cm1.o {a}/libcmd.a'),
+    # COMDAT: the first group of a signature wins, later members are dropped
+    ('comdat', '{t}/g1.o {t}/g2.o'),
+    ('comdat reversed', '{t}/g2.o {t}/g1.o'),
+    ('comdat three', '{t}/g1.o {t}/g2.o {t}/g3.o'),
+    ('comdat in archive', '{t}/g1.o {a}/libg.a'),
+    ('comdat any group', '{t}/g1.o {t}/g4.o'),
 ]
 MSG = {'-mbad': 'unknown emulation: foo',
        '-l missing': 'unable to find library -lnosuch', '-l no -L': 'unable to find library -lx'}
@@ -70,6 +76,17 @@ ASM = {	# cm: _start uses cv and cw; cm1/cm2 common of other sizes, cmd defines 
     'cm1': '.comm cv,16,4\n.comm cz,2,2\n',
     'cm2': '.comm cv,32,32\n.comm cw,64,8\n.globl f2\n.text\nf2: ret\n',
     'cmd': '.data\n.globl cv\n.p2align 3\ncv: .quad 7\n',
+    # g1: _start calls f and uses tbl; g2/g3 have the same comdat f (other bodies),
+    # g2 calls f too; g4 a non-COMDAT group of the same name (kept)
+    'g1': '.text\n.globl _start\n_start: bl f\n bl g2f\n adrp x0, tbl\n ldr x0, [x0, :lo12:tbl]\n ret\n'
+          '.section .text.f,"axG",@progbits,f,comdat\n.weak f\nf: mov w0, #1\nlf1: ret\n'
+          '.section .data.tbl,"awG",@progbits,f,comdat\n.weak tbl\n.p2align 3\ntbl: .quad lf1\n'
+          '.text\n.weak g2f\n',
+    'g2': '.text\n.globl g2f\ng2f: b f\n'
+          '.section .text.f,"axG",@progbits,f,comdat\n.weak f\nf: mov w0, #2\n nop\nlf2: ret\n'
+          '.section .data.tbl,"awG",@progbits,f,comdat\n.weak tbl\n.p2align 3\ntbl: .quad lf2\n',
+    'g3': '.section .text.f,"axG",@progbits,f,comdat\n.globl f\nf: mov w0, #3\n ret\n',
+    'g4': '.section .text.h,"axG",@progbits,f\n.globl h\nh: ret\n',
     'cmw': '.data\n.weak cv\n.p2align 3\ncv: .quad 7\n',
 }
 LAZY = {	# c -> b1 -> b2 -> b3; w refers to b1 weakly; p1 -> q1 -> p2
@@ -102,7 +119,7 @@ def main():
             open(f'{t}/{name}.c', 'w').write(src)
             subprocess.run([VPP, '--target=aarch64-linux-gnu', '-c', f'{t}/{name}.c', '-o', f'{t}/{name}.o'], check=True)
         for lib, ms, fl in (('x', 'x', 'rcs'), ('ch', 'b1 b2 b3 unused', 'rcs'), ('chr', 'unused b3 b2 b1', 'rcs'),
-                            ('p', 'p1 p2', 'rcs'), ('cm', 'cm2', 'rcs'), ('cmd', 'cmd', 'rcs'), ('q', 'q1', 'rcs'), ('thin', 'b1 b2 b3', 'rcsT')):
+                            ('p', 'p1 p2', 'rcs'), ('cm', 'cm2', 'rcs'), ('g', 'g2', 'rcs'), ('cmd', 'cmd', 'rcs'), ('q', 'q1', 'rcs'), ('thin', 'b1 b2 b3', 'rcsT')):
             subprocess.run([llvm('llvm-ar'), fl, f'{t}/lib/lib{lib}.a'] + [f'{t}/{m}.o' for m in ms.split()], check=True)
         for name, args in CASES:
             a = args.format(o=f'{t}/a.o {t}/x.o', m=f'{t}/a.o', a=f'{t}/lib', t=t).split()

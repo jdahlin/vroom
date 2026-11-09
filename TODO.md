@@ -860,8 +860,11 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
   cases, images identical to lld.  COMMON as lld: strong beats common beats
   weak; largest size and alignment, first file with that size; one NOBITS
   `COMMON` section each after all files' sections, in lld's
-  replaceCommonSymbols order; 7 cases in `vlink-opts.py`.)  Left: COMDAT groups (`parse_obj`), the archive symbol index (lld
-  ignores it too).
+  replaceCommonSymbols order; 7 cases in `vlink-opts.py`.  COMDAT groups as lld: the first group of a
+  signature in file order is kept, later members dropped; their definitions
+  still resolve, and a winner in a dropped member is demoted with lld's
+  "relocation refers to a symbol in a discarded section"; non-COMDAT groups
+  kept; 5 cases.)  Left: groups under `-r`.
   *Validate:* T8 static link of a musl `libc.a` hello world (run under
   qemu-user); a C++ template object pair.
 - [ ] **Dynamic linking**: `.dynamic`, `.dynsym`/`.dynstr`, `.gnu.hash`, PLT,

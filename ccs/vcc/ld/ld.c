@@ -357,6 +357,7 @@ typedef struct ISec {
 	uint32_t dyn0;
 	uint8_t kind;
 	bool thunked;			/* some relocation has a tr_put entry */
+	bool dropped;			/* member of a COMDAT group seen before */
 } ISec;
 
 #define OS_DISCARD 0xfffffffeu
@@ -1762,6 +1763,17 @@ static bool obj_valid(Obj *o, const Ehdr *eh)
 	for (uint32_t s = 0; s < o->nsh; s++) {
 		const Shdr *h = &o->sh[s];
 
+		if (h->sh_type == SHT_GROUP) {
+			if (h->sh_offset % 4 || h->sh_size % 4 || h->sh_size < 4 || !symtab ||
+			    h->sh_link >= o->nsh || &o->sh[h->sh_link] != symtab || h->sh_info >= nsym)
+				BAD("%s: invalid SHT_GROUP section %u", o->path, s);
+			const uint32_t *w = (const uint32_t *)(o->buf + h->sh_offset);
+
+			for (uint64_t k = 1; k < h->sh_size / 4; k++)
+				if (w[k] == 0 || w[k] >= o->nsh)
+					BAD("%s: invalid section index in group section %u", o->path, s);
+			continue;
+		}
 		if (h->sh_type != SHT_RELA)
 			continue;
 		if (h->sh_offset % 8 || h->sh_size % sizeof(Rela) || h->sh_info >= o->nsh)
@@ -1823,7 +1835,8 @@ static void parse_obj(void *arg, size_t i)
 			o->firstg = o->sh[s].sh_info;
 			o->str = (const char *)o->buf + o->sh[o->sh[s].sh_link].sh_offset;
 		} else if (o->sh[s].sh_type == SHT_GROUP) {
-			error("%s: section groups not supported", o->path);
+			if (opt.relocatable)
+				error("%s: section groups not supported with -r", o->path);
 		}
 	}
 	if (o->nsym > o->firstg)
@@ -1892,6 +1905,68 @@ static void fill_isecs(void *arg, size_t i)
 /* ---------------- symbol resolution ---------------- */
 
 static inline uint64_t symkey(uint32_t obj, uint32_t idx) { return (uint64_t)obj << 32 | idx; }
+
+/* lld: the first COMDAT group of a signature (in file order) is kept; a later
+ * one's members are dropped.  Their definitions still take part in resolution
+ * (lld postParse); one that wins is demoted (demote_symbols), and relocations
+ * against it fail as lld's "refers to a symbol in a discarded section" */
+static void dedup_comdats(void)
+{
+	struct { const char *name; uint32_t h; } *tab = NULL;
+	uint32_t mask = 0, n = 0;
+
+	for (uint32_t i = 0; i < objs.n; i++) {
+		Obj *o = objs.v[i];
+
+		for (uint32_t s = 0; o->buf && s < o->nsh; s++) {
+			const Shdr *h = &o->sh[s];
+			const uint32_t *w = (const uint32_t *)(o->buf + h->sh_offset);
+
+			if (h->sh_type != SHT_GROUP || !(w[0] & 1))	/* GRP_COMDAT */
+				continue;
+			const char *name = o->str + o->sym[h->sh_info].st_name;
+			uint32_t len = strlen(name), hh = strhash(name, len);
+
+			if (!tab || (n + 1) * 2 > mask) {
+				uint32_t m = tab ? (mask + 1) * 2 : 1024;
+				__typeof__(tab) nt = calloc(m, sizeof *tab);
+
+				for (uint32_t k = 0; tab && k <= mask; k++)
+					if (tab[k].name) {
+						uint32_t j = tab[k].h & (m - 1);
+
+						while (nt[j].name)
+							j = (j + 1) & (m - 1);
+						nt[j] = tab[k];
+					}
+				free(tab);
+				tab = nt;
+				mask = m - 1;
+			}
+			uint32_t j = hh & mask;
+			bool seen = false;
+
+			for (; tab[j].name; j = (j + 1) & mask)
+				if (tab[j].h == hh && !strcmp(tab[j].name, name)) {
+					seen = true;
+					break;
+				}
+			if (!seen) {
+				tab[j].name = name;
+				tab[j].h = hh;
+				n++;
+				continue;
+			}
+			for (uint64_t k = 1; k < h->sh_size / 4; k++) {
+				ISec *is = &isecs.v[o->isec0 + w[k]];
+
+				is->kind = K_NONE;
+				is->dropped = true;
+			}
+		}
+	}
+	free(tab);
+}
 
 static void resolve_obj(void *arg, size_t i)
 {
@@ -4280,6 +4355,7 @@ static int run(int argc, char **argv)
 	}
 	alloc_isecs(0);
 	pfor(objs.n, fill_isecs, NULL);
+	dedup_comdats();
 	pfor(objs.n, resolve_obj, NULL);
 	pfor(objs.n, check_dups, NULL);
 	phase("resolve symbols");
