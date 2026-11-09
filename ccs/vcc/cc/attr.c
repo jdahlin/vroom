@@ -175,8 +175,12 @@ __attribute__((noinline)) VPRIV void attribute_list_(cc *c, attrs *a)
 			case A_VISIBILITY:
 				expect(c, T_LPAREN, "'('");
 				{
+					uint32_t sloc = tok(c)->loc;
 					uint32_t s = string_index(c);
 
+					if (an == A_SECTION && c->o->target == PP_DARWIN && s && !strchr(c->strs[s - 1].s, ','))
+						cc_error(c, sloc, "argument to 'section' attribute is not valid for this target: "
+							 "mach-o section specifier requires a segment and section separated by a comma");
 					if (an == A_SECTION)
 						a->section = s;
 					else if (an == A_ALIAS)

@@ -1023,11 +1023,20 @@ int ppd_run(int argc, char **argv, const ppd_env *env)
 			goto out;
 		}
 		as_set_dir(tl_as, env->cwd);
-		if (as_run(tl_as, tl_obj, t, (size_t)got, main_file, &msg)) {
+		size_t tn = (size_t)got;
+
+		if (darwin) {
+			/* Apple's dialect, then the Mach-O writer */
+			char *d = as_darwin_text(t, tn, &tn);
+
+			free(t);
+			t = d;
+		}
+		if (as_run(tl_as, tl_obj, t, tn, main_file, &msg)) {
 			dprintf(errfd, "vcc: error: %s\n", msg);
 			status = 1;
 		} else
-			status = write_obj(env->cwd, out, env->outfd, errfd, 0);
+			status = write_obj(env->cwd, out, env->outfd, errfd, darwin);
 		free(t);
 		goto out;
 	}
@@ -1442,12 +1451,18 @@ int ppd_run(int argc, char **argv, const ppd_env *env)
 		const char *msg;
 
 		as_set_dir(tl_as, env->cwd);
-		if (as_run(tl_as, tl_obj, o.p, o.n, main_file, &msg)) {
+		char *dt = NULL;
+		size_t dn = o.n;
+
+		if (darwin)
+			dt = as_darwin_text(o.p, o.n, &dn);
+		if (as_run(tl_as, tl_obj, dt ? dt : o.p, dn, main_file, &msg)) {
 			dprintf(errfd, "vcc: error: %s\n", msg);
 			status = 1;
 		} else {
-			status = write_obj(env->cwd, out, env->outfd, errfd, 0);
+			status = write_obj(env->cwd, out, env->outfd, errfd, darwin);
 		}
+		free(dt);
 		if (!status && depfile)
 			status = write_deps(p, env->cwd, depfile, dtarget, dnosys, mphony, dfirst, NULL, -1, errfd);
 	} else {

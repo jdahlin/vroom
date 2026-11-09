@@ -9,6 +9,8 @@
  * symbolic becomes an elf_fixup() resolved at the end.
  */
 #include "asimpl.h"
+#include <ctype.h>
+#include <stdbool.h>
 
 VPRIV Sv svdup(As *a, const char *s, size_t n)
 {
@@ -3259,4 +3261,176 @@ int as_run(As *a, ElfObj *o, const char *text, size_t len, const char *name, con
 	as_begin(a, o, name);
 	if (as_snippet(a, text, len) || as_end(a)) { *msg = a->msg; return -1; }
 	return 0;
+}
+
+/* ---------------- Mach-O dialect -> ELF dialect ---------------- */
+
+typedef struct { char *p; size_t n, cap; } DBuf;
+
+static void db_put(DBuf *b, const char *s, size_t n)
+{
+	if (b->n + n + 64 > b->cap) {
+		b->cap = (b->n + n + 64) * 2;
+		b->p = realloc(b->p, b->cap);
+	}
+	memcpy(b->p + b->n, s, n);
+	b->n += n;
+}
+static void db_s(DBuf *b, const char *s) { db_put(b, s, strlen(s)); }
+
+static bool dt_id(char c) { return isalnum((unsigned char)c) || c == '_' || c == '.' || c == '$'; }
+
+static bool dt_word(const char *p, const char *e, const char *w)
+{
+	size_t n = strlen(w);
+
+	return (size_t)(e - p) >= n && !memcmp(p, w, n) && (p + n == e || !dt_id(p[n]));
+}
+
+/* __SEG,__sect -> the ELF section the Mach-O writer maps back to it */
+static void dt_section(DBuf *b, const char *p, const char *e)
+{
+	static const struct { const char *m, *elf; } t[] = {
+		{ "__TEXT,__text", "\t.text\n" },
+		{ "__TEXT,__cstring", "\t.section\t.rodata.str1.1,\"aMS\",@progbits,1\n" },
+		{ "__TEXT,__const", "\t.section\t.rodata,\"a\",@progbits\n" },
+		{ "__DATA,__const", "\t.section\t.rodata,\"a\",@progbits\n" },
+		{ "__DATA,__data", "\t.data\n" },
+		{ "__DATA,__bss", "\t.bss\n" },
+		{ "__DATA,__mod_init_func", "\t.section\t.init_array,\"aw\",@init_array\n" },
+		{ "__DATA,__mod_term_func", "\t.section\t.fini_array,\"aw\",@fini_array\n" },
+		{ "__DATA,__thread_vars", "\t.section\t.tlv,\"aw\",@progbits\n" },
+		{ "__DATA,__thread_data", "\t.section\t.tdata,\"awT\",@progbits\n" },
+		{ "__DATA,__thread_bss", "\t.section\t.tbss,\"awT\",@nobits\n" },
+	};
+	const char *q = p;
+	int commas = 0;
+
+	while (q < e && !(*q == ',' && ++commas == 2) && *q != ' ' && *q != '\t')
+		q++;
+	for (size_t k = 0; k < sizeof t / sizeof t[0]; k++)
+		if ((size_t)(q - p) == strlen(t[k].m) && !memcmp(p, t[k].m, (size_t)(q - p))) {
+			db_s(b, t[k].elf);
+			return;
+		}
+	/* section("seg,sect") as the attribute gave it */
+	db_s(b, "\t.section\t\"");
+	db_put(b, p, (size_t)(q - p));
+	db_s(b, "\"\n");
+}
+
+/* one operand line: Lname -> .Lname, x@SPEC+k -> :mod:x+k */
+static void dt_operands(DBuf *b, const char *p, const char *e)
+{
+	static const struct { const char *spec, *mod; } sp[] = {
+		{ "GOTPAGEOFF", ":got_lo12:" }, { "GOTPAGE", ":got:" }, { "TLVPPAGEOFF", ":vcc_tlvp_lo12:" },
+		{ "TLVPPAGE", ":vcc_tlvp:" }, { "PAGEOFF", ":lo12:" }, { "PAGE", "" },
+	};
+	bool quote = false;
+
+	const char *p0 = p;
+
+	while (p < e) {
+		if (*p == '"') {
+			quote = !quote;
+			db_put(b, p++, 1);
+			continue;
+		}
+		if (quote || !dt_id(*p) || *p == '.' || isdigit((unsigned char)*p)) {
+			if (*p == '\\' && quote && p + 1 < e)
+				db_put(b, p++, 1);
+			db_put(b, p++, 1);
+			continue;
+		}
+		const char *s = p;
+
+		while (p < e && dt_id(*p))
+			p++;
+		const char *mod = NULL;
+		const char *after = p;
+
+		if (p < e && *p == '@')
+			for (size_t k = 0; k < sizeof sp / sizeof sp[0]; k++)
+				if (dt_word(p + 1, e, sp[k].spec)) {
+					mod = sp[k].mod;
+					after = p + 1 + strlen(sp[k].spec);
+					break;
+				}
+		if (mod)
+			db_s(b, mod);
+		if (s[0] == 'L' && !((size_t)(p - s) == 2 && s[1] == 'R') && !(s > p0 && s[-1] == '.'))
+			db_s(b, ".");	/* Mach-O's assembler-local Lname is ELF's .Lname */
+		db_put(b, s, (size_t)(p - s));
+		p = after;
+	}
+}
+
+char *as_darwin_text(const char *t, size_t n, size_t *outn)
+{
+	DBuf b = { 0 };
+	static const char *const drop[] = {
+		".build_version", ".macosx_version_min", ".ios_version_min", ".subsections_via_symbols",
+		".loh", ".data_region", ".end_data_region", ".no_dead_strip", ".alt_entry",
+	};
+
+	for (const char *p = t, *e = t + n; p < e;) {
+		const char *nl = memchr(p, '\n', (size_t)(e - p));
+		const char *le = nl ? nl : e;
+		const char *c = p;
+		bool quote = false;
+
+		/* ';' starts a comment (outside strings) */
+		for (; c < le; c++) {
+			if (*c == '"' && (c == p || c[-1] != '\\'))
+				quote = !quote;
+			else if (*c == ';' && !quote)
+				break;
+		}
+		const char *s = p;
+
+		while (s < c && (*s == ' ' || *s == '\t'))
+			s++;
+		bool done = false;
+
+		if (s < c && *s == '.') {
+			for (size_t k = 0; k < sizeof drop / sizeof drop[0] && !done; k++)
+				if (dt_word(s, c, drop[k]))
+					done = true;
+			if (!done && dt_word(s, c, ".section")) {
+				const char *a = s + 8;
+
+				while (a < c && (*a == ' ' || *a == '\t'))
+					a++;
+				if (a + 1 < c && a[0] == '_' && a[1] == '_') {
+					dt_section(&b, a, c);
+					done = true;
+				}
+			}
+			if (!done && dt_word(s, c, ".private_extern")) {
+				db_s(&b, "\t.hidden");
+				dt_operands(&b, s + 15, c);
+				db_s(&b, "\n");
+				done = true;
+			}
+			if (!done && (dt_word(s, c, ".weak_definition") || dt_word(s, c, ".weak_reference"))) {
+				db_s(&b, "\t.weak");
+				dt_operands(&b, s + (s[6] == 'd' ? 16 : 15), c);
+				db_s(&b, "\n");
+				done = true;
+			}
+			if (done && !(dt_word(s, c, ".section") || dt_word(s, c, ".private_extern") ||
+				      dt_word(s, c, ".weak_definition") || dt_word(s, c, ".weak_reference")))
+				db_s(&b, "\n");	/* a dropped directive: keep the line count */
+		}
+		if (!done) {
+			dt_operands(&b, p, c);
+			db_s(&b, "\n");
+		}
+		p = le + 1;
+	}
+	if (!b.p)
+		db_put(&b, "", 0);
+	*outn = b.n;
+	memset(b.p + b.n, 0, 64);
+	return b.p;
 }

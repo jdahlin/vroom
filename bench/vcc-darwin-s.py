@@ -6,7 +6,8 @@
 For each test of the vcc suite and gcc-torture/execute: vcc builds an object
 directly (its own Mach-O writer) and also writes -S text, which clang (the
 system assembler, `as`) assembles.  Both are linked by clang and run
-natively; they must agree on exit status and output.  A test whose direct
+natively; they must agree on exit status and output.  vpp -c of the
+-S text must also be byte-identical to the direct object.  A test whose direct
 build does not compile, link or pass is skipped (vcc-ctests.py covers those):
 what is checked here is that the text says the same as the object.
 macOS only.
@@ -18,6 +19,8 @@ R = os.path.dirname(B)
 T = f'{R}/ccs/vcc/tests'
 VPP = os.environ.get('VCC_BIN', f'{R}/build/ccs') + '/vpp'
 CLANG = 'clang'
+# text has no branch relaxation (func.c: every cbz/b.cond far in a huge function)
+NOIDENT = {'branch_far.c'}
 FL = ['-w', '-O0', '-fno-stack-protector']
 
 
@@ -53,6 +56,11 @@ def one(src):
         rc, _, err = sh([VPP] + FL + fl + ['-S', src, '-o', f'{wd}/b.s'], cwd=d)
         if rc:
             return 'fail', src, '-S: ' + err.decode(errors='replace')[:400]
+        rc, _, err = sh([VPP] + FL + ['-c', f'{wd}/b.s', '-o', f'{wd}/v.o'])
+        if rc:
+            return 'fail', src, 'vpp -c .s: ' + err.decode(errors='replace')[:400]
+        if os.path.basename(src) not in NOIDENT and open(f'{wd}/v.o', 'rb').read() != open(f'{wd}/a.o', 'rb').read():
+            return 'fail', src, 'vpp -c of -S differs from the direct object'
         rc, _, err = sh([CLANG, '-c', '-x', 'assembler', f'{wd}/b.s', '-o', f'{wd}/b.o'])
         if rc:
             return 'fail', src, 'as: ' + err.decode(errors='replace')[:600]

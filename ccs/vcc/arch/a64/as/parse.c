@@ -161,6 +161,7 @@ static int mod_kind(const char *s, size_t n)
 		{ "prel_g3", A64_MOD_PREL_G3 }, { "prel_g2", A64_MOD_PREL_G2 }, { "prel_g2_nc", A64_MOD_PREL_G2_NC },
 		{ "prel_g1", A64_MOD_PREL_G1 }, { "prel_g1_nc", A64_MOD_PREL_G1_NC },
 		{ "prel_g0", A64_MOD_PREL_G0 }, { "prel_g0_nc", A64_MOD_PREL_G0_NC },
+		{ "vcc_tlvp", A64_MOD_TLVP }, { "vcc_tlvp_lo12", A64_MOD_TLVP_LO12 },
 	};
 	for (size_t i = 0; i < sizeof t / sizeof t[0]; i++) if (sveqi(s, n, t[i].n)) return t[i].k;
 	return -1;

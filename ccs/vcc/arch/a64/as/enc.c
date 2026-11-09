@@ -1206,6 +1206,7 @@ static int k_adr(Ctx *c, const Mn *m)
 	}
 	if (m->x) {
 		if (o[1].mod == A64_MOD_GOT) return setfix(c, R_AARCH64_ADR_GOT_PAGE, &o[1]);
+		if (o[1].mod == A64_MOD_TLVP) return setfix(c, R_VCC_TLVP_PAGE21, &o[1]);
 		if (o[1].mod == A64_MOD_TLSDESC) return setfix(c, R_AARCH64_TLSDESC_ADR_PAGE21, &o[1]);
 		if (o[1].mod == A64_MOD_GOTTPREL) return setfix(c, R_AARCH64_TLSIE_ADR_GOTTPREL_PAGE21, &o[1]);
 		if (o[1].mod == A64_MOD_PG_HI21_NC) return setfix(c, R_AARCH64_ADR_PREL_PG_HI21_NC, &o[1]);
@@ -1320,9 +1321,11 @@ static int ldst_common(Ctx *c, unsigned size, unsigned v, unsigned opc, int scal
 		*c->out = 0x38200800u | size << 30 | v << 26 | opc << 22 | (unsigned)mem->index << 16 | option << 13 | s << 12 | rn << 5 | rt;
 		return 0;
 	}
-	if (mem->mod == A64_MOD_GOT_LO12 && scale == 3 && opc == 1 && !v && mem->mode == A64M_OFF && !unscaled_only) {
+	if ((mem->mod == A64_MOD_GOT_LO12 || mem->mod == A64_MOD_TLVP_LO12) && scale == 3 && opc == 1 && !v &&
+	    mem->mode == A64M_OFF && !unscaled_only) {
 		*c->out = a64_ldst_uoff(size, 0, opc, rt, rn, 0);
-		c->fix->type = R_AARCH64_LD64_GOT_LO12_NC; c->fix->v = mem->v;
+		c->fix->type = mem->mod == A64_MOD_TLVP_LO12 ? R_VCC_TLVP_PAGEOFF12 : R_AARCH64_LD64_GOT_LO12_NC;
+		c->fix->v = mem->v;
 		return 0;
 	}
 	if ((mem->mod == A64_MOD_GOTTPREL_LO12_NC || mem->mod == A64_MOD_TLSDESC_LO12) && scale == 3 && opc == 1 && !v &&

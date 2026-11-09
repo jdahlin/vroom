@@ -416,7 +416,7 @@ VPRIV void print_ins(cc *c, tbuf *b, const ins *i, uint32_t fid, const char *raw
 	case I_TLV: {
 		/* ELF: the sequences of obj.c; x0 = the address */
 		static const char *const seq[4][7] = {
-			{ "\t// tlv " },
+			{ "\tadrp\tx0, :vcc_tlvp:", "\n\tldr\tx0, [x0, :vcc_tlvp_lo12:", "]\n\tldr\tx16, [x0]\n\tblr\tx16\n" },
 			{ "\tmrs\tx1, TPIDR_EL0\n\tadd\tx0, x1, :tprel_hi12:", "\n\tadd\tx0, x0, :tprel_lo12_nc:", "\n" },
 			{ "\tmrs\tx1, TPIDR_EL0\n\tadrp\tx0, :gottprel:", "\n\tldr\tx0, [x0, :gottprel_lo12:", "]\n\tadd\tx0, x1, x0\n" },
 			{ "\tadrp\tx0, :tlsdesc:", "\n\tldr\tx1, [x0, :tlsdesc_lo12:", "]\n\tadd\tx0, x0, :tlsdesc_lo12:",
@@ -424,12 +424,6 @@ VPRIV void print_ins(cc *c, tbuf *b, const ins *i, uint32_t fid, const char *raw
 		};
 		const char *const *q = seq[i->cond < 4 ? i->cond : 0];
 
-		if (!i->cond) {
-			tb_s(b, q[0]);
-			ref_name(c, b, i->ref);
-			tb_c(b, '\n');
-			return;
-		}
 		for (int k = 0; q[k + 1]; k++) {
 			tb_s(b, q[k]);
 			ref_name(c, b, i->ref);

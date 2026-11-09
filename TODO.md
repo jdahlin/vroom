@@ -795,9 +795,12 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
   `ldr x0, :got:v` / `:gottprel:`, `:pg_hi21_nc:`; TLS relocations make the
   symbol STT_TLS and labels in TLS sections are STT_TLS, as MC.  *Validated:*
   `ccs/vcc/tests/vas-obj/tlsops.s`, `tlslocal.s` byte-identical with clang -c.
-- [ ] **Mach-O syntax** `@PAGE`/`@PAGEOFF`/`@GOTPAGE…`; vasm writes ELF
-  only.  *Validate:* T7 with `--target=arm64-apple-darwin` vs clang's Mach-O
-  (`llvm-objdump --macho -r -d`).
+- [~] **Mach-O syntax** `@PAGE`/`@PAGEOFF`/`@GOTPAGE…`/`@TLVPPAGE…`: `vpp -c x.s`
+  for a Darwin target reads Apple's dialect (`as_darwin_text`, the inverse of
+  emit's `darwin_text`) into the Mach-O writer.  *Validated:* `vcc-darwin-s.py`:
+  vpp -c of vcc's -S is byte-identical to the direct object (1447 tests; not
+  branch_far.c, whose text has no relaxation).  Left: clang's Darwin .s
+  (`.zerofill`, `.tbss`, `.cfi_*`, `.comm` log2 alignment), vasm (ELF only).
 - [x] **Wrong output**: GOT relocs against local symbols kept the section
   (fixed: GOT/TLS relocations keep the symbol); integer and absolute-symbol
   branch targets are the pc-relative offset, not `*ABS*` relocations; `adr`,

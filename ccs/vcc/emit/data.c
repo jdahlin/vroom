@@ -431,8 +431,40 @@ VPRIV void emit_object(ecx *e, uint32_t s)
 		out_chunk(e, ((uint64_t)s << 1) | 1, start);
 		return;
 	}
-	if (!a->section && (y->flags & SF_THREAD) && !direct(e))
+	if (!a->section && (y->flags & SF_THREAD) && !direct(e) && !DARWIN(e->c))
 		efatal(e, y->loc, "thread-local storage is not supported");
+	if (!direct(e) && DARWIN(e->c) && (y->flags & SF_THREAD)) {
+		/* the same TLV layout as text; darwin_text names the sections */
+		bool global = y->sc != SC_STATIC && y->depth == 0 && y->name;
+
+		tb_s(b, zero ? "\t.section\t.tbss,\"aw\",@nobits\n" : "\t.section\t.tdata,\"aw\",@progbits\n");
+		tb_s(b, "\t.p2align\t");
+		tb_u(b, (uint64_t)__builtin_ctz(align ? align : 1));
+		tb_c(b, '\n');
+		sym_name(c, b, s);
+		tb_s(b, "$tlv$init:\n");
+		if (zero && !e->nrel) {
+			tb_s(b, "\t.zero\t");
+			tb_u(b, size ? size : 1);
+			tb_c(b, '\n');
+		} else {
+			data_bytes(e, b, size);
+		}
+		tb_s(b, "\t.section\t.tlv,\"aw\",@progbits\n");
+		if (global) {
+			tb_s(b, (y->flags & SF_WEAK) ? "\t.weak\t" : "\t.globl\t");
+			sym_name(c, b, s);
+			tb_c(b, '\n');
+		}
+		tb_s(b, "\t.p2align\t3\n");
+		sym_name(c, b, s);
+		tb_s(b, ":\n\t.xword\t__tlv_bootstrap\n\t.xword\t0\n\t.xword\t");
+		sym_name(c, b, s);
+		tb_s(b, "$tlv$init\n");
+		e->E->nobj++;
+		out_chunk(e, ((uint64_t)s << 1) | 1, start);
+		return;
+	}
 	if (direct(e) && (y->flags & SF_THREAD)) {
 		/*
 		 * Darwin TLV: the initial value in __thread_data/__thread_bss under
@@ -448,9 +480,9 @@ VPRIV void emit_object(ecx *e, uint32_t s)
 		tb_s(b, zero ? "\t.section\t.tbss,\"aw\",@nobits\n" : "\t.section\t.tdata,\"aw\",@progbits\n");
 		tb_s(b, "\t.p2align\t");
 		tb_u(b, (uint64_t)__builtin_ctz(align ? align : 1));
-		tb_s(b, "\n.Ltlvi.");
-		tb_u(b, s);
-		tb_s(b, ":\n");
+		tb_c(b, '\n');
+		sym_name(c, b, s);
+		tb_s(b, "$tlv$init:\n");
 		it_close(e, h);
 		data_item(e, zero && !e->nrel ? (size ? size : 1) : size, zero && !e->nrel);
 		h = it_open(e, IT_TEXT);
@@ -462,9 +494,9 @@ VPRIV void emit_object(ecx *e, uint32_t s)
 		}
 		tb_s(b, "\t.p2align\t3\n");
 		sym_name(c, b, s);
-		tb_s(b, ":\n\t.xword\t__tlv_bootstrap\n\t.xword\t0\n\t.xword\t.Ltlvi.");
-		tb_u(b, s);
-		tb_c(b, '\n');
+		tb_s(b, ":\n\t.xword\t__tlv_bootstrap\n\t.xword\t0\n\t.xword\t");
+		sym_name(c, b, s);
+		tb_s(b, "$tlv$init\n");
 		it_close(e, h);
 		e->E->nobj++;
 		out_chunk(e, ((uint64_t)s << 1) | 1, start);
