@@ -37,6 +37,12 @@ RESINC=$(echo "$SYS" | grep -v framework | sed 's/^ *//' | head -1)
 	echo "static const char predef_undef_asm[] ="
 	$CL -undef -dM -E -x assembler-with-cpp /dev/null | LC_ALL=C sort | cstr
 	echo "	;"
+	echo "static const char *const predef_order_linux[] = {"
+	python3 $D/gen-ppdata-order.py $CL "$FL" "$FL -O0" "$FL -Os" "$FL -mcmodel=tiny" "--target=aarch64-linux-gnu" "--target=aarch64-linux-gnu -O2 -fPIC" "--target=aarch64-linux-gnu -fno-PIE"
+	echo "};"
+	echo "static const char *const predef_order_darwin[] = {"
+	python3 $D/gen-ppdata-order.py $CL "$FH" "$FH -O0" "$FH -Os" "" "-O0 -fno-PIC"
+	echo "};"
 	echo "static const char *const sysdirs_darwin[] = {"
 	echo "$SYS" | grep -v framework | sed 's/^ *\(.*\)$/	"\1",/'
 	echo "};"

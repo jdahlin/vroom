@@ -305,7 +305,11 @@ VPRIV int directive(pp *p, ctx *c, ptok *out)
 		return 0;
 	case D_UNDEF:
 		if (b + 1 < e && c->vt[b + 1].kind == T_IDENT)
+{
 			mdef(p, c->vt[b + 1].id, NULL);
+			if (unlikely(p->o->dump_defines))
+				dd_out(p, c->vt[b + 1].id, NULL, c->f == &p->builtin);
+		}
 		else
 			error(p, loc, "macro name must be an identifier");
 		return 0;

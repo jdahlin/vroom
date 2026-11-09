@@ -99,6 +99,16 @@ def hdr(t):
     import difflib
     return obj, 1, '\n'.join(list(difflib.unified_diff(h[0], h[1], 'clang', 'vpp', n=0, lineterm=''))[:12])
 
+def dd(t):
+    """-dD: the #define/#undef lines of -E -P -dD, in order, vs clang (the
+    rest of the text is what cmp checks)"""
+    obj, a = t
+    r = [subprocess.run([x] + a + ['-E', '-P', '-dD'], cwd=B, capture_output=True) for x in (CL, VPP)]
+    h = [[l for l in x.stdout.decode(errors='replace').splitlines() if l.startswith(('#define ', '#undef '))] for x in r]
+    if h[0] == h[1]: return obj, 0, ''
+    import difflib
+    return obj, 1, '\n'.join(list(difflib.unified_diff(h[0], h[1], 'clang', 'vpp', n=0, lineterm=''))[:12])
+
 if __name__ == '__main__':
     av = [a for a in sys.argv[1:] if a not in ('--kernel', '--cmp')]; j = 6
     if '-j' in av: k = av.index('-j'); j = int(av[k+1]); del av[k:k+2]
@@ -117,7 +127,7 @@ if __name__ == '__main__':
         os.unlink(jf); sys.exit(r.returncode)
     if mode == 'ref': os.makedirs(REF, exist_ok=True)
     with Pool(j) as pool:
-        res = pool.map({'ref': mkref, 'dm': dm, 'deps': deps, 'hdr': hdr}.get(mode, cmp), ts, chunksize=4)
+        res = pool.map({'ref': mkref, 'dm': dm, 'deps': deps, 'hdr': hdr, 'dd': dd}.get(mode, cmp), ts, chunksize=4)
     bad = [r for r in res if r[1]]
     for obj, rc, err in bad[:int(os.environ.get('SHOW', 20))]:
         print(f'--- {obj} (rc {rc})\n{err}')

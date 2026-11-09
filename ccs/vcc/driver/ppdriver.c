@@ -701,7 +701,7 @@ int ppd_run(int argc, char **argv, const ppd_env *env)
 	char *pmap = NULL;
 	double t0;
 	pp *p;
-	int dmacros = 0, showinc = 0, syntax = 0, layout = 0, ms_anon = 0, short_wchar = 0, tokhash = 0, emit = 0, objmode = 0;
+	int dmacros = 0, showinc = 0, ddefs = 0, syntax = 0, layout = 0, ms_anon = 0, short_wchar = 0, tokhash = 0, emit = 0, objmode = 0;
 	int tri = -1, std = 0, strict = 0, wimpl_int = 0, wimpl_fn = 0, gnu89_inline = -1, vcc_kernel = 0;
 	char objbuf[1024];
 
@@ -716,6 +716,7 @@ int ppd_run(int argc, char **argv, const ppd_env *env)
 		if (!strcmp(a, "-c")) { objmode = 1; continue; }
 		if (!strcmp(a, "-dM")) { dmacros = 1; continue; }
 		if (!strcmp(a, "-H")) { showinc = 1; continue; }
+		if (!strcmp(a, "-dD")) { ddefs = 1; continue; }
 		if (!strcmp(a, "-fms-anonymous-structs") || !strcmp(a, "-fms-extensions")) { ms_anon = 1; continue; }
 		if (!strcmp(a, "-fshort-wchar")) { short_wchar = 1; continue; }
 		if (!strcmp(a, "-fcolor-diagnostics") || !strcmp(a, "-fdiagnostics-color") || !strcmp(a, "-fdiagnostics-color=always")) { dcolor = 1; continue; }
@@ -939,6 +940,10 @@ int ppd_run(int argc, char **argv, const ppd_env *env)
 	po.c89 = std == 89 && strict;
 	po.deps = mdeps || depfile;
 	po.show_includes = showinc;
+	po.dump_defines = ddefs;
+	po.dd_order = darwin ? predef_order_darwin : predef_order_linux;
+	po.ndd_order = darwin ? (int)(sizeof(predef_order_darwin) / sizeof(*predef_order_darwin))
+			      : (int)(sizeof(predef_order_linux) / sizeof(*predef_order_linux));
 	po.fatal_continue = !emit && !objmode && !syntax && !layout && !tokhash;
 	po.trigraphs = tri >= 0 ? tri : strict && std != 23;	/* clang: strict modes before C23 */
 	{
@@ -975,9 +980,9 @@ int ppd_run(int argc, char **argv, const ppd_env *env)
 		bstr(&pre, "#undef __STDC_VERSION__\n#define __STDC_VERSION__ 201710L\n");
 	}
 	po.target = darwin ? PP_DARWIN : PP_LINUX_AARCH64;
-	if (opt == 0) bstr(&pre, "#undef __OPTIMIZE__\n#define __NO_INLINE__ 1\n");
-	if (os) bstr(&pre, "#define __OPTIMIZE_SIZE__ 1\n");
-	if (pie || pic) {
+	if (opt == 0 && !undef) bstr(&pre, "#undef __OPTIMIZE__\n#define __NO_INLINE__ 1\n");
+	if (os && !undef) bstr(&pre, "#define __OPTIMIZE_SIZE__ 1\n");
+	if ((pie || pic) && !undef) {
 		char b[160];
 		int l = pie ? pie : pic;
 
@@ -994,7 +999,7 @@ int ppd_run(int argc, char **argv, const ppd_env *env)
 		bstr(&pre, gnu89_inline ? "#undef __GNUC_STDC_INLINE__\n#undef __GNUC_GNU_INLINE__\n#define __GNUC_GNU_INLINE__ 1\n"
 					: "#undef __GNUC_GNU_INLINE__\n#undef __GNUC_STDC_INLINE__\n#define __GNUC_STDC_INLINE__ 1\n");
 	if (freestanding) bstr(&pre, "#undef __STDC_HOSTED__\n#define __STDC_HOSTED__ 0\n");
-	if (!darwin && !short_wchar && !asm_mode && !undef)	/* the Linux table is for the kernel's -fshort-wchar */
+	if (!darwin && !short_wchar && !undef)	/* the Linux table is for the kernel's -fshort-wchar */
 		bstr(&pre, "#undef __ARM_SIZEOF_WCHAR_T\n#define __ARM_SIZEOF_WCHAR_T 4\n"
 			   "#undef __SIZEOF_WCHAR_T__\n#define __SIZEOF_WCHAR_T__ 4\n"
 			   "#undef __WCHAR_MAX__\n#define __WCHAR_MAX__ 4294967295U\n"
@@ -1002,7 +1007,7 @@ int ppd_run(int argc, char **argv, const ppd_env *env)
 			   "#undef __WCHAR_TYPE__\n#define __WCHAR_TYPE__ unsigned int\n"
 			   "#undef __WCHAR_WIDTH__\n#define __WCHAR_WIDTH__ 32\n"
 			   "#undef __clang_wide_literal_encoding__\n#define __clang_wide_literal_encoding__ \"UTF-32\"\n");
-	if (cfi) bstr(&pre, "#define __GCC_HAVE_DWARF2_CFI_ASM 1\n");
+	if (cfi && !undef) bstr(&pre, "#define __GCC_HAVE_DWARF2_CFI_ASM 1\n");
 	/* the Linux table is for the kernel's -mgeneral-regs-only */
 	if (!darwin && !gregs && !undef)
 		bstr(&pre, "#define __ARM_FP 0xE\n#define __ARM_NEON 1\n#define __ARM_NEON_FP 0xE\n");

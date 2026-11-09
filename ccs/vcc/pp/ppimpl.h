@@ -452,6 +452,9 @@ struct pp {
 	char *out;
 	size_t nout, capout;
 	unsigned col;
+	struct { uint32_t id; const pmacro *m; } *dd_ev;	/* -dD: <built-in>'s #define/#undef, until printed */
+	uint32_t ndd, capdd;
+	int dd_done;
 	/* header cache */
 	int hc;			/* on (pp_text or pp_next, not disabled) */
 	int tokmode;		/* 0 unset, 1 text (pp_text), 2 tokens (pp_next) */
@@ -598,6 +601,10 @@ void pp_diag_summary(pp *p);
 /* include.c: dependencies */
 VPRIV uint8_t inc_sys(pp *p, int32_t sdir);
 VPRIV void dep_only(pp *p, const char *path, uint8_t sys);
+
+/* macro.c: -dD */
+VPRIV void dd_out(pp *p, uint32_t id, const pmacro *m, bool builtin);
+VPRIV void dd_flush(pp *p);
 
 /* macro.c */
 static inline uintptr_t mget(const pp *p, uint32_t id);
