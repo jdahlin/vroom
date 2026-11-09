@@ -106,6 +106,9 @@ bench/vcc-diff.py dm -j 6           # -dM byte for byte vs clang, C TUs (~40 s)
 bench/vcc-diff.py deps -j 6         # -M and -MM -MP -MQ byte for byte vs clang (~80 s)
 bench/vcc-diff.py hdr -j 6          # -H include tree vs clang (~60 s)
 bench/vcc-diff.py dd -j 6           # -dD: the #define/#undef lines in order vs clang (~60 s)
+bench/vcc-diff.py text -j 6         # -E -P byte for byte vs the references (spacing, lines)
+bench/vcc-diff.py textc -j 6        # the same with -C (comments), clang run alongside (~2 min)
+bench/vcc-diff.py lines -j 6        # -E without -P: line markers byte for byte, clang alongside (~2 min)
 bench/vcc-sema.py run -j 6          # vpp -fsyntax-only on every C TU
 bench/vcc-sema.py batch -j 6        # the same in one vpp --batch process: ~3 s instead of ~35 s
 bench/vcc-sema.py layout -j 6       # layouts/constants/decl types checked by clang (~70 s)
@@ -129,6 +132,8 @@ bench/vcc-wasm.py -j 6 --objcmp     # ... and vpp -c's object byte-identical to 
 bench/vcc-wasm.py -j 6 --obj --vlink  # ... vcc's side through vpp -c and vlink as emcc's wasm-ld (~9 min)
 bench/vcc-same.py --base DIR -j 6    # test-suite outputs byte-identical with DIR/vpp (vbench.py mkbase REV), ~80 s
 bench/vas-enc.py $PWD/ccs/vcc/tests/vas   # vas encodings vs llvm-mc
+bench/vas-obj.py                    # vasm objects vs clang -c byte for byte (ccs/vcc/tests/vas-obj, <1 s)
+bench/vas-corpus.py -j 6 [-O2] [PAT] # clang -S of the test C files: clang -c vs vasm (~6 min for -O0 -O2)
 bench/pg/build.sh clang && bench/pg/build.sh vcc   # PostgreSQL (macOS, meson+ninja): build + meson test (~2 min each)
 bench/pg/build.sh vccd             # ... CC = vcc shim + private vccd (VCC_DELEGATE=bench/pg/cc for the rest)
 bench/pg/speed.py                  # PostgreSQL compile speed: clang, clang -O0, vpp, vpp --batch
@@ -193,6 +198,7 @@ cd build/ccs/fuzz && ./fuzz-pp -fork=2 -max_total_time=180 -dict=../../../ccs/fu
     -max_len=4096 -timeout=5 -artifact_prefix=art/ run-pp corpus/pp   # same for fuzz-lex
 make -C ccs fuzz-regress            # replay ccs/fuzz/regress/{lex,pp}
 make -C ccs fuzz-diff               # vpp vs clang -E -P on regress + seeds
+ccs/fuzz/pp-diff.py -j 4 --text DIR # ... byte for byte (spacing, indentation, blank lines)
 ccs/fuzz/pp-diff.py -j 4 DIR...     # ... on any corpus; mismatches -> build/ccs/fuzz/diff/
 ```
 Keep runs to minutes with `-fork=2`.  Every fixed finding gets a minimal

@@ -87,12 +87,12 @@ static const vlex_file *find_include_(pp *p, const ctx *from, const char *name, 
 	if (next && from && from->sdir < 0)
 		next = false;	/* #include_next outside the search path: a normal search */
 	if (!angled && !next) {
-		const char *fp = from && from->f != &p->builtin ? from->spath : "";
+		const char *fp = from && from->f != &p->builtin ? from->spath : "./";
 		const char *sl = strrchr(fp, '/');
 		size_t dl = sl ? (size_t)(sl - fp) + 1 : 0;
 
 		if (!sl && fp[0])
-			fp = "./", dl = 2;	/* clang: the includer's directory, "." spelled out */
+			fp = "./", dl = 2;	/* clang: the includer's directory, "." spelled out (-include's too) */
 		if (dl + nlen + 1 < sizeof(buf)) {
 			memcpy(buf, fp, dl);
 			memcpy(buf + dl, name, nlen);
@@ -184,10 +184,10 @@ static inline int32_t inc_mode(const pp *p, const ctx *from, bool angled, bool n
 	int32_t start = nx ? from->sdir + 1 : angled ? p->o->nquote : 0;
 
 	*fp = "", *dl = 0;
-	if (!angled && !nx && from->f != &p->builtin) {
-		*fp = from->spath, *dl = from->sdl;
-		if (!*dl && (*fp)[0])
-			*fp = "./", *dl = 2;	/* as find_include_ spells it: not the key of -include's "" */
+	if (!angled && !nx) {
+		*fp = from->f != &p->builtin ? from->spath : "", *dl = from->f != &p->builtin ? from->sdl : 0;
+		if (!*dl)
+			*fp = "./", *dl = 2;	/* as find_include_ spells it (-include's too) */
 	}
 	return start * 4 + angled * 2 + nx;
 }
@@ -329,13 +329,21 @@ static void show_include(pp *p, const char *path)
 		"................................................................", path);
 }
 
-/* is a header found in search directory sdir a system header (-1: the includer's directory) */
+/* is a header found in search directory sdir a system header (-1: the includer's
+ * directory): 1, 2 for an extern "C" one */
 VPRIV uint8_t inc_sys(pp *p, int32_t sdir)
 {
 	const ctx *from = cur_file(p);
 
-	return sdir == -2 || (sdir >= 0 && p->o->nsys1 && sdir >= p->o->nsys1 - 1) ||
-	       (sdir == -1 && from && p->fe[from->fe].sys);
+	uint8_t s = from ? p->fe[from->fe].sys : 0, d = 0;	/* clang: the includer's, if higher */
+
+	if (sdir >= 0 && p->o->nsys1 && sdir >= p->o->nsys1 - 1)
+		d = 1 + (sdir >= p->o->xc0 && sdir < p->o->xc1);	/* 2: extern "C" */
+	else if (sdir == -2)
+		d = 1;
+	else if (sdir != -1)
+		return 0;
+	return d > s ? d : s;
 }
 
 VPRIV void dep_only(pp *p, const char *path, uint8_t sys)
@@ -450,7 +458,7 @@ VPRIV void enter_file(pp *p, const vlex_file *f, const char *path, int32_t sdir)
 	ctx *c;
 
 	sys = inc_sys(p, sdir);
-	if (fi->guard && mguard(p, fi->guard) && !(unlikely(p->o->show_includes) && !guard_known(p, f))) {
+	if (fi->guard && mguard(p, fi->guard) && !(unlikely(p->o->show_includes || p->out_text) && !guard_known(p, f))) {
 		if (p->o->deps)
 			dep_only(p, path, sys);
 		return;
@@ -464,6 +472,8 @@ VPRIV void enter_file(pp *p, const vlex_file *f, const char *path, int32_t sdir)
 			dep_only(p, path, sys);
 		return;
 	}
+	if (unlikely(p->out_text) && f != &p->builtin)
+		text_file_change(p, from, 1);
 	if (f != &p->builtin && from && hc_top(p)) {
 		int d0 = p->depth;
 		uint32_t b0 = p->next_base;
@@ -507,7 +517,10 @@ VPRIV void enter_file(pp *p, const vlex_file *f, const char *path, int32_t sdir)
 	if (unlikely(p->o->show_includes) && from && f != &p->builtin && from->f != &p->builtin)
 		show_include(p, path);
 	add_fent(p, c, f, path);
+	p->fe[c->fe].cpos = f->src;
 	p->fe[c->fe].sys = sys;
+	if (unlikely(p->lmark) && f != &p->builtin)
+		lm_enter(p, &p->fe[c->fe]);
 	p->fe[c->fe].from = from && from->f != &p->builtin && from->i ? from->loc + from->vt[from->i - 1].off : 0;
 	if (unlikely(fi->bad)) {
 		/* clang's message at the directive; the file is not processed */

@@ -66,7 +66,7 @@ Existing gates that every change must keep green: `vcc-diff.py cmp`
   `llvm-readelf -r -S -s` / `llvm-objdump -d`.  For PIC, TLS, CFI, DWARF,
   section groups, branch ranges — things that are about the object, not
   runtime output.
-- [ ] **T7 `as` corpus: compiler-generated assembly.**  `tests/as/*.c` →
+- [ ] **T7 `as` corpus: compiler-generated assembly.** (started: `bench/vas-corpus.py`: clang -S -O0/-O2 of every test C file, clang -c vs vasm byte for byte: 3035/3035 identical on 2026-11-09, `-g` and `-O2 -fPIC` too.  Next:, `-march=armv9-a+sve2`.)  `tests/as/*.c` →
   `clang --target=aarch64-linux-gnu -O2 -S` (and `-g`, `-fPIC`, `-march=armv8.5-a+sve2`)
   → assemble with `vasm` and with clang, compare objects with
   `bench/vas-diff.py` (sections, symbols, relocations, bytes).  Plus
@@ -625,11 +625,26 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
   *Validate:* T4.
 - [ ] **`#embed` / `__has_embed`** [P].  *Validate:* pp-diff fixtures plus
   T1 (`unsigned char d[] = { #embed "bin" };` checksums).
-- [ ] **Output modes ignored**: `-C`, `-CC`,
-  `-traditional-cpp` (reject); line markers without `-P`; text identical to
-  clang's spacing.
-  *Validate:* `bench/vcc-diff.py` new mode `text` comparing bytes (not
-  tokens) for `-E` with and without `-P`.  (`-M`/`-MM` done: see Depfiles;
+- [ ] **Output modes**: `-CC` (comments in macro definitions and arguments,
+  `//` as `/* */`) and `-traditional-cpp` are rejected with an error.
+  *Validate:* `bench/vcc-diff.py text` (bytes, not tokens) for `-E` with and
+  without `-P`.  (`-E -P` text done: clang's spacing (leading space,
+  AvoidConcat), indentation to the expansion column, MoveToLine's blank lines
+  and file-change newlines, `#line` as a file change, assembler `#` lines
+  re-spaced as tokens; a header guard counts once the file is complete, as for
+  `-H`.  `-C` done: comments printed as clang's comment tokens, dropped in
+  directives, skipped groups and macro arguments; vccd accepts it, so
+  kbuild's `cpp_lds_S` (vdso.lds) no longer needs clang.  Line markers
+  (`-E` without `-P`) done: GNU `# N "file" 1/2/3/3 4` as clang's
+  FileChanged/WriteLineInfo, `<built-in>`/`<command line>` (its line: the
+  predefined macros + 3), `./` for `-include` from the current directory,
+  extern "C" system directories (`/usr/include`, the SDK's), `#line`, up to
+  8 newlines before a marker; `bench/vcc-diff.py lines` 912/912.  The
+  predefined macros now match clang's `-dM` outside the kernel's flags too
+  (Linux PIE/CFI defaults, C23 char8_t/%B, Darwin -fshort-wchar and
+  -mgeneral-regs-only).
+  `bench/vcc-diff.py text` and `textc` (-C) 912/912,
+  `ccs/fuzz/pp-diff.py --text` on regress/pp and the seed corpus.)  (`-M`/`-MM` done: see Depfiles;
   `-H` done: `bench/vcc-diff.py hdr` 912/912, header cache off under `-H`;
   `-dD` done: `bench/vcc-diff.py dd` 910/912, predefined macros in clang's
   order from `predef_order_*` (gen-ppdata-order.py); the two left are the
@@ -648,15 +663,27 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
   912/912 byte-identical.)
   *Validate:* T11 against clang's `.d` files for each flag combination
   (byte comparison after path normalisation).
-- [ ] **Options**: `-imacros`, `-isysroot`/`--sysroot`, `-nostdlibinc`,
+- [x] **Options**: `-imacros`, `-isysroot`/`--sysroot`, `-nostdlibinc`,
   `-iprefix`/`-iwithprefix`, `-mmacosx-version-min`, unknown `-std=` values
   (error), `iso9899:199409`.
   *Validate:* T11 rows; predefine diff (`-dM`) for `-std` and
-  `-mmacosx-version-min`.
+  `-mmacosx-version-min`.  (Done: `-imacros` as clang's `#__include_macros`
+  + `##` in `<built-in>`, before every `-include`, its markers too; the
+  `-std=` table is clang's exact spellings, anything else an error;
+  `iso9899:199409` and `c2y`/`gnu2y` versions; the macOS deployment version
+  from `-mmacosx-version-min` or a versioned `-macosNN` target (which wins);
+  `-isysroot`/`--sysroot`/`-nostdlibinc`/`-iprefix` already matched.
+  `bench/vcc-driver.py` rows, -E and -dM byte for byte.)
 - [ ] **Predefines for other targets and flags**: only two tables;
   `--target=x86_64`, `-m32`, `-funsigned-char`, `-fstack-protector*`,
   `-ffast-math`, `-march=+sve`, `-pthread`, `-fsanitize=*`, `-fexceptions`
-  change nothing.  Generate predefines from (target, flags) using a table
+  change nothing.  (Done: `-f[no-][un]signed-char` (macro, and `char`'s
+  signedness in pp and cc), `-ffast-math`/`-ffinite-math-only`/
+  `-f[no-]math-errno`/`-fno-fast-math` with clang's interplay, `-pthread`;
+  checked by `bench/vcc-driver.py` rows.  Left out on purpose until vcc
+  implements them, so the macros don't promise what isn't there:
+  `-fstack-protector*` (`__SSP*__`), `-fsanitize=*`, `-fexceptions`,
+  `-fopenmp`, `-fblocks`, `-mbranch-protection`, `+sve`.)  Generate predefines from (target, flags) using a table
   extracted from clang per flag delta (`gen-ppdata.sh` extended).
   *Validate:* `bench/vcc-predef.py`: `vpp -dM -E` vs `clang -dM -E` for a
   matrix of targets × flags.
@@ -678,43 +705,76 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
   vs scalar, add SSE vs scalar.
 
 ### Assembler (`as/as.c`, `arch/a64/as/enc.c`)
-- [ ] **`.cfi_*`** → `.eh_frame` [P].  *Validate:* T7 (clang `-S` output
-  with CFI assembles, `.eh_frame` byte-identical).
-- [ ] **`.loc`, `.file N`, DWARF line tables, `.uleb128`/`.sleb128`** [P].
-  *Validate:* T7 with `-g`.
-- [ ] **Scalar FP** (fadd … frint*, `fmov #imm`) [P].  *Validate:* T7
-  encoding tables.
-- [ ] **AdvSIMD arithmetic, long/wide/narrow, by-element, ld2-ld4/st2-st4,
-  single-lane ld1/st1** [P].  *Validate:* T7 encoding tables (generated
-  from llvm-mc's AArch64 instruction list for these classes).
-- [ ] **Integer aliases** sxtw, uxtb, sxt*/uxt*, cls, ngc, mneg, smnegl,
-  CSSC [P].  *Validate:* T7 tables.
-- [ ] **Pointer auth, barriers/hints** (paciasp … xpaclri, csdb, esb, ssbb,
+- [x] **`.cfi_*`** → `.eh_frame` [P]: every directive but personality/LSDA
+  and `.debug_frame` (an error), CIEs per key, FDEs sorted by CIE key as MC.
+  *Validated:* `vas-obj` `cfi-basic.s`, `cfi-all.s`; `bench/vas-corpus.py`.
+- [x] **`.loc`, `.file N`, DWARF line tables, `.uleb128`/`.sleb128`** [P]:
+  the v5 `.debug_line` (+ `.debug_line_str`) as MCDwarfLineTable writes it,
+  rows on the next instruction or data, one sequence per section; gas-style
+  `.file 1 "dir/x.c"` splits the path, directory 0 is the cwd.  Left: rows in
+  several subsections of one section (an error), `.uleb128` of a forward
+  label difference (needs relaxation; an error), `-fdebug-compilation-dir`.
+  *Validated:* `vas-obj` `dwarf-line.s`, `leb128.s`; T7 `-O "0 -g"` 1516/1516.
+- [x] **Scalar FP** [P]: 2/1/3-source arithmetic, frint*, fcmp(e) (also #0.0),
+  fccmp(e), fcsel, fcvt between S/D/H, fcvt[nampz][su] and [su]cvtf (also
+  fixed point), `fmov #imm` and the H moves.  *Validated:*
+  `ccs/vcc/tests/vas/fp-scalar.s` vs llvm-mc (`bench/vas-enc.py` 293/293);
+  `bench/vas-corpus.py -O2` 1441/1519, the rest AdvSIMD.
+- [ ] **AdvSIMD** [P]: done: integer 3-same (mul/mla/mls also by element,
+  sshl/ushl, smax/smin, sabd/uabd), compare with #0, neg/abs, FP 3-same and
+  by element, FP compare (#0.0 too), FP 2-reg misc (frint*, conversions,
+  also the scalar `scvtf d0, d0` forms), `fmov` vector immediates, long/wide
+  (s/u mull/mlal/mlsl/abdl/abal/addl/subl/addw/subw and the 2 forms),
+  shll/sxtl/uxtl, xtn/sqxtn/uqxtn/sqxtun, shrn/rshrn, usra/ssra/urshr/srshr/
+  ursra/srsra, uaddlv/saddlv, mvni, `movi d`, ld2-ld4/st2-st4 and lanes,
+  ldpsw (`ccs/vcc/tests/vas/simd-ops.s` vs llvm-mc).  Left: FP16 vectors,
+  saturating arithmetic (sqadd, sqdmull, ...), pairwise FP, crypto beyond
+  AES/SHA, by-element forms of the long ops, ld1r variants.  *Validate:*
+  `bench/vas-enc.py`, `bench/vas-corpus.py`.
+- [x] **Integer aliases** sxtw, uxtb, sxt*/uxt*, cls, ngc, mneg, smnegl,
+  CSSC [P].  *Validate:* T7 tables.  (Done: sxtb/sxth/sxtw, uxtb/uxth/uxtw
+  (X forms as llvm-mc), cls, rev64 X, ngc(s), mneg, smnegl/umnegl,
+  smsubl/umsubl, bfc, CSSC abs/cnt/ctz and smax/smin/umax/umin (register and
+  immediate; the vector cnt/umax/umin unchanged); `ccs/vcc/tests/vas/int-alias.s`,
+  `bench/vas-enc.py` 128/128 vs llvm-mc.)
+- [x] **Pointer auth, barriers/hints** (paciasp … xpaclri, csdb, esb, ssbb,
   pssbb, dgh, `psb csync`, wfet, chkfeat, sysl, prfum, ldapur, stlur), **MTE
-  irg/addg** [P].  *Validate:* T7 tables.
+  irg/addg** [P].  *Validate:* T7 tables.  (Done: PAC hints and register forms,
+  blraa…brabz, retaa/eretaa, ldraa/ldrab, csdb/esb/ssbb/pssbb/dgh, psb/tsb
+  csync, wfet/wfit, chkfeat, sysl, prfum, ldapur*/stlur*, irg/gmi/addg/subg/
+  subp(s)/cmpp/stgp; `ccs/vcc/tests/vas/pac-hint.s`, `bench/vas-enc.py`
+  vs llvm-mc.)
 - [ ] **SVE/SVE2/SME** (operand parser for `z`/`p` registers first) [P].
   *Validate:* T7 tables; T7 `-march=armv9-a+sve2` corpus.
-- [ ] **Directives**: `.comm`/`.lcomm`, `.symver`, `.altmacro`,
-  `.float`/`.double`, `.dc.*`, `.eqv`, `.weakref`, `.end`, `.err`,
-  `.addrsig`/`.addrsig_sym`, `.variant_pcs`, `.tlsdesccall`, `.nops`,
-  `.balignw`/`.p2alignl`, `.base64`, `.inst.n`, COMDAT `"G"` sections
-  (`as/as.c:722`), `@gnu_unique_object` (`as/as.c:1125`), full `.reloc` (`as/as.c:836`).
-  Silently ignored today: `.print`, `.warning`, `.ident`, `.arch`, `.cpu`
-  (`as/as.c:2307-2440`).
-  *Validate:* T7 per directive; `.arch` must gate instructions (T4).
-- [ ] **Relocation operators** (TLS `:tlsdesc:`, `:tprel_*:`,
-  `:gottprel*:`, `:dtprel*:`, `:prel_g*:`, literal `ldr x0, :got:v`)
-  (`mod_kind` `as/as.c:1912`, `obj/obj.h:53-72`) [P].  *Validate:* T7 with
-  `-fPIC` and TLS sources.
+- [ ] **Directives**: left: `.arch`/`.cpu` gating instructions (T4).
+  (`.eqv`, `.nops`, `.inst.n` are GNU-only: clang rejects them.)
+  *Validate:* `bench/vas-obj.py` (`ccs/vcc/tests/vas-obj/`: clang -c and
+  vasm byte for byte).  (Done: COMDAT/`"G"` groups (SHT_GROUP, signature
+  in the group section when undefined), `.addrsig`/`.addrsig_sym`,
+  `.altmacro` (`%expr`, `<text>`, bare parameter names), `.type`
+  `@gnu_unique_object`/`@common` (OS/ABI GNU as MC), `.comm`/`.lcomm`,
+  `.symver` (@@@, remove), `.weakref`, `.float`/`.double`/`.dc.*`,
+  `.base64`, `.balignw`/`.p2alignl`, `.end`, `.ident`, `.print`/`.warning`,
+  `.variant_pcs`, `.tlsdesccall`, `.reloc` at `.`/labels with
+  NONE/TLSDESC_CALL/BFD_RELOC_*; code sections at least 4-aligned.)
+- [x] **Relocation operators**: `:tlsdesc:`, `:tlsdesc_lo12:`, `:gottprel*:`,
+  `:tprel_*:`, `:dtprel_*:` (add, movz/movk, ldst of every size), `:prel_g*:`,
+  `ldr x0, :got:v` / `:gottprel:`, `:pg_hi21_nc:`; TLS relocations make the
+  symbol STT_TLS and labels in TLS sections are STT_TLS, as MC.  *Validated:*
+  `ccs/vcc/tests/vas-obj/tlsops.s`, `tlslocal.s` byte-identical with clang -c.
 - [ ] **Mach-O syntax** `@PAGE`/`@PAGEOFF`/`@GOTPAGE…`; vasm writes ELF
   only.  *Validate:* T7 with `--target=arm64-apple-darwin` vs clang's Mach-O
   (`llvm-objdump --macho -r -d`).
-- [ ] **Wrong output**: GOT relocs against local symbols converted to
-  section+addend [P]; integer branch targets as `*ABS*` relocs; `adr x0, 4`
-  rejected (`arch/a64/as/enc.c:1005`).  *Validate:* T7 / T6 relocation comparison.
-- [ ] **Diagnostics**: line numbers off by one (`as/as.c:575/636/133`), `# N
-  "file"` markers ignored (`as/as.c:579`), EOF errors at `:0:` [P].
-  *Validate:* T4 for the assembler (`// expect-error: x.S:2:`).
+- [x] **Wrong output**: GOT relocs against local symbols kept the section
+  (fixed: GOT/TLS relocations keep the symbol); integer and absolute-symbol
+  branch targets are the pc-relative offset, not `*ABS*` relocations; `adr`,
+  `adrp` and `ldr` literal take constants.  *Validated:* `vas-obj`
+  `intbranch.s`, `absb.s`.
+- [ ] **Diagnostics**: left: errors inside a macro say the invocation line
+  (clang: `<instantiation>:N`); vasm stops at the first error (clang goes on).
+  (Done: the statement's own line, `# N "file"` markers, end-of-input
+  errors at the line after the last.)  *Validate:* `bench/vas-obj.py` error
+  files (`err-*.s`: clang's first file:line).
 
 ### Linker (`ld/ld.c`) and binutils
 - [ ] **ELF input parsing unchecked** [P]: `parse_obj` `ld/ld.c:1670-1697`,

@@ -44,6 +44,7 @@ typedef struct pp_opts {
 	const char *const *dirs;	/* search path: -iquote dirs, then -I, -isystem, -idirafter */
 	int ndirs, nquote;		/* dirs[0..nquote) only for "" includes */
 	int nsys1;			/* dirs[nsys1 - 1..) are system directories (0: none) */
+	int xc0, xc1;			/* dirs[xc0..xc1) are extern "C" system directories (clang's ExternCSystem) */
 	const char *predef;		/* "<built-in>": #define/#undef/#include lines, run first */
 	const char *prefix_from, *prefix_to;	/* -fmacro-prefix-map (one) */
 	const char *const *fwdirs;	/* framework dirs: <A/b.h> -> DIR/A.framework/Headers/b.h */
@@ -66,9 +67,13 @@ typedef struct pp_opts {
 	int dump_defines;		/* -dD: #define/#undef in the -E text */
 	const char *const *dd_order;	/* -dD: clang's order of its predefined macros */
 	int ndd_order;
+	int comments;			/* -C: comments in the -E text (not in directives or macro arguments) */
 	int show_includes;		/* -H: each file entered, dots for its depth, to errfd */
 	int deps;			/* -M/-MD: files skipped by guard or #pragma once are dependencies too */
 	int fatal_continue;		/* -E text: a fatal error (file not found) does not end the TU, as clang */
+	int markers;			/* -E without -P: GNU line markers (# N "file" flags), 2 with -undef */
+	unsigned predef_cmdl, predef_incl;	/* ... and its -imacros/-include part */
+	int imacros;			/* predef has -imacros (#__include_macros): no header cache */		/* markers: where predef's command-line part (-D/-U) starts */
 } pp_opts;
 
 enum { PP_LINUX_AARCH64, PP_DARWIN, PP_WASM64, PP_WASM32 };

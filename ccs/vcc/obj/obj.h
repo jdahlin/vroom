@@ -79,6 +79,8 @@ typedef struct {
 	uint32_t nfix_reloc;	/* relocations left after resolution */
 	uint32_t idx, rela_idx;	/* header indices assigned by elf_finish */
 	uint32_t group;		/* group signature symbol, 0 = none */
+	uint32_t gidx;		/* SHT_GROUP header index when this is the group's first section */
+	uint8_t comdat;		/* GRP_COMDAT */
 	uint8_t map;		/* mapping state: 0 none, 1 code, 2 data */
 	uint64_t size;		/* after layout */
 } ElfSec;
@@ -94,6 +96,8 @@ typedef struct {
 	uint32_t idx;		/* symbol table index (elf_finish) */
 	uint32_t alias;		/* .set alias of this symbol: type and size merge from it */
 	uint8_t reg;		/* registered (MC's Asm.symbols(): symbol-table order) */
+	uint8_t common;		/* 1 .comm: SHN_COMMON, value = alignment; 2 undefined group
+				   signature: defined in section value's SHT_GROUP */
 } ElfSym;
 
 enum {				/* ElfSym.flags */
@@ -121,6 +125,8 @@ typedef struct ElfObj {
 	uint32_t *htab; uint32_t hmask, hcount;	/* name -> symbol */
 	void *fin;		/* elf_finish() results for elf_emit() */
 	struct ElfExpr *expr, **expr_tail;	/* symbols defined as x op y, valued after layout */
+	uint32_t *addrsig; uint32_t naddrsig;	/* .addrsig_sym list */
+	int has_addrsig;	/* .addrsig: write .llvm_addrsig */
 	char err[256];
 	int has_err;
 } ElfObj;
@@ -187,7 +193,7 @@ void elf_define_abs(ElfObj *o, uint32_t sym, uint64_t value);
 static inline void elf_bind(ElfObj *o, uint32_t s, int bind)
 { ElfSym *y = elf_symp(o, s); y->bind = (uint8_t)bind; y->flags |= ESYM_BINDSET; }
 static inline void elf_type(ElfObj *o, uint32_t s, int type) { elf_symp(o, s)->type = (uint8_t)type; }
-static inline void elf_vis(ElfObj *o, uint32_t s, int vis) { elf_symp(o, s)->vis = (uint8_t)vis; }
+static inline void elf_vis(ElfObj *o, uint32_t s, int vis) { ElfSym *y = elf_symp(o, s); y->vis = (uint8_t)((y->vis & 0x80) | vis); }	/* 0x80: STO_AARCH64_VARIANT_PCS */
 void elf_size_expr(ElfObj *o, uint32_t sym, ElfVal v);	/* .size sym, expr */
 /* sym = x op y (op: as.c's operator codes), x and y absolute once the layout is known */
 void elf_expr_sym(ElfObj *o, uint32_t sym, int op, ElfVal x, ElfVal y);

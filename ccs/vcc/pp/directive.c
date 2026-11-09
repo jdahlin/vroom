@@ -24,6 +24,14 @@ static bool cond_true(pp *p, const ctx *c, const pdir *d)
 }
 
 /* in a false group: run on from directive k to the group that is taken */
+/* -C: the comments before directive line [b, e) are printed, those in it dropped */
+static __attribute__((noinline, cold)) void cmt_directive(pp *p, ctx *c, uint32_t b, uint32_t e)
+{
+	if (!p->collecting)	/* in macro arguments they are dropped */
+		cmt_flush(p, c, c->src + c->vt[b].off);
+	p->fe[c->fe].cpos = cmt_line_end(c->src + c->vt[e - 1].off + c->vt[e - 1].len);
+}
+
 static void skip_from(pp *p, ctx *c, uint32_t k)
 {
 	const pdir *dir = c->fi->dir;
@@ -37,6 +45,8 @@ static void skip_from(pp *p, ctx *c, uint32_t k)
 		}
 		c->i = d->end;
 		c->di = k + 1;
+		if (unlikely(p->out_text > 1))	/* -C: nothing skipped is printed */
+			p->fe[c->fe].cpos = cmt_line_end(c->src + c->vt[c->i - 1].off + c->vt[c->i - 1].len);
 		return;
 	}
 }
@@ -273,6 +283,31 @@ static void line_directive(pp *p, ctx *c, uint32_t b, uint32_t e, bool expand_li
 		m->namelen = (uint32_t)(w - m->name);
 	}
 	pop_to(p, d);
+	if (unlikely(p->out_text)) {
+		/* clang's FileChanged(RenameFile): the next line is line v, and a line in progress ends */
+		if (p->lmark) {
+			lm_rename(p, m->name, m->namelen, m->line);
+			return;
+		}
+		p->cur_line = m->line;
+		if (p->col || p->edir) {
+			out_nl(p);
+			p->col = 0, p->edir = 0;
+		}
+	}
+}
+
+/* -imacros: the file is read for its macros, its tokens dropped up to the
+ * "##" line after the directive in <built-in> (clang's #__include_macros) */
+static __attribute__((cold, noinline)) void imacros(pp *p, ctx *c, uint32_t b, uint32_t e, uint32_t loc)
+{
+	int nfile = p->nfile;
+	ptok t;
+
+	include(p, c, b + 1, e, D_INCLUDE, loc);
+	do
+		next_exp(p, &t);
+	while (t.kind != T_EOF && !(t.kind == T_HASHHASH && p->nfile == nfile));
 }
 
 /* run the directive at c->i; 1 if it produced a token in *out */
@@ -283,6 +318,10 @@ VPRIV int directive(pp *p, ctx *c, ptok *out)
 
 	c->i = e;
 	c->di++;
+	if (unlikely(p->out_text > 1))
+		cmt_directive(p, c, d->tok, e);
+	if (unlikely(p->lmark) && c->f == &p->builtin && c->vt[d->tok].off >= p->o->predef_cmdl)
+		lm_count(p);	/* the command line's first -D/-U/-include */
 	switch (d->kind) {
 	case D_IF: case D_IFDEF: case D_IFNDEF:
 		if (!cond_true(p, c, d))
@@ -296,6 +335,8 @@ VPRIV int directive(pp *p, ctx *c, ptok *out)
 			k = c->fi->dir[k].next;
 		c->i = c->fi->dir[k].end;
 		c->di = k + 1;
+		if (unlikely(p->out_text > 1))
+			p->fe[c->fe].cpos = cmt_line_end(c->src + c->vt[c->i - 1].off + c->vt[c->i - 1].len);
 		return 0;
 	}
 	case D_ENDIF: case D_NULL:
@@ -315,6 +356,15 @@ VPRIV int directive(pp *p, ctx *c, ptok *out)
 		return 0;
 	case D_INCLUDE: case D_INCLUDE_NEXT: case D_IMPORT:
 		include(p, c, b + 1, e, (int)d->kind, loc);
+		return 0;
+	case D_IMACROS:
+		if (c->f == &p->builtin) {
+			imacros(p, c, b, e, loc);
+			return 0;
+		}
+		if (p->o->asm_mode)
+			goto pass;
+		error(p, loc, "invalid preprocessing directive");
 		return 0;
 	case D_PRAGMA: {
 		const vtok *f = &c->vt[b], *l = &c->vt[e - 1];
@@ -370,6 +420,25 @@ pass: {
 	out->len = l->off + l->len - f->off;
 	out->loc = loc;
 	out->flags = TF_SOL;
+	if (unlikely(p->out_text)) {
+		/* clang -E re-lexes the line as tokens: one space where there was
+		 * any, and one before the end of the line if a blank or comment is */
+		size_t n = 0, cap = (size_t)(l->off + l->len - f->off) + 2;
+		char *s = varena_alloc(&p->tmp, cap + 16);
+		const char *q = c->src + l->off + l->len;
+
+		for (uint32_t i = b; i < e; i++) {
+			if (c->vt[i].flags & (TF_SPACE | TF_SOL))
+				s[n++] = ' ';
+			memcpy(s + n, c->src + c->vt[i].off, c->vt[i].len);
+			n += c->vt[i].len;
+		}
+		if (*q == ' ' || *q == '\t' || *q == '\f' || *q == '\v' || (*q == '/' && (q[1] == '*' || q[1] == '/')))
+			s[n++] = ' ';
+		out->s = s;
+		out->len = (uint32_t)n;
+		out->id = 1;	/* tokens, not a directive: indented like a line of them */
+	}
 	return 1;
 	}
 }

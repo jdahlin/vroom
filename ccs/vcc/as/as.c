@@ -19,8 +19,8 @@ VPRIV Sv svdup(As *a, const char *s, size_t n)
 
 VPRIV uint32_t curline(As *a)
 {
-	for (int i = a->nfr - 1; i >= 0; i--) if (a->fr[i].kind == FR_FILE) return a->fr[i].line;
-	return 0;
+	for (int i = a->nfr - 1; i >= 0; i--) if (a->fr[i].kind == FR_FILE) return a->fr[i].sline;
+	return a->eofline;
 }
 
 VPRIV int err(As *a, const char *fmt, ...)
@@ -390,7 +390,7 @@ static int push_frame(As *a, const char *p, size_t n, int kind, size_t mark)
 	if (a->nfr >= MAXFR) return err(a, "macros nested too deeply");
 	Frame *f = &a->fr[a->nfr++];
 	f->p = p; f->e = p + n; f->kind = (uint8_t)kind; f->bol = 1;
-	f->ncond = (uint32_t)a->ncs; f->mark = mark; f->line = 1;
+	f->ncond = (uint32_t)a->ncs; f->mark = mark; f->line = f->sline = 1;
 	return 0;
 }
 
@@ -398,6 +398,7 @@ static void pop_frame(As *a)
 {
 	Frame *f = &a->fr[--a->nfr];
 	if (f->kind != FR_FILE) a->xs.used = f->mark;
+	else a->eofline = f->line;
 }
 
 /* bytes next_stmt must look at: newline, ';', comments, strings */
@@ -433,7 +434,20 @@ static __attribute__((noinline)) size_t next_stmt_copy(As *a, Frame *f)
 		if (f->bol) {
 			if (c == ' ' || c == '\t' || c == '\r') { p++; if (n < cap) o[n++] = c; continue; }
 			f->bol = 0;
-			if (c == '#') {		/* cpp line marker / line comment */
+			if (c == '#') {		/* cpp line marker (# N "file") / line comment */
+				const char *q = p + 1;
+				while (q < e && (*q == ' ' || *q == '\t')) q++;
+				if (f->kind == FR_FILE && q < e && c_digit((unsigned char)*q)) {
+					uint32_t ln = 0;
+					while (q < e && c_digit((unsigned char)*q)) ln = ln * 10 + (uint32_t)(*q++ - '0');
+					while (q < e && (*q == ' ' || *q == '\t')) q++;
+					if (q < e && *q == '"') {
+						const char *r = ++q;
+						while (q < e && *q != '"' && *q != '\n') q++;
+						a->fname = svdup(a, r, (size_t)(q - r)).s;
+					}
+					if (ln) f->line = ln - 1;	/* the marker's newline makes it ln */
+				}
 				while (p < e && *p != '\n') p++;
 				continue;
 			}
@@ -481,6 +495,7 @@ static inline __attribute__((always_inline)) size_t next_stmt(As *a, Frame *f, c
 {
 	const char *p = f->p, *e = f->e;
 	*raw = p;
+	f->sline = f->line;
 	const char *q = p;
 	int bol = f->bol;
 	if (bol) {
@@ -512,7 +527,7 @@ static int hasprefix(Sv n, const char *pre)
 
 static void switch_to(As *a, uint32_t frag)
 {
-	if (frag != a->cur) a->prev = a->cur;
+	if (frag != a->cur) { a->prev = a->cur; a->dwlocp = 0; }	/* MC drops a pending .loc */
 	a->cur = frag;
 }
 
@@ -547,13 +562,17 @@ static int parse_name(As *a, const char **pp, const char *e, Sv *out)
 	return 0;
 }
 
+static Sv trim(const char *p, const char *e);
+static int d_dwfile(As *a, const char *p, const char *e);
+static int d_loc(As *a, const char *p, const char *e);
+static void loc_row(As *a);
 /* .section name [, "flags" [, @type [, entsize]]] ; push = .pushsection */
 static int d_section(As *a, const char *p, const char *e, int push)
 {
 	Sv name;
 	if (parse_name(a, &p, e, &name)) return -1;
-	uint32_t type = 0; uint64_t flags = 0; uint32_t entsize = 0;
-	int have_flags = 0;
+	uint32_t type = 0; uint64_t flags = 0; uint32_t entsize = 0, group = 0;
+	int have_flags = 0, comdat = 0;
 	int64_t sub = 0;
 	p = ws(p, e);
 	if (p < e && *p == ',') {
@@ -576,7 +595,7 @@ static int d_section(As *a, const char *p, const char *e, int push)
 				case 'o': flags |= SHF_LINK_ORDER; break;
 				case 'e': flags |= SHF_EXCLUDE; break;
 				case 'R': flags |= 0x200000; break;	/* SHF_GNU_RETAIN */
-				case 'G': return err(a, "section groups are not supported");
+				case 'G': flags |= SHF_GROUP; break;
 				default: return err(a, "unknown flag '%c' in .section", *p);
 				}
 			}
@@ -597,11 +616,24 @@ static int d_section(As *a, const char *p, const char *e, int push)
 					else if (sveq(t, "preinit_array")) type = SHT_PREINIT_ARRAY;
 					else return err(a, "unknown section type");
 					p = ws(p, e);
-					if (p < e && *p == ',') {
+					if ((flags & SHF_MERGE) && p < e && *p == ',') {
 						p++;
 						int64_t es;
 						if (abs_expr(a, &p, e, &es)) return -1;
 						entsize = (uint32_t)es;
+						p = ws(p, e);
+					}
+					if ((flags & SHF_GROUP) && p < e && *p == ',') {
+						p++;
+						Sv g;
+						if (parse_name(a, &p, e, &g)) return -1;
+						group = sym(a, g.s, g.n);
+						p = ws(p, e);
+						if (p < e && *p == ',') {
+							Sv c = trim(p + 1, e);
+							if (!sveq(c, "comdat")) return err(a, "expected 'comdat'");
+							comdat = 1;
+						}
 					}
 				}
 			}
@@ -628,7 +660,13 @@ static int d_section(As *a, const char *p, const char *e, int push)
 		if (a->nss >= MAXSECSTK) return err(a, "section stack overflow");
 		a->ss[a->nss].cur = a->cur; a->ss[a->nss].prev = a->prev; a->nss++;
 	}
-	uint32_t s = elf_section(a->o, name.s, name.n, type, flags, entsize, 0);
+	if ((flags & SHF_GROUP) && !group) return err(a, "expected group name");
+	uint32_t s = elf_section(a->o, name.s, name.n, type, flags, entsize, group);
+	if (group) { elf_reg(a->o, group); elf_sec(a->o, s)->comdat = (uint8_t)comdat; }
+	{	/* MC: a code section is at least 4-aligned once switched to */
+		ElfSec *se = elf_sec(a->o, s);
+		if ((se->flags & SHF_EXECINSTR) && se->align < 2) se->align = 2;
+	}
 	switch_to(a, elf_subsection(a->o, s, (int32_t)sub));
 	return 0;
 }
@@ -639,6 +677,12 @@ VPRIV int emit_value(As *a, int size, Val *v)
 {
 	ElfObj *o = a->o;
 	elf_data(o, a->cur);
+	if (elf_sec(o, elf_frag(o, a->cur)->sec)->type == SHT_NOBITS) {	/* zeros only (MC) */
+		fold(a, v);
+		if (v->add || v->sub || v->c) return err(a, "cannot have non-zero initializers in a NOBITS section");
+		elf_fill(o, a->cur, (uint64_t)size, 0);
+		return 0;
+	}
 	uint64_t off = elf_frag(o, a->cur)->size;
 	uint8_t *p = elf_grow(o, a->cur, (size_t)size);
 	fold(a, v);
@@ -687,39 +731,75 @@ static int d_octa(As *a, const char *p, const char *e)
 }
 
 /* .reloc offset, R_AARCH64_<type>[, expr]: a relocation at a constant offset of the current section */
+/* a .reloc fixup goes among its frag's fixups in offset order (MC) */
+static void reloc_fixup(ElfObj *o, uint32_t f, uint64_t off, uint8_t *at, uint32_t type, Val v)
+{
+	elf_fixup(o, f, off, at, type, v);
+	ElfFix *fx = (ElfFix *)o->fixes.base;
+	ElfFrag *fr = elf_frag(o, f);
+	uint32_t id = o->nfix - 1;
+	if (fr->fix_head == id) return;
+	uint32_t prev = 0, k = fr->fix_head;
+	while (k != id && fx[k].off <= off) { prev = k; k = fx[k].next; }
+	if (k == id) return;
+	/* unlink the tail, insert before k */
+	uint32_t t = k;
+	while (fx[t].next != id) t = fx[t].next;
+	fx[t].next = 0; fr->fix_tail = t;
+	fx[id].next = k;
+	if (k == fr->fix_head) fr->fix_head = id; else fx[prev].next = id;
+}
+
 static int d_reloc(As *a, const char *p, const char *e)
 {
 	static const struct { const char *n; uint32_t t; } types[] = {
 		{ "R_AARCH64_ABS64", R_AARCH64_ABS64 }, { "R_AARCH64_ABS32", R_AARCH64_ABS32 }, { "R_AARCH64_ABS16", R_AARCH64_ABS16 },
 		{ "R_AARCH64_PREL64", R_AARCH64_PREL64 }, { "R_AARCH64_PREL32", R_AARCH64_PREL32 }, { "R_AARCH64_PREL16", R_AARCH64_PREL16 },
+		{ "R_AARCH64_NONE", R_AARCH64_NONE }, { "R_AARCH64_TLSDESC_CALL", R_AARCH64_TLSDESC_CALL },
+		{ "BFD_RELOC_NONE", R_AARCH64_NONE }, { "BFD_RELOC_64", R_AARCH64_ABS64 },
+		{ "BFD_RELOC_32", R_AARCH64_ABS32 }, { "BFD_RELOC_16", R_AARCH64_ABS16 },
 	};
-	int64_t off;
-	if (abs_expr(a, &p, e, &off)) return -1;
+	ElfObj *o = a->o;
+	Val ov;
+	if (val_expr(a, &p, e, &ov)) return -1;
+	fold(a, &ov);
 	p = ws(p, e);
 	if (p >= e || *p != ',') return err(a, "expected comma");
 	Sv nm = first_word(p + 1, e);
-	uint32_t type = 0, size = 0;
+	uint32_t type = (uint32_t)-1, size = 0;
 	for (size_t i = 0; i < sizeof types / sizeof types[0]; i++)
 		if (strlen(types[i].n) == nm.n && !memcmp(types[i].n, nm.s, nm.n)) type = types[i].t;
-	if (!type) return err(a, "unknown relocation name");
-	size = type == R_AARCH64_ABS64 || type == R_AARCH64_PREL64 ? 8 : type == R_AARCH64_ABS32 || type == R_AARCH64_PREL32 ? 4 : 2;
+	if (type == (uint32_t)-1) return err(a, "unknown relocation name");
+	size = type == R_AARCH64_NONE || type == R_AARCH64_TLSDESC_CALL ? 0 :
+	       type == R_AARCH64_ABS64 || type == R_AARCH64_PREL64 ? 8 : type == R_AARCH64_ABS32 || type == R_AARCH64_PREL32 ? 4 : 2;
 	p = ws(nm.s + nm.n, e);
 	Val v = { 0, 0, 0 };
 	if (p < e && *p == ',') { p++; if (val_expr(a, &p, e, &v)) return -1; }
-	/* the frag and bytes at section offset off */
-	ElfObj *o = a->o;
 	uint32_t sec = elf_frag(o, a->cur)->sec;
+	uint64_t off;
+	if (!ov.add && !ov.sub) off = (uint64_t)ov.c;
+	else {
+		/* .reloc sym+c: an offset in sym's section (MC: the section of the offset) */
+		ElfSym *t = ov.add && !ov.sub ? elf_symp(o, ov.add) : 0;
+		if (!t || !(t->flags & ESYM_DEFINED) || (t->flags & ESYM_ABS)) return err(a, ".reloc offset is not absolute or a label");
+		if (!size) { reloc_fixup(o, t->frag, t->value + (uint64_t)ov.c, 0, type, v); return 0; }
+		sec = elf_frag(o, t->frag)->sec;
+		off = t->value + (uint64_t)ov.c;
+		for (uint32_t f = sec; f != t->frag; f = elf_frag(o, f)->next) off += elf_frag(o, f)->size;
+	}
+	/* the frag and bytes at section offset off */
 	uint64_t at = 0;
 	for (uint32_t f = sec; f; f = elf_frag(o, f)->next) {
 		ElfFrag *fr = elf_frag(o, f);
-		if ((uint64_t)off >= at && (uint64_t)off + size <= at + fr->size) {
-			uint64_t k = (uint64_t)off - at;
+		if (off >= at && off + size <= at + fr->size + (size == 0)) {
+			uint64_t k = off - at;
+			if (!size) { reloc_fixup(o, f, k, 0, type, v); return 0; }
 			for (ElfChunk *ch = fr->head; ch; ch = ch->next) {
 				if (k + size <= ch->used) {
 					/* llvm-mc keeps the bytes and adds the relocation; the field is not patched */
 					uint8_t keep[8];
 					memcpy(keep, ch->data + k, size);
-					elf_fixup(o, f, (uint64_t)off - at, ch->data + k, type, v);
+					reloc_fixup(o, f, off - at, ch->data + k, type, v);
 					memcpy(ch->data + k, keep, size);
 					return 0;
 				}
@@ -735,6 +815,7 @@ static int d_reloc(As *a, const char *p, const char *e)
 
 static int d_data(As *a, const char *p, const char *e, int size)
 {
+	if (a->dwlocp) loc_row(a);
 	p = ws(p, e);
 	if (p >= e) return 0;
 	for (;;) {
@@ -780,6 +861,7 @@ static int parse_string(As *a, const char **pp, const char *e, char *out, size_t
 
 static int d_ascii(As *a, const char *p, const char *e, int z)
 {
+	if (a->dwlocp) loc_row(a);
 	p = ws(p, e);
 	if (p >= e) return 0;
 	for (;;) {
@@ -797,10 +879,87 @@ static int d_ascii(As *a, const char *p, const char *e, int z)
 	}
 }
 
+/* .float/.single (size 4), .double (8): literals, as llvm-mc (inf, nan, signs) */
+static int d_float(As *a, const char *p, const char *e, int size)
+{
+	if (a->dwlocp) loc_row(a);
+	p = ws(p, e);
+	if (p >= e) return 0;
+	for (;;) {
+		char buf[128];
+		size_t k = 0;
+		const char *q = p;
+		while (q < e && *q != ',' && *q != ' ' && *q != '\t' && k < sizeof buf - 1) buf[k++] = *q++;
+		buf[k] = 0;
+		char *end;
+		const char *s = buf;
+		int neg = 0;
+		if (*s == '-' || *s == '+') neg = *s++ == '-';
+		double d;
+		if (!strcasecmp(s, "inf") || !strcasecmp(s, "infinity")) d = __builtin_inf();
+		else if (!strcasecmp(s, "nan")) d = __builtin_nan("");
+		else {
+			d = strtod(s, &end);
+			if (end == s || *end) return err(a, "invalid floating point literal");
+		}
+		uint64_t bits;
+		if (__builtin_isnan(d))	/* llvm-mc: every mantissa bit set */
+			bits = size == 4 ? 0x7fffffffu | (uint64_t)neg << 31 : 0x7fffffffffffffffu | (uint64_t)neg << 63;
+		else if (size == 4) {	/* rounded once, from the text */
+			float f = __builtin_isinf(d) || __builtin_isnan(d) ? (float)d : strtof(s, NULL);
+			uint32_t b32;
+			if (neg) f = -f;
+			memcpy(&b32, &f, 4);
+			bits = b32;
+		} else {
+			if (neg) d = -d;
+			memcpy(&bits, &d, 8);
+		}
+		Val v = { 0, 0, (int64_t)bits };
+		if (emit_value(a, size, &v)) return -1;
+		p = ws(q, e);
+		if (p >= e) return 0;
+		if (*p != ',') return err(a, "unexpected token in directive");
+		p = ws(p + 1, e);
+	}
+}
+
+/* .base64 "..." */
+static int d_base64(As *a, const char *p, const char *e)
+{
+	char buf[4096];
+	size_t n;
+	if ((size_t)(e - p) > sizeof buf) return err(a, "string too long");
+	if (parse_string(a, &p, e, buf, &n)) return -1;
+	if (!n || n % 4) return err(a, "failed to base64 decode string data");
+	uint8_t out[3072];
+	size_t m = 0;
+	for (size_t i = 0; i < n; i += 4) {
+		uint32_t w = 0;
+		int pad = 0;
+		for (int j = 0; j < 4; j++) {
+			char c = buf[i + j];
+			int v = c >= 'A' && c <= 'Z' ? c - 'A' : c >= 'a' && c <= 'z' ? c - 'a' + 26 : c >= '0' && c <= '9' ? c - '0' + 52 :
+				c == '+' ? 62 : c == '/' ? 63 : c == '=' && i + 4 == n && j >= 2 ? (pad++, 0) : -1;
+			if (v < 0 || (pad && c != '=')) return err(a, "failed to base64 decode string data");
+			w = w << 6 | (uint32_t)v;
+		}
+		out[m++] = (uint8_t)(w >> 16);
+		if (pad < 2) out[m++] = (uint8_t)(w >> 8);
+		if (pad < 1) out[m++] = (uint8_t)w;
+	}
+	elf_data(a->o, a->cur);
+	elf_bytes(a->o, a->cur, out, m);
+	return 0;
+}
+
 static int code_section(As *a) { return (elf_sec(a->o, elf_frag(a->o, a->cur)->sec)->flags & SHF_EXECINSTR) != 0; }
 
-/* .align/.p2align (p2 = 1) or .balign (p2 = 0) */
-static int d_align(As *a, const char *p, const char *e, int p2)
+/* .align/.p2align (p2 = 1) or .balign (p2 = 0); .balignw/.p2alignl..: a
+ * fill of fsz bytes (little-endian pattern) */
+static int d_align_w(As *a, const char *p, const char *e, int p2, int fsz);
+static int d_align(As *a, const char *p, const char *e, int p2) { return d_align_w(a, p, e, p2, 1); }
+static int d_align_w(As *a, const char *p, const char *e, int p2, int fsz)
 {
 	int64_t n, fill = 0, max = 0;
 	int hasfill = 0;
@@ -821,8 +980,80 @@ static int d_align(As *a, const char *p, const char *e, int p2)
 		if (n & (n - 1)) return err(a, "alignment must be a power of 2");
 		l2 = (unsigned)__builtin_ctzll((uint64_t)n);
 	}
-	elf_align(a->o, a->cur, l2, !hasfill && code_section(a), (uint8_t)fill, (uint64_t)max);
+	if (fsz == 1) {
+		elf_align(a->o, a->cur, l2, !hasfill && code_section(a), (uint8_t)fill, (uint64_t)max);
+		return 0;
+	}
+	ElfFrag *f = elf_frag(a->o, a->cur);
+	uint64_t al = (uint64_t)1 << l2, pad = (al - (f->size & (al - 1))) & (al - 1);
+	ElfSec *sc = elf_sec(a->o, f->sec);
+	if (!hasfill || sc->type == SHT_NOBITS) {
+		elf_align(a->o, a->cur, l2, !hasfill && code_section(a), 0, (uint64_t)max);
+		return 0;
+	}
+	/* the pattern repeated over the whole pad (GNU as; llvm-mc lays out the
+	 * whole pad but writes only whole values when the pad is not a multiple) */
+	if (l2 > sc->align) sc->align = l2;
+	if (f->sub) f->has_align |= 1u << l2;
+	if (pad && (!max || pad <= (uint64_t)max)) {
+		uint8_t *q = elf_grow(a->o, a->cur, pad);
+		for (uint64_t i = 0; i < pad; i++) q[i] = (uint8_t)((uint64_t)fill >> 8 * (i % (uint64_t)fsz));
+	}
 	return 0;
+}
+
+/* .comm name, size[, align] (SHN_COMMON, or .bss when the name is local) and .lcomm */
+static int d_comm(As *a, const char *p, const char *e, int local)
+{
+	Sv nm;
+	int64_t size, al = 0;
+	if (parse_name(a, &p, e, &nm)) return -1;
+	p = ws(p, e);
+	if (p >= e || *p != ',') return err(a, "expected a comma");
+	p++;
+	if (abs_expr(a, &p, e, &size)) return -1;
+	p = ws(p, e);
+	if (p < e && *p == ',') { p++; if (abs_expr(a, &p, e, &al)) return -1; }
+	if (size < 0) return err(a, "invalid '.comm' or '.lcomm' directive size");
+	if (al < 0 || (al & (al - 1))) return err(a, "alignment must be a power of 2");
+	uint32_t y = sym(a, nm.s, nm.n);
+	ElfSym *s = elf_symp(a->o, y);
+	if (s->flags & ESYM_DEFINED) return err(a, "invalid symbol redefinition");
+	elf_reg(a->o, y);
+	s->type = STT_OBJECT;
+	s->size = (uint64_t)size;
+	if (local || ((s->flags & ESYM_BINDSET) && s->bind == STB_LOCAL)) {
+		uint32_t f = std_section(a, ".bss");
+		if (al > 1) elf_align(a->o, f, (unsigned)__builtin_ctzll((uint64_t)al), 0, 0, 0);
+		elf_define(a->o, y, f, elf_frag(a->o, f)->size);
+		elf_data(a->o, f);
+		elf_fill(a->o, f, (uint64_t)size, 0);
+		return 0;
+	}
+	s->common = 1;
+	s->value = (uint64_t)(al ? al : 1);
+	return 0;
+}
+
+typedef struct { uint8_t *p; size_t n; } Buf8;
+static void uleb(Buf8 *b, uint64_t v);
+static void sleb(Buf8 *b, int64_t v);
+/* .uleb128/.sleb128 expr, ...: constants (label differences resolved by then) */
+static int d_leb(As *a, const char *p, const char *e, int sgn)
+{
+	if (a->dwlocp) loc_row(a);
+	elf_data(a->o, a->cur);
+	for (;;) {
+		int64_t v;
+		if (abs_expr(a, &p, e, &v)) return -1;
+		uint8_t t[16]; Buf8 b = { t, 0 };
+		if (sgn) sleb(&b, v); else uleb(&b, (uint64_t)v);
+		memcpy(elf_grow(a->o, a->cur, b.n), t, b.n);
+		p = ws(p, e);
+		if (p >= e) return 0;
+		if (*p != ',') return err(a, "unexpected token in directive");
+		p++;
+	}
 }
 
 static int d_space(As *a, const char *p, const char *e)
@@ -977,7 +1208,9 @@ static int d_type(As *a, const char *p, const char *e)
 	else if (sveq(t, "object") || sveq(t, "STT_OBJECT")) ty = STT_OBJECT;
 	else if (sveq(t, "notype") || sveq(t, "STT_NOTYPE")) ty = STT_NOTYPE;
 	else if (sveq(t, "tls_object") || sveq(t, "STT_TLS")) ty = STT_TLS;
-	else if (sveq(t, "gnu_indirect_function")) ty = STT_GNU_IFUNC;
+	else if (sveq(t, "gnu_indirect_function") || sveq(t, "STT_GNU_IFUNC")) ty = STT_GNU_IFUNC;
+	else if (sveq(t, "common") || sveq(t, "STT_COMMON")) ty = STT_OBJECT;	/* MC: STT_COMMON is written as OBJECT */
+	else if (sveq(t, "gnu_unique_object")) { ty = STT_OBJECT; elf_bind(a->o, y, 10); }	/* STB_GNU_UNIQUE */
 	else return err(a, "unsupported attribute in '.type' directive");
 	elf_reg(a->o, y);
 	elf_type(a->o, y, ty);
@@ -1256,6 +1489,63 @@ static Tmpl tmpl_compile(As *a, vregion *r, Sv body, const Param *ps, uint32_t n
 	return t;
 }
 
+/* .altmacro: a parameter name is replaced wherever it stands as a whole
+ * identifier, with or without the backslash */
+static Tmpl tmpl_compile_alt(vregion *r, Sv body, const Param *ps, uint32_t np)
+{
+	const char *b = body.s;
+	size_t n = body.n;
+	Tmpl t = { rget(r, sizeof(Piece) * (n / 2 + 2)), 0 };
+	size_t lit = 0, i = 0;
+	while (i < n) {
+		size_t st = i;
+		int bs = b[i] == '\\';
+		if (bs) i++;
+		if (i < n && isidc((unsigned char)b[i]) && (bs || st == 0 || !isidc((unsigned char)b[st - 1]))) {
+			size_t j = i;
+			while (j < n && isidc((unsigned char)b[j])) j++;
+			uint32_t m;
+			for (m = 0; m < np; m++) if (ps[m].name.n == j - i && !memcmp(ps[m].name.s, b + i, j - i)) break;
+			if (m < np) {
+				t.p[t.n++] = (Piece){ (uint32_t)lit, (uint32_t)(st - lit), (int32_t)m };
+				lit = j;
+			}
+			i = j;
+			continue;
+		}
+		if (!bs) i++;
+	}
+	if (lit < n) t.p[t.n++] = (Piece){ (uint32_t)lit, (uint32_t)(n - lit), -1 };
+	return t;
+}
+
+/* an .altmacro argument: %expr is its value in decimal, <text> is text with
+ * !c standing for c */
+static int alt_arg(As *a, const char **pp, const char *e, Sv *out)
+{
+	const char *p = *pp;
+	if (*p == '%') {
+		p++;
+		int64_t v;
+		if (abs_expr(a, &p, e, &v)) return -1;
+		char buf[24];
+		int k = snprintf(buf, sizeof buf, "%lld", (long long)v);
+		*out = svdup(a, buf, (size_t)k);
+	} else {
+		char *o = rget(&a->defs, (size_t)(e - p) + 1);
+		size_t n = 0;
+		for (p++; p < e && *p != '>'; p++) {
+			if (*p == '!' && p + 1 < e) p++;
+			o[n++] = *p;
+		}
+		if (p >= e) return err(a, "expected '>'");
+		p++;
+		*out = (Sv){ o, (uint32_t)n };
+	}
+	*pp = p;
+	return 0;
+}
+
 static char *utoa(char *o, uint32_t v)
 {
 	char tmp[10]; int k = 0;
@@ -1403,7 +1693,8 @@ static int invoke(As *a, Macro *m, const char *p, const char *e)
 			}
 			/* the arguments are used before the statement text changes */
 			int va = hasvararg && k == np - 1;
-			if (!macro_arg_plain(&p, e, va, &args[k]) && macro_arg(a, &p, e, va, &args[k])) return -1;
+			if (a->altmacro && p < e && (*p == '%' || *p == '<')) { if (alt_arg(a, &p, e, &args[k])) return -1; }
+			else if (!macro_arg_plain(&p, e, va, &args[k]) && macro_arg(a, &p, e, va, &args[k])) return -1;
 			set[k] = 1;
 			p = ws(p, e);
 			if (p >= e) break;
@@ -1418,9 +1709,14 @@ static int invoke(As *a, Macro *m, const char *p, const char *e)
 			else if (m->params[k].req && !args[k].n) return err(a, "missing value for required parameter '%.*s' in macro '%.*s'", (int)m->params[k].name.n, m->params[k].name.s, (int)m->name.n, m->name.s);
 		}
 	}
+	Tmpl tt;
+	if (a->altmacro) tt = tmpl_compile_alt(&a->defs, m->body, m->params, np);
+	else {
+		if (!m->t.p) m->t = tmpl_compile(a, &a->defs, m->body, m->params, np, 1);
+		tt = m->t;
+	}
 	char *o = (char *)rget(&a->xs, expand_bound(m->body, args, np));
-	if (!m->t.p) m->t = tmpl_compile(a, &a->defs, m->body, m->params, np, 1);
-	size_t n = expand(a, o, m->body.s, m->t, args, m->count);
+	size_t n = expand(a, o, m->body.s, tt, args, m->count);
 	a->xs.used = (size_t)((uint8_t *)o - a->xs.base) + n;
 	a->ninst++;
 	m->count++;
@@ -1636,6 +1932,8 @@ static int define_label(As *a, const char *s, size_t n)
 	return 0;
 }
 
+static int d_symver(As *a, const char *p, const char *e);
+static int d_cfi(As *a, Sv w, const char *p, const char *e);
 static int directive(As *a, Sv w, const char *p, const char *e)
 {
 	const char *d = w.s + 1;
@@ -1643,6 +1941,20 @@ static int directive(As *a, Sv w, const char *p, const char *e)
 #define IS(x) (n == sizeof(x) - 1 && !memcmp(d, x, n))
 	switch (d[0]) {
 	case 'a':
+		if (IS("altmacro")) { a->altmacro = 1; return 0; }
+		if (IS("addrsig")) { a->o->has_addrsig = 1; return 0; }
+		if (IS("addrsig_sym")) {
+			Sv nm;
+			if (parse_name(a, &p, e, &nm)) return -1;
+			if (a->nasg == a->asgcap) {
+				uint32_t nc = a->asgcap ? a->asgcap * 2 : 64;
+				uint32_t *t = rget(&a->defs, sizeof *t * nc);
+				if (a->nasg) memcpy(t, a->asg, sizeof *t * a->nasg);
+				a->asg = t; a->asgcap = nc;
+			}
+			a->asg[a->nasg++] = sym(a, nm.s, nm.n);
+			return 0;
+		}
 		if (IS("align") || IS("p2align")) return d_align(a, p, e, 1);
 		if (IS("ascii")) return d_ascii(a, p, e, 0);
 		if (IS("asciz")) return d_ascii(a, p, e, 1);
@@ -1651,16 +1963,28 @@ static int directive(As *a, Sv w, const char *p, const char *e)
 	case 'b':
 		if (IS("byte")) return d_data(a, p, e, 1);
 		if (IS("balign")) return d_align(a, p, e, 0);
+		if (IS("balignw")) return d_align_w(a, p, e, 0, 2);
+		if (IS("balignl")) return d_align_w(a, p, e, 0, 4);
+		if (IS("base64")) return d_base64(a, p, e);
 		if (IS("bss")) { switch_to(a, std_section(a, ".bss")); return 0; }
 		break;
 	case 'c':
+		if (n > 4 && !memcmp(d, "cfi_", 4)) return d_cfi(a, (Sv){ d, (uint32_t)n }, p, e);
+		if (IS("comm")) return d_comm(a, p, e, 0);
 		if (IS("cpu")) return 0;
 		break;
 	case 'd':
 		if (IS("data")) { switch_to(a, std_section(a, ".data")); return 0; }
+		if (IS("double") || IS("dc.d")) return d_float(a, p, e, 8);
+		if (IS("dc.s")) return d_float(a, p, e, 4);
+		if (IS("dc.b")) return d_data(a, p, e, 1);
+		if (IS("dc") || IS("dc.w")) return d_data(a, p, e, 2);
+		if (IS("dc.l")) return d_data(a, p, e, 4);
+		if (IS("dc.a")) return d_data(a, p, e, 8);
 		break;
 	case 'e':
 		if (IS("equ")) goto set;
+		if (IS("end")) { a->ended = 1; return 0; }
 		if (IS("error")) {
 			Sv t = trim(p, e);
 			return err(a, "%.*s", (int)t.n, t.s);
@@ -1681,7 +2005,21 @@ static int directive(As *a, Sv w, const char *p, const char *e)
 		break;
 	case 'f':
 		if (IS("fill")) return d_fill(a, p, e);
-		if (IS("file")) return 0;
+		if (IS("float")) return d_float(a, p, e, 4);
+		if (IS("file")) {	/* .file "name": an STT_FILE symbol; .file N ...: DWARF */
+			p = ws(p, e);
+			if (p < e && c_digit((unsigned char)*p)) return d_dwfile(a, p, e);
+			if (p < e && *p == '"') {
+				const char *q = ++p;
+				while (q < e && *q != '"') q++;
+				uint32_t y = elf_sym_anon(a->o, svdup(a, p, (size_t)(q - p)).s, (uint32_t)(q - p));
+				ElfSym *f = elf_symp(a->o, y);
+				f->type = STT_FILE;
+				elf_define_abs(a->o, y, 0);
+				elf_reg(a->o, y);
+			}
+			return 0;
+		}
 		break;
 	case 'g':
 		if (IS("globl") || IS("global")) return d_symattr(a, p, e, 'g');
@@ -1697,15 +2035,33 @@ static int directive(As *a, Sv w, const char *p, const char *e)
 		if (IS("irp")) return d_irp(a, p, e, 0);
 		if (IS("irpc")) return d_irp(a, p, e, 1);
 		if (IS("internal")) return d_symattr(a, p, e, 'i');
-		if (IS("ident")) return 0;
+		if (IS("ident")) {
+			char buf[4096];
+			size_t k;
+			if ((size_t)(e - p) > sizeof buf) return err(a, "string too long");
+			if (parse_string(a, &p, e, buf, &k)) return -1;
+			/* MC's emitIdent: into .comment at once, a NUL before the first */
+			uint32_t s = elf_section(a->o, ".comment", 8, SHT_PROGBITS, SHF_MERGE | SHF_STRINGS, 1, 0);
+			elf_data(a->o, s);
+			if (!a->nident++) elf_fill(a->o, s, 1, 0);
+			elf_bytes(a->o, s, buf, k);
+			elf_fill(a->o, s, 1, 0);
+			return 0;
+		}
 		break;
 	case 'l':
+		if (IS("loc")) return d_loc(a, p, e);
+		if (IS("loc_mark_labels")) return 0;
+		if (IS("lcomm")) return d_comm(a, p, e, 1);
 		if (IS("long")) return d_data(a, p, e, 4);
 		if (IS("local")) return d_symattr(a, p, e, 'l');
 		if (IS("ltorg") || IS("pool")) return ltorg(a);
 		break;
 	case 'm':
 		if (IS("macro")) return d_macro(a, p, e);
+		break;
+	case 'n':
+		if (IS("noaltmacro")) { a->altmacro = 0; return 0; }
 		break;
 	case 'o':
 		if (IS("org")) return d_org(a, p, e);
@@ -1716,14 +2072,24 @@ static int directive(As *a, Sv w, const char *p, const char *e)
 		if (IS("popsection")) {
 			if (!a->nss) return err(a, ".popsection without corresponding .pushsection");
 			a->nss--;
+			if (a->cur != a->ss[a->nss].cur) a->dwlocp = 0;
 			a->cur = a->ss[a->nss].cur; a->prev = a->ss[a->nss].prev;
 			return 0;
 		}
-		if (IS("previous")) { uint32_t t = a->cur; a->cur = a->prev; a->prev = t; return 0; }
+		if (IS("previous")) { uint32_t t = a->cur; if (a->prev != t) a->dwlocp = 0; a->cur = a->prev; a->prev = t; return 0; }
 		if (IS("p2align")) return d_align(a, p, e, 1);
+		if (IS("p2alignw")) return d_align_w(a, p, e, 1, 2);
+		if (IS("p2alignl")) return d_align_w(a, p, e, 1, 4);
 		if (IS("protected")) return d_symattr(a, p, e, 'p');
 		if (IS("purgem")) return d_purgem(a, p, e);
-		if (IS("print")) return 0;
+		if (IS("print")) {
+			char buf[4096];
+			size_t k;
+			if ((size_t)(e - p) > sizeof buf) return err(a, "string too long");
+			if (parse_string(a, &p, e, buf, &k)) return -1;
+			printf("%.*s\n", (int)k, buf);	/* llvm-mc: to stdout */
+			return 0;
+		}
 		break;
 	case 'q':
 		if (IS("quad")) return d_data(a, p, e, 8);
@@ -1737,7 +2103,10 @@ static int directive(As *a, Sv w, const char *p, const char *e)
 		if (IS("section")) return d_section(a, p, e, 0);
 		if (IS("set")) goto set;
 		if (IS("size")) return d_size(a, p, e);
+		if (IS("symver")) return d_symver(a, p, e);
+		if (IS("sleb128")) return d_leb(a, p, e, 1);
 		if (IS("short")) return d_data(a, p, e, 2);
+		if (IS("single")) return d_float(a, p, e, 4);
 		if (IS("space") || IS("skip")) return d_space(a, p, e);
 		if (IS("string")) return d_ascii(a, p, e, 1);
 		if (IS("subsection")) {
@@ -1748,10 +2117,18 @@ static int directive(As *a, Sv w, const char *p, const char *e)
 		}
 		break;
 	case 't':
+		if (IS("tlsdesccall")) {	/* R_AARCH64_TLSDESC_CALL on the next instruction */
+			Val v;
+			if (val_expr(a, &p, e, &v)) return -1;
+			elf_fixup(a->o, a->cur, elf_frag(a->o, a->cur)->size, 0, R_AARCH64_TLSDESC_CALL, v);
+			if (v.add) elf_symp(a->o, v.add)->type = STT_TLS;
+			return 0;
+		}
 		if (IS("text")) { switch_to(a, std_section(a, ".text")); return 0; }
 		if (IS("type")) return d_type(a, p, e);
 		break;
 	case 'u':
+		if (IS("uleb128")) return d_leb(a, p, e, 0);
 		if (IS("unreq")) {
 			Sv nm = first_word(p, e);
 			for (uint32_t i = a->nal; i-- > 0;)
@@ -1763,10 +2140,48 @@ static int directive(As *a, Sv w, const char *p, const char *e)
 			return 0;
 		}
 		break;
+	case 'v':
+		if (IS("variant_pcs")) {	/* STO_AARCH64_VARIANT_PCS */
+			Sv nm;
+			if (parse_name(a, &p, e, &nm)) return -1;
+			uint32_t y = sym(a, nm.s, nm.n);
+			elf_symp(a->o, y)->vis |= 0x80;
+			elf_reg(a->o, y);
+			return 0;
+		}
+		break;
 	case 'w':
+		if (IS("weakref")) {	/* .weakref alias, target */
+			Sv al, tg;
+			if (parse_name(a, &p, e, &al)) return -1;
+			p = ws(p, e);
+			if (p >= e || *p != ',') return err(a, "expected a comma");
+			p++;
+			if (parse_name(a, &p, e, &tg)) return -1;
+			uint32_t ya = sym(a, al.s, al.n), yt = sym(a, tg.s, tg.n);
+			if (a->nsv == a->svcap) {
+				uint32_t nc = a->svcap ? a->svcap * 2 : 16;
+				void *t = rget(&a->defs, sizeof *a->sv * nc);
+				if (a->nsv) memcpy(t, a->sv, sizeof *a->sv * a->nsv);
+				a->sv = t; a->svcap = nc;
+			}
+			a->sv[a->nsv].orig = ya; a->sv[a->nsv].ver = yt; a->sv[a->nsv].rm = 2;
+			a->nsv++;
+			return 0;
+		}
 		if (IS("word")) return d_data(a, p, e, 4);
 		if (IS("weak")) return d_symattr(a, p, e, 'w');
-		if (IS("warning")) return 0;
+		if (IS("warning")) {
+			Sv t = trim(p, e);
+			char buf[4096];
+			size_t k = 0;
+			const char *q = t.s;
+			if (t.n && *q == '"' && (size_t)(e - q) <= sizeof buf && !parse_string(a, &q, e, buf, &k))
+				fprintf(stderr, "%s: warning: %.*s\n", a->fname ? a->fname : "<stdin>", (int)k, buf);
+			else
+				fprintf(stderr, "%s: warning: .warning directive invoked in source file\n", a->fname ? a->fname : "<stdin>");
+			return 0;
+		}
 		break;
 	case 'x':
 		if (IS("xword")) return d_data(a, p, e, 8);
@@ -1841,6 +2256,7 @@ static int statement(As *a, const char *p, const char *e)
 	Macro *m = find_macro(a, w.s, w.n);
 	if (m) return invoke(a, m, w.s + w.n, e);
 	if (w.s[0] == '.') return directive(a, w, w.s + w.n, e);
+	if (a->dwlocp) loc_row(a);
 	return instruction(a, w.s, e, w.n);
 }
 
@@ -1879,6 +2295,10 @@ void as_begin(As *a, ElfObj *o, const char *name)
 	a->xs.used = 0; a->defs.used = 0; a->ninst = 0; a->nal = 0; a->alcap = 0; a->al = 0;
 	memset(a->alh, 0, sizeof a->alh);
 	a->fname = name;
+	a->nident = 0; a->ended = 0; a->altmacro = 0; a->eofline = 0;
+	a->ncfi = a->cficap = a->nfde = a->fdecap = 0; a->infde = 0; a->cfi_eh = 0; a->nsv = a->svcap = 0; a->nasg = a->asgcap = 0;
+	a->ndwf = a->dwfcap = a->ndwd = a->dwdcap = a->ndwl = a->dwlcap = 0; a->dwlocp = a->dwtab = 0;
+	memset(&a->dwcur, 0, sizeof a->dwcur); a->dwcur.flags = 1;
 	a->mmask = 255; a->mcount = 0;
 	a->mtab = rget(&a->defs, sizeof(Macro *) * (a->mmask + 1));
 	memset(a->mtab, 0, sizeof(Macro *) * (a->mmask + 1));
@@ -1912,9 +2332,668 @@ int as_snippet(As *a, const char *text, size_t len)
 			break;
 		}
 		if (o->has_err) { err(a, "%s", o->err); break; }
+		if (a->ended) break;	/* .end: the rest of the input is ignored */
 	}
 	a->nfr = 0;
 	return a->err ? -1 : 0;
+}
+
+/* ---------------------------------------------------------------- CFI */
+
+enum { CF_DEF_CFA, CF_DEF_CFA_OFFSET, CF_DEF_CFA_REGISTER, CF_ADJUST, CF_OFFSET, CF_REL_OFFSET,
+       CF_RESTORE, CF_UNDEFINED, CF_SAME, CF_REGISTER, CF_REMEMBER, CF_RESTORE_STATE, CF_ESCAPE,
+       CF_NEGATE_RA };
+
+/* a DWARF register: x0-x30/w0-w30, sp/wsp, fp, lr, v/b/h/s/d/q 0-31 (64+), or a number */
+static int cfi_reg(As *a, const char **pp, const char *e, uint32_t *r)
+{
+	const char *p = ws(*pp, e), *s = p;
+	while (p < e && isidc((unsigned char)*p)) p++;
+	size_t n = (size_t)(p - s);
+	if (!n) return err(a, "expected register");
+	*pp = p;
+	if (c_digit((unsigned char)s[0])) {
+		uint32_t v = 0;
+		for (size_t i = 0; i < n; i++) { if (!c_digit((unsigned char)s[i])) return err(a, "invalid register number"); v = v * 10 + (uint32_t)(s[i] - '0'); }
+		*r = v; return 0;
+	}
+	if ((n == 2 && !strncasecmp(s, "sp", 2)) || (n == 3 && !strncasecmp(s, "wsp", 3))) { *r = 31; return 0; }
+	if (n == 2 && !strncasecmp(s, "fp", 2)) { *r = 29; return 0; }
+	if (n == 2 && !strncasecmp(s, "lr", 2)) { *r = 30; return 0; }
+	char c = (char)(s[0] | 0x20);
+	if (n >= 2 && n <= 3 && strchr("xwvbhsdq", c) && c_digit((unsigned char)s[1]) && (n == 2 || c_digit((unsigned char)s[2]))) {
+		uint32_t v = (uint32_t)(s[1] - '0');
+		if (n == 3) v = v * 10 + (uint32_t)(s[2] - '0');
+		if ((c == 'x' || c == 'w') ? v > 30 : v > 31) return err(a, "invalid register name");
+		*r = (c == 'x' || c == 'w') ? v : 64 + v;
+		return 0;
+	}
+	return err(a, "invalid register name");
+}
+
+static struct Cfi *cfi_push(As *a, uint8_t op)
+{
+	if (a->ncfi == a->cficap) {
+		uint32_t nc = a->cficap ? a->cficap * 2 : 256;
+		struct Cfi *t = rget(&a->defs, sizeof *t * nc);
+		if (a->ncfi) memcpy(t, a->cfi, sizeof *t * a->ncfi);
+		a->cfi = t; a->cficap = nc;
+	}
+	struct Cfi *c = &a->cfi[a->ncfi++];
+	memset(c, 0, sizeof *c);
+	c->op = op;
+	c->lab = here(a);
+	a->fde[a->nfde - 1].n++;
+	return c;
+}
+
+static int d_cfi(As *a, Sv w, const char *p, const char *e)
+{
+#define CIS(lit) (w.n == sizeof(lit) - 1 && !memcmp(w.s, lit, w.n))
+	p = ws(p, e);
+	if (CIS("cfi_sections")) {
+		int eh = 0, dbg = 0;
+		while (p < e) {
+			const char *s = p;
+			while (p < e && *p != ',' && *p != ' ' && *p != '\t') p++;
+			Sv t = { s, (uint32_t)(p - s) };
+			if (sveq(t, ".eh_frame")) eh = 1;
+			else if (sveq(t, ".debug_frame")) dbg = 1;
+			p = ws(p, e);
+			if (p < e && *p == ',') p = ws(p + 1, e);
+		}
+		if (dbg) return err(a, ".debug_frame is not supported");
+		a->cfi_eh = !eh;
+		return 0;
+	}
+	if (CIS("cfi_startproc")) {
+		if (a->infde) return err(a, "starting new .cfi frame before finishing the previous one");
+		if (a->nfde == a->fdecap) {
+			uint32_t nc = a->fdecap ? a->fdecap * 2 : 64;
+			struct Fde *t = rget(&a->defs, sizeof *t * nc);
+			if (a->nfde) memcpy(t, a->fde, sizeof *t * a->nfde);
+			a->fde = t; a->fdecap = nc;
+		}
+		struct Fde *f = &a->fde[a->nfde++];
+		memset(f, 0, sizeof *f);
+		Sv t = trim(p, e);
+		if (t.n) { if (!sveq(t, "simple")) return err(a, "unexpected token"); f->simple = 1; }
+		f->start = here(a); f->first = a->ncfi; f->ra = 30;
+		a->infde = 1;
+		return 0;
+	}
+	if (!a->infde) return err(a, "this directive must appear between .cfi_startproc and .cfi_endproc directives");
+	struct Fde *f = &a->fde[a->nfde - 1];
+	if (CIS("cfi_endproc")) { f->end = here(a); a->infde = 0; return 0; }
+	if (CIS("cfi_signal_frame")) { f->sig = 1; return 0; }
+	if (CIS("cfi_b_key_frame")) { f->bkey = 1; return 0; }
+	if (CIS("cfi_return_column")) return cfi_reg(a, &p, e, &f->ra);
+	if (CIS("cfi_remember_state")) { cfi_push(a, CF_REMEMBER); return 0; }
+	if (CIS("cfi_restore_state")) { cfi_push(a, CF_RESTORE_STATE); return 0; }
+	if (CIS("cfi_negate_ra_state") || CIS("cfi_window_save")) { cfi_push(a, CF_NEGATE_RA); return 0; }
+	if (CIS("cfi_escape")) {
+		uint8_t *b = rget(&a->defs, (size_t)(e - p) + 1);
+		uint32_t n = 0;
+		while (p < e) {
+			int64_t v;
+			if (abs_expr(a, &p, e, &v)) return -1;
+			b[n++] = (uint8_t)v;
+			p = ws(p, e);
+			if (p < e && *p == ',') p = ws(p + 1, e);
+		}
+		struct Cfi *c = cfi_push(a, CF_ESCAPE);
+		c->esc = b; c->off = n;
+		return 0;
+	}
+	int64_t off = 0;
+	uint32_t r1 = 0, r2 = 0;
+	uint8_t op;
+	if (CIS("cfi_def_cfa_offset") || CIS("cfi_adjust_cfa_offset")) {
+		if (abs_expr(a, &p, e, &off)) return -1;
+		op = CIS("cfi_adjust_cfa_offset") ? CF_ADJUST : CF_DEF_CFA_OFFSET;
+	} else if (CIS("cfi_def_cfa_register") || CIS("cfi_restore") || CIS("cfi_undefined") || CIS("cfi_same_value")) {
+		if (cfi_reg(a, &p, e, &r1)) return -1;
+		op = CIS("cfi_def_cfa_register") ? CF_DEF_CFA_REGISTER : CIS("cfi_restore") ? CF_RESTORE :
+		     CIS("cfi_undefined") ? CF_UNDEFINED : CF_SAME;
+	} else if (CIS("cfi_def_cfa") || CIS("cfi_offset") || CIS("cfi_rel_offset") || CIS("cfi_register")) {
+		if (cfi_reg(a, &p, e, &r1)) return -1;
+		p = ws(p, e);
+		if (p >= e || *p != ',') return err(a, "expected comma");
+		p++;
+		if (CIS("cfi_register")) { if (cfi_reg(a, &p, e, &r2)) return -1; op = CF_REGISTER; }
+		else {
+			if (abs_expr(a, &p, e, &off)) return -1;
+			op = CIS("cfi_def_cfa") ? CF_DEF_CFA : CIS("cfi_offset") ? CF_OFFSET : CF_REL_OFFSET;
+		}
+	} else return err(a, "unknown directive '.%.*s'", (int)w.n, w.s);
+	struct Cfi *c = cfi_push(a, op);
+	c->reg = r1; c->reg2 = r2; c->off = off;
+	return 0;
+#undef CFIS
+}
+
+
+static void uleb(Buf8 *b, uint64_t v) { do { uint8_t c = v & 0x7f; v >>= 7; b->p[b->n++] = (uint8_t)(c | (v ? 0x80 : 0)); } while (v); }
+static void sleb(Buf8 *b, int64_t v)
+{
+	for (;;) {
+		uint8_t c = v & 0x7f; v >>= 7;
+		if ((v == 0 && !(c & 0x40)) || (v == -1 && (c & 0x40))) { b->p[b->n++] = c; return; }
+		b->p[b->n++] = (uint8_t)(c | 0x80);
+	}
+}
+
+/* .eh_frame as MC's FrameEmitterImpl writes it: per FDE, its CIE first when
+ * it is new; entries padded to 4 with DW_CFA_nop */
+static void cfi_finish(As *a)
+{
+	ElfObj *o = a->o;
+	if (a->infde) { err(a, "unfinished frame"); return; }
+	if (!a->nfde || a->cfi_eh) return;
+	uint32_t sec = elf_section(o, ".eh_frame", 9, SHT_PROGBITS, SHF_ALLOC, 0, 0);
+	uint32_t fr = sec;
+	if (elf_sec(o, sec)->align < 3) elf_sec(o, sec)->align = 3;
+	elf_data(o, fr);
+	struct { uint32_t key, off; } cies[8]; uint32_t ncie = 0;
+	size_t cap = 64;
+	for (uint32_t i = 0; i < a->nfde; i++) cap += 64 + 16 * (size_t)a->fde[i].n;
+	for (uint32_t i = 0; i < a->ncfi; i++) if (a->cfi[i].op == CF_ESCAPE) cap += (size_t)a->cfi[i].off;
+	Buf8 b = { rget(&a->defs, cap), 0 };
+	size_t *pcbs = rget(&a->defs, sizeof(size_t) * a->nfde);
+	/* MC stable-sorts the FDEs by CIE key (signal frame, simple, RA column, B key) */
+	uint32_t *ord = rget(&a->defs, sizeof(uint32_t) * a->nfde);
+	for (uint32_t i = 0; i < a->nfde; i++) {
+		struct Fde *f = &a->fde[i];
+		uint32_t key = (uint32_t)f->sig << 30 | (uint32_t)f->simple << 29 | f->ra << 1 | f->bkey;
+		uint32_t k = i;
+		while (k > 0) {
+			struct Fde *g = &a->fde[ord[k - 1]];
+			uint32_t gk = (uint32_t)g->sig << 30 | (uint32_t)g->simple << 29 | g->ra << 1 | g->bkey;
+			if (gk <= key) break;
+			ord[k] = ord[k - 1]; k--;
+		}
+		ord[k] = i;
+	}
+	for (uint32_t oi = 0; oi < a->nfde; oi++) {
+		uint32_t i = ord[oi];
+		struct Fde *f = &a->fde[i];
+		uint32_t key = (uint32_t)f->sig << 30 | (uint32_t)f->simple << 29 | f->ra << 1 | f->bkey;
+		uint32_t ci;
+		for (ci = 0; ci < ncie; ci++) if (cies[ci].key == key) break;
+		if (ci == ncie) {
+			if (ncie == 8) { err(a, "too many distinct CIEs"); return; }
+			cies[ncie].key = key; cies[ncie].off = (uint32_t)b.n; ncie++;
+			size_t st = b.n;
+			b.n += 4;
+			memset(b.p + b.n, 0, 4); b.n += 4;	/* CIE id */
+			b.p[b.n++] = 1;				/* version */
+			b.p[b.n++] = 'z'; b.p[b.n++] = 'R';
+			if (f->sig) b.p[b.n++] = 'S';
+			if (f->bkey) b.p[b.n++] = 'B';
+			b.p[b.n++] = 0;
+			uleb(&b, 1); sleb(&b, -4);
+			b.p[b.n++] = (uint8_t)f->ra;
+			uleb(&b, 1); b.p[b.n++] = 0x1b;	/* augmentation: pcrel sdata4 */
+			if (!f->simple) { b.p[b.n++] = 0x0c; uleb(&b, 31); uleb(&b, 0); }
+			while ((b.n - st) & 3) b.p[b.n++] = 0;
+			uint32_t len = (uint32_t)(b.n - st - 4);
+			memcpy(b.p + st, &len, 4);
+		}
+		size_t st = b.n;
+		b.n += 4;
+		uint32_t cptr = (uint32_t)(b.n - cies[ci].off);
+		memcpy(b.p + b.n, &cptr, 4); b.n += 4;
+		size_t pcb = b.n;
+		memset(b.p + b.n, 0, 8); b.n += 8;	/* pc_begin, pc_range: fixups */
+		uleb(&b, 0);
+		int64_t cfa = 0;
+		uint32_t base = f->start;
+		for (uint32_t k = f->first; k < f->first + f->n; k++) {
+			struct Cfi *c = &a->cfi[k];
+			ElfSym *x = elf_symp(o, base), *y = elf_symp(o, c->lab);
+			if (x->frag != y->frag) { err(a, "CFI across fragments is not supported"); return; }
+			uint64_t d = y->value - x->value;
+			if (d) {
+				if (d < 0x40) b.p[b.n++] = (uint8_t)(0x40 | d);
+				else if (d <= 0xff) { b.p[b.n++] = 2; b.p[b.n++] = (uint8_t)d; }
+				else if (d <= 0xffff) { b.p[b.n++] = 3; b.p[b.n++] = (uint8_t)d; b.p[b.n++] = (uint8_t)(d >> 8); }
+				else { b.p[b.n++] = 4; uint32_t d4 = (uint32_t)d; memcpy(b.p + b.n, &d4, 4); b.n += 4; }
+				base = c->lab;
+			}
+			switch (c->op) {
+			case CF_DEF_CFA: b.p[b.n++] = 0x0c; uleb(&b, c->reg); cfa = c->off; uleb(&b, (uint64_t)cfa); break;
+			case CF_DEF_CFA_OFFSET: case CF_ADJUST:
+				cfa = c->op == CF_ADJUST ? cfa + c->off : c->off;
+				b.p[b.n++] = 0x0e; uleb(&b, (uint64_t)cfa); break;
+			case CF_DEF_CFA_REGISTER: b.p[b.n++] = 0x0d; uleb(&b, c->reg); break;
+			case CF_OFFSET: case CF_REL_OFFSET: {
+				int64_t v = c->off;
+				if (c->op == CF_REL_OFFSET) v -= cfa;
+				v /= -4;
+				if (v < 0) { b.p[b.n++] = 0x11; uleb(&b, c->reg); sleb(&b, v); }
+				else if (c->reg < 64) { b.p[b.n++] = (uint8_t)(0x80 | c->reg); uleb(&b, (uint64_t)v); }
+				else { b.p[b.n++] = 0x05; uleb(&b, c->reg); uleb(&b, (uint64_t)v); }
+				break;
+			}
+			case CF_RESTORE:
+				if (c->reg < 64) b.p[b.n++] = (uint8_t)(0xc0 | c->reg);
+				else { b.p[b.n++] = 0x06; uleb(&b, c->reg); }
+				break;
+			case CF_UNDEFINED: b.p[b.n++] = 0x07; uleb(&b, c->reg); break;
+			case CF_SAME: b.p[b.n++] = 0x08; uleb(&b, c->reg); break;
+			case CF_REGISTER: b.p[b.n++] = 0x09; uleb(&b, c->reg); uleb(&b, c->reg2); break;
+			case CF_REMEMBER: b.p[b.n++] = 0x0a; break;
+			case CF_RESTORE_STATE: b.p[b.n++] = 0x0b; break;
+			case CF_NEGATE_RA: b.p[b.n++] = 0x2d; break;
+			case CF_ESCAPE: memcpy(b.p + b.n, c->esc, (size_t)c->off); b.n += (size_t)c->off; break;
+			}
+		}
+		while ((b.n - st) & 3) b.p[b.n++] = 0;
+		if (oi == a->nfde - 1) while (b.n & 7) b.p[b.n++] = 0;	/* the section ends 8-aligned (MC) */
+		uint32_t len = (uint32_t)(b.n - st - 4);
+		memcpy(b.p + st, &len, 4);
+		pcbs[i] = pcb;
+	}
+	uint64_t at = elf_frag(o, fr)->size;
+	uint8_t *q = elf_grow(o, fr, b.n);
+	memcpy(q, b.p, b.n);
+	for (uint32_t oi = 0; oi < a->nfde; oi++) {
+		uint32_t i = ord[oi];
+		struct Fde *f = &a->fde[i];
+		elf_fixup(o, fr, at + pcbs[i], q + pcbs[i], R_AARCH64_PREL32, (Val){ f->start, 0, 0 });
+		elf_fixup(o, fr, at + pcbs[i] + 4, q + pcbs[i] + 4, R_AARCH64_ABS32, (Val){ f->end, f->start, 0 });
+	}
+}
+
+/* ---------------------------------------------------------------- DWARF lines */
+
+static int dw_num(As *a, const char **pp, const char *e, uint64_t *v)
+{
+	const char *p = ws(*pp, e);
+	if (p >= e || !c_digit((unsigned char)*p)) return err(a, "expected an integer");
+	uint64_t x = 0;
+	if (p + 1 < e && p[0] == '0' && (p[1] | 0x20) == 'x') {
+		p += 2;
+		while (p < e && c_xdigit((unsigned char)*p)) { x = x * 16 + (uint64_t)(c_digit((unsigned char)*p) ? *p - '0' : c_lower((unsigned char)*p) - 'a' + 10); p++; }
+	} else while (p < e && c_digit((unsigned char)*p)) x = x * 10 + (uint64_t)(*p++ - '0');
+	*pp = p; *v = x;
+	return 0;
+}
+
+static uint32_t dw_dir(As *a, Sv d)
+{
+	for (uint32_t i = 0; i < a->ndwd; i++) if (a->dwd[i].n == d.n && !memcmp(a->dwd[i].s, d.s, d.n)) return i;
+	if (a->ndwd == a->dwdcap) {
+		uint32_t nc = a->dwdcap ? a->dwdcap * 2 : 16;
+		Sv *t = rget(&a->defs, sizeof *t * nc);
+		if (a->ndwd) memcpy(t, a->dwd, sizeof *t * a->ndwd);
+		a->dwd = t; a->dwdcap = nc;
+	}
+	a->dwd[a->ndwd] = d;
+	return a->ndwd++;
+}
+
+/* .file N ["dir"] "name" [md5 0x...] */
+static int d_dwfile(As *a, const char *p, const char *e)
+{
+	uint64_t n;
+	if (dw_num(a, &p, e, &n)) return -1;
+	if (n > 100000) return err(a, "file number too large");
+	char *b1 = rget(&a->defs, (size_t)(e - p) + 1), *b2 = rget(&a->defs, (size_t)(e - p) + 1);
+	size_t l1, l2 = 0;
+	if (parse_string(a, &p, e, b1, &l1)) return -1;
+	b1[l1] = 0;
+	p = ws(p, e);
+	int two = p < e && *p == '"';
+	if (two) { if (parse_string(a, &p, e, b2, &l2)) return -1; b2[l2] = 0; }
+	Sv dir = two ? (Sv){ b1, (uint32_t)l1 } : (Sv){ "", 0 }, name = two ? (Sv){ b2, (uint32_t)l2 } : (Sv){ b1, (uint32_t)l1 };
+	uint8_t md5[16]; int hasmd5 = 0;
+	for (;;) {
+		p = ws(p, e);
+		if (p >= e) break;
+		Sv w = first_word(p, e);
+		if (w.n == 3 && !memcmp(w.s, "md5", 3)) {
+			p = ws(w.s + 3, e);
+			if (p + 2 > e || p[0] != '0' || (p[1] | 0x20) != 'x') return err(a, "MD5 checksum specified, but no file number");
+			p += 2;
+			const char *s = p;
+			while (p < e && c_xdigit((unsigned char)*p)) p++;
+			if (p - s != 32) return err(a, "invalid MD5 checksum specified");
+			for (int i = 0; i < 16; i++) {
+				int h = c_digit((unsigned char)s[2 * i]) ? s[2 * i] - '0' : c_lower((unsigned char)s[2 * i]) - 'a' + 10;
+				int l = c_digit((unsigned char)s[2 * i + 1]) ? s[2 * i + 1] - '0' : c_lower((unsigned char)s[2 * i + 1]) - 'a' + 10;
+				md5[i] = (uint8_t)(h << 4 | l);
+			}
+			hasmd5 = 1;
+		} else return err(a, "unexpected token in '.file' directive");
+	}
+	if (n >= a->dwfcap) {
+		uint32_t nc = a->dwfcap ? a->dwfcap : 16;
+		while (nc <= n) nc *= 2;
+		struct DwFile *t = rget(&a->defs, sizeof *t * nc);
+		memset(t, 0, sizeof *t * nc);
+		if (a->ndwf) memcpy(t, a->dwf, sizeof *t * a->ndwf);
+		a->dwf = t; a->dwfcap = nc;
+	}
+	if (n >= a->ndwf) a->ndwf = (uint32_t)n + 1;
+	struct DwFile *f = &a->dwf[n];
+	if (!two && n) {	/* "sub/y.h": directory "sub", name "y.h" (MC's tryGetFile) */
+		const char *sl = 0;
+		for (uint32_t i = 0; i < name.n; i++) if (name.s[i] == '/') sl = name.s + i;
+		if (sl && sl + 1 < name.s + name.n && sl > name.s) {
+			dir = (Sv){ name.s, (uint32_t)(sl - name.s) };
+			name = (Sv){ sl + 1, (uint32_t)(name.s + name.n - sl - 1) };
+		}
+	}
+	if (!a->ndwd) {	/* directory 0: the root file's, else the compilation directory */
+		Sv d = dir;
+		if (n) {
+			char *cwd = rget(&a->defs, 4096);
+			if (!getcwd(cwd, 4096)) cwd[0] = 0;
+			d = (Sv){ cwd, (uint32_t)strlen(cwd) };
+		}
+		dw_dir(a, d);
+	}
+	if (n == 0) a->dwd[0] = dir;
+	f->name = name; f->set = 1; f->hasmd5 = (uint8_t)hasmd5;
+	if (hasmd5) memcpy(f->md5, md5, 16);
+	f->dir = n == 0 || !dir.n ? 0 : dw_dir(a, dir);
+	if (!two && n && f->dir == 0 && dir.n) f->dir = dw_dir(a, dir);
+	a->dwtab = 1;
+	return 0;
+}
+
+/* .loc file line [col] [basic_block|prologue_end|epilogue_begin|is_stmt N|isa N|discriminator N|view V] */
+static int d_loc(As *a, const char *p, const char *e)
+{
+	uint64_t fi, ln, col = 0;
+	if (dw_num(a, &p, e, &fi)) return -1;
+	if (fi >= a->ndwf || !a->dwf[fi].set) return err(a, "unassigned file number in '.loc' directive");
+	if (dw_num(a, &p, e, &ln)) return -1;
+	p = ws(p, e);
+	if (p < e && c_digit((unsigned char)*p) && dw_num(a, &p, e, &col)) return -1;
+	if (a->dwlocp) loc_row(a);
+	struct DwLoc *l = &a->dwcur;
+	l->file = (uint32_t)fi; l->line = (uint32_t)ln; l->col = (uint32_t)col;
+	l->flags &= 1; l->isa = 0; l->disc = 0;
+	for (;;) {
+		p = ws(p, e);
+		if (p >= e) break;
+		Sv w = first_word(p, e);
+		p = w.s + w.n;
+		uint64_t v;
+#define LW(lit) (w.n == sizeof lit - 1 && !memcmp(w.s, lit, w.n))
+		if (LW("basic_block")) l->flags |= 2;
+		else if (LW("prologue_end")) l->flags |= 4;
+		else if (LW("epilogue_begin")) l->flags |= 8;
+		else if (LW("is_stmt")) { if (dw_num(a, &p, e, &v)) return -1; if (v > 1) return err(a, "is_stmt value not 0 or 1"); l->flags = (uint8_t)((l->flags & ~1) | v); }
+		else if (LW("isa")) { if (dw_num(a, &p, e, &v)) return -1; l->isa = (uint32_t)v; }
+		else if (LW("discriminator")) { if (dw_num(a, &p, e, &v)) return -1; l->disc = (uint32_t)v; }
+		else if (LW("view")) { p = ws(p, e); while (p < e && *p != ' ' && *p != '\t') p++; }
+		else return err(a, "unknown sub-directive in '.loc' directive");
+#undef LW
+	}
+	a->dwlocp = 1;
+	return 0;
+}
+
+/* the pending .loc becomes a row at the current position */
+static void loc_row(As *a)
+{
+	a->dwlocp = 0;
+	if (a->ndwl == a->dwlcap) {
+		uint32_t nc = a->dwlcap ? a->dwlcap * 2 : 256;
+		struct DwLoc *t = rget(&a->defs, sizeof *t * nc);
+		if (a->ndwl) memcpy(t, a->dwl, sizeof *t * a->ndwl);
+		a->dwl = t; a->dwlcap = nc;
+	}
+	struct DwLoc *l = &a->dwl[a->ndwl++];
+	*l = a->dwcur;
+	l->frag = a->cur; l->off = elf_frag(a->o, a->cur)->size;
+}
+
+/* MCDwarfLineAddr::encode with DWARF v5's line_base -5, line_range 14, opcode_base 13 */
+static void dw_adv(Buf8 *b, int64_t ld, uint64_t ad, int end)
+{
+	enum { BASE = -5, RANGE = 14, OPB = 13, MAXSP = (255 - OPB) / RANGE };
+	if (end) {
+		if (ad == MAXSP) b->p[b->n++] = 8;
+		else if (ad) { b->p[b->n++] = 2; uleb(b, ad); }
+		b->p[b->n++] = 0; b->p[b->n++] = 1; b->p[b->n++] = 1;
+		return;
+	}
+	int copy = 0;
+	uint64_t t = (uint64_t)(ld - BASE);
+	if (t >= RANGE) { b->p[b->n++] = 3; sleb(b, ld); ld = 0; t = (uint64_t)-BASE; copy = 1; }
+	if (!ld && !ad) { b->p[b->n++] = 1; return; }
+	t += OPB;
+	if (ad < 256 + MAXSP) {
+		uint64_t op = t + ad * RANGE;
+		if (op <= 255) { b->p[b->n++] = (uint8_t)op; return; }
+		op = t + (ad - MAXSP) * RANGE;
+		if (op <= 255) { b->p[b->n++] = 8; b->p[b->n++] = (uint8_t)op; return; }
+	}
+	b->p[b->n++] = 2; uleb(b, ad);
+	if (copy) b->p[b->n++] = 1;
+	else b->p[b->n++] = (uint8_t)t;
+}
+
+static uint32_t dw_str(ElfObj *o, uint32_t ls, Sv s)
+{
+	/* .debug_line_str: deduplicated, in order of first use */
+	ElfFrag *f = elf_frag(o, ls);
+	uint32_t off = 0;
+	for (ElfChunk *c = f->head; c; c = c->next) {
+		for (uint32_t i = 0; i < c->used;) {
+			size_t k = strlen((const char *)c->data + i);
+			if (k == s.n && !memcmp(c->data + i, s.s, s.n)) return off + i;
+			i += (uint32_t)k + 1;
+		}
+		off += c->used;
+	}
+	off = (uint32_t)f->size;
+	uint8_t *q = elf_grow(o, ls, s.n + 1);
+	memcpy(q, s.s, s.n); q[s.n] = 0;
+	return off;
+}
+
+static void dwline_finish(As *a)
+{
+	ElfObj *o = a->o;
+	if (a->dwlocp) a->dwlocp = 0;
+	if (!a->ndwf || !a->dwf[0].set) {
+		if (a->ndwf > 1 && a->dwf[1].set) {	/* no root file: file 1 is (MC) */
+			if (!a->ndwf) a->ndwf = 1;
+			a->dwf[0] = a->dwf[1];
+			a->dwf[0].dir = 0;
+		} else { err(a, "no root file for the line table"); return; }
+	}
+	uint32_t sec = elf_section(o, ".debug_line", 11, SHT_PROGBITS, 0, 0, 0);
+	elf_data(o, sec);
+	uint32_t ls = elf_section(o, ".debug_line_str", 15, SHT_PROGBITS, SHF_MERGE | SHF_STRINGS, 1, 0);
+	elf_data(o, ls);
+	int md5 = 1;
+	for (uint32_t i = 0; i < a->ndwf; i++) if (a->dwf[i].set && !a->dwf[i].hasmd5) md5 = 0;
+	size_t cap = 256 + 32 * (size_t)(a->ndwf + a->ndwd) + 48 * (size_t)a->ndwl;
+	Buf8 b = { rget(&a->defs, cap), 0 };
+	uint32_t *sfix = rget(&a->defs, sizeof(uint32_t) * 2 * (a->ndwf + a->ndwd + 1));
+	uint32_t nsfix = 0;
+	b.n = 4;
+	b.p[b.n++] = 5; b.p[b.n++] = 0; b.p[b.n++] = 8; b.p[b.n++] = 0;
+	size_t hl = b.n; b.n += 4;
+	static const uint8_t std[] = { 1, 1, 1, 0xfb, 14, 13, 0, 1, 1, 1, 1, 0, 0, 0, 1, 0, 0, 1 };
+	memcpy(b.p + b.n, std, sizeof std); b.n += sizeof std;
+	b.p[b.n++] = 1; b.p[b.n++] = 1; b.p[b.n++] = 0x1f;
+	uleb(&b, a->ndwd);
+	for (uint32_t i = 0; i < a->ndwd; i++) {
+		sfix[2 * nsfix] = (uint32_t)b.n; sfix[2 * nsfix + 1] = dw_str(o, ls, a->dwd[i]); nsfix++;
+		memset(b.p + b.n, 0, 4); b.n += 4;
+	}
+	b.p[b.n++] = (uint8_t)(2 + md5);
+	b.p[b.n++] = 1; b.p[b.n++] = 0x1f; b.p[b.n++] = 2; b.p[b.n++] = 0x0f;
+	if (md5) { b.p[b.n++] = 5; b.p[b.n++] = 0x1e; }
+	uleb(&b, a->ndwf);
+	for (uint32_t i = 0; i < a->ndwf; i++) {
+		struct DwFile *f = &a->dwf[i];
+		sfix[2 * nsfix] = (uint32_t)b.n; sfix[2 * nsfix + 1] = dw_str(o, ls, f->name); nsfix++;
+		memset(b.p + b.n, 0, 4); b.n += 4;
+		uleb(&b, f->dir);
+		if (md5) { memcpy(b.p + b.n, f->md5, 16); b.n += 16; }
+	}
+	uint32_t hlen = (uint32_t)(b.n - hl - 4);
+	memcpy(b.p + hl, &hlen, 4);
+	/* sequences: one per section, in order of first row */
+	uint32_t *afix = rget(&a->defs, sizeof(uint32_t) * 2 * (a->ndwl + 1));
+	uint32_t nafix = 0;
+	uint8_t *done = rget(&a->defs, a->ndwl + 1);
+	memset(done, 0, a->ndwl + 1);
+	for (uint32_t s = 0; s < a->ndwl; s++) {
+		if (done[s]) continue;
+		uint32_t fr = a->dwl[s].frag;
+		uint32_t file = 1, line = 1, col = 0, disc = 0, isa = 0, flags = 1;
+		uint64_t last = 0; int first = 1;
+		for (uint32_t i = s; i < a->ndwl; i++) {
+			struct DwLoc *l = &a->dwl[i];
+			if (l->frag != fr) {
+				if (elf_frag(o, l->frag)->sec == elf_frag(o, fr)->sec) { err(a, "line rows in subsections are not supported"); return; }
+				continue;
+			}
+			done[i] = 1;
+			if (b.n + 64 > cap) { err(a, "line table overflow"); return; }
+			int64_t ld = (int64_t)l->line - line;
+			if (file != l->file) { file = l->file; b.p[b.n++] = 4; uleb(&b, file); }
+			if (col != l->col) { col = l->col; b.p[b.n++] = 5; uleb(&b, col); }
+			if (disc != l->disc) {
+				disc = l->disc;
+				Buf8 t = { b.p + b.n + 2, 0 }; uleb(&t, disc);
+				b.p[b.n++] = 0; b.p[b.n++] = (uint8_t)(t.n + 1);
+				memmove(b.p + b.n + 1, b.p + b.n, t.n); b.p[b.n] = 4; b.n += t.n + 1;
+			}
+			if (isa != l->isa) { isa = l->isa; b.p[b.n++] = 12; uleb(&b, isa); }
+			if ((l->flags ^ flags) & 1) { flags = l->flags; b.p[b.n++] = 6; }
+			if (l->flags & 2) b.p[b.n++] = 7;
+			if (l->flags & 4) b.p[b.n++] = 10;
+			if (l->flags & 8) b.p[b.n++] = 11;
+			if (first) {
+				b.p[b.n++] = 0; b.p[b.n++] = 9; b.p[b.n++] = 2;
+				afix[2 * nafix] = (uint32_t)b.n; afix[2 * nafix + 1] = i; nafix++;
+				memset(b.p + b.n, 0, 8); b.n += 8;
+				dw_adv(&b, ld, 0, 0);
+				first = 0;
+			} else dw_adv(&b, ld, l->off - last, 0);
+			disc = 0;
+			line = l->line; last = l->off;
+		}
+		dw_adv(&b, 0, elf_frag(o, fr)->size - last, 1);
+	}
+	uint32_t len = (uint32_t)(b.n - 4);
+	memcpy(b.p, &len, 4);
+	uint64_t at = elf_frag(o, sec)->size;
+	uint8_t *q = elf_grow(o, sec, b.n);
+	memcpy(q, b.p, b.n);
+	uint32_t lsym = elf_sec(o, elf_frag(o, ls)->sec)->sym;
+	for (uint32_t i = 0; i < nsfix; i++)
+		elf_fixup(o, sec, at + sfix[2 * i], q + sfix[2 * i], R_AARCH64_ABS32, (Val){ lsym, 0, (int64_t)sfix[2 * i + 1] });
+	for (uint32_t i = 0; i < nafix; i++) {
+		struct DwLoc *l = &a->dwl[afix[2 * i + 1]];
+		uint32_t y = elf_sym_anon(o, ".Ltmp", 5);
+		elf_symp(o, y)->flags |= ESYM_TEMP;
+		elf_define(o, y, l->frag, l->off);
+		elf_fixup(o, sec, at + afix[2 * i], q + afix[2 * i], R_AARCH64_ABS64, (Val){ y, 0, 0 });
+	}
+}
+
+/* .symver orig, name@[@[@]]ver[, remove|local|hidden]: an alias defined at
+   the end (MC's ELFObjectWriter::executePostLayoutBinding) */
+static int d_symver(As *a, const char *p, const char *e)
+{
+	Sv o, v;
+	if (parse_name(a, &p, e, &o)) return -1;
+	p = ws(p, e);
+	if (p >= e || *p != ',') return err(a, "expected a comma");
+	p = ws(p + 1, e);
+	const char *q = p;
+	while (q < e && *q != ',' && *q != ' ' && *q != '\t') q++;
+	v = (Sv){ p, (size_t)(q - p) };
+	const char *at = memchr(v.s, '@', v.n);
+	if (!at) return err(a, "expected a '@' in the name");
+	int rm = 0;
+	p = ws(q, e);
+	if (p < e && *p == ',') {
+		Sv w = trim(p + 1, e);
+		if (w.n == 6 && !memcmp(w.s, "remove", 6)) rm = 1;
+		else if (!(w.n == 5 && !memcmp(w.s, "local", 5)) && !(w.n == 6 && !memcmp(w.s, "hidden", 6)))
+			return err(a, "expected 'remove'");
+	}
+	uint32_t yo = sym(a, o.s, o.n);
+	elf_reg(a->o, yo);
+	uint32_t yv = sym(a, v.s, v.n);
+	elf_reg(a->o, yv);
+	if (a->nsv == a->svcap) {
+		uint32_t nc = a->svcap ? a->svcap * 2 : 16;
+		void *t = rget(&a->defs, sizeof *a->sv * nc);
+		if (a->nsv) memcpy(t, a->sv, sizeof *a->sv * a->nsv);
+		a->sv = t; a->svcap = nc;
+	}
+	a->sv[a->nsv].orig = yo; a->sv[a->nsv].ver = yv; a->sv[a->nsv].rm = rm;
+	a->nsv++;
+	return 0;
+}
+
+static void symver_finish(As *a)
+{
+	ElfObj *o = a->o;
+	for (uint32_t i = 0; i < a->nsv; i++) {
+		uint32_t yo = a->sv[i].orig, yv = a->sv[i].ver;
+		ElfSym *s = elf_symp(o, yo), *t = elf_symp(o, yv);
+		if (a->sv[i].rm == 2) {	/* .weakref yo -> yv */
+			if (t->flags & ESYM_DEFINED) {
+				elf_define(o, yo, t->frag, t->value);
+				s->flags |= (t->flags & ESYM_ABS) | ESYM_NOSYMTAB;
+				s->flags &= (uint8_t)~ESYM_USED;
+				s->alias = t->alias ? t->alias : yv;
+				continue;
+			}
+			/* only referenced through the alias: weak */
+			if (!t->reg && !(t->flags & ESYM_BINDSET)) t->bind = STB_WEAK;
+			ElfFix *fx = (ElfFix *)o->fixes.base;
+			for (uint32_t k = 0; k < o->nfix; k++) {
+				if (fx[k].v.add == yo) { fx[k].v.add = yv; elf_reg(o, yv); }
+				if (fx[k].v.sub == yo) { fx[k].v.sub = yv; elf_reg(o, yv); }
+			}
+			s->flags = (uint8_t)((s->flags & ~ESYM_USED) | ESYM_NOSYMTAB);
+			continue;
+		}
+		int def = (s->flags & ESYM_DEFINED) != 0, rm = (int)a->sv[i].rm;
+		const char *at = memchr(t->name, '@', t->len);
+		if (at && t->len - (size_t)(at - t->name) >= 3 && !memcmp(at, "@@@", 3)) {
+			/* name@@@v: @@ when defined here, @ otherwise */
+			size_t k = (size_t)(at - t->name);
+			char *n = rget(&a->defs, t->len);
+			memcpy(n, t->name, k + 1);
+			if (def) { memcpy(n + k + 1, at + 2, t->len - k - 2); }
+			else { memcpy(n + k + 1, at + 3, t->len - k - 3); }
+			t->name = n; t->len -= def ? 1 : 2;
+			rm = 1;
+		}
+		if (def) {
+			elf_define(o, yv, s->frag, s->value);
+			t->flags |= s->flags & ESYM_ABS;
+			t->bind = s->bind; t->type = s->type; t->vis = s->vis;
+			t->alias = s->alias ? s->alias : yo;
+			t->flags |= ESYM_BINDSET;
+		}
+		if (!def || rm) {
+			/* references go to the versioned name; the original disappears */
+			ElfFix *fx = (ElfFix *)o->fixes.base;
+			for (uint32_t k = 0; k < o->nfix; k++) {
+				if (fx[k].v.add == yo) fx[k].v.add = yv;
+				if (fx[k].v.sub == yo) fx[k].v.sub = yv;
+			}
+			if (s->flags & ESYM_USED) t->flags |= ESYM_USED;
+			s->flags = (uint8_t)((s->flags & ~ESYM_USED) | ESYM_NOSYMTAB);
+		}
+	}
 }
 
 int as_end(As *a)
@@ -1942,6 +3021,13 @@ int as_end(As *a)
 			} else if (!v.add && !v.sub) elf_define_abs(o, vr->sym, (uint64_t)v.c);
 			else { err(a, "unsupported variable '%s'", s->name); break; }
 		}
+	}
+	if (!a->err && a->nfde) cfi_finish(a);
+	if (!a->err && a->dwtab) dwline_finish(a);
+	if (!a->err && a->nsv) symver_finish(a);
+	if (!a->err && a->nasg) {
+		o->addrsig = a->asg;	/* in a->defs: lives until the next run, after the object is written */
+		o->naddrsig = a->nasg;
 	}
 	return a->err ? -1 : 0;
 }
