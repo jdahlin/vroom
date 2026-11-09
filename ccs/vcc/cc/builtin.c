@@ -609,6 +609,67 @@ static uint32_t generic_bitcount(cc *c, int id, uint32_t loc)
 	return r;
 }
 
+/*
+ * __builtin_shufflevector(a, b, i...): lanes of a then b picked by constant
+ * indices (-1: undefined, here 0), a vector of as many lanes;
+ * __builtin_convertvector(v, T): each lane converted to T's lane type.
+ * Both lowered lane by lane in emit (builtin.c).
+ */
+VPRIV uint32_t vector_builtin(cc *c, bool shuffle, uint32_t loc)
+{
+	vec args;
+	uint32_t a, b;
+	qty at, rt;
+
+	vinit(&args);
+	expect(c, T_LPAREN, "'('");
+	a = rvalue(c, assign_expr(c));
+	at = QUNQ(N(a)->ty);
+	expect(c, T_COMMA, "','");
+	if (!shuffle) {
+		rt = type_name(c);
+		expect(c, T_RPAREN, "')'");
+		if (!is_vector(c, at) || !is_vector(c, rt) ||
+		    ty_size(c, at) / ty_size(c, T(c, at)->base) != ty_size(c, rt) / ty_size(c, T(c, rt)->base)) {
+			cc_error(c, loc, "first two arguments to __builtin_convertvector must have the same number of elements");
+			return mk_int(c, 0, prim(TY_INT), loc);
+		}
+		vpush(c, &args, a);
+		return mk_builtin(c, BI_CONVERTVECTOR, rt, loc, &args);
+	}
+	b = rvalue(c, assign_expr(c));
+	vpush(c, &args, a);
+	vpush(c, &args, b);
+	if (!is_vector(c, at) || !compatible(c, at, QUNQ(N(b)->ty))) {
+		cc_error(c, loc, "first two arguments to '__builtin_shufflevector' must have the same type");
+		while (accept(c, T_COMMA))
+			assign_expr(c);
+		expect(c, T_RPAREN, "')'");
+		return mk_int(c, 0, prim(TY_INT), loc);
+	}
+	{
+		qty et = T(c, at)->base;
+		uint64_t n = ty_size(c, at) / ty_size(c, et), k = 0;
+
+		while (accept(c, T_COMMA)) {
+			uint32_t ix = assign_expr(c);
+			i128 v = 0;
+
+			if (!const_int(c, ix, &v) || v < -1 || v >= (i128)(2 * n))
+				cc_error(c, N(ix)->loc, "index for __builtin_shufflevector must be a constant integer in range");
+			vpush(c, &args, mk_int(c, v, prim(TY_INT), N(ix)->loc));
+			k++;
+		}
+		expect(c, T_RPAREN, "')'");
+		if (k == 0 || (k & (k - 1)) || k * ty_size(c, et) > 64) {
+			cc_error(c, loc, "__builtin_shufflevector: the number of indices must be a power of two");
+			return mk_int(c, 0, prim(TY_INT), loc);
+		}
+		rt = ty_vector(c, et, (uint32_t)(k * ty_size(c, et)));
+	}
+	return mk_builtin(c, BI_SHUFFLEVECTOR, rt, loc, &args);
+}
+
 VPRIV uint32_t builtin_call(cc *c, const builtin *b, uint32_t loc)
 {
 	vec args;

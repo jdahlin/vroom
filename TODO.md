@@ -541,8 +541,9 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
   `= {}`, `[[...]]` standard attributes, `#embed` (pp).
   *Validate:* T1 `c23-*.c` with `vcc-flags: -std=c23`; T4 that the same
   keywords are identifiers under `-std=c99` (`int bool = 1;`).
-- [ ] **Builtins**: `__builtin_shufflevector`, `__builtin_convertvector`
-  [P]; audit the full list against clang's `Builtins.td` for the target
+- [ ] **Builtins**: ~~`__builtin_shufflevector`, `__builtin_convertvector`~~ (done:
+  tests/vcc/vector_builtins.c; vector diagnostics spell clang's unnamed form, without the
+  `(vector of N 'T' values)` note and typedef names) [P]; audit the full list against clang's `Builtins.td` for the target
   (generate a list, try each).
   *Validate:* T1 per builtin; `bench/vcc-builtins.py` that compiles a
   generated use of each clang builtin and reports unknowns.

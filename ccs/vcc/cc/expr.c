@@ -426,6 +426,10 @@ static __attribute__((noinline)) uint32_t primary_kw(cc *c, int kw, uint32_t loc
 		next(c);
 		return builtin_call(c, &tc, loc);
 	}
+	if (kw == KW___builtin_shufflevector || kw == KW___builtin_convertvector) {
+		next(c);
+		return vector_builtin(c, kw == KW___builtin_shufflevector, loc);
+	}
 	if (kw == KW___builtin_choose_expr) {
 		static const builtin ch = { "", BI_CHOOSE, 1, "i" };
 

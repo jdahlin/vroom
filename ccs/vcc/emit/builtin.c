@@ -677,6 +677,40 @@ VPRIV val gen_builtin(ecx *e, uint32_t n)
 	val v;
 
 	switch (x->aux) {
+	case BI_SHUFFLEVECTOR: case BI_CONVERTVECTOR: {
+		/* lane by lane through a frame slot (vectors are addresses here) */
+		qty at = N(arg[0])->ty, ae = T(c, at)->base, re = T(c, x->ty)->base;
+		unsigned na = (unsigned)(tsize(c, at) / tsize(c, ae)), nr = (unsigned)(tsize(c, x->ty) / tsize(c, re));
+		val a = gen(e, arg[0]), b = x->aux == BI_SHUFFLEVECTOR ? gen(e, arg[1]) : vconst(0);
+		int ra = toreg(e, &a), rb = x->aux == BI_SHUFFLEVECTOR ? toreg(e, &b) : -1;
+		int32_t sl = slot(e, tsize(c, x->ty), 16);
+		int rd = treg(e);
+
+		opi(e, I_ADDI, 1, rd, FRAME, sl);
+		for (unsigned i = 0; i < nr; i++) {
+			lval d = { .k = L_REG, .r = (uint8_t)rd, .off = (int64_t)i * (int64_t)tsize(c, re), .align = talign(c, re) };
+			val v;
+
+			if (x->aux == BI_SHUFFLEVECTOR) {
+				int64_t k = (int64_t)c->ipool[N(arg[2 + i])->a];
+				lval s = { .k = L_REG, .r = (uint8_t)(k < (int64_t)na ? ra : rb),
+					   .off = (k < (int64_t)na ? k : k - (int64_t)na) * (int64_t)tsize(c, ae), .align = talign(c, ae) };
+
+				v = k < 0 ? vconst(0) : load(e, &s, ae);
+			} else {
+				lval s = { .k = L_REG, .r = (uint8_t)ra, .off = (int64_t)i * (int64_t)tsize(c, ae), .align = talign(c, ae) };
+				int ck = is_flt(c, ae) ? (is_flt(c, re) ? CK_F2F : CK_F2I) : is_flt(c, re) ? CK_I2F : CK_INT;
+
+				v = cast(e, load(e, &s, ae), ae, re, ck);
+			}
+			store(e, &d, re, &v);
+			val_free(e, &v);
+		}
+		tfree(e, ra);
+		if (rb >= 0)
+			tfree(e, rb);
+		return vreg(rd);
+	}
 	case BI_CONSTANT_P: {
 		/*
 		 * clang: 1 if the front end folds the operand (a pointer only as a

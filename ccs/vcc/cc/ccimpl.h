@@ -291,6 +291,7 @@ bool cc_eval(cc *c, uint32_t n, cval *v);
 VPRIV bool eval_builtin(cc *c, const node *x, cval *v);
 VPRIV uint32_t args_list(cc *c, vec *args);
 VPRIV uint32_t mk_builtin(cc *c, int id, qty ty, uint32_t loc, const vec *args);
+VPRIV uint32_t vector_builtin(cc *c, bool shuffle, uint32_t loc);
 VPRIV uint32_t offsetof_expr(cc *c, uint32_t loc);
 VPRIV uint32_t builtin_call(cc *c, const builtin *b, uint32_t loc);
 /* expr.c */

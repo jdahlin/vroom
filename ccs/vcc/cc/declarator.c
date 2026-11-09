@@ -63,6 +63,17 @@ static void param_list(cc *c, dop *op)
 			attribute_list(c, &d.at);
 			t = apply_declarator(c, ds.ty, first, nops);
 			c->ndops = first;
+			{
+				/* int __attribute__((vector_size(16))) p: a vector parameter, as a declaration */
+				uint32_t vs = d.at.vecsize ? d.at.vecsize : ds.at.vecsize;
+
+				if (vs) {
+					if (!is_arith(c, t) || ty_size(c, t) > vs || vs % ty_size(c, t))
+						cc_error(c, d.loc, "invalid vector element type");
+					else
+						t = QT(QI(ty_vector(c, t, vs)), QQ(t));
+				}
+			}
 			/* adjustments (C11 6.7.6.3p7-8) */
 			uint32_t vsize = 0;
 
