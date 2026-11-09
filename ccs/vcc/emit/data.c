@@ -344,8 +344,19 @@ VPRIV void emit_object(ecx *e, uint32_t s)
 		if (a->section) {
 			tb_s(b, c->strs[a->section - 1].s);
 		} else {
+			/* a quoted name: the whole section name in quotes, as clang */
+			bool q = sym_quoted(c, s);
+			size_t at;
+
+			if (q)
+				tb_c(b, '"');
 			tb_s(b, all_const(c, y->ty) ? ".rodata." : zero ? ".bss." : ".data.");
+			at = b->n;
 			sym_name(c, b, s);
+			if (q) {
+				memmove(b->p + at, b->p + at + 1, b->n - at - 1);
+				b->n--;
+			}
 		}
 		tb_s(b, ",\"\",@\n");
 		if (global) {

@@ -59,6 +59,7 @@ typedef struct wsym {
 	uint8_t kind;		/* WS_*, WS_NONE until known */
 	bool global, weak, hidden, defined, reg, used_reloc, temp;
 	bool set;		/* defined by .set (clang: exported, no-strip) */
+	bool nostrip;		/* .no_dead_strip: no-strip, exported */
 	int32_t sig;		/* signature (.functype), -1 none */
 	int32_t alias;		/* `a = b`: b, -1 none */
 	int32_t seg;		/* data: segment; function: its wfunc; -1 */
@@ -105,6 +106,10 @@ typedef struct wmod {
 	uint32_t nsig, csig;
 	wseg *seg;
 	uint32_t nseg, cseg;
+	wseg *cust;		/* custom sections (.custom_section.NAME): bytes only */
+	uint32_t ncust, ccust;
+	struct winit { uint32_t prio, sym; } *init;	/* .init_array entries: the init functions */
+	uint32_t ninit, cinit;
 	wfunc *fn;
 	uint32_t nfn, cfn;
 	char *err;

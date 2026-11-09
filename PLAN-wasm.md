@@ -198,8 +198,24 @@ explorer-sidan.
 - arm64 oförändrat: `vcc-same.py` 13 167/13 167 mot bygget före wasm,
   `vcc-ctests` 1 743/1 743, bygget fil för fil utan varningar; emscripten-bygget
   (`ccs/wasm/build.sh`) tar med de nya filerna.
-- Återstår i W5: generatorn direkt till modellen (utan text), `.init_array`
-  (konstruktorer), TLS, egna sektioner, `vas` i vccd.
+- Tillägg (i `claude/wasm-w8-linker`): konstruktorer. Generatorn tappade
+  `__attribute__((constructor))` tyst för wasm; nu `.init_array[.N]`, som
+  assemblern gör till objektets init-funktioner (linking-delsektion 6, i
+  sektionernas ordning som LLVM); prioriteten `constructor(N)` sparas i
+  `attrs.prio` (front end tappade den, även för arm64, som nu skriver
+  `.init_array.N` som clang). Assemblern tar också egna sektioner
+  (`.custom_section.X`; `producers` och `target_features` sist),
+  `.no_dead_strip` (tabellimporten clang -O0 tvingar fram), segmentflaggan
+  `"S"` och symboler som minnesoffset (`i32.store x`, MEMORY_ADDR_LEB64):
+  clangs egen `-O0`-`.s` ger nu samma objekt som clang. Test
+  `tests/vcc/ctor_priority.c` (arm64 och wasm); destruktorer ger fel för
+  wasm (clang gör dem till `__cxa_atexit`-anrop).
+  Namn utanför ASCII skrivs inom citattecken (`"привет"`, sektionen
+  `".data.привет"`) som clang -S; LLVM:s wasm-assembler tar inte tillbaka
+  dem (clangs egen `.s` faller också), så `vcc-wasm.py` bygger då vccs sida
+  med `vpp -c` (tcc/83_utf8_in_identifiers godkänt).
+- Återstår i W5: generatorn direkt till modellen (utan text), destruktorer,
+  TLS, `vas` i vccd.
 
 ### W1, W2 (2026-11-09): klara
 - W1 omplanerat: i stället för att lyfta ut vikning och inlining ur

@@ -159,6 +159,11 @@ static int resolve(lay *L, wrel *r, uint64_t *val)
 			: r->type == R_ADDR_I64 ? R_MEMORY_ADDR_I64 : R_MEMORY_ADDR_I32;
 		*val = b->defined && b->seg >= 0 ? m->seg[b->seg].vaddr + b->off + (uint64_t)r->addend : 0;
 		return 0;
+	case R_MEMORY_ADDR_LEB: case R_MEMORY_ADDR_LEB64:
+		if (b->kind != WS_DATA && b->kind != WS_NONE)
+			return was_error(m, "'%s' as a memory offset, which is not data", y->name);
+		*val = b->defined && b->seg >= 0 ? m->seg[b->seg].vaddr + b->off + (uint64_t)r->addend : 0;
+		return 0;
 	case R_FUNCTION_INDEX_LEB:
 		if (b->kind != WS_FUNCTION)
 			return was_error(m, "call to '%s', which is not a function", y->name);
@@ -534,6 +539,15 @@ int wasm_write(wmod *m, vbuf *o)
 		sec_end(o, at);
 		data_idx = secidx++;
 	}
+	/* custom sections, but producers and target_features go last (as LLVM) */
+	for (uint32_t k = 0; k < m->ncust; k++)
+		if (strcmp(m->cust[k].name, "producers") && strcmp(m->cust[k].name, "target_features")) {
+			size_t at = sec_begin(o, SEC_CUSTOM, m->cust[k].name);
+
+			vbuf_put(o, m->cust[k].data.p, m->cust[k].data.n);
+			sec_end(o, at);
+			secidx++;
+		}
 	/* linking: the symbol table, then the segments */
 	{
 		size_t at = sec_begin(o, SEC_CUSTOM, "linking"), sub;
@@ -558,7 +572,7 @@ int wasm_write(wmod *m, vbuf *o)
 					fl |= WF_HIDDEN;
 				if (!def)
 					fl |= WF_UNDEFINED;
-				if ((bs->kind == WS_TABLE && L.nelems) || y->set)
+				if ((bs->kind == WS_TABLE && L.nelems) || y->set || y->nostrip)
 					fl |= WF_EXPORTED | WF_NO_STRIP;
 				put8(&b, bs->kind);
 				uleb(&b, fl);
@@ -589,6 +603,28 @@ int wasm_write(wmod *m, vbuf *o)
 			}
 			sub_size(o, b.n);
 			vbuf_put(o, b.p, b.n);
+			b.n = 0;
+		}
+		if (m->ninit) {
+			/* init functions: grouped by section (priority) in the order the
+			   sections first appear, as LLVM; the linker sorts by priority */
+			put8(o, 6);
+			uleb(&b, m->ninit);
+			for (uint32_t k = 0; k < m->ninit; k++) {
+				uint32_t j = 0;
+
+				while (j < k && m->init[j].prio != m->init[k].prio)
+					j++;
+				if (j < k)
+					continue;	/* this priority's section came earlier */
+				for (j = k; j < m->ninit; j++)
+					if (m->init[j].prio == m->init[k].prio) {
+						uleb(&b, m->init[j].prio);
+						uleb(&b, m->sym[m->init[j].sym].symidx);
+					}
+			}
+			sub_size(o, b.n);
+			vbuf_put(o, b.p, b.n);
 		}
 		free(b.p);
 		(void)sub;
@@ -598,6 +634,14 @@ int wasm_write(wmod *m, vbuf *o)
 		reloc_section(o, &L, "reloc.CODE", code_idx, crel, cn, cbase, L.nfuncs);
 	if (m->nseg)
 		reloc_section(o, &L, "reloc.DATA", data_idx, drel, dn, dbase, m->nseg);
+	for (int last = 0; last < 2; last++)
+		for (uint32_t k = 0; k < m->ncust; k++)
+			if (!strcmp(m->cust[k].name, last ? "target_features" : "producers")) {
+				size_t at = sec_begin(o, SEC_CUSTOM, m->cust[k].name);
+
+				vbuf_put(o, m->cust[k].data.p, m->cust[k].data.n);
+				sec_end(o, at);
+			}
 	r = 0;
 out:
 	free(lb.p);

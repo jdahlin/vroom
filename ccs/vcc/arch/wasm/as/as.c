@@ -423,7 +423,9 @@ static const winsn *insn_find(const char *s, size_t n)
 
 typedef struct was {
 	wmod *m;
-	int cur;		/* 0 none, 1 a text section, 2 a data segment */
+	int cur;		/* 0 none, 1 a text section, 2 a data segment, 3 .init_array */
+	uint32_t prio;		/* .init_array's priority */
+	bool custom;		/* the data segment is a custom section (m->cust) */
 	int32_t seg;		/* the data segment */
 	int32_t fn;		/* the function being assembled, -1 */
 	int32_t label;		/* the last label in the text section */
@@ -613,9 +615,10 @@ static int instruction(was *a, const winsn *w, lx *l)
 	}
 	case I_MEM: {
 		int64_t off = 0, al = w->align;
+		int32_t os = -1;
 
 		if (!at_end(l)) {
-			if (!number(l, &off))
+			if (!expr(m, l, &off, &os))
 				return was_error(m, "%s: expected an offset", w->name);
 			if (accept(l, ':')) {
 				n = ident(l, &t);
@@ -624,7 +627,14 @@ static int instruction(was *a, const winsn *w, lx *l)
 			}
 		}
 		uleb(b, (uint64_t)al);
-		uleb(b, (uint64_t)off);
+		if (os >= 0) {
+			/* a symbol's address as the offset (clang -O0) */
+			sym_use(a, (uint32_t)os, WS_NONE);
+			fn_rel(a, R_MEMORY_ADDR_LEB64, (uint32_t)os, off);
+			hole(b, 10);
+		} else {
+			uleb(b, (uint64_t)off);
+		}
 		break;
 	}
 	case I_MEMIDX:
@@ -646,7 +656,7 @@ static int instruction(was *a, const winsn *w, lx *l)
 
 /* ---------------- data ---------------- */
 
-static wseg *curseg(was *a) { return &a->m->seg[a->seg]; }
+static wseg *curseg(was *a) { return a->custom ? &a->m->cust[a->seg] : &a->m->seg[a->seg]; }
 
 static int data_value(was *a, lx *l, int size)
 {
@@ -660,6 +670,8 @@ static int data_value(was *a, lx *l, int size)
 		if (!expr(m, l, &v, &s))
 			return was_error(m, "expected a value");
 		if (s >= 0) {
+			if (a->custom)
+				return was_error(m, "a symbol in a custom section");
 			if (size != 8 && size != 4)
 				return was_error(m, "a symbol in a %d-byte value", size);
 			sym_use(a, (uint32_t)s, WS_NONE);
@@ -732,15 +744,46 @@ static int section(was *a, const char *s, size_t n)
 	wmod *m = a->m;
 
 	a->fn = -1;
+	a->custom = false;
 	if ((n >= 5 && !memcmp(s, ".text", 5) && (n == 5 || s[5] == '.'))) {
 		a->cur = 1;
 		a->label = -1;
 		return 0;
 	}
-	if (n >= 11 && !memcmp(s, ".init_array", 11))
-		return was_error(m, ".init_array is not supported yet (PLAN-wasm.md W5)");
-	if (n >= 16 && !memcmp(s, ".custom_section.", 16))
-		return was_error(m, "custom sections are not supported yet");
+	if (n >= 11 && !memcmp(s, ".init_array", 11) && (n == 11 || s[11] == '.')) {
+		/* not a segment: its pointers become the linking section's init functions */
+		a->cur = 3;
+		a->prio = 65535;
+		if (n > 12) {
+			a->prio = 0;
+			for (size_t i = 12; i < n; i++) {
+				if (s[i] < '0' || s[i] > '9' || a->prio > 6553500)
+					return was_error(m, "bad .init_array priority");
+				a->prio = a->prio * 10 + (uint32_t)(s[i] - '0');
+			}
+		}
+		return 0;
+	}
+	if (n > 16 && !memcmp(s, ".custom_section.", 16)) {
+		uint32_t i;
+
+		s += 16, n -= 16;
+		for (i = 0; i < m->ncust; i++)
+			if (strlen(m->cust[i].name) == n && !memcmp(m->cust[i].name, s, n))
+				break;
+		if (i == m->ncust) {
+			GROW(m->cust, m->ncust, m->ccust);
+			memset(&m->cust[i], 0, sizeof(wseg));
+			m->cust[i].name = malloc(n + 1);
+			memcpy(m->cust[i].name, s, n);
+			m->cust[i].name[n] = 0;
+			m->ncust++;
+		}
+		a->cur = 2;
+		a->custom = true;
+		a->seg = (int32_t)i;
+		return 0;
+	}
 	if (n >= 6 && (!memcmp(s, ".tdata", 6) || !memcmp(s, ".tbss", 5)))
 		return was_error(m, "thread-local data is not supported yet");
 	for (uint32_t i = 0; i < m->nseg; i++)
@@ -791,9 +834,21 @@ static int directive(was *a, const char *d, size_t dn, lx *l)
 	if (IS(".section")) {
 		ws(l);
 		s = l->p;
-		while (l->p < l->e && *l->p != ',' && *l->p != ' ' && *l->p != '\t')
-			l->p++;
-		return section(a, s, (size_t)(l->p - s));
+		if (l->p < l->e && *l->p == '"') {
+			n = ident(l, &s);	/* a quoted name */
+		} else {
+			while (l->p < l->e && *l->p != ',' && *l->p != ' ' && *l->p != '\t')
+				l->p++;
+			n = (size_t)(l->p - s);
+		}
+		if (section(a, s, n))
+			return -1;
+		/* flags: S, a segment of strings */
+		if (accept(l, ',') && accept(l, '"'))
+			while (l->p < l->e && *l->p != '"')
+				if (*l->p++ == 'S' && a->cur == 2 && !a->custom)
+					curseg(a)->flags |= 1;
+		return 0;
 	}
 	if (IS(".text"))
 		return section(a, ".text", 5);
@@ -940,8 +995,37 @@ static int directive(was *a, const char *d, size_t dn, lx *l)
 		}
 		return 0;
 	}
-	if (IS(".file") || IS(".ident") || IS(".addrsig") || IS(".addrsig_sym") || IS(".no_dead_strip"))
+	if (IS(".no_dead_strip")) {
+		/* kept by the linker: NO_STRIP (and EXPORTED, for emscripten) */
+		const char *t;
+		size_t tn = ident(l, &t);
+		uint32_t k;
+
+		if (!tn)
+			return was_error(m, ".no_dead_strip: expected a symbol");
+		k = was_sym(m, t, tn);
+		was_reg(m, k);
+		m->sym[k].nostrip = true;
+		if (tn == 25 && !memcmp(t, "__indirect_function_table", 25))
+			m->sym[k].kind = WS_TABLE;
 		return 0;
+	}
+	if (IS(".file") || IS(".ident") || IS(".addrsig") || IS(".addrsig_sym"))
+		return 0;
+	if (a->cur == 3) {
+		/* .init_array: function pointers */
+		if (!(IS(".quad") || IS(".int64") || IS(".long") || IS(".int32") || IS(".int")))
+			return was_error(m, "%.*s in .init_array", (int)dn, d);
+		do {
+			if (!expr(m, l, &v, &sy) || sy < 0 || v)
+				return was_error(m, ".init_array: expected a function");
+			sym_use(a, (uint32_t)sy, WS_FUNCTION);
+			m->sym[sy].used_reloc = true;
+			GROW(m->init, m->ninit, m->cinit);
+			m->init[m->ninit++] = (struct winit){ a->prio, (uint32_t)sy };
+		} while (accept(l, ','));
+		return 0;
+	}
 	/* data */
 	if (a->cur != 2)
 		return was_error(m, "%.*s outside a data section", (int)dn, d);
@@ -990,6 +1074,8 @@ static int label(was *a, uint32_t s)
 		y->kind = WS_FUNCTION;
 		a->label = (int32_t)s;
 	} else if (a->cur == 2) {
+		if (a->custom)
+			return was_error(m, "a label in a custom section ('%s')", y->name);
 		y->kind = WS_DATA;
 		y->seg = a->seg;
 		y->off = curseg(a)->data.n;
@@ -1067,6 +1153,12 @@ static void mod_free(wmod *m)
 	free(m->ci_sig);
 	free(m->sig);
 	free(m->seg);
+	free(m->init);
+	for (uint32_t i = 0; i < m->ncust; i++) {
+		free(m->cust[i].name);
+		free(m->cust[i].data.p);
+	}
+	free(m->cust);
 	free(m->fn);
 }
 

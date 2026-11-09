@@ -131,11 +131,17 @@ def one(t):
         if rc and all('call_indirect' in l for l in re.findall(r'error: .*\n(.*)', err.decode(errors='replace'))):
             # LLVM's assembler checks call_indirect's index against an i32 table (clang's own -S fails the same way)
             rc, _, err = sh([CL, TGT, '-Wa,--no-type-check', '-c', f'{wd}/vcc.s', '-o', f'{wd}/vcc.o'])
+        quoted = False
+        if rc and re.search(r'error: (Unexpected token in operand|Expected label after \.type directive, got): "', err.decode(errors='replace')):
+            # quoted (non-ASCII) names, as clang -S writes them, which LLVM's wasm
+            # assembler does not take back: vcc's own assembler builds the object
+            rc, _, err = sh([VPP, '-c'] + vfl + [path, '-o', f'{wd}/vcc.o'], cwd=cwd)
+            quoted = True
         if rc:
             e = err.decode(errors='replace')
             m = re.search(r'error: (.*)', e)
             return t, 'fail', 'as', re.sub(r'\d+', 'N', m.group(1)) if m else ct.first_err(e)
-        if OBJCMP:
+        if OBJCMP and not quoted:
             # vcc's object for the same text, byte for byte against clang's
             rc, _, err = sh([VPP, '-c'] + vfl + [path, '-o', f'{wd}/vccobj.o'], cwd=cwd)
             if rc:
