@@ -96,7 +96,7 @@ PP_OBJ  = $(call o,$(PP_SRC)) $(SPLIT_OBJ)
 mod = $(if $(VCC_UNITY),$(OBJ)/unity/$(1).o,$(call o,$($(1)_SRC)))
 AS_SRC  = $(AS_FILES) $(as_SRC) $(obj_SRC)
 AS_OBJ  = $(call o,$(AS_FILES)) $(call mod,as) $(call mod,obj)
-LD_SRC  = vcc/ld/ld.c vcc/lib/ldhash.c vcc/ld/objcopy.c
+LD_SRC  = vcc/ld/ld.c vcc/lib/ldhash.c vcc/ld/objcopy.c vcc/ld/wasmld.c
 
 $(OBJ)/%.o: vcc/%.c | $(OBJ)
 	@mkdir -p $(dir $@)

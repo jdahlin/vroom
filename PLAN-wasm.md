@@ -144,6 +144,36 @@ W1 kan delvis gå parallellt med W0.
 Före planen: wasm-*bygget* av vcc via emscripten (`ccs/wasm/`, commit 8e9f9da) och
 explorer-sidan.
 
+### W8 (2026-11-09): egen länkare, i gren `claude/wasm-w8-linker` (på W5)
+- `ld/wasmld.c`: `vlink` länkar wasm när det anropas som `wasm-ld` eller med
+  `-mwasm64`. Läser relokerbara wasm-objekt (clangs och vccs), arkiv (SysV-
+  symboltabell, medlemmar hämtas lat av starka referenser, `--export` och
+  `--export-if-defined` som i wasm-ld) och emscriptens stubbibliotek
+  (`#STUB`: symboler som JS ger, med beroenden som blir rötter).
+  Symbolupplösning (stark före svag, dubbletter är fel), GC från rötterna
+  (exporter, `NO_STRIP`, konstruktorer), `__wasm_call_ctors` (init-funktioner
+  efter prioritet), odefinierade svaga funktioner som stubbar som fäller och
+  null i tabellen, syntetiska `__stack_pointer`, `__heap_base`, `__data_end`,
+  `__stack_low/high`, `__start_/__stop_X`; minneslayout med `--stack-first`,
+  `-z stack-size`, `--initial-heap`, `--no-growable-memory`, `--table-base`;
+  segment slås ihop per namn (`.rodata`, `.data`, `.bss` utelämnas), data-
+  symboler exporteras som oföränderliga globaler, relokeringar skrivs i de
+  utfyllda fälten, `target_features` som unionen plus `--extra-features`.
+- emcc använder den genom `EM_LLVM_ROOT` = en katalog med emscriptens LLVM-
+  verktyg där `wasm-ld` pekar på `vlink` (`EM_FROZEN_CACHE=1`, cachen läses
+  bara). `bench/vcc-wasm.py --vlink` länkar vccs sida så; `--obj --vlink` är
+  hela vcc-kedjan (vpp -c, vlink) med bara emscriptens libc och JS kvar.
+- Validering: `vcc-wasm.py -j 6 --vlink` och `--obj --vlink`: samma 1 590
+  godkända som med wasm-ld (två fel hittade och rättade på vägen:
+  `--export-if-defined` måste hämta arkivmedlemmar, annars saknas `fflush`
+  och utdata utan radslut försvinner; odefinierad svag funktion ska ha
+  tabellplats 0). Tid för emccs länk av t1.c (libc, dlmalloc, stubbar):
+  `vlink` 5,4 ms mot `wasm-ld` 29,2 ms (bäst av 10, belastad maskin).
+- Saknas (ger fel, inte tyst fel): COMDAT, TLS-segment i flertrådat läge,
+  `--entry`/`_start`, `name`-sektionen (felsökningsnamn), `--growable-table`
+  utan max, delade minnen, PIC/`-shared`. Utdata är inte byte för byte som
+  wasm-ld:s (exportordning, segmentindelning); det krävs inte.
+
 ### W5 (2026-11-09): objektfiler, i gren `claude/wasm-w5-objects`
 - `arch/wasm/as/as.c` (+ `was.h`, gränssnittet `wasmas.h`): LLVM:s wasm-`.s`
   (det generatorn skriver: `.functype`, `.globaltype`, `.tabletype`, `.local`,

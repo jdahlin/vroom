@@ -43,7 +43,8 @@ assembler, linker, behind `vcc`/`vas`/`vld` shims and the `vccd` server.
   - `obj/`: the in-memory object (`obj.h`: sections, frags, symbols, fixups)
     and its layout; with `arch/<cpu>/obj/fixup.c` and `platform/linux/elf.c`
     one module (`obj_SRC`, internal header `objimpl.h`).
-  - `ld/`: the linker `vlink` (`ld.c`, one TU) and `vobjcopy`/`vnm`.
+  - `ld/`: the linker `vlink` (`ld.c`, one TU) and `vobjcopy`/`vnm`;
+    `wasmld.c` is vlink for WebAssembly (as `wasm-ld` or with `-mwasm64`).
   - `driver/`: one compile job from a clang command line (`ppdriver.c`), the
     declaration cache (`ccsnap.c`) and `vpp`, the driver for parity tests.
   - `vccd/`: the server, the `vcc`/`vas`/`vld`/`var`/`vsh` shim (`shim.c`),
@@ -125,6 +126,7 @@ bench/vccd-test.py                  # vccd as a service: socket, bad requests, c
 bench/vbench.py gate                # performance gate: instructions vs the merge-base, budget 1 % (~1 min)
 bench/vcc-wasm.py -j 6              # the C suites for wasm64: vcc -S, clang -c, emcc, node vs clang's build (~2 min)
 bench/vcc-wasm.py -j 6 --objcmp     # ... and vpp -c's object byte-identical to clang's for the same .s
+bench/vcc-wasm.py -j 6 --obj --vlink  # ... vcc's side through vpp -c and vlink as emcc's wasm-ld (~9 min)
 bench/vcc-same.py --base DIR -j 6    # test-suite outputs byte-identical with DIR/vpp (vbench.py mkbase REV), ~80 s
 bench/vas-enc.py $PWD/ccs/vcc/tests/vas   # vas encodings vs llvm-mc
 bench/pg/build.sh clang && bench/pg/build.sh vcc   # PostgreSQL (macOS, meson+ninja): build + meson test (~2 min each)
