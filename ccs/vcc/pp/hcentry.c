@@ -350,8 +350,8 @@ static void hc_apply(pp *p, const hent *e)
 	}
 	p->next_base += e->span;
 	apply_delta(p, e);
-	for (uint32_t i = 0; i < e->noadd && p->nonce < 4096; i++)
-		p->once[p->nonce++] = e->oadd[i];
+	for (uint32_t i = 0; i < e->noadd; i++)
+		once_add(p, e->oadd[i]);
 	p->counter += e->counter_delta;
 	if (p->tokmode != 2 || !e->has_text)
 		p->pend = e->pend_out;	/* (tokens: when the replay is done) */

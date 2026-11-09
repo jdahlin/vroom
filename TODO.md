@@ -570,7 +570,9 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
   *Validate:* T1 `fe-limits.c` (generated, at 2× each limit).
 
 ### Preprocessor and lexer (`pp.c`, `lex.c`)
-- [ ] **`#pragma once` by path string, capped at 4096** [P].
+- [x] **`#pragma once` by path string, capped at 4096** [P].  (Done: by (dev, ino) from
+  read_src, list grows; symlink/hard link/`a/../a` checked against clang -E -P;
+  tests/vcc/once.c, once_tri.c.)
   `pp.c:4189,5191,4479`.  Key on (dev, ino); unbounded set.
   *Validate:* `ccs/fuzz/regress/pp/` style files + `make -C ccs fuzz-diff`
   extended with a directory fixture (symlink, hardlink, `a/../a/x.h`),

@@ -78,7 +78,8 @@ pp *pp_open(const pp_opts *o)
 		p->sig = HNONE;
 	p->sv = vmreg_get(&ppr[4], SVMAX * sizeof(ptok), "pp.sv");
 	p->fe = vmreg_get(&ppr[5], (1u << 20) * sizeof(fent), "pp.fe");
-	p->once = alloc(&p->perm, 4096 * sizeof(*p->once));
+	p->once = alloc(&p->perm, 256 * sizeof(*p->once));
+	p->oncecap = 256;
 	p->pushed = alloc(&p->perm, 4096 * sizeof(*p->pushed));
 	p->lm = vmreg_get(&ppr[6], 65536 * sizeof(*p->lm), "pp.lm");
 	{

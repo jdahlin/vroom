@@ -120,10 +120,23 @@ VPRIV hkey *hkey_get(uint32_t sig, const vlex_file *f, int32_t sdir, uint32_t nf
 
 VPRIV int once_index(const pp *p, const vlex_file *f)
 {
+	/* the same file by any path (symlink, hard link, a/../a): clang's FileEntry */
 	for (uint32_t i = 0; i < p->nonce; i++)
-		if (p->once[i] == f)
+		if (p->once[i] == f || (f->ino && p->once[i]->ino == f->ino && p->once[i]->dev == f->dev))
 			return (int)i;
 	return -1;
+}
+
+VPRIV void once_add(pp *p, const vlex_file *f)
+{
+	if (p->nonce == p->oncecap) {
+		const vlex_file **n = alloc(&p->perm, 2 * p->oncecap * sizeof(*n));
+
+		memcpy(n, p->once, p->nonce * sizeof(*n));
+		p->once = n;
+		p->oncecap *= 2;
+	}
+	p->once[p->nonce++] = f;
 }
 
 /* ---------------- deduplicated chunks and blobs ---------------- */

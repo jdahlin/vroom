@@ -176,8 +176,8 @@ VPRIV int pragma_text(pp *p, const char *s, size_t n, uint32_t loc, ptok *out)
 	if (word(&q, e, "once")) {
 		const ctx *fc = cur_file(p);
 
-		if (fc && p->nonce < 4096)
-			p->once[p->nonce++] = fc->f;
+		if (fc)
+			once_add(p, fc->f);
 		return 0;
 	}
 	if (word(&q, e, "push_macro")) {

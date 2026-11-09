@@ -432,7 +432,7 @@ struct pp {
 	int errors;
 	unsigned counter;
 	const vlex_file **once;
-	uint32_t nonce;
+	uint32_t nonce, oncecap;
 	struct { uint32_t id; uintptr_t m; } *pushed;
 	uint32_t npushed;
 	vlex_file builtin;
@@ -673,6 +673,7 @@ VPRIV const vlex_file *try_path(const pp_opts *o, const char *path, size_t len);
 VPRIV const vlex_file *find_include(pp *p, const ctx *from, const char *name, size_t nlen, bool angled, bool next, int32_t *sdir, const char **path, const incent **ie);
 /* hcache.c */
 VPRIV int once_index(const pp *p, const vlex_file *f);
+VPRIV void once_add(pp *p, const vlex_file *f);
 VPRIV bool hc_top(const pp *p);
 VPRIV bool hc_valid(pp *p, const hent *e);
 VPRIV void emit(pp *p, const hent *e, unsigned base);

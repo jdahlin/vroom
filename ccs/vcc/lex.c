@@ -1363,7 +1363,7 @@ static char *read_file(int fd, size_t size, size_t *got)
 }
 
 /* open + read: the file's bytes in this thread's arena, false if unreadable */
-static bool read_src(const char *path, const char **src, size_t *size)
+static bool read_src(const char *path, const char **src, size_t *size, uint64_t id[2])
 {
 	struct stat st;
 	int fd;
@@ -1378,6 +1378,8 @@ static bool read_src(const char *path, const char **src, size_t *size)
 		return false;
 	}
 	*src = read_file(fd, (size_t)st.st_size, size);
+	id[0] = (uint64_t)st.st_dev;
+	id[1] = (uint64_t)st.st_ino;
 	close(fd);
 	return true;
 }
@@ -1409,8 +1411,12 @@ static bool load(vlex_file *f, const char *path)
 	const char *src;
 	size_t size;
 
-	if (!read_src(path, &src, &size))
+	uint64_t id[2];
+
+	if (!read_src(path, &src, &size, id))
 		return false;
+	f->dev = id[0];
+	f->ino = id[1];
 	lex_src(f, src, size);
 	return true;
 }
@@ -1513,6 +1519,8 @@ const vlex_file *vlex_trigraphs(const vlex_file *f)
 	nf = arena(sizeof(*nf));
 	memset(nf, 0, sizeof(*nf));
 	nf->path = f->path;
+	nf->dev = f->dev;
+	nf->ino = f->ino;
 	lex_src(nf, b, o);
 	return nf;
 }
@@ -1596,7 +1604,11 @@ static void *io_thread(void *arg)
 			const char *src;
 			size_t size;
 
-			if (read_src(e->path, &src, &size)) {
+			uint64_t id[2];
+
+			if (read_src(e->path, &src, &size, id)) {
+				e->f.dev = id[0];
+				e->f.ino = id[1];
 				e->f.src = src;
 				e->f.size = (uint32_t)size;
 				atomic_store_explicit(&e->state, CE_READ, memory_order_release);
