@@ -849,8 +849,9 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
 - [ ] **Relocations**: (done: GOT relaxation adrp+ldr -> adrp+add / nop+adr
   as lld; orphans placed by lld's coarse rank (sections without inputs do not count; nothing with inputs after: at the very end, as lld); `.got` for
   `ADR_GOT_PAGE`/`LD64_GOT_LO12_NC` against globals, 0 for undefined weak,
-  RELATIVE under -pie/-shared; `tests/vcc/got_pic.c`, `pragma_weak.c`; not:
-  locals, GLOB_DAT for preemptible symbols),
+  RELATIVE under -pie/-shared; `tests/vcc/got_pic.c`, `pragma_weak.c`; locals
+  after the globals by file as lld's postScanRelocations (`vlink-opts.py`); not:
+  GLOB_DAT for preemptible symbols (dynamic linking)),
   TLS in shared objects (executables done: LE, IE and TLSDESC relaxed to LE as
   lld, `PT_TLS`, `.tbss` without address space; text byte-identical to lld
   for `tests/vcc/tls_{static,ie,desc}.c`; `PT_GNU_RELRO` as lld: isRelroSection,

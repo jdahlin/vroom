@@ -158,7 +158,8 @@ static void relocate_isec(uint32_t si, uint8_t *buf)
 			}
 			/* fall through */
 		case R_AARCH64_LD64_GOT_LO12_NC: {
-			uint64_t slot = isec_va(got_isec, 8 * (uint64_t)gsyms[o->gs[symi - o->firstg]].gotidx);
+			uint64_t slot = isec_va(got_isec, 8 * (uint64_t)(symi < o->firstg ? o->lgotidx[symi] :
+									  gsyms[o->gs[symi - o->firstg]].gotidx));
 			if (type == R_AARCH64_LD64_GOT_LO12_NC) {
 				write_le_imm(loc, 0xfffu << 10, (uint32_t)((slot & 0xfff) >> 3) << 10);
 				break;

@@ -329,6 +329,8 @@ typedef struct Obj {
 	const char *shstr;
 	uint32_t isec0;			/* ISec id of section 0 */
 	uint32_t *gs;			/* global slot of sym[firstg + i] */
+	_Atomic uint8_t *lgot;		/* local k needs a .got slot (only when there is a .got) */
+	uint32_t *lgotidx;		/* its slot */
 	uint32_t idx;
 	/* symbol table output */
 	uint32_t nloc, loc0;		/* kept locals, first output index */
@@ -2222,7 +2224,9 @@ static VVEC(PhdrSecs) phsecs;		/* first/last osec of each phdr */
 static VVEC(uint32_t) outsecs;		/* live output sections in header order */
 static uint64_t ndyn;			/* RELATIVE relocations */
 static uint32_t reladyn_isec = NONE, buildid_isec = NONE, comment_isec = NONE, got_isec = NONE;
-static VVEC(uint32_t) gotsyms;		/* .got slot -> G id */
+static VVEC(uint32_t) gotsyms;		/* .got slot -> G id (the globals, first) */
+typedef struct { uint32_t obj, sym; } GotLoc;
+static VVEC(GotLoc) gotlocs;		/* then the locals: slot gotsyms.n + i */
 static uint32_t symtab_isec = NONE, strtab_isec = NONE, shstrtab_isec = NONE;
 static uint32_t nobj_real;		/* objects excluding synthetic */
 
@@ -3033,6 +3037,21 @@ static void write_isec(void *arg, size_t j)
 			wr64(dst + 8 * k, v);
 			if (pic && !undef && !gsym_isabs(g)) {
 				dyn[nd].r_offset = isec_va(si, 8 * k);
+				dyn[nd].r_info = R_AARCH64_RELATIVE;
+				dyn[nd].r_addend = (int64_t)v;
+				nd++;
+			}
+		}
+		for (uint32_t k = 0; k < gotlocs.n; k++) {
+			const Obj *o = objs.v[gotlocs.v[k].obj];
+			const Sym *y = &o->sym[gotlocs.v[k].sym];
+			bool abs = y->st_shndx == SHN_ABS;
+			uint64_t v = abs ? y->st_value : isec_va(o->isec0 + y->st_shndx, y->st_value);
+			uint64_t at = 8 * ((uint64_t)gotsyms.n + k);
+
+			wr64(dst + at, v);
+			if (pic && !abs) {
+				dyn[nd].r_offset = isec_va(si, at);
 				dyn[nd].r_info = R_AARCH64_RELATIVE;
 				dyn[nd].r_addend = (int64_t)v;
 				nd++;
@@ -4632,8 +4651,13 @@ static int run(int argc, char **argv)
 
 	process_symbol_assignments();
 	adjust_output_sections();
+	if (got_isec != NONE)
+		for (uint32_t i = 0; i < objs.n; i++)
+			if (objs.v[i]->buf && objs.v[i]->firstg)
+				objs.v[i]->lgot = calloc(objs.v[i]->firstg, 1);
 	pfor(isecs.n, scan_relocs, NULL);
-	/* .got: one slot per symbol, in symbol id order */
+	/* .got: one slot per symbol, globals in symbol id order, then the locals by
+	 * file (lld postScanRelocations) */
 	for (uint32_t g = 0, ng = atomic_load(&ngsyms); g < ng; g++)
 		if (atomic_load(&gsyms[g].needgot)) {
 			gsyms[g].gotidx = gotsyms.n;
@@ -4641,8 +4665,21 @@ static int run(int argc, char **argv)
 			if (pic && got_isec != NONE && !gsym_isabs(g) && gsyms[g].state != GS_UNDEF && !gsyms[g].demoted)
 				isecs.v[got_isec].ndyn++;
 		}
+	for (uint32_t i = 0; got_isec != NONE && i < objs.n; i++) {
+		Obj *o = objs.v[i];
+
+		for (uint32_t k = 0; o->lgot && k < o->firstg; k++)
+			if (o->lgot[k]) {
+				if (!o->lgotidx)
+					o->lgotidx = alloc(o->firstg * sizeof(uint32_t));
+				o->lgotidx[k] = gotsyms.n + gotlocs.n;
+				VVEC_PUSH(gotlocs, ((GotLoc){i, k}), alloc);
+				if (pic && o->sym[k].st_shndx != SHN_ABS)
+					isecs.v[got_isec].ndyn++;
+			}
+	}
 	if (got_isec != NONE)
-		isecs.v[got_isec].size = (uint64_t)gotsyms.n * 8;
+		isecs.v[got_isec].size = (uint64_t)(gotsyms.n + gotlocs.n) * 8;
 	ndyn = 0;
 	for (uint32_t i = 0; i < isecs.n; i++)
 		ndyn += isecs.v[i].ndyn;
@@ -5167,6 +5204,7 @@ static void reset_state(void)
 	entry_name = NULL;
 	reladyn_isec = buildid_isec = comment_isec = got_isec = NONE;
 	gotsyms.n = 0;
+	gotlocs.n = 0;
 	symtab_isec = strtab_isec = shstrtab_isec = NONE;
 	reladyn_buf = NULL;
 	out = NULL;

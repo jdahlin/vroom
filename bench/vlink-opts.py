@@ -73,6 +73,9 @@ CASES = [
     # __start_X / __stop_X: output section X; under gc they keep the X sections
     ('start-stop', '{t}/ss.o {t}/ss2.o'),
     ('start-stop gc', '--gc-sections {t}/ss.o {t}/ss2.o'),
+    # GOT slots for local symbols: after the globals, by file (lld postScanRelocations)
+    ('got local', '{t}/gl.o {t}/cm.o'),
+    ('got local no-relax', '--no-relax {t}/gl.o'),
 ]
 MSG = {'-mbad': 'unknown emulation: foo',
        '-l missing': 'unable to find library -lnosuch', '-l no -L': 'unable to find library -lx'}
@@ -96,6 +99,10 @@ ASM = {	# cm: _start uses cv and cw; cm1/cm2 common of other sizes, cmd defines 
           '.section .data.tbl,"awG",@progbits,f,comdat\n.weak tbl\n.p2align 3\ntbl: .quad lf2\n',
     'g3': '.section .text.f,"axG",@progbits,f,comdat\n.globl f\nf: mov w0, #3\n ret\n',
     'g4': '.section .text.h,"axG",@progbits,f\n.globl h\nh: ret\n',
+    'gl': '.text\n.globl gfun\ngfun: adrp x0, :got:loc\n ldr x0, [x0, :got_lo12:loc]\n adrp x1, :got:cv\n'
+          ' ldr x1, [x1, :got_lo12:cv]\n adrp x2, :got:loc2\n ldr x2, [x2, :got_lo12:loc2]\n'
+          ' adrp x3, :got:loc\n ldr x3, [x3, :got_lo12:loc]\n ret\n'
+          '.data\n.p2align 3\nloc: .quad 1\nloc2: .quad 2\n',
     'cmw': '.data\n.weak cv\n.p2align 3\ncv: .quad 7\n',
 }
 GC = {	# with -ffunction-sections -fdata-sections

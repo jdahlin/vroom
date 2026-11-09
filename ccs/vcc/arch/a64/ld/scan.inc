@@ -80,8 +80,7 @@ static void scan_relocs(void *arg, size_t i)
 			break;
 		case R_AARCH64_ADR_GOT_PAGE: case R_AARCH64_LD64_GOT_LO12_NC:
 			if (symi < o->firstg)
-				error("%s:(%s+0x%llx): GOT relocation against a local symbol is not supported", o->path,
-				      is->name, (unsigned long long)rl->r_offset);
+				atomic_store_explicit(&o->lgot[symi], 1, memory_order_relaxed);
 			else
 				atomic_store(&gsyms[o->gs[symi - o->firstg]].needgot, 1);
 			break;
