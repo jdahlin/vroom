@@ -90,6 +90,7 @@ VPRIV void gen_asm(ecx *e, uint32_t n)
 		if (r >= 0)
 			clobs |= 1u << r;
 	}
+	e->usedcs |= clobs & ((1u << 29) - (1u << 19));	/* callee-saved ones it clobbers: the prologue saves them */
 	for (int i = 0; i < NTEMP; i++)
 		if ((clobs >> tempregs[i]) & 1) {
 			if (e->live & (1u << i)) {
