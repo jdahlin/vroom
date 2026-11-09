@@ -485,6 +485,55 @@ load 5–7.
     read sets (name lookups, tags) and identity remapping. That is an AST reader in all
     but name.
 
+### 6.8 Is per-region declaration replay worth it? Measured on PostgreSQL (2026-11-09)
+- **Setup.** The 1574 C compiles of `work/build-pg-clang` (as `bench/pg/speed.py`), one
+  `vpp --batch -c` process at `-j 1`, cold, load 4–6; 1570 ok (the 4 failures are the
+  SVE popcount file and `norm_test.c`, as before). Each row is two alternating runs that
+  agreed within 1%:
+
+  | | instructions | cycles | `cc_run` |
+  |---|---|---|---|
+  | no caches (`VPP_NOHC=1 VCC_NODC=1`) | 43.7 G | 12.3 G | 40.2 G |
+  | header cache only (`VCC_NODC=1`) | 40.2 G | 12.5 G | 37.3 G |
+  | both (default) | 35.8 G | 11.5 G | 32.4 G |
+  | both, warm (`--warm 1`) | 25.5 G | 7.6 G | 23.5 G |
+  | both, 1 GB declaration cache | 34.8 G | 11.7 G | 31.4 G |
+
+  Emit is 4.3 G and the object write 1.3–1.6 G in every row.
+- **Lazy bodies do not help here.** PostgreSQL's headers have few inline functions:
+  31 k bodies are kept (1.0 M tokens; `VCC_EAGER=1` makes no measurable difference), against 265 M tokens
+  in the kernel. What is left in the headers is declarations.
+- **Headers are most of the front end.**
+  - The parser receives 104.5 M tokens (`--vcc-tokhash` counts). Stubs that keep only the
+    main file's directive lines (plus `-iquote` of its directory) receive 93.3 M, so
+    ~89% come from headers.
+  - Without caches the stubs cost 32.3 G of the full run's 40.2 G in `cc_run`, so
+    headers are ~80% of the front end.
+  - With today's caches that is ~24 G, ~68% of all instructions. The declaration cache
+    skips 27.9 M header tokens (981 restores, 256 MB cap reached), so ~65 M are still
+    parsed.
+  - (The stubs are pessimistic with the header cache on: `-iquote` per source directory
+    splits the search-path signature. The split is therefore taken from the no-cache rows.)
+- **The token header cache does not pay in time on PostgreSQL.** It saves 8% of
+  instructions but costs 2% more cycles: replay is memory-bound. The decl cache gives
+  the gain (−11% instructions, −8% cycles).
+  - Its hit count looks low (46.7 k hits against 47.8 k misses, 38 k of the misses
+    "counter name or a child entry", mostly SDK headers). That count is misleading:
+    every nested miss is counted, but only one hit per replayed subtree. In bytes, 75 MB
+    are replayed against 17 MB recorded (81%).
+- **Profile** (`sample`, `bench/vccd-sample.py`, idle `__ulock_wait` left out):
+  preprocessing pulled by the parser 42%, parse + sema 30%, emit 10%, object write 8%,
+  other preprocessing 7%. That matches the 1570-TU profile in `PLAN-fas2.md`.
+- **Estimate for per-region declaration replay.**
+  - Assume header work is done only on misses (~19% of the header text) and a hit costs
+    ~15% of parsing it. Then 36 G → ~19 G instructions, about −45%.
+  - The ceiling is the rest: main file + emit + write ≈ 14 G, −60%.
+  - A hit would also skip token replay, which removes the header cache's cycle cost.
+  - This is compile CPU. In the kernel build, wall time is set by make (`PLAN-fas2.md`).
+- **Conclusion.** On PostgreSQL, a codebase with ordinary headers, declaration replay per
+  region is the largest remaining lever in the compiler, larger than in the kernel,
+  where lazy bodies already took ~45%.
+
 ## Sources
 - clang: TokenLexer.cpp, PPMacroExpansion.cpp, Preprocessor.cpp, MacroArgs.cpp,
   DependencyDirectivesScanner.cpp (llvm-project `main`)
