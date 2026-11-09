@@ -753,9 +753,11 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
   branch targets are the pc-relative offset, not `*ABS*` relocations; `adr`,
   `adrp` and `ldr` literal take constants.  *Validated:* `vas-obj`
   `intbranch.s`, `absb.s`.
-- [ ] **Diagnostics**: line numbers off by one (`as/as.c:575/636/133`), `# N
-  "file"` markers ignored (`as/as.c:579`), EOF errors at `:0:` [P].
-  *Validate:* T4 for the assembler (`// expect-error: x.S:2:`).
+- [ ] **Diagnostics**: left: errors inside a macro say the invocation line
+  (clang: `<instantiation>:N`); vasm stops at the first error (clang goes on).
+  (Done: the statement's own line, `# N "file"` markers, end-of-input
+  errors at the line after the last.)  *Validate:* `bench/vas-obj.py` error
+  files (`err-*.s`: clang's first file:line).
 
 ### Linker (`ld/ld.c`) and binutils
 - [ ] **ELF input parsing unchecked** [P]: `parse_obj` `ld/ld.c:1670-1697`,

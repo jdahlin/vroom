@@ -60,6 +60,7 @@ typedef struct {
 	uint32_t ncond;
 	size_t mark;
 	uint32_t line;
+	uint32_t sline;		/* line of the current statement */
 } Frame;
 enum { FR_FILE, FR_MACRO, FR_LOOP };
 
@@ -97,6 +98,7 @@ struct As {
 	size_t nident;		/* .ident directives seen (.comment's leading NUL) */
 	int ended;		/* .end seen */
 	int altmacro;		/* .altmacro mode */
+	uint32_t eofline;	/* the line after the input's last (errors at the end) */
 	struct { uint32_t orig, ver, rm; } *sv; uint32_t nsv, svcap;	/* .symver */
 	uint32_t *asg; uint32_t nasg, asgcap;	/* .addrsig_sym */
 	char msg[512];

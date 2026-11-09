@@ -19,8 +19,8 @@ VPRIV Sv svdup(As *a, const char *s, size_t n)
 
 VPRIV uint32_t curline(As *a)
 {
-	for (int i = a->nfr - 1; i >= 0; i--) if (a->fr[i].kind == FR_FILE) return a->fr[i].line;
-	return 0;
+	for (int i = a->nfr - 1; i >= 0; i--) if (a->fr[i].kind == FR_FILE) return a->fr[i].sline;
+	return a->eofline;
 }
 
 VPRIV int err(As *a, const char *fmt, ...)
@@ -390,7 +390,7 @@ static int push_frame(As *a, const char *p, size_t n, int kind, size_t mark)
 	if (a->nfr >= MAXFR) return err(a, "macros nested too deeply");
 	Frame *f = &a->fr[a->nfr++];
 	f->p = p; f->e = p + n; f->kind = (uint8_t)kind; f->bol = 1;
-	f->ncond = (uint32_t)a->ncs; f->mark = mark; f->line = 1;
+	f->ncond = (uint32_t)a->ncs; f->mark = mark; f->line = f->sline = 1;
 	return 0;
 }
 
@@ -398,6 +398,7 @@ static void pop_frame(As *a)
 {
 	Frame *f = &a->fr[--a->nfr];
 	if (f->kind != FR_FILE) a->xs.used = f->mark;
+	else a->eofline = f->line;
 }
 
 /* bytes next_stmt must look at: newline, ';', comments, strings */
@@ -433,7 +434,20 @@ static __attribute__((noinline)) size_t next_stmt_copy(As *a, Frame *f)
 		if (f->bol) {
 			if (c == ' ' || c == '\t' || c == '\r') { p++; if (n < cap) o[n++] = c; continue; }
 			f->bol = 0;
-			if (c == '#') {		/* cpp line marker / line comment */
+			if (c == '#') {		/* cpp line marker (# N "file") / line comment */
+				const char *q = p + 1;
+				while (q < e && (*q == ' ' || *q == '\t')) q++;
+				if (f->kind == FR_FILE && q < e && c_digit((unsigned char)*q)) {
+					uint32_t ln = 0;
+					while (q < e && c_digit((unsigned char)*q)) ln = ln * 10 + (uint32_t)(*q++ - '0');
+					while (q < e && (*q == ' ' || *q == '\t')) q++;
+					if (q < e && *q == '"') {
+						const char *r = ++q;
+						while (q < e && *q != '"' && *q != '\n') q++;
+						a->fname = svdup(a, r, (size_t)(q - r)).s;
+					}
+					if (ln) f->line = ln - 1;	/* the marker's newline makes it ln */
+				}
 				while (p < e && *p != '\n') p++;
 				continue;
 			}
@@ -481,6 +495,7 @@ static inline __attribute__((always_inline)) size_t next_stmt(As *a, Frame *f, c
 {
 	const char *p = f->p, *e = f->e;
 	*raw = p;
+	f->sline = f->line;
 	const char *q = p;
 	int bol = f->bol;
 	if (bol) {
@@ -2226,7 +2241,7 @@ void as_begin(As *a, ElfObj *o, const char *name)
 	a->xs.used = 0; a->defs.used = 0; a->ninst = 0; a->nal = 0; a->alcap = 0; a->al = 0;
 	memset(a->alh, 0, sizeof a->alh);
 	a->fname = name;
-	a->nident = 0; a->ended = 0; a->altmacro = 0; a->nsv = a->svcap = 0; a->nasg = a->asgcap = 0;
+	a->nident = 0; a->ended = 0; a->altmacro = 0; a->eofline = 0; a->nsv = a->svcap = 0; a->nasg = a->asgcap = 0;
 	a->mmask = 255; a->mcount = 0;
 	a->mtab = rget(&a->defs, sizeof(Macro *) * (a->mmask + 1));
 	memset(a->mtab, 0, sizeof(Macro *) * (a->mmask + 1));
