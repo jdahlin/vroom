@@ -190,6 +190,27 @@ instruktioner. `vcc-wasm.py -j 6`: 1 739/1 746 i alla lägen (`-S`, `--objcmp`
 byte för byte, `--obj --vlink`); kvar är de 6 `link_error`-testerna (kräver
 optimering) och `bcp-1`.
 
+### W6 (2026-11-10): klar, explorern inte bytt
+vcc kompilerar sig själv till wasm64: `VCC=build/ccs/vpp OUT=../build/wasm-self
+sh ccs/wasm/build.sh` (från `ccs/`) gör varje objekt med vcc:s wasm-generator,
+assembler och objektskrivare mot emscriptens libc-huvuden; emcc länkar bara
+(`-sSUPPORT_LONGJMP=wasm`, vcc:s setjmp är wasm-EH).  Det som behövdes:
+- vcc:s `<arm_neon.h>`/`<arm_acle.h>` har C-versioner av inline-asm-
+  intrinsics för andra mål än arm64 (lane för lane; CRC32/CRC32C en nibble i
+  taget), provade mot clangs NEON på 20 000 slumpade indata;
+- `_Thread_local` som vanliga objekt på wasm, som LLVM gör utan delat minne
+  (`tests/vcc/thread_local.c`);
+- `__builtin_bitreverse8..64`, `__builtin_isinf`/`isfinite` i wasm-generatorn
+  (`tests/vcc/bitreverse.c`, `fp_class_builtins.c`).
+`bench/vcc-self.py -j 6`: varje test i sviterna, förbehandlat av den native
+vpp för aarch64 och wasm64, kompileras `-O2 -S` av både emcc-bygget och det
+självbyggda `vcc.wasm` (`ccs/wasm/selfrun.mjs`, node): 3 741/3 741 utdata
+byte-identiska (3 428 kompilerade, resten samma diagnostik), 37 s.
+`vcc.wasm` 1,26 MB mot emcc:s 1,61 MB, men ~7x långsammare (9,0 s mot 1,2 s
+på 41 MB `many_probes`): ingen optimering, intrinsics lane för lane.
+Explorern använder fortfarande emcc-bygget; att byta är ett beslut (hastighet)
+och en ny publicering av sidan.
+
 ### W7 (2026-11-09): klar
 `--target=wasm32-unknown-emscripten`: predefines som clang, ILP32 i front end,
 och nu hela vägen: pekarbredden per mål i generatorn (`WPT(c)`, `wrep()`:

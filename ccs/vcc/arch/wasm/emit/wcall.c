@@ -1133,6 +1133,40 @@ VPRIV int wbuiltin(ecx *e, uint32_t n, bool want)
 		wbswap(e, bytes == 8 ? WT_I64 : WT_I32, bytes);
 		return k;
 	}
+	case BI_BITREVERSE8: case BI_BITREVERSE16: case BI_BITREVERSE32: case BI_BITREVERSE64: {
+		/* the bytes reversed, then the nibbles, bit pairs and bits in each byte */
+		int bytes = x->aux == BI_BITREVERSE8 ? 1 : x->aux == BI_BITREVERSE16 ? 2 : x->aux == BI_BITREVERSE32 ? 4 : 8;
+		int ak = bytes == 8 ? WT_I64 : WT_I32;
+		static const uint64_t mask[3] = { 0x0f0f0f0f0f0f0f0full, 0x3333333333333333ull, 0x5555555555555555ull };
+		uint32_t t = wtmp(e, ak);
+
+		wexpr(e, warg_n(c, n, 0), true);
+		if (bytes > 1) {
+			wbswap(e, ak, bytes);
+		} else {
+			wconst(e, ak, 0xff);
+			wop(e, ak, "and");
+		}
+		for (int i = 0, sh = 4; i < 3; i++, sh >>= 1) {
+			int64_t m = (int64_t)(ak == WT_I64 ? mask[i] : (uint32_t)mask[i]);
+
+			if (ak == WT_I32)
+				m = (int32_t)m;
+			wtee(e, t);
+			wconst(e, ak, sh);
+			wop(e, ak, "shr_u");
+			wconst(e, ak, m);
+			wop(e, ak, "and");
+			wget(e, t);
+			wconst(e, ak, m);
+			wop(e, ak, "and");
+			wconst(e, ak, sh);
+			wop(e, ak, "shl");
+			wop(e, ak, "or");
+		}
+		wfree(e, t);
+		return k;
+	}
 	case BI_ROTL32: case BI_ROTR32: case BI_ROTL64: case BI_ROTR64: {
 		int ak = x->aux == BI_ROTL32 || x->aux == BI_ROTR32 ? WT_I32 : WT_I64;
 		uint32_t b = warg_n(c, n, 1);
@@ -1156,6 +1190,19 @@ VPRIV int wbuiltin(ecx *e, uint32_t n, bool want)
 		wget(e, t);
 		wop(e, ak, "ne");
 		wfree(e, t);
+		return WT_I32;
+	}
+	case BI_ISINF: case BI_ISFINITE: {
+		/* |x| == inf, |x| < inf (false for a NaN) */
+		uint32_t a = warg_n(c, n, 0);
+		int ak = wty(c, N(a)->ty);
+
+		if (ak != WT_F32 && ak != WT_F64)
+			break;
+		wexpr(e, a, true);
+		wop(e, ak, "abs");
+		wfconst(e, ak, __builtin_inf());
+		wop(e, ak, x->aux == BI_ISINF ? "eq" : "lt");
 		return WT_I32;
 	}
 	case BI_ADD_OVERFLOW: case BI_SUB_OVERFLOW: case BI_MUL_OVERFLOW:

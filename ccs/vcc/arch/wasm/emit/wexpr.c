@@ -316,8 +316,6 @@ VPRIV void wlval(ecx *e, uint32_t n, wlv *l, qty t)
 			l->off = b->off;
 			break;
 		}
-		if (y->kind == S_VAR && (y->flags & SF_THREAD))
-			efatal(e, x->loc, "wasm: thread-local storage is not supported yet");
 		if (y->kind == S_FUNC || y->kind == S_BUILTIN) {
 			wexpr(e, n, true);
 			break;

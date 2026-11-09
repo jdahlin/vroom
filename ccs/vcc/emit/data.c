@@ -347,8 +347,8 @@ VPRIV void emit_object(ecx *e, uint32_t s)
 		/* one section per object, as clang writes them */
 		bool global = y->sc != SC_STATIC && y->depth == 0 && y->name;
 
-		if (y->flags & SF_THREAD)
-			efatal(e, y->loc, "wasm: thread-local storage is not supported yet");
+		/* _Thread_local: an ordinary object, as LLVM strips TLS from a
+		 * module without shared memory (no -pthread) */
 		tb_s(b, "\t.section\t");
 		if (a->section) {
 			tb_s(b, c->strs[a->section - 1].s);
