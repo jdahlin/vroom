@@ -586,6 +586,49 @@ static int arch_lse(const char *v, bool cpu)
 }
 
 
+static void intern_full(void)
+{
+	if (vjob_jb)
+		longjmp(*vjob_jb, 1);
+}
+
+/* CPATH-style lists (kept out of ppd_run: its size decides how clang
+   compiles the argument loop; vbench pp +3.7 % instructions inline) */
+static __attribute__((noinline)) size_t env_ndirs(const char *v)
+{
+	size_t k = v && *v ? 1 : 0;
+
+	for (; v && *v; v++)
+		k += *v == ':';
+	return k;
+}
+
+/* the elements of v appended to all[n..] (not repeating one from nquote on); an
+   empty element is the current directory.  slot: which per-thread copy holds them */
+static __attribute__((noinline)) int env_dirs(const char *v, const char **all, int n, int nquote, int slot)
+{
+	static _Thread_local char *copy[2];
+	char *s, *t;
+
+	if (!v || !*v)
+		return n;
+	free(copy[slot]);
+	copy[slot] = s = strdup(v);
+	for (; s; s = t) {
+		const char *d;
+		int dup = 0;
+
+		if ((t = strchr(s, ':')))
+			*t++ = 0;
+		d = *s ? s : ".";
+		for (int j = nquote; j < n; j++)
+			dup |= !strcmp(all[j], d);
+		if (!dup)
+			all[n++] = d;
+	}
+	return n;
+}
+
 /* a variable of the job's environment: the client's under vccd */
 static const char *ppd_getenv(const ppd_env *env, const char *name)
 {
@@ -605,15 +648,8 @@ int ppd_run(int argc, char **argv, const ppd_env *env)
 	   per-thread allocation, grown to the longest command line seen */
 	static _Thread_local const char **dirv;
 	static _Thread_local size_t dircap;
-	/* CPATH (after -I) and C_INCLUDE_PATH (after -isystem), as clang; split in a copy */
-	static _Thread_local char *envdirs;
 	const char *cpath = ppd_getenv(env, "CPATH"), *cipath = ppd_getenv(env, "C_INCLUDE_PATH");
-	size_t nenvd = 2;
-
-	for (const char *s = cpath; s && *s; s++)
-		nenvd += *s == ':';
-	for (const char *s = cipath; s && *s; s++)
-		nenvd += *s == ':';
+	size_t nenvd = env_ndirs(cpath) + env_ndirs(cipath);
 	size_t per = (size_t)argc + 64 + nenvd;
 
 	if (5 * per > dircap) {
@@ -800,36 +836,16 @@ int ppd_run(int argc, char **argv, const ppd_env *env)
 	po.nquote = n;
 #define ADD(d) do { int dup_ = 0; for (int j = po.nquote; j < n; j++) dup_ |= !strcmp(all[j], d); if (!dup_) all[n++] = d; } while (0)
 	for (int k = 0; k < ni; k++) ADD(dirs_i[k]);
-	{
-		size_t l1 = cpath ? strlen(cpath) : 0, l2 = cipath ? strlen(cipath) : 0;
-		char *w;
-
-		free(envdirs);
-		envdirs = w = malloc(l1 + l2 + 2);
-		memcpy(w, cpath ? cpath : "", l1 + 1);
-		memcpy(w + l1 + 1, cipath ? cipath : "", l2 + 1);
-		/* an empty element is the current directory */
-		for (char *s = w, *t; l1 && s; s = t) {
-			t = strchr(s, ':');
-			if (t)
-				*t++ = 0;
-			ADD(*s ? s : ".");
-		}
-		po.nsys = n;
-		for (int k = 0; k < ns; k++) {
-			/* vcc's own headers (arm_neon.h) go before the clang resource directory */
-			if (strstr(dirs_s[k], "/lib/clang/") && strlen(dirs_s[k]) > 8 &&
-			    !strcmp(dirs_s[k] + strlen(dirs_s[k]) - 8, "/include"))
-				ADD(VCC_INCDIR);
-			ADD(dirs_s[k]);
-		}
-		for (char *s = w + l1 + 1, *t; l2 && s; s = t) {
-			t = strchr(s, ':');
-			if (t)
-				*t++ = 0;
-			ADD(*s ? s : ".");
-		}
+	n = env_dirs(cpath, all, n, po.nquote, 0);	/* CPATH: after -I, as clang */
+	po.nsys = n;
+	for (int k = 0; k < ns; k++) {
+		/* vcc's own headers (arm_neon.h) go before the clang resource directory */
+		if (strstr(dirs_s[k], "/lib/clang/") && strlen(dirs_s[k]) > 8 &&
+		    !strcmp(dirs_s[k] + strlen(dirs_s[k]) - 8, "/include"))
+			ADD(VCC_INCDIR);
+		ADD(dirs_s[k]);
 	}
+	n = env_dirs(cipath, all, n, po.nquote, 1);	/* C_INCLUDE_PATH: after -isystem */
 	/* Darwin: vcc's own <stdatomic.h>, <arm_neon.h>, <arm_acle.h> ahead of the SDK's */
 	if (darwin && !nostdinc)
 		ADD(VCC_INCDIR);
@@ -947,7 +963,20 @@ int ppd_run(int argc, char **argv, const ppd_env *env)
 	}
 
 	t0 = now();
-	p = pp_open(&po);
+	{	/* pp_open lexes the main file: a full identifier table there ends the job too
+		   (the pp it was opening is lost: a leak, as rare as the table filling) */
+		static _Thread_local jmp_buf jo;
+
+		if (setjmp(jo)) {
+			vjob_jb = NULL;
+			status = 1;
+			goto out;
+		}
+		vjob_jb = &jo;
+		vintern_full_hook = intern_full;
+		p = pp_open(&po);
+		vjob_jb = NULL;
+	}
 	if (!p) {
 		status = 1;
 		goto out;
@@ -959,6 +988,7 @@ int ppd_run(int argc, char **argv, const ppd_env *env)
 		goto done;
 	}
 	vjob_jb = &jb;	/* as/elf overflow ends this TU too */
+	vintern_full_hook = intern_full;	/* (only reaches vjob_jb in the thread that set it) */
 	if (tokhash) {
 		/* a hash of what pp_next hands the parser: kind, SOL/SPACE, spelling, id, file:line:col, sys */
 		uint64_t h = 1469598103934665603ull;

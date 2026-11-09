@@ -56,6 +56,9 @@ def cases(d):
     # one function-like expansion of 2^25 tokens (the argument doubles at every level)
     case('pp-expansion-33M', 'any', {'a.c': '#define D(x) x+x\nlong big = ' + nest('D(', ')', 25, '1') + ';\n'}, 'a.c')
     case('pp-include-self', 'error', {'a.c': '#include "a.c"\n'}, 'a.c')
+    # more distinct identifiers than the intern table holds (6.3M): an error, and vccd restarts
+    case('idents-7M', 'error', {'a.c': ''.join('int ' + ','.join(f'v{j}' for j in range(i, i + 10)) + ';\n'
+                                           for i in range(0, 7000000, 10))}, 'a.c', regex='identifier table full')
     # fixed limits that reject (or crash on) valid code
     case('struct-10k-members', 'ok', {'a.c': 'struct s {' + ''.join(f' int m{i};' for i in range(10000)) + ' } v;\n'}, 'a.c')
     case('declarator-100-ptrs', 'ok', {'a.c': 'int ' + '*' * 100 + 'p;\n'}, 'a.c')

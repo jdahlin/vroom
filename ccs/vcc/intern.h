@@ -150,4 +150,7 @@ static inline __attribute__((always_inline)) uint32_t vintern_fast(vintern_cache
 	}
 }
 
+/* called (in the thread) when the table is full; must not return to the caller */
+extern void (*vintern_full_hook)(void);
+extern _Atomic int vintern_filled;	/* set once the table was found full (vccd restarts) */
 #endif

@@ -83,6 +83,20 @@ static inline int same(const char *a, const char *b, size_t len)
 	return tail(a + i, len - i) == tail(b + i, len - i);
 }
 
+/* table full: the job's hook (the driver: an error for this TU, longjmp) or abort */
+void (*vintern_full_hook)(void);
+_Atomic int vintern_filled;
+
+
+static __attribute__((noreturn, noinline)) void vintern_full(void)
+{
+	atomic_store(&vintern_filled, 1);
+	fprintf(stderr, "vcc: error: identifier table full (more than %u distinct identifiers)\n", MAX_ENT);
+	if (vintern_full_hook)
+		vintern_full_hook();
+	abort();
+}
+
 /* the probe from slot i on, inserting at the first empty slot */
 static __attribute__((noinline)) uint32_t insert(const char *s, size_t len, uint32_t hash, uint32_t i,
 						 uint64_t w0, uint64_t w1)
@@ -96,8 +110,8 @@ static __attribute__((noinline)) uint32_t insert(const char *s, size_t len, uint
 			if (!id) {
 				id = atomic_fetch_add_explicit(&nent, 1, memory_order_relaxed);
 				if (id >= MAX_ENT) {
-					fprintf(stderr, "vcc: identifier table full\n");
-					abort();
+					atomic_fetch_sub_explicit(&nent, 1, memory_order_relaxed);
+					vintern_full();
 				}
 				vintern_ents[id] = (vident){ s, (uint32_t)len, hash, w0, w1 };
 			}
@@ -196,7 +210,7 @@ uint32_t vintern_copy(const char *s, size_t len)
 	d = copy_buf + off;
 
 	if (off + len + 16 > COPY_MAX)
-		abort();
+		vintern_full();
 	memcpy(d, s, len);
 	return vintern(d, len, h);
 }
