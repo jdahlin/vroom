@@ -187,7 +187,7 @@ VPRIV int find_member(cc *c, uint32_t ti, uint32_t name, uint32_t *path, int dep
 {
 	const tag *r = &c->tags[ti];
 
-	if (depth >= 16)
+	if (depth >= FM_DEPTH)
 		return -1;
 	for (uint32_t i = 0; i < r->nfield; i++) {
 		const field *f = &r->f[i];
@@ -211,7 +211,7 @@ VPRIV int find_member(cc *c, uint32_t ti, uint32_t name, uint32_t *path, int dep
 static __attribute__((noinline)) uint32_t member_slow(cc *c, uint32_t base, uint32_t name, uint32_t loc)
 {
 	qty bt = N(base)->ty;
-	uint32_t path[16], ti;
+	uint32_t path[FM_DEPTH], ti;
 	int d;
 
 	if (!is_record(c, bt)) {
@@ -426,6 +426,10 @@ static __attribute__((noinline)) uint32_t primary_kw(cc *c, int kw, uint32_t loc
 		next(c);
 		return builtin_call(c, &tc, loc);
 	}
+	if (kw == KW___builtin_shufflevector || kw == KW___builtin_convertvector) {
+		next(c);
+		return vector_builtin(c, kw == KW___builtin_shufflevector, loc);
+	}
 	if (kw == KW___builtin_choose_expr) {
 		static const builtin ch = { "", BI_CHOOSE, 1, "i" };
 
@@ -446,6 +450,12 @@ static __attribute__((noinline)) uint32_t primary_unbound(cc *c, uint32_t id, ui
 	}
 	if (id == c->id_func || id == c->id_FUNCTION || id == c->id_PRETTY)
 		return func_name(c, loc);
+	{
+		uint32_t s = is(c, T_LPAREN) ? lib_builtin(c, id, loc) : 0;
+
+		if (s)
+			return primary_sym(c, s, id, loc);
+	}
 	if (is(c, T_LPAREN)) {
 		if (!c->o->implicit_fn)
 			cc_error(c, loc, "call to undeclared function '%.*s'; ISO C99 and later do not support implicit function declarations [-Wimplicit-function-declaration]", IDF(id));

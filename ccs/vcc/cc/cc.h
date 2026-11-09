@@ -229,7 +229,7 @@ typedef struct node {
 
 /* ---------------- the TU ---------------- */
 
-typedef struct cc_opts {
+typedef struct cc_opts {	/* fields before outfd: parse options, all in the decl cache key */
 	int target;		/* PP_LINUX_AARCH64 / PP_DARWIN */
 	int unsigned_char;
 	int ms_anon;		/* -fms-anonymous-structs / -fms-extensions: "struct S;" members */
@@ -238,6 +238,8 @@ typedef struct cc_opts {
 	int implicit_int;	/* implicit int allowed (-std=gnu89, -Wno-error=implicit-int) */
 	int gnu89_inline;	/* -std=gnu89 or -fgnu89-inline: plain inline is gnu_inline */
 	int instrument;		/* -finstrument-functions */
+	int vcc_kernel;		/* -fvcc-kernel (or -D__KERNEL__): error() calls left after folding are dropped */
+	int lse;		/* target has LSE atomics (else ldaxr/stlxr loops) */
 	int general_regs_only;	/* -mgeneral-regs-only: no FP/SIMD registers (variadic: no v0-v7 save area) */
 	int no_builtin;		/* -ffreestanding / -fno-builtin: abs() etc. are plain calls */
 	int implicit_fn;	/* implicit function declarations allowed (... implicit-function-declaration) */

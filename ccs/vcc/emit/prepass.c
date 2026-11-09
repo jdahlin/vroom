@@ -49,6 +49,9 @@ VPRIV uint32_t aconst_idx(cc *c, uint32_t n)
 	return (uint32_t)c->ipool[N(b)->a];
 }
 
+/* va_list is a pointer (Apple), not an array of one record (AAPCS64): it can be a register variable */
+static bool scalar_valist(cc *c) { return T(c, c->t_valist)->kind != TY_ARRAY; }
+
 static void mark_written(pre *P, uint32_t n, bool addr)
 {
 	cc *c = P->c;
@@ -225,7 +228,12 @@ static int walk(pre *P, uint32_t n)
 	case N_LABELADDR:
 		P->E->lref[x->a] |= LR_REF | LR_BACK;
 		return false;
-	case N_MEMBER: case N_DEREF: case N_UNARY: case N_VAARG:
+	case N_VAARG:	/* va_arg reads and advances a scalar va_list through its address */
+		if (scalar_valist(c))
+			mark_written(P, x->a, true);
+		lab = walk(P, x->a);
+		break;
+	case N_MEMBER: case N_DEREF: case N_UNARY:
 		lab = walk(P, x->a);
 		break;
 	case N_CAST:
@@ -274,8 +282,14 @@ static int walk(pre *P, uint32_t n)
 	case N_BUILTIN:
 		for (uint32_t i = 0; i < x->c; i++)
 			lab |= walk(P, c->lists[x->b + i]);
-		if (x->op == N_BUILTIN && (x->aux == BI_VA_START || x->aux == BI_VA_COPY) && x->c)
-			mark_written(P, c->lists[x->b], true);
+		/*
+		 * The va builtins take their va_lists' addresses (Apple's char *
+		 * could otherwise be a register variable): every operand.
+		 */
+		if (x->op == N_BUILTIN && (x->aux == BI_VA_START || x->aux == BI_VA_COPY || x->aux == BI_VA_END))
+			for (uint32_t i = 0; i < x->c && i < (x->aux == BI_VA_COPY ? 2u : 1u); i++)
+				if ((i == 0 && x->aux != BI_VA_END) || scalar_valist(c))
+					mark_written(P, c->lists[x->b + i], true);
 		break;
 	case N_STMTEXPR:
 		lab = walk(P, x->a);

@@ -7,6 +7,8 @@ run -fsyntax-only on it (no colours, same target) from that directory;
 the test passes when vcc prints exactly what clang prints on stderr
 (locations, messages, source snippets, carets, ranges, fix-its, notes and
 the "N errors generated." line) and exits with the same status.
+A test with /* diag-mode: -c */ is compiled (-c -o /dev/null) instead, for
+diagnostics that come from code generation (the error attribute).
 
   bench/vcc-diag.py [-v] [-j N] [PATTERN]   -v: show the diff of each failure
 """
@@ -23,7 +25,10 @@ FL = ['--target=aarch64-linux-gnu', '-fsyntax-only', '-fno-color-diagnostics']
 
 
 def run(cmd, name):
-    p = subprocess.run(cmd + FL + [name], cwd=D, capture_output=True, timeout=30)
+    fl = FL
+    if re.search(r'/\*\s*diag-mode:\s*-c\s*\*/', open(os.path.join(D, name), errors='replace').read()):
+        fl = [f for f in FL if f != '-fsyntax-only'] + ['-c', '-o', '/dev/null']
+    p = subprocess.run(cmd + fl + [name], cwd=D, capture_output=True, timeout=30)
     return p.returncode, p.stderr.decode(errors='replace')
 
 

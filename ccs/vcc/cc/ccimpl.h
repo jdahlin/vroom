@@ -17,6 +17,7 @@
  * pointer constants depend on the difference: __is_constexpr), and the
  * types of builtins.
  */
+#include "../lib/vstack.h"
 #include <math.h>
 #include <pthread.h>
 #include <setjmp.h>
@@ -116,6 +117,7 @@ typedef struct declr {
 
 /* the declarator op stack (shared, nested declarators push and pop) */
 #define DOPS_MAX 4096
+#define FM_DEPTH 256	/* nested anonymous members find_member follows */
 
 /* ---------------- struct / union / enum bodies ---------------- */
 
@@ -289,6 +291,7 @@ bool cc_eval(cc *c, uint32_t n, cval *v);
 VPRIV bool eval_builtin(cc *c, const node *x, cval *v);
 VPRIV uint32_t args_list(cc *c, vec *args);
 VPRIV uint32_t mk_builtin(cc *c, int id, qty ty, uint32_t loc, const vec *args);
+VPRIV uint32_t vector_builtin(cc *c, bool shuffle, uint32_t loc);
 VPRIV uint32_t offsetof_expr(cc *c, uint32_t loc);
 VPRIV uint32_t builtin_call(cc *c, const builtin *b, uint32_t loc);
 /* expr.c */
@@ -333,6 +336,7 @@ VPRIV void enum_body(cc *c, uint32_t ti, attrs *after);
 VPRIV uint32_t initializer(cc *c, qty *ty, bool st);
 /* decl.c */
 VPRIV void apply_sym_attrs(cc *c, sym *s, const attrs *a);
+VPRIV uint32_t lib_builtin(cc *c, uint32_t id, uint32_t loc);
 /* mangle.c */
 VPRIV void name_overload(cc *c, uint32_t s);
 /* decl.c */
@@ -502,6 +506,7 @@ static inline void attribute_list(cc *c, attrs *a)
 }
 
 /* no attribute at all (padding excluded) */
+/* 11 u32 fields then the 18 flag bytes (attr.c asserts the layout) */
 static inline bool attrs_empty(const attrs *a)
 {
 	const char *p = (const char *)a;
@@ -510,7 +515,7 @@ static inline bool attrs_empty(const attrs *a)
 	memcpy(w, p, sizeof(w));
 	for (int i = 0; i < 7; i++)
 		o |= w[i];
-	return !o && !p[56] && !p[57];
+	return !o && !p[56] && !p[57] && !p[58] && !p[59] && !p[60] && !p[61];
 }
 
 #endif

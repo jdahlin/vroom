@@ -54,7 +54,10 @@ VPRIV bool sig_of(const pp_opts *o, uint32_t *sig, uint32_t *psig)
 
 #define SIGS(x) do { const char *s_ = (x) ? (x) : ""; size_t l_ = strlen(s_); \
 	if (n + l_ + 8 < (1 << 17)) { memcpy(b + n, s_, l_); n += l_; b[n++] = 0; } else ok = false; } while (0)
-	n += (size_t)snprintf(b, 64, "%d %d %d %d", o->nfwdirs, o->unsigned_char, o->asm_mode, o->target) + 1;
+	n += (size_t)snprintf(b, 64, "%d %d %d %d %d %d %d", o->nfwdirs, o->unsigned_char, o->asm_mode, o->target,
+			      o->nwargs, o->error_limit, o->trigraphs) + 1;
+	for (int i = 0; i < o->nwargs; i++)	/* -W/-Werror decide which replayed diagnostics are errors */
+		SIGS(o->wargs[i]);
 	for (int i = 0; i < o->nfwdirs; i++)
 		SIGS(o->fwdirs[i]);
 	SIGS(o->cwd);
@@ -117,10 +120,23 @@ VPRIV hkey *hkey_get(uint32_t sig, const vlex_file *f, int32_t sdir, uint32_t nf
 
 VPRIV int once_index(const pp *p, const vlex_file *f)
 {
+	/* the same file by any path (symlink, hard link, a/../a): clang's FileEntry */
 	for (uint32_t i = 0; i < p->nonce; i++)
-		if (p->once[i] == f)
+		if (p->once[i] == f || (f->ino && p->once[i]->ino == f->ino && p->once[i]->dev == f->dev))
 			return (int)i;
 	return -1;
+}
+
+VPRIV void once_add(pp *p, const vlex_file *f)
+{
+	if (p->nonce == p->oncecap) {
+		const vlex_file **n = varena_alloc(&p->perm, 2 * p->oncecap * sizeof(*n));
+
+		memcpy(n, p->once, p->nonce * sizeof(*n));
+		p->once = n;
+		p->oncecap *= 2;
+	}
+	p->once[p->nonce++] = f;
 }
 
 /* ---------------- deduplicated chunks and blobs ---------------- */

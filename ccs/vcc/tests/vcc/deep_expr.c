@@ -1,6 +1,5 @@
 /* Right-nested expressions deeper than the temporary registers need
    spilling (TODO.md tier 3, "Register spilling"). */
-/* vcc-xfail: Register spilling: ~18-deep right-nested expression is fatal */
 #include <stdio.h>
 
 volatile long a[64];

@@ -241,7 +241,14 @@ __attribute__((noinline)) VPRIV void attribute_list_(cc *c, attrs *a)
 			case A_COLD: a->cold = 1; break;
 			case A_NONSTRING: a->nonstring = 1; break;
 			case A_MAY_ALIAS: a->may_alias = 1; break;
-			case A_ERROR: a->error_fn = 1; break;	/* a call left after folding is a build error */
+			case A_ERROR:	/* a call left after folding is a build error */
+				a->error_fn = 1;
+				if (is(c, T_LPAREN) && is_strtok(peek(c, 1)->kind)) {
+					next(c);
+					a->errmsg = string_index(c);
+					expect(c, T_RPAREN, "')'");
+				}
+				break;
 			default: break;
 			}
 			if (is(c, T_LPAREN))
@@ -253,7 +260,7 @@ __attribute__((noinline)) VPRIV void attribute_list_(cc *c, attrs *a)
 }
 
 /* the 0/1 flags packed .. noinstr are 18 contiguous bytes after the u32 fields */
-_Static_assert(offsetof(attrs, packed) == 10 * sizeof(uint32_t) &&
+_Static_assert(offsetof(attrs, packed) == 11 * sizeof(uint32_t) &&
 	       offsetof(attrs, noinstr) == offsetof(attrs, packed) + 17, "attrs layout");
 
 VPRIV void merge_attrs(attrs *to, const attrs *from)
@@ -270,6 +277,7 @@ VPRIV void merge_attrs(attrs *to, const attrs *from)
 	if (from->vecsize) to->vecsize = from->vecsize;
 	if (from->counted_by) to->counted_by = from->counted_by;
 	if (from->visibility) to->visibility = from->visibility;
+	if (from->errmsg) to->errmsg = from->errmsg;
 	/* the 0/1 flags packed .. noinstr: or them bytewise */
 	{
 		char *t = (char *)&to->packed;

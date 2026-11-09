@@ -10,10 +10,8 @@ VPRIV void *halloc(cc *c, size_t n)
 	char *r;
 
 	n = (n + 15) & ~(size_t)15;
-	if (unlikely(c->hp + n > c->hend)) {
-		fputs("vcc: out of memory\n", stderr);
-		abort();
-	}
+	if (unlikely(c->hp + n > c->hend))
+		fatal(c, c->prevloc, "translation unit too large (front-end heap full)");
 	r = c->hp;
 	c->hp += n;
 	return r;

@@ -7,4 +7,5 @@
  * decide.  Shared by all threads.
  */
 int vdir_exists(const char *path, size_t len);
+void vdir_flush(void);	/* forget every directory (a new build); none in flight */
 #endif

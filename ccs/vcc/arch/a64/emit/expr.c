@@ -1,5 +1,6 @@
 /* vcc code generator: expressions */
 #include "../../../emit/emitimpl.h"
+#include "../../../lib/vstack.h"
 
 /* ---------------- expressions ---------------- */
 
@@ -373,7 +374,29 @@ static val gen_binary(ecx *e, uint32_t n)
 
 	if (known >= 0)
 		return vconst(known);
-	a = gen(e, x->a), b = gen(e, x->b);
+	if (unlikely(vstack_low()))	/* nested operators recurse here: an error before the stack runs out */
+		efatal(e, x->loc, "expression nested too deeply");
+	a = gen(e, x->a);
+	if (unlikely(e->spill) && (a.k == V_REG || a.k == V_REG2) && tidx(a.r) >= 0 &&
+	    !is_vec(c, lt) && N(x->b)->op != N_NUM && N(x->b)->op != N_VAR) {
+		/* out of registers before: the left value waits in the frame while the right is computed */
+		int32_t sl = slot(e, 16, 8);
+		bool two = a.k == V_REG2;
+
+		mem(e, I_ST, 3, 0, a.r, FRAME, sl);
+		if (two)
+			mem(e, I_ST, 3, 0, a.r2, FRAME, sl + 8);
+		val_free(e, &a);
+		b = gen(e, x->b);
+		a.r = (uint8_t)treg(e);
+		mem(e, I_LD, 3, 0, a.r, FRAME, sl);
+		if (two) {
+			a.r2 = (uint8_t)treg(e);
+			mem(e, I_LD, 3, 0, a.r2, FRAME, sl + 8);
+		}
+	} else {
+		b = gen(e, x->b);
+	}
 	if (is_vec(c, ty) && !vbin_fast(c, op, lt, rt, ty))
 		return gen_vlanes(e, op, lt, &a, rt, &b, ty, false);
 	if (is_vec(c, ty)) {
@@ -654,7 +677,7 @@ static val atomic_rmw(ecx *e, uint32_t n, bool inc, bool post)
 	nb = nv.k == V_CONST && nv.i == 0 ? ZR : toreg(e, &nv);
 	cmp = treg(e);
 	mov(e, 1, cmp, ob);
-	word(e, (unsigned)sz << 30 | 0x08e0fc00u | (unsigned)cmp << 16 | (unsigned)ra << 5 | (unsigned)nb);	/* casal */
+	at_cas(e, (unsigned)sz, cmp, nb, ra);	/* casal */
 	op3(e, I_SUBS, sz == 3, ZR, cmp, ob);	/* both zero-extended */
 	mov(e, 1, ob, cmp);
 	bcond(e, C_NE, top);

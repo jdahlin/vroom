@@ -1,4 +1,5 @@
 /* vcc preprocessor: opening and closing a TU, pp_next and the queries on the result */
+#include <sys/stat.h>
 #include "ppimpl.h"
 
 VPRIV void *vm(size_t n)
@@ -77,7 +78,8 @@ pp *pp_open(const pp_opts *o)
 		p->sig = HNONE;
 	p->sv = vmreg_get(&ppr[4], SVMAX * sizeof(ptok), "pp.sv");
 	p->fe = vmreg_get(&ppr[5], (1u << 20) * sizeof(fent), "pp.fe");
-	p->once = varena_alloc(&p->perm, 4096 * sizeof(*p->once));
+	p->once = varena_alloc(&p->perm, 256 * sizeof(*p->once));
+	p->oncecap = 256;
 	p->pushed = varena_alloc(&p->perm, 4096 * sizeof(*p->pushed));
 	p->lm = vmreg_get(&ppr[6], 65536 * sizeof(*p->lm), "pp.lm");
 	{
@@ -95,11 +97,19 @@ pp *pp_open(const pp_opts *o)
 
 		memcpy(mp, o->main, ml);
 		memset(mp + ml, 0, 16);
-		mf = try_path(o->cwd, mp, ml);
+		mf = try_path(o, mp, ml);
 	}
 	if (!mf) {
-		char m[4200];
-		int l = snprintf(m, sizeof(m), "vcc: error: %s: cannot read\n", o->main);
+		char m[4200], fp[4200];
+		struct stat st;
+		bool big;
+
+		/* the lexer takes files below 2 GB (32-bit offsets): say so rather than "cannot read" */
+		snprintf(fp, sizeof(fp), "%s%s%s", o->main[0] != '/' && o->cwd ? o->cwd : "",
+			 o->main[0] != '/' && o->cwd ? "/" : "", o->main);
+		big = !stat(fp, &st) && st.st_size >= (1ll << 31);
+		int l = snprintf(m, sizeof(m), big ? "vcc: error: %s: file too large (2 GB or more)\n" :
+						    "vcc: error: %s: cannot read\n", o->main);
 
 		(void)!write(o->errfd ? o->errfd : 2, m, (size_t)(l < (int)sizeof(m) ? l : (int)sizeof(m) - 1));
 		pp_close(p);
@@ -274,6 +284,44 @@ int pp_skip_top(pp *p)
 	return 1;
 }
 
+/* an identifier's \\u/\\U escapes as UTF-8, in place (never longer), as clang -E */
+static __attribute__((noinline, cold)) size_t ucn_utf8(char *s, size_t n)
+{
+	size_t o = 0;
+
+	for (size_t i = 0; i < n;) {
+		unsigned d = s[i] == '\\' && i + 1 < n ? (s[i + 1] == 'u' ? 4 : s[i + 1] == 'U' ? 8 : 0) : 0;
+		uint32_t c = 0;
+
+		if (!d || i + 2 + d > n) {
+			s[o++] = s[i++];
+			continue;
+		}
+		for (unsigned k = 0; k < d; k++) {
+			char h = s[i + 2 + k];
+
+			c = c << 4 | (uint32_t)(h <= '9' ? h - '0' : (h | 32) - 'a' + 10);
+		}
+		i += 2 + d;
+		if (c < 0x80) {
+			s[o++] = (char)c;
+		} else if (c < 0x800) {
+			s[o++] = (char)(0xc0 | c >> 6);
+			s[o++] = (char)(0x80 | (c & 63));
+		} else if (c < 0x10000) {
+			s[o++] = (char)(0xe0 | c >> 12);
+			s[o++] = (char)(0x80 | (c >> 6 & 63));
+			s[o++] = (char)(0x80 | (c & 63));
+		} else {
+			s[o++] = (char)(0xf0 | c >> 18);
+			s[o++] = (char)(0x80 | (c >> 12 & 63));
+			s[o++] = (char)(0x80 | (c >> 6 & 63));
+			s[o++] = (char)(0x80 | (c & 63));
+		}
+	}
+	return o;
+}
+
 /* the token as clang -E -P prints it */
 static inline void render(pp *p, const ptok *t)
 {
@@ -304,6 +352,8 @@ static inline void render(pp *p, const ptok *t)
 	sp = pp_spell(t, p->out + p->nout, &l);
 	if (sp != p->out + p->nout)
 		memcpy(p->out + p->nout, sp, l);
+	if (t->kind == T_IDENT && !p->o->asm_mode && unlikely(memchr(p->out + p->nout, '\\', l) != NULL))
+		l = ucn_utf8(p->out + p->nout, l);
 	if (unlikely(t->ctr) && p->rec.on)
 		for (uint16_t r = t->ctr; r; r = p->rec.cp[r].next) {
 			const cprov *c = &p->rec.cp[r];

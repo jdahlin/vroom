@@ -127,6 +127,12 @@ typedef struct ElfObj {
 
 ElfObj *elf_new(void);
 void elf_reset(ElfObj *o);
+/* a job's escape for input-driven overflow (an arena or region full): set by
+ * the driver around a TU, the assembler and object writer longjmp there with
+ * a message instead of abort() taking down vccd; NULL: abort as before */
+#include <setjmp.h>
+extern _Thread_local jmp_buf *vjob_jb;
+__attribute__((noreturn)) void vjob_fail(const char *msg);
 void elf_free(ElfObj *o);
 void elf_error(ElfObj *o, const char *fmt, ...);
 

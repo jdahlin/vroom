@@ -1,5 +1,6 @@
 /* vcc preprocessor: macro expansion: arguments, stringizing, token pasting, substitution */
 #include "ppimpl.h"
+#include <ctype.h>
 
 /* ---------------- arguments ---------------- */
 
@@ -156,8 +157,7 @@ static bool collect_(pp *p, const pmacro *m, const ptok *name, margs *a, ptok *r
 						break;
 					}
 					if (unlikely(p->svn == SVMAX)) {
-						fprintf(stderr, "vcc: expansion too large\n");
-						abort();
+						fatal(p, 0, "macro expansion too large");
 					}
 					vfill(&p->sv[p->svn++], v, c->src, offloc ? loc + v->off : loc);
 				}
@@ -259,6 +259,8 @@ static __attribute__((noinline)) void preexpand_run(pp *p, margs *a, uint32_t k,
 	size_t base = p->svn;
 	ptok t;
 
+	if (vstack_low())
+		fatal(p, at->loc, "macro arguments nested too deeply");
 	push_ptok(p, at, n, 0, 0, 1);
 	p->pend = 0;
 	p->preexp++;
@@ -434,6 +436,19 @@ const uint8_t idch_tab[256] = {	/* [a-zA-Z0-9_$] and >= 0x80 */
 };
 #undef IDCH_ROW
 
+/* a UCN (\\uXXXX, \\UXXXXXXXX) at s[i]: its length, else 0 */
+static __attribute__((noinline, cold)) size_t ucn_at(const char *s, size_t n, size_t i)
+{
+	size_t d = i + 1 < n && s[i] == '\\' ? (s[i + 1] == 'u' ? 4 : s[i + 1] == 'U' ? 8 : 0) : 0;
+
+	if (!d || i + 2 + d > n)
+		return 0;
+	for (size_t k = i + 2; k < i + 2 + d; k++)
+		if (!isxdigit((unsigned char)s[k]))
+			return 0;
+	return 2 + d;
+}
+
 /* the kind of the single token spelled s[0..n), or -1 */
 static int classify(const char *s, size_t n, int rkind)
 {
@@ -441,9 +456,17 @@ static int classify(const char *s, size_t n, int rkind)
 
 	if (!n)
 		return -1;
-	if (idch((unsigned char)s[0]) && !(s[0] >= '0' && s[0] <= '9')) {
-		for (i = 0; i < n && idch((unsigned char)s[i]); i++)
-			;
+	if ((idch((unsigned char)s[0]) && !(s[0] >= '0' && s[0] <= '9')) || (s[0] == '\\' && ucn_at(s, n, 0))) {
+		for (i = 0; i < n;) {
+			size_t u;
+
+			if (idch((unsigned char)s[i]))
+				i++;
+			else if (s[i] == '\\' && (u = ucn_at(s, n, i)))
+				i += u;
+			else
+				break;
+		}
 		if (i == n)
 			return T_IDENT;
 		/* encoding prefix + literal */
@@ -467,6 +490,10 @@ static int classify(const char *s, size_t n, int rkind)
 
 			if ((c == '+' || c == '-') && strchr("eEpP", s[i - 1]))
 				continue;
+			if (c == '\\' && ucn_at(s, n, i)) {
+				i += ucn_at(s, n, i) - 1;
+				continue;
+			}
 			if (!idch(c) && c != '.')
 				return -1;
 		}
@@ -537,8 +564,7 @@ static size_t append(pp *p, const ptok *t, uint32_t n)
 	ptok *w = p->sv + first;
 
 	if (unlikely(n > SVMAX - p->svn)) {
-		fprintf(stderr, "vcc: expansion too large\n");
-		abort();
+		fatal(p, 0, "macro expansion too large");
 	}
 	for (uint32_t i = 0; i < n; i++) {
 		w[i] = t[i];
@@ -600,8 +626,7 @@ plain:
 			ptok *w;
 
 			if (unlikely(p->svn == SVMAX)) {
-				fprintf(stderr, "vcc: expansion too large\n");
-				abort();
+				fatal(p, 0, "macro expansion too large");
 			}
 			w = &p->sv[p->svn++];
 			vfill(w, cur, m->src, eloc);

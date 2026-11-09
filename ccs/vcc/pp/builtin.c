@@ -1,5 +1,6 @@
 /* vcc preprocessor: builtin macros and the __has_* queries */
 #include "ppimpl.h"
+#include <sys/stat.h>
 #include "ppdata.inc"
 
 /* ---------------- builtin macros ---------------- */
@@ -232,12 +233,25 @@ VPRIV int builtin(pp *p, const pmacro *m, ptok *t)
 		mknum(p, t, p->nfile > 1 ? (unsigned)p->nfile - 1 : 0);
 		break;
 	case B_DATE: case B_TIME: case B_TIMESTAMP: {
-		time_t now = time(NULL);
+		time_t now = p->o->has_epoch ? (time_t)p->o->epoch : time(NULL);
 
 		HC_BAD(p);
 		struct tm tm;
+		struct stat st;
 
-		localtime_r(&now, &tm);
+		/* clang: __TIMESTAMP__ is the current file's mtime */
+		if (m->builtin == B_TIMESTAMP && !p->o->has_epoch && fc) {
+			if (stat(p->fe[fc->fe].f->path, &st) != 0) {
+				mkstr(p, t, "??? ??? ?? ??:??:?? ????", 24);
+				break;
+			}
+			now = st.st_mtime;
+		}
+
+		if (p->o->has_epoch)	/* reproducible builds: UTC, as clang */
+			gmtime_r(&now, &tm);
+		else
+			localtime_r(&now, &tm);
 		strftime(buf, sizeof(buf), m->builtin == B_DATE ? "%b %e %Y" :
 			 m->builtin == B_TIME ? "%H:%M:%S" : "%a %b %e %H:%M:%S %Y", &tm);
 		mkstr(p, t, buf, strlen(buf));

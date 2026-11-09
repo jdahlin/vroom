@@ -75,6 +75,30 @@ static inline int same(const char *a, const char *b, size_t len)
 	return tail(a + i, len - i) == tail(b + i, len - i);
 }
 
+/* table full: the job's hook (the driver: an error for this TU, longjmp) or abort */
+void (*vintern_full_hook)(void);
+_Atomic int vtables_full;
+
+
+/* a server-wide table or region is full: an error for this job (and vccd
+   restarts when idle, vtables_full), abort without a job to end */
+void vjob_escape(const char *msg)
+{
+	atomic_store(&vtables_full, 1);
+	fprintf(stderr, "vcc: error: %s\n", msg);
+	if (vintern_full_hook)
+		vintern_full_hook();
+	abort();
+}
+
+static __attribute__((noreturn, noinline)) void vintern_full(void)
+{
+	char m[96];
+
+	snprintf(m, sizeof(m), "identifier table full (more than %u distinct identifiers)", MAX_ENT);
+	vjob_escape(m);
+}
+
 /* the probe from slot i on, inserting at the first empty slot */
 static __attribute__((noinline)) uint32_t insert(const char *s, size_t len, uint32_t hash, uint32_t i,
 						 uint64_t w0, uint64_t w1)
@@ -88,8 +112,8 @@ static __attribute__((noinline)) uint32_t insert(const char *s, size_t len, uint
 			if (!id) {
 				id = atomic_fetch_add_explicit(&nent, 1, memory_order_relaxed);
 				if (id >= MAX_ENT) {
-					fprintf(stderr, "vcc: identifier table full\n");
-					abort();
+					atomic_fetch_sub_explicit(&nent, 1, memory_order_relaxed);
+					vintern_full();
 				}
 				vintern_ents[id] = (vident){ s, (uint32_t)len, hash, w0, w1 };
 			}
@@ -188,7 +212,7 @@ uint32_t vintern_copy(const char *s, size_t len)
 	d = copy_buf + off;
 
 	if (off + len + 16 > COPY_MAX)
-		abort();
+		vintern_full();
 	memcpy(d, s, len);
 	return vintern(d, len, h);
 }
@@ -248,3 +272,30 @@ vintern_cache *vintern_local(void)
 	return c;
 }
 
+
+/* ---------------- stack guard (vstack.h) ---------------- */
+#include "vstack.h"
+
+_Thread_local uintptr_t vstack_lim;
+
+void vstack_init(void)
+{
+	pthread_t t = pthread_self();
+	uintptr_t lo;
+#ifdef __APPLE__
+	lo = (uintptr_t)pthread_get_stackaddr_np(t) - pthread_get_stacksize_np(t);
+#else
+	pthread_attr_t a;
+	void *addr;
+	size_t sz;
+
+	if (pthread_getattr_np(t, &a)) {
+		vstack_lim = 1;	/* unknown: never low */
+		return;
+	}
+	pthread_attr_getstack(&a, &addr, &sz);
+	pthread_attr_destroy(&a);
+	lo = (uintptr_t)addr;
+#endif
+	vstack_lim = lo + VSTACK_RESERVE;
+}

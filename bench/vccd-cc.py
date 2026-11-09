@@ -30,7 +30,7 @@ def run(t):
     obj, a = t
     o = f'{T}/{obj.replace("/", "__")}'
     # vccd wants the source last
-    p = subprocess.run([f'{vd.R}/build/ccs/vcc'] + a[:-1] + ['-c', '-o', o, a[-1]], cwd=vd.B,
+    p = subprocess.run([f'{vd.BIN}/vcc'] + a[:-1] + ['-c', '-o', o, a[-1]], cwd=vd.B,
                        capture_output=True, text=True, env=dict(os.environ, VCC_SOCK=sock))
     ok = p.returncode == 0 and os.path.exists(o) and os.path.getsize(o) > 0
     if os.path.exists(o): os.unlink(o)

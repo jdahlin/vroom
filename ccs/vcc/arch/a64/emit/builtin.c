@@ -407,6 +407,92 @@ stack:
 }
 
 /*
+ * Atomic read-modify-write instructions: the LSE one when the target has
+ * LSE (-march=armv8.1-a and later, +lse, most -mcpu, Darwin), else the same
+ * effect as an ldaxr/stlxr loop (what clang emits with -mno-outline-atomics).
+ * Registers as in the LSE forms; sz is log2 of the size.
+ */
+static void ex_ld(ecx *e, unsigned sz, int rt, int rn)
+{
+	word(e, sz << 30 | 0x085ffc00u | (unsigned)rn << 5 | (unsigned)rt);	/* ldaxr */
+}
+
+static void ex_st(ecx *e, unsigned sz, int ws, int rt, int rn)
+{
+	word(e, sz << 30 | 0x0800fc00u | (unsigned)ws << 16 | (unsigned)rn << 5 | (unsigned)rt);	/* stlxr */
+}
+
+/* casal rs, rt, [rn]: rs = old (zero-extended); *rn = rt if old == rs */
+VPRIV void at_cas(ecx *e, unsigned sz, int rs, int rt, int rn)
+{
+	int t, ws, cmpv;
+	uint32_t top, fail;
+
+	if (e->c->o->lse) {
+		word(e, sz << 30 | 0x08e0fc00u | (unsigned)rs << 16 | (unsigned)rn << 5 | (unsigned)rt);
+		return;
+	}
+	t = treg(e), ws = treg(e), cmpv = treg(e);
+	if (sz < 2)
+		extend(e, cmpv, rs, 1 << sz, false);
+	else
+		mov(e, 1, cmpv, rs);
+	top = newlabel(e), fail = newlabel(e);
+	deflabel_loop(e, top, true);
+	ex_ld(e, sz, t, rn);
+	op3(e, I_SUBS, sz == 3, ZR, t, cmpv);
+	bcond(e, C_NE, fail);
+	ex_st(e, sz, ws, rt, rn);
+	cbz(e, true, 0, ws, top);
+	deflabel_forced(e, fail);
+	word(e, 0xd503305fu);	/* clrex (harmless after a store) */
+	mov(e, 1, rs, t);
+	tfree(e, cmpv), tfree(e, ws), tfree(e, t);
+}
+
+/* swpal rs, rt, [rn]: rt = old, *rn = rs */
+VPRIV void at_swp(ecx *e, unsigned sz, int rs, int rt, int rn)
+{
+	int t, ws;
+	uint32_t top;
+
+	if (e->c->o->lse) {
+		word(e, sz << 30 | 0x38e08000u | (unsigned)rs << 16 | (unsigned)rn << 5 | (unsigned)rt);
+		return;
+	}
+	t = treg(e), ws = treg(e);
+	top = newlabel(e);
+	deflabel_loop(e, top, true);
+	ex_ld(e, sz, t, rn);
+	ex_st(e, sz, ws, rs, rn);
+	cbz(e, true, 0, ws, top);
+	mov(e, 1, rt, t);
+	tfree(e, ws), tfree(e, t);
+}
+
+/* ld<op>al rs, rt, [rn] (opc: 0 add, 1 clr, 2 eor, 3 set): rt = old, *rn = old op rs */
+VPRIV void at_ldop(ecx *e, unsigned sz, unsigned opc, int rs, int rt, int rn)
+{
+	static const int op[] = { I_ADD, I_BIC, I_EOR, I_ORR };
+	int t, u, ws;
+	uint32_t top;
+
+	if (e->c->o->lse) {
+		word(e, sz << 30 | 0x38e00000u | (unsigned)rs << 16 | opc << 12 | (unsigned)rn << 5 | (unsigned)rt);
+		return;
+	}
+	t = treg(e), u = treg(e), ws = treg(e);
+	top = newlabel(e);
+	deflabel_loop(e, top, true);
+	ex_ld(e, sz, t, rn);
+	op3(e, op[opc], sz == 3, u, t, rs);
+	ex_st(e, sz, ws, u, rn);
+	cbz(e, true, 0, ws, top);
+	mov(e, 1, rt, t);
+	tfree(e, ws), tfree(e, u), tfree(e, t);
+}
+
+/*
  * __atomic_*: LSE instructions, always acquire+release (ldar/stlr, swpal,
  * casal, ld<op>al), which is at least what any memory order asks for.
  */
@@ -481,7 +567,7 @@ static val gen_atomic(ecx *e, const node *x, const uint32_t *arg)
 		} else {
 			rs = toreg(e, &v1);
 		}
-		word(e, sz << 30 | 0x38e08000u | (unsigned)rs << 16 | (unsigned)rp << 5 | (unsigned)r);	/* swpal */
+		at_swp(e, sz, rs, r, rp);	/* swpal */
 		if (id == BI_ATOMIC_EXCHANGE) {
 			int rr = toreg(e, &v2);
 
@@ -510,7 +596,7 @@ static val gen_atomic(ecx *e, const node *x, const uint32_t *arg)
 		}
 		mem(e, I_LD, (int)sz, 0, old, re, 0);
 		mov(e, 1, cmpv, old);
-		word(e, sz << 30 | 0x08e0fc00u | (unsigned)old << 16 | (unsigned)rp << 5 | (unsigned)rd);	/* casal */
+		at_cas(e, sz, old, rd, rp);	/* casal */
 		if (n < 4)
 			extend(e, cmpv, cmpv, (int)n, false), extend(e, old, old, (int)n, false);
 		op3(e, I_SUBS, xs, ZR, old, cmpv);
@@ -531,7 +617,7 @@ static val gen_atomic(ecx *e, const node *x, const uint32_t *arg)
 		int re = toreg(e, &v1), rd = toreg(e, &v2), old = treg(e);
 
 		mov(e, 1, old, re);
-		word(e, sz << 30 | 0x08e0fc00u | (unsigned)old << 16 | (unsigned)rp << 5 | (unsigned)rd);	/* casal */
+		at_cas(e, sz, old, rd, rp);	/* casal */
 		if (id == BI_SYNC_VAL_CAS) {
 			if (sg && n < 8)
 				extend(e, old, old, (int)n, true);
@@ -564,7 +650,7 @@ static val gen_atomic(ecx *e, const node *x, const uint32_t *arg)
 			op3(e, I_ORN, 1, rs, ZR, rv);		/* mvn: clear the bits not in v */
 		else
 			mov(e, 1, rs, rv);
-		word(e, sz << 30 | 0x38e00000u | (unsigned)rs << 16 | opc[base] << 12 | (unsigned)rp << 5 | (unsigned)r);
+		at_ldop(e, sz, opc[base], rs, r, rp);
 		tfree(e, rs);
 		if (id >= BI_ATOMIC_ADD_FETCH) {
 			static const int bop[] = { I_ADD, I_SUB, I_AND, I_ORR, I_EOR };
@@ -591,6 +677,40 @@ VPRIV val gen_builtin(ecx *e, uint32_t n)
 	val v;
 
 	switch (x->aux) {
+	case BI_SHUFFLEVECTOR: case BI_CONVERTVECTOR: {
+		/* lane by lane through a frame slot (vectors are addresses here) */
+		qty at = N(arg[0])->ty, ae = T(c, at)->base, re = T(c, x->ty)->base;
+		unsigned na = (unsigned)(tsize(c, at) / tsize(c, ae)), nr = (unsigned)(tsize(c, x->ty) / tsize(c, re));
+		val a = gen(e, arg[0]), b = x->aux == BI_SHUFFLEVECTOR ? gen(e, arg[1]) : vconst(0);
+		int ra = toreg(e, &a), rb = x->aux == BI_SHUFFLEVECTOR ? toreg(e, &b) : -1;
+		int32_t sl = slot(e, tsize(c, x->ty), 16);
+		int rd = treg(e);
+
+		opi(e, I_ADDI, 1, rd, FRAME, sl);
+		for (unsigned i = 0; i < nr; i++) {
+			lval d = { .k = L_REG, .r = (uint8_t)rd, .off = (int64_t)i * (int64_t)tsize(c, re), .align = talign(c, re) };
+			val v;
+
+			if (x->aux == BI_SHUFFLEVECTOR) {
+				int64_t k = (int64_t)c->ipool[N(arg[2 + i])->a];
+				lval s = { .k = L_REG, .r = (uint8_t)(k < (int64_t)na ? ra : rb),
+					   .off = (k < (int64_t)na ? k : k - (int64_t)na) * (int64_t)tsize(c, ae), .align = talign(c, ae) };
+
+				v = k < 0 ? vconst(0) : load(e, &s, ae);
+			} else {
+				lval s = { .k = L_REG, .r = (uint8_t)ra, .off = (int64_t)i * (int64_t)tsize(c, ae), .align = talign(c, ae) };
+				int ck = is_flt(c, ae) ? (is_flt(c, re) ? CK_F2F : CK_F2I) : is_flt(c, re) ? CK_I2F : CK_INT;
+
+				v = cast(e, load(e, &s, ae), ae, re, ck);
+			}
+			store(e, &d, re, &v);
+			val_free(e, &v);
+		}
+		tfree(e, ra);
+		if (rb >= 0)
+			tfree(e, rb);
+		return vreg(rd);
+	}
 	case BI_CONSTANT_P: {
 		/*
 		 * clang: 1 if the front end folds the operand (a pointer only as a

@@ -22,6 +22,7 @@
  * read), the paint flag, GNU ", ## __VA_ARGS__", and the leading-space
  * propagation that stringification makes visible.
  */
+#include "../lib/vstack.h"
 #include <pthread.h>
 #include <setjmp.h>
 #include <stdarg.h>
@@ -427,7 +428,7 @@ struct pp {
 	int errors;
 	unsigned counter;
 	const vlex_file **once;
-	uint32_t nonce;
+	uint32_t nonce, oncecap;
 	struct { uint32_t id; uintptr_t m; } *pushed;
 	uint32_t npushed;
 	vlex_file builtin;
@@ -663,10 +664,11 @@ VPRIV void *mem_shared(void *a, size_t n);
 extern const vtok no_body[1];
 VPRIV void define(pp *p, ctx *c, uint32_t b, uint32_t e);
 /* include.c */
-VPRIV const vlex_file *try_path(const char *cwd, const char *path, size_t len);
+VPRIV const vlex_file *try_path(const pp_opts *o, const char *path, size_t len);
 VPRIV const vlex_file *find_include(pp *p, const ctx *from, const char *name, size_t nlen, bool angled, bool next, int32_t *sdir, const char **path, const incent **ie);
 /* hcache.c */
 VPRIV int once_index(const pp *p, const vlex_file *f);
+VPRIV void once_add(pp *p, const vlex_file *f);
 VPRIV bool hc_top(const pp *p);
 VPRIV bool hc_valid(pp *p, const hent *e);
 VPRIV void emit(pp *p, const hent *e, unsigned base);
@@ -875,10 +877,8 @@ static inline char *spell_to16(char *dst, const ptok *t)
 
 static inline void svpush(pp *p, const ptok *t)
 {
-	if (unlikely(p->svn == SVMAX)) {
-		fprintf(stderr, "vcc: expansion too large\n");
-		abort();
-	}
+	if (unlikely(p->svn == SVMAX))
+		fatal(p, 0, "macro expansion too large");
 	p->sv[p->svn++] = *t;
 }
 

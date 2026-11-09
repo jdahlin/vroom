@@ -21,6 +21,8 @@
 #include <errno.h>
 #include <fcntl.h>
 #include <setjmp.h>
+#include <poll.h>
+#include <sys/socket.h>
 #include <stdatomic.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -347,19 +349,66 @@ static int write_all(int fd, const char *p, size_t n)
 	return 0;
 }
 
+/* outputs go to a temporary next to the target, renamed over it when complete:
+   an interrupted or failed job leaves the old file or none, never a torn one */
+_Thread_local int ppd_umask = -1;
+_Thread_local int ppd_conn = -1;
+
+/* the client closed its end (it was killed, or make was interrupted): the
+ * request is all it sends, so anything readable now is the EOF */
+static bool client_gone(void)
+{
+	struct pollfd pf = { ppd_conn, POLLIN, 0 };
+	char c;
+
+	return ppd_conn >= 0 && poll(&pf, 1, 0) == 1 && recv(ppd_conn, &c, 1, MSG_PEEK | MSG_DONTWAIT) == 0;
+}
+
+/* a new output's mode: the client's umask under vccd */
+static void out_mode(int fd)
+{
+	if (ppd_umask >= 0)
+		fchmod(fd, 0666 & ~(mode_t)ppd_umask);
+}
+
+static bool tmp_name(char *t, size_t cap, const char *f)
+{
+	static _Atomic unsigned seq;
+	struct stat st;
+
+	/* /dev/null, a fifo, ...: written where it is, a rename would replace it */
+	if (!stat(f, &st) && !S_ISREG(st.st_mode)) {
+		snprintf(t, cap, "%s", f);
+		return false;
+	}
+	snprintf(t, cap, "%s.vcc%d.%u.tmp", f, (int)getpid(), atomic_fetch_add(&seq, 1));
+	return true;
+}
+
 static int write_file(const char *cwd, const char *path, const char *s, size_t n, int errfd)
 {
-	char b[8192];
+	char b[8192], t[8300];
 	const char *f = at(cwd, path, b, sizeof(b));
-	int fd = open(f, O_WRONLY | O_CREAT | O_TRUNC | O_CLOEXEC, 0666);
+	int fd;
 
-	if (fd < 0 || write_all(fd, s, n)) {
-		dprintf(errfd, "vcc: error: cannot write %s: %s\n", path, strerror(errno));
-		if (fd >= 0)
-			close(fd);
+	bool tmp = tmp_name(t, sizeof(t), f);
+
+	if (client_gone()) {
+		dprintf(errfd, "vcc: %s not written: the client has gone\n", path);
 		return 1;
 	}
-	close(fd);
+
+	fd = open(t, O_WRONLY | O_CREAT | O_TRUNC | O_CLOEXEC, 0666);
+	if (fd >= 0 && tmp)
+		out_mode(fd);
+	if (fd < 0 || write_all(fd, s, n) || close(fd) || (tmp && rename(t, f))) {
+		int e = errno;
+
+		dprintf(errfd, "vcc: error: cannot write %s: %s\n", path, strerror(e));
+		if (fd >= 0 && tmp)
+			unlink(t);
+		return 1;
+	}
 	return 0;
 }
 
@@ -373,8 +422,16 @@ static int write_out(const char *cwd, const char *out, int outfd, const char *s,
 /* make-style dependency file, as clang -MD writes it */
 static int write_deps(const pp *p, const char *cwd, const char *depfile, const char *target, int errfd)
 {
-	static _Thread_local const char *names[1 << 16];
-	size_t n = pp_files(p, names, sizeof(names) / sizeof(names[0]));
+	static _Thread_local const char **names;
+	static _Thread_local size_t cap;
+	size_t n;
+
+	/* grown until every file fits (a full table may have been cut short) */
+	while (!names || (n = pp_files(p, names, cap)) == cap) {
+		free(names);
+		cap = cap ? 2 * cap : 4096;
+		names = malloc(cap * sizeof(*names));
+	}
 	buf d = { .r = &bufr[3] };
 	int r;
 
@@ -493,9 +550,115 @@ static const char *obj_name(const char *main_file, char *buf, size_t cap)
 	return buf;
 }
 
+/* does -march=/-mcpu= name a target with LSE atomics (as clang's
+   __ARM_FEATURE_ATOMICS)?  -1: no opinion (keep the previous answer) */
+static int arch_lse(const char *v, bool cpu)
+{
+	const char *plus = strchr(v, '+');
+	size_t n = plus ? (size_t)(plus - v) : strlen(v);
+	int lse = -1;
+
+	if (!cpu) {
+		if (n == 7 && !strncmp(v, "armv8-a", 7))
+			lse = 0;
+		else if (n >= 5 && (!strncmp(v, "armv8.", 6) || !strncmp(v, "armv9", 5)))
+			lse = 1;	/* armv8.1-a and later, armv8-r has none */
+		if (n >= 7 && !strncmp(v, "armv8-r", 7))
+			lse = 0;
+	} else {
+		static const char *const old[] = { "generic", "cortex-a35", "cortex-a53", "cortex-a57", "cortex-a72",
+						   "cortex-a73", "thunderx", "thunderxt88", "xgene1", "exynos-m3",
+						   "cyclone", "apple-a7", "apple-a8", "apple-a9", "apple-a10", "falkor",
+						   "kryo", "thunderxt81", "thunderxt83", "cortex-r82", NULL };
+
+		lse = 1;	/* native here is an Apple core */
+		for (int i = 0; old[i]; i++)
+			if (strlen(old[i]) == n && !strncmp(v, old[i], n))
+				lse = 0;
+	}
+	for (const char *p = plus; p; p = strchr(p + 1, '+')) {
+		if (!strncmp(p, "+lse", 4) && (!p[4] || p[4] == '+'))
+			lse = 1;
+		else if (!strncmp(p, "+nolse", 6) && (!p[6] || p[6] == '+'))
+			lse = 0;
+	}
+	return lse;
+}
+
+
+static void intern_full(void)
+{
+	if (vjob_jb)
+		longjmp(*vjob_jb, 1);
+}
+
+/* CPATH-style lists (kept out of ppd_run: its size decides how clang
+   compiles the argument loop; vbench pp +3.7 % instructions inline) */
+static __attribute__((noinline)) size_t env_ndirs(const char *v)
+{
+	size_t k = v && *v ? 1 : 0;
+
+	for (; v && *v; v++)
+		k += *v == ':';
+	return k;
+}
+
+/* the elements of v appended to all[n..] (not repeating one from nquote on); an
+   empty element is the current directory.  slot: which per-thread copy holds them */
+static __attribute__((noinline)) int env_dirs(const char *v, const char **all, int n, int nquote, int slot)
+{
+	static _Thread_local char *copy[2];
+	char *s, *t;
+
+	if (!v || !*v)
+		return n;
+	free(copy[slot]);
+	copy[slot] = s = strdup(v);
+	for (; s; s = t) {
+		const char *d;
+		int dup = 0;
+
+		if ((t = strchr(s, ':')))
+			*t++ = 0;
+		d = *s ? s : ".";
+		for (int j = nquote; j < n; j++)
+			dup |= !strcmp(all[j], d);
+		if (!dup)
+			all[n++] = d;
+	}
+	return n;
+}
+
+/* a variable of the job's environment: the client's under vccd */
+static const char *ppd_getenv(const ppd_env *env, const char *name)
+{
+	size_t l = strlen(name);
+
+	if (!env->envp)
+		return getenv(name);
+	for (char **e = env->envp; *e; e++)
+		if (!strncmp(*e, name, l) && (*e)[l] == '=')
+			return *e + l + 1;
+	return NULL;
+}
+
 int ppd_run(int argc, char **argv, const ppd_env *env)
 {
-	const char *dirs_q[256], *dirs_i[1024], *dirs_s[256], *dirs_a[256], *all[2048];
+	/* each list holds at most argc entries, all of them plus the defaults: one
+	   per-thread allocation, grown to the longest command line seen */
+	static _Thread_local const char **dirv;
+	static _Thread_local size_t dircap;
+	const char *cpath = ppd_getenv(env, "CPATH"), *cipath = ppd_getenv(env, "C_INCLUDE_PATH");
+	size_t nenvd = env_ndirs(cpath) + env_ndirs(cipath);
+	size_t per = (size_t)argc + 64 + nenvd;
+
+	if (5 * per > dircap) {
+		free(dirv);
+		dircap = 5 * per;
+		dirv = malloc(dircap * sizeof(*dirv));
+	}
+	const char **dirs_q = dirv, **dirs_i = dirv + per, **dirs_s = dirv + 2 * per, **dirs_a = dirv + 3 * per,
+		   **all = dirv + 4 * per;
 	int nq = 0, ni = 0, ns = 0, na = 0, n = 0;
 	const char *cmp = NULL, *out = NULL, *main_file = NULL, *depfile = NULL, *deptarget = NULL;
 	int errfd = env->errfd, status = 0, md = 0, dcolor = 0, nocaret = 0, elimit = 0, nwargs = 0;
@@ -511,13 +674,14 @@ int ppd_run(int argc, char **argv, const ppd_env *env)
 	int darwin = 0;
 #endif
 	int hosted = 1, nostdinc = 0, asm_mode = 0, undef = 0;
+	int march_lse = -1, mcpu_lse = -1, lse;
 	int opt = 0, olevel = 0, os = 0, pie = -1, pic = 0, freestanding = 0, nobuiltin = 0, instr = 0, cfi = -1, strict_align = 0, tiny = 0, gregs = 0;
 	pp_opts po = { 0 };
 	char *pmap = NULL;
 	double t0;
 	pp *p;
 	int syntax = 0, layout = 0, ms_anon = 0, short_wchar = 0, tokhash = 0, emit = 0, objmode = 0;
-	int std = 0, strict = 0, wimpl_int = 0, wimpl_fn = 0, gnu89_inline = -1;
+	int tri = -1, std = 0, strict = 0, wimpl_int = 0, wimpl_fn = 0, gnu89_inline = -1, vcc_kernel = 0;
 	char objbuf[1024];
 
 	for (int i = 1; i < argc; i++) {
@@ -554,7 +718,10 @@ int ppd_run(int argc, char **argv, const ppd_env *env)
 			continue;
 		}
 		if (!strcmp(a, "-ansi")) { std = 89; strict = 1; continue; }
+		if (!strcmp(a, "-trigraphs") || !strcmp(a, "-ftrigraphs")) { tri = 1; continue; }
+		if (!strcmp(a, "-fno-trigraphs")) { tri = 0; continue; }
 		if (!strcmp(a, "-fgnu89-inline")) { gnu89_inline = 1; continue; }
+		if (!strcmp(a, "-fvcc-kernel")) { vcc_kernel = 1; continue; }
 		if (!strcmp(a, "-fno-gnu89-inline")) { gnu89_inline = 0; continue; }
 		if ((a[1] == 'W' && a[2] && a[3] != ',') || !strcmp(a, "-w")) {
 			/* warning options, in order, for pp_wstate (some are also handled below) */
@@ -600,7 +767,12 @@ int ppd_run(int argc, char **argv, const ppd_env *env)
 			continue;
 		}
 		if ((v = ARG("-I"))) { dirs_i[ni++] = v; continue; }
-		if ((v = ARG("-D"))) { define_arg(&cmdl, v); continue; }
+		if ((v = ARG("-D"))) {
+			if (!strncmp(v, "__KERNEL__", 10) && (!v[10] || v[10] == '='))
+				vcc_kernel = 1;	/* the kernel: its error() calls rely on clang -O2 folding */
+			define_arg(&cmdl, v);
+			continue;
+		}
 		if ((v = ARG("-U"))) { bstr(&cmdl, "#undef "); bstr(&cmdl, v); bstr(&cmdl, "\n"); continue; }
 		if (!strncmp(a, "-fmacro-prefix-map=", 19)) {
 			snprintf(pmapbuf, sizeof(pmapbuf), "%s", a + 19);
@@ -626,6 +798,8 @@ int ppd_run(int argc, char **argv, const ppd_env *env)
 		else if (!strcmp(a, "-fno-asynchronous-unwind-tables")) cfi = 0;
 		else if (!strcmp(a, "-mstrict-align")) strict_align = 1;
 		else if (!strcmp(a, "-mgeneral-regs-only")) gregs = 1;
+		else if (!strncmp(a, "-march=", 7) && arch_lse(a + 7, false) >= 0) march_lse = arch_lse(a + 7, false);
+		else if (!strncmp(a, "-mcpu=", 6) && arch_lse(a + 6, true) >= 0) mcpu_lse = arch_lse(a + 6, true);
 		else if (!strcmp(a, "-mcmodel=tiny")) tiny = 1;
 		else if (a[0] != '-' && (strstr(a, ".c") || strstr(a, ".S") || strstr(a, ".dts"))) {
 			size_t l = strlen(a);
@@ -664,6 +838,7 @@ int ppd_run(int argc, char **argv, const ppd_env *env)
 	po.nquote = n;
 #define ADD(d) do { int dup_ = 0; for (int j = po.nquote; j < n; j++) dup_ |= !strcmp(all[j], d); if (!dup_) all[n++] = d; } while (0)
 	for (int k = 0; k < ni; k++) ADD(dirs_i[k]);
+	n = env_dirs(cpath, all, n, po.nquote, 0);	/* CPATH: after -I, as clang */
 	po.nsys = n;
 	for (int k = 0; k < ns; k++) {
 		/* vcc's own headers (arm_neon.h) go before the clang resource directory */
@@ -672,6 +847,7 @@ int ppd_run(int argc, char **argv, const ppd_env *env)
 			ADD(VCC_INCDIR);
 		ADD(dirs_s[k]);
 	}
+	n = env_dirs(cipath, all, n, po.nquote, 1);	/* C_INCLUDE_PATH: after -isystem */
 	/* Darwin: vcc's own <stdatomic.h>, <arm_neon.h>, <arm_acle.h> ahead of the SDK's */
 	if (darwin && !nostdinc)
 		ADD(VCC_INCDIR);
@@ -694,6 +870,16 @@ int ppd_run(int argc, char **argv, const ppd_env *env)
 	}
 	po.dirs = all;
 	po.ndirs = n;
+	po.trigraphs = tri >= 0 ? tri : strict && std != 23;	/* clang: strict modes before C23 */
+	{
+		const char *ep = ppd_getenv(env, "SOURCE_DATE_EPOCH");
+		char *end;
+
+		if (ep && *ep) {
+			po.epoch = strtoll(ep, &end, 10);
+			po.has_epoch = !*end;
+		}
+	}
 
 	if (undef)
 		bstr(&pre, asm_mode ? predef_undef_asm : predef_undef_c);
@@ -750,6 +936,10 @@ int ppd_run(int argc, char **argv, const ppd_env *env)
 	/* the Linux table is for the kernel's -mgeneral-regs-only */
 	if (!darwin && !gregs && !undef)
 		bstr(&pre, "#define __ARM_FP 0xE\n#define __ARM_NEON 1\n#define __ARM_NEON_FP 0xE\n");
+	/* -march wins over -mcpu (clang); Darwin: Apple cores, LSE always */
+	lse = darwin ? 1 : march_lse >= 0 ? march_lse : mcpu_lse >= 0 ? mcpu_lse : 0;
+	if (!darwin && lse && !undef)
+		bstr(&pre, "#define __ARM_FEATURE_ATOMICS 1\n");
 	if (strict_align) bstr(&pre, "#undef __ARM_FEATURE_UNALIGNED\n");
 	if (tiny) bstr(&pre, "#undef __AARCH64_CMODEL_SMALL__\n#define __AARCH64_CMODEL_TINY__ 1\n");
 	if (cmdl.n) bput(&pre, cmdl.p, cmdl.n);
@@ -776,16 +966,32 @@ int ppd_run(int argc, char **argv, const ppd_env *env)
 	}
 
 	t0 = now();
-	p = pp_open(&po);
+	{	/* pp_open lexes the main file: a full identifier table there ends the job too
+		   (the pp it was opening is lost: a leak, as rare as the table filling) */
+		static _Thread_local jmp_buf jo;
+
+		if (setjmp(jo)) {
+			vjob_jb = NULL;
+			status = 1;
+			goto out;
+		}
+		vjob_jb = &jo;
+		vintern_full_hook = intern_full;
+		p = pp_open(&po);
+		vjob_jb = NULL;
+	}
 	if (!p) {
 		status = 1;
 		goto out;
 	}
 	pp_set_fatal(p, &jb);
 	if (setjmp(jb)) {
+		vjob_jb = NULL;
 		status = 1;
 		goto done;
 	}
+	vjob_jb = &jb;	/* as/elf overflow ends this TU too */
+	vintern_full_hook = intern_full;	/* (only reaches vjob_jb in the thread that set it) */
 	if (tokhash) {
 		/* a hash of what pp_next hands the parser: kind, SOL/SPACE, spelling, id, file:line:col, sys */
 		uint64_t h = 1469598103934665603ull;
@@ -829,9 +1035,11 @@ int ppd_run(int argc, char **argv, const ppd_env *env)
 		cc_opts co = { .target = po.target, .unsigned_char = po.unsigned_char, .dump_layouts = layout, .ms_anon = ms_anon, .short_wchar = short_wchar,
 				.std = std, .implicit_int = std == 89 || wimpl_int, .implicit_fn = std == 89 || wimpl_fn,
 				.gnu89_inline = gnu89_inline, .no_builtin = freestanding || nobuiltin, .instrument = instr,
-				.general_regs_only = gregs, .opt = olevel,
+				.general_regs_only = gregs, .vcc_kernel = vcc_kernel, .lse = lse, .opt = olevel,
 			       .outfd = env->outfd };
 		int fd = -1;
+		char outpath[4096], outtmp[4200];
+		bool outrename = false;
 
 		co.emit = emit;
 		co.nthreads = getenv("VCC_THREADS") ? atoi(getenv("VCC_THREADS")) : 1;
@@ -844,7 +1052,11 @@ int ppd_run(int argc, char **argv, const ppd_env *env)
 				snprintf(path, sizeof(path), "%s/%s", env->cwd, out);
 			else
 				snprintf(path, sizeof(path), "%s", out);
-			fd = open(path, O_WRONLY | O_CREAT | O_TRUNC, 0644);
+			snprintf(outpath, sizeof(outpath), "%s", path);
+			outrename = tmp_name(outtmp, sizeof(outtmp), path);
+			fd = open(outtmp, O_WRONLY | O_CREAT | O_TRUNC | O_CLOEXEC, 0666);
+			if (fd >= 0 && outrename)
+				out_mode(fd);
 			if (fd < 0) {
 				dprintf(errfd, "vcc: error: cannot open %s\n", out);
 				status = 1;
@@ -860,8 +1072,16 @@ int ppd_run(int argc, char **argv, const ppd_env *env)
 			ppd_ns_cc += nsnow() - t1;
 			ppd_ph_add(PPD_PH_CC, v1);
 		}
-		if (fd >= 0)
-			close(fd);
+		if (fd >= 0) {
+			if (!status && client_gone())
+				status = 1;	/* (the temporary is removed below) */
+			if (close(fd) || (!status && outrename && rename(outtmp, outpath))) {
+				dprintf(errfd, "vcc: error: cannot write %s: %s\n", out, strerror(errno));
+				status = 1;
+			}
+			if (status && outrename)
+				unlink(outtmp);
+		}
 		if (!status && emit == 2)
 			status = write_obj(env->cwd, out, env->outfd, errfd, darwin);
 		if (!status && emit == 2 && depfile)
@@ -907,6 +1127,7 @@ int ppd_run(int argc, char **argv, const ppd_env *env)
 			status = write_deps(p, env->cwd, depfile, deptarget ? deptarget : out ? out : "-", errfd);
 	}
 done:
+	vjob_jb = NULL;
 	pp_diag_summary(p);
 	pp_close(p);	/* frees the text in o */
 out:

@@ -44,43 +44,40 @@ def cases(d):
     def case(name, expect, files, main, args=(), regex=None, xfail=None):
         C[name] = dict(expect=expect, regex=regex, xfail=xfail, files=files, main=main, args=list(args))
 
-    # front end recursion (cc.c has no depth limit; clang stops at bracket depth 256)
-    case('paren-200k', 'error', {'a.c': 'int x = ' + nest('(', ')', 200000, '1') + ';\n'}, 'a.c',
-         xfail='Input-driven abort() / stack overflow kill the whole server (recursion depth)')
-    case('unary-minus-300k', 'any', {'a.c': 'int x = ' + '- ' * 300000 + '1;\n'}, 'a.c',
-         xfail='Input-driven abort() / stack overflow kill the whole server (recursion depth)')
-    case('ternary-100k', 'any', {'a.c': 'int x = ' + '1 ? ' * 100000 + '1' + ' : 0' * 100000 + ';\n'}, 'a.c',
-         xfail='Input-driven abort() / stack overflow kill the whole server (recursion depth)')
-    case('cast-chain-100k', 'any', {'a.c': 'long x = ' + '(long)' * 100000 + '1;\n'}, 'a.c',
-         xfail='Input-driven abort() / stack overflow kill the whole server (recursion depth)')
+    # front end recursion: vstack.h ends the TU before the stack runs out (clang itself crashes here)
+    case('paren-200k', 'error', {'a.c': 'int x = ' + nest('(', ')', 200000, '1') + ';\n'}, 'a.c')
+    case('unary-minus-300k', 'any', {'a.c': 'int x = ' + '- ' * 300000 + '1;\n'}, 'a.c')
+    case('ternary-100k', 'any', {'a.c': 'int x = ' + '1 ? ' * 100000 + '1' + ' : 0' * 100000 + ';\n'}, 'a.c')
+    case('cast-chain-100k', 'any', {'a.c': 'long x = ' + '(long)' * 100000 + '1;\n'}, 'a.c')
     case('block-nest-5000', 'any', {'a.c': 'void f(void) ' + nest('{', '}', 5000, '') + '\n'}, 'a.c')
     # preprocessor recursion
-    case('pp-if-parens-200k', 'any', {'a.c': '#if ' + nest('(', ')', 200000, '1') + '\nint x;\n#endif\n'}, 'a.c',
-         xfail='Input-driven abort() / stack overflow kill the whole server (pp #if evaluator)')
-    case('pp-macro-nest-100k', 'any', {'a.c': '#define F(x) x\nint y = ' + nest('F(', ')', 100000, '1') + ';\n'}, 'a.c',
-         xfail='Input-driven abort() / stack overflow kill the whole server (argument pre-expansion)')
+    case('pp-if-parens-200k', 'any', {'a.c': '#if ' + nest('(', ')', 200000, '1') + '\nint x;\n#endif\n'}, 'a.c')
+    case('pp-macro-nest-100k', 'any', {'a.c': '#define F(x) x\nint y = ' + nest('F(', ')', 100000, '1') + ';\n'}, 'a.c')
     # one function-like expansion of 2^25 tokens (the argument doubles at every level)
-    case('pp-expansion-33M', 'any', {'a.c': '#define D(x) x+x\nlong big = ' + nest('D(', ')', 25, '1') + ';\n'}, 'a.c',
-         xfail='Input-driven abort() / stack overflow kill the whole server (expansion too large aborts)')
+    case('pp-expansion-33M', 'any', {'a.c': '#define D(x) x+x\nlong big = ' + nest('D(', ')', 25, '1') + ';\n'}, 'a.c')
     case('pp-include-self', 'error', {'a.c': '#include "a.c"\n'}, 'a.c')
+    # more distinct identifiers than the intern table holds (6.3M): an error, and vccd restarts
+    case('idents-7M', 'error', {'a.c': ''.join('int ' + ','.join(f'v{j}' for j in range(i, i + 10)) + ';\n'
+                                           for i in range(0, 7000000, 10))}, 'a.c', regex='identifier table full')
     # fixed limits that reject (or crash on) valid code
-    case('struct-10k-members', 'ok', {'a.c': 'struct s {' + ''.join(f' int m{i};' for i in range(10000)) + ' } v;\n'}, 'a.c',
-         xfail='Fixed limits: 4096 struct members (cc.c)')
-    case('declarator-100-ptrs', 'ok', {'a.c': 'int ' + '*' * 100 + 'p;\n'}, 'a.c',
-         xfail='Fixed limits: 64 declarator levels (cc.c)')
-    case('anon-nest-20', 'ok', {'a.c': 'struct s { ' + 'struct { ' * 20 + 'int x; ' + '}; ' * 20 + '} v;\nint f(void) { return v.x; }\n'}, 'a.c',
-         xfail='Fixed limits: 16 nested anonymous members (find_member)')
+    def rnest(n):
+        e = 'a[0]'
+        for i in range(n):
+            e = f'a[{i % 64}] + x * ({e})'
+        return 'volatile long a[64];\nlong f(long x) { return ' + e + '; }\n'
+    # right-nested expressions past the temporaries: spilled; far past the stack: an error or code, no crash (clang crashes)
+    case('expr-right-nest-250', 'ok', {'a.c': rnest(250)}, 'a.c')
+    case('expr-right-nest-10k', 'any', {'a.c': rnest(10000)}, 'a.c')	# vccd's stacks are bigger: it compiles
+    case('struct-10k-members', 'ok', {'a.c': 'struct s {' + ''.join(f' int m{i};' for i in range(10000)) + ' } v;\n'}, 'a.c')
+    case('declarator-100-ptrs', 'ok', {'a.c': 'int ' + '*' * 100 + 'p;\n'}, 'a.c')
+    case('anon-nest-20', 'ok', {'a.c': 'struct s { ' + 'struct { ' * 20 + 'int x; ' + '}; ' * 20 + '} v;\nint f(void) { return v.x; }\n'}, 'a.c')
     case('call-300-args', 'ok', {'a.c': 'void g(' + ', '.join(['int'] * 300) + ');\nvoid f(void) { g(' + ', '.join(['1'] * 300) + '); }\n'}, 'a.c')
-    case('include-dirs-5000', 'ok', {'a.c': 'int x;\n'}, 'a.c', [f'-I{d}/nodir{i}' for i in range(5000)],
-         xfail='Unbounded argv arrays (ppdriver.c dirs_i[1024], all[2048])')
+    case('include-dirs-5000', 'ok', {'a.c': 'int x;\n'}, 'a.c', [f'-I{d}/nodir{i}' for i in range(5000)])
     # files
-    case('file-3g', 'error', {'a.c': ('sparse', 3 << 30)}, 'a.c', regex='too large',
-         xfail='Files >= 2 GB reported as missing (lex.c)')
+    case('file-3g', 'error', {'a.c': ('sparse', 3 << 30)}, 'a.c', regex='too large')
     # assembler
-    case('asm-rept-200M', 'any', {'a.S': '.rept 200000000\nnop\n.endr\n'}, 'a.S',
-         xfail='Input-driven abort() / stack overflow kill the whole server (as.c arena abort)')
-    case('asm-space-512G', 'any', {'a.S': '.space 0x7fffffffff\n'}, 'a.S',
-         xfail='Input-driven abort() / stack overflow kill the whole server (elf.c arena abort)')
+    case('asm-rept-200M', 'any', {'a.S': '.rept 200000000\nnop\n.endr\n'}, 'a.S')
+    case('asm-space-512G', 'any', {'a.S': '.space 0x7fffffffff\n'}, 'a.S')
     case('asm-macro-recursion', 'error', {'a.S': '.macro m\nm\n.endm\nm\n'}, 'a.S')
     # control: a normal TU
     case('normal', 'ok', {'a.c': 'int f(int a) { return a * 2 + 1; }\n'}, 'a.c')
@@ -121,7 +118,7 @@ def run(c, d, vccd):
     out = f'{d}/out.o'
     argv = TARGET + c['args'] + ['-c', '-o', out, c['main']]
     if vccd:
-        cmd, env = [f'{vd.R}/build/ccs/vcc'] + argv, dict(os.environ, VCC_SOCK=vccd.sock)
+        cmd, env = [f'{vd.BIN}/vcc'] + argv, dict(os.environ, VCC_SOCK=vccd.sock)
     else:
         cmd, env = [vd.VPP] + argv, None
     t0 = time.time()
@@ -142,7 +139,8 @@ def verdict(c, rc, err, server_ok):
     if rc == 0:
         return (c['expect'] == 'any', 'accepted' if c['expect'] == 'any' else 'accepted, want an error')
     if not has_diag: return False, f'rc {rc} without a diagnostic'
-    if c['regex'] and not re.search(c['regex'], err): return False, f'diagnostic does not match /{c["regex"]}/: {first(err)}'
+    # (vccd hands a TU it rejects to the backend: its own message is not shown)
+    if c['regex'] and not re.search(c['regex'], err) and not re.search(r'backend .* not reachable', err): return False, f'diagnostic does not match /{c["regex"]}/: {first(err)}'
     return True, f'error: {first(err)}'
 
 def first(err):

@@ -63,6 +63,17 @@ static void param_list(cc *c, dop *op)
 			attribute_list(c, &d.at);
 			t = apply_declarator(c, ds.ty, first, nops);
 			c->ndops = first;
+			{
+				/* int __attribute__((vector_size(16))) p: a vector parameter, as a declaration */
+				uint32_t vs = d.at.vecsize ? d.at.vecsize : ds.at.vecsize;
+
+				if (vs) {
+					if (!is_arith(c, t) || ty_size(c, t) > vs || vs % ty_size(c, t))
+						cc_error(c, d.loc, "invalid vector element type");
+					else
+						t = QT(QI(ty_vector(c, t, vs)), QQ(t));
+				}
+			}
 			/* adjustments (C11 6.7.6.3p7-8) */
 			uint32_t vsize = 0;
 
@@ -186,11 +197,14 @@ static bool nested_declarator(cc *c, bool abstract_ok)
  */
 VPRIV void declarator(cc *c, declr *d, bool abstract_ok, uint32_t *first, uint32_t *nops)
 {
-	dop ptrs[64], sufs[64];
+	dop ptrs[1024], sufs[64];	/* (clang: no limit; DOPS_MAX bounds the whole) */
 	int np = 0, ns = 0;
 	uint32_t ifirst = 0, inops = 0;
 	bool inner = false;
 	declr id;
+
+	if (vstack_low())	/* int (((((... nests declarators */
+		fatal(c, tok(c)->loc, "declarator nested too deeply");
 
 	memset(d, 0, sizeof(*d));
 	d->loc = tok(c)->loc;
@@ -220,7 +234,7 @@ VPRIV void declarator(cc *c, declr *d, bool abstract_ok, uint32_t *first, uint32
 					break;
 				next(c);
 			}
-			if (np >= 64)
+			if (np >= 1024)
 				fatal(c, tok(c)->loc, "declarator too complex");
 			ptrs[np++] = (dop){ .kind = 0, .q = (uint8_t)q, .fl = (uint16_t)(blk ? TF_BLOCK : 0) };
 			continue;

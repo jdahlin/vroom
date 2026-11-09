@@ -44,6 +44,12 @@ static _Atomic size_t used;
 
 _Atomic unsigned long vdir_probes;	/* VPP_TIME */
 
+void vdir_flush(void)	/* (lex.c's vlex_cache_flush) */
+{
+	for (size_t i = 0; i < (1u << DBITS); i++)
+		atomic_store_explicit(&dtab[i], NULL, memory_order_release);
+}
+
 static void *dalloc(size_t n)
 {
 	char *b0 = __atomic_load_n(&base, __ATOMIC_ACQUIRE);

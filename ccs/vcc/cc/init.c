@@ -330,7 +330,7 @@ static void il_continue(cc *c, ilist *l, uint64_t pos, bool st)
 static uint64_t il_designation(cc *c, ilist *l, bool st)
 {
 	uint64_t lo, hi;
-	uint32_t path[16];
+	uint32_t path[FM_DEPTH];
 	int depth = 1;
 
 	if (accept(c, T_PERIOD) || (is(c, T_IDENT) && peek(c, 1)->kind == T_COLON)) {

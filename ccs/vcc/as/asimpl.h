@@ -102,7 +102,14 @@ struct As {
 /* ---------------------------------------------------------------- utilities */
 
 static inline void *reserve(size_t n) { return vreserve(n, MAP_NORESERVE, "vcc: as: mmap"); }
-static inline void *rget(vregion *r, size_t n) { return vregion_push(r, n, 8, "vcc: as: region full"); }
+static inline void *rget(vregion *r, size_t n)
+{
+	size_t u = (r->used + 7) & ~(size_t)7;
+	if (u + n > r->cap || u + n < u)
+		vjob_fail("assembly too large (expansion or statement buffer full)");
+	r->used = u + n;
+	return r->base + u;
+}
 
 /* ASCII classes without libc's locale lookups (hot in the scanner) */
 enum { C_D = 1, C_X = 2, C_A = 4, C_S = 8, C_I = 16, C_W = 32, C_E = 64 };	/* C_W: blanks ws() skips; C_E: starts an immediate operand */

@@ -21,9 +21,11 @@ VPRIV bool lazy_ok(cc *c, uint32_t s, const declr *d)
 	const sym *y = &c->syms[s];
 	const attrs *a = y->attrs ? &c->attr[y->attrs] : NULL;
 
-	if (unlikely(lz_off < 0))
-		lz_off = getenv("VCC_EAGER") != NULL;
-	if (lz_off || y->kind != S_FUNC || y->sc != SC_STATIC || (y->flags & (SF_DEFINED | SF_ATTR_USED | SF_OVERLOAD)))
+	int off = __atomic_load_n(&lz_off, __ATOMIC_RELAXED);
+
+	if (unlikely(off < 0))	/* (threads race to set it: same value) */
+		__atomic_store_n(&lz_off, off = getenv("VCC_EAGER") != NULL, __ATOMIC_RELAXED);
+	if (off || y->kind != S_FUNC || y->sc != SC_STATIC || (y->flags & (SF_DEFINED | SF_ATTR_USED | SF_OVERLOAD)))
 		return false;
 	if (a && (a->used || a->constructor || a->destructor || a->alias))
 		return false;

@@ -12,7 +12,7 @@ VPRIV int treg(ecx *e)
 				e->usedcs |= 1u << tempregs[i];
 			return tempregs[i];
 		}
-	if (e->nlr || (e->inlfree && e->inlfree < INLINE_FREE_SAFE))
+	if (e->nlr || (e->inlfree && e->inlfree < INLINE_FREE_SAFE) || !e->spill)
 		_longjmp(e->bail, 2);	/* emit_function tries again more carefully */
 	{
 		const fnctx *f = e->f;
@@ -122,7 +122,7 @@ VPRIV void addr_of_ref(ecx *e, int rd, uint32_t ref, int64_t off)
 			opi(e, I_ADDI, 1, rd, rd, off);
 		return;
 	}
-	if (off < INT32_MIN || off > INT32_MAX) {
+	if (!SYMOFF_OK(c, off)) {
 		symop(e, I_ADRP, 1, 0, rd, 0, ref, 0);
 		symop(e, I_ADDLO, 1, 0, rd, rd, ref, 0);
 		opi(e, I_ADDI, 1, rd, rd, (int64_t)off);
@@ -252,7 +252,7 @@ VPRIV void load_n(ecx *e, int rd, const lval *l, int n, int ext)
 	int sz = log2sz((uint64_t)n);
 
 	if (l->k == L_SYM && !sym_needs_got(e->c, l->ref) && ref_align(e, l) >= (uint32_t)n && (l->off & (n - 1)) == 0 &&
-	    l->off >= INT32_MIN && l->off <= INT32_MAX) {
+	    SYMOFF_OK(e->c, l->off)) {
 		note_ref(e, l->ref);
 		symop(e, I_ADRP, 1, 0, R_X16, 0, l->ref, l->off);
 		symop(e, I_LDLO, sz, ext, rd, R_X16, l->ref, l->off);
@@ -271,7 +271,7 @@ VPRIV void store_n(ecx *e, int rs, const lval *l, int64_t extra, int n)
 	int sz = log2sz((uint64_t)n);
 
 	if (l->k == L_SYM && !sym_needs_got(e->c, l->ref) && ref_align(e, l) >= (uint32_t)n && ((l->off + extra) & (n - 1)) == 0 &&
-	    l->off + extra >= INT32_MIN && l->off + extra <= INT32_MAX) {
+	    SYMOFF_OK(e->c, l->off + extra)) {
 		note_ref(e, l->ref);
 		symop(e, I_ADRP, 1, 0, R_X16, 0, l->ref, l->off + extra);
 		symop(e, I_STLO, sz, 0, rs, R_X16, l->ref, l->off + extra);

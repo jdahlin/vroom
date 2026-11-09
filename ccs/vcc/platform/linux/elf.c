@@ -287,7 +287,7 @@ int elf_write_file(ElfObj *o, const char *path)
 	if (!n) return -1;
 	uint8_t *b = rpush(&o->arena, n, 16);
 	elf_emit(o, b);
-	int fd = open(path, O_WRONLY | O_CREAT | O_TRUNC, 0644);
+	int fd = open(path, O_WRONLY | O_CREAT | O_TRUNC | O_CLOEXEC, 0644);
 	if (fd < 0) { elf_error(o, "%s: %s", path, strerror(errno)); return -1; }
 	size_t done = 0;
 	while (done < n) {

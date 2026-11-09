@@ -8,6 +8,8 @@
 #define vlex vlex_ref
 #define vlex_get vlex_get_ref
 #define vlex_get_hook vlex_get_hook_ref
+#define vlex_cache_flush vlex_cache_flush_ref
+#define vlex_trigraphs vlex_trigraphs_ref
 #define vlex_load_uncached vlex_load_uncached_ref
 #define vlex_no_intern vlex_no_intern_ref
 #define vlex_prefetch vlex_prefetch_ref

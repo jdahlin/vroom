@@ -12,6 +12,16 @@
 #define FIX_CAP ((size_t)1 << 30)
 #define SEC_CAP ((size_t)64 << 20)
 
+_Thread_local jmp_buf *vjob_jb;
+
+void vjob_fail(const char *msg)
+{
+	fprintf(stderr, "vcc: error: %s\n", msg);
+	if (vjob_jb)
+		longjmp(*vjob_jb, 1);
+	abort();
+}
+
 void elf_error(ElfObj *o, const char *fmt, ...)
 {
 	if (o->has_err) return;
@@ -185,7 +195,8 @@ uint32_t elf_section(ElfObj *o, const char *name, uint32_t len, uint32_t type,
 	memset(s, 0, sizeof *s);
 	s->name = copyname(o, name, len); s->len = len;
 	s->type = type; s->flags = flags; s->entsize = entsize; s->group = group;
-	if (o->nsec >= o->nfrag) { fprintf(stderr, "vcc: elf: too many sections\n"); abort(); }
+	if (o->nsec >= o->nfrag)
+		vjob_fail("too many sections in the object");
 	newfrag(o, i, i, 0);
 	/* MC registers the section symbol under the section's name unless a
 	 * defined symbol has it; an undefined one becomes the section symbol */

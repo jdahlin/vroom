@@ -31,14 +31,16 @@ typedef uint64_t rmask;
 #define DELETED 0xff
 
 /* operand roles */
-enum { RD_R = 1, RN_R = 2, RM_R = 4, RA_R = 8, RD_W = 16, RA_W = 32, RN_W = 64, OP_ALL = 128, OP_CALL = 256, OP_ASM = 512 };
+enum { RD_R = 1, RN_R = 2, RM_R = 4, RA_R = 8, RD_W = 16, RA_W = 32, RN_W = 64, OP_ALL = 128, OP_CALL = 256, OP_ASM = 512,
+       OP_RET = 2048, OP_TLV = 4096 };
+#define OP_SLOW (OP_ALL | OP_CALL | OP_ASM | OP_RET | OP_TLV)	/* reads()/writes() beyond the operand fields */
 
 /* the function's raw text, for the registers of inline asm (RAW_MASKS) */
 static _Thread_local const char *rawp;
 /* control */
 enum { BR_NONE, BR_UNCOND, BR_COND, BR_END, BR_INDIRECT };
 
-static unsigned roles(const ins *i)
+static unsigned roles_sw(const ins *i)
 {
 	switch (i->op) {
 	case I_ADD: case I_SUB: case I_ADDS: case I_SUBS: case I_AND: case I_ORR: case I_EOR:
@@ -67,13 +69,17 @@ static unsigned roles(const ins *i)
 		return RD_R;
 	case I_PRFM:
 		return RN_R;
-	case I_BL: case I_TLV:
+	case I_BL:
 		return OP_CALL;
+	case I_TLV:	/* Darwin's TLV thunk keeps every register but x0 (the address); blr x16 */
+		return OP_TLV;
 	case I_BLR:
 		return RN_R | OP_CALL;
 	case I_BR:
 		return RN_R;
-	case I_LABEL: case I_B: case I_BC: case I_NOP: case I_RET:
+	case I_RET:
+		return OP_RET;	/* reads x0, x1 */
+	case I_LABEL: case I_B: case I_BC: case I_NOP:
 	case I_BRK:	/* a trap (BUG, WARN, __builtin_trap): the handler may print registers, needs none */
 		return 0;
 	case I_RAW:
@@ -83,7 +89,39 @@ static unsigned roles(const ins *i)
 	}
 }
 
-static int brkind(const ins *i)
+/* roles and control by opcode, from the switches above; OP_VAR: depends on more than the opcode */
+enum { OP_VAR = 1024 };
+static uint16_t RT[256];
+static uint8_t BT[256];
+static uint8_t XT[256];	/* exts: an extension xredundant() may find redundant */
+/* register field -> its bit (0: zr/sp/FRAME and other non-registers above 63) */
+static rmask RBT[256];
+
+static int brkind_sw(const ins *i);
+__attribute__((constructor)) static void opt_tables(void)
+{
+	for (unsigned op = 0; op < 256; op++) {
+		ins x = { .op = (uint8_t)op };
+
+		RT[op] = (uint16_t)roles_sw(&x);
+		BT[op] = (uint8_t)brkind_sw(&x);
+	}
+	RT[I_LDP] = RT[I_STP] = RT[I_RAW] = OP_VAR;
+	XT[I_UBFM] = XT[I_SBFM] = XT[I_MOV] = XT[I_ANDI] = 1;
+	for (unsigned r = 0; r < 64; r++)
+		RBT[r] = RB(r);
+}
+
+static inline unsigned roles(const ins *i)
+{
+	unsigned r = RT[i->op];
+
+	return r & OP_VAR ? roles_sw(i) : r;
+}
+
+static inline int brkind(const ins *i) { return BT[i->op]; }
+
+static int brkind_sw(const ins *i)
 {
 	switch (i->op) {
 	case I_B: return BR_UNCOND;
@@ -96,7 +134,8 @@ static int brkind(const ins *i)
 
 static inline rmask m(int r) { return r < 64 ? RB(r) : 0; }
 
-static rmask reads(const ins *i, unsigned ro)
+/* reads(), writes() of calls, asm, ret and unknown records */
+__attribute__((noinline)) static rmask reads_slow(const ins *i, unsigned ro)
 {
 	rmask s = 0;
 
@@ -112,12 +151,12 @@ static rmask reads(const ins *i, unsigned ro)
 	if (ro & RA_R) s |= m(i->ra);
 	if (ro & OP_CALL)
 		s |= RB(9) - 1;	/* x0-x8: arguments, indirect result */
-	if (i->op == I_RET)
+	if (ro & OP_RET)
 		s |= RB(0) | RB(1);
 	return s;
 }
 
-static rmask writes(const ins *i, unsigned ro)
+__attribute__((noinline)) static rmask writes_slow(const ins *i, unsigned ro)
 {
 	rmask s = 0;
 
@@ -130,13 +169,31 @@ static rmask writes(const ins *i, unsigned ro)
 	if (ro & RN_W) s |= m(i->rn);
 	if (ro & OP_CALL)
 		s |= CALLW;
+	if (ro & OP_TLV)
+		s |= RB(0) | RB(16) | RB(30);
 	return s;
+}
+
+static inline rmask reads(const ins *i, unsigned ro)
+{
+	if (ro & OP_SLOW)
+		return reads_slow(i, ro);
+	return (ro & RD_R ? RBT[i->rd] : 0) | (ro & RN_R ? RBT[i->rn] : 0) | (ro & RM_R ? RBT[i->rm] : 0) |
+	       (ro & RA_R ? RBT[i->ra] : 0);
+}
+
+static inline rmask writes(const ins *i, unsigned ro)
+{
+	if (ro & OP_SLOW)
+		return writes_slow(i, ro);
+	return (ro & RD_W ? RBT[i->rd] : 0) | (ro & RA_W ? RBT[i->ra] : 0) | (ro & RN_W ? RBT[i->rn] : 0);
 }
 
 /* scratch, per thread: grows to the largest function */
 static _Thread_local struct {
 	rmask *la;		/* per record: live after it */
-	rmask *rr, *ww;		/* per record: registers read, written, as liveness found them (OP_ALL: rr GPRS) */
+	rmask *rr, *ww;		/* per record: registers read, written (OP_ALL: rr GPRS), kept up to date by the rewrites */
+	uint16_t *ro;		/* per record: roles() */
 	uint32_t *blk;		/* per record: its block */
 	uint32_t *bs, *be;	/* per block: first and last record */
 	int32_t *s0, *s1;	/* per block: successors (-1 none) */
@@ -162,7 +219,8 @@ static void grow(uint32_t n, uint32_t nl)
 		W.out = realloc(W.out, c * sizeof(rmask));
 		W.use = realloc(W.use, c * sizeof(rmask));
 		W.def = realloc(W.def, c * sizeof(rmask));
-		if (!W.la || !W.rr || !W.ww || !W.blk || !W.bs || !W.be || !W.s0 || !W.s1 || !W.in || !W.out || !W.use || !W.def)
+		W.ro = realloc(W.ro, c * sizeof(uint16_t));
+		if (!W.ro || !W.la || !W.rr || !W.ww || !W.blk || !W.bs || !W.be || !W.s0 || !W.s1 || !W.in || !W.out || !W.use || !W.def)
 			abort();
 		W.cap = c;
 	}
@@ -183,22 +241,39 @@ static bool liveness(ecx *e)
 
 	grow(n + 1, e->nlabel + 1);
 	memset(W.lpos, 0, (size_t)e->nlabel * sizeof(uint32_t));
-	/* labels something jumps to (+ asm, label addresses); the others (scopes, inlining) split nothing */
-	for (uint32_t k = 0; k < n; k++)
-		if (brkind(&in[k]) == BR_UNCOND || brkind(&in[k]) == BR_COND ||
-		    (in[k].op == I_LABEL && (e->lrefc[in[k].label] & LREF_EXT)))
-			W.lpos[in[k].label] = UINT32_MAX;
-	for (uint32_t k = 0; k < n; k++) {
-		if (k == 0 || (in[k].op == I_LABEL && W.lpos[in[k].label]) || brkind(&in[k - 1]) != BR_NONE) {
+	/*
+	 * Each record's roles and registers; labels something jumps to (+ asm,
+	 * label addresses), as the others (scopes, inlining) split nothing.
+	 */
+	{
+		rmask *rr = W.rr, *ww = W.ww;
+		uint16_t *rop = W.ro;
+		uint32_t *lpos = W.lpos;
+
+		for (uint32_t k = 0; k < n; k++) {
+			const ins *i = &in[k];
+			unsigned ro = roles(i), bk = BT[i->op];
+
+			rop[k] = (uint16_t)ro;
+			rr[k] = reads(i, ro), ww[k] = writes(i, ro);
+			if (bk == BR_INDIRECT)
+				return false;
+			if (bk - BR_UNCOND <= BR_COND - BR_UNCOND || (i->op == I_LABEL && (e->lrefc[i->label] & LREF_EXT)))
+				lpos[i->label] = UINT32_MAX;
+		}
+	}
+	for (uint32_t k = 0, prev = BR_UNCOND; k < n; k++) {
+		const ins *i = &in[k];
+
+		if (prev != BR_NONE || (i->op == I_LABEL && W.lpos[i->label])) {
 			if (nb)
 				W.be[nb - 1] = k - 1;
 			W.bs[nb++] = k;
 		}
 		W.blk[k] = nb - 1;
-		if (in[k].op == I_LABEL)
-			W.lpos[in[k].label] = nb;	/* the label's block + 1 */
-		if (in[k].op == I_BR)
-			return false;
+		if (i->op == I_LABEL)
+			W.lpos[i->label] = nb;	/* the label's block + 1 */
+		prev = BT[i->op];
 	}
 	if (!n)
 		return false;
@@ -215,17 +290,16 @@ static bool liveness(ecx *e)
 				return false;	/* a branch to a label not in the records */
 			W.s1[b] = (int32_t)W.lpos[l->label] - 1;
 		}
-		W.use[b] = W.def[b] = 0;
-		for (uint32_t j = W.be[b] + 1; j-- > W.bs[b];) {
-			unsigned ro = roles(&in[j]);
-			rmask w = writes(&in[j], ro), r = reads(&in[j], ro);
+		{
+			rmask use = 0, def = 0;
+			const rmask *rr = W.rr, *ww = W.ww;
 
-			W.rr[j] = r;
-			W.ww[j] = w;
-			W.use[b] = (W.use[b] & ~w) | r;
-			W.def[b] |= w;
+			for (uint32_t j = W.be[b] + 1; j-- > W.bs[b];) {
+				use = (use & ~ww[j]) | rr[j];
+				def |= ww[j];
+			}
+			W.use[b] = W.in[b] = use, W.def[b] = def;
 		}
-		W.in[b] = W.use[b];
 		W.out[b] = 0;
 	}
 	do {
@@ -246,11 +320,12 @@ static bool liveness(ecx *e)
 		}
 	} while (changed);
 	for (uint32_t b = 0; b < nb; b++) {
-		rmask l = W.out[b];
+		rmask l = W.out[b], *la = W.la;
+		const rmask *rr = W.rr, *ww = W.ww;
 
 		for (uint32_t j = W.be[b] + 1; j-- > W.bs[b];) {
-			W.la[j] = l;
-			l = (l & ~W.ww[j]) | W.rr[j];
+			la[j] = l;
+			l = (l & ~ww[j]) | rr[j];
 		}
 	}
 	return true;
@@ -299,10 +374,10 @@ static bool forward(ecx *e, uint32_t k)
 
 		if (i->op == DELETED)
 			continue;
-		ro = roles(i);
+		ro = W.ro[j];
 		if (ro & OP_ALL)
 			return false;
-		r = reads(i, ro), w = writes(i, ro);
+		r = W.rr[j], w = W.ww[j];
 		if (r & RB(t)) {
 			if ((ro & OP_ASM) || !can_rewrite(i, ro, t) || nrw == 256)
 				return false;	/* (asm names its registers in its text) */
@@ -315,8 +390,10 @@ static bool forward(ecx *e, uint32_t k)
 	}
 	if (j > W.be[b])
 		return false;
-	for (uint32_t q = 0; q < nrw; q++)
-		rewrite(&in[rw[q]], roles(&in[rw[q]]), t, v);
+	for (uint32_t q = 0; q < nrw; q++) {
+		rewrite(&in[rw[q]], W.ro[rw[q]], t, v);
+		W.rr[rw[q]] = (W.rr[rw[q]] & ~RB(t)) | RB(v);
+	}
 	for (uint32_t q = k; nrw && q < rw[nrw - 1]; q++)
 		W.la[q] |= RB(v);	/* v is read further on now */
 	in[k].op = DELETED;
@@ -339,16 +416,17 @@ static bool backward(ecx *e, uint32_t k)
 
 		if (i->op == DELETED)
 			continue;
-		ro = roles(i);
+		ro = W.ro[j];
 		if (ro & (OP_ALL | OP_CALL))
 			return false;
-		r = reads(i, ro), w = writes(i, ro);
+		r = W.rr[j], w = W.ww[j];
 		if (w & RB(t)) {
 			if (!(ro & RD_W) || i->rd != t || (ro & (RD_R | RA_W | RN_W)) || (w & ~RB(t)))
 				return false;
 			if (w & RB(v))
 				return false;
 			i->rd = (uint8_t)v;
+			W.ww[j] = RB(v);
 			for (uint32_t q = j; q < k; q++)
 				W.la[q] |= RB(v);
 			in[k].op = DELETED;
@@ -514,6 +592,16 @@ static void slots(ecx *e)
 		if (SLOT_TAG2(i) < na)
 			SL.a[SLOT_TAG2(i)].esc = true;
 	}
+	if (!nw && na == 1)
+		return;	/* (no access of a slot) */
+	{
+		bool any = false;
+
+		for (uint32_t id = 1; id < na && !any; id++)
+			any = SL.a[id].state != 0;
+		if (!any)
+			return;	/* only addresses of slots: nothing to forward or drop */
+	}
 	/* allocations with several ranges: their cells, sorted, overlaps bad */
 	for (uint32_t k = 0; multi && k < n; k++) {
 		const ins *i = &in[k];
@@ -624,6 +712,8 @@ static void slots(ecx *e)
 							W.la[q] |= RB(r);
 					a->pos = k;	/* (r is live up to here now) */
 					load_from_reg(i, r);
+					W.ro[k] = (uint16_t)roles(i);
+					W.rr[k] = reads(i, W.ro[k]);
 					SL.rc[k] = -1;
 					if (i->op == I_MOV && i->sz == 1 && i->rd == i->rn) {
 						i->op = DELETED;
@@ -926,7 +1016,8 @@ static void xblock(ecx *e, uint32_t b, xf *f, uint8_t *red)
 		}
 		if (!W.ww[k])
 			continue;
-		red[k] = (uint8_t)xredundant(f, i);
+		if (XT[i->op])
+			red[k] = (uint8_t)xredundant(f, i);
 		if (W.ww[k] == RB(rd) && rd < 31 && (COPYOK & RB(rd)) && xresult(f, i, &z, &s)) {
 			f->z[rd] = (uint8_t)z, XS(f)[rd] = (uint8_t)s;
 			continue;
@@ -940,7 +1031,15 @@ static void exts(ecx *e)
 	uint32_t n = e->nin, nb = W.blk[n - 1] + 1;
 	xf f;
 	bool changed;
+	uint32_t nc = 0;
 
+	for (uint32_t k = 0; k < n; k++) {
+		const ins *i = &e->in[k];
+
+		nc += XT[i->op] && (i->op == I_ANDI || (i->op == I_MOV ? !i->sz : !i->imm));
+	}
+	if (!nc)
+		return;	/* no extension to find redundant */
 	if (nb > XF.cap) {
 		XF.cap = nb * 2;
 		XF.in = realloc(XF.in, XF.cap * sizeof(xf));
@@ -957,9 +1056,16 @@ static void exts(ecx *e)
 		if (XF.vis[b])
 			memset(&XF.in[b], XU, sizeof(xf));
 	}
+	/*
+	 * In order, but a back edge that weakens its target goes back there at
+	 * once: what follows a loop is first gone through once the loop is
+	 * settled (one visit, not one per round).
+	 */
 	do {
 		changed = false;
 		for (uint32_t b = 0; b < nb; b++) {
+			uint32_t back = UINT32_MAX;
+
 			if (XF.vis[b] != 2)
 				continue;
 			XF.vis[b] = 1;
@@ -974,7 +1080,8 @@ static void exts(ecx *e)
 				t = &XF.in[sb];
 				if (!XF.vis[sb]) {
 					*t = f, XF.vis[sb] = 2;
-					changed |= (uint32_t)sb <= b;
+					if ((uint32_t)sb <= b && (uint32_t)sb < back)
+						back = (uint32_t)sb;
 					continue;
 				}
 				{
@@ -988,10 +1095,13 @@ static void exts(ecx *e)
 					}
 					if (up) {
 						XF.vis[sb] = 2;
-						changed |= (uint32_t)sb <= b;
+						if ((uint32_t)sb <= b && (uint32_t)sb < back)
+							back = (uint32_t)sb;
 					}
 				}
 			}
+			if (back != UINT32_MAX)
+				b = back - 1, changed = true;	/* (b++: back) */
 		}
 	} while (changed);
 	for (uint32_t k = 0; k < n; k++)
@@ -1042,18 +1152,48 @@ static void dead(ecx *e)
 			live |= RB(0) | RB(1);
 		for (uint32_t k = W.be[b] + 1; k-- > W.bs[b];) {
 			ins *i = &in[k];
-			unsigned ro;
 
 			if (i->op == DELETED)
 				continue;
-			ro = roles(i);
-			if (i->rd < 29 && pure(i) && !(live & RB(i->rd))) {
+			if (i->rd < 29 && !(live & RB(i->rd)) && pure(i)) {
 				i->op = DELETED;
 				continue;
 			}
-			live = (live & ~writes(i, ro)) | reads(i, ro);
+			live = (live & ~W.ww[k]) | W.rr[k];
 		}
 	}
+}
+
+/*
+ * For the frame, after the clean-ups: the registers the records read or
+ * write (inline asm: what it writes, and its reads but x18/x29/x30, which
+ * every asm lists).  *fl: OPF_ALL a record may touch any register,
+ * OPF_CALL a call, OPF_FRAME a frame slot is referenced.
+ */
+VPRIV uint64_t opt_regs(ecx *e, unsigned *fl)
+{
+	const ins *in = e->in;
+	rmask u = 0;
+	unsigned f = 0;
+
+	rawp = e->raw.p;
+	for (uint32_t k = 0; k < e->nin; k++) {
+		const ins *i = &in[k];
+		unsigned ro = roles(i);
+		rmask r = reads(i, ro), w = writes(i, ro);
+
+		if (ro & OP_ALL)
+			f |= OPF_ALL;
+		if (ro & OP_CALL)
+			f |= OPF_CALL, w &= ~CALLW;	/* (a call's own clobbers are not the function's) */
+		if (ro & OP_ASM)
+			r &= ~(RB(18) | RB(29) | RB(30));
+		if (i->rn == FRAME)
+			f |= OPF_FRAME;
+		u |= r | w;
+	}
+	*fl = f;
+	return u;
 }
 
 /* copy propagation (forward, then backward) and dead copies */
@@ -1096,14 +1236,8 @@ VPRIV void opt_function(ecx *e)
 				}
 			in[k].op = DELETED;
 		}
-	/* copies first, so slots sees the registers values really stay in; their rewrites stale W.rr/W.ww */
+	/* copies first, so slots sees the registers values really stay in */
 	copies(e);
-	for (uint32_t k = 0; k < e->nin; k++)
-		if (in[k].op != DELETED) {
-			unsigned ro = roles(&in[k]);
-
-			W.rr[k] = reads(&in[k], ro), W.ww[k] = writes(&in[k], ro);
-		}
 	slots(e);
 	exts(e);
 	copies(e);

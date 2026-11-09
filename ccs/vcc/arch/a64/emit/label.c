@@ -6,8 +6,7 @@
 VPRIV uint32_t newlabel(ecx *e)
 {
 	if (e->nlabel == e->caplabel) {
-		fputs("vcc: too many labels\n", stderr);
-		abort();
+		efatal(e, 0, "function too large (more than %u labels)", e->caplabel);
 	}
 	e->lrefc[e->nlabel] = 0;
 	e->lkvi[e->nlabel] = 0;

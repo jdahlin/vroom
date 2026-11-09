@@ -1,6 +1,22 @@
 /* vcc code generator: calls and inline expansion */
 #include "../../../emit/emitimpl.h"
 
+/* the first report of an error() call at loc (inlined copies share it) */
+static bool err_call_once(ecx *e, uint32_t loc)
+{
+	emitter *E = e->E;
+	bool fresh = true;
+
+	pthread_mutex_lock(&E->emu);
+	for (uint32_t i = 0; i < E->nerrcall_loc; i++)
+		if (E->errcall[i] == loc)
+			fresh = false;
+	if (fresh && E->nerrcall_loc < 256)
+		E->errcall[E->nerrcall_loc++] = loc;
+	pthread_mutex_unlock(&E->emu);
+	return fresh;
+}
+
 #define MAXARGS 128
 
 /* park an argument value: registers go to a slot, aggregates are copied */
@@ -141,7 +157,15 @@ VPRIV val do_call(ecx *e, uint32_t ref, val *fnv, carg *args, int n, qty rty, bo
 		 * (__compiletime_assert is then ((void)(condition))): a trap
 		 * here would fire on paths clang proved are fine.
 		 */
-		if (!e->dry) {
+		if (!e->dry && !e->E->o->vcc_kernel) {
+			/* as clang: every call that survives is an error */
+			const attrs *at = sym_attrs(c, RIDX(ref));
+			const vident *nm = &vintern_ents[c->syms[RIDX(ref)].name];
+
+			if (err_call_once(e, e->curloc))
+				eerror(e, e->curloc, "call to '%.*s' declared with 'error' attribute: %s", (int)nm->len, nm->s,
+				       at->errmsg ? c->strs[at->errmsg - 1].s : "");
+		} else if (!e->dry) {
 			need_fold(e);
 			e->E->nerrcall++;
 			if (e->E->stats)

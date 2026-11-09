@@ -25,7 +25,14 @@
 #endif
 
 static inline void *reserve(size_t n) { return vreserve(n, MAP_NORESERVE, "vcc: elf: mmap"); }
-static inline void *rpush(vregion *r, size_t n, size_t al) { return vregion_push(r, n, al, "vcc: elf: region full"); }
+static inline void *rpush(vregion *r, size_t n, size_t al)
+{
+	size_t u = (r->used + al - 1) & ~(al - 1);
+	if (u + n > r->cap || u + n < u)
+		vjob_fail("object too large (an output section or table is full)");
+	r->used = u + n;
+	return r->base + u;
+}
 
 static inline uint64_t symoff(ElfObj *o, ElfSym *y) { return elf_frag(o, y->frag)->base + y->value; }
 static inline uint32_t symsec(ElfObj *o, ElfSym *y) { return elf_frag(o, y->frag)->sec; }

@@ -265,6 +265,28 @@ static void type_str(cc *c, qty t, const char *inner, vfixbuf *out, bool *ok)
 		type_str(c, x->base, in.s, out, ok);
 		return;
 	}
+	case TY_VECTOR: {
+		/* clang without the typedef: __attribute__((__vector_size__(4 * sizeof(int)))) int */
+		vfixbuf el;
+		char n[96];
+
+		el.n = 0, el.s[0] = 0;
+		type_str(c, x->base, "", &el, ok);
+		quals(&b, QQ(t));
+		snprintf(n, sizeof(n), "__attribute__((__vector_size__(%llu * sizeof(",
+			 (unsigned long long)(ty_size(c, t) / ty_size(c, x->base)));
+		vfixbuf_puts(&b, n);
+		vfixbuf_put(&b, el.s, el.n);
+		vfixbuf_puts(&b, ")))) ");
+		vfixbuf_put(&b, el.s, el.n);
+		if (inner[0]) {
+			vfixbuf_puts(&b, " ");
+			vfixbuf_puts(&b, inner);
+		}
+		vfixbuf_put(out, b.s, b.n);
+		*ok = false;	/* not a spelling layout checks can use */
+		return;
+	}
 	default:
 		break;
 	}

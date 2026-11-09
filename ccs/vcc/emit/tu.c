@@ -25,8 +25,8 @@ VPRIV void ediag(ecx *e, uint32_t loc, const char *fmt, ...)
 	pthread_mutex_unlock(&e->E->emu);
 }
 
-__attribute__((format(printf, 3, 4), unused))
-static void eerror(ecx *e, uint32_t loc, const char *fmt, ...)
+__attribute__((format(printf, 3, 4)))
+VPRIV void eerror(ecx *e, uint32_t loc, const char *fmt, ...)
 {
 	va_list ap;
 
@@ -521,6 +521,21 @@ static int emit_tu1(cc *c, const cc_opts *o, bool write_out, uint8_t *mf, bool *
 				E.errors++;
 			}
 		} else if (!E.errors && write_out && !*again) {
+			static _Thread_local tbuf all, mo;
+
+			if (DARWIN(c)) {
+				/* -S for Mach-O: the text in Apple's dialect (darwin.c) */
+				if (!all.p) {
+					tb_init(&all, (size_t)1 << 32);
+					tb_init(&mo, (size_t)1 << 32);
+				}
+				all.n = mo.n = 0;
+				for (int i = 0; i < k; i++)
+					tb_put(&all, iov[i].iov_base, iov[i].iov_len);
+				darwin_text(&mo, all.p, all.n);
+				iov[0] = (struct iovec){ mo.p, mo.n };
+				k = 1;
+			}
 			for (int i = 0; i < k;) {
 				int m = k - i > 1024 ? 1024 : k - i;
 				ssize_t w = writev(o->outfd, iov + i, m);

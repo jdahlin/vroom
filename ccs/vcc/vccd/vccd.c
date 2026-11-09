@@ -65,10 +65,17 @@
 #include <time.h>
 #include <unistd.h>
 
+#include <poll.h>
+#ifdef __APPLE__
+#include <mach/mach.h>
+#endif
 #include "../../protocol.h"
 #include "caps.h"
 #include "../driver/ccsnap.h"
 #include "../pp/pp.h"
+#include "../lex/lex.h"
+#include "../lib/intern.h"
+#include "../pp/dircache.h"
 #include "../driver/ppdriver.h"
 #include "fixdep.h"
 #include "ar.h"
@@ -86,6 +93,8 @@ static const char *lld = "/opt/homebrew/bin/ld.lld";
 static bool log_requests, own_pp = true, own_cc = true;
 
 static atomic_ulong n_probe, n_fwd, n_spawn, n_pp, n_cc, n_fallback, n_ar, n_sh, n_sh_decl;
+static char self_exe[4096];	/* our own binary (realpath), for a restart */
+static uint64_t self_build;	/* vroom_build_id of our own binary */
 static char tool_dir[4096];	/* where vccd and its shims live (realpath) */
 
 /* ---------------- work queue: accepted sockets ---------------- */
@@ -109,6 +118,177 @@ static void queue_push(int fd)
 	pthread_mutex_unlock(&qlock);
 }
 
+static _Atomic int n_active;
+
+/*
+ * Builds.  The caches answer "what is at this path" for the server's life;
+ * between builds files change.  A request from a new process group is a new
+ * make invocation: before it runs, the running jobs finish and the file,
+ * directory and include caches are emptied (old entries stay allocated, so
+ * nothing in flight dangles).  Jobs of the same group never wait.
+ */
+static pthread_mutex_t gen_mu = PTHREAD_MUTEX_INITIALIZER;
+static pthread_cond_t gen_cv = PTHREAD_COND_INITIALIZER;
+static uint32_t gen_pgrp;
+static int gen_running, gen_flushing;
+static _Atomic unsigned long n_flush;
+
+static void print_counts(void);
+static int g_argc, g_ls = -1;
+static char **g_argv;
+static const char *g_sock;
+static _Atomic int gen_restart;
+
+/* resident memory in MB */
+static size_t rss_mb(void)
+{
+#ifdef __APPLE__
+	struct mach_task_basic_info ti;
+	mach_msg_type_number_t n = MACH_TASK_BASIC_INFO_COUNT;
+
+	if (task_info(mach_task_self(), MACH_TASK_BASIC_INFO, (task_info_t)&ti, &n) != KERN_SUCCESS)
+		return 0;
+	return (size_t)(ti.resident_size >> 20);
+#else
+	long pages = 0, res = 0;
+	FILE *f = fopen("/proc/self/statm", "r");
+
+	if (f && fscanf(f, "%ld %ld", &pages, &res) != 2)
+		res = 0;
+	if (f)
+		fclose(f);
+	return (size_t)res * (size_t)sysconf(_SC_PAGESIZE) >> 20;
+#endif
+}
+
+/*
+ * Memory: every cache only grows.  At a build boundary, with no job running,
+ * a server above VCC_RESTART_MB resident (default 6144) starts over: every
+ * request it holds or has queued is answered VROOM_STATUS_RETRY (the shim
+ * sends it again), then it execs itself on the same listening socket.
+ * restart_due() decides (gen_enter, idle); the worker that saw it answers its
+ * own request and calls do_restart(), which returns only if exec fails.
+ */
+static bool restart_due(void)
+{
+	const char *e = getenv("VCC_RESTART_MB");
+	size_t lim = e ? strtoul(e, NULL, 10) : 6144;
+
+	return g_ls >= 0 && self_exe[0] && rss_mb() >= lim;
+}
+
+/* the accept loop: during a restart it accepts nothing more (connections
+   wait in the kernel's backlog for the new process) */
+static _Atomic int accept_parked;
+
+static void park_accept(void)
+{
+	if (!atomic_load(&gen_restart))
+		return;
+	atomic_store(&accept_parked, 1);
+	while (atomic_load(&gen_restart))	/* (until the exec, or its failure) */
+		usleep(1000);
+	atomic_store(&accept_parked, 0);
+}
+
+static void do_restart(void)
+{
+	while (!atomic_load(&accept_parked))
+		usleep(1000);
+	for (;;) {	/* the other workers answer what they took (n_active counts us too) */
+		pthread_mutex_lock(&qlock);
+		if (atomic_load(&n_active) == 1) {
+			while (qhead != qtail) {	/* still queued: never read */
+				int c = queue[qhead++ % QSIZE];
+				int32_t st = (int32_t)VROOM_STATUS_RETRY;
+
+				(void)!write(c, &st, sizeof(st));
+				close(c);
+			}
+			break;	/* (qlock stays held: nobody takes another) */
+		}
+		pthread_mutex_unlock(&qlock);
+		usleep(1000);
+	}
+	{
+		char fd[16], **av = calloc((size_t)g_argc + 3, sizeof(char *));
+		int k = 0;
+
+		for (int i = 0; i < g_argc; i++) {
+			if (!strcmp(g_argv[i], "--listen-fd")) {
+				i++;
+				continue;
+			}
+			av[k++] = g_argv[i];
+		}
+		snprintf(fd, sizeof(fd), "%d", g_ls);
+		av[k++] = "--listen-fd", av[k++] = fd, av[k] = NULL;
+		fprintf(stderr, "vccd: restarting (%zu MB resident; identifier table %s)\n", rss_mb(),
+			atomic_load(&vtables_full) ? "full" : "not full");
+		print_counts();
+		fcntl(g_ls, F_SETFD, 0);
+		fcntl(g_ls, F_SETFL, 0);
+		execv(self_exe, av);
+		perror("vccd: restart");	/* go on with the old process */
+		fcntl(g_ls, F_SETFD, FD_CLOEXEC);
+		fcntl(g_ls, F_SETFL, O_NONBLOCK);
+		atomic_store(&gen_restart, 0);
+		pthread_mutex_unlock(&qlock);
+	}
+}
+
+/* 1: answer VROOM_STATUS_RETRY (the server is restarting); 2: the same, and
+   then restart (do_restart) */
+static int gen_enter(uint32_t pgrp)
+{
+	pthread_mutex_lock(&gen_mu);
+	while (gen_flushing && !atomic_load(&gen_restart))
+		pthread_cond_wait(&gen_cv, &gen_mu);
+	if (atomic_load(&gen_restart)) {
+		pthread_mutex_unlock(&gen_mu);
+		return 1;
+	}
+	if (atomic_load(&vtables_full) && !gen_running && g_ls >= 0 && self_exe[0]) {
+		/* identifiers are never freed: a full table fails every later TU */
+		atomic_store(&gen_restart, 1);
+		pthread_cond_broadcast(&gen_cv);
+		pthread_mutex_unlock(&gen_mu);
+		return 2;
+	}
+	if (pgrp && pgrp != gen_pgrp) {
+		if (gen_pgrp) {
+			gen_flushing = 1;
+			while (gen_running)
+				pthread_cond_wait(&gen_cv, &gen_mu);
+			if (restart_due()) {
+				atomic_store(&gen_restart, 1);
+				gen_flushing = 0;
+				pthread_cond_broadcast(&gen_cv);	/* (waiters see gen_restart) */
+				pthread_mutex_unlock(&gen_mu);
+				return 2;
+			}
+			vlex_cache_flush();
+			vdir_flush();
+			pp_include_flush();
+			atomic_fetch_add(&n_flush, 1);
+			gen_flushing = 0;
+			pthread_cond_broadcast(&gen_cv);
+		}
+		gen_pgrp = pgrp;
+	}
+	gen_running++;
+	pthread_mutex_unlock(&gen_mu);
+	return 0;
+}
+
+static void gen_leave(void)
+{
+	pthread_mutex_lock(&gen_mu);
+	if (!--gen_running)
+		pthread_cond_broadcast(&gen_cv);
+	pthread_mutex_unlock(&gen_mu);
+}	/* connections taken by a worker, not yet answered */
+
 static int queue_pop(void)
 {
 	int fd;
@@ -117,6 +297,7 @@ static int queue_pop(void)
 	while (qhead == qtail)
 		pthread_cond_wait(&qcond, &qlock);
 	fd = queue[qhead++ % QSIZE];
+	atomic_fetch_add(&n_active, 1);	/* under the lock: drain_exit never sees it in neither place */
 	pthread_mutex_unlock(&qlock);
 	return fd;
 }
@@ -174,8 +355,9 @@ static bool split_req(char *raw, char **strs, struct req *r);
 static bool recv_req(struct worker *w, int conn, struct req *r)
 {
 	struct vroom_req_hdr *h = (struct vroom_req_hdr *)w->raw;
-	char cbuf[CMSG_SPACE(3 * sizeof(int))];
+	char cbuf[CMSG_SPACE(16 * sizeof(int))] = { 0 };
 	struct iovec iov = { h, sizeof(*h) };
+	int nfd = 0, bad = 0;
 	struct msghdr m = { 0 };
 	struct cmsghdr *c;
 
@@ -184,11 +366,39 @@ static bool recv_req(struct worker *w, int conn, struct req *r)
 	m.msg_control = cbuf;
 	m.msg_controllen = sizeof(cbuf);
 	r->fds[0] = r->fds[1] = r->fds[2] = -1;
-	if (recvmsg(conn, &m, MSG_WAITALL) != (ssize_t)sizeof(*h))
+	struct pollfd pf = { conn, POLLIN, 0 };
+	/* the shim sends right after connecting: a silent client frees the worker
+	   (macOS: SO_RCVTIMEO does not bound recvmsg with MSG_WAITALL) */
+	ssize_t got = poll(&pf, 1, 2000) == 1 ? recvmsg(conn, &m, MSG_WAITALL) : -1;
+
+	/* exactly three fds (stdin, stdout, stderr); any other count closes all we got */
+	if (got < 0)
+		m.msg_controllen = 0;
+	for (c = CMSG_FIRSTHDR(&m); c; c = CMSG_NXTHDR(&m, c)) {
+		if (c->cmsg_len < CMSG_LEN(0))	/* (CMSG_NXTHDR would not advance) */
+			break;
+		if (c->cmsg_level != SOL_SOCKET || c->cmsg_type != SCM_RIGHTS)
+			continue;
+		size_t k = (c->cmsg_len - CMSG_LEN(0)) / sizeof(int);
+
+		for (size_t i = 0; i < k; i++) {
+			int fd;
+
+			memcpy(&fd, CMSG_DATA(c) + i * sizeof(int), sizeof(int));
+			fcntl(fd, F_SETFD, FD_CLOEXEC);
+			if (nfd < 3)
+				r->fds[nfd] = fd;
+			else
+				close(fd), bad = 1;
+			nfd++;
+		}
+	}
+	if (bad || nfd != 3 || (m.msg_flags & MSG_CTRUNC) || got != (ssize_t)sizeof(*h)) {
+		for (int i = 0; i < 3; i++)
+			if (r->fds[i] >= 0)
+				close(r->fds[i]), r->fds[i] = -1;
 		return false;
-	for (c = CMSG_FIRSTHDR(&m); c; c = CMSG_NXTHDR(&m, c))
-		if (c->cmsg_level == SOL_SOCKET && c->cmsg_type == SCM_RIGHTS)
-			memcpy(r->fds, CMSG_DATA(c), sizeof(r->fds));
+	}
 	if (h->magic != VROOM_MAGIC || h->payload_len > VROOM_MAX_PAYLOAD ||
 	    1 + h->argc + h->envc > MAX_STRS)
 		return false;
@@ -517,7 +727,7 @@ static int delegate(const struct req *r, const char *prog, const char **kind)
 {
 	if (dg_is_compile(r, req_env(r, "VCC_DELEGATE_SKIP"))) {
 		/* diagnostics only in the log: PROG runs a failed TU again and reports */
-		ppd_env e = { r->cwd, r->fds[1], log_requests ? 2 : -1 };
+		ppd_env e = { r->cwd, r->fds[1], log_requests ? 2 : -1, r->envp };
 
 		if (ppd_run(r->argc, r->argv, &e) == 0) {
 			*kind = "cc-own";
@@ -585,14 +795,38 @@ static int spawn(const struct req *r, const char *prog)
 	pid_t pid;
 	int st, i, err;
 
+	/* the request's environment minus the dynamic loader's: a client's
+	   DYLD_INSERT_LIBRARIES / LD_PRELOAD must not run code in our children */
+	size_t ne = 0, nall = 0;
+	char **env;
+
+	while (r->envp[nall])
+		nall++;
+	env = malloc((nall + 1) * sizeof(char *));
+	for (char **e = r->envp; *e; e++)
+		if (strncmp(*e, "DYLD_", 5) && strncmp(*e, "LD_PRELOAD=", 11) && strncmp(*e, "LD_LIBRARY_PATH=", 16) &&
+		    strncmp(*e, "LD_AUDIT=", 9) && strncmp(*e, "VCC_UMASK=", 10))
+			env[ne++] = *e;
+	env[ne] = NULL;
 	posix_spawn_file_actions_init(&fa);
 	for (i = 0; i < 3; i++)
 		if (r->fds[i] >= 0)
 			posix_spawn_file_actions_adddup2(&fa, r->fds[i], i);
 	posix_spawn_file_actions_addchdir(&fa, r->cwd);
 	r->argv[0] = (char *)prog;
-	err = posix_spawn(&pid, prog, &fa, NULL, r->argv, r->envp);
+#ifdef POSIX_SPAWN_CLOEXEC_DEFAULT
+	/* only 0-2 reach the child: other workers' request fds are open meanwhile */
+	posix_spawnattr_t sa;
+
+	posix_spawnattr_init(&sa);
+	posix_spawnattr_setflags(&sa, POSIX_SPAWN_CLOEXEC_DEFAULT);
+	err = posix_spawn(&pid, prog, &fa, &sa, r->argv, env);
+	posix_spawnattr_destroy(&sa);
+#else
+	err = posix_spawn(&pid, prog, &fa, NULL, r->argv, env);
+#endif
 	r->argv[0] = saved;
+	free(env);
 	posix_spawn_file_actions_destroy(&fa);
 	if (err) {
 		say(r, "%s: error: cannot run %s\n", prog);
@@ -650,7 +884,13 @@ static int handle1(const struct req *r, const char **kind);
 
 static int handle(const struct req *r, const char **kind)
 {
-	int status = handle1(r, kind);
+	int status;
+
+	ppd_umask = -1;	/* the shim sends VCC_UMASK; outputs then get 0666 & ~umask */
+	for (char **e = r->envp; *e; e++)
+		if (!strncmp(*e, "VCC_UMASK=", 10))
+			ppd_umask = (int)(strtoul(*e + 10, NULL, 8) & 0777);
+	status = handle1(r, kind);
 
 	if (!strcmp(*kind, "cc-own") || !strcmp(*kind, "cc") || !strcmp(*kind, "cc-fallbk"))
 		status = fixdep_after(r, status);
@@ -731,7 +971,7 @@ static int handle1(const struct req *r, const char **kind)
 		return cc_probe(r, probe);
 	}
 	if (cc_is_pp(r)) {
-		ppd_env e = { r->cwd, r->fds[1], r->fds[2] };
+		ppd_env e = { r->cwd, r->fds[1], r->fds[2], r->envp };
 
 		*kind = "cc-E";
 		atomic_fetch_add(&n_pp, 1);
@@ -739,7 +979,7 @@ static int handle1(const struct req *r, const char **kind)
 	}
 	if (cc_is_compile(r)) {
 		/* diagnostics only in the log: a TU vcc fails on goes to clang, which reports */
-		ppd_env e = { r->cwd, r->fds[1], log_requests ? 2 : -1 };
+		ppd_env e = { r->cwd, r->fds[1], log_requests ? 2 : -1, r->envp };
 
 		if (ppd_run(r->argc, r->argv, &e) == 0) {
 			*kind = "cc-own";
@@ -881,10 +1121,10 @@ static int run_sh(const struct req *r)
 
 static void print_counts(void)
 {
-	fprintf(stderr, "vccd: %lu probes, %lu -E, %lu compiled by vcc, %lu fell back to clang, %lu forwarded in all, %lu spawned, %lu ar, %lu recipes run, %lu passed to sh\n",
+	fprintf(stderr, "vccd: %lu probes, %lu -E, %lu compiled by vcc, %lu fell back to clang, %lu forwarded in all, %lu spawned, %lu ar, %lu recipes run, %lu passed to sh; %lu builds (cache flushes)\n",
 		atomic_load(&n_probe), atomic_load(&n_pp), atomic_load(&n_cc), atomic_load(&n_fallback),
 		atomic_load(&n_fwd), atomic_load(&n_spawn), atomic_load(&n_ar),
-		atomic_load(&n_sh), atomic_load(&n_sh_decl));
+		atomic_load(&n_sh), atomic_load(&n_sh_decl), atomic_load(&n_flush));
 	{	/* the shared caches, as vpp --batch prints them */
 		char hs[512];
 		struct rusage ru;
@@ -918,28 +1158,85 @@ static void *worker_main(void *arg)
 		exit(1);
 	}
 	for (;;) {
-		int conn = queue_pop();
+		int conn = queue_pop();	/* (counts itself in n_active) */
 		struct req r;
 		int32_t status = 127;
 		const char *kind = "bad";
 		double t0 = now_ms();
 		int i;
 
-		if (recv_req(&w, conn, &r))
-			status = handle(&r, &kind);
+		if (recv_req(&w, conn, &r)) {
+			struct vroom_req_hdr *h = (struct vroom_req_hdr *)w.raw;
+
+			if (h->build && self_build && h->build != self_build) {
+				status = (int32_t)VROOM_STATUS_MISMATCH, kind = "mismatch";
+			} else {
+				int g = gen_enter(h->pgrp);
+
+				if (g) {
+					status = (int32_t)VROOM_STATUS_RETRY, kind = "retry";
+					if (g == 2) {	/* answer first: the exec drops every fd we hold */
+						(void)write_full(conn, (char *)&status, sizeof(status));
+						close(conn);
+						for (i = 0; i < 3; i++)
+							if (r.fds[i] >= 0)
+								close(r.fds[i]), r.fds[i] = -1;
+						do_restart();
+						conn = open("/dev/null", O_RDWR);	/* (exec failed: the loop's close) */
+					}
+				} else {
+					ppd_conn = conn;
+					status = handle(&r, &kind);
+					ppd_conn = -1;
+					gen_leave();
+				}
+			}
+		}
 		(void)write_full(conn, (char *)&status, sizeof(status));
 		close(conn);
 		for (i = 0; i < 3; i++)
 			if (r.fds[i] >= 0)
 				close(r.fds[i]);
 		log_req(&r, kind, status, t0);
+		atomic_fetch_sub(&n_active, 1);
 	}
 	return NULL;
 }
 
+/* SIGTERM: no new connections; the queued and running jobs finish, then exit */
+static __attribute__((noreturn)) void drain_exit(int ls, const char *sock)
+{
+	close(ls);
+	unlink(sock);
+	for (;;) {
+		pthread_mutex_lock(&qlock);
+		bool idle = qhead == qtail && !atomic_load(&n_active);
+		pthread_mutex_unlock(&qlock);
+		if (idle)
+			exit(0);
+		usleep(5000);
+	}
+}
+
+static bool peer_is_us(int c)
+{
+#ifdef __APPLE__
+	uid_t u;
+	gid_t g;
+
+	return !getpeereid(c, &u, &g) && u == geteuid();
+#else
+	struct ucred cr;
+	socklen_t l = sizeof(cr);
+
+	return !getsockopt(c, SOL_SOCKET, SO_PEERCRED, &cr, &l) && cr.uid == geteuid();
+#endif
+}
+
 int main(int argc, char **argv)
 {
-	const char *sock = "/tmp/vccd.sock";
+	const char *sock = NULL;
+	char ddir[1024], dsock[1100];
 	struct sockaddr_un sa = { .sun_family = AF_UNIX };
 #ifdef __APPLE__
 	struct kevent ev;
@@ -947,11 +1244,13 @@ int main(int argc, char **argv)
 	/* make never has more than -j requests in flight, and compiles are CPU bound:
 	 * two per core leaves room for the ones that block (forwarded to vroomd,
 	 * spawned tools) without a thread per possible connection */
-	int nworkers = 2 * (int)sysconf(_SC_NPROCESSORS_ONLN), ls, kq, i;
+	int nworkers = 2 * (int)sysconf(_SC_NPROCESSORS_ONLN), ls, kq, i, listen_fd = -1;
 
 	for (i = 1; i < argc; i++) {
 		if (!strcmp(argv[i], "--sock") && i + 1 < argc)
 			sock = argv[++i];
+		else if (!strcmp(argv[i], "--listen-fd") && i + 1 < argc)
+			listen_fd = atoi(argv[++i]);
 		else if (!strcmp(argv[i], "--backend-sock") && i + 1 < argc)
 			backend_sock = argv[++i];
 		else if (!strcmp(argv[i], "--ld") && i + 1 < argc)
@@ -970,6 +1269,8 @@ int main(int argc, char **argv)
 		char self[4096], *sl;
 
 		if (realpath(argv[0], self) && (sl = strrchr(self, '/'))) {
+			self_build = vroom_build_id(self);
+			snprintf(self_exe, sizeof(self_exe), "%s", self);
 			*sl = 0;
 			snprintf(tool_dir, sizeof(tool_dir), "%s", self);
 		}
@@ -978,13 +1279,34 @@ int main(int argc, char **argv)
 	own_cc = !getenv("VCC_CC") || strcmp(getenv("VCC_CC"), "0");
 	signal(SIGPIPE, SIG_IGN);
 
+	if (!sock) {
+		if (vroom_default_sock(ddir, sizeof(ddir), dsock, sizeof(dsock), 1)) {
+			fprintf(stderr, "vccd: %s is not a private directory of ours\n", ddir);
+			return 1;
+		}
+		sock = dsock;
+	}
+	g_argc = argc, g_argv = argv, g_sock = sock;
+	if (listen_fd >= 0) {	/* re-exec'ed after a memory restart: the same socket */
+		ls = g_ls = listen_fd;
+		fcntl(ls, F_SETFD, FD_CLOEXEC);
+		goto listening;
+	}
 	unlink(sock);
 	strncpy(sa.sun_path, sock, sizeof(sa.sun_path) - 1);
 	ls = socket(AF_UNIX, SOCK_STREAM, 0);
-	if (ls < 0 || bind(ls, (struct sockaddr *)&sa, sizeof(sa)) || listen(ls, 1024)) {
-		perror("vccd: socket");
-		return 1;
+	g_ls = ls;
+	{	/* the socket is 0600 whatever the umask: the peer check below is the real gate */
+		mode_t um = umask(077);
+		int bad = ls < 0 || bind(ls, (struct sockaddr *)&sa, sizeof(sa));
+
+		umask(um);
+		if (bad || listen(ls, 1024)) {
+			perror("vccd: socket");
+			return 1;
+		}
 	}
+listening:
 	fcntl(ls, F_SETFL, O_NONBLOCK);
 #ifndef __APPLE__
 	{	/* USR1/TERM go to the signalfd below: block them before the workers inherit the mask */
@@ -1023,8 +1345,13 @@ int main(int argc, char **argv)
 	kevent(kq, &ev, 1, NULL, 0, NULL);
 	for (;;) {
 		struct kevent out;
+		struct timespec tick = { 0, 50000000 };	/* (a restart waits for park_accept) */
+		int nev;
 
-		if (kevent(kq, NULL, 0, &out, 1, NULL) < 0) {
+		park_accept();
+		if ((nev = kevent(kq, NULL, 0, &out, 1, &tick)) == 0)
+			continue;
+		if (nev < 0) {
 			if (errno == EINTR)
 				continue;
 			perror("vccd: kevent");
@@ -1033,7 +1360,7 @@ int main(int argc, char **argv)
 		if (out.filter == EVFILT_SIGNAL) {
 			print_counts();
 			if (out.ident == SIGTERM)
-				exit(0);
+				drain_exit(ls, sock);
 			continue;
 		}
 #else
@@ -1057,8 +1384,12 @@ int main(int argc, char **argv)
 		epoll_ctl(kq, EPOLL_CTL_ADD, sfd, &e);
 		for (;;) {
 			struct epoll_event out;
+			int nev;
 
-			if (epoll_wait(kq, &out, 1, -1) < 0) {
+			park_accept();
+			if ((nev = epoll_wait(kq, &out, 1, 50)) == 0)
+				continue;
+			if (nev < 0) {
 				if (errno == EINTR)
 					continue;
 				perror("vccd: epoll_wait");
@@ -1071,17 +1402,31 @@ int main(int argc, char **argv)
 					continue;
 				print_counts();
 				if (si.ssi_signo == SIGTERM)
-					exit(0);
+					drain_exit(ls, sock);
 				continue;
 			}
 #endif
 		for (;;) {
-			int c = accept(ls, NULL, NULL);
+			int c;
+
+			if (atomic_load(&gen_restart))
+				break;	/* (parks at the loop's top) */
+			c = accept(ls, NULL, NULL);
 
 			if (c < 0)
 				break;
+			if (!peer_is_us(c)) {	/* another user: refused before reading anything */
+				close(c);
+				continue;
+			}
 			fcntl(c, F_SETFL, 0);	/* BSD: accept() inherits O_NONBLOCK */
 			fcntl(c, F_SETFD, FD_CLOEXEC);
+			{	/* the shim sends its request right after connecting: a client that
+				   stays silent frees its worker instead of holding it */
+				struct timeval tv = { 2, 0 };
+
+				setsockopt(c, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
+			}
 			queue_push(c);
 		}
 	}

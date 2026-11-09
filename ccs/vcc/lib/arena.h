@@ -82,14 +82,16 @@ static void vmreg_dbg_report(void)
 
 static int vmreg_dbg(void)
 {
-	if (__builtin_expect(vmreg_dbg_mode < 0, 0)) {
-		int m = (getenv("VCC_VMREG_CHECK") ? 1 : 0) | (getenv("VCC_VMREG_STATS") ? 2 : 0);
+	int m = __atomic_load_n(&vmreg_dbg_mode, __ATOMIC_RELAXED);	/* (threads race to set it: same value) */
 
-		if (m & 2)
+	if (__builtin_expect(m < 0, 0)) {
+		int z = -1;
+
+		m = (getenv("VCC_VMREG_CHECK") ? 1 : 0) | (getenv("VCC_VMREG_STATS") ? 2 : 0);
+		if (__atomic_compare_exchange_n(&vmreg_dbg_mode, &z, m, 0, __ATOMIC_RELAXED, __ATOMIC_RELAXED) && (m & 2))
 			atexit(vmreg_dbg_report);
-		vmreg_dbg_mode = m;
 	}
-	return vmreg_dbg_mode;
+	return m;
 }
 
 __attribute__((noinline, cold)) static void vmreg_dbg_put(vmreg *r, size_t used)

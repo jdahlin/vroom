@@ -335,6 +335,9 @@ VPRIV uint32_t cast_expr(cc *c)
 {
 	uint32_t b = tok(c)->loc, n;
 
+	if (vstack_low())	/* every nested expression comes through here */
+		fatal(c, b, "expression nested too deeply");
+
 	if (is(c, T_LPAREN)) {
 		/* consumed first: no lookahead token to shift out later */
 		next(c);

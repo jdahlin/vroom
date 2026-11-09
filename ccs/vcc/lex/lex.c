@@ -1355,12 +1355,15 @@ static char *read_file(int fd, size_t size, size_t *got)
 		n += (size_t)r;
 	}
 	memset(b + n, 0, 128);
+	/* a UTF-8 byte order mark is not text (clang skips it): blanks keep the columns */
+	if (n >= 3 && (unsigned char)b[0] == 0xef && (unsigned char)b[1] == 0xbb && (unsigned char)b[2] == 0xbf)
+		b[0] = b[1] = b[2] = ' ';
 	*got = n;
 	return b;
 }
 
 /* open + read: the file's bytes in this thread's arena, false if unreadable */
-static bool read_src(const char *path, const char **src, size_t *size)
+static bool read_src(const char *path, const char **src, size_t *size, uint64_t id[2])
 {
 	struct stat st;
 	int fd;
@@ -1375,6 +1378,8 @@ static bool read_src(const char *path, const char **src, size_t *size)
 		return false;
 	}
 	*src = read_file(fd, (size_t)st.st_size, size);
+	id[0] = (uint64_t)st.st_dev;
+	id[1] = (uint64_t)st.st_ino;
 	close(fd);
 	return true;
 }
@@ -1406,8 +1411,12 @@ static bool load(vlex_file *f, const char *path)
 	const char *src;
 	size_t size;
 
-	if (!read_src(path, &src, &size))
+	uint64_t id[2];
+
+	if (!read_src(path, &src, &size, id))
 		return false;
+	f->dev = id[0];
+	f->ino = id[1];
 	lex_src(f, src, size);
 	return true;
 }
@@ -1483,7 +1492,48 @@ static void publish(centry *e, bool ok)
 	atomic_store_explicit(&e->state, ok ? CE_OK : CE_MISSING, memory_order_release);
 }
 
+const vlex_file *vlex_trigraphs(const vlex_file *f)
+{
+	static const char from[] = "=/'()!<>-", to[] = "#\\^[]|{}~";
+	const char *s = f->src, *q = memmem(s, f->size, "??", 2);
+	size_t n = f->size, o = 0;
+	char *b;
+	vlex_file *nf;
+
+	while (q && (q + 2 >= s + n || !strchr(from, q[2]) || !q[2]))
+		q = q + 1 < s + n ? memmem(q + 1, (size_t)(s + n - q - 1), "??", 2) : NULL;
+	if (!q)
+		return f;
+	b = arena(n + 128);
+	for (size_t i = 0; i < n; i++) {
+		const char *t;
+
+		if (s[i] == '?' && i + 2 < n && s[i + 1] == '?' && s[i + 2] && (t = strchr(from, s[i + 2]))) {
+			b[o++] = to[t - from];
+			i += 2;
+		} else {
+			b[o++] = s[i];
+		}
+	}
+	memset(b + o, 0, 128);
+	nf = arena(sizeof(*nf));
+	memset(nf, 0, sizeof(*nf));
+	nf->path = f->path;
+	nf->dev = f->dev;
+	nf->ino = f->ino;
+	lex_src(nf, b, o);
+	return nf;
+}
+
 const vlex_file *(*vlex_get_hook)(const char *path, size_t len);
+
+/* forget every file (a new build: vccd, idle): later lookups read and lex
+ * again.  Old entries are not freed, so pointers into them stay valid. */
+void vlex_cache_flush(void)
+{
+	for (size_t i = 0; i < (1u << CBITS); i++)
+		atomic_store_explicit(&ctab[i], NULL, memory_order_release);
+}
 
 const vlex_file *vlex_get(const char *path, size_t len)
 {
@@ -1554,7 +1604,11 @@ static void *io_thread(void *arg)
 			const char *src;
 			size_t size;
 
-			if (read_src(e->path, &src, &size)) {
+			uint64_t id[2];
+
+			if (read_src(e->path, &src, &size, id)) {
+				e->f.dev = id[0];
+				e->f.ino = id[1];
 				e->f.src = src;
 				e->f.size = (uint32_t)size;
 				atomic_store_explicit(&e->state, CE_READ, memory_order_release);

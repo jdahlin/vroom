@@ -22,8 +22,11 @@ import array, os, re, signal, socket, stat, struct, subprocess, sys, tempfile, t
 spec = importlib.util.spec_from_file_location('vd', os.path.join(os.path.dirname(os.path.abspath(__file__)), 'vcc-diff.py'))
 vd = importlib.util.module_from_spec(spec); spec.loader.exec_module(vd)
 
-SHIM = f'{vd.R}/build/ccs/vcc'
-MAGIC = 0x6d6f6f72
+SHIM = f'{vd.BIN}/vcc'	# next to the vccd under test: the build ids match
+MAGIC = 0x326f6f72
+
+def hdr(magic, argc, envc, plen, build=0):
+    return struct.pack('<IIIIQII', magic, argc, envc, plen, build, 0, 0)
 TARGET = ['--target=aarch64-linux-gnu', '-nostdinc', '-ffreestanding']
 TESTS = []
 
@@ -36,15 +39,15 @@ class Skip(Exception): pass
 
 class Vccd:
     """a private vccd in its own directory"""
-    def __init__(self, workers=4, umask=None, sockdir_mode=None):
+    def __init__(self, workers=4, umask=None, sockdir_mode=None, extra=(), env=None):
         self.dir = tempfile.mkdtemp(prefix='vccd-test-')
         if sockdir_mode is not None: os.chmod(self.dir, sockdir_mode)
         self.sock = f'{self.dir}/vccd.sock'
         self.logf = f'{self.dir}/vccd.log'
         pre = (lambda: os.umask(umask)) if umask is not None else None
         self.p = subprocess.Popen([f'{vd.BIN}/vccd', '--sock', self.sock, '--backend-sock', f'{self.dir}/none.sock',
-                                   '-j', str(workers)], stdout=open(self.logf, 'w'), stderr=subprocess.STDOUT,
-                                  preexec_fn=pre)
+                                   '-j', str(workers)] + list(extra), stdout=open(self.logf, 'w'), stderr=subprocess.STDOUT,
+                                  preexec_fn=pre, env=dict(os.environ, **(env or {})))
         for _ in range(200):
             if os.path.exists(self.sock): break
             time.sleep(0.02)
@@ -56,7 +59,8 @@ class Vccd:
         """compile through the shim: (status, stderr)"""
         pre = (lambda: os.umask(umask)) if umask is not None else None
         p = subprocess.run([SHIM] + TARGET + list(extra) + ['-c', '-o', out, src], cwd=cwd, capture_output=True,
-                           timeout=timeout, env=dict(os.environ, VCC_SOCK=self.sock), preexec_fn=pre)
+                           timeout=timeout, env=dict(os.environ, VCC_SOCK=self.sock), preexec_fn=pre,
+                           process_group=0)	# one build per call (a shell gives each make its own group)
         return p.returncode, p.stderr.decode(errors='replace')
 
 def raw_request(sock, cwd, argv, env=(), fds=(0, 1, 2), header=None, payload=None, close_early=False, timeout=10):
@@ -64,7 +68,7 @@ def raw_request(sock, cwd, argv, env=(), fds=(0, 1, 2), header=None, payload=Non
     if payload is None:
         payload = b''.join(s.encode() + b'\0' for s in [cwd] + list(argv) + list(env))
     if header is None:
-        header = struct.pack('<IIII', MAGIC, len(argv), len(env), len(payload))
+        header = hdr(MAGIC, len(argv), len(env), len(payload))
     s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
     s.settimeout(timeout)
     s.connect(sock)
@@ -96,7 +100,7 @@ def check(cond, msg):
 
 # ---------------- access ----------------
 
-@test(xfail='Socket has no peer check, lives in /tmp (socket mode follows the umask)')
+@test()
 def socket_mode_ignores_umask(v=None):
     """started with umask 0 in a world-readable directory, the socket must still be private"""
     v = Vccd(umask=0, sockdir_mode=0o755)
@@ -105,11 +109,11 @@ def socket_mode_ignores_umask(v=None):
         check(m & 0o077 == 0, f'socket mode {m:o}: other users can connect')
     finally: v.stop()
 
-@test(xfail='Socket has no peer check, lives in /tmp (default path)')
+@test()
 def default_socket_not_in_tmp():
     """the default socket path (shim and server) is in a per-user directory, not /tmp"""
     for f in ('shim.c', 'vccd.c'):
-        src = open(f'{vd.R}/ccs/vcc/{f}').read()
+        src = open(f'{vd.R}/ccs/vcc/vccd/{f}').read()
         check('"/tmp/vccd.sock"' not in src, f'{f}: default socket /tmp/vccd.sock')
 
 @test()
@@ -128,7 +132,7 @@ def peer_other_user():
 
 # ---------------- malformed requests ----------------
 
-@test(xfail='fd handling: uninitialised cmsg, three fds assumed')
+@test()
 def wrong_fd_count():
     """requests with 0, 1, 2 or 4 fds are refused, the server stays up and serves"""
     v = Vccd()
@@ -138,12 +142,143 @@ def wrong_fd_count():
         r, w = os.pipe()
         for fds in ((), (r,), (r, w), (0, 1, 2, w)):
             for _ in range(5):
-                st = raw_request(v.sock, d, argv, fds=fds)
+                try:
+                    st = raw_request(v.sock, d, argv, fds=fds)
+                except (BrokenPipeError, ConnectionResetError):
+                    st = None	# refused before the payload was read
                 check(st != 0, f'request with {len(fds)} fds accepted (status {st})')
         os.close(r); os.close(w)
         check(v.alive(), 'vccd died')
         st, err = v.cc(d, src)
         check(st == 0, f'normal job after bad requests: {st} {err[-300:]}')
+    finally: v.stop()
+
+@test()
+def spawned_tool_env_clean():
+    """a link spawned for a request gets the request's env minus the dynamic loader's variables"""
+    d0 = tempfile.mkdtemp(prefix='vccd-ld-')
+    dump = f'{d0}/env.txt'
+    with open(f'{d0}/ld', 'w') as f: f.write(f'#!/bin/sh\nenv > {dump}\n')
+    os.chmod(f'{d0}/ld', 0o755)
+    v = Vccd(extra=['--ld', f'{d0}/ld'])
+    try:
+        st = raw_request(v.sock, d0, ['ld', 'x.o', '-o', 'x'], env=['DYLD_INSERT_LIBRARIES=/nonexistent',
+                         'LD_PRELOAD=/nonexistent', 'VCC_TEST_KEEP=1', 'PATH=/usr/bin:/bin'])
+        check(st == 0, f'link status {st}')
+        e = open(dump).read()
+        check('VCC_TEST_KEEP=1' in e, 'the request env did not reach the tool')
+        check('DYLD_INSERT_LIBRARIES' not in e and 'LD_PRELOAD' not in e, 'loader variables reached the tool')
+    finally: v.stop()
+
+@test()
+def request_2mb():
+    """a 2 MB environment (Linux allows more than macOS's 1 MB ARG_MAX) is served"""
+    v = Vccd()
+    try:
+        d = f'{v.dir}/w'; src = tu(d)
+        argv = [SHIM] + TARGET + ['-c', '-o', f'{d}/big.o', src]
+        st = raw_request(v.sock, d, argv, env=['BIG=' + 'x' * (2 << 20), 'PATH=/usr/bin:/bin'])
+        check(st == 0, f'status {st} for a 2 MB request')
+    finally: v.stop()
+
+@test()
+def autostart_default_socket():
+    """no server on the default socket: concurrent shims start one between them and are served"""
+    from concurrent.futures import ThreadPoolExecutor
+    t = tempfile.mkdtemp(prefix='vccd-auto-')
+    env = {k: x for k, x in os.environ.items() if k not in ('VCC_SOCK', 'XDG_RUNTIME_DIR')}
+    env['TMPDIR'] = t
+    src = tu(f'{t}/w')
+    try:
+        def one(i):
+            return subprocess.run([SHIM] + TARGET + ['-c', '-o', f'{i}.o', src], env=env, cwd=f'{t}/w',
+                                  capture_output=True, timeout=30).returncode
+        with ThreadPoolExecutor(4) as ex: rcs = list(ex.map(one, range(4)))
+        check(rcs == [0] * 4, f'exit statuses {rcs}')
+        n = subprocess.run(['pgrep', '-f', f'vccd --sock {t}/'], capture_output=True, text=True).stdout.split()
+        check(len(n) == 1, f'{len(n)} servers started')
+    finally:
+        subprocess.run(['pkill', '-f', f'vccd --sock {t}/'])
+
+@test()
+def sigterm_drains():
+    """SIGTERM during a job: the job still completes, then the server exits and its socket is gone"""
+    v = Vccd()
+    try:
+        d = f'{v.dir}/w'
+        src = tu(d, 'big.c', ''.join(f'int f{i}(int x) {{ return x * {i} + (x >> 3) - {i}; }}\n' for i in range(600000)))
+        p = subprocess.Popen([SHIM] + TARGET + ['-c', '-o', 'big.o', src], cwd=d, env=dict(os.environ, VCC_SOCK=v.sock),
+                             stderr=subprocess.PIPE)
+        time.sleep(0.4)
+        v.p.send_signal(signal.SIGTERM)
+        rc = p.wait(timeout=60)
+        check(rc == 0, f'job interrupted: rc {rc} {p.stderr.read()[-300:]}')
+        check(os.path.getsize(f'{d}/big.o') > 0, 'no object')
+        v.p.wait(timeout=10)
+        check(not os.path.exists(v.sock), 'socket left behind')
+    finally: v.stop()
+
+@test()
+def request_env_reaches_job():
+    """SOURCE_DATE_EPOCH and CPATH from the client's environment, not the server's"""
+    v = Vccd()
+    try:
+        d = f'{v.dir}/w'; os.makedirs(f'{d}/cp', exist_ok=True)
+        open(f'{d}/cp/e.h', 'w').write('#define FROM_CPATH 7\n')
+        src = tu(d, 'e.c', '#include "e.h"\nconst char *s = __DATE__; int k = FROM_CPATH;\n')
+        env = dict(os.environ, VCC_SOCK=v.sock, SOURCE_DATE_EPOCH='0', CPATH='cp')
+        p = subprocess.run([SHIM] + TARGET + ['-E', '-P', src], cwd=d, env=env, capture_output=True, text=True,
+                           process_group=0)
+        check(p.returncode == 0, f'rc {p.returncode} {p.stderr[-300:]}')
+        check('"Jan  1 1970"' in p.stdout, f'__DATE__ not from SOURCE_DATE_EPOCH: {p.stdout[-200:]}')
+        check('k = 7' in p.stdout, 'CPATH not used')
+    finally: v.stop()
+
+@test()
+def killed_client_no_output():
+    """the shim killed during a long job: no object is written, and the server keeps serving"""
+    v = Vccd()
+    try:
+        d = f'{v.dir}/w'
+        src = tu(d, 'big.c', ''.join(f'int f{i}(int x) {{ return x * {i} + (x >> 3) - {i}; }}\n' for i in range(600000)))
+        p = subprocess.Popen([SHIM] + TARGET + ['-c', '-o', 'big.o', src], cwd=d, env=dict(os.environ, VCC_SOCK=v.sock),
+                             stderr=subprocess.DEVNULL, process_group=0)
+        time.sleep(0.4)
+        p.kill(); p.wait()
+        time.sleep(3)
+        check(not os.path.exists(f'{d}/big.o'), 'object written for a client that had gone')
+        check(not [f for f in os.listdir(d) if f.endswith('.tmp')], 'temporary left behind')
+        st, err = v.cc(d, tu(d)); check(st == 0, f'server after: {st} {err[-300:]}')
+    finally: v.stop()
+
+@test()
+def memory_restart_between_builds():
+    """over its memory limit at a new build the server re-execs on the same socket; concurrent jobs are retried"""
+    from concurrent.futures import ThreadPoolExecutor
+    v = Vccd(env={'VCC_RESTART_MB': '1'})
+    try:
+        d = f'{v.dir}/w'; src = tu(d)
+        for b in range(3):	# each v.cc is a new build: a restart before each but the first
+            with ThreadPoolExecutor(6) as ex:
+                rs = list(ex.map(lambda i: v.cc(d, src, out=f'{b}-{i}.o'), range(6)))
+            check(all(st == 0 for st, _ in rs), f'build {b}: {[(st, e[-120:]) for st, e in rs if st]}')
+            check(v.alive(), 'vccd died')
+        log = open(v.logf).read()
+        check(log.count('restarting') >= 2, f'{log.count("restarting")} restarts in the log')
+    finally: v.stop()
+
+@test()
+def other_build_refused():
+    """a request from another build of the shim gets the mismatch status, not service"""
+    v = Vccd()
+    try:
+        d = f'{v.dir}/w'; src = tu(d)
+        argv = [SHIM] + TARGET + ['-c', src]
+        good = b''.join(s.encode() + b'\0' for s in [d] + argv)
+        st = raw_request(v.sock, d, argv, header=hdr(MAGIC, len(argv), 0, len(good), build=12345), payload=good)
+        check(st == 0x7fff0001, f'status {st} for a foreign build id (want VROOM_STATUS_MISMATCH)')
+        st, err = v.cc(d, src)
+        check(st == 0, f'the real shim (same build) is served: {st} {err[-300:]}')
     finally: v.stop()
 
 @test()
@@ -155,13 +290,13 @@ def garbage_requests():
         argv = [SHIM] + TARGET + ['-c', src]
         good = b''.join(s.encode() + b'\0' for s in [d] + argv)
         bad = [
-            dict(header=struct.pack('<IIII', 0xdeadbeef, len(argv), 0, len(good)), payload=good),
-            dict(header=struct.pack('<IIII', MAGIC, len(argv), 0, 1 << 31), payload=good),
-            dict(header=struct.pack('<IIII', MAGIC, 1 << 30, 1 << 30, len(good)), payload=good),
-            dict(header=struct.pack('<IIII', MAGIC, len(argv) + 50, 0, len(good)), payload=good),
-            dict(header=struct.pack('<IIII', MAGIC, 0, 0, len(good)), payload=good),
-            dict(header=struct.pack('<IIII', MAGIC, len(argv), 0, len(good) + 100), payload=good, close_early=True),
-            dict(header=struct.pack('<IIII', MAGIC, len(argv), 0, len(good)), payload=good.replace(b'\0', b'x')),
+            dict(header=hdr(0xdeadbeef, len(argv), 0, len(good)), payload=good),
+            dict(header=hdr(MAGIC, len(argv), 0, 1 << 31), payload=good),
+            dict(header=hdr(MAGIC, 1 << 30, 1 << 30, len(good)), payload=good),
+            dict(header=hdr(MAGIC, len(argv) + 50, 0, len(good)), payload=good),
+            dict(header=hdr(MAGIC, 0, 0, len(good)), payload=good),
+            dict(header=hdr(MAGIC, len(argv), 0, len(good) + 100), payload=good, close_early=True),
+            dict(header=hdr(MAGIC, len(argv), 0, len(good)), payload=good.replace(b'\0', b'x')),
             dict(header=b'\x72\x6f', payload=b'', close_early=True),
         ]
         for i, b in enumerate(bad):
@@ -175,7 +310,7 @@ def garbage_requests():
         check(st == 0, f'normal job after garbage: {st} {err[-300:]}')
     finally: v.stop()
 
-@test(xfail='No timeouts; idle connections stall all workers')
+@test()
 def idle_connections_do_not_stall():
     """with every worker's worth of connections open and silent, a real job still runs"""
     v = Vccd(workers=2)
@@ -211,7 +346,7 @@ def fresh(d, src, out):
         return obj(d, out)
     finally: v.stop()
 
-@test(xfail='Caches never invalidated (edited header)')
+@test()
 def edited_header_rebuilds():
     v = Vccd()
     try:
@@ -221,7 +356,7 @@ def edited_header_rebuilds():
         check(b == fresh(d, src, '3.o'), 'second build differs from a fresh server')
     finally: v.stop()
 
-@test(xfail='Caches never invalidated (edited main file)')
+@test()
 def edited_main_file_rebuilds():
     v = Vccd()
     try:
@@ -230,7 +365,7 @@ def edited_main_file_rebuilds():
         check(a != b, 'the object did not change after the source was edited')
     finally: v.stop()
 
-@test(xfail='Caches never invalidated (header created after a miss)')
+@test()
 def header_created_after_miss():
     v = Vccd()
     try:
@@ -240,7 +375,7 @@ def header_created_after_miss():
         check(a != b, 'the new header was not found in the second build')
     finally: v.stop()
 
-@test(xfail='Caches never invalidated (header created in an earlier -I directory)')
+@test()
 def header_shadowed_by_new_file():
     """a new file earlier in the search path takes over from the one found before"""
     v = Vccd()
@@ -256,7 +391,7 @@ def header_shadowed_by_new_file():
 
 # ---------------- the client's view ----------------
 
-@test(xfail='Request environment and umask ignored by in-process jobs')
+@test()
 def output_mode_follows_client_umask():
     v = Vccd(umask=0o022)
     try:

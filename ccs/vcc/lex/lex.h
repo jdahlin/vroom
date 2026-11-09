@@ -62,6 +62,7 @@ typedef struct vlex_file {
 	uint32_t ntok;		/* tokens, excluding the final T_EOF */
 	const vtok *tok;	/* ntok + 1 entries */
 	void *pp;		/* preprocessor's per-file data (pp/file.c), set once with __atomic */
+	uint64_t dev, ino;	/* the file's identity (0, 0: unknown): #pragma once, as clang */
 } vlex_file;
 
 /* clang's name for a token kind (as in -dump-raw-tokens) */
@@ -88,6 +89,10 @@ size_t vlex_spell(const char *src, const vtok *t, char *buf);
  * and in vlex_prefetch().
  */
 const vlex_file *vlex_get(const char *path, size_t pathlen);
+/* f with trigraphs replaced (C phase 1), lexed into a new uncached file;
+ * f itself when it has none */
+const vlex_file *vlex_trigraphs(const vlex_file *f);
+void vlex_cache_flush(void);	/* only with no lookups in flight */
 /*
  * Read-ahead hint: path will probably be needed.  I/O threads open and read
  * it, so that vlex_get() only lexes.  Never required for correctness.

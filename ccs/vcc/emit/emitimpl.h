@@ -84,6 +84,9 @@
 /* Apple arm64 (Mach-O): '_' names, GOT for symbols outside the TU, variadic
  * arguments on the stack, va_list a char *, stack arguments packed */
 #define DARWIN(c) ((c)->o->target == PP_DARWIN)
+/* a symbol offset the relocation itself can carry: ELF RELA 32 bits here, a
+ * Mach-O ARM64_RELOC_ADDEND 24 bits signed (clang adds the rest in code) */
+#define SYMOFF_OK(c, off) (DARWIN(c) ? (off) >= -(1 << 23) && (off) < (1 << 23) : (off) >= INT32_MIN && (off) <= INT32_MAX)
 #define T(c, t) CT(c, t)
 #define KIND(c, t) CKIND(c, t)
 
@@ -176,6 +179,8 @@ typedef struct emitter {
 	bool stats;
 	bool objtext;			/* VCC_OBJ_TEXT: objects through the printer and as_run (checks the object backend) */
 	pthread_mutex_t emu;		/* diagnostics */
+	uint32_t errcall[256];		/* error() call sites already reported (under emu) */
+	uint32_t nerrcall_loc;
 } emitter;
 
 typedef struct val {
@@ -319,6 +324,7 @@ typedef struct ecx {
 	uint32_t live;		/* bit i: tempregs[i] in use */
 	uint32_t resv;		/* ... of those, never handed out: B_LREG variables', x28 once falign > 16 */
 	int inlfree;		/* free temporaries an inlined call keeps (0: INLINE_FREE_SAFE) */
+	int spill;		/* last try: a binary operator's left value waits in a frame slot */
 	int nlr;		/* B_LREG candidates of the emitted function: sym, register */
 	uint32_t lrsym[MAXLREG];
 	uint8_t lrreg[MAXLREG];
@@ -492,6 +498,7 @@ static inline int tidx(int r)
 	return (unsigned)r < 34 ? tidx_of[r] : -1;
 }
 VPRIV __attribute__((format(printf, 3, 4))) void ediag(ecx *e, uint32_t loc, const char *fmt, ...);
+VPRIV __attribute__((format(printf, 3, 4))) void eerror(ecx *e, uint32_t loc, const char *fmt, ...);
 VPRIV __attribute__((format(printf, 3, 4), noreturn)) void efatal(ecx *e, uint32_t loc, const char *fmt, ...);
 /* type.c */
 VPRIV uint32_t canon_sym(cc *c, uint32_t s);
@@ -499,6 +506,8 @@ VPRIV const attrs *sym_attrs(cc *c, uint32_t s);
 VPRIV void sym_name(cc *c, tbuf *b, uint32_t s);
 VPRIV void ref_name(cc *c, tbuf *b, uint32_t r);
 VPRIV void ref_off(cc *c, tbuf *b, uint32_t r, int64_t off);
+/* darwin.c */
+VPRIV void darwin_text(tbuf *o, const char *t, size_t tn);
 /* print.c */
 VPRIV void p_lbl(tbuf *b, uint32_t fid, uint32_t l);
 VPRIV void print_ins(cc *c, tbuf *b, const ins *i, uint32_t fid, const char *raw);
@@ -524,8 +533,12 @@ static inline void symop(ecx *e, int op, int sz, int ext, int rd, int rn, uint32
 VPRIV uint32_t newlabel(ecx *e);
 VPRIV void kv_edge(ecx *e, uint32_t l);
 VPRIV void deflabel(ecx *e, uint32_t l);
-VPRIV void deflabel_forced(ecx *e, uint32_t l);
 VPRIV void deflabel_loop(ecx *e, uint32_t l, bool forced);
+VPRIV void deflabel_forced(ecx *e, uint32_t l);
+/* builtin.c: atomics, LSE or ldaxr/stlxr loops */
+VPRIV void at_cas(ecx *e, unsigned sz, int rs, int rt, int rn);
+VPRIV void at_swp(ecx *e, unsigned sz, int rs, int rt, int rn);
+VPRIV void at_ldop(ecx *e, unsigned sz, unsigned opc, int rs, int rt, int rn);
 VPRIV void jump(ecx *e, uint32_t l);
 VPRIV void bcond(ecx *e, int cond, uint32_t l);
 VPRIV void cbz(ecx *e, bool nz, int x, int r, uint32_t l);
@@ -590,6 +603,8 @@ VPRIV void store(ecx *e, lval *l, qty t, val *v);
 VPRIV void extend(ecx *e, int rd, int rs, int from, bool sgn);
 VPRIV int lreg_of(ecx *e, uint32_t s);
 VPRIV void opt_function(ecx *e);
+enum { OPF_ALL = 1, OPF_CALL = 2, OPF_FRAME = 4 };
+VPRIV uint64_t opt_regs(ecx *e, unsigned *fl);
 VPRIV lval bind_lreg(ecx *e, uint32_t s);
 VPRIV val fold_int_bin(ecx *e, int op, qty ot, qty rt, i128 l, i128 r, bool *ok);
 VPRIV bool em_is_cmp(int op);

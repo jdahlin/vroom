@@ -368,10 +368,16 @@ static void snap_restore(cc *c, const dcsnap *s, uint32_t base)
 
 /* ---------------- the trie ---------------- */
 
+/* every option before outfd can change what a header parses to (cc.h), so all
+   of them key the trie, plus emit (code generation keeps more per decl) */
 static uint64_t opt_sig(const cc_opts *o)
 {
-	return (uint64_t)o->target | (uint64_t)!!o->unsigned_char << 8 | (uint64_t)!!o->ms_anon << 9 |
-	       (uint64_t)!!o->short_wchar << 10 | (uint64_t)!!o->dump_layouts << 11 | (uint64_t)!!o->emit << 12;
+	const unsigned char *p = (const unsigned char *)o;
+	uint64_t h = 1469598103934665603ull;
+
+	for (size_t i = 0; i < offsetof(cc_opts, outfd); i++)
+		h = (h ^ p[i]) * 1099511628211ull;
+	return (h ^ (uint64_t)o->emit) * 1099511628211ull;
 }
 
 static dcnode *root_get(uint64_t sig)

@@ -139,6 +139,9 @@ Existing gates that every change must keep green: `vcc-diff.py cmp`
   sed, gawk, bash, openssl, curl, libxml2, glib), the clang build as
   reference; (3) the whole archive only if (1)-(2) still find bugs at a
   rate that justifies it.
+- [ ] **rt `%Lg` with clang's caller**: `printf("%Lg", f())` of 19.0000000000009L prints
+  `1.9e+01` in the clang+rt reference (vcc's build prints `19`, the right answer).  Seen in tests/vcc/deep_mixed.c,
+  which prints `(double)` with `%.17g` instead.
 - [ ] **T18 runtime gaps hide torture tests.**  34 gcc/tcc tests are
   `ref-fail` (`vcc-ctests.py --show ref-fail`): ~15 only because
   `tests/rt` lacks `pow`, `tanh`, `__divsc3`, `__fixsfti`, `tmpnam`,
@@ -162,7 +165,7 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
   and for `adr` to a label beyond 1 MB, an error instead of wrapped code
   (relaxation there is still to do).  The emitter has no tbz.  Left: the
   assembler's integer targets (`b.eq 0x100000000`), see the assembler section.
-  `a64.h:129-140` mask the offset; `enc()` in `emit.c:1484`.  Out-of-range
+  `arch/a64/a64.h:129-140` mask the offset; `enc()` in `emit.c:1484`.  Out-of-range
   conditional branches must become an inverted branch over a `b`; `adr`
   beyond ±1 MB must become `adrp+add`; `tbz` (±32 KB) likewise.  Also assert
   in the encoders (debug builds) that the offset fits.  Assembler too:
@@ -296,7 +299,10 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
   `[0] = side(), [0] = side()` evaluates both.
   *Validate:* T1 `desig_override.c`, static and automatic variants, with
   side-effect counters (clang's behaviour is the oracle).
-- [ ] **Header/snapshot cache keys incomplete** [R].  `opt_sig`
+- [x] **Header/snapshot cache keys incomplete** [R].  *Done:* `opt_sig` hashes every
+  `cc_opts` field before `outfd` (cc.h says parse options go there) plus emit;
+  `sig_of` adds wargs and error_limit; `bench/vcc-cachekey.py` 6/6 (the decl
+  cache rows need bigger headers to reach a restore).  Was:  `opt_sig`
   `driver/ccsnap.c:356` misses `-std`, `-fgnu89-inline`, `-finstrument-functions`,
   implicit-int/function flags; `sig_of` `pp.c:1518` misses `-W`/`-Werror`.
   Derive both keys from one struct of all parse-affecting options so a new
@@ -322,13 +328,28 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
   (function index × asm index within it).
   *Validate:* T6/`vcc-obj.py`: compile a TU with several `%=` asms in many
   functions with `VCC_THREADS=1` and `=8` ten times; objects byte-identical.
-- [ ] **LSE-only atomics** [R].  `emit.c:5190-5330`.  Without `+lse` in
+- [x] **LSE-only atomics** [R].  (done: without LSE (Linux default, armv8-a,
+  -mcpu=cortex-a53 ..., `+nolse`) every casal/swpal/ld<op>al is an
+  ldaxr/stlxr loop (emit/builtin.c at_cas/at_swp/at_ldop, also the
+  `_Atomic` operators); LSE as before for armv8.1-a+, `+lse`, newer -mcpu
+  and Darwin; `__ARM_FEATURE_ATOMICS` as clang (`bench/vcc-driver.py`,
+  16 rows).  `vcc-ctests.py --cpu cortex-a53` runs vcc's binaries on a CPU
+  without LSE: 1729/1729 (the old binary: 7 run failures).  Not done:
+  clang's Linux default is outline atomics (`__aarch64_ldadd4_acq_rel`
+  calls, -moutline-atomics); vcc inlines the loop as -mno-outline-atomics.)  `emit.c:5190-5330`.  Without `+lse` in
   `-march`, call outline atomics (`__aarch64_ldadd4_acq_rel` etc., as clang's
   `-moutline-atomics` default on Linux) or emit LL/SC loops.
   *Validate:* T6 (no LSE opcodes without `+lse`); T1 run under
   `qemu -cpu cortex-a53` (no LSE) for `atomic-*.c`; extend `vcc-ctests.py`
   with a `--cpu` option.
-- [ ] **`error()` calls dropped silently when not folded** [P].
+- [x] **`error()` calls dropped silently when not folded** [P].  (done: every
+  surviving call is clang's error "call to 'f' declared with 'error'
+  attribute: msg", once per call site (emit/call.c); the old drop-and-go-on
+  rule only with `-fvcc-kernel`, which `-D__KERNEL__` implies.  Test
+  `tests/diag/attr_error.c` with the new `diag-mode: -c` marker.  Differs:
+  clang reports errors inside `static inline` functions after their caller's
+  (it emits them later), vcc where they are inlined.  The `warning`
+  attribute is still ignored.)
   `emit.c:4329-4347`.  Outside kernel compat mode, a surviving call to a
   function with `__attribute__((error))` must be a diagnostic (clang -O2
   rejects).  Keep the kernel behaviour behind a flag (`-fvcc-kernel`).
@@ -336,23 +357,40 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
 
 ## Tier 2: vccd as a safe long-lived service
 
-- [ ] **Socket has no peer check, lives in /tmp** [R].  `vccd/vccd.c:924-927`,
+- [x] **Socket has no peer check, lives in /tmp** [R].  *Done:* default socket
+  `$XDG_RUNTIME_DIR/vccd/` or `$TMPDIR/vccd-UID/` (0700, owner and mode checked
+  by shim and server, `protocol.h`), socket bound 0600, peer uid checked on
+  accept (getpeereid / SO_PEERCRED).  The other-uid test needs sudo.  Was:  `vccd/vccd.c:924-927`,
   `vccd/shim.c:85-135`.  Socket in a per-user 0700 directory
   (`$XDG_RUNTIME_DIR` or `$TMPDIR/vccd-$UID/`), check the directory's owner
   and mode before connecting (shim) and before binding (server), and check
   the peer uid with `getpeereid`/`SO_PEERCRED` on every connection.
   *Validate:* T12 (mode 0700 dir, 0600 socket; connection from another uid
   refused; pre-created squatting socket/dir detected by the shim and refused).
-- [ ] **ld.lld spawned with the request's environment** [R]. `vccd/vccd.c:543`.
+- [x] **ld.lld spawned with the request's environment** [R].  *Done:* spawn drops
+  `DYLD_*`, `LD_PRELOAD`, `LD_LIBRARY_PATH`, `LD_AUDIT` (blacklist, so tools keep
+  the variables they read); vccd-test spawned-tool-env-clean.  Was: `vccd/vccd.c:543`.
   Whitelist (PATH and the few the tools read); drop `LD_*`/`DYLD_*`.
   *Validate:* T12 (`DYLD_INSERT_LIBRARIES=/nonexistent` in the request does
   not change the child; a test helper dumps its env).
-- [ ] **No protocol/build versioning** [R].  `protocol.h:12`.  Add a build
+- [x] **No protocol/build versioning** [R].  *Done:* magic "roo2", the header
+  carries a build id (size+mtime of the vccd next to the shim); vccd answers
+  VROOM_STATUS_MISMATCH and the shim says to restart it (vccd-test
+  other-build-refused).  No automatic restart.  Was:  `protocol.h:12`.  Add a build
   id (hash of the binary or a build-time constant) to the handshake; on
   mismatch the shim restarts the server or falls back.
   *Validate:* T12 (shim from build A against vccd from build B → clear
   error or restart, never silent service).
-- [ ] **Input-driven `abort()` / stack overflow kill the whole server** [P].
+- [ ] **Input-driven `abort()` / stack overflow kill the whole server** [P].  (recursion
+  done: `lib/vstack.h` checks the stack pointer in cast_expr, the #if evaluator
+  and argument pre-expansion; 128 KB left ends the TU (clang itself crashes
+  on these inputs).  Overflow is a per-TU error now too: pp's
+  token stack via fatal(), as/elf regions via `vjob_fail` (obj/obj.h, a longjmp
+  the driver sets); vcc-stress 19/19, --vccd 20/20.  Audited the rest: input-driven
+  ones are errors now (front-end heap: fatal; labels: efatal; pp shared region,
+  identifier table: `vjob_escape` in lib/intern.c; ELF sections: vjob_fail); the
+  remaining aborts are mmap failures and internal invariants.  No stress case
+  yet for the front-end heap, labels or sections.)
   Aborts: `emit.c:1934,2036,2778`; `cc.c:44,1518,6219`; `as/as.c:107`;
   `obj/obj.c:33,40,234`; `pp.c:89,301,1721,2145,2531,2594`; `lib/intern.c:96,195`;
   `lex/lex.c:1318,1394`; `driver/ppdriver.c:65`.  Recursion without depth limit: cc.c
@@ -363,44 +401,62 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
   check `vmreg` reservations in `mk`/`sym`/`tag`.
   *Validate:* T5 (every generated case: exit 1 with a diagnostic, and in
   `--vccd` mode the server keeps serving).
-- [ ] **Unbounded argv arrays** [P].  `driver/ppdriver.c:410,489-498,561`
+- [x] **Unbounded argv arrays** [P].  *Done:* the directory lists are sized by
+  argc (one per-thread allocation), the depfile table grows until every file
+  fits; 5000 `-I`, 5000 `-include` and a 70000-header depfile work.  Was:  `driver/ppdriver.c:410,489-498,561`
   (`dirs_i[1024]`, `all[2048]` …), `write_deps` 65536 files
   (`driver/ppdriver.c:288`).  Allocate from the job arena.
   *Validate:* T5 (5000 `-I`, 5000 `-include`, a TU with 100k headers in the
   depfile).
-- [ ] **fd handling: uninitialised cmsg, three fds assumed** [R].
+- [x] **fd handling: uninitialised cmsg, three fds assumed** [R].  *Done:* cbuf
+  zeroed, room for 16, count from cmsg_len; not exactly three closes them all.  Was:
   `vccd/vccd.c:172,186,875-877`.  Zero `cbuf`, take the count from `cmsg_len`,
   reject requests without exactly three fds.
   *Validate:* T12 (send 0, 1, 2, 4 fds; server rejects, does not close
   unrelated fds — check that the listening socket and other open connections
   survive).
-- [ ] **fds leak into children** [R].  Use `MSG_CMSG_CLOEXEC` (Linux; on
+- [x] **fds leak into children** [R].  *Done:* received fds get FD_CLOEXEC,
+  spawn uses POSIX_SPAWN_CLOEXEC_DEFAULT (closes the macOS race), O_CLOEXEC
+  in fixdep/elf/ppdriver.  No child-fd test yet.  Was:  Use `MSG_CMSG_CLOEXEC` (Linux; on
   macOS set `FD_CLOEXEC` immediately under a lock or spawn with
   `POSIX_SPAWN_CLOEXEC_DEFAULT`), `O_CLOEXEC` in `driver/ppdriver.c:743`,
   `vccd/fixdep.c:407`.
   *Validate:* T12 (a spawned child lists its open fds: only 0-2).
-- [ ] **No timeouts; idle connections stall all workers** [R].
+- [x] **No timeouts; idle connections stall all workers** [R].  *Done:* a worker
+  waits 2 s (poll) for the request, SO_RCVTIMEO bounds the payload; a failed
+  recvmsg no longer spins in CMSG_NXTHDR on a zero cmsg_len.  Was:
   `vccd/vccd.c:182,190,305`.  Read the request with a deadline; don't tie a
   worker to a connection until the request is complete.
   *Validate:* T12 (open 2×ncpu idle connections, then a real job completes
   within 1 s).
-- [ ] **Jobs not cancelled on client exit; SIGTERM exits mid-job** [R].
+- [x] **Jobs not cancelled on client exit; SIGTERM exits mid-job** [R].  *Done:* a
+  job whose client's connection reads EOF writes no output (checked before
+  each write and the rename); the work itself still runs to the end.
+  vccd-test killed-client-no-output.  (SIGTERM
+  done: the listening socket closes and is unlinked, queued and running jobs
+  finish, then exit; vccd-test sigterm-drains.  Cancel on client exit open.)
   `vccd/vccd.c:979,1017`.  Detect peer close (kqueue EV_EOF / poll POLLHUP) and
   abandon the job; on SIGTERM stop accepting and drain.
   *Validate:* T12 (kill the shim during a long TU: the output file is not
   written; SIGTERM during a job: the job completes or its output is absent).
-- [ ] **Outputs written in place** [R].  `driver/ppdriver.c:266`.  Write to a
-  temporary next to the target and `rename()` (ar.c already does).
+- [x] **Outputs written in place** [R].  *Done:* every output (`-o`, `-S`, deps)
+  goes to `NAME.vccPID.N.tmp` and is renamed when complete; a failed job
+  unlinks it and leaves the old file.  Was:  `driver/ppdriver.c:266`.  Write to a
+  temporary next to the target and `rename()` (vccd/ar.c already does).
   *Validate:* T12 (interrupt during write: either the old file or none,
   never a truncated one with a new mtime).
-- [ ] **Request environment and umask ignored by in-process jobs** [R].
-  `getenv` at `driver/ppdriver.c:733,765`, `pp.c:5519`.  Pass the request's env
-  to the job (`CPATH`, `C_INCLUDE_PATH`, `SOURCE_DATE_EPOCH`,
-  `VCC_*`), create files with the client's umask (shim sends it).
-  *Validate:* T11 run through vccd (`SOURCE_DATE_EPOCH=0` gives
-  `__DATE__ "Jan  1 1970"`; `CPATH` adds a directory; a client umask 077
-  gives mode 0600 outputs).
-- [ ] **Caches never invalidated** [R].  Token cache keyed by path, caches
+- [x] **Request environment and umask ignored by in-process jobs** [R].  *Done:*
+  jobs read `CPATH` (after -I), `C_INCLUDE_PATH` (after -isystem) and
+  `SOURCE_DATE_EPOCH` (UTC __DATE__/__TIME__/__TIMESTAMP__) as clang, from the
+  request's env under vccd (`ppd_env.envp`); outputs follow the client's umask.
+  vccd-test request-env-reaches-job.  The VCC_*/VPP_* debug knobs stay
+  server-wide.
+- [x] **Caches never invalidated** [R].  *Done:* a build is a client process
+  group (the shim sends getpgrp(); a shell gives each make its own): a request
+  from a new group waits for running jobs, then the file, directory and
+  include caches are emptied (header/decl caches key on the file entries, so
+  they follow).  Within one build nothing is revalidated: a header regenerated
+  mid-build after it was read is still stale.  vccd-test: 4 tests XPASS.  Was:  Token cache keyed by path, caches
   misses (`lex/lex.c:1484-1505`, comment at `pp.c:4025`); dircache; header
   cache replays on top.  Either scope all caches to a build (make's
   jobserver lifetime / an explicit generation the shim sends) or validate
@@ -409,17 +465,27 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
   *Validate:* T12 (compile, edit a header, compile → new object; create a
   previously missing header → found; `__has_include` flips; regenerate a
   header during a build).
-- [ ] **Memory only grows** [R].  16 GB shared region aborts, 8 GB header
+- [ ] **Memory only grows** [R].  (server side done: at a new build, idle, a vccd
+  above `VCC_RESTART_MB` resident (6144) answers what it holds VROOM_STATUS_RETRY
+  and execs itself on the same listening socket; the shim resends.  vccd-test
+  memory-restart-between-builds.  Within one build memory still only grows.
+  A full identifier table (6.3M) is an error for the TU, and vccd restarts at
+  its next idle moment; vcc-stress idents-7M.)  16 GB shared region aborts, 8 GB header
   cache cap, intern table cap ~6.3M identifiers, bump-only per-thread
   arenas.  Evict header-cache regions (LRU by generation), reset per-job
   arenas, grow the intern table or start a new generation.
   *Validate:* T12 (compile the kernel's 840 TUs 5× in one server; RSS after
   run 5 within 10% of run 2); T5 (an input with 10M distinct identifiers
   gives an error, not an abort).
-- [ ] **No server → exit 127** [R].  `vccd/shim.c:96-99`.  Autostart the server
+- [x] **No server → exit 127** [R].  *Done:* on the default socket the shim
+  starts vccd itself (flock in the socket directory, setsid, log there;
+  `VCC_NO_AUTOSTART` turns it off); vccd-test autostart-default-socket (4
+  concurrent shims, one server).  An explicit VCC_SOCK is never started.  Was:  `vccd/shim.c:96-99`.  Autostart the server
   (with a lock) or run the job in-process in the shim.
   *Validate:* T11 (no server running: `vcc -c a.c` succeeds).
-- [ ] **Request size capped at 1 MB** [R].  `protocol.h:13`.  Long command
+- [x] **Request size capped at 1 MB** [R].  *Done:* 8 MB (above Linux's ARG_MAX
+  with an 8 MB stack); larger still gets the shim's "request too large";
+  vccd-test request-2mb.  Was:  `protocol.h:13`.  Long command
   lines plus env exceed it.  Stream or raise with a clear error.
   *Validate:* T12 (a 2 MB env/argv works or fails with a message).
 
@@ -446,7 +512,9 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
   *Validate:* T6 (`llvm-dwarfdump --verify`); `llvm-symbolizer` maps
   addresses to the right lines for `tests/vcc`; later a scripted lldb
   session (break at file:line, print local).
-- [ ] **Register spilling** [P]: ~18-deep right-nested expression is a
+- [x] **Register spilling** [P] (done: a third try of the function spills each binary
+  operator's left value to a frame slot; tests/vcc/deep_expr.c, deep_mixed.c (depth 10..200,
+  long/calls/__int128/double/long double), stress expr-right-nest-250/10k): ~18-deep right-nested expression was a
   fatal "out of registers" (`emit.c:2176-2195`).
   *Validate:* T1 `deep_expr.c` (generated: right-nested depth 10..200,
   mixed int/FP/calls); T5 for depth 10k (no crash).
@@ -466,7 +534,10 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
   cleanups, 16 tracked constants, 16M instructions / 4M labels per function).
   *Validate:* T1 `limits.c` (generated: 300 arguments, 1000-deep nested
   loops, 1000 cleanups); T5 for the extremes.
-- [ ] **`-S` on Darwin writes ELF directives** (`.type @function`).
+- [x] **`-S` on Darwin writes ELF directives** (`.type @function`).  (Done: emit/darwin.c
+  rewrites the text into Apple's dialect; far b.cond/cbz in text are long form on both
+  targets.  `bench/vcc-darwin-s.py`: 1428 vcc + gcc-torture tests, -S assembled by `as`,
+  same result as the direct object.)
   *Validate:* T3: `vpp -S` output assembled by `as` (Apple) for the vcc
   suite.
 
@@ -478,8 +549,12 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
   `= {}`, `[[...]]` standard attributes, `#embed` (pp).
   *Validate:* T1 `c23-*.c` with `vcc-flags: -std=c23`; T4 that the same
   keywords are identifiers under `-std=c99` (`int bool = 1;`).
-- [ ] **Builtins**: `__builtin_shufflevector`, `__builtin_convertvector`
-  [P]; audit the full list against clang's `Builtins.td` for the target
+- [ ] **Builtins**: ~~`__builtin_shufflevector`, `__builtin_convertvector`~~ (done:
+  tests/vcc/vector_builtins.c; vector diagnostics spell clang's unnamed form, without the
+  `(vector of N 'T' values)` note and typedef names) [P].  Library builtins (clang's `F`
+  ones, 479) are declared from cc/libbuiltins.inc (gen-libbuiltins.py) as calls to the
+  function: `bench/vcc-builtins.py` 473 -> 302 unknown of 924 for aarch64 Linux;
+  337 answer `__has_builtin` 0.  Audit the full list against clang's `Builtins.td` for the target
   (generate a list, try each).
   *Validate:* T1 per builtin; `bench/vcc-builtins.py` that compiles a
   generated use of each clang builtin and reports unknowns.
@@ -507,24 +582,34 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
 - [ ] **Scope details**: K&R parameter-list tags (`cc.c:7341`),
   declarations after labels (`cc.c:7886`).
   *Validate:* T1 small cases; T4 for the error cases.
-- [ ] **Fixed limits**: 4096 struct members (`cc.c:6255,6313`), 64
+- [ ] **Fixed limits** (struct members now 1M, pointer levels 1024, nested
+  declarators stack-guarded): 4096 struct members (`cc.c:6255,6313`), 64
   declarator levels (`cc.c:6047-6113`), `DOPS_MAX` 4096 (`cc.c:5551`), 16
   nested anonymous members (`find_member` `cc.c:3310`), 256 K&R params
   (`cc.c:7339`).
   *Validate:* T1 `fe-limits.c` (generated, at 2× each limit).
 
 ### Preprocessor and lexer (`pp.c`, `lex/lex.c`)
-- [ ] **`#pragma once` by path string, capped at 4096** [P].
+- [x] **`#pragma once` by path string, capped at 4096** [P].  (Done: by (dev, ino) from
+  read_src, list grows; symlink/hard link/`a/../a` checked against clang -E -P;
+  tests/vcc/once.c, once_tri.c.)
   `pp.c:4189,5191,4479`.  Key on (dev, ino); unbounded set.
   *Validate:* `ccs/fuzz/regress/pp/` style files + `make -C ccs fuzz-diff`
   extended with a directory fixture (symlink, hardlink, `a/../a/x.h`),
   compared with `clang -E -P`.
-- [ ] **UTF-8 BOM not skipped** [P].  *Validate:* pp-diff fixture.
-- [ ] **Trigraphs** under strict `-std=c89/c99/c11/c17` or `-trigraphs` [P].
+- [x] **UTF-8 BOM not skipped** [P].  *Done:* read_file blanks a leading BOM
+  (columns kept); tests/vcc/bom.c with bom_inc.h.  (vlex_get_hook inputs,
+  fuzz-pp, are not filtered.)
+- [x] **Trigraphs** under strict `-std=c89/c99/c11/c17` or `-trigraphs` [P].  (Done:
+  `vlex_trigraphs` lexes a translated copy; `-ftrigraphs`/`-fno-trigraphs` too; tests/vcc/trigraphs.c.
+  No `-Wtrigraphs` warnings yet.)
+- [ ] **No `//` comments in C89** (`-ansi`, `-std=c89`): clang lexes `//` as two `/` there [P].
   *Validate:* pp-diff fixtures with each `-std`.
-- [ ] **`SOURCE_DATE_EPOCH`; `__TIMESTAMP__` from file mtime** [P].
+- [x] **`SOURCE_DATE_EPOCH`; `__TIMESTAMP__` from file mtime** [P].  (Both done:
+  __TIMESTAMP__ is the current file's mtime, `??? ...` when stat fails, as clang.)
   `pp.c:3168-3178`.  *Validate:* T11 (fixed epoch → exact strings).
-- [ ] **`\U` outside the BMP printed unconverted in `-E`** [P].
+- [x] **`\U` outside the BMP printed unconverted in `-E`** [P].  (Done: identifiers' UCNs
+  print as UTF-8 (not in asm mode, not in literals); `##` accepts UCNs; regress/pp/ucn-ident.c.)
   *Validate:* pp-diff fixture.
 - [ ] **Errors suppress all `-E` output; `#include` in macro args accepted** [P].
   *Validate:* T4 for the latter; T11 for output-on-error.
@@ -557,8 +642,9 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
   cached; resource dir relative to the vcc binary).
   *Validate:* T11 on a machine/CI image with only Xcode, and after moving
   the install prefix.
-- [ ] **Files ≥ 2 GB reported as missing** (`lex/lex.c:1373`, `uint32` offsets
-  `lex.h:50,61`).  Clear error.
+- [x] **Files ≥ 2 GB reported as missing** (*Done:* the main file says "file too
+  large (2 GB or more)"; an #include of one still says not found) (`lex/lex.c:1373`, `uint32` offsets
+  `lex/lex.h:50,61`).  Clear error.
   *Validate:* T5 (sparse 3 GB file → "file too large").
 - [ ] **x86-64 host build**: `lex/lex.c:4` NEON, `lex/lex.c:1517` `yield`,
   `lib/intern.c:1` `arm_acle.h`.  Scalar fallback (lexref.c exists) or SSE/AVX2
@@ -602,7 +688,7 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
 - [ ] **Wrong output**: GOT relocs against local symbols converted to
   section+addend [P]; integer branch targets as `*ABS*` relocs; `adr x0, 4`
   rejected (`arch/a64/as/enc.c:1005`).  *Validate:* T7 / T6 relocation comparison.
-- [ ] **Diagnostics**: line numbers off by one (`as.c:575/636/133`), `# N
+- [ ] **Diagnostics**: line numbers off by one (`as/as.c:575/636/133`), `# N
   "file"` markers ignored (`as/as.c:579`), EOF errors at `:0:` [P].
   *Validate:* T4 for the assembler (`// expect-error: x.S:2:`).
 
@@ -687,7 +773,7 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
   reason, or an error (`-Wunused-command-line-argument` like clang).
   *Validate:* T11 table generated from clang's option list
   (`clang --help-hidden`): each must be in an explicit table in
-  ppdriver.c; a test fails when an option has no entry.
+  driver/ppdriver.c; a test fails when an option has no entry.
 - [ ] **Missing**: `-print-*` (`-print-file-name` echoes, `vccd/vccd.c:665`),
   `-dumpmachine`, `-v`, `-###`, `-save-temps`, `-shared`, `-l`/`-L`, `-Wl,`.
   *Validate:* T11 rows.
