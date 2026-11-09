@@ -128,7 +128,7 @@ def peer_other_user():
 
 # ---------------- malformed requests ----------------
 
-@test(xfail='fd handling: uninitialised cmsg, three fds assumed')
+@test()
 def wrong_fd_count():
     """requests with 0, 1, 2 or 4 fds are refused, the server stays up and serves"""
     v = Vccd()

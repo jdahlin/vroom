@@ -174,8 +174,9 @@ static bool split_req(char *raw, char **strs, struct req *r);
 static bool recv_req(struct worker *w, int conn, struct req *r)
 {
 	struct vroom_req_hdr *h = (struct vroom_req_hdr *)w->raw;
-	char cbuf[CMSG_SPACE(3 * sizeof(int))];
+	char cbuf[CMSG_SPACE(16 * sizeof(int))] = { 0 };
 	struct iovec iov = { h, sizeof(*h) };
+	int nfd = 0, bad = 0;
 	struct msghdr m = { 0 };
 	struct cmsghdr *c;
 
@@ -184,11 +185,32 @@ static bool recv_req(struct worker *w, int conn, struct req *r)
 	m.msg_control = cbuf;
 	m.msg_controllen = sizeof(cbuf);
 	r->fds[0] = r->fds[1] = r->fds[2] = -1;
-	if (recvmsg(conn, &m, MSG_WAITALL) != (ssize_t)sizeof(*h))
+	ssize_t got = recvmsg(conn, &m, MSG_WAITALL);
+
+	/* exactly three fds (stdin, stdout, stderr); any other count closes all we got */
+	for (c = CMSG_FIRSTHDR(&m); c; c = CMSG_NXTHDR(&m, c)) {
+		if (c->cmsg_level != SOL_SOCKET || c->cmsg_type != SCM_RIGHTS || c->cmsg_len < CMSG_LEN(0))
+			continue;
+		size_t k = (c->cmsg_len - CMSG_LEN(0)) / sizeof(int);
+
+		for (size_t i = 0; i < k; i++) {
+			int fd;
+
+			memcpy(&fd, CMSG_DATA(c) + i * sizeof(int), sizeof(int));
+			fcntl(fd, F_SETFD, FD_CLOEXEC);
+			if (nfd < 3)
+				r->fds[nfd] = fd;
+			else
+				close(fd), bad = 1;
+			nfd++;
+		}
+	}
+	if (bad || nfd != 3 || (m.msg_flags & MSG_CTRUNC) || got != (ssize_t)sizeof(*h)) {
+		for (int i = 0; i < 3; i++)
+			if (r->fds[i] >= 0)
+				close(r->fds[i]), r->fds[i] = -1;
 		return false;
-	for (c = CMSG_FIRSTHDR(&m); c; c = CMSG_NXTHDR(&m, c))
-		if (c->cmsg_level == SOL_SOCKET && c->cmsg_type == SCM_RIGHTS)
-			memcpy(r->fds, CMSG_DATA(c), sizeof(r->fds));
+	}
 	if (h->magic != VROOM_MAGIC || h->payload_len > VROOM_MAX_PAYLOAD ||
 	    1 + h->argc + h->envc > MAX_STRS)
 		return false;
@@ -591,7 +613,17 @@ static int spawn(const struct req *r, const char *prog)
 			posix_spawn_file_actions_adddup2(&fa, r->fds[i], i);
 	posix_spawn_file_actions_addchdir(&fa, r->cwd);
 	r->argv[0] = (char *)prog;
+#ifdef POSIX_SPAWN_CLOEXEC_DEFAULT
+	/* only 0-2 reach the child: other workers' request fds are open meanwhile */
+	posix_spawnattr_t sa;
+
+	posix_spawnattr_init(&sa);
+	posix_spawnattr_setflags(&sa, POSIX_SPAWN_CLOEXEC_DEFAULT);
+	err = posix_spawn(&pid, prog, &fa, &sa, r->argv, r->envp);
+	posix_spawnattr_destroy(&sa);
+#else
 	err = posix_spawn(&pid, prog, &fa, NULL, r->argv, r->envp);
+#endif
 	r->argv[0] = saved;
 	posix_spawn_file_actions_destroy(&fa);
 	if (err) {

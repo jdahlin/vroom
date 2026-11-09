@@ -378,13 +378,16 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
   (`ppdriver.c:288`).  Allocate from the job arena.
   *Validate:* T5 (5000 `-I`, 5000 `-include`, a TU with 100k headers in the
   depfile).
-- [ ] **fd handling: uninitialised cmsg, three fds assumed** [R].
+- [x] **fd handling: uninitialised cmsg, three fds assumed** [R].  *Done:* cbuf
+  zeroed, room for 16, count from cmsg_len; not exactly three closes them all.  Was:
   `vccd.c:172,186,875-877`.  Zero `cbuf`, take the count from `cmsg_len`,
   reject requests without exactly three fds.
   *Validate:* T12 (send 0, 1, 2, 4 fds; server rejects, does not close
   unrelated fds — check that the listening socket and other open connections
   survive).
-- [ ] **fds leak into children** [R].  Use `MSG_CMSG_CLOEXEC` (Linux; on
+- [x] **fds leak into children** [R].  *Done:* received fds get FD_CLOEXEC,
+  spawn uses POSIX_SPAWN_CLOEXEC_DEFAULT (closes the macOS race), O_CLOEXEC
+  in fixdep/elf/ppdriver.  No child-fd test yet.  Was:  Use `MSG_CMSG_CLOEXEC` (Linux; on
   macOS set `FD_CLOEXEC` immediately under a lock or spawn with
   `POSIX_SPAWN_CLOEXEC_DEFAULT`), `O_CLOEXEC` in `ppdriver.c:743`,
   `fixdep.c:407`.

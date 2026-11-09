@@ -404,7 +404,7 @@ int vfixdep(const char *cwd, const char *depfile, const char *target, const char
 		snprintf(oabs, sizeof(oabs), "%s/%s", cwd, cmdfile);
 	else
 		snprintf(oabs, sizeof(oabs), "%s", cmdfile);
-	fd = open(oabs, O_WRONLY | O_CREAT | O_TRUNC, 0644);
+	fd = open(oabs, O_WRONLY | O_CREAT | O_TRUNC | O_CLOEXEC, 0644);
 	rc = fd < 0 || write(fd, o.p, o.n) != (ssize_t)o.n;
 	if (fd >= 0 && close(fd))
 		rc = 1;
