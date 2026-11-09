@@ -266,7 +266,12 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
   target.  Bindings by the linker in `tests/abi/pragma_weak` (T6 does not
   exist), run-time zero in T1 `pragma_weak.c`, warnings in
   `tests/diag/pragma_weak.c`.)
-- [ ] **`#pragma pack(push, ident, N)` ignores N; `pop, ident` pops one** [P].
+- [x] **`#pragma pack(push, ident, N)` ignores N; `pop, ident` pops one** [P].
+  (done: `pragma_pack` in cc/token.c with clang's rules: labels, `pop, id`
+  to the label (a missing one pops nothing), `pop, N`, `pack(0)` = default,
+  invalid values and malformed pragmas ignored whole; tests
+  `tests/vcc/pragma_pack.c`, `pragma_pack_pop.c`.  clang's
+  -Wignored-pragmas warnings are not given.)
   `cc.c:919-927`.
   *Validate:* layout `_Static_assert` cases against clang (all forms:
   `push`, `push,N`, `push,id`, `push,id,N`, `pop`, `pop,id`, `pop,N`, `pack()`,

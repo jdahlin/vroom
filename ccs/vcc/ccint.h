@@ -161,6 +161,7 @@ struct cc {
 	int in_struct;		/* parsing a struct/union body */
 	bool has_pend;
 	uint32_t pack[64];	/* #pragma pack stack (bytes, 0: none) */
+	uint64_t packid[64];	/* labels (token.c pragma_pack) */
 	int npack;
 	/* #pragma weak (decl.c): waiting for key's declaration (alias: 0, or the weak alias of key) */
 	struct pweak { uint32_t key, alias, loc, sym; } *pweak;
