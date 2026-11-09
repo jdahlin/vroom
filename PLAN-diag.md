@@ -446,6 +446,12 @@ Varje delsteg: nya fall i `tests/diag/` (snapshots, och clang som mätpunkt), la
    under `-pedantic`.
 6. **Portabilitet**: Linux mot Apple (`long double`, variadiska argument, `char`-tecken).
 7. **UB vid konstantvikning**: skift ≥ bredd, signerat överspill, med en rad om varför.
+   **Status (2026-11-09): klart utom statiska initierare.**  `-Winteger-overflow` (clangs
+   plats och text, värdet med siffergrupper `-2'147'483'648`) för signerat `+ - *` och unärt `-`
+   av konstanter, billigt grindat (`small_const`), med `help:` om typens intervall; skift får
+   `help: 'int' is 32 bits wide ...`.  `vcc-sema.py warn` 879/879 (inga falska på kärnan).
+   Kvar (TODO.md "Invalid code accepted"): `-fsyntax-only` saknar "initializer element is not
+   a compile-time constant" (kontrollen görs i emit/data.c).
 8. **Attribut**: `format`, `nonnull`, `warn_unused_result`, `deprecated("...")`.
 
 ### D6. Fix-its, `--fix` och `--explain`

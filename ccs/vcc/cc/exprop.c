@@ -43,6 +43,8 @@ static uint32_t align_of_expr(cc *c, uint32_t e)
 }
 
 static uint32_t unary(cc *c);
+static bool small_const(cc *c, uint32_t n, int depth);
+static void overflow_check(cc *c, uint32_t n);
 
 /* the operand of sizeof/_Alignof: "( type-name )" gives UINT32_MAX, *ty and its
    span in *r (if r), anything else the (unevaluated) unary expression; '(' is
@@ -134,6 +136,8 @@ static __attribute__((noinline)) uint32_t unary_op(cc *c)
 
 			N(r)->aux = (uint16_t)op;
 			N(r)->a = n;
+			if (unlikely(op == T_MINUS && small_const(c, n, 3)))
+				overflow_check(c, r);
 			return r;
 		}
 	}
@@ -419,6 +423,79 @@ static int binprec(int k)
 	}
 }
 
+/* v with clang's digit separators: -2'147'483'648 */
+static void digits(char *b, size_t n, i128 v)
+{
+	char t[64];
+	int k = 0, d = 0;
+	u128 u = v < 0 ? (u128)0 - (u128)v : (u128)v;
+
+	do {
+		if (d && d % 3 == 0)
+			t[k++] = '\'';
+		t[k++] = (char)('0' + (int)(u % 10));
+		u /= 10, d++;
+	} while (u);
+	if (v < 0)
+		t[k++] = '-';
+	for (int i = 0; i < k && (size_t)i + 1 < n; i++)
+		b[i] = t[k - 1 - i];
+	b[(size_t)k < n ? (size_t)k : n - 1] = 0;
+}
+
+/* a constant made of literals and arithmetic at most a few levels deep: cheap to tell,
+   so -Winteger-overflow only evaluates what can overflow */
+static bool small_const(cc *c, uint32_t n, int depth)
+{
+	const node *x = N(n);
+
+	while (x->op == N_CAST)
+		x = N(x->a);
+	if (x->op == N_NUM)
+		return true;
+	if (!depth)
+		return false;
+	if (x->op == N_UNARY)
+		return x->aux == T_MINUS && small_const(c, x->a, depth - 1);
+	return x->op == N_BINARY && small_const(c, x->a, depth - 1) && small_const(c, x->b, depth - 1);
+}
+
+/* clang's -Winteger-overflow: a signed +, -, * or unary - of constants whose exact result
+   does not fit its type; with what does fit, as help */
+static __attribute__((cold, noinline)) void overflow_check(cc *c, uint32_t n)
+{
+	const node *x = N(n);
+	qty t = x->ty;
+	cval a, b = { 0 };
+	uint64_t bits;
+	i128 v, lo, hi;
+	char vs[64], los[64], his[64], es[64];
+	vdiag *d;
+
+	if (c->dead || !is_integer(c, t) || !is_signed(c, t) || (bits = ty_size(c, t) * 8) > 64 ||
+	    !cc_eval(c, x->a, &a) || a.kind != CV_INT || (x->op == N_BINARY && (!cc_eval(c, x->b, &b) || b.kind != CV_INT)))
+		return;
+	switch (x->op == N_UNARY ? T_TILDE : x->aux) {
+	case T_PLUS: v = a.i + b.i; break;
+	case T_MINUS: v = a.i - b.i; break;
+	case T_STAR: v = a.i * b.i; break;
+	case T_TILDE: v = -a.i; break;
+	default: return;
+	}
+	lo = -((i128)1 << (bits - 1)), hi = ((i128)1 << (bits - 1)) - 1;
+	if (v >= lo && v <= hi)
+		return;
+	digits(vs, sizeof vs, trunc_to(c, v, t));
+	d = cc_warn_begin(c, "integer-overflow", true, NULL, x->loc, "overflow in expression; result is %s with type '%s'", vs,
+			  tyname(c, t));
+	if (!d)
+		return;
+	digits(es, sizeof es, v), digits(los, sizeof los, lo), digits(his, sizeof his, hi);
+	pp_diag_help(c->p, d, "the exact result %s is outside '%s' (%s to %s); signed overflow is undefined", es, tyname(c, t),
+		     los, his);
+	pp_diag_emit(c->p, d);
+}
+
 /* -Wdivision-by-zero, -Wshift-count-*: l op r with a constant r */
 static void runtime_warn(cc *c, int op, uint32_t l, uint32_t r, uint32_t loc)
 {
@@ -437,10 +514,23 @@ static void runtime_warn(cc *c, int op, uint32_t l, uint32_t r, uint32_t loc)
 			      op == T_SLASH ? "division" : "remainder");
 		return;
 	}
-	if (cv.i < 0)
-		cc_warnx(c, "shift-count-negative", true, NULL, loc, &rr, 1, NULL, 0, "shift count is negative");
-	else if (cv.i >= (i128)ty_size(c, promoted(c, l)) * 8)
-		cc_warnx(c, "shift-count-overflow", true, NULL, loc, &rr, 1, NULL, 0, "shift count >= width of type");
+	{
+		qty pt = promoted(c, l);
+		uint64_t w = ty_size(c, pt) * 8;
+		vdiag *d = cv.i < 0 ? cc_warn_begin(c, "shift-count-negative", true, NULL, loc, "shift count is negative")
+			   : cc_warn_begin(c, "shift-count-overflow", true, NULL, loc, "shift count >= width of type");
+
+		if (!d)
+			return;
+		pp_diag_label(c->p, d, rr.b, rr.e, NULL);
+		if (cv.i < 0)
+			pp_diag_help(c->p, d, "a shift by a negative count is undefined");
+		else
+			pp_diag_help(c->p, d, "'%s' is %llu bits wide: a shift by %lld or more is undefined%s", tyname(c, pt),
+				     (unsigned long long)w, (long long)w,
+				     w < 64 && cv.i < 64 && op == T_LESSLESS ? "; shift a 64-bit value (1ULL << n)" : "");
+		pp_diag_emit(c->p, d);
+	}
 }
 
 static uint32_t binary(cc *c, int minp);
@@ -472,6 +562,9 @@ static __attribute__((noinline)) uint32_t binary_ops(cc *c, int minp, uint32_t l
 		} else {
 			runtime_warn(c, op, l, r, loc);
 			l = binop(c, op, l, r, loc);
+			if (unlikely((op == T_PLUS || op == T_MINUS || op == T_STAR) && N(l)->op == N_BINARY &&
+				     small_const(c, N(l)->a, 3) && small_const(c, N(l)->b, 3)))
+				overflow_check(c, l);
 		}
 		if (mac)
 			N(l)->flags |= NF_MACRO;

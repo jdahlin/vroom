@@ -340,6 +340,27 @@ VPRIV bool cc_warnx(cc *c, const char *flag, bool on, const char *const *groups,
 	return true;
 }
 
+/* a warning record of clang's flag to fill in (labels, help) and pp_diag_emit; NULL if off */
+__attribute__((format(printf, 6, 7)))
+VPRIV vdiag *cc_warn_begin(cc *c, const char *flag, bool on, const char *const *groups, uint32_t loc, const char *fmt, ...)
+{
+	int lv = pp_diag_wlevel(c->p, flag, on, groups, loc);
+	vdiag *d;
+	va_list ap;
+
+	if (lv < 0)
+		return NULL;
+	if (lv == VDL_ERROR)
+		error_limit(c), c->errors++;
+	c->ndiag++;
+	va_start(ap, fmt);
+	d = pp_diag_vbegin(c->p, lv, loc, fmt, ap);
+	va_end(ap);
+	pp_diag_flag(d, flag);
+	d->werror = lv == VDL_ERROR;
+	return d;
+}
+
 VPRIV const char *idname(uint32_t id, int *len)
 {
 	*len = (int)vintern_ents[id].len;
