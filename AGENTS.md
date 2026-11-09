@@ -36,7 +36,9 @@ assembler, linker, behind `vcc`/`vas`/`vld` shims and the `vccd` server.
   - `emit/`: code generator (straight from the AST): the shared part, state
     and types (`emitimpl.h`), the work queue and threads (`tu.c`), data
     objects, the prepass; the arm64 part is `arch/a64/emit/`.
-  - `as/`: GNU as syntax (`as.c`) and the standalone `vasm` driver.
+  - `as/`: GNU as syntax (`as.c`: statements, directives, macros,
+    conditionals, expressions; internal header `asimpl.h`; one module with
+    `arch/<cpu>/as/parse.c`, `as_SRC`) and the standalone `vasm` driver.
   - `obj/`: the in-memory object (`obj.h`: sections, frags, symbols, fixups)
     and its layout; with `arch/<cpu>/obj/fixup.c` and `platform/linux/elf.c`
     one module (`obj_SRC`, internal header `objimpl.h`).
@@ -49,7 +51,9 @@ assembler, linker, behind `vcc`/`vas`/`vld` shims and the `vccd` server.
     build uses no llvm-ar) and `rsh.c`, kbuild's recipe subset of sh, run for
     `vsh` (`build/ccs/vsh/sh`, shim.c with `-DVSH`), make's SHELL in
     `bench/vccd-kbuild.sh`; anything outside the subset goes to `$VSH_REAL`.
-  - `arch/a64/`: arm64: the encoder (`as/enc.c`, `a64.h`), system registers,
+  - `arch/a64/`: arm64: instructions in GNU as syntax (`as/parse.c`:
+    registers, `.req`, operands, literal pools), the encoder (`as/enc.c`,
+    `a64.h`), system registers,
     relocation types (`reloc.h`), fixups (`obj/fixup.c`: in place or a
     relocation, as LLVM MC);
     `emit/`: instruction records and register names (`ins.h`, `a64impl.h`,

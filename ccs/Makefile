@@ -72,7 +72,8 @@ OBJ        = $(OUT)/obj
 vcc: $(OUT)/vcc $(OUT)/vsh/sh $(OUT)/vld $(OUT)/vas $(OUT)/var $(OUT)/vccd $(OUT)/lextest $(OUT)/vpp $(OUT)/vlink $(OUT)/vasm
 
 o = $(patsubst vcc/%.c,$(OBJ)/%.o,$(1))
-AS_FILES = vcc/as/as.c vcc/arch/a64/as/enc.c vcc/platform/darwin/macho.c
+AS_FILES = vcc/arch/a64/as/enc.c vcc/platform/darwin/macho.c
+as_SRC   = vcc/as/as.c vcc/arch/a64/as/parse.c
 LEX_SRC = vcc/lex/lex.c vcc/lib/intern.c
 PP_SRC  = vcc/pp/dircache.c vcc/driver/ppdriver.c vcc/driver/ccsnap.c vcc/lib/ldhash.c
 VCCD_SRC = vcc/vccd/vccd.c vcc/vccd/caps.c vcc/vccd/fixdep.c vcc/vccd/ar.c vcc/vccd/rsh.c
@@ -93,8 +94,8 @@ SPLIT_OBJ = $(if $(VCC_UNITY),$(patsubst %,$(OBJ)/unity/%.o,$(SPLIT_MODS)),$(cal
 PP_OBJ  = $(call o,$(PP_SRC)) $(SPLIT_OBJ)
 # one module's objects: its unity TU, or its files
 mod = $(if $(VCC_UNITY),$(OBJ)/unity/$(1).o,$(call o,$($(1)_SRC)))
-AS_SRC  = $(AS_FILES) $(obj_SRC)
-AS_OBJ  = $(call o,$(AS_FILES)) $(call mod,obj)
+AS_SRC  = $(AS_FILES) $(as_SRC) $(obj_SRC)
+AS_OBJ  = $(call o,$(AS_FILES)) $(call mod,as) $(call mod,obj)
 LD_SRC  = vcc/ld/ld.c vcc/lib/ldhash.c vcc/ld/objcopy.c
 
 $(OBJ)/%.o: vcc/%.c | $(OBJ)
@@ -102,7 +103,7 @@ $(OBJ)/%.o: vcc/%.c | $(OBJ)
 	$(VCC_CC) $(VCC_FAST) $(VCC_LTO) $(XFLAGS) -MMD -MP -c $< -o $@
 
 # rewritten only when the list of files changes
-UNITY_C = $(patsubst %,$(OBJ)/unity/%.c,$(SPLIT_MODS) obj)
+UNITY_C = $(patsubst %,$(OBJ)/unity/%.c,$(SPLIT_MODS) as obj)
 $(UNITY_C): $(OBJ)/unity/%.c: FORCE
 	@mkdir -p $(dir $@)
 	@(echo '#define VCC_UNITY 1'; for f in $(abspath $($*_SRC)); do echo "#include \"$$f\""; done) > $@.tmp
