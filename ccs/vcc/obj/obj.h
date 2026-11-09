@@ -1,5 +1,5 @@
-#ifndef VCC_ELF_H
-#define VCC_ELF_H
+#ifndef VCC_OBJ_H
+#define VCC_OBJ_H
 /*
  * In-memory ELF64 relocatable object writer for AArch64, byte-compatible
  * with LLVM MC's ELFObjectWriter (clang -c / -cc1as, LLVM 23).
@@ -51,29 +51,7 @@ enum { STT_NOTYPE = 0, STT_OBJECT = 1, STT_FUNC = 2, STT_SECTION = 3,
        STT_FILE = 4, STT_TLS = 6, STT_GNU_IFUNC = 10 };
 enum { STV_DEFAULT = 0, STV_INTERNAL = 1, STV_HIDDEN = 2, STV_PROTECTED = 3 };
 
-/* The relocation types the kernel uses (plus a few neighbours). */
-enum {
-	R_AARCH64_NONE = 0,
-	R_AARCH64_ABS64 = 257, R_AARCH64_ABS32 = 258, R_AARCH64_ABS16 = 259,
-	R_AARCH64_PREL64 = 260, R_AARCH64_PREL32 = 261, R_AARCH64_PREL16 = 262,
-	R_AARCH64_MOVW_UABS_G0 = 263, R_AARCH64_MOVW_UABS_G0_NC = 264,
-	R_AARCH64_MOVW_UABS_G1 = 265, R_AARCH64_MOVW_UABS_G1_NC = 266,
-	R_AARCH64_MOVW_UABS_G2 = 267, R_AARCH64_MOVW_UABS_G2_NC = 268,
-	R_AARCH64_MOVW_UABS_G3 = 269,
-	R_AARCH64_MOVW_SABS_G0 = 270, R_AARCH64_MOVW_SABS_G1 = 271, R_AARCH64_MOVW_SABS_G2 = 272,
-	R_AARCH64_LD_PREL_LO19 = 273, R_AARCH64_ADR_PREL_LO21 = 274,
-	R_AARCH64_ADR_PREL_PG_HI21 = 275, R_AARCH64_ADR_PREL_PG_HI21_NC = 276,
-	R_AARCH64_ADD_ABS_LO12_NC = 277, R_AARCH64_LDST8_ABS_LO12_NC = 278,
-	R_AARCH64_TSTBR14 = 279, R_AARCH64_CONDBR19 = 280,
-	R_AARCH64_JUMP26 = 282, R_AARCH64_CALL26 = 283,
-	R_AARCH64_LDST16_ABS_LO12_NC = 284, R_AARCH64_LDST32_ABS_LO12_NC = 285,
-	R_AARCH64_LDST64_ABS_LO12_NC = 286, R_AARCH64_LDST128_ABS_LO12_NC = 299,
-	R_AARCH64_ADR_GOT_PAGE = 311, R_AARCH64_LD64_GOT_LO12_NC = 312,
-	/* internal: 1-byte data (no ELF relocation exists; must resolve) */
-	R_VCC_ABS8 = 0x10001,
-	/* internal, Mach-O only: thread-local variable descriptor (TLVP) page / page offset */
-	R_VCC_TLVP_PAGE21 = 0x10002, R_VCC_TLVP_PAGEOFF12 = 0x10003,
-};
+#include "../arch/a64/reloc.h"
 
 typedef struct ElfChunk {
 	struct ElfChunk *next;

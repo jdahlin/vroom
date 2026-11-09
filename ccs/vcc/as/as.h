@@ -6,7 +6,7 @@
  */
 #include <stddef.h>
 #include <stdint.h>
-#include "../obj/elf.h"
+#include "../obj/obj.h"
 
 typedef struct As As;
 

@@ -37,8 +37,9 @@ assembler, linker, behind `vcc`/`vas`/`vld` shims and the `vccd` server.
     and types (`emitimpl.h`), the work queue and threads (`tu.c`), data
     objects, the prepass; the arm64 part is `arch/a64/emit/`.
   - `as/`: GNU as syntax (`as.c`) and the standalone `vasm` driver.
-  - `obj/`: the in-memory object (sections, frags, symbols, fixups) and its
-    ELF writer.
+  - `obj/`: the in-memory object (`obj.h`: sections, frags, symbols, fixups)
+    and its layout; with `arch/<cpu>/obj/fixup.c` and `platform/linux/elf.c`
+    one module (`obj_SRC`, internal header `objimpl.h`).
   - `ld/`: the linker `vlink` and `vobjcopy`/`vnm`.
   - `driver/`: one compile job from a clang command line (`ppdriver.c`), the
     declaration cache (`ccsnap.c`) and `vpp`, the driver for parity tests.
@@ -48,12 +49,16 @@ assembler, linker, behind `vcc`/`vas`/`vld` shims and the `vccd` server.
     build uses no llvm-ar) and `rsh.c`, kbuild's recipe subset of sh, run for
     `vsh` (`build/ccs/vsh/sh`, shim.c with `-DVSH`), make's SHELL in
     `bench/vccd-kbuild.sh`; anything outside the subset goes to `$VSH_REAL`.
-  - `arch/a64/`: arm64: the encoder (`as/enc.c`, `a64.h`), system registers;
+  - `arch/a64/`: arm64: the encoder (`as/enc.c`, `a64.h`), system registers,
+    relocation types (`reloc.h`), fixups (`obj/fixup.c`: in place or a
+    relocation, as LLVM MC);
     `emit/`: instruction records and register names (`ins.h`, `a64impl.h`,
     included by `emit/emitimpl.h`), expressions, statements, calls (AAPCS64
     and Apple's), builtins, inline asm, the record optimizer (`opt.c`), the
     printer (`print.c`) and the encoder of records (`obj.c`).  It is compiled
     in the `emit` unity TU (`emit_SRC`), so VPRIV stays static.
+  - `platform/linux/`: the ELF writer (`elf.c`: relocations, string table,
+    file layout as LLVM MC).
   - `platform/darwin/`: the Mach-O writer; Apple PMU counters (`pmc.c`).
   - `pp/`, `cc/` and `emit/` (with `arch/<cpu>/emit/`) are directories of
     files by topic, one internal header each (`ppimpl.h`, `ccimpl.h`, `emitimpl.h`) with the types, macros

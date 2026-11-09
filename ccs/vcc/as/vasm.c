@@ -3,7 +3,7 @@
  *       vasm --bench N in.s...  (assemble each file N times, report MB/s)
  */
 #include "as.h"
-#include "../obj/elf.h"
+#include "../obj/obj.h"
 #include "../lib/vperf.h"
 #include <fcntl.h>
 #include <stdio.h>

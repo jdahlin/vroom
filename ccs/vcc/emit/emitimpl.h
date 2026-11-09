@@ -65,7 +65,7 @@
 #include "../cc/ccint.h"
 #include "emit.h"
 #include "../as/as.h"
-#include "../obj/elf.h"
+#include "../obj/obj.h"
 #include "../driver/ppdriver.h"
 #include "../lib/arena.h"
 #include "../lib/tbuf.h"

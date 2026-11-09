@@ -35,7 +35,7 @@
 #include "../cc/cc.h"
 #include "ppdriver.h"
 #include "../as/as.h"
-#include "../obj/elf.h"
+#include "../obj/obj.h"
 #include "../pp/ppdata-predef.inc"
 #include "../lib/arena.h"
 #include "../lib/ldhash.h"

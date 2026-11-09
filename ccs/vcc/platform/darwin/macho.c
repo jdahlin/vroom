@@ -23,7 +23,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include "../../obj/elf.h"
+#include "../../obj/obj.h"
 
 enum {
 	ARM64_RELOC_UNSIGNED, ARM64_RELOC_SUBTRACTOR, ARM64_RELOC_BRANCH26, ARM64_RELOC_PAGE21,

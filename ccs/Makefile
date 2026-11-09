@@ -72,7 +72,7 @@ OBJ        = $(OUT)/obj
 vcc: $(OUT)/vcc $(OUT)/vsh/sh $(OUT)/vld $(OUT)/vas $(OUT)/var $(OUT)/vccd $(OUT)/lextest $(OUT)/vpp $(OUT)/vlink $(OUT)/vasm
 
 o = $(patsubst vcc/%.c,$(OBJ)/%.o,$(1))
-AS_SRC  = vcc/as/as.c vcc/arch/a64/as/enc.c vcc/obj/elf.c vcc/platform/darwin/macho.c
+AS_FILES = vcc/as/as.c vcc/arch/a64/as/enc.c vcc/platform/darwin/macho.c
 LEX_SRC = vcc/lex/lex.c vcc/lib/intern.c
 PP_SRC  = vcc/pp/dircache.c vcc/driver/ppdriver.c vcc/driver/ccsnap.c vcc/lib/ldhash.c
 VCCD_SRC = vcc/vccd/vccd.c vcc/vccd/caps.c vcc/vccd/fixdep.c vcc/vccd/ar.c vcc/vccd/rsh.c
@@ -82,6 +82,8 @@ VCCD_SRC = vcc/vccd/vccd.c vcc/vccd/caps.c vcc/vccd/fixdep.c vcc/vccd/ar.c vcc/v
 # self` where there is no LTO, and what the files share stays static (VPRIV in
 # the headers).  `make VCC_UNITY=` compiles the files one by one.
 SPLIT_MODS = cc pp emit
+# the object writer: the model, the CPU's fixups, the ELF writer (linked with as)
+obj_SRC  = vcc/obj/obj.c vcc/arch/a64/obj/fixup.c vcc/platform/linux/elf.c
 cc_SRC   = $(wildcard vcc/cc/*.c)
 pp_SRC   = $(filter-out vcc/pp/dircache.c,$(wildcard vcc/pp/*.c))
 emit_SRC = $(wildcard vcc/emit/*.c vcc/arch/a64/emit/*.c)
@@ -89,6 +91,10 @@ VCC_UNITY ?= y
 SPLIT_SRC = $(foreach m,$(SPLIT_MODS),$($(m)_SRC))
 SPLIT_OBJ = $(if $(VCC_UNITY),$(patsubst %,$(OBJ)/unity/%.o,$(SPLIT_MODS)),$(call o,$(SPLIT_SRC)))
 PP_OBJ  = $(call o,$(PP_SRC)) $(SPLIT_OBJ)
+# one module's objects: its unity TU, or its files
+mod = $(if $(VCC_UNITY),$(OBJ)/unity/$(1).o,$(call o,$($(1)_SRC)))
+AS_SRC  = $(AS_FILES) $(obj_SRC)
+AS_OBJ  = $(call o,$(AS_FILES)) $(call mod,obj)
 LD_SRC  = vcc/ld/ld.c vcc/lib/ldhash.c vcc/ld/objcopy.c
 
 $(OBJ)/%.o: vcc/%.c | $(OBJ)
@@ -96,7 +102,7 @@ $(OBJ)/%.o: vcc/%.c | $(OBJ)
 	$(VCC_CC) $(VCC_FAST) $(VCC_LTO) $(XFLAGS) -MMD -MP -c $< -o $@
 
 # rewritten only when the list of files changes
-UNITY_C = $(patsubst %,$(OBJ)/unity/%.c,$(SPLIT_MODS))
+UNITY_C = $(patsubst %,$(OBJ)/unity/%.c,$(SPLIT_MODS) obj)
 $(UNITY_C): $(OBJ)/unity/%.c: FORCE
 	@mkdir -p $(dir $@)
 	@(echo '#define VCC_UNITY 1'; for f in $(abspath $($*_SRC)); do echo "#include \"$$f\""; done) > $@.tmp
@@ -117,16 +123,16 @@ $(OBJ)/no/%.o: vcc/%.c | $(OBJ)
 
 $(OBJ)/ld/ld.o: XFLAGS = -DVLD_MAIN
 
-$(OUT)/vpp: $(call o,vcc/driver/vpp.c $(LEX_SRC) $(AS_SRC)) $(PP_OBJ)
+$(OUT)/vpp: $(call o,vcc/driver/vpp.c $(LEX_SRC)) $(AS_OBJ) $(PP_OBJ)
 	$(VCC_CC) $(VCC_LDFLAGS) -pthread $^ -o $@ $(HOST_LIBS)
 
-$(OUT)/vccd: $(call o,$(VCCD_SRC) $(LEX_SRC) $(AS_SRC)) $(PP_OBJ)
+$(OUT)/vccd: $(call o,$(VCCD_SRC) $(LEX_SRC)) $(AS_OBJ) $(PP_OBJ)
 	$(VCC_CC) $(VCC_LDFLAGS) -pthread $^ -o $@ $(HOST_LIBS)
 
 $(OUT)/lextest: $(patsubst vcc/%.c,$(OBJ)/no/%.o,vcc/lex/lextest.c vcc/platform/darwin/pmc.c $(LEX_SRC))
 	$(VCC_CC) -O3 $(VCC_SAN) -pthread $^ -o $@
 
-$(OUT)/vasm: $(call o,vcc/as/vasm.c $(AS_SRC))
+$(OUT)/vasm: $(call o,vcc/as/vasm.c) $(AS_OBJ)
 	$(VCC_CC) $(VCC_LDFLAGS) $^ -o $@
 
 # vlink: the linker (ld.c) as a standalone tool; vobjcopy/vnm by argv[0]

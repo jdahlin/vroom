@@ -14,7 +14,7 @@
  */
 #include <stddef.h>
 #include <stdint.h>
-#include "../../obj/elf.h"
+#include "../../obj/obj.h"
 
 /* ---- registers ---- */
 enum { A64_X, A64_W, A64_V, A64_Q, A64_D, A64_S, A64_H, A64_B, A64_Z, A64_P };	/* A64Op.cls (Z/P: SVE) */
