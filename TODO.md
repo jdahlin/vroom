@@ -616,8 +616,10 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
 - [x] **`\U` outside the BMP printed unconverted in `-E`** [P].  (Done: identifiers' UCNs
   print as UTF-8 (not in asm mode, not in literals); `##` accepts UCNs; regress/pp/ucn-ident.c.)
   *Validate:* pp-diff fixture.
-- [ ] **Errors suppress all `-E` output; `#include` in macro args accepted** [P].
-  *Validate:* T4 for the latter; T11 for output-on-error.
+- [ ] **`#include` in macro args accepted** [P].  (`-E` output on errors
+  done: printed to stdout with status 1, no file with `-o`, as clang;
+  checked by the error row of `bench/vcc-driver.py`.)
+  *Validate:* T4.
 - [ ] **`#embed` / `__has_embed`** [P].  *Validate:* pp-diff fixtures plus
   T1 (`unsigned char d[] = { #embed "bin" };` checksums).
 - [ ] **Output modes ignored**: `-C`, `-CC`, `-dM`, `-dD`, `-M`, `-MM`, `-H`,

@@ -521,7 +521,7 @@ VPRIV void include(pp *p, ctx *c, uint32_t b, uint32_t e, int kind, uint32_t loc
 		pp_dinfo di = { "fatal error", floc, &r, 1, NULL, 0, NULL, 0 };
 
 		pp_diagx(p, &di, "'%.*s' file not found", (int)n, buf);
-		if (p->fatal_jb)
+		if (p->fatal_jb && !p->o->fatal_continue)
 			longjmp(*p->fatal_jb, 1);
 		return;
 	}

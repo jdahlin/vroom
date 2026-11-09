@@ -591,7 +591,7 @@ static void vdiagx_(pp *p, const pp_dinfo *d, const char *fmt, va_list ap)
 		p->errors++;
 	else if (what[0] == 'w')
 		p->warns++;
-	if (what[0] == 'f') {
+	if (what[0] == 'f' && !p->o->fatal_continue) {
 		if (p->fatal_jb)
 			longjmp(*p->fatal_jb, 1);
 		exit(1);

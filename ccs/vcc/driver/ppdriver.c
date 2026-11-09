@@ -871,6 +871,7 @@ int ppd_run(int argc, char **argv, const ppd_env *env)
 	po.dirs = all;
 	po.ndirs = n;
 	po.c23 = std == 23;
+	po.fatal_continue = !emit && !objmode && !syntax && !layout && !tokhash;
 	po.trigraphs = tri >= 0 ? tri : strict && std != 23;	/* clang: strict modes before C23 */
 	{
 		const char *ep = ppd_getenv(env, "SOURCE_DATE_EPOCH");
@@ -1107,6 +1108,9 @@ int ppd_run(int argc, char **argv, const ppd_env *env)
 			atomic_load(&vdir_probes));
 	}
 	if (pp_errors(p)) {
+		/* clang: -E to stdout still prints the text; with -o it writes no file */
+		if (!cmp && !objmode && (!out || !strcmp(out, "-")))
+			write_out(env->cwd, out, env->outfd, o.p, o.n, errfd);
 		status = 1;
 	} else if (cmp) {
 		status = ppd_compare(o.p, o.n, cmp);

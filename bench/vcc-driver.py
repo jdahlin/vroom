@@ -42,23 +42,30 @@ def run(cmd, src):
     r = subprocess.run(cmd + [src], capture_output=True, text=True)
     return r.returncode, r.stdout, r.stderr
 
+# -E with errors: clang still prints the text to stdout (status 1)
+ERR_ROWS = [
+    ('--target=aarch64-linux-gnu', '', 'int a;\n#error x\nint b;\n#include "nonexistent.h"\nint c;\n'),
+]
+
 def main():
     verbose = '-v' in sys.argv
     bad = 0
     with tempfile.TemporaryDirectory() as d:
-        for i, (t, flags, probe) in enumerate(ROWS):
+        for i, (t, flags, probe) in enumerate(ROWS + ERR_ROWS):
             src = os.path.join(d, f'p{i}.c')
             open(src, 'w').write(probe)
             fl = [t] + flags.split()
             rc, out, err = run([vd.CL, '-E', '-P'] + fl, src)
             vrc, vout, verr = run([vd.VPP, '-E', '-P'] + fl, src)
-            ok = rc == vrc and out.split() == vout.split()
+            ok = rc == vrc and (out.split() == vout.split() or
+                              (i >= len(ROWS) and ''.join(out.split()) == ''.join(vout.split())))
             if not ok:
                 bad += 1
             if verbose or not ok:
                 print(f'{"ok  " if ok else "FAIL"} {t} {flags or "(none)"}' +
                       ('' if ok else f'\n  clang: {" ".join(out.split())}\n  vpp:   {" ".join(vout.split())} {verr.strip()}'))
-    print(f'vcc-driver: {len(ROWS) - bad}/{len(ROWS)} ok')
+    n = len(ROWS) + len(ERR_ROWS)
+    print(f'vcc-driver: {n - bad}/{n} ok')
     sys.exit(1 if bad else 0)
 
 main()

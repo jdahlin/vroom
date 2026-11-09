@@ -62,6 +62,7 @@ typedef struct pp_opts {
 	long long epoch;
 	int trigraphs;			/* strict -std (not c23) or -trigraphs: ??x replaced before lexing */
 	int c23;			/* -std=c23/gnu23: true is 1 in #if */
+	int fatal_continue;		/* -E text: a fatal error (file not found) does not end the TU, as clang */
 } pp_opts;
 
 enum { PP_LINUX_AARCH64, PP_DARWIN };
