@@ -398,11 +398,11 @@ enum { EV_ABS, EV_OSEC, EV_ISEC };
 enum { GS_UNDEF, GS_OBJ, GS_SCRIPT };
 
 typedef struct G {
-	_Atomic uint64_t def;		/* best definition: weak<<63 | obj<<32 | symidx */
+	_Atomic uint64_t def;		/* best definition: rank<<62 | obj<<32 | symidx (rank: 0 strong, 1 common, 2 weak) */
 	_Atomic uint64_t first;		/* first occurrence, for symbol table order */
 	_Atomic uint8_t visrank;	/* min visibility (rank, see visrank()) */
 	uint8_t state, type, bind, vis, hidden_script;
-	uint8_t demoted, provide_live, scriptdef, dup;
+	uint8_t demoted, provide_live, scriptdef, dup, common;
 	_Atomic uint8_t strongref;	/* some non-weak undefined reference */
 	uint32_t obj;			/* defining object, NONE for script */
 	uint32_t symidx;
@@ -1912,13 +1912,14 @@ static void resolve_obj(void *arg, size_t i)
 		uint64_t k = symkey(o->idx, s);
 		atomic_min64(&gs->first, k);
 		atomic_min8(&gs->visrank, visrank(y->st_other));
-		if (y->st_shndx == SHN_COMMON)
-			error("%s: common symbol %s not supported", o->path, o->str + y->st_name);
+		if (y->st_shndx == SHN_COMMON && opt.relocatable)
+			error("%s: common symbol %s not supported with -r", o->path, o->str + y->st_name);
 		else if (y->st_shndx == SHN_UNDEF) {
 			if (bind != STB_WEAK && !atomic_load_explicit(&gs->strongref, memory_order_relaxed))
 				atomic_store_explicit(&gs->strongref, 1, memory_order_relaxed);
 		} else
-			atomic_min64(&gs->def, (uint64_t)(bind == STB_WEAK) << 63 | k);
+			/* lld Symbol::compare: a strong definition beats a common one, which beats a weak one */
+			atomic_min64(&gs->def, (uint64_t)(bind == STB_WEAK ? 2 : y->st_shndx == SHN_COMMON) << 62 | k);
 	}
 }
 
@@ -1930,12 +1931,12 @@ static void check_dups(void *arg, size_t i)
 		return;
 	for (uint32_t s = o->firstg; s < o->nsym; s++) {
 		const Sym *y = &o->sym[s];
-		if (y->st_shndx == SHN_UNDEF || (y->st_info >> 4) == STB_WEAK)
+		if (y->st_shndx == SHN_UNDEF || y->st_shndx == SHN_COMMON || (y->st_info >> 4) == STB_WEAK)
 			continue;
 		G *g = &gsyms[o->gs[s - o->firstg]];
 		uint64_t d = kget(&g->def);
-		if ((d >> 63) == 0 && d != symkey(o->idx, s)) {
-			Obj *first = objs.v[(d >> 32) & 0x7fffffff];
+		if ((d >> 62) == 0 && d != symkey(o->idx, s)) {
+			Obj *first = objs.v[(d >> 32) & 0x3fffffff];
 			error("duplicate symbol: %s\n>>> defined in %s\n>>> defined in %s",
 			      o->str + y->st_name, first->path, o->path);
 		}
@@ -1968,7 +1969,7 @@ static void finish_sym(void *arg, size_t i)
 		}
 		return;
 	}
-	uint32_t oi = (d >> 32) & 0x7fffffff, si = (uint32_t)d;
+	uint32_t oi = (d >> 32) & 0x3fffffff, si = (uint32_t)d;
 	Obj *o = objs.v[oi];
 	const Sym *y = &o->sym[si];
 	s->state = GS_OBJ;
@@ -1978,8 +1979,11 @@ static void finish_sym(void *arg, size_t i)
 	s->type = y->st_info & 15;
 	s->size = y->st_size;
 	s->val = y->st_value;
-	s->sec = y->st_shndx == SHN_ABS ? NONE : o->isec0 + y->st_shndx;
-	if (y->st_shndx >= SHN_ABS && y->st_shndx != SHN_ABS)
+	s->sec = y->st_shndx == SHN_ABS || y->st_shndx == SHN_COMMON ? NONE : o->isec0 + y->st_shndx;
+	s->common = y->st_shndx == SHN_COMMON;
+	if (s->common)
+		s->type = STT_OBJECT;
+	else if (y->st_shndx >= SHN_ABS && y->st_shndx != SHN_ABS)
 		error("%s: unsupported section index for %s", o->path, o->str + y->st_name);
 }
 
@@ -3951,6 +3955,59 @@ static bool any_got(void)
 	return atomic_load(&got_seen);
 }
 
+/* lld replaceCommonSymbols: each common symbol one NOBITS "COMMON" section
+ * (after every file's sections), of the largest size and alignment among its
+ * commons, in the first file with that size; placed in the order of the files
+ * that have commons, each file's globals in order, at the first mention */
+static void make_commons(void)
+{
+	bool any = false;
+
+	for (uint32_t g = 0; g < atomic_load(&ngsyms) && !any; g++)
+		any = gsyms[g].common && gsyms[g].state == GS_OBJ;
+	if (!any)
+		return;
+	for (uint32_t g = 0; g < atomic_load(&ngsyms); g++)
+		if (gsyms[g].common && gsyms[g].state == GS_OBJ)
+			gsyms[g].size = 0, gsyms[g].val = 1, gsyms[g].obj = NONE;
+	for (uint32_t i = 0; i < nobj_real; i++) {
+		Obj *o = objs.v[i];
+
+		for (uint32_t k = o->buf ? o->firstg : 0; o->buf && k < o->nsym; k++) {
+			const Sym *y = &o->sym[k];
+			G *s = &gsyms[o->gs[k - o->firstg]];
+
+			if (y->st_shndx != SHN_COMMON || !s->common || s->state != GS_OBJ)
+				continue;
+			if (y->st_value > s->val)
+				s->val = y->st_value;	/* the alignment, until placed */
+			if (s->obj == NONE || y->st_size > s->size)
+				s->obj = i, s->symidx = k, s->size = y->st_size;
+		}
+	}
+	for (uint32_t i = 0; i < nobj_real; i++) {
+		Obj *o = objs.v[i];
+		bool has = false;
+
+		for (uint32_t k = o->buf ? o->firstg : 0; o->buf && k < o->nsym && !has; k++)
+			has = o->sym[k].st_shndx == SHN_COMMON;
+		/* every global the file names, references too, in its order */
+		for (uint32_t k = o->firstg; has && k < o->nsym; k++) {
+			G *s = &gsyms[o->gs[k - o->firstg]];
+
+			if (!s->common || s->state != GS_OBJ || s->sec != NONE)
+				continue;
+			uint32_t is = new_isec("COMMON", K_NORMAL, SHT_NOBITS, SHF_ALLOC | SHF_WRITE,
+					       s->val ? (uint32_t)s->val : 1);
+
+			isecs.v[is].size = s->size;
+			isecs.v[is].obj = s->obj;
+			s->sec = is;
+			s->val = 0;
+		}
+	}
+}
+
 static void add_synthetic_sections(void)
 {
 	/* lld appends synthetic input sections after all files, in this order */
@@ -4249,6 +4306,7 @@ static int run(int argc, char **argv)
 	pfor(gorder.n, finish_syms, NULL);
 	phase("script symbols, order");
 
+	make_commons();
 	add_synthetic_sections();
 	assign_sections();
 	/* commit sections into their output sections, in order */

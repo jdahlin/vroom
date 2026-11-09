@@ -848,14 +848,19 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
   for `tests/vcc/tls_{static,ie,desc}.c`), `PT_GNU_RELRO`, MOVW_*, CONDBR19, TSTBR14,
   PREL32 to undefined (`ld/ld.c:2560-2570`).
   *Validate:* T8 (each against lld, run under qemu where runnable).
+- [ ] **`vpp -c x.s`** says "no input file" (clang assembles `.s` and
+  preprocesses `.S`).  *Validate:* vcc-driver.py rows; vlink-opts uses vasm
+  until then.
 - [ ] **Archives**: (done: lazy members extracted as lld: a non-weak
   undefined reference extracts the member defining it, depth first, in lld's
   file order; an archive's member is extracted when its definition meets an
   earlier undefined reference; weak references do not extract; order-free, so
   `--start-group` needs nothing; regular and thin archives.  A sequential pass
   only when a non-whole archive is linked.  `bench/vlink-opts.py`: 11 lazy
-  cases, images identical to lld.)  Left: COMMON (`ld/ld.c`
-  resolve_obj), COMDAT groups (`parse_obj`), the archive symbol index (lld
+  cases, images identical to lld.  COMMON as lld: strong beats common beats
+  weak; largest size and alignment, first file with that size; one NOBITS
+  `COMMON` section each after all files' sections, in lld's
+  replaceCommonSymbols order; 7 cases in `vlink-opts.py`.)  Left: COMDAT groups (`parse_obj`), the archive symbol index (lld
   ignores it too).
   *Validate:* T8 static link of a musl `libc.a` hello world (run under
   qemu-user); a C++ template object pair.

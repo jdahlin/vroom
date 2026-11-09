@@ -50,12 +50,28 @@ CASES = [
     ('lazy two archives group', '{t}/c.o --start-group {a}/libq.a {a}/libp.a --end-group'),
     ('lazy already defined', '{t}/c.o {t}/b1.o {a}/libch.a'),
     ('lazy thin', '{t}/c.o {a}/libthin.a'),
+    # COMMON: largest size and alignment, strong beats common beats weak
+    ('common', '{t}/cm.o {t}/cm1.o'),
+    ('common sizes', '{t}/cm.o {t}/cm1.o {t}/cm2.o'),
+    ('common sizes reversed', '{t}/cm.o {t}/cm2.o {t}/cm1.o'),
+    ('common and strong', '{t}/cm.o {t}/cm1.o {t}/cmd.o {t}/cm2.o'),
+    ('common and weak', '{t}/cm.o {t}/cmw.o {t}/cm1.o'),
+    ('common in archive', '{t}/cm.o {a}/libcm.a'),
+    ('common, archive def not taken', '{t}/cm.o {t}/cm1.o {a}/libcmd.a'),
 ]
 MSG = {'-mbad': 'unknown emulation: foo',
        '-l missing': 'unable to find library -lnosuch', '-l no -L': 'unable to find library -lx'}
 
 SRC = 'int d = 3; int x_fn(void); int _start(void) { return d + x_fn(); }\n'
 LIB = 'int x_fn(void) { return 4; }\n'
+ASM = {	# cm: _start uses cv and cw; cm1/cm2 common of other sizes, cmd defines cv, cmw weakly
+    'cm': '.text\n.globl _start\n_start: adrp x0, cv\n ldr x0, [x0, :lo12:cv]\n adrp x1, cw\n'
+          ' ldr x1, [x1, :lo12:cw]\n ret\n.comm cv,8,8\n.comm cw,4,4\n',
+    'cm1': '.comm cv,16,4\n.comm cz,2,2\n',
+    'cm2': '.comm cv,32,32\n.comm cw,64,8\n.globl f2\n.text\nf2: ret\n',
+    'cmd': '.data\n.globl cv\n.p2align 3\ncv: .quad 7\n',
+    'cmw': '.data\n.weak cv\n.p2align 3\ncv: .quad 7\n',
+}
 LAZY = {	# c -> b1 -> b2 -> b3; w refers to b1 weakly; p1 -> q1 -> p2
     'c': 'int b1(void); int _start(void) { return b1(); }\n',
     'w': '__attribute__((weak)) int b1(void); int _start(void) { return b1 ? b1() : 0; }\n',
@@ -79,11 +95,14 @@ def main():
     bad = 0
     with tempfile.TemporaryDirectory() as t:
         os.mkdir(f'{t}/lib')
+        for name, src in ASM.items():
+            open(f'{t}/{name}.s', 'w').write(src)
+            subprocess.run([f'{BUILD}/vasm', '--target=aarch64-linux-gnu', '-c', f'{t}/{name}.s', '-o', f'{t}/{name}.o'], check=True)
         for name, src in list({'a': SRC, 'x': LIB}.items()) + list(LAZY.items()):
             open(f'{t}/{name}.c', 'w').write(src)
             subprocess.run([VPP, '--target=aarch64-linux-gnu', '-c', f'{t}/{name}.c', '-o', f'{t}/{name}.o'], check=True)
         for lib, ms, fl in (('x', 'x', 'rcs'), ('ch', 'b1 b2 b3 unused', 'rcs'), ('chr', 'unused b3 b2 b1', 'rcs'),
-                            ('p', 'p1 p2', 'rcs'), ('q', 'q1', 'rcs'), ('thin', 'b1 b2 b3', 'rcsT')):
+                            ('p', 'p1 p2', 'rcs'), ('cm', 'cm2', 'rcs'), ('cmd', 'cmd', 'rcs'), ('q', 'q1', 'rcs'), ('thin', 'b1 b2 b3', 'rcsT')):
             subprocess.run([llvm('llvm-ar'), fl, f'{t}/lib/lib{lib}.a'] + [f'{t}/{m}.o' for m in ms.split()], check=True)
         for name, args in CASES:
             a = args.format(o=f'{t}/a.o {t}/x.o', m=f'{t}/a.o', a=f'{t}/lib', t=t).split()
