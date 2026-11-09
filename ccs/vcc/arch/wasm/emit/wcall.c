@@ -196,6 +196,28 @@ static void warg(ecx *e, uint32_t n, qty t, wabi a)
 	}
 }
 
+/* alloca(a): below __stack_pointer, given back on return */
+static int walloca(ecx *e, uint32_t a)
+{
+	cc *c = e->c;
+	uint32_t t = wtmp(e, WT_I64);
+
+	e->w->dyn = true;
+	wi(e, "global.get\t__stack_pointer");
+	wexpr(e, a, true);
+	wconv(e, N(a)->ty, prim(TY_ULONG));
+	wconst(e, WT_I64, 15);
+	wi(e, "i64.add");
+	wconst(e, WT_I64, -16);
+	wi(e, "i64.and");
+	wi(e, "i64.sub");
+	wtee(e, t);
+	wi(e, "global.set\t__stack_pointer");
+	wget(e, t);
+	wfree(e, t);
+	return WT_I64;
+}
+
 VPRIV int wcall(ecx *e, uint32_t n, bool want)
 {
 	cc *c = e->c;
@@ -215,6 +237,10 @@ VPRIV int wcall(ecx *e, uint32_t n, bool want)
 
 	uint32_t def = 0;
 
+	if (ref && RKIND(ref) == RK_SYM && x->c == 1 && !(c->syms[RIDX(ref)].flags & SF_DEFINED) &&
+	    c->syms[RIDX(ref)].name &&
+	    vintern_ents[c->syms[RIDX(ref)].name].len == 6 && !memcmp(vintern_ents[c->syms[RIDX(ref)].name].s, "alloca", 6))
+		return walloca(e, c->lists[x->b]);	/* clang: alloca is a builtin, declared or not */
 	if (noproto && ref && RKIND(ref) == RK_SYM && c->syms[RIDX(ref)].body &&
 	    N(c->syms[RIDX(ref)].body)->op == N_BLOCK && c->syms[RIDX(ref)].kind == S_FUNC)
 		def = RIDX(ref);	/* a K&R definition here: its parameters, extra arguments dropped */
@@ -829,25 +855,8 @@ VPRIV int wbuiltin(ecx *e, uint32_t n, bool want)
 		wconst(e, WT_I64, 0);
 		return WT_I64;
 	case BI_ALLOCA:
-	case BI_ALLOCA_UNINIT: {
-		uint32_t t = wtmp(e, WT_I64);
-		uint32_t a = warg_n(c, n, 0);
-
-		e->w->dyn = true;
-		wi(e, "global.get\t__stack_pointer");
-		wexpr(e, a, true);
-		wconv(e, N(a)->ty, prim(TY_ULONG));
-		wconst(e, WT_I64, 15);
-		wi(e, "i64.add");
-		wconst(e, WT_I64, -16);
-		wi(e, "i64.and");
-		wi(e, "i64.sub");
-		wtee(e, t);
-		wi(e, "global.set\t__stack_pointer");
-		wget(e, t);
-		wfree(e, t);
-		return WT_I64;
-	}
+	case BI_ALLOCA_UNINIT:
+		return walloca(e, warg_n(c, n, 0));
 	case BI_CLZ: case BI_CLZL: case BI_CLZLL:
 	case BI_CTZ: case BI_CTZL: case BI_CTZLL:
 	case BI_POPCOUNT: case BI_POPCOUNTL: case BI_POPCOUNTLL:

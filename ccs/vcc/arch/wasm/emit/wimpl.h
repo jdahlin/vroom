@@ -348,6 +348,7 @@ VPRIV int wbuiltin(ecx *e, uint32_t n, bool want);
 /* wstmt.c */
 VPRIV void wgoto_scan(ecx *e, uint32_t body);
 VPRIV void wvla_bytes(ecx *e, qty t);
+VPRIV int wknown(ecx *e, uint32_t n);
 VPRIV void wvla_fix(ecx *e, qty t, bool pure);
 VPRIV void wstmt(ecx *e, uint32_t n);
 VPRIV void winit(ecx *e, uint64_t off, qty ty, uint32_t init, bool zeroed);

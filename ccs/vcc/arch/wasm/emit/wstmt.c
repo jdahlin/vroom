@@ -168,6 +168,74 @@ static void wasm_asm(ecx *e, const node *x)
 	}
 }
 
+/* ---------------- dead code ---------------- */
+
+/* does statement n hold a label (a case, a goto target): it cannot be dropped */
+static bool wlabels(cc *c, uint32_t n)
+{
+	const node *x;
+
+	if (!n)
+		return false;
+	x = N(n);
+	switch (x->op) {
+	case N_LABEL: case N_CASE: case N_DEFAULT:
+		return true;
+	case N_BLOCK:
+		for (uint32_t i = 0; i < x->c; i++)
+			if (wlabels(c, c->lists[x->b + i]))
+				return true;
+		return false;
+	case N_IF:
+		return wlabels(c, x->b) || wlabels(c, x->c);
+	case N_WHILE: case N_DO:
+		return wlabels(c, x->b);
+	case N_FOR:
+		return wlabels(c, c->lists[x->c + 1]);
+	case N_SWITCH:
+		/* its case labels are its own */
+		return false;
+	default:
+		return false;
+	}
+}
+
+/* does statement n never complete normally (what follows it is dead until a label) */
+static bool wterm(cc *c, uint32_t n)
+{
+	const node *x;
+
+	if (!n)
+		return false;
+	x = N(n);
+	switch (x->op) {
+	case N_RETURN: case N_BREAK: case N_CONTINUE: case N_GOTO: case N_GOTO_IND:
+		return true;
+	case N_BLOCK:
+		return x->c && wterm(c, c->lists[x->b + x->c - 1]);
+	case N_IF:
+		return x->c && wterm(c, x->b) && wterm(c, x->c);
+	default:
+		return false;
+	}
+}
+
+/* the statements [i0, i1) of compound x: those after a jump are dropped up to a label */
+static void wstmts(ecx *e, const node *x, uint32_t i0, uint32_t i1)
+{
+	cc *c = e->c;
+	bool dead = false;
+
+	for (uint32_t i = i0; i < i1; i++) {
+		uint32_t s = c->lists[x->b + i];
+
+		if (dead && !wlabels(c, s))
+			continue;
+		wstmt(e, s);
+		dead = wterm(c, s);
+	}
+}
+
 /* ---------------- VLA scopes ---------------- */
 
 /* the index of the compound statement's first VLA declaration, UINT32_MAX: none */
@@ -527,7 +595,6 @@ static void wgtest(ecx *e, uint32_t st, uint32_t cond, int out)
 /* a compound statement with a dispatch loop */
 static void wgblock(ecx *e, const node *x, int r)
 {
-	cc *c = e->c;
 	wst *W = e->w;
 	wgd *d = &W->gd[r];
 	uint32_t m = d->nseg;
@@ -554,8 +621,7 @@ static void wgblock(ecx *e, const node *x, int r)
 
 		if (m > 1)
 			wend(e, "end_block");
-		for (uint32_t i = s0; i < s1; i++)
-			wstmt(e, c->lists[x->b + i]);
+		wstmts(e, x, s0, s1);
 	}
 	wend(e, "end_loop");
 	W->gd[r].loop = -1;
@@ -879,8 +945,7 @@ VPRIV void wstmt(ecx *e, uint32_t n)
 		if (r >= 0) {
 			wgblock(e, x, r);
 		} else {
-			for (uint32_t i = 0; i < x->c; i++)
-				wstmt(e, c->lists[x->b + i]);
+			wstmts(e, x, 0, x->c);
 		}
 		if (vla) {
 			wget(e, W->vb[--W->nvb].sp);
@@ -896,7 +961,13 @@ VPRIV void wstmt(ecx *e, uint32_t n)
 		wdecl_stmt(e, x);
 		break;
 	case N_IF: {
-		int r = W->ngdx ? wgfind(W, n) : -1;
+		int r = W->ngdx ? wgfind(W, n) : -1, kn = r < 0 ? wknown(e, x->a) : -1;
+
+		if (kn >= 0 && !wlabels(c, kn ? x->c : x->b)) {
+			/* if (0), if (1): only the branch taken */
+			wstmt(e, kn ? x->b : x->c);
+			break;
+		}
 
 		if (r >= 0) {
 			/* entered by goto (st: 1 then, 2 else): the condition is not evaluated */

@@ -1244,11 +1244,31 @@ static const char *wif(int k)
 	return s[k];
 }
 
+/* a condition known when compiling: 1 true, 0 false, -1 not known (clang folds these away) */
+VPRIV int wknown(ecx *e, uint32_t n)
+{
+	cc *c = e->c;
+	cval cv;
+
+	if (side_effects(c, n) || !cc_eval(c, n, &cv))
+		return -1;
+	if (cv.kind == CV_INT)
+		return cv.i != 0;
+	if (cv.kind == CV_FLT)
+		return cv.ld ? cv.q << 1 != 0 : cv.f != 0;
+	return -1;
+}
+
 static int wcond_expr(ecx *e, uint32_t n, bool want)
 {
 	cc *c = e->c;
 	const node *x = N(n);
-	int k = want ? wrep(wty(c, x->ty)) : WT_NONE;
+	int k = want ? wrep(wty(c, x->ty)) : WT_NONE, kn;
+
+	if (x->b && (kn = wknown(e, x->a)) >= 0) {
+		wexpr(e, kn ? x->b : x->c, want);
+		return k;
+	}
 
 	if (!x->b) {
 		/* GNU a ?: c */
@@ -1707,7 +1727,25 @@ static int wexpr1(ecx *e, uint32_t n, bool want)
 	case N_BINARY:
 		return wbinary(e, n);
 	case N_LOGAND:
-	case N_LOGOR:
+	case N_LOGOR: {
+		int kn = wknown(e, x->a);
+
+		if (kn >= 0) {
+			/* 0 && b, 1 || b: b is not evaluated; 1 && b, 0 || b: b decides */
+			if (kn == (x->op == N_LOGOR)) {
+				if (!want)
+					return WT_NONE;
+				wconst(e, WT_I32, kn);
+				return WT_I32;
+			}
+			if (!want) {
+				wexpr(e, x->b, false);
+				return WT_NONE;
+			}
+			wbool(e, x->b);
+			return WT_I32;
+		}
+	}
 		wtruth(e, x->a);
 		if (!want) {
 			if (x->op == N_LOGOR)
@@ -1790,6 +1828,12 @@ static int wexpr1(ecx *e, uint32_t n, bool want)
 	case N_VAR: case N_MEMBER: case N_INDEX: case N_DEREF: case N_COMPLIT: {
 		wlv l;
 
+		if (is_func(c, x->ty)) {
+			/* *fp: the function's address (its table index) */
+			wlval(e, n, &l, prim(TY_VOID));
+			wfold_off(e, &l);
+			return WT_I64;
+		}
 		wlval(e, n, &l, x->ty);
 		wload(e, &l, x->ty);
 		return wrep(k);

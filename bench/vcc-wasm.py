@@ -41,8 +41,18 @@ WASM_SKIP = {}
 def sh(cmd, timeout=60, **kw):
     return ct.sh(cmd, timeout=timeout, **kw)
 
+RTO = f'{OUT}/rt.o'
+
+def rt_obj():
+    """rt/wasm.c (__rt_assert ..), built by emcc once per change"""
+    src = f'{ct.RT}/wasm.c'
+    if not os.path.exists(RTO) or os.path.getmtime(RTO) < os.path.getmtime(src):
+        os.makedirs(OUT, exist_ok=True)
+        subprocess.run([EMCC, TGT, '-O2', '-c', src, '-o', RTO + '.tmp'], check=True)
+        os.replace(RTO + '.tmp', RTO)
+
 def link(objs, js):
-    rc, _, err = sh(LINK + objs + ['-o', js], timeout=120)
+    rc, _, err = sh(LINK + objs + [RTO, '-o', js], timeout=120)
     return rc, err.decode(errors='replace')
 
 def run(js):
@@ -50,7 +60,7 @@ def run(js):
     return rc, out.decode('latin-1')
 
 def reference(suite, name, path, flags, wd):
-    key = hashlib.sha1((open(path, 'rb').read().decode('latin-1') + ' '.join(flags) + ' '.join(ct.CLFL) + ' '.join(LINK)).encode()).hexdigest()[:16]
+    key = hashlib.sha1((open(path, 'rb').read().decode('latin-1') + ' '.join(flags) + ' '.join(ct.CLFL) + ' '.join(LINK) + 'rt1').encode()).hexdigest()[:16]
     cf = f'{OUT}/ref/{suite}/{name}.json'
     try:
         r = json.load(open(cf))
@@ -146,6 +156,7 @@ if __name__ == '__main__':
     pat = av[0] if av else None
     ts = ct.tests(suite, pat)
     t0 = time.time()
+    rt_obj()
     with Pool(j, initializer=init, initargs=(obj,)) as pool:
         res = pool.map(one, ts, chunksize=1)
     by = defaultdict(Counter)

@@ -238,6 +238,18 @@ VPRIV void wfname(cc *c, tbuf *b, uint32_t ref)
 }
 
 /* a function this one refers to: its .functype for the header (the assembler wants it before any use) */
+/* static data refers to ref: a function needs its .functype (its table index is the address) */
+VPRIV void wasm_data_ref(ecx *e, uint32_t ref)
+{
+	cc *c = e->c;
+
+	if (RKIND(ref) != RK_SYM || c->syms[RIDX(ref)].kind != S_FUNC)
+		return;
+	if (!e->w)
+		w_state(e);
+	wdecl(e, ref, c->syms[RIDX(ref)].ty, NULL);
+}
+
 VPRIV void wdecl(ecx *e, uint32_t ref, qty ft, const char *sig)
 {
 	cc *c = e->c;
@@ -482,7 +494,7 @@ VPRIV void wasm_emit_function(ecx *e, uint32_t s)
 
 	/* the function: header, locals, prologue, body, epilogue */
 	{
-		bool global = y->sc != SC_STATIC && y->name;
+		bool global = y->sc != SC_STATIC && y->name && !inline_only(y);
 
 		wsection(e, f, s, ".text.");
 		if (global) {
