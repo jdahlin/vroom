@@ -244,6 +244,11 @@ VPRIV val laddr(ecx *e, lval *l)
 
 	switch (l->k) {
 	case L_SYM:
+		if (unlikely(ref_weak(e->c, l->ref))) {
+			r = treg(e);
+			addr_of_ref(e, r, l->ref, l->off);
+			return vreg(r);
+		}
 		return vaddr(l->ref, l->off);
 	case L_FRAME:
 		r = treg(e);

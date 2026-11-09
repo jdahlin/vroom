@@ -31,6 +31,12 @@ static val gen_var(ecx *e, uint32_t n)
 		uint32_t r = REF(RK_SYM, canon_sym(c, s));
 
 		note_ref(e, r);
+		if (unlikely(ref_weak(c, r))) {
+			int rd = treg(e);
+
+			addr_of_ref(e, rd, r, 0);
+			return vreg(rd);
+		}
 		return vaddr(r, 0);
 	}
 	if (y->kind == S_BUILTIN)

@@ -337,6 +337,9 @@ VPRIV void apply_sym_attrs(cc *c, sym *s, const attrs *a);
 VPRIV void name_overload(cc *c, uint32_t s);
 /* decl.c */
 VPRIV uint32_t file_scope_sym(cc *c, uint32_t name);
+VPRIV void pragma_weak(cc *c, const char *s, const char *e, const char *base, uint32_t loc);
+VPRIV void weak_declared(cc *c, uint32_t s);
+VPRIV void weak_finish(cc *c);
 VPRIV uint32_t implicit_func(cc *c, uint32_t id, uint32_t loc);
 VPRIV void declaration(cc *c, vec *out, bool file);
 /* stmt.c */

@@ -474,8 +474,9 @@ static int emit_tu1(cc *c, const cc_opts *o, bool write_out, uint8_t *mf, bool *
 			if (y->depth == 0 && sym_attrs(c, s)->alias && y->name) {
 				const attrs *a = sym_attrs(c, s);
 
-				tb_s(&tail, (y->flags & SF_WEAK) ? "\t.weak\t" : y->sc == SC_STATIC ? "" : "\t.globl\t");
-				if (y->sc != SC_STATIC || (y->flags & SF_WEAK)) {
+				/* Darwin: clang's (#pragma weak) aliases are local, .weak_reference on a definition */
+				tb_s(&tail, DARWIN(c) ? "" : (y->flags & SF_WEAK) ? "\t.weak\t" : y->sc == SC_STATIC ? "" : "\t.globl\t");
+				if (!DARWIN(c) && (y->sc != SC_STATIC || (y->flags & SF_WEAK))) {
 					sym_name(c, &tail, s);
 					tb_c(&tail, '\n');
 				}
@@ -484,7 +485,7 @@ static int emit_tu1(cc *c, const cc_opts *o, bool write_out, uint8_t *mf, bool *
 				tb_s(&tail, y->kind == S_FUNC ? ",@function\n" : ",@object\n");
 				tb_s(&tail, "\t.set\t");
 				sym_name(c, &tail, s);
-				tb_s(&tail, ", ");
+				tb_s(&tail, DARWIN(c) ? ", _" : ", ");	/* (an assembler name: Mach-O's prefix) */
 				tb_s(&tail, c->strs[a->alias - 1].s);
 				tb_c(&tail, '\n');
 			}

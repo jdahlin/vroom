@@ -162,6 +162,9 @@ struct cc {
 	bool has_pend;
 	uint32_t pack[64];	/* #pragma pack stack (bytes, 0: none) */
 	int npack;
+	/* #pragma weak (decl.c): waiting for key's declaration (alias: 0, or the weak alias of key) */
+	struct pweak { uint32_t key, alias, loc, sym; } *pweak;
+	uint32_t npweak, cpweak;	/* (the done aliases, sym set, stay for the end-of-TU check) */
 
 	/* builtin types */
 	qty t_size, t_ptrdiff, t_wchar, t_char16, t_char32, t_valist;

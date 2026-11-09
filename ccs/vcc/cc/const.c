@@ -119,6 +119,8 @@ static u128 get_q(const cval *v, bool sgn)
 }
 /* nonzero, as a condition */
 static bool cv_nz(const cval *v) { return v->ld ? q_nz(v->q) : v->f != 0; }
+/* an address that may be null: a weak symbol's (clang: Decl::isWeak) */
+static bool cv_weak(const cc *c, const cval *v) { return v->kind == CV_ADDR && v->sym && (c->syms[v->sym].flags & SF_WEAK); }
 
 VPRIV int clz128(u128 x, unsigned bits)
 {
@@ -196,6 +198,8 @@ VPRIV bool eval(cc *c, uint32_t n, cval *v)
 				v->i = a.i != 0;
 			else if (a.kind == CV_FLT)
 				v->i = cv_nz(&a), v->ice = is_flt_lit(c, x->a);
+			else if (cv_weak(c, &a))
+				return false;
 			else
 				v->i = 1, v->ice = false;	/* address of an object is never null */
 			v->sym = v->str = v->label = 0;
@@ -264,7 +268,7 @@ VPRIV bool eval(cc *c, uint32_t n, cval *v)
 			return true;
 		}
 		if (a.kind == CV_ADDR) {
-			if (x->aux == T_EXCLAIM) {
+			if (x->aux == T_EXCLAIM && !cv_weak(c, &a)) {
 				v->kind = CV_INT, v->i = 0, v->ice = false, v->sym = v->str = v->label = 0;
 				return true;
 			}
@@ -363,7 +367,7 @@ VPRIV bool eval(cc *c, uint32_t n, cval *v)
 
 				if (!same) {
 					/* &obj vs null */
-					if ((a.kind == CV_INT && a.i == 0) || (b.kind == CV_INT && b.i == 0)) {
+					if (((a.kind == CV_INT && a.i == 0) || (b.kind == CV_INT && b.i == 0)) && !cv_weak(c, &a) && !cv_weak(c, &b)) {
 						if (op == T_EQUALEQUAL) { v->i = 0; return true; }
 						if (op == T_EXCLAIMEQ) { v->i = 1; return true; }
 					}
@@ -486,6 +490,8 @@ VPRIV bool eval(cc *c, uint32_t n, cval *v)
 
 		if (!eval(c, x->a, &a))
 			return false;
+		if (cv_weak(c, &a))
+			return false;
 		t = a.kind == CV_INT ? a.i != 0 : a.kind == CV_FLT ? cv_nz(&a) : true;
 		v->kind = CV_INT;
 		if (a.kind == CV_ADDR)
@@ -495,7 +501,7 @@ VPRIV bool eval(cc *c, uint32_t n, cval *v)
 			v->ice = a.ice;
 			return true;
 		}
-		if (!eval(c, x->b, &b))
+		if (!eval(c, x->b, &b) || cv_weak(c, &b))
 			return false;
 		v->i = b.kind == CV_INT ? b.i != 0 : b.kind == CV_FLT ? cv_nz(&b) : 1;
 		v->ice = a.ice && b.ice && b.kind != CV_ADDR;
@@ -505,6 +511,8 @@ VPRIV bool eval(cc *c, uint32_t n, cval *v)
 		bool t, ice;
 
 		if (!eval(c, x->a, &a))
+			return false;
+		if (cv_weak(c, &a))
 			return false;
 		t = a.kind == CV_INT ? a.i != 0 : a.kind == CV_FLT ? cv_nz(&a) : true;
 		ice = a.ice && a.kind != CV_ADDR;

@@ -150,7 +150,7 @@ VPRIV void expect_semi(cc *c, const char *after)
 	report(c, "error", e, NULL, 0, &fx, 1, "expected ';' %s", after);
 }
 
-/* #pragma: only pack changes semantics; the rest is ignored here */
+/* #pragma: pack and weak change semantics; the rest is ignored here */
 static void pragma(cc *c, const ptok *t)
 {
 	const char *s = t->s, *e = t->s + t->len;
@@ -161,6 +161,10 @@ static void pragma(cc *c, const ptok *t)
 	s += 6;
 	while (s < e && (*s == ' ' || *s == '\t'))
 		s++;
+	if (e - s >= 4 && !memcmp(s, "weak", 4) && (e - s == 4 || s[4] == ' ' || s[4] == '\t')) {
+		pragma_weak(c, s + 4, e, t->s, t->loc);
+		return;
+	}
 	if ((size_t)(e - s) < 4 || memcmp(s, "pack", 4))
 		return;
 	s += 4;

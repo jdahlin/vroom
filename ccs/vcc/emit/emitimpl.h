@@ -918,6 +918,14 @@ static inline void symop(ecx *e, int op, int sz, int ext, int rd, int rn, uint32
 static inline val vconst(i128 i) { val v = { .k = V_CONST, .i = i }; return v; }
 static inline val vreg(int r) { val v = { .k = V_REG, .r = (uint8_t)r }; return v; }
 static inline val vaddr(uint32_t ref, i128 off) { val v = { .k = V_ADDR, .ref = ref, .i = off }; return v; }
+/* an undefined weak symbol's address may be 0: a register, never a V_ADDR (which every fold takes as nonzero) */
+static inline bool ref_weak(const cc *c, uint32_t ref)
+{
+	const sym *y = &c->syms[RIDX(ref)];
+
+	return RKIND(ref) == RK_SYM && (y->flags & SF_WEAK) &&
+	       !(y->kind == S_FUNC ? (y->flags & SF_DEFINED) && y->body : (y->flags & (SF_DEFINED | SF_TENTATIVE)));
+}
 static inline val vnone(void) { val v = { .k = V_NONE }; return v; }
 
 /* a statement's temporaries end with it; compound literals live on to the end of their block */

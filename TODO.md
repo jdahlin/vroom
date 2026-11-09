@@ -200,10 +200,17 @@ Existing gates that every change must keep green: `vcc-diff.py cmp`
   *Validate:* T1 `ldouble_const.c` (`0.1L != 0.1`, `1e4000L` finite,
   `LDBL_MAX`, `LDBL_MIN`, denormals, hex float `0x1.0000000000000000000000000001p0L`,
   bit patterns compared via `memcpy` against clang's).
-- [ ] **`#pragma weak` ignored** [P].  `cc.c:892` handles only `pack`.
+- [x] **`#pragma weak` ignored** [P].  `cc.c:892` handles only `pack`.
   Implement `#pragma weak sym` and `#pragma weak alias = target`.
   *Validate:* T6 `pragma_weak.c` (symbol binding WEAK, alias defined);
   T1 `pragma_weak_undef.c` (`&ext == 0` at run time, not folded to 1).
+  (done: clang's rules in `cc/decl.c`, pending pragmas included, and its
+  diagnostics; on Darwin the aliases are local, as clang's.  Also fixed: a
+  weak symbol's address, by attribute too, was folded as nonzero in the
+  front end and the emitter, and Darwin aliases lacked the `_` on their
+  target.  Bindings by the linker in `tests/abi/pragma_weak` (T6 does not
+  exist), run-time zero in T1 `pragma_weak.c`, warnings in
+  `tests/diag/pragma_weak.c`.)
 - [ ] **`#pragma pack(push, ident, N)` ignores N; `pop, ident` pops one** [P].
   `cc.c:919-927`.
   *Validate:* layout `_Static_assert` cases against clang (all forms:
@@ -567,9 +574,11 @@ Existing gates that every change must keep green: `vcc-diff.py cmp`
 - [ ] **macho.c**: DWARF dropped (`macho.c:95`), `.eh_frame` to
   `__TEXT,__const`, no compact unwind, no `MH_SUBSECTIONS_VIA_SYMBOLS`,
   `LC_BUILD_VERSION` fixed at 11.0 (`macho.c:428`).
+  Without the flag ld64 cannot replace a weak definition of vcc's by a
+  strong one ("duplicate symbol").
   *Validate:* T3 (`ld64 -dead_strip` removes an unused function;
   `dwarfdump` / lldb line lookup; `-mmacosx-version-min=14.0` in
-  `otool -l`).
+  `otool -l`); `bench/vcc-abi.py --host pragma_weak` (its xfail goes).
 
 ### Driver (`ppdriver.c`, `vccd.c`, `caps.c`)
 - [ ] **vccd compiles only `-c … x.c` for aarch64 Linux; the rest goes to

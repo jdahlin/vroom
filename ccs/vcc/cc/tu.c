@@ -152,6 +152,7 @@ static void cc_free(cc *c)
 	vmreg_put(&ccr[19], USED(c->nlzf, c->lzf));
 	vmreg_put(&ccr[20], (size_t)c->nlzs + 64);
 	free(c->cases);
+	free(c->pweak);
 #undef USED
 	vmpool_give(&ccpool, ccr);
 	ccr = NULL;
@@ -178,6 +179,8 @@ int cc_run(pp *p, const cc_opts *o)
 		c->ntk = 1;
 		translation_unit(c);
 		lazy_closure(c);
+		if (unlikely(c->npweak))
+			weak_finish(c);
 		/* clang: a tentative definition of a never completed struct/union/enum */
 		for (uint32_t i = 1; i < c->nsym; i++) {
 			const sym *y = &c->syms[i];

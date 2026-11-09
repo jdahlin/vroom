@@ -461,6 +461,13 @@ static void die(cc *c)
 	c->dc->dead = true;
 }
 
+/* no snapshot from here on: state the snapshots do not hold (#pragma weak) */
+void dc_kill(cc *c)
+{
+	if (c->dc && !c->dc->dead)
+		die(c);
+}
+
 void dc_boundary_slow(cc *c)
 {
 	struct dcst *d = c->dc;
