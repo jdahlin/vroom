@@ -41,6 +41,7 @@
 #include "../pp/ppdata-predef.inc"
 #include "../lib/arena.h"
 #include "../lib/ldhash.h"
+#include "../lib/buf.h"
 
 #ifdef __APPLE__
 #define ST_MTIME_NS(st) ((unsigned long long)(st)->st_mtimespec.tv_sec * 1000000000ull + (unsigned long long)(st)->st_mtimespec.tv_nsec)
@@ -534,6 +535,9 @@ static void obj_release(void)
 	pthread_mutex_unlock(&obj_mu);
 }
 
+/* -c for wasm64: the object's bytes (arch/wasm/as, platform/wasm) */
+static _Thread_local vbuf tl_wasm_obj;
+
 /* lay out tl_obj and write it to out */
 static int write_obj(const char *cwd, const char *out, int outfd, int errfd, int macho)
 {
@@ -737,6 +741,7 @@ int ppd_run(int argc, char **argv, const ppd_env *env)
 #else
 	int darwin = 0;
 #endif
+	int wasm = 0, lnx;	/* 64 or 32: wasm64/wasm32-unknown-emscripten (PLAN-wasm.md); lnx: aarch64 Linux */
 	int hosted = 1, nostdinc = 0, asm_mode = 0, undef = 0;
 	int march_lse = -1, mcpu_lse = -1, lse;
 	int opt = 0, olevel = 0, os = 0, pie = -1, pic = 0, freestanding = 0, nobuiltin = 0, instr = 0, cfi = -1, strict_align = 0, tiny = 0, gregs = 0;
@@ -893,7 +898,8 @@ int ppd_run(int argc, char **argv, const ppd_env *env)
 		if (!strncmp(a, "--target=", 9) || !strcmp(a, "-target")) {
 			const char *m = strstr(a, "-macos");
 
-			darwin = strstr(a, "darwin") || strstr(a, "apple");
+			wasm = strstr(a, "wasm64") ? 64 : strstr(a, "wasm32") ? 32 : 0;
+			darwin = !wasm && (strstr(a, "darwin") || strstr(a, "apple"));
 			hosted = 0;
 			if (m && m[6] >= '0' && m[6] <= '9')
 				macos_min = m + 6, macos_min_flag = 2;	/* arm64-apple-macos14.2: wins over the flag */
@@ -1043,9 +1049,12 @@ int ppd_run(int argc, char **argv, const ppd_env *env)
 	po.show_includes = showinc;
 	po.comments = comments;
 	po.dump_defines = ddefs;
-	po.dd_order = darwin ? predef_order_darwin : predef_order_linux;
+	lnx = !darwin && !wasm;
+	po.dd_order = darwin ? predef_order_darwin : wasm == 64 ? predef_order_wasm64 : wasm ? predef_order_wasm32 : predef_order_linux;
 	po.ndd_order = darwin ? (int)(sizeof(predef_order_darwin) / sizeof(*predef_order_darwin))
-			      : (int)(sizeof(predef_order_linux) / sizeof(*predef_order_linux));
+		     : wasm == 64 ? (int)(sizeof(predef_order_wasm64) / sizeof(*predef_order_wasm64))
+		     : wasm ? (int)(sizeof(predef_order_wasm32) / sizeof(*predef_order_wasm32))
+			    : (int)(sizeof(predef_order_linux) / sizeof(*predef_order_linux));
 	po.fatal_continue = !emit && !objmode && !syntax && !layout && !tokhash;
 	po.trigraphs = tri >= 0 ? tri : strict && std != 23;	/* clang: strict modes before C23 */
 	{
@@ -1061,7 +1070,7 @@ int ppd_run(int argc, char **argv, const ppd_env *env)
 	if (undef)
 		bstr(&pre, asm_mode ? predef_undef_asm : predef_undef_c);
 	else
-		bstr(&pre, darwin ? predef_darwin : predef_aarch64_linux);
+		bstr(&pre, darwin ? predef_darwin : wasm == 64 ? predef_wasm64 : wasm ? predef_wasm32 : predef_aarch64_linux);
 	if (asm_mode && !undef)
 		bstr(&pre, "#define __ASSEMBLER__ 1\n#undef __STDC_VERSION__\n#define __STDC_VERSION__ 201710L\n");
 	else if (!undef && std) {
@@ -1083,7 +1092,7 @@ int ppd_run(int argc, char **argv, const ppd_env *env)
 	} else if (!undef && !asm_mode) {
 		bstr(&pre, "#undef __STDC_VERSION__\n#define __STDC_VERSION__ 201710L\n");
 	}
-	po.target = darwin ? PP_DARWIN : PP_LINUX_AARCH64;
+	po.target = darwin ? PP_DARWIN : wasm == 64 ? PP_WASM64 : wasm ? PP_WASM32 : PP_LINUX_AARCH64;
 	if (opt == 0 && !undef) bstr(&pre, "#undef __OPTIMIZE__\n#define __NO_INLINE__ 1\n");
 	if (os && !undef) bstr(&pre, "#define __OPTIMIZE_SIZE__ 1\n");
 	if ((pie || pic) && !undef) {
@@ -1103,7 +1112,7 @@ int ppd_run(int argc, char **argv, const ppd_env *env)
 		bstr(&pre, gnu89_inline ? "#undef __GNUC_STDC_INLINE__\n#undef __GNUC_GNU_INLINE__\n#define __GNUC_GNU_INLINE__ 1\n"
 					: "#undef __GNUC_GNU_INLINE__\n#undef __GNUC_STDC_INLINE__\n#define __GNUC_STDC_INLINE__ 1\n");
 	if (freestanding) bstr(&pre, "#undef __STDC_HOSTED__\n#define __STDC_HOSTED__ 0\n");
-	if (!darwin && !short_wchar && !undef)	/* the Linux table is for the kernel's -fshort-wchar */
+	if (lnx && !short_wchar && !undef)	/* the Linux table is for the kernel's -fshort-wchar */
 		bstr(&pre, "#undef __ARM_SIZEOF_WCHAR_T\n#define __ARM_SIZEOF_WCHAR_T 4\n"
 			   "#undef __SIZEOF_WCHAR_T__\n#define __SIZEOF_WCHAR_T__ 4\n"
 			   "#undef __WCHAR_MAX__\n#define __WCHAR_MAX__ 4294967295U\n"
@@ -1144,11 +1153,11 @@ int ppd_run(int argc, char **argv, const ppd_env *env)
 	if (cfi && !undef) bstr(&pre, "#define __GCC_HAVE_DWARF2_CFI_ASM 1\n");
 	if (darwin && freestanding && !undef) bstr(&pre, "#undef __GCC_HAVE_DWARF2_CFI_ASM\n");
 	/* the Linux table is for the kernel's -mgeneral-regs-only */
-	if (!darwin && !gregs && !undef)
+	if (lnx && !gregs && !undef)
 		bstr(&pre, "#define __ARM_FP 0xE\n#define __ARM_NEON 1\n#define __ARM_NEON_FP 0xE\n");
 	/* -march wins over -mcpu (clang); Darwin: Apple cores, LSE always */
 	lse = darwin ? 1 : march_lse >= 0 ? march_lse : mcpu_lse >= 0 ? mcpu_lse : 0;
-	if (!darwin && lse && !undef)
+	if (lnx && lse && !undef)
 		bstr(&pre, "#define __ARM_FEATURE_ATOMICS 1\n");
 	if (strict_align) bstr(&pre, "#undef __ARM_FEATURE_UNALIGNED\n");
 	if (tiny) bstr(&pre, "#undef __AARCH64_CMODEL_SMALL__\n#define __AARCH64_CMODEL_TINY__ 1\n");
@@ -1162,7 +1171,7 @@ int ppd_run(int argc, char **argv, const ppd_env *env)
 	bput(&pre, "", 1);
 	po.predef = pre.p;
 	po.main = main_file;
-	po.unsigned_char = uchar >= 0 ? uchar : !darwin;
+	po.unsigned_char = uchar >= 0 ? uchar : lnx;
 	po.cwd = env->cwd;
 	po.errfd = errfd;
 	po.diag_color = dcolor;
@@ -1260,6 +1269,7 @@ int ppd_run(int argc, char **argv, const ppd_env *env)
 		co.nthreads = getenv("VCC_THREADS") ? atoi(getenv("VCC_THREADS")) : 1;
 		co.obj = tl_obj;
 		co.as = tl_as;
+		co.wasm_obj = &tl_wasm_obj;
 		if ((layout || emit == 1) && out && strcmp(out, "-")) {
 			char path[4096];
 
@@ -1297,7 +1307,9 @@ int ppd_run(int argc, char **argv, const ppd_env *env)
 			if (status && outrename)
 				unlink(outtmp);
 		}
-		if (!status && emit == 2)
+		if (!status && emit == 2 && PP_IS_WASM(po.target))
+			status = write_out(env->cwd, out, env->outfd, tl_wasm_obj.p, tl_wasm_obj.n, errfd);
+		else if (!status && emit == 2)
 			status = write_obj(env->cwd, out, env->outfd, errfd, darwin);
 		if (!status && emit == 2 && depfile)
 			status = write_deps(p, env->cwd, depfile, dtarget, dnosys, mphony, dfirst, NULL, -1, errfd);

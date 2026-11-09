@@ -49,6 +49,7 @@ typedef struct attrs {		/* the attributes of one declaration */
 	uint8_t packed, transparent, used, unused, weak, noreturn, constructor, destructor;
 	uint8_t nonstring, may_alias, cold, gnu_inline, always_inline, noinline, ainline, error_fn;
 	uint8_t overloadable, noinstr;
+	uint16_t prio;		/* constructor(N)/destructor(N), 0: none (65535) */
 } attrs;
 
 typedef struct asmop {
@@ -253,6 +254,7 @@ typedef struct cval {
 bool cc_eval(cc *c, uint32_t n, cval *v);
 bool cc_is_signed(cc *c, qty t);
 const char *cc_builtin_name(int64_t i);
+const char *cc_lib_sig(const char *name, int *clang_enc);
 uint32_t cc_global_named(cc *c, const char *s);
 
 #endif

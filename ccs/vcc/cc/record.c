@@ -184,7 +184,7 @@ VPRIV void enum_body(cc *c, uint32_t ti, attrs *after)
 			mx = v;
 		any = true;
 		s = sym_new(c, S_ENUMCONST, name, v >= INT32_MIN && v <= INT32_MAX ? prim(TY_INT) :
-						 v >= 0 && v <= UINT32_MAX ? prim(TY_UINT) : v >= INT64_MIN && v <= INT64_MAX ? prim(TY_LONG) : prim(TY_ULONG), loc);
+						 v >= 0 && v <= UINT32_MAX ? prim(TY_UINT) : v >= INT64_MIN && v <= INT64_MAX ? prim(CC_I64(c, false)) : prim(CC_I64(c, true)), loc);
 		c->syms[s].val = (int64_t)v;
 		sym_bind(c, s);
 		vpush(c, &cs, s);
@@ -202,14 +202,14 @@ VPRIV void enum_body(cc *c, uint32_t ti, attrs *after)
 		} else if (after->packed) {
 			if (mn < 0)
 				best = mn >= INT8_MIN && mx <= INT8_MAX ? prim(TY_SCHAR) : mn >= INT16_MIN && mx <= INT16_MAX ? prim(TY_SHORT) :
-				       mn >= INT32_MIN && mx <= INT32_MAX ? prim(TY_INT) : prim(TY_LONG);
+				       mn >= INT32_MIN && mx <= INT32_MAX ? prim(TY_INT) : prim(CC_I64(c, false));
 			else
 				best = mx <= UINT8_MAX ? prim(TY_UCHAR) : mx <= UINT16_MAX ? prim(TY_USHORT) :
-				       mx <= UINT32_MAX ? prim(TY_UINT) : prim(TY_ULONG);
+				       mx <= UINT32_MAX ? prim(TY_UINT) : prim(CC_I64(c, true));
 		} else if (mn < 0) {
-			best = mn >= INT32_MIN && mx <= INT32_MAX ? prim(TY_INT) : prim(TY_LONG);
+			best = mn >= INT32_MIN && mx <= INT32_MAX ? prim(TY_INT) : prim(CC_I64(c, false));
 		} else {
-			best = mx <= UINT32_MAX ? prim(TY_UINT) : prim(TY_ULONG);
+			best = mx <= UINT32_MAX ? prim(TY_UINT) : prim(CC_I64(c, true));
 		}
 		et->base = best;
 		et->size = ty_size(c, best);

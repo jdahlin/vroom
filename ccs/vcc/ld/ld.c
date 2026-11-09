@@ -4331,10 +4331,18 @@ int ld_main(int argc, char **argv, int dirfd, FILE *err)
 }
 
 #ifdef VLD_MAIN
+int wasm_ld_main(int argc, char **argv);
+
 int main(int argc, char **argv)
 {
 	const char *b = strrchr(argv[0], '/');
 	b = b ? b + 1 : argv[0];
+	/* WebAssembly (wasmld.c): as wasm-ld, or for -mwasm64 */
+	if (strstr(b, "wasm-ld"))
+		return wasm_ld_main(argc, argv);
+	for (int i = 1; i < argc; i++)
+		if (!strcmp(argv[i], "-mwasm64"))
+			return wasm_ld_main(argc, argv);
 	if (strstr(b, "objcopy"))
 		return objcopy_main(argc, argv, AT_FDCWD, stderr);
 	if (strstr(b, "nm") && !strstr(b, "link"))

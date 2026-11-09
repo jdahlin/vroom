@@ -170,6 +170,11 @@ static void data_init(ecx *e, uint64_t off, qty ty, uint32_t init)
 			}
 			return;
 		case CV_ADDR:
+			if (WASM(c) && cv.label) {
+				/* wasm: a label's address is its number (PLAN-wasm.md W4) */
+				data_put(e, off, (uint64_t)cv.label - (cv.sublabel ? (uint64_t)cv.sublabel : 0) + (uint64_t)cv.i, n);
+				return;
+			}
 			if (cv.sublabel && (n == 4 || n == 8)) {
 				/* label difference: ref - sub, resolved by the assembler */
 				data_put(e, off, 0, n);
@@ -188,8 +193,11 @@ static void data_init(ecx *e, uint64_t off, qty ty, uint32_t init)
 				data_reloc(e, off, REF(RK_LBL, cv.label - 1), (int64_t)cv.i);
 			else if (cv.str)
 				data_reloc(e, off, REF(RK_STR, cv.str - 1), (int64_t)cv.i);
-			else
+			else {
 				data_reloc(e, off, REF(RK_SYM, canon_sym(c, cv.sym)), (int64_t)cv.i);
+				if (WASM(c))
+					wasm_data_ref(e, REF(RK_SYM, canon_sym(c, cv.sym)));
+			}
 			return;
 		default:
 			efatal(e, x->loc, "initializer element is not a compile-time constant");
@@ -256,7 +264,7 @@ static void data_bytes(ecx *e, tbuf *b, uint64_t size)
 		if (ri < e->nrel && o == e->rel[ri].off) {
 			uint32_t sz = e->rel[ri].sz ? e->rel[ri].sz : 8;
 
-			tb_s(b, sz == 4 ? "\t.word\t" : "\t.xword\t");
+			tb_s(b, sz == 4 ? (WASM(e->c) ? "\t.int32\t" : "\t.word\t") : WASM(e->c) ? "\t.int64\t" : "\t.xword\t");
 			ref_off(e->c, b, e->rel[ri].ref, e->rel[ri].add);
 			if (e->rel[ri].sub) {
 				tb_c(b, '-');
@@ -286,7 +294,7 @@ static void data_bytes(ecx *e, tbuf *b, uint64_t size)
 
 				/* o < data.n here; past it the bytes are zero, not what the buffer holds */
 				memcpy(&w, d + o, o + 8 <= e->data.n ? 8 : e->data.n - o);
-				tb_s(b, "\t.xword\t");
+				tb_s(b, WASM(e->c) ? "\t.int64\t" : "\t.xword\t");
 				tb_hex(b, w);
 				tb_c(b, '\n');
 				o += 8;
@@ -334,6 +342,59 @@ VPRIV void emit_object(ecx *e, uint32_t s)
 	zero = e->nrel == 0;
 	for (uint64_t i = 0; zero && i < e->data.n; i++)
 		zero = !e->data.p[i];
+	if (WASM(c)) {
+		/* one section per object, as clang writes them */
+		bool global = y->sc != SC_STATIC && y->depth == 0 && y->name;
+
+		if (y->flags & SF_THREAD)
+			efatal(e, y->loc, "wasm: thread-local storage is not supported yet");
+		tb_s(b, "\t.section\t");
+		if (a->section) {
+			tb_s(b, c->strs[a->section - 1].s);
+		} else {
+			/* a quoted name: the whole section name in quotes, as clang */
+			bool q = sym_quoted(c, s);
+			size_t at;
+
+			if (q)
+				tb_c(b, '"');
+			tb_s(b, all_const(c, y->ty) ? ".rodata." : zero ? ".bss." : ".data.");
+			at = b->n;
+			sym_name(c, b, s);
+			if (q) {
+				memmove(b->p + at, b->p + at + 1, b->n - at - 1);
+				b->n--;
+			}
+		}
+		tb_s(b, ",\"\",@\n");
+		if (global) {
+			tb_s(b, (y->flags & SF_WEAK) ? "\t.weak\t" : "\t.globl\t");
+			sym_name(c, b, s);
+			tb_c(b, '\n');
+		}
+		tb_s(b, "\t.p2align\t");
+		tb_u(b, (uint64_t)__builtin_ctz(align ? align : 1));
+		tb_s(b, "\n\t.type\t");
+		sym_name(c, b, s);
+		tb_s(b, ",@object\n");
+		sym_name(c, b, s);
+		tb_s(b, ":\n");
+		if (zero && !e->nrel) {
+			tb_s(b, "\t.zero\t");
+			tb_u(b, size ? size : 1);
+			tb_c(b, '\n');
+		} else {
+			data_bytes(e, b, size);
+		}
+		tb_s(b, "\t.size\t");
+		sym_name(c, b, s);
+		tb_s(b, ", ");
+		tb_u(b, size ? size : 1);
+		tb_c(b, '\n');
+		e->E->nobj++;
+		out_chunk(e, ((uint64_t)s << 1) | 1, start);
+		return;
+	}
 	if (!a->section && (y->flags & SF_THREAD) && !(DARWIN(c) && direct(e)))
 		efatal(e, y->loc, "thread-local storage is not supported");
 	if (direct(e) && (y->flags & SF_THREAD)) {
@@ -453,7 +514,9 @@ VPRIV void emit_string(ecx *e, uint32_t i)
 		out_chunk(e, ((uint64_t)1 << 62) | i, start);
 		return;
 	}
-	if (nul)
+	if (WASM(c))
+		tb_f(b, "\t.section\t.rodata..L.str.%u,\"\",@\n", i);
+	else if (nul)
 		tb_s(b, "\t.section\t.rodata,\"a\",@progbits\n");
 	else
 		tb_f(b, "\t.section\t.rodata.str%u.%u,\"aMS\",@progbits,%u\n", s->esz, s->esz, s->esz);
@@ -485,10 +548,12 @@ VPRIV void emit_string(ecx *e, uint32_t i)
 			uint32_t v = 0;
 
 			memcpy(&v, s->s + k, s->esz);
-			tb_s(b, s->esz == 1 ? "\t.byte\t" : s->esz == 2 ? "\t.short\t" : "\t.word\t");
+			tb_s(b, s->esz == 1 ? "\t.byte\t" : s->esz == 2 ? "\t.short\t" : WASM(c) ? "\t.long\t" : "\t.word\t");
 			tb_u(b, v);
 			tb_c(b, '\n');
 		}
 	}
+	if (WASM(c))
+		tb_f(b, "\t.size\t.L.str.%u, %llu\n", i, (unsigned long long)n);
 	out_chunk(e, ((uint64_t)1 << 62) | i, start);
 }

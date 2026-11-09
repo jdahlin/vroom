@@ -1,5 +1,7 @@
 /* vcc code generator: emitter state, the work queue and threads, emit_tu */
 #include "emitimpl.h"
+#include "../arch/wasm/as/wasmas.h"
+#include "../lib/buf.h"
 
 VPRIV void *reserve(size_t n) { return vreserve(n, MAP_NORESERVE, "vcc: mmap"); }
 
@@ -115,6 +117,7 @@ static void ecx_free(ecx *e, vmreg *r)
 	vmreg_put(&r[13], VMREG_SCRATCH);	/* (copied by keep_make before this) */
 	vmreg_put(&r[14], VMREG_SCRATCH);
 	vmpool_give(&ecxpool, r);
+	wasm_ecx_free(e);
 }
 
 /* a function the previous round generated, if nothing it asked about has been marked since */
@@ -156,7 +159,9 @@ static void do_item(ecx *e, uint32_t it)
 		emit_string(e, it & 0x7fffffffu);
 		return;
 	}
-	if (c->syms[it].kind == S_FUNC) {
+	if (c->syms[it].kind == S_FUNC && WASM(c)) {
+		wasm_emit_function(e, it);
+	} else if (c->syms[it].kind == S_FUNC) {
 		if (!reuse(e, it))
 			emit_function(e, it);
 	} else {
@@ -401,7 +406,8 @@ static int emit_tu1(cc *c, const cc_opts *o, bool write_out, uint8_t *mf, bool *
 	}
 	E.stats = getenv("VCC_EMIT_STATS") != NULL;
 	E.noopt = getenv("VCC_NOOPT") != NULL;
-	E.objtext = getenv("VCC_OBJ_TEXT") != NULL;
+	/* wasm64: objects from the text, through arch/wasm/as */
+	E.objtext = getenv("VCC_OBJ_TEXT") != NULL || PP_IS_WASM(o->target);
 	/* roots */
 	for (uint32_t i = 0; i < c->ntoplevel; i++) {
 		uint32_t s = c->toplevel[i];
@@ -436,12 +442,15 @@ static int emit_tu1(cc *c, const cc_opts *o, bool write_out, uint8_t *mf, bool *
 	/* stitch */
 	qsort(E.chunks, E.nchunk, sizeof(chunk), chunk_cmp);
 	tb_reg(&hdr, &er[12], (size_t)1 << 26, "emit.hdr");
-	tb_s(&hdr, "\t.text\n");
+	if (WASM(c))
+		wasm_header(c, &hdr, ctx, nthr);
+	else
+		tb_s(&hdr, "\t.text\n");
 	for (uint32_t i = 0; i < c->ntlasm; i++) {
 		const casm *a = &c->asms[N(c->tlasm[i])->a];
 
 		tb_s(&hdr, c->strs[a->tmpl - 1].s);
-		tb_s(&hdr, "\n\t.text\n");
+		tb_s(&hdr, WASM(c) ? "\n" : "\n\t.text\n");
 	}
 	{
 		tbuf tail;
@@ -493,7 +502,8 @@ static int emit_tu1(cc *c, const cc_opts *o, bool write_out, uint8_t *mf, bool *
 				tb_c(&tail, '\n');
 			}
 		}
-		tb_s(&tail, "\t.section\t\".note.GNU-stack\",\"\",@progbits\n");
+		if (!WASM(c))
+			tb_s(&tail, "\t.section\t\".note.GNU-stack\",\"\",@progbits\n");
 		iov[k++] = (struct iovec){ hdr.p, hdr.n };
 		for (uint32_t i = 0; i < E.nchunk; i++)
 			iov[k++] = (struct iovec){ (void *)E.chunks[i].p, E.chunks[i].n };
@@ -512,7 +522,20 @@ static int emit_tu1(cc *c, const cc_opts *o, bool write_out, uint8_t *mf, bool *
 				all.n = 0;
 				for (int i = 0; i < k; i++)
 					tb_put(&all, iov[i].iov_base, iov[i].iov_len);
-				if (as_run(o->as, o->obj, all.p, all.n, "<vcc>", &msg)) {
+				if (PP_IS_WASM(o->target)) {
+					uint8_t *ob;
+					size_t on;
+					char err[512];
+
+					if (wasm_assemble(all.p, all.n, &ob, &on, err, sizeof err)) {
+						as_error(c, "assembler: %s", err);
+						E.errors++;
+					} else {
+						o->wasm_obj->n = 0;
+						vbuf_put(o->wasm_obj, ob, on);
+						free(ob);
+					}
+				} else if (as_run(o->as, o->obj, all.p, all.n, "<vcc>", &msg)) {
 					as_error(c, "assembler: %s", msg);
 					E.errors++;
 				}

@@ -435,7 +435,7 @@ static bool lb_type(cc *c, const char **p, qty *out)
 	case 'Y': t = prim(TY_LONG); break;	/* ptrdiff_t */
 	case 'w': t = c->t_wchar; break;
 	case 'P': t = prim(TY_VOID); break;	/* FILE: only ever as P*, a void * */
-	case 'W': t = prim(TY_LONG); break;	/* int64_t */
+	case 'W': t = prim(CC_I64(c, false)); break;	/* int64_t */
 	case 'Z': t = prim(TY_INT); break;	/* int32_t */
 	default: return false;
 	}
@@ -494,6 +494,13 @@ static const struct libbi *libbi_find(const char *n, size_t nl)
 VPRIV bool lib_builtin_known(const char *n)
 {
 	return libbi_find(n, strlen(n)) != NULL;
+}
+
+VPRIV const char *lib_builtin_sig(const char *n)
+{
+	const struct libbi *b = libbi_find(n, strlen(n));
+
+	return b ? b->sig : NULL;
 }
 
 VPRIV uint32_t lib_builtin(cc *c, uint32_t id, uint32_t loc)
@@ -689,7 +696,9 @@ VPRIV void declaration(cc *c, vec *out, bool file)
 		}
 		if (accept(c, T_EQUAL)) {
 			sym *y = &c->syms[s];
-			qty it = t;
+			/* int a[]: the size of an earlier declaration (the composite type), if it had one */
+			qty it = is_array(c, t) && (T(c, t)->flags & TF_INCOMPLETE) && is_array(c, y->ty) &&
+				 !(T(c, y->ty)->flags & (TF_INCOMPLETE | TF_VLA)) ? QT(QI(y->ty), QQ(t)) : t;
 			bool st = file || ds.sc == SC_STATIC;
 			uint32_t v;
 

@@ -176,6 +176,7 @@ footer code { font-family: var(--font-code); font-size: 11.5px; }
 		<select id="target">
 			<option value="aarch64-linux-gnu">aarch64-linux-gnu</option>
 			<option value="arm64-apple-macos">arm64-apple-macos</option>
+			<option value="wasm64-unknown-emscripten">wasm64-unknown-emscripten</option>
 		</select>
 	</div>
 	<div class="ctl" role="group" aria-label="Optimisation level"><span>Opt</span>
@@ -551,7 +552,8 @@ function renderOutput() {
 		st.asmFns = {};
 		return;
 	}
-	$("outt").textContent = "arm64 assembly";
+	const wasm = $("target").value.startsWith("wasm");
+	$("outt").textContent = wasm ? "wasm64 assembly" : "arm64 assembly";
 	const lines = text.split("\n");
 	if (lines.length && lines[lines.length - 1] === "") lines.pop();
 	/* functions: .type name,@function (ELF) or a global label in __TEXT (Mach-O) */
@@ -580,6 +582,7 @@ function renderOutput() {
 		let cname = null;
 		if (lab && isFn.has(lab[1])) {
 			cname = darwin ? lab[1].replace(/^_/, "") : lab[1];
+			if (wasm && /^__(original_main|main_argc_argv)$/.test(cname)) cname = "main";
 			cur = cname;
 			if (!asmFns[cur]) asmFns[cur] = { k: k++, first: -1 };
 		} else if (/^\s*\.size\s/.test(l) || /^\.Lfe\d+:/.test(l)) {
@@ -597,7 +600,7 @@ function renderOutput() {
 		const style = fk >= 0 ? ` style="--fc:${fnColor(fk)}"` : "";
 		html += `<div class="row${cname ? " fnlab" : ""}${fk >= 0 && st.hover === f ? " hl" : ""}" data-fn="${f || ""}"${style}><span class="no">${i + 1}</span><span class="tx">${hlAsm(l) || " "}</span></div>`;
 		shown++;
-		if (/^\s*\.size\s/.test(l)) cur = null;
+		if (/^\s*\.size\s/.test(l) || /^\s*end_function\b/.test(l)) cur = null;
 	}
 	st.asmFns = asmFns;
 	out.innerHTML = html || `<div class="empty">No code: the file defines no functions or data.</div>`;

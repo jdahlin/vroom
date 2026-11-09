@@ -1,8 +1,10 @@
 /*
  * vasm: assembler driver.  vasm [-o out.o] in.s  (input: preprocessed text)
+ *       vasm --target=wasm64-unknown-emscripten [-o out.o] in.s  (LLVM's wasm syntax)
  *       vasm --bench N in.s...  (assemble each file N times, report MB/s)
  */
 #include "as.h"
+#include "../arch/wasm/as/wasmas.h"
 #include "../obj/obj.h"
 #include "../lib/vperf.h"
 #include <fcntl.h>
@@ -79,13 +81,24 @@ int main(int argc, char **argv)
 		       (unsigned long long)vbest.ins, (unsigned long long)vbest.cyc, bench - 1, (unsigned long long)h);
 		return 0;
 	}
+	int wasm = 0;
 	for (int i = 1; i < argc; i++) {
 		if (!strcmp(argv[i], "-o") && i + 1 < argc) out = argv[++i];
+		else if (!strncmp(argv[i], "--target=wasm", 13)) wasm = 1;
 		else in = argv[i];
 	}
-	if (!in) { fprintf(stderr, "usage: vasm [-o out.o] in.s\n"); return 2; }
+	if (!in) { fprintf(stderr, "usage: vasm [--target=wasm64-...] [-o out.o] in.s\n"); return 2; }
 	size_t n; const char *p = map(in, &n);
 	const char *msg;
+	if (wasm) {
+		/* LLVM's wasm .s to a wasm object (arch/wasm/as, platform/wasm) */
+		uint8_t *ob; size_t on; char err[512];
+		if (wasm_assemble(p, n, &ob, &on, err, sizeof err)) { fprintf(stderr, "%s: %s\n", in, err); return 1; }
+		FILE *f = fopen(out, "wb");
+		if (!f || fwrite(ob, 1, on, f) != on || fclose(f)) { perror(out); return 1; }
+		free(ob);
+		return 0;
+	}
 	if (as_run(a, o, p, n, in, &msg)) { fprintf(stderr, "%s\n", msg); return 1; }
 	if (elf_write_file(o, out)) { fprintf(stderr, "%s: %s\n", in, o->err); return 1; }
 	return 0;

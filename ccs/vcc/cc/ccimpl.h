@@ -319,6 +319,11 @@ static inline bool at_std_attr(cc *c);
 VPRIV __attribute__((noinline)) void attribute_list_(cc *c, attrs *a);
 static inline void attribute_list(cc *c, attrs *a);
 static inline bool attrs_empty(const attrs *a);
+/* the data model: LP64, but ILP32 for wasm32 (long and pointers 4 bytes) */
+#define CC_ILP32(c) ((c)->o->target == PP_WASM32)
+#define CC_PTRSIZE(c) (CC_ILP32(c) ? 4u : 8u)
+/* the 64-bit integer type: long, or long long under ILP32 */
+#define CC_I64(c, uns) (CC_ILP32(c) ? ((uns) ? TY_ULLONG : TY_LLONG) : ((uns) ? TY_ULONG : TY_LONG))
 VPRIV void merge_attrs(attrs *to, const attrs *from);
 VPRIV void asm_label(cc *c, attrs *a);
 /* declspec.c */
@@ -342,6 +347,7 @@ VPRIV uint32_t initializer(cc *c, qty *ty, bool st);
 VPRIV void apply_sym_attrs(cc *c, sym *s, const attrs *a);
 VPRIV uint32_t lib_builtin(cc *c, uint32_t id, uint32_t loc);
 VPRIV bool lib_builtin_known(const char *n);
+VPRIV const char *lib_builtin_sig(const char *n);
 /* mangle.c */
 VPRIV void name_overload(cc *c, uint32_t s);
 /* decl.c */

@@ -8,7 +8,7 @@ cd "$(dirname "$0")/.."
 OUT=${OUT:-../build/wasm}
 mkdir -p $OUT/obj
 CFLAGS="-Iwasm/compat -std=c11 -O2 -sMEMORY64=1 -msimd128 -mfpu=neon -D_GNU_SOURCE -DVCC_INCDIR=\"/vcc/include\" -Wno-unused-parameter ${WFLAGS}"
-SRC="vcc/driver/vpp.c vcc/lex/lex.c vcc/lib/intern.c vcc/arch/a64/as/enc.c vcc/platform/darwin/macho.c
+SRC="vcc/driver/vpp.c vcc/lex/lex.c vcc/lib/intern.c vcc/arch/a64/as/enc.c vcc/platform/darwin/macho.c vcc/arch/wasm/as/as.c vcc/platform/wasm/wasm.c
  vcc/pp/dircache.c vcc/driver/ppdriver.c vcc/driver/ccsnap.c vcc/lib/ldhash.c"
 for m in as obj cc pp emit; do
 	case $m in
@@ -16,7 +16,7 @@ for m in as obj cc pp emit; do
 	obj) f="vcc/obj/obj.c vcc/arch/a64/obj/fixup.c vcc/platform/linux/elf.c";;
 	cc) f=$(ls vcc/cc/*.c);;
 	pp) f=$(ls vcc/pp/*.c | grep -v dircache);;
-	emit) f=$(ls vcc/emit/*.c vcc/arch/a64/emit/*.c);;
+	emit) f=$(ls vcc/emit/*.c vcc/arch/a64/emit/*.c vcc/arch/wasm/emit/*.c);;
 	esac
 	{ echo '#define VCC_UNITY 1'; for x in $f; do echo "#include \"$PWD/$x\""; done; } > $OUT/obj/u-$m.c
 	SRC="$SRC $OUT/obj/u-$m.c"

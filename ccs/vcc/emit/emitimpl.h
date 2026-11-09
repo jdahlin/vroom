@@ -84,6 +84,23 @@
 /* Apple arm64 (Mach-O): '_' names, GOT for symbols outside the TU, variadic
  * arguments on the stack, va_list a char *, stack arguments packed */
 #define DARWIN(c) ((c)->o->target == PP_DARWIN)
+/* WebAssembly (wasm64): arch/wasm/emit/ generates the functions, data.c the data */
+#define WASM(c) PP_IS_WASM((c)->o->target)
+#define WASM32(c) ((c)->o->target == PP_WASM32)
+
+/*
+ * A C99 inline definition or GNU extern inline: not emitted (another TU
+ * has the definition).  The wasm target has no inliner, so it emits a local
+ * copy of one it calls, as clang's inlining would make it unneeded.
+ */
+static inline bool inline_only(const sym *y)
+{
+	if (y->kind != S_FUNC || !(y->flags & SF_DEFINED) || !y->body)
+		return false;
+	if ((y->flags & SF_GNU_INLINE) && !(y->flags & SF_INLINE_NOEXTERN))
+		return true;
+	return (y->flags & SF_INLINE) && !(y->flags & SF_GNU_INLINE) && y->sc != SC_EXTERN && y->sc != SC_STATIC;
+}
 /* a symbol offset the relocation itself can carry: ELF RELA 32 bits here, a
  * Mach-O ARM64_RELOC_ADDEND 24 bits signed (clang adds the rest in code) */
 #define SYMOFF_OK(c, off) (DARWIN(c) ? (off) >= -(1 << 23) && (off) < (1 << 23) : (off) >= INT32_MIN && (off) <= INT32_MAX)
@@ -347,6 +364,7 @@ typedef struct ecx {
 	uint32_t *rlog;		/* this round's item logs: (RL_*, value) pairs */
 	size_t nrlog, rlog0;	/* ... and where the current item's starts */
 	jmp_buf bail;
+	struct wst *w;		/* WASM: arch/wasm/emit/ state (wimpl.h) */
 } ecx;
 enum { FN_MEMCPY, FN_MEMSET, FN_MEMMOVE, FN_UDIVTI3, FN_DIVTI3, FN_UMODTI3, FN_MODTI3, FN_STRLEN,
        FN_ASHLTI3, FN_LSHRTI3, FN_ASHRTI3, FN_FLOATTISF, FN_FLOATTIDF, FN_FLOATUNTISF, FN_FLOATUNTIDF,
@@ -504,6 +522,7 @@ VPRIV __attribute__((format(printf, 3, 4), noreturn)) void efatal(ecx *e, uint32
 VPRIV uint32_t canon_sym(cc *c, uint32_t s);
 VPRIV const attrs *sym_attrs(cc *c, uint32_t s);
 VPRIV void sym_name(cc *c, tbuf *b, uint32_t s);
+VPRIV bool sym_quoted(cc *c, uint32_t s);
 VPRIV void ref_name(cc *c, tbuf *b, uint32_t r);
 VPRIV void ref_off(cc *c, tbuf *b, uint32_t r, int64_t off);
 /* darwin.c */
@@ -678,6 +697,11 @@ VPRIV void emit_function(ecx *e, uint32_t s);
 /* data.c */
 VPRIV void emit_object(ecx *e, uint32_t s);
 VPRIV void emit_string(ecx *e, uint32_t i);
+/* arch/wasm/emit/ */
+VPRIV void wasm_emit_function(ecx *e, uint32_t s);
+VPRIV void wasm_ecx_free(ecx *e);
+VPRIV void wasm_data_ref(ecx *e, uint32_t ref);
+VPRIV void wasm_header(cc *c, tbuf *hdr, ecx *ctx, int nthr);
 /* prepass.c */
 VPRIV bool is_aconst(cc *c, uint32_t n);
 VPRIV uint32_t aconst_idx(cc *c, uint32_t n);

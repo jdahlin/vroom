@@ -201,6 +201,27 @@ static const builtin builtins[] = {
 /* name of a library builtin (sym val of an S_BUILTIN) */
 const char *cc_builtin_name(int64_t i) { return builtins[i].name; }
 
+/* the prototype clang gives an implicitly declared library function name (no
+ * declaration made): vcc's signature letters (*clang_enc 0, see sigtype) or
+ * Builtins.def's (1); NULL: not one */
+const char *cc_lib_sig(const char *name, int *clang_enc)
+{
+	char b[128];
+	size_t n = strlen(name);
+
+	if (n + 11 > sizeof b)
+		return NULL;
+	memcpy(b, "__builtin_", 10);
+	memcpy(b + 10, name, n + 1);
+	for (uint32_t i = 0; builtins[i].name; i++)
+		if (builtins[i].id == BI_LIB && !strcmp(builtins[i].name, b)) {
+			*clang_enc = 0;
+			return builtins[i].sig;
+		}
+	*clang_enc = 1;
+	return lib_builtin_sig(b);
+}
+
 static qty sigtype(cc *c, char ch)
 {
 	switch (ch) {

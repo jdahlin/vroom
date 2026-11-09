@@ -16,7 +16,8 @@ assembler, linker, behind `vcc`/`vas`/`vld` shims and the `vccd` server.
   parallel diff runs.
 
 ## Layout
-- `PLAN.md`, `PLAN-fas2.md`: plans and per-step status (Swedish).  Update the
+- `PLAN.md`, `PLAN-fas2.md`, `PLAN-wasm.md` (WebAssembly as a target): plans
+  and per-step status (Swedish).  Update the
   status section of a step when it changes.
 - `RESEARCH-preprocessor.md`: preprocessor design and prior art.
 - `ccs/`: our code; `ccs/Makefile` builds into `build/ccs/`.  Under `ccs/vcc/`
@@ -42,7 +43,8 @@ assembler, linker, behind `vcc`/`vas`/`vld` shims and the `vccd` server.
   - `obj/`: the in-memory object (`obj.h`: sections, frags, symbols, fixups)
     and its layout; with `arch/<cpu>/obj/fixup.c` and `platform/linux/elf.c`
     one module (`obj_SRC`, internal header `objimpl.h`).
-  - `ld/`: the linker `vlink` (`ld.c`, one TU) and `vobjcopy`/`vnm`.
+  - `ld/`: the linker `vlink` (`ld.c`, one TU) and `vobjcopy`/`vnm`;
+    `wasmld.c` is vlink for WebAssembly (as `wasm-ld` or with `-mwasm64`).
   - `driver/`: one compile job from a clang command line (`ppdriver.c`), the
     declaration cache (`ccsnap.c`) and `vpp`, the driver for parity tests.
   - `vccd/`: the server, the `vcc`/`vas`/`vld`/`var`/`vsh` shim (`shim.c`),
@@ -63,9 +65,18 @@ assembler, linker, behind `vcc`/`vas`/`vld` shims and the `vccd` server.
     and Apple's), builtins, inline asm, the record optimizer (`opt.c`), the
     printer (`print.c`) and the encoder of records (`obj.c`).  It is compiled
     in the `emit` unity TU (`emit_SRC`), so VPRIV stays static.
+  - `arch/wasm/emit/`: the WebAssembly (wasm64) code generator, AST to
+    LLVM's wasm `.s` (`wimpl.h`; `wasm.c` functions, ABI, header; `wexpr.c`,
+    `wcall.c`, `wstmt.c`), also in the `emit` unity TU: every name starts
+    with `w`.  `emit/` picks it per target (`WASM(c)`); PLAN-wasm.md.
+  - `arch/wasm/as/`: the wasm assembler (`as.c`, model in `was.h`, interface
+    `wasmas.h`): LLVM's wasm `.s` to a relocatable object; `-c` for wasm64
+    and `vasm --target=wasm64-...` go through it.
   - `platform/linux/`: the ELF writer (`elf.c`: relocations, string table,
     file layout as LLVM MC).
   - `platform/darwin/`: the Mach-O writer; Apple PMU counters (`pmc.c`).
+  - `platform/wasm/`: the wasm object writer (`wasm.c`: layout, symbol table,
+    relocations as LLVM's WasmObjectWriter, byte for byte).
   - `pp/`, `cc/` and `emit/` (with `arch/<cpu>/emit/`) are directories of
     files by topic, one internal header each (`ppimpl.h`, `ccimpl.h`, `emitimpl.h`) with the types, macros
     and prototypes the files share; a shared function is `VPRIV` (static in
@@ -116,6 +127,10 @@ bench/vcc-bflayout.py               # generated bit-field records, layouts check
 bench/vcc-ldconst.py                # generated long double literals and folds, bits vs clang (~2 s)
 bench/vccd-test.py                  # vccd as a service: socket, bad requests, cache invalidation (~11 s)
 bench/vbench.py gate                # performance gate: instructions vs the merge-base, budget 1 % (~1 min)
+bench/vcc-wasm.py -j 6              # the C suites for wasm64: vcc -S, clang -c, emcc, node vs clang's build (~2 min)
+bench/vcc-wasm.py -j 6 --objcmp     # ... and vpp -c's object byte-identical to clang's for the same .s
+bench/vcc-wasm.py -j 6 --obj --vlink  # ... vcc's side through vpp -c and vlink as emcc's wasm-ld (~9 min)
+bench/vcc-same.py --base DIR -j 6    # test-suite outputs byte-identical with DIR/vpp (vbench.py mkbase REV), ~80 s
 bench/vas-enc.py $PWD/ccs/vcc/tests/vas   # vas encodings vs llvm-mc
 bench/vas-obj.py                    # vasm objects vs clang -c byte for byte (ccs/vcc/tests/vas-obj, <1 s)
 bench/vas-corpus.py -j 6 [-O2] [PAT] # clang -S of the test C files: clang -c vs vasm (~6 min for -O0 -O2)
