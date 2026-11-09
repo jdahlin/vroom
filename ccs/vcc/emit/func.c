@@ -74,7 +74,7 @@ VPRIV void sym_header(ecx *e, tbuf *b, uint32_t s, bool fn, const char *defsec, 
 }
 
 /* finish_function for the object backend: the same function as items */
-/* ctor: 1 constructor, 2 destructor, 4 x28 is the frame base (mov x28, sp after the saves) */
+/* ctor: 1 constructor, 2 destructor, 4 x28 is the frame base (mov x28, sp after the saves), 8 no frame (leaf) */
 static void finish_direct(ecx *e, uint32_t s, uint32_t align, const int *cs, int ncs, int32_t csave, int32_t total, int ctor)
 {
 	cc *c = e->c;
@@ -93,9 +93,10 @@ static void finish_direct(ecx *e, uint32_t s, uint32_t align, const int *cs, int
 	ch = it_room(e, sizeof *ch);
 	in = it_room(e, ((size_t)e->nin + 2 * (size_t)ncs + 8) * sizeof(ins));
 #define PUT(...) (in[n++] = (ins){ __VA_ARGS__ })
-	PUT(.op = I_STP, .sz = 1, .rd = R_FP, .ra = R_LR, .rn = SP, .cond = 1, .imm = -16);
-	PUT(.op = I_MOV, .sz = 1, .rd = R_FP, .rn = SP);
-	if (e->falign > 16) {	/* sp = (sp - frame) & -falign */
+	if (ctor & 8)
+		;
+	else if (PUT(.op = I_STP, .sz = 1, .rd = R_FP, .ra = R_LR, .rn = SP, .cond = 1, .imm = -16),
+		 PUT(.op = I_MOV, .sz = 1, .rd = R_FP, .rn = SP), e->falign > 16) {	/* sp = (sp - frame) & -falign */
 		PUT(.op = I_SUBI, .sz = 1, .rd = R_X16, .rn = SP, .imm = total - 16);
 		PUT(.op = I_ANDI, .sz = 1, .rd = SP, .rn = R_X16, .imm = -(int64_t)e->falign);
 	} else if (total > 16) {
@@ -113,8 +114,10 @@ static void finish_direct(ecx *e, uint32_t s, uint32_t align, const int *cs, int
 		PUT(.op = I_LDP, .sz = 1, .rd = (uint8_t)cs[k], .ra = (uint8_t)cs[k + 1], .rn = R_FP, .imm = -csave + 8 * k);
 	if (ncs & 1)
 		PUT(.op = I_LD, .sz = 3, .rd = (uint8_t)cs[ncs - 1], .rn = R_FP, .imm = -csave + 8 * (ncs - 1));
-	PUT(.op = I_MOV, .sz = 1, .rd = SP, .rn = R_FP);
-	PUT(.op = I_LDP, .sz = 1, .rd = R_FP, .ra = R_LR, .rn = SP, .cond = 2, .imm = 16);
+	if (!(ctor & 8)) {
+		PUT(.op = I_MOV, .sz = 1, .rd = SP, .rn = R_FP);
+		PUT(.op = I_LDP, .sz = 1, .rd = R_FP, .ra = R_LR, .rn = SP, .cond = 2, .imm = 16);
+	}
 	PUT(.op = I_RET);
 #undef PUT
 	/* give back the unused room, then the inline asm text */
@@ -176,12 +179,31 @@ static void finish_function(ecx *e, uint32_t s)
 	const attrs *a = sym_attrs(c, s);
 	uint32_t align = 4;
 
-	bool bp = e->falign > 16 && e->dyn;
+	bool bp = e->falign > 16 && e->dyn, leaf = false;
 
 	if (e->E->o->opt >= 1) {	/* -O1 and up */
+		unsigned fl;
+		uint64_t u;
+		const uint32_t csm = (1u << 29) - (1u << 19);	/* x19-x28 */
+
 		drop_fallthrough(e);
 		if (!e->E->noopt)
 			opt_function(e);
+		/*
+		 * What the records still need: callee-saved registers the clean-ups
+		 * left unused (register variables, saved temporaries) are not saved,
+		 * a frame no slot is referenced in has no locals, and a function
+		 * that needs nothing of a frame has none (as clang: leaf frame
+		 * pointers omitted).
+		 */
+		u = opt_regs(e, &fl);
+		if (!(fl & OPF_ALL)) {
+			e->usedcs &= ((uint32_t)u & csm) | ~csm;
+			if (!(fl & OPF_FRAME) && !e->dyn && e->falign <= 16)
+				e->fmax = 0;
+			leaf = !(fl & (OPF_CALL | OPF_FRAME)) && !e->dyn && !bp && e->falign <= 16 && !e->outmax &&
+			       !(e->usedcs & csm) && !(u & ((1ull << 29) | (1ull << 30)));
+		}
 	}
 
 	/*
@@ -235,13 +257,14 @@ static void finish_function(ecx *e, uint32_t s)
 	if (c->syms[s].align > align)
 		align = c->syms[s].align;
 	if (direct(e)) {
-		finish_direct(e, s, align, cs, ncs, csave, total, (a->constructor != 0) | (a->destructor != 0) << 1 | bp << 2);
+		finish_direct(e, s, align, cs, ncs, csave, total, (a->constructor != 0) | (a->destructor != 0) << 1 | bp << 2 | leaf << 3);
 		return;
 	}
 	sym_header(e, b, s, true, "\t.text\n", align);
 	/* prologue */
-	tb_s(b, "\tstp\tx29, x30, [sp, #-16]!\n\tmov\tx29, sp\n");
-	if (e->falign > 16) {
+	if (leaf)
+		;
+	else if (tb_s(b, "\tstp\tx29, x30, [sp, #-16]!\n\tmov\tx29, sp\n"), e->falign > 16) {
 		ins i = { .op = I_SUBI, .sz = 1, .rd = R_X16, .rn = SP, .imm = total - 16 };
 		ins a = { .op = I_ANDI, .sz = 1, .rd = SP, .rn = R_X16, .imm = -(int64_t)e->falign };
 
@@ -265,7 +288,7 @@ static void finish_function(ecx *e, uint32_t s)
 		tb_f(b, "\tldp\tx%d, x%d, [x29, #%d]\n", cs[k], cs[k + 1], -csave + 8 * k);
 	if (ncs & 1)
 		tb_f(b, "\tldr\tx%d, [x29, #%d]\n", cs[ncs - 1], -csave + 8 * (ncs - 1));
-	tb_s(b, "\tmov\tsp, x29\n\tldp\tx29, x30, [sp], #16\n\tret\n.Lfe");
+	tb_s(b, leaf ? "\tret\n.Lfe" : "\tmov\tsp, x29\n\tldp\tx29, x30, [sp], #16\n\tret\n.Lfe");
 	tb_u(b, s);
 	tb_s(b, ":\n\t.size\t");
 	sym_name(c, b, s);

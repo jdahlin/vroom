@@ -1056,6 +1056,38 @@ static void dead(ecx *e)
 	}
 }
 
+/*
+ * For the frame, after the clean-ups: the registers the records read or
+ * write (inline asm: what it writes, and its reads but x18/x29/x30, which
+ * every asm lists).  *fl: OPF_ALL a record may touch any register,
+ * OPF_CALL a call, OPF_FRAME a frame slot is referenced.
+ */
+VPRIV uint64_t opt_regs(ecx *e, unsigned *fl)
+{
+	const ins *in = e->in;
+	rmask u = 0;
+	unsigned f = 0;
+
+	rawp = e->raw.p;
+	for (uint32_t k = 0; k < e->nin; k++) {
+		const ins *i = &in[k];
+		unsigned ro = roles(i);
+		rmask r = reads(i, ro), w = writes(i, ro);
+
+		if (ro & OP_ALL)
+			f |= OPF_ALL;
+		if (ro & OP_CALL)
+			f |= OPF_CALL, w &= ~CALLW;	/* (a call's own clobbers are not the function's) */
+		if (ro & OP_ASM)
+			r &= ~(RB(18) | RB(29) | RB(30));
+		if (i->rn == FRAME)
+			f |= OPF_FRAME;
+		u |= r | w;
+	}
+	*fl = f;
+	return u;
+}
+
 /* copy propagation (forward, then backward) and dead copies */
 static void copies(ecx *e)
 {
