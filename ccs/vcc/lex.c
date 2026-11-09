@@ -1355,6 +1355,9 @@ static char *read_file(int fd, size_t size, size_t *got)
 		n += (size_t)r;
 	}
 	memset(b + n, 0, 128);
+	/* a UTF-8 byte order mark is not text (clang skips it): blanks keep the columns */
+	if (n >= 3 && (unsigned char)b[0] == 0xef && (unsigned char)b[1] == 0xbb && (unsigned char)b[2] == 0xbf)
+		b[0] = b[1] = b[2] = ' ';
 	*got = n;
 	return b;
 }

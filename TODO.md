@@ -575,7 +575,9 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
   *Validate:* `ccs/fuzz/regress/pp/` style files + `make -C ccs fuzz-diff`
   extended with a directory fixture (symlink, hardlink, `a/../a/x.h`),
   compared with `clang -E -P`.
-- [ ] **UTF-8 BOM not skipped** [P].  *Validate:* pp-diff fixture.
+- [x] **UTF-8 BOM not skipped** [P].  *Done:* read_file blanks a leading BOM
+  (columns kept); tests/vcc/bom.c with bom_inc.h.  (vlex_get_hook inputs,
+  fuzz-pp, are not filtered.)
 - [ ] **Trigraphs** under strict `-std=c89/c99/c11/c17` or `-trigraphs` [P].
   *Validate:* pp-diff fixtures with each `-std`.
 - [ ] **`SOURCE_DATE_EPOCH`; `__TIMESTAMP__` from file mtime** [P].  (SOURCE_DATE_EPOCH
