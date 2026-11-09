@@ -21,6 +21,8 @@
 #include <errno.h>
 #include <fcntl.h>
 #include <setjmp.h>
+#include <poll.h>
+#include <sys/socket.h>
 #include <stdatomic.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -350,6 +352,17 @@ static int write_all(int fd, const char *p, size_t n)
 /* outputs go to a temporary next to the target, renamed over it when complete:
    an interrupted or failed job leaves the old file or none, never a torn one */
 _Thread_local int ppd_umask = -1;
+_Thread_local int ppd_conn = -1;
+
+/* the client closed its end (it was killed, or make was interrupted): the
+ * request is all it sends, so anything readable now is the EOF */
+static bool client_gone(void)
+{
+	struct pollfd pf = { ppd_conn, POLLIN, 0 };
+	char c;
+
+	return ppd_conn >= 0 && poll(&pf, 1, 0) == 1 && recv(ppd_conn, &c, 1, MSG_PEEK | MSG_DONTWAIT) == 0;
+}
 
 /* a new output's mode: the client's umask under vccd */
 static void out_mode(int fd)
@@ -379,6 +392,11 @@ static int write_file(const char *cwd, const char *path, const char *s, size_t n
 	int fd;
 
 	bool tmp = tmp_name(t, sizeof(t), f);
+
+	if (client_gone()) {
+		dprintf(errfd, "vcc: %s not written: the client has gone\n", path);
+		return 1;
+	}
 
 	fd = open(t, O_WRONLY | O_CREAT | O_TRUNC | O_CLOEXEC, 0666);
 	if (fd >= 0 && tmp)
@@ -1022,6 +1040,8 @@ int ppd_run(int argc, char **argv, const ppd_env *env)
 			ppd_ph_add(PPD_PH_CC, v1);
 		}
 		if (fd >= 0) {
+			if (!status && client_gone())
+				status = 1;	/* (the temporary is removed below) */
 			if (close(fd) || (!status && outrename && rename(outtmp, outpath))) {
 				dprintf(errfd, "vcc: error: cannot write %s: %s\n", out, strerror(errno));
 				status = 1;

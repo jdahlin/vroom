@@ -1042,7 +1042,9 @@ static void *worker_main(void *arg)
 				status = (int32_t)VROOM_STATUS_MISMATCH, kind = "mismatch";
 			} else {
 				gen_enter(h->pgrp);
+				ppd_conn = conn;
 				status = handle(&r, &kind);
+				ppd_conn = -1;
 				gen_leave();
 			}
 		}

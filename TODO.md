@@ -415,7 +415,10 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
   worker to a connection until the request is complete.
   *Validate:* T12 (open 2×ncpu idle connections, then a real job completes
   within 1 s).
-- [ ] **Jobs not cancelled on client exit; SIGTERM exits mid-job** [R].  (SIGTERM
+- [x] **Jobs not cancelled on client exit; SIGTERM exits mid-job** [R].  *Done:* a
+  job whose client's connection reads EOF writes no output (checked before
+  each write and the rename); the work itself still runs to the end.
+  vccd-test killed-client-no-output.  (SIGTERM
   done: the listening socket closes and is unlinked, queued and running jobs
   finish, then exit; vccd-test sigterm-drains.  Cancel on client exit open.)
   `vccd.c:979,1017`.  Detect peer close (kqueue EV_EOF / poll POLLHUP) and

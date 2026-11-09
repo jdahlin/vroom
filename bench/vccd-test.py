@@ -232,6 +232,23 @@ def request_env_reaches_job():
     finally: v.stop()
 
 @test()
+def killed_client_no_output():
+    """the shim killed during a long job: no object is written, and the server keeps serving"""
+    v = Vccd()
+    try:
+        d = f'{v.dir}/w'
+        src = tu(d, 'big.c', ''.join(f'int f{i}(int x) {{ return x * {i} + (x >> 3) - {i}; }}\n' for i in range(600000)))
+        p = subprocess.Popen([SHIM] + TARGET + ['-c', '-o', 'big.o', src], cwd=d, env=dict(os.environ, VCC_SOCK=v.sock),
+                             stderr=subprocess.DEVNULL, process_group=0)
+        time.sleep(0.4)
+        p.kill(); p.wait()
+        time.sleep(3)
+        check(not os.path.exists(f'{d}/big.o'), 'object written for a client that had gone')
+        check(not [f for f in os.listdir(d) if f.endswith('.tmp')], 'temporary left behind')
+        st, err = v.cc(d, tu(d)); check(st == 0, f'server after: {st} {err[-300:]}')
+    finally: v.stop()
+
+@test()
 def other_build_refused():
     """a request from another build of the shim gets the mismatch status, not service"""
     v = Vccd()

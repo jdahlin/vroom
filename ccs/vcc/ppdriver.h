@@ -8,6 +8,8 @@ typedef struct ppd_env {
 
 /* the client's umask for files a job creates (-1: the process's own) */
 extern _Thread_local int ppd_umask;
+/* vccd: the client's connection; a job whose client has gone writes no output */
+extern _Thread_local int ppd_conn;
 
 /* one -E job; argv[0] is ignored.  Returns the exit status. */
 int ppd_run(int argc, char **argv, const ppd_env *env);
