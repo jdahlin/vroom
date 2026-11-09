@@ -27,6 +27,14 @@ def cp_width(c):
     return 1
 
 
+def pad_at(s, ls, le, f):
+    """diag.c pp_pad_at: an insertion widens clang's caret line unless a blank is next to it"""
+    x = f['start']['offset']
+    if f.get('end') and f['end'].get('offset') != x:
+        return False
+    return (x == ls or s[x - 1] not in (32, 9)) and (x >= le or s[x] not in (32, 9))
+
+
 def dcols(s, b, e, col=0):
     """display columns of s[b:e] from col (pp/diag.c dcols): tabs to the next multiple of 8,
     UTF-8 by its code point's width, a malformed byte one column"""
@@ -130,6 +138,8 @@ class Renderer:
         fixes = [f for f in d['fixits'] if same(f['start']) and ls <= f['start']['offset'] <= le and f['text']]
         for f in fixes:
             c0 = dcols(s, ls, f['start']['offset'])
+            if not pad_at(s, ls, le, f) or c0 <= len(cl):
+                continue
             if c0 > len(cl):
                 cl += b' ' * (c0 - len(cl))
         out += b' ' * (width + 2) + b'| ' + cl + b'\n'
@@ -273,7 +283,7 @@ class Renderer:
                  f['start']['path'] == path and ls <= f['start']['offset'] <= le and f['text']]
         for f in fixes:
             c0 = dcols(s, ls, f['start']['offset'])
-            if rn < c0 <= lw:
+            if rn < c0 <= lw and pad_at(s, ls, le, f):
                 rn = c0
         if not rn and not fixes:
             return

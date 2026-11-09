@@ -269,12 +269,12 @@ static bool ptr_ok(cc *c, qty a, qty b)
 
 /* clang's DiagRuntimeBehavior: nothing in unevaluated operands and constant expressions, and in a
    function nothing in code its CFG finds unreachable (at file scope a dead ?: branch still warns) */
-static bool quiet_const(const cc *c)
+VPRIV bool quiet_rt(const cc *c)
 {
 	return c->unevaluated || c->cexpr || (c->dead && c->fn);
 }
 
-static void i128s(char *b, size_t n, i128 v)
+VPRIV void i128s_(char *b, size_t n, i128 v)
 {
 	char t[48];
 	int k = 0;
@@ -304,7 +304,7 @@ static __attribute__((cold, noinline)) void const_conv(cc *c, uint32_t n, qty to
 	pp_span r;
 	vdiag *d;
 
-	if (quiet_const(c))	/* clang: DiagRuntimeBehavior */
+	if (quiet_rt(c))	/* clang: DiagRuntimeBehavior */
 		return;
 	while (x->op == N_CAST && !c->span[n].e)	/* implicit conversions */
 		n = x->a, x = N(n);
@@ -332,9 +332,9 @@ static __attribute__((cold, noinline)) void const_conv(cc *c, uint32_t n, qty to
 		return;
 	nv = trunc_to(c, v.i, to);
 	r = rng(c, n);
-	i128s(a, sizeof a, v.i), i128s(b, sizeof b, nv);
-	i128s(los, sizeof los, is_signed(c, to) ? -((i128)1 << (w - 1)) : 0);
-	i128s(his, sizeof his, is_signed(c, to) ? ((i128)1 << (w - 1)) - 1 : ((i128)1 << w) - 1);
+	i128s_(a, sizeof a, v.i), i128s_(b, sizeof b, nv);
+	i128s_(los, sizeof los, is_signed(c, to) ? -((i128)1 << (w - 1)) : 0);
+	i128s_(his, sizeof his, is_signed(c, to) ? ((i128)1 << (w - 1)) - 1 : ((i128)1 << w) - 1);
 	d = cc_warn_begin(c, "constant-conversion", true, NULL, x->loc != UINT32_MAX ? x->loc : r.b, "implicit conversion from '%s' to '%s' changes value from %s to %s",
 			  tyname(c, from), tyname(c, QUNQ(to)), a, b);
 	if (!d)
@@ -370,7 +370,7 @@ VPRIV __attribute__((noinline)) void bf_const_conv(cc *c, uint32_t n, const fiel
 	pp_span r;
 	vdiag *d;
 
-	if (quiet_const(c))
+	if (quiet_rt(c))
 		return;
 	while (x->op == N_CAST && !c->span[n].e)
 		n = x->a, x = N(n);
@@ -397,7 +397,7 @@ VPRIV __attribute__((noinline)) void bf_const_conv(cc *c, uint32_t n, const fiel
 	if (sg && nv > ((i128)1 << (w - 1)) - 1)
 		nv -= (i128)1 << w;
 	r = rng(c, n);
-	i128s(a, sizeof a, v.i), i128s(b, sizeof b, nv);
+	i128s_(a, sizeof a, v.i), i128s_(b, sizeof b, nv);
 	if (at == UINT32_MAX)
 		at = x->loc != UINT32_MAX ? x->loc : r.b;
 	if (sg && w == 1 && v.i == 1)
@@ -410,7 +410,7 @@ VPRIV __attribute__((noinline)) void bf_const_conv(cc *c, uint32_t n, const fiel
 		return;
 	pp_diag_label(c->p, d, r.b, r.e, NULL);
 	pp_diag_macro(d, a, (uint32_t)strlen(a));
-	i128s(los, sizeof los, sg ? lo : 0), i128s(his, sizeof his, hi);
+	i128s_(los, sizeof los, sg ? lo : 0), i128s_(his, sizeof his, hi);
 	if (sg && w == 1)
 		pp_diag_help(c->p, d, "a signed 1-bit bit-field holds only 0 and -1: declare it 'unsigned'");
 	else

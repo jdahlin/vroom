@@ -408,6 +408,12 @@ VPRIV void include_stack(pp *p, vbuf *b, const fent *e)
 	}
 }
 
+/* an insertion at x widens clang's caret line: no blank on either side of x */
+VPRIV bool pp_pad_at(const char *s, uint32_t ls, uint32_t le, uint32_t x)
+{
+	return (x == ls || (s[x - 1] != ' ' && s[x - 1] != '\t')) && (x >= le || (s[x] != ' ' && s[x] != '\t'));
+}
+
 static void snippet(pp *p, vbuf *b, const fent *e, const vdiag *d)
 {
 	const char *s = e->f->src;
@@ -493,11 +499,13 @@ static void snippet(pp *p, vbuf *b, const fent *e, const vdiag *d)
 			while (n > 0 && m[n - 1] == ' ')
 				n--;
 			vbuf_put(&cl, m, n);
-			/* clang pads the caret line out to the last fix-it's column */
+			/* clang highlights an insertion's empty range too: the caret line reaches its
+			   column unless a blank is next to it (highlightRange trims blanks) */
 			for (uint32_t i = 0; i < d->nfix; i++) {
 				uint32_t fb = d->fix[i].b, c0;
 
-				if (fb < e->base || fb - e->base < ls || fb - e->base > le || !*d->fix[i].s)
+				if (fb < e->base || fb - e->base < ls || fb - e->base > le || !*d->fix[i].s ||
+				    d->fix[i].e != fb || !pp_pad_at(s, ls, le, fb - e->base))
 					continue;
 				c0 = dcols(s, ls, fb - e->base, 0);
 				if (c0 > cl.n)

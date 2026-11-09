@@ -447,7 +447,18 @@ Varje delsteg: nya fall i `tests/diag/` (snapshots, och clang som mätpunkt), la
    utan blanktecken i kanterna och skriver ingen tom rad för en ren borttagning, som clang:
    testfallet är textidentiskt med clang (82 av 88).  `vcc-sema.py warn` 879/879,
    PostgreSQL 0 varningar, grinden ok.
-   Kvar i D5.1: `-Wformat`, `-Wtautological-compare`, sedan `-Wall`:s `-Wunused-*`.
+   **`-Wtautological-*` klart (2026-11-10):** självjämförelse (`-Wtautological-compare`:
+   samma variabel, medlemskedja eller index efter implicita konverteringar, inte flyttal, inte
+   från makro), array/`&objekt`/funktion mot null (`-Wtautological-pointer-compare`, med
+   clangs två fix-it-noter för en funktion) och konstant utanför den andra operandens egen typ
+   (`-Wtautological-constant-out-of-range-compare`, konstanten i jämförelsens typ, så
+   `u == -1` är tyst; gränsvärdena hör till den avslagna `-Wtautological-type-limit-compare`).
+   Renderarna följer clangs highlightRange även för insättningar: careten förlängs till en
+   insättnings kolumn bara när inget blanktecken står intill.  Testfallet tautological.c;
+   clang rapporterar out-of-range-varningar i omvänd ordning inom ett fullt uttryck (efter
+   uttrycket), vcc i källordning.  `vcc-sema.py warn` 879/879, PostgreSQL 0, grinden ok
+   (fe +0.54 % mot merge-basen; konstantjämförelsen provar bara när en operand är smalare).
+   Kvar i D5.1: `-Wformat`, sedan `-Wall`:s `-Wunused-*`.
 2. **Makron**: expanderad text med caret i, ramar från systemheaders vikta,
    flernivå-"expanded from" (TODO.md "Diagnostic details").
 3. **`static_assert`**: operanderna utvärderade (`48 == 56`), och för `sizeof` en

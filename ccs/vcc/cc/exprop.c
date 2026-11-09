@@ -556,6 +556,250 @@ static __attribute__((cold, noinline)) void logic_const_warn(cc *c, int op, uint
 	pp_diag_emit(c->p, d);
 }
 
+/* clang's isSameComparisonOperand: the same variable, member chain or subscript once
+   parentheses and implicit conversions are gone (an explicit cast is another operand) */
+static uint32_t no_implicit(cc *c, uint32_t n)
+{
+	while (N(n)->op == N_CAST && !c->span[n].e)
+		n = N(n)->a;
+	return n;
+}
+
+static bool same_operand(cc *c, uint32_t a, uint32_t b)
+{
+	const node *x, *y;
+
+	a = no_implicit(c, a), b = no_implicit(c, b);
+	x = N(a), y = N(b);
+	if (x->op != y->op)
+		return false;
+	switch (x->op) {
+	case N_VAR:
+		return x->a == y->a;
+	case N_NUM: {
+		cval u, v;
+
+		return cc_eval(c, a, &u) && cc_eval(c, b, &v) && u.kind == CV_INT && v.kind == CV_INT && u.i == v.i;
+	}
+	case N_MEMBER:
+		return x->b == y->b && x->c == y->c && same_operand(c, x->a, y->a);
+	case N_DEREF:
+		return same_operand(c, x->a, y->a);
+	case N_INDEX:
+		return same_operand(c, x->a, y->a) && same_operand(c, x->b, y->b);
+	default:
+		return false;
+	}
+}
+
+/* clang's -Wtautological-compare for x == x and friends (not floating: NaN) */
+static __attribute__((cold, noinline)) void self_compare(cc *c, int op, uint32_t l, uint32_t r, uint32_t loc)
+{
+	bool t = op == T_EQUALEQUAL || op == T_LESSEQ || op == T_GREATEREQ;
+	vdiag *d;
+
+	(void)l, (void)r;
+	if (c->dead && c->fn)
+		return;
+	d = cc_warn_begin(c, "tautological-compare", true, NULL, loc, "self-comparison always evaluates to %s", t ? "true" : "false");
+	if (!d)
+		return;
+	pp_diag_help(c->p, d, "both sides are the same %s: was another one meant?",
+		     N(no_implicit(c, l))->op == N_VAR ? "variable" : "object");
+	pp_diag_emit(c->p, d);
+}
+
+static inline void self_cmp(cc *c, int op, uint32_t l, uint32_t r, uint32_t loc)
+{
+	uint32_t a = no_implicit(c, l);
+
+	if (N(a)->op != N_VAR && N(a)->op != N_MEMBER && N(a)->op != N_INDEX && N(a)->op != N_DEREF)
+		return;
+	if (is_float(c, N(a)->ty) || is_float(c, N(no_implicit(c, r))->ty) || !same_operand(c, l, r))
+		return;
+	self_compare(c, op, l, r, loc);
+}
+
+/* an operand as clang prints it in these messages: v, s.f, p->f (appended at b[*k]) */
+static void operand_name(cc *c, uint32_t n, char *b, size_t sz, size_t *k)
+{
+	const node *x = N(n = no_implicit(c, n));
+	int l;
+	const char *nm;
+
+#define PUT(p, len) do { size_t q_ = (size_t)(len); if (*k + q_ < sz) memcpy(b + *k, (p), q_), *k += q_; } while (0)
+	if (x->op == N_VAR) {
+		nm = idname(c->syms[x->a].name, &l);
+		PUT(nm, l);
+	} else if (x->op == N_MEMBER) {
+		const field *f = &c->tags[x->b].f[x->c];
+		uint32_t base = no_implicit(c, x->a);
+
+		if (N(base)->op == N_DEREF) {
+			operand_name(c, N(base)->a, b, sz, k);
+			PUT("->", 2);
+		} else {
+			operand_name(c, base, b, sz, k);
+			PUT(".", 1);
+		}
+		if (f->name) {
+			nm = idname(f->name, &l);
+			PUT(nm, l);
+		}
+	}
+#undef PUT
+	b[*k < sz ? *k : sz - 1] = 0;
+}
+
+/* clang's -Wtautological-pointer-compare: an array, a function or &object against null */
+static __attribute__((cold, noinline)) void null_compare(cc *c, int op, uint32_t x, uint32_t nul)
+{
+	uint32_t n = no_implicit(c, x), at;
+	const node *y = N(n);
+	const char *what;
+	bool fn = false, eq = op == T_EQUALEQUAL;
+	char nm[160];
+	size_t nl = 0;
+	pp_span xr, nr = rng(c, nul);
+	vdiag *d;
+
+	if (y->op == N_ADDR) {
+		uint32_t in = no_implicit(c, y->a);
+
+		if ((N(in)->op != N_VAR && N(in)->op != N_MEMBER) || is_func(c, N(in)->ty) ||
+		    (N(in)->op == N_VAR && (c->syms[N(in)->a].flags & SF_WEAK)))
+			return;
+		what = "address of ", n = in;
+	} else if (y->op == N_VAR && is_func(c, y->ty)) {
+		if (c->syms[y->a].flags & SF_WEAK)
+			return;
+		what = "function ", fn = true;
+	} else if ((y->op == N_VAR || y->op == N_MEMBER) && is_array(c, y->ty)) {
+		if (y->op == N_VAR && (c->syms[y->a].flags & SF_WEAK))
+			return;
+		what = "array ";
+	} else {
+		return;
+	}
+	operand_name(c, n, nm, sizeof nm, &nl);
+	if (!nl)
+		return;
+	xr = rng(c, n), at = N(n)->loc;
+	if (N(n)->op == N_MEMBER)	/* clang: at the member's name, after '.' or '->' */
+		at += N(no_implicit(c, N(n)->a))->op == N_DEREF ? 2 : 1;
+	d = cc_warn_begin(c, "tautological-pointer-compare", true, NULL, at,
+			  "comparison of %s'%s' %s to a null pointer is always %s", what, nm, eq ? "equal" : "not equal",
+			  eq ? "false" : "true");
+	if (d) {
+		pp_diag_label(c->p, d, xr.b, xr.e, NULL);
+		pp_diag_label(c->p, d, nr.b, nr.e, NULL);
+		if (fn) {
+			const ctype *ft = T(c, y->ty);
+			vdiag *k = pp_diag_note(c->p, d, xr.b, "prefix with the address-of operator to silence this warning");
+
+			if (k)
+				pp_diag_fix(c->p, k, xr.b, xr.b, "&", VDA_MAYBE);
+			if (!ft->n && !(ft->flags & TF_VARIADIC) && !is_void(c, ft->base)) {
+				k = pp_diag_note(c->p, d, xr.b, "suffix with parentheses to turn this into a function call");
+				if (k)
+					pp_diag_fix(c->p, k, xr.e, xr.e, "()", VDA_MAYBE);
+			}
+		} else {
+			pp_diag_help(c->p, d, "%s'%s' is never null", what, nm);
+		}
+		pp_diag_emit(c->p, d);
+	}
+}
+
+static inline void ptr_cmp(cc *c, int op, uint32_t l, uint32_t r)
+{
+	if (op != T_EQUALEQUAL && op != T_EXCLAIMEQ)
+		return;
+	if (is_npc(c, r) && !is_npc(c, l))
+		null_compare(c, op, l, r);
+	else if (is_npc(c, l) && !is_npc(c, r))
+		null_compare(c, op, r, l);
+}
+
+/* clang's -Wtautological-constant-out-of-range-compare: a constant the other operand's own type
+   (implicit conversions stripped) cannot hold, compared in the comparison's type */
+static __attribute__((cold, noinline)) void range_compare(cc *c, uint32_t n, int nk, uint32_t loc)
+{
+	const node *x = N(n);
+	int op = x->aux;
+	uint32_t k = nk ? x->b : x->a, o = nk ? x->a : x->b, os = no_implicit(c, o);
+	qty ot = N(os)->ty;
+	cval v, ov;
+	i128 lo, hi;
+	uint64_t w;
+	bool above, res;
+	char vs[48];
+	pp_span orr = rng(c, os), kr = rng(c, no_implicit(c, k));
+	vdiag *d;
+
+	if (!is_integer(c, ot) || (cc_eval(c, os, &ov) && ov.kind == CV_INT) || !cc_eval(c, k, &v) || v.kind != CV_INT)
+		return;
+	w = ty_size(c, ot) * 8;
+	if (KIND(c, ot) == TY_BOOL)
+		lo = 0, hi = 1;
+	else if (w >= 64 || w >= ty_size(c, N(k)->ty) * 8)
+		return;	/* as wide as the comparison: every converted constant fits */
+	else if (is_signed(c, ot))
+		lo = -((i128)1 << (w - 1)), hi = ((i128)1 << (w - 1)) - 1;
+	else
+		lo = 0, hi = ((i128)1 << w) - 1;
+	if (v.i >= lo && v.i <= hi)
+		return;
+	above = v.i > hi;
+	if (!nk)	/* constant on the left: K op X is X op' K */
+		op = op == T_LESS ? T_GREATER : op == T_GREATER ? T_LESS : op == T_LESSEQ ? T_GREATEREQ : op == T_GREATEREQ ? T_LESSEQ : op;
+	switch (op) {
+	case T_EQUALEQUAL: res = false; break;
+	case T_EXCLAIMEQ: res = true; break;
+	case T_LESS: case T_LESSEQ: res = above; break;
+	default: res = !above; break;
+	}
+	i128s_(vs, sizeof vs, v.i);
+	d = cc_warn_begin(c, "tautological-constant-out-of-range-compare", true, NULL, loc,
+			  "result of comparison of constant %s with expression of type '%s' is always %s", vs, tyname(c, ot),
+			  res ? "true" : "false");
+	if (!d)
+		return;
+	if (nk)
+		pp_diag_label(c->p, d, orr.b, orr.e, NULL), pp_diag_label(c->p, d, kr.b, kr.e, NULL);
+	else
+		pp_diag_label(c->p, d, kr.b, kr.e, NULL), pp_diag_label(c->p, d, orr.b, orr.e, NULL);
+	{
+		char ls[48], hs[48];
+
+		i128s_(ls, sizeof ls, lo), i128s_(hs, sizeof hs, hi);
+		pp_diag_help(c->p, d, "'%s' holds %s to %s", tyname(c, ot), ls, hs);
+	}
+	pp_diag_emit(c->p, d);
+}
+
+static inline void range_cmp(cc *c, uint32_t n, uint32_t loc)
+{
+	const node *x = N(n);
+	cval v;
+
+	if (x->op != N_BINARY || !is_integer(c, N(x->a)->ty) || !is_integer(c, N(x->b)->ty))
+		return;
+	{	/* cheap first: an operand narrower than the comparison (or bool) */
+		uint64_t cw = ty_size(c, N(x->a)->ty);
+		qty ta = N(no_implicit(c, x->a))->ty, tb = N(no_implicit(c, x->b))->ty;
+		bool na = is_integer(c, ta) && (ty_size(c, ta) < cw || KIND(c, ta) == TY_BOOL);
+		bool nb = is_integer(c, tb) && (ty_size(c, tb) < cw || KIND(c, tb) == TY_BOOL);
+
+		if (likely(!na && !nb))
+			return;
+		if (na && cc_eval(c, x->b, &v) && v.kind == CV_INT)
+			range_compare(c, n, 1, loc);
+		else if (nb && cc_eval(c, x->a, &v) && v.kind == CV_INT)
+			range_compare(c, n, 0, loc);
+	}
+}
+
 static inline void logic_const(cc *c, int op, uint32_t l, uint32_t r, uint32_t loc)
 {
 	cval v;
@@ -603,8 +847,16 @@ static __attribute__((noinline)) uint32_t binary_ops(cc *c, int minp, uint32_t l
 		} else {
 			if ((op == T_AMPAMP || op == T_PIPEPIPE) && !mac)
 				logic_const(c, op, l, r, loc);
+			else if (is_cmp(op) && !mac) {
+				self_cmp(c, op, l, r, loc);
+				if (unlikely(is_ptr(c, N(l)->ty) || is_ptr(c, N(r)->ty) || is_array(c, N(l)->ty) || is_array(c, N(r)->ty) ||
+					     is_func(c, N(l)->ty) || is_func(c, N(r)->ty)))
+					ptr_cmp(c, op, l, r);
+			}
 			runtime_warn(c, op, l, r, loc);
 			l = binop(c, op, l, r, loc);
+			if (is_cmp(op) && !mac && !quiet_rt(c))
+				range_cmp(c, l, loc);
 			if (unlikely((op == T_PLUS || op == T_MINUS || op == T_STAR) && N(l)->op == N_BINARY &&
 				     small_const(c, N(l)->a, 3) && small_const(c, N(l)->b, 3)))
 				overflow_check(c, l);

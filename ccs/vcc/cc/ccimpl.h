@@ -288,6 +288,8 @@ VPRIV uint32_t char_lit(cc *c);
 /* const.c */
 VPRIV i128 trunc_to(cc *c, i128 v, qty t);
 VPRIV void const_conv_check(cc *c, uint32_t n, qty to);
+VPRIV bool quiet_rt(const cc *c);
+VPRIV void i128s_(char *b, size_t n, i128 v);
 VPRIV void bf_const_conv(cc *c, uint32_t n, const field *f, uint32_t at);
 VPRIV const field *node_field(cc *c, const node *x);
 VPRIV int clz128(u128 x, unsigned bits);

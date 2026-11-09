@@ -210,14 +210,14 @@ static void one_line(pp *p, vbuf *b, const fent *e, const vdiag *d, const mark *
 	rn = lw + 1;
 	while (rn > 0 && row[rn - 1] == ' ')
 		rn--;
-	/* clang pads the caret line out to the last fix-it's column */
+	/* fix-its with text get a line; an insertion widens the caret line as clang's (pp_pad_at) */
 	for (uint32_t i = 0; i < d->nfix; i++) {
 		uint32_t fb = d->fix[i].b, c0;
 
 		if (fb < e->base || fb - e->base < ls || fb - e->base > le || !*d->fix[i].s)	/* a removal: no text line */
 			continue;
 		c0 = dcols(s, ls, fb - e->base, 0);
-		if (c0 > rn && c0 <= lw)
+		if (c0 > rn && c0 <= lw && d->fix[i].e == fb && pp_pad_at(s, ls, le, fb - e->base))
 			rn = c0;
 		anyfix = true;
 	}

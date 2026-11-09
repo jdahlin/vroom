@@ -714,6 +714,7 @@ VPRIV void include(pp *p, ctx *c, uint32_t b, uint32_t e, int kind, uint32_t loc
 /* directive.c */
 VPRIV int pragma_text(pp *p, const char *s, size_t n, uint32_t loc, ptok *out);
 VPRIV int directive(pp *p, ctx *c, ptok *out);
+VPRIV bool pp_pad_at(const char *s, uint32_t ls, uint32_t le, uint32_t x);
 
 /* decimal digits of v at b (no terminator); returns the length */
 static inline int utoa(char *b, unsigned long long v)
