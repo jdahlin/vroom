@@ -672,13 +672,47 @@ static bool cc_is_pp(const struct req *r)
  * host programs (Mach-O), the vDSO (-mcmodel=tiny, position independent),
  * stdin, anything with -x other than c/assembler-with-cpp.
  */
+/* options whose value is the next argument (so it is not an input) */
+static bool takes_value(const char *a)
+{
+	static const char *const v[] = {
+		"-o", "-I", "-D", "-U", "-include", "-imacros", "-isystem", "-idirafter", "-iquote", "-iprefix",
+		"-iwithprefix", "-isysroot", "-MF", "-MT", "-MQ", "-x", "-Xclang", "-Xassembler", "-Xpreprocessor",
+		"-mllvm", "--param", "-arch", "-target", "-include-pch", "--sysroot",
+	};
+
+	for (size_t k = 0; k < sizeof v / sizeof *v; k++)
+		if (!strcmp(a, v[k]))
+			return true;
+	return false;
+}
+
+/* the one input of a compile: a .c or .S file anywhere on the line, NULL if none or several */
+static const char *cc_input(const struct req *r)
+{
+	const char *in = NULL;
+
+	for (int i = 1; i < r->argc; i++) {
+		const char *a = r->argv[i];
+		size_t n = strlen(a);
+
+		if (a[0] == '-') {
+			if (takes_value(a))
+				i++;
+			continue;
+		}
+		if (n < 3 || a[n - 2] != '.' || (a[n - 1] != 'c' && a[n - 1] != 'S') || in)
+			return NULL;	/* another kind of input (.o, .s, ...) or a second one */
+		in = a;
+	}
+	return in;
+}
+
 static bool cc_is_compile(const struct req *r)
 {
 	bool c = false, linux_target = false;
-	const char *last = r->argv[r->argc - 1];
-	size_t n = strlen(last);
 
-	if (!own_cc || last[0] == '-' || n < 3 || last[n - 2] != '.' || (last[n - 1] != 'c' && last[n - 1] != 'S'))
+	if (!own_cc || !cc_input(r))
 		return false;
 	for (int i = 1; i < r->argc; i++) {
 		const char *a = r->argv[i];
@@ -690,11 +724,13 @@ static bool cc_is_compile(const struct req *r)
 		else if (!strncmp(a, "--target=aarch64-", 17) && strstr(a, "-linux"))
 			linux_target = true;
 		else if (!strcmp(a, "-E") || !strcmp(a, "-S") || !strcmp(a, "-") || !strcmp(a, "-mcmodel=tiny") ||
-			 !strcmp(a, "-fpic") || !strcmp(a, "-fPIC") || !strcmp(a, "-shared") || !strcmp(a, "-emit-llvm"))
+			 !strcmp(a, "-shared") || !strcmp(a, "-emit-llvm"))
 			return false;
 		else if (!strcmp(a, "-x") && i + 1 < r->argc && strcmp(r->argv[i + 1], "c") &&
 			 strcmp(r->argv[i + 1], "assembler-with-cpp"))
 			return false;
+		else if (takes_value(a))
+			i++;
 	}
 	return c && linux_target;
 }
@@ -988,7 +1024,7 @@ static int handle1(const struct req *r, const char **kind)
 		}
 		atomic_fetch_add(&n_fallback, 1);
 		if (log_requests)
-			fprintf(stderr, "vccd fallback to clang: %s\n", r->argv[r->argc - 1]);
+			fprintf(stderr, "vccd fallback to clang: %s\n", cc_input(r));
 		*kind = "cc-fallbk";
 	} else {
 		*kind = "cc";
