@@ -94,6 +94,7 @@ typedef struct {
 	uint32_t idx;		/* symbol table index (elf_finish) */
 	uint32_t alias;		/* .set alias of this symbol: type and size merge from it */
 	uint8_t reg;		/* registered (MC's Asm.symbols(): symbol-table order) */
+	uint8_t common;		/* .comm: SHN_COMMON, value = alignment */
 } ElfSym;
 
 enum {				/* ElfSym.flags */
@@ -187,7 +188,7 @@ void elf_define_abs(ElfObj *o, uint32_t sym, uint64_t value);
 static inline void elf_bind(ElfObj *o, uint32_t s, int bind)
 { ElfSym *y = elf_symp(o, s); y->bind = (uint8_t)bind; y->flags |= ESYM_BINDSET; }
 static inline void elf_type(ElfObj *o, uint32_t s, int type) { elf_symp(o, s)->type = (uint8_t)type; }
-static inline void elf_vis(ElfObj *o, uint32_t s, int vis) { elf_symp(o, s)->vis = (uint8_t)vis; }
+static inline void elf_vis(ElfObj *o, uint32_t s, int vis) { ElfSym *y = elf_symp(o, s); y->vis = (uint8_t)((y->vis & 0x80) | vis); }	/* 0x80: STO_AARCH64_VARIANT_PCS */
 void elf_size_expr(ElfObj *o, uint32_t sym, ElfVal v);	/* .size sym, expr */
 /* sym = x op y (op: as.c's operator codes), x and y absolute once the layout is known */
 void elf_expr_sym(ElfObj *o, uint32_t sym, int op, ElfVal x, ElfVal y);

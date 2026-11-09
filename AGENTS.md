@@ -117,6 +117,7 @@ bench/vcc-ldconst.py                # generated long double literals and folds, 
 bench/vccd-test.py                  # vccd as a service: socket, bad requests, cache invalidation (~11 s)
 bench/vbench.py gate                # performance gate: instructions vs the merge-base, budget 1 % (~1 min)
 bench/vas-enc.py $PWD/ccs/vcc/tests/vas   # vas encodings vs llvm-mc
+bench/vas-obj.py                    # vasm objects vs clang -c byte for byte (ccs/vcc/tests/vas-obj, <1 s)
 bench/pg/build.sh clang && bench/pg/build.sh vcc   # PostgreSQL (macOS, meson+ninja): build + meson test (~2 min each)
 bench/pg/build.sh vccd             # ... CC = vcc shim + private vccd (VCC_DELEGATE=bench/pg/cc for the rest)
 bench/pg/speed.py                  # PostgreSQL compile speed: clang, clang -O0, vpp, vpp --batch

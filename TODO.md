@@ -729,14 +729,14 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
   vs llvm-mc.)
 - [ ] **SVE/SVE2/SME** (operand parser for `z`/`p` registers first) [P].
   *Validate:* T7 tables; T7 `-march=armv9-a+sve2` corpus.
-- [ ] **Directives**: `.comm`/`.lcomm`, `.symver`, `.altmacro`,
-  `.float`/`.double`, `.dc.*`, `.eqv`, `.weakref`, `.end`, `.err`,
-  `.addrsig`/`.addrsig_sym`, `.variant_pcs`, `.tlsdesccall`, `.nops`,
-  `.balignw`/`.p2alignl`, `.base64`, `.inst.n`, COMDAT `"G"` sections
-  (`as/as.c:722`), `@gnu_unique_object` (`as/as.c:1125`), full `.reloc` (`as/as.c:836`).
-  Silently ignored today: `.print`, `.warning`, `.ident`, `.arch`, `.cpu`
-  (`as/as.c:2307-2440`).
-  *Validate:* T7 per directive; `.arch` must gate instructions (T4).
+- [ ] **Directives**: left: `.altmacro`, `.addrsig`/`.addrsig_sym`, COMDAT
+  `"G"` sections, `@gnu_unique_object`, `.arch`/`.cpu` gating instructions
+  (T4).  (`.eqv`, `.nops`, `.inst.n` are GNU-only: clang rejects them.)
+  *Validate:* `bench/vas-obj.py` (`ccs/vcc/tests/vas-obj/`: clang -c and
+  vasm byte for byte).  (Done: `.comm`/`.lcomm`, `.symver` (@@@, remove),
+  `.weakref`, `.float`/`.double`/`.dc.*`, `.base64`, `.balignw`/`.p2alignl`,
+  `.end`, `.ident`, `.print`/`.warning`, `.variant_pcs`, `.tlsdesccall`,
+  `.reloc` at `.`/labels with NONE/TLSDESC_CALL/BFD_RELOC_*.)
 - [ ] **Relocation operators** (TLS `:tlsdesc:`, `:tprel_*:`,
   `:gottprel*:`, `:dtprel*:`, `:prel_g*:`, literal `ldr x0, :got:v`)
   (`mod_kind` `as/as.c:1912`, `obj/obj.h:53-72`) [P].  *Validate:* T7 with

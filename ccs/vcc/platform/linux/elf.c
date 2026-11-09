@@ -234,6 +234,7 @@ void elf_emit(ElfObj *o, uint8_t *b)
 		ElfSym *s = elf_symp(o, w->symtab[k]);
 		uint16_t shndx = 0; uint64_t val = 0;
 		if (s->flags & ESYM_ABS) { shndx = 0xfff1; val = s->value; }
+		else if (s->common) { shndx = 0xfff2; val = s->value; }
 		else if (s->flags & ESYM_DEFINED) { shndx = (uint16_t)elf_sec(o, symsec(o, s))->idx; val = symoff(o, s); }
 		uint8_t type = s->type;
 		uint64_t size = s->size;

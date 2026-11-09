@@ -687,39 +687,75 @@ static int d_octa(As *a, const char *p, const char *e)
 }
 
 /* .reloc offset, R_AARCH64_<type>[, expr]: a relocation at a constant offset of the current section */
+/* a .reloc fixup goes among its frag's fixups in offset order (MC) */
+static void reloc_fixup(ElfObj *o, uint32_t f, uint64_t off, uint8_t *at, uint32_t type, Val v)
+{
+	elf_fixup(o, f, off, at, type, v);
+	ElfFix *fx = (ElfFix *)o->fixes.base;
+	ElfFrag *fr = elf_frag(o, f);
+	uint32_t id = o->nfix - 1;
+	if (fr->fix_head == id) return;
+	uint32_t prev = 0, k = fr->fix_head;
+	while (k != id && fx[k].off <= off) { prev = k; k = fx[k].next; }
+	if (k == id) return;
+	/* unlink the tail, insert before k */
+	uint32_t t = k;
+	while (fx[t].next != id) t = fx[t].next;
+	fx[t].next = 0; fr->fix_tail = t;
+	fx[id].next = k;
+	if (k == fr->fix_head) fr->fix_head = id; else fx[prev].next = id;
+}
+
 static int d_reloc(As *a, const char *p, const char *e)
 {
 	static const struct { const char *n; uint32_t t; } types[] = {
 		{ "R_AARCH64_ABS64", R_AARCH64_ABS64 }, { "R_AARCH64_ABS32", R_AARCH64_ABS32 }, { "R_AARCH64_ABS16", R_AARCH64_ABS16 },
 		{ "R_AARCH64_PREL64", R_AARCH64_PREL64 }, { "R_AARCH64_PREL32", R_AARCH64_PREL32 }, { "R_AARCH64_PREL16", R_AARCH64_PREL16 },
+		{ "R_AARCH64_NONE", R_AARCH64_NONE }, { "R_AARCH64_TLSDESC_CALL", R_AARCH64_TLSDESC_CALL },
+		{ "BFD_RELOC_NONE", R_AARCH64_NONE }, { "BFD_RELOC_64", R_AARCH64_ABS64 },
+		{ "BFD_RELOC_32", R_AARCH64_ABS32 }, { "BFD_RELOC_16", R_AARCH64_ABS16 },
 	};
-	int64_t off;
-	if (abs_expr(a, &p, e, &off)) return -1;
+	ElfObj *o = a->o;
+	Val ov;
+	if (val_expr(a, &p, e, &ov)) return -1;
+	fold(a, &ov);
 	p = ws(p, e);
 	if (p >= e || *p != ',') return err(a, "expected comma");
 	Sv nm = first_word(p + 1, e);
-	uint32_t type = 0, size = 0;
+	uint32_t type = (uint32_t)-1, size = 0;
 	for (size_t i = 0; i < sizeof types / sizeof types[0]; i++)
 		if (strlen(types[i].n) == nm.n && !memcmp(types[i].n, nm.s, nm.n)) type = types[i].t;
-	if (!type) return err(a, "unknown relocation name");
-	size = type == R_AARCH64_ABS64 || type == R_AARCH64_PREL64 ? 8 : type == R_AARCH64_ABS32 || type == R_AARCH64_PREL32 ? 4 : 2;
+	if (type == (uint32_t)-1) return err(a, "unknown relocation name");
+	size = type == R_AARCH64_NONE || type == R_AARCH64_TLSDESC_CALL ? 0 :
+	       type == R_AARCH64_ABS64 || type == R_AARCH64_PREL64 ? 8 : type == R_AARCH64_ABS32 || type == R_AARCH64_PREL32 ? 4 : 2;
 	p = ws(nm.s + nm.n, e);
 	Val v = { 0, 0, 0 };
 	if (p < e && *p == ',') { p++; if (val_expr(a, &p, e, &v)) return -1; }
-	/* the frag and bytes at section offset off */
-	ElfObj *o = a->o;
 	uint32_t sec = elf_frag(o, a->cur)->sec;
+	uint64_t off;
+	if (!ov.add && !ov.sub) off = (uint64_t)ov.c;
+	else {
+		/* .reloc sym+c: an offset in sym's section (MC: the section of the offset) */
+		ElfSym *t = ov.add && !ov.sub ? elf_symp(o, ov.add) : 0;
+		if (!t || !(t->flags & ESYM_DEFINED) || (t->flags & ESYM_ABS)) return err(a, ".reloc offset is not absolute or a label");
+		if (!size) { reloc_fixup(o, t->frag, t->value + (uint64_t)ov.c, 0, type, v); return 0; }
+		sec = elf_frag(o, t->frag)->sec;
+		off = t->value + (uint64_t)ov.c;
+		for (uint32_t f = sec; f != t->frag; f = elf_frag(o, f)->next) off += elf_frag(o, f)->size;
+	}
+	/* the frag and bytes at section offset off */
 	uint64_t at = 0;
 	for (uint32_t f = sec; f; f = elf_frag(o, f)->next) {
 		ElfFrag *fr = elf_frag(o, f);
-		if ((uint64_t)off >= at && (uint64_t)off + size <= at + fr->size) {
-			uint64_t k = (uint64_t)off - at;
+		if (off >= at && off + size <= at + fr->size + (size == 0)) {
+			uint64_t k = off - at;
+			if (!size) { reloc_fixup(o, f, k, 0, type, v); return 0; }
 			for (ElfChunk *ch = fr->head; ch; ch = ch->next) {
 				if (k + size <= ch->used) {
 					/* llvm-mc keeps the bytes and adds the relocation; the field is not patched */
 					uint8_t keep[8];
 					memcpy(keep, ch->data + k, size);
-					elf_fixup(o, f, (uint64_t)off - at, ch->data + k, type, v);
+					reloc_fixup(o, f, off - at, ch->data + k, type, v);
 					memcpy(ch->data + k, keep, size);
 					return 0;
 				}
@@ -797,10 +833,86 @@ static int d_ascii(As *a, const char *p, const char *e, int z)
 	}
 }
 
+/* .float/.single (size 4), .double (8): literals, as llvm-mc (inf, nan, signs) */
+static int d_float(As *a, const char *p, const char *e, int size)
+{
+	p = ws(p, e);
+	if (p >= e) return 0;
+	for (;;) {
+		char buf[128];
+		size_t k = 0;
+		const char *q = p;
+		while (q < e && *q != ',' && *q != ' ' && *q != '\t' && k < sizeof buf - 1) buf[k++] = *q++;
+		buf[k] = 0;
+		char *end;
+		const char *s = buf;
+		int neg = 0;
+		if (*s == '-' || *s == '+') neg = *s++ == '-';
+		double d;
+		if (!strcasecmp(s, "inf") || !strcasecmp(s, "infinity")) d = __builtin_inf();
+		else if (!strcasecmp(s, "nan")) d = __builtin_nan("");
+		else {
+			d = strtod(s, &end);
+			if (end == s || *end) return err(a, "invalid floating point literal");
+		}
+		uint64_t bits;
+		if (__builtin_isnan(d))	/* llvm-mc: every mantissa bit set */
+			bits = size == 4 ? 0x7fffffffu | (uint64_t)neg << 31 : 0x7fffffffffffffffu | (uint64_t)neg << 63;
+		else if (size == 4) {	/* rounded once, from the text */
+			float f = __builtin_isinf(d) || __builtin_isnan(d) ? (float)d : strtof(s, NULL);
+			uint32_t b32;
+			if (neg) f = -f;
+			memcpy(&b32, &f, 4);
+			bits = b32;
+		} else {
+			if (neg) d = -d;
+			memcpy(&bits, &d, 8);
+		}
+		Val v = { 0, 0, (int64_t)bits };
+		if (emit_value(a, size, &v)) return -1;
+		p = ws(q, e);
+		if (p >= e) return 0;
+		if (*p != ',') return err(a, "unexpected token in directive");
+		p = ws(p + 1, e);
+	}
+}
+
+/* .base64 "..." */
+static int d_base64(As *a, const char *p, const char *e)
+{
+	char buf[4096];
+	size_t n;
+	if ((size_t)(e - p) > sizeof buf) return err(a, "string too long");
+	if (parse_string(a, &p, e, buf, &n)) return -1;
+	if (!n || n % 4) return err(a, "failed to base64 decode string data");
+	uint8_t out[3072];
+	size_t m = 0;
+	for (size_t i = 0; i < n; i += 4) {
+		uint32_t w = 0;
+		int pad = 0;
+		for (int j = 0; j < 4; j++) {
+			char c = buf[i + j];
+			int v = c >= 'A' && c <= 'Z' ? c - 'A' : c >= 'a' && c <= 'z' ? c - 'a' + 26 : c >= '0' && c <= '9' ? c - '0' + 52 :
+				c == '+' ? 62 : c == '/' ? 63 : c == '=' && i + 4 == n && j >= 2 ? (pad++, 0) : -1;
+			if (v < 0 || (pad && c != '=')) return err(a, "failed to base64 decode string data");
+			w = w << 6 | (uint32_t)v;
+		}
+		out[m++] = (uint8_t)(w >> 16);
+		if (pad < 2) out[m++] = (uint8_t)(w >> 8);
+		if (pad < 1) out[m++] = (uint8_t)w;
+	}
+	elf_data(a->o, a->cur);
+	elf_bytes(a->o, a->cur, out, m);
+	return 0;
+}
+
 static int code_section(As *a) { return (elf_sec(a->o, elf_frag(a->o, a->cur)->sec)->flags & SHF_EXECINSTR) != 0; }
 
-/* .align/.p2align (p2 = 1) or .balign (p2 = 0) */
-static int d_align(As *a, const char *p, const char *e, int p2)
+/* .align/.p2align (p2 = 1) or .balign (p2 = 0); .balignw/.p2alignl..: a
+ * fill of fsz bytes (little-endian pattern) */
+static int d_align_w(As *a, const char *p, const char *e, int p2, int fsz);
+static int d_align(As *a, const char *p, const char *e, int p2) { return d_align_w(a, p, e, p2, 1); }
+static int d_align_w(As *a, const char *p, const char *e, int p2, int fsz)
 {
 	int64_t n, fill = 0, max = 0;
 	int hasfill = 0;
@@ -821,7 +933,58 @@ static int d_align(As *a, const char *p, const char *e, int p2)
 		if (n & (n - 1)) return err(a, "alignment must be a power of 2");
 		l2 = (unsigned)__builtin_ctzll((uint64_t)n);
 	}
-	elf_align(a->o, a->cur, l2, !hasfill && code_section(a), (uint8_t)fill, (uint64_t)max);
+	if (fsz == 1) {
+		elf_align(a->o, a->cur, l2, !hasfill && code_section(a), (uint8_t)fill, (uint64_t)max);
+		return 0;
+	}
+	ElfFrag *f = elf_frag(a->o, a->cur);
+	uint64_t al = (uint64_t)1 << l2, pad = (al - (f->size & (al - 1))) & (al - 1);
+	ElfSec *sc = elf_sec(a->o, f->sec);
+	if (!hasfill || sc->type == SHT_NOBITS) {
+		elf_align(a->o, a->cur, l2, !hasfill && code_section(a), 0, (uint64_t)max);
+		return 0;
+	}
+	/* the pattern repeated over the whole pad (GNU as; llvm-mc lays out the
+	 * whole pad but writes only whole values when the pad is not a multiple) */
+	if (l2 > sc->align) sc->align = l2;
+	if (f->sub) f->has_align |= 1u << l2;
+	if (pad && (!max || pad <= (uint64_t)max)) {
+		uint8_t *q = elf_grow(a->o, a->cur, pad);
+		for (uint64_t i = 0; i < pad; i++) q[i] = (uint8_t)((uint64_t)fill >> 8 * (i % (uint64_t)fsz));
+	}
+	return 0;
+}
+
+/* .comm name, size[, align] (SHN_COMMON, or .bss when the name is local) and .lcomm */
+static int d_comm(As *a, const char *p, const char *e, int local)
+{
+	Sv nm;
+	int64_t size, al = 0;
+	if (parse_name(a, &p, e, &nm)) return -1;
+	p = ws(p, e);
+	if (p >= e || *p != ',') return err(a, "expected a comma");
+	p++;
+	if (abs_expr(a, &p, e, &size)) return -1;
+	p = ws(p, e);
+	if (p < e && *p == ',') { p++; if (abs_expr(a, &p, e, &al)) return -1; }
+	if (size < 0) return err(a, "invalid '.comm' or '.lcomm' directive size");
+	if (al < 0 || (al & (al - 1))) return err(a, "alignment must be a power of 2");
+	uint32_t y = sym(a, nm.s, nm.n);
+	ElfSym *s = elf_symp(a->o, y);
+	if (s->flags & ESYM_DEFINED) return err(a, "invalid symbol redefinition");
+	elf_reg(a->o, y);
+	s->type = STT_OBJECT;
+	s->size = (uint64_t)size;
+	if (local || ((s->flags & ESYM_BINDSET) && s->bind == STB_LOCAL)) {
+		uint32_t f = std_section(a, ".bss");
+		if (al > 1) elf_align(a->o, f, (unsigned)__builtin_ctzll((uint64_t)al), 0, 0, 0);
+		elf_define(a->o, y, f, elf_frag(a->o, f)->size);
+		elf_data(a->o, f);
+		elf_fill(a->o, f, (uint64_t)size, 0);
+		return 0;
+	}
+	s->common = 1;
+	s->value = (uint64_t)(al ? al : 1);
 	return 0;
 }
 
@@ -1636,6 +1799,7 @@ static int define_label(As *a, const char *s, size_t n)
 	return 0;
 }
 
+static int d_symver(As *a, const char *p, const char *e);
 static int directive(As *a, Sv w, const char *p, const char *e)
 {
 	const char *d = w.s + 1;
@@ -1651,16 +1815,27 @@ static int directive(As *a, Sv w, const char *p, const char *e)
 	case 'b':
 		if (IS("byte")) return d_data(a, p, e, 1);
 		if (IS("balign")) return d_align(a, p, e, 0);
+		if (IS("balignw")) return d_align_w(a, p, e, 0, 2);
+		if (IS("balignl")) return d_align_w(a, p, e, 0, 4);
+		if (IS("base64")) return d_base64(a, p, e);
 		if (IS("bss")) { switch_to(a, std_section(a, ".bss")); return 0; }
 		break;
 	case 'c':
+		if (IS("comm")) return d_comm(a, p, e, 0);
 		if (IS("cpu")) return 0;
 		break;
 	case 'd':
 		if (IS("data")) { switch_to(a, std_section(a, ".data")); return 0; }
+		if (IS("double") || IS("dc.d")) return d_float(a, p, e, 8);
+		if (IS("dc.s")) return d_float(a, p, e, 4);
+		if (IS("dc.b")) return d_data(a, p, e, 1);
+		if (IS("dc") || IS("dc.w")) return d_data(a, p, e, 2);
+		if (IS("dc.l")) return d_data(a, p, e, 4);
+		if (IS("dc.a")) return d_data(a, p, e, 8);
 		break;
 	case 'e':
 		if (IS("equ")) goto set;
+		if (IS("end")) { a->ended = 1; return 0; }
 		if (IS("error")) {
 			Sv t = trim(p, e);
 			return err(a, "%.*s", (int)t.n, t.s);
@@ -1681,6 +1856,7 @@ static int directive(As *a, Sv w, const char *p, const char *e)
 		break;
 	case 'f':
 		if (IS("fill")) return d_fill(a, p, e);
+		if (IS("float")) return d_float(a, p, e, 4);
 		if (IS("file")) return 0;
 		break;
 	case 'g':
@@ -1697,9 +1873,22 @@ static int directive(As *a, Sv w, const char *p, const char *e)
 		if (IS("irp")) return d_irp(a, p, e, 0);
 		if (IS("irpc")) return d_irp(a, p, e, 1);
 		if (IS("internal")) return d_symattr(a, p, e, 'i');
-		if (IS("ident")) return 0;
+		if (IS("ident")) {
+			char buf[4096];
+			size_t k;
+			if ((size_t)(e - p) > sizeof buf) return err(a, "string too long");
+			if (parse_string(a, &p, e, buf, &k)) return -1;
+			/* MC's emitIdent: into .comment at once, a NUL before the first */
+			uint32_t s = elf_section(a->o, ".comment", 8, SHT_PROGBITS, SHF_MERGE | SHF_STRINGS, 1, 0);
+			elf_data(a->o, s);
+			if (!a->nident++) elf_fill(a->o, s, 1, 0);
+			elf_bytes(a->o, s, buf, k);
+			elf_fill(a->o, s, 1, 0);
+			return 0;
+		}
 		break;
 	case 'l':
+		if (IS("lcomm")) return d_comm(a, p, e, 1);
 		if (IS("long")) return d_data(a, p, e, 4);
 		if (IS("local")) return d_symattr(a, p, e, 'l');
 		if (IS("ltorg") || IS("pool")) return ltorg(a);
@@ -1721,9 +1910,18 @@ static int directive(As *a, Sv w, const char *p, const char *e)
 		}
 		if (IS("previous")) { uint32_t t = a->cur; a->cur = a->prev; a->prev = t; return 0; }
 		if (IS("p2align")) return d_align(a, p, e, 1);
+		if (IS("p2alignw")) return d_align_w(a, p, e, 1, 2);
+		if (IS("p2alignl")) return d_align_w(a, p, e, 1, 4);
 		if (IS("protected")) return d_symattr(a, p, e, 'p');
 		if (IS("purgem")) return d_purgem(a, p, e);
-		if (IS("print")) return 0;
+		if (IS("print")) {
+			char buf[4096];
+			size_t k;
+			if ((size_t)(e - p) > sizeof buf) return err(a, "string too long");
+			if (parse_string(a, &p, e, buf, &k)) return -1;
+			printf("%.*s\n", (int)k, buf);	/* llvm-mc: to stdout */
+			return 0;
+		}
 		break;
 	case 'q':
 		if (IS("quad")) return d_data(a, p, e, 8);
@@ -1737,7 +1935,9 @@ static int directive(As *a, Sv w, const char *p, const char *e)
 		if (IS("section")) return d_section(a, p, e, 0);
 		if (IS("set")) goto set;
 		if (IS("size")) return d_size(a, p, e);
+		if (IS("symver")) return d_symver(a, p, e);
 		if (IS("short")) return d_data(a, p, e, 2);
+		if (IS("single")) return d_float(a, p, e, 4);
 		if (IS("space") || IS("skip")) return d_space(a, p, e);
 		if (IS("string")) return d_ascii(a, p, e, 1);
 		if (IS("subsection")) {
@@ -1748,6 +1948,13 @@ static int directive(As *a, Sv w, const char *p, const char *e)
 		}
 		break;
 	case 't':
+		if (IS("tlsdesccall")) {	/* R_AARCH64_TLSDESC_CALL on the next instruction */
+			Val v;
+			if (val_expr(a, &p, e, &v)) return -1;
+			elf_fixup(a->o, a->cur, elf_frag(a->o, a->cur)->size, 0, R_AARCH64_TLSDESC_CALL, v);
+			if (v.add) elf_symp(a->o, v.add)->type = STT_TLS;
+			return 0;
+		}
 		if (IS("text")) { switch_to(a, std_section(a, ".text")); return 0; }
 		if (IS("type")) return d_type(a, p, e);
 		break;
@@ -1763,10 +1970,48 @@ static int directive(As *a, Sv w, const char *p, const char *e)
 			return 0;
 		}
 		break;
+	case 'v':
+		if (IS("variant_pcs")) {	/* STO_AARCH64_VARIANT_PCS */
+			Sv nm;
+			if (parse_name(a, &p, e, &nm)) return -1;
+			uint32_t y = sym(a, nm.s, nm.n);
+			elf_symp(a->o, y)->vis |= 0x80;
+			elf_reg(a->o, y);
+			return 0;
+		}
+		break;
 	case 'w':
+		if (IS("weakref")) {	/* .weakref alias, target */
+			Sv al, tg;
+			if (parse_name(a, &p, e, &al)) return -1;
+			p = ws(p, e);
+			if (p >= e || *p != ',') return err(a, "expected a comma");
+			p++;
+			if (parse_name(a, &p, e, &tg)) return -1;
+			uint32_t ya = sym(a, al.s, al.n), yt = sym(a, tg.s, tg.n);
+			if (a->nsv == a->svcap) {
+				uint32_t nc = a->svcap ? a->svcap * 2 : 16;
+				void *t = rget(&a->defs, sizeof *a->sv * nc);
+				if (a->nsv) memcpy(t, a->sv, sizeof *a->sv * a->nsv);
+				a->sv = t; a->svcap = nc;
+			}
+			a->sv[a->nsv].orig = ya; a->sv[a->nsv].ver = yt; a->sv[a->nsv].rm = 2;
+			a->nsv++;
+			return 0;
+		}
 		if (IS("word")) return d_data(a, p, e, 4);
 		if (IS("weak")) return d_symattr(a, p, e, 'w');
-		if (IS("warning")) return 0;
+		if (IS("warning")) {
+			Sv t = trim(p, e);
+			char buf[4096];
+			size_t k = 0;
+			const char *q = t.s;
+			if (t.n && *q == '"' && (size_t)(e - q) <= sizeof buf && !parse_string(a, &q, e, buf, &k))
+				fprintf(stderr, "%s: warning: %.*s\n", a->fname ? a->fname : "<stdin>", (int)k, buf);
+			else
+				fprintf(stderr, "%s: warning: .warning directive invoked in source file\n", a->fname ? a->fname : "<stdin>");
+			return 0;
+		}
 		break;
 	case 'x':
 		if (IS("xword")) return d_data(a, p, e, 8);
@@ -1879,6 +2124,7 @@ void as_begin(As *a, ElfObj *o, const char *name)
 	a->xs.used = 0; a->defs.used = 0; a->ninst = 0; a->nal = 0; a->alcap = 0; a->al = 0;
 	memset(a->alh, 0, sizeof a->alh);
 	a->fname = name;
+	a->nident = 0; a->ended = 0;
 	a->mmask = 255; a->mcount = 0;
 	a->mtab = rget(&a->defs, sizeof(Macro *) * (a->mmask + 1));
 	memset(a->mtab, 0, sizeof(Macro *) * (a->mmask + 1));
@@ -1912,9 +2158,103 @@ int as_snippet(As *a, const char *text, size_t len)
 			break;
 		}
 		if (o->has_err) { err(a, "%s", o->err); break; }
+		if (a->ended) break;	/* .end: the rest of the input is ignored */
 	}
 	a->nfr = 0;
 	return a->err ? -1 : 0;
+}
+
+/* .symver orig, name@[@[@]]ver[, remove|local|hidden]: an alias defined at
+   the end (MC's ELFObjectWriter::executePostLayoutBinding) */
+static int d_symver(As *a, const char *p, const char *e)
+{
+	Sv o, v;
+	if (parse_name(a, &p, e, &o)) return -1;
+	p = ws(p, e);
+	if (p >= e || *p != ',') return err(a, "expected a comma");
+	p = ws(p + 1, e);
+	const char *q = p;
+	while (q < e && *q != ',' && *q != ' ' && *q != '\t') q++;
+	v = (Sv){ p, (size_t)(q - p) };
+	const char *at = memchr(v.s, '@', v.n);
+	if (!at) return err(a, "expected a '@' in the name");
+	int rm = 0;
+	p = ws(q, e);
+	if (p < e && *p == ',') {
+		Sv w = trim(p + 1, e);
+		if (w.n == 6 && !memcmp(w.s, "remove", 6)) rm = 1;
+		else if (!(w.n == 5 && !memcmp(w.s, "local", 5)) && !(w.n == 6 && !memcmp(w.s, "hidden", 6)))
+			return err(a, "expected 'remove'");
+	}
+	uint32_t yo = sym(a, o.s, o.n);
+	elf_reg(a->o, yo);
+	uint32_t yv = sym(a, v.s, v.n);
+	elf_reg(a->o, yv);
+	if (a->nsv == a->svcap) {
+		uint32_t nc = a->svcap ? a->svcap * 2 : 16;
+		void *t = rget(&a->defs, sizeof *a->sv * nc);
+		if (a->nsv) memcpy(t, a->sv, sizeof *a->sv * a->nsv);
+		a->sv = t; a->svcap = nc;
+	}
+	a->sv[a->nsv].orig = yo; a->sv[a->nsv].ver = yv; a->sv[a->nsv].rm = rm;
+	a->nsv++;
+	return 0;
+}
+
+static void symver_finish(As *a)
+{
+	ElfObj *o = a->o;
+	for (uint32_t i = 0; i < a->nsv; i++) {
+		uint32_t yo = a->sv[i].orig, yv = a->sv[i].ver;
+		ElfSym *s = elf_symp(o, yo), *t = elf_symp(o, yv);
+		if (a->sv[i].rm == 2) {	/* .weakref yo -> yv */
+			if (t->flags & ESYM_DEFINED) {
+				elf_define(o, yo, t->frag, t->value);
+				s->flags |= (t->flags & ESYM_ABS) | ESYM_NOSYMTAB;
+				s->flags &= (uint8_t)~ESYM_USED;
+				s->alias = t->alias ? t->alias : yv;
+				continue;
+			}
+			/* only referenced through the alias: weak */
+			if (!t->reg && !(t->flags & ESYM_BINDSET)) t->bind = STB_WEAK;
+			ElfFix *fx = (ElfFix *)o->fixes.base;
+			for (uint32_t k = 0; k < o->nfix; k++) {
+				if (fx[k].v.add == yo) { fx[k].v.add = yv; elf_reg(o, yv); }
+				if (fx[k].v.sub == yo) { fx[k].v.sub = yv; elf_reg(o, yv); }
+			}
+			s->flags = (uint8_t)((s->flags & ~ESYM_USED) | ESYM_NOSYMTAB);
+			continue;
+		}
+		int def = (s->flags & ESYM_DEFINED) != 0, rm = (int)a->sv[i].rm;
+		const char *at = memchr(t->name, '@', t->len);
+		if (at && t->len - (size_t)(at - t->name) >= 3 && !memcmp(at, "@@@", 3)) {
+			/* name@@@v: @@ when defined here, @ otherwise */
+			size_t k = (size_t)(at - t->name);
+			char *n = rget(&a->defs, t->len);
+			memcpy(n, t->name, k + 1);
+			if (def) { memcpy(n + k + 1, at + 2, t->len - k - 2); }
+			else { memcpy(n + k + 1, at + 3, t->len - k - 3); }
+			t->name = n; t->len -= def ? 1 : 2;
+			rm = 1;
+		}
+		if (def) {
+			elf_define(o, yv, s->frag, s->value);
+			t->flags |= s->flags & ESYM_ABS;
+			t->bind = s->bind; t->type = s->type; t->vis = s->vis;
+			t->alias = s->alias ? s->alias : yo;
+			t->flags |= ESYM_BINDSET;
+		}
+		if (!def || rm) {
+			/* references go to the versioned name; the original disappears */
+			ElfFix *fx = (ElfFix *)o->fixes.base;
+			for (uint32_t k = 0; k < o->nfix; k++) {
+				if (fx[k].v.add == yo) fx[k].v.add = yv;
+				if (fx[k].v.sub == yo) fx[k].v.sub = yv;
+			}
+			if (s->flags & ESYM_USED) t->flags |= ESYM_USED;
+			s->flags = (uint8_t)((s->flags & ~ESYM_USED) | ESYM_NOSYMTAB);
+		}
+	}
 }
 
 int as_end(As *a)
@@ -1943,6 +2283,7 @@ int as_end(As *a)
 			else { err(a, "unsupported variable '%s'", s->name); break; }
 		}
 	}
+	if (!a->err && a->nsv) symver_finish(a);
 	return a->err ? -1 : 0;
 }
 

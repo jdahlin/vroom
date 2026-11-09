@@ -94,6 +94,9 @@ struct As {
 	uint32_t ninst;		/* \@ */
 	uint64_t nstmt, nstmtb;	/* statistics: statements and their bytes */
 	const char *fname;
+	size_t nident;		/* .ident directives seen (.comment's leading NUL) */
+	int ended;		/* .end seen */
+	struct { uint32_t orig, ver, rm; } *sv; uint32_t nsv, svcap;	/* .symver */
 	char msg[512];
 	int err;
 };
