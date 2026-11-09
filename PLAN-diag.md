@@ -418,6 +418,16 @@ Varje delsteg: nya fall i `tests/diag/` (snapshots, och clang som mätpunkt), la
 1. **Saknade varningar** från TODO.md (`-Wunused-variable`, `-Wuninitialized`,
    `-Wformat`, `-Wconstant-conversion`, ...) — prioriteras med lager 2:s tabell efter hur
    ofta clang ger dem på PostgreSQL och kärnan.
+   *Status (2026-11-09):* kärnan och PostgreSQL är varningsfria under clang, så ordningen
+   följer clangs standardvarningar (utan `-Wall`).  **`-Wreturn-type` klart:** en flödesanalys
+   över AST:n som clangs CFG (konstanta villkor beskurna, även `x || 1` och const-variabler
+   med konstant initierare; noreturn-anrop, `__builtin_unreachable/trap`; en etikett nås bara
+   av en nådd goto, iterat till fixpunkt; asm goto; en enum-switch som täcker alla uppräknare;
+   indirekt goto: inget svar), med `help:`.  Kärnan bygger med `-Werror=return-type`:
+   `vcc-sema.py warn` 879/879 (inga falska; `scoped_guard`/`scoped_cond_guard` krävde
+   goto-spårning och tryEvaluateBool-vikning), PostgreSQL 0 varningar.  Kvar:
+   `-Wconstant-conversion`, `-Wformat`, `-Wconstant-logical-operand`,
+   `-Wtautological-compare`, sedan `-Wall`:s `-Wunused-*`.
 2. **Makron**: expanderad text med caret i, ramar från systemheaders vikta,
    flernivå-"expanded from" (TODO.md "Diagnostic details").
 3. **`static_assert`**: operanderna utvärderade (`48 == 56`), och för `sizeof` en
