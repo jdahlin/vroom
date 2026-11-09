@@ -128,6 +128,21 @@ static void relocate_isec(uint32_t si, uint8_t *buf)
 				     (uint32_t)((imm & 3) << 29 | ((imm >> 2) & 0x7ffff) << 5));
 			break;
 		}
+		case R_AARCH64_ADR_GOT_PAGE:
+		case R_AARCH64_LD64_GOT_LO12_NC: {
+			uint64_t slot = isec_va(got_isec, 8 * (uint64_t)gsyms[o->gs[symi - o->firstg]].gotidx);
+			if (type == R_AARCH64_LD64_GOT_LO12_NC) {
+				write_le_imm(loc, 0xfffu << 10, (uint32_t)((slot & 0xfff) >> 3) << 10);
+				break;
+			}
+			v = (int64_t)((slot & ~0xfffULL) - (P & ~0xfffULL));
+			if (!fits_int(v, 33))
+				reloc_error(o, is, rl, "out of range", v);
+			uint64_t imm = (uint64_t)v >> 12;
+			write_le_imm(loc, (3u << 29) | (0x7ffffu << 5),
+				     (uint32_t)((imm & 3) << 29 | ((imm >> 2) & 0x7ffff) << 5));
+			break;
+		}
 		case R_AARCH64_ADR_PREL_LO21:
 			v = (int64_t)(t.va - P);
 			if (!fits_int(v, 21))

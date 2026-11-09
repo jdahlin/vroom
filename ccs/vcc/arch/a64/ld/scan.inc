@@ -74,6 +74,13 @@ static void scan_relocs(void *arg, size_t i)
 		case R_AARCH64_LDST32_ABS_LO12_NC: case R_AARCH64_LDST64_ABS_LO12_NC:
 		case R_AARCH64_LDST128_ABS_LO12_NC: case R_AARCH64_LD_PREL_LO19:
 			break;
+		case R_AARCH64_ADR_GOT_PAGE: case R_AARCH64_LD64_GOT_LO12_NC:
+			if (symi < o->firstg)
+				error("%s:(%s+0x%llx): GOT relocation against a local symbol is not supported", o->path,
+				      is->name, (unsigned long long)rl->r_offset);
+			else
+				atomic_store(&gsyms[o->gs[symi - o->firstg]].needgot, 1);
+			break;
 		/* TLS: local-exec, and initial-exec/TLSDESC relaxed to it (an executable, as lld) */
 		case R_AARCH64_TLSLE_ADD_TPREL_HI12: case R_AARCH64_TLSLE_ADD_TPREL_LO12:
 		case R_AARCH64_TLSLE_ADD_TPREL_LO12_NC:

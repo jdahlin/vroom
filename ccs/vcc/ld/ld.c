@@ -337,7 +337,7 @@ typedef struct Obj {
 static VVEC(Obj *) objs;
 
 enum { K_NONE, K_NORMAL, K_MERGE_IN, K_MERGE, K_THUNK, K_RELADYN, K_BUILDID,
-       K_SYMTAB, K_STRTAB, K_SHSTRTAB, K_COMMENT };
+       K_SYMTAB, K_STRTAB, K_SHSTRTAB, K_COMMENT, K_GOT };
 
 typedef struct ISec {
 	const uint8_t *data;
@@ -412,6 +412,8 @@ typedef struct G {
 	uint32_t thunk;
 	uint64_t fva;			/* after layout: gsym_va() */
 	bool fabs, fundef;		/* gsym_isabs(); undefined or demoted */
+	_Atomic uint8_t needgot;	/* some GOT relocation names it */
+	uint32_t gotidx;		/* its .got slot */
 } G;
 
 static _Atomic(const char *) *hnames;	/* per slot */
@@ -1992,7 +1994,8 @@ typedef struct { int first, last; bool lma_set; } PhdrSecs;
 static VVEC(PhdrSecs) phsecs;		/* first/last osec of each phdr */
 static VVEC(uint32_t) outsecs;		/* live output sections in header order */
 static uint64_t ndyn;			/* RELATIVE relocations */
-static uint32_t reladyn_isec = NONE, buildid_isec = NONE, comment_isec = NONE;
+static uint32_t reladyn_isec = NONE, buildid_isec = NONE, comment_isec = NONE, got_isec = NONE;
+static VVEC(uint32_t) gotsyms;		/* .got slot -> G id */
 static uint32_t symtab_isec = NONE, strtab_isec = NONE, shstrtab_isec = NONE;
 static uint32_t nobj_real;		/* objects excluding synthetic */
 
@@ -2129,7 +2132,7 @@ static void assign_sections(void)
 		ISec *is = &isecs.v[orphans.v[i]];
 		if (!strcmp(is->name, ".note.GNU-stack") || (is->flags & SHF_EXCLUDE))
 			is->osec = OS_DISCARD;
-		else if (!opt.orphan)
+		else if (!opt.orphan || is->kind == K_GOT)
 			;	/* lld: placed silently by default */
 		else
 			(opt.orphan == 2 ? error : warn)("%s:(%s) is being placed in '%s'", is->obj != NONE ? objs.v[is->obj]->path : "<internal>",
@@ -2616,6 +2619,23 @@ static void write_isec(void *arg, size_t j)
 			wr32(b, adrp);
 			wr32(b + 4, 0x91000210 | (uint32_t)(s & 0xfff) << 10);
 			wr32(b + 8, 0xd61f0200);
+		}
+		break;
+	}
+	case K_GOT: {
+		Rela *dyn = reladyn_buf ? reladyn_buf + is->dyn0 : NULL;
+		uint32_t nd = 0;
+		for (uint32_t k = 0; k < gotsyms.n; k++) {
+			uint32_t g = gotsyms.v[k];
+			bool undef = gsyms[g].state == GS_UNDEF || gsyms[g].demoted;
+			uint64_t v = undef ? 0 : gsym_va(g);
+			wr64(dst + 8 * k, v);
+			if (pic && !undef && !gsym_isabs(g)) {
+				dyn[nd].r_offset = isec_va(si, 8 * k);
+				dyn[nd].r_info = R_AARCH64_RELATIVE;
+				dyn[nd].r_addend = (int64_t)v;
+				nd++;
+			}
 		}
 		break;
 	}
@@ -3534,6 +3554,8 @@ static void add_synthetic_sections(void)
 		isecs.v[buildid_isec].size = 16 + (!strcmp(opt.build_id, "md5") ? 16 :
 						   !strcmp(opt.build_id, "fast") ? 8 : 20);
 	}
+	/* sized after the relocation scan; empty unless something uses it */
+	got_isec = new_isec(".got", K_GOT, SHT_PROGBITS, SHF_ALLOC | SHF_WRITE, 8);
 	symtab_isec = new_isec(".symtab", K_SYMTAB, SHT_SYMTAB, 0, 8);
 	isecs.v[symtab_isec].entsize = sizeof(Sym);
 	shstrtab_isec = new_isec(".shstrtab", K_SHSTRTAB, SHT_STRTAB, 0, 1);
@@ -3831,6 +3853,15 @@ static int run(int argc, char **argv)
 	process_symbol_assignments();
 	adjust_output_sections();
 	pfor(isecs.n, scan_relocs, NULL);
+	/* .got: one slot per symbol, in symbol id order */
+	for (uint32_t g = 0, ng = atomic_load(&ngsyms); g < ng; g++)
+		if (atomic_load(&gsyms[g].needgot)) {
+			gsyms[g].gotidx = gotsyms.n;
+			VVEC_PUSH(gotsyms, g, alloc);
+			if (pic && !gsym_isabs(g) && gsyms[g].state != GS_UNDEF && !gsyms[g].demoted)
+				isecs.v[got_isec].ndyn++;
+		}
+	isecs.v[got_isec].size = (uint64_t)gotsyms.n * 8;
 	ndyn = 0;
 	for (uint32_t i = 0; i < isecs.n; i++)
 		ndyn += isecs.v[i].ndyn;
@@ -4351,7 +4382,8 @@ static void reset_state(void)
 	tr_vals = NULL;
 	tr_mask = tr_n = 0;
 	entry_name = NULL;
-	reladyn_isec = buildid_isec = comment_isec = NONE;
+	reladyn_isec = buildid_isec = comment_isec = got_isec = NONE;
+	gotsyms.n = 0;
 	symtab_isec = strtab_isec = shstrtab_isec = NONE;
 	reladyn_buf = NULL;
 	out = NULL;

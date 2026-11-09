@@ -816,7 +816,7 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
   without `.symtab`/`.strtab`/`.shstrtab` places them as orphans, as lld;
   `/DISCARD/` of a merge section (`.comment`): `isec_osec`.  Both found by
   `VCC_LD=build/ccs/vlink bench/vcc-ctests.py --no-cache`, which links every
-  test with vlink: 1748/1749, the one left needs a GOT (`pragma_weak`).)
+  test with vlink: 1750/1750.)
   *Validate:* T8 cases `no-script`, `discard-comment`.
 - [ ] **Options**: `-znotext` swallowed (`ld/ld.c:3315`), `-m X` unchecked
   (`ld/ld.c:3296`); rejected `-pie`, `-static`, `-L`/`-l`,
@@ -826,7 +826,10 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
   `_start`, lld's warning when absent; `--orphan-handling=place|warn|error`,
   silent by default as lld.)
   *Validate:* T8 per option; unknown options are errors (T11-style table).
-- [ ] **Relocations**: GOT (`ADR_GOT_PAGE`, `LD64_GOT_LO12_NC`) + relaxation,
+- [ ] **Relocations**: GOT relaxation to adrp+add (done: `.got` for
+  `ADR_GOT_PAGE`/`LD64_GOT_LO12_NC` against globals, 0 for undefined weak,
+  RELATIVE under -pie/-shared; `tests/vcc/got_pic.c`, `pragma_weak.c`; not:
+  locals, GLOB_DAT for preemptible symbols),
   TLS in shared objects (executables done: LE, IE and TLSDESC relaxed to LE as
   lld, `PT_TLS`, `.tbss` without address space; text byte-identical to lld
   for `tests/vcc/tls_{static,ie,desc}.c`), `PT_GNU_RELRO`, MOVW_*, CONDBR19, TSTBR14,
