@@ -422,6 +422,13 @@ Varje delsteg: nya fall i `tests/diag/` (snapshots, och clang som mätpunkt), la
    flernivå-"expanded from" (TODO.md "Diagnostic details").
 3. **`static_assert`**: operanderna utvärderade (`48 == 56`), och för `sizeof` en
    layoutnot med var utfyllnaden kom ifrån.
+   **Status (2026-11-09): klart.**  Det falska ledet i en `&&`-kedja rapporteras (clangs
+   findFailedBooleanCondition), en heltalsliteral ger bara "static assertion failed: msg",
+   "expression evaluates to" utelämnas när båda operanderna är literaler (som clang).  Nytt:
+   för `sizeof(struct X)`/`sizeof(T)` i villkoret en not vid posten, "'struct hdr' is 24 bytes
+   (alignment 8)", med etiketter "7 bytes of padding after this" / "... at the end" och
+   `help: ordering its members by decreasing alignment makes it 16 bytes`
+   (`tests/diag/static_assert_layout.c`).
 4. **Include-tips**: `memcpy` → `<string.h>` som fix-it, från en genererad libc/POSIX-tabell.
    **Status (2026-11-09): klart.**  `cc/libfuncs.inc` (genererad av `gen-libbuiltins.py` ur
    clangs Builtins.inc: 354 biblioteksfunktioner med header) — ett anrop till en odeklarerad

@@ -1,0 +1,27 @@
+static_assert_layout.c:13:16: error: static assertion failed due to requirement 'sizeof(struct hdr) == 16': hdr must be 16 bytes
+   13 | _Static_assert(sizeof(struct hdr) == 16, "hdr must be 16 bytes");
+      |                ^~~~~~~~~~~~~~~~~~~~~~~~ expression evaluates to '24 == 16'
+static_assert_layout.c:13:35: note: expression evaluates to '24 == 16'
+static_assert_layout.c:6:8: note: 'struct hdr' is 24 bytes (alignment 8)
+    6 | struct hdr {
+      |        ^
+    7 |         char tag;
+      |              ~~~ 7 bytes of padding after this
+    8 |         long len;
+    9 |         short kind;
+      |               ~~~~ 6 bytes of padding at the end
+      = help: ordering its members by decreasing alignment makes it 16 bytes
+static_assert_layout.c:14:16: error: static assertion failed due to requirement 'sizeof(pair) <= 4': pair
+   14 | _Static_assert(sizeof(pair) <= 4 && 1, "pair");
+      |                ^~~~~~~~~~~~~~~~~ expression evaluates to '8 <= 4'
+static_assert_layout.c:14:29: note: expression evaluates to '8 <= 4'
+static_assert_layout.c:11:9: note: 'pair' is 8 bytes (alignment 4)
+   11 | typedef struct { int a; char b; } pair;
+      |         ^                    ~ 3 bytes of padding at the end
+static_assert_layout.c:15:16: error: static assertion failed due to requirement '1 > 2': logic
+   15 | _Static_assert(1 > 2 && 2 > 1, "logic");
+      |                ^~~~~
+static_assert_layout.c:16:16: error: static assertion failed: zero
+   16 | _Static_assert(0, "zero");
+      |                ^
+4 errors generated.
