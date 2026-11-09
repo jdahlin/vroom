@@ -312,8 +312,8 @@ void elf_emit(ElfObj *o, uint8_t *b)
 			type = t;
 			if (!size && !(s->flags & ESYM_SIZE_EXPR)) size = b->size;
 		}
-		if (type == STT_NOTYPE && (s->flags & ESYM_DEFINED) && !(s->flags & ESYM_ABS) && (elf_sec(o, symsec(o, s))->flags & SHF_TLS))
-			type = STT_TLS;	/* MC: labels in a TLS section */
+		if ((type == STT_NOTYPE || type == STT_OBJECT) && (s->flags & ESYM_DEFINED) && !(s->flags & ESYM_ABS) && (elf_sec(o, symsec(o, s))->flags & SHF_TLS))
+			type = STT_TLS;	/* MC: labels in a TLS section (CombineSymbolTypes keeps TLS over OBJECT) */
 		if (type == STT_GNU_IFUNC || s->bind == 10) b[7] = 3;	/* ELFOSABI_GNU (MC) */
 		p32(y, s->size_sub);
 		y[4] = (uint8_t)(s->bind << 4 | type); y[5] = s->vis;

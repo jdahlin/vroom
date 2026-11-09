@@ -66,7 +66,7 @@ Existing gates that every change must keep green: `vcc-diff.py cmp`
   `llvm-readelf -r -S -s` / `llvm-objdump -d`.  For PIC, TLS, CFI, DWARF,
   section groups, branch ranges — things that are about the object, not
   runtime output.
-- [ ] **T7 `as` corpus: compiler-generated assembly.** (started: `bench/vas-corpus.py`: clang -S -O0/-O2 of every test C file, clang -c vs vasm byte for byte: 3035/3035 identical on 2026-11-09, `-g` too.  Next: `-fPIC`, `-march=armv9-a+sve2`.)  `tests/as/*.c` →
+- [ ] **T7 `as` corpus: compiler-generated assembly.** (started: `bench/vas-corpus.py`: clang -S -O0/-O2 of every test C file, clang -c vs vasm byte for byte: 3035/3035 identical on 2026-11-09, `-g` and `-O2 -fPIC` too.  Next:, `-march=armv9-a+sve2`.)  `tests/as/*.c` →
   `clang --target=aarch64-linux-gnu -O2 -S` (and `-g`, `-fPIC`, `-march=armv8.5-a+sve2`)
   → assemble with `vasm` and with clang, compare objects with
   `bench/vas-diff.py` (sections, symbols, relocations, bytes).  Plus
