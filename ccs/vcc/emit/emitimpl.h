@@ -84,6 +84,8 @@
 /* Apple arm64 (Mach-O): '_' names, GOT for symbols outside the TU, variadic
  * arguments on the stack, va_list a char *, stack arguments packed */
 #define DARWIN(c) ((c)->o->target == PP_DARWIN)
+/* WebAssembly (wasm64): arch/wasm/emit/ generates the functions, data.c the data */
+#define WASM(c) ((c)->o->target == PP_WASM64)
 /* a symbol offset the relocation itself can carry: ELF RELA 32 bits here, a
  * Mach-O ARM64_RELOC_ADDEND 24 bits signed (clang adds the rest in code) */
 #define SYMOFF_OK(c, off) (DARWIN(c) ? (off) >= -(1 << 23) && (off) < (1 << 23) : (off) >= INT32_MIN && (off) <= INT32_MAX)
@@ -347,6 +349,7 @@ typedef struct ecx {
 	uint32_t *rlog;		/* this round's item logs: (RL_*, value) pairs */
 	size_t nrlog, rlog0;	/* ... and where the current item's starts */
 	jmp_buf bail;
+	struct wst *w;		/* WASM: arch/wasm/emit/ state (wimpl.h) */
 } ecx;
 enum { FN_MEMCPY, FN_MEMSET, FN_MEMMOVE, FN_UDIVTI3, FN_DIVTI3, FN_UMODTI3, FN_MODTI3, FN_STRLEN,
        FN_ASHLTI3, FN_LSHRTI3, FN_ASHRTI3, FN_FLOATTISF, FN_FLOATTIDF, FN_FLOATUNTISF, FN_FLOATUNTIDF,
@@ -678,6 +681,10 @@ VPRIV void emit_function(ecx *e, uint32_t s);
 /* data.c */
 VPRIV void emit_object(ecx *e, uint32_t s);
 VPRIV void emit_string(ecx *e, uint32_t i);
+/* arch/wasm/emit/ */
+VPRIV void wasm_emit_function(ecx *e, uint32_t s);
+VPRIV void wasm_ecx_free(ecx *e);
+VPRIV void wasm_header(cc *c, tbuf *hdr, ecx *ctx, int nthr);
 /* prepass.c */
 VPRIV bool is_aconst(cc *c, uint32_t n);
 VPRIV uint32_t aconst_idx(cc *c, uint32_t n);

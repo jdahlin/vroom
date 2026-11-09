@@ -64,6 +64,10 @@ assembler, linker, behind `vcc`/`vas`/`vld` shims and the `vccd` server.
     and Apple's), builtins, inline asm, the record optimizer (`opt.c`), the
     printer (`print.c`) and the encoder of records (`obj.c`).  It is compiled
     in the `emit` unity TU (`emit_SRC`), so VPRIV stays static.
+  - `arch/wasm/emit/`: the WebAssembly (wasm64) code generator, AST to
+    LLVM's wasm `.s` (`wimpl.h`; `wasm.c` functions, ABI, header; `wexpr.c`,
+    `wcall.c`, `wstmt.c`), also in the `emit` unity TU: every name starts
+    with `w`.  `emit/` picks it per target (`WASM(c)`); PLAN-wasm.md.
   - `platform/linux/`: the ELF writer (`elf.c`: relocations, string table,
     file layout as LLVM MC).
   - `platform/darwin/`: the Mach-O writer; Apple PMU counters (`pmc.c`).
@@ -114,6 +118,7 @@ bench/vcc-bflayout.py               # generated bit-field records, layouts check
 bench/vcc-ldconst.py                # generated long double literals and folds, bits vs clang (~2 s)
 bench/vccd-test.py                  # vccd as a service: socket, bad requests, cache invalidation (~11 s)
 bench/vbench.py gate                # performance gate: instructions vs the merge-base, budget 1 % (~1 min)
+bench/vcc-wasm.py -j 6              # the C suites for wasm64: vcc -S, clang -c, emcc, node vs clang's build (~2 min)
 bench/vcc-same.py --base DIR -j 6    # test-suite outputs byte-identical with DIR/vpp (vbench.py mkbase REV), ~80 s
 bench/vas-enc.py $PWD/ccs/vcc/tests/vas   # vas encodings vs llvm-mc
 bench/pg/build.sh clang && bench/pg/build.sh vcc   # PostgreSQL (macOS, meson+ninja): build + meson test (~2 min each)

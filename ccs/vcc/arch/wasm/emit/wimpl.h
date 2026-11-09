@@ -1,0 +1,305 @@
+/*
+ * vcc code generator for WebAssembly (wasm64, PLAN-wasm.md): shared state
+ * of arch/wasm/emit/.  Straight from the AST to LLVM's wasm assembly
+ * syntax (what clang -S --target=wasm64-unknown-emscripten writes): one
+ * wasm value per C expression on the operand stack, scalar locals whose
+ * address is never taken in wasm locals, the rest in a frame on the shadow
+ * stack (__stack_pointer), structured control flow from C's.
+ *
+ * Part of the emit module (emit_SRC): its statics share the unity TU with
+ * arch/a64/emit/, so every name here starts with w.
+ */
+#ifndef VCC_WIMPL_H
+#define VCC_WIMPL_H
+#include "../../../emit/emitimpl.h"
+
+/* wasm value types; WT_MEM: a C value in memory, its address (an i64) on the stack */
+enum { WT_NONE, WT_I32, WT_I64, WT_F32, WT_F64, WT_MEM };
+
+/* where a local lives */
+enum { WB_NONE, WB_LOC, WB_FRAME, WB_PTR };	/* WB_PTR: the wasm local holds the object's address */
+
+typedef struct wbind {
+	uint32_t gen;		/* valid if == W->gen */
+	uint8_t k;
+	uint32_t loc;		/* WB_LOC / WB_PTR: local index */
+	uint64_t off;		/* WB_FRAME: offset from the frame base */
+} wbind;
+
+/* an lvalue: WL_LOC a wasm local; WL_MEM an address on the stack plus off */
+enum { WL_LOC, WL_MEM };
+typedef struct wlv {
+	uint8_t k, bf, sgn;
+	uint16_t bitoff, width;	/* bit-field: bits from the byte at off */
+	uint32_t loc;
+	uint64_t off;
+	bool vol;
+} wlv;
+
+/* a switch case: its range and segment */
+typedef struct wswc { i128 lo, hi; uint32_t seg; bool dflt; } wswc;
+
+typedef struct wst {
+	tbuf b;			/* the function's body */
+	tbuf fn;		/* the function assembled */
+	tbuf sig;		/* scratch: a call's signature */
+	tbuf decl;		/* functions referenced: "name\tsig\n", for the header's .functype lines */
+	uint8_t *lt;		/* local types (WT_I32 ..) */
+	uint32_t nloc, nparam;
+	uint32_t *fl[5];	/* free temporaries per type */
+	uint32_t nfl[5];
+	wbind *sb;		/* per sym */
+	uint32_t gen;
+	uint64_t frame;		/* frame bytes so far */
+	uint32_t falign;
+	uint32_t fp, sp0, rv, vap, sret;	/* locals (UINT32_MAX: none) */
+	bool dyn;		/* alloca / VLA: __stack_pointer moves during the function */
+	int depth;		/* open blocks, loops and ifs */
+	int brk, cont;		/* innermost targets: block index, -1 none */
+	qty rty;
+	int rt;			/* the wasm result: WT_NONE for void and sret */
+	uint32_t fsym;
+	wswc *sw;		/* switch case scratch */
+	uint32_t nsw;
+	uint32_t *seg;		/* switch segments: first statement index */
+	uint32_t nseg;
+	struct wst *next;	/* the free list */
+} wst;
+
+#define WMAXLOC ((size_t)1 << 22)
+#define WMAXSW ((size_t)1 << 22)
+
+static const char *const wt_name[] = { "", "i32", "i64", "f32", "f64", "i64" };
+
+/* ---------------- types ---------------- */
+
+/* the wasm type of a C value of type t */
+static inline int wty(cc *c, qty t)
+{
+	const ctype *y = T(c, t);
+
+	switch (y->kind) {
+	case TY_VOID:
+		return WT_NONE;
+	case TY_FLOAT:
+		return WT_F32;
+	case TY_DOUBLE:
+		return WT_F64;
+	case TY_PTR:
+	case TY_FUNC:
+		return WT_I64;
+	default:
+		if (k_int(y->kind))
+			return y->size <= 4 ? WT_I32 : y->size == 8 ? WT_I64 : WT_MEM;
+		return WT_MEM;
+	}
+}
+
+/* its representation on the operand stack */
+static inline int wrep(int t) { return t == WT_MEM ? WT_I64 : t; }
+
+/* ---------------- printing ---------------- */
+
+#define WB_ (&e->w->b)
+
+static inline void wi(ecx *e, const char *s)
+{
+	tbuf *b = WB_;
+
+	tb_c(b, '\t');
+	tb_s(b, s);
+	tb_c(b, '\n');
+}
+
+static inline void wiu(ecx *e, const char *s, uint64_t v)
+{
+	tbuf *b = WB_;
+
+	tb_c(b, '\t');
+	tb_s(b, s);
+	tb_c(b, '\t');
+	tb_u(b, v);
+	tb_c(b, '\n');
+}
+
+static inline void wii(ecx *e, const char *s, int64_t v)
+{
+	tbuf *b = WB_;
+
+	tb_c(b, '\t');
+	tb_s(b, s);
+	tb_c(b, '\t');
+	tb_i(b, v);
+	tb_c(b, '\n');
+}
+
+/* "<type>.<op>" */
+static inline void wop(ecx *e, int t, const char *op)
+{
+	tbuf *b = WB_;
+
+	tb_c(b, '\t');
+	tb_s(b, wt_name[t]);
+	tb_c(b, '.');
+	tb_s(b, op);
+	tb_c(b, '\n');
+}
+
+static inline void wconst(ecx *e, int t, int64_t v)
+{
+	if (t == WT_I32)
+		wii(e, "i32.const", (int32_t)v);
+	else
+		wii(e, "i64.const", v);
+}
+
+static inline void wfconst(ecx *e, int t, double d)
+{
+	if (t == WT_F32) {
+		float f = (float)d;
+		uint32_t u;
+
+		memcpy(&u, &f, 4);
+		wii(e, "i32.const", (int32_t)u);
+		wi(e, "f32.reinterpret_i32");
+	} else {
+		uint64_t u;
+
+		memcpy(&u, &d, 8);
+		wii(e, "i64.const", (int64_t)u);
+		wi(e, "f64.reinterpret_i64");
+	}
+}
+
+/* i64.const ref+off: the address of a symbol */
+static inline void waddr_ref(ecx *e, uint32_t ref, int64_t off)
+{
+	tbuf *b = WB_;
+
+	claim_ref(e, ref);
+	tb_s(b, "\ti64.const\t");
+	ref_off(e->c, b, ref, off);
+	tb_c(b, '\n');
+}
+
+/* ---------------- locals ---------------- */
+
+static inline uint32_t wnewloc(ecx *e, int t)
+{
+	wst *W = e->w;
+
+	if (W->nloc >= WMAXLOC)
+		efatal(e, e->curloc, "wasm: too many locals");
+	W->lt[W->nloc] = (uint8_t)wrep(t);
+	return W->nloc++;
+}
+
+/* a temporary local (wfree gives it back) */
+static inline uint32_t wtmp(ecx *e, int t)
+{
+	wst *W = e->w;
+
+	t = wrep(t);
+	if (W->nfl[t])
+		return W->fl[t][--W->nfl[t]];
+	return wnewloc(e, t);
+}
+
+static inline void wfree(ecx *e, uint32_t l)
+{
+	wst *W = e->w;
+	int t = W->lt[l];
+
+	W->fl[t][W->nfl[t]++] = l;
+}
+
+static inline void wget(ecx *e, uint32_t l) { wiu(e, "local.get", l); }
+static inline void wset(ecx *e, uint32_t l) { wiu(e, "local.set", l); }
+static inline void wtee(ecx *e, uint32_t l) { wiu(e, "local.tee", l); }
+
+/* ---------------- frame ---------------- */
+
+static inline uint32_t wfp(ecx *e)
+{
+	wst *W = e->w;
+
+	if (W->fp == UINT32_MAX)
+		W->fp = wnewloc(e, WT_I64);
+	return W->fp;
+}
+
+static inline uint64_t wslot(ecx *e, uint64_t size, uint32_t align)
+{
+	wst *W = e->w;
+	uint64_t o;
+
+	if (align < 1)
+		align = 1;
+	wfp(e);
+	if (align > W->falign)
+		W->falign = align;
+	o = (W->frame + align - 1) & ~(uint64_t)(align - 1);
+	W->frame = o + (size ? size : 1);
+	return o;
+}
+
+/* push the address of a frame slot */
+static inline void wslot_addr(ecx *e, uint64_t off)
+{
+	wget(e, wfp(e));
+	if (off) {
+		wconst(e, WT_I64, (int64_t)off);
+		wi(e, "i64.add");
+	}
+}
+
+/* ---------------- blocks ---------------- */
+
+static inline int wblock(ecx *e, const char *kind)
+{
+	wi(e, kind);
+	return e->w->depth++;
+}
+
+static inline void wend(ecx *e, const char *kind)
+{
+	e->w->depth--;
+	wi(e, kind);
+}
+
+static inline void wbr(ecx *e, const char *op, int target)
+{
+	wiu(e, op, (uint64_t)(e->w->depth - 1 - target));
+}
+
+/* the C ABI (clang's WebAssemblyABIInfo): how a value is passed */
+enum { WA_IGNORE, WA_SCALAR, WA_IND, WA_PAIR };
+typedef struct wabi { uint8_t k, st; qty ft; } wabi;	/* WA_SCALAR: wasm type st, loaded as C type ft */
+
+/* wasm.c */
+VPRIV bool wis_main(cc *c, uint32_t s);
+VPRIV void wfname(cc *c, tbuf *b, uint32_t ref);
+VPRIV bool wreg_ok(ecx *e, uint32_t s);
+VPRIV wabi wclassify(cc *c, qty t);
+VPRIV wabi wclassify_ret(cc *c, qty t);
+VPRIV void wdecl(ecx *e, uint32_t ref, qty ft, const char *sig);
+VPRIV void wsig(ecx *e, tbuf *b, qty ft, uint32_t call, uint32_t def, bool *sret);
+VPRIV qty wpromote(cc *c, qty t);
+/* wexpr.c */
+VPRIV wbind *wlocal(ecx *e, uint32_t s);
+VPRIV void wto_i64(ecx *e, qty t);
+VPRIV int wexpr(ecx *e, uint32_t n, bool want);
+VPRIV void wtruth(ecx *e, uint32_t n);
+VPRIV void wlval(ecx *e, uint32_t n, wlv *l, qty t);
+VPRIV void wload(ecx *e, wlv *l, qty t);
+VPRIV void wstore(ecx *e, wlv *l, qty t);
+VPRIV void wfold_off(ecx *e, wlv *l);
+VPRIV void wcopy(ecx *e, uint64_t n);
+VPRIV void wconv(ecx *e, qty from, qty to);
+/* wcall.c */
+VPRIV int wcall(ecx *e, uint32_t n, bool want);
+VPRIV int wbuiltin(ecx *e, uint32_t n, bool want);
+/* wstmt.c */
+VPRIV void wstmt(ecx *e, uint32_t n);
+VPRIV void winit(ecx *e, uint64_t off, qty ty, uint32_t init, bool zeroed);
+#endif

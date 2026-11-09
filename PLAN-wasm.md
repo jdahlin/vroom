@@ -101,7 +101,7 @@ satser blir wasm:s strukturerade kontrollflöde rakt av:
 | # | Leverans | Kriterium |
 |---|----------|-----------|
 | W0 | **Målval och front end.** `target` i stället för `darwin`; `--target=wasm64-unknown-emscripten`; predefines från clang; `char` signed och `va_list` som `void *` för wasm | `vpp -dM -E` = `clang -dM -E` för målet; `vcc-sema.py layout` med wasm64 som mål (layouter, konstanter, typer kontrollerade av clang); arm64-utdata byte-identiska |
-| W1 | **Lyft ut det generiska ur `arch/a64/emit/`.** Vikning, nåbarhet, inlining, `__builtin_constant_p` och `need_fold` till `emit/` bakom ett gränssnitt per arch | 1 326 arm64-utdata byte-identiska; `vbench.py gate` inom 1 %; kärnan bootar |
+| W1 | **Arch-krokar i `emit/`.** `do_item`, huvudet och svansen i `tu.c` och data-direktiven i `data.c` väljer per mål; wasm-generatorn viker själv med `cc_eval` (omplanerat: vikning och inlining lyfts inte ut ur `arch/a64/emit/` förrän wasm behöver dem) | arm64-utdata byte-identiska (`vcc-same.py`), `vbench.py check` |
 | W2 | **Första wasm-utdata.** `arch/wasm/emit/` för heltalsaritmetik, locals, parametrar, `return`, direkta anrop, `if`/loopar/`break`/`continue`; `-S`. Explorern får målet "wasm64" | Utdata assembleras av `clang --target=wasm64-unknown-emscripten -c`, länkas av emcc och körs i node med samma resultat som clangs; nytt harness `bench/vcc-wasm.py` |
 | W3 | **Minne och data.** Globala variabler, strängar, initierare, pekararitmetik, skuggstack för adresstagna lokala variabler, arrayer och structs, `memcpy`/`memset` för aggregat | `vcc-ctests.py --suite vcc` med `--target wasm64` i node |
 | W4 | **Hela C.** Structs som värden (ABI ovan), varargs, `switch` med `br_table`, `goto` med stackifier, flyttal, bit-fält, VLA/`alloca`, `__int128` och `long double` via compiler-rt, atomics, `setjmp`/`longjmp` | gcc-torture och tcc-tests2 i node via emcc: samma godkända som clang; `bench/vcc-abi.py --target wasm64` (clang/vcc × anropare/anropad) |
@@ -143,6 +143,43 @@ W1 kan delvis gå parallellt med W0.
 
 Före planen: wasm-*bygget* av vcc via emscripten (`ccs/wasm/`, commit 8e9f9da) och
 explorer-sidan.
+
+### W1, W2 (2026-11-09): klara
+- W1 omplanerat: i stället för att lyfta ut vikning och inlining ur
+  `arch/a64/emit/` (riskabelt, se Risker) väljer `emit/` generator per mål:
+  `do_item` (funktioner till `wasm_emit_function`), huvudet (`wasm_header`:
+  `.globaltype __stack_pointer`, `.tabletype`, en `.functype` per refererad
+  funktion, sorterad och unik, ur varje tråds lista), svansen (ingen
+  `.note.GNU-stack`) och `data.c` (en sektion per objekt, `.long`/`.quad`,
+  strängar i `.rodata..L.str.N`). `ecx.w` håller wasm-tillståndet (en pool).
+- W2: `arch/wasm/emit/` (`wimpl.h`, `wasm.c` funktioner/ABI/huvud, `wexpr.c`
+  uttryck/lvärden, `wcall.c` anrop/varargs/inbyggda, `wstmt.c` satser/initierare).
+  Ett värde per C-uttryck på operandstacken; skalära lokala variabler utan tagen
+  adress (prepassets `lnoreg`) i wasm-locals, resten i en ram på skuggstacken
+  (`__stack_pointer`, återställd från en sparad local); `return` som `br` ut ur
+  funktionens yttersta block med värdet i en local. ABI som clang: en struct med
+  ett element som skalären, tomma ignoreras, andra som pekare till en kopia,
+  sret; `__int128`/`long double` som två i64; varargs i en buffert på anroparens
+  ram (justering enligt typen, steg avrundat till 4, som `emitVoidPtrVAArg`).
+  `main` byter namn som hos clang (`__main_argc_argv`, eller `__original_main`
+  plus omslaget `main(i32, i64)` och `__main_void`). Implicit deklarerade
+  biblioteksfunktioner får bibliotekets prototyp (nytt `cc_lib_sig`, bara uppslag);
+  anrop till en K&R-definition i samma fil använder definitionens parametrar.
+  `switch` med `br_table` (täta fall) eller jämförelsekedja, fallen på
+  toppnivån i kroppen. Med i W2 redan: globala data, strängar, initierare,
+  pekararitmetik, bit-fält, structs som värden, varargs, `alloca`, flyttal.
+- Explorern har målet `wasm64-unknown-emscripten` (vcc i wasm som ger wasm).
+- Nytt `bench/vcc-wasm.py`: sviterna från `vcc-ctests.py` byggda av clang och av
+  vcc (`-S`, assemblerat av clang) för wasm64, länkade av emcc, körda i node.
+  LLVM:s assembler typkontrollerar `call_indirect`-index mot en i32-tabell (clangs
+  egen `-S` faller likadant), så en fil vars enda fel är det assembleras om med
+  `-Wa,--no-type-check`. Resultat: gcc 1 411/1 605, tcc 85/104, vcc 22/30
+  (alla 1 518/1 739, 87,3 %). Det som återstår (W4): `goto` (44), inline asm (36),
+  vektorer (36), `__int128`/`long double` (31), VLA (14), atomics och några
+  inbyggda, cleanup, Duffs device.
+- arm64 oförändrat: `vcc-same.py` 13 160/13 160 mot bygget före, `vbench.py
+  check --quick` 66/66; `vcc-ctests --suite vcc` 34/34, `vcc-sema batch` 878/879,
+  bygget fil för fil (`VCC_UNITY=`) utan varningar.
 
 ### W0 (2026-11-09): klar
 - `--target=wasm64-…` ger `PP_WASM64` (tredje kolumnen i `has_tab`, `pp.h`); drivern

@@ -496,6 +496,13 @@ VPRIV bool lib_builtin_known(const char *n)
 	return libbi_find(n, strlen(n)) != NULL;
 }
 
+VPRIV const char *lib_builtin_sig(const char *n)
+{
+	const struct libbi *b = libbi_find(n, strlen(n));
+
+	return b ? b->sig : NULL;
+}
+
 VPRIV uint32_t lib_builtin(cc *c, uint32_t id, uint32_t loc)
 {
 	const struct libbi *b = libbi_find(idstr_(id), idlen_(id));

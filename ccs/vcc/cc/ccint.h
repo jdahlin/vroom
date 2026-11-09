@@ -253,6 +253,7 @@ typedef struct cval {
 bool cc_eval(cc *c, uint32_t n, cval *v);
 bool cc_is_signed(cc *c, qty t);
 const char *cc_builtin_name(int64_t i);
+const char *cc_lib_sig(const char *name, int *clang_enc);
 uint32_t cc_global_named(cc *c, const char *s);
 
 #endif

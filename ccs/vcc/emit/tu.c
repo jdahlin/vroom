@@ -115,6 +115,7 @@ static void ecx_free(ecx *e, vmreg *r)
 	vmreg_put(&r[13], VMREG_SCRATCH);	/* (copied by keep_make before this) */
 	vmreg_put(&r[14], VMREG_SCRATCH);
 	vmpool_give(&ecxpool, r);
+	wasm_ecx_free(e);
 }
 
 /* a function the previous round generated, if nothing it asked about has been marked since */
@@ -156,7 +157,9 @@ static void do_item(ecx *e, uint32_t it)
 		emit_string(e, it & 0x7fffffffu);
 		return;
 	}
-	if (c->syms[it].kind == S_FUNC) {
+	if (c->syms[it].kind == S_FUNC && WASM(c)) {
+		wasm_emit_function(e, it);
+	} else if (c->syms[it].kind == S_FUNC) {
 		if (!reuse(e, it))
 			emit_function(e, it);
 	} else {
@@ -436,12 +439,15 @@ static int emit_tu1(cc *c, const cc_opts *o, bool write_out, uint8_t *mf, bool *
 	/* stitch */
 	qsort(E.chunks, E.nchunk, sizeof(chunk), chunk_cmp);
 	tb_reg(&hdr, &er[12], (size_t)1 << 26, "emit.hdr");
-	tb_s(&hdr, "\t.text\n");
+	if (WASM(c))
+		wasm_header(c, &hdr, ctx, nthr);
+	else
+		tb_s(&hdr, "\t.text\n");
 	for (uint32_t i = 0; i < c->ntlasm; i++) {
 		const casm *a = &c->asms[N(c->tlasm[i])->a];
 
 		tb_s(&hdr, c->strs[a->tmpl - 1].s);
-		tb_s(&hdr, "\n\t.text\n");
+		tb_s(&hdr, WASM(c) ? "\n" : "\n\t.text\n");
 	}
 	{
 		tbuf tail;
@@ -493,7 +499,8 @@ static int emit_tu1(cc *c, const cc_opts *o, bool write_out, uint8_t *mf, bool *
 				tb_c(&tail, '\n');
 			}
 		}
-		tb_s(&tail, "\t.section\t\".note.GNU-stack\",\"\",@progbits\n");
+		if (!WASM(c))
+			tb_s(&tail, "\t.section\t\".note.GNU-stack\",\"\",@progbits\n");
 		iov[k++] = (struct iovec){ hdr.p, hdr.n };
 		for (uint32_t i = 0; i < E.nchunk; i++)
 			iov[k++] = (struct iovec){ (void *)E.chunks[i].p, E.chunks[i].n };
