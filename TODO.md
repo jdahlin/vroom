@@ -827,14 +827,17 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
   test with vlink: 1750/1750; with `VCC_LDCMP=1` each test is linked by both
   and vlink's loaded image (objcopy -O binary) must equal lld's: 1750/1750.)
   *Validate:* T8 cases `no-script`, `discard-comment`.
-- [ ] **Options**: `-znotext` swallowed (`ld/ld.c:3315`), `-m X` unchecked
-  (`ld/ld.c:3296`); rejected `-pie`, `-static`, `-L`/`-l`,
-  `--gc-sections`, `--dynamic-linker`, `--version`, `--emit-relocs`
-  (`ld/ld.c:3295`); ignored `--start-group` (`ld/ld.c:3284`), `--eh-frame-hdr`
-  (`ld/ld.c:3285`), `-z now/relro/noexecstack`.  (Done: `-e`/`--entry` over `ENTRY()`, else
-  `_start`, lld's warning when absent; `--orphan-handling=place|warn|error`,
-  silent by default as lld.)
-  *Validate:* T8 per option; unknown options are errors (T11-style table).
+- [ ] **Options**: (done: `-e`/`--entry` over `ENTRY()`, else `_start`,
+  lld's warning when absent; `--orphan-handling=place|warn|error`; `-m X` /
+  `-mX` checked against lld's AArch64 emulations ("unknown emulation");
+  `-zX` as `-z X` (`-znotext` was swallowed); `--version`/`-v` with "LLD
+  23.1.4" for `scripts/ld-version.sh`; `-static`/`-Bstatic`/`-Bdynamic`,
+  `-no-pie`; `-L DIR`/`-lNAME`/`-l:FILE` (archives only, "unable to find
+  library"); `-pie` and `--dynamic-linker` a clear error until dynamic
+  linking.  `bench/vlink-opts.py`: 18/18 against ld.lld, image identical.)
+  Left: `--gc-sections`, `--emit-relocs`, `--eh-frame-hdr` (ignored),
+  `--start-group` (ignored: no lazy archives yet), `-z relro/now`.
+  *Validate:* `bench/vlink-opts.py` per option; unknown options are errors.
 - [ ] **Relocations**: (done: GOT relaxation adrp+ldr -> adrp+add / nop+adr
   as lld; orphans placed by lld's coarse rank; `.got` for
   `ADR_GOT_PAGE`/`LD64_GOT_LO12_NC` against globals, 0 for undefined weak,
