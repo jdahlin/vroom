@@ -63,8 +63,32 @@ typedef struct wst {
 	uint32_t nsw;
 	uint32_t *seg;		/* switch segments: first statement index */
 	uint32_t nseg;
+	/* goto: compound statements that are jumped into (a dispatch loop each) */
+	struct wgd *gd;
+	uint32_t ngd;
+	uint64_t *gdx;		/* node << 32 | gd index, sorted */
+	uint32_t ngdx;
+	struct wgp *gp;		/* (gd, statement index) pairs: segment starts, labels */
+	uint32_t ngp;		/* segment starts; the labels follow, sorted by label */
+	uint32_t ngl;
 	struct wst *next;	/* the free list */
 } wst;
+
+/* a compound statement goto can enter */
+typedef struct wgd {
+	uint32_t node;
+	int parent;		/* gd it is in (a compound, if or loop), -1: none */
+	uint32_t pidx;		/* its statement index there; in an if 1 then, 2 else */
+	int op;			/* N_BLOCK, N_IF, N_WHILE, N_DO, N_FOR */
+	uint32_t seg, nseg;	/* segment starts: gp[seg ..] (.i) */
+	uint32_t st;		/* the state local (i32): segment to start in; if: branch; loop: skip the test */
+	int loop;		/* block index of the dispatch loop while emitted, -1 */
+	bool need;
+} wgd;
+
+/* label (or 0 for a plain segment start), gd, statement index */
+typedef struct wgp { uint32_t label, d, i; } wgp;
+#define WMAXGD ((size_t)1 << 22)
 
 #define WMAXLOC ((size_t)1 << 22)
 #define WMAXSW ((size_t)1 << 22)
@@ -300,6 +324,7 @@ VPRIV void wconv(ecx *e, qty from, qty to);
 VPRIV int wcall(ecx *e, uint32_t n, bool want);
 VPRIV int wbuiltin(ecx *e, uint32_t n, bool want);
 /* wstmt.c */
+VPRIV void wgoto_scan(ecx *e, uint32_t body);
 VPRIV void wstmt(ecx *e, uint32_t n);
 VPRIV void winit(ecx *e, uint64_t off, qty ty, uint32_t init, bool zeroed);
 #endif

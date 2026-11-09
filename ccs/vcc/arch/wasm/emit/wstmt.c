@@ -168,6 +168,359 @@ static void wasm_asm(ecx *e, const node *x)
 	}
 }
 
+/* ---------------- goto ---------------- */
+
+/*
+ * Structured control flow has no goto.  A compound statement that holds a
+ * label is split into segments at its labelled statements and emitted as a
+ * dispatch loop:
+ *
+ *	loop                    ; goto: set st, br here
+ *	  block .. block        ; one per segment
+ *	    st, st = 0, br_table
+ *	  end_block  segment 0
+ *	  end_block  segment 1 ..
+ *	end_loop
+ *
+ * A goto inside the compound sets its state local and branches to the loop.
+ * A goto into a compound nested (statement in statement) under one being
+ * emitted also sets the states of the compounds between, so each dispatch
+ * picks the segment on the way.  The state is reset when read, and wasm
+ * locals start at 0, so a compound entered normally runs from the top.
+ */
+static void wgscan(ecx *e, uint32_t n, int pd, uint32_t pidx);
+
+static void wgadd(ecx *e, uint32_t label, uint32_t d, uint32_t i)
+{
+	wst *W = e->w;
+
+	if (W->ngp >= 2 * WMAXGD)
+		efatal(e, e->curloc, "wasm: too many labels");
+	W->gp[W->ngp++] = (wgp){ label, d, i };
+}
+
+static uint32_t wgrec(ecx *e, uint32_t n, int pd, uint32_t pidx)
+{
+	cc *c = e->c;
+	wst *W = e->w;
+	uint32_t r;
+
+	if (W->ngd >= WMAXGD)
+		efatal(e, N(n)->loc, "wasm: too many blocks");
+	r = W->ngd++;
+	W->gd[r] = (wgd){ .node = n, .parent = pd, .pidx = pidx, .op = N(n)->op, .loop = -1 };
+	return r;
+}
+
+/* a record r needed: so is its parent, a compound starts a segment there */
+static void wgneed(ecx *e, uint32_t r)
+{
+	wst *W = e->w;
+	int pd = W->gd[r].parent;
+
+	if (!W->gd[r].need || pd < 0)
+		return;
+	W->gd[pd].need = true;
+	if (W->gd[pd].op == N_BLOCK || W->gd[pd].op == N_SWITCH)
+		wgadd(e, 0, (uint32_t)pd, W->gd[r].pidx);
+}
+
+/* statement s at position i of record r: its labels, then what they label */
+static void wgsub(ecx *e, uint32_t s, uint32_t r, uint32_t i)
+{
+	cc *c = e->c;
+	wst *W = e->w;
+
+	for (; s && (N(s)->op == N_LABEL || N(s)->op == N_CASE || N(s)->op == N_DEFAULT); s = N(s)->c)
+		if (N(s)->op == N_LABEL) {
+			W->gd[r].need = true;
+			wgadd(e, N(s)->a, r, i);
+		}
+	wgscan(e, s, (int)r, i);
+}
+
+static void wgscan(ecx *e, uint32_t n, int pd, uint32_t pidx)
+{
+	cc *c = e->c;
+	const node *x;
+	uint32_t r;
+
+	if (!n)
+		return;
+	x = N(n);
+	switch (x->op) {
+	case N_BLOCK:
+		r = wgrec(e, n, pd, pidx);
+		for (uint32_t i = 0; i < x->c; i++)
+			wgsub(e, c->lists[x->b + i], r, i);
+		wgneed(e, r);
+		break;
+	case N_IF:
+		r = wgrec(e, n, pd, pidx);
+		wgsub(e, x->b, r, 1);
+		wgsub(e, x->c, r, 2);
+		wgneed(e, r);
+		break;
+	case N_WHILE:
+	case N_DO:
+		r = wgrec(e, n, pd, pidx);
+		wgsub(e, x->b, r, 0);
+		wgneed(e, r);
+		break;
+	case N_FOR:
+		wgscan(e, x->a, -1, 0);
+		r = wgrec(e, n, pd, pidx);
+		wgsub(e, c->lists[x->c + 1], r, 0);
+		wgneed(e, r);
+		break;
+	case N_SWITCH: {
+		/* its body's segments: the case labels and these */
+		const node *b = N(x->b);
+
+		if (b->op != N_BLOCK) {
+			wgscan(e, x->b, -1, 0);
+			break;
+		}
+		r = wgrec(e, n, pd, pidx);
+		for (uint32_t i = 0; i < b->c; i++)
+			wgsub(e, c->lists[b->b + i], r, i);
+		wgneed(e, r);
+		break;
+	}
+	case N_LABEL:
+	case N_CASE:
+	case N_DEFAULT:
+		wgscan(e, x->c, -1, 0);
+		break;
+	default:
+		break;
+	}
+}
+
+static int wgp_cmp(const void *a, const void *b)
+{
+	const wgp *p = a, *q = b;
+
+	if (p->d != q->d)
+		return p->d < q->d ? -1 : 1;
+	return p->i < q->i ? -1 : p->i > q->i;
+}
+
+static int wgdx_cmp(const void *a, const void *b)
+{
+	uint64_t p = *(const uint64_t *)a, q = *(const uint64_t *)b;
+
+	return p < q ? -1 : p > q;
+}
+
+static int wglab_cmp(const void *a, const void *b)
+{
+	const wgp *p = a, *q = b;
+
+	return p->label < q->label ? -1 : p->label > q->label;
+}
+
+VPRIV void wgoto_scan(ecx *e, uint32_t body)
+{
+	wst *W = e->w;
+	uint32_t nl = 0, k = 0;
+	wgp *lab;
+
+	W->ngd = W->ngdx = W->ngp = 0;
+	wgscan(e, body, -1, 0);
+	if (!W->ngp)
+		return;
+	/* segment starts per compound: statement 0 and every labelled one */
+	for (uint32_t r = 0; r < W->ngd; r++)
+		if (W->gd[r].need && W->gd[r].op == N_BLOCK)
+			wgadd(e, 0, r, 0);
+	qsort(W->gp, W->ngp, sizeof(wgp), wgp_cmp);
+	/* labels move behind the segment starts (gp[ngp ..]), starts are deduplicated */
+	lab = W->gp + W->ngp;
+	for (uint32_t j = 0; j < W->ngp; j++) {
+		wgp p = W->gp[j];
+
+		if (p.label)
+			lab[nl++] = p;
+	}
+	for (uint32_t j = 0; j < W->ngp; j++) {
+		wgp p = W->gp[j];
+
+		if (k && W->gp[k - 1].d == p.d && W->gp[k - 1].i == p.i)
+			continue;
+		p.label = 0;
+		W->gp[k++] = p;
+	}
+	memmove(W->gp + k, lab, nl * sizeof(wgp));
+	W->ngp = k;
+	for (uint32_t j = 0; j < k; j++) {
+		wgd *d = &W->gd[W->gp[j].d];
+
+		if (!d->nseg++)
+			d->seg = j;
+	}
+	qsort(W->gp + k, nl, sizeof(wgp), wglab_cmp);
+	for (uint32_t r = 0; r < W->ngd; r++)
+		if (W->gd[r].need) {
+			int op = W->gd[r].op;
+
+			W->gd[r].st = (op == N_BLOCK ? W->gd[r].nseg > 1 : op != N_DO) ? wnewloc(e, WT_I32) : UINT32_MAX;
+			W->gdx[W->ngdx++] = (uint64_t)W->gd[r].node << 32 | r;
+		}
+	qsort(W->gdx, W->ngdx, sizeof(uint64_t), wgdx_cmp);
+	W->ngp = k;
+	W->ngl = nl;
+}
+
+/* the segment of compound d that holds statement i */
+static uint32_t wgseg(wst *W, const wgd *d, uint32_t i)
+{
+	uint32_t lo = 0, hi = d->nseg;
+
+	while (hi - lo > 1) {
+		uint32_t m = (lo + hi) / 2;
+
+		if (W->gp[d->seg + m].i <= i)
+			lo = m;
+		else
+			hi = m;
+	}
+	return lo;
+}
+
+static int wgfind(wst *W, uint32_t node)
+{
+	uint32_t lo = 0, hi = W->ngdx;
+
+	while (lo < hi) {
+		uint32_t m = (lo + hi) / 2, v = (uint32_t)(W->gdx[m] >> 32);
+
+		if (v == node)
+			return (int)(uint32_t)W->gdx[m];
+		if (v < node)
+			lo = m + 1;
+		else
+			hi = m;
+	}
+	return -1;
+}
+
+/* the state of record d that starts at its part i */
+static uint32_t wgstate(wst *W, const wgd *d, uint32_t i)
+{
+	switch (d->op) {
+	case N_BLOCK:
+		return wgseg(W, d, i);
+	case N_IF:
+		return i;
+	case N_SWITCH:
+		return i + 1;
+	default:
+		return 1;
+	}
+}
+
+static void wgoto(ecx *e, const node *x)
+{
+	wst *W = e->w;
+	uint32_t lo = 0, hi = W->ngl, lb = x->a;
+	const wgp *L = W->gp + W->ngp, *p = NULL;
+	int d, a;
+
+	while (lo < hi) {
+		uint32_t m = (lo + hi) / 2;
+
+		if (L[m].label == lb) {
+			p = &L[m];
+			break;
+		}
+		if (L[m].label < lb)
+			lo = m + 1;
+		else
+			hi = m;
+	}
+	if (!p)
+		efatal(e, x->loc, "wasm: goto to a label that is not a statement of a compound statement is not supported yet (PLAN-wasm.md W4)");
+	/* the compound being emitted that the target is (nested) in */
+	for (a = (int)p->d; a >= 0 && W->gd[a].loop < 0; a = W->gd[a].parent)
+		;
+	if (a < 0)
+		efatal(e, x->loc, "wasm: goto into a statement expression is not supported yet (PLAN-wasm.md W4)");
+	/* the states on the way down: target segment in d, the enclosing segments above */
+	d = (int)p->d;
+	if (W->gd[d].st != UINT32_MAX) {
+		wconst(e, WT_I32, wgstate(W, &W->gd[d], p->i));
+		wset(e, W->gd[d].st);
+	}
+	while (d != a) {
+		const wgd *ch = &W->gd[d];
+
+		d = ch->parent;
+		if (W->gd[d].st != UINT32_MAX) {
+			wconst(e, WT_I32, wgstate(W, &W->gd[d], ch->pidx));
+			wset(e, W->gd[d].st);
+		}
+	}
+	wbr(e, "br", W->gd[a].loop);
+}
+
+/* a loop's test, skipped once when the loop is entered by goto (st != 0) */
+static void wgtest(ecx *e, uint32_t st, uint32_t cond, int out)
+{
+	wst *W = e->w;
+
+	wget(e, st);
+	wi(e, "i32.eqz");
+	wblock(e, "if");
+	if (cond) {
+		wtruth(e, cond);
+		wi(e, "i32.eqz");
+		wbr(e, "br_if", out);
+	}
+	wend(e, "end_if");
+	wconst(e, WT_I32, 0);
+	wset(e, st);
+	(void)W;
+}
+
+/* a compound statement with a dispatch loop */
+static void wgblock(ecx *e, const node *x, int r)
+{
+	cc *c = e->c;
+	wst *W = e->w;
+	wgd *d = &W->gd[r];
+	uint32_t m = d->nseg;
+	int *sb = malloc(m * sizeof(int));
+	tbuf *b = &W->b;
+
+	d->loop = wblock(e, "loop");
+	if (m > 1) {
+		for (uint32_t j = m; j-- > 0;)
+			sb[j] = wblock(e, "block");
+		wget(e, d->st);
+		wconst(e, WT_I32, 0);
+		wset(e, d->st);
+		tb_s(b, "\tbr_table\t{");
+		for (uint32_t j = 0; j < m; j++) {
+			tb_u(b, (uint64_t)(W->depth - 1 - sb[j]));
+			tb_s(b, ", ");
+		}
+		tb_u(b, (uint64_t)(W->depth - 1 - sb[0]));
+		tb_s(b, "}\n");
+	}
+	for (uint32_t j = 0; j < m; j++) {
+		uint32_t s0 = W->gp[d->seg + j].i, s1 = j + 1 < m ? W->gp[d->seg + j + 1].i : x->c;
+
+		if (m > 1)
+			wend(e, "end_block");
+		for (uint32_t i = s0; i < s1; i++)
+			wstmt(e, c->lists[x->b + i]);
+	}
+	wend(e, "end_loop");
+	W->gd[r].loop = -1;
+	free(sb);
+}
+
 /* ---------------- statements ---------------- */
 
 static void wdecl_stmt(ecx *e, const node *x)
@@ -219,6 +572,9 @@ static void wswitch(ecx *e, uint32_t n)
 	int brk, obrk = W->brk, *sb;
 	i128 lo = 0, hi = 0;
 	bool ranges = false;
+	int r = W->ngdx && body->op == N_BLOCK ? wgfind(W, n) : -1;
+	wgd *g = r >= 0 ? &W->gd[r] : NULL;
+	uint32_t gj = 0;	/* goto: the next segment start of g */
 
 	if (k == WT_MEM)
 		efatal(e, x->loc, "wasm: a switch on a 128-bit value is not supported yet");
@@ -227,6 +583,15 @@ static void wswitch(ecx *e, uint32_t n)
 		uint32_t s = st[i];
 		bool head = false;
 
+		while (g && gj < g->nseg && W->gp[g->seg + gj].i < i)
+			gj++;
+		if (g && gj < g->nseg && W->gp[g->seg + gj].i == i) {
+			/* a goto target */
+			if (W->nseg >= WMAXSW)
+				efatal(e, x->loc, "wasm: switch too large");
+			W->seg[W->nseg++] = i;
+			head = true;
+		}
 		for (; s && (N(s)->op == N_CASE || N(s)->op == N_DEFAULT || N(s)->op == N_LABEL); s = N(s)->c) {
 			if (N(s)->op == N_LABEL)
 				continue;
@@ -249,12 +614,47 @@ static void wswitch(ecx *e, uint32_t n)
 	m = W->nseg - seg0;
 	ncase = W->nsw - sw0;
 	t = wtmp(e, k);
-	wexpr(e, x->a, true);
-	wset(e, t);
+	if (g) {
+		/* entered by goto: the controlling expression is not evaluated */
+		wget(e, g->st);
+		wi(e, "i32.eqz");
+		wblock(e, "if");
+		wexpr(e, x->a, true);
+		wset(e, t);
+		wend(e, "end_if");
+	} else {
+		wexpr(e, x->a, true);
+		wset(e, t);
+	}
 	brk = wblock(e, "block");
+	if (g)
+		g->loop = wblock(e, "loop");
 	sb = malloc((m + 1) * sizeof(int));
 	for (uint32_t j = m; j-- > 0;)
 		sb[j] = wblock(e, "block");
+	if (g) {
+		/* st - 1: the statement to start at */
+		tbuf *b = &W->b;
+		uint32_t j = 0;
+
+		wget(e, g->st);
+		wblock(e, "if");
+		wget(e, g->st);
+		wconst(e, WT_I32, 1);
+		wi(e, "i32.sub");
+		wconst(e, WT_I32, 0);
+		wset(e, g->st);
+		tb_s(b, "\tbr_table\t{");
+		for (uint32_t i = 0; i < nst; i++) {
+			while (j < m && W->seg[seg0 + j] < i)
+				j++;
+			tb_u(b, (uint64_t)(W->depth - 1 - (j < m && W->seg[seg0 + j] == i ? sb[j] : brk)));
+			tb_s(b, ", ");
+		}
+		tb_u(b, (uint64_t)(W->depth - 1 - brk));
+		tb_s(b, "}\n");
+		wend(e, "end_if");
+	}
 	for (uint32_t i = 0; i < ncase; i++) {
 		const wswc *s = &W->sw[sw0 + i];
 
@@ -334,6 +734,10 @@ static void wswitch(ecx *e, uint32_t n)
 			wstmt(e, i == W->seg[seg0 + j] ? wunlabel(c, st[i]) : st[i]);
 	}
 	free(sb);
+	if (g) {
+		wend(e, "end_loop");
+		g->loop = -1;
+	}
 	wend(e, "end_block");
 	W->brk = obrk;
 	W->nsw = sw0;
@@ -383,10 +787,17 @@ VPRIV void wstmt(ecx *e, uint32_t n)
 	x = N(n);
 	e->curloc = x->loc;
 	switch (x->op) {
-	case N_BLOCK:
+	case N_BLOCK: {
+		int r = W->ngdx ? wgfind(W, n) : -1;
+
+		if (r >= 0) {
+			wgblock(e, x, r);
+			break;
+		}
 		for (uint32_t i = 0; i < x->c; i++)
 			wstmt(e, c->lists[x->b + i]);
 		break;
+	}
 	case N_EXPR:
 		if (x->a)
 			wexpr(e, x->a, false);
@@ -394,8 +805,27 @@ VPRIV void wstmt(ecx *e, uint32_t n)
 	case N_DECL:
 		wdecl_stmt(e, x);
 		break;
-	case N_IF:
-		wtruth(e, x->a);
+	case N_IF: {
+		int r = W->ngdx ? wgfind(W, n) : -1;
+
+		if (r >= 0) {
+			/* entered by goto (st: 1 then, 2 else): the condition is not evaluated */
+			uint32_t st = W->gd[r].st;
+
+			wget(e, st);
+			wi(e, "i32.eqz");
+			wblock(e, "if\ti32");
+			wtruth(e, x->a);
+			wi(e, "else");
+			wget(e, st);
+			wconst(e, WT_I32, 1);
+			wi(e, "i32.eq");
+			wconst(e, WT_I32, 0);
+			wset(e, st);
+			wend(e, "end_if");
+		} else {
+			wtruth(e, x->a);
+		}
 		wblock(e, "if");
 		wstmt(e, x->b);
 		if (x->c) {
@@ -404,12 +834,18 @@ VPRIV void wstmt(ecx *e, uint32_t n)
 		}
 		wend(e, "end_if");
 		break;
+	}
 	case N_WHILE: {
 		int ob = W->brk, oc = W->cont, b = wblock(e, "block"), l = wblock(e, "loop");
+		int r = W->ngdx ? wgfind(W, n) : -1;
 
-		wtruth(e, x->a);
-		wi(e, "i32.eqz");
-		wbr(e, "br_if", b);
+		if (r >= 0)
+			wgtest(e, W->gd[r].st, x->a, b);
+		else {
+			wtruth(e, x->a);
+			wi(e, "i32.eqz");
+			wbr(e, "br_if", b);
+		}
 		W->brk = b, W->cont = l;
 		wstmt(e, x->b);
 		wbr(e, "br", l);
@@ -434,12 +870,25 @@ VPRIV void wstmt(ecx *e, uint32_t n)
 	case N_FOR: {
 		uint32_t step = c->lists[x->c], body = c->lists[x->c + 1];
 		int ob = W->brk, oc = W->cont, b, l, k;
+		int r = W->ngdx ? wgfind(W, n) : -1;
 
-		if (x->a)
-			wstmt(e, x->a);
+		if (x->a) {
+			if (r >= 0) {
+				/* entered by goto: no initialization */
+				wget(e, W->gd[r].st);
+				wi(e, "i32.eqz");
+				wblock(e, "if");
+				wstmt(e, x->a);
+				wend(e, "end_if");
+			} else {
+				wstmt(e, x->a);
+			}
+		}
 		b = wblock(e, "block");
 		l = wblock(e, "loop");
-		if (x->b) {
+		if (r >= 0)
+			wgtest(e, W->gd[r].st, x->b, b);
+		else if (x->b) {
 			wtruth(e, x->b);
 			wi(e, "i32.eqz");
 			wbr(e, "br_if", b);
@@ -468,8 +917,10 @@ VPRIV void wstmt(ecx *e, uint32_t n)
 		wstmt(e, x->c);
 		break;
 	case N_GOTO:
+		wgoto(e, x);
+		break;
 	case N_GOTO_IND:
-		efatal(e, x->loc, "wasm: goto is not supported yet (PLAN-wasm.md W4)");
+		efatal(e, x->loc, "wasm: computed goto is not supported (PLAN-wasm.md W4)");
 	case N_BREAK:
 	case N_CONTINUE: {
 		int t = x->op == N_BREAK ? W->brk : W->cont;

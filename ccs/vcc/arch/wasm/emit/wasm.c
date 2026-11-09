@@ -28,6 +28,9 @@ VPRIV wst *w_state(ecx *e)
 			W->fl[i] = reserve(WMAXLOC * sizeof(uint32_t));
 		W->sw = reserve(WMAXSW * sizeof(wswc));
 		W->seg = reserve(WMAXSW * sizeof(uint32_t));
+		W->gd = reserve(WMAXGD * sizeof(wgd));
+		W->gdx = reserve(WMAXGD * sizeof(uint64_t));
+		W->gp = reserve(2 * WMAXGD * sizeof(wgp));
 	}
 	/* per sym bindings: sized for this TU (generation-tagged: never cleared) */
 	W->sb = reserve(((size_t)e->c->nsym + 64) * sizeof(wbind));
@@ -445,6 +448,7 @@ VPRIV void wasm_emit_function(ecx *e, uint32_t s)
 	wparams(e, s, &np);
 	if (W->rt != WT_NONE)
 		W->rv = wnewloc(e, W->rt);
+	wgoto_scan(e, y->body);
 	wblock(e, "block");	/* index 0: return branches out of it */
 	wstmt(e, y->body);
 	if (W->rt != WT_NONE && wis_main(c, s)) {
