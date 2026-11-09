@@ -57,6 +57,8 @@ typedef struct pp_opts {
 	int diag_nocaret;		/* -fno-caret-diagnostics: no source lines */
 	int diag_show_id;		/* -fdiagnostics-show-id: " [id]" after the flag */
 	int diag_format;		/* -fdiagnostics-format=: PP_DIAG_TEXT, _JSON (a record per line), _SARIF */
+	int diag_style;			/* -fdiagnostics-style=: PP_DSTYLE_VCC (default), _CLANG, _NARRATED */
+	int diag_unicode;		/* -fdiagnostics-text-art-charset=unicode: box-drawing gutter and connectors */
 	const char *sarif_file;		/* -fdiagnostics-add-output=sarif:file=F: SARIF there too */
 	char *const *argv;		/* the command line (SARIF's invocation) */
 	int argc;
@@ -174,6 +176,7 @@ struct vdiag {
 	const char *flag;	/* warning flag without "-W", or NULL */
 	const char *msg;	/* the message, without the flag */
 	const char *label;	/* the primary location's label, or NULL */
+	const char *help;	/* an action that fixes it, in words ("= help: ..."), or NULL */
 	const void *track;	/* the return address in vcc's reporting function (VCC_TRACK_DIAG) */
 	const char *ms;		/* the diagnosed token's spelling when it came from a macro */
 	vdspan *span;
@@ -189,6 +192,8 @@ vdiag *pp_diag_begin(pp *p, int level, uint32_t loc, const char *fmt, ...);
 vdiag *pp_diag_vbegin(pp *p, int level, uint32_t loc, const char *fmt, va_list ap);
 void pp_diag_label(pp *p, vdiag *d, uint32_t b, uint32_t e, const char *label);
 void pp_diag_fix(pp *p, vdiag *d, uint32_t b, uint32_t e, const char *s, int app);
+__attribute__((format(printf, 3, 4)))
+void pp_diag_help(pp *p, vdiag *d, const char *fmt, ...);
 __attribute__((format(printf, 4, 5)))
 vdiag *pp_diag_note(pp *p, vdiag *d, uint32_t loc, const char *fmt, ...);
 /* the token spelling when loc is a macro expansion's (clang's caret at the invocation) */
@@ -213,6 +218,9 @@ extern _Thread_local const void *pp_diag_pc;
 /* level name as clang prints it ("error", "fatal error", ...) */
 const char *pp_diag_level(int level);
 enum { PP_DIAG_TEXT, PP_DIAG_JSON, PP_DIAG_SARIF };
+/* the text renderers: vcc's (labels, several lines, folded notes, help), clang's
+   exactly, and one in words for screen readers (miette's "narratable") */
+enum { PP_DSTYLE_VCC, PP_DSTYLE_CLANG, PP_DSTYLE_NARRATED };
 /* the end of the TU's diagnostics: the last JSON record, the SARIF log (pp_diag_summary calls it) */
 void pp_diag_finish(pp *p);
 /* clang's location of the end of the main file: its last newline, or its end without one */

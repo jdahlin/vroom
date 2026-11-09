@@ -61,6 +61,9 @@ static const char *const cc_exact[] = {
 	"-fdiagnostics-color=always", "-fdiagnostics-color=never", "-fdiagnostics-color=auto",
 	"-fno-caret-diagnostics", "-fdiagnostics-show-id", "-fno-diagnostics-show-id",
 	"-fdiagnostics-format=json", "-fdiagnostics-format=sarif", "-fdiagnostics-format=clang", "-fno-spell-checking",
+	"-fdiagnostics-style=vcc", "-fdiagnostics-style=clang", "-fdiagnostics-style=narrated",
+	"-fdiagnostics-text-art-charset=ascii", "-fdiagnostics-text-art-charset=unicode",
+	"-fdiagnostics-text-art-charset=emoji", "-fdiagnostics-text-art-charset=none",
 	NULL
 };
 

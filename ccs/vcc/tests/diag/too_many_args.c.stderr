@@ -1,7 +1,10 @@
 too_many_args.c:4:14: error: too many arguments to function call, expected single argument 'a', have 3 arguments
+    1 | int f(int a);
+      |     - -----
+      |     |
+      |     'f' declared here
+  ...
     4 |         return f(1, 2, 3);
       |                ~    ^~~~
 too_many_args.c:1:5: note: 'f' declared here
-    1 | int f(int a);
-      |     ^ ~~~~~
 1 error generated.

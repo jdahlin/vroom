@@ -1,13 +1,15 @@
 macro_expansion.c:6:10: error: use of undeclared identifier 'x'
+    2 | #define USE x
+      |             - expanded from macro 'USE'
+  ...
     6 |         int y = USE;
       |                 ^~~
 macro_expansion.c:2:13: note: expanded from macro 'USE'
-    2 | #define USE x
-      |             ^
 macro_expansion.c:7:9: error: use of undeclared identifier 'nope'
+    3 | #define ADD(a) ((a) + nope)
+      |                       ---- expanded from macro 'ADD'
+  ...
     7 |         return ADD(v) + y;
       |                ^~~~~~
 macro_expansion.c:3:23: note: expanded from macro 'ADD'
-    3 | #define ADD(a) ((a) + nope)
-      |                       ^~~~
 2 errors generated.

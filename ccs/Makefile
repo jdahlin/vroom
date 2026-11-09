@@ -226,7 +226,7 @@ FUZZ_CFLAGS = -std=gnu11 -g -O1 -mcpu=apple-m1 -D_DARWIN_C_SOURCE -pthread \
 FUZZ_OUT = $(OUT)/fuzz
 FUZZ_HDR = vcc/lex/lex.h vcc/lib/intern.h vcc/pp/pp.h vcc/pp/dircache.h
 
-fuzz: $(FUZZ_OUT)/fuzz-lex $(FUZZ_OUT)/fuzz-pp
+fuzz: $(FUZZ_OUT)/fuzz-lex $(FUZZ_OUT)/fuzz-pp $(FUZZ_OUT)/fuzz-diag
 
 $(FUZZ_OUT):
 	mkdir -p $@
@@ -237,10 +237,14 @@ $(FUZZ_OUT)/fuzz-lex: fuzz/fuzz-lex.c fuzz/lexref.c fuzz/fuzz.h $(FUZZ_DRIVER) $
 $(FUZZ_OUT)/fuzz-pp: fuzz/fuzz-pp.c fuzz/fuzz.h $(FUZZ_DRIVER) $(wildcard vcc/pp/*.c vcc/pp/*.h) $(LEX_SRC) $(FUZZ_HDR) | $(FUZZ_OUT)
 	$(FUZZ_CC) $(FUZZ_CFLAGS) $(FUZZ_ENGINE) fuzz/fuzz-pp.c $(FUZZ_DRIVER) $(pp_SRC) vcc/pp/dircache.c $(LEX_SRC) -o $@
 
+$(FUZZ_OUT)/fuzz-diag: fuzz/fuzz-diag.c fuzz/fuzz.h $(FUZZ_DRIVER) $(wildcard vcc/pp/*.c vcc/pp/*.h) $(LEX_SRC) $(FUZZ_HDR) | $(FUZZ_OUT)
+	$(FUZZ_CC) $(FUZZ_CFLAGS) $(FUZZ_ENGINE) fuzz/fuzz-diag.c $(FUZZ_DRIVER) $(pp_SRC) vcc/pp/dircache.c $(LEX_SRC) -o $@
+
 # replay the regression inputs (fuzz/regress/{lex,pp}/): every one must pass
 fuzz-regress: fuzz
 	$(FUZZ_OUT)/fuzz-lex -runs=0 fuzz/regress/lex
 	$(FUZZ_OUT)/fuzz-pp -runs=0 -timeout=10 fuzz/regress/pp
+	$(FUZZ_OUT)/fuzz-diag -runs=0 fuzz/regress/diag
 
 # the differential check (vpp against clang -E -P) on the regression and seed inputs
 fuzz-diff: $(OUT)/vpp

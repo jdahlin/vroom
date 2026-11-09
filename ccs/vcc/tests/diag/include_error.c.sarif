@@ -101,6 +101,7 @@
       }
      ],
      "properties": {
+      "vcc/help": null,
       "vcc/flag": null,
       "vcc/werror": false
      }

@@ -96,6 +96,7 @@
       }
      ],
      "properties": {
+      "vcc/help": null,
       "vcc/flag": null,
       "vcc/werror": false
      }
@@ -151,6 +152,7 @@
       }
      ],
      "properties": {
+      "vcc/help": null,
       "vcc/flag": null,
       "vcc/werror": false
      }
@@ -206,6 +208,7 @@
       }
      ],
      "properties": {
+      "vcc/help": null,
       "vcc/flag": null,
       "vcc/werror": false
      }
@@ -261,6 +264,7 @@
       }
      ],
      "properties": {
+      "vcc/help": null,
       "vcc/flag": null,
       "vcc/werror": false
      }
@@ -316,6 +320,7 @@
       }
      ],
      "properties": {
+      "vcc/help": null,
       "vcc/flag": null,
       "vcc/werror": false
      }
@@ -371,6 +376,7 @@
       }
      ],
      "properties": {
+      "vcc/help": null,
       "vcc/flag": null,
       "vcc/werror": false
      }
@@ -426,6 +432,7 @@
       }
      ],
      "properties": {
+      "vcc/help": null,
       "vcc/flag": null,
       "vcc/werror": false
      }
@@ -481,6 +488,7 @@
       }
      ],
      "properties": {
+      "vcc/help": null,
       "vcc/flag": null,
       "vcc/werror": false
      }
@@ -536,6 +544,7 @@
       }
      ],
      "properties": {
+      "vcc/help": null,
       "vcc/flag": null,
       "vcc/werror": false
      }
@@ -591,6 +600,7 @@
       }
      ],
      "properties": {
+      "vcc/help": null,
       "vcc/flag": null,
       "vcc/werror": false
      }
@@ -646,6 +656,7 @@
       }
      ],
      "properties": {
+      "vcc/help": null,
       "vcc/flag": null,
       "vcc/werror": false
      }
@@ -701,6 +712,7 @@
       }
      ],
      "properties": {
+      "vcc/help": null,
       "vcc/flag": null,
       "vcc/werror": false
      }
@@ -756,6 +768,7 @@
       }
      ],
      "properties": {
+      "vcc/help": null,
       "vcc/flag": null,
       "vcc/werror": false
      }
@@ -811,6 +824,7 @@
       }
      ],
      "properties": {
+      "vcc/help": null,
       "vcc/flag": null,
       "vcc/werror": false
      }
@@ -866,6 +880,7 @@
       }
      ],
      "properties": {
+      "vcc/help": null,
       "vcc/flag": null,
       "vcc/werror": false
      }
@@ -921,6 +936,7 @@
       }
      ],
      "properties": {
+      "vcc/help": null,
       "vcc/flag": null,
       "vcc/werror": false
      }
@@ -976,6 +992,7 @@
       }
      ],
      "properties": {
+      "vcc/help": null,
       "vcc/flag": null,
       "vcc/werror": false
      }
@@ -1006,6 +1023,7 @@
      ],
      "relatedLocations": [],
      "properties": {
+      "vcc/help": null,
       "vcc/flag": null,
       "vcc/werror": false
      }
@@ -1061,6 +1079,7 @@
       }
      ],
      "properties": {
+      "vcc/help": null,
       "vcc/flag": null,
       "vcc/werror": false
      }
@@ -1073,6 +1092,7 @@
       "text": "too many errors emitted, stopping now [-ferror-limit=]"
      },
      "properties": {
+      "vcc/help": null,
       "vcc/flag": null,
       "vcc/werror": false
      }

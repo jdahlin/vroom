@@ -107,6 +107,8 @@ bench/vcc-diag.py --bless PATTERN   # ... rewrite the snapshots of a changed mes
 bench/gen-diagids.py [--check]      # pp/diagids.inc: each diagnostic format's id (clang's name or vcc_*)
 VCC_TRACK_DIAG=1 vpp ... -fdiagnostics-show-id   # each diagnostic's id and where vcc reported it
 bench/vcc-mutate.py -j 6 --formats  # ... and every mutant's JSON rebuilds its text (diag-render.py), SARIF checked
+bench/vcc-diag-catalog.py           # build/ccs/diag-catalog.html: every tests/diag case, clang/vcc/narrated/JSON side by side
+vpp -fdiagnostics-style=vcc|clang|narrated -fdiagnostics-text-art-charset=ascii|unicode   # text styles (vcc default)
 bench/sarif-check.py F.sarif        # SARIF structure (+ the official schema once `fetch`ed)
 bench/vcc-builtins.py [-v]          # clang builtins unknown to vcc, __has_builtin differences (<1 s)
 bench/clangdiag.py fetch|stats      # clang's Diagnostic*.td -> work/clang-td/VER/ (once); counts per language
@@ -172,15 +174,18 @@ Targets build with Homebrew LLVM's libFuzzer and ASan+UBSan into
 minus coverage feedback).
 - `fuzz-lex`: vlex on raw bytes; checks token-array invariants, spelling,
   interning, NEON vs a scalar build of lex.c (`lexref.c`), buffer alignment.
+- `fuzz-diag`: control bytes \x01 a source file; random records (spans,
+  labels, fix-its, notes, help) through every style and output.
+  `FUZZ_DIAG_PRINT=1` prints them.
 - `fuzz-pp`: one in-memory TU served by `vlex_get_hook`: main `\x01` a.h
   `\x01` b.h `\x01` sys/c.h, leading `\x02` for asm mode.
   `FUZZ_PP_PRINT=1` prints output and diagnostics.
 ```
-make -C ccs fuzz                    # build both targets
+make -C ccs fuzz                    # build the targets
 ccs/fuzz/gen-corpus.py              # seed corpora from work/linux headers -> build/ccs/fuzz/corpus
 cd build/ccs/fuzz && ./fuzz-pp -fork=2 -max_total_time=180 -dict=../../../ccs/fuzz/c.dict \
     -max_len=4096 -timeout=5 -artifact_prefix=art/ run-pp corpus/pp   # same for fuzz-lex
-make -C ccs fuzz-regress            # replay ccs/fuzz/regress/{lex,pp}
+make -C ccs fuzz-regress            # replay ccs/fuzz/regress/{lex,pp,diag}
 make -C ccs fuzz-diff               # vpp vs clang -E -P on regress + seeds
 ccs/fuzz/pp-diff.py -j 4 DIR...     # ... on any corpus; mismatches -> build/ccs/fuzz/diff/
 ```

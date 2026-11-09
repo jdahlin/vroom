@@ -1,8 +1,8 @@
 unknown_type_typo.c:2:1: error: unknown type name 'size_tpe'; did you mean 'size_type'?
+    1 | typedef unsigned long size_type;
+      |                       - 'size_type' declared here
     2 | size_tpe n;
       | ^~~~~~~~
       | size_type
 unknown_type_typo.c:1:23: note: 'size_type' declared here
-    1 | typedef unsigned long size_type;
-      |                       ^
 1 error generated.

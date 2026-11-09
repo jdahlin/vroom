@@ -78,6 +78,7 @@
       }
      ],
      "properties": {
+      "vcc/help": null,
       "vcc/flag": null,
       "vcc/werror": false
      }
@@ -127,6 +128,7 @@
       }
      ],
      "properties": {
+      "vcc/help": null,
       "vcc/flag": null,
       "vcc/werror": false
      }

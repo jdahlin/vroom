@@ -1,7 +1,7 @@
 unmatched_paren.c:3:15: error: expected ')'
     3 |         return (a + 1;
-      |                      ^
+      |                -     ^
+      |                |
+      |                to match this '('
 unmatched_paren.c:3:9: note: to match this '('
-    3 |         return (a + 1;
-      |                ^
 1 error generated.

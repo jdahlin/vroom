@@ -19,7 +19,8 @@ A deliberate difference from clang in layer 1 (a better place, fewer
 follow-on errors) is declared in the case: /* diag-differs: why */.
 A test with /* diag-mode: -c */ is compiled (-c -o /dev/null) instead, for
 diagnostics that come from code generation (the error attribute).
-The summary also counts the cases whose text is still identical to clang's.
+The summary also counts the cases whose text in -fdiagnostics-style=clang is
+identical to clang's.
 
   bench/vcc-diag.py [-v] [-j N] [--bin-dir DIR] [PATTERN]   -v: the diff of each failure
   bench/vcc-diag.py --bless [PATTERN]       write X.c.stderr from vcc's output
@@ -117,6 +118,16 @@ def one(name, bless=False):
     if rt != out_v:
         ok = False
         why.append('JSON does not rebuild the text (layer 5a)')
+    # clang's style (-fdiagnostics-style=clang): rebuilt from the same records; it is
+    # what the "text-identical to clang" count compares
+    _, out_k = run([VPP], name, ['-fdiagnostics-style=clang'])
+    try:
+        rk = render.render(out_j.splitlines(), D, style='clang').decode(errors='replace')
+    except (ValueError, KeyError) as e:
+        rk = f'(bad JSON: {e})'
+    if rk != out_k:
+        ok = False
+        why.append('JSON does not rebuild clang\'s style (layer 5a)')
     # D3.2: the SARIF log is well formed
     _, out_s = run([VPP], name, ['-fdiagnostics-format=sarif'])
     try:
@@ -128,14 +139,15 @@ def one(name, bless=False):
         why.append(f'SARIF: {sp[0]}')
     # layer 4 for the other renderers: /* diag-formats */ keeps X.c.json and X.c.sarif
     if re.search(r'/\*\s*diag-formats', src):
-        for ext, got in (('json', out_j), ('sarif', sarif_norm(out_s))):
+        _, out_n = run([VPP], name, ['-fdiagnostics-style=narrated'])
+        for ext, got in (('json', out_j), ('sarif', sarif_norm(out_s)), ('narrated', out_n)):
             snapf = os.path.join(D, f'{name}.{ext}')
             if bless:
                 open(snapf, 'w').write(got)
             if not os.path.exists(snapf) or open(snapf).read() != got:
                 ok = False
                 why.append(f'{ext} differs from .{ext}')
-    return name, ok, out_c, out_v, want or '', ', '.join(why), out_c == out_v
+    return name, ok, out_c, out_v, want or '', ', '.join(why), out_c == out_k
 
 
 def main():

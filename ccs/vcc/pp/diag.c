@@ -108,7 +108,7 @@ int pp_where(const pp *p, uint32_t loc, const char **name, uint32_t *namelen, ui
 
 /* ---------------- diagnostics in clang's text format ---------------- */
 
-static void db_c(vbuf *b, char c, int n)
+VPRIV void db_c(vbuf *b, char c, int n)
 {
 	while (n-- > 0)
 		vbuf_put(b, &c, 1);
@@ -298,16 +298,40 @@ uint32_t pp_tok_end(const pp *p, uint32_t loc)
 	return loc + 1;
 }
 
-/* display columns of src[b, e): tabs to the next multiple of 8, UTF-8 continuation bytes take none */
-static uint32_t dcols(const char *s, uint32_t b, uint32_t e, uint32_t col)
+/* the display width of code point c: 2 for East Asian wide and emoji, 0 for combining marks */
+static uint32_t cp_width(uint32_t c)
+{
+	if ((c >= 0x300 && c <= 0x36f) || (c >= 0x200b && c <= 0x200f) || (c >= 0xfe00 && c <= 0xfe0f))
+		return 0;
+	if ((c >= 0x1100 && c <= 0x115f) || (c >= 0x2e80 && c <= 0xa4cf && c != 0x303f) || (c >= 0xac00 && c <= 0xd7a3) ||
+	    (c >= 0xf900 && c <= 0xfaff) || (c >= 0xfe30 && c <= 0xfe4f) || (c >= 0xff00 && c <= 0xff60) ||
+	    (c >= 0xffe0 && c <= 0xffe6) || (c >= 0x1f300 && c <= 0x1f64f) || (c >= 0x1f900 && c <= 0x1f9ff) ||
+	    (c >= 0x20000 && c <= 0x3fffd))
+		return 2;
+	return 1;
+}
+
+/* display columns of src[b, e) from col: tabs to the next multiple of 8, UTF-8 by its
+   code point's width (a malformed byte is one column) */
+VPRIV uint32_t dcols(const char *s, uint32_t b, uint32_t e, uint32_t col)
 {
 	for (uint32_t i = b; i < e; i++) {
 		unsigned char ch = (unsigned char)s[i];
 
-		if (ch == '\t')
+		if (ch == '\t') {
 			col = (col / 8 + 1) * 8;
-		else if ((ch & 0xc0) != 0x80)
-			col++;
+		} else if (ch < 0xc0) {
+			col += (ch & 0xc0) != 0x80;
+		} else {
+			int n = ch >= 0xf0 ? 3 : ch >= 0xe0 ? 2 : 1;
+			uint32_t c = ch & (0x3f >> n);
+			int k;
+
+			for (k = 0; k < n && i + 1 + k < e && ((unsigned char)s[i + 1 + k] & 0xc0) == 0x80; k++)
+				c = c << 6 | ((unsigned char)s[i + 1 + k] & 0x3f);
+			col += k == n ? cp_width(c) : 1;
+			i += (uint32_t)k;
+		}
 	}
 	return col;
 }
@@ -324,7 +348,7 @@ VPRIV int diag_where(const pp *p, uint32_t loc, const char **name, uint32_t *nl,
 	return r;
 }
 
-static void include_stack(pp *p, vbuf *b, const fent *e)
+VPRIV void include_stack(pp *p, vbuf *b, const fent *e)
 {
 	const fent *chain[64];
 	int n = 0;
@@ -671,6 +695,19 @@ void pp_diag_label(pp *p, vdiag *d, uint32_t b, uint32_t e, const char *label)
 	d->span[d->nspan++] = (vdspan){ b, e, label ? dstr(p, label, strlen(label)) : NULL };
 }
 
+void pp_diag_help(pp *p, vdiag *d, const char *fmt, ...)
+{
+	char buf[512];
+	va_list ap;
+	int n;
+
+	va_start(ap, fmt);
+	n = vsnprintf(buf, sizeof(buf), fmt, ap);
+	va_end(ap);
+	if (n >= 0)
+		d->help = dstr(p, buf, (size_t)n < sizeof(buf) ? (size_t)n : sizeof(buf) - 1);
+}
+
 void pp_diag_fix(pp *p, vdiag *d, uint32_t b, uint32_t e, const char *s, int app)
 {
 	if (d->nfix == d->cfix) {
@@ -789,12 +826,12 @@ static void track_str(vbuf *b, const void *pc)
 	vbuf_s(b, "}");
 }
 
-/* one record in clang's text format */
-VPRIV void render_text(pp *p, vbuf *b, const vdiag *d)
+/* a record's first line (clang's, in every style); true and *ep when it has a source line */
+VPRIV bool render_head(pp *p, vbuf *b, const vdiag *d, const fent **ep)
 {
 	const char *name, *what = lvname[d->level];
 	uint32_t nl, line, col;
-	const fent *e;
+	const fent *e = NULL;
 	bool has = d->loc != UINT32_MAX && loc_ok(p, d->loc, &e);	/* UINT32_MAX: no location */
 	bool note = d->level == VDL_NOTE;
 
@@ -816,7 +853,10 @@ VPRIV void render_text(pp *p, vbuf *b, const vdiag *d)
 	vbuf_s(b, ": ");
 	if (p->color)
 		vbuf_s(b, note ? DC_RESET : DC_RESET DC_BOLD);
-	vbuf_s(b, d->msg);
+	if (p->color && p->o->diag_style != PP_DSTYLE_CLANG)
+		diag_typediff(b, d, note ? DC_RESET : DC_RESET DC_BOLD);
+	else
+		vbuf_s(b, d->msg);
 	if (d->flag && p->color)	/* OSC 8: the flag links to clang's reference */
 		vbuf_f(b, " [%s\033]8;;https://clang.llvm.org/docs/DiagnosticsReference.html#w%s\033\\-W%s\033]8;;\033\\]",
 		       d->werror ? "-Werror," : "", d->flag, d->flag);
@@ -836,9 +876,20 @@ VPRIV void render_text(pp *p, vbuf *b, const vdiag *d)
 	if (p->color)
 		vbuf_s(b, DC_RESET);
 	vbuf_s(b, "\n");
-	if (has && !p->o->diag_nocaret && d->loc - e->base < e->f->size)
+	*ep = e;
+	return has && !p->o->diag_nocaret && d->loc - e->base < e->f->size;
+}
+
+/* one record in clang's text format */
+VPRIV void render_text(pp *p, vbuf *b, const vdiag *d)
+{
+	const fent *e;
+
+	if (render_head(p, b, d, &e))
 		snippet(p, b, e, d);
 }
+
+static void render_clang(pp *p, vbuf *b, vdiag *d) { render_text(p, b, d); }
 
 void pp_diag_emit(pp *p, vdiag *d)
 {
@@ -860,12 +911,20 @@ void pp_diag_emit(pp *p, vdiag *d)
 		/* a record is written when it is complete: at the next one or at the end */
 		if (d == top)
 			diag_json_flush(p), p->dpend = d;
+	} else if (p->o->diag_format == PP_DIAG_TEXT && p->o->diag_style == PP_DSTYLE_VCC) {
+		/* rendered when the next record starts (or at the end): its notes come first */
+		if (d == top) {
+			diag_text_flush(p);
+			p->tpend = d;
+		}
 	} else if (p->o->diag_format != PP_DIAG_SARIF) {
+		void (*r)(pp *, vbuf *, vdiag *) = p->o->diag_style == PP_DSTYLE_NARRATED ? diag_narrate : render_clang;
+
 		if (!top->emitted)
-			render_text(p, &b, top), top->emitted = 1;
+			r(p, &b, top), top->emitted = 1;
 		for (vdiag *k = top->kids; k; k = k->next)
 			if (!k->emitted)
-				render_text(p, &b, k), k->emitted = 1;
+				r(p, &b, k), k->emitted = 1;
 		(void)!write(fd, b.p, b.n);
 		free(b.p);
 	}

@@ -1,7 +1,5 @@
 static_assert.c:1:16: error: static assertion failed due to requirement 'sizeof(int) == 8': int is 8 bytes
     1 | _Static_assert(sizeof(int) == 8, "int is 8 bytes");
-      |                ^~~~~~~~~~~~~~~~
+      |                ^~~~~~~~~~~~~~~~ expression evaluates to '4 == 8'
 static_assert.c:1:28: note: expression evaluates to '4 == 8'
-    1 | _Static_assert(sizeof(int) == 8, "int is 8 bytes");
-      |                ~~~~~~~~~~~~^~~~
 1 error generated.

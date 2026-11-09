@@ -113,6 +113,7 @@ VPRIV void delayed_bug_check(cc *c)
 	d = pp_diag_begin(c->p, VDL_ERROR, c->dbug_loc, "internal error: %s (vcc stopped short here, expecting an error)",
 			  c->dbug);
 	d->id = "vcc_internal_delayed_bug";
+	pp_diag_help(c->p, d, "this is a bug in vcc, not in your code: please report it with this file (vcc -E output)");
 	pp_diag_emit(c->p, d);
 	c->errors++;
 }

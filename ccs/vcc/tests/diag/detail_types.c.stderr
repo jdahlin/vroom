@@ -5,11 +5,12 @@ detail_types.c:6:1: error: _Atomic cannot be applied to array type 'int[2]'
     6 | _Atomic(int[2]) at;
       | ^
 detail_types.c:7:1: error: _Atomic cannot be applied to incomplete type 'struct X' 
+    2 | struct X;
+      |        - forward declaration of 'struct X'
+  ...
     7 | _Atomic(struct X) *ax;
       | ^
 detail_types.c:2:8: note: forward declaration of 'struct X'
-    2 | struct X;
-      |        ^
 detail_types.c:8:26: error: variable has incomplete type 'struct X'
     8 | void f1(void) { struct X x; }
       |                          ^

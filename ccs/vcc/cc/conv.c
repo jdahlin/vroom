@@ -149,6 +149,25 @@ VPRIV bool has_side_effects(cc *c, uint32_t n)
 
 static void param_note(cc *c);
 
+/* the converted value's role, as a label on its span (Elm: "the 2nd argument to f"); the clang
+   style prints no labels */
+static void role_label(cc *c, vdiag *d, pp_span r)
+{
+	char b[160];
+
+	if (c->cv_what == CX_PASS && c->cv_fn && c->syms[c->cv_fn].name)
+		snprintf(b, sizeof b, "argument %u of '%.*s'", c->cv_arg + 1, IDF(c->syms[c->cv_fn].name));
+	else if (c->cv_what == CX_PASS)
+		snprintf(b, sizeof b, "argument %u", c->cv_arg + 1);
+	else if (c->cv_what == CX_RETURN)
+		snprintf(b, sizeof b, "the returned value");
+	else {
+		pp_diag_label(c->p, d, r.b, r.e, NULL);
+		return;
+	}
+	pp_diag_label(c->p, d, r.b, r.e, b);
+}
+
 /* clang's message for a value of type from that cannot become to */
 static void bad_conversion(cc *c, uint32_t n, qty to)
 {
@@ -157,20 +176,23 @@ static void bad_conversion(cc *c, uint32_t n, qty to)
 
 	if (N(n)->flags & NF_ERR)
 		return;
-	if (c->cv_what == CX_PASS) {
-		report(c, "error", r.b, &r, 1, NULL, 0, "passing '%s' to parameter of incompatible type '%s'", f, t);
-		param_note(c);
+	if (c->cv_what == CX_PASS || c->cv_what == CX_RETURN) {
+		vdiag *d;
+
+		error_limit(c), c->errors++, c->ndiag++;
+		if (c->cv_what == CX_PASS)
+			d = pp_diag_begin(c->p, VDL_ERROR, r.b, "passing '%s' to parameter of incompatible type '%s'", f, t);
+		else
+			d = pp_diag_begin(c->p, VDL_ERROR, r.b, "returning '%s' from a function with incompatible result type '%s'", f, t);
+		role_label(c, d, r);
+		pp_diag_emit(c->p, d);
+		if (c->cv_what == CX_PASS)
+			param_note(c);
 		return;
 	}
 	switch (c->cv_what) {
 	case CX_INIT:
 		report(c, "error", c->cv_loc, &r, 1, NULL, 0, "initializing '%s' with an expression of incompatible type '%s'", t, f);
-		break;
-	case CX_PASS:
-		report(c, "error", r.b, NULL, 0, NULL, 0, "passing '%s' to parameter of incompatible type '%s'", f, t);
-		break;
-	case CX_RETURN:
-		report(c, "error", r.b, &r, 1, NULL, 0, "returning '%s' from a function with incompatible result type '%s'", f, t);
 		break;
 	case CX_ASSIGN:
 		report(c, "error", c->cv_loc, &r, 1, NULL, 0, "assigning to '%s' from incompatible type '%s'", t, f);
@@ -220,7 +242,7 @@ static void conv_error(cc *c, uint32_t n, qty to, const char *what, const char *
 	}
 	d->id = id;
 	pp_diag_flag(d, flag);
-	pp_diag_label(c->p, d, r.b, r.e, NULL);
+	role_label(c, d, r);
 	pp_diag_emit(c->p, d);
 	if (c->cv_what == CX_PASS)
 		param_note(c);

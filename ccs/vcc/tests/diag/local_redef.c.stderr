@@ -1,7 +1,7 @@
 local_redef.c:4:6: error: redefinition of 'x'
+    3 |         int x;
+      |             - previous definition is here
     4 |         int x;
       |             ^
 local_redef.c:3:6: note: previous definition is here
-    3 |         int x;
-      |             ^
 1 error generated.

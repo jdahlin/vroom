@@ -1,7 +1,7 @@
 dup_member.c:1:23: error: duplicate member 'a'
     1 | struct s { int a; int a; };
-      |                       ^
+      |                -      ^
+      |                |
+      |                previous declaration is here
 dup_member.c:1:16: note: previous declaration is here
-    1 | struct s { int a; int a; };
-      |                ^
 1 error generated.

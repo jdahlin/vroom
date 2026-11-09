@@ -442,6 +442,7 @@ struct pp {
 	bool dtrack;		/* VCC_TRACK_DIAG: vcc's call site after each diagnostic */
 	bool dfinished;		/* pp_diag_finish ran (JSON flushed, SARIF written) */
 	vdiag *dpend;		/* -fdiagnostics-format=json: the record not yet written */
+	vdiag *tpend;		/* vcc's text style: the record not yet rendered (its notes may follow) */
 	struct lmark {		/* #line / GNU line markers */
 		uint32_t fe, off;	/* in fent fe, from byte offset off on */
 		uint32_t pline, line;	/* physical line pline is line */
@@ -604,6 +605,16 @@ VPRIV bool loc_ok(const pp *p, uint32_t loc, const fent **e);
 VPRIV int diag_where(const pp *p, uint32_t loc, const char **name, uint32_t *nl, uint32_t *line, uint32_t *col);
 struct vbuf;
 VPRIV void render_text(pp *p, struct vbuf *b, const vdiag *d);
+VPRIV bool render_head(pp *p, struct vbuf *b, const vdiag *d, const fent **ep);
+VPRIV uint32_t dcols(const char *s, uint32_t b, uint32_t e, uint32_t col);
+VPRIV void db_c(struct vbuf *b, char c, int n);
+VPRIV void include_stack(pp *p, struct vbuf *b, const fent *e);
+/* diagtext.c: vcc's text style (records rendered when the next one starts, so that
+   their notes can fold into the snippet), the narrated style, the type diff */
+VPRIV void diag_text_flush(pp *p);
+VPRIV void diag_narrate(pp *p, struct vbuf *b, vdiag *d);
+VPRIV void diag_render_rec(pp *p, struct vbuf *b, vdiag *d);
+VPRIV void diag_typediff(struct vbuf *b, const vdiag *d, const char *plain);
 /* diagout.c: JSON lines and SARIF */
 VPRIV void diag_json_flush(pp *p);
 /* macro.c */

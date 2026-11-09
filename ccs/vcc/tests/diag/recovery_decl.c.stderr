@@ -1,15 +1,15 @@
 recovery_decl.c:4:17: error: expected ')'
     4 | void abort (void;
-      |                 ^
+      |            -    ^
+      |            |
+      |            to match this '('
 recovery_decl.c:4:12: note: to match this '('
-    4 | void abort (void;
-      |            ^
 recovery_decl.c:7:22: error: field has incomplete type 'struct zz'
+    6 | struct zz;
+      |        - forward declaration of 'struct zz'
     7 | struct s { struct zz f:3; long b; };
       |                      ^
 recovery_decl.c:6:8: note: forward declaration of 'struct zz'
-    6 | struct zz;
-      |        ^
 recovery_decl.c:8:23: error: 'long struct' is invalid
     8 | struct s3 { struct zz long g; int h; };
       |                       ^

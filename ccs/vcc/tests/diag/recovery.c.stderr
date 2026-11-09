@@ -17,26 +17,26 @@ recovery.c:14:18: error: expected expression
    14 |         int v[4] = { 8, , 9, 10 };
       |                         ^
 recovery.c:16:3: error: expected ')'
+   15 |         for (i = 0; i < b; i++
+      |             - to match this '('
    16 |                 n += v[i & 3];
       |                 ^
 recovery.c:15:6: note: to match this '('
-   15 |         for (i = 0; i < b; i++
-      |             ^
 recovery.c:18:3: error: expected ')'
+   17 |         if (b != (n + 1)
+      |            - to match this '('
    18 |                 n = 2;
       |                 ^
 recovery.c:17:5: note: to match this '('
-   17 |         if (b != (n + 1)
-      |            ^
 recovery.c:21:20: error: expected ';' in 'for' statement specifier
    21 |         for (i = 0; i < b @ 1; i++)
       |                           ^
 recovery.c:23:9: error: expected ')'
    23 |         n = f(b;
-      |                ^
+      |              - ^
+      |              |
+      |              to match this '('
 recovery.c:23:7: note: to match this '('
-   23 |         n = f(b;
-      |              ^
 recovery.c:26:12: error: type name requires a specifier or qualifier
    26 | struct T { a, b; int c };
       |            ^

@@ -661,7 +661,8 @@ int ppd_run(int argc, char **argv, const ppd_env *env)
 		   **all = dirv + 4 * per;
 	int nq = 0, ni = 0, ns = 0, na = 0, n = 0;
 	const char *cmp = NULL, *out = NULL, *main_file = NULL, *depfile = NULL, *deptarget = NULL;
-	int errfd = env->errfd, status = 0, md = 0, dcolor = 0, nocaret = 0, elimit = 0, slimit = 0, showid = 0, dformat = 0, nwargs = 0;
+	int errfd = env->errfd, status = 0, md = 0, dcolor = 0, nocaret = 0, elimit = 0, slimit = 0, showid = 0, dformat = 0, nwargs = 0, dstyle = 0, dunicode = 0;
+	const char *badval = NULL;	/* an option with a value clang would reject */
 	const char **wargs = NULL;
 	char pmapbuf[4096];
 	jmp_buf jb;
@@ -709,6 +710,22 @@ int ppd_run(int argc, char **argv, const ppd_env *env)
 			continue;
 		}
 		if (!strncmp(a, "-fdiagnostics-add-output=sarif:file=", 36)) { po.sarif_file = a + 36; continue; }
+		if (!strncmp(a, "-fdiagnostics-style=", 20)) {	/* vcc (default), clang, narrated */
+			const char *f = a + 20;
+
+			dstyle = !strcmp(f, "clang") ? PP_DSTYLE_CLANG : !strcmp(f, "narrated") ? PP_DSTYLE_NARRATED : PP_DSTYLE_VCC;
+			if (dstyle == PP_DSTYLE_VCC && strcmp(f, "vcc"))
+				badval = a;
+			continue;
+		}
+		if (!strncmp(a, "-fdiagnostics-text-art-charset=", 31)) {	/* GCC's: ascii, unicode, emoji, none */
+			const char *f = a + 31;
+
+			dunicode = !strcmp(f, "unicode") || !strcmp(f, "emoji");
+			if (!dunicode && strcmp(f, "ascii") && strcmp(f, "none"))
+				badval = a;
+			continue;
+		}
 		if (!strcmp(a, "-fno-diagnostics-show-id")) { showid = 0; continue; }
 		if (!strncmp(a, "-fspell-checking-limit=", 23)) { slimit = atoi(a + 23); slimit = slimit ? slimit : -1; continue; }
 		if (!strcmp(a, "-fno-spell-checking")) { slimit = -2; continue; }
@@ -822,6 +839,13 @@ int ppd_run(int argc, char **argv, const ppd_env *env)
 		}
 	}
 	(void)md;
+	if (badval) {
+		const char *eq = strchr(badval, '=');
+
+		dprintf(errfd, "vcc: error: invalid value '%s' in '%.*s'\n", eq + 1, (int)(eq + 1 - badval), badval);
+		status = 1;
+		goto out;
+	}
 	if (!main_file) {
 		dprintf(errfd, "vcc: error: no input file\n");
 		status = 2;
@@ -968,6 +992,8 @@ int ppd_run(int argc, char **argv, const ppd_env *env)
 	po.diag_color = dcolor;
 	po.diag_nocaret = nocaret;
 	po.diag_show_id = showid;
+	po.diag_style = dstyle;
+	po.diag_unicode = dunicode;
 	po.diag_format = dformat;
 	po.argv = argv;
 	po.argc = argc;

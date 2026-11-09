@@ -1,7 +1,7 @@
 dup_case.c:5:7: error: duplicate case value '1'
+    4 |         case 1: break;
+      |              - previous case defined here
     5 |         case 1: break;
       |              ^
 dup_case.c:4:7: note: previous case defined here
-    4 |         case 1: break;
-      |              ^
 1 error generated.

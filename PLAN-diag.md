@@ -390,6 +390,27 @@ Det här blir standardutseendet, inte ett eget läge; första raden behåller fo
   "narratable") under `NO_COLOR` utan tty.
   *Validera:* lager 1 (samma platser som clang), 4, 8, 10.
 
+**Status (2026-11-09): klart.**  `-fdiagnostics-style=vcc` (standard) | `clang` | `narrated`,
+`-fdiagnostics-text-art-charset=ascii|unicode|emoji|none` (okänt värde: fel, som clang).
+Varje huvudrad är clangs i alla stilar (vcc-driver kontrollerar att de är identiska).
+vcc-stilen (`pp/diagtext.c`): flera rader per kodutdrag, etiketter (`^` platsen, `~` spann,
+`-` en invikt nots plats), den högraste etiketten på raden, övriga på `|`-rader under;
+en not på en rad som redan visas (inom 5 rader, samma fil, utan fix-its/help) viks in i
+utdraget och behåller sin huvudrad; en rad mellan visas, större glapp blir `...`;
+`= help:`-rader (`pp_diag_help`); breda tecken/emoji räknas som två kolumner i båda stilarna.
+Typdiff i färg (bara vcc-stilen): bara de delar av två citerade typer som skiljer markeras.
+Rollnamn: konverteringsfel på argument får etiketten "argument N of 'f'", retur "the returned
+value".  `help:` på interna fel (fördröjd bugg).  Utskriften skjuts upp till nästa
+toppnivåpost/`pp_diag_finish`/`pp_close` så att noter kan vikas in.  JSON:s "rendered" följer
+vald stil, JSON/SARIF bär `help`.  Avvikelse från planen: narrated är en flagga, inte
+automatisk under `NO_COLOR` (NO_COLOR betyder bara inga färger; skärmläsaranvändare väljer).
+Validering: vcc-diag 82/82 (även ASan), 80 fall text-identiska med clang i clang-stilen,
+JSON återskapar både vcc- och clang-stilen (`bench/diag-render.py --style`), diag-formats-fall
+har `.narrated`-snapshots; mutate `--formats` 1970/1970; lager 8: `fuzz-diag` (slumpade poster
+över slumpad text genom alla stilar/utdata, ASan) 85 k körningar utan fynd, `fuzz/regress/diag`;
+lager 10: `bench/vcc-diag-catalog.py` (HTML: källa, clang, vcc, narrated, JSON).
+Prestanda: grinden fe +0.03 %, cc +0.08 %.
+
 ### D5. Innehåll (ett delsteg per område, i värde-per-insats-ordning)
 
 Varje delsteg: nya fall i `tests/diag/` (snapshots, och clang som mätpunkt), lager 6 grönt.
@@ -455,7 +476,7 @@ D1 och D2 hänger ihop (feltypen behöver posten); D0.2 först så att D2 har en
 - [x] D1.1 – D1.3 — 2026-11-09
 - [x] D2.1 – D2.3 — 2026-11-09
 - [x] D3.1 – D3.3 — 2026-11-09 (officiella SARIF-schemat ej vendrat)
-- [ ] D4
+- [x] D4 — 2026-11-09
 - [ ] D5.1 – D5.8
 - [ ] D6
 - [ ] D7

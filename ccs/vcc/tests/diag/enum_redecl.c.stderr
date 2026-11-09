@@ -1,7 +1,7 @@
 enum_redecl.c:2:5: error: redefinition of 'A' as different kind of symbol
+    1 | enum { A, B };
+      |        - previous definition is here
     2 | int A;
       |     ^
 enum_redecl.c:1:8: note: previous definition is here
-    1 | enum { A, B };
-      |        ^
 1 error generated.

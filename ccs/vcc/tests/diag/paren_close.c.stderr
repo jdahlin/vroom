@@ -1,30 +1,30 @@
 paren_close.c:4:19: error: expected ')'
     4 | int a = sizeof(int;
-      |                   ^
+      |               -   ^
+      |               |
+      |               to match this '('
 paren_close.c:4:15: note: to match this '('
-    4 | int a = sizeof(int;
-      |               ^
 paren_close.c:5:14: error: expected ')'
     5 | int b = (int 3;
-      |              ^
+      |         -    ^
+      |         |
+      |         to match this '('
 paren_close.c:5:9: note: to match this '('
-    5 | int b = (int 3;
-      |         ^
 paren_close.c:5:15: error: expected expression
     5 | int b = (int 3;
       |               ^
 paren_close.c:6:24: error: expected ')'
     6 | _Static_assert(1, "one";
-      |                        ^
+      |               -        ^
+      |               |
+      |               to match this '('
 paren_close.c:6:15: note: to match this '('
-    6 | _Static_assert(1, "one";
-      |               ^
 paren_close.c:9:12: error: expected ')'
     9 |         switch (x { default: break; }
-      |                   ^
+      |                -  ^
+      |                |
+      |                to match this '('
 paren_close.c:9:9: note: to match this '('
-    9 |         switch (x { default: break; }
-      |                ^
 paren_close.c:12:27: error: expected ')'
    12 | int g(void) { return (int x)3 + sizeof(int y); }
       |                           ^

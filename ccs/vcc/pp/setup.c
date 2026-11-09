@@ -460,6 +460,7 @@ size_t pp_files(const pp *p, const char **names, size_t max)
 
 void pp_close(pp *p)
 {
+	diag_text_flush(p);	/* a record still waiting for its notes (no summary ran) */
 	/* back to the thread: the stacks and tmp (reused all along the TU) as they are */
 	vmreg_put(&ppr[1], VMREG_SCRATCH);
 	vmreg_put(&ppr[2], (size_t)(p->perm.p - p->perm.base) + 64);

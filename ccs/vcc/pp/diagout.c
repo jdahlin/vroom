@@ -118,6 +118,8 @@ static void json_rec(pp *p, vbuf *b, const vdiag *d, bool top)
 	jloc(p, b, d->loc);
 	vbuf_s(b, ",\"label\":");
 	jcstr(b, d->label);
+	vbuf_s(b, ",\"help\":");
+	jcstr(b, d->help);
 	vbuf_s(b, ",\"spans\":[");
 	for (uint32_t i = 0; i < d->nspan; i++) {
 		vbuf_s(b, i ? ",{\"start\":" : "{\"start\":");
@@ -151,13 +153,11 @@ static void json_rec(pp *p, vbuf *b, const vdiag *d, bool top)
 				vbuf_s(b, ",");
 		}
 		vbuf_s(b, "],\"rendered\":");
-		/* the text as the text output prints it, with its include stack */
+		/* the text as the text output prints it (in its style), with its include stack */
 		p->diag_fe = 0;
 		bool color = p->color;
 		p->color = 0;
-		render_text(p, &r, d);
-		for (const vdiag *k = d->kids; k; k = k->next)
-			render_text(p, &r, k);
+		diag_render_rec(p, &r, (vdiag *)d);
 		p->color = color;
 		p->diag_fe = fe;
 		jstr(b, r.p ? r.p : "", r.n);
@@ -358,7 +358,9 @@ noloc:
 		}
 		vbuf_s(b, "]}]");
 	}
-	vbuf_s(b, ",\"properties\":{\"vcc/flag\":");
+	vbuf_s(b, ",\"properties\":{\"vcc/help\":");
+	jcstr(b, d->help);
+	vbuf_s(b, ",\"vcc/flag\":");
 	jcstr(b, d->flag);
 	vbuf_f(b, ",\"vcc/werror\":%s}}", d->werror ? "true" : "false");
 }
@@ -418,6 +420,7 @@ void pp_diag_finish(pp *p)
 	if (p->dfinished)
 		return;
 	p->dfinished = true;
+	diag_text_flush(p);
 	diag_json_flush(p);
 	if (p->o->diag_format == PP_DIAG_SARIF || p->o->sarif_file) {
 		vbuf b = { 0 };
