@@ -534,6 +534,169 @@ load 5–7.
   region is the largest remaining lever in the compiler, larger than in the kernel,
   where lazy bodies already took ~45%.
 
+### 6.9 Design: declaration replay per region (2026-11-09)
+Goal: a header-cache hit at a file-scope declaration boundary adds the region's
+declarations to the parser state without delivering or parsing its tokens. The result
+must equal parsing it: the same arrays in the same order, so that objects stay
+byte-identical with the feature off (`VCC_NODR=1`). The prefix snapshots (§6.7) stay.
+They are a cheaper bulk form for the leading run.
+
+**Unit and key.**
+- A *decl entry* hangs off a header-cache entry (`hent`) and is keyed by
+  (`hent`, `__COUNTER__` at its start, front-end option signature). The `hent` already
+  fixes the tokens, the macro reads and the files.
+- The option signature must cover every parse-affecting option. Derive it from one
+  struct, which also fixes the `TODO.md` item "Header/snapshot cache keys incomplete".
+- It is published once (release/acquire), immutable and never freed, like the
+  header cache, with a memory cap like `VCC_DC_MAX_MB`.
+
+**When a region qualifies** (checked at record time; anything else is parsed as today).
+- It starts and ends at a file-scope declaration boundary:
+  - depth 0, no open struct, enum or initializer;
+  - `ntk == 1`, with the region's first token in `tk[0]`;
+  - the end right before the next declaration (`dc_boundary_slow`'s test, for regions
+    at any depth).
+  - This rules out x-macro includes inside arrays and enums (PG's `kwlist.h`, `*.def`
+    patterns).
+- No diagnostics (`ndiag`, `errors`, pp errors unchanged).
+- No front-end pragma (`pack`, `weak`) consumed, and no `dc_kill`.
+- Every read resolves to builtins or to entities created by regions. A read of a
+  main-file entity makes the region uncacheable for that recording.
+
+**What a region does to the state.** These are the parts the entry must reproduce.
+- *Appends*, 1:1 and in order:
+  - syms, tags, nodes and spans;
+  - lists, ipool and fpool, strs, attrs, asms;
+  - toplevel and tlasm;
+  - lzt/lzf/lzs (lazy bodies, usually `lzfn.hc`: tokens referenced in the `hent`);
+  - heap bytes (fields, string bytes).
+- *Type interning*: `ty_intern` dedups against the whole table, so which types a
+  region appends depends on the types that already exist. The entry therefore stores
+  the region's interning calls, the first call per structural type and in order, as
+  structural types (`ctype` with its base/aux/params as references). Replay
+  re-interns them in that order.
+  - That gives the same `ty` array as parsing, provided the pre-state is the same.
+  - The pre-state is the same, by induction over exact earlier replays.
+  - Records and enums (`ty_new`) always append.
+- *Bindings*: each own sym that was bound at file scope is re-bound in order
+  (`sym_bind`). Its `shadow` comes from the consumer's slot, which the reads validated.
+- *Writes to external entities*:
+  - a redeclaration (`declare`'s `prev`: composite type, `sc`, flags, attrs);
+  - a tag completed here but declared earlier (fields, size, flags);
+  - `typedef_name`, `TF_TRANSPARENT`, `cplx[]`.
+  - Each is stored as the entity's full record after the region, with its index
+    fields as references. Replay overwrites it. The read set guarantees that the
+    pre-state of that entity was the recorded one.
+
+**References.**
+- Every index field in a stored record is either *own* (an offset from the region's
+  start counts: `nsym0`, `ntag0`, `nnode0`, …) or *external*.
+- An external reference names an entity by how the region reached it, which is a read
+  (below), so replay maps it to the consumer's index.
+- Builtins (`cc_init`, fixed per option set) are their own class with fixed indices.
+- This needs a schema of every index field:
+  - `sym` (`ty`, `body`, `attrs`, `next`, `ovl`, `psyms`);
+  - `tag`/`field`, `ctype` (`base`, `aux`, `n` for a VLA node);
+  - `node`: a/b/c by `op`, as `N_*` documents;
+  - `attrs` (`cleanup`, string indices), `casm`, `lzfn`.
+- The same schema serves locations: own locations are relative to the region's
+  location base, as in ccsnap's `LOCS`.
+
+**Reads: when an entry is valid.** The pp side is already validated by the `hent` hit.
+On the parser side:
+- *Name lookups* (`lookup`, `lookup_tag`, the `prev` lookup in `declare`,
+  `typedef_id`) of ids not bound by the region itself.
+  - Record (namespace, id) → the binding's *provenance*, or "unbound".
+  - Hooked in `lookup`/`lookup_tag` behind one `c->rec` test.
+  - Unbound reads matter: a typedef name appearing later changes the parse. They are
+    the parser's analogue of pp's `ru` reads.
+- *Provenance*: each sym and tag carries (`decl entry` that created it, its own index
+  there), or BUILTIN, or MAIN (never valid in a replay read).
+  - It is set on append and on replay.
+  - It lives in a side array (`c->prov`, 8 bytes per sym/tag), so `sym` keeps its size.
+- *Mutable state*: an entity read through a lookup may have been changed after its
+  creation by a later region (redeclaration, tag completion). A per-entity *version*
+  (the last writing decl entry) is part of the read: (provenance, version).
+- *Tags reached without a lookup*: in `typedef struct foo foo_t;`, then elsewhere
+  `struct foo {…};`, then `sizeof(foo_t)`, the third region depends on the second, but
+  only looked up `foo_t`. Completion is monotone (incomplete → complete once, then
+  immutable).
+  - At record time, add (tag provenance, completing entry, or "incomplete") for every
+    external tag reachable from the types of the external syms the region read.
+  - Follow `base` through pointers, arrays and functions, and the fields of complete
+    tags.
+  - Use a visited bitset per region, and stop at tags that were complete before the
+    region started *and* are reachable only through complete tags, since their state
+    cannot differ.
+- Validation of a hit is one `dget` per recorded name plus a provenance compare, and one
+  compare per tag. Expect tens to a few hundred per region, against ~350 instructions
+  per token parsed today.
+
+**Replay** (`dr_apply`, in a new `cc/replay.c`):
+1. Validate the reads, as above. On failure, parse the region as today.
+2. Re-intern the types in order. This builds the region-local → consumer type map.
+3. Bulk-copy the own records into the arrays and the heap, with one relocation pass
+   driven by the schema: own += base, external → map, locations += region base.
+4. Apply the external writes. Re-bind the file-scope syms. Append to toplevel and tlasm.
+5. Bump the versions of written entities to this entry, and set provenance on the new ones.
+
+On the pp side, the hit has already applied the macros, files and counter. Dropping the
+tokens needs `pp_skip_top` generalized to a nested replayed region (`pp_skip_region`).
+The cc side needs the boundary test above at the region's first token: an event from
+pp at a region start, at any depth, as `pp_top_events` gives for the top level.
+
+**Recording**, on a header-cache miss whose region qualifies:
+- At region start, save the counts and set `c->rec` (lookups log reads; `ty_intern`
+  logs calls; writes to external entities mark them in a bitset).
+- At region end, if still qualified, encode the decl entry and publish it on the
+  `hent`.
+- Nested regions record independently. A parent's entry covers its children's effects:
+  its own records include theirs, since they are appends in between, and its read set
+  is the union minus what the children's own records bound, as pp's `hkid` composes.
+- Cost: only on misses, which already pay ~15–20% for pp recording.
+
+**Exactness tests.**
+- `VCC_NODR=1` A/B:
+  - objects byte-identical for all PG and kernel TUs (`vcc-cbatch.py`, `bench/pg`);
+  - `-S` and `--vcc-layout-checks` identical;
+  - vcc-sema run/layout 878/879, ctests, fpcheck, diag;
+  - ASan, and TSan (shared entries).
+- A generator in the style of `vcc-bflayout.py`, with random header DAGs:
+  - forward tags completed in another header;
+  - typedefs that shadow, or appear between two includes;
+  - redeclarations with composite types;
+  - enums whose values use earlier constants;
+  - the same headers in different include orders and guard states.
+  - Each TU compiled cold, and after warm TUs that recorded other orders.
+  - Output compared with `VCC_NODR=1`, and layouts with clang.
+- The "unbound read" and tag-completion cases each get a minimal ctest that fails if
+  the corresponding validation is removed.
+
+**Order of work.**
+0. *Measure coverage first.* Count the header-cache hits (any depth) that start and end
+   at a file-scope boundary, and their tokens, on PG and the kernel. Stub that every
+   qualifying hit is replayed for free, without changing the output, to bound the gain.
+   If the boundary tokens are well under the 65 M parsed header tokens on PG, rethink
+   the unit before building.
+1. Provenance and versions (side arrays), the read hooks, and record-only mode with
+   stats (reads, types and records per entry, bytes). Nothing is replayed yet.
+2. Replay for entries with no external writes and no lazy bodies. A/B on PG.
+3. External writes (redeclarations, tag completion); lazy bodies through `lzfn.hc`.
+4. Nested composition, and replaying a child inside a parent that missed (the
+   guard-variant case, which is most misses).
+5. Fold ccsnap into this if per-region replay of the prefix is as cheap as a snapshot
+   restore; otherwise keep both.
+
+**Open questions.**
+- Whether re-interning in call order really reproduces `ty` exactly. Parsing interns
+  intermediate types (pointer types for expressions in constant expressions) that no
+  record references. They must be logged too, or `nty` drifts. Step 1's record-only
+  mode can check it: replay into a scratch array and compare with what parsing built.
+- Where region boundaries fall inside `extern "C"`-like wrappers. In C: SDK headers'
+  `__BEGIN_DECLS` is empty, so this is probably not a problem.
+- Size per entry: own records plus the type log. ccsnap's 3.5 MB per snapshot was for
+  the whole state; one region should be KBs to tens of KBs.
+
 ## Sources
 - clang: TokenLexer.cpp, PPMacroExpansion.cpp, Preprocessor.cpp, MacroArgs.cpp,
   DependencyDirectivesScanner.cpp (llvm-project `main`)
