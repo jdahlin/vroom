@@ -113,6 +113,7 @@ struct cc {
 	uint32_t nparams;
 	uint32_t *fnhash, fnhcap, nfn;
 	uint32_t *ptrc;		/* qty -> type index of a pointer to it (a cache, checked on use) */
+	uint32_t ptr_lo;	/* ptrc entries below are not used (1; a recorded region: its first type) */
 
 	tag *tags;
 	uint32_t ntag;
@@ -198,6 +199,9 @@ struct cc {
 	/* VCC_DRCOV: delivered positions of file-scope declaration starts (UINT64_MAX: lookahead) */
 	uint64_t *drb;
 	uint32_t ndrb, cdrb;
+	/* VCC_DRREC: per-region declaration replay, record only (cc/replay.c) */
+	struct drrec *dr;
+	uint8_t dr_on;		/* a region is being recorded: the hooks log */
 };
 
 
@@ -255,6 +259,7 @@ typedef struct cval {
 #define CN(c, i) (&(c)->nodes[i])
 
 bool cc_eval(cc *c, uint32_t n, cval *v);
+void dr_restored(cc *c);
 bool cc_is_signed(cc *c, qty t);
 const char *cc_builtin_name(int64_t i);
 uint32_t cc_global_named(cc *c, const char *s);

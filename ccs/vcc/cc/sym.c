@@ -72,18 +72,26 @@ static __attribute__((noinline)) uint32_t lz_visible(cc *c, uint32_t s)
 	return s;
 }
 
+/* a lookup in a lazy body or while recording a region (cc/replay.c) */
+static __attribute__((noinline)) uint32_t lookup_slow(cc *c, int ns, uint32_t id, uint32_t s)
+{
+	if (c->dr_on)
+		dr_read(c, ns, id, s);
+	return c->lz_wm && s >= c->lz_wm ? lz_visible(c, s) : s;
+}
+
 VPRIV uint32_t lookup(cc *c, uint32_t id)
 {
 	uint32_t s = dget(c->odir, id);
 
-	return unlikely(c->lz_wm) && s >= c->lz_wm ? lz_visible(c, s) : s;
+	return unlikely(c->lz_wm | c->dr_on) ? lookup_slow(c, 0, id, s) : s;
 }
 
 VPRIV uint32_t lookup_tag(cc *c, uint32_t id)
 {
 	uint32_t s = dget(c->tdir, id);
 
-	return unlikely(c->lz_wm) && s >= c->lz_wm ? lz_visible(c, s) : s;
+	return unlikely(c->lz_wm | c->dr_on) ? lookup_slow(c, 1, id, s) : s;
 }
 
 /* Levenshtein distance, giving up above max */

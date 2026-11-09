@@ -260,5 +260,7 @@ int cc_run(pp *p, const cc_opts *o);
 void cc_lz_stats(char *buf, size_t n);
 /* VCC_DRCOV: header-cache hits that start and end at file-scope declaration boundaries */
 void cc_drcov_stats(char *buf, size_t n);
+/* VCC_DRREC: what per-region decl entries would hold (record only) */
+void cc_dr_stats(char *buf, size_t n);
 
 #endif

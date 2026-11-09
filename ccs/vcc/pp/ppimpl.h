@@ -421,7 +421,7 @@ struct pp {
 	uint64_t skipped_tok;	/* tokens of regions pp_skip_top dropped */
 	pp_hitreg *drh;		/* VCC_DRCOV: header-cache hits in delivered positions (pp_hit_regions) */
 	uint32_t ndrh, ndrs;
-	struct { uint64_t pos; int depth; } drs[64];	/* hits whose replay is still open */
+	struct { uint64_t pos; int depth; const void *he; } drs[64];	/* hits whose replay is still open */
 	pp_topev *tev;		/* top-level region events (pp_top_events) */
 	uint32_t ntev;
 	uint8_t tev_full, top_rec;

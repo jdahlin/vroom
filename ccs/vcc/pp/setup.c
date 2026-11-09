@@ -165,7 +165,7 @@ static void hc_env(void)
 
 	hc_mem_max = m ? (size_t)atol(m) << 20 : (size_t)8 << 30;
 	hc_off = getenv("VPP_NOHC") != NULL;
-	pp_drcov = getenv("VCC_DRCOV") != NULL;
+	pp_drcov = getenv("VCC_DRCOV") || getenv("VCC_DRREC");
 }
 
 static void hc_mode(pp *p, int mode)
@@ -261,6 +261,15 @@ uint64_t pp_skipped(const pp *p)
 	return p->skipped_tok;
 }
 
+bool pp_open_hit(const pp *p, uint64_t *b, const void **he)
+{
+	if (!p->ndrs)
+		return false;
+	*b = p->drs[p->ndrs - 1].pos;
+	*he = p->drs[p->ndrs - 1].he;
+	return true;
+}
+
 const pp_hitreg *pp_hit_regions(const pp *p, uint32_t *n)
 {
 	*n = p->ndrh;
@@ -273,8 +282,10 @@ VPRIV void drcov_hit(pp *p, int d0)
 	if (!p->drh)
 		p->drh = varena_alloc(&p->perm, DRCOV_MAX * sizeof(pp_hitreg));
 	if (p->depth > d0) {
-		if (p->ndrs < 64)
-			p->drs[p->ndrs].pos = p->ntok_out, p->drs[p->ndrs++].depth = p->depth;
+		if (p->ndrs < 64) {
+			p->drs[p->ndrs].pos = p->ntok_out, p->drs[p->ndrs].depth = p->depth;
+			p->drs[p->ndrs++].he = p->hc_last;
+		}
 	}
 }
 
@@ -284,7 +295,8 @@ VPRIV void drcov_end(pp *p)
 	if (p->ndrs && p->drs[p->ndrs - 1].depth == p->depth) {
 		p->ndrs--;
 		if (p->ndrh < DRCOV_MAX && p->ntok_out > p->drs[p->ndrs].pos)
-			p->drh[p->ndrh++] = (pp_hitreg){ p->drs[p->ndrs].pos, p->ntok_out, (uint32_t)p->nfile };
+			p->drh[p->ndrh++] = (pp_hitreg){ p->drs[p->ndrs].pos, p->ntok_out, (uint32_t)p->nfile,
+						    p->drs[p->ndrs].he };
 	}
 }
 
@@ -306,6 +318,8 @@ int pp_skip_top(pp *p)
 		if (p->cx[d].type != C_REPLAY)
 			return 0;
 	p->skipped_tok += p->cx[d0].he->total;
+	while (p->ndrs && p->drs[p->ndrs - 1].depth > d0)
+		p->ndrs--;	/* (VCC_DRCOV: dropped, not counted as a hit) */
 	p->pend |= p->cx[d0].he->pend_out;
 	p->depth = d0;
 	p->ntok_out = s->pos;

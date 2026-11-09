@@ -174,6 +174,13 @@ static int batch(const char *file, int nthr, const char *statsf)
 			printf("%s\n", hs);
 	}
 	{
+		char ds[2048];
+
+		cc_dr_stats(ds, sizeof(ds));
+		if (*ds)
+			printf("%s\n", ds);
+	}
+	{
 		struct rusage ru;
 
 		getrusage(RUSAGE_SELF, &ru);

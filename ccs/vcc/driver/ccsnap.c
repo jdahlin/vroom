@@ -358,6 +358,7 @@ static void snap_restore(cc *c, const dcsnap *s, uint32_t base)
 	c->hp = c->heap + s->a[A_HEAP].n;
 	c->dc = keep.dc;
 	c->drb = keep.drb, c->ndrb = keep.ndrb, c->cdrb = keep.cdrb;	/* (VCC_DRCOV: this TU's) */
+	c->dr = keep.dr, c->dr_on = keep.dr_on;
 	c->dops = keep.dops, c->ndops = keep.ndops;	/* (scratch in this TU's heap) */
 	code_cc(&k, c, false);
 	c->prevloc = dec_loc(&k, s->c.prevloc);
@@ -365,6 +366,7 @@ static void snap_restore(cc *c, const dcsnap *s, uint32_t base)
 	LOCS(img, c, DEC);	/* (first: the tags' f is still coded) */
 #undef DEC
 	code_ptrs(&k, img, c, false);
+	dr_restored(c);
 }
 
 /* ---------------- the trie ---------------- */

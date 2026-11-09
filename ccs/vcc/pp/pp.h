@@ -177,8 +177,10 @@ const pp_topev *pp_top_events(const pp *p, uint32_t *n);
 uint64_t pp_ntok(const pp *p);
 uint64_t pp_skipped(const pp *p);
 /* VCC_DRCOV: the header-cache hits of the TU so far, as [first token, end) in delivered positions */
-typedef struct pp_hitreg { uint64_t b, e; uint32_t nfile; } pp_hitreg;
+typedef struct pp_hitreg { uint64_t b, e; uint32_t nfile; const void *he; } pp_hitreg;
 const pp_hitreg *pp_hit_regions(const pp *p, uint32_t *n);
+/* VCC_DRCOV/VCC_DRREC: the hit whose replay is open (its first token's position, its entry); false if none */
+bool pp_open_hit(const pp *p, uint64_t *b, const void **he);
 /*
  * Drop the rest of the replayed region that the last event started, whose
  * first token was the last one delivered: as if it had been delivered and

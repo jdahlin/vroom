@@ -64,7 +64,11 @@ VPRIV uint32_t ty_intern(cc *c, const ctype *t)
 		uint32_t e = c->tyhash[i];
 
 		if (!e) {
-			uint32_t idx = c->nty++;
+			uint32_t idx;
+
+			if (unlikely(c->dr_on))
+				return dr_intern(c, t);	/* (a region's own table: first use of t in it) */
+			idx = c->nty++;
 
 			c->ty[idx] = *t;
 			if (!(t->flags & TF_ALIGNED))
@@ -88,8 +92,9 @@ VPRIV uint32_t ty_intern(cc *c, const ctype *t)
 			}
 			return idx;
 		}
-		if (ty_eq(&c->ty[e], t))
+		if (ty_eq(&c->ty[e], t)) {
 			return e;
+		}
 	}
 }
 
@@ -108,11 +113,12 @@ VPRIV qty ty_ptr(cc *c, qty base)
 	uint32_t i = c->ptrc[base];
 
 	/* the cache may be stale (a restored snapshot): the entry must still be the pointer */
-	if (likely(i && i < c->nty)) {
+	if (likely(i >= c->ptr_lo && i < c->nty)) {	/* (ptr_lo: 1, or a recorded region's first type) */
 		const ctype *p = &c->ty[i];
 
-		if (p->kind == TY_PTR && !p->flags && p->base == base && p->align == 8)
+		if (p->kind == TY_PTR && !p->flags && p->base == base && p->align == 8) {
 			return QT(i, 0);
+		}
 	}
 	{
 		ctype t = { .kind = TY_PTR, .size = 8, .align = 8, .base = base };

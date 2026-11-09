@@ -24,6 +24,7 @@ VPRIV void *halloc(cc *c, size_t n)
 static void cc_init(cc *c, pp *p, const cc_opts *o)
 {
 	memset(c, 0, sizeof(*c));
+	c->ptr_lo = 1;
 	c->p = p;
 	c->o = o;
 	ccr = vmpool_take(&ccpool);
@@ -252,6 +253,7 @@ int cc_run(pp *p, const cc_opts *o)
 	c->drb = NULL, c->ndrb = c->cdrb = 0;
 	if (drcov_on)
 		drcov_boundary(c), c->ndrb = 0;	/* (allocates) */
+	dr_begin(c);
 	if (!setjmp(c->bail)) {
 		dc_begin(c);
 		fetch(c, &c->tk[0]);
@@ -278,6 +280,7 @@ int cc_run(pp *p, const cc_opts *o)
 	errors = c->errors;
 	if (c->drb)
 		drcov_finish(c);
+	dr_end(c);
 	dc_end(c);
 	cc_free(c);
 	free(c);

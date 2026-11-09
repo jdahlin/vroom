@@ -707,20 +707,82 @@ pp at a region start, at any depth, as `pp_top_events` gives for the top level.
    - The instrumentation stays (a `c->drb` test per file-scope declaration, a
      `pp_drcov` test per hit; `vbench gate` +0.1% on fe/cc). It measures coverage at
      each later step.
-1. Provenance and versions (side arrays), the read hooks, and record-only mode with
-   stats (reads, types and records per entry, bytes). Nothing is replayed yet.
-2. Replay for entries with no external writes and no lazy bodies. A/B on PG.
-3. External writes (redeclarations, tag completion); lazy bodies through `lzfn.hc`.
-4. Nested composition, and replaying a child inside a parent that missed (the
-   guard-variant case, which is most misses).
-5. Fold ccsnap into this if per-region replay of the prefix is as cheap as a snapshot
-   restore; otherwise keep both.
+1. Record-only mode with stats (reads, types and records per entry, bytes). Nothing is
+   replayed yet.
+   - *Done (2026-11-09), `cc/replay.c`, `VCC_DRREC=1`.*
+     - **Where.** Unlike the plan, entries are recorded on a header-cache *hit*, not
+       on a miss. Hits never nest: children are spliced into the parent's replay, so a
+       hit is one disjoint region with no composition. A region parsed at a hit is
+       recorded once, and later hits of the same (`hent`, counter) replay it. That is
+       ccsnap's second-visit rule, per region.
+     - **How.** A recording opens at a boundary where pp's open hit starts
+       (`pp_open_hit`), and closes where that hit ends at a boundary. During it:
+       - `lookup`/`lookup_tag` log names outside the region, bound or unbound;
+       - `ty_intern` works on a table of the region's own, so the first use of each
+         structural type reaches `dr_intern`, which is exactly the type log;
+       - `ty_ptr`'s cache ignores pointer types older than the region (`ptr_lo`);
+       - `pragma` logs `pack`/`weak`;
+       - writes to older entities are found by comparing a copy of the syms, tags,
+         types and attrs from the start. That is slow, and only for measuring which
+         fields a replay must carry.
+     - **Exactness.** Objects are byte-identical with and without `VCC_DRREC=1`
+       (PG 1570/1570, kernel 839/839). `vbench gate` ok: fe +0.33%, cc +0.40%, mostly
+       the `lz_wm | dr_on` test in `lookup`, which a permanent recorder needs anyway.
+       While a region is recorded no ccsnap snapshot can be taken (its type table is
+       not in the heap), so `VCC_DRREC` runs see few restores. The PG "default" column
+       below is from a run before that change, with the same hooks otherwise.
+
+     | PG | `VCC_NODC=1` | default (beyond ccsnap) |
+     |---|---|---|
+     | regions closed at a boundary | 32 963 (70.2 M tokens) | 31 583 (45.6 M) |
+     | diagnostics / main-file reads | 0 / 0 | 0 / 0 |
+     | `#pragma pack` (none started inside a pack) | 1068 (15.2 M) | 814 (10.1 M) |
+     | pure, no writes and no lazy bodies | 24 759 (16.2 M) | 24 687 (16.2 M) |
+     | pure, writes to older entities | 5011 (14.8 M) | 4880 (13.8 M) |
+     | pure, lazy bodies only | 2125 (24.1 M) | 1202 (5.5 M) |
+     | distinct entries | 4762 | 4676 |
+
+     The kernel (`VCC_NODC=1`): 36 556 regions (541 M tokens) close. Pragma regions
+     are 27 (4.5 M); no writes, no lazy: 1.8 M; writes: 308.6 M; lazy bodies only:
+     226.1 M; 3117 distinct entries.
+   - **Per pure region.**
+     - PG: reads 6.4 bound + 86 unbound, type log 4.5 old + 33 new types, 199 syms,
+       9.6 tags, 94 nodes, ~29 KB (25.6 bytes per token).
+     - Kernel: 17 + 217 reads, 11 + 142 types, 619 syms, 35 tags, 108 lazy bodies,
+       ~96 KB (7.8 bytes per token).
+     - Validating ~100–250 lookups against parsing ~1500–12000 tokens is cheap, as
+       planned. Storing every distinct entry would take ~140 MB (PG) and ~300 MB
+       (kernel), the same order as ccsnap's cap.
+   - **Writes to older entities**, all regions (PG / kernel):
+     - tag completions 4044 / 33 035, each with its type's size and align;
+     - sym flags only 5580 / 4378 (`SF_DEFINED | SF_USED | SF_REF`, and in the kernel
+       `SF_ADDR_TAKEN`, `SF_LAZY`);
+     - a redeclaration's `plb`/`ple` 3323 / 4812, and `psyms` 1599 / 1758;
+     - attrs 222 / 528.
+     - No sym's type changes: the composite is always the same type. No other tag
+       fields change.
+     - So "overwrite the older record with the recorded one" covers them. The read
+       set must include those entities' versions.
+   - **Consequence for the order.** Plain regions are only 16 of the 46 M PG tokens.
+     Writes (tag completion above all) and `#pragma pack` (with the pack state at the
+     start as an input) are needed in the first replay step. Lazy bodies are needed
+     for the kernel. Composition (old step 4) is not needed, since entries are taken
+     at hits.
+2. Replay with provenance and versions (side arrays), validation of the read set
+   including reachable tag completion, external writes as record overwrites, and pack
+   state as an input. A/B against `VCC_NODR=1` on PG and the kernel. Target: ~40 M
+   of PG's 46 M.
+3. Lazy bodies through `lzfn.hc` (the kernel's 226 M, PG's 5.5 M).
+4. Fold ccsnap into this if per-region replay of the prefix is as cheap as a snapshot
+   restore; otherwise keep both, and let a recording coexist with snapshots (the
+   region's type table in the heap, or no snapshot inside a recording).
 
 **Open questions.**
-- Whether re-interning in call order really reproduces `ty` exactly. Parsing interns
-  intermediate types (pointer types for expressions in constant expressions) that no
-  record references. They must be logged too, or `nty` drifts. Step 1's record-only
-  mode can check it: replay into a scratch array and compare with what parsing built.
+- Whether re-interning in call order really reproduces `ty` exactly. Step 1 settles
+  the method: the region's own table makes the log exactly "first call per structural
+  type, in order", including types no record references. Whether replaying that log
+  gives the same `ty` array is checked in step 2 (A/B objects, plus a debug compare of
+  `ty` after replay against a parse).
 - Where region boundaries fall inside `extern "C"`-like wrappers. In C: SDK headers'
   `__BEGIN_DECLS` is empty, so this is probably not a problem.
 - Size per entry: own records plus the type log. ccsnap's 3.5 MB per snapshot was for
