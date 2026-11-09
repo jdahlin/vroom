@@ -821,9 +821,9 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
   in the plan.
 - [ ] **Error recovery**: parse errors recover per block, struct body, for
   header and TU, missing closers as clang (PLAN-diag.md D2.2); left: parameter
-  lists (`int f(int a, int b { }` leaves `f` undeclared), `f(a; )`, broken
+  lists: `f(a; )` (clang's "unexpected ';' before ')'"), broken
   attributes, the remaining `fatal()` sites one by one; mutants with more
-  follow-on errors than clang 6.7 % (goal 5 %).
+  follow-on errors than clang 4.8 % (goal 5 % reached).
   *Validate:* `tests/diag/` cases with several independent errors, exact
   clang output (`vcc-diag.py`).
 - [ ] **Clang warns, vcc errors** (`bench/vcc-mutate.py show spurious`):

@@ -395,7 +395,10 @@ VPRIV bool need_lvalue(cc *c, uint32_t n, uint32_t loc)
 	pp_span r = rng(c, n);
 
 	if (!(N(n)->flags & NF_LVALUE)) {
-		report(c, "error", loc, &r, 1, NULL, 0, "expression is not assignable");
+		if (KIND(c, N(n)->ty) == TY_FUNC)
+			report(c, "error", loc, &r, 1, NULL, 0, "non-object type '%s' is not assignable", tyname(c, N(n)->ty));
+		else
+			report(c, "error", loc, &r, 1, NULL, 0, "expression is not assignable");
 		return false;
 	}
 	if (QQ(N(n)->ty) & Q_CONST) {

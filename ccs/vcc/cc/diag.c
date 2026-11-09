@@ -208,6 +208,18 @@ VPRIV void rec_restore(cc *c, recov *r, int mode)
 	c->switch_cases = r->switch_cases, c->switch_ty = r->switch_ty;
 	c->sw_default = r->sw_default, c->has_pend = r->has_pend, c->for_head = r->for_head;
 	c->rec = r;
+	if (c->decl_name && c->decl_depth == c->depth && !c->in_struct) {
+		/* clang: a declaration that failed after its name still declares it, invalid,
+		   so its uses say nothing more */
+		uint32_t s = lookup(c, c->decl_name);
+
+		if (!s || c->syms[s].depth != c->depth) {
+			s = sym_new(c, S_VAR, c->decl_name, prim(TY_INT), c->decl_loc);
+			c->syms[s].flags |= SF_INVALID;
+			sym_bind(c, s);
+		}
+	}
+	c->decl_name = 0;
 	dc_kill(c);	/* no declaration snapshots after an error */
 	if (tok(c)->loc == r->again) {	/* no progress since the last one: past this token */
 		if (is(c, T_EOF))

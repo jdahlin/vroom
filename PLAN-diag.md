@@ -243,8 +243,25 @@ Tio lager; varje steg nedan säger vilka det berör.
   2323 → 3006 (clang 3518); spurious 20 → 17; inga krascher.  `tests/diag/recovery.c`: tolv
   oberoende fel, exakt clangs utdata.  Prestanda: fe +0,62 % mot merge-basen (nyckelords-
   korrigeringens ParseImplicitInt-test flyttat till loopens utgång: −0,22 %).
-  Kvar: parameterlistor (`int f(int a, int b { }` deklarerar inte `f`), `f(a; )` (clangs
-  "unexpected ';' before ')'"), avbrutna attribut, de 46 `fatal()` ett och ett, målet ≤ 5 %.
+
+  *Status (steg 2, målet nått):* fler följdfel än clang 6,7 → 4,8 %, samma 79,4 → 82,3 %,
+  första felet på clangs plats 91,7 → 93,2 % (annanstans 3,2 → 1,9 %).  Det som tog dit:
+  en deklaration som felar efter sitt namn deklarerar det ändå, ogiltigt (en platshållare
+  som en senare deklaration ersätter tyst); en parameterlista utan `)` lämnar funktionen
+  deklarerad men ogiltig, och anrop av en ogiltig deklaration är tysta; `'void' must be the
+  first and only parameter` först när listan är parsad (som clang); ogiltiga specificerare
+  (`signed double`, `void long`, `'long struct' is invalid` efter en tagg) gör deklarationen
+  ogiltig, och ett bitfält eller en cast av ogiltig typ säger inget mer; för många/få
+  argument avbryter anropet (argumenten konverteras inte), liksom en tilldelning till ett
+  icke-lvärde (clangs "non-object type 'T' is not assignable" för funktioner); kommat
+  sprider felnoder; en ogiltig `return`-operand hoppas tyst till `;`; en saknad `;` efter en
+  prototyp före en ny deklaration är "after top level declarator", inte "expected function
+  body"; ett makroanrop som når filens slut tas bort med sitt namn, som i clang (`clang -E`
+  likadan).  `tests/diag/recovery_decl.c` nytt.  Prestanda: fe +0,89 % mot merge-basen
+  (preprocessorns felväg i en kall funktion: utan den kostade sex rader +0,27 % pp).
+  Kvar: `f(a; )` (clangs "unexpected ';' before ')'"), avbrutna attribut, clangs
+  parentes-socker i typnamn (`double (*())`), "expected ';' after struct" när en
+  typspecificerare följer en definition, de 46 `fatal()` ett och ett.
 - **D2.3 dubbletter** (`void v;`, sammansatt literal i parentes, typförslag som kaskaderar:
   TODO.md "Error recovery").
   *Validera:* lager 3: inga krascher, första felet på clangs plats i ≥ 95 %, följdfel

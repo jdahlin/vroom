@@ -336,6 +336,8 @@ static uint32_t declare(cc *c, const dspec *ds, declr *d, qty t, bool file)
 			return head;
 		}
 	}
+	if (prev && unlikely(c->syms[prev].flags & SF_INVALID) && c->syms[prev].kind != kind)
+		prev = 0;	/* a placeholder left by parser recovery (rec_restore): replaced */
 	if (prev) {
 		sym *y = &c->syms[prev];
 
@@ -710,7 +712,8 @@ VPRIV void declaration(cc *c, vec *out, bool file)
 			return;
 		}
 		if (unlikely(file && d.has_func) && is_func(c, t) && !is(c, T_SEMI) && !is(c, T_COMMA) &&
-		    !is(c, T_EQUAL) && !at_asm(c) && !iskw(c, KW___attribute__) && !iskw(c, KW___attribute)) {
+		    !is(c, T_EQUAL) && !at_asm(c) && !iskw(c, KW___attribute__) && !iskw(c, KW___attribute) &&
+		    !is_decl_start(c, tok(c))) {	/* a declaration next: the ';' is missing (decl_semi) */
 			/* clang: "int f(int x) return x; }": the '{' is missing */
 			cc_error(c, tok(c)->loc, "expected function body after function declarator");
 			skip_stmt(c, true);

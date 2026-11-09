@@ -118,10 +118,14 @@ __attribute__((noinline)) VPRIV void struct_body(cc *c, uint32_t ti)
 
 				const_expr(c, &w, &wn);
 				wr = wn ? rng(c, wn) : (pp_span){ d.loc, d.loc };
-				if (!is_integer(c, t))
+				if (!complete(c, t))
+					;	/* clang: only "field has incomplete type", below */
+				else if (!is_integer(c, t))
 					report(c, "error", d.loc, &wr, 1, NULL, 0, "bit-field '%.*s' has non-integral type '%s'", IDF(d.name),
 					       tyname(c, t));
-				if (w < 0)
+				if (!complete(c, t))
+					w = 0;
+				else if (w < 0)
 					cc_error(c, d.loc, "bit-field '%.*s' has negative width (%lld)", IDF(d.name), (long long)w), w = 0;
 				else if ((uint64_t)w > ty_size(c, t) * 8)
 					cc_error(c, d.loc, "width of bit-field '%.*s' (%lld bits) exceeds the width of its type (%llu bits)",
@@ -143,7 +147,7 @@ __attribute__((noinline)) VPRIV void struct_body(cc *c, uint32_t ti)
 			f.counted_by = d.at.counted_by;
 			if (is_func(c, t))
 				cc_error(c, d.loc, "field '%.*s' declared as a function", IDF(d.name));
-			else if (!complete(c, t) && !(is_array(c, t) && (T(c, t)->flags & TF_INCOMPLETE))) {
+			else if (!ds.invalid && !complete(c, t) && !(is_array(c, t) && (T(c, t)->flags & TF_INCOMPLETE))) {
 				cc_error(c, d.loc, "field has incomplete type '%s'", tyname(c, t));
 				fwd_note(c, t);
 				f.invalid = 1;

@@ -5,10 +5,12 @@ enum { DQ_ATOMIC = 8 };	/* dop.q: _Atomic on a pointer (beside Q_*) */
 
 /* ---------------- declarators ---------------- */
 
-static void param_list(cc *c, dop *op)
+/* false when the list did not end in its ')' (the declaration is invalid, clang) */
+static bool param_list(cc *c, dop *op)
 {
 	vec ptys, psyms;
 	int fl = 0;
+	uint32_t open = c->prevloc, voidat = 0;	/* the '('; a 'void' that is not alone (clang: after the list) */
 
 	vinit(&ptys);
 	vinit(&psyms);
@@ -90,14 +92,14 @@ static void param_list(cc *c, dop *op)
 			} else if (pk == TY_FUNC) {
 				t = ty_ptr(c, t);
 			} else if (unlikely(pk == TY_VOID)) {
-				if (!d.name && !ptys.n && is(c, T_RPAREN) && !QQ(t))
-					break;	/* "(void void)" after its error: still no parameters */
+				if (!d.name && !ptys.n && !is(c, T_COMMA) && !QQ(t))
+					break;	/* "(void void)" after its error, "(void;": still no parameters */
 				/* "(int a, void)", "(void x)": clang's errors (where the name would be);
 				   the parameter is invalid */
 				if (d.name)
 					cc_error(c, d.loc, "argument may not have 'void' type");
-				else
-					cc_error(c, tok(c)->loc, "'void' must be the first and only parameter if specified");
+				else if (!voidat)
+					voidat = tok(c)->loc;
 				ds.invalid = true;
 			}
 			vpush(c, &ptys, t);
@@ -111,8 +113,12 @@ static void param_list(cc *c, dop *op)
 				break;
 		}
 	}
+	if (unlikely(voidat))	/* the list parsed: "(int, void)", "(void, int)" */
+		cc_error(c, voidat, "'void' must be the first and only parameter if specified");
 	scope_close(c);
-	expect(c, T_RPAREN, "')'");
+	bool ok = is(c, T_RPAREN);
+
+	expect_match(c, T_RPAREN, open);
 	op->kind = 2;
 	op->fl = (uint16_t)fl;
 	op->a = vfreeze(c, &ptys);
@@ -120,6 +126,7 @@ static void param_list(cc *c, dop *op)
 	op->np = psyms.n;
 	/* the parameter syms follow the types */
 	vfreeze(c, &psyms);
+	return ok;
 }
 
 static void array_suffix(cc *c, dop *op, uint32_t name)
@@ -260,10 +267,12 @@ VPRIV void declarator(cc *c, declr *d, bool abstract_ok, uint32_t *first, uint32
 		break;
 	}
 	if (is(c, T_LPAREN) && nested_declarator(c, abstract_ok)) {
+		uint32_t plb0 = tok(c)->loc;
+
 		next(c);
 		attribute_list(c, &d->at);
 		declarator(c, &id, abstract_ok, &ifirst, &inops);
-		expect(c, T_RPAREN, "')'");
+		expect_match(c, T_RPAREN, plb0);
 		d->name = id.name;
 		d->loc = id.loc;
 		merge_attrs(&d->at, &id.at);
@@ -275,6 +284,8 @@ VPRIV void declarator(cc *c, declr *d, bool abstract_ok, uint32_t *first, uint32
 	} else if (is(c, T_IDENT) && !kwof(tok(c))) {
 		d->name = tok(c)->id;
 		d->loc = tok(c)->loc;
+		if (!abstract_ok)	/* an error before the declaration ends declares it, invalid (rec_restore) */
+			c->decl_name = d->name, c->decl_loc = d->loc, c->decl_depth = c->depth;
 		next(c);
 	} else if (!abstract_ok) {
 		fatal(c, tok(c)->loc, c->in_struct ? "expected member name or ';' after declaration specifiers" :
@@ -293,7 +304,8 @@ VPRIV void declarator(cc *c, declr *d, bool abstract_ok, uint32_t *first, uint32
 			plb = tok(c)->loc;
 			if (ns >= 64)
 				fatal(c, tok(c)->loc, "declarator too complex");
-			param_list(c, &sufs[ns]);
+			if (unlikely(!param_list(c, &sufs[ns])))
+				d->invalid = true;
 			/* the innermost function declarator next to the name gives the parameters */
 			if (!inner && !d->has_func && ns == 0) {
 				d->psyms = sufs[ns].a + sufs[ns].b;

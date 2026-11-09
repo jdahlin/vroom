@@ -649,7 +649,10 @@ VPRIV uint32_t statement(cc *c)
 			report(c, "error", loc, NULL, 0, NULL, 0, "non-void function '%.*s' should return a value [-Wreturn-mismatch]",
 			       IDF(c->syms[c->fn].name));
 		}
-		expect_semi(c, "after return statement");
+		if (unlikely(e && ISERR(e)) && !is(c, T_SEMI))
+			skip_semi(c);	/* clang: after an invalid expression, silently */
+		else
+			expect_semi(c, "after return statement");
 		return mkstmt(c, N_RETURN, loc, e, 0, 0);
 	}
 	case KW_goto:

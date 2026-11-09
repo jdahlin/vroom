@@ -332,9 +332,12 @@ static __attribute__((noinline)) uint32_t cast_paren(cc *c, uint32_t loc)
 {
 	{
 		uint32_t n;
+		int e0 = c->errors;
 		qty ty;
+		bool bad;
 
 		ty = type_name(c);
+		bad = c->errors != e0;	/* the type had its error: clang's invalid cast, silent */
 		expect(c, T_RPAREN, "')'");
 		if (is(c, T_LBRACE)) {	/* compound literal */
 			uint32_t init, s;
@@ -351,6 +354,8 @@ static __attribute__((noinline)) uint32_t cast_paren(cc *c, uint32_t loc)
 			return postfix(c, n);
 		}
 		n = cast_expr(c);
+		if (unlikely(bad))
+			return err_node(c, loc);
 		return explicit_cast(c, n, ty, loc);
 	}
 }
@@ -566,6 +571,10 @@ static __attribute__((noinline)) uint32_t comma_rest(cc *c, uint32_t l)
 
 		next(c);
 		r = assign_expr(c);
+		if (unlikely(ISERR(l) || ISERR(r))) {
+			l = err_node(c, loc);
+			continue;
+		}
 		l = mk2(c, N_COMMA, QUNQ(N(decay(c, r))->ty), loc, l, decay(c, r));
 	}
 	return l;

@@ -170,6 +170,7 @@ static bool collect_(pp *p, const pmacro *m, const ptok *name, margs *a, ptok *r
 		if (unlikely(t.kind == T_EOF)) {
 			error(p, name->loc, "unterminated function-like macro invocation");
 			p->svn = base;
+			*rp = t;	/* the end of the file: clang drops the invocation, its name too */
 			return false;
 		}
 		if (t.kind == T_LPAREN) {
@@ -226,6 +227,14 @@ done:
 	a->base = base;
 	memset(a->prest, 0, slots);
 	return true;
+}
+
+/* collect failed: the name stays, as clang's; at the end of the file it is dropped */
+static __attribute__((noinline, cold)) int collect_failed(ptok *t, const ptok *rp)
+{
+	if (rp->kind == T_EOF)
+		*t = *rp;
+	return 1;
 }
 
 static bool collect(pp *p, const pmacro *m, const ptok *name, margs *a, ptok *rp)
@@ -943,7 +952,7 @@ VPRIV int expand(pp *p, const pmacro *m, ptok *t)
 		return 2;
 	}
 	if (!collect(p, m, t, &a, &rp))
-		return 1;
+		return collect_failed(t, &rp);
 	if (!m->nbody) {
 		p->svn = a.base;
 		p->pend |= nf;

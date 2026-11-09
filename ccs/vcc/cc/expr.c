@@ -89,7 +89,8 @@ VPRIV uint32_t assign(cc *c, int op, uint32_t l, uint32_t r, uint32_t loc)
 	qty lt = QUNQ(N(l)->ty);
 	uint32_t n;
 
-	need_lvalue(c, l, loc);
+	if (unlikely(!need_lvalue(c, l, loc)))
+		return err_node(c, loc);	/* clang: the assignment is invalid */
 	bounds_warn(c, l, false);
 	r = decay(c, r);
 	if (op && (is_complex(c, lt) || is_complex(c, N(r)->ty)))	/* l = l op r (l evaluated twice) */
@@ -695,6 +696,11 @@ static __attribute__((noinline)) uint32_t call(cc *c, uint32_t fn, uint32_t loc)
 			c->syms[s].flags |= SF_USED;
 		c->syms[s].flags |= SF_REF;
 	}
+	if (unlikely(ISERR(fn))) {	/* an invalid declaration (or expression): silent */
+		if (!have_args)
+			args_list(c, &args);
+		return err_node(c, loc);
+	}
 	fn = rvalue(c, fn);
 	callee = fn;
 	ft = N(fn)->ty;
@@ -755,6 +761,7 @@ static __attribute__((noinline)) uint32_t call(cc *c, uint32_t fn, uint32_t loc)
 				}
 				report(c, "note", y->loc, &pr, t && len ? 1 : 0, NULL, 0, "'%.*s' declared here", IDF(y->name));
 			}
+			return err_node(c, loc);	/* clang: the arguments are not converted */
 		}
 	}
 	for (uint32_t i = 0; i < args.n; i++) {
@@ -841,8 +848,8 @@ static __attribute__((noinline, cold)) uint32_t postfix_err(cc *c, uint32_t n)
 		case T_PLUSPLUS: case T_MINUSMINUS:
 			next(c);
 			break;
-		default:
-			return n;
+		default:	/* an error node of no type a conversion would look at (decay drops the flag) */
+			return err_node(c, N(n)->loc);
 		}
 	}
 }

@@ -218,7 +218,7 @@ static bool after_declarator_id(const ptok *t)
    unsigned", "'long struct' is invalid"; returns WS_SGN / WS_LONG for what to drop
    (on as the type without them).  No pointers: sgn and nlong stay in registers */
 enum { WS_SGN = 1, WS_LONG = 2 };
-static __attribute__((noinline, cold)) int bad_width_sign(cc *c, int sgn, int nlong, int kw, const dspec *ds)
+static __attribute__((noinline, cold)) int bad_width_sign(cc *c, int sgn, int nlong, int kw, dspec *ds)
 {
 	int r = 0;
 
@@ -230,12 +230,13 @@ static __attribute__((noinline, cold)) int bad_width_sign(cc *c, int sgn, int nl
 		cc_error(c, ds->longloc, "'%s%.*s' is invalid", nlong > 1 ? "long long " : "long ", IDF(kw));
 		r |= WS_LONG;
 	}
+	ds->invalid |= r != 0;	/* clang: an invalid type, the declaration is invalid */
 	return r;
 }
 
 /* signed/unsigned or long (lng) after the base type specifier base: clang's errors;
    true if it is dropped */
-static __attribute__((noinline, cold)) bool late_width_sign(cc *c, int base, int nlong, bool lng, uint32_t loc)
+static __attribute__((noinline, cold)) bool late_width_sign(cc *c, int base, int nlong, bool lng, uint32_t loc, dspec *ds)
 {
 	if (lng) {
 		if (base == KW_int || (base == KW_double && !nlong))
@@ -243,13 +244,29 @@ static __attribute__((noinline, cold)) bool late_width_sign(cc *c, int base, int
 		if (base == KW_short)
 			cc_error(c, loc, "cannot combine with previous 'short' declaration specifier");
 		else
-			cc_error(c, loc, "'long %.*s' is invalid", IDF(base));
+			cc_error(c, loc, "'long %.*s' is invalid", IDF(base)), ds->invalid = true;
 		return true;
 	}
 	if (base == KW_int || base == KW_char || base == KW_short || base == KW___int128)
 		return false;
 	cc_error(c, loc, "'%.*s' cannot be signed or unsigned", IDF(base));
+	ds->invalid = true;
 	return true;
+}
+
+/* long/short/signed/unsigned after a struct, union or enum specifier: clang's error,
+   the word dropped, the declaration invalid */
+static __attribute__((noinline, cold)) void tag_width(cc *c, dspec *ds, int kw)
+{
+	int k = KIND(c, QT(c->tags[ds->tagdecl].ty, 0));
+	const char *tn = k == TY_ENUM ? "enum" : k == TY_UNION ? "union" : "struct";
+
+	if (kw == KW_long || kw == KW_short)
+		cc_error(c, tok(c)->loc, "'%.*s %s' is invalid", IDF(kw), tn);
+	else
+		cc_error(c, tok(c)->loc, "'%s' cannot be signed or unsigned", tn);
+	ds->invalid = true;
+	next(c);
 }
 
 /* a second base type specifier kw after base (or short after long): clang's errors;
@@ -455,27 +472,42 @@ again:
 			any = true;
 			break;
 		case KW_long:
-			if (have_named)
+			if (have_named) {
+				if (unlikely(ds->tagdecl) && !base) {
+					tag_width(c, ds, kw);
+					continue;
+				}
 				goto done;
-			if (unlikely(base) && late_width_sign(c, base, nlong, true, t->loc))
+			}
+			if (unlikely(base) && late_width_sign(c, base, nlong, true, t->loc, ds))
 				break;
 			if (!nlong++)
 				ds->longloc = t->loc;
 			any = true;
 			break;
 		case KW_signed: case KW___signed__: case KW___signed:
-			if (have_named)
+			if (have_named) {
+				if (unlikely(ds->tagdecl) && !base) {
+					tag_width(c, ds, kw);
+					continue;
+				}
 				goto done;
-			if (unlikely(base) && late_width_sign(c, base, nlong, false, t->loc))
+			}
+			if (unlikely(base) && late_width_sign(c, base, nlong, false, t->loc, ds))
 				break;
 			ds->sgnloc = t->loc;
 			sgn = 1;
 			any = true;
 			break;
 		case KW_unsigned:
-			if (have_named)
+			if (have_named) {
+				if (unlikely(ds->tagdecl) && !base) {
+					tag_width(c, ds, kw);
+					continue;
+				}
 				goto done;
-			if (unlikely(base) && late_width_sign(c, base, nlong, false, t->loc))
+			}
+			if (unlikely(base) && late_width_sign(c, base, nlong, false, t->loc, ds))
 				break;
 			ds->sgnloc = t->loc;
 			sgn = -1;
