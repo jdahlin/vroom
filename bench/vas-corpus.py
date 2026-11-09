@@ -23,7 +23,8 @@ def one(job):
         s, c, v = f'{t}/a.s', f'{t}/c.o', f'{t}/v.o'
         if subprocess.run([CL, '--target=aarch64-linux-gnu', *opt.split(), '-w', '-S', f, '-o', s], capture_output=True).returncode:
             return ('skip', f, opt, '')
-        if subprocess.run([CL, '--target=aarch64-linux-gnu', '-c', s, '-o', c], capture_output=True).returncode:
+        march = [o for o in opt.split() if o.startswith(('-march=', '-mcpu='))]	# the .s has no .arch
+        if subprocess.run([CL, '--target=aarch64-linux-gnu', *march, '-c', s, '-o', c], capture_output=True).returncode:
             return ('skip', f, opt, '')
         q = subprocess.run([VAS, s, '-o', v], capture_output=True, text=True)
         if q.returncode:

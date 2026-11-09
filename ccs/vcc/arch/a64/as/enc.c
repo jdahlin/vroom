@@ -2639,7 +2639,9 @@ static const Vf vtab[] = {	/* sorted by name */
 	{ "shrn", VS_SHRN, 0, 0x0f008400, 0, 0 },
 	{ "shrn2", VS_SHRN, 0, 0x4f008400, 0, 0 },
 	{ "smax", VS_SAME, VF_NO2D, 0x0e206400, 0, 0 },
+	{ "smaxp", VS_SAME, VF_NO2D, 0x0e20a400, 0, 0 },
 	{ "smin", VS_SAME, VF_NO2D, 0x0e206c00, 0, 0 },
+	{ "sminp", VS_SAME, VF_NO2D, 0x0e20ac00, 0, 0 },
 	{ "smlal", VS_LONG, 0, 0x0e208000, 0, 0 },
 	{ "smlal2", VS_LONG, 0, 0x4e208000, 0, 0 },
 	{ "smlsl", VS_LONG, 0, 0x0e20a000, 0, 0 },
@@ -2669,6 +2671,8 @@ static const Vf vtab[] = {	/* sorted by name */
 	{ "uaddw", VS_LONG, VF_WIDE, 0x2e201000, 0, 0 },
 	{ "uaddw2", VS_LONG, VF_WIDE, 0x6e201000, 0, 0 },
 	{ "ucvtf", VS_FMISC, 0, 0x2e21d800, 0, 0 },
+	{ "umaxp", VS_SAME, VF_NO2D, 0x2e20a400, 0, 0 },
+	{ "uminp", VS_SAME, VF_NO2D, 0x2e20ac00, 0, 0 },
 	{ "umlal", VS_LONG, 0, 0x2e208000, 0, 0 },
 	{ "umlal2", VS_LONG, 0, 0x6e208000, 0, 0 },
 	{ "umlsl", VS_LONG, 0, 0x2e20a000, 0, 0 },
@@ -2816,6 +2820,8 @@ static int k_simd(Ctx *c, const Vf *v)
 
 /* ---------------------------------------------------------------- dispatch */
 
+#include "sve.inc"
+
 int a64_asm(const char *mn, size_t n, const A64Op *op, int nop, uint32_t *out, A64Fix *fix, const char **err)
 {
 	Ctx c = { op, nop, out, fix, err, mn };
@@ -2835,6 +2841,17 @@ int a64_asm(const char *mn, size_t n, const A64Op *op, int nop, uint32_t *out, A
 		int r;
 		if (k_atomic(&c, mn, n, &r)) return r;
 		if (k_lsui(&c, mn, n, &r)) return r;
+	}
+	if (sve_insn(mn, n, op, nop)) { int r = k_sve(&c, mn, n); if (r != 1) return r; }
+	if (nop == 3 && op[0].kind == A64O_VREG && n >= 4 && !memcmp(mn + n - 3, "dot", 3) &&
+	    (n == 4 ? mn[0] == 's' || mn[0] == 'u' : n == 5 && !memcmp(mn, "usdot", 5))) {
+		/* sdot/udot/usdot Vd.2s|4s, Vn.8b|16b, Vm.8b|16b */
+		int q = op[0].arr == A64_4S;
+		if (!(q || op[0].arr == A64_2S) || op[1].kind != A64O_VREG || op[2].kind != A64O_VREG ||
+		    op[1].arr != (q ? A64_16B : A64_8B) || op[2].arr != op[1].arr) { *err = "invalid operand for instruction"; return -1; }
+		uint32_t b = n == 5 ? 0x0e809c00u : mn[0] == 'u' ? 0x2e809400u : 0x0e809400u;
+		*out = b | (uint32_t)q << 30 | (uint32_t)op[2].reg << 16 | (uint32_t)op[1].reg << 5 | op[0].reg;
+		return 0;
 	}
 	if (nop && op[0].kind == A64O_VREG) {
 		const Vf *v = vlookup(mn, n);

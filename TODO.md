@@ -66,7 +66,7 @@ Existing gates that every change must keep green: `vcc-diff.py cmp`
   `llvm-readelf -r -S -s` / `llvm-objdump -d`.  For PIC, TLS, CFI, DWARF,
   section groups, branch ranges — things that are about the object, not
   runtime output.
-- [ ] **T7 `as` corpus: compiler-generated assembly.** (started: `bench/vas-corpus.py`: clang -S -O0/-O2 of every test C file, clang -c vs vasm byte for byte: 3035/3035 identical on 2026-11-09, `-g` and `-O2 -fPIC` too.  Next:, `-march=armv9-a+sve2`.)  `tests/as/*.c` →
+- [ ] **T7 `as` corpus: compiler-generated assembly.** (started: `bench/vas-corpus.py`: clang -S -O0/-O2 of every test C file, clang -c vs vasm byte for byte: 3035/3035 identical on 2026-11-09, `-g`, `-O2 -fPIC`, `-O3`, `-O3 -march=armv8.6-a+...` and `-O3 -march=armv9-a+sve2` too.)  `tests/as/*.c` →
   `clang --target=aarch64-linux-gnu -O2 -S` (and `-g`, `-fPIC`, `-march=armv8.5-a+sve2`)
   → assemble with `vasm` and with clang, compare objects with
   `bench/vas-diff.py` (sections, symbols, relocations, bytes).  Plus
@@ -744,8 +744,16 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
   csync, wfet/wfit, chkfeat, sysl, prfum, ldapur*/stlur*, irg/gmi/addg/subg/
   subp(s)/cmpp/stgp; `ccs/vcc/tests/vas/pac-hint.s`, `bench/vas-enc.py`
   vs llvm-mc.)
-- [ ] **SVE/SVE2/SME** (operand parser for `z`/`p` registers first) [P].
-  *Validate:* T7 tables; T7 `-march=armv9-a+sve2` corpus.
+- [ ] **SVE/SVE2/SME** [P].  Done (`arch/a64/as/sve.inc`): `p/z`, `p/m`,
+  Z lists, patterns, `mul #n`; the forms clang generates: predicated and
+  unpredicated integer arithmetic, shifts, logic and immediates (dup/dupm/
+  cpy/`mov` aliases), compares, predicate logic and permutes, ptrue/ptest/
+  while*, cnt/inc/dec, addvl/addpl, index, reductions, last[ab], int<->fp
+  converts, ld1/ld1r/ldN/st1/stN contiguous (scalar+imm, scalar+scalar),
+  SVE2 xar/eor3/bcax/bsl/usra.  Left: FP arithmetic, gathers/scatters,
+  first-fault/non-temporal loads, by-element forms, SME.  *Validated:*
+  `ccs/vcc/tests/vas/sve.s` vs llvm-mc; T7 `-O "3 -march=armv9-a+sve2"`
+  1519/1519.
 - [ ] **Directives**: left: `.arch`/`.cpu` gating instructions (T4).
   (`.eqv`, `.nops`, `.inst.n` are GNU-only: clang rejects them.)
   *Validate:* `bench/vas-obj.py` (`ccs/vcc/tests/vas-obj/`: clang -c and

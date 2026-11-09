@@ -407,8 +407,8 @@ VPRIV int instruction(As *a, const char *p, const char *e, size_t wn)
 				const char *t = p;
 				while (p < e && isidc((unsigned char)*p)) p++;
 				A64Op r;
-				if (!parse_reg(a, t, (size_t)(p - t), &r, 0) || r.kind != A64O_VREG) return err(a, "vector register expected");
-				if (first) { op->reg = r.reg; op->arr = r.arr; op->cls = A64_V; op->nregs = 1; first = 0; }
+				if (!parse_reg(a, t, (size_t)(p - t), &r, 0) || !(r.kind == A64O_VREG || (r.kind == A64O_REG && r.cls == A64_Z && r.arr))) return err(a, "vector register expected");
+				if (first) { op->reg = r.reg; op->arr = r.arr; op->cls = r.kind == A64O_REG ? A64_Z : A64_V; op->nregs = 1; first = 0; }
 				else op->nregs++;
 				p = ws(p, e);
 				if (p < e && *p == '-') {
@@ -416,7 +416,7 @@ VPRIV int instruction(As *a, const char *p, const char *e, size_t wn)
 					t = p;
 					while (p < e && isidc((unsigned char)*p)) p++;
 					A64Op r2;
-					if (!parse_reg(a, t, (size_t)(p - t), &r2, 0) || r2.kind != A64O_VREG) return err(a, "vector register expected");
+					if (!parse_reg(a, t, (size_t)(p - t), &r2, 0) || r2.kind != (op->cls == A64_Z ? A64O_REG : A64O_VREG)) return err(a, "vector register expected");
 					op->nregs = (uint8_t)(((r2.reg - op->reg) & 31) + 1);
 					p = ws(p, e);
 				}
@@ -451,6 +451,9 @@ VPRIV int instruction(As *a, const char *p, const char *e, size_t wn)
 				if (parse_imm(a, &p, e, op)) return -1;
 			} else if (op->kind) {
 				if (op->kind == A64O_REG && q < e && *q == '!') { op->wb = 1; p = q + 1; }
+				else if (op->kind == A64O_REG && op->cls == A64_P && q + 1 < e && *q == '/' && ((q[1] | 32) == 'z' || (q[1] | 32) == 'm')) {
+					op->pq = (q[1] | 32) == 'z' ? 1 : 2; p = q + 2;
+				}
 				else if (op->kind == A64O_VREG && q < e && *q == '[') {
 					int64_t ix;
 					q++;
@@ -469,7 +472,12 @@ VPRIV int instruction(As *a, const char *p, const char *e, size_t wn)
 					if (abs_expr(a, &p, e, &amt)) return -1;
 					op->imm = amt; op->hasamt = 1;
 				}
-			} else if (names && (q >= e || *q == ',')) {
+			} else if (tn == 3 && sveqi(t, 3, "mul") && q < e && *q == '#') {	/* SVE: mul #imm */
+				int64_t amt;
+				p = q + 1;
+				if (abs_expr(a, &p, e, &amt)) return -1;
+				op->kind = A64O_SHIFT; op->shift = A64_MUL; op->imm = amt; op->hasamt = 1;
+			} else if ((names || (nop >= 2 && a64_svepat(t, tn) >= 0)) && (q >= e || *q == ',')) {
 				op->kind = A64O_NAME; op->name = t; op->nlen = (uint32_t)tn;
 			} else {
 				p = t;

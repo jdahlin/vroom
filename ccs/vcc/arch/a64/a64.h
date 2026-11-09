@@ -27,7 +27,8 @@ enum { A64_ARR_NONE, A64_8B, A64_16B, A64_4H, A64_8H, A64_2S, A64_4S, A64_1D, A6
 
 /* shifts / extends (A64Op.shift) */
 enum { A64_LSL, A64_LSR, A64_ASR, A64_ROR, A64_MSL,
-       A64_UXTB, A64_UXTH, A64_UXTW, A64_UXTX, A64_SXTB, A64_SXTH, A64_SXTW, A64_SXTX };
+       A64_UXTB, A64_UXTH, A64_UXTW, A64_UXTX, A64_SXTB, A64_SXTH, A64_SXTW, A64_SXTX,
+       A64_MUL /* SVE: mul #imm */ };
 
 /* condition codes */
 enum { A64_EQ, A64_NE, A64_HS, A64_LO, A64_MI, A64_PL, A64_VS, A64_VC,
@@ -74,6 +75,7 @@ typedef struct {
 	uint8_t hash;		/* IMM: written with '#' */
 	uint8_t wb;		/* REG: followed by '!' (MOPS) */
 	uint8_t mulvl;		/* MEM: offset followed by ', mul vl' (SVE) */
+	uint8_t pq;		/* REG P: /z = 1, /m = 2 (SVE predication) */
 	int64_t imm;		/* IMM value, MEM offset, SHIFT amount */
 	double fimm;		/* FIMM */
 	ElfVal v;		/* symbolic part (v.c holds the constant part) */
@@ -85,6 +87,8 @@ typedef struct { uint32_t type; ElfVal v; } A64Fix;	/* type 0 = no fixup */
 
 /* Assemble one instruction.  Returns 0 and sets *out (and *fix) or returns
  * -1 with *err pointing at a static message. */
+/* SVE predicate pattern (pow2, vl1 ... all) -> its number, else -1 */
+int a64_svepat(const char *s, size_t n);
 int a64_asm(const char *mn, size_t mnlen, const A64Op *op, int nop,
 	    uint32_t *out, A64Fix *fix, const char **err);
 

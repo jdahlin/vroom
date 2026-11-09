@@ -143,3 +143,10 @@ ldpsw x0, x1, [x2]
 ldpsw x0, x1, [sp, #-256]
 ldpsw x0, x1, [x2, #8]!
 ldpsw x3, x4, [x5], #252
+	smaxp v0.2s, v1.2s, v2.2s
+	sminp v0.16b, v1.16b, v2.16b
+	umaxp v0.8h, v1.8h, v2.8h
+	uminp v0.4s, v1.4s, v2.4s
+	udot v1.4s, v2.16b, v0.16b
+	sdot v1.2s, v2.8b, v0.8b
+	usdot v1.4s, v2.16b, v3.16b
