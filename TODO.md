@@ -288,7 +288,10 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
   `[0] = side(), [0] = side()` evaluates both.
   *Validate:* T1 `desig_override.c`, static and automatic variants, with
   side-effect counters (clang's behaviour is the oracle).
-- [ ] **Header/snapshot cache keys incomplete** [R].  `opt_sig`
+- [x] **Header/snapshot cache keys incomplete** [R].  *Done:* `opt_sig` hashes every
+  `cc_opts` field before `outfd` (cc.h says parse options go there) plus emit;
+  `sig_of` adds wargs and error_limit; `bench/vcc-cachekey.py` 6/6 (the decl
+  cache rows need bigger headers to reach a restore).  Was:  `opt_sig`
   `ccsnap.c:356` misses `-std`, `-fgnu89-inline`, `-finstrument-functions`,
   implicit-int/function flags; `sig_of` `pp.c:1518` misses `-W`/`-Werror`.
   Derive both keys from one struct of all parse-affecting options so a new
