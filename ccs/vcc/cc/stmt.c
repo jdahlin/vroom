@@ -255,6 +255,33 @@ static bool stmt_kw_typo(cc *c, bool decls)
 	return true;
 }
 
+/* "size_t n = 1;", "FILE *fp;" with the type's header missing: clang reports the
+   undeclared identifier and then each declarator's uses; vcc parses a declaration of an
+   invalid type, so the uses say nothing more.  Only where an expression cannot go on
+   (a name after a name), or "T *p" with T a standard type (cc/libnames.inc) */
+static __attribute__((cold, noinline)) bool undeclared_type_decl(cc *c, vec *items)
+{
+	const ptok *t = tok(c);
+	int i = 1, k;
+
+	if (lookup(c, t->id) || (t->flags & PF_MACRO))
+		return false;
+	if (peek(c, 1)->kind == T_STAR) {
+		if (!lib_header(c, t->id))
+			return false;
+		i = 2;
+	}
+	if (peek(c, i)->kind != T_IDENT || kwof(peek(c, i)))
+		return false;
+	k = peek(c, i + 1)->kind;
+	if (k != T_EQUAL && k != T_SEMI && k != T_COMMA && k != T_LSQUARE)
+		return false;
+	c->undecl_ty = 1;
+	declaration(c, items, false);
+	c->undecl_ty = 0;
+	return true;
+}
+
 /* the ';' after a part (e) of a for header; clang when it is missing: reported
    (unless e was invalid), then the rest of the part skipped up to a ';' or the ')' */
 static void for_semi(cc *c, uint32_t e)
@@ -298,6 +325,9 @@ static void block_item(cc *c, uint32_t loc, vec *items)
 		declaration(c, items, false);
 		return;
 	}
+	if (is(c, T_IDENT) && !kwof(tok(c)) && (peek(c, 1)->kind == T_IDENT || peek(c, 1)->kind == T_STAR) &&
+	    undeclared_type_decl(c, items))
+		return;
 	vpush(c, items, statement(c));
 }
 

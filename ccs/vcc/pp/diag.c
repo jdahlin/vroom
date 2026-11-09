@@ -146,6 +146,46 @@ uint32_t pp_main_eof(const pp *p)
 	return e->base + (n && e->f->src[n - 1] == '\n' ? n - 1 : n);
 }
 
+/* where an #include for a diagnostic at loc goes: the start of the line after the last
+   #include before loc in loc's file, else the file's first line; UINT32_MAX: not in a file */
+uint32_t pp_include_point(const pp *p, uint32_t loc)
+{
+	const fent *e;
+	const char *s;
+	uint32_t end, at = 0, i = 0;
+
+	if (!loc_ok(p, loc, &e))
+		return UINT32_MAX;
+	s = e->f->src;
+	end = loc - e->base;
+	while (i < end) {
+		uint32_t j = i;
+
+		while (j < end && (s[j] == ' ' || s[j] == '\t'))
+			j++;
+		if (j < end && s[j] == '#') {
+			j++;
+			while (j < end && (s[j] == ' ' || s[j] == '\t'))
+				j++;
+			if (end - j > 7 && !memcmp(s + j, "include", 7)) {
+				const char *nl = memchr(s + j, '\n', end - j);
+
+				if (!nl)
+					break;
+				at = (uint32_t)(nl - s) + 1;
+			}
+		}
+		{
+			const char *nl = memchr(s + i, '\n', end - i);
+
+			if (!nl)
+				break;
+			i = (uint32_t)(nl - s) + 1;
+		}
+	}
+	return e->base + at;
+}
+
 int pp_wstate(const pp *p, const char *flag, bool on, const char *const *groups)
 {
 	bool err = false, allerr = false, noerr = false;
@@ -884,8 +924,12 @@ VPRIV bool render_head(pp *p, vbuf *b, const vdiag *d, const fent **ep)
 VPRIV void render_text(pp *p, vbuf *b, const vdiag *d)
 {
 	const fent *e;
+	/* clang (DiagnosticRenderer): no snippet again for a record at the previous one's
+	   location without ranges or fix-its, unless it follows a note and is no note */
+	bool same = d->loc + 1 == p->dlast1 && !d->nspan && !d->nfix && !(p->dlastlv == VDL_NOTE && d->level != VDL_NOTE);
 
-	if (render_head(p, b, d, &e))
+	p->dlast1 = d->loc + 1, p->dlastlv = d->level;
+	if (render_head(p, b, d, &e) && !same)
 		snippet(p, b, e, d);
 }
 

@@ -248,8 +248,22 @@ VPRIV uint32_t undeclared(cc *c, const char *msg, uint32_t id, uint32_t loc, boo
 			note(c, c->syms[s].loc, "'%s' declared here", fs);
 	} else {
 		/* clang: a caret alone under an unknown type name, a range under an undeclared identifier */
-		report(c, "error", loc, &r, types ? 0 : 1, NULL, 0, tn ? "unknown type name '%.*s'"
-		       : "use of undeclared identifier '%.*s'", IDF(id));
+		const char *h = lib_header(c, id);
+
+		if (h) {
+			vdiag *d;
+
+			error_limit(c), c->errors++, c->ndiag++;
+			d = pp_diag_begin(c->p, VDL_ERROR, loc, tn ? "unknown type name '%.*s'" : "use of undeclared identifier '%.*s'",
+					  IDF(id));
+			if (!tn)
+				pp_diag_label(c->p, d, r.b, r.e, NULL);
+			pp_diag_help(c->p, d, "'%.*s' is declared in <%s>", IDF(id), h);
+			include_fix(c, d, loc, h);
+			pp_diag_emit(c->p, d);
+		} else
+			report(c, "error", loc, &r, tn ? 0 : 1, NULL, 0, tn ? "unknown type name '%.*s'"
+			       : "use of undeclared identifier '%.*s'", IDF(id));
 	}
 	return s;
 }

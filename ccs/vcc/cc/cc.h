@@ -244,6 +244,7 @@ typedef struct cc_opts {	/* fields before outfd: parse options, all in the decl 
 	int general_regs_only;	/* -mgeneral-regs-only: no FP/SIMD registers (variadic: no v0-v7 save area) */
 	int no_builtin;		/* -ffreestanding / -fno-builtin: abs() etc. are plain calls */
 	int implicit_fn;	/* implicit function declarations allowed (... implicit-function-declaration) */
+	int strict_std;		/* -std=cNN (not gnuNN): clang's GNU-only library functions are not known */
 	int dump_layouts;	/* append _Static_assert checks for clang to verify */
 	int outfd;
 	int emit;		/* generate code (emit/): 1 = assembly text to outfd, 2 = object into obj */

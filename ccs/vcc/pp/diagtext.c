@@ -362,6 +362,32 @@ static void snippet_vcc(pp *p, vbuf *b, const fent *e, const vdiag *d, vdiag *co
 		vbuf_s(b, d->help);
 		vbuf_s(b, "\n");
 	}
+	/* whole lines a fix-it inserts away from the shown ones (an #include): as a patch line,
+	   "  2 + #include <stddef.h>" (rustc's "consider importing") */
+	for (uint32_t i = 0; i < d->nfix; i++) {
+		const vdfix *f = &d->fix[i];
+		uint32_t fo, fl = 0;
+		bool shown = false;
+
+		if (f->b != f->e || f->b < e->base || f->b - e->base > size || !(fl = (uint32_t)strlen(f->s)) ||
+		    f->s[fl - 1] != '\n' || memchr(f->s, '\n', fl - 1) || lstart(s, f->b - e->base) != f->b - e->base)
+			continue;
+		fo = f->b - e->base;
+		for (int j = 0; j < n; j++)
+			shown |= ln[j] == fo;
+		if (shown)
+			continue;
+		snprintf(num, sizeof(num), "%u", loc_line(p, f->b));
+		db_c(b, ' ', (int)width - (int)strlen(num));
+		vbuf_s(b, num);
+		vbuf_s(b, " + ");
+		if (p->color)
+			vbuf_s(b, DC_FIXIT);
+		vbuf_put(b, f->s, fl - 1);
+		if (p->color)
+			vbuf_s(b, DC_RESET);
+		vbuf_s(b, "\n");
+	}
 }
 
 /* a record without a source line: its help still shows */

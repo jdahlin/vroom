@@ -467,6 +467,28 @@ static bool lb_type(cc *c, const char **p, qty *out)
 	return true;
 }
 
+/* a function type from a clang builtin type string (its result in *ret); false: not readable */
+static bool lb_functype(cc *c, const char *p, qty *fty, qty *ret)
+{
+	qty par[16];
+	uint32_t np = 0;
+	int fl = 0;
+
+	if (!lb_type(c, &p, ret))
+		return false;
+	while (*p) {
+		if (*p == '.') {
+			fl |= TF_VARIADIC;
+			break;
+		}
+		if (np == 16 || !lb_type(c, &p, &par[np]))
+			return false;
+		np++;
+	}
+	*fty = ty_func(c, *ret, par, np, fl);
+	return true;
+}
+
 /*
  * __builtin_X for a library function X that vcc has no code for: declared on
  * first use with clang's prototype, its symbol X (clang calls X unless it
@@ -507,26 +529,14 @@ VPRIV uint32_t lib_builtin(cc *c, uint32_t id, uint32_t loc)
 	if (!b)
 		return 0;
 	{
-		const char *p = b->sig;
-		qty ret, par[16];
-		uint32_t np = 0;
-		int fl = 0;
+		qty fty, ret;
 
-		if (!lb_type(c, &p, &ret))
+		if (!lb_functype(c, b->sig, &fty, &ret))
 			return 0;
-		while (*p) {
-			if (*p == '.') {
-				fl |= TF_VARIADIC;
-				break;
-			}
-			if (np == 16 || !lb_type(c, &p, &par[np]))
-				return 0;
-			np++;
-		}
 		{
 			dspec ds = { .ty = ret, .sc = SC_EXTERN, .loc = loc };
 			declr d = { .name = id, .loc = loc };
-			uint32_t s = declare(c, &ds, &d, ty_func(c, ret, par, np, fl), true);
+			uint32_t s = declare(c, &ds, &d, fty, true);
 			size_t ll = strlen(b->lib), pre = c->o->target == PP_DARWIN ? 1 : 0;
 			char *keep = halloc(c, ll + pre + 1);
 			attrs a;
@@ -548,6 +558,110 @@ VPRIV uint32_t implicit_func(cc *c, uint32_t id, uint32_t loc)
 	declr d = { .name = id, .loc = loc };
 
 	return declare(c, &ds, &d, ty_func(c, prim(TY_INT), NULL, 0, TF_NOPROTO), c->depth == 0);
+}
+
+/* ---------------- library functions and names with a header (D5.4) ---------------- */
+
+/* clang's library functions with their header (cc/libfuncs.inc, gen-libbuiltins.py) */
+static const struct libfn { const char *name, *hdr, *sig; uint8_t gnu; } libfns[] = {
+#include "libfuncs.inc"
+};
+/* other names standard headers declare (cc/libnames.inc, by hand) */
+static const struct libname { const char *name, *hdr; } libnames[] = {
+#include "libnames.inc"
+};
+
+#define BSEARCH(tab, n, nl, out) do {						\
+	size_t lo_ = 0, hi_ = sizeof(tab) / sizeof((tab)[0]);			\
+	(out) = NULL;								\
+	while (lo_ < hi_) {							\
+		size_t m_ = (lo_ + hi_) / 2;					\
+		int r_ = strncmp((tab)[m_].name, (n), (nl));			\
+		if (r_ == 0 && (tab)[m_].name[nl])				\
+			r_ = 1;							\
+		if (r_ == 0) { (out) = &(tab)[m_]; break; }			\
+		if (r_ < 0) lo_ = m_ + 1; else hi_ = m_;			\
+	}									\
+} while (0)
+
+static const struct libfn *libfn_find(cc *c, uint32_t id)
+{
+	const struct libfn *f;
+
+	if (c->o->no_builtin)
+		return NULL;	/* -ffreestanding / -fno-builtin: clang knows no library functions */
+	BSEARCH(libfns, idstr_(id), (size_t)idlen_(id), f);
+	return f && f->gnu && c->o->strict_std ? NULL : f;
+}
+
+/* the standard header that declares id, or NULL */
+VPRIV const char *lib_header(cc *c, uint32_t id)
+{
+	const struct libfn *f = libfn_find(c, id);
+	const struct libname *n;
+
+	if (f)
+		return f->hdr;
+	BSEARCH(libnames, idstr_(id), (size_t)idlen_(id), n);
+	return n ? n->hdr : NULL;
+}
+
+/* "#include <hdr>" as a fix-it on d, where the file's includes are (or at its top) */
+VPRIV void include_fix(cc *c, vdiag *d, uint32_t loc, const char *hdr)
+{
+	uint32_t at = pp_include_point(c->p, loc);
+	char b[96];
+
+	if (at == UINT32_MAX)
+		return;
+	snprintf(b, sizeof b, "#include <%s>\n", hdr);
+	pp_diag_fix(c->p, d, at, at, b, VDA_MAYBE);
+}
+
+/*
+ * A call to an undeclared library function (clang's Builtins with a header):
+ * declared with the library's prototype, as clang, after clang's diagnostic
+ * ("call to undeclared library function 'memcpy' with type ...", in C89 a
+ * warning) and the note naming the header.  0: not one (or a prototype vcc
+ * cannot read): the caller declares "int id()".
+ */
+VPRIV uint32_t lib_func(cc *c, uint32_t id, uint32_t loc)
+{
+	static const char *const none[] = { NULL };
+	const struct libfn *f = libfn_find(c, id);
+	qty fty, ret;
+	int lv;
+
+	if (!f || strchr(f->sig, 'P') || !lb_functype(c, f->sig, &fty, &ret) || !strcmp(f->name, "alloca"))
+		return 0;	/* FILE * parameters: vcc has no FILE; alloca is the builtin */
+	/* C89, or -Wno-error=implicit-function-declaration: clang's warning; else an error */
+	lv = c->o->std == 89 || c->o->implicit_fn ? pp_diag_wlevel(c->p, "implicit-function-declaration", true, none, loc)
+		: VDL_ERROR;
+	if (lv >= 0) {
+		const char *t = tyname(c, fty);
+		vdiag *d;
+
+		pp_diag_pc = __builtin_return_address(0);
+		if (lv == VDL_ERROR)
+			error_limit(c), c->errors++;
+		c->ndiag++;
+		if (c->o->std == 89)
+			d = pp_diag_begin(c->p, lv, loc, "implicitly declaring library function '%.*s' with type '%s'", IDF(id), t);
+		else
+			d = pp_diag_begin(c->p, lv, loc, "call to undeclared library function '%.*s' with type '%s'; ISO C99 and "
+					  "later do not support implicit function declarations", IDF(id), t);
+		pp_diag_flag(d, "implicit-function-declaration");
+		d->werror = lv == VDL_ERROR && (c->o->std == 89 || c->o->implicit_fn);
+		include_fix(c, d, loc, f->hdr);
+		pp_diag_emit(c->p, d);
+		note(c, loc, "include the header <%s> or explicitly provide a declaration for '%.*s'", f->hdr, IDF(id));
+	}
+	{
+		dspec ds = { .ty = ret, .sc = SC_EXTERN, .loc = loc };
+		declr d = { .name = id, .loc = loc };
+
+		return declare(c, &ds, &d, fty, c->depth == 0);
+	}
 }
 
 /* the declarations between a K&R definition's identifier list and its body */

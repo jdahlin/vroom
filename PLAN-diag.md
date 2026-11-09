@@ -423,6 +423,18 @@ Varje delsteg: nya fall i `tests/diag/` (snapshots, och clang som mätpunkt), la
 3. **`static_assert`**: operanderna utvärderade (`48 == 56`), och för `sizeof` en
    layoutnot med var utfyllnaden kom ifrån.
 4. **Include-tips**: `memcpy` → `<string.h>` som fix-it, från en genererad libc/POSIX-tabell.
+   **Status (2026-11-09): klart.**  `cc/libfuncs.inc` (genererad av `gen-libbuiltins.py` ur
+   clangs Builtins.inc: 354 biblioteksfunktioner med header) — ett anrop till en odeklarerad
+   deklareras med bibliotekets typ som clang, med clangs text ("call to undeclared library
+   function 'memcpy' with type ...", i C89 varningen "implicitly declaring library function")
+   och noten "include the header <string.h> ...".  `cc/libnames.inc` (för hand, 173 namn:
+   typer, makron, POSIX-funktioner som clang saknar) ger `= help: 'size_t' is declared in
+   <stddef.h>`.  Båda får `#include <h>` som fix-it efter filens sista `#include`
+   (`pp_include_point`), i vcc-stilen ritad som patchrad `8 + #include <stddef.h>`.
+   "size_t n = 1;" / "FILE *fp;" i ett block parsas som en deklaration av ogiltig typ: inga
+   följdfel på `n` (clang rapporterar varje användning).  Clang-stilen följer nu clangs
+   LastLoc-regel (inget utdrag igen på samma plats).  Mutanter: fel totalt 3153 → 3105
+   (clang 3519), första fel på clangs plats oförändrat 95.3 %.
 5. **Standardversion**: C23-nyckelord, `-std=c11` mot C23-funktioner, GNU-utvidgningar
    under `-pedantic`.
 6. **Portabilitet**: Linux mot Apple (`long double`, variadiska argument, `char`-tecken).

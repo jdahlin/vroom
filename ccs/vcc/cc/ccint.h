@@ -177,6 +177,7 @@ struct cc {
 	attrs pend;		/* attributes before a block-scope declaration */
 	int in_struct;		/* parsing a struct/union body */
 	int in_tyname;		/* parsing a type name (clang's DSC_type_specifier) */
+	int undecl_ty;		/* unknown_type: say clang's "use of undeclared identifier" (block_item's "size_t n = 1;") */
 	bool has_pend;
 	uint32_t pack[64];	/* #pragma pack stack (bytes, 0: none) */
 	uint64_t packid[64];	/* labels (token.c pragma_pack) */

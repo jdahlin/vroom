@@ -225,6 +225,7 @@ enum { PP_DSTYLE_VCC, PP_DSTYLE_CLANG, PP_DSTYLE_NARRATED };
 void pp_diag_finish(pp *p);
 /* clang's location of the end of the main file: its last newline, or its end without one */
 uint32_t pp_main_eof(const pp *p);
+uint32_t pp_include_point(const pp *p, uint32_t loc);
 /* -fspell-checking-limit= as given (0: default, -1: none, -2: off) */
 int pp_spell_limit(const pp *p);
 /* -ferror-limit= as given (0: default, -1: none) */

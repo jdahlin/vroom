@@ -6,7 +6,14 @@
    correction (or int); a keyword is parsed as written so (allow_sc: storage classes) */
 VPRIV void unknown_type(cc *c, dspec *ds, bool allow_sc)
 {
-	uint32_t kw, loc = tok(c)->loc, s = undeclared(c, "unknown type name", tok(c)->id, loc, true, KWS_TYPE, &kw);
+	bool ud = c->undecl_ty;
+	uint32_t kw, loc = tok(c)->loc, s;
+
+	c->undecl_ty = 0;
+	s = undeclared(c, ud ? "use of undeclared identifier" : "unknown type name", tok(c)->id, loc, true, ud ? 0 : KWS_TYPE,
+		       ud ? NULL : &kw);
+	if (ud)
+		kw = 0;
 
 	if (kw) {
 		tok(c)->id = kw;

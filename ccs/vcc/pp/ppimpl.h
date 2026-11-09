@@ -443,6 +443,8 @@ struct pp {
 	bool dfinished;		/* pp_diag_finish ran (JSON flushed, SARIF written) */
 	vdiag *dpend;		/* -fdiagnostics-format=json: the record not yet written */
 	vdiag *tpend;		/* vcc's text style: the record not yet rendered (its notes may follow) */
+	uint32_t dlast1;	/* clang's LastLoc + 1 (0: none) and LastLevel: the previous record's */
+	uint8_t dlastlv;
 	struct lmark {		/* #line / GNU line markers */
 		uint32_t fe, off;	/* in fent fe, from byte offset off on */
 		uint32_t pline, line;	/* physical line pline is line */

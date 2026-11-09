@@ -54,6 +54,7 @@ class Renderer:
     def __init__(self, cwd, caret=True, style='vcc'):
         self.cwd, self.caret, self.last, self.style = cwd, caret, None, style
         self.src = {}
+        self.dlast, self.dlastlv = None, None
 
     def source(self, path):
         if path not in self.src:
@@ -343,6 +344,15 @@ class Renderer:
             self.one_line(s, d, marks, x, width, out)
         if d.get('help'):
             out += b' ' * (width + 2) + b'= help: ' + d['help'].encode() + b'\n'
+        # whole lines a fix-it inserts away from the shown ones (an #include), as a patch line
+        for f in d['fixits']:
+            st, en, t = f['start'], f['end'], f['text']
+            if (st is None or st.get('file') is None or st['path'] != path or en is None or
+                    en['offset'] != st['offset'] or st['offset'] > len(s) or not t.endswith('\n') or
+                    '\n' in t[:-1] or self.lstart(s, st['offset']) != st['offset'] or st['offset'] in ln):
+                continue
+            num = str(self.line_no(s, d, st['offset']))
+            out += b' ' * (width - len(num)) + num.encode() + b' + ' + t[:-1].encode() + b'\n'
 
     def vcc(self, d, out):
         s = self.head(d, out)
@@ -382,7 +392,13 @@ class Renderer:
         if d['flag']:
             out += f' [{"-Werror," if d["werror"] else ""}-W{d["flag"]}]'.encode()
         out += b'\n'
-        if has and self.caret:
+        # clang: no snippet again at the previous record's location (no ranges, no fix-its),
+        # unless a non-note follows a note
+        key = (loc['path'], loc['offset']) if has else None
+        same = (key is not None and key == self.dlast and not d['spans'] and not d['fixits'] and
+                not (self.dlastlv == 'note' and not note))
+        self.dlast, self.dlastlv = key, d['level']
+        if has and self.caret and not same:
             self.snippet(d, out)
 
 

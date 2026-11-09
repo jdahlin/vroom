@@ -1002,7 +1002,7 @@
      "ruleIndex": 2,
      "level": "error",
      "message": {
-      "text": "call to undeclared function 'whil'; ISO C99 and later do not support implicit function declarations [-Wimplicit-function-declaration]"
+      "text": "call to undeclared function 'whil'; ISO C99 and later do not support implicit function declarations"
      },
      "locations": [
       {
@@ -1024,7 +1024,7 @@
      "relatedLocations": [],
      "properties": {
       "vcc/help": null,
-      "vcc/flag": null,
+      "vcc/flag": "implicit-function-declaration",
       "vcc/werror": false
      }
     },

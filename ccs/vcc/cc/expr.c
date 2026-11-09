@@ -467,6 +467,25 @@ static __attribute__((noinline)) uint32_t primary_kw(cc *c, int kw, uint32_t loc
 	bad_primary(c, tok(c));
 }
 
+/* C99: a call to an undeclared function; for one a standard header declares (POSIX's write,
+   open, ...) vcc adds where it is, as help with the #include fix-it */
+static __attribute__((cold, noinline)) void implicit_call_error(cc *c, uint32_t id, uint32_t loc)
+{
+	const char *h = lib_header(c, id);
+	vdiag *d;
+
+	pp_diag_pc = __builtin_return_address(0);
+	error_limit(c), c->errors++, c->ndiag++;
+	d = pp_diag_begin(c->p, VDL_ERROR, loc, "call to undeclared function '%.*s'; ISO C99 and later do not support "
+			  "implicit function declarations", IDF(id));
+	pp_diag_flag(d, "implicit-function-declaration");
+	if (h) {
+		pp_diag_help(c->p, d, "'%.*s' is declared in <%s>", IDF(id), h);
+		include_fix(c, d, loc, h);
+	}
+	pp_diag_emit(c->p, d);
+}
+
 /* an identifier without a binding (already consumed): builtins, __func__, errors */
 static __attribute__((noinline)) uint32_t primary_unbound(cc *c, uint32_t id, uint32_t loc)
 {
@@ -485,8 +504,17 @@ static __attribute__((noinline)) uint32_t primary_unbound(cc *c, uint32_t id, ui
 			return primary_sym(c, s, id, loc);
 	}
 	if (is(c, T_LPAREN)) {
+		uint32_t ls = lib_func(c, id, loc);
+
+		if (ls) {
+			uint32_t n = mk(c, N_VAR, c->syms[ls].ty, loc);
+
+			N(n)->a = ls;
+			c->syms[ls].flags |= SF_USED;
+			return n;
+		}
 		if (!c->o->implicit_fn)
-			cc_error(c, loc, "call to undeclared function '%.*s'; ISO C99 and later do not support implicit function declarations [-Wimplicit-function-declaration]", IDF(id));
+			implicit_call_error(c, id, loc);
 		if (idlen_(id) == 6 && !memcmp(idstr_(id), "alloca", 6)) {
 			/* clang: an implicitly declared library builtin is the builtin */
 			uint32_t bid = vintern_find("__builtin_alloca", 16, vintern_hash("__builtin_alloca", 16));
