@@ -38,12 +38,36 @@ CASES = [
     ('-l no -L', '-lx {m}'),
     ('--start-group', '--start-group {o} --end-group'),
     ('unknown', '--frobnicate {o}'),
+    # lazy archives: members extracted as lld (which, and in which order)
+    ('lazy -l', '-L{a} {m} -lx'),
+    ('lazy before object', '-L{a} -lx {m}'),
+    ('lazy chain', '{t}/c.o {a}/libch.a'),
+    ('lazy chain reversed members', '{t}/c.o {a}/libchr.a'),
+    ('lazy unused member', '{t}/c.o {a}/libch.a {a}/libx.a'),
+    ('lazy weak ref', '{t}/w.o {a}/libch.a'),
+    ('lazy weak then strong', '{t}/w.o {a}/libch.a {t}/s.o'),
+    ('lazy two archives', '{t}/c.o {a}/libp.a {a}/libq.a'),
+    ('lazy two archives group', '{t}/c.o --start-group {a}/libq.a {a}/libp.a --end-group'),
+    ('lazy already defined', '{t}/c.o {t}/b1.o {a}/libch.a'),
+    ('lazy thin', '{t}/c.o {a}/libthin.a'),
 ]
 MSG = {'-mbad': 'unknown emulation: foo',
        '-l missing': 'unable to find library -lnosuch', '-l no -L': 'unable to find library -lx'}
 
 SRC = 'int d = 3; int x_fn(void); int _start(void) { return d + x_fn(); }\n'
 LIB = 'int x_fn(void) { return 4; }\n'
+LAZY = {	# c -> b1 -> b2 -> b3; w refers to b1 weakly; p1 -> q1 -> p2
+    'c': 'int b1(void); int _start(void) { return b1(); }\n',
+    'w': '__attribute__((weak)) int b1(void); int _start(void) { return b1 ? b1() : 0; }\n',
+    's': 'int b1(void); int s(void) { return b1(); }\n',
+    'b1': 'int b2(void); int b1(void) { return b2() + 1; }\n',
+    'b2': 'int b3(void); int b2(void) { return b3() + 2; }\n',
+    'b3': 'int b3(void) { return 3; }\n',
+    'unused': 'int unused(void) { return 9; }\n',
+    'p1': 'int q1(void); int b1(void) { return q1(); }\n',
+    'p2': 'int p2(void) { return 5; }\n',
+    'q1': 'int p2(void); int q1(void) { return p2(); }\n',
+}
 
 def first_err(s):
     for l in s.splitlines():
@@ -55,12 +79,14 @@ def main():
     bad = 0
     with tempfile.TemporaryDirectory() as t:
         os.mkdir(f'{t}/lib')
-        for name, src in (('a', SRC), ('x', LIB)):
+        for name, src in list({'a': SRC, 'x': LIB}.items()) + list(LAZY.items()):
             open(f'{t}/{name}.c', 'w').write(src)
             subprocess.run([VPP, '--target=aarch64-linux-gnu', '-c', f'{t}/{name}.c', '-o', f'{t}/{name}.o'], check=True)
-        subprocess.run([llvm('llvm-ar'), 'rcs', f'{t}/lib/libx.a', f'{t}/x.o'], check=True)
+        for lib, ms, fl in (('x', 'x', 'rcs'), ('ch', 'b1 b2 b3 unused', 'rcs'), ('chr', 'unused b3 b2 b1', 'rcs'),
+                            ('p', 'p1 p2', 'rcs'), ('q', 'q1', 'rcs'), ('thin', 'b1 b2 b3', 'rcsT')):
+            subprocess.run([llvm('llvm-ar'), fl, f'{t}/lib/lib{lib}.a'] + [f'{t}/{m}.o' for m in ms.split()], check=True)
         for name, args in CASES:
-            a = args.format(o=f'{t}/a.o {t}/x.o', m=f'{t}/a.o', a=f'{t}/lib').split()
+            a = args.format(o=f'{t}/a.o {t}/x.o', m=f'{t}/a.o', a=f'{t}/lib', t=t).split()
             r = {}
             for tool, exe in (('vlink', VLINK), ('lld', LLD)):
                 out = f'{t}/{tool}.out'

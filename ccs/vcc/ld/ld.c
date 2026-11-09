@@ -1590,7 +1590,8 @@ static uint8_t *map_file(const char *path, size_t *size)
 }
 
 typedef struct { const char *path; const uint8_t *buf; size_t size; } Pending;
-static VVEC(Pending) pending;
+typedef VVEC(Pending) PendVec;
+static PendVec pending;
 
 static void add_archive(const char *path, const uint8_t *b, size_t n)
 {
@@ -1688,11 +1689,13 @@ static bool strtab_ok(const Obj *o, uint32_t k)
 	return h->sh_type == SHT_STRTAB && h->sh_size && o->buf[h->sh_offset + h->sh_size - 1] == 0;
 }
 
+static bool obj_quiet;	/* the sequential lazy-archive pass: no messages */
+
 /* every offset, index and size the later passes use, checked once (as lld's
  * ObjFile: the message names what is wrong; the object is then dropped) */
 static bool obj_valid(Obj *o, const Ehdr *eh)
 {
-#define BAD(...) do { error(__VA_ARGS__); return false; } while (0)
+#define BAD(...) do { if (!obj_quiet) error(__VA_ARGS__); return false; } while (0)
 	uint64_t n = o->size;
 
 	if (eh->e_shoff == 0 || eh->e_shentsize != sizeof(Shdr) || eh->e_shoff % 8 ||
@@ -2321,11 +2324,17 @@ static void assign_sections(void)
 				uint32_t at = NONE;
 				for (uint32_t c = 0; c + 1 < topcmds.n; c++)
 					if (topcmds.v[c].kind == C_OSEC) {
+						/* lld getRankProximity: sections without input sections do not count */
 						int q = osec_rank(topcmds.v[c].idx);
 						if (q >= 0 && q <= r)
 							at = c;
 					}
-				if (at != NONE) {
+				/* lld: when no later output section has input sections,
+				 * the orphan goes at the very end, past the commands */
+				bool later = false;
+				for (uint32_t c = at == NONE ? 0 : at + 1; at != NONE && c + 1 < topcmds.n; c++)
+					later |= topcmds.v[c].kind == C_OSEC && osec_rank(topcmds.v[c].idx) >= 0;
+				if (at != NONE && later) {
 					Cmd cm = topcmds.v[topcmds.n - 1];
 					memmove(&topcmds.v[at + 2], &topcmds.v[at + 1], (topcmds.n - 2 - at) * sizeof(Cmd));
 					topcmds.v[at + 1] = cm;
@@ -3029,8 +3038,152 @@ static bool parse_args(int argc, char **argv)
 	return true;
 }
 
+/* ---- lazy archives: which members, in which order (as lld) ----
+ * lld reads the inputs in order; an object's undefined (non-weak) reference to
+ * a symbol a lazy member defines extracts that member at once (depth first,
+ * the member is added to the files before its own symbols are read), and a
+ * lazy archive's member is extracted when one of its definitions meets an
+ * undefined non-weak reference already seen.  Only links with a non-whole
+ * archive run this sequential pass. */
+enum { LS_NONE, LS_UNDEF, LS_WEAKREF, LS_DEF, LS_LAZY };
+typedef struct { const char *name; uint32_t len, h; uint8_t st; uint32_t cand; } LSym;
+static struct { LSym *v; uint32_t mask, n; } lsyms;
+static PendVec lcand, lout;
+static VVEC(uint8_t) ltaken;
+
+static LSym *lsym(const char *name)
+{
+	uint32_t len = strlen(name), h = strhash(name, len);
+
+	if (!lsyms.v || (lsyms.n + 1) * 2 > lsyms.mask) {
+		uint32_t m = lsyms.v ? (lsyms.mask + 1) * 2 : 4096;
+		LSym *nv = calloc(m, sizeof(LSym));
+
+		for (uint32_t k = 0; lsyms.v && k <= lsyms.mask; k++)
+			if (lsyms.v[k].name) {
+				uint32_t j = lsyms.v[k].h & (m - 1);
+
+				while (nv[j].name)
+					j = (j + 1) & (m - 1);
+				nv[j] = lsyms.v[k];
+			}
+		free(lsyms.v);
+		lsyms.v = nv;
+		lsyms.mask = m - 1;
+	}
+	uint32_t j = h & lsyms.mask;
+
+	for (; lsyms.v[j].name; j = (j + 1) & lsyms.mask)
+		if (lsyms.v[j].h == h && lsyms.v[j].len == len && !memcmp(lsyms.v[j].name, name, len))
+			return &lsyms.v[j];
+	lsyms.n++;
+	lsyms.v[j] = (LSym){ .name = name, .len = len, .h = h };
+	return &lsyms.v[j];
+}
+
+/* the global symbols of a pending object (mapped and aligned here; NULL: not
+ * a valid object, left to parse_obj to report) */
+static const Sym *lglobals(Pending *p, uint32_t *n, const char **str)
+{
+	if (!p->buf) {
+		p->buf = map_file(p->path, &p->size);
+		if (!p->buf)
+			return NULL;
+	}
+	if ((uintptr_t)p->buf & 7) {
+		uint8_t *c = alloc(p->size);
+
+		memcpy(c, p->buf, p->size);
+		p->buf = c;
+	}
+	const Ehdr *eh = (const Ehdr *)p->buf;
+
+	if (p->size < sizeof(Ehdr) || memcmp(eh->e_ident, "\177ELF\2\1", 6))
+		return NULL;
+	Obj o = { .path = p->path, .buf = p->buf, .size = p->size };
+	obj_quiet = true;	/* parse_obj reports */
+	bool ok = obj_valid(&o, eh);
+
+	obj_quiet = false;
+	if (!ok)
+		return NULL;
+	for (uint32_t s = 0; s < o.nsh; s++)
+		if (o.sh[s].sh_type == SHT_SYMTAB) {
+			const Sym *y = (const Sym *)(o.buf + o.sh[s].sh_offset);
+
+			*n = o.sh[s].sh_size / sizeof(Sym) - o.sh[s].sh_info;
+			*str = (const char *)o.buf + o.sh[o.sh[s].sh_link].sh_offset;
+			return y + o.sh[s].sh_info;
+		}
+	*n = 0;
+	return NULL;
+}
+
+static void lextract(uint32_t c);
+
+static void lobject(Pending p)
+{
+	uint32_t n = 0;
+	const char *str;
+	VVEC_PUSH(lout, p, alloc);
+	Pending *q = &lout.v[lout.n - 1];
+	const Sym *y = lglobals(q, &n, &str);
+
+	for (uint32_t k = 0; y && k < n; k++) {
+		LSym *l = lsym(str + y[k].st_name);
+		bool weak = y[k].st_info >> 4 == STB_WEAK;
+
+		if (y[k].st_shndx != SHN_UNDEF)
+			l->st = LS_DEF;
+		else if (l->st == LS_LAZY) {
+			if (!weak)
+				lextract(l->cand);
+		} else if (l->st == LS_NONE || l->st == LS_WEAKREF)
+			l->st = weak ? (l->st == LS_NONE ? LS_WEAKREF : l->st) : LS_UNDEF;
+	}
+}
+
+static void lextract(uint32_t c)
+{
+	if (ltaken.v[c])
+		return;
+	ltaken.v[c] = 1;
+	lobject(lcand.v[c]);
+}
+
+static void larchive(uint32_t c0, uint32_t c1)
+{
+	for (uint32_t c = c0; c < c1; c++) {
+		uint32_t n = 0;
+		const char *str;
+		const Sym *y = lglobals(&lcand.v[c], &n, &str);
+
+		for (uint32_t k = 0; y && k < n && !ltaken.v[c]; k++) {
+			if (y[k].st_shndx == SHN_UNDEF)
+				continue;
+			LSym *l = lsym(str + y[k].st_name);
+
+			if (l->st == LS_UNDEF)
+				lextract(c);
+			else if (l->st == LS_NONE || l->st == LS_WEAKREF) {
+				l->st = LS_LAZY;
+				l->cand = c;
+			}
+		}
+	}
+}
+
 static void load_inputs(void)
 {
+	bool lazy = false;
+
+	for (uint32_t i = 0; i < opt.inputs.n && !opt.relocatable; i++)
+		if (!opt.inputs.v[i].whole) {
+			const char *p = opt.inputs.v[i].path;
+			size_t l = strlen(p);
+
+			lazy |= l > 2 && !strcmp(p + l - 2, ".a");
+		}
 	for (uint32_t i = 0; i < opt.inputs.n; i++) {
 		const char *p = opt.inputs.v[i].path;
 		size_t n;
@@ -3038,21 +3191,31 @@ static void load_inputs(void)
 		if (!b)
 			continue;
 		if (n >= 8 && (!memcmp(b, "!<arch>\n", 8) || !memcmp(b, "!<thin>\n", 8))) {
-			if (!opt.inputs.v[i].whole && !opt.relocatable) {
-				/* lazy archives are not needed by the kernel link */
-				bool empty = true;
-				uint32_t before = pending.n;
+			if (lazy && !opt.inputs.v[i].whole && !opt.relocatable) {
+				uint32_t before = pending.n, c0 = lcand.n;
+
 				add_archive(p, b, n);
-				empty = pending.n == before;
+				for (uint32_t k = before; k < pending.n; k++) {
+					VVEC_PUSH(lcand, pending.v[k], alloc);
+					VVEC_PUSH(ltaken, 0, alloc);
+				}
 				pending.n = before;
-				if (!empty)
-					error("%s: archives without --whole-archive are not supported", p);
+				/* an input marker: the archive's members are read here */
+				VVEC_PUSH(pending, ((Pending){.path = NULL, .size = c0, .buf = (const uint8_t *)(uintptr_t)lcand.n}), alloc);
 				continue;
 			}
 			add_archive(p, b, n);
 			continue;
 		}
 		VVEC_PUSH(pending, ((Pending){.path = p, .buf = b, .size = n}), alloc);
+	}
+	if (lazy) {
+		for (uint32_t i = 0; i < pending.n; i++)
+			if (pending.v[i].path)
+				lobject(pending.v[i]);
+			else
+				larchive(pending.v[i].size, (uint32_t)(uintptr_t)pending.v[i].buf);
+		pending = lout;
 	}
 	for (uint32_t i = 0; i < pending.n; i++) {
 		Obj *o = alloc(sizeof *o);

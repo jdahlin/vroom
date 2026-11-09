@@ -836,10 +836,10 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
   library"); `-pie` and `--dynamic-linker` a clear error until dynamic
   linking.  `bench/vlink-opts.py`: 18/18 against ld.lld, image identical.)
   Left: `--gc-sections`, `--emit-relocs`, `--eh-frame-hdr` (ignored),
-  `--start-group` (ignored: no lazy archives yet), `-z relro/now`.
+  `-z relro/now`.
   *Validate:* `bench/vlink-opts.py` per option; unknown options are errors.
 - [ ] **Relocations**: (done: GOT relaxation adrp+ldr -> adrp+add / nop+adr
-  as lld; orphans placed by lld's coarse rank; `.got` for
+  as lld; orphans placed by lld's coarse rank (sections without inputs do not count; nothing with inputs after: at the very end, as lld); `.got` for
   `ADR_GOT_PAGE`/`LD64_GOT_LO12_NC` against globals, 0 for undefined weak,
   RELATIVE under -pie/-shared; `tests/vcc/got_pic.c`, `pragma_weak.c`; not:
   locals, GLOB_DAT for preemptible symbols),
@@ -848,8 +848,15 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
   for `tests/vcc/tls_{static,ie,desc}.c`), `PT_GNU_RELRO`, MOVW_*, CONDBR19, TSTBR14,
   PREL32 to undefined (`ld/ld.c:2560-2570`).
   *Validate:* T8 (each against lld, run under qemu where runnable).
-- [ ] **Archives**: lazy member resolution, `-L`/`-l`, groups (`ld/ld.c:3342`);
-  COMMON (`ld/ld.c:1783`); COMDAT groups (`ld/ld.c:1693`).
+- [ ] **Archives**: (done: lazy members extracted as lld: a non-weak
+  undefined reference extracts the member defining it, depth first, in lld's
+  file order; an archive's member is extracted when its definition meets an
+  earlier undefined reference; weak references do not extract; order-free, so
+  `--start-group` needs nothing; regular and thin archives.  A sequential pass
+  only when a non-whole archive is linked.  `bench/vlink-opts.py`: 11 lazy
+  cases, images identical to lld.)  Left: COMMON (`ld/ld.c`
+  resolve_obj), COMDAT groups (`parse_obj`), the archive symbol index (lld
+  ignores it too).
   *Validate:* T8 static link of a musl `libc.a` hello world (run under
   qemu-user); a C++ template object pair.
 - [ ] **Dynamic linking**: `.dynamic`, `.dynsym`/`.dynstr`, `.gnu.hash`, PLT,
