@@ -74,6 +74,9 @@ assembler, linker, behind `vcc`/`vas`/`vld` shims and the `vccd` server.
     VCC_UNITY=` compiles file by file, and every file must compile alone.
   - `phase1/`: the clang-based phase 1 tools (`vroomd`, `vroom-cc`, PCH
     prefix) and `vroom-ld`, the ld.lld wrapper the -O0 kernel build links with.
+- `ccs/wasm/`: vcc (vpp) as WebAssembly for a compiler-explorer page
+  (`build.sh`, emscripten memory64 -> `build/wasm/site/`); `mman.c` turns the
+  big reservations into small sbrk stretches, `compat/` maps ACLE CRC to SIMDe.
 - `bench/`: harnesses.  `bench/vcc-diff.py` compares `vpp` with `clang -E`;
   `bench/vcc-sema.py` runs the front end and has clang verify its claims;
   `bench/vccd-cc.py` drives a private vccd with `-c` jobs.

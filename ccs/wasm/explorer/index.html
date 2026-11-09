@@ -1,0 +1,780 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>vcc Explorer</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+/* Layout: one screen, a toolbar over two panes (C source | arm64 assembly), diagnostics under the output. */
+:root {
+	--bg: #eef0f3;
+	--panel: #fbfbfc;
+	--ink: #1b2330;
+	--muted: #5f6b7c;
+	--line: #d5dae2;
+	--accent: #2856c9;
+	--accent-ink: #ffffff;
+	--sel: #dfe7fb;
+	--err: #c0322b;
+	--warn: #a36500;
+	--ok: #227a4b;
+	/* code colours */
+	--c-kw: #8a2f9f;
+	--c-ty: #1c6c8c;
+	--c-num: #b34a00;
+	--c-str: #227a4b;
+	--c-com: #7b8594;
+	--c-pp: #9d3d5a;
+	--a-mn: #2856c9;
+	--a-reg: #8a2f9f;
+	--a-imm: #b34a00;
+	--a-lab: #1b2330;
+	--a-dir: #7b8594;
+	--a-sym: #1c6c8c;
+	--font-ui: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
+	--font-code: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+	--code-size: 13px;
+	--code-lh: 20px;
+	color-scheme: light;
+}
+@media (prefers-color-scheme: dark) {
+	:root:not([data-theme="light"]) {
+		--bg: #14181f; --panel: #1a1f28; --ink: #dde3ec; --muted: #8b96a8; --line: #2c3442;
+		--accent: #6f9bff; --accent-ink: #0e1420; --sel: #24314d;
+		--err: #ff7b72; --warn: #e3a64a; --ok: #5cc98b;
+		--c-kw: #d49cf0; --c-ty: #6fc3e0; --c-num: #f0a868; --c-str: #8fd4a3; --c-com: #6d788a; --c-pp: #f08aa8;
+		--a-mn: #8fb2ff; --a-reg: #d49cf0; --a-imm: #f0a868; --a-lab: #dde3ec; --a-dir: #6d788a; --a-sym: #6fc3e0;
+		color-scheme: dark;
+	}
+}
+:root[data-theme="dark"] {
+	--bg: #14181f; --panel: #1a1f28; --ink: #dde3ec; --muted: #8b96a8; --line: #2c3442;
+	--accent: #6f9bff; --accent-ink: #0e1420; --sel: #24314d;
+	--err: #ff7b72; --warn: #e3a64a; --ok: #5cc98b;
+	--c-kw: #d49cf0; --c-ty: #6fc3e0; --c-num: #f0a868; --c-str: #8fd4a3; --c-com: #6d788a; --c-pp: #f08aa8;
+	--a-mn: #8fb2ff; --a-reg: #d49cf0; --a-imm: #f0a868; --a-lab: #dde3ec; --a-dir: #6d788a; --a-sym: #6fc3e0;
+	color-scheme: dark;
+}
+* { box-sizing: border-box; }
+html, body { height: 100%; margin: 0; }
+body {
+	background: var(--bg); color: var(--ink); font: 14px/1.4 var(--font-ui);
+	display: flex; flex-direction: column; overflow: hidden;
+}
+header {
+	display: flex; flex-wrap: wrap; align-items: center; gap: 10px 14px;
+	padding: 10px 16px; border-bottom: 1px solid var(--line); background: var(--panel);
+}
+.brand { display: flex; align-items: baseline; gap: 8px; margin-right: 6px; }
+.brand b { font: 600 16px var(--font-code); letter-spacing: -0.02em; }
+.brand span { color: var(--muted); font-size: 12px; }
+.ctl { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--muted); }
+select, input[type="text"] {
+	font: 13px var(--font-code); color: var(--ink); background: var(--bg);
+	border: 1px solid var(--line); border-radius: 6px; padding: 5px 8px;
+}
+input[type="text"] { width: 190px; }
+select:focus-visible, input:focus-visible, button:focus-visible, textarea:focus-visible {
+	outline: 2px solid var(--accent); outline-offset: 1px;
+}
+.seg { display: inline-flex; border: 1px solid var(--line); border-radius: 6px; overflow: hidden; }
+.seg button {
+	font: 500 12px var(--font-code); border: 0; background: var(--bg); color: var(--muted);
+	padding: 5px 9px; cursor: pointer; border-right: 1px solid var(--line);
+}
+.seg button:last-child { border-right: 0; }
+.seg button[aria-pressed="true"] { background: var(--accent); color: var(--accent-ink); }
+.status { margin-left: auto; display: flex; align-items: center; gap: 8px; font: 12px var(--font-code); color: var(--muted); }
+.pill { padding: 2px 8px; border-radius: 99px; border: 1px solid currentColor; font-weight: 500; }
+.pill.ok { color: var(--ok); } .pill.err { color: var(--err); } .pill.busy { color: var(--muted); } .pill.warn { color: var(--warn); }
+main { flex: 1; min-height: 0; display: grid; grid-template-columns: 1fr 1fr; gap: 1px; background: var(--line); }
+.pane { background: var(--panel); display: flex; flex-direction: column; min-height: 0; min-width: 0; }
+.pane-h {
+	display: flex; align-items: center; gap: 10px; padding: 6px 12px; border-bottom: 1px solid var(--line);
+	font-size: 12px; color: var(--muted); min-height: 36px; flex-wrap: wrap;
+}
+.pane-h .t { font-weight: 600; color: var(--ink); }
+.pane-h label { display: inline-flex; align-items: center; gap: 4px; cursor: pointer; }
+.pane-h .sp { flex: 1; }
+.pane-h button.link {
+	font: 12px var(--font-ui); background: none; border: 1px solid var(--line); border-radius: 6px;
+	color: var(--ink); padding: 3px 8px; cursor: pointer;
+}
+/* editor: a transparent textarea over a highlighted backdrop, same metrics */
+.code { position: relative; flex: 1; min-height: 0; overflow: hidden; display: flex; }
+.gutter {
+	flex: none; width: 44px; padding: 10px 8px 10px 0; text-align: right; color: var(--muted);
+	font: var(--code-size)/var(--code-lh) var(--font-code); overflow: hidden; user-select: none;
+	border-right: 1px solid var(--line); font-variant-numeric: tabular-nums;
+}
+.gutter div { height: var(--code-lh); position: relative; }
+.gutter div.fn::after {
+	content: ""; position: absolute; right: -9px; top: 0; bottom: 0; width: 4px; background: var(--fc);
+}
+.gutter div.bad { color: var(--err); font-weight: 600; }
+.edit { position: relative; flex: 1; min-width: 0; }
+.edit pre, .edit textarea {
+	position: absolute; inset: 0; margin: 0; padding: 10px 12px; border: 0;
+	font: var(--code-size)/var(--code-lh) var(--font-code); white-space: pre; tab-size: 8;
+	overflow: auto; letter-spacing: 0; font-variant-ligatures: none;
+}
+.edit pre { color: var(--ink); pointer-events: none; overflow: hidden; }
+.edit textarea {
+	background: transparent; color: transparent; caret-color: var(--ink); resize: none; outline: none;
+}
+.edit textarea::selection { background: var(--sel); color: transparent; }
+.ln { display: block; height: var(--code-lh); }
+.ln.hl { background: color-mix(in srgb, var(--fc) 16%, transparent); }
+.ln.bad { background: color-mix(in srgb, var(--err) 14%, transparent); }
+.k { color: var(--c-kw); } .ty { color: var(--c-ty); } .n { color: var(--c-num); }
+.s { color: var(--c-str); } .c { color: var(--c-com); font-style: italic; } .p { color: var(--c-pp); }
+/* output */
+.out { flex: 1; min-height: 0; overflow: auto; font: var(--code-size)/var(--code-lh) var(--font-code); padding: 10px 0; }
+.out .row { display: flex; white-space: pre; min-width: max-content; }
+.out .row .no {
+	flex: none; width: 52px; padding-right: 10px; text-align: right; color: var(--muted); user-select: none;
+	font-variant-numeric: tabular-nums; position: relative;
+}
+.out .row .no::after { content: ""; position: absolute; right: 2px; top: 0; bottom: 0; width: 4px; background: var(--fc, transparent); }
+.out .row .tx { padding: 0 14px 0 6px; }
+.out .row.hl { background: color-mix(in srgb, var(--fc) 16%, transparent); }
+.out .row.fnlab .tx { font-weight: 600; }
+.mn { color: var(--a-mn); } .rg { color: var(--a-reg); } .im { color: var(--a-imm); }
+.lb { color: var(--a-lab); } .dr { color: var(--a-dir); } .sy { color: var(--a-sym); }
+.empty { padding: 24px; color: var(--muted); font: 13px var(--font-ui); max-width: 52ch; }
+.diag {
+	flex: none; max-height: 32%; overflow: auto; border-top: 1px solid var(--line);
+	font: 12px/18px var(--font-code); padding: 8px 12px; white-space: pre-wrap; background: var(--bg);
+}
+.diag:empty { display: none; }
+.diag .e { color: var(--err); font-weight: 600; } .diag .w { color: var(--warn); font-weight: 600; }
+.diag .g { color: var(--ok); } .diag .b { font-weight: 600; } .diag .note { color: var(--accent); font-weight: 600; }
+footer {
+	padding: 6px 16px; font-size: 12px; color: var(--muted); border-top: 1px solid var(--line); background: var(--panel);
+	display: flex; flex-wrap: wrap; gap: 4px 16px;
+}
+footer code { font-family: var(--font-code); font-size: 11.5px; }
+@media (max-width: 760px) {
+	body { overflow: auto; }
+	main { grid-template-columns: 1fr; grid-template-rows: 46vh 60vh; flex: none; }
+	.status { margin-left: 0; }
+	input[type="text"] { width: 140px; }
+}
+@media (prefers-reduced-motion: no-preference) {
+	.pill { transition: color .15s; }
+}
+</style>
+</head>
+<body>
+<header>
+	<div class="brand"><b>vcc</b><span>explorer</span></div>
+	<div class="ctl"><label for="ex">Example</label><select id="ex"></select></div>
+	<div class="ctl"><label for="target">Target</label>
+		<select id="target">
+			<option value="aarch64-linux-gnu">aarch64-linux-gnu</option>
+			<option value="arm64-apple-macos">arm64-apple-macos</option>
+		</select>
+	</div>
+	<div class="ctl" role="group" aria-label="Optimisation level"><span>Opt</span>
+		<div class="seg" id="opt">
+			<button type="button" data-v="-O0" aria-pressed="false">-O0</button>
+			<button type="button" data-v="-O1" aria-pressed="false">-O1</button>
+			<button type="button" data-v="-O2" aria-pressed="true">-O2</button>
+		</div>
+	</div>
+	<div class="ctl" role="group" aria-label="Output"><span>Output</span>
+		<div class="seg" id="mode">
+			<button type="button" data-v="-S" aria-pressed="true">asm</button>
+			<button type="button" data-v="-E" aria-pressed="false">-E</button>
+		</div>
+	</div>
+	<div class="ctl"><label for="flags">Flags</label><input type="text" id="flags" placeholder="-DN=4 -std=c11" spellcheck="false" autocomplete="off"></div>
+	<div class="status"><span id="time"></span><span class="pill busy" id="state">loading</span></div>
+</header>
+<main>
+	<section class="pane" aria-label="C source">
+		<div class="pane-h"><span class="t">C source</span><span id="srcinfo">example.c</span><span class="sp"></span>
+			<span>hover a function to find its code</span></div>
+		<div class="code">
+			<div class="gutter" id="sgut" aria-hidden="true"></div>
+			<div class="edit">
+				<pre id="hl" aria-hidden="true"></pre>
+				<textarea id="src" spellcheck="false" wrap="off" autocapitalize="off" autocomplete="off" aria-label="C source code"></textarea>
+			</div>
+		</div>
+	</section>
+	<section class="pane" aria-label="Compiler output">
+		<div class="pane-h"><span class="t" id="outt">arm64 assembly</span><span id="outinfo"></span><span class="sp"></span>
+			<label><input type="checkbox" id="fdir" checked> hide directives</label>
+			<label><input type="checkbox" id="flab" checked> hide unused labels</label>
+			<button type="button" class="link" id="copy">Copy</button>
+		</div>
+		<div class="out" id="out"></div>
+		<div class="diag" id="diag" aria-live="polite"></div>
+	</section>
+</main>
+<footer>
+	<span>vroom's own C compiler (lexer, preprocessor, parser, arm64 code generator) built to WebAssembly with emscripten; it runs in your browser.</span>
+	<span>Headers: clang's freestanding set, vcc's <code>&lt;arm_neon.h&gt;</code> (the kernel's integer subset), <code>&lt;stdatomic.h&gt;</code> and declaration-only <code>stdio/stdlib/string</code>.</span>
+</footer>
+<script>
+"use strict";
+const EXAMPLES = {
+	"Loops and arithmetic": `// Edit me: the output on the right follows as you type.
+int square(int x)
+{
+	return x * x;
+}
+
+long sum(const int *a, int n)
+{
+	long s = 0;
+
+	for (int i = 0; i < n; i++)
+		s += a[i];
+	return s;
+}
+
+unsigned popcount(unsigned long v)
+{
+	unsigned c = 0;
+
+	while (v) {
+		v &= v - 1;
+		c++;
+	}
+	return c;
+}
+`,
+	"switch to jump table": `int classify(int op)
+{
+	switch (op) {
+	case 0: return 10;
+	case 1: return 42;
+	case 2: return -7;
+	case 3: return 99;
+	case 4: return 3;
+	case 5: return 1000;
+	case 6: return 12;
+	default: return 0;
+	}
+}
+`,
+	"Structs by value": `struct vec3 { float x, y, z; };
+struct big { long a, b, c, d; };
+
+struct vec3 add(struct vec3 a, struct vec3 b)
+{
+	return (struct vec3){ a.x + b.x, a.y + b.y, a.z + b.z };
+}
+
+float dot(struct vec3 a, struct vec3 b)
+{
+	return a.x * b.x + a.y * b.y + a.z * b.z;
+}
+
+long take_big(struct big b)
+{
+	return b.a + b.d;
+}
+
+struct big make_big(long v)
+{
+	return (struct big){ v, v + 1, v + 2, v + 3 };
+}
+`,
+	"Bit-fields": `struct pte {
+	unsigned long valid : 1;
+	unsigned long type  : 1;
+	unsigned long attr  : 3;
+	unsigned long ns    : 1;
+	unsigned long ap    : 2;
+	unsigned long sh    : 2;
+	unsigned long af    : 1;
+	unsigned long ng    : 1;
+	unsigned long addr  : 36;
+};
+
+unsigned long pte_addr(struct pte p)
+{
+	return (unsigned long)p.addr << 12;
+}
+
+void pte_mkyoung(struct pte *p)
+{
+	p->af = 1;
+}
+`,
+	"Atomics": `#include <stdatomic.h>
+
+static _Atomic long counter;
+
+long bump(void)
+{
+	return atomic_fetch_add_explicit(&counter, 1, memory_order_relaxed) + 1;
+}
+
+int try_lock(_Atomic int *lock)
+{
+	int expected = 0;
+
+	return atomic_compare_exchange_strong(lock, &expected, 1);
+}
+`,
+	"NEON intrinsics": `// vcc's <arm_neon.h> has the integer intrinsics the kernel uses
+#include <arm_neon.h>
+#include <stddef.h>
+
+void xor_block(uint8_t *d, const uint8_t *a, const uint8_t *b, size_t n)
+{
+	for (size_t i = 0; i + 16 <= n; i += 16)
+		vst1q_u8(d + i, veorq_u8(vld1q_u8(a + i), vld1q_u8(b + i)));
+}
+
+unsigned popcount128(const uint8_t *p)
+{
+	return vaddvq_u16(vpaddlq_u8(vcntq_u8(vld1q_u8(p))));
+}
+
+int has_blank(const uint8_t *p)
+{
+	uint8x16_t c = vld1q_u8(p);
+
+	return vmaxvq_u8(vorrq_u8(vceqq_u8(c, vdupq_n_u8(' ')), vceqq_u8(c, vdupq_n_u8('\\t')))) != 0;
+}
+`,
+	"Varargs and printf": `#include <stdarg.h>
+#include <stdio.h>
+
+int sum_ints(int n, ...)
+{
+	va_list ap;
+	int s = 0;
+
+	va_start(ap, n);
+	while (n--)
+		s += va_arg(ap, int);
+	va_end(ap);
+	return s;
+}
+
+int main(void)
+{
+	printf("%d\\n", sum_ints(4, 1, 2, 3, 4));
+	return 0;
+}
+`,
+	"Recursion": `unsigned long fib(unsigned n)
+{
+	return n < 2 ? n : fib(n - 1) + fib(n - 2);
+}
+
+static int gcd(int a, int b)
+{
+	return b ? gcd(b, a % b) : a;
+}
+
+int lcm(int a, int b)
+{
+	return a / gcd(a, b) * b;
+}
+`,
+	"Preprocessor": `#define STR(x) #x
+#define XSTR(x) STR(x)
+#define CAT(a, b) a##b
+#define N 4
+
+#if __has_builtin(__builtin_popcount)
+#define POP(x) __builtin_popcount(x)
+#else
+#define POP(x) 0
+#endif
+
+const char *version = XSTR(__STDC_VERSION__);
+int CAT(table_, N)[N] = { POP(7), POP(255), N, __LINE__ };
+
+int ones(unsigned x)
+{
+	return POP(x);
+}
+`,
+};
+
+const $ = id => document.getElementById(id);
+const src = $("src"), hl = $("hl"), sgut = $("sgut"), out = $("out"), diag = $("diag");
+const store = {
+	get(k) { try { return localStorage.getItem(k); } catch (e) { return null; } },
+	set(k, v) { try { localStorage.setItem(k, v); } catch (e) { /* private window */ } },
+};
+
+/* ---------- C highlighting ---------- */
+const KW = new Set("auto break case const continue default do else enum extern for goto if inline register restrict return sizeof static struct switch typedef union volatile while _Alignas _Alignof _Atomic _Bool _Complex _Generic _Noreturn _Static_assert _Thread_local __attribute__ __asm__ asm typeof __typeof__ __extension__ __restrict __inline".split(" "));
+const TY = new Set("void char short int long float double signed unsigned bool size_t ssize_t ptrdiff_t intptr_t uintptr_t int8_t int16_t int32_t int64_t uint8_t uint16_t uint32_t uint64_t va_list FILE".split(" "));
+const esc = s => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+
+function hlC(text) {
+	const lines = text.split("\n"), res = [];
+	let inCom = false;
+	for (const line of lines) {
+		let o = "", i = 0;
+		if (!inCom && /^\s*#/.test(line)) {
+			const m = /^(\s*#\s*\w*)(.*)$/.exec(line);
+			o = `<span class="p">${esc(m[1])}</span>` + hlRest(m[2]);
+			res.push(o);
+			continue;
+		}
+		o = hlRest(line);
+		res.push(o);
+		function hlRest(s) {
+			let r = "";
+			i = 0;
+			while (i < s.length) {
+				if (inCom) {
+					const e = s.indexOf("*/", i);
+					const end = e < 0 ? s.length : e + 2;
+					r += `<span class="c">${esc(s.slice(i, end))}</span>`;
+					if (e >= 0) inCom = false;
+					i = end;
+					continue;
+				}
+				const rest = s.slice(i);
+				let m;
+				if (rest.startsWith("//")) { r += `<span class="c">${esc(rest)}</span>`; break; }
+				if (rest.startsWith("/*")) { inCom = true; continue; }
+				if ((m = /^("(?:[^"\\]|\\.)*"?|'(?:[^'\\]|\\.)*'?)/.exec(rest))) { r += `<span class="s">${esc(m[0])}</span>`; i += m[0].length; continue; }
+				if ((m = /^(0[xX][\da-fA-F]+|\d+\.?\d*(?:[eE][+-]?\d+)?)[uUlLfF]*/.exec(rest))) { r += `<span class="n">${esc(m[0])}</span>`; i += m[0].length; continue; }
+				if ((m = /^[A-Za-z_]\w*/.exec(rest))) {
+					const w = m[0];
+					r += KW.has(w) ? `<span class="k">${w}</span>` : TY.has(w) || /_t$/.test(w) ? `<span class="ty">${w}</span>` : w;
+					i += w.length; continue;
+				}
+				r += esc(s[i]); i++;
+			}
+			return r;
+		}
+	}
+	return res;
+}
+
+/* source ranges of function definitions: name -> [first, last] (0-based lines) */
+function cFunctions(text) {
+	const lines = text.split("\n"), fns = {};
+	const clean = lines.map(l => l.replace(/\/\/.*$/, "").replace(/"(?:[^"\\]|\\.)*"/g, '""').replace(/'(?:[^'\\]|\\.)*'/g, "''"));
+	let depth = 0;
+	for (let i = 0; i < clean.length; i++) {
+		if (depth === 0) {
+			const m = /^[A-Za-z_][\w\s\*]*?\b([A-Za-z_]\w*)\s*\([^;]*$/.exec(clean[i]);
+			if (m && !/^\s*(if|while|for|switch|return)\b/.test(clean[i]) && !KW.has(m[1])) {
+				let j = i, d = 0, started = false, end = -1;
+				for (; j < clean.length && j < i + 400; j++) {
+					if (!started && /;\s*$/.test(clean[j]) && !clean[j].includes("{")) break;
+					for (const ch of clean[j]) {
+						if (ch === "{") { d++; started = true; }
+						else if (ch === "}") { d--; if (started && d === 0) { end = j; break; } }
+					}
+					if (end >= 0) break;
+				}
+				if (end >= 0) { fns[m[1]] = [i, end]; i = end; continue; }
+			}
+		}
+		for (const ch of clean[i]) { if (ch === "{") depth++; else if (ch === "}") depth = Math.max(0, depth - 1); }
+	}
+	return fns;
+}
+
+/* ---------- asm highlighting ---------- */
+const REG = /^(?:[xwbhsdqv]\d{1,2}(?:\.\d*[bhsd])?|sp|wsp|xzr|wzr|lr|fp)$/;
+const DATA_DIR = /^\s*\.(byte|hword|short|word|long|int|quad|xword|dword|zero|space|skip|ascii|asciz|string|float|double|uleb128|sleb128|8byte|4byte|2byte)\b/;
+function hlAsm(line) {
+	let m;
+	if ((m = /^([.\w$]+:)(.*)$/.exec(line))) return `<span class="lb">${esc(m[1])}</span>${esc(m[2])}`;
+	if ((m = /^(\s*)(\.\w+)(.*)$/.exec(line))) {
+		if (/^\.(asciz|ascii|string)$/.test(m[2])) return `${m[1]}<span class="dr">${m[2]}</span><span class="s">${esc(m[3])}</span>`;
+		return `${m[1]}<span class="dr">${m[2]}</span>${hlOps(m[3])}`;
+	}
+	if ((m = /^(\s+)([a-z][\w.]*)(.*)$/.exec(line))) return `${m[1]}<span class="mn">${m[2]}</span>${hlOps(m[3])}`;
+	return esc(line);
+}
+function hlOps(s) {
+	let r = "";
+	const re = /(\/\/.*$)|(#?-?0x[\da-fA-F]+|#-?\d+(?:\.\d+)?|\b\d+\b)|([.$\w]+)|([^.$\w#]+|#)/g;
+	let m;
+	while ((m = re.exec(s))) {
+		if (m[1]) r += `<span class="c">${esc(m[1])}</span>`;
+		else if (m[2]) r += `<span class="im">${esc(m[2])}</span>`;
+		else if (m[3]) r += REG.test(m[3]) ? `<span class="rg">${m[3]}</span>` : `<span class="sy">${esc(m[3])}</span>`;
+		else r += esc(m[4]);
+	}
+	return r;
+}
+
+/* ---------- state ---------- */
+const st = { opt: "-O2", mode: "-S", fns: {}, asmFns: {}, hover: null, bad: new Set(), lastText: "", lastRows: [] };
+const HUES = [212, 28, 140, 300, 50, 180, 340, 95, 260, 10];
+const fnColor = k => `hsl(${HUES[k % HUES.length]} 70% 52%)`;
+
+function renderSource() {
+	const text = src.value;
+	const rows = hlC(text);
+	st.fns = cFunctions(text);
+	const names = Object.keys(st.fns);
+	const lineFn = new Array(rows.length).fill(null);
+	names.forEach(n => { const [a, b] = st.fns[n]; for (let i = a; i <= b && i < rows.length; i++) lineFn[i] = n; });
+	st.lineFn = lineFn;
+	let h = "", g = "";
+	for (let i = 0; i < rows.length; i++) {
+		const f = lineFn[i], k = f && st.asmFns[f] ? st.asmFns[f].k : -1;
+		const style = k >= 0 ? ` style="--fc:${fnColor(k)}"` : "";
+		const cls = (st.bad.has(i + 1) ? " bad" : "") + (k >= 0 && st.hover === f ? " hl" : "");
+		h += `<span class="ln${cls}"${style}>${rows[i] || " "}</span>`;
+		g += `<div class="${k >= 0 ? "fn" : ""}${st.bad.has(i + 1) ? " bad" : ""}"${style}>${i + 1}</div>`;
+	}
+	hl.innerHTML = h + '<span class="ln"> </span>';
+	sgut.innerHTML = g + "<div></div>";
+	syncScroll();
+}
+function syncScroll() {
+	hl.scrollTop = src.scrollTop; hl.scrollLeft = src.scrollLeft; sgut.scrollTop = src.scrollTop;
+}
+src.addEventListener("scroll", syncScroll);
+
+function renderOutput() {
+	const text = st.lastText;
+	if (st.mode === "-E") {
+		$("outt").textContent = "Preprocessed C";
+		const rows = hlC(text);
+		out.innerHTML = rows.map((r, i) => `<div class="row"><span class="no">${i + 1}</span><span class="tx">${r || " "}</span></div>`).join("");
+		$("outinfo").textContent = `${rows.length} lines`;
+		st.asmFns = {};
+		return;
+	}
+	$("outt").textContent = "arm64 assembly";
+	const lines = text.split("\n");
+	if (lines.length && lines[lines.length - 1] === "") lines.pop();
+	/* functions: .type name,@function (ELF) or a global label in __TEXT (Mach-O) */
+	const isFn = new Set();
+	const darwin = $("target").value.includes("apple");
+	let inText = true;
+	for (const l of lines) {
+		let m;
+		if ((m = /^\s*\.type\s+([.\w$]+),\s*[@%]function/.exec(l))) isFn.add(m[1]);
+		if (/^\s*\.text\b/.test(l)) inText = true;
+		else if ((m = /^\s*\.(data|bss|const|cstring|section\s+(\S+))/.exec(l))) inText = !!m[2] && /^(__TEXT,__text|\.text)/.test(m[2]);
+		if (darwin && inText && (m = /^(_[\w$]+):/.exec(l))) isFn.add(m[1]);
+	}
+	/* referenced labels */
+	const used = new Set();
+	for (const l of lines) {
+		if (/^[.\w$]+:/.test(l)) { const r = l.replace(/^[.\w$]+:/, ""); for (const w of r.match(/[.\w$]+/g) || []) used.add(w); continue; }
+		for (const w of l.match(/[.\w$]+/g) || []) used.add(w);
+	}
+	const hideDir = $("fdir").checked, hideLab = $("flab").checked;
+	const asmFns = {};
+	let cur = null, k = 0, html = "", shown = 0, ninsn = 0;
+	for (let i = 0; i < lines.length; i++) {
+		const l = lines[i];
+		const lab = /^([.\w$]+):/.exec(l);
+		let cname = null;
+		if (lab && isFn.has(lab[1])) {
+			cname = darwin ? lab[1].replace(/^_/, "") : lab[1];
+			cur = cname;
+			if (!asmFns[cur]) asmFns[cur] = { k: k++, first: -1 };
+		} else if (/^\s*\.size\s/.test(l) || /^\.Lfe\d+:/.test(l)) {
+			/* the end of a function: its last row */
+		} else if (/^\s*\.(text|data|section|bss)\b/.test(l) && cur && !/^\s*\.text/.test(l)) {
+			cur = null;
+		}
+		const isDir = /^\s*\./.test(l) && !DATA_DIR.test(l);
+		const isLab = !!lab;
+		if (hideDir && isDir) { if (/^\s*\.size\s/.test(l)) cur = null; continue; }
+		if (hideLab && isLab && !isFn.has(lab[1]) && !used.has(lab[1]) && !/^[A-Za-z_]/.test(lab[1])) continue;
+		if (/^\s+[a-z]/.test(l) && !/^\s*\./.test(l)) ninsn++;
+		const f = cur, fk = f && asmFns[f] ? asmFns[f].k : -1;
+		if (f && asmFns[f].first < 0) asmFns[f].first = shown;
+		const style = fk >= 0 ? ` style="--fc:${fnColor(fk)}"` : "";
+		html += `<div class="row${cname ? " fnlab" : ""}${fk >= 0 && st.hover === f ? " hl" : ""}" data-fn="${f || ""}"${style}><span class="no">${i + 1}</span><span class="tx">${hlAsm(l) || " "}</span></div>`;
+		shown++;
+		if (/^\s*\.size\s/.test(l)) cur = null;
+	}
+	st.asmFns = asmFns;
+	out.innerHTML = html || `<div class="empty">No code: the file defines no functions or data.</div>`;
+	$("outinfo").textContent = `${ninsn} instructions, ${Object.keys(asmFns).length} functions`;
+}
+
+function setHover(f) {
+	if (st.hover === f) return;
+	st.hover = f;
+	for (const r of out.querySelectorAll(".row.hl")) r.classList.remove("hl");
+	if (f) for (const r of out.querySelectorAll(`.row[data-fn="${CSS.escape(f)}"]`)) r.classList.add("hl");
+	const spans = hl.children;
+	for (let i = 0; i < spans.length; i++) {
+		const on = f && st.lineFn && st.lineFn[i] === f && st.asmFns[f];
+		spans[i].classList.toggle("hl", !!on);
+	}
+}
+out.addEventListener("mouseover", e => {
+	const r = e.target.closest(".row");
+	setHover(r && r.dataset.fn ? r.dataset.fn : null);
+});
+out.addEventListener("mouseleave", () => setHover(null));
+function lineAtY(y) {
+	const rect = src.getBoundingClientRect();
+	return Math.floor((y - rect.top - 10 + src.scrollTop) / 20);
+}
+src.addEventListener("mousemove", e => {
+	const i = lineAtY(e.clientY);
+	const f = st.lineFn && st.lineFn[i];
+	setHover(f && st.asmFns[f] ? f : null);
+});
+src.addEventListener("mouseleave", () => setHover(null));
+src.addEventListener("dblclick", e => {
+	const f = st.lineFn && st.lineFn[lineAtY(e.clientY)];
+	if (f && st.asmFns[f]) {
+		const r = out.querySelector(`.row[data-fn="${CSS.escape(f)}"]`);
+		if (r) r.scrollIntoView({ block: "start" });
+	}
+});
+
+/* ---------- diagnostics (vcc prints clang-style ANSI colours) ---------- */
+function ansi(s) {
+	let r = "", open = 0;
+	const parts = s.split(/\x1b\[([\d;]*)m/);
+	for (let i = 0; i < parts.length; i++) {
+		if (i % 2 === 0) { r += esc(parts[i]); continue; }
+		const c = parts[i].split(";");
+		if (c.includes("0") || parts[i] === "") { r += "</span>".repeat(open); open = 0; }
+		let cls = null;
+		if (c.includes("31")) cls = "e"; else if (c.includes("35")) cls = "w"; else if (c.includes("32")) cls = "g";
+		else if (c.includes("36")) cls = "note"; else if (c.includes("1")) cls = "b";
+		if (cls) { r += `<span class="${cls}">`; open++; }
+	}
+	return r + "</span>".repeat(open);
+}
+function plain(s) { return s.replace(/\x1b\[[\d;]*m/g, ""); }
+
+/* ---------- the compiler ---------- */
+let worker = null, ready = false, seq = 0, pending = null, inflight = null, timer = null;
+function startWorker() {
+	ready = false;
+	worker = new Worker("worker.js");
+	worker.onmessage = ev => {
+		const m = ev.data;
+		if ("ready" in m) {
+			if (!m.ready) { setState("err", "load failed"); diag.textContent = m.error; return; }
+			ready = true; kick(); return;
+		}
+		if (!inflight || m.id !== inflight.id) return;
+		clearTimeout(timer);
+		inflight = null;
+		done(m);
+		kick();
+	};
+	worker.onerror = e => { setState("err", "worker error"); diag.textContent = e.message || "The compiler worker failed to start."; };
+}
+function setState(cls, text) { const s = $("state"); s.className = "pill " + cls; s.textContent = text; }
+function args() {
+	const a = ["--target=" + $("target").value, st.opt, st.mode, "-fcolor-diagnostics",
+		"-isystem", "/usr/lib/clang/include", "-isystem", "/usr/include"];
+	const extra = $("flags").value.trim();
+	if (extra) a.push(...extra.match(/(?:[^\s"]+|"[^"]*")+/g).map(x => x.replace(/"/g, "")));
+	return a;
+}
+function compile() {
+	pending = { id: ++seq, name: "example.c", source: src.value, args: args() };
+	kick();
+}
+function kick() {
+	if (!ready || inflight || !pending) return;
+	inflight = pending; pending = null;
+	setState("busy", "compiling");
+	worker.postMessage(inflight);
+	timer = setTimeout(() => {
+		worker.terminate(); inflight = null;
+		setState("err", "timeout");
+		diag.textContent = "vcc did not finish within 10 s; the worker was restarted.";
+		startWorker();
+	}, 10000);
+}
+function done(m) {
+	st.lastText = m.text;
+	const errs = plain(m.stderr);
+	st.bad = new Set();
+	for (const mm of errs.matchAll(/example\.c:(\d+):\d+: (?:fatal )?error/g)) st.bad.add(+mm[1]);
+	diag.innerHTML = ansi(m.stderr);
+	const nerr = (errs.match(/\berror:/g) || []).length, nw = (errs.match(/\bwarning:/g) || []).length;
+	if (m.rc === 0) setState(nw ? "warn" : "ok", nw ? `${nw} warning${nw > 1 ? "s" : ""}` : "ok");
+	else setState("err", nerr ? `${nerr} error${nerr > 1 ? "s" : ""}` : `exit ${m.rc}`);
+	$("time").textContent = `${m.msRun.toFixed(1)} ms`;
+	$("time").title = `instance ${m.msInit.toFixed(1)} ms, compile ${m.msRun.toFixed(1)} ms`;
+	if (m.rc === 0 || m.text) renderOutput();
+	else if (!st.lastRows.length) out.innerHTML = `<div class="empty">No output: fix the errors below.</div>`;
+	renderSource();
+	setHover(st.hover);
+}
+
+/* ---------- controls ---------- */
+let deb = null;
+src.addEventListener("input", () => {
+	renderSource();
+	store.set("vcc-explorer-src", src.value);
+	clearTimeout(deb); deb = setTimeout(compile, 250);
+});
+src.addEventListener("keydown", e => {
+	if (e.key === "Tab" && !e.shiftKey && !e.metaKey && !e.ctrlKey) {
+		e.preventDefault();
+		const s = src.selectionStart, t = src.selectionEnd;
+		src.setRangeText("\t", s, t, "end");
+		src.dispatchEvent(new Event("input"));
+	}
+});
+for (const id of ["opt", "mode"]) {
+	$(id).addEventListener("click", e => {
+		const b = e.target.closest("button");
+		if (!b) return;
+		for (const x of $(id).children) x.setAttribute("aria-pressed", x === b ? "true" : "false");
+		st[id] = b.dataset.v;
+		compile();
+	});
+}
+$("target").addEventListener("change", compile);
+$("flags").addEventListener("input", () => { clearTimeout(deb); deb = setTimeout(compile, 400); });
+$("fdir").addEventListener("change", () => { renderOutput(); renderSource(); });
+$("flab").addEventListener("change", () => { renderOutput(); renderSource(); });
+$("copy").addEventListener("click", async () => {
+	try { await navigator.clipboard.writeText(st.lastText); $("copy").textContent = "Copied"; }
+	catch (e) { $("copy").textContent = "Copy failed"; }
+	setTimeout(() => { $("copy").textContent = "Copy"; }, 1500);
+});
+const ex = $("ex");
+for (const name of Object.keys(EXAMPLES)) ex.add(new Option(name, name));
+ex.add(new Option("(your draft)", "__draft"));
+ex.addEventListener("change", () => {
+	if (ex.value === "__draft") src.value = store.get("vcc-explorer-src") || "";
+	else src.value = EXAMPLES[ex.value];
+	src.scrollTop = 0;
+	renderSource(); compile();
+});
+
+/* memory64 is needed: vcc assumes 64-bit size_t and long, as on arm64 */
+const mem64 = (() => {
+	try { return WebAssembly.validate(new Uint8Array([0, 97, 115, 109, 1, 0, 0, 0, 5, 3, 1, 4, 1])); }
+	catch (e) { return false; }
+})();
+const draft = store.get("vcc-explorer-src");
+src.value = EXAMPLES[Object.keys(EXAMPLES)[0]];
+if (draft && draft !== src.value) { ex.value = "__draft"; src.value = draft; }
+renderSource();
+if (!mem64) {
+	setState("err", "unsupported");
+	out.innerHTML = `<div class="empty">This browser lacks WebAssembly memory64, which the compiler needs (vcc is a 64-bit program). Chrome 133+ and Firefox 134+ have it.</div>`;
+} else {
+	out.innerHTML = `<div class="empty">Loading the compiler (1.3 MB)...</div>`;
+	startWorker();
+	compile();
+}
+</script>
+</body>
+</html>
