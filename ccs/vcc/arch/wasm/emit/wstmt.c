@@ -168,6 +168,43 @@ static void wasm_asm(ecx *e, const node *x)
 	}
 }
 
+/* ---------------- VLA scopes ---------------- */
+
+/* the index of the compound statement's first VLA declaration, UINT32_MAX: none */
+static uint32_t wvla_block(cc *c, const node *x)
+{
+	for (uint32_t i = 0; i < x->c; i++) {
+		uint32_t s = c->lists[x->b + i];
+
+		while (s && (N(s)->op == N_LABEL || N(s)->op == N_CASE || N(s)->op == N_DEFAULT))
+			s = N(s)->c;
+		if (s && N(s)->op == N_DECL) {
+			const ctype *t = T(c, c->syms[N(s)->a].ty);
+
+			if (c->syms[N(s)->a].kind == S_VAR && t->kind == TY_ARRAY && (t->flags & TF_VLA))
+				return i;
+		}
+	}
+	return UINT32_MAX;
+}
+
+/*
+ * A branch to block index t: give back the stack of the VLA blocks it
+ * leaves, and of the one whose dispatch loop t is when it goes back to
+ * statement idx before the VLAs (goto; UINT32_MAX: break, continue).
+ */
+static void wvla_leave(ecx *e, int t, uint32_t idx)
+{
+	wst *W = e->w;
+
+	for (uint32_t i = 0; i < W->nvb; i++)
+		if (t < W->vb[i].depth || (t == W->vb[i].depth && idx <= W->vb[i].first)) {
+			wget(e, W->vb[i].sp);
+			wi(e, "global.set\t__stack_pointer");
+			return;
+		}
+}
+
 /* ---------------- goto ---------------- */
 
 /*
@@ -426,6 +463,7 @@ static void wgoto(ecx *e, const node *x)
 	uint32_t lo = 0, hi = W->ngl, lb = x->a;
 	const wgp *L = W->gp + W->ngp, *p = NULL;
 	int d, a;
+	uint32_t aidx;
 
 	while (lo < hi) {
 		uint32_t m = (lo + hi) / 2;
@@ -448,6 +486,7 @@ static void wgoto(ecx *e, const node *x)
 		efatal(e, x->loc, "wasm: goto into a statement expression is not supported yet (PLAN-wasm.md W4)");
 	/* the states on the way down: target segment in d, the enclosing segments above */
 	d = (int)p->d;
+	aidx = p->i;
 	if (W->gd[d].st != UINT32_MAX) {
 		wconst(e, WT_I32, wgstate(W, &W->gd[d], p->i));
 		wset(e, W->gd[d].st);
@@ -456,11 +495,13 @@ static void wgoto(ecx *e, const node *x)
 		const wgd *ch = &W->gd[d];
 
 		d = ch->parent;
+		aidx = ch->pidx;
 		if (W->gd[d].st != UINT32_MAX) {
 			wconst(e, WT_I32, wgstate(W, &W->gd[d], ch->pidx));
 			wset(e, W->gd[d].st);
 		}
 	}
+	wvla_leave(e, W->gd[a].loop, aidx);
 	wbr(e, "br", W->gd[a].loop);
 }
 
@@ -530,10 +571,42 @@ static void wdecl_stmt(ecx *e, const node *x)
 	const sym *y = &c->syms[s];
 	wbind *b;
 
+	if (y->sc == SC_TYPEDEF && vm_type(c, y->ty)) {
+		wvla_fix(e, y->ty, false);
+		return;
+	}
 	if (y->kind != S_VAR || y->sc == SC_STATIC || y->sc == SC_EXTERN || y->sc == SC_TYPEDEF)
 		return;
 	if (vm_type(c, y->ty))
-		efatal(e, x->loc, "wasm: variable length arrays are not supported yet (PLAN-wasm.md W4)");
+		wvla_fix(e, y->ty, false);
+	if (T(c, y->ty)->kind == TY_ARRAY && (T(c, y->ty)->flags & TF_VLA)) {
+		/* below the stack pointer, as alloca; the block gives it back (wvla_block) */
+		wst *W = e->w;
+		uint32_t al = sym_align(c, s) > 16 ? sym_align(c, s) : 16;
+
+		b = &W->sb[s];
+		if (b->gen != W->gen) {
+			b->gen = W->gen;
+			b->k = WB_PTR;
+			b->loc = wnewloc(e, WT_I64);
+		}
+		W->dyn = true;
+		wi(e, "global.get\t__stack_pointer");
+		wvla_bytes(e, y->ty);
+		wi(e, "i64.sub");
+		wconst(e, WT_I64, -(int64_t)al);
+		wi(e, "i64.and");
+		wtee(e, b->loc);
+		wi(e, "global.set\t__stack_pointer");
+		if (x->b) {
+			/* = {}: zeroed */
+			wget(e, b->loc);
+			wconst(e, WT_I32, 0);
+			wvla_bytes(e, y->ty);
+			wi(e, "memory.fill\t0");
+		}
+		return;
+	}
 	if (sym_attrs(c, s)->cleanup)
 		efatal(e, x->loc, "wasm: the cleanup attribute is not supported yet (PLAN-wasm.md W4)");
 	b = wlocal(e, s);
@@ -789,13 +862,30 @@ VPRIV void wstmt(ecx *e, uint32_t n)
 	switch (x->op) {
 	case N_BLOCK: {
 		int r = W->ngdx ? wgfind(W, n) : -1;
+		uint32_t first = wvla_block(c, x);
+		bool vla = first != UINT32_MAX;
 
+		if (vla) {
+			/* the stack pointer to give back when the block is left */
+			if (W->nvb >= WMAXGD)
+				efatal(e, x->loc, "wasm: too many blocks");
+			W->vb[W->nvb].depth = W->depth;
+			W->vb[W->nvb].first = first;
+			W->vb[W->nvb].sp = wnewloc(e, WT_I64);
+			W->dyn = true;
+			wi(e, "global.get\t__stack_pointer");
+			wset(e, W->vb[W->nvb++].sp);
+		}
 		if (r >= 0) {
 			wgblock(e, x, r);
-			break;
+		} else {
+			for (uint32_t i = 0; i < x->c; i++)
+				wstmt(e, c->lists[x->b + i]);
 		}
-		for (uint32_t i = 0; i < x->c; i++)
-			wstmt(e, c->lists[x->b + i]);
+		if (vla) {
+			wget(e, W->vb[--W->nvb].sp);
+			wi(e, "global.set\t__stack_pointer");
+		}
 		break;
 	}
 	case N_EXPR:
@@ -927,6 +1017,7 @@ VPRIV void wstmt(ecx *e, uint32_t n)
 
 		if (t < 0)
 			efatal(e, x->loc, "break/continue outside a loop");
+		wvla_leave(e, t, UINT32_MAX);
 		wbr(e, "br", t);
 		break;
 	}

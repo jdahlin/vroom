@@ -31,6 +31,9 @@ VPRIV wst *w_state(ecx *e)
 		W->gd = reserve(WMAXGD * sizeof(wgd));
 		W->gdx = reserve(WMAXGD * sizeof(uint64_t));
 		W->gp = reserve(2 * WMAXGD * sizeof(wgp));
+		W->vszn = reserve(WMAXGD * sizeof(uint32_t));
+		W->vszl = reserve(WMAXGD * sizeof(uint32_t));
+		W->vb = reserve(WMAXGD * sizeof(wvb));
 	}
 	/* per sym bindings: sized for this TU (generation-tagged: never cleared) */
 	W->sb = reserve(((size_t)e->c->nsym + 64) * sizeof(wbind));
@@ -405,6 +408,12 @@ static void wparams(ecx *e, uint32_t s, uint32_t *np)
 			wstore(e, &l, is_record(c, y->ty) ? a.ft : y->ty);
 		}
 	}
+	for (uint32_t i = 0; i < body->aux; i++) {	/* int (*a)[n]: n as on entry */
+		uint32_t p = c->lists[body->a + i];
+
+		if (vm_type(c, c->syms[p].ty))
+			wvla_fix(e, c->syms[p].ty, true);
+	}
 }
 
 static void wsection(ecx *e, tbuf *b, uint32_t s, const char *kind)
@@ -448,6 +457,7 @@ VPRIV void wasm_emit_function(ecx *e, uint32_t s)
 	W->rty = ft->base;
 	W->fsym = s;
 	W->nsw = W->nseg = 0;
+	W->nvsz = W->nvb = 0;
 	r = wclassify_ret(c, ft->base);
 	W->rt = r.k == WA_SCALAR ? r.st : WT_NONE;
 	e->top = s;

@@ -71,8 +71,14 @@ typedef struct wst {
 	struct wgp *gp;		/* (gd, statement index) pairs: segment starts, labels */
 	uint32_t ngp;		/* segment starts; the labels follow, sorted by label */
 	uint32_t ngl;
+	uint32_t *vszn, *vszl;	/* VLA sizes fixed: size expression node, its i64 local */
+	uint32_t nvsz;
+	struct wvb *vb;		/* blocks with VLAs being emitted: sp to restore on leaving */
+	uint32_t nvb;
 	struct wst *next;	/* the free list */
 } wst;
+
+typedef struct wvb { int depth; uint32_t sp, first; } wvb;	/* first: the first VLA statement */
 
 /* a compound statement goto can enter */
 typedef struct wgd {
@@ -341,6 +347,8 @@ VPRIV int wcall(ecx *e, uint32_t n, bool want);
 VPRIV int wbuiltin(ecx *e, uint32_t n, bool want);
 /* wstmt.c */
 VPRIV void wgoto_scan(ecx *e, uint32_t body);
+VPRIV void wvla_bytes(ecx *e, qty t);
+VPRIV void wvla_fix(ecx *e, qty t, bool pure);
 VPRIV void wstmt(ecx *e, uint32_t n);
 VPRIV void winit(ecx *e, uint64_t off, qty ty, uint32_t init, bool zeroed);
 #endif

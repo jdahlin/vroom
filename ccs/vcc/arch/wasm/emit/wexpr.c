@@ -149,16 +149,113 @@ VPRIV wbind *wlocal(ecx *e, uint32_t s)
 	return b;
 }
 
+/* ---------------- variable length arrays ---------------- */
+
+static bool wvla(cc *c, qty t)
+{
+	const ctype *a = T(c, t);
+
+	return a->kind == TY_ARRAY && (a->flags & TF_VLA);
+}
+
+/* push the value of the VLA size expression sn (an i64): fixed when its declaration ran */
+static void wvla_len(ecx *e, uint32_t sn)
+{
+	cc *c = e->c;
+	wst *W = e->w;
+
+	for (uint32_t k = W->nvsz; k-- > 0;)
+		if (W->vszn[k] == sn) {
+			wget(e, W->vszl[k]);
+			return;
+		}
+	wexpr(e, sn, true);
+	wconv(e, N(sn)->ty, prim(TY_ULONG));
+}
+
+/* push the size of type t in bytes (an i64) */
+VPRIV void wvla_bytes(ecx *e, qty t)
+{
+	cc *c = e->c;
+	const ctype *a = T(c, t);
+
+	if (!wvla(c, t)) {
+		wconst(e, WT_I64, (int64_t)tsize(c, t));
+		return;
+	}
+	if (!a->n)
+		efatal(e, e->curloc, "wasm: a VLA of unspecified size");
+	wvla_len(e, a->n);
+	if (wvla(c, a->base) || tsize(c, a->base) != 1) {
+		wvla_bytes(e, a->base);
+		wi(e, "i64.mul");
+	}
+}
+
+/*
+ * A declaration whose type has VLAs in it (int a[n], int (*p)[n], typedef
+ * int T[n]): each size is evaluated now, once, into a local, so a later
+ * n = ... does not change the type (C11 6.7.6.2p5).  pure: only sizes
+ * without side effects (parameters).
+ */
+VPRIV void wvla_fix(ecx *e, qty t, bool pure)
+{
+	cc *c = e->c;
+	wst *W = e->w;
+
+	for (;;) {
+		const ctype *a = T(c, t);
+
+		if (a->kind == TY_PTR) {
+			t = a->base;
+			continue;
+		}
+		if (a->kind != TY_ARRAY)
+			return;
+		if ((a->flags & TF_VLA) && a->n && N(a->n)->op != N_NUM && !(pure && side_effects(c, a->n))) {
+			uint32_t k;
+
+			for (k = 0; k < W->nvsz && W->vszn[k] != a->n; k++)
+				;
+			if (k == W->nvsz) {
+				if (W->nvsz >= WMAXGD)
+					efatal(e, e->curloc, "too many variable length array sizes in one function");
+				W->vszn[k] = a->n;
+				W->vszl[k] = wnewloc(e, WT_I64);
+			}
+			wexpr(e, a->n, true);
+			wconv(e, N(a->n)->ty, prim(TY_ULONG));
+			wset(e, W->vszl[k]);
+			if (k == W->nvsz)
+				W->nvsz++;
+		}
+		t = a->base;
+	}
+}
+
+/* the element size of pointer type ptr, 0 if it is only known at run time */
 static uint64_t welem_size(ecx *e, qty ptr)
 {
 	cc *c = e->c;
 	qty b = T(c, ptr)->base;
 
-	if (vm_type(c, b))
-		efatal(e, e->curloc, "wasm: variable length arrays are not supported yet (PLAN-wasm.md W4)");
+	if (wvla(c, b))
+		return 0;
 	if (is_void(c, b) || is_func(c, b))
 		return 1;	/* GNU: void * and function pointer arithmetic */
 	return tsize(c, b);
+}
+
+/* stack: [i64 n] -> n times the element size of ptr (es: welem_size) */
+static void wscale(ecx *e, qty ptr, uint64_t es)
+{
+	if (es == 1)
+		return;
+	if (es)
+		wconst(e, WT_I64, (int64_t)es);
+	else
+		wvla_bytes(e, T(e->c, ptr)->base);
+	wi(e, "i64.mul");
 }
 
 /* push an integer of type t as an i64 (an index, an offset) */
@@ -253,16 +350,13 @@ VPRIV void wlval(ecx *e, uint32_t n, wlv *l, qty t)
 		int64_t k;
 
 		wexpr(e, x->a, true);
-		if (wnum(e, x->b, &k) && (k * (int64_t)es) >= 0) {
+		if (es && wnum(e, x->b, &k) && (k * (int64_t)es) >= 0) {
 			l->off = (uint64_t)(k * (int64_t)es);
 			break;
 		}
 		wexpr(e, x->b, true);
 		wto_i64(e, N(x->b)->ty);
-		if (es != 1) {
-			wconst(e, WT_I64, (int64_t)es);
-			wi(e, "i64.mul");
-		}
+		wscale(e, N(x->a)->ty, es);
 		wi(e, "i64.add");
 		break;
 	}
@@ -1049,18 +1143,12 @@ static int wbinary(ecx *e, uint32_t n)
 		wexpr(e, x->a, true);
 		if (!lp) {
 			wto_i64(e, lt);
-			if (es != 1) {
-				wconst(e, WT_I64, (int64_t)es);
-				wi(e, "i64.mul");
-			}
+			wscale(e, rt, es);
 		}
 		wexpr(e, x->b, true);
 		if (lp) {
 			wto_i64(e, rt);
-			if (es != 1) {
-				wconst(e, WT_I64, (int64_t)es);
-				wi(e, "i64.mul");
-			}
+			wscale(e, lt, es);
 		}
 		wi(e, op == T_PLUS ? "i64.add" : "i64.sub");
 		return WT_I64;
@@ -1071,8 +1159,11 @@ static int wbinary(ecx *e, uint32_t n)
 		wexpr(e, x->a, true);
 		wexpr(e, x->b, true);
 		wi(e, "i64.sub");
-		if (es > 1) {
-			wconst(e, WT_I64, (int64_t)es);
+		if (es != 1) {
+			if (es)
+				wconst(e, WT_I64, (int64_t)es);
+			else
+				wvla_bytes(e, T(c, lt)->base);
 			wi(e, "i64.div_s");
 		}
 		wconv(e, prim(TY_LONG), ty);
@@ -1272,10 +1363,7 @@ static int wassign(ecx *e, uint32_t n, bool want)
 
 			wexpr(e, x->b, true);
 			wto_i64(e, bt);
-			if (es != 1) {
-				wconst(e, WT_I64, (int64_t)es);
-				wi(e, "i64.mul");
-			}
+			wscale(e, lt, es);
 			wi(e, op == T_PLUS ? "i64.add" : "i64.sub");
 		} else {
 			if (!pt)
@@ -1346,7 +1434,10 @@ static int wincdec(ecx *e, uint32_t n, bool want)
 		wfconst(e, k, 1.0);
 		wop(e, k, inc ? "add" : "sub");
 	} else {
-		wconst(e, k, is_ptr(c, t) ? (int64_t)welem_size(e, t) : 1);
+		if (is_ptr(c, t) && !welem_size(e, t))
+			wvla_bytes(e, T(c, t)->base);
+		else
+			wconst(e, k, is_ptr(c, t) ? (int64_t)welem_size(e, t) : 1);
 		wop(e, k, inc ? "add" : "sub");
 		if (k == WT_I32)
 			wnarrow(e, prim(TY_INT), t);
@@ -1687,7 +1778,9 @@ static int wexpr1(ecx *e, uint32_t n, bool want)
 	case N_LABELADDR:
 		efatal(e, x->loc, "wasm: label addresses are not supported (PLAN-wasm.md W4)");
 	case N_SIZEOF_VLA:
-		efatal(e, x->loc, "wasm: variable length arrays are not supported yet (PLAN-wasm.md W4)");
+		wvla_bytes(e, x->b);
+		wconv(e, prim(TY_ULONG), x->ty);
+		return k;
 	default:
 		break;
 	}
