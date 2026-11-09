@@ -51,3 +51,22 @@
 	mov z0.s, z1.s[3]
 	dup z0.d, z1.d[7]
 	mov z0.b, z1.b[63]
+	fmla z0.h, z1.h, z2.h[0]
+	fmla z0.h, z1.h, z7.h[7]
+	fmla z0.s, z1.s, z7.s[3]
+	fmla z0.d, z1.d, z15.d[1]
+	fmls z0.s, z1.s, z2.s[0]
+	fmul z0.h, z1.h, z7.h[7]
+	fmul z0.s, z1.s, z7.s[3]
+	fmul z0.d, z1.d, z15.d[1]
+	sdot z0.s, z1.b, z2.b
+	udot z0.d, z1.h, z2.h
+	sdot z0.s, z1.b, z7.b[3]
+	udot z0.d, z1.h, z15.h[1]
+	mul z0.h, z1.h, z7.h[7]
+	mul z0.s, z1.s, z7.s[3]
+	mul z0.d, z1.d, z15.d[1]
+	mla z0.h, z1.h, z7.h[7]
+	mla z0.s, z1.s, z7.s[3]
+	mls z0.d, z1.d, z15.d[1]
+	fadd z0.h, p0/m, z0.h, #0.5

@@ -225,10 +225,11 @@ static int parse_mem(As *a, const char **pp, const char *e, A64Op *op)
 	const char *s = p;
 	while (p < e && isidc((unsigned char)*p)) p++;
 	A64Op r;
-	if (!parse_reg(a, s, (size_t)(p - s), &r, 0) || r.kind != A64O_REG || r.cls != A64_X)
+	if (!parse_reg(a, s, (size_t)(p - s), &r, 0) || r.kind != A64O_REG || (r.cls != A64_X && !(r.cls == A64_Z && r.arr)))
 		return err(a, "invalid operand for instruction");
 	memset(op, 0, sizeof *op);
 	op->kind = A64O_MEM; op->reg = r.reg; op->mode = A64M_OFF;
+	if (r.cls == A64_Z) { op->cls = A64_Z; op->arr = r.arr; }	/* SVE [Zn.T{, #imm}] */
 	p = ws(p, e);
 	if (p < e && *p == ',') {
 		p = ws(p + 1, e);
@@ -236,6 +237,7 @@ static int parse_mem(As *a, const char **pp, const char *e, A64Op *op)
 		while (p < e && isidc((unsigned char)*p)) p++;
 		if (p > s && parse_reg(a, s, (size_t)(p - s), &r, 0) && r.kind == A64O_REG) {
 			op->mode = A64M_REG; op->index = r.reg; op->idxcls = r.cls; op->shift = A64_LSL;
+			if (r.cls == A64_Z) op->idx = r.arr;	/* SVE [Xn, Zm.T{, ext}] */
 			p = ws(p, e);
 			if (p < e && *p == ',') {
 				p = ws(p + 1, e);
@@ -291,7 +293,7 @@ static int names_ops(const char *m, size_t n)
 	case 'h': return N("hint");
 	case 'i': return N("isb") || N("ic");
 	case 'm': return N("msr") || N("mrs");
-	case 'p': return N("prfm") || N("prfum") || N("psb");
+	case 'p': return N("prfm") || N("prfum") || N("psb") || N("prfb") || N("prfh") || N("prfw") || N("prfd");
 	case 's': return N("sys") || N("sysl") || N("sb");
 	case 't': return N("tlbi") || N("tsb");
 	}

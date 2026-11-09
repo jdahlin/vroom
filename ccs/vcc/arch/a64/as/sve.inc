@@ -169,6 +169,112 @@ static int sve_ldst(Ctx *c, const char *mn, size_t n)
 	return 0;
 }
 
+#define OUT2(v) do { *c->out = (v); return 0; } while (0)
+/* gathers/scatters, first-fault, non-fault, non-temporal, ld1rq, prf[bhwd]:
+ * returns 1 when the mnemonic is none of these */
+static int sve_ldst2(Ctx *c, const char *mn, size_t n)
+{
+	const A64Op *o = c->op;
+	int load, ff = 0, nf = 0, nt = 0, rq = 0, sgn = 0, msz;
+	const char *p = mn;
+	if (n >= 4 && !memcmp(mn, "prf", 3)) {
+		msz = mn[3] == 'b' ? 0 : mn[3] == 'h' ? 1 : mn[3] == 'w' ? 2 : mn[3] == 'd' ? 3 : -1;
+		if (n != 4 || msz < 0) return 1;
+		if (c->n != 3 || o[0].kind != A64O_NAME || !ispg(&o[1], 0) || o[2].kind != A64O_MEM || o[2].cls == A64_Z) BADOPS;
+		static const char *const ops[] = { "pldl1keep", "pldl1strm", "pldl2keep", "pldl2strm", "pldl3keep", "pldl3strm", 0, 0,
+						   "pstl1keep", "pstl1strm", "pstl2keep", "pstl2strm", "pstl3keep", "pstl3strm" };
+		unsigned op = 16;
+		for (unsigned i = 0; i < 14; i++) if (ops[i] && strlen(ops[i]) == o[0].nlen && !strncasecmp(ops[i], o[0].name, o[0].nlen)) op = i;
+		if (op == 16) BADOPS;
+		const A64Op *mm = &o[2];
+		unsigned f = R(&o[1]) << 10 | (unsigned)mm->reg << 5 | op;
+		if (mm->mode == A64M_OFF) {
+			if (mm->hassym || mm->mod || (mm->imm && !mm->mulvl) || mm->imm < -32 || mm->imm > 31) BADOPS;
+			OUT2(0x85c00000u | ((unsigned)mm->imm & 0x3f) << 16 | (unsigned)msz << 13 | f);
+		}
+		if (mm->mode != A64M_REG || mm->idxcls != A64_X || mm->index == 31) BADOPS;
+		if (msz ? !(mm->hasamt == 3 && mm->shift == A64_LSL && mm->imm == msz) : mm->hasamt != 0) BADOPS;
+		OUT2(0x8400c000u | (unsigned)msz << 23 | (unsigned)mm->index << 16 | f);
+	}
+	if (n < 4 || (memcmp(mn, "ld", 2) && memcmp(mn, "st", 2))) return 1;
+	load = mn[0] == 'l';
+	p += 2;
+	if (load && !memcmp(p, "ff", 2)) { ff = 1; p += 2; }
+	else if (load && !memcmp(p, "nf", 2)) { nf = 1; p += 2; }
+	else if (!memcmp(p, "nt", 2)) { nt = 1; p += 2; }
+	if (*p++ != '1') return 1;
+	if (load && !ff && !nf && !nt && p[0] == 'r' && p[1] == 'q') { rq = 1; p += 2; }
+	if (load && *p == 's' && !nt && !rq) { sgn = 1; p++; }
+	switch (*p++) { case 'b': msz = 0; break; case 'h': msz = 1; break; case 'w': msz = 2; break; case 'd': msz = 3; break; default: return 1; }
+	if (p != mn + n) return 1;
+	if (c->n != 3 || o[0].kind != A64O_LIST || o[0].cls != A64_Z || o[0].nregs != 1 || o[2].kind != A64O_MEM) return 1;
+	const A64Op *mm = &o[2];
+	int gather = mm->cls == A64_Z || (mm->mode == A64M_REG && mm->idxcls == A64_Z);
+	if (!gather && !ff && !nf && !nt && !rq) return 1;	/* plain contiguous: sve_ldst */
+	if (load ? !ispg(&o[1], 1) : !ispg(&o[1], 0)) BADOPS;
+	int esz = sz_(&o[0]);
+	unsigned f = R(&o[1]) << 10 | (unsigned)mm->reg << 5 | R(&o[0]);
+	if (gather) {
+		if (nf || nt || rq) BADOPS;	/* SVE2 ldnt1 gathers: not yet */
+		if (esz != 2 && esz != 3) BADOPS;
+		if (msz > esz || (sgn && msz == esz)) BADOPS;
+		unsigned u = load && !sgn, d = esz == 3;
+		if (mm->cls == A64_Z) {	/* [Zn.T{, #imm}] */
+			if (mm->arr != o[0].arr || mm->mode != A64M_OFF || mm->hassym || mm->mod || mm->mulvl) BADOPS;
+			int64_t im = mm->imm;
+			if (im < 0 || im % (1 << msz) || (im >> msz) > 31) BADOPS;
+			unsigned i5 = (unsigned)(im >> msz) << 16;
+			if (load) OUT2((d ? 0xc4208000u : 0x84208000u) | (unsigned)msz << 23 | i5 | u << 14 | (unsigned)ff << 13 | f);
+			OUT2((d ? 0xe440a000u : 0xe460a000u) | (unsigned)msz << 23 | i5 | f);
+		}
+		/* [Xn, Zm.T{, uxtw|sxtw|lsl #msz}] */
+		if (mm->idx != o[0].arr) BADOPS;
+		unsigned zm = (unsigned)mm->index << 16, sc = 0, xs = 0, ext = 0;
+		if (mm->hasamt >= 2) {
+			if (mm->shift == A64_UXTW || mm->shift == A64_SXTW) { ext = 1; xs = mm->shift == A64_SXTW; }
+			else if (mm->shift != A64_LSL || !d) BADOPS;
+			if (mm->hasamt == 3) { if (mm->imm != msz || !msz) BADOPS; sc = 1; }
+			else if (mm->shift == A64_LSL) BADOPS;
+		}
+		if (!d && !ext) BADOPS;
+		if (load) {
+			uint32_t b = !d ? 0x84000000u : ext ? 0xc4000000u : 0xc4408000u;
+			OUT2(b | (unsigned)msz << 23 | (d && !ext ? 0 : xs << 22) | sc << 21 | zm | u << 14 | (unsigned)ff << 13 | f);
+		}
+		uint32_t b = !d ? 0xe4408000u : ext ? 0xe4008000u : 0xe400a000u;
+		OUT2(b | (unsigned)msz << 23 | sc << 21 | zm | (ext ? xs << 14 : 0) | f);
+	}
+	/* contiguous variants */
+	if (mm->cls == A64_Z) BADOPS;
+	int dt = sgn || (!nt && !rq) ? ld_dtype(msz, esz, sgn) : -1;
+	if ((nt || rq) && esz != msz) BADOPS;
+	if (!nt && !rq && dt < 0) BADOPS;
+	if (mm->mode == A64M_OFF) {
+		if (mm->hassym || mm->mod) BADOPS;
+		int64_t im = mm->imm;
+		if (rq) {
+			if (mm->mulvl || im % 16 || im < -128 || im > 112) BADOPS;
+			OUT2(0xa4002000u | (unsigned)msz << 23 | ((unsigned)(im / 16) & 15) << 16 | f);
+		}
+		if ((im && !mm->mulvl) || im < -8 || im > 7) BADOPS;
+		unsigned i4 = ((unsigned)im & 15) << 16;
+		if (nf) OUT2(0xa410a000u | (unsigned)dt << 21 | i4 | f);
+		if (nt) OUT2((load ? 0xa400e000u : 0xe410e000u) | (unsigned)msz << 23 | i4 | f);
+		if (ff) {	/* ldff1 [Xn] is [Xn, xzr] */
+			if (im) BADOPS;
+			OUT2(0xa4006000u | (unsigned)dt << 21 | 31u << 16 | f);
+		}
+		BADOPS;
+	}
+	if (nf || mm->mode != A64M_REG || mm->idxcls != A64_X || (mm->index == 31 && !ff)) BADOPS;
+	if (msz ? !(mm->hasamt == 3 && mm->shift == A64_LSL && mm->imm == msz) : mm->hasamt != 0) BADOPS;
+	unsigned rm = (unsigned)mm->index << 16;
+	if (rq) OUT2(0xa4000000u | (unsigned)msz << 23 | rm | f);
+	if (nt) OUT2((load ? 0xa400c000u : 0xe4006000u) | (unsigned)msz << 23 | rm | f);
+	OUT2(0xa4006000u | (unsigned)dt << 21 | rm | f);	/* ldff1 */
+}
+#undef OUT2
+
 static int k_sve(Ctx *c, const char *mn, size_t n)
 {
 	const A64Op *o = c->op;
@@ -176,7 +282,11 @@ static int k_sve(Ctx *c, const char *mn, size_t n)
 	uint32_t b;
 #define MN(s) (n == sizeof s - 1 && !memcmp(mn, s, sizeof s - 1))
 #define OUT(v) do { *c->out = (v); return 0; } while (0)
-	if (k && o[0].kind == A64O_LIST && o[0].cls == A64_Z) return sve_ldst(c, mn, n);
+	if ((k && o[0].kind == A64O_LIST && o[0].cls == A64_Z) || (n == 4 && mn[0] == 'p')) {
+		int r = sve_ldst2(c, mn, n);
+		if (r != 1) return r;
+		if (k && o[0].kind == A64O_LIST) return sve_ldst(c, mn, n);
+	}
 
 	/* element counts: cnt[bhwd] / inc / dec (scalar or vector), pattern, mul #imm */
 	if (n == 4 && (!memcmp(mn, "cnt", 3) || !memcmp(mn, "inc", 3) || !memcmp(mn, "dec", 3)) && strchr("bhwd", mn[3])) {
@@ -396,7 +506,7 @@ static int k_sve(Ctx *c, const char *mn, size_t n)
 		};
 		static const SveOp fu2[] = { { "frecpe", 0x650e3000 }, { "frsqrte", 0x650f3000 } };
 		double d;
-		if (k == 3 && isz(&o[1]) && isz(&o[2]) && zsame(&o[0], &o[1]) && zsame(&o[0], &o[2]) && SVEOP(fp3))
+		if (k == 3 && isz(&o[1]) && isz(&o[2]) && !o[2].hasidx && zsame(&o[0], &o[1]) && zsame(&o[0], &o[2]) && SVEOP(fp3))
 			OUT(b | (unsigned)es << 22 | R(&o[2]) << 16 | R(&o[1]) << 5 | zd);
 		if (k == 2 && isz(&o[1]) && zsame(&o[0], &o[1]) && SVEOP(fu2))
 			OUT(b | (unsigned)es << 22 | R(&o[1]) << 5 | zd);
@@ -435,6 +545,24 @@ static int k_sve(Ctx *c, const char *mn, size_t n)
 			if (fp_imm8(d, &i8)) BADOPS;
 			OUT(0x0510c000u | (unsigned)es << 22 | R(&o[1]) << 16 | i8 << 5 | zd);
 		}
+	}
+	/* by element: Zd.T, Zn.T, Zm.T[i] (fmla/fmls/fmul, mla/mls/mul), and sdot/udot */
+	static const SveOp byel[] = { { "fmla", 0x64200000 }, { "fmls", 0x64200400 }, { "fmul", 0x64202000 },
+				      { "mla", 0x44200800 }, { "mls", 0x44200c00 }, { "mul", 0x4420f800 } };
+	if (k == 3 && isz(&o[1]) && zsame(&o[0], &o[1]) && o[2].kind == A64O_REG && o[2].cls == A64_Z && o[2].hasidx &&
+	    o[2].arr == o[0].arr && es >= 1 && es <= 3 && SVEOP(byel)) {
+		unsigned i = o[2].idx, zm = R(&o[2]);
+		if (es == 1) { if (i > 7 || zm > 7) BADOPS; OUT(b | (i >> 2) << 22 | (i & 3) << 19 | zm << 16 | R(&o[1]) << 5 | zd); }
+		if (es == 2) { if (i > 3 || zm > 7) BADOPS; OUT(b | 0x800000u | i << 19 | zm << 16 | R(&o[1]) << 5 | zd); }
+		if (i > 1 || zm > 15) BADOPS;
+		OUT(b | 0xc00000u | i << 20 | zm << 16 | R(&o[1]) << 5 | zd);
+	}
+	if ((MN("sdot") || MN("udot")) && k == 3 && (es == 2 || es == 3) && isz(&o[1]) && sz_(&o[1]) == es - 2 &&
+	    o[2].kind == A64O_REG && o[2].cls == A64_Z && o[2].arr == o[1].arr) {
+		unsigned u = MN("udot") ? 0x400u : 0, d = es == 3, zm = R(&o[2]), i = o[2].idx;
+		if (!o[2].hasidx) OUT(0x44800000u | d << 22 | zm << 16 | u | R(&o[1]) << 5 | zd);
+		if (d ? (i > 1 || zm > 15) : (i > 3 || zm > 7)) BADOPS;
+		OUT((d ? 0x44e00000u | i << 20 : 0x44a00000u | i << 19) | zm << 16 | u | R(&o[1]) << 5 | zd);
 	}
 	/* mov Zd.T, Vn | Zn.T[i]: dup (indexed) */
 	if ((MN("mov") || MN("dup")) && k == 2 && es <= 4 &&
@@ -509,7 +637,7 @@ static int k_sve(Ctx *c, const char *mn, size_t n)
 		{ "trn1", 0x05207000 }, { "trn2", 0x05207400 },
 	};
 	static const SveOp v3d[] = { { "and", 0x04203000 }, { "orr", 0x04603000 }, { "eor", 0x04a03000 }, { "bic", 0x04e03000 } };
-	if (k == 3 && isz(&o[1]) && isz(&o[2]) && es <= 3) {
+	if (k == 3 && isz(&o[1]) && isz(&o[2]) && !o[2].hasidx && es <= 3) {
 		if (zsame(&o[0], &o[1]) && zsame(&o[0], &o[2]) && SVEOP(v3))
 			OUT(b | (unsigned)es << 22 | R(&o[2]) << 16 | R(&o[1]) << 5 | zd);
 		if (SVEOP(v3d)) OUT(b | R(&o[2]) << 16 | R(&o[1]) << 5 | zd);
@@ -606,6 +734,7 @@ static int sve_insn(const char *mn, size_t n, const A64Op *op, int nop)
 {
 	for (int i = 0; i < nop && i < 2; i++)	/* an SVE form has its Z/P operand first or second */
 		if ((op[i].kind == A64O_REG || op[i].kind == A64O_LIST) && (op[i].cls == A64_Z || op[i].cls == A64_P)) return 1;
-	return (n == 5 && (!memcmp(mn, "addvl", 5) || !memcmp(mn, "addpl", 5))) ||
+	return (n == 4 && !memcmp(mn, "prf", 3) && nop == 3 && op[0].kind == A64O_NAME && op[2].kind == A64O_MEM && op[1].kind == A64O_REG && op[1].cls == A64_P) ||
+	       (n == 5 && (!memcmp(mn, "addvl", 5) || !memcmp(mn, "addpl", 5))) ||
 	       (n == 4 && (!memcmp(mn, "cnt", 3) || !memcmp(mn, "inc", 3) || !memcmp(mn, "dec", 3)) && strchr("bhwd", mn[3]));
 }

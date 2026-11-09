@@ -754,8 +754,10 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
   converts, ld1/ld1r/ldN/st1/stN contiguous (scalar+imm, scalar+scalar),
   SVE2 xar/eor3/bcax/bsl/usra; FP arithmetic, fused, unary, converts,
   compares, reductions, fadda, fmov/fdup/fcpy, dup indexed; splice, unpk,
-  brk*, cntp/incp/decp.  Left: gathers/scatters, first-fault/non-temporal
-  loads, by-element forms, SME (none of them in the corpora).  *Validated:*
+  brk*, cntp/incp/decp; gathers/scatters (vector+imm, scalar+vector with
+  uxtw/sxtw/lsl), ldff1/ldnf1/ldnt1/stnt1/ld1rq, prf[bhwd]; by-element
+  fmla/fmls/fmul/mla/mls/mul, sdot/udot.  Left: SVE2 non-temporal gathers,
+  the rest of SVE2 (widening/narrowing, histogram, crypto), SME.  *Validated:*
   `ccs/vcc/tests/vas/sve.s` vs llvm-mc; T7 `-O "3 -march=armv9-a+sve2"`
   1519/1519.
 - [ ] **Directives**: left: `.arch`/`.cpu` gating instructions (T4).
