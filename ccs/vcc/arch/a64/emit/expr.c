@@ -1,5 +1,5 @@
 /* vcc code generator: expressions */
-#include "emitimpl.h"
+#include "../../../emit/emitimpl.h"
 
 /* ---------------- expressions ---------------- */
 

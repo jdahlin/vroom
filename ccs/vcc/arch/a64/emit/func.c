@@ -1,5 +1,5 @@
 /* vcc code generator: functions: prologue, epilogue, finishing */
-#include "emitimpl.h"
+#include "../../../emit/emitimpl.h"
 
 /* ---------------- functions ---------------- */
 

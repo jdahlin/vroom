@@ -1,5 +1,5 @@
 /* vcc code generator: instruction records, byte buffers, immediates, register names */
-#include "emitimpl.h"
+#include "../../../emit/emitimpl.h"
 
 const char cond_name[][8] = { "eq", "ne", "hs", "lo", "mi", "pl", "vs", "vc", "hi", "ls", "ge", "lt", "gt", "le", "al" };
 

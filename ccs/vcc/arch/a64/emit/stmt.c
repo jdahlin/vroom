@@ -1,5 +1,5 @@
 /* vcc code generator: local initialisers, cleanups, statements */
-#include "emitimpl.h"
+#include "../../../emit/emitimpl.h"
 
 /* ---------------- local initialisers ---------------- */
 

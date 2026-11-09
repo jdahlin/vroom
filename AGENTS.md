@@ -33,7 +33,9 @@ assembler, linker, behind `vcc`/`vas`/`vld` shims and the `vccd` server.
   - `pp/`: preprocessor (pull model, clang-exact expansion), its generated
     tables (`ppdata*.inc` via `gen-ppdata.sh`) and the include-directory cache.
   - `cc/`: parser + sema (GNU C11, clang's layout and constant rules).
-  - `emit/`: code generator (straight from the AST).
+  - `emit/`: code generator (straight from the AST): the shared part, state
+    and types (`emitimpl.h`), the work queue and threads (`tu.c`), data
+    objects, the prepass; the arm64 part is `arch/a64/emit/`.
   - `as/`: GNU as syntax (`as.c`) and the standalone `vasm` driver.
   - `obj/`: the in-memory object (sections, frags, symbols, fixups) and its
     ELF writer.
@@ -46,10 +48,15 @@ assembler, linker, behind `vcc`/`vas`/`vld` shims and the `vccd` server.
     build uses no llvm-ar) and `rsh.c`, kbuild's recipe subset of sh, run for
     `vsh` (`build/ccs/vsh/sh`, shim.c with `-DVSH`), make's SHELL in
     `bench/vccd-kbuild.sh`; anything outside the subset goes to `$VSH_REAL`.
-  - `arch/a64/`: arm64: the encoder (`as/enc.c`, `a64.h`), system registers.
+  - `arch/a64/`: arm64: the encoder (`as/enc.c`, `a64.h`), system registers;
+    `emit/`: instruction records and register names (`ins.h`, `a64impl.h`,
+    included by `emit/emitimpl.h`), expressions, statements, calls (AAPCS64
+    and Apple's), builtins, inline asm, the record optimizer (`opt.c`), the
+    printer (`print.c`) and the encoder of records (`obj.c`).  It is compiled
+    in the `emit` unity TU (`emit_SRC`), so VPRIV stays static.
   - `platform/darwin/`: the Mach-O writer; Apple PMU counters (`pmc.c`).
-  - `pp/`, `cc/` and `emit/` are directories of files by topic, one internal
-    header each (`ppimpl.h`, `ccimpl.h`, `emitimpl.h`) with the types, macros
+  - `pp/`, `cc/` and `emit/` (with `arch/<cpu>/emit/`) are directories of
+    files by topic, one internal header each (`ppimpl.h`, `ccimpl.h`, `emitimpl.h`) with the types, macros
     and prototypes the files share; a shared function is `VPRIV` (static in
     the unity build).  Each such module is compiled as one TU by default
     (`obj/unity/MOD.c` #includes the files in `MOD_SRC`, SQLite style); `make

@@ -1,5 +1,5 @@
 /* vcc code generator: calls and inline expansion */
-#include "emitimpl.h"
+#include "../../../emit/emitimpl.h"
 
 #define MAXARGS 128
 

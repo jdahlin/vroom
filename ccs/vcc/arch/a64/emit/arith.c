@@ -1,5 +1,5 @@
 /* vcc code generator: integer helpers, truth tests, casts, arithmetic */
-#include "emitimpl.h"
+#include "../../../emit/emitimpl.h"
 
 /* ---------------- integer helpers ---------------- */
 

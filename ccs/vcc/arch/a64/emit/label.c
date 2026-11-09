@@ -1,5 +1,5 @@
 /* vcc code generator: emitting records, local labels and reachability */
-#include "emitimpl.h"
+#include "../../../emit/emitimpl.h"
 
 /* ---------------- local labels and reachability ---------------- */
 

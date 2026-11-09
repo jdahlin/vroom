@@ -1,5 +1,5 @@
 /* vcc code generator: reference logging and symbol bindings */
-#include "emitimpl.h"
+#include "../../../emit/emitimpl.h"
 
 VPRIV void note_ref(ecx *e, uint32_t ref)
 {

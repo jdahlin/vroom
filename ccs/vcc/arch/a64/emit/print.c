@@ -1,5 +1,5 @@
 /* vcc code generator: printer: records -> assembly text */
-#include "emitimpl.h"
+#include "../../../emit/emitimpl.h"
 
 /* ---------------- printer: records -> assembly text ---------------- */
 

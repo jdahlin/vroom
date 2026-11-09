@@ -1,5 +1,5 @@
 /* vcc code generator: builtins */
-#include "emitimpl.h"
+#include "../../../emit/emitimpl.h"
 
 /* ---------------- builtins ---------------- */
 

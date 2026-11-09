@@ -1,5 +1,5 @@
 /* vcc code generator: temporaries, frame slots, values, lvalues */
-#include "emitimpl.h"
+#include "../../../emit/emitimpl.h"
 
 /* ---------------- temporaries and frame slots ---------------- */
 

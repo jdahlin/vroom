@@ -1,5 +1,5 @@
 /* vcc code generator: inline asm */
-#include "emitimpl.h"
+#include "../../../emit/emitimpl.h"
 
 /* ---------------- inline asm ---------------- */
 

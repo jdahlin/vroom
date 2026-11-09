@@ -1,5 +1,5 @@
 /* vcc code generator: AAPCS64 classification, spilling around calls */
-#include "emitimpl.h"
+#include "../../../emit/emitimpl.h"
 
 /* ---------------- AAPCS64 (floating point and HFAs in v0-v7) ---------------- */
 

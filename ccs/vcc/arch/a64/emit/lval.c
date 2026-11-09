@@ -1,5 +1,5 @@
 /* vcc code generator: lvalues from expressions, typed loads and stores */
-#include "emitimpl.h"
+#include "../../../emit/emitimpl.h"
 
 /* ---------------- lvalues from expressions ---------------- */
 

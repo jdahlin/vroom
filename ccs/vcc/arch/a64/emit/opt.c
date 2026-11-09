@@ -1,5 +1,5 @@
 /* vcc code generator: record-level clean-ups once a function is generated */
-#include "emitimpl.h"
+#include "../../../emit/emitimpl.h"
 
 /*
  * Register liveness over the function's records (basic blocks split at

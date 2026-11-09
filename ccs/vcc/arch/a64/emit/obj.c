@@ -1,5 +1,5 @@
 /* vcc code generator: object backend: records -> machine code */
-#include "emitimpl.h"
+#include "../../../emit/emitimpl.h"
 
 VPRIV size_t it_open(ecx *e, uint32_t kind)
 {

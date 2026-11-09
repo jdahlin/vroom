@@ -1,5 +1,5 @@
 /* vcc code generator: floating point (long double through libcalls) */
-#include "emitimpl.h"
+#include "../../../emit/emitimpl.h"
 
 enum { FV0 = 16, FV1 = 17 };
 
