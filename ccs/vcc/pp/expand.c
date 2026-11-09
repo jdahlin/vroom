@@ -437,7 +437,7 @@ const uint8_t idch_tab[256] = {	/* [a-zA-Z0-9_$] and >= 0x80 */
 #undef IDCH_ROW
 
 /* a UCN (\\uXXXX, \\UXXXXXXXX) at s[i]: its length, else 0 */
-static size_t ucn_at(const char *s, size_t n, size_t i)
+static __attribute__((noinline, cold)) size_t ucn_at(const char *s, size_t n, size_t i)
 {
 	size_t d = i + 1 < n && s[i] == '\\' ? (s[i + 1] == 'u' ? 4 : s[i + 1] == 'U' ? 8 : 0) : 0;
 
@@ -456,14 +456,14 @@ static int classify(const char *s, size_t n, int rkind)
 
 	if (!n)
 		return -1;
-	if ((idch((unsigned char)s[0]) && !(s[0] >= '0' && s[0] <= '9')) || ucn_at(s, n, 0)) {
+	if ((idch((unsigned char)s[0]) && !(s[0] >= '0' && s[0] <= '9')) || (s[0] == '\\' && ucn_at(s, n, 0))) {
 		for (i = 0; i < n;) {
-			size_t u = ucn_at(s, n, i);
+			size_t u;
 
-			if (u)
-				i += u;
-			else if (idch((unsigned char)s[i]))
+			if (idch((unsigned char)s[i]))
 				i++;
+			else if (s[i] == '\\' && (u = ucn_at(s, n, i)))
+				i += u;
 			else
 				break;
 		}
@@ -490,7 +490,7 @@ static int classify(const char *s, size_t n, int rkind)
 
 			if ((c == '+' || c == '-') && strchr("eEpP", s[i - 1]))
 				continue;
-			if (ucn_at(s, n, i)) {
+			if (c == '\\' && ucn_at(s, n, i)) {
 				i += ucn_at(s, n, i) - 1;
 				continue;
 			}

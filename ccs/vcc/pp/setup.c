@@ -285,7 +285,7 @@ int pp_skip_top(pp *p)
 }
 
 /* an identifier's \\u/\\U escapes as UTF-8, in place (never longer), as clang -E */
-static size_t ucn_utf8(char *s, size_t n)
+static __attribute__((noinline, cold)) size_t ucn_utf8(char *s, size_t n)
 {
 	size_t o = 0;
 
