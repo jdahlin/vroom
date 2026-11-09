@@ -333,7 +333,8 @@ static void type_str(cc *c, qty t, const char *inner, vfixbuf *out, bool *ok)
 	}
 	}
 	if (inner[0]) {
-		vfixbuf_puts(&b, " ");
+		if (inner[0] != '[')	/* clang: 'int[2]', 'int (*)[2]' */
+			vfixbuf_puts(&b, " ");
 		vfixbuf_puts(&b, inner);
 	}
 	vfixbuf_put(out, b.s, b.n);

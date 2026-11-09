@@ -222,7 +222,10 @@ static __attribute__((noinline)) uint32_t member_slow(cc *c, uint32_t base, uint
 	}
 	ti = T(c, bt)->aux;
 	if (!(c->tags[ti].flags & RF_COMPLETE)) {
-		cc_error(c, loc, "incomplete definition of type");
+		pp_span r = rng(c, base);
+
+		report(c, "error", loc, &r, 1, NULL, 0, "incomplete definition of type '%s'", tyname(c, bt));
+		fwd_note(c, bt);
 		return mk_int(c, 0, prim(TY_INT), loc);
 	}
 	d = find_member(c, ti, name, path, 0);
@@ -310,8 +313,11 @@ VPRIV uint32_t addr_of(cc *c, uint32_t n, uint32_t loc)
 
 	if (bitfield_of(c, n))
 		cc_error(c, loc, "address of bit-field requested");
-	if (!(N(n)->flags & NF_LVALUE) && KIND(c, t) != TY_FUNC && N(n)->op != N_COMPLIT)
-		cc_error(c, loc, "cannot take the address of an rvalue");
+	if (!(N(n)->flags & NF_LVALUE) && KIND(c, t) != TY_FUNC && N(n)->op != N_COMPLIT) {
+		pp_span sp = rng(c, n);
+
+		report(c, "error", loc, &sp, 1, NULL, 0, "cannot take the address of an rvalue of type '%s'", tyname(c, t));
+	}
 	mark_addr_taken(c, n);
 	r = mk(c, N_ADDR, ty_ptr(c, t), loc);
 	N(r)->a = n;
@@ -351,7 +357,10 @@ static uint32_t generic_sel(cc *c, uint32_t loc)
 	if (!chosen)
 		chosen = def;
 	if (!chosen) {
-		cc_error(c, loc, "controlling expression type not compatible with any generic association type");
+		pp_span r = rng(c, ctl);
+
+		report(c, "error", N(ctl)->loc, &r, 1, NULL, 0,
+		       "controlling expression type '%s' not compatible with any generic association type", tyname(c, ct));
 		return mk_int(c, 0, prim(TY_INT), loc);
 	}
 	return chosen;

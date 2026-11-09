@@ -88,9 +88,25 @@ Tio lager; varje steg nedan säger vilka det berör.
 
 ### D1. Strukturerade diagnoser (grunden)
 
-- **D1.0 snabba vinster.**  De 47 vcc-format som säger mindre än clangs (`vcc-diagcov.py
-  -v`, "say less than clang"): lägg till typen, fältet, de förväntade/givna antalen.
-  *Validera:* lager 1, och listan krymper till de fall där vcc:s text är ett medvetet val.
+- **D1.0 snabba vinster.**  *Klart 2026-11-09.*  De 47 vcc-format som sade mindre än
+  clangs: nu med typen, fältet, förväntat/givet antal argument, indexet och gränsen, och
+  clangs intervall (`~~~`) och "forward declaration"-noter där clang har dem.  Dessutom:
+  - `-Wexcess-initializers` är en varning som i clang (var ett fel för första
+    elementet och tyst för resten), en gång per lista;
+  - `_Generic` pekar på det styrande uttrycket; `'int[2]'` utan mellanslag som clang;
+  - följdfel borta efter ogiltig unär operand och ogiltig vektor/skalär-konvertering;
+  - attributnamnet i "expected string literal as argument of 'section' attribute",
+    utan efterföljande "expected ')'";
+  - `invalid operand number 3 in inline asm string (2 operands, 0 labels)`: mer än clang.
+  Kvar i listan (13): falska träffar och medvetna val (vcc:s `impossible constraint`
+  och `unknown asm operand name` namnger operanden, clangs gör det inte).  Fynd som
+  hör till D2 eller är egna buggar står i TODO.md ("Designated initializers found by
+  PLAN-diag D1.0", "Invalid code accepted").
+  *Validerat:* `vcc-diag.py` 71/71 (5 nya fall: `detail_types`, `detail_fields`,
+  `detail_builtins`, `excess_init`, `attr_string`); `vcc-sema.py` batch/run 878/879,
+  warn 879/879; `vcc-ctests.py` 1740/1740; `vcc-stress.py` 22/22; `vcc-driver.py`
+  41/41; `vbench.py gate` ok (fe +0,29 %, cc +0,24 %).  Täckning: 105 → 136 clang-
+  diagnoser, "säger mindre" 47 → 13.
 - **D1.1 posten.**  `vdiag`: id (clangs namn, t.ex. `err_typecheck_convert_incompatible`;
   egna med `vcc_`-prefix), nivå, flagga, primärt spann + etikett, sekundära spann +
   etiketter, barn (note/help), förslag (spann, text, *tillämplighet*: maskin / kanske /
@@ -212,7 +228,7 @@ D1 och D2 hänger ihop (feltypen behöver posten); D0.2 först så att D2 har en
 
 - [x] D0.1 — 2026-11-09
 - [ ] D0.2
-- [ ] D1.0
+- [x] D1.0 — 2026-11-09
 - [ ] D1.1 – D1.3
 - [ ] D2.1 – D2.3
 - [ ] D3.1 – D3.3

@@ -228,6 +228,7 @@ VPRIV bool is_typedef_name(cc *c, const ptok *t);
 VPRIV uint32_t mk(cc *c, int op, qty ty, uint32_t loc);
 static inline void setspan(cc *c, uint32_t n, uint32_t b);
 VPRIV pp_span rng(cc *c, uint32_t n);
+VPRIV void fwd_note(cc *c, qty t);
 VPRIV uint32_t mk2(cc *c, int op, qty ty, uint32_t loc, uint32_t a, uint32_t b);
 VPRIV void vinit(vec *v);
 VPRIV void vpush(cc *c, vec *v, uint32_t x);
@@ -312,7 +313,7 @@ VPRIV bool const_expr(cc *c, i128 *v, uint32_t *np);
 /* attr.c */
 VPRIV void init_attrs(void);
 VPRIV void skip_balanced(cc *c);
-VPRIV uint32_t string_index(cc *c);
+VPRIV uint32_t string_index(cc *c, uint32_t attr);
 VPRIV int mode_kind(cc *c, uint32_t id, bool sgn);
 static inline bool at_attribute(cc *c);
 static inline bool at_std_attr(cc *c);

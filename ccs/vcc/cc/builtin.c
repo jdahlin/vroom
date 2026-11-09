@@ -1,6 +1,15 @@
 /* vcc front end: builtins: the table and the special forms */
 #include "ccimpl.h"
 
+/* "too few/many arguments", as clang: the caret after the arguments, the callee's name underlined */
+static void arity(cc *c, uint32_t loc, unsigned want, unsigned have)
+{
+	pp_span r = { loc, pp_tok_end(c->p, loc) };
+
+	report(c, "error", c->prevloc, &r, 1, NULL, 0, "too %s arguments to function call, expected %u, have %u",
+	       have < want ? "few" : "many", want, have);
+}
+
 static const builtin builtins[] = {
 	{ "__builtin_constant_p", BI_CONSTANT_P, 1, "i." },
 	{ "__builtin_expect", BI_EXPECT, 1, "lll" },
@@ -423,14 +432,14 @@ VPRIV uint32_t offsetof_expr(cc *c, uint32_t loc)
 			if (!is(c, T_IDENT))
 				fatal(c, tok(c)->loc, "expected identifier");
 			if (!is_record(c, t)) {
-				cc_error(c, tok(c)->loc, "offsetof requires struct, union, or class type");
+				cc_error(c, tok(c)->loc, "offsetof requires struct, union, or class type, '%s' invalid", tyname(c, t));
 				next(c);
 				break;
 			}
 			ti = T(c, t)->aux;
 			d = find_member(c, ti, tok(c)->id, path, 0);
 			if (d < 0) {
-				cc_error(c, tok(c)->loc, "no member named '%.*s'", IDF(tok(c)->id));
+				cc_error(c, tok(c)->loc, "no member named '%.*s' in '%s'", IDF(tok(c)->id), tyname(c, t));
 				next(c);
 				break;
 			}
@@ -449,7 +458,7 @@ VPRIV uint32_t offsetof_expr(cc *c, uint32_t loc)
 
 			expect(c, T_RSQUARE, "']'");
 			if (!is_array(c, t)) {
-				cc_error(c, loc, "subscripted value is not an array");
+				cc_error(c, loc, "subscripted value is not an array ('%s' invalid)", tyname(c, t));
 				break;
 			}
 			t = T(c, t)->base;
@@ -499,7 +508,7 @@ static uint32_t atomic_call(cc *c, const builtin *b, uint32_t loc)
 		args.v[i] = decay(c, args.v[i]);
 	if (id == BI_SYNC_SYNCHRONIZE) {	/* a full barrier: __atomic_thread_fence(seq_cst) */
 		if (args.n)
-			cc_error(c, loc, "too many arguments to function call");
+			arity(c, loc, 0, args.n);
 		args.n = 0;
 		vpush(c, &args, mk_int(c, 5, prim(TY_INT), loc));
 		return mk_builtin(c, BI_ATOMIC_THREAD_FENCE, prim(TY_VOID), loc, &args);
@@ -512,18 +521,20 @@ static uint32_t atomic_call(cc *c, const builtin *b, uint32_t loc)
 	if (b->sig[0] == 's' && (int)args.n == want - 1)	/* __sync_*: sequentially consistent */
 		vpush(c, &args, mk_int(c, 5, prim(TY_INT), loc));
 	if ((int)args.n != want) {
-		cc_error(c, loc, "too %s arguments to function call", (int)args.n < want ? "few" : "many");
+		arity(c, loc, (unsigned)want, args.n);
 		return mk_int(c, 0, prim(TY_INT), loc);
 	}
 	pt = N(args.v[0])->ty;
 	if (!is_ptr(c, pt)) {
-		cc_error(c, loc, "address argument to atomic builtin must be a pointer");
+		pp_span r = rng(c, args.v[0]);
+
+		report(c, "error", loc, &r, 1, NULL, 0, "address argument to atomic builtin must be a pointer ('%s' invalid)", tyname(c, pt));
 		return mk_int(c, 0, prim(TY_INT), loc);
 	}
 	t = QUNQ(T(c, pt)->base);
 	tp = ty_ptr(c, t);
 	if (!(T(c, t)->size == 1 || T(c, t)->size == 2 || T(c, t)->size == 4 || T(c, t)->size == 8 || T(c, t)->size == 16)) {
-		cc_error(c, loc, "address argument to atomic builtin must be a pointer to a 1, 2, 4, 8 or 16 byte type");
+		cc_error(c, loc, "address argument to atomic builtin must be a pointer to 1,2,4,8 or 16 byte type ('%s' invalid)", tyname(c, pt));
 		return mk_int(c, 0, prim(TY_INT), loc);
 	}
 	switch (id) {
@@ -558,14 +569,14 @@ static uint32_t atomic_call(cc *c, const builtin *b, uint32_t loc)
 		break;
 	case BI_SYNC_VAL_CAS: case BI_SYNC_BOOL_CAS:	/* (p, old, new) -> previous *p, or whether it was old */
 		if (!is_integer(c, t) && !is_ptr(c, t))
-			cc_error(c, loc, "address argument to atomic operation must be a pointer to integer or pointer");
+			cc_error(c, loc, "address argument to atomic operation must be a pointer to integer or pointer ('%s' invalid)", tyname(c, pt));
 		args.v[1] = convert(c, args.v[1], t);
 		args.v[2] = convert(c, args.v[2], t);
 		rt = id == BI_SYNC_VAL_CAS ? t : prim(TY_BOOL);
 		break;
 	default:	/* fetch_op / op_fetch */
 		if (!is_integer(c, t) && !is_ptr(c, t))
-			cc_error(c, loc, "address argument to atomic operation must be a pointer to integer or pointer");
+			cc_error(c, loc, "address argument to atomic operation must be a pointer to integer or pointer ('%s' invalid)", tyname(c, pt));
 		args.v[1] = convert(c, args.v[1], is_ptr(c, t) ? c->t_ptrdiff : t);
 		rt = t;
 		break;
@@ -589,7 +600,7 @@ static uint32_t generic_bitcount(cc *c, int id, uint32_t loc)
 
 	args_list(c, &args);
 	if (args.n < 1 || args.n > (id == BI_POPCOUNTG ? 1u : 2u)) {
-		cc_error(c, loc, "too %s arguments to function call", args.n ? "many" : "few");
+		arity(c, loc, id == BI_POPCOUNTG ? 1u : args.n ? 2u : 1u, args.n);
 		return mk_int(c, 0, prim(TY_INT), loc);
 	}
 	x = decay(c, args.v[0]);
@@ -737,7 +748,7 @@ VPRIV uint32_t builtin_call(cc *c, const builtin *b, uint32_t loc)
 		args_list(c, &args);
 		c->unevaluated--;
 		if (args.n != 1)
-			cc_error(c, loc, "too %s arguments to function call", args.n ? "many" : "few");
+			arity(c, loc, 1, args.n);
 		for (uint32_t i = 0; i < args.n; i++)
 			args.v[i] = decay(c, args.v[i]);
 		n = mk_builtin(c, b->id, prim(TY_INT), loc, &args);
@@ -756,7 +767,7 @@ VPRIV uint32_t builtin_call(cc *c, const builtin *b, uint32_t loc)
 
 		args_list(c, &args);
 		if (args.n != 1) {
-			cc_error(c, loc, "too %s arguments to function call", args.n ? "many" : "few");
+			arity(c, loc, 1, args.n);
 			return mk_int(c, 0, prim(TY_INT), loc);
 		}
 		a = convert(c, rvalue(c, args.v[0]), ct);
@@ -795,11 +806,12 @@ VPRIV uint32_t builtin_call(cc *c, const builtin *b, uint32_t loc)
 			args.v[i] = a;
 		}
 		if (args.n < np || (args.n > np && !(f->flags & TF_VARIADIC)))
-			cc_error(c, loc, "too %s arguments to function call", args.n < np ? "few" : "many");
+			arity(c, loc, np, args.n);
 		switch (b->id) {
 		case BI_ADD_OVERFLOW: case BI_SUB_OVERFLOW: case BI_MUL_OVERFLOW:
 			if (args.n != 3 || !is_ptr(c, N(args.v[2])->ty))
-				cc_error(c, loc, "result argument to overflow builtin must be a pointer");
+				cc_error(c, args.n == 3 ? N(args.v[2])->loc : loc, "result argument to overflow builtin must be a pointer to a non-const integer type ('%s' invalid)",
+					 args.n == 3 ? tyname(c, N(args.v[2])->ty) : "void");
 			break;
 		case BI_ADDC: case BI_SUBC:
 			if (args.n != 4 || !is_ptr(c, N(args.v[3])->ty))

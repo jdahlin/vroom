@@ -101,7 +101,7 @@ static uint32_t cond_of(cc *c)
 
 static uint32_t asm_string(cc *c)
 {
-	return string_index(c);
+	return string_index(c, 0);
 }
 
 static void asm_operands(cc *c, vec *ops, bool out)
@@ -469,8 +469,12 @@ VPRIV uint32_t statement(cc *c)
 			cnd = N(cnd)->a, et = N(cnd)->ty;	/* -Wswitch looks at the enum before promotion */
 		cnd = rvalue(c, cnd);
 		expect(c, T_RPAREN, "')'");
-		if (!is_integer(c, N(cnd)->ty))
-			cc_error(c, loc, "statement requires expression of integer type");
+		if (!is_integer(c, N(cnd)->ty)) {
+			pp_span r = rng(c, cnd);
+
+			report(c, "error", loc, &r, 1, NULL, 0, "statement requires expression of integer type ('%s' invalid)",
+			       tyname(c, N(cnd)->ty));
+		}
 		c->switch_ty = N(cnd)->ty;
 		c->in_switch++;
 		{

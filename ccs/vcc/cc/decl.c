@@ -251,7 +251,7 @@ static uint32_t declare(cc *c, const dspec *ds, declr *d, qty t, bool file)
 	}
 	if (at.vecsize) {
 		if (!is_arith(c, t) || ty_size(c, t) > at.vecsize || at.vecsize % ty_size(c, t))
-			cc_error(c, d->loc, "invalid vector element type");
+			cc_error(c, d->loc, "invalid vector element type '%s'", tyname(c, t));
 		else
 			t = QT(QI(ty_vector(c, t, at.vecsize)), QQ(t));
 	}
@@ -744,8 +744,10 @@ VPRIV void declaration(cc *c, vec *out, bool file)
 			if (y->kind == S_VAR && ds.sc != SC_EXTERN && ds.sc != SC_TYPEDEF) {
 				if (file)
 					y->flags |= SF_TENTATIVE;
-				else if (!complete(c, y->ty) && ds.sc != SC_STATIC)
-					cc_error(c, d.loc, "variable has incomplete type");
+				else if (!complete(c, y->ty) && ds.sc != SC_STATIC) {
+					cc_error(c, d.loc, "variable has incomplete type '%s'", tyname(c, y->ty));
+					fwd_note(c, y->ty);
+				}
 				if (out && (y->sc == SC_AUTO || y->sc == SC_REGISTER)) {
 					uint32_t n = mk2(c, N_DECL, prim(TY_VOID), d.loc, s, 0);
 

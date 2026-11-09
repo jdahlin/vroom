@@ -73,12 +73,23 @@ VPRIV void skip_balanced(cc *c)
 	} while (depth > 0);
 }
 
-VPRIV uint32_t string_index(cc *c)
+/* a string literal argument; attr: the attribute's name (0: none).  On an error the
+   argument is skipped up to its ')', so the caller's expect() does not report again */
+VPRIV uint32_t string_index(cc *c, uint32_t attr)
 {
 	uint32_t n;
 
 	if (!is_strtok(tok(c)->kind)) {
-		cc_error(c, tok(c)->loc, "expected string literal");
+		if (attr) {
+			int l;
+			const char *s = idname(attr, &l);	/* as written: clang keeps '__alias__' */
+
+			cc_error(c, tok(c)->loc, "expected string literal as argument of '%.*s' attribute", l, s);
+			for (int d = 0; !is(c, T_EOF) && !is(c, T_SEMI) && (d || !is(c, T_RPAREN)); next(c))
+				d += is(c, T_LPAREN) - is(c, T_RPAREN);
+		} else {
+			cc_error(c, tok(c)->loc, "expected string literal");
+		}
 		return 0;
 	}
 	n = string_lit(c);
@@ -125,7 +136,7 @@ __attribute__((noinline)) VPRIV void attribute_list_(cc *c, attrs *a)
 		while (!is(c, close)) {
 			ptok *t = tok(c);
 			int an;
-			uint32_t loc = t->loc;
+			uint32_t loc = t->loc, aid;
 
 			if (accept(c, T_COMMA))
 				continue;
@@ -150,7 +161,8 @@ __attribute__((noinline)) VPRIV void attribute_list_(cc *c, attrs *a)
 					continue;
 				}
 			}
-			an = attr_of(t->id);
+			aid = t->id;	/* t is gone after next() */
+			an = attr_of(aid);
 			if (!an && kwof(t) == KW_const)
 				an = A_NONE;
 			next(c);
@@ -174,7 +186,7 @@ __attribute__((noinline)) VPRIV void attribute_list_(cc *c, attrs *a)
 			case A_VISIBILITY:
 				expect(c, T_LPAREN, "'('");
 				{
-					uint32_t s = string_index(c);
+					uint32_t s = string_index(c, aid);
 
 					if (an == A_SECTION)
 						a->section = s;
@@ -245,7 +257,7 @@ __attribute__((noinline)) VPRIV void attribute_list_(cc *c, attrs *a)
 				a->error_fn = 1;
 				if (is(c, T_LPAREN) && is_strtok(peek(c, 1)->kind)) {
 					next(c);
-					a->errmsg = string_index(c);
+					a->errmsg = string_index(c, aid);
 					expect(c, T_RPAREN, "')'");
 				}
 				break;
@@ -299,6 +311,6 @@ VPRIV void asm_label(cc *c, attrs *a)
 		return;
 	next(c);
 	expect(c, T_LPAREN, "'('");
-	a->asmname = string_index(c);
+	a->asmname = string_index(c, 0);
 	expect(c, T_RPAREN, "')'");
 }

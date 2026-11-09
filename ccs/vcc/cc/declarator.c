@@ -69,7 +69,7 @@ static void param_list(cc *c, dop *op)
 
 				if (vs) {
 					if (!is_arith(c, t) || ty_size(c, t) > vs || vs % ty_size(c, t))
-						cc_error(c, d.loc, "invalid vector element type");
+						cc_error(c, d.loc, "invalid vector element type '%s'", tyname(c, t));
 					else
 						t = QT(QI(ty_vector(c, t, vs)), QQ(t));
 				}
@@ -151,7 +151,9 @@ static void array_suffix(cc *c, dop *op, uint32_t name)
 
 		expect(c, T_RSQUARE, "']'");
 		if (!is_integer(c, N(n)->ty)) {
-			cc_error(c, N(n)->loc, "size of array has non-integer type");
+			pp_span r = rng(c, n);
+
+			report(c, "error", N(n)->loc, &r, 1, NULL, 0, "size of array has non-integer type '%s'", tyname(c, N(n)->ty));
 			v = 1;
 		} else if (!const_int(c, n, &v)) {
 			op->fl = TF_VLA;

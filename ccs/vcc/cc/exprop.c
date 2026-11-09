@@ -116,8 +116,12 @@ static __attribute__((noinline)) uint32_t unary_op(cc *c)
 		if (is_complex(c, N(n)->ty))
 			return cplx_unary(c, op, n, loc);
 		if (is_vector(c, N(n)->ty) ? op == T_TILDE && !is_integer(c, T(c, N(n)->ty)->base)
-		    : !is_arith(c, N(n)->ty) || (op == T_TILDE && !is_integer(c, N(n)->ty)))
-			cc_error(c, loc, "invalid argument type to unary expression");
+		    : !is_arith(c, N(n)->ty) || (op == T_TILDE && !is_integer(c, N(n)->ty))) {
+			pp_span r = rng(c, n);
+
+			report(c, "error", loc, &r, 1, NULL, 0, "invalid argument type '%s' to unary expression", tyname(c, N(n)->ty));
+			return mk_int(c, 0, prim(TY_INT), loc);	/* no follow-on errors from the operand's type */
+		}
 		{
 			uint32_t r = mk(c, N_UNARY, N(n)->ty, loc);
 
@@ -250,8 +254,11 @@ static uint32_t explicit_cast(cc *c, uint32_t n, qty to, uint32_t loc)
 	if (is_void(c, to))
 		return cast_node(c, n, QUNQ(to), CK_VOID);
 	if (KIND(c, to) == TY_UNION && !compatible(c, to, N(n)->ty)) {
-		if (!union_member_for(c, to, n))
-			cc_error(c, loc, "cast to union type from type not present in union");
+		if (!union_member_for(c, to, n)) {
+			pp_span sp = rng(c, n);
+
+			report(c, "error", loc, &sp, 1, NULL, 0, "cast to union type from type '%s' not present in union", tyname(c, N(n)->ty));
+		}
 		return cast_node(c, n, QUNQ(to), CK_UNION);
 	}
 	if (is_vector(c, to) && is_vector(c, N(n)->ty) && T(c, to)->size == T(c, N(n)->ty)->size)
@@ -261,8 +268,11 @@ static uint32_t explicit_cast(cc *c, uint32_t n, qty to, uint32_t loc)
 		uint32_t from = rvalue(c, n);
 
 		if (ty_size(c, to) != ty_size(c, N(from)->ty) || (!is_vector(c, to) && !is_arith(c, to) && !is_ptr(c, to))) {
-			cc_error(c, loc, "invalid conversion between vector type and scalar type");
-			return n;
+			qty vt = is_vector(c, to) ? to : N(n)->ty, st = is_vector(c, to) ? N(n)->ty : to;
+
+			cc_error(c, loc, "invalid conversion between vector type '%s' and %s type '%s' of different size",
+				 tyname(c, vt), is_integer(c, st) ? "integer" : "scalar", tyname(c, st));
+			return cast_node(c, from, QUNQ(to), CK_NOP);	/* the cast's type: no follow-on errors (no code is generated) */
 		}
 		return cast_node(c, from, QUNQ(to), is_vector(c, to) ? CK_UNION : CK_VBITS);
 	}
@@ -270,14 +280,14 @@ static uint32_t explicit_cast(cc *c, uint32_t n, qty to, uint32_t loc)
 		uint32_t r;
 
 		if (!is_arith(c, N(n)->ty) && !is_complex(c, N(n)->ty)) {
-			cc_error(c, loc, "used type where arithmetic or pointer type is required");
+			cc_error(c, loc, "used type '%s' where arithmetic or pointer type is required", tyname(c, N(n)->ty));
 			return n;
 		}
 		r = convert(c, rvalue(c, n), QUNQ(to));
 		return r;
 	}
 	if (!is_scalar(c, to) && !compatible(c, to, N(n)->ty)) {
-		cc_error(c, loc, "used type where arithmetic or pointer type is required");
+		cc_error(c, loc, "used type '%s' where arithmetic or pointer type is required", tyname(c, N(n)->ty));
 		return n;
 	}
 	if (is_integer(c, N(n)->ty))

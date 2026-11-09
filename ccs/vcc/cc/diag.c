@@ -76,6 +76,17 @@ VPRIV void note(cc *c, uint32_t loc, const char *fmt, ...)
 	va_end(ap);
 }
 
+/* clang's note on an incomplete struct, union or enum: where it was declared */
+VPRIV void fwd_note(cc *c, qty t)
+{
+	int k = KIND(c, t);
+
+	while (k == TY_ARRAY)
+		t = T(c, t)->base, k = KIND(c, t);
+	if ((k == TY_STRUCT || k == TY_UNION || k == TY_ENUM) && c->tags[T(c, t)->aux].loc)
+		note(c, c->tags[T(c, t)->aux].loc, "forward declaration of '%s'", tyname(c, t));
+}
+
 const char *const w_all[] = { "all", "most", NULL };
 
 /* a warning of clang's flag (on: on by default); false if it is off */

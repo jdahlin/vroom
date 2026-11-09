@@ -79,17 +79,21 @@ __attribute__((noinline)) VPRIV void struct_body(cc *c, uint32_t ti)
 			f.loc = d.loc;
 			if (accept(c, T_COLON)) {
 				i128 w;
+				uint32_t wn = 0;
+				pp_span wr;
 
-				const_expr(c, &w, NULL);
+				const_expr(c, &w, &wn);
+				wr = wn ? rng(c, wn) : (pp_span){ d.loc, d.loc };
 				if (!is_integer(c, t))
-					cc_error(c, d.loc, "bit-field has non-integral type");
+					report(c, "error", d.loc, &wr, 1, NULL, 0, "bit-field '%.*s' has non-integral type '%s'", IDF(d.name),
+					       tyname(c, t));
 				if (w < 0)
-					cc_error(c, d.loc, "bit-field has negative width (%lld)", (long long)w), w = 0;
+					cc_error(c, d.loc, "bit-field '%.*s' has negative width (%lld)", IDF(d.name), (long long)w), w = 0;
 				else if ((uint64_t)w > ty_size(c, t) * 8)
 					cc_error(c, d.loc, "width of bit-field '%.*s' (%lld bits) exceeds the width of its type (%llu bits)",
 					      IDF(d.name), (long long)w, (unsigned long long)ty_size(c, t) * 8), w = 0;
 				else if (w == 0 && d.name)
-					cc_error(c, d.loc, "named bit-field has zero width");
+					report(c, "error", d.loc, &wr, 1, NULL, 0, "named bit-field '%.*s' has zero width", IDF(d.name));
 				f.bitfield = 1;
 				f.width = (uint16_t)w;
 			}
@@ -104,9 +108,11 @@ __attribute__((noinline)) VPRIV void struct_body(cc *c, uint32_t ti)
 			f.ty = t;
 			f.counted_by = d.at.counted_by;
 			if (is_func(c, t))
-				cc_error(c, d.loc, "field has function type");
-			else if (!complete(c, t) && !(is_array(c, t) && (T(c, t)->flags & TF_INCOMPLETE)))
-				cc_error(c, d.loc, "field has incomplete type");
+				cc_error(c, d.loc, "field '%.*s' declared as a function", IDF(d.name));
+			else if (!complete(c, t) && !(is_array(c, t) && (T(c, t)->flags & TF_INCOMPLETE))) {
+				cc_error(c, d.loc, "field has incomplete type '%s'", tyname(c, t));
+				fwd_note(c, t);
+			}
 			if (nf >= (1u << 20))
 				fatal(c, d.loc, "too many members");
 			for (uint32_t i = 0; f.name && i < nf; i++)

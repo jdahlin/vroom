@@ -838,8 +838,20 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
 - [ ] **Invalid code accepted**: duplicate enumerator / parameter,
   `&register_var`, `_Alignas(3)`, `typeof` on a bitfield, `*(void *)p` as a
   value, `return v();` of void from int function, `-fsyntax-only` missing
-  initializer-constness errors (`static int s = g();`, `5 % 0`).
+  initializer-constness errors (`static int s = g();`, `5 % 0`),
+  `void f(static int x)` (clang: invalid storage class specifier in function
+  declarator).
   *Validate:* T4 each, then promote to diag.
+- [ ] **Designated initializers found by PLAN-diag D1.0**: a designator on a
+  scalar (`int a = { .x = 1 };`) fails with "expected expression" instead of
+  clang's "initialization of non-aggregate type 'int' with a designated
+  initializer list"; after a designator error (`{ .a.b = 1 }` on an array)
+  vcc stops at "expected '}'" and the column is the member, not the `.`.
+  `__atomic_fetch_add` on a `double *` is rejected (clang accepts).
+  `vector_size(3)` on `int` says "invalid vector size" (clang: not an
+  integral multiple of component size); vector element type errors point at
+  the declarator, clang at the attribute.
+  *Validate:* diag tests (`tests/diag/excess_init.c` style).
 - [ ] **`"abc"[1]` rejected as a static initializer**; vector types print as
   `''` in messages (`tyname`).  *Validate:* T1; diag test.
 - [ ] **Diagnostic details**: columns on `##` and invalid directives,
