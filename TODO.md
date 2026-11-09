@@ -78,7 +78,11 @@ Existing gates that every change must keep green: `vcc-diff.py cmp`
 - [ ] **T10 random-program differential testing.**  `bench/vcc-csmith.py`:
   csmith / yarpgen programs (checksum output) built by clang -O0 and vcc,
   run under qemu, compare.  Minutes per run, reduce failures with creduce
-  into T1 tests.
+  into T1 tests.  Run natively on the Darwin host too (Mach-O backend, no
+  qemu: thousands of programs an hour at `-j 6`), and steer csmith towards
+  what the kernel uses (bit-fields, packed structs, `volatile`, structs as
+  arguments and returns).  Acceptance: 24 h per generator without a
+  mismatch, on both targets.
 - [ ] **T11 driver tests.**  `bench/vcc-driver.py` with a table of
   command lines → expected (exit status, output files, stderr regex),
   including flags that must be rejected.  Uses `vpp` directly and through a
@@ -90,6 +94,46 @@ Existing gates that every change must keep green: `vcc-diff.py cmp`
   idle-connection timeout, cancel on client disconnect, stale-cache
   invalidation after `touch`/edit/create, version mismatch, memory after
   N builds.
+- [ ] **T13 real programs with their own test suites.**  Like PostgreSQL
+  (42ecfb3, `meson test` as the oracle): build each with clang and with vcc
+  and compare test outcomes, not just "green".  Candidates with strong
+  self-checking tests: sqlite (`testfixture` + tcl tests, `speedtest1`), lua
+  (official test suite), zlib/zstd/xz (round trips and checksums over a
+  corpus), musl + libc-test (integer, string and FP edge cases), CPython
+  (`make test`).  Darwin host first, Linux user space once PIC/PIE exists.
+- [ ] **T14 the kernel runs, not just boots.**  KUnit built in
+  (`CONFIG_KUNIT=y` plus the common suites, run at boot, TAP on the
+  console), compared with the clang build's TAP; then kselftests and an LTP
+  subset in the Debian guest (syscalls, mm, sched, loopback net); the
+  modules kernel booted with `modprobe` of a sample of modules; a debug
+  config (`PROVE_LOCKING`, `DEBUG_ATOMIC_SLEEP`) that catches bugs like the
+  `scoped_guard` double unlock from PLAN-fas2 2.6.
+- [ ] **T15 code quality as numbers.**  Ratios against clang `-O0` (floor)
+  and `-O2` (target), A/B on a quiet machine.  Static, every commit: text
+  size and instruction count per kernel TU (`vcc-emit-stats.py`), totals
+  and the 20 largest differences.  Dynamic: run time natively on Darwin
+  (sqlite `speedtest1`, lua benchmarks, zstd, CoreMark, Embench,
+  llvm-test-suite SingleSource/Benchmarks); under qemu, executed instruction
+  counts from the TCG `insn` plugin instead of time (deterministic,
+  independent of machine load).  Feeds the Tier 4 optimizer item.
+- [ ] **T16 coverage of vcc itself.**  Build vcc with
+  `-fprofile-instr-generate -fcoverage-mapping`, run all suites, and list
+  `cc/` and `emit/` branches no suite reaches; each gets a targeted T1 test.
+  This, not the number of packages built, says when testing is enough.
+- [ ] **T17 Debian, sampled, last.**  A full archive rebuild mostly tests
+  the front end ("it built" says little about wrong code; most packages
+  have weak tests; Debian's clang rebuilds found mainly front-end
+  rejections), and needs Linux user space (PIC/PIE, shared libraries, glibc
+  headers, Tier 3).  So in steps: (1) front end only, `vpp -fsyntax-only` +
+  `vcc-sema.py layout`-style checks over preprocessed sources (from a clang
+  build) of the ~500 C packages highest in popcon; (2) build +
+  `dh_auto_test` for ~100-200 packages with good tests (coreutils, grep,
+  sed, gawk, bash, openssl, curl, libxml2, glib), the clang build as
+  reference; (3) the whole archive only if (1)-(2) still find bugs at a
+  rate that justifies it.
+
+Order once Tier 1 is clear: T10 (finds most wrong code per hour), T2's
+generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
 
 ## Tier 1: silent wrong code
 
