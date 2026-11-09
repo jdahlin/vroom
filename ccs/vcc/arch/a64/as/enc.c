@@ -1133,7 +1133,17 @@ static int k_adr(Ctx *c, const Mn *m)
 	const A64Op *o = c->op;
 	if (c->n != 2 || !isx(&o[0]) || o[0].sp || !isimm(&o[1])) BADOPS;
 	*c->out = m->base | R(&o[0]);
-	if (!o[1].hassym) FAIL("unsupported constant adr/adrp target");
+	if (!o[1].hassym) {	/* a constant is the pc-relative offset (adrp: in pages) */
+		if (o[1].mod) FAIL("invalid relocation specifier");
+		int64_t v = o[1].imm;
+		if (m->x) {
+			if (v & 0xfff) FAIL("fixup not sufficiently aligned");
+			v >>= 12;
+		}
+		if (v < -(1 << 20) || v >= (1 << 20)) FAIL("fixup value out of range");
+		*c->out |= (uint32_t)(v & 3) << 29 | (uint32_t)((v >> 2) & 0x7ffff) << 5;
+		return 0;
+	}
 	if (m->x) {
 		if (o[1].mod == A64_MOD_GOT) return setfix(c, R_AARCH64_ADR_GOT_PAGE, &o[1]);
 		if (o[1].mod == A64_MOD_TLSDESC) return setfix(c, R_AARCH64_TLSDESC_ADR_PAGE21, &o[1]);
@@ -1325,7 +1335,12 @@ static int k_ldst(Ctx *c, const Mn *m)
 			default: BADOPS;
 			}
 			*c->out = b | R(&o[0]);
-			if (!o[1].hassym) FAIL("unsupported literal");
+			if (!o[1].hassym) {	/* a constant is the pc-relative offset */
+				int64_t v = o[1].imm;
+				if (o[1].mod || (v & 3) || v < -(1 << 20) || v >= (1 << 20)) FAIL("fixup value out of range");
+				*c->out |= (uint32_t)((v >> 2) & 0x7ffff) << 5;
+				return 0;
+			}
 			if (o[1].mod == A64_MOD_GOT) return setfix(c, R_AARCH64_GOT_LD_PREL19, &o[1]);
 			if (o[1].mod == A64_MOD_GOTTPREL) return setfix(c, R_AARCH64_TLSIE_LD_GOTTPREL_PREL19, &o[1]);
 			if (o[1].mod == A64_MOD_TLSDESC) return setfix(c, R_AARCH64_LD_PREL_LO19, &o[1]);	/* as MC */

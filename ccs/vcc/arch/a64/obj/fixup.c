@@ -104,12 +104,7 @@ VPRIV void elf_resolve(ElfObj *o, Out *w, ElfFix *x)
 		elf_reloc(o, w, x, P, type, a, x->v.add, c);
 		return;
 	}
-	if (!a) {
-		if (is_pcrel(type) && type != R_AARCH64_PREL64 && type != R_AARCH64_PREL32 && type != R_AARCH64_PREL16) {
-			/* branch to an absolute address: MC emits a reloc against nothing */
-			elf_reloc(o, w, x, P, type, 0, 0, c);
-			return;
-		}
+	if (!a) {	/* a constant (branch targets too: the pc-relative offset, as MC) */
 		elf_patch(o, x, c);
 		return;
 	}

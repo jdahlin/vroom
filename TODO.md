@@ -748,9 +748,11 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
 - [ ] **Mach-O syntax** `@PAGE`/`@PAGEOFF`/`@GOTPAGE…`; vasm writes ELF
   only.  *Validate:* T7 with `--target=arm64-apple-darwin` vs clang's Mach-O
   (`llvm-objdump --macho -r -d`).
-- [ ] **Wrong output**: ~~GOT relocs against local symbols converted to
-  section+addend~~ (fixed: GOT/TLS relocations keep the symbol) [P]; integer branch targets as `*ABS*` relocs; `adr x0, 4`
-  rejected (`arch/a64/as/enc.c:1005`).  *Validate:* T7 / T6 relocation comparison.
+- [x] **Wrong output**: GOT relocs against local symbols kept the section
+  (fixed: GOT/TLS relocations keep the symbol); integer and absolute-symbol
+  branch targets are the pc-relative offset, not `*ABS*` relocations; `adr`,
+  `adrp` and `ldr` literal take constants.  *Validated:* `vas-obj`
+  `intbranch.s`, `absb.s`.
 - [ ] **Diagnostics**: line numbers off by one (`as/as.c:575/636/133`), `# N
   "file"` markers ignored (`as/as.c:579`), EOF errors at `:0:` [P].
   *Validate:* T4 for the assembler (`// expect-error: x.S:2:`).
