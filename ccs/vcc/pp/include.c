@@ -294,6 +294,29 @@ static void add_fent(pp *p, ctx *c, const vlex_file *f, const char *name)
 	p->next_base += f->size + 1;
 }
 
+/* a file skipped by its include guard or #pragma once: still a dependency,
+ * under this spelling (clang's FileSkipped).  An entry with no file and a
+ * one-byte span holds no location (loc_fent passes over it). */
+/* is a header found in search directory sdir a system header (-1: the includer's directory) */
+VPRIV uint8_t inc_sys(pp *p, int32_t sdir)
+{
+	const ctx *from = cur_file(p);
+
+	return sdir == -2 || (sdir >= 0 && p->o->nsys1 && sdir >= p->o->nsys1 - 1) ||
+	       (sdir == -1 && from && p->fe[from->fe].sys);
+}
+
+VPRIV void dep_only(pp *p, const char *path, uint8_t sys)
+{
+	fent *e = &p->fe[p->nfe++];
+
+	memset(e, 0, sizeof(*e));
+	e->spath = path;
+	e->name = "";
+	e->sys = sys;
+	e->base = p->next_base++;
+}
+
 /*
  * Read-ahead for a file entered for the first time: the first candidate of
  * each unconditional #include "x" / <x> (the includer's directory, or the
@@ -394,16 +417,21 @@ VPRIV void enter_file(pp *p, const vlex_file *f, const char *path, int32_t sdir)
 	int oi;
 	ctx *c;
 
-	if (fi->guard && mguard(p, fi->guard))
+	sys = inc_sys(p, sdir);
+	if (fi->guard && mguard(p, fi->guard)) {
+		if (p->o->deps)
+			dep_only(p, path, sys);
 		return;
+	}
 	oi = once_index(p, f);
 	if (unlikely(p->rec.on) && p->rec.nord < HC_MAXORD &&
 	    (oi < 0 || oi < (int)p->rec.lev[p->rec.n - 1].nonce0))
 		p->rec.ord[p->rec.nord++] = (honce){ f, oi >= 0 };
-	if (oi >= 0)
+	if (oi >= 0) {
+		if (p->o->deps)
+			dep_only(p, path, sys);
 		return;
-	sys = sdir == -2 || (sdir >= 0 && p->o->nsys && sdir >= p->o->nsys) ||
-	      (sdir == -1 && from && p->fe[from->fe].sys);
+	}
 	if (f != &p->builtin && from && hc_top(p)) {
 		int d0 = p->depth;
 		uint32_t b0 = p->next_base;

@@ -55,7 +55,7 @@ VPRIV bool sig_of(const pp_opts *o, uint32_t *sig, uint32_t *psig)
 #define SIGS(x) do { const char *s_ = (x) ? (x) : ""; size_t l_ = strlen(s_); \
 	if (n + l_ + 8 < (1 << 17)) { memcpy(b + n, s_, l_); n += l_; b[n++] = 0; } else ok = false; } while (0)
 	n += (size_t)snprintf(b, 64, "%d %d %d %d %d %d %d %d", o->nfwdirs, o->unsigned_char, o->asm_mode, o->target,
-			      o->nwargs, o->error_limit, o->trigraphs, o->c89 * 4 + o->c23 * 2 + o->fatal_continue) + 1;
+			      o->nwargs, o->error_limit, o->trigraphs, o->deps * 8 + o->c89 * 4 + o->c23 * 2 + o->fatal_continue) + 1;
 	for (int i = 0; i < o->nwargs; i++)	/* -W/-Werror decide which replayed diagnostics are errors */
 		SIGS(o->wargs[i]);
 	for (int i = 0; i < o->nfwdirs; i++)
@@ -68,7 +68,7 @@ VPRIV bool sig_of(const pp_opts *o, uint32_t *sig, uint32_t *psig)
 	psig[0] = sig_intern(b, 0);
 	for (int i = 0; i < o->ndirs && ok; i++) {
 		/* each directory with whether it is a quote-only and a system directory */
-		b[n++] = (char)('0' + (i < o->nquote) + 2 * (o->nsys && i >= o->nsys));
+		b[n++] = (char)('0' + (i < o->nquote) + 2 * (o->nsys1 && i >= o->nsys1 - 1));
 		SIGS(o->dirs[i]);
 		psig[i + 1] = sig_intern(b, n);
 	}

@@ -330,7 +330,13 @@ VPRIV int builtin(pp *p, const pmacro *m, ptok *t)
 		raw(p, &r);
 		if (r.kind != T_RPAREN)
 			error(p, t->loc, "missing ')' after __has_include");
-		mknum(p, t, find_include(p, fc, buf, n, angled, m->builtin == B_HAS_INCLUDE_NEXT, &sd, &path, NULL) != NULL);
+		{
+			const vlex_file *hf = find_include(p, fc, buf, n, angled, m->builtin == B_HAS_INCLUDE_NEXT, &sd, &path, NULL);
+
+			if (hf && p->o->deps)
+				dep_only(p, path, inc_sys(p, sd));	/* a dependency, as clang's */
+			mknum(p, t, hf != NULL);
+		}
 		break;
 	}
 	case B_IS_IDENTIFIER:

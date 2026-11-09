@@ -16,6 +16,8 @@ static const fent *loc_fent(const pp *p, uint32_t loc)
 		else
 			hi = mid;
 	}
+	while (lo > 0 && !p->fe[lo].f)	/* a dependency-only entry (dep_only) */
+		lo--;
 	return p->nfe ? &p->fe[lo] : NULL;
 }
 

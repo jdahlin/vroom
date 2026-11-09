@@ -43,7 +43,7 @@ typedef struct pp_opts {
 	const char *main;		/* the source file */
 	const char *const *dirs;	/* search path: -iquote dirs, then -I, -isystem, -idirafter */
 	int ndirs, nquote;		/* dirs[0..nquote) only for "" includes */
-	int nsys;			/* dirs[nsys..) are system directories (0: none) */
+	int nsys1;			/* dirs[nsys1 - 1..) are system directories (0: none) */
 	const char *predef;		/* "<built-in>": #define/#undef/#include lines, run first */
 	const char *prefix_from, *prefix_to;	/* -fmacro-prefix-map (one) */
 	const char *const *fwdirs;	/* framework dirs: <A/b.h> -> DIR/A.framework/Headers/b.h */
@@ -63,6 +63,7 @@ typedef struct pp_opts {
 	int trigraphs;			/* strict -std (not c23) or -trigraphs: ??x replaced before lexing */
 	int c89;			/* -std=c89/-ansi: no // comments */
 	int c23;			/* -std=c23/gnu23: true is 1 in #if */
+	int deps;			/* -M/-MD: files skipped by guard or #pragma once are dependencies too */
 	int fatal_continue;		/* -E text: a fatal error (file not found) does not end the TU, as clang */
 } pp_opts;
 
@@ -79,7 +80,7 @@ void pp_close(pp *p);
 /* fatal errors (missing #include) longjmp here instead of exiting */
 void pp_set_fatal(pp *p, jmp_buf *jb);
 /* the distinct files read so far, as spelled (for -MD dependency files) */
-size_t pp_files(const pp *p, const char **names, size_t max);
+size_t pp_files(const pp *p, const char **names, size_t max, int nosys);
 /* the next token; T_EOF at the end (and ever after) */
 void pp_next(pp *p, ptok *t);
 /*

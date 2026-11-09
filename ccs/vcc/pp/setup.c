@@ -419,7 +419,7 @@ void pp_set_fatal(pp *p, jmp_buf *jb)
 }
 
 /* the distinct file names in entry order (a hash set: TUs enter ~1000 files) */
-size_t pp_files(const pp *p, const char **names, size_t max)
+size_t pp_files(const pp *p, const char **names, size_t max, int nosys)
 {
 	uint32_t cap = 64, stk[1024], *tab;
 	size_t n = 0;
@@ -436,7 +436,7 @@ size_t pp_files(const pp *p, const char **names, size_t max)
 		size_t l = 0;
 		uint32_t k;
 
-		if (p->fe[i].f == &p->builtin)
+		if (p->fe[i].f == &p->builtin || (nosys && p->fe[i].sys))
 			continue;
 		for (; s[l]; l++)
 			h = (h ^ (unsigned char)s[l]) * 1099511628211ull;

@@ -623,17 +623,22 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
   *Validate:* T4.
 - [ ] **`#embed` / `__has_embed`** [P].  *Validate:* pp-diff fixtures plus
   T1 (`unsigned char d[] = { #embed "bin" };` checksums).
-- [ ] **Output modes ignored**: `-C`, `-CC`, `-dD`, `-M`, `-MM`, `-H`,
+- [ ] **Output modes ignored**: `-C`, `-CC`, `-dD`, `-H`,
   `-traditional-cpp` (reject); line markers without `-P`; text identical to
   clang's spacing.
   *Validate:* `bench/vcc-diff.py` new mode `text` comparing bytes (not
-  tokens) for `-E` with and without `-P`, `-M`/`-MM`.
+  tokens) for `-E` with and without `-P`.  (`-M`/`-MM` done: see Depfiles.)
   (`-dM` done: `bench/vcc-diff.py dm` is byte-identical to clang on all 879
   C TUs.  Open: on kernel `.S` files clang's `-dM` leaves out macros defined
   after a point in the headers (strchr.S: all of linux/linkage.h onwards)
   although `#ifdef` sees them; not understood, so `dm` skips `.S`.)
-- [ ] **Depfiles**: `-MMD` lists system headers, `-MD` without `-MF`, default
-  target `-`, `-MP`, `-MQ` [P].
+- [x] **Depfiles**: `-MMD` lists system headers, `-MD` without `-MF`, default
+  target `-`, `-MP`, `-MQ` [P].  (Done: clang's rule format (75-column
+  wrapping), targets and default file names, `-M`/`-MM`, `-MMD` without system
+  headers (an `-isystem` with no `-I` was not a system directory), headers
+  skipped by guard or `#pragma once` and `__has_include` hits listed under
+  each spelling, Darwin's `SDKSettings.json`; `bench/vcc-diff.py deps`
+  912/912 byte-identical.)
   *Validate:* T11 against clang's `.d` files for each flag combination
   (byte comparison after path normalisation).
 - [ ] **Options**: `-imacros`, `-isysroot`/`--sysroot`, `-nostdlibinc`,

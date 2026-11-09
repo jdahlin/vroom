@@ -65,15 +65,30 @@ def cmp(t):
     p = subprocess.run([VPP, '--cmp', refname(obj)] + a, cwd=B, capture_output=True, text=True)
     return obj, p.returncode, (p.stdout + p.stderr)[-1500:]
 
-def dm(t):
-    """-dM: the macro table at the end of the TU, bytes vs clang"""
+def dm(t, fl=('-dM', '-E')):
+    """-dM: the macro table at the end of the TU, bytes vs clang (deps: -M, -MM -MP)"""
     obj, a = t
-    r = [subprocess.run([x] + a + ['-dM', '-E'], cwd=B, capture_output=True) for x in (CL, VPP)]
+    r = [subprocess.run([x] + a + list(fl), cwd=B, capture_output=True) for x in (CL, VPP)]
     if r[0].stdout == r[1].stdout: return obj, 0, ''
     import difflib
     d = difflib.unified_diff(r[0].stdout.decode(errors='replace').splitlines(),
                              r[1].stdout.decode(errors='replace').splitlines(), 'clang', 'vpp', n=0, lineterm='')
     return obj, 1, '\n'.join(list(d)[:12]) + r[1].stderr.decode(errors='replace')[-300:]
+
+def deps(t):
+    """-M and -MM -MP -MQ: the rules byte for byte, else the same files after
+    normalising paths (clang also lists a guard-skipped header under each
+    spelling it was included by; vpp under the first only: TODO.md)"""
+    obj, a = t
+    for fl in (('-E', '-M'), ('-E', '-MM', '-MP', '-MQ', '$(obj)/x.o')):
+        r = [subprocess.run([x] + a + list(fl), cwd=B, capture_output=True) for x in (CL, VPP)]
+        if r[0].stdout == r[1].stdout: continue
+        def files(b):
+            w = b.decode(errors='replace').replace('\\\n', ' ').split('\n')[0].split()[1:]
+            return list(dict.fromkeys(os.path.normpath(os.path.join(B, f)) for f in w))
+        if files(r[0].stdout) != files(r[1].stdout) or r[0].stdout.count(b'\n\n') != r[1].stdout.count(b'\n\n'):
+            return dm(t, fl)
+    return obj, 0, ''
 
 if __name__ == '__main__':
     av = [a for a in sys.argv[1:] if a not in ('--kernel', '--cmp')]; j = 6
@@ -93,7 +108,7 @@ if __name__ == '__main__':
         os.unlink(jf); sys.exit(r.returncode)
     if mode == 'ref': os.makedirs(REF, exist_ok=True)
     with Pool(j) as pool:
-        res = pool.map(mkref if mode == 'ref' else dm if mode == 'dm' else cmp, ts, chunksize=4)
+        res = pool.map({'ref': mkref, 'dm': dm, 'deps': deps}.get(mode, cmp), ts, chunksize=4)
     bad = [r for r in res if r[1]]
     for obj, rc, err in bad[:int(os.environ.get('SHOW', 20))]:
         print(f'--- {obj} (rc {rc})\n{err}')

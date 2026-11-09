@@ -595,6 +595,10 @@ VPRIV __attribute__((format(printf, 4, 5))) void pp_diag(pp *p, uint32_t loc, co
 void pp_diagx(pp *p, const pp_dinfo *d, const char *fmt, ...);
 bool pp_warnx(pp *p, const char *flag, bool on, const char *const *groups, pp_dinfo *d, const char *fmt, ...);
 void pp_diag_summary(pp *p);
+/* include.c: dependencies */
+VPRIV uint8_t inc_sys(pp *p, int32_t sdir);
+VPRIV void dep_only(pp *p, const char *path, uint8_t sys);
+
 /* macro.c */
 static inline uintptr_t mget(const pp *p, uint32_t id);
 static inline uintptr_t *mslot(pp *p, uint32_t id);

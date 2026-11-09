@@ -420,14 +420,18 @@ static int write_out(const char *cwd, const char *out, int outfd, const char *s,
 }
 
 /* make-style dependency file, as clang -MD writes it */
-static int write_deps(const pp *p, const char *cwd, const char *depfile, const char *target, int errfd)
+/* the make rule, as clang's DependencyFileGenerator: lines wrapped at 75
+ * columns, -MMD/-MM without system headers, -MP phony targets.
+ * depfile NULL: to -o or stdout (-M/-MM). */
+static int write_deps(const pp *p, const char *cwd, const char *depfile, const char *target, int nosys, int phony,
+		      const char *first, const char *out, int outfd, int errfd)
 {
 	static _Thread_local const char **names;
 	static _Thread_local size_t cap;
-	size_t n;
+	size_t n, col;
 
 	/* grown until every file fits (a full table may have been cut short) */
-	while (!names || (n = pp_files(p, names, cap)) == cap) {
+	while (!names || (n = pp_files(p, names, cap, nosys)) == cap) {
 		free(names);
 		cap = cap ? 2 * cap : 4096;
 		names = malloc(cap * sizeof(*names));
@@ -437,16 +441,33 @@ static int write_deps(const pp *p, const char *cwd, const char *depfile, const c
 
 	bstr(&d, target);
 	bstr(&d, ":");
-	for (size_t i = 0; i < n; i++) {
-		const char *f = names[i];
+	col = strlen(target) + 1;
+	for (size_t i = first ? (size_t)-1 : 0; i + 1 < n + 1; i++) {	/* first: Darwin's SDKSettings.json */
+		const char *f = i == (size_t)-1 ? first : names[i];
+		size_t l;
 
 		while (f[0] == '.' && f[1] == '/')	/* clang drops "./" */
 			f += 2;
-		bstr(&d, " \\\n  ");
+		l = strlen(f);
+		if (col + l + 3 > 75) {	/* room for a trailing " \\" */
+			bstr(&d, " \\\n ");
+			col = 2;
+		}
+		bstr(&d, " ");
 		bstr(&d, f);
+		col += l + 1;
 	}
 	bstr(&d, "\n");
-	r = write_file(cwd, depfile, d.p, d.n, errfd);
+	if (phony)
+		for (size_t i = first ? (size_t)-1 : 1; i + 1 < n + 1; i += i == (size_t)-1 ? 2 : 1) {	/* not names[0], the main file */
+			const char *f = i == (size_t)-1 ? first : names[i];
+
+			while (f[0] == '.' && f[1] == '/')
+				f += 2;
+			bstr(&d, f);
+			bstr(&d, ":\n");
+		}
+	r = depfile ? write_file(cwd, depfile, d.p, d.n, errfd) : write_out(cwd, out, outfd, d.p, d.n, errfd);
 	bfree(&d);
 	return r;
 }
@@ -661,7 +682,7 @@ int ppd_run(int argc, char **argv, const ppd_env *env)
 		   **all = dirv + 4 * per;
 	int nq = 0, ni = 0, ns = 0, na = 0, n = 0;
 	const char *cmp = NULL, *out = NULL, *main_file = NULL, *depfile = NULL, *deptarget = NULL;
-	int errfd = env->errfd, status = 0, md = 0, dcolor = 0, nocaret = 0, elimit = 0, nwargs = 0;
+	int errfd = env->errfd, status = 0, md = 0, mdeps = 0, mphony = 0, dcolor = 0, nocaret = 0, elimit = 0, nwargs = 0;
 	const char **wargs = NULL;
 	char pmapbuf[4096];
 	jmp_buf jb;
@@ -738,19 +759,27 @@ int ppd_run(int argc, char **argv, const ppd_env *env)
 		if (!strcmp(a, "--vcc-layout-checks")) { syntax = 1; layout = 1; continue; }
 		if (!strcmp(a, "--vcc-tokhash")) { tokhash = 1; continue; }
 		if (!strcmp(a, "-o") && i + 1 < argc) { out = argv[++i]; continue; }
-		if (!strncmp(a, "-Wp,-MMD,", 9) || !strncmp(a, "-Wp,-MD,", 8)) { depfile = strchr(a + 4, ',') + 1; continue; }
-		if (!strcmp(a, "-MD") || !strcmp(a, "-MMD")) { md = 1; continue; }
+		if (!strncmp(a, "-Wp,-MMD,", 9) || !strncmp(a, "-Wp,-MD,", 8)) {
+			md = a[6] == 'M' ? 2 : 1;
+			depfile = strchr(a + 4, ',') + 1;
+			continue;
+		}
+		if (!strcmp(a, "-MD") || !strcmp(a, "-MMD")) { md = a[2] == 'M' ? 2 : 1; continue; }
+		if (!strcmp(a, "-M") || !strcmp(a, "-MM")) { mdeps = a[2] == 'M' ? 2 : 1; continue; }
+		if (!strcmp(a, "-MP")) { mphony = 1; continue; }
 		if (!strcmp(a, "-MF") && i + 1 < argc) { depfile = argv[++i]; continue; }
-		if (!strcmp(a, "-MT") && i + 1 < argc) { deptarget = argv[++i]; continue; }
-		if (!strcmp(a, "-MQ") && i + 1 < argc) {	/* -MT quoted for make: $ -> $$, space -> \ space */
+		if ((!strcmp(a, "-MT") || !strcmp(a, "-MQ")) && i + 1 < argc) {
+			/* targets joined by spaces; -MQ quoted for make: $ -> $$, space -> \ space */
 			static __thread char q[4096];
 			const char *t = argv[++i];
-			size_t k = 0;
+			size_t k = deptarget ? strlen(q) : 0;
 
+			if (k && k + 1 < sizeof(q))
+				q[k++] = ' ';
 			for (; *t && k + 3 < sizeof(q); t++) {
-				if (*t == '$')
+				if (a[2] == 'Q' && *t == '$')
 					q[k++] = '$';
-				else if (*t == ' ' || *t == '\t' || *t == '#')
+				else if (a[2] == 'Q' && (*t == ' ' || *t == '\t' || *t == '#'))
 					q[k++] = '\\';
 				q[k++] = *t;
 			}
@@ -810,7 +839,6 @@ int ppd_run(int argc, char **argv, const ppd_env *env)
 				asm_mode = 1;
 		}
 	}
-	(void)md;
 	if (!main_file) {
 		dprintf(errfd, "vcc: error: no input file\n");
 		status = 2;
@@ -824,6 +852,24 @@ int ppd_run(int argc, char **argv, const ppd_env *env)
 			syntax = 1;
 			emit = 2;
 		}
+	}
+	/* dependency rules, as clang: the target is -o (not for -M/-MM) or the
+	   source's basename with .o; -MD's file is the target's with .d */
+	char dtbuf[4096], dfbuf[4200];
+	const char *dtarget = deptarget;
+	int dnosys = mdeps ? mdeps == 2 : md == 2;
+	const char *dfirst = NULL;
+
+	if (!dtarget)
+		dtarget = out && strcmp(out, "-") && !mdeps ? out : obj_name(main_file, dtbuf, sizeof(dtbuf));
+	if (md && !mdeps && !depfile) {
+		const char *st = out && strcmp(out, "-") ? out : obj_name(main_file, dtbuf + 2048, 2048);
+		const char *sl = strrchr(st, '/'), *dot = strrchr(st, '.');
+
+		if (dot && sl && dot < sl)
+			dot = NULL;
+		snprintf(dfbuf, sizeof(dfbuf), "%.*s.d", (int)(dot ? dot - st : (long)strlen(st)), st);
+		depfile = dfbuf;
 	}
 	/* hosted Linux defaults as clang's: PIE, asynchronous unwind tables (CFI) */
 	{
@@ -840,7 +886,7 @@ int ppd_run(int argc, char **argv, const ppd_env *env)
 #define ADD(d) do { int dup_ = 0; for (int j = po.nquote; j < n; j++) dup_ |= !strcmp(all[j], d); if (!dup_) all[n++] = d; } while (0)
 	for (int k = 0; k < ni; k++) ADD(dirs_i[k]);
 	n = env_dirs(cpath, all, n, po.nquote, 0);	/* CPATH: after -I, as clang */
-	po.nsys = n;
+	po.nsys1 = n + 1;
 	for (int k = 0; k < ns; k++) {
 		/* vcc's own headers (arm_neon.h) go before the clang resource directory */
 		if (strstr(dirs_s[k], "/lib/clang/") && strlen(dirs_s[k]) > 8 &&
@@ -855,6 +901,19 @@ int ppd_run(int argc, char **argv, const ppd_env *env)
 	if (darwin && !nostdinc)
 		for (size_t k = 0; k < sizeof(sysdirs_darwin) / sizeof(sysdirs_darwin[0]); k++)
 			ADD(sysdirs_darwin[k]);
+	if (darwin && (mdeps || depfile)) {
+		/* clang reads the SDK's SDKSettings.json (the default sysroot: the SDK
+		   of the system directories), and it is the first dependency */
+		static __thread char sdk[1024];
+
+		for (size_t k = 0; k < sizeof(sysdirs_darwin) / sizeof(sysdirs_darwin[0]) && !dfirst; k++) {
+			const char *d = sysdirs_darwin[k], *u = strstr(d, ".sdk/usr/include");
+
+			if (u && snprintf(sdk, sizeof(sdk), "%.*s/SDKSettings.json", (int)(u + 4 - d), d) < (int)sizeof(sdk) &&
+			    !access(sdk, F_OK))
+				dfirst = sdk;
+		}
+	}
 #ifdef VCC_RESDIR
 	/* hosted Linux: clang's resource headers, then glibc's (multiarch first) */
 	if (hosted && !darwin && !nostdinc) {
@@ -873,6 +932,7 @@ int ppd_run(int argc, char **argv, const ppd_env *env)
 	po.ndirs = n;
 	po.c23 = std == 23;
 	po.c89 = std == 89 && strict;
+	po.deps = mdeps || depfile;
 	po.fatal_continue = !emit && !objmode && !syntax && !layout && !tokhash;
 	po.trigraphs = tri >= 0 ? tri : strict && std != 23;	/* clang: strict modes before C23 */
 	{
@@ -1027,7 +1087,7 @@ int ppd_run(int argc, char **argv, const ppd_env *env)
 			if (t.kind == T_IDENT)
 				HB(vintern_ents[t.id].s, vintern_ents[t.id].len);
 		}
-		nf = pp_files(p, fn, 4096);
+		nf = pp_files(p, fn, 4096, 0);
 		for (size_t i = 0; i < nf; i++)
 			HB(fn[i], strlen(fn[i]) + 1);
 #undef HB
@@ -1089,7 +1149,7 @@ int ppd_run(int argc, char **argv, const ppd_env *env)
 		if (!status && emit == 2)
 			status = write_obj(env->cwd, out, env->outfd, errfd, darwin);
 		if (!status && emit == 2 && depfile)
-			status = write_deps(p, env->cwd, depfile, deptarget ? deptarget : out, errfd);
+			status = write_deps(p, env->cwd, depfile, dtarget, dnosys, mphony, dfirst, NULL, -1, errfd);
 		if (getenv("VPP_TIME"))
 			dprintf(errfd, "vcc: %.1f ms\n", (now() - t0) * 1e3);
 		goto done;
@@ -1118,7 +1178,7 @@ int ppd_run(int argc, char **argv, const ppd_env *env)
 	}
 	if (pp_errors(p)) {
 		/* clang: -E to stdout still prints the text; with -o it writes no file */
-		if (!cmp && !objmode && (!out || !strcmp(out, "-")))
+		if (!cmp && !objmode && !mdeps && (!out || !strcmp(out, "-")))	/* -M: nothing */
 			write_out(env->cwd, out, env->outfd, o.p, o.n, errfd);
 		status = 1;
 	} else if (cmp) {
@@ -1134,11 +1194,14 @@ int ppd_run(int argc, char **argv, const ppd_env *env)
 			status = write_obj(env->cwd, out, env->outfd, errfd, 0);
 		}
 		if (!status && depfile)
-			status = write_deps(p, env->cwd, depfile, deptarget ? deptarget : out, errfd);
+			status = write_deps(p, env->cwd, depfile, dtarget, dnosys, mphony, dfirst, NULL, -1, errfd);
 	} else {
-		status = write_out(env->cwd, out, env->outfd, o.p, o.n, errfd);
-		if (!status && depfile)
-			status = write_deps(p, env->cwd, depfile, deptarget ? deptarget : out ? out : "-", errfd);
+		if (mdeps)
+			status = write_deps(p, env->cwd, depfile, dtarget, dnosys, mphony, dfirst, out, env->outfd, errfd);
+		else
+			status = write_out(env->cwd, out, env->outfd, o.p, o.n, errfd);
+		if (!status && depfile && !mdeps)
+			status = write_deps(p, env->cwd, depfile, dtarget, dnosys, mphony, dfirst, NULL, -1, errfd);
 	}
 done:
 	vjob_jb = NULL;
