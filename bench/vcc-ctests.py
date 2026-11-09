@@ -53,7 +53,7 @@ RT = f'{T}/rt'
 CL = llvm('clang')
 VPP = os.path.join(os.environ.get('VCC_BIN') or BUILD, 'vpp')
 OBJCOPY = llvm('llvm-objcopy')
-LLD = shutil.which('ld.lld') or llvm('ld.lld')
+LLD = os.environ.get('VCC_LD') or shutil.which('ld.lld') or llvm('ld.lld')	# VCC_LD=build/ccs/vlink: link with vlink
 QEMU = shutil.which('qemu-system-aarch64') or '/opt/homebrew/bin/qemu-system-aarch64'
 OUT = f'{BUILD}/ctests'
 RES = subprocess.run([CL, '-print-resource-dir'], capture_output=True, text=True).stdout.strip() + '/include'

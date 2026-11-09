@@ -296,6 +296,8 @@ static struct {
 	const char *out;
 	const char *script;
 	const char *soname;
+	const char *entry;
+	int orphan;			/* --orphan-handling: 0 place, 1 warn, 2 error */		/* -e/--entry: over the script's ENTRY() */
 	const char *comment;		/* .comment linker string */
 	const char *build_id;		/* NULL, "sha1", "md5", "fast" */
 	const char *map;
@@ -628,7 +630,7 @@ static uint64_t isec_osoff(uint32_t s, uint64_t off)
 static uint32_t isec_osec(uint32_t s)
 {
 	ISec *is = &isecs.v[s];
-	if (is->kind == K_MERGE_IN)
+	if (is->kind == K_MERGE_IN && is->osec != OS_DISCARD)	/* a discarded one has no MergeIn */
 		return isecs.v[mergeins.v[is->aux].syn].osec;
 	return is->osec;
 }
@@ -2102,8 +2104,7 @@ static void assign_sections(void)
 			continue;
 		uint32_t d = match_isd(is->name);
 		if (d == NONE) {
-			if (is->kind != K_SYMTAB && is->kind != K_STRTAB && is->kind != K_SHSTRTAB)
-				VVEC_PUSH(orphans, i, alloc);
+			VVEC_PUSH(orphans, i, alloc);
 			continue;
 		}
 		ISD *isd = &isds.v[d];
@@ -2128,8 +2129,10 @@ static void assign_sections(void)
 		ISec *is = &isecs.v[orphans.v[i]];
 		if (!strcmp(is->name, ".note.GNU-stack") || (is->flags & SHF_EXCLUDE))
 			is->osec = OS_DISCARD;
+		else if (!opt.orphan)
+			;	/* lld: placed silently by default */
 		else
-			warn("%s:(%s) is being placed in '%s'", is->obj != NONE ? objs.v[is->obj]->path : "<internal>",
+			(opt.orphan == 2 ? error : warn)("%s:(%s) is being placed in '%s'", is->obj != NONE ? objs.v[is->obj]->path : "<internal>",
 			     is->name, is->name);
 	}
 	/* orphans: own output section after everything (rare; lld would rank them) */
@@ -2433,6 +2436,10 @@ static int phnew(uint32_t type, uint32_t flags)
 	return phdrs.n - 1;
 }
 
+/* arm64 TLS variant 1: tp = the PT_TLS start - alignup(16, p_align); tprel = va - tls_tp */
+static uint64_t tls_tp;
+static bool has_tls;
+
 static void assign_file_offsets(void)
 {
 	uint64_t off = sizeof(Ehdr) + (uint64_t)phdrs.n * sizeof(Phdr);
@@ -2473,6 +2480,11 @@ static void assign_file_offsets(void)
 		p->p_memsz = l->va + l->size - f->va;
 		p->p_offset = f->offset;
 		p->p_vaddr = p->p_paddr = f->va;
+		if (p->p_type == PT_TLS) {
+			uint64_t a = p->p_align ? p->p_align : 1;
+			tls_tp = p->p_vaddr - alignup(16, a);
+			has_tls = true;
+		}
 	}
 }
 
@@ -2730,10 +2742,18 @@ static bool parse_args(int argc, char **argv)
 		if (!strncmp(a, "-m", 2) && !strncmp(a + 2, "aarch64", 7)) continue;
 		if ((v = VAL("--script")) || (v = VAL("-T"))) { opt.script = v; continue; }
 		if (!strncmp(a, "-T", 2) && a[2]) { opt.script = a + 2; continue; }
+		if ((v = VAL("--entry")) || (v = VAL("-e"))) { opt.entry = v; continue; }
+		if (!strncmp(a, "-e", 2) && a[2]) { opt.entry = a + 2; continue; }
 		if ((v = VAL("-soname")) || (v = VAL("--soname")) || (v = VAL("-h"))) { opt.soname = v; continue; }
 		if ((v = VAL("--build-id"))) { opt.build_id = strcmp(v, "none") ? v : NULL; continue; }
 		if (ARG("--build-id")) { opt.build_id = "fast"; continue; }
-		if ((v = VAL("--orphan-handling"))) continue;
+		if ((v = VAL("--orphan-handling"))) {
+			if (!strcmp(v, "place")) opt.orphan = 0;
+			else if (!strcmp(v, "warn")) opt.orphan = 1;
+			else if (!strcmp(v, "error")) opt.orphan = 2;
+			else error("unknown --orphan-handling mode: %s", v);
+			continue;
+		}
 		if ((v = VAL("--error-limit"))) { error_limit = atoi(v); continue; }
 		if ((v = VAL("--threads"))) { nthreads = atoi(v) > 0 ? atoi(v) : 1; continue; }
 		if ((v = VAL("-Map")) || (v = VAL("--Map"))) { opt.map = v; continue; }
@@ -2931,11 +2951,17 @@ static bool assign_symbol(Assign *a, bool insec)
 	return old.kind != s->ev.kind || old.idx != s->ev.idx || old.val != s->ev.val;
 }
 
+/* lld: .tbss takes no address space; consecutive ones stack from here */
+static uint64_t tbss_off;
+
 /* assignOffsets(); returns true if the section address changed */
 static bool assign_offsets(uint32_t oi, bool *symchg)
 {
 	OSec *os = &osecs.v[oi];
 	uint64_t saved = dot;
+	bool tbss = (os->flags & (SHF_ALLOC | SHF_TLS)) == (SHF_ALLOC | SHF_TLS) && os->type == SHT_NOBITS;
+	if (tbss)
+		dot += tbss_off;
 	if (!(os->flags & SHF_ALLOC))
 		dot = 0;
 	else if (os->addr)
@@ -2962,6 +2988,10 @@ static bool assign_offsets(uint32_t oi, bool *symchg)
 	os->size = dot - os->va;
 	if (!(os->flags & SHF_ALLOC))
 		dot = saved;
+	else if (tbss) {
+		tbss_off = dot - saved;
+		dot = saved;
+	}
 	return changed;
 }
 
@@ -2969,6 +2999,7 @@ static bool assign_addresses(void)
 {
 	bool changed = false, symchg = false;
 	dot = 0;
+	tbss_off = 0;
 	cur_osec = AETHER;
 	recorded.n = 0;
 	assert_fail.n = 0;
@@ -3095,6 +3126,18 @@ static void create_phdrs(void)
 			flags = nf;
 		}
 		phadd(load, oi);
+	}
+	/* lld: one PT_TLS over the SHF_TLS sections, after the PT_LOADs */
+	{
+		int tls = -1;
+		for (uint32_t i = 0; i < outsecs.n; i++) {
+			uint32_t oi = outsecs.v[i];
+			if ((osecs.v[oi].flags & (SHF_ALLOC | SHF_TLS)) != (SHF_ALLOC | SHF_TLS))
+				continue;
+			if (tls < 0)
+				tls = phnew(PT_TLS, PF_R);
+			phadd(tls, oi);
+		}
 	}
 	phnew(PT_GNU_STACK, PF_R | PF_W);
 	int note = -1;
@@ -3395,7 +3438,11 @@ static void write_headers(void)
 	eh->e_type = opt.relocatable ? 1 : opt.shared ? 3 : 2;
 	eh->e_machine = 183;
 	eh->e_version = 1;
-	uint32_t eg = entry_name ? gfind(entry_name) : NONE;
+	/* lld: -e, else ENTRY(), else _start (silently absent) */
+	const char *en = opt.entry ? opt.entry : entry_name ? entry_name : "_start";
+	uint32_t eg = gfind(en);
+	if (!opt.relocatable && (opt.entry || entry_name) && (eg == NONE || gsyms[eg].state == GS_UNDEF))
+		warn("cannot find entry symbol %s; not setting start address", en);
 	if (!opt.relocatable)
 		eh->e_entry = eg != NONE && gsyms[eg].state != GS_UNDEF ? gsym_va(eg) : 0;
 	eh->e_phoff = phdrs.n ? sizeof(Ehdr) : 0;

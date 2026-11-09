@@ -812,24 +812,30 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
   *Validate:* T9 `fuzz-elf` (ASan) + `regress/elf/` with the probe's
   corrupt objects (bad `e_shoff`, truncated, `st_shndx=0x500`, oversized
   archive member, ABS64 at `size-1`); T8 with a 70k-section object.
-- [ ] **Crashes on ordinary inputs** [P]: no script / script without
-  `.symtab` (`ld/ld.c:4410`), `/DISCARD/` of a merge section (`ld/ld.c:643`).
+- [ ] **Crashes on ordinary inputs** [P]: no script.  (Fixed: a script
+  without `.symtab`/`.strtab`/`.shstrtab` places them as orphans, as lld;
+  `/DISCARD/` of a merge section (`.comment`): `isec_osec`.  Both found by
+  `VCC_LD=build/ccs/vlink bench/vcc-ctests.py --no-cache`, which links every
+  test with vlink: 1748/1749, the one left needs a GOT (`pragma_weak`).)
   *Validate:* T8 cases `no-script`, `discard-comment`.
 - [ ] **Options**: `-znotext` swallowed (`ld/ld.c:3315`), `-m X` unchecked
-  (`ld/ld.c:3296`); rejected `-pie`, `-static`, `-L`/`-l`, `-e`,
+  (`ld/ld.c:3296`); rejected `-pie`, `-static`, `-L`/`-l`,
   `--gc-sections`, `--dynamic-linker`, `--version`, `--emit-relocs`
   (`ld/ld.c:3295`); ignored `--start-group` (`ld/ld.c:3284`), `--eh-frame-hdr`
-  (`ld/ld.c:3285`), `-z now/relro/noexecstack`, `--orphan-handling`.
+  (`ld/ld.c:3285`), `-z now/relro/noexecstack`.  (Done: `-e`/`--entry` over `ENTRY()`, else
+  `_start`, lld's warning when absent; `--orphan-handling=place|warn|error`,
+  silent by default as lld.)
   *Validate:* T8 per option; unknown options are errors (T11-style table).
 - [ ] **Relocations**: GOT (`ADR_GOT_PAGE`, `LD64_GOT_LO12_NC`) + relaxation,
-  TLS LE/IE/TLSDESC + relaxations + `PT_TLS`, MOVW_*, CONDBR19, TSTBR14,
+  TLS in shared objects (executables done: LE, IE and TLSDESC relaxed to LE as
+  lld, `PT_TLS`, `.tbss` without address space; text byte-identical to lld
+  for `tests/vcc/tls_{static,ie,desc}.c`), `PT_GNU_RELRO`, MOVW_*, CONDBR19, TSTBR14,
   PREL32 to undefined (`ld/ld.c:2560-2570`).
   *Validate:* T8 (each against lld, run under qemu where runnable).
 - [ ] **Archives**: lazy member resolution, `-L`/`-l`, groups (`ld/ld.c:3342`);
   COMMON (`ld/ld.c:1783`); COMDAT groups (`ld/ld.c:1693`).
   *Validate:* T8 static link of a musl `libc.a` hello world (run under
   qemu-user); a C++ template object pair.
-- [ ] **Default entry** `_start` when no `ENTRY()`.  *Validate:* T8.
 - [ ] **Dynamic linking**: `.dynamic`, `.dynsym`/`.dynstr`, `.gnu.hash`, PLT,
   `DT_NEEDED`, versioning, RELR, `PT_INTERP`, `PT_GNU_RELRO`,
   `.eh_frame_hdr`, reading `.so` inputs (`ld/ld.c:1678`).

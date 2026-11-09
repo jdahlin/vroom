@@ -74,6 +74,19 @@ static void scan_relocs(void *arg, size_t i)
 		case R_AARCH64_LDST32_ABS_LO12_NC: case R_AARCH64_LDST64_ABS_LO12_NC:
 		case R_AARCH64_LDST128_ABS_LO12_NC: case R_AARCH64_LD_PREL_LO19:
 			break;
+		/* TLS: local-exec, and initial-exec/TLSDESC relaxed to it (an executable, as lld) */
+		case R_AARCH64_TLSLE_ADD_TPREL_HI12: case R_AARCH64_TLSLE_ADD_TPREL_LO12:
+		case R_AARCH64_TLSLE_ADD_TPREL_LO12_NC:
+		case R_AARCH64_TLSIE_ADR_GOTTPREL_PAGE21: case R_AARCH64_TLSIE_LD64_GOTTPREL_LO12_NC:
+		case R_AARCH64_TLSDESC_ADR_PAGE21: case R_AARCH64_TLSDESC_LD64_LO12:
+		case R_AARCH64_TLSDESC_ADD_LO12: case R_AARCH64_TLSDESC_CALL:
+			if (opt.shared || opt.relocatable)
+				error("%s:(%s+0x%llx): TLS relocation %u in a shared object is not supported", o->path,
+				      is->name, (unsigned long long)rl->r_offset, type);
+			else if (t.undef)
+				error("%s:(%s+0x%llx): TLS relocation against an undefined symbol", o->path, is->name,
+				      (unsigned long long)rl->r_offset);
+			break;
 		default:
 			error("%s:(%s+0x%llx): unsupported relocation type %u", o->path, is->name,
 			      (unsigned long long)rl->r_offset, type);
