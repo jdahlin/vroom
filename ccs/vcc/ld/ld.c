@@ -310,6 +310,7 @@ static struct {
 	VVEC(const char *) libdirs;
 	bool bstatic;
 	bool gc, print_gc;		/* --gc-sections, --print-gc-sections */
+	bool norelro;			/* -z norelro: no PT_GNU_RELRO */
 } opt;
 
 static int dirfd_base = AT_FDCWD;
@@ -3238,6 +3239,8 @@ static bool parse_args(int argc, char **argv)
 		if ((v = VAL("--vroom-comment"))) { opt.comment = v; continue; }
 		if ((v = VAL("-z")) || (!strncmp(a, "-z", 2) && a[2] && (v = a + 2))) {
 			if (!strcmp(v, "notext")) opt.notext = true;
+			else if (!strcmp(v, "norelro")) opt.norelro = true;
+			else if (!strcmp(v, "relro")) opt.norelro = false;
 			else if (!strcmp(v, "max-page-size") || !strncmp(v, "max-page-size=", 14))
 				opt.max_page = strtoull(v + 14, NULL, 0);
 			else if (strcmp(v, "norelro") && strcmp(v, "noexecstack") && strcmp(v, "relro") &&
@@ -3733,6 +3736,24 @@ static void adjust_output_sections(void)
 
 static bool headers_loaded;
 
+/* lld isRelroSection */
+static bool is_relro(uint32_t oi)
+{
+	const OSec *os = &osecs.v[oi];
+	const char *n = os->name;
+
+	if (!(os->flags & SHF_ALLOC) || !(os->flags & SHF_WRITE))
+		return false;
+	if ((os->flags & SHF_TLS) || os->type == SHT_INIT_ARRAY || os->type == SHT_FINI_ARRAY ||
+	    os->type == SHT_PREINIT_ARRAY)
+		return true;
+	if (got_isec != NONE && isec_osec(got_isec) == oi)
+		return true;
+	return !strcmp(n, ".data.rel.ro") || !strcmp(n, ".bss.rel.ro") || !strcmp(n, ".ctors") ||
+	       !strcmp(n, ".dtors") || !strcmp(n, ".jcr") || !strcmp(n, ".eh_frame") ||
+	       !strcmp(n, ".fini_array") || !strcmp(n, ".init_array") || !strcmp(n, ".preinit_array");
+}
+
 static void create_phdrs(void)
 {
 	phdrs.n = phsecs.n = 0;
@@ -3740,6 +3761,17 @@ static void create_phdrs(void)
 	int hdrload = phnew(PT_LOAD, PF_R);
 	int load = hdrload;
 	uint32_t flags = PF_R;
+	/* lld relroEnd: the first section after the relro run starts a PT_LOAD */
+	uint32_t relro_end = NONE;
+
+	for (uint32_t i = 0, in = 0; i < outsecs.n && !opt.norelro && !opt.relocatable && relro_end == NONE; i++) {
+		if (!sec_in_load(&osecs.v[outsecs.v[i]]))
+			continue;
+		if (is_relro(outsecs.v[i]))
+			in = 1;
+		else if (in)
+			relro_end = outsecs.v[i];
+	}
 	for (uint32_t i = 0; i < outsecs.n; i++) {
 		uint32_t oi = outsecs.v[i];
 		OSec *os = &osecs.v[oi];
@@ -3747,7 +3779,7 @@ static void create_phdrs(void)
 		if (!sec_in_load(os))
 			continue;
 		uint32_t nf = phflags(os);
-		if (flags ^ nf)
+		if ((flags ^ nf) || oi == relro_end)
 			load = -1;
 		bool last_is_hdr = load == hdrload && phsecs.v[load].last < 0;
 		if (load >= 0 && (!os->lma || last_is_hdr)) {
@@ -3769,6 +3801,33 @@ static void create_phdrs(void)
 				tls = phnew(PT_TLS, PF_R);
 			phadd(tls, oi);
 		}
+	}
+	/* lld: one PT_GNU_RELRO over the contiguous relro sections */
+	if (!opt.norelro && !opt.relocatable) {
+		int rr = -1;
+		bool in = false, ended = false;
+
+		for (uint32_t i = 0; i < outsecs.n; i++) {
+			uint32_t oi = outsecs.v[i];
+
+			if (!sec_in_load(&osecs.v[oi]))
+				continue;
+			if (is_relro(oi)) {
+				in = true;
+				if (ended)
+					error("section: %s is not contiguous with other relro sections", osecs.v[oi].name);
+				else {
+					if (rr < 0)
+						rr = phnew(PT_GNU_RELRO, PF_R);
+					phadd(rr, oi);
+				}
+			} else if (in) {
+				in = false;
+				ended = true;
+			}
+		}
+		if (rr >= 0)
+			phdrs.v[rr].p_align = 1;
 	}
 	phnew(PT_GNU_STACK, PF_R | PF_W);
 	int note = -1;

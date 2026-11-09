@@ -844,7 +844,7 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
   stable-sorted by rank before placement as lld's sortSections: 2 cases.
   Left: `--gc-sections` with `.eh_frame` (an error: lld's piecewise FDE
   handling), `--emit-relocs`, `--eh-frame-hdr`
-  (ignored), `-z relro/now`.
+  (ignored), `-z now` (no effect without dynamic linking).
   *Validate:* `bench/vlink-opts.py` per option; unknown options are errors.
 - [ ] **Relocations**: (done: GOT relaxation adrp+ldr -> adrp+add / nop+adr
   as lld; orphans placed by lld's coarse rank (sections without inputs do not count; nothing with inputs after: at the very end, as lld); `.got` for
@@ -853,7 +853,9 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
   locals, GLOB_DAT for preemptible symbols),
   TLS in shared objects (executables done: LE, IE and TLSDESC relaxed to LE as
   lld, `PT_TLS`, `.tbss` without address space; text byte-identical to lld
-  for `tests/vcc/tls_{static,ie,desc}.c`), `PT_GNU_RELRO`, MOVW_*, CONDBR19, TSTBR14,
+  for `tests/vcc/tls_{static,ie,desc}.c`; `PT_GNU_RELRO` as lld: isRelroSection,
+  one contiguous run, p_align 1, a new PT_LOAD at relroEnd, `-z norelro`;
+  `VCC_LDCMP=1` also compares program headers: 1756/1756), MOVW_*, CONDBR19, TSTBR14,
   PREL32 to undefined (`ld/ld.c:2560-2570`).
   *Validate:* T8 (each against lld, run under qemu where runnable).
 - [x] **`vpp -c x.s`** (done: `.s` and `-x assembler` go to the assembler

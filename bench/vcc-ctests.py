@@ -138,6 +138,12 @@ def link(objs, elf):
         sh([oc, '-O', 'binary', elf, elf + '.lb']); sh([oc, '-O', 'binary', elf + '.v', elf + '.vb'])
         if open(elf + '.lb', 'rb').read() != open(elf + '.vb', 'rb').read():
             return 1, 'error: vlink image differs from lld'
+        # and the program headers (PT_LOAD split, PT_TLS, PT_GNU_RELRO, ...)
+        rd = llvm('llvm-readelf')
+        ph = [[l.split() for l in subprocess.run([rd, '-lW', e], capture_output=True, text=True).stdout.splitlines()
+               if l.strip()[:4] in ('LOAD', 'TLS ', 'GNU_', 'PHDR', 'NOTE')] for e in (elf, elf + '.v')]
+        if ph[0] != ph[1]:
+            return 1, 'error: vlink program headers differ from lld'
     return rc, err.decode(errors='replace')
 
 def first_err(s):

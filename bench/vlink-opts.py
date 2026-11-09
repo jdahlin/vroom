@@ -160,13 +160,19 @@ def main():
                 if p.returncode == 0:
                     subprocess.run([OC, '-O', 'binary', out, f'{out}.bin'], check=True)
                     img = open(f'{out}.bin', 'rb').read()
+                    # and the program headers (type, offsets, sizes, flags, alignment)
+                    ph = subprocess.run([llvm('llvm-readelf'), '-lW', out], capture_output=True, text=True).stdout
+                    img = (img, [l.split() for l in ph.splitlines()
+                                 if l.strip().split(' ')[0] in ('LOAD', 'TLS', 'GNU_RELRO', 'GNU_STACK', 'PHDR', 'NOTE')])
                 r[tool] = (p.returncode, first_err(p.stderr), img)
             (vr, ve, vi), (lr, le, li) = r['vlink'], r['lld']
             why = None
             if (vr == 0) != (lr == 0):
                 why = f'vlink rc={vr} ({ve}), lld rc={lr} ({le})'
-            elif vr == 0 and vi != li:
+            elif vr == 0 and vi[0] != li[0]:
                 why = 'loaded image differs from lld'
+            elif vr == 0 and vi[1] != li[1]:
+                why = f'program headers differ:\n    vlink {vi[1]}\n    lld   {li[1]}'
             elif name in MSG and (ve != MSG[name] or le != MSG[name]):
                 why = f'message: vlink "{ve}", lld "{le}"'
             if why:
