@@ -88,11 +88,13 @@ static void switch_enum_warn(cc *c, qty et, uint32_t cnd)
 	}
 }
 
-static uint32_t cond_of(cc *c)
+static uint32_t cond_of(cc *c, const char *kw)
 {
 	uint32_t e, open = tok(c)->loc;
 
-	expect(c, T_LPAREN, "'('");
+	if (unlikely(!is(c, T_LPAREN)))
+		lparen_fail(c, kw);
+	next(c);
 	e = decay(c, expr(c));
 	assign_cond_warn(c, e);
 	expect_close(c, T_RPAREN, open, e);
@@ -269,7 +271,7 @@ static void for_semi(cc *c, uint32_t e)
 static void block_item(cc *c, uint32_t loc, vec *items)
 {
 	if (is(c, T_EOF)) {
-		report(c, "error", pp_tok_end(c->p, c->prevloc), NULL, 0, NULL, 0, "expected '}'");
+		report(c, "error", pp_main_eof(c->p), NULL, 0, NULL, 0, "expected '}'");
 		note(c, loc, "to match this '{'");
 		longjmp(c->bail, 1);
 	}
@@ -425,7 +427,7 @@ VPRIV uint32_t statement(cc *c)
 
 		next(c);
 		scope_open(c);	/* C99 6.8.4p3: a selection statement is a block, and so is each substatement */
-		cnd = cond_of(c);
+		cnd = cond_of(c, "if");
 		{
 			/* clang: runtime-behaviour warnings only in reachable code */
 			cval cv;
@@ -449,7 +451,7 @@ VPRIV uint32_t statement(cc *c)
 
 		next(c);
 		scope_open(c);
-		cnd = cond_of(c);
+		cnd = cond_of(c, "while");
 		c->in_loop++;
 		body = sub_statement(c);
 		c->in_loop--;
@@ -467,7 +469,7 @@ VPRIV uint32_t statement(cc *c)
 		if (!iskw(c, KW_while))
 			fatal(c, tok(c)->loc, "expected 'while' in do/while loop");
 		next(c);
-		cnd = cond_of(c);
+		cnd = cond_of(c, "while");
 		scope_close(c);
 		expect_semi(c, "after do/while statement");
 		return mkstmt(c, N_DO, loc, cnd, body, 0);
@@ -480,7 +482,9 @@ VPRIV uint32_t statement(cc *c)
 
 		next(c);
 		open = tok(c)->loc;
-		expect(c, T_LPAREN, "'('");
+		if (unlikely(!is(c, T_LPAREN)))
+			lparen_fail(c, "for");
+		next(c);
 		scope_open(c);
 		if (REC_ARM(c, &r)) {	/* an error in the header: on with the body */
 			rec_restore(c, &r, REC_FOR);
@@ -524,19 +528,22 @@ VPRIV uint32_t statement(cc *c)
 		return n;
 	}
 	case KW_switch: {
-		uint32_t cnd, body;
+		uint32_t cnd, body, open;
 		qty et;
 		qty saved = c->switch_ty;
 
 		next(c);
 		scope_open(c);
-		expect(c, T_LPAREN, "'('");
+		open = tok(c)->loc;
+		if (unlikely(!is(c, T_LPAREN)))
+			lparen_fail(c, "switch");
+		next(c);
 		cnd = expr(c);
 		et = N(cnd)->ty;
 		while (N(cnd)->op == N_CAST && N(cnd)->a && !c->span[cnd].e && KIND(c, N(N(cnd)->a)->ty) == TY_ENUM)
 			cnd = N(cnd)->a, et = N(cnd)->ty;	/* -Wswitch looks at the enum before promotion */
 		cnd = rvalue(c, cnd);
-		expect(c, T_RPAREN, "')'");
+		expect_close(c, T_RPAREN, open, cnd);
 		if (!is_integer(c, N(cnd)->ty)) {
 			pp_span r = rng(c, cnd);
 

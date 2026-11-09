@@ -98,6 +98,8 @@ struct cc {
 	struct recov *rec;	/* the innermost parser recovery point (diag.c), NULL: errors end the TU */
 	bool for_head;		/* parsing a for (...;...;...) header: clang's form of "expected ';'" */
 	int ibr;		/* initializer '{'s open: after an error the skip closes them first */
+	const char *dbug;	/* the first delayed bug: an error was due, and must have come by the end */
+	uint32_t dbug_loc;
 	uint32_t ntypo;		/* typo corrections tried (clang's -fspell-checking-limit) */
 	uint32_t miss_loc;	/* where the last "expected ')'" was: one per place */
 	uint32_t decl_name, decl_loc, decl_depth;	/* the last declarator's name, where, at which scope depth */
@@ -105,9 +107,17 @@ struct cc {
 	/* tokens: tk[0] is the current one */
 	ptok tk[4];
 	int ntk;
-	uint32_t prevloc;
-	uint8_t prevflags;
-	uint32_t dead;		/* inside if (0) ... (and the like): no runtime-behaviour warnings */	/* the previous token's flags (PF_MACRO: diagnostics) */
+	/* the previous token's loc, kind, flags (PF_MACRO: diagnostics), as ptok lays
+	   them out: next() copies the 8 bytes with one load and one store */
+	union {
+		struct {
+			uint32_t prevloc;
+			uint8_t prevkind, prevflags;
+			uint16_t prevctr;
+		};
+		uint64_t prev8;
+	};
+	uint32_t dead;		/* inside if (0) ... (and the like): no runtime-behaviour warnings */
 	uint8_t cv_what;		/* context of the conversion being checked: CX_* (diagnostics) */
 	uint32_t cv_loc, cv_fn, cv_arg;	/* CX_PASS: the callee's sym (0: unknown) and the argument */
 
@@ -166,6 +176,7 @@ struct cc {
 	int unevaluated;	/* sizeof / typeof / _Alignof operand */
 	attrs pend;		/* attributes before a block-scope declaration */
 	int in_struct;		/* parsing a struct/union body */
+	int in_tyname;		/* parsing a type name (clang's DSC_type_specifier) */
 	bool has_pend;
 	uint32_t pack[64];	/* #pragma pack stack (bytes, 0: none) */
 	uint64_t packid[64];	/* labels (token.c pragma_pack) */

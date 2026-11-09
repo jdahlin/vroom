@@ -67,7 +67,7 @@ VPRIV void expect_match_fail(cc *c, int kind, uint32_t open)
 
 	if (c->miss_loc != tok(c)->loc) {	/* nested ones missing at the same token: once */
 		c->miss_loc = tok(c)->loc;
-		report(c, "error", tok(c)->loc, NULL, 0, NULL, 0, "expected '%s'", cl);
+		report(c, "error", tok(c)->kind == T_EOF ? pp_main_eof(c->p) : tok(c)->loc, NULL, 0, NULL, 0, "expected '%s'", cl);
 		note(c, open, "to match this '%s'", op);
 	}
 	skip_close(c, kind);
@@ -95,6 +95,28 @@ VPRIV void skip_close(cc *c, int kind)
 	}
 }
 
+/* ---------------- delayed bugs (D2.1) ---------------- */
+
+VPRIV void delayed_bug(cc *c, uint32_t loc, const char *what)
+{
+	if (!c->dbug)
+		c->dbug = what, c->dbug_loc = loc;
+}
+
+/* at the end of the TU: a delayed bug with no error reported is vcc's bug */
+VPRIV void delayed_bug_check(cc *c)
+{
+	vdiag *d;
+
+	if (!c->dbug || c->errors || pp_errors(c->p))
+		return;
+	d = pp_diag_begin(c->p, VDL_ERROR, c->dbug_loc, "internal error: %s (vcc stopped short here, expecting an error)",
+			  c->dbug);
+	d->id = "vcc_internal_delayed_bug";
+	pp_diag_emit(c->p, d);
+	c->errors++;
+}
+
 /* ---------------- parser recovery ---------------- */
 
 VPRIV void rec_save(cc *c, recov *r)
@@ -103,7 +125,7 @@ VPRIV void rec_save(cc *c, recov *r)
 	r->depth = c->depth, r->ndops = c->ndops, r->ncase = c->ncase, r->case_base = c->case_base;
 	r->dead = c->dead, r->fn = c->fn;
 	r->in_loop = c->in_loop, r->in_switch = c->in_switch, r->in_stmtexpr = c->in_stmtexpr;
-	r->unevaluated = c->unevaluated, r->in_struct = c->in_struct, r->ibr = c->ibr;
+	r->unevaluated = c->unevaluated, r->in_struct = c->in_struct, r->ibr = c->ibr, r->in_tyname = c->in_tyname;
 	r->switch_cases = c->switch_cases, r->switch_ty = c->switch_ty;
 	r->sw_default = c->sw_default, r->has_pend = c->has_pend, r->for_head = c->for_head;
 	r->again = UINT32_MAX;
@@ -203,7 +225,7 @@ VPRIV void rec_restore(cc *c, recov *r, int mode)
 	c->ndops = r->ndops, c->ncase = r->ncase, c->case_base = r->case_base;
 	c->dead = r->dead, c->fn = r->fn;
 	c->in_loop = r->in_loop, c->in_switch = r->in_switch, c->in_stmtexpr = r->in_stmtexpr;
-	c->unevaluated = r->unevaluated, c->in_struct = r->in_struct;
+	c->unevaluated = r->unevaluated, c->in_struct = r->in_struct, c->in_tyname = r->in_tyname;
 	int open = is(c, T_SEMI) ? 0 : c->ibr - r->ibr;	/* initializer braces left open, unless a ';' ends them */
 
 	c->ibr = r->ibr;
@@ -218,6 +240,7 @@ VPRIV void rec_restore(cc *c, recov *r, int mode)
 		if (!s || c->syms[s].depth != c->depth) {
 			s = sym_new(c, S_VAR, c->decl_name, prim(TY_INT), c->decl_loc);
 			c->syms[s].flags |= SF_INVALID;
+			delayed_bug(c, c->decl_loc, "an invalid declaration without an error");
 			sym_bind(c, s);
 		}
 	}

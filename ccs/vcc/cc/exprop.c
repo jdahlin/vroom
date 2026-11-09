@@ -57,7 +57,7 @@ static uint32_t sizeof_operand(cc *c, qty *ty, pp_span *r)
 		next(c);
 		if (is_type_start(c, tok(c))) {
 			*ty = type_name(c);
-			expect(c, T_RPAREN, "')'");
+			expect_match(c, T_RPAREN, ploc);
 			if (r)
 				*r = (pp_span){ ploc, pp_tok_end(c->p, c->prevloc) };
 			return UINT32_MAX;
@@ -338,7 +338,7 @@ static __attribute__((noinline)) uint32_t cast_paren(cc *c, uint32_t loc)
 
 		ty = type_name(c);
 		bad = c->errors != e0;	/* the type had its error: clang's invalid cast, silent */
-		expect(c, T_RPAREN, "')'");
+		expect_match(c, T_RPAREN, loc);
 		if (is(c, T_LBRACE)) {	/* compound literal */
 			uint32_t init, s;
 			bool st = !c->fn;
@@ -428,6 +428,8 @@ static void runtime_warn(cc *c, int op, uint32_t l, uint32_t r, uint32_t loc)
 	if (c->dead || (op != T_SLASH && op != T_PERCENT && op != T_LESSLESS && op != T_GREATERGREATER) ||
 	    !is_integer(c, N(l)->ty) || !is_integer(c, N(r)->ty) || !cc_eval(c, r, &cv) || cv.kind != CV_INT)
 		return;
+	if (op == T_SLASH || op == T_PERCENT ? cv.i : cv.i >= 0 && cv.i < (i128)ty_size(c, promoted(c, l)) * 8)
+		return;	/* no warning: no range (pp_tok_end) either */
 	rr = rng(c, r);
 	if (op == T_SLASH || op == T_PERCENT) {
 		if (!cv.i)

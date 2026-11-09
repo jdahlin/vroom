@@ -216,6 +216,8 @@ static inline bool iskw(cc *c, int kw);
 static inline __attribute__((always_inline)) bool accept(cc *c, int kind);
 VPRIV const char *tokspell(const ptok *t, char *buf, size_t cap);
 VPRIV __attribute__((noinline, cold, noreturn)) void expect_fail(cc *c, const char *what);
+VPRIV __attribute__((noinline, cold, noreturn)) void lparen_fail(cc *c, const char *kw);
+VPRIV __attribute__((noinline, cold, noreturn)) void expect_here_fail(cc *c, const char *what);
 /* diag.c: parser recovery.  A recovery point in a block, a struct body or at file
    scope: a parse error (fatal, a failed expect) reports, jumps back to the innermost
    one, which restores the parser's state and skips to the end of the statement or
@@ -225,7 +227,7 @@ typedef struct recov {
 	jmp_buf jb;
 	struct recov *prev;
 	uint32_t depth, ndops, ncase, case_base, dead, fn;
-	int in_loop, in_switch, in_stmtexpr, unevaluated, in_struct, ibr;
+	int in_loop, in_switch, in_stmtexpr, unevaluated, in_struct, ibr, in_tyname;
 	uint32_t *switch_cases;
 	qty switch_ty;
 	bool sw_default, has_pend, for_head;
@@ -270,6 +272,11 @@ VPRIV void vpush(cc *c, vec *v, uint32_t x);
 VPRIV uint32_t vfreeze(cc *c, const vec *v);
 VPRIV uint32_t mk_int(cc *c, i128 v, qty ty, uint32_t loc);
 VPRIV uint32_t err_node(cc *c, uint32_t loc);
+/* rustc's delay_bug (PLAN-diag D2.1): code that goes quiet because an error was
+   reported (an error node, an invalid declaration) says so; a TU that ends
+   with no error reports "internal error" instead of compiling wrongly */
+VPRIV __attribute__((noinline, cold)) void delayed_bug(cc *c, uint32_t loc, const char *what);
+VPRIV void delayed_bug_check(cc *c);
 VPRIV uint32_t mk_flt(cc *c, double v, qty ty, uint32_t loc);
 VPRIV uint32_t mk_fltq(cc *c, u128 q, qty ty, uint32_t loc);
 /* lit.c */
@@ -439,10 +446,13 @@ static inline bool is_nullability(const cc *c, const ptok *t)
 				      t->id == c->id_null[2] || t->id == c->id_null[3]);
 }
 
+_Static_assert(offsetof(ptok, kind) == offsetof(ptok, loc) + 4 && offsetof(ptok, flags) == offsetof(ptok, loc) + 5 &&
+	       offsetof(ptok, ctr) == offsetof(ptok, loc) + 6 && offsetof(ptok, loc) % 8 == 0, "next(): ptok's loc..ctr");
+_Static_assert(offsetof(cc, prevflags) == offsetof(cc, prevloc) + 5, "next(): cc's prev*");
+
 static inline __attribute__((always_inline)) void next(cc *c)
 {
-	c->prevloc = c->tk[0].loc;
-	c->prevflags = c->tk[0].flags;
+	memcpy(&c->prev8, &c->tk[0].loc, 8);
 	if (unlikely(c->ntk > 1))
 		next_shift(c);
 	else
@@ -464,6 +474,23 @@ static inline __attribute__((always_inline)) void expect(cc *c, int kind, const 
 {
 	if (unlikely(c->tk[0].kind != kind))
 		expect_fail(c, what);
+	next(c);
+}
+
+/* an opening '(' whose ')' is expect_match'ed: its location */
+static inline __attribute__((always_inline)) uint32_t expect_lparen(cc *c)
+{
+	uint32_t l = c->tk[0].loc;
+
+	expect(c, T_LPAREN, "'('");
+	return l;
+}
+
+/* a ')' clang diagnoses at the token, without the note (the builtins' closers) */
+static inline __attribute__((always_inline)) void expect_here(cc *c, int kind, const char *what)
+{
+	if (unlikely(c->tk[0].kind != kind))
+		expect_here_fail(c, what);
 	next(c);
 }
 

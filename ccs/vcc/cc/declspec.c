@@ -95,12 +95,12 @@ static uint32_t tag_lookup_or_new(cc *c, int kind, uint32_t name, uint32_t loc, 
 
 VPRIV void static_assert_decl(cc *c)
 {
-	uint32_t loc = tok(c)->loc, n, e;
+	uint32_t loc = tok(c)->loc, n, e, open;
 	i128 v;
 	char msg[256] = "";
 
 	next(c);
-	expect(c, T_LPAREN, "'('");
+	open = expect_lparen(c);
 	e = assign_expr(c);
 	n = rvalue(c, e);
 	if (!const_int(c, n, &v)) {
@@ -153,7 +153,7 @@ VPRIV void static_assert_decl(cc *c)
 			}
 		}
 	}
-	expect(c, T_RPAREN, "')'");
+	expect_match(c, T_RPAREN, open);
 	expect_semi(c, "after static_assert");
 }
 
@@ -182,9 +182,10 @@ static qty int_type(cc *c, int nlong, int sgn, int base, uint32_t loc)
 static qty typeof_spec(cc *c, bool unqual)
 {
 	qty t;
+	uint32_t open;
 
 	next(c);
-	expect(c, T_LPAREN, "'('");
+	open = expect_lparen(c);
 	if (is_type_start(c, tok(c))) {
 		t = type_name(c);
 	} else {
@@ -195,7 +196,7 @@ static qty typeof_spec(cc *c, bool unqual)
 		c->unevaluated--;
 		t = N(n)->ty;
 	}
-	expect(c, T_RPAREN, "')'");
+	expect_match(c, T_RPAREN, open);
 	return unqual ? QUNQ(t) : t;
 }
 
@@ -256,11 +257,26 @@ static __attribute__((noinline, cold)) bool late_width_sign(cc *c, int base, int
 
 /* long/short/signed/unsigned after a struct, union or enum specifier: clang's error,
    the word dropped, the declaration invalid */
+static void tag_semi(cc *c, int kind);
+
+/* "struct S" ending its line and a type specifier starting the next: clang's
+   missing ';' (a forward declaration), checked here, where vcc's own error would
+   be, so that the many "struct S" of a valid TU pay nothing for it */
+static bool tag_line_end(cc *c, const dspec *ds)
+{
+	if (!ds->tag_bare || !(tok(c)->flags & TF_SOL) || c->in_tyname)
+		return false;
+	tag_semi(c, KIND(c, QT(c->tags[ds->tagdecl].ty, 0)));
+	return true;
+}
+
 static __attribute__((noinline, cold)) void tag_width(cc *c, dspec *ds, int kw)
 {
 	int k = KIND(c, QT(c->tags[ds->tagdecl].ty, 0));
 	const char *tn = k == TY_ENUM ? "enum" : k == TY_UNION ? "union" : "struct";
 
+	if (tag_line_end(c, ds))
+		return;
 	if (kw == KW_long || kw == KW_short)
 		cc_error(c, tok(c)->loc, "'%.*s %s' is invalid", IDF(kw), tn);
 	else
@@ -293,6 +309,75 @@ static __attribute__((noinline)) bool base_clash(cc *c, int base, int kw, int nl
 	return kw == KW_int;
 }
 
+/* clang's isValidAfterTypeSpecifier (C): what may follow "struct S { ... }" */
+static __attribute__((noinline, cold)) bool valid_after_tag(cc *c)
+{
+	const ptok *t = tok(c);
+	int kw;
+
+	switch (t->kind) {
+	case T_SEMI: case T_STAR: case T_AMP: case T_AMPAMP: case T_RPAREN: case T_LPAREN:
+	case T_COMMA: case T_LSQUARE: case T_ELLIPSIS: case T_RBRACE:
+		return true;
+	case T_COLON:
+		return c->in_struct;
+	case T_IDENT:
+		break;
+	default:
+		return false;
+	}
+	kw = kwof(t);
+	switch (kw) {
+	case 0: case KW___attribute__: case KW___attribute:
+		return true;
+	case KW_const: case KW___const__: case KW___const: case KW_volatile: case KW___volatile__: case KW___volatile:
+	case KW_restrict: case KW___restrict__: case KW___restrict: case KW__Atomic: case KW_inline: case KW___inline__:
+	case KW___inline: case KW_static: case KW_extern: case KW_typedef: case KW_register: case KW_auto:
+	case KW__Thread_local: case KW_constexpr: {
+		/* likely the next declaration's, unless a type specifier follows (isKnownToBeTypeSpecifier) */
+		const ptok *n = peek(c, 1);
+		int k = n->kind == T_IDENT ? kwof(n) : 0;
+
+		return !(k && (kwclass[k] & KC_TYPE) && !(k == KW_const || k == KW___const__ || k == KW___const ||
+			 k == KW_volatile || k == KW___volatile__ || k == KW___volatile || k == KW_restrict ||
+			 k == KW___restrict__ || k == KW___restrict || k == KW__Atomic || k == KW__Alignas ||
+			 k == KW___attribute__ || k == KW___attribute));
+	}
+	default:
+		return false;
+	}
+}
+
+/* clang: "struct S { ... }" (or "struct S" at the end of a line) followed by what
+   cannot follow a type specifier is a missing ';': reported at the end of the
+   previous token, with the insertion, and parsing goes on as if it were there */
+static __attribute__((noinline, cold)) void tag_semi(cc *c, int kind)
+{
+	uint32_t e = c->prevflags & PF_MACRO ? tok(c)->loc : pp_tok_end(c->p, c->prevloc);
+	pp_fixit fx = { e, e, ";" };
+	ptok *t = c->tk;
+
+	report(c, "error", e, NULL, 0, &fx, !(c->prevflags & PF_MACRO), "expected ';' after %s",
+	       kind == TY_ENUM ? "enum" : kind == TY_UNION ? "union" : "struct");
+	peek(c, 0);
+	if (c->ntk >= 4)
+		return;
+	if (c->ntk < 1)
+		c->ntk = 1;
+	memmove(t + 1, t, c->ntk * sizeof(*t));
+	c->ntk++;
+	t[0] = (ptok){ .s = ";", .len = 1, .loc = e, .kind = T_SEMI };
+}
+
+/* after a struct, union or enum body: clang's missing ';' when what follows cannot
+   follow a type specifier (out of decl_specs' loop, which it would cost registers) */
+static __attribute__((noinline)) void tag_body_end(cc *c, int kind)
+{
+	if (likely(is(c, T_SEMI)) || c->in_tyname || valid_after_tag(c))
+		return;
+	tag_semi(c, kind);
+}
+
 /* "int struct S x", "struct S int x": clang's error at the second one, which is
    skipped (a tag's name and body too); the declaration goes on with the first */
 static __attribute__((noinline, cold)) void spec_clash(cc *c, const dspec *ds, int base)
@@ -300,6 +385,8 @@ static __attribute__((noinline, cold)) void spec_clash(cc *c, const dspec *ds, i
 	const ptok *t = tok(c);
 	int kw = kwof(t);
 
+	if (!base && tag_line_end(c, ds))
+		return;
 	if (base)
 		cc_error(c, t->loc, "cannot combine with previous '%.*s' declaration specifier", IDF(base));
 	else
@@ -416,10 +503,12 @@ again:
 
 			next(c);
 			if (is(c, T_LPAREN)) {
+				uint32_t open = tok(c)->loc;
+
 				next(c);
 				named = ty_atomic(c, type_name(c), aloc);
 				have_named = true;
-				expect(c, T_RPAREN, "')'");
+				expect_match(c, T_RPAREN, open);
 				any = true;
 			} else {
 				atomic = aloc ? aloc : 1;	/* the qualifier: applied to the type below */
@@ -432,10 +521,10 @@ again:
 		case KW___extension__:
 			break;
 		case KW__Alignas: {
-			uint32_t a;
+			uint32_t a, open;
 
 			next(c);
-			expect(c, T_LPAREN, "'('");
+			open = expect_lparen(c);
 			if (is_type_start(c, tok(c))) {
 				a = ty_align(c, type_name(c));
 			} else {
@@ -444,7 +533,7 @@ again:
 				const_expr(c, &v, NULL);
 				a = (uint32_t)v;
 			}
-			expect(c, T_RPAREN, "')'");
+			expect_match(c, T_RPAREN, open);
 			if (a > ds->align)
 				ds->align = a;
 			continue;
@@ -558,10 +647,12 @@ again:
 				if (kind == TY_ENUM) {
 					merge_attrs(&post, &pre);
 					enum_body(c, ti, &post);
+					tag_body_end(c, kind);
 				} else {
 					c->tags[ti].flags |= (pre.packed ? RF_PACKED : 0);
 					c->tags[ti].maxalign = pre.aligned;
 					struct_body(c, ti);
+					tag_body_end(c, kind);
 				}
 			} else {
 				ds->tag_bare = true;

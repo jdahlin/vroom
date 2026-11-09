@@ -259,6 +259,13 @@ Tio lager; varje steg nedan säger vilka det berör.
   (rustcs `TyKind::Error`); den kan bara skapas med en token som bara fås genom att ett fel
   sänts (`ErrorGuaranteed`).  En `diag_delayed_bug()` som blir intern fel om TU:n slutar
   utan fel.
+
+  *Status (klart):* felnoderna (`err_node`, `NF_ERR`) och ogiltiga deklarationer
+  (`SF_INVALID`) är feltypen; varje ställe som tystnar för att ett fel redan sänts anropar
+  `delayed_bug(c, loc, vad)`, och `delayed_bug_check` vid TU:ns slut (före layout och
+  kodgenerering) ger "internal error: ... (vcc stopped short here, expecting an error)"
+  (id `vcc_internal_delayed_bug`) om inget fel kom, i stället för att kompilera fel.
+  `VCC_TEST_DELAYED_BUG` provar vägen.  Mutationskorpusen: 0 utlösta.
 - **D2.2 `expect()` blir icke-fatal.**  Synkronisering på `;`, `}` och början av nästa
   deklaration; saknat `;` efter `struct`; obalanserade klamrar; de 46 `fatal()` gås
   igenom ett och ett.  Målet är **färre följdfel än clang**, med samma första fel.
@@ -310,6 +317,30 @@ Tio lager; varje steg nedan säger vilka det berör.
   *Validera:* lager 3: inga krascher, första felet på clangs plats i ≥ 95 %, följdfel
   inte fler än clangs i ≥ 95 % av mutanterna och färre totalt; nya `tests/diag/`-fall med flera oberoende fel; T5 stress
   grön; lager 9.
+
+  *Status (klart, målen nådda):* första felet på clangs plats 93,2 → 95,3 % (samma rad
+  4,1 %, annanstans 0,6 %), följdfel inte fler än clangs i 95,2 % (fler 4,8 %), fel totalt
+  3153 mot clangs 3518, inga krascher.  Det som tog dit, alla clangs regler:
+  ExpectAndConsume (saknad skiljetecken vid slutet av föregående token, med insättningen
+  som fix-it), BalancedDelimiterTracker för parens par (sizeof, cast, `_Generic`, typeof,
+  `_Atomic(...)`, `_Alignas`, `static_assert`, `switch`: vid token, med "to match this"),
+  inbyggda funktioners `)` vid token utan not, "expected '(' after 'if'" (while, for,
+  switch, do/while som 'while') vid token, EOF-platsen (filens sista radbrytning, annars
+  slutet), "expected ';' after struct/union/enum" (isValidAfterTypeSpecifier efter en
+  kropp; "struct S" sist på raden före en typspecificerare, i den kalla
+  "cannot combine"-vägen) med ett inskjutet `;` så att resten parsas som clang, en namnlös
+  deklarator "(int x)" får felet efter `(`, ett namn i ett typnamn är "expected ')'".
+  Dubbletterna (`void v;`, sammansatt literal i parentes, rättade namn) var redan som
+  clangs: `tests/diag/dup_followons.c` håller dem där; en parentes-uttrycks intervall
+  omfattar parenteserna (clangs ParenExpr, beräknat först i `rng()`).  Nya fall:
+  `tag_semi.c`, `cond_paren.c`, `paren_close.c`, `dup_followons.c` (82/82, 80 textidentiska
+  med clang).  Lager 9: diag 82/82, mutationer och stress under ASan (`vcc-diag.py
+  --bin-dir`); ASan-bygget får 64 MB huvudstack (dess ramar är 2–3 gånger större, som
+  vccd:s 16 MB-trådar), och konstantevalueringen kontrollerar stacken under ASan.  Fel på
+  vägen: `in_tyname` återställs vid återhämtning.  Prestanda: `next()` kopierar föregående
+  tokens loc/kind/flags med en 64-bitarsflytt (−0,35 % fe), `need_lvalue` och
+  `runtime_warn` räknar intervallet (`pp_tok_end`) bara när de rapporterar (−0,8 % fe);
+  grenen som helhet nu fe −0,01 %, cc +0,03 % mot merge-basen (var +0,99 %).
 
 ### D3. Maskinläsbar utdata
 
@@ -422,7 +453,7 @@ D1 och D2 hänger ihop (feltypen behöver posten); D0.2 först så att D2 har en
 - [x] D0.2 — 2026-11-09
 - [x] D1.0 — 2026-11-09
 - [x] D1.1 – D1.3 — 2026-11-09
-- [ ] D2.1 – D2.3
+- [x] D2.1 – D2.3 — 2026-11-09
 - [x] D3.1 – D3.3 — 2026-11-09 (officiella SARIF-schemat ej vendrat)
 - [ ] D4
 - [ ] D5.1 – D5.8

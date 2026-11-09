@@ -102,6 +102,7 @@ bench/vcc-abi.py                    # cross-compiler calls, clang/vcc x caller/c
 bench/vcc-abi.py --host             # the same for the Apple arm64 ABI, run natively
 bench/vcc-darwin-s.py -j 6           # Darwin -S assembled by Apple's as, runs as the direct object (~2 min)
 bench/vcc-diag.py -j 6             # tests/diag: vcc's .stderr snapshots, clang's locations/levels/flags (~2 s)
+bench/vcc-diag.py --bin-dir build/ccs-asan   # ... with a sanitizer build (also vcc-mutate.py, VCC_BIN=$PWD/build/ccs-asan)
 bench/vcc-diag.py --bless PATTERN   # ... rewrite the snapshots of a changed message (review the diff)
 bench/gen-diagids.py [--check]      # pp/diagids.inc: each diagnostic format's id (clang's name or vcc_*)
 VCC_TRACK_DIAG=1 vpp ... -fdiagnostics-show-id   # each diagnostic's id and where vcc reported it

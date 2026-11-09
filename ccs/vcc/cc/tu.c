@@ -172,6 +172,8 @@ int cc_run(pp *p, const cc_opts *o)
 	pthread_once(&once, init_tables);	/* vccd runs TUs on many threads */
 	kwmap = o->std == 23 ? kwmap_c23 : kwmap_gnu;	/* the TU's keywords (this thread parses it) */
 	cc_init(c, p, o);
+	if (unlikely(getenv("VCC_TEST_DELAYED_BUG") != NULL))	/* test hook: vcc-driver.py */
+		delayed_bug(c, 0, "VCC_TEST_DELAYED_BUG");
 	if (!setjmp(c->bail)) {
 		dc_begin(c);
 		fetch(c, &c->tk[0]);
@@ -191,6 +193,7 @@ int cc_run(pp *p, const cc_opts *o)
 			}
 		}
 	}
+	delayed_bug_check(c);
 	if (o->dump_layouts && !c->errors)
 		layout_checks(c);
 	if (o->emit && !c->errors && !pp_errors(p))

@@ -145,10 +145,37 @@ VPRIV const char *tokspell(const ptok *t, char *buf, size_t cap)
 }
 
 /* the failure path out of line: tokspell's buffer (a VLA) made every call set up a frame */
+/* clang's ExpectAndConsume: a missing punctuator is reported at the end of the
+   previous token, with the insertion as a fix-it (the closers of a delimiter pair
+   are expect_match: at the token, as clang's BalancedDelimiterTracker) */
 VPRIV __attribute__((noinline, cold, noreturn)) void expect_fail(cc *c, const char *what)
 {
+	size_t n = strlen(what);
+
+	if (n >= 3 && n <= 5 && what[0] == '\'' && what[n - 1] == '\'' && c->prevloc && !(c->prevflags & PF_MACRO)) {
+		uint32_t e = pp_tok_end(c->p, c->prevloc);
+		char *s = halloc(c, n - 1);
+		pp_fixit fx = { e, e, s };
+
+		memcpy(s, what + 1, n - 2), s[n - 2] = 0;
+		report(c, "error", e, NULL, 0, &fx, 1, "expected %s", what);
+		parse_jump(c);
+	}
 	fatal(c, c->tk[0].loc, "expected %s", what);
 	abort();
+}
+
+VPRIV __attribute__((noinline, cold, noreturn)) void expect_here_fail(cc *c, const char *what)
+{
+	report(c, "error", c->tk[0].loc, NULL, 0, NULL, 0, "expected %s", what);
+	parse_jump(c);
+}
+
+/* clang's "expected '(' after 'if'": at the token, for the statements' conditions */
+VPRIV __attribute__((noinline, cold, noreturn)) void lparen_fail(cc *c, const char *kw)
+{
+	report(c, "error", c->tk[0].loc, NULL, 0, NULL, 0, "expected '(' after '%s'", kw);
+	parse_jump(c);
 }
 
 /* "expected ';' after X": reported at the end of the previous token with a

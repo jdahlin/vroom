@@ -138,6 +138,14 @@ VPRIV bool loc_ok(const pp *p, uint32_t loc, const fent **e)
 int pp_error_limit(const pp *p) { return p->o->error_limit; }
 int pp_spell_limit(const pp *p) { return p->o->spell_limit; }
 
+uint32_t pp_main_eof(const pp *p)
+{
+	const fent *e = &p->fe[0];
+	uint32_t n = e->f->size;
+
+	return e->base + (n && e->f->src[n - 1] == '\n' ? n - 1 : n);
+}
+
 int pp_wstate(const pp *p, const char *flag, bool on, const char *const *groups)
 {
 	bool err = false, allerr = false, noerr = false;
@@ -218,6 +226,25 @@ const char *pp_src(const pp *p, uint32_t b, uint32_t e, size_t *len)
 		return NULL;
 	*len = e - b;
 	return f->f->src + (b - f->base);
+}
+
+/* the range [*b, *e) widened by the '(' and ')' around it (blanks between), when
+   both are there in the same file: clang's ParenExpr range, found on the error path */
+void pp_widen_parens(const pp *p, uint32_t *b, uint32_t *e)
+{
+	const fent *f;
+	const char *s;
+	uint32_t i, j, n;
+
+	if (!loc_ok(p, *b, &f) || *e < *b || *e - f->base > f->f->size)
+		return;
+	s = f->f->src, n = f->f->size, i = *b - f->base, j = *e - f->base;
+	while (i && (s[i - 1] == ' ' || s[i - 1] == '\t' || s[i - 1] == '\n'))
+		i--;
+	while (j < n && (s[j] == ' ' || s[j] == '\t' || s[j] == '\n'))
+		j++;
+	if (i && s[i - 1] == '(' && j < n && s[j] == ')')
+		*b = f->base + i - 1, *e = f->base + j + 1;
 }
 
 uint32_t pp_tok_end(const pp *p, uint32_t loc)

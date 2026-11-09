@@ -284,7 +284,13 @@ VPRIV pp_span rng(cc *c, uint32_t n)
 		return (pp_span){ 0, 0 };
 	if (!c->span[n].e)
 		return (pp_span){ N(n)->loc, pp_tok_end(c->p, N(n)->loc) };
-	return (pp_span){ c->span[n].b, pp_tok_end(c->p, c->span[n].e) };
+	{
+		pp_span r = { c->span[n].b, pp_tok_end(c->p, c->span[n].e) };
+
+		if (N(n)->flags & NF_PAREN)	/* clang's ParenExpr: the parentheses are in the range */
+			pp_widen_parens(c->p, &r.b, &r.e);
+		return r;
+	}
 }
 
 VPRIV uint32_t mk2(cc *c, int op, qty ty, uint32_t loc, uint32_t a, uint32_t b)
@@ -338,6 +344,7 @@ VPRIV uint32_t err_node(cc *c, uint32_t loc)
 	uint32_t n = mk_int(c, 0, prim(TY_INT), loc);
 
 	c->nodes[n].flags |= NF_ERR | NF_LVALUE;
+	delayed_bug(c, loc, "an error node without an error");
 	return n;
 }
 

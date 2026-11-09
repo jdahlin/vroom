@@ -403,8 +403,11 @@ VPRIV void need_scalar(cc *c, uint32_t n, const char *what)
 /* n is assigned (or incremented) by the operator at loc */
 VPRIV bool need_lvalue(cc *c, uint32_t n, uint32_t loc)
 {
-	pp_span r = rng(c, n);
+	pp_span r;
 
+	if (likely((N(n)->flags & NF_LVALUE) && !(QQ(N(n)->ty) & Q_CONST)))
+		return true;	/* the common case, before the range (pp_tok_end) */
+	r = rng(c, n);
 	if (!(N(n)->flags & NF_LVALUE)) {
 		if (KIND(c, N(n)->ty) == TY_FUNC)
 			report(c, "error", loc, &r, 1, NULL, 0, "non-object type '%s' is not assignable", tyname(c, N(n)->ty));

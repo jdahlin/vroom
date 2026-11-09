@@ -820,10 +820,13 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
   (`bench/micro/`: matmul, hash, interpreter, the vcc self-build), numbers
   in the plan.
 - [ ] **Error recovery**: parse errors recover per block, struct body, for
-  header and TU, missing closers as clang (PLAN-diag.md D2.2); left: parameter
-  lists: `f(a; )` (clang's "unexpected ';' before ')'"), broken
-  attributes, the remaining `fatal()` sites one by one; mutants with more
-  follow-on errors than clang 4.8 % (goal 5 % reached).
+  header and TU, missing closers as clang (PLAN-diag.md D2.2, D2.3: first
+  error at clang's place 95.3 %); left: parameter lists: `f(a; )` (clang's
+  "unexpected ';' before ')'"), broken attributes (`__attribute__(( (x))`),
+  clang's "expected expression" for `4(` (vcc: "called object type 'int' is
+  not a function"), "extraneous ')' before ';'" after a builtin's name, the
+  remaining `fatal()` sites one by one; mutants with more follow-on errors
+  than clang 4.8 % (goal 5 % reached).
   *Validate:* `tests/diag/` cases with several independent errors, exact
   clang output (`vcc-diag.py`).
 - [ ] **Clang warns, vcc errors** (`bench/vcc-mutate.py show spurious`):

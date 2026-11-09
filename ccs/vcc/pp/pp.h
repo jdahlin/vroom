@@ -215,6 +215,8 @@ const char *pp_diag_level(int level);
 enum { PP_DIAG_TEXT, PP_DIAG_JSON, PP_DIAG_SARIF };
 /* the end of the TU's diagnostics: the last JSON record, the SARIF log (pp_diag_summary calls it) */
 void pp_diag_finish(pp *p);
+/* clang's location of the end of the main file: its last newline, or its end without one */
+uint32_t pp_main_eof(const pp *p);
 /* -fspell-checking-limit= as given (0: default, -1: none, -2: off) */
 int pp_spell_limit(const pp *p);
 /* -ferror-limit= as given (0: default, -1: none) */
@@ -227,6 +229,7 @@ int pp_warnings(const pp *p);
 uint32_t pp_tok_end(const pp *p, uint32_t loc);
 /* the source text from loc b to loc e (one file), NULL if unknown */
 const char *pp_src(const pp *p, uint32_t b, uint32_t e, size_t *len);
+void pp_widen_parens(const pp *p, uint32_t *b, uint32_t *e);
 
 /*
  * Top-level regions (headers included from the main file, cached or being

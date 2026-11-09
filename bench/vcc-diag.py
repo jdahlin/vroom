@@ -21,7 +21,7 @@ A test with /* diag-mode: -c */ is compiled (-c -o /dev/null) instead, for
 diagnostics that come from code generation (the error attribute).
 The summary also counts the cases whose text is still identical to clang's.
 
-  bench/vcc-diag.py [-v] [-j N] [PATTERN]   -v: the diff of each failure
+  bench/vcc-diag.py [-v] [-j N] [--bin-dir DIR] [PATTERN]   -v: the diff of each failure
   bench/vcc-diag.py --bless [PATTERN]       write X.c.stderr from vcc's output
 """
 import difflib, importlib.util, json, os, re, subprocess, sys
@@ -32,7 +32,12 @@ from hostenv import llvm, BUILD
 R = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 D = f'{R}/ccs/vcc/tests/diag'
 CL = llvm('clang')
-VPP = f'{BUILD}/vpp'
+# --bin-dir DIR or VCC_BIN=DIR: the tools of a sanitizer build (PLAN-diag layer 9)
+_BIN = os.environ.get('VCC_BIN', BUILD)
+if '--bin-dir' in sys.argv:
+    _k = sys.argv.index('--bin-dir'); _BIN = os.path.abspath(sys.argv[_k + 1]); del sys.argv[_k:_k + 2]
+    os.environ['VCC_BIN'] = _BIN	# the pool's workers import this again (spawn)
+VPP = f'{_BIN}/vpp'
 FL = ['--target=aarch64-linux-gnu', '-fsyntax-only', '-fno-color-diagnostics']
 
 

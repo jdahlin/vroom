@@ -695,8 +695,10 @@ VPRIV void declaration(cc *c, vec *out, bool file)
 		else if (d.kr)
 			cc_error(c, d.plb, "a parameter list without types is only allowed in a function definition");
 		s = declare(c, &ds, &d, t, file);
-		if (unlikely(ds.invalid | d.invalid))
+		if (unlikely(ds.invalid | d.invalid)) {
 			c->syms[s].flags |= SF_INVALID;	/* its type was an error: uses say nothing more */
+			delayed_bug(c, d.loc, "an invalid declaration without an error");
+		}
 		if (d.has_func && c->syms[s].kind == S_FUNC && is_func(c, c->syms[s].ty) &&
 		    d.npsyms == T(c, c->syms[s].ty)->n)
 			c->syms[s].psyms = d.psyms + 1, c->syms[s].plb = d.plb, c->syms[s].ple = d.ple;
@@ -759,8 +761,10 @@ VPRIV void declaration(cc *c, vec *out, bool file)
 				/* array size from the initializer */
 				y->ty = QT(QI(it), QQ(y->ty));
 			}
-			if (unlikely(is_record(c, it) && !complete(c, it)))
+			if (unlikely(is_record(c, it) && !complete(c, it))) {
 				y->flags |= SF_INVALID;	/* initializer said so: its uses are silent */
+				delayed_bug(c, d.loc, "an incomplete initializer without an error");
+			}
 			if (y->body && file) {
 				cc_error(c, d.loc, "redefinition of '%.*s'", IDF(d.name));
 				note(c, y->loc, "previous definition is here");

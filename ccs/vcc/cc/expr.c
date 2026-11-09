@@ -339,8 +339,8 @@ static uint32_t generic_sel(cc *c, uint32_t loc)
 {
 	uint32_t ctl, chosen = 0, def = 0;
 	qty ct;
+	uint32_t open = expect_lparen(c);
 
-	expect(c, T_LPAREN, "'('");
 	c->unevaluated++;
 	ctl = decay(c, assign_expr(c));
 	c->unevaluated--;
@@ -362,7 +362,7 @@ static uint32_t generic_sel(cc *c, uint32_t loc)
 				chosen = e;
 		}
 	}
-	expect(c, T_RPAREN, "')'");
+	expect_match(c, T_RPAREN, open);
 	if (!chosen)
 		chosen = def;
 	if (!chosen) {

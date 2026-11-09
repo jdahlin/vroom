@@ -105,6 +105,8 @@ static bool param_list(cc *c, dop *op)
 			vpush(c, &ptys, t);
 			s = sym_new(c, S_VAR, d.name, t, d.loc ? d.loc : ds.loc);
 			c->syms[s].flags |= SF_PARAM | (ds.invalid ? SF_INVALID : 0);
+			if (unlikely(ds.invalid))
+				delayed_bug(c, d.loc, "an invalid parameter without an error");
 			c->syms[s].body = vsize;	/* parameters: a decayed VLA's size expression with side effects */
 			c->syms[s].sc = ds.sc == SC_REGISTER ? SC_REGISTER : SC_AUTO;
 			sym_bind(c, s);
@@ -288,8 +290,10 @@ VPRIV void declarator(cc *c, declr *d, bool abstract_ok, uint32_t *first, uint32
 			c->decl_name = d->name, c->decl_loc = d->loc, c->decl_depth = c->depth;
 		next(c);
 	} else if (!abstract_ok) {
-		fatal(c, tok(c)->loc, c->in_struct ? "expected member name or ';' after declaration specifiers" :
-			  "expected identifier or '('");
+		/* clang: a '(' that is not a grouping one starts the parameters of a nameless
+		   declarator, and the name was expected after it */
+		fatal(c, is(c, T_LPAREN) ? peek(c, 1)->loc : tok(c)->loc,
+		      c->in_struct ? "expected member name or ';' after declaration specifiers" : "expected identifier or '('");
 	}
 	attribute_list(c, &d->at);
 	for (;;) {
@@ -395,14 +399,16 @@ VPRIV qty type_name(cc *c)
 	uint32_t first, nops;
 	qty t;
 
+	c->in_tyname++;
 	if (!decl_specs(c, &ds, false))
 		fatal(c, tok(c)->loc, "expected a type");
+	c->in_tyname--;
 	declarator(c, &d, true, &first, &nops);
 	attribute_list(c, &d.at);
 	t = apply_declarator(c, ds.ty, first, nops);
 	c->ndops = first;
-	if (d.name)
-		cc_error(c, d.loc, "unexpected identifier in type name");
+	if (d.name)	/* clang: the abstract declarator ends before it */
+		cc_error(c, d.loc, "expected ')'");
 	{
 		uint32_t vs = d.at.vecsize ? d.at.vecsize : ds.at.vecsize;
 

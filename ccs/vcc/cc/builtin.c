@@ -492,7 +492,7 @@ VPRIV uint32_t offsetof_expr(cc *c, uint32_t loc)
 			break;
 		}
 	}
-	expect(c, T_RPAREN, "')'");
+	expect_here(c, T_RPAREN, "')'");
 	res = mk_int(c, off, c->t_size, loc);
 	if (dyn)
 		res = mk_bin(c, T_PLUS, c->t_size, res, dyn, loc);
@@ -671,7 +671,7 @@ VPRIV uint32_t vector_builtin(cc *c, bool shuffle, uint32_t loc)
 	expect(c, T_COMMA, "','");
 	if (!shuffle) {
 		rt = type_name(c);
-		expect(c, T_RPAREN, "')'");
+		expect_here(c, T_RPAREN, "')'");
 		if (!is_vector(c, at) || !is_vector(c, rt) ||
 		    ty_size(c, at) / ty_size(c, T(c, at)->base) != ty_size(c, rt) / ty_size(c, T(c, rt)->base)) {
 			cc_error(c, loc, "first two arguments to __builtin_convertvector must have the same number of elements");
@@ -687,7 +687,7 @@ VPRIV uint32_t vector_builtin(cc *c, bool shuffle, uint32_t loc)
 		cc_error(c, loc, "first two arguments to '__builtin_shufflevector' must have the same type");
 		while (accept(c, T_COMMA))
 			assign_expr(c);
-		expect(c, T_RPAREN, "')'");
+		expect_here(c, T_RPAREN, "')'");
 		return mk_int(c, 0, prim(TY_INT), loc);
 	}
 	{
@@ -703,7 +703,7 @@ VPRIV uint32_t vector_builtin(cc *c, bool shuffle, uint32_t loc)
 			vpush(c, &args, mk_int(c, v, prim(TY_INT), N(ix)->loc));
 			k++;
 		}
-		expect(c, T_RPAREN, "')'");
+		expect_here(c, T_RPAREN, "')'");
 		if (k == 0 || (k & (k - 1)) || k * ty_size(c, et) > 64) {
 			cc_error(c, loc, "__builtin_shufflevector: the number of indices must be a power of two");
 			return mk_int(c, 0, prim(TY_INT), loc);
@@ -729,7 +729,7 @@ VPRIV uint32_t builtin_call(cc *c, const builtin *b, uint32_t loc)
 		x = assign_expr(c);
 		expect(c, T_COMMA, "','");
 		y = assign_expr(c);
-		expect(c, T_RPAREN, "')'");
+		expect_here(c, T_RPAREN, "')'");
 		if (!const_int(c, decay(c, cond), &v))
 			cc_error(c, N(cond)->loc, "'__builtin_choose_expr' requires a constant expression");
 		return v ? x : y;
@@ -741,7 +741,7 @@ VPRIV uint32_t builtin_call(cc *c, const builtin *b, uint32_t loc)
 		a = type_name(c);
 		expect(c, T_COMMA, "','");
 		t = type_name(c);
-		expect(c, T_RPAREN, "')'");
+		expect_here(c, T_RPAREN, "')'");
 		return mk_int(c, compatible(c, unqual_array(c, a), unqual_array(c, t)), prim(TY_INT), loc);
 	}
 	case BI_OFFSETOF:
@@ -754,7 +754,7 @@ VPRIV uint32_t builtin_call(cc *c, const builtin *b, uint32_t loc)
 		ap = assign_expr(c);
 		expect(c, T_COMMA, "','");
 		t = type_name(c);
-		expect(c, T_RPAREN, "')'");
+		expect_here(c, T_RPAREN, "')'");
 		n = mk(c, N_VAARG, t, loc);
 		N(n)->a = ap;
 		return n;

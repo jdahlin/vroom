@@ -59,9 +59,12 @@ def diag_rows(d):
     open(src, 'w').write(DIAG_SRC)
     sf = os.path.join(d, 'out.sarif')
 
-    def v(*fl):
-        r = subprocess.run([vd.VPP, '--target=aarch64-linux-gnu', '-fsyntax-only', '-fno-color-diagnostics'] + list(fl) + [src],
-                           capture_output=True, text=True)
+    ok_src = os.path.join(d, 'ok.c')
+    open(ok_src, 'w').write('int ok;\n')
+
+    def v(*fl, f=src, env=None):
+        r = subprocess.run([vd.VPP, '--target=aarch64-linux-gnu', '-fsyntax-only', '-fno-color-diagnostics'] + list(fl) + [f],
+                           capture_output=True, text=True, env=dict(os.environ, **(env or {})))
         return r.returncode, r.stderr
 
     def json_lines(err):
@@ -80,6 +83,11 @@ def diag_rows(d):
                                            and '[err_expected_expression]' in e)(*v('-fdiagnostics-show-id'))),
         ('-fspell-checking-limit=1', lambda: v('-fspell-checking-limit=1')[1].count('did you mean') == 1),
         ('-fno-spell-checking', lambda: v('-fno-spell-checking')[1].count('did you mean') == 0),
+        # D2.1: a delayed bug in a TU without errors is an internal error; with errors it is silent
+        ('delayed bug, no error', lambda: (lambda rc, e: rc == 1 and 'internal error' in e)(
+            *v(f=ok_src, env={'VCC_TEST_DELAYED_BUG': '1'}))),
+        ('delayed bug after an error', lambda: (lambda rc, e: rc == 1 and 'internal error' not in e)(
+            *v(env={'VCC_TEST_DELAYED_BUG': '1'}))),
     ]
 
 

@@ -51,6 +51,7 @@ endif
 VCC_CC     = $(CCACHE) $(HOST_CC)
 # VCC_SAN/VCC_OPT: set by the sanitizer variants (vcc-asan, vcc-tsan below)
 VCC_SAN   ?=
+VCC_SANLD ?=
 VCC_OPT   ?= -O3 $(HOST_CPU)
 VCC_CFLAGS = -std=c11 -O2 -Wall -Wextra -Wno-unused-parameter $(HOST_DEFS) -DVCC_INCDIR='"$(abspath vcc/include)"' $(VCC_SAN)
 # LTO: off; the split modules are one TU each (SPLIT_MODS), which gives the
@@ -66,7 +67,7 @@ endif
 VCC_FAST   = $(VCC_CFLAGS) $(VCC_OPT) -pthread
 # -O3 also at link time: the driver passes it to ld, which then folds code
 # (and, with LTO, optimises and generates the code itself)
-VCC_LDFLAGS = -O3 $(VCC_SAN) $(VCC_LTO) $(if $(VCC_LTO),$(LTO_LINK))
+VCC_LDFLAGS = -O3 $(VCC_SAN) $(VCC_SANLD) $(VCC_LTO) $(if $(VCC_LTO),$(LTO_LINK))
 OBJ        = $(OUT)/obj
 
 vcc: $(OUT)/vcc $(OUT)/vsh/sh $(OUT)/vld $(OUT)/vas $(OUT)/var $(OUT)/vccd $(OUT)/lextest $(OUT)/vpp $(OUT)/vlink $(OUT)/vasm
@@ -131,7 +132,7 @@ $(OUT)/vccd: $(call o,$(VCCD_SRC) $(LEX_SRC)) $(AS_OBJ) $(PP_OBJ)
 	$(VCC_CC) $(VCC_LDFLAGS) -pthread $^ -o $@ $(HOST_LIBS)
 
 $(OUT)/lextest: $(patsubst vcc/%.c,$(OBJ)/no/%.o,vcc/lex/lextest.c vcc/platform/darwin/pmc.c $(LEX_SRC))
-	$(VCC_CC) -O3 $(VCC_SAN) -pthread $^ -o $@
+	$(VCC_CC) -O3 $(VCC_SAN) $(VCC_SANLD) -pthread $^ -o $@
 
 $(OUT)/vasm: $(call o,vcc/as/vasm.c) $(AS_OBJ)
 	$(VCC_CC) $(VCC_LDFLAGS) $^ -o $@
@@ -161,9 +162,13 @@ $(OBJ):
 # ---- sanitizer variants of the vcc tools (AGENTS.md, "Sanitizers") ----
 # Own OUT (and so own obj/), -O1 -g; the normal build is unchanged.
 SAN_COMMON = -O1 -g -fno-omit-frame-pointer -Wno-deprecated-declarations
+# ASan's frames are 2-3x larger: the parser's recursion (vcc-stress block-nest-5000)
+# gets a 64 MB main stack, as vccd's compile threads get 16 MB in the normal build
+ASAN_LD = $(if $(filter Darwin,$(HOST_OS)),-Wl$(comma)-stack_size$(comma)0x4000000)
+comma := ,
 vcc-asan:
 	$(MAKE) vcc OUT=$(OUT)-asan VCC_OPT="-O1 $(HOST_CPU)" VCC_LTO= \
-		VCC_SAN="$(SAN_COMMON) -fsanitize=address,undefined"
+		VCC_SAN="$(SAN_COMMON) -fsanitize=address,undefined" VCC_SANLD="$(ASAN_LD)"
 vcc-tsan:
 	$(MAKE) vcc OUT=$(OUT)-tsan VCC_OPT="-O1 $(HOST_CPU)" VCC_LTO= \
 		VCC_SAN="$(SAN_COMMON) -fsanitize=thread"
