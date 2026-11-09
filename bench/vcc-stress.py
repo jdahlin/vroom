@@ -44,21 +44,15 @@ def cases(d):
     def case(name, expect, files, main, args=(), regex=None, xfail=None):
         C[name] = dict(expect=expect, regex=regex, xfail=xfail, files=files, main=main, args=list(args))
 
-    # front end recursion (cc.c has no depth limit; clang stops at bracket depth 256)
-    case('paren-200k', 'error', {'a.c': 'int x = ' + nest('(', ')', 200000, '1') + ';\n'}, 'a.c',
-         xfail='Input-driven abort() / stack overflow kill the whole server (recursion depth)')
-    case('unary-minus-300k', 'any', {'a.c': 'int x = ' + '- ' * 300000 + '1;\n'}, 'a.c',
-         xfail='Input-driven abort() / stack overflow kill the whole server (recursion depth)')
-    case('ternary-100k', 'any', {'a.c': 'int x = ' + '1 ? ' * 100000 + '1' + ' : 0' * 100000 + ';\n'}, 'a.c',
-         xfail='Input-driven abort() / stack overflow kill the whole server (recursion depth)')
-    case('cast-chain-100k', 'any', {'a.c': 'long x = ' + '(long)' * 100000 + '1;\n'}, 'a.c',
-         xfail='Input-driven abort() / stack overflow kill the whole server (recursion depth)')
+    # front end recursion: vstack.h ends the TU before the stack runs out (clang itself crashes here)
+    case('paren-200k', 'error', {'a.c': 'int x = ' + nest('(', ')', 200000, '1') + ';\n'}, 'a.c')
+    case('unary-minus-300k', 'any', {'a.c': 'int x = ' + '- ' * 300000 + '1;\n'}, 'a.c')
+    case('ternary-100k', 'any', {'a.c': 'int x = ' + '1 ? ' * 100000 + '1' + ' : 0' * 100000 + ';\n'}, 'a.c')
+    case('cast-chain-100k', 'any', {'a.c': 'long x = ' + '(long)' * 100000 + '1;\n'}, 'a.c')
     case('block-nest-5000', 'any', {'a.c': 'void f(void) ' + nest('{', '}', 5000, '') + '\n'}, 'a.c')
     # preprocessor recursion
-    case('pp-if-parens-200k', 'any', {'a.c': '#if ' + nest('(', ')', 200000, '1') + '\nint x;\n#endif\n'}, 'a.c',
-         xfail='Input-driven abort() / stack overflow kill the whole server (pp #if evaluator)')
-    case('pp-macro-nest-100k', 'any', {'a.c': '#define F(x) x\nint y = ' + nest('F(', ')', 100000, '1') + ';\n'}, 'a.c',
-         xfail='Input-driven abort() / stack overflow kill the whole server (argument pre-expansion)')
+    case('pp-if-parens-200k', 'any', {'a.c': '#if ' + nest('(', ')', 200000, '1') + '\nint x;\n#endif\n'}, 'a.c')
+    case('pp-macro-nest-100k', 'any', {'a.c': '#define F(x) x\nint y = ' + nest('F(', ')', 100000, '1') + ';\n'}, 'a.c')
     # one function-like expansion of 2^25 tokens (the argument doubles at every level)
     case('pp-expansion-33M', 'any', {'a.c': '#define D(x) x+x\nlong big = ' + nest('D(', ')', 25, '1') + ';\n'}, 'a.c',
          xfail='Input-driven abort() / stack overflow kill the whole server (expansion too large aborts)')

@@ -259,6 +259,8 @@ static __attribute__((noinline)) void preexpand_run(pp *p, margs *a, uint32_t k,
 	size_t base = p->svn;
 	ptok t;
 
+	if (vstack_low())
+		fatal(p, at->loc, "macro arguments nested too deeply");
 	push_ptok(p, at, n, 0, 0, 1);
 	p->pend = 0;
 	p->preexp++;

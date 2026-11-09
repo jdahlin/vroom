@@ -17,6 +17,7 @@
  * pointer constants depend on the difference: __is_constexpr), and the
  * types of builtins.
  */
+#include "../vstack.h"
 #include <math.h>
 #include <pthread.h>
 #include <setjmp.h>

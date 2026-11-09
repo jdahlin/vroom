@@ -358,11 +358,18 @@ static void out_mode(int fd)
 		fchmod(fd, 0666 & ~(mode_t)ppd_umask);
 }
 
-static void tmp_name(char *t, size_t cap, const char *f)
+static bool tmp_name(char *t, size_t cap, const char *f)
 {
 	static _Atomic unsigned seq;
+	struct stat st;
 
+	/* /dev/null, a fifo, ...: written where it is, a rename would replace it */
+	if (!stat(f, &st) && !S_ISREG(st.st_mode)) {
+		snprintf(t, cap, "%s", f);
+		return false;
+	}
 	snprintf(t, cap, "%s.vcc%d.%u.tmp", f, (int)getpid(), atomic_fetch_add(&seq, 1));
+	return true;
 }
 
 static int write_file(const char *cwd, const char *path, const char *s, size_t n, int errfd)
@@ -371,15 +378,16 @@ static int write_file(const char *cwd, const char *path, const char *s, size_t n
 	const char *f = at(cwd, path, b, sizeof(b));
 	int fd;
 
-	tmp_name(t, sizeof(t), f);
+	bool tmp = tmp_name(t, sizeof(t), f);
+
 	fd = open(t, O_WRONLY | O_CREAT | O_TRUNC | O_CLOEXEC, 0666);
-	if (fd >= 0)
+	if (fd >= 0 && tmp)
 		out_mode(fd);
-	if (fd < 0 || write_all(fd, s, n) || close(fd) || rename(t, f)) {
+	if (fd < 0 || write_all(fd, s, n) || close(fd) || (tmp && rename(t, f))) {
 		int e = errno;
 
 		dprintf(errfd, "vcc: error: cannot write %s: %s\n", path, strerror(e));
-		if (fd >= 0)
+		if (fd >= 0 && tmp)
 			unlink(t);
 		return 1;
 	}
@@ -905,6 +913,7 @@ int ppd_run(int argc, char **argv, const ppd_env *env)
 			       .outfd = env->outfd };
 		int fd = -1;
 		char outpath[4096], outtmp[4200];
+		bool outrename = false;
 
 		co.emit = emit;
 		co.nthreads = getenv("VCC_THREADS") ? atoi(getenv("VCC_THREADS")) : 1;
@@ -918,9 +927,9 @@ int ppd_run(int argc, char **argv, const ppd_env *env)
 			else
 				snprintf(path, sizeof(path), "%s", out);
 			snprintf(outpath, sizeof(outpath), "%s", path);
-			tmp_name(outtmp, sizeof(outtmp), path);
+			outrename = tmp_name(outtmp, sizeof(outtmp), path);
 			fd = open(outtmp, O_WRONLY | O_CREAT | O_TRUNC | O_CLOEXEC, 0666);
-			if (fd >= 0)
+			if (fd >= 0 && outrename)
 				out_mode(fd);
 			if (fd < 0) {
 				dprintf(errfd, "vcc: error: cannot open %s\n", out);
@@ -938,11 +947,11 @@ int ppd_run(int argc, char **argv, const ppd_env *env)
 			ppd_ph_add(PPD_PH_CC, v1);
 		}
 		if (fd >= 0) {
-			if (close(fd) || (!status && rename(outtmp, outpath))) {
+			if (close(fd) || (!status && outrename && rename(outtmp, outpath))) {
 				dprintf(errfd, "vcc: error: cannot write %s: %s\n", out, strerror(errno));
 				status = 1;
 			}
-			if (status)
+			if (status && outrename)
 				unlink(outtmp);
 		}
 		if (!status && emit == 2)

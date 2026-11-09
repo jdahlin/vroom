@@ -370,7 +370,10 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
   mismatch the shim restarts the server or falls back.
   *Validate:* T12 (shim from build A against vccd from build B → clear
   error or restart, never silent service).
-- [ ] **Input-driven `abort()` / stack overflow kill the whole server** [P].
+- [ ] **Input-driven `abort()` / stack overflow kill the whole server** [P].  (recursion
+  done: `vstack.h` checks the stack pointer in cast_expr, the #if evaluator
+  and argument pre-expansion; 128 KB left ends the TU (clang itself crashes
+  on these inputs).  Aborts on oversized expansions/asm/-I counts remain.)
   Aborts: `emit.c:1934,2036,2778`; `cc.c:44,1518,6219`; `as.c:107`;
   `elf.c:33,40,234`; `pp.c:89,301,1721,2145,2531,2594`; `intern.c:96,195`;
   `lex.c:1318,1394`; `ppdriver.c:65`.  Recursion without depth limit: cc.c
