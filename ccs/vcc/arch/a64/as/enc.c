@@ -185,7 +185,7 @@ enum {
 	K_DP2, K_EXTR, K_VLD1, K_VREV, K_DUP, K_EXT, K_MOVI, K_VSHIFT, K_VPERM, K_PMULL,
 	K_FMOV, K_SHA3, K_SHA2, K_CPY, K_SET, K_V3, K_UMOV, K_AT, K_RDVL, K_PREG,
 	K_V2, K_TBL, K_SHA512, K_LDR_REP, K_INS, K_MTE, K_MTEM, K_VNOT, K_SMOV, K_ACROSS,
-	K_VMISC, K_ADDP, K_IALIAS, K_PAC,
+	K_VMISC, K_ADDP, K_IALIAS, K_PAC, K_FP,
 };
 
 typedef struct { const char *name; uint8_t k; uint32_t base; uint32_t x; } Mn;
@@ -336,7 +336,46 @@ static const Mn mns[] = {
 	{ "esb", K_FIXED, 0xd503221f, 0 },
 	{ "ext", K_EXT, 0x2e000000, 0 },
 	{ "extr", K_EXTR, 0x13800000, 0 },
+	{ "fabs", K_FP, 0x1e20c000, 2 },
+	{ "fadd", K_FP, 0x1e202800, 1 },
+	{ "fccmp", K_FP, 0x1e200400, 5 },
+	{ "fccmpe", K_FP, 0x1e200410, 5 },
+	{ "fcmp", K_FP, 0x1e202000, 4 },
+	{ "fcmpe", K_FP, 0x1e202010, 4 },
+	{ "fcsel", K_FP, 0x1e200c00, 6 },
+	{ "fcvt", K_FP, 0x1e224000, 9 },
+	{ "fcvtas", K_FP, 0x1e240000, 7 },
+	{ "fcvtau", K_FP, 0x1e250000, 7 },
+	{ "fcvtms", K_FP, 0x1e300000, 7 },
+	{ "fcvtmu", K_FP, 0x1e310000, 7 },
+	{ "fcvtns", K_FP, 0x1e200000, 7 },
+	{ "fcvtnu", K_FP, 0x1e210000, 7 },
+	{ "fcvtps", K_FP, 0x1e280000, 7 },
+	{ "fcvtpu", K_FP, 0x1e290000, 7 },
+	{ "fcvtzs", K_FP, 0x1e380000, 7 },
+	{ "fcvtzu", K_FP, 0x1e390000, 7 },
+	{ "fdiv", K_FP, 0x1e201800, 1 },
+	{ "fmadd", K_FP, 0x1f000000, 3 },
+	{ "fmax", K_FP, 0x1e204800, 1 },
+	{ "fmaxnm", K_FP, 0x1e206800, 1 },
+	{ "fmin", K_FP, 0x1e205800, 1 },
+	{ "fminnm", K_FP, 0x1e207800, 1 },
 	{ "fmov", K_FMOV, 0, 0 },
+	{ "fmsub", K_FP, 0x1f008000, 3 },
+	{ "fmul", K_FP, 0x1e200800, 1 },
+	{ "fneg", K_FP, 0x1e214000, 2 },
+	{ "fnmadd", K_FP, 0x1f200000, 3 },
+	{ "fnmsub", K_FP, 0x1f208000, 3 },
+	{ "fnmul", K_FP, 0x1e208800, 1 },
+	{ "frinta", K_FP, 0x1e264000, 2 },
+	{ "frinti", K_FP, 0x1e27c000, 2 },
+	{ "frintm", K_FP, 0x1e254000, 2 },
+	{ "frintn", K_FP, 0x1e244000, 2 },
+	{ "frintp", K_FP, 0x1e24c000, 2 },
+	{ "frintx", K_FP, 0x1e274000, 2 },
+	{ "frintz", K_FP, 0x1e25c000, 2 },
+	{ "fsqrt", K_FP, 0x1e21c000, 2 },
+	{ "fsub", K_FP, 0x1e203800, 1 },
 	{ "gmi", K_PAC, 0x9ac01400, 5 },
 	{ "hint", K_HINT, 0xd503201f, 0 },
 	{ "hvc", K_EXC, 0xd4000002, 0 },
@@ -441,6 +480,7 @@ static const Mn mns[] = {
 	{ "sbfiz", K_BFI, 0, 0 },
 	{ "sbfm", K_BFM, 0, 0 },
 	{ "sbfx", K_BFX, 0, 0 },
+	{ "scvtf", K_FP, 0x1e220000, 8 },
 	{ "sdiv", K_DP2, 0x1ac00c00, 0 },
 	{ "sete", K_SET, 0x19c08400, 0 },
 	{ "seten", K_SET, 0x19c08400, 2 },
@@ -536,6 +576,7 @@ static const Mn mns[] = {
 	{ "ubfiz", K_BFI, 2, 0 },
 	{ "ubfm", K_BFM, 2, 0 },
 	{ "ubfx", K_BFX, 2, 0 },
+	{ "ucvtf", K_FP, 0x1e230000, 8 },
 	{ "udiv", K_DP2, 0x1ac00800, 0 },
 	{ "umaddl", K_MUL, 0x9ba00000, 3 },
 	{ "umax", K_IALIAS, 0x1ac06400, 4 },
@@ -1836,11 +1877,109 @@ static int k_movi(Ctx *c, const Mn *m)
 	return 0;
 }
 
+/* scalar floating point: ftype S 00, D 01, H 11 at bit 22 */
+static int ftype(const A64Op *o)
+{
+	if (!isreg(o)) return -1;
+	return o->cls == A64_S ? 0 : o->cls == A64_D ? 1 : o->cls == A64_H ? 3 : -1;
+}
+
+/* fmov #imm: +-(16..31)/16 * 2^(-3..4) as abcdefgh */
+static int fp_imm8(double v, unsigned *imm8)
+{
+	unsigned sgn = v < 0;
+	if (sgn) v = -v;
+	for (int e = -3; e <= 4; e++)
+		for (int f = 16; f < 32; f++)
+			if ((double)f / 16 * (e >= 0 ? (double)(1 << e) : 1.0 / (double)(1 << -e)) == v) {
+				unsigned ex = (unsigned)(e + 3) ^ 4;	/* exponent bits b:cd with b = NOT(e7) */
+				*imm8 = sgn << 7 | (ex & 7) << 4 | (unsigned)(f - 16);
+				return 0;
+			}
+	return -1;
+}
+
+static int k_fp(Ctx *c, const Mn *m)
+{
+	const A64Op *o = c->op;
+	int t = c->n ? ftype(&o[0]) : -1;
+	uint32_t w;
+	switch (m->x) {
+	case 1:	/* fadd d, d, d */
+		if (c->n != 3 || t < 0 || ftype(&o[1]) != t || ftype(&o[2]) != t) BADOPS;
+		*c->out = m->base | (uint32_t)t << 22 | R(&o[2]) << 16 | R(&o[1]) << 5 | R(&o[0]);
+		return 0;
+	case 2:	/* fneg d, d */
+		if (c->n != 2 || t < 0 || ftype(&o[1]) != t) BADOPS;
+		*c->out = m->base | (uint32_t)t << 22 | R(&o[1]) << 5 | R(&o[0]);
+		return 0;
+	case 3:	/* fmadd d, d, d, d */
+		if (c->n != 4 || t < 0 || ftype(&o[1]) != t || ftype(&o[2]) != t || ftype(&o[3]) != t) BADOPS;
+		*c->out = m->base | (uint32_t)t << 22 | R(&o[2]) << 16 | R(&o[3]) << 10 | R(&o[1]) << 5 | R(&o[0]);
+		return 0;
+	case 4:	/* fcmp d, d | #0.0 */
+		if (c->n != 2 || t < 0) BADOPS;
+		if (ftype(&o[1]) == t) { *c->out = m->base | (uint32_t)t << 22 | R(&o[1]) << 16 | R(&o[0]) << 5; return 0; }
+		if ((o[1].kind == A64O_FIMM && o[1].fimm == 0) || (isimm(&o[1]) && !o[1].hassym && !o[1].imm)) {
+			*c->out = m->base | 8 | (uint32_t)t << 22 | R(&o[0]) << 5;
+			return 0;
+		}
+		FAIL("expected floating-point constant #0.0");
+	case 5: case 6: {	/* fccmp d, d, #nzcv, cond ; fcsel d, d, d, cond */
+		if (c->n != 4 || t < 0 || ftype(&o[1]) != t) BADOPS;
+		int cc = getcond(&o[3]);
+		if (cc < 0) FAIL("expected AArch64 condition code");
+		if (m->x == 5) {
+			if (!isimm(&o[2]) || o[2].hassym || o[2].imm < 0 || o[2].imm > 15) BADOPS;
+			*c->out = m->base | (uint32_t)t << 22 | R(&o[1]) << 16 | (unsigned)cc << 12 | R(&o[0]) << 5 | (uint32_t)o[2].imm;
+		} else {
+			if (ftype(&o[2]) != t) BADOPS;
+			*c->out = m->base | (uint32_t)t << 22 | R(&o[2]) << 16 | (unsigned)cc << 12 | R(&o[1]) << 5 | R(&o[0]);
+		}
+		return 0;
+	}
+	case 7: case 8: {	/* fcvtzs x|w, d ; scvtf d, x|w [, #fbits] */
+		const A64Op *g = m->x == 7 ? &o[0] : &o[1], *f = m->x == 7 ? &o[1] : &o[0];
+		if (c->n < 2 || c->n > 3 || !gpr_nosp(g)) BADOPS;
+		int ft = ftype(f);
+		if (ft < 0) BADOPS;
+		w = m->base | (uint32_t)isx(g) << 31 | (uint32_t)ft << 22 | R(&o[1]) << 5 | R(&o[0]);
+		if (c->n == 3) {	/* fixed point: bit 21 clear, scale = 64 - fbits */
+			int64_t fb = o[2].imm;
+			if (!isimm(&o[2]) || o[2].hassym || fb < 1 || fb > (isx(g) ? 64 : 32)) FAIL("invalid fixed-point scale");
+			if ((m->base >> 19 & 3) != (m->x == 7 ? 3u : 0u)) BADOPS;
+			w &= ~(1u << 21); w = (w & ~(3u << 19)) | (m->x == 7 ? 3u << 19 : 0);
+			w |= (uint32_t)(64 - fb) << 10;
+		}
+		*c->out = w;
+		return 0;
+	}
+	case 9: {	/* fcvt s|d|h, s|d|h */
+		int st = c->n == 2 ? ftype(&o[1]) : -1;
+		if (c->n != 2 || t < 0 || st < 0 || st == t) BADOPS;
+		unsigned opc = t == 0 ? 0 : t == 1 ? 1 : 3;
+		*c->out = 0x1e224000u | (uint32_t)st << 22 | opc << 15 | R(&o[1]) << 5 | R(&o[0]);
+		return 0;
+	}
+	}
+	BADOPS;
+}
+
 static int k_fmov(Ctx *c, const Mn *m)
 {
 	(void)m;
 	const A64Op *o = c->op;
+	if (c->n == 2 && ftype(&o[0]) >= 0 && (o[1].kind == A64O_FIMM || (isimm(&o[1]) && !o[1].hassym))) {
+		double v = o[1].kind == A64O_FIMM ? o[1].fimm : (double)o[1].imm;
+		unsigned imm8;
+		if (fp_imm8(v, &imm8)) FAIL("expected compatible register or floating-point constant");
+		*c->out = 0x1e201000u | (uint32_t)ftype(&o[0]) << 22 | imm8 << 13 | R(&o[0]);
+		return 0;
+	}
 	if (c->n != 2 || !isreg(&o[0]) || !isreg(&o[1])) BADOPS;
+	if (o[0].cls == A64_H && (isw(&o[1]) || isx(&o[1]))) { *c->out = 0x1ee70000u | (uint32_t)isx(&o[1]) << 31 | R(&o[1]) << 5 | R(&o[0]); return 0; }
+	if ((isw(&o[0]) || isx(&o[0])) && o[1].cls == A64_H) { *c->out = 0x1ee60000u | (uint32_t)isx(&o[0]) << 31 | R(&o[1]) << 5 | R(&o[0]); return 0; }
+	if (o[0].cls == A64_H && o[1].cls == A64_H) { *c->out = 0x1ee04000u | R(&o[1]) << 5 | R(&o[0]); return 0; }
 	if (o[0].cls == A64_D && isx(&o[1])) { *c->out = 0x9e670000u | R(&o[1]) << 5 | R(&o[0]); return 0; }
 	if (isx(&o[0]) && o[1].cls == A64_D) { *c->out = 0x9e660000u | R(&o[1]) << 5 | R(&o[0]); return 0; }
 	if (o[0].cls == A64_S && isw(&o[1])) { *c->out = 0x1e270000u | R(&o[1]) << 5 | R(&o[0]); return 0; }
@@ -2457,6 +2596,7 @@ int a64_asm(const char *mn, size_t n, const A64Op *op, int nop, uint32_t *out, A
 	case K_VPERM: return k_vperm(&c, m);
 	case K_PMULL: return k_pmull(&c, m);
 	case K_FMOV: return k_fmov(&c, m);
+	case K_FP: return k_fp(&c, m);
 	case K_SHA3: return k_sha3(&c, m);
 	case K_SHA2: return k_sha2(&c, m);
 	case K_CPY: return k_cpy(&c, m);

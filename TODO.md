@@ -710,8 +710,11 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
   *Validated:* `vas-obj` `cfi-basic.s`, `cfi-all.s`; `bench/vas-corpus.py`.
 - [ ] **`.loc`, `.file N`, DWARF line tables, `.uleb128`/`.sleb128`** [P].
   *Validate:* T7 with `-g`.
-- [ ] **Scalar FP** (fadd … frint*, `fmov #imm`) [P].  *Validate:* T7
-  encoding tables.
+- [x] **Scalar FP** [P]: 2/1/3-source arithmetic, frint*, fcmp(e) (also #0.0),
+  fccmp(e), fcsel, fcvt between S/D/H, fcvt[nampz][su] and [su]cvtf (also
+  fixed point), `fmov #imm` and the H moves.  *Validated:*
+  `ccs/vcc/tests/vas/fp-scalar.s` vs llvm-mc (`bench/vas-enc.py` 293/293);
+  `bench/vas-corpus.py -O2` 1441/1519, the rest AdvSIMD.
 - [ ] **AdvSIMD arithmetic, long/wide/narrow, by-element, ld2-ld4/st2-st4,
   single-lane ld1/st1** [P].  *Validate:* T7 encoding tables (generated
   from llvm-mc's AArch64 instruction list for these classes).
