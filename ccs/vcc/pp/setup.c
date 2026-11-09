@@ -171,7 +171,7 @@ static void hc_mode(pp *p, int mode)
 	static pthread_once_t once = PTHREAD_ONCE_INIT;
 
 	pthread_once(&once, hc_env);
-	p->hc = !hc_off && !p->o->show_includes;	/* -H: a replay has no nesting to print */
+	p->hc = !hc_off && !p->o->show_includes && !p->o->dump_defines;	/* -H: a replay has no nesting to print */
 	p->tokmode = mode;
 }
 
@@ -376,6 +376,8 @@ int pp_text(pp *p, const char **out, size_t *len)
 		p->hc = 0;	/* cached text is C-spaced */
 	for (;;) {
 		next_tok(p, &t);
+		if (unlikely(p->o->dump_defines) && !p->dd_done)
+			dd_flush(p);	/* the predefined macros before the first token */
 		if (t.kind == T_EOF)
 			break;
 		render(p, &t);

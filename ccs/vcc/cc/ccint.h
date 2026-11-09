@@ -224,6 +224,10 @@ enum {
 	/* legacy __sync_* without an __atomic_* form (the others map onto __atomic_*) */
 	BI_SYNC_VAL_CAS, BI_SYNC_BOOL_CAS, BI_SYNC_LOCK_RELEASE, BI_SYNC_SYNCHRONIZE,
 	BI_CONJ, BI_CREAL, BI_CIMAG,	/* complex parts (the element type is the signature's return) */
+	BI_ROTL8, BI_ROTL16, BI_ROTL32, BI_ROTL64, BI_ROTR8, BI_ROTR16, BI_ROTR32, BI_ROTR64,
+	/* ACLE hints and barriers (side effects: BI_ARM_NOP..BI_ARM_TRAP) */
+	BI_ARM_NOP, BI_ARM_YIELD, BI_ARM_WFE, BI_ARM_WFI, BI_ARM_SEV, BI_ARM_SEVL, BI_ARM_CLREX,
+	BI_ARM_ISB, BI_ARM_DMB, BI_ARM_DSB, BI_ARM_TRAP,
 	BI_LIB,	/* plain library call with a prototype */
 	BI_COUNT
 };

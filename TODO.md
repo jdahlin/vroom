@@ -560,16 +560,16 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
   tests/vcc/vector_builtins.c; vector diagnostics spell clang's unnamed form, without the
   `(vector of N 'T' values)` note and typedef names) [P].  Library builtins (clang's `F`
   ones, 479) are declared from cc/libbuiltins.inc (gen-libbuiltins.py) as calls to the
-  function: `bench/vcc-builtins.py` 473 -> 302 unknown of 924 for aarch64 Linux;
+  function: `bench/vcc-builtins.py` 473 -> 302 -> 190 unknown of 924 for aarch64 Linux;
   `__has_builtin` is also 1 for what the front end implements (pp_builtin_known, set by
-  cc): 337 -> 237 answer 0, none 1 where clang says 0 (the harness fails on that).  Audit the full list against clang's `Builtins.td` for the target
+  cc): 337 -> 237 -> 153 answer 0, none 1 where clang says 0 (the harness fails on that).  Audit the full list against clang's `Builtins.td` for the target
   (generate a list, try each).
   *Validate:* T1 per builtin; `bench/vcc-builtins.py` that compiles a
   generated use of each clang builtin and reports unknowns.
   (Partly: `__builtin_clzg`/`ctzg`/`popcountg`, `__builtin_ldexp*`,
   `scalbn`, `trunc*`, `round*`, `floorf`/`ceilf`, `fmaxf`/`fminf` added for
   `make -C ccs self-check`; the generic forms reject a fallback whose
-  argument has side effects.)
+  argument has side effects.  Sized `__sync_*_N`, `__sync_swap`, `__c11_atomic_*`, `__builtin_rotate{left,right}N` and the ACLE `__builtin_arm_{nop,yield,wfe,wfi,sev,sevl,clrex,isb,dmb,dsb,trap,clz,clz64,rbit,rbit64,cls,cls64}`: tests/vcc/builtin_rotate_arm.c.)
   ~~`__has_builtin` answers 0 for names absent from the kernel/SDK~~ (done for what vcc
   implements, see above; the rest are builtins vcc lacks).
 - [ ] **SVE in the front end**: `arm_sve.h` types, `target("+sve")`.
@@ -625,12 +625,16 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
   *Validate:* T4.
 - [ ] **`#embed` / `__has_embed`** [P].  *Validate:* pp-diff fixtures plus
   T1 (`unsigned char d[] = { #embed "bin" };` checksums).
-- [ ] **Output modes ignored**: `-C`, `-CC`, `-dD`,
+- [ ] **Output modes ignored**: `-C`, `-CC`,
   `-traditional-cpp` (reject); line markers without `-P`; text identical to
   clang's spacing.
   *Validate:* `bench/vcc-diff.py` new mode `text` comparing bytes (not
   tokens) for `-E` with and without `-P`.  (`-M`/`-MM` done: see Depfiles;
-  `-H` done: `bench/vcc-diff.py hdr` 912/912, header cache off under `-H`.)
+  `-H` done: `bench/vcc-diff.py hdr` 912/912, header cache off under `-H`;
+  `-dD` done: `bench/vcc-diff.py dd` 910/912, predefined macros in clang's
+  order from `predef_order_*` (gen-ppdata-order.py); the two left are the
+  vDSO's cpp runs, which clang gives `__PIC__`/`__PIE__` and the CFI macro
+  (no -fno-PIE there): PIC/PIE item.)
   (`-dM` done: `bench/vcc-diff.py dm` is byte-identical to clang on all 879
   C TUs.  Open: on kernel `.S` files clang's `-dM` leaves out macros defined
   after a point in the headers (strchr.S: all of linux/linkage.h onwards)
