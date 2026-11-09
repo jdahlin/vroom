@@ -38,6 +38,8 @@ VPRIV bool side_effects(cc *c, uint32_t n)
 				return true;
 			if (x->aux == BI_CONSTANT_P)
 				return false;	/* its operand is not evaluated */
+			if (x->aux >= BI_ARM_NOP && x->aux <= BI_ARM_TRAP)
+				return true;
 			for (uint32_t i = 0; i < x->c; i++)
 				if (side_effects(c, c->lists[x->b + i]))
 					return true;
@@ -789,6 +791,53 @@ VPRIV val gen_builtin(ecx *e, uint32_t n)
 			put(e, I_BRK)->imm = 0x3e8;
 		e->reach = false;
 		return vnone();
+	case BI_ARM_NOP: case BI_ARM_YIELD: case BI_ARM_WFE: case BI_ARM_WFI: case BI_ARM_SEV: case BI_ARM_SEVL:
+	case BI_ARM_CLREX: case BI_ARM_ISB: case BI_ARM_DMB: case BI_ARM_DSB: case BI_ARM_TRAP: {
+		/* the instruction word: hints (op2 in bits 5-7), barriers (CRm, the operand, in 8-11) */
+		static const uint32_t w[] = {
+			[BI_ARM_NOP - BI_ARM_NOP] = 0xd503201f, [BI_ARM_YIELD - BI_ARM_NOP] = 0xd503203f,
+			[BI_ARM_WFE - BI_ARM_NOP] = 0xd503205f, [BI_ARM_WFI - BI_ARM_NOP] = 0xd503207f,
+			[BI_ARM_SEV - BI_ARM_NOP] = 0xd503209f, [BI_ARM_SEVL - BI_ARM_NOP] = 0xd50320bf,
+			[BI_ARM_CLREX - BI_ARM_NOP] = 0xd5033f5f, [BI_ARM_ISB - BI_ARM_NOP] = 0xd50330df,
+			[BI_ARM_DMB - BI_ARM_NOP] = 0xd50330bf, [BI_ARM_DSB - BI_ARM_NOP] = 0xd503309f,
+		};
+		cval cv = { 0 };
+
+		if (x->aux >= BI_ARM_ISB && (!cc_eval(c, arg[0], &cv) || cv.kind != CV_INT))
+			efatal(e, x->loc, "argument to '%s' must be a constant integer",
+			       x->aux == BI_ARM_TRAP ? "__builtin_arm_trap" : "__builtin_arm_dmb");
+		if (!e->reach)
+			return vnone();
+		if (x->aux == BI_ARM_TRAP)
+			put(e, I_BRK)->imm = (int64_t)(cv.i & 0xffff);
+		else
+			put(e, I_WORD)->imm = w[x->aux - BI_ARM_NOP] | (x->aux >= BI_ARM_ISB ? (uint32_t)(cv.i & 15) << 8 : 0);
+		return vnone();
+	}
+	case BI_ROTL8: case BI_ROTL16: case BI_ROTL32: case BI_ROTL64:
+	case BI_ROTR8: case BI_ROTR16: case BI_ROTR32: case BI_ROTR64: {
+		/* LSLV/LSRV take the count mod the register width: 32/64 bits as
+		   (x << n) | (x >> -n); 8/16 bits with n & (w-1), w - n and a mask */
+		int k = (x->aux - BI_ROTL8) & 3, w = 8 << k, ax = w == 64, left = x->aux < BI_ROTR8;
+		val a = gen(e, arg[0]), b = gen(e, arg[1]);
+		int ra = toreg(e, &a), rb = toreg(e, &b), t = treg(e);
+
+		if (w < 32) {
+			opi(e, I_ANDI, 0, ra, ra, (1 << w) - 1);
+			opi(e, I_ANDI, 0, rb, rb, w - 1);
+		}
+		op3(e, I_SUB, ax, t, ZR, rb);		/* -n */
+		if (w < 32)
+			opi(e, I_ADDI, 0, t, t, w);	/* w - n */
+		op3(e, left ? I_LSRV : I_LSLV, ax, t, ra, t);
+		op3(e, left ? I_LSLV : I_LSRV, ax, ra, ra, rb);
+		op3(e, I_ORR, ax, ra, ra, t);
+		if (w < 32)
+			opi(e, I_ANDI, 0, ra, ra, (1 << w) - 1);
+		tfree(e, t);
+		val_free(e, &b);
+		return a;
+	}
 	case BI_DEBUGTRAP:
 		if (e->reach)
 			put(e, I_BRK)->imm = 0xf000;
