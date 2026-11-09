@@ -7,7 +7,7 @@ enum {
 	A_NONE, A_ALIGNED, A_PACKED, A_SECTION, A_MODE, A_CLEANUP, A_ALIAS, A_WEAK, A_USED, A_UNUSED,
 	A_NORETURN, A_ALWAYS_INLINE, A_NOINLINE, A_GNU_INLINE, A_TRANSPARENT_UNION, A_VISIBILITY,
 	A_CONSTRUCTOR, A_DESTRUCTOR, A_COUNTED_BY, A_VECTOR_SIZE, A_COLD, A_NONSTRING, A_MAY_ALIAS,
-	A_WEAKREF, A_NAKED, A_NOCF, A_ERROR, A_OVERLOADABLE, A_NOINSTR,
+	A_WEAKREF, A_NAKED, A_NOCF, A_ERROR, A_OVERLOADABLE, A_NOINSTR, A_TLS_MODEL,
 	A_COUNT
 };
 
@@ -20,7 +20,7 @@ static const char *const attr_names[A_COUNT] = {
 	[A_COUNTED_BY] = "counted_by", [A_VECTOR_SIZE] = "vector_size", [A_COLD] = "cold",
 	[A_NONSTRING] = "nonstring", [A_MAY_ALIAS] = "may_alias", [A_WEAKREF] = "weakref",
 	[A_NOINSTR] = "no_instrument_function", [A_NAKED] = "naked", [A_NOCF] = "nocf_check", [A_ERROR] = "error",
-	[A_OVERLOADABLE] = "overloadable",
+	[A_OVERLOADABLE] = "overloadable", [A_TLS_MODEL] = "tls_model",
 };
 
 static uint32_t *attr_dir[NDIR];
@@ -186,6 +186,17 @@ __attribute__((noinline)) VPRIV void attribute_list_(cc *c, attrs *a)
 				}
 				expect(c, T_RPAREN, "')'");
 				continue;
+			case A_TLS_MODEL:
+				expect(c, T_LPAREN, "'('");
+				{
+					uint32_t loc = tok(c)->loc;
+
+					a->tlsmodel = (uint8_t)vcc_tls_model(c->strs[string_index(c) - 1].s);
+					if (!a->tlsmodel)
+						cc_error(c, loc, "tls_model must be \"global-dynamic\", \"local-dynamic\", \"initial-exec\" or \"local-exec\"");
+				}
+				expect(c, T_RPAREN, "')'");
+				continue;
 			case A_MODE:
 				expect(c, T_LPAREN, "'('");
 				if (is(c, T_IDENT))
@@ -297,6 +308,7 @@ VPRIV void merge_attrs(attrs *to, const attrs *from)
 	if (from->visibility) to->visibility = from->visibility;
 	if (from->errmsg) to->errmsg = from->errmsg;
 	if (from->prio) to->prio = from->prio;
+	if (from->tlsmodel) to->tlsmodel = from->tlsmodel;
 	/* the 0/1 flags packed .. noinstr: or them bytewise */
 	{
 		char *t = (char *)&to->packed;

@@ -103,9 +103,17 @@ VPRIV lval gen_lval(ecx *e, uint32_t n)
 			 */
 			int r, model = 0;
 
-			if (!DARWIN(c))
-				model = c->o->pic == 2 ? TLS_DESC :
-					(c->syms[cs].flags & (SF_DEFINED | SF_TENTATIVE)) ? TLS_LE : TLS_IE;
+			if (!DARWIN(c)) {
+				/* clang: tls_model(), else -ftls-model=; the default if that is stronger */
+				const attrs *ta = sym_attrs(c, cs);
+				int want = ta && ta->tlsmodel ? ta->tlsmodel : c->o->tlsmodel, def;
+
+				def = c->o->pic == 2 ? VCC_TLS_GD :
+				      (c->syms[cs].flags & (SF_DEFINED | SF_TENTATIVE)) ? VCC_TLS_LE : VCC_TLS_IE;
+				if (want > def)
+					def = want;
+				model = def == VCC_TLS_LE ? TLS_LE : def == VCC_TLS_IE ? TLS_IE : TLS_DESC;
+			}
 			note_ref(e, REF(RK_SYM, cs));
 			if (model == 0 || model == TLS_DESC)
 				e->calls = true;

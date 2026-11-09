@@ -18,19 +18,21 @@ def relocs(o):
         if m and ('GOT' in m.group(1) or 'TLS' in m.group(1)): s.add((m.group(1), m.group(2)))
     return s
 
+TLSM = [f'{p} -ftls-model={m}' for p in ('-fPIC', '-fno-pic') for m in ('global-dynamic', 'local-dynamic', 'initial-exec', 'local-exec')]
 bad = ok = 0
 with tempfile.TemporaryDirectory() as t:
     for f in sorted(glob.glob(f'{R}/ccs/vcc/tests/pic/*.c')):
-        for mode in ['-fno-pic', '-fPIE', '-fPIC', '-fpie', '-fpic', None]:
-            fl = ['--target=aarch64-linux-gnu', '-O2', '-c', f] + ([mode] if mode else [])
+        for mode in ['-fno-pic', '-fPIE', '-fPIC', '-fpie', '-fpic', None] + (TLSM if 'tls' in f else []):
+            mode = mode.split() if mode else []
+            fl = ['--target=aarch64-linux-gnu', '-O2', '-c', f] + mode
             subprocess.run([CL] + fl + ['-o', f'{t}/c.o'], check=True)
             r = subprocess.run([VPP] + fl + ['-o', f'{t}/v.o'], capture_output=True, text=True)
             if r.returncode:
-                print('FAIL', os.path.basename(f), mode, r.stderr[:200]); bad += 1; continue
+                print('FAIL', os.path.basename(f), ' '.join(mode), r.stderr[:200]); bad += 1; continue
             a, b = relocs(f'{t}/c.o'), relocs(f'{t}/v.o')
             if a != b:
                 bad += 1
-                print('DIFF', os.path.basename(f), mode or '(default)', 'clang only:', sorted(a - b), 'vcc only:', sorted(b - a))
+                print('DIFF', os.path.basename(f), ' '.join(mode) or '(default)', 'clang only:', sorted(a - b), 'vcc only:', sorted(b - a))
             else: ok += 1
 print(f'vcc-pic: {ok} pass, {bad} fail')
 sys.exit(1 if bad else 0)

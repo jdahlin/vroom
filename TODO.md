@@ -507,8 +507,10 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
   defined in the TU, initial-exec for the others, TLSDESC under `-fPIC`
   (`I_TLV` with `cond` = model, x0 = the address), `.tdata`/`.tbss`
   "awT"; relocations checked by `bench/vcc-pic.py` (`tests/pic/tls.c`),
-  run by `tests/vcc/tls_static.c` (`tests/rt` sets `tpidr_el0`).  Left:
-  `-ftls-model=` and `__attribute__((tls_model))`, local-dynamic, the
+  run by `tests/vcc/tls_static.c` (`tests/rt` sets `tpidr_el0`).  `-ftls-model=` and
+  `tls_model()` as clang (the attribute over the option, the default if
+  stronger; `tests/pic/tls_model.c`).  Left: local-dynamic proper (now
+  TLSDESC per symbol, clang uses `_TLS_MODULE_BASE_` for local symbols), the
   register choice (always x0/x1, clang allocates), `-fdata-sections`.
   *Validate:* T6 (relocs per model); T1 run under qemu with the runtime's
   TLS setup (`tests/rt` start.S sets `tpidr_el0`); T3 already has TLV.

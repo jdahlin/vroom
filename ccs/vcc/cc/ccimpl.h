@@ -526,7 +526,7 @@ static inline bool attrs_empty(const attrs *a)
 	memcpy(w, p, sizeof(w));
 	for (int i = 0; i < 7; i++)
 		o |= w[i];
-	return !o && !p[56] && !p[57] && !p[58] && !p[59] && !p[60] && !p[61];
+	return !o && !p[56] && !p[57] && !p[58] && !p[59] && !p[60] && !p[61] && !a->tlsmodel;
 }
 
 #endif

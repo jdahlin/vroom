@@ -229,6 +229,14 @@ typedef struct node {
 
 /* ---------------- the TU ---------------- */
 
+/* TLS models, in the order clang strengthens them (the larger wins) */
+enum { VCC_TLS_GD = 1, VCC_TLS_LD, VCC_TLS_IE, VCC_TLS_LE };
+static inline int vcc_tls_model(const char *m)
+{
+	return !strcmp(m, "global-dynamic") ? VCC_TLS_GD : !strcmp(m, "local-dynamic") ? VCC_TLS_LD :
+	       !strcmp(m, "initial-exec") ? VCC_TLS_IE : !strcmp(m, "local-exec") ? VCC_TLS_LE : 0;
+}
+
 typedef struct cc_opts {	/* fields before outfd: parse options, all in the decl cache key */
 	int target;		/* PP_LINUX_AARCH64 / PP_DARWIN / PP_WASM64 */
 	int unsigned_char;
@@ -247,6 +255,7 @@ typedef struct cc_opts {	/* fields before outfd: parse options, all in the decl 
 	int outfd;
 	int emit;		/* generate code (emit/): 1 = assembly text to outfd, 2 = object into obj */
 	int opt;		/* -O level for code generation: 0 (default, -O0), 1 (-O1, -Og), 2 (-O2, -O3, -Os, -Oz, -O) */
+	int tlsmodel;		/* -ftls-model=: VCC_TLS_*, 0: the default */
 	int pic;		/* ELF: 0 none (-fno-pic), 1 PIE (-fpie, the hosted default), 2 PIC (-fpic) */
 	int nthreads;		/* emitter threads (0: 1) */
 	struct ElfObj *obj;	/* emit == 2: the object (reset first; the caller finishes it) */
