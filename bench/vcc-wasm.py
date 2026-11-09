@@ -9,8 +9,10 @@ linked by emcc (emscripten's libc, -sMEMORY64) and run under node.  vcc
 passes when its program prints what clang's prints and exits the same way.
 
 vcc's side: `vpp -S` (the assembly text) assembled by clang; with --obj,
-`vpp -c` (vcc's own assembler and object writer, W5).  Failures by stage:
-emit (vpp fails), as (clang rejects vcc's assembly), link (emcc), run.
+`vpp -c` (vcc's own assembler and object writer, W5); with --objcmp, both,
+and `vpp -c`'s object must be byte-identical to clang's for the same text.
+Failures by stage: emit (vpp fails), as (clang rejects vcc's assembly),
+objcmp, link (emcc), run.
 The test runtime headers (ccs/vcc/tests/rt/include) are used on both sides,
 emscripten's libc behind them.  Clang's results are cached in
 build/ccs/wasmtests/ref (keyed by the source and flags).
@@ -115,6 +117,13 @@ def one(t):
             e = err.decode(errors='replace')
             m = re.search(r'error: (.*)', e)
             return t, 'fail', 'as', re.sub(r'\d+', 'N', m.group(1)) if m else ct.first_err(e)
+        if OBJCMP:
+            # vcc's object for the same text, byte for byte against clang's
+            rc, _, err = sh([VPP, '-c'] + vfl + [path, '-o', f'{wd}/vccobj.o'], cwd=cwd)
+            if rc:
+                return t, 'fail', 'objcmp', 'vpp -c: ' + ct.first_err(err.decode(errors='replace'))
+            if open(f'{wd}/vccobj.o', 'rb').read() != open(f'{wd}/vcc.o', 'rb').read():
+                return t, 'fail', 'objcmp', 'object differs from clang\'s for the same .s'
     rc, err = link([f'{wd}/vcc.o'], f'{wd}/vcc.js')
     if rc:
         m = re.search(r'undefined symbol: (\S+)', err)
@@ -127,15 +136,17 @@ def one(t):
     open(f'{wd}/vcc.out', 'w').write(out); open(f'{wd}/ref.out', 'w').write(ref['out'])
     return t, 'fail', 'run', why
 
-def init(obj):
-    global OBJ
+def init(obj, objcmp=False):
+    global OBJ, OBJCMP
     OBJ = obj
+    OBJCMP = objcmp
 
 if __name__ == '__main__':
     av = sys.argv[1:]
     j, suite, show, verbose = 6, None, None, False
     obj = '--obj' in av
-    av = [a for a in av if a != '--obj']
+    objcmp = '--objcmp' in av
+    av = [a for a in av if a not in ('--obj', '--objcmp')]
     if '-v' in av: verbose = True; av.remove('-v')
     for opt in ('-j', '--suite', '--show'):
         if opt in av:
@@ -146,7 +157,7 @@ if __name__ == '__main__':
     pat = av[0] if av else None
     ts = ct.tests(suite, pat)
     t0 = time.time()
-    with Pool(j, initializer=init, initargs=(obj,)) as pool:
+    with Pool(j, initializer=init, initargs=(obj, objcmp)) as pool:
         res = pool.map(one, ts, chunksize=1)
     by = defaultdict(Counter)
     whys = defaultdict(Counter)

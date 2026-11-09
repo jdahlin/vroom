@@ -144,6 +144,33 @@ W1 kan delvis gå parallellt med W0.
 Före planen: wasm-*bygget* av vcc via emscripten (`ccs/wasm/`, commit 8e9f9da) och
 explorer-sidan.
 
+### W5 (2026-11-09): objektfiler, i gren `claude/wasm-w5-objects`
+- `arch/wasm/as/as.c` (+ `was.h`, gränssnittet `wasmas.h`): LLVM:s wasm-`.s`
+  (det generatorn skriver: `.functype`, `.globaltype`, `.tabletype`, `.local`,
+  sektioner, `.globl`/`.weak`/`.hidden`/`.type`/`.size`/`.p2align`, `x = y`,
+  `.set`, data-direktiv och strängar; hela MVP-instruktionsuppsättningen,
+  sign-ext, `trunc_sat`, `memory.copy`/`fill`) till en modell; instruktioner
+  kodas direkt, symboloperander lämnar fasta LEB-fält (5/10 byte) och
+  relokeringar. `platform/wasm/wasm.c` lägger ut modellen som LLVM:s
+  WasmObjectWriter: symboler, funktioner, importer och typer i den ordning
+  assemblern registrerade symbolerna (`call_indirect`-signaturer där
+  instruktionen står), utfyllda sektions- och delsektionsstorlekar,
+  ELEM-segment och tabellimport när en funktionsadress tas,
+  `linking` (symboltabell, segment) och `reloc.CODE`/`reloc.DATA`.
+- `-c` för wasm64: `emit_tu` tar texten (som `VCC_OBJ_TEXT`) genom
+  `wasm_assemble`; drivern skriver bytena (`cc_opts.wasm_obj`). Ännu genom
+  text, inte direkt från generatorn (planens "utan text" återstår, en
+  prestandafråga). `vasm --target=wasm64-…` läser wasm-`.s`.
+- Validering: `bench/vcc-wasm.py --objcmp` jämför `vpp -c`:s objekt byte för
+  byte med clangs objekt för samma `.s`: **alla identiska** (0 avvikelser på
+  sviterna, 1 590 tester godkända länkade av emcc och körda i node på grenens
+  bas 1856415, samma som `-S`-vägen). `--obj` kör sviterna med vccs objekt.
+- arm64 oförändrat: `vcc-same.py` 13 167/13 167 mot bygget före wasm,
+  `vcc-ctests` 1 743/1 743, bygget fil för fil utan varningar; emscripten-bygget
+  (`ccs/wasm/build.sh`) tar med de nya filerna.
+- Återstår i W5: generatorn direkt till modellen (utan text), `.init_array`
+  (konstruktorer), TLS, egna sektioner, `vas` i vccd.
+
 ### W1, W2 (2026-11-09): klara
 - W1 omplanerat: i stället för att lyfta ut vikning och inlining ur
   `arch/a64/emit/` (riskabelt, se Risker) väljer `emit/` generator per mål:

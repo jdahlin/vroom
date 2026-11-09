@@ -197,9 +197,7 @@ int cc_run(pp *p, const cc_opts *o)
 	}
 	if (o->dump_layouts && !c->errors)
 		layout_checks(c);
-	if (o->emit == 2 && !c->errors && !pp_errors(p) && o->target == PP_WASM64)
-		cc_error(c, 0, "wasm64: no object writer yet, only -S (PLAN-wasm.md, step W5)");
-	else if (o->emit && !c->errors && !pp_errors(p))
+	if (o->emit && !c->errors && !pp_errors(p))
 		c->errors += emit_tu(c, o);
 	errors = c->errors;
 	dc_end(c);

@@ -41,6 +41,7 @@
 #include "../pp/ppdata-predef.inc"
 #include "../lib/arena.h"
 #include "../lib/ldhash.h"
+#include "../lib/buf.h"
 
 #ifdef __APPLE__
 #define ST_MTIME_NS(st) ((unsigned long long)(st)->st_mtimespec.tv_sec * 1000000000ull + (unsigned long long)(st)->st_mtimespec.tv_nsec)
@@ -533,6 +534,9 @@ static void obj_release(void)
 	obj_free = s;
 	pthread_mutex_unlock(&obj_mu);
 }
+
+/* -c for wasm64: the object's bytes (arch/wasm/as, platform/wasm) */
+static _Thread_local vbuf tl_wasm_obj;
 
 /* lay out tl_obj and write it to out */
 static int write_obj(const char *cwd, const char *out, int outfd, int errfd, int macho)
@@ -1127,6 +1131,7 @@ int ppd_run(int argc, char **argv, const ppd_env *env)
 		co.nthreads = getenv("VCC_THREADS") ? atoi(getenv("VCC_THREADS")) : 1;
 		co.obj = tl_obj;
 		co.as = tl_as;
+		co.wasm_obj = &tl_wasm_obj;
 		if ((layout || emit == 1) && out && strcmp(out, "-")) {
 			char path[4096];
 
@@ -1164,7 +1169,9 @@ int ppd_run(int argc, char **argv, const ppd_env *env)
 			if (status && outrename)
 				unlink(outtmp);
 		}
-		if (!status && emit == 2)
+		if (!status && emit == 2 && po.target == PP_WASM64)
+			status = write_out(env->cwd, out, env->outfd, tl_wasm_obj.p, tl_wasm_obj.n, errfd);
+		else if (!status && emit == 2)
 			status = write_obj(env->cwd, out, env->outfd, errfd, darwin);
 		if (!status && emit == 2 && depfile)
 			status = write_deps(p, env->cwd, depfile, dtarget, dnosys, mphony, dfirst, NULL, -1, errfd);

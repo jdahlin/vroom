@@ -1,5 +1,7 @@
 /* vcc code generator: emitter state, the work queue and threads, emit_tu */
 #include "emitimpl.h"
+#include "../arch/wasm/as/wasmas.h"
+#include "../lib/buf.h"
 
 VPRIV void *reserve(size_t n) { return vreserve(n, MAP_NORESERVE, "vcc: mmap"); }
 
@@ -404,7 +406,8 @@ static int emit_tu1(cc *c, const cc_opts *o, bool write_out, uint8_t *mf, bool *
 	}
 	E.stats = getenv("VCC_EMIT_STATS") != NULL;
 	E.noopt = getenv("VCC_NOOPT") != NULL;
-	E.objtext = getenv("VCC_OBJ_TEXT") != NULL;
+	/* wasm64: objects from the text, through arch/wasm/as */
+	E.objtext = getenv("VCC_OBJ_TEXT") != NULL || o->target == PP_WASM64;
 	/* roots */
 	for (uint32_t i = 0; i < c->ntoplevel; i++) {
 		uint32_t s = c->toplevel[i];
@@ -519,7 +522,20 @@ static int emit_tu1(cc *c, const cc_opts *o, bool write_out, uint8_t *mf, bool *
 				all.n = 0;
 				for (int i = 0; i < k; i++)
 					tb_put(&all, iov[i].iov_base, iov[i].iov_len);
-				if (as_run(o->as, o->obj, all.p, all.n, "<vcc>", &msg)) {
+				if (o->target == PP_WASM64) {
+					uint8_t *ob;
+					size_t on;
+					char err[512];
+
+					if (wasm_assemble(all.p, all.n, &ob, &on, err, sizeof err)) {
+						as_error(c, "assembler: %s", err);
+						E.errors++;
+					} else {
+						o->wasm_obj->n = 0;
+						vbuf_put(o->wasm_obj, ob, on);
+						free(ob);
+					}
+				} else if (as_run(o->as, o->obj, all.p, all.n, "<vcc>", &msg)) {
 					as_error(c, "assembler: %s", msg);
 					E.errors++;
 				}

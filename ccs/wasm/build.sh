@@ -8,7 +8,7 @@ cd "$(dirname "$0")/.."
 OUT=${OUT:-../build/wasm}
 mkdir -p $OUT/obj
 CFLAGS="-Iwasm/compat -std=c11 -O2 -sMEMORY64=1 -msimd128 -mfpu=neon -D_GNU_SOURCE -DVCC_INCDIR=\"/vcc/include\" -Wno-unused-parameter ${WFLAGS}"
-SRC="vcc/driver/vpp.c vcc/lex/lex.c vcc/lib/intern.c vcc/arch/a64/as/enc.c vcc/platform/darwin/macho.c
+SRC="vcc/driver/vpp.c vcc/lex/lex.c vcc/lib/intern.c vcc/arch/a64/as/enc.c vcc/platform/darwin/macho.c vcc/arch/wasm/as/as.c vcc/platform/wasm/wasm.c
  vcc/pp/dircache.c vcc/driver/ppdriver.c vcc/driver/ccsnap.c vcc/lib/ldhash.c"
 for m in as obj cc pp emit; do
 	case $m in
