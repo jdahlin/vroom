@@ -546,3 +546,17 @@
 	ld4d { z0.d, z1.d, z2.d, z3.d }, p0/z, [x0]
 	st2b { z30.b, z31.b }, p0, [x0, #14, mul vl]
 	st4w { z0.s - z3.s }, p0, [x0, x1, lsl #2]
+	splice z0.s, p1, z0.s, z2.s
+	sunpkhi z0.h, z1.b
+	sunpklo z0.d, z1.s
+	uunpkhi z0.s, z1.h
+	uunpklo z0.h, z1.b
+	brkb p0.b, p1/z, p2.b
+	brka p0.b, p1/m, p2.b
+	brkbs p0.b, p1/z, p2.b
+	brkpa p0.b, p1/z, p2.b, p3.b
+	brkpbs p0.b, p1/z, p2.b, p3.b
+	cntp x0, p1, p2.s
+	cntp x3, p15, p0.b
+	incp x1, p2.d
+	decp x1, p2.h

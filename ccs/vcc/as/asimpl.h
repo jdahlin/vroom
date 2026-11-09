@@ -113,7 +113,11 @@ struct As {
 	Sv *dwd; uint32_t ndwd, dwdcap;	/* directories; [0] is the root file's */
 	struct DwLoc { uint32_t frag, file, line, col, disc, isa; uint64_t off; uint8_t flags; } *dwl, dwcur;
 	uint32_t ndwl, dwlcap;
-	int dwlocp, dwtab;		/* a .loc waits for its instruction; a table is due */
+	int dwlocp, dwtab;
+	/* variable-size items at the end of a split frag (.prefalign, alignment
+	   after one, .uleb128/.sleb128 of a label difference), relaxed at the end */
+	struct VarItem { uint32_t frag, end; uint8_t kind, p2, code, fill; uint64_t max, size; Val v; } *pfa;
+	uint32_t npfa, pfacap;		/* a .loc waits for its instruction; a table is due */
 	char msg[512];
 	int err;
 };

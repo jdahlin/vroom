@@ -454,6 +454,15 @@ VPRIV int instruction(As *a, const char *p, const char *e, size_t wn)
 				else if (op->kind == A64O_REG && op->cls == A64_P && q + 1 < e && *q == '/' && ((q[1] | 32) == 'z' || (q[1] | 32) == 'm')) {
 					op->pq = (q[1] | 32) == 'z' ? 1 : 2; p = q + 2;
 				}
+				else if (op->kind == A64O_REG && op->cls == A64_Z && op->arr && q < e && *q == '[') {	/* SVE Zn.T[i] */
+					int64_t ix;
+					q++;
+					if (abs_expr(a, &q, e, &ix)) return -1;
+					q = ws(q, e);
+					if (q >= e || *q != ']' || ix < 0 || ix > 63) return err(a, "']' expected");
+					op->idx = (uint8_t)ix; op->hasidx = 1;
+					p = q + 1;
+				}
 				else if (op->kind == A64O_VREG && q < e && *q == '[') {
 					int64_t ix;
 					q++;

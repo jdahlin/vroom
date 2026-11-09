@@ -525,8 +525,15 @@ static int hasprefix(Sv n, const char *pre)
 	return n.n >= k && !memcmp(n.s, pre, k) && (n.n == k || n.s[k] == '.');
 }
 
+static uint32_t latest(As *a, uint32_t frag)	/* a frag split by .prefalign goes on in its continuation */
+{
+	while (elf_frag(a->o, frag)->cont) frag = elf_frag(a->o, frag)->cont;
+	return frag;
+}
+
 static void switch_to(As *a, uint32_t frag)
 {
+	frag = latest(a, frag);
 	if (frag != a->cur) { a->prev = a->cur; a->dwlocp = 0; }	/* MC drops a pending .loc */
 	a->cur = frag;
 }
@@ -566,6 +573,10 @@ static Sv trim(const char *p, const char *e);
 static int d_dwfile(As *a, const char *p, const char *e);
 static int d_loc(As *a, const char *p, const char *e);
 static void loc_row(As *a);
+static uint64_t frag_base(As *a, uint32_t frag);
+static int d_prefalign(As *a, const char *p, const char *e);
+enum { VI_PREFALIGN, VI_ALIGN, VI_ULEB, VI_SLEB };
+static struct VarItem *var_item(As *a, int kind);
 /* .section name [, "flags" [, @type [, entsize]]] ; push = .pushsection */
 static int d_section(As *a, const char *p, const char *e, int push)
 {
@@ -981,6 +992,15 @@ static int d_align_w(As *a, const char *p, const char *e, int p2, int fsz)
 		l2 = (unsigned)__builtin_ctzll((uint64_t)n);
 	}
 	if (fsz == 1) {
+		if (elf_frag(a->o, a->cur)->split && elf_sec(a->o, elf_frag(a->o, a->cur)->sec)->type != SHT_NOBITS) {
+			/* its frag's start is not known yet (after .prefalign/.uleb128): a variable item */
+			ElfSec *sc = elf_sec(a->o, elf_frag(a->o, a->cur)->sec);
+			if (l2 > sc->align) sc->align = l2;
+			int code = !hasfill && code_section(a);
+			struct VarItem *v = var_item(a, VI_ALIGN);
+			v->p2 = (uint8_t)l2; v->code = (uint8_t)code; v->fill = (uint8_t)fill; v->max = (uint64_t)max;
+			return 0;
+		}
 		elf_align(a->o, a->cur, l2, !hasfill && code_section(a), (uint8_t)fill, (uint64_t)max);
 		return 0;
 	}
@@ -1042,13 +1062,23 @@ static void sleb(Buf8 *b, int64_t v);
 static int d_leb(As *a, const char *p, const char *e, int sgn)
 {
 	if (a->dwlocp) loc_row(a);
-	elf_data(a->o, a->cur);
 	for (;;) {
 		int64_t v;
-		if (abs_expr(a, &p, e, &v)) return -1;
+		Val x;
+		if (val_expr(a, &p, e, &x)) return -1;
+		fold(a, &x);
+		if (x.add || x.sub) {	/* a label difference not known yet: a variable item */
+			if (x.add && !x.sub) return err(a, "expected absolute expression");
+			struct VarItem *vi = var_item(a, sgn ? VI_SLEB : VI_ULEB);
+			vi->v = x;
+			goto next;
+		}
+		v = x.c;
+		elf_data(a->o, a->cur);	/* MC: a relaxable LEB gets no mapping symbol */
 		uint8_t t[16]; Buf8 b = { t, 0 };
 		if (sgn) sleb(&b, v); else uleb(&b, (uint64_t)v);
 		memcpy(elf_grow(a->o, a->cur, b.n), t, b.n);
+	next:
 		p = ws(p, e);
 		if (p >= e) return 0;
 		if (*p != ',') return err(a, "unexpected token in directive");
@@ -1079,7 +1109,7 @@ static int d_fill(As *a, const char *p, const char *e)
 		if (p < e && *p == ',') { p++; if (abs_expr(a, &p, e, &val)) return -1; }
 	}
 	if (size > 8) size = 8;
-	elf_data(a->o, a->cur);
+	/* MC: .fill makes no mapping symbol (.space does) */
 	for (int64_t i = 0; i < n; i++) {
 		uint8_t *q = elf_grow(a->o, a->cur, (size_t)size);
 		for (int k = 0; k < size; k++) q[k] = (uint8_t)((uint64_t)val >> 8 * k);
@@ -2073,10 +2103,11 @@ static int directive(As *a, Sv w, const char *p, const char *e)
 			if (!a->nss) return err(a, ".popsection without corresponding .pushsection");
 			a->nss--;
 			if (a->cur != a->ss[a->nss].cur) a->dwlocp = 0;
-			a->cur = a->ss[a->nss].cur; a->prev = a->ss[a->nss].prev;
+			a->cur = latest(a, a->ss[a->nss].cur); a->prev = latest(a, a->ss[a->nss].prev);
 			return 0;
 		}
-		if (IS("previous")) { uint32_t t = a->cur; if (a->prev != t) a->dwlocp = 0; a->cur = a->prev; a->prev = t; return 0; }
+		if (IS("prefalign")) return d_prefalign(a, p, e);
+		if (IS("previous")) { a->prev = latest(a, a->prev); uint32_t t = a->cur; if (a->prev != t) a->dwlocp = 0; a->cur = a->prev; a->prev = t; return 0; }
 		if (IS("p2align")) return d_align(a, p, e, 1);
 		if (IS("p2alignw")) return d_align_w(a, p, e, 1, 2);
 		if (IS("p2alignl")) return d_align_w(a, p, e, 1, 4);
@@ -2297,7 +2328,7 @@ void as_begin(As *a, ElfObj *o, const char *name)
 	a->fname = name;
 	a->nident = 0; a->ended = 0; a->altmacro = 0; a->eofline = 0;
 	a->ncfi = a->cficap = a->nfde = a->fdecap = 0; a->infde = 0; a->cfi_eh = 0; a->nsv = a->svcap = 0; a->nasg = a->asgcap = 0;
-	a->ndwf = a->dwfcap = a->ndwd = a->dwdcap = a->ndwl = a->dwlcap = 0; a->dwlocp = a->dwtab = 0;
+	a->ndwf = a->dwfcap = a->ndwd = a->dwdcap = a->ndwl = a->dwlcap = 0; a->npfa = a->pfacap = 0; a->dwlocp = a->dwtab = 0;
 	memset(&a->dwcur, 0, sizeof a->dwcur); a->dwcur.flags = 1;
 	a->mmask = 255; a->mcount = 0;
 	a->mtab = rget(&a->defs, sizeof(Macro *) * (a->mmask + 1));
@@ -2551,8 +2582,11 @@ static void cfi_finish(As *a)
 		for (uint32_t k = f->first; k < f->first + f->n; k++) {
 			struct Cfi *c = &a->cfi[k];
 			ElfSym *x = elf_symp(o, base), *y = elf_symp(o, c->lab);
-			if (x->frag != y->frag) { err(a, "CFI across fragments is not supported"); return; }
-			uint64_t d = y->value - x->value;
+			uint64_t d;
+			if (x->frag == y->frag) d = y->value - x->value;
+			else if (elf_frag(o, x->frag)->sec == elf_frag(o, y->frag)->sec)	/* split by .prefalign/alignment */
+				d = frag_base(a, y->frag) + y->value - frag_base(a, x->frag) - x->value;
+			else { err(a, "CFI across sections is not supported"); return; }
 			if (d) {
 				if (d < 0x40) b.p[b.n++] = (uint8_t)(0x40 | d);
 				else if (d <= 0xff) { b.p[b.n++] = 2; b.p[b.n++] = (uint8_t)d; }
@@ -2602,6 +2636,152 @@ static void cfi_finish(As *a)
 		struct Fde *f = &a->fde[i];
 		elf_fixup(o, fr, at + pcbs[i], q + pcbs[i], R_AARCH64_PREL32, (Val){ f->start, 0, 0 });
 		elf_fixup(o, fr, at + pcbs[i] + 4, q + pcbs[i] + 4, R_AARCH64_ABS32, (Val){ f->end, f->start, 0 });
+	}
+}
+
+/* ---------------------------------------------------------------- .prefalign */
+
+
+/* close the current frag with a variable-size item; what follows goes to a new frag */
+static struct VarItem *var_item(As *a, int kind)
+{
+	if (a->npfa == a->pfacap) {
+		uint32_t nc = a->pfacap ? a->pfacap * 2 : 64;
+		void *t = rget(&a->defs, sizeof *a->pfa * nc);
+		if (a->npfa) memcpy(t, a->pfa, sizeof *a->pfa * a->npfa);
+		a->pfa = t; a->pfacap = nc;
+	}
+	struct VarItem *v = &a->pfa[a->npfa++];
+	memset(v, 0, sizeof *v);
+	v->kind = (uint8_t)kind; v->frag = a->cur;
+	a->cur = elf_split(a->o, a->cur);
+	return v;
+}
+
+/* .prefalign p2, end, nop|fill: align to min(2^p2, the power of two that
+ * holds [here, end)) (MC) */
+static int d_prefalign(As *a, const char *p, const char *e)
+{
+	int64_t p2, fill = 0;
+	if (abs_expr(a, &p, e, &p2)) return -1;
+	if (p2 < 0 || p2 > 16) return err(a, "invalid alignment");
+	p = ws(p, e);
+	if (p >= e || *p != ',') return err(a, "expected a comma");
+	Sv nm = first_word(ws(p + 1, e), e);
+	if (!nm.n) return err(a, "expected symbol name");
+	uint32_t y = sym(a, nm.s, nm.n);
+	p = ws(nm.s + nm.n, e);
+	int nop = 0;
+	if (p < e && *p == ',') {
+		p = ws(p + 1, e);
+		if (e - p >= 3 && !memcmp(p, "nop", 3)) { nop = 1; p += 3; }
+		else if (abs_expr(a, &p, e, &fill)) return -1;
+	}
+	struct VarItem *v = var_item(a, VI_PREFALIGN);
+	v->end = y; v->p2 = (uint8_t)p2; v->code = (uint8_t)nop; v->fill = (uint8_t)fill;
+	return 0;
+}
+
+/* sizes before the variable items are final: offsets with the current estimates */
+static uint64_t frag_base(As *a, uint32_t frag)
+{
+	ElfObj *o = a->o;
+	uint64_t off = 0;
+	for (uint32_t f = elf_frag(o, frag)->sec; f && f != frag; f = elf_frag(o, f)->next) {
+		off += elf_frag(o, f)->size;
+		if (elf_frag(o, f)->cont && elf_frag(o, f)->aux) off += a->pfa[elf_frag(o, f)->aux - 1].size;
+	}
+	return off;
+}
+
+static int sym_secoff(As *a, uint32_t y, uint32_t *sec, int64_t *off)
+{
+	ElfSym *s = elf_symp(a->o, y);
+	if (!(s->flags & ESYM_DEFINED) || (s->flags & ESYM_ABS)) return -1;
+	*sec = elf_frag(a->o, s->frag)->sec;
+	*off = (int64_t)(frag_base(a, s->frag) + s->value);
+	return 0;
+}
+
+static int leb_len(int64_t v, int sgn)
+{
+	uint8_t t[16]; Buf8 b = { t, 0 };
+	if (sgn) sleb(&b, v); else uleb(&b, (uint64_t)v);
+	return (int)b.n;
+}
+
+static int var_eval(As *a, struct VarItem *v, int64_t *val)
+{
+	int64_t x = v->v.c, o1, o2;
+	uint32_t s1 = 0, s2 = 0;
+	if (v->v.add && sym_secoff(a, v->v.add, &s1, &o1)) return -1;
+	if (v->v.sub && sym_secoff(a, v->v.sub, &s2, &o2)) return -1;
+	if (v->v.add && v->v.sub && s1 != s2) return -1;
+	if (v->v.add && !v->v.sub) return -1;
+	if (v->v.add) x += o1 - o2;
+	*val = x;
+	return 0;
+}
+
+/* MC's relaxation: recompute every size until none changes, then emit */
+static void var_finish(As *a)
+{
+	ElfObj *o = a->o;
+	for (uint32_t i = 0; i < a->npfa; i++) elf_frag(o, a->pfa[i].frag)->aux = i + 1;
+	for (int it = 0;; it++) {
+		int changed = 0;
+		for (uint32_t i = 0; i < a->npfa; i++) {
+			struct VarItem *v = &a->pfa[i];
+			uint64_t end = frag_base(a, v->frag) + elf_frag(o, v->frag)->size, ns = 0;
+			if (v->kind == VI_PREFALIGN || v->kind == VI_ALIGN) {
+				uint64_t al = (uint64_t)1 << v->p2;
+				if (v->kind == VI_PREFALIGN) {
+					uint32_t nf = elf_frag(o, v->frag)->cont, sc; int64_t eo;
+					if (sym_secoff(a, v->end, &sc, &eo) || sc != elf_frag(o, v->frag)->sec) { err(a, ".prefalign: the end symbol must follow in the same section"); return; }
+					uint64_t size = (uint64_t)eo - frag_base(a, nf);
+					al = 1;
+					while (al < size && al < ((uint64_t)1 << v->p2)) al <<= 1;
+				}
+				ns = (al - (end & (al - 1))) & (al - 1);
+				if (v->max && ns > v->max) ns = 0;
+				if (v->kind == VI_PREFALIGN) {
+					ElfSec *s = elf_sec(o, elf_frag(o, v->frag)->sec);
+					unsigned lg = (unsigned)__builtin_ctzll(al);
+					if (lg > s->align) s->align = lg;
+				}
+			} else {
+				int64_t x;
+				if (var_eval(a, v, &x)) { err(a, "expected absolute expression"); return; }
+				ns = (uint64_t)leb_len(x, v->kind == VI_SLEB);
+				if (ns < v->size) ns = v->size;	/* never shrink: converges */
+			}
+			if (ns != v->size) { v->size = ns; changed = 1; }
+		}
+		if (!changed) break;
+		if (it == 64) { err(a, "relaxation did not converge"); return; }
+	}
+	for (uint32_t i = 0; i < a->npfa; i++) {
+		struct VarItem *v = &a->pfa[i];
+		uint64_t pad = v->size;
+		elf_frag(o, v->frag)->aux = 0;
+		if (!pad) continue;
+		uint8_t *q = elf_grow(o, v->frag, pad);
+		if (v->kind == VI_ULEB || v->kind == VI_SLEB) {
+			int64_t x; var_eval(a, v, &x);
+			uint8_t t[16]; Buf8 b = { t, 0 };
+			if (v->kind == VI_SLEB) sleb(&b, x); else uleb(&b, (uint64_t)x);
+			if (b.n < pad) {	/* padded to the relaxed size (MC: padding bytes 0x80 ..) */
+				t[b.n - 1] |= 0x80;
+				while (b.n < pad - 1) t[b.n++] = v->kind == VI_SLEB && x < 0 ? 0xff : 0x80;
+				t[b.n++] = v->kind == VI_SLEB && x < 0 ? 0x7f : 0;
+			}
+			memcpy(q, t, pad);
+			continue;
+		}
+		if (!v->code) { memset(q, v->fill, pad); continue; }
+		uint64_t z = pad & 3;
+		memset(q, 0, z);
+		for (q += z, pad -= z; pad; pad -= 4, q += 4) { q[0] = 0x1f; q[1] = 0x20; q[2] = 0x03; q[3] = 0xd5; }
 	}
 }
 
@@ -2849,15 +3029,13 @@ static void dwline_finish(As *a)
 	memset(done, 0, a->ndwl + 1);
 	for (uint32_t s = 0; s < a->ndwl; s++) {
 		if (done[s]) continue;
-		uint32_t fr = a->dwl[s].frag;
+		uint32_t sc = elf_frag(o, a->dwl[s].frag)->sec;
 		uint32_t file = 1, line = 1, col = 0, disc = 0, isa = 0, flags = 1;
 		uint64_t last = 0; int first = 1;
 		for (uint32_t i = s; i < a->ndwl; i++) {
 			struct DwLoc *l = &a->dwl[i];
-			if (l->frag != fr) {
-				if (elf_frag(o, l->frag)->sec == elf_frag(o, fr)->sec) { err(a, "line rows in subsections are not supported"); return; }
-				continue;
-			}
+			if (elf_frag(o, l->frag)->sec != sc) continue;
+			uint64_t at = frag_base(a, l->frag) + l->off;
 			done[i] = 1;
 			if (b.n + 64 > cap) { err(a, "line table overflow"); return; }
 			int64_t ld = (int64_t)l->line - line;
@@ -2880,11 +3058,13 @@ static void dwline_finish(As *a)
 				memset(b.p + b.n, 0, 8); b.n += 8;
 				dw_adv(&b, ld, 0, 0);
 				first = 0;
-			} else dw_adv(&b, ld, l->off - last, 0);
+			} else dw_adv(&b, ld, at - last, 0);
 			disc = 0;
-			line = l->line; last = l->off;
+			line = l->line; last = at;
 		}
-		dw_adv(&b, 0, elf_frag(o, fr)->size - last, 1);
+		uint64_t send = 0;
+		for (uint32_t f = sc; f; f = elf_frag(o, f)->next) send += elf_frag(o, f)->size;
+		dw_adv(&b, 0, send - last, 1);
 	}
 	uint32_t len = (uint32_t)(b.n - 4);
 	memcpy(b.p, &len, 4);
@@ -3022,6 +3202,7 @@ int as_end(As *a)
 			else { err(a, "unsupported variable '%s'", s->name); break; }
 		}
 	}
+	if (!a->err && a->npfa) var_finish(a);
 	if (!a->err && a->nfde) cfi_finish(a);
 	if (!a->err && a->dwtab) dwline_finish(a);
 	if (!a->err && a->nsv) symver_finish(a);

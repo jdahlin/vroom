@@ -80,6 +80,13 @@ static int sve_addimm(int esz, int64_t v, const A64Op *shop)
 	return -1;
 }
 
+static int fimmv(const A64Op *o, double *d)
+{
+	if (o->kind == A64O_FIMM) { *d = o->fimm; return 1; }
+	if (o->kind == A64O_IMM && !o->hassym && !o->mod) { *d = (double)o->imm; return 1; }
+	return 0;
+}
+
 typedef struct { const char *n; uint32_t b; } SveOp;
 static int sveop(const SveOp *t, size_t nt, const char *mn, size_t n, uint32_t *b)
 {
@@ -220,6 +227,10 @@ static int k_sve(Ctx *c, const char *mn, size_t n)
 		unsigned a = i1 ? (unsigned)o[1].imm & 31 : R(&o[1]), bb = i2 ? (unsigned)o[2].imm & 31 : R(&o[2]);
 		OUT((i1 ? (i2 ? 0x04204000u : 0x04204800u) : (i2 ? 0x04204400u : 0x04204c00u)) | f | bb << 16 | a << 5);
 	}
+	if (MN("cntp") && k == 3 && isx(&o[0]) && !o[0].sp && ispg(&o[1], 0) && isp(&o[2]) && sz_(&o[2]) <= 3)
+		OUT(0x25208000u | (unsigned)sz_(&o[2]) << 22 | R(&o[1]) << 10 | R(&o[2]) << 5 | R(&o[0]));
+	if ((MN("incp") || MN("decp")) && k == 2 && isx(&o[0]) && !o[0].sp && isp(&o[1]) && sz_(&o[1]) <= 3)
+		OUT((MN("incp") ? 0x252c8800u : 0x252d8800u) | (unsigned)sz_(&o[1]) << 22 | R(&o[1]) << 5 | R(&o[0]));
 	if (MN("ptest")) {
 		if (k != 2 || !ispg(&o[0], 0) || !isp(&o[1]) || sz_(&o[1]) != 0) BADOPS;
 		OUT(0x2550c000u | R(&o[0]) << 10 | R(&o[1]) << 5);
@@ -272,10 +283,38 @@ static int k_sve(Ctx *c, const char *mn, size_t n)
 				OUT(b | (unsigned)es << 22 | ((unsigned)v & 31) << 16 | R(&o[1]) << 10 | R(&o[2]) << 5 | R(&o[0]));
 			}
 		}
+		static const SveOp fcmv[] = {
+			{ "fcmge", 0x65004000 }, { "fcmgt", 0x65004010 }, { "fcmeq", 0x65006000 }, { "fcmne", 0x65006010 },
+			{ "fcmuo", 0x6500c000 }, { "facge", 0x6500c010 }, { "facgt", 0x6500e010 },
+			{ "fcmle", 0x80000000 | 0x65004000 }, { "fcmlt", 0x80000000 | 0x65004010 },
+			{ "facle", 0x80000000 | 0x6500c010 }, { "faclt", 0x80000000 | 0x6500e010 },
+		};
+		static const SveOp fcm0[] = {
+			{ "fcmge", 0x65102000 }, { "fcmgt", 0x65102010 }, { "fcmlt", 0x65112000 }, { "fcmle", 0x65112010 },
+			{ "fcmeq", 0x65122000 }, { "fcmne", 0x65132000 },
+		};
+		if (k == 4 && ispg(&o[1], 1) && isz(&o[2]) && sz_(&o[2]) == es && es >= 1 && es <= 3) {
+			double d;
+			if (isz(&o[3]) && zsame(&o[2], &o[3]) && SVEOP(fcmv)) {
+				const A64Op *zn = &o[2], *zm = &o[3];
+				if (b & 0x80000000u) { zn = &o[3]; zm = &o[2]; b &= 0x7fffffffu; }
+				OUT(b | (unsigned)es << 22 | R(zm) << 16 | R(&o[1]) << 10 | R(zn) << 5 | R(&o[0]));
+			}
+			if (fimmv(&o[3], &d) && d == 0 && SVEOP(fcm0))
+				OUT(b | (unsigned)es << 22 | R(&o[1]) << 10 | R(&o[2]) << 5 | R(&o[0]));
+		}
 		if (es == 0 && k == 4 && isp(&o[2]) && isp(&o[3]) && !sz_(&o[2]) && !sz_(&o[3]) && SVEOP(plog)) {
 			if (MN("sel") ? !ispg(&o[1], 0) : !ispg(&o[1], 1)) BADOPS;
 			OUT(b | R(&o[3]) << 16 | R(&o[1]) << 10 | R(&o[2]) << 5 | R(&o[0]));
 		}
+		static const SveOp brk[] = { { "brka", 0x25104000 }, { "brkb", 0x25904000 }, { "brkas", 0x25504000 }, { "brkbs", 0x25d04000 } };
+		if (es == 0 && k == 3 && o[1].kind == A64O_REG && o[1].cls == A64_P && !o[1].arr && o[1].pq && isp(&o[2]) && !sz_(&o[2]) && SVEOP(brk)) {
+			if (o[1].pq == 2 && n == 5) BADOPS;	/* brkas/brkbs: zeroing only */
+			OUT(b | R(&o[1]) << 10 | R(&o[2]) << 5 | (o[1].pq == 2 ? 0x10u : 0) | R(&o[0]));
+		}
+		static const SveOp brkp[] = { { "brkpa", 0x2500c000 }, { "brkpb", 0x2500c010 }, { "brkpas", 0x2540c000 }, { "brkpbs", 0x2540c010 } };
+		if (es == 0 && k == 4 && ispg(&o[1], 1) && isp(&o[2]) && isp(&o[3]) && !sz_(&o[2]) && !sz_(&o[3]) && SVEOP(brkp))
+			OUT(b | R(&o[3]) << 16 | R(&o[1]) << 10 | R(&o[2]) << 5 | R(&o[0]));
 		if (MN("mov") || MN("movs") || MN("not") || MN("nots")) {
 			int s = mn[n - 1] == 's' ? 0x400000 : 0;
 			if (es) BADOPS;
@@ -296,6 +335,18 @@ static int k_sve(Ctx *c, const char *mn, size_t n)
 	}
 
 	/* reductions and last element: Vd/Rd, Pg, Zn.T */
+	static const SveOp fred[] = { { "faddv", 0x65002000 }, { "fmaxnmv", 0x65042000 }, { "fminnmv", 0x65052000 },
+				      { "fmaxv", 0x65062000 }, { "fminv", 0x65072000 } };
+	if (k == 3 && ispg(&o[1], 0) && isz(&o[2]) && sz_(&o[2]) >= 1 && sz_(&o[2]) <= 3 && SVEOP(fred)) {
+		int es = sz_(&o[2]);
+		if (!isreg(&o[0]) || o[0].cls != (es == 1 ? A64_H : es == 2 ? A64_S : A64_D)) BADOPS;
+		OUT(b | (unsigned)es << 22 | R(&o[1]) << 10 | R(&o[2]) << 5 | R(&o[0]));
+	}
+	if (MN("fadda") && k == 4 && ispg(&o[1], 0) && isz(&o[3]) && sz_(&o[3]) >= 1 && sz_(&o[3]) <= 3) {
+		int es = sz_(&o[3]), want = es == 1 ? A64_H : es == 2 ? A64_S : A64_D;
+		if (!isreg(&o[0]) || o[0].cls != want || !isreg(&o[2]) || o[2].cls != want || R(&o[0]) != R(&o[2])) BADOPS;
+		OUT(0x65182000u | (unsigned)es << 22 | R(&o[1]) << 10 | R(&o[3]) << 5 | R(&o[0]));
+	}
 	static const SveOp red[] = {
 		{ "saddv", 0x04002000 }, { "uaddv", 0x04012000 }, { "smaxv", 0x04082000 }, { "umaxv", 0x04092000 },
 		{ "sminv", 0x040a2000 }, { "uminv", 0x040b2000 }, { "orv", 0x04182000 }, { "eorv", 0x04192000 },
@@ -321,6 +372,79 @@ static int k_sve(Ctx *c, const char *mn, size_t n)
 	if (!(k >= 2 && isz(&o[0]))) return 1;
 	int es = sz_(&o[0]);
 	unsigned zd = R(&o[0]);
+
+	if (n >= 2 && mn[0] == 'f' && es >= 1 && es <= 3) {
+		static const SveOp fp3[] = { { "fadd", 0x65000000 }, { "fsub", 0x65000400 }, { "fmul", 0x65000800 },
+					     { "ftsmul", 0x65000c00 }, { "frecps", 0x65001800 }, { "frsqrts", 0x65001c00 } };
+		static const SveOp fpp[] = {
+			{ "fadd", 0x65008000 }, { "fsub", 0x65018000 }, { "fmul", 0x65028000 }, { "fsubr", 0x65038000 },
+			{ "fmaxnm", 0x65048000 }, { "fminnm", 0x65058000 }, { "fmax", 0x65068000 }, { "fmin", 0x65078000 },
+			{ "fabd", 0x65088000 }, { "fscale", 0x65098000 }, { "fmulx", 0x650a8000 }, { "fdivr", 0x650c8000 },
+			{ "fdiv", 0x650d8000 },
+		};
+		static const SveOp fpi[] = {	/* #imm: two choices, i1 */
+			{ "fadd", 0x65188000 }, { "fsub", 0x65198000 }, { "fmul", 0x651a8000 }, { "fsubr", 0x651b8000 },
+			{ "fmaxnm", 0x651c8000 }, { "fminnm", 0x651d8000 }, { "fmax", 0x651e8000 }, { "fmin", 0x651f8000 },
+		};
+		static const SveOp fma[] = { { "fmla", 0x65200000 }, { "fmls", 0x65202000 }, { "fnmla", 0x65204000 }, { "fnmls", 0x65206000 },
+					     { "fmad", 0x65208000 }, { "fmsb", 0x6520a000 }, { "fnmad", 0x6520c000 }, { "fnmsb", 0x6520e000 } };
+		static const SveOp fun[] = {
+			{ "fabs", 0x041ca000 }, { "fneg", 0x041da000 },
+			{ "frintn", 0x6500a000 }, { "frintp", 0x6501a000 }, { "frintm", 0x6502a000 }, { "frintz", 0x6503a000 },
+			{ "frinta", 0x6504a000 }, { "frintx", 0x6506a000 }, { "frinti", 0x6507a000 },
+			{ "frecpx", 0x650ca000 }, { "fsqrt", 0x650da000 },
+		};
+		static const SveOp fu2[] = { { "frecpe", 0x650e3000 }, { "frsqrte", 0x650f3000 } };
+		double d;
+		if (k == 3 && isz(&o[1]) && isz(&o[2]) && zsame(&o[0], &o[1]) && zsame(&o[0], &o[2]) && SVEOP(fp3))
+			OUT(b | (unsigned)es << 22 | R(&o[2]) << 16 | R(&o[1]) << 5 | zd);
+		if (k == 2 && isz(&o[1]) && zsame(&o[0], &o[1]) && SVEOP(fu2))
+			OUT(b | (unsigned)es << 22 | R(&o[1]) << 5 | zd);
+		if (k == 4 && ispg(&o[1], 2) && isz(&o[2]) && zsame(&o[0], &o[2])) {
+			if (R(&o[2]) == zd && isz(&o[3]) && zsame(&o[0], &o[3]) && SVEOP(fpp))
+				OUT(b | (unsigned)es << 22 | R(&o[1]) << 10 | R(&o[3]) << 5 | zd);
+			if (R(&o[2]) == zd && fimmv(&o[3], &d) && SVEOP(fpi)) {
+				int mul = MN("fmul"), mm = mn[1] == 'm' && !mul;	/* fmax/fmin(nm): 0.0/1.0 */
+				int i1 = mul ? (d == 2.0 ? 1 : d == 0.5 ? 0 : -1) : mm ? (d == 1.0 ? 1 : d == 0.0 ? 0 : -1) : (d == 1.0 ? 1 : d == 0.5 ? 0 : -1);
+				if (i1 < 0) BADOPS;
+				OUT(b | (unsigned)es << 22 | R(&o[1]) << 10 | (unsigned)i1 << 5 | zd);
+			}
+			if (isz(&o[3]) && zsame(&o[0], &o[3]) && SVEOP(fma))	/* fmla: Zm, Zn; fmad: Za, Zm */
+				OUT(b | (unsigned)es << 22 | R(&o[3]) << 16 | R(&o[1]) << 10 | R(&o[2]) << 5 | zd);
+		}
+		if (k == 3 && ispg(&o[1], 2) && isz(&o[2])) {
+			if (zsame(&o[0], &o[2]) && SVEOP(fun)) OUT(b | (unsigned)es << 22 | R(&o[1]) << 10 | R(&o[2]) << 5 | zd);
+			if (MN("fcvt")) {
+				static const struct { uint8_t d, s; uint32_t b; } fc[] = {
+					{ 1, 2, 0x6588a000 }, { 2, 1, 0x6589a000 }, { 1, 3, 0x65c8a000 },
+					{ 3, 1, 0x65c9a000 }, { 2, 3, 0x65caa000 }, { 3, 2, 0x65cba000 } };
+				for (size_t i = 0; i < sizeof fc / sizeof fc[0]; i++)
+					if (fc[i].d == es && fc[i].s == sz_(&o[2])) OUT(fc[i].b | R(&o[1]) << 10 | R(&o[2]) << 5 | zd);
+				BADOPS;
+			}
+		}
+		if ((MN("fmov") || MN("fdup")) && k == 2 && fimmv(&o[1], &d)) {
+			unsigned i8;
+			if (d == 0 && MN("fmov")) OUT(0x2538c000u | (unsigned)es << 22 | zd);	/* dup #0 */
+			if (fp_imm8(d, &i8)) BADOPS;
+			OUT(0x2539c000u | (unsigned)es << 22 | i8 << 5 | zd);
+		}
+		if ((MN("fmov") || MN("fcpy")) && k == 3 && ispg(&o[1], 2) && fimmv(&o[2], &d)) {
+			unsigned i8;
+			if (d == 0 && MN("fmov")) OUT(0x05104000u | (unsigned)es << 22 | R(&o[1]) << 16 | zd);	/* cpy #0, /m */
+			if (fp_imm8(d, &i8)) BADOPS;
+			OUT(0x0510c000u | (unsigned)es << 22 | R(&o[1]) << 16 | i8 << 5 | zd);
+		}
+	}
+	/* mov Zd.T, Vn | Zn.T[i]: dup (indexed) */
+	if ((MN("mov") || MN("dup")) && k == 2 && es <= 4 &&
+	    ((isreg(&o[1]) && o[1].cls == (es == 0 ? A64_B : es == 1 ? A64_H : es == 2 ? A64_S : es == 3 ? A64_D : A64_Q) && MN("mov")) ||
+	     (o[1].kind == A64O_REG && o[1].cls == A64_Z && o[1].hasidx && o[1].arr == o[0].arr))) {
+		unsigned i = o[1].hasidx ? o[1].idx : 0;
+		if (i >= (64u >> es)) BADOPS;
+		unsigned v = (i << (es + 1) | 1u << es) & 0x7f;
+		OUT(0x05202000u | (v >> 5) << 22 | (v & 31) << 16 | R(&o[1]) << 5 | zd);
+	}
 
 	/* predicated: Zdn, Pg/m, Zdn, Zm | #imm */
 	static const SveOp pbin[] = {
@@ -429,6 +553,11 @@ static int k_sve(Ctx *c, const char *mn, size_t n)
 		if (SVEOP(logi)) { int e = sve_logimm(es, v); if (e < 0) BADOPS; OUT(b | (unsigned)e << 5 | zd); }
 	}
 
+	if (MN("splice") && k == 4 && ispg(&o[1], 0) && isz(&o[2]) && R(&o[2]) == zd && isz(&o[3]) && zsame(&o[0], &o[2]) && zsame(&o[0], &o[3]) && es <= 3)
+		OUT(0x052c8000u | (unsigned)es << 22 | R(&o[1]) << 10 | R(&o[3]) << 5 | zd);
+	static const SveOp unpk[] = { { "sunpklo", 0x05303800 }, { "sunpkhi", 0x05313800 }, { "uunpklo", 0x05323800 }, { "uunpkhi", 0x05333800 } };
+	if (k == 2 && isz(&o[1]) && es >= 1 && es <= 3 && sz_(&o[1]) == es - 1 && SVEOP(unpk))
+		OUT(b | (unsigned)es << 22 | R(&o[1]) << 5 | zd);
 	if (MN("sel") && k == 4 && ispg(&o[1], 0) && isz(&o[2]) && isz(&o[3]) && zsame(&o[0], &o[2]) && zsame(&o[0], &o[3]) && es <= 3)
 		OUT(0x0520c000u | (unsigned)es << 22 | R(&o[3]) << 16 | R(&o[1]) << 10 | R(&o[2]) << 5 | zd);
 	if (MN("rev") && k == 2 && isz(&o[1]) && zsame(&o[0], &o[1]) && es <= 3)

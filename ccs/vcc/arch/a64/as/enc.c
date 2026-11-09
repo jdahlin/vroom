@@ -2593,7 +2593,10 @@ static const Vf vtab[] = {	/* sorted by name */
 	{ "cmlt", VS_CMZ, 0, 0x0e20a800, 0, 0 },
 	{ "fabd", VS_FSAME, 0, 0x2ea0d400, 0, 0 },
 	{ "fabs", VS_FMISC, 0, 0x0ea0f800, 0, 0 },
+	{ "facge", VS_FSAME, 0, 0x2e20ec00, 0, 0 },
+	{ "facgt", VS_FSAME, 0, 0x2ea0ec00, 0, 0 },
 	{ "fadd", VS_FSAME, 0, 0x0e20d400, 0, 0 },
+	{ "faddp", VS_FSAME, 0, 0x2e20d400, 0, 0 },
 	{ "fcmeq", VS_FSAME, 0, 0x0e20e400, 0, 0x0ea0d800 },
 	{ "fcmge", VS_FSAME, 0, 0x2e20e400, 0, 0x2ea0c800 },
 	{ "fcmgt", VS_FSAME, 0, 0x2ea0e400, 0, 0x0ea0c800 },
@@ -2604,8 +2607,12 @@ static const Vf vtab[] = {	/* sorted by name */
 	{ "fdiv", VS_FSAME, 0, 0x2e20fc00, 0, 0 },
 	{ "fmax", VS_FSAME, 0, 0x0e20f400, 0, 0 },
 	{ "fmaxnm", VS_FSAME, 0, 0x0e20c400, 0, 0 },
+	{ "fmaxnmp", VS_FSAME, 0, 0x2e20c400, 0, 0 },
+	{ "fmaxp", VS_FSAME, 0, 0x2e20f400, 0, 0 },
 	{ "fmin", VS_FSAME, 0, 0x0ea0f400, 0, 0 },
 	{ "fminnm", VS_FSAME, 0, 0x0ea0c400, 0, 0 },
+	{ "fminnmp", VS_FSAME, 0, 0x2ea0c400, 0, 0 },
+	{ "fminp", VS_FSAME, 0, 0x2ea0f400, 0, 0 },
 	{ "fmla", VS_FSAME, 0, 0x0e20cc00, 0x0f801000, 0 },
 	{ "fmls", VS_FSAME, 0, 0x0ea0cc00, 0x0f805000, 0 },
 	{ "fmov", VS_FMOV, 0, 0x0f00f400, 0, 0 },
@@ -2744,6 +2751,10 @@ static int k_simd(Ctx *c, const Vf *v)
 	case VS_FSAME: {
 		if (c->n != 3 || !isvec(&o[0]) || !isvec(&o[1]) || o[1].arr != o[0].arr) return 1;
 		unsigned a = o[0].arr;
+		if ((a == A64_4H || a == A64_8H) && v->base && isvec(&o[2]) && o[2].arr == a) {	/* FP16: 0 Q U 01110 a 10 Rm 00 opc 1 Rn Rd */
+			*c->out = ((v->base & ~0x0020c000u) | 0x00400000u) | arr_q(a) << 30 | R(&o[2]) << 16 | R(&o[1]) << 5 | R(&o[0]);
+			return 0;
+		}
 		if (a != A64_2S && a != A64_4S && a != A64_2D) return 1;
 		unsigned sz = a == A64_2D;
 		if (o[2].kind == A64O_VELEM && v->b2) {
@@ -2769,6 +2780,10 @@ static int k_simd(Ctx *c, const Vf *v)
 	case VS_FMISC: {
 		if (c->n != 2 || !isvec(&o[0]) || !isvec(&o[1]) || o[1].arr != o[0].arr) return 1;
 		unsigned a = o[0].arr;
+		if (a == A64_4H || a == A64_8H) {	/* FP16: bits 22..17 = 111100 */
+			*c->out = (v->base & ~(0x3fu << 17)) | 0x3cu << 17 | arr_q(a) << 30 | R(&o[1]) << 5 | R(&o[0]);
+			return 0;
+		}
 		if (a != A64_2S && a != A64_4S && a != A64_2D) BADOPS;
 		*c->out = v->base | arr_q(a) << 30 | (uint32_t)(a == A64_2D) << 22 | R(&o[1]) << 5 | R(&o[0]);
 		return 0;
@@ -2843,6 +2858,49 @@ int a64_asm(const char *mn, size_t n, const A64Op *op, int nop, uint32_t *out, A
 		if (k_lsui(&c, mn, n, &r)) return r;
 	}
 	if (sve_insn(mn, n, op, nop)) { int r = k_sve(&c, mn, n); if (r != 1) return r; }
+	if (nop == 2 && op[0].kind == A64O_VREG && op[1].kind == A64O_VREG && n >= 5 && mn[0] == 'f' && mn[1] == 'c' && mn[2] == 'v' && mn[3] == 't') {
+		/* fcvtn{2} / fcvtxn{2} (narrow), fcvtl{2} (long) */
+		int two = mn[n - 1] == '2', len = (int)n - two;
+		int nar = (len == 5 && mn[4] == 'n') || (len == 6 && mn[4] == 'x' && mn[5] == 'n'), lng = len == 5 && mn[4] == 'l';
+		if (nar || lng) {
+			unsigned w = nar ? op[0].arr : op[1].arr, d = nar ? op[1].arr : op[0].arr;	/* narrow side, wide side */
+			int sz = d == A64_2D ? 1 : d == A64_4S ? 0 : -1;
+			unsigned want = sz ? (two ? A64_4S : A64_2S) : (two ? A64_8H : A64_4H);
+			if (sz < 0 || w != want || (len == 6 && !sz)) { *err = "invalid operand for instruction"; return -1; }
+			uint32_t b = len == 6 ? 0x2e216800u : nar ? 0x0e216800u : 0x0e217800u;
+			*out = b | (uint32_t)two << 30 | (uint32_t)sz << 22 | (uint32_t)op[1].reg << 5 | op[0].reg;
+			return 0;
+		}
+	}
+	if (nop == 2 && op[0].kind == A64O_REG && op[1].kind == A64O_VREG && n >= 5 && mn[0] == 'f' && mn[n - 1] == 'p') {
+		/* faddp/fmaxp/fminp/fmaxnmp/fminnmp Vd, Vn.2T (scalar pairwise) */
+		static const struct { const char *n; uint32_t b; } fp[] = {
+			{ "faddp", 0x7e30d800 }, { "fmaxp", 0x7e30f800 }, { "fminp", 0x7eb0f800 },
+			{ "fmaxnmp", 0x7e30c800 }, { "fminnmp", 0x7eb0c800 } };
+		for (size_t i = 0; i < sizeof fp / sizeof fp[0]; i++) if (strlen(fp[i].n) == n && !memcmp(fp[i].n, mn, n)) {
+			unsigned cl = op[0].cls, a = op[1].arr;
+			uint32_t b = fp[i].b;
+			if (cl == A64_S && a == A64_2S) ;
+			else if (cl == A64_D && a == A64_2D) b |= 1u << 22;
+			else { *err = "invalid operand for instruction"; return -1; }
+			*out = b | (uint32_t)op[1].reg << 5 | op[0].reg;
+			return 0;
+		}
+	}
+	if (nop == 3 && op[0].kind == A64O_REG && op[2].kind == A64O_VELEM && n >= 4 && mn[0] == 'f' &&
+	    (op[0].cls == A64_S || op[0].cls == A64_D) && op[1].kind == A64O_REG && op[1].cls == op[0].cls) {
+		/* fmul/fmla/fmls/fmulx Sd|Dd, Sn|Dn, Vm.T[i] */
+		uint32_t b = n == 4 && !memcmp(mn, "fmul", 4) ? 0x5f809000u : n == 4 && !memcmp(mn, "fmla", 4) ? 0x5f801000u :
+			     n == 4 && !memcmp(mn, "fmls", 4) ? 0x5f805000u : n == 5 && !memcmp(mn, "fmulx", 5) ? 0x7f809000u : 0;
+		if (b) {
+			int d = op[0].cls == A64_D;
+			unsigned i = op[2].idx;
+			if (op[2].arr != (d ? A64_ELD : A64_ELS) || i > (d ? 1u : 3u)) { *err = "invalid operand for instruction"; return -1; }
+			*out = b | (uint32_t)d << 22 | (d ? i << 11 : (i >> 1) << 11 | (i & 1) << 21) |
+			       (uint32_t)op[2].reg << 16 | (uint32_t)op[1].reg << 5 | op[0].reg;
+			return 0;
+		}
+	}
 	if (nop == 3 && op[0].kind == A64O_VREG && n >= 4 && !memcmp(mn + n - 3, "dot", 3) &&
 	    (n == 4 ? mn[0] == 's' || mn[0] == 'u' : n == 5 && !memcmp(mn, "usdot", 5))) {
 		/* sdot/udot/usdot Vd.2s|4s, Vn.8b|16b, Vm.8b|16b */

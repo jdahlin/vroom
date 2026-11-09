@@ -150,3 +150,26 @@ ldpsw x3, x4, [x5], #252
 	udot v1.4s, v2.16b, v0.16b
 	sdot v1.2s, v2.8b, v0.8b
 	usdot v1.4s, v2.16b, v3.16b
+	fmul v1.4h, v1.4h, v0.4h
+	fadd v1.8h, v2.8h, v3.8h
+	fcmgt v1.4h, v2.4h, v3.4h
+	fmla v1.8h, v2.8h, v3.8h
+	fabs v1.8h, v2.8h
+	fsqrt v1.4h, v2.4h
+	facge v17.2d, v5.2d, v6.2d
+	facgt v1.4s, v2.4s, v3.4s
+	faddp v0.4s, v1.4s, v2.4s
+	fmaxnmp v0.2d, v1.2d, v2.2d
+	fminp v0.2s, v1.2s, v2.2s
+	fcvtn v1.2s, v1.2d
+	fcvtn2 v1.4s, v3.2d
+	fcvtn v1.4h, v1.4s
+	fcvtn2 v1.8h, v3.4s
+	fcvtl v1.2d, v1.2s
+	fcvtl2 v1.4s, v3.8h
+	fcvtxn v1.2s, v2.2d
+	fcvtxn2 v1.4s, v2.2d
+	faddp s0, v1.2s
+	faddp d0, v1.2d
+	fmaxnmp d0, v0.2d
+	fminp s3, v4.2s

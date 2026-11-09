@@ -68,6 +68,9 @@ typedef struct {
 	uint64_t size;		/* current frag-relative offset */
 	uint64_t base;		/* section offset, valid after layout */
 	ElfChunk *head, *tail;
+	uint32_t cont;		/* elf_split: the frag that continues this one */
+	uint8_t split;		/* made by elf_split (its base is not known while assembling) */
+	uint32_t aux;		/* the assembler's use (its variable item) */
 } ElfFrag;
 
 typedef struct {
@@ -148,6 +151,9 @@ uint32_t elf_section(ElfObj *o, const char *name, uint32_t len, uint32_t type,
 		     uint64_t flags, uint32_t entsize, uint32_t group_sym);
 uint32_t elf_find_section(ElfObj *o, const char *name, uint32_t len, uint32_t group_sym);
 uint32_t elf_subsection(ElfObj *o, uint32_t sec, int32_t sub);	/* frag id */
+/* a new frag right after `frag` in its section and subsection: what follows
+ * goes there, so bytes can still be appended to `frag` (variable padding) */
+uint32_t elf_split(ElfObj *o, uint32_t frag);
 static inline ElfSec *elf_sec(ElfObj *o, uint32_t s) { return (ElfSec *)o->secs.base + s; }
 static inline ElfFrag *elf_frag(ElfObj *o, uint32_t f) { return (ElfFrag *)o->frags.base + f; }
 static inline ElfSym *elf_symp(ElfObj *o, uint32_t s) { return (ElfSym *)o->syms.base + s; }

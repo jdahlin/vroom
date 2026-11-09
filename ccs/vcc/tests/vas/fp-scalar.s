@@ -59,3 +59,8 @@ fmov s1, #31.0
 fmov h0, w1
 fmov w0, h1
 fmov x0, h1
+	fmul d0, d0, v0.d[1]
+	fmul s1, s2, v3.s[3]
+	fmla s1, s2, v31.s[0]
+	fmls d1, d2, v3.d[0]
+	fmulx s1, s2, v3.s[2]
