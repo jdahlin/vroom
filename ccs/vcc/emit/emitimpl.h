@@ -538,8 +538,12 @@ static inline void symop(ecx *e, int op, int sz, int ext, int rd, int rn, uint32
 VPRIV uint32_t newlabel(ecx *e);
 VPRIV void kv_edge(ecx *e, uint32_t l);
 VPRIV void deflabel(ecx *e, uint32_t l);
-VPRIV void deflabel_forced(ecx *e, uint32_t l);
 VPRIV void deflabel_loop(ecx *e, uint32_t l, bool forced);
+VPRIV void deflabel_forced(ecx *e, uint32_t l);
+/* builtin.c: atomics, LSE or ldaxr/stlxr loops */
+VPRIV void at_cas(ecx *e, unsigned sz, int rs, int rt, int rn);
+VPRIV void at_swp(ecx *e, unsigned sz, int rs, int rt, int rn);
+VPRIV void at_ldop(ecx *e, unsigned sz, unsigned opc, int rs, int rt, int rn);
 VPRIV void jump(ecx *e, uint32_t l);
 VPRIV void bcond(ecx *e, int cond, uint32_t l);
 VPRIV void cbz(ecx *e, bool nz, int x, int r, uint32_t l);

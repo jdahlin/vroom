@@ -493,6 +493,42 @@ static const char *obj_name(const char *main_file, char *buf, size_t cap)
 	return buf;
 }
 
+/* does -march=/-mcpu= name a target with LSE atomics (as clang's
+   __ARM_FEATURE_ATOMICS)?  -1: no opinion (keep the previous answer) */
+static int arch_lse(const char *v, bool cpu)
+{
+	const char *plus = strchr(v, '+');
+	size_t n = plus ? (size_t)(plus - v) : strlen(v);
+	int lse = -1;
+
+	if (!cpu) {
+		if (n == 7 && !strncmp(v, "armv8-a", 7))
+			lse = 0;
+		else if (n >= 5 && (!strncmp(v, "armv8.", 6) || !strncmp(v, "armv9", 5)))
+			lse = 1;	/* armv8.1-a and later, armv8-r has none */
+		if (n >= 7 && !strncmp(v, "armv8-r", 7))
+			lse = 0;
+	} else {
+		static const char *const old[] = { "generic", "cortex-a35", "cortex-a53", "cortex-a57", "cortex-a72",
+						   "cortex-a73", "thunderx", "thunderxt88", "xgene1", "exynos-m3",
+						   "cyclone", "apple-a7", "apple-a8", "apple-a9", "apple-a10", "falkor",
+						   "kryo", "thunderxt81", "thunderxt83", "cortex-r82", NULL };
+
+		lse = 1;	/* native here is an Apple core */
+		for (int i = 0; old[i]; i++)
+			if (strlen(old[i]) == n && !strncmp(v, old[i], n))
+				lse = 0;
+	}
+	for (const char *p = plus; p; p = strchr(p + 1, '+')) {
+		if (!strncmp(p, "+lse", 4) && (!p[4] || p[4] == '+'))
+			lse = 1;
+		else if (!strncmp(p, "+nolse", 6) && (!p[6] || p[6] == '+'))
+			lse = 0;
+	}
+	return lse;
+}
+
+
 int ppd_run(int argc, char **argv, const ppd_env *env)
 {
 	const char *dirs_q[256], *dirs_i[1024], *dirs_s[256], *dirs_a[256], *all[2048];
@@ -511,6 +547,7 @@ int ppd_run(int argc, char **argv, const ppd_env *env)
 	int darwin = 0;
 #endif
 	int hosted = 1, nostdinc = 0, asm_mode = 0, undef = 0;
+	int march_lse = -1, mcpu_lse = -1, lse;
 	int opt = 0, os = 0, pie = -1, pic = 0, freestanding = 0, nobuiltin = 0, instr = 0, cfi = -1, strict_align = 0, tiny = 0, gregs = 0;
 	pp_opts po = { 0 };
 	char *pmap = NULL;
@@ -632,6 +669,8 @@ int ppd_run(int argc, char **argv, const ppd_env *env)
 		else if (!strcmp(a, "-fno-asynchronous-unwind-tables")) cfi = 0;
 		else if (!strcmp(a, "-mstrict-align")) strict_align = 1;
 		else if (!strcmp(a, "-mgeneral-regs-only")) gregs = 1;
+		else if (!strncmp(a, "-march=", 7) && arch_lse(a + 7, false) >= 0) march_lse = arch_lse(a + 7, false);
+		else if (!strncmp(a, "-mcpu=", 6) && arch_lse(a + 6, true) >= 0) mcpu_lse = arch_lse(a + 6, true);
 		else if (!strcmp(a, "-mcmodel=tiny")) tiny = 1;
 		else if (a[0] != '-' && (strstr(a, ".c") || strstr(a, ".S") || strstr(a, ".dts"))) {
 			size_t l = strlen(a);
@@ -756,6 +795,10 @@ int ppd_run(int argc, char **argv, const ppd_env *env)
 	/* the Linux table is for the kernel's -mgeneral-regs-only */
 	if (!darwin && !gregs && !undef)
 		bstr(&pre, "#define __ARM_FP 0xE\n#define __ARM_NEON 1\n#define __ARM_NEON_FP 0xE\n");
+	/* -march wins over -mcpu (clang); Darwin: Apple cores, LSE always */
+	lse = darwin ? 1 : march_lse >= 0 ? march_lse : mcpu_lse >= 0 ? mcpu_lse : 0;
+	if (!darwin && lse && !undef)
+		bstr(&pre, "#define __ARM_FEATURE_ATOMICS 1\n");
 	if (strict_align) bstr(&pre, "#undef __ARM_FEATURE_UNALIGNED\n");
 	if (tiny) bstr(&pre, "#undef __AARCH64_CMODEL_SMALL__\n#define __AARCH64_CMODEL_TINY__ 1\n");
 	if (cmdl.n) bput(&pre, cmdl.p, cmdl.n);
@@ -835,7 +878,7 @@ int ppd_run(int argc, char **argv, const ppd_env *env)
 		cc_opts co = { .target = po.target, .unsigned_char = po.unsigned_char, .dump_layouts = layout, .ms_anon = ms_anon, .short_wchar = short_wchar,
 				.std = std, .implicit_int = std == 89 || wimpl_int, .implicit_fn = std == 89 || wimpl_fn,
 				.gnu89_inline = gnu89_inline, .no_builtin = freestanding || nobuiltin, .instrument = instr,
-				.general_regs_only = gregs, .vcc_kernel = vcc_kernel,
+				.general_regs_only = gregs, .vcc_kernel = vcc_kernel, .lse = lse,
 			       .outfd = env->outfd };
 		int fd = -1;
 

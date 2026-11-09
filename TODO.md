@@ -314,7 +314,15 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
   (function index × asm index within it).
   *Validate:* T6/`vcc-obj.py`: compile a TU with several `%=` asms in many
   functions with `VCC_THREADS=1` and `=8` ten times; objects byte-identical.
-- [ ] **LSE-only atomics** [R].  `emit.c:5190-5330`.  Without `+lse` in
+- [x] **LSE-only atomics** [R].  (done: without LSE (Linux default, armv8-a,
+  -mcpu=cortex-a53 ..., `+nolse`) every casal/swpal/ld<op>al is an
+  ldaxr/stlxr loop (emit/builtin.c at_cas/at_swp/at_ldop, also the
+  `_Atomic` operators); LSE as before for armv8.1-a+, `+lse`, newer -mcpu
+  and Darwin; `__ARM_FEATURE_ATOMICS` as clang (`bench/vcc-driver.py`,
+  16 rows).  `vcc-ctests.py --cpu cortex-a53` runs vcc's binaries on a CPU
+  without LSE: 1729/1729 (the old binary: 7 run failures).  Not done:
+  clang's Linux default is outline atomics (`__aarch64_ldadd4_acq_rel`
+  calls, -moutline-atomics); vcc inlines the loop as -mno-outline-atomics.)  `emit.c:5190-5330`.  Without `+lse` in
   `-march`, call outline atomics (`__aarch64_ldadd4_acq_rel` etc., as clang's
   `-moutline-atomics` default on Linux) or emit LL/SC loops.
   *Validate:* T6 (no LSE opcodes without `+lse`); T1 run under

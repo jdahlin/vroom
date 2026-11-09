@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """vcc-ctests.py: run vendored C compiler test suites through vcc.
 
-  bench/vcc-ctests.py [-j N] [--suite gcc|tcc|vcc] [--fe] [-v] [--show CAT] [PAT]
+  bench/vcc-ctests.py [-j N] [--suite gcc|tcc|vcc] [--fe] [--cpu QEMU_CPU] [-v] [--show CAT] [PAT]
 
 Suites (ccs/vcc/tests/, see the README there):
   gcc  gcc.c-torture/execute: exits 0 on success, abort()s on failure
@@ -117,8 +117,8 @@ def sh(cmd, timeout=60, **kw):
     except subprocess.TimeoutExpired as e:
         return 'timeout', e.stdout or b'', e.stderr or b''
 
-def qemu(elf):
-    rc, out, err = sh([QEMU, '-M', 'virt', '-cpu', 'max', '-m', '256M', '-nographic',
+def qemu(elf, cpu='max'):
+    rc, out, err = sh([QEMU, '-M', 'virt', '-cpu', cpu, '-m', '256M', '-nographic',
                        '-monitor', 'none', '-nic', 'none', '-semihosting', '-kernel', elf], timeout=20,
                       stdin=subprocess.DEVNULL)
     return rc, out.decode('latin-1').replace('\r\n', '\n')
@@ -245,7 +245,7 @@ def one_(t):
             return t, 'fail', 'emit', 'assembly differs between VCC_THREADS=1 and 8'
     # an object byte-identical to one that passed before (same runtime, same
     # reference) passes again: no link, no qemu (they are ~90% of the time)
-    pk = hashlib.sha1(open(f'{wd}/vcc.o', 'rb').read() + (RTHASH + ref['key']).encode()).hexdigest()
+    pk = hashlib.sha1(open(f'{wd}/vcc.o', 'rb').read() + (RTHASH + ref['key'] + os.environ.get('VCC_QEMU_CPU', 'max')).encode()).hexdigest()
     pf = f'{OUT}/pass/{suite}/{name}'
     if not NOCACHE:
         try:
@@ -260,7 +260,7 @@ def one_(t):
         if m and re.match(r'link_(error|failure)', m.group(1)):
             return t, 'fail', 'opt', 'undefined ' + m.group(1)
         return t, 'fail', 'link', 'undefined ' + m.group(1) if m else first_err(err)
-    rc, out = qemu(f'{wd}/vcc.elf')
+    rc, out = qemu(f'{wd}/vcc.elf', os.environ.get('VCC_QEMU_CPU', 'max'))
     if rc == ref['rc'] and out == ref['out']:
         os.makedirs(os.path.dirname(pf), exist_ok=True)
         open(pf, 'w').write(pk)
@@ -281,6 +281,8 @@ if __name__ == '__main__':
     nocache = '--no-cache' in av
     av = [a for a in av if a not in ('--fe', '--no-cache')]
     if '-v' in av: verbose = True; av.remove('-v')
+    if '--cpu' in av:	# vcc's binaries run on this qemu CPU (cortex-a53: no LSE); clang's on max
+        k = av.index('--cpu'); os.environ['VCC_QEMU_CPU'] = av[k + 1]; del av[k:k + 2]
     for opt in ('-j', '--suite', '--show'):
         if opt in av:
             k = av.index(opt); v = av[k + 1]; del av[k:k + 2]

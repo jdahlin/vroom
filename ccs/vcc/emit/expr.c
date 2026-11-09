@@ -640,7 +640,7 @@ static val atomic_rmw(ecx *e, uint32_t n, bool inc, bool post)
 	nb = nv.k == V_CONST && nv.i == 0 ? ZR : toreg(e, &nv);
 	cmp = treg(e);
 	mov(e, 1, cmp, ob);
-	word(e, (unsigned)sz << 30 | 0x08e0fc00u | (unsigned)cmp << 16 | (unsigned)ra << 5 | (unsigned)nb);	/* casal */
+	at_cas(e, (unsigned)sz, cmp, nb, ra);	/* casal */
 	op3(e, I_SUBS, sz == 3, ZR, cmp, ob);	/* both zero-extended */
 	mov(e, 1, ob, cmp);
 	bcond(e, C_NE, top);
