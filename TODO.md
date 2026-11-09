@@ -810,14 +810,15 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
   files (`err-*.s`: clang's first file:line).
 
 ### Linker (`ld/ld.c`) and binutils
-- [ ] **ELF input parsing unchecked** [P]: `parse_obj` `ld/ld.c:1670-1697`,
-  `fill_isecs`, `st_shndx` (`ld/ld.c:1847,2521,2887`), `add_archive`
-  (`ld/ld.c:1609-1655`, long names `ld/ld.c:1633`), reloc width (`ld/ld.c:2987`),
-  objcopy `elf_open` `ld/objcopy.c:113`, misaligned headers in archives
-  (`ld/ld.c:1672`), SHN_XINDEX / `e_shnum == 0` (`ld/ld.c:1684,1850`).
-  *Validate:* T9 `fuzz-elf` (ASan) + `regress/elf/` with the probe's
-  corrupt objects (bad `e_shoff`, truncated, `st_shndx=0x500`, oversized
-  archive member, ABS64 at `size-1`); T8 with a 70k-section object.
+- [ ] **ELF input parsing unchecked** [P]: (done: `obj_valid` in `ld/ld.c`
+  checks every header, section, string table, symbol (`st_name`,
+  `st_shndx`), relocation (symbol index, `r_offset` + field width) once, as
+  lld's messages; `e_shnum == 0` takes the count from `sh[0]`; regular
+  archive members (at 4 mod 8) are copied to aligned memory; archive headers,
+  sizes and long-name offsets checked.  `bench/vlink-bad.py`: 29 corruptions
+  under ASan+UBSan, each a clean error.  Left: objcopy's `elf_open`
+  (`ld/objcopy.c:113`), SHN_XINDEX symbols (rejected), a `fuzz-elf` target, a
+  70k-section object.)
 - [ ] **Crashes on ordinary inputs** [P]: no script.  (Fixed: a script
   without `.symtab`/`.strtab`/`.shstrtab` places them as orphans, as lld;
   `/DISCARD/` of a merge section (`.comment`): `isec_osec`.  Both found by
