@@ -591,7 +591,8 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
 - [x] **`SOURCE_DATE_EPOCH`; `__TIMESTAMP__` from file mtime** [P].  (Both done:
   __TIMESTAMP__ is the current file's mtime, `??? ...` when stat fails, as clang.)
   `pp.c:3168-3178`.  *Validate:* T11 (fixed epoch → exact strings).
-- [ ] **`\U` outside the BMP printed unconverted in `-E`** [P].
+- [x] **`\U` outside the BMP printed unconverted in `-E`** [P].  (Done: identifiers' UCNs
+  print as UTF-8 (not in asm mode, not in literals); `##` accepts UCNs; regress/pp/ucn-ident.c.)
   *Validate:* pp-diff fixture.
 - [ ] **Errors suppress all `-E` output; `#include` in macro args accepted** [P].
   *Validate:* T4 for the latter; T11 for output-on-error.

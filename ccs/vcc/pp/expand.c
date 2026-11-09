@@ -1,5 +1,6 @@
 /* vcc preprocessor: macro expansion: arguments, stringizing, token pasting, substitution */
 #include "ppimpl.h"
+#include <ctype.h>
 
 /* ---------------- arguments ---------------- */
 
@@ -435,6 +436,19 @@ const uint8_t idch_tab[256] = {	/* [a-zA-Z0-9_$] and >= 0x80 */
 };
 #undef IDCH_ROW
 
+/* a UCN (\\uXXXX, \\UXXXXXXXX) at s[i]: its length, else 0 */
+static size_t ucn_at(const char *s, size_t n, size_t i)
+{
+	size_t d = i + 1 < n && s[i] == '\\' ? (s[i + 1] == 'u' ? 4 : s[i + 1] == 'U' ? 8 : 0) : 0;
+
+	if (!d || i + 2 + d > n)
+		return 0;
+	for (size_t k = i + 2; k < i + 2 + d; k++)
+		if (!isxdigit((unsigned char)s[k]))
+			return 0;
+	return 2 + d;
+}
+
 /* the kind of the single token spelled s[0..n), or -1 */
 static int classify(const char *s, size_t n, int rkind)
 {
@@ -442,9 +456,17 @@ static int classify(const char *s, size_t n, int rkind)
 
 	if (!n)
 		return -1;
-	if (idch((unsigned char)s[0]) && !(s[0] >= '0' && s[0] <= '9')) {
-		for (i = 0; i < n && idch((unsigned char)s[i]); i++)
-			;
+	if ((idch((unsigned char)s[0]) && !(s[0] >= '0' && s[0] <= '9')) || ucn_at(s, n, 0)) {
+		for (i = 0; i < n;) {
+			size_t u = ucn_at(s, n, i);
+
+			if (u)
+				i += u;
+			else if (idch((unsigned char)s[i]))
+				i++;
+			else
+				break;
+		}
 		if (i == n)
 			return T_IDENT;
 		/* encoding prefix + literal */
@@ -468,6 +490,10 @@ static int classify(const char *s, size_t n, int rkind)
 
 			if ((c == '+' || c == '-') && strchr("eEpP", s[i - 1]))
 				continue;
+			if (ucn_at(s, n, i)) {
+				i += ucn_at(s, n, i) - 1;
+				continue;
+			}
 			if (!idch(c) && c != '.')
 				return -1;
 		}

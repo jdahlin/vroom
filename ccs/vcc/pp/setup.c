@@ -284,6 +284,44 @@ int pp_skip_top(pp *p)
 	return 1;
 }
 
+/* an identifier's \\u/\\U escapes as UTF-8, in place (never longer), as clang -E */
+static size_t ucn_utf8(char *s, size_t n)
+{
+	size_t o = 0;
+
+	for (size_t i = 0; i < n;) {
+		unsigned d = s[i] == '\\' && i + 1 < n ? (s[i + 1] == 'u' ? 4 : s[i + 1] == 'U' ? 8 : 0) : 0;
+		uint32_t c = 0;
+
+		if (!d || i + 2 + d > n) {
+			s[o++] = s[i++];
+			continue;
+		}
+		for (unsigned k = 0; k < d; k++) {
+			char h = s[i + 2 + k];
+
+			c = c << 4 | (uint32_t)(h <= '9' ? h - '0' : (h | 32) - 'a' + 10);
+		}
+		i += 2 + d;
+		if (c < 0x80) {
+			s[o++] = (char)c;
+		} else if (c < 0x800) {
+			s[o++] = (char)(0xc0 | c >> 6);
+			s[o++] = (char)(0x80 | (c & 63));
+		} else if (c < 0x10000) {
+			s[o++] = (char)(0xe0 | c >> 12);
+			s[o++] = (char)(0x80 | (c >> 6 & 63));
+			s[o++] = (char)(0x80 | (c & 63));
+		} else {
+			s[o++] = (char)(0xf0 | c >> 18);
+			s[o++] = (char)(0x80 | (c >> 12 & 63));
+			s[o++] = (char)(0x80 | (c >> 6 & 63));
+			s[o++] = (char)(0x80 | (c & 63));
+		}
+	}
+	return o;
+}
+
 /* the token as clang -E -P prints it */
 static inline void render(pp *p, const ptok *t)
 {
@@ -314,6 +352,8 @@ static inline void render(pp *p, const ptok *t)
 	sp = pp_spell(t, p->out + p->nout, &l);
 	if (sp != p->out + p->nout)
 		memcpy(p->out + p->nout, sp, l);
+	if (t->kind == T_IDENT && !p->o->asm_mode && unlikely(memchr(p->out + p->nout, '\\', l) != NULL))
+		l = ucn_utf8(p->out + p->nout, l);
 	if (unlikely(t->ctr) && p->rec.on)
 		for (uint16_t r = t->ctr; r; r = p->rec.cp[r].next) {
 			const cprov *c = &p->rec.cp[r];
