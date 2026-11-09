@@ -4,6 +4,9 @@
 
 /* ---------------- conversions ---------------- */
 
+static int w16(cc *c, qty t);
+static void w16conv(ecx *e, qty from, qty to);
+
 /* a C integer of type t kept in an i32: re-extend it after arithmetic (from: what the bits are now) */
 static void wnarrow(ecx *e, qty from, qty to)
 {
@@ -38,6 +41,10 @@ VPRIV void wconv(ecx *e, qty from, qty to)
 	if (fk == WT_MEM || tk == WT_MEM) {
 		if (fk == tk && tsize(c, from) == tsize(c, to) && is_flt(c, from) == is_flt(c, to))
 			return;
+		if ((w16(c, from) || fk != WT_MEM) && (w16(c, to) || tk != WT_MEM)) {
+			w16conv(e, from, to);
+			return;
+		}
 		efatal(e, e->curloc, "wasm: conversion between %s and %s is not supported yet (PLAN-wasm.md W4)",
 		       fk == WT_MEM ? "a 128-bit value" : "a scalar", tk == WT_MEM ? "a 128-bit value" : "a scalar");
 	}
@@ -417,6 +424,437 @@ static void wbf_trunc(ecx *e, const wlv *l, qty t)
 	}
 }
 
+/* ---------------- 16-byte scalars: __int128 and long double ---------------- */
+
+/*
+ * A 16-byte value is the address of 16 bytes (a frame slot for a result),
+ * as clang's wasm ABI passes it as two i64.  __int128 adds, subtracts, does
+ * bitwise operations and compares inline; it multiplies, divides and
+ * shifts in compiler-rt (__multi3 ..), as long double (binary128) does all
+ * its arithmetic, comparisons and conversions (__addtf3, __lttf2 ..).
+ */
+
+/* 1: __int128, 2: long double, 0: neither */
+static int w16(cc *c, qty t)
+{
+	switch (KIND(c, t)) {
+	case TY_INT128:
+	case TY_UINT128:
+		return 1;
+	case TY_LDOUBLE:
+		return 2;
+	default:
+		return 0;
+	}
+}
+
+/* call a compiler-rt routine */
+static void wrt(ecx *e, const char *name, const char *sig)
+{
+	wst *W = e->w;
+
+	tb_s(&W->decl, name);
+	tb_c(&W->decl, '\t');
+	tb_s(&W->decl, sig);
+	tb_c(&W->decl, '\n');
+	tb_s(&W->b, "\tcall\t");
+	tb_s(&W->b, name);
+	tb_c(&W->b, '\n');
+}
+
+/* push half h (0 low, 1 high) of the 16 bytes at local a */
+static void whalf(ecx *e, uint32_t a, int h)
+{
+	wget(e, a);
+	wiu(e, "i64.load", h ? 8 : 0);
+}
+
+/* stack: [address] -> [lo hi] */
+static void wsplit(ecx *e)
+{
+	uint32_t a = wtmp(e, WT_I64);
+
+	wset(e, a);
+	whalf(e, a, 0);
+	whalf(e, a, 1);
+	wfree(e, a);
+}
+
+/* stack: [lo hi] -> [address of a new slot holding them] */
+static void wpair(ecx *e)
+{
+	uint64_t sl = wslot(e, 16, 16);
+	uint32_t h = wtmp(e, WT_I64), l = wtmp(e, WT_I64);
+
+	wset(e, h);
+	wset(e, l);
+	wslot_addr(e, sl);
+	wget(e, l);
+	wiu(e, "i64.store", 0);
+	wslot_addr(e, sl);
+	wget(e, h);
+	wiu(e, "i64.store", 8);
+	wslot_addr(e, sl);
+	wfree(e, l);
+	wfree(e, h);
+}
+
+/* push a 16-byte constant */
+static void w16const(ecx *e, uint64_t lo, uint64_t hi)
+{
+	wconst(e, WT_I64, (int64_t)lo);
+	wconst(e, WT_I64, (int64_t)hi);
+	wpair(e);
+}
+
+/* stack: [a b] (a 16-byte, b 16-byte or a shift count of type rty) -> a op b */
+static void w16arith(ecx *e, int op, qty ty, qty rty)
+{
+	cc *c = e->c;
+	bool sg = is_signed(c, ty), fl = w16(c, ty) == 2;
+	uint32_t ta, tb;
+	const char *f = NULL;
+
+	if (op == T_LESSLESS || op == T_GREATERGREATER) {
+		uint32_t n = wtmp(e, WT_I32);
+		int rk = wty(c, rty);
+
+		if (rk == WT_MEM)
+			wiu(e, "i64.load", 0);
+		if (rk != WT_I32)
+			wi(e, "i32.wrap_i64");
+		wset(e, n);
+		ta = wtmp(e, WT_I64);
+		wset(e, ta);
+		{
+			uint64_t sl = wslot(e, 16, 16);
+
+			wslot_addr(e, sl);
+			whalf(e, ta, 0);
+			whalf(e, ta, 1);
+			wget(e, n);
+			wrt(e, op == T_LESSLESS ? "__ashlti3" : sg ? "__ashrti3" : "__lshrti3", "(i64, i64, i64, i32) -> ()");
+			wslot_addr(e, sl);
+		}
+		wfree(e, ta);
+		wfree(e, n);
+		return;
+	}
+	tb = wtmp(e, WT_I64);
+	wset(e, tb);
+	ta = wtmp(e, WT_I64);
+	wset(e, ta);
+	switch (op) {
+	case T_PLUS: f = fl ? "__addtf3" : NULL; break;
+	case T_MINUS: f = fl ? "__subtf3" : NULL; break;
+	case T_STAR: f = fl ? "__multf3" : "__multi3"; break;
+	case T_SLASH: f = fl ? "__divtf3" : sg ? "__divti3" : "__udivti3"; break;
+	case T_PERCENT: f = fl ? NULL : sg ? "__modti3" : "__umodti3"; break;
+	case T_AMP: case T_PIPE: case T_CARET: break;
+	default: efatal(e, e->curloc, "wasm: unsupported operator on a 16-byte value");
+	}
+	if (f) {
+		uint64_t sl = wslot(e, 16, 16);
+
+		wslot_addr(e, sl);
+		whalf(e, ta, 0);
+		whalf(e, ta, 1);
+		whalf(e, tb, 0);
+		whalf(e, tb, 1);
+		wrt(e, f, "(i64, i64, i64, i64, i64) -> ()");
+		wslot_addr(e, sl);
+	} else if (fl) {
+		efatal(e, e->curloc, "wasm: unsupported operator on long double");
+	} else if (op == T_PLUS || op == T_MINUS) {
+		uint32_t lo = wtmp(e, WT_I64);
+		const char *o = op == T_PLUS ? "i64.add" : "i64.sub";
+
+		whalf(e, ta, 0);
+		whalf(e, tb, 0);
+		wi(e, o);
+		wtee(e, lo);
+		whalf(e, ta, 1);
+		whalf(e, tb, 1);
+		wi(e, o);
+		/* the carry (lo < a.lo) or the borrow (a.lo < b.lo) */
+		if (op == T_PLUS) {
+			wget(e, lo);
+			whalf(e, ta, 0);
+		} else {
+			whalf(e, ta, 0);
+			whalf(e, tb, 0);
+		}
+		wi(e, "i64.lt_u");
+		wi(e, "i64.extend_i32_u");
+		wi(e, o);
+		wpair(e);
+		wfree(e, lo);
+	} else {
+		const char *o = op == T_AMP ? "i64.and" : op == T_PIPE ? "i64.or" : "i64.xor";
+
+		whalf(e, ta, 0);
+		whalf(e, tb, 0);
+		wi(e, o);
+		whalf(e, ta, 1);
+		whalf(e, tb, 1);
+		wi(e, o);
+		wpair(e);
+	}
+	wfree(e, ta);
+	wfree(e, tb);
+}
+
+/* stack: [a b] of 16-byte type t -> a op b as an i32 0/1 */
+static void w16cmp(ecx *e, int op, qty t)
+{
+	cc *c = e->c;
+	uint32_t ta, tb;
+
+	tb = wtmp(e, WT_I64);
+	wset(e, tb);
+	ta = wtmp(e, WT_I64);
+	wset(e, ta);
+	if (w16(c, t) == 2) {
+		static const char *const fn[] = { "__eqtf2", "__netf2", "__lttf2", "__gttf2", "__letf2", "__getf2" };
+		static const char *const rel[] = { "i32.eq", "i32.ne", "i32.lt_s", "i32.gt_s", "i32.le_s", "i32.ge_s" };
+		int i = op == T_EQUALEQUAL ? 0 : op == T_EXCLAIMEQ ? 1 : op == T_LESS ? 2 : op == T_GREATER ? 3 : op == T_LESSEQ ? 4 : 5;
+
+		whalf(e, ta, 0);
+		whalf(e, ta, 1);
+		whalf(e, tb, 0);
+		whalf(e, tb, 1);
+		wrt(e, fn[i], "(i64, i64, i64, i64) -> (i32)");
+		wconst(e, WT_I32, 0);
+		wi(e, rel[i]);
+	} else if (op == T_EQUALEQUAL || op == T_EXCLAIMEQ) {
+		whalf(e, ta, 0);
+		whalf(e, tb, 0);
+		wi(e, "i64.xor");
+		whalf(e, ta, 1);
+		whalf(e, tb, 1);
+		wi(e, "i64.xor");
+		wi(e, "i64.or");
+		wi(e, "i64.eqz");
+		if (op == T_EXCLAIMEQ)
+			wi(e, "i32.eqz");
+	} else {
+		bool sg = is_signed(c, t);
+		const char *lo, *hi;
+
+		switch (op) {
+		case T_LESS: lo = "i64.lt_u"; hi = sg ? "i64.lt_s" : "i64.lt_u"; break;
+		case T_GREATER: lo = "i64.gt_u"; hi = sg ? "i64.gt_s" : "i64.gt_u"; break;
+		case T_LESSEQ: lo = "i64.le_u"; hi = sg ? "i64.lt_s" : "i64.lt_u"; break;
+		default: lo = "i64.ge_u"; hi = sg ? "i64.gt_s" : "i64.gt_u"; break;
+		}
+		/* the high halves decide unless equal */
+		whalf(e, ta, 0);
+		whalf(e, tb, 0);
+		wi(e, lo);
+		whalf(e, ta, 1);
+		whalf(e, tb, 1);
+		wi(e, hi);
+		whalf(e, ta, 1);
+		whalf(e, tb, 1);
+		wi(e, "i64.eq");
+		wi(e, "i32.select");
+	}
+	wfree(e, ta);
+	wfree(e, tb);
+}
+
+/* the value on the stack, of type from, as type to: one of them 16 bytes */
+static void w16conv(ecx *e, qty from, qty to)
+{
+	cc *c = e->c;
+	int f = w16(c, from), t = w16(c, to), fk = wty(c, from), tk = wty(c, to);
+	bool fsg = is_signed(c, from) && is_integer(c, from) && KIND(c, from) != TY_BOOL;
+	bool tsg = is_signed(c, to) && KIND(c, to) != TY_BOOL;
+
+	if (f && t) {
+		uint64_t sl;
+
+		if (f == t)
+			return;
+		sl = wslot(e, 16, 16);
+		wsplit(e);
+		{
+			uint32_t h = wtmp(e, WT_I64), l = wtmp(e, WT_I64);
+
+			wset(e, h);
+			wset(e, l);
+			wslot_addr(e, sl);
+			wget(e, l);
+			wget(e, h);
+			wfree(e, l);
+			wfree(e, h);
+		}
+		if (t == 2)
+			wrt(e, fsg ? "__floattitf" : "__floatuntitf", "(i64, i64, i64) -> ()");
+		else
+			wrt(e, tsg ? "__fixtfti" : "__fixunstfti", "(i64, i64, i64) -> ()");
+		wslot_addr(e, sl);
+		return;
+	}
+	if (f) {
+		/* from a 16-byte value */
+		if (KIND(c, to) == TY_BOOL) {
+			if (f == 1) {
+				wsplit(e);
+				wi(e, "i64.or");
+				wi(e, "i64.eqz");
+				wi(e, "i32.eqz");
+			} else {
+				wsplit(e);
+				wconst(e, WT_I64, 0);
+				wconst(e, WT_I64, 0);
+				wrt(e, "__netf2", "(i64, i64, i64, i64) -> (i32)");
+				wconst(e, WT_I32, 0);
+				wi(e, "i32.ne");
+			}
+			return;
+		}
+		if (f == 1) {
+			if (tk == WT_F32 || tk == WT_F64) {
+				wsplit(e);
+				wrt(e, tk == WT_F32 ? (fsg ? "__floattisf" : "__floatuntisf") : (fsg ? "__floattidf" : "__floatuntidf"),
+				    tk == WT_F32 ? "(i64, i64) -> (f32)" : "(i64, i64) -> (f64)");
+				return;
+			}
+			wiu(e, "i64.load", 0);
+			wconv(e, prim(TY_ULONG), to);
+			return;
+		}
+		wsplit(e);
+		if (tk == WT_F32 || tk == WT_F64) {
+			wrt(e, tk == WT_F32 ? "__trunctfsf2" : "__trunctfdf2", tk == WT_F32 ? "(i64, i64) -> (f32)" : "(i64, i64) -> (f64)");
+			return;
+		}
+		if (tk == WT_I64) {
+			wrt(e, tsg ? "__fixtfdi" : "__fixunstfdi", "(i64, i64) -> (i64)");
+			return;
+		}
+		wrt(e, tsg || tsize(c, to) < 4 ? "__fixtfsi" : "__fixunstfsi", "(i64, i64) -> (i32)");
+		wnarrow(e, prim(TY_INT), to);
+		return;
+	}
+	/* to a 16-byte value */
+	if (t == 1 && fk != WT_F32 && fk != WT_F64) {
+		uint32_t l = wtmp(e, WT_I64);
+
+		wconv(e, from, fsg ? prim(TY_LONG) : prim(TY_ULONG));
+		wtee(e, l);
+		if (fsg) {
+			wget(e, l);
+			wconst(e, WT_I64, 63);
+			wi(e, "i64.shr_s");
+		} else {
+			wconst(e, WT_I64, 0);
+		}
+		wpair(e);
+		wfree(e, l);
+		return;
+	}
+	{
+		uint64_t sl = wslot(e, 16, 16);
+		uint32_t v = wtmp(e, fk);
+		const char *fn, *sig;
+
+		wset(e, v);
+		wslot_addr(e, sl);
+		wget(e, v);
+		wfree(e, v);
+		if (t == 1) {
+			fn = fk == WT_F32 ? (tsg ? "__fixsfti" : "__fixunssfti") : (tsg ? "__fixdfti" : "__fixunsdfti");
+			sig = fk == WT_F32 ? "(i64, f32) -> ()" : "(i64, f64) -> ()";
+		} else if (fk == WT_F32 || fk == WT_F64) {
+			fn = fk == WT_F32 ? "__extendsftf2" : "__extenddftf2";
+			sig = fk == WT_F32 ? "(i64, f32) -> ()" : "(i64, f64) -> ()";
+		} else if (fk == WT_I64) {
+			fn = fsg ? "__floatditf" : "__floatunditf";
+			sig = "(i64, i64) -> ()";
+		} else {
+			fn = fsg || tsize(c, from) < 4 ? "__floatsitf" : "__floatunsitf";
+			sig = "(i64, i32) -> ()";
+		}
+		wrt(e, fn, sig);
+		wslot_addr(e, sl);
+	}
+}
+
+/* stack: [a] -> -a or ~a */
+static void w16unary(ecx *e, int op, qty t)
+{
+	cc *c = e->c;
+	uint32_t a = wtmp(e, WT_I64);
+
+	wset(e, a);
+	if (op == T_TILDE) {
+		whalf(e, a, 0);
+		wconst(e, WT_I64, -1);
+		wi(e, "i64.xor");
+		whalf(e, a, 1);
+		wconst(e, WT_I64, -1);
+		wi(e, "i64.xor");
+	} else if (w16(c, t) == 2) {
+		whalf(e, a, 0);
+		whalf(e, a, 1);
+		wconst(e, WT_I64, INT64_MIN);
+		wi(e, "i64.xor");
+	} else {
+		wconst(e, WT_I64, 0);
+		whalf(e, a, 0);
+		wi(e, "i64.sub");
+		wconst(e, WT_I64, 0);
+		whalf(e, a, 1);
+		wi(e, "i64.sub");
+		whalf(e, a, 0);
+		wi(e, "i64.eqz");
+		wi(e, "i32.eqz");
+		wi(e, "i64.extend_i32_u");
+		wi(e, "i64.sub");
+	}
+	wpair(e);
+	wfree(e, a);
+}
+
+/* ++/-- on a 16-byte lvalue */
+static int w16incdec(ecx *e, uint32_t n, bool want)
+{
+	cc *c = e->c;
+	const node *x = N(n);
+	qty t = N(x->a)->ty;
+	bool inc = x->op == N_PREINC || x->op == N_POSTINC, post = x->op == N_POSTINC || x->op == N_POSTDEC;
+	uint32_t ta = wtmp(e, WT_I64);
+	uint64_t old = 0;
+	wlv l;
+
+	wlval(e, x->a, &l, t);
+	wset(e, ta);
+	if (want && post) {
+		old = wslot(e, 16, 16);
+		wslot_addr(e, old);
+		wget(e, ta);
+		wcopy(e, 16);
+	}
+	wget(e, ta);
+	wget(e, ta);
+	if (w16(c, t) == 2)
+		w16const(e, 0, 0x3fff000000000000ull);
+	else
+		w16const(e, 1, 0);
+	w16arith(e, inc ? T_PLUS : T_MINUS, t, 0);
+	wcopy(e, 16);
+	if (want) {
+		if (post)
+			wslot_addr(e, old);
+		else
+			wget(e, ta);
+	}
+	wfree(e, ta);
+	return want ? WT_I64 : WT_NONE;
+}
+
 /* ---------------- operators ---------------- */
 
 static bool wis_cmp(int op)
@@ -434,8 +872,12 @@ static void warith(ecx *e, int op, qty ty, qty rty)
 	bool fl = k == WT_F32 || k == WT_F64;
 	const char *o = NULL;
 
+	if (k == WT_MEM && w16(c, ty)) {
+		w16arith(e, op, ty, rty);
+		return;
+	}
 	if (k == WT_MEM)
-		efatal(e, e->curloc, "wasm: 128-bit arithmetic is not supported yet (PLAN-wasm.md W4)");
+		efatal(e, e->curloc, "wasm: arithmetic on this type is not supported yet (PLAN-wasm.md W4)");
 	switch (op) {
 	case T_PLUS: o = "add"; break;
 	case T_MINUS: o = "sub"; break;
@@ -452,9 +894,13 @@ static void warith(ecx *e, int op, qty ty, qty rty)
 			  op == T_GREATERGREATER)))
 		efatal(e, e->curloc, "wasm: unsupported operator");
 	if ((op == T_LESSLESS || op == T_GREATERGREATER) && rty && wrep(wty(c, rty)) != k) {
-		if (wty(c, rty) == WT_MEM)
-			efatal(e, e->curloc, "wasm: a 128-bit shift count is not supported yet");
-		wi(e, k == WT_I64 ? "i64.extend_i32_u" : "i32.wrap_i64");
+		if (wty(c, rty) == WT_MEM) {
+			wiu(e, "i64.load", 0);
+			if (k == WT_I32)
+				wi(e, "i32.wrap_i64");
+		} else {
+			wi(e, k == WT_I64 ? "i64.extend_i32_u" : "i32.wrap_i64");
+		}
 	}
 	wop(e, k, o);
 }
@@ -468,8 +914,12 @@ static void wcompare(ecx *e, int op, qty t)
 	bool sg = !is_ptr(c, t) && is_signed(c, t);
 	char o[8];
 
+	if (k == WT_MEM && w16(c, t)) {
+		w16cmp(e, op, t);
+		return;
+	}
 	if (k == WT_MEM)
-		efatal(e, e->curloc, "wasm: 128-bit comparisons are not supported yet (PLAN-wasm.md W4)");
+		efatal(e, e->curloc, "wasm: comparisons of this type are not supported yet (PLAN-wasm.md W4)");
 	switch (op) {
 	case T_EQUALEQUAL: wop(e, k, "eq"); return;
 	case T_EXCLAIMEQ: wop(e, k, "ne"); return;
@@ -580,7 +1030,11 @@ VPRIV void wtruth(ecx *e, uint32_t n)
 	case WT_I64: wi(e, "i64.eqz"); wi(e, "i32.eqz"); break;
 	case WT_F32: wfconst(e, WT_F32, 0); wi(e, "f32.ne"); break;
 	case WT_F64: wfconst(e, WT_F64, 0); wi(e, "f64.ne"); break;
-	default: efatal(e, x->loc, "wasm: a 128-bit condition is not supported yet (PLAN-wasm.md W4)");
+	default:
+		if (!w16(c, x->ty))
+			efatal(e, x->loc, "wasm: a condition of this type is not supported yet (PLAN-wasm.md W4)");
+		w16conv(e, x->ty, prim(TY_BOOL));
+		break;
 	}
 }
 
@@ -752,8 +1206,10 @@ static int wincdec(ecx *e, uint32_t n, bool want)
 	uint32_t ta = UINT32_MAX, told = UINT32_MAX, tnew = UINT32_MAX;
 	wlv l;
 
+	if (k == WT_MEM && w16(c, t) && !(T(c, t)->flags & TF_ATOMIC))
+		return w16incdec(e, n, want);
 	if (k == WT_MEM || is_vec(c, t))
-		efatal(e, x->loc, "wasm: ++/-- on a 128-bit value is not supported yet (PLAN-wasm.md W4)");
+		efatal(e, x->loc, "wasm: ++/-- on this type is not supported yet (PLAN-wasm.md W4)");
 	if (T(c, t)->flags & TF_ATOMIC)
 		efatal(e, x->loc, "wasm: _Atomic objects are not supported yet (PLAN-wasm.md W4)");
 	wlval(e, x->a, &l, t);
@@ -998,8 +1454,13 @@ static int wexpr1(ecx *e, uint32_t n, bool want)
 				wop(e, k, "neg");
 				return k;
 			}
-			if (k == WT_MEM)
-				break;
+			if (k == WT_MEM) {
+				if (!w16(c, x->ty))
+					break;
+				wexpr(e, x->a, true);
+				w16unary(e, T_MINUS, x->ty);
+				return WT_I64;
+			}
 			wconst(e, k, 0);
 			wexpr(e, x->a, true);
 			wop(e, k, "sub");
@@ -1007,8 +1468,13 @@ static int wexpr1(ecx *e, uint32_t n, bool want)
 				wnarrow(e, prim(TY_INT), x->ty);
 			return k;
 		case T_TILDE:
-			if (k == WT_MEM)
-				break;
+			if (k == WT_MEM) {
+				if (!w16(c, x->ty))
+					break;
+				wexpr(e, x->a, true);
+				w16unary(e, T_TILDE, x->ty);
+				return WT_I64;
+			}
 			wexpr(e, x->a, true);
 			wconst(e, k, -1);
 			wop(e, k, "xor");
