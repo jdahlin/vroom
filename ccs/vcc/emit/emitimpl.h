@@ -222,6 +222,8 @@ typedef struct emitter {
 	bool stats;
 	bool objtext;			/* VCC_OBJ_TEXT: objects through the printer and as_run (checks the object backend) */
 	pthread_mutex_t emu;		/* diagnostics */
+	uint32_t errcall[256];		/* error() call sites already reported (under emu) */
+	uint32_t nerrcall_loc;
 } emitter;
 
 typedef struct val {
@@ -504,6 +506,7 @@ static inline void reg(tbuf *b, int r, int x);
 /* tu.c */
 extern const uint8_t tempregs[NTEMP];
 VPRIV __attribute__((format(printf, 3, 4))) void ediag(ecx *e, uint32_t loc, const char *fmt, ...);
+VPRIV __attribute__((format(printf, 3, 4))) void eerror(ecx *e, uint32_t loc, const char *fmt, ...);
 VPRIV __attribute__((format(printf, 3, 4), noreturn)) void efatal(ecx *e, uint32_t loc, const char *fmt, ...);
 /* type.c */
 VPRIV uint32_t canon_sym(cc *c, uint32_t s);

@@ -517,7 +517,7 @@ int ppd_run(int argc, char **argv, const ppd_env *env)
 	double t0;
 	pp *p;
 	int syntax = 0, layout = 0, ms_anon = 0, short_wchar = 0, tokhash = 0, emit = 0, objmode = 0;
-	int std = 0, strict = 0, wimpl_int = 0, wimpl_fn = 0, gnu89_inline = -1;
+	int std = 0, strict = 0, wimpl_int = 0, wimpl_fn = 0, gnu89_inline = -1, vcc_kernel = 0;
 	char objbuf[1024];
 
 	for (int i = 1; i < argc; i++) {
@@ -555,6 +555,7 @@ int ppd_run(int argc, char **argv, const ppd_env *env)
 		}
 		if (!strcmp(a, "-ansi")) { std = 89; strict = 1; continue; }
 		if (!strcmp(a, "-fgnu89-inline")) { gnu89_inline = 1; continue; }
+		if (!strcmp(a, "-fvcc-kernel")) { vcc_kernel = 1; continue; }
 		if (!strcmp(a, "-fno-gnu89-inline")) { gnu89_inline = 0; continue; }
 		if ((a[1] == 'W' && a[2] && a[3] != ',') || !strcmp(a, "-w")) {
 			/* warning options, in order, for pp_wstate (some are also handled below) */
@@ -600,7 +601,12 @@ int ppd_run(int argc, char **argv, const ppd_env *env)
 			continue;
 		}
 		if ((v = ARG("-I"))) { dirs_i[ni++] = v; continue; }
-		if ((v = ARG("-D"))) { define_arg(&cmdl, v); continue; }
+		if ((v = ARG("-D"))) {
+			if (!strncmp(v, "__KERNEL__", 10) && (!v[10] || v[10] == '='))
+				vcc_kernel = 1;	/* the kernel: its error() calls rely on clang -O2 folding */
+			define_arg(&cmdl, v);
+			continue;
+		}
 		if ((v = ARG("-U"))) { bstr(&cmdl, "#undef "); bstr(&cmdl, v); bstr(&cmdl, "\n"); continue; }
 		if (!strncmp(a, "-fmacro-prefix-map=", 19)) {
 			snprintf(pmapbuf, sizeof(pmapbuf), "%s", a + 19);
@@ -829,7 +835,7 @@ int ppd_run(int argc, char **argv, const ppd_env *env)
 		cc_opts co = { .target = po.target, .unsigned_char = po.unsigned_char, .dump_layouts = layout, .ms_anon = ms_anon, .short_wchar = short_wchar,
 				.std = std, .implicit_int = std == 89 || wimpl_int, .implicit_fn = std == 89 || wimpl_fn,
 				.gnu89_inline = gnu89_inline, .no_builtin = freestanding || nobuiltin, .instrument = instr,
-				.general_regs_only = gregs,
+				.general_regs_only = gregs, .vcc_kernel = vcc_kernel,
 			       .outfd = env->outfd };
 		int fd = -1;
 

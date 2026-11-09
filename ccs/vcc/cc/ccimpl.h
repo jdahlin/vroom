@@ -502,6 +502,7 @@ static inline void attribute_list(cc *c, attrs *a)
 }
 
 /* no attribute at all (padding excluded) */
+/* 11 u32 fields then the 18 flag bytes (attr.c asserts the layout) */
 static inline bool attrs_empty(const attrs *a)
 {
 	const char *p = (const char *)a;
@@ -510,7 +511,7 @@ static inline bool attrs_empty(const attrs *a)
 	memcpy(w, p, sizeof(w));
 	for (int i = 0; i < 7; i++)
 		o |= w[i];
-	return !o && !p[56] && !p[57];
+	return !o && !p[56] && !p[57] && !p[58] && !p[59] && !p[60] && !p[61];
 }
 
 #endif

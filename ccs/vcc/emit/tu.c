@@ -34,8 +34,8 @@ VPRIV void ediag(ecx *e, uint32_t loc, const char *fmt, ...)
 	pthread_mutex_unlock(&e->E->emu);
 }
 
-__attribute__((format(printf, 3, 4), unused))
-static void eerror(ecx *e, uint32_t loc, const char *fmt, ...)
+__attribute__((format(printf, 3, 4)))
+VPRIV void eerror(ecx *e, uint32_t loc, const char *fmt, ...)
 {
 	va_list ap;
 

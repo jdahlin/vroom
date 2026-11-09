@@ -320,7 +320,14 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
   *Validate:* T6 (no LSE opcodes without `+lse`); T1 run under
   `qemu -cpu cortex-a53` (no LSE) for `atomic-*.c`; extend `vcc-ctests.py`
   with a `--cpu` option.
-- [ ] **`error()` calls dropped silently when not folded** [P].
+- [x] **`error()` calls dropped silently when not folded** [P].  (done: every
+  surviving call is clang's error "call to 'f' declared with 'error'
+  attribute: msg", once per call site (emit/call.c); the old drop-and-go-on
+  rule only with `-fvcc-kernel`, which `-D__KERNEL__` implies.  Test
+  `tests/diag/attr_error.c` with the new `diag-mode: -c` marker.  Differs:
+  clang reports errors inside `static inline` functions after their caller's
+  (it emits them later), vcc where they are inlined.  The `warning`
+  attribute is still ignored.)
   `emit.c:4329-4347`.  Outside kernel compat mode, a surviving call to a
   function with `__attribute__((error))` must be a diagnostic (clang -O2
   rejects).  Keep the kernel behaviour behind a flag (`-fvcc-kernel`).
