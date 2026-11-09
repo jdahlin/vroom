@@ -363,6 +363,7 @@ static bool emit_function1(ecx *e, uint32_t s, int nlreg)
 	e->ncases = 0;
 	e->reach = true;
 	e->top = s;
+	e->asmk = 0;
 	e->inline_depth = 0;
 	e->vararg = (ft->flags & TF_VARIADIC) != 0;
 	choose_lregs(e, s, nlreg);

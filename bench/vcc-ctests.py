@@ -9,6 +9,10 @@ Suites (ccs/vcc/tests/, see the README there):
   vcc  our own regression tests (ccs/vcc/tests/vcc): exit 0 (or abort()) and
        print what clang's build prints.  Comments in a test steer the runner:
          /* vcc-flags: -std=c23 ... */   extra flags for both compilers
+         /* vcc-noref: reason */         clang rejects it (a GNU extension): no
+                                         reference, vcc must exit 0 silently
+         /* vcc-threads-same */          -S output must be the same with
+                                         VCC_THREADS=1 and 8 (four builds)
          /* vcc-xfail: TODO item */      known vcc bug: a failure is counted as
                                          xfail, a pass as XPASS (an error: drop
                                          the marker in the commit that fixes it)
@@ -45,7 +49,7 @@ R = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 T = f'{R}/ccs/vcc/tests'
 RT = f'{T}/rt'
 CL = llvm('clang')
-VPP = f'{BUILD}/vpp'
+VPP = os.path.join(os.environ.get('VCC_BIN') or BUILD, 'vpp')
 OBJCOPY = llvm('llvm-objcopy')
 LLD = shutil.which('ld.lld') or llvm('ld.lld')
 QEMU = shutil.which('qemu-system-aarch64') or '/opt/homebrew/bin/qemu-system-aarch64'
@@ -165,6 +169,9 @@ def reference(suite, name, path, flags, rthash, wd):
     except (OSError, ValueError, KeyError):
         pass
     r = {'key': key}
+    if suite == 'vcc' and re.search(r'/\*\s*vcc-noref:', open(path, 'rb').read().decode('latin-1')):
+        r['rc'] = 0; r['out'] = ''
+        return r
     rc, _, err = sh([CL] + BASE + CLFL + flags + ['-c', path, '-o', f'{wd}/ref.o'], cwd=os.path.dirname(path))
     if rc:
         r['skip'] = 'clang-rejects'; r['why'] = first_err(err.decode(errors='replace'))
@@ -229,6 +236,13 @@ def one_(t):
         e = err.decode(errors='replace')
         cat = 'fp' if re.search(r'floating point|long double', e) else 'emit'
         return t, 'fail', cat, first_err(e) if rc != 'timeout' and rc > 0 else f'vpp: signal/timeout {rc}: ' + first_err(e)
+    if suite == 'vcc' and re.search(r'/\*\s*vcc-threads-same\s*\*/', src):
+        outs = set()
+        for k, n in enumerate(['1', '8', '8', '8']):
+            rc, _, err = sh([VPP, '-S'] + vfl + [path, '-o', f'{wd}/vcc{k}.s'], cwd=cwd, env=dict(os.environ, VCC_THREADS=n))
+            outs.add(open(f'{wd}/vcc{k}.s', 'rb').read() if not rc else b'')
+        if len(outs) != 1:
+            return t, 'fail', 'emit', 'assembly differs between VCC_THREADS=1 and 8'
     # an object byte-identical to one that passed before (same runtime, same
     # reference) passes again: no link, no qemu (they are ~90% of the time)
     pk = hashlib.sha1(open(f'{wd}/vcc.o', 'rb').read() + (RTHASH + ref['key']).encode()).hexdigest()

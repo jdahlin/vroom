@@ -340,7 +340,6 @@ static void keep_make(keep *K, cc *c, const emitter *E)
 	K->bytes = reserve(nb + 64);
 	K->nlogs = nl;
 	K->logs = reserve(nl * sizeof(uint32_t) + 64);
-	K->asmno = E->asmno;
 	ne = 0;
 	for (uint32_t i = 0; i < E->nchunk; i++) {
 		const chunk *ch = &E->chunks[i];
@@ -382,7 +381,6 @@ static int emit_tu1(cc *c, const cc_opts *o, bool write_out, uint8_t *mf, bool *
 	E.o = o;
 	E.mf = mf;
 	E.K = K;
-	E.asmno = K ? K->asmno : 0;
 	E.claimed = vmreg_get(&er[0], c->nsym + 64, "emit.claimed");
 	E.extref = vmreg_get(&er[1], c->nsym + 64, "emit.extref");
 	E.sflags = vmreg_get(&er[2], c->nsym + 64, "emit.sflags");

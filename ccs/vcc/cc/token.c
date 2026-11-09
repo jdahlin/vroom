@@ -150,11 +150,115 @@ VPRIV void expect_semi(cc *c, const char *after)
 	report(c, "error", e, NULL, 0, &fx, 1, "expected ';' %s", after);
 }
 
+/* #pragma pack as clang: pack(N), pack(), push[, id][, N], pop[, id][, N],
+   show.  pack[npack-1] is the current value (bytes, 0: default), the entries
+   below are saved ones, packid[i] the label of pack[i] (0: none).  A
+   malformed pragma or a value other than 0/1/2/4/8/16 is ignored whole. */
+static int pack_word(const char **ps, const char *e, const char **w)
+{
+	const char *s = *ps;
+	int n = 0;
+
+	while (s < e && (*s == ' ' || *s == '\t'))
+		s++;
+	*w = s;
+	while (s < e && (((*s | 32) >= 'a' && (*s | 32) <= 'z') || (*s >= '0' && *s <= '9') || *s == '_'))
+		s++, n++;
+	*ps = s;
+	return n;
+}
+
+static void pack_set(cc *c, uint32_t v)
+{
+	if (!c->npack)
+		c->pack[0] = 0, c->packid[0] = 0, c->npack = 1;
+	c->pack[c->npack - 1] = v;
+}
+
+static void pragma_pack(cc *c, const char *s, const char *e)
+{
+	const char *w, *it[3];
+	int n, len[3], ni = 0, push = 0, pop = 0;
+	uint64_t id = 0;
+	long v = -1;
+
+	while (s < e && (*s == ' ' || *s == '\t'))
+		s++;
+	if (s == e || *s++ != '(')
+		return;
+	for (;;) {
+		n = pack_word(&s, e, &w);
+		while (s < e && (*s == ' ' || *s == '\t'))
+			s++;
+		if (n) {
+			if (ni == 3)
+				return;
+			it[ni] = w, len[ni++] = n;
+		}
+		if (s < e && *s == ')')
+			break;
+		if (s == e || *s != ',' || !n)
+			return;
+		s++;
+	}
+	for (int i = 0; i < ni; i++) {
+		if (it[i][0] >= '0' && it[i][0] <= '9') {
+			char *x;
+			if (v >= 0)
+				return;
+			v = strtol(it[i], &x, 0);
+			if (x != it[i] + len[i] || (v && (v > 16 || (v & (v - 1)))))
+				return;
+		} else if (i == 0 && len[i] == 4 && !memcmp(it[i], "push", 4))
+			push = 1;
+		else if (i == 0 && len[i] == 3 && !memcmp(it[i], "pop", 3))
+			pop = 1;
+		else if (i == 0 && len[i] == 4 && !memcmp(it[i], "show", 4)) {
+			if (ni != 1)
+				return;
+			return;
+		} else if ((push || pop) && !id && v < 0) {
+			id = 1469598103934665603ull;
+			for (int k = 0; k < len[i]; k++)
+				id = (id ^ (unsigned char)it[i][k]) * 1099511628211ull;
+			id |= 1;
+		} else
+			return;
+	}
+	if (!push && !pop) {
+		if (ni > 1)
+			return;
+		pack_set(c, v < 0 ? 0 : (uint32_t)v);
+		return;
+	}
+	if (push) {
+		uint32_t cur = c->npack ? c->pack[c->npack - 1] : 0;
+		if (!c->npack)
+			c->pack[0] = 0, c->npack = 1;
+		if (c->npack == 64)
+			return;
+		c->packid[c->npack - 1] = id;
+		c->pack[c->npack] = cur, c->packid[c->npack] = 0;
+		c->npack++;
+	} else if (c->npack > 1) {
+		if (!id)
+			c->npack--;
+		else
+			for (int i = c->npack - 2; i >= 0; i--)
+				if (c->packid[i] == id) {
+					c->npack = i + 1;
+					break;
+				}
+		c->packid[c->npack - 1] = 0;
+	}
+	if (v >= 0)
+		pack_set(c, (uint32_t)v);
+}
+
 /* #pragma: pack and weak change semantics; the rest is ignored here */
 static void pragma(cc *c, const ptok *t)
 {
 	const char *s = t->s, *e = t->s + t->len;
-	int v = 0;
 
 	if ((size_t)(e - s) < 11 || memcmp(s, "pragma", 6))
 		return;
@@ -167,39 +271,5 @@ static void pragma(cc *c, const ptok *t)
 	}
 	if ((size_t)(e - s) < 4 || memcmp(s, "pack", 4))
 		return;
-	s += 4;
-	while (s < e && *s != '(')
-		s++;
-	if (s == e)
-		return;
-	s++;
-	while (s < e && *s == ' ')
-		s++;
-	if (*s == ')') {
-		c->pack[c->npack ? c->npack - 1 : 0] = 0;
-		if (!c->npack)
-			c->npack = 1;
-		return;
-	}
-	if (!memcmp(s, "push", 4)) {
-		s += 4;
-		while (s < e && (*s == ' ' || *s == ','))
-			s++;
-		v = c->npack ? (int)c->pack[c->npack - 1] : 0;
-		if (*s >= '0' && *s <= '9')
-			v = atoi(s);
-		if (c->npack < 63)
-			c->pack[c->npack++] = (uint32_t)v;
-		return;
-	}
-	if (!memcmp(s, "pop", 3)) {
-		if (c->npack)
-			c->npack--;
-		return;
-	}
-	if (*s >= '0' && *s <= '9') {
-		if (!c->npack)
-			c->npack = 1;
-		c->pack[c->npack - 1] = (uint32_t)atoi(s);
-	}
+	pragma_pack(c, s + 4, e);
 }

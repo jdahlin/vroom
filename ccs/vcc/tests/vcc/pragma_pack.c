@@ -1,7 +1,7 @@
 /* #pragma pack with identifiers and values (TODO.md tier 1, "#pragma pack
    (push, ident, N)").  Layout checked against clang at run time so every
    case reports, not only the first static assertion. */
-/* vcc-xfail: #pragma pack(push, ident, N) ignores N; pop, ident pops one */
+
 #include <stddef.h>
 #include <stdio.h>
 

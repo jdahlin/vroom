@@ -74,7 +74,7 @@ VPRIV void gen_asm(ecx *e, uint32_t n)
 	spill sp = { 0 };
 	tbuf *rb = &e->raw;
 	size_t start;
-	uint32_t uniq;
+	uint64_t uniq;
 	int nvreg = 0;
 
 	if (!e->reach)
@@ -304,7 +304,10 @@ VPRIV void gen_asm(ecx *e, uint32_t n)
 	}
 	/* the template */
 	start = rb->n;
-	uniq = atomic_fetch_add(&e->E->asmno, 1);
+	/* %=: unique in the object and the same with any thread count: the
+	   function's symbol and the place among its emitted asms that use %=
+	   (inlined copies counted) */
+	uniq = UINT64_MAX;	/* taken at the first %= */
 	if (basic) {
 		tb_s(rb, tp);
 	} else {
@@ -318,7 +321,15 @@ VPRIV void gen_asm(ecx *e, uint32_t n)
 			}
 			p++;
 			if (*p == '%') { tb_c(rb, '%'); continue; }
-			if (*p == '=') { tb_u(rb, uniq); continue; }
+			if (*p == '=') {
+				if (uniq == UINT64_MAX) {
+					if (e->asmk >= 1024)
+						efatal(e, x->loc, "more than 1024 inline asm statements with %%= in one function");
+					uniq = (uint64_t)e->top * 1024 + e->asmk++;
+				}
+				tb_u(rb, uniq);
+				continue;
+			}
 			if (*p == '{' || *p == '|' || *p == '}') { tb_c(rb, *p); continue; }
 			if (*p && strchr("wxcalHnPQRsqdbh", *p) && (p[1] == '[' || (p[1] >= '0' && p[1] <= '9')))
 				mod = *p++;

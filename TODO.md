@@ -83,7 +83,7 @@ Existing gates that every change must keep green: `vcc-diff.py cmp`
   what the kernel uses (bit-fields, packed structs, `volatile`, structs as
   arguments and returns).  Acceptance: 24 h per generator without a
   mismatch, on both targets.
-- [ ] **T11 driver tests.**  `bench/vcc-driver.py` with a table of
+- [ ] **T11 driver tests.** (started: `bench/vcc-driver.py`, -O predefines.)  `bench/vcc-driver.py` with a table of
   command lines → expected (exit status, output files, stderr regex),
   including flags that must be rejected.  Uses `vpp` directly and through a
   private vccd.
@@ -131,6 +131,17 @@ Existing gates that every change must keep green: `vcc-diff.py cmp`
   sed, gawk, bash, openssl, curl, libxml2, glib), the clang build as
   reference; (3) the whole archive only if (1)-(2) still find bugs at a
   rate that justifies it.
+- [ ] **T18 runtime gaps hide torture tests.**  34 gcc/tcc tests are
+  `ref-fail` (`vcc-ctests.py --show ref-fail`): ~15 only because
+  `tests/rt` lacks `pow`, `tanh`, `__divsc3`, `__fixsfti`, `tmpnam`,
+  `atomic_signal_fence`, or clang leaves `__builtin_exit`/`__builtin_puts`/
+  `__builtin_mul_overflow_p` as calls.  Add them to the runtime (or a
+  per-test shim) so the tests run.  *Validate:* `ref-fail` count drops,
+  the newly run tests pass or become xfail with a TODO item.
+- [ ] **T19 ASan inside our arenas.**  Poison the mmap'ed arenas behind
+  `used` (`ASAN_POISON_MEMORY_REGION` under `__has_feature`), so
+  over-reads there are reported.  *Validate:* an injected over-read in a
+  test build is reported; ASan runs of the gates stay clean.
 
 Order once Tier 1 is clear: T10 (finds most wrong code per hour), T2's
 generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
@@ -255,12 +266,24 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
   target.  Bindings by the linker in `tests/abi/pragma_weak` (T6 does not
   exist), run-time zero in T1 `pragma_weak.c`, warnings in
   `tests/diag/pragma_weak.c`.)
-- [ ] **`#pragma pack(push, ident, N)` ignores N; `pop, ident` pops one** [P].
+- [x] **`#pragma pack(push, ident, N)` ignores N; `pop, ident` pops one** [P].
+  (done: `pragma_pack` in cc/token.c with clang's rules: labels, `pop, id`
+  to the label (a missing one pops nothing), `pop, N`, `pack(0)` = default,
+  invalid values and malformed pragmas ignored whole; tests
+  `tests/vcc/pragma_pack.c`, `pragma_pack_pop.c`.  clang's
+  -Wignored-pragmas warnings are not given.)
   `cc.c:919-927`.
   *Validate:* layout `_Static_assert` cases against clang (all forms:
   `push`, `push,N`, `push,id`, `push,id,N`, `pop`, `pop,id`, `pop,N`, `pack()`,
   `show` ignored).
-- [ ] **Designated-initializer overrides differ from clang** [P].
+- [x] **Designated-initializer overrides differ from clang** [P].
+  (done, cc/init.c: an array element or range a later designator covers is
+  dropped, not evaluated; a designator into a sub-object initialized by one
+  value keeps the rest of it: a string becomes one element per character,
+  a struct/array value one member access / element per part, a union value
+  is read again through the member the designator picks.  Left, a clean
+  error: the overridden value has side effects (clang evaluates it once).
+  Tests `tests/vcc/desig_override.c`, `desig_override2.c`.)
   `.s = "ab", .s[3] = 'z'` loses "ab"; `.i = iv, .i.y = 99` zeroes `i.x`;
   `[0] = side(), [0] = side()` evaluates both.
   *Validate:* T1 `desig_override.c`, static and automatic variants, with
@@ -275,12 +298,18 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
   (object bytes / diagnostics) must equal a fresh process with B.  Add a
   static check: a unit test that toggles every field of the options struct
   and asserts the signature changes.
-- [ ] **Default `-O2` when no `-O` given** [P].  `ppdriver.c:426`.  Default
+- [x] **Default `-O2` when no `-O` given** [P].  (done: default -O0; `-Os -O2`
+  no longer keeps `__OPTIMIZE_SIZE__`; `bench/vcc-driver.py`, the start of T11,
+  checks the -O predefines against clang on both targets.)  `ppdriver.c:426`.  Default
   `opt = 0` (`__NO_INLINE__`, no `__OPTIMIZE__`).
   *Validate:* `vcc-diff.py` predefine check: `vpp -dM -E` (once `-dM`
   exists) vs `clang -dM -E` for `''`, `-O0`, `-O1`, `-O2`, `-Os`, `-Oz`;
   until then T11 with `#ifdef __OPTIMIZE__` probes.
-- [ ] **Inline asm `%=` depends on thread scheduling** [R].
+- [x] **Inline asm `%=` depends on thread scheduling** [R].  (done: the
+  function's symbol × 1024 + its n-th emitted asm that uses `%=`
+  (emit/asm.c); `tests/vcc/asm_uniq.c` with the new `vcc-threads-same`
+  marker (`-S` equal with 1 and 8 threads; failed before) and `vcc-noref`
+  (clang rejects `%=` on AArch64).)
   `atomic_fetch_add(&E->asmno)` `emit.c:8010`.  Number per function
   (function index × asm index within it).
   *Validate:* T6/`vcc-obj.py`: compile a TU with several `%=` asms in many
@@ -446,6 +475,15 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
   (generate a list, try each).
   *Validate:* T1 per builtin; `bench/vcc-builtins.py` that compiles a
   generated use of each clang builtin and reports unknowns.
+  (Partly: `__builtin_clzg`/`ctzg`/`popcountg`, `__builtin_ldexp*`,
+  `scalbn`, `trunc*`, `round*`, `floorf`/`ceilf`, `fmaxf`/`fminf` added for
+  `make -C ccs self-check`; the generic forms reject a fallback whose
+  argument has side effects.)
+  `__has_builtin` answers 0 for names absent from the kernel/SDK
+  (ppdata.inc was generated from those only; seen in PostgreSQL): generate
+  it from the full list.
+- [ ] **SVE in the front end**: `arm_sve.h` types, `target("+sve")`.
+  *Validate:* T1 under `qemu -cpu max`, layout checks for the types.
 - [ ] **`ext_vector_type` silently dropped; unknown attributes no warning** [P].
   `attr_names` `cc.c:5052`.
   *Validate:* layout `_Static_assert(sizeof(float4)==16)`; T4/diag for
@@ -699,8 +737,12 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
 - [ ] **`"abc"[1]` rejected as a static initializer**; vector types print as
   `''` in messages (`tyname`).  *Validate:* T1; diag test.
 - [ ] **Diagnostic details**: columns on `##` and invalid directives,
-  `#line` file names ignored, nested macro notes (one level today).
+  `#line` file names ignored, nested macro notes (one level today), the
+  "expanded from macro" note only for undeclared identifiers.
   *Validate:* diag tests.
 - [ ] **Longer fuzz runs** and pp-diff over the whole fuzz corpus (PLAN-fas2
   "Status fuzzning").  *Validate:* runs recorded in the plan, findings in
   `regress/`.
+- [ ] **PostgreSQL completeness**: TAP tests (`-Dtap_tests=enabled`) not
+  run; links still by ld64.  *Validate:* `bench/pg/build.sh` with TAP,
+  same pass set as clang.

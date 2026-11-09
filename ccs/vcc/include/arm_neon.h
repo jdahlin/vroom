@@ -136,5 +136,26 @@ typedef struct uint8x16x4_t { uint8x16_t val[4]; } uint8x16x4_t;
 #define vaddvq_u16(a) ({ uint16x8_t __r, __a = (a); asm("addv %h0, %1.8h" : "=w"(__r) : "w"(__a)); (uint16_t)__r[0]; })
 #define vaddv_u8(a) ({ uint8x8_t __r, __a = (a); asm("addv %b0, %1.8b" : "=w"(__r) : "w"(__a)); (uint8_t)__r[0]; })
 #define vaddvq_u64(a) ({ uint64x2_t __r, __a = (a); asm("addp %d0, %1.2d" : "=w"(__r) : "w"(__a)); (uint64_t)__r[0]; })
+#define vqtbx4q_u8(d, t, i) ({ uint8x16_t __r = (d), __i = (i); uint8x16x4_t __t = (t); \
+	const unsigned char *__b = (const unsigned char *)&__t; \
+	for (int __k = 0; __k < 16; __k++) if (__i[__k] < 64) __r[__k] = __b[__i[__k]]; __r; })
+
+/* used by vcc's own linker (ldhash.c: BLAKE3 four lanes at a time) */
+#define vaddq_u32(a, b) ((uint32x4_t)(a) + (uint32x4_t)(b))
+#define veorq_u32(a, b) ((uint32x4_t)(a) ^ (uint32x4_t)(b))
+#define vst1q_u32(p, v) __vcc_st(uint32x4_t, (unsigned int *)(p), v)
+#define vreinterpretq_u16_u32(x) ((uint16x8_t)(x))
+#define vreinterpretq_u32_u16(x) ((uint32x4_t)(x))
+#define vreinterpretq_u32_u64(x) ((uint32x4_t)(x))
+#define vreinterpretq_u32_u8(x) ((uint32x4_t)(x))
+#define vreinterpretq_u64_u32(x) ((uint64x2_t)(x))
+#define vreinterpretq_u8_u32(x) ((uint8x16_t)(x))
+#define vrev32q_u16(a) ({ uint16x8_t __r, __a = (a); asm("rev32 %0.8h, %1.8h" : "=w"(__r) : "w"(__a)); __r; })
+#define vshlq_n_u32(a, n) ({ uint32x4_t __r, __a = (a); asm("shl %0.4s, %1.4s, %2" : "=w"(__r) : "w"(__a), "i"(n)); __r; })
+#define vsriq_n_u32(a, b, n) ({ uint32x4_t __r = (a), __b = (b); asm("sri %0.4s, %1.4s, %2" : "+w"(__r) : "w"(__b), "i"(n)); __r; })
+#define vtrn1q_u32(a, b) __VCC_V3(uint32x4_t, "trn1", "4s", a, b)
+#define vtrn2q_u32(a, b) __VCC_V3(uint32x4_t, "trn2", "4s", a, b)
+#define vtrn1q_u64(a, b) __VCC_V3(uint64x2_t, "trn1", "2d", a, b)
+#define vtrn2q_u64(a, b) __VCC_V3(uint64x2_t, "trn2", "2d", a, b)
 
 #endif

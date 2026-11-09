@@ -161,6 +161,7 @@ struct cc {
 	int in_struct;		/* parsing a struct/union body */
 	bool has_pend;
 	uint32_t pack[64];	/* #pragma pack stack (bytes, 0: none) */
+	uint64_t packid[64];	/* labels (token.c pragma_pack) */
 	int npack;
 	/* #pragma weak (decl.c): waiting for key's declaration (alias: 0, or the weak alias of key) */
 	struct pweak { uint32_t key, alias, loc, sym; } *pweak;
@@ -202,7 +203,7 @@ enum {
 	BI_VA_START, BI_VA_END, BI_VA_COPY, BI_VA_ARG,
 	BI_CLZ, BI_CLZL, BI_CLZLL, BI_CTZ, BI_CTZL, BI_CTZLL, BI_FFS, BI_FFSL, BI_FFSLL,
 	BI_POPCOUNT, BI_POPCOUNTL, BI_POPCOUNTLL, BI_PARITY, BI_PARITYL, BI_PARITYLL,
-	BI_CLRSB, BI_CLRSBL, BI_CLRSBLL,
+	BI_CLRSB, BI_CLRSBL, BI_CLRSBLL, BI_CLZG, BI_CTZG, BI_POPCOUNTG,
 	BI_BSWAP16, BI_BSWAP32, BI_BSWAP64, BI_BITREVERSE8, BI_BITREVERSE16, BI_BITREVERSE32, BI_BITREVERSE64,
 	BI_UNREACHABLE, BI_TRAP, BI_DEBUGTRAP, BI_RETURN_ADDRESS, BI_FRAME_ADDRESS, BI_EXTRACT_RETURN_ADDR,
 	BI_ADD_OVERFLOW, BI_SUB_OVERFLOW, BI_MUL_OVERFLOW, BI_ADDC, BI_SUBC,
