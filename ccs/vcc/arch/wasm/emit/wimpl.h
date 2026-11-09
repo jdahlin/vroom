@@ -298,7 +298,17 @@ static inline void wbr(ecx *e, const char *op, int target)
 
 /* the C ABI (clang's WebAssemblyABIInfo): how a value is passed */
 enum { WA_IGNORE, WA_SCALAR, WA_IND, WA_PAIR };
-typedef struct wabi { uint8_t k, st; qty ft; } wabi;	/* WA_SCALAR: wasm type st, loaded as C type ft */
+/*
+ * WA_SCALAR: wasm type st, loaded as C type ft; WA_PAIR: n parts of wasm type
+ * st (an __int128 or long double: two i64; a vector: its lanes), ft the type
+ */
+typedef struct wabi { uint8_t k, st; qty ft; uint32_t n; } wabi;
+
+/* the wasm values an argument of class a takes */
+static inline uint32_t wparts(wabi a) { return a.k == WA_PAIR ? a.n : a.k == WA_IGNORE ? 0 : 1; }
+
+/* a WA_PAIR part's C type */
+static inline qty wpart_ty(cc *c, wabi a) { return is_vec(c, a.ft) ? T(c, a.ft)->base : prim(TY_ULONG); }
 
 /* wasm.c */
 VPRIV bool wis_main(cc *c, uint32_t s);

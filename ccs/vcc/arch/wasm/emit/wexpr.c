@@ -41,6 +41,28 @@ VPRIV void wconv(ecx *e, qty from, qty to)
 	if (fk == WT_MEM || tk == WT_MEM) {
 		if (fk == tk && tsize(c, from) == tsize(c, to) && is_flt(c, from) == is_flt(c, to))
 			return;
+		if ((is_vec(c, to) || is_vec(c, from)) && tsize(c, from) == tsize(c, to)) {
+			/* the same bits */
+			if (fk == WT_MEM && tk == WT_MEM)
+				return;
+			if (fk == WT_MEM) {
+				wlv l = { .k = WL_MEM };
+
+				wload(e, &l, to);
+			} else {
+				uint64_t sl = wslot(e, tsize(c, to), 16);
+				uint32_t v = wtmp(e, fk);
+				wlv l = { .k = WL_MEM };
+
+				wset(e, v);
+				wslot_addr(e, sl);
+				wget(e, v);
+				wstore(e, &l, from);
+				wslot_addr(e, sl);
+				wfree(e, v);
+			}
+			return;
+		}
 		if ((w16(c, from) || fk != WT_MEM) && (w16(c, to) || tk != WT_MEM)) {
 			w16conv(e, from, to);
 			return;
@@ -855,6 +877,82 @@ static int w16incdec(ecx *e, uint32_t n, bool want)
 	return want ? WT_I64 : WT_NONE;
 }
 
+/* ---------------- GNU vectors ---------------- */
+
+static void warith(ecx *e, int op, qty ty, qty rty);
+static void wcompare(ecx *e, int op, qty t);
+static bool wis_cmp(int op);
+
+/*
+ * Lane by lane (no simd128, as clang without it): stack [a b] (b a vector,
+ * a scalar against every lane, or nothing: unary - and ~) -> the address of
+ * a new vector of type rt.  Comparisons give -1 / 0 lanes.
+ */
+static void wvlanes(ecx *e, int op, qty at, qty bt, qty rt, bool unary)
+{
+	cc *c = e->c;
+	bool av = is_vec(c, at), bv = !unary && is_vec(c, bt);
+	qty vt = av ? at : bt, et = T(c, vt)->base, rte = T(c, rt)->base;
+	qty yt = unary ? et : bv ? T(c, bt)->base : bt, xt = av ? et : at;
+	uint32_t n = (uint32_t)(tsize(c, vt) / tsize(c, et));
+	uint32_t ta, tb = UINT32_MAX;
+	uint64_t sl = wslot(e, tsize(c, rt), 16);
+	int k = wty(c, et);
+	bool shift = op == T_LESSLESS || op == T_GREATERGREATER;
+
+	if (!unary) {
+		tb = wtmp(e, wty(c, bt));
+		wset(e, tb);
+	}
+	ta = wtmp(e, av ? WT_I64 : wty(c, at));
+	wset(e, ta);
+	for (uint32_t i = 0; i < n; i++) {
+		wlv la = { .k = WL_MEM, .off = i * tsize(c, et) }, lr = { .k = WL_MEM, .off = i * tsize(c, rte) };
+
+		wslot_addr(e, sl);
+		if (unary && op == T_MINUS && k != WT_F32 && k != WT_F64)
+			wconst(e, k, 0);
+		wget(e, ta);
+		if (av)
+			wload(e, &la, et);
+		else if (QUNQ(xt) != QUNQ(et))
+			wconv(e, xt, et);
+		if (unary) {
+			if (op == T_MINUS)
+				wop(e, k, k == WT_F32 || k == WT_F64 ? "neg" : "sub");
+			else {
+				wconst(e, k, -1);
+				wop(e, k, "xor");
+			}
+		} else {
+			if (bv) {
+				wlv lb = { .k = WL_MEM, .off = i * tsize(c, yt) };
+
+				wget(e, tb);
+				wload(e, &lb, yt);
+			} else {
+				wget(e, tb);
+				if (!shift && QUNQ(yt) != QUNQ(et))
+					wconv(e, yt, et);
+			}
+			if (wis_cmp(op)) {
+				wcompare(e, op, et);
+				/* 0 / 1 -> 0 / all ones */
+				wconst(e, WT_I32, -1);
+				wi(e, "i32.mul");
+				wconv(e, prim(TY_INT), rte);
+			} else {
+				warith(e, op, et, shift ? yt : 0);
+			}
+		}
+		wstore(e, &lr, rte);
+	}
+	wfree(e, ta);
+	if (tb != UINT32_MAX)
+		wfree(e, tb);
+	wslot_addr(e, sl);
+}
+
 /* ---------------- operators ---------------- */
 
 static bool wis_cmp(int op)
@@ -942,8 +1040,12 @@ static int wbinary(ecx *e, uint32_t n)
 
 	if (unlikely(vstack_low()))
 		efatal(e, x->loc, "expression nested too deeply");
-	if (is_vec(c, ty) || is_vec(c, lt))
-		efatal(e, x->loc, "wasm: vector arithmetic is not supported yet (PLAN-wasm.md W4)");
+	if (is_vec(c, ty) || is_vec(c, lt)) {
+		wexpr(e, x->a, true);
+		wexpr(e, x->b, true);
+		wvlanes(e, op, lt, rt, ty, false);
+		return WT_I64;
+	}
 	if (is_ptr(c, ty) && (op == T_PLUS || op == T_MINUS)) {
 		bool lp = is_ptr(c, lt);
 		uint64_t es = welem_size(e, lp ? lt : rt);
@@ -1103,8 +1205,21 @@ static int wassign(ecx *e, uint32_t n, bool want)
 	int k = wty(c, lt);
 	wlv l;
 
-	if (is_vec(c, lt))
-		efatal(e, x->loc, "wasm: vector assignment is not supported yet (PLAN-wasm.md W4)");
+	if (is_vec(c, lt) && x->aux) {
+		/* v op= w */
+		uint32_t ta = wtmp(e, WT_I64);
+
+		wlval(e, x->a, &l, lt);
+		wtee(e, ta);
+		wget(e, ta);
+		wexpr(e, x->b, true);
+		wvlanes(e, x->aux, lt, N(x->b)->ty, lt, false);
+		wcopy(e, tsize(c, lt));
+		if (want)
+			wget(e, ta);
+		wfree(e, ta);
+		return want ? WT_I64 : WT_NONE;
+	}
 	if (T(c, lt)->flags & TF_ATOMIC)
 		efatal(e, x->loc, "wasm: _Atomic objects are not supported yet (PLAN-wasm.md W4)");
 	if (!x->aux) {
@@ -1429,9 +1544,18 @@ static int wexpr1(ecx *e, uint32_t n, bool want)
 			wslot_addr(e, sl);
 			return WT_I64;
 		}
-		case CK_VBITS:
 		case CK_VADDR:
-			efatal(e, x->loc, "wasm: vectors are not supported yet (PLAN-wasm.md W4)");
+			/* a vector value is already the address of its first lane */
+			wexpr(e, x->a, true);
+			return WT_I64;
+		case CK_VBITS:
+			wexpr(e, x->a, true);
+			if (k != WT_MEM) {
+				wlv l = { .k = WL_MEM };
+
+				wload(e, &l, x->ty);
+			}
+			return k;
 		default: {
 			int64_t v;
 
@@ -1455,10 +1579,13 @@ static int wexpr1(ecx *e, uint32_t n, bool want)
 				return k;
 			}
 			if (k == WT_MEM) {
-				if (!w16(c, x->ty))
+				if (!is_vec(c, x->ty) && !w16(c, x->ty))
 					break;
 				wexpr(e, x->a, true);
-				w16unary(e, T_MINUS, x->ty);
+				if (is_vec(c, x->ty))
+					wvlanes(e, T_MINUS, x->ty, 0, x->ty, true);
+				else
+					w16unary(e, T_MINUS, x->ty);
 				return WT_I64;
 			}
 			wconst(e, k, 0);
@@ -1469,10 +1596,13 @@ static int wexpr1(ecx *e, uint32_t n, bool want)
 			return k;
 		case T_TILDE:
 			if (k == WT_MEM) {
-				if (!w16(c, x->ty))
+				if (!is_vec(c, x->ty) && !w16(c, x->ty))
 					break;
 				wexpr(e, x->a, true);
-				w16unary(e, T_TILDE, x->ty);
+				if (is_vec(c, x->ty))
+					wvlanes(e, T_TILDE, x->ty, 0, x->ty, true);
+				else
+					w16unary(e, T_TILDE, x->ty);
 				return WT_I64;
 			}
 			wexpr(e, x->a, true);

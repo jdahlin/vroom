@@ -168,12 +168,18 @@ static void warg(ecx *e, uint32_t n, qty t, wabi a)
 		return;
 	case WA_PAIR: {
 		uint32_t ta = wtmp(e, WT_I64);
+		qty pt = wpart_ty(c, a);
+		uint64_t es = tsize(c, pt);
 
 		wexpr(e, n, true);
-		wtee(e, ta);
-		wiu(e, "i64.load", 0);
-		wget(e, ta);
-		wiu(e, "i64.load", 8);
+		wset(e, ta);
+		for (uint32_t j = 0; j < a.n; j++) {
+			wlv l = { .k = WL_MEM, .off = j * es };
+
+			wget(e, ta);
+			wload(e, &l, pt);
+			wretype(e, wty(c, pt), a.st, is_signed(c, pt));
+		}
 		wfree(e, ta);
 		return;
 	}
@@ -225,7 +231,7 @@ VPRIV int wcall(ecx *e, uint32_t n, bool want)
 			lib = true;
 			va = lg.va;
 			nfix = lg.np;
-			r = (wabi){ lg.r == WT_NONE ? WA_IGNORE : WA_SCALAR, lg.r, f->base };
+			r = (wabi){ lg.r == WT_NONE ? WA_IGNORE : WA_SCALAR, lg.r, f->base, 0 };
 		}
 	}
 
@@ -268,7 +274,7 @@ VPRIV int wcall(ecx *e, uint32_t n, bool want)
 				vo = (vo + al - 1) & ~(uint64_t)(al - 1);
 				wslot_addr(e, vbuf + vo);
 				if (ind) {
-					warg(e, an, at, (wabi){ WA_IND, WT_I64, at });
+					warg(e, an, at, (wabi){ WA_IND, WT_I64, at, 0 });
 					wiu(e, "i64.store", 0);
 				} else {
 					wexpr(e, an, true);
@@ -308,7 +314,7 @@ VPRIV int wcall(ecx *e, uint32_t n, bool want)
 		for (uint32_t i = x->c; i < bd->aux; i++) {
 			wabi pa = wclassify(c, wpromote(c, c->syms[c->lists[bd->a + i]].ty));
 
-			for (int j = 0; j < (pa.k == WA_PAIR ? 2 : pa.k == WA_IGNORE ? 0 : 1); j++) {
+			for (uint32_t j = 0; j < wparts(pa); j++) {
 				if (pa.st == WT_F32 || pa.st == WT_F64)
 					wfconst(e, pa.st, 0);
 				else

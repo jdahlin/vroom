@@ -100,25 +100,31 @@ VPRIV wabi wclassify(cc *c, qty t)
 	int k = wty(c, t);
 
 	if (k != WT_MEM)
-		return (wabi){ WA_SCALAR, (uint8_t)k, t };
+		return (wabi){ WA_SCALAR, (uint8_t)k, t, 0 };
 	if (is_record(c, t)) {
 		qty s;
 
 		if (tsize(c, t) == 0)
-			return (wabi){ WA_IGNORE, 0, 0 };
+			return (wabi){ WA_IGNORE, 0, 0, 0 };
 		s = wsingle(c, t);
 		if (s && !is_record(c, s) && !is_vec(c, s)) {
 			k = wty(c, s);
 			if (k != WT_MEM)
-				return (wabi){ WA_SCALAR, (uint8_t)k, s };
+				return (wabi){ WA_SCALAR, (uint8_t)k, s, 0 };
 			if (tsize(c, s) == 16 && !is_array(c, s))
-				return (wabi){ WA_PAIR, WT_I64, s };
+				return (wabi){ WA_PAIR, WT_I64, s, 2 };
 		}
-		return (wabi){ WA_IND, WT_I64, t };
+		return (wabi){ WA_IND, WT_I64, t, 0 };
 	}
 	if (tsize(c, t) == 16 && (is_integer(c, t) || is_flt(c, t)))
-		return (wabi){ WA_PAIR, WT_I64, t };
-	return (wabi){ WA_IND, WT_I64, t };
+		return (wabi){ WA_PAIR, WT_I64, t, 2 };
+	if (is_vec(c, t)) {
+		/* lane by lane (no simd128), as clang */
+		qty b = T(c, t)->base;
+
+		return (wabi){ WA_PAIR, (uint8_t)wrep(wty(c, b)), t, (uint32_t)(tsize(c, t) / tsize(c, b)) };
+	}
+	return (wabi){ WA_IND, WT_I64, t, 0 };
 }
 
 VPRIV wabi wclassify_ret(cc *c, qty t)
@@ -126,7 +132,7 @@ VPRIV wabi wclassify_ret(cc *c, qty t)
 	wabi a;
 
 	if (is_void(c, t))
-		return (wabi){ WA_IGNORE, 0, 0 };
+		return (wabi){ WA_IGNORE, 0, 0, 0 };
 	a = wclassify(c, t);
 	if (a.k == WA_PAIR)
 		a.k = WA_IND;	/* an i128 result: through a pointer, as LLVM demotes it */
@@ -149,7 +155,7 @@ static void wsig_param(cc *c, tbuf *b, qty t, bool *first)
 
 	if (a.k == WA_IGNORE)
 		return;
-	for (int i = 0; i < (a.k == WA_PAIR ? 2 : 1); i++) {
+	for (uint32_t i = 0; i < wparts(a); i++) {
 		if (!*first)
 			tb_s(b, ", ");
 		*first = false;
@@ -331,7 +337,7 @@ static void wparams(ecx *e, uint32_t s, uint32_t *np)
 		qty pt = (ft->flags & TF_NOPROTO) ? wpromote(c, c->syms[p].ty) : c->syms[p].ty;
 		wabi a = wclassify(c, pt);
 
-		for (int j = 0; j < (a.k == WA_PAIR ? 2 : a.k == WA_IGNORE ? 0 : 1); j++)
+		for (uint32_t j = 0; j < wparts(a); j++)
 			W->lt[idx++] = a.st;
 	}
 	if (ft->flags & TF_VARIADIC) {
@@ -377,12 +383,16 @@ static void wparams(ecx *e, uint32_t s, uint32_t *np)
 		b->k = WB_FRAME;
 		b->off = wslot(e, tsize(c, y->ty), sym_align(c, p));
 		if (a.k == WA_PAIR) {
-			wslot_addr(e, b->off);
-			wget(e, idx++);
-			wiu(e, "i64.store", 0);
-			wslot_addr(e, b->off);
-			wget(e, idx++);
-			wiu(e, "i64.store", 8);
+			qty pt1 = wpart_ty(c, a);
+			uint64_t es = tsize(c, pt1);
+
+			for (uint32_t j = 0; j < a.n; j++) {
+				wlv l = { .k = WL_MEM, .off = j * es };
+
+				wslot_addr(e, b->off);
+				wget(e, idx++);
+				wstore(e, &l, pt1);
+			}
 			continue;
 		}
 		{
