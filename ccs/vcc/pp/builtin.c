@@ -1,5 +1,6 @@
 /* vcc preprocessor: builtin macros and the __has_* queries */
 #include "ppimpl.h"
+#include <sys/stat.h>
 #include "../ppdata.inc"
 
 /* ---------------- builtin macros ---------------- */
@@ -236,6 +237,16 @@ VPRIV int builtin(pp *p, const pmacro *m, ptok *t)
 
 		HC_BAD(p);
 		struct tm tm;
+		struct stat st;
+
+		/* clang: __TIMESTAMP__ is the current file's mtime */
+		if (m->builtin == B_TIMESTAMP && !p->o->has_epoch && fc) {
+			if (stat(p->fe[fc->fe].f->path, &st) != 0) {
+				mkstr(p, t, "??? ??? ?? ??:??:?? ????", 24);
+				break;
+			}
+			now = st.st_mtime;
+		}
 
 		if (p->o->has_epoch)	/* reproducible builds: UTC, as clang */
 			gmtime_r(&now, &tm);

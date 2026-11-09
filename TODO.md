@@ -580,8 +580,8 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
   fuzz-pp, are not filtered.)
 - [ ] **Trigraphs** under strict `-std=c89/c99/c11/c17` or `-trigraphs` [P].
   *Validate:* pp-diff fixtures with each `-std`.
-- [ ] **`SOURCE_DATE_EPOCH`; `__TIMESTAMP__` from file mtime** [P].  (SOURCE_DATE_EPOCH
-  done; __TIMESTAMP__ is still the current time without it.)
+- [x] **`SOURCE_DATE_EPOCH`; `__TIMESTAMP__` from file mtime** [P].  (Both done:
+  __TIMESTAMP__ is the current file's mtime, `??? ...` when stat fails, as clang.)
   `pp.c:3168-3178`.  *Validate:* T11 (fixed epoch → exact strings).
 - [ ] **`\U` outside the BMP printed unconverted in `-E`** [P].
   *Validate:* pp-diff fixture.
