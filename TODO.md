@@ -625,11 +625,15 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
   *Validate:* T4.
 - [ ] **`#embed` / `__has_embed`** [P].  *Validate:* pp-diff fixtures plus
   T1 (`unsigned char d[] = { #embed "bin" };` checksums).
-- [ ] **Output modes ignored**: `-C`, `-CC`,
-  `-traditional-cpp` (reject); line markers without `-P`; text identical to
-  clang's spacing.
-  *Validate:* `bench/vcc-diff.py` new mode `text` comparing bytes (not
-  tokens) for `-E` with and without `-P`.  (`-M`/`-MM` done: see Depfiles;
+- [ ] **Output modes ignored**: `-C`, `-CC` (kbuild's `cpp_lds_S` uses `-P -C`:
+  vdso.lds), `-traditional-cpp` (reject); line markers without `-P`.
+  *Validate:* `bench/vcc-diff.py text` (bytes, not tokens) for `-E` with and
+  without `-P`.  (`-E -P` text done: clang's spacing (leading space,
+  AvoidConcat), indentation to the expansion column, MoveToLine's blank lines
+  and file-change newlines, `#line` as a file change, assembler `#` lines
+  re-spaced as tokens; a header guard counts once the file is complete, as for
+  `-H`.  `bench/vcc-diff.py text` 911/912 (vdso.lds: `-C`),
+  `ccs/fuzz/pp-diff.py --text` on regress/pp and the seed corpus.)  (`-M`/`-MM` done: see Depfiles;
   `-H` done: `bench/vcc-diff.py hdr` 912/912, header cache off under `-H`;
   `-dD` done: `bench/vcc-diff.py dd` 910/912, predefined macros in clang's
   order from `predef_order_*` (gen-ppdata-order.py); the two left are the

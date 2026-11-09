@@ -136,6 +136,7 @@ typedef struct ctx {
 	uint8_t barrier;	/* yields T_EOF when exhausted instead of popping */
 	uint8_t first;		/* 0x80 | SOL/SPACE for the first token (macro contexts) */
 	uint8_t offloc;		/* C_VTOK: loc = loc + offset (a directive line) */
+	uint8_t trail;		/* C_PTOK: ended in an empty argument after a space: the next token gets one */
 	uint32_t i, n;
 	uint32_t loc;		/* C_FILE: file base; C_VTOK: expansion loc */
 	uint32_t mid;		/* macro to re-enable when popped */
@@ -348,6 +349,8 @@ struct hent {
 	uint32_t nbr;
 	uint32_t nord, noadd, nfe, nctr, ncrd, nseg, span, counter_delta;
 	uint8_t has_text, first_sol, col_end, pend_out;
+	uint8_t edir_end;
+	uint8_t pk, pk_L, pk_pp;	/* the printer's last token at the end (pp.pk...) */
 };
 
 typedef struct hkey {
@@ -452,6 +455,15 @@ struct pp {
 	char *out;
 	size_t nout, capout;
 	unsigned col;
+	/* the last token printed, for clang's AvoidConcat: kind, an identifier "L", '.' before it, its end */
+	uint8_t pk, pk_L, pk_pp;
+	const char *pk_end;
+	uint8_t sol_on, edir;	/* edir: a directive was printed on this line (clang's EmittedDirectiveOnThisLine) */
+	uint32_t cur_line;
+	uint8_t out_text;	/* pp_text: track lines for the printer */	/* clang's CurLine: the presumed line the output is on */
+	int sol_depth;
+	uint32_t exp_loc;
+	uint32_t sol_loc;	/* the source macro name a line starts with: expanded tokens' column */
 	struct { uint32_t id; const pmacro *m; } *dd_ev;	/* -dD: <built-in>'s #define/#undef, until printed */
 	uint32_t ndd, capdd;
 	int dd_done;
@@ -593,6 +605,10 @@ VPRIV const pfile *pfile_get(const vlex_file *f, bool *fresh);
 VPRIV uint32_t file_line(const vlex_file *f, const pfile *cfi, uint32_t off);
 /* diag.c */
 VPRIV uint32_t loc_line(const pp *p, uint32_t loc);
+VPRIV bool move_to_line(pp *p, uint32_t line, bool req);
+VPRIV void out_nl(pp *p);
+VPRIV unsigned tok_col(const pp *p, uint32_t loc);
+VPRIV void text_file_change(pp *p, const ctx *from, int enter);
 VPRIV const char *presumed_name(const pp *p, uint32_t fe, uint32_t loc, uint32_t *len);
 VPRIV __attribute__((format(printf, 4, 5))) void pp_diag(pp *p, uint32_t loc, const char *what, const char *fmt, ...);
 void pp_diagx(pp *p, const pp_dinfo *d, const char *fmt, ...);

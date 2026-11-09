@@ -92,6 +92,7 @@ bench/vcc-diff.py dm -j 6           # -dM byte for byte vs clang, C TUs (~40 s)
 bench/vcc-diff.py deps -j 6         # -M and -MM -MP -MQ byte for byte vs clang (~80 s)
 bench/vcc-diff.py hdr -j 6          # -H include tree vs clang (~60 s)
 bench/vcc-diff.py dd -j 6           # -dD: the #define/#undef lines in order vs clang (~60 s)
+bench/vcc-diff.py text -j 6         # -E -P byte for byte vs the references (spacing, lines)
 bench/vcc-sema.py run -j 6          # vpp -fsyntax-only on every C TU
 bench/vcc-sema.py batch -j 6        # the same in one vpp --batch process: ~3 s instead of ~35 s
 bench/vcc-sema.py layout -j 6       # layouts/constants/decl types checked by clang (~70 s)
@@ -175,6 +176,7 @@ cd build/ccs/fuzz && ./fuzz-pp -fork=2 -max_total_time=180 -dict=../../../ccs/fu
     -max_len=4096 -timeout=5 -artifact_prefix=art/ run-pp corpus/pp   # same for fuzz-lex
 make -C ccs fuzz-regress            # replay ccs/fuzz/regress/{lex,pp}
 make -C ccs fuzz-diff               # vpp vs clang -E -P on regress + seeds
+ccs/fuzz/pp-diff.py -j 4 --text DIR # ... byte for byte (spacing, indentation, blank lines)
 ccs/fuzz/pp-diff.py -j 4 DIR...     # ... on any corpus; mismatches -> build/ccs/fuzz/diff/
 ```
 Keep runs to minutes with `-fork=2`.  Every fixed finding gets a minimal

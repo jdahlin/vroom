@@ -450,7 +450,7 @@ VPRIV void enter_file(pp *p, const vlex_file *f, const char *path, int32_t sdir)
 	ctx *c;
 
 	sys = inc_sys(p, sdir);
-	if (fi->guard && mguard(p, fi->guard) && !(unlikely(p->o->show_includes) && !guard_known(p, f))) {
+	if (fi->guard && mguard(p, fi->guard) && !(unlikely(p->o->show_includes || p->out_text) && !guard_known(p, f))) {
 		if (p->o->deps)
 			dep_only(p, path, sys);
 		return;
@@ -464,6 +464,8 @@ VPRIV void enter_file(pp *p, const vlex_file *f, const char *path, int32_t sdir)
 			dep_only(p, path, sys);
 		return;
 	}
+	if (unlikely(p->out_text) && f != &p->builtin)
+		text_file_change(p, from, 1);
 	if (f != &p->builtin && from && hc_top(p)) {
 		int d0 = p->depth;
 		uint32_t b0 = p->next_base;

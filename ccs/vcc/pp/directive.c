@@ -273,6 +273,14 @@ static void line_directive(pp *p, ctx *c, uint32_t b, uint32_t e, bool expand_li
 		m->namelen = (uint32_t)(w - m->name);
 	}
 	pop_to(p, d);
+	if (unlikely(p->out_text)) {
+		/* clang's FileChanged(RenameFile): the next line is line v, and a line in progress ends */
+		p->cur_line = m->line;
+		if (p->col || p->edir) {
+			out_nl(p);
+			p->col = 0, p->edir = 0;
+		}
+	}
 }
 
 /* run the directive at c->i; 1 if it produced a token in *out */
@@ -370,6 +378,25 @@ pass: {
 	out->len = l->off + l->len - f->off;
 	out->loc = loc;
 	out->flags = TF_SOL;
+	if (unlikely(p->out_text)) {
+		/* clang -E re-lexes the line as tokens: one space where there was
+		 * any, and one before the end of the line if a blank or comment is */
+		size_t n = 0, cap = (size_t)(l->off + l->len - f->off) + 2;
+		char *s = varena_alloc(&p->tmp, cap + 16);
+		const char *q = c->src + l->off + l->len;
+
+		for (uint32_t i = b; i < e; i++) {
+			if (c->vt[i].flags & (TF_SPACE | TF_SOL))
+				s[n++] = ' ';
+			memcpy(s + n, c->src + c->vt[i].off, c->vt[i].len);
+			n += c->vt[i].len;
+		}
+		if (*q == ' ' || *q == '\t' || *q == '\f' || *q == '\v' || (*q == '/' && (q[1] == '*' || q[1] == '/')))
+			s[n++] = ' ';
+		out->s = s;
+		out->len = (uint32_t)n;
+		out->id = 1;	/* tokens, not a directive: indented like a line of them */
+	}
 	return 1;
 	}
 }

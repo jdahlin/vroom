@@ -295,14 +295,14 @@ static void hc_apply(pp *p, const hent *e)
 	} else if (e->has_text) {
 		size_t st;
 
-		if (p->col)
-			out_ch(p, e->first_sol ? '\n' : ' ');
 		if (L)
 			text_start(p, e->first_sol);
 		out_reserve(p, e->total + 16 * (size_t)e->nctr);
 		st = p->nout;
 		emit(p, e, c0);
 		p->col = e->col_end;
+		p->edir = e->edir_end;
+		p->pk = e->pk, p->pk_L = e->pk_L, p->pk_pp = e->pk_pp, p->pk_end = NULL;
 		if (L) {
 			if (r->nseg < HC_MAXSEG)
 				r->seg[r->nseg++] = (hsegr){ st, p->nout, e, c0, 0 };
@@ -310,6 +310,8 @@ static void hc_apply(pp *p, const hent *e)
 				HC_BAD(p);
 		}
 	}
+	if (p->tokmode != 2 && p->out_text)
+		text_file_change(p, cur_file(p), 0);
 	if (L) {
 		/* the entry's inputs and writes are the enclosing level's too */
 		for (int i = 0; i < r->n; i++) {
@@ -795,6 +797,8 @@ static hent *publish(pp *p, const hlev *L, size_t end)
 		e->has_text = 1;
 		e->first_sol = L->first_sol;
 		e->col_end = p->col != 0;
+		e->edir_end = p->edir;
+		e->pk = p->pk, e->pk_L = p->pk_L, e->pk_pp = p->pk_pp;
 	}
 	hc_account(e, L->k);
 	return e;

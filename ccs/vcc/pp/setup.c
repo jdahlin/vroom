@@ -322,31 +322,188 @@ static __attribute__((noinline, cold)) size_t ucn_utf8(char *s, size_t n)
 	return o;
 }
 
+VPRIV void out_nl(pp *p)
+{
+	if (unlikely(p->rec.on) && !p->rec.lev[p->rec.n - 1].text_started)
+		text_start(p, 1);
+	out_ch(p, '\n');
+}
+
+/* clang's PrintPPOutputPPCallbacks::MoveToLine with -P */
+VPRIV bool move_to_line(pp *p, uint32_t line, bool req)
+{
+	bool nl = false;
+
+	if ((req && p->col) || p->edir) {
+		out_nl(p);
+		nl = true;
+		p->cur_line++;
+	}
+	if (p->cur_line == line)
+		;
+	else if (!nl && line - p->cur_line == 1)
+		out_nl(p), nl = true;
+	else if (!nl && p->col)
+		out_nl(p), nl = true;
+	if (nl)
+		p->col = 0, p->edir = 0;
+	p->cur_line = line;
+	return nl;
+}
+
+/* FileChanged: entering a file from an #include in `from` moves to its line,
+ * leaving it puts the output on the line after (clang's IncludeLoc) */
+VPRIV void text_file_change(pp *p, const ctx *from, int enter)
+{
+	uint32_t l = 1;
+
+	if (!p->out_text)
+		return;
+	if (from && from->type == C_FILE && from->i)
+		l = loc_line(p, from->loc + from->vt[from->i - 1].off);
+	else if (enter)
+		return;
+	if (enter) {
+		if (from->f != &p->builtin || from->i)
+			move_to_line(p, l, false);
+		p->cur_line = 1;
+	} else {
+		p->cur_line = from && from->type == C_FILE && from->i ? l + 1 : 1;
+	}
+	if (p->col || p->edir) {	/* startNewLineIfNeeded */
+		out_nl(p);
+		p->col = 0, p->edir = 0;
+	}
+}
+
+/* clang's TokenConcatenation::AvoidConcat: would prev followed by t, unspaced, lex differently? */
+static bool avoid_concat(const pp *p, const ptok *t, char fc)
+{
+	switch (p->pk) {
+	case T_AMP: case T_PLUS: case T_MINUS: case T_SLASH: case T_LESS: case T_GREATER: case T_PIPE:
+	case T_PERCENT: case T_STAR: case T_EXCLAIM: case T_LESSLESS: case T_GREATERGREATER: case T_CARET:
+	case T_EQUAL:
+		if (t->kind == T_EQUAL || t->kind == T_EQUALEQUAL)
+			return true;
+		break;
+	}
+	switch (p->pk) {
+	case T_IDENT:
+		if (t->kind == T_NUMBER)
+			return fc != '.';
+		if (t->kind == T_IDENT || (t->kind >= T_WCHAR && t->kind <= T_U32CHAR) || (t->kind >= T_WSTRING && t->kind <= T_U32STRING))
+			return true;
+		return (t->kind == T_CHAR || t->kind == T_STRING) && p->pk_L;
+	case T_NUMBER:
+		return idch((unsigned char)fc) || fc == '.' || fc == '+' || fc == '-' || fc == '\\';
+	case T_PERIOD: return (fc == '.' && p->pk_pp) || (fc >= '0' && fc <= '9');
+	case T_AMP: return fc == '&';
+	case T_PLUS: return fc == '+';
+	case T_MINUS: return fc == '-' || fc == '>';
+	case T_SLASH: return fc == '*' || fc == '/';
+	case T_LESS: return fc == '<' || fc == ':' || fc == '%';
+	case T_GREATER: return fc == '>';
+	case T_PIPE: return fc == '|';
+	case T_PERCENT: return fc == '>' || fc == ':';
+	case T_COLON: return fc == '>';
+	case T_HASH: return fc == '#' || fc == '@' || fc == '%';
+	default: return false;
+	}
+}
+
+/* the expansion column of t (1-based, bytes) */
+VPRIV __attribute__((noinline)) unsigned tok_col(const pp *p, uint32_t loc)
+{
+	const char *s, *b;
+
+	{
+		uint32_t lo = 0, hi = p->nfe;
+
+		while (hi - lo > 1) {
+			uint32_t mid = (lo + hi) / 2;
+
+			if (p->fe[mid].base <= loc)
+				lo = mid;
+			else
+				hi = mid;
+		}
+		while (lo > 0 && !p->fe[lo].f)
+			lo--;
+		if (!p->nfe || !p->fe[lo].f || loc - p->fe[lo].base > p->fe[lo].f->size)
+			return 1;
+		b = p->fe[lo].f->src;
+		s = b + (loc - p->fe[lo].base);
+	}
+	for (unsigned c = 1;; c++)
+		if (s == b || s[-1] == '\n' || s[-1] == 0)
+			return c;
+		else
+			s--;
+}
+
 /* the token as clang -E -P prints it */
 static inline void render(pp *p, const ptok *t)
 {
 	bool sol = t->kind == P_DIRECTIVE || (t->flags & TF_SOL);
 	size_t l;
 	const char *sp;
+	char fc;
 
-	if (p->col) {
-		/* assembler-with-cpp: keep the source spacing like clang does, as
-		 * gas syntax is space-sensitive ("\\arg", "1:", ".L x") */
-		if (sol || !p->o->asm_mode || (t->flags & TF_SPACE))
-			out_ch(p, sol ? '\n' : ' ');
-		if (sol)
-			p->col = 0;
-	}
-	if (unlikely(p->rec.on) && !p->rec.lev[p->rec.n - 1].text_started)
+	if (unlikely(p->rec.on) && !p->rec.lev[p->rec.n - 1].text_started) {
+		if (!sol)
+			HC_BAD(p);	/* its separator depends on what was printed before */
 		text_start(p, sol);
+	}
+	if (t->kind == P_DIRECTIVE && t->id) {
+		/* an assembler line passed through: tokens, so indented as clang does */
+		unsigned c = tok_col(p, t->loc);
+
+		move_to_line(p, loc_line(p, t->loc), p->edir);
+		out_reserve(p, t->len + c + 2);
+		if (!p->col)
+			for (p->out[p->nout++] = ' '; c > 2; c--)
+				p->out[p->nout++] = ' ';
+		else
+			p->out[p->nout++] = ' ';
+		p->out[p->nout++] = '#';
+		memcpy(p->out + p->nout, t->s, t->len);
+		p->nout += t->len;
+		p->col = 1, p->sol_on = 0;
+		p->pk = T_EOF, p->pk_end = NULL;
+		return;
+	}
 	if (t->kind == P_DIRECTIVE) {
+		move_to_line(p, loc_line(p, t->loc), true);
 		out_reserve(p, t->len + 2);
 		p->out[p->nout++] = '#';
 		memcpy(p->out + p->nout, t->s, t->len);
 		p->nout += t->len;
-		p->out[p->nout++] = '\n';
-		p->col = 0;
+		p->col = 1, p->edir = 1, p->sol_on = 0;
+		p->pk = T_EOF, p->pk_end = NULL;
 		return;
+	}
+	fc = t->s[0];	/* a token never starts with a splice */
+	if (sol || p->edir) {
+		/* HandleWhitespaceBeforeTok: indented to its column if it starts a new line */
+		uint32_t loc = p->sol_on ? p->sol_loc : p->cx[p->depth - 1].type != C_FILE ? p->exp_loc : t->loc;
+		uint32_t line = loc_line(p, loc);
+		unsigned c = tok_col(p, loc);
+		/* clang's leading space: not the line break before a token in column 1 */
+		bool space = (t->flags & TF_SPACE) && (p->sol_on || c > 1);
+
+		if (move_to_line(p, line, p->edir) || (sol && line == 1)) {
+			if (c == 1 && space)
+				c = 2;	/* after an empty expansion in column 1 */
+			out_reserve(p, c + 1);
+			if (c <= 1 && t->kind == T_HASH)
+				p->out[p->nout++] = ' ';
+			for (; c > 1; c--)
+				p->out[p->nout++] = ' ';
+		} else if (space || (p->col && p->pk_end != t->s && p->pk != T_EOF && avoid_concat(p, t, fc))) {
+			out_ch(p, ' ');
+		}
+	} else if ((t->flags & TF_SPACE) || (p->col && p->pk_end != t->s && p->pk != T_EOF && avoid_concat(p, t, fc))) {
+		out_ch(p, ' ');
 	}
 	out_reserve(p, t->len);
 	sp = pp_spell(t, p->out + p->nout, &l);
@@ -363,6 +520,11 @@ static inline void render(pp *p, const ptok *t)
 			else
 				HC_BAD(p);
 		}
+	p->sol_on = 0;
+	p->pk_pp = p->pk == T_PERIOD;
+	p->pk = t->kind;
+	p->pk_L = t->kind == T_IDENT && l == 1 && p->out[p->nout] == 'L';
+	p->pk_end = t->flags & TF_DIRTY ? NULL : t->s + t->len;
 	p->nout += l;
 	p->col++;
 }
@@ -372,6 +534,8 @@ int pp_text(pp *p, const char **out, size_t *len)
 	ptok t;
 
 	hc_mode(p, 1);
+	p->out_text = 1;
+	p->cur_line = 1;
 	if (p->o->asm_mode)
 		p->hc = 0;	/* cached text is C-spaced */
 	for (;;) {
@@ -382,8 +546,7 @@ int pp_text(pp *p, const char **out, size_t *len)
 			break;
 		render(p, &t);
 	}
-	if (p->col)
-		out_ch(p, '\n');
+	out_ch(p, '\n');	/* clang ends with a newline, also after an empty line */
 	*out = p->out ? p->out : "";
 	*len = p->nout;
 	return p->errors;
