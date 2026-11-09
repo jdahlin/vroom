@@ -723,7 +723,9 @@ static bool cc_is_compile(const struct req *r)
 			c = true;
 		else if (!strncmp(a, "--target=aarch64-", 17) && strstr(a, "-linux"))
 			linux_target = true;
-		else if (!strcmp(a, "-E") || !strcmp(a, "-S") || !strcmp(a, "-") || !strcmp(a, "-mcmodel=tiny") ||
+		else if (!strcmp(a, "-S"))
+			c = true;	/* assembly text: the same job */
+		else if (!strcmp(a, "-E") || !strcmp(a, "-") || !strcmp(a, "-mcmodel=tiny") ||
 			 !strcmp(a, "-shared") || !strcmp(a, "-emit-llvm"))
 			return false;
 		else if (!strcmp(a, "-x") && i + 1 < r->argc && strcmp(r->argv[i + 1], "c") &&

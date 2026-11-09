@@ -953,6 +953,11 @@ int ppd_run(int argc, char **argv, const ppd_env *env)
 		status = 2;
 		goto out;
 	}
+	if (emit == 1 && !objmode && !out && !layout) {
+		/* clang: -S writes the source's basename with .s */
+		out = obj_name(main_file, objbuf, sizeof(objbuf));
+		objbuf[strlen(objbuf) - 1] = 's';
+	}
 	if (objmode) {
 		obj_state();
 		if (!out)

@@ -881,7 +881,8 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
 ### Driver (`driver/ppdriver.c`, `vccd/vccd.c`, `vccd/caps.c`)
 - [ ] **vccd compiles only `-c` of one `.c`/`.S` for aarch64 Linux; the rest
   goes to clang** (done: the input anywhere on the line, `-o` before `-c`,
-  `-fPIC`; vccd-test `compile-shapes-not-forwarded`.  Left: `-S`, Darwin,
+  `-fPIC`, `-S` (without `-o`: the basename with `.s`, as clang); vccd-test
+  `compile-shapes-not-forwarded`.  Left: Darwin,
   other targets).
   *Validate:* T11 (`-c a.c -o a.o`, flags after the input, `-o` before
   `-c`) all handled by vcc (a counter in vccd's stats, or `VCC_NO_FORWARD=1`
