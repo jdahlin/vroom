@@ -171,7 +171,7 @@ static void hc_mode(pp *p, int mode)
 	static pthread_once_t once = PTHREAD_ONCE_INIT;
 
 	pthread_once(&once, hc_env);
-	p->hc = !hc_off;
+	p->hc = !hc_off && !p->o->show_includes;	/* -H: a replay has no nesting to print */
 	p->tokmode = mode;
 }
 

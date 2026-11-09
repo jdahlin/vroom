@@ -701,7 +701,7 @@ int ppd_run(int argc, char **argv, const ppd_env *env)
 	char *pmap = NULL;
 	double t0;
 	pp *p;
-	int dmacros = 0, syntax = 0, layout = 0, ms_anon = 0, short_wchar = 0, tokhash = 0, emit = 0, objmode = 0;
+	int dmacros = 0, showinc = 0, syntax = 0, layout = 0, ms_anon = 0, short_wchar = 0, tokhash = 0, emit = 0, objmode = 0;
 	int tri = -1, std = 0, strict = 0, wimpl_int = 0, wimpl_fn = 0, gnu89_inline = -1, vcc_kernel = 0;
 	char objbuf[1024];
 
@@ -715,6 +715,7 @@ int ppd_run(int argc, char **argv, const ppd_env *env)
 		if (!strcmp(a, "-S")) { syntax = 1; emit = 1; continue; }
 		if (!strcmp(a, "-c")) { objmode = 1; continue; }
 		if (!strcmp(a, "-dM")) { dmacros = 1; continue; }
+		if (!strcmp(a, "-H")) { showinc = 1; continue; }
 		if (!strcmp(a, "-fms-anonymous-structs") || !strcmp(a, "-fms-extensions")) { ms_anon = 1; continue; }
 		if (!strcmp(a, "-fshort-wchar")) { short_wchar = 1; continue; }
 		if (!strcmp(a, "-fcolor-diagnostics") || !strcmp(a, "-fdiagnostics-color") || !strcmp(a, "-fdiagnostics-color=always")) { dcolor = 1; continue; }
@@ -901,7 +902,7 @@ int ppd_run(int argc, char **argv, const ppd_env *env)
 	if (darwin && !nostdinc)
 		for (size_t k = 0; k < sizeof(sysdirs_darwin) / sizeof(sysdirs_darwin[0]); k++)
 			ADD(sysdirs_darwin[k]);
-	if (darwin && (mdeps || depfile)) {
+	if (darwin && (mdeps || depfile || showinc)) {
 		/* clang reads the SDK's SDKSettings.json (the default sysroot: the SDK
 		   of the system directories), and it is the first dependency */
 		static __thread char sdk[1024];
@@ -913,6 +914,10 @@ int ppd_run(int argc, char **argv, const ppd_env *env)
 			    !access(sdk, F_OK))
 				dfirst = sdk;
 		}
+		if (dfirst && showinc)
+			dprintf(errfd, ". %s\n", dfirst);	/* -H: clang's first line too */
+		if (!mdeps && !depfile)
+			dfirst = NULL;
 	}
 #ifdef VCC_RESDIR
 	/* hosted Linux: clang's resource headers, then glibc's (multiarch first) */
@@ -933,6 +938,7 @@ int ppd_run(int argc, char **argv, const ppd_env *env)
 	po.c23 = std == 23;
 	po.c89 = std == 89 && strict;
 	po.deps = mdeps || depfile;
+	po.show_includes = showinc;
 	po.fatal_continue = !emit && !objmode && !syntax && !layout && !tokhash;
 	po.trigraphs = tri >= 0 ? tri : strict && std != 23;	/* clang: strict modes before C23 */
 	{

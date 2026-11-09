@@ -625,11 +625,12 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
   *Validate:* T4.
 - [ ] **`#embed` / `__has_embed`** [P].  *Validate:* pp-diff fixtures plus
   T1 (`unsigned char d[] = { #embed "bin" };` checksums).
-- [ ] **Output modes ignored**: `-C`, `-CC`, `-dD`, `-H`,
+- [ ] **Output modes ignored**: `-C`, `-CC`, `-dD`,
   `-traditional-cpp` (reject); line markers without `-P`; text identical to
   clang's spacing.
   *Validate:* `bench/vcc-diff.py` new mode `text` comparing bytes (not
-  tokens) for `-E` with and without `-P`.  (`-M`/`-MM` done: see Depfiles.)
+  tokens) for `-E` with and without `-P`.  (`-M`/`-MM` done: see Depfiles;
+  `-H` done: `bench/vcc-diff.py hdr` 912/912, header cache off under `-H`.)
   (`-dM` done: `bench/vcc-diff.py dm` is byte-identical to clang on all 879
   C TUs.  Open: on kernel `.S` files clang's `-dM` leaves out macros defined
   after a point in the headers (strchr.S: all of linux/linkage.h onwards)

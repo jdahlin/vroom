@@ -184,8 +184,11 @@ static inline int32_t inc_mode(const pp *p, const ctx *from, bool angled, bool n
 	int32_t start = nx ? from->sdir + 1 : angled ? p->o->nquote : 0;
 
 	*fp = "", *dl = 0;
-	if (!angled && !nx && from->f != &p->builtin)
+	if (!angled && !nx && from->f != &p->builtin) {
 		*fp = from->spath, *dl = from->sdl;
+		if (!*dl && (*fp)[0])
+			*fp = "./", *dl = 2;	/* as find_include_ spells it: not the key of -include's "" */
+	}
 	return start * 4 + angled * 2 + nx;
 }
 
@@ -297,6 +300,35 @@ static void add_fent(pp *p, ctx *c, const vlex_file *f, const char *name)
 /* a file skipped by its include guard or #pragma once: still a dependency,
  * under this spelling (clang's FileSkipped).  An entry with no file and a
  * one-byte span holds no location (loc_fent passes over it). */
+/* would clang skip f by its guard: it learns a guard at the end of the file,
+ * so f must have been read to its end in this TU (not open now).  Otherwise
+ * clang enters f, and -H shows it. */
+static bool guard_known(const pp *p, const vlex_file *f)
+{
+	bool seen = false;
+
+	for (uint32_t i = 0; i < p->nfe && !seen; i++)
+		seen = p->fe[i].f == f;
+	for (int i = 0; i < p->depth && seen; i++)
+		if (p->cx[i].type == C_FILE && p->cx[i].f == f)
+			return false;
+	return seen;
+}
+
+/* -H: ". path" with a dot per level, as clang (files -include names are not shown) */
+static void show_include(pp *p, const char *path)
+{
+	uint32_t d = 0;
+
+	for (int i = 0; i < p->depth; i++) {
+		if (p->cx[i].type == C_FILE && p->cx[i].f == &p->builtin && i + 1 < p->depth - 1)
+			return;	/* inside an -include'd file */
+		d += p->cx[i].type == C_FILE && p->cx[i].f != &p->builtin;
+	}
+	dprintf(p->o->errfd ? p->o->errfd : 2, "%.*s %s\n", (int)(d > 1 ? d - 1 : 1),
+		"................................................................", path);
+}
+
 /* is a header found in search directory sdir a system header (-1: the includer's directory) */
 VPRIV uint8_t inc_sys(pp *p, int32_t sdir)
 {
@@ -418,7 +450,7 @@ VPRIV void enter_file(pp *p, const vlex_file *f, const char *path, int32_t sdir)
 	ctx *c;
 
 	sys = inc_sys(p, sdir);
-	if (fi->guard && mguard(p, fi->guard)) {
+	if (fi->guard && mguard(p, fi->guard) && !(unlikely(p->o->show_includes) && !guard_known(p, f))) {
 		if (p->o->deps)
 			dep_only(p, path, sys);
 		return;
@@ -472,6 +504,8 @@ VPRIV void enter_file(pp *p, const vlex_file *f, const char *path, int32_t sdir)
 		c->sdl = sl ? (uint32_t)(sl - path) + 1 : 0;
 	}
 	p->nfile++;
+	if (unlikely(p->o->show_includes) && from && f != &p->builtin && from->f != &p->builtin)
+		show_include(p, path);
 	add_fent(p, c, f, path);
 	p->fe[c->fe].sys = sys;
 	p->fe[c->fe].from = from && from->f != &p->builtin && from->i ? from->loc + from->vt[from->i - 1].off : 0;

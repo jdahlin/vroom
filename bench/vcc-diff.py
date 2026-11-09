@@ -90,6 +90,15 @@ def deps(t):
             return dm(t, fl)
     return obj, 0, ''
 
+def hdr(t):
+    """-H: the include tree on stderr, lines starting with '.', vs clang"""
+    obj, a = t
+    r = [subprocess.run([x] + a + ['-E', '-H', '-o', '/dev/null'], cwd=B, capture_output=True) for x in (CL, VPP)]
+    h = [[l for l in x.stderr.decode(errors='replace').splitlines() if l.startswith('.')] for x in r]
+    if h[0] == h[1]: return obj, 0, ''
+    import difflib
+    return obj, 1, '\n'.join(list(difflib.unified_diff(h[0], h[1], 'clang', 'vpp', n=0, lineterm=''))[:12])
+
 if __name__ == '__main__':
     av = [a for a in sys.argv[1:] if a not in ('--kernel', '--cmp')]; j = 6
     if '-j' in av: k = av.index('-j'); j = int(av[k+1]); del av[k:k+2]
@@ -108,7 +117,7 @@ if __name__ == '__main__':
         os.unlink(jf); sys.exit(r.returncode)
     if mode == 'ref': os.makedirs(REF, exist_ok=True)
     with Pool(j) as pool:
-        res = pool.map({'ref': mkref, 'dm': dm, 'deps': deps}.get(mode, cmp), ts, chunksize=4)
+        res = pool.map({'ref': mkref, 'dm': dm, 'deps': deps, 'hdr': hdr}.get(mode, cmp), ts, chunksize=4)
     bad = [r for r in res if r[1]]
     for obj, rc, err in bad[:int(os.environ.get('SHOW', 20))]:
         print(f'--- {obj} (rc {rc})\n{err}')
