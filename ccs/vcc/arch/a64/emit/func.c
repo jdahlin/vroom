@@ -194,10 +194,13 @@ static void finish_direct(ecx *e, uint32_t s, uint32_t align, const int *cs, int
 /* drop each b to a label among those right after it: the code falls through anyway */
 static void drop_fallthrough(ecx *e)
 {
-	uint32_t n = 0;
+	uint32_t n = 0, dj = 0;
 
 	for (uint32_t k = 0; k < e->nin; k++) {
 		const ins *i = &e->in[k];
+
+		if (e->ndl)
+			dbg_remap(e, &dj, k, n);
 
 		if (i->op == I_B) {
 			uint32_t j = k + 1;
@@ -209,6 +212,8 @@ static void drop_fallthrough(ecx *e)
 		}
 		e->in[n++] = *i;
 	}
+	if (e->ndl)
+		dbg_remap(e, &dj, UINT32_MAX, n);
 	e->nin = n;
 }
 
@@ -304,6 +309,16 @@ static void finish_function(ecx *e, uint32_t s)
 		return;
 	}
 	sym_header(e, b, s, true, "\t.text\n", align);
+	uint32_t dj = 0;	/* -g: the next row */
+
+	if (unlikely(e->E->o->debug) && !(leaf && !ncs && !bp)) {
+		/* (none without prologue instructions, as clang) the function's own line, then its first statement's with prologue_end (as clang) */
+		uint32_t f, l, cl;
+
+		/* clang: the line of the body's '{', column 0 */
+		if (dbg_where(e, c->syms[s].body ? N(c->syms[s].body)->loc : c->syms[s].loc, &f, &l, &cl))
+			tb_f(b, "\t.loc\t%u %u 0\n", f, l);
+	}
 	/* prologue */
 	if (leaf)
 		;
@@ -331,6 +346,10 @@ static void finish_function(ecx *e, uint32_t s)
 	for (uint32_t k = 0; k < e->nin; k++) {
 		const ins *i = &e->in[k];
 
+		for (; dj < e->ndl && e->dl[dj].k == k; dj++)
+			if (dj + 1 == e->ndl || e->dl[dj + 1].k != k)	/* the last of several at one place */
+				tb_f(b, dj ? "\t.loc\t%u %u %u\n" : "\t.loc\t%u %u %u prologue_end\n",
+				     e->dl[dj].file, e->dl[dj].line, e->dl[dj].col);
 		if (far && ((i->op == I_BC && i->cond < 14) || i->op == I_CBZ || i->op == I_CBNZ)) {
 			ins n = *i;
 
@@ -355,6 +374,10 @@ static void finish_function(ecx *e, uint32_t s)
 		}
 		print_ins(c, b, i, s, e->raw.p);
 	}
+	for (; dj < e->ndl; dj++)
+		if (dj + 1 == e->ndl)
+			tb_f(b, dj ? "\t.loc\t%u %u %u\n" : "\t.loc\t%u %u %u prologue_end\n",
+			     e->dl[dj].file, e->dl[dj].line, e->dl[dj].col);
 	/* epilogue */
 	for (int k = 0; k + 1 < ncs; k += 2)
 		tb_f(b, "\tldp\tx%d, x%d, [x29, #%d]\n", cs[k], cs[k + 1], -csave + 8 * k);
@@ -441,6 +464,7 @@ static bool emit_function1(ecx *e, uint32_t s, int nlreg)
 
 	walk_fn(e, s);
 	e->nin = 0;
+	e->ndl = 0;
 	e->raw.n = 0;
 	e->nlabel = 0;
 	e->nkv = 0, e->kvalid = 0, e->nkvs = 0, e->nael = 0;

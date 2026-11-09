@@ -170,6 +170,26 @@ static void p_addi(tbuf *b, const ins *i)
 	tb_s(b, i->sz ? ", x17\n" : ", w17\n");
 }
 
+/* a register name (x0, w30, b1, q7, v31, sp, xzr, ...) */
+static bool reg_like(const char *p, size_t n)
+{
+	static const char *const sp[] = { "sp", "wsp", "xzr", "wzr", "lr", "fp" };
+
+	for (size_t k = 0; k < sizeof sp / sizeof *sp; k++)
+		if (n == strlen(sp[k]) && !memcmp(p, sp[k], n))
+			return true;
+	if (n < 2 || n > 3 || !strchr("bhsdqvwxz", p[0]) || p[1] < '0' || p[1] > '9')
+		return false;
+	unsigned r = p[1] - '0';
+
+	if (n == 3) {
+		if (p[2] < '0' || p[2] > '9' || p[1] == '0')
+			return false;
+		r = r * 10 + (p[2] - '0');
+	}
+	return r < 32;
+}
+
 VPRIV void print_ins(cc *c, tbuf *b, const ins *i, uint32_t fid, const char *raw)
 {
 	switch (i->op) {
@@ -344,11 +364,23 @@ VPRIV void print_ins(cc *c, tbuf *b, const ins *i, uint32_t fid, const char *raw
 		p_lbl(b, fid, i->label);
 		tb_c(b, '\n');
 		return;
-	case I_BL:
+	case I_BL: {
 		tb_s(b, "\tbl\t");
+		size_t at = b->n;
+
 		ref_name(c, b, i->ref);
+		if (reg_like(b->p + at, b->n - at)) {
+			/* "bl b1" is a register operand to the assembler (llvm-mc too): quote it */
+			size_t n = b->n - at;
+
+			tb_c(b, '"');
+			tb_c(b, '"');
+			memmove(b->p + at + 1, b->p + at, n);
+			b->p[at] = '"';
+		}
 		tb_c(b, '\n');
 		return;
+	}
 	case I_BLR: case I_BR:
 		tb_s(b, i->op == I_BLR ? "\tblr\t" : "\tbr\t");
 		reg(b, i->rn, 1);

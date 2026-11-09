@@ -523,7 +523,13 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
   for every function); T3 `unwind.c` (`_Unwind_Backtrace` from a deep vcc
   call chain lists every frame; a C++ exception thrown through vcc frames,
   built with clang++ for the C++ part).
-- [ ] **DWARF** (`-g`): line tables first, then variables/types.
+- [ ] **DWARF** (`-g`): line tables first, then variables/types.  (Line
+  tables done for ELF: `-g` takes `-c` through the printer text and `as_run`;
+  a row per statement start (none for blocks/case/labels, none for `{`
+  without a prologue, as clang), `.file 0` the main file, a v5 CU with
+  low/high pc.  `bench/vcc-dwarf.py`: 1377/1377 verify, `.text` unchanged by
+  `-g`, `-c` = clang -c of `-S`; rows clang lacks (136 files) are ifs clang
+  -O0 folds.  Left: variables, types, frame base; Mach-O; direct objects.)
   *Validate:* T6 (`llvm-dwarfdump --verify`); `llvm-symbolizer` maps
   addresses to the right lines for `tests/vcc`; later a scripted lldb
   session (break at file:line, print local).

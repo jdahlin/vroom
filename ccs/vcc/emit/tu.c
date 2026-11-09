@@ -65,6 +65,18 @@ VPRIV void enqueue(emitter *E, uint32_t item)
 }
 
 /* the regions of a ctx[i] (ecx_init takes a set, ecx_free gives it back) */
+/* a quoted assembler string */
+static void dbg_str(tbuf *b, const char *s)
+{
+	tb_c(b, '"');
+	for (; *s; s++) {
+		if (*s == '"' || *s == '\\')
+			tb_c(b, '\\');
+		tb_c(b, *s);
+	}
+	tb_c(b, '"');
+}
+
 static vmpool ecxpool = VMPOOL_INIT(15);
 
 static void ecx_init(ecx *e, emitter *E, vmreg *r)
@@ -391,6 +403,7 @@ static int emit_tu1(cc *c, const cc_opts *o, bool write_out, uint8_t *mf, bool *
 	pthread_cond_init(&E.cv, NULL);
 	pthread_mutex_init(&E.cmu, NULL);
 	pthread_mutex_init(&E.emu, NULL);
+	pthread_mutex_init(&E.dmu, NULL);
 	E.walked = vmreg_get(&er[9], c->nsym + 64, "emit.walked");
 	E.fnsize = vmreg_get(&er[10], (c->nsym + 64) * sizeof(uint16_t), "emit.fnsize");
 	E.cwval = vmreg_get(&er[11], (c->nsym + 64) * sizeof(i128), "emit.cwval");
@@ -408,6 +421,9 @@ static int emit_tu1(cc *c, const cc_opts *o, bool write_out, uint8_t *mf, bool *
 	E.noopt = getenv("VCC_NOOPT") != NULL;
 	/* wasm64: objects from the text, through arch/wasm/as */
 	E.objtext = getenv("VCC_OBJ_TEXT") != NULL || PP_IS_WASM(o->target);
+	/* -g: the line table is the assembler's, from the printer's .loc */
+	if (o->debug && !DARWIN(c) && !WASM(c))
+		E.objtext = true;
 	/* roots */
 	for (uint32_t i = 0; i < c->ntoplevel; i++) {
 		uint32_t s = c->toplevel[i];
@@ -446,6 +462,21 @@ static int emit_tu1(cc *c, const cc_opts *o, bool write_out, uint8_t *mf, bool *
 		wasm_header(c, &hdr, ctx, nthr);
 	else
 		tb_s(&hdr, "\t.text\n");
+	bool dbg = o->debug && !DARWIN(c) && !WASM(c);
+	if (dbg) {
+		tb_s(&hdr, ".Ldbg_text0:\n\t.file\t0 ");
+		dbg_str(&hdr, o->dbg_dir ? o->dbg_dir : ".");
+		tb_c(&hdr, ' ');
+		dbg_str(&hdr, o->dbg_name ? o->dbg_name : "<stdin>");
+		tb_c(&hdr, '\n');
+		for (uint32_t i = 0; i < E.ndfile; i++) {
+			tb_f(&hdr, "\t.file\t%u ", i + 1);
+			dbg_str(&hdr, E.dfile[i]);
+			tb_c(&hdr, '\n');
+			free(E.dfile[i]);
+		}
+		free(E.dfile);
+	}
 	for (uint32_t i = 0; i < c->ntlasm; i++) {
 		const casm *a = &c->asms[N(c->tlasm[i])->a];
 
@@ -501,6 +532,21 @@ static int emit_tu1(cc *c, const cc_opts *o, bool write_out, uint8_t *mf, bool *
 				tb_s(&tail, c->strs[a->alias - 1].s);
 				tb_c(&tail, '\n');
 			}
+		}
+		if (dbg) {
+			/* one compile unit over .text: producer, C11, name, its line table, dir, pc range */
+			tb_s(&tail, "\t.text\n.Ldbg_text1:\n"
+				    "\t.section\t.debug_abbrev,\"\",@progbits\n.Ldbg_abbrev:\n"
+				    "\t.byte\t1, 17, 0, 37, 8, 19, 5, 3, 8, 16, 23, 27, 8, 17, 1, 18, 6, 0, 0, 0\n"
+				    "\t.section\t.debug_info,\"\",@progbits\n"
+				    "\t.word\t.Ldbg_cu_end-.Ldbg_cu_start\n.Ldbg_cu_start:\n"
+				    "\t.hword\t5\n\t.byte\t1, 8\n\t.word\t.Ldbg_abbrev\n\t.byte\t1\n\t.asciz\t\"vcc\"\n"
+				    "\t.hword\t29\n\t.asciz\t");
+			dbg_str(&tail, o->dbg_name ? o->dbg_name : "<stdin>");
+			tb_s(&tail, "\n\t.word\t.Lline_table_start0\n\t.asciz\t");
+			dbg_str(&tail, o->dbg_dir ? o->dbg_dir : ".");
+			tb_s(&tail, "\n\t.xword\t.Ldbg_text0\n\t.word\t.Ldbg_text1-.Ldbg_text0\n.Ldbg_cu_end:\n"
+				    "\t.section\t.debug_line,\"\",@progbits\n.Lline_table_start0:\n");
 		}
 		if (!WASM(c))
 			tb_s(&tail, "\t.section\t\".note.GNU-stack\",\"\",@progbits\n");

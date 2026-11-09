@@ -116,6 +116,7 @@ bench/var-cmp.py work/build-x       # vcc ar against llvm-ar on an llvm-ar-built
 bench/vsh-test.py                   # vsh/rsh against dash on small recipes
 bench/vcc-driver.py                 # driver: command lines vs clang (predefines from -O), <1 s
 bench/vcc-fpcheck.py -j 6           # no generated FP/SIMD code under -mgeneral-regs-only (~10 s)
+bench/vcc-dwarf.py -j 6             # -g line tables: dwarfdump --verify, .text unchanged, rows vs clang (~2 min)
 bench/vcc-pic.py                    # GOT and TLS relocations per -fno-pic/-fPIE/-fPIC vs clang (<1 s)
 bench/vcc-ctests.py -j 6 --suite vcc # our own regression tests (ccs/vcc/tests/vcc), ~1 s
 bench/vcc-ctests.py -j 6 --cpu cortex-a53   # vcc's binaries on a CPU without LSE (atomics as LL/SC)

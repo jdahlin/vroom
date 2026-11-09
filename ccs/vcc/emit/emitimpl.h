@@ -195,6 +195,9 @@ typedef struct emitter {
 	const keep *K;			/* the previous round's functions, or NULL */
 	bool stats;
 	bool objtext;			/* VCC_OBJ_TEXT: objects through the printer and as_run (checks the object backend) */
+	pthread_mutex_t dmu;		/* -g: the file table */
+	char **dfile;			/* .file N (1-based) names */
+	uint32_t ndfile, dfcap;
 	pthread_mutex_t emu;		/* diagnostics */
 	uint32_t errcall[256];		/* error() call sites already reported (under emu) */
 	uint32_t nerrcall_loc;
@@ -297,6 +300,10 @@ typedef struct ecx {
 	uint32_t *sstk, nsstk;	/* the live ones (indices into sla, deepest last) */
 	int novtag;		/* inside a volatile access: its records stay untagged */
 	uint32_t curloc;	/* innermost statement being generated (diagnostics) */
+	struct dbgrow { uint32_t k, file, line, col; } *dl;	/* -g: a row at record k */
+	uint32_t ndl, dlcap;
+	const char *dlname;	/* the last file looked up, and its number */
+	uint32_t dlnlen, dlfile;
 	tbuf raw;		/* inline asm text */
 	tbuf out;		/* this thread's output text */
 	tbuf data;		/* scratch: data object bytes */
@@ -688,6 +695,9 @@ VPRIV val gen_block(ecx *e, uint32_t n, bool want);
 VPRIV val vla_bytes(ecx *e, qty t);
 VPRIV void vla_fix(ecx *e, qty t, bool pure);
 VPRIV void gen_stmt(ecx *e, uint32_t n);
+VPRIV bool dbg_where(ecx *e, uint32_t loc, uint32_t *file, uint32_t *line, uint32_t *col);
+VPRIV void dbg_row(ecx *e, uint32_t loc);	/* -g: a line-table row at the next record */
+VPRIV void dbg_remap(ecx *e, uint32_t *j, uint32_t k, uint32_t n);	/* compaction, k ascending */
 /* asm.c */
 VPRIV void gen_asm(ecx *e, uint32_t n);
 /* func.c */

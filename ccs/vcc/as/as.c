@@ -2847,6 +2847,10 @@ static int d_dwfile(As *a, const char *p, const char *e)
 			hasmd5 = 1;
 		} else return err(a, "unexpected token in '.file' directive");
 	}
+	/* MC: a file named as the root file (file 0) is the root: N stays unassigned */
+	if (n && a->ndwf && a->dwf[0].set && !hasmd5 && !a->dwf[0].hasmd5 && name.n == a->dwf[0].name.n &&
+	    !memcmp(name.s, a->dwf[0].name.s, name.n))
+		return 0;
 	if (n >= a->dwfcap) {
 		uint32_t nc = a->dwfcap ? a->dwfcap : 16;
 		while (nc <= n) nc *= 2;
@@ -2988,6 +2992,13 @@ static void dwline_finish(As *a)
 			a->dwf[0].dir = 0;
 		} else { err(a, "no root file for the line table"); return; }
 	}
+	for (uint32_t i = 1; i < a->ndwf; i++)
+		if (!a->dwf[i].set) {
+			char m[64];
+			snprintf(m, sizeof m, "unassigned file number: %u for .file directives", i);
+			err(a, "%s", m);
+			return;
+		}
 	uint32_t sec = elf_section(o, ".debug_line", 11, SHT_PROGBITS, 0, 0, 0);
 	elf_data(o, sec);
 	uint32_t ls = elf_section(o, ".debug_line_str", 15, SHT_PROGBITS, SHF_MERGE | SHF_STRINGS, 1, 0);

@@ -98,6 +98,8 @@ VPRIV val dry(ecx *e, uint32_t n)
 		e->nael--;
 	memcpy(e->kval, kval, sizeof(kval));
 	e->nin = nin, e->live = live, e->usedcs = usedcs, e->foff = foff;	/* labels stay: user labels may map to them */
+	while (e->ndl && e->dl[e->ndl - 1].k > e->nin)
+		e->ndl--;
 	e->reach = reach, e->nclean = nclean, e->nloop = nloop, e->raw.n = raw, e->calls = calls, e->nvsz = nvsz;
 	if (v.k != V_CONST && v.k != V_ADDR)
 		v = vnone();
