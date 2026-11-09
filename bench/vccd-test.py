@@ -23,7 +23,10 @@ spec = importlib.util.spec_from_file_location('vd', os.path.join(os.path.dirname
 vd = importlib.util.module_from_spec(spec); spec.loader.exec_module(vd)
 
 SHIM = f'{vd.R}/build/ccs/vcc'
-MAGIC = 0x6d6f6f72
+MAGIC = 0x326f6f72
+
+def hdr(magic, argc, envc, plen, build=0):
+    return struct.pack('<IIIIQ', magic, argc, envc, plen, build)
 TARGET = ['--target=aarch64-linux-gnu', '-nostdinc', '-ffreestanding']
 TESTS = []
 
@@ -64,7 +67,7 @@ def raw_request(sock, cwd, argv, env=(), fds=(0, 1, 2), header=None, payload=Non
     if payload is None:
         payload = b''.join(s.encode() + b'\0' for s in [cwd] + list(argv) + list(env))
     if header is None:
-        header = struct.pack('<IIII', MAGIC, len(argv), len(env), len(payload))
+        header = hdr(MAGIC, len(argv), len(env), len(payload))
     s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
     s.settimeout(timeout)
     s.connect(sock)
@@ -147,6 +150,20 @@ def wrong_fd_count():
     finally: v.stop()
 
 @test()
+def other_build_refused():
+    """a request from another build of the shim gets the mismatch status, not service"""
+    v = Vccd()
+    try:
+        d = f'{v.dir}/w'; src = tu(d)
+        argv = [SHIM] + TARGET + ['-c', src]
+        good = b''.join(s.encode() + b'\0' for s in [d] + argv)
+        st = raw_request(v.sock, d, argv, header=hdr(MAGIC, len(argv), 0, len(good), build=12345), payload=good)
+        check(st == 0x7fff0001, f'status {st} for a foreign build id (want VROOM_STATUS_MISMATCH)')
+        st, err = v.cc(d, src)
+        check(st == 0, f'the real shim (same build) is served: {st} {err[-300:]}')
+    finally: v.stop()
+
+@test()
 def garbage_requests():
     """bad magic, huge lengths, truncated payloads, counts that do not match: refused, server up"""
     v = Vccd()
@@ -155,13 +172,13 @@ def garbage_requests():
         argv = [SHIM] + TARGET + ['-c', src]
         good = b''.join(s.encode() + b'\0' for s in [d] + argv)
         bad = [
-            dict(header=struct.pack('<IIII', 0xdeadbeef, len(argv), 0, len(good)), payload=good),
-            dict(header=struct.pack('<IIII', MAGIC, len(argv), 0, 1 << 31), payload=good),
-            dict(header=struct.pack('<IIII', MAGIC, 1 << 30, 1 << 30, len(good)), payload=good),
-            dict(header=struct.pack('<IIII', MAGIC, len(argv) + 50, 0, len(good)), payload=good),
-            dict(header=struct.pack('<IIII', MAGIC, 0, 0, len(good)), payload=good),
-            dict(header=struct.pack('<IIII', MAGIC, len(argv), 0, len(good) + 100), payload=good, close_early=True),
-            dict(header=struct.pack('<IIII', MAGIC, len(argv), 0, len(good)), payload=good.replace(b'\0', b'x')),
+            dict(header=hdr(0xdeadbeef, len(argv), 0, len(good)), payload=good),
+            dict(header=hdr(MAGIC, len(argv), 0, 1 << 31), payload=good),
+            dict(header=hdr(MAGIC, 1 << 30, 1 << 30, len(good)), payload=good),
+            dict(header=hdr(MAGIC, len(argv) + 50, 0, len(good)), payload=good),
+            dict(header=hdr(MAGIC, 0, 0, len(good)), payload=good),
+            dict(header=hdr(MAGIC, len(argv), 0, len(good) + 100), payload=good, close_early=True),
+            dict(header=hdr(MAGIC, len(argv), 0, len(good)), payload=good.replace(b'\0', b'x')),
             dict(header=b'\x72\x6f', payload=b'', close_early=True),
         ]
         for i, b in enumerate(bad):

@@ -360,7 +360,10 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
   Whitelist (PATH and the few the tools read); drop `LD_*`/`DYLD_*`.
   *Validate:* T12 (`DYLD_INSERT_LIBRARIES=/nonexistent` in the request does
   not change the child; a test helper dumps its env).
-- [ ] **No protocol/build versioning** [R].  `protocol.h:12`.  Add a build
+- [x] **No protocol/build versioning** [R].  *Done:* magic "roo2", the header
+  carries a build id (size+mtime of the vccd next to the shim); vccd answers
+  VROOM_STATUS_MISMATCH and the shim says to restart it (vccd-test
+  other-build-refused).  No automatic restart.  Was:  `protocol.h:12`.  Add a build
   id (hash of the binary or a build-time constant) to the handshake; on
   mismatch the shim restarts the server or falls back.
   *Validate:* T12 (shim from build A against vccd from build B → clear

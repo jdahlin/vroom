@@ -16,6 +16,11 @@
  * the real shell, $VSH_REAL (default /bin/sh), with the same arguments.
  */
 #include <sys/stat.h>
+#ifdef __APPLE__
+#include <mach-o/dyld.h>
+#endif
+#include <stdlib.h>
+#include <string.h>
 #include <errno.h>
 #include <stdint.h>
 #include <stdlib.h>
@@ -121,6 +126,24 @@ int main(int argc, char **argv)
 		p = put(p, um);
 	}
 
+	{	/* the vccd next to this binary (vsh: one directory up) gives the build id */
+		char exe[4096], rp[4096], v[4200], *sl;
+		uint32_t el = sizeof(exe);
+
+#ifdef __APPLE__
+		if (!_NSGetExecutablePath(exe, &el) && realpath(exe, rp) && (sl = strrchr(rp, '/'))) {
+#else
+		(void)el;
+		if (realpath("/proc/self/exe", rp) && (sl = strrchr(rp, '/'))) {
+#endif
+			*sl = 0;
+			memcpy(v, rp, (size_t)(sl - rp)), memcpy(v + (sl - rp), "/vccd", 6);
+			if (!(h->build = vroom_build_id(v))) {
+				memcpy(v + (sl - rp), "/../vccd", 9);
+				h->build = vroom_build_id(v);
+			}
+		}
+	}
 	h->magic = VROOM_MAGIC;
 	h->argc = argc;
 	h->envc = e - environ + 1;
@@ -165,6 +188,8 @@ int main(int argc, char **argv)
 			die("vcc: server closed the connection\n");
 	}
 #ifdef VSH
+	if (status == (int32_t)VROOM_STATUS_MISMATCH)
+		die("vcc: vccd runs another build of vcc than this shim; restart it\n");
 	if (status == (int32_t)VROOM_STATUS_DECLINE) {
 		close(s);
 		real_shell();

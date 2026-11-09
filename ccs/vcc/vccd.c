@@ -87,6 +87,7 @@ static const char *lld = "/opt/homebrew/bin/ld.lld";
 static bool log_requests, own_pp = true, own_cc = true;
 
 static atomic_ulong n_probe, n_fwd, n_spawn, n_pp, n_cc, n_fallback, n_ar, n_sh, n_sh_decl;
+static uint64_t self_build;	/* vroom_build_id of our own binary */
 static char tool_dir[4096];	/* where vccd and its shims live (realpath) */
 
 /* ---------------- work queue: accepted sockets ---------------- */
@@ -971,8 +972,14 @@ static void *worker_main(void *arg)
 		double t0 = now_ms();
 		int i;
 
-		if (recv_req(&w, conn, &r))
-			status = handle(&r, &kind);
+		if (recv_req(&w, conn, &r)) {
+			struct vroom_req_hdr *h = (struct vroom_req_hdr *)w.raw;
+
+			if (h->build && self_build && h->build != self_build)
+				status = (int32_t)VROOM_STATUS_MISMATCH, kind = "mismatch";
+			else
+				status = handle(&r, &kind);
+		}
 		(void)write_full(conn, (char *)&status, sizeof(status));
 		close(conn);
 		for (i = 0; i < 3; i++)
@@ -1032,6 +1039,7 @@ int main(int argc, char **argv)
 		char self[4096], *sl;
 
 		if (realpath(argv[0], self) && (sl = strrchr(self, '/'))) {
+			self_build = vroom_build_id(self);
 			*sl = 0;
 			snprintf(tool_dir, sizeof(tool_dir), "%s", self);
 		}
