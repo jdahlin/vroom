@@ -465,7 +465,11 @@ static __attribute__((noinline)) uint32_t primary_unbound(cc *c, uint32_t id, ui
 			return primary_sym(c, s, id, loc);
 	}
 	if (is(c, T_LPAREN)) {
-		if (!c->o->implicit_fn)
+		qty lt = implicit_lib_type(c, id);
+
+		if (!c->o->implicit_fn && lt)
+			cc_error(c, loc, "call to undeclared library function '%.*s' with type '%s'; ISO C99 and later do not support implicit function declarations [-Wimplicit-function-declaration]", IDF(id), tyname(c, lt));
+		else if (!c->o->implicit_fn)
 			cc_error(c, loc, "call to undeclared function '%.*s'; ISO C99 and later do not support implicit function declarations [-Wimplicit-function-declaration]", IDF(id));
 		if (idlen_(id) == 6 && !memcmp(idstr_(id), "alloca", 6)) {
 			/* clang: an implicitly declared library builtin is the builtin */
@@ -476,7 +480,8 @@ static __attribute__((noinline)) uint32_t primary_unbound(cc *c, uint32_t id, ui
 				return builtin_call(c, b, loc);
 		}
 		{
-			uint32_t fs = implicit_func(c, id, loc);
+			/* clang: a library function gets its library type (asin(x) is a double) */
+			uint32_t fs = lt ? implicit_lib_func(c, id, loc, lt) : implicit_func(c, id, loc);
 			uint32_t n = mk(c, N_VAR, c->syms[fs].ty, loc);
 
 			N(n)->a = fs;

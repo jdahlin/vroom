@@ -356,6 +356,9 @@ VPRIV void pragma_weak(cc *c, const char *s, const char *e, const char *base, ui
 VPRIV void weak_declared(cc *c, uint32_t s);
 VPRIV void weak_finish(cc *c);
 VPRIV uint32_t implicit_func(cc *c, uint32_t id, uint32_t loc);
+VPRIV qty implicit_lib_type(cc *c, uint32_t id);
+VPRIV uint32_t implicit_lib_func(cc *c, uint32_t id, uint32_t loc, qty t);
+VPRIV qty sig_func_type(cc *c, const char *sig);
 VPRIV void declaration(cc *c, vec *out, bool file);
 /* stmt.c */
 VPRIV uint32_t label_ref(cc *c, uint32_t name, uint32_t loc);

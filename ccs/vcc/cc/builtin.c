@@ -248,21 +248,26 @@ static qty sigtype(cc *c, char ch)
 	}
 }
 
-/* the function type of a builtin's signature */
-static qty builtin_type(cc *c, const builtin *b)
+/* the function type of a signature in vcc's letters (sigtype) */
+VPRIV qty sig_func_type(cc *c, const char *sig)
 {
 	qty par[16];
 	uint32_t n = 0;
 	int fl = 0;
 
-	for (const char *s = b->sig + 1; *s; s++) {
+	for (const char *s = sig + 1; *s; s++) {
 		if (*s == '.') {
 			fl |= TF_VARIADIC;
 			break;
 		}
 		par[n++] = sigtype(c, *s);
 	}
-	return ty_func(c, sigtype(c, b->sig[0]), par, n, fl);
+	return ty_func(c, sigtype(c, sig[0]), par, n, fl);
+}
+
+static qty builtin_type(cc *c, const builtin *b)
+{
+	return sig_func_type(c, b->sig);
 }
 
 /* ---------------- expressions: builtins ---------------- */

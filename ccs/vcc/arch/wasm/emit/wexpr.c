@@ -1897,8 +1897,8 @@ static int wexpr1(ecx *e, uint32_t n, bool want)
 		wslot_addr(e, sl);
 		wexpr(e, x->a, true);
 		wstore(e, &l, et);
-		l.off = es;
-		wslot_addr(e, sl);
+		/* the imaginary part's address (a record copy, long double, takes no offset) */
+		wslot_addr(e, sl + es);
 		wexpr(e, x->b, true);
 		wstore(e, &l, et);
 		wslot_addr(e, sl);

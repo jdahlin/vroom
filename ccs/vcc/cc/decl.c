@@ -545,6 +545,46 @@ VPRIV uint32_t lib_builtin(cc *c, uint32_t id, uint32_t loc)
 	}
 }
 
+/* the type clang gives an implicitly declared library function (asin: double
+   (double)), 0: not one (or -fno-builtin) */
+VPRIV qty implicit_lib_type(cc *c, uint32_t id)
+{
+	char nm[128];
+	const char *p;
+	qty ret, par[16];
+	uint32_t np = 0;
+	int fl = 0, enc;
+
+	if (c->o->no_builtin || (size_t)idlen_(id) >= sizeof nm)
+		return 0;
+	memcpy(nm, idstr_(id), idlen_(id));
+	nm[idlen_(id)] = 0;
+	if (!(p = cc_lib_sig(nm, &enc)))
+		return 0;
+	if (!enc)
+		return sig_func_type(c, p);
+	if (!lb_type(c, &p, &ret))
+		return 0;
+	while (*p) {
+		if (*p == '.') {
+			fl |= TF_VARIADIC;
+			break;
+		}
+		if (np == 16 || !lb_type(c, &p, &par[np]))
+			return 0;
+		np++;
+	}
+	return ty_func(c, ret, par, np, fl);
+}
+
+VPRIV uint32_t implicit_lib_func(cc *c, uint32_t id, uint32_t loc, qty t)
+{
+	dspec ds = { .ty = T(c, t)->base, .sc = SC_EXTERN, .loc = loc };
+	declr d = { .name = id, .loc = loc };
+
+	return declare(c, &ds, &d, t, c->depth == 0);
+}
+
 VPRIV uint32_t implicit_func(cc *c, uint32_t id, uint32_t loc)
 {
 	dspec ds = { .ty = prim(TY_INT), .sc = SC_EXTERN, .loc = loc };
