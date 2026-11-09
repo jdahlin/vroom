@@ -65,6 +65,30 @@ typedef struct casm {
 	uint8_t vol, go, inl;
 } casm;
 
+/*
+ * Lazy function bodies: a static function defined in a header keeps its
+ * body as tokens (lztok, spellings of non-identifiers in lzs) and is parsed
+ * after the TU only if something names it (SF_REF), like clang's deferred
+ * emission one step earlier.  Most of a kernel TU's tokens are such bodies.
+ */
+typedef struct lztok {
+	uint32_t loc;
+	uint32_t v;		/* T_IDENT: interned id; otherwise: offset of the spelling in lzs */
+	uint32_t len;
+	uint8_t kind, flags;
+	uint16_t _pad;
+} lztok;
+
+typedef struct lzfn {
+	uint32_t sym;
+	uint32_t tk, ntk;	/* its tokens in lzt, '{' to '}' */
+	uint32_t wm;		/* nsym at the definition: later file-scope syms are not visible */
+	uint32_t name, loc, psyms, npsyms, plb, ple;	/* the declarator, for function_def */
+	uint8_t done;
+	uint8_t hc;		/* the tokens are z's, in a header cache entry (ntk 0) */
+	pp_lazy z;
+} lzfn;
+
 struct cc {
 	pp *p;
 	const cc_opts *o;
@@ -101,7 +125,7 @@ struct cc {
 	uint32_t nlist;
 	i128 *ipool;
 	uint32_t nipool;
-	double *fpool;
+	double *fpool;		/* a 16-byte long double: its double, then its binary128 bits in the next two */
 	uint32_t nfpool;
 	cstr *strs;
 	uint32_t nstr;
@@ -138,6 +162,9 @@ struct cc {
 	bool has_pend;
 	uint32_t pack[64];	/* #pragma pack stack (bytes, 0: none) */
 	int npack;
+	/* #pragma weak (decl.c): waiting for key's declaration (alias: 0, or the weak alias of key) */
+	struct pweak { uint32_t key, alias, loc, sym; } *pweak;
+	uint32_t npweak, cpweak;	/* (the done aliases, sym set, stay for the end-of-TU check) */
 
 	/* builtin types */
 	qty t_size, t_ptrdiff, t_wchar, t_char16, t_char32, t_valist;
@@ -152,6 +179,19 @@ struct cc {
 	uint32_t ntlasm;
 	uint32_t ndiag;		/* diagnostics reported */
 	struct dcst *dc;	/* declaration cache (ccsnap.c), NULL: off */
+
+	/* lazy bodies */
+	lztok *lzt;
+	uint32_t nlzt;
+	lzfn *lzf;
+	uint32_t nlzf;
+	char *lzs;
+	uint32_t nlzs;
+	bool lz_on;		/* tokens come from lzt[lzc, lze) or lzz (lz_hc), then T_EOF */
+	bool lz_hc;
+	uint32_t lzc, lze;
+	pp_lazy lzz;
+	uint32_t lz_wm;		/* parsing a lazy body: file-scope syms from here on are hidden (0: none) */
 };
 
 
@@ -179,6 +219,8 @@ enum {
 	BI_ATOMIC_FETCH_ADD, BI_ATOMIC_FETCH_SUB, BI_ATOMIC_FETCH_AND, BI_ATOMIC_FETCH_OR, BI_ATOMIC_FETCH_XOR,
 	BI_ATOMIC_ADD_FETCH, BI_ATOMIC_SUB_FETCH, BI_ATOMIC_AND_FETCH, BI_ATOMIC_OR_FETCH, BI_ATOMIC_XOR_FETCH,
 	BI_ATOMIC_THREAD_FENCE, BI_ATOMIC_SIGNAL_FENCE, BI_ATOMIC_LOCK_FREE,
+	/* legacy __sync_* without an __atomic_* form (the others map onto __atomic_*) */
+	BI_SYNC_VAL_CAS, BI_SYNC_BOOL_CAS, BI_SYNC_LOCK_RELEASE, BI_SYNC_SYNCHRONIZE,
 	BI_CONJ, BI_CREAL, BI_CIMAG,	/* complex parts (the element type is the signature's return) */
 	BI_LIB,	/* plain library call with a prototype */
 	BI_COUNT
@@ -190,7 +232,9 @@ typedef struct cval {
 	int kind;
 	bool ice;		/* integer constant expression (C11 6.6p6, clang's rules) */
 	i128 i;			/* CV_INT; CV_ADDR: byte offset */
-	double f;
+	double f;		/* CV_FLT; with ld, the nearest double of q */
+	u128 q;			/* CV_FLT with ld: the binary128 value (16-byte long double) */
+	bool ld;
 	uint32_t sym, str;	/* CV_ADDR base: sym or string literal */
 	uint32_t label;		/* CV_ADDR base: &&label */
 	uint32_t sublabel;	/* CV_ADDR: minus &&sublabel (GNU label difference: a constant once laid out) */

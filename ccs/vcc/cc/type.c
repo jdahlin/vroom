@@ -256,6 +256,42 @@ VPRIV qty ty_aligned(cc *c, qty t, uint32_t align)
 	}
 }
 
+/*
+ * _Atomic(T): a type of its own (not compatible with T), laid out as clang
+ * does: a size up to 16 bytes is rounded up to a power of 2, which is also
+ * the alignment (_Atomic struct { char a[3]; } is 4/4).  n keeps T.
+ */
+VPRIV qty ty_atomic(cc *c, qty t, uint32_t loc)
+{
+	ctype v = *T(c, t);
+
+	if (v.flags & TF_ATOMIC)
+		return t;
+	if (v.kind == TY_ARRAY || v.kind == TY_FUNC) {
+		cc_error(c, loc, "_Atomic cannot be applied to %s type", v.kind == TY_ARRAY ? "array" : "function");
+		return t;
+	}
+	if (!complete(c, t)) {
+		cc_error(c, loc, "_Atomic cannot be applied to incomplete type");
+		return t;
+	}
+	if (v.kind == TY_VECTOR) {
+		cc_error(c, loc, "_Atomic vector types are not supported by vcc");
+		return t;
+	}
+	v.flags = (uint8_t)((v.flags & ~TF_ALIGNED) | TF_ATOMIC);
+	v.n = QI(t);
+	if (v.size && v.size <= 16) {
+		uint64_t s = 1;
+
+		while (s < v.size)
+			s <<= 1;
+		v.size = s;
+		v.align = (uint32_t)s;
+	}
+	return QT(ty_intern(c, &v), QQ(t));
+}
+
 VPRIV uint64_t ty_size(cc *c, qty t) { return T(c, t)->size; }
 VPRIV uint32_t ty_align(cc *c, qty t) { return T(c, t)->align; }
 
@@ -375,6 +411,8 @@ VPRIV bool compatible(cc *c, qty a, qty b)
 	if (QI(a) == QI(b))
 		return true;
 	x = T(c, a), y = T(c, b);
+	if ((x->flags ^ y->flags) & TF_ATOMIC)
+		return false;
 	/* an enum is compatible with its underlying type */
 	if (x->kind == TY_ENUM && y->kind != TY_ENUM)
 		return compatible(c, x->base, b);

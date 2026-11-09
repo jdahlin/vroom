@@ -159,7 +159,7 @@ static void data_init(ecx *e, uint64_t off, qty ty, uint32_t init)
 				uint64_t u;
 
 				if (n == 16) {
-					u128 q = (u128)ld_of_d(cv.f);
+					u128 q = cv.ld ? cv.q : (u128)ld_of_d(cv.f);
 
 					data_put(e, off, (uint64_t)q, 8);
 					data_put(e, off + 8, (uint64_t)(q >> 64), 8);

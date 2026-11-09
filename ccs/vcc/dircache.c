@@ -29,6 +29,7 @@
 enum { D_UNKNOWN, D_PROBING, D_EXISTS, D_MISSING };
 
 typedef struct dnode {
+	struct dnode *next;	/* the bucket's chain (see lex.c's centry_get) */
 	uint32_t hash, plen;
 	_Atomic int state;
 	char path[];
@@ -67,25 +68,25 @@ static void *dalloc(size_t n)
 static dnode *node_get(const char *path, size_t plen)
 {
 	uint32_t h = vintern_hash(path, plen);
-	dnode *mine = NULL;
+	_Atomic(dnode *) *b = &dtab[h >> (32 - DBITS)];
+	dnode *head = atomic_load_explicit(b, memory_order_acquire), *seen = NULL, *mine = NULL;
 
-	for (uint32_t i = h >> (32 - DBITS);; i = (i + 1) & ((1u << DBITS) - 1)) {
-		dnode *e = atomic_load_explicit(&dtab[i], memory_order_acquire);
-
-		if (!e) {
-			if (!mine) {
-				mine = dalloc(sizeof(*mine) + plen + 17);
-				mine->hash = h;
-				mine->plen = (uint32_t)plen;
-				memcpy(mine->path, path, plen);
-				memset(mine->path + plen, 0, 17);
-			}
-			if (atomic_compare_exchange_strong_explicit(&dtab[i], &e, mine,
-					memory_order_acq_rel, memory_order_acquire))
-				return mine;
+	for (;;) {
+		for (dnode *e = head; e != seen; e = e->next)
+			if (e->hash == h && e->plen == plen && !memcmp(e->path, path, plen))
+				return e;
+		if (!mine) {
+			mine = dalloc(sizeof(*mine) + plen + 17);
+			mine->hash = h;
+			mine->plen = (uint32_t)plen;
+			memcpy(mine->path, path, plen);
+			memset(mine->path + plen, 0, 17);
 		}
-		if (e->hash == h && e->plen == plen && !memcmp(e->path, path, plen))
-			return e;
+		mine->next = head;
+		seen = head;
+		if (atomic_compare_exchange_strong_explicit(b, &head, mine, memory_order_acq_rel,
+							    memory_order_acquire))
+			return mine;
 	}
 }
 

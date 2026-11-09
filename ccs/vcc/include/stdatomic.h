@@ -1,7 +1,7 @@
 /*
  * vcc's <stdatomic.h> (Darwin target): C11 atomics on the GNU __atomic_*
- * builtins, as GCC's header does.  _Atomic is accepted and has no effect
- * on layout; operations go through the explicit functions below.
+ * builtins, as GCC's header does.  _Atomic types have clang's layout, and
+ * plain loads, stores and operators on them are atomic (seq_cst).
  */
 #ifndef __VCC_STDATOMIC_H
 #define __VCC_STDATOMIC_H

@@ -7,9 +7,14 @@ static __attribute__((noinline)) uint32_t fold_f2i(cc *c, uint32_t n, qty to)
 	cval v;
 
 	if (eval(c, n, &v) && v.kind == CV_FLT && v.f > -9.3e18 && v.f < 1.8e19) {
-		i128 i = v.f < 0 ? (i128)(int64_t)v.f : (i128)(uint64_t)v.f;
+		u128 q = v.ld ? v.q : q_of_d(v.f);
+		int bits = (int)ty_size(c, to) * 8;
+		bool sg = is_signed(c, to);
+		i128 i = q_to_int(q, 128, true);
 
-		return mk_int(c, trunc_to(c, i, to), to, N(n)->loc);
+		/* in range only: out of range is undefined, and eval saturates as clang */
+		if (i == q_to_int(q, bits, sg) || KIND(c, to) == TY_BOOL)
+			return mk_int(c, trunc_to(c, i, to), to, N(n)->loc);
 	}
 	return UINT32_MAX;
 }
@@ -29,6 +34,8 @@ VPRIV uint32_t cast_node(cc *c, uint32_t n, qty to, int kind)
 
 VPRIV __attribute__((noinline)) uint32_t decay_slow(cc *c, uint32_t n, qty t, int k)
 {
+	if (T(c, t)->flags & TF_ATOMIC)	/* lvalue conversion drops _Atomic: the load is atomic (emit) */
+		return cast_node(c, n, QUNQ(ty_unatomic(c, t)), CK_NOP);
 	if (k == TY_ARRAY)
 		return cast_node(c, n, ty_ptr(c, T(c, t)->base), CK_DECAY);
 	return cast_node(c, n, ty_ptr(c, QUNQ(t)), CK_FDECAY);

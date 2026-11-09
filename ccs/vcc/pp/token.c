@@ -222,7 +222,8 @@ static bool peek_lparen(const pp *p)
 		const ctx *c = &p->cx[d];
 
 		if (c->i < c->n)
-			return (c->type == C_PTOK || c->type == C_REPLAY ? c->pt[c->i].kind : c->vt[c->i].kind) == T_LPAREN;
+			return (c->type == C_PTOK ? c->pt[c->i].kind : c->type == C_REPLAY ? c->ht[c->i].kind
+							  : c->vt[c->i].kind) == T_LPAREN;
 		if (c->type == C_FILE || c->barrier)
 			return false;
 	}

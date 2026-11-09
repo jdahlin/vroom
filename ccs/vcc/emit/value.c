@@ -6,7 +6,7 @@
 VPRIV int treg(ecx *e)
 {
 	for (int i = 0; i < NTEMP; i++)
-		if (!(e->live & (1u << i))) {
+		if (!((e->live | e->resv) & (1u << i))) {
 			e->live |= 1u << i;
 			if (tempregs[i] >= 19)
 				e->usedcs |= 1u << tempregs[i];
@@ -48,8 +48,13 @@ VPRIV int32_t slot(ecx *e, uint64_t size, uint32_t align)
 {
 	if (align < 1)
 		align = 1;
-	if (align > 16)
-		align = 16;	/* the frame is only 16-aligned; larger alignment is approximated */
+	if (align > 16) {	/* x28: the base of the realigned frame if it turns out dynamic */
+		if (e->nlr)
+			_longjmp(e->bail, 2);	/* it holds a register variable (they start at x28): again without */
+		e->resv |= 1u << tidx(R_BP);
+	}
+	if (align > e->falign)
+		e->falign = align;	/* over 16: finish_function realigns sp to it */
 	if (size > (1u << 28))
 		efatal(e, 0, "stack object too large");
 	/* allocations past the current top ended with their scope */
@@ -286,6 +291,11 @@ VPRIV val laddr(ecx *e, lval *l)
 
 	switch (l->k) {
 	case L_SYM:
+		if (unlikely(ref_weak(e->c, l->ref))) {
+			r = treg(e);
+			addr_of_ref(e, r, l->ref, l->off);
+			return vreg(r);
+		}
 		return vaddr(l->ref, l->off);
 	case L_FRAME:
 		r = treg(e);

@@ -160,6 +160,8 @@ VPRIV val do_call(ecx *e, uint32_t ref, val *fnv, carg *args, int n, qty rty, bo
 		case A_REG:
 			for (int k = 0; k < a->a.nreg; k++)
 				arg_word(e, a, k, a->a.reg + k);
+			if (darwin_narrow(c, a->t))	/* Apple: the caller extends char/short/_Bool to 32 bits */
+				extend(e, a->a.reg, a->a.reg, (int)tsize(c, a->t), is_signed(c, a->t));
 			break;
 		case A_STACK:
 			if (DARWIN(c) && a->a.size < 8 && !is_agg(c, a->t)) {	/* Apple: packed */
@@ -218,6 +220,13 @@ VPRIV val do_call(ecx *e, uint32_t ref, val *fnv, carg *args, int n, qty rty, bo
 
 		for (int k = 0; k < hn; k++)
 			vr_store(e, hb, k, FRAME, sl + hb * k);
+		opi(e, I_ADDI, 1, r, FRAME, sl);
+		res = vreg(r);
+	} else if (vec_small(c, rty)) {
+		int32_t sl = slot(e, 8, 8);
+		int r = treg(e);
+
+		vec_small_res(e, rty, sl);
 		opi(e, I_ADDI, 1, r, FRAME, sl);
 		res = vreg(r);
 	} else if (is_recabi(c, rty)) {
@@ -571,13 +580,14 @@ VPRIV val gen_call(ecx *e, uint32_t n)
 	cc *c = e->c;
 	const node *x = N(n);
 	uint32_t ref = 0, s = direct_callee(c, x->a, &ref);
-	carg args[MAXARGS];
+	carg argbuf[MAXARGS], *args = argbuf;
 	int na = (int)x->c;
-	val fnv = vnone();
+	val fnv = vnone(), r;
 	bool noret = false, inl;
 
-	if (na > MAXARGS)
-		efatal(e, x->loc, "too many arguments");
+	/* more than MAXARGS (psql's sql_help.c passes ~260): on the heap */
+	if (na > MAXARGS && !(args = malloc((size_t)na * sizeof(*args))))
+		efatal(e, x->loc, "out of memory");
 	if (s) {
 		const sym *y = &c->syms[s];
 
@@ -615,9 +625,9 @@ VPRIV val gen_call(ecx *e, uint32_t n)
 		    (args[i].v.k == V_REG || args[i].v.k == V_REG2))
 			park(e, &args[i]);
 	}
-	if (inl)
-		return inline_call(e, s, args, na);
-	{
+	if (inl) {
+		r = inline_call(e, s, args, na);
+	} else {
 		qty ft = N(x->a)->ty;
 		int nfix = -1;
 
@@ -625,8 +635,10 @@ VPRIV val gen_call(ecx *e, uint32_t n)
 			ft = T(c, ft)->base;
 		if (is_func(c, ft) && (T(c, ft)->flags & TF_VARIADIC))
 			nfix = (int)T(c, ft)->n;
-		if (s || ref)
-			return do_call(e, ref, NULL, args, na, x->ty, noret, nfix);
-		return do_call(e, 0, &fnv, args, na, x->ty, false, nfix);
+		r = s || ref ? do_call(e, ref, NULL, args, na, x->ty, noret, nfix)
+			     : do_call(e, 0, &fnv, args, na, x->ty, false, nfix);
 	}
+	if (args != argbuf)
+		free(args);
+	return r;
 }

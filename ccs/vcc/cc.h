@@ -57,6 +57,7 @@ enum {
 	TF_ALIGNED = 16,	/* aligned typedef variant */
 	TF_TRANSPARENT = 32,	/* transparent_union */
 	TF_BLOCK = 64,		/* pointer: a block pointer (^, Darwin SDK prototypes only) */
+	TF_ATOMIC = 128,	/* _Atomic(T): n is T's index; clang's layout (ty_atomic) */
 };
 
 typedef struct ctype {
@@ -126,6 +127,8 @@ enum {
 	SF_INLINE_NOEXTERN = 16384,	/* some declaration is 'inline' without 'extern' */
 	SF_NOINSTR = 65536,	/* no_instrument_function */
 	SF_OVERLOAD = 32768,	/* __attribute__((overloadable)): mangled name, member of an overload set */
+	SF_LAZY = 1u << 17,	/* a header function whose body is kept as tokens, parsed only if referenced */
+	SF_REF = 1u << 18,	/* named anywhere (also in sizeof/typeof): a lazy body must be parsed */
 };
 
 typedef struct sym {
@@ -251,5 +254,7 @@ typedef struct cc cc;
 
 /* parse and analyse the whole TU; returns the number of errors */
 int cc_run(pp *p, const cc_opts *o);
+/* lazy bodies kept and parsed so far (all TUs of the process) */
+void cc_lz_stats(char *buf, size_t n);
 
 #endif

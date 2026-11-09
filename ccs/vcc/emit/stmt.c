@@ -505,6 +505,8 @@ static void gen_return(ecx *e, const node *x)
 
 			for (int k = 0; k < hn; k++)
 				vr_load(e, hb, k, rs, hb * k);
+		} else if (vec_small(c, rt)) {
+			vec_small_ret(e, rt, toreg(e, &v));
 		} else if (is_recabi(c, rt)) {
 			int rs = toreg(e, &v);
 
@@ -532,6 +534,8 @@ static void gen_return(ecx *e, const node *x)
 			move_to(e, 0, -1, &v, rt);
 			if (is_flt(c, rt))
 				word(e, f_in(fpk(e, rt), 0, 0));	/* fmov d0/s0, x0/w0 */
+			else if (darwin_narrow(c, rt))	/* Apple: the callee extends char/short/_Bool to 32 bits */
+				extend(e, 0, 0, (int)tsize(c, rt), is_signed(c, rt));
 		}
 		val_free(e, &v);
 	} else {
@@ -547,6 +551,58 @@ static void gen_return(ecx *e, const node *x)
  * memory; leaving its scope (block end, break, goto, return) restores sp
  * through the cleanup stack.
  */
+/* the value of a VLA size expression: from its slot once its declaration ran (vla_fix) */
+static val vla_len(ecx *e, uint32_t sn)
+{
+	cc *c = e->c;
+
+	for (uint32_t k = e->nvsz; k-- > 0;)
+		if (e->vsz[k].node == sn && e->vsz[k].inst == e->f->inst) {
+			int r = treg(e);
+
+			mem(e, I_LD, 3, 0, r, FRAME, e->vsz[k].slot);
+			return vreg(r);
+		}
+	return cast(e, gen(e, sn), N(sn)->ty, c->t_size, CK_INT);
+}
+
+/*
+ * A declaration whose type has VLAs in it (int a[n], int (*p)[n], typedef
+ * int T[n]): each size is evaluated now, once, and kept in a slot of the
+ * block, so a later n = ... does not change the type (C11 6.7.6.2p5).
+ * pure: only sizes without side effects (parameters: function_def already
+ * evaluated the others on entry).
+ */
+VPRIV void vla_fix(ecx *e, qty t, bool pure)
+{
+	cc *c = e->c;
+
+	for (;;) {
+		const ctype *a = T(c, t);
+
+		if (a->kind == TY_PTR) {
+			t = a->base;
+			continue;
+		}
+		if (a->kind != TY_ARRAY)
+			return;
+		if ((a->flags & TF_VLA) && a->n && N(a->n)->op != N_NUM && !(pure && side_effects(c, a->n))) {
+			val v = cast(e, gen(e, a->n), N(a->n)->ty, c->t_size, CK_INT);
+			int r = toreg(e, &v);
+			int32_t sl = slot(e, 8, 8);
+
+			mem(e, I_ST, 3, 0, r, FRAME, sl);
+			val_free(e, &v);
+			if (e->nvsz >= NVSZ)
+				efatal(e, 0, "too many variable length array sizes in one function");
+			e->vsz[e->nvsz].node = a->n;
+			e->vsz[e->nvsz].inst = e->f->inst;
+			e->vsz[e->nvsz++].slot = sl;
+		}
+		t = a->base;
+	}
+}
+
 VPRIV val vla_bytes(ecx *e, qty t)
 {
 	cc *c = e->c;
@@ -556,7 +612,7 @@ VPRIV val vla_bytes(ecx *e, qty t)
 
 	if (a->kind != TY_ARRAY || !(a->flags & TF_VLA))
 		return vconst(tsize(c, t));
-	n = cast(e, gen(e, a->n), N(a->n)->ty, c->t_size, CK_INT);
+	n = vla_len(e, a->n);
 	b = vla_bytes(e, a->base);
 	r = toreg(e, &n);
 	if (b.k == V_CONST) {
@@ -580,8 +636,11 @@ static void gen_vla_decl(ecx *e, const node *x, uint32_t s)
 	val n = vla_bytes(e, c->syms[s].ty);
 	int r = toreg(e, &n), t = treg(e);
 	int32_t sl = slot(e, 24, 8);
+	uint32_t al = talign(c, c->syms[s].ty);
 	ins *i;
 
+	if (sym_align(c, s) > al)
+		al = sym_align(c, s);
 	b->inst = e->f->inst;
 	b->kind = B_INDIRECT;
 	b->kv = 0;
@@ -591,14 +650,36 @@ static void gen_vla_decl(ecx *e, const node *x, uint32_t s)
 	mem(e, I_ST, 3, 0, r, FRAME, sl + 16);
 	mov(e, 1, t, SP);
 	mem(e, I_ST, 3, 0, t, FRAME, sl + 8);
-	opi(e, I_ADDI, 1, r, r, 15);
+	/* sp is 16-aligned: a larger alignment allocates align - 16 more and rounds the address up */
+	opi(e, I_ADDI, 1, r, r, 15 + (al > 16 ? al - 16 : 0));
 	opi(e, I_ANDI, 1, r, r, -16);
 	op3(e, I_SUB, 1, SP, SP, r);
 	if (e->reach) {
 		i = put(e, I_ADDI);
 		i->sz = 1, i->rd = (uint8_t)t, i->rn = SP, i->imm = 0, i->cond = 0xee;	/* + outgoing area */
 	}
+	if (al > 16) {
+		opi(e, I_ADDI, 1, t, t, al - 1);
+		opi(e, I_ANDI, 1, t, t, -(int64_t)al);
+	}
 	mem(e, I_ST, 3, 0, t, FRAME, sl);
+	if (x->b) {
+		/* = {}: zero the array's bytes, rounded up to 8 (still inside the allocation) */
+		int k = treg(e);
+		uint32_t lt = newlabel(e), ld = newlabel(e);
+
+		mem(e, I_LD, 3, 0, k, FRAME, sl + 16);
+		opi(e, I_ADDI, 1, k, k, 7);
+		opi(e, I_ANDI, 1, k, k, -8);
+		cbz(e, false, 1, k, ld);
+		deflabel_loop(e, lt, true);
+		mem(e, I_ST, 3, 0, ZR, t, 0);
+		opi(e, I_ADDI, 1, t, t, 8);
+		opi(e, I_SUBI, 1, k, k, 8);
+		cbz(e, true, 1, k, lt);
+		deflabel(e, ld);
+		tfree(e, k);
+	}
 	val_free(e, &n);
 	{
 		val tv = vreg(t);
@@ -610,6 +691,27 @@ static void gen_vla_decl(ecx *e, const node *x, uint32_t s)
 	e->clean[e->nclean++] = s;
 }
 
+/*
+ * A declaration control never reaches (switch (k) { T *p; case 1: ... }):
+ * no code, but its slot is taken here, in its block's part of the frame.
+ * Bound lazily at its first use instead, it would land in that statement's
+ * scratch area, which later temporaries (call arguments) reuse.
+ */
+static void dead_decl(ecx *e, const node *x)
+{
+	cc *c = e->c;
+	uint32_t s = x->a;
+	const sym *y = &c->syms[s];
+	int rr;
+
+	if (y->kind != S_VAR || y->sc == SC_STATIC || y->sc == SC_EXTERN || y->sc == SC_TYPEDEF ||
+	    (T(c, y->ty)->flags & TF_VLA))
+		return;
+	bind_slot(e, s);
+	if ((rr = regvar_reg(c, s)) >= 0)
+		binding(e, s)->reg = (uint8_t)rr;
+}
+
 static void gen_decl(ecx *e, const node *x)
 {
 	cc *c = e->c;
@@ -617,6 +719,8 @@ static void gen_decl(ecx *e, const node *x)
 	const sym *y = &c->syms[s];
 	bind *b;
 
+	if (unlikely(vm_type(c, y->ty)))
+		vla_fix(e, y->ty, false);
 	if (y->kind != S_VAR || y->sc == SC_STATIC || y->sc == SC_EXTERN || y->sc == SC_TYPEDEF)
 		return;
 	if (T(c, y->ty)->flags & TF_VLA) {
@@ -705,8 +809,11 @@ static void gen_stmt1(ecx *e, uint32_t n)
 
 	if (!n)
 		return;
-	if (!e->reach && !(e->E->nflags[n] & NA_LABEL))
+	if (!e->reach && !(e->E->nflags[n] & NA_LABEL)) {
+		if (N(n)->op == N_DECL)
+			dead_decl(e, N(n));
 		return;
+	}
 	x = N(n);
 	mark = e->foff;
 	switch (x->op) {

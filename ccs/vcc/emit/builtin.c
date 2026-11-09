@@ -81,6 +81,7 @@ VPRIV val dry(ecx *e, uint32_t n)
 	int32_t foff = e->foff;
 	bool reach = e->reach, calls = e->calls;
 	int nclean = e->nclean, nloop = e->nloop;
+	uint32_t nvsz = e->nvsz;
 	uint8_t nkv = e->nkv;
 	uint16_t kvalid = e->kvalid;
 	int64_t kval[NKV];
@@ -95,7 +96,7 @@ VPRIV val dry(ecx *e, uint32_t n)
 		e->nael--;
 	memcpy(e->kval, kval, sizeof(kval));
 	e->nin = nin, e->live = live, e->usedcs = usedcs, e->foff = foff;	/* labels stay: user labels may map to them */
-	e->reach = reach, e->nclean = nclean, e->nloop = nloop, e->raw.n = raw, e->calls = calls;
+	e->reach = reach, e->nclean = nclean, e->nloop = nloop, e->raw.n = raw, e->calls = calls, e->nvsz = nvsz;
 	if (v.k != V_CONST && v.k != V_ADDR)
 		v = vnone();
 	return v;
@@ -525,6 +526,32 @@ static val gen_atomic(ecx *e, const node *x, const uint32_t *arg)
 		res = vreg(ok);
 		break;
 	}
+	case BI_SYNC_VAL_CAS: case BI_SYNC_BOOL_CAS: {
+		/* old = expected; casal old, desired, [p]; val: old; bool: old == expected (low n bytes) */
+		int re = toreg(e, &v1), rd = toreg(e, &v2), old = treg(e);
+
+		mov(e, 1, old, re);
+		word(e, sz << 30 | 0x08e0fc00u | (unsigned)old << 16 | (unsigned)rp << 5 | (unsigned)rd);	/* casal */
+		if (id == BI_SYNC_VAL_CAS) {
+			if (sg && n < 8)
+				extend(e, old, old, (int)n, true);
+			res = vreg(old);
+			break;
+		}
+		if (n < 4) {
+			int cmpv = treg(e);
+
+			mov(e, 1, cmpv, re);
+			extend(e, cmpv, cmpv, (int)n, false);
+			op3(e, I_SUBS, 0, ZR, old, cmpv);	/* casal b/h zero-extends old */
+			tfree(e, cmpv);
+		} else {
+			op3(e, I_SUBS, xs, ZR, old, re);
+		}
+		cset(e, old, C_EQ);
+		res = vreg(old);
+		break;
+	}
 	default: {
 		/* ld<op>al: add 000, clr 001, eor 010, set 011 */
 		int base = id >= BI_ATOMIC_ADD_FETCH ? id - BI_ATOMIC_ADD_FETCH : id - BI_ATOMIC_FETCH_ADD;	/* add sub and or xor */
@@ -699,7 +726,7 @@ VPRIV val gen_builtin(ecx *e, uint32_t n)
 	case BI_ATOMIC_LOAD: case BI_ATOMIC_STORE: case BI_ATOMIC_EXCHANGE: case BI_ATOMIC_CMPXCHG:
 	case BI_ATOMIC_FETCH_ADD: case BI_ATOMIC_FETCH_SUB: case BI_ATOMIC_FETCH_AND: case BI_ATOMIC_FETCH_OR:
 	case BI_ATOMIC_FETCH_XOR: case BI_ATOMIC_ADD_FETCH: case BI_ATOMIC_SUB_FETCH: case BI_ATOMIC_AND_FETCH:
-	case BI_ATOMIC_OR_FETCH: case BI_ATOMIC_XOR_FETCH:
+	case BI_ATOMIC_OR_FETCH: case BI_ATOMIC_XOR_FETCH: case BI_SYNC_VAL_CAS: case BI_SYNC_BOOL_CAS:
 		return gen_atomic(e, x, arg);
 	case BI_ATOMIC_THREAD_FENCE: case BI_ATOMIC_SIGNAL_FENCE: {
 		val m = gen(e, arg[0]);
@@ -885,7 +912,7 @@ runtime:
 		if (cc_eval(c, n, &cv) && cv.kind == CV_INT)
 			return vconst(cv.i);
 		if (cc_eval(c, n, &cv) && cv.kind == CV_FLT && is_flt(c, x->ty))
-			return f_const_t(e, x->ty, cv.f);
+			return f_const_cv(e, x->ty, &cv);
 		efatal(e, x->loc, "unsupported builtin (%d)", x->aux);
 	}
 	}

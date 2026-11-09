@@ -333,7 +333,13 @@ aldrig i bygget. Ett TU-test (`bench/vcc-diff.py`) körs över alla kärnfiler.
     - Minnet är 256 MB (`VCC_DC_MAX_MB`).
     - Kvar är omlokaliserbar uppspelning per region på alla djup, som täcker resterande 84 %;
   - ~~läsordning per region mot guard-missarna~~: provat och lagt på hyllan (RESEARCH-preprocessor §6.6). Med splitsning blev det 6–8 % färre missar, men 4× långsammare `-E` och 101 TU:er med fel utdata;
-  - minnet: 2,8 GB lagrat vid `-j 6`, taket är `VPP_HC_MAX_MB`;
+  - ~~minnet: 2,8 GB lagrat vid `-j 6`~~ (2026-11-08): taket är fortfarande `VPP_HC_MAX_MB`, men en post lagrar nu mycket mindre:
+    - Profil först (`VPP_HC_DEBUG=1` skriver bytes per slag, `VPP_HC_PUB=1` en rad per post): i `-E`-läget var 1,33 GB postdata, varav makrodelta 628 MB, läsningar 308 MB, egen text 233 MB och filposter 141 MB. Det gamla "lagrat"-talet räknade med andra trådars allokeringar (`shared_used`); nu räknas exakt (`hsalloc`).
+    - Läsningar och delta upprepar barnens körningar i varje omslutande header. De delas nu i innehållsdefinierade bitar (snitt efter id, ~32 element, högst 256) som lagras en gång i en låsfri tabell; filnamn, egen `-E`-text och tokenarrayer lagras också en gång (`hc_blob`).
+    - Lagrade tokens är 12 byte (`htok`) i stället för 24 (`ptok`): identifierare som id, andra spellningar som 32-bitars offset till en delad blob, plats relativt posten, art/flaggor/16-bitars längd. Skarvade identifierare och långa spellningar går till en full `ptok` (HF_X).
+    - **Mätt (`-j 6`, load 10–13), main mot nu:** `vcc-diff.py batch --cmp --kernel` 1,33 GB → 0,33 GB lagrat, max RSS 2,07 → 1,04 GB, 3,2 s vägg och ~19 s CPU båda. `-fsyntax-only`-batch (840 TU:er) 3,6 GB (racy tal; ~1,1 GB tokens) → 0,44 GB lagrat, max RSS 3,21 → 1,36 GB, vägg 1,39 → 1,48 s, CPU 8,3 → 8,9 s. Kostnaden ligger i publiceringen (hash och jämförelse av bitar); ren uppspelning (`--warm 1`) gick 2,98 → 2,54 s vägg vid lika många cykler.
+    - Poster som träd (2026-11-08): en post lagrar bara sina egna läsningar, sina egna sista skrivningar (`HT_O`) och en lista med barnposter. Varje barn har de id:n föräldern skrev före barnet; barnets läsningar av dem är inte indata. Deltat tillämpas barn för barn och sedan det egna. Vid uppslag memoiseras ett barns utslag per `hc_try`, och räknarnamnen (`__COUNTER__`) kontrolleras sist. En variant över 64 per nyckel publiceras men listas inte, så att föräldern kan ha den som barn. Vid minnestaket blir de omslutande nivåerna ej cachebara. Lagrat `-E` 330 → 292 MB, tokens 430 → 361 MB, max RSS 735 → 691 MB respektive 1,35 → 1,27 GB; instruktioner 77,3 → 76,3 G, cykler lika inom bruset (load 6–9). Publiceringens bitar försvann nästan (`hc_vec` 193 → 14 samplingar), men nu kostar barnens validering och genomgången av barnets läsningar och skrivningar när det läggs till en förälder ungefär lika mycket.
+    - Verifiering: `--vcc-tokhash` identisk med `VPP_NOHC=1` för alla C-TU:er, `vcc-diff.py cmp -j 6` 911/912, batch `--cmp` 873/873, `vcc-sema.py run` och `layout` 878/879, `fuzz-regress` grönt. TSan-körningen avbröts (för långsam på den delade maskinen) och är inte gjord.
   - vccd tar inte om filer och litar redan på att de är oföränderliga, och cachen ärver det.
 ### Status 2.5 (2026-11-07): parser + sema, första version klar
 - 2.4 (header-cache) är medvetet uppskjuten: först hela kedjan, sedan fart.
@@ -506,6 +512,28 @@ klarar inte runtimen 34, tcc-specifika 32, kompilatorspecifikt 1).
   - Header-cachens låsfria CAS-publicering, tokencachen, intern-tabellen och vlink:s trådpool gav inga rapporter.
 - **Acceptans** (efter merge av main): ASan+UBSan (`UBSAN_OPTIONS=halt_on_error=1`) och TSan: `vcc-diff.py cmp --kernel` 873/873, `batch --cmp` 873/873, `vcc-sema.py run` 878/879, `vcc-cbatch.py` 840/840, `vccd-cc.py` 174/175 (vDSO-skriptet ska till backend), lextest `bench -p`/`idcheck`, vlink `-r` + slutlänk och vobjcopy/vnm byte-identiska med normalbygget; 0 rapporter, inga suppressions (`ccs/tsan.supp` behövs inte). Normalbygget: `vcc-diff.py cmp` 911/912, `vcc-sema.py run`/`layout` 878/879. TSan-batch ~65–100 s, ASan 12–24 s per svit.
 - **Kvar:** ASan ser inte överläsningar inuti egna mmap-arenor (ogiftade); manuell förgiftning (`ASAN_POISON_MEMORY_REGION` bakom arenornas `used`) under `__has_feature(address_sanitizer)` vore nästa steg. Fuzzmålen kunde också byggas med TSan.
+
+### Status PostgreSQL (2026-11-08): andra projektet, macOS, meson + ninja, all C av vcc
+- PostgreSQL 18.6 (`work/postgres`, REL_18_6, C) byggt nativt på macOS med meson + ninja: `bench/pg/build.sh clang|vcc [setup|build|test|all]`. Referensen är Homebrew LLVM 23 (Apple clang 21 svarar annorlunda, t.ex. på `format(gnu_printf)`). `bench/pg/cc` är CC: `-c` av `.c` → `vpp`, kompilera+länka (meson-prober) → vpp per källa och clang länkar, allt annat (`--version`, `-E`, länkning, `.S`) → clang. meson-prober (`meson-private/`) godkänns bara om clang också godtar dem: vpp ignorerar okända flaggor, och meson lade annars till GCC-flaggor (`-fpch-deps`, `-Wimplicit-fallthrough=3`). Installation till `work/pg-$V-inst` före test: SIP stryker `DYLD_LIBRARY_PATH` när pg_regress kör psql via `/bin/sh`. Alternativ: `-Dauto_features=disabled -Dcassert=true`, debugoptimized.
+- Fynd, rättade: (1) `__sync_val/bool_compare_and_swap`, `__sync_lock_release`, `__sync_synchronize` saknades (configure föll tillbaka på semaforer); (2) `__builtin_bzero`; (3) anrop med fler än 128 argument (psql:s sql_help.c: ~260) → argumenten på heapen; (4) NEON-intrinsics till simd.h/pg_popcount (`vqsubq_u8`, `vminq/vmaxq_u8`, `vcnt(q)_u8`, `vpaddlq_u8/u16`, `vpadalq_u32`, `vaddv*`, `vmaxvq_*`, `vceqq_u32`, `vzip1q_u8`, `vdupq_n_u32` m.fl.) och i vas `uqsub`, `umin`/`umax`, `cnt`, `uaddlp`/`uadalp`, `addp` (även skalär `addp d, v.2d`); (5) **lokala variabler med alignment > 16** fick bara 16 (`PGIOAlignedBlock`, aligned(4096): Assert i mdextend): prologen gör nu `sub x16, sp, #ram; and sp, x16, #-A`, locals/outs avrundas till A (ram adresserad från x29, VLA/alloca, ger fatalt fel i stället); (6) **pp:s tmp-arena återanvändes medan parsern höll lookahead**: `string_lit` tittar tre token framåt, och en andra `#x` skrev över den förstas stavning (`CppAsString2('r') "," CppAsString2('p')` blev `'p','p'`, psql `\dt` visade inga tabeller); `-E` skriver token direkt, så pariteten såg det aldrig. Nu `pp_hold_tmp()` runt `peek`; (7) **deklaration som hoppas över** (`switch (k) { T *p; case …`) fick slot vid första användning, i satsens skrapyta, som ett senare anropsargument återanvände (ecpg:s `check_indicator` segfaultade): `dead_decl` binder slotten på deklarationens plats. (8) **`vpp --batch` hängde** efter ~1 470 av 1 574 TU:er: lexerns filcache (`ctab`, 65 536 platser, öppen adressering) och dircache (`dtab`, 16 384) växte aldrig, och varje provad sökväg (även saknade, gånger alla `-I`) får en post; full tabell = oändlig probe-loop i `centry_get`. Båda är nu låsfria kedjor (CAS på hinkens huvud), aldrig fulla. Test `many_probes.c`: 65 536 `__has_include` i en TU (gammal vpp: hänger).
+- Test: `ccs/vcc/tests/vcc/` (ny svit i `vcc-ctests.py --suite vcc`, självkontrollerande, en fil per fynd: 7/7, alla 7 fallerar med vcc före rättningarna) och `ccs/vcc/tests/vas/simd-pg.s` (`bench/vas-enc.py $PWD/ccs/vcc/tests/vas`: 47/47 mot llvm-mc).
+- **Acceptans:** pg_config.h identisk med clangs utom `USE_SVE_POPCNT_WITH_RUNTIME_CHECK` (vcc har inga SVE-typer, proben fallerar rent); alla 1 504 C-filer av vcc utan reserv; `meson test` 81 ok / 0 fel / 249 överhoppade (TAP av), samma som clangs bygge (regress 231, isolation, ecpg, contrib, testmoduler). Bygge `-j 6`: clang 43 s, vcc ~26 s (via Python-shimmen, ingen vccd). vcc-sviterna: paritet 911/912, `vcc-sema.py run`/`layout` 878/879, ctests 1715/1715, fpcheck 840/840, batchparitet kärnan 873/873.
+- **Hastighet** (`bench/pg/speed.py -r 2`, 1 574 C-filer ur clang-trädets compile_commands.json, `-j 6`, bästa av 2, last 10–16 på maskinen):
+
+  | läge | vägg | CPU | filer/s | mot clang |
+  |---|---|---|---|---|
+  | clang -O2 -g (byggets flaggor) | 45,2 s | 223 s | 35 | 1,0x |
+  | clang -O0 -g0 | 26,1 s | 144 s | 60 | 1,7x |
+  | vpp, en process per fil | 11,3 s | 54 s | 139 | 4,0x |
+  | vpp --batch (en process, 6 trådar, som vccd) | 1,5 s | 5,3 s | 1 074 | 31x |
+
+  Batch: 57 610 träffar i huvudcachen, 935 återställda deklarationsregioner, 32 846 lata kroppar aldrig parsade; 38 MB objekt (clang -O0: 36 MB). 4 filer fallerar i vcc-lägena (3 × `pg_popcount_aarch64.c` med SVE ur clangs konfiguration, `norm_test.c` saknar en genererad header; den fallerar även för clang).
+- **vccd i PostgreSQL-bygget** (`bench/pg/build.sh vccd`): CC är vcc:s native shim mot en privat vccd. Med `VCC_DELEGATE=bench/pg/cc` i miljön kompilerar vccd själv `-c` av `.c` (delade huvud- och deklarationscacher) och kör allt annat som `bench/pg/cc` (prober, länkning, `--version`, TU:er vcc fallerar på; `VCC_DELEGATE_SKIP=meson-private` skickar alltid meson-prober dit). Drivern förstår nu `-MQ`. Resultat: 1 504 av 1 504 C-filer av vcc i vccd, 0 reserv; `meson test` 81 ok / 0 fel / 249 överhoppade, som clang.
+  - Helt bygge (`ninja -j 6` efter `ninja -t clean`): vccd 9–12 s, Python-shimmen ~26 s, clang 43 s.
+  - Bara psql (`ninja src/bin/psql/psql` efter clean, 214 steg, bästa av 2, last ~15): clang 4,4 s, Python-shimmen 2,95 s, vccd 1,06 s. I vccd tar de 145 kompileringarna 0,33 s vägg (~10 ms styck mot 125 ms via Python-shimmen, där 50 ms per fil var Python och resten omparsade headers); kvar är genbki.pl (perl, 0,4–1 s, samma för clang) och länksvansen (libpq.dylib, mesons `.symbols`, psql: ~0,3 s), som inte är vcc:s.
+- **Profil av `vpp --batch`** (1 570 TU:er, `sample` vid -j 1, 2026-11-09): av upptagen tid preprocessor ~47 %, parse + sema ~30 %, emit ~10 %, skriva .o ~8 %. Rättat: (a) `find_include` var ~14 %: 175 prober per uppslag, eftersom nyckeln saknade sökvägens id och varje meson-mål (egen `-I` först) lade en post per header under samma hash; nu med `fsig`: 1,5 prober, samma träffar, -6 % cykler och -7 % user-CPU vid -j 6. (b) macho.c:s qsort-jämförare läste objektet ur en filstatisk variabel: vid flera trådar blev symbolordningen fel i 36 av 1 570 objekt; nu `_Thread_local`, och -j 6 ger samma byte som -j 1. (c) Misslyckade `open()` av include-kandidater (~8 % av upptagen tid): 78 644, alla ENOENT, 73 % i kataloger som inte finns. dircache hoppade bara över absoluta sökvägar (kbuild), meson ger relativa `-I`; nu prövas den sammanfogade sökvägen: 21 122 kvar (i befintliga kataloger) mot ~8 500 katalog-stat, sys-tid -25 % vid -j 6, objekten bytevis lika. Säkert eftersom alla byggträdskataloger som include-sökningen tittar i finns direkt efter `meson setup`. De 21 122 som är kvar skulle kräva kataloglistning, och där kan genererade headers dyka upp under bygget: lämnas. Kvar, i storleksordning: skapandet av 1 570 objektfiler (open+close+write ~7,6 %, path-walk; `openat` mot en sparad katalog-fd skulle korta den); parallell överkostnad (-j 6: 11 % fler instruktioner än -j 1, fler missar i huvudcachen när trådar spelar in samma header samtidigt); deklarationscachen når sitt tak på 256 MB (1 GB: -2 % instruktioner, +80 MB).
+- Kärnan: 22 av 839 objekt ändras (vcc-cbatch, före mot efter): 9 av (5) (t.ex. `call_single_data_t` på stacken är `__aligned(32)`), 13 av (7) (slotplacering). Inte boot-testat.
+- **Kvar:** SVE (`arm_sve.h`-typer, `target("+sve")`); `__has_builtin` svarar 0 för namn som inte finns i kärnan/SDK:n (ppdata.inc, t.ex. `__sync_lock_release`): generera med `EXTRA_INC=work/postgres/src/include`; diagnostiker skriver vektortyper som `''`; TAP-testerna (`-Dtap_tests=enabled`, IPC::Run); Mach-O-länkning (ld64 i svansen).
 
 ## Linux aarch64 som värd (påbörjat 2026-11-08)
 
@@ -700,6 +728,107 @@ ingen emulering. Samma image fungerar i en qemu-system-aarch64-gäst med `-accel
     var (521 + 308 ms), `{ …; } >/dev/null 2>&1 && echo y || echo n` med `${o#-Wno-}` m.m. —
     antingen mer sh i rsh eller en Kconfig-patch som frågar vccd direkt; 60 värdkompileringar
     via vroomd före första CC; de 432 undermakes.
+
+### Profil av vcc/vccd:s eget arbete (2026-11-08): vad som bör byggas om
+- Rigg: `bench/vccd-kbuild.sh` (vroom.config, `-j 14`) med `sample <vccd> 25` +
+  `bench/vccd-sample.py`; samma TU:er utan byggsystem i `vpp --batch` (som
+  `vcc-cbatch.py`, `--stats`, `-j 1` under `sample`, `--warm 1`, `VCC_NODC`/`VPP_NOHC`);
+  `bench/vcc-bodies.py` (ny) för vilka tokens parsern får. Last 5–6.
+- **Bygget:** 13,9 s, 877 TU:er av vcc. vccd 15,6 s user + 2,4 s sys; 877 `cc-own` summerar
+  46,4 s vägg (median 39 ms) mot ~13,6 s CPU i batch (median 14 ms): jobben väntar på CPU
+  (9–11 i luften, make och andra sessioner delar kärnorna), inte på lås (84 % av de blockerade
+  proven är lediga arbetare; inga mutexväntor i kompileringen). vccd använder ~2,1 kärnor i
+  snitt under kompileringsfasen, så det är fortfarande make som sätter väggtiden där.
+- **Kompilatorn ensam** (840 kärn-TU:er, en process, kall): 131 G instruktioner, IPC 3,4,
+  12,2 s på en tråd, 2,3 s på 6. cc_run (förprocessning + parse + sema) **98 %**, emit + as
+  3 %, objekt 0,8 %. Proven utan väntan: parse + sema 50 %, förprocessning som parsern drar
+  42 %, emit 5 %, skrivning 2 %. Hög IPC: mikrooptimering är i stort sett gjord; det som
+  återstår är att göra mindre arbete.
+- **Cacharnas värde:** utan båda 189 G; huvudcachen 189 → 151 G (−20 %); deklarationscachen
+  151 → 135 G (−10 %; bara TU:er med samma *prefix* av toppnivåhuvuden, i snitt 1,5 regioner
+  per återställning, ~19 % av tokens). En helt varm process (`--warm 1`, = en vccd som överlever
+  mellan byggen) 133,6 → 106,7 G (−20 %): resten är arbete per TU som ingen cache tar bort.
+- **Vad parsern får** (`vcc-bodies.py`, 24 korpus-TU:er, 20,8 M tokens): 95 % kommer från
+  headers; **51,6 % är kroppar av funktioner i headers och 49,2 % kroppar som TU:n aldrig når**
+  (transitivt från huvudfilen och initierare); huvudfilens egna kroppar 4,1 %. Typisk TU:
+  ~8 000 inline-funktioner i headers, ~7 800 oanvända. I tid: `compound_stmt` inklusive den
+  förprocessning den drar är **55 % av kompileringens CPU** (27 % pp, 28 % parse).
+- **Ombyggnader i ordning:**
+  1. **Lat parsning av funktionskroppar i headers** (~−45–50 % av kompileringens CPU om
+     överhoppet är gratis, ~−25 % om bara parsningen sparas). Vid `{` efter en
+     funktionsdeklarator på filnivå: spara tokenintervallet och hoppa till matchande `}`;
+     parsa när namnet först refereras (anrop, adress, inlining ≤ 40 noder), annars aldrig
+     (emit är redan lat). Det dyra är att tokens fortfarande dras genom `pp_next`; därför
+     ska huvudcachens poster bära kroppsintervallen (räknade vid inspelning: djup 0, `)` `{`)
+     så att uppspelningen hoppar över en kropp i O(1) och parsern senare läser den direkt ur
+     postens tokenarray (nollkopia). Namnuppslag i en sen kropp: symboler bär en
+     deklarationsordning och uppslaget ignorerar senare deklarationer (exakt C-semantik även
+     för sena taggar/omdeklarationer). Kostnad: diagnostik i oanvända kroppar försvinner
+     (clang ger den) → `VCC_EAGER=1` för sema-/diag-sviterna; numrering (strängar, statiska
+     lokala) följer användningsordning, vilket clangs CodeGen också gör (deferred decls).
+  2. **Deklarationscache per huvud i stället för per prefix** (modul-lik): när en huvudpost
+     spelas upp med samma makroingångar och samma *semantiska* ingångar (de namn/taggar dess
+     deklarationer slog upp och vad de band till), applicera postens deklarationsdelta
+     (typer, symboler, taggar) i stället för att parsa. Efter (1) är det som återstår av
+     headers mest deklarationer (~40 % av dagens tid); prefixträdet når bara ~19 % av tokens.
+  3. **fixdep i vccd** 6 % av vccd:s CPU i bygget (`in_hashtable`, mutexväntor i `vfixdep`):
+     `CONFIG_`-mängden per fil som internerade id:n, union per TU med generationsstämplad
+     array, inget globalt lås.
+  4. Småsaker: `VCC_LOG`:s `fprintf` tar `flockfile`-lås (bara profilering); `open()` vid
+     skrivning 1 %.
+- **Lata kroppar, steg 1: på parsernivå (klart, 2026-11-08).** `cc/lazy.c`: en `static`
+  funktion som definieras i en header (inte huvudfilen; utan used/constructor/destructor/alias,
+  inte overloadable, ingen `#pragma pack` aktiv) får sin kropp sparad som tokens (`lztok`,
+  16 byte; identifierare som internerat id, övrigas stavning i `lzs`), `SF_DEFINED | SF_LAZY`,
+  och tokenströmmen fortsätter efter `}`. Efter TU:n parsas de kroppar som något namnger
+  (`SF_REF`: varje `N_VAR`, även i sizeof/typeof, block-scope-`extern` märker den globala,
+  `cleanup()`, alias-mål), tills inget nytt namnges. Namnuppslag i en sen kropp hoppar över
+  filskopssymboler skapade efter definitionen (`lz_wm`, längs `shadow`), alltså exakt det
+  som syntes där. `#pragma` i kroppen sparas som `P_DIRECTIVE` och verkställs när kroppen
+  parsas (`fetch_directive` läser vidare ur kroppen). Deklarationscachens bilder har tre nya
+  arrayer (platser kodas). Emit avbryter med internt fel om en aldrig parsad kropp refereras.
+  `VCC_EAGER=1` = som förut.
+  - **Mätt** (840 kärn-TU:er, en process, `-j 6`, samma binär med/utan `VCC_EAGER`):
+    137,6 → **101,7 G instruktioner (−26 %)**, 43,8 → 35,1 G cykler, user 14,1 → 10,9 s.
+    4,39 M kroppar sparade (264,6 M tokens), **85,6 k parsade (6,5 M tokens, 2 %)**. Cyklerna
+    sjunker mindre än instruktionerna: kopieringen av tokens är minnesbunden, och de dras
+    fortfarande genom `pp_next` (steg 2). Kallt bygge (`-j 14`, alternerande ×3, last 7–9):
+    vccd user 14,5–15,1 → **12,1–12,3 s**, summerad jobbtid 26–28 → 22–24 s; väggtiden
+    10,8–11,0 → 10,4–10,9 s (make-bunden, som väntat).
+  - **Verifierat:** cbatch 840/840 (även ASan+UBSan), vcc-obj 840/840 med samma 31 odefinierade
+    symboler som utan lata kroppar, sema run 878/879, layout 878/879 (18,8 M kontroller),
+    fpcheck 840/840, diag 63/63, ctests 1708/1708, paritet 911/912. Objekten mot `VCC_EAGER=1`:
+    maskinkoden identisk i alla 839; 284 skiljer i byte-form, bara placering: strängar i
+    `.rodata.str1.1`, ordningen av statiska lokala objekt (`__msg`) i `.rodata`/`.data`,
+    suffixet på statiska lokalas namn (sym-index) — de skapas när kroppen parsas. Debian
+    bootar till `running`, 0 felande enheter (`results/boot-20261108-214004.log`).
+- **Lata kroppar, steg 2: i huvudcachen (klart, 2026-11-08).** `publish_tok` sparar per post
+  de yttersta `{`–`}`-paren i postens egna tokens som inte har något barn inskarvat (`hent.br`).
+  När parserns `{` för en lat kropp just spelades upp ur en post och paret finns där
+  (`pp_lazy_skip`; inte under inspelning utom i en `norec`-uppspelning, inget `pend`),
+  flyttas uppspelningen förbi `}`: positionerna räknas (`ntok_out`, deklarationscachen),
+  `__COUNTER__`-posterna hoppas över. Kroppen är då `(post, open, close, bas, cbase, ci)`
+  (`pp_lazy` i `lzfn`), och den sena parsningen läser postens tokens direkt (`pp_lazy_tok`,
+  samma `__COUNTER__`-omskrivning som `replay_tok`, nu `ctr_spell`). Missar i huvudcachen
+  kopierar som i steg 1. `prevloc`/`prevflags` blir `}`:s som förut.
+  - **Mätt** (samma körning som ovan, 840 TU:er, `-j 6`): steg 1 101,7 → **76,0 G
+    instruktioner** (från 137,6 utan lata kroppar: **−45 %**), 35,1 → 27,4 G cykler (−37 %),
+    user 10,9 → 8,3 s, vägg 2,1 → 1,6 s. 4,21 M kroppar sparade, 3,81 M ur huvudcachen,
+    samma 85 647 parsade. Deklarationscachen tar nu 121 bilder (förut 64) inom samma tak.
+    Kallt bygge (`-j 14`, alternerande mot `VCC_EAGER=1` ×3, last 5–13): vccd user
+    14,8–15,1 → **9,4–9,5 s (−37 %)**, summerad jobbtid 30–42 → 19–24 s; väggtiden brus.
+  - **Verifierat:** alla 839 objekt byte-identiska med steg 1; paritet 911/912, batch --cmp
+    873/873, sema run och layout 878/879, fpcheck 840/840, diag 63/63, vcc-obj 840/840 (samma
+    31 odefinierade), cbatch ASan+UBSan 840/840, fuzz-regress, vccd-cc 174/175 (som förut;
+    obs: med ett långt `TMPDIR` blir socketvägen för lång och vccd-cc hänger i `forward`).
+    Debian bootar till `running`, 0 felande enheter (`results/boot-20261108-220251.log`).
+- **Inkrementellt:** make-nivån fungerar redan (vccd:s `.cmd` = fixdeps, `touch` på ett huvud
+  bygger om exakt beroende objekt; no-op 2,7 s, nästan bara undermakes). En vccd som lever
+  mellan byggen ger −20 % instruktioner. Det som ger mycket är en **innehållsadresserad
+  objektcache i vccd** (direktläge som ccache: nyckel = vcc-bygg-id + argv + hash av
+  huvudfilen och varje fil i förra körningens dep-lista; filhash en gång per process i
+  tokencachen; träff = skriv `.o` + `.cmd`), mmap:ad på disk. Ett om-bygge i tom utkatalog
+  blir då nära noll kompileringstid; det första kalla bygget hjälps inte.
 
 ### Felmeddelanden (clang-format)
 

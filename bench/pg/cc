@@ -1,0 +1,142 @@
+#!/usr/bin/env -S python3 -I -S
+"""CC for a native macOS PostgreSQL build: C is compiled by vcc, the rest by clang.
+
+    CC=bench/pg/cc meson setup ...      (see bench/pg/build.sh)
+
+- `-c` of a .c file: vcc (`$VPP`, default build/ccs/vpp) writes the object and
+  the depfile (-MQ becomes -MT, which is what vpp reads).
+- compile-and-link of .c files (meson's links()/run() probes): each .c is
+  compiled by vcc to a temporary object, then clang links.
+- everything else (--version, -E, -dM, links of objects, .S, .m): clang.
+
+When vcc fails, the command is appended to $VCC_PG_LOG (one line: status, cwd,
+argv as JSON).  With VCC_PG_FALLBACK=1 clang then compiles the file instead,
+so the build finishes and the log lists every TU vcc could not do.
+
+meson's probes (sources under meson-private/) compiled with -c also go to
+clang, and pass only if both accept them: vcc's driver ignores options it does
+not know, so without this meson would add every GCC-only flag it tries.  A
+probe that only one of them accepts is logged with "probe": the vcc or clang
+side that failed.
+"""
+import json
+import os
+import subprocess
+import sys
+import tempfile
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+VPP = os.environ.get("VPP") or os.path.join(HERE, "..", "..", "build", "ccs", "vpp")
+CLANG = os.environ.get("VCC_PG_CLANG", "/opt/homebrew/opt/llvm/bin/clang")
+LOG = os.environ.get("VCC_PG_LOG")
+FALLBACK = os.environ.get("VCC_PG_FALLBACK") == "1"
+
+
+def clang(argv):
+    os.execvp(CLANG, [CLANG] + argv)
+
+
+def log(status, argv, err, probe=None):
+    if LOG:
+        d = {"status": status, "cwd": os.getcwd(), "argv": argv, "err": err[-2000:]}
+        if probe:
+            d["probe"] = probe
+        with open(LOG, "a") as f:
+            f.write(json.dumps(d) + "\n")
+
+
+def clang_probe(argv):
+    """clang on the same -c command, writing its object to a scratch file."""
+    with tempfile.TemporaryDirectory(prefix="vccpg") as td:
+        a = list(argv)
+        if "-o" in a and a.index("-o") + 1 < len(a):
+            a[a.index("-o") + 1] = os.path.join(td, "probe.o")
+        p = subprocess.run([CLANG] + a, stderr=subprocess.PIPE)
+        return p.returncode, p.stderr.decode(errors="replace")
+
+
+def vcc(argv):
+    """Run vpp with argv; return (status, stderr text)."""
+    a, i = [], 0
+    while i < len(argv):
+        x = argv[i]
+        if x == "-MQ" and i + 1 < len(argv):
+            a += ["-MT", argv[i + 1]]
+            i += 2
+            continue
+        a.append(x)
+        i += 1
+    p = subprocess.run([VPP] + a, stderr=subprocess.PIPE)
+    err = p.stderr.decode(errors="replace")
+    return p.returncode, err
+
+
+def is_c(x):
+    return not x.startswith("-") and x.endswith(".c")
+
+
+def main():
+    argv = sys.argv[1:]
+    if any(x in ("-E", "-S", "-M", "-MM", "--version", "-v", "-###") or x.startswith("-print-")
+           or x.startswith("-dump") for x in argv) or "-x" in argv:
+        clang(argv)
+    srcs = [x for x in argv if is_c(x)]
+    if not srcs:
+        clang(argv)
+    if "-c" in argv:
+        st, err = vcc(argv)
+        if any("meson-private" in x for x in srcs):
+            cst, cerr = clang_probe(argv)
+            if (st == 0) != (cst == 0):
+                log(st or cst, argv, err or cerr, "vcc" if st else "clang")
+            if st == 0 and cst:
+                sys.stderr.write(cerr)
+                return cst
+        if st == 0:
+            sys.stderr.write(err)
+            return 0
+        log(st, argv, err)
+        if FALLBACK:
+            clang(argv)
+        sys.stderr.write(err)
+        return st
+    # compile and link: vcc per source, clang links the objects
+    cflags, link = [], []
+    skip = {"-o"}
+    i = 0
+    while i < len(argv):
+        x = argv[i]
+        if x in skip and i + 1 < len(argv):
+            link += [x, argv[i + 1]]
+            i += 2
+            continue
+        if is_c(x):
+            i += 1
+            continue
+        if x.startswith(("-l", "-L", "-Wl,", "-framework", "-shared", "-bundle", "-dynamiclib")):
+            link.append(x)
+            if x in ("-framework",) and i + 1 < len(argv):
+                link.append(argv[i + 1])
+                i += 1
+        else:
+            cflags.append(x)
+            link.append(x)
+        i += 1
+    with tempfile.TemporaryDirectory(prefix="vccpg") as td:
+        objs = []
+        for k, s in enumerate(srcs):
+            o = os.path.join(td, "%d.o" % k)
+            st, err = vcc(cflags + ["-c", s, "-o", o])
+            if st:
+                log(st, argv, err)
+                if FALLBACK:
+                    clang(argv)
+                sys.stderr.write(err)
+                return st
+            sys.stderr.write(err)
+            objs.append(o)
+        return subprocess.run([CLANG] + objs + link).returncode
+
+
+if __name__ == "__main__":
+    sys.exit(main())

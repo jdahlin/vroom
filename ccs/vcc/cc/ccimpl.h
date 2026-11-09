@@ -33,6 +33,7 @@
 #include "../emit.h"
 #include "../ccsnap.h"
 #include "../arena.h"
+#include "../f128.h"
 
 /* functions one file defines and another calls: static when the directory is
    compiled as one TU (VCC_UNITY, the default build), so they stay internal */
@@ -100,7 +101,7 @@ typedef struct dop {
 	uint8_t q;		/* ptr quals / array param quals */
 	uint16_t fl;		/* array: TF_*; func: TF_* */
 	uint32_t a, b;		/* array: length lo/hi or vla node; func: params start, count */
-	uint32_t np;		/* func: parameter syms (after the types; K&R: no types) */
+	uint32_t np;		/* func: parameter syms (after the types; K&R: no types); array: the size's location */
 	bool kr;		/* func: K&R identifier list */
 } dop;
 
@@ -172,6 +173,8 @@ VPRIV qty qualify(cc *c, qty t, int q);
 VPRIV qty ty_func(cc *c, qty ret, const qty *par, uint32_t n, int flags);
 VPRIV qty ty_vector(cc *c, qty elem, uint32_t size);
 VPRIV qty ty_aligned(cc *c, qty t, uint32_t align);
+VPRIV qty ty_atomic(cc *c, qty t, uint32_t loc);
+static inline qty ty_unatomic(cc *c, qty t);
 VPRIV uint64_t ty_size(cc *c, qty t);
 VPRIV uint32_t ty_align(cc *c, qty t);
 VPRIV bool complete(cc *c, qty t);
@@ -190,6 +193,7 @@ extern uint8_t kwclass[KW_END];
 VPRIV void init_keywords(void);
 static inline int kwof(const ptok *t);
 VPRIV __attribute__((noinline)) void fetch_directive(cc *c, ptok *t);
+VPRIV __attribute__((noinline)) void lz_fetch(cc *c, ptok *t);
 static inline __attribute__((always_inline)) void fetch(cc *c, ptok *t);
 static inline ptok *tok(cc *c);
 static inline bool is_nullability(const cc *c, const ptok *t);
@@ -224,6 +228,7 @@ VPRIV void vpush(cc *c, vec *v, uint32_t x);
 VPRIV uint32_t vfreeze(cc *c, const vec *v);
 VPRIV uint32_t mk_int(cc *c, i128 v, qty ty, uint32_t loc);
 VPRIV uint32_t mk_flt(cc *c, double v, qty ty, uint32_t loc);
+VPRIV uint32_t mk_fltq(cc *c, u128 q, qty ty, uint32_t loc);
 /* lit.c */
 VPRIV uint32_t number(cc *c, const ptok *t);
 VPRIV bool is_strtok(int k);
@@ -332,6 +337,9 @@ VPRIV void apply_sym_attrs(cc *c, sym *s, const attrs *a);
 VPRIV void name_overload(cc *c, uint32_t s);
 /* decl.c */
 VPRIV uint32_t file_scope_sym(cc *c, uint32_t name);
+VPRIV void pragma_weak(cc *c, const char *s, const char *e, const char *base, uint32_t loc);
+VPRIV void weak_declared(cc *c, uint32_t s);
+VPRIV void weak_finish(cc *c);
 VPRIV uint32_t implicit_func(cc *c, uint32_t id, uint32_t loc);
 VPRIV void declaration(cc *c, vec *out, bool file);
 /* stmt.c */
@@ -341,6 +349,10 @@ VPRIV uint32_t asm_stmt(cc *c, bool toplevel);
 VPRIV bool at_asm(cc *c);
 VPRIV uint32_t compound_stmt(cc *c, qty *last);
 VPRIV uint32_t statement(cc *c);
+/* lazy.c */
+VPRIV bool lazy_ok(cc *c, uint32_t s, const declr *d);
+VPRIV void lazy_capture(cc *c, uint32_t s, const declr *d);
+VPRIV void lazy_closure(cc *c);
 /* func.c */
 VPRIV void function_def(cc *c, uint32_t s, const declr *d);
 VPRIV void translation_unit(cc *c);
@@ -350,6 +362,11 @@ VPRIV void layout_checks(cc *c);
 
 static inline bool is_int_kind(int k) { return k >= TY_BOOL && k <= TY_UINT128; }
 static inline bool is_flt_kind(int k) { return k >= TY_FLOAT16 && k <= TY_LDOUBLE; }
+/* long double as binary128 (aarch64 Linux; Apple's is double) */
+static inline bool is_q(cc *c, qty t) { return KIND(c, t) == TY_LDOUBLE && c->ty[QI(t)].size == 16; }
+/* the binary128 bits of a 16-byte long double constant: the two pool slots after its double */
+static inline void fpool_q(cc *c, u128 q) { memcpy(&c->fpool[c->nfpool], &q, 16); c->nfpool += 2; }
+static inline u128 fnum_q(const cc *c, uint32_t a) { u128 q; memcpy(&q, &c->fpool[a + 1], 16); return q; }
 
 static inline int kwof(const ptok *t)
 {
@@ -359,7 +376,10 @@ static inline int kwof(const ptok *t)
 /* inline at every token consumer: a call to pp_next and a test; the rest out of line */
 static inline __attribute__((always_inline)) void fetch(cc *c, ptok *t)
 {
-	pp_next(c->p, t);
+	if (unlikely(c->lz_on))
+		lz_fetch(c, t);
+	else
+		pp_next(c->p, t);
 	if (unlikely(t->kind == P_DIRECTIVE))
 		fetch_directive(c, t);
 }
@@ -431,9 +451,17 @@ static inline uint32_t decay(cc *c, uint32_t n)
 	if (unlikely(N(n)->op == N_INDEX))
 		bounds_warn(c, n, false);	/* returns at once for anything else */
 
-	if (likely(k != TY_ARRAY && k != TY_FUNC))
+	if (likely(k != TY_ARRAY && k != TY_FUNC && !(T(c, t)->flags & TF_ATOMIC)))
 		return n;
 	return decay_slow(c, n, t, k);
+}
+
+/* the value type of an _Atomic(T) (T, qualifiers kept); anything else unchanged */
+static inline qty ty_unatomic(cc *c, qty t)
+{
+	const ctype *x = T(c, t);
+
+	return x->flags & TF_ATOMIC ? QT(x->n, QQ(t)) : t;
 }
 
 static inline uint32_t convert(cc *c, uint32_t n, qty to)

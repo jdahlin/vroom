@@ -91,6 +91,7 @@
 
 /* registers: 0-30 x0-x30, ZR, SP, FRAME (pseudo base of stack slots) */
 enum { R_FP = 29, R_LR = 30, ZR = 31, SP = 32, FRAME = 33, R_X16 = 16, R_X17 = 17 };
+#define R_BP 28		/* frame base of a realigned dynamic frame (ecx.falign, finish_function) */
 
 enum {
 	I_LABEL,	/* label */
@@ -330,6 +331,8 @@ typedef struct slotal {
 #define SLOT_TAG(i) ((uint32_t)(i)->rm | (uint32_t)(i)->ra << 8)
 #define SLOT_TAG2(i) ((uint32_t)(i)->cond | (uint32_t)(i)->sh << 8)
 
+#define NVSZ 64		/* VLA size expressions live at once in a function */
+
 typedef struct ecx {
 	emitter *E;
 	cc *c;
@@ -370,6 +373,10 @@ typedef struct ecx {
 	uint32_t inst_next;
 	/* frame */
 	int32_t foff, fmax;
+	uint32_t falign;	/* largest slot alignment; over 16 the prologue realigns sp */
+	/* VLA sizes, evaluated where their declaration is reached (stmt.c vla_fix) */
+	struct { uint32_t node, inst; int32_t slot; } vsz[NVSZ];
+	uint32_t nvsz;
 	int32_t cl_top;		/* frame offset above the block's compound literals (kept past statements) */
 	int32_t outmax;		/* outgoing stack argument bytes */
 	bool dyn, calls, vararg;
@@ -379,7 +386,7 @@ typedef struct ecx {
 	int nsrn;		/* classify: next SIMD/FP argument register */
 	/* temporaries */
 	uint32_t live;		/* bit i: tempregs[i] in use */
-	uint32_t resv;		/* ... of those, held by B_LREG variables for the whole function */
+	uint32_t resv;		/* ... of those, never handed out: B_LREG variables', x28 once falign > 16 */
 	int inlfree;		/* free temporaries an inlined call keeps (0: INLINE_FREE_SAFE) */
 	int nlr;		/* B_LREG candidates of the emitted function: sym, register */
 	uint32_t lrsym[MAXLREG];
@@ -463,7 +470,7 @@ typedef struct rctx {
 
 /* a pending fixup on word k of an instruction */
 typedef struct pfix { uint8_t k, lbl; uint32_t type, ref; int64_t off; } pfix;
-typedef struct rpatch { uint32_t k, at; pfix f; } rpatch;	/* record k at word at */
+typedef struct rpatch { uint32_t k, at; pfix f; uint8_t lng; } rpatch;	/* record k at word at; lng: relaxed (r_relax) */
 typedef struct rlab { uint32_t ser, flags, frag, off, pend; } rlab;
 typedef struct rpend { uint32_t next, k, frag, off; uint8_t *p; } rpend;	/* a branch waiting for its label */
 
@@ -627,6 +634,9 @@ VPRIV void copy_mem(ecx *e, int dst, int src, uint64_t n);
 VPRIV void zero_mem(ecx *e, int dst, uint64_t n);
 /* abi.c */
 VPRIV int hfa(cc *c, qty t, int *n);
+VPRIV bool vec_small(cc *c, qty t);
+VPRIV void vec_small_ret(ecx *e, qty t, int rs);
+VPRIV void vec_small_res(ecx *e, qty t, int32_t sl);
 VPRIV bool is_sret(cc *c, qty t);
 VPRIV void classify_va(ecx *e, qty t, int *nsaa, abiarg *a);
 VPRIV void classify(ecx *e, qty t, int *ngrn, int *nsaa, abiarg *a);
@@ -653,6 +663,9 @@ VPRIV val ptr_add_vla(ecx *e, val p, val i, qty ptr, bool sub);
 VPRIV bool ptr_to_vla(cc *c, qty ptr);
 VPRIV lval gen_lval(ecx *e, uint32_t n);
 VPRIV val load(ecx *e, lval *l, qty t);
+VPRIV bool is_atomic_lv(ecx *e, const lval *l, qty t);
+VPRIV int atomic_sz(ecx *e, qty t);
+VPRIV int atomic_addr(ecx *e, lval *l, bool *own);
 VPRIV void store(ecx *e, lval *l, qty t, val *v);
 /* arith.c */
 VPRIV void extend(ecx *e, int rd, int rs, int from, bool sgn);
@@ -676,6 +689,7 @@ static inline uint32_t q_out_hi(int r, int vr);
 VPRIV void vr_store(ecx *e, int sz, int vr, int base, int32_t off);
 VPRIV void vr_load(ecx *e, int sz, int vr, int base, int32_t off);
 VPRIV i128 ld_of_d(double x);
+VPRIV val f_const_cv(ecx *e, qty t, const cval *cv);
 VPRIV val f_const_t(ecx *e, qty t, double x);
 VPRIV val ld_compare(ecx *e, int op, qty t, val a, val b);
 VPRIV val f_arith(ecx *e, int op, qty ty, val a, val b);
@@ -719,6 +733,7 @@ VPRIV void run_cleanups(ecx *e, int to);
 VPRIV uint32_t user_label(ecx *e, uint32_t l);
 VPRIV val gen_block(ecx *e, uint32_t n, bool want);
 VPRIV val vla_bytes(ecx *e, qty t);
+VPRIV void vla_fix(ecx *e, qty t, bool pure);
 VPRIV void gen_stmt(ecx *e, uint32_t n);
 /* asm.c */
 VPRIV void gen_asm(ecx *e, uint32_t n);
@@ -753,6 +768,23 @@ static inline bool is_vec(cc *c, qty t) { return KIND(c, t) == TY_VECTOR; }
 static inline bool is_recabi(cc *c, qty t) { return is_record(c, t) || is_vec(c, t); }
 static inline bool is_agg(cc *c, qty t) { return is_record(c, t) || is_array(c, t) || is_vec(c, t); }
 static inline uint64_t tsize(cc *c, qty t) { return T(c, t)->size; }
+
+/* Apple arm64: an integer under 4 bytes in a register is extended to 32 bits by its producer */
+static inline bool darwin_narrow(cc *c, qty t) { return DARWIN(c) && T(c, t)->size < 4 && is_integer(c, t); }
+
+/* a VLA somewhere in t's pointer/array chain (int a[n], int (*p)[n][4]) */
+static inline bool vm_type(cc *c, qty t)
+{
+	for (;;) {
+		const ctype *a = T(c, t);
+
+		if (a->kind == TY_ARRAY && (a->flags & TF_VLA))
+			return true;
+		if (a->kind != TY_ARRAY && a->kind != TY_PTR)
+			return false;
+		t = a->base;
+	}
+}
 static inline uint32_t talign(cc *c, qty t) { return T(c, t)->align; }
 static inline bool is_signed(cc *c, qty t) { return cc_is_signed(c, t); }
 /* long double: binary128, kept as its bits in a register pair (arithmetic: the __*tf* helpers) */
@@ -977,6 +1009,14 @@ static inline void symop(ecx *e, int op, int sz, int ext, int rd, int rn, uint32
 static inline val vconst(i128 i) { val v = { .k = V_CONST, .i = i }; return v; }
 static inline val vreg(int r) { val v = { .k = V_REG, .r = (uint8_t)r }; return v; }
 static inline val vaddr(uint32_t ref, i128 off) { val v = { .k = V_ADDR, .ref = ref, .i = off }; return v; }
+/* an undefined weak symbol's address may be 0: a register, never a V_ADDR (which every fold takes as nonzero) */
+static inline bool ref_weak(const cc *c, uint32_t ref)
+{
+	const sym *y = &c->syms[RIDX(ref)];
+
+	return RKIND(ref) == RK_SYM && (y->flags & SF_WEAK) &&
+	       !(y->kind == S_FUNC ? (y->flags & SF_DEFINED) && y->body : (y->flags & (SF_DEFINED | SF_TENTATIVE)));
+}
 static inline val vnone(void) { val v = { .k = V_NONE }; return v; }
 
 /* a statement's temporaries end with it; compound literals live on to the end of their block */

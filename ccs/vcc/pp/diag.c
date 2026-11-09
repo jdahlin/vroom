@@ -77,6 +77,13 @@ int pp_in_system_header(const pp *p, uint32_t loc)
 	return e && loc - e->base <= e->f->size && e->sys;
 }
 
+int pp_in_main_file(const pp *p, uint32_t loc)
+{
+	const fent *e = loc_fent(p, loc);
+
+	return e && e->f == p->fe[0].f && loc - e->base <= e->f->size;
+}
+
 int pp_where(const pp *p, uint32_t loc, const char **name, uint32_t *namelen, uint32_t *line, uint32_t *col)
 {
 	const fent *e = loc_fent(p, loc);

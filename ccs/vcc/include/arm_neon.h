@@ -113,4 +113,28 @@ typedef struct uint8x16x4_t { uint8x16_t val[4]; } uint8x16x4_t;
 #define vld4q_u8(p) ({ const unsigned char *__p = (const unsigned char *)(p); uint8x16x4_t __r; \
 	for (int __k = 0; __k < 64; __k++) __r.val[__k & 3][__k >> 2] = __p[__k]; __r; })
 
+/* used by PostgreSQL (port/simd.h, pg_popcount_aarch64.c) */
+#define vld1q_u32(p) __vcc_ld(uint32x4_t, (const unsigned int *)(p))
+#define vdupq_n_u32(x) ({ uint32x4_t __r; asm("dup %0.4s, %w1" : "=w"(__r) : "r"((unsigned int)(x))); __r; })
+#define vorrq_u32(a, b) ((uint32x4_t)(a) | (uint32x4_t)(b))
+#define vaddq_u64(a, b) ((uint64x2_t)(a) + (uint64x2_t)(b))
+#define __VCC_V3(T, op, arr, a, b) ({ T __r, __a = (a), __b = (b); \
+	asm(op " %0." arr ", %1." arr ", %2." arr : "=w"(__r) : "w"(__a), "w"(__b)); __r; })
+#define vqsubq_u8(a, b) __VCC_V3(uint8x16_t, "uqsub", "16b", a, b)
+#define vminq_u8(a, b) __VCC_V3(uint8x16_t, "umin", "16b", a, b)
+#define vmaxq_u8(a, b) __VCC_V3(uint8x16_t, "umax", "16b", a, b)
+#define vceqq_u32(a, b) __VCC_V3(uint32x4_t, "cmeq", "4s", a, b)
+#define vzip1q_u8(a, b) __VCC_V3(uint8x16_t, "zip1", "16b", a, b)
+#define vcntq_u8(a) ({ uint8x16_t __r, __a = (a); asm("cnt %0.16b, %1.16b" : "=w"(__r) : "w"(__a)); __r; })
+#define vcnt_u8(a) ({ uint8x8_t __r, __a = (a); asm("cnt %0.8b, %1.8b" : "=w"(__r) : "w"(__a)); __r; })
+#define vpaddlq_u8(a) ({ uint8x16_t __a = (a); uint16x8_t __r; asm("uaddlp %0.8h, %1.16b" : "=w"(__r) : "w"(__a)); __r; })
+#define vpaddlq_u16(a) ({ uint16x8_t __a = (a); uint32x4_t __r; asm("uaddlp %0.4s, %1.8h" : "=w"(__r) : "w"(__a)); __r; })
+#define vpadalq_u32(a, b) ({ uint64x2_t __r = (a); uint32x4_t __b = (b); asm("uadalp %0.2d, %1.4s" : "+w"(__r) : "w"(__b)); __r; })
+/* across lanes: the result is lane 0 of a vector register (the rest is zeroed) */
+#define vmaxvq_u8(a) ({ uint8x16_t __r, __a = (a); asm("umaxv %b0, %1.16b" : "=w"(__r) : "w"(__a)); (uint8_t)__r[0]; })
+#define vmaxvq_u32(a) ({ uint32x4_t __r, __a = (a); asm("umaxv %s0, %1.4s" : "=w"(__r) : "w"(__a)); (uint32_t)__r[0]; })
+#define vaddvq_u16(a) ({ uint16x8_t __r, __a = (a); asm("addv %h0, %1.8h" : "=w"(__r) : "w"(__a)); (uint16_t)__r[0]; })
+#define vaddv_u8(a) ({ uint8x8_t __r, __a = (a); asm("addv %b0, %1.8b" : "=w"(__r) : "w"(__a)); (uint8_t)__r[0]; })
+#define vaddvq_u64(a) ({ uint64x2_t __r, __a = (a); asm("addp %d0, %1.2d" : "=w"(__r) : "w"(__a)); (uint64_t)__r[0]; })
+
 #endif

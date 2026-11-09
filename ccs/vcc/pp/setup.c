@@ -139,7 +139,7 @@ pp *pp_open(const pp_opts *o)
 
 static inline __attribute__((always_inline)) void next_tok(pp *p, ptok *t)
 {
-	if (p->depth == p->nfile && !p->svn)
+	if (p->depth == p->nfile && !p->svn && !p->hold_tmp)
 		p->tmp.p = p->tmp.base;	/* nothing above file level refers to tmp */
 	next_exp(p, t);
 }
@@ -183,6 +183,8 @@ static __attribute__((noinline)) void pp_next_mac(pp *p, ptok *t, uintptr_t e)
 	p->ntok_out++;
 }
 
+void pp_hold_tmp(pp *p, int on) { p->hold_tmp = on != 0; }
+
 void pp_next(pp *p, ptok *t)
 {
 	ctx *c = &p->cx[p->depth - 1];
@@ -193,8 +195,7 @@ void pp_next(pp *p, ptok *t)
 
 		if ((c->si >= e->nseg || e->seg[c->si].at != c->i) && (c->ci >= e->nctr || e->ctr[c->ci].off != c->i)) {
 			p->ntok_out++;
-			*t = c->pt[c->i++];
-			t->loc = t->loc ? c->loc + t->loc - 1 : 0;
+			htok_get(t, &c->ht[c->i++], c->pt, c->src, c->loc);
 			if (t->kind == T_IDENT)
 				t->flags |= PF_NOEXP;
 			if (unlikely(p->rec.on) && !c->norec)
@@ -215,7 +216,7 @@ void pp_next(pp *p, ptok *t)
 		} else if (c->type == C_FILE && !((c->vt[c->i].flags & TF_SOL) && c->vt[c->i].kind == T_HASH)) {
 			const vtok *v = &c->vt[c->i++];
 
-			if (p->depth == p->nfile && !p->svn)
+			if (p->depth == p->nfile && !p->svn && !p->hold_tmp)
 				p->tmp.p = p->tmp.base;	/* nothing above file level refers to tmp */
 			vfill(t, v, c->src, c->loc + v->off);
 		} else {
@@ -349,6 +350,11 @@ void pp_hc_stats(char *buf, size_t n)
 		snprintf(buf + l, n - l, "\n  stored: %lu undef reads, %lu other reads, %lu writes, %lu files",
 			 (unsigned long)hstat.nru, (unsigned long)hstat.nrv, (unsigned long)hstat.ndl,
 			 (unsigned long)hstat.nfe);
+		l = strlen(buf);
+		snprintf(buf + l, n - l, "\n  bytes: reads %.1f MB, delta %.1f MB, once %.1f MB, files %.1f MB, text %.1f MB, "
+			 "segs %.1f MB, entries %.1f MB",
+			 hstat.b_rd / 1e6, hstat.b_dl / 1e6, hstat.b_once / 1e6, hstat.b_fe / 1e6, hstat.b_text / 1e6,
+			 hstat.b_seg / 1e6, hstat.b_ent / 1e6);
 	}
 }
 
@@ -426,6 +432,7 @@ void pp_close(pp *p)
 	if (p->rec.t && !rec_spare.t) {
 		rec_spare.t = p->rec.t, rec_spare.ord = p->rec.ord, rec_spare.ctr = p->rec.ctr;
 		rec_spare.crd = p->rec.crd, rec_spare.seg = p->rec.seg, rec_spare.cp = p->rec.cp;
+		rec_spare.kid = p->rec.kid, rec_spare.kex = p->rec.kex;
 	} else if (p->rec.t) {
 		munmap(p->rec.t, HC_MAXT * sizeof(htouch));
 		munmap(p->rec.ord, HC_MAXORD * sizeof(honce));

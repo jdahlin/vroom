@@ -178,7 +178,7 @@ static bool ffact(ecx *e, uint32_t n, uint8_t f)
 
 		return (g & (FF_SEEN | FF_BAD)) == FF_SEEN && (g & f) == f;
 	}
-	return f == FF_ZERO && is_flt(c, x->ty) && cc_eval(c, n, &cv) && cv.kind == CV_FLT && cv.f == 0;
+	return f == FF_ZERO && is_flt(c, x->ty) && cc_eval(c, n, &cv) && cv.kind == CV_FLT && (cv.ld ? !(cv.q << 1) : cv.f == 0);
 }
 
 VPRIV int cond_fold(ecx *e, uint32_t n)

@@ -39,16 +39,63 @@ VPRIV __attribute__((noinline)) void fetch_directive(cc *c, ptok *t)
 		if (unlikely(dc_stale(c)))
 			dc_materialize(c);	/* (the pragma acts on the real state) */
 		pragma(c, t);
-		pp_next(c->p, t);
+		if (unlikely(c->lz_on))
+			lz_fetch(c, t);
+		else
+			pp_next(c->p, t);
 	} while (t->kind == P_DIRECTIVE);
+}
+
+/* a lazy body's next token (lazy.c), T_EOF after its '}' */
+VPRIV __attribute__((noinline)) void lz_fetch(cc *c, ptok *t)
+{
+	const lztok *z;
+
+	if (c->lz_hc && c->lzz.k <= c->lzz.close) {
+		pp_lazy_tok(c->p, &c->lzz, t);
+		c->lze = t->loc;	/* (the T_EOF's location) */
+		return;
+	}
+	if (c->lz_hc) {
+		memset(t, 0, sizeof(*t));
+		t->kind = T_EOF;
+		t->s = "";
+		t->loc = c->lze;
+		return;
+	}
+	if (c->lzc >= c->lze) {
+		memset(t, 0, sizeof(*t));
+		t->kind = T_EOF;
+		t->s = "";
+		t->loc = c->lze ? c->lzt[c->lze - 1].loc : 0;
+		return;
+	}
+	z = &c->lzt[c->lzc++];
+	t->kind = z->kind;
+	t->flags = z->flags;
+	t->loc = z->loc;
+	t->ctr = 0;
+	t->len = z->len;
+	if (z->kind == T_IDENT) {
+		t->id = z->v;
+		t->s = vintern_ents[z->v].s;
+	} else {
+		t->id = 0;
+		t->s = c->lzs + z->v;
+	}
 }
 
 void cc_fetch(cc *c, ptok *t) { fetch(c, t); }
 
 VPRIV ptok *peek(cc *c, int k)
 {
-	while (c->ntk <= k)
-		fetch(c, &c->tk[c->ntk++]);
+	/* tk[0..ntk) may point into pp's tmp arena: keep it while looking ahead */
+	if (c->ntk <= k) {
+		pp_hold_tmp(c->p, 1);
+		while (c->ntk <= k)
+			fetch(c, &c->tk[c->ntk++]);
+		pp_hold_tmp(c->p, 0);
+	}
 	return &c->tk[k];
 }
 
@@ -103,7 +150,7 @@ VPRIV void expect_semi(cc *c, const char *after)
 	report(c, "error", e, NULL, 0, &fx, 1, "expected ';' %s", after);
 }
 
-/* #pragma: only pack changes semantics; the rest is ignored here */
+/* #pragma: pack and weak change semantics; the rest is ignored here */
 static void pragma(cc *c, const ptok *t)
 {
 	const char *s = t->s, *e = t->s + t->len;
@@ -114,6 +161,10 @@ static void pragma(cc *c, const ptok *t)
 	s += 6;
 	while (s < e && (*s == ' ' || *s == '\t'))
 		s++;
+	if (e - s >= 4 && !memcmp(s, "weak", 4) && (e - s == 4 || s[4] == ' ' || s[4] == '\t')) {
+		pragma_weak(c, s + 4, e, t->s, t->loc);
+		return;
+	}
 	if ((size_t)(e - s) < 4 || memcmp(s, "pack", 4))
 		return;
 	s += 4;

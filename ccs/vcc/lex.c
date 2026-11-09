@@ -1427,11 +1427,16 @@ enum { CE_QUEUED, CE_READING, CE_READ, CE_LOADING, CE_OK, CE_MISSING };
 
 typedef struct centry {
 	vlex_file f;
+	struct centry *next;	/* the bucket's chain, newest first; set before publication */
 	uint32_t hash, len;
 	_Atomic int state;
 	char path[];
 } centry;
 
+/*
+ * Chained, never full: every probed path (missing ones too) gets an entry,
+ * and a long batch (vccd, vpp --batch) probes far more than any table size.
+ */
 #define CBITS 16
 static _Atomic(centry *) ctab[1u << CBITS];
 
@@ -1439,32 +1444,31 @@ static _Atomic(centry *) ctab[1u << CBITS];
 static centry *centry_get(const char *path, size_t len, int st0, bool *ins)
 {
 	uint32_t h = vintern_hash(path, len);
-	centry *mine = NULL;
+	_Atomic(centry *) *b = &ctab[h >> (32 - CBITS)];
+	centry *head = atomic_load_explicit(b, memory_order_acquire), *seen = NULL, *mine = NULL;
 
 	*ins = false;
-	for (uint32_t i = h >> (32 - CBITS);; i = (i + 1) & ((1u << CBITS) - 1)) {
-		centry *e = atomic_load_explicit(&ctab[i], memory_order_acquire);
-
-		if (!e) {
-			if (!mine) {
-				mine = arena(sizeof(*mine) + len + 1);
-				memset(mine, 0, sizeof(*mine));
-				mine->hash = h;
-				mine->len = (uint32_t)len;
-				memcpy(mine->path, path, len);
-				mine->path[len] = 0;
-				mine->f.path = mine->path;
-				atomic_init(&mine->state, st0);
-			}
-			if (atomic_compare_exchange_strong_explicit(&ctab[i], &e, mine,
-					memory_order_acq_rel, memory_order_acquire)) {
-				*ins = true;
-				return mine;
-			}
-			/* mine is wasted arena space: rare */
+	for (;;) {
+		for (centry *e = head; e != seen; e = e->next)
+			if (e->hash == h && e->len == len && !memcmp(e->path, path, len))
+				return e;	/* mine, if allocated, is wasted arena space: rare */
+		if (!mine) {
+			mine = arena(sizeof(*mine) + len + 1);
+			memset(mine, 0, sizeof(*mine));
+			mine->hash = h;
+			mine->len = (uint32_t)len;
+			memcpy(mine->path, path, len);
+			mine->path[len] = 0;
+			mine->f.path = mine->path;
+			atomic_init(&mine->state, st0);
 		}
-		if (e->hash == h && e->len == len && !memcmp(e->path, path, len))
-			return e;
+		mine->next = head;
+		seen = head;	/* scanned: only entries pushed after it are new */
+		if (atomic_compare_exchange_strong_explicit(b, &head, mine, memory_order_acq_rel,
+							    memory_order_acquire)) {
+			*ins = true;
+			return mine;
+		}
 	}
 }
 

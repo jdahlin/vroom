@@ -9,6 +9,10 @@ are printed too but are only trustworthy in an A/B run (`ab`, alternating).
   vbench.py run [MODE...] [--quick] [--reps N] [--bin DIR]
   vbench.py ab  [MODE...] --base DIR [--quick] [--reps N] [--bin DIR] [--per-tu]
   vbench.py check [--quick] [--bin DIR] [--base DIR]
+  vbench.py gate [MODE...] [--base DIR] [--budget PCT] [--quick] [--reps N] [--bin DIR]
+                                  A/B against --base (default: mkbase of the merge-base
+                                  with main); exit 1 if any mode's instructions grew by
+                                  more than PCT (default 1) or twice the noise (TODO.md T0)
   vbench.py mkbase [REV]          build REV's ccs/ (default: merge-base with main)
                                   into work/vbench/base/<sha>/; prints the bin dir
   vbench.py pick TSV              choose the corpus from a `vpp --batch --stats`
@@ -176,6 +180,8 @@ def cmd_run(modes, bin, quick, reps):
             print(f'{m:5} {fmt(b)}  (spread {b["spread"] * 100:.2f} %)', flush=True)
 
 def cmd_ab(modes, bin, base, quick, reps, show_tu):
+    """prints the comparison; returns [(mode, instructions %, noise %)]"""
+    res = []
     with tempfile.TemporaryDirectory(prefix='vbench-') as d:
         for m in modes:
             A, Bn, ta, tb = [], [], {}, {}
@@ -193,9 +199,25 @@ def cmd_ab(modes, bin, base, quick, reps, show_tu):
             verdict = 'BETTER' if di < -max(0.5, 2 * noise) else 'WORSE' if di > max(0.5, 2 * noise) else 'same'
             print(f'{m:5} base {fmt(a)}\n      new  {fmt(b)}\n      instructions {di:+.2f} %  cycles {dc:+.2f} %  '
                   f'(noise {noise:.2f} %)  {verdict}', flush=True)
+            res.append((m, di, noise))
             if show_tu and ta:
                 ds = sorted(((tb[k] - ta[k]) / ta[k] * 100, os.path.relpath(k, f'{W}/linux')) for k in ta if k in tb)
                 for x, k in ds[:5] + ds[-5:]: print(f'        {x:+6.2f} %  {k}')
+    return res
+
+# the modes that only move when the code does (pphc/real move with the header cache)
+GATE_MODES = ['lex', 'pp', 'fe', 'cc', 'emit', 'as', 'ld']
+
+def cmd_gate(modes, bin, base, quick, reps, budget):
+    """TODO.md T0: the hot path may not get slower than the budget"""
+    if not base: base = cmd_mkbase(None, quiet=True)
+    print(f'gate: {bin} against {base}, budget {budget:.2f} %', flush=True)
+    res = cmd_ab(modes, bin, base, quick, reps, False)
+    bad = [(m, di, n) for m, di, n in res if di > max(budget, 2 * n)]
+    print('gate: ' + '  '.join(f'{m} {di:+.2f}%' for m, di, _ in res))
+    for m, di, n in bad: print(f'gate: FAIL {m}: instructions {di:+.2f} % > budget {budget:.2f} % (noise {n:.2f} %)')
+    print('gate: ' + ('FAIL' if bad else 'ok'))
+    return 1 if bad else 0
 
 # ---------------- correctness ----------------
 
@@ -255,7 +277,7 @@ def cmd_check(bin, base, quick):
 
 # ---------------- base build ----------------
 
-def cmd_mkbase(rev):
+def cmd_mkbase(rev, quiet=False):
     if not rev:
         rev = subprocess.run(['git', '-C', R, 'merge-base', 'HEAD', 'main'], capture_output=True, text=True).stdout.strip()
     sha_ = subprocess.run(['git', '-C', R, 'rev-parse', rev], capture_output=True, text=True, check=True).stdout.strip()
@@ -274,7 +296,8 @@ def cmd_mkbase(rev):
             if p.returncode: die(f'base build failed:\n{p.stdout[-1500:]}{p.stderr[-1500:]}')
             open(f'{d}/ok', 'w').close()
         finally: os.rmdir(f'{d}.lock')
-    print(f'{d}/build/ccs')
+    if not quiet: print(f'{d}/build/ccs')
+    return f'{d}/build/ccs'
 
 # ---------------- corpus selection ----------------
 
@@ -315,15 +338,17 @@ if __name__ == '__main__':
     quick = opt('--quick', False, True); show_tu = opt('--per-tu', False, True)
     reps = int(opt('--reps', '3')); bin = os.path.abspath(opt('--bin', f'{R}/build/ccs'))
     base = opt('--base'); base = os.path.abspath(base) if base else None
+    budget = float(opt('--budget', '1'))
     cmd, rest = av[0], av[1:]
-    modes = rest or MODES
-    if cmd in ('run', 'ab'):
+    modes = rest or (GATE_MODES if cmd == 'gate' else MODES)
+    if cmd in ('run', 'ab', 'gate'):
         bad = [m for m in modes if m not in MODES]
         if bad: die(f'unknown modes {bad}; have {MODES}')
     if cmd == 'run': cmd_run(modes, bin, quick, reps)
     elif cmd == 'ab':
         if not base: die('ab needs --base DIR (vbench.py mkbase)')
         cmd_ab(modes, bin, base, quick, max(reps, 2), show_tu)
+    elif cmd == 'gate': sys.exit(cmd_gate(modes, bin, base, quick, max(reps, 2), budget))
     elif cmd == 'check': sys.exit(cmd_check(bin, base, quick))
     elif cmd == 'mkbase': cmd_mkbase(rest[0] if rest else None)
     elif cmd == 'pick': cmd_pick(rest[0])

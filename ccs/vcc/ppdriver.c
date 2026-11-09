@@ -8,7 +8,9 @@
  * that change predefined macros, -fmacro-prefix-map, -o, -Wp,-MMD,FILE /
  * -MD -MF -MT) and prints what clang -E -P prints.  With --cmp REF.i the
  * output is compared with REF.i token by token instead (vcc's lexer: kind
- * and spelling); the first difference is shown, status 1.
+ * and spelling); the first difference is shown, status 1.  The reference's
+ * token-stream hash is kept in REF.i.th (keyed by its size and mtime): when
+ * ours hashes the same, the reference is not read again.
  *
  * With -c the TU is compiled (C: cc/ + emit/, .S: as.c) into an ELF
  * object, written with one write(); the dependency file is written as for -E.
@@ -36,6 +38,13 @@
 #include "elf.h"
 #include "ppdata-predef.inc"
 #include "arena.h"
+#include "ldhash.h"
+
+#ifdef __APPLE__
+#define ST_MTIME_NS(st) ((unsigned long long)(st)->st_mtimespec.tv_sec * 1000000000ull + (unsigned long long)(st)->st_mtimespec.tv_nsec)
+#else
+#define ST_MTIME_NS(st) ((unsigned long long)(st)->st_mtim.tv_sec * 1000000000ull + (unsigned long long)(st)->st_mtim.tv_nsec)
+#endif
 
 typedef struct buf {
 	char *p;
@@ -162,6 +171,73 @@ static void show(const char *what, const vlex_file *f, uint32_t i)
 
 static int cmp_toks(const vlex_file *pa, const vlex_file *pb, char *ba, char *bb);
 
+/* XXH3 of a token stream: per token the kind, the clean spelling's length and
+ * the spelling (what cmp_toks compares) */
+static uint64_t tokstream_hash(const vlex_file *f)
+{
+	size_t cap = (size_t)f->size + (size_t)f->ntok * 5 + 64, n = 0;
+	unsigned char *b = mmap(NULL, cap, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANON, -1, 0);
+	uint64_t h;
+
+	for (uint32_t i = 0; i < f->ntok; i++) {
+		const vtok *t = &f->tok[i];
+		size_t l;
+
+		if (n + 5 + t->len + 64 > cap)	/* a clean spelling is never longer than the raw one */
+			break;
+		b[n] = (unsigned char)t->kind;
+		l = clean(f, t, (char *)b + n + 5);
+		memcpy(b + n + 1, &(uint32_t){ (uint32_t)l }, 4);
+		n += 5 + l;
+	}
+	h = ld_xxh3(b, n) ^ f->ntok;
+	munmap(b, cap);
+	return h;
+}
+
+/* REF.i.th: "size mtime_ns ntok hash" of REF.i's token stream, so a run that
+ * matches lexes only our side; written on the first compare of a REF.i */
+static int refhash_read(const char *refpath, const struct stat *st, uint64_t *h)
+{
+	char path[4096], b[128];
+	unsigned long long sz, mt, nt, hv;
+	int fd;
+	ssize_t r;
+
+	snprintf(path, sizeof(path), "%s.th", refpath);
+	fd = open(path, O_RDONLY | O_CLOEXEC);
+	if (fd < 0)
+		return 0;
+	r = read(fd, b, sizeof(b) - 1);
+	close(fd);
+	if (r <= 0)
+		return 0;
+	b[r] = 0;
+	if (sscanf(b, "%llu %llu %llu %llx", &sz, &mt, &nt, &hv) != 4 || sz != (unsigned long long)st->st_size ||
+	    mt != ST_MTIME_NS(st))
+		return 0;
+	*h = hv;
+	return 1;
+}
+
+static void refhash_write(const char *refpath, const struct stat *st, uint32_t ntok, uint64_t h)
+{
+	char path[4096], tmp[4200], b[128];
+	int fd, n;
+
+	snprintf(path, sizeof(path), "%s.th", refpath);
+	snprintf(tmp, sizeof(tmp), "%s.%d.%p", path, (int)getpid(), (void *)&fd);
+	n = snprintf(b, sizeof(b), "%llu %llu %u %016llx\n", (unsigned long long)st->st_size,
+		     ST_MTIME_NS(st), ntok, (unsigned long long)h);
+	fd = open(tmp, O_WRONLY | O_CREAT | O_TRUNC | O_CLOEXEC, 0666);
+	if (fd < 0)
+		return;
+	if (write(fd, b, (size_t)n) == n && !close(fd))
+		rename(tmp, path);
+	else
+		unlink(tmp);
+}
+
 int ppd_compare(const char *ours, size_t on, const char *refpath)
 {
 	vintern_init();
@@ -169,7 +245,8 @@ int ppd_compare(const char *ours, size_t on, const char *refpath)
 	struct stat st;
 	vlex_file A, B;
 	static _Thread_local char *ba, *bb;
-	int r;
+	uint64_t rh;
+	int r, cached;
 
 	if (fd < 0 || fstat(fd, &st)) {
 		perror(refpath);
@@ -179,16 +256,27 @@ int ppd_compare(const char *ours, size_t on, const char *refpath)
 		ba = malloc(1 << 20);
 		bb = malloc(1 << 20);
 	}
+	vlex_no_intern = 1;	/* the copies are freed: nothing may point into them */
+	A = lexbuf(ours, on);
+	/* VPP_CMP_NOCACHE=1: always lex and compare the reference */
+	cached = !getenv("VPP_CMP_NOCACHE") && refhash_read(refpath, &st, &rh);
+	if (cached && tokstream_hash(&A) == rh) {
+		vlex_no_intern = 0;
+		close(fd);
+		printf("same: %u tokens\n", A.ntok);
+		lexfree(&A);
+		return 0;
+	}
 	{
 		char *m = mmap(NULL, (size_t)st.st_size + 1, PROT_READ, MAP_PRIVATE, fd, 0);
 
 		close(fd);
-		vlex_no_intern = 1;	/* the copies are freed: nothing may point into them */
-		A = lexbuf(ours, on);
 		B = lexbuf(m, (size_t)st.st_size);
 		vlex_no_intern = 0;
 		munmap(m, (size_t)st.st_size + 1);
 	}
+	if (!cached)
+		refhash_write(refpath, &st, B.ntok, tokstream_hash(&B));
 	r = cmp_toks(&A, &B, ba, bb);
 	lexfree(&A);
 	lexfree(&B);
@@ -486,6 +574,22 @@ int ppd_run(int argc, char **argv, const ppd_env *env)
 		if (!strcmp(a, "-MD") || !strcmp(a, "-MMD")) { md = 1; continue; }
 		if (!strcmp(a, "-MF") && i + 1 < argc) { depfile = argv[++i]; continue; }
 		if (!strcmp(a, "-MT") && i + 1 < argc) { deptarget = argv[++i]; continue; }
+		if (!strcmp(a, "-MQ") && i + 1 < argc) {	/* -MT quoted for make: $ -> $$, space -> \ space */
+			static __thread char q[4096];
+			const char *t = argv[++i];
+			size_t k = 0;
+
+			for (; *t && k + 3 < sizeof(q); t++) {
+				if (*t == '$')
+					q[k++] = '$';
+				else if (*t == ' ' || *t == '\t' || *t == '#')
+					q[k++] = '\\';
+				q[k++] = *t;
+			}
+			q[k] = 0;
+			deptarget = q;
+			continue;
+		}
 		if ((v = ARG("-iquote"))) { dirs_q[nq++] = v; continue; }
 		if ((v = ARG("-isystem"))) { dirs_s[ns++] = v; continue; }
 		if ((v = ARG("-idirafter"))) { dirs_a[na++] = v; continue; }

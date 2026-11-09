@@ -1,6 +1,8 @@
 /* vcc front end: declarators */
 #include "ccimpl.h"
 
+enum { DQ_ATOMIC = 8 };	/* dop.q: _Atomic on a pointer (beside Q_*) */
+
 /* ---------------- declarators ---------------- */
 
 static void param_list(cc *c, dop *op)
@@ -121,6 +123,7 @@ static void array_suffix(cc *c, dop *op, uint32_t name)
 		}
 	}
 	op->q = (uint8_t)q;
+	op->np = tok(c)->loc;	/* where the size is written (an array of VLAs: its size node) */
 	if (accept(c, T_RSQUARE)) {
 		op->fl = TF_INCOMPLETE;
 		return;
@@ -206,7 +209,9 @@ VPRIV void declarator(cc *c, declr *d, bool abstract_ok, uint32_t *first, uint32
 					q |= Q_VOLATILE;
 				else if (kw == KW_restrict || kw == KW___restrict || kw == KW___restrict__)
 					q |= Q_RESTRICT;
-				else if (kw == KW__Atomic || is_nullability(c, tok(c)))
+				else if (kw == KW__Atomic)
+					q |= DQ_ATOMIC;
+				else if (is_nullability(c, tok(c)))
 					;
 				else if (kw == KW___attribute__ || kw == KW___attribute) {
 					attribute_list(c, &d->at);
@@ -316,16 +321,21 @@ VPRIV qty apply_declarator(cc *c, qty t, uint32_t first, uint32_t nops)
 			if (o->fl & TF_BLOCK) {
 				ctype b = { .kind = TY_PTR, .flags = TF_BLOCK, .size = 8, .align = 8, .base = t };
 
-				t = QT(ty_intern(c, &b), o->q);
+				t = QT(ty_intern(c, &b), o->q & Q_MASK);
 			} else {
-				t = QT(QI(ty_ptr(c, t)), o->q);
+				t = QT(QI(ty_ptr(c, t)), o->q & Q_MASK);
 			}
+			if (o->q & DQ_ATOMIC)	/* T *_Atomic */
+				t = ty_atomic(c, t, 0);
 			break;
 		case 1:
 			if (is_func(c, t))
 				cc_error(c, tok(c)->loc, "array of functions is not allowed");
 			if (o->fl & TF_VLA)
 				t = ty_vla(c, t, o->a);
+			else if ((T(c, t)->flags & TF_VLA) && !(o->fl & TF_INCOMPLETE))
+				/* int a[6][n]: an array of VLAs is one too (its size is known only at run time) */
+				t = ty_vla(c, t, mk_int(c, (i128)((uint64_t)o->a | (uint64_t)o->b << 32), prim(TY_ULONG), o->np));
 			else
 				t = ty_array(c, t, (uint64_t)o->a | (uint64_t)o->b << 32, o->fl);
 			break;

@@ -200,6 +200,8 @@ __attribute__((noinline)) VPRIV void attribute_list_(cc *c, attrs *a)
 					if (!s || c->syms[s].kind != S_FUNC)
 						cc_error(c, tok(c)->loc, "'cleanup' argument is not a function");
 					a->cleanup = s;
+					if (s)
+						c->syms[s].flags |= SF_REF;
 				}
 				next(c);
 				expect(c, T_RPAREN, "')'");

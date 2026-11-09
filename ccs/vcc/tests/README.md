@@ -11,6 +11,8 @@ and exits like clang's build.
 | `tcc-tests2/` | tinycc `tests/tests2`, unchanged (145 tests, `.expect`, Makefile) | https://repo.or.cz/tinycc.git `tests/tests2` | `70adbb129760b77e3bdfec447c1f986def763f2c` (2026-11-07) | LGPL-2.1 (`tcc-tests2/COPYING`); picoc-derived parts BSD-3 (`tcc-tests2/LICENSE`) |
 | `rt/` | our runtime: start.S, link.ld, a tiny libc (rt.c, include/) | here | | |
 | `emit/` | emitter tests (run.sh) | here | | |
+| `vcc/` | our regression tests, one per bug found outside the kernel (`--suite vcc`; self-checking: exit 0 or `abort()`, output compared with clang's) | here | | |
+| `vas/` | assembler encodings checked against llvm-mc: `bench/vas-enc.py $PWD/ccs/vcc/tests/vas` | here | | |
 
 The files are vendored as they are (no local edits), so updating is a copy.
 

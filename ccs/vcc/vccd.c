@@ -19,6 +19,11 @@
  *     do (the vDSO: -mcmodel=tiny/PIC; any TU vcc fails on) to vroomd
  *     (clang), links to vroom-ld/ld.lld;
  *   - runs the archiver (ar, var, llvm-ar by argv[0]) itself: ar.c.
+ *   - with VCC_DELEGATE=PROG in the request's environment (a build that is
+ *     not the kernel, e.g. PostgreSQL on macOS: bench/pg/build.sh vccd),
+ *     a vcc request is either -c of a .c file, compiled here, or run as
+ *     PROG with the same arguments (probes, links, --version, and any TU
+ *     vcc fails on); sources containing $VCC_DELEGATE_SKIP go to PROG too;
  *   - runs make's recipes for vsh (argv[0] sh): rsh.c interprets kbuild's
  *     subset of sh and runs the tools in it as requests here; anything else
  *     is answered VROOM_STATUS_DECLINE and vsh runs the real shell.
@@ -484,6 +489,52 @@ static bool cc_is_compile(const struct req *r)
 	return c && linux_target;
 }
 
+/* VCC_DELEGATE: -c of a named .c file (the last argument), nothing vcc's driver would not do */
+static bool dg_is_compile(const struct req *r, const char *skip)
+{
+	const char *last = r->argv[r->argc - 1];
+	size_t n = strlen(last);
+	bool c = false;
+
+	if (!own_cc || last[0] == '-' || n < 3 || strcmp(last + n - 2, ".c") || (skip && *skip && strstr(last, skip)))
+		return false;
+	for (int i = 1; i < r->argc - 1; i++) {
+		const char *a = r->argv[i];
+
+		if (!strcmp(a, "-c"))
+			c = true;
+		else if (!strcmp(a, "-E") || !strcmp(a, "-S") || !strcmp(a, "-M") || !strcmp(a, "-MM") || !strcmp(a, "-x") ||
+			 !strcmp(a, "-") || !strcmp(a, "-emit-llvm") || !strncmp(a, "-print-", 7) || !strcmp(a, "-###"))
+			return false;
+	}
+	return c;
+}
+
+static int spawn(const struct req *r, const char *prog);
+static const char *req_env(const struct req *r, const char *name);
+
+static int delegate(const struct req *r, const char *prog, const char **kind)
+{
+	if (dg_is_compile(r, req_env(r, "VCC_DELEGATE_SKIP"))) {
+		/* diagnostics only in the log: PROG runs a failed TU again and reports */
+		ppd_env e = { r->cwd, r->fds[1], log_requests ? 2 : -1 };
+
+		if (ppd_run(r->argc, r->argv, &e) == 0) {
+			*kind = "cc-own";
+			atomic_fetch_add(&n_cc, 1);
+			return 0;
+		}
+		atomic_fetch_add(&n_fallback, 1);
+		if (log_requests)
+			fprintf(stderr, "vccd fallback to %s: %s\n", prog, r->argv[r->argc - 1]);
+		*kind = "dg-fallbk";
+	} else {
+		*kind = "dg";
+	}
+	atomic_fetch_add(&n_spawn, 1);
+	return spawn(r, prog);
+}
+
 /* ---------------- forwarding ---------------- */
 
 /* relay the request unchanged to another vroom-protocol server */
@@ -619,6 +670,12 @@ static int handle1(const struct req *r, const char **kind)
 		*kind = st == RSH_DECLINE ? "sh-decl" : "sh";
 		atomic_fetch_add(st == RSH_DECLINE ? &n_sh_decl : &n_sh, 1);
 		return st == RSH_DECLINE ? VROOM_STATUS_DECLINE : st;
+	}
+	if (!strcmp(r->tool, "vcc")) {
+		const char *dg = req_env(r, "VCC_DELEGATE");
+
+		if (dg && *dg)
+			return delegate(r, dg, kind);
 	}
 	if (!strcmp(r->tool, "var") || !strcmp(r->tool, "ar") || !strcmp(r->tool, "llvm-ar")) {
 		/* the archiver: thin archives written here (ar.c), never llvm-ar */

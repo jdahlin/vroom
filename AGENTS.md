@@ -52,11 +52,41 @@ bench/vcc-diff.py ref -j 6          # clang -E references (once, ~1 min)
 bench/vcc-diff.py cmp -j 6 --kernel # preprocessor parity, kernel TUs
 bench/vcc-diff.py cmp -j 6          # ... including host tools (scripts/)
 bench/vcc-sema.py run -j 6          # vpp -fsyntax-only on every C TU
+bench/vcc-sema.py batch -j 6        # the same in one vpp --batch process: ~3 s instead of ~35 s
 bench/vcc-sema.py layout -j 6       # layouts/constants/decl types checked by clang (~70 s)
 bench/var-cmp.py work/build-x       # vcc ar against llvm-ar on an llvm-ar-built tree
 bench/vsh-test.py                   # vsh/rsh against dash on small recipes
 bench/vcc-fpcheck.py -j 6           # no generated FP/SIMD code under -mgeneral-regs-only (~10 s)
+bench/vcc-ctests.py -j 6 --suite vcc # our own regression tests (ccs/vcc/tests/vcc), ~1 s
+bench/vcc-stress.py [--vccd]        # pathological inputs fail cleanly, vccd survives (~2 s)
+bench/vcc-abi.py                    # cross-compiler calls, clang/vcc x caller/callee, qemu (ccs/vcc/tests/abi, ~3 s)
+bench/vcc-abi.py --host             # the same for the Apple arm64 ABI, run natively
+bench/vcc-bflayout.py               # generated bit-field records, layouts checked by clang, Linux + Apple (~1 s)
+bench/vcc-ldconst.py                # generated long double literals and folds, bits vs clang (~2 s)
+bench/vccd-test.py                  # vccd as a service: socket, bad requests, cache invalidation (~11 s)
+bench/vbench.py gate                # performance gate: instructions vs the merge-base, budget 1 % (~1 min)
+bench/vas-enc.py $PWD/ccs/vcc/tests/vas   # vas encodings vs llvm-mc
+bench/pg/build.sh clang && bench/pg/build.sh vcc   # PostgreSQL (macOS, meson+ninja): build + meson test (~2 min each)
+bench/pg/build.sh vccd             # ... CC = vcc shim + private vccd (VCC_DELEGATE=bench/pg/cc for the rest)
+bench/pg/speed.py                  # PostgreSQL compile speed: clang, clang -O0, vpp, vpp --batch
 ```
+Fast loop while iterating (cold numbers on a loaded machine, in brackets):
+`vcc-sema.py batch` (3 s [33 s]), `vcc-diff.py batch --cmp --kernel` (3 s
+[14 s]; `cmp` 16 s [40 s]: each reference's token-stream hash is kept in
+`work/ppref/X.i.th`, keyed by its size and mtime, so a match lexes only our
+side; `VPP_CMP_NOCACHE=1` compares in full), `vcc-ctests.py -j 6` (5 s [32 s]: a vcc object byte-identical to one
+that passed is not linked or run again; `--no-cache` runs all) and
+`vcc-sema.py layout` (clang only rechecks TUs whose claims changed;
+`NOCACHE=1` rechecks all).  The batch modes share caches across TUs as vccd
+does, so before a commit also run the per-process `cmp` and `run`.
+PostgreSQL (`work/postgres`, `bench/pg/`) is the second test project: a
+native macOS build where vcc compiles every C file (`bench/pg/cc`) and clang
+links; the reference is Homebrew clang, and both builds must pass the same
+`meson test` set.  A bug found there gets a test in `ccs/vcc/tests/vcc/`.
+`TODO.md` lists what is left before vcc is a production compiler, each item
+with how it is validated.  The vcc suite, stress and vccd tests mark known bugs
+`xfail` with their TODO.md item; a fix that makes one pass turns it into an
+XPASS error, so the same commit removes the marker.
 Parity is a token-stream comparison (kind and spelling) of `clang -E -P`
 against `vpp`, both lexed by vcc's lexer.  A change to `pp/` or `lex.c` is
 only done when the parity run is fully green; a change to `cc/` when both

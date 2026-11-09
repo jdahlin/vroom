@@ -185,6 +185,7 @@ enum {
 	K_DP2, K_EXTR, K_VLD1, K_VREV, K_DUP, K_EXT, K_MOVI, K_VSHIFT, K_VPERM, K_PMULL,
 	K_FMOV, K_SHA3, K_SHA2, K_CPY, K_SET, K_V3, K_UMOV, K_AT, K_RDVL, K_PREG,
 	K_V2, K_TBL, K_SHA512, K_LDR_REP, K_INS, K_MTE, K_MTEM, K_VNOT, K_SMOV, K_ACROSS,
+	K_VMISC, K_ADDP,
 };
 
 typedef struct { const char *name; uint8_t k; uint32_t base; uint32_t x; } Mn;
@@ -194,6 +195,7 @@ static const Mn mns[] = {
 	{ "adc", K_DP2, 0x1a000000, 0 },
 	{ "adcs", K_DP2, 0x3a000000, 0 },
 	{ "add", K_ADDSUB, 0, 0 },
+	{ "addp", K_ADDP, 0x0e20bc00, 0 },
 	{ "adds", K_ADDSUB, 1, 0 },
 	{ "addv", K_ACROSS, 0x0e31b800, 0 },
 	{ "adr", K_ADR, 0x10000000, 0 },
@@ -239,6 +241,7 @@ static const Mn mns[] = {
 	{ "cmp", K_CMP, 3, 0 },
 	{ "cmtst", K_VPERM, 0x0e208c00, 0 },
 	{ "cneg", K_CNEG, 0x5a800400, 0 },
+	{ "cnt", K_VMISC, 0x0e205800, 0 },
 	{ "cpye", K_CPY, 0x1d800400, 0 },
 	{ "cpyen", K_CPY, 0x1d800400, 12 },
 	{ "cpyern", K_CPY, 0x1d800400, 8 },
@@ -441,16 +444,21 @@ static const Mn mns[] = {
 	{ "trn1", K_VPERM, 0x0e002800, 0 },
 	{ "trn2", K_VPERM, 0x0e006800, 0 },
 	{ "tst", K_TST, 0, 0 },
+	{ "uadalp", K_VMISC, 0x2e206800, 1 },
+	{ "uaddlp", K_VMISC, 0x2e202800, 1 },
 	{ "ubfiz", K_BFI, 2, 0 },
 	{ "ubfm", K_BFM, 2, 0 },
 	{ "ubfx", K_BFX, 2, 0 },
 	{ "udiv", K_DP2, 0x1ac00800, 0 },
 	{ "umaddl", K_MUL, 0x9ba00000, 3 },
+	{ "umax", K_VPERM, 0x2e206400, 1 },
 	{ "umaxv", K_ACROSS, 0x2e30a800, 0 },
+	{ "umin", K_VPERM, 0x2e206c00, 1 },
 	{ "uminv", K_ACROSS, 0x2e31a800, 0 },
 	{ "umov", K_UMOV, 0, 0 },
 	{ "umulh", K_DP2, 0x9bc07c00, 1 },
 	{ "umull", K_MUL, 0x9ba07c00, 2 },
+	{ "uqsub", K_VPERM, 0x2e202c00, 0 },
 	{ "ushr", K_VSHIFT, 0x2f000400, 1 },
 	{ "uzp1", K_VPERM, 0x0e001800, 0 },
 	{ "uzp2", K_VPERM, 0x0e005800, 0 },
@@ -1584,7 +1592,12 @@ static int k_ext(Ctx *c, const Mn *m)
 	return 0;
 }
 
-static int k_vperm(Ctx *c, const Mn *m) { return vec3(c, m->base, 1); }
+/* AdvSIMD three-same, sized; x=1: no .2d (umin, umax) */
+static int k_vperm(Ctx *c, const Mn *m)
+{
+	if (m->x && c->n == 3 && c->op[0].kind == A64O_VREG && c->op[0].arr == A64_2D) BADOPS;
+	return vec3(c, m->base, 1);
+}
 
 static int k_pmull(Ctx *c, const Mn *m)
 {
@@ -1828,6 +1841,36 @@ static int k_across(Ctx *c, const Mn *m)
 	if (sz < 0 || sz > 2 || (sz == 2 && !arr_q(o[1].arr)) || o[0].cls != cls_of[sz]) BADOPS;
 	*c->out = m->base | arr_q(o[1].arr) << 30 | (uint32_t)sz << 22 | R(&o[1]) << 5 | R(&o[0]);
 	return 0;
+}
+
+/*
+ * AdvSIMD two-register misc, size from the source: cnt Vd.T, Vn.T (8b/16b);
+ * x=1, long pairwise (uaddlp, uadalp): Vd has elements twice Vn's, same Q.
+ */
+static int k_vmisc(Ctx *c, const Mn *m)
+{
+	const A64Op *o = c->op;
+	if (c->n != 2 || o[0].kind != A64O_VREG || o[1].kind != A64O_VREG) BADOPS;
+	int sz = arr_size(o[1].arr);
+	if (!m->x) {
+		if (o[0].arr != o[1].arr || (o[1].arr != A64_8B && o[1].arr != A64_16B)) BADOPS;
+	} else if (sz < 0 || sz > 2 || arr_size(o[0].arr) != sz + 1 || arr_q(o[0].arr) != arr_q(o[1].arr)) {
+		BADOPS;
+	}
+	*c->out = m->base | arr_q(o[1].arr) << 30 | (uint32_t)sz << 22 | R(&o[1]) << 5 | R(&o[0]);
+	return 0;
+}
+
+/* addp: Vd.T, Vn.T, Vm.T, or the scalar Dd, Vn.2d */
+static int k_addp(Ctx *c, const Mn *m)
+{
+	const A64Op *o = c->op;
+	if (c->n == 2 && isreg(&o[0]) && o[0].cls == A64_D && o[1].kind == A64O_VREG && o[1].arr == A64_2D) {
+		*c->out = 0x5ef1b800u | R(&o[1]) << 5 | R(&o[0]);
+		return 0;
+	}
+	if (c->n == 3 && o[0].kind == A64O_VREG && o[0].arr == A64_1D) BADOPS;
+	return vec3(c, m->base, 1);
 }
 
 /* not Vd.8b/16b, Vn.T (mvn's vector form) */
@@ -2088,6 +2131,8 @@ int a64_asm(const char *mn, size_t n, const A64Op *op, int nop, uint32_t *out, A
 	case K_VNOT: return k_vnot(&c, m);
 	case K_SMOV: return k_smov(&c, m);
 	case K_ACROSS: return k_across(&c, m);
+	case K_VMISC: return k_vmisc(&c, m);
+	case K_ADDP: return k_addp(&c, m);
 	}
 	*err = "internal: unhandled class";
 	return -1;

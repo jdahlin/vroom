@@ -143,7 +143,8 @@ typedef struct ctx {
 	uint32_t mid;		/* macro to re-enable when popped */
 	const vtok *vt;
 	const ptok *pt;
-	const char *src;
+	const struct htok *ht;	/* C_REPLAY: the entry's own tokens (pt: its escapes) */
+	const char *src;	/* (C_REPLAY: the shared region's base) */
 	/* C_FILE */
 	const vlex_file *f;
 	const pfile *fi;
@@ -248,6 +249,46 @@ typedef struct hcread {
 
 typedef struct hent hent;
 
+typedef struct hkid {
+	const hent *e;
+	const uint32_t *ex;
+	uint32_t nex;
+} hkid;
+
+/*
+ * A stored token (12 bytes; ptok is 24).  T_IDENT: sp is the id and the
+ * spelling the id's.  Others: sp - 1 is the spelling's offset / 16 in the
+ * shared region (hc_blob: stored once).  HF_X: sp indexes the entry's
+ * escapes (full ptoks: spliced identifiers, long spellings, odd ids).
+ */
+typedef struct htok {
+	uint32_t sp;
+	uint32_t loc;		/* offset from the base + 1, 0: none */
+	uint8_t kind, flags;
+	uint16_t len;
+} htok;
+#define HF_X 128
+
+static inline void htok_get(ptok *t, const htok *h, const ptok *xtk, const char *sbase, uint32_t base)
+{
+	if (__builtin_expect(h->flags & HF_X, 0)) {
+		*t = xtk[h->sp];
+	} else {
+		t->kind = h->kind;
+		t->flags = h->flags;
+		t->len = h->len;
+		t->ctr = 0;
+		if (h->kind == T_IDENT) {
+			t->id = h->sp;
+			t->s = vintern_ents[h->sp].s;
+		} else {
+			t->id = 0;
+			t->s = sbase + ((size_t)(h->sp - 1) << 4);
+		}
+	}
+	t->loc = h->loc ? base + h->loc - 1 : 0;
+}
+
 typedef struct hseg {
 	uint32_t at;		/* own-text offset (tokens: own-token index) the child goes before */
 	uint32_t cdelta;	/* child's counter at entry - ours */
@@ -255,24 +296,59 @@ typedef struct hseg {
 	uint32_t lbase;		/* tokens: child's location base - ours */
 } hseg;
 
+/*
+ * Arrays of reads and writes are stored as chunks deduplicated across all
+ * entries (an enclosing header's arrays repeat its children's runs).  The
+ * cuts are content defined (by id), so the same run of ids cuts the same
+ * way wherever it occurs.
+ */
+typedef struct hck {
+	uint64_t h;
+	uint32_t n, esz;	/* elements, element size (1: a blob of n bytes) */
+	_Alignas(16) char d[];
+} hck;
+
+typedef struct hvec {
+	const hck *const *c;
+	uint32_t nc, n;		/* chunks, elements */
+} hvec;
+
+/* for (const T *x ...) over the elements of v; break leaves only the inner loop */
+#define HV_FOR(v, T, x) \
+	for (uint32_t hvi_ = 0; hvi_ < (v).nc; hvi_++) \
+		for (const T *x = (const T *)(const void *)(v).c[hvi_]->d, *x##_e = x + (v).c[hvi_]->n; x < x##_e; x++)
+
 struct hent {
 	hent *next;
-	const hread *rg;	/* inputs: include guards (v: HDEF or 0); checked first */
-	const uint32_t *ru;	/* inputs: ids read while undefined */
-	const hread *rv;	/* inputs: other reads */
-	const hread *dl;	/* delta: (id, new value) */
+	hvec rg;		/* inputs: include guards (v: HDEF or 0); checked first */
+	hvec ru;		/* inputs: ids read while undefined (uint32_t) */
+	hvec rv;		/* inputs: other reads */
+	hvec dl;		/* delta: (id, new value) */
 	const honce *ord;
 	const vlex_file *const *oadd;
 	const hfent *fe;
 	const char *text;	/* own text */
-	const ptok *tk;		/* token entries: own tokens (loc: offset from the base + 1, 0: none) */
+	const htok *tk;		/* token entries: own tokens */
+	const ptok *xtk;	/* their escapes (HF_X) */
 	const hctr *ctr;
 	const hcread *crd;
 	const hseg *seg;
+	/*
+	 * Child entries in order: their reads are this entry's inputs except
+	 * the ids this entry wrote before the child (ex, sorted), and their
+	 * deltas apply before this entry's own (dl: the ids whose last write was
+	 * this entry's own).  Reads and writes are stored once, in the entry
+	 * that made them.
+	 */
+	const struct hkid *kid;
+	uint32_t nkid;
 	size_t ntext, total;	/* own text (tokens); with the children */
 	int32_t level;		/* __INCLUDE_LEVEL__ used: the include depth it ran at (-1: not used) */
 	uint32_t ndirs, psig;	/* leading search directories its lookups depended on; their id */
-	uint32_t nrg, nru, nrv, ndl, nord, noadd, nfe, nctr, ncrd, nseg, span, counter_delta;
+	const uint32_t *br;	/* token entries: outermost '{' '}' pairs of the own tokens with no child
+				   inside, (open, close) own-token indices, by open (pp_lazy_skip) */
+	uint32_t nbr;
+	uint32_t nord, noadd, nfe, nctr, ncrd, nseg, span, counter_delta;
 	uint8_t has_text, first_sol, col_end, pend_out;
 };
 
@@ -288,7 +364,8 @@ typedef struct hkey {
 } hkey;
 
 /* recording, per TU */
-enum { HT_R = 1, HT_W = 2, HT_G = 4 /* the read was an include guard check */ };
+enum { HT_R = 1, HT_W = 2, HT_G = 4 /* the read was an include guard check */,
+       HT_O = 8 /* the last write was the level's own (not a child entry's) */ };
 
 typedef struct htouch {	/* a level's first touch of an id */
 	uint32_t id, flags;	/* HT_* */
@@ -323,7 +400,13 @@ typedef struct hlev {
 	size_t text0;
 	uint8_t first_sol, uses_level;
 	uint32_t nfile, ndirs;
+	uint32_t k0, x0;	/* starts in rec.kid, rec.kex */
 } hlev;
+
+typedef struct hkidr {		/* a child entry of a level while recording */
+	const hent *e;
+	uint32_t ex0, nex;	/* its exclusions in rec.kex */
+} hkidr;
 
 struct pp {
 	uintptr_t *mdir[NMDIR];
@@ -331,6 +414,7 @@ struct pp {
 	ctx *cx;
 	int depth, nfile;
 	arena perm, tmp;
+	bool hold_tmp;		/* the consumer holds earlier tokens: tmp is not reset (pp_hold_tmp) */
 	ptok *sv;		/* scratch token stack */
 	size_t svn;
 	fent *fe;
@@ -391,6 +475,10 @@ struct pp {
 		uint32_t ncrd;
 		hsegr *seg;
 		uint32_t nseg;
+		hkidr *kid;	/* child entries, in order (their reads and writes are theirs) */
+		uint32_t nkid;
+		uint32_t *kex;
+		uint32_t nkex;
 		cprov *cp;	/* indexed by ptok.ctr */
 		uint32_t ncp;
 		ptok *tk;	/* tokens handed out (token mode) */
@@ -399,6 +487,13 @@ struct pp {
 		size_t nsb;
 	} rec;
 	uint64_t *rst[NMDIR];	/* per id: serial << 32 | index in rec.t */
+	struct { const void *e; uint32_t gen, ok; } hm[4096];	/* child entry verdicts in one hc_try */
+	uint32_t hgen;
+	size_t hc_bytes;	/* what the entry being published allocated */
+	const void *bcache[4096];	/* recent spelling blobs, by hash */
+	const char *kspell[256];	/* punctuator spelling blobs, by kind */
+	const hck *ckc[4096];
+	const hck *vkc[4096];	/* recent chunks, by (first id, last id, length) */	/* recent chunks, by hash (most repeats are a child's) */
 };
 
 #define error(p, loc, ...) pp_diag(p, loc, "error", __VA_ARGS__)
@@ -421,6 +516,7 @@ struct pp {
 typedef struct {
 	_Atomic unsigned long hit, miss, rec, uncacheable, full, bytes_replayed, bytes_rec, mem;
 	_Atomic unsigned long nru, nrv, ndl, nfe, nvalid, nchecked;
+	_Atomic unsigned long b_rd, b_dl, b_once, b_fe, b_text, b_seg, b_ent;	/* bytes stored, by kind */
 } hstat_t;
 
 /* ---------------- #if expressions ---------------- */
@@ -440,10 +536,16 @@ typedef struct ival {
  * Kbuild puts the per-directory -I last, so one entry serves every TU.  A
  * warm lookup is one probe instead of a path build, directory-cache probe
  * and token-cache probe per search directory.
+ *
+ * The key also holds the whole search path's id (fsig): meson puts each
+ * target's own -I first, so the prefix an answer depends on differs per
+ * target anyway, and without fsig the entries of hundreds of targets for
+ * the same header shared one hash and one probe cluster (PostgreSQL: 175
+ * probes per lookup, half of them same-key entries for other targets).
  */
 struct incent {
 	uint64_t hash;
-	uint32_t sig, klen;
+	uint32_t sig, fsig, klen;
 	int32_t mode;		/* start * 4 + angled * 2 + next */
 	uint32_t used, usig;	/* directories looked at, psig[used] */
 	int32_t sdir;
@@ -460,6 +562,8 @@ struct incent {
 
 #define HC_MAXTK (1u << 24)
 #define HC_MAXSB ((size_t)1 << 28)
+#define HC_MAXKID (1u << 20)
+#define HC_MAXKEX (1u << 22)
 
 typedef struct {
 	htouch *t;
@@ -467,6 +571,8 @@ typedef struct {
 	hcpos *ctr;
 	hcrd *crd;
 	hsegr *seg;
+	hkidr *kid;
+	uint32_t *kex;
 	cprov *cp;
 } rec_spare_t;
 
@@ -478,6 +584,10 @@ static inline int utoa(char *b, unsigned long long v);
 /* file.c */
 extern _Atomic size_t shared_used;
 VPRIV void *salloc(size_t n);
+VPRIV const char *shared_base0(void);
+VPRIV void *hsalloc(pp *p, size_t n);
+VPRIV hvec hc_vec(pp *p, const void *a, uint32_t n, uint32_t esz);
+VPRIV const void *hc_blob(pp *p, const void *s, size_t n);
 VPRIV const pfile *pfile_get(const vlex_file *f, bool *fresh);
 VPRIV uint32_t file_line(const vlex_file *f, const pfile *cfi, uint32_t off);
 static inline void *alloc(arena *a, size_t n);
@@ -563,7 +673,7 @@ VPRIV const vlex_file *find_include(pp *p, const ctx *from, const char *name, si
 /* hcache.c */
 VPRIV int once_index(const pp *p, const vlex_file *f);
 VPRIV bool hc_top(const pp *p);
-VPRIV bool hc_valid(const pp *p, const hent *e);
+VPRIV bool hc_valid(pp *p, const hent *e);
 VPRIV void emit(pp *p, const hent *e, unsigned base);
 static inline void text_start(pp *p, uint8_t sol);
 /* hcentry.c */
@@ -682,7 +792,17 @@ static inline void touch_write(pp *p, uint32_t id)
 	htouch *t = touch(p, id, &isnew);
 
 	if (t)
-		t->flags |= HT_W;
+		t->flags |= HT_W | HT_O;
+}
+
+/* a child entry wrote id: not the level's own write any more */
+static inline void touch_write_kid(pp *p, uint32_t id)
+{
+	bool isnew;
+	htouch *t = touch(p, id, &isnew);
+
+	if (t)
+		t->flags = (t->flags | HT_W) & ~(uint32_t)HT_O;
 }
 
 /* the entry for token t's identifier, as an expansion reads it */

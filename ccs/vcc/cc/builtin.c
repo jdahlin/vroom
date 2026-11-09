@@ -100,6 +100,10 @@ static const builtin builtins[] = {
 	{ "__sync_and_and_fetch", BI_ATOMIC_AND_FETCH, 0, "s." }, { "__sync_or_and_fetch", BI_ATOMIC_OR_FETCH, 0, "s." },
 	{ "__sync_xor_and_fetch", BI_ATOMIC_XOR_FETCH, 0, "s." },
 	{ "__sync_lock_test_and_set", BI_ATOMIC_EXCHANGE_N, 0, "s." },
+	{ "__sync_val_compare_and_swap", BI_SYNC_VAL_CAS, 0, "s." },
+	{ "__sync_bool_compare_and_swap", BI_SYNC_BOOL_CAS, 0, "s." },
+	{ "__sync_lock_release", BI_SYNC_LOCK_RELEASE, 0, "s." },
+	{ "__sync_synchronize", BI_SYNC_SYNCHRONIZE, 0, "s." },
 	{ "__atomic_thread_fence", BI_ATOMIC_THREAD_FENCE, 0, "vi" },
 	{ "__atomic_signal_fence", BI_ATOMIC_SIGNAL_FENCE, 0, "vi" },
 	{ "__atomic_always_lock_free", BI_ATOMIC_LOCK_FREE, 1, "bzP" },
@@ -107,7 +111,7 @@ static const builtin builtins[] = {
 	/* library functions */
 	{ "__builtin_memcpy", BI_LIB, 0, "ppPz" }, { "__builtin_memmove", BI_LIB, 0, "ppPz" },
 	{ "__builtin_memset", BI_LIB, 0, "ppiz" }, { "__builtin_memcmp", BI_LIB, 0, "iPPz" },
-	{ "__builtin_memchr", BI_LIB, 0, "pPiz" },
+	{ "__builtin_memchr", BI_LIB, 0, "pPiz" }, { "__builtin_bzero", BI_LIB, 0, "vpz" },
 	{ "__builtin_strcmp", BI_LIB, 0, "iSS" }, { "__builtin_strncmp", BI_LIB, 0, "iSSz" },
 	{ "__builtin_strcpy", BI_LIB, 0, "ssS" }, { "__builtin_strncpy", BI_LIB, 0, "ssSz" },
 	{ "__builtin_strcat", BI_LIB, 0, "ssS" }, { "__builtin_strncat", BI_LIB, 0, "ssSz" },
@@ -463,14 +467,27 @@ static uint32_t atomic_call(cc *c, const builtin *b, uint32_t loc)
 		[BI_ATOMIC_LOAD - BI_ATOMIC_LOAD_N] = 3, [BI_ATOMIC_STORE - BI_ATOMIC_LOAD_N] = 3,
 		[BI_ATOMIC_EXCHANGE - BI_ATOMIC_LOAD_N] = 4, [BI_ATOMIC_CMPXCHG - BI_ATOMIC_LOAD_N] = 6,
 	};
-	int id = b->id, want = id <= BI_ATOMIC_CMPXCHG ? nargs[id - BI_ATOMIC_LOAD_N] : 3;
+	int id = b->id, want = id <= BI_ATOMIC_CMPXCHG ? nargs[id - BI_ATOMIC_LOAD_N] :
+			       id == BI_SYNC_VAL_CAS || id == BI_SYNC_BOOL_CAS ? 4 : id == BI_SYNC_SYNCHRONIZE ? 1 : 3;
 	vec args;
 	qty pt, t, rt = prim(TY_VOID), tp;
 
 	args_list(c, &args);
 	for (uint32_t i = 0; i < args.n; i++)
 		args.v[i] = decay(c, args.v[i]);
-	if (b->sig[0] == 's' && args.n == 2)	/* __sync_*: sequentially consistent */
+	if (id == BI_SYNC_SYNCHRONIZE) {	/* a full barrier: __atomic_thread_fence(seq_cst) */
+		if (args.n)
+			cc_error(c, loc, "too many arguments to function call");
+		args.n = 0;
+		vpush(c, &args, mk_int(c, 5, prim(TY_INT), loc));
+		return mk_builtin(c, BI_ATOMIC_THREAD_FENCE, prim(TY_VOID), loc, &args);
+	}
+	if (id == BI_SYNC_LOCK_RELEASE && args.n == 1) {	/* __atomic_store_n(p, 0, release) */
+		vpush(c, &args, mk_int(c, 0, prim(TY_INT), loc));
+		vpush(c, &args, mk_int(c, 3, prim(TY_INT), loc));
+		id = BI_ATOMIC_STORE_N;
+	}
+	if (b->sig[0] == 's' && (int)args.n == want - 1)	/* __sync_*: sequentially consistent */
 		vpush(c, &args, mk_int(c, 5, prim(TY_INT), loc));
 	if ((int)args.n != want) {
 		cc_error(c, loc, "too %s arguments to function call", (int)args.n < want ? "few" : "many");
@@ -516,6 +533,13 @@ static uint32_t atomic_call(cc *c, const builtin *b, uint32_t loc)
 		args.v[2] = convert(c, args.v[2], tp);
 		args.v[3] = convert(c, args.v[3], prim(TY_BOOL));
 		rt = prim(TY_BOOL);
+		break;
+	case BI_SYNC_VAL_CAS: case BI_SYNC_BOOL_CAS:	/* (p, old, new) -> previous *p, or whether it was old */
+		if (!is_integer(c, t) && !is_ptr(c, t))
+			cc_error(c, loc, "address argument to atomic operation must be a pointer to integer or pointer");
+		args.v[1] = convert(c, args.v[1], t);
+		args.v[2] = convert(c, args.v[2], t);
+		rt = id == BI_SYNC_VAL_CAS ? t : prim(TY_BOOL);
 		break;
 	default:	/* fetch_op / op_fetch */
 		if (!is_integer(c, t) && !is_ptr(c, t))
@@ -593,6 +617,7 @@ VPRIV uint32_t builtin_call(cc *c, const builtin *b, uint32_t loc)
 	case BI_ATOMIC_FETCH_ADD: case BI_ATOMIC_FETCH_SUB: case BI_ATOMIC_FETCH_AND: case BI_ATOMIC_FETCH_OR:
 	case BI_ATOMIC_FETCH_XOR: case BI_ATOMIC_ADD_FETCH: case BI_ATOMIC_SUB_FETCH: case BI_ATOMIC_AND_FETCH:
 	case BI_ATOMIC_OR_FETCH: case BI_ATOMIC_XOR_FETCH:
+	case BI_SYNC_VAL_CAS: case BI_SYNC_BOOL_CAS: case BI_SYNC_LOCK_RELEASE: case BI_SYNC_SYNCHRONIZE:
 		return atomic_call(c, b, loc);
 	case BI_CONJ: case BI_CREAL: case BI_CIMAG: {
 		qty ct = ty_complex(c, sigtype(c, b->sig[0]));
