@@ -475,6 +475,10 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
   (generate a list, try each).
   *Validate:* T1 per builtin; `bench/vcc-builtins.py` that compiles a
   generated use of each clang builtin and reports unknowns.
+  (Partly: `__builtin_clzg`/`ctzg`/`popcountg`, `__builtin_ldexp*`,
+  `scalbn`, `trunc*`, `round*`, `floorf`/`ceilf`, `fmaxf`/`fminf` added for
+  `make -C ccs self-check`; the generic forms reject a fallback whose
+  argument has side effects.)
   `__has_builtin` answers 0 for names absent from the kernel/SDK
   (ppdata.inc was generated from those only; seen in PostgreSQL): generate
   it from the full list.

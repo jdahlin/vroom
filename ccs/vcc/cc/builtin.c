@@ -13,6 +13,8 @@ static const builtin builtins[] = {
 	{ "__builtin_ffs", BI_FFS, 1, "ii" }, { "__builtin_ffsl", BI_FFSL, 1, "il" }, { "__builtin_ffsll", BI_FFSLL, 1, "iw" },
 	{ "__builtin_popcount", BI_POPCOUNT, 1, "iu" }, { "__builtin_popcountl", BI_POPCOUNTL, 1, "iL" },
 	{ "__builtin_popcountll", BI_POPCOUNTLL, 1, "iW" },
+	{ "__builtin_clzg", BI_CLZG, 1, "i." }, { "__builtin_ctzg", BI_CTZG, 1, "i." },
+	{ "__builtin_popcountg", BI_POPCOUNTG, 1, "i." },
 	{ "__builtin_parity", BI_PARITY, 1, "iu" }, { "__builtin_parityl", BI_PARITYL, 1, "iL" },
 	{ "__builtin_parityll", BI_PARITYLL, 1, "iW" },
 	{ "__builtin_clrsb", BI_CLRSB, 1, "ii" }, { "__builtin_clrsbl", BI_CLRSBL, 1, "il" },
@@ -133,6 +135,12 @@ static const builtin builtins[] = {
 	{ "__builtin_sqrt", BI_LIB, 0, "dd" }, { "__builtin_sqrtf", BI_LIB, 0, "ff" },
 	{ "__builtin_floor", BI_LIB, 0, "dd" }, { "__builtin_ceil", BI_LIB, 0, "dd" },
 	{ "__builtin_fmax", BI_LIB, 0, "ddd" }, { "__builtin_fmin", BI_LIB, 0, "ddd" },
+	{ "__builtin_ldexp", BI_LIB, 0, "ddi" }, { "__builtin_ldexpf", BI_LIB, 0, "ffi" },
+	{ "__builtin_ldexpl", BI_LIB, 0, "DDi" }, { "__builtin_scalbn", BI_LIB, 0, "ddi" },
+	{ "__builtin_floorf", BI_LIB, 0, "ff" }, { "__builtin_ceilf", BI_LIB, 0, "ff" },
+	{ "__builtin_trunc", BI_LIB, 0, "dd" }, { "__builtin_truncf", BI_LIB, 0, "ff" },
+	{ "__builtin_round", BI_LIB, 0, "dd" }, { "__builtin_roundf", BI_LIB, 0, "ff" },
+	{ "__builtin_fmaxf", BI_LIB, 0, "fff" }, { "__builtin_fminf", BI_LIB, 0, "fff" },
 	{ "__builtin___memcpy_chk", BI_LIB, 0, "ppPzz" }, { "__builtin___memmove_chk", BI_LIB, 0, "ppPzz" },
 	{ "__builtin___memset_chk", BI_LIB, 0, "ppizz" }, { "__builtin___strcpy_chk", BI_LIB, 0, "ssSz" },
 	{ "__builtin___stpcpy_chk", BI_LIB, 0, "ssSz" }, { "__builtin___strcat_chk", BI_LIB, 0, "ssSz" },
@@ -553,6 +561,54 @@ static uint32_t atomic_call(cc *c, const builtin *b, uint32_t loc)
 	return mk_builtin(c, id, rt, loc, &args);
 }
 
+/* __builtin_clzg/ctzg/popcountg (x[, fallback]), clang's type-generic forms:
+   x unsigned, up to 64 bits; the fixed-width builtin on x widened, clz
+   corrected for the narrower width; the fallback is the result for x == 0
+   (x is then read twice: one with side effects is not supported yet). */
+static uint32_t generic_bitcount(cc *c, int id, uint32_t loc)
+{
+	vec args;
+	uint32_t x, r, w;
+	qty xt;
+	unsigned bits;
+	int fid;
+
+	args_list(c, &args);
+	if (args.n < 1 || args.n > (id == BI_POPCOUNTG ? 1u : 2u)) {
+		cc_error(c, loc, "too %s arguments to function call", args.n ? "many" : "few");
+		return mk_int(c, 0, prim(TY_INT), loc);
+	}
+	x = decay(c, args.v[0]);
+	xt = QUNQ(N(x)->ty);	/* before promotion: the width counts */
+	if (!is_integer(c, xt) || is_signed(c, xt) || KIND(c, xt) == TY_BOOL || ty_size(c, xt) > 8) {
+		cc_error(c, N(x)->loc, "1st argument must be a scalar unsigned integer type of at most 64 bits");
+		return mk_int(c, 0, prim(TY_INT), loc);
+	}
+	bits = (unsigned)ty_size(c, xt) * 8;
+	w = convert(c, x, prim(bits == 64 ? TY_ULLONG : TY_UINT));
+	fid = id == BI_CLZG ? (bits == 64 ? BI_CLZLL : BI_CLZ) : id == BI_CTZG ? (bits == 64 ? BI_CTZLL : BI_CTZ)
+	    : (bits == 64 ? BI_POPCOUNTLL : BI_POPCOUNT);
+	{
+		vec a1;
+
+		vinit(&a1);
+		vpush(c, &a1, w);
+		r = mk_builtin(c, fid, prim(TY_INT), loc, &a1);
+	}
+	if (id == BI_CLZG && bits < 32)
+		r = binop(c, T_MINUS, r, mk_int(c, 32 - bits, prim(TY_INT), loc), loc);
+	if (args.n == 2) {
+		uint32_t fb = convert(c, rvalue(c, decay(c, args.v[1])), prim(TY_INT));
+
+		if (has_side_effects(c, x)) {
+			cc_error(c, N(x)->loc, "unsupported: a fallback with an argument that has side effects");
+			return r;
+		}
+		r = conditional(c, binop(c, T_EXCLAIMEQ, x, mk_int(c, 0, xt, loc), loc), r, fb, loc);
+	}
+	return r;
+}
+
 VPRIV uint32_t builtin_call(cc *c, const builtin *b, uint32_t loc)
 {
 	vec args;
@@ -633,6 +689,8 @@ VPRIV uint32_t builtin_call(cc *c, const builtin *b, uint32_t loc)
 			return cplx_unary(c, T_TILDE, a, loc);
 		return rvalue(c, cplx_part(c, a, b->id == BI_CIMAG));
 	}
+	case BI_CLZG: case BI_CTZG: case BI_POPCOUNTG:
+		return generic_bitcount(c, b->id, loc);
 	case BI_COUNTED_BY_REF: {
 		uint32_t m;
 
