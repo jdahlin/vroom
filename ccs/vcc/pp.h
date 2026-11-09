@@ -58,6 +58,8 @@ typedef struct pp_opts {
 	const char *const *wargs;	/* -W..., -w options in command-line order */
 	int nwargs;
 	int error_limit;		/* -ferror-limit=: 0 default (20), -1 none */
+	int has_epoch;			/* SOURCE_DATE_EPOCH set: __DATE__/__TIME__/__TIMESTAMP__ from epoch, UTC */
+	long long epoch;
 } pp_opts;
 
 enum { PP_LINUX_AARCH64, PP_DARWIN };

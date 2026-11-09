@@ -216,6 +216,22 @@ def sigterm_drains():
     finally: v.stop()
 
 @test()
+def request_env_reaches_job():
+    """SOURCE_DATE_EPOCH and CPATH from the client's environment, not the server's"""
+    v = Vccd()
+    try:
+        d = f'{v.dir}/w'; os.makedirs(f'{d}/cp', exist_ok=True)
+        open(f'{d}/cp/e.h', 'w').write('#define FROM_CPATH 7\n')
+        src = tu(d, 'e.c', '#include "e.h"\nconst char *s = __DATE__; int k = FROM_CPATH;\n')
+        env = dict(os.environ, VCC_SOCK=v.sock, SOURCE_DATE_EPOCH='0', CPATH='cp')
+        p = subprocess.run([SHIM] + TARGET + ['-E', '-P', src], cwd=d, env=env, capture_output=True, text=True,
+                           process_group=0)
+        check(p.returncode == 0, f'rc {p.returncode} {p.stderr[-300:]}')
+        check('"Jan  1 1970"' in p.stdout, f'__DATE__ not from SOURCE_DATE_EPOCH: {p.stdout[-200:]}')
+        check('k = 7' in p.stdout, 'CPATH not used')
+    finally: v.stop()
+
+@test()
 def other_build_refused():
     """a request from another build of the shim gets the mismatch status, not service"""
     v = Vccd()

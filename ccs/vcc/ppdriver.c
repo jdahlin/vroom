@@ -568,13 +568,35 @@ static int arch_lse(const char *v, bool cpu)
 }
 
 
+/* a variable of the job's environment: the client's under vccd */
+static const char *ppd_getenv(const ppd_env *env, const char *name)
+{
+	size_t l = strlen(name);
+
+	if (!env->envp)
+		return getenv(name);
+	for (char **e = env->envp; *e; e++)
+		if (!strncmp(*e, name, l) && (*e)[l] == '=')
+			return *e + l + 1;
+	return NULL;
+}
+
 int ppd_run(int argc, char **argv, const ppd_env *env)
 {
 	/* each list holds at most argc entries, all of them plus the defaults: one
 	   per-thread allocation, grown to the longest command line seen */
 	static _Thread_local const char **dirv;
 	static _Thread_local size_t dircap;
-	size_t per = (size_t)argc + 64;
+	/* CPATH (after -I) and C_INCLUDE_PATH (after -isystem), as clang; split in a copy */
+	static _Thread_local char *envdirs;
+	const char *cpath = ppd_getenv(env, "CPATH"), *cipath = ppd_getenv(env, "C_INCLUDE_PATH");
+	size_t nenvd = 2;
+
+	for (const char *s = cpath; s && *s; s++)
+		nenvd += *s == ':';
+	for (const char *s = cipath; s && *s; s++)
+		nenvd += *s == ':';
+	size_t per = (size_t)argc + 64 + nenvd;
 
 	if (5 * per > dircap) {
 		free(dirv);
@@ -760,13 +782,35 @@ int ppd_run(int argc, char **argv, const ppd_env *env)
 	po.nquote = n;
 #define ADD(d) do { int dup_ = 0; for (int j = po.nquote; j < n; j++) dup_ |= !strcmp(all[j], d); if (!dup_) all[n++] = d; } while (0)
 	for (int k = 0; k < ni; k++) ADD(dirs_i[k]);
-	po.nsys = n;
-	for (int k = 0; k < ns; k++) {
-		/* vcc's own headers (arm_neon.h) go before the clang resource directory */
-		if (strstr(dirs_s[k], "/lib/clang/") && strlen(dirs_s[k]) > 8 &&
-		    !strcmp(dirs_s[k] + strlen(dirs_s[k]) - 8, "/include"))
-			ADD(VCC_INCDIR);
-		ADD(dirs_s[k]);
+	{
+		size_t l1 = cpath ? strlen(cpath) : 0, l2 = cipath ? strlen(cipath) : 0;
+		char *w;
+
+		free(envdirs);
+		envdirs = w = malloc(l1 + l2 + 2);
+		memcpy(w, cpath ? cpath : "", l1 + 1);
+		memcpy(w + l1 + 1, cipath ? cipath : "", l2 + 1);
+		/* an empty element is the current directory */
+		for (char *s = w, *t; l1 && s; s = t) {
+			t = strchr(s, ':');
+			if (t)
+				*t++ = 0;
+			ADD(*s ? s : ".");
+		}
+		po.nsys = n;
+		for (int k = 0; k < ns; k++) {
+			/* vcc's own headers (arm_neon.h) go before the clang resource directory */
+			if (strstr(dirs_s[k], "/lib/clang/") && strlen(dirs_s[k]) > 8 &&
+			    !strcmp(dirs_s[k] + strlen(dirs_s[k]) - 8, "/include"))
+				ADD(VCC_INCDIR);
+			ADD(dirs_s[k]);
+		}
+		for (char *s = w + l1 + 1, *t; l2 && s; s = t) {
+			t = strchr(s, ':');
+			if (t)
+				*t++ = 0;
+			ADD(*s ? s : ".");
+		}
 	}
 	/* Darwin: vcc's own <stdatomic.h>, <arm_neon.h>, <arm_acle.h> ahead of the SDK's */
 	if (darwin && !nostdinc)
@@ -790,6 +834,15 @@ int ppd_run(int argc, char **argv, const ppd_env *env)
 	}
 	po.dirs = all;
 	po.ndirs = n;
+	{
+		const char *ep = ppd_getenv(env, "SOURCE_DATE_EPOCH");
+		char *end;
+
+		if (ep && *ep) {
+			po.epoch = strtoll(ep, &end, 10);
+			po.has_epoch = !*end;
+		}
+	}
 
 	if (undef)
 		bstr(&pre, asm_mode ? predef_undef_asm : predef_undef_c);

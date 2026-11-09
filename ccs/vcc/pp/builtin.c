@@ -232,12 +232,15 @@ VPRIV int builtin(pp *p, const pmacro *m, ptok *t)
 		mknum(p, t, p->nfile > 1 ? (unsigned)p->nfile - 1 : 0);
 		break;
 	case B_DATE: case B_TIME: case B_TIMESTAMP: {
-		time_t now = time(NULL);
+		time_t now = p->o->has_epoch ? (time_t)p->o->epoch : time(NULL);
 
 		HC_BAD(p);
 		struct tm tm;
 
-		localtime_r(&now, &tm);
+		if (p->o->has_epoch)	/* reproducible builds: UTC, as clang */
+			gmtime_r(&now, &tm);
+		else
+			localtime_r(&now, &tm);
 		strftime(buf, sizeof(buf), m->builtin == B_DATE ? "%b %e %Y" :
 			 m->builtin == B_TIME ? "%H:%M:%S" : "%a %b %e %H:%M:%S %Y", &tm);
 		mkstr(p, t, buf, strlen(buf));

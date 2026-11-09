@@ -428,15 +428,12 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
   temporary next to the target and `rename()` (ar.c already does).
   *Validate:* T12 (interrupt during write: either the old file or none,
   never a truncated one with a new mtime).
-- [ ] **Request environment and umask ignored by in-process jobs** [R].  (umask
-  done: the shim sends `VCC_UMASK`, ppdriver outputs get `0666 & ~umask`;
-  the environment is still open.)
-  `getenv` at `ppdriver.c:733,765`, `pp.c:5519`.  Pass the request's env
-  to the job (`CPATH`, `C_INCLUDE_PATH`, `SOURCE_DATE_EPOCH`,
-  `VCC_*`), create files with the client's umask (shim sends it).
-  *Validate:* T11 run through vccd (`SOURCE_DATE_EPOCH=0` gives
-  `__DATE__ "Jan  1 1970"`; `CPATH` adds a directory; a client umask 077
-  gives mode 0600 outputs).
+- [x] **Request environment and umask ignored by in-process jobs** [R].  *Done:*
+  jobs read `CPATH` (after -I), `C_INCLUDE_PATH` (after -isystem) and
+  `SOURCE_DATE_EPOCH` (UTC __DATE__/__TIME__/__TIMESTAMP__) as clang, from the
+  request's env under vccd (`ppd_env.envp`); outputs follow the client's umask.
+  vccd-test request-env-reaches-job.  The VCC_*/VPP_* debug knobs stay
+  server-wide.
 - [x] **Caches never invalidated** [R].  *Done:* a build is a client process
   group (the shim sends getpgrp(); a shell gives each make its own): a request
   from a new group waits for running jobs, then the file, directory and
@@ -469,6 +466,9 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
   vccd-test request-2mb.  Was:  `protocol.h:13`.  Long command
   lines plus env exceed it.  Stream or raise with a clear error.
   *Validate:* T12 (a 2 MB env/argv works or fails with a message).
+
+- [ ] **vccd-test flaked once on the first run after a rebuild** (one FAIL line
+  not captured, not reproduced in 6 runs).  Rerun after rebuilds and catch it.
 
 ## Tier 3: features general C needs
 
@@ -570,7 +570,8 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
 - [ ] **UTF-8 BOM not skipped** [P].  *Validate:* pp-diff fixture.
 - [ ] **Trigraphs** under strict `-std=c89/c99/c11/c17` or `-trigraphs` [P].
   *Validate:* pp-diff fixtures with each `-std`.
-- [ ] **`SOURCE_DATE_EPOCH`; `__TIMESTAMP__` from file mtime** [P].
+- [ ] **`SOURCE_DATE_EPOCH`; `__TIMESTAMP__` from file mtime** [P].  (SOURCE_DATE_EPOCH
+  done; __TIMESTAMP__ is still the current time without it.)
   `pp.c:3168-3178`.  *Validate:* T11 (fixed epoch → exact strings).
 - [ ] **`\U` outside the BMP printed unconverted in `-E`** [P].
   *Validate:* pp-diff fixture.

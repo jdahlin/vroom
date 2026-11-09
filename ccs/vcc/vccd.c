@@ -597,7 +597,7 @@ static int delegate(const struct req *r, const char *prog, const char **kind)
 {
 	if (dg_is_compile(r, req_env(r, "VCC_DELEGATE_SKIP"))) {
 		/* diagnostics only in the log: PROG runs a failed TU again and reports */
-		ppd_env e = { r->cwd, r->fds[1], log_requests ? 2 : -1 };
+		ppd_env e = { r->cwd, r->fds[1], log_requests ? 2 : -1, r->envp };
 
 		if (ppd_run(r->argc, r->argv, &e) == 0) {
 			*kind = "cc-own";
@@ -841,7 +841,7 @@ static int handle1(const struct req *r, const char **kind)
 		return cc_probe(r, probe);
 	}
 	if (cc_is_pp(r)) {
-		ppd_env e = { r->cwd, r->fds[1], r->fds[2] };
+		ppd_env e = { r->cwd, r->fds[1], r->fds[2], r->envp };
 
 		*kind = "cc-E";
 		atomic_fetch_add(&n_pp, 1);
@@ -849,7 +849,7 @@ static int handle1(const struct req *r, const char **kind)
 	}
 	if (cc_is_compile(r)) {
 		/* diagnostics only in the log: a TU vcc fails on goes to clang, which reports */
-		ppd_env e = { r->cwd, r->fds[1], log_requests ? 2 : -1 };
+		ppd_env e = { r->cwd, r->fds[1], log_requests ? 2 : -1, r->envp };
 
 		if (ppd_run(r->argc, r->argv, &e) == 0) {
 			*kind = "cc-own";
