@@ -225,7 +225,9 @@ VPRIV void sym_bind(cc *c, uint32_t s);
 VPRIV uint32_t lookup(cc *c, uint32_t id);
 VPRIV uint32_t lookup_tag(cc *c, uint32_t id);
 static inline bool typedef_id(cc *c, uint32_t id);
-VPRIV uint32_t undeclared(cc *c, const char *msg, uint32_t id, uint32_t loc, bool types);
+enum { KWS_TYPE = 1, KWS_STMT = 2 };	/* keywords offered as typo corrections */
+VPRIV uint32_t undeclared(cc *c, const char *msg, uint32_t id, uint32_t loc, bool types, int kws, uint32_t *kw);
+VPRIV uint32_t typo_keyword(cc *c, uint32_t id, int kws);
 VPRIV bool is_typedef_name(cc *c, const ptok *t);
 VPRIV uint32_t mk(cc *c, int op, qty ty, uint32_t loc);
 static inline void setspan(cc *c, uint32_t n, uint32_t b);
@@ -325,7 +327,7 @@ static inline bool attrs_empty(const attrs *a);
 VPRIV void merge_attrs(attrs *to, const attrs *from);
 VPRIV void asm_label(cc *c, attrs *a);
 /* declspec.c */
-VPRIV void unknown_type(cc *c, dspec *ds);
+VPRIV void unknown_type(cc *c, dspec *ds, bool allow_sc);
 VPRIV bool is_type_start(cc *c, const ptok *t);
 VPRIV bool is_decl_start(cc *c, const ptok *t);
 VPRIV uint32_t tag_new(cc *c, int kind, uint32_t name, uint32_t loc);

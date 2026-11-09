@@ -42,7 +42,7 @@ __attribute__((noinline)) VPRIV void struct_body(cc *c, uint32_t ti)
 		if (!decl_specs(c, &ds, false)) {
 			if (!is(c, T_IDENT))
 				fatal(c, tok(c)->loc, "expected member declaration");
-			unknown_type(c, &ds);
+			unknown_type(c, &ds, false);
 		}
 		if (is(c, T_SEMI)) {
 			/* anonymous struct/union member; with -fms-anonymous-structs also a

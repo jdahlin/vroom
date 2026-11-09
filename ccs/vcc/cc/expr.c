@@ -494,7 +494,7 @@ static __attribute__((noinline)) uint32_t primary_unbound(cc *c, uint32_t id, ui
 		}
 	}
 	{
-		uint32_t s = undeclared(c, "use of undeclared identifier", id, loc, false);
+		uint32_t s = undeclared(c, "use of undeclared identifier", id, loc, false, 0, NULL);
 
 		if (s)
 			return primary_sym(c, s, id, loc);	/* clang recovers with the correction */

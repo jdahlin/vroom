@@ -9,6 +9,9 @@ the test passes when vcc prints exactly what clang prints on stderr
 the "N errors generated." line) and exits with the same status.
 A test with /* diag-mode: -c */ is compiled (-c -o /dev/null) instead, for
 diagnostics that come from code generation (the error attribute).
+Where vcc says more than clang on purpose (PLAN-diag.md: better where we can),
+X.c.expect holds vcc's output: the test passes when vcc prints that, with the
+same diagnostic lines (file:line:col: level) as clang and the same exit status.
 
   bench/vcc-diag.py [-v] [-j N] [PATTERN]   -v: show the diff of each failure
 """
@@ -32,10 +35,21 @@ def run(cmd, name):
     return p.returncode, p.stderr.decode(errors='replace')
 
 
+def heads(out):
+    return [m.group(0) for m in re.finditer(r'^\S+:\d+:\d+: (?:error|warning|note|fatal error):', out, re.M)]
+
+
 def one(name):
     rc_c, out_c = run([CL], name)
     rc_v, out_v = run([VPP], name)
-    ok = out_c == out_v and (rc_c == 0) == (rc_v == 0)
+    exp = os.path.join(D, name + '.expect')
+    if os.path.exists(exp):
+        want = open(exp, errors='replace').read()
+        ok = out_v == want and heads(out_c) == heads(out_v)
+        out_c = want if heads(out_c) == heads(out_v) else out_c
+    else:
+        ok = out_c == out_v
+    ok = ok and (rc_c == 0) == (rc_v == 0)
     return name, ok, out_c, out_v, rc_c, rc_v
 
 
@@ -57,7 +71,8 @@ def main():
         if verbose:
             for l in difflib.unified_diff(out_c.splitlines(), out_v.splitlines(), 'clang', 'vcc', lineterm='', n=2):
                 print('    ' + l)
-    print(f'{len(res) - len(fails)}/{len(res)} identical to clang')
+    nexp = sum(os.path.exists(os.path.join(D, r[0] + '.expect')) for r in res)
+    print(f'{len(res) - len(fails)}/{len(res)} pass: identical to clang' + (f', or ({nexp}) to vcc\'s own .expect at clang\'s locations' if nexp else ''))
     return 1 if fails else 0
 
 

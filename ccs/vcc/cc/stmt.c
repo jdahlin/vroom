@@ -227,6 +227,32 @@ VPRIV bool at_asm(cc *c)
 	return kw == KW_asm || kw == KW___asm__ || kw == KW___asm;
 }
 
+/* clang: an unknown identifier at the start of a statement that is a typo of a
+   keyword ("retur x;", "stati int n;") is reported with the keyword and parsed as
+   it (decls: a declaration may stand here).  Only before a token that cannot go on
+   an expression, so a valid statement costs a peek */
+static bool stmt_kw_typo(cc *c, bool decls)
+{
+	ptok *t = tok(c);
+	uint32_t kw;
+	int k;
+
+	if (t->kind != T_IDENT || kwof(t))
+		return false;
+	k = peek(c, 1)->kind;
+	if (k != T_IDENT && k != T_NUMBER && k != T_CHAR && !is_strtok(k) && k != T_LBRACE &&
+	    k != T_SEMI && k != T_STAR)
+		return false;
+	t = tok(c);
+	if (lookup(c, t->id) || !(kw = typo_keyword(c, t->id, KWS_STMT)))
+		return false;
+	if (!decls && (kwclass[kwmap[kw]] & KC_DECL))
+		return false;
+	undeclared(c, "use of undeclared identifier", t->id, t->loc, false, KWS_STMT, &kw);
+	tok(c)->id = kw;
+	return true;
+}
+
 VPRIV uint32_t compound_stmt(cc *c, qty *last)
 {
 	uint32_t loc = tok(c)->loc, n;
@@ -278,6 +304,10 @@ VPRIV uint32_t compound_stmt(cc *c, qty *last)
 			}
 		}
 		if (is_decl_start(c, tok(c)) && !(is(c, T_IDENT) && peek(c, 1)->kind == T_COLON)) {
+			declaration(c, &items, false);
+			continue;
+		}
+		if (is(c, T_IDENT) && !kwof(tok(c)) && stmt_kw_typo(c, true) && is_decl_start(c, tok(c))) {
 			declaration(c, &items, false);
 			continue;
 		}
@@ -614,10 +644,12 @@ VPRIV uint32_t statement(cc *c)
 	default:
 		break;
 	}
+	if (stmt_kw_typo(c, false))
+		return statement(c);
 	if (is(c, T_IDENT) && !kwof(tok(c)) && peek(c, 1)->kind == T_IDENT && !kwof(peek(c, 1)) &&
 	    !lookup(c, tok(c)->id)) {
 		/* "foo_t x;" with foo_t unknown: clang reports the identifier and skips the statement */
-		undeclared(c, "use of undeclared identifier", tok(c)->id, tok(c)->loc, false);
+		undeclared(c, "use of undeclared identifier", tok(c)->id, tok(c)->loc, false, 0, NULL);
 		while (!is(c, T_SEMI) && !is(c, T_RBRACE) && !is(c, T_EOF))
 			next(c);
 		accept(c, T_SEMI);

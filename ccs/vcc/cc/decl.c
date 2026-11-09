@@ -559,7 +559,7 @@ static void kr_params(cc *c, const declr *fd)
 		if (!decl_specs(c, &ds, true)) {
 			if (!is(c, T_IDENT) || kwof(tok(c)))
 				fatal(c, tok(c)->loc, "expected ';' after top level declarator");
-			unknown_type(c, &ds);
+			unknown_type(c, &ds, true);
 		}
 		for (;;) {
 			declr d;
@@ -627,7 +627,7 @@ VPRIV void declaration(cc *c, vec *out, bool file)
 			if (!c->o->implicit_int)
 				cc_error(c, ds.loc, "type specifier missing, defaults to 'int'; ISO C99 and later do not support implicit int");
 		} else if (is(c, T_IDENT) && !kwof(tok(c))) {
-			unknown_type(c, &ds);
+			unknown_type(c, &ds, true);
 		} else {
 			char b[64];
 
@@ -674,6 +674,8 @@ VPRIV void declaration(cc *c, vec *out, bool file)
 		}
 		if (file && d.kr && is_func(c, t) && !is(c, T_SEMI) && !is(c, T_COMMA) && !is(c, T_EQUAL))
 			kr_params(c, &d);
+		else if (d.kr)
+			cc_error(c, d.plb, "a parameter list without types is only allowed in a function definition");
 		s = declare(c, &ds, &d, t, file);
 		if (d.has_func && c->syms[s].kind == S_FUNC && is_func(c, c->syms[s].ty) &&
 		    d.npsyms == T(c, c->syms[s].ty)->n)

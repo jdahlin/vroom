@@ -2,11 +2,17 @@
 #include "ccimpl.h"
 
 /* an identifier where a type name must be: clang's "unknown type name" (with typo
-   correction among the typedefs), then on as if it were the correction (or int) */
-VPRIV void unknown_type(cc *c, dspec *ds)
+   correction among the typedefs and the type keywords), then on as if it were the
+   correction (or int); a keyword is parsed as written so (allow_sc: storage classes) */
+VPRIV void unknown_type(cc *c, dspec *ds, bool allow_sc)
 {
-	uint32_t loc = tok(c)->loc, s = undeclared(c, "unknown type name", tok(c)->id, loc, true);
+	uint32_t kw, loc = tok(c)->loc, s = undeclared(c, "unknown type name", tok(c)->id, loc, true, KWS_TYPE, &kw);
 
+	if (kw) {
+		tok(c)->id = kw;
+		if (decl_specs(c, ds, allow_sc))
+			return;
+	}
 	next(c);
 	memset(ds, 0, sizeof(*ds));
 	ds->ty = s ? c->syms[s].ty : prim(TY_INT);
@@ -192,6 +198,21 @@ static qty typeof_spec(cc *c, bool unqual)
 	return unqual ? QUNQ(t) : t;
 }
 
+/* a token that may follow the name in a declarator (clang's
+   isValidAfterIdentifierInDeclarator): "static x = 4" is implicit int, not a typo */
+static bool after_declarator_id(const ptok *t)
+{
+	int kw = kwof(t);
+
+	switch (t->kind) {
+	case T_LSQUARE: case T_LPAREN: case T_RPAREN: case T_SEMI: case T_COMMA: case T_EQUAL:
+	case T_LBRACE: case T_COLON:
+		return true;
+	default:
+		return kw == KW_asm || kw == KW___asm__ || kw == KW___asm;
+	}
+}
+
 VPRIV bool decl_specs(cc *c, dspec *ds, bool allow_sc)
 {
 	int nlong = 0, sgn = 0, base = 0, q = 0;
@@ -224,6 +245,24 @@ VPRIV bool decl_specs(cc *c, dspec *ds, bool allow_sc)
 				have_named = true;
 				any = true;
 				next(c);
+				continue;
+			}
+			if (t->kind == T_IDENT && !any && !have_named && !base && !nlong && !sgn && !cplx &&
+			    (q || atomic || ds->sc || ds->inline_ || ds->noreturn || ds->thread) &&
+			    !after_declarator_id(peek(c, 1))) {
+				/* clang's ParseImplicitInt: "static in f(void)", "const unsigne long *p":
+				   an unknown name where only a type fits is an unknown type name */
+				uint32_t kwc, s;
+
+				t = tok(c);
+				s = undeclared(c, "unknown type name", t->id, t->loc, true, KWS_TYPE, &kwc);
+				if (kwc) {
+					t->id = kwc;	/* on as the keyword */
+					continue;
+				}
+				next(c);
+				named = s ? c->syms[s].ty : prim(TY_INT);
+				have_named = any = true;
 				continue;
 			}
 			break;

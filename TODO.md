@@ -844,11 +844,12 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
   value, `return v();` of void from int function, `-fsyntax-only` missing
   initializer-constness errors (`static int s = g();`, `5 % 0`),
   `void f(static int x)` (clang: invalid storage class specifier in function
-  declarator).  From `bench/vcc-mutate.py` (PLAN-diag D0.2, `show missed`): a parameter
-  list without types in a declaration (`void exit(in);`), `main` with wrong
+  declarator).  From `bench/vcc-mutate.py` (PLAN-diag D0.2, `show missed`): `main` with wrong
   parameter types, an array of an incomplete element type, a call to or
   definition of a function with an incomplete return type (`struct zz f(...)
-  { return 0; }` is accepted), `unsigned double`.
+  { return 0; }` is accepted), `unsigned double`, a K&R definition whose
+  parameter count conflicts with an earlier prototype (`void bar(void);` then
+  `void bar(x) { }`: clang "conflicting types for 'bar'").
   *Validate:* T4 each, then promote to diag.
 - [ ] **Designated initializers found by PLAN-diag D1.0**: a designator on a
   scalar (`int a = { .x = 1 };`) fails with "expected expression" instead of

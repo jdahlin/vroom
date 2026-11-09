@@ -341,6 +341,27 @@ static __attribute__((noinline)) uint32_t cast_paren(cc *c, uint32_t loc)
 	}
 }
 
+/* clang: "(doubl)x", a typo of a type keyword in parentheses before an operand,
+   is reported with the keyword and parsed as a cast; '(' is consumed */
+static bool paren_type_typo(cc *c)
+{
+	ptok *t = tok(c);
+	uint32_t kw;
+	int k;
+
+	if (t->kind != T_IDENT || kwof(t) || peek(c, 1)->kind != T_RPAREN)
+		return false;
+	k = peek(c, 2)->kind;
+	if (k != T_IDENT && k != T_NUMBER && k != T_CHAR && k != T_LPAREN)
+		return false;
+	t = tok(c);
+	if (lookup(c, t->id) || !(kw = typo_keyword(c, t->id, KWS_TYPE)) || !(kwclass[kwmap[kw]] & KC_TYPE))
+		return false;
+	undeclared(c, "use of undeclared identifier", t->id, t->loc, true, KWS_TYPE, &kw);
+	tok(c)->id = kw;
+	return true;
+}
+
 VPRIV uint32_t cast_expr(cc *c)
 {
 	uint32_t b = tok(c)->loc, n;
@@ -351,7 +372,7 @@ VPRIV uint32_t cast_expr(cc *c)
 	if (is(c, T_LPAREN)) {
 		/* consumed first: no lookahead token to shift out later */
 		next(c);
-		if (is_type_start(c, tok(c)))
+		if (is_type_start(c, tok(c)) || paren_type_typo(c))
 			n = cast_paren(c, b);
 		else
 			n = postfix(c, paren_expr(c, b));

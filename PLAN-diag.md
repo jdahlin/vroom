@@ -132,6 +132,24 @@ Tio lager; varje steg nedan säger vilka det berör.
   declaration").  Första felet på clangs plats 82,6 → 88,7 %, annanstans 9,2 → 3,5 %;
   `semi-comma` 154 av 155 på clangs plats (den sista pekar vcc på själva `,`, clang på
   följdfelet).  Fler följdfel än clang 18,5 → 17,4 %.  Test: `tests/diag/comma_semi.c`.
+  **Efter felstavade nyckelord (2026-11-09):** typo-rättningen erbjuder nyckelord som
+  clang (Semas CTypeSpecs där en typ kan stå, satsnyckelorden i början av en sats;
+  `break`/`continue`/`case`/`default` bara där de är tillåtna, `bool` bara i C23) och
+  förkastar, som clang, en rättning när namnet är kortare än tre gånger avståndet
+  (`in` blir inte `int`, `i` inte `u`).  Ett valt nyckelord parsas *som* nyckelordet
+  (token-id skrivs om): `stati int x;`, `struc S s;`, `retur x;`, `(doubl)x`.  Dessutom
+  clangs ParseImplicitInt: efter specificerare utan typ (`static in f(void)`, `const
+  unsigne long *p`) är ett okänt namn som inte följs av `[ ( ) ; , = { :`/`asm` ett
+  okänt typnamn, och en identifierarlista utan typer utanför en definition (`void
+  exit(in);`) är clangs fel.  `typo-keyword`: först på clangs plats 145 → 163 av 165,
+  fler följdfel 74 → 7, missade 7 → 1; totalt första felet på clangs plats 88,7 →
+  89,7 %, fler följdfel 17,4 → 13,3 %, missade 34 → 27.  Kvar i kategorin: kaskader på felnoder (`in
+  y[8];` ger "subscripted value is not an array" på `y`), `as volatile (...)`; den
+  missade är en K&R-definition mot en tidigare prototyp (TODO.md).
+  Test: `tests/diag/keyword_typo.c` (med `.expect`: vcc visar fix-it även för
+  `(doubl)x`, där clang tappar den), `tests/diag/kr_decl.c`.  `vcc-diag.py` tar nu
+  `X.c.expect` där vcc medvetet säger mer än clang: vcc:s text måste stämma med filen
+  och diagnosraderna (`fil:rad:kol: nivå:`) med clangs.
 
 ### D1. Strukturerade diagnoser (grunden)
 

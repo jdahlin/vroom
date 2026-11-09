@@ -54,7 +54,7 @@ static void param_list(cc *c, dop *op)
 					ds.ty = prim(TY_INT);
 					ds.loc = tok(c)->loc;
 				} else if (is(c, T_IDENT)) {
-					unknown_type(c, &ds);
+					unknown_type(c, &ds, true);
 				} else {
 					fatal(c, tok(c)->loc, "expected parameter declarator");
 				}
