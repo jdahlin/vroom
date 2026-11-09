@@ -185,13 +185,14 @@ enum {
 	K_DP2, K_EXTR, K_VLD1, K_VREV, K_DUP, K_EXT, K_MOVI, K_VSHIFT, K_VPERM, K_PMULL,
 	K_FMOV, K_SHA3, K_SHA2, K_CPY, K_SET, K_V3, K_UMOV, K_AT, K_RDVL, K_PREG,
 	K_V2, K_TBL, K_SHA512, K_LDR_REP, K_INS, K_MTE, K_MTEM, K_VNOT, K_SMOV, K_ACROSS,
-	K_VMISC, K_ADDP,
+	K_VMISC, K_ADDP, K_IALIAS,
 };
 
 typedef struct { const char *name; uint8_t k; uint32_t base; uint32_t x; } Mn;
 
 /* sorted by name */
 static const Mn mns[] = {
+	{ "abs", K_IALIAS, 0x5ac02000, 3 },
 	{ "adc", K_DP2, 0x1a000000, 0 },
 	{ "adcs", K_DP2, 0x3a000000, 0 },
 	{ "add", K_ADDSUB, 0, 0 },
@@ -210,6 +211,7 @@ static const Mn mns[] = {
 	{ "at", K_AT, 0, 0 },
 	{ "b", K_B, 0x14000000, R_AARCH64_JUMP26 },
 	{ "bcax", K_SHA512, 0xce200000, 3 },
+	{ "bfc", K_IALIAS, 0, 5 },
 	{ "bfi", K_BFI, 1, 0 },
 	{ "bfm", K_BFM, 1, 0 },
 	{ "bfxil", K_BFX, 1, 0 },
@@ -231,6 +233,7 @@ static const Mn mns[] = {
 	{ "cinv", K_CNEG, 0x5a800000, 0 },
 	{ "clrbhb", K_FIXED, 0xd50322df, 0 },
 	{ "clrex", K_FIXED, 0xd5033f5f, 0 },
+	{ "cls", K_DP1, 0x5ac01400, 0 },
 	{ "clz", K_DP1, 0x5ac01000, 0 },
 	{ "cmeq", K_VPERM, 0x2e208c00, 0 },
 	{ "cmge", K_VPERM, 0x0e203c00, 0 },
@@ -241,7 +244,7 @@ static const Mn mns[] = {
 	{ "cmp", K_CMP, 3, 0 },
 	{ "cmtst", K_VPERM, 0x0e208c00, 0 },
 	{ "cneg", K_CNEG, 0x5a800400, 0 },
-	{ "cnt", K_VMISC, 0x0e205800, 0 },
+	{ "cnt", K_IALIAS, 0x5ac01c00, 3 },
 	{ "cpye", K_CPY, 0x1d800400, 0 },
 	{ "cpyen", K_CPY, 0x1d800400, 12 },
 	{ "cpyern", K_CPY, 0x1d800400, 8 },
@@ -292,6 +295,7 @@ static const Mn mns[] = {
 	{ "csinc", K_CSEL, 0x1a800400, 0 },
 	{ "csinv", K_CSEL, 0x5a800000, 0 },
 	{ "csneg", K_CSEL, 0x5a800400, 0 },
+	{ "ctz", K_IALIAS, 0x5ac01800, 3 },
 	{ "dc", K_DC, 0, 0 },
 	{ "dmb", K_BARRIER, 0xd50330bf, 0 },
 	{ "dsb", K_BARRIER, 0xd503309f, 0 },
@@ -334,6 +338,7 @@ static const Mn mns[] = {
 	{ "lsl", K_SHIFT, 0, 0 },
 	{ "lsr", K_SHIFT, 1, 0 },
 	{ "madd", K_MUL, 0x1b000000, 1 },
+	{ "mneg", K_MUL, 0x1b00fc00, 0 },
 	{ "mov", K_MOV, 0, 0 },
 	{ "movi", K_MOVI, 0, 0 },
 	{ "movk", K_MOVW, 0x72800000, 0 },
@@ -346,6 +351,8 @@ static const Mn mns[] = {
 	{ "mvn", K_NEG, 0x2a2003e0, 1 },
 	{ "neg", K_NEG, 0x4b0003e0, 0 },
 	{ "negs", K_NEG, 0x6b0003e0, 0 },
+	{ "ngc", K_IALIAS, 0x5a0003e0, 2 },
+	{ "ngcs", K_IALIAS, 0x7a0003e0, 2 },
 	{ "nop", K_FIXED, 0xd503201f, 0 },
 	{ "not", K_VNOT, 0x2e205800, 0 },
 	{ "orn", K_LOGIC, 1, 1 },
@@ -363,7 +370,7 @@ static const Mn mns[] = {
 	{ "rev", K_DP1, 0x5ac00800, 1 },
 	{ "rev16", K_VREV, 0x0e201800, 0x5ac00400 },
 	{ "rev32", K_VREV, 0x2e200800, 0xdac00800 },
-	{ "rev64", K_VREV, 0x0e200800, 0 },
+	{ "rev64", K_VREV, 0x0e200800, 0xdac00c00 },
 	{ "ror", K_SHIFT, 3, 0 },
 	{ "sb", K_FIXED, 0xd50330ff, 0 },
 	{ "sbc", K_DP2, 0x5a000000, 0 },
@@ -404,10 +411,14 @@ static const Mn mns[] = {
 	{ "shl", K_VSHIFT, 0x0f005400, 0 },
 	{ "sli", K_VSHIFT, 0x2f005400, 0 },
 	{ "smaddl", K_MUL, 0x9b200000, 3 },
+	{ "smax", K_IALIAS, 0x1ac06000, 4 },
 	{ "smaxv", K_ACROSS, 0x0e30a800, 0 },
 	{ "smc", K_EXC, 0xd4000003, 0 },
+	{ "smin", K_IALIAS, 0x1ac06800, 4 },
 	{ "sminv", K_ACROSS, 0x0e31a800, 0 },
+	{ "smnegl", K_MUL, 0x9b20fc00, 2 },
 	{ "smov", K_SMOV, 0x0e002c00, 0 },
+	{ "smsubl", K_MUL, 0x9b208000, 3 },
 	{ "smulh", K_DP2, 0x9b407c00, 1 },
 	{ "smull", K_MUL, 0x9b207c00, 2 },
 	{ "sri", K_VSHIFT, 0x2f004400, 1 },
@@ -435,6 +446,9 @@ static const Mn mns[] = {
 	{ "sub", K_ADDSUB, 2, 0 },
 	{ "subs", K_ADDSUB, 3, 0 },
 	{ "svc", K_EXC, 0xd4000001, 0 },
+	{ "sxtb", K_IALIAS, 0, 0x07 },
+	{ "sxth", K_IALIAS, 0, 0x0f },
+	{ "sxtw", K_IALIAS, 0, 0x1f },
 	{ "sys", K_SYS, 0xd5080000, 0 },
 	{ "tbl", K_TBL, 0x0e000000, 0 },
 	{ "tbnz", K_TBZ, 0x37000000, 0 },
@@ -451,15 +465,20 @@ static const Mn mns[] = {
 	{ "ubfx", K_BFX, 2, 0 },
 	{ "udiv", K_DP2, 0x1ac00800, 0 },
 	{ "umaddl", K_MUL, 0x9ba00000, 3 },
-	{ "umax", K_VPERM, 0x2e206400, 1 },
+	{ "umax", K_IALIAS, 0x1ac06400, 4 },
 	{ "umaxv", K_ACROSS, 0x2e30a800, 0 },
-	{ "umin", K_VPERM, 0x2e206c00, 1 },
+	{ "umin", K_IALIAS, 0x1ac06c00, 4 },
 	{ "uminv", K_ACROSS, 0x2e31a800, 0 },
+	{ "umnegl", K_MUL, 0x9ba0fc00, 2 },
 	{ "umov", K_UMOV, 0, 0 },
+	{ "umsubl", K_MUL, 0x9ba08000, 3 },
 	{ "umulh", K_DP2, 0x9bc07c00, 1 },
 	{ "umull", K_MUL, 0x9ba07c00, 2 },
 	{ "uqsub", K_VPERM, 0x2e202c00, 0 },
 	{ "ushr", K_VSHIFT, 0x2f000400, 1 },
+	{ "uxtb", K_IALIAS, 2, 0x07 },
+	{ "uxth", K_IALIAS, 2, 0x0f },
+	{ "uxtw", K_IALIAS, 2, 0x1f },
 	{ "uzp1", K_VPERM, 0x0e001800, 0 },
 	{ "uzp2", K_VPERM, 0x0e005800, 0 },
 	{ "wfe", K_FIXED, 0xd503205f, 0 },
@@ -1552,7 +1571,7 @@ static int k_vrev(Ctx *c, const Mn *m)
 	if (c->n == 2 && isgpr(&o[0]) && m->x) {
 		if (!gpr_nosp(&o[0]) || !gpr_nosp(&o[1])) BADOPS;
 		uint32_t b = m->x;
-		if (b == 0xdac00800 && !isx(&o[0])) BADOPS;
+		if ((b == 0xdac00800 || b == 0xdac00c00) && !isx(&o[0])) BADOPS;
 		if (b == 0x5ac00400) b |= (uint32_t)isx(&o[0]) << 31;
 		*c->out = b | R(&o[1]) << 5 | R(&o[0]);
 		return 0;
@@ -1860,6 +1879,66 @@ static int k_vmisc(Ctx *c, const Mn *m)
 	*c->out = m->base | arr_q(o[1].arr) << 30 | (uint32_t)sz << 22 | R(&o[1]) << 5 | R(&o[0]);
 	return 0;
 }
+/* integer aliases: x 0x07/0x0f/0x1f sxtb..uxth (base: SBFM 0, UBFM 2), 2 ngc(s),
+ * 3 CSSC abs/cnt/ctz (vector cnt: VMISC), 4 CSSC smax.. (vector umax/umin: VPERM), 5 bfc */
+static int k_ialias(Ctx *c, const Mn *m)
+{
+	const A64Op *o = c->op;
+
+	if (c->n >= 2 && o[0].kind == A64O_VREG) {
+		static const Mn vcnt = { "cnt", K_VMISC, 0x0e205800, 0 }, vumax = { "umax", K_VPERM, 0x2e206400, 1 },
+				vumin = { "umin", K_VPERM, 0x2e206c00, 1 };
+
+		if (m->x == 3 && m->base == 0x5ac01c00) return k_vmisc(c, &vcnt);
+		if (m->x == 4 && m->base == 0x1ac06400) return k_vperm(c, &vumax);
+		if (m->x == 4 && m->base == 0x1ac06c00) return k_vperm(c, &vumin);
+		BADOPS;
+	}
+	if (m->x >= 0x07) {	/* sxtb Wd|Xd, Wn; uxtb Wd, Wn; sxtw Xd, Wn */
+		if (c->n != 2 || !gpr_nosp(&o[0]) || !gpr_nosp(&o[1]) || !isw(&o[1])) BADOPS;
+		int sf = isx(&o[0]);
+		if (m->x == 0x1f && !sf) BADOPS;
+		if (m->base == 2 && m->x != 0x1f)
+			sf = 0;	/* uxtb/uxth Xd: the W form (llvm-mc) */
+		*c->out = a64_bfm(sf, m->base, R(&o[0]), R(&o[1]), 0, m->x);
+		return 0;
+	}
+	switch (m->x) {
+	case 2:	/* ngc Rd, Rm = sbc Rd, zr, Rm */
+		if (c->n != 2 || !gpr_nosp(&o[0]) || !gpr_nosp(&o[1]) || isx(&o[0]) != isx(&o[1])) BADOPS;
+		*c->out = m->base | (uint32_t)isx(&o[0]) << 31 | R(&o[1]) << 16 | R(&o[0]);
+		return 0;
+	case 3:
+		if (c->n != 2 || !gpr_nosp(&o[0]) || !gpr_nosp(&o[1]) || isx(&o[0]) != isx(&o[1])) BADOPS;
+		*c->out = m->base | (uint32_t)isx(&o[0]) << 31 | R(&o[1]) << 5 | R(&o[0]);
+		return 0;
+	case 4: {
+		if (c->n != 3 || !gpr_nosp(&o[0]) || !gpr_nosp(&o[1])) BADOPS;
+		int sf = isx(&o[0]);
+		if (isx(&o[1]) != sf) BADOPS;
+		if (iscimm(&o[2])) {	/* imm8: signed for smax/smin, unsigned for umax/umin */
+			int u = (m->base >> 10) & 1;
+			int64_t v = o[2].imm;
+			if (u ? v < 0 || v > 255 : v < -128 || v > 127) FAIL("immediate must be an integer in range");
+			*c->out = 0x11c00000 | (uint32_t)sf << 31 | ((m->base >> 10) & 3) << 18 | ((uint32_t)v & 255) << 10 |
+				  R(&o[1]) << 5 | R(&o[0]);
+			return 0;
+		}
+		if (!gpr_nosp(&o[2]) || isx(&o[2]) != sf) BADOPS;
+		*c->out = m->base | (uint32_t)sf << 31 | R(&o[2]) << 16 | R(&o[1]) << 5 | R(&o[0]);
+		return 0;
+	}
+	case 5: {	/* bfc Rd, #lsb, #width = bfm Rd, zr, #(-lsb % size), #(width - 1) */
+		if (c->n != 3 || !gpr_nosp(&o[0]) || !iscimm(&o[1]) || !iscimm(&o[2])) BADOPS;
+		int sf = isx(&o[0]);
+		unsigned size = sf ? 64 : 32, lsb = (unsigned)o[1].imm, w = (unsigned)o[2].imm;
+		if (lsb >= size || !w || lsb + w > size) FAIL("requested insert overflows register");
+		*c->out = a64_bfm(sf, 1, R(&o[0]), 31, (size - lsb) & (size - 1), w - 1);
+		return 0;
+	}
+	}
+	BADOPS;
+}
 
 /* addp: Vd.T, Vn.T, Vm.T, or the scalar Dd, Vn.2d */
 static int k_addp(Ctx *c, const Mn *m)
@@ -2102,6 +2181,7 @@ int a64_asm(const char *mn, size_t n, const A64Op *op, int nop, uint32_t *out, A
 	case K_DP1: return k_dp1(&c, m);
 	case K_DP2: return k_dp2(&c, m);
 	case K_MUL: return k_mul(&c, m);
+	case K_IALIAS: return k_ialias(&c, m);
 	case K_CRC: return k_crc(&c, m);
 	case K_VLD1: return k_vld1(&c, m);
 	case K_VREV: return k_vrev(&c, m);

@@ -714,8 +714,12 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
 - [ ] **AdvSIMD arithmetic, long/wide/narrow, by-element, ld2-ld4/st2-st4,
   single-lane ld1/st1** [P].  *Validate:* T7 encoding tables (generated
   from llvm-mc's AArch64 instruction list for these classes).
-- [ ] **Integer aliases** sxtw, uxtb, sxt*/uxt*, cls, ngc, mneg, smnegl,
-  CSSC [P].  *Validate:* T7 tables.
+- [x] **Integer aliases** sxtw, uxtb, sxt*/uxt*, cls, ngc, mneg, smnegl,
+  CSSC [P].  *Validate:* T7 tables.  (Done: sxtb/sxth/sxtw, uxtb/uxth/uxtw
+  (X forms as llvm-mc), cls, rev64 X, ngc(s), mneg, smnegl/umnegl,
+  smsubl/umsubl, bfc, CSSC abs/cnt/ctz and smax/smin/umax/umin (register and
+  immediate; the vector cnt/umax/umin unchanged); `ccs/vcc/tests/vas/int-alias.s`,
+  `bench/vas-enc.py` 128/128 vs llvm-mc.)
 - [ ] **Pointer auth, barriers/hints** (paciasp … xpaclri, csdb, esb, ssbb,
   pssbb, dgh, `psb csync`, wfet, chkfeat, sysl, prfum, ldapur, stlur), **MTE
   irg/addg** [P].  *Validate:* T7 tables.
