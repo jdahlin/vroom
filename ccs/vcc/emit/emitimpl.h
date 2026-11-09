@@ -712,6 +712,7 @@ VPRIV void wasm_emit_function(ecx *e, uint32_t s);
 VPRIV void wasm_ecx_free(ecx *e);
 VPRIV void wasm_data_ref(ecx *e, uint32_t ref);
 VPRIV void wasm_header(cc *c, tbuf *hdr, ecx *ctx, int nthr);
+VPRIV void wasm_tail(cc *c, tbuf *t, _Atomic uint8_t *claimed);
 /* prepass.c */
 VPRIV bool is_aconst(cc *c, uint32_t n);
 VPRIV uint32_t aconst_idx(cc *c, uint32_t n);

@@ -1,4 +1,5 @@
 /* vcc code generator for WebAssembly: state, locals, frame, functions (wimpl.h) */
+#include <stdarg.h>
 #include "wimpl.h"
 
 /* ---------------- per-thread state (one per ecx, from a pool) ---------------- */
@@ -275,6 +276,82 @@ static int wdecl_cmp(const void *a, const void *b)
 	if (*x == '\t' && *y == '\t')
 		return 0;
 	return *x == '\t' ? -1 : *y == '\t' ? 1 : (unsigned char)*x - (unsigned char)*y;
+}
+
+static void wfmt(tbuf *t, const char *fmt, ...)
+{
+	char b[1024];
+	va_list ap;
+
+	va_start(ap, fmt);
+	vsnprintf(b, sizeof b, fmt, ap);
+	va_end(ap);
+	tb_s(t, b);
+}
+
+static int wprio_cmp(const void *a, const void *b)
+{
+	uint64_t p = *(const uint64_t *)a, q = *(const uint64_t *)b;
+
+	return p < q ? -1 : p > q;
+}
+
+/* destructors, as clang: per priority, .Lcall_dtors[.N](void *) calls them in
+   reverse order and .Lregister_call_dtors[.N], last in .init_array[.N] (after
+   the constructors of that priority), registers it with __cxa_atexit */
+VPRIV void wasm_tail(cc *c, tbuf *t, _Atomic uint8_t *claimed)
+{
+	uint64_t *d = NULL;
+	uint32_t n = 0, cap = 0;
+
+	for (uint32_t ti = 0; ti < c->ntoplevel; ti++) {
+		uint32_t s = c->toplevel[ti];
+		const attrs *a = sym_attrs(c, s);
+
+		if (c->syms[s].kind != S_FUNC || !a || !a->destructor || !c->syms[s].body || !claimed[s])
+			continue;
+		if (n == cap) {
+			cap = cap ? 2 * cap : 16;
+			d = realloc(d, cap * sizeof *d);
+		}
+		/* priority, then position: a stable order */
+		d[n] = (uint64_t)(a->prio ? a->prio : 65535) << 40 | (uint64_t)n << 32 | s;
+		n++;
+	}
+	if (!n)
+		return;
+	qsort(d, n, sizeof *d, wprio_cmp);
+	tb_s(t, "	.functype	__cxa_atexit (i64, i64, i64) -> (i32)\n");
+	for (uint32_t i = 0; i < n;) {
+		uint32_t p = (uint32_t)(d[i] >> 40), j = i;
+		char sfx[16] = "";
+
+		while (j < n && (uint32_t)(d[j] >> 40) == p)
+			j++;
+		if (p != 65535)
+			snprintf(sfx, sizeof sfx, ".%u", p);
+		wfmt(t, "\t.section\t.text..Lcall_dtors%s,\"\",@\n\t.type\t.Lcall_dtors%s,@function\n"
+			  ".Lcall_dtors%s:\n\t.functype\t.Lcall_dtors%s (i64) -> ()\n", sfx, sfx, sfx, sfx);
+		for (uint32_t k = j; k-- > i;) {
+			uint32_t s = (uint32_t)d[k];
+
+			tb_s(t, "\tcall\t");
+			wfname(c, t, REF(RK_SYM, s));
+			tb_c(t, '\n');
+			if (!is_void(c, T(c, c->syms[s].ty)->base))
+				tb_s(t, "\tdrop\n");
+		}
+		wfmt(t, "\tend_function\n\t.section\t.text..Lregister_call_dtors%s,\"\",@\n"
+			  "\t.type\t.Lregister_call_dtors%s,@function\n.Lregister_call_dtors%s:\n"
+			  "\t.functype\t.Lregister_call_dtors%s () -> ()\n\tblock\n\ti64.const\t.Lcall_dtors%s\n"
+			  "\ti64.const\t0\n\ti64.const\t__dso_handle\n\tcall\t__cxa_atexit\n\ti32.eqz\n"
+			  "\tbr_if\t0\n\tunreachable\n\tend_block\n\tend_function\n"
+			  "\t.section\t.init_array%s,\"\",@\n\t.p2align\t3, 0x0\n\t.int64\t.Lregister_call_dtors%s\n",
+			  sfx, sfx, sfx, sfx, sfx, sfx, sfx);
+		i = j;
+	}
+	tb_s(t, "\t.hidden\t__dso_handle\n\t.weak\t__dso_handle\n");
+	free(d);
 }
 
 VPRIV void wasm_header(cc *c, tbuf *hdr, ecx *ctx, int nthr)
@@ -591,8 +668,7 @@ VPRIV void wasm_emit_function(ecx *e, uint32_t s)
 			wfname(c, f, REF(RK_SYM, s));
 			tb_c(f, '\n');
 		}
-		if (a && a->destructor)
-			efatal(e, y->loc, "wasm: destructors are not supported yet (PLAN-wasm.md W5)");
+		/* a destructor: registered at the end of the TU (wasm_tail) */
 	}
 	if (wis_main(c, s) && f->n > 0 && strstr(f->p, "__original_main:")) {
 		/* main(void): what emscripten calls is main(argc, argv) (clang's wrapper) */

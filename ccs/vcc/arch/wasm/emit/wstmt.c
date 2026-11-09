@@ -129,8 +129,7 @@ static void wasm_asm(ecx *e, const node *x)
 	for (; *t; t++)
 		if (*t != ' ' && *t != '\t' && *t != '\n' && *t != ';')
 			efatal(e, x->loc, "wasm: inline assembly is not supported (only an empty template)");
-	if (a->go)
-		efatal(e, x->loc, "wasm: asm goto is not supported");
+	/* asm goto with an empty template never jumps: it falls through */
 	for (uint32_t i = 0; i < a->nin; i++) {
 		const asmop *in = &a->ops[a->nout + i];
 		const char *cs = c->strs[in->constraint - 1].s;

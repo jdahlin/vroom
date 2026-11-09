@@ -548,7 +548,9 @@ static int emit_tu1(cc *c, const cc_opts *o, bool write_out, uint8_t *mf, bool *
 			tb_s(&tail, "\n\t.xword\t.Ldbg_text0\n\t.word\t.Ldbg_text1-.Ldbg_text0\n.Ldbg_cu_end:\n"
 				    "\t.section\t.debug_line,\"\",@progbits\n.Lline_table_start0:\n");
 		}
-		if (!WASM(c))
+		if (WASM(c))
+			wasm_tail(c, &tail, E.claimed);
+		else
 			tb_s(&tail, "\t.section\t\".note.GNU-stack\",\"\",@progbits\n");
 		iov[k++] = (struct iovec){ hdr.p, hdr.n };
 		for (uint32_t i = 0; i < E.nchunk; i++)
