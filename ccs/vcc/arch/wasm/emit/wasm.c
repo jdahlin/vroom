@@ -36,6 +36,7 @@ VPRIV wst *w_state(ecx *e)
 		W->vszl = reserve(WMAXGD * sizeof(uint32_t));
 		W->vb = reserve(WMAXGD * sizeof(wvb));
 		W->cl = reserve(WMAXGD * sizeof(wvb));
+		W->sj = reserve(WMAXGD * sizeof(uint32_t));
 	}
 	/* per sym bindings: sized for this TU (generation-tagged: never cleared) */
 	W->sb = reserve(((size_t)e->c->nsym + 64) * sizeof(wbind));
@@ -357,6 +358,7 @@ VPRIV void wasm_tail(cc *c, tbuf *t, _Atomic uint8_t *claimed)
 VPRIV void wasm_header(cc *c, tbuf *hdr, ecx *ctx, int nthr)
 {
 	size_t n = 0, k = 0;
+	bool tag = false;
 	const char **v;
 
 	(void)c;
@@ -387,6 +389,8 @@ VPRIV void wasm_header(cc *c, tbuf *hdr, ecx *ctx, int nthr)
 			continue;	/* the first: definitions and prototypes sort the same */
 		while (*q != '\n')
 			q++;
+		if (!strncmp(p, "__wasm_setjmp_test\t", 19))
+			tag = true;
 		tb_s(hdr, "\t.functype\t");
 		while (*p != '\t')
 			tb_c(hdr, *p++);
@@ -394,6 +398,9 @@ VPRIV void wasm_header(cc *c, tbuf *hdr, ecx *ctx, int nthr)
 		tb_put(hdr, p + 1, (size_t)(q - p - 1));
 		tb_c(hdr, '\n');
 	}
+	/* a function catches longjmp's exception (wsj_end) */
+	if (tag)
+		tb_s(hdr, "\t.tagtype\t__c_longjmp i64\n");
 	free(v);
 }
 
@@ -560,6 +567,8 @@ VPRIV void wasm_emit_function(ecx *e, uint32_t s)
 	W->nvsz = W->nvb = W->ncl = 0;
 	W->bdepth = 0;
 	W->sxv = W->notop = 0;
+	W->nsj = 0;
+	W->sjr = -1;
 	r = wclassify_ret(c, ft->base);
 	W->rt = r.k == WA_SCALAR ? r.st : WT_NONE;
 	e->top = s;
@@ -572,7 +581,11 @@ VPRIV void wasm_emit_function(ecx *e, uint32_t s)
 		W->rv = wnewloc(e, W->rt);
 	wgoto_scan(e, y->body);
 	wblock(e, "block");	/* index 0: return branches out of it */
+	if (W->nsj)
+		wsj_begin(e);
 	wstmt(e, y->body);
+	if (W->nsj)
+		wsj_end(e);
 	if (W->rt != WT_NONE && wis_main(c, s)) {
 		/* falling off the end of main returns 0 */
 		wconst(e, W->rt, 0);

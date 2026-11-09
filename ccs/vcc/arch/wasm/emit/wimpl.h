@@ -78,6 +78,13 @@ typedef struct wst {
 	struct wvb *cl;		/* variables with a cleanup in scope: block depth, sym (.sp) */
 	uint32_t ncl;
 	int bdepth;		/* the depth at the start of the innermost compound statement */
+	uint32_t *sj;		/* setjmp call sites (nodes) of the function (-mllvm -wasm-enable-sjlj) */
+	uint32_t nsj;
+	int sjr;		/* scan: the statement's record (-1: none, -2: a loop's condition) */
+	uint32_t sji;		/* ... and its position there */
+	uint32_t sjl, sjv, sjsp, sjp;	/* the site to resume (0: none), the value, sp, the payload */
+	uint64_t sjfid;		/* the frame slot whose address identifies this invocation */
+	int sjloop;
 	uint32_t notop;		/* a compound only entered by goto (the dead branch of if (0)) */
 	uint32_t sxv, sxt;	/* the statement expression's value statement, its local */
 	struct wst *next;	/* the free list */
@@ -100,6 +107,7 @@ typedef struct wgd {
 /* label (or 0 for a plain segment start), gd, statement index */
 typedef struct wgp { uint32_t label, d, i; } wgp;
 #define WG_CASE (1u << 31)	/* label: a case label (node) in a nested statement */
+#define WG_SJ (1u << 30)	/* label: the statement of setjmp call site N (W->sj[N]) */
 #define WMAXGD ((size_t)1 << 22)
 
 #define WMAXLOC ((size_t)1 << 22)
@@ -354,6 +362,9 @@ VPRIV void wcompare(ecx *e, int op, qty t);
 VPRIV int wcall(ecx *e, uint32_t n, bool want);
 VPRIV int wbuiltin(ecx *e, uint32_t n, bool want);
 VPRIV int wconstant_p(ecx *e, uint32_t a);
+VPRIV int wsjlj_kind(cc *c, uint32_t n);
+VPRIV void wsj_begin(ecx *e);
+VPRIV void wsj_end(ecx *e);
 /* wstmt.c */
 VPRIV void wgoto_scan(ecx *e, uint32_t body);
 VPRIV void wvla_bytes(ecx *e, qty t);

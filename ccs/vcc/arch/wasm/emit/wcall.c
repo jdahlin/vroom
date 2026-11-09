@@ -219,6 +219,79 @@ static int walloca(ecx *e, uint32_t a)
 	return WT_I64;
 }
 
+/* with -mllvm -wasm-enable-sjlj: 1 a call to setjmp (_setjmp), 2 to longjmp (_longjmp), else 0 */
+VPRIV int wsjlj_kind(cc *c, uint32_t n)
+{
+	uint32_t ref;
+	const sym *y;
+	const char *s;
+	uint32_t len;
+
+	if (!c->o->wasm_sjlj || N(n)->op != N_CALL || !(ref = wcallee(c, N(n)->a)) || RKIND(ref) != RK_SYM)
+		return 0;
+	y = &c->syms[RIDX(ref)];
+	if (!y->name || y->sc == SC_STATIC)
+		return 0;
+	s = vintern_ents[y->name].s;
+	len = vintern_ents[y->name].len;
+	if (len && *s == '_')
+		s++, len--;
+	return len == 6 && !memcmp(s, "setjmp", 6) ? 1 : len == 7 && !memcmp(s, "longjmp", 7) ? 2 : 0;
+}
+
+/* setjmp(env) at site k: the value a longjmp resumed with, else __wasm_setjmp and 0 */
+static int wsetjmp(ecx *e, uint32_t n, bool want)
+{
+	cc *c = e->c;
+	wst *W = e->w;
+	const node *x = N(n);
+	uint32_t k = 0;
+
+	while (k < W->nsj && W->sj[k] != n)
+		k++;
+	if (k == W->nsj || x->c != 1)
+		efatal(e, x->loc, "wasm: setjmp here is not supported");
+	wget(e, W->sjl);
+	wconst(e, WT_I32, k + 1);
+	wi(e, "i32.eq");
+	wblock(e, "if\ti32");
+	wconst(e, WT_I32, 0);
+	wset(e, W->sjl);
+	wget(e, W->sjv);
+	wi(e, "else");
+	wexpr(e, c->lists[x->b], true);
+	wconst(e, WT_I32, k + 1);
+	wslot_addr(e, W->sjfid);
+	wi(e, "call\t__wasm_setjmp");
+	wconst(e, WT_I32, 0);
+	wend(e, "end_if");
+	if (!want) {
+		wi(e, "drop");
+		return WT_NONE;
+	}
+	return WT_I32;
+}
+
+/* longjmp(env, val): __wasm_longjmp throws __c_longjmp */
+static int wlongjmp(ecx *e, uint32_t n)
+{
+	cc *c = e->c;
+	const node *x = N(n);
+	uint32_t a1;
+
+	if (x->c != 2)
+		efatal(e, x->loc, "wasm: longjmp with %u arguments", x->c);
+	a1 = c->lists[x->b + 1];
+	wexpr(e, c->lists[x->b], true);
+	wexpr(e, a1, true);
+	if (wty(c, N(a1)->ty) != WT_I32)
+		wconv(e, N(a1)->ty, prim(TY_INT));
+	tb_s(&e->w->decl, "__wasm_longjmp\t(i64, i32) -> ()\n");
+	wi(e, "call\t__wasm_longjmp");
+	wi(e, "unreachable");
+	return WT_NONE;
+}
+
 /*
  * A call to a C library function that is one wasm instruction: clang makes
  * these its intrinsics at every -O (emscripten has no math errno), unless
@@ -327,6 +400,12 @@ VPRIV int wcall(ecx *e, uint32_t n, bool want)
 	    c->syms[RIDX(ref)].name &&
 	    vintern_ents[c->syms[RIDX(ref)].name].len == 6 && !memcmp(vintern_ents[c->syms[RIDX(ref)].name].s, "alloca", 6))
 		return walloca(e, c->lists[x->b]);	/* clang: alloca is a builtin, declared or not */
+	switch (wsjlj_kind(c, n)) {
+	case 1:
+		return wsetjmp(e, n, want);
+	case 2:
+		return wlongjmp(e, n);
+	}
 	{
 		const char *mi = wmath_insn(c, ref, f);
 

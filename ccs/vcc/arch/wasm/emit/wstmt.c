@@ -404,9 +404,15 @@ static void wgexpr(ecx *e, uint32_t n)
 	for (; n; n = x->a) {
 		x = N(n);
 		switch (x->op) {
-		case N_STMTEXPR:
+		case N_STMTEXPR: {
+			wst *W = e->w;
+			int sr = W->sjr;
+			uint32_t si = W->sji;
+
 			wgscan(e, x->a, -1, 0);
+			W->sjr = sr, W->sji = si;
 			return;
+		}
 		case N_MEMBER: case N_CAST: case N_UNARY: case N_ADDR: case N_DEREF:
 		case N_PREINC: case N_PREDEC: case N_POSTINC: case N_POSTDEC:
 		case N_VAARG: case N_COMPLIT:
@@ -420,6 +426,19 @@ static void wgexpr(ecx *e, uint32_t n)
 			wgexpr(e, x->c);
 			continue;
 		case N_CALL: case N_BUILTIN:
+			if (x->op == N_CALL && wsjlj_kind(c, n) == 1) {
+				/* a setjmp: its statement is where a longjmp resumes (wsj_begin) */
+				wst *W = e->w;
+
+				if (W->sjr < 0)
+					efatal(e, x->loc, W->sjr == -2 ? "wasm: setjmp in a loop's condition is not supported"
+								       : "wasm: setjmp outside a statement of a compound statement is not supported");
+				if (W->nsj >= WMAXGD)
+					efatal(e, x->loc, "wasm: too many setjmp calls");
+				W->gd[W->sjr].need = true;
+				wgadd(e, WG_SJ | W->nsj, (uint32_t)W->sjr, W->sji);
+				W->sj[W->nsj++] = n;
+			}
 			for (uint32_t i = 0; i < x->c; i++)
 				wgexpr(e, c->lists[x->b + i]);
 			if (x->op == N_CALL)
@@ -444,6 +463,7 @@ static void wgscan(ecx *e, uint32_t n, int pd, uint32_t pidx)
 	if (!n)
 		return;
 	x = N(n);
+	e->w->sjr = pd, e->w->sji = pidx;
 	switch (x->op) {
 	case N_EXPR: case N_RETURN: case N_GOTO_IND:
 		wgexpr(e, x->a);
@@ -466,6 +486,7 @@ static void wgscan(ecx *e, uint32_t n, int pd, uint32_t pidx)
 		break;
 	case N_WHILE:
 	case N_DO:
+		e->w->sjr = -2;
 		wgexpr(e, x->a);
 		r = wgrec(e, n, pd, pidx);
 		wgsub(e, x->b, r, 0);
@@ -473,6 +494,7 @@ static void wgscan(ecx *e, uint32_t n, int pd, uint32_t pidx)
 		break;
 	case N_FOR:
 		wgscan(e, x->a, -1, 0);
+		e->w->sjr = -2;
 		wgexpr(e, x->b);
 		wgexpr(e, c->lists[x->c]);
 		r = wgrec(e, n, pd, pidx);
@@ -680,6 +702,88 @@ static void wgoto(ecx *e, uint32_t lb, uint32_t loc)
 	wcleanup_leave(e, W->gd[a].loop);
 	wvla_leave(e, W->gd[a].loop, aidx);
 	wbr(e, "br", W->gd[a].loop);
+}
+
+/*
+ * setjmp/longjmp through wasm exceptions, as clang -mllvm -wasm-enable-sjlj:
+ * setjmp(env) is __wasm_setjmp(env, site, &id) and 0; longjmp throws
+ * __c_longjmp ({env, val}), which a function with setjmp sites catches
+ * around its body: __wasm_setjmp_test(env, &id) gives the site (0: another
+ * invocation's, thrown on), and the body runs again entered at the site's
+ * statement as by goto, where the setjmp is then val.
+ */
+VPRIV void wsj_begin(ecx *e)
+{
+	cc *c = e->c;
+	wst *W = e->w;
+
+	W->sjl = wnewloc(e, WT_I32);
+	W->sjv = wnewloc(e, WT_I32);
+	W->sjsp = wnewloc(e, WT_I64);
+	W->sjp = wnewloc(e, WT_I64);
+	W->sjfid = wslot(e, 4, 4);
+	tb_s(&W->decl, "__wasm_setjmp\t(i64, i32, i64) -> ()\n__wasm_setjmp_test\t(i64, i64) -> (i32)\n"
+		       "__wasm_longjmp\t(i64, i32) -> ()\n");
+	wi(e, "global.get\t__stack_pointer");
+	wset(e, W->sjsp);
+	W->sjloop = wblock(e, "loop");
+	wblock(e, "try");
+	for (uint32_t k = 0; k < W->nsj; k++) {
+		const wgp *p = wglabel(W, WG_SJ | k);
+		int d = (int)p->d;
+		uint32_t i = p->i;
+
+		wget(e, W->sjl);
+		wconst(e, WT_I32, k + 1);
+		wi(e, "i32.eq");
+		wblock(e, "if");
+		/* the states on the way down from the body (its dispatch picks them up) */
+		for (;;) {
+			if (W->gd[d].st != UINT32_MAX) {
+				wconst(e, WT_I32, wgstate(W, &W->gd[d], i));
+				wset(e, W->gd[d].st);
+			}
+			if (W->gd[d].parent < 0)
+				break;
+			i = W->gd[d].pidx;
+			d = W->gd[d].parent;
+		}
+		if (W->gd[d].node != c->syms[W->fsym].body)
+			efatal(e, N(W->sj[k])->loc, "wasm: setjmp in a statement expression is not supported");
+		wend(e, "end_if");
+	}
+}
+
+VPRIV void wsj_end(ecx *e)
+{
+	wst *W = e->w;
+	int b;
+
+	wi(e, "catch\t__c_longjmp");
+	wset(e, W->sjp);
+	wget(e, W->sjsp);
+	wi(e, "global.set\t__stack_pointer");
+	wget(e, W->sjp);
+	wiu(e, "i32.load", 8);
+	wset(e, W->sjv);
+	wget(e, W->sjp);
+	wiu(e, "i64.load", 0);
+	wset(e, W->sjp);
+	b = wblock(e, "block");
+	wget(e, W->sjp);
+	wslot_addr(e, W->sjfid);
+	wi(e, "call\t__wasm_setjmp_test");
+	wtee(e, W->sjl);
+	wbr(e, "br_if", b);
+	/* not a setjmp of this invocation: on to the next frame */
+	wget(e, W->sjp);
+	wget(e, W->sjv);
+	wi(e, "call\t__wasm_longjmp");
+	wi(e, "unreachable");
+	wend(e, "end_block");
+	wbr(e, "br", W->sjloop);
+	wend(e, "end_try");
+	wend(e, "end_loop");
 }
 
 /* a loop's test, skipped once when the loop is entered by goto (st != 0) */
@@ -1370,7 +1474,7 @@ VPRIV void wstmt(ecx *e, uint32_t n)
 		wexpr(e, x->a, true);
 		wset(e, t);
 		for (uint32_t i = 0; i < W->ngl; i++) {
-			if ((L[i].label & WG_CASE) || !c->labels[L[i].label].addr_taken ||
+			if ((L[i].label & (WG_CASE | WG_SJ)) || !c->labels[L[i].label].addr_taken ||
 			    (i && L[i - 1].label == L[i].label))
 				continue;
 			wget(e, t);

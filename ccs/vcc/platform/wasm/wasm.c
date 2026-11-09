@@ -114,7 +114,7 @@ typedef struct lay {
 	uint32_t *tmap;		/* parse signature -> type index + 1 */
 	uint32_t *types;	/* type index -> parse signature */
 	uint32_t ntypes;
-	uint32_t nfimp, ngimp, ntimp;
+	uint32_t nfimp, ngimp, ntimp, ntagimp;
 	uint32_t *funcs;	/* function index - nfimp -> wfunc */
 	uint32_t nfuncs;
 	uint32_t *elems;	/* table slot - 1 -> function index */
@@ -174,6 +174,11 @@ static int resolve(lay *L, wrel *r, uint64_t *val)
 			return was_error(m, "'%s' is not a global (.globaltype)", y->name);
 		*val = b->index;
 		return 0;
+	case R_TAG_INDEX_LEB:
+		if (b->kind != WS_TAG)
+			return was_error(m, "'%s' is not a tag (.tagtype)", y->name);
+		*val = b->index;
+		return 0;
 	case R_TABLE_NUMBER_LEB:
 		if (b->kind != WS_TABLE)
 			return was_error(m, "'%s' is not a table (.tabletype)", y->name);
@@ -191,7 +196,7 @@ static int patch(lay *L, wrel *r, uint8_t *p)
 		return -1;
 	switch (r->type) {
 	case R_FUNCTION_INDEX_LEB: case R_TYPE_INDEX_LEB: case R_GLOBAL_INDEX_LEB: case R_TABLE_NUMBER_LEB:
-	case R_MEMORY_ADDR_LEB:
+	case R_MEMORY_ADDR_LEB: case R_TAG_INDEX_LEB:
 		pad_uleb(p, v, 5);
 		break;
 	case R_MEMORY_ADDR_LEB64:
@@ -309,12 +314,16 @@ int wasm_write(wmod *m, vbuf *o)
 		b = base(m, y);
 		if (!y->in_symtab)
 			continue;
-		if (b->kind == WS_FUNCTION) {
+		if (b->kind == WS_FUNCTION || b->kind == WS_TAG) {
 			if (b->sig < 0) {
-				was_error(m, "function '%s' has no .functype", b->name);
+				was_error(m, b->kind == WS_TAG ? "tag '%s' has no .tagtype" : "function '%s' has no .functype", b->name);
 				goto out;
 			}
 			type_of(&L, b->sig);
+		}
+		if (b->kind == WS_TAG && defined(m, y)) {
+			was_error(m, "defining tag '%s' is not supported", b->name);
+			goto out;
 		}
 		if (y->alias >= 0 || defined(m, y))
 			continue;
@@ -324,6 +333,8 @@ int wasm_write(wmod *m, vbuf *o)
 			b->index = L.ngimp++;
 		else if (b->kind == WS_TABLE)
 			b->index = L.ntimp++;
+		else if (b->kind == WS_TAG)
+			b->index = L.ntagimp++;
 		else
 			continue;
 		L.imps[L.nimps++] = m->reg[i];
@@ -440,6 +451,10 @@ int wasm_write(wmod *m, vbuf *o)
 				put8(o, 3);
 				put8(o, y->gtype ? y->gtype : WV_I64);
 				put8(o, y->gmut);
+			} else if (y->kind == WS_TAG) {
+				put8(o, 4);
+				put8(o, 0);
+				uleb(o, type_of(&L, y->sig));
 			} else {
 				put8(o, 1);
 				put8(o, WV_FUNCREF);

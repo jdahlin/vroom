@@ -301,6 +301,9 @@ typedef struct obj {
 	uint32_t *fimp, nfimp;	/* function index < nfimp: the import */
 	uint32_t *gimp, ngimp;
 	uint32_t ntimp;
+	uint32_t *tagimp, ntagimp;	/* tag index < ntagimp: the import */
+	struct itag { uint32_t type; int32_t out; bool live; } *tag;
+	uint32_t ntag;
 	ifunc *fn;
 	uint32_t nfn;
 	iglob *gl;
@@ -455,7 +458,8 @@ static void parse_linking(obj *o, rd *r)
 					else {
 						/* the import's field */
 						uint32_t k = y->kind == K_FUNCTION && y->index < o->nfimp ? o->fimp[y->index]
-							   : y->kind == K_GLOBAL && y->index < o->ngimp ? o->gimp[y->index] : UINT32_MAX;
+							   : y->kind == K_GLOBAL && y->index < o->ngimp ? o->gimp[y->index]
+							   : y->kind == K_TAG && y->index < o->ntagimp ? o->tagimp[y->index] : UINT32_MAX;
 
 						if (k != UINT32_MAX)
 							y->name = span_str(o->imp[k].field);
@@ -580,6 +584,7 @@ static obj *parse_obj(const char *name, const uint8_t *p, size_t n)
 			o->imp = calloc(k + 1, sizeof(iimp));
 			o->fimp = calloc(k + 1, sizeof(uint32_t));
 			o->gimp = calloc(k + 1, sizeof(uint32_t));
+			o->tagimp = calloc(k + 1, sizeof(uint32_t));
 			o->nimp = k;
 			for (uint32_t i = 0; i < k && !s.bad; i++) {
 				iimp *m = &o->imp[i];
@@ -619,6 +624,7 @@ static obj *parse_obj(const char *name, const uint8_t *p, size_t n)
 				case 4:
 					r8(&s);
 					m->type = (uint32_t)ruleb(&s);
+					o->tagimp[o->ntagimp++] = i;
 					break;
 				default:
 					s.bad = true;
@@ -688,6 +694,18 @@ static obj *parse_obj(const char *name, const uint8_t *p, size_t n)
 					o->seg[i].off = (uint32_t)(s.p - data0);
 					o->seg[i].data = rbytes(&s, sz);
 				}
+			}
+			break;
+		}
+		case 13: {
+			uint32_t k = (uint32_t)ruleb(&s);
+
+			o->tag = calloc(k + 1, sizeof *o->tag);
+			o->ntag = k;
+			for (uint32_t i = 0; i < k && !s.bad; i++) {
+				r8(&s);		/* attribute: exception */
+				o->tag[i].type = (uint32_t)ruleb(&s);
+				o->tag[i].out = -1;
 			}
 			break;
 		}
@@ -1029,6 +1047,8 @@ static tgt resolve(obj *o, uint32_t si)
 		t.idx = y->index - o->nfimp;
 	else if (y->kind == K_GLOBAL)
 		t.idx = y->index - o->ngimp;
+	else if (y->kind == K_TAG)
+		t.idx = y->index - o->ntagimp;
 	else
 		t.idx = y->index;
 	return t;
@@ -1091,6 +1111,8 @@ static void mark_tgt(tgt t)
 		wl[nwl++] = (work){ t.o, t.y->seg, 1 };
 	} else if (t.kind == K_GLOBAL && t.idx < t.o->ngl) {
 		t.o->gl[t.idx].live = true;
+	} else if (t.kind == K_TAG && t.idx < t.o->ntag) {
+		t.o->tag[t.idx].live = true;
 	}
 }
 
@@ -1361,6 +1383,13 @@ static int rel_value(obj *o, irel *r, uint64_t *v, uint32_t *imm_globals)
 		}
 		(void)imm_globals;
 		return 0;
+	case R_TAG_INDEX_LEB:
+		if (t.g || !t.o || t.idx >= t.o->ntag || t.o->tag[t.idx].out < 0) {
+			err("%s: undefined tag: %s", o->name, t.g ? t.g->name : "?");
+			return -1;
+		}
+		*v = (uint64_t)t.o->tag[t.idx].out;
+		return 0;
 	case R_TABLE_NUMBER_LEB:
 		*v = 0;
 		return 0;
@@ -1382,7 +1411,7 @@ static int apply(obj *o, irel *r, uint32_t n, uint8_t *base, uint32_t base_off)
 			return -1;
 		switch (r[i].type) {
 		case R_FUNCTION_INDEX_LEB: case R_TYPE_INDEX_LEB: case R_GLOBAL_INDEX_LEB: case R_TABLE_NUMBER_LEB:
-		case R_MEMORY_ADDR_LEB:
+		case R_MEMORY_ADDR_LEB: case R_TAG_INDEX_LEB:
 			pad_uleb(p, v, 5);
 			break;
 		case R_MEMORY_ADDR_LEB64:
@@ -1427,6 +1456,7 @@ static int write_module(void)
 	struct oglob { uint8_t type, mut; span init; uint64_t val; bool has_val; } *ogl = NULL;
 	uint32_t nog = 0, cog = 0;
 	int32_t ctors = -1;
+	uint32_t *otags = NULL, notag = 0, cotag = 0;
 	uint64_t mem;
 	static const uint8_t t_void[] = { 0, 0 };
 
@@ -1506,6 +1536,14 @@ static int write_module(void)
 			g->out = (int32_t)(nfi + nof++);
 		}
 	}
+	/* tags: the objects' live ones, in order (no imports) */
+	for (uint32_t k = 0; k < nobjs; k++)
+		for (uint32_t i = 0; i < objs[k]->ntag; i++)
+			if (objs[k]->tag[i].live) {
+				GROW(otags, notag, cotag);
+				otags[notag] = otype(objs[k]->types[objs[k]->tag[i].type]);
+				objs[k]->tag[i].out = (int32_t)notag++;
+			}
 	/* globals: __stack_pointer, then the objects' */
 	GROW(ogl, nog, cog);
 	ogl[nog++] = (struct oglob){ 0x7e, 1, { 0 }, 0, true };
@@ -1671,6 +1709,8 @@ static int write_module(void)
 				ex[nex++] = (oexp){ g->name, 0, (uint32_t)t.o->fn[t.idx].out };
 			else if (t.kind == K_GLOBAL)
 				ex[nex++] = (oexp){ g->name, 3, (uint32_t)t.o->gl[t.idx].out };
+			else if (t.kind == K_TAG)
+				ex[nex++] = (oexp){ g->name, 4, (uint32_t)t.o->tag[t.idx].out };
 			else if (t.kind == K_DATA) {
 				/* a data symbol: an immutable global holding its address */
 				GROW(ogl, nog, cog);
@@ -1852,6 +1892,16 @@ static int write_module(void)
 		if (max_pages)
 			ouleb(&o, max_pages);
 		sec_end(&o, at);
+		/* tags */
+		if (notag) {
+			at = sec_begin(&o, 13, NULL);
+			ouleb(&o, notag);
+			for (uint32_t i = 0; i < notag; i++) {
+				ob8(&o, 0);
+				ouleb(&o, otags[i]);
+			}
+			sec_end(&o, at);
+		}
 		/* globals */
 		at = sec_begin(&o, 6, NULL);
 		ouleb(&o, nog);

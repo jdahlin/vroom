@@ -56,8 +56,16 @@ def rt_obj():
         subprocess.run([EMCC, TGT, '-O2', '-c', src, '-o', RTO + '.tmp'], check=True)
         os.replace(RTO + '.tmp', RTO)
 
-def link(objs, js, vlink=False):
-    rc, _, err = sh(LINK + objs + [RTO, '-o', js], timeout=120, env=VLENV if vlink else None)
+# setjmp/longjmp through wasm exceptions, as emcc -sSUPPORT_LONGJMP=wasm compiles and links
+SJLJ = ['-mllvm', '-wasm-enable-sjlj']
+SJLJ_CL = ['-mllvm', '-wasm-use-legacy-eh', '-mexception-handling']
+SJLJ_LINK = ['-sSUPPORT_LONGJMP=wasm']
+
+def uses_sjlj(src):
+    return re.search(r'\b_?(setjmp|longjmp)\b', src) is not None
+
+def link(objs, js, vlink=False, extra=()):
+    rc, _, err = sh(LINK + list(extra) + objs + [RTO, '-o', js], timeout=120, env=VLENV if vlink else None)
     return rc, err.decode(errors='replace')
 
 def vlink_env():
@@ -89,11 +97,13 @@ def reference(suite, name, path, flags, wd):
     except (OSError, ValueError, KeyError):
         pass
     r = {'key': key}
-    rc, _, err = sh([CL] + BASE + ct.CLFL + flags + ['-c', path, '-o', f'{wd}/ref.o'], cwd=os.path.dirname(path))
+    sj = SJLJ in [flags[i:i + 2] for i in range(len(flags))]
+    rc, _, err = sh([CL] + BASE + ct.CLFL + flags + (SJLJ_CL if sj else []) + ['-c', path, '-o', f'{wd}/ref.o'],
+                    cwd=os.path.dirname(path))
     if rc:
         r['skip'] = 'clang-rejects'; r['why'] = ct.first_err(err.decode(errors='replace'))
     else:
-        rc, err = link([f'{wd}/ref.o'], f'{wd}/ref.js')
+        rc, err = link([f'{wd}/ref.o'], f'{wd}/ref.js', extra=SJLJ_LINK if sj else ())
         if rc:
             m = re.search(r'undefined symbol: (\S+)', err)
             r['skip'] = 'ref-fail'; r['why'] = 'link: ' + (m.group(1) if m else ct.first_err(err))
@@ -118,6 +128,9 @@ def one(t):
     flags = ct.dg_flags(src) if suite == 'gcc' else ct.exec_marks(src)[0] if suite == 'vcc' else []
     if name.startswith('76_dollars'):
         flags = ['-fdollars-in-identifiers']
+    sj = uses_sjlj(src)
+    if sj:
+        flags = flags + SJLJ
     if suite == 'vcc' and re.search(r'/\*\s*vcc-noref:', src):
         return t, 'skip', 'noref', 'no clang reference'
     wd = f'{OUT}/w/{suite}/{name}'
@@ -137,10 +150,11 @@ def one(t):
         if rc:
             e = err.decode(errors='replace')
             return t, 'fail', 'emit', ct.first_err(e) if rc != 'timeout' and rc > 0 else f'vpp: signal/timeout {rc}: ' + ct.first_err(e)
-        rc, _, err = sh([CL, TGT, '-c', f'{wd}/vcc.s', '-o', f'{wd}/vcc.o'])
+        eh = ['-mexception-handling'] if sj else []
+        rc, _, err = sh([CL, TGT] + eh + ['-c', f'{wd}/vcc.s', '-o', f'{wd}/vcc.o'])
         if rc and all('call_indirect' in l for l in re.findall(r'error: .*\n(.*)', err.decode(errors='replace'))):
             # LLVM's assembler checks call_indirect's index against an i32 table (clang's own -S fails the same way)
-            rc, _, err = sh([CL, TGT, '-Wa,--no-type-check', '-c', f'{wd}/vcc.s', '-o', f'{wd}/vcc.o'])
+            rc, _, err = sh([CL, TGT] + eh + ['-Wa,--no-type-check', '-c', f'{wd}/vcc.s', '-o', f'{wd}/vcc.o'])
         quoted = False
         if rc and re.search(r'error: (Unexpected token in operand|Expected label after \.type directive, got): "', err.decode(errors='replace')):
             # quoted (non-ASCII) names, as clang -S writes them, which LLVM's wasm
@@ -158,7 +172,7 @@ def one(t):
                 return t, 'fail', 'objcmp', 'vpp -c: ' + ct.first_err(err.decode(errors='replace'))
             if open(f'{wd}/vccobj.o', 'rb').read() != open(f'{wd}/vcc.o', 'rb').read():
                 return t, 'fail', 'objcmp', 'object differs from clang\'s for the same .s'
-    rc, err = link([f'{wd}/vcc.o'], f'{wd}/vcc.js', VLENV is not None)
+    rc, err = link([f'{wd}/vcc.o'], f'{wd}/vcc.js', VLENV is not None, SJLJ_LINK if sj else ())
     if rc:
         m = re.search(r'undefined symbol: (\S+)', err)
         return t, 'fail', 'link', 'undefined ' + m.group(1) if m else ct.first_err(err)

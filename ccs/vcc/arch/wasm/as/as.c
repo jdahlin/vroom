@@ -317,7 +317,7 @@ static int sigparse(wmod *m, lx *l, wsig *g)
 
 enum {
 	I_NONE, I_BLOCK, I_LABEL, I_BRTABLE, I_CALL, I_CALLIND, I_LOCAL, I_GLOBAL, I_I32, I_I64, I_F32, I_F64,
-	I_MEM, I_MEMIDX, I_MEMIDX2, I_END, I_ENDFN,
+	I_MEM, I_MEMIDX, I_MEMIDX2, I_END, I_ENDFN, I_TAG,
 };
 
 typedef struct winsn {
@@ -332,6 +332,9 @@ static const winsn insns[] = {
 	{ "loop", 0x03, I_BLOCK, 0 }, { "if", 0x04, I_BLOCK, 0 }, { "else", 0x05, I_NONE, 0 },
 	{ "end_block", 0x0b, I_END, 0 }, { "end_loop", 0x0b, I_END, 0 }, { "end_if", 0x0b, I_END, 0 },
 	{ "end", 0x0b, I_END, 0 }, { "end_function", 0x0b, I_ENDFN, 0 },
+	{ "try", 0x06, I_BLOCK, 0 }, { "catch", 0x07, I_TAG, 0 }, { "throw", 0x08, I_TAG, 0 },
+	{ "rethrow", 0x09, I_LABEL, 0 }, { "end_try", 0x0b, I_END, 0 }, { "delegate", 0x18, I_LABEL, 0 },
+	{ "catch_all", 0x19, I_NONE, 0 },
 	{ "br", 0x0c, I_LABEL, 0 }, { "br_if", 0x0d, I_LABEL, 0 }, { "br_table", 0x0e, I_BRTABLE, 0 },
 	{ "return", 0x0f, I_NONE, 0 }, { "call", 0x10, I_CALL, 0 }, { "call_indirect", 0x11, I_CALLIND, 0 },
 	{ "drop", 0x1a, I_NONE, 0 }, { "select", 0x1b, I_NONE, 0 }, { "i32.select", 0x1b, I_NONE, 0 },
@@ -570,6 +573,14 @@ static int instruction(was *a, const winsn *w, lx *l)
 		hole(b, 5);
 		break;
 	}
+	case I_TAG:
+		n = ident(l, &t);
+		if (!n)
+			return was_error(m, "%s: expected a tag", w->name);
+		s = (int32_t)sym_use(a, was_sym(m, t, n), WS_TAG);
+		fn_rel(a, R_TAG_INDEX_LEB, (uint32_t)s, 0);
+		hole(b, 5);
+		break;
 	case I_GLOBAL:
 		n = ident(l, &t);
 		if (!n)
@@ -939,6 +950,27 @@ static int directive(was *a, const char *d, size_t dn, lx *l)
 			if (n == 9 && !memcmp(s, "immutable", 9))
 				m->sym[sy].gmut = false;
 		}
+		return 0;
+	}
+	if (IS(".tagtype")) {
+		wsig g = { 0 };
+
+		n = ident(l, &s);
+		if (!n)
+			return was_error(m, ".tagtype: expected a symbol");
+		sy = (int32_t)was_sym(m, s, n);
+		while (!at_end(l)) {
+			int t;
+
+			n = ident(l, &s);
+			t = valtype(s, n);
+			if (t < 0 || t == WV_FUNCREF || g.np >= sizeof g.t)
+				return was_error(m, ".tagtype: unknown type '%.*s'", (int)n, s);
+			g.t[g.np++] = (uint8_t)t;
+			accept(l, ',');
+		}
+		m->sym[sy].kind = WS_TAG;
+		m->sym[sy].sig = (int32_t)was_sig_intern(m, &g);
 		return 0;
 	}
 	if (IS(".tabletype")) {
