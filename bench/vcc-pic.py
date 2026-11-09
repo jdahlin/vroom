@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""vcc-pic.py: GOT use per code model (-fno-pic, -fPIE, -fPIC, the hosted
+"""vcc-pic.py: GOT and TLS use per code model (-fno-pic, -fPIE, -fPIC, the hosted
 default) checked against clang: for every C file in ccs/vcc/tests/pic, the
-symbols with GOT relocations and the relocation types in each object must
+symbols with GOT or TLS relocations and the relocation types in each object must
 match clang -c's (<1 s)."""
 import glob, os, re, subprocess, sys, tempfile
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -15,7 +15,7 @@ def relocs(o):
     s = set()
     for l in out.splitlines():
         m = re.match(r'\s*[0-9a-f]+\s+[0-9a-f]+\s+(R_AARCH64_\w+)\s+[0-9a-f]+\s+(\S+)', l)
-        if m and 'GOT' in m.group(1): s.add((m.group(1), m.group(2)))
+        if m and ('GOT' in m.group(1) or 'TLS' in m.group(1)): s.add((m.group(1), m.group(2)))
     return s
 
 bad = ok = 0

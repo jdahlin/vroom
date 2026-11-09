@@ -95,14 +95,26 @@ VPRIV lval gen_lval(ecx *e, uint32_t n)
 			l.r = (uint8_t)r;
 			return l;
 		}
-		if (DARWIN(c) && ((c->syms[cs].flags | c->syms[s].flags) & SF_THREAD)) {
-			/* Darwin TLV: the descriptor's thunk returns the address in x0 */
-			int r;
+		if (!WASM(c) && ((c->syms[cs].flags | c->syms[s].flags) & SF_THREAD)) {
+			/*
+			 * x0 = the address.  Darwin: the TLV descriptor's thunk.  ELF as
+			 * clang: -fPIC TLSDESC (a call), else local-exec for a symbol
+			 * defined here and initial-exec for the others.
+			 */
+			int r, model = 0;
 
+			if (!DARWIN(c))
+				model = c->o->pic == 2 ? TLS_DESC :
+					(c->syms[cs].flags & (SF_DEFINED | SF_TENTATIVE)) ? TLS_LE : TLS_IE;
 			note_ref(e, REF(RK_SYM, cs));
-			e->calls = true;
-			if (e->reach)
-				put(e, I_TLV)->ref = REF(RK_SYM, cs);
+			if (model == 0 || model == TLS_DESC)
+				e->calls = true;
+			if (e->reach) {
+				ins *t = put(e, I_TLV);
+
+				t->ref = REF(RK_SYM, cs);
+				t->cond = (uint8_t)model;
+			}
 			r = treg(e);
 			mov(e, 1, r, 0);
 			l.k = L_REG;

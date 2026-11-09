@@ -6,6 +6,9 @@ SECTIONS {
 	.init_array : { __init_array_start = .; KEEP(*(SORT(.init_array.*))) KEEP(*(.init_array)) __init_array_end = .; }
 	.fini_array : { __fini_array_start = .; KEEP(*(SORT(.fini_array.*))) KEEP(*(.fini_array)) __fini_array_end = .; }
 	.data : { *(.data*) }
+	.tdata : { __tdata_start = .; *(.tdata*) }
+	.tbss : { *(.tbss*) }
+	__tdata_size = SIZEOF(.tdata);
 	.bss : { *(.bss*) *(COMMON) }
 	. = ALIGN(16);
 	__heap_start = .;

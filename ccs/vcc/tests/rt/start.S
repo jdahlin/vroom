@@ -20,7 +20,19 @@ _start:
 	bic	x0, x0, #(1 << 1)
 	msr	sctlr_el1, x0
 	isb
-	bl	__rt_main
+	/* static TLS (variant 1): tpidr_el0 -> 16-byte TCB, .tdata after it, .tbss zero (in .bss) */
+	adrp	x0, tls_area
+	add	x0, x0, :lo12:tls_area
+	msr	tpidr_el0, x0
+	add	x1, x0, #16
+	ldr	x2, =__tdata_start
+	ldr	x3, =__tdata_size
+2:	cbz	x3, 3f
+	ldrb	w4, [x2], #1
+	strb	w4, [x1], #1
+	sub	x3, x3, #1
+	b	2b
+3:	bl	__rt_main
 	/* x0 = exit status */
 	.globl	_exit
 _exit:
@@ -85,6 +97,9 @@ ttb:
 	.fill	508, 8, 0
 
 	.bss
+	.p2align 6
+tls_area:
+	.space	64 << 10
 	.p2align 4
 	.space	8 << 20
 stack_top:

@@ -395,7 +395,42 @@ VPRIV void emit_object(ecx *e, uint32_t s)
 		out_chunk(e, ((uint64_t)s << 1) | 1, start);
 		return;
 	}
-	if (!a->section && (y->flags & SF_THREAD) && !(DARWIN(c) && direct(e)))
+	if (!a->section && (y->flags & SF_THREAD) && !DARWIN(c)) {
+		/* ELF: .tdata/.tbss; code reaches it through I_TLV (lval.c) */
+		const char *sec = zero && !e->nrel ? "\t.section\t.tbss,\"awT\",@nobits\n" : "\t.section\t.tdata,\"awT\",@progbits\n";
+
+		if (direct(e)) {
+			size_t h;
+
+			b->n = (b->n + 7) & ~(size_t)7;
+			start = b->n;
+			sym_header(e, b, s, false, sec, align);
+			data_item(e, zero && !e->nrel ? (size ? size : 1) : size, zero && !e->nrel);
+			h = it_open(e, IT_OSIZE);
+			*(osize *)it_room(e, sizeof(osize)) = (osize){ .sym = s, .size = size };
+			it_close(e, h);
+			e->E->nobj++;
+			out_chunk(e, ((uint64_t)s << 1) | 1, start);
+			return;
+		}
+		sym_header(e, b, s, false, sec, align);
+		if (zero && !e->nrel) {
+			tb_s(b, "\t.zero\t");
+			tb_u(b, size ? size : 1);
+			tb_c(b, '\n');
+		} else {
+			data_bytes(e, b, size);
+		}
+		tb_s(b, "\t.size\t");
+		sym_name(c, b, s);
+		tb_s(b, ", ");
+		tb_u(b, size);
+		tb_c(b, '\n');
+		e->E->nobj++;
+		out_chunk(e, ((uint64_t)s << 1) | 1, start);
+		return;
+	}
+	if (!a->section && (y->flags & SF_THREAD) && !direct(e))
 		efatal(e, y->loc, "thread-local storage is not supported");
 	if (direct(e) && (y->flags & SF_THREAD)) {
 		/*

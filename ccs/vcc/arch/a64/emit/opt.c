@@ -170,7 +170,7 @@ __attribute__((noinline)) static rmask writes_slow(const ins *i, unsigned ro)
 	if (ro & OP_CALL)
 		s |= CALLW;
 	if (ro & OP_TLV)
-		s |= RB(0) | RB(16) | RB(30);
+		s |= i->cond ? RB(0) | RB(1) | RB(30) : RB(0) | RB(16) | RB(30);
 	return s;
 }
 

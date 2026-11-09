@@ -499,12 +499,17 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
   `-fPIC` every default-visibility non-static symbol, `-fPIE` those not
   defined in the TU, hidden/protected direct, calls direct; checked by
   `bench/vcc-pic.py` (GOT relocations vs clang per mode).  Left: T8 (a
-  shared library + executable run under qemu), the vDSO, TLS under PIC.
+  shared library + executable run under qemu), the vDSO.
   *Validate:* T6 (`ADR_GOT_PAGE`/`LD64_GOT_LO12_NC` for extern data under
   `-fPIC`, none for `static`/hidden); T8 link a shared library + an executable
   using it, run under qemu-user; kernel vDSO built by vcc and boot test.
-- [ ] **ELF TLS** [P] (`emit.c:8883`): local-exec / initial-exec / TLSDESC
-  per `-ftls-model` and PIC, `.tbss`/`.tdata`.
+- [ ] **ELF TLS** [P]: done as clang's defaults: local-exec for a symbol
+  defined in the TU, initial-exec for the others, TLSDESC under `-fPIC`
+  (`I_TLV` with `cond` = model, x0 = the address), `.tdata`/`.tbss`
+  "awT"; relocations checked by `bench/vcc-pic.py` (`tests/pic/tls.c`),
+  run by `tests/vcc/tls_static.c` (`tests/rt` sets `tpidr_el0`).  Left:
+  `-ftls-model=` and `__attribute__((tls_model))`, local-dynamic, the
+  register choice (always x0/x1, clang allocates), `-fdata-sections`.
   *Validate:* T6 (relocs per model); T1 run under qemu with the runtime's
   TLS setup (`tests/rt` start.S sets `tpidr_el0`); T3 already has TLV.
 - [ ] **CFI / `.eh_frame`** (and Darwin compact unwind) [P].
