@@ -144,6 +144,51 @@ W1 kan delvis gå parallellt med W0.
 Före planen: wasm-*bygget* av vcc via emscripten (`ccs/wasm/`, commit 8e9f9da) och
 explorer-sidan.
 
+### Integrering (2026-11-09): gren `claude/wasm`
+Allt färdigt i en gren: W5 och W8 (`claude/wasm-w5-objects`,
+`claude/wasm-w8-linker`), W7:s front end (`claude/wasm-w7-wasm32`) och resten
+av W4 (`claude/wasm-compiler-explorer-5ed0bf`). Inte med: cleanup-attributet
+(`claude/wasm-cleanup-wip`, ett oförklarat körfel). Konflikter bara i
+`emitimpl.h` (`WASM()` täcker nu wasm32, plus `inline_only`) och
+`bench/vcc-wasm.py` (`rt/wasm.c` länkas också med `--vlink`).
+- `vcc-wasm.py -j 6`: 1 717/1 742 (gcc 1 588/1 605, tcc 97/104, vcc 32/33).
+- arm64: `vcc-same.py` 13 165/13 181; de 16 avvikelserna är avsedda
+  (`ctor_priority.c`: `.init_array.N` som clang, W5; `36_array_initialisers.c`
+  och `composite_array.c`: storleken från en tidigare deklaration, rättelse i
+  front end). `vcc-ctests` 1 745/1 745, `vcc-sema batch` 878/879, bygget fil
+  för fil utan varningar.
+
+### W4 (2026-11-09): nästan klar
+Gjort sedan W2: `goto` (dispatch-loopar med tillståndslocals och `br_table`,
+hopp in i nästlade satser), etikettadresser och beräknat `goto`, inline asm
+med tom mall, vektorer (lane för lane, sret), `__int128`/`long double` via
+compiler-rt (16-byte-värden som adresser till platser), VLA (under
+`__stack_pointer`, återlämnas vid blockslut, `break`/`continue` och bakåthopp),
+`alloca`, atomics som vanliga laddningar/lagringar (som clang utan
+atomics-funktionen), överspillsinbyggda, död kod efter hopp och kända villkor,
+lokala kopior av inline-only-funktioner (emittern inlinar inte), funktions-
+adresser i data (`.int32`/`.int64`, tabellindex), varargs-platser minst 4 byte.
+Återstår (fel, inte tyst fel):
+- `emit` 13: cleanup-attributet (2, WIP-gren), `asm goto` (2), `goto` till en
+  etikett som inte står i en sammansatt sats (2), `case` i en nästlad sats
+  (1), `switch` på 128 bitar (1), överspillsinbyggda på `__int128` (1),
+  `_Atomic`-objekt (1), bit-fält över 8 byte (1), `atomic_signal_fence` (1,
+  front end), destruktorer (1, W5).
+- `link` 6: testerna förutsätter att optimeringen tar bort `link_error`-anrop.
+- `run` 6: optimeringsberoende (`bcp-1`, `builtin-constant`,
+  `frame-address`, `20030125-1`), `complex-6` (`long double _Complex`) och
+  `24_math_library` (bibliotekets signaturer för implicit deklarerade).
+- Inte gjort: `setjmp`/`longjmp` (wasm-EH), `bench/vcc-abi.py --target wasm64`
+  (ABI provat med egna skript, alla fyra kombinationerna, men inte som harness).
+
+### W7 (2026-11-09): front end klar, generatorn inte
+`--target=wasm32-unknown-emscripten`: predefines som clang, ILP32 i front end.
+Generatorn, assemblern och länkaren antar 64-bitars pekare (`int *p = &g[1]`
+ger "address initializer for a 4-byte object"). Kvar: pekarbredd 4 genom
+`arch/wasm/emit/`, `.int32`-adresser, `i32`-adressering och
+`__stack_pointer` som i32, objektskrivarens relokeringar (MEMORY_ADDR_SLEB
+m.fl.), `vlink` utan `-mwasm64`, sviterna med `--target=wasm32`.
+
 ### W8 (2026-11-09): egen länkare, i gren `claude/wasm-w8-linker` (på W5)
 - `ld/wasmld.c`: `vlink` länkar wasm när det anropas som `wasm-ld` eller med
   `-mwasm64`. Läser relokerbara wasm-objekt (clangs och vccs), arkiv (SysV-
