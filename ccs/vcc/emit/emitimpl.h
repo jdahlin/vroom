@@ -131,6 +131,9 @@ enum {
 
 enum { C_EQ, C_NE, C_HS, C_LO, C_MI, C_PL, C_VS, C_VC, C_HI, C_LS, C_GE, C_LT, C_GT, C_LE, C_AL };
 
+/* lrefc: a label that inline asm (asm goto) or a label address (&&l) may reach */
+#define LREF_EXT (1u << 31)
+
 typedef struct ins {
 	uint8_t op, sz;		/* sz: 1 = 64-bit (x), 0 = 32-bit (w); memory: log2 bytes */
 	uint8_t rd, rn, rm, ra;
@@ -345,7 +348,7 @@ typedef struct ecx {
 	bind *b;		/* per sym */
 	lbl *lm;		/* per label */
 	uint32_t *caselbl;	/* per node (N_CASE / N_DEFAULT): local label */
-	uint32_t *lrefc;	/* per local label: branches to it */
+	uint32_t *lrefc;	/* per local label: branches to it; LREF_EXT: also reached from outside the records */
 	uint32_t nlabel, caplabel;
 	/*
 	 * Known values of locals only ever assigned constants (SA_CWRITE):

@@ -662,6 +662,327 @@ static void slots(ecx *e)
 	}
 }
 
+/* ---------------- known extensions ---------------- */
+
+/*
+ * Forward over the blocks, meeting at joins, per register: z, the value
+ * fits in its low z bits (the rest are zero), and s, it is the sign
+ * extension of its low s bits (64: nothing known).  A zero or sign
+ * extension (ubfm/sbfm #0, a 32-bit mov, an and with a low mask) of a
+ * register that already has that form becomes a 64-bit mov, which the copy
+ * clean-ups then remove: the emitter keeps every value extended to 64 bits
+ * after each load, compare and 32-bit operation, often twice.
+ *
+ * Only x0-x15 and x19-x28 carry facts (x16/x17 are the printer's and the
+ * linker's scratch).  A function's entry, a block nothing branches to and a
+ * label that inline asm or a label address may reach (LREF_EXT) start
+ * with nothing known.
+ */
+#define XU 64
+typedef struct xf { uint8_t z[64]; } xf;	/* z[r], then s[r] at z[32 + r] */
+#define XS(f) ((f)->z + 32)
+
+static _Thread_local struct {
+	xf *in;			/* per block */
+	uint8_t *vis;		/* per block: 0 in not set, 1 set, 2 changed since the block was gone through */
+	uint8_t *red;		/* per record: a redundant extension */
+	uint32_t cap, capr;
+} XF;
+
+static inline unsigned xz(const xf *f, int r) { return r == ZR ? 0 : r < 31 ? f->z[r] : XU; }
+static inline unsigned xs(const xf *f, int r) { return r == ZR ? 1 : r < 31 ? XS(f)[r] : XU; }
+static inline unsigned umin(unsigned a, unsigned b) { return a < b ? a : b; }
+static inline unsigned umax(unsigned a, unsigned b) { return a > b ? a : b; }
+static inline unsigned zbits(uint64_t v) { return v ? 64 - (unsigned)__builtin_clzll(v) : 0; }
+static inline unsigned sbits(int64_t v) { return 64 - (unsigned)__builtin_clrsbll(v); }
+
+/* the record's result: its z and s, or false if nothing is known of it */
+static bool xresult(const xf *f, const ins *i, unsigned *zo, unsigned *so)
+{
+	int rn = i->rn, rm = i->rm, x = i->sz;
+	unsigned z = XU, s = XU, w = x ? 64 : 32;
+	unsigned zn = xz(f, rn), sn = xs(f, rn);
+
+	switch (i->op) {
+	case I_LD: case I_LDLO:
+		if (i->sz == 3)
+			return false;
+		if (i->cond == 0)
+			z = 8u << i->sz;
+		else if (i->cond == 1)
+			s = 8u << i->sz;
+		else
+			z = 32;	/* sign-extended into w */
+		goto done;
+	case I_MOVI: {
+		uint64_t v = x ? (uint64_t)i->imm : (uint32_t)i->imm;
+
+		z = zbits(v), s = sbits((int64_t)v);
+		goto done;
+	}
+	case I_MOV:
+		z = zn, s = sn;
+		break;
+	case I_CSINC:
+		if (rn != ZR || rm != ZR)
+			return x ? false : (*zo = 32, *so = 33, true);
+		z = 1;	/* cset */
+		break;
+	case I_CSINV:
+		if (rn != ZR || rm != ZR)
+			return x ? false : (*zo = 32, *so = 33, true);
+		s = 1;	/* csetm */
+		break;
+	case I_CSEL:
+		z = umax(zn, xz(f, rm)), s = umax(sn, xs(f, rm));
+		break;
+	case I_UBFM: {
+		unsigned r = (unsigned)i->imm, h = i->sh;
+
+		if (h >= r)	/* bits r..h to 0 (lsr, ubfx) */
+			z = umin(h - r + 1, zn > r ? zn - r : 0);
+		else		/* bits 0..h to w-r (lsl, ubfiz) */
+			z = umin(h + 1, zn) + (w - r);
+		break;
+	}
+	case I_SBFM: {
+		unsigned r = (unsigned)i->imm, h = i->sh;
+
+		if (r == 0) {	/* sxt: bits 0..h */
+			if (zn < h + 1)
+				z = zn;
+			else if (x)
+				s = umin(h + 1, sn);
+		} else if (h == w - 1) {	/* asr */
+			if (zn < w)	/* (not negative in w bits: an lsr) */
+				z = zn > r ? zn - r : 0;
+			else if (x)
+				s = sn > r ? sn - r : 1;
+		}
+		break;
+	}
+	case I_ANDI: {
+		uint64_t v = x ? (uint64_t)i->imm : (uint32_t)i->imm;
+
+		z = umin(zn, zbits(v));
+		if (x && (int64_t)v < 0 && zbits(~v) < sn)
+			s = sn;	/* the mask keeps every bit from the sign up */
+		break;
+	}
+	case I_AND: case I_ORR: case I_EOR:
+		if (i->sh)
+			break;
+		if (i->op == I_AND)
+			z = umin(zn, xz(f, rm));
+		else
+			z = umax(zn, xz(f, rm));
+		s = umax(sn, xs(f, rm));
+		break;
+	case I_ORRI: case I_EORI: {
+		uint64_t v = x ? (uint64_t)i->imm : (uint32_t)i->imm;
+
+		z = umax(zn, zbits(v)), s = umax(sn, sbits((int64_t)v));
+		break;
+	}
+	case I_ADD:
+		if (i->sh)
+			break;
+		{
+			unsigned a = umax(zn, xz(f, rm)), b = umax(sn, xs(f, rm));
+
+			z = a < XU ? a + 1 : XU, s = b < XU ? b + 1 : XU;
+		}
+		break;
+	case I_ADDI: case I_SUBI: {
+		int64_t v = i->imm;
+
+		if (v == INT64_MIN)
+			break;
+		if (i->op == I_SUBI)
+			v = -v;
+		if (v >= 0) {
+			unsigned a = umax(zn, zbits((uint64_t)v));
+
+			z = a < XU ? a + 1 : XU;
+		}
+		if (x) {
+			unsigned b = umax(sn, sbits(v));
+
+			s = b < XU ? b + 1 : XU;
+		}
+		break;
+	}
+	case I_LSRV:
+		z = zn;
+		break;
+	case I_ASRV:
+		z = zn;
+		if (x)
+			s = sn;
+		break;
+	case I_UDIV:
+		z = zn;
+		break;
+	case I_CLZ: case I_CLS:
+		z = 7;
+		break;
+	default:
+		if (x || i->op == I_ADRP || i->op == I_ADR || i->op == I_LDGOT || i->op == I_MRS)
+			return false;
+		break;	/* another 32-bit operation: its upper half is zero */
+	}
+	/*
+	 * A 32-bit operation zero-extends its result.  The rules above are on
+	 * 64-bit values; where the inputs fit in 32 bits and the result does too
+	 * they hold for the 32-bit operation, and otherwise the cap does.
+	 */
+	if (!x) {
+		z = umin(z, 32);
+		s = XU;
+	}
+done:
+	if (z > XU) z = XU;
+	if (s > XU) s = XU;
+	if (z < XU && s > z + 1)
+		s = z + 1;
+	*zo = z, *so = s;
+	return true;
+}
+
+/* the extension at i is a copy of its source: rn then holds the result */
+static bool xredundant(const xf *f, const ins *i)
+{
+	int rn = i->rn;
+	unsigned zn = xz(f, rn), sn = xs(f, rn);
+
+	if (rn >= 31)
+		return false;
+	switch (i->op) {
+	case I_UBFM:
+		return i->imm == 0 && zn <= (unsigned)i->sh + 1u;
+	case I_SBFM:
+		return i->imm == 0 && (zn < (unsigned)i->sh + 1u || (i->sz && sn <= (unsigned)i->sh + 1u));
+	case I_MOV:
+		return !i->sz && zn <= 32;
+	case I_ANDI: {
+		uint64_t v = i->sz ? (uint64_t)i->imm : (uint32_t)i->imm;
+		uint64_t lo = zn >= 64 ? ~0ull : (1ull << zn) - 1;
+
+		return zn <= (i->sz ? 64u : 32u) && (v & lo) == lo;
+	}
+	default:
+		return false;
+	}
+}
+
+static inline void xkill(xf *f, rmask w)
+{
+	for (w &= COPYOK; w; w &= w - 1) {
+		int r = __builtin_ctzll(w);
+
+		f->z[r] = XS(f)[r] = XU;
+	}
+}
+
+/*
+ * The block's records over f.  red: per record, whether its extension is a
+ * copy given f.  Facts only ever grow weaker, and a block's last visit is
+ * with its final in, so that visit's answer stands.
+ */
+static void xblock(ecx *e, uint32_t b, xf *f, uint8_t *red)
+{
+	const ins *in = e->in;
+
+	for (uint32_t k = W.bs[b]; k <= W.be[b]; k++) {
+		const ins *i = &in[k];
+		unsigned z, s;
+		int rd = i->rd;
+
+		if (i->op == DELETED)
+			continue;
+		if (W.rr[k] == GPRS) {	/* OP_ALL */
+			memset(f, XU, sizeof(*f));
+			continue;
+		}
+		if (!W.ww[k])
+			continue;
+		red[k] = (uint8_t)xredundant(f, i);
+		if (W.ww[k] == RB(rd) && rd < 31 && (COPYOK & RB(rd)) && xresult(f, i, &z, &s)) {
+			f->z[rd] = (uint8_t)z, XS(f)[rd] = (uint8_t)s;
+			continue;
+		}
+		xkill(f, W.ww[k]);
+	}
+}
+
+static void exts(ecx *e)
+{
+	uint32_t n = e->nin, nb = W.blk[n - 1] + 1;
+	xf f;
+	bool changed;
+
+	if (nb > XF.cap) {
+		XF.cap = nb * 2;
+		XF.in = realloc(XF.in, XF.cap * sizeof(xf));
+		XF.vis = realloc(XF.vis, XF.cap);
+		if (!XF.in || !XF.vis)
+			abort();
+	}
+	XF.red = grow_to(XF.red, &XF.capr, n, 1);
+	memset(XF.red, 0, n);
+	for (uint32_t b = 0; b < nb; b++) {
+		const ins *l = &e->in[W.bs[b]];
+
+		XF.vis[b] = b == 0 || (l->op == I_LABEL && (e->lrefc[l->label] & LREF_EXT)) ? 2 : 0;
+		if (XF.vis[b])
+			memset(&XF.in[b], XU, sizeof(xf));
+	}
+	do {
+		changed = false;
+		for (uint32_t b = 0; b < nb; b++) {
+			if (XF.vis[b] != 2)
+				continue;
+			XF.vis[b] = 1;
+			f = XF.in[b];
+			xblock(e, b, &f, XF.red);
+			for (int q = 0; q < 2; q++) {
+				int32_t sb = q ? W.s1[b] : W.s0[b];
+				xf *t;
+
+				if (sb < 0)
+					continue;
+				t = &XF.in[sb];
+				if (!XF.vis[sb]) {
+					*t = f, XF.vis[sb] = 2;
+					changed |= (uint32_t)sb <= b;
+					continue;
+				}
+				{
+					uint8_t up = 0, *tz = t->z, *fz = f.z;	/* (z then s: 64 bytes, vectorized) */
+
+					for (int r = 0; r < 64; r++) {
+						uint8_t v = fz[r] > tz[r] ? fz[r] : tz[r];
+
+						up |= v ^ tz[r];
+						tz[r] = v;
+					}
+					if (up) {
+						XF.vis[sb] = 2;
+						changed |= (uint32_t)sb <= b;
+					}
+				}
+			}
+		}
+	} while (changed);
+	for (uint32_t k = 0; k < n; k++)
+		if (XF.red[k]) {
+			ins *i = &e->in[k];
+
+			i->op = i->rd == i->rn ? DELETED : I_MOV;
+			i->sz = 1;
+		}
+}
+
 VPRIV void opt_function(ecx *e)
 {
 	ins *in = e->in;
@@ -680,6 +1001,7 @@ VPRIV void opt_function(ecx *e)
 			in[k].op = DELETED;
 		}
 	slots(e);
+	exts(e);
 	for (uint32_t k = 0; k < e->nin; k++)
 		if (is_copy(&in[k])) {
 			if (!(W.la[k] & RB(in[k].rd)) && in[k].rd != 29 && in[k].rd != 30)

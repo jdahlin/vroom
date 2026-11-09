@@ -434,6 +434,7 @@ VPRIV void gen_asm(ecx *e, uint32_t n)
 
 		for (int pass = 0; pass <= (int)(a->nout ? a->nlabel : 0); pass++) {
 			if (pass > 0) {
+				e->lrefc[tramp[pass - 1]] |= LREF_EXT;	/* (the asm jumps here) */
 				deflabel_forced(e, tramp[pass - 1]);
 			}
 			for (uint32_t i = 0; i < a->nout; i++) {
@@ -471,5 +472,6 @@ VPRIV void gen_asm(ecx *e, uint32_t n)
 		for (uint32_t k = 0; k < a->nlabel; k++) {
 			kv_edge(e, tramp[k]);
 			e->lrefc[tramp[k]]++;
+			e->lrefc[tramp[k]] |= LREF_EXT;
 		}
 }

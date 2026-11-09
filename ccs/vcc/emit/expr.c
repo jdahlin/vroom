@@ -790,6 +790,7 @@ VPRIV val gen(ecx *e, uint32_t n)
 			i->label = m->id;
 		}
 		e->lrefc[m->id]++;
+		e->lrefc[m->id] |= LREF_EXT;
 		return vreg(r);
 	}
 	case N_CAST:
