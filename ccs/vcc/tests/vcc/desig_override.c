@@ -2,7 +2,6 @@
    (TODO.md tier 1, "Designated-initializer overrides").  The output is
    compared with clang's build, which is the reference for what is kept. */
 /* vcc-flags: -Wno-initializer-overrides */
-/* vcc-xfail: Designated-initializer overrides differ from clang */
 #include <stdio.h>
 
 struct in { int x, y; };

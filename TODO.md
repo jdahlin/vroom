@@ -276,7 +276,14 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
   *Validate:* layout `_Static_assert` cases against clang (all forms:
   `push`, `push,N`, `push,id`, `push,id,N`, `pop`, `pop,id`, `pop,N`, `pack()`,
   `show` ignored).
-- [ ] **Designated-initializer overrides differ from clang** [P].
+- [x] **Designated-initializer overrides differ from clang** [P].
+  (done, cc/init.c: an array element or range a later designator covers is
+  dropped, not evaluated; a designator into a sub-object initialized by one
+  value keeps the rest of it: a string becomes one element per character,
+  a struct/array value one member access / element per part, a union value
+  is read again through the member the designator picks.  Left, a clean
+  error: the overridden value has side effects (clang evaluates it once).
+  Tests `tests/vcc/desig_override.c`, `desig_override2.c`.)
   `.s = "ab", .s[3] = 'z'` loses "ab"; `.i = iv, .i.y = 99` zeroes `i.x`;
   `[0] = side(), [0] = side()` evaluates both.
   *Validate:* T1 `desig_override.c`, static and automatic variants, with

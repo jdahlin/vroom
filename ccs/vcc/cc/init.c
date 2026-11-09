@@ -20,6 +20,7 @@ typedef struct ilist {
 	uint32_t nrun, caprun;
 	uint32_t ufield;	/* union: the initialized field */
 	bool uset;
+	uint32_t ubase;	/* union expanded from this value (il_expand), 0: none */
 } ilist;
 
 static ilist *il_new(cc *c, qty ty)
@@ -66,6 +67,15 @@ static void il_run(cc *c, ilist *l, uint64_t lo, uint64_t hi, uint32_t node, ili
 		l->runs = nr;
 		l->caprun = ncap;
 	}
+	/* earlier runs this one covers are dropped, never evaluated (clang) */
+	{
+		uint32_t k = 0;
+
+		for (uint32_t j = 0; j < l->nrun; j++)
+			if (!(l->runs[j].lo >= lo && l->runs[j].hi <= hi))
+				l->runs[k++] = l->runs[j];
+		l->nrun = k;
+	}
 	l->runs[l->nrun++] = (irun){ (uint32_t)lo, (uint32_t)hi, node, sub };
 	if (hi + 1 > l->max)
 		l->max = hi + 1;
@@ -78,6 +88,7 @@ static void il_set(cc *c, ilist *l, uint64_t i, uint32_t node, ilist *sub)
 		return;
 	}
 	if (l->isunion) {
+		l->ubase = 0;
 		for (uint64_t k = 0; k < l->n; k++)
 			l->slot[k] = 0, l->sub[k] = NULL;
 		l->ufield = (uint32_t)i;
@@ -87,24 +98,118 @@ static void il_set(cc *c, ilist *l, uint64_t i, uint32_t node, ilist *sub)
 	l->sub[i] = sub;
 }
 
+/* a designator reaches into a sub-object initialized by one value: as
+   clang, keep what the value gives the other parts.  A string literal becomes
+   one element per character; any other array or struct/union value one
+   element or member access per part (arrays inside expanded in turn), so the
+   value is read once per part: only without side effects. */
+static void il_expand(cc *c, ilist *s, uint32_t v);
+
+static void il_put(cc *c, ilist *s, uint64_t k, uint32_t m)
+{
+	qty ft = N(m)->ty;
+
+	if (is_array(c, ft) && N(m)->op != N_STR) {
+		ilist *t = il_new(c, QUNQ(ft));
+
+		il_expand(c, t, m);
+		il_set(c, s, k, 0, t);
+	} else {
+		il_set(c, s, k, m, NULL);
+	}
+}
+
+static void il_expand(cc *c, ilist *s, uint32_t v)
+{
+	uint32_t loc = N(v)->loc;
+
+	if (s->array && N(v)->op == N_STR) {
+		const cstr *str = &c->strs[N(v)->a];
+		qty et = T(c, s->ty)->base;
+
+		for (uint32_t k = 0; k < str->n && (s->unknown || k < s->n); k++) {
+			i128 x = 0;
+
+			memcpy(&x, str->s + (size_t)k * str->esz, str->esz);
+			if (is_signed(c, et))
+				x = str->esz == 1 ? (int8_t)x : str->esz == 2 ? (int16_t)x : (int32_t)x;
+			il_run(c, s, k, k, mk_int(c, x, et, loc), NULL);
+		}
+		return;
+	}
+	if (has_side_effects(c, v)) {
+		cc_error(c, loc, "unsupported: a designator overrides part of an initializer with side effects");
+		return;
+	}
+	if (s->array) {
+		qty et = T(c, s->ty)->base;
+
+		if (s->unknown || is_vector(c, s->ty)) {
+			cc_error(c, loc, "unsupported: a designator overrides part of this initializer");
+			return;
+		}
+		for (uint64_t k = 0; k < s->n; k++) {
+			uint32_t e = mk2(c, N_INDEX, et, loc, rvalue(c, v), mk_int(c, (i128)k, prim(TY_LONG), loc));
+
+			N(e)->flags = NF_LVALUE;
+			il_put(c, s, k, e);
+		}
+		return;
+	}
+	{
+		qty bt = N(v)->ty;
+		const tag *r = &c->tags[T(c, bt)->aux];
+
+		for (uint32_t k = 0; k < r->nfield; k++) {
+			const field *f = &r->f[k];
+			uint32_t m;
+
+			if (f->bitfield && !f->name)
+				continue;
+			m = mk(c, N_MEMBER, qualify(c, f->ty, QQ(bt)), loc);
+			N(m)->a = v, N(m)->b = T(c, bt)->aux, N(m)->c = k;
+			N(m)->flags = (uint8_t)((N(v)->flags & NF_LVALUE) | (f->bitfield ? NF_BITFIELD : 0));
+			il_put(c, s, k, m);
+			if (s->isunion)
+				break;	/* (its first member; il_child reads another through v) */
+		}
+		if (s->isunion)
+			s->ubase = v;
+	}
+}
+
 /* the sub-list at i, created (replacing a plain value) if needed */
 static ilist *il_child(cc *c, ilist *l, uint64_t i)
 {
 	qty et = il_elem_type(c, l, i);
+	uint32_t old = 0;
 
 	if (l->array) {
 		for (uint32_t k = l->nrun; k-- > 0;)
 			if (l->runs[k].lo <= i && i <= l->runs[k].hi) {
 				if (l->runs[k].sub && l->runs[k].lo == i && l->runs[k].hi == i)
 					return l->runs[k].sub;
+				if (!l->runs[k].sub)
+					old = l->runs[k].node;
 				break;
 			}
 	} else if (l->sub[i] && (!l->isunion || l->ufield == i)) {
 		return l->sub[i];
+	} else if (!l->isunion || (l->uset && l->ufield == i)) {
+		old = l->slot[i];
+	} else if (l->ubase) {	/* the same bytes through the member the designator picks */
+		uint32_t v = l->ubase;
+		qty bt = N(v)->ty;
+
+		old = mk(c, N_MEMBER, qualify(c, c->tags[T(c, bt)->aux].f[i].ty, QQ(bt)), N(v)->loc);
+		N(old)->a = v, N(old)->b = T(c, bt)->aux, N(old)->c = (uint32_t)i;
+		N(old)->flags = (uint8_t)(N(v)->flags & NF_LVALUE);
 	}
 	{
 		ilist *s = il_new(c, et);
 
+		if (old && is_ilagg(c, et))
+			il_expand(c, s, old);
 		il_set(c, l, i, 0, s);
 		return s;
 	}
