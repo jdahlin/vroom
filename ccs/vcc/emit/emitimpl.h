@@ -585,6 +585,8 @@ VPRIV const attrs *sym_attrs(cc *c, uint32_t s);
 VPRIV void sym_name(cc *c, tbuf *b, uint32_t s);
 VPRIV void ref_name(cc *c, tbuf *b, uint32_t r);
 VPRIV void ref_off(cc *c, tbuf *b, uint32_t r, int64_t off);
+/* darwin.c */
+VPRIV void darwin_text(tbuf *o, const char *t, size_t tn);
 /* print.c */
 VPRIV void p_lbl(tbuf *b, uint32_t fid, uint32_t l);
 VPRIV void print_ins(cc *c, tbuf *b, const ins *i, uint32_t fid, const char *raw);

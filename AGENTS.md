@@ -63,6 +63,7 @@ bench/vcc-ctests.py -j 6 --cpu cortex-a53   # vcc's binaries on a CPU without LS
 bench/vcc-stress.py [--vccd]        # pathological inputs fail cleanly, vccd survives (~2 s)
 bench/vcc-abi.py                    # cross-compiler calls, clang/vcc x caller/callee, qemu (ccs/vcc/tests/abi, ~3 s)
 bench/vcc-abi.py --host             # the same for the Apple arm64 ABI, run natively
+bench/vcc-darwin-s.py -j 6           # Darwin -S assembled by Apple's as, runs as the direct object (~2 min)
 bench/vcc-bflayout.py               # generated bit-field records, layouts checked by clang, Linux + Apple (~1 s)
 bench/vcc-ldconst.py                # generated long double literals and folds, bits vs clang (~2 s)
 bench/vccd-test.py                  # vccd as a service: socket, bad requests, cache invalidation (~11 s)

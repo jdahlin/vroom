@@ -281,8 +281,37 @@ static void finish_function(ecx *e, uint32_t s)
 		tb_f(b, "\tstr\tx%d, [x29, #%d]\n", cs[ncs - 1], -csave + 8 * (ncs - 1));
 	if (bp)
 		tb_s(b, "\tmov\tx28, sp\n");
-	for (uint32_t k = 0; k < e->nin; k++)
-		print_ins(c, b, &e->in[k], s, e->raw.p);
+	/* text has no relaxation (the object writer's r_relax): in a function that
+	 * may pass b.cond/cbz's +-1 MB, every one is the inverted branch over a b */
+	bool far = e->nin > (1u << 17);
+
+	for (uint32_t k = 0; k < e->nin; k++) {
+		const ins *i = &e->in[k];
+
+		if (far && ((i->op == I_BC && i->cond < 14) || i->op == I_CBZ || i->op == I_CBNZ)) {
+			ins n = *i;
+
+			if (n.op == I_BC)
+				n.cond ^= 1;
+			else
+				n.op = n.op == I_CBZ ? I_CBNZ : I_CBZ;
+			n.label = 0;
+			print_ins(c, b, &n, s, e->raw.p);
+			{
+				/* the printed label is the last token on the line: point it at 1f */
+				size_t l = b->n - 1;
+
+				while (l && b->p[l - 1] != '\t' && b->p[l - 1] != ' ')
+					l--;
+				b->n = l;
+				tb_s(b, "1f\n\tb\t");
+				p_lbl(b, s, i->label);
+				tb_s(b, "\n1:\n");
+			}
+			continue;
+		}
+		print_ins(c, b, i, s, e->raw.p);
+	}
 	/* epilogue */
 	for (int k = 0; k + 1 < ncs; k += 2)
 		tb_f(b, "\tldp\tx%d, x%d, [x29, #%d]\n", cs[k], cs[k + 1], -csave + 8 * k);

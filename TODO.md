@@ -521,7 +521,10 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
   cleanups, 16 tracked constants, 16M instructions / 4M labels per function).
   *Validate:* T1 `limits.c` (generated: 300 arguments, 1000-deep nested
   loops, 1000 cleanups); T5 for the extremes.
-- [ ] **`-S` on Darwin writes ELF directives** (`.type @function`).
+- [x] **`-S` on Darwin writes ELF directives** (`.type @function`).  (Done: emit/darwin.c
+  rewrites the text into Apple's dialect; far b.cond/cbz in text are long form on both
+  targets.  `bench/vcc-darwin-s.py`: 1428 vcc + gcc-torture tests, -S assembled by `as`,
+  same result as the direct object.)
   *Validate:* T3: `vpp -S` output assembled by `as` (Apple) for the vcc
   suite.
 
