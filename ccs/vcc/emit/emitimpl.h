@@ -94,7 +94,7 @@ enum { R_FP = 29, R_LR = 30, ZR = 31, SP = 32, FRAME = 33, R_X16 = 16, R_X17 = 1
 
 enum {
 	I_LABEL,	/* label */
-	I_RAW,		/* off: text pool offset, ref: length; cond 1: inline asm (//APP in -S) */
+	I_RAW,		/* off: text pool offset, ref: length; cond 1: inline asm (//APP in -S), RAW_MASKS: with its registers */
 	/* rd = rn op (rm << sh); cond: shift kind (0 lsl, 1 lsr, 2 asr) */
 	I_ADD, I_SUB, I_ADDS, I_SUBS, I_AND, I_ORR, I_EOR, I_ANDS, I_BIC, I_ORN, I_ADC, I_SBC, I_ADCS, I_SBCS,
 	/* rd = rn op imm (any value: the backend splits or materialises) */
@@ -130,6 +130,9 @@ enum {
 };
 
 enum { C_EQ, C_NE, C_HS, C_LO, C_MI, C_PL, C_VS, C_VC, C_HI, C_LS, C_GE, C_LT, C_GT, C_LE, C_AL };
+
+/* I_RAW cond 2: inline asm whose registers follow its text: uint64_t reads, writes */
+#define RAW_MASKS 2
 
 /* lrefc: a label that inline asm (asm goto) or a label address (&&l) may reach */
 #define LREF_EXT (1u << 31)

@@ -15,9 +15,10 @@
  *
  * The emitter reads a register variable (B_LREG) into a fresh temporary and
  * stores one through a mov; these undo most of that.  Records the pass
- * cannot see into (inline asm, encoded words, brk) read every register, so
- * nothing moves across them; a function with an indirect branch is left as
- * it is.  Liveness is only ever made larger after a rewrite, never smaller,
+ * cannot see into (basic asm, asm goto, encoded words) read every register,
+ * so nothing moves across them; extended asm reads and writes just its
+ * operands and clobbers (RAW_MASKS).  A function with an indirect branch is
+ * left as it is.  Liveness is only ever made larger after a rewrite, never smaller,
  * so it stays an over-approximation.
  */
 
@@ -30,7 +31,10 @@ typedef uint64_t rmask;
 #define DELETED 0xff
 
 /* operand roles */
-enum { RD_R = 1, RN_R = 2, RM_R = 4, RA_R = 8, RD_W = 16, RA_W = 32, RN_W = 64, OP_ALL = 128, OP_CALL = 256 };
+enum { RD_R = 1, RN_R = 2, RM_R = 4, RA_R = 8, RD_W = 16, RA_W = 32, RN_W = 64, OP_ALL = 128, OP_CALL = 256, OP_ASM = 512 };
+
+/* the function's raw text, for the registers of inline asm (RAW_MASKS) */
+static _Thread_local const char *rawp;
 /* control */
 enum { BR_NONE, BR_UNCOND, BR_COND, BR_END, BR_INDIRECT };
 
@@ -70,8 +74,11 @@ static unsigned roles(const ins *i)
 	case I_BR:
 		return RN_R;
 	case I_LABEL: case I_B: case I_BC: case I_NOP: case I_RET:
+	case I_BRK:	/* a trap (BUG, WARN, __builtin_trap): the handler may print registers, needs none */
 		return 0;
-	default:	/* I_RAW, I_WORD, I_BRK, I_MOVSP: unknown registers */
+	case I_RAW:
+		return i->cond == RAW_MASKS ? OP_ASM : OP_ALL;
+	default:	/* I_RAW, I_WORD, I_MOVSP: unknown registers */
 		return OP_ALL;
 	}
 }
@@ -95,6 +102,10 @@ static rmask reads(const ins *i, unsigned ro)
 
 	if (ro & OP_ALL)
 		return GPRS;
+	if (ro & OP_ASM) {
+		memcpy(&s, rawp + i->off + i->ref, sizeof(s));
+		return s & GPRS;
+	}
 	if (ro & RD_R) s |= m(i->rd);
 	if (ro & RN_R) s |= m(i->rn);
 	if (ro & RM_R) s |= m(i->rm);
@@ -110,6 +121,10 @@ static rmask writes(const ins *i, unsigned ro)
 {
 	rmask s = 0;
 
+	if (ro & OP_ASM) {
+		memcpy(&s, rawp + i->off + i->ref + sizeof(s), sizeof(s));
+		return s & GPRS;
+	}
 	if (ro & RD_W) s |= m(i->rd);
 	if (ro & RA_W) s |= m(i->ra);
 	if (ro & RN_W) s |= m(i->rn);
@@ -126,7 +141,7 @@ static _Thread_local struct {
 	uint32_t *bs, *be;	/* per block: first and last record */
 	int32_t *s0, *s1;	/* per block: successors (-1 none) */
 	rmask *in, *out, *use, *def;
-	uint32_t *lpos;		/* per label: block that starts with it (+1, 0: not placed) */
+	uint32_t *lpos;		/* per label: its block + 1 (UINT32_MAX: jumped to, not placed) */
 	uint32_t cap, lcap;
 } W;
 
@@ -168,8 +183,13 @@ static bool liveness(ecx *e)
 
 	grow(n + 1, e->nlabel + 1);
 	memset(W.lpos, 0, (size_t)e->nlabel * sizeof(uint32_t));
+	/* labels something jumps to (+ asm, label addresses); the others (scopes, inlining) split nothing */
+	for (uint32_t k = 0; k < n; k++)
+		if (brkind(&in[k]) == BR_UNCOND || brkind(&in[k]) == BR_COND ||
+		    (in[k].op == I_LABEL && (e->lrefc[in[k].label] & LREF_EXT)))
+			W.lpos[in[k].label] = UINT32_MAX;
 	for (uint32_t k = 0; k < n; k++) {
-		if (k == 0 || in[k].op == I_LABEL || brkind(&in[k - 1]) != BR_NONE) {
+		if (k == 0 || (in[k].op == I_LABEL && W.lpos[in[k].label]) || brkind(&in[k - 1]) != BR_NONE) {
 			if (nb)
 				W.be[nb - 1] = k - 1;
 			W.bs[nb++] = k;
@@ -191,7 +211,7 @@ static bool liveness(ecx *e)
 		if (k == BR_NONE || k == BR_COND)
 			W.s0[b] = b + 1 < nb ? (int32_t)b + 1 : -1;
 		if (k == BR_UNCOND || k == BR_COND) {
-			if (!W.lpos[l->label])
+			if (W.lpos[l->label] == UINT32_MAX)
 				return false;	/* a branch to a label not in the records */
 			W.s1[b] = (int32_t)W.lpos[l->label] - 1;
 		}
@@ -284,8 +304,8 @@ static bool forward(ecx *e, uint32_t k)
 			return false;
 		r = reads(i, ro), w = writes(i, ro);
 		if (r & RB(t)) {
-			if (!can_rewrite(i, ro, t) || nrw == 256)
-				return false;
+			if ((ro & OP_ASM) || !can_rewrite(i, ro, t) || nrw == 256)
+				return false;	/* (asm names its registers in its text) */
 			rw[nrw++] = j;
 		}
 		if ((w & RB(t)) || !(W.la[j] & RB(t)))
@@ -617,7 +637,7 @@ static void slots(ecx *e)
 				ver[__builtin_ctzll(w)]++;
 			if (SL.rc[k] < 0) {
 				if (i->op == I_ST || i->op == I_STLO || i->op == I_STP || i->op == I_BL || i->op == I_BLR ||
-				    i->op == I_TLV || W.rr[k] == GPRS)
+				    i->op == I_TLV || i->op == I_RAW || W.rr[k] == GPRS)
 					mver++;	/* may write an escaped cell */
 				continue;
 			}
@@ -827,7 +847,7 @@ static bool xresult(const xf *f, const ins *i, unsigned *zo, unsigned *so)
 		z = 7;
 		break;
 	default:
-		if (x || i->op == I_ADRP || i->op == I_ADR || i->op == I_LDGOT || i->op == I_MRS)
+		if (x || i->op == I_ADRP || i->op == I_ADR || i->op == I_LDGOT || i->op == I_MRS || i->op == I_RAW)
 			return false;
 		break;	/* another 32-bit operation: its upper half is zero */
 	}
@@ -983,11 +1003,87 @@ static void exts(ecx *e)
 		}
 }
 
+/* ---------------- dead results ---------------- */
+
+/* an instruction with no effect but its rd (no flags, memory, traps) */
+static bool pure(const ins *i)
+{
+	switch (i->op) {
+	case I_ADD: case I_SUB: case I_AND: case I_ORR: case I_EOR: case I_BIC: case I_ORN: case I_ADC: case I_SBC:
+	case I_ADDI: case I_SUBI: case I_ANDI: case I_ORRI: case I_EORI:
+	case I_MOVI: case I_MOV: case I_MADD: case I_MSUB:
+	case I_SDIV: case I_UDIV: case I_SMULH: case I_UMULH: case I_LSLV: case I_LSRV: case I_ASRV:
+	case I_SBFM: case I_UBFM: case I_BFM: case I_CSEL: case I_CSINC: case I_CSINV: case I_CSNEG:
+	case I_CLZ: case I_CLS: case I_RBIT: case I_REV: case I_REV16: case I_REV32:
+	case I_ADRP: case I_ADDLO: case I_LDGOT: case I_ADR:
+		return true;
+	case I_LD:	/* a stack slot vcc placed (volatile ones are untagged) */
+		return i->rn == FRAME && SLOT_TAG(i);
+	default:
+		return false;
+	}
+}
+
+/*
+ * Backward over each block from its live-out (still an over-approximation
+ * after the rewrites, which only add reads inside a block): a pure
+ * instruction whose rd is dead goes, so chains of them go together.  Reads
+ * and writes are taken afresh, as the rewrites changed the records.
+ */
+static void dead(ecx *e)
+{
+	ins *in = e->in;
+	uint32_t nb = W.blk[e->nin - 1] + 1;
+
+	for (uint32_t b = 0; b < nb; b++) {
+		rmask live = W.out[b];
+
+		if (b == nb - 1 && brkind(&in[W.be[b]]) != BR_UNCOND)
+			live |= RB(0) | RB(1);
+		for (uint32_t k = W.be[b] + 1; k-- > W.bs[b];) {
+			ins *i = &in[k];
+			unsigned ro;
+
+			if (i->op == DELETED)
+				continue;
+			ro = roles(i);
+			if (i->rd < 29 && pure(i) && !(live & RB(i->rd))) {
+				i->op = DELETED;
+				continue;
+			}
+			live = (live & ~writes(i, ro)) | reads(i, ro);
+		}
+	}
+}
+
+/* copy propagation (forward, then backward) and dead copies */
+static void copies(ecx *e)
+{
+	ins *in = e->in;
+
+	for (uint32_t k = 0; k < e->nin; k++) {
+		if (in[k].op == I_MOV && in[k].sz == 1 && in[k].rd == in[k].rn && in[k].rd < 31) {
+			in[k].op = DELETED;	/* mov x, x */
+			continue;
+		}
+		if (is_copy(&in[k])) {
+			if (!(W.la[k] & RB(in[k].rd)) && in[k].rd != 29 && in[k].rd != 30)
+				in[k].op = DELETED;	/* dead */
+			else
+				forward(e, k);
+		}
+	}
+	for (uint32_t k = 0; k < e->nin; k++)
+		if (is_copy(&in[k]))
+			backward(e, k);
+}
+
 VPRIV void opt_function(ecx *e)
 {
 	ins *in = e->in;
 	uint32_t n = 0;
 
+	rawp = e->raw.p;
 	if (!liveness(e))
 		return;
 	/* a temporary saved around a call and dead after its restore: neither */
@@ -1000,18 +1096,18 @@ VPRIV void opt_function(ecx *e)
 				}
 			in[k].op = DELETED;
 		}
+	/* copies first, so slots sees the registers values really stay in; their rewrites stale W.rr/W.ww */
+	copies(e);
+	for (uint32_t k = 0; k < e->nin; k++)
+		if (in[k].op != DELETED) {
+			unsigned ro = roles(&in[k]);
+
+			W.rr[k] = reads(&in[k], ro), W.ww[k] = writes(&in[k], ro);
+		}
 	slots(e);
 	exts(e);
-	for (uint32_t k = 0; k < e->nin; k++)
-		if (is_copy(&in[k])) {
-			if (!(W.la[k] & RB(in[k].rd)) && in[k].rd != 29 && in[k].rd != 30)
-				in[k].op = DELETED;	/* dead */
-			else
-				forward(e, k);
-		}
-	for (uint32_t k = 0; k < e->nin; k++)
-		if (is_copy(&in[k]))
-			backward(e, k);
+	copies(e);
+	dead(e);
 	for (uint32_t k = 0; k < e->nin; k++)
 		if (in[k].op != DELETED)
 			in[n++] = in[k];
