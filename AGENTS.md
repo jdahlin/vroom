@@ -18,6 +18,8 @@ assembler, linker, behind `vcc`/`vas`/`vld` shims and the `vccd` server.
 ## Layout
 - `PLAN.md`, `PLAN-fas2.md`: plans and per-step status (Swedish).  Update the
   status section of a step when it changes.
+- `PLAN-release.md`: what vcc 1.0 is and its release gates G0-G9 (Swedish);
+  work toward the release should move a gate, and update its status there.
 - `RESEARCH-preprocessor.md`: preprocessor design and prior art.
 - `ccs/`: our code; `ccs/Makefile` builds into `build/ccs/`.  Under `ccs/vcc/`
   generic code is in the component directories, code for one target CPU in
