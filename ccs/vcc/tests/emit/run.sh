@@ -1,5 +1,6 @@
 #!/bin/sh
 # run.sh T.c [VPP]: build T.c with clang and with vcc (vpp -S), run both under qemu, diff the UART output
+# VCC_O: vcc's -O level (default -O2; -O0 checks the unoptimised code generator)
 set -e
 CL=/opt/homebrew/opt/llvm/bin/clang
 D=$(cd "$(dirname "$0")" && pwd)
@@ -10,7 +11,7 @@ FL="--target=aarch64-linux-gnu -ffreestanding -fno-builtin -nostdinc -fno-PIE -f
 $CL $FL -O1 -c "$D/rt.c" -o "$O/rt.o"
 $CL $FL -c "$D/start.S" -o "$O/start.o"
 $CL $FL -O2 -c "$T" -o "$O/ref.o"
-$VPP $FL -S -o "$O/vcc.s" "$T"
+$VPP $FL ${VCC_O:--O2} -S -o "$O/vcc.s" "$T"
 $CL --target=aarch64-linux-gnu -c "$O/vcc.s" -o "$O/vcc.o"
 for k in ref vcc; do
 	ld.lld -T "$D/link.ld" "$O/start.o" "$O/rt.o" "$O/$k.o" -o "$O/$k.elf"

@@ -72,7 +72,7 @@ VPRIV void enqueue(emitter *E, uint32_t item)
 }
 
 /* the regions of a ctx[i] (ecx_init takes a set, ecx_free gives it back) */
-static vmpool ecxpool = VMPOOL_INIT(14);
+static vmpool ecxpool = VMPOOL_INIT(15);
 
 static void ecx_init(ecx *e, emitter *E, vmreg *r)
 {
@@ -97,6 +97,8 @@ static void ecx_init(ecx *e, emitter *E, vmreg *r)
 	e->cases = vmreg_get(&r[11], (size_t)1 << 24, "emit.cases");
 	e->weakref = vmreg_get(&r[12], (size_t)c->nsym * sizeof(uint32_t) + 4096, "emit.weakref");
 	e->rlog = vmreg_get(&r[13], RLOG_CAP * sizeof(uint32_t), "emit.rlog");
+	e->sla = vmreg_get(&r[14], (size_t)CAPSLA * (sizeof(slotal) + sizeof(uint32_t)), "emit.sla");
+	e->sstk = (uint32_t *)(e->sla + CAPSLA);
 }
 
 /* (after the stitch: the chunks point into e->out) */
@@ -120,6 +122,7 @@ static void ecx_free(ecx *e, vmreg *r)
 	vmreg_put(&r[11], VMREG_SCRATCH);
 	vmreg_put(&r[12], VMREG_SCRATCH);
 	vmreg_put(&r[13], VMREG_SCRATCH);	/* (copied by keep_make before this) */
+	vmreg_put(&r[14], VMREG_SCRATCH);
 	vmpool_give(&ecxpool, r);
 }
 
@@ -359,7 +362,7 @@ static void keep_make(keep *K, cc *c, const emitter *E)
 }
 
 /* emit_tu1's per-TU tables (E.*) and text buffers */
-static vmpool erpool = VMPOOL_INIT(15);
+static vmpool erpool = VMPOOL_INIT(18);
 
 static int emit_tu1(cc *c, const cc_opts *o, bool write_out, uint8_t *mf, bool *again, bool last,
 		    const keep *K, keep *next)
@@ -395,7 +398,18 @@ static int emit_tu1(cc *c, const cc_opts *o, bool write_out, uint8_t *mf, bool *
 	E.walked = vmreg_get(&er[9], c->nsym + 64, "emit.walked");
 	E.fnsize = vmreg_get(&er[10], (c->nsym + 64) * sizeof(uint16_t), "emit.fnsize");
 	E.cwval = vmreg_get(&er[11], (c->nsym + 64) * sizeof(i128), "emit.cwval");
+	E.luse = vmreg_get(&er[15], (c->nsym + 64) * sizeof(uint16_t), "emit.luse");
+	E.lnoreg = vmreg_get(&er[16], c->nsym + 64, "emit.lnoreg");
+	E.lspan = vmreg_get(&er[17], (c->nsym + 64) * 2 * sizeof(uint32_t), "emit.lspan");
+	{
+		const char *k = getenv("VCC_LREGS");
+
+		E.nlreg = k ? atoi(k) : LREGS_DEFAULT;
+		if (E.nlreg < 0 || E.nlreg > MAXLREG)
+			E.nlreg = MAXLREG;
+	}
 	E.stats = getenv("VCC_EMIT_STATS") != NULL;
+	E.noopt = getenv("VCC_NOOPT") != NULL;
 	E.objtext = getenv("VCC_OBJ_TEXT") != NULL;
 	/* roots */
 	for (uint32_t i = 0; i < c->ntoplevel; i++) {
@@ -582,6 +596,9 @@ static int emit_tu1(cc *c, const cc_opts *o, bool write_out, uint8_t *mf, bool *
 	vmreg_put(&er[10], (c->nsym + 64) * sizeof(uint16_t));
 	vmreg_put(&er[11], (c->nsym + 64) * sizeof(i128));
 	vmreg_put(&er[14], c->nsym + 64);
+	vmreg_put(&er[15], (c->nsym + 64) * sizeof(uint16_t));
+	vmreg_put(&er[16], c->nsym + 64);
+	vmreg_put(&er[17], (c->nsym + 64) * 2 * sizeof(uint32_t));
 	vmpool_give(&erpool, er);
 	return errors;
 }

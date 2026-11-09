@@ -21,6 +21,7 @@ spec = importlib.util.spec_from_file_location('vd', os.path.join(os.path.dirname
 vd = importlib.util.module_from_spec(spec); spec.loader.exec_module(vd)
 B, CL, VPP = vd.B, vd.CL, vd.VPP
 R = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+VDSO = 'arch/arm64/kernel/vdso/'
 ASFLAGS = ('--target=', '-march=', '-mcpu=', '-Wa,', '-ffixed-', '-mbranch-protection')
 
 def build(t):
@@ -46,7 +47,12 @@ if __name__ == '__main__':
     if not os.path.exists(dst):
         print(f'copying {B} -> {dst}', flush=True)
         subprocess.run(['cp', '-a', B, dst], check=True)
-    ts = [(o, a, dst) for o, a in vd.tus(only) if a[-1].endswith('.c') and '-E' not in a and not o.startswith('scripts/')
+    # the vDSO needs PIC (vcc has none): clang builds it; delete a vcc object an earlier run left there
+    for o, a in vd.tus(only):
+        if o.startswith(VDSO) and os.path.exists(f'{dst}/{o}.vcc.s'):
+            for x in (f'{dst}/{o}', f'{dst}/{o}.vcc.s'):
+                if os.path.exists(x): os.remove(x)
+    ts = [(o, a, dst) for o, a in vd.tus(only) if a[-1].endswith('.c') and '-E' not in a and not o.startswith(('scripts/', VDSO))
           and not (skip and re.search(skip, o))]
     t0 = time.time()
     with Pool(j) as pool:
@@ -60,7 +66,13 @@ if __name__ == '__main__':
     # like the -O0 reference build: vroom-ld stubs what only dead code refers to (listed in
     # vmlinux.unstripped.vroom-stubs; compare with the reference tree's list)
     sh = (f'source {R}/env/macos-env.sh && kmake -C {R}/work/linux O={dst} -j{j} LD={R}/ccs/vroom-ld Image')
+    mt = {o: os.stat(f'{dst}/{o}').st_mtime_ns for o, e in res if not e and o != 'init/version-timestamp.o'}	# relinked every time
     r = subprocess.run(['zsh', '-c', sh], env=env)
+    # kbuild may decide to rebuild a TU (a freshly copied tree): then that object is clang's again
+    redone = [o for o, t in mt.items() if not os.path.exists(f'{dst}/{o}') or os.stat(f'{dst}/{o}').st_mtime_ns != t]
+    if redone:
+        print(f'{len(redone)} vcc objects were rebuilt by kbuild (clang), e.g. {" ".join(redone[:5])}: run again')
+        sys.exit(1)
     st = f'{dst}/vmlinux.unstripped.vroom-stubs'
     ref = f'{vd.B}/vmlinux.unstripped.vroom-stubs'
     if r.returncode == 0 and os.path.exists(st):

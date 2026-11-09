@@ -12,6 +12,8 @@ VPRIV int treg(ecx *e)
 				e->usedcs |= 1u << tempregs[i];
 			return tempregs[i];
 		}
+	if (e->nlr || (e->inlfree && e->inlfree < INLINE_FREE_SAFE))
+		_longjmp(e->bail, 2);	/* emit_function tries again more carefully */
 	{
 		const fnctx *f = e->f;
 
@@ -24,12 +26,6 @@ VPRIV int treg(ecx *e)
 	}
 }
 
-static const int8_t tidx_of[34] = {
-	-1, -1, -1, -1, -1, -1, -1, -1, -1, 0, 1, 2, 3, 4, 5, 6, -1, -1, -1,
-	7, 8, 9, 10, 11, 12, 13, 14, 15, 16, -1, -1, -1, -1, -1,
-};
-
-static inline int tidx(int r) { return (unsigned)r < 34 ? tidx_of[r] : -1; }
 
 VPRIV void tfree(ecx *e, int r)
 {
@@ -52,16 +48,65 @@ VPRIV int32_t slot(ecx *e, uint64_t size, uint32_t align)
 {
 	if (align < 1)
 		align = 1;
-	if (align > 16 && !e->resv)
-		e->resv = 1u << tidx(R_BP);	/* the base of the realigned frame if it turns out dynamic */
+	if (align > 16) {	/* x28: the base of the realigned frame if it turns out dynamic */
+		if (e->nlr)
+			_longjmp(e->bail, 2);	/* it holds a register variable (they start at x28): again without */
+		e->resv |= 1u << tidx(R_BP);
+	}
 	if (align > e->falign)
 		e->falign = align;	/* over 16: finish_function realigns sp to it */
 	if (size > (1u << 28))
 		efatal(e, 0, "stack object too large");
+	/* allocations past the current top ended with their scope */
+	while (e->nsstk && e->sla[e->sstk[e->nsstk - 1]].off < -e->foff)
+		e->nsstk--;
 	e->foff = (int32_t)(((uint64_t)e->foff + size + align - 1) & ~(uint64_t)(align - 1));
 	if (e->foff > e->fmax)
 		e->fmax = e->foff;
+	if (e->nsla < CAPSLA) {
+		e->sla[e->nsla] = (slotal){ -e->foff, (uint32_t)size };
+		e->sstk[e->nsstk++] = e->nsla;
+	}
+	e->nsla++;
 	return -e->foff;
+}
+
+/* tag record i (frame offset off, len bytes; -1: an address) with its live allocation */
+VPRIV void slot_tag(ecx *e, ins *i, int64_t off, int64_t len)
+{
+	uint32_t lo = 0, hi = e->nsstk;
+
+	if (e->E->o->opt < 1 || e->novtag)
+		return;
+	/* live allocations are disjoint, offsets decreasing with depth */
+	while (lo < hi) {
+		uint32_t mid = (lo + hi) / 2;
+
+		if (e->sla[e->sstk[mid]].off > off)
+			lo = mid + 1;
+		else
+			hi = mid;
+	}
+	if (lo < e->nsstk) {
+		const slotal *a = &e->sla[e->sstk[lo]];
+		uint32_t id = e->sstk[lo] + 1;
+
+		if (off >= a->off && (len < 0 ? off <= a->off + (int64_t)a->size : off + len <= a->off + (int64_t)a->size) &&
+		    id <= 0xffff)
+			i->rm = (uint8_t)id, i->ra = (uint8_t)(id >> 8);
+		/* an address at the start of one allocation is also just past the end of the one below */
+		if (len < 0 && off == a->off && lo + 1 < e->nsstk) {
+			const slotal *b = &e->sla[e->sstk[lo + 1]];
+			uint32_t id2 = e->sstk[lo + 1] + 1;
+
+			if (b->off + (int64_t)b->size == off) {
+				if (id2 > 0xffff)
+					i->rm = i->ra = 0;	/* untagged */
+				else
+					i->cond = (uint8_t)id2, i->sh = (uint8_t)(id2 >> 8);
+			}
+		}
+	}
 }
 static bool sym_needs_got(cc *c, uint32_t ref);
 
@@ -157,6 +202,8 @@ VPRIV int lbase(ecx *e, const lval *l, int64_t *off, int size)
 	case L_REG:
 		*off = l->off;
 		return l->r;
+	case L_VREG:
+		efatal(e, e->curloc, "internal: memory access to a register variable");
 	default:
 		addr_of_ref(e, R_X16, l->ref, l->off);
 		*off = 0;
@@ -259,6 +306,8 @@ VPRIV val laddr(ecx *e, lval *l)
 			opi(e, I_ADDI, 1, l->r, l->r, l->off);
 		l->off = 0;
 		return vreg(l->r);
+	case L_VREG:
+		efatal(e, e->curloc, "internal: address of a register variable");
 	default:
 		r = treg(e);
 		mov(e, 1, r, l->r);

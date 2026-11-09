@@ -252,6 +252,8 @@ VPRIV void spill_live(ecx *e, spill *s)
 		if ((e->live & (1u << i)) && tempregs[i] < 19) {
 			s->slot[i] = slot(e, 8, 8);
 			mem(e, I_ST, 3, 0, tempregs[i], FRAME, s->slot[i]);
+			if (e->reach)
+				e->in[e->nin - 1].sh = SPILL_REC;
 			s->mask |= 1u << i;
 		}
 }
@@ -259,8 +261,11 @@ VPRIV void spill_live(ecx *e, spill *s)
 VPRIV void unspill(ecx *e, const spill *s)
 {
 	for (int i = 0; i < NTEMP; i++)
-		if (s->mask & (1u << i))
+		if (s->mask & (1u << i)) {
 			mem(e, I_LD, 3, 0, tempregs[i], FRAME, s->slot[i]);
+			if (e->reach)
+				e->in[e->nin - 1].sh = SPILL_REC;
+		}
 }
 
 /* memcpy(a0, a1, n) / memset(a0, 0, n) with a0/a1 in temporaries */

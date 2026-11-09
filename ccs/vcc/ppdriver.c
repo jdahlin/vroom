@@ -548,7 +548,7 @@ int ppd_run(int argc, char **argv, const ppd_env *env)
 #endif
 	int hosted = 1, nostdinc = 0, asm_mode = 0, undef = 0;
 	int march_lse = -1, mcpu_lse = -1, lse;
-	int opt = 0, os = 0, pie = -1, pic = 0, freestanding = 0, nobuiltin = 0, instr = 0, cfi = -1, strict_align = 0, tiny = 0, gregs = 0;
+	int opt = 0, olevel = 0, os = 0, pie = -1, pic = 0, freestanding = 0, nobuiltin = 0, instr = 0, cfi = -1, strict_align = 0, tiny = 0, gregs = 0;
 	pp_opts po = { 0 };
 	char *pmap = NULL;
 	double t0;
@@ -654,9 +654,9 @@ int ppd_run(int argc, char **argv, const ppd_env *env)
 		else if (!strcmp(a, "-nostdinc")) nostdinc = 1;
 		else if (!strcmp(a, "-undef")) undef = 1;
 		else if (!strcmp(a, "-x") && i + 1 < argc) asm_mode = !strcmp(argv[++i], "assembler-with-cpp");
-		else if (!strcmp(a, "-O0")) opt = 0, os = 0;
-		else if (!strcmp(a, "-Os") || !strcmp(a, "-Oz")) { opt = 2; os = 1; }
-		else if (!strncmp(a, "-O", 2)) opt = 2, os = 0;
+		else if (!strcmp(a, "-O0")) opt = 0, os = 0, olevel = 0;
+		else if (!strcmp(a, "-Os") || !strcmp(a, "-Oz")) { opt = 2; os = 1; olevel = 2; }
+		else if (!strncmp(a, "-O", 2)) opt = 2, os = 0, olevel = !strcmp(a, "-O1") || !strcmp(a, "-Og") ? 1 : 2;
 		else if (!strcmp(a, "-fpie")) pie = 1, pic = 0;
 		else if (!strcmp(a, "-fPIE")) pie = 2, pic = 0;
 		else if (!strcmp(a, "-fpic")) pic = 1, pie = 0;
@@ -878,7 +878,7 @@ int ppd_run(int argc, char **argv, const ppd_env *env)
 		cc_opts co = { .target = po.target, .unsigned_char = po.unsigned_char, .dump_layouts = layout, .ms_anon = ms_anon, .short_wchar = short_wchar,
 				.std = std, .implicit_int = std == 89 || wimpl_int, .implicit_fn = std == 89 || wimpl_fn,
 				.gnu89_inline = gnu89_inline, .no_builtin = freestanding || nobuiltin, .instrument = instr,
-				.general_regs_only = gregs, .vcc_kernel = vcc_kernel, .lse = lse,
+				.general_regs_only = gregs, .vcc_kernel = vcc_kernel, .lse = lse, .opt = olevel,
 			       .outfd = env->outfd };
 		int fd = -1;
 

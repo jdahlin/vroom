@@ -19,8 +19,18 @@
  *     return the same constant is that constant to the caller;
  *   - lazy emission: static functions and objects are emitted only when
  *     emitted code or data refers to them;
- *   - locals live in stack slots; expression temporaries in x9-x15 and
- *     x19-x28.
+ *   - from -O1 on (cc_opts.opt), the three items below; at -O0 locals
+ *     and inlined params and results live in stack slots;
+ *   - the emitted function's most used scalar locals and params whose
+ *     address is never needed (prepass: luse, lnoreg) live in callee-saved
+ *     registers x28 down (B_LREG, L_VREG; VCC_LREGS, default 6), the rest
+ *     in stack slots; expression temporaries in x9-x15 and the remaining
+ *     x19-x28.  An inlined call's params that its body never writes keep
+ *     the argument's register (B_REG), and its result comes back in a
+ *     register (fnctx.retreg), not through slots.  Out of temporaries, a
+ *     function is generated again without either;
+ *   - a b to a label right after it is dropped, and opt.c removes the
+ *     register copies this leaves (liveness, copy propagation).
  *
  * The kernel also relies on what clang -O2 folds beyond that: a
  * BUILD_BUG_ON inside a plain static or inline function that only folds
@@ -85,7 +95,7 @@ enum { R_FP = 29, R_LR = 30, ZR = 31, SP = 32, FRAME = 33, R_X16 = 16, R_X17 = 1
 
 enum {
 	I_LABEL,	/* label */
-	I_RAW,		/* off: text pool offset, ref: length; cond 1: inline asm (//APP in -S) */
+	I_RAW,		/* off: text pool offset, ref: length; cond 1: inline asm (//APP in -S), RAW_MASKS: with its registers */
 	/* rd = rn op (rm << sh); cond: shift kind (0 lsl, 1 lsr, 2 asr) */
 	I_ADD, I_SUB, I_ADDS, I_SUBS, I_AND, I_ORR, I_EOR, I_ANDS, I_BIC, I_ORN, I_ADC, I_SBC, I_ADCS, I_SBCS,
 	/* rd = rn op imm (any value: the backend splits or materialises) */
@@ -121,6 +131,12 @@ enum {
 };
 
 enum { C_EQ, C_NE, C_HS, C_LO, C_MI, C_PL, C_VS, C_VC, C_HI, C_LS, C_GE, C_LT, C_GT, C_LE, C_AL };
+
+/* I_RAW cond 2: inline asm whose registers follow its text: uint64_t reads, writes */
+#define RAW_MASKS 2
+
+/* lrefc: a label that inline asm (asm goto) or a label address (&&l) may reach */
+#define LREF_EXT (1u << 31)
 
 typedef struct ins {
 	uint8_t op, sz;		/* sz: 1 = 64-bit (x), 0 = 32-bit (w); memory: log2 bytes */
@@ -196,6 +212,11 @@ typedef struct emitter {
 	_Atomic uint8_t *extref;	/* per sym: referenced (for .weak of undefined syms) */
 	_Atomic uint8_t *walked;
 	uint16_t *fnsize;		/* per function: AST nodes (prepass) */
+	uint16_t *luse;			/* per local: uses weighted by loop depth (prepass) */
+	uint8_t *lnoreg;		/* per local: needs memory (address taken, asm operand, {} init) */
+	uint32_t *lspan;		/* per function: [2s] lowest, [2s+1] highest local sym seen */
+	int nlreg;			/* locals given callee-saved registers per function (VCC_LREGS) */
+	bool noopt;			/* VCC_NOOPT: no opt.c clean-ups (to compare) */
 	i128 *cwval;		/* per SA_CWRITE variable: the one constant it is assigned */	/* per function: prepass state (0 no, 1 running, 2 done) */
 	uint8_t *sflags;		/* SA_* per sym */
 	uint8_t *ffacts;		/* FF_* per floating local: what every write stores */
@@ -236,7 +257,9 @@ typedef struct val {
 enum { V_NONE, V_CONST, V_ADDR, V_REG, V_REG2 };
 
 /* per-sym binding inside a function instance */
-enum { B_NONE, B_SLOT, B_CONST, B_INDIRECT };
+enum { B_NONE, B_SLOT, B_CONST, B_INDIRECT, B_REG, B_LREG };
+/* B_REG: an inlined call's read-only param in temporary v.r; B_LREG: a local or param of the
+   emitted function that lives in callee-saved register v.r for the whole function */
 
 /* per user label (prepass): referenced, defined so far, target of a jump back (or &&) */
 enum { LR_REF = 1, LR_DEF = 2, LR_BACK = 4 };
@@ -272,6 +295,7 @@ typedef struct fnctx {		/* one function instance: the emitted function or an inl
 	uint32_t fn, inst;
 	uint32_t retlbl;
 	int32_t retslot;
+	uint8_t retreg;		/* inlined: the result's temporary + 1 (0: in retslot) */
 	qty rty;
 	bool inl;
 	bool cst_ok, any_ret;
@@ -284,6 +308,28 @@ typedef struct fnctx {		/* one function instance: the emitted function or an inl
 #define MAXLOOP 256
 #define MAXCLEAN 256
 #define NTEMP 17
+#define MAXLREG 10	/* x19-x28 */
+#define LREGS_DEFAULT 6	/* the rest stay expression temporaries */
+#define INLINE_FREE_FAST 5
+#define INLINE_FREE_SAFE 8
+
+/* a stack slot handed out by slot() (offsets are reused across scopes) */
+typedef struct slotal {
+	int32_t off;
+	uint32_t size;
+} slotal;
+#define CAPSLA (1u << 20)
+/*
+ * At -O1 and up a record addressing a frame slot (I_LD/I_ST, add/sub
+ * immediate with rn FRAME) names the live allocation it is inside in
+ * rm | ra << 8 (index + 1; 0: none found, or past 65535).  Slots are
+ * reused once a scope ends, so this tells opt.c which accesses belong to
+ * one object.  An address at the start of an allocation that is also just
+ * past the end of the live one below names that one too, in cond | sh << 8
+ * (SLOT_TAG2).  finish_function clears the tags before the frame layout.
+ */
+#define SLOT_TAG(i) ((uint32_t)(i)->rm | (uint32_t)(i)->ra << 8)
+#define SLOT_TAG2(i) ((uint32_t)(i)->cond | (uint32_t)(i)->sh << 8)
 
 #define NVSZ 64		/* VLA size expressions live at once in a function */
 
@@ -293,6 +339,10 @@ typedef struct ecx {
 	/* records of the function being emitted */
 	ins *in;
 	uint32_t nin, capin;
+	slotal *sla;		/* the function's slot() allocations */
+	uint32_t nsla;
+	uint32_t *sstk, nsstk;	/* the live ones (indices into sla, deepest last) */
+	int novtag;		/* inside a volatile access: its records stay untagged */
 	uint32_t curloc;	/* innermost statement being generated (diagnostics) */
 	tbuf raw;		/* inline asm text */
 	tbuf out;		/* this thread's output text */
@@ -304,7 +354,7 @@ typedef struct ecx {
 	bind *b;		/* per sym */
 	lbl *lm;		/* per label */
 	uint32_t *caselbl;	/* per node (N_CASE / N_DEFAULT): local label */
-	uint32_t *lrefc;	/* per local label: branches to it */
+	uint32_t *lrefc;	/* per local label: branches to it; LREF_EXT: also reached from outside the records */
 	uint32_t nlabel, caplabel;
 	/*
 	 * Known values of locals only ever assigned constants (SA_CWRITE):
@@ -327,7 +377,6 @@ typedef struct ecx {
 	/* VLA sizes, evaluated where their declaration is reached (stmt.c vla_fix) */
 	struct { uint32_t node, inst; int32_t slot; } vsz[NVSZ];
 	uint32_t nvsz;
-	uint32_t resv;		/* temporaries never handed out (tidx bits): x28 once falign > 16 */
 	int32_t cl_top;		/* frame offset above the block's compound literals (kept past statements) */
 	int32_t outmax;		/* outgoing stack argument bytes */
 	bool dyn, calls, vararg;
@@ -337,6 +386,11 @@ typedef struct ecx {
 	int nsrn;		/* classify: next SIMD/FP argument register */
 	/* temporaries */
 	uint32_t live;		/* bit i: tempregs[i] in use */
+	uint32_t resv;		/* ... of those, never handed out: B_LREG variables', x28 once falign > 16 */
+	int inlfree;		/* free temporaries an inlined call keeps (0: INLINE_FREE_SAFE) */
+	int nlr;		/* B_LREG candidates of the emitted function: sym, register */
+	uint32_t lrsym[MAXLREG];
+	uint8_t lrreg[MAXLREG];
 	uint32_t usedcs;	/* callee-saved registers used (bit = x number) */
 	/* control */
 	bool reach;
@@ -423,7 +477,7 @@ typedef struct rpend { uint32_t next, k, frag, off; uint8_t *p; } rpend;	/* a br
 
 /* ---------------- lvalues ---------------- */
 
-enum { L_FRAME, L_SYM, L_REG, L_GLOBREG };
+enum { L_FRAME, L_SYM, L_REG, L_GLOBREG, L_VREG };	/* L_VREG: a B_LREG variable, value in r (no address) */
 
 typedef struct lval {
 	uint8_t k;
@@ -445,6 +499,9 @@ typedef struct abiarg {
 } abiarg;
 
 /* ---------------- spilling caller-saved temporaries around calls ---------------- */
+
+/* ins.sh of the I_ST/I_LD pair spill_live/unspill put around a call (opt.c drops dead ones) */
+#define SPILL_REC 1
 
 typedef struct spill {
 	uint32_t mask;
@@ -505,6 +562,17 @@ VPRIV bool logimm_ok(uint64_t v, int x);
 static inline void reg(tbuf *b, int r, int x);
 /* tu.c */
 extern const uint8_t tempregs[NTEMP];
+
+/* the tempregs index of x<r>, or -1 */
+static inline int tidx(int r)
+{
+	static const int8_t tidx_of[34] = {
+		-1, -1, -1, -1, -1, -1, -1, -1, -1, 0, 1, 2, 3, 4, 5, 6, -1, -1, -1,
+		7, 8, 9, 10, 11, 12, 13, 14, 15, 16, -1, -1, -1, -1, -1,
+	};
+
+	return (unsigned)r < 34 ? tidx_of[r] : -1;
+}
 VPRIV __attribute__((format(printf, 3, 4))) void ediag(ecx *e, uint32_t loc, const char *fmt, ...);
 VPRIV __attribute__((format(printf, 3, 4))) void eerror(ecx *e, uint32_t loc, const char *fmt, ...);
 VPRIV __attribute__((format(printf, 3, 4), noreturn)) void efatal(ecx *e, uint32_t loc, const char *fmt, ...);
@@ -533,6 +601,7 @@ static inline void opbf(ecx *e, int op, int x, int rd, int rn, int immr, int imm
 static inline void movi(ecx *e, int x, int rd, int64_t v);
 static inline void mov(ecx *e, int x, int rd, int rn);
 static inline void cset(ecx *e, int rd, int cond);
+static inline int last_cset(ecx *e, const val *v);
 static inline void mem(ecx *e, int op, int sz, int ext, int rd, int base, int64_t off);
 static inline void symop(ecx *e, int op, int sz, int ext, int rd, int rn, uint32_t ref, int64_t off);
 VPRIV uint32_t newlabel(ecx *e);
@@ -552,6 +621,7 @@ VPRIV int treg(ecx *e);
 VPRIV void tfree(ecx *e, int r);
 VPRIV void val_free(ecx *e, const val *v);
 VPRIV int32_t slot(ecx *e, uint64_t size, uint32_t align);
+VPRIV void slot_tag(ecx *e, ins *i, int64_t off, int64_t len);
 static inline val vconst(i128 i);
 static inline val vreg(int r);
 static inline val vaddr(uint32_t ref, i128 off);
@@ -605,6 +675,9 @@ VPRIV int atomic_addr(ecx *e, lval *l, bool *own);
 VPRIV void store(ecx *e, lval *l, qty t, val *v);
 /* arith.c */
 VPRIV void extend(ecx *e, int rd, int rs, int from, bool sgn);
+VPRIV int lreg_of(ecx *e, uint32_t s);
+VPRIV void opt_function(ecx *e);
+VPRIV lval bind_lreg(ecx *e, uint32_t s);
 VPRIV val fold_int_bin(ecx *e, int op, qty ot, qty rt, i128 l, i128 r, bool *ok);
 VPRIV bool em_is_cmp(int op);
 VPRIV int emit_cmp(ecx *e, int op, int x, bool sg, val *a, val *b);
@@ -871,6 +944,8 @@ static inline void opi(ecx *e, int op, int x, int rd, int rn, int64_t imm)
 	i = put(e, op);
 	i->sz = (uint8_t)x, i->rd = (uint8_t)rd, i->rn = (uint8_t)rn;
 	i->imm = imm;
+	if (rn == FRAME)
+		slot_tag(e, i, imm, -1);	/* an address: may point just past the end */
 }
 
 static inline void opbf(ecx *e, int op, int x, int rd, int rn, int immr, int imms)
@@ -897,6 +972,20 @@ static inline void cset(ecx *e, int rd, int cond)
 	i->sz = 0, i->rd = (uint8_t)rd, i->rn = ZR, i->rm = ZR, i->cond = (uint8_t)(cond ^ 1);
 }
 
+/* the last record is `cset v.r, cond` (nothing since, no label: the flags still say it): cond, else -1.
+ * The value is then 0/1 already, and a test of it can use the flags. */
+static inline int last_cset(ecx *e, const val *v)
+{
+	const ins *i;
+
+	if (v->k != V_REG || !e->reach || !e->nin || e->E->o->opt < 1)
+		return -1;
+	i = &e->in[e->nin - 1];
+	if (i->op != I_CSINC || i->rn != ZR || i->rm != ZR || i->rd != v->r)
+		return -1;
+	return i->cond ^ 1;
+}
+
 static inline void mem(ecx *e, int op, int sz, int ext, int rd, int base, int64_t off)
 {
 	ins *i;
@@ -906,6 +995,8 @@ static inline void mem(ecx *e, int op, int sz, int ext, int rd, int base, int64_
 	i = put(e, op);
 	i->sz = (uint8_t)sz, i->cond = (uint8_t)ext, i->rd = (uint8_t)rd, i->rn = (uint8_t)base;
 	i->imm = off;
+	if (base == FRAME)
+		slot_tag(e, i, off, (int64_t)1 << sz);
 }
 
 static inline void symop(ecx *e, int op, int sz, int ext, int rd, int rn, uint32_t ref, int64_t off)

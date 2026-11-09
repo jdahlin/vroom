@@ -145,6 +145,27 @@ static void finish_direct(ecx *e, uint32_t s, uint32_t align, const int *cs, int
 	out_chunk(e, (uint64_t)s << 1, start);
 }
 
+/* drop each b to a label among those right after it: the code falls through anyway */
+static void drop_fallthrough(ecx *e)
+{
+	uint32_t n = 0;
+
+	for (uint32_t k = 0; k < e->nin; k++) {
+		const ins *i = &e->in[k];
+
+		if (i->op == I_B) {
+			uint32_t j = k + 1;
+
+			while (j < e->nin && e->in[j].op == I_LABEL && e->in[j].label != i->label)
+				j++;
+			if (j < e->nin && e->in[j].op == I_LABEL)
+				continue;
+		}
+		e->in[n++] = *i;
+	}
+	e->nin = n;
+}
+
 static void finish_function(ecx *e, uint32_t s)
 {
 	cc *c = e->c;
@@ -156,6 +177,12 @@ static void finish_function(ecx *e, uint32_t s)
 	uint32_t align = 4;
 
 	bool bp = e->falign > 16 && e->dyn;
+
+	if (e->E->o->opt >= 1) {	/* -O1 and up */
+		drop_fallthrough(e);
+		if (!e->E->noopt)
+			opt_function(e);
+	}
 
 	/*
 	 * Frame below x29: callee saves, locals, outgoing arguments.  Slots are
@@ -189,6 +216,9 @@ static void finish_function(ecx *e, uint32_t s)
 		}
 		if (i->rn != FRAME)
 			continue;
+		i->rm = i->ra = 0;	/* slot tags */
+		if (i->op != I_LD && i->op != I_ST)
+			i->cond = i->sh = 0;
 		if (bp) {
 			i->rn = R_BP;
 			i->imm = i->imm - csave + (total - 16);
@@ -259,7 +289,56 @@ static void finish_function(ecx *e, uint32_t s)
 	out_chunk(e, (uint64_t)s << 1, start);
 }
 
-VPRIV void emit_function(ecx *e, uint32_t s)
+/*
+ * The function's own scalar locals and params whose address is never
+ * needed, most used first (loop depth counts 8x a level), live in
+ * callee-saved registers x28 down for the whole function: no slot, a read
+ * is a mov.  Those registers are then not expression temporaries here.
+ */
+static void choose_lregs(ecx *e, uint32_t s, int max)
+{
+	cc *c = e->c;
+	emitter *E = e->E;
+	uint32_t lo = E->lspan[2 * s], hi = E->lspan[2 * s + 1];
+	int k = 0;
+	uint32_t cand[MAXLREG];
+
+	e->nlr = 0;
+	if (!max || lo > hi || e->vararg || e->E->o->opt < 1)
+		return;
+	for (uint32_t v = lo; v <= hi; v++) {
+		const sym *y = &c->syms[v];
+		qty t = y->ty;
+		int j;
+
+		if (!E->luse[v] || E->lnoreg[v] || y->kind != S_VAR || !is_local_var(c, v) || y->sc == SC_STATIC ||
+		    !(is_integer(c, t) || is_ptr(c, t)) || is_wide(c, t) || (QQ(t) & Q_VOLATILE) ||
+		    tsize(c, t) - 1 >= 8 || (T(c, t)->flags & TF_VLA) || sym_attrs(c, v)->cleanup ||
+		    regvar_reg(c, v) >= 0)
+			continue;
+		if (k == max && E->luse[cand[k - 1]] >= E->luse[v])
+			continue;
+		j = k < max ? k++ : k - 1;
+		while (j > 0 && E->luse[cand[j - 1]] < E->luse[v]) {
+			cand[j] = cand[j - 1];
+			j--;
+		}
+		cand[j] = v;
+	}
+	for (int i = 0; i < k; i++) {
+		int r = 28 - i;
+
+		e->lrsym[i] = cand[i];
+		e->lrreg[i] = (uint8_t)r;
+		e->live |= 1u << (16 - i);	/* tempregs[16 - i] == x(28 - i) */
+		e->resv |= 1u << (16 - i);
+		e->usedcs |= 1u << r;
+	}
+	e->nlr = k;
+}
+
+/* true: out of temporaries with register variables, generate it again without */
+static bool emit_function1(ecx *e, uint32_t s, int nlreg)
 {
 	cc *c = e->c;
 	const sym *y = &c->syms[s];
@@ -275,6 +354,7 @@ VPRIV void emit_function(ecx *e, uint32_t s)
 	e->nlabel = 0;
 	e->nkv = 0, e->kvalid = 0, e->nkvs = 0, e->nael = 0;
 	e->foff = e->fmax = e->outmax = e->cl_top = 0;
+	e->nsla = e->nsstk = 0;
 	e->falign = 16, e->resv = 0, e->nvsz = 0;
 	e->dyn = e->calls = false;
 	e->live = 0;
@@ -286,15 +366,22 @@ VPRIV void emit_function(ecx *e, uint32_t s)
 	e->asmk = 0;
 	e->inline_depth = 0;
 	e->vararg = (ft->flags & TF_VARIADIC) != 0;
+	choose_lregs(e, s, nlreg);
 	memset(&F, 0, sizeof(F));
 	F.fn = s;
 	F.inst = ++e->inst_next;
 	F.rty = rty;
 	F.retlbl = newlabel(e);
 	e->f = &F;
-	if (_setjmp(e->bail)) {
+	switch (_setjmp(e->bail)) {
+	case 0:
+		break;
+	case 2:
 		e->f = NULL;
-		return;
+		return true;
+	default:
+		e->f = NULL;
+		return false;
 	}
 	if (is_sret(c, rty)) {
 		F.retslot = slot(e, 8, 8);
@@ -319,6 +406,18 @@ VPRIV void emit_function(ecx *e, uint32_t s)
 		}
 		bd->inst = F.inst;
 		bd->reg = 0xff;
+		if ((ab.kind == A_REG || ab.kind == A_STACK) && lreg_of(e, p) >= 0) {
+			int r = lreg_of(e, p);
+
+			bd->kind = B_LREG;
+			bd->kv = 0;
+			bd->v = vreg(r);
+			if (ab.kind == A_REG)
+				extend(e, r, ab.reg, (int)sz, is_signed(c, pt));	/* AAPCS64: high bits unspecified */
+			else
+				mem(e, I_LD, log2sz(sz), sz < 8 && is_signed(c, pt) ? 1 : 0, r, R_FP, 16 + ab.stk);
+			continue;
+		}
 		switch (ab.kind) {
 		case A_IGNORE:
 			bd->kind = B_SLOT;
@@ -409,4 +508,16 @@ VPRIV void emit_function(ecx *e, uint32_t s)
 	} else {
 		finish_function(e, s);
 	}
+	return false;
+}
+
+VPRIV void emit_function(ecx *e, uint32_t s)
+{
+	/* out of temporaries: again without register variables and with more of them free in inlined calls */
+	e->inlfree = INLINE_FREE_FAST;
+	if (emit_function1(e, s, e->E->nlreg)) {
+		e->inlfree = INLINE_FREE_SAFE;
+		emit_function1(e, s, 0);
+	}
+	e->nlr = 0, e->resv = 0, e->inlfree = 0;	/* out of a function: no register variables */
 }

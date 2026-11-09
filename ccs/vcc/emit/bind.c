@@ -101,6 +101,31 @@ VPRIV int32_t bind_slot(ecx *e, uint32_t s)
 	return b->slot;
 }
 
+/* the callee-saved register local s of the emitted function lives in, or -1 */
+VPRIV int lreg_of(ecx *e, uint32_t s)
+{
+	for (int i = 0; i < e->nlr; i++)
+		if (e->lrsym[i] == s)
+			return e->lrreg[i];
+	return -1;
+}
+
+/* bind s to its register (lreg_of) for this instance */
+VPRIV lval bind_lreg(ecx *e, uint32_t s)
+{
+	bind *b = binding(e, s);
+	lval l = { .k = L_VREG };
+
+	b->inst = e->f->inst;
+	b->kind = B_LREG;
+	b->kv = 0;
+	b->reg = 0xff;
+	b->v = vreg(lreg_of(e, s));
+	l.r = b->v.r;
+	l.align = talign(e->c, e->c->syms[s].ty);
+	return l;
+}
+
 /* the lvalue of a local (auto/param/register) variable */
 VPRIV lval local_lval(ecx *e, uint32_t s)
 {
@@ -110,6 +135,20 @@ VPRIV lval local_lval(ecx *e, uint32_t s)
 	qty t = c->syms[s].ty;
 
 	l.align = talign(c, t);
+	if (b->kind == B_LREG && b->inst) {
+		l.k = L_VREG;
+		l.r = b->v.r;
+		return l;
+	}
+	if ((b->kind == B_NONE || b->inst == 0) && lreg_of(e, s) >= 0)
+		return bind_lreg(e, s);	/* declaration jumped over */
+	if (b->kind == B_REG && b->inst) {
+		/* read-only, its address never taken: a copy in a fresh slot will do */
+		l.k = L_FRAME;
+		l.off = slot(e, 8, 8);
+		mem(e, I_ST, 3, 0, b->v.r, FRAME, l.off);
+		return l;
+	}
 	if (b->kind == B_NONE || b->inst == 0) {
 		/* declaration not executed (jumped over, or dead): give it a slot */
 		bind_slot(e, s);

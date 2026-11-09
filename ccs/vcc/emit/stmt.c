@@ -445,7 +445,24 @@ static void gen_return(ecx *e, const node *x)
 				f->cst_ok = false;
 			}
 			f->any_ret = true;
-			store(e, &l, rt, &v);
+			if (f->retreg) {
+				/* what a store to and load from retslot would give */
+				int rr = f->retreg - 1;
+				uint64_t sz = tsize(c, rt);
+
+				if (v.k == V_CONST) {
+					movi(e, 1, rr, (int64_t)em_trunc_to(c, v.i, rt));
+				} else {
+					int r = toreg(e, &v);
+
+					if (sz < 8)
+						extend(e, rr, r, (int)sz, is_signed(c, rt));
+					else
+						mov(e, 1, rr, r);
+				}
+			} else {
+				store(e, &l, rt, &v);
+			}
 		}
 		val_free(e, &v);
 		run_cleanups(e, f->cbase);
@@ -725,7 +742,10 @@ static void gen_decl(ecx *e, const node *x)
 		{
 			lval l = { .k = L_FRAME, .align = sym_align(c, s) };
 
-			l.off = bind_slot(e, s);
+			if (lreg_of(e, s) >= 0)
+				l = bind_lreg(e, s);
+			else
+				l.off = bind_slot(e, s);
 			kv_track(e, s, &v);
 			store(e, &l, y->ty, &v);
 			val_free(e, &v);
@@ -734,7 +754,10 @@ static void gen_decl(ecx *e, const node *x)
 		lval l = { .k = L_FRAME, .align = sym_align(c, s) };
 		int rr = regvar_reg(c, s);
 
-		l.off = bind_slot(e, s);
+		if (lreg_of(e, s) >= 0)
+			l = bind_lreg(e, s);
+		else
+			l.off = bind_slot(e, s);
 		if (rr >= 0)
 			binding(e, s)->reg = (uint8_t)rr;
 		if (x->b)

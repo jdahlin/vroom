@@ -90,6 +90,7 @@ VPRIV void gen_asm(ecx *e, uint32_t n)
 		if (r >= 0)
 			clobs |= 1u << r;
 	}
+	e->usedcs |= clobs & ((1u << 29) - (1u << 19));	/* callee-saved ones it clobbers: the prologue saves them */
 	for (int i = 0; i < NTEMP; i++)
 		if ((clobs >> tempregs[i]) & 1) {
 			if (e->live & (1u << i)) {
@@ -412,6 +413,36 @@ VPRIV void gen_asm(ecx *e, uint32_t n)
 		i->off = (int32_t)start;
 		i->ref = (uint32_t)(rb->n - start);
 		i->cond = 1;
+		/*
+		 * Extended asm reads and writes only its operands and clobbers:
+		 * the registers go after the text (cond 2, RAW_MASKS) for opt.c.
+		 * Basic asm and asm goto (its labels need what is live there)
+		 * stay unknown.
+		 */
+		if (!basic && !a->nlabel) {
+			uint64_t m[2] = { (1ull << 18) | (1ull << 29) | (1ull << 30), clobs };	/* reads, writes */
+
+			for (uint32_t k = 0; k < nops; k++) {
+				const asmopnd *o = &op[k];
+				uint64_t r;
+
+				if (o->kind == AO_MEM) {
+					m[0] |= 1ull << o->reg;
+					continue;
+				}
+				if (o->kind != AO_REG || o->reg == 0xff)
+					continue;
+				r = 1ull << o->reg;
+				if (o->v.k == V_REG2)
+					r |= 1ull << o->v.r2;
+				if (o->out)
+					m[1] |= r;
+				if (!o->out || o->inout)
+					m[0] |= r;
+			}
+			tb_put(rb, (const char *)m, sizeof(m));
+			i->cond = RAW_MASKS;
+		}
 	}
 	for (uint32_t i = 0; i < a->nout; i++) {
 		asmopnd *o = &op[i];
@@ -445,6 +476,7 @@ VPRIV void gen_asm(ecx *e, uint32_t n)
 
 		for (int pass = 0; pass <= (int)(a->nout ? a->nlabel : 0); pass++) {
 			if (pass > 0) {
+				e->lrefc[tramp[pass - 1]] |= LREF_EXT;	/* (the asm jumps here) */
 				deflabel_forced(e, tramp[pass - 1]);
 			}
 			for (uint32_t i = 0; i < a->nout; i++) {
@@ -482,5 +514,6 @@ VPRIV void gen_asm(ecx *e, uint32_t n)
 		for (uint32_t k = 0; k < a->nlabel; k++) {
 			kv_edge(e, tramp[k]);
 			e->lrefc[tramp[k]]++;
+			e->lrefc[tramp[k]] |= LREF_EXT;
 		}
 }

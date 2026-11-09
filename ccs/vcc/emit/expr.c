@@ -46,6 +46,12 @@ static val gen_var(ecx *e, uint32_t n)
 
 		if (b->kind == B_CONST && b->inst)
 			return b->v;
+		if (b->kind == B_REG && b->inst) {
+			int r = treg(e);
+
+			mov(e, 1, r, b->v.r);
+			return vreg(r);
+		}
 		if (b->kv && (e->kvalid >> (b->kv - 1) & 1))
 			return vconst(e->kval[b->kv - 1]);
 	} else {
@@ -438,6 +444,11 @@ static val gen_binary(ecx *e, uint32_t n)
 			if (op == T_EXCLAIMEQ)
 				return vconst(1);
 		}
+		if ((op == T_EQUALEQUAL || op == T_EXCLAIMEQ) && b.k == V_CONST && b.i == 0 && last_cset(e, &a) >= 0) {
+			if (op == T_EQUALEQUAL)	/* (cond) == 0: the inverse cset */
+				e->in[e->nin - 1].cond ^= 1;
+			return a;
+		}
 		if (is_wide(c, lt))
 			cond = emit_cmp2(e, op, sg, &a, &b);
 		else
@@ -515,7 +526,10 @@ static val gen_unary(ecx *e, uint32_t n)
 		v = tobool(e, v, t);
 		if (v.k == V_CONST)
 			return vconst(!v.i);
-		opi(e, I_EORI, 0, v.r, v.r, 1);
+		if (last_cset(e, &v) >= 0)
+			e->in[e->nin - 1].cond ^= 1;
+		else
+			opi(e, I_EORI, 0, v.r, v.r, 1);
 		return v;
 	}
 	efatal(e, x->loc, "unsupported unary operator");
@@ -927,6 +941,7 @@ VPRIV val gen(ecx *e, uint32_t n)
 			i->label = m->id;
 		}
 		e->lrefc[m->id]++;
+		e->lrefc[m->id] |= LREF_EXT;
 		return vreg(r);
 	}
 	case N_CAST:
