@@ -133,6 +133,7 @@ static bool loc_ok(const pp *p, uint32_t loc, const fent **e)
 }
 
 int pp_error_limit(const pp *p) { return p->o->error_limit; }
+int pp_spell_limit(const pp *p) { return p->o->spell_limit; }
 
 int pp_wstate(const pp *p, const char *flag, bool on, const char *const *groups)
 {
@@ -173,19 +174,35 @@ int pp_wstate(const pp *p, const char *flag, bool on, const char *const *groups)
 	return err || (allerr && !noerr) ? 2 : 1;
 }
 
-bool pp_warnx(pp *p, const char *flag, bool on, const char *const *groups, pp_dinfo *d, const char *fmt, ...)
+/* the level a warning of flag is reported at at loc: VDL_WARNING, VDL_ERROR (-Werror), or -1 (off) */
+int pp_diag_wlevel(pp *p, const char *flag, bool on, const char *const *groups, uint32_t loc)
 {
 	int st = pp_wstate(p, flag, on, groups);
-	char msg[1024];
+
+	if (!st || (loc != UINT32_MAX && pp_in_system_header(p, loc)))
+		return -1;
+	return st == 2 ? VDL_ERROR : VDL_WARNING;
+}
+
+bool pp_warnx(pp *p, const char *flag, bool on, const char *const *groups, pp_dinfo *di, const char *fmt, ...)
+{
+	int lv = pp_diag_wlevel(p, flag, on, groups, di->loc);
+	vdiag *d;
 	va_list ap;
 
-	if (!st || (d->loc != UINT32_MAX && pp_in_system_header(p, d->loc)))
+	if (lv < 0)
 		return false;
 	va_start(ap, fmt);
-	vsnprintf(msg, sizeof(msg), fmt, ap);
+	d = pp_diag_vbegin(p, lv, di->loc, fmt, ap);
 	va_end(ap);
-	d->what = st == 2 ? "error" : "warning";
-	pp_diagx(p, d, "%s [%s-W%s]", msg, st == 2 ? "-Werror," : "", flag);
+	pp_diag_flag(d, flag);
+	d->werror = lv == VDL_ERROR;
+	for (int i = 0; i < di->nr; i++)
+		pp_diag_label(p, d, di->r[i].b, di->r[i].e, NULL);
+	for (int i = 0; i < di->nfx; i++)
+		pp_diag_fix(p, d, di->fx[i].b, di->fx[i].e, di->fx[i].s, VDA_UNSPEC);
+	pp_diag_macro(d, di->ms, di->mlen);
+	pp_diag_emit(p, d);
 	return true;
 }
 
@@ -296,7 +313,7 @@ static void include_stack(pp *p, vbuf *b, const fent *e)
 	}
 }
 
-static void snippet(pp *p, vbuf *b, const fent *e, const pp_dinfo *d)
+static void snippet(pp *p, vbuf *b, const fent *e, const vdiag *d)
 {
 	const char *s = e->f->src;
 	uint32_t off = d->loc - e->base, size = e->f->size, ls, le, line, width, nd;
@@ -339,8 +356,8 @@ static void snippet(pp *p, vbuf *b, const fent *e, const pp_dinfo *d)
 		char *m = calloc(lw + 1, 1);
 
 		memset(m, ' ', lw);
-		for (int i = 0; i < d->nr; i++) {
-			uint32_t rb = d->r[i].b, re = d->r[i].e;
+		for (uint32_t i = 0; i < d->nspan; i++) {
+			uint32_t rb = d->span[i].b, re = d->span[i].e;
 
 			if (rb < e->base || re < rb)
 				continue;
@@ -363,8 +380,8 @@ static void snippet(pp *p, vbuf *b, const fent *e, const pp_dinfo *d)
 				n--;
 			vbuf_put(&cl, m, n);
 			/* clang pads the caret line out to the last fix-it's column */
-			for (int i = 0; i < d->nfx; i++) {
-				uint32_t fb = d->fx[i].b, c0;
+			for (uint32_t i = 0; i < d->nfix; i++) {
+				uint32_t fb = d->fix[i].b, c0;
 
 				if (fb < e->base || fb - e->base < ls || fb - e->base > le)
 					continue;
@@ -384,8 +401,8 @@ static void snippet(pp *p, vbuf *b, const fent *e, const pp_dinfo *d)
 		vbuf_s(b, DC_RESET);
 	vbuf_s(b, "\n");
 	/* fix-it hints on this line */
-	for (int i = 0; i < d->nfx; i++) {
-		uint32_t fb = d->fx[i].b;
+	for (uint32_t i = 0; i < d->nfix; i++) {
+		uint32_t fb = d->fix[i].b;
 		uint32_t c0, have;
 
 		if (fb < e->base || fb - e->base < ls || fb - e->base > le)
@@ -395,7 +412,7 @@ static void snippet(pp *p, vbuf *b, const fent *e, const pp_dinfo *d)
 		if (c0 < have)
 			c0 = have;
 		db_c(&fl, ' ', (int)(c0 - have));
-		vbuf_s(&fl, d->fx[i].s);
+		vbuf_s(&fl, d->fix[i].s);
 		anyfix = true;
 	}
 	if (anyfix) {
@@ -469,10 +486,10 @@ static const pmacro *expansion_at(pp *p, uint32_t loc, uint32_t *b, uint32_t *ee
 	return (const pmacro *)m;
 }
 
-static void vdiagx_(pp *p, const pp_dinfo *d, const char *fmt, va_list ap);
-
 /* "expanded from macro 'M'" at the body token spelled like the diagnosed one (the last #define before) */
-static void expansion_note(pp *p, const pmacro *m, uint32_t before, const char *ms, uint32_t mlen)
+static void kid_after(vdiag *top, vdiag *after, vdiag *n);
+
+static void expansion_note(pp *p, vdiag *top, vdiag *after, const pmacro *m, uint32_t before, const char *ms, uint32_t mlen)
 {
 	uint32_t loc = 0, len = 0;
 
@@ -515,95 +532,280 @@ static void expansion_note(pp *p, const pmacro *m, uint32_t before, const char *
 		}
 	}
 	if (loc) {
-		pp_span r = { loc, loc + len };
-		pp_dinfo d = { "note", loc, &r, len > 1, NULL, 0, NULL, 0 };
+		vdiag *n = pp_diag_begin(p, VDL_NOTE, loc, "expanded from macro '%.*s'",
+					 (int)vintern_ents[m->name].len, vintern_ents[m->name].s);
 
-		pp_diagx(p, &d, "expanded from macro '%.*s'", (int)vintern_ents[m->name].len, vintern_ents[m->name].s);
+		if (len > 1)
+			pp_diag_label(p, n, loc, loc + len, NULL);
+		n->id = "note_macro_expansion_here";
+		kid_after(top, after, n);
 	}
 }
 
-void pp_vdiagx(pp *p, const pp_dinfo *d, const char *fmt, va_list ap)
+/* ---------------- records ---------------- */
+
+/* vcc's formats and their ids (bench/gen-diagids.py) */
+static const struct dfmt { const char *fmt, *id; } dfmts[] = {
+#define DID(n, cls, grp)
+#define DFMT(f, n) { f, #n },
+#include "diagids.inc"
+#undef DID
+#undef DFMT
+};
+
+/* the id of a format (NULL: not in the table) */
+static const char *fmt_id(const char *fmt)
+{
+	size_t lo = 0, hi = sizeof(dfmts) / sizeof(dfmts[0]);
+
+	while (lo < hi) {
+		size_t mid = (lo + hi) / 2;
+		int r = strcmp(dfmts[mid].fmt, fmt);
+
+		if (!r)
+			return dfmts[mid].id;
+		if (r < 0)
+			lo = mid + 1;
+		else
+			hi = mid;
+	}
+	return NULL;
+}
+
+static const char *const lvname[] = { "note", "remark", "warning", "error", "fatal error" };
+
+const char *pp_diag_level(int level) { return lvname[level]; }
+
+static int level_of(const char *what)
+{
+	switch (what[0]) {
+	case 'e': return VDL_ERROR;
+	case 'f': return VDL_FATAL;
+	case 'w': return VDL_WARNING;
+	case 'r': return VDL_REMARK;
+	default: return VDL_NOTE;
+	}
+}
+
+static char *dstr(pp *p, const char *s, size_t n)
+{
+	char *r = varena_alloc(&p->perm, n + 1);
+
+	memcpy(r, s, n);
+	r[n] = 0;
+	return r;
+}
+
+vdiag *pp_diag_vbegin(pp *p, int level, uint32_t loc, const char *fmt, va_list ap)
+{
+	vdiag *d = varena_alloc(&p->perm, sizeof(*d));
+	char msg[2048];
+	int n = vsnprintf(msg, sizeof(msg), fmt, ap);
+
+	memset(d, 0, sizeof(*d));
+	d->level = (uint8_t)level;
+	d->loc = loc;
+	d->fmt = fmt;
+	d->id = fmt_id(fmt);
+	d->msg = dstr(p, msg, n < 0 ? 0 : (size_t)n < sizeof(msg) ? (size_t)n : sizeof(msg) - 1);
+	return d;
+}
+
+vdiag *pp_diag_begin(pp *p, int level, uint32_t loc, const char *fmt, ...)
+{
+	va_list ap;
+	vdiag *d;
+
+	va_start(ap, fmt);
+	d = pp_diag_vbegin(p, level, loc, fmt, ap);
+	va_end(ap);
+	return d;
+}
+
+void pp_diag_label(pp *p, vdiag *d, uint32_t b, uint32_t e, const char *label)
+{
+	if (d->nspan == d->cspan) {
+		uint32_t c = d->cspan ? d->cspan * 2 : 4;
+		vdspan *n = varena_alloc(&p->perm, c * sizeof(*n));
+
+		if (d->nspan)
+			memcpy(n, d->span, d->nspan * sizeof(*n));
+		d->span = n, d->cspan = c;
+	}
+	d->span[d->nspan++] = (vdspan){ b, e, label ? dstr(p, label, strlen(label)) : NULL };
+}
+
+void pp_diag_fix(pp *p, vdiag *d, uint32_t b, uint32_t e, const char *s, int app)
+{
+	if (d->nfix == d->cfix) {
+		uint32_t c = d->cfix ? d->cfix * 2 : 4;
+		vdfix *n = varena_alloc(&p->perm, c * sizeof(*n));
+
+		if (d->nfix)
+			memcpy(n, d->fix, d->nfix * sizeof(*n));
+		d->fix = n, d->cfix = c;
+	}
+	d->fix[d->nfix++] = (vdfix){ b, e, dstr(p, s, strlen(s)), (uint8_t)app };
+}
+
+void pp_diag_flag(vdiag *d, const char *flag)
+{
+	d->flag = flag;
+}
+
+void pp_diag_macro(vdiag *d, const char *ms, uint32_t mlen)
+{
+	d->ms = ms, d->mlen = mlen;
+}
+
+static void kid_add(vdiag *d, vdiag *k)
+{
+	if (d->klast)
+		d->klast->next = k;
+	else
+		d->kids = k;
+	d->klast = k;
+}
+
+/* n among top's notes right after after (top itself: first) */
+static void kid_after(vdiag *top, vdiag *after, vdiag *n)
+{
+	if (after == top) {
+		n->next = top->kids, top->kids = n;
+		if (!top->klast)
+			top->klast = n;
+		return;
+	}
+	n->next = after->next, after->next = n;
+	if (top->klast == after)
+		top->klast = n;
+}
+
+vdiag *pp_diag_note(pp *p, vdiag *d, uint32_t loc, const char *fmt, ...)
+{
+	va_list ap;
+	vdiag *k;
+
+	va_start(ap, fmt);
+	k = pp_diag_vbegin(p, VDL_NOTE, loc, fmt, ap);
+	va_end(ap);
+	kid_add(d, k);
+	return k;
+}
+
+const vdiag *pp_diag_records(const pp *p) { return p->dhead; }
+
+/* clang: a token from a macro expansion has the caret at the invocation and
+   a range over all of it, and a note at the macro's body */
+static void macro_adjust(pp *p, vdiag *top, vdiag *d)
 {
 	const pmacro *xm;
 	uint32_t b, ee;
+	bool any = false;
 
-	if (d->ms && d->loc != UINT32_MAX && (xm = expansion_at(p, d->loc, &b, &ee))) {
-		/* clang: the caret at the invocation, a range at the expansion over all of it */
-		pp_dinfo md = *d;
-		pp_span mr[8];
-
-		md.loc = b;
-		md.nr = d->nr > 8 ? 8 : d->nr;
-		for (int i = 0; i < md.nr; i++) {
-			mr[i] = d->r[i];
-			if (mr[i].b >= b && mr[i].b <= ee)
-				mr[i].b = b, mr[i].e = ee;
-		}
-		if (!md.nr)
-			mr[0].b = b, mr[0].e = ee, md.nr = 1;
-		md.r = mr;
-		vdiagx_(p, &md, fmt, ap);
-		expansion_note(p, xm, b, d->ms, d->mlen);
+	if (!d->ms || d->loc == UINT32_MAX || !(xm = expansion_at(p, d->loc, &b, &ee)))
 		return;
+	d->loc = b;
+	if (d->nspan > 8)
+		d->nspan = 8;
+	for (uint32_t i = 0; i < d->nspan; i++) {
+		if (d->span[i].b >= b && d->span[i].b <= ee)
+			d->span[i].b = b, d->span[i].e = ee;
+		any = true;
 	}
-	vdiagx_(p, d, fmt, ap);
+	if (!any)
+		pp_diag_label(p, d, b, ee, NULL);
+	expansion_note(p, top, d, xm, b, d->ms, d->mlen);
 }
 
-static void vdiagx_(pp *p, const pp_dinfo *d, const char *fmt, va_list ap)
+/* one record in clang's text format */
+static void render_text(pp *p, vbuf *b, const vdiag *d)
 {
-	int fd = p->o->errfd ? p->o->errfd : 2;
-	const char *name, *what = d->what;
+	const char *name, *what = lvname[d->level];
 	uint32_t nl, line, col;
 	const fent *e;
 	bool has = d->loc != UINT32_MAX && loc_ok(p, d->loc, &e);	/* UINT32_MAX: no location */
-	bool note = what[0] == 'n';
-	char msg[2048];
-	vbuf b = { 0 };
+	bool note = d->level == VDL_NOTE;
 
-	vsnprintf(msg, sizeof(msg), fmt, ap);
-	if (has && what[0] != 'n' && (uint32_t)(e - p->fe) + 1 != p->diag_fe)
-		include_stack(p, &b, e);
-	if (has && what[0] != 'n')
+	if (has && !note && (uint32_t)(e - p->fe) + 1 != p->diag_fe)
+		include_stack(p, b, e);
+	if (has && !note)
 		p->diag_fe = (uint32_t)(e - p->fe) + 1;
 	if (p->color)
-		vbuf_s(&b, DC_BOLD);
+		vbuf_s(b, DC_BOLD);
 	if (has && diag_where(p, d->loc, &name, &nl, &line, &col))
-		vbuf_f(&b, "%.*s:%u:%u: ", (int)nl, name, line, col);
+		vbuf_f(b, "%.*s:%u:%u: ", (int)nl, name, line, col);
 	else if (d->loc == UINT32_MAX)
 		;	/* "fatal error: too many errors emitted" has no location */
 	else if (!has)
-		vbuf_s(&b, "vcc: ");
+		vbuf_s(b, "vcc: ");
 	if (p->color)
-		vbuf_s(&b, dcolor(what));
-	vbuf_s(&b, what);
-	vbuf_s(&b, ": ");
+		vbuf_s(b, dcolor(what));
+	vbuf_s(b, what);
+	vbuf_s(b, ": ");
 	if (p->color)
-		vbuf_s(&b, note ? DC_RESET : DC_RESET DC_BOLD);
-	vbuf_s(&b, msg);
+		vbuf_s(b, note ? DC_RESET : DC_RESET DC_BOLD);
+	vbuf_s(b, d->msg);
+	if (d->flag)
+		vbuf_f(b, " [%s-W%s]", d->werror ? "-Werror," : "", d->flag);
 	if (p->color)
-		vbuf_s(&b, DC_RESET);
-	vbuf_s(&b, "\n");
+		vbuf_s(b, DC_RESET);
+	vbuf_s(b, "\n");
 	if (has && !p->o->diag_nocaret && d->loc - e->base < e->f->size)
-		snippet(p, &b, e, d);
+		snippet(p, b, e, d);
+}
+
+void pp_diag_emit(pp *p, vdiag *d)
+{
+	int fd = p->o->errfd ? p->o->errfd : 2;
+	vdiag *top = d;
+	vbuf b = { 0 };
+
+	if (d->level == VDL_NOTE && p->dtail)
+		kid_add(top = p->dtail, d);	/* a note reported after its diagnostic */
+	else {
+		if (p->dtail)
+			p->dtail->next = d;
+		else
+			p->dhead = d;
+		p->dtail = d;
+	}
+	macro_adjust(p, top, d);
+	if (!top->emitted)
+		render_text(p, &b, top), top->emitted = 1;
+	for (vdiag *k = top->kids; k; k = k->next)
+		if (!k->emitted)
+			render_text(p, &b, k), k->emitted = 1;
 	(void)!write(fd, b.p, b.n);
 	free(b.p);
-	if (what[0] == 'e' || what[0] == 'f')
+	if (d->level >= VDL_ERROR)
 		p->errors++;
-	else if (what[0] == 'w')
+	else if (d->level == VDL_WARNING)
 		p->warns++;
-	if (what[0] == 'f' && !p->o->fatal_continue) {
+	if (d->level == VDL_FATAL && !p->o->fatal_continue) {
 		if (p->fatal_jb)
 			longjmp(*p->fatal_jb, 1);
 		exit(1);
 	}
 }
 
+/* ---------------- the pp_dinfo wrappers ---------------- */
+
+void pp_vdiagx(pp *p, const pp_dinfo *di, const char *fmt, va_list ap)
+{
+	vdiag *d = pp_diag_vbegin(p, level_of(di->what), di->loc, fmt, ap);
+
+	for (int i = 0; i < di->nr; i++)
+		pp_diag_label(p, d, di->r[i].b, di->r[i].e, NULL);
+	for (int i = 0; i < di->nfx; i++)
+		pp_diag_fix(p, d, di->fx[i].b, di->fx[i].e, di->fx[i].s, VDA_UNSPEC);
+	pp_diag_macro(d, di->ms, di->mlen);
+	pp_diag_emit(p, d);
+}
+
 void pp_vdiag(pp *p, uint32_t loc, const char *what, const char *fmt, va_list ap)
 {
-	pp_span r;
-	pp_dinfo d = { what, loc, &r, 0, NULL, 0, NULL, 0 };
-
-	pp_vdiagx(p, &d, fmt, ap);
+	pp_diag_emit(p, pp_diag_vbegin(p, level_of(what), loc, fmt, ap));
 }
 
 int pp_warnings(const pp *p) { return p->warns; }

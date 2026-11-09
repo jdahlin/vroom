@@ -338,9 +338,19 @@ VPRIV int directive(pp *p, ctx *c, ptok *out)
 			f = &c->vt[b + 1];
 		else
 			f = l + 1;
-		pp_diag(p, nloc, d->kind == D_ERROR ? "error" : "warning", "%.*s%s",
-		     e - b > 1 ? (int)(l->off + l->len - f->off) : 0, e - b > 1 ? c->src + f->off : "",
-		     d->kind == D_WARNING ? " [-W#warnings]" : "");
+		{
+			int lv = d->kind == D_ERROR ? VDL_ERROR : pp_diag_wlevel(p, "#warnings", true, NULL, UINT32_MAX);
+			vdiag *r;
+
+			if (lv < 0)
+				return 0;
+			r = pp_diag_begin(p, lv, nloc, "%.*s", e - b > 1 ? (int)(l->off + l->len - f->off) : 0,
+					  e - b > 1 ? c->src + f->off : "");
+			r->id = d->kind == D_ERROR ? "err_pp_hash_error" : "pp_hash_warning";
+			if (d->kind == D_WARNING)
+				pp_diag_flag(r, "#warnings"), r->werror = lv == VDL_ERROR;
+			pp_diag_emit(p, r);
+		}
 		return 0;
 	}
 	case D_LINEMARK:

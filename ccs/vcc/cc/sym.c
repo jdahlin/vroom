@@ -150,7 +150,13 @@ static uint32_t typo_sym(cc *c, uint32_t id, bool types, int kws, uint32_t *kw)
 	int n, max, best;
 	const char *s = idname(id, &n);
 	uint32_t pick = 0, kpick = 0;
+	int lim = pp_spell_limit(c->p);
 
+	if (kw)
+		*kw = 0;
+	/* clang tries 50 corrections per TU (failed ones count): each scans every symbol */
+	if (lim == -2 || (lim != -1 && c->ntypo++ >= (uint32_t)(lim ? lim : 50)))
+		return 0;
 	max = best = (n + 2) / 3;
 	for (uint32_t i = 1; i < c->nsym; i++) {
 		const sym *y = &c->syms[i];
@@ -214,6 +220,7 @@ VPRIV uint32_t undeclared(cc *c, const char *msg, uint32_t id, uint32_t loc, boo
 	bool mac = (tok(c)->loc == loc ? tok(c)->flags : c->prevflags) & PF_MACRO;
 	uint32_t k = 0, s = mac ? 0 : typo_sym(c, id, types, kw ? kws : 0, &k);
 	pp_span r = { loc, pp_tok_end(c->p, loc) };
+	bool tn = msg[1] == 'n';	/* "unknown type name", else "use of undeclared identifier" */
 
 	if (kw)
 		*kw = k;
@@ -223,7 +230,7 @@ VPRIV uint32_t undeclared(cc *c, const char *msg, uint32_t id, uint32_t loc, boo
 		pp_dinfo d = { "error", loc, &r, 1, NULL, 0, t, (uint32_t)m };
 
 		error_limit(c), c->errors++, c->ndiag++;
-		pp_diagx(c->p, &d, "%s '%.*s'", msg, IDF(id));
+		pp_diagx(c->p, &d, tn ? "unknown type name '%.*s'" : "use of undeclared identifier '%.*s'", IDF(id));
 		return 0;
 	}
 
@@ -235,12 +242,14 @@ VPRIV uint32_t undeclared(cc *c, const char *msg, uint32_t id, uint32_t loc, boo
 
 		memcpy(fs, t, m), fs[m] = 0;
 		fx = (pp_fixit){ r.b, r.e, fs };
-		report(c, "error", loc, &r, 1, &fx, 1, "%s '%.*s'; did you mean '%s'?", msg, IDF(id), fs);
+		report(c, "error", loc, &r, 1, &fx, 1, tn ? "unknown type name '%.*s'; did you mean '%s'?"
+		       : "use of undeclared identifier '%.*s'; did you mean '%s'?", IDF(id), fs);
 		if (s)
 			note(c, c->syms[s].loc, "'%s' declared here", fs);
 	} else {
 		/* clang: a caret alone under an unknown type name, a range under an undeclared identifier */
-		report(c, "error", loc, &r, types ? 0 : 1, NULL, 0, "%s '%.*s'", msg, IDF(id));
+		report(c, "error", loc, &r, types ? 0 : 1, NULL, 0, tn ? "unknown type name '%.*s'"
+		       : "use of undeclared identifier '%.*s'", IDF(id));
 	}
 	return s;
 }

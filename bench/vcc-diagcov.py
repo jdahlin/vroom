@@ -26,7 +26,8 @@ DIRS = ['pp', 'cc', 'emit', 'arch/a64/emit', 'driver', 'lex']
 # function: (index of the format argument, kind or index of the kind argument)
 CALLS = {'cc_error': (2, 'error'), 'fatal': (2, 'error'), 'note': (2, 'note'), 'report': (7, 1),
          'cc_warnx': (9, 'warning'), 'pp_diag': (3, 2), 'pp_diagx': (2, '?'), 'pp_warnx': (5, 'warning'),
-         'ediag': (2, '?'), 'eerror': (2, 'error'), 'efatal': (2, 'error')}
+         'ediag': (2, '?'), 'eerror': (2, 'error'), 'efatal': (2, 'error'), 'macro_note_': (3, 'note'),
+         'pp_diag_begin': (3, '?'), 'pp_diag_note': (3, 'note')}
 MARK = '\x01'		# a printf conversion in a vcc format
 
 
@@ -70,6 +71,16 @@ def literal(a):
     return ''.join(re.findall(r'"((?:[^"\\]|\\.)*)"', a)).encode().decode('unicode_escape')
 
 
+def literals(a):
+    """the string literals an argument is made of: one, or both arms of a ?: of literals"""
+    one = literal(a)
+    if one is not None:
+        return [one]
+    a = re.sub(r'/\*.*?\*/', '', a, flags=re.S).strip()
+    m = re.fullmatch(r'[^"?]*\?\s*((?:"(?:[^"\\]|\\.)*"\s*)+):\s*((?:"(?:[^"\\]|\\.)*"\s*)+)', a, re.S)
+    return [literal(m.group(1)), literal(m.group(2))] if m else []
+
+
 def vcc_messages():
     out = []
     call = re.compile(r'\b(' + '|'.join(CALLS) + r')\s*\(')
@@ -82,18 +93,21 @@ def vcc_messages():
                 src = open(path, errors='replace').read()
                 for m in call.finditer(src):
                     pre = src[max(0, m.start() - 40):m.start()]
-                    if re.search(r'(void|bool|int)\s+\**$', pre):	# the definition itself
+                    if re.search(r'(void|bool|int|vdiag)\s+\**$', pre):	# the definition itself
                         continue
                     name = m.group(1)
                     args, _ = split_args(src, m.end() - 1)
                     fi, ki = CALLS[name]
                     if len(args) <= fi:
                         continue
-                    fmt = literal(args[fi])
+                    if re.fullmatch(r'\s*(fmt|msg)\s*', args[fi]):	# a wrapper passing its format on
+                        continue
+                    fmts = literals(args[fi])
                     kind = ki if isinstance(ki, str) else (literal(args[ki]) or '?')
                     line = src.count('\n', 0, m.start()) + 1
-                    out.append({'where': f'{os.path.relpath(path, V)}:{line}', 'call': name, 'kind': kind,
-                                'fmt': fmt})
+                    for fmt in fmts or [None]:
+                        out.append({'where': f'{os.path.relpath(path, V)}:{line}', 'call': name, 'kind': kind,
+                                    'fmt': fmt})
     return out
 
 

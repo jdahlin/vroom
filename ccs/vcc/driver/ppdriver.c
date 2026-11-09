@@ -661,7 +661,7 @@ int ppd_run(int argc, char **argv, const ppd_env *env)
 		   **all = dirv + 4 * per;
 	int nq = 0, ni = 0, ns = 0, na = 0, n = 0;
 	const char *cmp = NULL, *out = NULL, *main_file = NULL, *depfile = NULL, *deptarget = NULL;
-	int errfd = env->errfd, status = 0, md = 0, dcolor = 0, nocaret = 0, elimit = 0, nwargs = 0;
+	int errfd = env->errfd, status = 0, md = 0, dcolor = 0, nocaret = 0, elimit = 0, slimit = 0, nwargs = 0;
 	const char **wargs = NULL;
 	char pmapbuf[4096];
 	jmp_buf jb;
@@ -701,6 +701,8 @@ int ppd_run(int argc, char **argv, const ppd_env *env)
 		if (!strcmp(a, "-fdiagnostics-color=auto")) { dcolor = 0; continue; }
 		if (!strcmp(a, "-fno-caret-diagnostics")) { nocaret = 1; continue; }
 		if (!strcmp(a, "-fcaret-diagnostics")) { nocaret = 0; continue; }
+		if (!strncmp(a, "-fspell-checking-limit=", 23)) { slimit = atoi(a + 23); slimit = slimit ? slimit : -1; continue; }
+		if (!strcmp(a, "-fno-spell-checking")) { slimit = -2; continue; }
 		if (!strncmp(a, "-ferror-limit=", 14)) { elimit = atoi(a + 14); elimit = elimit ? elimit : -1; continue; }
 		if (!strncmp(a, "-std=", 5)) {
 			/* clang's spellings: c89 c90 iso9899:1990 gnu89 gnu90 c99 gnu99 c11 gnu11 c17 c18 gnu17 c23 c2x gnu23 ... */
@@ -957,6 +959,7 @@ int ppd_run(int argc, char **argv, const ppd_env *env)
 	po.diag_color = dcolor;
 	po.diag_nocaret = nocaret;
 	po.error_limit = elimit;
+	po.spell_limit = slimit;
 	po.wargs = wargs, po.nwargs = nwargs;
 	po.asm_mode = asm_mode;
 	if (pmap) {

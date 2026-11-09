@@ -98,6 +98,7 @@ struct cc {
 	struct recov *rec;	/* the innermost parser recovery point (diag.c), NULL: errors end the TU */
 	bool for_head;		/* parsing a for (...;...;...) header: clang's form of "expected ';'" */
 	int ibr;		/* initializer '{'s open: after an error the skip closes them first */
+	uint32_t ntypo;		/* typo corrections tried (clang's -fspell-checking-limit) */
 	uint32_t miss_loc;	/* where the last "expected ')'" was: one per place */
 	uint32_t decl_name, decl_loc, decl_depth;	/* the last declarator's name, where, at which scope depth */
 

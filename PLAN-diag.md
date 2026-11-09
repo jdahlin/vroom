@@ -201,6 +201,28 @@ Tio lager; varje steg nedan säger vilka det berör.
   anropsställena kan flyttas över ett i taget.  `diagids.inc` genereras ur `.td`-filerna
   (bara C-hinken och de id vcc använder), som `ppdata*.inc`.
   *Validera:* lager 1 (66/66), 6, 7.
+  *Klart 2026-11-09.*  `vdiag` i `pp/pp.h`: id, format, flagga, meddelande, primär plats och
+  etikett, spann med etiketter, fix-its med tillämplighet (`VDA_MACHINE/MAYBE/PLACEHOLDER`),
+  makrots token, barn (noter) och `track` (för D1.3).  Byggs i TU:ns `perm`-arena med
+  `pp_diag_begin/label/fix/note/emit`; `pp_diag_records()` ger TU:ns poster i ordning.  En
+  not som rapporteras efter sin diagnos blir dess barn; "expanded from macro" läggs direkt
+  efter den diagnos den hör till.  Textutskriften läser bara posten (`render_text`), så
+  JSON/SARIF (D3) får samma innehåll.  `report`, `note`, `cc_warnx`, `pp_warnx`,
+  `pp_diagx` och `pp_vdiag` är tunna omslag; flaggan ligger i posten, inte i texten.
+  Konverteringsfelen som clang har som varningar med fel som standard (`-Wint-conversion`,
+  `-Wincompatible-pointer-types`) och `#error`/`#warning` sätter id och flagga själva.
+  `diagids.inc` (`bench/gen-diagids.py`, incheckad): varje format vcc rapporterar får
+  clangs namn när texten matchar (som `vcc-diagcov.py`, även `?:`-format) och annars
+  `vcc_` + formatets ord; posten slår upp formatet (binärsökning, bara på felvägen).  270
+  format, 240 id, 72 `vcc_*`.  `--check` säger om tabellen är inaktuell.
+  Lager 7 hittade en kvadratisk väg som fanns före posten: varje odeklarerat namn sökte
+  typo-rättning över alla symboler (40 000 fel: 7,3 s).  Clangs `-fspell-checking-limit`
+  (50 försök per TU, misslyckade räknas; `-fno-spell-checking`) införd, samma antal
+  rättningar som clang; nu 0,19 s.  `vcc-stress.py` har fallet (`errors-40k`, budget 3 s).
+  *Validerat:* `vcc-diag.py` 78/78; `vcc-sema.py` batch 878/879, warn 879/879;
+  `vcc-ctests.py` 1740/1740; `vcc-stress.py` 23/23; `vcc-driver.py` 41/41; `vccd-test.py`
+  19/19; PostgreSQL med vcc: 1 504 filer, `meson test` 81 ok, 0 fel; `vbench.py gate` ok
+  (fe +0,94 %).
 - **D1.2 textrenderaren.**  Dagens `vdiagx_`/`snippet` flyttas till en renderare som tar
   en post; i början samma utseende som clang.  `tests/diag/` får vcc:s egen förväntade
   text (`*.stderr`, `--bless`) och `vcc-diag.py` byter till lager 1:s jämförelse, så

@@ -195,26 +195,35 @@ static void param_note(cc *c)
 		note(c, c->syms[p].loc, "passing argument to parameter here");
 }
 
-/* "... initializing 'T' with an expression of type 'F'" and the like, per context */
-static void conv_error(cc *c, uint32_t n, qty to, const char *what, const char *flag)
+/* "... initializing 'T' with an expression of type 'F'" and the like, per context: clang's
+   warnings that are errors by default (id: clang's diagnostic, flag: its -W flag) */
+static void conv_error(cc *c, uint32_t n, qty to, const char *what, const char *id, const char *flag)
 {
 	pp_span r = rng(c, n);
 	const char *f = tyname(c, N(n)->ty), *t = tyname(c, to);
+	uint32_t loc = c->cv_what == CX_PASS || c->cv_what == CX_RETURN ? r.b : c->cv_loc;
+	vdiag *d;
 
+	error_limit(c), c->errors++, c->ndiag++;
 	switch (c->cv_what) {
 	case CX_INIT:
-		report(c, "error", c->cv_loc, &r, 1, NULL, 0, "%s initializing '%s' with an expression of type '%s' [%s]", what, t, f, flag);
+		d = pp_diag_begin(c->p, VDL_ERROR, loc, "%s initializing '%s' with an expression of type '%s'", what, t, f);
 		break;
 	case CX_PASS:
-		report(c, "error", r.b, &r, 1, NULL, 0, "%s passing '%s' to parameter of type '%s' [%s]", what, f, t, flag);
-		param_note(c);
+		d = pp_diag_begin(c->p, VDL_ERROR, loc, "%s passing '%s' to parameter of type '%s'", what, f, t);
 		break;
 	case CX_RETURN:
-		report(c, "error", r.b, &r, 1, NULL, 0, "%s returning '%s' from a function with result type '%s' [%s]", what, f, t, flag);
+		d = pp_diag_begin(c->p, VDL_ERROR, loc, "%s returning '%s' from a function with result type '%s'", what, f, t);
 		break;
 	default:
-		report(c, "error", c->cv_loc, &r, 1, NULL, 0, "%s assigning to '%s' from '%s' [%s]", what, t, f, flag);
+		d = pp_diag_begin(c->p, VDL_ERROR, loc, "%s assigning to '%s' from '%s'", what, t, f);
 	}
+	d->id = id;
+	pp_diag_flag(d, flag);
+	pp_diag_label(c->p, d, r.b, r.e, NULL);
+	pp_diag_emit(c->p, d);
+	if (c->cv_what == CX_PASS)
+		param_note(c);
 }
 
 /* pointee types that clang's -Wincompatible-pointer-types accepts: compatible once
@@ -244,15 +253,17 @@ static uint32_t conv_check(cc *c, uint32_t n, qty to)
 	if (N(n)->flags & NF_ERR)
 		return n;
 	if (is_ptr(c, to) && (is_integer(c, from) || KIND(c, from) == TY_ENUM) && !is_npc(c, n) && KIND(c, from) != TY_BOOL) {
-		conv_error(c, n, to, "incompatible integer to pointer conversion", "-Wint-conversion");
+		conv_error(c, n, to, "incompatible integer to pointer conversion", "ext_typecheck_convert_int_pointer", "int-conversion");
 	} else if ((is_integer(c, to) || KIND(c, to) == TY_ENUM) && KIND(c, to) != TY_BOOL && is_ptr(c, from)) {
-		conv_error(c, n, to, "incompatible pointer to integer conversion", "-Wint-conversion");
+		conv_error(c, n, to, "incompatible pointer to integer conversion", "ext_typecheck_convert_pointer_int", "int-conversion");
 	} else if (is_ptr(c, to) && is_ptr(c, from) && !(T(c, to)->flags & TF_BLOCK) && !(T(c, from)->flags & TF_BLOCK) &&
 		   !ptr_ok(c, T(c, to)->base, T(c, from)->base)) {
 		if (is_func(c, T(c, to)->base) && is_func(c, T(c, from)->base))
-			conv_error(c, n, to, "incompatible function pointer types", "-Wincompatible-function-pointer-types");
+			conv_error(c, n, to, "incompatible function pointer types", "ext_typecheck_convert_incompatible_function_pointer",
+				   "incompatible-function-pointer-types");
 		else
-			conv_error(c, n, to, "incompatible pointer types", "-Wincompatible-pointer-types");
+			conv_error(c, n, to, "incompatible pointer types", "ext_typecheck_convert_incompatible_pointer",
+				   "incompatible-pointer-types");
 	} else {
 		return n;
 	}

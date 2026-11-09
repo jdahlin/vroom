@@ -41,8 +41,8 @@ def nest(open_, close, n, inner):
 #        main file, extra args)
 def cases(d):
     C = {}
-    def case(name, expect, files, main, args=(), regex=None, xfail=None):
-        C[name] = dict(expect=expect, regex=regex, xfail=xfail, files=files, main=main, args=list(args))
+    def case(name, expect, files, main, args=(), regex=None, xfail=None, budget=None):
+        C[name] = dict(expect=expect, regex=regex, xfail=xfail, files=files, main=main, args=list(args), budget=budget)
 
     # front end recursion: vstack.h ends the TU before the stack runs out (clang itself crashes here)
     case('paren-200k', 'error', {'a.c': 'int x = ' + nest('(', ')', 200000, '1') + ';\n'}, 'a.c')
@@ -79,6 +79,10 @@ def cases(d):
     case('asm-rept-200M', 'any', {'a.S': '.rept 200000000\nnop\n.endr\n'}, 'a.S')
     case('asm-space-512G', 'any', {'a.S': '.space 0x7fffffffff\n'}, 'a.S')
     case('asm-macro-recursion', 'error', {'a.S': '.macro m\nm\n.endm\nm\n'}, 'a.S')
+    # diagnostics (PLAN-diag lager 7): 40 000 errors in one TU stay linear (typo correction scans
+    # every symbol: clang's -fspell-checking-limit of 50 attempts bounds it; records are in an arena)
+    case('errors-40k', 'error', {'a.c': 'int counter;\n' + ''.join(f'int v{i} = countr + undeclared{i};\n' for i in range(40000))},
+         'a.c', ['-ferror-limit=0'], budget=3)
     # control: a normal TU
     case('normal', 'ok', {'a.c': 'int f(int a) { return a * 2 + 1; }\n'}, 'a.c')
     return C
@@ -165,6 +169,7 @@ def main():
             rc, dt, err = run(c, d, vccd)
             server_ok = vccd.alive() if vccd else True
             ok, why = verdict(c, rc, err, server_ok)
+            if ok and c['budget'] and dt > c['budget']: ok, why = False, f'{dt:.1f} s, budget {c["budget"]} s'
             if c['xfail'] and not ok: st = 'xfail'; xfails += 1
             elif c['xfail'] and ok: st = 'XPASS'; fails += 1; why += f' -- remove xfail ({c["xfail"]})'
             elif ok: st = 'pass'; passes += 1

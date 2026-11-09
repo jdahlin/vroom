@@ -21,7 +21,7 @@ VPRIV void error_limit(cc *c)
 VPRIV void diag(cc *c, uint32_t loc, const char *what, const char *fmt, va_list ap)
 {
 	c->ndiag++;
-	pp_vdiag(c->p, loc, what, fmt, ap);
+	pp_diag_emit(c->p, pp_diag_vbegin(c->p, what[0] == 'e' ? VDL_ERROR : what[0] == 'w' ? VDL_WARNING : VDL_NOTE, loc, fmt, ap));
 }
 
 __attribute__((format(printf, 3, 4)))
@@ -238,31 +238,43 @@ VPRIV void rec_restore(cc *c, recov *r, int mode)
 	r->again = tok(c)->loc;	/* where parsing resumes */
 }
 
+/* a record with clang's ranges and fix-its */
+static vdiag *rec(cc *c, int level, uint32_t loc, const pp_span *r, int nr, const pp_fixit *fx, int nfx,
+		  const char *fmt, va_list ap)
+{
+	vdiag *d = pp_diag_vbegin(c->p, level, loc, fmt, ap);
+
+	for (int i = 0; i < nr; i++)
+		pp_diag_label(c->p, d, r[i].b, r[i].e, NULL);
+	for (int i = 0; i < nfx; i++)
+		pp_diag_fix(c->p, d, fx[i].b, fx[i].e, fx[i].s, VDA_UNSPEC);
+	return d;
+}
+
 /* a diagnostic with ranges and fix-its (clang's rendering, pp.c) */
 __attribute__((format(printf, 8, 9)))
 VPRIV void report(cc *c, const char *what, uint32_t loc, const pp_span *r, int nr,
 		   const pp_fixit *fx, int nfx, const char *fmt, ...)
 {
-	pp_dinfo d = { what, loc, r, nr, fx, nfx, NULL, 0 };
+	int lv = what[0] == 'e' ? VDL_ERROR : what[0] == 'w' ? VDL_WARNING : VDL_NOTE;
 	va_list ap;
 
-	if (!strcmp(what, "error"))
+	if (lv == VDL_ERROR)
 		error_limit(c), c->errors++;
-	if (strcmp(what, "note"))
+	if (lv != VDL_NOTE)
 		c->ndiag++;
 	va_start(ap, fmt);
-	pp_vdiagx(c->p, &d, fmt, ap);
+	pp_diag_emit(c->p, rec(c, lv, loc, r, nr, fx, nfx, fmt, ap));
 	va_end(ap);
 }
 
 __attribute__((format(printf, 3, 4)))
 VPRIV void note(cc *c, uint32_t loc, const char *fmt, ...)
 {
-	pp_dinfo d = { "note", loc, NULL, 0, NULL, 0, NULL, 0 };
 	va_list ap;
 
 	va_start(ap, fmt);
-	pp_vdiagx(c->p, &d, fmt, ap);
+	pp_diag_emit(c->p, pp_diag_vbegin(c->p, VDL_NOTE, loc, fmt, ap));
 	va_end(ap);
 }
 
@@ -284,14 +296,19 @@ __attribute__((format(printf, 10, 11)))
 VPRIV bool cc_warnx(cc *c, const char *flag, bool on, const char *const *groups, uint32_t loc,
 		  const pp_span *r, int nr, const pp_fixit *fx, int nfx, const char *fmt, ...)
 {
-	pp_dinfo d = { "warning", loc, r, nr, fx, nfx, NULL, 0 };
-	char msg[1024];
+	int lv = pp_diag_wlevel(c->p, flag, on, groups, loc);
+	vdiag *d;
 	va_list ap;
 
+	if (lv < 0)
+		return false;
 	va_start(ap, fmt);
-	vsnprintf(msg, sizeof(msg), fmt, ap);
+	d = rec(c, lv, loc, r, nr, fx, nfx, fmt, ap);
 	va_end(ap);
-	return pp_warnx(c->p, flag, on, groups, &d, "%s", msg);
+	pp_diag_flag(d, flag);
+	d->werror = lv == VDL_ERROR;
+	pp_diag_emit(c->p, d);
+	return true;
 }
 
 VPRIV const char *idname(uint32_t id, int *len)

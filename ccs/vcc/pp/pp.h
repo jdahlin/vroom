@@ -58,6 +58,7 @@ typedef struct pp_opts {
 	const char *const *wargs;	/* -W..., -w options in command-line order */
 	int nwargs;
 	int error_limit;		/* -ferror-limit=: 0 default (20), -1 none */
+	int spell_limit;		/* -fspell-checking-limit=: 0 default (50), -1 none; -2 -fno-spell-checking */
 	int has_epoch;			/* SOURCE_DATE_EPOCH set: __DATE__/__TIME__/__TIMESTAMP__ from epoch, UTC */
 	long long epoch;
 	int trigraphs;			/* strict -std (not c23) or -trigraphs: ??x replaced before lexing */
@@ -141,6 +142,64 @@ int pp_wstate(const pp *p, const char *flag, bool on, const char *const *groups)
 /* report a warning of flag (clang's " [-Wflag]" / " [-Werror,-Wflag]" suffix); false if off */
 __attribute__((format(printf, 6, 7)))
 bool pp_warnx(pp *p, const char *flag, bool on, const char *const *groups, pp_dinfo *d, const char *fmt, ...);
+/*
+ * Diagnostic records (PLAN-diag.md D1.1).  Every diagnostic is built as a
+ * record in the TU's arena and rendered from it (text, JSON, SARIF); the
+ * pp_diag* calls above are thin wrappers.  A note reported after its
+ * diagnostic becomes that diagnostic's child.  Records are only built on the
+ * error path; nothing here runs for a TU without diagnostics.
+ *
+ *   vdiag *d = pp_diag_begin(p, VDL_ERROR, loc, "expected '%s'", "x");
+ *   pp_diag_label(p, d, b, e, "this");		// a range (label NULL: plain ~)
+ *   pp_diag_fix(p, d, b, e, ";", VDA_MACHINE);	// replace [b, e)
+ *   pp_diag_note(p, d, loc2, "to match this '('");
+ *   pp_diag_emit(p, d);
+ */
+enum { VDL_NOTE, VDL_REMARK, VDL_WARNING, VDL_ERROR, VDL_FATAL };
+/* a suggestion's applicability (rustc): safe to apply, maybe, has placeholders */
+enum { VDA_UNSPEC, VDA_MACHINE, VDA_MAYBE, VDA_PLACEHOLDER };
+typedef struct vdspan { uint32_t b, e; const char *label; } vdspan;
+typedef struct vdfix { uint32_t b, e; const char *s; uint8_t app; } vdfix;
+typedef struct vdiag vdiag;
+struct vdiag {
+	vdiag *next;		/* the next record (top level), or the next child */
+	vdiag *kids, *klast;	/* notes, in order */
+	const char *id;		/* clang's diagnostic name or vcc_*; NULL: none yet */
+	const char *fmt;	/* the format the message came from (the id's key) */
+	const char *flag;	/* warning flag without "-W", or NULL */
+	const char *msg;	/* the message, without the flag */
+	const char *label;	/* the primary location's label, or NULL */
+	const char *track;	/* vcc's source location that reported it (VCC_TRACK_DIAG) */
+	const char *ms;		/* the diagnosed token's spelling when it came from a macro */
+	vdspan *span;
+	vdfix *fix;
+	uint32_t loc;		/* primary location; UINT32_MAX: none */
+	uint32_t mlen, nspan, nfix, cspan, cfix;
+	uint8_t level;		/* VDL_* as rendered (a -Werror warning is VDL_ERROR) */
+	uint8_t werror;		/* a warning promoted by -Werror */
+	uint8_t emitted;
+};
+__attribute__((format(printf, 4, 5)))
+vdiag *pp_diag_begin(pp *p, int level, uint32_t loc, const char *fmt, ...);
+vdiag *pp_diag_vbegin(pp *p, int level, uint32_t loc, const char *fmt, va_list ap);
+void pp_diag_label(pp *p, vdiag *d, uint32_t b, uint32_t e, const char *label);
+void pp_diag_fix(pp *p, vdiag *d, uint32_t b, uint32_t e, const char *s, int app);
+__attribute__((format(printf, 4, 5)))
+vdiag *pp_diag_note(pp *p, vdiag *d, uint32_t loc, const char *fmt, ...);
+/* the token spelling when loc is a macro expansion's (clang's caret at the invocation) */
+void pp_diag_macro(vdiag *d, const char *ms, uint32_t mlen);
+/* a warning's flag (" [-Wflag]"; werror: " [-Werror,-Wflag]") */
+void pp_diag_flag(vdiag *d, const char *flag);
+/* the level a warning of flag is reported at, at loc: VDL_WARNING, VDL_ERROR (-Werror), or -1 (off) */
+int pp_diag_wlevel(pp *p, const char *flag, bool on, const char *const *groups, uint32_t loc);
+/* render (and keep) the record; a fatal error ends the TU */
+void pp_diag_emit(pp *p, vdiag *d);
+/* the TU's records so far, in order (children under kids) */
+const vdiag *pp_diag_records(const pp *p);
+/* level name as clang prints it ("error", "fatal error", ...) */
+const char *pp_diag_level(int level);
+/* -fspell-checking-limit= as given (0: default, -1: none, -2: off) */
+int pp_spell_limit(const pp *p);
 /* -ferror-limit= as given (0: default, -1: none) */
 int pp_error_limit(const pp *p);
 /* "N errors generated." (clang's summary), if there were any */
