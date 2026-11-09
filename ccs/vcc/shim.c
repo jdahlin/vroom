@@ -220,6 +220,7 @@ int main(int argc, char **argv)
 		if (!vccd_path(v, sizeof(v)))
 			h->build = vroom_build_id(v);
 	}
+	h->pgrp = (uint32_t)getpgrp();
 	h->magic = VROOM_MAGIC;
 	h->argc = argc;
 	h->envc = e - environ + 1;

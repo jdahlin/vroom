@@ -107,7 +107,7 @@ def run(c, d, vccd):
     out = f'{d}/out.o'
     argv = TARGET + c['args'] + ['-c', '-o', out, c['main']]
     if vccd:
-        cmd, env = [f'{vd.R}/build/ccs/vcc'] + argv, dict(os.environ, VCC_SOCK=vccd.sock)
+        cmd, env = [f'{vd.BIN}/vcc'] + argv, dict(os.environ, VCC_SOCK=vccd.sock)
     else:
         cmd, env = [vd.VPP] + argv, None
     t0 = time.time()

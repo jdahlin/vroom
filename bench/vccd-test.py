@@ -22,11 +22,11 @@ import array, os, re, signal, socket, stat, struct, subprocess, sys, tempfile, t
 spec = importlib.util.spec_from_file_location('vd', os.path.join(os.path.dirname(os.path.abspath(__file__)), 'vcc-diff.py'))
 vd = importlib.util.module_from_spec(spec); spec.loader.exec_module(vd)
 
-SHIM = f'{vd.R}/build/ccs/vcc'
+SHIM = f'{vd.BIN}/vcc'	# next to the vccd under test: the build ids match
 MAGIC = 0x326f6f72
 
 def hdr(magic, argc, envc, plen, build=0):
-    return struct.pack('<IIIIQ', magic, argc, envc, plen, build)
+    return struct.pack('<IIIIQII', magic, argc, envc, plen, build, 0, 0)
 TARGET = ['--target=aarch64-linux-gnu', '-nostdinc', '-ffreestanding']
 TESTS = []
 
@@ -59,7 +59,8 @@ class Vccd:
         """compile through the shim: (status, stderr)"""
         pre = (lambda: os.umask(umask)) if umask is not None else None
         p = subprocess.run([SHIM] + TARGET + list(extra) + ['-c', '-o', out, src], cwd=cwd, capture_output=True,
-                           timeout=timeout, env=dict(os.environ, VCC_SOCK=self.sock), preexec_fn=pre)
+                           timeout=timeout, env=dict(os.environ, VCC_SOCK=self.sock), preexec_fn=pre,
+                           process_group=0)	# one build per call (a shell gives each make its own group)
         return p.returncode, p.stderr.decode(errors='replace')
 
 def raw_request(sock, cwd, argv, env=(), fds=(0, 1, 2), header=None, payload=None, close_early=False, timeout=10):
@@ -293,7 +294,7 @@ def fresh(d, src, out):
         return obj(d, out)
     finally: v.stop()
 
-@test(xfail='Caches never invalidated (edited header)')
+@test()
 def edited_header_rebuilds():
     v = Vccd()
     try:
@@ -303,7 +304,7 @@ def edited_header_rebuilds():
         check(b == fresh(d, src, '3.o'), 'second build differs from a fresh server')
     finally: v.stop()
 
-@test(xfail='Caches never invalidated (edited main file)')
+@test()
 def edited_main_file_rebuilds():
     v = Vccd()
     try:
@@ -312,7 +313,7 @@ def edited_main_file_rebuilds():
         check(a != b, 'the object did not change after the source was edited')
     finally: v.stop()
 
-@test(xfail='Caches never invalidated (header created after a miss)')
+@test()
 def header_created_after_miss():
     v = Vccd()
     try:
@@ -322,7 +323,7 @@ def header_created_after_miss():
         check(a != b, 'the new header was not found in the second build')
     finally: v.stop()
 
-@test(xfail='Caches never invalidated (header created in an earlier -I directory)')
+@test()
 def header_shadowed_by_new_file():
     """a new file earlier in the search path takes over from the one found before"""
     v = Vccd()

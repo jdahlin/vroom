@@ -26,6 +26,8 @@ struct vroom_req_hdr {
 	uint32_t envc;
 	uint32_t payload_len;
 	uint64_t build;	/* vroom_build_id of the vccd binary the shim sits next to (0: unknown, no check) */
+	uint32_t pgrp;	/* the client's process group: one per make invocation from a shell (0: unknown) */
+	uint32_t pad;
 };
 
 /* a build id: size and mtime of the vccd binary at path (0 when it cannot be read) */

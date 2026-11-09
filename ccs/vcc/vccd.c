@@ -70,6 +70,8 @@
 #include "caps.h"
 #include "ccsnap.h"
 #include "pp.h"
+#include "lex.h"
+#include "dircache.h"
 #include "ppdriver.h"
 #include "fixdep.h"
 #include "ar.h"
@@ -111,7 +113,51 @@ static void queue_push(int fd)
 	pthread_mutex_unlock(&qlock);
 }
 
-static _Atomic int n_active;	/* connections taken by a worker, not yet answered */
+static _Atomic int n_active;
+
+/*
+ * Builds.  The caches answer "what is at this path" for the server's life;
+ * between builds files change.  A request from a new process group is a new
+ * make invocation: before it runs, the running jobs finish and the file,
+ * directory and include caches are emptied (old entries stay allocated, so
+ * nothing in flight dangles).  Jobs of the same group never wait.
+ */
+static pthread_mutex_t gen_mu = PTHREAD_MUTEX_INITIALIZER;
+static pthread_cond_t gen_cv = PTHREAD_COND_INITIALIZER;
+static uint32_t gen_pgrp;
+static int gen_running, gen_flushing;
+static _Atomic unsigned long n_flush;
+
+static void gen_enter(uint32_t pgrp)
+{
+	pthread_mutex_lock(&gen_mu);
+	while (gen_flushing)
+		pthread_cond_wait(&gen_cv, &gen_mu);
+	if (pgrp && pgrp != gen_pgrp) {
+		if (gen_pgrp) {
+			gen_flushing = 1;
+			while (gen_running)
+				pthread_cond_wait(&gen_cv, &gen_mu);
+			vlex_cache_flush();
+			vdir_flush();
+			pp_include_flush();
+			atomic_fetch_add(&n_flush, 1);
+			gen_flushing = 0;
+			pthread_cond_broadcast(&gen_cv);
+		}
+		gen_pgrp = pgrp;
+	}
+	gen_running++;
+	pthread_mutex_unlock(&gen_mu);
+}
+
+static void gen_leave(void)
+{
+	pthread_mutex_lock(&gen_mu);
+	if (!--gen_running)
+		pthread_cond_broadcast(&gen_cv);
+	pthread_mutex_unlock(&gen_mu);
+}	/* connections taken by a worker, not yet answered */
 
 static int queue_pop(void)
 {
@@ -945,10 +991,10 @@ static int run_sh(const struct req *r)
 
 static void print_counts(void)
 {
-	fprintf(stderr, "vccd: %lu probes, %lu -E, %lu compiled by vcc, %lu fell back to clang, %lu forwarded in all, %lu spawned, %lu ar, %lu recipes run, %lu passed to sh\n",
+	fprintf(stderr, "vccd: %lu probes, %lu -E, %lu compiled by vcc, %lu fell back to clang, %lu forwarded in all, %lu spawned, %lu ar, %lu recipes run, %lu passed to sh; %lu builds (cache flushes)\n",
 		atomic_load(&n_probe), atomic_load(&n_pp), atomic_load(&n_cc), atomic_load(&n_fallback),
 		atomic_load(&n_fwd), atomic_load(&n_spawn), atomic_load(&n_ar),
-		atomic_load(&n_sh), atomic_load(&n_sh_decl));
+		atomic_load(&n_sh), atomic_load(&n_sh_decl), atomic_load(&n_flush));
 	{	/* the shared caches, as vpp --batch prints them */
 		char hs[512];
 		struct rusage ru;
@@ -992,10 +1038,13 @@ static void *worker_main(void *arg)
 		if (recv_req(&w, conn, &r)) {
 			struct vroom_req_hdr *h = (struct vroom_req_hdr *)w.raw;
 
-			if (h->build && self_build && h->build != self_build)
+			if (h->build && self_build && h->build != self_build) {
 				status = (int32_t)VROOM_STATUS_MISMATCH, kind = "mismatch";
-			else
+			} else {
+				gen_enter(h->pgrp);
 				status = handle(&r, &kind);
+				gen_leave();
+			}
 		}
 		(void)write_full(conn, (char *)&status, sizeof(status));
 		close(conn);

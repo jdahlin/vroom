@@ -135,6 +135,14 @@ static const vlex_file *find_include_(pp *p, const ctx *from, const char *name, 
 static _Atomic(incent *) inc_tab[1u << INC_BITS];
 static _Atomic uint32_t inc_n;
 
+/* a new build: forget every include answer (pp.h) */
+void pp_include_flush(void)
+{
+	for (size_t i = 0; i < (1u << INC_BITS); i++)
+		atomic_store_explicit(&inc_tab[i], NULL, memory_order_release);
+	atomic_store(&inc_n, 0);
+}
+
 static inline bool inc_same(const incent *e, uint64_t h, uint32_t sig, uint32_t fsig, int32_t mode, const char *k,
 			    size_t kl)
 {

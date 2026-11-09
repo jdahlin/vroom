@@ -90,6 +90,9 @@ int pp_text(pp *p, const char **out, size_t *len);
 void pp_hc_stats(char *buf, size_t n);
 /* errors reported so far */
 int pp_errors(const pp *p);
+/* a new build (vccd): forget the include answers; with vlex_cache_flush and
+ * vdir_flush, every file is looked up and read again.  No TU may be running. */
+void pp_include_flush(void);
 
 /* is loc in a system header */
 int pp_in_system_header(const pp *p, uint32_t loc);

@@ -88,6 +88,7 @@ size_t vlex_spell(const char *src, const vtok *t, char *buf);
  * and in vlex_prefetch().
  */
 const vlex_file *vlex_get(const char *path, size_t pathlen);
+void vlex_cache_flush(void);	/* only with no lookups in flight */
 /*
  * Read-ahead hint: path will probably be needed.  I/O threads open and read
  * it, so that vlex_get() only lexes.  Never required for correctness.

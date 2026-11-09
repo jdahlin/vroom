@@ -1485,6 +1485,14 @@ static void publish(centry *e, bool ok)
 
 const vlex_file *(*vlex_get_hook)(const char *path, size_t len);
 
+/* forget every file (a new build: vccd, idle): later lookups read and lex
+ * again.  Old entries are not freed, so pointers into them stay valid. */
+void vlex_cache_flush(void)
+{
+	for (size_t i = 0; i < (1u << CBITS); i++)
+		atomic_store_explicit(&ctab[i], NULL, memory_order_release);
+}
+
 const vlex_file *vlex_get(const char *path, size_t len)
 {
 	bool ins;

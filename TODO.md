@@ -437,7 +437,12 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
   *Validate:* T11 run through vccd (`SOURCE_DATE_EPOCH=0` gives
   `__DATE__ "Jan  1 1970"`; `CPATH` adds a directory; a client umask 077
   gives mode 0600 outputs).
-- [ ] **Caches never invalidated** [R].  Token cache keyed by path, caches
+- [x] **Caches never invalidated** [R].  *Done:* a build is a client process
+  group (the shim sends getpgrp(); a shell gives each make its own): a request
+  from a new group waits for running jobs, then the file, directory and
+  include caches are emptied (header/decl caches key on the file entries, so
+  they follow).  Within one build nothing is revalidated: a header regenerated
+  mid-build after it was read is still stale.  vccd-test: 4 tests XPASS.  Was:  Token cache keyed by path, caches
   misses (`lex.c:1484-1505`, comment at `pp.c:4025`); dircache; header
   cache replays on top.  Either scope all caches to a build (make's
   jobserver lifetime / an explicit generation the shim sends) or validate
