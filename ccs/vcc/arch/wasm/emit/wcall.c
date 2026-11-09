@@ -219,6 +219,91 @@ static int walloca(ecx *e, uint32_t a)
 	return WT_I64;
 }
 
+/*
+ * A call to a C library function that is one wasm instruction: clang makes
+ * these its intrinsics at every -O (emscripten has no math errno), unless
+ * -fno-builtin.  Returns the instruction ("f64.floor"), NULL: not one.
+ */
+static const char *wmath_insn(cc *c, uint32_t ref, const ctype *f)
+{
+	static const struct { const char *name, *op[2]; uint8_t ar; } tab[] = {
+		{ "sqrt", { "f64.sqrt", "f32.sqrt" }, 1 }, { "floor", { "f64.floor", "f32.floor" }, 1 },
+		{ "ceil", { "f64.ceil", "f32.ceil" }, 1 }, { "trunc", { "f64.trunc", "f32.trunc" }, 1 },
+		{ "fabs", { "f64.abs", "f32.abs" }, 1 }, { "rint", { "f64.nearest", "f32.nearest" }, 1 },
+		{ "nearbyint", { "f64.nearest", "f32.nearest" }, 1 },
+		{ "roundeven", { "f64.nearest", "f32.nearest" }, 1 },
+		{ "copysign", { "f64.copysign", "f32.copysign" }, 2 },
+	};
+	const sym *y;
+	const char *nm;
+	uint32_t len;
+	int fk;
+
+	if (c->o->no_builtin || !ref || RKIND(ref) != RK_SYM)
+		return NULL;
+	y = &c->syms[RIDX(ref)];
+	if (!y->name || y->sc == SC_STATIC || (f->flags & (TF_NOPROTO | TF_VARIADIC)))
+		return NULL;
+	nm = vintern_ents[y->name].s;
+	len = vintern_ents[y->name].len;
+	fk = KIND(c, f->base);
+	if (fk != TY_DOUBLE && fk != TY_FLOAT)
+		return NULL;
+	for (uint32_t i = 0; i < sizeof tab / sizeof *tab; i++) {
+		size_t tl = strlen(tab[i].name);
+
+		if (len != tl + (fk == TY_FLOAT) || memcmp(nm, tab[i].name, tl) || (fk == TY_FLOAT && nm[tl] != 'f'))
+			continue;
+		if (f->n != tab[i].ar)
+			return NULL;
+		for (uint32_t j = 0; j < f->n; j++)
+			if (KIND(c, c->params[f->aux + j]) != fk)
+				return NULL;
+		return tab[i].op[fk == TY_FLOAT];
+	}
+	return NULL;
+}
+
+/*
+ * __builtin_constant_p, as the arm64 generator without its inliner: 1 if the
+ * front end folds the operand (a pointer only as a string literal at offset
+ * 0) or it reads a character of a literal; at -O1 and up also a local never
+ * written after its constant initializer; else 0.
+ */
+VPRIV int wconstant_p(ecx *e, uint32_t a)
+{
+	cc *c = e->c;
+	cval cv;
+	qty at = N(a)->ty;
+	uint32_t r = a;
+
+	if (cc_eval(c, a, &cv) && (cv.kind == CV_INT || cv.kind == CV_FLT ||
+				   (cv.kind == CV_ADDR && cv.str && cv.i == 0 && !cv.sym && !cv.label)))
+		return 1;
+	if (side_effects(c, a) || !(is_integer(c, at) || is_flt(c, at)))
+		return 0;
+	while (N(r)->op == N_CAST && (N(r)->aux == CK_INT || N(r)->aux == CK_NOP))
+		r = N(r)->a;
+	if (N(r)->op == N_INDEX && cc_eval(c, N(r)->b, &cv) && cv.kind == CV_INT) {
+		uint32_t s = N(r)->a;
+
+		while (N(s)->op == N_CAST && (N(s)->aux == CK_DECAY || N(s)->aux == CK_NOP))
+			s = N(s)->a;
+		if (N(s)->op == N_STR && cv.i >= 0 && (uint64_t)cv.i < c->strs[N(s)->a].n)
+			return 1;
+	}
+	if (c->o->opt && N(r)->op == N_VAR) {
+		uint32_t s = N(r)->a;
+		const sym *y = &c->syms[s];
+
+		if (is_local_var(c, s) && y->sc != SC_STATIC && !(QQ(y->ty) & Q_VOLATILE) &&
+		    !(y->flags & SF_ADDR_TAKEN) && !(e->E->sflags[s] & (SA_WRITTEN | SA_CWRITE)) &&
+		    y->body && cc_eval(c, y->body, &cv) && cv.kind == CV_INT)
+			return 1;
+	}
+	return 0;
+}
+
 VPRIV int wcall(ecx *e, uint32_t n, bool want)
 {
 	cc *c = e->c;
@@ -242,6 +327,26 @@ VPRIV int wcall(ecx *e, uint32_t n, bool want)
 	    c->syms[RIDX(ref)].name &&
 	    vintern_ents[c->syms[RIDX(ref)].name].len == 6 && !memcmp(vintern_ents[c->syms[RIDX(ref)].name].s, "alloca", 6))
 		return walloca(e, c->lists[x->b]);	/* clang: alloca is a builtin, declared or not */
+	{
+		const char *mi = wmath_insn(c, ref, f);
+
+		if (mi && x->c == f->n) {
+			/* sqrt(x): f64.sqrt; the arguments converted to the parameters' type */
+			for (uint32_t i = 0; i < x->c; i++) {
+				uint32_t a = c->lists[x->b + i];
+
+				wexpr(e, a, true);
+				if (QUNQ(N(a)->ty) != QUNQ(f->base))
+					wconv(e, N(a)->ty, f->base);
+			}
+			wi(e, mi);
+			if (!want) {
+				wi(e, "drop");
+				return WT_NONE;
+			}
+			return wty(c, f->base);
+		}
+	}
 	if (noproto && ref && RKIND(ref) == RK_SYM && c->syms[RIDX(ref)].body &&
 	    N(c->syms[RIDX(ref)].body)->op == N_BLOCK && c->syms[RIDX(ref)].kind == S_FUNC)
 		def = RIDX(ref);	/* a K&R definition here: its parameters, extra arguments dropped */
@@ -859,10 +964,18 @@ VPRIV int wbuiltin(ecx *e, uint32_t n, bool want)
 		wi(e, "unreachable");
 		return WT_NONE;
 	case BI_RETURN_ADDRESS:
-	case BI_FRAME_ADDRESS:
+	case BI_FRAME_ADDRESS: {
+		/* level 0: the frame (on the shadow stack, below the caller's); others: 0 */
+		cval lv;
+
+		if (cc_eval(c, warg_n(c, n, 0), &lv) && lv.kind == CV_INT && lv.i == 0) {
+			wget(e, wfp(e));
+			return WT_I64;
+		}
 		wexpr(e, warg_n(c, n, 0), false);
 		wconst(e, WT_I64, 0);
 		return WT_I64;
+	}
 	case BI_ALLOCA:
 	case BI_ALLOCA_UNINIT:
 		return walloca(e, warg_n(c, n, 0));
@@ -1006,6 +1119,11 @@ VPRIV int wbuiltin(ecx *e, uint32_t n, bool want)
 		for (uint32_t i = 0; i < x->c; i++)
 			wexpr(e, warg_n(c, n, i), false);
 		return WT_NONE;
+	case BI_CONSTANT_P:
+		/* before the front end's fold, which says 0 for what the optimizer folds */
+		if (want)
+			wconst(e, WT_I32, wconstant_p(e, warg_n(c, n, 0)));
+		return want ? WT_I32 : WT_NONE;
 	}
 	if (cc_eval(c, n, &cv) && (cv.kind == CV_INT || (cv.kind == CV_FLT && !cv.ld))) {
 		if (k == WT_F32 || k == WT_F64)
@@ -1017,10 +1135,6 @@ VPRIV int wbuiltin(ecx *e, uint32_t n, bool want)
 		else
 			efatal(e, x->loc, "wasm: 128-bit builtin constant");
 		return k;
-	}
-	if (x->aux == BI_CONSTANT_P) {
-		wconst(e, WT_I32, 0);
-		return WT_I32;
 	}
 	if (x->aux == BI_OBJECT_SIZE || x->aux == BI_DYNAMIC_OBJECT_SIZE) {
 		int64_t ty = 0;

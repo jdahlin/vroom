@@ -353,6 +353,7 @@ VPRIV void wcompare(ecx *e, int op, qty t);
 /* wcall.c */
 VPRIV int wcall(ecx *e, uint32_t n, bool want);
 VPRIV int wbuiltin(ecx *e, uint32_t n, bool want);
+VPRIV int wconstant_p(ecx *e, uint32_t a);
 /* wstmt.c */
 VPRIV void wgoto_scan(ecx *e, uint32_t body);
 VPRIV void wvla_bytes(ecx *e, qty t);

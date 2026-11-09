@@ -1317,11 +1317,47 @@ static const char *wif(int k)
 }
 
 /* a condition known when compiling: 1 true, 0 false, -1 not known (clang folds these away) */
+/* does expression n contain __builtin_constant_p (the front end folds it to 0) */
+static bool wbcp_in(cc *c, uint32_t n)
+{
+	const node *x;
+
+	if (!n)
+		return false;
+	x = N(n);
+	switch (x->op) {
+	case N_BUILTIN:
+		if (x->aux == BI_CONSTANT_P)
+			return true;
+		/* fall through */
+	case N_CALL:
+		for (uint32_t i = 0; i < x->c; i++)
+			if (wbcp_in(c, c->lists[x->b + i]))
+				return true;
+		return x->op == N_CALL && wbcp_in(c, x->a);
+	case N_CAST: case N_UNARY:
+		return wbcp_in(c, x->a);
+	case N_BINARY: case N_LOGAND: case N_LOGOR: case N_COMMA:
+		return wbcp_in(c, x->a) || wbcp_in(c, x->b);
+	case N_COND:
+		return wbcp_in(c, x->a) || wbcp_in(c, x->b) || wbcp_in(c, x->c);
+	default:
+		return false;
+	}
+}
+
 VPRIV int wknown(ecx *e, uint32_t n)
 {
 	cc *c = e->c;
 	cval cv;
+	uint32_t r = n;
 
+	while (N(r)->op == N_CAST && (N(r)->aux == CK_INT || N(r)->aux == CK_NOP || N(r)->aux == CK_BOOL))
+		r = N(r)->a;
+	if (N(r)->op == N_BUILTIN && N(r)->aux == BI_CONSTANT_P)
+		return wconstant_p(e, c->lists[N(r)->b]);
+	if (wbcp_in(c, n))
+		return -1;
 	if (side_effects(c, n) || !cc_eval(c, n, &cv))
 		return -1;
 	if (cv.kind == CV_INT)
