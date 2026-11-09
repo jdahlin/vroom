@@ -1,0 +1,145 @@
+# WebAssembly som mål: ny arch och ny platform i vcc
+
+**Mål:** `vcc --target=wasm64-unknown-emscripten -c x.c` ger ett wasm-objekt som
+`wasm-ld` länkar och som körs med samma resultat som clangs. `-S` ger LLVM:s
+textsyntax för wasm. Slutmålet är att vcc kompilerar sig själv till wasm och att
+explorer-sidan (`ccs/wasm/`) kör den versionen i stället för emscripten-bygget.
+
+**Varför:** I dag är det emscripten (clang) som kompilerar vcc till wasm
+(`ccs/wasm/build.sh`). Med en egen wasm-backend behövs clang inte för det, och vcc
+får ett andra mål vid sidan av arm64. Det tvingar fram den uppdelning mellan
+generiskt och målspecifikt som x86-64 också behöver (TODO.md: "Target-OS code out
+of the generic files").
+
+**Regler:** samma som fas 2. Clang är referensen (`--target=wasm64-unknown-emscripten`
+och `wasm32-wasip1`), inget från clang/LLVM vid körning. `wasm-ld` och emscriptens
+libc används för länkning och test tills steg W7. arm64-utdata får inte ändras av
+något steg: varje commit verifieras mot de 1 326 utdata som användes vid
+katalogomflyttningen (PLAN-fas2.md, "Status katalogstruktur").
+
+## Utgångsläge (2026-11-09)
+
+- Emittern genererar direkt från AST:t utan IR. Den generiska delen `emit/` är
+  2 462 rader (kö, trådar, data, förpass, typer), arm64-delen `arch/a64/emit/` är
+  10 292 rader. arm64-delen innehåller också sådant som inte är arm64-specifikt:
+  konstantvikning under genereringen, nåbarhetsflaggan, inlining av
+  `__always_inline`, `__builtin_constant_p`-regler och `need_fold`-omgenereringen.
+- Typstorlekarna är en statisk LP64-tabell (`cc/type.c:6`), `__builtin_va_list` är
+  AAPCS64-structen eller Apples `char *` (`cc/tu.c:94`).
+- Predefines finns för två mål (`ppdata-predef.inc`: aarch64-linux, Darwin).
+- Objektskrivarna är ELF (`platform/linux/elf.c`) och Mach-O
+  (`platform/darwin/macho.c`) ovanpå den gemensamma objektmodellen `obj/obj.h`
+  (sektioner, frags, symboler, fixups).
+- Emscripten 7.0.0 finns (Homebrew), med en wasm64-sysroot (libc, compiler-rt).
+  Node 26 kör memory64 utan flaggor. Clang 23 skriver wasm-`.s` och objekt för
+  båda bredderna.
+
+## Datamodellen: wasm64 först
+
+| | aarch64-linux | wasm64-emscripten | wasm32-wasip1 |
+|---|---|---|---|
+| `long`, pekare, `size_t` | 8 | 8 | **4** |
+| `long double` | binary128 | binary128 | binary128 |
+| `char` | unsigned | **signed** | **signed** |
+| `va_list` | AAPCS64-struct | `char *` | `char *` |
+| största alignment | 16 | 16 | 16 |
+
+wasm64 är LP64 som arm64, så typtabellen kan stå kvar. Det som skiljer är `char`
+och `va_list`, och de har vi redan som Darwin-varianter. Explorern är också
+memory64. wasm32 (ILP32) kräver en typtabell per mål och 32-bitarspekare genom
+hela emittern, så det kommer sist (W6).
+
+## Arkitektur
+
+| Del | Fil(er) | Innehåll |
+|---|---|---|
+| Målval | `driver/ppdriver.c`, `cc/`, `emit/` | Ett `target`-värde (cpu, os, pekarbredd) i stället för `darwin`-flaggan; `--target=wasm64-*`/`wasm32-*` |
+| Predefines, `__has_*` | `pp/ppdata-predef.inc` via `gen-ppdata.sh` | En tabell till per mål, tagen från clang en gång |
+| Layout | `cc/type.c`, `cc/layout.c` | `char` signed, `va_list` som `char *`; senare tabell per mål |
+| Generisk kodgenerering | `emit/` | Det som lyfts ut ur `arch/a64/emit/`: vikning, nåbarhet, inlining, `__builtin_constant_p` |
+| Kodgenerator | `arch/wasm/emit/` | AST → wasm-instruktioner: stackmaskin, locals, strukturerad kontrollflöde, skuggstack |
+| Textutdata | `arch/wasm/emit/print.c` | `-S` i LLVM:s syntax (`.functype`, `.local`, `local.get`, `block`/`loop`/`end_block`) |
+| Kodare | `arch/wasm/as/enc.c` | Opkoder, LEB128 (5/10 byte med utfyllnad där en relokering ska in) |
+| Assembler | `arch/wasm/as/parse.c` | wasm-`.s` som `vas` läser: `-S` → `-c` går runt, och `.s`-tester mot llvm-mc |
+| Fixups | `arch/wasm/obj/fixup.c`, `reloc.h` | `R_WASM_FUNCTION_INDEX_LEB`, `R_WASM_MEMORY_ADDR_LEB64`/`SLEB64`/`I64`, `R_WASM_TABLE_INDEX_*`, `R_WASM_GLOBAL_INDEX_LEB`, `R_WASM_TYPE_INDEX_LEB` |
+| Objektskrivare | `platform/wasm/wasm.c` | Typ-, import-, funktions-, kod- och datasektioner; `linking` (symboltabell, segment, init-funktioner) och `reloc.CODE`/`reloc.DATA`. Objektformatet är detsamma för emscripten och WASI; skillnaderna mellan OS:en (libc, startkod, sjlj) ligger i drivern och ABI-koden |
+
+### Kodgeneratorn
+
+Att emittern arbetar från AST:t passar wasm bra, eftersom C:s strukturerade
+satser blir wasm:s strukturerade kontrollflöde rakt av:
+
+- `if`/`else` → `block`/`br_if` eller `if`/`else`/`end`; `while`/`for`/`do` → `block` + `loop`;
+  `break`/`continue` → `br` till rätt djup.
+- `switch` → `br_table` när fallen är täta (som arm64:s hopptabell), annars en
+  jämförelsekedja. Hopp in i en loop (Duffs device) hanteras som `goto`.
+- `goto`: i det vanliga fallet (framåt ut ur nästling, `goto out`/`goto err`) ett
+  `block` runt hoppet. Annars en stackifier för funktionen: grundblock, dominatorträd
+  och samma algoritm som LLVM:s `WebAssemblyCFGStackify`. Oreducerbar kontrollflöde
+  blir en `loop` med en `br_table`-dispatcher på en etikettvariabel (LLVM:s
+  `FixIrreducibleControlFlow`). Indirekt `goto` stöds inte, och clang avvisar det också.
+- Värden lever på operandstacken inom ett uttryck. Variabler och temporärer blir
+  wasm-locals (obegränsat antal: ingen registerallokering, `opt.c` behövs inte).
+  Lokala variabler vars adress tas, arrayer och structs läggs på en skuggstack i
+  linjärt minne via den globala `__stack_pointer`, som clang gör.
+- Anrop: direkta `call`, indirekta `call_indirect` via tabellen med typindex.
+  ABI som clangs `WebAssemblyABIInfo`: skalärer i parametrar; en struct med ett
+  enda skalärt fält skickas som skalären, andra aggregat som pekare till en kopia;
+  aggregat returneras via dold sret-pekare; varargs i en buffert på anroparens
+  skuggstack, anroparen skickar pekaren.
+- `__int128` och binary128 `long double` via compiler-rt-anrop (`__multi3`,
+  `__addtf3`, …), som clang. Atomics som vanliga laddningar och lagringar utan
+  delat minne, med `i64.atomic.*` under `-matomics`/`-pthread`.
+- `setjmp`/`longjmp` som emscriptens wasm-EH-variant (`__wasm_setjmp`,
+  `__wasm_setjmp_test`, `__wasm_longjmp`, `try_table`). vcc behöver det själv: pp och
+  cc hoppar ut med `longjmp` vid fel.
+- Inline asm: wasm-`.s`-fragment via `arch/wasm/as/parse.c`. Det är sällsynt i C för
+  wasm och kan komma sent.
+
+## Steg
+
+| # | Leverans | Kriterium |
+|---|----------|-----------|
+| W0 | **Målval och front end.** `target` i stället för `darwin`; `--target=wasm64-unknown-emscripten`; predefines från clang; `char` signed och `va_list` som `char *` för wasm | `vpp -dM -E` = `clang -dM -E` för målet; `vcc-sema.py layout` med wasm64 som mål (layouter, konstanter, typer kontrollerade av clang); arm64-utdata byte-identiska |
+| W1 | **Lyft ut det generiska ur `arch/a64/emit/`.** Vikning, nåbarhet, inlining, `__builtin_constant_p` och `need_fold` till `emit/` bakom ett gränssnitt per arch | 1 326 arm64-utdata byte-identiska; `vbench.py gate` inom 1 %; kärnan bootar |
+| W2 | **Första wasm-utdata.** `arch/wasm/emit/` för heltalsaritmetik, locals, parametrar, `return`, direkta anrop, `if`/loopar/`break`/`continue`; `-S`. Explorern får målet "wasm64" | Utdata assembleras av `clang --target=wasm64-unknown-emscripten -c`, länkas av emcc och körs i node med samma resultat som clangs; nytt harness `bench/vcc-wasm.py` |
+| W3 | **Minne och data.** Globala variabler, strängar, initierare, pekararitmetik, skuggstack för adresstagna lokala variabler, arrayer och structs, `memcpy`/`memset` för aggregat | `vcc-ctests.py --suite vcc` med `--target wasm64` i node |
+| W4 | **Hela C.** Structs som värden (ABI ovan), varargs, `switch` med `br_table`, `goto` med stackifier, flyttal, bit-fält, VLA/`alloca`, `__int128` och `long double` via compiler-rt, atomics, `setjmp`/`longjmp` | gcc-torture och tcc-tests2 i node via emcc: samma godkända som clang; `bench/vcc-abi.py --target wasm64` (clang/vcc × anropare/anropad) |
+| W5 | **Objektfiler.** `arch/wasm/as/enc.c`, `arch/wasm/obj/fixup.c`, `platform/wasm/wasm.c`; `-c` direkt utan text; `vas` läser wasm-`.s` | Länkas av `wasm-ld` och körs: allt från W4 med `-c`; kodare mot `llvm-mc` (`bench/vas-enc.py`); `wasm-objdump -x` jämförs mot clangs objekt för samma `.s` |
+| W6 | **vcc kompilerar sig själv till wasm64.** NEON-lexern som skalär `VLEX_SCALAR`, CRC32C i mjukvara, `ccs/wasm/mman.c` som i dag; emcc länkar bara | `-S`-utdata från den självbyggda `vcc.wasm` byte-identisk med emscripten-byggets på testfilerna; explorern använder den |
+| W7 | **wasm32 (ILP32).** Typtabell per mål, pekarbredd 4 genom emittern och objektskrivaren, wasi-libc | Samma sviter som W4 med `--target=wasm32-wasip1` |
+| W8 | **Egen wasm-länkare** i `ld/` (valfritt; regeln om inget LLVM) | Ett program länkat av `vlink` körs som det länkat av `wasm-ld`; tider mot `wasm-ld` |
+
+Ordningen gör att varje steg syns: W2 ger utdata i explorern och W5 körbara objekt.
+W1 kan delvis gå parallellt med W0.
+
+## Validering
+
+- **Referens:** clang 23 med samma mål. `-S` jämförs inte rad för rad, eftersom
+  instruktionsvalet skiljer sig. Det som jämförs är beteende (körning), ABI
+  (anrop mellan clang- och vcc-objekt) och layout (`vcc-sema.py layout`).
+- **Körning:** emcc länkar mot emscriptens wasm64-libc och node kör. Samma upplägg
+  som `bench/vcc-ctests.py` med qemu för arm64. Cache som där: ett objekt
+  byte-identiskt med ett som redan gått igenom körs inte igen.
+- **arm64 oförändrat:** varje commit i W0, W1 och W7 verifieras mot de 1 326 utdata
+  och `vbench.py gate`.
+
+## Risker och öppna frågor
+
+- **W1 är det svåra steget.** Vikning och inlining är sammanvävda med arm64:s
+  registerhantering (`B_REG`, `fnctx.retreg`). Att lyfta ut dem utan att ändra en
+  enda byte i arm64-utdata kräver små steg. Alternativet är att wasm-generatorn
+  får en egen kopia av vikningen. Det går fortare men ger två ställen att hålla i
+  takt med clangs regler, så det väljs bara om W1 drar ut på tiden.
+- **`goto`-tung kod:** kärnan och vcc själv har mest `goto out`-mönster som klaras
+  med ett omgivande `block`. Stackifiern behövs ändå för gcc-torture.
+- **setjmp via wasm-EH** måste matcha emscriptens runtime exakt (symboler, taggar).
+  Testas tidigt i W4 med ett litet program.
+- **Prestanda:** wasm-utdata ska kosta ungefär som arm64-utdata per funktion (inga
+  extra pass utöver stackifiern, som bara körs för funktioner med `goto`). Mäts med
+  `vbench.py` när W5 är klart.
+
+## Status
+
+Inte påbörjad (2026-11-09). Före detta: wasm-*bygget* av vcc via emscripten
+(`ccs/wasm/`, commit 8e9f9da) och explorer-sidan.
