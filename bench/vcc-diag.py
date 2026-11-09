@@ -8,6 +8,8 @@ Every ccs/vcc/tests/diag/*.c is a small piece of broken C.  vcc runs
 passes when
   - layer 4: vcc's stderr is exactly X.c.stderr (vcc's own snapshot: the text
     may be better than clang's), and
+  - layer 2: with -fdiagnostics-show-id every diagnostic has an id
+    (bench/gen-diagids.py), and
   - layer 1: the diagnostics' first lines name the same (file, line, column,
     level, -W flag) as clang's, in order, and the exit status agrees.
 A deliberate difference from clang in layer 1 (a better place, fewer
@@ -31,10 +33,11 @@ VPP = f'{BUILD}/vpp'
 FL = ['--target=aarch64-linux-gnu', '-fsyntax-only', '-fno-color-diagnostics']
 
 
-def run(cmd, name):
+def run(cmd, name, extra=()):
     fl = FL
     if re.search(r'/\*\s*diag-mode:\s*-c\s*\*/', open(os.path.join(D, name), errors='replace').read()):
         fl = [f for f in FL if f != '-fsyntax-only'] + ['-c', '-o', '/dev/null']
+    fl = fl + list(extra)
     p = subprocess.run(cmd + fl + [name], cwd=D, capture_output=True, timeout=30)
     return p.returncode, p.stderr.decode(errors='replace')
 
@@ -67,6 +70,12 @@ def one(name, bless=False):
         why.append('locations/levels/flags differ from clang')
     if (rc_c == 0) != (rc_v == 0):
         why.append(f'exit {rc_v}, clang {rc_c}')
+    # layer 2: every diagnostic carries an id from pp/diagids.inc (clang's name or vcc_*)
+    _, out_i = run([VPP], name, ['-fdiagnostics-show-id'])
+    noid = [l for l in out_i.splitlines() if HEAD.match(l) and (not re.search(r' \[(\w+)\]$', l) or l.endswith('[vcc_unknown]'))]
+    if noid:
+        ok = False
+        why.append(f'diagnostic without an id: {noid[0]}')
     return name, ok, out_c, out_v, want or '', ', '.join(why), out_c == out_v
 
 

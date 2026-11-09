@@ -67,6 +67,11 @@ pp *pp_open(const pp_opts *o)
 
 	vintern_init();
 	p->o = o;
+	{
+		const char *t = getenv("VCC_TRACK_DIAG");
+
+		p->dtrack = t && *t && *t != '0';
+	}
 	p->color = o->diag_color > 0 || (o->diag_color == 0 && isatty(o->errfd ? o->errfd : 2));
 	p->cx = vmreg_get(&ppr[1], MAXCTX * sizeof(ctx), "pp.cx");
 	p->perm.base = p->perm.p = vmreg_get(&ppr[2], 1ull << 30, "pp.perm");

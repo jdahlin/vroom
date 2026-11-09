@@ -104,7 +104,11 @@ VPRIV void define(pp *p, ctx *c, uint32_t b, uint32_t e)
 
 		err = parse_define(vt, b, e, n, site ? mem_shared : mem_perm, &p->perm, &eoff);
 		if (err) {
-			error(p, c->loc + vt[eoff].off, "%s", err);
+			/* parse_define's two messages, each a format of its own (its id) */
+			if (err[0] == '\'')
+				error(p, c->loc + vt[eoff].off, "'##' cannot appear at either end of a macro expansion");
+			else
+				error(p, c->loc + vt[eoff].off, "invalid macro parameter list");
 			return;
 		}
 		n->src = c->src;

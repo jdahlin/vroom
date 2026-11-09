@@ -238,6 +238,20 @@ Tio lager; varje steg nedan säger vilka det berör.
 - **D1.3 id i alla anropsställen** och `-fdiagnostics-show-id` (id efter flaggan) samt
   `VCC_TRACK_DIAG=1` (vcc:s egen källplats per diagnos, som rustcs `-Z track-diagnostics`).
   *Validera:* lager 2: varje vcc-diagnos har ett id som finns i `diagids.inc` eller är `vcc_*`.
+  *Klart 2026-11-09.*  Id:t sitter i anropsställets format (posten slår upp det, D1.1); de
+  format som delas av flera clang-diagnoser (konverteringsfelen med `%s`-prefix, `#error`)
+  sätter id:t själva, och `#define`-felen fick ett format var.  `gen-diagids.py` matchar nu
+  även pp:s `error()`/`warn()` och har en lista med fästa id där textmatchningen tar fel
+  (`err_typecheck_convert_incompatible`, `fatal_too_many_errors`, pp:s `missing ')' after`):
+  303 format, 268 id, 75 `vcc_*`.  `-fdiagnostics-show-id` skriver ` [id]` efter flaggan.
+  `VCC_TRACK_DIAG=1` skriver ` {vcc fil.c:rad funktion}` (med `-g`, t.ex. ASan-bygget) eller
+  ` {vcc funktion+offset}`: rapportfunktionerna sparar sin returadress i posten, `atos`
+  översätter bara när det skrivs ut.  Två första försök (makron som skickade
+  `__FILE_NAME__:__LINE__` som argument, eller lagrade det i en trådlokal vid anropet)
+  kostade pp +0,6 % resp. +1,6 % (en TLV-åtkomst lyfts in i heta funktioner på Darwin).
+  *Validerat:* lager 2 i `vcc-diag.py` (varje diagnosrad med `-fdiagnostics-show-id` har ett
+  id) 78/78; mutationskorpusen kör vcc med id: 81 olika id över 3 158 fel, 0 utan id;
+  `gen-diagids.py --check`; `vbench.py gate` ok (pp +0,07 %, fe +0,89 %).
 
 ### D2. Felåterhämtning utan kaskader
 
@@ -386,7 +400,7 @@ D1 och D2 hänger ihop (feltypen behöver posten); D0.2 först så att D2 har en
 - [x] D0.1 — 2026-11-09
 - [x] D0.2 — 2026-11-09
 - [x] D1.0 — 2026-11-09
-- [ ] D1.1 – D1.3
+- [x] D1.1 – D1.3 — 2026-11-09
 - [ ] D2.1 – D2.3
 - [ ] D3.1 – D3.3
 - [ ] D4

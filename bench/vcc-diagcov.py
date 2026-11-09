@@ -27,7 +27,9 @@ DIRS = ['pp', 'cc', 'emit', 'arch/a64/emit', 'driver', 'lex']
 CALLS = {'cc_error': (2, 'error'), 'fatal': (2, 'error'), 'note': (2, 'note'), 'report': (7, 1),
          'cc_warnx': (9, 'warning'), 'pp_diag': (3, 2), 'pp_diagx': (2, '?'), 'pp_warnx': (5, 'warning'),
          'ediag': (2, '?'), 'eerror': (2, 'error'), 'efatal': (2, 'error'), 'macro_note_': (3, 'note'),
-         'pp_diag_begin': (3, '?'), 'pp_diag_note': (3, 'note')}
+         'pp_diag_begin': (3, '?'), 'pp_diag_note': (3, 'note'), 'error': (2, 'error'), 'warn': (2, 'warning')}
+# pp's error()/warn()/fatal() macros (ppimpl.h): only under pp/
+PPONLY = {'error', 'warn'}
 MARK = '\x01'		# a printf conversion in a vcc format
 
 
@@ -96,6 +98,8 @@ def vcc_messages():
                     if re.search(r'(void|bool|int|vdiag)\s+\**$', pre):	# the definition itself
                         continue
                     name = m.group(1)
+                    if name in PPONLY and d != 'pp':
+                        continue
                     args, _ = split_args(src, m.end() - 1)
                     fi, ki = CALLS[name]
                     if len(args) <= fi:

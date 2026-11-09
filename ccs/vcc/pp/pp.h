@@ -55,6 +55,7 @@ typedef struct pp_opts {
 	int target;			/* PP_LINUX_AARCH64 or PP_DARWIN (column of the feature table) */
 	int diag_color;			/* diagnostics: 1 colors, -1 none, 0 when errfd is a terminal */
 	int diag_nocaret;		/* -fno-caret-diagnostics: no source lines */
+	int diag_show_id;		/* -fdiagnostics-show-id: " [id]" after the flag */
 	const char *const *wargs;	/* -W..., -w options in command-line order */
 	int nwargs;
 	int error_limit;		/* -ferror-limit=: 0 default (20), -1 none */
@@ -169,7 +170,7 @@ struct vdiag {
 	const char *flag;	/* warning flag without "-W", or NULL */
 	const char *msg;	/* the message, without the flag */
 	const char *label;	/* the primary location's label, or NULL */
-	const char *track;	/* vcc's source location that reported it (VCC_TRACK_DIAG) */
+	const void *track;	/* the return address in vcc's reporting function (VCC_TRACK_DIAG) */
 	const char *ms;		/* the diagnosed token's spelling when it came from a macro */
 	vdspan *span;
 	vdfix *fix;
@@ -196,6 +197,15 @@ int pp_diag_wlevel(pp *p, const char *flag, bool on, const char *const *groups, 
 void pp_diag_emit(pp *p, vdiag *d);
 /* the TU's records so far, in order (children under kids) */
 const vdiag *pp_diag_records(const pp *p);
+/*
+ * VCC_TRACK_DIAG=1 prints with each diagnostic where in vcc it was reported
+ * (rustc's -Z track-diagnostics): each reporting function (cc_error, report,
+ * pp_diagx, ...) leaves its return address here, and the record keeps it;
+ * it is symbolized (atos) only when printed.  Nothing at the call sites:
+ * a __FILE_NAME__:__LINE__ argument or a thread-local store there changed
+ * the hot paths' code (+0.6 % / +1.5 % pp).
+ */
+extern _Thread_local const void *pp_diag_pc;
 /* level name as clang prints it ("error", "fatal error", ...) */
 const char *pp_diag_level(int level);
 /* -fspell-checking-limit= as given (0: default, -1: none, -2: off) */

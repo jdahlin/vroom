@@ -204,16 +204,29 @@ def kernel_tus():
 ELINE = re.compile(r'^(.*?):(\d+):(\d+): (error|fatal error): (.*)$', re.M)
 
 
-def compile1(cc, args, path, cwd):
+IDRX = re.compile(r' \[([a-z][a-z0-9_]*)\]$')
+
+
+def compile1(cc, args, path, cwd, ids=False):
+    """ids: vcc with -fdiagnostics-show-id: each error's id is taken off its message (PLAN-diag layer 2)"""
     t0 = time.time()
     try:
-        p = subprocess.run([cc] + COMMON + args + [path], cwd=cwd, capture_output=True, text=True, errors='replace',
+        p = subprocess.run([cc] + COMMON + (['-fdiagnostics-show-id'] if ids else []) + args + [path], cwd=cwd, capture_output=True, text=True, errors='replace',
                            timeout=TIMEOUT)
     except subprocess.TimeoutExpired:
         return {'rc': 'timeout', 'errs': [], 'out': '', 't': TIMEOUT}
     errs = [[os.path.basename(m.group(1)), int(m.group(2)), int(m.group(3)), m.group(5)] for m in ELINE.finditer(p.stderr)]	# lists: as from the JSON cache
     errs = [e for e in errs if not e[3].startswith('too many errors emitted')]
-    return {'rc': p.returncode, 'errs': errs, 'out': p.stderr[-6000:], 't': time.time() - t0}
+    r = {'rc': p.returncode, 'errs': errs, 'out': p.stderr[-6000:], 't': time.time() - t0}
+    if ids:
+        r['ids'] = []
+        for e in errs:
+            m = IDRX.search(e[3])
+            r['ids'].append(m.group(1) if m and m.group(1) != 'vcc_unknown' else None)
+            if m:
+                e[3] = e[3][:m.start()]
+        r['out'] = IDRX.sub('', r['out'])
+    return r
 
 
 def clang_cached(args, path, src, cwd):
@@ -248,7 +261,7 @@ def job(arg):
     open(mp, 'w').write(mut)
     a = args + ['-iquote', os.path.dirname(path)]		# "x.h" next to the original
     c = clang_cached(a, mp, mut, cwd)
-    v = compile1(VPP, a, mp, cwd)
+    v = compile1(VPP, a, mp, cwd, ids=True)
     os.unlink(mp)
     os.rmdir(d)
     rec = {'src': src_kind, 'tu': name, 'kind': kind, 'seed': seed, 'path': path, 'clang': c, 'vcc': v}
@@ -373,6 +386,10 @@ def report(recs, ntu, nktu, dt):
         nv = sum(len(r['vcc']['errs']) for r in recs if r['cat'][0].startswith('first'))
         nc = sum(len(r['clang']['errs']) for r in recs if r['cat'][0].startswith('first'))
         print(f'  errors in all: vcc {nv}, clang {nc}')
+    ids = [i for r in recs for i in r['vcc'].get('ids', [])]
+    if ids:
+        miss = sum(1 for i in ids if i is None)
+        print(f'  ids (layer 2): {len(set(i for i in ids if i))} distinct over {len(ids)} errors, {miss} without an id')
     cols = ['n', 'crash', 'missed', 'spurious', 'valid', 'firstok', 'firstline', 'firstloc', 'fewer', 'same', 'more']
     print('\n  ' + f'{"kind":14}' + ''.join(f'{c:>10}' for c in cols))
     for k in sorted(by):

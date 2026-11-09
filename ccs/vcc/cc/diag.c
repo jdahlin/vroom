@@ -27,6 +27,7 @@ VPRIV void diag(cc *c, uint32_t loc, const char *what, const char *fmt, va_list 
 __attribute__((format(printf, 3, 4)))
 VPRIV void cc_error(cc *c, uint32_t loc, const char *fmt, ...)
 {
+	pp_diag_pc = __builtin_return_address(0);
 	va_list ap;
 
 	error_limit(c);
@@ -39,6 +40,7 @@ VPRIV void cc_error(cc *c, uint32_t loc, const char *fmt, ...)
 __attribute__((format(printf, 3, 4), noreturn))
 VPRIV void fatal(cc *c, uint32_t loc, const char *fmt, ...)
 {
+	pp_diag_pc = __builtin_return_address(0);
 	va_list ap;
 
 	error_limit(c);
@@ -256,6 +258,7 @@ __attribute__((format(printf, 8, 9)))
 VPRIV void report(cc *c, const char *what, uint32_t loc, const pp_span *r, int nr,
 		   const pp_fixit *fx, int nfx, const char *fmt, ...)
 {
+	pp_diag_pc = __builtin_return_address(0);
 	int lv = what[0] == 'e' ? VDL_ERROR : what[0] == 'w' ? VDL_WARNING : VDL_NOTE;
 	va_list ap;
 
@@ -271,6 +274,7 @@ VPRIV void report(cc *c, const char *what, uint32_t loc, const pp_span *r, int n
 __attribute__((format(printf, 3, 4)))
 VPRIV void note(cc *c, uint32_t loc, const char *fmt, ...)
 {
+	pp_diag_pc = __builtin_return_address(0);
 	va_list ap;
 
 	va_start(ap, fmt);
@@ -296,6 +300,7 @@ __attribute__((format(printf, 10, 11)))
 VPRIV bool cc_warnx(cc *c, const char *flag, bool on, const char *const *groups, uint32_t loc,
 		  const pp_span *r, int nr, const pp_fixit *fx, int nfx, const char *fmt, ...)
 {
+	pp_diag_pc = __builtin_return_address(0);
 	int lv = pp_diag_wlevel(c->p, flag, on, groups, loc);
 	vdiag *d;
 	va_list ap;

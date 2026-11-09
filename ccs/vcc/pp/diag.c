@@ -1,6 +1,7 @@
 /* vcc preprocessor: diagnostics in clang's text format */
 #include "ppimpl.h"
 #include "../lib/buf.h"
+#include <dlfcn.h>
 
 /* ---------------- diagnostics ---------------- */
 
@@ -53,6 +54,7 @@ void pp_vdiag(pp *p, uint32_t loc, const char *what, const char *fmt, va_list ap
 __attribute__((format(printf, 4, 5)))
 VPRIV void pp_diag(pp *p, uint32_t loc, const char *what, const char *fmt, ...)
 {
+	pp_diag_pc = __builtin_return_address(0);
 	va_list ap;
 
 	va_start(ap, fmt);
@@ -62,6 +64,7 @@ VPRIV void pp_diag(pp *p, uint32_t loc, const char *what, const char *fmt, ...)
 
 void pp_diagx(pp *p, const pp_dinfo *d, const char *fmt, ...)
 {
+	pp_diag_pc = __builtin_return_address(0);
 	va_list ap;
 
 	va_start(ap, fmt);
@@ -186,6 +189,7 @@ int pp_diag_wlevel(pp *p, const char *flag, bool on, const char *const *groups, 
 
 bool pp_warnx(pp *p, const char *flag, bool on, const char *const *groups, pp_dinfo *di, const char *fmt, ...)
 {
+	pp_diag_pc = __builtin_return_address(0);
 	int lv = pp_diag_wlevel(p, flag, on, groups, di->loc);
 	vdiag *d;
 	va_list ap;
@@ -572,6 +576,8 @@ static const char *fmt_id(const char *fmt)
 	return NULL;
 }
 
+_Thread_local const void *pp_diag_pc;
+
 static const char *const lvname[] = { "note", "remark", "warning", "error", "fatal error" };
 
 const char *pp_diag_level(int level) { return lvname[level]; }
@@ -607,12 +613,15 @@ vdiag *pp_diag_vbegin(pp *p, int level, uint32_t loc, const char *fmt, va_list a
 	d->loc = loc;
 	d->fmt = fmt;
 	d->id = fmt_id(fmt);
+	d->track = pp_diag_pc;
+	pp_diag_pc = NULL;
 	d->msg = dstr(p, msg, n < 0 ? 0 : (size_t)n < sizeof(msg) ? (size_t)n : sizeof(msg) - 1);
 	return d;
 }
 
 vdiag *pp_diag_begin(pp *p, int level, uint32_t loc, const char *fmt, ...)
 {
+	pp_diag_pc = __builtin_return_address(0);
 	va_list ap;
 	vdiag *d;
 
@@ -683,6 +692,7 @@ static void kid_after(vdiag *top, vdiag *after, vdiag *n)
 
 vdiag *pp_diag_note(pp *p, vdiag *d, uint32_t loc, const char *fmt, ...)
 {
+	pp_diag_pc = __builtin_return_address(0);
 	va_list ap;
 	vdiag *k;
 
@@ -718,6 +728,40 @@ static void macro_adjust(pp *p, vdiag *top, vdiag *d)
 	expansion_note(p, top, d, xm, b, d->ms, d->mlen);
 }
 
+/* " {vcc file.c:123 function}": where vcc reported it (VCC_TRACK_DIAG; symbolized by atos) */
+static void track_str(vbuf *b, const void *pc)
+{
+	Dl_info di;
+	char cmd[1200], out[512];
+	FILE *f = NULL;
+	const char *l, *r;
+
+	vbuf_s(b, " {vcc ");
+	if (!pc || !dladdr(pc, &di) || strlen(di.dli_fname) > 1024 || strchr(di.dli_fname, '\'')) {
+		vbuf_s(b, "?}");
+		return;
+	}
+	snprintf(cmd, sizeof(cmd), "atos -o '%s' -l %p %p 2>/dev/null", di.dli_fname, di.dli_fbase, (const char *)pc - 1);
+	/* "function (in vpp) (expr.c:123)" with debug info, else "function (in vpp) + 6304" */
+	if ((f = popen(cmd, "r")) && fgets(out, sizeof(out), f) && (l = strstr(out, " (in "))) {
+		vbuf_put(b, out, (size_t)(l - out));
+		if ((l = strrchr(out, '(')) && (r = strchr(l, ')')) && memchr(l, ':', (size_t)(r - l))) {
+			vbuf_s(b, " ");
+			vbuf_put(b, l + 1, (size_t)(r - l - 1));
+		} else if ((l = strstr(out, ") + "))) {
+			vbuf_s(b, "+");
+			vbuf_put(b, l + 4, strcspn(l + 4, "\n"));
+		}
+	} else {
+		const char *base = strrchr(di.dli_fname, '/');
+
+		vbuf_f(b, "%s+%#lx", base ? base + 1 : di.dli_fname, (unsigned long)((const char *)pc - (const char *)di.dli_fbase));
+	}
+	if (f)
+		pclose(f);
+	vbuf_s(b, "}");
+}
+
 /* one record in clang's text format */
 static void render_text(pp *p, vbuf *b, const vdiag *d)
 {
@@ -748,6 +792,10 @@ static void render_text(pp *p, vbuf *b, const vdiag *d)
 	vbuf_s(b, d->msg);
 	if (d->flag)
 		vbuf_f(b, " [%s-W%s]", d->werror ? "-Werror," : "", d->flag);
+	if (p->o->diag_show_id)
+		vbuf_f(b, " [%s]", d->id ? d->id : "vcc_unknown");
+	if (p->dtrack)
+		track_str(b, d->track);
 	if (p->color)
 		vbuf_s(b, DC_RESET);
 	vbuf_s(b, "\n");

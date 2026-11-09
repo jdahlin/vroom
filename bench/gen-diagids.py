@@ -34,6 +34,18 @@ PINNED = {
     "%s passing '%s' to parameter of type '%s'": None,
     "%s returning '%s' from a function with result type '%s'": None,
     "%s assigning to '%s' from '%s'": None,
+    "passing '%s' to parameter of incompatible type '%s'": 'err_typecheck_convert_incompatible',
+    "initializing '%s' with an expression of incompatible type '%s'": 'err_typecheck_convert_incompatible',
+    "returning '%s' from a function with incompatible result type '%s'": 'err_typecheck_convert_incompatible',
+    "assigning to '%s' from incompatible type '%s'": 'err_typecheck_convert_incompatible',
+    'initializing with an expression of incompatible type': 'err_typecheck_convert_incompatible',
+    '#if with no expression': 'err_pp_expected_value_in_expr',
+    "expected ':' in preprocessor expression": 'err_expected',
+    "missing ')' after 'defined'": 'err_pp_expected_after',
+    "missing ')' after __has_include": 'err_pp_expected_after',
+    "missing '(' after __has_include": 'err_pp_expected_after',
+    "missing '(' after feature-test macro": 'err_pp_expected_after',
+    'directive in macro arguments ignored': 'ext_embedded_directive',
 }
 
 
@@ -131,7 +143,7 @@ def main():
     text = render(ids, diags)
     if '--list' in a:
         for f in sorted(ids):
-            print(f'{ids[f]:48} {f!r:70} {" ".join(sites[f])}')
+            print(f'{ids[f] or "(call site)":48} {f!r:70} {" ".join(sites[f])}')
         return 0
     if '--check' in a:
         cur = open(OUT).read() if os.path.exists(OUT) else ''

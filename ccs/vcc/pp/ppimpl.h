@@ -439,6 +439,7 @@ struct pp {
 	int color;		/* diagnostics in colour */
 	uint32_t diag_fe;	/* the file of the last diagnostic + 1 (for "In file included from") */
 	vdiag *dhead, *dtail;	/* the TU's diagnostic records (in perm) */
+	bool dtrack;		/* VCC_TRACK_DIAG: vcc's call site after each diagnostic */
 	struct lmark {		/* #line / GNU line markers */
 		uint32_t fe, off;	/* in fent fe, from byte offset off on */
 		uint32_t pline, line;	/* physical line pline is line */
