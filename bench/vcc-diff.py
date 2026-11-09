@@ -4,6 +4,7 @@
   bench/vcc-diff.py ref [-j N]          clang -E -P for every C TU -> work/ppref/
   bench/vcc-diff.py cmp [-j N] [PAT]    vpp --cmp against the references
   bench/vcc-diff.py text [-j N] [PAT]   vpp -E -P byte for byte against the references
+  bench/vcc-diff.py textc [-j N] [PAT]  the same with -C, clang run alongside
   bench/vcc-diff.py args TU             the clang argv for one TU (for vpp)
   bench/vcc-diff.py batch [-j N] [--cmp] [PAT]
                                         all TUs in one vpp process (vpp --batch)
@@ -112,6 +113,17 @@ def text(t):
                              'clang', 'vpp', n=0, lineterm='')
     return obj, 1, '\n'.join(list(d)[:12]) + r.stderr.decode(errors='replace')[-300:]
 
+def textc(t):
+    """-E -P -C: with comments, byte for byte vs clang run now"""
+    obj, a = t
+    r = [subprocess.run([x] + a + ['-E', '-P', '-C'], cwd=B, capture_output=True) for x in (CL, VPP)]
+    if r[0].returncode: return obj, 0, ''
+    if r[0].stdout == r[1].stdout: return obj, 0, ''
+    import difflib
+    d = difflib.unified_diff(r[0].stdout.decode(errors='replace').splitlines(),
+                             r[1].stdout.decode(errors='replace').splitlines(), 'clang', 'vpp', n=0, lineterm='')
+    return obj, 1, '\n'.join(list(d)[:12]) + r[1].stderr.decode(errors='replace')[-300:]
+
 def dd(t):
     """-dD: the #define/#undef lines of -E -P -dD, in order, vs clang (the
     rest of the text is what cmp checks)"""
@@ -140,7 +152,7 @@ if __name__ == '__main__':
         os.unlink(jf); sys.exit(r.returncode)
     if mode == 'ref': os.makedirs(REF, exist_ok=True)
     with Pool(j) as pool:
-        res = pool.map({'ref': mkref, 'dm': dm, 'deps': deps, 'hdr': hdr, 'dd': dd, 'text': text}.get(mode, cmp), ts, chunksize=4)
+        res = pool.map({'ref': mkref, 'dm': dm, 'deps': deps, 'hdr': hdr, 'dd': dd, 'text': text, 'textc': textc}.get(mode, cmp), ts, chunksize=4)
     bad = [r for r in res if r[1]]
     for obj, rc, err in bad[:int(os.environ.get('SHOW', 20))]:
         print(f'--- {obj} (rc {rc})\n{err}')

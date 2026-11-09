@@ -171,7 +171,7 @@ static void hc_mode(pp *p, int mode)
 	static pthread_once_t once = PTHREAD_ONCE_INIT;
 
 	pthread_once(&once, hc_env);
-	p->hc = !hc_off && !p->o->show_includes && !p->o->dump_defines;	/* -H: a replay has no nesting to print */
+	p->hc = !hc_off && !p->o->show_includes && !p->o->dump_defines && !p->o->comments;	/* -H: a replay has no nesting to print */
 	p->tokmode = mode;
 }
 
@@ -376,6 +376,121 @@ VPRIV void text_file_change(pp *p, const ctx *from, int enter)
 	}
 }
 
+/* -C: the start of the line after s (past a directive's tokens): a block
+ * comment that starts on the line continues it */
+VPRIV const char *cmt_line_end(const char *s)
+{
+	for (;;) {
+		if (*s == '\n')
+			return s + 1;
+		if (!*s)
+			return s;	/* the end: files are zero padded */
+		if (s[0] == '/' && s[1] == '*') {
+			for (s += 2; *s && !(s[0] == '*' && s[1] == '/'); s++)
+				;
+			s += *s ? 2 : 0;
+		} else if (s[0] == '\\' && s[1] == '\n') {
+			s += 2;
+		} else if (s[0] == '\\' && s[1] == '\r' && s[2] == '\n') {
+			s += 3;
+		} else if (s[0] == '/' && s[1] == '/') {
+			for (; *s && *s != '\n'; s++)
+				if (s[0] == '\\' && s[1] == '\n')
+					s++;
+		} else {
+			s++;
+		}
+	}
+}
+
+/* -C: a comment token [s, e) of file context c, printed as clang does */
+static void cmt_print(pp *p, const ctx *c, const char *s, const char *e)
+{
+	const char *b = s;
+	bool sol, space;
+	unsigned col;
+
+	while (b > c->src && (b[-1] == ' ' || b[-1] == '\t' || b[-1] == '\f' || b[-1] == '\v'))
+		b--;
+	sol = b == c->src || b[-1] == '\n' || p->cmt_sol;
+	p->cmt_sol = 0;
+	space = b != s;
+	for (col = 1; s - col >= c->src && s[-(ptrdiff_t)col] != '\n'; col++)
+		;
+	if (sol || p->edir) {
+		uint32_t line = loc_line(p, c->loc + (uint32_t)(s - c->src));
+
+		if (move_to_line(p, line, p->edir) || (sol && line == 1)) {
+			out_reserve(p, col);
+			for (; col > 1; col--)
+				p->out[p->nout++] = ' ';
+		} else if (space) {
+			out_ch(p, ' ');
+		}
+	} else if (space || (p->col && p->pk == T_SLASH && p->pk_end != s)) {
+		out_ch(p, ' ');
+	}
+	out_put(p, s, (size_t)(e - s));
+	for (const char *q = s; q < e; q++)
+		p->cur_line += *q == '\n';
+	p->col = 1, p->sol_on = 0;
+	p->pk = T_EOF, p->pk_end = e;
+}
+
+/* -C: print the comments of file context c from its position up to upto */
+VPRIV void cmt_flush(pp *p, ctx *c, const char *upto)
+{
+	const char *s = p->fe[c->fe].cpos;
+
+	if (!s || upto <= s) {
+		if (s && upto > s)
+			p->fe[c->fe].cpos = upto;
+		return;
+	}
+	while (s < upto) {
+		if (s[0] == '/' && s[1] == '*') {
+			const char *e = s + 2;
+
+			while (e < upto && !(e[0] == '*' && e[1] == '/'))
+				e++;
+			if (e >= upto)
+				break;
+			cmt_print(p, c, s, e + 2);
+			s = e + 2;
+		} else if (s[0] == '/' && s[1] == '/') {
+			const char *e = s;
+
+			for (; e < upto && *e != '\n'; e++)
+				if (e[0] == '\\' && e[1] == '\n')
+					e++;
+			if (e > upto)
+				e = upto;
+			while (e > s && (e[-1] == '\r'))
+				e--;
+			cmt_print(p, c, s, e);
+			s = e;
+		} else if (*s == '"' || *s == '\'') {
+			char q = *s++;
+
+			while (s < upto && *s != q && *s != '\n')
+				s += *s == '\\' ? 2 : 1;
+			s++;
+		} else {
+			s++;
+		}
+	}
+	p->fe[c->fe].cpos = upto;
+}
+
+/* -C: the file context's comments up to the end of token rp are dropped (macro arguments) */
+VPRIV void cmt_skip_to(pp *p, const ptok *rp)
+{
+	ctx *fc = &p->cx[p->depth - 1];
+
+	if (fc->type == C_FILE && rp->s >= fc->src && rp->s < fc->src + fc->f->size && p->fe[fc->fe].cpos && p->fe[fc->fe].cpos < rp->s)
+		p->fe[fc->fe].cpos = rp->s + rp->len;
+}
+
 /* clang's TokenConcatenation::AvoidConcat: would prev followed by t, unspaced, lex differently? */
 static bool avoid_concat(const pp *p, const ptok *t, char fc)
 {
@@ -449,6 +564,16 @@ static inline void render(pp *p, const ptok *t)
 	const char *sp;
 	char fc;
 
+	if (unlikely(p->out_text > 1) && t->kind != P_DIRECTIVE) {
+		ctx *fc = &p->cx[p->depth - 1];
+
+		if (fc->type == C_FILE && !(t->flags & PF_MACRO) && p->fe[fc->fe].cpos && t->s >= p->fe[fc->fe].cpos &&
+		    t->s < fc->src + fc->f->size) {
+			cmt_flush(p, fc, t->s);
+			p->fe[fc->fe].cpos = t->s + t->len;
+		}
+		p->cmt_sol = 0;	/* taken by a comment printed now, else by this token */
+	}
 	if (unlikely(p->rec.on) && !p->rec.lev[p->rec.n - 1].text_started) {
 		if (!sol)
 			HC_BAD(p);	/* its separator depends on what was printed before */
@@ -489,7 +614,7 @@ static inline void render(pp *p, const ptok *t)
 		uint32_t line = loc_line(p, loc);
 		unsigned c = tok_col(p, loc);
 		/* clang's leading space: not the line break before a token in column 1 */
-		bool space = (t->flags & TF_SPACE) && (p->sol_on || c > 1);
+		bool space = (t->flags & TF_SPACE) && (p->sol_on || c > 1) && p->pk_end != t->s;
 
 		if (move_to_line(p, line, p->edir) || (sol && line == 1)) {
 			if (c == 1 && space)
@@ -502,7 +627,8 @@ static inline void render(pp *p, const ptok *t)
 		} else if (space || (p->col && p->pk_end != t->s && p->pk != T_EOF && avoid_concat(p, t, fc))) {
 			out_ch(p, ' ');
 		}
-	} else if ((t->flags & TF_SPACE) || (p->col && p->pk_end != t->s && p->pk != T_EOF && avoid_concat(p, t, fc))) {
+	} else if (((t->flags & TF_SPACE) && p->pk_end != t->s) ||
+		   (p->col && p->pk_end != t->s && p->pk != T_EOF && avoid_concat(p, t, fc))) {
 		out_ch(p, ' ');
 	}
 	out_reserve(p, t->len);
@@ -534,7 +660,7 @@ int pp_text(pp *p, const char **out, size_t *len)
 	ptok t;
 
 	hc_mode(p, 1);
-	p->out_text = 1;
+	p->out_text = p->o->comments ? 2 : 1;	/* 2: -C */
 	p->cur_line = 1;
 	if (p->o->asm_mode)
 		p->hc = 0;	/* cached text is C-spaced */

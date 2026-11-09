@@ -24,6 +24,14 @@ static bool cond_true(pp *p, const ctx *c, const pdir *d)
 }
 
 /* in a false group: run on from directive k to the group that is taken */
+/* -C: the comments before directive line [b, e) are printed, those in it dropped */
+static __attribute__((noinline, cold)) void cmt_directive(pp *p, ctx *c, uint32_t b, uint32_t e)
+{
+	if (!p->collecting)	/* in macro arguments they are dropped */
+		cmt_flush(p, c, c->src + c->vt[b].off);
+	p->fe[c->fe].cpos = cmt_line_end(c->src + c->vt[e - 1].off + c->vt[e - 1].len);
+}
+
 static void skip_from(pp *p, ctx *c, uint32_t k)
 {
 	const pdir *dir = c->fi->dir;
@@ -37,6 +45,8 @@ static void skip_from(pp *p, ctx *c, uint32_t k)
 		}
 		c->i = d->end;
 		c->di = k + 1;
+		if (unlikely(p->out_text > 1))	/* -C: nothing skipped is printed */
+			p->fe[c->fe].cpos = cmt_line_end(c->src + c->vt[c->i - 1].off + c->vt[c->i - 1].len);
 		return;
 	}
 }
@@ -291,6 +301,8 @@ VPRIV int directive(pp *p, ctx *c, ptok *out)
 
 	c->i = e;
 	c->di++;
+	if (unlikely(p->out_text > 1))
+		cmt_directive(p, c, d->tok, e);
 	switch (d->kind) {
 	case D_IF: case D_IFDEF: case D_IFNDEF:
 		if (!cond_true(p, c, d))
@@ -304,6 +316,8 @@ VPRIV int directive(pp *p, ctx *c, ptok *out)
 			k = c->fi->dir[k].next;
 		c->i = c->fi->dir[k].end;
 		c->di = k + 1;
+		if (unlikely(p->out_text > 1))
+			p->fe[c->fe].cpos = cmt_line_end(c->src + c->vt[c->i - 1].off + c->vt[c->i - 1].len);
 		return 0;
 	}
 	case D_ENDIF: case D_NULL:

@@ -180,6 +180,8 @@ VPRIV __attribute__((noinline)) void raw(pp *p, ptok *t)
 			return;
 		}
 		if (c->type == C_FILE) {
+			if (unlikely(p->out_text > 1))
+				cmt_flush(p, c, c->src + c->f->size);
 			if (p->nfile == 1) {
 				mkeof(t);
 				return;

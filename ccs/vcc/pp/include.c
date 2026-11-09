@@ -509,6 +509,7 @@ VPRIV void enter_file(pp *p, const vlex_file *f, const char *path, int32_t sdir)
 	if (unlikely(p->o->show_includes) && from && f != &p->builtin && from->f != &p->builtin)
 		show_include(p, path);
 	add_fent(p, c, f, path);
+	p->fe[c->fe].cpos = f->src;
 	p->fe[c->fe].sys = sys;
 	p->fe[c->fe].from = from && from->f != &p->builtin && from->i ? from->loc + from->vt[from->i - 1].off : 0;
 	if (unlikely(fi->bad)) {

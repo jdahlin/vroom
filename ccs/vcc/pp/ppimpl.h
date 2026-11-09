@@ -169,6 +169,7 @@ typedef struct fent {
 	const char *spath;	/* as spelled, for dependency files */
 	uint8_t sys;		/* a system header (found in a system directory, or included by one) */
 	uint32_t from;		/* the #include's location (0: the main file, <built-in>, or a cached replay) */
+	const char *cpos;	/* -C: its comments before here are printed or dropped (NULL: none yet) */
 } fent;
 
 #define MAXCTX (1u << 15)
@@ -458,7 +459,7 @@ struct pp {
 	/* the last token printed, for clang's AvoidConcat: kind, an identifier "L", '.' before it, its end */
 	uint8_t pk, pk_L, pk_pp;
 	const char *pk_end;
-	uint8_t sol_on, edir;	/* edir: a directive was printed on this line (clang's EmittedDirectiveOnThisLine) */
+	uint8_t sol_on, edir, cmt_sol;	/* cmt_sol: -C, an empty expansion began the line: a comment next starts it */	/* edir: a directive was printed on this line (clang's EmittedDirectiveOnThisLine) */
 	uint32_t cur_line;
 	uint8_t out_text;	/* pp_text: track lines for the printer */	/* clang's CurLine: the presumed line the output is on */
 	int sol_depth;
@@ -607,6 +608,9 @@ VPRIV uint32_t file_line(const vlex_file *f, const pfile *cfi, uint32_t off);
 VPRIV uint32_t loc_line(const pp *p, uint32_t loc);
 VPRIV bool move_to_line(pp *p, uint32_t line, bool req);
 VPRIV void out_nl(pp *p);
+VPRIV void cmt_flush(pp *p, ctx *c, const char *upto);
+VPRIV __attribute__((cold)) void cmt_skip_to(pp *p, const ptok *rp);
+VPRIV const char *cmt_line_end(const char *s);
 VPRIV unsigned tok_col(const pp *p, uint32_t loc);
 VPRIV void text_file_change(pp *p, const ctx *from, int enter);
 VPRIV const char *presumed_name(const pp *p, uint32_t fe, uint32_t loc, uint32_t *len);

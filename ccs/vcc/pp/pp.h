@@ -66,6 +66,7 @@ typedef struct pp_opts {
 	int dump_defines;		/* -dD: #define/#undef in the -E text */
 	const char *const *dd_order;	/* -dD: clang's order of its predefined macros */
 	int ndd_order;
+	int comments;			/* -C: comments in the -E text (not in directives or macro arguments) */
 	int show_includes;		/* -H: each file entered, dots for its depth, to errfd */
 	int deps;			/* -M/-MD: files skipped by guard or #pragma once are dependencies too */
 	int fatal_continue;		/* -E text: a fatal error (file not found) does not end the TU, as clang */

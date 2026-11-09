@@ -701,6 +701,7 @@ int ppd_run(int argc, char **argv, const ppd_env *env)
 	char *pmap = NULL;
 	double t0;
 	pp *p;
+	int comments = 0;
 	int dmacros = 0, showinc = 0, ddefs = 0, syntax = 0, layout = 0, ms_anon = 0, short_wchar = 0, tokhash = 0, emit = 0, objmode = 0;
 	int tri = -1, std = 0, strict = 0, wimpl_int = 0, wimpl_fn = 0, gnu89_inline = -1, vcc_kernel = 0;
 	char objbuf[1024];
@@ -716,6 +717,12 @@ int ppd_run(int argc, char **argv, const ppd_env *env)
 		if (!strcmp(a, "-c")) { objmode = 1; continue; }
 		if (!strcmp(a, "-dM")) { dmacros = 1; continue; }
 		if (!strcmp(a, "-H")) { showinc = 1; continue; }
+		if (!strcmp(a, "-C")) { comments = 1; continue; }
+		if (!strcmp(a, "-CC") || !strcmp(a, "-traditional-cpp") || !strcmp(a, "-traditional")) {
+			dprintf(errfd, "vcc: error: %s is not supported\n", a);	/* TODO.md: output modes */
+			status = 2;
+			goto out;
+		}
 		if (!strcmp(a, "-dD")) { ddefs = 1; continue; }
 		if (!strcmp(a, "-fms-anonymous-structs") || !strcmp(a, "-fms-extensions")) { ms_anon = 1; continue; }
 		if (!strcmp(a, "-fshort-wchar")) { short_wchar = 1; continue; }
@@ -940,6 +947,7 @@ int ppd_run(int argc, char **argv, const ppd_env *env)
 	po.c89 = std == 89 && strict;
 	po.deps = mdeps || depfile;
 	po.show_includes = showinc;
+	po.comments = comments;
 	po.dump_defines = ddefs;
 	po.dd_order = darwin ? predef_order_darwin : predef_order_linux;
 	po.ndd_order = darwin ? (int)(sizeof(predef_order_darwin) / sizeof(*predef_order_darwin))
