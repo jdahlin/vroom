@@ -925,6 +925,66 @@ pp at a region start, at any depth, as `pp_top_events` gives for the top level.
      - **Next.** Step 3 (lazy bodies) for the kernel's 256 M refused tokens. Cheaper
        recording (W reached lazily, entries smaller) before turning it on by
        default.
+   - *2c done (2026-11-09): replay pays on PG (−2.9% of `cc_run`). Still opt-in.*
+     - **Measured per phase** with thread instruction counters around each phase
+       (debug code, not kept). Process totals moved ±1% between runs on the loaded
+       machine, so from here on the metric is `cc_run` instructions from `vpp --batch`'s
+       `perf:` line (the job threads only).
+       - Recording a region cost ~230 k instructions in hooks and W copies
+         (~33% on top of parsing it).
+       - At publish, `rel_build` took 1.24 G for 27 M `rel_one` calls: one per
+         field, values included.
+       - Validation made 19.6 M `pair` calls, ~16 per W record, mostly on values.
+       - 1867 of the 3509 published entries were never used: 206 of 328 MB.
+     - **Changes.**
+       - *Record at the second sight.* The never table also counts sights per key,
+         and a key is recorded at its `DR_SEEN`-th sight (2). Recording at the third
+         gave the same `cc_run` with 174 MB instead of 224.
+       - *Stop a doomed recording at once.* When a lazy body, pragma, label, asm or
+         weak pragma appears (checked at each read), the recording stops there
+         instead of copying W until the region's end. On the kernel, 70.6 M of
+         recorded tokens became 0.9 M.
+       - *Value masks.* Per schema variant (sym: tag or not; ctype: 32 by kind and
+         flags), a mask covers the bytes of the `K_IMM` fields. Validation compares
+         a sym, field or type's values with masked word compares and pairs only the
+         references; 0/0 references are skipped. Tag contents are keyed the same
+         way (masked words plus normalized references).
+       - *Specialized publish.* `SYM_REFS`/`FIELD_REFS` list the reference fields,
+         and `schema_check` aborts if they drift from `sym_fd`/`field_fd`.
+         `rel_build` visits only those fields (nodes: ty, loc and the three
+         operands) with constant schemas.
+       - *Delta relocations as offset lists.* Own deltas of 4 bytes are stored per
+         array and op as offsets (4 bytes instead of 12), and apply skips an op
+         whose delta is 0 (all deltas are 0 in a third of PG's replays).
+       - *Tries ordered by hits.* A key's variants are tried by successful
+         validations, most first (27 704 → 23 152 tries before the second-sight
+         change).
+       - The stamp tables are sized once per try, not at every pair.
+         `dr_close` is called only while a recording is open (`dr_on`).
+     - **Numbers**, `vpp --batch -j 1`, `cc_run` instructions:
+
+       | | default | 2b `VCC_DR=1` | 2c `VCC_DR=1` |
+       |---|---|---|---|
+       | PG (1549 TUs) | 33.66 G | 36.37 G (+8.1%) | 32.68 G (−2.9%) |
+       | PG entries | | 3509, 338 MB | 2247, 224 MB |
+       | PG regions replayed | | 17 394 (17.4 M tok) | 16 033 (15.6 M tok) |
+       | kernel (840 TUs) | 81.84 G | 99.10 G (+21%) | 84.62 G (+3.4%) |
+       | kernel entries | | 3668, 214 MB | 1065, 49 MB |
+
+       - PG ms, validate / apply / publish / W: 233 / 122 / 349 / 138 in 2b, and
+         ~100 / 75 / 140 / 80 in 2c.
+       - On the kernel, replay still loses: most of its regions hold lazy bodies
+         (only 0.6 M tokens replay). With nothing recorded at all, replay mode
+         costs ~1% for the bookkeeping at each top-level declaration.
+     - **Verification.**
+       - `VCC_DRCHECK`: 0 mismatches (PG 17 808 regions, kernel 4380; under
+         ASan+UBSan, 400 PG and 300 kernel TUs).
+       - Objects are identical with `VCC_DR=1`: PG 1545/1545 (`pgf.jobs`), kernel
+         840/840.
+       - Default path: the file-by-file build compiles; ctests, stress, sema,
+         parity, vccd tests and `vbench gate` are as in the commit message.
+     - **Next.** Step 3 (lazy bodies) is what the kernel needs. Then decide whether
+       to turn replay on by default for PG-like code.
 3. Lazy bodies through `lzfn.hc` (the kernel's 226 M, PG's 5.5 M).
 4. Fold ccsnap into this if per-region replay of the prefix is as cheap as a snapshot
    restore; otherwise keep both, and let a recording coexist with snapshots (the

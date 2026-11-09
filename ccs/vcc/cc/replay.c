@@ -144,6 +144,21 @@ static int field_fd(fd *o)
 	return n;
 }
 
+/* the fields of sym_fd and field_fd that are not values, in order (rel_build; schema_check: in sync) */
+#define SYM_REFS(X) X(loc, K_LOC) X(ty, K_TYPE) X(val, K_TAG) X(body, K_NODE) X(attrs, K_ATTR) X(shadow, K_SHADOW) \
+	X(next, K_SYM) X(ovl, K_SYM) X(plb, K_LOC) X(ple, K_LOC) X(psyms, K_LIST1)
+#define FIELD_REFS(X) X(ty, K_TYPE) X(loc, K_LOC)
+
+/*
+ * Value masks: the bytes of a record's K_IMM fields, per schema variant, so
+ * a record's values are compared (validation) or keyed (tag contents) at
+ * once and only its references one by one (set by vm_init from the schemas).
+ */
+#define SYM_W ((sizeof(sym) + 7) / 8)
+#define FIELD_W ((sizeof(field) + 7) / 8)
+#define TY_W ((sizeof(ctype) + 7) / 8)
+static uint64_t vm_sym[2][SYM_W], vm_field[FIELD_W], vm_ty[32][TY_W];
+
 static bool is_tagkind(int k) { return k == TY_STRUCT || k == TY_UNION || k == TY_ENUM; }
 
 static int ty_fd(const ctype *t, fd *o)
@@ -294,6 +309,7 @@ typedef struct drrel { uint32_t off; uint8_t op, size, wk, _pad; uint32_t arg; }
 
 typedef struct drent {
 	struct drent *_Atomic next;
+	_Atomic uint32_t hits;	/* successful validations (tries go by most hits first) */
 	const void *he;
 	unsigned ctr;
 	uint32_t pack;
@@ -340,6 +356,8 @@ typedef struct drent {
 	uint32_t *fpc, nfpc;	/* field pieces in heap: (offset, count) */
 	struct drrel *rel[RA_N];	/* the own records' references, per array (rel_build) */
 	uint32_t nrel[RA_N];
+	uint32_t *dof[RA_N];	/* 4-byte own deltas, per array: offsets by op, op RO_DS + k at [dn[k], dn[k + 1]) */
+	uint32_t dn[RA_N][RO_DA + 2];
 	uint32_t *bind, nbind;	/* syms bound at file scope, in order */
 	uint32_t *tl, ntl;	/* toplevel */
 	xrec *xs, *xt, *xa, *xy;
@@ -372,13 +390,17 @@ static uint32_t pack_key(const cc *c)
 }
 
 /*
- * Regions that did not publish: after NEVER_AFTER failures (or abandoned
- * recordings) a key is not recorded again, as what stops it (a lazy body, a
- * pragma, asm ...) is mostly the region's own.
+ * Per key, process-wide: how often its region was seen at a boundary, and how
+ * often recording it failed.  A key is recorded at its DR_SEEN-th sight (on
+ * PG half of the entries recorded at the first sight were never used), and
+ * not again after NEVER_AFTER failures (or abandoned recordings), as what
+ * stops it (a lazy body, a pragma, asm ...) is mostly the region's own.
  */
+enum { S_OPEN, S_PUB, S_NOPUB, S_ABANDON, S_TRY, S_HIT, S_MISS, S_NOENT, S_NOSKIP, S_NEVER, S_FIRST, S_N };
 #define NEVER_N 65536
 #define NEVER_AFTER 2
-static struct never { _Atomic uint64_t key; _Atomic uint32_t n; } never_tab[NEVER_N];
+#define DR_SEEN 2
+static struct never { _Atomic uint64_t key; _Atomic uint32_t n, seen; } never_tab[NEVER_N];
 
 static uint64_t never_key(const void *he, unsigned ctr, uint32_t pack, uint64_t sig)
 {
@@ -413,17 +435,24 @@ static void never_note(const void *he, unsigned ctr, uint32_t pack, uint64_t sig
 		atomic_fetch_add_explicit(&v->n, n, memory_order_relaxed);
 }
 
-static bool never_record(const void *he, unsigned ctr, uint32_t pack, uint64_t sig)
+/* 0: record; S_NEVER: failed too often; S_FIRST: not seen often enough yet (this sight counted) */
+static int never_record(const void *he, unsigned ctr, uint32_t pack, uint64_t sig)
 {
-	struct never *v = never_slot(never_key(he, ctr, pack, sig), false);
+	struct never *v = never_slot(never_key(he, ctr, pack, sig), true);
 
-	return v && atomic_load_explicit(&v->n, memory_order_relaxed) >= NEVER_AFTER;
+	if (!v)
+		return 0;	/* (table full here: record) */
+	if (atomic_load_explicit(&v->n, memory_order_relaxed) >= NEVER_AFTER)
+		return S_NEVER;
+	return atomic_fetch_add_explicit(&v->seen, 1, memory_order_relaxed) + 1 < DR_SEEN ? S_FIRST : 0;
 }
 
 /* ---------------- per-TU state ---------------- */
 
 enum { F_DIAG, F_PRAGMA, F_LAZY, F_LABEL, F_ASM, F_CPLX, F_WEAK, F_BODY, F_TYWRITE, F_LISTWRITE, F_UNHOOKED,
        F_EXTBIND, F_UNMAPPED, F_TYMUT, F_OPS, F_HEAP, F_BUDGET, F_VARIANTS, F_N };
+/* failures from the region's own tokens: the key is not recorded again */
+#define F_OWN (1u << F_PRAGMA | 1u << F_WEAK | 1u << F_LAZY | 1u << F_LABEL | 1u << F_ASM | 1u << F_CPLX)
 static const char *const fname[F_N] = { "diag", "pragma", "lazy", "label", "asm", "complex", "pweak", "ext-var-body",
 	"type-write", "list-write", "unhooked-write", "ext-bind", "unmapped", "type-mutated", "type-log", "heap",
 	"budget", "variants" };
@@ -490,7 +519,6 @@ struct drrec {
 };
 
 /* stats */
-enum { S_OPEN, S_PUB, S_NOPUB, S_ABANDON, S_TRY, S_HIT, S_MISS, S_NOENT, S_NOSKIP, S_NEVER, S_N };
 static _Atomic uint64_t st_n[S_N], st_tok[S_N], st_fail[F_N], st_failtok[F_N], st_bytes, st_ents;
 
 #define ADD(x, v) atomic_fetch_add_explicit(&(x), (v), memory_order_relaxed)
@@ -872,12 +900,21 @@ static void w_drain(cc *c)
 	}
 }
 
+static uint32_t own_fail(cc *c, const struct drrec *r, bool all);
+static void rec_doomed(cc *c, uint32_t fail);
+
 /* a name lookup (ns 0: ordinary, 1: tag) gave s */
 VPRIV __attribute__((noinline)) void dr_read(cc *c, int ns, uint32_t id, uint32_t s)
 {
 	struct drrec *r = c->dr;
 
-	if (!r->open || (s && s >= r->s0))
+	if (!r->open)
+		return;
+	if (unlikely(!r->chk && ((r->fail & F_OWN) || own_fail(c, r, false)))) {
+		rec_doomed(c, r->fail | own_fail(c, r, false));
+		return;
+	}
+	if (s && s >= r->s0)
 		return;
 	if (!rs_add(r, (uint64_t)ns << 31 | id))
 		return;
@@ -1322,6 +1359,7 @@ static uint32_t heap_piece(cvec *h, const cc *c, size_t heap0, const void *p, si
 }
 
 typedef VEC(drrel) relvec;
+typedef struct relset { relvec g; VEC(uint32_t) d[RO_DA + 1]; } relset;
 
 /* the relocation of field f (value v64) of an own record at byte offset off; false: unmapped */
 static int64_t rel_w(const struct drrec *r, int k, uint32_t a)
@@ -1331,7 +1369,7 @@ static int64_t rel_w(const struct drrec *r, int k, uint32_t a)
 	return p == UINT32_MAX ? -1 : (int64_t)p;
 }
 
-static bool rel_one(const drent *e, const struct drrec *r, relvec *rl, uint32_t off, fd f, uint64_t v64)
+static inline __attribute__((always_inline)) bool rel_one(const drent *e, const struct drrec *r, relset *rl, uint32_t off, fd f, uint64_t v64)
 {
 	uint32_t v = (uint32_t)v64, ix;
 	int64_t p;
@@ -1439,11 +1477,14 @@ static bool rel_one(const drent *e, const struct drrec *r, relvec *rl, uint32_t 
 	default:
 		return false;
 	}
-	VPUSH(*rl, x);
+	if (x.op <= RO_DA && x.size == 4)
+		VPUSH(rl->d[x.op], x.off);
+	else
+		VPUSH(rl->g, x);
 	return true;
 }
 
-static bool rel_rec(const drent *e, const struct drrec *r, relvec *rl, uint32_t off, const void *rec, const fd *f, int n)
+static inline bool rel_rec(const drent *e, const struct drrec *r, relset *rl, uint32_t off, const void *rec, const fd *f, int n)
 {
 	bool ok = true;
 
@@ -1455,22 +1496,39 @@ static bool rel_rec(const drent *e, const struct drrec *r, relvec *rl, uint32_t 
 /* the relocation lists of e's own records (e->syms ... and the field pieces of heap h) */
 static bool rel_build(drent *e, const struct drrec *r, const char *h)
 {
-	relvec rl[RA_N] = { 0 };
+	relset rl[RA_N] = { 0 };
 	fd f[24], sf[2] = { FD(pp_span, b, K_LOC), FD(pp_span, e, K_LOC) };
 	int n;
 	bool ok = true;
 
+#define R1(T, rec, fl, k) (ok &= rel_one(e, r, rs, off, FD(T, fl, k), rd(rec, FD(T, fl, k))))
 	for (uint32_t i = 0; i < e->s1 - e->s0; i++) {
-		n = sym_fd(&e->syms[i], f);
-		ok &= rel_rec(e, r, &rl[RA_SYM], i * (uint32_t)sizeof(sym), &e->syms[i], f, n);
+		const sym *y = &e->syms[i];
+		uint32_t off = i * (uint32_t)sizeof(sym);
+		relset *rs = &rl[RA_SYM];
+
+#define X(fl, k)                                                     \
+	if (offsetof(sym, fl) != offsetof(sym, val) || y->kind == S_TAG) \
+		R1(sym, y, fl, k);
+		SYM_REFS(X)
+#undef X
 	}
 	for (uint32_t i = 0; i < e->t1 - e->t0; i++) {
 		n = tag_fd(&e->tags[i], f);
 		ok &= rel_rec(e, r, &rl[RA_TAG], i * (uint32_t)sizeof(tag), &e->tags[i], f, n);
 	}
 	for (uint32_t i = 0; i < e->n1 - e->n0; i++) {
-		n = node_fd(&e->nodes[i], f);
-		ok &= rel_rec(e, r, &rl[RA_NODE], i * (uint32_t)sizeof(node), &e->nodes[i], f, n);
+		const node *y = &e->nodes[i];
+		uint32_t off = i * (uint32_t)sizeof(node);
+		relset *rs = &rl[RA_NODE];
+		uint8_t k[3];
+
+		node_kinds(y, k);	/* (node_fd: op..aux a value) */
+		R1(node, y, ty, K_TYPE);
+		R1(node, y, loc, K_LOC);
+		ok &= rel_one(e, r, rs, off, FD(node, a, k[0]), y->a);
+		ok &= rel_one(e, r, rs, off, FD(node, b, k[1]), y->b);
+		ok &= rel_one(e, r, rs, off, FD(node, c, k[2]), y->c);
 		ok &= rel_rec(e, r, &rl[RA_SPAN], i * (uint32_t)sizeof(pp_span), &e->spans[i], sf, 2);
 	}
 	for (uint32_t i = 0; i < e->l1 - e->l0; i++)
@@ -1479,23 +1537,55 @@ static bool rel_build(drent *e, const struct drrec *r, const char *h)
 	n = attr_fd(f);
 	for (uint32_t i = 0; i < e->a1 - e->a0; i++)
 		ok &= rel_rec(e, r, &rl[RA_ATTR], i * (uint32_t)sizeof(attrs), &e->attr[i], f, n);
-	n = field_fd(f);
 	for (uint32_t i = 0; i < e->nfpc; i += 2)
 		for (uint32_t k = 0; k + 1 < e->fpc[i + 1]; k++) {
 			uint32_t off = e->fpc[i] + k * (uint32_t)sizeof(field);
+			const field *y = (const field *)(h + off);
+			relset *rs = &rl[RA_HEAP];
 
-			ok &= rel_rec(e, r, &rl[RA_HEAP], off, h + off, f, n);
+#define X(fl, kk) R1(field, y, fl, kk);
+			FIELD_REFS(X)
+#undef X
 		}
-	for (int a = 0; a < RA_N; a++)
-		e->rel[a] = rl[a].v, e->nrel[a] = rl[a].n;
+#undef R1
+	for (int a = 0; a < RA_N; a++) {
+		uint32_t t = 0;
+
+		e->rel[a] = rl[a].g.v, e->nrel[a] = rl[a].g.n;
+		for (int k = 0; k <= RO_DA; k++)
+			e->dn[a][k] = t, t += rl[a].d[k].n;
+		e->dn[a][RO_DA + 1] = t;
+		e->dof[a] = malloc((t + 1) * sizeof(uint32_t));
+		for (int k = 0; k <= RO_DA; k++) {
+			memcpy(e->dof[a] + e->dn[a][k], rl[a].d[k].v, rl[a].d[k].n * sizeof(uint32_t));
+			free(rl[a].d[k].v);
+		}
+	}
 	return ok;
 }
 
-/* apply relocations rl[0, n) to the copied array at base */
-static void rel_apply(const trx *x, char *base, const drrel *rl, uint32_t n)
+/* apply the relocations of array a to its copy at base */
+static void rel_apply(const trx *x, char *base, int a)
 {
 	const struct drrec *r = x->r;
 	const int64_t d[8] = { x->ds, x->dt, x->dn, x->dl, x->di, x->df, x->dr, x->da };
+	const drrel *rl = x->e->rel[a];
+	uint32_t n = x->e->nrel[a];
+	const uint32_t *dof = x->e->dof[a], *dn = x->e->dn[a];
+
+	for (int k = 0; k <= RO_DA; k++) {
+		uint32_t dk = (uint32_t)d[k];
+
+		if (!dk)
+			continue;
+		for (uint32_t i = dn[k]; i < dn[k + 1]; i++) {
+			uint32_t v;
+
+			memcpy(&v, base + dof[i], 4);
+			v += dk;
+			memcpy(base + dof[i], &v, 4);
+		}
+	}
 
 	for (uint32_t i = 0; i < n; i++) {
 		const drrel *q = &rl[i];
@@ -1520,6 +1610,40 @@ static void rel_apply(const trx *x, char *base, const drrel *rl, uint32_t n)
 #define REL_LOC(x_, lb_) ((x_) = (x_) ? (x_) + (lb_) : 0)
 
 static void drcheck(cc *c);
+
+/* what the region's own tokens did that stops an entry (all: also diagnostics and _Complex) */
+static uint32_t own_fail(cc *c, const struct drrec *r, bool all)
+{
+	uint32_t fail = 0;
+
+	if (all && (c->errors != r->errors0 || c->ndiag != r->ndiag0 || pp_errors(c->p) != r->pperr0))
+		fail |= 1u << F_DIAG;
+	if (c->npack != r->npack0)
+		fail |= 1u << F_PRAGMA;
+	if (c->nlzf != r->lzf0 || c->nlzt != r->lzt0 || c->nlzs != r->lzs0)
+		fail |= 1u << F_LAZY;
+	if (c->nlabel != r->lb0)
+		fail |= 1u << F_LABEL;
+	if (c->nasm != r->as0 || c->ntlasm != r->tla0)
+		fail |= 1u << F_ASM;
+	if (all && memcmp(r->cplx0, c->cplx, sizeof(r->cplx0)))
+		fail |= 1u << F_CPLX;
+	if (c->npweak != r->pw0)
+		fail |= 1u << F_WEAK;
+	return fail;
+}
+
+/* a recording that cannot publish any more (see own_fail): stopped at once, not at the region's end */
+static void rec_doomed(cc *c, uint32_t fail)
+{
+	struct drrec *r = c->dr;
+	uint64_t tok = pp_ntok(c->p) - 1 - r->b;
+
+	rec_stop(c);
+	count(S_NOPUB, tok);
+	fail_count(fail, tok);
+	never_note(r->he, r->ctr, r->pack, opt_sig(c->o), fail & F_OWN ? NEVER_AFTER : 1);
+}
 
 static void rec_close(cc *c, uint64_t endpos)
 {
@@ -1547,20 +1671,7 @@ static void rec_close(cc *c, uint64_t endpos)
 			return;
 		}
 	}
-	if (c->errors != r->errors0 || c->ndiag != r->ndiag0 || pp_errors(c->p) != r->pperr0)
-		fail |= 1u << F_DIAG;
-	if (c->npack != r->npack0)
-		fail |= 1u << F_PRAGMA;
-	if (c->nlzf != r->lzf0 || c->nlzt != r->lzt0 || c->nlzs != r->lzs0)
-		fail |= 1u << F_LAZY;
-	if (c->nlabel != r->lb0)
-		fail |= 1u << F_LABEL;
-	if (c->nasm != r->as0 || c->ntlasm != r->tla0)
-		fail |= 1u << F_ASM;
-	if (memcmp(r->cplx0, c->cplx, sizeof(r->cplx0)))
-		fail |= 1u << F_CPLX;
-	if (c->npweak != r->pw0)
-		fail |= 1u << F_WEAK;
+	fail |= own_fail(c, r, true);
 	if (fail)
 		goto nopub;
 
@@ -1689,6 +1800,33 @@ static void rec_close(cc *c, uint64_t endpos)
 				continue;
 			}
 			cb.n = 0;
+#define PUTM(rec, m, nw)                                                                          \
+	do {                                                                                      \
+		VGROW(cb, (nw) * 8);                                                              \
+		for (size_t q_ = 0; q_ < (nw); q_++) {                                            \
+			uint64_t v_ = 0;                                                          \
+			size_t k_ = q_ * 8 + 8 <= sizeof(*(rec)) ? 8 : sizeof(*(rec)) - q_ * 8;   \
+			memcpy(&v_, (const char *)(rec) + q_ * 8, k_);                            \
+			v_ &= (m)[q_];                                                            \
+			memcpy(cb.v + cb.n, &v_, 8);                                              \
+			cb.n += 8;                                                                \
+		}                                                                                 \
+	} while (0)
+#define PUTR(rec, fdx)                                                                            \
+	do {                                                                                      \
+		fd f_ = (fdx);                                                                    \
+		uint64_t v_ = rd((rec), f_);                                                      \
+		if (f_.kind == K_TYPE || f_.kind == K_TIDX) {                                     \
+			uint32_t ix_ = f_.kind == K_TYPE ? QI((uint32_t)v_) : (uint32_t)v_;       \
+			if (ix_ >= r->nty_bi)                                                     \
+				v_ = f_.kind == K_TYPE ? QQ((uint32_t)v_) | 1ull << 40 : 1ull << 40; \
+		} else {                                                                          \
+			v_ = v_ ? 1ull << 41 : 0;                                                 \
+		}                                                                                 \
+		VGROW(cb, 8);                                                                     \
+		memcpy(cb.v + cb.n, &v_, 8);                                                      \
+		cb.n += 8;                                                                        \
+	} while (0)
 #define PUT(rec, fds, nf)                                                                         \
 	for (int q_ = 0; q_ < (nf); q_++) {                                                       \
 		uint64_t v_ = rd((rec), (fds)[q_]);                                               \
@@ -1708,9 +1846,12 @@ static void rec_close(cc *c, uint64_t endpos)
 	}
 			n = tag_fd(&w->t, f);
 			PUT(&w->t, f, n);
-			n = field_fd(f);
-			for (uint32_t j = 0; j < w->t.nfield && w->t.f; j++)
-				PUT(&r->wf.v[w->fo + j], f, n);
+			for (uint32_t j = 0; j < w->t.nfield && w->t.f; j++) {
+				const field *y = &r->wf.v[w->fo + j];
+
+				PUTM(y, vm_field, FIELD_W);
+				PUTR(y, FD(field, ty, K_TYPE));
+			}
 			if (w->t.nenum) {
 				uint32_t lp = wm_find(&r->wm, (uint64_t)W_LIST << 32 | w->t.enums);
 
@@ -1730,12 +1871,18 @@ static void rec_close(cc *c, uint64_t endpos)
 							ok = false;	/* (tag_known pairs only an enumerator's type) */
 							break;
 						}
-						n = sym_fd(y, f);
-						PUT(y, f, n);
+						PUTM(y, vm_sym[0], SYM_W);	/* (S_ENUMCONST) */
+#define X(fl, k)                                          \
+	if ((k) != K_LOC && (k) != K_SHADOW && offsetof(sym, fl) != offsetof(sym, val)) \
+		PUTR(y, FD(sym, fl, k));
+						SYM_REFS(X)
+#undef X
 					}
 				}
 			}
 #undef PUT
+#undef PUTM
+#undef PUTR
 			w->k = ok ? tc_intern(cb.v, cb.n) : NULL;
 			if (w->k) {	/* (A's tag has these values now too unless the region wrote it) */
 				bool wrote = false;
@@ -1986,7 +2133,7 @@ static void rec_close(cc *c, uint64_t endpos)
 		   (e->f1 - e->f0) * 8 + (e->r1 - e->r0) * sizeof(cstr) + (e->a1 - e->a0) * sizeof(attrs) + e->nheap +
 		   e->nfpc * 4 + e->nbind * 4 + e->ntl * 4 + (e->nxs + e->nxt + e->nxa + e->nxy) * sizeof(xrec);
 	for (int k = 0; k < RA_N; k++)
-		e->bytes += e->nrel[k] * sizeof(drrel);
+		e->bytes += e->nrel[k] * sizeof(drrel) + e->dn[k][RO_DA + 1] * 4;
 	for (int k = 0; k < W_N; k++)
 		e->bytes += (e->wmask[k] + 1) * 8;
 	if (!fail) {
@@ -2022,7 +2169,7 @@ static void rec_close(cc *c, uint64_t endpos)
 	free(e->wb), free(e->wv), free(e->wvp), free(e->ops), free(e->opar), free(e->fin), free(e->syms), free(e->tags);
 	free(e->nodes), free(e->spans), free(e->lists), free(e->lk), free(e->ip), free(e->fp), free(e->strs);
 	for (int k = 0; k < RA_N; k++)
-		free(e->rel[k]);
+		free(e->rel[k]), free(e->dof[k]);
 	free(e->attr), free(e->heap), free(e->fpc), free(e->bind), free(e->tl), free(e->xs), free(e->xt), free(e->xa), free(e->xy);
 	free(e);
 	hp.v = NULL, fpc.v = NULL;
@@ -2033,8 +2180,7 @@ nopub:
 	/* (what the region's own tokens do stops it every time: no second recording) */
 	if (!(fail & (1u << F_BUDGET | 1u << F_VARIANTS)))
 		never_note(r->he, r->ctr, r->pack, opt_sig(c->o),
-			   fail & (1u << F_PRAGMA | 1u << F_WEAK | 1u << F_LAZY | 1u << F_LABEL | 1u << F_ASM | 1u << F_CPLX)
-				   ? NEVER_AFTER : 1);
+			   fail & F_OWN ? NEVER_AFTER : 1);
 }
 
 /* ---------------- replay: validation ---------------- */
@@ -2081,11 +2227,10 @@ static bool pair_wp(un *u, int k, uint32_t a, uint32_t b, bool *found, bool push
 	*s = b + 1;
 	if (k <= W_TY) {
 		uint32_t lim = k == W_SYM ? u->c->nsym : k == W_TAG ? u->c->ntag : u->c->nty;
-		uint32_t *st;
+		uint32_t *st = u->r->stamp[k];	/* (validate: sized) */
 
 		if (b >= lim)
 			return false;
-		st = ensure(&u->r->stamp[k], &u->r->cstamp[k], lim, false);
 		if (st[b] == u->r->gen)
 			return false;	/* (two A records for one of B's) */
 		st[b] = u->r->gen;
@@ -2127,7 +2272,7 @@ static bool slot_set(un *u, int k, uint32_t p, uint32_t b)
 	lim = k == W_SYM ? u->c->nsym : k == W_TAG ? u->c->ntag : u->c->nty;
 	if (b >= lim)
 		return false;
-	st = ensure(&u->r->stamp[k], &u->r->cstamp[k], lim, false);
+	st = u->r->stamp[k];
 	if (st[b] == u->r->gen)
 		return false;
 	st[b] = u->r->gen;
@@ -2252,6 +2397,104 @@ static bool pair(un *u, int k, uint64_t a64, uint64_t b64)
 	}
 }
 
+static fd ty_refs[32][8];
+static uint8_t nty_refs[32];
+
+static int ty_vx(const ctype *t)
+{
+	return (t->flags & TF_VLA ? 1 : 0) | (t->flags & TF_ATOMIC ? 2 : 0) | (is_tagkind(t->kind) ? 4 : 0) |
+	       (t->kind == TY_FUNC ? 8 : 0) | (t->flags & TF_ALIGNED ? 16 : 0);
+}
+
+static void vm_build(const fd *f, int n, uint64_t *m)
+{
+	for (int i = 0; i < n; i++)
+		if (f[i].kind == K_IMM)
+			memset((char *)m + f[i].off, 0xff, f[i].size);
+}
+
+static void vm_init(void)
+{
+	fd f[24];
+	int n;
+	sym s = { 0 };
+
+	for (int t = 0; t < 2; t++) {
+		s.kind = t ? S_TAG : S_VAR;
+		n = sym_fd(&s, f);
+		vm_build(f, n, vm_sym[t]);
+	}
+	n = field_fd(f);
+	vm_build(f, n, vm_field);
+	for (int v = 0; v < 32; v++) {
+		ctype y = { 0 };
+
+		y.kind = v & 4 ? TY_STRUCT : v & 8 ? TY_FUNC : TY_ARRAY;
+		y.flags = (v & 1 ? TF_VLA : 0) | (v & 2 ? TF_ATOMIC : 0) | (v & 16 ? TF_ALIGNED : 0);
+		if ((v & 4) && (v & 8))
+			continue;
+		n = ty_fd(&y, f);
+		vm_build(f, n, vm_ty[v]);
+		for (int i = 0; i < n; i++)
+			if (f[i].kind != K_IMM && f[i].kind != K_LOC && f[i].kind != K_SHADOW && f[i].kind != K_PARAMS &&
+			    f[i].kind != K_SELF)
+				ty_refs[v][nty_refs[v]++] = f[i];
+	}
+}
+
+/* a and b equal in the bytes of m */
+static inline bool vm_eq(const void *a, const void *b, const uint64_t *m, size_t nw, size_t size)
+{
+	uint64_t d = 0;
+
+	for (size_t i = 0; i < nw; i++) {
+		uint64_t x = 0, y = 0;
+		size_t k = i * 8 + 8 <= size ? 8 : size - i * 8;
+
+		memcpy(&x, (const char *)a + i * 8, k);
+		memcpy(&y, (const char *)b + i * 8, k);
+		d |= (x ^ y) & m[i];
+	}
+	return !d;
+}
+
+static bool pair(un *u, int k, uint64_t a64, uint64_t b64);
+
+static bool un_sym(un *u, const sym *a, const sym *b)
+{
+	if (!vm_eq(a, b, vm_sym[a->kind == S_TAG], SYM_W, sizeof(sym)))
+		return false;
+#define X(fl, k)                                                                                 \
+	if ((k) != K_LOC && (k) != K_SHADOW && (offsetof(sym, fl) != offsetof(sym, val) || a->kind == S_TAG)) { \
+		uint64_t av_ = rd(a, FD(sym, fl, k)), bv_ = rd(b, FD(sym, fl, k));                    \
+		if ((av_ | bv_) && !pair(u, k, av_, bv_))	/* (0, 0: equal for every kind here) */     \
+			return false;                                                                \
+	}
+	SYM_REFS(X)
+#undef X
+	return true;
+}
+
+static bool un_field(un *u, const field *a, const field *b)
+{
+	return vm_eq(a, b, vm_field, FIELD_W, sizeof(field)) && pair(u, K_TYPE, a->ty, b->ty);
+}
+
+static bool un_ty(un *u, const ctype *a, const ctype *b)
+{
+	int v = ty_vx(a);
+
+	if (!vm_eq(a, b, vm_ty[v], TY_W, sizeof(ctype)))
+		return false;
+	for (int i = 0; i < nty_refs[v]; i++) {
+		uint64_t av = rd(a, ty_refs[v][i]), bv = rd(b, ty_refs[v][i]);
+
+		if ((av | bv) && !pair(u, ty_refs[v][i].kind, av, bv))	/* (no K_LIST among them) */
+			return false;
+	}
+	return true;
+}
+
 static bool un_rec(un *u, const void *a, const void *b, const fd *f, int n)
 {
 	for (int i = 0; i < n; i++) {
@@ -2272,10 +2515,7 @@ static bool unify_one(un *u, int k, uint32_t p)
 
 	switch (k) {
 	case W_SYM: {
-		const sym *as = &e->ws[p].s, *bs = &c->syms[b];
-
-		n = sym_fd(as, f);
-		return un_rec(u, as, bs, f, n);
+		return un_sym(u, &e->ws[p].s, &c->syms[b]);
 	}
 	case W_TAG: {
 		const wtag *w = &e->wt[p];
@@ -2292,9 +2532,8 @@ static bool unify_one(un *u, int k, uint32_t p)
 			return false;
 		if (!w->t.f != !bt->f)
 			return false;
-		n = field_fd(f);
 		for (uint32_t i = 0; i < w->t.nfield && w->t.f; i++)
-			if (!un_rec(u, &e->wf[w->fo + i], &bt->f[i], f, n))
+			if (!un_field(u, &e->wf[w->fo + i], &bt->f[i]))
 				return false;
 		return true;
 	}
@@ -2302,8 +2541,7 @@ static bool unify_one(un *u, int k, uint32_t p)
 		const wty *w = &e->wy[p];
 		const ctype *bt = &c->ty[b];
 
-		n = ty_fd(&w->t, f);
-		if (!un_rec(u, &w->t, bt, f, n))
+		if (!un_ty(u, &w->t, bt))
 			return false;
 		if (!(w->t.flags & TF_ALIGNED) && (w->t.canon != w->a || bt->canon != b))
 			return false;
@@ -2345,6 +2583,9 @@ static bool validate(cc *c, const drent *e)
 	}
 	for (int k = 0; k < W_N; k++)
 		ensure(&r->slot[k], &r->cslot[k], e->nw[k] + 1, true);
+	ensure(&r->stamp[W_SYM], &r->cstamp[W_SYM], c->nsym + 1, false);
+	ensure(&r->stamp[W_TAG], &r->cstamp[W_TAG], c->ntag + 1, false);
+	ensure(&r->stamp[W_TY], &r->cstamp[W_TY], c->nty + 1, false);
 	r->uw.n = 0;
 	r->tdone.n = 0;
 	/* first the bindings themselves (bound or not, kind, flags): most variants that fail, fail here */
@@ -2435,7 +2676,7 @@ static void apply(cc *c, const drent *e, uint32_t baseB)
 		sym *to = &c->syms[c->nsym];
 
 		memcpy(to, e->syms, ns * sizeof(sym));
-		rel_apply(&x, (char *)to, e->rel[RA_SYM], e->nrel[RA_SYM]);
+		rel_apply(&x, (char *)to, RA_SYM);
 		for (uint32_t i = 0; i < ns; i++) {
 			REL_LOC(to[i].loc, lb);
 			REL_LOC(to[i].plb, lb);
@@ -2450,7 +2691,7 @@ static void apply(cc *c, const drent *e, uint32_t baseB)
 			x.heapB = halloc(c, e->nheap + 16);
 			x.heapB = (char *)(((uintptr_t)x.heapB + 15) & ~(uintptr_t)15);
 			memcpy(x.heapB, e->heap, e->nheap);
-			rel_apply(&x, x.heapB, e->rel[RA_HEAP], e->nrel[RA_HEAP]);
+			rel_apply(&x, x.heapB, RA_HEAP);
 			for (uint32_t i = 0; i < e->nfpc; i += 2) {
 				field *ff = (field *)(x.heapB + e->fpc[i]);
 
@@ -2459,7 +2700,7 @@ static void apply(cc *c, const drent *e, uint32_t baseB)
 			}
 		}
 		memcpy(to, e->tags, nt * sizeof(tag));
-		rel_apply(&x, (char *)to, e->rel[RA_TAG], e->nrel[RA_TAG]);
+		rel_apply(&x, (char *)to, RA_TAG);
 		for (uint32_t i = 0; i < nt; i++) {
 			REL_LOC(to[i].loc, lb);
 			if (to[i].f)
@@ -2473,7 +2714,7 @@ static void apply(cc *c, const drent *e, uint32_t baseB)
 
 		memcpy(to, e->nodes, nn * sizeof(node));
 		memcpy(sp, e->spans, nn * sizeof(pp_span));
-		rel_apply(&x, (char *)to, e->rel[RA_NODE], e->nrel[RA_NODE]);
+		rel_apply(&x, (char *)to, RA_NODE);
 		for (uint32_t i = 0; i < nn; i++) {
 			REL_LOC(to[i].loc, lb);
 			REL_LOC(sp[i].b, lb);
@@ -2484,7 +2725,7 @@ static void apply(cc *c, const drent *e, uint32_t baseB)
 		uint32_t nl = e->l1 - e->l0, *to = &c->lists[c->nlist];
 
 		memcpy(to, e->lists, nl * sizeof(uint32_t));
-		rel_apply(&x, (char *)to, e->rel[RA_LIST], e->nrel[RA_LIST]);
+		rel_apply(&x, (char *)to, RA_LIST);
 	}
 	memcpy(&c->ipool[c->nipool], e->ip, (e->i1 - e->i0) * sizeof(i128));
 	memcpy(&c->fpool[c->nfpool], e->fp, (e->f1 - e->f0) * sizeof(double));
@@ -2502,7 +2743,7 @@ static void apply(cc *c, const drent *e, uint32_t baseB)
 		attrs *to = &c->attr[c->nattr];
 
 		memcpy(to, e->attr, na * sizeof(attrs));
-		rel_apply(&x, (char *)to, e->rel[RA_ATTR], e->nrel[RA_ATTR]);
+		rel_apply(&x, (char *)to, RA_ATTR);
 	}
 	/* 3. the final content of the region's records and enums (and its other ty_new types) */
 	for (uint32_t i = 0; i < e->nops; i++)
@@ -2835,10 +3076,10 @@ VPRIV bool dr_boundary(cc *c)
 	uint32_t base, span, pack;
 	unsigned ctr;
 
-	if (r->open || c->ntk != 1)
+	if (r->open || c->ntk != 1 || !pp_open_hit(c->p, &b, &he, &base, &ctr, &span))
 		return false;
 	pos = pp_ntok(c->p) - 1;
-	if (!pp_open_hit(c->p, &b, &he, &base, &ctr, &span) || b != pos)
+	if (b != pos)
 		return false;
 	pack = pack_key(c);
 	bool any = false;
@@ -2848,10 +3089,22 @@ VPRIV bool dr_boundary(cc *c)
 		uint64_t sig = opt_sig(c->o);
 		uint32_t h = key_hash(he, ctr, pack, sig);
 
-		for (drent *e = atomic_load_explicit(&dr_tab[h], memory_order_acquire); e;
+		drent *vs[DR_VARIANTS];
+		uint32_t vh[DR_VARIANTS], nv = 0;
+
+		for (drent *e = atomic_load_explicit(&dr_tab[h], memory_order_acquire); e && nv < DR_VARIANTS;
 		     e = atomic_load_explicit(&e->next, memory_order_acquire)) {
 			if (e->he != he || e->ctr != ctr || e->pack != pack || e->sig != sig)
 				continue;
+			uint32_t hv = atomic_load_explicit(&e->hits, memory_order_relaxed), j = nv++;
+
+			for (; j > 0 && vh[j - 1] < hv; j--)
+				vs[j] = vs[j - 1], vh[j] = vh[j - 1];
+			vs[j] = e, vh[j] = hv;
+		}
+		for (uint32_t vi = 0; vi < nv; vi++) {
+			drent *e = vs[vi];
+
 			any = true;
 			nvar++;
 			count(S_TRY, 0);
@@ -2864,6 +3117,7 @@ VPRIV bool dr_boundary(cc *c)
 					continue;
 			}
 			count(S_HIT, e->ntok);
+			atomic_fetch_add_explicit(&e->hits, 1, memory_order_relaxed);
 			if (dr_mode == 2)
 				return false;	/* (VCC_DRREC: would replay; parsed, not recorded) */
 			if (dr_check) {
@@ -2888,9 +3142,17 @@ VPRIV bool dr_boundary(cc *c)
 					   e.g. no lazy bodies from the header cache) */
 		return false;
 	}
-	if (nvar >= DR_VARIANTS || never_record(he, ctr, pack, opt_sig(c->o))) {
+	if (nvar >= DR_VARIANTS) {
 		count(S_NEVER, 0);
 		return false;
+	}
+	{
+		int why = never_record(he, ctr, pack, opt_sig(c->o));
+
+		if (why) {
+			count(why, 0);
+			return false;
+		}
 	}
 	r->heap0 = (size_t)(c->hp - c->heap);
 	rec_open(c, b, he, base, ctr, span);
@@ -2918,8 +3180,37 @@ static void schema_check(void)
 	n = node_fd(&x, f);
 	for (int i = 0; i < n; i++)
 		bad |= f[i].size > 8 || !f[i].size;
+	/* SYM_REFS, FIELD_REFS: sym_fd's and field_fd's non-value fields */
+	for (int pass = 0; pass < 3; pass++) {
+		fd want[24];
+		int m = 0;
+
+		s.kind = pass == 0 ? S_TAG : S_VAR;
+		n = pass < 2 ? sym_fd(&s, f) : field_fd(f);
+#define X(fl, k)                                                         \
+	if (offsetof(sym, fl) != offsetof(sym, val) || s.kind == S_TAG) \
+		want[m++] = FD(sym, fl, k);
+#define Y(fl, k) want[m++] = FD(field, fl, k);
+		if (pass < 2) {
+			SYM_REFS(X)
+		} else {
+			FIELD_REFS(Y)
+		}
+#undef X
+#undef Y
+		for (int i = 0, j = 0; i <= n; i++) {
+			if (i == n) {
+				bad |= j != m;
+				break;
+			}
+			if (f[i].kind == K_IMM)
+				continue;
+			bad |= j >= m || want[j].off != f[i].off || want[j].size != f[i].size || want[j].kind != f[i].kind;
+			j++;
+		}
+	}
 	if (bad) {
-		fprintf(stderr, "vcc: VCC_DR: a schema field is wider than 8 bytes (bug)\n");
+		fprintf(stderr, "vcc: VCC_DR: a schema field is wider than 8 bytes, or SYM_REFS/FIELD_REFS out of sync (bug)\n");
 		abort();
 	}
 }
@@ -2930,8 +3221,10 @@ static void dr_env(void)
 
 	dr_mode = getenv("VCC_DR") ? 1 : getenv("VCC_DRREC") ? 2 : 0;
 	dr_check = getenv("VCC_DRCHECK") != NULL;
-	if (dr_mode)
+	if (dr_mode) {
 		schema_check();
+		vm_init();
+	}
 	atomic_store(&dr_max, (uint64_t)(m ? atoll(m) : 512) << 20);
 }
 
@@ -3002,12 +3295,12 @@ void cc_dr_stats(char *buf, size_t n)
 	k = snprintf(buf, n,
 		     "%s: recorded %llu: published %llu (%.1f M tok), not %llu (%.1f M), abandoned %llu; %llu entries, %.1f MB\n"
 		     "  at hits: no entry %llu, tried %llu variants, %s %llu (%.1f M tok), no valid variant %llu, no skip %llu,"
-		     " not recorded again %llu",
+		     " not recorded again %llu, first sight %llu",
 		     dr_mode == 1 ? "decl replay" : "decl replay (record only)", K(st_n[S_OPEN]), K(st_n[S_PUB]),
 		     M(st_tok[S_PUB]), K(st_n[S_NOPUB]), M(st_tok[S_NOPUB]), K(st_n[S_ABANDON]), K(st_ents),
 		     (double)K(st_bytes) / (1 << 20), K(st_n[S_NOENT]), K(st_n[S_TRY]),
 		     dr_mode == 1 ? "replayed" : "valid", K(st_n[S_HIT]), M(st_tok[S_HIT]), K(st_n[S_MISS]),
-		     K(st_n[S_NOSKIP]), K(st_n[S_NEVER]));
+		     K(st_n[S_NOSKIP]), K(st_n[S_NEVER]), K(st_n[S_FIRST]));
 	if (k > 0 && (size_t)k + 96 < n)
 		k += snprintf(buf + k, n - (size_t)k, "\n  tags known equal %llu; %llu tag contents, %.1f MB", K(st_known), K(tc_n),
 			      (double)K(tc_bytes) / (1 << 20));
