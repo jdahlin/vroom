@@ -450,6 +450,12 @@ static __attribute__((noinline)) uint32_t primary_unbound(cc *c, uint32_t id, ui
 	}
 	if (id == c->id_func || id == c->id_FUNCTION || id == c->id_PRETTY)
 		return func_name(c, loc);
+	{
+		uint32_t s = is(c, T_LPAREN) ? lib_builtin(c, id, loc) : 0;
+
+		if (s)
+			return primary_sym(c, s, id, loc);
+	}
 	if (is(c, T_LPAREN)) {
 		if (!c->o->implicit_fn)
 			cc_error(c, loc, "call to undeclared function '%.*s'; ISO C99 and later do not support implicit function declarations [-Wimplicit-function-declaration]", IDF(id));

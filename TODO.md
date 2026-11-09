@@ -543,7 +543,10 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
   keywords are identifiers under `-std=c99` (`int bool = 1;`).
 - [ ] **Builtins**: ~~`__builtin_shufflevector`, `__builtin_convertvector`~~ (done:
   tests/vcc/vector_builtins.c; vector diagnostics spell clang's unnamed form, without the
-  `(vector of N 'T' values)` note and typedef names) [P]; audit the full list against clang's `Builtins.td` for the target
+  `(vector of N 'T' values)` note and typedef names) [P].  Library builtins (clang's `F`
+  ones, 479) are declared from cc/libbuiltins.inc (gen-libbuiltins.py) as calls to the
+  function: `bench/vcc-builtins.py` 473 -> 302 unknown of 924 for aarch64 Linux;
+  337 answer `__has_builtin` 0.  Audit the full list against clang's `Builtins.td` for the target
   (generate a list, try each).
   *Validate:* T1 per builtin; `bench/vcc-builtins.py` that compiles a
   generated use of each clang builtin and reports unknowns.

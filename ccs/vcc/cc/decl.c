@@ -393,6 +393,142 @@ static uint32_t declare(cc *c, const dspec *ds, declr *d, qty t, bool file)
 }
 
 /* C89: a call to an undeclared id declares "extern int id();" in this scope */
+/* ---------------- library builtins (cc/libbuiltins.inc, from clang) ---------------- */
+
+static const struct libbi { const char *name, *lib, *sig; } libbis[] = {
+#include "libbuiltins.inc"
+};
+
+/* one type of a clang builtin type string at *p (Builtins.def's encoding); false: not one vcc reads */
+static bool lb_type(cc *c, const char **p, qty *out)
+{
+	const char *s = *p;
+	int lng = 0, sgn = 0, uns = 0, cplx = 0;
+	qty t;
+
+	for (;; s++) {
+		if (*s == 'L') lng++;
+		else if (*s == 'S') sgn = 1;
+		else if (*s == 'U') uns = 1;
+		else if (*s == 'I') ;	/* a required constant */
+		else if (*s == 'X') cplx = 1;
+		else break;
+	}
+	switch (*s++) {
+	case 'v': t = prim(TY_VOID); break;
+	case 'b': t = prim(TY_BOOL); break;
+	case 'c': t = prim(uns ? TY_UCHAR : sgn ? TY_SCHAR : TY_CHAR); break;
+	case 's': t = prim(uns ? TY_USHORT : TY_SHORT); break;
+	case 'i':
+		t = prim(lng == 0 ? (uns ? TY_UINT : TY_INT) : lng == 1 ? (uns ? TY_ULONG : TY_LONG)
+			 : lng == 2 ? (uns ? TY_ULLONG : TY_LLONG) : (uns ? TY_UINT128 : TY_INT128));
+		lng = 0;
+		break;
+	case 'f': t = prim(TY_FLOAT); break;
+	case 'd':
+		if (lng > 1)
+			return false;	/* __float128 */
+		t = prim(lng ? TY_LDOUBLE : TY_DOUBLE);
+		lng = 0;
+		break;
+	case 'z': t = prim(TY_ULONG); break;	/* size_t */
+	case 'Y': t = prim(TY_LONG); break;	/* ptrdiff_t */
+	case 'w': t = c->t_wchar; break;
+	case 'P': t = prim(TY_VOID); break;	/* FILE: only ever as P*, a void * */
+	case 'W': t = prim(TY_LONG); break;	/* int64_t */
+	case 'Z': t = prim(TY_INT); break;	/* int32_t */
+	default: return false;
+	}
+	if (lng)
+		return false;
+	if (cplx)
+		t = ty_complex(c, t);
+	for (;;) {
+		if (*s == '*') {
+			t = ty_ptr(c, t);
+			s++;
+			while (*s >= '0' && *s <= '9')
+				s++;	/* address space */
+		} else if (*s == 'C' || *s == 'D' || *s == 'R') {
+			t = QT(QI(t), QQ(t) | (*s == 'C' ? Q_CONST : *s == 'D' ? Q_VOLATILE : Q_RESTRICT));
+			s++;
+		} else if (*s == '&') {
+			return false;
+		} else {
+			break;
+		}
+	}
+	*p = s;
+	*out = t;
+	return true;
+}
+
+/*
+ * __builtin_X for a library function X that vcc has no code for: declared on
+ * first use with clang's prototype, its symbol X (clang calls X unless it
+ * folds or inlines it).  0: not a library builtin, or a type vcc cannot read.
+ */
+VPRIV uint32_t lib_builtin(cc *c, uint32_t id, uint32_t loc)
+{
+	const char *n = idstr_(id);
+	size_t nl = idlen_(id), lo = 0, hi = sizeof(libbis) / sizeof(libbis[0]);
+	const struct libbi *b = NULL;
+
+	if (nl < 11 || memcmp(n, "__builtin_", 10))
+		return 0;
+	while (lo < hi) {
+		size_t m = (lo + hi) / 2;
+		int r = strncmp(libbis[m].name, n, nl);
+
+		if (r == 0 && libbis[m].name[nl])
+			r = 1;
+		if (r == 0) {
+			b = &libbis[m];
+			break;
+		}
+		if (r < 0)
+			lo = m + 1;
+		else
+			hi = m;
+	}
+	if (!b)
+		return 0;
+	{
+		const char *p = b->sig;
+		qty ret, par[16];
+		uint32_t np = 0;
+		int fl = 0;
+
+		if (!lb_type(c, &p, &ret))
+			return 0;
+		while (*p) {
+			if (*p == '.') {
+				fl |= TF_VARIADIC;
+				break;
+			}
+			if (np == 16 || !lb_type(c, &p, &par[np]))
+				return 0;
+			np++;
+		}
+		{
+			dspec ds = { .ty = ret, .sc = SC_EXTERN, .loc = loc };
+			declr d = { .name = id, .loc = loc };
+			uint32_t s = declare(c, &ds, &d, ty_func(c, ret, par, np, fl), true);
+			size_t ll = strlen(b->lib), pre = c->o->target == PP_DARWIN ? 1 : 0;
+			char *keep = halloc(c, ll + pre + 1);
+			attrs a;
+
+			keep[0] = '_';
+			memcpy(keep + pre, b->lib, ll + 1);
+			memset(&a, 0, sizeof(a));
+			a.asmname = c->nstr + 1;
+			c->strs[c->nstr++] = (cstr){ keep, (uint32_t)(ll + pre + 1), 1, T_STRING };
+			apply_sym_attrs(c, &c->syms[s], &a);
+			return s;
+		}
+	}
+}
+
 VPRIV uint32_t implicit_func(cc *c, uint32_t id, uint32_t loc)
 {
 	dspec ds = { .ty = prim(TY_INT), .sc = SC_EXTERN, .loc = loc };

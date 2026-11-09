@@ -336,6 +336,7 @@ VPRIV void enum_body(cc *c, uint32_t ti, attrs *after);
 VPRIV uint32_t initializer(cc *c, qty *ty, bool st);
 /* decl.c */
 VPRIV void apply_sym_attrs(cc *c, sym *s, const attrs *a);
+VPRIV uint32_t lib_builtin(cc *c, uint32_t id, uint32_t loc);
 /* mangle.c */
 VPRIV void name_overload(cc *c, uint32_t s);
 /* decl.c */
