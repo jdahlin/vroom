@@ -131,6 +131,17 @@ Existing gates that every change must keep green: `vcc-diff.py cmp`
   sed, gawk, bash, openssl, curl, libxml2, glib), the clang build as
   reference; (3) the whole archive only if (1)-(2) still find bugs at a
   rate that justifies it.
+- [ ] **T18 runtime gaps hide torture tests.**  34 gcc/tcc tests are
+  `ref-fail` (`vcc-ctests.py --show ref-fail`): ~15 only because
+  `tests/rt` lacks `pow`, `tanh`, `__divsc3`, `__fixsfti`, `tmpnam`,
+  `atomic_signal_fence`, or clang leaves `__builtin_exit`/`__builtin_puts`/
+  `__builtin_mul_overflow_p` as calls.  Add them to the runtime (or a
+  per-test shim) so the tests run.  *Validate:* `ref-fail` count drops,
+  the newly run tests pass or become xfail with a TODO item.
+- [ ] **T19 ASan inside our arenas.**  Poison the mmap'ed arenas behind
+  `used` (`ASAN_POISON_MEMORY_REGION` under `__has_feature`), so
+  over-reads there are reported.  *Validate:* an injected over-read in a
+  test build is reported; ASan runs of the gates stay clean.
 
 Order once Tier 1 is clear: T10 (finds most wrong code per hour), T2's
 generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
@@ -446,6 +457,11 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
   (generate a list, try each).
   *Validate:* T1 per builtin; `bench/vcc-builtins.py` that compiles a
   generated use of each clang builtin and reports unknowns.
+  `__has_builtin` answers 0 for names absent from the kernel/SDK
+  (ppdata.inc was generated from those only; seen in PostgreSQL): generate
+  it from the full list.
+- [ ] **SVE in the front end**: `arm_sve.h` types, `target("+sve")`.
+  *Validate:* T1 under `qemu -cpu max`, layout checks for the types.
 - [ ] **`ext_vector_type` silently dropped; unknown attributes no warning** [P].
   `attr_names` `cc.c:5052`.
   *Validate:* layout `_Static_assert(sizeof(float4)==16)`; T4/diag for
@@ -699,8 +715,12 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
 - [ ] **`"abc"[1]` rejected as a static initializer**; vector types print as
   `''` in messages (`tyname`).  *Validate:* T1; diag test.
 - [ ] **Diagnostic details**: columns on `##` and invalid directives,
-  `#line` file names ignored, nested macro notes (one level today).
+  `#line` file names ignored, nested macro notes (one level today), the
+  "expanded from macro" note only for undeclared identifiers.
   *Validate:* diag tests.
 - [ ] **Longer fuzz runs** and pp-diff over the whole fuzz corpus (PLAN-fas2
   "Status fuzzning").  *Validate:* runs recorded in the plan, findings in
   `regress/`.
+- [ ] **PostgreSQL completeness**: TAP tests (`-Dtap_tests=enabled`) not
+  run; links still by ld64.  *Validate:* `bench/pg/build.sh` with TAP,
+  same pass set as clang.
