@@ -39,7 +39,7 @@ class Skip(Exception): pass
 
 class Vccd:
     """a private vccd in its own directory"""
-    def __init__(self, workers=4, umask=None, sockdir_mode=None, extra=()):
+    def __init__(self, workers=4, umask=None, sockdir_mode=None, extra=(), env=None):
         self.dir = tempfile.mkdtemp(prefix='vccd-test-')
         if sockdir_mode is not None: os.chmod(self.dir, sockdir_mode)
         self.sock = f'{self.dir}/vccd.sock'
@@ -47,7 +47,7 @@ class Vccd:
         pre = (lambda: os.umask(umask)) if umask is not None else None
         self.p = subprocess.Popen([f'{vd.BIN}/vccd', '--sock', self.sock, '--backend-sock', f'{self.dir}/none.sock',
                                    '-j', str(workers)] + list(extra), stdout=open(self.logf, 'w'), stderr=subprocess.STDOUT,
-                                  preexec_fn=pre)
+                                  preexec_fn=pre, env=dict(os.environ, **(env or {})))
         for _ in range(200):
             if os.path.exists(self.sock): break
             time.sleep(0.02)
@@ -142,7 +142,10 @@ def wrong_fd_count():
         r, w = os.pipe()
         for fds in ((), (r,), (r, w), (0, 1, 2, w)):
             for _ in range(5):
-                st = raw_request(v.sock, d, argv, fds=fds)
+                try:
+                    st = raw_request(v.sock, d, argv, fds=fds)
+                except (BrokenPipeError, ConnectionResetError):
+                    st = None	# refused before the payload was read
                 check(st != 0, f'request with {len(fds)} fds accepted (status {st})')
         os.close(r); os.close(w)
         check(v.alive(), 'vccd died')
@@ -246,6 +249,22 @@ def killed_client_no_output():
         check(not os.path.exists(f'{d}/big.o'), 'object written for a client that had gone')
         check(not [f for f in os.listdir(d) if f.endswith('.tmp')], 'temporary left behind')
         st, err = v.cc(d, tu(d)); check(st == 0, f'server after: {st} {err[-300:]}')
+    finally: v.stop()
+
+@test()
+def memory_restart_between_builds():
+    """over its memory limit at a new build the server re-execs on the same socket; concurrent jobs are retried"""
+    from concurrent.futures import ThreadPoolExecutor
+    v = Vccd(env={'VCC_RESTART_MB': '1'})
+    try:
+        d = f'{v.dir}/w'; src = tu(d)
+        for b in range(3):	# each v.cc is a new build: a restart before each but the first
+            with ThreadPoolExecutor(6) as ex:
+                rs = list(ex.map(lambda i: v.cc(d, src, out=f'{b}-{i}.o'), range(6)))
+            check(all(st == 0 for st, _ in rs), f'build {b}: {[(st, e[-120:]) for st, e in rs if st]}')
+            check(v.alive(), 'vccd died')
+        log = open(v.logf).read()
+        check(log.count('restarting') >= 2, f'{log.count("restarting")} restarts in the log')
     finally: v.stop()
 
 @test()

@@ -226,47 +226,65 @@ int main(int argc, char **argv)
 	h->envc = e - environ + 1;
 	h->payload_len = p - (buf + sizeof(*h));
 
-	memset(cbuf, 0, sizeof(cbuf));
-	iov.iov_base = buf;
-	iov.iov_len = p - buf;
-	m.msg_iov = &iov;
-	m.msg_iovlen = 1;
-	m.msg_control = cbuf;
-	m.msg_controllen = sizeof(cbuf);
-	c = CMSG_FIRSTHDR(&m);
-	c->cmsg_level = SOL_SOCKET;
-	c->cmsg_type = SCM_RIGHTS;
-	c->cmsg_len = CMSG_LEN(sizeof(fds));
-	memcpy(CMSG_DATA(c), fds, sizeof(fds));
+	/* VROOM_STATUS_RETRY: the server restarts itself (memory) and has not run
+	   the request; it listens again on the same socket in a moment */
+	for (int tries = 0;; tries++) {
+		memset(cbuf, 0, sizeof(cbuf));
+		iov.iov_base = buf;
+		iov.iov_len = p - buf;
+		m.msg_iov = &iov;
+		m.msg_iovlen = 1;
+		m.msg_control = cbuf;
+		m.msg_controllen = sizeof(cbuf);
+		c = CMSG_FIRSTHDR(&m);
+		c->cmsg_level = SOL_SOCKET;
+		c->cmsg_type = SCM_RIGHTS;
+		c->cmsg_len = CMSG_LEN(sizeof(fds));
+		memcpy(CMSG_DATA(c), fds, sizeof(fds));
 
-	/* the first sendmsg carries the fds; any remainder goes with write */
-	do
-		n = sendmsg(s, &m, 0);
-	while (n < 0 && errno == EINTR);
-	if (n < 0)
-		die("vcc: sendmsg failed\n");
-	for (off = n; off < iov.iov_len; off += n) {
-		n = write(s, buf + off, iov.iov_len - off);
-		if (n < 0 && errno == EINTR) {
-			n = 0;
-			continue;
+		/* the first sendmsg carries the fds; any remainder goes with write */
+		do
+			n = sendmsg(s, &m, 0);
+		while (n < 0 && errno == EINTR);
+		if (n < 0)
+			die("vcc: sendmsg failed\n");
+		for (off = n; off < iov.iov_len; off += n) {
+			n = write(s, buf + off, iov.iov_len - off);
+			if (n < 0 && errno == EINTR) {
+				n = 0;
+				continue;
+			}
+			if (n <= 0)
+				die("vcc: write failed\n");
 		}
-		if (n <= 0)
-			die("vcc: write failed\n");
-	}
 
-	for (got = 0; got < sizeof(status); got += n) {
-		n = read(s, (char *)&status + got, sizeof(status) - got);
-		if (n < 0 && errno == EINTR) {
-			n = 0;
-			continue;
+		for (got = 0; got < sizeof(status); got += n) {
+			n = read(s, (char *)&status + got, sizeof(status) - got);
+			if (n < 0 && errno == EINTR) {
+				n = 0;
+				continue;
+			}
+			if (n <= 0)
+				die("vcc: server closed the connection\n");
 		}
-		if (n <= 0)
-			die("vcc: server closed the connection\n");
+		if (status != (int32_t)VROOM_STATUS_RETRY || tries == 20)
+			break;
+		close(s);
+		for (int t = 0; t < 500; t++) {
+			s = socket(AF_UNIX, SOCK_STREAM, 0);
+			if (s >= 0 && !connect(s, (struct sockaddr *)&sa, sizeof(sa)))
+				break;
+			if (s >= 0)
+				close(s);
+			s = -1;
+			usleep(10000);
+		}
+		if (s < 0)
+			die("vcc: vccd did not come back after restarting\n");
 	}
-#ifdef VSH
 	if (status == (int32_t)VROOM_STATUS_MISMATCH)
 		die("vcc: vccd runs another build of vcc than this shim; restart it\n");
+#ifdef VSH
 	if (status == (int32_t)VROOM_STATUS_DECLINE) {
 		close(s);
 		real_shell();

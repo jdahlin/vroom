@@ -66,6 +66,9 @@
 #include <unistd.h>
 
 #include <poll.h>
+#ifdef __APPLE__
+#include <mach/mach.h>
+#endif
 #include "../protocol.h"
 #include "caps.h"
 #include "ccsnap.h"
@@ -89,6 +92,7 @@ static const char *lld = "/opt/homebrew/bin/ld.lld";
 static bool log_requests, own_pp = true, own_cc = true;
 
 static atomic_ulong n_probe, n_fwd, n_spawn, n_pp, n_cc, n_fallback, n_ar, n_sh, n_sh_decl;
+static char self_exe[4096];	/* our own binary (realpath), for a restart */
 static uint64_t self_build;	/* vroom_build_id of our own binary */
 static char tool_dir[4096];	/* where vccd and its shims live (realpath) */
 
@@ -128,16 +132,132 @@ static uint32_t gen_pgrp;
 static int gen_running, gen_flushing;
 static _Atomic unsigned long n_flush;
 
-static void gen_enter(uint32_t pgrp)
+static void print_counts(void);
+static int g_argc, g_ls = -1;
+static char **g_argv;
+static const char *g_sock;
+static _Atomic int gen_restart;
+
+/* resident memory in MB */
+static size_t rss_mb(void)
+{
+#ifdef __APPLE__
+	struct mach_task_basic_info ti;
+	mach_msg_type_number_t n = MACH_TASK_BASIC_INFO_COUNT;
+
+	if (task_info(mach_task_self(), MACH_TASK_BASIC_INFO, (task_info_t)&ti, &n) != KERN_SUCCESS)
+		return 0;
+	return (size_t)(ti.resident_size >> 20);
+#else
+	long pages = 0, res = 0;
+	FILE *f = fopen("/proc/self/statm", "r");
+
+	if (f && fscanf(f, "%ld %ld", &pages, &res) != 2)
+		res = 0;
+	if (f)
+		fclose(f);
+	return (size_t)res * (size_t)sysconf(_SC_PAGESIZE) >> 20;
+#endif
+}
+
+/*
+ * Memory: every cache only grows.  At a build boundary, with no job running,
+ * a server above VCC_RESTART_MB resident (default 6144) starts over: every
+ * request it holds or has queued is answered VROOM_STATUS_RETRY (the shim
+ * sends it again), then it execs itself on the same listening socket.
+ * restart_due() decides (gen_enter, idle); the worker that saw it answers its
+ * own request and calls do_restart(), which returns only if exec fails.
+ */
+static bool restart_due(void)
+{
+	const char *e = getenv("VCC_RESTART_MB");
+	size_t lim = e ? strtoul(e, NULL, 10) : 6144;
+
+	return g_ls >= 0 && self_exe[0] && rss_mb() >= lim;
+}
+
+/* the accept loop: during a restart it accepts nothing more (connections
+   wait in the kernel's backlog for the new process) */
+static _Atomic int accept_parked;
+
+static void park_accept(void)
+{
+	if (!atomic_load(&gen_restart))
+		return;
+	atomic_store(&accept_parked, 1);
+	while (atomic_load(&gen_restart))	/* (until the exec, or its failure) */
+		usleep(1000);
+	atomic_store(&accept_parked, 0);
+}
+
+static void do_restart(void)
+{
+	while (!atomic_load(&accept_parked))
+		usleep(1000);
+	for (;;) {	/* the other workers answer what they took (n_active counts us too) */
+		pthread_mutex_lock(&qlock);
+		if (atomic_load(&n_active) == 1) {
+			while (qhead != qtail) {	/* still queued: never read */
+				int c = queue[qhead++ % QSIZE];
+				int32_t st = (int32_t)VROOM_STATUS_RETRY;
+
+				(void)!write(c, &st, sizeof(st));
+				close(c);
+			}
+			break;	/* (qlock stays held: nobody takes another) */
+		}
+		pthread_mutex_unlock(&qlock);
+		usleep(1000);
+	}
+	{
+		char fd[16], **av = calloc((size_t)g_argc + 3, sizeof(char *));
+		int k = 0;
+
+		for (int i = 0; i < g_argc; i++) {
+			if (!strcmp(g_argv[i], "--listen-fd")) {
+				i++;
+				continue;
+			}
+			av[k++] = g_argv[i];
+		}
+		snprintf(fd, sizeof(fd), "%d", g_ls);
+		av[k++] = "--listen-fd", av[k++] = fd, av[k] = NULL;
+		fprintf(stderr, "vccd: %zu MB resident at a new build: restarting\n", rss_mb());
+		print_counts();
+		fcntl(g_ls, F_SETFD, 0);
+		fcntl(g_ls, F_SETFL, 0);
+		execv(self_exe, av);
+		perror("vccd: restart");	/* go on with the old process */
+		fcntl(g_ls, F_SETFD, FD_CLOEXEC);
+		fcntl(g_ls, F_SETFL, O_NONBLOCK);
+		atomic_store(&gen_restart, 0);
+		pthread_mutex_unlock(&qlock);
+	}
+}
+
+/* 1: answer VROOM_STATUS_RETRY (the server is restarting); 2: the same, and
+   then restart (do_restart) */
+static int gen_enter(uint32_t pgrp)
 {
 	pthread_mutex_lock(&gen_mu);
-	while (gen_flushing)
+	while (gen_flushing && !atomic_load(&gen_restart))
 		pthread_cond_wait(&gen_cv, &gen_mu);
+	if (atomic_load(&gen_restart)) {
+		pthread_mutex_unlock(&gen_mu);
+		return 1;
+	}
 	if (pgrp && pgrp != gen_pgrp) {
 		if (gen_pgrp) {
 			gen_flushing = 1;
 			while (gen_running)
 				pthread_cond_wait(&gen_cv, &gen_mu);
+			if (restart_due()) {
+				atomic_store(&gen_restart, 1);
+				gen_flushing = 0;
+				pthread_cond_broadcast(&gen_cv);	/* (waiters see gen_restart) */
+				pthread_mutex_unlock(&gen_mu);
+				return 2;
+			}
 			vlex_cache_flush();
 			vdir_flush();
 			pp_include_flush();
@@ -149,6 +269,7 @@ static void gen_enter(uint32_t pgrp)
 	}
 	gen_running++;
 	pthread_mutex_unlock(&gen_mu);
+	return 0;
 }
 
 static void gen_leave(void)
@@ -1041,11 +1162,25 @@ static void *worker_main(void *arg)
 			if (h->build && self_build && h->build != self_build) {
 				status = (int32_t)VROOM_STATUS_MISMATCH, kind = "mismatch";
 			} else {
-				gen_enter(h->pgrp);
-				ppd_conn = conn;
-				status = handle(&r, &kind);
-				ppd_conn = -1;
-				gen_leave();
+				int g = gen_enter(h->pgrp);
+
+				if (g) {
+					status = (int32_t)VROOM_STATUS_RETRY, kind = "retry";
+					if (g == 2) {	/* answer first: the exec drops every fd we hold */
+						(void)write_full(conn, (char *)&status, sizeof(status));
+						close(conn);
+						for (i = 0; i < 3; i++)
+							if (r.fds[i] >= 0)
+								close(r.fds[i]), r.fds[i] = -1;
+						do_restart();
+						conn = open("/dev/null", O_RDWR);	/* (exec failed: the loop's close) */
+					}
+				} else {
+					ppd_conn = conn;
+					status = handle(&r, &kind);
+					ppd_conn = -1;
+					gen_leave();
+				}
 			}
 		}
 		(void)write_full(conn, (char *)&status, sizeof(status));
@@ -1100,11 +1235,13 @@ int main(int argc, char **argv)
 	/* make never has more than -j requests in flight, and compiles are CPU bound:
 	 * two per core leaves room for the ones that block (forwarded to vroomd,
 	 * spawned tools) without a thread per possible connection */
-	int nworkers = 2 * (int)sysconf(_SC_NPROCESSORS_ONLN), ls, kq, i;
+	int nworkers = 2 * (int)sysconf(_SC_NPROCESSORS_ONLN), ls, kq, i, listen_fd = -1;
 
 	for (i = 1; i < argc; i++) {
 		if (!strcmp(argv[i], "--sock") && i + 1 < argc)
 			sock = argv[++i];
+		else if (!strcmp(argv[i], "--listen-fd") && i + 1 < argc)
+			listen_fd = atoi(argv[++i]);
 		else if (!strcmp(argv[i], "--backend-sock") && i + 1 < argc)
 			backend_sock = argv[++i];
 		else if (!strcmp(argv[i], "--ld") && i + 1 < argc)
@@ -1124,6 +1261,7 @@ int main(int argc, char **argv)
 
 		if (realpath(argv[0], self) && (sl = strrchr(self, '/'))) {
 			self_build = vroom_build_id(self);
+			snprintf(self_exe, sizeof(self_exe), "%s", self);
 			*sl = 0;
 			snprintf(tool_dir, sizeof(tool_dir), "%s", self);
 		}
@@ -1139,9 +1277,16 @@ int main(int argc, char **argv)
 		}
 		sock = dsock;
 	}
+	g_argc = argc, g_argv = argv, g_sock = sock;
+	if (listen_fd >= 0) {	/* re-exec'ed after a memory restart: the same socket */
+		ls = g_ls = listen_fd;
+		fcntl(ls, F_SETFD, FD_CLOEXEC);
+		goto listening;
+	}
 	unlink(sock);
 	strncpy(sa.sun_path, sock, sizeof(sa.sun_path) - 1);
 	ls = socket(AF_UNIX, SOCK_STREAM, 0);
+	g_ls = ls;
 	{	/* the socket is 0600 whatever the umask: the peer check below is the real gate */
 		mode_t um = umask(077);
 		int bad = ls < 0 || bind(ls, (struct sockaddr *)&sa, sizeof(sa));
@@ -1152,6 +1297,7 @@ int main(int argc, char **argv)
 			return 1;
 		}
 	}
+listening:
 	fcntl(ls, F_SETFL, O_NONBLOCK);
 #ifndef __APPLE__
 	{	/* USR1/TERM go to the signalfd below: block them before the workers inherit the mask */
@@ -1190,8 +1336,13 @@ int main(int argc, char **argv)
 	kevent(kq, &ev, 1, NULL, 0, NULL);
 	for (;;) {
 		struct kevent out;
+		struct timespec tick = { 0, 50000000 };	/* (a restart waits for park_accept) */
+		int nev;
 
-		if (kevent(kq, NULL, 0, &out, 1, NULL) < 0) {
+		park_accept();
+		if ((nev = kevent(kq, NULL, 0, &out, 1, &tick)) == 0)
+			continue;
+		if (nev < 0) {
 			if (errno == EINTR)
 				continue;
 			perror("vccd: kevent");
@@ -1224,8 +1375,12 @@ int main(int argc, char **argv)
 		epoll_ctl(kq, EPOLL_CTL_ADD, sfd, &e);
 		for (;;) {
 			struct epoll_event out;
+			int nev;
 
-			if (epoll_wait(kq, &out, 1, -1) < 0) {
+			park_accept();
+			if ((nev = epoll_wait(kq, &out, 1, 50)) == 0)
+				continue;
+			if (nev < 0) {
 				if (errno == EINTR)
 					continue;
 				perror("vccd: epoll_wait");
@@ -1243,7 +1398,11 @@ int main(int argc, char **argv)
 			}
 #endif
 		for (;;) {
-			int c = accept(ls, NULL, NULL);
+			int c;
+
+			if (atomic_load(&gen_restart))
+				break;	/* (parks at the loop's top) */
+			c = accept(ls, NULL, NULL);
 
 			if (c < 0)
 				break;

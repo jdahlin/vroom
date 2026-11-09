@@ -451,7 +451,11 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
   *Validate:* T12 (compile, edit a header, compile → new object; create a
   previously missing header → found; `__has_include` flips; regenerate a
   header during a build).
-- [ ] **Memory only grows** [R].  16 GB shared region aborts, 8 GB header
+- [ ] **Memory only grows** [R].  (server side done: at a new build, idle, a vccd
+  above `VCC_RESTART_MB` resident (6144) answers what it holds VROOM_STATUS_RETRY
+  and execs itself on the same listening socket; the shim resends.  vccd-test
+  memory-restart-between-builds.  Within one build memory still only grows,
+  and the intern-table abort at ~6.3M identifiers remains.)  16 GB shared region aborts, 8 GB header
   cache cap, intern table cap ~6.3M identifiers, bump-only per-thread
   arenas.  Evict header-cache regions (LRU by generation), reset per-job
   arenas, grow the intern table or start a new generation.
@@ -469,9 +473,6 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
   vccd-test request-2mb.  Was:  `protocol.h:13`.  Long command
   lines plus env exceed it.  Stream or raise with a clear error.
   *Validate:* T12 (a 2 MB env/argv works or fails with a message).
-
-- [ ] **vccd-test flaked once on the first run after a rebuild** (one FAIL line
-  not captured, not reproduced in 6 runs).  Rerun after rebuilds and catch it.
 
 ## Tier 3: features general C needs
 

@@ -19,6 +19,8 @@
 #define VROOM_STATUS_DECLINE 0x7fff0000
 /* vccd's answer when the shim's build id is not its own */
 #define VROOM_STATUS_MISMATCH 0x7fff0001
+/* vccd's answer when it restarts before running the request: send it again */
+#define VROOM_STATUS_RETRY 0x7fff0002
 
 struct vroom_req_hdr {
 	uint32_t magic;
