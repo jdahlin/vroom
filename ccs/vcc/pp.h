@@ -65,6 +65,9 @@ typedef struct pp_opts {
 
 enum { PP_LINUX_AARCH64, PP_DARWIN };
 
+/* set by the front end (a constructor): __has_builtin is 1 for a name it implements */
+extern int (*pp_builtin_known)(const char *name);
+
 typedef struct pp pp;
 
 /* NULL if the main file cannot be read or has a fatal error (reported) */

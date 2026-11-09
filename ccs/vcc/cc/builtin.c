@@ -202,6 +202,20 @@ static qty builtin_type(cc *c, const builtin *b)
 
 static uint32_t *bi_dir[NDIR];
 
+/* __has_builtin for the names the front end implements (the pp asks through pp_builtin_known) */
+static int builtin_known(const char *n)
+{
+	for (uint32_t i = 0; builtins[i].name; i++)
+		if (!strcmp(builtins[i].name, n))
+			return builtins[i].id != BI_IS_CONSTANT_EVALUATED;	/* clang: C++ only */
+	return lib_builtin_known(n);
+}
+
+__attribute__((constructor)) static void builtin_hook(void)
+{
+	pp_builtin_known = builtin_known;
+}
+
 VPRIV void init_builtins(void)
 {
 	static bool done;
