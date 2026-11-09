@@ -894,10 +894,8 @@ static inline char *spell_to16(char *dst, const ptok *t)
 
 static inline void svpush(pp *p, const ptok *t)
 {
-	if (unlikely(p->svn == SVMAX)) {
-		fprintf(stderr, "vcc: expansion too large\n");
-		abort();
-	}
+	if (unlikely(p->svn == SVMAX))
+		fatal(p, 0, "macro expansion too large");
 	p->sv[p->svn++] = *t;
 }
 

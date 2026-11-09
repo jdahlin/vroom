@@ -883,9 +883,11 @@ int ppd_run(int argc, char **argv, const ppd_env *env)
 	}
 	pp_set_fatal(p, &jb);
 	if (setjmp(jb)) {
+		vjob_jb = NULL;
 		status = 1;
 		goto done;
 	}
+	vjob_jb = &jb;	/* as/elf overflow ends this TU too */
 	if (tokhash) {
 		/* a hash of what pp_next hands the parser: kind, SOL/SPACE, spelling, id, file:line:col, sys */
 		uint64_t h = 1469598103934665603ull;
@@ -1019,6 +1021,7 @@ int ppd_run(int argc, char **argv, const ppd_env *env)
 			status = write_deps(p, env->cwd, depfile, deptarget ? deptarget : out ? out : "-", errfd);
 	}
 done:
+	vjob_jb = NULL;
 	pp_diag_summary(p);
 	pp_close(p);	/* frees the text in o */
 out:

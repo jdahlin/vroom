@@ -156,8 +156,7 @@ static bool collect_(pp *p, const pmacro *m, const ptok *name, margs *a, ptok *r
 						break;
 					}
 					if (unlikely(p->svn == SVMAX)) {
-						fprintf(stderr, "vcc: expansion too large\n");
-						abort();
+						fatal(p, 0, "macro expansion too large");
 					}
 					vfill(&p->sv[p->svn++], v, c->src, offloc ? loc + v->off : loc);
 				}
@@ -539,8 +538,7 @@ static size_t append(pp *p, const ptok *t, uint32_t n)
 	ptok *w = p->sv + first;
 
 	if (unlikely(n > SVMAX - p->svn)) {
-		fprintf(stderr, "vcc: expansion too large\n");
-		abort();
+		fatal(p, 0, "macro expansion too large");
 	}
 	for (uint32_t i = 0; i < n; i++) {
 		w[i] = t[i];
@@ -602,8 +600,7 @@ plain:
 			ptok *w;
 
 			if (unlikely(p->svn == SVMAX)) {
-				fprintf(stderr, "vcc: expansion too large\n");
-				abort();
+				fatal(p, 0, "macro expansion too large");
 			}
 			w = &p->sv[p->svn++];
 			vfill(w, cur, m->src, eloc);

@@ -104,7 +104,8 @@ static void *reserve(size_t n)
 static void *rget(Region *r, size_t n)
 {
 	size_t u = (r->used + 7) & ~(size_t)7;
-	if (u + n > r->cap) { fprintf(stderr, "vcc: as: region full\n"); abort(); }
+	if (u + n > r->cap || u + n < u)
+		vjob_fail("assembly too large (expansion or statement buffer full)");
 	r->used = u + n;
 	return r->base + u;
 }

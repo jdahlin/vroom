@@ -27,6 +27,16 @@
 #define FIX_CAP ((size_t)1 << 30)
 #define SEC_CAP ((size_t)64 << 20)
 
+_Thread_local jmp_buf *vjob_jb;
+
+void vjob_fail(const char *msg)
+{
+	fprintf(stderr, "vcc: error: %s\n", msg);
+	if (vjob_jb)
+		longjmp(*vjob_jb, 1);
+	abort();
+}
+
 static void *reserve(size_t n)
 {
 	void *p = mmap(NULL, n, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANON | MAP_NORESERVE, -1, 0);
@@ -37,7 +47,8 @@ static void *reserve(size_t n)
 static void *rpush(ElfRegion *r, size_t n, size_t al)
 {
 	size_t u = (r->used + al - 1) & ~(al - 1);
-	if (u + n > r->cap) { fprintf(stderr, "vcc: elf: region full\n"); abort(); }
+	if (u + n > r->cap || u + n < u)
+		vjob_fail("object too large (an output section or table is full)");
 	r->used = u + n;
 	return r->base + u;
 }
