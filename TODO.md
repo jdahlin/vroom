@@ -511,7 +511,10 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
   `tls_model()` as clang (the attribute over the option, the default if
   stronger; `tests/pic/tls_model.c`).  Left: local-dynamic proper (now
   TLSDESC per symbol, clang uses `_TLS_MODULE_BASE_` for local symbols), the
-  register choice (always x0/x1, clang allocates), `-fdata-sections`.
+  register choice (always x0/x1, clang allocates).  `-ffunction-sections`/
+  `-fdata-sections` done (ELF, `.text.f`/`.data.d`/`.tbss.t`...; static
+  locals are named after vcc's symbol, `.bss.x.N`, clang `.bss.f.x`;
+  `tests/vcc/data_sections.c`).
   *Validate:* T6 (relocs per model); T1 run under qemu with the runtime's
   TLS setup (`tests/rt` start.S sets `tpidr_el0`); T3 already has TLV.
 - [ ] **CFI / `.eh_frame`** (and Darwin compact unwind) [P].
@@ -588,10 +591,10 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
   `attr_names` `cc.c:5052`.
   *Validate:* layout `_Static_assert(sizeof(float4)==16)`; T4/diag for
   `-Wunknown-attributes`.
-- [ ] **Attributes without effect**: `ifunc`, `tls_model`, `alloc_size`,
+- [ ] **Attributes without effect**: `ifunc`, `alloc_size`,
   `format`, `nonnull`, `deprecated`, `warn_unused_result`, `returns_twice`,
   `target`.
-  *Validate:* T6 for `ifunc` (STT_GNU_IFUNC) and `tls_model`; diag tests
+  *Validate:* T6 for `ifunc` (STT_GNU_IFUNC); diag tests
   for `format`/`nonnull`/`deprecated`/`warn_unused_result` warnings.
 - [ ] **Blocks (`^{}`)** for Darwin headers.
   *Validate:* T3 compile programs including `<dispatch/dispatch.h>` and

@@ -29,6 +29,38 @@ VPRIV void sym_header(ecx *e, tbuf *b, uint32_t s, bool fn, const char *defsec, 
 		tb_s(b, sn);
 		tb_s(b, fn ? "\",\"ax\",@progbits\n" : bss ? "\",\"aw\",@nobits\n" :
 			 (QQ(y->ty) & Q_CONST) && !strncmp(sn, ".rodata", 7) ? "\",\"a\",@progbits\n" : "\",\"aw\",@progbits\n");
+	} else if (!DARWIN(c) && (c->o->sections & (fn ? 1 : 2))) {
+		/* -ffunction-sections / -fdata-sections: .text.NAME etc., as clang */
+		static const struct { const char *def, *base, *rest; } m[] = {
+			{ "\t.text\n", ".text.", ",\"ax\",@progbits\n" },
+			{ "\t.data\n", ".data.", ",\"aw\",@progbits\n" },
+			{ "\t.bss\n", ".bss.", ",\"aw\",@nobits\n" },
+		};
+		const char *base = NULL, *rest = NULL;
+		char nb[16];
+
+		for (size_t k = 0; k < sizeof m / sizeof *m && !base; k++)
+			if (!strcmp(defsec, m[k].def))
+				base = m[k].base, rest = m[k].rest;
+		if (!base && !strncmp(defsec, "\t.section\t.", 10)) {
+			/* "\t.section\t.rodata,..." -> ".rodata." and ",..." */
+			const char *cm = strchr(defsec + 10, ',');
+			size_t n = cm ? (size_t)(cm - (defsec + 10)) : 0;
+
+			if (cm && n + 2 <= sizeof nb) {
+				memcpy(nb, defsec + 10, n);
+				nb[n] = '.', nb[n + 1] = 0;
+				base = nb, rest = cm;
+			}
+		}
+		if (base) {
+			tb_s(b, "\t.section\t");
+			tb_s(b, base);
+			sym_name(c, b, s);
+			tb_s(b, rest);
+		} else {
+			tb_s(b, defsec);
+		}
 	} else {
 		tb_s(b, defsec);
 	}

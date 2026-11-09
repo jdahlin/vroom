@@ -255,6 +255,7 @@ typedef struct cc_opts {	/* fields before outfd: parse options, all in the decl 
 	int outfd;
 	int emit;		/* generate code (emit/): 1 = assembly text to outfd, 2 = object into obj */
 	int opt;		/* -O level for code generation: 0 (default, -O0), 1 (-O1, -Og), 2 (-O2, -O3, -Os, -Oz, -O) */
+	int sections;		/* 1 -ffunction-sections, 2 -fdata-sections (ELF) */
 	int tlsmodel;		/* -ftls-model=: VCC_TLS_*, 0: the default */
 	int pic;		/* ELF: 0 none (-fno-pic), 1 PIE (-fpie, the hosted default), 2 PIC (-fpic) */
 	int nthreads;		/* emitter threads (0: 1) */
