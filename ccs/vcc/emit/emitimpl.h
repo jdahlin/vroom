@@ -62,13 +62,13 @@
 #include <time.h>
 #include <unistd.h>
 
-#include "../ccint.h"
-#include "../emit.h"
-#include "../as.h"
-#include "../elf.h"
-#include "../a64.h"
-#include "../ppdriver.h"
-#include "../arena.h"
+#include "../cc/ccint.h"
+#include "emit.h"
+#include "../as/as.h"
+#include "../obj/elf.h"
+#include "../arch/a64/a64.h"
+#include "../driver/ppdriver.h"
+#include "../lib/arena.h"
 
 /* functions one file defines and another calls: static when the directory is
    compiled as one TU (VCC_UNITY, the default build), so they stay internal */

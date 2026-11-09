@@ -35,10 +35,10 @@
 #include <time.h>
 #include <unistd.h>
 
-#include "../dircache.h"
-#include "../intern.h"
-#include "../pp.h"
-#include "../arena.h"
+#include "dircache.h"
+#include "../lib/intern.h"
+#include "pp.h"
+#include "../lib/arena.h"
 
 /* functions one file defines and another calls: static when the directory is
    compiled as one TU (VCC_UNITY, the default build), so they stay internal */

@@ -65,7 +65,7 @@ if __name__ == '__main__':
     env = dict(os.environ)
     # like the -O0 reference build: vroom-ld stubs what only dead code refers to (listed in
     # vmlinux.unstripped.vroom-stubs; compare with the reference tree's list)
-    sh = (f'source {R}/env/macos-env.sh && kmake -C {R}/work/linux O={dst} -j{j} LD={R}/ccs/vroom-ld Image')
+    sh = (f'source {R}/env/macos-env.sh && kmake -C {R}/work/linux O={dst} -j{j} LD={R}/ccs/phase1/vroom-ld Image')
     mt = {o: os.stat(f'{dst}/{o}').st_mtime_ns for o, e in res if not e and o != 'init/version-timestamp.o'}	# relinked every time
     r = subprocess.run(['zsh', '-c', sh], env=env)
     # kbuild may decide to rebuild a TU (a freshly copied tree): then that object is clang's again

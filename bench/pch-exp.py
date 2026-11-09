@@ -3,7 +3,7 @@
 import os, shlex, subprocess, sys, time
 B = '/Users/johandahlin/dev/vroom/work/build-vroomd'
 C = '/opt/homebrew/opt/llvm/bin/clang'
-PREFIX = '/Users/johandahlin/dev/vroom/ccs/pch/vroom-prefix.h'
+PREFIX = '/Users/johandahlin/dev/vroom/ccs/phase1/pch/vroom-prefix.h'
 PCH = '/tmp/claude-vroom.pch'
 os.chdir(B)
 

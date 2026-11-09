@@ -18,8 +18,8 @@
 #include <stdbool.h>
 #include <string.h>
 
-#include "../vcc/intern.h"
-#include "../vcc/lex.h"
+#include "../vcc/lib/intern.h"
+#include "../vcc/lex/lex.h"
 #include "fuzz.h"
 
 uint32_t vlex_ref(const char *src, size_t size, vtok *out, void *scratch);

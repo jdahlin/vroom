@@ -29,11 +29,11 @@
 #include <sys/mman.h>
 #include <unistd.h>
 
-#include "../ccint.h"
-#include "../emit.h"
-#include "../ccsnap.h"
-#include "../arena.h"
-#include "../f128.h"
+#include "ccint.h"
+#include "../emit/emit.h"
+#include "../driver/ccsnap.h"
+#include "../lib/arena.h"
+#include "../lib/f128.h"
 
 /* functions one file defines and another calls: static when the directory is
    compiled as one TU (VCC_UNITY, the default build), so they stay internal */

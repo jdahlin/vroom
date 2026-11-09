@@ -21,9 +21,9 @@
 #include <string.h>
 #include <unistd.h>
 
-#include "../vcc/intern.h"
-#include "../vcc/lex.h"
-#include "../vcc/pp.h"
+#include "../vcc/lib/intern.h"
+#include "../vcc/lex/lex.h"
+#include "../vcc/pp/pp.h"
 #include "fuzz.h"
 
 #define MAXIN (256u << 10)

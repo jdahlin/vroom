@@ -1,6 +1,6 @@
 /* vcc preprocessor: builtin macros and the __has_* queries */
 #include "ppimpl.h"
-#include "../ppdata.inc"
+#include "ppdata.inc"
 
 /* ---------------- builtin macros ---------------- */
 
