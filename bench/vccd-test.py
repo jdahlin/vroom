@@ -178,6 +178,25 @@ def request_2mb():
     finally: v.stop()
 
 @test()
+def autostart_default_socket():
+    """no server on the default socket: concurrent shims start one between them and are served"""
+    from concurrent.futures import ThreadPoolExecutor
+    t = tempfile.mkdtemp(prefix='vccd-auto-')
+    env = {k: x for k, x in os.environ.items() if k not in ('VCC_SOCK', 'XDG_RUNTIME_DIR')}
+    env['TMPDIR'] = t
+    src = tu(f'{t}/w')
+    try:
+        def one(i):
+            return subprocess.run([SHIM] + TARGET + ['-c', '-o', f'{i}.o', src], env=env, cwd=f'{t}/w',
+                                  capture_output=True, timeout=30).returncode
+        with ThreadPoolExecutor(4) as ex: rcs = list(ex.map(one, range(4)))
+        check(rcs == [0] * 4, f'exit statuses {rcs}')
+        n = subprocess.run(['pgrep', '-f', f'vccd --sock {t}/'], capture_output=True, text=True).stdout.split()
+        check(len(n) == 1, f'{len(n)} servers started')
+    finally:
+        subprocess.run(['pkill', '-f', f'vccd --sock {t}/'])
+
+@test()
 def other_build_refused():
     """a request from another build of the shim gets the mismatch status, not service"""
     v = Vccd()

@@ -451,7 +451,10 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
   *Validate:* T12 (compile the kernel's 840 TUs 5× in one server; RSS after
   run 5 within 10% of run 2); T5 (an input with 10M distinct identifiers
   gives an error, not an abort).
-- [ ] **No server → exit 127** [R].  `shim.c:96-99`.  Autostart the server
+- [x] **No server → exit 127** [R].  *Done:* on the default socket the shim
+  starts vccd itself (flock in the socket directory, setsid, log there;
+  `VCC_NO_AUTOSTART` turns it off); vccd-test autostart-default-socket (4
+  concurrent shims, one server).  An explicit VCC_SOCK is never started.  Was:  `shim.c:96-99`.  Autostart the server
   (with a lock) or run the job in-process in the shim.
   *Validate:* T11 (no server running: `vcc -c a.c` succeeds).
 - [x] **Request size capped at 1 MB** [R].  *Done:* 8 MB (above Linux's ARG_MAX

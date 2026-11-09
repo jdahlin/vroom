@@ -16,6 +16,9 @@
  * the real shell, $VSH_REAL (default /bin/sh), with the same arguments.
  */
 #include <sys/stat.h>
+#include <sys/file.h>
+#include <fcntl.h>
+#include <spawn.h>
 #ifdef __APPLE__
 #include <mach-o/dyld.h>
 #endif
@@ -68,6 +71,79 @@ static char *put(char *p, const char *s)
 	return p + n;
 }
 
+/* the vccd next to this binary (vsh/sh: one directory up); 0 when found */
+static int vccd_path(char *v, size_t cap)
+{
+	char exe[4096], rp[4096], *sl;
+	uint32_t el = sizeof(exe);
+	struct stat st;
+
+#ifdef __APPLE__
+	if (_NSGetExecutablePath(exe, &el) || !realpath(exe, rp) || !(sl = strrchr(rp, '/')))
+		return -1;
+#else
+	(void)el, (void)exe;
+	if (!realpath("/proc/self/exe", rp) || !(sl = strrchr(rp, '/')))
+		return -1;
+#endif
+	*sl = 0;
+	if ((size_t)snprintf(v, cap, "%s/vccd", rp) < cap && !stat(v, &st))
+		return 0;
+	if ((size_t)snprintf(v, cap, "%s/../vccd", rp) < cap && !stat(v, &st))
+		return 0;
+	return -1;
+}
+
+#ifndef VSH
+/* no server on the default socket: start one (under a lock, detached, its
+ * log in the socket's directory) and wait up to 5 s for it to listen */
+static int autostart(const char *dir, const struct sockaddr_un *sa)
+{
+	char v[4200], lk[1200], lg[1200];
+	char *av[4];
+	int s = -1, lfd, nul, log;
+	posix_spawn_file_actions_t fa;
+	posix_spawnattr_t at;
+	pid_t pid;
+
+	if (getenv("VCC_NO_AUTOSTART") || vccd_path(v, sizeof(v)))
+		return -1;
+	snprintf(lk, sizeof(lk), "%s/lock", dir);
+	snprintf(lg, sizeof(lg), "%s/vccd.log", dir);
+	if ((lfd = open(lk, O_RDWR | O_CREAT | O_CLOEXEC, 0600)) < 0 || flock(lfd, LOCK_EX))
+		return -1;
+	for (int t = 0; t < 500; t++) {
+		s = socket(AF_UNIX, SOCK_STREAM, 0);
+		if (s >= 0 && !connect(s, (const struct sockaddr *)sa, sizeof(*sa)))
+			break;	/* another client started it while we waited for the lock */
+		if (s >= 0)
+			close(s);
+		s = -1;
+		if (t == 0) {
+			av[0] = v, av[1] = "--sock", av[2] = (char *)sa->sun_path, av[3] = NULL;
+			nul = open("/dev/null", O_RDWR | O_CLOEXEC);
+			log = open(lg, O_WRONLY | O_CREAT | O_APPEND | O_CLOEXEC, 0600);
+			posix_spawn_file_actions_init(&fa);
+			posix_spawn_file_actions_adddup2(&fa, nul, 0);
+			posix_spawn_file_actions_adddup2(&fa, nul, 1);
+			posix_spawn_file_actions_adddup2(&fa, log >= 0 ? log : nul, 2);
+			posix_spawnattr_init(&at);
+			posix_spawnattr_setflags(&at, POSIX_SPAWN_SETSID);
+			if (posix_spawn(&pid, v, &fa, &at, av, environ))
+				t = 500;
+			posix_spawnattr_destroy(&at);
+			posix_spawn_file_actions_destroy(&fa);
+			close(nul);
+			if (log >= 0)
+				close(log);
+		}
+		usleep(10000);
+	}
+	close(lfd);	/* (releases the lock) */
+	return s;
+}
+#endif
+
 int main(int argc, char **argv)
 {
 	const char *path = getenv("VCC_SOCK");
@@ -92,8 +168,16 @@ int main(int argc, char **argv)
 #endif
 	char ddir[1024], dsock[1100];
 
-	if (!path) {
-		if (vroom_default_sock(ddir, sizeof(ddir), dsock, sizeof(dsock), 0)) {
+	int deflt = !path;
+
+	if (deflt) {
+		/* (VSH: never creates the directory, a missing server means the real shell) */
+#ifdef VSH
+		int mk = 0;
+#else
+		int mk = 1;
+#endif
+		if (vroom_default_sock(ddir, sizeof(ddir), dsock, sizeof(dsock), mk)) {
 #ifdef VSH
 			real_shell();
 #endif
@@ -106,8 +190,12 @@ int main(int argc, char **argv)
 	if (s < 0 || connect(s, (struct sockaddr *)&sa, sizeof(sa)) < 0) {
 #ifdef VSH
 		real_shell();
+#else
+		if (s >= 0)
+			close(s);
+		if (!deflt || (s = autostart(ddir, &sa)) < 0)
+			die("vcc: cannot connect to vccd (VCC_SOCK)\n");
 #endif
-		die("vcc: cannot connect to vccd (VCC_SOCK)\n");
 	}
 
 	if (!getcwd(p, VROOM_MAX_PAYLOAD))
@@ -126,23 +214,11 @@ int main(int argc, char **argv)
 		p = put(p, um);
 	}
 
-	{	/* the vccd next to this binary (vsh: one directory up) gives the build id */
-		char exe[4096], rp[4096], v[4200], *sl;
-		uint32_t el = sizeof(exe);
+	{	/* the vccd next to this binary gives the build id */
+		char v[4200];
 
-#ifdef __APPLE__
-		if (!_NSGetExecutablePath(exe, &el) && realpath(exe, rp) && (sl = strrchr(rp, '/'))) {
-#else
-		(void)el;
-		if (realpath("/proc/self/exe", rp) && (sl = strrchr(rp, '/'))) {
-#endif
-			*sl = 0;
-			memcpy(v, rp, (size_t)(sl - rp)), memcpy(v + (sl - rp), "/vccd", 6);
-			if (!(h->build = vroom_build_id(v))) {
-				memcpy(v + (sl - rp), "/../vccd", 9);
-				h->build = vroom_build_id(v);
-			}
-		}
+		if (!vccd_path(v, sizeof(v)))
+			h->build = vroom_build_id(v);
 	}
 	h->magic = VROOM_MAGIC;
 	h->argc = argc;
