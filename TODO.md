@@ -816,7 +816,8 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
   without `.symtab`/`.strtab`/`.shstrtab` places them as orphans, as lld;
   `/DISCARD/` of a merge section (`.comment`): `isec_osec`.  Both found by
   `VCC_LD=build/ccs/vlink bench/vcc-ctests.py --no-cache`, which links every
-  test with vlink: 1750/1750.)
+  test with vlink: 1750/1750; with `VCC_LDCMP=1` each test is linked by both
+  and vlink's loaded image (objcopy -O binary) must equal lld's: 1750/1750.)
   *Validate:* T8 cases `no-script`, `discard-comment`.
 - [ ] **Options**: `-znotext` swallowed (`ld/ld.c:3315`), `-m X` unchecked
   (`ld/ld.c:3296`); rejected `-pie`, `-static`, `-L`/`-l`,
@@ -826,7 +827,8 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
   `_start`, lld's warning when absent; `--orphan-handling=place|warn|error`,
   silent by default as lld.)
   *Validate:* T8 per option; unknown options are errors (T11-style table).
-- [ ] **Relocations**: GOT relaxation to adrp+add (done: `.got` for
+- [ ] **Relocations**: (done: GOT relaxation adrp+ldr -> adrp+add / nop+adr
+  as lld; orphans placed by lld's coarse rank; `.got` for
   `ADR_GOT_PAGE`/`LD64_GOT_LO12_NC` against globals, 0 for undefined weak,
   RELATIVE under -pie/-shared; `tests/vcc/got_pic.c`, `pragma_weak.c`; not:
   locals, GLOB_DAT for preemptible symbols),

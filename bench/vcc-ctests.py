@@ -125,8 +125,19 @@ def qemu(elf, cpu='max'):
                       stdin=subprocess.DEVNULL)
     return rc, out.decode('latin-1').replace('\r\n', '\n')
 
+VLINK = os.path.join(os.environ.get('VCC_BIN') or BUILD, 'vlink')
 def link(objs, elf):
-    rc, _, err = sh([LLD, '-T', f'{RT}/link.ld', f'{OUT}/rt/start.o', f'{OUT}/rt/rt.o'] + objs + ['-o', elf])
+    args = ['-T', f'{RT}/link.ld', f'{OUT}/rt/start.o', f'{OUT}/rt/rt.o'] + objs
+    rc, _, err = sh([LLD] + args + ['-o', elf])
+    if not rc and os.environ.get('VCC_LDCMP'):
+        # VCC_LDCMP=1: vlink must give lld's loaded image byte for byte
+        rc2, _, err2 = sh([VLINK] + args + ['-o', elf + '.v'])
+        if rc2:
+            return rc2, 'error: vlink: ' + err2.decode(errors='replace')
+        oc = llvm('llvm-objcopy')
+        sh([oc, '-O', 'binary', elf, elf + '.lb']); sh([oc, '-O', 'binary', elf + '.v', elf + '.vb'])
+        if open(elf + '.lb', 'rb').read() != open(elf + '.vb', 'rb').read():
+            return 1, 'error: vlink image differs from lld'
     return rc, err.decode(errors='replace')
 
 def first_err(s):

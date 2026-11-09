@@ -2094,6 +2094,33 @@ static void commit_section(OSec *os, ISec *is)
 		os->addralign = is->align;
 }
 
+/* lld's coarse section order: read-only, code, RELRO (TLS, .got,
+ * init/fini arrays), writable, bss; -1 for non-allocated */
+static int orphan_rank(uint64_t flags, uint32_t type, const char *name)
+{
+	if (!(flags & SHF_ALLOC))
+		return -1;
+	if (flags & SHF_EXECINSTR)
+		return 1;
+	if (!(flags & SHF_WRITE))
+		return 0;
+	if ((flags & SHF_TLS) || !strcmp(name, ".got") || type == SHT_INIT_ARRAY || type == SHT_FINI_ARRAY)
+		return 2;
+	return type == SHT_NOBITS ? 4 : 3;
+}
+
+/* the rank of a script output section, from its first input section */
+static int osec_rank(uint32_t oi)
+{
+	OSec *os = &osecs.v[oi];
+	for (uint32_t k = 0; k < os->cmds.n; k++)
+		if (os->cmds.v[k].kind == C_ISD && isds.v[os->cmds.v[k].idx].secs.n) {
+			ISec *is = &isecs.v[isds.v[os->cmds.v[k].idx].secs.v[0]];
+			return orphan_rank(is->flags, is->type, is->name);
+		}
+	return -1;
+}
+
 static void assign_sections(void)
 {
 	uint32_t ncap = 1024;
@@ -2150,6 +2177,23 @@ static void assign_sections(void)
 		if (found == NONE) {
 			found = get_osec(is->name);
 			VVEC_PUSH(topcmds, ((Cmd){.kind = C_OSEC, .idx = found}), alloc);
+			/* lld findOrphanPos, simplified: an allocated orphan goes after the
+			 * last output section of the same or a lower rank */
+			int r = orphan_rank(is->flags, is->type, is->name);
+			if (r >= 0) {
+				uint32_t at = NONE;
+				for (uint32_t c = 0; c + 1 < topcmds.n; c++)
+					if (topcmds.v[c].kind == C_OSEC) {
+						int q = osec_rank(topcmds.v[c].idx);
+						if (q >= 0 && q <= r)
+							at = c;
+					}
+				if (at != NONE) {
+					Cmd cm = topcmds.v[topcmds.n - 1];
+					memmove(&topcmds.v[at + 2], &topcmds.v[at + 1], (topcmds.n - 2 - at) * sizeof(Cmd));
+					topcmds.v[at + 1] = cm;
+				}
+			}
 		}
 		OSec *os = &osecs.v[found];
 		uint32_t di = NONE;
@@ -3531,6 +3575,29 @@ static void write_build_id(void)
 
 static void reset_state(void);
 
+static _Atomic bool got_seen;
+static void find_got(void *arg, size_t i)
+{
+	(void)arg;
+	const ISec *is = &isecs.v[i];
+	if (atomic_load_explicit(&got_seen, memory_order_relaxed))
+		return;
+	for (uint32_t r = 0; r < is->nrela; r++) {
+		uint32_t t = (uint32_t)is->rela[r].r_info;
+		if (t == R_AARCH64_ADR_GOT_PAGE || t == R_AARCH64_LD64_GOT_LO12_NC) {
+			atomic_store(&got_seen, true);
+			return;
+		}
+	}
+}
+static bool any_got(void)
+{
+	atomic_store(&got_seen, false);
+	if (!opt.relocatable)
+		pfor(isecs.n, find_got, NULL);
+	return atomic_load(&got_seen);
+}
+
 static void add_synthetic_sections(void)
 {
 	/* lld appends synthetic input sections after all files, in this order */
@@ -3554,8 +3621,9 @@ static void add_synthetic_sections(void)
 		isecs.v[buildid_isec].size = 16 + (!strcmp(opt.build_id, "md5") ? 16 :
 						   !strcmp(opt.build_id, "fast") ? 8 : 20);
 	}
-	/* sized after the relocation scan; empty unless something uses it */
-	got_isec = new_isec(".got", K_GOT, SHT_PROGBITS, SHF_ALLOC | SHF_WRITE, 8);
+	/* only when some GOT relocation needs it (lld drops an empty .got); sized after the scan */
+	if (any_got())
+		got_isec = new_isec(".got", K_GOT, SHT_PROGBITS, SHF_ALLOC | SHF_WRITE, 8);
 	symtab_isec = new_isec(".symtab", K_SYMTAB, SHT_SYMTAB, 0, 8);
 	isecs.v[symtab_isec].entsize = sizeof(Sym);
 	shstrtab_isec = new_isec(".shstrtab", K_SHSTRTAB, SHT_STRTAB, 0, 1);
@@ -3858,10 +3926,11 @@ static int run(int argc, char **argv)
 		if (atomic_load(&gsyms[g].needgot)) {
 			gsyms[g].gotidx = gotsyms.n;
 			VVEC_PUSH(gotsyms, g, alloc);
-			if (pic && !gsym_isabs(g) && gsyms[g].state != GS_UNDEF && !gsyms[g].demoted)
+			if (pic && got_isec != NONE && !gsym_isabs(g) && gsyms[g].state != GS_UNDEF && !gsyms[g].demoted)
 				isecs.v[got_isec].ndyn++;
 		}
-	isecs.v[got_isec].size = (uint64_t)gotsyms.n * 8;
+	if (got_isec != NONE)
+		isecs.v[got_isec].size = (uint64_t)gotsyms.n * 8;
 	ndyn = 0;
 	for (uint32_t i = 0; i < isecs.n; i++)
 		ndyn += isecs.v[i].ndyn;
