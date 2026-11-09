@@ -404,8 +404,16 @@ static int write_out(const char *cwd, const char *out, int outfd, const char *s,
 /* make-style dependency file, as clang -MD writes it */
 static int write_deps(const pp *p, const char *cwd, const char *depfile, const char *target, int errfd)
 {
-	static _Thread_local const char *names[1 << 16];
-	size_t n = pp_files(p, names, sizeof(names) / sizeof(names[0]));
+	static _Thread_local const char **names;
+	static _Thread_local size_t cap;
+	size_t n;
+
+	/* grown until every file fits (a full table may have been cut short) */
+	while (!names || (n = pp_files(p, names, cap)) == cap) {
+		free(names);
+		cap = cap ? 2 * cap : 4096;
+		names = malloc(cap * sizeof(*names));
+	}
 	buf d = { .r = &bufr[3] };
 	int r;
 
@@ -562,7 +570,19 @@ static int arch_lse(const char *v, bool cpu)
 
 int ppd_run(int argc, char **argv, const ppd_env *env)
 {
-	const char *dirs_q[256], *dirs_i[1024], *dirs_s[256], *dirs_a[256], *all[2048];
+	/* each list holds at most argc entries, all of them plus the defaults: one
+	   per-thread allocation, grown to the longest command line seen */
+	static _Thread_local const char **dirv;
+	static _Thread_local size_t dircap;
+	size_t per = (size_t)argc + 64;
+
+	if (5 * per > dircap) {
+		free(dirv);
+		dircap = 5 * per;
+		dirv = malloc(dircap * sizeof(*dirv));
+	}
+	const char **dirs_q = dirv, **dirs_i = dirv + per, **dirs_s = dirv + 2 * per, **dirs_a = dirv + 3 * per,
+		   **all = dirv + 4 * per;
 	int nq = 0, ni = 0, ns = 0, na = 0, n = 0;
 	const char *cmp = NULL, *out = NULL, *main_file = NULL, *depfile = NULL, *deptarget = NULL;
 	int errfd = env->errfd, status = 0, md = 0, dcolor = 0, nocaret = 0, elimit = 0, nwargs = 0;

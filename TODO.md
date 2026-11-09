@@ -384,7 +384,9 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
   check `vmreg` reservations in `mk`/`sym`/`tag`.
   *Validate:* T5 (every generated case: exit 1 with a diagnostic, and in
   `--vccd` mode the server keeps serving).
-- [ ] **Unbounded argv arrays** [P].  `ppdriver.c:410,489-498,561`
+- [x] **Unbounded argv arrays** [P].  *Done:* the directory lists are sized by
+  argc (one per-thread allocation), the depfile table grows until every file
+  fits; 5000 `-I`, 5000 `-include` and a 70000-header depfile work.  Was:  `ppdriver.c:410,489-498,561`
   (`dirs_i[1024]`, `all[2048]` …), `write_deps` 65536 files
   (`ppdriver.c:288`).  Allocate from the job arena.
   *Validate:* T5 (5000 `-I`, 5000 `-include`, a TU with 100k headers in the
