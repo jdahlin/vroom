@@ -500,6 +500,277 @@ static void wbswap(ecx *e, int k, int bytes)
 	wfree(e, r);
 }
 
+/* ---------------- builtins: overflow, atomics, vectors ---------------- */
+
+/* __builtin_{add,sub,mul}_overflow(a, b, &r): exact in 128 bits, then does r hold it */
+static int wbi_overflow(ecx *e, uint32_t n)
+{
+	cc *c = e->c;
+	const node *x = N(n);
+	uint32_t a = warg_n(c, n, 0), b = warg_n(c, n, 1), p = warg_n(c, n, 2);
+	qty ta = N(a)->ty, tb = N(b)->ty, rt = T(c, N(p)->ty)->base;
+	int op = x->aux == BI_ADD_OVERFLOW ? T_PLUS : x->aux == BI_SUB_OVERFLOW ? T_MINUS : T_STAR;
+	/* u64 * u64 needs all 128 bits unsigned; every other case fits signed */
+	qty v = op == T_STAR && !is_signed(c, ta) && !is_signed(c, tb) ? prim(TY_UINT128) : prim(TY_INT128);
+	uint32_t tr = wtmp(e, WT_I64), tp = wtmp(e, WT_I64);
+	wlv l = { .k = WL_MEM };
+
+	if (w16(c, rt) || w16(c, ta) || w16(c, tb))
+		efatal(e, x->loc, "wasm: overflow builtins on __int128 are not supported yet");
+	wexpr(e, a, true);
+	w16conv(e, ta, v);
+	wexpr(e, b, true);
+	w16conv(e, tb, v);
+	wexpr(e, p, true);
+	wset(e, tp);
+	w16arith(e, op, v, 0);
+	wset(e, tr);
+	wget(e, tp);
+	wget(e, tr);
+	w16conv(e, v, rt);
+	wstore(e, &l, rt);
+	wget(e, tr);
+	w16conv(e, v, rt);
+	w16conv(e, rt, v);
+	wget(e, tr);
+	w16cmp(e, T_EXCLAIMEQ, v);
+	wfree(e, tr);
+	wfree(e, tp);
+	return WT_I32;
+}
+
+/* the unsigned integer type of n bytes */
+static qty wuint_n(ecx *e, uint64_t n)
+{
+	switch (n) {
+	case 1: return prim(TY_UCHAR);
+	case 2: return prim(TY_USHORT);
+	case 4: return prim(TY_UINT);
+	case 8: return prim(TY_ULONG);
+	default: efatal(e, e->curloc, "wasm: %llu-byte atomics are not supported", (unsigned long long)n);
+	}
+}
+
+/*
+ * __atomic_* and __sync_*: plain loads and stores, as clang does for wasm
+ * without the atomics feature (one thread).
+ */
+static int wbi_atomic(ecx *e, uint32_t n, bool want)
+{
+	cc *c = e->c;
+	const node *x = N(n);
+	int id = x->aux;
+	qty t = QUNQ(T(c, N(warg_n(c, n, 0))->ty)->base);
+	uint64_t sz = tsize(c, t);
+	bool gen = id == BI_ATOMIC_LOAD || id == BI_ATOMIC_STORE || id == BI_ATOMIC_EXCHANGE || id == BI_ATOMIC_CMPXCHG;
+	qty vt = gen || !(is_integer(c, t) || is_ptr(c, t)) ? wuint_n(e, sz) : t;	/* the type moved */
+	int nmo = id == BI_ATOMIC_CMPXCHG_N || id == BI_ATOMIC_CMPXCHG ? 2 : id == BI_SYNC_VAL_CAS || id == BI_SYNC_BOOL_CAS || id == BI_SYNC_LOCK_RELEASE ? 0 : 1;
+	int nargs = (int)x->c, k = wty(c, vt);
+	uint32_t tp = wtmp(e, WT_I64), v1 = UINT32_MAX, v2 = UINT32_MAX, cur;
+	wlv l = { .k = WL_MEM };
+
+	wexpr(e, warg_n(c, n, 0), true);
+	wset(e, tp);
+	/* the operands (a pointer for the generic forms), then the orders and weak */
+	for (int i = 1; i < nargs; i++) {
+		uint32_t a = warg_n(c, n, (uint32_t)i);
+		bool opnd = i < nargs - nmo && i <= 2;
+
+		if (id == BI_ATOMIC_CMPXCHG_N || id == BI_ATOMIC_CMPXCHG)
+			opnd = i <= 2;
+		if (!opnd) {
+			wexpr(e, a, false);
+			continue;
+		}
+		{
+			/* the generic forms and cmpxchg's expected: pointers */
+			bool ptr = gen || ((id == BI_ATOMIC_CMPXCHG_N) && i == 1);
+			uint32_t tv = wtmp(e, ptr ? WT_I64 : k);
+
+			wexpr(e, a, true);
+			if (!ptr && QUNQ(N(a)->ty) != QUNQ(vt))
+				wconv(e, N(a)->ty, vt);
+			wset(e, tv);
+			if (i == 1)
+				v1 = tv;
+			else
+				v2 = tv;
+		}
+	}
+	cur = wtmp(e, k);
+	switch (id) {
+	case BI_ATOMIC_LOAD_N:
+		wget(e, tp);
+		wload(e, &l, vt);
+		break;
+	case BI_ATOMIC_LOAD:
+		wget(e, v1);
+		wget(e, tp);
+		wcopy(e, sz);
+		break;
+	case BI_ATOMIC_STORE_N:
+	case BI_SYNC_LOCK_RELEASE:
+		wget(e, tp);
+		if (id == BI_SYNC_LOCK_RELEASE)
+			wconst(e, k, 0);
+		else
+			wget(e, v1);
+		wstore(e, &l, vt);
+		break;
+	case BI_ATOMIC_STORE:
+		wget(e, tp);
+		wget(e, v1);
+		wcopy(e, sz);
+		break;
+	case BI_ATOMIC_EXCHANGE_N:
+	case BI_ATOMIC_EXCHANGE:
+		wget(e, tp);
+		wload(e, &l, vt);
+		wset(e, cur);
+		wget(e, tp);
+		wget(e, v1);
+		if (gen)
+			wload(e, &l, vt);
+		wstore(e, &l, vt);
+		if (gen) {
+			wget(e, v2);
+			wget(e, cur);
+			wstore(e, &l, vt);
+		} else {
+			wget(e, cur);
+		}
+		break;
+	case BI_ATOMIC_CMPXCHG_N:
+	case BI_ATOMIC_CMPXCHG:
+	case BI_SYNC_VAL_CAS:
+	case BI_SYNC_BOOL_CAS: {
+		bool sync = id == BI_SYNC_VAL_CAS || id == BI_SYNC_BOOL_CAS;
+
+		wget(e, tp);
+		wload(e, &l, vt);
+		wtee(e, cur);
+		wget(e, v1);
+		if (!sync)
+			wload(e, &l, vt);
+		wop(e, k, "eq");
+		wblock(e, "if\ti32");
+		wget(e, tp);
+		wget(e, v2);
+		if (gen)
+			wload(e, &l, vt);
+		wstore(e, &l, vt);
+		wconst(e, WT_I32, 1);
+		wi(e, "else");
+		if (!sync) {
+			wget(e, v1);
+			wget(e, cur);
+			wstore(e, &l, vt);
+		}
+		wconst(e, WT_I32, 0);
+		wend(e, "end_if");
+		if (id == BI_SYNC_VAL_CAS) {
+			wi(e, "drop");
+			wget(e, cur);
+		}
+		break;
+	}
+	default: {
+		/* fetch_op / op_fetch: add sub and or xor */
+		int base = id >= BI_ATOMIC_ADD_FETCH ? id - BI_ATOMIC_ADD_FETCH : id - BI_ATOMIC_FETCH_ADD;
+		static const int bop[] = { T_PLUS, T_MINUS, T_AMP, T_PIPE, T_CARET };
+		qty at = is_ptr(c, vt) ? prim(TY_ULONG) : k == WT_I32 ? prim(TY_INT) : vt;
+		uint32_t nv = wtmp(e, k);
+
+		wget(e, tp);
+		wload(e, &l, vt);
+		wtee(e, cur);
+		wget(e, v1);
+		warith(e, bop[base], at, 0);
+		wconv(e, at, vt);
+		wset(e, nv);
+		wget(e, tp);
+		wget(e, nv);
+		wstore(e, &l, vt);
+		wget(e, id >= BI_ATOMIC_ADD_FETCH ? nv : cur);
+		wfree(e, nv);
+		break;
+	}
+	}
+	wfree(e, cur);
+	wfree(e, tp);
+	if (v1 != UINT32_MAX)
+		wfree(e, v1);
+	if (v2 != UINT32_MAX)
+		wfree(e, v2);
+	{
+		int rk = wty(c, x->ty);
+
+		if (rk == WT_NONE)
+			return WT_NONE;
+		if (id == BI_ATOMIC_CMPXCHG_N || id == BI_ATOMIC_CMPXCHG || id == BI_SYNC_BOOL_CAS)
+			return WT_I32;
+		if (QUNQ(vt) != QUNQ(x->ty))
+			wconv(e, vt, x->ty);
+		(void)want;
+		return rk;
+	}
+}
+
+/* __builtin_shufflevector / __builtin_convertvector: lane by lane */
+static int wbi_vector(ecx *e, uint32_t n)
+{
+	cc *c = e->c;
+	const node *x = N(n);
+	uint32_t a0 = warg_n(c, n, 0);
+	qty at = N(a0)->ty, ae = T(c, at)->base, re = T(c, x->ty)->base;
+	uint32_t na = (uint32_t)(tsize(c, at) / tsize(c, ae)), nr = (uint32_t)(tsize(c, x->ty) / tsize(c, re));
+	bool sh = x->aux == BI_SHUFFLEVECTOR;
+	uint32_t ta = wtmp(e, WT_I64), tb = wtmp(e, WT_I64);
+	uint64_t sl = wslot(e, tsize(c, x->ty), 16);
+
+	wexpr(e, a0, true);
+	wset(e, ta);
+	if (sh) {
+		wexpr(e, warg_n(c, n, 1), true);
+		wset(e, tb);
+	}
+	for (uint32_t i = 0; i < nr; i++) {
+		wlv d = { .k = WL_MEM, .off = i * tsize(c, re) };
+
+		wslot_addr(e, sl);
+		if (sh) {
+			int64_t kx = (int64_t)c->ipool[N(warg_n(c, n, 2 + i))->a];
+
+			if (kx < 0) {
+				int rk = wty(c, re);
+
+				if (rk == WT_F32 || rk == WT_F64)
+					wfconst(e, rk, 0);
+				else if (rk == WT_MEM) {
+					wget(e, ta);
+				} else
+					wconst(e, rk, 0);
+			} else {
+				wlv s = { .k = WL_MEM, .off = (uint64_t)(kx < (int64_t)na ? kx : kx - (int64_t)na) * tsize(c, ae) };
+
+				wget(e, kx < (int64_t)na ? ta : tb);
+				wload(e, &s, ae);
+			}
+		} else {
+			wlv s = { .k = WL_MEM, .off = i * tsize(c, ae) };
+
+			wget(e, ta);
+			wload(e, &s, ae);
+			wconv(e, ae, re);
+		}
+		wstore(e, &d, re);
+	}
+	wfree(e, ta);
+	wfree(e, tb);
+	wslot_addr(e, sl);
+	return WT_I64;
+}
+
 VPRIV int wbuiltin(ecx *e, uint32_t n, bool want)
 {
 	cc *c = e->c;
@@ -672,6 +943,44 @@ VPRIV int wbuiltin(ecx *e, uint32_t n, bool want)
 		wop(e, ak, "ne");
 		wfree(e, t);
 		return WT_I32;
+	}
+	case BI_ADD_OVERFLOW: case BI_SUB_OVERFLOW: case BI_MUL_OVERFLOW:
+		return wbi_overflow(e, n);
+	case BI_ATOMIC_LOAD_N: case BI_ATOMIC_STORE_N: case BI_ATOMIC_EXCHANGE_N: case BI_ATOMIC_CMPXCHG_N:
+	case BI_ATOMIC_LOAD: case BI_ATOMIC_STORE: case BI_ATOMIC_EXCHANGE: case BI_ATOMIC_CMPXCHG:
+	case BI_ATOMIC_FETCH_ADD: case BI_ATOMIC_FETCH_SUB: case BI_ATOMIC_FETCH_AND: case BI_ATOMIC_FETCH_OR:
+	case BI_ATOMIC_FETCH_XOR: case BI_ATOMIC_ADD_FETCH: case BI_ATOMIC_SUB_FETCH: case BI_ATOMIC_AND_FETCH:
+	case BI_ATOMIC_OR_FETCH: case BI_ATOMIC_XOR_FETCH: case BI_SYNC_VAL_CAS: case BI_SYNC_BOOL_CAS:
+	case BI_SYNC_LOCK_RELEASE:
+		return wbi_atomic(e, n, want);
+	case BI_ATOMIC_LOCK_FREE:
+		for (uint32_t i = 0; i < x->c; i++)
+			wexpr(e, warg_n(c, n, i), false);
+		wconst(e, WT_I32, 1);
+		return WT_I32;
+	case BI_SHUFFLEVECTOR: case BI_CONVERTVECTOR:
+		return wbi_vector(e, n);
+	case BI_SIGNBIT: {
+		uint32_t a = warg_n(c, n, 0);
+		int ak = wty(c, N(a)->ty);
+
+		wexpr(e, a, true);
+		if (ak == WT_F32) {
+			wi(e, "i32.reinterpret_f32");
+			wconst(e, WT_I32, 31);
+			wi(e, "i32.shr_u");
+		} else {
+			if (ak == WT_F64)
+				wi(e, "i64.reinterpret_f64");
+			else
+				wiu(e, "i64.load", 8);
+			wconst(e, WT_I64, 63);
+			wi(e, "i64.shr_u");
+			wi(e, "i32.wrap_i64");
+		}
+		if (k == WT_I64)
+			wi(e, "i64.extend_i32_u");
+		return k;
 	}
 	case BI_ATOMIC_THREAD_FENCE:
 	case BI_ATOMIC_SIGNAL_FENCE:

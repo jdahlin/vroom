@@ -4,8 +4,6 @@
 
 /* ---------------- conversions ---------------- */
 
-static int w16(cc *c, qty t);
-static void w16conv(ecx *e, qty from, qty to);
 
 /* a C integer of type t kept in an i32: re-extend it after arithmetic (from: what the bits are now) */
 static void wnarrow(ecx *e, qty from, qty to)
@@ -457,7 +455,7 @@ static void wbf_trunc(ecx *e, const wlv *l, qty t)
  */
 
 /* 1: __int128, 2: long double, 0: neither */
-static int w16(cc *c, qty t)
+VPRIV int w16(cc *c, qty t)
 {
 	switch (KIND(c, t)) {
 	case TY_INT128:
@@ -530,7 +528,7 @@ static void w16const(ecx *e, uint64_t lo, uint64_t hi)
 }
 
 /* stack: [a b] (a 16-byte, b 16-byte or a shift count of type rty) -> a op b */
-static void w16arith(ecx *e, int op, qty ty, qty rty)
+VPRIV void w16arith(ecx *e, int op, qty ty, qty rty)
 {
 	cc *c = e->c;
 	bool sg = is_signed(c, ty), fl = w16(c, ty) == 2;
@@ -627,7 +625,7 @@ static void w16arith(ecx *e, int op, qty ty, qty rty)
 }
 
 /* stack: [a b] of 16-byte type t -> a op b as an i32 0/1 */
-static void w16cmp(ecx *e, int op, qty t)
+VPRIV void w16cmp(ecx *e, int op, qty t)
 {
 	cc *c = e->c;
 	uint32_t ta, tb;
@@ -686,7 +684,7 @@ static void w16cmp(ecx *e, int op, qty t)
 }
 
 /* the value on the stack, of type from, as type to: one of them 16 bytes */
-static void w16conv(ecx *e, qty from, qty to)
+VPRIV void w16conv(ecx *e, qty from, qty to)
 {
 	cc *c = e->c;
 	int f = w16(c, from), t = w16(c, to), fk = wty(c, from), tk = wty(c, to);
@@ -879,8 +877,6 @@ static int w16incdec(ecx *e, uint32_t n, bool want)
 
 /* ---------------- GNU vectors ---------------- */
 
-static void warith(ecx *e, int op, qty ty, qty rty);
-static void wcompare(ecx *e, int op, qty t);
 static bool wis_cmp(int op);
 
 /*
@@ -962,7 +958,7 @@ static bool wis_cmp(int op)
 }
 
 /* stack: [a b] of C type ty (b of rty: a shift count) -> a op b */
-static void warith(ecx *e, int op, qty ty, qty rty)
+VPRIV void warith(ecx *e, int op, qty ty, qty rty)
 {
 	cc *c = e->c;
 	int k = wty(c, ty);
@@ -1004,7 +1000,7 @@ static void warith(ecx *e, int op, qty ty, qty rty)
 }
 
 /* stack: [a b] of type t -> a op b as an i32 0/1 */
-static void wcompare(ecx *e, int op, qty t)
+VPRIV void wcompare(ecx *e, int op, qty t)
 {
 	cc *c = e->c;
 	int k = wty(c, t);

@@ -330,6 +330,12 @@ VPRIV void wstore(ecx *e, wlv *l, qty t);
 VPRIV void wfold_off(ecx *e, wlv *l);
 VPRIV void wcopy(ecx *e, uint64_t n);
 VPRIV void wconv(ecx *e, qty from, qty to);
+VPRIV int w16(cc *c, qty t);
+VPRIV void w16arith(ecx *e, int op, qty ty, qty rty);
+VPRIV void w16cmp(ecx *e, int op, qty t);
+VPRIV void w16conv(ecx *e, qty from, qty to);
+VPRIV void warith(ecx *e, int op, qty ty, qty rty);
+VPRIV void wcompare(ecx *e, int op, qty t);
 /* wcall.c */
 VPRIV int wcall(ecx *e, uint32_t n, bool want);
 VPRIV int wbuiltin(ecx *e, uint32_t n, bool want);
