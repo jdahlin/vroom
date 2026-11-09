@@ -388,8 +388,52 @@ static void wgsub(ecx *e, uint32_t s, uint32_t r, uint32_t i)
 		if (N(s)->op == N_LABEL) {
 			W->gd[r].need = true;
 			wgadd(e, N(s)->a, r, i);
+		} else if (W->gd[r].op != N_SWITCH) {
+			/* a case label in a nested statement: its switch goes there as a goto */
+			W->gd[r].need = true;
+			wgadd(e, WG_CASE | s, r, i);
 		}
 	wgscan(e, s, (int)r, i);
+}
+
+/* the statement expressions in expression n: compounds of their own (roots) */
+static void wgexpr(ecx *e, uint32_t n)
+{
+	cc *c = e->c;
+	const node *x;
+
+	for (; n; n = x->a) {
+		x = N(n);
+		switch (x->op) {
+		case N_STMTEXPR:
+			wgscan(e, x->a, -1, 0);
+			return;
+		case N_MEMBER: case N_CAST: case N_UNARY: case N_ADDR: case N_DEREF:
+		case N_PREINC: case N_PREDEC: case N_POSTINC: case N_POSTDEC:
+		case N_VAARG: case N_COMPLIT:
+			continue;
+		case N_INDEX: case N_BINARY: case N_LOGAND: case N_LOGOR: case N_ASSIGN:
+		case N_COMMA: case N_CPLX:
+			wgexpr(e, x->b);
+			continue;
+		case N_COND:
+			wgexpr(e, x->b);
+			wgexpr(e, x->c);
+			continue;
+		case N_CALL: case N_BUILTIN:
+			for (uint32_t i = 0; i < x->c; i++)
+				wgexpr(e, c->lists[x->b + i]);
+			if (x->op == N_CALL)
+				continue;
+			return;
+		case N_INIT:
+			for (uint32_t i = 0; i < x->c; i++)
+				wgexpr(e, c->lists[x->b + (x->aux == 1 ? 3 * i + 2 : i)]);
+			return;
+		default:
+			return;
+		}
+	}
 }
 
 static void wgscan(ecx *e, uint32_t n, int pd, uint32_t pidx)
@@ -402,6 +446,12 @@ static void wgscan(ecx *e, uint32_t n, int pd, uint32_t pidx)
 		return;
 	x = N(n);
 	switch (x->op) {
+	case N_EXPR: case N_RETURN: case N_GOTO_IND:
+		wgexpr(e, x->a);
+		break;
+	case N_DECL:
+		wgexpr(e, x->b);
+		break;
 	case N_BLOCK:
 		r = wgrec(e, n, pd, pidx);
 		for (uint32_t i = 0; i < x->c; i++)
@@ -409,6 +459,7 @@ static void wgscan(ecx *e, uint32_t n, int pd, uint32_t pidx)
 		wgneed(e, r);
 		break;
 	case N_IF:
+		wgexpr(e, x->a);
 		r = wgrec(e, n, pd, pidx);
 		wgsub(e, x->b, r, 1);
 		wgsub(e, x->c, r, 2);
@@ -416,12 +467,15 @@ static void wgscan(ecx *e, uint32_t n, int pd, uint32_t pidx)
 		break;
 	case N_WHILE:
 	case N_DO:
+		wgexpr(e, x->a);
 		r = wgrec(e, n, pd, pidx);
 		wgsub(e, x->b, r, 0);
 		wgneed(e, r);
 		break;
 	case N_FOR:
 		wgscan(e, x->a, -1, 0);
+		wgexpr(e, x->b);
+		wgexpr(e, c->lists[x->c]);
 		r = wgrec(e, n, pd, pidx);
 		wgsub(e, c->lists[x->c + 1], r, 0);
 		wgneed(e, r);
@@ -430,6 +484,7 @@ static void wgscan(ecx *e, uint32_t n, int pd, uint32_t pidx)
 		/* its body's segments: the case labels and these */
 		const node *b = N(x->b);
 
+		wgexpr(e, x->a);
 		if (b->op != N_BLOCK) {
 			wgscan(e, x->b, -1, 0);
 			break;
@@ -573,26 +628,32 @@ static uint32_t wgstate(wst *W, const wgd *d, uint32_t i)
 	}
 }
 
-static void wgoto(ecx *e, uint32_t lb, uint32_t loc)
+/* label lb's (compound, statement), NULL: not a goto target */
+static const wgp *wglabel(wst *W, uint32_t lb)
 {
-	wst *W = e->w;
 	uint32_t lo = 0, hi = W->ngl;
-	const wgp *L = W->gp + W->ngp, *p = NULL;
-	int d, a;
-	uint32_t aidx;
+	const wgp *L = W->gp + W->ngp;
 
 	while (lo < hi) {
 		uint32_t m = (lo + hi) / 2;
 
-		if (L[m].label == lb) {
-			p = &L[m];
-			break;
-		}
+		if (L[m].label == lb)
+			return &L[m];
 		if (L[m].label < lb)
 			lo = m + 1;
 		else
 			hi = m;
 	}
+	return NULL;
+}
+
+static void wgoto(ecx *e, uint32_t lb, uint32_t loc)
+{
+	wst *W = e->w;
+	const wgp *p = wglabel(W, lb);
+	int d, a;
+	uint32_t aidx;
+
 	if (!p)
 		efatal(e, loc, "wasm: goto to a label that is not a statement of a compound statement is not supported yet (PLAN-wasm.md W4)");
 	/* the compound being emitted that the target is (nested) in */
@@ -647,6 +708,7 @@ static void wgblock(ecx *e, const node *x, int r)
 	wst *W = e->w;
 	wgd *d = &W->gd[r];
 	uint32_t m = d->nseg;
+	bool notop = W->notop && W->notop == d->node && x->c && !wlabels(e->c, e->c->lists[x->b]);
 	int *sb = malloc(m * sizeof(int));
 	tbuf *b = &W->b;
 
@@ -670,7 +732,8 @@ static void wgblock(ecx *e, const node *x, int r)
 
 		if (m > 1)
 			wend(e, "end_block");
-		wstmts(e, x, s0, s1);
+		if (j || !notop || m < 2)
+			wstmts(e, x, s0, s1);
 	}
 	wend(e, "end_loop");
 	W->gd[r].loop = -1;
@@ -752,6 +815,43 @@ static uint32_t wunlabel(cc *c, uint32_t s)
 	return s;
 }
 
+/* the case labels of the current switch nested in statement n (not in an inner switch) */
+static void wnested_cases(cc *c, uint32_t n, uint32_t **v, uint32_t *nv, uint32_t *cap)
+{
+	const node *x;
+
+	for (; n; n = x->c) {
+		x = N(n);
+		switch (x->op) {
+		case N_CASE: case N_DEFAULT:
+			if (*nv == *cap) {
+				*cap = *cap ? 2 * *cap : 16;
+				*v = realloc(*v, *cap * sizeof **v);
+			}
+			(*v)[(*nv)++] = n;
+			continue;
+		case N_LABEL:
+			continue;
+		case N_BLOCK:
+			for (uint32_t i = 0; i < x->c; i++)
+				wnested_cases(c, c->lists[x->b + i], v, nv, cap);
+			return;
+		case N_IF:
+			wnested_cases(c, x->b, v, nv, cap);
+			wnested_cases(c, x->c, v, nv, cap);
+			return;
+		case N_WHILE: case N_DO:
+			wnested_cases(c, x->b, v, nv, cap);
+			return;
+		case N_FOR:
+			wnested_cases(c, c->lists[x->c + 1], v, nv, cap);
+			return;
+		default:
+			return;
+		}
+	}
+}
+
 static void wswitch(ecx *e, uint32_t n)
 {
 	cc *c = e->c;
@@ -769,6 +869,7 @@ static void wswitch(ecx *e, uint32_t n)
 	int r = W->ngdx && body->op == N_BLOCK ? wgfind(W, n) : -1;
 	wgd *g = r >= 0 ? &W->gd[r] : NULL;
 	uint32_t gj = 0;	/* goto: the next segment start of g */
+	uint32_t *nc = NULL, nnc = 0, cnc = 0;	/* nested case labels */
 
 	if (k == WT_MEM)
 		efatal(e, x->loc, "wasm: a switch on a 128-bit value is not supported yet");
@@ -806,6 +907,28 @@ static void wswitch(ecx *e, uint32_t n)
 		}
 	}
 	m = W->nseg - seg0;
+	/* case labels in nested statements: a trampoline block each (sb[m + j]), a goto */
+	for (uint32_t i = 0; i < nst; i++) {
+		uint32_t s = st[i];
+
+		while (s && (N(s)->op == N_CASE || N(s)->op == N_DEFAULT || N(s)->op == N_LABEL))
+			s = N(s)->c;
+		wnested_cases(c, s, &nc, &nnc, &cnc);
+	}
+	if (nnc && !g)
+		efatal(e, x->loc, "wasm: a case label in a nested statement of a switch whose body is not a compound statement");
+	for (uint32_t j = 0; j < nnc; j++) {
+		const node *y = N(nc[j]);
+
+		if (y->op == N_DEFAULT) {
+			dseg = m + j;
+			continue;
+		}
+		if (W->nsw >= WMAXSW)
+			efatal(e, x->loc, "wasm: switch too large");
+		W->sw[W->nsw++] = (wswc){ em_trunc_to(c, c->ipool[y->a], ct),
+					  em_trunc_to(c, c->ipool[y->b ? y->b : y->a], ct), m + j, false };
+	}
 	ncase = W->nsw - sw0;
 	t = wtmp(e, k);
 	if (g) {
@@ -823,8 +946,10 @@ static void wswitch(ecx *e, uint32_t n)
 	brk = wblock(e, "block");
 	if (g)
 		g->loop = wblock(e, "loop");
-	sb = malloc((m + 1) * sizeof(int));
+	sb = malloc((m + nnc + 1) * sizeof(int));
 	for (uint32_t j = m; j-- > 0;)
+		sb[j] = wblock(e, "block");
+	for (uint32_t j = m + nnc; j-- > m;)
 		sb[j] = wblock(e, "block");
 	if (g) {
 		/* st - 1: the statement to start at */
@@ -917,6 +1042,11 @@ static void wswitch(ecx *e, uint32_t n)
 	}
 	wfree(e, t);
 	W->brk = brk;
+	for (uint32_t j = 0; j < nnc; j++) {
+		wend(e, "end_block");
+		wgoto(e, WG_CASE | nc[j], N(nc[j])->loc);
+	}
+	free(nc);
 	/* statements before the first label: never run (their declarations count) */
 	for (uint32_t i = 0; i < (m ? W->seg[seg0] : nst); i++)
 		wstmt(e, st[i]);
@@ -1040,6 +1170,11 @@ VPRIV void wstmt(ecx *e, uint32_t n)
 		break;
 	}
 	case N_EXPR:
+		if (n == W->sxv && n) {
+			/* the value of the statement expression being emitted */
+			wst_sxval(e, x->a);
+			break;
+		}
 		if (x->a)
 			wexpr(e, x->a, false);
 		break;
@@ -1047,9 +1182,9 @@ VPRIV void wstmt(ecx *e, uint32_t n)
 		wdecl_stmt(e, x);
 		break;
 	case N_IF: {
-		int r = W->ngdx ? wgfind(W, n) : -1, kn = r < 0 ? wknown(e, x->a) : -1;
+		int r = W->ngdx ? wgfind(W, n) : -1, kn = wknown(e, x->a);
 
-		if (kn >= 0 && !wlabels(c, kn ? x->c : x->b)) {
+		if (r < 0 && kn >= 0 && !wlabels(c, kn ? x->c : x->b)) {
 			/* if (0), if (1): only the branch taken */
 			wstmt(e, kn ? x->b : x->c);
 			break;
@@ -1074,11 +1209,16 @@ VPRIV void wstmt(ecx *e, uint32_t n)
 			wtruth(e, x->a);
 		}
 		wblock(e, "if");
+		/* if (0) { a; L: b; }: the branch not taken is only entered by goto,
+		   what comes before its first label is dead */
+		W->notop = kn == 0 ? x->b : 0;
 		wstmt(e, x->b);
 		if (x->c) {
 			wi(e, "else");
+			W->notop = kn == 1 ? x->c : 0;
 			wstmt(e, x->c);
 		}
+		W->notop = 0;
 		wend(e, "end_if");
 		break;
 	}
@@ -1160,7 +1300,10 @@ VPRIV void wstmt(ecx *e, uint32_t n)
 		break;
 	case N_CASE:
 	case N_DEFAULT:
-		efatal(e, x->loc, "wasm: a case label inside a nested statement is not supported yet (PLAN-wasm.md W4)");
+		/* nested: its switch reaches it as a goto target (wswitch) */
+		if (!W->ngl || !wglabel(W, WG_CASE | n))
+			efatal(e, x->loc, "wasm: a case label in a nested statement of a switch whose body is not a compound statement");
+		/* fall through */
 	case N_LABEL:
 		wstmt(e, x->c);
 		break;
@@ -1175,7 +1318,8 @@ VPRIV void wstmt(ecx *e, uint32_t n)
 		wexpr(e, x->a, true);
 		wset(e, t);
 		for (uint32_t i = 0; i < W->ngl; i++) {
-			if (!c->labels[L[i].label].addr_taken || (i && L[i - 1].label == L[i].label))
+			if ((L[i].label & WG_CASE) || !c->labels[L[i].label].addr_taken ||
+			    (i && L[i - 1].label == L[i].label))
 				continue;
 			wget(e, t);
 			wconst(e, WT_I64, (int64_t)L[i].label + 1);

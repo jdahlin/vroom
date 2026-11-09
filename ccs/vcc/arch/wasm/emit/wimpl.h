@@ -78,6 +78,8 @@ typedef struct wst {
 	struct wvb *cl;		/* variables with a cleanup in scope: block depth, sym (.sp) */
 	uint32_t ncl;
 	int bdepth;		/* the depth at the start of the innermost compound statement */
+	uint32_t notop;		/* a compound only entered by goto (the dead branch of if (0)) */
+	uint32_t sxv, sxt;	/* the statement expression's value statement, its local */
 	struct wst *next;	/* the free list */
 } wst;
 
@@ -97,6 +99,7 @@ typedef struct wgd {
 
 /* label (or 0 for a plain segment start), gd, statement index */
 typedef struct wgp { uint32_t label, d, i; } wgp;
+#define WG_CASE (1u << 31)	/* label: a case label (node) in a nested statement */
 #define WMAXGD ((size_t)1 << 22)
 
 #define WMAXLOC ((size_t)1 << 22)
@@ -338,6 +341,7 @@ VPRIV void wload(ecx *e, wlv *l, qty t);
 VPRIV void wstore(ecx *e, wlv *l, qty t);
 VPRIV void wfold_off(ecx *e, wlv *l);
 VPRIV void wcopy(ecx *e, uint64_t n);
+VPRIV void wst_sxval(ecx *e, uint32_t v);
 VPRIV void wconv(ecx *e, qty from, qty to);
 VPRIV int w16(cc *c, qty t);
 VPRIV void w16arith(ecx *e, int op, qty ty, qty rty);

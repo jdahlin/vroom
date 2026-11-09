@@ -482,6 +482,7 @@ VPRIV void wasm_emit_function(ecx *e, uint32_t s)
 	W->nsw = W->nseg = 0;
 	W->nvsz = W->nvb = W->ncl = 0;
 	W->bdepth = 0;
+	W->sxv = W->notop = 0;
 	r = wclassify_ret(c, ft->base);
 	W->rt = r.k == WA_SCALAR ? r.st : WT_NONE;
 	e->top = s;

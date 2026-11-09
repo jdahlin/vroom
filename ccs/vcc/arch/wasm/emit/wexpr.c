@@ -1492,10 +1492,32 @@ static int wincdec(ecx *e, uint32_t n, bool want)
 	return want ? k : WT_NONE;
 }
 
+/* the value statement of a statement expression: into W->sxt (a record is
+   copied to a slot of its own, it outlives the block's objects) */
+VPRIV void wst_sxval(ecx *e, uint32_t v)
+{
+	cc *c = e->c;
+	wst *W = e->w;
+	qty vt = N(v)->ty;
+
+	wexpr(e, v, true);
+	if (wty(c, vt) == WT_MEM) {
+		uint64_t sl = wslot(e, tsize(c, vt), talign(c, vt));
+
+		wset(e, W->sxt);
+		wslot_addr(e, sl);
+		wget(e, W->sxt);
+		wcopy(e, tsize(c, vt));
+		wslot_addr(e, sl);
+	}
+	wset(e, W->sxt);
+}
+
 /* a statement expression's value: the last statement's, if it is an expression */
 static int wstmtexpr(ecx *e, uint32_t n, bool want)
 {
 	cc *c = e->c;
+	wst *W = e->w;
 	const node *x = N(n);
 	uint32_t last = x->c ? c->lists[x->b + x->c - 1] : 0, vs = 0;
 
@@ -1510,26 +1532,14 @@ static int wstmtexpr(ecx *e, uint32_t n, bool want)
 		return WT_NONE;
 	}
 	{
-		qty vt = N(N(vs)->a)->ty;
-		int k = wty(c, vt);
-		uint32_t t = wtmp(e, k);
+		int k = wty(c, N(N(vs)->a)->ty);
+		uint32_t osv = W->sxv, ost = W->sxt, t = wtmp(e, k == WT_MEM ? WT_I64 : k);
 
-		for (uint32_t i = 0; i + 1 < x->c; i++)
-			wstmt(e, c->lists[x->b + i]);
-		/* labels in front of the value (a goto target: W4) */
-		for (uint32_t s = c->lists[x->b + x->c - 1]; N(s)->op == N_LABEL; s = N(s)->c)
-			;
-		wexpr(e, N(vs)->a, true);
-		if (k == WT_MEM) {
-			/* a record value outlives the block's objects: copy it */
-			uint64_t sl = wslot(e, tsize(c, vt), talign(c, vt));
-
-			wset(e, t);
-			wslot_addr(e, sl);
-			wget(e, t);
-			wcopy(e, tsize(c, vt));
-			wslot_addr(e, sl);
-		}
+		/* the whole compound (goto dispatch, VLAs, cleanups); the value into t */
+		W->sxv = vs, W->sxt = t;
+		wstmt(e, n);
+		W->sxv = osv, W->sxt = ost;
+		wget(e, t);
 		wfree(e, t);
 		return k;
 	}
