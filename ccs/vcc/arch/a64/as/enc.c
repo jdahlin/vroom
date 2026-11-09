@@ -185,7 +185,7 @@ enum {
 	K_DP2, K_EXTR, K_VLD1, K_VREV, K_DUP, K_EXT, K_MOVI, K_VSHIFT, K_VPERM, K_PMULL,
 	K_FMOV, K_SHA3, K_SHA2, K_CPY, K_SET, K_V3, K_UMOV, K_AT, K_RDVL, K_PREG,
 	K_V2, K_TBL, K_SHA512, K_LDR_REP, K_INS, K_MTE, K_MTEM, K_VNOT, K_SMOV, K_ACROSS,
-	K_VMISC, K_ADDP, K_IALIAS,
+	K_VMISC, K_ADDP, K_IALIAS, K_PAC,
 };
 
 typedef struct { const char *name; uint8_t k; uint32_t base; uint32_t x; } Mn;
@@ -196,6 +196,7 @@ static const Mn mns[] = {
 	{ "adc", K_DP2, 0x1a000000, 0 },
 	{ "adcs", K_DP2, 0x3a000000, 0 },
 	{ "add", K_ADDSUB, 0, 0 },
+	{ "addg", K_PAC, 0x91800000, 17 },
 	{ "addp", K_ADDP, 0x0e20bc00, 0 },
 	{ "adds", K_ADDSUB, 1, 0 },
 	{ "addv", K_ACROSS, 0x0e31b800, 0 },
@@ -209,6 +210,20 @@ static const Mn mns[] = {
 	{ "ands", K_LOGIC, 3, 0 },
 	{ "asr", K_SHIFT, 2, 0 },
 	{ "at", K_AT, 0, 0 },
+	{ "autda", K_PAC, 0xdac11800, 3 },
+	{ "autdb", K_PAC, 0xdac11c00, 3 },
+	{ "autdza", K_PAC, 0xdac13be0, 1 },
+	{ "autdzb", K_PAC, 0xdac13fe0, 1 },
+	{ "autia", K_PAC, 0xdac11000, 3 },
+	{ "autia1716", K_FIXED, 0xd503219f, 0 },
+	{ "autiasp", K_FIXED, 0xd50323bf, 0 },
+	{ "autiaz", K_FIXED, 0xd503239f, 0 },
+	{ "autib", K_PAC, 0xdac11400, 3 },
+	{ "autib1716", K_FIXED, 0xd50321df, 0 },
+	{ "autibsp", K_FIXED, 0xd50323ff, 0 },
+	{ "autibz", K_FIXED, 0xd50323df, 0 },
+	{ "autiza", K_PAC, 0xdac133e0, 1 },
+	{ "autizb", K_PAC, 0xdac137e0, 1 },
 	{ "b", K_B, 0x14000000, R_AARCH64_JUMP26 },
 	{ "bcax", K_SHA512, 0xce200000, 3 },
 	{ "bfc", K_IALIAS, 0, 5 },
@@ -221,7 +236,15 @@ static const Mn mns[] = {
 	{ "bit", K_V3, 0x2ea01c00, 0 },
 	{ "bl", K_B, 0x94000000, R_AARCH64_CALL26 },
 	{ "blr", K_BR, 0xd63f0000, 0 },
+	{ "blraa", K_PAC, 0xd73f0800, 4 },
+	{ "blraaz", K_PAC, 0xd63f081f, 2 },
+	{ "blrab", K_PAC, 0xd73f0c00, 4 },
+	{ "blrabz", K_PAC, 0xd63f0c1f, 2 },
 	{ "br", K_BR, 0xd61f0000, 0 },
+	{ "braa", K_PAC, 0xd71f0800, 4 },
+	{ "braaz", K_PAC, 0xd61f081f, 2 },
+	{ "brab", K_PAC, 0xd71f0c00, 4 },
+	{ "brabz", K_PAC, 0xd61f0c1f, 2 },
 	{ "brk", K_EXC, 0xd4200000, 0 },
 	{ "bsl", K_V3, 0x2e601c00, 0 },
 	{ "bti", K_BTI, 0xd503241f, 0 },
@@ -229,6 +252,7 @@ static const Mn mns[] = {
 	{ "cbz", K_CBZ, 0x34000000, 0 },
 	{ "ccmn", K_CCMP, 0x3a400000, 0 },
 	{ "ccmp", K_CCMP, 0x7a400000, 0 },
+	{ "chkfeat", K_PAC, 0xd503251f, 8 },
 	{ "cinc", K_CNEG, 0x1a800400, 0 },
 	{ "cinv", K_CNEG, 0x5a800000, 0 },
 	{ "clrbhb", K_FIXED, 0xd50322df, 0 },
@@ -242,6 +266,7 @@ static const Mn mns[] = {
 	{ "cmhs", K_VPERM, 0x2e203c00, 0 },
 	{ "cmn", K_CMP, 1, 0 },
 	{ "cmp", K_CMP, 3, 0 },
+	{ "cmpp", K_PAC, 0xbac0001f, 20 },
 	{ "cmtst", K_VPERM, 0x0e208c00, 0 },
 	{ "cneg", K_CNEG, 0x5a800400, 0 },
 	{ "cnt", K_IALIAS, 0x5ac01c00, 3 },
@@ -289,6 +314,7 @@ static const Mn mns[] = {
 	{ "crc32h", K_CRC, 0x1ac04400, 0 },
 	{ "crc32w", K_CRC, 0x1ac04800, 0 },
 	{ "crc32x", K_CRC, 0x9ac04c00, 1 },
+	{ "csdb", K_FIXED, 0xd503229f, 0 },
 	{ "csel", K_CSEL, 0x1a800000, 0 },
 	{ "cset", K_CSET, 0x1a9f07e0, 0 },
 	{ "csetm", K_CSET, 0x5a9f03e0, 0 },
@@ -297,6 +323,7 @@ static const Mn mns[] = {
 	{ "csneg", K_CSEL, 0x5a800400, 0 },
 	{ "ctz", K_IALIAS, 0x5ac01800, 3 },
 	{ "dc", K_DC, 0, 0 },
+	{ "dgh", K_FIXED, 0xd50320df, 0 },
 	{ "dmb", K_BARRIER, 0xd50330bf, 0 },
 	{ "dsb", K_BARRIER, 0xd503309f, 0 },
 	{ "dup", K_DUP, 0, 0 },
@@ -304,25 +331,38 @@ static const Mn mns[] = {
 	{ "eor", K_LOGIC, 2, 0 },
 	{ "eor3", K_SHA512, 0xce000000, 3 },
 	{ "eret", K_FIXED, 0xd69f03e0, 0 },
+	{ "eretaa", K_FIXED, 0xd69f0bff, 0 },
+	{ "eretab", K_FIXED, 0xd69f0fff, 0 },
+	{ "esb", K_FIXED, 0xd503221f, 0 },
 	{ "ext", K_EXT, 0x2e000000, 0 },
 	{ "extr", K_EXTR, 0x13800000, 0 },
 	{ "fmov", K_FMOV, 0, 0 },
+	{ "gmi", K_PAC, 0x9ac01400, 5 },
 	{ "hint", K_HINT, 0xd503201f, 0 },
 	{ "hvc", K_EXC, 0xd4000002, 0 },
 	{ "ic", K_IC, 0, 0 },
 	{ "ins", K_INS, 0, 0 },
+	{ "irg", K_PAC, 0x9ac01000, 16 },
 	{ "isb", K_BARRIER, 0xd50330df, 1 },
 	{ "ld1", K_VLD1, 0x0c400000, 0 },
 	{ "ld1r", K_LDR_REP, 0x0d40c000, 1 },
 	{ "ld2r", K_LDR_REP, 0x0d60c000, 2 },
 	{ "ld3r", K_LDR_REP, 0x0d40e000, 3 },
 	{ "ld4r", K_LDR_REP, 0x0d60e000, 4 },
+	{ "ldapur", K_PAC, 0x99400000, 12 },
+	{ "ldapurb", K_PAC, 0x19400000, 11 },
+	{ "ldapurh", K_PAC, 0x59400000, 11 },
+	{ "ldapursb", K_PAC, 0x19800000, 13 },
+	{ "ldapursh", K_PAC, 0x59800000, 13 },
+	{ "ldapursw", K_PAC, 0x99800000, 14 },
 	{ "ldaxr", K_LDX, 0x085ffc00, 0 },
 	{ "ldg", K_MTE, 0xd9600000, 1 },
 	{ "ldgm", K_MTEM, 0xd9e00000, 0 },
 	{ "ldnp", K_LDP, 0, 1 | 2 },
 	{ "ldp", K_LDP, 0, 1 },
 	{ "ldr", K_LDST, 0x01, 0xff },
+	{ "ldraa", K_PAC, 0xf8200400, 6 },
+	{ "ldrab", K_PAC, 0xf8a00400, 6 },
 	{ "ldrb", K_LDST, 0x01, 0 },
 	{ "ldrh", K_LDST, 0x01, 1 },
 	{ "ldrsb", K_LDST, 0x02, 0 },
@@ -357,16 +397,36 @@ static const Mn mns[] = {
 	{ "not", K_VNOT, 0x2e205800, 0 },
 	{ "orn", K_LOGIC, 1, 1 },
 	{ "orr", K_LOGIC, 1, 0 },
+	{ "pacda", K_PAC, 0xdac10800, 3 },
+	{ "pacdb", K_PAC, 0xdac10c00, 3 },
+	{ "pacdza", K_PAC, 0xdac12be0, 1 },
+	{ "pacdzb", K_PAC, 0xdac12fe0, 1 },
+	{ "pacga", K_PAC, 0x9ac03000, 5 },
+	{ "pacia", K_PAC, 0xdac10000, 3 },
+	{ "pacia1716", K_FIXED, 0xd503211f, 0 },
+	{ "paciasp", K_FIXED, 0xd503233f, 0 },
+	{ "paciaz", K_FIXED, 0xd503231f, 0 },
+	{ "pacib", K_PAC, 0xdac10400, 3 },
+	{ "pacib1716", K_FIXED, 0xd503215f, 0 },
+	{ "pacibsp", K_FIXED, 0xd503237f, 0 },
+	{ "pacibz", K_FIXED, 0xd503235f, 0 },
+	{ "paciza", K_PAC, 0xdac123e0, 1 },
+	{ "pacizb", K_PAC, 0xdac127e0, 1 },
 	{ "pfalse", K_PREG, 0x2518e400, 0 },
 	{ "pmul", K_V3, 0x2e209c00, 1 },
 	{ "pmull", K_PMULL, 0x0e20e000, 0 },
 	{ "pmull2", K_PMULL, 0x4e20e000, 0 },
 	{ "prfm", K_PRFM, 0, 0 },
+	{ "prfum", K_PAC, 0xf8800000, 15 },
+	{ "psb", K_PAC, 0xd503223f, 7 },
+	{ "pssbb", K_FIXED, 0xd503349f, 0 },
 	{ "rbit", K_DP1, 0x5ac00000, 0 },
 	{ "rdffr", K_PREG, 0x2519f000, 0 },
 	{ "rdsvl", K_RDVL, 0x04bf5800, 0 },
 	{ "rdvl", K_RDVL, 0x04bf5000, 0 },
 	{ "ret", K_RET, 0xd65f0000, 0 },
+	{ "retaa", K_FIXED, 0xd65f0bff, 0 },
+	{ "retab", K_FIXED, 0xd65f0fff, 0 },
 	{ "rev", K_DP1, 0x5ac00800, 1 },
 	{ "rev16", K_VREV, 0x0e201800, 0x5ac00400 },
 	{ "rev32", K_VREV, 0x2e200800, 0xdac00800 },
@@ -422,11 +482,16 @@ static const Mn mns[] = {
 	{ "smulh", K_DP2, 0x9b407c00, 1 },
 	{ "smull", K_MUL, 0x9b207c00, 2 },
 	{ "sri", K_VSHIFT, 0x2f004400, 1 },
+	{ "ssbb", K_FIXED, 0xd503309f, 0 },
 	{ "sshr", K_VSHIFT, 0x0f000400, 1 },
 	{ "st1", K_VLD1, 0x0c000000, 0 },
 	{ "st2g", K_MTE, 0xd9a00000, 0 },
 	{ "stg", K_MTE, 0xd9200000, 0 },
 	{ "stgm", K_MTEM, 0xd9a00000, 0 },
+	{ "stgp", K_PAC, 0x69000000, 21 },
+	{ "stlur", K_PAC, 0x99000000, 12 },
+	{ "stlurb", K_PAC, 0x19000000, 11 },
+	{ "stlurh", K_PAC, 0x59000000, 11 },
 	{ "stlxr", K_STX, 0x0800fc00, 0 },
 	{ "stnp", K_LDP, 0, 2 },
 	{ "stp", K_LDP, 0, 0 },
@@ -444,12 +509,16 @@ static const Mn mns[] = {
 	{ "stzg", K_MTE, 0xd9600000, 0 },
 	{ "stzgm", K_MTEM, 0xd9200000, 0 },
 	{ "sub", K_ADDSUB, 2, 0 },
+	{ "subg", K_PAC, 0xd1800000, 17 },
+	{ "subp", K_PAC, 0x9ac00000, 5 },
+	{ "subps", K_PAC, 0xbac00000, 5 },
 	{ "subs", K_ADDSUB, 3, 0 },
 	{ "svc", K_EXC, 0xd4000001, 0 },
 	{ "sxtb", K_IALIAS, 0, 0x07 },
 	{ "sxth", K_IALIAS, 0, 0x0f },
 	{ "sxtw", K_IALIAS, 0, 0x1f },
 	{ "sys", K_SYS, 0xd5080000, 0 },
+	{ "sysl", K_PAC, 0xd5280000, 10 },
 	{ "tbl", K_TBL, 0x0e000000, 0 },
 	{ "tbnz", K_TBZ, 0x37000000, 0 },
 	{ "tbx", K_TBL, 0x0e001000, 0 },
@@ -457,6 +526,7 @@ static const Mn mns[] = {
 	{ "tlbi", K_TLBI, 0, 0 },
 	{ "trn1", K_VPERM, 0x0e002800, 0 },
 	{ "trn2", K_VPERM, 0x0e006800, 0 },
+	{ "tsb", K_PAC, 0xd503225f, 7 },
 	{ "tst", K_TST, 0, 0 },
 	{ "uadalp", K_VMISC, 0x2e206800, 1 },
 	{ "uaddlp", K_VMISC, 0x2e202800, 1 },
@@ -482,8 +552,13 @@ static const Mn mns[] = {
 	{ "uzp1", K_VPERM, 0x0e001800, 0 },
 	{ "uzp2", K_VPERM, 0x0e005800, 0 },
 	{ "wfe", K_FIXED, 0xd503205f, 0 },
+	{ "wfet", K_PAC, 0xd5031000, 1 },
 	{ "wfi", K_FIXED, 0xd503207f, 0 },
+	{ "wfit", K_PAC, 0xd5031020, 1 },
 	{ "wrffr", K_PREG, 0x25289000, 5 },
+	{ "xpacd", K_PAC, 0xdac147e0, 1 },
+	{ "xpaci", K_PAC, 0xdac143e0, 1 },
+	{ "xpaclri", K_FIXED, 0xd50320ff, 0 },
 	{ "yield", K_FIXED, 0xd503203f, 0 },
 	{ "zip1", K_VPERM, 0x0e003800, 0 },
 	{ "zip2", K_VPERM, 0x0e007800, 0 },
@@ -1879,6 +1954,120 @@ static int k_vmisc(Ctx *c, const Mn *m)
 	*c->out = m->base | arr_q(o[1].arr) << 30 | (uint32_t)sz << 22 | R(&o[1]) << 5 | R(&o[0]);
 	return 0;
 }
+/* pointer authentication, hints with operands, RCpc unscaled, MTE tags:
+ * x is the operand shape (see the cases) */
+static int pac_x(const A64Op *o, int sp) { return isx(o) && (sp || !o->sp); }
+static int pac_mem9(Ctx *c, const A64Op *o)	/* [Xn|sp{, #simm9}] */
+{
+	if (o->kind != A64O_MEM || o->mode != A64M_OFF || o->hassym) return -1;
+	if (o->imm < -256 || o->imm > 255) { *c->err = "index must be an integer in range [-256, 255]."; return -2; }
+	return 0;
+}
+static int k_pac(Ctx *c, const Mn *m)
+{
+	const A64Op *o = c->op;
+	uint32_t b = m->base;
+	int r;
+
+	switch (m->x) {
+	case 1:	/* Xd */
+		if (c->n != 1 || !pac_x(&o[0], 0)) BADOPS;
+		*c->out = b | R(&o[0]);
+		return 0;
+	case 2:	/* Xn */
+		if (c->n != 1 || !pac_x(&o[0], 0)) BADOPS;
+		*c->out = b | R(&o[0]) << 5;
+		return 0;
+	case 3:	/* Xd, Xn|sp */
+		if (c->n != 2 || !pac_x(&o[0], 0) || !pac_x(&o[1], 1)) BADOPS;
+		*c->out = b | R(&o[1]) << 5 | R(&o[0]);
+		return 0;
+	case 4:	/* Xn, Xm|sp */
+		if (c->n != 2 || !pac_x(&o[0], 0) || !pac_x(&o[1], 1)) BADOPS;
+		*c->out = b | R(&o[0]) << 5 | R(&o[1]);
+		return 0;
+	case 5:	/* Xd, Xn, Xm (sp where the instruction takes it) */
+		if (c->n != 3 || !pac_x(&o[0], 0) || !pac_x(&o[1], 1) || !pac_x(&o[2], 1)) BADOPS;
+		*c->out = b | R(&o[2]) << 16 | R(&o[1]) << 5 | R(&o[0]);
+		return 0;
+	case 6: {	/* ldraa Xt, [Xn|sp{, #simm10*8}]{!} */
+		if (c->n != 2 || !pac_x(&o[0], 0) || o[1].kind != A64O_MEM || o[1].hassym ||
+		    (o[1].mode != A64M_OFF && o[1].mode != A64M_PRE)) BADOPS;
+		int64_t v = o[1].imm;
+		if (v & 7 || v < -4096 || v > 4088) FAIL("index must be a multiple of 8 in range [-4096, 4088].");
+		unsigned u = (unsigned)(v / 8) & 0x3ff;
+		*c->out = b | (u >> 9) << 22 | (u & 0x1ff) << 12 | (o[1].mode == A64M_PRE) << 11 | (unsigned)o[1].reg << 5 | R(&o[0]);
+		return 0;
+	}
+	case 7:	/* psb/tsb csync */
+		if (c->n != 1 || o[0].kind != A64O_NAME || o[0].nlen != 5 || strncasecmp(o[0].name, "csync", 5)) BADOPS;
+		*c->out = b;
+		return 0;
+	case 8:	/* chkfeat x16 */
+		if (c->n != 1 || !pac_x(&o[0], 0) || R(&o[0]) != 16) BADOPS;
+		*c->out = b;
+		return 0;
+	case 10: {	/* sysl Xt, #op1, Cn, Cm, #op2 */
+		if (c->n != 5 || !pac_x(&o[0], 0) || !iscimm(&o[1]) || !iscimm(&o[4])) BADOPS;
+		int crn = cname(&o[2]), crm = cname(&o[3]);
+		if (crn < 0 || crm < 0 || o[1].imm < 0 || o[1].imm > 7 || o[4].imm < 0 || o[4].imm > 7) BADOPS;
+		*c->out = b | (unsigned)o[1].imm << 16 | (unsigned)crn << 12 | (unsigned)crm << 8 | (unsigned)o[4].imm << 5 | R(&o[0]);
+		return 0;
+	}
+	case 11: case 12: case 13: case 14:	/* ldapur*, stlur*: 11 W, 14 X, 12 W|X (X: size 3), 13 X|W (W: opc 11) */
+		if (c->n != 2 || !isgpr(&o[0]) || o[0].sp) BADOPS;
+		if ((m->x == 11 && !isw(&o[0])) || (m->x == 14 && !isx(&o[0]))) BADOPS;
+		if (m->x == 12 && isx(&o[0])) b |= 0x40000000;
+		if (m->x == 13 && isw(&o[0])) b |= 0x00400000;
+		if ((r = pac_mem9(c, &o[1])) == -1) BADOPS;
+		if (r < 0) return -1;
+		*c->out = b | ((unsigned)o[1].imm & 0x1ff) << 12 | (unsigned)o[1].reg << 5 | R(&o[0]);
+		return 0;
+	case 15: {	/* prfum op, [Xn|sp{, #simm9}] */
+		int op;
+		if (c->n != 2) BADOPS;
+		if (o[0].kind == A64O_NAME) op = prfop(o[0].name, o[0].nlen);
+		else if (iscimm(&o[0])) op = (int)o[0].imm;
+		else BADOPS;
+		if (op < 0 || op > 31) FAIL("prefetch hint expected");
+		if ((r = pac_mem9(c, &o[1])) == -1) BADOPS;
+		if (r < 0) return -1;
+		*c->out = b | ((unsigned)o[1].imm & 0x1ff) << 12 | (unsigned)o[1].reg << 5 | (unsigned)op;
+		return 0;
+	}
+	case 16:	/* irg Xd|sp, Xn|sp{, Xm} */
+		if (c->n < 2 || c->n > 3 || !pac_x(&o[0], 1) || !pac_x(&o[1], 1) || (c->n == 3 && !pac_x(&o[2], 0))) BADOPS;
+		*c->out = b | (c->n == 3 ? R(&o[2]) : 31) << 16 | R(&o[1]) << 5 | R(&o[0]);
+		return 0;
+	case 17: {	/* addg/subg Xd|sp, Xn|sp, #uimm6*16, #uimm4 */
+		if (c->n != 4 || !pac_x(&o[0], 1) || !pac_x(&o[1], 1) || !iscimm(&o[2]) || !iscimm(&o[3])) BADOPS;
+		if (o[2].imm & 15 || o[2].imm < 0 || o[2].imm > 1008) FAIL("index must be a multiple of 16 in range [0, 1008].");
+		if (o[3].imm < 0 || o[3].imm > 15) FAIL("immediate must be an integer in range [0, 15].");
+		*c->out = b | (unsigned)(o[2].imm / 16) << 16 | (unsigned)o[3].imm << 10 | R(&o[1]) << 5 | R(&o[0]);
+		return 0;
+	}
+	case 20:	/* cmpp Xn|sp, Xm|sp */
+		if (c->n != 2 || !pac_x(&o[0], 1) || !pac_x(&o[1], 1)) BADOPS;
+		*c->out = b | R(&o[1]) << 16 | R(&o[0]) << 5;
+		return 0;
+	case 21: {	/* stgp Xt1, Xt2, [Xn|sp{, #imm7*16}]{!} | [Xn|sp], #imm7*16 */
+		if (c->n < 3 || c->n > 4 || !pac_x(&o[0], 0) || !pac_x(&o[1], 0) || o[2].kind != A64O_MEM || o[2].hassym) BADOPS;
+		int64_t v = o[2].imm;
+		uint32_t mode = 0x01000000;	/* signed offset */
+		if (c->n == 4) {
+			if (o[2].mode != A64M_OFF || v || !iscimm(&o[3])) BADOPS;
+			v = o[3].imm, mode = 0x00800000;
+		} else if (o[2].mode == A64M_PRE)
+			mode = 0x01800000;
+		else if (o[2].mode != A64M_OFF)
+			BADOPS;
+		if (v & 15 || v < -1024 || v > 1008) FAIL("index must be a multiple of 16 in range [-1024, 1008].");
+		*c->out = 0x68000000 | mode | ((unsigned)(v / 16) & 0x7f) << 15 | R(&o[1]) << 10 | (unsigned)o[2].reg << 5 | R(&o[0]);
+		return 0;
+	}
+	}
+	BADOPS;
+}
 /* integer aliases: x 0x07/0x0f/0x1f sxtb..uxth (base: SBFM 0, UBFM 2), 2 ngc(s),
  * 3 CSSC abs/cnt/ctz (vector cnt: VMISC), 4 CSSC smax.. (vector umax/umin: VPERM), 5 bfc */
 static int k_ialias(Ctx *c, const Mn *m)
@@ -2182,6 +2371,7 @@ int a64_asm(const char *mn, size_t n, const A64Op *op, int nop, uint32_t *out, A
 	case K_DP2: return k_dp2(&c, m);
 	case K_MUL: return k_mul(&c, m);
 	case K_IALIAS: return k_ialias(&c, m);
+	case K_PAC: return k_pac(&c, m);
 	case K_CRC: return k_crc(&c, m);
 	case K_VLD1: return k_vld1(&c, m);
 	case K_VREV: return k_vrev(&c, m);

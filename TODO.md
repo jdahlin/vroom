@@ -720,9 +720,13 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
   smsubl/umsubl, bfc, CSSC abs/cnt/ctz and smax/smin/umax/umin (register and
   immediate; the vector cnt/umax/umin unchanged); `ccs/vcc/tests/vas/int-alias.s`,
   `bench/vas-enc.py` 128/128 vs llvm-mc.)
-- [ ] **Pointer auth, barriers/hints** (paciasp … xpaclri, csdb, esb, ssbb,
+- [x] **Pointer auth, barriers/hints** (paciasp … xpaclri, csdb, esb, ssbb,
   pssbb, dgh, `psb csync`, wfet, chkfeat, sysl, prfum, ldapur, stlur), **MTE
-  irg/addg** [P].  *Validate:* T7 tables.
+  irg/addg** [P].  *Validate:* T7 tables.  (Done: PAC hints and register forms,
+  blraa…brabz, retaa/eretaa, ldraa/ldrab, csdb/esb/ssbb/pssbb/dgh, psb/tsb
+  csync, wfet/wfit, chkfeat, sysl, prfum, ldapur*/stlur*, irg/gmi/addg/subg/
+  subp(s)/cmpp/stgp; `ccs/vcc/tests/vas/pac-hint.s`, `bench/vas-enc.py`
+  vs llvm-mc.)
 - [ ] **SVE/SVE2/SME** (operand parser for `z`/`p` registers first) [P].
   *Validate:* T7 tables; T7 `-march=armv9-a+sve2` corpus.
 - [ ] **Directives**: `.comm`/`.lcomm`, `.symver`, `.altmacro`,
