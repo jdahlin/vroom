@@ -54,8 +54,8 @@ VPRIV bool sig_of(const pp_opts *o, uint32_t *sig, uint32_t *psig)
 
 #define SIGS(x) do { const char *s_ = (x) ? (x) : ""; size_t l_ = strlen(s_); \
 	if (n + l_ + 8 < (1 << 17)) { memcpy(b + n, s_, l_); n += l_; b[n++] = 0; } else ok = false; } while (0)
-	n += (size_t)snprintf(b, 64, "%d %d %d %d %d %d", o->nfwdirs, o->unsigned_char, o->asm_mode, o->target,
-			      o->nwargs, o->error_limit) + 1;
+	n += (size_t)snprintf(b, 64, "%d %d %d %d %d %d %d", o->nfwdirs, o->unsigned_char, o->asm_mode, o->target,
+			      o->nwargs, o->error_limit, o->trigraphs) + 1;
 	for (int i = 0; i < o->nwargs; i++)	/* -W/-Werror decide which replayed diagnostics are errors */
 		SIGS(o->wargs[i]);
 	for (int i = 0; i < o->nfwdirs; i++)

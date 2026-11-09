@@ -88,6 +88,9 @@ size_t vlex_spell(const char *src, const vtok *t, char *buf);
  * and in vlex_prefetch().
  */
 const vlex_file *vlex_get(const char *path, size_t pathlen);
+/* f with trigraphs replaced (C phase 1), lexed into a new uncached file;
+ * f itself when it has none */
+const vlex_file *vlex_trigraphs(const vlex_file *f);
 void vlex_cache_flush(void);	/* only with no lookups in flight */
 /*
  * Read-ahead hint: path will probably be needed.  I/O threads open and read

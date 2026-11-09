@@ -681,7 +681,7 @@ int ppd_run(int argc, char **argv, const ppd_env *env)
 	double t0;
 	pp *p;
 	int syntax = 0, layout = 0, ms_anon = 0, short_wchar = 0, tokhash = 0, emit = 0, objmode = 0;
-	int std = 0, strict = 0, wimpl_int = 0, wimpl_fn = 0, gnu89_inline = -1, vcc_kernel = 0;
+	int tri = -1, std = 0, strict = 0, wimpl_int = 0, wimpl_fn = 0, gnu89_inline = -1, vcc_kernel = 0;
 	char objbuf[1024];
 
 	for (int i = 1; i < argc; i++) {
@@ -718,6 +718,8 @@ int ppd_run(int argc, char **argv, const ppd_env *env)
 			continue;
 		}
 		if (!strcmp(a, "-ansi")) { std = 89; strict = 1; continue; }
+		if (!strcmp(a, "-trigraphs") || !strcmp(a, "-ftrigraphs")) { tri = 1; continue; }
+		if (!strcmp(a, "-fno-trigraphs")) { tri = 0; continue; }
 		if (!strcmp(a, "-fgnu89-inline")) { gnu89_inline = 1; continue; }
 		if (!strcmp(a, "-fvcc-kernel")) { vcc_kernel = 1; continue; }
 		if (!strcmp(a, "-fno-gnu89-inline")) { gnu89_inline = 0; continue; }
@@ -868,6 +870,7 @@ int ppd_run(int argc, char **argv, const ppd_env *env)
 	}
 	po.dirs = all;
 	po.ndirs = n;
+	po.trigraphs = tri >= 0 ? tri : strict && std != 23;	/* clang: strict modes before C23 */
 	{
 		const char *ep = ppd_getenv(env, "SOURCE_DATE_EPOCH");
 		char *end;

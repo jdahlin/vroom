@@ -96,7 +96,7 @@ pp *pp_open(const pp_opts *o)
 
 		memcpy(mp, o->main, ml);
 		memset(mp + ml, 0, 16);
-		mf = try_path(o->cwd, mp, ml);
+		mf = try_path(o, mp, ml);
 	}
 	if (!mf) {
 		char m[4200], fp[4200];

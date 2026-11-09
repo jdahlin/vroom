@@ -1486,6 +1486,37 @@ static void publish(centry *e, bool ok)
 	atomic_store_explicit(&e->state, ok ? CE_OK : CE_MISSING, memory_order_release);
 }
 
+const vlex_file *vlex_trigraphs(const vlex_file *f)
+{
+	static const char from[] = "=/'()!<>-", to[] = "#\\^[]|{}~";
+	const char *s = f->src, *q = memmem(s, f->size, "??", 2);
+	size_t n = f->size, o = 0;
+	char *b;
+	vlex_file *nf;
+
+	while (q && (q + 2 >= s + n || !strchr(from, q[2]) || !q[2]))
+		q = q + 1 < s + n ? memmem(q + 1, (size_t)(s + n - q - 1), "??", 2) : NULL;
+	if (!q)
+		return f;
+	b = arena(n + 128);
+	for (size_t i = 0; i < n; i++) {
+		const char *t;
+
+		if (s[i] == '?' && i + 2 < n && s[i + 1] == '?' && s[i + 2] && (t = strchr(from, s[i + 2]))) {
+			b[o++] = to[t - from];
+			i += 2;
+		} else {
+			b[o++] = s[i];
+		}
+	}
+	memset(b + o, 0, 128);
+	nf = arena(sizeof(*nf));
+	memset(nf, 0, sizeof(*nf));
+	nf->path = f->path;
+	lex_src(nf, b, o);
+	return nf;
+}
+
 const vlex_file *(*vlex_get_hook)(const char *path, size_t len);
 
 /* forget every file (a new build: vccd, idle): later lookups read and lex

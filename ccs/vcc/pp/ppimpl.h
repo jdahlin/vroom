@@ -669,7 +669,7 @@ VPRIV void *mem_shared(void *a, size_t n);
 extern const vtok no_body[1];
 VPRIV void define(pp *p, ctx *c, uint32_t b, uint32_t e);
 /* include.c */
-VPRIV const vlex_file *try_path(const char *cwd, const char *path, size_t len);
+VPRIV const vlex_file *try_path(const pp_opts *o, const char *path, size_t len);
 VPRIV const vlex_file *find_include(pp *p, const ctx *from, const char *name, size_t nlen, bool angled, bool next, int32_t *sdir, const char **path, const incent **ie);
 /* hcache.c */
 VPRIV int once_index(const pp *p, const vlex_file *f);

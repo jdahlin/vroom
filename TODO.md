@@ -578,7 +578,10 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
 - [x] **UTF-8 BOM not skipped** [P].  *Done:* read_file blanks a leading BOM
   (columns kept); tests/vcc/bom.c with bom_inc.h.  (vlex_get_hook inputs,
   fuzz-pp, are not filtered.)
-- [ ] **Trigraphs** under strict `-std=c89/c99/c11/c17` or `-trigraphs` [P].
+- [x] **Trigraphs** under strict `-std=c89/c99/c11/c17` or `-trigraphs` [P].  (Done:
+  `vlex_trigraphs` lexes a translated copy; `-ftrigraphs`/`-fno-trigraphs` too; tests/vcc/trigraphs.c.
+  No `-Wtrigraphs` warnings yet.)
+- [ ] **No `//` comments in C89** (`-ansi`, `-std=c89`): clang lexes `//` as two `/` there [P].
   *Validate:* pp-diff fixtures with each `-std`.
 - [x] **`SOURCE_DATE_EPOCH`; `__TIMESTAMP__` from file mtime** [P].  (Both done:
   __TIMESTAMP__ is the current file's mtime, `??? ...` when stat fails, as clang.)

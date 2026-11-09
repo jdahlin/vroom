@@ -20,7 +20,7 @@ _Atomic unsigned long pp_stat_skip;	/* VPP_TIME */
  * build-tree directory an include search can look in before compiling
  * (PostgreSQL: all of them exist right after `meson setup`).
  */
-VPRIV const vlex_file *try_path(const char *cwd, const char *path, size_t len)
+static const vlex_file *try_path_(const char *cwd, const char *path, size_t len)
 {
 	static _Atomic int off_ = -1;
 	int off = atomic_load_explicit(&off_, memory_order_relaxed);
@@ -55,6 +55,14 @@ VPRIV const vlex_file *try_path(const char *cwd, const char *path, size_t len)
 	return f;
 }
 
+/* trigraph mode reads a private, translated copy (vlex_trigraphs) */
+VPRIV const vlex_file *try_path(const pp_opts *o, const char *path, size_t len)
+{
+	const vlex_file *f = try_path_(o->cwd, path, len);
+
+	return f && o->trigraphs ? vlex_trigraphs(f) : f;
+}
+
 static const vlex_file *find_include_(pp *p, const ctx *from, const char *name, size_t nlen,
 				      bool angled, bool next, int32_t *sdir, const char **path, uint32_t *used)
 {
@@ -70,7 +78,7 @@ static const vlex_file *find_include_(pp *p, const ctx *from, const char *name, 
 		memcpy(buf, name, nlen);
 		buf[nlen] = 0;
 		*path = pstrdup(p, buf, nlen);
-		return try_path(p->o->cwd, buf, nlen);
+		return try_path(p->o, buf, nlen);
 	}
 	if (next && from && from->sdir < 0)
 		next = false;	/* #include_next outside the search path: a normal search */
@@ -85,7 +93,7 @@ static const vlex_file *find_include_(pp *p, const ctx *from, const char *name, 
 			memcpy(buf, fp, dl);
 			memcpy(buf + dl, name, nlen);
 			buf[dl + nlen] = 0;
-			if ((f = try_path(p->o->cwd, buf, dl + nlen))) {
+			if ((f = try_path(p->o, buf, dl + nlen))) {
 				*path = pstrdup(p, buf, dl + nlen);
 				return f;
 			}
@@ -105,7 +113,7 @@ static const vlex_file *find_include_(pp *p, const ctx *from, const char *name, 
 		memcpy(buf + l, name, nlen);
 		l += nlen;
 		buf[l] = 0;
-		if ((f = try_path(p->o->cwd, buf, l))) {
+		if ((f = try_path(p->o, buf, l))) {
 			*sdir = k;
 			*path = pstrdup(p, buf, l);
 			*used = (uint32_t)k + 1;
@@ -121,7 +129,7 @@ static const vlex_file *find_include_(pp *p, const ctx *from, const char *name, 
 			int l = snprintf(buf, sizeof(buf), "%s/%.*s.framework/Headers/%.*s", p->o->fwdirs[k],
 					 (int)(sl - name), name, (int)(nlen - (size_t)(sl - name) - 1), sl + 1);
 
-			if (l > 0 && (size_t)l < sizeof(buf) && (f = try_path(p->o->cwd, buf, (size_t)l))) {
+			if (l > 0 && (size_t)l < sizeof(buf) && (f = try_path(p->o, buf, (size_t)l))) {
 				*path = pstrdup(p, buf, (size_t)l);
 				*sdir = -2;
 				return f;
