@@ -83,7 +83,7 @@ Existing gates that every change must keep green: `vcc-diff.py cmp`
   what the kernel uses (bit-fields, packed structs, `volatile`, structs as
   arguments and returns).  Acceptance: 24 h per generator without a
   mismatch, on both targets.
-- [ ] **T11 driver tests.**  `bench/vcc-driver.py` with a table of
+- [ ] **T11 driver tests.** (started: `bench/vcc-driver.py`, -O predefines.)  `bench/vcc-driver.py` with a table of
   command lines → expected (exit status, output files, stderr regex),
   including flags that must be rejected.  Uses `vpp` directly and through a
   private vccd.
@@ -298,7 +298,9 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
   (object bytes / diagnostics) must equal a fresh process with B.  Add a
   static check: a unit test that toggles every field of the options struct
   and asserts the signature changes.
-- [ ] **Default `-O2` when no `-O` given** [P].  `ppdriver.c:426`.  Default
+- [x] **Default `-O2` when no `-O` given** [P].  (done: default -O0; `-Os -O2`
+  no longer keeps `__OPTIMIZE_SIZE__`; `bench/vcc-driver.py`, the start of T11,
+  checks the -O predefines against clang on both targets.)  `ppdriver.c:426`.  Default
   `opt = 0` (`__NO_INLINE__`, no `__OPTIMIZE__`).
   *Validate:* `vcc-diff.py` predefine check: `vpp -dM -E` (once `-dM`
   exists) vs `clang -dM -E` for `''`, `-O0`, `-O1`, `-O2`, `-Os`, `-Oz`;

@@ -56,6 +56,7 @@ bench/vcc-sema.py batch -j 6        # the same in one vpp --batch process: ~3 s 
 bench/vcc-sema.py layout -j 6       # layouts/constants/decl types checked by clang (~70 s)
 bench/var-cmp.py work/build-x       # vcc ar against llvm-ar on an llvm-ar-built tree
 bench/vsh-test.py                   # vsh/rsh against dash on small recipes
+bench/vcc-driver.py                 # driver: command lines vs clang (predefines from -O), <1 s
 bench/vcc-fpcheck.py -j 6           # no generated FP/SIMD code under -mgeneral-regs-only (~10 s)
 bench/vcc-ctests.py -j 6 --suite vcc # our own regression tests (ccs/vcc/tests/vcc), ~1 s
 bench/vcc-stress.py [--vccd]        # pathological inputs fail cleanly, vccd survives (~2 s)
