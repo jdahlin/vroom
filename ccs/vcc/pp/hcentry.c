@@ -429,7 +429,7 @@ VPRIV void hc_begin(pp *p, hkey *k)
 		/* this thread's last pp's buffers: counts are reset below, contents need no clearing */
 		r->t = rec_spare.t, r->ord = rec_spare.ord, r->ctr = rec_spare.ctr;
 		r->crd = rec_spare.crd, r->seg = rec_spare.seg, r->cp = rec_spare.cp;
-		r->kid = rec_spare.kid, r->kex = rec_spare.kex;
+		r->kid = rec_spare.kid, r->kex = rec_spare.kex, r->lk = rec_spare.lk;
 		rec_spare.t = NULL;
 	}
 	if (!r->t) {
@@ -441,6 +441,7 @@ VPRIV void hc_begin(pp *p, hkey *k)
 		r->cp = vm((HC_MAXCP + 1) * sizeof(cprov));
 		r->kid = vm(HC_MAXKID * sizeof(hkidr));
 		r->kex = vm(HC_MAXKEX * sizeof(uint32_t));
+		r->lk = vm(HC_MAXLK * sizeof(hlook));
 	}
 	if (p->tokmode == 2 && !r->tk) {
 		if (tk_spare) {
@@ -454,6 +455,7 @@ VPRIV void hc_begin(pp *p, hkey *k)
 	if (!r->n) {
 		r->nt = r->nord = r->nctr = r->ncrd = r->nseg = r->ncp = 0;
 		r->nkid = r->nkex = 0;
+		r->nlk = 0;
 		r->ntk = 0;
 		r->nsb = 0;
 		r->nbad = 0;
@@ -470,6 +472,7 @@ VPRIV void hc_begin(pp *p, hkey *k)
 	L->s0 = r->nseg;
 	L->k0 = r->nkid;
 	L->x0 = r->nkex;
+	L->l0 = r->nlk;
 	L->fe0 = p->cx[p->depth - 1].fe;
 	L->base0 = p->fe[L->fe0].base;
 	L->nonce0 = p->nonce;
@@ -725,6 +728,20 @@ static hent *publish(pp *p, const hlev *L, size_t end)
 		e->kid = kd;
 		e->nkid = nk;
 	}
+	e->nlk = r->nlk - L->l0;
+	if (e->nlk) {
+		hlook *lk = hsalloc(p, e->nlk * sizeof(hlook));
+
+		for (uint32_t i = 0; i < e->nlk; i++) {
+			const hlook *l = &r->lk[L->l0 + i];
+
+			lk[i] = *l;
+			lk[i].name = hstrdup(p, l->name, l->nlen);
+			lk[i].from = l->from ? hstrdup(p, l->from, strlen(l->from)) : NULL;
+			lk[i].path = l->path ? hstrdup(p, l->path, strlen(l->path)) : NULL;
+		}
+		e->lk = lk;
+	}
 	e->ord = hcopy(p, r->ord + L->o0, (r->nord - L->o0) * sizeof(honce));
 	e->nord = r->nord - L->o0;
 	e->oadd = hcopy(p, p->once + L->nonce0, (p->nonce - L->nonce0) * sizeof(*p->once));
@@ -865,6 +882,7 @@ VPRIV void hc_end(pp *p)
 	r->nt = L->t0;
 	r->nkid = L->k0;
 	r->nkex = L->x0;
+	r->nlk = L->l0;	/* (they are in e, or the enclosing levels are not cacheable either) */
 	{
 		uint32_t w = L->o0;
 

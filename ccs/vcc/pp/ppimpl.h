@@ -316,6 +316,23 @@ typedef struct hvec {
 	for (uint32_t hvi_ = 0; hvi_ < (v).nc; hvi_++) \
 		for (const T *x = (const T *)(const void *)(v).c[hvi_]->d, *x##_e = x + (v).c[hvi_]->n; x < x##_e; x++)
 
+/*
+ * An include lookup an entry made itself that depended on the search
+ * directories (used > 0).  The entry's ndirs/psig say the directories it
+ * depended on were the same; where they differ, the entry still holds when
+ * each such lookup gives the same answer here (hc_looks_ok): PostgreSQL
+ * puts a per-target directory first, which every lookup passes through.
+ */
+typedef struct hlook {
+	const char *name;	/* as written */
+	const char *from;	/* the includer's spath (NULL: no includer) */
+	const char *path;	/* the answer's spelling (NULL: not found) */
+	const vlex_file *f;
+	int32_t from_sdir, sdir;
+	uint32_t nlen, from_sdl;
+	uint8_t angled, next, from_bi, sys;
+} hlook;
+
 struct hent {
 	hent *next;
 	hvec rg;		/* inputs: include guards (v: HDEF or 0); checked first */
@@ -340,6 +357,8 @@ struct hent {
 	 */
 	const struct hkid *kid;
 	uint32_t nkid;
+	const hlook *lk;	/* its own lookups that depended on the search directories */
+	uint32_t nlk;
 	size_t ntext, total;	/* own text (tokens); with the children */
 	int32_t level;		/* __INCLUDE_LEVEL__ used: the include depth it ran at (-1: not used) */
 	uint32_t ndirs, psig;	/* leading search directories its lookups depended on; their id */
@@ -399,6 +418,7 @@ typedef struct hlev {
 	uint8_t first_sol, uses_level;
 	uint32_t nfile, ndirs;
 	uint32_t k0, x0;	/* starts in rec.kid, rec.kex */
+	uint32_t l0;		/* start in rec.lk */
 } hlev;
 
 typedef struct hkidr {		/* a child entry of a level while recording */
@@ -483,6 +503,8 @@ struct pp {
 		uint32_t nkid;
 		uint32_t *kex;
 		uint32_t nkex;
+		hlook *lk;	/* the levels' own lookups (hlook) */
+		uint32_t nlk;
 		cprov *cp;	/* indexed by ptok.ctr */
 		uint32_t ncp;
 		ptok *tk;	/* tokens handed out (token mode) */
@@ -568,6 +590,7 @@ struct incent {
 #define HC_MAXSB ((size_t)1 << 28)
 #define HC_MAXKID (1u << 20)
 #define HC_MAXKEX (1u << 22)
+#define HC_MAXLK (1u << 16)
 
 typedef struct {
 	htouch *t;
@@ -577,6 +600,7 @@ typedef struct {
 	hsegr *seg;
 	hkidr *kid;
 	uint32_t *kex;
+	hlook *lk;
 	cprov *cp;
 } rec_spare_t;
 
@@ -685,6 +709,7 @@ VPRIV void define(pp *p, ctx *c, uint32_t b, uint32_t e);
 /* include.c */
 VPRIV const vlex_file *try_path(const pp_opts *o, const char *path, size_t len);
 VPRIV const vlex_file *find_include(pp *p, const ctx *from, const char *name, size_t nlen, bool angled, bool next, int32_t *sdir, const char **path, const incent **ie);
+VPRIV bool hc_looks_ok(pp *p, const hent *e);
 /* hcache.c */
 VPRIV int once_index(const pp *p, const vlex_file *f);
 VPRIV void once_add(pp *p, const vlex_file *f);

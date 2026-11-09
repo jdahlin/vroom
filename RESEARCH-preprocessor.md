@@ -53,9 +53,10 @@ layer 3 saves parsing the rest of the headers.
    it is why replay saves instructions but not time. The way past it is to share
    a read-only layer instead of copying, as modules do: a different model from
    today's.
-2. **Header-cache misses**, which preprocess the header again. PG: 48 k misses
-   against 46.5 k hits, mostly guard variants and SDK headers. Kernel: 14.5 k
-   misses against 41 k hits.
+2. **Header-cache misses**, which preprocess the header again. Kernel: 14.5 k
+   misses against 41 k hits, mostly guard variants. PG had 48 k misses, mostly
+   from per-target search dirs. §6.10 checks each lookup instead, and PG is
+   down to 7.7 k misses and −14% instructions; the table above predates that.
 3. **Header hits without a replay entry**, which are parsed in full: 27 k
    (kernel) and 21 k (PG). Reasons: first sight, the gain rule said no, or the
    budget was spent. Half of the kernel's entries are never hit and take half
@@ -1224,6 +1225,40 @@ pp at a region start, at any depth, as `pp_top_events` gives for the top level.
   `__BEGIN_DECLS` is empty, so this is probably not a problem.
 - Size per entry: own records plus the type log. ccsnap's 3.5 MB per snapshot was for
   the whole state; one region should be KBs to tens of KBs.
+
+### 6.10 Exact search-dir check instead of the dir-prefix signature (2026-11-09)
+
+- **Problem.** A variant stored the hash (`psig`) of the first `ndirs` search
+  dirs that its lookups depended on. A TU with other dirs there was rejected,
+  even if every lookup would find the same file. PostgreSQL puts a per-target
+  `-Isrc/<target>.p` first, so nearly every lookup depends on it:
+  - 1.81 M of 1.96 M variant tries were rejected on dirs;
+  - 48 k misses, and 10 238 entries not stored (`HC_MAXVAR` full of per-target
+    variants).
+- **Change.** A recording now keeps each `#include`/`__has_include` lookup it
+  made (`hlook`: name, `<>`/`""`, `_next`, the includer's dir and dir index, and
+  the result: file, dir index, system flag). The signature still decides first:
+  if the dirs match, nothing changes. If they differ, `hc_looks_ok` redoes each
+  lookup against this TU's search path and accepts the variant only if every
+  answer is the same.
+  - Still exact: the answer to every lookup is part of what the entry read.
+  - Tested in `bench/vcc-cachekey.py` (`search-dir-*`: shadowing, `__has_include`,
+    same answers, `#include_next`). A mutant that accepts every variant fails
+    three of the rows.
+- **Result.** `vpp --batch -j 1`, G instructions:
+
+  | | PG default | PG `VCC_DR=1` | kernel default | kernel `VCC_DR=1` |
+  |---|---|---|---|---|
+  | before | 42.4 | 36.7 | 86.2 | 81.9 |
+  | after | 36.6 | 30.9 | 86.1 | 81.5 |
+
+  - PG misses fall from 48 k to 7.7 k, and entries not stored from 10 238 to 185.
+  - PG saves 14% of instructions by default and 16% with replay. The kernel has
+    one search path, so it is unchanged.
+  - Cycles were measured at load 60–78, so they are only indicative. PG with
+    `VCC_DR=1` went from 16.2 to 12.4 G cycles, a larger gain than in
+    instructions, because a hit replays no tokens.
+  - Objects are identical before and after: PG 1570/1570, kernel 840/840.
 
 ## Sources
 - clang: TokenLexer.cpp, PPMacroExpansion.cpp, Preprocessor.cpp, MacroArgs.cpp,

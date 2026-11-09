@@ -192,9 +192,72 @@ static inline int32_t inc_mode(const pp *p, const ctx *from, bool angled, bool n
 	return start * 4 + angled * 2 + nx;
 }
 
+/* is a header found in search directory sdir in a system directory (inc_sys without the includer's case) */
+static inline uint8_t dir_sys(const pp *p, int32_t sdir)
+{
+	return sdir == -2 || (sdir >= 0 && p->o->nsys1 && sdir >= p->o->nsys1 - 1);
+}
+
+/* the innermost recording level made a lookup that depended on the first used search directories */
+static void rec_lookup(pp *p, const ctx *from, const char *name, size_t nlen, bool angled, bool next,
+		       const vlex_file *f, int32_t sdir, const char *path)
+{
+	struct hrec *r = &p->rec;
+	hlook *l;
+
+	if (r->nlk >= HC_MAXLK || nlen >= 4096) {
+		HC_BAD(p);
+		return;
+	}
+	l = &r->lk[r->nlk++];
+	*l = (hlook){ pstrdup(p, name, nlen), from ? from->spath : NULL, f ? path : NULL, f, from ? from->sdir : -1,
+		      f ? sdir : -1, (uint32_t)nlen, from ? from->sdl : 0, angled, next, from && from->f == &p->builtin,
+		      f ? dir_sys(p, sdir) : 0 };
+}
+
+static const vlex_file *find_include_at(pp *p, const ctx *from, const char *name, size_t nlen, bool angled,
+					bool next, int32_t *sdir, const char **path, const incent **ie, uint32_t *usedp);
+
 /* *ie: the cache entry of the answer, if it has one */
 VPRIV const vlex_file *find_include(pp *p, const ctx *from, const char *name, size_t nlen,
 				     bool angled, bool next, int32_t *sdir, const char **path, const incent **ie)
+{
+	uint32_t used;
+	const vlex_file *f = find_include_at(p, from, name, nlen, angled, next, sdir, path, ie, &used);
+
+	inc_used(p, used);
+	if (unlikely(p->rec.on) && used)
+		rec_lookup(p, from, name, nlen, angled, next, f, *sdir, *path);
+	return f;
+}
+
+/* each of e's own lookups that depended on the search directories gives the same answer here */
+VPRIV bool hc_looks_ok(pp *p, const hent *e)
+{
+	for (uint32_t i = 0; i < e->nlk; i++) {
+		const hlook *l = &e->lk[i];
+		ctx fc;
+		int32_t sd = -1;
+		const char *path = NULL;
+		uint32_t used;
+		const vlex_file *f;
+
+		if (l->from) {
+			memset(&fc, 0, sizeof(fc));
+			fc.f = l->from_bi ? &p->builtin : NULL;
+			fc.spath = l->from, fc.sdl = l->from_sdl, fc.sdir = l->from_sdir;
+		}
+		f = find_include_at(p, l->from ? &fc : NULL, l->name, l->nlen, l->angled, l->next, &sd, &path, NULL, &used);
+		if (f != l->f)
+			return false;
+		if (f && (sd != l->sdir || dir_sys(p, sd) != l->sys || strcmp(path, l->path)))
+			return false;
+	}
+	return true;
+}
+
+static const vlex_file *find_include_at(pp *p, const ctx *from, const char *name, size_t nlen, bool angled,
+					bool next, int32_t *sdir, const char **path, const incent **ie, uint32_t *usedp)
 {
 	uint32_t used, i, sig = p->sig, fsig;
 	const vlex_file *f;
@@ -266,7 +329,7 @@ hit:
 slow:
 	f = find_include_(p, from, name, nlen, angled, next, sdir, path, &used);
 done:
-	inc_used(p, used);
+	*usedp = used;
 	return f;
 }
 
@@ -557,6 +620,9 @@ VPRIV void include(pp *p, ctx *c, uint32_t b, uint32_t e, int kind, uint32_t loc
 		if (ie->sig == p->sig && ie->mode == mode && inc_valid(p, ie) && dl < ie->klen && !ie->key[dl] &&
 		    !memcmp(ie->key, fp, dl)) {
 			inc_used(p, ie->used);
+			if (unlikely(p->rec.on) && ie->used)
+				rec_lookup(p, c, ie->key + dl + 1, ie->klen - dl - 1, c->vt[b].kind == T_LESS,
+					   kind == D_INCLUDE_NEXT, ie->f, ie->sdir, ie->path);
 			enter_file(p, ie->f, ie->path, ie->sdir);
 			return;
 		}

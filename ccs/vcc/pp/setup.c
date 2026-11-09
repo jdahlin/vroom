@@ -575,7 +575,7 @@ void pp_close(pp *p)
 	if (p->rec.t && !rec_spare.t) {
 		rec_spare.t = p->rec.t, rec_spare.ord = p->rec.ord, rec_spare.ctr = p->rec.ctr;
 		rec_spare.crd = p->rec.crd, rec_spare.seg = p->rec.seg, rec_spare.cp = p->rec.cp;
-		rec_spare.kid = p->rec.kid, rec_spare.kex = p->rec.kex;
+		rec_spare.kid = p->rec.kid, rec_spare.kex = p->rec.kex, rec_spare.lk = p->rec.lk;
 	} else if (p->rec.t) {
 		munmap(p->rec.t, HC_MAXT * sizeof(htouch));
 		munmap(p->rec.ord, HC_MAXORD * sizeof(honce));
@@ -583,6 +583,7 @@ void pp_close(pp *p)
 		munmap(p->rec.crd, HC_MAXCRD * sizeof(hcrd));
 		munmap(p->rec.seg, HC_MAXSEG * sizeof(hsegr));
 		munmap(p->rec.cp, (HC_MAXCP + 1) * sizeof(cprov));
+		munmap(p->rec.lk, HC_MAXLK * sizeof(hlook));
 	}
 	vmreg_put(&ppr[0], sizeof(pp));
 	vmpool_give(&pppool, ppr);

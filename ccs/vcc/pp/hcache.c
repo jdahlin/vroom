@@ -306,8 +306,14 @@ static bool hex_has(const hexf *xs, int nx, uint32_t id)
 	return false;
 }
 
+/* the search directories e depended on (with its children) are not this TU's: its own lookups must give the same answers */
+static inline bool dirs_differ(const pp *p, const hent *e)
+{
+	return (int)e->ndirs > p->o->ndirs || p->psig[e->ndirs] != e->psig;
+}
+
 /* e's own reads (guards first) hold in this state, except excluded ids */
-static bool own_reads_ok(const pp *p, const hent *e, const hexf *xs, int nx)
+static bool own_reads_ok(pp *p, const hent *e, const hexf *xs, int nx)
 {
 	HV_FOR(e->rg, hread, r)
 		if ((mget(p, r->id) != 0) != (r->v != 0) && !(nx && hex_has(xs, nx, r->id)))
@@ -321,7 +327,7 @@ static bool own_reads_ok(const pp *p, const hent *e, const hexf *xs, int nx)
 		if ((v == HDEF ? !c : c != v) && !(nx && hex_has(xs, nx, r->id)))
 			return false;
 	}
-	return true;
+	return !e->nlk || !dirs_differ(p, e) || hc_looks_ok(p, e);
 }
 
 static bool tree_ok(pp *p, const hent *e, hexf *xs, int nx);
@@ -366,8 +372,6 @@ VPRIV bool hc_valid(pp *p, const hent *e)
 
 	if (e->level >= 0 && e->level != p->nfile)
 		return false;
-	if ((int)e->ndirs > p->o->ndirs || p->psig[e->ndirs] != e->psig)
-		return false;
 	HV_FOR(e->rg, hread, r)
 		if ((mget(p, r->id) != 0) != (r->v != 0))
 			return false;
@@ -383,6 +387,8 @@ VPRIV bool hc_valid(pp *p, const hent *e)
 		if (v == HDEF ? !c : c != v)
 			return false;
 	}
+	if (e->nlk && dirs_differ(p, e) && !hc_looks_ok(p, e))
+		return false;
 	if (!kids_ok(p, e, xs, 0))
 		return false;	/* (before the costly counter-name lookups) */
 	for (uint32_t i = 0; i < e->ncrd; i++) {
