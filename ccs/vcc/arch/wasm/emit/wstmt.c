@@ -236,6 +236,54 @@ static void wstmts(ecx *e, const node *x, uint32_t i0, uint32_t i1)
 	}
 }
 
+/* ---------------- cleanups ---------------- */
+
+/* call the cleanup of variable s: f(&s) */
+static void wcleanup(ecx *e, uint32_t s)
+{
+	cc *c = e->c;
+	uint32_t f = canon_sym(c, sym_attrs(c, s)->cleanup), ref = REF(RK_SYM, f);
+	const ctype *ft = T(c, c->syms[f].ty);
+	wbind *b = wlocal(e, s);
+	tbuf *tb = &e->w->b;
+
+	if (b->k == WB_FRAME)
+		wslot_addr(e, b->off);
+	else if (b->k == WB_PTR)
+		wget(e, b->loc);
+	else
+		efatal(e, c->syms[s].loc, "wasm: a cleanup variable in a register");
+	claim_ref(e, ref);
+	wdecl(e, ref, c->syms[f].ty, NULL);
+	tb_s(tb, "\tcall\t");
+	wfname(c, tb, ref);
+	tb_c(tb, '\n');
+	if (wclassify_ret(c, ft->base).k == WA_SCALAR)
+		wi(e, "drop");
+}
+
+/* run the cleanups [from, ncl) in reverse; pop: they go out of scope */
+static void wcleanups(ecx *e, uint32_t from, bool pop)
+{
+	wst *W = e->w;
+
+	for (uint32_t i = W->ncl; i-- > from;)
+		wcleanup(e, W->cl[i].sp);
+	if (pop)
+		W->ncl = from;
+}
+
+/* a branch to block index t: the cleanups of the blocks it leaves */
+static void wcleanup_leave(ecx *e, int t)
+{
+	wst *W = e->w;
+	uint32_t i;
+
+	for (i = 0; i < W->ncl && W->cl[i].depth <= t; i++)
+		;
+	wcleanups(e, i, false);
+}
+
 /* ---------------- VLA scopes ---------------- */
 
 /* the index of the compound statement's first VLA declaration, UINT32_MAX: none */
@@ -569,6 +617,7 @@ static void wgoto(ecx *e, uint32_t lb, uint32_t loc)
 			wset(e, W->gd[d].st);
 		}
 	}
+	wcleanup_leave(e, W->gd[a].loop);
 	wvla_leave(e, W->gd[a].loop, aidx);
 	wbr(e, "br", W->gd[a].loop);
 }
@@ -673,9 +722,15 @@ static void wdecl_stmt(ecx *e, const node *x)
 		}
 		return;
 	}
-	if (sym_attrs(c, s)->cleanup)
-		efatal(e, x->loc, "wasm: the cleanup attribute is not supported yet (PLAN-wasm.md W4)");
 	b = wlocal(e, s);
+	if (sym_attrs(c, s)->cleanup) {
+		wst *W = e->w;
+
+		if (W->ncl >= WMAXGD)
+			efatal(e, x->loc, "wasm: too many cleanups");
+		W->cl[W->ncl].depth = W->bdepth;
+		W->cl[W->ncl++].sp = s;
+	}
 	if (!x->b)
 		return;
 	if (b->k == WB_LOC) {
@@ -883,6 +938,18 @@ static void wswitch(ecx *e, uint32_t n)
 	W->nseg = seg0;
 }
 
+/* a for statement's declarations: their cleanups run when the loop ends */
+static void wfor_init(ecx *e, uint32_t n)
+{
+	cc *c = e->c;
+	const node *x = N(n);
+
+	if (x->op == N_BLOCK && wvla_block(c, x) == UINT32_MAX)
+		wstmts(e, x, 0, x->c);
+	else
+		wstmt(e, n);
+}
+
 static void wreturn(ecx *e, const node *x)
 {
 	cc *c = e->c;
@@ -893,6 +960,19 @@ static void wreturn(ecx *e, const node *x)
 		wabi r = wclassify_ret(c, W->rty);
 
 		if (r.k == WA_IND) {
+			const node *v = N(x->a);
+
+			/* clang builds a returned local in the sret slot (NRVO): its
+			   cleanup sees, and changes, what the caller gets */
+			if (v->op == N_VAR && W->ncl && sym_attrs(c, v->a)->cleanup &&
+			    QUNQ(t) == QUNQ(W->rty)) {
+				wcleanups(e, 0, false);
+				wget(e, W->sret);
+				wexpr(e, x->a, true);
+				wcopy(e, tsize(c, W->rty));
+				wbr(e, "br", 0);
+				return;
+			}
 			wget(e, W->sret);
 			wexpr(e, x->a, true);
 			wcopy(e, tsize(c, W->rty));
@@ -911,6 +991,7 @@ static void wreturn(ecx *e, const node *x)
 			wexpr(e, x->a, false);
 		}
 	}
+	wcleanups(e, 0, false);
 	wbr(e, "br", 0);
 }
 
@@ -928,8 +1009,9 @@ VPRIV void wstmt(ecx *e, uint32_t n)
 	switch (x->op) {
 	case N_BLOCK: {
 		int r = W->ngdx ? wgfind(W, n) : -1;
-		uint32_t first = wvla_block(c, x);
+		uint32_t first = wvla_block(c, x), cl0 = W->ncl;
 		bool vla = first != UINT32_MAX;
+		int obd = W->bdepth;
 
 		if (vla) {
 			/* the stack pointer to give back when the block is left */
@@ -942,11 +1024,15 @@ VPRIV void wstmt(ecx *e, uint32_t n)
 			wi(e, "global.get\t__stack_pointer");
 			wset(e, W->vb[W->nvb++].sp);
 		}
+		W->bdepth = W->depth;
 		if (r >= 0) {
 			wgblock(e, x, r);
 		} else {
 			wstmts(e, x, 0, x->c);
 		}
+		W->bdepth = obd;
+		if (W->ncl > cl0)
+			wcleanups(e, cl0, true);
 		if (vla) {
 			wget(e, W->vb[--W->nvb].sp);
 			wi(e, "global.set\t__stack_pointer");
@@ -1032,6 +1118,7 @@ VPRIV void wstmt(ecx *e, uint32_t n)
 		uint32_t step = c->lists[x->c], body = c->lists[x->c + 1];
 		int ob = W->brk, oc = W->cont, b, l, k;
 		int r = W->ngdx ? wgfind(W, n) : -1;
+		uint32_t cl0 = W->ncl;
 
 		if (x->a) {
 			if (r >= 0) {
@@ -1039,10 +1126,10 @@ VPRIV void wstmt(ecx *e, uint32_t n)
 				wget(e, W->gd[r].st);
 				wi(e, "i32.eqz");
 				wblock(e, "if");
-				wstmt(e, x->a);
+				wfor_init(e, x->a);
 				wend(e, "end_if");
 			} else {
-				wstmt(e, x->a);
+				wfor_init(e, x->a);
 			}
 		}
 		b = wblock(e, "block");
@@ -1064,6 +1151,8 @@ VPRIV void wstmt(ecx *e, uint32_t n)
 		wbr(e, "br", l);
 		wend(e, "end_loop");
 		wend(e, "end_block");
+		if (W->ncl > cl0)
+			wcleanups(e, cl0, true);
 		break;
 	}
 	case N_SWITCH:
@@ -1105,6 +1194,7 @@ VPRIV void wstmt(ecx *e, uint32_t n)
 
 		if (t < 0)
 			efatal(e, x->loc, "break/continue outside a loop");
+		wcleanup_leave(e, t);
 		wvla_leave(e, t, UINT32_MAX);
 		wbr(e, "br", t);
 		break;

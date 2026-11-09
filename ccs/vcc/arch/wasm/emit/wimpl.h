@@ -75,6 +75,9 @@ typedef struct wst {
 	uint32_t nvsz;
 	struct wvb *vb;		/* blocks with VLAs being emitted: sp to restore on leaving */
 	uint32_t nvb;
+	struct wvb *cl;		/* variables with a cleanup in scope: block depth, sym (.sp) */
+	uint32_t ncl;
+	int bdepth;		/* the depth at the start of the innermost compound statement */
 	struct wst *next;	/* the free list */
 } wst;
 

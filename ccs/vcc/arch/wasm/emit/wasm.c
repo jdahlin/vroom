@@ -34,6 +34,7 @@ VPRIV wst *w_state(ecx *e)
 		W->vszn = reserve(WMAXGD * sizeof(uint32_t));
 		W->vszl = reserve(WMAXGD * sizeof(uint32_t));
 		W->vb = reserve(WMAXGD * sizeof(wvb));
+		W->cl = reserve(WMAXGD * sizeof(wvb));
 	}
 	/* per sym bindings: sized for this TU (generation-tagged: never cleared) */
 	W->sb = reserve(((size_t)e->c->nsym + 64) * sizeof(wbind));
@@ -479,7 +480,8 @@ VPRIV void wasm_emit_function(ecx *e, uint32_t s)
 	W->rty = ft->base;
 	W->fsym = s;
 	W->nsw = W->nseg = 0;
-	W->nvsz = W->nvb = 0;
+	W->nvsz = W->nvb = W->ncl = 0;
+	W->bdepth = 0;
 	r = wclassify_ret(c, ft->base);
 	W->rt = r.k == WA_SCALAR ? r.st : WT_NONE;
 	e->top = s;
