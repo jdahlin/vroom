@@ -513,7 +513,7 @@ void dc_boundary_slow(cc *c)
 			d->pos = E->pos;
 			d->node = child(d->node, E->e, d->open.ctr, true);
 			atomic_fetch_add_explicit(&d->node->visits, 1, memory_order_relaxed);
-			if (!d->stale && atomic_load_explicit(&d->node->visits, memory_order_relaxed) >= 2 &&
+			if (!d->stale && !c->dr_on && atomic_load_explicit(&d->node->visits, memory_order_relaxed) >= 2 &&
 			    !atomic_load_explicit(&d->node->snap, memory_order_acquire) && !c->errors && !c->ndiag &&
 			    !pp_errors(c->p) && atomic_load_explicit(&dc_mem, memory_order_relaxed) <
 			    atomic_load_explicit(&dc_max, memory_order_relaxed)) {

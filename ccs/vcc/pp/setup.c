@@ -165,7 +165,7 @@ static void hc_env(void)
 
 	hc_mem_max = m ? (size_t)atol(m) << 20 : (size_t)8 << 30;
 	hc_off = getenv("VPP_NOHC") != NULL;
-	pp_drcov = getenv("VCC_DRCOV") || getenv("VCC_DRREC");
+	pp_drcov = getenv("VCC_DRCOV") || getenv("VCC_DRREC") || getenv("VCC_DR");
 }
 
 static void hc_mode(pp *p, int mode)
@@ -261,12 +261,15 @@ uint64_t pp_skipped(const pp *p)
 	return p->skipped_tok;
 }
 
-bool pp_open_hit(const pp *p, uint64_t *b, const void **he)
+bool pp_open_hit(const pp *p, uint64_t *b, const void **he, uint32_t *base, unsigned *ctr, uint32_t *span)
 {
 	if (!p->ndrs)
 		return false;
 	*b = p->drs[p->ndrs - 1].pos;
 	*he = p->drs[p->ndrs - 1].he;
+	if (base)
+		*base = p->drs[p->ndrs - 1].base, *ctr = p->drs[p->ndrs - 1].ctr,
+		*span = ((const hent *)*he)->span;
 	return true;
 }
 
@@ -281,9 +284,10 @@ VPRIV void drcov_hit(pp *p, int d0)
 {
 	if (!p->drh)
 		p->drh = varena_alloc(&p->perm, DRCOV_MAX * sizeof(pp_hitreg));
-	if (p->depth > d0) {
+	if (p->depth > d0 && p->cx[d0].type == C_REPLAY && p->cx[d0].he == p->hc_last) {
 		if (p->ndrs < 64) {
 			p->drs[p->ndrs].pos = p->ntok_out, p->drs[p->ndrs].depth = p->depth;
+			p->drs[p->ndrs].base = p->cx[d0].loc, p->drs[p->ndrs].ctr = p->cx[d0].cbase;
 			p->drs[p->ndrs++].he = p->hc_last;
 		}
 	}
@@ -363,6 +367,45 @@ static __attribute__((noinline, cold)) size_t ucn_utf8(char *s, size_t n)
 		}
 	}
 	return o;
+}
+
+/*
+ * Per-region declaration replay (cc/replay.c): drop the rest of the
+ * innermost open hit, whose first token was the last one delivered, as
+ * pp_skip_top does for a top-level region.  0 if that is not the case.
+ */
+int pp_skip_hit(pp *p, int dry)
+{
+	int d0, top;
+
+	if (!p->ndrs || p->drs[p->ndrs - 1].pos + 1 != p->ntok_out)
+		return 0;
+	d0 = p->drs[p->ndrs - 1].depth - 1;
+	if (d0 < 0 || p->cx[d0].type != C_REPLAY || p->cx[d0].he != p->drs[p->ndrs - 1].he)
+		return 0;
+	for (int d = d0 + 1; d < p->depth; d++)
+		if (p->cx[d].type != C_REPLAY)
+			return 0;
+	if (p->rec.on && !p->cx[d0].norec)
+		return 0;	/* an enclosing header is being recorded: it needs the tokens */
+	top = p->cx[d0].top;
+	if (top == 2) {
+		const pp_topev *t = p->ntev && !p->tev_full ? &p->tev[p->ntev - 1] : NULL;
+
+		if (!t || t->end || !t->hit || t->pos + 1 != p->ntok_out || t->e != p->cx[d0].he)
+			return 0;
+		return dry ? 1 : pp_skip_top(p);
+	}
+	if (dry)
+		return 1;
+	p->skipped_tok += p->cx[d0].he->total;
+	while (p->ndrs && p->drs[p->ndrs - 1].depth > d0)
+		p->ndrs--;
+	if (top)
+		p->pend |= p->cx[d0].he->pend_out;
+	p->depth = d0;
+	p->ntok_out--;
+	return 1;
 }
 
 /* the token as clang -E -P prints it */

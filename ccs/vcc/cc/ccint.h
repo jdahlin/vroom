@@ -199,7 +199,7 @@ struct cc {
 	/* VCC_DRCOV: delivered positions of file-scope declaration starts (UINT64_MAX: lookahead) */
 	uint64_t *drb;
 	uint32_t ndrb, cdrb;
-	/* VCC_DRREC: per-region declaration replay, record only (cc/replay.c) */
+	/* VCC_DR / VCC_DRREC: per-region declaration replay (cc/replay.c) */
 	struct drrec *dr;
 	uint8_t dr_on;		/* a region is being recorded: the hooks log */
 };

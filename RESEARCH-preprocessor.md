@@ -772,6 +772,88 @@ pp at a region start, at any depth, as `pp_top_events` gives for the top level.
    including reachable tag completion, external writes as record overwrites, and pack
    state as an input. A/B against `VCC_NODR=1` on PG and the kernel. Target: ~40 M
    of PG's 46 M.
+   - *2a done (2026-11-09): exact replay, validated structurally; no provenance yet.
+     Opt-in, `VCC_DR=1`; off by default.*
+     - **Entry** (`cc/replay.c`, recorded at a hit as in step 1, published to a
+       process-wide table keyed by (`hent`, counter, pack depth and top, option
+       signature), up to 8 variants per key). It holds:
+       - the reads: (namespace, id, A's sym or 0);
+       - W, the older records they reach, copied at first use: syms, tags with their
+         fields, types with their params, attrs, strings, the psyms/enum lists;
+       - the type log (`ty_intern`, `ty_new`, `ty_func` in call order; `ty_func`
+         works on a region-own table too);
+       - the own records in A's indices, with heap pointers turned into offsets into
+         a heap blob of their own;
+       - the writes to W as (record, changed fields, post value);
+       - the file-scope binds, the toplevel additions and the last token.
+     - **Schemas.** One field table per record kind (sym, tag, field, ctype, attrs,
+       node by `op`, list elements by referrer) says what each field holds: value,
+       location, sym, tag, type, node, list, pool, string, attrs. One table drives
+       recording W, the publish check, validation and translation.
+       - A publish-time pass checks that every reference maps: own, builtin, or in W.
+       - Unreferenced lists (declarator scratch) are copied as they are.
+     - **Validation** at a hit in B: each read is looked up in B and unified with W
+       (worklist, A→B map, injective for syms/tags/types). All of W must be reached;
+       types that came only from interning are mapped by the type log instead.
+     - **Apply**:
+       1. replay the type log through B's interning;
+       2. append the own records translated (index deltas, the type map, W slots,
+          location base);
+       3. set the final content of the region's records;
+       4. apply the writes field by field;
+       5. `sym_bind` the file-scope syms;
+       6. append toplevel, set `prevloc`;
+       7. `pp_skip_hit` drops the rest of the hit; `pp_skip_top` does it for a
+          top-level one, so the decl cache sees the region end.
+     - **Hidden inputs found.**
+       - *Pack depth.* `lazy_ok` refuses inside any `#pragma pack`, so the key holds
+         the depth, not only the alignment in effect.
+       - *An enclosing header being recorded by pp.* No lazy body comes from the
+         header cache then. Regions are only recorded and replayed where
+         `pp_skip_hit` would be allowed.
+       - *Writes.* Struct completion writes size and align into the older record
+         type, which is supported as a write (not for interned types). The step-1
+         count missed this because it only looked at pure regions.
+     - **Not published.** Diagnostics; `#pragma pack`/`weak` inside the region; lazy
+       bodies, labels, asm, `_Complex` (step 3 and later); an older `S_VAR` with an
+       initializer in W; anything unmapped. A key that failed twice is not recorded
+       again.
+     - **Verification.**
+       - `VCC_DRCHECK=1` with `VCC_DR=1` parses each region that would replay and
+         compares field by field with what the replay would write: 0 mismatches in
+         ~18 000 PG regions (two runs) and 5361 kernel regions.
+       - With `VCC_DRREC`, it also refuses regions that wrote to an older record
+         outside W.
+       - Objects are byte-identical with `VCC_DR=1` (PG 1570/1570, kernel 839/839),
+         and so are the diagnostics.
+       - Clean under ASan+UBSan on both.
+       - The default path: parity 873/873 and 911/912; sema run, batch and layout
+         878/879; ctests, stress and vccd tests green; `vbench gate` ok (fe +0.41%,
+         cc +0.37% since the merge-base, steps 0–2a together).
+     - **Numbers**, `vpp --batch -j 1`, cold process:
+
+       | | PG default | PG `VCC_DR=1` | kernel default | kernel `VCC_DR=1` |
+       |---|---|---|---|---|
+       | instructions (jobs) | 36.5 G | 46.4 G (+27%) | 79.4 G | 97.9 G (+23%) |
+       | regions replayed | | 17 392 (16.4 M tok) | | 5194 (0.9 M) |
+       | recorded / published | | 5814 / 3849 | | 16 887 / 3504 |
+       | entries | | 328 MB | | 185 MB |
+       | biggest refusals | | lazy 3.3 M, pragma 6.4 M | | lazy 256 M tok |
+
+       - Per replayed PG region (~940 tokens), validation takes ~27 µs and apply
+         ~17 µs. Parsing it takes ~100 µs.
+       - A cheaper replay does not show yet: record-only (`VCC_DRREC`, nothing
+         applied) costs 47.6 G, and replaying instead saves 1.2 G of that.
+       - The overhead is recording plus validation:
+         - the deep unify of W runs per try (32 282 tries for 17 392 hits);
+         - `pair`/`pair_w` plus the inlined validation are ~30% of a sampled PG
+           run's busy time;
+         - the kernel's W copies at reads take 1.2 s (big structs reached through
+           pointers).
+     - **Next (2b).** Make validation O(reads), not O(W): the provenance and versions
+       of the design. A sym/tag certified as the same entry's own and unwritten since
+       needs no deep compare. Also stop recording regions that already have
+       variants. Then step 3 (lazy bodies) for the kernel.
 3. Lazy bodies through `lzfn.hc` (the kernel's 226 M, PG's 5.5 M).
 4. Fold ccsnap into this if per-region replay of the prefix is as cheap as a snapshot
    restore; otherwise keep both, and let a recording coexist with snapshots (the
@@ -782,7 +864,9 @@ pp at a region start, at any depth, as `pp_top_events` gives for the top level.
   the method: the region's own table makes the log exactly "first call per structural
   type, in order", including types no record references. Whether replaying that log
   gives the same `ty` array is checked in step 2 (A/B objects, plus a debug compare of
-  `ty` after replay against a parse).
+  `ty` after replay against a parse). *Settled in 2a: it does (`VCC_DRCHECK`). The
+  count of new types may differ from A's, since B can already have some; the log
+  maps each one.*
 - Where region boundaries fall inside `extern "C"`-like wrappers. In C: SDK headers'
   `__BEGIN_DECLS` is empty, so this is probably not a problem.
 - Size per entry: own records plus the type log. ccsnap's 3.5 MB per snapshot was for

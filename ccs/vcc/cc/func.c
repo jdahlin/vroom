@@ -169,11 +169,13 @@ VPRIV void function_def(cc *c, uint32_t s, const declr *d)
 VPRIV void translation_unit(cc *c)
 {
 	for (;;) {
+		if (unlikely(c->dr))
+			dr_close(c);	/* (before a snapshot can be taken) */
 		dc_boundary(c);
 		if (unlikely(c->drb))
 			drcov_boundary(c);
-		if (unlikely(c->dr))
-			dr_boundary(c);
+		if (unlikely(c->dr) && dr_boundary(c))
+			continue;	/* replayed: at a boundary again */
 		if (is(c, T_EOF))
 			break;
 		if (accept(c, T_SEMI))
