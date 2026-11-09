@@ -149,6 +149,18 @@ static int mod_kind(const char *s, size_t n)
 		{ "abs_g1_nc", A64_MOD_ABS_G1_NC }, { "abs_g2", A64_MOD_ABS_G2 }, { "abs_g2_nc", A64_MOD_ABS_G2_NC },
 		{ "abs_g3", A64_MOD_ABS_G3 }, { "got", A64_MOD_GOT }, { "got_lo12", A64_MOD_GOT_LO12 },
 		{ "abs_g0_s", A64_MOD_ABS_G0_S }, { "abs_g1_s", A64_MOD_ABS_G1_S }, { "abs_g2_s", A64_MOD_ABS_G2_S },
+		{ "tlsdesc", A64_MOD_TLSDESC }, { "tlsdesc_lo12", A64_MOD_TLSDESC_LO12 },
+		{ "gottprel", A64_MOD_GOTTPREL }, { "gottprel_lo12", A64_MOD_GOTTPREL_LO12_NC },
+		{ "gottprel_g1", A64_MOD_GOTTPREL_G1 }, { "gottprel_g0_nc", A64_MOD_GOTTPREL_G0_NC },
+		{ "tprel_g2", A64_MOD_TPREL_G2 }, { "tprel_g1", A64_MOD_TPREL_G1 }, { "tprel_g1_nc", A64_MOD_TPREL_G1_NC },
+		{ "tprel_g0", A64_MOD_TPREL_G0 }, { "tprel_g0_nc", A64_MOD_TPREL_G0_NC },
+		{ "tprel_hi12", A64_MOD_TPREL_HI12 }, { "tprel_lo12", A64_MOD_TPREL_LO12 }, { "tprel_lo12_nc", A64_MOD_TPREL_LO12_NC },
+		{ "dtprel_g2", A64_MOD_DTPREL_G2 }, { "dtprel_g1", A64_MOD_DTPREL_G1 }, { "dtprel_g1_nc", A64_MOD_DTPREL_G1_NC },
+		{ "dtprel_g0", A64_MOD_DTPREL_G0 }, { "dtprel_g0_nc", A64_MOD_DTPREL_G0_NC },
+		{ "dtprel_hi12", A64_MOD_DTPREL_HI12 }, { "dtprel_lo12", A64_MOD_DTPREL_LO12 }, { "dtprel_lo12_nc", A64_MOD_DTPREL_LO12_NC },
+		{ "prel_g3", A64_MOD_PREL_G3 }, { "prel_g2", A64_MOD_PREL_G2 }, { "prel_g2_nc", A64_MOD_PREL_G2_NC },
+		{ "prel_g1", A64_MOD_PREL_G1 }, { "prel_g1_nc", A64_MOD_PREL_G1_NC },
+		{ "prel_g0", A64_MOD_PREL_G0 }, { "prel_g0_nc", A64_MOD_PREL_G0_NC },
 	};
 	for (size_t i = 0; i < sizeof t / sizeof t[0]; i++) if (sveqi(s, n, t[i].n)) return t[i].k;
 	return -1;

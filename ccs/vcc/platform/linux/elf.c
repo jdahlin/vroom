@@ -37,7 +37,11 @@ VPRIV void elf_reloc(ElfObj *o, Out *w, ElfFix *x, uint64_t P, uint32_t type, El
 	/* local symbols become section + offset, except (MC's shouldRelocateWithSymbol) in a
 	 * SHF_MERGE section with an addend: the linker would find the piece at offset+addend,
 	 * so "" + 1 could land in the next string */
-	if (a && insec(a) && a->bind == STB_LOCAL && !(a->flags & ESYM_SECTION) && a->type != STT_GNU_IFUNC &&
+	/* GOT and TLS relocations name the symbol (MC); TLS ones make it STT_TLS */
+	int tls = type >= 523 && type <= 573;
+	int keep = tls || type == R_AARCH64_ADR_GOT_PAGE || type == R_AARCH64_LD64_GOT_LO12_NC || type == R_AARCH64_GOT_LD_PREL19;
+	if (a && tls && a->type == STT_NOTYPE) a->type = STT_TLS;
+	if (a && !keep && insec(a) && a->bind == STB_LOCAL && !(a->flags & ESYM_SECTION) && a->type != STT_GNU_IFUNC &&
 	    !(add && (elf_sec(o, symsec(o, a))->flags & SHF_MERGE))) {
 		add += (int64_t)symoff(o, a);
 		aid = elf_sec(o, symsec(o, a))->sym;
@@ -292,6 +296,8 @@ void elf_emit(ElfObj *o, uint8_t *b)
 			type = t;
 			if (!size && !(s->flags & ESYM_SIZE_EXPR)) size = b->size;
 		}
+		if (type == STT_NOTYPE && (s->flags & ESYM_DEFINED) && !(s->flags & ESYM_ABS) && (elf_sec(o, symsec(o, s))->flags & SHF_TLS))
+			type = STT_TLS;	/* MC: labels in a TLS section */
 		if (type == STT_GNU_IFUNC || s->bind == 10) b[7] = 3;	/* ELFOSABI_GNU (MC) */
 		p32(y, s->size_sub);
 		y[4] = (uint8_t)(s->bind << 4 | type); y[5] = s->vis;

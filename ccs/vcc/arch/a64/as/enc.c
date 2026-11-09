@@ -600,9 +600,20 @@ static int addsub_imm(Ctx *c, int sf, int op, int s, unsigned rd, unsigned rn, c
 		lsl12 = sh->imm == 12;
 	}
 	if (im->hassym || im->mod) {
-		if (im->mod != A64_MOD_LO12) FAIL("invalid immediate");
+		uint32_t r;
+		switch (im->mod) {
+		case A64_MOD_LO12: r = R_AARCH64_ADD_ABS_LO12_NC; break;
+		case A64_MOD_TLSDESC_LO12: r = R_AARCH64_TLSDESC_ADD_LO12; break;
+		case A64_MOD_TPREL_HI12: r = R_AARCH64_TLSLE_ADD_TPREL_HI12; lsl12 = 1; break;
+		case A64_MOD_TPREL_LO12: r = R_AARCH64_TLSLE_ADD_TPREL_LO12; break;
+		case A64_MOD_TPREL_LO12_NC: r = R_AARCH64_TLSLE_ADD_TPREL_LO12_NC; break;
+		case A64_MOD_DTPREL_HI12: r = R_AARCH64_TLSLD_ADD_DTPREL_HI12; lsl12 = 1; break;
+		case A64_MOD_DTPREL_LO12: r = R_AARCH64_TLSLD_ADD_DTPREL_LO12; break;
+		case A64_MOD_DTPREL_LO12_NC: r = R_AARCH64_TLSLD_ADD_DTPREL_LO12_NC; break;
+		default: FAIL("invalid immediate");
+		}
 		*c->out = a64_addsub_imm(sf, op, s, rd, rn, 0, lsl12);
-		return setfix(c, R_AARCH64_ADD_ABS_LO12_NC, im);
+		return setfix(c, r, im);
 	}
 	int64_t v = im->imm;
 	if (!sh && v < 0 && v > -4096 * 4096LL) { v = -v; op ^= 1; }
@@ -903,6 +914,18 @@ static int k_movw(Ctx *c, const Mn *m)
 			[A64_MOD_ABS_G3] = { 3, 0, R_AARCH64_MOVW_UABS_G3 },
 			[A64_MOD_ABS_G0_S] = { 0, 1, R_AARCH64_MOVW_SABS_G0 }, [A64_MOD_ABS_G1_S] = { 1, 1, R_AARCH64_MOVW_SABS_G1 },
 			[A64_MOD_ABS_G2_S] = { 2, 1, R_AARCH64_MOVW_SABS_G2 },
+			[A64_MOD_GOTTPREL_G1] = { 1, 0, R_AARCH64_TLSIE_MOVW_GOTTPREL_G1 },
+			[A64_MOD_GOTTPREL_G0_NC] = { 0, 0, R_AARCH64_TLSIE_MOVW_GOTTPREL_G0_NC },
+			[A64_MOD_TPREL_G2] = { 2, 0, R_AARCH64_TLSLE_MOVW_TPREL_G2 }, [A64_MOD_TPREL_G1] = { 1, 0, R_AARCH64_TLSLE_MOVW_TPREL_G1 },
+			[A64_MOD_TPREL_G1_NC] = { 1, 0, R_AARCH64_TLSLE_MOVW_TPREL_G1_NC }, [A64_MOD_TPREL_G0] = { 0, 0, R_AARCH64_TLSLE_MOVW_TPREL_G0 },
+			[A64_MOD_TPREL_G0_NC] = { 0, 0, R_AARCH64_TLSLE_MOVW_TPREL_G0_NC },
+			[A64_MOD_DTPREL_G2] = { 2, 0, R_AARCH64_TLSLD_MOVW_DTPREL_G2 }, [A64_MOD_DTPREL_G1] = { 1, 0, R_AARCH64_TLSLD_MOVW_DTPREL_G1 },
+			[A64_MOD_DTPREL_G1_NC] = { 1, 0, R_AARCH64_TLSLD_MOVW_DTPREL_G1_NC }, [A64_MOD_DTPREL_G0] = { 0, 0, R_AARCH64_TLSLD_MOVW_DTPREL_G0 },
+			[A64_MOD_DTPREL_G0_NC] = { 0, 0, R_AARCH64_TLSLD_MOVW_DTPREL_G0_NC },
+			[A64_MOD_PREL_G3] = { 3, 0, R_AARCH64_MOVW_PREL_G3 }, [A64_MOD_PREL_G2] = { 2, 0, R_AARCH64_MOVW_PREL_G2 },
+			[A64_MOD_PREL_G2_NC] = { 2, 0, R_AARCH64_MOVW_PREL_G2_NC }, [A64_MOD_PREL_G1] = { 1, 0, R_AARCH64_MOVW_PREL_G1 },
+			[A64_MOD_PREL_G1_NC] = { 1, 0, R_AARCH64_MOVW_PREL_G1_NC }, [A64_MOD_PREL_G0] = { 0, 0, R_AARCH64_MOVW_PREL_G0 },
+			[A64_MOD_PREL_G0_NC] = { 0, 0, R_AARCH64_MOVW_PREL_G0_NC },
 		};
 		if (o[1].mod >= sizeof g / sizeof g[0] || !g[o[1].mod].r || c->n == 3) FAIL("invalid relocation specifier");
 		hw = g[o[1].mod].hw;
@@ -914,6 +937,12 @@ static int k_movw(Ctx *c, const Mn *m)
 			return 0;
 		}
 		*c->out = base | R(&o[0]);
+		switch (o[1].mod) {	/* MC: a checked TLS group in movz is written as movn */
+		case A64_MOD_GOTTPREL_G1: case A64_MOD_TPREL_G2: case A64_MOD_TPREL_G1: case A64_MOD_TPREL_G0:
+		case A64_MOD_DTPREL_G2: case A64_MOD_DTPREL_G1: case A64_MOD_DTPREL_G0:
+			if ((*c->out & 0x60000000u) == 0x40000000u) *c->out &= ~0x40000000u;
+			break;
+		}
 		return setfix(c, g[o[1].mod].r, &o[1]);
 	}
 	if (o[1].hassym) FAIL("expected relocated symbol or integer");
@@ -1107,6 +1136,9 @@ static int k_adr(Ctx *c, const Mn *m)
 	if (!o[1].hassym) FAIL("unsupported constant adr/adrp target");
 	if (m->x) {
 		if (o[1].mod == A64_MOD_GOT) return setfix(c, R_AARCH64_ADR_GOT_PAGE, &o[1]);
+		if (o[1].mod == A64_MOD_TLSDESC) return setfix(c, R_AARCH64_TLSDESC_ADR_PAGE21, &o[1]);
+		if (o[1].mod == A64_MOD_GOTTPREL) return setfix(c, R_AARCH64_TLSIE_ADR_GOTTPREL_PAGE21, &o[1]);
+		if (o[1].mod == A64_MOD_PG_HI21_NC) return setfix(c, R_AARCH64_ADR_PREL_PG_HI21_NC, &o[1]);
 		if (o[1].mod && o[1].mod != A64_MOD_PG_HI21) FAIL("invalid relocation specifier");
 		return setfix(c, R_AARCH64_ADR_PREL_PG_HI21, &o[1]);
 	}
@@ -1223,6 +1255,23 @@ static int ldst_common(Ctx *c, unsigned size, unsigned v, unsigned opc, int scal
 		c->fix->type = R_AARCH64_LD64_GOT_LO12_NC; c->fix->v = mem->v;
 		return 0;
 	}
+	if ((mem->mod == A64_MOD_GOTTPREL_LO12_NC || mem->mod == A64_MOD_TLSDESC_LO12) && scale == 3 && opc == 1 && !v &&
+	    mem->mode == A64M_OFF && !unscaled_only) {
+		*c->out = a64_ldst_uoff(size, 0, opc, rt, rn, 0);
+		c->fix->type = mem->mod == A64_MOD_TLSDESC_LO12 ? R_AARCH64_TLSDESC_LD64_LO12 : R_AARCH64_TLSIE_LD64_GOTTPREL_LO12_NC;
+		c->fix->v = mem->v;
+		return 0;
+	}
+	if (mem->mod >= A64_MOD_TPREL_LO12 && mem->mod <= A64_MOD_DTPREL_LO12_NC && mem->mod != A64_MOD_DTPREL_G2 &&
+	    (mem->mod == A64_MOD_TPREL_LO12 || mem->mod == A64_MOD_TPREL_LO12_NC || mem->mod == A64_MOD_DTPREL_LO12 || mem->mod == A64_MOD_DTPREL_LO12_NC)) {
+		if (mem->mode != A64M_OFF || unscaled_only) return -1;
+		int nc = mem->mod == A64_MOD_TPREL_LO12_NC || mem->mod == A64_MOD_DTPREL_LO12_NC;
+		int tp = mem->mod == A64_MOD_TPREL_LO12 || mem->mod == A64_MOD_TPREL_LO12_NC;
+		uint32_t r = scale == 4 ? (tp ? 570u : 572u) : (tp ? R_AARCH64_TLSLE_LDST8_TPREL_LO12 : R_AARCH64_TLSLD_LDST8_DTPREL_LO12) + 2u * (unsigned)scale;
+		*c->out = a64_ldst_uoff(size, (int)v, opc, rt, rn, 0);
+		c->fix->type = r + (unsigned)nc; c->fix->v = mem->v;
+		return 0;
+	}
 	if (mem->hassym || mem->mod) {
 		if (mem->mod != A64_MOD_LO12 || mem->mode != A64M_OFF || unscaled_only) return -1;
 		*c->out = a64_ldst_uoff(size, (int)v, opc, rt, rn, 0);
@@ -1276,7 +1325,11 @@ static int k_ldst(Ctx *c, const Mn *m)
 			default: BADOPS;
 			}
 			*c->out = b | R(&o[0]);
-			if (!o[1].hassym || o[1].mod) FAIL("unsupported literal");
+			if (!o[1].hassym) FAIL("unsupported literal");
+			if (o[1].mod == A64_MOD_GOT) return setfix(c, R_AARCH64_GOT_LD_PREL19, &o[1]);
+			if (o[1].mod == A64_MOD_GOTTPREL) return setfix(c, R_AARCH64_TLSIE_LD_GOTTPREL_PREL19, &o[1]);
+			if (o[1].mod == A64_MOD_TLSDESC) return setfix(c, R_AARCH64_LD_PREL_LO19, &o[1]);	/* as MC */
+			if (o[1].mod) FAIL("unsupported literal");
 			return setfix(c, R_AARCH64_LD_PREL_LO19, &o[1]);
 		}
 		scale = ldst_reg(&o[0], load, &size, &v, &opc);

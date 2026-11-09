@@ -740,15 +740,16 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
   `.base64`, `.balignw`/`.p2alignl`, `.end`, `.ident`, `.print`/`.warning`,
   `.variant_pcs`, `.tlsdesccall`, `.reloc` at `.`/labels with
   NONE/TLSDESC_CALL/BFD_RELOC_*; code sections at least 4-aligned.)
-- [ ] **Relocation operators** (TLS `:tlsdesc:`, `:tprel_*:`,
-  `:gottprel*:`, `:dtprel*:`, `:prel_g*:`, literal `ldr x0, :got:v`)
-  (`mod_kind` `as/as.c:1912`, `obj/obj.h:53-72`) [P].  *Validate:* T7 with
-  `-fPIC` and TLS sources.
+- [x] **Relocation operators**: `:tlsdesc:`, `:tlsdesc_lo12:`, `:gottprel*:`,
+  `:tprel_*:`, `:dtprel_*:` (add, movz/movk, ldst of every size), `:prel_g*:`,
+  `ldr x0, :got:v` / `:gottprel:`, `:pg_hi21_nc:`; TLS relocations make the
+  symbol STT_TLS and labels in TLS sections are STT_TLS, as MC.  *Validated:*
+  `ccs/vcc/tests/vas-obj/tlsops.s`, `tlslocal.s` byte-identical with clang -c.
 - [ ] **Mach-O syntax** `@PAGE`/`@PAGEOFF`/`@GOTPAGE…`; vasm writes ELF
   only.  *Validate:* T7 with `--target=arm64-apple-darwin` vs clang's Mach-O
   (`llvm-objdump --macho -r -d`).
-- [ ] **Wrong output**: GOT relocs against local symbols converted to
-  section+addend [P]; integer branch targets as `*ABS*` relocs; `adr x0, 4`
+- [ ] **Wrong output**: ~~GOT relocs against local symbols converted to
+  section+addend~~ (fixed: GOT/TLS relocations keep the symbol) [P]; integer branch targets as `*ABS*` relocs; `adr x0, 4`
   rejected (`arch/a64/as/enc.c:1005`).  *Validate:* T7 / T6 relocation comparison.
 - [ ] **Diagnostics**: line numbers off by one (`as/as.c:575/636/133`), `# N
   "file"` markers ignored (`as/as.c:579`), EOF errors at `:0:` [P].
