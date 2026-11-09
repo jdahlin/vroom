@@ -1,5 +1,6 @@
 /* vcc front end: record layout (clang's ItaniumRecordLayoutBuilder, AArch64) and the layout checks clang verifies */
 #include "ccimpl.h"
+#include "../lib/buf.h"
 
 /* ---------------- record layout (clang ItaniumRecordLayoutBuilder, AArch64) ---------------- */
 
@@ -147,42 +148,7 @@ VPRIV void lay_record(cc *c, tag *r, const uint32_t *fa, const uint8_t *fp)
 
 /* ---------------- layout checks (clang verifies them) ---------------- */
 
-typedef struct obuf {
-	char *p;
-	size_t n, cap;
-	int fd;
-} obuf;
-
-static void oflush(obuf *o)
-{
-	size_t off = 0;
-
-	while (off < o->n) {
-		ssize_t w = write(o->fd, o->p + off, o->n - off);
-
-		if (w <= 0)
-			break;
-		off += (size_t)w;
-	}
-	o->n = 0;
-}
-
-__attribute__((format(printf, 2, 3)))
-static void oprintf(obuf *o, const char *fmt, ...)
-{
-	va_list ap;
-	int n;
-
-	if (o->cap - o->n < 4096)
-		oflush(o);
-	va_start(ap, fmt);
-	n = vsnprintf(o->p + o->n, o->cap - o->n, fmt, ap);
-	va_end(ap);
-	if (n > 0)
-		o->n += (size_t)n < o->cap - o->n ? (size_t)n : o->cap - o->n - 1;
-}
-
-static void field_checks(cc *c, obuf *o, const char *rname, uint32_t ti, uint64_t base, const char *prefix)
+static void field_checks(cc *c, vfdbuf *o, const char *rname, uint32_t ti, uint64_t base, const char *prefix)
 {
 	const tag *r = &c->tags[ti];
 
@@ -196,7 +162,7 @@ static void field_checks(cc *c, obuf *o, const char *rname, uint32_t ti, uint64_
 				field_checks(c, o, rname, T(c, f->ty)->aux, base + f->off / 8, prefix);
 			continue;
 		}
-		oprintf(o, "_Static_assert(__builtin_offsetof(%s, %s%.*s) == %llu, \"vcc\");\n", rname, prefix,
+		vfdbuf_printf(o, "_Static_assert(__builtin_offsetof(%s, %s%.*s) == %llu, \"vcc\");\n", rname, prefix,
 			IDF(f->name), (unsigned long long)(base + f->off / 8));
 	}
 }
@@ -223,94 +189,78 @@ static const char *int_name(int k)
 }
 
 /* C spelling of a type for the checks (*ok = false if it cannot be named) */
-typedef struct tbuf {
-	char s[4096];
-	size_t n;
-} tbuf;
-
-static void tb_put(tbuf *b, const char *s, size_t n)
+static void quals(vfixbuf *b, int q)
 {
-	if (b->n + n >= sizeof(b->s))
-		n = sizeof(b->s) - 1 - b->n;
-	memcpy(b->s + b->n, s, n);
-	b->n += n;
-	b->s[b->n] = 0;
-}
-
-static void tb_puts(tbuf *b, const char *s) { tb_put(b, s, strlen(s)); }
-
-static void quals(tbuf *b, int q)
-{
-	if (q & Q_CONST) tb_puts(b, "const ");
-	if (q & Q_VOLATILE) tb_puts(b, "volatile ");
-	if (q & Q_RESTRICT) tb_puts(b, "restrict ");
+	if (q & Q_CONST) vfixbuf_puts(b, "const ");
+	if (q & Q_VOLATILE) vfixbuf_puts(b, "volatile ");
+	if (q & Q_RESTRICT) vfixbuf_puts(b, "restrict ");
 }
 
 /* out = spelling of t around the declarator text inner */
-static void type_str(cc *c, qty t, const char *inner, tbuf *out, bool *ok)
+static void type_str(cc *c, qty t, const char *inner, vfixbuf *out, bool *ok)
 {
 	const ctype *x = T(c, t);
-	tbuf b;
+	vfixbuf b;
 
 	b.n = 0, b.s[0] = 0;
 	switch (x->kind) {
 	case TY_PTR: {
-		tbuf in;
+		vfixbuf in;
 		const ctype *bt = T(c, x->base);
 
 		in.n = 0, in.s[0] = 0;
 		if (bt->kind == TY_ARRAY || bt->kind == TY_FUNC)
-			tb_puts(&in, x->flags & TF_BLOCK ? "(^" : "(*");
+			vfixbuf_puts(&in, x->flags & TF_BLOCK ? "(^" : "(*");
 		else
-			tb_puts(&in, x->flags & TF_BLOCK ? "^" : "*");
+			vfixbuf_puts(&in, x->flags & TF_BLOCK ? "^" : "*");
 		if (QQ(t)) {
-			tb_puts(&in, " ");
+			vfixbuf_puts(&in, " ");
 			quals(&in, QQ(t));
 		}
-		tb_puts(&in, inner);
+		vfixbuf_puts(&in, inner);
 		if (bt->kind == TY_ARRAY || bt->kind == TY_FUNC)
-			tb_puts(&in, ")");
+			vfixbuf_puts(&in, ")");
 		type_str(c, x->base, in.s, out, ok);
 		return;
 	}
 	case TY_ARRAY: {
-		tbuf in;
+		vfixbuf in;
 		char n[32];
 
 		in.n = 0, in.s[0] = 0;
-		tb_puts(&in, inner);
+		vfixbuf_puts(&in, inner);
 		if (x->flags & (TF_INCOMPLETE | TF_VLA))
-			tb_puts(&in, "[]");
+			vfixbuf_puts(&in, "[]");
 		else {
 			snprintf(n, sizeof(n), "[%llu]", (unsigned long long)arr_len(c, t));
-			tb_puts(&in, n);
+			vfixbuf_puts(&in, n);
 		}
 		type_str(c, QT(QI(x->base), QQ(x->base) | QQ(t)), in.s, out, ok);
 		return;
 	}
 	case TY_FUNC: {
-		tbuf in;
+		vfixbuf in;
 
 		in.n = 0, in.s[0] = 0;
-		tb_puts(&in, inner);
-		tb_puts(&in, "(");
+		vfixbuf_puts(&in, inner);
+		vfixbuf_puts(&in, "(");
 		if (x->flags & TF_NOPROTO) {
 		} else if (!x->n && !(x->flags & TF_VARIADIC)) {
-			tb_puts(&in, "void");
+			vfixbuf_puts(&in, "void");
 		} else {
 			for (uint32_t i = 0; i < x->n; i++) {
-				tbuf p;
+				vfixbuf p;
 
 				p.n = 0, p.s[0] = 0;
 				if (i)
-					tb_puts(&in, ", ");
+					vfixbuf_puts(&in, ", ");
 				type_str(c, c->params[x->aux + i], "", &p, ok);
-				tb_put(&in, p.s, p.n);
+				vfixbuf_put(&in, p.s, p.n);
 			}
 			if (x->flags & TF_VARIADIC)
-				tb_puts(&in, ", ...");
+				vfixbuf_puts(&in, ", ...");
 		}
-		tb_puts(&in, ")");
+		vfixbuf_puts(&in, ")");
 		x = T(c, t);
 		type_str(c, x->base, in.s, out, ok);
 		return;
@@ -320,17 +270,17 @@ static void type_str(cc *c, qty t, const char *inner, tbuf *out, bool *ok)
 	}
 	quals(&b, QQ(t));
 	switch (x->kind) {
-	case TY_VOID: tb_puts(&b, "void"); break;
-	case TY_FLOAT16: tb_puts(&b, "_Float16"); break;
-	case TY_FLOAT: tb_puts(&b, "float"); break;
-	case TY_DOUBLE: tb_puts(&b, "double"); break;
-	case TY_LDOUBLE: tb_puts(&b, "long double"); break;
+	case TY_VOID: vfixbuf_puts(&b, "void"); break;
+	case TY_FLOAT16: vfixbuf_puts(&b, "_Float16"); break;
+	case TY_FLOAT: vfixbuf_puts(&b, "float"); break;
+	case TY_DOUBLE: vfixbuf_puts(&b, "double"); break;
+	case TY_LDOUBLE: vfixbuf_puts(&b, "long double"); break;
 	case TY_STRUCT: case TY_UNION: case TY_ENUM: {
 		const tag *r = &c->tags[x->aux];
 		char nb[256];
 
 		if (x->aux == c->valist_tag && c->valist_tag) {
-			tb_puts(&b, "__builtin_va_list");
+			vfixbuf_puts(&b, "__builtin_va_list");
 		} else if (r->name) {
 			uint32_t s = lookup_tag(c, r->name);
 
@@ -338,14 +288,14 @@ static void type_str(cc *c, qty t, const char *inner, tbuf *out, bool *ok)
 				*ok = false;
 			snprintf(nb, sizeof(nb), "%s %.*s", x->kind == TY_STRUCT ? "struct" : x->kind == TY_UNION ? "union" : "enum",
 				 IDF(r->name));
-			tb_puts(&b, nb);
+			vfixbuf_puts(&b, nb);
 		} else if (r->typedef_name) {
 			uint32_t s = lookup(c, r->typedef_name);
 
 			if (!s || c->syms[s].kind != S_TYPEDEF || T(c, c->syms[s].ty)->canon != T(c, t)->canon)
 				*ok = false;
 			snprintf(nb, sizeof(nb), "%.*s", IDF(r->typedef_name));
-			tb_puts(&b, nb);
+			vfixbuf_puts(&b, nb);
 		} else {
 			*ok = false;
 		}
@@ -357,23 +307,23 @@ static void type_str(cc *c, qty t, const char *inner, tbuf *out, bool *ok)
 		if (!n)
 			*ok = false;
 		else
-			tb_puts(&b, n);
+			vfixbuf_puts(&b, n);
 	}
 	}
 	if (inner[0]) {
-		tb_puts(&b, " ");
-		tb_puts(&b, inner);
+		vfixbuf_puts(&b, " ");
+		vfixbuf_puts(&b, inner);
 	}
-	tb_put(out, b.s, b.n);
+	vfixbuf_put(out, b.s, b.n);
 }
 
 /* t as clang spells it in diagnostics (four buffers in rotation) */
 VPRIV const char *tyname(cc *c, qty t)
 {
-	static tbuf b[4];
+	static vfixbuf b[4];
 	static int k;
 	bool ok = true;
-	tbuf *o = &b[k++ & 3];
+	vfixbuf *o = &b[k++ & 3];
 
 	o->n = 0, o->s[0] = 0;
 	type_str(c, t, "", o, &ok);
@@ -382,10 +332,10 @@ VPRIV const char *tyname(cc *c, qty t)
 
 VPRIV void layout_checks(cc *c)
 {
-	obuf o = { malloc(1 << 20), 0, 1 << 20, c->o->outfd };
+	vfdbuf o = { malloc(1 << 20), 0, 1 << 20, c->o->outfd };
 	char rn[512];
 
-	oprintf(&o, "\n/* vcc layout checks */\n");
+	vfdbuf_printf(&o, "\n/* vcc layout checks */\n");
 	for (uint32_t i = 0; i < c->ntag; i++) {
 		const tag *r = &c->tags[i];
 		int k = c->ty[r->ty].kind;
@@ -408,13 +358,13 @@ VPRIV void layout_checks(cc *c)
 		} else {
 			continue;
 		}
-		oprintf(&o, "_Static_assert(sizeof(%s) == %llu && _Alignof(%s) == %u, \"vcc\");\n", rn,
+		vfdbuf_printf(&o, "_Static_assert(sizeof(%s) == %llu && _Alignof(%s) == %u, \"vcc\");\n", rn,
 			(unsigned long long)r->size, rn, r->align);
 		if (k == TY_ENUM) {
 			const char *bn = int_name(KIND(c, c->ty[r->ty].base));
 
 			if (bn)
-				oprintf(&o, "_Static_assert(__builtin_types_compatible_p(%s, %s), \"vcc\");\n", rn, bn);
+				vfdbuf_printf(&o, "_Static_assert(__builtin_types_compatible_p(%s, %s), \"vcc\");\n", rn, bn);
 			continue;
 		}
 		field_checks(c, &o, rn, i, 0, "");
@@ -426,20 +376,20 @@ VPRIV void layout_checks(cc *c)
 			continue;
 		if (s->kind == S_TYPEDEF) {
 			if (complete(c, s->ty) && !is_func(c, s->ty))
-				oprintf(&o, "_Static_assert(sizeof(%.*s) == %llu && _Alignof(%.*s) == %u, \"vcc\");\n",
+				vfdbuf_printf(&o, "_Static_assert(sizeof(%.*s) == %llu && _Alignof(%.*s) == %u, \"vcc\");\n",
 					IDF(s->name), (unsigned long long)ty_size(c, s->ty), IDF(s->name), ty_align(c, s->ty));
 		} else if (s->kind == S_VAR && complete(c, s->ty)) {
-			oprintf(&o, "_Static_assert(sizeof(%.*s) == %llu, \"vcc\");\n", IDF(s->name),
+			vfdbuf_printf(&o, "_Static_assert(sizeof(%.*s) == %llu, \"vcc\");\n", IDF(s->name),
 				(unsigned long long)ty_size(c, s->ty));
 		}
 		if (s->kind == S_VAR || s->kind == S_FUNC) {
-			tbuf b;
+			vfixbuf b;
 			bool ok = true;
 
 			b.n = 0, b.s[0] = 0;
 			type_str(c, s->ty, "", &b, &ok);
 			if (ok)
-				oprintf(&o, "_Static_assert(__builtin_types_compatible_p(__typeof__(%.*s), %s), \"vcc\");\n",
+				vfdbuf_printf(&o, "_Static_assert(__builtin_types_compatible_p(__typeof__(%.*s), %s), \"vcc\");\n",
 					IDF(s->name), b.s);
 		}
 	}
@@ -453,9 +403,9 @@ VPRIV void layout_checks(cc *c)
 		tn = int_name(KIND(c, KIND(c, s->ty) == TY_ENUM ? T(c, s->ty)->base : s->ty));
 		if (!tn)
 			continue;
-		oprintf(&o, "_Static_assert((%.*s) == %lldLL && __builtin_types_compatible_p(__typeof__(%.*s), %s), \"vcc\");\n",
+		vfdbuf_printf(&o, "_Static_assert((%.*s) == %lldLL && __builtin_types_compatible_p(__typeof__(%.*s), %s), \"vcc\");\n",
 			IDF(s->name), (long long)s->val, IDF(s->name), tn);
 	}
-	oflush(&o);
+	vfdbuf_flush(&o);
 	free(o.p);
 }

@@ -231,7 +231,7 @@ VPRIV hvec hc_vec(pp *p, const void *a, uint32_t n, uint32_t esz)
 
 	if (!n)
 		return v;
-	tmp = alloc(&p->tmp, (size_t)n * sizeof(*tmp));
+	tmp = varena_alloc(&p->tmp, (size_t)n * sizeof(*tmp));
 	for (uint32_t i = 0; i < n; i++) {
 		uint32_t id;
 

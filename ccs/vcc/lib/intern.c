@@ -7,6 +7,7 @@
 #include <sys/mman.h>
 
 #include "intern.h"
+#include "arena.h"
 
 #define SLOT_BITS 23	/* 64 MB of slots, touched as ids arrive */
 #define NSLOT (1u << SLOT_BITS)
@@ -28,16 +29,7 @@ static _Atomic uint64_t *slots;
 vident *vintern_ents;
 static _Atomic uint32_t nent = 1;	/* id 0 = none */
 
-static void *reserve(size_t n)
-{
-	void *p = mmap(NULL, n, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANON, -1, 0);
-
-	if (p == MAP_FAILED) {
-		perror("vcc: mmap");
-		abort();
-	}
-	return p;
-}
+static void *reserve(size_t n) { return vreserve(n, 0, "vcc: mmap"); }
 
 /* little-endian load of the first n (< 8) bytes of the word at s */
 static inline uint64_t tail(const char *s, size_t n)

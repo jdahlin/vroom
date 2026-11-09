@@ -6,7 +6,7 @@ VPRIV uint64_t *rslot(pp *p, uint32_t id)
 	uint64_t **pg = &p->rst[id >> MPAGE_BITS];
 
 	if (unlikely(!*pg)) {
-		*pg = alloc(&p->perm, MPAGE * sizeof(uint64_t));
+		*pg = varena_alloc(&p->perm, MPAGE * sizeof(uint64_t));
 		memset(*pg, 0, MPAGE * sizeof(uint64_t));
 	}
 	return &(*pg)[id & (MPAGE - 1)];
@@ -52,7 +52,7 @@ VPRIV __attribute__((noinline)) void rec_ctr_read(pp *p, const ptok *t, uintptr_
 		HC_BAD(p);	/* such a name defined as a macro, or two runs: give up */
 		return;
 	}
-	d = alloc(&p->perm, t->len + 1);
+	d = varena_alloc(&p->perm, t->len + 1);
 	memcpy(d, t->s, t->len);	/* pasted: the spelling is clean */
 	p->rec.crd[p->rec.ncrd++] = (hcrd){ d, t->len, c->off, c->len, c->val };
 }

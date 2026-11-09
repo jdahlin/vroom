@@ -36,7 +36,7 @@ VPRIV bool replay_seg(pp *p, ctx *c)
 /* __COUNTER__ digits in the spelling of own token k: this TU's values */
 static __attribute__((noinline)) void ctr_spell(pp *p, const hent *e, uint32_t *ci, uint32_t k, unsigned cbase, ptok *t)
 {
-	char *b = alloc(&p->perm, t->len + 24 * 4 + 32), *w = b;
+	char *b = varena_alloc(&p->perm, t->len + 24 * 4 + 32), *w = b;
 	uint32_t at = 0;
 
 	while (*ci < e->nctr && e->ctr[*ci].off == k) {
@@ -552,7 +552,7 @@ static void publish_tok(pp *p, const hlev *L, size_t end, hent *e)
 
 	for (uint32_t i = L->s0; i < r->nseg; i++)
 		own -= r->seg[i].end - r->seg[i].start;
-	tk = alloc(&p->tmp, (own ? own : 1) * sizeof(htok));
+	tk = varena_alloc(&p->tmp, (own ? own : 1) * sizeof(htok));
 	for (uint32_t i = L->s0; i <= r->nseg; i++) {
 		size_t to = i < r->nseg ? r->seg[i].start : end;
 
@@ -581,7 +581,7 @@ static void publish_tok(pp *p, const hlev *L, size_t end, hent *e)
 			}
 			/* escape: the full token, its spelling stored */
 			if (nx == xcap) {
-				ptok *n2 = alloc(&p->tmp, (xcap = xcap ? 2 * xcap : 16) * sizeof(ptok));
+				ptok *n2 = varena_alloc(&p->tmp, (xcap = xcap ? 2 * xcap : 16) * sizeof(ptok));
 
 				if (nx)
 					memcpy(n2, xt, nx * sizeof(ptok));
@@ -686,10 +686,10 @@ static hent *publish(pp *p, const hlev *L, size_t end)
 		ndl += (t->flags & HT_O) != 0;
 	}
 	/* scratch in tmp: the stored form is the shared chunks */
-	rg = alloc(&p->tmp, (nrg ? nrg : 1) * sizeof(*rg));
-	ru = alloc(&p->tmp, (nru ? nru : 1) * sizeof(*ru));
-	rv = alloc(&p->tmp, (nrv ? nrv : 1) * sizeof(*rv));
-	dl = alloc(&p->tmp, (ndl ? ndl : 1) * sizeof(*dl));
+	rg = varena_alloc(&p->tmp, (nrg ? nrg : 1) * sizeof(*rg));
+	ru = varena_alloc(&p->tmp, (nru ? nru : 1) * sizeof(*ru));
+	rv = varena_alloc(&p->tmp, (nrv ? nrv : 1) * sizeof(*rv));
+	dl = varena_alloc(&p->tmp, (ndl ? ndl : 1) * sizeof(*dl));
 	nrg = nru = nrv = ndl = 0;
 	for (uint32_t i = L->t0; i < r->nt; i++) {
 		const htouch *t = &r->t[i];
@@ -770,7 +770,7 @@ static hent *publish(pp *p, const hlev *L, size_t end)
 
 		for (uint32_t i = L->s0; i < r->nseg; i++)
 			own -= r->seg[i].end - r->seg[i].start;
-		t = alloc(&p->tmp, own + 1);
+		t = varena_alloc(&p->tmp, own + 1);
 		for (uint32_t i = L->s0; i <= r->nseg; i++) {
 			size_t to = i < r->nseg ? r->seg[i].start : end;
 

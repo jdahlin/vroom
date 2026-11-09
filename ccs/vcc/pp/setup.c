@@ -72,13 +72,13 @@ pp *pp_open(const pp_opts *o)
 	p->perm.end = p->perm.base + (1ull << 30);
 	p->tmp.base = p->tmp.p = vmreg_get(&ppr[3], 1ull << 32, "pp.tmp");
 	p->tmp.end = p->tmp.base + (1ull << 32);
-	p->psig = alloc(&p->perm, ((size_t)o->ndirs + 1) * sizeof(uint32_t));
+	p->psig = varena_alloc(&p->perm, ((size_t)o->ndirs + 1) * sizeof(uint32_t));
 	if (!sig_of(o, &p->sig, p->psig))
 		p->sig = HNONE;
 	p->sv = vmreg_get(&ppr[4], SVMAX * sizeof(ptok), "pp.sv");
 	p->fe = vmreg_get(&ppr[5], (1u << 20) * sizeof(fent), "pp.fe");
-	p->once = alloc(&p->perm, 4096 * sizeof(*p->once));
-	p->pushed = alloc(&p->perm, 4096 * sizeof(*p->pushed));
+	p->once = varena_alloc(&p->perm, 4096 * sizeof(*p->once));
+	p->pushed = varena_alloc(&p->perm, 4096 * sizeof(*p->pushed));
 	p->lm = vmreg_get(&ppr[6], 65536 * sizeof(*p->lm), "pp.lm");
 	{
 		static pthread_once_t once = PTHREAD_ONCE_INIT;
@@ -91,7 +91,7 @@ pp *pp_open(const pp_opts *o)
 	{
 		/* the caller's string is unpadded; vlex_get hashes by words (ASan) */
 		size_t ml = strlen(o->main);
-		char *mp = alloc(&p->perm, ml + 16);
+		char *mp = varena_alloc(&p->perm, ml + 16);
 
 		memcpy(mp, o->main, ml);
 		memset(mp + ml, 0, 16);
@@ -125,7 +125,7 @@ pp *pp_open(const pp_opts *o)
 	src = salloc(n + 129);	/* interned identifiers point into it: immortal */
 	memcpy(src, o->predef, n);
 	memset(src + n, 0, 129);
-	tok = alloc(&p->perm, (n + 2) * sizeof(vtok));
+	tok = varena_alloc(&p->perm, (n + 2) * sizeof(vtok));
 	scratch = vmreg_get(&ppr[7], vlex_scratch_size(n) + 4096, "pp.lexscratch");
 	p->builtin.path = "<built-in>";
 	p->builtin.src = src;

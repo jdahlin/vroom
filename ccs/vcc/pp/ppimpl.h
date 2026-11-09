@@ -85,10 +85,6 @@ typedef struct pfile {
 
 /* ---------------- arenas ---------------- */
 
-typedef struct arena {
-	char *base, *p, *end;
-} arena;
-
 /* ---------------- macros ---------------- */
 
 enum { MK_OBJ, MK_FUNC, MK_BUILTIN };
@@ -413,7 +409,7 @@ struct pp {
 	const pp_opts *o;
 	ctx *cx;
 	int depth, nfile;
-	arena perm, tmp;
+	varena perm, tmp;
 	bool hold_tmp;		/* the consumer holds earlier tokens: tmp is not reset (pp_hold_tmp) */
 	ptok *sv;		/* scratch token stack */
 	size_t svn;
@@ -590,7 +586,6 @@ VPRIV hvec hc_vec(pp *p, const void *a, uint32_t n, uint32_t esz);
 VPRIV const void *hc_blob(pp *p, const void *s, size_t n);
 VPRIV const pfile *pfile_get(const vlex_file *f, bool *fresh);
 VPRIV uint32_t file_line(const vlex_file *f, const pfile *cfi, uint32_t off);
-static inline void *alloc(arena *a, size_t n);
 /* diag.c */
 VPRIV uint32_t loc_line(const pp *p, uint32_t loc);
 VPRIV const char *presumed_name(const pp *p, uint32_t fe, uint32_t loc, uint32_t *len);
@@ -707,19 +702,6 @@ static inline int utoa(char *b, unsigned long long v)
 	return n;
 }
 
-static inline void *alloc(arena *a, size_t n)
-{
-	char *r = a->p;
-
-	n = (n + 7) & ~(size_t)7;
-	if (unlikely((size_t)(a->end - r) < n)) {
-		fprintf(stderr, "vcc: preprocessor arena full\n");
-		abort();
-	}
-	a->p = r + n;
-	return r;
-}
-
 /* ---------------- macro table ---------------- */
 
 static inline uintptr_t mget(const pp *p, uint32_t id)
@@ -734,7 +716,7 @@ static inline uintptr_t *mslot(pp *p, uint32_t id)
 	uintptr_t **pg = &p->mdir[id >> MPAGE_BITS];
 
 	if (unlikely(!*pg)) {
-		*pg = alloc(&p->perm, MPAGE * sizeof(uintptr_t));
+		*pg = varena_alloc(&p->perm, MPAGE * sizeof(uintptr_t));
 		memset(*pg, 0, MPAGE * sizeof(uintptr_t));
 	}
 	return &(*pg)[id & (MPAGE - 1)];

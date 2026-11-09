@@ -63,7 +63,7 @@ VPRIV char *spell_to(char *dst, const ptok *t)
 VPRIV ptok *svtake(pp *p, size_t base, uint32_t *n)
 {
 	size_t k = p->svn - base;
-	ptok *r = alloc(&p->tmp, (k ? k : 1) * sizeof(ptok));
+	ptok *r = varena_alloc(&p->tmp, (k ? k : 1) * sizeof(ptok));
 
 	memcpy(r, p->sv + base, k * sizeof(ptok));
 	p->svn = base;
@@ -118,7 +118,7 @@ VPRIV void top_event(pp *p, const void *e, uint32_t base, unsigned ctr, uint8_t 
 	if (p->tev_full)
 		return;
 	if (!p->tev)
-		p->tev = alloc(&p->perm, 1024 * sizeof(pp_topev));
+		p->tev = varena_alloc(&p->perm, 1024 * sizeof(pp_topev));
 	if (p->ntev == 1024) {
 		p->tev_full = 1;
 		return;

@@ -3,7 +3,7 @@
 
 static char *pstrdup(pp *p, const char *s, size_t n)
 {
-	char *d = alloc(&p->perm, n + 1);
+	char *d = varena_alloc(&p->perm, n + 1);
 
 	memcpy(d, s, n);
 	d[n] = 0;
@@ -257,7 +257,7 @@ static void add_fent(pp *p, ctx *c, const vlex_file *f, const char *name)
 	if (from && !strncmp(name, from, strlen(from))) {
 		const char *to = p->o->prefix_to ? p->o->prefix_to : "";
 		size_t fl = strlen(from), tl = strlen(to);
-		char *d = alloc(&p->perm, tl + nl - fl + 1);
+		char *d = varena_alloc(&p->perm, tl + nl - fl + 1);
 
 		memcpy(d, to, tl);
 		memcpy(d + tl, name + fl, nl - fl + 1);

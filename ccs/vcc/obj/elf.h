@@ -33,6 +33,8 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include "../lib/arena.h"
+
 /* ELF constants used by callers */
 enum {
 	SHT_PROGBITS = 1, SHT_SYMTAB = 2, SHT_STRTAB = 3, SHT_RELA = 4,
@@ -133,11 +135,10 @@ typedef struct {
 	ElfVal v;
 } ElfFix;
 
-typedef struct { uint8_t *base; size_t used, cap; } ElfRegion;
 
 typedef struct ElfObj {
-	ElfRegion arena;	/* chunks, names, hash tables */
-	ElfRegion secs, frags, syms, fixes, regs;
+	vregion arena;	/* chunks, names, hash tables */
+	vregion secs, frags, syms, fixes, regs;
 	uint32_t nsec, nfrag, nsym, nfix, nreg;
 	uint32_t *htab; uint32_t hmask, hcount;	/* name -> symbol */
 	void *fin;		/* elf_finish() results for elf_emit() */

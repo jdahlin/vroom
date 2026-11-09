@@ -22,6 +22,7 @@
  * (null, FILE, SECTION, $d/$x mapping symbols) are not printed.
  */
 #include "ld.h"
+#include "../lib/hash.h"
 #include "ldelf.h"
 
 #include <errno.h>
@@ -130,22 +131,6 @@ typedef struct {
 	uint64_t size;
 } StrTab;
 
-static uint32_t fnv(const char *s, uint32_t n)
-{
-	/* 8 bytes at a time, multiply-xorshift mixing */
-	uint64_t h = 0x9e3779b97f4a7c15ull ^ n;
-	uint32_t i = 0;
-	for (; i + 8 <= n; i += 8) {
-		uint64_t w;
-		memcpy(&w, s + i, 8);
-		h = (h ^ w) * 0xff51afd7ed558ccdull;
-		h ^= h >> 29;
-	}
-	uint64_t w = 0;
-	memcpy(&w, s + i, n - i);
-	h = (h ^ w) * 0xc4ceb9fe1a85ec53ull;
-	return (uint32_t)(h ^ h >> 32);
-}
 static void st_grow(StrTab *t)
 {
 	uint32_t nm = t->tab ? (t->tmask + 1) * 2 : 1024;
@@ -176,7 +161,7 @@ static void st_reserve(StrTab *t, uint32_t n)
 }
 static uint32_t st_add(StrTab *t, const char *s)
 {
-	uint32_t len = strlen(s), h = fnv(s, len);
+	uint32_t len = strlen(s), h = vhash_strtab(s, len);
 	if (!t->tab || (t->n + 1) * 2 > t->tmask)
 		st_grow(t);
 	uint32_t j = h & t->tmask;
@@ -196,7 +181,7 @@ static uint32_t st_add(StrTab *t, const char *s)
 }
 static uint64_t st_find(const StrTab *t, const char *s)
 {
-	uint32_t len = strlen(s), h = fnv(s, len);
+	uint32_t len = strlen(s), h = vhash_strtab(s, len);
 	if (!len)
 		return 0;
 	uint32_t j = h & t->tmask;

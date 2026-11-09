@@ -69,6 +69,7 @@
 #include "../arch/a64/a64.h"
 #include "../driver/ppdriver.h"
 #include "../lib/arena.h"
+#include "../lib/tbuf.h"
 
 /* functions one file defines and another calls: static when the directory is
    compiled as one TU (VCC_UNITY, the default build), so they stay internal */
@@ -156,11 +157,6 @@ enum { RK_SYM = 0, RK_STR = 1, RK_LBL = 2, RK_NAME = 3 };
 #define RIDX(r) ((r) & 0x0fffffffu)
 
 /* ---------------- byte buffers ---------------- */
-
-typedef struct tbuf {
-	char *p;
-	size_t n, cap;
-} tbuf;
 
 /* ---------------- emitter state ---------------- */
 
@@ -543,19 +539,6 @@ static inline bool is_wide(cc *c, qty t);
 VPRIV i128 em_trunc_to(cc *c, i128 v, qty t);
 /* insn.c */
 extern const char cond_name[][8];
-VPRIV void tb_init(tbuf *b, size_t cap);
-VPRIV void tb_reg(tbuf *b, vmreg *r, size_t cap, const char *name);
-static inline void tb_need(tbuf *b, size_t n);
-static inline void tb_put(tbuf *b, const char *s, size_t n);
-static inline void tb_c(tbuf *b, char ch);
-static inline void tb_s(tbuf *b, const char *s);
-VPRIV void tb_u_slow(tbuf *b, uint64_t v);
-static inline void tb_u(tbuf *b, uint64_t v);
-static inline void tb_x(tbuf *b, uint32_t v);
-static inline void tb_n8(tbuf *b, const char s[8]);
-VPRIV void tb_i(tbuf *b, int64_t v);
-VPRIV void tb_hex(tbuf *b, uint64_t v);
-VPRIV void tb_f(tbuf *b, const char *fmt, ...);
 VPRIV bool logimm_ok(uint64_t v, int x);
 static inline void reg(tbuf *b, int r, int x);
 /* tu.c */
@@ -789,68 +772,6 @@ static inline bool is_signed(cc *c, qty t) { return cc_is_signed(c, t); }
 /* long double: binary128, kept as its bits in a register pair (arithmetic: the __*tf* helpers) */
 static inline bool is_ld(cc *c, qty t) { return is_flt(c, t) && tsize(c, t) == 16; }
 static inline bool is_wide(cc *c, qty t) { return (is_integer(c, t) || is_flt(c, t)) && tsize(c, t) == 16; }
-
-static inline void tb_need(tbuf *b, size_t n)
-{
-	if (unlikely(b->n + n > b->cap)) {
-		fputs("vcc: emitter buffer overflow\n", stderr);
-		abort();
-	}
-}
-
-static inline void tb_put(tbuf *b, const char *s, size_t n)
-{
-	tb_need(b, n);
-	memcpy(b->p + b->n, s, n);
-	b->n += n;
-}
-
-static inline void tb_c(tbuf *b, char ch)
-{
-	tb_need(b, 1);
-	b->p[b->n++] = ch;
-}
-
-static inline void tb_s(tbuf *b, const char *s) { tb_put(b, s, strlen(s)); }
-
-static inline void tb_u(tbuf *b, uint64_t v)
-{
-	if (likely(v < 10)) {
-		tb_c(b, (char)('0' + v));
-	} else if (v < 100) {
-		tb_need(b, 2);
-		b->p[b->n] = (char)('0' + v / 10);
-		b->p[b->n + 1] = (char)('0' + v % 10);
-		b->n += 2;
-	} else {
-		tb_u_slow(b, v);
-	}
-}
-
-/* lower-case hex digits, no prefix: label numbers */
-static inline void tb_x(tbuf *b, uint32_t v)
-{
-	int n = v ? (35 - __builtin_clz(v)) >> 2 : 1;
-	char *p;
-
-	tb_need(b, 8);
-	p = b->p + b->n;
-	for (int i = n - 1; i >= 0; i--, v >>= 4)
-		p[i] = "0123456789abcdef"[v & 15];
-	b->n += (size_t)n;
-}
-
-/* a name from a char[8] table: one 8-byte copy, the length from the first zero byte */
-static inline void tb_n8(tbuf *b, const char s[8])
-{
-	uint64_t w, z;
-
-	memcpy(&w, s, 8);
-	tb_need(b, 8);
-	memcpy(b->p + b->n, &w, 8);
-	z = (w - 0x0101010101010101ull) & ~w & 0x8080808080808080ull;
-	b->n += z ? (size_t)(__builtin_ctzll(z) >> 3) : 8;
-}
 
 /* ---------------- register names ---------------- */
 

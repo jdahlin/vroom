@@ -16,33 +16,9 @@
 #include <unistd.h>
 
 #include "rsh.h"
+#include "../lib/buf.h"
 
 /* ---------------- growable buffers ---------------- */
-
-struct sbuf {
-	char *p;
-	size_t n, cap;
-};
-
-static bool sb_put(struct sbuf *b, const char *s, size_t n)
-{
-	if (b->n + n + 1 > b->cap) {
-		size_t cap = b->cap ? b->cap : 256;
-		char *p;
-
-		while (b->n + n + 1 > cap)
-			cap *= 2;
-		p = realloc(b->p, cap);
-		if (!p)
-			return false;
-		b->p = p;
-		b->cap = cap;
-	}
-	memcpy(b->p + b->n, s, n);
-	b->n += n;
-	b->p[b->n] = 0;
-	return true;
-}
 
 /* ---------------- tokens ---------------- */
 
@@ -88,7 +64,7 @@ static bool bail_char(char c)
 
 static bool tokenize(const char *s, struct toks *v)
 {
-	struct sbuf w = { 0 };
+	vzbuf w = { 0 };
 
 	for (;;) {
 		bool quoted, assign, in_word;
@@ -111,7 +87,7 @@ static bool tokenize(const char *s, struct toks *v)
 		}
 		/* a word: unquoted, '...' and "..." parts up to a blank or operator */
 		w.n = 0;
-		if (!sb_put(&w, "", 0))
+		if (!vzbuf_put(&w, "", 0))
 			return false;
 		quoted = false;
 		name_end = 0;
@@ -123,7 +99,7 @@ static bool tokenize(const char *s, struct toks *v)
 			if (c == '\'') {
 				const char *e = strchr(s + 1, '\'');
 
-				if (!e || !sb_put(&w, s + 1, e - s - 1))
+				if (!e || !vzbuf_put(&w, s + 1, e - s - 1))
 					goto fail;
 				quoted = true;
 				s = e + 1;
@@ -135,13 +111,13 @@ static bool tokenize(const char *s, struct toks *v)
 						goto fail;
 					e++;
 				}
-				if (!*e || !sb_put(&w, s + 1, e - s - 1))
+				if (!*e || !vzbuf_put(&w, s + 1, e - s - 1))
 					goto fail;
 				quoted = true;
 				s = e + 1;
 			} else if (c == '\\') {
 				/* \X is X ('\'' in kbuild's saved commands); \newline continues a line */
-				if (!s[1] || s[1] == '\n' || !sb_put(&w, s + 1, 1))
+				if (!s[1] || s[1] == '\n' || !vzbuf_put(&w, s + 1, 1))
 					goto fail;
 				quoted = true;
 				s += 2;
@@ -159,7 +135,7 @@ static bool tokenize(const char *s, struct toks *v)
 					else if (name_end == w.n && name_char(c, w.n == 0))
 						name_end++;
 				}
-				if (!sb_put(&w, s, 1))
+				if (!vzbuf_put(&w, s, 1))
 					goto fail;
 				s++;
 			}
@@ -215,7 +191,7 @@ static struct cmd *sc_add(struct script *sc)
 }
 
 /* NULL-terminated copy of n token words (the strings stay owned by the tokens) */
-static char **wordv(struct tok *t, int n, struct sbuf *extra)
+static char **wordv(struct tok *t, int n, vzbuf *extra)
 {
 	int nx = 0, i;
 	char **v, *p;
@@ -251,12 +227,12 @@ static char **wordv(struct tok *t, int n, struct sbuf *extra)
 }
 
 /* POSIX printf with %s and %% and \n \t \\: the format is reused while arguments remain */
-static bool do_printf(struct tok *a, int n, struct sbuf *out)
+static bool do_printf(struct tok *a, int n, vzbuf *out)
 {
 	const char *fmt = a[0].s;
 	int ai = 1;
 
-	if (!sb_put(out, "", 0))
+	if (!vzbuf_put(out, "", 0))
 		return false;
 	do {
 		bool used = false;
@@ -266,24 +242,24 @@ static bool do_printf(struct tok *a, int n, struct sbuf *out)
 			if (*f == '\\') {
 				char c = f[1] == 'n' ? '\n' : f[1] == 't' ? '\t' : f[1] == '\\' ? '\\' : 0;
 
-				if (!c || !sb_put(out, &c, 1))
+				if (!c || !vzbuf_put(out, &c, 1))
 					return false;
 				f++;
 			} else if (*f == '%') {
 				if (f[1] == '%') {
-					if (!sb_put(out, "%", 1))
+					if (!vzbuf_put(out, "%", 1))
 						return false;
 				} else if (f[1] == 's') {
 					const char *s = ai < n ? a[ai++].s : "";
 
 					used = true;
-					if (!sb_put(out, s, strlen(s)))
+					if (!vzbuf_put(out, s, strlen(s)))
 						return false;
 				} else {
 					return false;
 				}
 				f++;
-			} else if (!sb_put(out, f, 1)) {
+			} else if (!vzbuf_put(out, f, 1)) {
 				return false;
 			}
 		}
@@ -298,7 +274,7 @@ static bool do_printf(struct tok *a, int n, struct sbuf *out)
  * one > FILE.  pipe_in: printf's output for the xargs side of a pipe.
  */
 static bool parse_simple(struct tok *t, int n, struct script *sc, const struct rsh_ops *ops,
-			 struct sbuf *pipe_in, struct sbuf *pipe_out)
+			 vzbuf *pipe_in, vzbuf *pipe_out)
 {
 	struct tok w[n > 0 ? n : 1];
 	const char *redir = NULL, *name;
@@ -356,19 +332,19 @@ static bool parse_simple(struct tok *t, int n, struct script *sc, const struct r
 			return false;	/* : > file creates it */
 		c->kind = C_NOP;
 	} else if (!strcmp(name, "echo")) {
-		struct sbuf b = { 0 };
+		vzbuf b = { 0 };
 
-		if (!sb_put(&b, "", 0))
+		if (!vzbuf_put(&b, "", 0))
 			return false;
 		for (i = 1; i < nw; i++) {
 			/* dash's echo takes -n and expands backslashes */
 			if ((i == 1 && w[i].s[0] == '-') || strchr(w[i].s, '\\') ||
-			    (i > 1 && !sb_put(&b, " ", 1)) || !sb_put(&b, w[i].s, strlen(w[i].s))) {
+			    (i > 1 && !vzbuf_put(&b, " ", 1)) || !vzbuf_put(&b, w[i].s, strlen(w[i].s))) {
 				free(b.p);
 				return false;
 			}
 		}
-		if (!sb_put(&b, "\n", 1)) {
+		if (!vzbuf_put(&b, "\n", 1)) {
 			free(b.p);
 			return false;
 		}
@@ -377,7 +353,7 @@ static bool parse_simple(struct tok *t, int n, struct script *sc, const struct r
 		c->textlen = b.n;
 		c->redir = redir;
 	} else if (!strcmp(name, "printf")) {
-		struct sbuf b = { 0 };
+		vzbuf b = { 0 };
 
 		if (nw < 2 || !do_printf(w + 1, nw - 1, &b)) {
 			free(b.p);
@@ -450,7 +426,7 @@ static bool parse(struct toks *v, struct script *sc, const struct rsh_ops *ops)
 		if (i == a)
 			return false;	/* empty command: a syntax error for sh */
 		if (p >= 0) {
-			struct sbuf out = { 0 };
+			vzbuf out = { 0 };
 			bool ok = parse_simple(v->t + a, p - a, sc, ops, NULL, &out) &&
 				  parse_simple(v->t + p + 1, i - p - 1, sc, ops, &out, NULL);
 

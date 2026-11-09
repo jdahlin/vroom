@@ -1,16 +1,7 @@
 /* vcc code generator: emitter state, the work queue and threads, emit_tu */
 #include "emitimpl.h"
 
-VPRIV void *reserve(size_t n)
-{
-	void *p = mmap(NULL, n, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANON | MAP_NORESERVE, -1, 0);
-
-	if (p == MAP_FAILED) {
-		perror("vcc: mmap");
-		abort();
-	}
-	return p;
-}
+VPRIV void *reserve(size_t n) { return vreserve(n, MAP_NORESERVE, "vcc: mmap"); }
 
 VPRIV double now(void)
 {

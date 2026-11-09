@@ -55,7 +55,7 @@ static bool collect_(pp *p, const pmacro *m, const ptok *name, margs *a, ptok *r
 	a->elided = false;
 	/* pre, then st, ln, preln, then prest: one allocation */
 	{
-		char *b = alloc(&p->tmp, slots * (sizeof(*a->pre) + 3 * sizeof(uint32_t) + 1));
+		char *b = varena_alloc(&p->tmp, slots * (sizeof(*a->pre) + 3 * sizeof(uint32_t) + 1));
 
 		a->pre = (const ptok **)b;
 		a->st = (uint32_t *)(b + slots * sizeof(*a->pre));
@@ -334,7 +334,7 @@ static void stringify(pp *p, const ptok *t, uint32_t n, ptok *out)
 	uint16_t runs[64];
 	uint32_t roff[64], nr = 0;
 
-	b = w = alloc(&p->tmp, cap + 16);
+	b = w = varena_alloc(&p->tmp, cap + 16);
 	*w++ = '"';
 	for (uint32_t i = 0; i < n; i++) {
 		uint16_t rc = unlikely(t[i].ctr) && p->rec.on ? t[i].ctr : 0;
@@ -488,7 +488,7 @@ static bool paste_ok(const ptok *l, const ptok *r)
 
 static ptok paste(pp *p, const ptok *l, const ptok *r)
 {
-	char *b = alloc(&p->tmp, l->len + r->len + 24), *w;
+	char *b = varena_alloc(&p->tmp, l->len + r->len + 24), *w;
 	ptok t = *l;
 	int k;
 	uint32_t ll;
@@ -743,7 +743,7 @@ static void subst_simple(pp *p, const pmacro *m, margs *a, uint8_t nf, uint32_t 
 		p->pend |= nf;
 		return;
 	}
-	r = w = alloc(&p->tmp, n * sizeof(ptok));
+	r = w = varena_alloc(&p->tmp, n * sizeof(ptok));
 	for (uint32_t i = 0; i < nb; i++) {
 		const vtok *cur = &body[i];
 		uint32_t k = pidx ? pidx[i] : 0;

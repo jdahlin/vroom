@@ -25,27 +25,9 @@
 #include "../lib/intern.h"
 #include "../lex/lex.h"
 #include "fixdep.h"
+#include "../lib/buf.h"
 
 /* ---------------- output buffer ---------------- */
-
-typedef struct obuf {
-	char *p;
-	size_t n, cap;
-} obuf;
-
-static void oput(obuf *b, const char *s, size_t n)
-{
-	if (b->n + n > b->cap) {
-		b->cap = (b->n + n) * 2 + 4096;
-		b->p = realloc(b->p, b->cap);
-		if (!b->p)
-			abort();
-	}
-	memcpy(b->p + b->n, s, n);
-	b->n += n;
-}
-
-static void ostr(obuf *b, const char *s) { oput(b, s, strlen(s)); }
 
 /* ---------------- fixdep's hash sets (per job) ---------------- */
 
@@ -111,7 +93,7 @@ static int str_ends_with(const char *s, size_t slen, const char *sub)
 static char *scan_configs(const char *text)
 {
 	item *seen[HASHSZ] = { 0 };
-	obuf b = { 0 };
+	vbuf b = { 0 };
 	const char *p = text, *q, *r;
 
 	while ((p = strstr(p, "CONFIG_"))) {
@@ -125,12 +107,12 @@ static char *scan_configs(const char *text)
 			q++;
 		r = str_ends_with(p, (size_t)(q - p), "_MODULE") ? q - 7 : q;
 		if (r > p && !in_hashtable(p, (unsigned int)(r - p), seen)) {
-			oput(&b, p, (size_t)(r - p));
-			oput(&b, "\n", 1);
+			vbuf_put(&b, p, (size_t)(r - p));
+			vbuf_put(&b, "\n", 1);
 		}
 		p = q;
 	}
-	oput(&b, "", 1);
+	vbuf_put(&b, "", 1);
 	free_tab(seen);
 	return b.p;
 }
@@ -208,7 +190,7 @@ static int is_no_parse_file(const char *s, size_t len)
 
 typedef struct job {
 	const char *cwd;
-	obuf *o;
+	vbuf *o;
 	item **configs;
 	char err[512];
 } job;
@@ -232,9 +214,9 @@ static int use_file(job *j, const char *path)
 		const char *e = strchr(names, '\n');
 
 		if (!in_hashtable(names, (unsigned int)(e - names), j->configs)) {
-			ostr(j->o, "    $(wildcard include/config/");
-			oput(j->o, names, (size_t)(e - names));
-			ostr(j->o, ") \\\n");
+			vbuf_s(j->o, "    $(wildcard include/config/");
+			vbuf_put(j->o, names, (size_t)(e - names));
+			vbuf_s(j->o, ") \\\n");
 		}
 		names = e + 1;
 	}
@@ -303,20 +285,20 @@ static int parse_dep_file(job *j, char *p, const char *target)
 		if (is_source) {
 			if (!saw_any_target) {
 				saw_any_target = true;
-				ostr(j->o, "source_");
-				ostr(j->o, target);
-				ostr(j->o, " := ");
-				ostr(j->o, p);
-				ostr(j->o, "\n\n");
-				ostr(j->o, "deps_");
-				ostr(j->o, target);
-				ostr(j->o, " := \\\n");
+				vbuf_s(j->o, "source_");
+				vbuf_s(j->o, target);
+				vbuf_s(j->o, " := ");
+				vbuf_s(j->o, p);
+				vbuf_s(j->o, "\n\n");
+				vbuf_s(j->o, "deps_");
+				vbuf_s(j->o, target);
+				vbuf_s(j->o, " := \\\n");
 				need_parse = true;
 			}
 		} else if (!is_ignored_file(p, (size_t)(q - p)) && !in_hashtable(p, (unsigned int)(q - p), files)) {
-			ostr(j->o, "  ");
-			ostr(j->o, p);
-			ostr(j->o, " \\\n");
+			vbuf_s(j->o, "  ");
+			vbuf_s(j->o, p);
+			vbuf_s(j->o, " \\\n");
 			need_parse = true;
 		}
 		if (need_parse && !is_no_parse_file(p, (size_t)(q - p)))
@@ -332,13 +314,13 @@ static int parse_dep_file(job *j, char *p, const char *target)
 		snprintf(j->err, sizeof(j->err), "fixdep: parse error; no targets found\n");
 		return -1;
 	}
-	ostr(j->o, "\n");
-	ostr(j->o, target);
-	ostr(j->o, ": $(deps_");
-	ostr(j->o, target);
-	ostr(j->o, ")\n\n$(deps_");
-	ostr(j->o, target);
-	ostr(j->o, "):\n");
+	vbuf_s(j->o, "\n");
+	vbuf_s(j->o, target);
+	vbuf_s(j->o, ": $(deps_");
+	vbuf_s(j->o, target);
+	vbuf_s(j->o, ")\n\n$(deps_");
+	vbuf_s(j->o, target);
+	vbuf_s(j->o, "):\n");
 	return 0;
 }
 
@@ -376,7 +358,7 @@ int vfixdep(const char *cwd, const char *depfile, const char *target, const char
 {
 	char dabs[4096], oabs[4096];
 	item *configs[HASHSZ] = { 0 };
-	obuf o = { 0 };
+	vbuf o = { 0 };
 	job j = { .cwd = cwd, .o = &o, .configs = configs };
 
 	vintern_init();	/* the token cache interns; vsh may run fixdep before any compile */
@@ -387,11 +369,11 @@ int vfixdep(const char *cwd, const char *depfile, const char *target, const char
 		dprintf(errfd, "fixdep: error opening file: %s: %s\n", depfile, strerror(errno));
 		return 2;
 	}
-	ostr(&o, "savedcmd_");
-	ostr(&o, target);
-	ostr(&o, " := ");
-	ostr(&o, cmdline);
-	ostr(&o, "\n\n");
+	vbuf_s(&o, "savedcmd_");
+	vbuf_s(&o, target);
+	vbuf_s(&o, " := ");
+	vbuf_s(&o, cmdline);
+	vbuf_s(&o, "\n\n");
 	rc = parse_dep_file(&j, d, target);
 	free(d);
 	free_tab(configs);

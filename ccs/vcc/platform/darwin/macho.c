@@ -73,7 +73,7 @@ typedef struct {
 static void *zalloc(ElfObj *o, size_t n)
 {
 	/* the object's arena: freed with the object */
-	ElfRegion *r = &o->arena;
+	vregion *r = &o->arena;
 	size_t at = (r->used + 15) & ~(size_t)15;
 	if (at + n > r->cap) { elf_error(o, "out of memory"); return NULL; }
 	r->used = at + n;

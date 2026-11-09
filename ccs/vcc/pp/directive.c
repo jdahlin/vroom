@@ -126,7 +126,7 @@ VPRIV const char *parse_define(const vtok *vt, uint32_t b, uint32_t e, pmacro *m
 	return NULL;
 }
 
-VPRIV void *mem_perm(void *a, size_t n) { return alloc(a, n); }
+VPRIV void *mem_perm(void *a, size_t n) { return varena_alloc(a, n); }
 VPRIV void *mem_shared(void *a, size_t n) { (void)a; return salloc(n); }
 
 /* the macro name in ("NAME") of push_macro/pop_macro, or 0 */
@@ -259,7 +259,7 @@ static void line_directive(pp *p, ctx *c, uint32_t b, uint32_t e, bool expand_li
 		size_t l;
 		const char *s = pp_spell(&f, tmp, &l);
 
-		w = alloc(&p->perm, l + 1);
+		w = varena_alloc(&p->perm, l + 1);
 		m->name = w;
 		for (size_t i = 1; i + 1 < l; i++) {
 			if (s[i] == '\\' && i + 2 < l)

@@ -23,9 +23,12 @@ assembler, linker, behind `vcc`/`vas`/`vld` shims and the `vccd` server.
   generic code is in the component directories, code for one target CPU in
   `arch/<cpu>/<component>/`, code for one target OS in `platform/<os>/`
   (target, not host: host SIMD and host-OS `#ifdef`s stay with their code).
-  - `lib/`: shared data structures and helpers: arenas (`arena.h`), interning
-    (`intern.c`), hashes (`ldhash.c`), binary128 (`f128.h`), thread counters
-    (`vperf.h`).
+  - `lib/`: shared data structures and helpers, header-only unless noted:
+    reservations, regions and arenas (`arena.h`), byte buffers (`buf.h`),
+    the emitter's text buffer (`tbuf.h`), growable arrays (`vec.h`), string
+    hashes (`hash.h`; XXH3/BLAKE3 in `ldhash.c`), file mapping (`mapfile.h`),
+    interning (`intern.c`), binary128 (`f128.h`), thread counters
+    (`vperf.h`).  Variants not yet merged are listed in TODO.md.
   - `lex/`: SIMD lexer and token cache; `lextest.c` drives it.
   - `pp/`: preprocessor (pull model, clang-exact expansion), its generated
     tables (`ppdata*.inc` via `gen-ppdata.sh`) and the include-directory cache.

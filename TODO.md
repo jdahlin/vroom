@@ -746,3 +746,16 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
 - [ ] **PostgreSQL completeness**: TAP tests (`-Dtap_tests=enabled`) not
   run; links still by ld64.  *Validate:* `bench/pg/build.sh` with TAP,
   same pass set as clang.
+- [ ] **One set of data structures in `lib/`** (restructure 2026-11-09).
+  Merged so far: `vreserve` (4 copies), `vregion` (as + object writer),
+  `vbuf` (pp diagnostics + fixdep).  Still side by side in `lib/`: the
+  buffers `vbuf`/`vsbuf`/`vzbuf`/`vfixbuf`/`vfdbuf` (they differ in OOM
+  behaviour: abort, sticky flag, bool) and `tbuf.h`; the arenas `vregion`
+  (offsets) and `varena` (pointers); the hashes `vhash_obj`/`vhash_strtab`.
+  Still in their component, tied to its state: ppdriver's `buf` (first
+  16 MB from a per-job vmreg), cc's `vec` (inline storage, frozen into
+  `c->lists`), ld's block arena (process-wide list, generations), as's
+  `.req` hash, objcopy's StrTab and the object writer's symbol table.  One
+  OOM policy for code inside vccd (fail the request, never abort) decides
+  the buffer.  *Validate:* outputs byte-identical (objects, `-S`, `-E`),
+  `bench/vbench.py gate`.

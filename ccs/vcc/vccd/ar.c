@@ -44,40 +44,10 @@
 #include <unistd.h>
 
 #include "ar.h"
+#include "../lib/buf.h"
+#include "../lib/mapfile.h"
 
 /* ---------------- growable buffer ---------------- */
-
-typedef struct sbuf {
-	char *p;
-	size_t n, cap;
-	bool oom;
-} sbuf;
-
-static void sb_put(sbuf *b, const void *s, size_t n)
-{
-	if (b->oom)
-		return;
-	if (b->n + n > b->cap) {
-		size_t cap = b->cap ? b->cap : 4096;
-		char *p;
-
-		while (cap < b->n + n)
-			cap *= 2;
-		if (!(p = realloc(b->p, cap))) {
-			b->oom = true;
-			return;
-		}
-		b->p = p;
-		b->cap = cap;
-	}
-	memcpy(b->p + b->n, s, n);
-	b->n += n;
-}
-
-static void sb_str(sbuf *b, const char *s)
-{
-	sb_put(b, s, strlen(s));
-}
 
 /* ---------------- request state ---------------- */
 
@@ -223,42 +193,6 @@ static char *relto(const char *dir, const char *abs)
 
 /* ---------------- reading ---------------- */
 
-typedef struct mapped {
-	const unsigned char *p;
-	size_t n;
-} mapped;
-
-static bool map_file(const char *abs, mapped *m, struct stat *st)
-{
-	int fd = open(abs, O_RDONLY);
-	void *p;
-
-	m->p = NULL;
-	m->n = 0;
-	if (fd < 0 || fstat(fd, st)) {
-		if (fd >= 0)
-			close(fd);
-		return false;
-	}
-	if (st->st_size) {
-		p = mmap(NULL, st->st_size, PROT_READ, MAP_PRIVATE, fd, 0);
-		if (p == MAP_FAILED) {
-			close(fd);
-			return false;
-		}
-		m->p = p;
-		m->n = st->st_size;
-	}
-	close(fd);
-	return true;
-}
-
-static void unmap(mapped *m)
-{
-	if (m->p)
-		munmap((void *)m->p, m->n);
-}
-
 static uint64_t num(const unsigned char *s, size_t n, int base)
 {
 	char b[24];
@@ -271,11 +205,11 @@ static uint64_t num(const unsigned char *s, size_t n, int base)
 }
 
 /*
- * Append the members of the thin archive at abs (mapped as d) to l: names
+ * Append the members of the thin archive at abs (vmapped as d) to l: names
  * are made relative to q->dir, mode and size come from the headers.
  * shown is the path the user gave, for messages.
  */
-static bool read_thin(arq *q, const char *abs, const char *shown, const mapped *d, mlist *l)
+static bool read_thin(arq *q, const char *abs, const char *shown, const vmapped *d, mlist *l)
 {
 	char *adir = dirof(abs);
 	const unsigned char *names = NULL;
@@ -335,12 +269,12 @@ static bool add_file(arq *q, const char *path, mlist *l)
 {
 	char *abs = norm(q->cwd, path);
 	struct stat st;
-	mapped d;
+	vmapped d;
 	bool ok;
 
 	if (!abs)
 		return false;
-	if (!map_file(abs, &d, &st)) {
+	if (!vmap_file(abs, &d, &st)) {
 		err(q, "ar: error: %s: %s\n", path, strerror(errno));
 		free(abs);
 		return false;
@@ -361,7 +295,7 @@ static bool add_file(arq *q, const char *path, mlist *l)
 			free(abs);
 		}
 	}
-	unmap(&d);
+	vunmap_file(&d);
 	return ok;
 }
 
@@ -377,7 +311,7 @@ static uint64_t r64(const unsigned char *p) { return r32(p) | (uint64_t)r32(p + 
  * local, section or file symbols.  Other files have no symbols, and an
  * archive without any object file gets no symbol table (*is_obj).
  */
-static bool elf_syms(const mapped *d, sbuf *names, uint32_t *count, bool *is_obj)
+static bool elf_syms(const vmapped *d, vsbuf *names, uint32_t *count, bool *is_obj)
 {
 	const unsigned char *p = d->p;
 	uint64_t shoff, shnum, i;
@@ -428,7 +362,7 @@ static bool elf_syms(const mapped *d, sbuf *names, uint32_t *count, bool *is_obj
 			len = strnlen((const char *)str + nm, ssize - nm);
 			if (nm + len >= ssize)
 				return false;
-			sb_put(names, str + nm, len + 1);
+			vsbuf_put(names, str + nm, len + 1);
 			(*count)++;
 		}
 		return true;	/* one symbol table per object */
@@ -438,26 +372,26 @@ static bool elf_syms(const mapped *d, sbuf *names, uint32_t *count, bool *is_obj
 
 /* ---------------- writing ---------------- */
 
-static void header(sbuf *b, const char *name, const char *date, const char *uid, const char *gid,
+static void header(vsbuf *b, const char *name, const char *date, const char *uid, const char *gid,
 		   const char *mode, uint64_t size)
 {
 	char h[61];
 
 	snprintf(h, sizeof(h), "%-16s%-12s%-6s%-6s%-8s%-10llu`\n", name, date, uid, gid, mode,
 		 (unsigned long long)size);
-	sb_put(b, h, 60);
+	vsbuf_put(b, h, 60);
 }
 
-static void be32(sbuf *b, uint32_t v)
+static void be32(vsbuf *b, uint32_t v)
 {
 	unsigned char c[4] = { v >> 24, v >> 16, v >> 8, v };
 
-	sb_put(b, c, 4);
+	vsbuf_put(b, c, 4);
 }
 
 static bool write_archive(arq *q, const char *archive_abs, const char *shown, const mlist *l, bool symtab)
 {
-	sbuf out = { 0 }, names = { 0 }, syms = { 0 };
+	vsbuf out = { 0 }, names = { 0 }, syms = { 0 };
 	uint32_t *nsym = NULL, total = 0;
 	bool any_obj = false;
 	uint64_t pos, symsize = 0;
@@ -467,28 +401,28 @@ static bool write_archive(arq *q, const char *archive_abs, const char *shown, co
 	bool ok = false;
 
 	for (i = 0; i < l->n; i++) {
-		sb_str(&names, l->m[i].name);
-		sb_put(&names, "/\n", 2);
+		vsbuf_str(&names, l->m[i].name);
+		vsbuf_put(&names, "/\n", 2);
 	}
 	if (names.n & 1)
-		sb_put(&names, "\n", 1);
+		vsbuf_put(&names, "\n", 1);
 	if (symtab && l->n) {
 		if (!(nsym = calloc(l->n, sizeof(*nsym))))
 			goto out;
 		for (i = 0; i < l->n; i++) {
 			struct stat st;
-			mapped d;
+			vmapped d;
 
-			if (!map_file(l->m[i].abs, &d, &st)) {
+			if (!vmap_file(l->m[i].abs, &d, &st)) {
 				err(q, "ar: error: %s: %s\n", l->m[i].name, strerror(errno));
 				goto out;
 			}
 			if (!elf_syms(&d, &syms, &nsym[i], &any_obj)) {
-				unmap(&d);
+				vunmap_file(&d);
 				err(q, "ar: error: %s: %s\n", l->m[i].name, "malformed ELF symbol table");
 				goto out;
 			}
-			unmap(&d);
+			vunmap_file(&d);
 			total += nsym[i];
 		}
 		symtab = any_obj;
@@ -498,7 +432,7 @@ static bool write_archive(arq *q, const char *archive_abs, const char *shown, co
 			symsize = 8;	/* llvm-ar: count 0 and four zero bytes */
 	}
 
-	sb_put(&out, "!<thin>\n", 8);
+	vsbuf_put(&out, "!<thin>\n", 8);
 	if (l->n) {
 		pos = 8 + (symtab ? 60 + symsize : 0) + 60 + names.n;
 		if (symtab) {
@@ -507,11 +441,11 @@ static bool write_archive(arq *q, const char *archive_abs, const char *shown, co
 			for (i = 0; i < l->n; i++)
 				for (uint32_t k = 0; k < nsym[i]; k++)
 					be32(&out, (uint32_t)(pos + 60 * i));
-			sb_put(&out, syms.p, syms.n);
-			sb_put(&out, "\0\0\0\0", symsize - (4 + 4 * (uint64_t)total + syms.n));
+			vsbuf_put(&out, syms.p, syms.n);
+			vsbuf_put(&out, "\0\0\0\0", symsize - (4 + 4 * (uint64_t)total + syms.n));
 		}
 		header(&out, "//", "", "", "", "", names.n);
-		sb_put(&out, names.p, names.n);
+		vsbuf_put(&out, names.p, names.n);
 		for (i = 0, pos = 0; i < l->n; i++) {
 			char nm[24], mode[16];
 
@@ -577,7 +511,7 @@ int ar_run(const char *cwd, int argc, char **argv, int outfd, int errfd)
 	int nfiles = 0, i, rc = 1;
 	mlist old = { 0 }, res = { 0 }, moved = { 0 };
 	struct stat st;
-	mapped d = { 0 };
+	vmapped d = { 0 };
 	bool have_old = false;
 
 	if (!(files = calloc(argc, sizeof(*files))))
@@ -626,7 +560,7 @@ int ar_run(const char *cwd, int argc, char **argv, int outfd, int errfd)
 	if (!(archive_abs = norm(cwd, archive)) || !(q.dir = dirof(archive_abs)))
 		goto out;
 
-	if (map_file(archive_abs, &d, &st)) {
+	if (vmap_file(archive_abs, &d, &st)) {
 		have_old = true;
 		if (!read_thin(&q, archive_abs, archive, &d, &old))
 			goto out;
@@ -640,16 +574,16 @@ int ar_run(const char *cwd, int argc, char **argv, int outfd, int errfd)
 		/* the archive argument's directory, then the stored name */
 		const char *s = strrchr(archive, '/');
 		size_t dl = s ? (size_t)(s - archive) : 0;
-		sbuf b = { 0 };
+		vsbuf b = { 0 };
 
 		for (size_t k = 0; k < old.n; k++) {
 			if (s) {
-				sb_put(&b, archive, dl ? dl : 1);
+				vsbuf_put(&b, archive, dl ? dl : 1);
 				if (dl)
-					sb_put(&b, "/", 1);
+					vsbuf_put(&b, "/", 1);
 			}
-			sb_str(&b, old.m[k].name);
-			sb_put(&b, "\n", 1);
+			vsbuf_str(&b, old.m[k].name);
+			vsbuf_put(&b, "\n", 1);
 		}
 		rc = 0;
 		for (size_t off = 0; off < b.n;) {
@@ -757,7 +691,7 @@ out_lists:
 	ml_free(&moved);
 out:
 	if (have_old)
-		unmap(&d);
+		vunmap_file(&d);
 	ml_free(&old);
 	free(archive_abs);
 	free(q.dir);

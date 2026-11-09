@@ -29,6 +29,7 @@
  * No per-symbol malloc: everything comes from bump arenas.
  */
 #include "ld.h"
+#include "../lib/vec.h"
 #include "../lib/ldhash.h"
 #include "../lib/vperf.h"
 
@@ -210,18 +211,6 @@ static char *astrdup(const char *s)
 	return p;
 }
 
-/* growable array in the arena (amortized doubling) */
-#define VEC(T) struct { T *v; uint32_t n, cap; }
-#define VPUSH(a, x) do { \
-	if ((a).n == (a).cap) { \
-		uint32_t nc = (a).cap ? (a).cap * 2 : 8; \
-		void *nv = alloc(nc * sizeof(*(a).v)); \
-		if ((a).n) memcpy(nv, (a).v, (a).n * sizeof(*(a).v)); \
-		(a).v = nv; (a).cap = nc; \
-	} \
-	(a).v[(a).n++] = (x); \
-} while (0)
-
 /* ---------------- thread pool ---------------- */
 
 typedef void (*pfn)(void *arg, size_t i);
@@ -315,7 +304,7 @@ static struct {
 	bool stubs;			/* define unresolved symbols as -O0 stubs */
 	bool relax;
 	uint64_t max_page;
-	VEC(InputArg) inputs;
+	VVEC(InputArg) inputs;
 } opt;
 
 static int dirfd_base = AT_FDCWD;
@@ -343,7 +332,7 @@ typedef struct Obj {
 	bool mapped;
 } Obj;
 
-static VEC(Obj *) objs;
+static VVEC(Obj *) objs;
 
 enum { K_NONE, K_NORMAL, K_MERGE_IN, K_MERGE, K_THUNK, K_RELADYN, K_BUILDID,
        K_SYMTAB, K_STRTAB, K_SHSTRTAB, K_COMMENT };
@@ -367,7 +356,7 @@ typedef struct ISec {
 } ISec;
 
 #define OS_DISCARD 0xfffffffeu
-static VEC(ISec) isecs;
+static VVEC(ISec) isecs;
 
 /* SHF_MERGE input split into pieces */
 typedef struct {
@@ -378,19 +367,19 @@ typedef struct {
 	uint32_t *hash;			/* 31-bit hash */
 	uint32_t *outoff;		/* offset in the synthetic section */
 } MergeIn;
-static VEC(MergeIn) mergeins;
+static VVEC(MergeIn) mergeins;
 
 typedef struct {
 	uint32_t isec;			/* the synthetic ISec */
 	uint32_t osec;
 	uint64_t flags;
 	uint32_t entsize, align;
-	VEC(uint32_t) members;		/* MergeIn ids in order */
+	VVEC(uint32_t) members;		/* MergeIn ids in order */
 	uint64_t shardoff[32], shardsize[32];
 	/* piece lists per shard for writing: (mergein, piece) of unique pieces */
-	VEC(uint64_t) uniq[32];
+	VVEC(uint64_t) uniq[32];
 } Merge;
-static VEC(Merge) merges;
+static VVEC(Merge) merges;
 
 /* ---------------- global symbols ---------------- */
 
@@ -429,7 +418,7 @@ static const char **gnames;		/* per id */
 static G *gsyms;			/* per id */
 static _Atomic uint32_t ngsyms;
 static uint32_t hmask;
-static VEC(uint32_t) gorder;		/* ids in symbol table order */
+static VVEC(uint32_t) gorder;		/* ids in symbol table order */
 
 static inline uint32_t strhash(const char *s, size_t n) { return (uint32_t)ld_xxh3(s, n); }
 
@@ -554,13 +543,13 @@ typedef struct ISD {
 	Pat *pats;
 	uint32_t npats;
 	bool keep;
-	VEC(uint32_t) secs;		/* ISec ids, in final order */
+	VVEC(uint32_t) secs;		/* ISec ids, in final order */
 	uint32_t thunksec;		/* ISec of this ISD's thunk section, or NONE */
 	uint64_t thunk_off;		/* pass-0 isecLimit */
 	struct Call *calls;		/* CALL26/JUMP26 relocations, built by thunk pass 0 */
 	uint32_t ncalls;
 } ISD;
-static VEC(ISD) isds;
+static VVEC(ISD) isds;
 
 enum { C_ASSIGN, C_OSEC, C_ISD };
 typedef struct Assign {
@@ -580,7 +569,7 @@ typedef struct Cmd {
 typedef struct OSec {
 	const char *name;
 	Expr *addr, *alignx, *lma, *subalign;
-	VEC(Cmd) cmds;
+	VVEC(Cmd) cmds;
 	bool nonalloc, noload, discard, used_in_expr, has_input, live, type_set;
 	bool uses_syms;			/* expressionsUseSymbols */
 	uint32_t type, addralign, entsize;
@@ -590,14 +579,14 @@ typedef struct OSec {
 	int ptload;			/* index into phdrs, -1 */
 	uint32_t link, info;
 } OSec;
-static VEC(OSec) osecs;
-static VEC(Cmd) topcmds;
+static VVEC(OSec) osecs;
+static VVEC(Cmd) topcmds;
 static const char *entry_name;
 
 /* names referenced by expressions, in parse order (lld referencedSymbols) */
-static VEC(uint32_t) refsyms;
-typedef struct { uint32_t sym; VEC(uint32_t) refs; } Provide;
-static VEC(Provide) provides;
+static VVEC(uint32_t) refsyms;
+typedef struct { uint32_t sym; VVEC(uint32_t) refs; } Provide;
+static VVEC(Provide) provides;
 
 #define AETHER 0xfffffffdu
 
@@ -815,7 +804,7 @@ static EV dot_ev(void)
 	return v;
 }
 
-static VEC(const char *) assert_fail;	/* recorded failures of the current pass */
+static VVEC(const char *) assert_fail;	/* recorded failures of the current pass */
 
 static EV eval(Expr *e)
 {
@@ -845,7 +834,7 @@ static EV eval(Expr *e)
 	case E_TERN: return ev_value(eval(e->a)) ? eval(e->b) : eval(e->c);
 	case E_ASSERT:
 		if (!ev_value(eval(e->a)))
-			VPUSH(assert_fail, e->msg);
+			VVEC_PUSH(assert_fail, e->msg, alloc);
 		return evabs(dot);
 	case E_DEFINED: {
 		G *s = &gsyms[e->sym];
@@ -976,9 +965,9 @@ static Provide *cur_provide;
 static void note_ref(uint32_t g)
 {
 	if (cur_provide)
-		VPUSH(cur_provide->refs, g);
+		VVEC_PUSH(cur_provide->refs, g, alloc);
 	else
-		VPUSH(refsyms, g);
+		VVEC_PUSH(refsyms, g, alloc);
 }
 
 static int prec(const char *op)
@@ -1201,7 +1190,7 @@ static uint32_t get_osec(const char *name)
 				return i;
 	OSec o = {.name = name, .type = SHT_PROGBITS, .addralign = 1, .ptload = -1};
 	o.discard = !strcmp(name, "/DISCARD/");
-	VPUSH(osecs, o);
+	VVEC_PUSH(osecs, o, alloc);
 	return osecs.n - 1;
 }
 
@@ -1225,7 +1214,7 @@ static Assign *pprovide(bool hidden)
 	sexpect('(');
 	char *name = sname();
 	Assign *a;
-	VPUSH(provides, ((Provide){.sym = gintern(name)}));
+	VVEC_PUSH(provides, ((Provide){.sym = gintern(name)}), alloc);
 	cur_provide = &provides.v[provides.n - 1];
 	a = passign_rest(name);
 	cur_provide = NULL;
@@ -1260,25 +1249,25 @@ static void pinput(OSec *os, uint32_t osi, const char *filepat, bool keep)
 	if (strcmp(filepat, "*"))
 		error("linker script: file pattern '%s' not supported", filepat);
 	ISD d = {.osec = osi, .keep = keep, .thunksec = NONE};
-	VEC(Pat) pats = {0};
+	VVEC(Pat) pats = {0};
 	sexpect('(');
 	while (!satend() && !speek(')')) {
 		Pat p = {0};
-		VEC(const char *) g = {0};
+		VVEC(const char *) g = {0};
 		const char *save = sp;
 		char *w = spatname();
 		if ((!strcmp(w, "SORT") || !strcmp(w, "SORT_BY_NAME") || !strcmp(w, "SORT_BY_ALIGNMENT")) && speek('(')) {
 			p.sort = w[5] == 'B' && w[8] == 'A' ? SORT_ALIGN : SORT_NAME;
 			sexpect('(');
 			while (!satend() && !speek(')'))
-				VPUSH(g, spatname());
+				VVEC_PUSH(g, spatname(), alloc);
 			sexpect(')');
 		} else if (!strcmp(w, "EXCLUDE_FILE")) {
 			error("linker script: EXCLUDE_FILE not supported");
 			sp = save;
 			return;
 		} else {
-			VPUSH(g, w);
+			VVEC_PUSH(g, w, alloc);
 			/* consecutive plain globs belong to the same pattern */
 			for (;;) {
 				const char *s2 = sp;
@@ -1290,19 +1279,19 @@ static void pinput(OSec *os, uint32_t osi, const char *filepat, bool keep)
 					sp = s2;
 					break;
 				}
-				VPUSH(g, w2);
+				VVEC_PUSH(g, w2, alloc);
 			}
 		}
 		p.globs = g.v;
 		p.nglobs = g.n;
-		VPUSH(pats, p);
+		VVEC_PUSH(pats, p, alloc);
 	}
 	sexpect(')');
 	d.pats = pats.v;
 	d.npats = pats.n;
-	VPUSH(isds, d);
+	VVEC_PUSH(isds, d, alloc);
 	Cmd c = {.kind = C_ISD, .idx = isds.n - 1};
-	VPUSH(os->cmds, c);
+	VVEC_PUSH(os->cmds, c, alloc);
 }
 
 static void poutsec(const char *name)
@@ -1364,7 +1353,7 @@ static void poutsec(const char *name)
 		if (sword("ASSERT")) {
 			Assign *a = passert();
 			Cmd c = {.kind = C_ASSIGN, .as = a};
-			VPUSH(osecs.v[osi].cmds, c);
+			VVEC_PUSH(osecs.v[osi].cmds, c, alloc);
 			sconsume(';');
 			continue;
 		}
@@ -1375,7 +1364,7 @@ static void poutsec(const char *name)
 			if (a) {
 				a->provide = prov;
 				Cmd c = {.kind = C_ASSIGN, .as = a};
-				VPUSH(osecs.v[osi].cmds, c);
+				VVEC_PUSH(osecs.v[osi].cmds, c, alloc);
 			}
 			sexpect(';');
 			continue;
@@ -1385,7 +1374,7 @@ static void poutsec(const char *name)
 		Assign *a = passign_rest(w);
 		if (a) {
 			Cmd c = {.kind = C_ASSIGN, .as = a};
-			VPUSH(osecs.v[osi].cmds, c);
+			VVEC_PUSH(osecs.v[osi].cmds, c, alloc);
 			sexpect(';');
 			continue;
 		}
@@ -1418,7 +1407,7 @@ static void poutsec(const char *name)
 	if (refsyms.n > nref0)
 		osecs.v[osi].uses_syms = true;
 	Cmd c = {.kind = C_OSEC, .idx = osi};
-	VPUSH(topcmds, c);
+	VVEC_PUSH(topcmds, c, alloc);
 }
 
 static void psections(void)
@@ -1429,19 +1418,19 @@ static void psections(void)
 			continue;
 		if (sword("ASSERT")) {
 			Assign *a = passert();
-			VPUSH(topcmds, ((Cmd){.kind = C_ASSIGN, .as = a}));
+			VVEC_PUSH(topcmds, ((Cmd){.kind = C_ASSIGN, .as = a}), alloc);
 			sconsume(';');
 			continue;
 		}
 		if (sword("PROVIDE_HIDDEN") || sword("HIDDEN")) {
 			Assign *a = pprovide(true);
-			if (a) VPUSH(topcmds, ((Cmd){.kind = C_ASSIGN, .as = a}));
+			if (a) VVEC_PUSH(topcmds, ((Cmd){.kind = C_ASSIGN, .as = a}), alloc);
 			sexpect(';');
 			continue;
 		}
 		if (sword("PROVIDE")) {
 			Assign *a = pprovide(false);
-			if (a) VPUSH(topcmds, ((Cmd){.kind = C_ASSIGN, .as = a}));
+			if (a) VVEC_PUSH(topcmds, ((Cmd){.kind = C_ASSIGN, .as = a}), alloc);
 			sexpect(';');
 			continue;
 		}
@@ -1449,7 +1438,7 @@ static void psections(void)
 		char *w = sname();
 		Assign *a = passign_rest(w);
 		if (a) {
-			VPUSH(topcmds, ((Cmd){.kind = C_ASSIGN, .as = a}));
+			VVEC_PUSH(topcmds, ((Cmd){.kind = C_ASSIGN, .as = a}), alloc);
 			sexpect(';');
 			continue;
 		}
@@ -1487,19 +1476,19 @@ static void parse_script(const char *text, size_t len)
 		}
 		if (sword("ASSERT")) {
 			Assign *a = passert();
-			VPUSH(topcmds, ((Cmd){.kind = C_ASSIGN, .as = a}));
+			VVEC_PUSH(topcmds, ((Cmd){.kind = C_ASSIGN, .as = a}), alloc);
 			sconsume(';');
 			continue;
 		}
 		if (sword("PROVIDE_HIDDEN") || sword("HIDDEN")) {
 			Assign *a = pprovide(true);
-			if (a) VPUSH(topcmds, ((Cmd){.kind = C_ASSIGN, .as = a}));
+			if (a) VVEC_PUSH(topcmds, ((Cmd){.kind = C_ASSIGN, .as = a}), alloc);
 			sexpect(';');
 			continue;
 		}
 		if (sword("PROVIDE")) {
 			Assign *a = pprovide(false);
-			if (a) VPUSH(topcmds, ((Cmd){.kind = C_ASSIGN, .as = a}));
+			if (a) VVEC_PUSH(topcmds, ((Cmd){.kind = C_ASSIGN, .as = a}), alloc);
 			sexpect(';');
 			continue;
 		}
@@ -1507,7 +1496,7 @@ static void parse_script(const char *text, size_t len)
 		char *w = sname();
 		Assign *a = passign_rest(w);
 		if (a) {
-			VPUSH(topcmds, ((Cmd){.kind = C_ASSIGN, .as = a}));
+			VVEC_PUSH(topcmds, ((Cmd){.kind = C_ASSIGN, .as = a}), alloc);
 			sexpect(';');
 			continue;
 		}
@@ -1595,7 +1584,7 @@ static uint8_t *map_file(const char *path, size_t *size)
 }
 
 typedef struct { const char *path; const uint8_t *buf; size_t size; } Pending;
-static VEC(Pending) pending;
+static VVEC(Pending) pending;
 
 static void add_archive(const char *path, const uint8_t *b, size_t n)
 {
@@ -1648,11 +1637,11 @@ static void add_archive(const char *path, const uint8_t *b, size_t n)
 			char *full = alloc(strlen(dir) + strlen(name) + 1);
 			strcpy(full, name[0] == '/' ? "" : dir);
 			strcat(full, name);
-			VPUSH(pending, ((Pending){.path = full}));
+			VVEC_PUSH(pending, ((Pending){.path = full}), alloc);
 		} else {
 			char *full = alloc(strlen(path) + strlen(name) + 3);
 			sprintf(full, "%s(%s)", path, name);
-			VPUSH(pending, ((Pending){.path = full, .buf = b + off, .size = size}));
+			VVEC_PUSH(pending, ((Pending){.path = full, .buf = b + off, .size = size}), alloc);
 			off += size + (size & 1);
 		}
 	}
@@ -1996,10 +1985,10 @@ static inline void reloc_target_final(const Obj *o, uint32_t symidx, int64_t add
 
 static uint8_t *out;			/* output file image */
 static uint64_t filesize, shoff;
-static VEC(Phdr) phdrs;
+static VVEC(Phdr) phdrs;
 typedef struct { int first, last; bool lma_set; } PhdrSecs;
-static VEC(PhdrSecs) phsecs;		/* first/last osec of each phdr */
-static VEC(uint32_t) outsecs;		/* live output sections in header order */
+static VVEC(PhdrSecs) phsecs;		/* first/last osec of each phdr */
+static VVEC(uint32_t) outsecs;		/* live output sections in header order */
 static uint64_t ndyn;			/* RELATIVE relocations */
 static uint32_t reladyn_isec = NONE, buildid_isec = NONE, comment_isec = NONE;
 static uint32_t symtab_isec = NONE, strtab_isec = NONE, shstrtab_isec = NONE;
@@ -2009,7 +1998,7 @@ static uint32_t new_isec(const char *name, uint8_t kind, uint32_t type, uint64_t
 {
 	ISec is = {.name = name, .kind = kind, .type = type, .flags = flags, .align = align,
 		   .obj = NONE, .osec = NONE, .isd = NONE, .aux = NONE, .shndx = NONE};
-	VPUSH(isecs, is);
+	VVEC_PUSH(isecs, is, alloc);
 	return isecs.n - 1;
 }
 
@@ -2026,9 +2015,9 @@ typedef struct {
 	bool lng;			/* long form; sticky once chosen (lld) */
 	const char *name;
 } Thunk;
-static VEC(Thunk) thunks;
-typedef struct { VEC(uint32_t) list; } ThunkSec;
-static VEC(ThunkSec) thunksecs;
+static VVEC(Thunk) thunks;
+typedef struct { VVEC(uint32_t) list; } ThunkSec;
+static VVEC(ThunkSec) thunksecs;
 
 /* thunk redirection: (isec, reloc index) -> thunk; open hash */
 static uint64_t *tr_keys;
@@ -2160,7 +2149,7 @@ static int cmp_align_stable(const void *a, const void *b)
 	return (x > y) - (x < y);
 }
 
-static VEC(uint32_t) orphans;
+static VVEC(uint32_t) orphans;
 
 static void commit_section(OSec *os, ISec *is)
 {
@@ -2199,7 +2188,7 @@ static void assign_sections(void)
 		uint32_t d = match_isd(is->name);
 		if (d == NONE) {
 			if (is->kind != K_SYMTAB && is->kind != K_STRTAB && is->kind != K_SHSTRTAB)
-				VPUSH(orphans, i);
+				VVEC_PUSH(orphans, i, alloc);
 			continue;
 		}
 		ISD *isd = &isds.v[d];
@@ -2208,7 +2197,7 @@ static void assign_sections(void)
 			continue;
 		}
 		is->isd = d;
-		VPUSH(isd->secs, i);
+		VVEC_PUSH(isd->secs, i, alloc);
 	}
 	for (uint32_t i = 0; i < isds.n; i++) {
 		ISD *d = &isds.v[i];
@@ -2239,7 +2228,7 @@ static void assign_sections(void)
 				found = k;
 		if (found == NONE) {
 			found = get_osec(is->name);
-			VPUSH(topcmds, ((Cmd){.kind = C_OSEC, .idx = found}));
+			VVEC_PUSH(topcmds, ((Cmd){.kind = C_OSEC, .idx = found}), alloc);
 		}
 		OSec *os = &osecs.v[found];
 		uint32_t di = NONE;
@@ -2248,12 +2237,12 @@ static void assign_sections(void)
 				di = os->cmds.v[k].idx;
 		if (di == NONE) {
 			ISD d = {.osec = found, .thunksec = NONE};
-			VPUSH(isds, d);
+			VVEC_PUSH(isds, d, alloc);
 			di = isds.n - 1;
-			VPUSH(osecs.v[found].cmds, ((Cmd){.kind = C_ISD, .idx = di}));
+			VVEC_PUSH(osecs.v[found].cmds, ((Cmd){.kind = C_ISD, .idx = di}), alloc);
 		}
 		is->isd = di;
-		VPUSH(isds.v[di].secs, orphans.v[i]);
+		VVEC_PUSH(isds.v[di].secs, orphans.v[i], alloc);
 	}
 
 	/* merge sections: one synthetic per (flags, entsize[, align]) per output section */
@@ -2292,16 +2281,16 @@ static void assign_sections(void)
 					isecs.v[syn].aux = m;
 					isecs.v[syn].entsize = is->entsize;
 					isecs.v[syn].isd = os->cmds.v[k].idx;
-					VPUSH(merges, mg);
+					VVEC_PUSH(merges, mg, alloc);
 					d->secs.v[w++] = syn;
 				}
 				Merge *mg = &merges.v[m];
 				if (is->align > mg->align)
 					mg->align = is->align;
 				MergeIn mi = {.isec = si, .syn = mg->isec};
-				VPUSH(mergeins, mi);
+				VVEC_PUSH(mergeins, mi, alloc);
 				is->aux = mergeins.n - 1;
-				VPUSH(mg->members, mergeins.n - 1);
+				VVEC_PUSH(mg->members, mergeins.n - 1, alloc);
 			}
 			d->secs.n = w;
 		}
@@ -2445,7 +2434,7 @@ static void merge_shard(void *arg, size_t job_i)
 					tab[x] = (uint64_t)mid << 32 | p;
 					thash[x] = h;
 					used++;
-					VPUSH(mg->uniq[shard], tab[x]);
+					VVEC_PUSH(mg->uniq[shard], tab[x], alloc);
 					break;
 				}
 				if (thash[x] == h) {
@@ -2721,7 +2710,7 @@ static bool create_thunks(int pass)
 							uint32_t ts = new_isec(".text.thunk", K_THUNK, SHT_PROGBITS,
 									       SHF_ALLOC | SHF_EXECINSTR, 4);
 							d = &isds.v[di];
-							VPUSH(thunksecs, ((ThunkSec){0}));
+							VVEC_PUSH(thunksecs, ((ThunkSec){0}), alloc);
 							isecs.v[ts].aux = thunksecs.n - 1;
 							isecs.v[ts].osec = oi;
 							isecs.v[ts].isd = di;
@@ -2738,8 +2727,8 @@ static bool create_thunks(int pass)
 						tn.name = nm;
 						ThunkSec *tsx = &thunksecs.v[isecs.v[d->thunksec].aux];
 						tn.off = 0;
-						VPUSH(thunks, tn);
-						VPUSH(tsx->list, thunks.n - 1);
+						VVEC_PUSH(thunks, tn, alloc);
+						VVEC_PUSH(tsx->list, thunks.n - 1, alloc);
 						found = thunks.n - 1;
 						changed = true;
 					}
@@ -2787,7 +2776,7 @@ static bool create_thunks(int pass)
 		uint32_t pos = d->secs.n;
 		while (pos > 0 && isecs.v[d->secs.v[pos - 1]].off >= d->thunk_off)
 			pos--;
-		VPUSH(d->secs, 0);
+		VVEC_PUSH(d->secs, 0, alloc);
 		memmove(&d->secs.v[pos + 1], &d->secs.v[pos], (d->secs.n - 1 - pos) * sizeof(uint32_t));
 		d->secs.v[pos] = d->thunksec;
 	}
@@ -2823,8 +2812,8 @@ static void phadd(int ph, uint32_t oi)
 static int phnew(uint32_t type, uint32_t flags)
 {
 	Phdr p = {.p_type = type, .p_flags = flags, .p_align = type == PT_LOAD ? opt.max_page : 0};
-	VPUSH(phdrs, p);
-	VPUSH(phsecs, ((PhdrSecs){.first = -1, .last = -1}));
+	VVEC_PUSH(phdrs, p, alloc);
+	VVEC_PUSH(phsecs, ((PhdrSecs){.first = -1, .last = -1}), alloc);
 	return phdrs.n - 1;
 }
 
@@ -3126,7 +3115,7 @@ static void relocate_isec(uint32_t si, uint8_t *buf)
 	}
 }
 
-static VEC(uint32_t) wjobs;		/* ISecs to write */
+static VVEC(uint32_t) wjobs;		/* ISecs to write */
 
 static void write_isec(void *arg, size_t j)
 {
@@ -3270,7 +3259,7 @@ static bool parse_args(int argc, char **argv)
 		   (!strcmp(a, name) && i + 1 < argc) ? argv[++i] : NULL)
 		const char *v;
 		if (a[0] != '-' || !a[1]) {
-			VPUSH(opt.inputs, ((InputArg){.path = a, .whole = whole}));
+			VVEC_PUSH(opt.inputs, ((InputArg){.path = a, .whole = whole}), alloc);
 			continue;
 		}
 		if (ARG("-o") && i + 1 < argc) { opt.out = argv[++i]; continue; }
@@ -3345,7 +3334,7 @@ static void load_inputs(void)
 			add_archive(p, b, n);
 			continue;
 		}
-		VPUSH(pending, ((Pending){.path = p, .buf = b, .size = n}));
+		VVEC_PUSH(pending, ((Pending){.path = p, .buf = b, .size = n}), alloc);
 	}
 	for (uint32_t i = 0; i < pending.n; i++) {
 		Obj *o = alloc(sizeof *o);
@@ -3353,7 +3342,7 @@ static void load_inputs(void)
 		o->buf = pending.v[i].buf;
 		o->size = pending.v[i].size;
 		o->idx = objs.n;
-		VPUSH(objs, o);
+		VVEC_PUSH(objs, o, alloc);
 	}
 	pfor(objs.n, parse_obj, NULL);
 }
@@ -3464,7 +3453,7 @@ static EV apply_op(char op, EV lhs, EV v)
 	return v;
 }
 
-static VEC(const char *) recorded;	/* errors of the current address pass */
+static VVEC(const char *) recorded;	/* errors of the current address pass */
 
 /* assignSymbol(); returns true if the symbol's (section, value) changed */
 static bool assign_symbol(Assign *a, bool insec)
@@ -3480,7 +3469,7 @@ static bool assign_symbol(Assign *a, bool insec)
 			char *m = alloc(160);
 			snprintf(m, 160, "unable to move location counter (0x%llx) backward to 0x%llx for section '%s'",
 				 (unsigned long long)dot, (unsigned long long)val, osecs.v[cur_osec].name);
-			VPUSH(recorded, m);
+			VVEC_PUSH(recorded, m, alloc);
 		}
 		dot = val;
 		return false;
@@ -4079,12 +4068,12 @@ static bool g_referenced(uint32_t g) { return kget(&gsyms[g].first) != UINT64_MA
 static bool g_defined_obj(uint32_t g) { return kget(&gsyms[g].def) != UINT64_MAX; }
 
 static uint64_t script_ord;
-static VEC(uint32_t) script_new;	/* slots first inserted by the script, in order */
+static VVEC(uint32_t) script_new;	/* slots first inserted by the script, in order */
 
 static void script_insert(uint32_t g)
 {
 	if (!g_referenced(g))
-		VPUSH(script_new, g);
+		VVEC_PUSH(script_new, g, alloc);
 	atomic_min64(&gsyms[g].first, script_ord++);
 }
 
@@ -4112,7 +4101,7 @@ static void script_symbols(void)
 	for (uint32_t i = 0; i < refsyms.n; i++)
 		script_insert(refsyms.v[i]);
 	uint8_t *added = alloc(provides.n + 1);
-	VEC(uint32_t) stack = {0};
+	VVEC(uint32_t) stack = {0};
 	for (uint32_t i = 0; i < provides.n; i++) {
 		uint32_t g = provides.v[i].sym;
 		bool dup = false;
@@ -4120,7 +4109,7 @@ static void script_symbols(void)
 			dup = provides.v[k].sym == g;
 		if (!dup && g_referenced(g) && !g_defined_obj(g)) {
 			added[i] = 1;
-			VPUSH(stack, i);
+			VVEC_PUSH(stack, i, alloc);
 		}
 	}
 	while (stack.n) {
@@ -4136,7 +4125,7 @@ static void script_symbols(void)
 					seen = provides.v[q].sym == g && added[q];
 				if (!seen && !g_defined_obj(g)) {
 					added[j] = 1;
-					VPUSH(stack, j);
+					VVEC_PUSH(stack, j, alloc);
 				}
 				break;
 			}
@@ -4158,7 +4147,7 @@ static void mark_target(Assign *a)
 static void collect_stubs(void)
 {
 	for_assigns(mark_target);
-	VEC(const char *) names = {0};
+	VVEC(const char *) names = {0};
 	for (uint32_t i = 0; i < objs.n; i++) {
 		Obj *o = objs.v[i];
 		if (!o->buf)
@@ -4171,7 +4160,7 @@ static void collect_stubs(void)
 			if ((o->sym[s].st_info >> 4) == STB_WEAK)
 				continue;
 			gs->dup = 1;
-			VPUSH(names, gname(g));
+			VVEC_PUSH(names, gname(g), alloc);
 		}
 	}
 	for_assigns(mark_target);	/* idempotent */
@@ -4210,11 +4199,11 @@ static void build_gorder(void)
 		for (uint32_t s = o->firstg; s < o->nsym; s++) {
 			uint32_t g = o->gs[s - o->firstg];
 			if (kget(&gsyms[g].first) == symkey(o->idx, s))
-				VPUSH(gorder, g);
+				VVEC_PUSH(gorder, g, alloc);
 		}
 	}
 	for (uint32_t i = 0; i < script_new.n; i++)
-		VPUSH(gorder, script_new.v[i]);
+		VVEC_PUSH(gorder, script_new.v[i], alloc);
 }
 
 static void report_undefined(void)
@@ -4313,7 +4302,7 @@ static int run(int argc, char **argv)
 		if (nstubs) {
 			Obj *o = make_stub_obj(stub_names, nstubs);
 			o->idx = objs.n;
-			VPUSH(objs, o);
+			VVEC_PUSH(objs, o, alloc);
 			alloc_isecs(o->idx);
 			fill_isecs(NULL, o->idx);
 			resolve_obj(NULL, o->idx);
@@ -4371,7 +4360,7 @@ static int run(int argc, char **argv)
 	outsecs.n = 0;
 	for (uint32_t c = 0; c < topcmds.n; c++)
 		if (topcmds.v[c].kind == C_OSEC && osecs.v[topcmds.v[c].idx].live) {
-			VPUSH(outsecs, topcmds.v[c].idx);
+			VVEC_PUSH(outsecs, topcmds.v[c].idx, alloc);
 			osecs.v[topcmds.v[c].idx].shidx = outsecs.n;
 		}
 
@@ -4428,10 +4417,10 @@ static int run(int argc, char **argv)
 	out = bigalloc(filesize);
 	/* RELATIVE relocations: per section, in address order */
 	if (reladyn_isec != NONE && ndyn) {
-		VEC(uint32_t) dl = {0};
+		VVEC(uint32_t) dl = {0};
 		for (uint32_t i = 0; i < isecs.n; i++)
 			if (isecs.v[i].ndyn)
-				VPUSH(dl, i);
+				VVEC_PUSH(dl, i, alloc);
 		qsort(dl.v, dl.n, sizeof(uint32_t), cmp_dyn);
 		uint32_t at = 0;
 		for (uint32_t i = 0; i < dl.n; i++) {
@@ -4451,7 +4440,7 @@ static int run(int argc, char **argv)
 			if (os->cmds.v[k].kind == C_ISD) {
 				ISD *d = &isds.v[os->cmds.v[k].idx];
 				for (uint32_t s = 0; s < d->secs.n; s++)
-					VPUSH(wjobs, d->secs.v[s]);
+					VVEC_PUSH(wjobs, d->secs.v[s], alloc);
 			}
 	}
 	final_addresses();
@@ -4495,12 +4484,12 @@ typedef struct {
 	uint32_t h;
 	uint32_t type, align, entsize;
 	uint64_t flags, size, off;
-	VEC(uint32_t) secs;
+	VVEC(uint32_t) secs;
 	uint64_t nrela, relaoff;
 	uint32_t shidx, relaidx, nameoff, relanameoff;
 	uint32_t secsym;
 } ROut;
-static VEC(ROut) routs;
+static VVEC(ROut) routs;
 static uint32_t *rmap;			/* name hash table -> ROut */
 static uint32_t rmask;
 static uint32_t **lmap;			/* per object: local symbol -> output index */
@@ -4522,7 +4511,7 @@ static uint32_t rout_get(const char *name)
 		j = (j + 1) & rmask;
 	}
 	ROut r = {.name = name, .h = h, .align = 1};
-	VPUSH(routs, r);
+	VVEC_PUSH(routs, r, alloc);
 	rmap[j] = routs.n - 1;
 	return routs.n - 1;
 }
@@ -4684,7 +4673,7 @@ static int ld_relocatable(void)
 		r->size += is->size;
 		is->dyn0 = r->nrela;
 		r->nrela += is->nrela;
-		VPUSH(r->secs, i);
+		VVEC_PUSH(r->secs, i, alloc);
 	}
 	phase("-r: output sections");
 
@@ -4772,7 +4761,7 @@ static int ld_relocatable(void)
 	wjobs.n = 0;
 	for (uint32_t i = 0; i < routs.n; i++)
 		for (uint32_t k = 0; k < routs.v[i].secs.n; k++)
-			VPUSH(wjobs, routs.v[i].secs.v[k]);
+			VVEC_PUSH(wjobs, routs.v[i].secs.v[k], alloc);
 	/* local maps must exist before relocations are rewritten */
 	pfor(objs.n, r_write_locals, NULL);
 	pfor(wjobs.n, r_write_isec, NULL);

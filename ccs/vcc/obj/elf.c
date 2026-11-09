@@ -12,6 +12,7 @@
  * descending; a string that ends the previous one shares its bytes).
  */
 #include "elf.h"
+#include "../lib/hash.h"
 #include <errno.h>
 #include <fcntl.h>
 #include <stdarg.h>
@@ -27,20 +28,8 @@
 #define FIX_CAP ((size_t)1 << 30)
 #define SEC_CAP ((size_t)64 << 20)
 
-static void *reserve(size_t n)
-{
-	void *p = mmap(NULL, n, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANON | MAP_NORESERVE, -1, 0);
-	if (p == MAP_FAILED) { perror("vcc: elf: mmap"); abort(); }
-	return p;
-}
-
-static void *rpush(ElfRegion *r, size_t n, size_t al)
-{
-	size_t u = (r->used + al - 1) & ~(al - 1);
-	if (u + n > r->cap) { fprintf(stderr, "vcc: elf: region full\n"); abort(); }
-	r->used = u + n;
-	return r->base + u;
-}
+static void *reserve(size_t n) { return vreserve(n, MAP_NORESERVE, "vcc: elf: mmap"); }
+static void *rpush(vregion *r, size_t n, size_t al) { return vregion_push(r, n, al, "vcc: elf: region full"); }
 
 void elf_error(ElfObj *o, const char *fmt, ...)
 {
@@ -86,22 +75,6 @@ void elf_reset(ElfObj *o)
 	o->has_err = 0; o->err[0] = 0;
 }
 
-static uint32_t hash(const char *s, uint32_t n)
-{
-	uint64_t h = 0x9e3779b97f4a7c15ull ^ n, w;
-	const char *e = s + n;
-	uint32_t n0 = n, r = n & 7;
-	while (n >= 8) { memcpy(&w, s, 8); h = (h ^ w) * 0xff51afd7ed558ccdull; h ^= h >> 32; s += 8; n -= 8; }
-	/* the tail (n % 8 bytes, little-endian in the low bits, as a
-	 * memcpy into a zeroed word would put them) from whole loads */
-	if (r && n0 >= 8) { memcpy(&w, e - 8, 8); w >>= 8 * (8 - r); }
-	else if (r >= 4) { uint32_t x, y; memcpy(&x, s, 4); memcpy(&y, e - 4, 4); w = x | (uint64_t)y << (8 * (r - 4)); }
-	else if (r) w = (uint64_t)(uint8_t)s[0] | (uint64_t)(uint8_t)s[r / 2] << (8 * (r / 2)) | (uint64_t)(uint8_t)e[-1] << (8 * (r - 1));
-	else w = 0;
-	h = (h ^ w) * 0xc4ceb9fe1a85ec53ull; h ^= h >> 29;
-	return (uint32_t)h | 1;
-}
-
 static const char *copyname(ElfObj *o, const char *s, uint32_t n)
 {
 	char *p = rpush(&o->arena, n + 1, 1);
@@ -136,7 +109,7 @@ static void hgrow(ElfObj *o)
 
 uint32_t elf_sym_lookup(ElfObj *o, const char *name, uint32_t len)
 {
-	uint32_t h = hash(name, len);
+	uint32_t h = vhash_obj(name, len);
 	for (uint32_t i = h & o->hmask;; i = (i + 1) & o->hmask) {
 		uint32_t s = o->htab[i];
 		if (!s) return 0;
@@ -147,7 +120,7 @@ uint32_t elf_sym_lookup(ElfObj *o, const char *name, uint32_t len)
 
 uint32_t elf_sym(ElfObj *o, const char *name, uint32_t len)
 {
-	uint32_t h = hash(name, len), i;
+	uint32_t h = vhash_obj(name, len), i;
 	for (i = h & o->hmask;; i = (i + 1) & o->hmask) {
 		uint32_t s = o->htab[i];
 		if (!s) break;

@@ -9,6 +9,7 @@
  * symbolic becomes an elf_fixup() resolved at the end.
  */
 #include "as.h"
+#include "../lib/arena.h"
 #include "../arch/a64/a64.h"
 #include <fcntl.h>
 #include <stdarg.h>
@@ -67,7 +68,6 @@ typedef struct { Sv name; Sv reg; uint32_t next; } Alias;	/* next: older entry i
 
 typedef struct { uint32_t sym; ElfVal v; } Var;	/* .set with a non-absolute value */
 
-typedef struct { uint8_t *base; size_t used, cap; } Region;
 
 struct As {
 	ElfObj *o;
@@ -76,9 +76,9 @@ struct As {
 	Cond cs[MAXCOND]; int ncs;
 	uint32_t cur, prev;	/* current/previous frag */
 	struct { uint32_t cur, prev; } ss[MAXSECSTK]; int nss;
-	Region xs;		/* expansion text stack */
-	Region defs;		/* macro definitions etc. (per run) */
-	Region sb;		/* current statement */
+	vregion xs;		/* expansion text stack */
+	vregion defs;		/* macro definitions etc. (per run) */
+	vregion sb;		/* current statement */
 	Macro **mtab; uint32_t mmask, mcount;
 	NumLab *nl; uint32_t nlmask, nlcount;
 	Alias *al; uint32_t nal, alcap;
@@ -94,20 +94,8 @@ struct As {
 
 /* ---------------------------------------------------------------- utilities */
 
-static void *reserve(size_t n)
-{
-	void *p = mmap(NULL, n, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANON | MAP_NORESERVE, -1, 0);
-	if (p == MAP_FAILED) { perror("vcc: as: mmap"); abort(); }
-	return p;
-}
-
-static void *rget(Region *r, size_t n)
-{
-	size_t u = (r->used + 7) & ~(size_t)7;
-	if (u + n > r->cap) { fprintf(stderr, "vcc: as: region full\n"); abort(); }
-	r->used = u + n;
-	return r->base + u;
-}
+static void *reserve(size_t n) { return vreserve(n, MAP_NORESERVE, "vcc: as: mmap"); }
+static void *rget(vregion *r, size_t n) { return vregion_push(r, n, 8, "vcc: as: region full"); }
 
 /* ASCII classes without libc's locale lookups (hot in the scanner) */
 enum { C_D = 1, C_X = 2, C_A = 4, C_S = 8, C_I = 16, C_W = 32, C_E = 64 };	/* C_W: blanks ws() skips; C_E: starts an immediate operand */
@@ -1366,7 +1354,7 @@ static int macro_arg(As *a, const char **pp, const char *e, int vararg, Sv *out)
 /* expandMacro: body with \param, \@, \+, \() substitutions.  The body is
  * compiled once into pieces (r is the region for them), then each
  * expansion is copies. */
-static Tmpl tmpl_compile(As *a, Region *r, Sv body, const Param *ps, uint32_t np, int at)
+static Tmpl tmpl_compile(As *a, vregion *r, Sv body, const Param *ps, uint32_t np, int at)
 {
 	const char *b = body.s;
 	size_t n = body.n, nbs = 0;
