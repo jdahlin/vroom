@@ -824,6 +824,10 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
   duplicated errors (`void v;`, compound literal in parens).
   *Validate:* `tests/diag/` cases with several independent errors, exact
   clang output (`vcc-diag.py`).
+- [ ] **Clang warns, vcc errors** (`bench/vcc-mutate.py show spurious`): a
+  missing `;` before `}` in a struct (clang: warning "expected ';' at end of
+  declaration list"); `-Wreturn-mismatch` is not in the `return-type` group.
+  *Validate:* `vcc-mutate.py` spurious count; diag tests.
 - [ ] **Warnings as errors not controllable**: `conv_error` (`cc.c:2622`)
   always errors for `-Wincompatible-pointer-types`.
   *Validate:* diag tests with `-Wno-error=…` and `-Wno-…`.
@@ -840,7 +844,11 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
   value, `return v();` of void from int function, `-fsyntax-only` missing
   initializer-constness errors (`static int s = g();`, `5 % 0`),
   `void f(static int x)` (clang: invalid storage class specifier in function
-  declarator).
+  declarator).  From `bench/vcc-mutate.py` (PLAN-diag D0.2, `show missed`): a parameter
+  list without types in a declaration (`void exit(in);`), `main` with wrong
+  parameter types, an array of an incomplete element type, a call to or
+  definition of a function with an incomplete return type (`struct zz f(...)
+  { return 0; }` is accepted), `unsigned double`.
   *Validate:* T4 each, then promote to diag.
 - [ ] **Designated initializers found by PLAN-diag D1.0**: a designator on a
   scalar (`int a = { .x = 1 };`) fails with "expected expression" instead of

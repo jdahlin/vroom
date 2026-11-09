@@ -82,9 +82,48 @@ Tio lager; varje steg nedan säger vilka det berör.
   Textmatchningen är en startpunkt; när diagnoserna har id (D1.3) läser täckningen dem.
   `diagids.inc` för vcc självt genereras i D1.1.
   *Validerat:* 7 297 diagnoser (diagtool: 7 298), 830 grupper, 20 substitutioner.
-- **D0.2 mutationskorpus** enligt lager 3, med dagens vcc som baslinje.
-  *Validera:* körningen är deterministisk; baslinjesiffror (krascher, första-fel-paritet,
-  följdfel) i planen.
+- **D0.2 mutationskorpus** enligt lager 3.  *Klart 2026-11-09.*  `bench/vcc-mutate.py`:
+  TU:er som både clang och vcc godtar (gcc-torture, tcc-tests2, `tests/vcc` med
+  vcc-ctests flaggor, och kärn-TU:er), ett fel injicerat i huvudfilen av elva mutatorer
+  (`del-semi`, `del-close`, `del-open`, `del-token`, `dup-token`, `semi-comma`,
+  `typo-ident`, `typo-keyword`, `change-type`, `insert`, `operator`), `-fsyntax-only
+  -ferror-limit=0` med båda.  Clangs svar cachas, så en omkörning kör bara vcc (22 s
+  för 1 970 mutanter med `-j 6`; kallt 112 s).  `show KATEGORI [MUTATOR]` visar fallen
+  med båda kompilatorernas fel; allt i `build/ccs/mutate/last.jsonl`.
+  **Baslinje** (frö 1, 1 970 mutanter ur 1 800 torture- och 145 kärn-TU:er):
+
+  | | |
+  |---|---|
+  | krascher / timeouts | 0 / 0 |
+  | missade (clang avvisar, vcc godtar) | 34 |
+  | falska (clang godtar, vcc avvisar) | 20 |
+  | båda godtar (mutationen blev giltig C) | 304 |
+  | båda avvisar | 1 612 |
+  | första felet på clangs plats / samma rad / annanstans | 82,6 % / 8,2 % / 9,2 % |
+  | följdfel jämfört med clang: färre / lika / fler | 21,3 % / 60,2 % / 18,5 % |
+  | fel totalt | vcc 2 715, clang 3 505 |
+
+  Vad siffrorna säger (grupperat per meddelande):
+  - **Första felet annanstans** (148): nästan alltid ett `,` i stället för `;` i radslut.
+    Clang säger "expected ';' at end of declaration / after expression / after return
+    statement" på raden (92 fall); vcc säger "expected expression" eller "expected
+    identifier" på nästa rad.  Clangs heuristik: ett `,` följt av radbrytning och en
+    token som inte kan fortsätta uttrycket.  Även `unsigned double` (7) diagnostiseras inte.
+  - **Färre fel** (343) är oftast att vcc slutar efter första parsningsfelet där clang
+    återhämtar sig och hittar fler (D2.2): "expected ')'", odeklarerade namn,
+    "conflicting types", "function definition is not allowed here".
+  - **Fler fel** (298): följdfel efter ett felstavat nyckelord (`cas 61:`, `struc S {`,
+    `cha str[]`): clang föreslår nyckelordet ("did you mean 'struct'?") och går vidare;
+    vcc ger "expected ';' after expression" och odeklarerade namn efteråt.
+  - **Missade** (34): parameterlista utan typer i en deklaration (8), `main` med fel
+    parametertyper (4), fältelement av ofullständig typ (4), anrop/definition med
+    ofullständig returtyp (7), returtyp som inte stämmer (2).  I TODO.md.
+  - **Falska** (20): `-Wno-error=int-conversion` / `incompatible-pointer-types` styr inte
+    vcc (TODO.md "Warnings as errors not controllable"), `-Wreturn-mismatch` hör inte
+    till gruppen `return-type`, och ett saknat `;` före `}` i en struct är i clang en
+    varning ("expected ';' at end of declaration list"), i vcc ett fel.
+  *Validerat:* tre körningar i rad ger identiska siffror (efter en rättning: cachade
+  clang-svar kom som listor, vcc:s som tupler).
 
 ### D1. Strukturerade diagnoser (grunden)
 
@@ -227,7 +266,7 @@ D1 och D2 hänger ihop (feltypen behöver posten); D0.2 först så att D2 har en
 ## Status
 
 - [x] D0.1 — 2026-11-09
-- [ ] D0.2
+- [x] D0.2 — 2026-11-09
 - [x] D1.0 — 2026-11-09
 - [ ] D1.1 – D1.3
 - [ ] D2.1 – D2.3
