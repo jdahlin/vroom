@@ -184,8 +184,15 @@ static size_t elf_finish_tail(ElfObj *o, Out *w)
 		w->as_data = rpush(&o->arena, 5 * (size_t)o->naddrsig + 1, 1);
 		uint32_t n = 0;
 		for (uint32_t i = 0; i < o->naddrsig; i++) {
-			ElfSym *y = elf_symp(o, o->addrsig[i]);
-			if (!y->idx || y->idx > w->nsymtab || w->symtab[y->idx - 1] != o->addrsig[i]) continue;
+			uint32_t id = o->addrsig[i];
+			ElfSym *y = elf_symp(o, id);
+			if (!y->idx || y->idx > w->nsymtab || w->symtab[y->idx - 1] != id) {
+				/* not in the table (a temporary): its section's symbol (MC) */
+				if (!(y->flags & ESYM_DEFINED) || (y->flags & ESYM_ABS)) continue;
+				id = elf_sec(o, symsec(o, y))->sym;
+				y = elf_symp(o, id);
+				if (!y->idx || y->idx > w->nsymtab || w->symtab[y->idx - 1] != id) continue;
+			}
 			uint32_t v = y->idx;
 			do { uint8_t c = v & 0x7f; v >>= 7; w->as_data[n++] = (uint8_t)(c | (v ? 0x80 : 0)); } while (v);
 		}

@@ -385,8 +385,11 @@ static const Mn mns[] = {
 	{ "isb", K_BARRIER, 0xd50330df, 1 },
 	{ "ld1", K_VLD1, 0x0c400000, 0 },
 	{ "ld1r", K_LDR_REP, 0x0d40c000, 1 },
+	{ "ld2", K_VLD1, 0x0c400000, 2 },
 	{ "ld2r", K_LDR_REP, 0x0d60c000, 2 },
+	{ "ld3", K_VLD1, 0x0c400000, 3 },
 	{ "ld3r", K_LDR_REP, 0x0d40e000, 3 },
+	{ "ld4", K_VLD1, 0x0c400000, 4 },
 	{ "ld4r", K_LDR_REP, 0x0d60e000, 4 },
 	{ "ldapur", K_PAC, 0x99400000, 12 },
 	{ "ldapurb", K_PAC, 0x19400000, 11 },
@@ -399,6 +402,7 @@ static const Mn mns[] = {
 	{ "ldgm", K_MTEM, 0xd9e00000, 0 },
 	{ "ldnp", K_LDP, 0, 1 | 2 },
 	{ "ldp", K_LDP, 0, 1 },
+	{ "ldpsw", K_LDP, 0, 1 | 4 },
 	{ "ldr", K_LDST, 0x01, 0xff },
 	{ "ldraa", K_PAC, 0xf8200400, 6 },
 	{ "ldrab", K_PAC, 0xf8a00400, 6 },
@@ -431,6 +435,7 @@ static const Mn mns[] = {
 	{ "msub", K_MUL, 0x1b008000, 1 },
 	{ "mul", K_MUL, 0x1b007c00, 0 },
 	{ "mvn", K_NEG, 0x2a2003e0, 1 },
+	{ "mvni", K_MOVI, 0x00000000, 1 },
 	{ "neg", K_NEG, 0x4b0003e0, 0 },
 	{ "negs", K_NEG, 0x6b0003e0, 0 },
 	{ "ngc", K_IALIAS, 0x5a0003e0, 2 },
@@ -474,6 +479,7 @@ static const Mn mns[] = {
 	{ "rev32", K_VREV, 0x2e200800, 0xdac00800 },
 	{ "rev64", K_VREV, 0x0e200800, 0xdac00c00 },
 	{ "ror", K_SHIFT, 3, 0 },
+	{ "saddlv", K_ACROSS, 0x0e303800, 1 },
 	{ "sb", K_FIXED, 0xd50330ff, 0 },
 	{ "sbc", K_DP2, 0x5a000000, 0 },
 	{ "sbcs", K_DP2, 0x7a000000, 0 },
@@ -525,10 +531,16 @@ static const Mn mns[] = {
 	{ "smulh", K_DP2, 0x9b407c00, 1 },
 	{ "smull", K_MUL, 0x9b207c00, 2 },
 	{ "sri", K_VSHIFT, 0x2f004400, 1 },
+	{ "srshr", K_VSHIFT, 0x0f002400, 1 },
+	{ "srsra", K_VSHIFT, 0x0f003400, 1 },
 	{ "ssbb", K_FIXED, 0xd503309f, 0 },
 	{ "sshr", K_VSHIFT, 0x0f000400, 1 },
+	{ "ssra", K_VSHIFT, 0x0f001400, 1 },
 	{ "st1", K_VLD1, 0x0c000000, 0 },
+	{ "st2", K_VLD1, 0x0c000000, 2 },
 	{ "st2g", K_MTE, 0xd9a00000, 0 },
+	{ "st3", K_VLD1, 0x0c000000, 3 },
+	{ "st4", K_VLD1, 0x0c000000, 4 },
 	{ "stg", K_MTE, 0xd9200000, 0 },
 	{ "stgm", K_MTEM, 0xd9a00000, 0 },
 	{ "stgp", K_PAC, 0x69000000, 21 },
@@ -573,6 +585,7 @@ static const Mn mns[] = {
 	{ "tst", K_TST, 0, 0 },
 	{ "uadalp", K_VMISC, 0x2e206800, 1 },
 	{ "uaddlp", K_VMISC, 0x2e202800, 1 },
+	{ "uaddlv", K_ACROSS, 0x2e303800, 1 },
 	{ "ubfiz", K_BFI, 2, 0 },
 	{ "ubfm", K_BFM, 2, 0 },
 	{ "ubfx", K_BFX, 2, 0 },
@@ -589,7 +602,10 @@ static const Mn mns[] = {
 	{ "umulh", K_DP2, 0x9bc07c00, 1 },
 	{ "umull", K_MUL, 0x9ba07c00, 2 },
 	{ "uqsub", K_VPERM, 0x2e202c00, 0 },
+	{ "urshr", K_VSHIFT, 0x2f002400, 1 },
+	{ "ursra", K_VSHIFT, 0x2f003400, 1 },
 	{ "ushr", K_VSHIFT, 0x2f000400, 1 },
+	{ "usra", K_VSHIFT, 0x2f001400, 1 },
 	{ "uxtb", K_IALIAS, 2, 0x07 },
 	{ "uxth", K_IALIAS, 2, 0x0f },
 	{ "uxtw", K_IALIAS, 2, 0x1f },
@@ -1450,6 +1466,7 @@ static int k_ldp(Ctx *c, const Mn *m)
 	case A64_Q: opc = 2; v = 1; scale = 4; break;
 	default: BADOPS;
 	}
+	if (m->x & 4) { if (o[0].cls != A64_X) BADOPS; opc = 1; scale = 2; }	/* ldpsw */
 	if (isgpr(&o[0]) && (o[0].sp || o[1].sp)) BADOPS;
 	const A64Op *mem = &o[2];
 	unsigned mode;
@@ -1521,13 +1538,38 @@ static int k_prfm(Ctx *c, const Mn *m)
 static int k_vld1(Ctx *c, const Mn *m)
 {
 	const A64Op *o = c->op;
-	if (c->n < 2 || c->n > 3 || o[0].kind != A64O_LIST || o[0].hasidx || o[1].kind != A64O_MEM || o[1].mode != A64M_OFF || o[1].hasamt) BADOPS;
+	if (c->n < 2 || c->n > 3 || o[0].kind != A64O_LIST || o[1].kind != A64O_MEM || o[1].mode != A64M_OFF || o[1].hasamt) BADOPS;
 	static const uint32_t opcode[5] = { 0, 0x7000, 0xa000, 0x6000, 0x2000 };
-	unsigned nr = o[0].nregs;
-	if (nr < 1 || nr > 4) BADOPS;
+	unsigned nr = o[0].nregs, ns = m->x ? m->x : 1;	/* ld1: 1-4 registers; ldN: N */
+	if (nr < 1 || nr > 4 || (m->x && nr != m->x)) BADOPS;
 	int sz = arr_size(o[0].arr);
-	if (sz < 0 || sz > 3) BADOPS;
-	uint32_t w = m->base | arr_q(o[0].arr) << 30 | opcode[nr] | (unsigned)sz << 10 | (unsigned)o[1].reg << 5 | R(&o[0]);
+	uint32_t w;
+	if (o[0].hasidx) {	/* one lane: {Vt.T, ...}[i] (element arrangement) */
+		unsigned i = o[0].idx, qs, op3, sb;
+		switch (o[0].arr) {
+		case A64_ELB: if (i > 15) BADOPS; op3 = 0; qs = i >> 2; sb = i & 3; break;
+		case A64_ELH: if (i > 7) BADOPS; op3 = 2; qs = i >> 1; sb = (i & 1) << 1; break;
+		case A64_ELS: if (i > 3) BADOPS; op3 = 4; qs = i; sb = 0; break;
+		case A64_ELD: if (i > 1) BADOPS; op3 = 4; qs = i << 1; sb = 1; break;
+		default: BADOPS;
+		}
+		if (ns == 3 || ns == 4) op3 |= 1;
+		w = 0x0d000000u | (m->base & 0x00400000u) | (qs >> 1) << 30 | (uint32_t)(ns == 2 || ns == 4) << 21 | op3 << 13 |
+		    (qs & 1) << 12 | sb << 10 | (unsigned)o[1].reg << 5 | R(&o[0]);
+		if (c->n == 3) {
+			w |= 0x00800000;
+			if (iscimm(&o[2])) {
+				if (o[2].imm != (int64_t)ns << sz) FAIL("invalid post-increment");
+				w |= 31u << 16;
+			} else if (gpr_nosp(&o[2]) && isx(&o[2]) && o[2].reg != 31) w |= R(&o[2]) << 16;
+			else BADOPS;
+		}
+		*c->out = w;
+		return 0;
+	}
+	if (sz < 0 || sz > 3 || (m->x && sz == 3 && !arr_q(o[0].arr))) BADOPS;
+	static const uint32_t sop[5] = { 0, 0, 0x8000, 0x4000, 0x0000 };
+	w = m->base | arr_q(o[0].arr) << 30 | (m->x ? sop[nr] : opcode[nr]) | (unsigned)sz << 10 | (unsigned)o[1].reg << 5 | R(&o[0]);
 	if (c->n == 3) {
 		w |= 0x00800000;
 		if (iscimm(&o[2])) {
@@ -1841,11 +1883,20 @@ static int k_vshift(Ctx *c, const Mn *m)
 
 static int k_movi(Ctx *c, const Mn *m)
 {
-	(void)m;
 	const A64Op *o = c->op;
+	if (!m->x && c->n == 2 && isreg(&o[0]) && o[0].cls == A64_D && iscimm(&o[1])) {	/* movi Dd, #bytemask */
+		uint64_t v = (uint64_t)o[1].imm, abc = 0;
+		for (int i = 0; i < 8; i++) {
+			unsigned b = (unsigned)(v >> 8 * i) & 0xff;
+			if (b == 0xff) abc |= 1u << i; else if (b) FAIL("invalid immediate");
+		}
+		*c->out = 0x2f00e400u | (unsigned)(abc >> 5 & 7) << 16 | (unsigned)(abc & 31) << 5 | R(&o[0]);
+		return 0;
+	}
 	if (c->n < 2 || c->n > 3 || o[0].kind != A64O_VREG || !iscimm(&o[1])) BADOPS;
+	if (m->x && (o[0].arr == A64_2D || arr_size(o[0].arr) == 0)) BADOPS;	/* mvni: H and S */
 	uint64_t v = (uint64_t)o[1].imm;
-	unsigned q = arr_q(o[0].arr), op = 0, cmode;
+	unsigned q = arr_q(o[0].arr), op = m->x, cmode;
 	uint64_t abc;
 	int sz = arr_size(o[0].arr);
 	if (o[0].arr == A64_2D) {
@@ -1940,6 +1991,14 @@ static int k_fp(Ctx *c, const Mn *m)
 	}
 	case 7: case 8: {	/* fcvtzs x|w, d ; scvtf d, x|w [, #fbits] */
 		const A64Op *g = m->x == 7 ? &o[0] : &o[1], *f = m->x == 7 ? &o[1] : &o[0];
+		if (c->n == 2 && t >= 0 && t < 2 && ftype(&o[1]) == t) {	/* AdvSIMD scalar: scvtf d0, d1 */
+			static const struct { uint32_t fp; uint32_t simd; } sm[] = {
+				{ 0x1e220000, 0x5e21d800 }, { 0x1e230000, 0x7e21d800 }, { 0x1e380000, 0x5ea1b800 }, { 0x1e390000, 0x7ea1b800 },
+			};
+			for (size_t i = 0; i < sizeof sm / sizeof sm[0]; i++)
+				if (sm[i].fp == m->base) { *c->out = sm[i].simd | (uint32_t)t << 22 | R(&o[1]) << 5 | R(&o[0]); return 0; }
+			BADOPS;
+		}
 		if (c->n < 2 || c->n > 3 || !gpr_nosp(g)) BADOPS;
 		int ft = ftype(f);
 		if (ft < 0) BADOPS;
@@ -2146,7 +2205,8 @@ static int k_across(Ctx *c, const Mn *m)
 	static const uint8_t cls_of[3] = { A64_B, A64_H, A64_S };
 	if (c->n != 2 || !isreg(&o[0]) || o[1].kind != A64O_VREG) BADOPS;
 	int sz = arr_size(o[1].arr);
-	if (sz < 0 || sz > 2 || (sz == 2 && !arr_q(o[1].arr)) || o[0].cls != cls_of[sz]) BADOPS;
+	static const uint8_t cls_long[3] = { A64_H, A64_S, A64_D };
+	if (sz < 0 || sz > 2 || (sz == 2 && !arr_q(o[1].arr)) || o[0].cls != (m->x ? cls_long : cls_of)[sz]) BADOPS;
 	*c->out = m->base | arr_q(o[1].arr) << 30 | (uint32_t)sz << 22 | R(&o[1]) << 5 | R(&o[0]);
 	return 0;
 }
@@ -2517,6 +2577,243 @@ static int k_lsui(Ctx *c, const char *mn, size_t n, int *r)
 	return 1;
 }
 
+/* ---------------------------------------------------------------- AdvSIMD vector forms
+ * Mnemonics with a vector form looked up when the first operand is a
+ * vector (some share a name with a scalar instruction: mul, neg, fadd).
+ * Returns 1 when the operands are not this form (the normal table goes on). */
+enum { VS_SAME = 1, VS_FSAME, VS_MISC, VS_FMISC, VS_CMZ, VS_LONG, VS_SHLL, VS_XTN, VS_SHRN, VS_FMOV };
+typedef struct { const char *name; uint8_t sub, fl; uint32_t base, b2, b3; } Vf;
+enum { VF_NO2D = 1, VF_NOB = 2, VF_WIDE = 4, VF_BHS = 8 };
+static const Vf vtab[] = {	/* sorted by name */
+	{ "abs", VS_MISC, 0, 0x0e20b800, 0, 0 },
+	{ "cmeq", VS_CMZ, 0, 0x0e209800, 0, 0 },
+	{ "cmge", VS_CMZ, 0, 0x2e208800, 0, 0 },
+	{ "cmgt", VS_CMZ, 0, 0x0e208800, 0, 0 },
+	{ "cmle", VS_CMZ, 0, 0x2e209800, 0, 0 },
+	{ "cmlt", VS_CMZ, 0, 0x0e20a800, 0, 0 },
+	{ "fabd", VS_FSAME, 0, 0x2ea0d400, 0, 0 },
+	{ "fabs", VS_FMISC, 0, 0x0ea0f800, 0, 0 },
+	{ "fadd", VS_FSAME, 0, 0x0e20d400, 0, 0 },
+	{ "fcmeq", VS_FSAME, 0, 0x0e20e400, 0, 0x0ea0d800 },
+	{ "fcmge", VS_FSAME, 0, 0x2e20e400, 0, 0x2ea0c800 },
+	{ "fcmgt", VS_FSAME, 0, 0x2ea0e400, 0, 0x0ea0c800 },
+	{ "fcmle", VS_FSAME, 0, 0, 0, 0x2ea0d800 },
+	{ "fcmlt", VS_FSAME, 0, 0, 0, 0x0ea0e800 },
+	{ "fcvtzs", VS_FMISC, 0, 0x0ea1b800, 0, 0 },
+	{ "fcvtzu", VS_FMISC, 0, 0x2ea1b800, 0, 0 },
+	{ "fdiv", VS_FSAME, 0, 0x2e20fc00, 0, 0 },
+	{ "fmax", VS_FSAME, 0, 0x0e20f400, 0, 0 },
+	{ "fmaxnm", VS_FSAME, 0, 0x0e20c400, 0, 0 },
+	{ "fmin", VS_FSAME, 0, 0x0ea0f400, 0, 0 },
+	{ "fminnm", VS_FSAME, 0, 0x0ea0c400, 0, 0 },
+	{ "fmla", VS_FSAME, 0, 0x0e20cc00, 0x0f801000, 0 },
+	{ "fmls", VS_FSAME, 0, 0x0ea0cc00, 0x0f805000, 0 },
+	{ "fmov", VS_FMOV, 0, 0x0f00f400, 0, 0 },
+	{ "fmul", VS_FSAME, 0, 0x2e20dc00, 0x0f809000, 0 },
+	{ "fneg", VS_FMISC, 0, 0x2ea0f800, 0, 0 },
+	{ "frinta", VS_FMISC, 0, 0x2e218800, 0, 0 },
+	{ "frinti", VS_FMISC, 0, 0x2ea19800, 0, 0 },
+	{ "frintm", VS_FMISC, 0, 0x0e219800, 0, 0 },
+	{ "frintn", VS_FMISC, 0, 0x0e218800, 0, 0 },
+	{ "frintp", VS_FMISC, 0, 0x0ea18800, 0, 0 },
+	{ "frintx", VS_FMISC, 0, 0x2e219800, 0, 0 },
+	{ "frintz", VS_FMISC, 0, 0x0ea19800, 0, 0 },
+	{ "fsqrt", VS_FMISC, 0, 0x2ea1f800, 0, 0 },
+	{ "fsub", VS_FSAME, 0, 0x0ea0d400, 0, 0 },
+	{ "mla", VS_SAME, VF_NO2D, 0x0e209400, 0x2f000000, 0 },
+	{ "mls", VS_SAME, VF_NO2D, 0x2e209400, 0x2f004000, 0 },
+	{ "mul", VS_SAME, VF_NO2D, 0x0e209c00, 0x0f008000, 0 },
+	{ "neg", VS_MISC, 0, 0x2e20b800, 0, 0 },
+	{ "rshrn", VS_SHRN, 0, 0x0f008c00, 0, 0 },
+	{ "rshrn2", VS_SHRN, 0, 0x4f008c00, 0, 0 },
+	{ "sabal", VS_LONG, 0, 0x0e205000, 0, 0 },
+	{ "sabal2", VS_LONG, 0, 0x4e205000, 0, 0 },
+	{ "sabd", VS_SAME, VF_NO2D, 0x0e207400, 0, 0 },
+	{ "sabdl", VS_LONG, 0, 0x0e207000, 0, 0 },
+	{ "sabdl2", VS_LONG, 0, 0x4e207000, 0, 0 },
+	{ "saddl", VS_LONG, 0, 0x0e200000, 0, 0 },
+	{ "saddl2", VS_LONG, 0, 0x4e200000, 0, 0 },
+	{ "saddw", VS_LONG, VF_WIDE, 0x0e201000, 0, 0 },
+	{ "saddw2", VS_LONG, VF_WIDE, 0x4e201000, 0, 0 },
+	{ "scvtf", VS_FMISC, 0, 0x0e21d800, 0, 0 },
+	{ "shrn", VS_SHRN, 0, 0x0f008400, 0, 0 },
+	{ "shrn2", VS_SHRN, 0, 0x4f008400, 0, 0 },
+	{ "smax", VS_SAME, VF_NO2D, 0x0e206400, 0, 0 },
+	{ "smin", VS_SAME, VF_NO2D, 0x0e206c00, 0, 0 },
+	{ "smlal", VS_LONG, 0, 0x0e208000, 0, 0 },
+	{ "smlal2", VS_LONG, 0, 0x4e208000, 0, 0 },
+	{ "smlsl", VS_LONG, 0, 0x0e20a000, 0, 0 },
+	{ "smlsl2", VS_LONG, 0, 0x4e20a000, 0, 0 },
+	{ "smull", VS_LONG, 0, 0x0e20c000, 0, 0 },
+	{ "smull2", VS_LONG, 0, 0x4e20c000, 0, 0 },
+	{ "sqxtn", VS_XTN, 0, 0x0e214800, 0, 0 },
+	{ "sqxtn2", VS_XTN, 0, 0x4e214800, 0, 0 },
+	{ "sqxtun", VS_XTN, 0, 0x2e212800, 0, 0 },
+	{ "sqxtun2", VS_XTN, 0, 0x6e212800, 0, 0 },
+	{ "sshl", VS_SAME, 0, 0x0e204400, 0, 0 },
+	{ "sshll", VS_SHLL, 0, 0x0f00a400, 0, 0 },
+	{ "sshll2", VS_SHLL, 0, 0x4f00a400, 0, 0 },
+	{ "ssubl", VS_LONG, 0, 0x0e202000, 0, 0 },
+	{ "ssubl2", VS_LONG, 0, 0x4e202000, 0, 0 },
+	{ "ssubw", VS_LONG, VF_WIDE, 0x0e203000, 0, 0 },
+	{ "ssubw2", VS_LONG, VF_WIDE, 0x4e203000, 0, 0 },
+	{ "sxtl", VS_SHLL, 0, 0x0f00a400, 0, 0 },
+	{ "sxtl2", VS_SHLL, 0, 0x4f00a400, 0, 0 },
+	{ "uabal", VS_LONG, 0, 0x2e205000, 0, 0 },
+	{ "uabal2", VS_LONG, 0, 0x6e205000, 0, 0 },
+	{ "uabd", VS_SAME, VF_NO2D, 0x2e207400, 0, 0 },
+	{ "uabdl", VS_LONG, 0, 0x2e207000, 0, 0 },
+	{ "uabdl2", VS_LONG, 0, 0x6e207000, 0, 0 },
+	{ "uaddl", VS_LONG, 0, 0x2e200000, 0, 0 },
+	{ "uaddl2", VS_LONG, 0, 0x6e200000, 0, 0 },
+	{ "uaddw", VS_LONG, VF_WIDE, 0x2e201000, 0, 0 },
+	{ "uaddw2", VS_LONG, VF_WIDE, 0x6e201000, 0, 0 },
+	{ "ucvtf", VS_FMISC, 0, 0x2e21d800, 0, 0 },
+	{ "umlal", VS_LONG, 0, 0x2e208000, 0, 0 },
+	{ "umlal2", VS_LONG, 0, 0x6e208000, 0, 0 },
+	{ "umlsl", VS_LONG, 0, 0x2e20a000, 0, 0 },
+	{ "umlsl2", VS_LONG, 0, 0x6e20a000, 0, 0 },
+	{ "umull", VS_LONG, 0, 0x2e20c000, 0, 0 },
+	{ "umull2", VS_LONG, 0, 0x6e20c000, 0, 0 },
+	{ "uqxtn", VS_XTN, 0, 0x2e214800, 0, 0 },
+	{ "uqxtn2", VS_XTN, 0, 0x6e214800, 0, 0 },
+	{ "ushl", VS_SAME, 0, 0x2e204400, 0, 0 },
+	{ "ushll", VS_SHLL, 0, 0x2f00a400, 0, 0 },
+	{ "ushll2", VS_SHLL, 0, 0x6f00a400, 0, 0 },
+	{ "usubl", VS_LONG, 0, 0x2e202000, 0, 0 },
+	{ "usubl2", VS_LONG, 0, 0x6e202000, 0, 0 },
+	{ "usubw", VS_LONG, VF_WIDE, 0x2e203000, 0, 0 },
+	{ "usubw2", VS_LONG, VF_WIDE, 0x6e203000, 0, 0 },
+	{ "uxtl", VS_SHLL, 0, 0x2f00a400, 0, 0 },
+	{ "uxtl2", VS_SHLL, 0, 0x6f00a400, 0, 0 },
+	{ "xtn", VS_XTN, 0, 0x0e212800, 0, 0 },
+	{ "xtn2", VS_XTN, 0, 0x4e212800, 0, 0 },
+};
+
+static const Vf *vlookup(const char *mn, size_t n)
+{
+	size_t lo = 0, hi = sizeof vtab / sizeof vtab[0];
+	while (lo < hi) {
+		size_t mid = (lo + hi) / 2;
+		int r = strncmp(vtab[mid].name, mn, n);
+		if (!r && vtab[mid].name[n]) r = 1;
+		if (!r) return &vtab[mid];
+		if (r < 0) lo = mid + 1; else hi = mid;
+	}
+	return 0;
+}
+
+static int isvec(const A64Op *o) { return o->kind == A64O_VREG && o->arr && o->arr < A64_1Q; }
+static int iszero(const A64Op *o) { return (o->kind == A64O_FIMM && o->fimm == 0) || (isimm(o) && !o->hassym && !o->imm); }
+
+/* the wide arrangement of a narrow one (8b -> 8h, 16b -> 8h, ...) */
+static int arr_wide(unsigned arr)
+{
+	switch (arr) {
+	case A64_8B: case A64_16B: return A64_8H;
+	case A64_4H: case A64_8H: return A64_4S;
+	case A64_2S: case A64_4S: return A64_2D;
+	}
+	return -1;
+}
+
+static int k_simd(Ctx *c, const Vf *v)
+{
+	const A64Op *o = c->op;
+	int q2 = (v->base >> 30) & 1;	/* the "2" (upper half) forms */
+	switch (v->sub) {
+	case VS_SAME: {
+		if (c->n != 3 || !isvec(&o[0]) || !isvec(&o[1]) || o[1].arr != o[0].arr) return 1;
+		int sz = arr_size(o[0].arr);
+		if (o[2].kind == A64O_VELEM && v->b2) {	/* by element: H (v0-v15) or S */
+			unsigned i = o[2].idx, r = o[2].reg;
+			if (sz == 1) { if (i > 7 || r > 15) BADOPS; *c->out = v->b2 | (i >> 2) << 11 | (i & 3) << 20; }
+			else if (sz == 2) { if (i > 3) BADOPS; *c->out = v->b2 | (i >> 1) << 11 | (i & 1) << 21; }
+			else BADOPS;
+			*c->out |= arr_q(o[0].arr) << 30 | (uint32_t)sz << 22 | r << 16 | R(&o[1]) << 5 | R(&o[0]);
+			return 0;
+		}
+		if (!isvec(&o[2]) || o[2].arr != o[0].arr || sz < 0 || ((v->fl & VF_NO2D) && sz == 3)) return 1;
+		*c->out = v->base | arr_q(o[0].arr) << 30 | (uint32_t)sz << 22 | R(&o[2]) << 16 | R(&o[1]) << 5 | R(&o[0]);
+		return 0;
+	}
+	case VS_FSAME: {
+		if (c->n != 3 || !isvec(&o[0]) || !isvec(&o[1]) || o[1].arr != o[0].arr) return 1;
+		unsigned a = o[0].arr;
+		if (a != A64_2S && a != A64_4S && a != A64_2D) return 1;
+		unsigned sz = a == A64_2D;
+		if (o[2].kind == A64O_VELEM && v->b2) {
+			unsigned i = o[2].idx;
+			if (sz ? i > 1 : i > 3) BADOPS;
+			*c->out = v->b2 | arr_q(a) << 30 | sz << 22 | (sz ? i << 11 : (i >> 1) << 11 | (i & 1) << 21) |
+				  R(&o[2]) << 16 | R(&o[1]) << 5 | R(&o[0]);
+			return 0;
+		}
+		if (iszero(&o[2]) && v->b3) { *c->out = v->b3 | arr_q(a) << 30 | sz << 22 | R(&o[1]) << 5 | R(&o[0]); return 0; }
+		if (!isvec(&o[2]) || o[2].arr != a || !v->base) return 1;
+		*c->out = v->base | arr_q(a) << 30 | sz << 22 | R(&o[2]) << 16 | R(&o[1]) << 5 | R(&o[0]);
+		return 0;
+	}
+	case VS_MISC: case VS_CMZ: {
+		if (c->n != (v->sub == VS_CMZ ? 3 : 2) || !isvec(&o[0]) || !isvec(&o[1]) || o[1].arr != o[0].arr) return 1;
+		if (v->sub == VS_CMZ && !iszero(&o[2])) return 1;
+		int sz = arr_size(o[0].arr);
+		if (sz == 3 && !arr_q(o[0].arr)) BADOPS;
+		*c->out = v->base | arr_q(o[0].arr) << 30 | (uint32_t)sz << 22 | R(&o[1]) << 5 | R(&o[0]);
+		return 0;
+	}
+	case VS_FMISC: {
+		if (c->n != 2 || !isvec(&o[0]) || !isvec(&o[1]) || o[1].arr != o[0].arr) return 1;
+		unsigned a = o[0].arr;
+		if (a != A64_2S && a != A64_4S && a != A64_2D) BADOPS;
+		*c->out = v->base | arr_q(a) << 30 | (uint32_t)(a == A64_2D) << 22 | R(&o[1]) << 5 | R(&o[0]);
+		return 0;
+	}
+	case VS_LONG: {	/* Vd wide; Vn narrow (wide for the w forms), Vm narrow */
+		if (c->n != 3 || !isvec(&o[0]) || !isvec(&o[1]) || !isvec(&o[2])) return 1;
+		unsigned na = o[2].arr;
+		if (arr_q(na) != (unsigned)q2 || arr_wide(na) != (int)o[0].arr) BADOPS;
+		if ((v->fl & VF_WIDE) ? o[1].arr != o[0].arr : o[1].arr != na) BADOPS;
+		*c->out = v->base | (uint32_t)arr_size(na) << 22 | R(&o[2]) << 16 | R(&o[1]) << 5 | R(&o[0]);
+		return 0;
+	}
+	case VS_SHLL: {	/* sshll Vd.wide, Vn.narrow, #sh ; sxtl = #0 */
+		int ext = v->name[1] == 'x';
+		if (c->n != (ext ? 2 : 3) || !isvec(&o[0]) || !isvec(&o[1])) return 1;
+		unsigned na = o[1].arr;
+		if (arr_q(na) != (unsigned)q2 || arr_wide(na) != (int)o[0].arr) BADOPS;
+		int64_t sh = 0;
+		if (!ext) { if (!iscimm(&o[2])) BADOPS; sh = o[2].imm; }
+		unsigned es = 8u << arr_size(na);
+		if (sh < 0 || sh >= (int64_t)es) FAIL("immediate out of range");
+		*c->out = v->base | (es + (unsigned)sh) << 16 | R(&o[1]) << 5 | R(&o[0]);
+		return 0;
+	}
+	case VS_XTN: case VS_SHRN: {	/* Vd.narrow, Vn.wide [, #sh] */
+		if (c->n != (v->sub == VS_SHRN ? 3 : 2) || !isvec(&o[0]) || !isvec(&o[1])) return 1;
+		unsigned na = o[0].arr;
+		if (arr_q(na) != (unsigned)q2 || arr_wide(na) != (int)o[1].arr) BADOPS;
+		if (v->sub == VS_XTN) { *c->out = v->base | (uint32_t)arr_size(na) << 22 | R(&o[1]) << 5 | R(&o[0]); return 0; }
+		if (!iscimm(&o[2])) BADOPS;
+		unsigned es = 8u << arr_size(na);
+		int64_t sh = o[2].imm;
+		if (sh < 1 || sh > (int64_t)es) FAIL("immediate out of range");
+		*c->out = v->base | (2 * es - (unsigned)sh) << 16 | R(&o[1]) << 5 | R(&o[0]);
+		return 0;
+	}
+	case VS_FMOV: {	/* fmov Vd.2s|4s|2d, #imm */
+		if (c->n != 2 || !isvec(&o[0]) || (o[1].kind != A64O_FIMM && !(isimm(&o[1]) && !o[1].hassym))) return 1;
+		unsigned a = o[0].arr, imm8;
+		if (a != A64_2S && a != A64_4S && a != A64_2D) BADOPS;
+		double d = o[1].kind == A64O_FIMM ? o[1].fimm : (double)o[1].imm;
+		if (fp_imm8(d, &imm8)) FAIL("expected compatible register or floating-point constant");
+		*c->out = v->base | arr_q(a) << 30 | (uint32_t)(a == A64_2D) << 29 | (imm8 >> 5) << 16 | (imm8 & 31) << 5 | R(&o[0]);
+		return 0;
+	}
+	}
+	return 1;
+}
+
 /* ---------------------------------------------------------------- dispatch */
 
 int a64_asm(const char *mn, size_t n, const A64Op *op, int nop, uint32_t *out, A64Fix *fix, const char **err)
@@ -2538,6 +2835,10 @@ int a64_asm(const char *mn, size_t n, const A64Op *op, int nop, uint32_t *out, A
 		int r;
 		if (k_atomic(&c, mn, n, &r)) return r;
 		if (k_lsui(&c, mn, n, &r)) return r;
+	}
+	if (nop && op[0].kind == A64O_VREG) {
+		const Vf *v = vlookup(mn, n);
+		if (v) { int r = k_simd(&c, v); if (r != 1) return r; if (!m) { *err = "invalid operand for instruction"; return -1; } }
 	}
 	if (!m) { *err = "unrecognized instruction mnemonic"; return -1; }
 	switch (m->k) {

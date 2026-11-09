@@ -66,7 +66,7 @@ Existing gates that every change must keep green: `vcc-diff.py cmp`
   `llvm-readelf -r -S -s` / `llvm-objdump -d`.  For PIC, TLS, CFI, DWARF,
   section groups, branch ranges — things that are about the object, not
   runtime output.
-- [ ] **T7 `as` corpus: compiler-generated assembly.** (started: `bench/vas-corpus.py`: clang -S -O0/-O2 of every test C file, clang -c vs vasm byte for byte; 2026-11-09: 2660/3035 identical before ldurs*/register-named symbols, the rest is scalar FP and AdvSIMD.)  `tests/as/*.c` →
+- [ ] **T7 `as` corpus: compiler-generated assembly.** (started: `bench/vas-corpus.py`: clang -S -O0/-O2 of every test C file, clang -c vs vasm byte for byte: 3035/3035 identical on 2026-11-09.  Next: `-g` (DWARF, `.loc`), `-fPIC`, `-march=armv9-a+sve2`.)  `tests/as/*.c` →
   `clang --target=aarch64-linux-gnu -O2 -S` (and `-g`, `-fPIC`, `-march=armv8.5-a+sve2`)
   → assemble with `vasm` and with clang, compare objects with
   `bench/vas-diff.py` (sections, symbols, relocations, bytes).  Plus
@@ -715,9 +715,17 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
   fixed point), `fmov #imm` and the H moves.  *Validated:*
   `ccs/vcc/tests/vas/fp-scalar.s` vs llvm-mc (`bench/vas-enc.py` 293/293);
   `bench/vas-corpus.py -O2` 1441/1519, the rest AdvSIMD.
-- [ ] **AdvSIMD arithmetic, long/wide/narrow, by-element, ld2-ld4/st2-st4,
-  single-lane ld1/st1** [P].  *Validate:* T7 encoding tables (generated
-  from llvm-mc's AArch64 instruction list for these classes).
+- [ ] **AdvSIMD** [P]: done: integer 3-same (mul/mla/mls also by element,
+  sshl/ushl, smax/smin, sabd/uabd), compare with #0, neg/abs, FP 3-same and
+  by element, FP compare (#0.0 too), FP 2-reg misc (frint*, conversions,
+  also the scalar `scvtf d0, d0` forms), `fmov` vector immediates, long/wide
+  (s/u mull/mlal/mlsl/abdl/abal/addl/subl/addw/subw and the 2 forms),
+  shll/sxtl/uxtl, xtn/sqxtn/uqxtn/sqxtun, shrn/rshrn, usra/ssra/urshr/srshr/
+  ursra/srsra, uaddlv/saddlv, mvni, `movi d`, ld2-ld4/st2-st4 and lanes,
+  ldpsw (`ccs/vcc/tests/vas/simd-ops.s` vs llvm-mc).  Left: FP16 vectors,
+  saturating arithmetic (sqadd, sqdmull, ...), pairwise FP, crypto beyond
+  AES/SHA, by-element forms of the long ops, ld1r variants.  *Validate:*
+  `bench/vas-enc.py`, `bench/vas-corpus.py`.
 - [x] **Integer aliases** sxtw, uxtb, sxt*/uxt*, cls, ngc, mneg, smnegl,
   CSSC [P].  *Validate:* T7 tables.  (Done: sxtb/sxth/sxtw, uxtb/uxth/uxtw
   (X forms as llvm-mc), cls, rev64 X, ngc(s), mneg, smnegl/umnegl,
