@@ -839,8 +839,11 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
   non-alloc, init/fini arrays, notes outside groups, .ctors/.init/...,
   exported symbols under -shared; relocations, groups and SHF_LINK_ORDER
   propagate), `--print-gc-sections` on stdout as lld: 6 cases.
+  `__start_X`/`__stop_X` for C-identifier output sections (protected,
+  global; not a gc root: lld's default -z start-stop-gc); orphans
+  stable-sorted by rank before placement as lld's sortSections: 2 cases.
   Left: `--gc-sections` with `.eh_frame` (an error: lld's piecewise FDE
-  handling), `__start_`/`__stop_` symbols, `--emit-relocs`, `--eh-frame-hdr`
+  handling), `--emit-relocs`, `--eh-frame-hdr`
   (ignored), `-z relro/now`.
   *Validate:* `bench/vlink-opts.py` per option; unknown options are errors.
 - [ ] **Relocations**: (done: GOT relaxation adrp+ldr -> adrp+add / nop+adr

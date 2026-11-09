@@ -2358,10 +2358,24 @@ static void ncache_init(void)
 	ncmask = ncap - 1;
 }
 
+/* __start_NAME / __stop_NAME with NAME a C identifier: the NAME, else NULL */
+static const char *start_stop_name(const char *n)
+{
+	const char *s = !strncmp(n, "__start_", 8) ? n + 8 : !strncmp(n, "__stop_", 7) ? n + 7 : NULL;
+
+	if (!s || !*s || isdigit((unsigned char)*s))
+		return NULL;
+	for (const char *p = s; *p; p++)
+		if (!isalnum((unsigned char)*p) && *p != '_')
+			return NULL;
+	return s;
+}
+
 /* --gc-sections as lld's MarkLive: roots are the entry symbol, KEEP, SHF_GNU_RETAIN,
  * non-allocated sections, init/fini/preinit arrays, notes outside groups,
  * .ctors/.dtors/.init/.fini/.jcr, and under -shared the exported definitions;
- * relocations, SHF_LINK_ORDER and section groups propagate liveness */
+ * relocations, SHF_LINK_ORDER and section groups propagate liveness; a
+ * __start_X/__stop_X reference keeps nothing (lld's default -z start-stop-gc) */
 static void gc_sections(const char *entry)
 {
 	uint8_t *live = calloc(isecs.n, 1);
@@ -2487,7 +2501,21 @@ static void assign_sections(void)
 			(opt.orphan == 2 ? error : warn)("%s:(%s) is being placed in '%s'", is->obj != NONE ? objs.v[is->obj]->path : "<internal>",
 			     is->name, is->name);
 	}
-	/* orphans: own output section after everything (rare; lld would rank them) */
+	/* lld sortSections: orphans stable-sorted by rank (non-allocated last), then
+	 * placed one by one, each seeing those placed before it */
+	{
+		uint32_t n = orphans.n, *tmp = alloc(n * sizeof(uint32_t) + 1), k = 0;
+
+		for (int r = 0; r <= 5; r++)
+			for (uint32_t i = 0; i < n; i++) {
+				const ISec *is = &isecs.v[orphans.v[i]];
+				int q = orphan_rank(is->flags, is->type, is->name);
+
+				if ((q < 0 ? 5 : q) == r)
+					tmp[k++] = orphans.v[i];
+			}
+		memcpy(orphans.v, tmp, n * sizeof(uint32_t));
+	}
 	for (uint32_t i = 0; i < orphans.n; i++) {
 		ISec *is = &isecs.v[orphans.v[i]];
 		if (is->osec == OS_DISCARD)
@@ -4416,6 +4444,34 @@ static void demote_symbols(void *arg, size_t i)
 
 static void finish_syms(void *arg, size_t i) { finish_sym(arg, i); }
 
+static VVEC(uint32_t) stop_syms;	/* __stop_X: the section size, after layout */
+
+/* lld addStartStopSymbols: a referenced, undefined __start_X/__stop_X is the
+ * start/end of output section X (X a C identifier), protected, global */
+static void start_stop_symbols(void)
+{
+	for (uint32_t i = 0; i < gorder.n; i++) {
+		G *s = &gsyms[gorder.v[i]];
+		const char *n = gname(gorder.v[i]), *x;
+
+		if (s->state != GS_UNDEF || !(x = start_stop_name(n)))
+			continue;
+		for (uint32_t k = 0; k < topcmds.n; k++) {
+			if (topcmds.v[k].kind != C_OSEC || strcmp(osecs.v[topcmds.v[k].idx].name, x) ||
+			    osecs.v[topcmds.v[k].idx].discard)
+				continue;
+			s->state = GS_SCRIPT;
+			s->ev = (EV){.kind = EV_OSEC, .idx = topcmds.v[k].idx, .align = 1};
+			s->vis = STV_PROTECTED;
+			s->bind = STB_GLOBAL;
+			s->type = STT_NOTYPE;
+			if (n[2] == 's' && n[3] == 't' && n[4] == 'o')
+				VVEC_PUSH(stop_syms, gorder.v[i], alloc);
+			break;
+		}
+	}
+}
+
 static int ld_relocatable(void);
 
 static int run(int argc, char **argv)
@@ -4506,6 +4562,7 @@ static int run(int argc, char **argv)
 					commit_section(os, &isecs.v[d->secs.v[s]]);
 			}
 	}
+	start_stop_symbols();
 	pfor(gorder.n, demote_symbols, NULL);
 	report_undefined();
 	phase("assign sections");
@@ -4567,6 +4624,8 @@ static int run(int argc, char **argv)
 	in_layout = true;
 	assign_addresses();
 	in_layout = false;
+	for (uint32_t i = 0; i < stop_syms.n; i++)
+		gsyms[stop_syms.v[i]].ev.val = osecs.v[gsyms[stop_syms.v[i]].ev.idx].size;
 	for (uint32_t i = 0; i < recorded.n; i++)
 		error("%s", recorded.v[i]);
 	for (uint32_t i = 0; i < assert_fail.n; i++)

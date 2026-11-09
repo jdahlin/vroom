@@ -70,6 +70,9 @@ CASES = [
     ('gc comdat', '--gc-sections {t}/g1.o {t}/g2.o'),
     ('gc archive', '--gc-sections {t}/c.o {a}/libch.a'),
     ('no gc', '--gc-sections --no-gc-sections {t}/gc.o'),
+    # __start_X / __stop_X: output section X; under gc they keep the X sections
+    ('start-stop', '{t}/ss.o {t}/ss2.o'),
+    ('start-stop gc', '--gc-sections {t}/ss.o {t}/ss2.o'),
 ]
 MSG = {'-mbad': 'unknown emulation: foo',
        '-l missing': 'unable to find library -lnosuch', '-l no -L': 'unable to find library -lx'}
@@ -96,6 +99,12 @@ ASM = {	# cm: _start uses cv and cw; cm1/cm2 common of other sizes, cmd defines 
     'cmw': '.data\n.weak cv\n.p2align 3\ncv: .quad 7\n',
 }
 GC = {	# with -ffunction-sections -fdata-sections
+    'ss': 'extern const int __start_my_sec[], __stop_my_sec[];\n'
+          'extern const int __start_none[] __attribute__((weak));\n'
+          '__attribute__((section("my_sec"), used)) static const int a = 1;\n'
+          'int _start(void) { int n = 0; for (const int *p = __start_my_sec; p < __stop_my_sec; p++) n += *p;'
+          ' return n + (__start_none != 0); }\n',
+    'ss2': '__attribute__((section("my_sec"))) const int b = 2, c = 3;\n',
     'gc': 'int used_d = 1, unused_d = 2; static int sd = 3;\n'
           'int leaf(void) { return used_d; }\n'
           'int dead(void) { return unused_d + leaf(); }\n'
