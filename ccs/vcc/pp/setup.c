@@ -273,6 +273,11 @@ bool pp_open_hit(const pp *p, uint64_t *b, const void **he, uint32_t *base, unsi
 	return true;
 }
 
+uint64_t pp_hit_ntok(const void *he)
+{
+	return ((const hent *)he)->total;
+}
+
 const pp_hitreg *pp_hit_regions(const pp *p, uint32_t *n)
 {
 	*n = p->ndrh;

@@ -1030,6 +1030,52 @@ pp at a region start, at any depth, as `pp_top_events` gives for the top level.
      - **Next.** Entries are large on the kernel (~190 KB, mostly W), and W's
        validation is what limits the kernel. Make W cheaper per try, e.g. a TU memo
        for syms and types like the one for tags, or record W lazily.
+   - *3b (2026-11-09): what costs on the kernel, measured before building a W memo.*
+     - **Validation was no longer the problem.** Per run, the kernel spent
+       validate 170 ms, apply 179 ms, publish 491 ms and W copies 270 ms; PG spent
+       72 / 118 / 126 / 55 ms. A TU memo for syms and types would save part of
+       validation, under 1% of `cc_run`, so it was not built.
+     - **Where the cost was.**
+       - *Late gain check.* The gain rule was applied after building the entry:
+         2032 kernel recordings were recorded, translated and relocated, and
+         then dropped. It now runs before anything is built (`dr_pays`).
+       - *Hopeless recordings ran on.* During a recording, W alone can outweigh
+         the region's whole token count (`pp_hit_ntok`: the hit's tokens with its
+         children's). Such a recording now stops at once (as "no gain").
+       - *"Unmapped" was a bug.* 472 kernel recordings (14.9 M tokens) failed
+         because the parameter list of `f(void)` is an empty list at exactly
+         `l1`, the region's list end, which counted as neither own nor W. Own lists
+         are now `l0 ≤ v ≤ l1`, in `rel_one` and `tr`. DRCHECK found no
+         mismatches with the fix.
+     - **Kernel entries**, 512 MB for 1978 entries:
+       - own syms 175 MB (lazy functions and their parameters);
+       - the type log 52 MB, W tags with fields 44 MB, lazy bodies 40 MB,
+         relocations 38 MB, W types 25 MB.
+
+       A bigger budget no longer pays: 1 or 2 GB gave 79.6–79.9 G, against 79.6 G
+       with 512 MB.
+     - **The gain constants re-fitted** after these changes. Twice the cost
+       estimate gave kernel 78.67 G and PG 33.15 G; the old estimate gave
+       79.56 / 33.17; 4× gave 79.25 / 34.08. The doubled estimate is now the
+       default.
+     - **Numbers**, `vpp --batch -j 1`, `cc_run` instructions:
+
+       | | default | 3 | 3b |
+       |---|---|---|---|
+       | PG (1574 TUs) | 35.90 G | 33.83 G | 33.27 G (−7.3%) |
+       | kernel (840 TUs) | 82.68 G | 81.45 G | 78.86 G (−4.6%) |
+
+       PG run-to-run noise is ~±0.4 G (default measured 35.90 and 36.12 G).
+     - **Verification.**
+       - `VCC_DRCHECK`: 0 mismatches (PG 13 967 regions, kernel 9700; ASan+UBSan
+         on 400 PG and 300 kernel TUs).
+       - Objects are identical with `VCC_DR=1`: PG 1570/1570, kernel 840/840.
+       - The default path: suites and gate green (see the commit).
+     - **Next.** Apply and publish now cost more than validation. Possible steps:
+       - smaller entries: store the type log's final content only for `OP_NEW`,
+         and fold the location passes into the offset lists;
+       - more replay coverage: on PG, 20 833 hits found no entry, most of them
+         keys the gain rule turned down.
 4. Fold ccsnap into this if per-region replay of the prefix is as cheap as a snapshot
    restore; otherwise keep both, and let a recording coexist with snapshots (the
    region's type table in the heap, or no snapshot inside a recording).

@@ -182,6 +182,8 @@ const pp_hitreg *pp_hit_regions(const pp *p, uint32_t *n);
 /* VCC_DRCOV/VCC_DRREC/VCC_DR: the hit whose replay is open (its first token's position, its entry; if base:
    its location base, __COUNTER__ at its start, location span); false if none */
 bool pp_open_hit(const pp *p, uint64_t *b, const void **he, uint32_t *base, unsigned *ctr, uint32_t *span);
+/* the tokens of hit entry he, with its children's */
+uint64_t pp_hit_ntok(const void *he);
 /* drop the rest of that hit, whose first token was the last one delivered (cc/replay.c); 0 if not so
    (dry: only whether it would) */
 int pp_skip_hit(pp *p, int dry);

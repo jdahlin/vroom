@@ -380,9 +380,9 @@ static uint32_t dr_gain = 10;	/* VCC_DR_GAIN: publish if the estimated saving is
 /* (estimated instructions: parsing a token; per W record, own record and try of a replay, recording included;
    fitted so that gain 10 is best on PG and the kernel) */
 #define DR_TOKCOST 270
-#define DR_WCOST 600
-#define DR_OWNCOST 160
-#define DR_FIXCOST 12000
+#define DR_WCOST 1200
+#define DR_OWNCOST 320
+#define DR_FIXCOST 24000
 
 static uint32_t key_hash(const void *he, unsigned ctr, uint32_t pack, uint64_t sig)
 {
@@ -477,6 +477,7 @@ struct drrec {
 	uint32_t nsym_bi, nty_bi, ntag_bi;
 	uint32_t s0, t0, y0, n0, l0, i0, f0, r0, a0, st0, tl0, tla0, lb0, as0, lzf0, lzt0, lzs0, pw0;
 	uint32_t lzseen;	/* lazy bodies checked so far (own_fail, early) */
+	uint64_t ntot;		/* the region's tokens (pp) */
 	int npack0, errors0, pperr0;
 	uint32_t ndiag0;
 	uint32_t cplx0[TY_NKINDS];
@@ -912,6 +913,8 @@ static void w_drain(cc *c)
 
 static uint32_t own_fail(cc *c, struct drrec *r, bool all);
 static void rec_doomed(cc *c, uint32_t fail);
+static bool dr_pays(uint64_t tok, uint64_t lzt, uint64_t nw, uint64_t own);
+static uint64_t w_count(const struct drrec *r);
 
 /* a name lookup (ns 0: ordinary, 1: tag) gave s */
 VPRIV __attribute__((noinline)) void dr_read(cc *c, int ns, uint32_t id, uint32_t s)
@@ -935,6 +938,10 @@ VPRIV __attribute__((noinline)) void dr_read(cc *c, int ns, uint32_t id, uint32_
 		w_sym(c, s);
 		w_drain(c);
 		ADD(tk_w, ticks() - t0);
+		if (!r->chk && !dr_pays(r->ntot, 0, w_count(r), 0)) {
+			rec_doomed(c, 1u << F_GAIN);	/* (W alone outweighs all of the region's tokens) */
+			return;
+		}
 	}
 }
 
@@ -1102,6 +1109,7 @@ static void rec_open(cc *c, uint64_t b, const void *he, uint32_t base, unsigned 
 
 	r->open = true;
 	r->b = b, r->he = he, r->base = base, r->ctr = ctr, r->span = span;
+	r->ntot = pp_hit_ntok(he);
 	r->pack = pack_key(c);
 	r->s0 = c->nsym, r->t0 = c->ntag, r->y0 = c->nty, r->n0 = c->nnode, r->l0 = c->nlist;
 	r->i0 = c->nipool, r->f0 = c->nfpool, r->st0 = c->nstr, r->a0 = c->nattr, r->r0 = c->nparams;
@@ -1261,7 +1269,7 @@ static uint64_t tr(trx *x, int k, uint64_t v64)
 		x->bad = true;
 		return 0;
 	case K_LIST:
-		if (v >= e->l0 && v < e->l1)
+		if (v >= e->l0 && v <= e->l1)	/* (as rel_one) */
 			return x->check ? v : (uint32_t)(v + x->dl);
 		if (!v)
 			return 0;
@@ -1272,7 +1280,7 @@ static uint64_t tr(trx *x, int k, uint64_t v64)
 	case K_LIST1:
 		return v ? tr(x, K_LIST, v - 1) + 1 : 0;
 	case K_LISTO:
-		return v >= e->l0 && v < e->l1 && !x->check ? (uint32_t)(v + x->dl) : v;
+		return v >= e->l0 && v <= e->l1 && !x->check ? (uint32_t)(v + x->dl) : v;
 	case K_IPOOL:
 		if (v >= e->i0 && v < e->i1)
 			return x->check ? v : (uint32_t)(v + x->di);
@@ -1446,7 +1454,7 @@ static inline __attribute__((always_inline)) bool rel_one(const drent *e, const 
 				return true;
 			v--;
 		}
-		if (v >= e->l0 && v < e->l1) {
+		if (v >= e->l0 && v <= e->l1) {	/* (l1: an empty list at the end, e.g. f(void)'s parameters) */
 			x.op = RO_DL;
 			break;
 		}
@@ -1623,6 +1631,21 @@ static void rel_apply(const trx *x, char *base, int a)
 static void drcheck(cc *c);
 
 /*
+ * Worth it?  A replay saves parsing the tokens outside lazy bodies (those are
+ * skipped cheaply either way) and costs recording, validating W and copying
+ * the own records (DR_*COST): false if the saving is below gain/10 of the cost.
+ */
+static bool dr_pays(uint64_t tok, uint64_t lzt, uint64_t nw, uint64_t own)
+{
+	return (tok > lzt ? tok - lzt : 0) * DR_TOKCOST * 10 >= (nw * DR_WCOST + own * DR_OWNCOST + DR_FIXCOST) * dr_gain;
+}
+
+static uint64_t w_count(const struct drrec *r)
+{
+	return (uint64_t)r->ws.n + r->wt.n + r->wy.n + r->wa.n + r->wst.n + r->wl.n;
+}
+
+/*
  * A lazy body the region kept, in B: its tokens are in the header cache entry
  * z.e, which is immutable and the same in every TU replaying the region, so
  * only its indices and locations move.
@@ -1698,7 +1721,7 @@ static void rec_doomed(cc *c, uint32_t fail)
 	rec_stop(c);
 	count(S_NOPUB, tok);
 	fail_count(fail, tok);
-	never_note(r->he, r->ctr, r->pack, opt_sig(c->o), fail & F_OWN ? NEVER_AFTER : 1);
+	never_note(r->he, r->ctr, r->pack, opt_sig(c->o), fail & (F_OWN | 1u << F_GAIN) ? NEVER_AFTER : 1);
 }
 
 static void rec_close(cc *c, uint64_t endpos)
@@ -1730,6 +1753,16 @@ static void rec_close(cc *c, uint64_t endpos)
 	fail |= own_fail(c, r, true);
 	if (fail)
 		goto nopub;
+	if (!dr_check) {	/* (before building the entry) */
+		uint64_t lzt = 0;
+
+		for (uint32_t i = r->lzf0; i < c->nlzf; i++)
+			lzt += c->lzf[i].z.close - c->lzf[i].z.open + 1;
+		if (!dr_pays(tok, lzt, w_count(r), (c->nsym - r->s0) + (c->ntag - r->t0) + (c->nnode - r->n0) + r->ops.n)) {
+			fail |= 1u << F_GAIN;
+			goto nopub;
+		}
+	}
 
 	/* writes to W (and, with VCC_DRCHECK, to anything else older) */
 	for (uint32_t i = 0; i < r->ws.n; i++) {
@@ -2200,22 +2233,6 @@ static void rec_close(cc *c, uint64_t endpos)
 		e->bytes += e->nrel[k] * sizeof(drrel) + e->dn[k][RO_DA + 1] * 4;
 	for (int k = 0; k < W_N; k++)
 		e->bytes += (e->wmask[k] + 1) * 8;
-	if (!fail && !dr_check) {
-		/*
-		 * Worth it?  A replay saves parsing the tokens outside lazy bodies (those
-		 * are skipped cheaply either way) and costs recording, validating W and
-		 * copying the own records (DR_*COST).
-		 */
-		uint64_t lzt = 0, nw = 0, own;
-
-		for (uint32_t i = 0; i < e->nlz; i++)
-			lzt += e->lz[i].z.close - e->lz[i].z.open + 1;
-		for (int k = 0; k < W_N; k++)
-			nw += e->nw[k];
-		own = (e->s1 - e->s0) + (e->t1 - e->t0) + (e->n1 - e->n0) + e->nops;
-		if ((tok > lzt ? tok - lzt : 0) * DR_TOKCOST * 10 < (nw * DR_WCOST + own * DR_OWNCOST + DR_FIXCOST) * dr_gain)
-			fail |= 1u << F_GAIN;
-	}
 	if (!fail) {
 		uint64_t m = atomic_fetch_add_explicit(&dr_mem, e->bytes, memory_order_relaxed);
 
