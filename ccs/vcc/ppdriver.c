@@ -347,19 +347,31 @@ static int write_all(int fd, const char *p, size_t n)
 	return 0;
 }
 
+/* outputs go to a temporary next to the target, renamed over it when complete:
+   an interrupted or failed job leaves the old file or none, never a torn one */
+static void tmp_name(char *t, size_t cap, const char *f)
+{
+	static _Atomic unsigned seq;
+
+	snprintf(t, cap, "%s.vcc%d.%u.tmp", f, (int)getpid(), atomic_fetch_add(&seq, 1));
+}
+
 static int write_file(const char *cwd, const char *path, const char *s, size_t n, int errfd)
 {
-	char b[8192];
+	char b[8192], t[8300];
 	const char *f = at(cwd, path, b, sizeof(b));
-	int fd = open(f, O_WRONLY | O_CREAT | O_TRUNC | O_CLOEXEC, 0666);
+	int fd;
 
-	if (fd < 0 || write_all(fd, s, n)) {
-		dprintf(errfd, "vcc: error: cannot write %s: %s\n", path, strerror(errno));
+	tmp_name(t, sizeof(t), f);
+	fd = open(t, O_WRONLY | O_CREAT | O_TRUNC | O_CLOEXEC, 0666);
+	if (fd < 0 || write_all(fd, s, n) || close(fd) || rename(t, f)) {
+		int e = errno;
+
+		dprintf(errfd, "vcc: error: cannot write %s: %s\n", path, strerror(e));
 		if (fd >= 0)
-			close(fd);
+			unlink(t);
 		return 1;
 	}
-	close(fd);
 	return 0;
 }
 
@@ -881,6 +893,7 @@ int ppd_run(int argc, char **argv, const ppd_env *env)
 				.general_regs_only = gregs, .vcc_kernel = vcc_kernel, .lse = lse, .opt = olevel,
 			       .outfd = env->outfd };
 		int fd = -1;
+		char outpath[4096], outtmp[4200];
 
 		co.emit = emit;
 		co.nthreads = getenv("VCC_THREADS") ? atoi(getenv("VCC_THREADS")) : 1;
@@ -893,7 +906,9 @@ int ppd_run(int argc, char **argv, const ppd_env *env)
 				snprintf(path, sizeof(path), "%s/%s", env->cwd, out);
 			else
 				snprintf(path, sizeof(path), "%s", out);
-			fd = open(path, O_WRONLY | O_CREAT | O_TRUNC, 0644);
+			snprintf(outpath, sizeof(outpath), "%s", path);
+			tmp_name(outtmp, sizeof(outtmp), path);
+			fd = open(outtmp, O_WRONLY | O_CREAT | O_TRUNC | O_CLOEXEC, 0666);
 			if (fd < 0) {
 				dprintf(errfd, "vcc: error: cannot open %s\n", out);
 				status = 1;
@@ -909,8 +924,14 @@ int ppd_run(int argc, char **argv, const ppd_env *env)
 			ppd_ns_cc += nsnow() - t1;
 			ppd_ph_add(PPD_PH_CC, v1);
 		}
-		if (fd >= 0)
-			close(fd);
+		if (fd >= 0) {
+			if (close(fd) || (!status && rename(outtmp, outpath))) {
+				dprintf(errfd, "vcc: error: cannot write %s: %s\n", out, strerror(errno));
+				status = 1;
+			}
+			if (status)
+				unlink(outtmp);
+		}
 		if (!status && emit == 2)
 			status = write_obj(env->cwd, out, env->outfd, errfd, darwin);
 		if (!status && emit == 2 && depfile)

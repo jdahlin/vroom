@@ -399,7 +399,9 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
   abandon the job; on SIGTERM stop accepting and drain.
   *Validate:* T12 (kill the shim during a long TU: the output file is not
   written; SIGTERM during a job: the job completes or its output is absent).
-- [ ] **Outputs written in place** [R].  `ppdriver.c:266`.  Write to a
+- [x] **Outputs written in place** [R].  *Done:* every output (`-o`, `-S`, deps)
+  goes to `NAME.vccPID.N.tmp` and is renamed when complete; a failed job
+  unlinks it and leaves the old file.  Was:  `ppdriver.c:266`.  Write to a
   temporary next to the target and `rename()` (ar.c already does).
   *Validate:* T12 (interrupt during write: either the old file or none,
   never a truncated one with a new mtime).
