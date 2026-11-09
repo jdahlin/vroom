@@ -156,6 +156,7 @@ static inline __attribute__((always_inline)) void next_tok(pp *p, ptok *t)
 
 /* the header cache's mode: text for pp_text, tokens for pp_next */
 static int hc_off;
+int pp_drcov;
 
 /* once: a thread that saw the flag but not hc_mem_max stored without a cap (TSan) */
 static void hc_env(void)
@@ -164,6 +165,7 @@ static void hc_env(void)
 
 	hc_mem_max = m ? (size_t)atol(m) << 20 : (size_t)8 << 30;
 	hc_off = getenv("VPP_NOHC") != NULL;
+	pp_drcov = getenv("VCC_DRCOV") != NULL;
 }
 
 static void hc_mode(pp *p, int mode)
@@ -257,6 +259,33 @@ uint64_t pp_ntok(const pp *p)
 uint64_t pp_skipped(const pp *p)
 {
 	return p->skipped_tok;
+}
+
+const pp_hitreg *pp_hit_regions(const pp *p, uint32_t *n)
+{
+	*n = p->ndrh;
+	return p->drh;
+}
+
+/* VCC_DRCOV: a header-cache hit just applied; its replay (if any) is the context at depth d */
+VPRIV void drcov_hit(pp *p, int d0)
+{
+	if (!p->drh)
+		p->drh = varena_alloc(&p->perm, DRCOV_MAX * sizeof(pp_hitreg));
+	if (p->depth > d0) {
+		if (p->ndrs < 64)
+			p->drs[p->ndrs].pos = p->ntok_out, p->drs[p->ndrs++].depth = p->depth;
+	}
+}
+
+/* VCC_DRCOV: the replay context at the top of the stack is done */
+VPRIV void drcov_end(pp *p)
+{
+	if (p->ndrs && p->drs[p->ndrs - 1].depth == p->depth) {
+		p->ndrs--;
+		if (p->ndrh < DRCOV_MAX && p->ntok_out > p->drs[p->ndrs].pos)
+			p->drh[p->ndrh++] = (pp_hitreg){ p->drs[p->ndrs].pos, p->ntok_out, (uint32_t)p->nfile };
+	}
 }
 
 int pp_skip_top(pp *p)

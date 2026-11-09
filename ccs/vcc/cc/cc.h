@@ -258,5 +258,7 @@ typedef struct cc cc;
 int cc_run(pp *p, const cc_opts *o);
 /* lazy bodies kept and parsed so far (all TUs of the process) */
 void cc_lz_stats(char *buf, size_t n);
+/* VCC_DRCOV: header-cache hits that start and end at file-scope declaration boundaries */
+void cc_drcov_stats(char *buf, size_t n);
 
 #endif

@@ -419,6 +419,9 @@ struct pp {
 	uint32_t nfe, next_base;
 	uint64_t ntok_out;	/* tokens pp_next delivered */
 	uint64_t skipped_tok;	/* tokens of regions pp_skip_top dropped */
+	pp_hitreg *drh;		/* VCC_DRCOV: header-cache hits in delivered positions (pp_hit_regions) */
+	uint32_t ndrh, ndrs;
+	struct { uint64_t pos; int depth; } drs[64];	/* hits whose replay is still open */
 	pp_topev *tev;		/* top-level region events (pp_top_events) */
 	uint32_t ntev;
 	uint8_t tev_full, top_rec;
@@ -648,6 +651,10 @@ static inline ctx *push(pp *p);
 VPRIV void push_ptok(pp *p, const ptok *t, uint32_t n, uint32_t mid, uint8_t first, int barrier);
 VPRIV void push_line(pp *p, const ctx *fc, uint32_t b, uint32_t e);
 VPRIV void pop_to(pp *p, int d);
+#define DRCOV_MAX 65536
+extern int pp_drcov;
+VPRIV void drcov_hit(pp *p, int d0);
+VPRIV void drcov_end(pp *p);
 VPRIV void top_event(pp *p, const void *e, uint32_t base, unsigned ctr, uint8_t end, uint8_t hit);
 VPRIV __attribute__((noinline)) void raw(pp *p, ptok *t);
 static inline __attribute__((always_inline)) bool raw_plain(pp *p, ctx *c, ptok *t);

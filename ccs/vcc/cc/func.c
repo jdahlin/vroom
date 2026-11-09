@@ -170,6 +170,8 @@ VPRIV void translation_unit(cc *c)
 {
 	for (;;) {
 		dc_boundary(c);
+		if (unlikely(c->drb))
+			drcov_boundary(c);
 		if (is(c, T_EOF))
 			break;
 		if (accept(c, T_SEMI))

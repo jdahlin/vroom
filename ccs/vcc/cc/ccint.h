@@ -194,6 +194,10 @@ struct cc {
 	uint32_t lzc, lze;
 	pp_lazy lzz;
 	uint32_t lz_wm;		/* parsing a lazy body: file-scope syms from here on are hidden (0: none) */
+
+	/* VCC_DRCOV: delivered positions of file-scope declaration starts (UINT64_MAX: lookahead) */
+	uint64_t *drb;
+	uint32_t ndrb, cdrb;
 };
 
 

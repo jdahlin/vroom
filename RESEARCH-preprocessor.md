@@ -678,6 +678,35 @@ pp at a region start, at any depth, as `pp_top_events` gives for the top level.
    qualifying hit is replayed for free, without changing the output, to bound the gain.
    If the boundary tokens are well under the 65 M parsed header tokens on PG, rethink
    the unit before building.
+   - *Done (2026-11-09).* `VCC_DRCOV=1` makes pp log every header-cache hit (any depth)
+     as [first token, end) in delivered positions, and cc log every file-scope
+     declaration start (with `ntk == 1`). The two are matched at the end of the TU, and
+     `vpp --batch` prints the sums. This is the necessary condition only: diagnostics,
+     pragmas and main-file reads inside a region are not measured yet (step 1).
+
+     | | delivered | dc-skipped | in hits | hits at boundaries | of which top-level |
+     |---|---|---|---|---|---|
+     | PG, `VCC_NODC=1` | 103.0 M | — | 74.9 M | 73.4 M (27 247 of 27 947) | 56.9 M |
+     | PG, default | 75.1 M | 27.9 M | 47.1 M | 46.0 M (25 708 of 26 383) | 29.5 M |
+     | kernel, `VCC_NODC=1` | 597.3 M | — | 541.4 M | 541.4 M (36 065 of 36 095) | 228.4 M |
+     | kernel, default | 491.8 M | 105.5 M | 435.6 M | 435.6 M | 123.2 M |
+
+     ("Delivered" counts lazy bodies skipped in O(1), ~313 M of the kernel's tokens.)
+   - *Reading.* Almost every hit starts and ends at a boundary: 98% of hit tokens on
+     PG, ~100% in the kernel. Headers are included between declarations, and the few
+     x-macro includes are small.
+     - On PG, beyond the prefix snapshots, 46.0 M of the 75.1 M tokens still delivered
+       (61%) are in such hits.
+     - The rest (~29 M) is the main files (~11 M) and the own text of header-cache
+       misses (~18 M). Those misses are mostly guard variants: step 4, or nothing.
+     - 16.5 M of the 46 M lie in nested hits, inside a top-level region that missed.
+       Step 4's "child inside a parent that missed" is therefore not an extra; nested
+       hits must be replayable from step 2 on, which the boundary test already allows.
+     - This is in line with §6.8's estimate, which assumed 81% coverage of the header
+       text. The unit stands.
+   - The instrumentation stays (a `c->drb` test per file-scope declaration, a
+     `pp_drcov` test per hit; `vbench gate` +0.1% on fe/cc). It measures coverage at
+     each later step.
 1. Provenance and versions (side arrays), the read hooks, and record-only mode with
    stats (reads, types and records per entry, bytes). Nothing is replayed yet.
 2. Replay for entries with no external writes and no lazy bodies. A/B on PG.

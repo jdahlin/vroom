@@ -474,6 +474,8 @@ VPRIV void enter_file(pp *p, const vlex_file *f, const char *path, int32_t sdir)
 		bool top = p->tokmode == 2 && (p->nfile == 1 || (p->nfile == 2 && from->f == &p->builtin));
 
 		if (k && hc_try(p, k)) {
+			if (unlikely(pp_drcov) && p->tokmode == 2)
+				drcov_hit(p, d0);
 			if (top) {
 				top_event(p, p->hc_last, b0, c0, 0, 1);
 				if (p->depth > d0)

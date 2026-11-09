@@ -134,6 +134,7 @@ typedef struct fscratch {
 
 /* tu.c */
 VPRIV void *halloc(cc *c, size_t n);
+VPRIV void drcov_boundary(cc *c);
 /* diag.c */
 VPRIV void error_limit(cc *c);
 VPRIV void diag(cc *c, uint32_t loc, const char *what, const char *fmt, va_list ap);
