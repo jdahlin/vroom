@@ -39,14 +39,14 @@ class Skip(Exception): pass
 
 class Vccd:
     """a private vccd in its own directory"""
-    def __init__(self, workers=4, umask=None, sockdir_mode=None):
+    def __init__(self, workers=4, umask=None, sockdir_mode=None, extra=()):
         self.dir = tempfile.mkdtemp(prefix='vccd-test-')
         if sockdir_mode is not None: os.chmod(self.dir, sockdir_mode)
         self.sock = f'{self.dir}/vccd.sock'
         self.logf = f'{self.dir}/vccd.log'
         pre = (lambda: os.umask(umask)) if umask is not None else None
         self.p = subprocess.Popen([f'{vd.BIN}/vccd', '--sock', self.sock, '--backend-sock', f'{self.dir}/none.sock',
-                                   '-j', str(workers)], stdout=open(self.logf, 'w'), stderr=subprocess.STDOUT,
+                                   '-j', str(workers)] + list(extra), stdout=open(self.logf, 'w'), stderr=subprocess.STDOUT,
                                   preexec_fn=pre)
         for _ in range(200):
             if os.path.exists(self.sock): break
@@ -147,6 +147,23 @@ def wrong_fd_count():
         check(v.alive(), 'vccd died')
         st, err = v.cc(d, src)
         check(st == 0, f'normal job after bad requests: {st} {err[-300:]}')
+    finally: v.stop()
+
+@test()
+def spawned_tool_env_clean():
+    """a link spawned for a request gets the request's env minus the dynamic loader's variables"""
+    d0 = tempfile.mkdtemp(prefix='vccd-ld-')
+    dump = f'{d0}/env.txt'
+    with open(f'{d0}/ld', 'w') as f: f.write(f'#!/bin/sh\nenv > {dump}\n')
+    os.chmod(f'{d0}/ld', 0o755)
+    v = Vccd(extra=['--ld', f'{d0}/ld'])
+    try:
+        st = raw_request(v.sock, d0, ['ld', 'x.o', '-o', 'x'], env=['DYLD_INSERT_LIBRARIES=/nonexistent',
+                         'LD_PRELOAD=/nonexistent', 'VCC_TEST_KEEP=1', 'PATH=/usr/bin:/bin'])
+        check(st == 0, f'link status {st}')
+        e = open(dump).read()
+        check('VCC_TEST_KEEP=1' in e, 'the request env did not reach the tool')
+        check('DYLD_INSERT_LIBRARIES' not in e and 'LD_PRELOAD' not in e, 'loader variables reached the tool')
     finally: v.stop()
 
 @test()

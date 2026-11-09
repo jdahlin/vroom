@@ -356,7 +356,9 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
   the peer uid with `getpeereid`/`SO_PEERCRED` on every connection.
   *Validate:* T12 (mode 0700 dir, 0600 socket; connection from another uid
   refused; pre-created squatting socket/dir detected by the shim and refused).
-- [ ] **ld.lld spawned with the request's environment** [R]. `vccd.c:543`.
+- [x] **ld.lld spawned with the request's environment** [R].  *Done:* spawn drops
+  `DYLD_*`, `LD_PRELOAD`, `LD_LIBRARY_PATH`, `LD_AUDIT` (blacklist, so tools keep
+  the variables they read); vccd-test spawned-tool-env-clean.  Was: `vccd.c:543`.
   Whitelist (PATH and the few the tools read); drop `LD_*`/`DYLD_*`.
   *Validate:* T12 (`DYLD_INSERT_LIBRARIES=/nonexistent` in the request does
   not change the child; a test helper dumps its env).
