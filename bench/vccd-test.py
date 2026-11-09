@@ -175,7 +175,7 @@ def garbage_requests():
         check(st == 0, f'normal job after garbage: {st} {err[-300:]}')
     finally: v.stop()
 
-@test(xfail='No timeouts; idle connections stall all workers')
+@test()
 def idle_connections_do_not_stall():
     """with every worker's worth of connections open and silent, a real job still runs"""
     v = Vccd(workers=2)

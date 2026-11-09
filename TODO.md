@@ -395,7 +395,9 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
   `POSIX_SPAWN_CLOEXEC_DEFAULT`), `O_CLOEXEC` in `ppdriver.c:743`,
   `fixdep.c:407`.
   *Validate:* T12 (a spawned child lists its open fds: only 0-2).
-- [ ] **No timeouts; idle connections stall all workers** [R].
+- [x] **No timeouts; idle connections stall all workers** [R].  *Done:* a worker
+  waits 2 s (poll) for the request, SO_RCVTIMEO bounds the payload; a failed
+  recvmsg no longer spins in CMSG_NXTHDR on a zero cmsg_len.  Was:
   `vccd.c:182,190,305`.  Read the request with a deadline; don't tie a
   worker to a connection until the request is complete.
   *Validate:* T12 (open 2×ncpu idle connections, then a real job completes

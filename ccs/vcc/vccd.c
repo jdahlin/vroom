@@ -65,6 +65,7 @@
 #include <time.h>
 #include <unistd.h>
 
+#include <poll.h>
 #include "../protocol.h"
 #include "caps.h"
 #include "ccsnap.h"
@@ -185,11 +186,18 @@ static bool recv_req(struct worker *w, int conn, struct req *r)
 	m.msg_control = cbuf;
 	m.msg_controllen = sizeof(cbuf);
 	r->fds[0] = r->fds[1] = r->fds[2] = -1;
-	ssize_t got = recvmsg(conn, &m, MSG_WAITALL);
+	struct pollfd pf = { conn, POLLIN, 0 };
+	/* the shim sends right after connecting: a silent client frees the worker
+	   (macOS: SO_RCVTIMEO does not bound recvmsg with MSG_WAITALL) */
+	ssize_t got = poll(&pf, 1, 2000) == 1 ? recvmsg(conn, &m, MSG_WAITALL) : -1;
 
 	/* exactly three fds (stdin, stdout, stderr); any other count closes all we got */
+	if (got < 0)
+		m.msg_controllen = 0;
 	for (c = CMSG_FIRSTHDR(&m); c; c = CMSG_NXTHDR(&m, c)) {
-		if (c->cmsg_level != SOL_SOCKET || c->cmsg_type != SCM_RIGHTS || c->cmsg_len < CMSG_LEN(0))
+		if (c->cmsg_len < CMSG_LEN(0))	/* (CMSG_NXTHDR would not advance) */
+			break;
+		if (c->cmsg_level != SOL_SOCKET || c->cmsg_type != SCM_RIGHTS)
 			continue;
 		size_t k = (c->cmsg_len - CMSG_LEN(0)) / sizeof(int);
 
@@ -1153,6 +1161,12 @@ int main(int argc, char **argv)
 			}
 			fcntl(c, F_SETFL, 0);	/* BSD: accept() inherits O_NONBLOCK */
 			fcntl(c, F_SETFD, FD_CLOEXEC);
+			{	/* the shim sends its request right after connecting: a client that
+				   stays silent frees its worker instead of holding it */
+				struct timeval tv = { 2, 0 };
+
+				setsockopt(c, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
+			}
 			queue_push(c);
 		}
 	}
