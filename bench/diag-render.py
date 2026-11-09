@@ -109,11 +109,25 @@ class Renderer:
             rb, re_ = max(rb, ls), min(re_, le)
             for c0 in range(dcols(s, ls, rb), min(dcols(s, ls, re_), lw)):
                 m[c0] = ord('~')
+        for f in d['fixits']:	# a fix-it's replaced range, without its blanks at either end
+            if not same(f['start']) or not same(f.get('end')):
+                continue
+            rb, re_ = f['start']['offset'], f['end']['offset']
+            if re_ <= rb or rb < ls or rb >= le:
+                continue
+            re_ = min(re_, le)
+            while rb < re_ and s[rb] in (32, 9):
+                rb += 1
+            while re_ > rb and s[re_ - 1] in (32, 9):
+                re_ -= 1
+            for c0 in range(dcols(s, ls, rb), min(dcols(s, ls, re_), lw)):
+                if m[c0] == 32:
+                    m[c0] = ord('~')
         ccol = dcols(s, ls, off)
         if ccol < lw:
             m[ccol] = ord('^')
         cl = bytes(m).rstrip(b' ')
-        fixes = [f for f in d['fixits'] if same(f['start']) and ls <= f['start']['offset'] <= le]
+        fixes = [f for f in d['fixits'] if same(f['start']) and ls <= f['start']['offset'] <= le and f['text']]
         for f in fixes:
             c0 = dcols(s, ls, f['start']['offset'])
             if c0 > len(cl):
@@ -256,7 +270,7 @@ class Renderer:
                 labs.insert(j, (c0, m))
         rn = len(bytes(row[:lw + 1]).rstrip(b' '))
         fixes = [f for f in d['fixits'] if f['start'] and f['start'].get('file') is not None and
-                 f['start']['path'] == path and ls <= f['start']['offset'] <= le]
+                 f['start']['path'] == path and ls <= f['start']['offset'] <= le and f['text']]
         for f in fixes:
             c0 = dcols(s, ls, f['start']['offset'])
             if rn < c0 <= lw:
@@ -299,6 +313,23 @@ class Renderer:
             if len(marks) < 32:
                 m = self.mk(s, path, sp['start'], sp['end'], '~', sp['label'])
                 if m:
+                    marks.append(m)
+        for f in d['fixits']:	# a fix-it's replaced range, blanks trimmed
+            st, en = f['start'], f.get('end')
+            if len(marks) >= 32 or not st or not en or st.get('file') is None or en.get('file') is None or \
+               st['path'] != path or en['path'] != path:
+                continue
+            rb, re_ = st['offset'], en['offset']
+            if re_ <= rb or re_ > len(s):
+                continue
+            while rb < re_ and s[rb] in (32, 9):
+                rb += 1
+            while re_ > rb and s[re_ - 1] in (32, 9):
+                re_ -= 1
+            if re_ > rb:
+                m = self.mk(s, path, {'file': path, 'path': path, 'offset': rb}, {'file': path, 'path': path, 'offset': re_}, '~', None)
+                if m:
+                    m['pri'] = 1
                     marks.append(m)
         for k in fold:
             kl = k['location']

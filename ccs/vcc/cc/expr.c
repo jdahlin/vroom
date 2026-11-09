@@ -407,8 +407,12 @@ static inline __attribute__((always_inline)) uint32_t primary_sym(cc *c, uint32_
 {
 	sym *y = &c->syms[s];
 
-	if (y->kind == S_ENUMCONST)
-		return mk_int(c, y->val, y->ty, loc);
+	if (y->kind == S_ENUMCONST) {
+		uint32_t n = mk_int(c, y->val, y->ty, loc);
+
+		N(n)->flags |= NF_ENUMC;
+		return n;
+	}
 	if (unlikely(y->kind == S_TYPEDEF))
 		fatal(c, loc, "unexpected type name '%.*s': expected expression", IDF(id));
 	{

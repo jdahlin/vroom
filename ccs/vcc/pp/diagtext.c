@@ -214,7 +214,7 @@ static void one_line(pp *p, vbuf *b, const fent *e, const vdiag *d, const mark *
 	for (uint32_t i = 0; i < d->nfix; i++) {
 		uint32_t fb = d->fix[i].b, c0;
 
-		if (fb < e->base || fb - e->base < ls || fb - e->base > le)
+		if (fb < e->base || fb - e->base < ls || fb - e->base > le || !*d->fix[i].s)	/* a removal: no text line */
 			continue;
 		c0 = dcols(s, ls, fb - e->base, 0);
 		if (c0 > rn && c0 <= lw)
@@ -275,7 +275,7 @@ static void one_line(pp *p, vbuf *b, const fent *e, const vdiag *d, const mark *
 	for (uint32_t i = 0; i < d->nfix; i++) {
 		uint32_t fb = d->fix[i].b, c0, have;
 
-		if (fb < e->base || fb - e->base < ls || fb - e->base > le)
+		if (fb < e->base || fb - e->base < ls || fb - e->base > le || !*d->fix[i].s)
 			continue;
 		c0 = dcols(s, ls, fb - e->base, 0);
 		have = (uint32_t)fl.n;
@@ -311,6 +311,18 @@ static void snippet_vcc(pp *p, vbuf *b, const fent *e, const vdiag *d, vdiag *co
 	for (uint32_t i = 0; i < d->nspan && nm < MAXMARKS; i++)
 		if (mk(e, d->span[i].b, d->span[i].e, '~', d->span[i].label, &m[nm]))
 			nm++;
+	for (uint32_t i = 0; i < d->nfix && nm < MAXMARKS; i++) {	/* a fix-it's replaced range, blanks trimmed */
+		uint32_t rb = d->fix[i].b, re = d->fix[i].e;
+
+		if (rb < e->base || re <= rb || re - e->base > size)
+			continue;
+		while (rb < re && (s[rb - e->base] == ' ' || s[rb - e->base] == '\t'))
+			rb++;
+		while (re > rb && (s[re - 1 - e->base] == ' ' || s[re - 1 - e->base] == '\t'))
+			re--;
+		if (re > rb && mk(e, rb, re, '~', NULL, &m[nm]))
+			m[nm].pri = 1, nm++;
+	}
 	for (int i = 0; i < nfold && nm < MAXMARKS; i++) {
 		const vdiag *k = fold[i];
 

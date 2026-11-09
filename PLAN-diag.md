@@ -440,8 +440,14 @@ Varje delsteg: nya fall i `tests/diag/` (snapshots, och clang som mätpunkt), la
    (fe +0.40 % mot merge-basen).  Kvar: kod efter return/break och `while (0)` (clangs
    CFG-nåbarhet, TODO.md), typedef-namn i meddelandet (`'s8' (aka 'signed char')`),
    flyttalsfallen (`-Wliteral-conversion`, `-Wimplicit-const-int-float-conversion`).
-   Kvar i D5.1: `-Wformat`, `-Wconstant-logical-operand`, `-Wtautological-compare`, sedan
-   `-Wall`:s `-Wunused-*`.
+   **`-Wconstant-logical-operand` klart (2026-11-10):** clangs regel (höger operand en
+   konstant ≠ 0, 1; vänster ett heltal som inte är bool; ingen uppräknare; operatorn inte från
+   ett makro), noterna "use '&'" med fix-it och (för `&&`) "remove constant" med borttagning.
+   Renderarna (vcc, clang, diag-render.py) markerar nu fix-its ersatta intervall med `~`
+   utan blanktecken i kanterna och skriver ingen tom rad för en ren borttagning, som clang:
+   testfallet är textidentiskt med clang (82 av 88).  `vcc-sema.py warn` 879/879,
+   PostgreSQL 0 varningar, grinden ok.
+   Kvar i D5.1: `-Wformat`, `-Wtautological-compare`, sedan `-Wall`:s `-Wunused-*`.
 2. **Makron**: expanderad text med caret i, ramar från systemheaders vikta,
    flernivå-"expanded from" (TODO.md "Diagnostic details").
 3. **`static_assert`**: operanderna utvärderade (`48 == 56`), och för `sizeof` en

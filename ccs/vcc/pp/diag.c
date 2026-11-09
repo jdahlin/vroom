@@ -466,6 +466,25 @@ static void snippet(pp *p, vbuf *b, const fent *e, const vdiag *d)
 			for (uint32_t c0 = dcols(s, ls, rb, 0), c1 = dcols(s, ls, re, 0); c0 < c1 && c0 < lw; c0++)
 				m[c0] = '~';
 		}
+		/* clang: a fix-it's replaced range is highlighted too, without its blanks at either end */
+		for (uint32_t i = 0; i < d->nfix; i++) {
+			uint32_t rb = d->fix[i].b, re = d->fix[i].e;
+
+			if (rb < e->base || re <= rb)
+				continue;
+			rb -= e->base, re -= e->base;
+			if (rb < ls || rb >= le)
+				continue;
+			if (re > le)
+				re = le;
+			while (rb < re && (s[rb] == ' ' || s[rb] == '\t'))
+				rb++;
+			while (re > rb && (s[re - 1] == ' ' || s[re - 1] == '\t'))
+				re--;
+			for (uint32_t c0 = dcols(s, ls, rb, 0), c1 = dcols(s, ls, re, 0); c0 < c1 && c0 < lw; c0++)
+				if (m[c0] == ' ')
+					m[c0] = '~';
+		}
 		if (ccol < lw)
 			m[ccol] = '^';
 		{
@@ -478,7 +497,7 @@ static void snippet(pp *p, vbuf *b, const fent *e, const vdiag *d)
 			for (uint32_t i = 0; i < d->nfix; i++) {
 				uint32_t fb = d->fix[i].b, c0;
 
-				if (fb < e->base || fb - e->base < ls || fb - e->base > le)
+				if (fb < e->base || fb - e->base < ls || fb - e->base > le || !*d->fix[i].s)
 					continue;
 				c0 = dcols(s, ls, fb - e->base, 0);
 				if (c0 > cl.n)
@@ -500,7 +519,7 @@ static void snippet(pp *p, vbuf *b, const fent *e, const vdiag *d)
 		uint32_t fb = d->fix[i].b;
 		uint32_t c0, have;
 
-		if (fb < e->base || fb - e->base < ls || fb - e->base > le)
+		if (fb < e->base || fb - e->base < ls || fb - e->base > le || !*d->fix[i].s)	/* a removal: no text line */
 			continue;
 		c0 = dcols(s, ls, fb - e->base, 0);
 		have = (uint32_t)fl.n;

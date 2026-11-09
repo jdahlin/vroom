@@ -533,6 +533,47 @@ static void runtime_warn(cc *c, int op, uint32_t l, uint32_t r, uint32_t loc)
 	}
 }
 
+/* clang's -Wconstant-logical-operand: 'x && 4' where '&' was likely meant (the right
+   operand a constant other than 0 and 1, an integer non-bool left one, no enumerator) */
+static __attribute__((cold, noinline)) void logic_const_warn(cc *c, int op, uint32_t l, uint32_t r, uint32_t loc, i128 v)
+{
+	const char *o = op == T_AMPAMP ? "&&" : "||", *bo = op == T_AMPAMP ? "&" : "|";
+	pp_span lr = rng(c, l), rr = rng(c, r);
+	vdiag *d = cc_warn_begin(c, "constant-logical-operand", true, NULL, loc, "use of logical '%s' with constant operand", o), *n;
+
+	(void)v;
+	if (!d)
+		return;
+	pp_diag_label(c->p, d, rr.b, rr.e, NULL);
+	n = pp_diag_note(c->p, d, loc, "use '%s' for a bitwise operation", bo);
+	if (n)
+		pp_diag_fix(c->p, n, loc, loc + 2, bo, VDA_MAYBE);
+	if (op == T_AMPAMP) {
+		n = pp_diag_note(c->p, d, loc, "remove constant to silence this warning");
+		if (n)
+			pp_diag_fix(c->p, n, lr.e, rr.e, "", VDA_MAYBE);
+	}
+	pp_diag_emit(c->p, d);
+}
+
+static inline void logic_const(cc *c, int op, uint32_t l, uint32_t r, uint32_t loc)
+{
+	cval v;
+
+	if (!is_integer(c, N(r)->ty) || !is_integer(c, N(l)->ty) || KIND(c, N(l)->ty) == TY_BOOL ||
+	    !cc_eval(c, r, &v) || v.kind != CV_INT || v.i == 0 || v.i == 1)
+		return;
+	if (N(r)->flags & NF_ENUMC)
+		return;
+	if (N(l)->flags & NF_ENUMC) {
+		cval lv;
+
+		if (cc_eval(c, l, &lv) && lv.kind == CV_INT && lv.i != 0 && lv.i != 1)
+			return;
+	}
+	logic_const_warn(c, op, l, r, loc, v.i);
+}
+
 static uint32_t binary(cc *c, int minp);
 
 static __attribute__((noinline)) uint32_t binary_ops(cc *c, int minp, uint32_t l, uint32_t b)
@@ -560,6 +601,8 @@ static __attribute__((noinline)) uint32_t binary_ops(cc *c, int minp, uint32_t l
 		if (unlikely(ISERR(l) || ISERR(r))) {
 			l = err_node(c, loc);
 		} else {
+			if ((op == T_AMPAMP || op == T_PIPEPIPE) && !mac)
+				logic_const(c, op, l, r, loc);
 			runtime_warn(c, op, l, r, loc);
 			l = binop(c, op, l, r, loc);
 			if (unlikely((op == T_PLUS || op == T_MINUS || op == T_STAR) && N(l)->op == N_BINARY &&
