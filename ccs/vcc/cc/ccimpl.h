@@ -213,6 +213,8 @@ VPRIV const char *tokspell(const ptok *t, char *buf, size_t cap);
 VPRIV __attribute__((noinline, cold, noreturn)) void expect_fail(cc *c, const char *what);
 static inline __attribute__((always_inline)) void expect(cc *c, int kind, const char *what);
 VPRIV void expect_semi(cc *c, const char *after);
+VPRIV bool not_expr_start(cc *c, const ptok *t);
+VPRIV bool decl_comma_typo(cc *c);
 /* sym.c */
 VPRIV uint32_t *dslot(cc *c, uint32_t **dir, uint32_t id);
 static inline uint32_t dget(uint32_t **dir, uint32_t id);

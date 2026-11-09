@@ -124,6 +124,14 @@ Tio lager; varje steg nedan säger vilka det berör.
     varning ("expected ';' at end of declaration list"), i vcc ett fel.
   *Validerat:* tre körningar i rad ger identiska siffror (efter en rättning: cachade
   clang-svar kom som listor, vcc:s som tupler).
+  **Efter `,` för `;` (2026-11-09):** clangs två heuristiker: ett `,` före något som inte
+  kan börja ett uttryck (`{`, `}`, `if`, `for`, `while`, `else`, `goto`, en
+  deklarationsspecificerare) avslutar uttrycket, och `expect_semi` tar `,` eller `:` som
+  ett felskrivet `;` (fix-it, parsningen går vidare); i en deklaration är ett `,` sist på
+  raden före något som inte kan börja en deklarator ett `;` ("expected ';' at end of
+  declaration").  Första felet på clangs plats 82,6 → 88,7 %, annanstans 9,2 → 3,5 %;
+  `semi-comma` 154 av 155 på clangs plats (den sista pekar vcc på själva `,`, clang på
+  följdfelet).  Fler följdfel än clang 18,5 → 17,4 %.  Test: `tests/diag/comma_semi.c`.
 
 ### D1. Strukturerade diagnoser (grunden)
 

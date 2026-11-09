@@ -665,6 +665,8 @@ VPRIV void declaration(cc *c, vec *out, bool file)
 
 				vpush(c, out, n);
 			}
+			if (decl_comma_typo(c))
+				return;
 			if (accept(c, T_COMMA))
 				continue;
 			expect_semi(c, "at end of declaration");
@@ -757,6 +759,8 @@ VPRIV void declaration(cc *c, vec *out, bool file)
 		}
 		if (c->syms[s].kind == S_VAR)	/* the declaration's range, for notes */
 			c->syms[s].plb = dbeg, c->syms[s].ple = c->prevloc;
+		if (decl_comma_typo(c))
+			return;
 		if (accept(c, T_COMMA))
 			continue;
 		expect_semi(c, "at end of declaration");

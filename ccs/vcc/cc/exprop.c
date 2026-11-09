@@ -518,7 +518,7 @@ VPRIV uint32_t assign_expr(cc *c)
 
 static __attribute__((noinline)) uint32_t comma_rest(cc *c, uint32_t l)
 {
-	while (is(c, T_COMMA)) {
+	while (is(c, T_COMMA) && !not_expr_start(c, peek(c, 1))) {
 		uint32_t loc = tok(c)->loc, r;
 
 		next(c);

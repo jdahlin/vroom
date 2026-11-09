@@ -162,9 +162,69 @@ VPRIV void expect_semi(cc *c, const char *after)
 		next(c);
 		return;
 	}
+	if (c->tk[0].kind == T_COMMA || c->tk[0].kind == T_COLON) {
+		/* clang's common typo: ',' or ':' for ';', replaced; parsing goes on after it */
+		e = c->tk[0].loc;
+		fx = (pp_fixit){ e, pp_tok_end(c->p, e), ";" };
+		report(c, "error", e, NULL, 0, &fx, 1, "expected ';' %s", after);
+		next(c);
+		return;
+	}
 	e = pp_tok_end(c->p, c->prevloc);
 	fx = (pp_fixit){ e, e, ";" };
 	report(c, "error", e, NULL, 0, &fx, 1, "expected ';' %s", after);
+}
+
+/* clang's isNotExpressionStart: after a ',' this ends the expression, the ',' being a
+   typo for ';' (expect_semi reports it) */
+VPRIV bool not_expr_start(cc *c, const ptok *t)
+{
+	int kw;
+
+	if (t->kind == T_LBRACE || t->kind == T_RBRACE)
+		return true;
+	if (t->kind != T_IDENT)
+		return false;
+	kw = kwof(t);
+	if (kw == KW_for || kw == KW_while || kw == KW_if || kw == KW_else || kw == KW_goto)
+		return true;
+	if (kw == KW___extension__ || kw == KW___attribute__ || kw == KW___attribute)
+		return false;
+	return is_decl_start(c, t);
+}
+
+/* could t start a declarator after a ',' in a declaration (clang's MightBeDeclarator) */
+static bool might_be_declarator(cc *c, const ptok *t)
+{
+	int kw;
+
+	if (t->kind == T_STAR || t->kind == T_LPAREN || t->kind == T_LSQUARE)
+		return true;
+	if (t->kind != T_IDENT)
+		return false;
+	kw = kwof(t);
+	if (kw == KW___attribute__ || kw == KW___attribute)
+		return true;
+	return !kw && !typedef_id(c, t->id);
+}
+
+/* clang's ParseDeclGroup: a ',' that ends a line, followed by something that cannot
+   start a declarator, was meant as ';'.  Reported and consumed: the declaration ends */
+VPRIV bool decl_comma_typo(cc *c)
+{
+	uint32_t l = c->tk[0].loc;
+	const ptok *t;
+	pp_fixit fx;
+
+	if (c->tk[0].kind != T_COMMA)
+		return false;
+	t = peek(c, 1);
+	if (!(t->flags & TF_SOL) || might_be_declarator(c, t))
+		return false;
+	fx = (pp_fixit){ l, pp_tok_end(c->p, l), ";" };
+	report(c, "error", l, NULL, 0, &fx, 1, "expected ';' at end of declaration");
+	next(c);
+	return true;
 }
 
 /* #pragma pack as clang: pack(N), pack(), push[, id][, N], pop[, id][, N],
