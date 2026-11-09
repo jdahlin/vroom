@@ -507,6 +507,7 @@ VPRIV __attribute__((format(printf, 3, 4), noreturn)) void efatal(ecx *e, uint32
 VPRIV uint32_t canon_sym(cc *c, uint32_t s);
 VPRIV const attrs *sym_attrs(cc *c, uint32_t s);
 VPRIV void sym_name(cc *c, tbuf *b, uint32_t s);
+VPRIV bool sym_quoted(cc *c, uint32_t s);
 VPRIV void ref_name(cc *c, tbuf *b, uint32_t r);
 VPRIV void ref_off(cc *c, tbuf *b, uint32_t r, int64_t off);
 /* darwin.c */

@@ -144,6 +144,79 @@ W1 kan delvis gå parallellt med W0.
 Före planen: wasm-*bygget* av vcc via emscripten (`ccs/wasm/`, commit 8e9f9da) och
 explorer-sidan.
 
+### W8 (2026-11-09): egen länkare, i gren `claude/wasm-w8-linker` (på W5)
+- `ld/wasmld.c`: `vlink` länkar wasm när det anropas som `wasm-ld` eller med
+  `-mwasm64`. Läser relokerbara wasm-objekt (clangs och vccs), arkiv (SysV-
+  symboltabell, medlemmar hämtas lat av starka referenser, `--export` och
+  `--export-if-defined` som i wasm-ld) och emscriptens stubbibliotek
+  (`#STUB`: symboler som JS ger, med beroenden som blir rötter).
+  Symbolupplösning (stark före svag, dubbletter är fel), GC från rötterna
+  (exporter, `NO_STRIP`, konstruktorer), `__wasm_call_ctors` (init-funktioner
+  efter prioritet), odefinierade svaga funktioner som stubbar som fäller och
+  null i tabellen, syntetiska `__stack_pointer`, `__heap_base`, `__data_end`,
+  `__stack_low/high`, `__start_/__stop_X`; minneslayout med `--stack-first`,
+  `-z stack-size`, `--initial-heap`, `--no-growable-memory`, `--table-base`;
+  segment slås ihop per namn (`.rodata`, `.data`, `.bss` utelämnas), data-
+  symboler exporteras som oföränderliga globaler, relokeringar skrivs i de
+  utfyllda fälten, `target_features` som unionen plus `--extra-features`.
+- emcc använder den genom `EM_LLVM_ROOT` = en katalog med emscriptens LLVM-
+  verktyg där `wasm-ld` pekar på `vlink` (`EM_FROZEN_CACHE=1`, cachen läses
+  bara). `bench/vcc-wasm.py --vlink` länkar vccs sida så; `--obj --vlink` är
+  hela vcc-kedjan (vpp -c, vlink) med bara emscriptens libc och JS kvar.
+- Validering: `vcc-wasm.py -j 6 --vlink` och `--obj --vlink`: samma 1 590
+  godkända som med wasm-ld (två fel hittade och rättade på vägen:
+  `--export-if-defined` måste hämta arkivmedlemmar, annars saknas `fflush`
+  och utdata utan radslut försvinner; odefinierad svag funktion ska ha
+  tabellplats 0). Tid för emccs länk av t1.c (libc, dlmalloc, stubbar):
+  `vlink` 5,4 ms mot `wasm-ld` 29,2 ms (bäst av 10, belastad maskin).
+- Saknas (ger fel, inte tyst fel): COMDAT, TLS-segment i flertrådat läge,
+  `--entry`/`_start`, `name`-sektionen (felsökningsnamn), `--growable-table`
+  utan max, delade minnen, PIC/`-shared`. Utdata är inte byte för byte som
+  wasm-ld:s (exportordning, segmentindelning); det krävs inte.
+
+### W5 (2026-11-09): objektfiler, i gren `claude/wasm-w5-objects`
+- `arch/wasm/as/as.c` (+ `was.h`, gränssnittet `wasmas.h`): LLVM:s wasm-`.s`
+  (det generatorn skriver: `.functype`, `.globaltype`, `.tabletype`, `.local`,
+  sektioner, `.globl`/`.weak`/`.hidden`/`.type`/`.size`/`.p2align`, `x = y`,
+  `.set`, data-direktiv och strängar; hela MVP-instruktionsuppsättningen,
+  sign-ext, `trunc_sat`, `memory.copy`/`fill`) till en modell; instruktioner
+  kodas direkt, symboloperander lämnar fasta LEB-fält (5/10 byte) och
+  relokeringar. `platform/wasm/wasm.c` lägger ut modellen som LLVM:s
+  WasmObjectWriter: symboler, funktioner, importer och typer i den ordning
+  assemblern registrerade symbolerna (`call_indirect`-signaturer där
+  instruktionen står), utfyllda sektions- och delsektionsstorlekar,
+  ELEM-segment och tabellimport när en funktionsadress tas,
+  `linking` (symboltabell, segment) och `reloc.CODE`/`reloc.DATA`.
+- `-c` för wasm64: `emit_tu` tar texten (som `VCC_OBJ_TEXT`) genom
+  `wasm_assemble`; drivern skriver bytena (`cc_opts.wasm_obj`). Ännu genom
+  text, inte direkt från generatorn (planens "utan text" återstår, en
+  prestandafråga). `vasm --target=wasm64-…` läser wasm-`.s`.
+- Validering: `bench/vcc-wasm.py --objcmp` jämför `vpp -c`:s objekt byte för
+  byte med clangs objekt för samma `.s`: **alla identiska** (0 avvikelser på
+  sviterna, 1 590 tester godkända länkade av emcc och körda i node på grenens
+  bas 1856415, samma som `-S`-vägen). `--obj` kör sviterna med vccs objekt.
+- arm64 oförändrat: `vcc-same.py` 13 167/13 167 mot bygget före wasm,
+  `vcc-ctests` 1 743/1 743, bygget fil för fil utan varningar; emscripten-bygget
+  (`ccs/wasm/build.sh`) tar med de nya filerna.
+- Tillägg (i `claude/wasm-w8-linker`): konstruktorer. Generatorn tappade
+  `__attribute__((constructor))` tyst för wasm; nu `.init_array[.N]`, som
+  assemblern gör till objektets init-funktioner (linking-delsektion 6, i
+  sektionernas ordning som LLVM); prioriteten `constructor(N)` sparas i
+  `attrs.prio` (front end tappade den, även för arm64, som nu skriver
+  `.init_array.N` som clang). Assemblern tar också egna sektioner
+  (`.custom_section.X`; `producers` och `target_features` sist),
+  `.no_dead_strip` (tabellimporten clang -O0 tvingar fram), segmentflaggan
+  `"S"` och symboler som minnesoffset (`i32.store x`, MEMORY_ADDR_LEB64):
+  clangs egen `-O0`-`.s` ger nu samma objekt som clang. Test
+  `tests/vcc/ctor_priority.c` (arm64 och wasm); destruktorer ger fel för
+  wasm (clang gör dem till `__cxa_atexit`-anrop).
+  Namn utanför ASCII skrivs inom citattecken (`"привет"`, sektionen
+  `".data.привет"`) som clang -S; LLVM:s wasm-assembler tar inte tillbaka
+  dem (clangs egen `.s` faller också), så `vcc-wasm.py` bygger då vccs sida
+  med `vpp -c` (tcc/83_utf8_in_identifiers godkänt).
+- Återstår i W5: generatorn direkt till modellen (utan text), destruktorer,
+  TLS, `vas` i vccd.
+
 ### W1, W2 (2026-11-09): klara
 - W1 omplanerat: i stället för att lyfta ut vikning och inlining ur
   `arch/a64/emit/` (riskabelt, se Risker) väljer `emit/` generator per mål:

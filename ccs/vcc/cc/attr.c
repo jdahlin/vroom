@@ -236,8 +236,25 @@ __attribute__((noinline)) VPRIV void attribute_list_(cc *c, attrs *a)
 			case A_OVERLOADABLE: a->overloadable = 1; break;
 			case A_GNU_INLINE: a->gnu_inline = 1; break;
 			case A_TRANSPARENT_UNION: a->transparent = 1; break;
-			case A_CONSTRUCTOR: a->constructor = 1; break;
-			case A_DESTRUCTOR: a->destructor = 1; break;
+			case A_CONSTRUCTOR:
+			case A_DESTRUCTOR:
+				if (an == A_CONSTRUCTOR)
+					a->constructor = 1;
+				else
+					a->destructor = 1;
+				if (is(c, T_LPAREN)) {
+					/* the priority: lower runs first */
+					i128 v;
+
+					next(c);
+					const_expr(c, &v, NULL);
+					expect(c, T_RPAREN, "')'");
+					if (v < 0 || v > 65535)
+						cc_error(c, loc, "'%s' priority out of range", an == A_CONSTRUCTOR ? "constructor" : "destructor");
+					else
+						a->prio = (uint16_t)v;
+				}
+				continue;
 			case A_COLD: a->cold = 1; break;
 			case A_NONSTRING: a->nonstring = 1; break;
 			case A_MAY_ALIAS: a->may_alias = 1; break;
@@ -278,6 +295,7 @@ VPRIV void merge_attrs(attrs *to, const attrs *from)
 	if (from->counted_by) to->counted_by = from->counted_by;
 	if (from->visibility) to->visibility = from->visibility;
 	if (from->errmsg) to->errmsg = from->errmsg;
+	if (from->prio) to->prio = from->prio;
 	/* the 0/1 flags packed .. noinstr: or them bytewise */
 	{
 		char *t = (char *)&to->packed;

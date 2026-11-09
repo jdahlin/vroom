@@ -73,6 +73,21 @@ VPRIV void sym_header(ecx *e, tbuf *b, uint32_t s, bool fn, const char *defsec, 
 	tb_s(b, ":\n");
 }
 
+/* a constructor's or destructor's pointer: .init_array[.prio] / .fini_array[.prio], as clang */
+static void ctor_entry(cc *c, tbuf *b, uint32_t s, bool fini)
+{
+	const attrs *a = sym_attrs(c, s);
+
+	tb_s(b, fini ? "\t.section\t.fini_array" : "\t.section\t.init_array");
+	if (a && a->prio) {
+		tb_c(b, '.');
+		tb_u(b, a->prio);
+	}
+	tb_s(b, fini ? ",\"aw\",@fini_array\n\t.p2align\t3\n\t.xword\t" : ",\"aw\",@init_array\n\t.p2align\t3\n\t.xword\t");
+	sym_name(c, b, s);
+	tb_c(b, '\n');
+}
+
 /* finish_function for the object backend: the same function as items */
 /* ctor: 1 constructor, 2 destructor, 4 x28 is the frame base (mov x28, sp after the saves), 8 no frame (leaf) */
 static void finish_direct(ecx *e, uint32_t s, uint32_t align, const int *cs, int ncs, int32_t csave, int32_t total, int ctor)
@@ -131,16 +146,12 @@ static void finish_direct(ecx *e, uint32_t s, uint32_t align, const int *cs, int
 	it_close(e, h);
 	if (ctor & 1) {
 		h = it_open(e, IT_TEXT);
-		tb_s(b, "\t.section\t.init_array,\"aw\",@init_array\n\t.p2align\t3\n\t.xword\t");
-		sym_name(c, b, s);
-		tb_c(b, '\n');
+		ctor_entry(c, b, s, false);
 		it_close(e, h);
 	}
 	if (ctor & 2) {
 		h = it_open(e, IT_TEXT);
-		tb_s(b, "\t.section\t.fini_array,\"aw\",@fini_array\n\t.p2align\t3\n\t.xword\t");
-		sym_name(c, b, s);
-		tb_c(b, '\n');
+		ctor_entry(c, b, s, true);
 		it_close(e, h);
 	}
 	e->E->nins += e->nin;
@@ -327,14 +338,10 @@ static void finish_function(ecx *e, uint32_t s)
 	sym_name(c, b, s);
 	tb_c(b, '\n');
 	if (a->constructor) {
-		tb_s(b, "\t.section\t.init_array,\"aw\",@init_array\n\t.p2align\t3\n\t.xword\t");
-		sym_name(c, b, s);
-		tb_c(b, '\n');
+		ctor_entry(c, b, s, false);
 	}
 	if (a->destructor) {
-		tb_s(b, "\t.section\t.fini_array,\"aw\",@fini_array\n\t.p2align\t3\n\t.xword\t");
-		sym_name(c, b, s);
-		tb_c(b, '\n');
+		ctor_entry(c, b, s, true);
 	}
 	e->E->nins += e->nin;
 	e->E->nfn++;

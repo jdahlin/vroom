@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """vcc-wasm.py: the C test suites through vcc's WebAssembly target (PLAN-wasm.md).
 
-  bench/vcc-wasm.py [-j N] [--suite gcc|tcc|vcc] [-v] [--show CAT] [--obj] [PAT]
+  bench/vcc-wasm.py [-j N] [--suite gcc|tcc|vcc] [-v] [--show CAT] [--obj] [--objcmp] [--vlink] [PAT]
 
 Every test of vcc-ctests.py (gcc torture, tcc tests2, our own) is built for
 wasm64-unknown-emscripten twice: by clang (the oracle) and by vcc, each
@@ -9,8 +9,13 @@ linked by emcc (emscripten's libc, -sMEMORY64) and run under node.  vcc
 passes when its program prints what clang's prints and exits the same way.
 
 vcc's side: `vpp -S` (the assembly text) assembled by clang; with --obj,
-`vpp -c` (vcc's own assembler and object writer, W5).  Failures by stage:
-emit (vpp fails), as (clang rejects vcc's assembly), link (emcc), run.
+`vpp -c` (vcc's own assembler and object writer, W5); with --objcmp, both,
+and `vpp -c`'s object must be byte-identical to clang's for the same text.
+With --vlink, emcc links vcc's side with vlink (W8: build/ccs/vlink as
+wasm-ld, through a directory of emscripten's LLVM tools with that one
+replaced); --obj --vlink is vcc's whole chain.
+Failures by stage: emit (vpp fails), as (clang rejects vcc's assembly),
+objcmp, link (emcc), run.
 The test runtime headers (ccs/vcc/tests/rt/include) are used on both sides,
 emscripten's libc behind them.  Clang's results are cached in
 build/ccs/wasmtests/ref (keyed by the source and flags).
@@ -41,9 +46,24 @@ WASM_SKIP = {}
 def sh(cmd, timeout=60, **kw):
     return ct.sh(cmd, timeout=timeout, **kw)
 
-def link(objs, js):
-    rc, _, err = sh(LINK + objs + ['-o', js], timeout=120)
+def link(objs, js, vlink=False):
+    rc, _, err = sh(LINK + objs + ['-o', js], timeout=120, env=VLENV if vlink else None)
     return rc, err.decode(errors='replace')
+
+def vlink_env():
+    # emscripten's LLVM tools with wasm-ld -> vlink; the shared cache is only read
+    llvm_bin = os.path.join(os.path.dirname(os.path.realpath(EMCC)), '..', 'libexec', 'llvm', 'bin')
+    if not os.path.isdir(llvm_bin):
+        llvm_bin = '/opt/homebrew/opt/emscripten/libexec/llvm/bin'
+    shim = f'{OUT}/llvmshim'
+    if not os.path.isdir(shim):
+        os.makedirs(shim + '.tmp', exist_ok=True)
+        for f in os.listdir(llvm_bin):
+            d = os.path.join(shim + '.tmp', f)
+            if not os.path.lexists(d):
+                os.symlink(f'{BUILD}/vlink' if f == 'wasm-ld' else os.path.join(llvm_bin, f), d)
+        os.rename(shim + '.tmp', shim)
+    return dict(os.environ, EM_LLVM_ROOT=shim, EM_FROZEN_CACHE='1', EM_IGNORE_SANITY='1')
 
 def run(js):
     rc, out, err = sh([NODE, js], timeout=20, stdin=subprocess.DEVNULL)
@@ -111,11 +131,24 @@ def one(t):
         if rc and all('call_indirect' in l for l in re.findall(r'error: .*\n(.*)', err.decode(errors='replace'))):
             # LLVM's assembler checks call_indirect's index against an i32 table (clang's own -S fails the same way)
             rc, _, err = sh([CL, TGT, '-Wa,--no-type-check', '-c', f'{wd}/vcc.s', '-o', f'{wd}/vcc.o'])
+        quoted = False
+        if rc and re.search(r'error: (Unexpected token in operand|Expected label after \.type directive, got): "', err.decode(errors='replace')):
+            # quoted (non-ASCII) names, as clang -S writes them, which LLVM's wasm
+            # assembler does not take back: vcc's own assembler builds the object
+            rc, _, err = sh([VPP, '-c'] + vfl + [path, '-o', f'{wd}/vcc.o'], cwd=cwd)
+            quoted = True
         if rc:
             e = err.decode(errors='replace')
             m = re.search(r'error: (.*)', e)
             return t, 'fail', 'as', re.sub(r'\d+', 'N', m.group(1)) if m else ct.first_err(e)
-    rc, err = link([f'{wd}/vcc.o'], f'{wd}/vcc.js')
+        if OBJCMP and not quoted:
+            # vcc's object for the same text, byte for byte against clang's
+            rc, _, err = sh([VPP, '-c'] + vfl + [path, '-o', f'{wd}/vccobj.o'], cwd=cwd)
+            if rc:
+                return t, 'fail', 'objcmp', 'vpp -c: ' + ct.first_err(err.decode(errors='replace'))
+            if open(f'{wd}/vccobj.o', 'rb').read() != open(f'{wd}/vcc.o', 'rb').read():
+                return t, 'fail', 'objcmp', 'object differs from clang\'s for the same .s'
+    rc, err = link([f'{wd}/vcc.o'], f'{wd}/vcc.js', VLENV is not None)
     if rc:
         m = re.search(r'undefined symbol: (\S+)', err)
         return t, 'fail', 'link', 'undefined ' + m.group(1) if m else ct.first_err(err)
@@ -127,15 +160,21 @@ def one(t):
     open(f'{wd}/vcc.out', 'w').write(out); open(f'{wd}/ref.out', 'w').write(ref['out'])
     return t, 'fail', 'run', why
 
-def init(obj):
-    global OBJ
+VLENV = None
+
+def init(obj, objcmp=False, vlenv=None):
+    global OBJ, OBJCMP, VLENV
     OBJ = obj
+    OBJCMP = objcmp
+    VLENV = vlenv
 
 if __name__ == '__main__':
     av = sys.argv[1:]
     j, suite, show, verbose = 6, None, None, False
     obj = '--obj' in av
-    av = [a for a in av if a != '--obj']
+    objcmp = '--objcmp' in av
+    vlenv = vlink_env() if '--vlink' in av else None
+    av = [a for a in av if a not in ('--obj', '--objcmp', '--vlink')]
     if '-v' in av: verbose = True; av.remove('-v')
     for opt in ('-j', '--suite', '--show'):
         if opt in av:
@@ -146,7 +185,7 @@ if __name__ == '__main__':
     pat = av[0] if av else None
     ts = ct.tests(suite, pat)
     t0 = time.time()
-    with Pool(j, initializer=init, initargs=(obj,)) as pool:
+    with Pool(j, initializer=init, initargs=(obj, objcmp, vlenv)) as pool:
         res = pool.map(one, ts, chunksize=1)
     by = defaultdict(Counter)
     whys = defaultdict(Counter)

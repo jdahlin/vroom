@@ -425,8 +425,18 @@ static void wsection(ecx *e, tbuf *b, uint32_t s, const char *kind)
 	if (a->section) {
 		tb_s(b, c->strs[a->section - 1].s);
 	} else {
+		bool q = sym_quoted(c, s);
+		size_t at;
+
+		if (q)
+			tb_c(b, '"');	/* the whole section name quoted, as clang */
 		tb_s(b, kind);
+		at = b->n;
 		wfname(c, b, REF(RK_SYM, s));
+		if (q) {
+			memmove(b->p + at, b->p + at + 1, b->n - at - 1);
+			b->n--;
+		}
 	}
 	tb_s(b, ",\"\",@\n");
 }
@@ -551,6 +561,24 @@ VPRIV void wasm_emit_function(ecx *e, uint32_t s)
 		tb_c(f, '\n');
 	}
 	tb_s(f, "\tend_function\n");
+	{
+		/* a constructor: a pointer in .init_array[.prio], which the assembler turns
+		   into the object's init functions */
+		const attrs *a = sym_attrs(c, s);
+
+		if (a && a->constructor) {
+			tb_s(f, "\t.section\t.init_array");
+			if (a->prio) {
+				tb_c(f, '.');
+				tb_u(f, a->prio);
+			}
+			tb_s(f, ",\"\",@\n\t.p2align\t3, 0x0\n\t.int64\t");
+			wfname(c, f, REF(RK_SYM, s));
+			tb_c(f, '\n');
+		}
+		if (a && a->destructor)
+			efatal(e, y->loc, "wasm: destructors are not supported yet (PLAN-wasm.md W5)");
+	}
 	if (wis_main(c, s) && f->n > 0 && strstr(f->p, "__original_main:")) {
 		/* main(void): what emscripten calls is main(argc, argv) (clang's wrapper) */
 		tb_s(f, "\t.section\t.text.main,\"\",@\n\t.globl\tmain\n\t.type\tmain,@function\nmain:\n"
