@@ -66,6 +66,8 @@ static void cc_init(cc *c, pp *p, const cc_opts *o)
 
 		if (k == TY_LDOUBLE && o->target == PP_DARWIN)
 			t.size = 8, t.align = 8;
+		if (k == TY_LDOUBLE && o->target == PP_WASM64)
+			t.align = 8;	/* emscripten: binary128, 8-byte aligned */
 		c->ty[k] = t;
 		c->ty[k].canon = (uint32_t)k;
 		c->nty++;
@@ -80,7 +82,7 @@ static void cc_init(cc *c, pp *p, const cc_opts *o)
 	}
 	c->t_size = prim(TY_ULONG);
 	c->t_ptrdiff = prim(TY_LONG);
-	c->t_wchar = o->short_wchar ? prim(TY_USHORT) : o->target == PP_DARWIN ? prim(TY_INT) : prim(TY_UINT);
+	c->t_wchar = o->short_wchar ? prim(TY_USHORT) : o->target != PP_LINUX_AARCH64 ? prim(TY_INT) : prim(TY_UINT);
 	c->t_char16 = prim(TY_USHORT);
 	c->t_char32 = prim(TY_UINT);
 	c->id_func = vintern_copy("__func__\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0", 8);
@@ -98,6 +100,8 @@ static void cc_init(cc *c, pp *p, const cc_opts *o)
 
 		if (o->target == PP_DARWIN) {
 			vl = ty_ptr(c, prim(TY_CHAR));
+		} else if (o->target == PP_WASM64) {
+			vl = ty_ptr(c, prim(TY_VOID));
 		} else {
 			/* struct __va_list { void *__stack, *__gr_top, *__vr_top; int __gr_offs, __vr_offs; } */
 			uint32_t ti = tag_new(c, TY_STRUCT, vintern_copy("__va_list\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0", 9), 0);
@@ -193,7 +197,9 @@ int cc_run(pp *p, const cc_opts *o)
 	}
 	if (o->dump_layouts && !c->errors)
 		layout_checks(c);
-	if (o->emit && !c->errors && !pp_errors(p))
+	if (o->emit && !c->errors && !pp_errors(p) && o->target == PP_WASM64)
+		cc_error(c, 0, "wasm64: no code generator yet (PLAN-wasm.md, step W2)");
+	else if (o->emit && !c->errors && !pp_errors(p))
 		c->errors += emit_tu(c, o);
 	errors = c->errors;
 	dc_end(c);

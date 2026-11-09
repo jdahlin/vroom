@@ -17,7 +17,7 @@ import os, random, re, subprocess, sys, tempfile
 B = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 VPP = os.environ.get('VCC_BIN', f'{B}/build/ccs') + '/vpp'
 CL = os.environ.get('CLANG', 'clang')
-TARGETS = ('aarch64-linux-gnu', 'arm64-apple-darwin')
+TARGETS = ('aarch64-linux-gnu', 'arm64-apple-darwin', 'wasm64-unknown-emscripten')
 TYPES = [('char', 8), ('signed char', 8), ('unsigned char', 8), ('_Bool', 1), ('short', 16), ('unsigned short', 16),
          ('int', 32), ('unsigned', 32), ('long', 64), ('unsigned long', 64), ('long long', 64)]
 PLAIN = ['char', 'short', 'int', 'long', 'char[3]', 'double']

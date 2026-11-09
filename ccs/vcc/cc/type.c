@@ -233,7 +233,9 @@ VPRIV qty ty_func(cc *c, qty ret, const qty *par, uint32_t n, int flags)
 VPRIV qty ty_vector(cc *c, qty elem, uint32_t size)
 {
 	const ctype *e = T(c, elem);
-	ctype t = { .kind = TY_VECTOR, .base = QUNQ(elem), .size = size, .align = size > 16 ? 16 : size };
+	/* arm64: at most 16 (the NEON registers); wasm: the vector's size */
+	ctype t = { .kind = TY_VECTOR, .base = QUNQ(elem), .size = size,
+		    .align = size > 16 && c->o->target != PP_WASM64 ? 16 : size };
 
 	t.n = e->size ? (uint32_t)(size / e->size) : 0;
 	return QT(ty_intern(c, &t), 0);

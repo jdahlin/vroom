@@ -41,11 +41,11 @@ katalogomflyttningen (PLAN-fas2.md, "Status katalogstruktur").
 | `long`, pekare, `size_t` | 8 | 8 | **4** |
 | `long double` | binary128 | binary128 | binary128 |
 | `char` | unsigned | **signed** | **signed** |
-| `va_list` | AAPCS64-struct | `char *` | `char *` |
+| `va_list` | AAPCS64-struct | `void *` | `void *` |
 | största alignment | 16 | 16 | 16 |
 
 wasm64 är LP64 som arm64, så typtabellen kan stå kvar. Det som skiljer är `char`
-och `va_list`, och de har vi redan som Darwin-varianter. Explorern är också
+(som Darwin) och `va_list` (`void *`, Darwin har `char *`). Explorern är också
 memory64. wasm32 (ILP32) kräver en typtabell per mål och 32-bitarspekare genom
 hela emittern, så det kommer sist (W6).
 
@@ -100,7 +100,7 @@ satser blir wasm:s strukturerade kontrollflöde rakt av:
 
 | # | Leverans | Kriterium |
 |---|----------|-----------|
-| W0 | **Målval och front end.** `target` i stället för `darwin`; `--target=wasm64-unknown-emscripten`; predefines från clang; `char` signed och `va_list` som `char *` för wasm | `vpp -dM -E` = `clang -dM -E` för målet; `vcc-sema.py layout` med wasm64 som mål (layouter, konstanter, typer kontrollerade av clang); arm64-utdata byte-identiska |
+| W0 | **Målval och front end.** `target` i stället för `darwin`; `--target=wasm64-unknown-emscripten`; predefines från clang; `char` signed och `va_list` som `void *` för wasm | `vpp -dM -E` = `clang -dM -E` för målet; `vcc-sema.py layout` med wasm64 som mål (layouter, konstanter, typer kontrollerade av clang); arm64-utdata byte-identiska |
 | W1 | **Lyft ut det generiska ur `arch/a64/emit/`.** Vikning, nåbarhet, inlining, `__builtin_constant_p` och `need_fold` till `emit/` bakom ett gränssnitt per arch | 1 326 arm64-utdata byte-identiska; `vbench.py gate` inom 1 %; kärnan bootar |
 | W2 | **Första wasm-utdata.** `arch/wasm/emit/` för heltalsaritmetik, locals, parametrar, `return`, direkta anrop, `if`/loopar/`break`/`continue`; `-S`. Explorern får målet "wasm64" | Utdata assembleras av `clang --target=wasm64-unknown-emscripten -c`, länkas av emcc och körs i node med samma resultat som clangs; nytt harness `bench/vcc-wasm.py` |
 | W3 | **Minne och data.** Globala variabler, strängar, initierare, pekararitmetik, skuggstack för adresstagna lokala variabler, arrayer och structs, `memcpy`/`memset` för aggregat | `vcc-ctests.py --suite vcc` med `--target wasm64` i node |
@@ -141,5 +141,28 @@ W1 kan delvis gå parallellt med W0.
 
 ## Status
 
-Inte påbörjad (2026-11-09). Före detta: wasm-*bygget* av vcc via emscripten
-(`ccs/wasm/`, commit 8e9f9da) och explorer-sidan.
+Före planen: wasm-*bygget* av vcc via emscripten (`ccs/wasm/`, commit 8e9f9da) och
+explorer-sidan.
+
+### W0 (2026-11-09): klar
+- `--target=wasm64-…` ger `PP_WASM64` (tredje kolumnen i `has_tab`, `pp.h`); drivern
+  skiljer `lnx` (aarch64 Linux) från Darwin och wasm, så Linux-tilläggen (`-fshort-wchar`-
+  tabellen, `__ARM_NEON`, LSE) inte hamnar i wasm-predefines. `gen-ppdata.sh` ger
+  `predef_wasm64`, `predef_order_wasm64` och wasm-svaren på `__has_*`; körd med
+  `EXTRA_INC="work/glibc-include <emscriptens sysroot/include>"`. Linux- och
+  Darwin-kolumnerna och -tabellerna är oförändrade; 23 nya namn ur emscriptens headers.
+- Front end för wasm64, kontrollerat mot clang 23: `char` signed, `wchar_t` `int`,
+  `__builtin_va_list` `void *`, `long double` binary128 med alignment 8 (emscripten),
+  namnlösa bit-fält som Apple (påverkar inte postens alignment), GNU-vektorer
+  alignade till hela storleken (arm64: högst 16).
+- `-S`/`-c` för wasm64 ger ett fel som pekar på W2 tills kodgeneratorn finns.
+- Verifierat: `vpp -dM -E` = clang för wasm64 med `-O0/-O1/-O2/-Os`, `-std=c99`,
+  `-fPIC`, `-ffreestanding` (C23 avviker, som för Linux redan före);
+  `vcc-bflayout.py` 6 604 påståenden per mål, 0 avvisade för alla tre målen;
+  layoutpåståenden (`--vcc-layout-checks`) för 1 880 testfiler med wasm64 som mål:
+  83 858 påståenden, de 9 filer clang avvisar har samma avvisningar för aarch64-linux
+  (befintliga, `_Atomic`-kompatibilitet m.m.). arm64 oförändrat: nytt
+  `bench/vcc-same.py` 13 160/13 160 utdata identiska (1 880 filer × -c -O0/-O1/-O2,
+  -S, -E, Darwin -c/-S) mot bygget före, `vbench.py check --quick` 66/66;
+  `vcc-diff batch --cmp --kernel` 873/873, `vcc-sema batch` 878/879, `vcc-driver`
+  41/41, `vcc-ctests --suite vcc` 34/34.

@@ -52,7 +52,7 @@ typedef struct pp_opts {
 	const char *cwd;		/* relative paths are relative to this (NULL: process cwd) */
 	int errfd;			/* diagnostics (0: stderr) */
 	int asm_mode;			/* assembler-with-cpp: unknown directives pass, # need not stringify */
-	int target;			/* PP_LINUX_AARCH64 or PP_DARWIN (column of the feature table) */
+	int target;			/* PP_LINUX_AARCH64, PP_DARWIN or PP_WASM64 (column of the feature table) */
 	int diag_color;			/* diagnostics: 1 colors, -1 none, 0 when errfd is a terminal */
 	int diag_nocaret;		/* -fno-caret-diagnostics: no source lines */
 	const char *const *wargs;	/* -W..., -w options in command-line order */
@@ -71,7 +71,7 @@ typedef struct pp_opts {
 	int fatal_continue;		/* -E text: a fatal error (file not found) does not end the TU, as clang */
 } pp_opts;
 
-enum { PP_LINUX_AARCH64, PP_DARWIN };
+enum { PP_LINUX_AARCH64, PP_DARWIN, PP_WASM64 };
 
 /* set by the front end (a constructor): __has_builtin is 1 for a name it implements */
 extern int (*pp_builtin_known)(const char *name);

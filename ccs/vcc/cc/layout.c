@@ -79,8 +79,8 @@ static void lay_bitfield(cc *c, layout *l, field *f, uint32_t fattr_align, bool 
 	}
 	if (l->data_size > l->size)
 		l->size = l->data_size;
-	if (c->o->target == PP_DARWIN && !f->name)
-		falign = ufalign = 8;	/* Apple (no useZeroLengthBitfieldAlignment): unnamed bit-fields leave the record's alignment */
+	if (c->o->target != PP_LINUX_AARCH64 && !f->name)
+		falign = ufalign = 8;	/* Apple, wasm (no useZeroLengthBitfieldAlignment): unnamed bit-fields leave the record's alignment */
 	lay_update(l, falign, ufalign);
 }
 

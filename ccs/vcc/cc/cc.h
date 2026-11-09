@@ -230,7 +230,7 @@ typedef struct node {
 /* ---------------- the TU ---------------- */
 
 typedef struct cc_opts {	/* fields before outfd: parse options, all in the decl cache key */
-	int target;		/* PP_LINUX_AARCH64 / PP_DARWIN */
+	int target;		/* PP_LINUX_AARCH64 / PP_DARWIN / PP_WASM64 */
 	int unsigned_char;
 	int ms_anon;		/* -fms-anonymous-structs / -fms-extensions: "struct S;" members */
 	int short_wchar;	/* -fshort-wchar */

@@ -896,6 +896,386 @@ static const char predef_darwin[] =
 	"#define __unsafe_unretained \n"
 	"#define __weak __attribute__((objc_gc(weak)))\n"
 	;
+static const char predef_wasm64[] =
+	"#define _LP64 1\n"
+	"#define __ATOMIC_ACQUIRE 2\n"
+	"#define __ATOMIC_ACQ_REL 4\n"
+	"#define __ATOMIC_CONSUME 1\n"
+	"#define __ATOMIC_RELAXED 0\n"
+	"#define __ATOMIC_RELEASE 3\n"
+	"#define __ATOMIC_SEQ_CST 5\n"
+	"#define __BIGGEST_ALIGNMENT__ 16\n"
+	"#define __BITINT_MAXWIDTH__ 128\n"
+	"#define __BOOL_WIDTH__ 1\n"
+	"#define __BYTE_ORDER__ __ORDER_LITTLE_ENDIAN__\n"
+	"#define __CHAR16_TYPE__ unsigned short\n"
+	"#define __CHAR32_TYPE__ unsigned int\n"
+	"#define __CHAR_BIT__ 8\n"
+	"#define __CLANG_ATOMIC_BOOL_LOCK_FREE 2\n"
+	"#define __CLANG_ATOMIC_CHAR16_T_LOCK_FREE 2\n"
+	"#define __CLANG_ATOMIC_CHAR32_T_LOCK_FREE 2\n"
+	"#define __CLANG_ATOMIC_CHAR_LOCK_FREE 2\n"
+	"#define __CLANG_ATOMIC_INT_LOCK_FREE 2\n"
+	"#define __CLANG_ATOMIC_LLONG_LOCK_FREE 2\n"
+	"#define __CLANG_ATOMIC_LONG_LOCK_FREE 2\n"
+	"#define __CLANG_ATOMIC_POINTER_LOCK_FREE 2\n"
+	"#define __CLANG_ATOMIC_SHORT_LOCK_FREE 2\n"
+	"#define __CLANG_ATOMIC_WCHAR_T_LOCK_FREE 2\n"
+	"#define __CONSTANT_CFSTRINGS__ 1\n"
+	"#define __DBL_DECIMAL_DIG__ 17\n"
+	"#define __DBL_DENORM_MIN__ 4.9406564584124654e-324\n"
+	"#define __DBL_DIG__ 15\n"
+	"#define __DBL_EPSILON__ 2.2204460492503131e-16\n"
+	"#define __DBL_HAS_DENORM__ 1\n"
+	"#define __DBL_HAS_INFINITY__ 1\n"
+	"#define __DBL_HAS_QUIET_NAN__ 1\n"
+	"#define __DBL_MANT_DIG__ 53\n"
+	"#define __DBL_MAX_10_EXP__ 308\n"
+	"#define __DBL_MAX_EXP__ 1024\n"
+	"#define __DBL_MAX__ 1.7976931348623157e+308\n"
+	"#define __DBL_MIN_10_EXP__ (-307)\n"
+	"#define __DBL_MIN_EXP__ (-1021)\n"
+	"#define __DBL_MIN__ 2.2250738585072014e-308\n"
+	"#define __DBL_NORM_MAX__ 1.7976931348623157e+308\n"
+	"#define __DECIMAL_DIG__ __LDBL_DECIMAL_DIG__\n"
+	"#define __EMSCRIPTEN__ 1\n"
+	"#define __FINITE_MATH_ONLY__ 0\n"
+	"#define __FLOAT128__ 1\n"
+	"#define __FLT_DECIMAL_DIG__ 9\n"
+	"#define __FLT_DENORM_MIN__ 1.40129846e-45F\n"
+	"#define __FLT_DIG__ 6\n"
+	"#define __FLT_EPSILON__ 1.19209290e-7F\n"
+	"#define __FLT_HAS_DENORM__ 1\n"
+	"#define __FLT_HAS_INFINITY__ 1\n"
+	"#define __FLT_HAS_QUIET_NAN__ 1\n"
+	"#define __FLT_MANT_DIG__ 24\n"
+	"#define __FLT_MAX_10_EXP__ 38\n"
+	"#define __FLT_MAX_EXP__ 128\n"
+	"#define __FLT_MAX__ 3.40282347e+38F\n"
+	"#define __FLT_MIN_10_EXP__ (-37)\n"
+	"#define __FLT_MIN_EXP__ (-125)\n"
+	"#define __FLT_MIN__ 1.17549435e-38F\n"
+	"#define __FLT_NORM_MAX__ 3.40282347e+38F\n"
+	"#define __FLT_RADIX__ 2\n"
+	"#define __FPCLASS_NEGINF 0x0004\n"
+	"#define __FPCLASS_NEGNORMAL 0x0008\n"
+	"#define __FPCLASS_NEGSUBNORMAL 0x0010\n"
+	"#define __FPCLASS_NEGZERO 0x0020\n"
+	"#define __FPCLASS_POSINF 0x0200\n"
+	"#define __FPCLASS_POSNORMAL 0x0100\n"
+	"#define __FPCLASS_POSSUBNORMAL 0x0080\n"
+	"#define __FPCLASS_POSZERO 0x0040\n"
+	"#define __FPCLASS_QNAN 0x0002\n"
+	"#define __FPCLASS_SNAN 0x0001\n"
+	"#define __GCC_ATOMIC_BOOL_LOCK_FREE 2\n"
+	"#define __GCC_ATOMIC_CHAR16_T_LOCK_FREE 2\n"
+	"#define __GCC_ATOMIC_CHAR32_T_LOCK_FREE 2\n"
+	"#define __GCC_ATOMIC_CHAR_LOCK_FREE 2\n"
+	"#define __GCC_ATOMIC_INT_LOCK_FREE 2\n"
+	"#define __GCC_ATOMIC_LLONG_LOCK_FREE 2\n"
+	"#define __GCC_ATOMIC_LONG_LOCK_FREE 2\n"
+	"#define __GCC_ATOMIC_POINTER_LOCK_FREE 2\n"
+	"#define __GCC_ATOMIC_SHORT_LOCK_FREE 2\n"
+	"#define __GCC_ATOMIC_TEST_AND_SET_TRUEVAL 1\n"
+	"#define __GCC_ATOMIC_WCHAR_T_LOCK_FREE 2\n"
+	"#define __GCC_CONSTRUCTIVE_SIZE 64\n"
+	"#define __GCC_DESTRUCTIVE_SIZE 64\n"
+	"#define __GCC_HAVE_SYNC_COMPARE_AND_SWAP_1 1\n"
+	"#define __GCC_HAVE_SYNC_COMPARE_AND_SWAP_2 1\n"
+	"#define __GCC_HAVE_SYNC_COMPARE_AND_SWAP_4 1\n"
+	"#define __GCC_HAVE_SYNC_COMPARE_AND_SWAP_8 1\n"
+	"#define __GNUC_MINOR__ 2\n"
+	"#define __GNUC_PATCHLEVEL__ 1\n"
+	"#define __GNUC_STDC_INLINE__ 1\n"
+	"#define __GNUC__ 4\n"
+	"#define __GXX_ABI_VERSION 1002\n"
+	"#define __INT16_C(c) c\n"
+	"#define __INT16_C_SUFFIX__ \n"
+	"#define __INT16_FMTd__ \"hd\"\n"
+	"#define __INT16_FMTi__ \"hi\"\n"
+	"#define __INT16_MAX__ 32767\n"
+	"#define __INT16_TYPE__ short\n"
+	"#define __INT32_C(c) c\n"
+	"#define __INT32_C_SUFFIX__ \n"
+	"#define __INT32_FMTd__ \"d\"\n"
+	"#define __INT32_FMTi__ \"i\"\n"
+	"#define __INT32_MAX__ 2147483647\n"
+	"#define __INT32_TYPE__ int\n"
+	"#define __INT64_C(c) c##LL\n"
+	"#define __INT64_C_SUFFIX__ LL\n"
+	"#define __INT64_FMTd__ \"lld\"\n"
+	"#define __INT64_FMTi__ \"lli\"\n"
+	"#define __INT64_MAX__ 9223372036854775807LL\n"
+	"#define __INT64_TYPE__ long long int\n"
+	"#define __INT8_C(c) c\n"
+	"#define __INT8_C_SUFFIX__ \n"
+	"#define __INT8_FMTd__ \"hhd\"\n"
+	"#define __INT8_FMTi__ \"hhi\"\n"
+	"#define __INT8_MAX__ 127\n"
+	"#define __INT8_TYPE__ signed char\n"
+	"#define __INTMAX_C(c) c##LL\n"
+	"#define __INTMAX_C_SUFFIX__ LL\n"
+	"#define __INTMAX_FMTd__ \"lld\"\n"
+	"#define __INTMAX_FMTi__ \"lli\"\n"
+	"#define __INTMAX_MAX__ 9223372036854775807LL\n"
+	"#define __INTMAX_TYPE__ long long int\n"
+	"#define __INTMAX_WIDTH__ 64\n"
+	"#define __INTPTR_FMTd__ \"ld\"\n"
+	"#define __INTPTR_FMTi__ \"li\"\n"
+	"#define __INTPTR_MAX__ 9223372036854775807L\n"
+	"#define __INTPTR_TYPE__ long int\n"
+	"#define __INTPTR_WIDTH__ 64\n"
+	"#define __INT_FAST16_FMTd__ \"hd\"\n"
+	"#define __INT_FAST16_FMTi__ \"hi\"\n"
+	"#define __INT_FAST16_MAX__ 32767\n"
+	"#define __INT_FAST16_TYPE__ short\n"
+	"#define __INT_FAST16_WIDTH__ 16\n"
+	"#define __INT_FAST32_FMTd__ \"d\"\n"
+	"#define __INT_FAST32_FMTi__ \"i\"\n"
+	"#define __INT_FAST32_MAX__ 2147483647\n"
+	"#define __INT_FAST32_TYPE__ int\n"
+	"#define __INT_FAST32_WIDTH__ 32\n"
+	"#define __INT_FAST64_FMTd__ \"lld\"\n"
+	"#define __INT_FAST64_FMTi__ \"lli\"\n"
+	"#define __INT_FAST64_MAX__ 9223372036854775807LL\n"
+	"#define __INT_FAST64_TYPE__ long long int\n"
+	"#define __INT_FAST64_WIDTH__ 64\n"
+	"#define __INT_FAST8_FMTd__ \"hhd\"\n"
+	"#define __INT_FAST8_FMTi__ \"hhi\"\n"
+	"#define __INT_FAST8_MAX__ 127\n"
+	"#define __INT_FAST8_TYPE__ signed char\n"
+	"#define __INT_FAST8_WIDTH__ 8\n"
+	"#define __INT_LEAST16_FMTd__ \"hd\"\n"
+	"#define __INT_LEAST16_FMTi__ \"hi\"\n"
+	"#define __INT_LEAST16_MAX__ 32767\n"
+	"#define __INT_LEAST16_TYPE__ short\n"
+	"#define __INT_LEAST16_WIDTH__ 16\n"
+	"#define __INT_LEAST32_FMTd__ \"d\"\n"
+	"#define __INT_LEAST32_FMTi__ \"i\"\n"
+	"#define __INT_LEAST32_MAX__ 2147483647\n"
+	"#define __INT_LEAST32_TYPE__ int\n"
+	"#define __INT_LEAST32_WIDTH__ 32\n"
+	"#define __INT_LEAST64_FMTd__ \"lld\"\n"
+	"#define __INT_LEAST64_FMTi__ \"lli\"\n"
+	"#define __INT_LEAST64_MAX__ 9223372036854775807LL\n"
+	"#define __INT_LEAST64_TYPE__ long long int\n"
+	"#define __INT_LEAST64_WIDTH__ 64\n"
+	"#define __INT_LEAST8_FMTd__ \"hhd\"\n"
+	"#define __INT_LEAST8_FMTi__ \"hhi\"\n"
+	"#define __INT_LEAST8_MAX__ 127\n"
+	"#define __INT_LEAST8_TYPE__ signed char\n"
+	"#define __INT_LEAST8_WIDTH__ 8\n"
+	"#define __INT_MAX__ 2147483647\n"
+	"#define __INT_WIDTH__ 32\n"
+	"#define __LDBL_DECIMAL_DIG__ 36\n"
+	"#define __LDBL_DENORM_MIN__ 6.47517511943802511092443895822764655e-4966L\n"
+	"#define __LDBL_DIG__ 33\n"
+	"#define __LDBL_EPSILON__ 1.92592994438723585305597794258492732e-34L\n"
+	"#define __LDBL_HAS_DENORM__ 1\n"
+	"#define __LDBL_HAS_INFINITY__ 1\n"
+	"#define __LDBL_HAS_QUIET_NAN__ 1\n"
+	"#define __LDBL_MANT_DIG__ 113\n"
+	"#define __LDBL_MAX_10_EXP__ 4932\n"
+	"#define __LDBL_MAX_EXP__ 16384\n"
+	"#define __LDBL_MAX__ 1.18973149535723176508575932662800702e+4932L\n"
+	"#define __LDBL_MIN_10_EXP__ (-4931)\n"
+	"#define __LDBL_MIN_EXP__ (-16381)\n"
+	"#define __LDBL_MIN__ 3.36210314311209350626267781732175260e-4932L\n"
+	"#define __LDBL_NORM_MAX__ 1.18973149535723176508575932662800702e+4932L\n"
+	"#define __LITTLE_ENDIAN__ 1\n"
+	"#define __LLONG_WIDTH__ 64\n"
+	"#define __LONG_LONG_MAX__ 9223372036854775807LL\n"
+	"#define __LONG_MAX__ 9223372036854775807L\n"
+	"#define __LONG_WIDTH__ 64\n"
+	"#define __LP64__ 1\n"
+	"#define __MEMORY_SCOPE_CLUSTR 5\n"
+	"#define __MEMORY_SCOPE_DEVICE 1\n"
+	"#define __MEMORY_SCOPE_SINGLE 4\n"
+	"#define __MEMORY_SCOPE_SYSTEM 0\n"
+	"#define __MEMORY_SCOPE_WRKGRP 2\n"
+	"#define __MEMORY_SCOPE_WVFRNT 3\n"
+	"#define __NO_MATH_ERRNO__ 1\n"
+	"#define __OBJC_BOOL_IS_BOOL 0\n"
+	"#define __OPENCL_MEMORY_SCOPE_ALL_SVM_DEVICES 3\n"
+	"#define __OPENCL_MEMORY_SCOPE_DEVICE 2\n"
+	"#define __OPENCL_MEMORY_SCOPE_SUB_GROUP 4\n"
+	"#define __OPENCL_MEMORY_SCOPE_WORK_GROUP 1\n"
+	"#define __OPENCL_MEMORY_SCOPE_WORK_ITEM 0\n"
+	"#define __OPTIMIZE__ 1\n"
+	"#define __ORDER_BIG_ENDIAN__ 4321\n"
+	"#define __ORDER_LITTLE_ENDIAN__ 1234\n"
+	"#define __ORDER_PDP_ENDIAN__ 3412\n"
+	"#define __POINTER_WIDTH__ 64\n"
+	"#define __PRAGMA_REDEFINE_EXTNAME 1\n"
+	"#define __PTRDIFF_FMTd__ \"ld\"\n"
+	"#define __PTRDIFF_FMTi__ \"li\"\n"
+	"#define __PTRDIFF_MAX__ 9223372036854775807L\n"
+	"#define __PTRDIFF_TYPE__ long int\n"
+	"#define __PTRDIFF_WIDTH__ 64\n"
+	"#define __SCHAR_MAX__ 127\n"
+	"#define __SHRT_MAX__ 32767\n"
+	"#define __SHRT_WIDTH__ 16\n"
+	"#define __SIG_ATOMIC_MAX__ 9223372036854775807L\n"
+	"#define __SIG_ATOMIC_MIN__ (-__SIG_ATOMIC_MAX__ - 1)\n"
+	"#define __SIG_ATOMIC_TYPE__ long int\n"
+	"#define __SIG_ATOMIC_WIDTH__ 64\n"
+	"#define __SIZEOF_DOUBLE__ 8\n"
+	"#define __SIZEOF_FLOAT__ 4\n"
+	"#define __SIZEOF_INT128__ 16\n"
+	"#define __SIZEOF_INT__ 4\n"
+	"#define __SIZEOF_LONG_DOUBLE__ 16\n"
+	"#define __SIZEOF_LONG_LONG__ 8\n"
+	"#define __SIZEOF_LONG__ 8\n"
+	"#define __SIZEOF_POINTER__ 8\n"
+	"#define __SIZEOF_PTRDIFF_T__ 8\n"
+	"#define __SIZEOF_SHORT__ 2\n"
+	"#define __SIZEOF_SIZE_T__ 8\n"
+	"#define __SIZEOF_WCHAR_T__ 4\n"
+	"#define __SIZEOF_WINT_T__ 4\n"
+	"#define __SIZE_FMTX__ \"lX\"\n"
+	"#define __SIZE_FMTo__ \"lo\"\n"
+	"#define __SIZE_FMTu__ \"lu\"\n"
+	"#define __SIZE_FMTx__ \"lx\"\n"
+	"#define __SIZE_MAX__ 18446744073709551615UL\n"
+	"#define __SIZE_TYPE__ long unsigned int\n"
+	"#define __SIZE_WIDTH__ 64\n"
+	"#define __STDC_EMBED_EMPTY__ 2\n"
+	"#define __STDC_EMBED_FOUND__ 1\n"
+	"#define __STDC_EMBED_NOT_FOUND__ 0\n"
+	"#define __STDC_HOSTED__ 1\n"
+	"#define __STDC_UTF_16__ 1\n"
+	"#define __STDC_UTF_32__ 1\n"
+	"#define __STDC_VERSION__ 201112L\n"
+	"#define __STDC__ 1\n"
+	"#define __UINT16_C(c) c\n"
+	"#define __UINT16_C_SUFFIX__ \n"
+	"#define __UINT16_FMTX__ \"hX\"\n"
+	"#define __UINT16_FMTo__ \"ho\"\n"
+	"#define __UINT16_FMTu__ \"hu\"\n"
+	"#define __UINT16_FMTx__ \"hx\"\n"
+	"#define __UINT16_MAX__ 65535\n"
+	"#define __UINT16_TYPE__ unsigned short\n"
+	"#define __UINT32_C(c) c##U\n"
+	"#define __UINT32_C_SUFFIX__ U\n"
+	"#define __UINT32_FMTX__ \"X\"\n"
+	"#define __UINT32_FMTo__ \"o\"\n"
+	"#define __UINT32_FMTu__ \"u\"\n"
+	"#define __UINT32_FMTx__ \"x\"\n"
+	"#define __UINT32_MAX__ 4294967295U\n"
+	"#define __UINT32_TYPE__ unsigned int\n"
+	"#define __UINT64_C(c) c##ULL\n"
+	"#define __UINT64_C_SUFFIX__ ULL\n"
+	"#define __UINT64_FMTX__ \"llX\"\n"
+	"#define __UINT64_FMTo__ \"llo\"\n"
+	"#define __UINT64_FMTu__ \"llu\"\n"
+	"#define __UINT64_FMTx__ \"llx\"\n"
+	"#define __UINT64_MAX__ 18446744073709551615ULL\n"
+	"#define __UINT64_TYPE__ long long unsigned int\n"
+	"#define __UINT8_C(c) c\n"
+	"#define __UINT8_C_SUFFIX__ \n"
+	"#define __UINT8_FMTX__ \"hhX\"\n"
+	"#define __UINT8_FMTo__ \"hho\"\n"
+	"#define __UINT8_FMTu__ \"hhu\"\n"
+	"#define __UINT8_FMTx__ \"hhx\"\n"
+	"#define __UINT8_MAX__ 255\n"
+	"#define __UINT8_TYPE__ unsigned char\n"
+	"#define __UINTMAX_C(c) c##ULL\n"
+	"#define __UINTMAX_C_SUFFIX__ ULL\n"
+	"#define __UINTMAX_FMTX__ \"llX\"\n"
+	"#define __UINTMAX_FMTo__ \"llo\"\n"
+	"#define __UINTMAX_FMTu__ \"llu\"\n"
+	"#define __UINTMAX_FMTx__ \"llx\"\n"
+	"#define __UINTMAX_MAX__ 18446744073709551615ULL\n"
+	"#define __UINTMAX_TYPE__ long long unsigned int\n"
+	"#define __UINTMAX_WIDTH__ 64\n"
+	"#define __UINTPTR_FMTX__ \"lX\"\n"
+	"#define __UINTPTR_FMTo__ \"lo\"\n"
+	"#define __UINTPTR_FMTu__ \"lu\"\n"
+	"#define __UINTPTR_FMTx__ \"lx\"\n"
+	"#define __UINTPTR_MAX__ 18446744073709551615UL\n"
+	"#define __UINTPTR_TYPE__ long unsigned int\n"
+	"#define __UINTPTR_WIDTH__ 64\n"
+	"#define __UINT_FAST16_FMTX__ \"hX\"\n"
+	"#define __UINT_FAST16_FMTo__ \"ho\"\n"
+	"#define __UINT_FAST16_FMTu__ \"hu\"\n"
+	"#define __UINT_FAST16_FMTx__ \"hx\"\n"
+	"#define __UINT_FAST16_MAX__ 65535\n"
+	"#define __UINT_FAST16_TYPE__ unsigned short\n"
+	"#define __UINT_FAST32_FMTX__ \"X\"\n"
+	"#define __UINT_FAST32_FMTo__ \"o\"\n"
+	"#define __UINT_FAST32_FMTu__ \"u\"\n"
+	"#define __UINT_FAST32_FMTx__ \"x\"\n"
+	"#define __UINT_FAST32_MAX__ 4294967295U\n"
+	"#define __UINT_FAST32_TYPE__ unsigned int\n"
+	"#define __UINT_FAST64_FMTX__ \"llX\"\n"
+	"#define __UINT_FAST64_FMTo__ \"llo\"\n"
+	"#define __UINT_FAST64_FMTu__ \"llu\"\n"
+	"#define __UINT_FAST64_FMTx__ \"llx\"\n"
+	"#define __UINT_FAST64_MAX__ 18446744073709551615ULL\n"
+	"#define __UINT_FAST64_TYPE__ long long unsigned int\n"
+	"#define __UINT_FAST8_FMTX__ \"hhX\"\n"
+	"#define __UINT_FAST8_FMTo__ \"hho\"\n"
+	"#define __UINT_FAST8_FMTu__ \"hhu\"\n"
+	"#define __UINT_FAST8_FMTx__ \"hhx\"\n"
+	"#define __UINT_FAST8_MAX__ 255\n"
+	"#define __UINT_FAST8_TYPE__ unsigned char\n"
+	"#define __UINT_LEAST16_FMTX__ \"hX\"\n"
+	"#define __UINT_LEAST16_FMTo__ \"ho\"\n"
+	"#define __UINT_LEAST16_FMTu__ \"hu\"\n"
+	"#define __UINT_LEAST16_FMTx__ \"hx\"\n"
+	"#define __UINT_LEAST16_MAX__ 65535\n"
+	"#define __UINT_LEAST16_TYPE__ unsigned short\n"
+	"#define __UINT_LEAST32_FMTX__ \"X\"\n"
+	"#define __UINT_LEAST32_FMTo__ \"o\"\n"
+	"#define __UINT_LEAST32_FMTu__ \"u\"\n"
+	"#define __UINT_LEAST32_FMTx__ \"x\"\n"
+	"#define __UINT_LEAST32_MAX__ 4294967295U\n"
+	"#define __UINT_LEAST32_TYPE__ unsigned int\n"
+	"#define __UINT_LEAST64_FMTX__ \"llX\"\n"
+	"#define __UINT_LEAST64_FMTo__ \"llo\"\n"
+	"#define __UINT_LEAST64_FMTu__ \"llu\"\n"
+	"#define __UINT_LEAST64_FMTx__ \"llx\"\n"
+	"#define __UINT_LEAST64_MAX__ 18446744073709551615ULL\n"
+	"#define __UINT_LEAST64_TYPE__ long long unsigned int\n"
+	"#define __UINT_LEAST8_FMTX__ \"hhX\"\n"
+	"#define __UINT_LEAST8_FMTo__ \"hho\"\n"
+	"#define __UINT_LEAST8_FMTu__ \"hhu\"\n"
+	"#define __UINT_LEAST8_FMTx__ \"hhx\"\n"
+	"#define __UINT_LEAST8_MAX__ 255\n"
+	"#define __UINT_LEAST8_TYPE__ unsigned char\n"
+	"#define __USER_LABEL_PREFIX__ \n"
+	"#define __VERSION__ \"Homebrew Clang 23.1.4\"\n"
+	"#define __WCHAR_MAX__ 2147483647\n"
+	"#define __WCHAR_MIN__ (-__WCHAR_MAX__ - 1)\n"
+	"#define __WCHAR_TYPE__ int\n"
+	"#define __WCHAR_WIDTH__ 32\n"
+	"#define __WINT_MAX__ 2147483647\n"
+	"#define __WINT_MIN__ (-__WINT_MAX__ - 1)\n"
+	"#define __WINT_TYPE__ int\n"
+	"#define __WINT_WIDTH__ 32\n"
+	"#define __clang__ 1\n"
+	"#define __clang_literal_encoding__ \"UTF-8\"\n"
+	"#define __clang_major__ 23\n"
+	"#define __clang_minor__ 1\n"
+	"#define __clang_patchlevel__ 4\n"
+	"#define __clang_version__ \"23.1.4 \"\n"
+	"#define __clang_wide_literal_encoding__ \"UTF-32\"\n"
+	"#define __llvm__ 1\n"
+	"#define __unix 1\n"
+	"#define __unix__ 1\n"
+	"#define __wasm 1\n"
+	"#define __wasm64 1\n"
+	"#define __wasm64__ 1\n"
+	"#define __wasm__ 1\n"
+	"#define __wasm_bulk_memory__ 1\n"
+	"#define __wasm_bulk_memory_opt__ 1\n"
+	"#define __wasm_multivalue__ 1\n"
+	"#define __wasm_mutable_globals__ 1\n"
+	"#define __wasm_nontrapping_fptoint__ 1\n"
+	"#define __wasm_reference_types__ 1\n"
+	"#define __wasm_sign_ext__ 1\n"
+	"#define unix 1\n"
+	;
 static const char predef_undef_c[] =
 	"#define __STDC_EMBED_EMPTY__ 2\n"
 	"#define __STDC_EMBED_FOUND__ 1\n"
@@ -1818,6 +2198,388 @@ static const char *const predef_order_darwin[] = {
 	"__STDC_NO_THREADS__",
 	"__ENVIRONMENT_MAC_OS_X_VERSION_MIN_REQUIRED__",
 	"__ENVIRONMENT_OS_VERSION_MIN_REQUIRED__",
+	"__STDC__",
+	"__STDC_HOSTED__",
+	"__STDC_VERSION__",
+	"__STDC_UTF_16__",
+	"__STDC_UTF_32__",
+	"__STDC_EMBED_NOT_FOUND__",
+	"__STDC_EMBED_FOUND__",
+	"__STDC_EMBED_EMPTY__",
+};
+static const char *const predef_order_wasm64[] = {
+	"__llvm__",
+	"__clang__",
+	"__clang_major__",
+	"__clang_minor__",
+	"__clang_patchlevel__",
+	"__clang_version__",
+	"__GNUC__",
+	"__GNUC_MINOR__",
+	"__GNUC_PATCHLEVEL__",
+	"__GXX_ABI_VERSION",
+	"__ATOMIC_RELAXED",
+	"__ATOMIC_CONSUME",
+	"__ATOMIC_ACQUIRE",
+	"__ATOMIC_RELEASE",
+	"__ATOMIC_ACQ_REL",
+	"__ATOMIC_SEQ_CST",
+	"__MEMORY_SCOPE_SYSTEM",
+	"__MEMORY_SCOPE_DEVICE",
+	"__MEMORY_SCOPE_WRKGRP",
+	"__MEMORY_SCOPE_WVFRNT",
+	"__MEMORY_SCOPE_SINGLE",
+	"__MEMORY_SCOPE_CLUSTR",
+	"__OPENCL_MEMORY_SCOPE_WORK_ITEM",
+	"__OPENCL_MEMORY_SCOPE_WORK_GROUP",
+	"__OPENCL_MEMORY_SCOPE_DEVICE",
+	"__OPENCL_MEMORY_SCOPE_ALL_SVM_DEVICES",
+	"__OPENCL_MEMORY_SCOPE_SUB_GROUP",
+	"__FPCLASS_SNAN",
+	"__FPCLASS_QNAN",
+	"__FPCLASS_NEGINF",
+	"__FPCLASS_NEGNORMAL",
+	"__FPCLASS_NEGSUBNORMAL",
+	"__FPCLASS_NEGZERO",
+	"__FPCLASS_POSZERO",
+	"__FPCLASS_POSSUBNORMAL",
+	"__FPCLASS_POSNORMAL",
+	"__FPCLASS_POSINF",
+	"__PRAGMA_REDEFINE_EXTNAME",
+	"__VERSION__",
+	"__OBJC_BOOL_IS_BOOL",
+	"__CONSTANT_CFSTRINGS__",
+	"__clang_literal_encoding__",
+	"__clang_wide_literal_encoding__",
+	"__OPTIMIZE__",
+	"__OPTIMIZE_SIZE__",
+	"__ORDER_LITTLE_ENDIAN__",
+	"__ORDER_BIG_ENDIAN__",
+	"__ORDER_PDP_ENDIAN__",
+	"__BYTE_ORDER__",
+	"__LITTLE_ENDIAN__",
+	"_LP64",
+	"__LP64__",
+	"__CHAR_BIT__",
+	"__BOOL_WIDTH__",
+	"__SHRT_WIDTH__",
+	"__INT_WIDTH__",
+	"__LONG_WIDTH__",
+	"__LLONG_WIDTH__",
+	"__BITINT_MAXWIDTH__",
+	"__SCHAR_MAX__",
+	"__SHRT_MAX__",
+	"__INT_MAX__",
+	"__LONG_MAX__",
+	"__LONG_LONG_MAX__",
+	"__WCHAR_MAX__",
+	"__WCHAR_WIDTH__",
+	"__WCHAR_MIN__",
+	"__WINT_MAX__",
+	"__WINT_WIDTH__",
+	"__WINT_MIN__",
+	"__INTMAX_MAX__",
+	"__INTMAX_WIDTH__",
+	"__SIZE_MAX__",
+	"__SIZE_WIDTH__",
+	"__UINTMAX_MAX__",
+	"__UINTMAX_WIDTH__",
+	"__PTRDIFF_MAX__",
+	"__PTRDIFF_WIDTH__",
+	"__INTPTR_MAX__",
+	"__INTPTR_WIDTH__",
+	"__UINTPTR_MAX__",
+	"__UINTPTR_WIDTH__",
+	"__SIZEOF_DOUBLE__",
+	"__SIZEOF_FLOAT__",
+	"__SIZEOF_INT__",
+	"__SIZEOF_LONG__",
+	"__SIZEOF_LONG_DOUBLE__",
+	"__SIZEOF_LONG_LONG__",
+	"__SIZEOF_POINTER__",
+	"__SIZEOF_SHORT__",
+	"__SIZEOF_PTRDIFF_T__",
+	"__SIZEOF_SIZE_T__",
+	"__SIZEOF_WCHAR_T__",
+	"__SIZEOF_WINT_T__",
+	"__SIZEOF_INT128__",
+	"__INTMAX_TYPE__",
+	"__INTMAX_FMTd__",
+	"__INTMAX_FMTi__",
+	"__INTMAX_C_SUFFIX__",
+	"__INTMAX_C",
+	"__UINTMAX_TYPE__",
+	"__UINTMAX_FMTo__",
+	"__UINTMAX_FMTu__",
+	"__UINTMAX_FMTx__",
+	"__UINTMAX_FMTX__",
+	"__UINTMAX_C_SUFFIX__",
+	"__UINTMAX_C",
+	"__PTRDIFF_TYPE__",
+	"__PTRDIFF_FMTd__",
+	"__PTRDIFF_FMTi__",
+	"__INTPTR_TYPE__",
+	"__INTPTR_FMTd__",
+	"__INTPTR_FMTi__",
+	"__SIZE_TYPE__",
+	"__SIZE_FMTo__",
+	"__SIZE_FMTu__",
+	"__SIZE_FMTx__",
+	"__SIZE_FMTX__",
+	"__WCHAR_TYPE__",
+	"__WINT_TYPE__",
+	"__SIG_ATOMIC_TYPE__",
+	"__SIG_ATOMIC_MAX__",
+	"__SIG_ATOMIC_WIDTH__",
+	"__SIG_ATOMIC_MIN__",
+	"__CHAR16_TYPE__",
+	"__CHAR32_TYPE__",
+	"__UINTPTR_TYPE__",
+	"__UINTPTR_FMTo__",
+	"__UINTPTR_FMTu__",
+	"__UINTPTR_FMTx__",
+	"__UINTPTR_FMTX__",
+	"__FLT_DENORM_MIN__",
+	"__FLT_NORM_MAX__",
+	"__FLT_HAS_DENORM__",
+	"__FLT_DIG__",
+	"__FLT_DECIMAL_DIG__",
+	"__FLT_EPSILON__",
+	"__FLT_HAS_INFINITY__",
+	"__FLT_HAS_QUIET_NAN__",
+	"__FLT_MANT_DIG__",
+	"__FLT_MAX_10_EXP__",
+	"__FLT_MAX_EXP__",
+	"__FLT_MAX__",
+	"__FLT_MIN_10_EXP__",
+	"__FLT_MIN_EXP__",
+	"__FLT_MIN__",
+	"__DBL_DENORM_MIN__",
+	"__DBL_NORM_MAX__",
+	"__DBL_HAS_DENORM__",
+	"__DBL_DIG__",
+	"__DBL_DECIMAL_DIG__",
+	"__DBL_EPSILON__",
+	"__DBL_HAS_INFINITY__",
+	"__DBL_HAS_QUIET_NAN__",
+	"__DBL_MANT_DIG__",
+	"__DBL_MAX_10_EXP__",
+	"__DBL_MAX_EXP__",
+	"__DBL_MAX__",
+	"__DBL_MIN_10_EXP__",
+	"__DBL_MIN_EXP__",
+	"__DBL_MIN__",
+	"__LDBL_DENORM_MIN__",
+	"__LDBL_NORM_MAX__",
+	"__LDBL_HAS_DENORM__",
+	"__LDBL_DIG__",
+	"__LDBL_DECIMAL_DIG__",
+	"__LDBL_EPSILON__",
+	"__LDBL_HAS_INFINITY__",
+	"__LDBL_HAS_QUIET_NAN__",
+	"__LDBL_MANT_DIG__",
+	"__LDBL_MAX_10_EXP__",
+	"__LDBL_MAX_EXP__",
+	"__LDBL_MAX__",
+	"__LDBL_MIN_10_EXP__",
+	"__LDBL_MIN_EXP__",
+	"__LDBL_MIN__",
+	"__POINTER_WIDTH__",
+	"__BIGGEST_ALIGNMENT__",
+	"__INT8_TYPE__",
+	"__INT8_FMTd__",
+	"__INT8_FMTi__",
+	"__INT8_C_SUFFIX__",
+	"__INT8_C",
+	"__INT16_TYPE__",
+	"__INT16_FMTd__",
+	"__INT16_FMTi__",
+	"__INT16_C_SUFFIX__",
+	"__INT16_C",
+	"__INT32_TYPE__",
+	"__INT32_FMTd__",
+	"__INT32_FMTi__",
+	"__INT32_C_SUFFIX__",
+	"__INT32_C",
+	"__INT64_TYPE__",
+	"__INT64_FMTd__",
+	"__INT64_FMTi__",
+	"__INT64_C_SUFFIX__",
+	"__INT64_C",
+	"__UINT8_TYPE__",
+	"__UINT8_FMTo__",
+	"__UINT8_FMTu__",
+	"__UINT8_FMTx__",
+	"__UINT8_FMTX__",
+	"__UINT8_C_SUFFIX__",
+	"__UINT8_C",
+	"__UINT8_MAX__",
+	"__INT8_MAX__",
+	"__UINT16_TYPE__",
+	"__UINT16_FMTo__",
+	"__UINT16_FMTu__",
+	"__UINT16_FMTx__",
+	"__UINT16_FMTX__",
+	"__UINT16_C_SUFFIX__",
+	"__UINT16_C",
+	"__UINT16_MAX__",
+	"__INT16_MAX__",
+	"__UINT32_TYPE__",
+	"__UINT32_FMTo__",
+	"__UINT32_FMTu__",
+	"__UINT32_FMTx__",
+	"__UINT32_FMTX__",
+	"__UINT32_C_SUFFIX__",
+	"__UINT32_C",
+	"__UINT32_MAX__",
+	"__INT32_MAX__",
+	"__UINT64_TYPE__",
+	"__UINT64_FMTo__",
+	"__UINT64_FMTu__",
+	"__UINT64_FMTx__",
+	"__UINT64_FMTX__",
+	"__UINT64_C_SUFFIX__",
+	"__UINT64_C",
+	"__UINT64_MAX__",
+	"__INT64_MAX__",
+	"__INT_LEAST8_TYPE__",
+	"__INT_LEAST8_MAX__",
+	"__INT_LEAST8_WIDTH__",
+	"__INT_LEAST8_FMTd__",
+	"__INT_LEAST8_FMTi__",
+	"__UINT_LEAST8_TYPE__",
+	"__UINT_LEAST8_MAX__",
+	"__UINT_LEAST8_FMTo__",
+	"__UINT_LEAST8_FMTu__",
+	"__UINT_LEAST8_FMTx__",
+	"__UINT_LEAST8_FMTX__",
+	"__INT_LEAST16_TYPE__",
+	"__INT_LEAST16_MAX__",
+	"__INT_LEAST16_WIDTH__",
+	"__INT_LEAST16_FMTd__",
+	"__INT_LEAST16_FMTi__",
+	"__UINT_LEAST16_TYPE__",
+	"__UINT_LEAST16_MAX__",
+	"__UINT_LEAST16_FMTo__",
+	"__UINT_LEAST16_FMTu__",
+	"__UINT_LEAST16_FMTx__",
+	"__UINT_LEAST16_FMTX__",
+	"__INT_LEAST32_TYPE__",
+	"__INT_LEAST32_MAX__",
+	"__INT_LEAST32_WIDTH__",
+	"__INT_LEAST32_FMTd__",
+	"__INT_LEAST32_FMTi__",
+	"__UINT_LEAST32_TYPE__",
+	"__UINT_LEAST32_MAX__",
+	"__UINT_LEAST32_FMTo__",
+	"__UINT_LEAST32_FMTu__",
+	"__UINT_LEAST32_FMTx__",
+	"__UINT_LEAST32_FMTX__",
+	"__INT_LEAST64_TYPE__",
+	"__INT_LEAST64_MAX__",
+	"__INT_LEAST64_WIDTH__",
+	"__INT_LEAST64_FMTd__",
+	"__INT_LEAST64_FMTi__",
+	"__UINT_LEAST64_TYPE__",
+	"__UINT_LEAST64_MAX__",
+	"__UINT_LEAST64_FMTo__",
+	"__UINT_LEAST64_FMTu__",
+	"__UINT_LEAST64_FMTx__",
+	"__UINT_LEAST64_FMTX__",
+	"__INT_FAST8_TYPE__",
+	"__INT_FAST8_MAX__",
+	"__INT_FAST8_WIDTH__",
+	"__INT_FAST8_FMTd__",
+	"__INT_FAST8_FMTi__",
+	"__UINT_FAST8_TYPE__",
+	"__UINT_FAST8_MAX__",
+	"__UINT_FAST8_FMTo__",
+	"__UINT_FAST8_FMTu__",
+	"__UINT_FAST8_FMTx__",
+	"__UINT_FAST8_FMTX__",
+	"__INT_FAST16_TYPE__",
+	"__INT_FAST16_MAX__",
+	"__INT_FAST16_WIDTH__",
+	"__INT_FAST16_FMTd__",
+	"__INT_FAST16_FMTi__",
+	"__UINT_FAST16_TYPE__",
+	"__UINT_FAST16_MAX__",
+	"__UINT_FAST16_FMTo__",
+	"__UINT_FAST16_FMTu__",
+	"__UINT_FAST16_FMTx__",
+	"__UINT_FAST16_FMTX__",
+	"__INT_FAST32_TYPE__",
+	"__INT_FAST32_MAX__",
+	"__INT_FAST32_WIDTH__",
+	"__INT_FAST32_FMTd__",
+	"__INT_FAST32_FMTi__",
+	"__UINT_FAST32_TYPE__",
+	"__UINT_FAST32_MAX__",
+	"__UINT_FAST32_FMTo__",
+	"__UINT_FAST32_FMTu__",
+	"__UINT_FAST32_FMTx__",
+	"__UINT_FAST32_FMTX__",
+	"__INT_FAST64_TYPE__",
+	"__INT_FAST64_MAX__",
+	"__INT_FAST64_WIDTH__",
+	"__INT_FAST64_FMTd__",
+	"__INT_FAST64_FMTi__",
+	"__UINT_FAST64_TYPE__",
+	"__UINT_FAST64_MAX__",
+	"__UINT_FAST64_FMTo__",
+	"__UINT_FAST64_FMTu__",
+	"__UINT_FAST64_FMTx__",
+	"__UINT_FAST64_FMTX__",
+	"__USER_LABEL_PREFIX__",
+	"__NO_MATH_ERRNO__",
+	"__FINITE_MATH_ONLY__",
+	"__GNUC_STDC_INLINE__",
+	"__GCC_ATOMIC_TEST_AND_SET_TRUEVAL",
+	"__GCC_DESTRUCTIVE_SIZE",
+	"__GCC_CONSTRUCTIVE_SIZE",
+	"__CLANG_ATOMIC_BOOL_LOCK_FREE",
+	"__CLANG_ATOMIC_CHAR_LOCK_FREE",
+	"__CLANG_ATOMIC_CHAR16_T_LOCK_FREE",
+	"__CLANG_ATOMIC_CHAR32_T_LOCK_FREE",
+	"__CLANG_ATOMIC_WCHAR_T_LOCK_FREE",
+	"__CLANG_ATOMIC_SHORT_LOCK_FREE",
+	"__CLANG_ATOMIC_INT_LOCK_FREE",
+	"__CLANG_ATOMIC_LONG_LOCK_FREE",
+	"__CLANG_ATOMIC_LLONG_LOCK_FREE",
+	"__CLANG_ATOMIC_POINTER_LOCK_FREE",
+	"__GCC_ATOMIC_BOOL_LOCK_FREE",
+	"__GCC_ATOMIC_CHAR_LOCK_FREE",
+	"__GCC_ATOMIC_CHAR16_T_LOCK_FREE",
+	"__GCC_ATOMIC_CHAR32_T_LOCK_FREE",
+	"__GCC_ATOMIC_WCHAR_T_LOCK_FREE",
+	"__GCC_ATOMIC_SHORT_LOCK_FREE",
+	"__GCC_ATOMIC_INT_LOCK_FREE",
+	"__GCC_ATOMIC_LONG_LOCK_FREE",
+	"__GCC_ATOMIC_LLONG_LOCK_FREE",
+	"__GCC_ATOMIC_POINTER_LOCK_FREE",
+	"__NO_INLINE__",
+	"__FLT_RADIX__",
+	"__DECIMAL_DIG__",
+	"__wasm",
+	"__wasm__",
+	"__wasm_bulk_memory__",
+	"__wasm_bulk_memory_opt__",
+	"__wasm_multivalue__",
+	"__wasm_mutable_globals__",
+	"__wasm_nontrapping_fptoint__",
+	"__wasm_reference_types__",
+	"__wasm_sign_ext__",
+	"__GCC_HAVE_SYNC_COMPARE_AND_SWAP_1",
+	"__GCC_HAVE_SYNC_COMPARE_AND_SWAP_2",
+	"__GCC_HAVE_SYNC_COMPARE_AND_SWAP_4",
+	"__GCC_HAVE_SYNC_COMPARE_AND_SWAP_8",
+	"__wasm64",
+	"__wasm64__",
+	"__FLOAT128__",
+	"unix",
+	"__unix",
+	"__unix__",
+	"__EMSCRIPTEN__",
 	"__STDC__",
 	"__STDC_HOSTED__",
 	"__STDC_VERSION__",
