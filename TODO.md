@@ -590,7 +590,8 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
   cached; resource dir relative to the vcc binary).
   *Validate:* T11 on a machine/CI image with only Xcode, and after moving
   the install prefix.
-- [ ] **Files ≥ 2 GB reported as missing** (`lex.c:1373`, `uint32` offsets
+- [x] **Files ≥ 2 GB reported as missing** (*Done:* the main file says "file too
+  large (2 GB or more)"; an #include of one still says not found) (`lex.c:1373`, `uint32` offsets
   `lex.h:50,61`).  Clear error.
   *Validate:* T5 (sparse 3 GB file → "file too large").
 - [ ] **x86-64 host build**: `lex.c:4` NEON, `lex.c:1517` `yield`,

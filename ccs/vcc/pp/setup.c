@@ -1,4 +1,5 @@
 /* vcc preprocessor: opening and closing a TU, pp_next and the queries on the result */
+#include <sys/stat.h>
 #include "ppimpl.h"
 
 VPRIV void *vm(size_t n)
@@ -98,8 +99,16 @@ pp *pp_open(const pp_opts *o)
 		mf = try_path(o->cwd, mp, ml);
 	}
 	if (!mf) {
-		char m[4200];
-		int l = snprintf(m, sizeof(m), "vcc: error: %s: cannot read\n", o->main);
+		char m[4200], fp[4200];
+		struct stat st;
+		bool big;
+
+		/* the lexer takes files below 2 GB (32-bit offsets): say so rather than "cannot read" */
+		snprintf(fp, sizeof(fp), "%s%s%s", o->main[0] != '/' && o->cwd ? o->cwd : "",
+			 o->main[0] != '/' && o->cwd ? "/" : "", o->main);
+		big = !stat(fp, &st) && st.st_size >= (1ll << 31);
+		int l = snprintf(m, sizeof(m), big ? "vcc: error: %s: file too large (2 GB or more)\n" :
+						    "vcc: error: %s: cannot read\n", o->main);
 
 		(void)!write(o->errfd ? o->errfd : 2, m, (size_t)(l < (int)sizeof(m) ? l : (int)sizeof(m) - 1));
 		pp_close(p);

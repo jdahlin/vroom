@@ -403,7 +403,7 @@ VPRIV uint32_t offsetof_expr(cc *c, uint32_t loc)
 	expect(c, T_COMMA, "','");
 	for (bool first = true;; first = false) {
 		if (first || accept(c, T_PERIOD)) {
-			uint32_t path[16], ti;
+			uint32_t path[FM_DEPTH], ti;
 			int d;
 
 			if (!is(c, T_IDENT))

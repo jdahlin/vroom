@@ -60,13 +60,11 @@ def cases(d):
     # fixed limits that reject (or crash on) valid code
     case('struct-10k-members', 'ok', {'a.c': 'struct s {' + ''.join(f' int m{i};' for i in range(10000)) + ' } v;\n'}, 'a.c')
     case('declarator-100-ptrs', 'ok', {'a.c': 'int ' + '*' * 100 + 'p;\n'}, 'a.c')
-    case('anon-nest-20', 'ok', {'a.c': 'struct s { ' + 'struct { ' * 20 + 'int x; ' + '}; ' * 20 + '} v;\nint f(void) { return v.x; }\n'}, 'a.c',
-         xfail='Fixed limits: 16 nested anonymous members (find_member)')
+    case('anon-nest-20', 'ok', {'a.c': 'struct s { ' + 'struct { ' * 20 + 'int x; ' + '}; ' * 20 + '} v;\nint f(void) { return v.x; }\n'}, 'a.c')
     case('call-300-args', 'ok', {'a.c': 'void g(' + ', '.join(['int'] * 300) + ');\nvoid f(void) { g(' + ', '.join(['1'] * 300) + '); }\n'}, 'a.c')
     case('include-dirs-5000', 'ok', {'a.c': 'int x;\n'}, 'a.c', [f'-I{d}/nodir{i}' for i in range(5000)])
     # files
-    case('file-3g', 'error', {'a.c': ('sparse', 3 << 30)}, 'a.c', regex='too large',
-         xfail='Files >= 2 GB reported as missing (lex.c)')
+    case('file-3g', 'error', {'a.c': ('sparse', 3 << 30)}, 'a.c', regex='too large')
     # assembler
     case('asm-rept-200M', 'any', {'a.S': '.rept 200000000\nnop\n.endr\n'}, 'a.S',
          xfail='Input-driven abort() / stack overflow kill the whole server (as.c arena abort)')
