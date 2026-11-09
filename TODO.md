@@ -66,7 +66,7 @@ Existing gates that every change must keep green: `vcc-diff.py cmp`
   `llvm-readelf -r -S -s` / `llvm-objdump -d`.  For PIC, TLS, CFI, DWARF,
   section groups, branch ranges — things that are about the object, not
   runtime output.
-- [ ] **T7 `as` corpus: compiler-generated assembly.** (started: `bench/vas-corpus.py`: clang -S -O0/-O2 of every test C file, clang -c vs vasm byte for byte: 3035/3035 identical on 2026-11-09.  Next: `-g` (DWARF, `.loc`), `-fPIC`, `-march=armv9-a+sve2`.)  `tests/as/*.c` →
+- [ ] **T7 `as` corpus: compiler-generated assembly.** (started: `bench/vas-corpus.py`: clang -S -O0/-O2 of every test C file, clang -c vs vasm byte for byte: 3035/3035 identical on 2026-11-09, `-g` too.  Next: `-fPIC`, `-march=armv9-a+sve2`.)  `tests/as/*.c` →
   `clang --target=aarch64-linux-gnu -O2 -S` (and `-g`, `-fPIC`, `-march=armv8.5-a+sve2`)
   → assemble with `vasm` and with clang, compare objects with
   `bench/vas-diff.py` (sections, symbols, relocations, bytes).  Plus
@@ -708,8 +708,13 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
 - [x] **`.cfi_*`** → `.eh_frame` [P]: every directive but personality/LSDA
   and `.debug_frame` (an error), CIEs per key, FDEs sorted by CIE key as MC.
   *Validated:* `vas-obj` `cfi-basic.s`, `cfi-all.s`; `bench/vas-corpus.py`.
-- [ ] **`.loc`, `.file N`, DWARF line tables, `.uleb128`/`.sleb128`** [P].
-  *Validate:* T7 with `-g`.
+- [x] **`.loc`, `.file N`, DWARF line tables, `.uleb128`/`.sleb128`** [P]:
+  the v5 `.debug_line` (+ `.debug_line_str`) as MCDwarfLineTable writes it,
+  rows on the next instruction or data, one sequence per section; gas-style
+  `.file 1 "dir/x.c"` splits the path, directory 0 is the cwd.  Left: rows in
+  several subsections of one section (an error), `.uleb128` of a forward
+  label difference (needs relaxation; an error), `-fdebug-compilation-dir`.
+  *Validated:* `vas-obj` `dwarf-line.s`, `leb128.s`; T7 `-O "0 -g"` 1516/1516.
 - [x] **Scalar FP** [P]: 2/1/3-source arithmetic, frint*, fcmp(e) (also #0.0),
   fccmp(e), fcsel, fcvt between S/D/H, fcvt[nampz][su] and [su]cvtf (also
   fixed point), `fmov #imm` and the H moves.  *Validated:*

@@ -21,7 +21,7 @@ def one(job):
     f, opt = job
     with tempfile.TemporaryDirectory() as t:
         s, c, v = f'{t}/a.s', f'{t}/c.o', f'{t}/v.o'
-        if subprocess.run([CL, '--target=aarch64-linux-gnu', opt, '-w', '-S', f, '-o', s], capture_output=True).returncode:
+        if subprocess.run([CL, '--target=aarch64-linux-gnu', *opt.split(), '-w', '-S', f, '-o', s], capture_output=True).returncode:
             return ('skip', f, opt, '')
         if subprocess.run([CL, '--target=aarch64-linux-gnu', '-c', s, '-o', c], capture_output=True).returncode:
             return ('skip', f, opt, '')

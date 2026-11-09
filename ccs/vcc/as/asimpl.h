@@ -107,6 +107,13 @@ struct As {
 	int infde, cfi_eh;	/* inside .cfi_startproc; .cfi_sections without .eh_frame: 1 */
 	struct { uint32_t orig, ver, rm; } *sv; uint32_t nsv, svcap;	/* .symver */
 	uint32_t *asg; uint32_t nasg, asgcap;	/* .addrsig_sym */
+	/* .file N / .loc: DWARF line table (MC's MCDwarfLineTable, version 5) */
+	struct DwFile { Sv name; uint32_t dir; uint8_t md5[16]; uint8_t set, hasmd5; } *dwf;
+	uint32_t ndwf, dwfcap;		/* file slots by number (0 = root) */
+	Sv *dwd; uint32_t ndwd, dwdcap;	/* directories; [0] is the root file's */
+	struct DwLoc { uint32_t frag, file, line, col, disc, isa; uint64_t off; uint8_t flags; } *dwl, dwcur;
+	uint32_t ndwl, dwlcap;
+	int dwlocp, dwtab;		/* a .loc waits for its instruction; a table is due */
 	char msg[512];
 	int err;
 };
