@@ -342,6 +342,7 @@ VPRIV void wstore(ecx *e, wlv *l, qty t);
 VPRIV void wfold_off(ecx *e, wlv *l);
 VPRIV void wcopy(ecx *e, uint64_t n);
 VPRIV void wst_sxval(ecx *e, uint32_t v);
+VPRIV void wsplit(ecx *e);
 VPRIV void wconv(ecx *e, qty from, qty to);
 VPRIV int w16(cc *c, qty t);
 VPRIV void w16arith(ecx *e, int op, qty ty, qty rty);

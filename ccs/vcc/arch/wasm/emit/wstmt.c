@@ -871,8 +871,9 @@ static void wswitch(ecx *e, uint32_t n)
 	uint32_t gj = 0;	/* goto: the next segment start of g */
 	uint32_t *nc = NULL, nnc = 0, cnc = 0;	/* nested case labels */
 
-	if (k == WT_MEM)
-		efatal(e, x->loc, "wasm: a switch on a 128-bit value is not supported yet");
+	bool wide = k == WT_MEM;	/* __int128: compared by halves (tl, th) */
+	uint32_t th = 0;
+
 	/* segments: top-level statements that carry case labels */
 	for (uint32_t i = 0; i < nst; i++) {
 		uint32_t s = st[i];
@@ -930,19 +931,23 @@ static void wswitch(ecx *e, uint32_t n)
 					  em_trunc_to(c, c->ipool[y->b ? y->b : y->a], ct), m + j, false };
 	}
 	ncase = W->nsw - sw0;
-	t = wtmp(e, k);
+	t = wtmp(e, wide ? WT_I64 : k);
+	if (wide)
+		th = wtmp(e, WT_I64);
 	if (g) {
 		/* entered by goto: the controlling expression is not evaluated */
 		wget(e, g->st);
 		wi(e, "i32.eqz");
 		wblock(e, "if");
-		wexpr(e, x->a, true);
-		wset(e, t);
-		wend(e, "end_if");
-	} else {
-		wexpr(e, x->a, true);
-		wset(e, t);
 	}
+	wexpr(e, x->a, true);
+	if (wide) {
+		wsplit(e);
+		wset(e, th);
+	}
+	wset(e, t);
+	if (g)
+		wend(e, "end_if");
 	brk = wblock(e, "block");
 	if (g)
 		g->loop = wblock(e, "loop");
@@ -983,7 +988,55 @@ static void wswitch(ecx *e, uint32_t n)
 			hi = s->hi;
 		ranges |= s->lo != s->hi;
 	}
-	if (ncase >= 4 && !ranges && hi - lo < 4 * (i128)ncase + 8 && hi - lo < 65536) {
+	if (wide) {
+		for (uint32_t i = 0; i < ncase; i++) {
+			const wswc *s = &W->sw[sw0 + i];
+
+			if (s->lo == s->hi) {
+				wget(e, t);
+				wconst(e, WT_I64, (int64_t)(uint64_t)s->lo);
+				wi(e, "i64.eq");
+				wget(e, th);
+				wconst(e, WT_I64, (int64_t)(uint64_t)((u128)s->lo >> 64));
+				wi(e, "i64.eq");
+				wi(e, "i32.and");
+			} else {
+				/* (t - lo) <= (hi - lo), unsigned, in 128 bits */
+				u128 rg = (u128)s->hi - (u128)s->lo;
+				uint32_t dl = wtmp(e, WT_I64), dh = wtmp(e, WT_I64);
+
+				wget(e, t);
+				wconst(e, WT_I64, (int64_t)(uint64_t)s->lo);
+				wi(e, "i64.sub");
+				wset(e, dl);
+				wget(e, th);
+				wconst(e, WT_I64, (int64_t)(uint64_t)((u128)s->lo >> 64));
+				wi(e, "i64.sub");
+				wget(e, t);
+				wconst(e, WT_I64, (int64_t)(uint64_t)s->lo);
+				wi(e, "i64.lt_u");
+				wi(e, "i64.extend_i32_u");
+				wi(e, "i64.sub");
+				wset(e, dh);
+				wget(e, dh);
+				wconst(e, WT_I64, (int64_t)(uint64_t)(rg >> 64));
+				wi(e, "i64.lt_u");
+				wget(e, dh);
+				wconst(e, WT_I64, (int64_t)(uint64_t)(rg >> 64));
+				wi(e, "i64.eq");
+				wget(e, dl);
+				wconst(e, WT_I64, (int64_t)(uint64_t)rg);
+				wi(e, "i64.le_u");
+				wi(e, "i32.and");
+				wi(e, "i32.or");
+				wfree(e, dl);
+				wfree(e, dh);
+			}
+			wbr(e, "br_if", sb[s->seg]);
+		}
+		wbr(e, "br", dseg != UINT32_MAX ? sb[dseg] : brk);
+		wfree(e, th);
+	} else if (ncase >= 4 && !ranges && hi - lo < 4 * (i128)ncase + 8 && hi - lo < 65536) {
 		/* dense: a branch table on t - lo */
 		uint32_t span = (uint32_t)(hi - lo) + 1;
 		uint32_t *tg = malloc(span * sizeof *tg);

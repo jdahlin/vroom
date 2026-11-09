@@ -542,8 +542,8 @@ static int wbi_overflow(ecx *e, uint32_t n)
 	uint32_t tr = wtmp(e, WT_I64), tp = wtmp(e, WT_I64);
 	wlv l = { .k = WL_MEM };
 
-	if (w16(c, rt) || w16(c, ta) || w16(c, tb))
-		efatal(e, x->loc, "wasm: overflow builtins on __int128 are not supported yet");
+	if (w16(c, ta) || w16(c, tb))
+		efatal(e, x->loc, "wasm: overflow builtins with __int128 operands are not supported yet");
 	wexpr(e, a, true);
 	w16conv(e, ta, v);
 	wexpr(e, b, true);
@@ -561,6 +561,14 @@ static int wbi_overflow(ecx *e, uint32_t n)
 	w16conv(e, rt, v);
 	wget(e, tr);
 	w16cmp(e, T_EXCLAIMEQ, v);
+	if (w16(c, rt) && is_signed(c, rt) != is_signed(c, v)) {
+		/* the same 128 bits, the other signedness: the top bit set is out of range */
+		wget(e, tr);
+		wiu(e, "i64.load", 8);
+		wconst(e, WT_I64, 0);
+		wi(e, "i64.lt_s");
+		wi(e, "i32.or");
+	}
 	wfree(e, tr);
 	wfree(e, tp);
 	return WT_I32;

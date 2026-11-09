@@ -396,12 +396,16 @@ VPRIV void wlval(ecx *e, uint32_t n, wlv *l, qty t)
 
 /* ---------------- loads and stores ---------------- */
 
+/* the container's bytes; over 8 (a packed field across 9 to 16 bytes): 8 plus
+   the high part's container, 1, 2, 4 or 8 */
 static int wbf_bytes(ecx *e, const wlv *l)
 {
 	int nb = (l->bitoff + l->width + 7) / 8;
 
+	if (nb > 16)
+		efatal(e, e->curloc, "wasm: a bit-field over 16 bytes");
 	if (nb > 8)
-		efatal(e, e->curloc, "wasm: a bit-field over 8 bytes is not supported");
+		return 8 + wbf_bytes(e, &(wlv){ .bitoff = 0, .width = l->bitoff + l->width - 64 });
 	return nb <= 1 ? 1 : nb <= 2 ? 2 : nb <= 4 ? 4 : 8;
 }
 
@@ -447,6 +451,33 @@ VPRIV void wload(ecx *e, wlv *l, qty t)
 	if (l->bf) {
 		int nb = wbf_bytes(e, l);
 
+		if (nb > 8) {
+			/* low 8 bytes >> bitoff | the high part << (64 - bitoff) */
+			uint32_t ta = wtmp(e, WT_I64);
+
+			wtee(e, ta);
+			wiu(e, "i64.load", l->off);
+			wconst(e, WT_I64, l->bitoff);
+			wi(e, "i64.shr_u");
+			wget(e, ta);
+			wbf_container(e, nb - 8, false, l->off + 8);
+			wconst(e, WT_I64, 64 - l->bitoff);
+			wi(e, "i64.shl");
+			wi(e, "i64.or");
+			wfree(e, ta);
+			if (l->sgn && l->width < 64) {
+				wconst(e, WT_I64, 64 - l->width);
+				wi(e, "i64.shl");
+				wconst(e, WT_I64, 64 - l->width);
+				wi(e, "i64.shr_s");
+			} else if (l->width < 64) {
+				wconst(e, WT_I64, (int64_t)((1ull << l->width) - 1));
+				wi(e, "i64.and");
+			}
+			if (wty(c, t) == WT_I32)
+				wi(e, "i32.wrap_i64");
+			return;
+		}
 		wbf_container(e, nb, false, l->off);
 		if (l->sgn) {
 			wconst(e, WT_I64, 64 - l->bitoff - l->width);
@@ -489,6 +520,47 @@ VPRIV void wstore(ecx *e, wlv *l, qty t)
 		uint32_t tv = wtmp(e, wty(c, t)), ta = wtmp(e, WT_I64);
 
 		wset(e, tv);
+		if (nb > 8) {
+			/* the low 8 bytes, then the high part */
+			int hb = (int)(l->bitoff + l->width - 64);
+			uint64_t hm = (1ull << hb) - 1;
+
+			wset(e, ta);
+			if (wty(c, t) == WT_I32) {
+				wget(e, tv);
+				wi(e, "i64.extend_i32_u");
+				wfree(e, tv);
+				tv = wtmp(e, WT_I64);
+				wset(e, tv);
+			}
+			wget(e, ta);
+			wget(e, ta);
+			wiu(e, "i64.load", l->off);
+			wconst(e, WT_I64, (int64_t)~(mask << l->bitoff));
+			wi(e, "i64.and");
+			wget(e, tv);
+			wconst(e, WT_I64, (int64_t)mask);
+			wi(e, "i64.and");
+			wconst(e, WT_I64, l->bitoff);
+			wi(e, "i64.shl");
+			wi(e, "i64.or");
+			wiu(e, "i64.store", l->off);
+			wget(e, ta);
+			wget(e, ta);
+			wbf_container(e, nb - 8, false, l->off + 8);
+			wconst(e, WT_I64, (int64_t)~hm);
+			wi(e, "i64.and");
+			wget(e, tv);
+			wconst(e, WT_I64, (int64_t)mask);
+			wi(e, "i64.and");
+			wconst(e, WT_I64, 64 - l->bitoff);
+			wi(e, "i64.shr_u");
+			wi(e, "i64.or");
+			wbf_container(e, nb - 8, true, l->off + 8);
+			wfree(e, tv);
+			wfree(e, ta);
+			return;
+		}
 		wtee(e, ta);
 		wget(e, ta);
 		wbf_container(e, nb, false, l->off);
@@ -584,7 +656,7 @@ static void whalf(ecx *e, uint32_t a, int h)
 }
 
 /* stack: [address] -> [lo hi] */
-static void wsplit(ecx *e)
+VPRIV void wsplit(ecx *e)
 {
 	uint32_t a = wtmp(e, WT_I64);
 
@@ -1327,8 +1399,7 @@ static int wassign(ecx *e, uint32_t n, bool want)
 		wfree(e, ta);
 		return want ? WT_I64 : WT_NONE;
 	}
-	if (T(c, lt)->flags & TF_ATOMIC)
-		efatal(e, x->loc, "wasm: _Atomic objects are not supported yet (PLAN-wasm.md W4)");
+	/* _Atomic: plain loads and stores, one thread (clang without the atomics feature) */
 	if (!x->aux) {
 		wlval(e, x->a, &l, lt);
 		if (k == WT_MEM) {
@@ -1439,12 +1510,10 @@ static int wincdec(ecx *e, uint32_t n, bool want)
 	uint32_t ta = UINT32_MAX, told = UINT32_MAX, tnew = UINT32_MAX;
 	wlv l;
 
-	if (k == WT_MEM && w16(c, t) && !(T(c, t)->flags & TF_ATOMIC))
+	if (k == WT_MEM && w16(c, t))
 		return w16incdec(e, n, want);
 	if (k == WT_MEM || is_vec(c, t))
 		efatal(e, x->loc, "wasm: ++/-- on this type is not supported yet (PLAN-wasm.md W4)");
-	if (T(c, t)->flags & TF_ATOMIC)
-		efatal(e, x->loc, "wasm: _Atomic objects are not supported yet (PLAN-wasm.md W4)");
 	wlval(e, x->a, &l, t);
 	if (l.k == WL_MEM) {
 		ta = wtmp(e, WT_I64);
