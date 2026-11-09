@@ -61,7 +61,9 @@ MARK_ROWS = [(t, f) for t in TARGETS for f in
              ['', '-undef', '-include a.h -DQ=2 -UQ', '-include sys/b.h -include ./a.h', '-std=c23',
               '-ffreestanding -std=c89', '-x assembler-with-cpp', '-mgeneral-regs-only -fshort-wchar -fPIC',
               '-fno-PIE -fno-asynchronous-unwind-tables', '-imacros im.h', '-include a.h -imacros im.h -imacros im.h',
-              '-std=iso9899:199409', '-std=c2y', '-std=gnu1x']]
+              '-std=iso9899:199409', '-std=c2y', '-std=gnu1x', '-fsigned-char', '-funsigned-char',
+              '-fno-unsigned-char -fno-signed-char', '-ffast-math', '-ffast-math -fmath-errno -pthread',
+              '-ffast-math -fno-finite-math-only', '-fno-math-errno -ffinite-math-only', '-fmath-errno']]
 MARK_ROWS += [('--target=arm64-apple-macos' + v, f) for v, f in
               [('', '-mmacosx-version-min=13.0'), ('14', ''), ('15.2', ''), ('10.15', ''), ('10.9', ''),
                ('11', '-mmacosx-version-min=12.3.1')]]

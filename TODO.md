@@ -677,7 +677,13 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
 - [ ] **Predefines for other targets and flags**: only two tables;
   `--target=x86_64`, `-m32`, `-funsigned-char`, `-fstack-protector*`,
   `-ffast-math`, `-march=+sve`, `-pthread`, `-fsanitize=*`, `-fexceptions`
-  change nothing.  Generate predefines from (target, flags) using a table
+  change nothing.  (Done: `-f[no-][un]signed-char` (macro, and `char`'s
+  signedness in pp and cc), `-ffast-math`/`-ffinite-math-only`/
+  `-f[no-]math-errno`/`-fno-fast-math` with clang's interplay, `-pthread`;
+  checked by `bench/vcc-driver.py` rows.  Left out on purpose until vcc
+  implements them, so the macros don't promise what isn't there:
+  `-fstack-protector*` (`__SSP*__`), `-fsanitize=*`, `-fexceptions`,
+  `-fopenmp`, `-fblocks`, `-mbranch-protection`, `+sve`.)  Generate predefines from (target, flags) using a table
   extracted from clang per flag delta (`gen-ppdata.sh` extended).
   *Validate:* `bench/vcc-predef.py`: `vpp -dM -E` vs `clang -dM -E` for a
   matrix of targets × flags.

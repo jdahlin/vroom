@@ -624,6 +624,25 @@ static __attribute__((noinline)) size_t env_ndirs(const char *v)
 	return k;
 }
 
+/* -f[un]signed-char against the target's default, the math flags, -pthread */
+static __attribute__((noinline, cold)) void predef_flags(buf *pre, int darwin, int uchar, int fmath)
+{
+	if (uchar >= 0 && uchar != !darwin)
+		bstr(pre, uchar ? "#define __CHAR_UNSIGNED__ 1\n" : "#undef __CHAR_UNSIGNED__\n");
+	if (fmath & 1)
+		bstr(pre, "#undef __FINITE_MATH_ONLY__\n#define __FINITE_MATH_ONLY__ 1\n");
+	if ((fmath & 2) && !darwin)	/* Darwin's default is already no errno */
+		bstr(pre, "#define __NO_MATH_ERRNO__ 1\n");
+	if ((fmath & 16) && darwin)
+		bstr(pre, "#undef __NO_MATH_ERRNO__\n");
+	if (fmath & 4)
+		bstr(pre, "#define __FAST_MATH__ 1\n");
+	if (fmath & 32)
+		bstr(pre, "#define __ARM_FP_FAST 1\n");
+	if (fmath & 8)
+		bstr(pre, "#define _REENTRANT 1\n");
+}
+
 /* C23: char8_t and the %B/%b formats (out of line: the caller's loops stay as compiled) */
 static __attribute__((noinline, cold)) void predef_c23(buf *pre, int darwin)
 {
@@ -728,7 +747,7 @@ int ppd_run(int argc, char **argv, const ppd_env *env)
 	int comments = 0, nomarkers = 0;
 	int dmacros = 0, showinc = 0, ddefs = 0, syntax = 0, layout = 0, ms_anon = 0, short_wchar = 0, tokhash = 0, emit = 0, objmode = 0;
 	const char *stdver = NULL, *macos_min = NULL;
-	int macos_min_flag = 0;
+	int macos_min_flag = 0, uchar = -1, fmath = 0;	/* fmath: 1 finite-only, 2 no errno, 4 __FAST_MATH__, 8 -pthread, 16 errno, 32 __ARM_FP_FAST */
 	int tri = -1, std = 0, strict = 0, wimpl_int = 0, wimpl_fn = 0, gnu89_inline = -1, vcc_kernel = 0;
 	char objbuf[1024];
 
@@ -753,6 +772,15 @@ int ppd_run(int argc, char **argv, const ppd_env *env)
 		if (!strcmp(a, "-dD")) { ddefs = 1; continue; }
 		if (!strcmp(a, "-fms-anonymous-structs") || !strcmp(a, "-fms-extensions")) { ms_anon = 1; continue; }
 		if (!strcmp(a, "-fshort-wchar")) { short_wchar = 1; continue; }
+		if (!strcmp(a, "-funsigned-char") || !strcmp(a, "-fno-signed-char")) { uchar = 1; continue; }
+		if (!strcmp(a, "-fsigned-char") || !strcmp(a, "-fno-unsigned-char")) { uchar = 0; continue; }
+		if (!strcmp(a, "-ffast-math")) { fmath = (fmath | 39) & ~16; continue; }
+		if (!strcmp(a, "-fno-fast-math")) { fmath &= 8; continue; }
+		if (!strcmp(a, "-ffinite-math-only")) { fmath |= 1; continue; }
+		if (!strcmp(a, "-fno-finite-math-only")) { fmath &= ~5; continue; }
+		if (!strcmp(a, "-fno-math-errno")) { fmath = (fmath | 2) & ~16; continue; }
+		if (!strcmp(a, "-fmath-errno")) { fmath = (fmath & ~6) | 16; continue; }	/* no longer fast-math */
+		if (!strcmp(a, "-pthread")) { fmath |= 8; continue; }	/* (-pthread: _REENTRANT) */
 		if (!strcmp(a, "-fcolor-diagnostics") || !strcmp(a, "-fdiagnostics-color") || !strcmp(a, "-fdiagnostics-color=always")) { dcolor = 1; continue; }
 		if (!strcmp(a, "-fno-color-diagnostics") || !strcmp(a, "-fno-diagnostics-color") || !strcmp(a, "-fdiagnostics-color=never")) { dcolor = -1; continue; }
 		if (!strcmp(a, "-fdiagnostics-color=auto")) { dcolor = 0; continue; }
@@ -1083,6 +1111,8 @@ int ppd_run(int argc, char **argv, const ppd_env *env)
 			   "#undef __WCHAR_TYPE__\n#define __WCHAR_TYPE__ unsigned int\n"
 			   "#undef __WCHAR_WIDTH__\n#define __WCHAR_WIDTH__ 32\n"
 			   "#undef __clang_wide_literal_encoding__\n#define __clang_wide_literal_encoding__ \"UTF-32\"\n");
+	if (!undef && (fmath || (uchar >= 0 && uchar != !darwin)))
+		predef_flags(&pre, darwin, uchar, fmath);
 	if (darwin && macos_min && !undef) {
 		/* clang: MMmmpp (10.x before 10.10: 10mp) */
 		unsigned maj = 0, min = 0, pat = 0, vv;
@@ -1132,7 +1162,7 @@ int ppd_run(int argc, char **argv, const ppd_env *env)
 	bput(&pre, "", 1);
 	po.predef = pre.p;
 	po.main = main_file;
-	po.unsigned_char = !darwin;
+	po.unsigned_char = uchar >= 0 ? uchar : !darwin;
 	po.cwd = env->cwd;
 	po.errfd = errfd;
 	po.diag_color = dcolor;
