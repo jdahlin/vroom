@@ -285,6 +285,10 @@ static void line_directive(pp *p, ctx *c, uint32_t b, uint32_t e, bool expand_li
 	pop_to(p, d);
 	if (unlikely(p->out_text)) {
 		/* clang's FileChanged(RenameFile): the next line is line v, and a line in progress ends */
+		if (p->lmark) {
+			lm_rename(p, m->name, m->namelen, m->line);
+			return;
+		}
 		p->cur_line = m->line;
 		if (p->col || p->edir) {
 			out_nl(p);
@@ -303,6 +307,8 @@ VPRIV int directive(pp *p, ctx *c, ptok *out)
 	c->di++;
 	if (unlikely(p->out_text > 1))
 		cmt_directive(p, c, d->tok, e);
+	if (unlikely(p->lmark) && c->f == &p->builtin && c->vt[d->tok].off >= p->o->predef_cmdl)
+		lm_count(p);	/* the command line's first -D/-U/-include */
 	switch (d->kind) {
 	case D_IF: case D_IFDEF: case D_IFNDEF:
 		if (!cond_true(p, c, d))

@@ -171,7 +171,7 @@ static void hc_mode(pp *p, int mode)
 	static pthread_once_t once = PTHREAD_ONCE_INIT;
 
 	pthread_once(&once, hc_env);
-	p->hc = !hc_off && !p->o->show_includes && !p->o->dump_defines && !p->o->comments;	/* -H: a replay has no nesting to print */
+	p->hc = !hc_off && !p->o->show_includes && !p->o->dump_defines && !p->o->comments && !p->o->markers;	/* -H: a replay has no nesting to print */
 	p->tokmode = mode;
 }
 
@@ -329,7 +329,102 @@ VPRIV void out_nl(pp *p)
 	out_ch(p, '\n');
 }
 
-/* clang's PrintPPOutputPPCallbacks::MoveToLine with -P */
+/* clang's WriteLineInfo: "# N "file" flags" on a line of its own */
+static __attribute__((cold, noinline)) void lm_write(pp *p, uint32_t line, const char *extra)
+{
+	char b[16];
+	int n = snprintf(b, sizeof(b), "# %u \"", line);
+
+	if (p->col || p->edir)
+		out_nl(p);
+	for (int i = 0; i < n; i++)
+		out_ch(p, b[i]);
+	for (uint32_t i = 0; i < p->lm_nlen; i++) {	/* llvm's write_escaped */
+		unsigned char c = (unsigned char)p->lm_name[i];
+
+		if (c == '\\' || c == '"')
+			out_ch(p, '\\'), out_ch(p, (char)c);
+		else if (c == '\t')
+			out_ch(p, '\\'), out_ch(p, 't');
+		else if (c == '\n')
+			out_ch(p, '\\'), out_ch(p, 'n');
+		else if (c < 32 || c > 126) {
+			out_ch(p, '\\');
+			out_ch(p, (char)('0' + (c >> 6)));
+			out_ch(p, (char)('0' + (c >> 3 & 7)));
+			out_ch(p, (char)('0' + (c & 7)));
+		} else
+			out_ch(p, (char)c);
+	}
+	out_ch(p, '"');
+	while (*extra)
+		out_ch(p, *extra++);
+	if (p->lm_sys)
+		out_ch(p, ' '), out_ch(p, '3');
+	if (p->lm_sys == 2)
+		out_ch(p, ' '), out_ch(p, '4');
+	out_nl(p);
+	p->col = 0, p->edir = 0;
+}
+
+static void lm_file(pp *p, const char *name, uint8_t sys)
+{
+	p->lm_name = name;
+	p->lm_nlen = (uint32_t)strlen(name);
+	p->lm_sys = sys;
+}
+
+/* the predefined macros before the command line: clang's <built-in> has a
+ * line for each, and the command line's marker is 3 lines after (1 with -undef) */
+VPRIV void lm_count(pp *p)
+{
+	uint32_t n = 0;
+
+	if (p->lm_n)
+		return;
+	for (uint32_t d = 0; d < NMDIR; d++) {
+		const uintptr_t *pg = p->mdir[d];
+
+		for (uint32_t k = 0; pg && k < MPAGE; k++) {
+			const pmacro *m = (const pmacro *)(pg[k] & ~(uintptr_t)1);
+
+			n += m && m->kind != MK_BUILTIN;
+		}
+	}
+	p->lm_n = n + 1;
+}
+
+/* <built-in>'s command line, after the predefined macros */
+static __attribute__((cold, noinline)) void lm_builtin_block(pp *p)
+{
+	lm_count(p);
+	p->lm_blk = 1;
+	move_to_line(p, p->lm_n - 1 + (p->o->markers == 2 ? 1 : 3), false);
+	lm_file(p, "<command line>", 0);
+	lm_write(p, 1, " 1");
+	lm_file(p, "<built-in>", 0);
+	lm_write(p, 1, " 2");
+	p->cur_line = p->lm_bline = 1;
+}
+
+/* a file entered: its marker (after the #include's line was moved to) */
+VPRIV void lm_enter(pp *p, const fent *e)
+{
+	lm_file(p, e->spath, e->sys);
+	p->cur_line = 1;
+	lm_write(p, 1, " 1");
+}
+
+/* #line N ["file"] / # N "file": clang's FileChanged(RenameFile) */
+VPRIV void lm_rename(pp *p, const char *name, uint32_t nlen, uint32_t line)
+{
+	if (name)
+		p->lm_name = name, p->lm_nlen = nlen;
+	p->cur_line = line;
+	lm_write(p, line, "");
+}
+
+/* clang's PrintPPOutputPPCallbacks::MoveToLine (-P: MinimizeWhitespace off) */
 VPRIV bool move_to_line(pp *p, uint32_t line, bool req)
 {
 	bool nl = false;
@@ -338,9 +433,18 @@ VPRIV bool move_to_line(pp *p, uint32_t line, bool req)
 		out_nl(p);
 		nl = true;
 		p->cur_line++;
+		p->col = 0, p->edir = 0;
 	}
 	if (p->cur_line == line)
 		;
+	else if (unlikely(p->lmark)) {
+		if (line - p->cur_line <= 8)
+			for (uint32_t i = p->cur_line; i < line; i++)
+				out_nl(p);
+		else
+			lm_write(p, line, "");
+		nl = true;
+	}
 	else if (!nl && line - p->cur_line == 1)
 		out_nl(p), nl = true;
 	else if (!nl && p->col)
@@ -359,6 +463,44 @@ VPRIV void text_file_change(pp *p, const ctx *from, int enter)
 
 	if (!p->out_text)
 		return;
+	if (unlikely(p->lmark)) {
+		const fent *e;
+
+		if (from && from->f == &p->builtin) {
+			if (!p->lm_blk)
+				lm_builtin_block(p);
+			if (!enter)
+				p->lm_bline++;
+			l = p->lm_bline;
+			if (!enter) {
+				lm_file(p, "<built-in>", 0);
+				p->cur_line = l;
+				lm_write(p, l, " 2");
+			}
+			return;	/* enter: the -include line is the current one */
+		}
+		if (!enter && !p->lm_blk)
+			lm_builtin_block(p);	/* <built-in> ends */
+		if (from && from->type == C_FILE && from->i)
+			l = loc_line(p, from->loc + from->vt[from->i - 1].off);
+		if (enter) {
+			move_to_line(p, l, false);
+			return;	/* the marker when the file is known (lm_enter) */
+		}
+		e = &p->fe[from->fe];
+		lm_file(p, e->spath, e->sys);
+		if (from->i) {
+			uint32_t pl;
+			const char *pn = presumed_name(p, from->fe, from->loc + from->vt[from->i - 1].off, &pl);
+
+			if (pn != e->name)
+				p->lm_name = pn, p->lm_nlen = pl;
+			l++;
+		}
+		p->cur_line = l;
+		lm_write(p, l, " 2");
+		return;
+	}
 	if (from && from->type == C_FILE && from->i)
 		l = loc_line(p, from->loc + from->vt[from->i - 1].off);
 	else if (enter)
@@ -598,7 +740,12 @@ static inline void render(pp *p, const ptok *t)
 		return;
 	}
 	if (t->kind == P_DIRECTIVE) {
-		move_to_line(p, loc_line(p, t->loc), true);
+		uint32_t line = loc_line(p, t->loc);
+
+		/* clang prints "assume_nonnull end" at the line of what it printed last */
+		if (t->len == 31 && !memcmp(t->s, "pragma clang assume_nonnull end", 31))
+			line = p->cur_line;
+		move_to_line(p, line, true);
 		out_reserve(p, t->len + 2);
 		p->out[p->nout++] = '#';
 		memcpy(p->out + p->nout, t->s, t->len);
@@ -662,6 +809,15 @@ int pp_text(pp *p, const char **out, size_t *len)
 	hc_mode(p, 1);
 	p->out_text = p->o->comments ? 2 : 1;	/* 2: -C */
 	p->cur_line = 1;
+	if (unlikely(p->o->markers)) {
+		p->lmark = 1;
+		lm_file(p, p->fe[0].spath, p->fe[0].sys);
+		lm_write(p, 1, "");
+		lm_file(p, "<built-in>", 0);
+		lm_write(p, 1, " 1");
+		p->lm_sys = 1;
+		lm_write(p, 1, "");
+	}
 	if (p->o->asm_mode)
 		p->hc = 0;	/* cached text is C-spaced */
 	for (;;) {

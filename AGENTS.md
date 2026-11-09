@@ -97,6 +97,7 @@ bench/vcc-diff.py hdr -j 6          # -H include tree vs clang (~60 s)
 bench/vcc-diff.py dd -j 6           # -dD: the #define/#undef lines in order vs clang (~60 s)
 bench/vcc-diff.py text -j 6         # -E -P byte for byte vs the references (spacing, lines)
 bench/vcc-diff.py textc -j 6        # the same with -C (comments), clang run alongside (~2 min)
+bench/vcc-diff.py lines -j 6        # -E without -P: line markers byte for byte, clang alongside (~2 min)
 bench/vcc-sema.py run -j 6          # vpp -fsyntax-only on every C TU
 bench/vcc-sema.py batch -j 6        # the same in one vpp --batch process: ~3 s instead of ~35 s
 bench/vcc-sema.py layout -j 6       # layouts/constants/decl types checked by clang (~70 s)

@@ -465,6 +465,11 @@ struct pp {
 	int sol_depth;
 	uint32_t exp_loc;
 	uint32_t sol_loc;	/* the source macro name a line starts with: expanded tokens' column */
+	/* -E without -P: GNU line markers */
+	uint8_t lmark, lm_blk, lm_sys;	/* on; <built-in>'s block printed; the current file is a system header */
+	uint32_t lm_n, lm_bline;	/* predefined macros before the command line (+1); <built-in>'s line */
+	const char *lm_name;		/* the current file's presumed name */
+	uint32_t lm_nlen;
 	struct { uint32_t id; const pmacro *m; } *dd_ev;	/* -dD: <built-in>'s #define/#undef, until printed */
 	uint32_t ndd, capdd;
 	int dd_done;
@@ -613,6 +618,9 @@ VPRIV __attribute__((cold)) void cmt_skip_to(pp *p, const ptok *rp);
 VPRIV const char *cmt_line_end(const char *s);
 VPRIV unsigned tok_col(const pp *p, uint32_t loc);
 VPRIV void text_file_change(pp *p, const ctx *from, int enter);
+VPRIV void lm_count(pp *p);
+VPRIV void lm_enter(pp *p, const fent *e);
+VPRIV void lm_rename(pp *p, const char *name, uint32_t nlen, uint32_t line);
 VPRIV const char *presumed_name(const pp *p, uint32_t fe, uint32_t loc, uint32_t *len);
 VPRIV __attribute__((format(printf, 4, 5))) void pp_diag(pp *p, uint32_t loc, const char *what, const char *fmt, ...);
 void pp_diagx(pp *p, const pp_dinfo *d, const char *fmt, ...);

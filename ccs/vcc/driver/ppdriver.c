@@ -624,6 +624,30 @@ static __attribute__((noinline)) size_t env_ndirs(const char *v)
 	return k;
 }
 
+/* C23: char8_t and the %B/%b formats (out of line: the caller's loops stay as compiled) */
+static __attribute__((noinline, cold)) void predef_c23(buf *pre, int darwin)
+{
+	/* char8_t and the %B/%b formats */
+	static const char *const fmt[][2] = {
+		{ "SIZE", "l" }, { "UINT16", "h" }, { "UINT32", "" }, { "UINT64", "l" }, { "UINT8", "hh" },
+		{ "UINTMAX", "l" }, { "UINTPTR", "l" }, { "UINT_FAST16", "h" }, { "UINT_FAST32", "" },
+		{ "UINT_FAST64", "l" }, { "UINT_FAST8", "hh" }, { "UINT_LEAST16", "h" },
+		{ "UINT_LEAST32", "" }, { "UINT_LEAST64", "l" }, { "UINT_LEAST8", "hh" },
+	};
+	char b[96];
+
+	bstr(pre, "#define __CHAR8_TYPE__ unsigned char\n#define __CLANG_ATOMIC_CHAR8_T_LOCK_FREE 2\n"
+		   "#define __GCC_ATOMIC_CHAR8_T_LOCK_FREE 2\n");
+	for (size_t k = 0; k < sizeof(fmt) / sizeof(*fmt); k++) {
+		/* Darwin's 64-bit types are long long */
+		const char *l = darwin && strstr(fmt[k][0], "64") ? "ll" : fmt[k][1];
+
+		snprintf(b, sizeof(b), "#define __%s_FMTB__ \"%sB\"\n#define __%s_FMTb__ \"%sb\"\n",
+			 fmt[k][0], l, fmt[k][0], l);
+		bstr(pre, b);
+	}
+}
+
 /* the elements of v appended to all[n..] (not repeating one from nquote on); an
    empty element is the current directory.  slot: which per-thread copy holds them */
 static __attribute__((noinline)) int env_dirs(const char *v, const char **all, int n, int nquote, int slot)
@@ -701,7 +725,7 @@ int ppd_run(int argc, char **argv, const ppd_env *env)
 	char *pmap = NULL;
 	double t0;
 	pp *p;
-	int comments = 0;
+	int comments = 0, nomarkers = 0;
 	int dmacros = 0, showinc = 0, ddefs = 0, syntax = 0, layout = 0, ms_anon = 0, short_wchar = 0, tokhash = 0, emit = 0, objmode = 0;
 	int tri = -1, std = 0, strict = 0, wimpl_int = 0, wimpl_fn = 0, gnu89_inline = -1, vcc_kernel = 0;
 	char objbuf[1024];
@@ -718,6 +742,7 @@ int ppd_run(int argc, char **argv, const ppd_env *env)
 		if (!strcmp(a, "-dM")) { dmacros = 1; continue; }
 		if (!strcmp(a, "-H")) { showinc = 1; continue; }
 		if (!strcmp(a, "-C")) { comments = 1; continue; }
+		if (!strcmp(a, "-P")) { nomarkers = 1; continue; }
 		if (!strcmp(a, "-CC") || !strcmp(a, "-traditional-cpp") || !strcmp(a, "-traditional")) {
 			dprintf(errfd, "vcc: error: %s is not supported\n", a);	/* TODO.md: output modes */
 			status = 2;
@@ -880,14 +905,14 @@ int ppd_run(int argc, char **argv, const ppd_env *env)
 		snprintf(dfbuf, sizeof(dfbuf), "%.*s.d", (int)(dot ? dot - st : (long)strlen(st)), st);
 		depfile = dfbuf;
 	}
-	/* hosted Linux defaults as clang's: PIE, asynchronous unwind tables (CFI) */
+	/* Linux defaults as clang's: PIE, asynchronous unwind tables (CFI) */
 	{
-		int hl = hosted && !darwin;
+		int hl = !darwin;
 
 		if (pie < 0)
 			pie = hl && !pic ? 2 : 0;
 		if (cfi < 0)
-			cfi = hl;
+			cfi = hl && !freestanding;
 	}
 	/* search path: -iquote, -I, -isystem, -idirafter; exact duplicates dropped */
 	for (int k = 0; k < nq; k++) all[n++] = dirs_q[k];
@@ -908,8 +933,16 @@ int ppd_run(int argc, char **argv, const ppd_env *env)
 	if (darwin && !nostdinc)
 		ADD(VCC_INCDIR);
 	if (darwin && !nostdinc)
-		for (size_t k = 0; k < sizeof(sysdirs_darwin) / sizeof(sysdirs_darwin[0]); k++)
+		for (size_t k = 0; k < sizeof(sysdirs_darwin) / sizeof(sysdirs_darwin[0]); k++) {
+			size_t l = strlen(sysdirs_darwin[k]);
+			int xc = l > 12 && !strcmp(sysdirs_darwin[k] + l - 12, "/usr/include");
+
+			if (xc)
+				po.xc0 = n;
 			ADD(sysdirs_darwin[k]);
+			if (xc)
+				po.xc1 = n;
+		}
 	if (darwin && (mdeps || depfile || showinc)) {
 		/* clang reads the SDK's SDKSettings.json (the default sysroot: the SDK
 		   of the system directories), and it is the first dependency */
@@ -927,13 +960,16 @@ int ppd_run(int argc, char **argv, const ppd_env *env)
 		if (!mdeps && !depfile)
 			dfirst = NULL;
 	}
+	(void)hosted;
 #ifdef VCC_RESDIR
 	/* hosted Linux: clang's resource headers, then glibc's (multiarch first) */
 	if (hosted && !darwin && !nostdinc) {
 		ADD(VCC_RESDIR);
 		ADD("/usr/local/include");
+		po.xc0 = n;	/* clang: extern "C" system directories (" 3 4" in line markers) */
 		ADD("/usr/include/aarch64-linux-gnu");
 		ADD("/usr/include");
+		po.xc1 = n;
 	}
 #endif
 	for (int k = 0; k < na; k++) ADD(dirs_a[k]);
@@ -984,6 +1020,8 @@ int ppd_run(int argc, char **argv, const ppd_env *env)
 		}
 		if (strict)
 			bstr(&pre, "#define __STRICT_ANSI__ 1\n#undef linux\n#undef unix\n");
+		if (std == 23)
+			predef_c23(&pre, darwin);
 	} else if (!undef && !asm_mode) {
 		bstr(&pre, "#undef __STDC_VERSION__\n#define __STDC_VERSION__ 201710L\n");
 	}
@@ -1015,7 +1053,23 @@ int ppd_run(int argc, char **argv, const ppd_env *env)
 			   "#undef __WCHAR_TYPE__\n#define __WCHAR_TYPE__ unsigned int\n"
 			   "#undef __WCHAR_WIDTH__\n#define __WCHAR_WIDTH__ 32\n"
 			   "#undef __clang_wide_literal_encoding__\n#define __clang_wide_literal_encoding__ \"UTF-32\"\n");
+	if (darwin && short_wchar && !undef)
+		bstr(&pre, "#undef __ARM_SIZEOF_WCHAR_T\n#define __ARM_SIZEOF_WCHAR_T 2\n"
+			   "#undef __SIZEOF_WCHAR_T__\n#define __SIZEOF_WCHAR_T__ 2\n"
+			   "#undef __WCHAR_MAX__\n#define __WCHAR_MAX__ 65535\n"
+			   "#undef __WCHAR_MIN__\n#define __WCHAR_MIN__ 0\n"
+			   "#undef __WCHAR_TYPE__\n#define __WCHAR_TYPE__ unsigned short\n"
+			   "#define __WCHAR_UNSIGNED__ 1\n"
+			   "#undef __WCHAR_WIDTH__\n#define __WCHAR_WIDTH__ 16\n"
+			   "#undef __clang_wide_literal_encoding__\n#define __clang_wide_literal_encoding__ \"UTF-16\"\n");
+	if (darwin && gregs && !undef)	/* the Darwin table has Apple's FP/SIMD features */
+		bstr(&pre, "#undef __ARM_FEATURE_AES\n#undef __ARM_FEATURE_CRYPTO\n#undef __ARM_FEATURE_DOTPROD\n"
+			   "#undef __ARM_FEATURE_FP16_FML\n#undef __ARM_FEATURE_FP16_SCALAR_ARITHMETIC\n"
+			   "#undef __ARM_FEATURE_FP16_VECTOR_ARITHMETIC\n#undef __ARM_FEATURE_SHA2\n"
+			   "#undef __ARM_FEATURE_SHA3\n#undef __ARM_FEATURE_SHA512\n#undef __ARM_FP\n"
+			   "#undef __ARM_NEON\n#undef __ARM_NEON_FP\n");
 	if (cfi && !undef) bstr(&pre, "#define __GCC_HAVE_DWARF2_CFI_ASM 1\n");
+	if (darwin && freestanding && !undef) bstr(&pre, "#undef __GCC_HAVE_DWARF2_CFI_ASM\n");
 	/* the Linux table is for the kernel's -mgeneral-regs-only */
 	if (!darwin && !gregs && !undef)
 		bstr(&pre, "#define __ARM_FP 0xE\n#define __ARM_NEON 1\n#define __ARM_NEON_FP 0xE\n");
@@ -1025,6 +1079,8 @@ int ppd_run(int argc, char **argv, const ppd_env *env)
 		bstr(&pre, "#define __ARM_FEATURE_ATOMICS 1\n");
 	if (strict_align) bstr(&pre, "#undef __ARM_FEATURE_UNALIGNED\n");
 	if (tiny) bstr(&pre, "#undef __AARCH64_CMODEL_SMALL__\n#define __AARCH64_CMODEL_TINY__ 1\n");
+	po.markers = nomarkers || cmp || !po.fatal_continue || dmacros ? 0 : undef ? 2 : 1;
+	po.predef_cmdl = (unsigned)pre.n;
 	if (cmdl.n) bput(&pre, cmdl.p, cmdl.n);
 	if (incl.n) bput(&pre, incl.p, incl.n);
 	bput(&pre, "", 1);

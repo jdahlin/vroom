@@ -626,8 +626,7 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
 - [ ] **`#embed` / `__has_embed`** [P].  *Validate:* pp-diff fixtures plus
   T1 (`unsigned char d[] = { #embed "bin" };` checksums).
 - [ ] **Output modes**: `-CC` (comments in macro definitions and arguments,
-  `//` as `/* */`) and `-traditional-cpp` are rejected with an error; line
-  markers without `-P`.
+  `//` as `/* */`) and `-traditional-cpp` are rejected with an error.
   *Validate:* `bench/vcc-diff.py text` (bytes, not tokens) for `-E` with and
   without `-P`.  (`-E -P` text done: clang's spacing (leading space,
   AvoidConcat), indentation to the expansion column, MoveToLine's blank lines
@@ -635,7 +634,15 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
   re-spaced as tokens; a header guard counts once the file is complete, as for
   `-H`.  `-C` done: comments printed as clang's comment tokens, dropped in
   directives, skipped groups and macro arguments; vccd accepts it, so
-  kbuild's `cpp_lds_S` (vdso.lds) no longer needs clang.
+  kbuild's `cpp_lds_S` (vdso.lds) no longer needs clang.  Line markers
+  (`-E` without `-P`) done: GNU `# N "file" 1/2/3/3 4` as clang's
+  FileChanged/WriteLineInfo, `<built-in>`/`<command line>` (its line: the
+  predefined macros + 3), `./` for `-include` from the current directory,
+  extern "C" system directories (`/usr/include`, the SDK's), `#line`, up to
+  8 newlines before a marker; `bench/vcc-diff.py lines` 912/912.  The
+  predefined macros now match clang's `-dM` outside the kernel's flags too
+  (Linux PIE/CFI defaults, C23 char8_t/%B, Darwin -fshort-wchar and
+  -mgeneral-regs-only).
   `bench/vcc-diff.py text` and `textc` (-C) 912/912,
   `ccs/fuzz/pp-diff.py --text` on regress/pp and the seed corpus.)  (`-M`/`-MM` done: see Depfiles;
   `-H` done: `bench/vcc-diff.py hdr` 912/912, header cache off under `-H`;
