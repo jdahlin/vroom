@@ -494,9 +494,12 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
 ## Tier 3: features general C needs
 
 ### Codegen (`emit.c`)
-- [ ] **PIC/PIE** [P]: `-fPIC`/`-fPIE` only set macros; `sym_needs_got`
-  `emit.c:2362`.  GOT for preemptible symbols under `-fPIC`, direct for
-  local/hidden, PIE default on hosted Linux as clang.
+- [ ] **PIC/PIE** [P]: done: `cc_opts.pic` from the driver (PIE the hosted
+  default, `-fno-pic`), `sym_needs_got` (arch/a64/emit/value.c) as clang:
+  `-fPIC` every default-visibility non-static symbol, `-fPIE` those not
+  defined in the TU, hidden/protected direct, calls direct; checked by
+  `bench/vcc-pic.py` (GOT relocations vs clang per mode).  Left: T8 (a
+  shared library + executable run under qemu), the vDSO, TLS under PIC.
   *Validate:* T6 (`ADR_GOT_PAGE`/`LD64_GOT_LO12_NC` for extern data under
   `-fPIC`, none for `static`/hidden); T8 link a shared library + an executable
   using it, run under qemu-user; kernel vDSO built by vcc and boot test.

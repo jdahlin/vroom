@@ -919,6 +919,7 @@ int ppd_run(int argc, char **argv, const ppd_env *env)
 		else if (!strcmp(a, "-fpic")) pic = 1, pie = 0;
 		else if (!strcmp(a, "-fPIC")) pic = 2, pie = 0;
 		else if (!strcmp(a, "-fno-PIE") || !strcmp(a, "-fno-pie")) pie = 0;
+		else if (!strcmp(a, "-fno-PIC") || !strcmp(a, "-fno-pic")) pic = 0, pie = 0;
 		else if (!strcmp(a, "-ffreestanding")) freestanding = 1;
 		else if (!strcmp(a, "-fno-builtin")) nobuiltin = 1;
 		else if (!strcmp(a, "-finstrument-functions")) instr = 1;
@@ -1259,7 +1260,7 @@ int ppd_run(int argc, char **argv, const ppd_env *env)
 		cc_opts co = { .target = po.target, .unsigned_char = po.unsigned_char, .dump_layouts = layout, .ms_anon = ms_anon, .short_wchar = short_wchar,
 				.std = std, .implicit_int = std == 89 || wimpl_int, .implicit_fn = std == 89 || wimpl_fn,
 				.gnu89_inline = gnu89_inline, .no_builtin = freestanding || nobuiltin, .instrument = instr,
-				.general_regs_only = gregs, .vcc_kernel = vcc_kernel, .lse = lse, .opt = olevel,
+				.general_regs_only = gregs, .vcc_kernel = vcc_kernel, .lse = lse, .opt = olevel, .pic = pic ? 2 : pie ? 1 : 0,
 			       .outfd = env->outfd };
 		int fd = -1;
 		char outpath[4096], outtmp[4200];
