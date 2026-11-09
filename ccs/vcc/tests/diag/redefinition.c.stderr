@@ -1,0 +1,7 @@
+redefinition.c:2:5: error: redefinition of 'x'
+    2 | int x = 2;
+      |     ^
+redefinition.c:1:5: note: previous definition is here
+    1 | int x = 1;
+      |     ^
+1 error generated.

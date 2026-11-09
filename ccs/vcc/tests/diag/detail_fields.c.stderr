@@ -1,0 +1,19 @@
+detail_fields.c:3:16: error: field 'f' declared as a function
+    3 | struct A { int f(void); };
+      |                ^
+detail_fields.c:4:21: error: field has incomplete type 'struct X'
+    4 | struct B { struct X x; };
+      |                     ^
+detail_fields.c:2:8: note: forward declaration of 'struct X'
+    2 | struct X;
+      |        ^
+detail_fields.c:5:18: error: bit-field 'b' has non-integral type 'float'
+    5 | struct C { float b : 3; };
+      |                  ^   ~
+detail_fields.c:6:16: error: bit-field 'c' has negative width (-1)
+    6 | struct D { int c : -1; };
+      |                ^
+detail_fields.c:7:16: error: named bit-field 'd' has zero width
+    7 | struct E { int d : 0; };
+      |                ^   ~
+5 errors generated.

@@ -1,0 +1,15 @@
+undeclared_typo.c:5:2: error: use of undeclared identifier 'totl'; did you mean 'total'?
+    5 |         totl = 1;
+      |         ^~~~
+      |         total
+undeclared_typo.c:4:6: note: 'total' declared here
+    4 |         int total = 0;
+      |             ^
+undeclared_typo.c:6:9: error: use of undeclared identifier 'cont'; did you mean 'count'?
+    6 |         return cont + total;
+      |                ^~~~
+      |                count
+undeclared_typo.c:1:5: note: 'count' declared here
+    1 | int count;
+      |     ^
+2 errors generated.

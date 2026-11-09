@@ -1,0 +1,7 @@
+conflicting_types.c:2:6: error: conflicting types for 'f'
+    2 | long f(int);
+      |      ^
+conflicting_types.c:1:5: note: previous declaration is here
+    1 | int f(int);
+      |     ^
+1 error generated.

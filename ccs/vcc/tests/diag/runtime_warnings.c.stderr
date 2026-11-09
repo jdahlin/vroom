@@ -1,0 +1,25 @@
+runtime_warnings.c:4:12: warning: division by zero is undefined [-Wdivision-by-zero]
+    4 |         int y = x / 0;
+      |                   ^ ~
+runtime_warnings.c:5:12: warning: remainder by zero is undefined [-Wdivision-by-zero]
+    5 |         int z = x % 0;
+      |                   ^ ~
+runtime_warnings.c:6:12: warning: shift count >= width of type [-Wshift-count-overflow]
+    6 |         int s = x << 32;
+      |                   ^  ~~
+runtime_warnings.c:7:12: warning: shift count is negative [-Wshift-count-negative]
+    7 |         int t = x >> -1;
+      |                   ^  ~~
+runtime_warnings.c:8:10: warning: array index 4 is past the end of the array (that has type 'int[4]') [-Warray-bounds]
+    8 |         int u = a[4];
+      |                 ^ ~
+runtime_warnings.c:1:1: note: array 'a' declared here
+    1 | int a[4];
+      | ^
+runtime_warnings.c:9:10: warning: array index -1 is before the beginning of the array [-Warray-bounds]
+    9 |         int v = a[-1];
+      |                 ^ ~~
+runtime_warnings.c:1:1: note: array 'a' declared here
+    1 | int a[4];
+      | ^
+6 warnings generated.

@@ -1,0 +1,7 @@
+sizeof_incomplete.c:2:9: error: invalid application of 'sizeof' to an incomplete type 'struct s'
+    2 | int n = sizeof(struct s);
+      |         ^     ~~~~~~~~~~
+sizeof_incomplete.c:1:8: note: forward declaration of 'struct s'
+    1 | struct s;
+      |        ^
+1 error generated.

@@ -1,0 +1,4 @@
+member_typo.c:4:12: error: no member named 'yy' in 'struct point'
+    4 |         return p->yy;
+      |                ~  ^
+1 error generated.

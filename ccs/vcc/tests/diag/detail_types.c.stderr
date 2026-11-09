@@ -1,0 +1,40 @@
+detail_types.c:5:7: error: size of array has non-integer type 'double'
+    5 | int a[1.5];
+      |       ^~~
+detail_types.c:6:1: error: _Atomic cannot be applied to array type 'int[2]' 
+    6 | _Atomic(int[2]) at;
+      | ^
+detail_types.c:7:1: error: _Atomic cannot be applied to incomplete type 'struct X' 
+    7 | _Atomic(struct X) *ax;
+      | ^
+detail_types.c:2:8: note: forward declaration of 'struct X'
+    2 | struct X;
+      |        ^
+detail_types.c:8:26: error: variable has incomplete type 'struct X'
+    8 | void f1(void) { struct X x; }
+      |                          ^
+detail_types.c:2:8: note: forward declaration of 'struct X'
+    2 | struct X;
+      |        ^
+detail_types.c:9:31: error: incomplete definition of type 'struct X'
+    9 | int f2(struct X *p) { return p->a; }
+      |                              ~^
+detail_types.c:2:8: note: forward declaration of 'struct X'
+    2 | struct X;
+      |        ^
+detail_types.c:11:24: error: cannot take the address of an rvalue of type 'int'
+   11 | int *f3(void) { return &g(); }
+      |                        ^~~~
+detail_types.c:12:18: error: controlling expression type 'double' not compatible with any generic association type
+   12 | int x = _Generic(1.0, int: 1);
+      |                  ^~~
+detail_types.c:13:23: error: invalid argument type 'struct S' to unary expression
+   13 | int f4(void) { return -s; }
+      |                       ^~
+detail_types.c:14:31: error: cast to union type from type 'double' not present in union
+   14 | union U f5(double d) { return (union U)d; }
+      |                               ^        ~
+detail_types.c:15:21: error: statement requires expression of integer type ('double' invalid)
+   15 | void f6(double d) { switch (d) { } }
+      |                     ^       ~
+10 errors generated.

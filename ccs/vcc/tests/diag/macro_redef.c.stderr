@@ -1,0 +1,7 @@
+macro_redef.c:2:9: warning: 'X' macro redefined [-Wmacro-redefined]
+    2 | #define X 2
+      |         ^
+macro_redef.c:1:9: note: previous definition is here
+    1 | #define X 1
+      |         ^
+1 warning generated.

@@ -1,0 +1,7 @@
+redef_fn.c:2:5: error: redefinition of 'f'
+    2 | int f(void) { return 2; }
+      |     ^
+redef_fn.c:1:5: note: previous definition is here
+    1 | int f(void) { return 1; }
+      |     ^
+1 error generated.

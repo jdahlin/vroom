@@ -1,0 +1,7 @@
+struct_redef.c:2:8: error: redefinition of 's'
+    2 | struct s { int b; };
+      |        ^
+struct_redef.c:1:8: note: previous definition is here
+    1 | struct s { int a; };
+      |        ^
+1 error generated.

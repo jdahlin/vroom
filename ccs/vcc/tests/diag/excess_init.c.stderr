@@ -1,0 +1,10 @@
+excess_init.c:3:20: warning: excess elements in array initializer [-Wexcess-initializers]
+    3 | int d[2] = { 1, 2, 3, 4 };
+      |                    ^
+excess_init.c:4:24: warning: excess elements in struct initializer [-Wexcess-initializers]
+    4 | struct T e = { .y = 1, 2 };
+      |                        ^
+excess_init.c:5:27: warning: excess elements in union initializer [-Wexcess-initializers]
+    5 | union { int a; } u = { 1, 2 };
+      |                           ^
+3 warnings generated.

@@ -1,0 +1,4 @@
+missing_operand.c:3:12: error: expected expression
+    3 |         return a +;
+      |                   ^
+1 error generated.

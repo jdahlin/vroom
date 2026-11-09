@@ -1,0 +1,8 @@
+unused_cmp.c:3:4: warning: equality comparison result unused [-Wunused-comparison]
+    3 |         x == 1;
+      |         ~~^~~~
+unused_cmp.c:3:4: note: use '=' to turn this equality comparison into an assignment
+    3 |         x == 1;
+      |           ^~
+      |           =
+1 warning generated.

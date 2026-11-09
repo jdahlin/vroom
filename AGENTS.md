@@ -101,6 +101,9 @@ bench/vcc-stress.py [--vccd]        # pathological inputs fail cleanly, vccd sur
 bench/vcc-abi.py                    # cross-compiler calls, clang/vcc x caller/callee, qemu (ccs/vcc/tests/abi, ~3 s)
 bench/vcc-abi.py --host             # the same for the Apple arm64 ABI, run natively
 bench/vcc-darwin-s.py -j 6           # Darwin -S assembled by Apple's as, runs as the direct object (~2 min)
+bench/vcc-diag.py -j 6             # tests/diag: vcc's .stderr snapshots, clang's locations/levels/flags (~2 s)
+bench/vcc-diag.py --bless PATTERN   # ... rewrite the snapshots of a changed message (review the diff)
+bench/gen-diagids.py [--check]      # pp/diagids.inc: each diagnostic format's id (clang's name or vcc_*)
 bench/vcc-builtins.py [-v]          # clang builtins unknown to vcc, __has_builtin differences (<1 s)
 bench/clangdiag.py fetch|stats      # clang's Diagnostic*.td -> work/clang-td/VER/ (once); counts per language
 bench/vcc-diagcov.py [-v] [--missing]   # vcc's diagnostics vs clang's table: coverage, gaps (~1 s)

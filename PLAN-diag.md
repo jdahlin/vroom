@@ -228,6 +228,13 @@ Tio lager; varje steg nedan säger vilka det berör.
   text (`*.stderr`, `--bless`) och `vcc-diag.py` byter till lager 1:s jämförelse, så
   att texten sedan får bli bättre.
   *Validera:* lager 1, 4 + 5a (JSON-rundresan bevisar att posten räcker).
+  *Klart 2026-11-09 (lager 5a med D3.1).*  `render_text` tar en post (D1.1).  `vcc-diag.py`
+  jämför nu två saker: vcc:s egen text mot `X.c.stderr` (lager 4, `--bless` skriver om), och
+  (fil, rad, kolumn, nivå, `-W`-flagga) för varje diagnosrad samt exit-status mot clang
+  (lager 1).  En medveten skillnad i lager 1 deklareras i fallet med `/* diag-differs: ... */`.
+  `.expect` blev `.stderr`.  Sammanfattningen räknar också fall vars text fortfarande är
+  identisk med clangs (77 av 78), så det syns när texten börjar bli bättre.
+  *Validerat:* 78/78; en ändrad snapshot ger FAIL med diff.
 - **D1.3 id i alla anropsställen** och `-fdiagnostics-show-id` (id efter flaggan) samt
   `VCC_TRACK_DIAG=1` (vcc:s egen källplats per diagnos, som rustcs `-Z track-diagnostics`).
   *Validera:* lager 2: varje vcc-diagnos har ett id som finns i `diagids.inc` eller är `vcc_*`.

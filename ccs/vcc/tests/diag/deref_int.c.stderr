@@ -1,0 +1,4 @@
+deref_int.c:3:9: error: indirection requires pointer operand ('int' invalid)
+    3 |         return *a;
+      |                ^~
+1 error generated.

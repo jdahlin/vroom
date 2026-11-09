@@ -1,0 +1,4 @@
+cast_struct.c:4:14: error: operand of type 'struct s' where arithmetic or pointer type is required
+    4 |         return (int)a;
+      |                     ^
+1 error generated.
