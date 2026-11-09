@@ -100,7 +100,8 @@ VPRIV int mode_kind(cc *c, uint32_t id, bool sgn)
 	if (!strcmp(b, "QI")) return sgn ? TY_SCHAR : TY_UCHAR;
 	if (!strcmp(b, "HI")) return sgn ? TY_SHORT : TY_USHORT;
 	if (!strcmp(b, "SI")) return sgn ? TY_INT : TY_UINT;
-	if (!strcmp(b, "DI") || !strcmp(b, "word") || !strcmp(b, "pointer")) return sgn ? TY_LONG : TY_ULONG;
+	if (!strcmp(b, "DI")) return CC_I64(c, !sgn);
+	if (!strcmp(b, "word") || !strcmp(b, "pointer")) return sgn ? TY_LONG : TY_ULONG;	/* the pointer's width */
 	if (!strcmp(b, "TI")) return sgn ? TY_INT128 : TY_UINT128;
 	return 0;
 }

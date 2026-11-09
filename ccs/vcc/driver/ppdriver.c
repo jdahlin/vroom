@@ -698,7 +698,7 @@ int ppd_run(int argc, char **argv, const ppd_env *env)
 #else
 	int darwin = 0;
 #endif
-	int wasm = 0, lnx;	/* wasm64-unknown-emscripten (PLAN-wasm.md); lnx: aarch64 Linux */
+	int wasm = 0, lnx;	/* 64 or 32: wasm64/wasm32-unknown-emscripten (PLAN-wasm.md); lnx: aarch64 Linux */
 	int hosted = 1, nostdinc = 0, asm_mode = 0, undef = 0;
 	int march_lse = -1, mcpu_lse = -1, lse;
 	int opt = 0, olevel = 0, os = 0, pie = -1, pic = 0, freestanding = 0, nobuiltin = 0, instr = 0, cfi = -1, strict_align = 0, tiny = 0, gregs = 0;
@@ -817,7 +817,7 @@ int ppd_run(int argc, char **argv, const ppd_env *env)
 			continue;
 		}
 		if (!strncmp(a, "--target=", 9) || !strcmp(a, "-target")) {
-			wasm = strstr(a, "wasm64") != NULL;
+			wasm = strstr(a, "wasm64") ? 64 : strstr(a, "wasm32") ? 32 : 0;
 			darwin = !wasm && (strstr(a, "darwin") || strstr(a, "apple"));
 			hosted = 0;
 		}
@@ -951,9 +951,10 @@ int ppd_run(int argc, char **argv, const ppd_env *env)
 	po.show_includes = showinc;
 	po.dump_defines = ddefs;
 	lnx = !darwin && !wasm;
-	po.dd_order = darwin ? predef_order_darwin : wasm ? predef_order_wasm64 : predef_order_linux;
+	po.dd_order = darwin ? predef_order_darwin : wasm == 64 ? predef_order_wasm64 : wasm ? predef_order_wasm32 : predef_order_linux;
 	po.ndd_order = darwin ? (int)(sizeof(predef_order_darwin) / sizeof(*predef_order_darwin))
-		     : wasm ? (int)(sizeof(predef_order_wasm64) / sizeof(*predef_order_wasm64))
+		     : wasm == 64 ? (int)(sizeof(predef_order_wasm64) / sizeof(*predef_order_wasm64))
+		     : wasm ? (int)(sizeof(predef_order_wasm32) / sizeof(*predef_order_wasm32))
 			    : (int)(sizeof(predef_order_linux) / sizeof(*predef_order_linux));
 	po.fatal_continue = !emit && !objmode && !syntax && !layout && !tokhash;
 	po.trigraphs = tri >= 0 ? tri : strict && std != 23;	/* clang: strict modes before C23 */
@@ -970,7 +971,7 @@ int ppd_run(int argc, char **argv, const ppd_env *env)
 	if (undef)
 		bstr(&pre, asm_mode ? predef_undef_asm : predef_undef_c);
 	else
-		bstr(&pre, darwin ? predef_darwin : wasm ? predef_wasm64 : predef_aarch64_linux);
+		bstr(&pre, darwin ? predef_darwin : wasm == 64 ? predef_wasm64 : wasm ? predef_wasm32 : predef_aarch64_linux);
 	if (asm_mode && !undef)
 		bstr(&pre, "#define __ASSEMBLER__ 1\n#undef __STDC_VERSION__\n#define __STDC_VERSION__ 201710L\n");
 	else if (!undef && std) {
@@ -990,7 +991,7 @@ int ppd_run(int argc, char **argv, const ppd_env *env)
 	} else if (!undef && !asm_mode) {
 		bstr(&pre, "#undef __STDC_VERSION__\n#define __STDC_VERSION__ 201710L\n");
 	}
-	po.target = darwin ? PP_DARWIN : wasm ? PP_WASM64 : PP_LINUX_AARCH64;
+	po.target = darwin ? PP_DARWIN : wasm == 64 ? PP_WASM64 : wasm ? PP_WASM32 : PP_LINUX_AARCH64;
 	if (opt == 0 && !undef) bstr(&pre, "#undef __OPTIMIZE__\n#define __NO_INLINE__ 1\n");
 	if (os && !undef) bstr(&pre, "#define __OPTIMIZE_SIZE__ 1\n");
 	if ((pie || pic) && !undef) {
@@ -1169,7 +1170,7 @@ int ppd_run(int argc, char **argv, const ppd_env *env)
 			if (status && outrename)
 				unlink(outtmp);
 		}
-		if (!status && emit == 2 && po.target == PP_WASM64)
+		if (!status && emit == 2 && PP_IS_WASM(po.target))
 			status = write_out(env->cwd, out, env->outfd, tl_wasm_obj.p, tl_wasm_obj.n, errfd);
 		else if (!status && emit == 2)
 			status = write_obj(env->cwd, out, env->outfd, errfd, darwin);

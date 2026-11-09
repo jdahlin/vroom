@@ -174,7 +174,7 @@ static int has_query(pp *p, int b, const char *name, uint32_t loc)
 		if (!c)
 			c = strcmp(has_tab[mid].name, name);
 		if (!c)
-			return has_tab[mid].v[p->o->target];
+			return has_tab[mid].v[p->o->target == PP_WASM32 ? PP_WASM64 : p->o->target];	/* wasm32 asks as wasm64 */
 		if (c < 0)
 			lo = mid + 1;
 		else

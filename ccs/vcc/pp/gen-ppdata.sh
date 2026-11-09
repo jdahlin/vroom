@@ -6,7 +6,8 @@
 #
 # Data the preprocessor takes from clang once, like caps.c: the predefined
 # macros for the targets vcc builds for (the kernel: aarch64-linux-gnu;
-# host tools: arm64 darwin; wasm64-unknown-emscripten, PLAN-wasm.md), darwin's
+# host tools: arm64 darwin; wasm64- and wasm32-unknown-emscripten, PLAN-wasm.md;
+# wasm32 shares wasm64's feature-query column), darwin's
 # system include directories, and the
 # answers to every feature-test query (__has_attribute(x), __is_target_os(x),
 # ...) that the kernel source, the macOS SDK and clang's own headers make.
@@ -19,6 +20,7 @@ T=${KEEP:-$(mktemp -d)}; mkdir -p $T; [ -n "$KEEP" ] || trap "rm -rf $T" EXIT
 FL="--target=aarch64-linux-gnu -std=gnu11 -O2 -fno-PIE -mlittle-endian -fshort-wchar -funsigned-char -fno-common -fno-strict-aliasing -mgeneral-regs-only -fno-asynchronous-unwind-tables -fno-unwind-tables -mbranch-protection=none -fno-delete-null-pointer-checks -fno-stack-protector -fno-omit-frame-pointer -fno-strict-overflow"
 FH="-std=gnu11 -O2"
 FW="--target=wasm64-unknown-emscripten -std=gnu11 -O2"
+FW32="--target=wasm32-unknown-emscripten -std=gnu11 -O2"
 cstr() { sed -e 's/\\/\\\\/g' -e 's/"/\\"/g' -e 's/^/	"/' -e 's/$/\\n"/'; }
 
 SYS=$($CL $FH -E -v -x c /dev/null 2>&1 | sed -n '/<\.\.\.> search starts/,/End of search/p' | sed '1d;$d')
@@ -36,6 +38,9 @@ RESINC=$(echo "$SYS" | grep -v framework | sed 's/^ *//' | head -1)
 	echo "static const char predef_wasm64[] ="
 	$CL $FW -dM -E -x c /dev/null | LC_ALL=C sort | cstr
 	echo "	;"
+	echo "static const char predef_wasm32[] ="
+	$CL $FW32 -dM -E -x c /dev/null | LC_ALL=C sort | cstr
+	echo "	;"
 	echo "static const char predef_undef_c[] ="
 	$CL -undef -dM -E -x c /dev/null | LC_ALL=C sort | cstr
 	echo "	;"
@@ -50,6 +55,9 @@ RESINC=$(echo "$SYS" | grep -v framework | sed 's/^ *//' | head -1)
 	echo "};"
 	echo "static const char *const predef_order_wasm64[] = {"
 	python3 $D/gen-ppdata-order.py $CL "$FW" "$FW -O0" "$FW -Os" "--target=wasm64-unknown-emscripten"
+	echo "};"
+	echo "static const char *const predef_order_wasm32[] = {"
+	python3 $D/gen-ppdata-order.py $CL "$FW32" "$FW32 -O0" "$FW32 -Os" "--target=wasm32-unknown-emscripten"
 	echo "};"
 	echo "static const char *const sysdirs_darwin[] = {"
 	echo "$SYS" | grep -v framework | sed 's/^ *\(.*\)$/	"\1",/'

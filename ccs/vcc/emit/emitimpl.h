@@ -85,7 +85,8 @@
  * arguments on the stack, va_list a char *, stack arguments packed */
 #define DARWIN(c) ((c)->o->target == PP_DARWIN)
 /* WebAssembly (wasm64): arch/wasm/emit/ generates the functions, data.c the data */
-#define WASM(c) ((c)->o->target == PP_WASM64)
+#define WASM(c) PP_IS_WASM((c)->o->target)
+#define WASM32(c) ((c)->o->target == PP_WASM32)
 /* a symbol offset the relocation itself can carry: ELF RELA 32 bits here, a
  * Mach-O ARM64_RELOC_ADDEND 24 bits signed (clang adds the rest in code) */
 #define SYMOFF_OK(c, off) (DARWIN(c) ? (off) >= -(1 << 23) && (off) < (1 << 23) : (off) >= INT32_MIN && (off) <= INT32_MAX)

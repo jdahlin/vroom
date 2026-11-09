@@ -435,7 +435,7 @@ static bool lb_type(cc *c, const char **p, qty *out)
 	case 'Y': t = prim(TY_LONG); break;	/* ptrdiff_t */
 	case 'w': t = c->t_wchar; break;
 	case 'P': t = prim(TY_VOID); break;	/* FILE: only ever as P*, a void * */
-	case 'W': t = prim(TY_LONG); break;	/* int64_t */
+	case 'W': t = prim(CC_I64(c, false)); break;	/* int64_t */
 	case 'Z': t = prim(TY_INT); break;	/* int32_t */
 	default: return false;
 	}

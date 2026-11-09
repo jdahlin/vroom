@@ -66,8 +66,10 @@ static void cc_init(cc *c, pp *p, const cc_opts *o)
 
 		if (k == TY_LDOUBLE && o->target == PP_DARWIN)
 			t.size = 8, t.align = 8;
-		if (k == TY_LDOUBLE && o->target == PP_WASM64)
+		if (k == TY_LDOUBLE && PP_IS_WASM(o->target))
 			t.align = 8;	/* emscripten: binary128, 8-byte aligned */
+		if ((k == TY_LONG || k == TY_ULONG) && o->target == PP_WASM32)
+			t.size = 4, t.align = 4;	/* ILP32 */
 		c->ty[k] = t;
 		c->ty[k].canon = (uint32_t)k;
 		c->nty++;
@@ -100,7 +102,7 @@ static void cc_init(cc *c, pp *p, const cc_opts *o)
 
 		if (o->target == PP_DARWIN) {
 			vl = ty_ptr(c, prim(TY_CHAR));
-		} else if (o->target == PP_WASM64) {
+		} else if (PP_IS_WASM(o->target)) {
 			vl = ty_ptr(c, prim(TY_VOID));
 		} else {
 			/* struct __va_list { void *__stack, *__gr_top, *__vr_top; int __gr_offs, __vr_offs; } */

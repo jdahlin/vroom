@@ -407,7 +407,7 @@ static int emit_tu1(cc *c, const cc_opts *o, bool write_out, uint8_t *mf, bool *
 	E.stats = getenv("VCC_EMIT_STATS") != NULL;
 	E.noopt = getenv("VCC_NOOPT") != NULL;
 	/* wasm64: objects from the text, through arch/wasm/as */
-	E.objtext = getenv("VCC_OBJ_TEXT") != NULL || o->target == PP_WASM64;
+	E.objtext = getenv("VCC_OBJ_TEXT") != NULL || PP_IS_WASM(o->target);
 	/* roots */
 	for (uint32_t i = 0; i < c->ntoplevel; i++) {
 		uint32_t s = c->toplevel[i];
@@ -522,7 +522,7 @@ static int emit_tu1(cc *c, const cc_opts *o, bool write_out, uint8_t *mf, bool *
 				all.n = 0;
 				for (int i = 0; i < k; i++)
 					tb_put(&all, iov[i].iov_base, iov[i].iov_len);
-				if (o->target == PP_WASM64) {
+				if (PP_IS_WASM(o->target)) {
 					uint8_t *ob;
 					size_t on;
 					char err[512];

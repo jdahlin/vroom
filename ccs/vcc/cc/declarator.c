@@ -333,7 +333,7 @@ VPRIV qty apply_declarator(cc *c, qty t, uint32_t first, uint32_t nops)
 		switch (o->kind) {
 		case 0:
 			if (o->fl & TF_BLOCK) {
-				ctype b = { .kind = TY_PTR, .flags = TF_BLOCK, .size = 8, .align = 8, .base = t };
+				ctype b = { .kind = TY_PTR, .flags = TF_BLOCK, .size = CC_PTRSIZE(c), .align = CC_PTRSIZE(c), .base = t };
 
 				t = QT(ty_intern(c, &b), o->q & Q_MASK);
 			} else {
