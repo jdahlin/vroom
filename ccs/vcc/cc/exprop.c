@@ -86,6 +86,8 @@ static __attribute__((noinline)) uint32_t unary_op(cc *c)
 
 		next(c);
 		n = unary(c);
+		if (ISERR(n))
+			return n;
 		need_lvalue(c, n, t->loc);
 		need_scalar(c, n, "increment");
 		{
@@ -98,12 +100,14 @@ static __attribute__((noinline)) uint32_t unary_op(cc *c)
 	case T_AMP:
 		next(c);
 		n = cast_expr(c);
+		if (ISERR(n))
+			return n;
 		bounds_warn(c, n, true);
 		return addr_of(c, n, loc);
 	case T_STAR:
 		next(c);
 		n = cast_expr(c);
-		if (KIND(c, N(n)->ty) == TY_FUNC)
+		if (KIND(c, N(n)->ty) == TY_FUNC || ISERR(n))
 			return n;
 		return deref(c, n, loc);
 	case T_PLUS:
@@ -112,7 +116,10 @@ static __attribute__((noinline)) uint32_t unary_op(cc *c)
 		int op = t->kind;
 
 		next(c);
-		n = rvalue(c, cast_expr(c));
+		n = cast_expr(c);
+		if (ISERR(n))
+			return n;
+		n = rvalue(c, n);
 		if (is_complex(c, N(n)->ty))
 			return cplx_unary(c, op, n, loc);
 		if (is_vector(c, N(n)->ty) ? op == T_TILDE && !is_integer(c, T(c, N(n)->ty)->base)
@@ -120,7 +127,7 @@ static __attribute__((noinline)) uint32_t unary_op(cc *c)
 			pp_span r = rng(c, n);
 
 			report(c, "error", loc, &r, 1, NULL, 0, "invalid argument type '%s' to unary expression", tyname(c, N(n)->ty));
-			return mk_int(c, 0, prim(TY_INT), loc);	/* no follow-on errors from the operand's type */
+			return err_node(c, loc);
 		}
 		{
 			uint32_t r = mk(c, N_UNARY, N(n)->ty, loc);
@@ -134,7 +141,10 @@ static __attribute__((noinline)) uint32_t unary_op(cc *c)
 		uint32_t r;
 
 		next(c);
-		n = scalar_cond(c, rvalue(c, cast_expr(c)), "'!'");
+		n = cast_expr(c);
+		if (ISERR(n))
+			return n;
+		n = scalar_cond(c, rvalue(c, n), "'!'");
 		r = mk(c, N_UNARY, prim(TY_INT), loc);
 		N(r)->aux = T_EXCLAIM;
 		N(r)->a = n;
@@ -202,6 +212,8 @@ static __attribute__((noinline)) uint32_t unary_op(cc *c)
 
 		next(c);
 		n = cast_expr(c);
+		if (ISERR(n))
+			return n;
 		if (is_complex(c, N(n)->ty))
 			return cplx_part(c, n, im);
 		n = rvalue(c, n);
@@ -250,6 +262,8 @@ static uint32_t explicit_cast(cc *c, uint32_t n, qty to, uint32_t loc)
 	int k;
 	uint32_t r;
 
+	if (ISERR(n))
+		return n;
 	n = decay(c, n);
 	if (is_void(c, to))
 		return cast_node(c, n, QUNQ(to), CK_VOID);
@@ -446,8 +460,12 @@ static __attribute__((noinline)) uint32_t binary_ops(cc *c, int minp, uint32_t l
 			r = binary(c, p + 1);
 			c->dead -= dead;
 		}
-		runtime_warn(c, op, l, r, loc);
-		l = binop(c, op, l, r, loc);
+		if (unlikely(ISERR(l) || ISERR(r))) {
+			l = err_node(c, loc);
+		} else {
+			runtime_warn(c, op, l, r, loc);
+			l = binop(c, op, l, r, loc);
+		}
 		if (mac)
 			N(l)->flags |= NF_MACRO;
 		setspan(c, l, b);
@@ -483,6 +501,8 @@ static __attribute__((noinline)) uint32_t cond_rest(cc *c, uint32_t cnd)
 		c->dead += k == 1;
 		b = cond_expr(c);
 		c->dead -= k == 1;
+		if (ISERR(cnd) || (a && ISERR(a)) || ISERR(b))
+			return err_node(c, loc);
 		return conditional(c, cnd, a, b, loc);
 	}
 }
@@ -521,6 +541,8 @@ static __attribute__((noinline)) uint32_t assign_rest(cc *c, uint32_t l, int op)
 
 	next(c);
 	r = assign_expr(c);
+	if (ISERR(l) || ISERR(r))
+		return err_node(c, loc);
 	r = assign(c, op < 0 ? 0 : op, l, r, loc);
 	if (mac)
 		N(r)->flags |= NF_MACRO;

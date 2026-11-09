@@ -112,7 +112,9 @@ __attribute__((noinline)) VPRIV void struct_body(cc *c, uint32_t ti)
 			else if (!complete(c, t) && !(is_array(c, t) && (T(c, t)->flags & TF_INCOMPLETE))) {
 				cc_error(c, d.loc, "field has incomplete type '%s'", tyname(c, t));
 				fwd_note(c, t);
+				f.invalid = 1;
 			}
+			f.invalid |= ds.invalid;
 			if (nf >= (1u << 20))
 				fatal(c, d.loc, "too many members");
 			for (uint32_t i = 0; f.name && i < nf; i++)

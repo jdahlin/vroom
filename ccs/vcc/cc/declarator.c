@@ -77,7 +77,9 @@ static void param_list(cc *c, dop *op)
 			/* adjustments (C11 6.7.6.3p7-8) */
 			uint32_t vsize = 0;
 
-			if (is_array(c, t)) {
+			int pk = KIND(c, t);
+
+			if (pk == TY_ARRAY) {
 				const dop *ad = nops ? &c->dops[first + nops - 1] : NULL;
 				int q = ad && ad->kind == 1 ? ad->q : 0;
 
@@ -85,12 +87,22 @@ static void param_list(cc *c, dop *op)
 				if ((T(c, t)->flags & TF_VLA) && T(c, t)->n && has_side_effects(c, T(c, t)->n))
 					vsize = T(c, t)->n;
 				t = QT(QI(ty_ptr(c, T(c, t)->base)), q);
-			} else if (is_func(c, t)) {
+			} else if (pk == TY_FUNC) {
 				t = ty_ptr(c, t);
+			} else if (unlikely(pk == TY_VOID)) {
+				if (!d.name && !ptys.n && is(c, T_RPAREN) && !QQ(t))
+					break;	/* "(void void)" after its error: still no parameters */
+				/* "(int a, void)", "(void x)": clang's errors (where the name would be);
+				   the parameter is invalid */
+				if (d.name)
+					cc_error(c, d.loc, "argument may not have 'void' type");
+				else
+					cc_error(c, tok(c)->loc, "'void' must be the first and only parameter if specified");
+				ds.invalid = true;
 			}
 			vpush(c, &ptys, t);
 			s = sym_new(c, S_VAR, d.name, t, d.loc ? d.loc : ds.loc);
-			c->syms[s].flags |= SF_PARAM;
+			c->syms[s].flags |= SF_PARAM | (ds.invalid ? SF_INVALID : 0);
 			c->syms[s].body = vsize;	/* parameters: a decayed VLA's size expression with side effects */
 			c->syms[s].sc = ds.sc == SC_REGISTER ? SC_REGISTER : SC_AUTO;
 			sym_bind(c, s);

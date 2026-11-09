@@ -64,6 +64,7 @@ enum { KC_KW = 1, KC_TYPE = 2, KC_DECL = 4 };
 enum { S_TAG = 16 };
 
 #define N(i) (&c->nodes[i])
+#define ISERR(n) (N(n)->flags & NF_ERR)	/* an error node: say nothing more about it */
 
 /* lists: append to a temporary vector, then freeze into c->lists */
 typedef struct vec {
@@ -90,6 +91,9 @@ typedef struct dspec {
 	qty ty;
 	int sc;
 	bool inline_, noreturn, thread, auto_type, has_type;
+	bool invalid;		/* an unknown type name stands for the type (int) */
+	uint16_t sckw;		/* the storage-class keyword, if any */
+	uint32_t sgnloc, longloc, baseloc;	/* signed/unsigned, the first long, short: for clang's errors */
 	attrs at;
 	uint32_t align;		/* _Alignas */
 	uint32_t loc;
@@ -113,6 +117,7 @@ typedef struct declr {
 	uint32_t plb, ple;	/* ... its parameter list: first token, the ')' */
 	bool kr;		/* ... from a K&R identifier list (types follow the declarator) */
 	bool has_func;
+	bool invalid;		/* declare reported its type (a void variable) */
 } declr;
 
 /* the declarator op stack (shared, nested declarators push and pop) */
@@ -238,6 +243,7 @@ VPRIV void vinit(vec *v);
 VPRIV void vpush(cc *c, vec *v, uint32_t x);
 VPRIV uint32_t vfreeze(cc *c, const vec *v);
 VPRIV uint32_t mk_int(cc *c, i128 v, qty ty, uint32_t loc);
+VPRIV uint32_t err_node(cc *c, uint32_t loc);
 VPRIV uint32_t mk_flt(cc *c, double v, qty ty, uint32_t loc);
 VPRIV uint32_t mk_fltq(cc *c, u128 q, qty ty, uint32_t loc);
 /* lit.c */

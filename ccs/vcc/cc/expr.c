@@ -81,7 +81,7 @@ VPRIV uint32_t binop(cc *c, int op, uint32_t l, uint32_t r, uint32_t loc)
 		return mk_bin(c, op, prim(TY_INT), l, r, loc);
 	}
 	bad_operands(c, l, r, loc);
-	return mk_bin(c, op, prim(TY_INT), l, r, loc);
+	return err_node(c, loc);
 }
 
 VPRIV uint32_t assign(cc *c, int op, uint32_t l, uint32_t r, uint32_t loc)
@@ -119,6 +119,7 @@ VPRIV uint32_t assign(cc *c, int op, uint32_t l, uint32_t r, uint32_t loc)
 			r = convert(c, r, pt);
 		} else {
 			cc_error(c, loc, "invalid operands to compound assignment");
+			return err_node(c, loc);
 		}
 		n = mk2(c, N_ASSIGN, lt, loc, l, r);
 		N(n)->aux = (uint16_t)op;
@@ -170,7 +171,7 @@ VPRIV uint32_t conditional(cc *c, uint32_t cond, uint32_t a, uint32_t b, uint32_
 		t = QUNQ(at);
 	} else {
 		cc_error(c, loc, "incompatible operand types in conditional expression");
-		t = at;
+		return err_node(c, loc);
 	}
 	n = mk(c, N_COND, t, loc);
 	N(n)->a = decay(c, cond);
@@ -218,7 +219,7 @@ static __attribute__((noinline)) uint32_t member_slow(cc *c, uint32_t base, uint
 		pp_span r[2] = { rng(c, base), { loc, pp_tok_end(c->p, c->prevloc) } };
 
 		report(c, "error", loc, r, 2, NULL, 0, "member reference base type '%s' is not a structure or union", tyname(c, bt));
-		return mk_int(c, 0, prim(TY_INT), loc);
+		return err_node(c, loc);
 	}
 	ti = T(c, bt)->aux;
 	if (!(c->tags[ti].flags & RF_COMPLETE)) {
@@ -226,18 +227,21 @@ static __attribute__((noinline)) uint32_t member_slow(cc *c, uint32_t base, uint
 
 		report(c, "error", loc, &r, 1, NULL, 0, "incomplete definition of type '%s'", tyname(c, bt));
 		fwd_note(c, bt);
-		return mk_int(c, 0, prim(TY_INT), loc);
+		return err_node(c, loc);
 	}
 	d = find_member(c, ti, name, path, 0);
 	if (d < 0) {
 		pp_span r = rng(c, base);
 
 		report(c, "error", c->prevloc, &r, 1, NULL, 0, "no member named '%.*s' in '%s'", IDF(name), tyname(c, bt));
-		return mk_int(c, 0, prim(TY_INT), loc);
+		return err_node(c, loc);
 	}
 	for (int i = 0; i < d; i++) {
 		const field *f = &c->tags[ti].f[path[i]];
 		uint32_t m = mk(c, N_MEMBER, qualify(c, f->ty, QQ(bt)), loc);
+
+		if (unlikely(f->invalid))
+			return err_node(c, loc);
 
 		N(m)->a = base;
 		N(m)->b = ti;
@@ -264,7 +268,11 @@ VPRIV uint32_t member(cc *c, uint32_t base, uint32_t name, uint32_t loc)
 			const field *f = &r->f[i];
 
 			if (f->name == name) {
-				uint32_t m = mk(c, N_MEMBER, qualify(c, f->ty, QQ(bt)), loc);
+				uint32_t m;
+
+				if (unlikely(f->invalid))
+					return err_node(c, loc);
+				m = mk(c, N_MEMBER, qualify(c, f->ty, QQ(bt)), loc);
 
 				N(m)->a = base;
 				N(m)->b = t->aux;
@@ -289,7 +297,7 @@ VPRIV uint32_t deref(cc *c, uint32_t p, uint32_t loc)
 		pp_span r = rng(c, p);
 
 		report(c, "error", loc, &r, 1, NULL, 0, "indirection requires pointer operand ('%s' invalid)", tyname(c, N(p)->ty));
-		return p;
+		return err_node(c, loc);
 	}
 	t = T(c, N(p)->ty)->base;
 	n = mk(c, N_DEREF, t, loc);
@@ -403,6 +411,8 @@ static inline __attribute__((always_inline)) uint32_t primary_sym(cc *c, uint32_
 
 		N(n)->a = s;
 		N(n)->flags = y->kind == S_VAR ? NF_LVALUE : 0;
+		if (unlikely(y->flags & SF_INVALID))
+			N(n)->flags |= NF_ERR;
 		if (!c->unevaluated && !((y->flags & SF_OVERLOAD) && is(c, T_LPAREN)))
 			y->flags |= SF_USED;
 		y->flags |= SF_REF;
@@ -672,6 +682,7 @@ static __attribute__((noinline)) uint32_t call(cc *c, uint32_t fn, uint32_t loc)
 	const ctype *f;
 	uint32_t n;
 	bool have_args = false;
+	unsigned aflags = 0;	/* the arguments' NF_* together */
 
 	if (N(fn)->op == N_VAR && (c->syms[N(fn)->a].flags & SF_OVERLOAD) && c->syms[N(fn)->a].kind == S_FUNC) {
 		uint32_t s;
@@ -694,7 +705,7 @@ static __attribute__((noinline)) uint32_t call(cc *c, uint32_t fn, uint32_t loc)
 		report(c, "error", loc, &r, 1, NULL, 0, "called object type '%s' is not a function or function pointer", tyname(c, ft));
 		if (!have_args)
 			args_list(c, &args);
-		return mk_int(c, 0, prim(TY_INT), loc);
+		return err_node(c, loc);
 	}
 	ft = T(c, ft)->base;
 	f = T(c, ft);
@@ -760,6 +771,7 @@ static __attribute__((noinline)) uint32_t call(cc *c, uint32_t fn, uint32_t loc)
 				a = cast_node(c, a, prim(TY_DOUBLE), CK_F2F);
 		}
 		args.v[i] = a;
+		aflags |= N(a)->flags;
 	}
 	if (!c->o->no_builtin && args.n == 1 && N(callee)->op == N_VAR && c->syms[N(callee)->a].kind == S_FUNC &&
 	    (c->syms[N(callee)->a].flags & SF_GLOBAL)) {
@@ -798,7 +810,39 @@ static __attribute__((noinline)) uint32_t call(cc *c, uint32_t fn, uint32_t loc)
 	N(n)->a = fn;
 	N(n)->b = vfreeze(c, &args);
 	N(n)->c = args.n;
+	N(n)->flags |= aflags & NF_ERR;	/* clang: a call with an invalid argument is invalid */
 	return n;
+}
+
+/* the postfix operators after an error node: parsed, nothing more said */
+static __attribute__((noinline, cold)) uint32_t postfix_err(cc *c, uint32_t n)
+{
+	for (;;) {
+		switch (tok(c)->kind) {
+		case T_LSQUARE:
+			next(c);
+			expr(c);
+			expect(c, T_RSQUARE, "']'");
+			break;
+		case T_LPAREN: {
+			vec args;
+
+			args_list(c, &args);
+			break;
+		}
+		case T_PERIOD: case T_ARROW:
+			next(c);
+			if (!is(c, T_IDENT))
+				fatal(c, tok(c)->loc, "expected identifier");
+			next(c);
+			break;
+		case T_PLUSPLUS: case T_MINUSMINUS:
+			next(c);
+			break;
+		default:
+			return n;
+		}
+	}
 }
 
 VPRIV __attribute__((noinline)) uint32_t postfix_ops(cc *c, uint32_t n)
@@ -808,6 +852,8 @@ VPRIV __attribute__((noinline)) uint32_t postfix_ops(cc *c, uint32_t n)
 	for (;; setspan(c, n, b0)) {
 		uint32_t loc = tok(c)->loc;
 
+		if (unlikely(ISERR(n)))
+			return postfix_err(c, n);
 		switch (tok(c)->kind) {
 		case T_LSQUARE: {
 			uint32_t ix, r;
@@ -816,6 +862,10 @@ VPRIV __attribute__((noinline)) uint32_t postfix_ops(cc *c, uint32_t n)
 			next(c);
 			ix = expr(c);
 			expect(c, T_RSQUARE, "']'");
+			if (unlikely(ISERR(ix))) {
+				n = err_node(c, loc);
+				continue;
+			}
 			if (is_vector(c, N(n)->ty) && (N(n)->flags & NF_LVALUE)) {
 				/* v[i]: lane i of the vector object */
 				qty et = QT(QI(T(c, N(n)->ty)->base), QQ(N(n)->ty));
@@ -836,7 +886,8 @@ VPRIV __attribute__((noinline)) uint32_t postfix_ops(cc *c, uint32_t n)
 				pp_span r[2] = { rng(c, n), rng(c, ix) };
 
 				report(c, "error", loc, r, 2, NULL, 0, "subscripted value is not an array, pointer, or vector");
-				break;
+				n = err_node(c, loc);
+				continue;
 			}
 			r = mk2(c, N_INDEX, T(c, at)->base, loc, n, convert(c, ix, prim(TY_LONG)));
 			N(r)->flags = NF_LVALUE;

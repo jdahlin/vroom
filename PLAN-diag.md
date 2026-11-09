@@ -150,6 +150,26 @@ Tio lager; varje steg nedan säger vilka det berör.
   `(doubl)x`, där clang tappar den), `tests/diag/kr_decl.c`.  `vcc-diag.py` tar nu
   `X.c.expect` där vcc medvetet säger mer än clang: vcc:s text måste stämma med filen
   och diagnosraderna (`fil:rad:kol: nivå:`) med clangs.
+  **Efter felnoder (2026-11-09):** clangs ogiltiga uttryck och deklarationer.  Ett uttryck
+  som redan fått sitt fel blir en felnod (`err_node`, `NF_ERR`: int 0, lvalue), och
+  operatorerna (binära, tilldelning, `?:`, unära, cast, index, medlem, anrop) ger en
+  felnod utan nytt fel när en operand är det; postfix-operatorer efter en felnod parsas
+  bara (`postfix_err`).  En deklaration vars typ var fel (okänt typnamn, `void`-variabel,
+  ofullständig typ, ett `void`-fält eller -parameter) märks `SF_INVALID` / `field.invalid`,
+  och varje användning blir en felnod.  Samtidigt clangs första fel som saknades:
+  `'void' cannot be signed or unsigned`, `'long struct' is invalid`, `'short double' is
+  invalid`, `cannot combine with previous 'X' declaration specifier` (med det tidigare
+  ordet; `char int` är nu ett fel som i clang), `'void' must be the first and only
+  parameter`, `argument may not have 'void' type`, ofullständig parameter- och
+  resultattyp i en definition.  Första felet på clangs plats 89,7 → 91,0 % (annanstans
+  3,5 → 2,4 %), fler följdfel 13,3 → 11,2 %, missade 27 → 23; `change-type` först på
+  clangs plats 54 → 81.  Kvar bland följdfelen är mest parserns återhämtning ("expected
+  X", D3).  Prestanda: `decl_specs` körs för varje deklaration, medlem och parameter
+  (~100 000 per kernel-TU), så kontrollerna ligger på den felaktiga token i kalla
+  funktioner utan pekare till loopens variabler (`&sgn` tvingade dem till minnet: +0,4 %);
+  parametrarnas typ läses en gång (`KIND`).  fe +0,27 % mot förra steget; grenen ligger på
+  +0,91 % mot merge-basen, nära budgeten på 1 %.  Test: `tests/diag/error_nodes.c`,
+  `tests/diag/spec_combine.c`.
 
 ### D1. Strukturerade diagnoser (grunden)
 

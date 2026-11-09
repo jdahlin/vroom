@@ -280,8 +280,10 @@ static uint32_t declare(cc *c, const dspec *ds, declr *d, qty t, bool file)
 		return s;
 	}
 	kind = is_func(c, t) ? S_FUNC : S_VAR;
-	if (kind == S_VAR && is_void(c, t) && ds->sc != SC_EXTERN)
+	if (kind == S_VAR && is_void(c, t) && ds->sc != SC_EXTERN) {
 		cc_error(c, d->loc, "variable has incomplete type 'void'");
+		d->invalid = true;
+	}
 	/* redeclarations: the same entity in the same scope, or a block-scope extern */
 	prev = 0;
 	{
@@ -677,6 +679,8 @@ VPRIV void declaration(cc *c, vec *out, bool file)
 		else if (d.kr)
 			cc_error(c, d.plb, "a parameter list without types is only allowed in a function definition");
 		s = declare(c, &ds, &d, t, file);
+		if (unlikely(ds.invalid | d.invalid))
+			c->syms[s].flags |= SF_INVALID;	/* its type was an error: uses say nothing more */
 		if (d.has_func && c->syms[s].kind == S_FUNC && is_func(c, c->syms[s].ty) &&
 		    d.npsyms == T(c, c->syms[s].ty)->n)
 			c->syms[s].psyms = d.psyms + 1, c->syms[s].plb = d.plb, c->syms[s].ple = d.ple;
@@ -749,8 +753,11 @@ VPRIV void declaration(cc *c, vec *out, bool file)
 				if (file)
 					y->flags |= SF_TENTATIVE;
 				else if (!complete(c, y->ty) && ds.sc != SC_STATIC) {
-					cc_error(c, d.loc, "variable has incomplete type '%s'", tyname(c, y->ty));
-					fwd_note(c, y->ty);
+					if (!is_void(c, y->ty)) {	/* void: declare said so */
+						cc_error(c, d.loc, "variable has incomplete type '%s'", tyname(c, y->ty));
+						fwd_note(c, y->ty);
+					}
+					y->flags |= SF_INVALID;
 				}
 				if (out && (y->sc == SC_AUTO || y->sc == SC_REGISTER)) {
 					uint32_t n = mk2(c, N_DECL, prim(TY_VOID), d.loc, s, 0);

@@ -119,11 +119,25 @@ VPRIV void function_def(cc *c, uint32_t s, const declr *d)
 	}
 	c->syms[s].flags |= SF_DEFINED;
 	c->fn = s;
+	{
+		qty rt = T(c, c->syms[s].ty)->base;
+
+		if (!is_void(c, rt) && !complete(c, rt)) {
+			cc_error(c, d->loc, "incomplete result type '%s' in function definition", tyname(c, rt));
+			fwd_note(c, rt);
+		}
+	}
 	scope_open(c);
 	for (uint32_t i = 0; i < d->npsyms; i++) {
 		uint32_t p = c->lists[d->psyms + i];
+		sym *y = &c->syms[p];
 
-		if (!c->syms[p].name)
+		if (!is_void(c, y->ty) && !complete(c, y->ty) && !(y->flags & SF_INVALID)) {
+			cc_error(c, y->loc, "variable has incomplete type '%s'", tyname(c, y->ty));
+			fwd_note(c, y->ty);
+			y->flags |= SF_INVALID;
+		}
+		if (!y->name)
 			continue;	/* C23: unnamed parameters in definitions (clang accepts) */
 		sym_bind(c, p);
 	}

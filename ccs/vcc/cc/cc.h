@@ -79,7 +79,7 @@ typedef struct field {
 	uint64_t off;		/* bits */
 	uint16_t width;		/* bit-field width */
 	uint8_t bitfield;
-	uint8_t _pad;
+	uint8_t invalid;	/* its type was an error: uses say nothing more (clang) */
 	uint32_t loc;
 	uint32_t counted_by;	/* counted_by(member): its identifier id */
 } field;
@@ -129,6 +129,7 @@ enum {
 	SF_OVERLOAD = 32768,	/* __attribute__((overloadable)): mangled name, member of an overload set */
 	SF_LAZY = 1u << 17,	/* a header function whose body is kept as tokens, parsed only if referenced */
 	SF_REF = 1u << 18,	/* named anywhere (also in sizeof/typeof): a lazy body must be parsed */
+	SF_INVALID = 1u << 19,	/* its declaration's type was an error: uses say nothing more (clang) */
 };
 
 typedef struct sym {

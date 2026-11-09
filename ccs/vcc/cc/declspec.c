@@ -18,6 +18,7 @@ VPRIV void unknown_type(cc *c, dspec *ds, bool allow_sc)
 	ds->ty = s ? c->syms[s].ty : prim(TY_INT);
 	ds->loc = loc;
 	ds->has_type = true;
+	ds->invalid = !s;
 }
 
 VPRIV bool is_type_start(cc *c, const ptok *t)
@@ -213,6 +214,68 @@ static bool after_declarator_id(const ptok *t)
 	}
 }
 
+/* clang: signed/unsigned or long on a type that has none: "'void' cannot be signed or
+   unsigned", "'long struct' is invalid"; returns WS_SGN / WS_LONG for what to drop
+   (on as the type without them).  No pointers: sgn and nlong stay in registers */
+enum { WS_SGN = 1, WS_LONG = 2 };
+static __attribute__((noinline, cold)) int bad_width_sign(cc *c, int sgn, int nlong, int kw, const dspec *ds)
+{
+	int r = 0;
+
+	if (sgn && kw != KW_int && kw != KW_char && kw != KW_short && kw != KW___int128) {
+		cc_error(c, ds->sgnloc, "'%.*s' cannot be signed or unsigned", IDF(kw));
+		r |= WS_SGN;
+	}
+	if (nlong && kw != KW_int && !(kw == KW_double && nlong == 1)) {
+		cc_error(c, ds->longloc, "'%s%.*s' is invalid", nlong > 1 ? "long long " : "long ", IDF(kw));
+		r |= WS_LONG;
+	}
+	return r;
+}
+
+/* signed/unsigned or long (lng) after the base type specifier base: clang's errors;
+   true if it is dropped */
+static __attribute__((noinline, cold)) bool late_width_sign(cc *c, int base, int nlong, bool lng, uint32_t loc)
+{
+	if (lng) {
+		if (base == KW_int || (base == KW_double && !nlong))
+			return false;
+		if (base == KW_short)
+			cc_error(c, loc, "cannot combine with previous 'short' declaration specifier");
+		else
+			cc_error(c, loc, "'long %.*s' is invalid", IDF(base));
+		return true;
+	}
+	if (base == KW_int || base == KW_char || base == KW_short || base == KW___int128)
+		return false;
+	cc_error(c, loc, "'%.*s' cannot be signed or unsigned", IDF(base));
+	return true;
+}
+
+/* a second base type specifier kw after base (or short after long): clang's errors;
+   true to go on without kw ("short int" too, which is fine) */
+static __attribute__((noinline)) bool base_clash(cc *c, int base, int kw, int nlong, uint32_t baseloc, uint32_t loc)
+{
+	if (kw == KW_short && nlong) {
+		cc_error(c, loc, "cannot combine with previous 'long' declaration specifier");
+		return true;
+	}
+	if (base == KW_short && kw != KW_int && kw != KW_short) {
+		/* clang: short is a width, "short double" one invalid type */
+		cc_error(c, baseloc, "'short %.*s' is invalid", IDF(kw));
+		return false;
+	}
+	if (kw == KW_short && base != KW_int) {
+		cc_error(c, loc, "'short %.*s' is invalid", IDF(base));
+		return true;
+	}
+	if (!(base == KW_int && kw == KW_short) && !(kw == KW_int && base == KW_short) && !(base == KW_double && kw == KW_double)) {
+		cc_error(c, loc, "cannot combine with previous '%.*s' declaration specifier", IDF(base));
+		return true;	/* clang: on with the first */
+	}
+	return kw == KW_int;
+}
+
 VPRIV bool decl_specs(cc *c, dspec *ds, bool allow_sc)
 {
 	int nlong = 0, sgn = 0, base = 0, q = 0;
@@ -263,6 +326,7 @@ VPRIV bool decl_specs(cc *c, dspec *ds, bool allow_sc)
 				next(c);
 				named = s ? c->syms[s].ty : prim(TY_INT);
 				have_named = any = true;
+				ds->invalid = !s;
 				continue;
 			}
 			break;
@@ -274,9 +338,12 @@ VPRIV bool decl_specs(cc *c, dspec *ds, bool allow_sc)
 
 			if (!allow_sc)
 				cc_error(c, t->loc, "invalid storage class specifier");
-			if (ds->sc && ds->sc != sc)
-				cc_error(c, t->loc, "cannot combine with previous storage class specifier");
+			if (ds->sc && ds->sc != sc) {
+				cc_error(c, t->loc, "cannot combine with previous '%.*s' declaration specifier", IDF(ds->sckw));
+				break;
+			}
 			ds->sc = sc;
+			ds->sckw = (uint16_t)kw;
 			break;
 		}
 		case KW_inline: case KW___inline__: case KW___inline:
@@ -340,29 +407,43 @@ VPRIV bool decl_specs(cc *c, dspec *ds, bool allow_sc)
 		case KW_double: case KW___int128: case KW__Float16: case KW___fp16:
 			if (have_named)
 				goto done;
-			if (base && !(base == KW_int && (kw == KW_short || kw == KW_char)) && !(kw == KW_int && (base == KW_short || base == KW_char)) &&
-			    !(base == KW_double && kw == KW_double))
-				cc_error(c, t->loc, "cannot combine with previous type specifier");
-			if (kw == KW_int && base)
+			if (unlikely(base || (kw == KW_short && nlong)) && base_clash(c, base, kw, nlong, ds->baseloc, t->loc))
 				break;
+			if (unlikely((sgn | nlong) && kw != KW_int)) {
+				int w = bad_width_sign(c, sgn, nlong, kw, ds);
+
+				sgn = w & WS_SGN ? 0 : sgn;
+				nlong = w & WS_LONG ? 0 : nlong;
+			}
+			if (kw == KW_short)
+				ds->baseloc = t->loc;
 			base = kw;
 			any = true;
 			break;
 		case KW_long:
 			if (have_named)
 				goto done;
-			nlong++;
+			if (unlikely(base) && late_width_sign(c, base, nlong, true, t->loc))
+				break;
+			if (!nlong++)
+				ds->longloc = t->loc;
 			any = true;
 			break;
 		case KW_signed: case KW___signed__: case KW___signed:
 			if (have_named)
 				goto done;
+			if (unlikely(base) && late_width_sign(c, base, nlong, false, t->loc))
+				break;
+			ds->sgnloc = t->loc;
 			sgn = 1;
 			any = true;
 			break;
 		case KW_unsigned:
 			if (have_named)
 				goto done;
+			if (unlikely(base) && late_width_sign(c, base, nlong, false, t->loc))
+				break;
+			ds->sgnloc = t->loc;
 			sgn = -1;
 			any = true;
 			break;
@@ -384,6 +465,10 @@ VPRIV bool decl_specs(cc *c, dspec *ds, bool allow_sc)
 
 			if (have_named || base)
 				goto done;
+			if (unlikely(sgn | nlong)) {
+				bad_width_sign(c, sgn, nlong, kw, ds);
+				sgn = nlong = 0;
+			}
 			next(c);
 			attribute_list(c, &pre);
 			if (is(c, T_IDENT) && !kwof(tok(c))) {

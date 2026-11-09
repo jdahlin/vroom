@@ -239,7 +239,8 @@ VPRIV uint32_t undeclared(cc *c, const char *msg, uint32_t id, uint32_t loc, boo
 		if (s)
 			note(c, c->syms[s].loc, "'%s' declared here", fs);
 	} else {
-		report(c, "error", loc, &r, 1, NULL, 0, "%s '%.*s'", msg, IDF(id));
+		/* clang: a caret alone under an unknown type name, a range under an undeclared identifier */
+		report(c, "error", loc, &r, types ? 0 : 1, NULL, 0, "%s '%.*s'", msg, IDF(id));
 	}
 	return s;
 }
@@ -318,6 +319,16 @@ VPRIV uint32_t mk_int(cc *c, i128 v, qty ty, uint32_t loc)
 
 	c->ipool[c->nipool] = v;
 	c->nodes[n].a = c->nipool++;
+	return n;
+}
+
+/* stands in for an expression already diagnosed: operators on it say nothing more
+   (clang's invalid expressions); an int 0 lvalue, so a constant and assignable */
+VPRIV uint32_t err_node(cc *c, uint32_t loc)
+{
+	uint32_t n = mk_int(c, 0, prim(TY_INT), loc);
+
+	c->nodes[n].flags |= NF_ERR | NF_LVALUE;
 	return n;
 }
 
