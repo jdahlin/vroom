@@ -468,29 +468,38 @@ static bool lb_type(cc *c, const char **p, qty *out)
  * first use with clang's prototype, its symbol X (clang calls X unless it
  * folds or inlines it).  0: not a library builtin, or a type vcc cannot read.
  */
-VPRIV uint32_t lib_builtin(cc *c, uint32_t id, uint32_t loc)
+static const struct libbi *libbi_find(const char *n, size_t nl)
 {
-	const char *n = idstr_(id);
-	size_t nl = idlen_(id), lo = 0, hi = sizeof(libbis) / sizeof(libbis[0]);
-	const struct libbi *b = NULL;
+	size_t lo = 0, hi = sizeof(libbis) / sizeof(libbis[0]);
 
 	if (nl < 11 || memcmp(n, "__builtin_", 10))
-		return 0;
+		return NULL;
 	while (lo < hi) {
 		size_t m = (lo + hi) / 2;
 		int r = strncmp(libbis[m].name, n, nl);
 
 		if (r == 0 && libbis[m].name[nl])
 			r = 1;
-		if (r == 0) {
-			b = &libbis[m];
-			break;
-		}
+		if (r == 0)
+			return &libbis[m];
 		if (r < 0)
 			lo = m + 1;
 		else
 			hi = m;
 	}
+	return NULL;
+}
+
+/* __has_builtin: a library builtin vcc declares (the table holds only the readable ones) */
+VPRIV bool lib_builtin_known(const char *n)
+{
+	return libbi_find(n, strlen(n)) != NULL;
+}
+
+VPRIV uint32_t lib_builtin(cc *c, uint32_t id, uint32_t loc)
+{
+	const struct libbi *b = libbi_find(idstr_(id), idlen_(id));
+
 	if (!b)
 		return 0;
 	{

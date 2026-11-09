@@ -554,7 +554,8 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
   `(vector of N 'T' values)` note and typedef names) [P].  Library builtins (clang's `F`
   ones, 479) are declared from cc/libbuiltins.inc (gen-libbuiltins.py) as calls to the
   function: `bench/vcc-builtins.py` 473 -> 302 unknown of 924 for aarch64 Linux;
-  337 answer `__has_builtin` 0.  Audit the full list against clang's `Builtins.td` for the target
+  `__has_builtin` is also 1 for what the front end implements (pp_builtin_known, set by
+  cc): 337 -> 237 answer 0, none 1 where clang says 0 (the harness fails on that).  Audit the full list against clang's `Builtins.td` for the target
   (generate a list, try each).
   *Validate:* T1 per builtin; `bench/vcc-builtins.py` that compiles a
   generated use of each clang builtin and reports unknowns.
@@ -562,9 +563,8 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
   `scalbn`, `trunc*`, `round*`, `floorf`/`ceilf`, `fmaxf`/`fminf` added for
   `make -C ccs self-check`; the generic forms reject a fallback whose
   argument has side effects.)
-  `__has_builtin` answers 0 for names absent from the kernel/SDK
-  (ppdata.inc was generated from those only; seen in PostgreSQL): generate
-  it from the full list.
+  ~~`__has_builtin` answers 0 for names absent from the kernel/SDK~~ (done for what vcc
+  implements, see above; the rest are builtins vcc lacks).
 - [ ] **SVE in the front end**: `arm_sve.h` types, `target("+sve")`.
   *Validate:* T1 under `qemu -cpu max`, layout checks for the types.
 - [ ] **`ext_vector_type` silently dropped; unknown attributes no warning** [P].

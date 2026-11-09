@@ -9,7 +9,9 @@ accepts for the target in C are the list.  For each:
   - unknown: vcc -fsyntax-only on a call to it says "undeclared function"
     (a wrong-argument error means vcc knows the name);
   - has_builtin: vcc's __has_builtin answer differs from clang's.
-Prints the counts and, with -v, the names.  Exit status 0 (a report).
+Prints the counts and, with -v, the names.  Exit status 1 if vcc's
+__has_builtin says 1 where clang says 0 (a program would take a path that
+clang's build does not); the rest is a report.
 """
 import os, re, subprocess, sys, tempfile
 
@@ -57,12 +59,14 @@ def main(av):
                                capture_output=True, text=True)
             unknown += [n for n in chunk if f"undeclared function '{n}'" in p.stderr or f"undeclared identifier '{n}'" in p.stderr]
     hb = [n for n in known if not us.get(n)]
+    extra = [n for n in ns if us.get(n) and not cl.get(n)]
     print(f'builtins: {len(known)} accepted by clang for {target}; {len(unknown)} unknown to vcc; '
-          f'{len(hb)} with __has_builtin 0 in vcc')
+          f'{len(hb)} with __has_builtin 0 in vcc; {len(extra)} 1 in vcc, 0 in clang')
     if verbose:
         print('unknown:', ' '.join(unknown))
         print('has_builtin 0:', ' '.join(hb))
-    return 0
+        print('has_builtin 1, clang 0:', ' '.join(extra))
+    return 1 if extra else 0
 
 
 if __name__ == '__main__':

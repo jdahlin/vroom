@@ -180,8 +180,13 @@ static int has_query(pp *p, int b, const char *name, uint32_t loc)
 		else
 			hi = mid;
 	}
+	/* the table is what the kernel and SDK headers asked clang; the front end knows more */
+	if (b == B_HAS_BUILTIN && pp_builtin_known && pp_builtin_known(name))
+		return 1;
 	return 0;
 }
+
+int (*pp_builtin_known)(const char *name);
 
 VPRIV int builtin(pp *p, const pmacro *m, ptok *t)
 {
