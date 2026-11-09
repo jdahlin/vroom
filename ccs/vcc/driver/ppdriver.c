@@ -871,6 +871,7 @@ int ppd_run(int argc, char **argv, const ppd_env *env)
 	po.dirs = all;
 	po.ndirs = n;
 	po.c23 = std == 23;
+	po.c89 = std == 89 && strict;
 	po.fatal_continue = !emit && !objmode && !syntax && !layout && !tokhash;
 	po.trigraphs = tri >= 0 ? tri : strict && std != 23;	/* clang: strict modes before C23 */
 	{

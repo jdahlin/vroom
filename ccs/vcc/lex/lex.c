@@ -1616,6 +1616,50 @@ const vlex_file *vlex_digitsep(const vlex_file *f)
 	return nf;
 }
 
+/* C89 (strict): no line comments; "//" outside comments and literals is
+ * two '/' tokens.  The copy has a space between them, so a column after one
+ * moves by one. */
+const vlex_file *vlex_c89(const vlex_file *f)
+{
+	const char *s = f->src;
+	size_t n = f->size, o = 0, i = 0, cnt = 0;
+	char *b;
+	vlex_file *nf;
+
+	if (!memmem(s, n, "//", 2))
+		return f;
+	for (const char *q = s; (q = memmem(q, (size_t)(s + n - q), "//", 2)); q++)
+		cnt++;
+	b = arena(n + cnt + 128);
+	cnt = 0;
+	while (i < n) {
+		char ch = s[i];
+		size_t j;
+
+		if (ch == '/' && i + 1 < n && s[i + 1] == '/') {
+			b[o++] = '/';
+			b[o++] = ' ';
+			i++;
+			cnt++;
+			continue;
+		}
+		j = ch == '/' || ch == '"' || ch == '\'' ? lx_skip(s, n, i) : i + 1;
+		memcpy(b + o, s + i, j - i);
+		o += j - i;
+		i = j;
+	}
+	if (!cnt)
+		return f;
+	memset(b + o, 0, 128);
+	nf = arena(sizeof(*nf));
+	memset(nf, 0, sizeof(*nf));
+	nf->path = f->path;
+	nf->dev = f->dev;
+	nf->ino = f->ino;
+	lex_src(nf, b, o);
+	return nf;
+}
+
 const vlex_file *(*vlex_get_hook)(const char *path, size_t len);
 
 /* forget every file (a new build: vccd, idle): later lookups read and lex

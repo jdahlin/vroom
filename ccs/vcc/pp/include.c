@@ -62,6 +62,8 @@ VPRIV const vlex_file *try_path(const pp_opts *o, const char *path, size_t len)
 
 	if (f && o->trigraphs)
 		f = vlex_trigraphs(f);
+	if (f && o->c89)
+		f = vlex_c89(f);
 	return f && o->c23 ? vlex_digitsep(f) : f;
 }
 
