@@ -283,6 +283,7 @@ VPRIV void emit_function(ecx *e, uint32_t s)
 	e->ncases = 0;
 	e->reach = true;
 	e->top = s;
+	e->asmk = 0;
 	e->inline_depth = 0;
 	e->vararg = (ft->flags & TF_VARIADIC) != 0;
 	memset(&F, 0, sizeof(F));

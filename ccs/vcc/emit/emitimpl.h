@@ -178,7 +178,6 @@ typedef struct keep {
 	char *bytes;
 	uint32_t *logs;
 	size_t nidx, nent, nbytes, nlogs;
-	uint32_t asmno;		/* inline asm %= numbers go on from here */
 } keep;
 
 /* analysis bits (prepass, read-only while emitting) */
@@ -213,7 +212,6 @@ typedef struct emitter {
 	pthread_mutex_t cmu;
 	chunk *chunks;
 	uint32_t nchunk;
-	_Atomic uint32_t asmno;
 	_Atomic int errors;
 	_Atomic uint64_t nins, nfn, nobj, ninl;
 	_Atomic uint64_t print_ns, walk_ns, nwalk;
@@ -348,6 +346,7 @@ typedef struct ecx {
 	fnctx *f;
 	int inline_depth;
 	uint32_t top;		/* sym being emitted */
+	uint32_t asmk;		/* inline asm statements emitted in it so far (%=) */
 	uint32_t *cases;	/* scratch for switch case collection */
 	uint32_t *weakref;	/* weak undefined syms this thread referenced first */
 	uint32_t nweakref;

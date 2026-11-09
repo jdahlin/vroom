@@ -305,7 +305,11 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
   *Validate:* `vcc-diff.py` predefine check: `vpp -dM -E` (once `-dM`
   exists) vs `clang -dM -E` for `''`, `-O0`, `-O1`, `-O2`, `-Os`, `-Oz`;
   until then T11 with `#ifdef __OPTIMIZE__` probes.
-- [ ] **Inline asm `%=` depends on thread scheduling** [R].
+- [x] **Inline asm `%=` depends on thread scheduling** [R].  (done: the
+  function's symbol × 1024 + its n-th emitted asm that uses `%=`
+  (emit/asm.c); `tests/vcc/asm_uniq.c` with the new `vcc-threads-same`
+  marker (`-S` equal with 1 and 8 threads; failed before) and `vcc-noref`
+  (clang rejects `%=` on AArch64).)
   `atomic_fetch_add(&E->asmno)` `emit.c:8010`.  Number per function
   (function index × asm index within it).
   *Validate:* T6/`vcc-obj.py`: compile a TU with several `%=` asms in many
