@@ -663,11 +663,17 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
   912/912 byte-identical.)
   *Validate:* T11 against clang's `.d` files for each flag combination
   (byte comparison after path normalisation).
-- [ ] **Options**: `-imacros`, `-isysroot`/`--sysroot`, `-nostdlibinc`,
+- [x] **Options**: `-imacros`, `-isysroot`/`--sysroot`, `-nostdlibinc`,
   `-iprefix`/`-iwithprefix`, `-mmacosx-version-min`, unknown `-std=` values
   (error), `iso9899:199409`.
   *Validate:* T11 rows; predefine diff (`-dM`) for `-std` and
-  `-mmacosx-version-min`.
+  `-mmacosx-version-min`.  (Done: `-imacros` as clang's `#__include_macros`
+  + `##` in `<built-in>`, before every `-include`, its markers too; the
+  `-std=` table is clang's exact spellings, anything else an error;
+  `iso9899:199409` and `c2y`/`gnu2y` versions; the macOS deployment version
+  from `-mmacosx-version-min` or a versioned `-macosNN` target (which wins);
+  `-isysroot`/`--sysroot`/`-nostdlibinc`/`-iprefix` already matched.
+  `bench/vcc-driver.py` rows, -E and -dM byte for byte.)
 - [ ] **Predefines for other targets and flags**: only two tables;
   `--target=x86_64`, `-m32`, `-funsigned-char`, `-fstack-protector*`,
   `-ffast-math`, `-march=+sve`, `-pthread`, `-fsanitize=*`, `-fexceptions`

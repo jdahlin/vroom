@@ -72,7 +72,8 @@ typedef struct pp_opts {
 	int deps;			/* -M/-MD: files skipped by guard or #pragma once are dependencies too */
 	int fatal_continue;		/* -E text: a fatal error (file not found) does not end the TU, as clang */
 	int markers;			/* -E without -P: GNU line markers (# N "file" flags), 2 with -undef */
-	unsigned predef_cmdl;		/* markers: where predef's command-line part (-D/-U) starts */
+	unsigned predef_cmdl, predef_incl;	/* ... and its -imacros/-include part */
+	int imacros;			/* predef has -imacros (#__include_macros): no header cache */		/* markers: where predef's command-line part (-D/-U) starts */
 } pp_opts;
 
 enum { PP_LINUX_AARCH64, PP_DARWIN };

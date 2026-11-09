@@ -297,6 +297,19 @@ static void line_directive(pp *p, ctx *c, uint32_t b, uint32_t e, bool expand_li
 	}
 }
 
+/* -imacros: the file is read for its macros, its tokens dropped up to the
+ * "##" line after the directive in <built-in> (clang's #__include_macros) */
+static __attribute__((cold, noinline)) void imacros(pp *p, ctx *c, uint32_t b, uint32_t e, uint32_t loc)
+{
+	int nfile = p->nfile;
+	ptok t;
+
+	include(p, c, b + 1, e, D_INCLUDE, loc);
+	do
+		next_exp(p, &t);
+	while (t.kind != T_EOF && !(t.kind == T_HASHHASH && p->nfile == nfile));
+}
+
 /* run the directive at c->i; 1 if it produced a token in *out */
 VPRIV int directive(pp *p, ctx *c, ptok *out)
 {
@@ -343,6 +356,15 @@ VPRIV int directive(pp *p, ctx *c, ptok *out)
 		return 0;
 	case D_INCLUDE: case D_INCLUDE_NEXT: case D_IMPORT:
 		include(p, c, b + 1, e, (int)d->kind, loc);
+		return 0;
+	case D_IMACROS:
+		if (c->f == &p->builtin) {
+			imacros(p, c, b, e, loc);
+			return 0;
+		}
+		if (p->o->asm_mode)
+			goto pass;
+		error(p, loc, "invalid preprocessing directive");
 		return 0;
 	case D_PRAGMA: {
 		const vtok *f = &c->vt[b], *l = &c->vt[e - 1];

@@ -711,7 +711,7 @@ int ppd_run(int argc, char **argv, const ppd_env *env)
 	char pmapbuf[4096];
 	jmp_buf jb;
 	vmreg *br = bufr = vmpool_take(&bufpool);
-	buf pre = { .r = &br[0] }, cmdl = { .r = &br[1] }, incl = { .r = &br[2] }, o = { 0 };
+	buf pre = { .r = &br[0] }, cmdl = { .r = &br[1] }, incl = { .r = &br[2] }, imac = { .r = &br[3] }, o = { 0 };
 	/* no --target: the host's own userland (Darwin on a Mac, glibc aarch64 on Linux) */
 #ifdef __APPLE__
 	int darwin = 1;
@@ -727,6 +727,8 @@ int ppd_run(int argc, char **argv, const ppd_env *env)
 	pp *p;
 	int comments = 0, nomarkers = 0;
 	int dmacros = 0, showinc = 0, ddefs = 0, syntax = 0, layout = 0, ms_anon = 0, short_wchar = 0, tokhash = 0, emit = 0, objmode = 0;
+	const char *stdver = NULL, *macos_min = NULL;
+	int macos_min_flag = 0;
 	int tri = -1, std = 0, strict = 0, wimpl_int = 0, wimpl_fn = 0, gnu89_inline = -1, vcc_kernel = 0;
 	char objbuf[1024];
 
@@ -758,19 +760,29 @@ int ppd_run(int argc, char **argv, const ppd_env *env)
 		if (!strcmp(a, "-fcaret-diagnostics")) { nocaret = 0; continue; }
 		if (!strncmp(a, "-ferror-limit=", 14)) { elimit = atoi(a + 14); elimit = elimit ? elimit : -1; continue; }
 		if (!strncmp(a, "-std=", 5)) {
-			/* clang's spellings: c89 c90 iso9899:1990 gnu89 gnu90 c99 gnu99 c11 gnu11 c17 c18 gnu17 c23 c2x gnu23 ... */
-			static const struct { const char *s; int v; } stds[] = {
-				{ "89", 89 }, { "90", 89 }, { "1990", 89 }, { "199409", 89 }, { "99", 99 }, { "9x", 99 },
-				{ "1999", 99 }, { "11", 11 }, { "1x", 11 }, { "2011", 11 }, { "17", 17 }, { "18", 17 },
-				{ "2017", 17 }, { "2018", 17 }, { "23", 23 }, { "2x", 23 }, { "2y", 23 }, { "2024", 23 },
+			/* clang's C spellings (LangStandards.def); ver: a __STDC_VERSION__ of its own */
+			static const struct { const char *s; int v; const char *ver; } stds[] = {
+				{ "c89", 89, NULL }, { "c90", 89, NULL }, { "iso9899:1990", 89, NULL }, { "iso9899:199409", 89, "199409L" },
+				{ "gnu89", 89, NULL }, { "gnu90", 89, NULL }, { "c99", 99, NULL }, { "iso9899:1999", 99, NULL }, { "c9x", 99, NULL },
+				{ "iso9899:199x", 99, NULL }, { "gnu99", 99, NULL }, { "gnu9x", 99, NULL }, { "c11", 11, NULL }, { "iso9899:2011", 11, NULL },
+				{ "c1x", 11, NULL }, { "iso9899:201x", 11, NULL }, { "gnu11", 11, NULL }, { "gnu1x", 11, NULL }, { "c17", 17, NULL },
+				{ "iso9899:2017", 17, NULL }, { "c18", 17, NULL }, { "iso9899:2018", 17, NULL }, { "gnu17", 17, NULL }, { "gnu18", 17, NULL },
+				{ "c23", 23, NULL }, { "iso9899:2024", 23, NULL }, { "c2x", 23, NULL }, { "gnu23", 23, NULL }, { "gnu2x", 23, NULL },
+				{ "c2y", 23, "202400L" }, { "gnu2y", 23, "202400L" },
 			};
 			const char *v = a + 5;
+			size_t k;
 
+			for (k = 0; k < sizeof(stds) / sizeof(stds[0]) && strcmp(v, stds[k].s); k++)
+				;
+			if (k == sizeof(stds) / sizeof(stds[0])) {
+				dprintf(errfd, "error: invalid value '%s' in '%s'\n", v, a);	/* clang, without its notes */
+				status = 1;
+				goto out;
+			}
+			std = stds[k].v;
+			stdver = stds[k].ver;
 			strict = strncmp(v, "gnu", 3) != 0;
-			v += strncmp(v, "gnu", 3) == 0 ? 3 : v[0] == 'c' ? 1 : strncmp(v, "iso9899:", 8) == 0 ? 8 : 0;
-			for (size_t k = 0; k < sizeof(stds) / sizeof(stds[0]); k++)
-				if (!strcmp(v, stds[k].s))
-					std = stds[k].v;
 			continue;
 		}
 		if (!strcmp(a, "-ansi")) { std = 89; strict = 1; continue; }
@@ -824,6 +836,13 @@ int ppd_run(int argc, char **argv, const ppd_env *env)
 		if ((v = ARG("-iquote"))) { dirs_q[nq++] = v; continue; }
 		if ((v = ARG("-isystem"))) { dirs_s[ns++] = v; continue; }
 		if ((v = ARG("-idirafter"))) { dirs_a[na++] = v; continue; }
+		if ((v = ARG("-imacros"))) {
+			/* clang's: the file's macros, its tokens dropped up to the ## (before every -include) */
+			bstr(&imac, "#__include_macros \"");
+			bstr(&imac, v);
+			bstr(&imac, "\"\n##\n");
+			continue;
+		}
 		if ((v = ARG("-include"))) {
 			bstr(&incl, "#include \"");
 			bstr(&incl, v);
@@ -843,7 +862,18 @@ int ppd_run(int argc, char **argv, const ppd_env *env)
 			pmap = pmapbuf;
 			continue;
 		}
-		if (!strncmp(a, "--target=", 9) || !strcmp(a, "-target")) { darwin = strstr(a, "darwin") || strstr(a, "apple"); hosted = 0; }
+		if (!strncmp(a, "--target=", 9) || !strcmp(a, "-target")) {
+			const char *m = strstr(a, "-macos");
+
+			darwin = strstr(a, "darwin") || strstr(a, "apple");
+			hosted = 0;
+			if (m && m[6] >= '0' && m[6] <= '9')
+				macos_min = m + 6, macos_min_flag = 2;	/* arm64-apple-macos14.2: wins over the flag */
+		}
+		else if (!strncmp(a, "-mmacosx-version-min=", 21) || !strncmp(a, "-mmacos-version-min=", 20)) {
+			if (macos_min_flag < 2)
+				macos_min = strchr(a, '=') + 1, macos_min_flag = 1;
+		}
 		else if (!strcmp(a, "-nostdinc")) nostdinc = 1;
 		else if (!strcmp(a, "-undef")) undef = 1;
 		else if (!strcmp(a, "-x") && i + 1 < argc) asm_mode = !strcmp(argv[++i], "assembler-with-cpp");
@@ -1011,13 +1041,13 @@ int ppd_run(int argc, char **argv, const ppd_env *env)
 		static const char *const ver[] = { [89] = NULL, [99] = "199901L", [11] = "201112L", [17] = "201710L", [23] = "202311L" };
 
 		bstr(&pre, "#undef __STDC_VERSION__\n");
-		if (ver[std]) {
+		if (stdver || ver[std]) {
 			bstr(&pre, "#define __STDC_VERSION__ ");
-			bstr(&pre, ver[std]);
+			bstr(&pre, stdver ? stdver : ver[std]);
 			bstr(&pre, "\n");
-		} else {
-			bstr(&pre, "#undef __GNUC_STDC_INLINE__\n#define __GNUC_GNU_INLINE__ 1\n");
 		}
+		if (std == 89)
+			bstr(&pre, "#undef __GNUC_STDC_INLINE__\n#define __GNUC_GNU_INLINE__ 1\n");
 		if (strict)
 			bstr(&pre, "#define __STRICT_ANSI__ 1\n#undef linux\n#undef unix\n");
 		if (std == 23)
@@ -1053,6 +1083,19 @@ int ppd_run(int argc, char **argv, const ppd_env *env)
 			   "#undef __WCHAR_TYPE__\n#define __WCHAR_TYPE__ unsigned int\n"
 			   "#undef __WCHAR_WIDTH__\n#define __WCHAR_WIDTH__ 32\n"
 			   "#undef __clang_wide_literal_encoding__\n#define __clang_wide_literal_encoding__ \"UTF-32\"\n");
+	if (darwin && macos_min && !undef) {
+		/* clang: MMmmpp (10.x before 10.10: 10mp) */
+		unsigned maj = 0, min = 0, pat = 0, vv;
+		char b[320];
+
+		sscanf(macos_min, "%u.%u.%u", &maj, &min, &pat);
+		vv = maj == 10 && min < 10 ? 1000 + min * 10 + (pat > 9 ? 9 : pat) : maj * 10000 + min * 100 + pat;
+		snprintf(b, sizeof(b), "#undef __ENVIRONMENT_MAC_OS_X_VERSION_MIN_REQUIRED__\n"
+			 "#define __ENVIRONMENT_MAC_OS_X_VERSION_MIN_REQUIRED__ %u\n"
+			 "#undef __ENVIRONMENT_OS_VERSION_MIN_REQUIRED__\n#define __ENVIRONMENT_OS_VERSION_MIN_REQUIRED__ %u\n",
+			 vv, vv);
+		bstr(&pre, b);
+	}
 	if (darwin && short_wchar && !undef)
 		bstr(&pre, "#undef __ARM_SIZEOF_WCHAR_T\n#define __ARM_SIZEOF_WCHAR_T 2\n"
 			   "#undef __SIZEOF_WCHAR_T__\n#define __SIZEOF_WCHAR_T__ 2\n"
@@ -1082,7 +1125,10 @@ int ppd_run(int argc, char **argv, const ppd_env *env)
 	po.markers = nomarkers || cmp || !po.fatal_continue || dmacros ? 0 : undef ? 2 : 1;
 	po.predef_cmdl = (unsigned)pre.n;
 	if (cmdl.n) bput(&pre, cmdl.p, cmdl.n);
+	po.predef_incl = (unsigned)pre.n;
+	if (imac.n) bput(&pre, imac.p, imac.n);
 	if (incl.n) bput(&pre, incl.p, incl.n);
+	po.imacros = imac.n != 0;
 	bput(&pre, "", 1);
 	po.predef = pre.p;
 	po.main = main_file;
@@ -1286,6 +1332,7 @@ out:
 	bfree(&pre);
 	bfree(&cmdl);
 	bfree(&incl);
+	bfree(&imac);
 	vmpool_give(&bufpool, br);
 	bufr = NULL;
 	obj_release();

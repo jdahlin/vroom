@@ -52,6 +52,7 @@ MARK_FILES = {
     'a.h': 'int a;\n',
     'sys/b.h': '#pragma once\nint b;\n#include "c.h"\n',
     'sys/c.h': 'int c;\n',
+    'im.h': '#ifndef IMG\n#define IMG\n#include "a.h"\n#define IM 42\nint junk;\n#endif\n',
 }
 MARK_PROBE = ('#include "a.h"\nint x;\n' + '\n' * 10 + 'int y;\n#include <b.h>\n#include <b.h>\n'
               '#pragma clang assume_nonnull begin\n' + '\n' * 12 + '#pragma clang assume_nonnull end\n'
@@ -59,7 +60,11 @@ MARK_PROBE = ('#include "a.h"\nint x;\n' + '\n' * 10 + 'int y;\n#include <b.h>\n
 MARK_ROWS = [(t, f) for t in TARGETS for f in
              ['', '-undef', '-include a.h -DQ=2 -UQ', '-include sys/b.h -include ./a.h', '-std=c23',
               '-ffreestanding -std=c89', '-x assembler-with-cpp', '-mgeneral-regs-only -fshort-wchar -fPIC',
-              '-fno-PIE -fno-asynchronous-unwind-tables']]
+              '-fno-PIE -fno-asynchronous-unwind-tables', '-imacros im.h', '-include a.h -imacros im.h -imacros im.h',
+              '-std=iso9899:199409', '-std=c2y', '-std=gnu1x']]
+MARK_ROWS += [('--target=arm64-apple-macos' + v, f) for v, f in
+              [('', '-mmacosx-version-min=13.0'), ('14', ''), ('15.2', ''), ('10.15', ''), ('10.9', ''),
+               ('11', '-mmacosx-version-min=12.3.1')]]
 
 def mark_rows(verbose):
     bad = 0

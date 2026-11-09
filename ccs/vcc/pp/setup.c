@@ -171,7 +171,7 @@ static void hc_mode(pp *p, int mode)
 	static pthread_once_t once = PTHREAD_ONCE_INIT;
 
 	pthread_once(&once, hc_env);
-	p->hc = !hc_off && !p->o->show_includes && !p->o->dump_defines && !p->o->comments && !p->o->markers;	/* -H: a replay has no nesting to print */
+	p->hc = !hc_off && !p->o->show_includes && !p->o->dump_defines && !p->o->comments && !p->o->markers && !p->o->imacros;	/* -H: a replay has no nesting to print */
 	p->tokmode = mode;
 }
 
@@ -404,7 +404,10 @@ static __attribute__((cold, noinline)) void lm_builtin_block(pp *p)
 	lm_write(p, 1, " 1");
 	lm_file(p, "<built-in>", 0);
 	lm_write(p, 1, " 2");
-	p->cur_line = p->lm_bline = 1;
+	p->cur_line = 1;
+	p->lm_bline = 1;	/* <built-in>'s line where -imacros/-include start */
+	for (unsigned i = 0; i < p->o->predef_incl; i++)
+		p->lm_bline += p->o->predef[i] == '\n';
 }
 
 /* a file entered: its marker (after the #include's line was moved to) */
@@ -469,9 +472,10 @@ VPRIV void text_file_change(pp *p, const ctx *from, int enter)
 		if (from && from->f == &p->builtin) {
 			if (!p->lm_blk)
 				lm_builtin_block(p);
-			if (!enter)
-				p->lm_bline++;
-			l = p->lm_bline;
+			/* clang's <built-in> after the command line: a line per -include, 2 per -imacros */
+			l = loc_line(p, from->loc + from->vt[from->i - 1].off) - p->lm_bline + 1 + !enter;
+			if (enter)
+				move_to_line(p, l, false);
 			if (!enter) {
 				lm_file(p, "<built-in>", 0);
 				p->cur_line = l;
