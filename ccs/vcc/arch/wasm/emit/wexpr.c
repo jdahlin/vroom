@@ -1776,7 +1776,9 @@ static int wexpr1(ecx *e, uint32_t n, bool want)
 	case N_VAARG:
 		return wbuiltin(e, n, want);
 	case N_LABELADDR:
-		efatal(e, x->loc, "wasm: label addresses are not supported (PLAN-wasm.md W4)");
+		/* its number (1-based), as in data: goto * compares against these */
+		wconst(e, WT_I64, (int64_t)x->a + 1);
+		return WT_I64;
 	case N_SIZEOF_VLA:
 		wvla_bytes(e, x->b);
 		wconv(e, prim(TY_ULONG), x->ty);

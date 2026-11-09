@@ -170,6 +170,11 @@ static void data_init(ecx *e, uint64_t off, qty ty, uint32_t init)
 			}
 			return;
 		case CV_ADDR:
+			if (WASM(c) && cv.label) {
+				/* wasm: a label's address is its number (PLAN-wasm.md W4) */
+				data_put(e, off, (uint64_t)cv.label - (cv.sublabel ? (uint64_t)cv.sublabel : 0) + (uint64_t)cv.i, n);
+				return;
+			}
 			if (cv.sublabel && (n == 4 || n == 8)) {
 				/* label difference: ref - sub, resolved by the assembler */
 				data_put(e, off, 0, n);

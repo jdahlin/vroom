@@ -457,10 +457,10 @@ static uint32_t wgstate(wst *W, const wgd *d, uint32_t i)
 	}
 }
 
-static void wgoto(ecx *e, const node *x)
+static void wgoto(ecx *e, uint32_t lb, uint32_t loc)
 {
 	wst *W = e->w;
-	uint32_t lo = 0, hi = W->ngl, lb = x->a;
+	uint32_t lo = 0, hi = W->ngl;
 	const wgp *L = W->gp + W->ngp, *p = NULL;
 	int d, a;
 	uint32_t aidx;
@@ -478,12 +478,12 @@ static void wgoto(ecx *e, const node *x)
 			hi = m;
 	}
 	if (!p)
-		efatal(e, x->loc, "wasm: goto to a label that is not a statement of a compound statement is not supported yet (PLAN-wasm.md W4)");
+		efatal(e, loc, "wasm: goto to a label that is not a statement of a compound statement is not supported yet (PLAN-wasm.md W4)");
 	/* the compound being emitted that the target is (nested) in */
 	for (a = (int)p->d; a >= 0 && W->gd[a].loop < 0; a = W->gd[a].parent)
 		;
 	if (a < 0)
-		efatal(e, x->loc, "wasm: goto into a statement expression is not supported yet (PLAN-wasm.md W4)");
+		efatal(e, loc, "wasm: goto into a statement expression is not supported yet (PLAN-wasm.md W4)");
 	/* the states on the way down: target segment in d, the enclosing segments above */
 	d = (int)p->d;
 	aidx = p->i;
@@ -1002,15 +1002,32 @@ VPRIV void wstmt(ecx *e, uint32_t n)
 	case N_DEFAULT:
 		efatal(e, x->loc, "wasm: a case label inside a nested statement is not supported yet (PLAN-wasm.md W4)");
 	case N_LABEL:
-		if (c->labels[x->a].addr_taken)
-			efatal(e, x->loc, "wasm: label addresses are not supported (PLAN-wasm.md W4)");
 		wstmt(e, x->c);
 		break;
 	case N_GOTO:
-		wgoto(e, x);
+		wgoto(e, x->a, x->loc);
 		break;
-	case N_GOTO_IND:
-		efatal(e, x->loc, "wasm: computed goto is not supported (PLAN-wasm.md W4)");
+	case N_GOTO_IND: {
+		/* compare with the number of every label whose address is taken */
+		uint32_t t = wtmp(e, WT_I64);
+		const wgp *L = W->gp + W->ngp;
+
+		wexpr(e, x->a, true);
+		wset(e, t);
+		for (uint32_t i = 0; i < W->ngl; i++) {
+			if (!c->labels[L[i].label].addr_taken || (i && L[i - 1].label == L[i].label))
+				continue;
+			wget(e, t);
+			wconst(e, WT_I64, (int64_t)L[i].label + 1);
+			wi(e, "i64.eq");
+			wblock(e, "if");
+			wgoto(e, L[i].label, x->loc);
+			wend(e, "end_if");
+		}
+		wfree(e, t);
+		wi(e, "unreachable");
+		break;
+	}
 	case N_BREAK:
 	case N_CONTINUE: {
 		int t = x->op == N_BREAK ? W->brk : W->cont;
