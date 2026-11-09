@@ -145,8 +145,9 @@ static void wva_slot(cc *c, qty t, uint64_t *size, uint32_t *align, bool *ind)
 		*align = 8;
 		return;
 	}
-	*size = tsize(c, t);
-	*align = talign(c, t);
+	/* slots of at least 4 bytes (clang's SlotSize: a 2-byte record takes 4) */
+	*size = (tsize(c, t) + 3) & ~(uint64_t)3;
+	*align = talign(c, t) < 4 ? 4 : talign(c, t);
 }
 
 /* push an argument of type t passed as a (the value of node n) */

@@ -1369,8 +1369,14 @@ static int wassign(ecx *e, uint32_t n, bool want)
 	{
 		qty pt = x->c, bt = N(x->b)->ty;
 		int op = x->aux;
-		uint32_t ta = UINT32_MAX;
+		uint32_t ta = UINT32_MAX, tb = UINT32_MAX;
 
+		if (side_effects(c, x->b)) {
+			/* clang: the right operand first, then the left is read */
+			tb = wtmp(e, wty(c, bt));
+			wexpr(e, x->b, true);
+			wset(e, tb);
+		}
 		wlval(e, x->a, &l, lt);
 		if (l.k == WL_MEM) {
 			ta = wtmp(e, WT_I64);
@@ -1381,7 +1387,10 @@ static int wassign(ecx *e, uint32_t n, bool want)
 		if (is_ptr(c, lt)) {
 			uint64_t es = welem_size(e, lt);
 
-			wexpr(e, x->b, true);
+			if (tb != UINT32_MAX)
+				wget(e, tb);
+			else
+				wexpr(e, x->b, true);
 			wto_i64(e, bt);
 			wscale(e, lt, es);
 			wi(e, op == T_PLUS ? "i64.add" : "i64.sub");
@@ -1389,7 +1398,10 @@ static int wassign(ecx *e, uint32_t n, bool want)
 			if (!pt)
 				pt = lt;
 			wconv(e, lt, pt);
-			wexpr(e, x->b, true);
+			if (tb != UINT32_MAX)
+				wget(e, tb);
+			else
+				wexpr(e, x->b, true);
 			if (op != T_LESSLESS && op != T_GREATERGREATER && QUNQ(bt) != QUNQ(pt))
 				wconv(e, bt, pt);
 			warith(e, op, pt, (op == T_LESSLESS || op == T_GREATERGREATER) ? bt : 0);
@@ -1411,6 +1423,8 @@ static int wassign(ecx *e, uint32_t n, bool want)
 		}
 		if (ta != UINT32_MAX)
 			wfree(e, ta);
+		if (tb != UINT32_MAX)
+			wfree(e, tb);
 		return want ? k : WT_NONE;
 	}
 }

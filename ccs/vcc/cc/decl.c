@@ -696,7 +696,9 @@ VPRIV void declaration(cc *c, vec *out, bool file)
 		}
 		if (accept(c, T_EQUAL)) {
 			sym *y = &c->syms[s];
-			qty it = t;
+			/* int a[]: the size of an earlier declaration (the composite type), if it had one */
+			qty it = is_array(c, t) && (T(c, t)->flags & TF_INCOMPLETE) && is_array(c, y->ty) &&
+				 !(T(c, y->ty)->flags & (TF_INCOMPLETE | TF_VLA)) ? QT(QI(y->ty), QQ(t)) : t;
 			bool st = file || ds.sc == SC_STATIC;
 			uint32_t v;
 
