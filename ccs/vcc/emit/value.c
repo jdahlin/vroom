@@ -52,10 +52,56 @@ VPRIV int32_t slot(ecx *e, uint64_t size, uint32_t align)
 		align = 16;	/* the frame is only 16-aligned; larger alignment is approximated */
 	if (size > (1u << 28))
 		efatal(e, 0, "stack object too large");
+	/* allocations past the current top ended with their scope */
+	while (e->nsstk && e->sla[e->sstk[e->nsstk - 1]].off < -e->foff)
+		e->nsstk--;
 	e->foff = (int32_t)(((uint64_t)e->foff + size + align - 1) & ~(uint64_t)(align - 1));
 	if (e->foff > e->fmax)
 		e->fmax = e->foff;
+	if (e->nsla < CAPSLA) {
+		e->sla[e->nsla] = (slotal){ -e->foff, (uint32_t)size };
+		e->sstk[e->nsstk++] = e->nsla;
+	}
+	e->nsla++;
 	return -e->foff;
+}
+
+/* tag record i (frame offset off, len bytes; -1: an address) with its live allocation */
+VPRIV void slot_tag(ecx *e, ins *i, int64_t off, int64_t len)
+{
+	uint32_t lo = 0, hi = e->nsstk;
+
+	if (e->E->o->opt < 1 || e->novtag)
+		return;
+	/* live allocations are disjoint, offsets decreasing with depth */
+	while (lo < hi) {
+		uint32_t mid = (lo + hi) / 2;
+
+		if (e->sla[e->sstk[mid]].off > off)
+			lo = mid + 1;
+		else
+			hi = mid;
+	}
+	if (lo < e->nsstk) {
+		const slotal *a = &e->sla[e->sstk[lo]];
+		uint32_t id = e->sstk[lo] + 1;
+
+		if (off >= a->off && (len < 0 ? off <= a->off + (int64_t)a->size : off + len <= a->off + (int64_t)a->size) &&
+		    id <= 0xffff)
+			i->rm = (uint8_t)id, i->ra = (uint8_t)(id >> 8);
+		/* an address at the start of one allocation is also just past the end of the one below */
+		if (len < 0 && off == a->off && lo + 1 < e->nsstk) {
+			const slotal *b = &e->sla[e->sstk[lo + 1]];
+			uint32_t id2 = e->sstk[lo + 1] + 1;
+
+			if (b->off + (int64_t)b->size == off) {
+				if (id2 > 0xffff)
+					i->rm = i->ra = 0;	/* untagged */
+				else
+					i->cond = (uint8_t)id2, i->sh = (uint8_t)(id2 >> 8);
+			}
+		}
+	}
 }
 static bool sym_needs_got(cc *c, uint32_t ref);
 

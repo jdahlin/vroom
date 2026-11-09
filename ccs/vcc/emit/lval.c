@@ -208,7 +208,21 @@ VPRIV lval gen_lval(ecx *e, uint32_t n)
 }
 static int bf_bytes(int bits) { return bits <= 8 ? 1 : bits <= 16 ? 2 : bits <= 32 ? 4 : 8; }
 
+static val load1(ecx *e, lval *l, qty t);
+
+/* a volatile access stays untagged: opt.c then leaves its slot alone */
 VPRIV val load(ecx *e, lval *l, qty t)
+{
+	val v;
+	int vol = (QQ(t) & Q_VOLATILE) != 0;
+
+	e->novtag += vol;
+	v = load1(e, l, t);
+	e->novtag -= vol;
+	return v;
+}
+
+static val load1(ecx *e, lval *l, qty t)
 {
 	cc *c = e->c;
 	uint64_t size = tsize(c, t);
@@ -268,7 +282,18 @@ VPRIV val load(ecx *e, lval *l, qty t)
 }
 
 /* store v (of type t) to l; v is consumed unless keep; returns v (in a register if kept) */
+static void store1(ecx *e, lval *l, qty t, val *v);
+
 VPRIV void store(ecx *e, lval *l, qty t, val *v)
+{
+	int vol = (QQ(t) & Q_VOLATILE) != 0;
+
+	e->novtag += vol;
+	store1(e, l, t, v);
+	e->novtag -= vol;
+}
+
+static void store1(ecx *e, lval *l, qty t, val *v)
 {
 	cc *c = e->c;
 	uint64_t size = tsize(c, t);

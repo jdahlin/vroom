@@ -72,7 +72,7 @@ VPRIV void enqueue(emitter *E, uint32_t item)
 }
 
 /* the regions of a ctx[i] (ecx_init takes a set, ecx_free gives it back) */
-static vmpool ecxpool = VMPOOL_INIT(14);
+static vmpool ecxpool = VMPOOL_INIT(15);
 
 static void ecx_init(ecx *e, emitter *E, vmreg *r)
 {
@@ -97,6 +97,8 @@ static void ecx_init(ecx *e, emitter *E, vmreg *r)
 	e->cases = vmreg_get(&r[11], (size_t)1 << 24, "emit.cases");
 	e->weakref = vmreg_get(&r[12], (size_t)c->nsym * sizeof(uint32_t) + 4096, "emit.weakref");
 	e->rlog = vmreg_get(&r[13], RLOG_CAP * sizeof(uint32_t), "emit.rlog");
+	e->sla = vmreg_get(&r[14], (size_t)CAPSLA * (sizeof(slotal) + sizeof(uint32_t)), "emit.sla");
+	e->sstk = (uint32_t *)(e->sla + CAPSLA);
 }
 
 /* (after the stitch: the chunks point into e->out) */
@@ -120,6 +122,7 @@ static void ecx_free(ecx *e, vmreg *r)
 	vmreg_put(&r[11], VMREG_SCRATCH);
 	vmreg_put(&r[12], VMREG_SCRATCH);
 	vmreg_put(&r[13], VMREG_SCRATCH);	/* (copied by keep_make before this) */
+	vmreg_put(&r[14], VMREG_SCRATCH);
 	vmpool_give(&ecxpool, r);
 }
 

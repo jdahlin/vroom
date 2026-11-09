@@ -192,6 +192,9 @@ static void finish_function(ecx *e, uint32_t s)
 		}
 		if (i->rn != FRAME)
 			continue;
+		i->rm = i->ra = 0;	/* slot tags */
+		if (i->op != I_LD && i->op != I_ST)
+			i->cond = i->sh = 0;
 		if (e->dyn) {
 			i->rn = R_FP;
 			i->imm = i->imm - csave;
@@ -316,6 +319,7 @@ static bool emit_function1(ecx *e, uint32_t s, int nlreg)
 	e->nlabel = 0;
 	e->nkv = 0, e->kvalid = 0, e->nkvs = 0, e->nael = 0;
 	e->foff = e->fmax = e->outmax = e->cl_top = 0;
+	e->nsla = e->nsstk = 0;
 	e->dyn = e->calls = false;
 	e->live = 0;
 	e->resv = 0;

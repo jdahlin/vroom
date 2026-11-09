@@ -306,12 +306,34 @@ typedef struct fnctx {		/* one function instance: the emitted function or an inl
 #define INLINE_FREE_FAST 5
 #define INLINE_FREE_SAFE 8
 
+/* a stack slot handed out by slot() (offsets are reused across scopes) */
+typedef struct slotal {
+	int32_t off;
+	uint32_t size;
+} slotal;
+#define CAPSLA (1u << 20)
+/*
+ * At -O1 and up a record addressing a frame slot (I_LD/I_ST, add/sub
+ * immediate with rn FRAME) names the live allocation it is inside in
+ * rm | ra << 8 (index + 1; 0: none found, or past 65535).  Slots are
+ * reused once a scope ends, so this tells opt.c which accesses belong to
+ * one object.  An address at the start of an allocation that is also just
+ * past the end of the live one below names that one too, in cond | sh << 8
+ * (SLOT_TAG2).  finish_function clears the tags before the frame layout.
+ */
+#define SLOT_TAG(i) ((uint32_t)(i)->rm | (uint32_t)(i)->ra << 8)
+#define SLOT_TAG2(i) ((uint32_t)(i)->cond | (uint32_t)(i)->sh << 8)
+
 typedef struct ecx {
 	emitter *E;
 	cc *c;
 	/* records of the function being emitted */
 	ins *in;
 	uint32_t nin, capin;
+	slotal *sla;		/* the function's slot() allocations */
+	uint32_t nsla;
+	uint32_t *sstk, nsstk;	/* the live ones (indices into sla, deepest last) */
+	int novtag;		/* inside a volatile access: its records stay untagged */
 	uint32_t curloc;	/* innermost statement being generated (diagnostics) */
 	tbuf raw;		/* inline asm text */
 	tbuf out;		/* this thread's output text */
@@ -580,6 +602,7 @@ VPRIV int treg(ecx *e);
 VPRIV void tfree(ecx *e, int r);
 VPRIV void val_free(ecx *e, const val *v);
 VPRIV int32_t slot(ecx *e, uint64_t size, uint32_t align);
+VPRIV void slot_tag(ecx *e, ins *i, int64_t off, int64_t len);
 static inline val vconst(i128 i);
 static inline val vreg(int r);
 static inline val vaddr(uint32_t ref, i128 off);
@@ -877,6 +900,8 @@ static inline void opi(ecx *e, int op, int x, int rd, int rn, int64_t imm)
 	i = put(e, op);
 	i->sz = (uint8_t)x, i->rd = (uint8_t)rd, i->rn = (uint8_t)rn;
 	i->imm = imm;
+	if (rn == FRAME)
+		slot_tag(e, i, imm, -1);	/* an address: may point just past the end */
 }
 
 static inline void opbf(ecx *e, int op, int x, int rd, int rn, int immr, int imms)
@@ -926,6 +951,8 @@ static inline void mem(ecx *e, int op, int sz, int ext, int rd, int base, int64_
 	i = put(e, op);
 	i->sz = (uint8_t)sz, i->cond = (uint8_t)ext, i->rd = (uint8_t)rd, i->rn = (uint8_t)base;
 	i->imm = off;
+	if (base == FRAME)
+		slot_tag(e, i, off, (int64_t)1 << sz);
 }
 
 static inline void symop(ecx *e, int op, int sz, int ext, int rd, int rn, uint32_t ref, int64_t off)
