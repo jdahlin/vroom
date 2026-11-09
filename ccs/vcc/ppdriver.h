@@ -5,6 +5,9 @@ typedef struct ppd_env {
 	int outfd, errfd;	/* output without -o; diagnostics */
 } ppd_env;
 
+/* the client's umask for files a job creates (-1: the process's own) */
+extern _Thread_local int ppd_umask;
+
 /* one -E job; argv[0] is ignored.  Returns the exit status. */
 int ppd_run(int argc, char **argv, const ppd_env *env);
 /* token-by-token comparison of ours[0..on) with the file refpath (0: same) */

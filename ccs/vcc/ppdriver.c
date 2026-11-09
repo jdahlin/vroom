@@ -349,6 +349,15 @@ static int write_all(int fd, const char *p, size_t n)
 
 /* outputs go to a temporary next to the target, renamed over it when complete:
    an interrupted or failed job leaves the old file or none, never a torn one */
+_Thread_local int ppd_umask = -1;
+
+/* a new output's mode: the client's umask under vccd */
+static void out_mode(int fd)
+{
+	if (ppd_umask >= 0)
+		fchmod(fd, 0666 & ~(mode_t)ppd_umask);
+}
+
 static void tmp_name(char *t, size_t cap, const char *f)
 {
 	static _Atomic unsigned seq;
@@ -364,6 +373,8 @@ static int write_file(const char *cwd, const char *path, const char *s, size_t n
 
 	tmp_name(t, sizeof(t), f);
 	fd = open(t, O_WRONLY | O_CREAT | O_TRUNC | O_CLOEXEC, 0666);
+	if (fd >= 0)
+		out_mode(fd);
 	if (fd < 0 || write_all(fd, s, n) || close(fd) || rename(t, f)) {
 		int e = errno;
 
@@ -909,6 +920,8 @@ int ppd_run(int argc, char **argv, const ppd_env *env)
 			snprintf(outpath, sizeof(outpath), "%s", path);
 			tmp_name(outtmp, sizeof(outtmp), path);
 			fd = open(outtmp, O_WRONLY | O_CREAT | O_TRUNC | O_CLOEXEC, 0666);
+			if (fd >= 0)
+				out_mode(fd);
 			if (fd < 0) {
 				dprintf(errfd, "vcc: error: cannot open %s\n", out);
 				status = 1;

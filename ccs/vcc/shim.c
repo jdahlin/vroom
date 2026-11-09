@@ -15,6 +15,7 @@
  * (rsh.c); anything vccd declines, any other argv, and a missing vccd run
  * the real shell, $VSH_REAL (default /bin/sh), with the same arguments.
  */
+#include <sys/stat.h>
 #include <errno.h>
 #include <stdint.h>
 #include <stdlib.h>
@@ -102,10 +103,18 @@ int main(int argc, char **argv)
 		p = put(p, argv[i]);
 	for (e = environ; *e; e++)
 		p = put(p, *e);
+	{	/* the client's umask, for files the server creates (last: it wins) */
+		char um[16] = "VCC_UMASK=";
+		mode_t m = umask(0);
+
+		umask(m);
+		um[10] = (char)('0' + (m >> 6 & 7)), um[11] = (char)('0' + (m >> 3 & 7)), um[12] = (char)('0' + (m & 7));
+		p = put(p, um);
+	}
 
 	h->magic = VROOM_MAGIC;
 	h->argc = argc;
-	h->envc = e - environ;
+	h->envc = e - environ + 1;
 	h->payload_len = p - (buf + sizeof(*h));
 
 	memset(cbuf, 0, sizeof(cbuf));

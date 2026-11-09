@@ -256,7 +256,7 @@ def header_shadowed_by_new_file():
 
 # ---------------- the client's view ----------------
 
-@test(xfail='Request environment and umask ignored by in-process jobs')
+@test()
 def output_mode_follows_client_umask():
     v = Vccd(umask=0o022)
     try:

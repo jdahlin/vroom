@@ -682,7 +682,13 @@ static int handle1(const struct req *r, const char **kind);
 
 static int handle(const struct req *r, const char **kind)
 {
-	int status = handle1(r, kind);
+	int status;
+
+	ppd_umask = -1;	/* the shim sends VCC_UMASK; outputs then get 0666 & ~umask */
+	for (char **e = r->envp; *e; e++)
+		if (!strncmp(*e, "VCC_UMASK=", 10))
+			ppd_umask = (int)(strtoul(*e + 10, NULL, 8) & 0777);
+	status = handle1(r, kind);
 
 	if (!strcmp(*kind, "cc-own") || !strcmp(*kind, "cc") || !strcmp(*kind, "cc-fallbk"))
 		status = fixdep_after(r, status);

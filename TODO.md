@@ -408,7 +408,9 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
   temporary next to the target and `rename()` (ar.c already does).
   *Validate:* T12 (interrupt during write: either the old file or none,
   never a truncated one with a new mtime).
-- [ ] **Request environment and umask ignored by in-process jobs** [R].
+- [ ] **Request environment and umask ignored by in-process jobs** [R].  (umask
+  done: the shim sends `VCC_UMASK`, ppdriver outputs get `0666 & ~umask`;
+  the environment is still open.)
   `getenv` at `ppdriver.c:733,765`, `pp.c:5519`.  Pass the request's env
   to the job (`CPATH`, `C_INCLUDE_PATH`, `SOURCE_DATE_EPOCH`,
   `VCC_*`), create files with the client's umask (shim sends it).
