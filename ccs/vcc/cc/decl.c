@@ -258,8 +258,10 @@ static uint32_t declare(cc *c, const dspec *ds, declr *d, qty t, bool file)
 	if (ds->sc == SC_TYPEDEF) {
 		if (at.aligned)
 			t = ty_aligned(c, t, at.aligned);
-		if (at.transparent && KIND(c, t) == TY_UNION)
+		if (at.transparent && KIND(c, t) == TY_UNION) {
+			DR_TAGWRITE(c, T(c, t)->aux);
 			c->ty[QI(t)].flags |= TF_TRANSPARENT;
+		}
 		prev = lookup(c, d->name);
 		if (prev && c->syms[prev].depth == c->depth && c->syms[prev].kind == S_TYPEDEF) {
 			if (!compatible(c, c->syms[prev].ty, t) || QQ(c->syms[prev].ty) != QQ(t))
@@ -272,8 +274,10 @@ static uint32_t declare(cc *c, const dspec *ds, declr *d, qty t, bool file)
 		if (is_record(c, t) || KIND(c, t) == TY_ENUM) {
 			tag *r = &c->tags[T(c, t)->aux];
 
-			if (!r->name && !r->typedef_name && file)
+			if (!r->name && !r->typedef_name && file) {
+				DR_TAGWRITE(c, T(c, t)->aux);
 				r->typedef_name = d->name;
+			}
 		}
 		if (file)
 			c->toplevel[c->ntoplevel++] = s;

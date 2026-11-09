@@ -850,10 +850,81 @@ pp at a region start, at any depth, as `pp_top_events` gives for the top level.
            run's busy time;
          - the kernel's W copies at reads take 1.2 s (big structs reached through
            pointers).
-     - **Next (2b).** Make validation O(reads), not O(W): the provenance and versions
-       of the design. A sym/tag certified as the same entry's own and unwritten since
-       needs no deep compare. Also stop recording regions that already have
-       variants. Then step 3 (lazy bodies) for the kernel.
+   - *2b done (2026-11-09): cheaper validation, apply and publish. Still opt-in.*
+     - **A 2a bug.** `rd`/`wr` handled field sizes 1, 2, 4 and 8 only. So the tag range
+       `align..typedef_name` (12 bytes) and `field.width..bitfield` (3 bytes) read as 0:
+       - a replayed struct completion never wrote `align`, `maxalign` or
+         `typedef_name`;
+       - bit-field widths were never compared;
+       - `VCC_DRCHECK` compared the same zeros, so it could not see it.
+
+       Objects stayed identical because codegen reads the type's `align`, not the
+       tag's. Now every field up to 8 bytes is read, and `schema_check` aborts on a
+       wider one (attrs ranges split). It was also behind ~5000 variants that
+       failed to validate, on tag `align`.
+     - **What validation compared.** On PG, 96% of the syms unified per try were
+       enumerators: 3.3 M of 3.4 M, reached through enum tags such as `NodeTag`.
+       Fields of tags came second (1.4 M). Half the work was in tries that failed.
+     - **Provenance, as designed, did not pay.** Tags got (entry, own index, last
+       writer), with hooks at every tag write (`DR_TAGWRITE`), and snapshots carried
+       it. But the same header text gets a new identity in each snapshot, variant or
+       parse: only 27 k of 226 k tag compares certified, and syms unified barely
+       dropped. Identity of creation is the wrong key when equal content is created
+       many times.
+     - **Content memo instead.** The values of a W tag (the tag, its fields and its
+       enumerators, without references and locations) are interned process-wide at
+       publish (1081 distinct contents, 0.5 MB on PG).
+       - A TU remembers, per tag, the content a successful validation compared it
+         with. The memo is cleared by `DR_TAGWRITE` (struct and enum bodies,
+         pre-body packed/aligned, `transparent_union`, `typedef_name`), by replayed
+         writes and by a restore.
+       - A tag that matches its memo has only its references paired. Builtin types
+         and zero references are part of the content, so only the others are
+         paired. Its enumerators are mapped by stored W positions, uncompared.
+       - Equality is always established by a full comparison at least once per TU.
+       - The recording TU sets the memo too, so a tag is hashed once per TU.
+       - `DR_TAGWRITE` also refuses a region that writes an older tag outside W, a
+         write the entry would miss (before, only `VCC_DRCHECK` saw that).
+     - **Cheaper per try.**
+       - W lookups are a hash per kind, not a sorted array with binary search (this
+         also drops a `qsort` per publish).
+       - A first pass over the reads checks binding, kind and flags before any deep
+         compare.
+     - **Apply.** Own records stay in A's indices in the entry. A relocation list
+       built at publish (`rel_build`, which also replaces the publish-time mapping
+       check) names the fields that change: own delta, W slot, own or W type,
+       shadow to 0. Locations are one fixed pass per array, so apply is `memcpy`
+       plus those.
+     - **Recording less.**
+       - A key that already has 8 variants is not recorded (each such recording was
+         thrown away).
+       - A region refused for its own tokens (pragma, lazy body, asm, label,
+         `_Complex`) is not recorded a second time.
+     - **Verification.**
+       - `VCC_DRCHECK`: 0 mismatches (PG 18 324 regions, kernel 5508).
+       - Objects identical with `VCC_DR=1`: PG 1570/1570, kernel 840/840.
+       - ASan+UBSan clean (400 PG and 300 kernel TUs with `VCC_DRCHECK`).
+       - Default path: parity 873/873 and 911/912; sema run, batch and layout
+         878/879; ctests, stress and vccd tests green; the file-by-file build
+         compiles; `vbench gate` ok (fe +0.36%, cc +0.33% since the merge-base).
+     - **Numbers**, PG `vpp --batch -j 1`. Main's `f0ffb6a` (designated-initializer
+       overrides) made 25 TUs with big initializer tables far slower in `il_run`
+       (`gram.c` 0.5 → 247 G instructions), so they are left out: 1549 TUs, default
+       39.2 G.
+
+       | | 2a (bug fixed) | 2b |
+       |---|---|---|
+       | instructions, `VCC_DR=1` | 47.5 G | 41.7 G |
+       | validate / apply / publish / W, ms | 440 / 290 / 300 / 125 | 167 / 85 / 243 / 103 |
+       | regions replayed | 17 394 (17.4 M tok) | 17 394 (17.4 M tok) |
+       | syms unified in validation | 3.4 M | 0.5 M |
+
+       Replay is still 6% above parsing everything. What is left is mostly
+       recording: the W copies at reads and publishing (~80 KB per entry, 338 MB on
+       PG), about 23% of the front end's samples with the replay itself.
+     - **Next.** Step 3 (lazy bodies) for the kernel's 256 M refused tokens. Cheaper
+       recording (W reached lazily, entries smaller) before turning it on by
+       default.
 3. Lazy bodies through `lzfn.hc` (the kernel's 226 M, PG's 5.5 M).
 4. Fold ccsnap into this if per-region replay of the prefix is as cheap as a snapshot
    restore; otherwise keep both, and let a recording coexist with snapshots (the

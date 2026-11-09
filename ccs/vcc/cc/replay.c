@@ -124,7 +124,8 @@ static int tag_fd(const tag *t, fd *o)
 	o[n++] = FD(tag, ty, K_TIDX);
 	o[n++] = FDR(tag, flags, nfield, K_IMM);
 	o[n++] = FD(tag, size, K_IMM);
-	o[n++] = FDR(tag, align, typedef_name, K_IMM);
+	o[n++] = FDR(tag, align, maxalign, K_IMM);
+	o[n++] = FD(tag, typedef_name, K_IMM);
 	o[n++] = FD(tag, enums, t->nenum ? K_LIST : K_IMM);
 	o[n++] = FD(tag, nenum, K_IMM);
 	return n;
@@ -168,10 +169,13 @@ static int attr_fd(fd *o)
 	o[n++] = FD(attrs, alias, K_STR1);
 	o[n++] = FD(attrs, asmname, K_STR1);
 	o[n++] = FD(attrs, cleanup, K_SYM);
-	o[n++] = FDR(attrs, mode, counted_by, K_IMM);
+	o[n++] = FDR(attrs, mode, vecsize, K_IMM);
+	o[n++] = FD(attrs, counted_by, K_IMM);
 	o[n++] = FD(attrs, visibility, K_STR1);
 	o[n++] = FD(attrs, flags, K_IMM);
-	o[n++] = FDR(attrs, packed, noinstr, K_IMM);
+	o[n++] = FDR(attrs, packed, destructor, K_IMM);
+	o[n++] = FDR(attrs, nonstring, error_fn, K_IMM);
+	o[n++] = FDR(attrs, overloadable, noinstr, K_IMM);
 	return n;
 }
 
@@ -222,37 +226,48 @@ static int node_fd(const node *x, fd *o)
 	return n;
 }
 
-static inline uint64_t rd(const void *r, fd f)
+/* a field of up to 8 bytes, little-endian (schema_check: no wider ones) */
+static inline uint64_t rdz(const char *p, unsigned size)
 {
-	const char *p = (const char *)r + f.off;
+	uint64_t v = 0;
 
-	switch (f.size) {
+	switch (size) {
 	case 1: return *(const uint8_t *)p;
-	case 2: { uint16_t v; memcpy(&v, p, 2); return v; }
-	case 4: { uint32_t v; memcpy(&v, p, 4); return v; }
-	case 8: { uint64_t v; memcpy(&v, p, 8); return v; }
+	case 2: { uint16_t x; memcpy(&x, p, 2); return x; }
+	case 4: { uint32_t x; memcpy(&x, p, 4); return x; }
+	case 8: memcpy(&v, p, 8); return v;
+	case 3: memcpy(&v, p, 3); return v;
+	case 5: memcpy(&v, p, 5); return v;
+	case 6: memcpy(&v, p, 6); return v;
+	case 7: memcpy(&v, p, 7); return v;
 	}
 	return 0;
 }
 
-static inline void wr(void *r, fd f, uint64_t v)
+static inline void wrz(char *p, unsigned size, uint64_t v)
 {
-	char *p = (char *)r + f.off;
-
-	switch (f.size) {
+	switch (size) {
 	case 1: *(uint8_t *)p = (uint8_t)v; break;
 	case 2: { uint16_t x = (uint16_t)v; memcpy(p, &x, 2); break; }
 	case 4: { uint32_t x = (uint32_t)v; memcpy(p, &x, 4); break; }
 	case 8: memcpy(p, &v, 8); break;
+	case 3: memcpy(p, &v, 3); break;
+	case 5: memcpy(p, &v, 5); break;
+	case 6: memcpy(p, &v, 6); break;
+	case 7: memcpy(p, &v, 7); break;
 	}
 }
+
+static inline uint64_t rd(const void *r, fd f) { return rdz((const char *)r + f.off, f.size); }
+static inline void wr(void *r, fd f, uint64_t v) { wrz((char *)r + f.off, f.size, v); }
 
 /* ---------------- entries ---------------- */
 
 enum { W_SYM, W_TAG, W_TY, W_ATTR, W_STR, W_LIST, W_N };
 
 typedef struct wsym { uint32_t a; sym s; } wsym;
-typedef struct wtag { uint32_t a, fo; tag t; } wtag;			/* fields at wf[fo] */
+/* fields at wf[fo]; k: its values interned (tc_intern), set at publish */
+typedef struct wtag { uint32_t a, fo; const void *k; tag t; } wtag;
 typedef struct wty { uint32_t a, po; uint8_t intern; ctype t; } wty;	/* params at wp[po]; intern: only as an
 									   interning result, not compared */
 typedef struct wattr { uint32_t a; attrs r; } wattr;
@@ -261,10 +276,21 @@ typedef struct wlist { uint32_t a, n, vo; } wlist;			/* syms at wv[vo] */
 
 enum { OP_INTERN, OP_NEW, OP_FUNC };
 typedef struct drop { uint8_t op; uint32_t a, po; ctype t; } drop;	/* FUNC: params at opar[po], t.n of them */
-typedef struct drread { uint32_t id, s; uint8_t ns; } drread;
+typedef struct drread { uint32_t id, s, flags; uint8_t ns, kind; } drread;	/* kind, flags: of s in A */
 typedef struct xrec { uint32_t w, mask; union { sym s; tag t; attrs r; ctype y; } u; } xrec;	/* a write: W position,
 											   changed fields */
 #define XF_F (1u << 31)	/* tag.f changed */
+
+/*
+ * Own records are kept in A's indices; apply copies them and fixes only the
+ * fields that change, by a relocation list built at publish (rel_build): an
+ * offset into the array, an op, and for a W reference its W position or for
+ * an own type its index in the region.
+ */
+enum { RA_SYM, RA_TAG, RA_NODE, RA_SPAN, RA_LIST, RA_ATTR, RA_HEAP, RA_N };
+enum { RO_DS, RO_DT, RO_DN, RO_DL, RO_DI, RO_DF, RO_DR, RO_DA,	/* own: + (B start - A start) */
+       RO_ZERO, RO_W, RO_W1, RO_TYOWN, RO_TYW, RO_TIOWN, RO_TIW };
+typedef struct drrel { uint32_t off; uint8_t op, size, wk, _pad; uint32_t arg; } drrel;
 
 typedef struct drent {
 	struct drent *_Atomic next;
@@ -279,7 +305,8 @@ typedef struct drent {
 	drread *rd;
 	uint32_t nrd;
 	/* W, per kind: (A index << 32 | position) sorted, and the records by position */
-	uint64_t *wk[W_N];
+	uint64_t *wk[W_N];	/* per kind, open addressing: (A index + 1) << 32 | position; 0: empty */
+	uint32_t wmask[W_N];
 	uint32_t nw[W_N];
 	wsym *ws;
 	wtag *wt;
@@ -291,6 +318,7 @@ typedef struct drent {
 	qty *wp;
 	char *wb;
 	uint32_t *wv;
+	uint32_t *wvp;		/* per wv element: its W position (W_SYM), UINT32_MAX: none */
 	/* the type log */
 	drop *ops;
 	uint32_t nops;
@@ -310,6 +338,8 @@ typedef struct drent {
 	char *heap;
 	size_t nheap;
 	uint32_t *fpc, nfpc;	/* field pieces in heap: (offset, count) */
+	struct drrel *rel[RA_N];	/* the own records' references, per array (rel_build) */
+	uint32_t nrel[RA_N];
 	uint32_t *bind, nbind;	/* syms bound at file scope, in order */
 	uint32_t *tl, ntl;	/* toplevel */
 	xrec *xs, *xt, *xa, *xy;
@@ -375,12 +405,12 @@ static struct never *never_slot(uint64_t k, bool make)
 	return NULL;
 }
 
-static void never_note(const void *he, unsigned ctr, uint32_t pack, uint64_t sig)
+static void never_note(const void *he, unsigned ctr, uint32_t pack, uint64_t sig, uint32_t n)
 {
 	struct never *v = never_slot(never_key(he, ctr, pack, sig), true);
 
 	if (v)
-		atomic_fetch_add_explicit(&v->n, 1, memory_order_relaxed);
+		atomic_fetch_add_explicit(&v->n, n, memory_order_relaxed);
 }
 
 static bool never_record(const void *he, unsigned ctr, uint32_t pack, uint64_t sig)
@@ -449,6 +479,11 @@ struct drrec {
 	uint32_t *tymap, ctymap;
 	VEC(uint64_t) uw;
 	VEC(qty) tpar;
+	/* per tag: the interned values (wtag.k) a successful validation compared it with, NULL: none or written
+	   since (tag_memo) */
+	const void **tk;
+	uint32_t ctk;
+	VEC(uint64_t) tdone;	/* this try's fully compared tags: (W position << 32 | B index) */
 	/* VCC_DR + VCC_DRCHECK: the region is parsed and compared with what this entry's replay would do */
 	const struct drent *chk;
 	uint32_t chk_base;
@@ -477,6 +512,68 @@ static void count(int k, uint64_t tok)
 {
 	ADD(st_n[k], 1);
 	ADD(st_tok[k], tok);
+}
+
+/* ---------------- tag memo ---------------- */
+
+/*
+ * The values of a tag (everything but references and locations: the tag,
+ * its fields, its enumerators) are interned process-wide, one copy per
+ * distinct content: tc_intern.  A TU remembers per tag which content a
+ * successful validation compared it with (tk).  Any write to the tag since
+ * clears that (DR_TAGWRITE for parsed code, apply for replayed writes, a
+ * restore for all), so a tag that matches its memo has those values, and
+ * validation only pairs its references (tag_known).  Enumerators are never
+ * written after their enum body.
+ */
+typedef struct tcont { struct tcont *next; uint64_t h; uint32_t n; char b[]; } tcont;
+#define TC_NB 65536
+static tcont *_Atomic tc_tab[TC_NB];
+static pthread_mutex_t tc_mu = PTHREAD_MUTEX_INITIALIZER;
+static _Atomic uint64_t tc_bytes, tc_n;
+
+static const void *tc_intern(const char *b, uint32_t n)
+{
+	uint64_t h = 0xcbf29ce484222325ull;
+	tcont *x;
+	uint32_t j;
+
+	for (uint32_t i = 0; i < n; i++)
+		h = (h ^ (unsigned char)b[i]) * 0x100000001b3ull;
+	j = (uint32_t)(h >> 40) & (TC_NB - 1);
+	for (x = atomic_load_explicit(&tc_tab[j], memory_order_acquire); x; x = x->next)
+		if (x->h == h && x->n == n && !memcmp(x->b, b, n))
+			return x;
+	pthread_mutex_lock(&tc_mu);
+	for (x = atomic_load_explicit(&tc_tab[j], memory_order_acquire); x; x = x->next)
+		if (x->h == h && x->n == n && !memcmp(x->b, b, n))
+			break;
+	if (!x) {
+		x = malloc(sizeof(*x) + n);
+		x->h = h, x->n = n;
+		memcpy(x->b, b, n);
+		x->next = atomic_load_explicit(&tc_tab[j], memory_order_relaxed);
+		atomic_store_explicit(&tc_tab[j], x, memory_order_release);
+		ADD(tc_bytes, sizeof(*x) + n);
+		ADD(tc_n, 1);
+	}
+	pthread_mutex_unlock(&tc_mu);
+	return x;
+}
+
+static void tk_set(struct drrec *r, uint32_t t, const void *k)
+{
+	if (t >= r->ctk) {
+		uint32_t nc;
+
+		if (!k)
+			return;
+		nc = t + t / 2 + 1024;
+		r->tk = realloc(r->tk, nc * sizeof(*r->tk));
+		memset(r->tk + r->ctk, 0, (nc - r->ctk) * sizeof(*r->tk));
+		r->ctk = nc;
+	}
+	r->tk[t] = k;
 }
 
 /* ---------------- small hash tables ---------------- */
@@ -562,6 +659,22 @@ static bool wm_has(const wmap *w, uint64_t k)
 	}
 }
 
+/* position of key k, UINT32_MAX if absent */
+static uint32_t wm_find(const wmap *w, uint64_t k)
+{
+	uint32_t m = w->cap - 1;
+
+	if (!w->cap)
+		return UINT32_MAX;
+	k++;
+	for (uint32_t j = hmix(k) & m;; j = (j + 1) & m) {
+		if (!w->k[j])
+			return UINT32_MAX;
+		if (w->k[j] == k)
+			return w->v[j];
+	}
+}
+
 static void wm_clear(wmap *w)
 {
 	if (w->n)
@@ -597,6 +710,7 @@ static void w_tag(cc *c, uint32_t t)
 	if (!t || t >= r->t0 || wm_get(&r->wm, (uint64_t)W_TAG << 32 | t, r->wt.n) != UINT32_MAX)
 		return;
 	w.a = t, w.t = *g, w.fo = r->wf.n;
+	w.k = NULL;
 	if (g->f && g->nfield) {
 		VGROW(r->wf, g->nfield);
 		memcpy(r->wf.v + r->wf.n, g->f, g->nfield * sizeof(field));
@@ -767,7 +881,7 @@ VPRIV __attribute__((noinline)) void dr_read(cc *c, int ns, uint32_t id, uint32_
 		return;
 	if (!rs_add(r, (uint64_t)ns << 31 | id))
 		return;
-	VPUSH(r->rds, ((drread){ id, s, (uint8_t)ns }));
+	VPUSH(r->rds, ((drread){ id, s, s ? c->syms[s].flags : 0, (uint8_t)ns, s ? c->syms[s].kind : 0 }));
 	if (s) {
 		uint64_t t0 = ticks();
 
@@ -900,6 +1014,16 @@ VPRIV __attribute__((noinline)) void dr_pragma(cc *c, int kind)
 	r->fail |= 1u << (kind == 1 ? F_WEAK : F_PRAGMA);
 }
 
+/* DR_TAGWRITE: tag ti is written by the code being parsed */
+VPRIV __attribute__((noinline)) void dr_tagwrite(cc *c, uint32_t ti)
+{
+	struct drrec *r = c->dr;
+
+	tk_set(r, ti, NULL);
+	if (r->open && ti < r->t0 && ti >= r->ntag_bi && !wm_has(&r->wm, (uint64_t)W_TAG << 32 | ti))
+		r->fail |= 1u << F_UNHOOKED;	/* (an older tag the reads did not reach: the entry would miss the write) */
+}
+
 /* ---------------- opening and closing ---------------- */
 
 static void *grow(void *p, uint32_t *cap, uint32_t need, size_t el)
@@ -992,17 +1116,16 @@ typedef struct trx {
 static int64_t wfind(const drent *e, int k, uint32_t a)
 {
 	const uint64_t *v = e->wk[k];
-	uint32_t lo = 0, hi = e->nw[k];
+	uint32_t m = e->wmask[k];
 
-	while (lo < hi) {
-		uint32_t m = (lo + hi) / 2;
+	for (uint32_t j = hmix((uint64_t)a + 1) & m;; j = (j + 1) & m) {
+		uint64_t x = v[j];
 
-		if ((uint32_t)(v[m] >> 32) < a)
-			lo = m + 1;
-		else
-			hi = m;
+		if (!x)
+			return -1;
+		if ((uint32_t)(x >> 32) == a + 1)
+			return (int64_t)(uint32_t)x;
 	}
-	return lo < e->nw[k] && (uint32_t)(v[lo] >> 32) == a ? (int64_t)(uint32_t)v[lo] : -1;
 }
 
 /* a W member's B index (check: present) */
@@ -1170,13 +1293,6 @@ static void fail_count(uint32_t fail, uint64_t tok)
 		}
 }
 
-static int cmp_u64(const void *a, const void *b)
-{
-	uint64_t x = *(const uint64_t *)a, y = *(const uint64_t *)b;
-
-	return x < y ? -1 : x > y;
-}
-
 static uint64_t opt_sig(const cc_opts *o)
 {
 	return (uint64_t)o->target | (uint64_t)!!o->unsigned_char << 8 | (uint64_t)!!o->ms_anon << 9 |
@@ -1204,6 +1320,204 @@ static uint32_t heap_piece(cvec *h, const cc *c, size_t heap0, const void *p, si
 	h->n = at + (uint32_t)n;
 	return at + 1;
 }
+
+typedef VEC(drrel) relvec;
+
+/* the relocation of field f (value v64) of an own record at byte offset off; false: unmapped */
+static int64_t rel_w(const struct drrec *r, int k, uint32_t a)
+{
+	uint32_t p = wm_find(&r->wm, (uint64_t)k << 32 | a);
+
+	return p == UINT32_MAX ? -1 : (int64_t)p;
+}
+
+static bool rel_one(const drent *e, const struct drrec *r, relvec *rl, uint32_t off, fd f, uint64_t v64)
+{
+	uint32_t v = (uint32_t)v64, ix;
+	int64_t p;
+	drrel x = { off + f.off, 0, (uint8_t)f.size, 0, 0, 0 };
+	int k = f.kind;
+
+	switch (k) {
+	case K_IMM: case K_PARAMS:
+		return true;
+	case K_LOC:	/* (rel_locs: every one in the region) */
+		return !v || v - e->base < e->span;
+	case K_SHADOW: case K_SYM:
+		if (!v)
+			return true;
+		if (v >= e->s0 && v < e->s1) {
+			x.op = RO_DS;
+			break;
+		}
+		if ((p = rel_w(r, W_SYM, v)) >= 0) {
+			x.op = RO_W, x.wk = W_SYM, x.arg = (uint32_t)p;
+			break;
+		}
+		if (v < e->nsym_bi)
+			return true;
+		if (k == K_SYM)
+			return false;
+		x.op = RO_ZERO;
+		break;
+	case K_TAG:
+		if (!v)
+			return true;
+		if (v >= e->t0 && v < e->t1) {
+			x.op = RO_DT;
+			break;
+		}
+		if ((p = rel_w(r, W_TAG, v)) >= 0) {
+			x.op = RO_W, x.wk = W_TAG, x.arg = (uint32_t)p;
+			break;
+		}
+		return v < e->ntag_bi;
+	case K_TYPE: case K_TIDX:
+		ix = k == K_TYPE ? QI(v) : v;
+		if (ix < e->nty_bi)
+			return true;
+		if (ix >= e->y0 && ix < e->y1) {
+			x.op = k == K_TYPE ? RO_TYOWN : RO_TIOWN, x.arg = ix - e->y0;
+			break;
+		}
+		if ((p = rel_w(r, W_TY, ix)) < 0)
+			return false;
+		x.op = k == K_TYPE ? RO_TYW : RO_TIW, x.arg = (uint32_t)p;
+		break;
+	case K_NODE:
+		if (!v)
+			return true;
+		if (v < e->n0 || v >= e->n1)
+			return false;
+		x.op = RO_DN;
+		break;
+	case K_LIST: case K_LIST1: case K_LISTO:
+		if (k == K_LIST1) {
+			if (!v)
+				return true;
+			v--;
+		}
+		if (v >= e->l0 && v < e->l1) {
+			x.op = RO_DL;
+			break;
+		}
+		if (!v || k == K_LISTO)
+			return true;
+		if ((p = rel_w(r, W_LIST, v)) < 0)
+			return false;
+		x.op = k == K_LIST1 ? RO_W1 : RO_W, x.wk = W_LIST, x.arg = (uint32_t)p;
+		break;
+	case K_IPOOL: case K_FPOOL:
+		if (k == K_IPOOL ? v < e->i0 || v >= e->i1 : v < e->f0 || v >= e->f1)
+			return false;
+		x.op = k == K_IPOOL ? RO_DI : RO_DF;
+		break;
+	case K_STR: case K_STR1:
+		if (!v)
+			return true;
+		if (k == K_STR1 && !--v)
+			return true;
+		if (v >= e->r0 && v < e->r1) {
+			x.op = RO_DR;
+			break;
+		}
+		if ((p = rel_w(r, W_STR, v)) < 0)
+			return false;
+		x.op = k == K_STR1 ? RO_W1 : RO_W, x.wk = W_STR, x.arg = (uint32_t)p;
+		break;
+	case K_ATTR:
+		if (!v)
+			return true;
+		if (v >= e->a0 && v < e->a1) {
+			x.op = RO_DA;
+			break;
+		}
+		if ((p = rel_w(r, W_ATTR, v)) < 0)
+			return false;
+		x.op = RO_W, x.wk = W_ATTR, x.arg = (uint32_t)p;
+		break;
+	default:
+		return false;
+	}
+	VPUSH(*rl, x);
+	return true;
+}
+
+static bool rel_rec(const drent *e, const struct drrec *r, relvec *rl, uint32_t off, const void *rec, const fd *f, int n)
+{
+	bool ok = true;
+
+	for (int i = 0; i < n; i++)
+		ok &= rel_one(e, r, rl, off, f[i], rd(rec, f[i]));
+	return ok;
+}
+
+/* the relocation lists of e's own records (e->syms ... and the field pieces of heap h) */
+static bool rel_build(drent *e, const struct drrec *r, const char *h)
+{
+	relvec rl[RA_N] = { 0 };
+	fd f[24], sf[2] = { FD(pp_span, b, K_LOC), FD(pp_span, e, K_LOC) };
+	int n;
+	bool ok = true;
+
+	for (uint32_t i = 0; i < e->s1 - e->s0; i++) {
+		n = sym_fd(&e->syms[i], f);
+		ok &= rel_rec(e, r, &rl[RA_SYM], i * (uint32_t)sizeof(sym), &e->syms[i], f, n);
+	}
+	for (uint32_t i = 0; i < e->t1 - e->t0; i++) {
+		n = tag_fd(&e->tags[i], f);
+		ok &= rel_rec(e, r, &rl[RA_TAG], i * (uint32_t)sizeof(tag), &e->tags[i], f, n);
+	}
+	for (uint32_t i = 0; i < e->n1 - e->n0; i++) {
+		n = node_fd(&e->nodes[i], f);
+		ok &= rel_rec(e, r, &rl[RA_NODE], i * (uint32_t)sizeof(node), &e->nodes[i], f, n);
+		ok &= rel_rec(e, r, &rl[RA_SPAN], i * (uint32_t)sizeof(pp_span), &e->spans[i], sf, 2);
+	}
+	for (uint32_t i = 0; i < e->l1 - e->l0; i++)
+		if (e->lk[i] != K_IMM && e->lk[i] != LK_DEAD)
+			ok &= rel_one(e, r, &rl[RA_LIST], i * 4, (fd){ 0, 4, e->lk[i] }, e->lists[i]);
+	n = attr_fd(f);
+	for (uint32_t i = 0; i < e->a1 - e->a0; i++)
+		ok &= rel_rec(e, r, &rl[RA_ATTR], i * (uint32_t)sizeof(attrs), &e->attr[i], f, n);
+	n = field_fd(f);
+	for (uint32_t i = 0; i < e->nfpc; i += 2)
+		for (uint32_t k = 0; k + 1 < e->fpc[i + 1]; k++) {
+			uint32_t off = e->fpc[i] + k * (uint32_t)sizeof(field);
+
+			ok &= rel_rec(e, r, &rl[RA_HEAP], off, h + off, f, n);
+		}
+	for (int a = 0; a < RA_N; a++)
+		e->rel[a] = rl[a].v, e->nrel[a] = rl[a].n;
+	return ok;
+}
+
+/* apply relocations rl[0, n) to the copied array at base */
+static void rel_apply(const trx *x, char *base, const drrel *rl, uint32_t n)
+{
+	const struct drrec *r = x->r;
+	const int64_t d[8] = { x->ds, x->dt, x->dn, x->dl, x->di, x->df, x->dr, x->da };
+
+	for (uint32_t i = 0; i < n; i++) {
+		const drrel *q = &rl[i];
+		char *p = base + q->off;
+		uint64_t v = rdz(p, q->size);
+
+		switch (q->op) {
+		case RO_ZERO: v = 0; break;
+		case RO_W: v = r->slot[q->wk][q->arg] - 1; break;
+		case RO_W1: v = r->slot[q->wk][q->arg]; break;
+		case RO_TYOWN: v = QT(r->tymap[q->arg], QQ((uint32_t)v)); break;
+		case RO_TYW: v = QT(r->slot[W_TY][q->arg] - 1, QQ((uint32_t)v)); break;
+		case RO_TIOWN: v = r->tymap[q->arg]; break;
+		case RO_TIW: v = r->slot[W_TY][q->arg] - 1; break;
+		default: v = (uint32_t)(v + d[q->op]); break;
+		}
+		wrz(p, q->size, v);
+	}
+}
+
+/* the locations of copied own records: + (B base - A base), 0 stays */
+#define REL_LOC(x_, lb_) ((x_) = (x_) ? (x_) + (lb_) : 0)
 
 static void drcheck(cc *c);
 
@@ -1302,8 +1616,7 @@ static void rec_close(cc *c, uint64_t endpos)
 
 		n = attr_fd(f);
 		for (int k = 0; k < n; k++)
-			if (f[k].size <= 8 ? rd(a, f[k]) != rd(b, f[k])
-					   : memcmp((const char *)a + f[k].off, (const char *)b + f[k].off, f[k].size))
+			if (rd(a, f[k]) != rd(b, f[k]))
 				w.mask |= 1u << k;
 		if (w.mask)
 			VPUSH(xa, w);
@@ -1346,16 +1659,94 @@ static void rec_close(cc *c, uint64_t endpos)
 		uint32_t nw[W_N] = { r->ws.n, r->wt.n, r->wy.n, r->wa.n, r->wst.n, r->wl.n };
 
 		for (int k = 0; k < W_N; k++) {
+			uint32_t cap = 2;
+
+			while (cap < nw[k] * 2)
+				cap *= 2;
 			e->nw[k] = nw[k];
-			e->wk[k] = malloc((nw[k] + 1) * sizeof(uint64_t));
+			e->wmask[k] = cap - 1;
+			e->wk[k] = calloc(cap, sizeof(uint64_t));
 			for (uint32_t i = 0; i < nw[k]; i++) {
 				uint32_t a = k == W_SYM ? r->ws.v[i].a : k == W_TAG ? r->wt.v[i].a : k == W_TY ? r->wy.v[i].a
-					   : k == W_ATTR ? r->wa.v[i].a : k == W_STR ? r->wst.v[i].a : r->wl.v[i].a;
+					   : k == W_ATTR ? r->wa.v[i].a : k == W_STR ? r->wst.v[i].a : r->wl.v[i].a, j;
 
-				e->wk[k][i] = (uint64_t)a << 32 | i;
+				for (j = hmix((uint64_t)a + 1) & (cap - 1); e->wk[k][j]; j = (j + 1) & (cap - 1))
+					;
+				e->wk[k][j] = ((uint64_t)a + 1) << 32 | i;
 			}
-			qsort(e->wk[k], nw[k], sizeof(uint64_t), cmp_u64);
 		}
+	}
+	/* the W tags' values (tag_known): the tag, its fields, its enumerators, as A had them before the region */
+	{
+		cvec cb = { 0 };
+
+		for (uint32_t i = 0; i < r->wt.n; i++) {
+			wtag *w = &r->wt.v[i];
+			bool ok = true;
+
+			if (w->a < r->ctk && r->tk[w->a]) {
+				w->k = r->tk[w->a];	/* (known, and not written since: also before the region) */
+				continue;
+			}
+			cb.n = 0;
+#define PUT(rec, fds, nf)                                                                         \
+	for (int q_ = 0; q_ < (nf); q_++) {                                                       \
+		uint64_t v_ = rd((rec), (fds)[q_]);                                               \
+		int k_ = (fds)[q_].kind;                                                          \
+		if (k_ == K_LOC || k_ == K_SHADOW)                                                \
+			continue;                                                                 \
+		if (k_ == K_TYPE || k_ == K_TIDX) {                                               \
+			uint32_t ix_ = k_ == K_TYPE ? QI((uint32_t)v_) : (uint32_t)v_;            \
+			if (ix_ >= r->nty_bi)                                                     \
+				v_ = k_ == K_TYPE ? QQ((uint32_t)v_) | 1ull << 40 : 1ull << 40;   \
+		} else if (k_ != K_IMM) {                                                         \
+			v_ = v_ ? 1ull << 41 : 0;                                                 \
+		}                                                                                 \
+		VGROW(cb, 8);                                                                     \
+		memcpy(cb.v + cb.n, &v_, 8);                                                      \
+		cb.n += 8;                                                                        \
+	}
+			n = tag_fd(&w->t, f);
+			PUT(&w->t, f, n);
+			n = field_fd(f);
+			for (uint32_t j = 0; j < w->t.nfield && w->t.f; j++)
+				PUT(&r->wf.v[w->fo + j], f, n);
+			if (w->t.nenum) {
+				uint32_t lp = wm_find(&r->wm, (uint64_t)W_LIST << 32 | w->t.enums);
+
+				if (lp == UINT32_MAX)
+					ok = false;
+				for (uint32_t j = 0; ok && j < r->wl.v[lp].n; j++) {
+					uint32_t sp = wm_find(&r->wm, (uint64_t)W_SYM << 32 | r->wv.v[r->wl.v[lp].vo + j]);
+
+					if (sp == UINT32_MAX) {
+						ok = false;
+						break;
+					}
+					{
+						const sym *y = &r->ws.v[sp].s;
+
+						if (y->kind != S_ENUMCONST || y->attrs || y->body || y->next || y->ovl || y->psyms) {
+							ok = false;	/* (tag_known pairs only an enumerator's type) */
+							break;
+						}
+						n = sym_fd(y, f);
+						PUT(y, f, n);
+					}
+				}
+			}
+#undef PUT
+			w->k = ok ? tc_intern(cb.v, cb.n) : NULL;
+			if (w->k) {	/* (A's tag has these values now too unless the region wrote it) */
+				bool wrote = false;
+
+				for (uint32_t j = 0; j < xt.n && !wrote; j++)
+					wrote = xt.v[j].w == i;
+				if (!wrote)
+					tk_set(r, w->a, w->k);
+			}
+		}
+		free(cb.v);
 	}
 	e->ws = xdup(r->ws.v, r->ws.n * sizeof(wsym));
 	e->wt = xdup(r->wt.v, r->wt.n * sizeof(wtag));
@@ -1367,6 +1758,9 @@ static void rec_close(cc *c, uint64_t endpos)
 	e->wp = xdup(r->wp.v, r->wp.n * sizeof(qty));
 	e->wb = xdup(r->wb.v, r->wb.n);
 	e->wv = xdup(r->wv.v, r->wv.n * sizeof(uint32_t));
+	e->wvp = malloc((r->wv.n + 1) * sizeof(uint32_t));
+	for (uint32_t i = 0; i < r->wv.n; i++)
+		e->wvp[i] = r->wv.v[i] ? wm_find(&r->wm, (uint64_t)W_SYM << 32 | r->wv.v[i]) : UINT32_MAX;
 	e->ops = xdup(r->ops.v, r->ops.n * sizeof(drop)), e->nops = r->ops.n;
 	e->opar = xdup(r->opar.v, r->opar.n * sizeof(qty));
 	e->fin = malloc((r->ops.n + 1) * sizeof(ctype));
@@ -1413,28 +1807,15 @@ static void rec_close(cc *c, uint64_t endpos)
 		fail |= 1u << F_OPS;
 
 	/* own records */
+	/* (rel_build checks that their references map) */
 	e->syms = xdup(&c->syms[e->s0], (e->s1 - e->s0) * sizeof(sym));
-	for (uint32_t i = 0; i < e->s1 - e->s0; i++) {
-		n = sym_fd(&e->syms[i], f);
-		tr_rec(&x, &e->syms[i], f, n, 0);
-	}
 	e->tags = xdup(&c->tags[e->t0], (e->t1 - e->t0) * sizeof(tag));
-	n = field_fd(f);
 	for (uint32_t i = 0; i < e->t1 - e->t0; i++) {
 		tag *t = &e->tags[i];
-		fd g[16];
-		int m = tag_fd(t, g);
 
-		tr_rec(&x, t, g, m, 0);
 		if (t->f) {
-			const field *ff = t->f;
-			uint32_t at = heap_piece(&hp, c, heap0, ff, (t->nfield + 1) * sizeof(field), &x.bad);
+			uint32_t at = heap_piece(&hp, c, heap0, t->f, (t->nfield + 1) * sizeof(field), &x.bad);
 
-			for (uint32_t k = 0; k < t->nfield; k++) {
-				field q = ff[k];
-
-				tr_rec(&x, &q, f, n, 0);
-			}
 			VPUSH(fpc, at - 1);
 			VPUSH(fpc, t->nfield + 1);
 			t->f = (field *)(uintptr_t)at;
@@ -1478,10 +1859,7 @@ static void rec_close(cc *c, uint64_t endpos)
 			break;
 		case N_FOR: MARK(d->c, 2, K_NODE, false); break;
 		}
-		n = node_fd(d, f);
-		tr_rec(&x, d, f, n, 0);
-		s->b = (uint32_t)tr(&x, K_LOC, s->b);
-		s->e = (uint32_t)tr(&x, K_LOC, s->e);
+		(void)s;
 	}
 	for (uint32_t i = 0; i < e->s1 - e->s0; i++) {
 		const sym *s = &c->syms[e->s0 + i];
@@ -1522,8 +1900,6 @@ static void rec_close(cc *c, uint64_t endpos)
 			e->lk[i] = K_IMM;
 		else if (!e->lk[i])
 			e->lk[i] = LK_DEAD;
-		if (e->lk[i] != K_IMM && e->lk[i] != LK_DEAD)
-			tr(&x, e->lk[i], e->lists[i]);
 	}
 	e->ip = xdup(&c->ipool[e->i0], (e->i1 - e->i0) * sizeof(i128));
 	e->fp = xdup(&c->fpool[e->f0], (e->f1 - e->f0) * sizeof(double));
@@ -1534,9 +1910,6 @@ static void rec_close(cc *c, uint64_t endpos)
 		s->s = (const char *)(uintptr_t)heap_piece(&hp, c, heap0, s->s, (size_t)s->n * s->esz, &x.bad);
 	}
 	e->attr = xdup(&c->attr[e->a0], (e->a1 - e->a0) * sizeof(attrs));
-	n = attr_fd(f);
-	for (uint32_t i = 0; i < e->a1 - e->a0; i++)
-		tr_rec(&x, &e->attr[i], f, n, 0);
 
 	/* writes: the changed fields must map */
 	for (uint32_t i = 0; i < xs.n; i++) {
@@ -1599,19 +1972,23 @@ static void rec_close(cc *c, uint64_t endpos)
 	tr(&x, K_LOC, e->prevloc);
 	e->heap = hp.v, e->nheap = hp.n;
 	e->fpc = fpc.v, e->nfpc = fpc.n;
+	if (!rel_build(e, r, hp.v))
+		x.bad = true;
 	e->xs = xs.v, e->nxs = xs.n, e->xt = xt.v, e->nxt = xt.n, e->xa = xa.v, e->nxa = xa.n, e->xy = xy.v, e->nxy = xy.n;
 	xs.v = xt.v = xa.v = xy.v = NULL;
 	if (x.bad)
 		fail |= 1u << F_UNMAPPED;
 	e->bytes = sizeof(drent) + e->nrd * sizeof(drread) + r->ws.n * sizeof(wsym) + r->wt.n * sizeof(wtag) +
 		   r->wy.n * sizeof(wty) + r->wa.n * sizeof(wattr) + r->wst.n * sizeof(wstr) + r->wl.n * sizeof(wlist) +
-		   r->wf.n * sizeof(field) + r->wp.n * 4 + r->wb.n + r->wv.n * 4 + e->nops * (sizeof(drop) + sizeof(ctype)) +
+		   r->wf.n * sizeof(field) + r->wp.n * 4 + r->wb.n + r->wv.n * 8 + e->nops * (sizeof(drop) + sizeof(ctype)) +
 		   r->opar.n * 4 + (e->s1 - e->s0) * sizeof(sym) + (e->t1 - e->t0) * sizeof(tag) +
 		   (e->n1 - e->n0) * (sizeof(node) + sizeof(pp_span)) + (e->l1 - e->l0) * 5 + (e->i1 - e->i0) * 16 +
 		   (e->f1 - e->f0) * 8 + (e->r1 - e->r0) * sizeof(cstr) + (e->a1 - e->a0) * sizeof(attrs) + e->nheap +
 		   e->nfpc * 4 + e->nbind * 4 + e->ntl * 4 + (e->nxs + e->nxt + e->nxa + e->nxy) * sizeof(xrec);
+	for (int k = 0; k < RA_N; k++)
+		e->bytes += e->nrel[k] * sizeof(drrel);
 	for (int k = 0; k < W_N; k++)
-		e->bytes += e->nw[k] * 8;
+		e->bytes += (e->wmask[k] + 1) * 8;
 	if (!fail) {
 		uint64_t m = atomic_fetch_add_explicit(&dr_mem, e->bytes, memory_order_relaxed);
 
@@ -1642,8 +2019,10 @@ static void rec_close(cc *c, uint64_t endpos)
 	for (int k = 0; k < W_N; k++)
 		free(e->wk[k]);
 	free(e->ws), free(e->wt), free(e->wy), free(e->wa), free(e->wst), free(e->wl), free(e->wf), free(e->wp);
-	free(e->wb), free(e->wv), free(e->ops), free(e->opar), free(e->fin), free(e->syms), free(e->tags);
+	free(e->wb), free(e->wv), free(e->wvp), free(e->ops), free(e->opar), free(e->fin), free(e->syms), free(e->tags);
 	free(e->nodes), free(e->spans), free(e->lists), free(e->lk), free(e->ip), free(e->fp), free(e->strs);
+	for (int k = 0; k < RA_N; k++)
+		free(e->rel[k]);
 	free(e->attr), free(e->heap), free(e->fpc), free(e->bind), free(e->tl), free(e->xs), free(e->xt), free(e->xa), free(e->xy);
 	free(e);
 	hp.v = NULL, fpc.v = NULL;
@@ -1651,8 +2030,11 @@ nopub:
 	free(hp.v), free(fpc.v), free(xs.v), free(xt.v), free(xa.v), free(xy.v);
 	count(S_NOPUB, tok);
 	fail_count(fail, tok);
+	/* (what the region's own tokens do stops it every time: no second recording) */
 	if (!(fail & (1u << F_BUDGET | 1u << F_VARIANTS)))
-		never_note(r->he, r->ctr, r->pack, opt_sig(c->o));
+		never_note(r->he, r->ctr, r->pack, opt_sig(c->o),
+			   fail & (1u << F_PRAGMA | 1u << F_WEAK | 1u << F_LAZY | 1u << F_LABEL | 1u << F_ASM | 1u << F_CPLX)
+				   ? NEVER_AFTER : 1);
 }
 
 /* ---------------- replay: validation ---------------- */
@@ -1678,7 +2060,14 @@ static uint32_t *ensure(uint32_t **a, uint32_t *cap, uint32_t n, bool zero)
 }
 
 /* map W member a (kind k) to B's b; false on a conflict */
+static bool pair_wp(un *u, int k, uint32_t a, uint32_t b, bool *found, bool push);
+
 static bool pair_w(un *u, int k, uint32_t a, uint32_t b, bool *found)
+{
+	return pair_wp(u, k, a, b, found, true);
+}
+
+static bool pair_wp(un *u, int k, uint32_t a, uint32_t b, bool *found, bool push)
 {
 	int64_t p = wfind(u->e, k, a);
 	uint32_t *s;
@@ -1701,8 +2090,96 @@ static bool pair_w(un *u, int k, uint32_t a, uint32_t b, bool *found)
 			return false;	/* (two A records for one of B's) */
 		st[b] = u->r->gen;
 	}
-	if (k != W_TY || !u->e->wy[p].intern)
+	if (push && (k != W_TY || !u->e->wy[p].intern))
 		VPUSH(u->r->uw, (uint64_t)k << 32 | (uint32_t)p);
+	return true;
+}
+
+static _Atomic uint64_t st_known;
+static bool pair(un *u, int k, uint64_t a64, uint64_t b64);
+
+/* pair a record's references that tc_intern did not take as values (types not builtin, refs not 0) */
+static bool refs_rest(un *u, const void *a, const void *b, const fd *f, int n)
+{
+	for (int i = 0; i < n; i++) {
+		int k = f[i].kind;
+		uint64_t v;
+
+		if (k == K_IMM || k == K_LOC || k == K_SHADOW)
+			continue;
+		v = rd(a, f[i]);
+		if (k == K_TYPE ? QI((uint32_t)v) < u->e->nty_bi : k == K_TIDX ? v < u->e->nty_bi : !v)
+			continue;
+		if (!pair(u, k, v, rd(b, f[i])))
+			return false;
+	}
+	return true;
+}
+
+/* map W member p (kind k) to B's b without comparing it (pair_wp with the position known) */
+static bool slot_set(un *u, int k, uint32_t p, uint32_t b)
+{
+	uint32_t *s = &u->r->slot[k][p], lim, *st;
+
+	if (*s)
+		return *s - 1 == b;
+	*s = b + 1;
+	lim = k == W_SYM ? u->c->nsym : k == W_TAG ? u->c->ntag : u->c->nty;
+	if (b >= lim)
+		return false;
+	st = ensure(&u->r->stamp[k], &u->r->cstamp[k], lim, false);
+	if (st[b] == u->r->gen)
+		return false;
+	st[b] = u->r->gen;
+	return true;
+}
+
+/* a W tag that B's tag b was already found equal to (tk): pair the references of it, its fields and enumerators */
+static bool tag_known(un *u, const wtag *w, uint32_t b, bool *ok)
+{
+	struct drrec *r = u->r;
+	const tag *bt = &u->c->tags[b];
+	const drent *e = u->e;
+	fd f[24];
+	int n;
+	bool found;
+
+	if (!w->k || b >= r->ctk || r->tk[b] != w->k)
+		return false;
+	ADD(st_known, 1);
+	*ok = false;
+	if (bt->nfield != w->t.nfield || !bt->f != !w->t.f || bt->nenum != w->t.nenum)
+		return true;	/* (cannot be: the same values) */
+	n = tag_fd(&w->t, f);
+	if (!refs_rest(u, &w->t, bt, f, n))
+		return true;
+	for (uint32_t i = 0; i < w->t.nfield && w->t.f; i++) {
+		qty a = e->wf[w->fo + i].ty;
+
+		if (QI(a) >= e->nty_bi && !pair(u, K_TYPE, a, bt->f[i].ty))
+			return true;
+	}
+	if (w->t.nenum) {
+		int64_t q = wfind(e, W_LIST, w->t.enums);
+		const wlist *l;
+		const uint32_t *bl = &u->c->lists[bt->enums];
+
+		if (q < 0 || bt->enums + bt->nenum > u->c->nlist ||
+		    !pair_wp(u, W_LIST, w->t.enums, bt->enums, &found, false))
+			return true;
+		l = &e->wl[q];
+		for (uint32_t i = 0; i < l->n; i++) {
+			uint32_t sp = e->wvp[l->vo + i];
+			qty a;
+
+			if (sp == UINT32_MAX || !slot_set(u, W_SYM, sp, bl[i]))
+				return true;
+			a = e->ws[sp].s.ty;	/* (the rest of an enumerator: values, or 0) */
+			if (QI(a) >= e->nty_bi && !pair(u, K_TYPE, a, u->c->syms[bl[i]].ty))
+				return true;
+		}
+	}
+	*ok = true;
 	return true;
 }
 
@@ -1778,10 +2255,7 @@ static bool pair(un *u, int k, uint64_t a64, uint64_t b64)
 static bool un_rec(un *u, const void *a, const void *b, const fd *f, int n)
 {
 	for (int i = 0; i < n; i++) {
-		if (f[i].size > 8) {
-			if (memcmp((const char *)a + f[i].off, (const char *)b + f[i].off, f[i].size))
-				return false;
-		} else if (!pair(u, f[i].kind, rd(a, f[i]), rd(b, f[i]))) {
+		if (!pair(u, f[i].kind, rd(a, f[i]), rd(b, f[i]))) {
 			return false;
 		}
 	}
@@ -1806,9 +2280,17 @@ static bool unify_one(un *u, int k, uint32_t p)
 	case W_TAG: {
 		const wtag *w = &e->wt[p];
 		const tag *bt = &c->tags[b];
+		bool ok;
+
+		if (tag_known(u, w, b, &ok))
+			return ok;
+		if (w->k)
+			VPUSH(u->r->tdone, (uint64_t)p << 32 | b);	/* (compared in full: remembered if the try succeeds) */
 
 		n = tag_fd(&w->t, f);
-		if (!un_rec(u, &w->t, bt, f, n) || !w->t.f != !bt->f)
+		if (!un_rec(u, &w->t, bt, f, n))
+			return false;
+		if (!w->t.f != !bt->f)
 			return false;
 		n = field_fd(f);
 		for (uint32_t i = 0; i < w->t.nfield && w->t.f; i++)
@@ -1864,6 +2346,15 @@ static bool validate(cc *c, const drent *e)
 	for (int k = 0; k < W_N; k++)
 		ensure(&r->slot[k], &r->cslot[k], e->nw[k] + 1, true);
 	r->uw.n = 0;
+	r->tdone.n = 0;
+	/* first the bindings themselves (bound or not, kind, flags): most variants that fail, fail here */
+	for (uint32_t i = 0; i < e->nrd; i++) {
+		const drread *d = &e->rd[i];
+		uint32_t b = dget(d->ns ? c->tdir : c->odir, d->id);
+
+		if (!d->s != !b || (b && (c->syms[b].kind != d->kind || c->syms[b].flags != d->flags)))
+			return false;
+	}
 	for (uint32_t i = 0; i < e->nrd; i++) {
 		const drread *d = &e->rd[i];
 		uint32_t b = dget(d->ns ? c->tdir : c->odir, d->id);
@@ -1882,6 +2373,8 @@ static bool validate(cc *c, const drent *e)
 		for (uint32_t i = 0; i < e->nw[k]; i++)
 			if (!r->slot[k][i] && !(k == W_TY && e->wy[i].intern))
 				return false;
+	for (uint32_t i = 0; i < r->tdone.n; i++)
+		tk_set(r, (uint32_t)r->tdone.v[i], e->wt[r->tdone.v[i] >> 32].k);
 	return true;
 }
 
@@ -1893,7 +2386,7 @@ static void apply(cc *c, const drent *e, uint32_t baseB)
 	trx x = { c, e, r, false, false, (int64_t)c->nsym - e->s0, (int64_t)c->ntag - e->t0, (int64_t)c->nnode - e->n0,
 		  (int64_t)c->nlist - e->l0, (int64_t)c->nipool - e->i0, (int64_t)c->nfpool - e->f0,
 		  (int64_t)c->nstr - e->r0, (int64_t)c->nattr - e->a0, baseB, NULL };
-	uint32_t ty0 = c->nty;
+	uint32_t ty0 = c->nty, lb = baseB - e->base;
 	fd f[24];
 	int n;
 
@@ -1942,9 +2435,11 @@ static void apply(cc *c, const drent *e, uint32_t baseB)
 		sym *to = &c->syms[c->nsym];
 
 		memcpy(to, e->syms, ns * sizeof(sym));
+		rel_apply(&x, (char *)to, e->rel[RA_SYM], e->nrel[RA_SYM]);
 		for (uint32_t i = 0; i < ns; i++) {
-			n = sym_fd(&to[i], f);
-			tr_rec(&x, &to[i], f, n, 0);
+			REL_LOC(to[i].loc, lb);
+			REL_LOC(to[i].plb, lb);
+			REL_LOC(to[i].ple, lb);
 		}
 	}
 	{
@@ -1955,18 +2450,18 @@ static void apply(cc *c, const drent *e, uint32_t baseB)
 			x.heapB = halloc(c, e->nheap + 16);
 			x.heapB = (char *)(((uintptr_t)x.heapB + 15) & ~(uintptr_t)15);
 			memcpy(x.heapB, e->heap, e->nheap);
-			n = field_fd(f);
+			rel_apply(&x, x.heapB, e->rel[RA_HEAP], e->nrel[RA_HEAP]);
 			for (uint32_t i = 0; i < e->nfpc; i += 2) {
 				field *ff = (field *)(x.heapB + e->fpc[i]);
 
 				for (uint32_t k = 0; k + 1 < e->fpc[i + 1]; k++)
-					tr_rec(&x, &ff[k], f, n, 0);
+					REL_LOC(ff[k].loc, lb);
 			}
 		}
 		memcpy(to, e->tags, nt * sizeof(tag));
+		rel_apply(&x, (char *)to, e->rel[RA_TAG], e->nrel[RA_TAG]);
 		for (uint32_t i = 0; i < nt; i++) {
-			n = tag_fd(&to[i], f);
-			tr_rec(&x, &to[i], f, n, 0);
+			REL_LOC(to[i].loc, lb);
 			if (to[i].f)
 				to[i].f = (field *)(x.heapB + ((uintptr_t)to[i].f - 1));
 		}
@@ -1978,18 +2473,18 @@ static void apply(cc *c, const drent *e, uint32_t baseB)
 
 		memcpy(to, e->nodes, nn * sizeof(node));
 		memcpy(sp, e->spans, nn * sizeof(pp_span));
+		rel_apply(&x, (char *)to, e->rel[RA_NODE], e->nrel[RA_NODE]);
 		for (uint32_t i = 0; i < nn; i++) {
-			n = node_fd(&to[i], f);
-			tr_rec(&x, &to[i], f, n, 0);
-			sp[i].b = (uint32_t)tr(&x, K_LOC, sp[i].b);
-			sp[i].e = (uint32_t)tr(&x, K_LOC, sp[i].e);
+			REL_LOC(to[i].loc, lb);
+			REL_LOC(sp[i].b, lb);
+			REL_LOC(sp[i].e, lb);
 		}
 	}
 	{
 		uint32_t nl = e->l1 - e->l0, *to = &c->lists[c->nlist];
 
-		for (uint32_t i = 0; i < nl; i++)
-			to[i] = e->lk[i] == K_IMM || e->lk[i] == LK_DEAD ? e->lists[i] : (uint32_t)tr(&x, e->lk[i], e->lists[i]);
+		memcpy(to, e->lists, nl * sizeof(uint32_t));
+		rel_apply(&x, (char *)to, e->rel[RA_LIST], e->nrel[RA_LIST]);
 	}
 	memcpy(&c->ipool[c->nipool], e->ip, (e->i1 - e->i0) * sizeof(i128));
 	memcpy(&c->fpool[c->nfpool], e->fp, (e->f1 - e->f0) * sizeof(double));
@@ -2007,9 +2502,7 @@ static void apply(cc *c, const drent *e, uint32_t baseB)
 		attrs *to = &c->attr[c->nattr];
 
 		memcpy(to, e->attr, na * sizeof(attrs));
-		n = attr_fd(f);
-		for (uint32_t i = 0; i < na; i++)
-			tr_rec(&x, &to[i], f, n, 0);
+		rel_apply(&x, (char *)to, e->rel[RA_ATTR], e->nrel[RA_ATTR]);
 	}
 	/* 3. the final content of the region's records and enums (and its other ty_new types) */
 	for (uint32_t i = 0; i < e->nops; i++)
@@ -2038,6 +2531,7 @@ static void apply(cc *c, const drent *e, uint32_t baseB)
 		const xrec *w = &e->xt[i];
 		tag *b = &c->tags[r->slot[W_TAG][w->w] - 1];
 
+		tk_set(r, r->slot[W_TAG][w->w] - 1, NULL);
 		n = tag_fd(&w->u.t, f);
 		for (int k = 0; k < n; k++)
 			if (w->mask & (1u << k))
@@ -2060,12 +2554,8 @@ static void apply(cc *c, const drent *e, uint32_t baseB)
 
 		n = attr_fd(f);
 		for (int k = 0; k < n; k++)
-			if (w->mask & (1u << k)) {
-				if (f[k].size > 8)
-					memcpy((char *)b + f[k].off, (const char *)&w->u.r + f[k].off, f[k].size);
-				else
-					wr(b, f[k], tr(&x, f[k].kind, rd(&w->u.r, f[k])));
-			}
+			if (w->mask & (1u << k))
+				wr(b, f[k], tr(&x, f[k].kind, rd(&w->u.r, f[k])));
 	}
 	/* 5. file-scope bindings, toplevel, the last token */
 	for (uint32_t i = 0; i < e->nbind; i++)
@@ -2100,13 +2590,6 @@ static bool chk_rec(cc *c, trx *x, const char *what, uint32_t i, const void *a, 
 
 		if (f[k].kind == K_SHADOW)
 			continue;
-		if (f[k].size > 8) {
-			if (memcmp((const char *)a + f[k].off, (const char *)b + f[k].off, f[k].size)) {
-				chk_report(c, what, i, k, 0, 1);
-				return false;
-			}
-			continue;
-		}
 		want = f[k].kind == K_SELF ? self : tr(x, f[k].kind, rd(a, f[k]));
 		got = rd(b, f[k]);
 		if (x->bad) {
@@ -2331,7 +2814,7 @@ VPRIV void dr_close(cc *c)
 				ADD(tk_close, ticks() - t0);
 			} else {
 				if (!r->chk)
-					never_note(r->he, r->ctr, r->pack, opt_sig(c->o));
+					never_note(r->he, r->ctr, r->pack, opt_sig(c->o), 1);
 				rec_stop(c);
 				count(S_ABANDON, h[i].e - r->b);
 			}
@@ -2358,16 +2841,19 @@ VPRIV bool dr_boundary(cc *c)
 	if (!pp_open_hit(c->p, &b, &he, &base, &ctr, &span) || b != pos)
 		return false;
 	pack = pack_key(c);
+	bool any = false;
+	uint32_t nvar = 0;
+
 	if (pp_skip_hit(c->p, 1)) {
 		uint64_t sig = opt_sig(c->o);
 		uint32_t h = key_hash(he, ctr, pack, sig);
-		bool any = false;
 
 		for (drent *e = atomic_load_explicit(&dr_tab[h], memory_order_acquire); e;
 		     e = atomic_load_explicit(&e->next, memory_order_acquire)) {
 			if (e->he != he || e->ctr != ctr || e->pack != pack || e->sig != sig)
 				continue;
 			any = true;
+			nvar++;
 			count(S_TRY, 0);
 			{
 				uint64_t t0 = ticks();
@@ -2402,7 +2888,7 @@ VPRIV bool dr_boundary(cc *c)
 					   e.g. no lazy bodies from the header cache) */
 		return false;
 	}
-	if (never_record(he, ctr, pack, opt_sig(c->o))) {
+	if (nvar >= DR_VARIANTS || never_record(he, ctr, pack, opt_sig(c->o))) {
 		count(S_NEVER, 0);
 		return false;
 	}
@@ -2413,12 +2899,39 @@ VPRIV bool dr_boundary(cc *c)
 
 /* ---------------- per TU ---------------- */
 
+/* every schema field fits rd/wr: at most 8 bytes */
+static void schema_check(void)
+{
+	fd f[24];
+	int n, bad = 0;
+	sym s = { 0 };
+	tag t = { .nenum = 1 };
+	ctype y = { 0 };
+	node x = { 0 };
+
+	for (int pass = 0; pass < 5; pass++) {
+		n = pass == 0 ? sym_fd(&s, f) : pass == 1 ? tag_fd(&t, f) : pass == 2 ? field_fd(f) : pass == 3 ? ty_fd(&y, f)
+										   : attr_fd(f);
+		for (int i = 0; i < n; i++)
+			bad |= f[i].size > 8 || !f[i].size;
+	}
+	n = node_fd(&x, f);
+	for (int i = 0; i < n; i++)
+		bad |= f[i].size > 8 || !f[i].size;
+	if (bad) {
+		fprintf(stderr, "vcc: VCC_DR: a schema field is wider than 8 bytes (bug)\n");
+		abort();
+	}
+}
+
 static void dr_env(void)
 {
 	const char *m = getenv("VCC_DR_MAX_MB");
 
 	dr_mode = getenv("VCC_DR") ? 1 : getenv("VCC_DRREC") ? 2 : 0;
 	dr_check = getenv("VCC_DRCHECK") != NULL;
+	if (dr_mode)
+		schema_check();
 	atomic_store(&dr_max, (uint64_t)(m ? atoll(m) : 512) << 20);
 }
 
@@ -2455,6 +2968,7 @@ VPRIV void dr_end(cc *c)
 	for (int k = 0; k < 3; k++)
 		free(r->stamp[k]);
 	free(r->tymap), free(r->uw.v), free(r->tpar.v);
+	free(r->tk), free(r->tdone.v);
 	free(r);
 	c->dr = NULL;
 	c->dr_on = 0;
@@ -2463,6 +2977,8 @@ VPRIV void dr_end(cc *c)
 /* a declaration-cache restore replaced the state: a recording in progress is void */
 void dr_restored(cc *c)
 {
+	if (c->dr && c->dr->ctk)	/* (the tags are the snapshot's) */
+		memset(c->dr->tk, 0, c->dr->ctk * sizeof(*c->dr->tk));
 	if (c->dr && c->dr->open) {
 		c->dr->open = false;	/* (the snapshot's tables are in place: no swap back) */
 		c->dr->chk = NULL;
@@ -2486,19 +3002,23 @@ void cc_dr_stats(char *buf, size_t n)
 	k = snprintf(buf, n,
 		     "%s: recorded %llu: published %llu (%.1f M tok), not %llu (%.1f M), abandoned %llu; %llu entries, %.1f MB\n"
 		     "  at hits: no entry %llu, tried %llu variants, %s %llu (%.1f M tok), no valid variant %llu, no skip %llu,"
-		     " not recorded again %llu\n"
-		     "  not published:",
+		     " not recorded again %llu",
 		     dr_mode == 1 ? "decl replay" : "decl replay (record only)", K(st_n[S_OPEN]), K(st_n[S_PUB]),
 		     M(st_tok[S_PUB]), K(st_n[S_NOPUB]), M(st_tok[S_NOPUB]), K(st_n[S_ABANDON]), K(st_ents),
 		     (double)K(st_bytes) / (1 << 20), K(st_n[S_NOENT]), K(st_n[S_TRY]),
 		     dr_mode == 1 ? "replayed" : "valid", K(st_n[S_HIT]), M(st_tok[S_HIT]), K(st_n[S_MISS]),
 		     K(st_n[S_NOSKIP]), K(st_n[S_NEVER]));
 	if (k > 0 && (size_t)k + 96 < n)
+		k += snprintf(buf + k, n - (size_t)k, "\n  tags known equal %llu; %llu tag contents, %.1f MB", K(st_known), K(tc_n),
+			      (double)K(tc_bytes) / (1 << 20));
+	if (k > 0 && (size_t)k + 96 < n)
 		k += snprintf(buf + k, n - (size_t)k, "\n  ms (24 MHz ticks, all threads): validate %.0f, apply %.0f, publish %.0f, W %.0f",
 			      K(tk_val) / 24e3, K(tk_apply) / 24e3, K(tk_close) / 24e3, K(tk_w) / 24e3);
 	if (dr_check && dr_mode == 1 && k > 0 && (size_t)k + 64 < n)
-		k += snprintf(buf + k, n - (size_t)k, "\n  drcheck: %llu regions compared, %llu mismatches\n  not published:",
+		k += snprintf(buf + k, n - (size_t)k, "\n  drcheck: %llu regions compared, %llu mismatches",
 			      K(st_chk), K(st_chkbad));
+	if (k > 0 && (size_t)k + 32 < n)
+		k += snprintf(buf + k, n - (size_t)k, "\n  not published:");
 	for (int i = 0; i < F_N && k > 0 && (size_t)k + 48 < n; i++)
 		if (K(st_fail[i]))
 			k += snprintf(buf + k, n - (size_t)k, " %s %llu (%.1f M)", fname[i], K(st_fail[i]), M(st_failtok[i]));

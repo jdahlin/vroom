@@ -142,6 +142,13 @@ VPRIV bool dr_boundary(cc *c);
 VPRIV void dr_close(cc *c);
 VPRIV qty dr_func(cc *c, qty ret, const qty *par, uint32_t n, int flags);
 VPRIV void dr_new(cc *c, uint32_t idx);
+VPRIV void dr_tagwrite(cc *c, uint32_t ti);
+/* a write to tag ti (or its record type) after its creation: replay.c's provenance must see it */
+#define DR_TAGWRITE(c, ti)                       \
+	do {                                     \
+		if (unlikely((c)->dr != NULL))   \
+			dr_tagwrite((c), (ti));  \
+	} while (0)
 VPRIV void dr_begin(cc *c);
 VPRIV void dr_end(cc *c);
 /* diag.c */

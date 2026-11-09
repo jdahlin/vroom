@@ -365,6 +365,7 @@ VPRIV bool decl_specs(cc *c, dspec *ds, bool allow_sc)
 					merge_attrs(&post, &pre);
 					enum_body(c, ti, &post);
 				} else {
+					DR_TAGWRITE(c, ti);
 					c->tags[ti].flags |= (pre.packed ? RF_PACKED : 0);
 					c->tags[ti].maxalign = pre.aligned;
 					struct_body(c, ti);
