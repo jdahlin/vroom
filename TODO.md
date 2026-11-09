@@ -729,14 +729,17 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
   vs llvm-mc.)
 - [ ] **SVE/SVE2/SME** (operand parser for `z`/`p` registers first) [P].
   *Validate:* T7 tables; T7 `-march=armv9-a+sve2` corpus.
-- [ ] **Directives**: left: `.altmacro`, `.addrsig`/`.addrsig_sym`, COMDAT
-  `"G"` sections, `@gnu_unique_object`, `.arch`/`.cpu` gating instructions
-  (T4).  (`.eqv`, `.nops`, `.inst.n` are GNU-only: clang rejects them.)
+- [ ] **Directives**: left: `.arch`/`.cpu` gating instructions (T4).
+  (`.eqv`, `.nops`, `.inst.n` are GNU-only: clang rejects them.)
   *Validate:* `bench/vas-obj.py` (`ccs/vcc/tests/vas-obj/`: clang -c and
-  vasm byte for byte).  (Done: `.comm`/`.lcomm`, `.symver` (@@@, remove),
-  `.weakref`, `.float`/`.double`/`.dc.*`, `.base64`, `.balignw`/`.p2alignl`,
-  `.end`, `.ident`, `.print`/`.warning`, `.variant_pcs`, `.tlsdesccall`,
-  `.reloc` at `.`/labels with NONE/TLSDESC_CALL/BFD_RELOC_*.)
+  vasm byte for byte).  (Done: COMDAT/`"G"` groups (SHT_GROUP, signature
+  in the group section when undefined), `.addrsig`/`.addrsig_sym`,
+  `.altmacro` (`%expr`, `<text>`, bare parameter names), `.type`
+  `@gnu_unique_object`/`@common` (OS/ABI GNU as MC), `.comm`/`.lcomm`,
+  `.symver` (@@@, remove), `.weakref`, `.float`/`.double`/`.dc.*`,
+  `.base64`, `.balignw`/`.p2alignl`, `.end`, `.ident`, `.print`/`.warning`,
+  `.variant_pcs`, `.tlsdesccall`, `.reloc` at `.`/labels with
+  NONE/TLSDESC_CALL/BFD_RELOC_*; code sections at least 4-aligned.)
 - [ ] **Relocation operators** (TLS `:tlsdesc:`, `:tprel_*:`,
   `:gottprel*:`, `:dtprel*:`, `:prel_g*:`, literal `ldr x0, :got:v`)
   (`mod_kind` `as/as.c:1912`, `obj/obj.h:53-72`) [P].  *Validate:* T7 with

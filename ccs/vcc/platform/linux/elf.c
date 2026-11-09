@@ -19,7 +19,9 @@ typedef struct { uint64_t off; uint32_t sym, type; int64_t addend; uint32_t sec,
 typedef struct Out {
 	Rel *rel; uint32_t nrel;
 	uint32_t *symtab; uint32_t nsymtab, nlocal;	/* symbol ids in output order */
-	uint32_t symtab_idx;
+	uint32_t symtab_idx, group_name;
+	uint32_t as_idx, as_name, as_size; uint64_t as_off; uint8_t *as_data;	/* .llvm_addrsig */
+	uint64_t *goff;	/* per section: its group's data, when it is the first member */
 	uint8_t *strtab; uint32_t strsize;
 	uint32_t *secname, *relaname; uint32_t symtab_name, strtab_name;
 	uint64_t *secoff, *relaoff, symoff_, stroff, shoff, size;
@@ -122,6 +124,19 @@ static size_t elf_finish_tail(ElfObj *o, Out *w)
 		for (uint32_t s = 1; s < ns; s++) { w->relbeg[s] = k; k += elf_sec(o, s)->nfix_reloc; }
 		w->relbeg[ns] = k;
 	}
+	/* section groups: the first member section carries the SHT_GROUP header */
+	int ngroup = 0;
+	for (uint32_t s = 1; s < ns; s++) {
+		ElfSec *se = elf_sec(o, s);
+		se->gidx = 0;
+		if (!se->group) continue;
+		uint32_t k = 1;
+		while (k < s && elf_sec(o, k)->group != se->group) k++;
+		if (k < s) continue;
+		se->gidx = 1; ngroup++;
+		ElfSym *g = elf_symp(o, se->group);
+		if (!(g->flags & ESYM_DEFINED) && !g->common) { g->common = 2; g->value = s; }
+	}
 	/* symbol table: locals then globals, creation order */
 	w->symtab = rpush(&o->arena, sizeof(uint32_t) * o->nsym * 2, 8);
 	uint32_t *glob = w->symtab + o->nsym;
@@ -135,7 +150,7 @@ static size_t elf_finish_tail(ElfObj *o, Out *w)
 		else if (y->flags & ESYM_USED) in = 1;
 		else in = !(y->flags & (ESYM_TEMP | ESYM_NOSYMTAB));
 		if (!in) continue;
-		if (!(y->flags & ESYM_DEFINED) && y->bind == STB_LOCAL) y->bind = STB_GLOBAL;
+		if (!(y->flags & ESYM_DEFINED) && y->common != 2 && y->bind == STB_LOCAL) y->bind = STB_GLOBAL;
 		if (y->bind == STB_LOCAL) w->symtab[nl++] = i; else glob[ng++] = i;
 	}
 	memmove(w->symtab + nl, glob, ng * sizeof(uint32_t));
@@ -145,13 +160,26 @@ static size_t elf_finish_tail(ElfObj *o, Out *w)
 	uint32_t idx = 2;
 	for (uint32_t s = 1; s < ns; s++) {
 		ElfSec *se = elf_sec(o, s);
+		if (se->gidx) se->gidx = idx++;
 		se->idx = idx++;
 		se->rela_idx = se->nfix_reloc ? idx++ : 0;
 	}
+	w->as_idx = o->has_addrsig ? idx++ : 0;
 	w->symtab_idx = idx++;
 	w->nshdr = idx;
+	if (w->as_idx) {	/* ULEB128 symbol indices of the listed symbols in the symbol table */
+		w->as_data = rpush(&o->arena, 5 * (size_t)o->naddrsig + 1, 1);
+		uint32_t n = 0;
+		for (uint32_t i = 0; i < o->naddrsig; i++) {
+			ElfSym *y = elf_symp(o, o->addrsig[i]);
+			if (!y->idx || y->idx > w->nsymtab || w->symtab[y->idx - 1] != o->addrsig[i]) continue;
+			uint32_t v = y->idx;
+			do { uint8_t c = v & 0x7f; v >>= 7; w->as_data[n++] = (uint8_t)(c | (v ? 0x80 : 0)); } while (v);
+		}
+		w->as_size = n;
+	}
 	/* strings */
-	uint32_t nstr = 0, cap = w->nsymtab + 2 * ns + 2;
+	uint32_t nstr = 0, cap = w->nsymtab + 2 * ns + 4;
 	Str *sv = rpush(&o->arena, sizeof(Str) * cap, 8);
 	w->secname = rpush(&o->arena, sizeof(uint32_t) * ns * 2, 8);
 	w->relaname = w->secname + ns;
@@ -166,6 +194,8 @@ static size_t elf_finish_tail(ElfObj *o, Out *w)
 		}
 	}
 	sv[nstr++] = (Str){ ".symtab", 7, &w->symtab_name };
+	if (w->as_idx) sv[nstr++] = (Str){ ".llvm_addrsig", 13, &w->as_name };
+	if (ngroup) sv[nstr++] = (Str){ ".group", 6, &w->group_name };
 	sv[nstr++] = (Str){ ".strtab", 7, &w->strtab_name };
 	for (uint32_t k = 0; k < w->nsymtab; k++) {
 		ElfSym *y = elf_symp(o, w->symtab[k]);
@@ -176,8 +206,9 @@ static size_t elf_finish_tail(ElfObj *o, Out *w)
 	build_strtab(o, w, sv, nstr);
 	for (uint32_t k = 0; k < w->nsymtab; k++) elf_symp(o, w->symtab[k])->size_sub = symname[k];	/* reuse: name offset */
 	/* file offsets */
-	w->secoff = rpush(&o->arena, sizeof(uint64_t) * ns * 2, 8);
+	w->secoff = rpush(&o->arena, sizeof(uint64_t) * ns * 3, 8);
 	w->relaoff = w->secoff + ns;
+	w->goff = w->secoff + 2 * ns;
 	uint64_t off = 64;
 	for (uint32_t s = 1; s < ns; s++) {
 		ElfSec *se = elf_sec(o, s);
@@ -185,12 +216,22 @@ static size_t elf_finish_tail(ElfObj *o, Out *w)
 		w->secoff[s] = off;
 		if (se->type != SHT_NOBITS) off += se->size;
 	}
+	for (uint32_t s = 1; s < ns; s++) {
+		ElfSec *se = elf_sec(o, s);
+		if (!se->gidx) continue;
+		off = al(off, 4); w->goff[s] = off; off += 4;
+		for (uint32_t k = s; k < ns; k++) {
+			ElfSec *m = elf_sec(o, k);
+			if (m->group == se->group) off += m->rela_idx ? 8 : 4;
+		}
+	}
 	off = al(off, 8); w->symoff_ = off; off += 24 * (uint64_t)(w->nsymtab + 1);
 	for (uint32_t s = 1; s < ns; s++) {
 		ElfSec *se = elf_sec(o, s);
 		if (!se->rela_idx) continue;
 		off = al(off, 8); w->relaoff[s] = off; off += 24 * (uint64_t)se->nfix_reloc;
 	}
+	if (w->as_idx) { w->as_off = off; off += w->as_size; }
 	w->stroff = off; off += w->strsize;
 	off = al(off, 8); w->shoff = off; off += 64 * (uint64_t)w->nshdr;
 	w->size = off;
@@ -234,7 +275,8 @@ void elf_emit(ElfObj *o, uint8_t *b)
 		ElfSym *s = elf_symp(o, w->symtab[k]);
 		uint16_t shndx = 0; uint64_t val = 0;
 		if (s->flags & ESYM_ABS) { shndx = 0xfff1; val = s->value; }
-		else if (s->common) { shndx = 0xfff2; val = s->value; }
+		else if (s->common == 1) { shndx = 0xfff2; val = s->value; }
+		else if (s->common == 2) shndx = (uint16_t)elf_sec(o, (uint32_t)s->value)->gidx;
 		else if (s->flags & ESYM_DEFINED) { shndx = (uint16_t)elf_sec(o, symsec(o, s))->idx; val = symoff(o, s); }
 		uint8_t type = s->type;
 		uint64_t size = s->size;
@@ -250,6 +292,7 @@ void elf_emit(ElfObj *o, uint8_t *b)
 			type = t;
 			if (!size && !(s->flags & ESYM_SIZE_EXPR)) size = b->size;
 		}
+		if (type == STT_GNU_IFUNC || s->bind == 10) b[7] = 3;	/* ELFOSABI_GNU (MC) */
 		p32(y, s->size_sub);
 		y[4] = (uint8_t)(s->bind << 4 | type); y[5] = s->vis;
 		p16(y + 6, shndx); p64(y + 8, val); p64(y + 16, size);
@@ -272,11 +315,29 @@ void elf_emit(ElfObj *o, uint8_t *b)
 	shdr(h + 64, w->strtab_name, SHT_STRTAB, 0, w->stroff, w->strsize, 0, 0, 1, 0);
 	for (uint32_t s = 1; s < ns; s++) {
 		ElfSec *se = elf_sec(o, s);
+		if (se->gidx) {
+			uint8_t *g = b + w->goff[s];
+			uint64_t n = 4;
+			p32(g, se->comdat);
+			for (uint32_t k = s; k < ns; k++) {
+				ElfSec *m = elf_sec(o, k);
+				if (m->group != se->group) continue;
+				p32(g + n, m->idx); n += 4;
+				if (m->rela_idx) { p32(g + n, m->rela_idx); n += 4; }
+			}
+			shdr(h + 64 * se->gidx, w->group_name, 17 /* SHT_GROUP */, 0, w->goff[s], n, w->symtab_idx,
+			     elf_symp(o, se->group)->idx, 4, 4);
+		}
 		shdr(h + 64 * se->idx, w->secname[s], se->type, se->flags, w->secoff[s], se->size, 0, 0,
 		     (uint64_t)1 << se->align, se->entsize);
 		if (se->rela_idx)
-			shdr(h + 64 * se->rela_idx, w->relaname[s], SHT_RELA, SHF_INFO_LINK, w->relaoff[s],
+			shdr(h + 64 * se->rela_idx, w->relaname[s], SHT_RELA, (se->flags & SHF_GROUP) ? SHF_GROUP : SHF_INFO_LINK, w->relaoff[s],
 			     24 * (uint64_t)se->nfix_reloc, w->symtab_idx, se->idx, 8, 24);
+	}
+	if (w->as_idx) {
+		memcpy(b + w->as_off, w->as_data, w->as_size);
+		shdr(h + 64 * w->as_idx, w->as_name, 0x6fff4c03 /* SHT_LLVM_ADDRSIG */, SHF_EXCLUDE, w->as_off, w->as_size,
+		     w->symtab_idx, 0, 1, 0);
 	}
 	shdr(h + 64 * w->symtab_idx, w->symtab_name, SHT_SYMTAB, 0, w->symoff_, 24 * (uint64_t)(w->nsymtab + 1),
 	     1, w->nlocal + 1, 8, 24);

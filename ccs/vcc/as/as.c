@@ -547,13 +547,14 @@ static int parse_name(As *a, const char **pp, const char *e, Sv *out)
 	return 0;
 }
 
+static Sv trim(const char *p, const char *e);
 /* .section name [, "flags" [, @type [, entsize]]] ; push = .pushsection */
 static int d_section(As *a, const char *p, const char *e, int push)
 {
 	Sv name;
 	if (parse_name(a, &p, e, &name)) return -1;
-	uint32_t type = 0; uint64_t flags = 0; uint32_t entsize = 0;
-	int have_flags = 0;
+	uint32_t type = 0; uint64_t flags = 0; uint32_t entsize = 0, group = 0;
+	int have_flags = 0, comdat = 0;
 	int64_t sub = 0;
 	p = ws(p, e);
 	if (p < e && *p == ',') {
@@ -576,7 +577,7 @@ static int d_section(As *a, const char *p, const char *e, int push)
 				case 'o': flags |= SHF_LINK_ORDER; break;
 				case 'e': flags |= SHF_EXCLUDE; break;
 				case 'R': flags |= 0x200000; break;	/* SHF_GNU_RETAIN */
-				case 'G': return err(a, "section groups are not supported");
+				case 'G': flags |= SHF_GROUP; break;
 				default: return err(a, "unknown flag '%c' in .section", *p);
 				}
 			}
@@ -597,11 +598,24 @@ static int d_section(As *a, const char *p, const char *e, int push)
 					else if (sveq(t, "preinit_array")) type = SHT_PREINIT_ARRAY;
 					else return err(a, "unknown section type");
 					p = ws(p, e);
-					if (p < e && *p == ',') {
+					if ((flags & SHF_MERGE) && p < e && *p == ',') {
 						p++;
 						int64_t es;
 						if (abs_expr(a, &p, e, &es)) return -1;
 						entsize = (uint32_t)es;
+						p = ws(p, e);
+					}
+					if ((flags & SHF_GROUP) && p < e && *p == ',') {
+						p++;
+						Sv g;
+						if (parse_name(a, &p, e, &g)) return -1;
+						group = sym(a, g.s, g.n);
+						p = ws(p, e);
+						if (p < e && *p == ',') {
+							Sv c = trim(p + 1, e);
+							if (!sveq(c, "comdat")) return err(a, "expected 'comdat'");
+							comdat = 1;
+						}
 					}
 				}
 			}
@@ -628,7 +642,13 @@ static int d_section(As *a, const char *p, const char *e, int push)
 		if (a->nss >= MAXSECSTK) return err(a, "section stack overflow");
 		a->ss[a->nss].cur = a->cur; a->ss[a->nss].prev = a->prev; a->nss++;
 	}
-	uint32_t s = elf_section(a->o, name.s, name.n, type, flags, entsize, 0);
+	if ((flags & SHF_GROUP) && !group) return err(a, "expected group name");
+	uint32_t s = elf_section(a->o, name.s, name.n, type, flags, entsize, group);
+	if (group) { elf_reg(a->o, group); elf_sec(a->o, s)->comdat = (uint8_t)comdat; }
+	{	/* MC: a code section is at least 4-aligned once switched to */
+		ElfSec *se = elf_sec(a->o, s);
+		if ((se->flags & SHF_EXECINSTR) && se->align < 2) se->align = 2;
+	}
 	switch_to(a, elf_subsection(a->o, s, (int32_t)sub));
 	return 0;
 }
@@ -1140,7 +1160,9 @@ static int d_type(As *a, const char *p, const char *e)
 	else if (sveq(t, "object") || sveq(t, "STT_OBJECT")) ty = STT_OBJECT;
 	else if (sveq(t, "notype") || sveq(t, "STT_NOTYPE")) ty = STT_NOTYPE;
 	else if (sveq(t, "tls_object") || sveq(t, "STT_TLS")) ty = STT_TLS;
-	else if (sveq(t, "gnu_indirect_function")) ty = STT_GNU_IFUNC;
+	else if (sveq(t, "gnu_indirect_function") || sveq(t, "STT_GNU_IFUNC")) ty = STT_GNU_IFUNC;
+	else if (sveq(t, "common") || sveq(t, "STT_COMMON")) ty = STT_OBJECT;	/* MC: STT_COMMON is written as OBJECT */
+	else if (sveq(t, "gnu_unique_object")) { ty = STT_OBJECT; elf_bind(a->o, y, 10); }	/* STB_GNU_UNIQUE */
 	else return err(a, "unsupported attribute in '.type' directive");
 	elf_reg(a->o, y);
 	elf_type(a->o, y, ty);
@@ -1419,6 +1441,63 @@ static Tmpl tmpl_compile(As *a, vregion *r, Sv body, const Param *ps, uint32_t n
 	return t;
 }
 
+/* .altmacro: a parameter name is replaced wherever it stands as a whole
+ * identifier, with or without the backslash */
+static Tmpl tmpl_compile_alt(vregion *r, Sv body, const Param *ps, uint32_t np)
+{
+	const char *b = body.s;
+	size_t n = body.n;
+	Tmpl t = { rget(r, sizeof(Piece) * (n / 2 + 2)), 0 };
+	size_t lit = 0, i = 0;
+	while (i < n) {
+		size_t st = i;
+		int bs = b[i] == '\\';
+		if (bs) i++;
+		if (i < n && isidc((unsigned char)b[i]) && (bs || st == 0 || !isidc((unsigned char)b[st - 1]))) {
+			size_t j = i;
+			while (j < n && isidc((unsigned char)b[j])) j++;
+			uint32_t m;
+			for (m = 0; m < np; m++) if (ps[m].name.n == j - i && !memcmp(ps[m].name.s, b + i, j - i)) break;
+			if (m < np) {
+				t.p[t.n++] = (Piece){ (uint32_t)lit, (uint32_t)(st - lit), (int32_t)m };
+				lit = j;
+			}
+			i = j;
+			continue;
+		}
+		if (!bs) i++;
+	}
+	if (lit < n) t.p[t.n++] = (Piece){ (uint32_t)lit, (uint32_t)(n - lit), -1 };
+	return t;
+}
+
+/* an .altmacro argument: %expr is its value in decimal, <text> is text with
+ * !c standing for c */
+static int alt_arg(As *a, const char **pp, const char *e, Sv *out)
+{
+	const char *p = *pp;
+	if (*p == '%') {
+		p++;
+		int64_t v;
+		if (abs_expr(a, &p, e, &v)) return -1;
+		char buf[24];
+		int k = snprintf(buf, sizeof buf, "%lld", (long long)v);
+		*out = svdup(a, buf, (size_t)k);
+	} else {
+		char *o = rget(&a->defs, (size_t)(e - p) + 1);
+		size_t n = 0;
+		for (p++; p < e && *p != '>'; p++) {
+			if (*p == '!' && p + 1 < e) p++;
+			o[n++] = *p;
+		}
+		if (p >= e) return err(a, "expected '>'");
+		p++;
+		*out = (Sv){ o, (uint32_t)n };
+	}
+	*pp = p;
+	return 0;
+}
+
 static char *utoa(char *o, uint32_t v)
 {
 	char tmp[10]; int k = 0;
@@ -1566,7 +1645,8 @@ static int invoke(As *a, Macro *m, const char *p, const char *e)
 			}
 			/* the arguments are used before the statement text changes */
 			int va = hasvararg && k == np - 1;
-			if (!macro_arg_plain(&p, e, va, &args[k]) && macro_arg(a, &p, e, va, &args[k])) return -1;
+			if (a->altmacro && p < e && (*p == '%' || *p == '<')) { if (alt_arg(a, &p, e, &args[k])) return -1; }
+			else if (!macro_arg_plain(&p, e, va, &args[k]) && macro_arg(a, &p, e, va, &args[k])) return -1;
 			set[k] = 1;
 			p = ws(p, e);
 			if (p >= e) break;
@@ -1581,9 +1661,14 @@ static int invoke(As *a, Macro *m, const char *p, const char *e)
 			else if (m->params[k].req && !args[k].n) return err(a, "missing value for required parameter '%.*s' in macro '%.*s'", (int)m->params[k].name.n, m->params[k].name.s, (int)m->name.n, m->name.s);
 		}
 	}
+	Tmpl tt;
+	if (a->altmacro) tt = tmpl_compile_alt(&a->defs, m->body, m->params, np);
+	else {
+		if (!m->t.p) m->t = tmpl_compile(a, &a->defs, m->body, m->params, np, 1);
+		tt = m->t;
+	}
 	char *o = (char *)rget(&a->xs, expand_bound(m->body, args, np));
-	if (!m->t.p) m->t = tmpl_compile(a, &a->defs, m->body, m->params, np, 1);
-	size_t n = expand(a, o, m->body.s, m->t, args, m->count);
+	size_t n = expand(a, o, m->body.s, tt, args, m->count);
 	a->xs.used = (size_t)((uint8_t *)o - a->xs.base) + n;
 	a->ninst++;
 	m->count++;
@@ -1807,6 +1892,20 @@ static int directive(As *a, Sv w, const char *p, const char *e)
 #define IS(x) (n == sizeof(x) - 1 && !memcmp(d, x, n))
 	switch (d[0]) {
 	case 'a':
+		if (IS("altmacro")) { a->altmacro = 1; return 0; }
+		if (IS("addrsig")) { a->o->has_addrsig = 1; return 0; }
+		if (IS("addrsig_sym")) {
+			Sv nm;
+			if (parse_name(a, &p, e, &nm)) return -1;
+			if (a->nasg == a->asgcap) {
+				uint32_t nc = a->asgcap ? a->asgcap * 2 : 64;
+				uint32_t *t = rget(&a->defs, sizeof *t * nc);
+				if (a->nasg) memcpy(t, a->asg, sizeof *t * a->nasg);
+				a->asg = t; a->asgcap = nc;
+			}
+			a->asg[a->nasg++] = sym(a, nm.s, nm.n);
+			return 0;
+		}
 		if (IS("align") || IS("p2align")) return d_align(a, p, e, 1);
 		if (IS("ascii")) return d_ascii(a, p, e, 0);
 		if (IS("asciz")) return d_ascii(a, p, e, 1);
@@ -1895,6 +1994,9 @@ static int directive(As *a, Sv w, const char *p, const char *e)
 		break;
 	case 'm':
 		if (IS("macro")) return d_macro(a, p, e);
+		break;
+	case 'n':
+		if (IS("noaltmacro")) { a->altmacro = 0; return 0; }
 		break;
 	case 'o':
 		if (IS("org")) return d_org(a, p, e);
@@ -2124,7 +2226,7 @@ void as_begin(As *a, ElfObj *o, const char *name)
 	a->xs.used = 0; a->defs.used = 0; a->ninst = 0; a->nal = 0; a->alcap = 0; a->al = 0;
 	memset(a->alh, 0, sizeof a->alh);
 	a->fname = name;
-	a->nident = 0; a->ended = 0;
+	a->nident = 0; a->ended = 0; a->altmacro = 0; a->nsv = a->svcap = 0; a->nasg = a->asgcap = 0;
 	a->mmask = 255; a->mcount = 0;
 	a->mtab = rget(&a->defs, sizeof(Macro *) * (a->mmask + 1));
 	memset(a->mtab, 0, sizeof(Macro *) * (a->mmask + 1));
@@ -2284,6 +2386,10 @@ int as_end(As *a)
 		}
 	}
 	if (!a->err && a->nsv) symver_finish(a);
+	if (!a->err && a->nasg) {
+		o->addrsig = a->asg;	/* in a->defs: lives until the next run, after the object is written */
+		o->naddrsig = a->nasg;
+	}
 	return a->err ? -1 : 0;
 }
 

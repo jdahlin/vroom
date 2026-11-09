@@ -96,7 +96,9 @@ struct As {
 	const char *fname;
 	size_t nident;		/* .ident directives seen (.comment's leading NUL) */
 	int ended;		/* .end seen */
+	int altmacro;		/* .altmacro mode */
 	struct { uint32_t orig, ver, rm; } *sv; uint32_t nsv, svcap;	/* .symver */
+	uint32_t *asg; uint32_t nasg, asgcap;	/* .addrsig_sym */
 	char msg[512];
 	int err;
 };

@@ -64,6 +64,7 @@ void elf_reset(ElfObj *o)
 	o->htab = rpush(&o->arena, (o->hmask + 1) * 4, 64);
 	memset(o->htab, 0, (o->hmask + 1) * 4);
 	o->has_err = 0; o->err[0] = 0;
+	o->addrsig = 0; o->naddrsig = 0; o->has_addrsig = 0;
 }
 
 static const char *copyname(ElfObj *o, const char *s, uint32_t n)
