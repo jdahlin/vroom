@@ -379,6 +379,7 @@ VPRIV uint32_t statement(cc *c);
 /* lazy.c */
 VPRIV bool lazy_ok(cc *c, uint32_t s, const declr *d);
 VPRIV void lazy_capture(cc *c, uint32_t s, const declr *d);
+VPRIV void lazy_replayed(const lzfn *L, uint32_t n);
 VPRIV void lazy_closure(cc *c);
 /* func.c */
 VPRIV void function_def(cc *c, uint32_t s, const declr *d);

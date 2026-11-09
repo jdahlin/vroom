@@ -360,6 +360,8 @@ typedef struct drent {
 	uint32_t dn[RA_N][RO_DA + 2];
 	uint32_t *bind, nbind;	/* syms bound at file scope, in order */
 	uint32_t *tl, ntl;	/* toplevel */
+	lzfn *lz;		/* lazy bodies the region kept (all from the header cache), A's */
+	uint32_t nlz;
 	xrec *xs, *xt, *xa, *xy;
 	uint32_t nxs, nxt, nxa, nxy;
 	uint32_t prevloc;
@@ -374,6 +376,13 @@ static drent *_Atomic dr_tab[DR_NB];
 static _Atomic uint64_t dr_mem, dr_max;
 static int dr_mode = -1;	/* 0 off, 1 record + replay (VCC_DR), 2 record only (VCC_DRREC) */
 static int dr_check;
+static uint32_t dr_gain = 10;	/* VCC_DR_GAIN: publish if the estimated saving is at least gain/10 of the cost */
+/* (estimated instructions: parsing a token; per W record, own record and try of a replay, recording included;
+   fitted so that gain 10 is best on PG and the kernel) */
+#define DR_TOKCOST 270
+#define DR_WCOST 600
+#define DR_OWNCOST 160
+#define DR_FIXCOST 12000
 
 static uint32_t key_hash(const void *he, unsigned ctr, uint32_t pack, uint64_t sig)
 {
@@ -396,7 +405,7 @@ static uint32_t pack_key(const cc *c)
  * not again after NEVER_AFTER failures (or abandoned recordings), as what
  * stops it (a lazy body, a pragma, asm ...) is mostly the region's own.
  */
-enum { S_OPEN, S_PUB, S_NOPUB, S_ABANDON, S_TRY, S_HIT, S_MISS, S_NOENT, S_NOSKIP, S_NEVER, S_FIRST, S_N };
+enum { S_OPEN, S_PUB, S_NOPUB, S_ABANDON, S_TRY, S_HIT, S_MISS, S_NOENT, S_NOSKIP, S_NEVER, S_FIRST, S_FULL, S_N };
 #define NEVER_N 65536
 #define NEVER_AFTER 2
 #define DR_SEEN 2
@@ -450,12 +459,12 @@ static int never_record(const void *he, unsigned ctr, uint32_t pack, uint64_t si
 /* ---------------- per-TU state ---------------- */
 
 enum { F_DIAG, F_PRAGMA, F_LAZY, F_LABEL, F_ASM, F_CPLX, F_WEAK, F_BODY, F_TYWRITE, F_LISTWRITE, F_UNHOOKED,
-       F_EXTBIND, F_UNMAPPED, F_TYMUT, F_OPS, F_HEAP, F_BUDGET, F_VARIANTS, F_N };
+       F_EXTBIND, F_UNMAPPED, F_TYMUT, F_OPS, F_HEAP, F_BUDGET, F_VARIANTS, F_GAIN, F_N };
 /* failures from the region's own tokens: the key is not recorded again */
 #define F_OWN (1u << F_PRAGMA | 1u << F_WEAK | 1u << F_LAZY | 1u << F_LABEL | 1u << F_ASM | 1u << F_CPLX)
 static const char *const fname[F_N] = { "diag", "pragma", "lazy", "label", "asm", "complex", "pweak", "ext-var-body",
 	"type-write", "list-write", "unhooked-write", "ext-bind", "unmapped", "type-mutated", "type-log", "heap",
-	"budget", "variants" };
+	"budget", "variants", "no gain" };
 
 typedef struct wmap { uint64_t *k; uint32_t *v; uint32_t cap, n; } wmap;	/* (kind << 32 | A index) -> position */
 
@@ -467,6 +476,7 @@ struct drrec {
 	uint32_t base, span, pack;
 	uint32_t nsym_bi, nty_bi, ntag_bi;
 	uint32_t s0, t0, y0, n0, l0, i0, f0, r0, a0, st0, tl0, tla0, lb0, as0, lzf0, lzt0, lzs0, pw0;
+	uint32_t lzseen;	/* lazy bodies checked so far (own_fail, early) */
 	int npack0, errors0, pperr0;
 	uint32_t ndiag0;
 	uint32_t cplx0[TY_NKINDS];
@@ -900,7 +910,7 @@ static void w_drain(cc *c)
 	}
 }
 
-static uint32_t own_fail(cc *c, const struct drrec *r, bool all);
+static uint32_t own_fail(cc *c, struct drrec *r, bool all);
 static void rec_doomed(cc *c, uint32_t fail);
 
 /* a name lookup (ns 0: ordinary, 1: tag) gave s */
@@ -1096,6 +1106,7 @@ static void rec_open(cc *c, uint64_t b, const void *he, uint32_t base, unsigned 
 	r->s0 = c->nsym, r->t0 = c->ntag, r->y0 = c->nty, r->n0 = c->nnode, r->l0 = c->nlist;
 	r->i0 = c->nipool, r->f0 = c->nfpool, r->st0 = c->nstr, r->a0 = c->nattr, r->r0 = c->nparams;
 	r->as0 = c->nasm, r->lb0 = c->nlabel, r->tl0 = c->ntoplevel, r->tla0 = c->ntlasm;
+	r->lzseen = c->nlzf;
 	r->lzf0 = c->nlzf, r->lzt0 = c->nlzt, r->lzs0 = c->nlzs, r->pw0 = c->npweak;
 	r->npack0 = c->npack, r->errors0 = c->errors, r->ndiag0 = c->ndiag, r->pperr0 = pp_errors(c->p);
 	memcpy(r->cplx0, c->cplx, sizeof(r->cplx0));
@@ -1611,8 +1622,49 @@ static void rel_apply(const trx *x, char *base, int a)
 
 static void drcheck(cc *c);
 
+/*
+ * A lazy body the region kept, in B: its tokens are in the header cache entry
+ * z.e, which is immutable and the same in every TU replaying the region, so
+ * only its indices and locations move.
+ */
+static lzfn lz_tr(const drent *e, const lzfn *a, int64_t ds, int64_t dl, uint32_t lb, uint32_t nlzt)
+{
+	lzfn b = *a;
+
+	b.sym = (uint32_t)(a->sym + ds);
+	b.wm = (uint32_t)(a->wm + ds);
+	if (a->psyms >= e->l0 && a->psyms <= e->l1)
+		b.psyms = (uint32_t)(a->psyms + dl);
+	b.tk = nlzt;
+	REL_LOC(b.loc, lb);
+	REL_LOC(b.plb, lb);
+	REL_LOC(b.ple, lb);
+	REL_LOC(b.z.base, lb);
+	REL_LOC(b.z.rloc, lb);
+	return b;
+}
+
+/* a lazy body's indices and locations map (lz_tr) */
+static bool lz_ok(const drent *e, const lzfn *a)
+{
+#define LOC_OK(v) (!(v) || (v) - e->base <= e->span)
+	return a->hc && !a->done && !a->ntk && a->sym >= e->s0 && a->sym < e->s1 && a->wm >= e->s0 && a->wm <= e->s1 &&
+	       (!a->npsyms || (a->psyms >= e->l0 && a->psyms + a->npsyms <= e->l1)) && LOC_OK(a->loc) &&
+	       LOC_OK(a->plb) && LOC_OK(a->ple) && LOC_OK(a->z.base) && LOC_OK(a->z.rloc);
+#undef LOC_OK
+}
+
+static bool lz_eq(const lzfn *a, const lzfn *b)
+{
+	return a->sym == b->sym && a->tk == b->tk && a->ntk == b->ntk && a->wm == b->wm && a->name == b->name &&
+	       a->loc == b->loc && (!a->npsyms || a->psyms == b->psyms) && a->npsyms == b->npsyms && a->plb == b->plb &&
+	       a->ple == b->ple && a->done == b->done && a->hc == b->hc && a->z.e == b->z.e && a->z.open == b->z.open &&
+	       a->z.close == b->z.close && a->z.base == b->z.base && a->z.cbase == b->z.cbase && a->z.ci == b->z.ci &&
+	       a->z.k == b->z.k && a->z.rloc == b->z.rloc && a->z.rflags == b->z.rflags;
+}
+
 /* what the region's own tokens did that stops an entry (all: also diagnostics and _Complex) */
-static uint32_t own_fail(cc *c, const struct drrec *r, bool all)
+static uint32_t own_fail(cc *c, struct drrec *r, bool all)
 {
 	uint32_t fail = 0;
 
@@ -1620,8 +1672,12 @@ static uint32_t own_fail(cc *c, const struct drrec *r, bool all)
 		fail |= 1u << F_DIAG;
 	if (c->npack != r->npack0)
 		fail |= 1u << F_PRAGMA;
-	if (c->nlzf != r->lzf0 || c->nlzt != r->lzt0 || c->nlzs != r->lzs0)
-		fail |= 1u << F_LAZY;
+	if (c->nlzt != r->lzt0 || c->nlzs != r->lzs0)
+		fail |= 1u << F_LAZY;	/* (a body kept as tokens of its own: not replayed) */
+	for (uint32_t i = all ? r->lzf0 : r->lzseen; i < c->nlzf; i++)	/* (early: only the new ones) */
+		if (!c->lzf[i].hc || c->lzf[i].done)
+			fail |= 1u << F_LAZY;
+	r->lzseen = c->nlzf;
 	if (c->nlabel != r->lb0)
 		fail |= 1u << F_LABEL;
 	if (c->nasm != r->as0 || c->ntlasm != r->tla0)
@@ -2026,6 +2082,9 @@ static void rec_close(cc *c, uint64_t endpos)
 		if (t->nenum)
 			MARK(t->enums, t->nenum, K_SYM, true);
 	}
+	for (uint32_t i = r->lzf0; i < c->nlzf; i++)	/* (the lazy bodies' parameters) */
+		if (c->lzf[i].npsyms)
+			MARK(c->lzf[i].psyms, c->lzf[i].npsyms, K_SYM, false);
 	for (uint32_t i = 0; i < r->wt.n; i++)	/* (written ext tags: their new enum lists) */
 		if (c->tags[r->wt.v[i].a].nenum)
 			MARK(c->tags[r->wt.v[i].a].enums, c->tags[r->wt.v[i].a].nenum, K_SYM, true);
@@ -2116,6 +2175,11 @@ static void rec_close(cc *c, uint64_t endpos)
 	}
 	e->ntl = c->ntoplevel - r->tl0;
 	e->tl = xdup(&c->toplevel[r->tl0], e->ntl * sizeof(uint32_t));
+	e->nlz = c->nlzf - r->lzf0;
+	e->lz = xdup(&c->lzf[r->lzf0], e->nlz * sizeof(lzfn));
+	for (uint32_t i = 0; i < e->nlz; i++)
+		if (!lz_ok(e, &e->lz[i]))
+			x.bad = true;
 	tr(&x, K_LOC, e->prevloc);
 	e->heap = hp.v, e->nheap = hp.n;
 	e->fpc = fpc.v, e->nfpc = fpc.n;
@@ -2131,11 +2195,27 @@ static void rec_close(cc *c, uint64_t endpos)
 		   r->opar.n * 4 + (e->s1 - e->s0) * sizeof(sym) + (e->t1 - e->t0) * sizeof(tag) +
 		   (e->n1 - e->n0) * (sizeof(node) + sizeof(pp_span)) + (e->l1 - e->l0) * 5 + (e->i1 - e->i0) * 16 +
 		   (e->f1 - e->f0) * 8 + (e->r1 - e->r0) * sizeof(cstr) + (e->a1 - e->a0) * sizeof(attrs) + e->nheap +
-		   e->nfpc * 4 + e->nbind * 4 + e->ntl * 4 + (e->nxs + e->nxt + e->nxa + e->nxy) * sizeof(xrec);
+		   e->nfpc * 4 + e->nbind * 4 + e->ntl * 4 + e->nlz * sizeof(lzfn) + (e->nxs + e->nxt + e->nxa + e->nxy) * sizeof(xrec);
 	for (int k = 0; k < RA_N; k++)
 		e->bytes += e->nrel[k] * sizeof(drrel) + e->dn[k][RO_DA + 1] * 4;
 	for (int k = 0; k < W_N; k++)
 		e->bytes += (e->wmask[k] + 1) * 8;
+	if (!fail && !dr_check) {
+		/*
+		 * Worth it?  A replay saves parsing the tokens outside lazy bodies (those
+		 * are skipped cheaply either way) and costs recording, validating W and
+		 * copying the own records (DR_*COST).
+		 */
+		uint64_t lzt = 0, nw = 0, own;
+
+		for (uint32_t i = 0; i < e->nlz; i++)
+			lzt += e->lz[i].z.close - e->lz[i].z.open + 1;
+		for (int k = 0; k < W_N; k++)
+			nw += e->nw[k];
+		own = (e->s1 - e->s0) + (e->t1 - e->t0) + (e->n1 - e->n0) + e->nops;
+		if ((tok > lzt ? tok - lzt : 0) * DR_TOKCOST * 10 < (nw * DR_WCOST + own * DR_OWNCOST + DR_FIXCOST) * dr_gain)
+			fail |= 1u << F_GAIN;
+	}
 	if (!fail) {
 		uint64_t m = atomic_fetch_add_explicit(&dr_mem, e->bytes, memory_order_relaxed);
 
@@ -2170,7 +2250,7 @@ static void rec_close(cc *c, uint64_t endpos)
 	free(e->nodes), free(e->spans), free(e->lists), free(e->lk), free(e->ip), free(e->fp), free(e->strs);
 	for (int k = 0; k < RA_N; k++)
 		free(e->rel[k]), free(e->dof[k]);
-	free(e->attr), free(e->heap), free(e->fpc), free(e->bind), free(e->tl), free(e->xs), free(e->xt), free(e->xa), free(e->xy);
+	free(e->attr), free(e->heap), free(e->fpc), free(e->bind), free(e->tl), free(e->lz), free(e->xs), free(e->xt), free(e->xa), free(e->xy);
 	free(e);
 	hp.v = NULL, fpc.v = NULL;
 nopub:
@@ -2180,7 +2260,7 @@ nopub:
 	/* (what the region's own tokens do stops it every time: no second recording) */
 	if (!(fail & (1u << F_BUDGET | 1u << F_VARIANTS)))
 		never_note(r->he, r->ctr, r->pack, opt_sig(c->o),
-			   fail & F_OWN ? NEVER_AFTER : 1);
+			   fail & (F_OWN | 1u << F_GAIN) ? NEVER_AFTER : 1);
 }
 
 /* ---------------- replay: validation ---------------- */
@@ -2803,6 +2883,10 @@ static void apply(cc *c, const drent *e, uint32_t baseB)
 		sym_bind(c, (uint32_t)(e->bind[i] + x.ds));
 	for (uint32_t i = 0; i < e->ntl; i++)
 		c->toplevel[c->ntoplevel++] = (uint32_t)tr(&x, K_SYM, e->tl[i]);
+	for (uint32_t i = 0; i < e->nlz; i++)
+		c->lzf[c->nlzf++] = lz_tr(e, &e->lz[i], x.ds, x.dl, lb, c->nlzt);
+	if (e->nlz)
+		lazy_replayed(e->lz, e->nlz);
 	c->prevloc = (uint32_t)tr(&x, K_LOC, e->prevloc);
 	c->prevflags = e->prevflags;
 }
@@ -2876,6 +2960,7 @@ static void drcheck(cc *c)
 	CNT("attrs", e->a1 - e->a0, c->nattr - r->a0);
 	CNT("ops", e->nops, r->ops.n);
 	CNT("toplevel", e->ntl, c->ntoplevel - r->tl0);
+	CNT("lazy bodies", e->nlz, c->nlzf - r->lzf0);
 #undef CNT
 	ensure(&r->tymap, &r->ctymap, e->y1 - e->y0 + 1, false);
 	for (uint32_t i = 0; i < e->nops; i++) {
@@ -2972,6 +3057,14 @@ static void drcheck(cc *c)
 			n = ty_fd(&e->fin[i], f);
 			ok = chk_rec(c, &x, "type", b, &e->fin[i], &c->ty[b], f, n, b);
 		}
+	for (uint32_t i = 0; ok && i < e->nlz; i++) {
+		lzfn want = lz_tr(e, &e->lz[i], x.ds, x.dl, r->chk_base - e->base, r->lzt0);
+
+		if (!lz_eq(&want, &c->lzf[r->lzf0 + i])) {
+			chk_report(c, "lazy body", r->lzf0 + i, 0, want.sym, c->lzf[r->lzf0 + i].sym);
+			ok = false;
+		}
+	}
 	for (uint32_t i = 0; ok && i < e->ntl; i++)
 		if ((uint32_t)tr(&x, K_SYM, e->tl[i]) != c->toplevel[r->tl0 + i]) {
 			chk_report(c, "toplevel", i, 0, tr(&x, K_SYM, e->tl[i]), c->toplevel[r->tl0 + i]);
@@ -3146,6 +3239,10 @@ VPRIV bool dr_boundary(cc *c)
 		count(S_NEVER, 0);
 		return false;
 	}
+	if (atomic_load_explicit(&dr_mem, memory_order_relaxed) >= atomic_load_explicit(&dr_max, memory_order_relaxed)) {
+		count(S_FULL, 0);	/* (the entries' budget is spent: a recording could not publish) */
+		return false;
+	}
 	{
 		int why = never_record(he, ctr, pack, opt_sig(c->o));
 
@@ -3221,6 +3318,8 @@ static void dr_env(void)
 
 	dr_mode = getenv("VCC_DR") ? 1 : getenv("VCC_DRREC") ? 2 : 0;
 	dr_check = getenv("VCC_DRCHECK") != NULL;
+	if (getenv("VCC_DR_GAIN"))
+		dr_gain = (uint32_t)atoi(getenv("VCC_DR_GAIN"));
 	if (dr_mode) {
 		schema_check();
 		vm_init();
@@ -3295,12 +3394,12 @@ void cc_dr_stats(char *buf, size_t n)
 	k = snprintf(buf, n,
 		     "%s: recorded %llu: published %llu (%.1f M tok), not %llu (%.1f M), abandoned %llu; %llu entries, %.1f MB\n"
 		     "  at hits: no entry %llu, tried %llu variants, %s %llu (%.1f M tok), no valid variant %llu, no skip %llu,"
-		     " not recorded again %llu, first sight %llu",
+		     " not recorded again %llu, first sight %llu, budget spent %llu",
 		     dr_mode == 1 ? "decl replay" : "decl replay (record only)", K(st_n[S_OPEN]), K(st_n[S_PUB]),
 		     M(st_tok[S_PUB]), K(st_n[S_NOPUB]), M(st_tok[S_NOPUB]), K(st_n[S_ABANDON]), K(st_ents),
 		     (double)K(st_bytes) / (1 << 20), K(st_n[S_NOENT]), K(st_n[S_TRY]),
 		     dr_mode == 1 ? "replayed" : "valid", K(st_n[S_HIT]), M(st_tok[S_HIT]), K(st_n[S_MISS]),
-		     K(st_n[S_NOSKIP]), K(st_n[S_NEVER]), K(st_n[S_FIRST]));
+		     K(st_n[S_NOSKIP]), K(st_n[S_NEVER]), K(st_n[S_FIRST]), K(st_n[S_FULL]));
 	if (k > 0 && (size_t)k + 96 < n)
 		k += snprintf(buf + k, n - (size_t)k, "\n  tags known equal %llu; %llu tag contents, %.1f MB", K(st_known), K(tc_n),
 			      (double)K(tc_bytes) / (1 << 20));

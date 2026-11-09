@@ -986,6 +986,50 @@ pp at a region start, at any depth, as `pp_top_events` gives for the top level.
      - **Next.** Step 3 (lazy bodies) is what the kernel needs. Then decide whether
        to turn replay on by default for PG-like code.
 3. Lazy bodies through `lzfn.hc` (the kernel's 226 M, PG's 5.5 M).
+   - *Done (2026-11-09), still opt-in. The measurements now use all 1574 PG TUs,
+     since main's `8e5c987` made initializer lists linear again.*
+     - **Lazy bodies.** In a region replayed from the header cache, a lazy body is
+       always `hc`: its tokens stay in the cache entry `z.e`, which is immutable and
+       the same in every TU that replays the region. An entry therefore keeps the
+       region's `lzfn` records, and apply appends them (`lz_tr`):
+       - sym and wm move by the sym delta, psyms by the list delta, and `tk` is B's
+         `nlzt`;
+       - the locations and `z.base` move by the location delta;
+       - their parameter lists are marked `K_SYM`.
+       - A body kept as tokens of its own (`lzt`/`lzs` grew) still refuses the
+         region.
+       - `VCC_DRCHECK` compares the records field by field: 0 mismatches (PG 19 149 regions, kernel 11 491; ASan+UBSan 400 PG + 300 kernel TUs), and objects are identical with `VCC_DR=1` (PG 1570/1570, kernel 840/840).
+     - **Bugs this exposed.**
+       - *Quadratic early check.* The early check (`own_fail` at each read) scanned
+         all of the recording's lazy bodies, which was quadratic in kernel regions
+         with thousands of them. It now checks only the new ones.
+       - *Budget.* With the 512 MB budget spent, every recording still ran to the
+         end and was then dropped (4037 times on the kernel). No recording starts
+         once the budget is spent.
+     - **Worth it?** The replayed kernel tokens are mostly lazy bodies, which
+       parsing skips cheaply anyway. A kernel region's W is large, so many replays
+       cost more than parsing. So publish now estimates both sides:
+       - saving: the tokens outside lazy bodies × `DR_TOKCOST`;
+       - cost: W records × `DR_WCOST`, own records × `DR_OWNCOST`, plus
+         `DR_FIXCOST`;
+       - the region is published only if the saving is at least `VCC_DR_GAIN`/10
+         of the cost; if not, the key is not recorded again.
+       - The constants are fitted by a sweep. Gain 1×, 2×, 4×, 8× and 16× of the
+         first estimate gave kernel 82.79 / 82.37 / 81.45 / 82.05 / 83.10 G and PG
+         33.98 / – / 33.83 / 34.00 / 34.93 G; the best (4×) is now the default.
+       - A bigger budget made it worse: 2 GB gave the kernel 85.5 G.
+     - **Numbers**, `vpp --batch -j 1`, `cc_run` instructions:
+
+       | | default | 2c | 3 |
+       |---|---|---|---|
+       | PG (1574 TUs) | 36.12 G | 34.64 G (−4.1%, before the gain rule) | 33.83 G (−6.3%) |
+       | kernel (840 TUs) | 82.68 G | 84.62 G (+3.4%; default then 81.84) | 81.45 G (−1.5%) |
+
+       On the kernel, 8266 regions replay (105 M tokens, mostly lazy bodies). On
+       PG, 7231 regions replay (19.6 M tokens).
+     - **Next.** Entries are large on the kernel (~190 KB, mostly W), and W's
+       validation is what limits the kernel. Make W cheaper per try, e.g. a TU memo
+       for syms and types like the one for tags, or record W lazily.
 4. Fold ccsnap into this if per-region replay of the prefix is as cheap as a snapshot
    restore; otherwise keep both, and let a recording coexist with snapshots (the
    region's type table in the heap, or no snapshot inside a recording).
