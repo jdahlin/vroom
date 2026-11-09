@@ -4,6 +4,69 @@ Research of 2026-11-07. Sources: three research passes (clang/GCC/tcc/warp code,
 LPC talks) and local measurements on the arm64 kernel build (`work/build-o0` flags, Homebrew
 clang 23). Points the research could only infer, not verify, are marked *(unverified)*.
 
+## 0. Overview: what vccd reuses across TUs (2026-11-09)
+
+**The model.** Every layer follows one rule:
+
+> The first time, do the work and note what it read. The next time, if what it
+> read is the same, reuse the result instead of redoing the work.
+
+- **Exact.** The check covers everything the work read, so the result equals a
+  run without the cache. Objects are byte-identical with and without each layer.
+- **The work only happens when a cache misses.**
+- **Three layers**, each built on the one before (details in the sections named):
+
+| layer | what is reused | keyed on (what it read) | on a hit |
+|---|---|---|---|
+| 1. header cache (§3.3, §6) | one `#include`: its tokens and macro effects | the macros it tested or used, `__COUNTER__`, search path | tokens replayed, not lexed or preprocessed; inline bodies kept unparsed (lazy) unless used |
+| 2. prefix snapshots (§6.7) | the parser state after a TU's leading headers: vcc's automatic PCH | the sequence of header-cache entries | one copy, the whole prefix skipped |
+| 3. declaration replay (§6.9, opt-in `VCC_DR=1`) | one later header hit: the declarations it created | its lookups into older declarations (names, types, tags) | records copied and relocated, not parsed |
+
+Layer 1 saves preprocessing, layer 2 saves parsing the opening headers, and
+layer 3 saves parsing the rest of the headers.
+
+**What each layer saves.** The numbers come from these runs:
+- whole process, `vpp --batch -j 1`, mean of two runs;
+- units are G instructions / G cycles; cycles are noisy, about ±5%;
+- "no caches" is `VPP_NOHC=1 VCC_NODC=1`; each later row adds a layer.
+
+| | PG (1574 TUs) | kernel (840 TUs) |
+|---|---|---|
+| no caches | 49.5 / 14.6 | 157.1 / 44.2 |
+| + header cache | 46.8 / 14.7 | 93.9 / 28.9 |
+| + prefix snapshots (today's default) | 42.1 / 14.0 | 85.6 / 27.1 |
+| + declaration replay | 39.1 / 13.8 | 81.3 / 27.0 |
+
+- **Header cache, kernel: −35% of cycles.** Almost all of it is lazy inline
+  bodies. The kernel's headers hold 249 M tokens of inline functions, and only
+  6.5 M of them are parsed. PG has few inline functions; there the cache saves
+  instructions but no cycles: token replay is memory-bound.
+- **Prefix snapshots: 4–6% of cycles.** They skip 40% of the kernel's
+  front-end tokens (242 of 597 M) and 45% of PG's (46.5 of 103 M).
+- **Declaration replay: 5–7% of instructions on top, but only 0–1.5% of
+  cycles.** It replays 125 M kernel tokens and 18.6 M PG tokens. Parsing, with
+  its high IPC, is traded for copies and cache misses.
+
+**What is still done once per TU.** Largest first:
+1. **Copying shared declarations into each TU's own state.** Both snapshots and
+   replay copy them into each TU's arrays. This is the cycles that remain, and
+   it is why replay saves instructions but not time. The way past it is to share
+   a read-only layer instead of copying, as modules do: a different model from
+   today's.
+2. **Header-cache misses**, which preprocess the header again. PG: 48 k misses
+   against 46.5 k hits, mostly guard variants and SDK headers. Kernel: 14.5 k
+   misses against 41 k hits.
+3. **Header hits without a replay entry**, which are parsed in full: 27 k
+   (kernel) and 21 k (PG). Reasons: first sight, the gain rule said no, or the
+   budget was spent. Half of the kernel's entries are never hit and take half
+   of its budget.
+4. **Code generation of `static inline` functions**, emitted in every object
+   that uses them (`__refcount_sub_and_test` 143 times). Copies beyond the
+   first are 0.5 of the kernel's 8.3 MB of function code (6%); emit is about 7%
+   of the instructions, so this is under 1% of the total.
+5. **The main files**, parsed once each. That is not duplication, only what is
+   left.
+
 ## 1. The workload (measured here)
 
 | per TU (clang `-E -Xclang -print-stats`) | `fs/ext4/inode.c` | `kernel/sched/fair.c` | `lib/klist.c` |
