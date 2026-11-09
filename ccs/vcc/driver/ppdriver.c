@@ -742,7 +742,7 @@ int ppd_run(int argc, char **argv, const ppd_env *env)
 	int darwin = 0;
 #endif
 	int wasm = 0, lnx;	/* 64 or 32: wasm64/wasm32-unknown-emscripten (PLAN-wasm.md); lnx: aarch64 Linux */
-	int hosted = 1, nostdinc = 0, asm_mode = 0, undef = 0;
+	int hosted = 1, nostdinc = 0, asm_mode = 0, undef = 0, raw_asm = -1, xlang = 0;	/* raw_asm -1: by the suffix; xlang: -x given */
 	int march_lse = -1, mcpu_lse = -1, lse;
 	int opt = 0, olevel = 0, os = 0, pie = -1, pic = 0, tlsmodel = 0, sections = 0, debug = 0, freestanding = 0, nobuiltin = 0, instr = 0, cfi = -1, strict_align = 0, tiny = 0, gregs = 0;
 	pp_opts po = { 0 };
@@ -910,7 +910,12 @@ int ppd_run(int argc, char **argv, const ppd_env *env)
 		}
 		else if (!strcmp(a, "-nostdinc")) nostdinc = 1;
 		else if (!strcmp(a, "-undef")) undef = 1;
-		else if (!strcmp(a, "-x") && i + 1 < argc) asm_mode = !strcmp(argv[++i], "assembler-with-cpp");
+		else if (!strcmp(a, "-x") && i + 1 < argc) {
+			i++;
+			asm_mode = !strcmp(argv[i], "assembler-with-cpp");
+			raw_asm = !strcmp(argv[i], "assembler") ? 1 : 0;
+			xlang = strcmp(argv[i], "none") != 0;
+		}
 		else if (!strcmp(a, "-O0")) opt = 0, os = 0, olevel = 0;
 		else if (!strcmp(a, "-Os") || !strcmp(a, "-Oz")) { opt = 2; os = 1; olevel = 2; }
 		else if (!strncmp(a, "-O", 2)) opt = 2, os = 0, olevel = !strcmp(a, "-O1") || !strcmp(a, "-Og") ? 1 : 2;
@@ -945,12 +950,15 @@ int ppd_run(int argc, char **argv, const ppd_env *env)
 		else if (!strncmp(a, "-march=", 7) && arch_lse(a + 7, false) >= 0) march_lse = arch_lse(a + 7, false);
 		else if (!strncmp(a, "-mcpu=", 6) && arch_lse(a + 6, true) >= 0) mcpu_lse = arch_lse(a + 6, true);
 		else if (!strcmp(a, "-mcmodel=tiny")) tiny = 1;
-		else if (a[0] != '-' && (strstr(a, ".c") || strstr(a, ".S") || strstr(a, ".dts"))) {
+		else if (a[0] != '-' && a[0] && (xlang || strstr(a, ".c") || strstr(a, ".S") || strstr(a, ".dts") ||
+					 (strlen(a) > 2 && !strcmp(a + strlen(a) - 2, ".s")))) {
 			size_t l = strlen(a);
 
 			main_file = a;
 			if (l > 2 && !strcmp(a + l - 2, ".S"))
 				asm_mode = 1;
+			if (l > 2 && !strcmp(a + l - 2, ".s") && raw_asm < 0)
+				raw_asm = 1;	/* clang: .s is assembled without the preprocessor */
 		}
 	}
 	if (!main_file) {
@@ -962,6 +970,51 @@ int ppd_run(int argc, char **argv, const ppd_env *env)
 		/* clang: -S writes the source's basename with .s */
 		out = obj_name(main_file, objbuf, sizeof(objbuf));
 		objbuf[strlen(objbuf) - 1] = 's';
+	}
+	if (raw_asm == 1 && !objmode) {
+		dprintf(errfd, "vcc: error: %s: assembler input needs -c\n", main_file);
+		status = 2;
+		goto out;
+	}
+	if (raw_asm == 1) {
+		/* a .s file (or -x assembler): straight to the assembler, as clang */
+		char path[4096];
+		const char *msg;
+
+		obj_state();
+		if (!out)
+			out = obj_name(main_file, objbuf, sizeof(objbuf));
+		snprintf(path, sizeof(path), "%s%s%s", main_file[0] == '/' || !env->cwd ? "" : env->cwd,
+			 main_file[0] == '/' || !env->cwd ? "" : "/", main_file);
+		int fd = open(path, O_RDONLY);
+		struct stat st;
+
+		if (fd < 0 || fstat(fd, &st)) {
+			dprintf(errfd, "vcc: error: no such file or directory: '%s'\n", main_file);
+			if (fd >= 0)
+				close(fd);
+			status = 1;
+			goto out;
+		}
+		/* padded: the lexer reads 16 bytes past the end */
+		char *t = calloc(1, (size_t)st.st_size + 64);
+		ssize_t got = t ? read(fd, t, (size_t)st.st_size) : -1;
+
+		close(fd);
+		if (got != st.st_size) {
+			dprintf(errfd, "vcc: error: cannot read '%s'\n", main_file);
+			free(t);
+			status = 1;
+			goto out;
+		}
+		as_set_dir(tl_as, env->cwd);
+		if (as_run(tl_as, tl_obj, t, (size_t)got, main_file, &msg)) {
+			dprintf(errfd, "vcc: error: %s\n", msg);
+			status = 1;
+		} else
+			status = write_obj(env->cwd, out, env->outfd, errfd, 0);
+		free(t);
+		goto out;
 	}
 	if (objmode) {
 		obj_state();

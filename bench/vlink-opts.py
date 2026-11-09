@@ -97,7 +97,7 @@ def main():
         os.mkdir(f'{t}/lib')
         for name, src in ASM.items():
             open(f'{t}/{name}.s', 'w').write(src)
-            subprocess.run([f'{BUILD}/vasm', '--target=aarch64-linux-gnu', '-c', f'{t}/{name}.s', '-o', f'{t}/{name}.o'], check=True)
+            subprocess.run([VPP, '--target=aarch64-linux-gnu', '-c', f'{t}/{name}.s', '-o', f'{t}/{name}.o'], check=True)
         for name, src in list({'a': SRC, 'x': LIB}.items()) + list(LAZY.items()):
             open(f'{t}/{name}.c', 'w').write(src)
             subprocess.run([VPP, '--target=aarch64-linux-gnu', '-c', f'{t}/{name}.c', '-o', f'{t}/{name}.o'], check=True)

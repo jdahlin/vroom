@@ -848,9 +848,9 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
   for `tests/vcc/tls_{static,ie,desc}.c`), `PT_GNU_RELRO`, MOVW_*, CONDBR19, TSTBR14,
   PREL32 to undefined (`ld/ld.c:2560-2570`).
   *Validate:* T8 (each against lld, run under qemu where runnable).
-- [ ] **`vpp -c x.s`** says "no input file" (clang assembles `.s` and
-  preprocesses `.S`).  *Validate:* vcc-driver.py rows; vlink-opts uses vasm
-  until then.
+- [x] **`vpp -c x.s`** (done: `.s` and `-x assembler` go to the assembler
+  without the preprocessor, as clang; an explicit `-x` takes any file name;
+  objects identical to clang -c; `vlink-opts.py` builds its inputs so.)
 - [ ] **Archives**: (done: lazy members extracted as lld: a non-weak
   undefined reference extracts the member defining it, depth first, in lld's
   file order; an archive's member is extracted when its definition meets an
