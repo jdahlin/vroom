@@ -536,10 +536,16 @@ typedef struct ival {
  * Kbuild puts the per-directory -I last, so one entry serves every TU.  A
  * warm lookup is one probe instead of a path build, directory-cache probe
  * and token-cache probe per search directory.
+ *
+ * The key also holds the whole search path's id (fsig): meson puts each
+ * target's own -I first, so the prefix an answer depends on differs per
+ * target anyway, and without fsig the entries of hundreds of targets for
+ * the same header shared one hash and one probe cluster (PostgreSQL: 175
+ * probes per lookup, half of them same-key entries for other targets).
  */
 struct incent {
 	uint64_t hash;
-	uint32_t sig, klen;
+	uint32_t sig, fsig, klen;
 	int32_t mode;		/* start * 4 + angled * 2 + next */
 	uint32_t used, usig;	/* directories looked at, psig[used] */
 	int32_t sdir;
