@@ -45,6 +45,9 @@ VPRIV val ptr_add(ecx *e, val p, val i, int64_t scale, bool sub)
 
 		if (scale > 0 && !(scale & (scale - 1))) {
 			op3s(e, sub ? I_SUB : I_ADD, 1, rp, rp, ri, 0, __builtin_ctzll((uint64_t)scale));
+		} else if (e->E->opt3) {
+			movi(e, 1, R_X16, scale);
+			op4(e, sub ? I_MSUB : I_MADD, 1, rp, ri, R_X16, rp);
 		} else {
 			movi(e, 1, R_X16, scale);
 			op4(e, I_MADD, 1, ri, ri, R_X16, ZR);

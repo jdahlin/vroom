@@ -99,6 +99,22 @@ VPRIV int emit_cmp(ecx *e, int op, int x, bool sg, val *a, val *b)
 {
 	int ra = toreg(e, a);
 
+	if (e->E->opt3 && b->k == V_CONST) {
+		/* the constant in the compare's width: an immediate (or lsl #12), else materialised at that width */
+		int64_t v = x ? (int64_t)b->i : (int32_t)b->i;
+		uint64_t m = v < 0 ? (uint64_t)0 - (uint64_t)v : (uint64_t)v;
+
+		if (m < 4096 || (!(m & 0xfff) && m < (1u << 24))) {
+			opi(e, v < 0 ? I_ADDSI : I_SUBSI, x, ZR, ra, (int64_t)m);
+		} else {
+			int rb = treg(e);
+
+			movi(e, x, rb, v);
+			op3(e, I_SUBS, x, ZR, ra, rb);
+			tfree(e, rb);
+		}
+		return cmp_cond(op, sg);
+	}
 	if (b->k == V_CONST && b->i >= -4095 && b->i <= 4095) {
 		if (b->i < 0)
 			opi(e, I_ADDSI, x, ZR, ra, (int64_t)-b->i);
@@ -307,6 +323,45 @@ VPRIV void shift_imm(ecx *e, int op, int x, int rd, int rn, int k)
 		opbf(e, I_UBFM, x, rd, rn, k, w - 1);
 }
 
+/* -O3: ra = ra / m or ra % m for a power of two m (k as given; false: not one) */
+static bool div_pow2(ecx *e, int op, int x, bool sg, int ra, int64_t k)
+{
+	uint64_t m = x ? (uint64_t)k : (uint32_t)k;
+	int s;
+
+	if ((sg && (x ? k <= 0 : (int32_t)k <= 0)) || !m || (m & (m - 1)))
+		return false;
+	s = __builtin_ctzll(m);
+	if (op == T_SLASH) {
+		if (!s)
+			return true;
+		if (!sg) {
+			shift_imm(e, I_LSRV, x, ra, ra, s);
+			return true;
+		}
+		/* round toward zero: bias negative dividends by m - 1 */
+		opi(e, I_ADDI, x, R_X16, ra, (int64_t)(m - 1));
+		opi(e, I_SUBSI, x, ZR, ra, 0);
+		op3s(e, I_CSEL, x, R_X16, R_X16, ra, C_LT, 0);
+		shift_imm(e, I_ASRV, x, ra, R_X16, s);
+		return true;
+	}
+	if (!s) {
+		movi(e, x, ra, 0);
+		return true;
+	}
+	if (!sg) {
+		opi(e, I_ANDI, x, ra, ra, (int64_t)(m - 1));
+		return true;
+	}
+	/* the remainder takes the dividend's sign: a > 0 ? a & (m-1) : -(-a & (m-1)) */
+	op3(e, I_SUBS, x, R_X16, ZR, ra);
+	opi(e, I_ANDI, x, ra, ra, (int64_t)(m - 1));
+	opi(e, I_ANDI, x, R_X16, R_X16, (int64_t)(m - 1));
+	op3s(e, I_CSNEG, x, ra, ra, R_X16, C_MI, 0);
+	return true;
+}
+
 VPRIV val arith(ecx *e, int op, qty ty, val a, val b)
 {
 	cc *c = e->c;
@@ -337,6 +392,15 @@ VPRIV val arith(ecx *e, int op, qty ty, val a, val b)
 				shift_imm(e, T_LESSLESS, x, ra, ra, __builtin_ctzll(m));
 				return a;
 			}
+			if (e->E->opt3 && m > 2 && !((m - 1) & (m - 2))) {
+				/* 2^s + 1 */
+				op3s(e, I_ADD, x, ra, ra, ra, 0, __builtin_ctzll(m - 1));
+				return a;
+			}
+			break;
+		case T_SLASH: case T_PERCENT:
+			if (e->E->opt3 && div_pow2(e, op, x, sg, ra, k))
+				return a;
 			break;
 		case T_AMP: case T_PIPE: case T_CARET:
 			if (logimm_ok(m, x)) {
@@ -359,6 +423,18 @@ VPRIV val arith(ecx *e, int op, qty ty, val a, val b)
 		}
 	}
 	rb = toreg(e, &b);
+	if (e->E->opt3 && (op == T_PLUS || op == T_MINUS) && e->reach && e->nin) {
+		/* ra +- rb where rb = rn * rm was just computed: madd/msub */
+		ins *p = &e->in[e->nin - 1];
+
+		if (p->op == I_MADD && p->ra == ZR && p->rd == rb && rb != ra && p->sz == x && p->rn != ra && p->rm != ra) {
+			p->op = op == T_PLUS ? I_MADD : I_MSUB;
+			p->rd = (uint8_t)ra;
+			p->ra = (uint8_t)ra;
+			tfree(e, rb);
+			return a;
+		}
+	}
 	switch (op) {
 	case T_PLUS: op3(e, I_ADD, x, ra, ra, rb); break;
 	case T_MINUS: op3(e, I_SUB, x, ra, ra, rb); break;
