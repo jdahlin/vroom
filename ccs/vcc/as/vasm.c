@@ -1,6 +1,7 @@
 /*
  * vasm: assembler driver.  vasm [-o out.o] in.s  (input: preprocessed text)
  *       vasm --target=wasm64-unknown-emscripten [-o out.o] in.s  (LLVM's wasm syntax)
+ *       vasm --target=arm64-apple-macos [-o out.o] in.s  (Apple's syntax, a Mach-O object)
  *       vasm --bench N in.s...  (assemble each file N times, report MB/s)
  */
 #include "as.h"
@@ -81,13 +82,15 @@ int main(int argc, char **argv)
 		       (unsigned long long)vbest.ins, (unsigned long long)vbest.cyc, bench - 1, (unsigned long long)h);
 		return 0;
 	}
-	int wasm = 0;
+	int wasm = 0, macho = 0;
 	for (int i = 1; i < argc; i++) {
 		if (!strcmp(argv[i], "-o") && i + 1 < argc) out = argv[++i];
 		else if (!strncmp(argv[i], "--target=wasm", 13)) wasm = strncmp(argv[i] + 13, "32", 2) ? 64 : 32;
+		else if (!strncmp(argv[i], "--target=", 9) && (strstr(argv[i], "darwin") || strstr(argv[i], "apple") ||
+							       strstr(argv[i], "macos"))) macho = 1;
 		else in = argv[i];
 	}
-	if (!in) { fprintf(stderr, "usage: vasm [--target=wasm64-...] [-o out.o] in.s\n"); return 2; }
+	if (!in) { fprintf(stderr, "usage: vasm [--target=wasm64-...|arm64-apple-macos] [-o out.o] in.s\n"); return 2; }
 	size_t n; const char *p = map(in, &n);
 	const char *msg;
 	if (wasm) {
@@ -97,6 +100,22 @@ int main(int argc, char **argv)
 		FILE *f = fopen(out, "wb");
 		if (!f || fwrite(ob, 1, on, f) != on || fclose(f)) { perror(out); return 1; }
 		free(ob);
+		return 0;
+	}
+	if (macho) {
+		/* Apple's dialect, as vpp -c for a Darwin target: back to ours, then the Mach-O writer */
+		size_t dn;
+		char *d = as_darwin_text(p, n, &dn);
+		if (as_run(a, o, d, dn, in, &msg)) { fprintf(stderr, "%s\n", msg); return 1; }
+		size_t on = macho_finish(o);
+		if (!on || o->has_err) { fprintf(stderr, "%s: %s\n", in, o->err[0] ? o->err : "cannot lay out the object"); return 1; }
+		uint8_t *ob = malloc(on);
+		FILE *f = fopen(out, "wb");
+		if (!ob) return 1;
+		macho_emit(o, ob);
+		if (!f || fwrite(ob, 1, on, f) != on || fclose(f)) { perror(out); return 1; }
+		free(ob);
+		free(d);
 		return 0;
 	}
 	if (as_run(a, o, p, n, in, &msg)) { fprintf(stderr, "%s\n", msg); return 1; }

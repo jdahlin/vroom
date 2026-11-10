@@ -802,7 +802,8 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
   (commons now as Mach-O commons).  *Validated:* `vcc-darwin-s.py`: vpp -c of
   vcc's -S is byte-identical to the direct object (1447 tests; not
   branch_far.c, whose text has no relaxation); `--clang`: clang's -S assembled
-  by vpp runs as clang's own assembly (1432 tests).  Left: vasm (ELF only);
+  by vpp runs as clang's own assembly (1432 tests); `vasm --target=arm64-apple-*`
+  writes the same Mach-O object as vpp -c.  Left:
   `.cfi_*` is dropped: no compact unwind (`__LD,__compact_unwind`) in vcc's
   Mach-O, neither direct nor from text.
 - [x] **Wrong output**: GOT relocs against local symbols kept the section
