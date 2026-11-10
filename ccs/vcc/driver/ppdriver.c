@@ -1357,7 +1357,7 @@ int ppd_run(int argc, char **argv, const ppd_env *env)
 		cc_opts co = { .target = po.target, .unsigned_char = po.unsigned_char, .dump_layouts = layout, .ms_anon = ms_anon, .short_wchar = short_wchar,
 				.std = std, .implicit_int = std == 89 || wimpl_int, .implicit_fn = std == 89 || wimpl_fn, .conv_warn = conv_warn,
 				.gnu89_inline = gnu89_inline, .no_builtin = freestanding || nobuiltin, .instrument = instr, .wasm_sjlj = sjlj,
-				.general_regs_only = gregs, .vcc_kernel = vcc_kernel, .lse = lse, .opt = olevel, .pic = pic ? 2 : pie ? 1 : 0, .tlsmodel = tlsmodel, .sections = sections, .debug = debug, .dbg_name = main_file,
+				.general_regs_only = gregs, .vcc_kernel = vcc_kernel, .lse = lse, .opt = olevel, .pic = pic ? 2 : pie ? 1 : 0, .tlsmodel = tlsmodel, .sections = sections, .debug = debug, .cfi = cfi > 0, .dbg_name = main_file,
 			       .outfd = env->outfd };
 		int fd = -1;
 		char outpath[4096], outtmp[4200];

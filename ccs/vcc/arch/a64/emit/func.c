@@ -319,10 +319,16 @@ static void finish_function(ecx *e, uint32_t s)
 		if (dbg_where(e, c->syms[s].body ? N(c->syms[s].body)->loc : c->syms[s].loc, &f, &l, &cl))
 			tb_f(b, "\t.loc\t%u %u 0\n", f, l);
 	}
-	/* prologue */
+	/* prologue; with unwind tables the CFA is x29 + 16 once the frame is set up (as clang) */
+	bool cfi = e->E->o->cfi && !DARWIN(c);
+
+	if (cfi)
+		tb_s(b, "\t.cfi_startproc\n");
 	if (leaf)
 		;
-	else if (tb_s(b, "\tstp\tx29, x30, [sp, #-16]!\n\tmov\tx29, sp\n"), e->falign > 16) {
+	else if (tb_s(b, cfi ? "\tstp\tx29, x30, [sp, #-16]!\n\t.cfi_def_cfa_offset 16\n\tmov\tx29, sp\n"
+			      "\t.cfi_def_cfa w29, 16\n\t.cfi_offset w30, -8\n\t.cfi_offset w29, -16\n" :
+			      "\tstp\tx29, x30, [sp, #-16]!\n\tmov\tx29, sp\n"), e->falign > 16) {
 		ins i = { .op = I_SUBI, .sz = 1, .rd = R_X16, .rn = SP, .imm = total - 16 };
 		ins a = { .op = I_ANDI, .sz = 1, .rd = SP, .rn = R_X16, .imm = -(int64_t)e->falign };
 
@@ -337,6 +343,9 @@ static void finish_function(ecx *e, uint32_t s)
 		tb_f(b, "\tstp\tx%d, x%d, [x29, #%d]\n", cs[k], cs[k + 1], -csave + 8 * k);
 	if (ncs & 1)
 		tb_f(b, "\tstr\tx%d, [x29, #%d]\n", cs[ncs - 1], -csave + 8 * (ncs - 1));
+	if (cfi)
+		for (int k = 0; k < ncs; k++)
+			tb_f(b, "\t.cfi_offset w%d, %d\n", cs[k], -csave + 8 * k - 16);
 	if (bp)
 		tb_s(b, "\tmov\tx28, sp\n");
 	/* text has no relaxation (the object writer's r_relax): in a function that
@@ -383,7 +392,10 @@ static void finish_function(ecx *e, uint32_t s)
 		tb_f(b, "\tldp\tx%d, x%d, [x29, #%d]\n", cs[k], cs[k + 1], -csave + 8 * k);
 	if (ncs & 1)
 		tb_f(b, "\tldr\tx%d, [x29, #%d]\n", cs[ncs - 1], -csave + 8 * (ncs - 1));
-	tb_s(b, leaf ? "\tret\n.Lfe" : "\tmov\tsp, x29\n\tldp\tx29, x30, [sp], #16\n\tret\n.Lfe");
+	tb_s(b, leaf ? "\tret\n" : "\tmov\tsp, x29\n\tldp\tx29, x30, [sp], #16\n\tret\n");
+	if (cfi)
+		tb_s(b, "\t.cfi_endproc\n");
+	tb_s(b, ".Lfe");
 	tb_u(b, s);
 	tb_s(b, ":\n\t.size\t");
 	sym_name(c, b, s);

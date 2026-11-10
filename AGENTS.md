@@ -116,6 +116,7 @@ bench/var-cmp.py work/build-x       # vcc ar against llvm-ar on an llvm-ar-built
 bench/vsh-test.py                   # vsh/rsh against dash on small recipes
 bench/vcc-driver.py                 # driver: command lines vs clang (predefines from -O), <1 s
 bench/vcc-fpcheck.py -j 6           # no generated FP/SIMD code under -mgeneral-regs-only (~10 s)
+bench/vcc-cfi.py -j 6               # -fasynchronous-unwind-tables: .eh_frame per function, .text unchanged (~1 min)
 bench/vcc-dwarf.py -j 6             # -g line tables: dwarfdump --verify, .text unchanged, rows vs clang (~2 min)
 bench/vlink-bad.py                  # corrupt objects/archives: vlink (ASan) fails cleanly (<1 s)
 bench/vlink-opts.py                 # vlink options vs ld.lld: errors and loaded image (<1 s)

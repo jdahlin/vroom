@@ -517,8 +517,16 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
   `tests/vcc/data_sections.c`).
   *Validate:* T6 (relocs per model); T1 run under qemu with the runtime's
   TLS setup (`tests/rt` start.S sets `tpidr_el0`); T3 already has TLV.
-- [ ] **CFI / `.eh_frame`** (and Darwin compact unwind) [P].
-  `-fasynchronous-unwind-tables` default on hosted Linux.
+- [~] **CFI / `.eh_frame`** (and Darwin compact unwind) [P].
+  `-fasynchronous-unwind-tables` default on hosted Linux.  ELF done: the
+  printer writes `.cfi_*` (CFA = x29 + 16 after the frame record, the frame
+  record and callee-saved registers), `-c` goes through the text and the
+  assembler's `.eh_frame` (as `-g`).  *Validated:* `bench/vcc-cfi.py`
+  1393/1393: one FDE per function covering it, `.text` unchanged, every
+  frame function's last row CFA=W29+16 with W29/W30 saved.  Left: Darwin
+  (`__eh_frame` or `__LD,__compact_unwind` in the Mach-O writer), the
+  direct object path (-c with unwind tables goes through the text), an
+  unwinder run (T3 `unwind.c`: no unwinder in the freestanding qemu runtime).
   *Validate:* T6 (`.eh_frame` present, `llvm-dwarfdump --eh-frame` valid
   for every function); T3 `unwind.c` (`_Unwind_Backtrace` from a deep vcc
   call chain lists every frame; a C++ exception thrown through vcc frames,

@@ -424,6 +424,9 @@ static int emit_tu1(cc *c, const cc_opts *o, bool write_out, uint8_t *mf, bool *
 	/* -g: the line table is the assembler's, from the printer's .loc */
 	if (o->debug && !DARWIN(c) && !WASM(c))
 		E.objtext = true;
+	/* unwind tables: .eh_frame is the assembler's, from the printer's .cfi_* */
+	if (o->cfi && !DARWIN(c) && !WASM(c))
+		E.objtext = true;
 	/* roots */
 	for (uint32_t i = 0; i < c->ntoplevel; i++) {
 		uint32_t s = c->toplevel[i];

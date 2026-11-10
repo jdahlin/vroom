@@ -262,6 +262,7 @@ typedef struct cc_opts {	/* fields before outfd: parse options, all in the decl 
 	int opt;		/* -O level for code generation: 0 (default, -O0), 1 (-O1, -Og), 2 (-O2, -O3, -Os, -Oz, -O) */
 	int sections;		/* 1 -ffunction-sections, 2 -fdata-sections (ELF) */
 	int debug;		/* -g: DWARF line tables (ELF) */
+	int cfi;		/* -fasynchronous-unwind-tables: .cfi_* (ELF), .eh_frame from the assembler */
 	const char *dbg_dir, *dbg_name;	/* the compilation directory and the main file, as named */
 	int tlsmodel;		/* -ftls-model=: VCC_TLS_*, 0: the default */
 	int pic;		/* ELF: 0 none (-fno-pic), 1 PIE (-fpie, the hosted default), 2 PIC (-fpic) */
