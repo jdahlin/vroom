@@ -21,6 +21,9 @@ VPRIV wkst *wk_state(ecx *e)
 		W->ulbl = reserve(((size_t)c->nlabel + 64) * sizeof(uint32_t));
 		W->cgen = reserve(((size_t)c->nnode + 64) * sizeof(uint32_t));
 		W->clbl = reserve(((size_t)c->nnode + 64) * sizeof(uint32_t));
+		W->zgen = reserve(((size_t)c->nsym + 64) * sizeof(uint32_t));
+		W->vgen = reserve(((size_t)c->nnode + 64) * sizeof(uint32_t));
+		W->voff = reserve(((size_t)c->nnode + 64) * sizeof(int32_t));
 	}
 	return W;
 }
@@ -43,6 +46,9 @@ VPRIV void wk_ecx_free(ecx *e)
 		munmap(W->ulbl, ((size_t)c->nlabel + 64) * sizeof(uint32_t));
 		munmap(W->cgen, ((size_t)c->nnode + 64) * sizeof(uint32_t));
 		munmap(W->clbl, ((size_t)c->nnode + 64) * sizeof(uint32_t));
+		munmap(W->zgen, ((size_t)c->nsym + 64) * sizeof(uint32_t));
+		munmap(W->vgen, ((size_t)c->nnode + 64) * sizeof(uint32_t));
+		munmap(W->voff, ((size_t)c->nnode + 64) * sizeof(int32_t));
 	}
 	munmap(W->cases, WK_MAXCASE * sizeof(wkcase));
 	free(W);
@@ -93,6 +99,148 @@ static uint32_t wk_caselabel(ecx *e, uint32_t n)
 	return W->clbl[n];
 }
 
+/* ---------------- initializers ---------------- */
+
+static bool wk_zero_init(cc *c, uint32_t v)
+{
+	const node *x = N(v);
+
+	if (!v || x->op == N_ZERO)
+		return true;
+	if (x->op == N_NUM)
+		return c->ipool[x->a] == 0;
+	if (x->op == N_CAST && (x->aux == CK_INT || x->aux == CK_NOP || x->aux == CK_NULL || x->aux == CK_I2P))
+		return x->aux == CK_NULL || wk_zero_init(c, x->a);
+	return false;
+}
+
+/* the address of d (a frame slot or a symbol) in a new temporary */
+static int wk_addr(ecx *e, const lval *d)
+{
+	if (d->k == L_REG)
+		efatal(e, e->curloc, "internal error: an initializer through a register");
+	return LO(laddr)(e, d);
+}
+
+/* the elements of init stored into the (already zeroed) object at d */
+static void wk_elems(ecx *e, const lval *d, qty ty, uint32_t init)
+{
+	cc *c = e->c;
+	const node *x = N(init);
+
+	if (!init || x->op == N_ZERO)
+		return;
+	if (x->op == N_INIT) {
+		const uint32_t *v = &c->lists[x->b];
+
+		if (x->aux == 1) {
+			qty et = T(c, ty)->base;
+			uint64_t es = tsize(c, et);
+
+			for (uint32_t i = 0; i < x->c; i++) {
+				uint32_t lo = v[3 * i], hi = v[3 * i + 1], vi = v[3 * i + 2];
+
+				for (uint64_t k = lo; k <= hi; k++) {
+					lval el = *d;
+
+					el.off += (int64_t)(k * es);
+					wk_elems(e, &el, et, vi);
+				}
+			}
+			return;
+		}
+		{
+			const tag *r = &c->tags[T(c, ty)->aux];
+
+			for (uint32_t i = 0; i < x->c && i < r->nfield; i++) {
+				const field *f = &r->f[i];
+				lval el = *d;
+
+				if ((x->aux == 2 && i != x->a) || !v[i])
+					continue;
+				el.off += (int64_t)(f->off / 8);
+				if (f->bitfield) {
+					if (wk_zero_init(c, v[i]))
+						continue;
+					el.bf = 1;
+					el.bitoff = (uint16_t)(f->off % 8);
+					el.width = f->width;
+					el.sgn = is_signed(c, f->ty);
+					wk_bfinit(e, &el, f->ty, v[i]);
+					continue;
+				}
+				wk_elems(e, &el, f->ty, v[i]);
+			}
+		}
+		return;
+	}
+	if (x->op == N_STR && is_array(c, ty)) {
+		/* the literal's bytes (up to the array's size; the rest is zero) */
+		const cstr *s = &c->strs[x->a];
+		uint64_t n = (uint64_t)s->n * s->esz, cap = tsize(c, ty);
+		lval src = { .k = L_SYM, .ref = REF(RK_STR, x->a), .align = s->esz };
+		int rd, rs;
+
+		if (n > cap)
+			n = cap;
+		note_ref(e, src.ref);
+		rd = wk_addr(e, d);
+		rs = LO(laddr)(e, &src);
+		LO(copy)(e, rd, rs, n);
+		LO(tfree)(e, rs);
+		LO(tfree)(e, rd);
+		return;
+	}
+	if (wk_zero_init(c, init) && !wk_mem(e, ty))
+		return;
+	if (wk_mem(e, ty)) {
+		/* another object's bytes (a struct variable, a call's result ...) */
+		val v = wk_gen(e, init);
+		int rs = wk_reg(e, &v, prim(TY_ULONG)), rd = wk_addr(e, d);
+
+		LO(copy)(e, rd, rs, tsize(c, ty));
+		LO(tfree)(e, rs);
+		LO(tfree)(e, rd);
+		return;
+	}
+	{
+		val v = wk_gen(e, init);
+		int r = wk_reg(e, &v, ty);
+
+		LO(store)(e, r, d, wk_size(c, ty));
+		LO(tfree)(e, r);
+	}
+}
+
+VPRIV void wk_init(ecx *e, const lval *d, qty t, uint32_t init)
+{
+	cc *c = e->c;
+	const node *x = N(init);
+
+	if (!init)
+		return;
+	if (x->op == N_INIT || x->op == N_ZERO || (x->op == N_STR && is_array(c, t))) {
+		int rd = wk_addr(e, d);
+
+		LO(zero)(e, rd, tsize(c, t));
+		LO(tfree)(e, rd);
+		wk_elems(e, d, t, init);
+		return;
+	}
+	if (wk_mem(e, t)) {
+		wk_elems(e, d, t, init);	/* another object's bytes */
+		return;
+	}
+	{
+		/* a scalar: stored whatever its value (the object was not zeroed) */
+		val v = wk_gen(e, init);
+		int r = wk_reg(e, &v, t);
+
+		LO(store)(e, r, d, wk_size(c, t));
+		LO(tfree)(e, r);
+	}
+}
+
 /* ---------------- declarations ---------------- */
 
 static void wk_decl(ecx *e, const node *x)
@@ -101,28 +249,74 @@ static void wk_decl(ecx *e, const node *x)
 	uint32_t s = x->a;
 	const sym *y = &c->syms[s];
 
+	if (unlikely(vm_type(c, y->ty)))
+		wk_vla_fix(e, y->ty, false);
 	if (y->kind != S_VAR || y->sc == SC_STATIC || y->sc == SC_EXTERN || y->sc == SC_TYPEDEF)
 		return;
-	if (vm_type(c, y->ty))
-		efatal(e, x->loc, "x86-64: variable-length arrays are not supported yet (PLAN-x86.md X3)");
+	if (T(c, y->ty)->flags & TF_VLA) {
+		wk_vla_decl(e, s, x->b != 0);
+		return;
+	}
 	if (sym_attrs(c, s)->cleanup)
 		efatal(e, x->loc, "x86-64: cleanup variables are not supported yet (PLAN-x86.md X3)");
 	{
 		lval l = { .k = L_FRAME, .align = sym_align(c, s) };
 
-		e->wk->sgen[s] = e->wk->gen;
-		e->wk->soff[s] = l.off = wk_slot(e, tsize(c, y->ty) ? tsize(c, y->ty) : 1, sym_align(c, s));
-		if (!x->b)
-			return;
-		if (is_agg(c, y->ty) || N(x->b)->op == N_INIT || N(x->b)->op == N_ZERO)
-			efatal(e, x->loc, "x86-64: aggregate initializers are not supported yet (PLAN-x86.md X3)");
-		{
-			val v = wk_gen(e, x->b);
-			int r = wk_reg(e, &v, y->ty);
+		l.off = wk_local(e, s);
+		wk_init(e, &l, y->ty, x->b);
+	}
+}
 
-			LO(store)(e, r, &l, wk_size(c, y->ty));
+/*
+ * The VLAs declared in the statements under n: their saved sp zeroed on
+ * entry, so a declaration reached again (a goto back) frees the previous
+ * instance first.  (One inside a statement expression is not seen: it is
+ * not freed by a goto back.)
+ */
+static void wk_vla_scan(ecx *e, uint32_t n)
+{
+	cc *c = e->c;
+	wkst *W = e->wk;
+	const node *x;
+
+	if (!n)
+		return;
+	x = N(n);
+	switch (x->op) {
+	case N_DECL: {
+		const sym *y = &c->syms[x->a];
+
+		if (y->kind == S_VAR && y->sc != SC_TYPEDEF && y->sc != SC_STATIC && y->sc != SC_EXTERN &&
+		    (T(c, y->ty)->flags & TF_VLA)) {
+			lval l = { .k = L_FRAME, .off = wk_local(e, x->a) + 8, .align = 8 };
+			val z = vconst(0);
+			int r = LO(toreg)(e, &z, 8);
+
+			LO(store)(e, r, &l, 8);
 			LO(tfree)(e, r);
+			W->zgen[x->a] = W->gen;
 		}
+		return;
+	}
+	case N_BLOCK:
+		for (uint32_t i = 0; i < x->c; i++)
+			wk_vla_scan(e, c->lists[x->b + i]);
+		return;
+	case N_IF:
+		wk_vla_scan(e, x->b);
+		wk_vla_scan(e, x->c);
+		return;
+	case N_WHILE: case N_DO: case N_SWITCH:
+		wk_vla_scan(e, x->b);
+		return;
+	case N_FOR:
+		wk_vla_scan(e, c->lists[x->c + 1]);
+		return;
+	case N_LABEL: case N_CASE: case N_DEFAULT:
+		wk_vla_scan(e, x->c);
+		return;
+	default:
+		return;
 	}
 }
 
@@ -188,7 +382,22 @@ static void wk_switch(ecx *e, uint32_t n)
 			ldef = l;
 			continue;
 		}
-		if (k->lo == k->hi) {
+		if (wk_mem(e, ct)) {
+			/* __int128: each test a 0/1 value (the value is an object, r its address) */
+			val t = LO(wcmp)(e, k->lo == k->hi ? T_EQUALEQUAL : T_GREATEREQ, sg, (val){ .k = V_REG, .r = (uint8_t)r }, vconst(k->lo));
+			uint32_t skip = wk_newlabel(e);
+
+			LO(tkeep)(e, r);
+			if (k->lo == k->hi) {
+				LO(brz)(e, t, 4, true, l);
+				continue;
+			}
+			LO(brz)(e, t, 4, false, skip);
+			t = LO(wcmp)(e, T_LESSEQ, sg, (val){ .k = V_REG, .r = (uint8_t)r }, vconst(k->hi));
+			LO(tkeep)(e, r);
+			LO(brz)(e, t, 4, true, l);
+			LO(label)(e, skip);
+		} else if (k->lo == k->hi) {
 			LO(cmpbr)(e, T_EQUALEQUAL, w, sg, (val){ .k = V_REG, .r = (uint8_t)r }, vconst(k->lo), l);
 			LO(tkeep)(e, r);
 		} else {
@@ -235,10 +444,26 @@ VPRIV void wk_stmt(ecx *e, uint32_t n)
 	x = N(n);
 	e->curloc = x->loc;
 	switch (x->op) {
-	case N_BLOCK:
-		for (uint32_t i = 0; i < x->c; i++)
+	case N_BLOCK: {
+		uint32_t vs = 0;	/* the block's first VLA: its saved sp is restored at the end */
+
+		for (uint32_t i = 0; i < x->c; i++) {
+			const node *d = N(c->lists[x->b + i]);
+
+			if (!vs && d->op == N_DECL && c->syms[d->a].kind == S_VAR && c->syms[d->a].sc != SC_TYPEDEF &&
+			    c->syms[d->a].sc != SC_STATIC && c->syms[d->a].sc != SC_EXTERN && (T(c, c->syms[d->a].ty)->flags & TF_VLA))
+				vs = d->a;
 			wk_stmt(e, c->lists[x->b + i]);
+		}
+		if (vs) {
+			lval l = { .k = L_FRAME, .off = wk_local(e, vs) + 8, .align = 8 };
+			int r = LO(treg)(e);
+
+			LO(load)(e, r, &l, 8, false);
+			LO(spset)(e, r);
+		}
 		return;
+	}
 	case N_EXPR:
 		if (x->a) {
 			val v = wk_gen(e, x->a);
@@ -336,17 +561,31 @@ VPRIV void wk_stmt(ecx *e, uint32_t n)
 		return;
 	}
 	case N_RETURN:
-		if (x->a && KIND(c, W->rty) != TY_VOID) {
+		if (x->a && wk_mem(e, W->rty)) {
+			/* the object's address; a size not a multiple of 8 through a slot of whole words */
+			val v = wk_gen(e, x->a);
+			int r = wk_reg(e, &v, prim(TY_ULONG));
+
+			if (!W->rrec.mem && W->rrec.size % 8) {
+				lval t = { .k = L_FRAME, .off = wk_slot(e, (W->rrec.size + 7) & ~(uint64_t)7, 8), .align = 8 };
+				int rt = LO(laddr)(e, &t);
+
+				LO(copy)(e, rt, r, W->rrec.size);
+				LO(tfree)(e, r);
+				r = rt;
+			}
+			LO(retrec)(e, r, &W->rrec, W->retlbl);
+		} else if (x->a && KIND(c, W->rty) != TY_VOID) {
 			val v = wk_gen(e, x->a);
 
-			LO(ret)(e, &v, wk_size(c, W->rty), wk_signed(c, W->rty), W->retlbl);
+			LO(ret)(e, &v, W->rty, W->retlbl);
 		} else {
 			if (x->a) {
 				val v = wk_gen(e, x->a);
 
 				wk_free(e, &v);
 			}
-			LO(ret)(e, NULL, 0, false, W->retlbl);
+			LO(ret)(e, NULL, prim(TY_VOID), W->retlbl);
 		}
 		return;
 	case N_ASM:
@@ -375,7 +614,7 @@ VPRIV void wk_function(ecx *e, uint32_t s)
 	const ctype *ft = T(c, y->ty);
 	const node *body = N(y->body);
 	wkst *W = wk_state(e);
-	int nreg = LO(nregargs)(), ir = 0, is = 0;
+	wkarg pa[256];
 
 	walk_fn(e, s);
 	W->gen++;
@@ -386,6 +625,7 @@ VPRIV void wk_function(ecx *e, uint32_t s)
 	W->ncases = 0;
 	W->rty = ft->base;
 	W->fsym = s;
+	W->rrec = (wkarg){ 0 };
 	e->top = s;
 	e->reach = true;
 	e->calls = false;
@@ -393,36 +633,63 @@ VPRIV void wk_function(ecx *e, uint32_t s)
 	LO(begin)(e, s);
 	if (_setjmp(e->bail))
 		return;	/* efatal: the function is not emitted, the error counted */
-	if (ft->flags & TF_VARIADIC)
-		efatal(e, y->loc, "x86-64: variadic functions are not supported yet (PLAN-x86.md X3)");
 	if (KIND(c, W->rty) != TY_VOID) {
 		int k = KIND(c, W->rty);
 
-		if (is_flt(c, W->rty) || is_record(c, W->rty) || k == TY_INT128 || k == TY_UINT128 || k == TY_VECTOR)
+		if (k == TY_FLOAT16 || ((k == TY_INT128 || k == TY_UINT128) && !LO(i128mem)()) || k == TY_VECTOR || k == TY_FLOAT128)
 			efatal(e, y->loc, "x86-64: this return type is not supported yet (PLAN-x86.md X3)");
 	}
+	if (body->aux > 256)
+		efatal(e, y->loc, "x86-64: more than 256 parameters");
 	W->retlbl = wk_newlabel(e);
-	/* parameters: in registers to frame slots, on the stack where they are */
+	if (wk_mem(e, W->rty)) {
+		LO(classify)(e, W->rty, &W->rrec);
+		W->rrec.slot = wk_slot(e, 8, 8);	/* (memory: the hidden pointer's slot) */
+	}
+	/* parameters: their slots, filled from the registers (or left on the stack) */
 	for (uint32_t i = 0; i < body->aux; i++) {
 		uint32_t p = c->lists[body->a + i];
 		qty pt = c->syms[p].ty;
 		int k = KIND(c, pt);
 
-		if (is_flt(c, pt) || is_record(c, pt) || k == TY_INT128 || k == TY_UINT128 || k == TY_VECTOR)
+		if (k == TY_FLOAT16 || ((k == TY_INT128 || k == TY_UINT128) && !LO(i128mem)()) || k == TY_VECTOR || k == TY_FLOAT128)
 			efatal(e, c->syms[p].loc, "x86-64: this parameter type is not supported yet (PLAN-x86.md X3)");
+		if ((ft->flags & TF_NOPROTO) && k == TY_FLOAT)
+			pt = prim(TY_DOUBLE);	/* K&R: received as the caller promoted it */
+		LO(classify)(e, pt, &pa[i]);
+		pa[i].slot = wk_slot(e, pa[i].size > 8 ? (pa[i].size + 7) & ~(uint64_t)7 : 8, pa[i].align);
+	}
+	LO(params)(e, pa, (int)body->aux, wk_mem(e, W->rty) ? &W->rrec : NULL, (ft->flags & TF_VARIADIC) != 0);
+	for (uint32_t i = 0; i < body->aux; i++) {
+		uint32_t p = c->lists[body->a + i];
+
 		W->sgen[p] = W->gen;
-		if (ir < nreg) {
-			W->soff[p] = wk_slot(e, 8, 8);
-			LO(param)(e, ir++, W->soff[p], wk_size(c, pt));
-		} else {
-			W->soff[p] = LO(stackarg)(nreg + is++);
+		W->soff[p] = pa[i].slot;
+		if ((ft->flags & TF_NOPROTO) && KIND(c, c->syms[p].ty) == TY_FLOAT) {
+			/* the double narrowed to the float the parameter is, in place */
+			lval l = { .k = L_FRAME, .off = pa[i].slot, .align = 8 };
+			val v = { .k = V_REG, .r = (uint8_t)LO(ftreg)(e) };
+			int r;
+
+			LO(load)(e, v.r, &l, 8, false);
+			v = LO(cvt)(e, v, prim(TY_DOUBLE), prim(TY_FLOAT));
+			r = v.r;
+			LO(store)(e, r, &l, 4);
+			LO(tfree)(e, r);
 		}
 	}
+	for (uint32_t i = 0; i < body->aux; i++) {	/* int (*a)[n]: n as on entry */
+		qty pt = c->syms[c->lists[body->a + i]].ty;
+
+		if (unlikely(vm_type(c, pt)))
+			wk_vla_fix(e, pt, true);
+	}
+	wk_vla_scan(e, y->body);
 	wk_stmt(e, y->body);
 	if (wk_is_main(c, s) && KIND(c, W->rty) == TY_INT) {
 		val z = vconst(0);
 
-		LO(ret)(e, &z, 4, true, W->retlbl);	/* falling off the end of main returns 0 */
+		LO(ret)(e, &z, prim(TY_INT), W->retlbl);	/* falling off the end of main returns 0 */
 	}
 	LO(label)(e, W->retlbl);
 	LO(finish)(e, s);
