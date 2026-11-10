@@ -1148,6 +1148,185 @@ static int wk_valist(ecx *e, uint32_t n)
 	}
 }
 
+/* a new temporary holding r's value */
+static int wk_dup(ecx *e, int r)
+{
+	int k = LO(treg)(e);
+
+	LO(mov)(e, k, r);
+	return k;
+}
+
+/*
+ * __atomic_* and __sync_* (cc/builtin.c normalized them: the memory orders
+ * are the last arguments, evaluated and then ignored, every access is
+ * sequentially consistent).  Values travel as integers of the object's size
+ * (the generic forms through their pointers); and/or/xor and the op_fetch
+ * forms other than add/sub are a compare-and-swap loop.
+ */
+static val wk_atomic(ecx *e, uint32_t n)
+{
+	cc *c = e->c;
+	const node *x = N(n);
+	const uint32_t *arg = &c->lists[x->b];
+	int id = x->aux, nmo = id == BI_ATOMIC_CMPXCHG_N || id == BI_ATOMIC_CMPXCHG ? 2 : 1, nargs = (int)x->c;
+	qty t = QUNQ(T(c, N(arg[0])->ty)->base);
+	int sz = (int)tsize(c, t), rp, r1 = -1, r2 = -1, r = -1;
+	bool sg = is_integer(c, t) && !is_ptr(c, t) && is_signed(c, t), byptr = id >= BI_ATOMIC_LOAD && id <= BI_ATOMIC_CMPXCHG;
+	val p, v;
+
+	if (sz != 1 && sz != 2 && sz != 4 && sz != 8)
+		wk_unsup(e, n, "a 16-byte atomic");
+	p = wk_gen(e, arg[0]);
+	rp = wk_reg(e, &p, N(arg[0])->ty);
+	if (nargs - nmo > 1) {
+		v = wk_gen(e, arg[1]);
+		r1 = wk_reg(e, &v, N(arg[1])->ty);
+	}
+	if (nargs - nmo > 2) {
+		v = wk_gen(e, arg[2]);
+		r2 = wk_reg(e, &v, N(arg[2])->ty);
+	}
+	for (int k = nmo + 3 < nargs ? 3 : nargs - nmo; k < nargs; k++) {	/* weak, the orders */
+		v = wk_gen(e, arg[k]);
+		wk_free(e, &v);
+	}
+	if (byptr) {
+		/* the generic forms: the value operands' bytes */
+		lval l = { .k = L_REG, .align = 1 };
+		int k;
+
+		if (id == BI_ATOMIC_STORE || id == BI_ATOMIC_EXCHANGE) {
+			l.r = (uint8_t)r1;
+			k = LO(treg)(e);
+			LO(load)(e, k, &l, sz, false);
+			LO(tfree)(e, r1);
+			r1 = k;
+		}
+		if (id == BI_ATOMIC_CMPXCHG) {
+			l.r = (uint8_t)r2;
+			k = LO(treg)(e);
+			LO(load)(e, k, &l, sz, false);
+			LO(tfree)(e, r2);
+			r2 = k;
+		}
+	}
+	switch (id) {
+	case BI_ATOMIC_LOAD_N: case BI_ATOMIC_LOAD:
+		r = LO(atomic)(e, WK_ALOAD, sz, rp, -1, -1);
+		if (id == BI_ATOMIC_LOAD) {
+			lval d = { .k = L_REG, .r = (uint8_t)r1, .align = 1 };
+
+			LO(store)(e, r, &d, sz);
+			LO(tfree)(e, r);
+			LO(tfree)(e, r1);
+			r = -1;
+		}
+		break;
+	case BI_ATOMIC_STORE_N: case BI_ATOMIC_STORE:
+		LO(atomic)(e, WK_ASTORE, sz, rp, r1, -1);
+		LO(tfree)(e, r1);
+		break;
+	case BI_ATOMIC_EXCHANGE_N: case BI_ATOMIC_EXCHANGE:
+		r = LO(atomic)(e, WK_AXCHG, sz, rp, r1, -1);
+		LO(tfree)(e, r1);
+		if (id == BI_ATOMIC_EXCHANGE) {
+			lval d = { .k = L_REG, .r = (uint8_t)r2, .align = 1 };
+
+			LO(store)(e, r, &d, sz);
+			LO(tfree)(e, r);
+			LO(tfree)(e, r2);
+			r = -1;
+		}
+		break;
+	case BI_ATOMIC_CMPXCHG_N: case BI_ATOMIC_CMPXCHG: {
+		/* ok = CAS(p, *expected, desired) == *expected; if !ok, *expected = what p held */
+		lval le = { .k = L_REG, .r = (uint8_t)r1, .align = 1 };
+		int ex = LO(treg)(e), old;
+		uint32_t done = wk_newlabel(e);
+		val ok;
+
+		LO(load)(e, ex, &le, sz, false);
+		old = LO(atomic)(e, WK_ACAS, sz, rp, r2, ex);
+		ok = LO(cmp)(e, T_EQUALEQUAL, 8, false, wk_vreg(wk_dup(e, old)), wk_vreg(wk_dup(e, ex)));
+		LO(brz)(e, ok, 4, true, done);
+		LO(tkeep)(e, ok.r);
+		LO(store)(e, old, &le, sz);
+		LO(label)(e, done);
+		LO(tfree)(e, old);
+		LO(tfree)(e, ex);
+		LO(tfree)(e, r1);
+		LO(tfree)(e, r2);
+		r = ok.r;
+		sg = false;
+		break;
+	}
+	case BI_SYNC_VAL_CAS: case BI_SYNC_BOOL_CAS: {
+		int ex = wk_dup(e, r1);
+
+		LO(ext)(e, ex, sz, false);
+		r = LO(atomic)(e, WK_ACAS, sz, rp, r2, ex);
+		LO(tfree)(e, r1);
+		LO(tfree)(e, r2);
+		if (id == BI_SYNC_BOOL_CAS) {
+			r = LO(cmp)(e, T_EQUALEQUAL, 8, false, wk_vreg(r), wk_vreg(ex)).r;
+			sg = false;
+		} else {
+			LO(tfree)(e, ex);
+		}
+		break;
+	}
+	case BI_ATOMIC_FETCH_ADD: case BI_ATOMIC_FETCH_SUB: case BI_ATOMIC_ADD_FETCH: case BI_ATOMIC_SUB_FETCH: {
+		bool sub = id == BI_ATOMIC_FETCH_SUB || id == BI_ATOMIC_SUB_FETCH;
+		int a = sub ? LO(un)(e, T_MINUS, 8, wk_vreg(wk_dup(e, r1))).r : r1;
+
+		r = LO(atomic)(e, WK_AXADD, sz, rp, a, -1);
+		if (sub)
+			LO(tfree)(e, a);
+		if (id == BI_ATOMIC_ADD_FETCH || id == BI_ATOMIC_SUB_FETCH)
+			r = LO(bin)(e, sub ? T_MINUS : T_PLUS, 8, false, wk_vreg(r), wk_vreg(r1)).r;
+		else
+			LO(tfree)(e, r1);
+		break;
+	}
+	default: {
+		/* and, or, xor: old = *p; do new = old op v while CAS(p, old, new) != old (old = what it held) */
+		int base = id >= BI_ATOMIC_ADD_FETCH ? id - BI_ATOMIC_ADD_FETCH : id - BI_ATOMIC_FETCH_ADD;
+		static const int bop[] = { T_PLUS, T_MINUS, T_AMP, T_PIPE, T_CARET };
+		uint32_t top = wk_newlabel(e), done = wk_newlabel(e);
+		int old = LO(atomic)(e, WK_ALOAD, sz, rp, -1, -1), nw, got;
+
+		LO(label)(e, top);
+		nw = LO(bin)(e, bop[base], 8, false, wk_vreg(wk_dup(e, old)), wk_vreg(wk_dup(e, r1))).r;
+		got = LO(atomic)(e, WK_ACAS, sz, rp, nw, old);
+		LO(cmpbr)(e, T_EQUALEQUAL, 8, false, wk_vreg(got), wk_vreg(old), done);
+		LO(tkeep)(e, got);
+		LO(tkeep)(e, old);
+		LO(mov)(e, old, got);
+		LO(tfree)(e, got);
+		LO(tfree)(e, nw);
+		LO(jump)(e, top);
+		LO(label)(e, done);
+		LO(tfree)(e, r1);
+		if (id >= BI_ATOMIC_ADD_FETCH) {
+			LO(tfree)(e, old);
+			r = nw;
+			LO(tkeep)(e, nw);
+		} else {
+			LO(tfree)(e, nw);
+			r = old;
+		}
+		break;
+	}
+	}
+	LO(tfree)(e, rp);
+	if (r < 0)
+		return vconst(0);
+	if (sg && sz < 8)
+		LO(ext)(e, r, sz, true);
+	return wk_vreg(r);
+}
+
 static val wk_builtin(ecx *e, uint32_t n)
 {
 	cc *c = e->c;
@@ -1196,6 +1375,27 @@ static val wk_builtin(ecx *e, uint32_t n)
 		val t = wk_gen(e, arg[1]);
 
 		return vconst(t.k == V_CONST && (t.i & 2) ? 0 : (i128)(uint64_t)-1);
+	}
+	case BI_ATOMIC_LOAD_N: case BI_ATOMIC_STORE_N: case BI_ATOMIC_EXCHANGE_N: case BI_ATOMIC_CMPXCHG_N:
+	case BI_ATOMIC_LOAD: case BI_ATOMIC_STORE: case BI_ATOMIC_EXCHANGE: case BI_ATOMIC_CMPXCHG:
+	case BI_ATOMIC_FETCH_ADD: case BI_ATOMIC_FETCH_SUB: case BI_ATOMIC_FETCH_AND: case BI_ATOMIC_FETCH_OR:
+	case BI_ATOMIC_FETCH_XOR: case BI_ATOMIC_ADD_FETCH: case BI_ATOMIC_SUB_FETCH: case BI_ATOMIC_AND_FETCH:
+	case BI_ATOMIC_OR_FETCH: case BI_ATOMIC_XOR_FETCH: case BI_SYNC_VAL_CAS: case BI_SYNC_BOOL_CAS:
+		return wk_atomic(e, n);
+	case BI_ATOMIC_THREAD_FENCE: case BI_ATOMIC_SIGNAL_FENCE: {
+		val m = wk_gen(e, arg[0]);
+
+		wk_free(e, &m);
+		if (x->aux == BI_ATOMIC_THREAD_FENCE)
+			LO(atomic)(e, WK_AFENCE, 8, -1, -1, -1);
+		return vconst(0);
+	}
+	case BI_ATOMIC_LOCK_FREE: {
+		val a = wk_gen(e, arg[0]), b = wk_gen(e, arg[1]);
+
+		wk_free(e, &a);
+		wk_free(e, &b);
+		return vconst(1);
 	}
 	case BI_ALLOCA: case BI_ALLOCA_UNINIT: {
 		val v = wk_gen(e, arg[0]);

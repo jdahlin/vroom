@@ -585,6 +585,76 @@ VPRIV int x64_tlsaddr(ecx *e, uint32_t ref, int model)
 	}
 }
 
+/* ---------------- atomics (sequentially consistent: x86 orders the rest) ---------------- */
+
+static rec *x64_atrec(ecx *e, int op, int size, int r, int rp)
+{
+	rec *i = x64_put(e, op);
+
+	i->sz = (uint8_t)size;
+	i->r[0] = (uint8_t)r;
+	i->r[1] = (uint8_t)rp;
+	return i;
+}
+
+VPRIV int x64_atomic(ecx *e, int op, int size, int rp, int rv, int rexp)
+{
+	xst *X = e->x64;
+	int r;
+
+	switch (op) {
+	case WK_AFENCE:
+		x64_put(e, X_MFENCE);
+		return -1;
+	case WK_ALOAD: {
+		lval l = { .k = L_REG, .r = (uint8_t)rp };
+
+		r = x64_treg(e);
+		x64_mem(e, X_LD, size, r, &l, false);	/* a plain load is sequentially consistent */
+		return r;
+	}
+	case WK_ASTORE:
+		x64_mov(e, R11, rv);
+		x64_atrec(e, X_XCHG, size, R11, rp);
+		return -1;
+	case WK_AXCHG: case WK_AXADD:
+		r = x64_treg(e);
+		x64_mov(e, r, rv);
+		x64_atrec(e, op == WK_AXCHG ? X_XCHG : X_XADD, size, r, rp);
+		x64_ext(e, r, size, false);
+		return r;
+	default: {	/* WK_ACAS: rax is the comparand (saved if it holds something) */
+		bool save = (X->live & (1u << RAX)) != 0;
+		rec *i;
+
+		if (save) {
+			x64_op3(e, X_PUSH, 8, XNOREG, RAX, XNOREG);
+			X->pushes++;
+		}
+		if (rv == RAX || rp == RAX) {
+			x64_mov(e, R11, RAX);
+			rv = rv == RAX ? R11 : rv;
+			rp = rp == RAX ? R11 : rp;
+		}
+		x64_mov(e, RAX, rexp);
+		i = x64_atrec(e, X_CMPXCHG, size, XNOREG, rp);
+		i->r[2] = (uint8_t)rv;
+		if (save) {
+			x64_mov(e, R11, RAX);
+			x64_op3(e, X_POP, 8, RAX, XNOREG, XNOREG);
+			X->pushes--;
+			r = x64_treg(e);
+			x64_mov(e, r, R11);
+		} else {
+			x64_tkeep(e, RAX);
+			r = RAX;
+		}
+		x64_ext(e, r, size, false);	/* (cmpxchg leaves the upper bits as they were) */
+		return r;
+	}
+	}
+}
+
 VPRIV void x64_trap(ecx *e) { x64_put(e, X_UD2); }
 
 VPRIV val x64_frame(ecx *e, bool ret)
