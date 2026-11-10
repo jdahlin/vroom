@@ -81,11 +81,11 @@ static unsigned roles_sw(const ins *i)
 		return OP_TLV;
 	case I_BLR:
 		return RN_R | OP_CALL;
-	case I_BR:
+	case I_BR: case I_BRT:
 		return RN_R;
 	case I_RET:
 		return OP_RET;	/* reads x0, x1 */
-	case I_LABEL: case I_B: case I_BC: case I_NOP:
+	case I_LABEL: case I_B: case I_BC: case I_NOP: case I_BT:
 	case I_BRK:	/* a trap (BUG, WARN, __builtin_trap): the handler may print registers, needs none */
 		return 0;
 	case I_RAW:
@@ -131,7 +131,14 @@ static int brkind_sw(const ins *i)
 {
 	switch (i->op) {
 	case I_B: return BR_UNCOND;
-	case I_BC: case I_CBZ: case I_CBNZ: case I_TBZ: case I_TBNZ: return BR_COND;
+	/*
+	 * A branch table: I_BRT falls into its table, and each entry is taken
+	 * as a conditional branch to its case that falls into the next one, so
+	 * the table's block reaches every case (and, past the last entry, the
+	 * next block: a superset of the edges, which only makes the facts
+	 * weaker).
+	 */
+	case I_BC: case I_CBZ: case I_CBNZ: case I_TBZ: case I_TBNZ: case I_BT: return BR_COND;
 	case I_RET: return BR_END;
 	case I_BR: return BR_INDIRECT;
 	default: return BR_NONE;

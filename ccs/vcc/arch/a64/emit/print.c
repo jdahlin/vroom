@@ -345,7 +345,7 @@ VPRIV void print_ins(cc *c, tbuf *b, const ins *i, uint32_t fid, const char *raw
 		p_lbl(b, fid, i->label);
 		tb_c(b, '\n');
 		return;
-	case I_B:
+	case I_B: case I_BT:
 		tb_s(b, "\tb\t");
 		p_lbl(b, fid, i->label);
 		tb_c(b, '\n');
@@ -423,7 +423,7 @@ VPRIV void print_ins(cc *c, tbuf *b, const ins *i, uint32_t fid, const char *raw
 		tb_c(b, '\n');
 		return;
 	}
-	case I_BLR: case I_BR:
+	case I_BLR: case I_BR: case I_BRT:
 		tb_s(b, i->op == I_BLR ? "\tblr\t" : "\tbr\t");
 		reg(b, i->rn, 1);
 		tb_c(b, '\n');

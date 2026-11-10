@@ -298,12 +298,12 @@ static unsigned enc(const ins *i, uint32_t *w, pfix *f, const uint32_t *loff, ui
 		       R5(i->rn) << 5 | (i->ra & 15u) |
 		       (i->sh ? 0x800u | (uint32_t)(i->imm < 0 ? -i->imm : i->imm) << 16 : R5(i->rm) << 16);
 		return 1;
-	case I_B: case I_BC: case I_CBZ: case I_CBNZ: case I_TBZ: case I_TBNZ: {
+	case I_B: case I_BT: case I_BC: case I_CBZ: case I_CBNZ: case I_TBZ: case I_TBNZ: {
 		int64_t d = loff ? ((int64_t)loff[i->label] - at) * 4 : 0;
 		uint32_t rt = R_AARCH64_CONDBR19;
 
 		switch (i->op) {
-		case I_B: w[0] = a64_b(d); rt = R_AARCH64_JUMP26; break;
+		case I_B: case I_BT: w[0] = a64_b(d); rt = R_AARCH64_JUMP26; break;
 		case I_BC: w[0] = a64_bcond(i->cond, d); break;
 		case I_TBZ: case I_TBNZ: w[0] = a64_tbz(i->op == I_TBNZ, R5(i->rd), i->sh, d); rt = R_AARCH64_TSTBR14; break;
 		default: w[0] = a64_cbz(sf, i->op == I_CBNZ, R5(i->rd), d); break;
@@ -319,7 +319,7 @@ static unsigned enc(const ins *i, uint32_t *w, pfix *f, const uint32_t *loff, ui
 	case I_BLR:
 		w[0] = a64_blr(R5(i->rn));
 		return 1;
-	case I_BR:
+	case I_BR: case I_BRT:
 		w[0] = a64_br(R5(i->rn));
 		return 1;
 	case I_RET:
@@ -452,7 +452,7 @@ static bool r_branch(rctx *R, uint32_t fid, const ins *i, rlab *L, uint32_t frag
 	if (L->frag == frag && !(L->off & 3) && !(off & 3)) {
 		int64_t d = ((int64_t)L->off - off) / 4;
 
-		if (i->op != I_B && (d < BR19_MIN || d > BR19_MAX))	/* not relaxed with inline asm in the function */
+		if (i->op != I_B && i->op != I_BT && (d < BR19_MIN || d > BR19_MAX))	/* not relaxed with inline asm in the function */
 			return r_fail(R, "function with inline asm too large: conditional branch or adr beyond 1 MB") == 0;
 		if (is_tbz(i->op) && (d < BR14_MIN || d > BR14_MAX))	/* (tbz_range keeps them in reach) */
 			return r_fail(R, "internal: tbz/tbnz beyond 32 KiB") == 0;
@@ -623,7 +623,7 @@ static int r_code(rctx *R, const code_hdr *h)
 			if (is_cbr(i->op) ? d < BR19_MIN || d > BR19_MAX :
 			    i->op == I_ADR ? d < BR19_MIN || d > BR19_MAX :
 			    is_tbz(i->op) ? d < BR14_MIN || d > BR14_MAX :
-			    i->op == I_B ? d < -(1 << 25) || d >= 1 << 25 : false)
+			    i->op == I_B || i->op == I_BT ? d < -(1 << 25) || d >= 1 << 25 : false)
 				return r_fail(R, i->op == I_ADR ? "function too large: adr to a label beyond 1 MB" :
 							   "function too large: branch out of range");
 			enc(i, wb + a, &f, loff, a);
@@ -697,7 +697,8 @@ static int r_code(rctx *R, const code_hdr *h)
 				}
 				continue;
 			}
-			if (i->op == I_ADR || i->op == I_B || i->op == I_BC || i->op == I_CBZ || i->op == I_CBNZ || is_tbz(i->op)) {
+			if (i->op == I_ADR || i->op == I_B || i->op == I_BT || i->op == I_BC || i->op == I_CBZ || i->op == I_CBNZ ||
+			    is_tbz(i->op)) {
 				rlab *L = r_lab(R, i->label);
 
 				if (!(L->flags & RL_NAMED)) {

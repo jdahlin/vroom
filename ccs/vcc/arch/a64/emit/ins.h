@@ -48,6 +48,8 @@ enum {
 	I_TBZ, I_TBNZ,	/* rd, sh: bit number, label (+-32 KiB: tbz_range) */
 	I_CCMP,		/* flags = cond ? rn - (sh ? imm : rm) : ra (nzcv); imm -31..31 (ccmn for < 0) */
 	I_LDX, I_STX,	/* [rn + ext(rm) << sh]; sz/cond as I_LD; ra: extend (X_UXTW, X_LSL, X_SXTW); sh: 0 or sz */
+	I_BRT,		/* br rn into the branch table that follows (its I_BT records, after its label) */
+	I_BT,		/* label: b label, one entry of a branch table */
 };
 
 /* extend kinds of register-offset addressing (I_LDX/I_STX.ra: the option field) */
