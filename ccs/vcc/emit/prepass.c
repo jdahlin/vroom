@@ -11,7 +11,46 @@ typedef struct pre {
 	int cdepth;		/* cleanup variables in scope */
 	int loopd;		/* loops around the node */
 	uint32_t llo, lhi;	/* local syms seen (lspan) */
+	bool bad;		/* not for the -O3 inlining heuristics (E->fnbad) */
 } pre;
+
+/*
+ * What keeps a function out of the -O3 inlining heuristics: code whose
+ * meaning depends on its own frame (alloca, VLAs, return/frame address,
+ * setjmp), inline asm (labels in its text would be defined twice),
+ * computed gotos and label addresses.
+ */
+static bool returns_twice(cc *c, uint32_t fn)
+{
+	static const char *const names[] = { "setjmp", "_setjmp", "sigsetjmp", "__sigsetjmp", "savectx", "vfork", "getcontext" };
+	const vident *n = &vintern_ents[c->syms[fn].name];
+
+	for (size_t i = 0; i < sizeof(names) / sizeof(names[0]); i++)
+		if (n->len == strlen(names[i]) && !memcmp(n->s, names[i], n->len))
+			return true;
+	return false;
+}
+
+/* -O3: per function, references and direct calls in the TU (a linear scan of all nodes; dead code counts too) */
+VPRIV void opt_count_calls(emitter *E, cc *c)
+{
+	for (uint32_t n = 1; n < c->nnode; n++) {
+		const node *x = N(n);
+		uint32_t s, ref;
+
+		if (x->op == N_VAR) {
+			if (x->a < c->nsym && c->syms[x->a].kind == S_FUNC) {
+				s = canon_sym(c, x->a);
+				if (E->nref[s] < 255)
+					E->nref[s]++;
+			}
+		} else if (x->op == N_CALL) {
+			s = direct_callee(c, x->a, &ref);
+			if (s && E->ncall[s] < 255)
+				E->ncall[s]++;
+		}
+	}
+}
 
 /* a local is read or written here: count it for register allocation (8x per loop level) */
 static void note_local(pre *P, uint32_t s)
@@ -154,7 +193,7 @@ VPRIV void ensure_walked(emitter *E, cc *c, uint32_t s)
 		return;
 	st = 0;
 	if (atomic_compare_exchange_strong(&E->walked[s], &st, 1)) {
-		pre P = { E, c, s, 0, 0, 0, UINT32_MAX, 0 };
+		pre P = { E, c, s, 0, 0, 0, UINT32_MAX, 0, false };
 		double t = E->stats ? now() : 0;
 		const node *b = &c->nodes[c->syms[s].body];
 
@@ -163,6 +202,7 @@ VPRIV void ensure_walked(emitter *E, cc *c, uint32_t s)
 		walk(&P, c->syms[s].body);
 		E->lspan[2 * s] = P.llo, E->lspan[2 * s + 1] = P.lhi;
 		E->fnsize[s] = P.nodes > 65535 ? 65535 : (uint16_t)P.nodes;
+		E->fnbad[s] = P.bad;
 		if (E->stats)
 			E->walk_ns += (uint64_t)((now() - t) * 1e9), E->nwalk++;
 		atomic_store_explicit(&E->walked[s], 2, memory_order_release);
@@ -227,6 +267,7 @@ static int walk(pre *P, uint32_t n)
 		return false;
 	case N_LABELADDR:
 		P->E->lref[x->a] |= LR_REF | LR_BACK;
+		P->bad = true;
 		return false;
 	case N_VAARG:	/* va_arg reads and advances a scalar va_list through its address */
 		if (scalar_valist(c))
@@ -276,6 +317,8 @@ static int walk(pre *P, uint32_t n)
 
 		if (callee && sym_attrs(c, callee)->error_fn)
 			P->E->sflags[P->fn] |= SA_MUSTFOLD;
+		if (P->E->opt3 && callee && returns_twice(c, callee))	/* (-O3 only: 7 compares a call) */
+			P->bad = true;
 		lab = walk(P, x->a);
 	}
 		/* fall through */
@@ -290,6 +333,9 @@ static int walk(pre *P, uint32_t n)
 			for (uint32_t i = 0; i < x->c && i < (x->aux == BI_VA_COPY ? 2u : 1u); i++)
 				if ((i == 0 && x->aux != BI_VA_END) || scalar_valist(c))
 					mark_written(P, c->lists[x->b + i], true);
+		if (x->op == N_BUILTIN && (x->aux == BI_ALLOCA || x->aux == BI_ALLOCA_UNINIT || x->aux == BI_RETURN_ADDRESS ||
+					   x->aux == BI_FRAME_ADDRESS))
+			P->bad = true;
 		break;
 	case N_STMTEXPR:
 		lab = walk(P, x->a);
@@ -314,9 +360,11 @@ static int walk(pre *P, uint32_t n)
 		P->cdepth = cd;
 		break;
 	}
+	case N_GOTO_IND:
+		P->bad = true;
+		/* fall through */
 	case N_EXPR:
 	case N_RETURN:
-	case N_GOTO_IND:
 		lab = walk(P, x->a);
 		break;
 	case N_DECL: {
@@ -332,6 +380,10 @@ static int walk(pre *P, uint32_t n)
 		}
 		if (sym_attrs(c, x->a)->cleanup || (y->kind == S_VAR && (T(c, y->ty)->flags & TF_VLA)))
 			P->cdepth++;
+		/* VLAs; an aggregate with a cleanup, which clang may return in place (NRVO: the
+		   cleanup sees the returned object) where inline_call returns a copy */
+		if (y->kind == S_VAR && ((T(c, y->ty)->flags & TF_VLA) || (sym_attrs(c, x->a)->cleanup && is_agg(c, y->ty))))
+			P->bad = true;
 		/* a __used static local is emitted with its function, referenced or not */
 		if (y->kind == S_VAR && y->sc == SC_STATIC && sym_attrs(c, x->a)->used &&
 		    !atomic_load_explicit(&P->E->claimed[x->a], memory_order_relaxed) &&
@@ -393,6 +445,7 @@ static int walk(pre *P, uint32_t n)
 	case N_ASM: {
 		const casm *a = &c->asms[x->a];
 
+		P->bad = true;
 		for (uint32_t i = 0; i < a->nout + a->nin; i++) {
 			if (i < a->nout)
 				mark_written(P, a->ops[i].expr, true);

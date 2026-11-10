@@ -65,8 +65,14 @@ static unsigned roles_sw(const ins *i)
 		return RN_R | RD_W | RA_W | (i->cond ? RN_W : 0);
 	case I_STP:
 		return RD_R | RA_R | RN_R | (i->cond ? RN_W : 0);
-	case I_CBZ: case I_CBNZ:
+	case I_CBZ: case I_CBNZ: case I_TBZ: case I_TBNZ:
 		return RD_R;
+	case I_CCMP:	/* (and the flags) */
+		return RN_R | (i->sh ? 0 : RM_R);
+	case I_LDX:
+		return RN_R | RM_R | RD_W;
+	case I_STX:
+		return RD_R | RN_R | RM_R;
 	case I_PRFM:
 		return RN_R;
 	case I_BL:
@@ -75,11 +81,11 @@ static unsigned roles_sw(const ins *i)
 		return OP_TLV;
 	case I_BLR:
 		return RN_R | OP_CALL;
-	case I_BR:
+	case I_BR: case I_BRT:
 		return RN_R;
 	case I_RET:
 		return OP_RET;	/* reads x0, x1 */
-	case I_LABEL: case I_B: case I_BC: case I_NOP:
+	case I_LABEL: case I_B: case I_BC: case I_NOP: case I_BT:
 	case I_BRK:	/* a trap (BUG, WARN, __builtin_trap): the handler may print registers, needs none */
 		return 0;
 	case I_RAW:
@@ -106,7 +112,7 @@ __attribute__((constructor)) static void opt_tables(void)
 		RT[op] = (uint16_t)roles_sw(&x);
 		BT[op] = (uint8_t)brkind_sw(&x);
 	}
-	RT[I_LDP] = RT[I_STP] = RT[I_RAW] = OP_VAR;
+	RT[I_LDP] = RT[I_STP] = RT[I_RAW] = RT[I_CCMP] = OP_VAR;
 	XT[I_UBFM] = XT[I_SBFM] = XT[I_MOV] = XT[I_ANDI] = 1;
 	for (unsigned r = 0; r < 64; r++)
 		RBT[r] = RB(r);
@@ -125,7 +131,14 @@ static int brkind_sw(const ins *i)
 {
 	switch (i->op) {
 	case I_B: return BR_UNCOND;
-	case I_BC: case I_CBZ: case I_CBNZ: return BR_COND;
+	/*
+	 * A branch table: I_BRT falls into its table, and each entry is taken
+	 * as a conditional branch to its case that falls into the next one, so
+	 * the table's block reaches every case (and, past the last entry, the
+	 * next block: a superset of the edges, which only makes the facts
+	 * weaker).
+	 */
+	case I_BC: case I_CBZ: case I_CBNZ: case I_TBZ: case I_TBNZ: case I_BT: return BR_COND;
 	case I_RET: return BR_END;
 	case I_BR: return BR_INDIRECT;
 	default: return BR_NONE;
@@ -726,7 +739,7 @@ static void slots(ecx *e)
 			for (; w; w &= w - 1)
 				ver[__builtin_ctzll(w)]++;
 			if (SL.rc[k] < 0) {
-				if (i->op == I_ST || i->op == I_STLO || i->op == I_STP || i->op == I_BL || i->op == I_BLR ||
+				if (i->op == I_ST || i->op == I_STLO || i->op == I_STP || i->op == I_STX || i->op == I_BL || i->op == I_BLR ||
 				    i->op == I_TLV || i->op == I_RAW || W.rr[k] == GPRS)
 					mver++;	/* may write an escaped cell */
 				continue;

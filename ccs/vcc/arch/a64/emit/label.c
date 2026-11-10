@@ -143,3 +143,58 @@ VPRIV void cbz(ecx *e, bool nz, int x, int r, uint32_t l)
 	i->label = l;
 	e->lrefc[l]++;
 }
+
+/* -O3: branch to l if bit `bit` of r is set (nz) or clear */
+VPRIV void tbz(ecx *e, bool nz, int r, int bit, uint32_t l)
+{
+	ins *i;
+
+	if (!e->reach)
+		return;
+	kv_edge(e, l);
+	i = put(e, nz ? I_TBNZ : I_TBZ);
+	i->sz = bit >= 32, i->rd = (uint8_t)r, i->sh = (uint8_t)bit;
+	i->label = l;
+	e->lrefc[l]++;
+}
+
+/* a single set bit of m (width x): its number, else -1 */
+VPRIV int one_bit(uint64_t m, int x)
+{
+	if (!x)
+		m &= 0xffffffffu;
+	return m && !(m & (m - 1)) ? __builtin_ctzll(m) : -1;
+}
+
+/*
+ * Branch to l on cond of the flags the record just emitted set; at -O3 a
+ * compare with zero becomes cbz/cbnz (tbz/tbnz on the sign bit for < 0 and
+ * >= 0) and a single-bit test tbz/tbnz.  Only for flags no other record
+ * reads: the callers' compare feeds this one branch.
+ */
+VPRIV void bcond_opt(ecx *e, int cond, uint32_t l)
+{
+	const ins *p = e->E->opt3 && e->reach && e->nin ? &e->in[e->nin - 1] : NULL;
+
+	if (p && p->rd == ZR && p->rn < ZR) {
+		int r = p->rn, x = p->sz, bit;
+		bool zero = (p->op == I_SUBSI && p->imm == 0) || (p->op == I_SUBS && p->rm == ZR && !p->sh);
+
+		if (zero && (cond == C_EQ || cond == C_NE || cond == C_HI || cond == C_LS)) {
+			e->nin--;
+			cbz(e, cond == C_NE || cond == C_HI, x, r, l);
+			return;
+		}
+		if (zero && (cond == C_LT || cond == C_GE)) {
+			e->nin--;
+			tbz(e, cond == C_LT, r, x ? 63 : 31, l);
+			return;
+		}
+		if (p->op == I_ANDSI && (cond == C_EQ || cond == C_NE) && (bit = one_bit((uint64_t)p->imm, x)) >= 0) {
+			e->nin--;
+			tbz(e, cond == C_NE, r, bit, l);
+			return;
+		}
+	}
+	bcond(e, cond, l);
+}

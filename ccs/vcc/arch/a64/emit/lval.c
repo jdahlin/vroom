@@ -45,6 +45,9 @@ VPRIV val ptr_add(ecx *e, val p, val i, int64_t scale, bool sub)
 
 		if (scale > 0 && !(scale & (scale - 1))) {
 			op3s(e, sub ? I_SUB : I_ADD, 1, rp, rp, ri, 0, __builtin_ctzll((uint64_t)scale));
+		} else if (e->E->opt3) {
+			movi(e, 1, R_X16, scale);
+			op4(e, sub ? I_MSUB : I_MADD, 1, rp, ri, R_X16, rp);
 		} else {
 			movi(e, 1, R_X16, scale);
 			op4(e, I_MADD, 1, ri, ri, R_X16, ZR);
@@ -368,7 +371,7 @@ static val load1(ecx *e, lval *l, qty t)
 	r = treg(e);
 	if (size == 0)
 		movi(e, 1, r, 0);
-	else
+	else if (!fold_index(e, I_LDX, r, l, (int)size, size < 8 && !is_flt(c, t) && is_signed(c, t) ? 1 : 0))
 		load_n(e, r, l, (int)size, size < 8 && !is_flt(c, t) && is_signed(c, t) ? 1 : 0);
 	return vreg(r);
 }
@@ -460,12 +463,14 @@ static void store1(ecx *e, lval *l, qty t, val *v)
 	if (size == 0)
 		return;
 	if (v->k == V_CONST && v->i == 0) {
-		store_n(e, ZR, l, 0, (int)size);
+		if (!fold_index(e, I_STX, ZR, l, (int)size, 0))
+			store_n(e, ZR, l, 0, (int)size);
 		return;
 	}
 	{
 		int r = toreg(e, v);
 
-		store_n(e, r, l, 0, (int)size);
+		if (!fold_index(e, I_STX, r, l, (int)size, 0))
+			store_n(e, r, l, 0, (int)size);
 	}
 }

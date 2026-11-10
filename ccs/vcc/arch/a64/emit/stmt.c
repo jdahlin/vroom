@@ -187,7 +187,7 @@ static void run_cleanup(ecx *e, uint32_t s)
 	a.t = prim(TY_LONG);
 	a.slot = 1;
 	fn = canon_sym(c, fn);
-	if (can_inline(e, fn)) {
+	if (can_inline(e, fn, 0)) {
 		val r = inline_call(e, fn, &a, 1);
 
 		val_free(e, &r);
@@ -322,6 +322,154 @@ static void collect_cases(ecx *e, uint32_t n)
 	}
 }
 
+/*
+ * -O3 switch lowering.  The N_CASE nodes are sorted by value and split
+ * recursively: a dense run (at least 4 cases, at least 40% of the values
+ * in its range taken, a range of at most 1024) becomes a branch table
+ *   adr x17, Ltab; add x16, x17, xi, lsl #2; br x16; Ltab: b case0; b case1 ...
+ * (code, one I_BT per value: no data, no relocations), a short run a chain
+ * of compares, anything else a binary search on the middle case's value.
+ */
+#define JT_MAX 1024
+
+/* is the run ids[0..n) (sorted) dense enough for a table? */
+static bool sw_dense(cc *c, const uint32_t *ids, uint32_t n)
+{
+	i128 lo, hi, nval = 0;
+
+	if (n < 4)
+		return false;
+	lo = c->ipool[N(ids[0])->a], hi = c->ipool[N(ids[n - 1])->b];
+	for (uint32_t k = 0; k < n; k++)
+		nval += c->ipool[N(ids[k])->b] - c->ipool[N(ids[k])->a] + 1;
+	return hi - lo + 1 <= JT_MAX && (hi - lo + 1) * 10 <= nval * 25;
+}
+
+static void sw_table(ecx *e, int r, int cx, const uint32_t *ids, uint32_t n, uint32_t dflt)
+{
+	cc *c = e->c;
+	uint32_t tab[JT_MAX], ltab;
+	i128 lo = c->ipool[N(ids[0])->a], span = c->ipool[N(ids[n - 1])->b] - lo + 1;
+	int ri = r;
+	ins *i;
+
+	for (uint32_t k = 0; k < (uint32_t)span; k++)
+		tab[k] = dflt;
+	for (uint32_t k = 0; k < n; k++)
+		for (i128 x = c->ipool[N(ids[k])->a]; x <= c->ipool[N(ids[k])->b]; x++)
+			tab[(uint32_t)(x - lo)] = e->caselbl[ids[k]];
+	if (lo || !cx) {
+		/* a 32-bit sub also clears the upper half the table index needs */
+		opi(e, I_SUBI, cx, R_X16, r, (int64_t)lo);
+		ri = R_X16;
+	}
+	if (span - 1 <= 4095) {
+		opi(e, I_SUBSI, cx, ZR, ri, (int64_t)(span - 1));
+	} else {
+		movi(e, cx, R_X17, (int64_t)(span - 1));
+		op3(e, I_SUBS, cx, ZR, ri, R_X17);
+	}
+	bcond(e, C_HI, dflt);
+	if (!e->reach)
+		return;
+	ltab = newlabel(e);
+	i = put(e, I_ADR);
+	i->rd = R_X17, i->label = ltab;
+	e->lrefc[ltab]++;
+	op3s(e, I_ADD, 1, R_X16, R_X17, ri, 0, 2);
+	put(e, I_BRT)->rn = R_X16;
+	put(e, I_LABEL)->label = ltab;
+	for (uint32_t k = 0; k < (uint32_t)span; k++) {
+		kv_edge(e, tab[k]);
+		put(e, I_BT)->label = tab[k];
+		e->lrefc[tab[k]]++;
+	}
+	e->reach = false;
+}
+
+/* compare-and-branch to each case of ids[0..n), then to dflt */
+static void sw_chain(ecx *e, int r, int cx, const uint32_t *ids, uint32_t n, uint32_t dflt)
+{
+	cc *c = e->c;
+
+	for (uint32_t k = 0; k < n; k++) {
+		const node *cn = N(ids[k]);
+		i128 lo = c->ipool[cn->a], hi = c->ipool[cn->b];
+
+		if (lo == hi) {
+			val a = vreg(r), b = vconst(lo);
+
+			emit_cmp(e, T_EQUALEQUAL, cx, false, &a, &b);
+			val_free(e, &b);
+			bcond_opt(e, C_EQ, e->caselbl[ids[k]]);
+		} else {
+			opi(e, I_SUBI, cx, R_X16, r, (int64_t)lo);
+			if (hi - lo <= 4095) {
+				opi(e, I_SUBSI, cx, ZR, R_X16, (int64_t)(hi - lo));
+			} else {
+				movi(e, cx, R_X17, (int64_t)(hi - lo));
+				op3(e, I_SUBS, cx, ZR, R_X16, R_X17);
+			}
+			bcond(e, C_LS, e->caselbl[ids[k]]);
+		}
+	}
+	jump(e, dflt);
+}
+
+static void sw_tree(ecx *e, int r, int cx, bool sg, const uint32_t *ids, uint32_t n, uint32_t dflt)
+{
+	cc *c = e->c;
+	uint32_t m = n / 2, lr;
+	val a, b;
+
+	if (sw_dense(c, ids, n)) {
+		sw_table(e, r, cx, ids, n, dflt);
+		return;
+	}
+	if (n <= 5) {
+		sw_chain(e, r, cx, ids, n, dflt);
+		return;
+	}
+	/* r >= the middle case: the upper half */
+	lr = newlabel(e);
+	a = vreg(r), b = vconst(c->ipool[N(ids[m])->a]);
+	bcond(e, emit_cmp(e, T_GREATEREQ, cx, sg, &a, &b), lr);
+	val_free(e, &b);
+	sw_tree(e, r, cx, sg, ids, m, dflt);
+	deflabel(e, lr);
+	sw_tree(e, r, cx, sg, ids + m, n - m, dflt);
+}
+
+/* the switch on v as a tree (-O3); false: leave it to the compare chain */
+static bool switch_tree(ecx *e, val *v, uint32_t base, int cx, bool sg, uint32_t dflt)
+{
+	cc *c = e->c;
+	uint32_t *ids = e->cases + e->ncases, n = 0;
+
+	if (!e->E->opt3 || !e->reach)
+		return false;
+	for (uint32_t k = base; k < e->ncases; k++) {
+		const node *cn = N(e->cases[k]);
+
+		if (cn->op == N_CASE && c->ipool[cn->a] <= c->ipool[cn->b])
+			ids[n++] = e->cases[k];
+	}
+	if (n < 4)
+		return false;
+	/* shell sort by value (scratch past the collected cases; no case ranges overlap) */
+	for (uint32_t gap = n / 2; gap; gap /= 2)
+		for (uint32_t k = gap; k < n; k++) {
+			uint32_t t = ids[k], j = k;
+			i128 tv = c->ipool[N(t)->a];
+
+			for (; j >= gap && c->ipool[N(ids[j - gap])->a] > tv; j -= gap)
+				ids[j] = ids[j - gap];
+			ids[j] = t;
+		}
+	sw_tree(e, toreg(e, v), cx, sg, ids, n, dflt);
+	return true;
+}
+
 static void gen_switch(ecx *e, uint32_t n)
 {
 	cc *c = e->c;
@@ -354,6 +502,8 @@ static void gen_switch(ecx *e, uint32_t n)
 			}
 		}
 		jump(e, target);
+	} else if (!is_wide(c, ct) && switch_tree(e, &v, base, cx, is_signed(c, ct), dflt)) {
+		val_free(e, &v);
 	} else if (is_wide(c, ct)) {
 		/* 128-bit: v - lo <= hi - lo, unsigned, in two words (a single value: hi == lo) */
 		int t0 = treg(e), t1 = treg(e);

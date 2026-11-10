@@ -218,6 +218,55 @@ static void drop_fallthrough(ecx *e)
 	e->nin = n;
 }
 
+/*
+ * -O3: tbz/tbnz reach +-32 KiB.  A function that may be larger (an upper
+ * bound of its words: frame offsets are not final yet, inline asm counts a
+ * word per byte) gets them back as tst + b.eq/b.ne: the flags are dead at
+ * a tbz, which only replaces a flag-setting test and its branch.
+ */
+static void tbz_range(ecx *e)
+{
+	uint64_t words = 64;
+	uint32_t ntb = 0, dj = 0, add = 0;
+
+	for (uint32_t k = 0; k < e->nin; k++) {
+		const ins *i = &e->in[k];
+
+		switch (i->op) {
+		case I_LABEL: break;
+		case I_RAW: words += i->ref; break;
+		case I_TBZ: case I_TBNZ: ntb++; words++; break;
+		default: words += 6; break;	/* I_LD/I_ST with a far offset: movi (4) + add + the access */
+		}
+	}
+	if (!ntb || words < 8000)
+		return;
+	if (e->capin - e->nin < ntb) {
+		fputs("vcc: function too large\n", stderr);
+		abort();
+	}
+	/* -g rows move by the tbz before them */
+	for (uint32_t k = 0; k < e->nin; k++) {
+		for (; dj < e->ndl && e->dl[dj].k == k; dj++)
+			e->dl[dj].k += add;
+		add += e->in[k].op == I_TBZ || e->in[k].op == I_TBNZ;
+	}
+	for (; dj < e->ndl; dj++)
+		e->dl[dj].k += add;
+	/* from the end: each tbz becomes two records */
+	for (uint32_t k = e->nin, d = e->nin + ntb; k-- > 0;) {
+		ins t = e->in[k];
+
+		if (t.op == I_TBZ || t.op == I_TBNZ) {
+			e->in[--d] = (ins){ .op = I_BC, .cond = t.op == I_TBZ ? C_EQ : C_NE, .label = t.label };
+			e->in[--d] = (ins){ .op = I_ANDSI, .sz = t.sh >= 32, .rd = ZR, .rn = t.rd, .imm = (int64_t)(UINT64_C(1) << t.sh) };
+		} else {
+			e->in[--d] = t;
+		}
+	}
+	e->nin += ntb;
+}
+
 static void finish_function(ecx *e, uint32_t s)
 {
 	cc *c = e->c;
@@ -254,6 +303,8 @@ static void finish_function(ecx *e, uint32_t s)
 			       !(e->usedcs & csm) && !(u & ((1ull << 29) | (1ull << 30)));
 		}
 	}
+	if (e->E->opt3)
+		tbz_range(e);
 
 	/*
 	 * Frame below x29: callee saves, locals, outgoing arguments.  Slots are
@@ -493,6 +544,7 @@ static bool emit_function1(ecx *e, uint32_t s, int nlreg)
 	e->top = s;
 	e->asmk = 0;
 	e->inline_depth = 0;
+	e->inl_grow = 0;
 	e->vararg = (ft->flags & TF_VARIADIC) != 0;
 	choose_lregs(e, s, nlreg);
 	memset(&F, 0, sizeof(F));

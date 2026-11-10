@@ -49,6 +49,8 @@ WASM_SKIP = {}
 _WOPT = 'wasm: no inliner or dead-code removal (TODO.md)'
 WASM_XFAIL = {n: _WOPT for n in ('20020720-1', '20030216-1', '20041114-1', 'compare-3',
                                  'pure-1', 'shiftopt-1', 'bcp-1')}
+# -O3 is never on for wasm (emitter.opt3): its constant leaves do not fold away the guarded calls
+WASM_XFAIL['vcc/opt3_flags'] = _WOPT	# (other suites than gcc: suite/name)
 
 def set_target(w32):
     """wasm32 (W7) instead of wasm64: the target, emcc's memory, the work directory"""
@@ -136,7 +138,7 @@ def reference(suite, name, path, flags, wd):
 
 def one(t):
     t, st, cat, why = one_(t)
-    xf = WASM_XFAIL.get(t[1]) if t[0] == 'gcc' else None
+    xf = WASM_XFAIL.get(t[1] if t[0] == 'gcc' else f'{t[0]}/{t[1]}')
     if xf and st == 'fail':
         return t, 'xfail', cat, f'{xf} [{why}]'
     if xf and st == 'pass':

@@ -167,11 +167,14 @@ typedef struct emitter {
 	_Atomic uint8_t *extref;	/* per sym: referenced (for .weak of undefined syms) */
 	_Atomic uint8_t *walked;
 	uint16_t *fnsize;		/* per function: AST nodes (prepass) */
+	uint8_t *fnbad;			/* per function: never inlined by the -O3 heuristics (prepass) */
+	uint8_t *nref, *ncall;		/* -O3: per function, references and direct calls in the TU (saturating) */
 	uint16_t *luse;			/* per local: uses weighted by loop depth (prepass) */
 	uint8_t *lnoreg;		/* per local: needs memory (address taken, asm operand, {} init) */
 	uint32_t *lspan;		/* per function: [2s] lowest, [2s+1] highest local sym seen */
 	int nlreg;			/* locals given callee-saved registers per function (VCC_LREGS) */
 	bool noopt;			/* VCC_NOOPT: no opt.c clean-ups (to compare) */
+	bool opt3;			/* -O3 (cc_opts.opt 3): the -O3 heuristics and instruction selection; VCC_NOOPT3 off */
 	i128 *cwval;		/* per SA_CWRITE variable: the one constant it is assigned */	/* per function: prepass state (0 no, 1 running, 2 done) */
 	uint8_t *sflags;		/* SA_* per sym */
 	uint8_t *ffacts;		/* FF_* per floating local: what every write stores */
@@ -189,7 +192,7 @@ typedef struct emitter {
 	chunk *chunks;
 	uint32_t nchunk;
 	_Atomic int errors;
-	_Atomic uint64_t nins, nfn, nobj, ninl;
+	_Atomic uint64_t nins, nfn, nobj, ninl, noptinl;
 	_Atomic uint64_t print_ns, walk_ns, nwalk;
 	uint8_t *mf;			/* per sym: static function to inline everywhere (kept across rounds) */
 	_Atomic uint32_t newmf;		/* marked this round */
@@ -363,6 +366,7 @@ typedef struct ecx {
 	int nclean;
 	fnctx *f;
 	int inline_depth;
+	uint32_t inl_grow;	/* -O3: AST nodes the inlining heuristics put into this function */
 	uint32_t top;		/* sym being emitted */
 	uint32_t asmk;		/* inline asm statements emitted in it so far (%=) */
 	uint32_t *cases;	/* scratch for switch case collection */
@@ -453,6 +457,7 @@ typedef struct lval {
 	uint32_t ref;		/* L_SYM */
 	int64_t off;		/* byte offset (L_FRAME: slot offset) */
 	uint32_t align;		/* known alignment of the address */
+	uint8_t once;		/* -O3: accessed once (load/store may fold the address's last add, fold_index) */
 } lval;
 
 enum { A_IGNORE, A_REG, A_STACK, A_REF_REG, A_REF_STACK, A_VREG, A_HFA };	/* A_VREG: float/double in v<reg>; A_HFA: nreg members of fsz bytes in v<reg>.. */
@@ -571,6 +576,9 @@ VPRIV void at_ldop(ecx *e, unsigned sz, unsigned opc, int rs, int rt, int rn);
 VPRIV void jump(ecx *e, uint32_t l);
 VPRIV void bcond(ecx *e, int cond, uint32_t l);
 VPRIV void cbz(ecx *e, bool nz, int x, int r, uint32_t l);
+VPRIV void tbz(ecx *e, bool nz, int r, int bit, uint32_t l);
+VPRIV int one_bit(uint64_t m, int x);
+VPRIV void bcond_opt(ecx *e, int cond, uint32_t l);
 /* value.c */
 VPRIV int treg(ecx *e);
 VPRIV void tfree(ecx *e, int r);
@@ -638,10 +646,14 @@ VPRIV uint64_t opt_regs(ecx *e, unsigned *fl);
 VPRIV lval bind_lreg(ecx *e, uint32_t s);
 VPRIV val fold_int_bin(ecx *e, int op, qty ot, qty rt, i128 l, i128 r, bool *ok);
 VPRIV bool em_is_cmp(int op);
+VPRIV int cmp_cond(int op, bool sg);
 VPRIV int emit_cmp(ecx *e, int op, int x, bool sg, val *a, val *b);
 VPRIV int emit_cmp2(ecx *e, int op, bool sg, val *a, val *b);
 VPRIV int test_zero(ecx *e, val *v, qty t, uint32_t l, bool nz);
 VPRIV val tobool(ecx *e, val v, qty t);
+VPRIV int last_ext(ecx *e, int r);
+VPRIV bool fold_index(ecx *e, int op, int rd, const lval *l, int n, int ext);
+VPRIV bool ext_ok(int x, int from, bool sgn);
 /* fp.c */
 static inline void word(ecx *e, uint32_t w);
 VPRIV int fpk(ecx *e, qty t);
@@ -675,7 +687,7 @@ VPRIV void walk_fn(ecx *e, uint32_t s);
 VPRIV void kv_track(ecx *e, uint32_t s, const val *v);
 VPRIV int ael_slot(ecx *e, uint32_t n, bool create);
 VPRIV bool const_var(ecx *e, uint32_t s, const val *v);
-VPRIV bool can_inline(ecx *e, uint32_t s);
+VPRIV bool can_inline(ecx *e, uint32_t s, uint32_t call);
 VPRIV val inline_call(ecx *e, uint32_t s, carg *args, int n);
 VPRIV uint32_t direct_callee(cc *c, uint32_t fn, uint32_t *ref);
 VPRIV val gen_call(ecx *e, uint32_t n);
@@ -691,6 +703,13 @@ VPRIV val gen(ecx *e, uint32_t n);
 /* cond.c */
 VPRIV int cond_fold(ecx *e, uint32_t n);
 VPRIV void gen_cond(ecx *e, uint32_t n, bool jump_if, uint32_t l);
+/* -O3: a flag chain or range check that folded: its truth instead of a condition */
+enum { FL_TRUE = 16, FL_FALSE = 17 };
+VPRIV bool num_of(cc *c, uint32_t n, i128 *v);
+VPRIV bool cheap_arm(ecx *e, uint32_t n);
+VPRIV int range_check(ecx *e, uint32_t n);
+VPRIV bool flaggable(ecx *e, uint32_t n, bool first);
+VPRIV int gen_flags(ecx *e, uint32_t n, bool first);
 /* stmt.c */
 VPRIV void gen_init_local(ecx *e, const lval *dst, qty ty, uint32_t init);
 VPRIV void run_cleanups(ecx *e, int to);
@@ -723,6 +742,7 @@ VPRIV void wasm_tail(cc *c, tbuf *t, _Atomic uint8_t *claimed);
 VPRIV bool is_aconst(cc *c, uint32_t n);
 VPRIV uint32_t aconst_idx(cc *c, uint32_t n);
 VPRIV void ensure_walked(emitter *E, cc *c, uint32_t s);
+VPRIV void opt_count_calls(emitter *E, cc *c);
 VPRIV int u32_cmp(const void *a, const void *b);
 /* tu.c */
 VPRIV void enqueue(emitter *E, uint32_t item);

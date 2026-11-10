@@ -190,7 +190,8 @@ vcc-tsan:
 # $(SELF); self-check builds stage 3 with stage 2 and requires identical objects.
 SELF ?= ../build/self
 SELF_CC = $(OUT)/vpp
-SELF_FLAGS = -c -std=c11 -O2 -D_DARWIN_C_SOURCE -DVCC_INCDIR='"$(abspath vcc/include)"'
+SELF_OPT ?= -O3
+SELF_FLAGS = -c -std=c11 $(SELF_OPT) -D_DARWIN_C_SOURCE -DVCC_INCDIR='"$(abspath vcc/include)"'
 SELF_LD = ld -arch arm64 -platform_version macos 14.0 14.0 -syslibroot $$(xcrun --show-sdk-path) -lSystem
 SELF_SRC = $(filter-out vcc/tests/%,$(wildcard vcc/*/*.c vcc/*/*/*.c vcc/*/*/*/*.c))
 SO = $(SELF)
@@ -208,7 +209,7 @@ self: $(OUT)/vpp
 	$(SELF_LD) $(call so,$(VCCD_SRC) vcc/ld/ld.c vcc/ld/objcopy.c vcc/platform/darwin/ldmacho.c) $(SELF_PP) $(SELF_LEX) $(SELF_AS) -o $(SO)/vccd
 	$(SELF_LD) $(SO)/as-vasm.o $(SELF_AS) -o $(SO)/vasm
 	$(SELF_LD) $(SO)/lex-lextest.o $(SO)/platform-darwin-pmc.o $(SELF_LEX) -o $(SO)/lextest
-	$(SELF_LD) $(SO)/ld-main.o $(SO)/lib-ldhash.o $(SO)/ld-objcopy.o $(SO)/platform-darwin-ldmacho.o -o $(SO)/vlink
+	$(SELF_LD) $(SO)/ld-main.o $(SO)/lib-ldhash.o $(SO)/ld-objcopy.o $(SO)/ld-wasmld.o $(SO)/platform-darwin-ldmacho.o -o $(SO)/vlink
 	$(SELF_LD) $(SO)/vccd-shim.o -o $(SO)/vcc
 
 self-check: self

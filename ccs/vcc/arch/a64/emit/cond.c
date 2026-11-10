@@ -226,6 +226,297 @@ VPRIV int cond_fold(ecx *e, uint32_t n)
 	return -1;
 }
 
+/* ---------------- -O3: range checks and flag chains ---------------- */
+
+/* n as an integer constant (N_NUM, possibly converted) */
+VPRIV bool num_of(cc *c, uint32_t n, i128 *v)
+{
+	const node *x = N(n);
+
+	if (x->op == N_NUM && is_integer(c, x->ty)) {
+		*v = c->ipool[x->a];
+		return true;
+	}
+	if ((x->op == N_UNARY || x->op == N_CAST) && is_integer(c, x->ty) && !is_wide(c, x->ty)) {
+		cval cv;
+
+		if (cc_eval(c, n, &cv) && cv.kind == CV_INT) {
+			*v = em_trunc_to(c, cv.i, x->ty);
+			return true;
+		}
+	}
+	return false;
+}
+
+/*
+ * An operand that can be evaluated whether or not it is needed: no side
+ * effects, no faults, and code that leaves the flags alone (loads of
+ * locals, constants, integer conversions).
+ */
+VPRIV bool cheap_arm(ecx *e, uint32_t n)
+{
+	cc *c = e->c;
+	const node *x = N(n);
+
+	if ((!is_integer(c, x->ty) && !is_ptr(c, x->ty)) || is_wide(c, x->ty) || (QQ(x->ty) & Q_VOLATILE))
+		return false;
+	switch (x->op) {
+	case N_NUM:
+		return true;
+	case N_VAR:
+		return is_local_var(c, x->a) && !(QQ(c->syms[x->a].ty) & Q_VOLATILE);
+	case N_CAST:
+		return (x->aux == CK_INT || x->aux == CK_NOP || x->aux == CK_P2P || x->aux == CK_I2P || x->aux == CK_P2I) &&
+		       cheap_arm(e, x->a);
+	case N_UNARY: {
+		i128 v;
+
+		return num_of(c, n, &v);	/* -k */
+	}
+	default:
+		return false;
+	}
+}
+
+/* the same side-effect-free value: a local variable, through the same conversions */
+static bool same_simple(cc *c, uint32_t a, uint32_t b)
+{
+	const node *x = N(a), *y = N(b);
+
+	if (x->op != y->op || x->ty != y->ty || (QQ(x->ty) & Q_VOLATILE))
+		return false;
+	if (x->op == N_VAR)
+		return x->a == y->a && is_local_var(c, x->a) && !(QQ(c->syms[x->a].ty) & Q_VOLATILE);
+	if (x->op == N_CAST)
+		return x->aux == y->aux && x->aux == CK_INT && same_simple(c, x->a, y->a);
+	return false;
+}
+
+/* one bound of a range check: v >= k (lower) or v <= k (upper), any spelling; returns the v node or 0 */
+static uint32_t range_bound(cc *c, uint32_t n, bool *lower, i128 *k)
+{
+	const node *x = N(n);
+	qty lt;
+	int op;
+	uint32_t v;
+	i128 m, lo, hi;
+
+	if (x->op != N_BINARY || !em_is_cmp(x->aux) || x->aux == T_EQUALEQUAL || x->aux == T_EXCLAIMEQ)
+		return 0;
+	lt = N(x->a)->ty;
+	if (!is_integer(c, lt) || is_wide(c, lt) || tsize(c, lt) < 4)
+		return 0;
+	op = x->aux;
+	if (num_of(c, x->b, &m)) {
+		v = x->a;
+	} else if (num_of(c, x->a, &m)) {
+		v = x->b;	/* k op v: mirror */
+		op = op == T_LESS ? T_GREATER : op == T_GREATER ? T_LESS : op == T_LESSEQ ? T_GREATEREQ : T_LESSEQ;
+	} else {
+		return 0;
+	}
+	m = em_trunc_to(c, m, lt);
+	if (is_signed(c, lt)) {
+		lo = tsize(c, lt) == 8 ? (i128)INT64_MIN : (i128)INT32_MIN;
+		hi = tsize(c, lt) == 8 ? (i128)INT64_MAX : (i128)INT32_MAX;
+	} else {
+		lo = 0;
+		hi = tsize(c, lt) == 8 ? (i128)UINT64_MAX : (i128)UINT32_MAX;
+	}
+	switch (op) {
+	case T_GREATEREQ: *lower = true; *k = m; break;
+	case T_GREATER: *lower = true; *k = m + 1; break;
+	case T_LESSEQ: *lower = false; *k = m; break;
+	default: *lower = false; *k = m - 1; break;
+	}
+	return *k < lo || *k > hi ? 0 : v;
+}
+
+/*
+ * v >= lo && v <= hi (any order and spelling, v a local) as one unsigned
+ * compare (v - lo) <= (hi - lo); v < lo || v > hi as its negation.
+ * Returns the condition that is true when the && or || is (the flags
+ * set), FL_TRUE/FL_FALSE when v is known, or -1.
+ */
+VPRIV int range_check(ecx *e, uint32_t n)
+{
+	cc *c = e->c;
+	const node *x = N(n);
+	uint32_t va, vb;
+	bool la, lb;
+	i128 ka, kb, lo, hi;
+	qty lt;
+	int cx, r;
+	val v;
+
+	if (!e->E->opt3 || (x->op != N_LOGAND && x->op != N_LOGOR))
+		return -1;
+	if (!(va = range_bound(c, x->a, &la, &ka)) || !(vb = range_bound(c, x->b, &lb, &kb)) || la == lb ||
+	    !same_simple(c, va, vb))
+		return -1;
+	lt = N(va)->ty;		/* the type both compares are done in */
+	if (x->op == N_LOGAND) {
+		lo = la ? ka : kb, hi = la ? kb : ka;
+	} else {
+		/* v < lo || v > hi: outside the range */
+		lo = (la ? kb : ka) + 1, hi = (la ? ka : kb) - 1;
+	}
+	if (lo > hi)
+		return -1;
+	cx = X(c, lt);
+	v = gen(e, va);
+	if (v.k == V_CONST) {
+		/* a known value: no code (what it guards may not exist) */
+		i128 k = em_trunc_to(c, v.i, lt);
+		bool in = k >= lo && k <= hi;
+
+		return (x->op == N_LOGAND ? in : !in) ? FL_TRUE : FL_FALSE;
+	}
+	r = toreg(e, &v);
+	if (lo)
+		opi(e, I_SUBI, cx, r, r, (int64_t)lo);
+	if (hi - lo <= 4095) {
+		opi(e, I_SUBSI, cx, ZR, r, (int64_t)(hi - lo));
+	} else {
+		movi(e, cx, R_X16, (int64_t)(hi - lo));
+		op3(e, I_SUBS, cx, ZR, r, R_X16);
+	}
+	val_free(e, &v);
+	return x->op == N_LOGAND ? C_LS : C_HI;
+}
+
+/*
+ * && and || of integer compares as one flag chain (cmp; ccmp ...; then
+ * cset or b.cond).  The chain is left-deep: (A op B) op C ..., each
+ * operand after the first a compare of cheap values (cheap_arm), since it
+ * is evaluated whatever the ones before decided.
+ */
+static bool flag_leaf(ecx *e, uint32_t n, bool first)
+{
+	cc *c = e->c;
+	const node *x = N(n);
+	qty lt;
+
+	if (x->op == N_UNARY && x->aux == T_EXCLAIM)
+		return flag_leaf(e, x->a, first);
+	if (x->op != N_BINARY || !em_is_cmp(x->aux))
+		return false;
+	lt = N(x->a)->ty;
+	if ((!is_integer(c, lt) && !is_ptr(c, lt)) || is_wide(c, lt) || is_vec(c, x->ty) || is_vec(c, lt))
+		return false;
+	return first || (cheap_arm(e, x->a) && cheap_arm(e, x->b));
+}
+
+VPRIV bool flaggable(ecx *e, uint32_t n, bool first)
+{
+	cc *c = e->c;
+	const node *x = N(n);
+
+	if (!e->E->opt3)
+		return false;
+	if (x->op == N_LOGAND || x->op == N_LOGOR)
+		return flaggable(e, x->a, first) && flag_leaf(e, x->b, false);
+	return flag_leaf(e, n, first);
+}
+
+/* NZCV values that make each condition true */
+static const uint8_t nzcv_true[] = {
+	[C_EQ] = 4, [C_NE] = 0, [C_HS] = 2, [C_LO] = 0, [C_MI] = 8, [C_PL] = 0, [C_VS] = 1, [C_VC] = 0,
+	[C_HI] = 2, [C_LS] = 4, [C_GE] = 0, [C_LT] = 8, [C_GT] = 0, [C_LE] = 4,
+};
+
+/* a compare leaf: cmp (first: cin < 0), or ccmp under cin (&&: when cin holds; ||: when it does not) */
+static int flag_cmp(ecx *e, uint32_t n, int cin, bool isand)
+{
+	cc *c = e->c;
+	const node *x = N(n);
+	bool inv = false, sg;
+	qty lt;
+	val a, b;
+	int cond, x64;
+
+	while (x->op == N_UNARY) {
+		inv = !inv;
+		n = x->a, x = N(n);
+	}
+	lt = N(x->a)->ty;
+	sg = !is_ptr(c, lt) && is_signed(c, lt);
+	x64 = X(c, lt);
+	a = gen(e, x->a);
+	b = gen(e, x->b);
+	cond = cmp_cond(x->aux, sg) ^ inv;
+	if ((a.k == V_CONST || a.k == V_ADDR) && (b.k == V_CONST || b.k == V_ADDR)) {
+		/* folds as gen_binary folds it, else compared at run time */
+		int t = -1;
+
+		if (a.k == V_CONST && b.k == V_CONST) {
+			bool ok;
+			val f = fold_int_bin(e, x->aux, is_ptr(c, lt) ? prim(TY_ULONG) : lt, x->ty, a.i, b.i, &ok);
+
+			if (ok)
+				t = f.i != 0;
+		} else if (a.k == V_ADDR && b.k == V_ADDR && a.ref == b.ref) {
+			bool ok;
+			val f = fold_int_bin(e, x->aux, prim(TY_LONG), x->ty, a.i, b.i, &ok);
+
+			if (ok)
+				t = f.i != 0;
+		}
+		if (t >= 0)
+			return (t ^ inv) ? FL_TRUE : FL_FALSE;
+	}
+	if (cin < 0) {
+		emit_cmp(e, x->aux, x64, sg, &a, &b);
+	} else {
+		int64_t k = 0;
+		bool imm = false;
+		int ra = toreg(e, &a), rb = 0;
+
+		if (b.k == V_CONST) {
+			k = x64 ? (int64_t)b.i : (int32_t)b.i;
+			imm = k >= -31 && k <= 31;
+		}
+		if (!imm)
+			rb = toreg(e, &b);
+		if (e->reach) {
+			ins *i = put(e, I_CCMP);
+
+			i->sz = (uint8_t)x64, i->rn = (uint8_t)ra, i->rm = (uint8_t)rb, i->sh = imm;
+			i->imm = imm ? k : 0;
+			i->cond = (uint8_t)(isand ? cin : cin ^ 1);
+			i->ra = nzcv_true[isand ? cond ^ 1 : cond];
+		}
+	}
+	val_free(e, &a);
+	val_free(e, &b);
+	return cond;
+}
+
+/* the chain at n (flaggable): returns the condition that holds when n is true, or FL_TRUE/FL_FALSE */
+VPRIV int gen_flags(ecx *e, uint32_t n, bool first)
+{
+	cc *c = e->c;
+	const node *x = N(n);
+
+	if (x->op == N_LOGAND || x->op == N_LOGOR) {
+		bool isand = x->op == N_LOGAND;
+		int rc = first ? range_check(e, n) : -1, rb;
+
+		if (rc >= 0)
+			return rc;
+		rc = gen_flags(e, x->a, first);
+		if (rc == (isand ? FL_FALSE : FL_TRUE))
+			return rc;	/* decided: the rest is cheap, nothing to evaluate */
+		if (rc >= FL_TRUE)
+			return flag_cmp(e, x->b, -1, false);
+		rb = flag_cmp(e, x->b, rc, isand);
+		if (rb >= FL_TRUE)
+			return rb == (isand ? FL_TRUE : FL_FALSE) ? rc : rb;
+		return rb;
+	}
+	return flag_cmp(e, n, -1, false);
+}
+
 VPRIV void gen_cond(ecx *e, uint32_t n, bool jump_if, uint32_t l)
 {
 	cc *c = e->c;
@@ -241,7 +532,17 @@ VPRIV void gen_cond(ecx *e, uint32_t n, bool jump_if, uint32_t l)
 	case N_LOGAND:
 	case N_LOGOR: {
 		bool isand = x->op == N_LOGAND;
+		int rc = flaggable(e, n, true) ? gen_flags(e, n, true) : range_check(e, n);
 
+		if (rc >= FL_TRUE) {
+			if ((rc == FL_TRUE) == jump_if)
+				jump(e, l);
+			return;
+		}
+		if (rc >= 0) {
+			bcond(e, jump_if ? rc : rc ^ 1, l);
+			return;
+		}
 		if (isand != jump_if) {
 			/* && jumping on false / || jumping on true: both operands jump to l */
 			gen_cond(e, x->a, jump_if, l);
@@ -266,6 +567,26 @@ VPRIV void gen_cond(ecx *e, uint32_t n, bool jump_if, uint32_t l)
 			gen_cond(e, x->a, jump_if, l);
 			return;
 		}
+		if (e->E->opt3 && (x->aux == CK_INT || x->aux == CK_NOP || x->aux == CK_P2I) &&
+		    (is_integer(c, x->ty) || is_ptr(c, x->ty)) && (is_integer(c, N(x->a)->ty) || is_ptr(c, N(x->a)->ty)) &&
+		    !is_wide(c, x->ty) && !is_wide(c, N(x->a)->ty) && tsize(c, x->ty) >= tsize(c, N(x->a)->ty)) {
+			/* a widening conversion keeps the truth */
+			gen_cond(e, x->a, jump_if, l);
+			return;
+		}
+		break;
+	case N_BUILTIN:
+		if (e->E->opt3 && (x->aux == BI_EXPECT || x->aux == BI_EXPECT_PROB) && x->c) {
+			const uint32_t *arg = &c->lists[x->b];
+			bool pure = true;
+
+			for (uint32_t i = 1; i < x->c; i++)
+				pure &= !side_effects(c, arg[i]);
+			if (pure) {
+				gen_cond(e, arg[0], jump_if, l);
+				return;
+			}
+		}
 		break;
 	case N_BINARY:
 		if (em_is_cmp(x->aux) && !is_wide(c, N(x->a)->ty) && !is_flt(c, N(x->a)->ty)) {
@@ -281,7 +602,7 @@ VPRIV void gen_cond(ecx *e, uint32_t n, bool jump_if, uint32_t l)
 				int cond = e->in[e->nin - 1].cond ^ 1;
 
 				e->nin--;
-				bcond(e, jump_if ? cond : cond ^ 1, l);
+				bcond_opt(e, jump_if ? cond : cond ^ 1, l);
 				val_free(e, &v);
 				return;
 			}
