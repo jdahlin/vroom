@@ -694,7 +694,7 @@ VPRIV void wk_stmt(ecx *e, uint32_t n)
 				LO(store)(e, r, &t, 8);
 				LO(tfree)(e, r);
 				wk_cleanups(e, 0);
-				v = wk_vreg(wk_treg(e, W->rty));
+				v = (val){ .k = V_REG, .r = (uint8_t)(is_flt(c, W->rty) ? LO(ftreg)(e) : LO(treg)(e)) };
 				LO(load)(e, v.r, &t, 8, false);
 			}
 			LO(ret)(e, &v, W->rty, W->retlbl);
