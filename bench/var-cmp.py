@@ -88,6 +88,9 @@ def main():
         [f'cDPrST A {four}', 'mP A kernel/fork.o'],
         [f'cDPrsT A {four}', 'mPi kernel/fork.o A mm/memory.o'],
         [f'cDPrST A {four}', 'mPi nonmember.o A mm/memory.o'],
+        # regular archives (created only): basenames, long names, symbol table, odd sizes
+        [f'cDPrs A {four} .varcmp/e.o'], [f'cDPrS A {four}'], ['crs A kernel/fork.o .config'],
+        ['cDPrs A arch/arm64/kernel/vdso/vdso.so.dbg init/main.o'], ['cDPrsT A arch/arm64/kernel/vdso/vdso.so.dbg'],
     ]
     ebad = 0
     for arch in ('.varcmp/a.a', 'a.a'):

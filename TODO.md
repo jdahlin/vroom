@@ -972,7 +972,10 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
 - [ ] **Diagnostics**: undefined symbol with section+offset and all
   referencing objects (`ld/ld.c:4231`); `-r` output differs from lld.
   *Validate:* T4-style expected-stderr for vlink; T8 `-r` byte diff.
-- [ ] **var**: only thin archives (`vccd/ar.c:286,352,672`), ops `r`/`m`/`t`,
+- [ ] **var**: (done: creating a regular GNU archive with an ELF object
+  first, byte-identical to llvm-ar; mode 644 for every member as llvm-ar's
+  deterministic mode, also in thin archives.)  Regular archives are not
+  updated or read (`r` on one, `t`), ops `r`/`m`/`t` only,
   32-bit GNU symtab only; ld skips `/SYM64/` (`ld/ld.c:1622`).
   *Validate:* `bench/var-cmp.py` extended to regular archives and `x`, `d`,
   `q`, `p`, `s`; round-trip with llvm-ar.
