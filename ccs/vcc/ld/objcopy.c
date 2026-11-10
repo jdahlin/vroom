@@ -401,6 +401,7 @@ static struct {
 	uint32_t nredef;
 	const char **add;	/* --add-section name=file */
 	uint32_t nadd;
+	const char *debuglink;
 	const char **only;
 	uint32_t nonly;
 	const char **unneeded;
@@ -494,7 +495,7 @@ static int objcopy_run(int dirfd)
 	const Ehdr *eh = e.eh;
 	bool rel = eh->e_type == 1;
 	uint32_t ns = e.nsh;
-	OSec *sec = xcalloc(ns + oc.nadd, sizeof *sec);
+	OSec *sec = xcalloc(ns + oc.nadd + 1, sizeof *sec);
 	for (uint32_t i = 0; i < ns; i++) {
 		const Shdr *h = &e.sh[i];
 		OSec *s = &sec[i];
@@ -546,6 +547,42 @@ static int objcopy_run(int dirfd)
 			oerror("'%s': %s data must be either empty or at least 12 bytes long", oc.in, s->name);
 		close(fd);
 		ns++;
+	}
+	/* --add-gnu-debuglink (after --add-section): .gnu_debuglink = basename, NUL, padding to 4, CRC-32 of the file */
+	if (oc.debuglink) {
+		OSec *s = &sec[ns];
+		int fd = openat(dirfd, oc.debuglink, O_RDONLY);
+		struct stat st;
+		const char *base = strrchr(oc.debuglink, '/') ? strrchr(oc.debuglink, '/') + 1 : oc.debuglink;
+		size_t bl = strlen(base), sz = (bl + 4) / 4 * 4 + 4;
+		uint32_t crc = 0xffffffff;
+
+		if (fd < 0 || fstat(fd, &st) < 0) {
+			oerror("'%s': %s", oc.debuglink, strerror(errno));
+		} else {
+			uint8_t buf[65536];
+			ssize_t r;
+
+			while ((r = read(fd, buf, sizeof buf)) > 0)
+				for (ssize_t i = 0; i < r; i++) {
+					crc ^= buf[i];
+					for (int b = 0; b < 8; b++)
+						crc = crc >> 1 ^ (0xedb88320 & -(crc & 1));
+				}
+			crc = ~crc;
+			s->name = ".gnu_debuglink";
+			s->type = SHT_PROGBITS;
+			s->align = 4;
+			s->size = sz;
+			s->origoff = UINT64_MAX;
+			s->parent = -1;
+			s->gen = xcalloc(sz, 1);
+			memcpy(s->gen, base, bl);
+			memcpy(s->gen + sz - 4, &crc, 4);
+			ns++;
+		}
+		if (fd >= 0)
+			close(fd);
 	}
 
 	/* segments: real ones, then the ELF header and program header "segments" */
@@ -1014,6 +1051,8 @@ int objcopy_main(int argc, char **argv, int dirfd, FILE *err)
 			push(&oc.unneeded, &oc.nunneeded, v);
 		} else if ((v = VAL("--dump-section"))) {
 			push(&oc.dump, &oc.ndump, v);
+		} else if ((v = VAL("--add-gnu-debuglink"))) {
+			oc.debuglink = v;
 		} else if ((v = VAL("--add-section"))) {
 			if (!strchr(v, '=') || v[0] == '=')
 				oerror("bad format for --add-section: missing '='");
