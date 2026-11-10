@@ -316,6 +316,21 @@ static int cmp_toks(const vlex_file *pa, const vlex_file *pb, char *ba, char *bb
 }
 
 
+/* an input file by its suffix, as clang's driver: .c .h .i (C), .S .s (assembly), .dts */
+static bool src_suffix(const char *a)
+{
+	static const char *const sfx[] = { ".c", ".h", ".i", ".S", ".s", ".dts" };
+	size_t l = strlen(a);
+
+	for (size_t i = 0; i < sizeof sfx / sizeof *sfx; i++) {
+		size_t n = strlen(sfx[i]);
+
+		if (l > n && !strcmp(a + l - n, sfx[i]))
+			return true;
+	}
+	return false;
+}
+
 static void bfree(buf *b)
 {
 	if (b->p && b->r)
@@ -967,8 +982,7 @@ int ppd_run(int argc, char **argv, const ppd_env *env)
 		else if (!strncmp(a, "-march=", 7) && arch_lse(a + 7, false) >= 0) march_lse = arch_lse(a + 7, false);
 		else if (!strncmp(a, "-mcpu=", 6) && arch_lse(a + 6, true) >= 0) mcpu_lse = arch_lse(a + 6, true);
 		else if (!strcmp(a, "-mcmodel=tiny")) tiny = 1;
-		else if (a[0] != '-' && a[0] && (xlang || strstr(a, ".c") || strstr(a, ".S") || strstr(a, ".dts") ||
-					 (strlen(a) > 2 && !strcmp(a + strlen(a) - 2, ".s")))) {
+		else if (a[0] != '-' && a[0] && (xlang || src_suffix(a))) {
 			size_t l = strlen(a);
 
 			main_file = a;

@@ -1006,7 +1006,7 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
   configure and build with `CC=vcc`, tests pass.
 - [ ] **Unknown flags silently ignored** [P] (`driver/ppdriver.c:435-533`): `-g`,
   `-fsanitize=*`, `-m32`, `-march=znver4`, `-x c++`, `.cpp` inputs, `@rsp`,
-  several inputs; input detection by `strstr(a, ".c")` (`driver/ppdriver.c:526`).
+  several inputs.  (Done: input detection by suffix, `src_suffix`.)
   Every option is either implemented, explicitly ignored with a documented
   reason, or an error (`-Wunused-command-line-argument` like clang).
   *Validate:* T11 table generated from clang's option list
