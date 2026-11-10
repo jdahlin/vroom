@@ -255,6 +255,14 @@ static uint32_t declare(cc *c, const dspec *ds, declr *d, qty t, bool file)
 		else
 			t = QT(QI(ty_vector(c, t, at.vecsize)), QQ(t));
 	}
+	if (at.extvec && ds->sc == SC_TYPEDEF && is_arith(c, t) && !is_complex(c, t)) {
+		/* clang: n elements, the size rounded up to a power of 2 (float3: 16) */
+		uint64_t sz = (uint64_t)at.extvec * ty_size(c, t), p = 1;
+
+		while (p < sz)
+			p <<= 1;
+		t = QT(QI(ty_vector(c, t, (uint32_t)p)), QQ(t));
+	}
 	if (ds->sc == SC_TYPEDEF) {
 		if (at.aligned)
 			t = ty_aligned(c, t, at.aligned);

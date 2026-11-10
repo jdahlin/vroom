@@ -42,6 +42,7 @@ typedef struct attrs {		/* the attributes of one declaration */
 	uint32_t cleanup;	/* sym */
 	uint32_t mode;		/* 0, or the integer type kind from mode() */
 	uint32_t vecsize;	/* vector_size(n) bytes, 0: none */
+	uint32_t extvec;	/* ext_vector_type(n) elements, 0: none */
 	uint32_t counted_by;	/* identifier id */
 	uint32_t errmsg;	/* error("..."): string index + 1, 0: none */
 	uint32_t visibility;

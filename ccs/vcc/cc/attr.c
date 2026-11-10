@@ -7,7 +7,7 @@ enum {
 	A_NONE, A_ALIGNED, A_PACKED, A_SECTION, A_MODE, A_CLEANUP, A_ALIAS, A_WEAK, A_USED, A_UNUSED,
 	A_NORETURN, A_ALWAYS_INLINE, A_NOINLINE, A_GNU_INLINE, A_TRANSPARENT_UNION, A_VISIBILITY,
 	A_CONSTRUCTOR, A_DESTRUCTOR, A_COUNTED_BY, A_VECTOR_SIZE, A_COLD, A_NONSTRING, A_MAY_ALIAS,
-	A_WEAKREF, A_NAKED, A_NOCF, A_ERROR, A_OVERLOADABLE, A_NOINSTR, A_TLS_MODEL,
+	A_WEAKREF, A_NAKED, A_NOCF, A_ERROR, A_OVERLOADABLE, A_NOINSTR, A_TLS_MODEL, A_EXT_VECTOR,
 	A_COUNT
 };
 
@@ -20,7 +20,7 @@ static const char *const attr_names[A_COUNT] = {
 	[A_COUNTED_BY] = "counted_by", [A_VECTOR_SIZE] = "vector_size", [A_COLD] = "cold",
 	[A_NONSTRING] = "nonstring", [A_MAY_ALIAS] = "may_alias", [A_WEAKREF] = "weakref",
 	[A_NOINSTR] = "no_instrument_function", [A_NAKED] = "naked", [A_NOCF] = "nocf_check", [A_ERROR] = "error",
-	[A_OVERLOADABLE] = "overloadable", [A_TLS_MODEL] = "tls_model",
+	[A_OVERLOADABLE] = "overloadable", [A_TLS_MODEL] = "tls_model", [A_EXT_VECTOR] = "ext_vector_type",
 };
 
 static uint32_t *attr_dir[NDIR];
@@ -241,6 +241,18 @@ __attribute__((noinline)) VPRIV void attribute_list_(cc *c, attrs *a)
 					a->vecsize = (uint32_t)v;
 				continue;
 			}
+			case A_EXT_VECTOR: {	/* ext_vector_type(N): N elements (typedefs only) */
+				i128 v;
+
+				expect(c, T_LPAREN, "'('");
+				const_expr(c, &v, NULL);
+				expect(c, T_RPAREN, "')'");
+				if (v <= 0 || v > 4096)
+					cc_error(c, loc, "invalid vector size");
+				else
+					a->extvec = (uint32_t)v;
+				continue;
+			}
 			case A_PACKED: a->packed = 1; break;
 			case A_WEAK: a->weak = 1; break;
 			case A_USED: a->used = 1; break;
@@ -293,7 +305,7 @@ __attribute__((noinline)) VPRIV void attribute_list_(cc *c, attrs *a)
 }
 
 /* the 0/1 flags packed .. noinstr are 18 contiguous bytes after the u32 fields */
-_Static_assert(offsetof(attrs, packed) == 11 * sizeof(uint32_t) &&
+_Static_assert(offsetof(attrs, packed) == 12 * sizeof(uint32_t) &&
 	       offsetof(attrs, noinstr) == offsetof(attrs, packed) + 17, "attrs layout");
 
 VPRIV void merge_attrs(attrs *to, const attrs *from)
@@ -308,6 +320,7 @@ VPRIV void merge_attrs(attrs *to, const attrs *from)
 	if (from->cleanup) to->cleanup = from->cleanup;
 	if (from->mode) to->mode = from->mode;
 	if (from->vecsize) to->vecsize = from->vecsize;
+	if (from->extvec) to->extvec = from->extvec;
 	if (from->counted_by) to->counted_by = from->counted_by;
 	if (from->visibility) to->visibility = from->visibility;
 	if (from->errmsg) to->errmsg = from->errmsg;

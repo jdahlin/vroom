@@ -1027,9 +1027,10 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
   literal folds (`eval`); `{ "q"[0] }` in an int array parsed as a string
   initializer.  Done: `tests/vcc/static_strelem.c`.
 - [ ] **Vector types in messages**: clang keeps the typedef name (`'v4'`),
-  appends ` (vector of 4 'int' values)` after the quoted type, and an
-  `ext_vector_type` prints as its typedef, not its element type (vcc:
-  `'float'`).  *Validate:* diag test with vector_size and ext_vector_type.
+  appends ` (vector of 4 'int' values)` after the quoted type.
+  `ext_vector_type(N)` is now a vector (it was ignored: `sizeof` wrong;
+  `tests/vcc/ext_vector.c`); its `.xyzw` swizzles are not supported.
+  *Validate:* diag test with vector_size and ext_vector_type.
 - [ ] **Diagnostic details**: columns on `##` and invalid directives,
   `#line` file names ignored, nested macro notes (one level today), the
   "expanded from macro" note only for undeclared identifiers.

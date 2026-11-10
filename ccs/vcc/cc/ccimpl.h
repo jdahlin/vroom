@@ -522,16 +522,16 @@ static inline void attribute_list(cc *c, attrs *a)
 }
 
 /* no attribute at all (padding excluded) */
-/* 11 u32 fields then the 18 flag bytes (attr.c asserts the layout) */
+/* 12 u32 fields then the 18 flag bytes (attr.c asserts the layout) */
 static inline bool attrs_empty(const attrs *a)
 {
 	const char *p = (const char *)a;
-	uint64_t w[7], o = 0;
+	uint64_t w[8], o = 0;
 
 	memcpy(w, p, sizeof(w));
-	for (int i = 0; i < 7; i++)
+	for (int i = 0; i < 8; i++)
 		o |= w[i];
-	return !o && !p[56] && !p[57] && !p[58] && !p[59] && !p[60] && !p[61] && !a->tlsmodel;
+	return !o && !p[64] && !p[65] && !a->prio && !a->tlsmodel;
 }
 
 #endif
