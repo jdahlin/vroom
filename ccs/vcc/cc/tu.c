@@ -196,6 +196,7 @@ int cc_run(pp *p, const cc_opts *o)
 				note(c, c->tags[T(c, y->ty)->aux].loc, "forward declaration of '%s'", tyname(c, y->ty));
 			}
 		}
+		unused_statics(c);
 	}
 	if (o->dump_layouts && !c->errors)
 		layout_checks(c);

@@ -1046,7 +1046,14 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
   whose exact value does not fit (innermost only, `NF_OVF`), value with
   clang's digit separators.  Done: diag `int_overflow.c`; not modelled:
   overflow inside casts/conditionals reached through other operators.
-- [ ] **Missing warnings** (only 7 `-W` flags): `-Wunused-variable`,
+- [x] **-Wunused-variable**, `-Wunused-const-variable`: block-scope
+  variables never named, at scope close; main-file statics at end of TU;
+  none after an error, cleanup/unused/used exempt.  Done: diag
+  `unused_var.c`, 90 warnings over the 2032 test-suite files identical to
+  clang.  Not modelled: a static redeclared and then defined is warned at
+  its first declaration (clang: the definition); bodies of unreferenced
+  lazy header functions are never parsed, so they are not checked.
+- [ ] **Missing warnings** (only 7 `-W` flags):
   `-Wreturn-stack-address` of a compound literal
   (clang prints the initializer with its expression printer),
   `-Wconstant-conversion`,

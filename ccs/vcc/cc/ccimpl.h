@@ -219,6 +219,7 @@ VPRIV uint32_t *dslot(cc *c, uint32_t **dir, uint32_t id);
 static inline uint32_t dget(uint32_t **dir, uint32_t id);
 VPRIV void scope_open(cc *c);
 VPRIV void scope_close(cc *c);
+VPRIV void unused_statics(cc *c);
 VPRIV uint32_t sym_new(cc *c, int kind, uint32_t name, qty ty, uint32_t loc);
 VPRIV void sym_bind(cc *c, uint32_t s);
 VPRIV uint32_t lookup(cc *c, uint32_t id);

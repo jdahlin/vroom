@@ -21,9 +21,82 @@ VPRIV void scope_open(cc *c)
 	c->smark[++c->depth] = c->nsstack;
 }
 
+/* -Wunused-variable: a block-scope variable never named (clang's
+   ActOnPopScope, in declaration order) */
+static void unused_vars(cc *c, uint32_t m)
+{
+	static const char *const g[] = { "unused", "all", "most", NULL };
+
+	for (uint32_t i = m; i < c->nsstack; i++) {
+		sym *y = &c->syms[c->sstack[i]];
+		const attrs *a = y->attrs ? &c->attr[y->attrs] : NULL;
+		pp_span r;
+
+		if (y->kind != S_VAR || !y->name || (y->flags & (SF_REF | SF_PARAM | SF_ATTR_USED)) ||
+		    y->sc == SC_EXTERN || (a && (a->unused || a->cleanup || a->used)))
+			continue;
+		r = (pp_span){ y->loc, pp_tok_end(c->p, y->loc) };
+		{
+			pp_dinfo d = { "warning", y->loc, &r, 1, NULL, 0, idstr_(y->name), (uint32_t)idlen_(y->name) };
+
+			pp_warnx(c->p, "unused-variable", false, g, &d, "unused variable '%.*s'", IDF(y->name));
+		}
+	}
+}
+
+/* -Wunused-variable, -Wunused-const-variable: a static file-scope variable
+   of the main file never named, at its definition (clang's end of TU) */
+VPRIV void unused_statics(cc *c)
+{
+	static const char *const g[] = { "unused", "all", "most", NULL };
+	static const char *const gc[] = { "unused-variable", "unused", "all", "most", NULL };
+
+	if (c->errors || pp_errors(c->p))
+		return;
+
+	for (uint32_t i = 1; i < c->nsym; i++) {
+		const sym *y = &c->syms[i];
+		uint32_t at = i, s;
+		bool ref = false, skip = false;
+
+		if (y->kind != S_VAR || y->depth || y->sc != SC_STATIC || !y->name || lookup(c, y->name) != i)
+			continue;
+		for (s = i; s; s = c->syms[s].next) {
+			const sym *z = &c->syms[s];
+			const attrs *a = z->attrs ? &c->attr[z->attrs] : NULL;
+
+			ref |= (z->flags & (SF_REF | SF_ATTR_USED)) != 0;
+			skip |= a && (a->unused || a->used);
+			if (z->flags & SF_DEFINED || !c->syms[s].next)
+				at = s;
+			if (z->flags & SF_DEFINED)
+				break;
+		}
+		y = &c->syms[at];
+		if (ref || skip || !pp_in_main_file(c->p, y->loc))
+			continue;
+		{
+			qty t = y->ty;
+			bool k;
+
+			while (KIND(c, t) == TY_ARRAY)
+				t = QT(QI(T(c, t)->base), QQ(T(c, t)->base) | QQ(t));
+			k = (QQ(t) & Q_CONST) != 0;
+			pp_span r = { y->loc, pp_tok_end(c->p, y->loc) };
+			pp_dinfo d = { "warning", y->loc, &r, 1, NULL, 0, idstr_(y->name), (uint32_t)idlen_(y->name) };
+
+			pp_warnx(c->p, k ? "unused-const-variable" : "unused-variable", false, k ? gc : g, &d,
+				 "unused variable '%.*s'", IDF(y->name));
+		}
+	}
+}
+
 VPRIV void scope_close(cc *c)
 {
 	uint32_t m = c->smark[c->depth];
+
+	if (c->depth > 0 && c->nsstack > m && !c->errors && !pp_errors(c->p))	/* (clang: none after an error) */
+		unused_vars(c, m);
 
 	while (c->nsstack > m) {
 		uint32_t s = c->sstack[--c->nsstack];
