@@ -960,7 +960,8 @@ VPRIV void embed(pp *p, ctx *c, uint32_t b, uint32_t e, uint32_t loc, uint32_t n
 			return;
 		o = w = varena_alloc(&p->tmp, nt * sizeof(ptok));
 		if (on) {
-			memcpy(w, m.pre, m.npre * sizeof(ptok)), w += m.npre;
+			if (m.npre)	/* no prefix: m.pre is NULL, and memcpy's arguments are nonnull */
+				memcpy(w, m.pre, m.npre * sizeof(ptok)), w += m.npre;
 			for (uint64_t i = 0; i < on; i++) {
 				unsigned char v = (unsigned char)f->src[ob + i];
 
@@ -971,7 +972,8 @@ VPRIV void embed(pp *p, ctx *c, uint32_t b, uint32_t e, uint32_t loc, uint32_t n
 					       (uint8_t)(i ? TF_SPACE : 0), 0 };
 			}
 			w[-1].flags |= PF_EMBEND;
-			memcpy(w, m.suf, m.nsuf * sizeof(ptok)), w += m.nsuf;
+			if (m.nsuf)
+				memcpy(w, m.suf, m.nsuf * sizeof(ptok)), w += m.nsuf;
 		} else {
 			memcpy(w, m.emp, m.nemp * sizeof(ptok)), w += m.nemp;
 		}

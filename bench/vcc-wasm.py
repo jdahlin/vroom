@@ -44,6 +44,11 @@ BASE = [TGT, '-nostdinc', '-I', f'{ct.RT}/include', '-isystem', ct.RES, '-O2']
 LINK = [EMCC, '-sMEMORY64=1', '-sEXIT_RUNTIME=1', '-sASSERTIONS=0', '-sSTACK_SIZE=4MB', '-Wno-deprecated']
 # tests that need what the wasm target or emscripten does not have
 WASM_SKIP = {}
+# known vcc bugs (TODO.md "wasm: the optimizations the gcc torture tests
+# assume"): a failure counts as xfail, a pass as XPASS (an error: drop it here)
+_WOPT = 'wasm: no inliner or dead-code removal (TODO.md)'
+WASM_XFAIL = {n: _WOPT for n in ('20020720-1', '20030216-1', '20041114-1', 'compare-3',
+                                 'pure-1', 'shiftopt-1', 'bcp-1')}
 
 def set_target(w32):
     """wasm32 (W7) instead of wasm64: the target, emcc's memory, the work directory"""
@@ -130,6 +135,15 @@ def reference(suite, name, path, flags, wd):
     return r
 
 def one(t):
+    t, st, cat, why = one_(t)
+    xf = WASM_XFAIL.get(t[1]) if t[0] == 'gcc' else None
+    if xf and st == 'fail':
+        return t, 'xfail', cat, f'{xf} [{why}]'
+    if xf and st == 'pass':
+        return t, 'fail', 'xpass', f'passes now: remove it from WASM_XFAIL ({xf})'
+    return t, st, cat, why
+
+def one_(t):
     suite, name, path = t
     src = open(path, 'rb').read().decode('latin-1')
     if suite == 'tcc' and name in ct.TCC_SKIP:
@@ -237,6 +251,8 @@ if __name__ == '__main__':
             whys[(st, cat)][why] += 1
         if verbose and st == 'fail':
             print(f'FAIL {cat:5s} {s}/{n}: {why}')
+        if verbose and st == 'xfail':
+            print(f'XFAIL {cat:5s} {s}/{n}: {why}')
         if show and st != 'pass' and cat == show:
             print(f'{st} {cat} {s}/{n}: {why}')
     for (st, cat), c in sorted(whys.items()):
@@ -250,6 +266,7 @@ if __name__ == '__main__':
     for s, c in sorted(by.items()) + [('all', tot)]:
         run_ = c['pass'] + c['fail']
         det = ' '.join(f'{k}={v}' for k, v in sorted(c.items()) if ':' in k)
-        print(f'{s:4s} {c["pass"]}/{run_} pass ({100 * c["pass"] / max(run_, 1):.1f}%), {c["skip"]} skipped   {det}')
+        xf = f', {c["xfail"]} xfail' if c['xfail'] else ''
+        print(f'{s:4s} {c["pass"]}/{run_} pass ({100 * c["pass"] / max(run_, 1):.1f}%){xf}, {c["skip"]} skipped   {det}')
     print(f'{time.time() - t0:.1f} s')
     sys.exit(1 if tot['fail'] else 0)

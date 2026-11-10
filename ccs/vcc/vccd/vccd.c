@@ -490,6 +490,10 @@ static int cc_probe_kind(const struct req *r)
 			in_stdin = true;
 			continue;
 		}
+		if (!strcmp(a, "--param") && i + 1 < r->argc) {
+			i++;	/* its value is no input (cc_probe rejects --param, as clang: unused) */
+			continue;
+		}
 		if (a[0] != '-') {
 			if (strcmp(a, "/dev/null"))
 				return PROBE_NONE;
@@ -540,15 +544,63 @@ static ssize_t read_stdin(const struct req *r, char *buf, size_t size)
 
 static int forward(const struct req *r, const char *sock);
 
+/* all of fd into a malloc'ed *buf (*len bytes); nonzero on a read error */
+static int read_all(int fd, char **buf, size_t *len)
+{
+	size_t cap = 0, n = 0;
+	char *b = NULL;
+
+	for (;;) {
+		ssize_t k;
+
+		if (cap - n < 65536) {
+			char *nb = realloc(b, cap = cap ? cap * 2 : 1 << 16);
+
+			if (!nb)
+				break;
+			b = nb;
+		}
+		k = read(fd, b + n, cap - n);
+		if (k < 0 && errno == EINTR)
+			continue;
+		if (k <= 0) {
+			*buf = b, *len = n;
+			return k < 0;
+		}
+		n += (size_t)k;
+	}
+	*buf = b, *len = n;
+	return 1;
+}
+
 /* forward r with src[0..n) (already read from its stdin) as stdin */
 static int forward_stdin(const struct req *r, const char *src, size_t n)
 {
 	struct req r2 = *r;
 	int p[2], status;
 
+	if (n > 8192) {
+		/* more than a pipe buffer holds: an unlinked temporary file */
+		const char *td = getenv("TMPDIR");
+		char path[4096];
+		int fd;
+
+		snprintf(path, sizeof(path), "%s/vccd-stdin.XXXXXX", td && *td ? td : "/tmp");
+		if ((fd = mkstemp(path)) < 0)
+			return 127;
+		unlink(path);
+		if (!write_full(fd, src, n) || lseek(fd, 0, SEEK_SET)) {
+			close(fd);
+			return 127;
+		}
+		r2.fds[0] = fd;
+		status = forward(&r2, backend_sock);
+		close(fd);
+		return status;
+	}
 	if (pipe(p))
 		return 127;
-	/* a probe source fits in the pipe buffer: write it all, then hand over */
+	/* a small source fits in the pipe buffer: write it all, then hand over */
 	if (!write_full(p[1], src, n)) {
 		close(p[0]);
 		close(p[1]);
@@ -663,16 +715,18 @@ static bool cc_is_pp(const struct req *r)
 
 	for (int i = 1; i < r->argc; i++)
 		e |= !strcmp(r->argv[i], "-E");
-	return e && own_pp && last[0] != '-' && (strstr(last, ".c") || strstr(last, ".S") ||
-						  strstr(last, ".dts") || strstr(last, ".lds"));
+	return e && own_pp && (!strcmp(last, "-") || (last[0] != '-' && (strstr(last, ".c") || strstr(last, ".S") ||
+						  strstr(last, ".dts") || strstr(last, ".lds"))));
 }
 
 /* ---------------- compiling ---------------- */
 
 /*
  * -c of a named .c or .S file for aarch64 Linux: vcc compiles it.  Not:
- * host programs (Mach-O), the vDSO (-mcmodel=tiny, position independent),
- * stdin, anything with -x other than c/assembler-with-cpp.
+ * anything with -x other than c/assembler-with-cpp.  The vDSO's
+ * -mcmodel=tiny is vcc's too: its ADRP pairs are PC-relative as tiny's ADR
+ * (larger code, no dynamic relocation).  stdin (`-`) is read by
+ * the driver from the client's fd 0.
  */
 /* options whose value is the next argument (so it is not an input) */
 static bool takes_value(const char *a)
@@ -698,6 +752,12 @@ static const char *cc_input(const struct req *r)
 		const char *a = r->argv[i];
 		size_t n = strlen(a);
 
+		if (!strcmp(a, "-")) {	/* stdin (Kconfig's cc-version.sh, tools-support-relr.sh) */
+			if (in)
+				return NULL;
+			in = a;
+			continue;
+		}
 		if (a[0] == '-') {
 			if (takes_value(a))
 				i++;
@@ -710,9 +770,16 @@ static const char *cc_input(const struct req *r)
 	return in;
 }
 
+/* a host program's compile (no --target) is vcc's on an arm64 Mac, the target it defaults to */
+#if defined(__APPLE__) && defined(__aarch64__)
+#define HOST_CC 1
+#else
+#define HOST_CC 0
+#endif
+
 static bool cc_is_compile(const struct req *r)
 {
-	bool c = false, linux_target = false;
+	bool c = false, linux_target = false, target = false;
 
 	if (!own_cc || !cc_input(r))
 		return false;
@@ -724,10 +791,12 @@ static bool cc_is_compile(const struct req *r)
 		if (!strcmp(a, "-c"))
 			c = true;
 		else if (!strncmp(a, "--target=aarch64-", 17) && strstr(a, "-linux"))
-			linux_target = true;
+			linux_target = target = true;
+		else if (!strncmp(a, "--target=", 9) || !strcmp(a, "-target") || !strcmp(a, "-arch"))
+			target = true;
 		else if (!strcmp(a, "-S"))
 			c = true;	/* assembly text: the same job */
-		else if (!strcmp(a, "-E") || !strcmp(a, "-") || !strcmp(a, "-mcmodel=tiny") ||
+		else if (!strcmp(a, "-E") ||
 			 !strcmp(a, "-shared") || !strcmp(a, "-emit-llvm"))
 			return false;
 		else if (!strcmp(a, "-x") && i + 1 < r->argc && strcmp(r->argv[i + 1], "c") &&
@@ -736,7 +805,36 @@ static bool cc_is_compile(const struct req *r)
 		else if (takes_value(a))
 			i++;
 	}
-	return c && linux_target;
+	return c && (linux_target || (HOST_CC && !target));
+}
+
+/*
+ * A host program from one .c in one command (kbuild's hostprogs: fixdep,
+ * mk_elfconfig, ...): no -c, -S, -E, no target, an -o.  vcc compiles it to a
+ * temporary object and the backend links that with the same options.
+ */
+static bool host_cc_link(const struct req *r)
+{
+	const char *in = cc_input(r);
+	size_t n;
+	bool out = false;
+
+	if (!HOST_CC || !own_cc || !in || !strcmp(in, "-") || (n = strlen(in)) < 3 || strcmp(in + n - 2, ".c"))
+		return false;
+	for (int i = 1; i < r->argc; i++) {
+		const char *a = r->argv[i];
+
+		if (!strcmp(a, "-c") || !strcmp(a, "-S") || !strcmp(a, "-E") || !strcmp(a, "-M") || !strcmp(a, "-MM") ||
+		    !strcmp(a, "-x") || !strcmp(a, "-shared") || !strcmp(a, "-emit-llvm") || !strcmp(a, "-###") ||
+		    !strcmp(a, "-v") || !strncmp(a, "-print-", 7) || !strncmp(a, "--target=", 9) ||
+		    !strcmp(a, "-target") || !strcmp(a, "-arch"))
+			return false;
+		if (!strcmp(a, "-o") && i + 1 < r->argc)
+			out = true;
+		if (takes_value(a))
+			i++;
+	}
+	return out;
 }
 
 /* VCC_DELEGATE: -c of a named .c file (the last argument), nothing vcc's driver would not do */
@@ -765,14 +863,16 @@ static const char *req_env(const struct req *r, const char *name);
 
 /* a -c job vcc compiles itself.  Its diagnostics go to a scratch file and to the
    client only if it succeeds: a TU vcc fails on goes to clang (or PROG), which
-   reports.  Its records replace the TU's in the build's store (dstore.c). */
+   reports.  Its records replace the TU's in the build's store (dstore.c).
+   src[0..len): the input `-` when vccd has read it already (NULL: fd 0). */
 static _Thread_local int cap_fd = -1;
 
-static int cc_own(const struct req *r)
+static int cc_own(const struct req *r, const char *src, size_t len)
 {
 	const char *dd = req_env(r, "VCC_DIAG_DEDUP");
 	dstore_job j;
-	ppd_env e = { r->cwd, r->fds[1], -1, r->envp, &j.sink, isatty(r->fds[2]) };
+	ppd_env e = { .cwd = r->cwd, .outfd = r->fds[1], .errfd = -1, .envp = r->envp, .dsink = &j.sink,
+		      .errtty = isatty(r->fds[2]), .infd = r->fds[0], .in_src = src, .in_len = len };
 	int st, to;
 	off_t n;
 
@@ -807,7 +907,7 @@ static int cc_own(const struct req *r)
 static int delegate(const struct req *r, const char *prog, const char **kind)
 {
 	if (dg_is_compile(r, req_env(r, "VCC_DELEGATE_SKIP"))) {
-		if (cc_own(r) == 0) {
+		if (cc_own(r, NULL, 0) == 0) {
 			*kind = "cc-own";
 			atomic_fetch_add(&n_cc, 1);
 			return 0;
@@ -863,6 +963,40 @@ static int forward(const struct req *r, const char *sock)
 		status = 127;
 	close(s);
 	return status;
+}
+
+/* forward r with argv[0..argc) in place of its own (the same cwd, env and fds) */
+static int forward_argv(const struct req *r, int argc, char **argv)
+{
+	const struct vroom_req_hdr *h = (const struct vroom_req_hdr *)r->raw;
+	struct vroom_req_hdr *nh;
+	struct req r2 = *r;
+	size_t len = strlen(r->cwd) + 1, envc = 0;
+	char *raw, *p;
+	int st;
+
+	for (int i = 0; i < argc; i++)
+		len += strlen(argv[i]) + 1;
+	for (char **e = r->envp; *e; e++, envc++)
+		len += strlen(*e) + 1;
+	if (len > VROOM_MAX_PAYLOAD || !(raw = malloc(sizeof(*nh) + len)))
+		return 127;
+	nh = (struct vroom_req_hdr *)raw;
+	*nh = *h;
+	nh->argc = (uint32_t)argc;
+	nh->envc = (uint32_t)envc;
+	nh->payload_len = (uint32_t)len;
+	p = raw + sizeof(*nh);
+	p = stpcpy(p, r->cwd) + 1;
+	for (int i = 0; i < argc; i++)
+		p = stpcpy(p, argv[i]) + 1;
+	for (char **e = r->envp; *e; e++)
+		p = stpcpy(p, *e) + 1;
+	r2.raw = raw;
+	r2.rawlen = sizeof(*nh) + len;
+	st = forward(&r2, backend_sock);
+	free(raw);
+	return st;
 }
 
 /* run a program with the request's cwd, env and fds */
@@ -970,7 +1104,7 @@ static int handle(const struct req *r, const char **kind)
 			ppd_umask = (int)(strtoul(*e + 10, NULL, 8) & 0777);
 	status = handle1(r, kind);
 
-	if (!strcmp(*kind, "cc-own") || !strcmp(*kind, "cc") || !strcmp(*kind, "cc-fallbk"))
+	if (!strcmp(*kind, "cc-own") || !strcmp(*kind, "cc") || !strcmp(*kind, "cc-fallbk") || !strcmp(*kind, "cc-link"))
 		status = fixdep_after(r, status);
 	return status;
 }
@@ -1058,7 +1192,7 @@ static int handle1(const struct req *r, const char **kind)
 	for (int i = 1; i < r->argc; i++)
 		if (!strcmp(r->argv[i], "--explain") || !strncmp(r->argv[i], "--explain=", 10) || !strcmp(r->argv[i], "--fix")) {
 			/* vcc's own: the client's output and diagnostics, no clang to fall back to */
-			ppd_env e = { r->cwd, r->fds[1], r->fds[2], r->envp, NULL, 0 };
+			ppd_env e = { .cwd = r->cwd, .outfd = r->fds[1], .errfd = r->fds[2], .envp = r->envp, .infd = r->fds[0] };
 
 			*kind = r->argv[i][2] == 'e' ? "cc-explain" : "cc-fix";
 			atomic_fetch_add(&n_cc, 1);
@@ -1078,14 +1212,98 @@ static int handle1(const struct req *r, const char **kind)
 		return cc_probe(r, probe);
 	}
 	if (cc_is_pp(r)) {
-		ppd_env e = { r->cwd, r->fds[1], r->fds[2], r->envp, NULL, 0 };
+		ppd_env e = { .cwd = r->cwd, .outfd = r->fds[1], .errfd = r->fds[2], .envp = r->envp, .infd = r->fds[0] };
 
 		*kind = "cc-E";
 		atomic_fetch_add(&n_pp, 1);
 		return ppd_run(r->argc, r->argv, &e);
 	}
+	if (host_cc_link(r)) {
+		/* vcc compiles, the backend links the object with the command's options */
+		const char *in = cc_input(r), *out = NULL, *td = getenv("TMPDIR");
+		char tmp[4096], **av = malloc((size_t)(r->argc + 4) * sizeof(char *)), **lv;
+		bool deps = false, mt = false;
+		int n = 0, ln = 0, fd, st;
+		ppd_env e = { .cwd = r->cwd, .outfd = r->fds[1], .errfd = log_requests ? 2 : -1, .envp = r->envp, .infd = r->fds[0] };
+
+		snprintf(tmp, sizeof(tmp), "%s/vccd-%s-XXXXXX.o", td && *td ? td : "/tmp", "host");
+		if (!av || (fd = mkstemps(tmp, 2)) < 0) {
+			free(av);
+			goto plain;
+		}
+		close(fd);
+		lv = malloc((size_t)(r->argc + 1) * sizeof(char *));
+		for (int i = 0; i < r->argc; i++) {
+			const char *a = r->argv[i];
+
+			if (!strcmp(a, "-o") && i + 1 < r->argc)
+				out = r->argv[i + 1];
+			deps |= !strncmp(a, "-Wp,-MMD,", 9) || !strncmp(a, "-Wp,-MD,", 8) || !strcmp(a, "-MD") || !strcmp(a, "-MMD");
+			mt |= !strcmp(a, "-MT") || !strcmp(a, "-MQ");
+		}
+		/* the compile: -c into the temporary; the dependency target stays the program, as clang's */
+		for (int i = 0; i < r->argc; i++) {
+			if (!strcmp(r->argv[i], "-o") && i + 1 < r->argc) {
+				av[n++] = r->argv[i++];
+				av[n++] = tmp;
+				continue;
+			}
+			av[n++] = r->argv[i];
+		}
+		av[n++] = "-c";
+		if (deps && !mt)
+			av[n++] = "-MT", av[n++] = (char *)out;
+		av[n] = NULL;
+		if (lv && ppd_run(n, av, &e) == 0) {
+			/* the link: the object for the source, no dependency options */
+			for (int i = 0; i < r->argc; i++) {
+				const char *a = r->argv[i];
+
+				if (!strncmp(a, "-Wp,-M", 6) || !strcmp(a, "-MD") || !strcmp(a, "-MMD") || !strcmp(a, "-MP"))
+					continue;
+				if ((!strcmp(a, "-MF") || !strcmp(a, "-MT") || !strcmp(a, "-MQ")) && i + 1 < r->argc) {
+					i++;
+					continue;
+				}
+				lv[ln++] = a == in ? tmp : r->argv[i];
+			}
+			lv[ln] = NULL;
+			atomic_fetch_add(&n_cc, 1);
+			atomic_fetch_add(&n_fwd, 1);
+			*kind = "cc-link";
+			st = forward_argv(r, ln, lv);
+			unlink(tmp);
+			free(av);
+			free(lv);
+			return st;
+		}
+		unlink(tmp);
+		free(av);
+		free(lv);
+		atomic_fetch_add(&n_fallback, 1);
+		if (log_requests)
+			fprintf(stderr, "vccd fallback to clang: %s\n", in);
+		*kind = "cc-fallbk";
+		atomic_fetch_add(&n_fwd, 1);
+		return forward(r, backend_sock);
+	}
+plain:
 	if (cc_is_compile(r)) {
-		if (cc_own(r) == 0) {
+		bool in_stdin = !strcmp(cc_input(r), "-");
+		char *src = NULL;
+		size_t len = 0;
+		int st;
+
+		if (in_stdin) {
+			/* read here: a fallback to clang needs the same bytes */
+			if (read_all(r->fds[0], &src, &len)) {
+				free(src);
+				say(r, "%s: error: %s\n", "cannot read stdin");
+				return 1;
+			}
+		}
+		if ((st = cc_own(r, src, len)) == 0) {
+			free(src);
 			*kind = "cc-own";
 			atomic_fetch_add(&n_cc, 1);
 			return 0;
@@ -1094,8 +1312,23 @@ static int handle1(const struct req *r, const char **kind)
 		if (log_requests)
 			fprintf(stderr, "vccd fallback to clang: %s\n", cc_input(r));
 		*kind = "cc-fallbk";
+		if (in_stdin) {
+			atomic_fetch_add(&n_fwd, 1);
+			st = forward_stdin(r, src, len);
+			free(src);
+			return st;
+		}
 	} else {
 		*kind = "cc";
+		if (log_requests) {
+			/* the whole command line: what is still forwarded, and why, is read from here */
+			flockfile(stderr);
+			fputs("vccd forward:", stderr);
+			for (int i = 0; i < r->argc; i++)
+				fprintf(stderr, " %s", r->argv[i]);
+			fputc('\n', stderr);
+			funlockfile(stderr);
+		}
 	}
 	atomic_fetch_add(&n_fwd, 1);
 	return forward(r, backend_sock);
@@ -1247,6 +1480,18 @@ static void print_counts(void)
 #endif
 	}
 }
+
+/* compiles recurse (parser, emitter): vstack_low() ends a TU that nests too
+   deeply.  TSan keeps a fixed shadow call stack (64K frames) per thread and
+   corrupts its state past it, so under TSan the guard must fire sooner. */
+#if defined(__has_feature)
+#if __has_feature(thread_sanitizer)
+#define WORKER_STACK (2u << 20)
+#endif
+#endif
+#ifndef WORKER_STACK
+#define WORKER_STACK (16u << 20)
+#endif
 
 static void *worker_main(void *arg)
 {
@@ -1430,7 +1675,7 @@ listening:
 		pthread_attr_t at;
 
 		pthread_attr_init(&at);
-		pthread_attr_setstacksize(&at, 16 << 20);	/* compiles recurse (parser, emitter) */
+		pthread_attr_setstacksize(&at, WORKER_STACK);
 		pthread_create(&t, &at, worker_main, NULL);
 		pthread_attr_destroy(&at);
 	}

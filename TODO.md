@@ -501,6 +501,13 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
 ## Tier 3: features general C needs
 
 ### Codegen (`emit.c`)
+- [ ] **wasm: the optimizations the gcc torture tests assume** [P].  The
+  wasm generator (`arch/wasm/emit/`) has no inliner or dead-code removal:
+  `20020720-1`, `20030216-1`, `20041114-1`, `compare-3`, `pure-1`,
+  `shiftopt-1` call a `link_error` that the optimizer must remove, and
+  `bcp-1` needs `__builtin_constant_p` of an inlined argument.  They are
+  `WASM_XFAIL` in `bench/vcc-wasm.py` (premerge's wasm job).
+  *Validate:* `bench/vcc-wasm.py -j 6` reports them as XPASS; remove the entries.
 - [ ] **PIC/PIE** [P]: done: `cc_opts.pic` from the driver (PIE the hosted
   default, `-fno-pic`), `sym_needs_got` (arch/a64/emit/value.c) as clang:
   `-fPIC` every default-visibility non-static symbol, `-fPIE` those not
