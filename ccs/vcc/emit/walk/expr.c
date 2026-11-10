@@ -193,14 +193,18 @@ VPRIV lval wk_lval(ecx *e, uint32_t n)
 		const field *f = &c->tags[x->b].f[x->c];
 		const node *b = N(x->a);
 
-		if (f->bitfield)
-			wk_unsup(e, n, "a bit-field");
 		if (b->flags & NF_LVALUE || b->op == N_VAR || b->op == N_DEREF || b->op == N_MEMBER || b->op == N_INDEX ||
 		    b->op == N_STR || b->op == N_COMPLIT)
 			l = wk_lval(e, x->a);
 		else
 			l = wk_fromval(e, wk_gen(e, x->a), b->ty);	/* a record rvalue is its address */
 		l.off += (int64_t)(f->off / 8);
+		if (f->bitfield) {
+			l.bf = 1;
+			l.bitoff = (uint16_t)(f->off % 8);
+			l.width = f->width;
+			l.sgn = is_signed(c, f->ty);
+		}
 		return l;
 	}
 	case N_INDEX: {
@@ -261,6 +265,100 @@ VPRIV lval wk_lval(ecx *e, uint32_t n)
 	wk_unsup(e, n, "this lvalue");
 }
 
+/* ---------------- bit-fields ---------------- */
+
+static int64_t wk_floordiv(int64_t a, int64_t b) { return a >= 0 ? a / b : -((-a + b - 1) / b); }
+
+/* the unit a bit-field is accessed in: its type's size, aligned, or wider
+   for one that crosses it (packed); its offset and the field's bit in it */
+static void wk_bf_unit(ecx *e, const lval *l, qty t, int64_t *uoff, int *us, int *pos)
+{
+	int64_t bit = l->off * 8 + l->bitoff;
+	int s = wk_size(e->c, t);
+
+	for (s = s < 1 ? 1 : s; s <= 8; s *= 2) {
+		int64_t ub = wk_floordiv(bit, s * 8);
+		int p = (int)(bit - ub * s * 8);
+
+		if (p + l->width <= s * 8) {
+			*uoff = ub * s, *us = s, *pos = p;
+			return;
+		}
+	}
+	efatal(e, e->curloc, "x86-64: a bit-field across 8 bytes is not supported yet (PLAN-x86.md X3)");
+}
+
+/* a bit-field's value in a new register (l stays) */
+static val wk_bf_load(ecx *e, const lval *l, qty t)
+{
+	lval u = *l;
+	int us, pos, w = l->width;
+	int64_t uo;
+	val v;
+
+	wk_bf_unit(e, l, t, &uo, &us, &pos);
+	u.bf = 0, u.off = uo;
+	v = (val){ .k = V_REG, .r = (uint8_t)LO(treg)(e) };
+	LO(load)(e, v.r, &u, us, false);
+	if (l->sgn) {
+		if (64 - pos - w)
+			v = LO(bin)(e, T_LESSLESS, 8, false, v, vconst(64 - pos - w));
+		if (64 - w)
+			v = LO(bin)(e, T_GREATERGREATER, 8, true, v, vconst(64 - w));
+		return v;
+	}
+	if (pos)
+		v = LO(bin)(e, T_GREATERGREATER, 8, false, v, vconst(pos));
+	if (w < 64)
+		v = LO(bin)(e, T_AMP, 8, false, v, vconst((i128)(((uint64_t)1 << w) - 1)));
+	return v;
+}
+
+/* the low bits of rv into the bit-field (rv stays) */
+static void wk_bf_store(ecx *e, const lval *l, qty t, int rv)
+{
+	lval u = *l;
+	int us, pos, w = l->width;
+	int64_t uo;
+	uint64_t m;
+	val old, nv;
+
+	wk_bf_unit(e, l, t, &uo, &us, &pos);
+	u.bf = 0, u.off = uo;
+	m = (w >= 64 ? ~(uint64_t)0 : (((uint64_t)1 << w) - 1)) << pos;
+	if (us < 8)
+		m &= ((uint64_t)1 << (us * 8)) - 1;
+	old = (val){ .k = V_REG, .r = (uint8_t)LO(treg)(e) };
+	LO(load)(e, old.r, &u, us, false);
+	old = LO(bin)(e, T_AMP, 8, false, old, vconst((i128)(int64_t)~m));
+	nv = (val){ .k = V_REG, .r = (uint8_t)LO(treg)(e) };
+	LO(mov)(e, nv.r, rv);
+	if (pos)
+		nv = LO(bin)(e, T_LESSLESS, 8, false, nv, vconst(pos));
+	nv = LO(bin)(e, T_AMP, 8, false, nv, vconst((i128)(int64_t)m));
+	old = LO(bin)(e, T_PIPE, 8, false, old, nv);
+	LO(store)(e, old.r, &u, us);
+	LO(tfree)(e, old.r);
+}
+
+/* r stored to l as type t (a bit-field or not); r stays */
+static void wk_put(ecx *e, const lval *l, qty t, int r)
+{
+	if (l->bf)
+		wk_bf_store(e, l, t, r);
+	else
+		LO(store)(e, r, l, wk_size(e->c, t));
+}
+
+VPRIV void wk_bfinit(ecx *e, const lval *l, qty t, uint32_t init)
+{
+	val v = wk_gen(e, init);
+	int r = wk_reg(e, &v, t);
+
+	wk_bf_store(e, l, t, r);
+	LO(tfree)(e, r);
+}
+
 static val wk_load(ecx *e, lval l, qty t)
 {
 	cc *c = e->c;
@@ -271,6 +369,12 @@ static val wk_load(ecx *e, lval l, qty t)
 		if (l.k == L_SYM)
 			return (val){ .k = V_ADDR, .ref = l.ref, .i = l.off };
 		return wk_vreg(LO(laddr)(e, &l));
+	}
+	if (l.bf) {
+		val v = wk_bf_load(e, &l, t);
+
+		wk_lfree(e, &l);
+		return v;
 	}
 	r = l.k == L_REG ? l.r : LO(treg)(e);
 	LO(load)(e, r, &l, wk_size(c, t), wk_signed(c, t) || KIND(c, t) == TY_BOOL ? wk_signed(c, t) : false);
@@ -523,7 +627,11 @@ static val wk_ternary(ecx *e, uint32_t n)
 /* l's value in a new register (l and its register stay) */
 static val wk_reload(ecx *e, const lval *l, qty t)
 {
-	int r = LO(treg)(e);
+	int r;
+
+	if (l->bf)
+		return wk_bf_load(e, l, t);
+	r = LO(treg)(e);
 
 	LO(load)(e, r, l, wk_size(e->c, t), wk_signed(e->c, t));
 	return wk_vreg(r);
@@ -598,7 +706,14 @@ static val wk_assign(ecx *e, uint32_t n)
 	{
 		int r = wk_reg(e, &v, lt);
 
-		LO(store)(e, r, &l, wk_size(c, lt));
+		wk_put(e, &l, lt, r);
+		if (l.bf) {
+			/* the value is the field's (truncated to its width) */
+			LO(tfree)(e, r);
+			v = wk_bf_load(e, &l, lt);
+			wk_lfree(e, &l);
+			return v;
+		}
 		wk_lfree(e, &l);
 		return wk_vreg(r);
 	}
@@ -625,7 +740,13 @@ static val wk_incdec(ecx *e, uint32_t n)
 		old = wk_reload(e, &l, t);
 	nv = wk_arith(e, dec ? T_MINUS : T_PLUS, ot, wk_reload(e, &l, t), vconst(d ? d : 1));
 	r = wk_reg(e, &nv, t);
-	LO(store)(e, r, &l, wk_size(c, t));
+	wk_put(e, &l, t, r);
+	if (l.bf && !post) {
+		LO(tfree)(e, r);
+		nv = wk_bf_load(e, &l, t);
+		wk_lfree(e, &l);
+		return nv;
+	}
 	wk_lfree(e, &l);
 	if (post) {
 		LO(tfree)(e, r);

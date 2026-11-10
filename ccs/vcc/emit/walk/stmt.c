@@ -156,7 +156,12 @@ static void wk_elems(ecx *e, const lval *d, qty ty, uint32_t init)
 				if (f->bitfield) {
 					if (wk_zero_init(c, v[i]))
 						continue;
-					efatal(e, N(v[i])->loc, "x86-64: a bit-field is not supported yet (PLAN-x86.md X3)");
+					el.bf = 1;
+					el.bitoff = (uint16_t)(f->off % 8);
+					el.width = f->width;
+					el.sgn = is_signed(c, f->ty);
+					wk_bfinit(e, &el, f->ty, v[i]);
+					continue;
 				}
 				wk_elems(e, &el, f->ty, v[i]);
 			}
