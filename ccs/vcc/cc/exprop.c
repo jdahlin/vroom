@@ -43,6 +43,7 @@ static uint32_t align_of_expr(cc *c, uint32_t e)
 }
 
 static uint32_t unary(cc *c);
+static void ovf_warn(cc *c, int op, uint32_t n, uint32_t loc, uint32_t sub0, uint32_t sub1);
 
 /* the operand of sizeof/_Alignof: "( type-name )" gives UINT32_MAX, *ty and its
    span in *r (if r), anything else the (unevaluated) unary expression; '(' is
@@ -147,6 +148,10 @@ static __attribute__((noinline)) uint32_t unary_op(cc *c)
 
 			N(r)->aux = (uint16_t)op;
 			N(r)->a = n;
+			if (op == T_MINUS) {
+				setspan(c, r, loc);
+				ovf_warn(c, op, r, loc, n, 0);
+			}
 			return r;
 		}
 	}
@@ -420,6 +425,57 @@ static void runtime_warn(cc *c, int op, uint32_t l, uint32_t r, uint32_t loc)
 		cc_warnx(c, "shift-count-overflow", true, NULL, loc, &rr, 1, NULL, 0, "shift count >= width of type");
 }
 
+
+/* -Winteger-overflow: n, a signed integer +, -, * or unary - of constants,
+   whose exact value does not fit its type.  Once per expression (NF_OVF). */
+static void ovf_warn(cc *c, int op, uint32_t n, uint32_t loc, uint32_t sub0, uint32_t sub1)
+{
+	cval a, b;
+	i128 v;
+	int bits;
+	qty t = N(n)->ty;
+
+	if ((N(sub0)->flags & NF_OVF) || (sub1 && (N(sub1)->flags & NF_OVF))) {
+		N(n)->flags |= NF_OVF;
+		return;
+	}
+	if (c->dead || c->unevaluated || !is_integer(c, t) || !is_signed(c, t) || (bits = (int)ty_size(c, t) * 8) > 64 ||
+	    !cc_eval(c, sub0, &a) || a.kind != CV_INT || (sub1 && (!cc_eval(c, sub1, &b) || b.kind != CV_INT)))
+		return;
+	if (!sub1)
+		v = -a.i;
+	else if (op == T_PLUS)
+		v = a.i + b.i;
+	else if (op == T_MINUS)
+		v = a.i - b.i;
+	else
+		v = a.i * b.i;
+	if (v >= -((i128)1 << (bits - 1)) && v < ((i128)1 << (bits - 1)))
+		return;
+	N(n)->flags |= NF_OVF;
+	{
+		char d[48], o[64];
+		int64_t w = bits == 64 ? (int64_t)(uint64_t)v : (int64_t)(int32_t)(uint32_t)v;
+		uint64_t m = w < 0 ? -(uint64_t)w : (uint64_t)w;
+		int nd = 0, k = 0;
+		pp_span r = rng(c, n);
+
+		do
+			d[nd++] = (char)('0' + m % 10), m /= 10;
+		while (m);
+		if (w < 0)
+			o[k++] = '-';
+		while (nd) {
+			o[k++] = d[--nd];
+			if (nd && nd % 3 == 0)
+				o[k++] = '\'';
+		}
+		o[k] = 0;
+		cc_warnx(c, "integer-overflow", true, NULL, loc, &r, 1, NULL, 0,
+			 "overflow in expression; result is %s with type '%s'", o, tyname(c, t));
+	}
+}
+
 static uint32_t binary(cc *c, int minp);
 
 static __attribute__((noinline)) uint32_t binary_ops(cc *c, int minp, uint32_t l, uint32_t b)
@@ -445,10 +501,18 @@ static __attribute__((noinline)) uint32_t binary_ops(cc *c, int minp, uint32_t l
 			c->dead -= dead;
 		}
 		runtime_warn(c, op, l, r, loc);
-		l = binop(c, op, l, r, loc);
-		if (mac)
-			N(l)->flags |= NF_MACRO;
-		setspan(c, l, b);
+		{
+			uint32_t l0 = l;
+
+			l = binop(c, op, l, r, loc);
+			if (mac)
+				N(l)->flags |= NF_MACRO;
+			setspan(c, l, b);
+			if (op == T_PLUS || op == T_MINUS || op == T_STAR)
+				ovf_warn(c, op, l, loc, l0, r);
+			else if ((N(l0)->flags | N(r)->flags) & NF_OVF)
+				N(l)->flags |= NF_OVF;
+		}
 	}
 }
 

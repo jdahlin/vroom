@@ -1042,8 +1042,12 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
   flag; `-Werror=` of one again is clang's plain error (no `-Werror,`:
   `pp_werror_named`).  Done: diag `conv_flags*.c` (`diag-flags:` in
   vcc-diag.py), 12 flag combinations identical to clang.
+- [x] **-Winteger-overflow**: signed `+ - *` and unary `-` of constants
+  whose exact value does not fit (innermost only, `NF_OVF`), value with
+  clang's digit separators.  Done: diag `int_overflow.c`; not modelled:
+  overflow inside casts/conditionals reached through other operators.
 - [ ] **Missing warnings** (only 7 `-W` flags): `-Wunused-variable`,
-  `-Winteger-overflow`, `-Wreturn-stack-address` of a compound literal
+  `-Wreturn-stack-address` of a compound literal
   (clang prints the initializer with its expression printer),
   `-Wconstant-conversion`,
   `-Wuninitialized`, `-Wunknown-attributes`, `-Wdeprecated-declarations`,
