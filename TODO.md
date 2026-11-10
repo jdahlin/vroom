@@ -684,8 +684,13 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
   done: printed to stdout with status 1, no file with `-o`, as clang;
   checked by the error row of `bench/vcc-driver.py`.)
   *Validate:* T4.
-- [ ] **`#embed` / `__has_embed`** [P].  *Validate:* pp-diff fixtures plus
-  T1 (`unsigned char d[] = { #embed "bin" };` checksums).
+- [ ] **`#embed` / `__has_embed`** [P].  (done: `#embed "x"` with limit,
+  clang::offset, prefix, suffix, if_empty, `__has_embed` 0/1/2, -Wc23-extensions,
+  -M lists the file, clang's search (absolute, or the includer's directory);
+  tests/vcc `embed.c` checksums the file embedding itself.)  Left: `--embed-dir`
+  (`<x>`), `-E` text placement of the token after the data (clang keeps it on the
+  data's line), a constant expression in limit() (vcc: a number), a header
+  with #embed in the header cache (replay does not record it).
 - [ ] **Output modes**: `-CC` (comments in macro definitions and arguments,
   `//` as `/* */`) and `-traditional-cpp` are rejected with an error.
   *Validate:* `bench/vcc-diff.py text` (bytes, not tokens) for `-E` with and

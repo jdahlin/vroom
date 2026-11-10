@@ -68,6 +68,8 @@ static uint32_t dir_kind(const vlex_file *f, uint32_t i, uint32_t end)
 	}
 	if (spelled(f, v, "import"))
 		return D_IMPORT;
+	if (spelled(f, v, "embed"))
+		return D_EMBED;
 	if (spelled(f, v, "ident") || spelled(f, v, "sccs"))
 		return D_IDENT;
 	if (spelled(f, v, "__include_macros"))

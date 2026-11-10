@@ -26,7 +26,7 @@ static const struct { const char *n; int b; } bi[] = {
 	{ "__has_c_attribute", B_HAS_C_ATTRIBUTE },	/* __has_cpp_attribute: not defined in C (clang) */
 	{ "__has_declspec_attribute", B_HAS_DECLSPEC }, { "__has_warning", B_HAS_WARNING },
 	{ "__is_identifier", B_IS_IDENTIFIER }, { "__has_include", B_HAS_INCLUDE },
-	{ "__has_include_next", B_HAS_INCLUDE_NEXT },
+	{ "__has_include_next", B_HAS_INCLUDE_NEXT }, { "__has_embed", B_HAS_EMBED },
 	{ "__has_constexpr_builtin", B_HAS_CONSTEXPR_BUILTIN },
 	{ "__is_target_arch", B_IS_TARGET_ARCH }, { "__is_target_os", B_IS_TARGET_OS },
 	{ "__is_target_vendor", B_IS_TARGET_VENDOR },

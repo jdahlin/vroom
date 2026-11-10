@@ -339,6 +339,13 @@ VPRIV int builtin(pp *p, const pmacro *m, ptok *t)
 		}
 		break;
 	}
+	case B_HAS_EMBED:
+		if (!p->in_dir) {
+			error(p, t->loc, "'__has_embed' must be used within a preprocessing directive");
+			return 1;
+		}
+		mknum(p, t, has_embed(p, fc, t->loc));
+		break;
 	case B_IS_IDENTIFIER:
 		if (!feature_arg(p, buf, sizeof(buf), t->loc))
 			return 1;

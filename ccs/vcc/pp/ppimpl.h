@@ -59,7 +59,7 @@
 enum {
 	D_OTHER, D_NULL, D_IF, D_IFDEF, D_IFNDEF, D_ELIF, D_ELIFDEF, D_ELIFNDEF,
 	D_ELSE, D_ENDIF, D_DEFINE, D_UNDEF, D_INCLUDE, D_INCLUDE_NEXT, D_IMPORT,
-	D_PRAGMA, D_ERROR, D_WARNING, D_LINE, D_LINEMARK, D_IDENT, D_IMACROS,
+	D_PRAGMA, D_ERROR, D_WARNING, D_LINE, D_LINEMARK, D_IDENT, D_IMACROS, D_EMBED,
 };
 
 typedef struct pdir {
@@ -103,7 +103,7 @@ enum {
 	B_HAS_CONSTEXPR_BUILTIN, B_IS_TARGET_ARCH, B_IS_TARGET_OS, B_IS_TARGET_VENDOR,
 	B_IS_TARGET_ENVIRONMENT, B_IS_TARGET_VARIANT_OS, B_IS_TARGET_VARIANT_ENVIRONMENT,
 	B_BUILDING_MODULE,
-	B_IS_IDENTIFIER, B_HAS_INCLUDE, B_HAS_INCLUDE_NEXT,
+	B_IS_IDENTIFIER, B_HAS_INCLUDE, B_HAS_INCLUDE_NEXT, B_HAS_EMBED,
 };
 
 /*
@@ -732,6 +732,8 @@ VPRIV int builtin(pp *p, const pmacro *m, ptok *t);
 /* ifexpr.c */
 VPRIV ival parse_number(pp *p, const ptok *t);
 VPRIV bool eval_if(pp *p, const ctx *fc, uint32_t b, uint32_t e);
+VPRIV void embed(pp *p, ctx *c, uint32_t b, uint32_t e, uint32_t loc, uint32_t nloc);
+VPRIV int has_embed(pp *p, const ctx *fc, uint32_t loc);
 /* directive.c */
 VPRIV const char *parse_define(const vtok *vt, uint32_t b, uint32_t e, pmacro *m, void *(*mem)(void *, size_t), void *mc, uint32_t *eoff);
 VPRIV void *mem_perm(void *a, size_t n);

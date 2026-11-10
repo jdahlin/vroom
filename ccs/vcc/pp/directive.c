@@ -465,6 +465,11 @@ VPRIV int directive(pp *p, ctx *c, ptok *out)
 	case D_INCLUDE: case D_INCLUDE_NEXT: case D_IMPORT:
 		include(p, c, b + 1, e, (int)d->kind, loc);
 		return 0;
+	case D_EMBED:
+		if (p->o->asm_mode)
+			goto pass;
+		embed(p, c, b + 1, e, loc, loc + (c->vt[b].off - c->vt[b - 1].off));
+		return 0;
 	case D_IMACROS:
 		if (c->f == &p->builtin) {
 			imacros(p, c, b, e, loc);
