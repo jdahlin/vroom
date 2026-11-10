@@ -1053,10 +1053,18 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
   clang.  Not modelled: a static redeclared and then defined is warned at
   its first declaration (clang: the definition); bodies of unreferenced
   lazy header functions are never parsed, so they are not checked.
+- [x] **-Wconstant-conversion**: an integer constant converted to a
+  narrower integer type (init, assignment, argument, return; each `?:` arm,
+  the taken one when the condition is constant; a comma's right operand).
+  Narrowing waits for the end of the function as clang's
+  DiagRuntimeBehavior; same-width sign changes skip literals spelled with a
+  leading 0 (`N_NUM` aux) and chars in braces.  Done: diag `const_conv.c`,
+  kernel/PostgreSQL/test suites 0 differences.  Not modelled: clang drops
+  the deferred ones in unreachable code; `-Wbitfield-constant-conversion`,
+  `-Wliteral-conversion`.
 - [ ] **Missing warnings** (only 7 `-W` flags):
   `-Wreturn-stack-address` of a compound literal
   (clang prints the initializer with its expression printer),
-  `-Wconstant-conversion`,
   `-Wuninitialized`, `-Wunknown-attributes`, `-Wdeprecated-declarations`,
   `-Wunused-value`; pp `-Wextra-tokens`,
   `-Wexpansion-to-defined`, `-Winvalid-pp-token`, `#pragma GCC warning`.

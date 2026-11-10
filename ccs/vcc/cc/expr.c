@@ -806,6 +806,7 @@ static __attribute__((noinline)) uint32_t call(cc *c, uint32_t fn, uint32_t loc)
 		if (!(f->flags & TF_NOPROTO) && i < f->n) {
 			c->cv_fn = N(callee)->op == N_VAR && c->syms[N(callee)->a].kind == S_FUNC ? N(callee)->a : 0;
 			c->cv_arg = i;
+			c->cv_callee = rng(c, callee).b;
 			a = convert_as(c, decay(c, a), c->params[f->aux + i], CX_PASS, loc);
 			c->cv_fn = 0;
 		} else {

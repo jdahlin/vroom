@@ -280,6 +280,107 @@ static uint32_t conv_check(cc *c, uint32_t n, qty to)
 	return n;
 }
 
+/* the bits of v as clang's IntRange of a constant: width, non-negative */
+static int crange(i128 v, bool *nn)
+{
+	int w = 0;
+
+	*nn = v >= 0;
+	if (v < 0)
+		v = ~v, w = 1;
+	while (v)
+		w++, v >>= 1;
+	return w;
+}
+
+/* -Wconstant-conversion: integer constant n converted to the narrower integer to */
+static void const_conv(cc *c, uint32_t n, qty to)
+{
+	qty from = N(n)->ty;
+	cval cv;
+	int tw, sw, lw;
+	bool tnn, lnn, deferred;
+	i128 v, t;
+
+	if (N(n)->op == N_COND && N(n)->b && N(n)->c) {	/* clang: each arm (the taken one), in its own type */
+		cval cc0;
+		int k0 = 0, k1 = 2;
+
+		if (cc_eval(c, N(n)->a, &cc0) && cc0.kind == CV_INT)
+			k0 = cc0.i == 0, k1 = k0 + 1;
+		for (int k = k0; k < k1; k++) {
+			uint32_t e = k ? N(n)->c : N(n)->b;
+
+			while (N(e)->op == N_CAST && !c->span[e].e && N(e)->a)
+				e = N(e)->a;
+			const_conv(c, e, to);
+		}
+		return;
+	}
+	if (N(n)->op == N_COMMA) {	/* clang: the right operand, at the comma */
+		uint32_t sl = c->cv_loc;
+		uint8_t sw = c->cv_what;
+
+		c->cv_loc = N(n)->loc, c->cv_what = CX_INIT;
+		const_conv(c, N(n)->b, to);
+		c->cv_loc = sl, c->cv_what = sw;
+		return;
+	}
+	if (!is_integer(c, to) || !is_integer(c, from) || KIND(c, to) == TY_BOOL || KIND(c, from) == TY_BOOL ||
+	    c->dead || c->unevaluated || !cc_eval(c, n, &cv) || cv.kind != CV_INT)
+		return;
+	tw = (int)ty_size(c, to) * 8, sw = (int)ty_size(c, from) * 8;
+	if (tw >= sw || tw > 64)
+		return;
+	tnn = !is_signed(c, to);
+	v = cv.i;
+	if (!is_signed(c, from) && sw <= 64)
+		v = (i128)((uint64_t)v & (sw == 64 ? ~0ull : (1ull << sw) - 1));
+	lw = crange(v, &lnn);
+	if (lw > tw)	/* (+1 for the sign of a negative range: crange counts it) */
+		deferred = true;
+	else if (lw == tw && !tnn && lnn && is_signed(c, from)) {
+		/* clang's isSameWidthConstantConversion: not a hex/octal literal, not a char in braces */
+		uint32_t e = n;
+
+		while (N(e)->op == N_CAST && !c->span[e].e && N(e)->a)
+			e = N(e)->a;
+		uint32_t b = rng(c, e).b;
+		int ch;
+
+		while ((ch = pp_loc_char(c->p, b)) == '(' || ch == ' ' || ch == '\t')
+			b++;
+		if ((N(e)->op == N_NUM ? N(e)->aux != 0 : ch == '0') ||
+		    ((KIND(c, to) == TY_CHAR || KIND(c, to) == TY_SCHAR) && pp_loc_char(c->p, c->cv_loc) == '{'))
+			return;
+		deferred = false;
+	}
+	else
+		return;
+	t = (i128)((uint64_t)v & (tw == 64 ? ~0ull : (1ull << tw) - 1));
+	if (!tnn && (t >> (tw - 1)) & 1)
+		t -= (i128)1 << tw;
+	if (t == v)
+		return;
+	{
+		uint32_t cl = c->cv_what == CX_PASS ? c->cv_callee : c->cv_loc;
+		pp_span r[2] = { { cl, pp_tok_end(c->p, cl) }, rng(c, n) };
+		char msg[112];
+
+		snprintf(msg, sizeof msg, "implicit conversion from '%s' to '%s' changes value from %lld to %lld",
+			 tyname(c, from), tyname(c, to), (long long)v, (long long)t);
+		if (deferred && c->fn && !c->defer_rt) {
+			if (c->nrtd < 16) {
+				c->rtd[c->nrtd].loc = r[1].b;
+				memcpy(c->rtd[c->nrtd].r, r, sizeof r);
+				memcpy(c->rtd[c->nrtd++].msg, msg, sizeof msg);
+			}
+			return;
+		}
+		cc_warnx(c, "constant-conversion", true, w_conv, r[1].b, r, 2, NULL, 0, "%s", msg);
+	}
+}
+
 /* convert for an initialization, argument, return or assignment at loc */
 VPRIV uint32_t convert_as(cc *c, uint32_t n, qty to, int what, uint32_t loc)
 {
@@ -287,8 +388,11 @@ VPRIV uint32_t convert_as(cc *c, uint32_t n, qty to, int what, uint32_t loc)
 	uint32_t sl = c->cv_loc;
 
 	c->cv_what = (uint8_t)what, c->cv_loc = loc;
-	if (what)
+	if (what) {
 		n = conv_check(c, n, to);
+		if (!(N(n)->flags & NF_ERR))
+			const_conv(c, n, to);
+	}
 	n = convert(c, n, to);
 	c->cv_what = sw, c->cv_loc = sl;
 	return n;

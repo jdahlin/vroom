@@ -126,7 +126,12 @@ static uint32_t number_s(cc *c, const ptok *t, const char *s, size_t n)
 	}
 	if (over)
 		cc_error(c, t->loc, "integer literal is too large to be represented in any integer type");
-	return mk_int(c, (i128)v, int_lit_type(c, v, l, u, base == 10), t->loc);
+	{
+		uint32_t r = mk_int(c, (i128)v, int_lit_type(c, v, l, u, base == 10), t->loc);
+
+		N(r)->aux = base != 10;	/* spelled with a leading 0 (-Wconstant-conversion) */
+		return r;
+	}
 }
 
 /* the common case: a clean decimal or hex integer with an optional u/l suffix */
@@ -175,7 +180,12 @@ VPRIV uint32_t number(cc *c, const ptok *t)
 		else
 			return number_slow(c, t);	/* float, separators, odd suffixes */
 	}
-	return mk_int(c, (i128)v, int_lit_type(c, v, l, u, dec), t->loc);
+	{
+		uint32_t r = mk_int(c, (i128)v, int_lit_type(c, v, l, u, dec), t->loc);
+
+		N(r)->aux = !dec;	/* spelled with a leading 0 (-Wconstant-conversion) */
+		return r;
+	}
 }
 
 /* one (possibly multi-byte UTF-8) escape or character of a literal */

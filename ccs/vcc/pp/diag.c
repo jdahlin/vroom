@@ -224,6 +224,16 @@ const char *pp_src(const pp *p, uint32_t b, uint32_t e, size_t *len)
 	return f->f->src + (b - f->base);
 }
 
+/* the source character at loc, -1 if none */
+int pp_loc_char(const pp *p, uint32_t loc)
+{
+	const fent *e;
+
+	if (!loc_ok(p, loc, &e) || loc - e->base >= e->f->size)
+		return -1;
+	return (unsigned char)e->f->src[loc - e->base];
+}
+
 uint32_t pp_tok_end(const pp *p, uint32_t loc)
 {
 	const fent *e;
