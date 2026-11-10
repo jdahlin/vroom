@@ -491,7 +491,7 @@ static int write_deps(const pp *p, const char *cwd, const char *depfile, const c
 }
 
 /* phase times over all -c jobs (ns): front end + codegen, assembler, finish + write */
-_Atomic unsigned long long ppd_ns_cc, ppd_ns_emit, ppd_ns_obj, ppd_bytes_obj;
+_Atomic unsigned long long ppd_ns_cc, ppd_ns_emit, ppd_ns_obj, ppd_bytes_obj, ppd_tok_out, ppd_tok_skip;
 _Thread_local vperf ppd_ph[PPD_NPH];
 
 static unsigned long long nsnow(void)
@@ -1472,6 +1472,8 @@ int ppd_run(int argc, char **argv, const ppd_env *env)
 			status = cc_run(p, &co) || pp_errors(p) ? 1 : 0;
 			ppd_ns_cc += nsnow() - t1;
 			ppd_ph_add(PPD_PH_CC, v1);
+			ppd_tok_out += pp_ntok(p);
+			ppd_tok_skip += pp_skipped(p);
 		}
 		if (fd >= 0) {
 			if (!status && client_gone())
