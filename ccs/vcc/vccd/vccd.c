@@ -721,8 +721,9 @@ static bool cc_is_pp(const struct req *r)
 
 /*
  * -c of a named .c or .S file for aarch64 Linux: vcc compiles it.  Not:
- * host programs (Mach-O), the vDSO (-mcmodel=tiny, position independent),
- * anything with -x other than c/assembler-with-cpp.  stdin (`-`) is read by
+ * anything with -x other than c/assembler-with-cpp.  The vDSO's
+ * -mcmodel=tiny is vcc's too: its ADRP pairs are PC-relative as tiny's ADR
+ * (larger code, no dynamic relocation).  stdin (`-`) is read by
  * the driver from the client's fd 0.
  */
 /* options whose value is the next argument (so it is not an input) */
@@ -793,7 +794,7 @@ static bool cc_is_compile(const struct req *r)
 			target = true;
 		else if (!strcmp(a, "-S"))
 			c = true;	/* assembly text: the same job */
-		else if (!strcmp(a, "-E") || !strcmp(a, "-mcmodel=tiny") ||
+		else if (!strcmp(a, "-E") ||
 			 !strcmp(a, "-shared") || !strcmp(a, "-emit-llvm"))
 			return false;
 		else if (!strcmp(a, "-x") && i + 1 < r->argc && strcmp(r->argv[i + 1], "c") &&

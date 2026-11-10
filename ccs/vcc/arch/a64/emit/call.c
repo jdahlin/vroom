@@ -602,6 +602,49 @@ static val fold_strcmp(ecx *e, const node *x)
 	return vconst(r < 0 ? -1 : r > 0);
 }
 
+/*
+ * __builtin_memcpy/memmove/memset with a constant size: inline stores, as
+ * clang at every -O and under -fno-builtin/-ffreestanding (LLVM's memcpy
+ * intrinsic; the vDSO has no memcpy to call: get/put_unaligned in
+ * lib/vdso/getrandom.c).  Plain memcpy() stays a call.  The value is dst.
+ */
+static bool mem_inline(ecx *e, uint32_t ref, carg *args, val *res)
+{
+	const char *nm = cc_builtin_name(RIDX(ref));
+	int kind = !strcmp(nm, "__builtin_memcpy") ? 1 : !strcmp(nm, "__builtin_memmove") ? 2 :
+		   !strcmp(nm, "__builtin_memset") ? 3 : 0;
+	uint64_t n;
+	int d;
+
+	if (!kind || args[2].v.k != V_CONST)
+		return false;
+	n = (uint64_t)args[2].v.i;
+	if (n > 128 || (kind == 2 && n & (n - 1)) || (kind == 2 && n > 8) || (kind == 3 && args[1].v.k != V_CONST))
+		return false;	/* memmove: one load before one store (overlap) */
+	d = toreg(e, &args[0].v);
+	if (kind < 3) {
+		int sr = toreg(e, &args[1].v);
+
+		copy_mem(e, d, sr, n);
+		val_free(e, &args[1].v);
+	} else if (!(args[1].v.i & 0xff)) {
+		zero_mem(e, d, n);
+	} else {
+		uint64_t pat = (uint64_t)(args[1].v.i & 0xff) * 0x0101010101010101ull, o = 0;
+		int t = R_X16;	/* as copy_mem: not x17 */
+
+		movi(e, 1, t, (int64_t)pat);
+		while (o < n) {
+			uint64_t k = n - o >= 8 ? 8 : n - o >= 4 ? 4 : n - o >= 2 ? 2 : 1;
+
+			mem(e, I_ST, log2sz(k), 0, t, d, (int64_t)o);
+			o += k;
+		}
+	}
+	*res = args[0].v;
+	return true;
+}
+
 VPRIV val gen_call(ecx *e, uint32_t n)
 {
 	cc *c = e->c;
@@ -654,6 +697,8 @@ VPRIV val gen_call(ecx *e, uint32_t n)
 	}
 	if (inl) {
 		r = inline_call(e, s, args, na);
+	} else if (!s && ref && na == 3 && RKIND(ref) == RK_NAME && mem_inline(e, ref, args, &r)) {
+		/* inlined */
 	} else {
 		qty ft = N(x->a)->ty;
 		int nfix = -1;
