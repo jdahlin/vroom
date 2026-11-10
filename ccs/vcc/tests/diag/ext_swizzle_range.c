@@ -1,4 +1,4 @@
-#include <stdio.h>
+int printf(const char *, ...);
 typedef float f4 __attribute__((ext_vector_type(4)));
 typedef float f2 __attribute__((ext_vector_type(2)));
 typedef int i8 __attribute__((ext_vector_type(8)));

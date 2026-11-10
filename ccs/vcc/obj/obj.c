@@ -274,6 +274,8 @@ void elf_fill(ElfObj *o, uint32_t frag, uint64_t n, uint8_t v)
 		f->size += n;
 		return;
 	}
+	if (n > o->arena.cap - o->arena.used)	/* fail now, not after zeroing the whole arena (.space 512G) */
+		vjob_fail("object too large (an output section or table is full)");
 	while (n) {
 		size_t k = n > (1u << 20) ? (1u << 20) : n;
 		memset(elf_grow(o, frag, k), v, k);

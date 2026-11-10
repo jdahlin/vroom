@@ -1,0 +1,23 @@
+#!/bin/sh
+# Send a commit through the premerge gate (.github/workflows/premerge.yml):
+# push it to origin's `premerge` branch; when every job passes, CI
+# fast-forwards main to it.  The commit must contain origin/main.
+#
+#   ci/premerge-push [REV]        default HEAD; --watch follows the run (gh)
+set -eu
+WATCH=
+[ "${1:-}" = --watch ] && { WATCH=1; shift; }
+REV=$(git rev-parse --verify "${1:-HEAD}^{commit}")
+git fetch -q origin main
+if ! git merge-base --is-ancestor origin/main "$REV"; then
+	echo "premerge-push: $REV does not contain origin/main; merge or rebase first" >&2
+	exit 1
+fi
+# premerge is a scratch branch: whatever was queued before is replaced
+git push -f origin "$REV:refs/heads/premerge"
+echo "premerge: $(git log -1 --format='%h %s' "$REV")"
+if [ -n "$WATCH" ] && command -v gh >/dev/null; then
+	sleep 5
+	id=$(gh run list --workflow premerge.yml --branch premerge --commit "$REV" --limit 1 --json databaseId -q '.[0].databaseId')
+	[ -n "$id" ] && gh run watch "$id" --exit-status
+fi

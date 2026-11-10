@@ -41,7 +41,9 @@ typedef struct ptok {
 } ptok;
 
 typedef struct pp_opts {
-	const char *main;		/* the source file */
+	const char *main;		/* the source file ("<stdin>" with main_src) */
+	const char *main_src;		/* non-NULL: the main file's bytes (stdin), main_len of them */
+	size_t main_len;
 	const char *const *dirs;	/* search path: -iquote dirs, then -I, -isystem, -idirafter */
 	const char *const *edirs;	/* --embed-dir: #embed's search path */
 	int nedirs;

@@ -18,7 +18,7 @@ skipped.  Exit status 1 on any FAIL or XPASS.
 --bin-dir build/ccs-asan or build/ccs-tsan runs the sanitizer builds of
 vccd; then also check the vccd log each test prints with -v.
 """
-import array, os, re, signal, socket, stat, struct, subprocess, sys, tempfile, time, importlib.util
+import array, os, re, shutil, signal, socket, stat, struct, subprocess, sys, tempfile, time, importlib.util
 spec = importlib.util.spec_from_file_location('vd', os.path.join(os.path.dirname(os.path.abspath(__file__)), 'vcc-diff.py'))
 vd = importlib.util.module_from_spec(spec); spec.loader.exec_module(vd)
 
@@ -119,7 +119,7 @@ def default_socket_not_in_tmp():
 @test()
 def peer_other_user():
     """a connection from another uid is refused (needs passwordless sudo -u nobody)"""
-    if subprocess.run(['sudo', '-n', '-u', 'nobody', 'true'], capture_output=True).returncode:
+    if not shutil.which('sudo') or subprocess.run(['sudo', '-n', '-u', 'nobody', 'true'], capture_output=True).returncode:
         raise Skip('no passwordless sudo -u nobody')
     v = Vccd(sockdir_mode=0o755)
     try:
@@ -265,6 +265,29 @@ def dumpmachine_as_clang():
             p = subprocess.run([SHIM, f'--target={t}', '-dumpmachine'], cwd=v.dir, env=env, capture_output=True,
                                text=True, process_group=0)
             check(p.returncode == 0 and p.stdout == want + '\n', f'{t}: rc {p.returncode} {p.stdout!r}')
+    finally: v.stop()
+
+@test()
+def stdin_and_host_not_forwarded():
+    """-E and -c of `-` (Kconfig's cc-version.sh, tools-support-relr.sh) and, on an arm64 Mac, a host -c: vcc's
+    (no backend, so a forward fails); stdin's dependency file names no <stdin>, as clang's"""
+    v = Vccd()
+    try:
+        d = f'{v.dir}/w'; os.makedirs(d, exist_ok=True)
+        tu(d, 'h.h', 'int y;\n')
+        env = dict(os.environ, VCC_SOCK=v.sock)
+        run = lambda argv, inp=None: subprocess.run([SHIM] + argv, cwd=d, env=env, input=inp, capture_output=True,
+                                                     text=True, process_group=0)
+        p = run(TARGET + ['-E', '-P', '-x', 'c', '-'], '__clang_major__ __FILE__\n')
+        check(p.returncode == 0 and '"<stdin>"' in p.stdout, f'-E -: rc {p.returncode} {p.stdout[-200:]} {p.stderr[-300:]}')
+        big = '#include "h.h"\nint big[] = {' + ','.join(['1'] * 5000) + '};\n'	# more than a pipe buffer
+        p = run(TARGET + ['-Wp,-MMD,s.d', '-c', '-x', 'c', '-', '-o', 's.o'], big)
+        check(p.returncode == 0 and os.path.exists(f'{d}/s.o'), f'-c -: rc {p.returncode} {p.stderr[-300:]}')
+        check(open(f'{d}/s.d').read() == 's.o: h.h\n', f'stdin deps: {open(f"{d}/s.d").read()!r}')
+        if sys.platform == 'darwin' and os.uname().machine == 'arm64':
+            src = tu(d, 'host.c', 'int main(void) { return 0; }\n')
+            p = run(['-O2', '-c', '-o', 'host.o', src])
+            check(p.returncode == 0 and obj(d, 'host.o')[:4] == b'\xcf\xfa\xed\xfe', f'host -c: rc {p.returncode} {p.stderr[-300:]}')
     finally: v.stop()
 
 @test()

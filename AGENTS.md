@@ -172,6 +172,19 @@ against `vpp`, both lexed by vcc's lexer.  A change to `pp/` or `lex.c` is
 only done when the parity run is fully green; a change to `cc/` when both
 vcc-sema.py runs are green (878/879: modpost.c lacks a generated header).
 
+## CI and the premerge gate
+`.github/workflows/premerge.yml` runs one reusable workflow per target in
+parallel (`arm64.yml`: jobs arm64, asan, tsan; `wasm.yml`; x86-64 gets its
+own), each on GitHub's ubuntu-24.04-arm in a Debian 13 container
+(`ci/setup-debian.sh`: clang 23 from apt.llvm.org, qemu, emsdk for wasm).
+The test set is `ci/premerge.sh JOB`: the vendored C suites under qemu and
+the fast harnesses, no kernel, PostgreSQL or anything needing `work/`.
+Locally, as CI: `env/linux/run.sh ci/premerge.sh arm64`.  main is not
+protected (private repo, free plan), so the gate is the workflow: push to
+main through `ci/premerge-push [--watch]` (pushes to `premerge`; job `gate`
+fast-forwards main when everything is green).  A new harness belongs in
+`ci/premerge.sh` when it is fast and needs only the checkout.
+
 ## Sanitizers
 ```
 make -C ccs -j 6 vcc-asan           # -fsanitize=address,undefined -> build/ccs-asan/
@@ -185,7 +198,10 @@ bench/vccd-cc.py --bin-dir build/ccs-tsan                 # vccd itself, 150 TUs
 Both variants are `-O1 -g` with their own `obj/`; the normal build is
 unchanged.  `--bin-dir DIR` (or `VCC_BIN=DIR`) picks the tools in every
 harness that imports `vcc-diff.py`.  The big reservations (16 GB shared pp
-region, 4 GB NORESERVE arenas) need no special handling.  A TSan batch takes
+region, 4 GB arenas, all MAP_NORESERVE) need no special handling; on Linux
+(CI) run ASan with `ASAN_OPTIONS=detect_leaks=0` (LeakSanitizer is on by
+default there; vcc exits with its arenas mapped) and the default 8 MB stack
+(`ulimit -s unlimited` leaves `vstack_low()` without a stack bottom).  A TSan batch takes
 65-100 s (15-20x the normal build), an ASan suite 12-25 s.  Limits: ASan does
 not see over-reads inside our own mmap'ed arenas (they are never poisoned),
 only in malloc, globals and the stack.  Contract that ASan checks: strings
