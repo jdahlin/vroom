@@ -185,9 +185,9 @@ static void wk_elems(ecx *e, const lval *d, qty ty, uint32_t init)
 		LO(tfree)(e, rd);
 		return;
 	}
-	if (wk_zero_init(c, init) && !is_agg(c, ty))
+	if (wk_zero_init(c, init) && !wk_mem(e, ty))
 		return;
-	if (is_agg(c, ty)) {
+	if (wk_mem(e, ty)) {
 		/* another object's bytes (a struct variable, a call's result ...) */
 		val v = wk_gen(e, init);
 		int rs = wk_reg(e, &v, prim(TY_ULONG)), rd = wk_addr(e, d);
@@ -221,7 +221,7 @@ VPRIV void wk_init(ecx *e, const lval *d, qty t, uint32_t init)
 		wk_elems(e, d, t, init);
 		return;
 	}
-	if (is_agg(c, t)) {
+	if (wk_mem(e, t)) {
 		wk_elems(e, d, t, init);	/* another object's bytes */
 		return;
 	}
@@ -467,7 +467,7 @@ VPRIV void wk_stmt(ecx *e, uint32_t n)
 		return;
 	}
 	case N_RETURN:
-		if (x->a && is_record(c, W->rty)) {
+		if (x->a && wk_mem(e, W->rty)) {
 			/* the object's address; a size not a multiple of 8 through a slot of whole words */
 			val v = wk_gen(e, x->a);
 			int r = wk_reg(e, &v, prim(TY_ULONG));
@@ -484,14 +484,14 @@ VPRIV void wk_stmt(ecx *e, uint32_t n)
 		} else if (x->a && KIND(c, W->rty) != TY_VOID) {
 			val v = wk_gen(e, x->a);
 
-			LO(ret)(e, &v, wk_size(c, W->rty), wk_signed(c, W->rty), W->retlbl);
+			LO(ret)(e, &v, W->rty, W->retlbl);
 		} else {
 			if (x->a) {
 				val v = wk_gen(e, x->a);
 
 				wk_free(e, &v);
 			}
-			LO(ret)(e, NULL, 0, false, W->retlbl);
+			LO(ret)(e, NULL, prim(TY_VOID), W->retlbl);
 		}
 		return;
 	case N_ASM:
@@ -542,13 +542,13 @@ VPRIV void wk_function(ecx *e, uint32_t s)
 	if (KIND(c, W->rty) != TY_VOID) {
 		int k = KIND(c, W->rty);
 
-		if (is_flt(c, W->rty) || k == TY_INT128 || k == TY_UINT128 || k == TY_VECTOR || k == TY_FLOAT128)
+		if (k == TY_FLOAT16 || k == TY_INT128 || k == TY_UINT128 || k == TY_VECTOR || k == TY_FLOAT128)
 			efatal(e, y->loc, "x86-64: this return type is not supported yet (PLAN-x86.md X3)");
 	}
 	if (body->aux > 256)
 		efatal(e, y->loc, "x86-64: more than 256 parameters");
 	W->retlbl = wk_newlabel(e);
-	if (is_record(c, W->rty)) {
+	if (wk_mem(e, W->rty)) {
 		LO(classify)(e, W->rty, &W->rrec);
 		W->rrec.slot = wk_slot(e, 8, 8);	/* (memory: the hidden pointer's slot) */
 	}
@@ -558,23 +558,37 @@ VPRIV void wk_function(ecx *e, uint32_t s)
 		qty pt = c->syms[p].ty;
 		int k = KIND(c, pt);
 
-		if (is_flt(c, pt) || k == TY_INT128 || k == TY_UINT128 || k == TY_VECTOR || k == TY_FLOAT128)
+		if (k == TY_FLOAT16 || k == TY_INT128 || k == TY_UINT128 || k == TY_VECTOR || k == TY_FLOAT128)
 			efatal(e, c->syms[p].loc, "x86-64: this parameter type is not supported yet (PLAN-x86.md X3)");
+		if ((ft->flags & TF_NOPROTO) && k == TY_FLOAT)
+			pt = prim(TY_DOUBLE);	/* K&R: received as the caller promoted it */
 		LO(classify)(e, pt, &pa[i]);
 		pa[i].slot = wk_slot(e, pa[i].size > 8 ? (pa[i].size + 7) & ~(uint64_t)7 : 8, pa[i].align);
 	}
-	LO(params)(e, pa, (int)body->aux, is_record(c, W->rty) ? &W->rrec : NULL, (ft->flags & TF_VARIADIC) != 0);
+	LO(params)(e, pa, (int)body->aux, wk_mem(e, W->rty) ? &W->rrec : NULL, (ft->flags & TF_VARIADIC) != 0);
 	for (uint32_t i = 0; i < body->aux; i++) {
 		uint32_t p = c->lists[body->a + i];
 
 		W->sgen[p] = W->gen;
 		W->soff[p] = pa[i].slot;
+		if ((ft->flags & TF_NOPROTO) && KIND(c, c->syms[p].ty) == TY_FLOAT) {
+			/* the double narrowed to the float the parameter is, in place */
+			lval l = { .k = L_FRAME, .off = pa[i].slot, .align = 8 };
+			val v = { .k = V_REG, .r = (uint8_t)LO(ftreg)(e) };
+			int r;
+
+			LO(load)(e, v.r, &l, 8, false);
+			v = LO(cvt)(e, v, prim(TY_DOUBLE), prim(TY_FLOAT));
+			r = v.r;
+			LO(store)(e, r, &l, 4);
+			LO(tfree)(e, r);
+		}
 	}
 	wk_stmt(e, y->body);
 	if (wk_is_main(c, s) && KIND(c, W->rty) == TY_INT) {
 		val z = vconst(0);
 
-		LO(ret)(e, &z, 4, true, W->retlbl);	/* falling off the end of main returns 0 */
+		LO(ret)(e, &z, prim(TY_INT), W->retlbl);	/* falling off the end of main returns 0 */
 	}
 	LO(label)(e, W->retlbl);
 	LO(finish)(e, s);

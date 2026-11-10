@@ -95,14 +95,26 @@ VPRIV int x64_treg(ecx *e)
 
 VPRIV void x64_tfree(ecx *e, int r)
 {
-	if (r < 16)
+	if (r < 32)
 		e->x64->live &= ~(1u << r);
 }
 
 VPRIV void x64_tkeep(ecx *e, int r)
 {
-	if (r < 16)
+	if (r < 32)
 		e->x64->live |= 1u << r;
+}
+
+VPRIV int x64_ftreg(ecx *e)
+{
+	xst *X = e->x64;
+
+	for (int r = XMM8; r < XMM15; r++)
+		if (!(X->live & (1u << r))) {
+			X->live |= 1u << r;
+			return r;
+		}
+	efatal(e, e->curloc, "x86-64: expression too complex (out of vector registers)");
 }
 
 VPRIV int x64_nfree(ecx *e) { return 8 - __builtin_popcount(e->x64->live & X_TEMPS); }
