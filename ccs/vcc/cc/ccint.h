@@ -114,6 +114,7 @@ struct cc {
 	uint8_t defer_rt;	/* parsing a static initializer: -Wdivision-by-zero waits (clang's DiagRuntimeBehavior) */
 	uint8_t ndefer;
 	struct { uint32_t loc; pp_span r; uint8_t rem; } defer[8];
+	uint32_t unk_loc;	/* the last unknown token given -Winvalid-pp-token */
 	uint8_t se_direct;	/* the next statement is one of a statement expression's body */
 	uint16_t nrtd;		/* warnings of a function body given at its end (clang's DiagRuntimeBehavior) */
 	struct { const char *flag; const char *const *groups; const char *ms; uint32_t mlen, loc, nr; pp_span r[2];

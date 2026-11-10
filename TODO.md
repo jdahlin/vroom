@@ -1096,11 +1096,15 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
   diagnostic without ranges is a bare caret, as clang.  Done: diag
   `pragma_warning.c`.  Not modelled: from `_Pragma` (clang's
   "<scratch space>" note).
+- [x] **pp -Winvalid-pp-token**: an unterminated ' or " in a #define
+  body (MF_UNKNOWN, so a cached site does not rescan) or in the text (given
+  by the front end with its error: an unknown token always ends in one, so
+  no per-token check).  Done: diag `invalid_pp_token.c`.  Not modelled: in
+  -E output; clang's recovery after it ("expected ';'").
 - [ ] **Missing warnings** (only 7 `-W` flags):
   `-Wreturn-stack-address` of a compound literal
   (clang prints the initializer with its expression printer),
-  `-Wuninitialized`, `-Wunknown-attributes`, `-Wdeprecated-declarations`;
-  pp `-Winvalid-pp-token`.
+  `-Wuninitialized`, `-Wunknown-attributes`, `-Wdeprecated-declarations`.
   *Validate:* one diag test per warning; `vcc-sema.py warn` stays 879/879
   (no false positives on the kernel).  (Done: `-Wmultichar` in C and `#if`, "character constant too long",
   multi-character wide/Unicode literals as errors: diag `multichar.c`; the

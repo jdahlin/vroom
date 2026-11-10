@@ -224,6 +224,24 @@ const char *pp_src(const pp *p, uint32_t b, uint32_t e, size_t *len)
 	return f->f->src + (b - f->base);
 }
 
+/* -Winvalid-pp-token: an unknown token that is an unterminated character constant or string */
+void pp_invalid_tok(pp *p, const char *s, uint32_t len, uint32_t loc)
+{
+	uint32_t i = 0;
+
+	if (i < len && (s[i] == 'L' || s[i] == 'U' || s[i] == 'u'))
+		i++;
+	if (i < len && s[0] == 'u' && s[i] == '8')
+		i++;
+	if (i >= len || (s[i] != '\'' && s[i] != '"'))
+		return;
+	{
+		pp_dinfo d = { "warning", loc + i, NULL, 0, NULL, 0, NULL, 0 };
+
+		pp_warnx(p, "invalid-pp-token", true, NULL, &d, "missing terminating %s character", s[i] == '"' ? "'\"'" : "'");
+	}
+}
+
 /* the source character at loc, -1 if none */
 int pp_loc_char(const pp *p, uint32_t loc)
 {

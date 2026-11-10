@@ -93,6 +93,7 @@ enum {
 	MF_VARIADIC = 1, MF_PASTE = 2, MF_VAOPT = 4,
 	MF_BADHASH = 8,		/* '#' not before a parameter: an error unless assembler */
 	MF_HASH = 16,		/* a '#' in the body */
+	MF_UNKNOWN = 32,	/* an unknown token in the body (-Winvalid-pp-token) */
 };
 enum {
 	B_NONE, B_FILE, B_LINE, B_COUNTER, B_DATE, B_TIME, B_TIMESTAMP,

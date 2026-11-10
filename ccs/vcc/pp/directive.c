@@ -156,6 +156,8 @@ VPRIV const char *parse_define(const vtok *vt, uint32_t b, uint32_t e, pmacro *m
 			m->flags |= MF_VAOPT;
 		if (vt[j].kind == T_HASH)
 			m->flags |= MF_HASH;
+		if (vt[j].kind == T_UNKNOWN)
+			m->flags |= MF_UNKNOWN;
 	}
 	if (m->nbody && (m->body[0].kind == T_HASHHASH || m->body[m->nbody - 1].kind == T_HASHHASH))
 		return "'##' cannot appear at either end of a macro expansion";

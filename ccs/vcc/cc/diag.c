@@ -24,11 +24,25 @@ VPRIV void diag(cc *c, uint32_t loc, const char *what, const char *fmt, va_list 
 	pp_vdiag(c->p, loc, what, fmt, ap);
 }
 
+/* -Winvalid-pp-token for the unknown tokens read ahead (they always end in an error: here, not per token) */
+static void unknown_toks(cc *c)
+{
+	for (int i = 0; i < c->ntk; i++) {
+		const ptok *t = &c->tk[i];
+
+		if (t->kind == T_UNKNOWN && !(t->flags & PF_MACRO) && t->loc != c->unk_loc) {
+			c->unk_loc = t->loc;
+			pp_invalid_tok(c->p, t->s, t->len, t->loc);
+		}
+	}
+}
+
 __attribute__((format(printf, 3, 4)))
 VPRIV void cc_error(cc *c, uint32_t loc, const char *fmt, ...)
 {
 	va_list ap;
 
+	unknown_toks(c);
 	error_limit(c);
 	va_start(ap, fmt);
 	diag(c, loc, "error", fmt, ap);
@@ -41,6 +55,7 @@ VPRIV void fatal(cc *c, uint32_t loc, const char *fmt, ...)
 {
 	va_list ap;
 
+	unknown_toks(c);
 	va_start(ap, fmt);
 	diag(c, loc, "error", fmt, ap);
 	va_end(ap);
@@ -57,7 +72,7 @@ VPRIV void report(cc *c, const char *what, uint32_t loc, const pp_span *r, int n
 	va_list ap;
 
 	if (!strcmp(what, "error"))
-		error_limit(c), c->errors++;
+		unknown_toks(c), error_limit(c), c->errors++;
 	if (strcmp(what, "note"))
 		c->ndiag++;
 	va_start(ap, fmt);
