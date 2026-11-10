@@ -568,7 +568,8 @@ static void expansion_note(pp *p, const pmacro *m, uint32_t before, const char *
 			uint32_t b = k + 1, pb = 0, pe = 0, hit = 0, first = 0;
 
 			if (!(q[k].kind == T_IDENT && q[k].id == m->name && q[k - 1].id == KW_define &&
-			      q[k - 2].kind == T_HASH && (q[k - 2].flags & TF_SOL) && p->fe[i].base + q[k].off < before))
+			      q[k - 2].kind == T_HASH && (q[k - 2].flags & TF_SOL) &&
+			      (p->fe[i].base + q[k].off < before || f == &p->builtin)))	/* <built-in> comes first */
 				continue;
 			if (b < f->ntok && q[b].kind == T_LPAREN && !(q[b].flags & TF_SPACE) && !(q[b].flags & TF_SOL)) {
 				pb = b + 1;

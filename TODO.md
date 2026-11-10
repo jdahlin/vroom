@@ -616,9 +616,10 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
   on all three targets, diag `unknown_attribute.c`; `[[x]]`, `[[gnu::x]]`,
   `[[clang::x]]` (`_Clang`, `__gnu__`) and other vendors from
   `__has_c_attribute` (`unknown_std_attribute.c`, the 625 again per scope).
-- [ ] **`[[__clang__::x]]`**: `__clang__` expands to `1` and vcc fails
-  ("expected attribute name"); clang warns (`-Wignored-attributes`, did you
-  mean '_Clang', note at the built-in macro) and takes it as `clang::`.
+- [ ] **`[[__clang__::x]]`**: (done: clang's -Wignored-attributes warning with
+  the `_Clang` fix-it, taken as `clang::`; tests/vcc `attr_clang_macro.c`.)
+  Left: the "expanded from macro" note says `<built-in>:460`, clang `:2`: our
+  predefines are sorted (`gen-ppdata.sh`), clang's in definition order.
   *Validate:* diag test.
 - [x] **Attributes without effect**: none left.  Accepted
   and needing nothing today: `returns_twice` (locals live in memory:
