@@ -1212,7 +1212,7 @@ int nm_main(int argc, char **argv, int dirfd, FILE *out, FILE *err)
 	oerr = err ? err : stderr;
 	oerrors = 0;
 	prog = "vnm";
-	bool nosort = false, numeric = false, size = false, undef = false, defd = false, ext = false;
+	bool nosort = false, numeric = false, size = false, undef = false, defd = false, ext = false, dyn = false;
 	const char **files = xcalloc((size_t)argc + 1, sizeof *files);
 	int nf = 0;
 	for (int i = 1; i < argc; i++) {
@@ -1225,6 +1225,7 @@ int nm_main(int argc, char **argv, int dirfd, FILE *out, FILE *err)
 				else if (*p == 'u') undef = true;
 				else if (*p == 'U') defd = true;
 				else if (*p == 'g') ext = true;
+				else if (*p == 'D') dyn = true;
 				else oerror("unsupported option -%c", *p);
 			}
 		} else if (!strcmp(a, "--no-sort")) {
@@ -1237,6 +1238,8 @@ int nm_main(int argc, char **argv, int dirfd, FILE *out, FILE *err)
 			undef = true;
 		} else if (!strcmp(a, "--defined-only")) {
 			defd = true;
+		} else if (!strcmp(a, "--dynamic")) {
+			dyn = true;
 		} else if (!strcmp(a, "--extern-only")) {
 			ext = true;
 		} else if (a[0] == '-' && a[1]) {
@@ -1257,7 +1260,7 @@ int nm_main(int argc, char **argv, int dirfd, FILE *out, FILE *err)
 			continue;
 		const Shdr *st = NULL;
 		for (uint32_t k = 0; k < e.nsh; k++)
-			if (e.sh[k].sh_type == SHT_SYMTAB)
+			if (e.sh[k].sh_type == (dyn ? SHT_DYNSYM : SHT_SYMTAB))
 				st = &e.sh[k];
 		if (nf > 1)
 			fprintf(out, "\n%s:\n", files[f]);
@@ -1271,6 +1274,47 @@ int nm_main(int argc, char **argv, int dirfd, FILE *out, FILE *err)
 		uint32_t n = st->sh_size / sizeof(Sym);
 		NSym *v = xcalloc(n, sizeof *v);
 		uint32_t m = 0;
+		/* -D: symbol versions as llvm-nm (name@@VER defined, name@VER hidden or undefined) */
+		const uint16_t *versym = NULL;
+		const char *vname[256] = { 0 };
+		char **owned = dyn ? xcalloc(n, sizeof *owned) : NULL;
+		for (uint32_t k = 0; dyn && k < e.nsh; k++) {
+			const Shdr *h = &e.sh[k];
+			const uint8_t *d = e.buf + h->sh_offset;
+			const char *vs = h->sh_link < e.nsh ? (const char *)e.buf + e.sh[h->sh_link].sh_offset : NULL;
+			if (h->sh_type == 0x6fffffff && h->sh_size >= n * 2)
+				versym = (const uint16_t *)d;
+			else if (h->sh_type == 0x6ffffffd)	/* verdef */
+				for (uint32_t c = 0, o = 0; c < h->sh_info && o + 20 <= h->sh_size; c++) {
+					uint16_t ndx, cnt; uint32_t aux, next, nm_;
+					memcpy(&ndx, d + o + 4, 2); memcpy(&cnt, d + o + 6, 2);
+					memcpy(&aux, d + o + 12, 4); memcpy(&next, d + o + 16, 4);
+					if (cnt && o + aux + 8 <= h->sh_size && ndx < 256) {
+						memcpy(&nm_, d + o + aux, 4);
+						vname[ndx] = vs + nm_;
+					}
+					if (!next)
+						break;
+					o += next;
+				}
+			else if (h->sh_type == 0x6ffffffe)	/* verneed */
+				for (uint32_t c = 0, o = 0; c < h->sh_info && o + 16 <= h->sh_size; c++) {
+					uint16_t cnt; uint32_t aux, next;
+					memcpy(&cnt, d + o + 2, 2); memcpy(&aux, d + o + 8, 4); memcpy(&next, d + o + 12, 4);
+					for (uint32_t j = 0, a = o + aux; j < cnt && a + 16 <= h->sh_size; j++) {
+						uint16_t other; uint32_t nm_, an;
+						memcpy(&other, d + a + 6, 2); memcpy(&nm_, d + a + 8, 4); memcpy(&an, d + a + 12, 4);
+						if (other < 256)
+							vname[other] = vs + nm_;
+						if (!an)
+							break;
+						a += an;
+					}
+					if (!next)
+						break;
+					o += next;
+				}
+		}
 		for (uint32_t i = 1; i < n; i++) {
 			const Sym *y = &ys[i];
 			uint8_t type = y->st_info & 15;
@@ -1282,6 +1326,14 @@ int nm_main(int argc, char **argv, int dirfd, FILE *out, FILE *err)
 			if ((undef && y->st_shndx != SHN_UNDEF) || (defd && y->st_shndx == SHN_UNDEF) ||
 			    (ext && (y->st_info >> 4) == STB_LOCAL))
 				continue;
+			if (versym && (versym[i] & 0x7fff) > 1 && (versym[i] & 0x7fff) < 256 && vname[versym[i] & 0x7fff]) {
+				const char *vn = vname[versym[i] & 0x7fff];
+				bool at2 = !(versym[i] & 0x8000) && y->st_shndx != SHN_UNDEF;
+				size_t l = strlen(name) + strlen(vn) + 3;
+				owned[i] = malloc(l);
+				snprintf(owned[i], l, "%s%s%s", name, at2 ? "@@" : "@", vn);
+				name = owned[i];
+			}
 			v[m++] = (NSym){.name = name, .addr = y->st_value, .size = y->st_size,
 					.type = nm_type(&e, y), .defined = y->st_shndx != SHN_UNDEF};
 		}
@@ -1308,6 +1360,9 @@ int nm_main(int argc, char **argv, int dirfd, FILE *out, FILE *err)
 		}
 		fwrite(buf, 1, len, out);
 		free(buf);
+		for (uint32_t i = 0; owned && i < n; i++)
+			free(owned[i]);
+		free(owned);
 		free(v);
 		elf_close(&e);
 	}

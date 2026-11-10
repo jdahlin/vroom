@@ -39,5 +39,6 @@ for o in -u -g -U --undefined-only --extern-only --defined-only; do
   $L/llvm-nm $o $IN > $T/r.nm; $B/vnm $o $IN > $T/m.nm; chk $T/r.nm $T/m.nm "nm $o"; done
 V=$W/arch/arm64/kernel/vdso/vdso.so.dbg
 $L/llvm-nm $V > $T/r.vnm; $B/vnm $V > $T/m.vnm; chk $T/r.vnm $T/m.vnm "nm vdso"
+$L/llvm-nm -D $V > $T/r.vnm; $B/vnm -D $V > $T/m.vnm; chk $T/r.vnm $T/m.vnm "nm -D vdso"
 echo "$ok identical, $bad different"
 [ $bad = 0 ]
