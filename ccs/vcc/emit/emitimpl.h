@@ -641,6 +641,7 @@ VPRIV uint64_t opt_regs(ecx *e, unsigned *fl);
 VPRIV lval bind_lreg(ecx *e, uint32_t s);
 VPRIV val fold_int_bin(ecx *e, int op, qty ot, qty rt, i128 l, i128 r, bool *ok);
 VPRIV bool em_is_cmp(int op);
+VPRIV int cmp_cond(int op, bool sg);
 VPRIV int emit_cmp(ecx *e, int op, int x, bool sg, val *a, val *b);
 VPRIV int emit_cmp2(ecx *e, int op, bool sg, val *a, val *b);
 VPRIV int test_zero(ecx *e, val *v, qty t, uint32_t l, bool nz);
@@ -696,6 +697,13 @@ VPRIV val gen(ecx *e, uint32_t n);
 /* cond.c */
 VPRIV int cond_fold(ecx *e, uint32_t n);
 VPRIV void gen_cond(ecx *e, uint32_t n, bool jump_if, uint32_t l);
+/* -O3: a flag chain or range check that folded: its truth instead of a condition */
+enum { FL_TRUE = 16, FL_FALSE = 17 };
+VPRIV bool num_of(cc *c, uint32_t n, i128 *v);
+VPRIV bool cheap_arm(ecx *e, uint32_t n);
+VPRIV int range_check(ecx *e, uint32_t n);
+VPRIV bool flaggable(ecx *e, uint32_t n, bool first);
+VPRIV int gen_flags(ecx *e, uint32_t n, bool first);
 /* stmt.c */
 VPRIV void gen_init_local(ecx *e, const lval *dst, qty ty, uint32_t init);
 VPRIV void run_cleanups(ecx *e, int to);

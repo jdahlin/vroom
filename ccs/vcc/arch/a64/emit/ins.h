@@ -46,6 +46,7 @@ enum {
 			 * TLS_LE/TLS_IE: ELF via tpidr_el0 (clobbers x1), TLS_DESC: ELF TLSDESC call (x1, lr) */
 	/* -O3 instruction selection (emitter.opt3; never emitted below -O3) */
 	I_TBZ, I_TBNZ,	/* rd, sh: bit number, label (+-32 KiB: tbz_range) */
+	I_CCMP,		/* flags = cond ? rn - (sh ? imm : rm) : ra (nzcv); imm -31..31 (ccmn for < 0) */
 };
 
 enum { TLS_LE = 1, TLS_IE, TLS_DESC };	/* I_TLV.cond on ELF */

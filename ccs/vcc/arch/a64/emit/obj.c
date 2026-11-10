@@ -286,6 +286,11 @@ static unsigned enc(const ins *i, uint32_t *w, pfix *f, const uint32_t *loff, ui
 		w[0] = 0x10000000u | R5(i->rd);
 		*f = (pfix){ 0, 1, R_AARCH64_ADR_PREL_LO21, i->label, 0 };
 		return 1;
+	case I_CCMP:
+		w[0] = (i->sh && i->imm < 0 ? 0x3a400000u : 0x7a400000u) | (uint32_t)sf << 31 | (uint32_t)i->cond << 12 |
+		       R5(i->rn) << 5 | (i->ra & 15u) |
+		       (i->sh ? 0x800u | (uint32_t)(i->imm < 0 ? -i->imm : i->imm) << 16 : R5(i->rm) << 16);
+		return 1;
 	case I_B: case I_BC: case I_CBZ: case I_CBNZ: case I_TBZ: case I_TBNZ: {
 		int64_t d = loff ? ((int64_t)loff[i->label] - at) * 4 : 0;
 		uint32_t rt = R_AARCH64_CONDBR19;

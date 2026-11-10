@@ -364,6 +364,22 @@ VPRIV void print_ins(cc *c, tbuf *b, const ins *i, uint32_t fid, const char *raw
 		p_lbl(b, fid, i->label);
 		tb_c(b, '\n');
 		return;
+	case I_CCMP:
+		tb_s(b, i->sh && i->imm < 0 ? "\tccmn\t" : "\tccmp\t");
+		reg(b, i->rn, i->sz);
+		tb_s(b, ", ");
+		if (i->sh) {
+			tb_c(b, '#');
+			tb_u(b, (uint64_t)(i->imm < 0 ? -i->imm : i->imm));
+		} else {
+			reg(b, i->rm, i->sz);
+		}
+		tb_s(b, ", #");
+		tb_u(b, i->ra);
+		tb_s(b, ", ");
+		tb_n8(b, cond_name[i->cond]);
+		tb_c(b, '\n');
+		return;
 	case I_TBZ: case I_TBNZ:
 		tb_s(b, i->op == I_TBZ ? "\ttbz\t" : "\ttbnz\t");
 		reg(b, i->rd, i->sh >= 32);

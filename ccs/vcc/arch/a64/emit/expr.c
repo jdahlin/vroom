@@ -105,16 +105,63 @@ VPRIV void move_to(ecx *e, int r, int r2, val *v, qty t)
 	}
 }
 
+/* -O3: c ? b : d with cheap arms as a compare and csel; false: not such a ?: */
+static bool gen_csel(ecx *e, const node *x, val *out)
+{
+	cc *c = e->c;
+	qty t = x->ty, ct = N(x->a)->ty;
+	val ca, vb, vd;
+	int cond, rb, rd, r;
+
+	if (!e->E->opt3 || !x->b || (!is_integer(c, t) && !is_ptr(c, t)) || is_wide(c, t) || is_flt(c, ct) || is_wide(c, ct) ||
+	    is_vec(c, ct) || is_agg(c, ct) || !cheap_arm(e, x->b) || !cheap_arm(e, x->c))
+		return false;
+	ca = gen(e, x->a);
+	if (ca.k == V_CONST || ca.k == V_ADDR) {
+		*out = gen(e, (ca.k == V_ADDR || ca.i) ? x->b : x->c);
+		return true;
+	}
+	if (ca.k != V_REG)
+		toreg(e, &ca);
+	r = ca.r;
+	if ((cond = last_cset(e, &ca)) >= 0) {
+		e->nin--;
+	} else {
+		uint64_t sz = tsize(c, ct);
+		int xe = last_ext(e, r);
+
+		if (is_ptr(c, ct) || sz == 8 || (xe && (xe & 15) <= (int)sz))
+			op3(e, I_SUBS, 1, ZR, r, ZR);
+		else if (sz == 4)
+			op3(e, I_SUBS, 0, ZR, r, ZR);
+		else
+			opi(e, I_ANDSI, 0, ZR, r, sz == 2 ? 0xffff : 0xff);
+		cond = C_NE;
+	}
+	val_free(e, &ca);
+	vb = gen(e, x->b);
+	rb = toreg(e, &vb);
+	vd = gen(e, x->c);
+	rd = toreg(e, &vd);
+	op3s(e, I_CSEL, X(c, t), rb, rb, rd, cond, 0);
+	val_free(e, &vd);
+	*out = vb;
+	return true;
+}
+
 static val gen_cond_expr(ecx *e, uint32_t n)
 {
 	cc *c = e->c;
 	const node *x = N(n);
 	qty t = x->ty;
 	bool vd = is_void(c, t), wide = is_wide(c, t);
-	uint32_t lelse = newlabel(e), lend = newlabel(e);
+	uint32_t lelse, lend;
 	int r = -1, r2 = -1;
 	val v;
 
+	if (gen_csel(e, x, &v))
+		return v;
+	lelse = newlabel(e), lend = newlabel(e);
 	if (!x->b) {		/* a ?: c */
 		v = gen(e, x->a);
 		if (v.k == V_CONST || v.k == V_ADDR) {
@@ -173,10 +220,19 @@ static val gen_logical(ecx *e, uint32_t n)
 	cc *c = e->c;
 	const node *x = N(n);
 	bool isand = x->op == N_LOGAND;
-	val a = gen(e, x->a), b;
+	val a, b;
 	uint32_t lshort, lend;
-	int r;
+	int r = flaggable(e, n, true) ? gen_flags(e, n, true) : -1;
 
+	if (r >= FL_TRUE)
+		return vconst(r == FL_TRUE);
+	if (r >= 0) {
+		int d = treg(e);
+
+		cset(e, d, r);
+		return vreg(d);
+	}
+	a = gen(e, x->a);
 	if (a.k == V_CONST || a.k == V_ADDR) {
 		bool t = a.k == V_ADDR || a.i;
 

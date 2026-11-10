@@ -77,7 +77,7 @@ VPRIV val fold_int_bin(ecx *e, int op, qty ot, qty rt, i128 l, i128 r, bool *ok)
 	return vconst(em_trunc_to(c, v, rt));
 }
 
-static int cmp_cond(int op, bool sg)
+VPRIV int cmp_cond(int op, bool sg)
 {
 	switch (op) {
 	case T_EQUALEQUAL: return C_EQ;

@@ -67,6 +67,8 @@ static unsigned roles_sw(const ins *i)
 		return RD_R | RA_R | RN_R | (i->cond ? RN_W : 0);
 	case I_CBZ: case I_CBNZ: case I_TBZ: case I_TBNZ:
 		return RD_R;
+	case I_CCMP:	/* (and the flags) */
+		return RN_R | (i->sh ? 0 : RM_R);
 	case I_PRFM:
 		return RN_R;
 	case I_BL:
@@ -106,7 +108,7 @@ __attribute__((constructor)) static void opt_tables(void)
 		RT[op] = (uint16_t)roles_sw(&x);
 		BT[op] = (uint8_t)brkind_sw(&x);
 	}
-	RT[I_LDP] = RT[I_STP] = RT[I_RAW] = OP_VAR;
+	RT[I_LDP] = RT[I_STP] = RT[I_RAW] = RT[I_CCMP] = OP_VAR;
 	XT[I_UBFM] = XT[I_SBFM] = XT[I_MOV] = XT[I_ANDI] = 1;
 	for (unsigned r = 0; r < 64; r++)
 		RBT[r] = RB(r);
