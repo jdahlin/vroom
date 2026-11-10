@@ -463,6 +463,15 @@ VPRIV int directive(pp *p, ctx *c, ptok *out)
 			error(p, loc, "macro name must be an identifier");
 		return 0;
 	case D_INCLUDE: case D_INCLUDE_NEXT: case D_IMPORT:
+		if (unlikely(p->collecting)) {
+			pp_dinfo n = { "note", p->coll_loc, NULL, 0, NULL, 0, NULL, 0 };
+
+			error(p, loc + (c->vt[b].off - c->vt[b - 1].off),
+			      "embedding a #include directive within macro arguments is not supported");
+			pp_diagx(p, &n, "expansion of macro '%.*s' requested here", (int)vintern_ents[p->coll_name].len,
+				 vintern_ents[p->coll_name].s);
+			return 0;
+		}
 		include(p, c, b + 1, e, (int)d->kind, loc);
 		return 0;
 	case D_EMBED:

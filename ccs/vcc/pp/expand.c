@@ -239,6 +239,8 @@ static bool collect(pp *p, const pmacro *m, const ptok *name, margs *a, ptok *rp
 {
 	bool r;
 
+	if (!p->collecting)
+		p->coll_loc = name->loc, p->coll_name = m->name;
 	p->collecting++;
 	r = collect_(p, m, name, a, rp);
 	p->collecting--;

@@ -478,6 +478,7 @@ struct pp {
 	int warns;
 	int in_dir;		/* evaluating a directive's tokens (#if, #include, #line) */
 	int collecting;		/* in collect(): directives are inside macro arguments */
+	uint32_t coll_loc, coll_name;	/* the outermost macro collecting: its name token, id */
 	/* -E text (pp_text) */
 	char *out;
 	size_t nout, capout;

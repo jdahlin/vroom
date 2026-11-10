@@ -688,7 +688,8 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
 - [x] **`\U` outside the BMP printed unconverted in `-E`** [P].  (Done: identifiers' UCNs
   print as UTF-8 (not in asm mode, not in literals); `##` accepts UCNs; regress/pp/ucn-ident.c.)
   *Validate:* pp-diff fixture.
-- [ ] **`#include` in macro args accepted** [P].  (`-E` output on errors
+- [x] **`#include` in macro args accepted** [P].  (Done: clang's error and
+  "expansion of macro" note, diag `include_in_macro_args.c`.  `-E` output on errors
   done: printed to stdout with status 1, no file with `-o`, as clang;
   checked by the error row of `bench/vcc-driver.py`.)
   *Validate:* T4.
