@@ -128,12 +128,90 @@ static void relocate_isec(uint32_t si, uint8_t *buf)
 				     (uint32_t)((imm & 3) << 29 | ((imm >> 2) & 0x7ffff) << 5));
 			break;
 		}
+		case R_AARCH64_ADR_GOT_PAGE:
+			/* lld tryRelaxAdrpLdr: adrp+ldr of a non-preemptible symbol's slot ->
+			 * adrp+add, then tryRelaxAdrpAdd: nop+adr when within 1 MB */
+			if (opt.relax && !opt.shared && r + 1 < is->nrela) {
+				const Rela *r2 = &is->rela[r + 1];
+				uint32_t adrp = rd32(loc), ldr = rl->r_offset + 4 < is->size ? rd32(loc + 4) : 0;
+				uint32_t rd = adrp & 0x1f;
+				if ((uint32_t)r2->r_info == R_AARCH64_LD64_GOT_LO12_NC && rl->r_offset + 4 == r2->r_offset &&
+				    (rl->r_info >> 32) == (r2->r_info >> 32) && rl->r_addend == 0 && r2->r_addend == 0 &&
+				    !t.undef && !t.abs && (ldr & 0xffc00000) == 0xf9400000 && rd == (ldr & 0x1f) &&
+				    rd == ((ldr >> 5) & 0x1f)) {
+					int64_t pg = (int64_t)((t.va & ~0xfffULL) - (P & ~0xfffULL));
+					int64_t d = (int64_t)(t.va - (P + 4));
+					if (fits_int(pg, 33)) {
+						if (d >= -1024 * 1024 && d < 1024 * 1024) {
+							wr32(loc, 0xd503201f);
+							wr32(loc + 4, 0x10000000 | rd | ((uint32_t)d & 3) << 29 |
+									  (((uint32_t)(d >> 2)) & 0x7ffff) << 5);
+						} else {
+							uint64_t imm = (uint64_t)pg >> 12;
+							wr32(loc, 0x90000000 | rd | (uint32_t)((imm & 3) << 29 | ((imm >> 2) & 0x7ffff) << 5));
+							wr32(loc + 4, 0x91000000 | rd | rd << 5 | (uint32_t)(t.va & 0xfff) << 10);
+						}
+						r++;
+						break;
+					}
+				}
+			}
+			/* fall through */
+		case R_AARCH64_LD64_GOT_LO12_NC: {
+			uint64_t slot = isec_va(got_isec, 8 * (uint64_t)(symi < o->firstg ? o->lgotidx[symi] :
+									  gsyms[o->gs[symi - o->firstg]].gotidx));
+			if (type == R_AARCH64_LD64_GOT_LO12_NC) {
+				write_le_imm(loc, 0xfffu << 10, (uint32_t)((slot & 0xfff) >> 3) << 10);
+				break;
+			}
+			v = (int64_t)((slot & ~0xfffULL) - (P & ~0xfffULL));
+			if (!fits_int(v, 33))
+				reloc_error(o, is, rl, "out of range", v);
+			uint64_t imm = (uint64_t)v >> 12;
+			write_le_imm(loc, (3u << 29) | (0x7ffffu << 5),
+				     (uint32_t)((imm & 3) << 29 | ((imm >> 2) & 0x7ffff) << 5));
+			break;
+		}
 		case R_AARCH64_ADR_PREL_LO21:
 			v = (int64_t)(t.va - P);
 			if (!fits_int(v, 21))
 				reloc_error(o, is, rl, "out of range", v);
 			write_le_imm(loc, (3u << 29) | (0x7ffffu << 5),
 				     (uint32_t)(((uint64_t)v & 3) << 29 | (((uint64_t)v >> 2) & 0x7ffff) << 5));
+			break;
+		case R_AARCH64_TLSLE_ADD_TPREL_HI12:
+			v = (int64_t)(t.va - tls_tp);
+			if (!has_tls || v < 0 || v >= 1 << 24)
+				reloc_error(o, is, rl, "out of range (TLS offset)", v);
+			write_le_imm(loc, 0xfffu << 10, (uint32_t)((v >> 12) & 0xfff) << 10);
+			break;
+		case R_AARCH64_TLSLE_ADD_TPREL_LO12:
+		case R_AARCH64_TLSLE_ADD_TPREL_LO12_NC:
+			v = (int64_t)(t.va - tls_tp);
+			if (type == R_AARCH64_TLSLE_ADD_TPREL_LO12 && (v < 0 || v >= 1 << 12))
+				reloc_error(o, is, rl, "out of range (TLS offset)", v);
+			write_le_imm(loc, 0xfffu << 10, (uint32_t)(v & 0xfff) << 10);
+			break;
+		/* lld relaxTlsIeToLe / relaxTlsGdToLe: movz/movk of the offset, nops */
+		case R_AARCH64_TLSIE_ADR_GOTTPREL_PAGE21:
+			v = (int64_t)(t.va - tls_tp);
+			wr32(loc, 0xd2a00000u | (rd32(loc) & 0x1f) | (uint32_t)((v >> 16) & 0xffff) << 5);
+			break;
+		case R_AARCH64_TLSIE_LD64_GOTTPREL_LO12_NC:
+			v = (int64_t)(t.va - tls_tp);
+			wr32(loc, 0xf2800000u | (rd32(loc) & 0x1f) | (uint32_t)(v & 0xffff) << 5);
+			break;
+		case R_AARCH64_TLSDESC_ADR_PAGE21:	/* movz x0, #hi, lsl 16 */
+			v = (int64_t)(t.va - tls_tp);
+			wr32(loc, 0xd2a00000u | (uint32_t)((v >> 16) & 0xffff) << 5);
+			break;
+		case R_AARCH64_TLSDESC_LD64_LO12:	/* movk x0, #lo */
+			v = (int64_t)(t.va - tls_tp);
+			wr32(loc, 0xf2800000u | (uint32_t)(v & 0xffff) << 5);
+			break;
+		case R_AARCH64_TLSDESC_ADD_LO12:
+		case R_AARCH64_TLSDESC_CALL:
+			wr32(loc, 0xd503201fu);
 			break;
 		case R_AARCH64_ADD_ABS_LO12_NC:
 			write_le_imm(loc, 0xfffu << 10, (uint32_t)(t.va & 0xfff) << 10);

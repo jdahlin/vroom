@@ -44,6 +44,7 @@ typedef struct pp_opts {
 	const char *const *dirs;	/* search path: -iquote dirs, then -I, -isystem, -idirafter */
 	int ndirs, nquote;		/* dirs[0..nquote) only for "" includes */
 	int nsys1;			/* dirs[nsys1 - 1..) are system directories (0: none) */
+	int xc0, xc1;			/* dirs[xc0..xc1) are extern "C" system directories (clang's ExternCSystem) */
 	const char *predef;		/* "<built-in>": #define/#undef/#include lines, run first */
 	const char *prefix_from, *prefix_to;	/* -fmacro-prefix-map (one) */
 	const char *const *fwdirs;	/* framework dirs: <A/b.h> -> DIR/A.framework/Headers/b.h */
@@ -52,7 +53,7 @@ typedef struct pp_opts {
 	const char *cwd;		/* relative paths are relative to this (NULL: process cwd) */
 	int errfd;			/* diagnostics (0: stderr) */
 	int asm_mode;			/* assembler-with-cpp: unknown directives pass, # need not stringify */
-	int target;			/* PP_LINUX_AARCH64 or PP_DARWIN (column of the feature table) */
+	int target;			/* PP_LINUX_AARCH64, PP_DARWIN, PP_WASM64 or PP_WASM32 (column of the feature table) */
 	int diag_color;			/* diagnostics: 1 colors, -1 none, 0 when errfd is a terminal */
 	int diag_nocaret;		/* -fno-caret-diagnostics: no source lines */
 	const char *const *wargs;	/* -W..., -w options in command-line order */
@@ -66,12 +67,18 @@ typedef struct pp_opts {
 	int dump_defines;		/* -dD: #define/#undef in the -E text */
 	const char *const *dd_order;	/* -dD: clang's order of its predefined macros */
 	int ndd_order;
+	int comments;			/* -C: comments in the -E text (not in directives or macro arguments) */
 	int show_includes;		/* -H: each file entered, dots for its depth, to errfd */
 	int deps;			/* -M/-MD: files skipped by guard or #pragma once are dependencies too */
 	int fatal_continue;		/* -E text: a fatal error (file not found) does not end the TU, as clang */
+	int markers;			/* -E without -P: GNU line markers (# N "file" flags), 2 with -undef */
+	unsigned predef_cmdl, predef_incl;	/* ... and its -imacros/-include part */
+	int imacros;			/* predef has -imacros (#__include_macros): no header cache */		/* markers: where predef's command-line part (-D/-U) starts */
 } pp_opts;
 
-enum { PP_LINUX_AARCH64, PP_DARWIN };
+enum { PP_LINUX_AARCH64, PP_DARWIN, PP_WASM64, PP_WASM32 };
+/* WebAssembly, either width (wasm32: ILP32, PLAN-wasm.md W7) */
+#define PP_IS_WASM(t) ((t) == PP_WASM64 || (t) == PP_WASM32)
 
 /* set by the front end (a constructor): __has_builtin is 1 for a name it implements */
 extern int (*pp_builtin_known)(const char *name);
@@ -143,6 +150,8 @@ void pp_diagx(pp *p, const pp_dinfo *d, const char *fmt, ...);
 /* a warning's state after the -W options: 0 off, 1 warning, 2 error; on: its default
    (flag without "-W"; groups: the warning's groups, NULL-terminated, e.g. "all") */
 int pp_wstate(const pp *p, const char *flag, bool on, const char *const *groups);
+/* the last -Werror=/-Wno-error= naming flag (or one of groups): 1 -Werror=, -1 -Wno-error=, 0 none */
+int pp_werror_named(const pp *p, const char *flag, const char *const *groups);
 /* report a warning of flag (clang's " [-Wflag]" / " [-Werror,-Wflag]" suffix); false if off */
 __attribute__((format(printf, 6, 7)))
 bool pp_warnx(pp *p, const char *flag, bool on, const char *const *groups, pp_dinfo *d, const char *fmt, ...);
@@ -154,6 +163,9 @@ void pp_diag_summary(pp *p);
 int pp_warnings(const pp *p);
 /* the end of the token at loc (an identifier, number or punctuator; loc + 1 if unknown) */
 uint32_t pp_tok_end(const pp *p, uint32_t loc);
+int pp_loc_char(const pp *p, uint32_t loc);
+int pp_spells(const pp *p, uint32_t loc, const char *s, uint32_t n);
+void pp_invalid_tok(pp *p, const char *s, uint32_t len, uint32_t loc);
 /* the source text from loc b to loc e (one file), NULL if unknown */
 const char *pp_src(const pp *p, uint32_t b, uint32_t e, size_t *len);
 

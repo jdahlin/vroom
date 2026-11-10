@@ -200,21 +200,41 @@ static void conv_error(cc *c, uint32_t n, qty to, const char *what, const char *
 {
 	pp_span r = rng(c, n);
 	const char *f = tyname(c, N(n)->ty), *t = tyname(c, to);
+	uint32_t loc = c->cv_what == CX_PASS || c->cv_what == CX_RETURN ? r.b : c->cv_loc;
+	int bit = !strcmp(flag, "-Wint-conversion") ? 1 : !strcmp(flag, "-Wincompatible-pointer-types") ? 2 : 4;
+	char msg[1024];
 
 	switch (c->cv_what) {
 	case CX_INIT:
-		report(c, "error", c->cv_loc, &r, 1, NULL, 0, "%s initializing '%s' with an expression of type '%s' [%s]", what, t, f, flag);
+		snprintf(msg, sizeof msg, "%s initializing '%s' with an expression of type '%s' [%s]", what, t, f, flag);
 		break;
 	case CX_PASS:
-		report(c, "error", r.b, &r, 1, NULL, 0, "%s passing '%s' to parameter of type '%s' [%s]", what, f, t, flag);
-		param_note(c);
+		snprintf(msg, sizeof msg, "%s passing '%s' to parameter of type '%s' [%s]", what, f, t, flag);
 		break;
 	case CX_RETURN:
-		report(c, "error", r.b, &r, 1, NULL, 0, "%s returning '%s' from a function with result type '%s' [%s]", what, f, t, flag);
+		snprintf(msg, sizeof msg, "%s returning '%s' from a function with result type '%s' [%s]", what, f, t, flag);
 		break;
 	default:
-		report(c, "error", c->cv_loc, &r, 1, NULL, 0, "%s assigning to '%s' from '%s' [%s]", what, t, f, flag);
+		snprintf(msg, sizeof msg, "%s assigning to '%s' from '%s' [%s]", what, t, f, flag);
 	}
+	static const char *const ipt[] = { "incompatible-pointer-types", NULL };
+
+	if (c->o->conv_warn & bit) {
+		/* -Wno-error=...: clang's warning (the message without its flag, which pp_warnx adds) */
+		char *b = strrchr(msg, '[');
+
+		if (pp_werror_named(c->p, flag + 2, bit == 4 ? ipt : NULL) == 1)
+			goto err;	/* -Werror= again: clang's own error (no "-Werror,") */
+		if (b && b > msg)
+			b[-1] = 0;
+		if (cc_warnx(c, flag + 2, true, bit == 4 ? ipt : NULL, loc, &r, 1, NULL, 0, "%s", msg) && c->cv_what == CX_PASS)
+			param_note(c);
+		return;
+	}
+err:
+	report(c, "error", loc, &r, 1, NULL, 0, "%s", msg);
+	if (c->cv_what == CX_PASS)
+		param_note(c);
 }
 
 /* pointee types that clang's -Wincompatible-pointer-types accepts: compatible once
@@ -260,6 +280,247 @@ static uint32_t conv_check(cc *c, uint32_t n, qty to)
 	return n;
 }
 
+/* the bits of v as clang's IntRange of a constant: width, non-negative */
+static int crange(i128 v, bool *nn)
+{
+	int w = 0;
+
+	*nn = v >= 0;
+	if (v < 0)
+		v = ~v, w = 1;
+	while (v)
+		w++, v >>= 1;
+	return w;
+}
+
+/* APFloat::toString(prec, padding 3, truncate zeros) of v */
+static void apf_str(char *o, double v, int prec)
+{
+	char b[64], dg[32];
+	int nd = 0, e10, k = 0, exp;
+
+	if (v < 0)
+		o[k++] = '-', v = -v;
+	snprintf(b, sizeof b, "%.*e", prec - 1, v);
+	for (const char *q = b; *q && *q != 'e'; q++)
+		if (*q >= '0' && *q <= '9')
+			dg[nd++] = *q;
+	e10 = atoi(strchr(b, 'e') + 1);
+	while (nd > 1 && dg[nd - 1] == '0')
+		nd--;
+	exp = e10 - (nd - 1);	/* value = digits * 10^exp */
+	{
+		bool sci;
+		int msd = exp + nd - 1;
+
+		if (exp >= 0)
+			sci = exp > 3 || nd + exp > prec;
+		else
+			sci = msd < 0 && -msd > 3;
+		if (sci) {
+			o[k++] = dg[0], o[k++] = '.';
+			if (nd == 1)
+				o[k++] = '0';
+			for (int i = 1; i < nd; i++)
+				o[k++] = dg[i];
+			k += sprintf(o + k, "E%c%d", msd >= 0 ? '+' : '-', msd < 0 ? -msd : msd);
+		} else if (exp >= 0) {
+			for (int i = 0; i < nd; i++)
+				o[k++] = dg[i];
+			for (int i = 0; i < exp; i++)
+				o[k++] = '0';
+		} else if (nd + exp > 0) {
+			for (int i = 0; i < nd; i++) {
+				if (i == nd + exp)
+					o[k++] = '.';
+				o[k++] = dg[i];
+			}
+		} else {
+			o[k++] = '0', o[k++] = '.';
+			for (int i = 0; i < -(nd + exp); i++)
+				o[k++] = '0';
+			for (int i = 0; i < nd; i++)
+				o[k++] = dg[i];
+		}
+	}
+	o[k] = 0;
+}
+
+/* -Wliteral-conversion: a floating literal (or its negation) converted to an integer type */
+static void literal_conv(cc *c, uint32_t n, qty to)
+{
+	uint32_t e = n, lit;
+	double v, t;
+	char vs[64], ts[48];
+	const char *what = NULL;
+
+	while (N(e)->op == N_CAST && !c->span[e].e && N(e)->a)
+		e = N(e)->a;
+	lit = N(e)->op == N_UNARY && N(e)->aux == T_MINUS ? N(e)->a : e;
+	if (N(lit)->op != N_FNUM || is_q(c, N(lit)->ty) || ty_size(c, N(lit)->ty) > 8)
+		return;
+	v = c->fpool[N(lit)->a];
+	if (lit != e)
+		v = -v;
+	t = trunc(v);
+	if (KIND(c, to) == TY_BOOL) {
+		if (v == 0 || v == 1)
+			return;
+		snprintf(ts, sizeof ts, "%s", v != 0 ? "true" : "false");
+	} else {
+		int w = (int)ty_size(c, to) * 8;
+		bool sg = is_signed(c, to);
+		double lo = sg ? -ldexp(1, w - 1) : 0, hi = sg ? ldexp(1, w - 1) : ldexp(1, w);
+
+		if (!(t >= lo && t < hi))
+			what = "out of range";
+		else if (t == v)
+			return;
+		else
+			snprintf(ts, sizeof ts, "%.0f", t == 0 ? 0.0 : t);
+	}
+	{
+		pp_span r[2] = { { c->cv_what == CX_PASS ? c->cv_callee : c->cv_loc, 0 },
+				 { N(e)->loc, pp_tok_end(c->p, N(lit)->loc) } };
+
+		r[0].e = pp_tok_end(c->p, r[0].b);
+		if (what) {
+			cc_warnx(c, "literal-conversion", true, w_conv, r[1].b, r, 2, NULL, 0,
+				 "implicit conversion of out of range value from '%s' to '%s' is undefined",
+				 tyname(c, N(lit)->ty), tyname(c, to));
+			return;
+		}
+		apf_str(vs, v, ty_size(c, N(lit)->ty) == 4 ? 8 : 16);
+		cc_warnx(c, "literal-conversion", true, w_conv, r[1].b, r, 2, NULL, 0,
+			 "implicit conversion from '%s' to '%s' changes value from %s to %s", tyname(c, N(lit)->ty),
+			 tyname(c, to), vs, ts);
+	}
+}
+
+/* -Wconstant-conversion: integer constant n converted to the narrower integer to */
+static void const_conv(cc *c, uint32_t n, qty to)
+{
+	qty from = N(n)->ty;
+	cval cv;
+	int tw, sw, lw;
+	bool tnn, lnn, deferred;
+	i128 v, t;
+
+	if (N(n)->op == N_COND && N(n)->b && N(n)->c) {	/* clang: each arm (the taken one), in its own type */
+		cval cc0;
+		int k0 = 0, k1 = 2;
+
+		if (cc_eval(c, N(n)->a, &cc0) && cc0.kind == CV_INT)
+			k0 = cc0.i == 0, k1 = k0 + 1;
+		for (int k = k0; k < k1; k++) {
+			uint32_t e = k ? N(n)->c : N(n)->b;
+
+			while (N(e)->op == N_CAST && !c->span[e].e && N(e)->a)
+				e = N(e)->a;
+			const_conv(c, e, to);
+		}
+		return;
+	}
+	if (N(n)->op == N_COMMA) {	/* clang: the right operand, at the comma */
+		uint32_t sl = c->cv_loc;
+		uint8_t sw = c->cv_what;
+
+		c->cv_loc = N(n)->loc, c->cv_what = CX_INIT;
+		const_conv(c, N(n)->b, to);
+		c->cv_loc = sl, c->cv_what = sw;
+		return;
+	}
+	if (is_integer(c, to) && is_float(c, from) && !c->unevaluated) {	/* (immediate: also in dead code) */
+		literal_conv(c, n, to);
+		return;
+	}
+	if (!is_integer(c, to) || !is_integer(c, from) || KIND(c, to) == TY_BOOL || KIND(c, from) == TY_BOOL ||
+	    c->unevaluated || !cc_eval(c, n, &cv) || cv.kind != CV_INT)
+		return;
+	tw = (int)ty_size(c, to) * 8, sw = (int)ty_size(c, from) * 8;
+	if (tw >= sw || tw > 64)
+		return;
+	tnn = !is_signed(c, to);
+	v = cv.i;
+	if (!is_signed(c, from) && sw <= 64)
+		v = (i128)((uint64_t)v & (sw == 64 ? ~0ull : (1ull << sw) - 1));
+	lw = crange(v, &lnn);
+	if (lw > tw && c->dead)	/* clang's DiagRuntimeBehavior: not in unreachable code */
+		return;
+	if (lw > tw)	/* (crange counts a negative range's sign bit) */
+		deferred = true;
+	else if (lw == tw && !tnn && lnn && is_signed(c, from)) {
+		/* clang's isSameWidthConstantConversion: not a hex/octal literal, not a char in braces */
+		uint32_t e = n;
+
+		while (N(e)->op == N_CAST && !c->span[e].e && N(e)->a)
+			e = N(e)->a;
+		uint32_t b = rng(c, e).b;
+		int ch;
+
+		while ((ch = pp_loc_char(c->p, b)) == '(' || ch == ' ' || ch == '\t')
+			b++;
+		if ((N(e)->op == N_NUM ? N(e)->aux != 0 : ch == '0') ||
+		    ((KIND(c, to) == TY_CHAR || KIND(c, to) == TY_SCHAR) && pp_loc_char(c->p, c->cv_loc) == '{'))
+			return;
+		deferred = false;
+	}
+	else
+		return;
+	t = (i128)((uint64_t)v & (tw == 64 ? ~0ull : (1ull << tw) - 1));
+	if (!tnn && (t >> (tw - 1)) & 1)
+		t -= (i128)1 << tw;
+	if (t == v)
+		return;
+	{
+		uint32_t cl = c->cv_what == CX_PASS ? c->cv_callee : c->cv_loc;
+		pp_span r[2] = { { cl, pp_tok_end(c->p, cl) }, rng(c, n) };
+		char msg[112];
+
+		snprintf(msg, sizeof msg, "implicit conversion from '%s' to '%s' changes value from %lld to %lld",
+			 tyname(c, from), tyname(c, to), (long long)v, (long long)t);
+		if (deferred && c->fn && !c->defer_rt) {
+			rt_defer(c, "constant-conversion", w_conv, r[1].b, r, 2, NULL, 0, "%s", msg);
+			return;
+		}
+		cc_warnx(c, "constant-conversion", true, w_conv, r[1].b, r, 2, NULL, 0, "%s", msg);
+	}
+}
+
+/* -Wbitfield-constant-conversion: constant v stored in bit-field f; at the
+   operator op (an assignment), or at v (0: an initializer) */
+VPRIV void bitfield_const(cc *c, const field *f, uint32_t v, uint32_t op)
+{
+	static const char *const g[] = { "bitfield-constant-conversion", "constant-conversion", "conversion", NULL };
+	cval cv;
+	int w = f->width;
+	bool sg = is_signed(c, f->ty);
+	i128 x, t;
+
+	if (KIND(c, f->ty) == TY_BOOL || !is_integer(c, N(v)->ty) || KIND(c, N(v)->ty) == TY_BOOL || w <= 0 || w > 64 ||
+	    c->unevaluated || !cc_eval(c, v, &cv) || cv.kind != CV_INT)
+		return;
+	x = cv.i;
+	if (!is_signed(c, N(v)->ty) && ty_size(c, N(v)->ty) <= 8)
+		x = (i128)((uint64_t)x & (ty_size(c, N(v)->ty) == 8 ? ~0ull : (1ull << ty_size(c, N(v)->ty) * 8) - 1));
+	t = (i128)((uint64_t)x & (w == 64 ? ~0ull : (1ull << w) - 1));
+	if (sg && (t >> (w - 1)) & 1)
+		t -= (i128)1 << w;
+	if (t == x || (!sg && x < 0 && x >= -((i128)1 << (w - 1))))
+		return;
+	{
+		pp_span r[1] = { rng(c, v) };
+		uint32_t at = op ? op : r[0].b;
+		bool one = sg && w == 1 && x == 1;
+
+		pp_dinfo d = { "warning", at, op ? r : NULL, op ? 1 : 0, NULL, 0, op ? "=" : NULL, op ? 1 : 0 };
+
+		pp_warnx(c->p, one ? "single-bit-bitfield-constant-conversion" : "bitfield-constant-conversion", true,
+			 one ? g : g + 1, &d, "implicit truncation from '%s' to %s changes value from %lld to %lld",
+			 tyname(c, N(v)->ty), one ? "a one-bit wide bit-field" : "bit-field", (long long)x, (long long)t);
+	}
+}
+
 /* convert for an initialization, argument, return or assignment at loc */
 VPRIV uint32_t convert_as(cc *c, uint32_t n, qty to, int what, uint32_t loc)
 {
@@ -267,8 +528,11 @@ VPRIV uint32_t convert_as(cc *c, uint32_t n, qty to, int what, uint32_t loc)
 	uint32_t sl = c->cv_loc;
 
 	c->cv_what = (uint8_t)what, c->cv_loc = loc;
-	if (what)
+	if (what) {
 		n = conv_check(c, n, to);
+		if (!(N(n)->flags & NF_ERR))
+			const_conv(c, n, to);
+	}
 	n = convert(c, n, to);
 	c->cv_what = sw, c->cv_loc = sl;
 	return n;

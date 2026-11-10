@@ -170,7 +170,7 @@ __attribute__((noinline)) static rmask writes_slow(const ins *i, unsigned ro)
 	if (ro & OP_CALL)
 		s |= CALLW;
 	if (ro & OP_TLV)
-		s |= RB(0) | RB(16) | RB(30);
+		s |= i->cond ? RB(0) | RB(1) | RB(30) : RB(0) | RB(16) | RB(30);
 	return s;
 }
 
@@ -1242,8 +1242,15 @@ VPRIV void opt_function(ecx *e)
 	exts(e);
 	copies(e);
 	dead(e);
-	for (uint32_t k = 0; k < e->nin; k++)
+	uint32_t dj = 0;
+
+	for (uint32_t k = 0; k < e->nin; k++) {
+		if (e->ndl)
+			dbg_remap(e, &dj, k, n);
 		if (in[k].op != DELETED)
 			in[n++] = in[k];
+	}
+	if (e->ndl)
+		dbg_remap(e, &dj, UINT32_MAX, n);
 	e->nin = n;
 }

@@ -32,6 +32,11 @@ int as_label(As *a, uint32_t sym);		/* define sym at the current position */
 
 /* directory for relative .incbin paths (NULL: the process cwd) */
 void as_set_dir(As *a, const char *dir);
+/* Apple's assembler dialect (as vcc -S and clang write it for Mach-O) as the
+ * GNU/ELF one as_run parses, line for line: the inverse of the emitter's
+ * darwin_text (sections, x@PAGEOFF, Lname, .private_extern, ';' comments).
+ * Returns malloc'ed text (padded: 64 zero bytes after *outn). */
+char *as_darwin_text(const char *t, size_t n, size_t *outn);
 
 /* statements run (after macro/loop expansion) and their bytes, cumulative */
 void as_stats(const As *a, uint64_t *stmts, uint64_t *bytes);

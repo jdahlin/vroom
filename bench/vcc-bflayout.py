@@ -17,7 +17,8 @@ import os, random, re, subprocess, sys, tempfile
 B = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 VPP = os.environ.get('VCC_BIN', f'{B}/build/ccs') + '/vpp'
 CL = os.environ.get('CLANG', 'clang')
-TARGETS = ('aarch64-linux-gnu', 'arm64-apple-darwin')
+TARGETS = ('aarch64-linux-gnu', 'arm64-apple-darwin', 'wasm64-unknown-emscripten', 'wasm32-unknown-emscripten')
+ILP32 = ('wasm32-unknown-emscripten',)	# long is 32 bits: its own records
 TYPES = [('char', 8), ('signed char', 8), ('unsigned char', 8), ('_Bool', 1), ('short', 16), ('unsigned short', 16),
          ('int', 32), ('unsigned', 32), ('long', 64), ('unsigned long', 64), ('long long', 64)]
 PLAIN = ['char', 'short', 'int', 'long', 'char[3]', 'double']
@@ -33,6 +34,8 @@ def member(r, i, depth):
     if k < 0.36 and depth < 2:
         return f'{record(r, depth + 1, None)} m{i};'
     t, w = r.choice(TYPES)
+    if LONG32 and t in ('long', 'unsigned long'):
+        w = 32
     width = r.choice([0, 0, 1, w // 2 or 1, w - 1 or 1, w]) if r.random() < 0.6 else r.randint(0, w)
     attr = ''
     if r.random() < 0.08:
@@ -63,18 +66,23 @@ def gen(n, seed):
     return '\n'.join(out) + '\n'
 
 
+LONG32 = False
+
+
 def main():
+    global LONG32
     av = sys.argv[1:]
     n = int(av[av.index('-n') + 1]) if '-n' in av else 2000
     seed = int(av[av.index('--seed') + 1]) if '--seed' in av else 1
     keep = av[av.index('--keep') + 1] if '--keep' in av else None
     d = keep or tempfile.mkdtemp(prefix='vcc-bflayout-')
     os.makedirs(d, exist_ok=True)
-    src = f'{d}/bf.c'
-    open(src, 'w').write(gen(n, seed))
-    lines = open(src).read().split('\n')
     bad = 0
     for t in TARGETS:
+        LONG32 = t in ILP32
+        src = f'{d}/bf{"32" if LONG32 else ""}.c'
+        open(src, 'w').write(gen(n, seed))
+        lines = open(src).read().split('\n')
         chk = f'{d}/{t}.chk'
         p = subprocess.run([VPP, f'--target={t}', '--vcc-layout-checks', '-o', chk, src], capture_output=True, text=True)
         if p.returncode:

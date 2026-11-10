@@ -42,6 +42,13 @@ typedef struct attrs {		/* the attributes of one declaration */
 	uint32_t cleanup;	/* sym */
 	uint32_t mode;		/* 0, or the integer type kind from mode() */
 	uint32_t vecsize;	/* vector_size(n) bytes, 0: none */
+	uint32_t extvec;	/* ext_vector_type(n) elements, 0: none */
+	uint32_t depr;		/* deprecated: the attribute name's location, 0: none */
+	uint32_t deprmsg;	/* deprecated("msg"): string index + 1, 0: none */
+	uint32_t wur;		/* 1: warn_unused_result, 2: [[nodiscard]] */
+	uint32_t nonnull;	/* nonnull: bit 0 all pointer parameters, bit i parameter i (1-based) */
+	uint32_t fmt;		/* format(printf, i, j): 1 << 16 | i << 8 | j, 0: none or not printf */
+	uint32_t ifunc;		/* ifunc("resolver"): alias is the resolver, an STT_GNU_IFUNC symbol */
 	uint32_t counted_by;	/* identifier id */
 	uint32_t errmsg;	/* error("..."): string index + 1, 0: none */
 	uint32_t visibility;
@@ -49,6 +56,8 @@ typedef struct attrs {		/* the attributes of one declaration */
 	uint8_t packed, transparent, used, unused, weak, noreturn, constructor, destructor;
 	uint8_t nonstring, may_alias, cold, gnu_inline, always_inline, noinline, ainline, error_fn;
 	uint8_t overloadable, noinstr;
+	uint16_t prio;		/* constructor(N)/destructor(N), 0: none (65535) */
+	uint8_t tlsmodel;	/* tls_model(): VCC_TLS_*, 0: none */
 } attrs;
 
 typedef struct asmop {
@@ -102,8 +111,17 @@ struct cc {
 	uint32_t prevloc;
 	uint8_t prevflags;
 	uint32_t dead;		/* inside if (0) ... (and the like): no runtime-behaviour warnings */	/* the previous token's flags (PF_MACRO: diagnostics) */
+	uint8_t defer_rt;	/* parsing a static initializer: -Wdivision-by-zero waits (clang's DiagRuntimeBehavior) */
+	uint8_t ndefer;
+	struct { uint32_t loc; pp_span r; uint8_t rem; } defer[8];
+	uint32_t unk_loc;	/* the last unknown token given -Winvalid-pp-token */
+	uint8_t se_direct;	/* the next statement is one of a statement expression's body */
+	uint16_t nrtd;		/* warnings of a function body given at its end (clang's DiagRuntimeBehavior) */
+	struct { const char *flag; const char *const *groups; const char *ms; uint32_t mlen, loc, nr; pp_span r[2];
+		 char msg[112]; } rtd[64];
+	bool after_amp;		/* the unary * being parsed is the operand of & (no -Wvoid-ptr-dereference) */
 	uint8_t cv_what;		/* context of the conversion being checked: CX_* (diagnostics) */
-	uint32_t cv_loc, cv_fn, cv_arg;	/* CX_PASS: the callee's sym (0: unknown) and the argument */
+	uint32_t cv_loc, cv_fn, cv_arg, cv_callee;	/* cv_callee: CX_PASS: the callee expression's first location */	/* CX_PASS: the callee's sym (0: unknown) and the argument */
 
 	ctype *ty;
 	uint32_t nty;
@@ -262,6 +280,7 @@ bool cc_eval(cc *c, uint32_t n, cval *v);
 void dr_restored(cc *c);
 bool cc_is_signed(cc *c, qty t);
 const char *cc_builtin_name(int64_t i);
+const char *cc_lib_sig(const char *name, int *clang_enc);
 uint32_t cc_global_named(cc *c, const char *s);
 
 #endif

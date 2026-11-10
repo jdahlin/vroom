@@ -94,6 +94,7 @@ typedef struct dspec {
 	uint32_t align;		/* _Alignas */
 	uint32_t loc;
 	uint32_t tagdecl;	/* struct/union/enum defined or declared here: its tag */
+	uint32_t tdef;		/* the typedef name the type came from (sym), 0: none */
 	bool tag_bare;		/* "struct S" with no body (a reference or forward declaration) */
 } dspec;
 
@@ -159,6 +160,14 @@ VPRIV __attribute__((format(printf, 3, 4), noreturn)) void fatal(cc *c, uint32_t
 VPRIV __attribute__((format(printf, 8, 9))) void report(cc *c, const char *what, uint32_t loc, const pp_span *r, int nr, const pp_fixit *fx, int nfx, const char *fmt, ...);
 VPRIV __attribute__((format(printf, 3, 4))) void note(cc *c, uint32_t loc, const char *fmt, ...);
 extern const char *const w_all[];
+extern const char *const w_conv[];
+extern const char *const w_selfassign[];
+VPRIV void rt_defer(cc *c, const char *flag, const char *const *groups, uint32_t loc, const pp_span *r, int nr,
+		    const char *ms, uint32_t mlen, const char *fmt, ...) __attribute__((format(printf, 9, 10)));
+VPRIV void rt_flush(cc *c);
+VPRIV void unused_value(cc *c, uint32_t e, bool comma);
+VPRIV bool unused_cmp(cc *c, uint32_t e);
+VPRIV void set_only(cc *c, uint32_t e);
 VPRIV __attribute__((format(printf, 10, 11))) bool cc_warnx(cc *c, const char *flag, bool on, const char *const *groups, uint32_t loc, const pp_span *r, int nr, const pp_fixit *fx, int nfx, const char *fmt, ...);
 VPRIV const char *idname(uint32_t id, int *len);
 VPRIV int idlen_(uint32_t id);
@@ -236,6 +245,8 @@ VPRIV uint32_t *dslot(cc *c, uint32_t **dir, uint32_t id);
 static inline uint32_t dget(uint32_t **dir, uint32_t id);
 VPRIV void scope_open(cc *c);
 VPRIV void scope_close(cc *c);
+VPRIV void unused_statics(cc *c);
+VPRIV void unused_typedefs(cc *c);
 VPRIV uint32_t sym_new(cc *c, int kind, uint32_t name, qty ty, uint32_t loc);
 VPRIV void sym_bind(cc *c, uint32_t s);
 VPRIV uint32_t lookup(cc *c, uint32_t id);
@@ -270,6 +281,12 @@ VPRIV uint32_t cast_node(cc *c, uint32_t n, qty to, int kind);
 VPRIV __attribute__((noinline)) uint32_t decay_slow(cc *c, uint32_t n, qty t, int k);
 static inline uint32_t decay(cc *c, uint32_t n);
 VPRIV const field *bitfield_of(cc *c, uint32_t n);
+VPRIV void bitfield_const(cc *c, const field *f, uint32_t v, uint32_t op);
+VPRIV bool static_init_ok(cc *c, qty ty, uint32_t init, uint32_t *bad);
+VPRIV void deprecated_use(cc *c, uint32_t loc, uint32_t name, const attrs *a);
+VPRIV void tag_deprecate(cc *c, uint32_t ti, const attrs *a);
+VPRIV void unused_result(cc *c, uint32_t e, bool last);
+VPRIV uint32_t expr_loc(cc *c, uint32_t n);
 VPRIV qty promoted(cc *c, uint32_t n);
 VPRIV int conv_kind(cc *c, qty from, qty to, uint32_t n);
 VPRIV bool union_member_for(cc *c, qty u, uint32_t n);
@@ -329,7 +346,7 @@ VPRIV uint32_t expr(cc *c);
 VPRIV bool const_expr(cc *c, i128 *v, uint32_t *np);
 /* attr.c */
 VPRIV void init_attrs(void);
-VPRIV void skip_balanced(cc *c);
+VPRIV uint32_t skip_balanced(cc *c);
 VPRIV uint32_t string_index(cc *c);
 VPRIV int mode_kind(cc *c, uint32_t id, bool sgn);
 static inline bool at_attribute(cc *c);
@@ -337,7 +354,16 @@ static inline bool at_std_attr(cc *c);
 VPRIV __attribute__((noinline)) void attribute_list_(cc *c, attrs *a);
 static inline void attribute_list(cc *c, attrs *a);
 static inline bool attrs_empty(const attrs *a);
+/* the data model: LP64, but ILP32 for wasm32 (long and pointers 4 bytes) */
+#define CC_ILP32(c) ((c)->o->target == PP_WASM32)
+#define CC_PTRSIZE(c) (CC_ILP32(c) ? 4u : 8u)
+/* the 64-bit integer type: long, or long long under ILP32 */
+#define CC_I64(c, uns) (CC_ILP32(c) ? ((uns) ? TY_ULLONG : TY_LLONG) : ((uns) ? TY_ULONG : TY_LONG))
 VPRIV void merge_attrs(attrs *to, const attrs *from);
+/* flow.c */
+VPRIV int body_falls_off(cc *c, uint32_t body, uint32_t first_label);
+/* fmt.c */
+VPRIV void format_check(cc *c, uint32_t fs, const uint32_t *args, const qty *aty, const uint32_t *atd, uint32_t nargs);
 VPRIV void asm_label(cc *c, attrs *a);
 /* declspec.c */
 VPRIV void unknown_type(cc *c, dspec *ds);
@@ -360,6 +386,7 @@ VPRIV uint32_t initializer(cc *c, qty *ty, bool st);
 VPRIV void apply_sym_attrs(cc *c, sym *s, const attrs *a);
 VPRIV uint32_t lib_builtin(cc *c, uint32_t id, uint32_t loc);
 VPRIV bool lib_builtin_known(const char *n);
+VPRIV const char *lib_builtin_sig(const char *n);
 /* mangle.c */
 VPRIV void name_overload(cc *c, uint32_t s);
 /* decl.c */
@@ -368,6 +395,9 @@ VPRIV void pragma_weak(cc *c, const char *s, const char *e, const char *base, ui
 VPRIV void weak_declared(cc *c, uint32_t s);
 VPRIV void weak_finish(cc *c);
 VPRIV uint32_t implicit_func(cc *c, uint32_t id, uint32_t loc);
+VPRIV qty implicit_lib_type(cc *c, uint32_t id);
+VPRIV uint32_t implicit_lib_func(cc *c, uint32_t id, uint32_t loc, qty t);
+VPRIV qty sig_func_type(cc *c, const char *sig);
 VPRIV void declaration(cc *c, vec *out, bool file);
 /* stmt.c */
 VPRIV uint32_t label_ref(cc *c, uint32_t name, uint32_t loc);
@@ -530,16 +560,15 @@ static inline void attribute_list(cc *c, attrs *a)
 }
 
 /* no attribute at all (padding excluded) */
-/* 11 u32 fields then the 18 flag bytes (attr.c asserts the layout) */
+/* the u32 fields then the 0/1 flag bytes packed .. noinstr (attr.c asserts the layout) */
 static inline bool attrs_empty(const attrs *a)
 {
-	const char *p = (const char *)a;
-	uint64_t w[7], o = 0;
+	const unsigned char *p = (const unsigned char *)a;
+	unsigned o = a->prio | a->tlsmodel;
 
-	memcpy(w, p, sizeof(w));
-	for (int i = 0; i < 7; i++)
-		o |= w[i];
-	return !o && !p[56] && !p[57] && !p[58] && !p[59] && !p[60] && !p[61];
+	for (size_t i = 0; i <= offsetof(attrs, noinstr); i++)
+		o |= p[i];
+	return !o;
 }
 
 #endif

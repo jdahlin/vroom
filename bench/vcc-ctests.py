@@ -53,13 +53,14 @@ RT = f'{T}/rt'
 CL = llvm('clang')
 VPP = os.path.join(os.environ.get('VCC_BIN') or BUILD, 'vpp')
 OBJCOPY = llvm('llvm-objcopy')
-LLD = shutil.which('ld.lld') or llvm('ld.lld')
+LLD = os.environ.get('VCC_LD') or shutil.which('ld.lld') or llvm('ld.lld')	# VCC_LD=build/ccs/vlink: link with vlink
 QEMU = shutil.which('qemu-system-aarch64') or '/opt/homebrew/bin/qemu-system-aarch64'
 OUT = f'{BUILD}/ctests'
 RES = subprocess.run([CL, '-print-resource-dir'], capture_output=True, text=True).stdout.strip() + '/include'
 
 BASE = ['--target=aarch64-linux-gnu', '-nostdinc', '-I', f'{RT}/include', '-isystem', RES,
         '-fno-PIE', '-fno-asynchronous-unwind-tables', '-fno-stack-protector', '-O2']
+BASE += os.environ.get('VCC_CFLAGS', '').split()	# e.g. -fasynchronous-unwind-tables (both compilers)
 # clang -O2, with gcc's leniency for old code (the tests are compiled by gcc -w)
 CLFL = ['-w', '-Wno-error=implicit-function-declaration', '-Wno-error=implicit-int',
         '-Wno-error=int-conversion', '-Wno-error=incompatible-pointer-types', '-Wno-error=return-type',
@@ -125,8 +126,25 @@ def qemu(elf, cpu='max'):
                       stdin=subprocess.DEVNULL)
     return rc, out.decode('latin-1').replace('\r\n', '\n')
 
+VLINK = os.path.join(os.environ.get('VCC_BIN') or BUILD, 'vlink')
 def link(objs, elf):
-    rc, _, err = sh([LLD, '-T', f'{RT}/link.ld', f'{OUT}/rt/start.o', f'{OUT}/rt/rt.o'] + objs + ['-o', elf])
+    args = ['-T', f'{RT}/link.ld', f'{OUT}/rt/start.o', f'{OUT}/rt/rt.o'] + objs
+    rc, _, err = sh([LLD] + args + ['-o', elf])
+    if not rc and os.environ.get('VCC_LDCMP'):
+        # VCC_LDCMP=1: vlink must give lld's loaded image byte for byte
+        rc2, _, err2 = sh([VLINK] + args + ['-o', elf + '.v'])
+        if rc2:
+            return rc2, 'error: vlink: ' + err2.decode(errors='replace')
+        oc = llvm('llvm-objcopy')
+        sh([oc, '-O', 'binary', elf, elf + '.lb']); sh([oc, '-O', 'binary', elf + '.v', elf + '.vb'])
+        if open(elf + '.lb', 'rb').read() != open(elf + '.vb', 'rb').read():
+            return 1, 'error: vlink image differs from lld'
+        # and the program headers (PT_LOAD split, PT_TLS, PT_GNU_RELRO, ...)
+        rd = llvm('llvm-readelf')
+        ph = [[l.split() for l in subprocess.run([rd, '-lW', e], capture_output=True, text=True).stdout.splitlines()
+               if l.strip()[:4] in ('LOAD', 'TLS ', 'GNU_', 'PHDR', 'NOTE')] for e in (elf, elf + '.v')]
+        if ph[0] != ph[1]:
+            return 1, 'error: vlink program headers differ from lld'
     return rc, err.decode(errors='replace')
 
 def first_err(s):

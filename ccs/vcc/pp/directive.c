@@ -3,6 +3,49 @@
 
 /* ---------------- directives ---------------- */
 
+/* -Wextra-tokens: tokens after a conditional's (or #undef's) operands */
+static void extra_loc(pp *p, uint32_t loc, const char *name, int nl)
+{
+	pp_span r = { loc, loc };
+	pp_fixit fx = { loc, loc, "//" };
+	pp_dinfo di = { "warning", loc, &r, 0, &fx, 1, NULL, 0 };
+
+	pp_warnx(p, "extra-tokens", true, NULL, &di, "extra tokens at end of #%.*s directive", nl, name);
+}
+
+VPRIV __attribute__((noinline)) void dir_extra_tok(pp *p, const ctx *c, uint32_t name, uint32_t i)
+{
+	uint32_t loc = c->loc + c->vt[i].off;
+	pp_span r = { loc, loc };
+	pp_fixit fx = { loc, loc, "//" };
+	pp_dinfo di = { "warning", loc, &r, 0, &fx, 1, NULL, 0 };
+	const vtok *n = &c->vt[name];
+
+	pp_warnx(p, "extra-tokens", true, NULL, &di, "extra tokens at end of #%.*s directive", (int)n->len, c->src + n->off);
+}
+
+static void extra_at(pp *p, const ctx *c, const pdir *d, uint32_t i)
+{
+	dir_extra_tok(p, c, d->tok + 1, i);
+}
+
+static inline void dir_extra(pp *p, const ctx *c, const pdir *d)
+{
+	uint32_t i;
+
+	switch (d->kind) {
+	case D_ELSE: case D_ENDIF: i = d->tok + 2; break;
+	case D_IFDEF: case D_IFNDEF: case D_ELIFDEF: case D_ELIFNDEF: case D_UNDEF:
+		i = d->tok + 3;
+		if (d->tok + 2 >= d->end || c->vt[d->tok + 2].kind != T_IDENT)
+			return;
+		break;
+	default: return;
+	}
+	if (unlikely(i < d->end))
+		extra_at(p, c, d, i);
+}
+
 static bool cond_true(pp *p, const ctx *c, const pdir *d)
 {
 	uint32_t b = d->tok + 2;
@@ -24,6 +67,14 @@ static bool cond_true(pp *p, const ctx *c, const pdir *d)
 }
 
 /* in a false group: run on from directive k to the group that is taken */
+/* -C: the comments before directive line [b, e) are printed, those in it dropped */
+static __attribute__((noinline, cold)) void cmt_directive(pp *p, ctx *c, uint32_t b, uint32_t e)
+{
+	if (!p->collecting)	/* in macro arguments they are dropped */
+		cmt_flush(p, c, c->src + c->vt[b].off);
+	p->fe[c->fe].cpos = cmt_line_end(c->src + c->vt[e - 1].off + c->vt[e - 1].len);
+}
+
 static void skip_from(pp *p, ctx *c, uint32_t k)
 {
 	const pdir *dir = c->fi->dir;
@@ -31,12 +82,15 @@ static void skip_from(pp *p, ctx *c, uint32_t k)
 	for (;;) {
 		const pdir *d = &dir[k];
 
+		dir_extra(p, c, d);
 		if ((d->kind == D_ELIF || d->kind == D_ELIFDEF || d->kind == D_ELIFNDEF) && !cond_true(p, c, d)) {
 			k = d->next;
 			continue;
 		}
 		c->i = d->end;
 		c->di = k + 1;
+		if (unlikely(p->out_text > 1))	/* -C: nothing skipped is printed */
+			p->fe[c->fe].cpos = cmt_line_end(c->src + c->vt[c->i - 1].off + c->vt[c->i - 1].len);
 		return;
 	}
 }
@@ -102,6 +156,8 @@ VPRIV const char *parse_define(const vtok *vt, uint32_t b, uint32_t e, pmacro *m
 			m->flags |= MF_VAOPT;
 		if (vt[j].kind == T_HASH)
 			m->flags |= MF_HASH;
+		if (vt[j].kind == T_UNKNOWN)
+			m->flags |= MF_UNKNOWN;
 	}
 	if (m->nbody && (m->body[0].kind == T_HASHHASH || m->body[m->nbody - 1].kind == T_HASHHASH))
 		return "'##' cannot appear at either end of a macro expansion";
@@ -168,12 +224,49 @@ static bool word(const char **s, const char *e, const char *w)
 	return true;
 }
 
+/* #pragma GCC warning/error: ("msg") or "msg" from q to e, at loc (the word) */
+static __attribute__((cold, noinline)) void pragma_message(pp *p, bool err, const char *q, const char *e, uint32_t loc)
+{
+	const char *b, *m;
+	bool par = false;
+	pp_dinfo d = { err ? "error" : "warning", loc, NULL, 0, NULL, 0, NULL, 0 };
+
+	while (q < e && (*q == ' ' || *q == '\t'))
+		q++;
+	if (q < e && *q == '(')
+		par = true, q++;
+	while (q < e && (*q == ' ' || *q == '\t'))
+		q++;
+	if (q >= e || *q != '"')
+		goto bad;
+	b = ++q;
+	while (q < e && *q != '"')
+		q += *q == '\\' ? 2 : 1;
+	if (q >= e)
+		goto bad;
+	m = q++;
+	if (par) {
+		while (q < e && (*q == ' ' || *q == '\t'))
+			q++;
+		if (q >= e || *q != ')')
+			goto bad;
+	}
+	if (err)
+		pp_diagx(p, &d, "%.*s", (int)(m - b), b);
+	else
+		pp_warnx(p, "#pragma-messages", true, NULL, &d, "%.*s", (int)(m - b), b);
+	return;
+bad:
+	d.what = "error";
+	pp_diagx(p, &d, "pragma %s requires parenthesized string", err ? "error" : "warning");
+}
+
 /*
  * A pragma, text "pragma ..." (from #pragma or _Pragma).  The ones the
  * preprocessor implements are run and dropped, as clang -E does; the rest
  * become a P_DIRECTIVE token.  Returns 1 if *out was set.
  */
-VPRIV int pragma_text(pp *p, const char *s, size_t n, uint32_t loc, ptok *out)
+VPRIV int pragma_text(pp *p, const char *s, size_t n, uint32_t loc, ptok *out, uint32_t sloc)
 {
 	const char *q = s + 6, *e = s + n;	/* after "pragma" */
 
@@ -213,6 +306,16 @@ VPRIV int pragma_text(pp *p, const char *s, size_t n, uint32_t loc, ptok *out)
 		if (word(&r, e, "GCC") && (word(&r, e, "system_header") || word(&r, e, "poison") ||
 					    word(&r, e, "dependency")))
 			return 0;
+		r = q;
+		if (sloc && word(&r, e, "GCC")) {	/* #pragma GCC warning/error "msg" (_Pragma: not modelled) */
+			const char *w = r;
+			bool err;
+
+			while (w < e && (*w == ' ' || *w == '\t'))
+				w++;
+			if ((err = word(&r, e, "error")) || word(&r, e, "warning"))
+				pragma_message(p, err, r, e, sloc + (uint32_t)(w - s));
+		}
 	}
 	memset(out, 0, sizeof(*out));
 	out->kind = P_DIRECTIVE;
@@ -271,8 +374,42 @@ static void line_directive(pp *p, ctx *c, uint32_t b, uint32_t e, bool expand_li
 			*w++ = s[i];
 		}
 		m->namelen = (uint32_t)(w - m->name);
+		if (expand_line) {
+			ptok x;
+
+			p->in_dir++;
+			next_exp(p, &x);
+			p->in_dir--;
+			if (x.kind != T_EOF)
+				extra_loc(p, x.loc, "line", 4);
+		}
 	}
 	pop_to(p, d);
+	if (unlikely(p->out_text)) {
+		/* clang's FileChanged(RenameFile): the next line is line v, and a line in progress ends */
+		if (p->lmark) {
+			lm_rename(p, m->name, m->namelen, m->line);
+			return;
+		}
+		p->cur_line = m->line;
+		if (p->col || p->edir) {
+			out_nl(p);
+			p->col = 0, p->edir = 0;
+		}
+	}
+}
+
+/* -imacros: the file is read for its macros, its tokens dropped up to the
+ * "##" line after the directive in <built-in> (clang's #__include_macros) */
+static __attribute__((cold, noinline)) void imacros(pp *p, ctx *c, uint32_t b, uint32_t e, uint32_t loc)
+{
+	int nfile = p->nfile;
+	ptok t;
+
+	include(p, c, b + 1, e, D_INCLUDE, loc);
+	do
+		next_exp(p, &t);
+	while (t.kind != T_EOF && !(t.kind == T_HASHHASH && p->nfile == nfile));
 }
 
 /* run the directive at c->i; 1 if it produced a token in *out */
@@ -283,8 +420,13 @@ VPRIV int directive(pp *p, ctx *c, ptok *out)
 
 	c->i = e;
 	c->di++;
+	if (unlikely(p->out_text > 1))
+		cmt_directive(p, c, d->tok, e);
+	if (unlikely(p->lmark) && c->f == &p->builtin && c->vt[d->tok].off >= p->o->predef_cmdl)
+		lm_count(p);	/* the command line's first -D/-U/-include */
 	switch (d->kind) {
 	case D_IF: case D_IFDEF: case D_IFNDEF:
+		dir_extra(p, c, d);
 		if (!cond_true(p, c, d))
 			skip_from(p, c, d->next);
 		return 0;
@@ -292,18 +434,25 @@ VPRIV int directive(pp *p, ctx *c, ptok *out)
 		/* the end of a group that was taken: on to #endif */
 		uint32_t k = d->next;
 
-		while (c->fi->dir[k].kind != D_ENDIF)
+		dir_extra(p, c, d);
+		while (dir_extra(p, c, &c->fi->dir[k]), c->fi->dir[k].kind != D_ENDIF)
 			k = c->fi->dir[k].next;
 		c->i = c->fi->dir[k].end;
 		c->di = k + 1;
+		if (unlikely(p->out_text > 1))
+			p->fe[c->fe].cpos = cmt_line_end(c->src + c->vt[c->i - 1].off + c->vt[c->i - 1].len);
 		return 0;
 	}
-	case D_ENDIF: case D_NULL:
+	case D_ENDIF:
+		dir_extra(p, c, d);
+		return 0;
+	case D_NULL:
 		return 0;
 	case D_DEFINE:
 		define(p, c, b + 1, e);
 		return 0;
 	case D_UNDEF:
+		dir_extra(p, c, d);
 		if (b + 1 < e && c->vt[b + 1].kind == T_IDENT)
 {
 			mdef(p, c->vt[b + 1].id, NULL);
@@ -316,10 +465,19 @@ VPRIV int directive(pp *p, ctx *c, ptok *out)
 	case D_INCLUDE: case D_INCLUDE_NEXT: case D_IMPORT:
 		include(p, c, b + 1, e, (int)d->kind, loc);
 		return 0;
+	case D_IMACROS:
+		if (c->f == &p->builtin) {
+			imacros(p, c, b, e, loc);
+			return 0;
+		}
+		if (p->o->asm_mode)
+			goto pass;
+		error(p, loc, "invalid preprocessing directive");
+		return 0;
 	case D_PRAGMA: {
 		const vtok *f = &c->vt[b], *l = &c->vt[e - 1];
 
-		return pragma_text(p, c->src + f->off, l->off + l->len - f->off, loc, out);
+		return pragma_text(p, c->src + f->off, l->off + l->len - f->off, loc, out, c->loc + f->off);
 	}
 	case D_IDENT: {
 		const vtok *f = &c->vt[b], *l = &c->vt[e - 1];
@@ -370,6 +528,25 @@ pass: {
 	out->len = l->off + l->len - f->off;
 	out->loc = loc;
 	out->flags = TF_SOL;
+	if (unlikely(p->out_text)) {
+		/* clang -E re-lexes the line as tokens: one space where there was
+		 * any, and one before the end of the line if a blank or comment is */
+		size_t n = 0, cap = (size_t)(l->off + l->len - f->off) + 2;
+		char *s = varena_alloc(&p->tmp, cap + 16);
+		const char *q = c->src + l->off + l->len;
+
+		for (uint32_t i = b; i < e; i++) {
+			if (c->vt[i].flags & (TF_SPACE | TF_SOL))
+				s[n++] = ' ';
+			memcpy(s + n, c->src + c->vt[i].off, c->vt[i].len);
+			n += c->vt[i].len;
+		}
+		if (*q == ' ' || *q == '\t' || *q == '\f' || *q == '\v' || (*q == '/' && (q[1] == '*' || q[1] == '/')))
+			s[n++] = ' ';
+		out->s = s;
+		out->len = (uint32_t)n;
+		out->id = 1;	/* tokens, not a directive: indented like a line of them */
+	}
 	return 1;
 	}
 }

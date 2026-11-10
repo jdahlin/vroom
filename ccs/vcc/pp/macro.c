@@ -99,6 +99,10 @@ VPRIV void define(pp *p, ctx *c, uint32_t b, uint32_t e)
 		return;
 	}
 	m = slot ? atomic_load_explicit(slot, memory_order_acquire) : NULL;
+	if (!m || unlikely(m->flags & MF_UNKNOWN))	/* -Winvalid-pp-token (a cached site knows it has none) */
+		for (uint32_t i = b + 1; i < e; i++)
+			if (unlikely(vt[i].kind == T_UNKNOWN))
+				pp_invalid_tok(p, c->src + vt[i].off, vt[i].len, c->loc + vt[i].off);
 	if (!m) {
 		pmacro *n = site ? salloc(sizeof(*n)) : varena_alloc(&p->perm, sizeof(*n));
 

@@ -243,6 +243,49 @@ static void il_continue(cc *c, ilist *l, uint64_t pos, bool st);
 static void il_fill(cc *c, ilist *l, uint64_t pos, bool braced, uint32_t first, bool st);
 static uint32_t init_braced(cc *c, qty ty, bool st);
 
+/* a braced initializer skipped (excess elements): its range */
+static pp_span skip_braces(cc *c)
+{
+	int depth = 0;
+	pp_span r = { tok(c)->loc, 0 };
+
+	do {
+		r.e = tok(c)->loc;
+		if (is(c, T_LBRACE))
+			depth++;
+		else if (is(c, T_RBRACE))
+			depth--;
+		else if (is(c, T_EOF))
+			fatal(c, tok(c)->loc, "expected '}'");
+		next(c);
+	} while (depth > 0);
+	r.e = pp_tok_end(c->p, r.e);
+	return r;
+}
+
+/* a string literal for a char array of known size: longer than it (the terminator may go) */
+static void str_fit(cc *c, qty arr, uint32_t s)
+{
+	if (is_array(c, arr) && !(T(c, arr)->flags & (TF_INCOMPLETE | TF_VLA)) && N(s)->op == N_STR &&
+	    c->strs[N(s)->a].esz == 1 && c->strs[N(s)->a].n - 1 > T(c, arr)->n) {
+		pp_span r = rng(c, s);
+
+		cc_warnx(c, "excess-initializers", true, NULL, r.b, &r, 1, NULL, 0, "initializer-string for char array is too long");
+	}
+}
+
+/* clang's -Wexcess-initializers, once per list: at the first excess element */
+static void excess_warn(cc *c, qty ty, bool *done, pp_span r)
+{
+	const char *k = is_array(c, ty) ? "array" : is_vector(c, ty) ? "vector" : KIND(c, ty) == TY_UNION ? "union" :
+			is_record(c, ty) ? "struct" : "scalar";
+
+	if (*done)
+		return;
+	*done = true;
+	cc_warnx(c, "excess-initializers", true, NULL, r.b, &r, 1, NULL, 0, "excess elements in %s initializer", k);
+}
+
 static bool is_char_array(cc *c, qty t)
 {
 	if (!is_array(c, t))
@@ -261,19 +304,36 @@ static bool string_initializes(cc *c, qty arr, uint32_t v)
 	       c->strs[N(s)->a].esz == ty_size(c, T(c, arr)->base);
 }
 
+/*
+ * at '{': { "str" } follows, not { "q"[0] } (an element of it).  The token
+ * queue holds 4: concatenated strings ("a" "b") are taken as the string.
+ */
+static bool brace_string(cc *c)
+{
+	int k;
+
+	if (!is_strtok(peek(c, 1)->kind))
+		return false;
+	k = peek(c, 2)->kind;
+	if (is_strtok(k) || k == T_RBRACE)
+		return true;
+	return k == T_COMMA && peek(c, 3)->kind == T_RBRACE;
+}
+
 /* one element at pos: braces, a value, or brace elision into a sub-aggregate */
 static void il_elem(cc *c, ilist *l, uint64_t pos, uint32_t v, bool st)
 {
 	qty et = il_elem_type(c, l, pos);
 
 	if (!v && is(c, T_LBRACE)) {
-		if (is_char_array(c, et) && is_strtok(peek(c, 1)->kind)) {	/* { "string" } */
+		if (is_char_array(c, et) && brace_string(c)) {	/* { "string" } */
 			uint32_t sv;
 
 			next(c);
 			sv = string_lit(c);
 			accept(c, T_COMMA);
 			expect(c, T_RBRACE, "'}'");
+			str_fit(c, et, sv);
 			il_set(c, l, pos, sv, NULL);
 			return;
 		}
@@ -300,9 +360,12 @@ static void il_elem(cc *c, ilist *l, uint64_t pos, uint32_t v, bool st)
 		return;
 	}
 	if (is_array(c, et)) {
+		str_fit(c, et, v);
 		il_set(c, l, pos, v, NULL);	/* string literal */
 		return;
 	}
+	if (!l->array && is_record(c, l->ty) && c->tags[T(c, l->ty)->aux].f[pos].bitfield)
+		bitfield_const(c, &c->tags[T(c, l->ty)->aux].f[pos], decay(c, v), 0);
 	il_set(c, l, pos, is_record(c, et) && !is_complex(c, et) ? v : convert(c, decay(c, v), et), NULL);
 }
 
@@ -446,6 +509,8 @@ static uint64_t il_designation(cc *c, ilist *l, bool st)
 
 static void il_fill(cc *c, ilist *l, uint64_t pos, bool braced, uint32_t first, bool st)
 {
+	bool excess = false;
+
 	pos = il_next_pos(c, l, pos);
 	if (first) {
 		if (il_full(l, pos)) {
@@ -474,13 +539,12 @@ static void il_fill(cc *c, ilist *l, uint64_t pos, bool braced, uint32_t first, 
 				return;
 			if (il_full(l, pos)) {
 				/* excess elements: clang warns and drops them */
-				uint32_t v;
-
 				if (is(c, T_LBRACE)) {
-					skip_balanced(c);
+					excess_warn(c, l->ty, &excess, skip_braces(c));
 				} else {
-					v = assign_expr(c);
-					(void)v;
+					uint32_t v = assign_expr(c);
+
+					excess_warn(c, l->ty, &excess, rng(c, v));
 				}
 			} else {
 				il_elem(c, l, pos, 0, st);
@@ -546,13 +610,17 @@ static uint32_t init_braced(cc *c, qty ty, bool st)
 		v = init_braced(c, ty, st);
 	else
 		v = convert_as(c, decay(c, assign_expr(c)), ty, c->cv_what == CX_INIT ? CX_INIT : 0, c->cv_loc);
-	while (accept(c, T_COMMA)) {
-		if (is(c, T_RBRACE))
-			break;
-		if (is(c, T_LBRACE))
-			skip_balanced(c);
-		else
-			assign_expr(c);
+	{
+		bool excess = false;
+
+		while (accept(c, T_COMMA)) {
+			if (is(c, T_RBRACE))
+				break;
+			if (is(c, T_LBRACE))
+				excess_warn(c, ty, &excess, skip_braces(c));
+			else
+				excess_warn(c, ty, &excess, rng(c, assign_expr(c)));
+		}
 	}
 	expect(c, T_RBRACE, "'}'");
 	return v;
@@ -564,13 +632,14 @@ VPRIV uint32_t initializer(cc *c, qty *ty, bool st)
 	qty t = *ty;
 
 	if (is(c, T_LBRACE)) {
-		if (is_char_array(c, t) && is_strtok(peek(c, 1)->kind)) {
+		if (is_char_array(c, t) && brace_string(c)) {
 			uint32_t s;
 
 			next(c);
 			s = string_lit(c);
 			accept(c, T_COMMA);
 			expect(c, T_RBRACE, "'}'");
+			str_fit(c, t, s);
 			if (T(c, t)->flags & TF_INCOMPLETE)
 				*ty = QT(QI(ty_array(c, T(c, t)->base, c->strs[N(s)->a].n, 0)), QQ(t));
 			return s;
@@ -604,6 +673,8 @@ VPRIV uint32_t initializer(cc *c, qty *ty, bool st)
 			}
 			if (T(c, t)->flags & TF_INCOMPLETE)
 				*ty = QT(QI(ty_array(c, T(c, t)->base, c->strs[N(v)->a].n, 0)), QQ(t));
+			else
+				str_fit(c, t, v);
 			return v;
 		}
 		if (is_record(c, t) && !is_complex(c, t)) {
@@ -613,4 +684,86 @@ VPRIV uint32_t initializer(cc *c, qty *ty, bool st)
 		}
 		return convert_as(c, decay(c, v), t, c->cv_what == CX_INIT ? CX_INIT : 0, c->cv_loc);
 	}
+}
+
+/* clang's location for a diagnostic about expression n (getExprLoc: a call's callee) */
+VPRIV uint32_t expr_loc(cc *c, uint32_t n)
+{
+	while (N(n)->op == N_CAST && N(n)->a && !c->span[n].e)
+		n = N(n)->a;
+	if (N(n)->op == N_CALL && N(n)->a)
+		return rng(c, N(n)->a).b;
+	return N(n)->loc;
+}
+
+/*
+ * Whether init can initialise an object of static storage of type ty: the
+ * walk of the emitter's data_init (emit/data.c) without writing, so the error
+ * comes from the front end, also for an object never emitted (clang Sema).
+ * *bad: the first element that is not a constant.
+ */
+VPRIV bool static_init_ok(cc *c, qty ty, uint32_t init, uint32_t *bad)
+{
+	const node *x;
+	cval cv;
+
+	if (!init)
+		return true;
+	x = N(init);
+	if (x->op == N_ZERO || (x->flags & NF_ERR))
+		return true;
+	if (x->op == N_INIT) {
+		const uint32_t *v = &c->lists[x->b];
+
+		if (x->aux == 1) {
+			for (uint32_t i = 0; i < x->c; i++)
+				if (!static_init_ok(c, T(c, ty)->base, v[3 * i + 2], bad))
+					return false;
+			return true;
+		}
+		const tag *r = &c->tags[T(c, ty)->aux];
+
+		for (uint32_t i = 0; i < x->c && i < r->nfield; i++) {
+			const field *f = &r->f[i];
+
+			if ((x->aux == 2 && i != x->a) || !v[i])
+				continue;
+			if (f->bitfield) {
+				if (!eval(c, v[i], &cv) || cv.kind != CV_INT) {
+					*bad = v[i];
+					return false;
+				}
+				continue;
+			}
+			if (!static_init_ok(c, f->ty, v[i], bad))
+				return false;
+		}
+		return true;
+	}
+	if (x->op == N_STR && is_array(c, ty))
+		return true;
+	if (x->op == N_COMPLIT)
+		return static_init_ok(c, ty, x->a, bad);
+	if (x->op == N_CPLX) {
+		qty et = c->tags[T(c, x->ty)->aux].f[0].ty;
+
+		return static_init_ok(c, et, x->a, bad) && static_init_ok(c, et, x->b, bad);
+	}
+	if (x->op == N_CAST && x->aux == CK_NOP && (is_record(c, ty) || is_array(c, ty) || is_vector(c, ty)))
+		return static_init_ok(c, ty, x->a, bad);
+	if ((is_record(c, ty) || is_array(c, ty) || is_vector(c, ty))) {
+		uint32_t m = init;
+
+		while (N(m)->op == N_CAST)
+			m = N(m)->a;
+		if (N(m)->op == N_VAR && c->syms[N(m)->a].body)
+			return true;
+		*bad = init;
+		return false;
+	}
+	if (!eval(c, init, &cv) || (cv.kind != CV_INT && cv.kind != CV_FLT && cv.kind != CV_ADDR)) {
+		*bad = init;
+		return false;
+	}
+	return true;
 }

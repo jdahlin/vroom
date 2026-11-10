@@ -194,8 +194,11 @@ VPRIV val do_call(ecx *e, uint32_t ref, val *fnv, carg *args, int n, qty rty, bo
 				break;
 			}
 			for (int k = 0; k < a->a.nreg; k++) {
+				/* an Apple HFA of floats on the stack: a 4-byte last part */
+				int lg = a->a.fsz && a->a.size - 8 * k < 8 ? 2 : 3;
+
 				arg_word(e, a, k, R_X16);
-				mem(e, I_ST, 3, 0, R_X16, SP, a->a.stk + 8 * k);
+				mem(e, I_ST, lg, 0, R_X16, SP, a->a.stk + 8 * k);
 			}
 			break;
 		case A_REF_REG:

@@ -105,6 +105,15 @@ static ival parse_char(pp *p, const ptok *t)
 		}
 		v = narrow ? (v << 8) | (c & 0xff) : c;
 	}
+	if (cnt > 1 && t->kind == T_CHAR) {
+		pp_span sp;
+		pp_dinfo d = { "warning", t->loc, &sp, 0, NULL, 0, NULL, 0 };
+
+		if (cnt != 4)	/* (4: -Wfour-char-constants, off) */
+			pp_warnx(p, "multichar", true, NULL, &d, "multi-character character constant");
+		if (cnt > 4)
+			pp_diag(p, t->loc, "warning", "character constant too long for its type");
+	}
 	if (narrow && cnt == 1 && t->kind == T_CHAR && !p->o->unsigned_char)
 		v = (uint64_t)(int64_t)(int8_t)v;
 	else if (narrow && cnt > 1)
@@ -118,17 +127,30 @@ typedef struct ev {
 	pp *p;
 	ptok t;		/* lookahead */
 	uint32_t loc;
+	uint32_t prev;		/* the last token consumed */
+	uint32_t lb, le;	/* the last primary expression: first and last token */
 	bool bad;
 } ev;
 
 static void eadv(ev *e)
 {
+	e->prev = e->t.loc;
 	next_exp(e->p, &e->t);
 }
 
 static ival ecomma(ev *e, bool live);
 
+static ival eprimary_(ev *e, bool live);
 static ival eprimary(ev *e, bool live)
+{
+	uint32_t b = e->t.loc;
+	ival r = eprimary_(e, live);
+
+	e->lb = b, e->le = e->prev;
+	return r;
+}
+
+static ival eprimary_(ev *e, bool live)
 {
 	ival r = { 0, false };
 	pp *p = e->p;
@@ -179,6 +201,13 @@ static ival eprimary(ev *e, bool live)
 			ptok n;
 			bool paren;
 
+			if (unlikely(obj_macro_at(p, e->t.loc))) {
+				pp_dinfo d = { "warning", e->t.loc, NULL, 0, NULL, 0, "defined", 7 };
+
+				pp_warnx(p, "expansion-to-defined", true, NULL, &d,
+					 "macro expansion producing 'defined' has undefined behavior");
+			}
+
 			raw(p, &n);
 			paren = n.kind == T_LPAREN;
 			if (paren)
@@ -205,6 +234,14 @@ static ival eprimary(ev *e, bool live)
 			uint32_t id = e->t.id, loc = e->t.loc;
 
 			eadv(e);	/* an identifier that is not a macro: 0 */
+			if (p->o->c23 && e->t.kind == T_CHAR && e->t.loc == loc + 2 && vintern_ents[id].len == 2 &&
+			    !memcmp(vintern_ents[id].s, "u8", 2)) {
+				/* C23 u8'a' (the lexer's C17 tokens u8 and 'a') */
+				e->t.kind = T_U8CHAR;
+				r = parse_char(p, &e->t);
+				eadv(e);
+				return r;
+			}
 			if (e->t.kind == T_LPAREN && !e->bad) {
 				error(p, loc, "function-like macro '%.*s' is not defined",
 				      (int)vintern_ents[id].len, vintern_ents[id].s);
@@ -358,7 +395,18 @@ VPRIV bool eval_if(pp *p, const ctx *fc, uint32_t b, uint32_t e)
 	r = ecomma(&E, true);
 	p->in_dir--;
 	if (!E.bad && E.t.kind != T_EOF)
-		error(p, E.loc, "token is not a valid binary operator in a preprocessor subexpression");
+	{
+		/* clang: at the token, the operand before it underlined */
+		pp_span sp = { E.lb, pp_tok_end(p, E.le) };
+		pp_dinfo d = { "error", E.t.loc, &sp, E.lb && E.le >= E.lb, NULL, 0, NULL, 0 };
+		char tmp[E.t.len + 1];
+		size_t ml;
+
+		if (E.t.flags & PF_MACRO)	/* (the note at the macro's body token) */
+			d.ms = pp_spell(&E.t, tmp, &ml), d.mlen = (uint32_t)ml;
+
+		pp_diagx(p, &d, "token is not a valid binary operator in a preprocessor subexpression");
+	}
 	pop_to(p, d);
 	return r.v != 0;
 }

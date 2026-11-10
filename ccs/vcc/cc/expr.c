@@ -95,6 +95,10 @@ VPRIV uint32_t assign(cc *c, int op, uint32_t l, uint32_t r, uint32_t loc)
 	if (op && (is_complex(c, lt) || is_complex(c, N(r)->ty)))	/* l = l op r (l evaluated twice) */
 		return assign(c, 0, l, cplx_binop(c, op, rvalue(c, l), rvalue(c, r), loc), loc);
 	if (!op) {
+		const field *bf = bitfield_of(c, l);
+
+		if (bf)
+			bitfield_const(c, bf, r, loc);
 		r = convert_as(c, r, lt, CX_ASSIGN, loc);
 		n = mk2(c, N_ASSIGN, lt, loc, l, r);
 		return n;
@@ -385,6 +389,10 @@ static inline __attribute__((always_inline)) uint32_t primary_sym(cc *c, uint32_
 {
 	sym *y = &c->syms[s];
 
+	if (unlikely(y->flags & SF_DEPRECATED)) {
+		deprecated_use(c, loc, id, &c->attr[y->attrs]);
+		y = &c->syms[s];
+	}
 	if (y->kind == S_ENUMCONST)
 		return mk_int(c, y->val, y->ty, loc);
 	if (unlikely(y->kind == S_TYPEDEF))
@@ -397,6 +405,7 @@ static inline __attribute__((always_inline)) uint32_t primary_sym(cc *c, uint32_
 		if (!c->unevaluated && !((y->flags & SF_OVERLOAD) && is(c, T_LPAREN)))
 			y->flags |= SF_USED;
 		y->flags |= SF_REF;
+		y->nref += y->nref != 0xffff;
 		if (unlikely(y->next) && y->depth)
 			c->syms[y->next].flags |= SF_REF;	/* a block-scope extern: the global */
 		return n;
@@ -465,7 +474,11 @@ static __attribute__((noinline)) uint32_t primary_unbound(cc *c, uint32_t id, ui
 			return primary_sym(c, s, id, loc);
 	}
 	if (is(c, T_LPAREN)) {
-		if (!c->o->implicit_fn)
+		qty lt = implicit_lib_type(c, id);
+
+		if (!c->o->implicit_fn && lt)
+			cc_error(c, loc, "call to undeclared library function '%.*s' with type '%s'; ISO C99 and later do not support implicit function declarations [-Wimplicit-function-declaration]", IDF(id), tyname(c, lt));
+		else if (!c->o->implicit_fn)
 			cc_error(c, loc, "call to undeclared function '%.*s'; ISO C99 and later do not support implicit function declarations [-Wimplicit-function-declaration]", IDF(id));
 		if (idlen_(id) == 6 && !memcmp(idstr_(id), "alloca", 6)) {
 			/* clang: an implicitly declared library builtin is the builtin */
@@ -476,7 +489,8 @@ static __attribute__((noinline)) uint32_t primary_unbound(cc *c, uint32_t id, ui
 				return builtin_call(c, b, loc);
 		}
 		{
-			uint32_t fs = implicit_func(c, id, loc);
+			/* clang: a library function gets its library type (asin(x) is a double) */
+			uint32_t fs = lt ? implicit_lib_func(c, id, loc, lt) : implicit_func(c, id, loc);
 			uint32_t n = mk(c, N_VAR, c->syms[fs].ty, loc);
 
 			N(n)->a = fs;
@@ -511,6 +525,8 @@ static __attribute__((noinline)) uint32_t stmt_expr(cc *c, uint32_t loc)
 	expect(c, T_RPAREN, "')'");
 	n = mk(c, N_STMTEXPR, last, loc);
 	N(n)->a = b;
+	if (!c->in_stmtexpr)
+		unused_result(c, n, false);	/* the statements before the value */
 	return n;
 }
 
@@ -519,8 +535,14 @@ VPRIV uint32_t paren_expr(cc *c, uint32_t loc)
 {
 	uint32_t n;
 
-	if (is(c, T_LBRACE))
-		return stmt_expr(c, loc);
+	if (is(c, T_LBRACE)) {
+		bool mac = tok(c)->flags & PF_MACRO;
+
+		n = stmt_expr(c, loc);
+		if (mac)
+			N(n)->flags |= NF_MACRO;	/* (no -Wunused-value) */
+		return n;
+	}
 	n = expr(c);
 	if (!is(c, T_RPAREN)) {
 		report(c, "error", tok(c)->loc, NULL, 0, NULL, 0, "expected ')'");
@@ -566,6 +588,16 @@ static uint32_t primary_(cc *c)
 
 		if (unlikely(kw))
 			return primary_kw(c, kw, loc);
+		if (unlikely(c->o->std == 23 && idlen_(id) == 2 && !memcmp(idstr_(id), "u8", 2))) {
+			/* C23 u8'a': the lexer gives u8 and 'a' (C17 tokens) */
+			ptok *q = peek(c, 1);
+
+			if (q->kind == T_CHAR && q->loc == loc + 2) {
+				next(c);
+				tok(c)->kind = T_U8CHAR, tok(c)->loc = loc;
+				return char_lit(c);
+			}
+		}
 		s = lookup(c, id);
 		next(c);
 		if (likely(s))
@@ -655,13 +687,44 @@ static __attribute__((noinline)) uint32_t ovl_pick(cc *c, uint32_t head, const v
 	return best;
 }
 
+/* clang's -Wnonnull: a null pointer constant passed for a nonnull parameter */
+static void nonnull_args(cc *c, uint32_t fs, qty ft, const uint32_t *args, uint32_t n)
+{
+	const sym *y = &c->syms[fs];
+	uint32_t all = y->attrs ? c->attr[y->attrs].nonnull : 0;
+	uint32_t call_end = c->prevloc;	/* ')': where clang points for a plain nonnull */
+	const ctype *f = T(c, ft);
+
+	if (!all && !y->psyms)
+		return;
+	for (uint32_t i = 0; i < n; i++) {
+		uint32_t p = y->psyms && i < f->n ? c->lists[y->psyms - 1 + i] : 0;
+		bool pn = p && (c->syms[p].flags & SF_NONNULL), idx = i < 31 && (all >> (i + 1) & 1);
+		bool any = (all & 1) && i < f->n && is_ptr(c, c->params[f->aux + i]);
+		cval cv;
+
+		if (!pn && !idx && !any)
+			continue;
+		if (!is_ptr(c, N(args[i])->ty) || !eval(c, args[i], &cv) || cv.kind != CV_INT || cv.i)
+			continue;
+		{
+			pp_span r = rng(c, args[i]);
+
+			cc_warnx(c, "nonnull", true, NULL, pn || idx ? r.b : call_end, &r, 1, NULL, 0,
+				 "null passed to a callee that requires a non-null argument");
+		}
+	}
+}
+
 static __attribute__((noinline)) uint32_t call(cc *c, uint32_t fn, uint32_t loc)
 {
 	uint32_t callee;
 	vec args;
 	qty ft;
 	const ctype *f;
-	uint32_t n;
+	uint32_t n, fmt;
+	qty aty[64];
+	uint32_t atd[64];
 	bool have_args = false;
 
 	if (N(fn)->op == N_VAR && (c->syms[N(fn)->a].flags & SF_OVERLOAD) && c->syms[N(fn)->a].kind == S_FUNC) {
@@ -735,13 +798,26 @@ static __attribute__((noinline)) uint32_t call(cc *c, uint32_t fn, uint32_t loc)
 			}
 		}
 	}
+	{
+		uint32_t fs = N(callee)->op == N_VAR && c->syms[N(callee)->a].kind == S_FUNC ? N(callee)->a : 0;
+
+		fmt = fs && c->syms[fs].attrs && c->attr[c->syms[fs].attrs].fmt && args.n <= 64 && !c->unevaluated ? fs : 0;
+	}
 	for (uint32_t i = 0; i < args.n; i++) {
 		uint32_t a = args.v[i];
 
 		f = T(c, ft);
+		if (fmt) {
+			int k = KIND(c, N(a)->ty);
+
+			atd[i] = k == TY_ARRAY ? 0 : N(a)->op == N_VAR ? c->syms[N(a)->a].tdef :
+				 N(a)->op == N_MEMBER && !(N(a)->flags & NF_BITFIELD) ? node_field(c, N(a))->tdef : 0;
+			aty[i] = bitfield_of(c, a) ? 0 : k == TY_ARRAY ? ty_ptr(c, T(c, N(a)->ty)->base) : k == TY_FUNC ? 0 : QUNQ(N(a)->ty);
+		}
 		if (!(f->flags & TF_NOPROTO) && i < f->n) {
 			c->cv_fn = N(callee)->op == N_VAR && c->syms[N(callee)->a].kind == S_FUNC ? N(callee)->a : 0;
 			c->cv_arg = i;
+			c->cv_callee = rng(c, callee).b;
 			a = convert_as(c, decay(c, a), c->params[f->aux + i], CX_PASS, loc);
 			c->cv_fn = 0;
 		} else {
@@ -752,6 +828,10 @@ static __attribute__((noinline)) uint32_t call(cc *c, uint32_t fn, uint32_t loc)
 		}
 		args.v[i] = a;
 	}
+	if (N(callee)->op == N_VAR && c->syms[N(callee)->a].kind == S_FUNC && !c->unevaluated)
+		nonnull_args(c, N(callee)->a, ft, args.v, args.n);
+	if (fmt)
+		format_check(c, fmt, args.v, aty, atd, args.n);
 	if (!c->o->no_builtin && args.n == 1 && N(callee)->op == N_VAR && c->syms[N(callee)->a].kind == S_FUNC &&
 	    (c->syms[N(callee)->a].flags & SF_GLOBAL)) {
 		/* clang: abs, labs and llabs declared with their library types are builtins (inline) */

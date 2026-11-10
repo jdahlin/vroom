@@ -118,12 +118,11 @@ VPRIV qty ty_ptr(cc *c, qty base)
 	if (likely(i >= c->ptr_lo && i < c->nty)) {	/* (ptr_lo: 1, or a recorded region's first type) */
 		const ctype *p = &c->ty[i];
 
-		if (p->kind == TY_PTR && !p->flags && p->base == base && p->align == 8) {
+		if (p->kind == TY_PTR && !p->flags && p->base == base && p->align == CC_PTRSIZE(c))
 			return QT(i, 0);
-		}
 	}
 	{
-		ctype t = { .kind = TY_PTR, .size = 8, .align = 8, .base = base };
+		ctype t = { .kind = TY_PTR, .size = CC_PTRSIZE(c), .align = CC_PTRSIZE(c), .base = base };
 
 		i = ty_intern(c, &t);
 		c->ptrc[base] = i;
@@ -245,7 +244,9 @@ VPRIV qty ty_func(cc *c, qty ret, const qty *par, uint32_t n, int flags)
 VPRIV qty ty_vector(cc *c, qty elem, uint32_t size)
 {
 	const ctype *e = T(c, elem);
-	ctype t = { .kind = TY_VECTOR, .base = QUNQ(elem), .size = size, .align = size > 16 ? 16 : size };
+	/* arm64: at most 16 (the NEON registers); wasm: the vector's size */
+	ctype t = { .kind = TY_VECTOR, .base = QUNQ(elem), .size = size,
+		    .align = size > 16 && !PP_IS_WASM(c->o->target) ? 16 : size };
 
 	t.n = e->size ? (uint32_t)(size / e->size) : 0;
 	return QT(ty_intern(c, &t), 0);
@@ -361,7 +362,7 @@ VPRIV qty unsigned_of(cc *c, qty t)
 VPRIV qty vec_mask_type(cc *c, qty v)
 {
 	uint32_t es = (uint32_t)T(c, T(c, v)->base)->size;
-	int k = es == 1 ? TY_SCHAR : es == 2 ? TY_SHORT : es == 4 ? TY_INT : es == 8 ? TY_LONG : TY_INT128;
+	int k = es == 1 ? TY_SCHAR : es == 2 ? TY_SHORT : es == 4 ? TY_INT : es == 8 ? CC_I64(c, false) : TY_INT128;
 
 	return ty_vector(c, prim(k), (uint32_t)T(c, v)->size);
 }

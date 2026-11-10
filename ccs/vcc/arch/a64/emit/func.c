@@ -29,6 +29,38 @@ VPRIV void sym_header(ecx *e, tbuf *b, uint32_t s, bool fn, const char *defsec, 
 		tb_s(b, sn);
 		tb_s(b, fn ? "\",\"ax\",@progbits\n" : bss ? "\",\"aw\",@nobits\n" :
 			 (QQ(y->ty) & Q_CONST) && !strncmp(sn, ".rodata", 7) ? "\",\"a\",@progbits\n" : "\",\"aw\",@progbits\n");
+	} else if (!DARWIN(c) && (c->o->sections & (fn ? 1 : 2))) {
+		/* -ffunction-sections / -fdata-sections: .text.NAME etc., as clang */
+		static const struct { const char *def, *base, *rest; } m[] = {
+			{ "\t.text\n", ".text.", ",\"ax\",@progbits\n" },
+			{ "\t.data\n", ".data.", ",\"aw\",@progbits\n" },
+			{ "\t.bss\n", ".bss.", ",\"aw\",@nobits\n" },
+		};
+		const char *base = NULL, *rest = NULL;
+		char nb[16];
+
+		for (size_t k = 0; k < sizeof m / sizeof *m && !base; k++)
+			if (!strcmp(defsec, m[k].def))
+				base = m[k].base, rest = m[k].rest;
+		if (!base && !strncmp(defsec, "\t.section\t.", 10)) {
+			/* "\t.section\t.rodata,..." -> ".rodata." and ",..." */
+			const char *cm = strchr(defsec + 10, ',');
+			size_t n = cm ? (size_t)(cm - (defsec + 10)) : 0;
+
+			if (cm && n + 2 <= sizeof nb) {
+				memcpy(nb, defsec + 10, n);
+				nb[n] = '.', nb[n + 1] = 0;
+				base = nb, rest = cm;
+			}
+		}
+		if (base) {
+			tb_s(b, "\t.section\t");
+			tb_s(b, base);
+			sym_name(c, b, s);
+			tb_s(b, rest);
+		} else {
+			tb_s(b, defsec);
+		}
 	} else {
 		tb_s(b, defsec);
 	}
@@ -71,6 +103,21 @@ VPRIV void sym_header(ecx *e, tbuf *b, uint32_t s, bool fn, const char *defsec, 
 	tb_s(b, fn ? ",@function\n" : ",@object\n");
 	sym_name(c, b, s);
 	tb_s(b, ":\n");
+}
+
+/* a constructor's or destructor's pointer: .init_array[.prio] / .fini_array[.prio], as clang */
+static void ctor_entry(cc *c, tbuf *b, uint32_t s, bool fini)
+{
+	const attrs *a = sym_attrs(c, s);
+
+	tb_s(b, fini ? "\t.section\t.fini_array" : "\t.section\t.init_array");
+	if (a && a->prio) {
+		tb_c(b, '.');
+		tb_u(b, a->prio);
+	}
+	tb_s(b, fini ? ",\"aw\",@fini_array\n\t.p2align\t3\n\t.xword\t" : ",\"aw\",@init_array\n\t.p2align\t3\n\t.xword\t");
+	sym_name(c, b, s);
+	tb_c(b, '\n');
 }
 
 /* finish_function for the object backend: the same function as items */
@@ -131,16 +178,12 @@ static void finish_direct(ecx *e, uint32_t s, uint32_t align, const int *cs, int
 	it_close(e, h);
 	if (ctor & 1) {
 		h = it_open(e, IT_TEXT);
-		tb_s(b, "\t.section\t.init_array,\"aw\",@init_array\n\t.p2align\t3\n\t.xword\t");
-		sym_name(c, b, s);
-		tb_c(b, '\n');
+		ctor_entry(c, b, s, false);
 		it_close(e, h);
 	}
 	if (ctor & 2) {
 		h = it_open(e, IT_TEXT);
-		tb_s(b, "\t.section\t.fini_array,\"aw\",@fini_array\n\t.p2align\t3\n\t.xword\t");
-		sym_name(c, b, s);
-		tb_c(b, '\n');
+		ctor_entry(c, b, s, true);
 		it_close(e, h);
 	}
 	e->E->nins += e->nin;
@@ -151,10 +194,13 @@ static void finish_direct(ecx *e, uint32_t s, uint32_t align, const int *cs, int
 /* drop each b to a label among those right after it: the code falls through anyway */
 static void drop_fallthrough(ecx *e)
 {
-	uint32_t n = 0;
+	uint32_t n = 0, dj = 0;
 
 	for (uint32_t k = 0; k < e->nin; k++) {
 		const ins *i = &e->in[k];
+
+		if (e->ndl)
+			dbg_remap(e, &dj, k, n);
 
 		if (i->op == I_B) {
 			uint32_t j = k + 1;
@@ -166,6 +212,8 @@ static void drop_fallthrough(ecx *e)
 		}
 		e->in[n++] = *i;
 	}
+	if (e->ndl)
+		dbg_remap(e, &dj, UINT32_MAX, n);
 	e->nin = n;
 }
 
@@ -261,10 +309,26 @@ static void finish_function(ecx *e, uint32_t s)
 		return;
 	}
 	sym_header(e, b, s, true, "\t.text\n", align);
-	/* prologue */
+	uint32_t dj = 0;	/* -g: the next row */
+
+	if (unlikely(e->E->o->debug) && !(leaf && !ncs && !bp)) {
+		/* (none without prologue instructions, as clang) the function's own line, then its first statement's with prologue_end (as clang) */
+		uint32_t f, l, cl;
+
+		/* clang: the line of the body's '{', column 0 */
+		if (dbg_where(e, c->syms[s].body ? N(c->syms[s].body)->loc : c->syms[s].loc, &f, &l, &cl))
+			tb_f(b, "\t.loc\t%u %u 0\n", f, l);
+	}
+	/* prologue; with unwind tables the CFA is x29 + 16 once the frame is set up (as clang) */
+	bool cfi = e->E->o->cfi && !DARWIN(c);
+
+	if (cfi)
+		tb_s(b, "\t.cfi_startproc\n");
 	if (leaf)
 		;
-	else if (tb_s(b, "\tstp\tx29, x30, [sp, #-16]!\n\tmov\tx29, sp\n"), e->falign > 16) {
+	else if (tb_s(b, cfi ? "\tstp\tx29, x30, [sp, #-16]!\n\t.cfi_def_cfa_offset 16\n\tmov\tx29, sp\n"
+			      "\t.cfi_def_cfa w29, 16\n\t.cfi_offset w30, -8\n\t.cfi_offset w29, -16\n" :
+			      "\tstp\tx29, x30, [sp, #-16]!\n\tmov\tx29, sp\n"), e->falign > 16) {
 		ins i = { .op = I_SUBI, .sz = 1, .rd = R_X16, .rn = SP, .imm = total - 16 };
 		ins a = { .op = I_ANDI, .sz = 1, .rd = SP, .rn = R_X16, .imm = -(int64_t)e->falign };
 
@@ -279,6 +343,9 @@ static void finish_function(ecx *e, uint32_t s)
 		tb_f(b, "\tstp\tx%d, x%d, [x29, #%d]\n", cs[k], cs[k + 1], -csave + 8 * k);
 	if (ncs & 1)
 		tb_f(b, "\tstr\tx%d, [x29, #%d]\n", cs[ncs - 1], -csave + 8 * (ncs - 1));
+	if (cfi)
+		for (int k = 0; k < ncs; k++)
+			tb_f(b, "\t.cfi_offset w%d, %d\n", cs[k], -csave + 8 * k - 16);
 	if (bp)
 		tb_s(b, "\tmov\tx28, sp\n");
 	/* text has no relaxation (the object writer's r_relax): in a function that
@@ -288,6 +355,10 @@ static void finish_function(ecx *e, uint32_t s)
 	for (uint32_t k = 0; k < e->nin; k++) {
 		const ins *i = &e->in[k];
 
+		for (; dj < e->ndl && e->dl[dj].k == k; dj++)
+			if (dj + 1 == e->ndl || e->dl[dj + 1].k != k)	/* the last of several at one place */
+				tb_f(b, dj ? "\t.loc\t%u %u %u\n" : "\t.loc\t%u %u %u prologue_end\n",
+				     e->dl[dj].file, e->dl[dj].line, e->dl[dj].col);
 		if (far && ((i->op == I_BC && i->cond < 14) || i->op == I_CBZ || i->op == I_CBNZ)) {
 			ins n = *i;
 
@@ -312,12 +383,19 @@ static void finish_function(ecx *e, uint32_t s)
 		}
 		print_ins(c, b, i, s, e->raw.p);
 	}
+	for (; dj < e->ndl; dj++)
+		if (dj + 1 == e->ndl)
+			tb_f(b, dj ? "\t.loc\t%u %u %u\n" : "\t.loc\t%u %u %u prologue_end\n",
+			     e->dl[dj].file, e->dl[dj].line, e->dl[dj].col);
 	/* epilogue */
 	for (int k = 0; k + 1 < ncs; k += 2)
 		tb_f(b, "\tldp\tx%d, x%d, [x29, #%d]\n", cs[k], cs[k + 1], -csave + 8 * k);
 	if (ncs & 1)
 		tb_f(b, "\tldr\tx%d, [x29, #%d]\n", cs[ncs - 1], -csave + 8 * (ncs - 1));
-	tb_s(b, leaf ? "\tret\n.Lfe" : "\tmov\tsp, x29\n\tldp\tx29, x30, [sp], #16\n\tret\n.Lfe");
+	tb_s(b, leaf ? "\tret\n" : "\tmov\tsp, x29\n\tldp\tx29, x30, [sp], #16\n\tret\n");
+	if (cfi)
+		tb_s(b, "\t.cfi_endproc\n");
+	tb_s(b, ".Lfe");
 	tb_u(b, s);
 	tb_s(b, ":\n\t.size\t");
 	sym_name(c, b, s);
@@ -327,14 +405,10 @@ static void finish_function(ecx *e, uint32_t s)
 	sym_name(c, b, s);
 	tb_c(b, '\n');
 	if (a->constructor) {
-		tb_s(b, "\t.section\t.init_array,\"aw\",@init_array\n\t.p2align\t3\n\t.xword\t");
-		sym_name(c, b, s);
-		tb_c(b, '\n');
+		ctor_entry(c, b, s, false);
 	}
 	if (a->destructor) {
-		tb_s(b, "\t.section\t.fini_array,\"aw\",@fini_array\n\t.p2align\t3\n\t.xword\t");
-		sym_name(c, b, s);
-		tb_c(b, '\n');
+		ctor_entry(c, b, s, true);
 	}
 	e->E->nins += e->nin;
 	e->E->nfn++;
@@ -402,6 +476,7 @@ static bool emit_function1(ecx *e, uint32_t s, int nlreg)
 
 	walk_fn(e, s);
 	e->nin = 0;
+	e->ndl = 0;
 	e->raw.n = 0;
 	e->nlabel = 0;
 	e->nkv = 0, e->kvalid = 0, e->nkvs = 0, e->nael = 0;
@@ -490,8 +565,10 @@ static bool emit_function1(ecx *e, uint32_t s, int nlreg)
 				break;
 			}
 			for (int k = 0; k < ab.nreg; k++) {
-				mem(e, I_LD, 3, 0, R_X16, R_FP, 16 + ab.stk + 8 * k);
-				mem(e, I_ST, 3, 0, R_X16, FRAME, bd->slot + 8 * k);
+				int lg = ab.fsz && ab.size - 8 * k < 8 ? 2 : 3;	/* an Apple float HFA's last part */
+
+				mem(e, I_LD, lg, 0, R_X16, R_FP, 16 + ab.stk + 8 * k);
+				mem(e, I_ST, lg, 0, R_X16, FRAME, bd->slot + 8 * k);
 			}
 			break;
 		case A_REF_REG:

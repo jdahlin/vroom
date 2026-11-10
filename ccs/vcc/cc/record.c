@@ -103,6 +103,7 @@ __attribute__((noinline)) VPRIV void struct_body(cc *c, uint32_t ti)
 					t = prim(k);
 			}
 			f.ty = t;
+			f.tdef = ds.tdef && QUNQ(t) == QUNQ(ds.ty) ? ds.tdef : 0;
 			f.counted_by = d.at.counted_by;
 			if (is_func(c, t))
 				cc_error(c, d.loc, "field has function type");
@@ -135,6 +136,8 @@ __attribute__((noinline)) VPRIV void struct_body(cc *c, uint32_t ti)
 	memcpy(r->f, &x->fs[base], nf * sizeof(field));
 	fs = r->f;
 	r->nfield = nf;
+	tag_deprecate(c, ti, &post);
+	r = &c->tags[ti];
 	if (post.packed)
 		r->flags |= RF_PACKED;
 	if (post.aligned > r->maxalign)
@@ -185,8 +188,21 @@ VPRIV void enum_body(cc *c, uint32_t ti, attrs *after)
 		if (!any || v > mx)
 			mx = v;
 		any = true;
+		{
+			uint32_t o = lookup(c, name);
+
+			if (o && c->syms[o].depth == c->depth && c->syms[o].kind != S_TAG) {
+				if (c->syms[o].kind == S_ENUMCONST)
+					cc_error(c, loc, "redefinition of enumerator '%.*s'", IDF(name));
+				else
+					cc_error(c, loc, "redefinition of '%.*s' as different kind of symbol", IDF(name));
+				note(c, c->syms[o].loc, "previous definition is here");
+			}
+		}
 		s = sym_new(c, S_ENUMCONST, name, v >= INT32_MIN && v <= INT32_MAX ? prim(TY_INT) :
-						 v >= 0 && v <= UINT32_MAX ? prim(TY_UINT) : v >= INT64_MIN && v <= INT64_MAX ? prim(TY_LONG) : prim(TY_ULONG), loc);
+						 v >= 0 && v <= UINT32_MAX ? prim(TY_UINT) : v >= INT64_MIN && v <= INT64_MAX ? prim(CC_I64(c, false)) : prim(CC_I64(c, true)), loc);
+		if (unlikely(ea.depr))
+			apply_sym_attrs(c, &c->syms[s], &ea);
 		c->syms[s].val = (int64_t)v;
 		sym_bind(c, s);
 		vpush(c, &cs, s);
@@ -204,14 +220,14 @@ VPRIV void enum_body(cc *c, uint32_t ti, attrs *after)
 		} else if (after->packed) {
 			if (mn < 0)
 				best = mn >= INT8_MIN && mx <= INT8_MAX ? prim(TY_SCHAR) : mn >= INT16_MIN && mx <= INT16_MAX ? prim(TY_SHORT) :
-				       mn >= INT32_MIN && mx <= INT32_MAX ? prim(TY_INT) : prim(TY_LONG);
+				       mn >= INT32_MIN && mx <= INT32_MAX ? prim(TY_INT) : prim(CC_I64(c, false));
 			else
 				best = mx <= UINT8_MAX ? prim(TY_UCHAR) : mx <= UINT16_MAX ? prim(TY_USHORT) :
-				       mx <= UINT32_MAX ? prim(TY_UINT) : prim(TY_ULONG);
+				       mx <= UINT32_MAX ? prim(TY_UINT) : prim(CC_I64(c, true));
 		} else if (mn < 0) {
-			best = mn >= INT32_MIN && mx <= INT32_MAX ? prim(TY_INT) : prim(TY_LONG);
+			best = mn >= INT32_MIN && mx <= INT32_MAX ? prim(TY_INT) : prim(CC_I64(c, false));
 		} else {
-			best = mx <= UINT32_MAX ? prim(TY_UINT) : prim(TY_ULONG);
+			best = mx <= UINT32_MAX ? prim(TY_UINT) : prim(CC_I64(c, true));
 		}
 		et->base = best;
 		et->size = ty_size(c, best);

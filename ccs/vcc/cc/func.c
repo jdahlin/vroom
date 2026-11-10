@@ -118,18 +118,42 @@ VPRIV void function_def(cc *c, uint32_t s, const declr *d)
 		note(c, c->syms[s].loc, "previous definition is here");
 	}
 	c->syms[s].flags |= SF_DEFINED;
+	c->syms[s].defloc = d->loc;
 	c->fn = s;
 	scope_open(c);
 	for (uint32_t i = 0; i < d->npsyms; i++) {
 		uint32_t p = c->lists[d->psyms + i];
 
-		if (!c->syms[p].name)
-			continue;	/* C23: unnamed parameters in definitions (clang accepts) */
+		if (!c->syms[p].name) {	/* C23: unnamed parameters in definitions */
+			if (kwmap != kwmap_c23 && KIND(c, c->syms[p].ty) != TY_VOID)
+				cc_warnx(c, "c23-extensions", true, NULL, c->syms[p].loc, NULL, 0, NULL, 0,
+					 "omitting the parameter name in a function definition is a C23 extension");
+			continue;
+		}
 		sym_bind(c, p);
 	}
 	c->in_loop = c->in_switch = 0;
+	c->nrtd = 0;
 	body = compound_stmt(c, NULL);
 	scope_close(c);
+	rt_flush(c);	/* (clang: only if reachable; vcc: not under a constant-false condition) */
+	{
+		uint32_t rb = c->prevloc;	/* the closing brace */
+		const sym *y = &c->syms[s];
+		bool nr = y->flags & SF_NORETURN;
+		qty rt = T(c, y->ty)->base;
+		bool main_ = idlen_(y->name) == 4 && !memcmp(idstr_(y->name), "main", 4);
+
+		if (nr || (!is_void(c, rt) && !main_)) {
+			int k = body_falls_off(c, body, first_label);
+
+			if (k && nr)
+				cc_warnx(c, "invalid-noreturn", true, NULL, rb, NULL, 0, NULL, 0, "function declared 'noreturn' should not return");
+			else if (k)
+				cc_warnx(c, "return-type", true, NULL, rb, NULL, 0, NULL, 0, "non-void function does not return a value%s",
+					 k == 1 ? " in all control paths" : "");
+		}
+	}
 	{
 		/* side effects of decayed VLA parameter sizes run first, in order */
 		vec items;

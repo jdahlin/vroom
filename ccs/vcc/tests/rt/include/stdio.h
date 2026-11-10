@@ -35,4 +35,5 @@ int feof(FILE *);
 int sscanf(const char *, const char *, ...);
 void perror(const char *);
 int remove(const char *);
+char *tmpnam(char *);
 #endif

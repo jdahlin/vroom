@@ -324,6 +324,30 @@ static unsigned enc(const ins *i, uint32_t *w, pfix *f, const uint32_t *loff, ui
 		w[0] = (uint32_t)i->imm;
 		return 1;
 	case I_TLV:
+		switch (i->cond) {
+		case TLS_LE:	/* mrs x1, tpidr_el0; add x0, x1, :tprel_hi12:; add x0, x0, :tprel_lo12_nc: */
+			w[0] = 0xd53bd041u;
+			w[1] = 0x91400020u;
+			w[2] = 0x91000000u;
+			*f = (pfix){ 1, 0, R_AARCH64_TLSLE_ADD_TPREL_HI12, i->ref, 0 };
+			return 3;
+		case TLS_IE:	/* mrs x1, tpidr_el0; adrp x0, :gottprel:; ldr x0, [x0, :gottprel_lo12:]; add x0, x1, x0 */
+			w[0] = 0xd53bd041u;
+			w[1] = 0x90000000u;
+			w[2] = a64_ldst_uoff(3, 0, 1, 0, 0, 0);
+			w[3] = 0x8b000020u;
+			*f = (pfix){ 1, 0, R_AARCH64_TLSIE_ADR_GOTTPREL_PAGE21, i->ref, 0 };
+			return 4;
+		case TLS_DESC:	/* adrp x0; ldr x1, [x0]; add x0, x0; blr x1 (.tlsdesccall); mrs x1, tpidr_el0; add x0, x1, x0 */
+			w[0] = 0x90000000u;
+			w[1] = a64_ldst_uoff(3, 0, 1, 1, 0, 0);
+			w[2] = 0x91000000u;
+			w[3] = a64_blr(1);
+			w[4] = 0xd53bd041u;
+			w[5] = 0x8b000020u;
+			*f = (pfix){ 0, 0, R_AARCH64_TLSDESC_ADR_PAGE21, i->ref, 0 };
+			return 6;
+		}
 		/* adrp x0, ref@TLVPPAGE; ldr x0, [x0, ref@TLVPPAGEOFF]; ldr x16, [x0]; blr x16 */
 		w[0] = 0x90000000u;
 		w[1] = a64_ldst_uoff(3, 0, 1, 0, 0, 0);
@@ -339,6 +363,26 @@ static int r_fail(rctx *R, const char *msg)
 {
 	elf_error(R->o, "%s", msg);
 	return -1;
+}
+
+/* the fixups after an instruction's first: off is where the instruction starts */
+static void more_fixups(ElfObj *o, uint32_t frag, uint64_t off, uint8_t *p, const ins *i, uint32_t y, As *as)
+{
+	if (i->op == I_LDGOT)
+		elf_fixup(o, frag, off + 4, p + 4, R_AARCH64_LD64_GOT_LO12_NC, as_val(as, y, 0));
+	else if (i->op != I_TLV)
+		return;
+	else if (i->cond == 0)
+		elf_fixup(o, frag, off + 4, p + 4, R_VCC_TLVP_PAGEOFF12, as_val(as, y, 0));
+	else if (i->cond == TLS_LE)
+		elf_fixup(o, frag, off + 8, p + 8, R_AARCH64_TLSLE_ADD_TPREL_LO12_NC, as_val(as, y, 0));
+	else if (i->cond == TLS_IE)
+		elf_fixup(o, frag, off + 8, p + 8, R_AARCH64_TLSIE_LD64_GOTTPREL_LO12_NC, as_val(as, y, 0));
+	else {
+		elf_fixup(o, frag, off + 4, p + 4, R_AARCH64_TLSDESC_LD64_LO12, as_val(as, y, 0));
+		elf_fixup(o, frag, off + 8, p + 8, R_AARCH64_TLSDESC_ADD_LO12, as_val(as, y, 0));
+		elf_fixup(o, frag, off + 12, p + 12, R_AARCH64_TLSDESC_CALL, as_val(as, y, 0));
+	}
 }
 
 /* emit one instruction's words at the end of frag, with its fixup(s) */
@@ -357,9 +401,7 @@ static void r_words(rctx *R, uint32_t frag, const uint32_t *w, unsigned n, const
 		uint32_t y = f->lbl ? r_label(R, fid, f->ref) : r_sym(R, f->ref);
 
 		elf_fixup(o, frag, off + 4u * f->k, p + 4 * f->k, f->type, as_val(R->as, y, f->off));
-		if (i->op == I_LDGOT || i->op == I_TLV)
-			elf_fixup(o, frag, off + 4, p + 4, i->op == I_TLV ? R_VCC_TLVP_PAGEOFF12 : R_AARCH64_LD64_GOT_LO12_NC,
-				  as_val(R->as, y, 0));
+		more_fixups(o, frag, off, p, i, y, R->as);
 	}
 }
 
@@ -574,11 +616,8 @@ static int r_code(rctx *R, const code_hdr *h)
 			if (g->lbl)
 				continue;
 			y = r_sym(R, g->ref);
-			elf_fixup(o, frag, base + 4u * a, p + 4 * a, g->type, as_val(R->as, y, g->off));
-			if (in[pt[j].k].op == I_LDGOT || in[pt[j].k].op == I_TLV)
-				elf_fixup(o, frag, base + 4u * a + 4, p + 4 * a + 4,
-					  in[pt[j].k].op == I_TLV ? R_VCC_TLVP_PAGEOFF12 : R_AARCH64_LD64_GOT_LO12_NC,
-					  as_val(R->as, y, 0));
+			elf_fixup(o, frag, base + 4u * (a + g->k), p + 4 * (a + g->k), g->type, as_val(R->as, y, g->off));
+			more_fixups(o, frag, base + 4u * a, p + 4 * a, &in[pt[j].k], y, R->as);
 		}
 		return 0;
 	}

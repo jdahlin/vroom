@@ -177,6 +177,8 @@ static qty typeof_spec(cc *c, bool unqual)
 	qty t;
 
 	next(c);
+	uint32_t loc = tok(c)->loc;	/* clang: at the '(' */
+
 	expect(c, T_LPAREN, "'('");
 	if (is_type_start(c, tok(c))) {
 		t = type_name(c);
@@ -186,6 +188,8 @@ static qty typeof_spec(cc *c, bool unqual)
 		c->unevaluated++;
 		n = expr(c);
 		c->unevaluated--;
+		if (bitfield_of(c, n))
+			cc_error(c, loc, "invalid application of 'typeof' to bit-field");
 		t = N(n)->ty;
 	}
 	expect(c, T_RPAREN, "')'");
@@ -220,7 +224,13 @@ VPRIV bool decl_specs(cc *c, dspec *ds, bool allow_sc)
 				continue;
 			}
 			if (!have_named && !base && !nlong && !sgn && t->kind == T_IDENT && typedef_id(c, t->id)) {
-				named = c->syms[lookup(c, t->id)].ty;
+				uint32_t ts = lookup(c, t->id);
+
+				if (unlikely(c->syms[ts].flags & SF_DEPRECATED))
+					deprecated_use(c, t->loc, t->id, &c->attr[c->syms[ts].attrs]);
+				named = c->syms[ts].ty;
+				ds->tdef = ts;
+				c->syms[ts].flags |= SF_REF;	/* (-Wunused-local-typedef) */
 				have_named = true;
 				any = true;
 				next(c);
@@ -280,7 +290,7 @@ VPRIV bool decl_specs(cc *c, dspec *ds, bool allow_sc)
 		case KW___extension__:
 			break;
 		case KW__Alignas: {
-			uint32_t a;
+			uint32_t a, aloc = t->loc;
 
 			next(c);
 			expect(c, T_LPAREN, "'('");
@@ -288,9 +298,15 @@ VPRIV bool decl_specs(cc *c, dspec *ds, bool allow_sc)
 				a = ty_align(c, type_name(c));
 			} else {
 				i128 v;
+				uint32_t vn = 0;
 
-				const_expr(c, &v, NULL);
-				a = (uint32_t)v;
+				const_expr(c, &v, &vn);
+				if (v < 0 || (v & (v - 1))) {	/* 0: no effect (C11) */
+					pp_span r = rng(c, vn);
+
+					report(c, "error", aloc, &r, vn ? 1 : 0, NULL, 0, "requested alignment is not a power of 2");
+				}
+				a = v < 0 || (v & (v - 1)) ? 0 : (uint32_t)v;
 			}
 			expect(c, T_RPAREN, "')'");
 			if (a > ds->align)
@@ -354,9 +370,12 @@ VPRIV bool decl_specs(cc *c, dspec *ds, bool allow_sc)
 			}
 			body = is(c, T_LBRACE) || (kind == TY_ENUM && is(c, T_COLON));
 			ti = tag_lookup_or_new(c, kind, name, loc, body, !body && is(c, T_SEMI) && !c->in_struct);
+			if (!body && c->tags[ti].depr)
+				deprecated_use(c, loc, name, &c->attr[c->tags[ti].depr]);
 			if (body) {
 				tag *r = &c->tags[ti];
 
+				tag_deprecate(c, ti, &pre);
 				if (r->flags & RF_COMPLETE) {
 					cc_error(c, loc, "redefinition of '%.*s'", IDF(name));
 					note(c, r->loc, "previous definition is here");

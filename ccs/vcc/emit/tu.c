@@ -1,5 +1,7 @@
 /* vcc code generator: emitter state, the work queue and threads, emit_tu */
 #include "emitimpl.h"
+#include "../arch/wasm/as/wasmas.h"
+#include "../lib/buf.h"
 
 VPRIV void *reserve(size_t n) { return vreserve(n, MAP_NORESERVE, "vcc: mmap"); }
 
@@ -63,6 +65,18 @@ VPRIV void enqueue(emitter *E, uint32_t item)
 }
 
 /* the regions of a ctx[i] (ecx_init takes a set, ecx_free gives it back) */
+/* a quoted assembler string */
+static void dbg_str(tbuf *b, const char *s)
+{
+	tb_c(b, '"');
+	for (; *s; s++) {
+		if (*s == '"' || *s == '\\')
+			tb_c(b, '\\');
+		tb_c(b, *s);
+	}
+	tb_c(b, '"');
+}
+
 static vmpool ecxpool = VMPOOL_INIT(15);
 
 static void ecx_init(ecx *e, emitter *E, vmreg *r)
@@ -115,6 +129,7 @@ static void ecx_free(ecx *e, vmreg *r)
 	vmreg_put(&r[13], VMREG_SCRATCH);	/* (copied by keep_make before this) */
 	vmreg_put(&r[14], VMREG_SCRATCH);
 	vmpool_give(&ecxpool, r);
+	wasm_ecx_free(e);
 }
 
 /* a function the previous round generated, if nothing it asked about has been marked since */
@@ -156,7 +171,9 @@ static void do_item(ecx *e, uint32_t it)
 		emit_string(e, it & 0x7fffffffu);
 		return;
 	}
-	if (c->syms[it].kind == S_FUNC) {
+	if (c->syms[it].kind == S_FUNC && WASM(c)) {
+		wasm_emit_function(e, it);
+	} else if (c->syms[it].kind == S_FUNC) {
 		if (!reuse(e, it))
 			emit_function(e, it);
 	} else {
@@ -386,6 +403,7 @@ static int emit_tu1(cc *c, const cc_opts *o, bool write_out, uint8_t *mf, bool *
 	pthread_cond_init(&E.cv, NULL);
 	pthread_mutex_init(&E.cmu, NULL);
 	pthread_mutex_init(&E.emu, NULL);
+	pthread_mutex_init(&E.dmu, NULL);
 	E.walked = vmreg_get(&er[9], c->nsym + 64, "emit.walked");
 	E.fnsize = vmreg_get(&er[10], (c->nsym + 64) * sizeof(uint16_t), "emit.fnsize");
 	E.cwval = vmreg_get(&er[11], (c->nsym + 64) * sizeof(i128), "emit.cwval");
@@ -401,7 +419,14 @@ static int emit_tu1(cc *c, const cc_opts *o, bool write_out, uint8_t *mf, bool *
 	}
 	E.stats = getenv("VCC_EMIT_STATS") != NULL;
 	E.noopt = getenv("VCC_NOOPT") != NULL;
-	E.objtext = getenv("VCC_OBJ_TEXT") != NULL;
+	/* wasm64: objects from the text, through arch/wasm/as */
+	E.objtext = getenv("VCC_OBJ_TEXT") != NULL || PP_IS_WASM(o->target);
+	/* -g: the line table is the assembler's, from the printer's .loc */
+	if (o->debug && !DARWIN(c) && !WASM(c))
+		E.objtext = true;
+	/* unwind tables: .eh_frame is the assembler's, from the printer's .cfi_* */
+	if (o->cfi && !DARWIN(c) && !WASM(c))
+		E.objtext = true;
 	/* roots */
 	for (uint32_t i = 0; i < c->ntoplevel; i++) {
 		uint32_t s = c->toplevel[i];
@@ -436,12 +461,30 @@ static int emit_tu1(cc *c, const cc_opts *o, bool write_out, uint8_t *mf, bool *
 	/* stitch */
 	qsort(E.chunks, E.nchunk, sizeof(chunk), chunk_cmp);
 	tb_reg(&hdr, &er[12], (size_t)1 << 26, "emit.hdr");
-	tb_s(&hdr, "\t.text\n");
+	if (WASM(c))
+		wasm_header(c, &hdr, ctx, nthr);
+	else
+		tb_s(&hdr, "\t.text\n");
+	bool dbg = o->debug && !DARWIN(c) && !WASM(c);
+	if (dbg) {
+		tb_s(&hdr, ".Ldbg_text0:\n\t.file\t0 ");
+		dbg_str(&hdr, o->dbg_dir ? o->dbg_dir : ".");
+		tb_c(&hdr, ' ');
+		dbg_str(&hdr, o->dbg_name ? o->dbg_name : "<stdin>");
+		tb_c(&hdr, '\n');
+		for (uint32_t i = 0; i < E.ndfile; i++) {
+			tb_f(&hdr, "\t.file\t%u ", i + 1);
+			dbg_str(&hdr, E.dfile[i]);
+			tb_c(&hdr, '\n');
+			free(E.dfile[i]);
+		}
+		free(E.dfile);
+	}
 	for (uint32_t i = 0; i < c->ntlasm; i++) {
 		const casm *a = &c->asms[N(c->tlasm[i])->a];
 
 		tb_s(&hdr, c->strs[a->tmpl - 1].s);
-		tb_s(&hdr, "\n\t.text\n");
+		tb_s(&hdr, WASM(c) ? "\n" : "\n\t.text\n");
 	}
 	{
 		tbuf tail;
@@ -478,14 +521,15 @@ static int emit_tu1(cc *c, const cc_opts *o, bool write_out, uint8_t *mf, bool *
 				const attrs *a = sym_attrs(c, s);
 
 				/* Darwin: clang's (#pragma weak) aliases are local, .weak_reference on a definition */
-				tb_s(&tail, DARWIN(c) ? "" : (y->flags & SF_WEAK) ? "\t.weak\t" : y->sc == SC_STATIC ? "" : "\t.globl\t");
-				if (!DARWIN(c) && (y->sc != SC_STATIC || (y->flags & SF_WEAK))) {
+				/* clang: an ifunc is global even when static */
+				tb_s(&tail, DARWIN(c) ? "" : (y->flags & SF_WEAK) ? "\t.weak\t" : y->sc == SC_STATIC && !a->ifunc ? "" : "\t.globl\t");
+				if (!DARWIN(c) && (y->sc != SC_STATIC || (y->flags & SF_WEAK) || a->ifunc)) {
 					sym_name(c, &tail, s);
 					tb_c(&tail, '\n');
 				}
 				tb_s(&tail, "\t.type\t");
 				sym_name(c, &tail, s);
-				tb_s(&tail, y->kind == S_FUNC ? ",@function\n" : ",@object\n");
+				tb_s(&tail, a->ifunc ? ",@gnu_indirect_function\n" : y->kind == S_FUNC ? ",@function\n" : ",@object\n");
 				tb_s(&tail, "\t.set\t");
 				sym_name(c, &tail, s);
 				tb_s(&tail, DARWIN(c) ? ", _" : ", ");	/* (an assembler name: Mach-O's prefix) */
@@ -493,7 +537,25 @@ static int emit_tu1(cc *c, const cc_opts *o, bool write_out, uint8_t *mf, bool *
 				tb_c(&tail, '\n');
 			}
 		}
-		tb_s(&tail, "\t.section\t\".note.GNU-stack\",\"\",@progbits\n");
+		if (dbg) {
+			/* one compile unit over .text: producer, C11, name, its line table, dir, pc range */
+			tb_s(&tail, "\t.text\n.Ldbg_text1:\n"
+				    "\t.section\t.debug_abbrev,\"\",@progbits\n.Ldbg_abbrev:\n"
+				    "\t.byte\t1, 17, 0, 37, 8, 19, 5, 3, 8, 16, 23, 27, 8, 17, 1, 18, 6, 0, 0, 0\n"
+				    "\t.section\t.debug_info,\"\",@progbits\n"
+				    "\t.word\t.Ldbg_cu_end-.Ldbg_cu_start\n.Ldbg_cu_start:\n"
+				    "\t.hword\t5\n\t.byte\t1, 8\n\t.word\t.Ldbg_abbrev\n\t.byte\t1\n\t.asciz\t\"vcc\"\n"
+				    "\t.hword\t29\n\t.asciz\t");
+			dbg_str(&tail, o->dbg_name ? o->dbg_name : "<stdin>");
+			tb_s(&tail, "\n\t.word\t.Lline_table_start0\n\t.asciz\t");
+			dbg_str(&tail, o->dbg_dir ? o->dbg_dir : ".");
+			tb_s(&tail, "\n\t.xword\t.Ldbg_text0\n\t.word\t.Ldbg_text1-.Ldbg_text0\n.Ldbg_cu_end:\n"
+				    "\t.section\t.debug_line,\"\",@progbits\n.Lline_table_start0:\n");
+		}
+		if (WASM(c))
+			wasm_tail(c, &tail, E.claimed);
+		else
+			tb_s(&tail, "\t.section\t\".note.GNU-stack\",\"\",@progbits\n");
 		iov[k++] = (struct iovec){ hdr.p, hdr.n };
 		for (uint32_t i = 0; i < E.nchunk; i++)
 			iov[k++] = (struct iovec){ (void *)E.chunks[i].p, E.chunks[i].n };
@@ -512,7 +574,20 @@ static int emit_tu1(cc *c, const cc_opts *o, bool write_out, uint8_t *mf, bool *
 				all.n = 0;
 				for (int i = 0; i < k; i++)
 					tb_put(&all, iov[i].iov_base, iov[i].iov_len);
-				if (as_run(o->as, o->obj, all.p, all.n, "<vcc>", &msg)) {
+				if (PP_IS_WASM(o->target)) {
+					uint8_t *ob;
+					size_t on;
+					char err[512];
+
+					if (wasm_assemble(all.p, all.n, o->target == PP_WASM32, &ob, &on, err, sizeof err)) {
+						as_error(c, "assembler: %s", err);
+						E.errors++;
+					} else {
+						o->wasm_obj->n = 0;
+						vbuf_put(o->wasm_obj, ob, on);
+						free(ob);
+					}
+				} else if (as_run(o->as, o->obj, all.p, all.n, "<vcc>", &msg)) {
 					as_error(c, "assembler: %s", msg);
 					E.errors++;
 				}

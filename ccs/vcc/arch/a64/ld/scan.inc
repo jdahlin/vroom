@@ -53,7 +53,11 @@ static void scan_relocs(void *arg, size_t i)
 			continue;
 		}
 		reloc_class(o, symi, &t);
-		if (t.discarded && (is->flags & SHF_ALLOC))
+		if (symi >= o->firstg && (is->flags & SHF_ALLOC) && gsyms[o->gs[symi - o->firstg]].demoted)
+			/* lld: its winning definition is in a dropped COMDAT member or /DISCARD/ */
+			error("relocation refers to a symbol in a discarded section: %s\n>>> defined in %s\n>>> referenced by %s",
+			      gname(o->gs[symi - o->firstg]), objs.v[gsyms[o->gs[symi - o->firstg]].obj]->path, o->path);
+		else if (t.discarded && (is->flags & SHF_ALLOC))
 			error("%s:(%s+0x%llx): relocation refers to a discarded section", o->path, is->name,
 			      (unsigned long long)rl->r_offset);
 		switch (type) {
@@ -73,6 +77,25 @@ static void scan_relocs(void *arg, size_t i)
 		case R_AARCH64_LDST8_ABS_LO12_NC: case R_AARCH64_LDST16_ABS_LO12_NC:
 		case R_AARCH64_LDST32_ABS_LO12_NC: case R_AARCH64_LDST64_ABS_LO12_NC:
 		case R_AARCH64_LDST128_ABS_LO12_NC: case R_AARCH64_LD_PREL_LO19:
+			break;
+		case R_AARCH64_ADR_GOT_PAGE: case R_AARCH64_LD64_GOT_LO12_NC:
+			if (symi < o->firstg)
+				atomic_store_explicit(&o->lgot[symi], 1, memory_order_relaxed);
+			else
+				atomic_store(&gsyms[o->gs[symi - o->firstg]].needgot, 1);
+			break;
+		/* TLS: local-exec, and initial-exec/TLSDESC relaxed to it (an executable, as lld) */
+		case R_AARCH64_TLSLE_ADD_TPREL_HI12: case R_AARCH64_TLSLE_ADD_TPREL_LO12:
+		case R_AARCH64_TLSLE_ADD_TPREL_LO12_NC:
+		case R_AARCH64_TLSIE_ADR_GOTTPREL_PAGE21: case R_AARCH64_TLSIE_LD64_GOTTPREL_LO12_NC:
+		case R_AARCH64_TLSDESC_ADR_PAGE21: case R_AARCH64_TLSDESC_LD64_LO12:
+		case R_AARCH64_TLSDESC_ADD_LO12: case R_AARCH64_TLSDESC_CALL:
+			if (opt.shared || opt.relocatable)
+				error("%s:(%s+0x%llx): TLS relocation %u in a shared object is not supported", o->path,
+				      is->name, (unsigned long long)rl->r_offset, type);
+			else if (t.undef)
+				error("%s:(%s+0x%llx): TLS relocation against an undefined symbol", o->path, is->name,
+				      (unsigned long long)rl->r_offset);
 			break;
 		default:
 			error("%s:(%s+0x%llx): unsupported relocation type %u", o->path, is->name,

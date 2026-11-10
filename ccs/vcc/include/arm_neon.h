@@ -158,4 +158,106 @@ typedef struct uint8x16x4_t { uint8x16_t val[4]; } uint8x16x4_t;
 #define vtrn1q_u64(a, b) __VCC_V3(uint64x2_t, "trn1", "2d", a, b)
 #define vtrn2q_u64(a, b) __VCC_V3(uint64x2_t, "trn2", "2d", a, b)
 
+/*
+ * Other targets (vcc built for WebAssembly by itself, W6): the intrinsics
+ * written as inline asm above, lane by lane in C with the same results.
+ */
+#ifndef __aarch64__
+#define __VCC_L1(T, n, a, e) ({ T __r, __a = (a); for (int __k = 0; __k < (n); __k++) __r[__k] = (e); __r; })
+#define __VCC_L2(T, n, a, b, e) ({ T __r, __a = (a), __b = (b); for (int __k = 0; __k < (n); __k++) __r[__k] = (e); __r; })
+#define __VCC_POP8(x) ({ unsigned __x = (x); __x = __x - ((__x >> 1) & 0x55); __x = (__x & 0x33) + ((__x >> 2) & 0x33); \
+	(unsigned char)((__x + (__x >> 4)) & 0x0f); })
+#undef vdupq_n_u8
+#undef vdupq_n_u64
+#undef vdupq_n_u32
+#undef vextq_u8
+#undef vextq_u64
+#undef vshrq_n_u8
+#undef vshrq_n_s8
+#undef vshlq_n_u8
+#undef vshrq_n_u64
+#undef vshlq_n_u64
+#undef vqtbl1q_u8
+#undef vtbl2_u8
+#undef vmulq_p8
+#undef vmull_p64
+#undef vmull_high_p64
+#undef vsriq_n_u8
+#undef __VCC_CMP
+#undef vceqq_u8
+#undef vtstq_u8
+#undef vcleq_u8
+#undef __VCC_V3
+#undef vqsubq_u8
+#undef vminq_u8
+#undef vmaxq_u8
+#undef vceqq_u32
+#undef vzip1q_u8
+#undef vcntq_u8
+#undef vcnt_u8
+#undef vpaddlq_u8
+#undef vpaddlq_u16
+#undef vpadalq_u32
+#undef vmaxvq_u8
+#undef vmaxvq_u32
+#undef vaddvq_u16
+#undef vaddv_u8
+#undef vaddvq_u64
+#undef vrev32q_u16
+#undef vshlq_n_u32
+#undef vsriq_n_u32
+#undef vtrn1q_u32
+#undef vtrn2q_u32
+#undef vtrn1q_u64
+#undef vtrn2q_u64
+#define vdupq_n_u8(x) ({ unsigned char __x = (unsigned char)(x); uint8x16_t __r; for (int __k = 0; __k < 16; __k++) __r[__k] = __x; __r; })
+#define vdupq_n_u32(x) ({ unsigned int __x = (unsigned int)(x); uint32x4_t __r = { __x, __x, __x, __x }; __r; })
+#define vdupq_n_u64(x) ({ unsigned long long __x = (unsigned long long)(x); uint64x2_t __r = { __x, __x }; __r; })
+#define vextq_u8(a, b, n) __VCC_L2(uint8x16_t, 16, a, b, __k + (n) < 16 ? __a[__k + (n)] : __b[__k + (n) - 16])
+#define vextq_u64(a, b, n) __VCC_L2(uint64x2_t, 2, a, b, __k + (n) < 2 ? __a[__k + (n)] : __b[__k + (n) - 2])
+#define vshrq_n_u8(a, n) __VCC_L1(uint8x16_t, 16, a, (unsigned char)(__a[__k] >> (n)))
+#define vshrq_n_s8(a, n) __VCC_L1(int8x16_t, 16, a, (signed char)(__a[__k] >> (n)))
+#define vshlq_n_u8(a, n) __VCC_L1(uint8x16_t, 16, a, (unsigned char)(__a[__k] << (n)))
+#define vshrq_n_u64(a, n) __VCC_L1(uint64x2_t, 2, a, __a[__k] >> (n))
+#define vshlq_n_u64(a, n) __VCC_L1(uint64x2_t, 2, a, __a[__k] << (n))
+#define vshlq_n_u32(a, n) __VCC_L1(uint32x4_t, 4, a, __a[__k] << (n))
+#define vqtbl1q_u8(t, i) __VCC_L2(uint8x16_t, 16, t, i, __b[__k] < 16 ? __a[__b[__k]] : 0)
+#define vtbl2_u8(t, i) ({ uint8x8x2_t __t = (t); uint8x16_t __q = vcombine_u8(__t.val[0], __t.val[1]); \
+	uint8x8_t __i = (i), __r; for (int __k = 0; __k < 8; __k++) __r[__k] = __i[__k] < 16 ? __q[__i[__k]] : 0; __r; })
+#define vmulq_p8(a, b) ({ poly8x16_t __r, __a = (a), __b = (b); for (int __k = 0; __k < 16; __k++) { unsigned __p = 0; \
+	for (int __j = 0; __j < 8; __j++) if (__b[__k] >> __j & 1) __p ^= (unsigned)__a[__k] << __j; __r[__k] = (unsigned char)__p; } __r; })
+#define __VCC_PMULL(x, y) ({ unsigned long long __x = (x), __y = (y); poly128_t __p = 0; \
+	for (int __j = 0; __j < 64; __j++) if (__y >> __j & 1) __p ^= (poly128_t)__x << __j; __p; })
+#define vmull_p64(a, b) __VCC_PMULL(a, b)
+#define vmull_high_p64(a, b) ({ poly64x2_t __ha = (a), __hb = (b); __VCC_PMULL(__ha[1], __hb[1]); })
+#define vsriq_n_u8(a, b, n) __VCC_L2(uint8x16_t, 16, a, b, (unsigned char)((__a[__k] & ~(0xffu >> (n))) | (__b[__k] >> (n))))
+#define vsriq_n_u32(a, b, n) __VCC_L2(uint32x4_t, 4, a, b, (n) >= 32 ? __a[__k] : (__a[__k] & ~(0xffffffffu >> (n))) | (__b[__k] >> (n)))
+#define vceqq_u8(a, b) __VCC_L2(uint8x16_t, 16, a, b, __a[__k] == __b[__k] ? 0xff : 0)
+#define vtstq_u8(a, b) __VCC_L2(uint8x16_t, 16, a, b, (__a[__k] & __b[__k]) ? 0xff : 0)
+#define vcleq_u8(a, b) __VCC_L2(uint8x16_t, 16, a, b, __a[__k] <= __b[__k] ? 0xff : 0)
+#define vqsubq_u8(a, b) __VCC_L2(uint8x16_t, 16, a, b, __a[__k] > __b[__k] ? __a[__k] - __b[__k] : 0)
+#define vminq_u8(a, b) __VCC_L2(uint8x16_t, 16, a, b, __a[__k] < __b[__k] ? __a[__k] : __b[__k])
+#define vmaxq_u8(a, b) __VCC_L2(uint8x16_t, 16, a, b, __a[__k] > __b[__k] ? __a[__k] : __b[__k])
+#define vceqq_u32(a, b) __VCC_L2(uint32x4_t, 4, a, b, __a[__k] == __b[__k] ? 0xffffffffu : 0)
+#define vzip1q_u8(a, b) __VCC_L2(uint8x16_t, 16, a, b, __k & 1 ? __b[__k >> 1] : __a[__k >> 1])
+#define vtrn1q_u32(a, b) __VCC_L2(uint32x4_t, 4, a, b, __k & 1 ? __b[__k - 1] : __a[__k])
+#define vtrn2q_u32(a, b) __VCC_L2(uint32x4_t, 4, a, b, __k & 1 ? __b[__k] : __a[__k + 1])
+#define vtrn1q_u64(a, b) __VCC_L2(uint64x2_t, 2, a, b, __k ? __b[0] : __a[0])
+#define vtrn2q_u64(a, b) __VCC_L2(uint64x2_t, 2, a, b, __k ? __b[1] : __a[1])
+#define vrev32q_u16(a) __VCC_L1(uint16x8_t, 8, a, __a[__k ^ 1])
+#define vcntq_u8(a) __VCC_L1(uint8x16_t, 16, a, __VCC_POP8(__a[__k]))
+#define vcnt_u8(a) __VCC_L1(uint8x8_t, 8, a, __VCC_POP8(__a[__k]))
+#define vpaddlq_u8(a) ({ uint8x16_t __a = (a); uint16x8_t __r; for (int __k = 0; __k < 8; __k++) \
+	__r[__k] = (unsigned short)(__a[2 * __k] + __a[2 * __k + 1]); __r; })
+#define vpaddlq_u16(a) ({ uint16x8_t __a = (a); uint32x4_t __r; for (int __k = 0; __k < 4; __k++) \
+	__r[__k] = (unsigned)__a[2 * __k] + __a[2 * __k + 1]; __r; })
+#define vpadalq_u32(a, b) ({ uint64x2_t __r = (a); uint32x4_t __b = (b); for (int __k = 0; __k < 2; __k++) \
+	__r[__k] += (unsigned long long)__b[2 * __k] + __b[2 * __k + 1]; __r; })
+#define vmaxvq_u8(a) ({ uint8x16_t __a = (a); uint8_t __m = 0; for (int __k = 0; __k < 16; __k++) if (__a[__k] > __m) __m = __a[__k]; __m; })
+#define vmaxvq_u32(a) ({ uint32x4_t __a = (a); uint32_t __m = 0; for (int __k = 0; __k < 4; __k++) if (__a[__k] > __m) __m = __a[__k]; __m; })
+#define vaddvq_u16(a) ({ uint16x8_t __a = (a); uint16_t __s = 0; for (int __k = 0; __k < 8; __k++) __s += __a[__k]; __s; })
+#define vaddv_u8(a) ({ uint8x8_t __a = (a); uint8_t __s = 0; for (int __k = 0; __k < 8; __k++) __s += __a[__k]; __s; })
+#define vaddvq_u64(a) ({ uint64x2_t __a = (a); (uint64_t)(__a[0] + __a[1]); })
+#endif
+
 #endif

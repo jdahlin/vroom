@@ -175,6 +175,29 @@ int pp_wstate(const pp *p, const char *flag, bool on, const char *const *groups)
 	return err || (allerr && !noerr) ? 2 : 1;
 }
 
+int pp_werror_named(const pp *p, const char *flag, const char *const *groups)
+{
+	int r = 0;
+
+	for (int i = 0; i < p->o->nwargs; i++) {
+		const char *a = p->o->wargs[i], *n;
+		bool hit;
+
+		if (!strncmp(a, "-Werror=", 8))
+			n = a + 8;
+		else if (!strncmp(a, "-Wno-error=", 11))
+			n = a + 11;
+		else
+			continue;
+		hit = !strcmp(n, flag);
+		for (int g = 0; !hit && groups && groups[g]; g++)
+			hit = !strcmp(n, groups[g]);
+		if (hit)
+			r = a[2] == 'e' ? 1 : -1;
+	}
+	return r;
+}
+
 bool pp_warnx(pp *p, const char *flag, bool on, const char *const *groups, pp_dinfo *d, const char *fmt, ...)
 {
 	int st = pp_wstate(p, flag, on, groups);
@@ -199,6 +222,44 @@ const char *pp_src(const pp *p, uint32_t b, uint32_t e, size_t *len)
 		return NULL;
 	*len = e - b;
 	return f->f->src + (b - f->base);
+}
+
+/* -Winvalid-pp-token: an unknown token that is an unterminated character constant or string */
+void pp_invalid_tok(pp *p, const char *s, uint32_t len, uint32_t loc)
+{
+	uint32_t i = 0;
+
+	if (i < len && (s[i] == 'L' || s[i] == 'U' || s[i] == 'u'))
+		i++;
+	if (i < len && s[0] == 'u' && s[i] == '8')
+		i++;
+	if (i >= len || (s[i] != '\'' && s[i] != '"'))
+		return;
+	{
+		pp_dinfo d = { "warning", loc + i, NULL, 0, NULL, 0, NULL, 0 };
+
+		pp_warnx(p, "invalid-pp-token", true, NULL, &d, "missing terminating %s character", s[i] == '"' ? "'\"'" : "'");
+	}
+}
+
+/* the source at loc spells s[0, n) as a whole token (not a macro's expansion of it) */
+int pp_spells(const pp *p, uint32_t loc, const char *s, uint32_t n)
+{
+	const fent *e;
+
+	if (!loc_ok(p, loc, &e) || loc - e->base + n > e->f->size || memcmp(e->f->src + (loc - e->base), s, n))
+		return 0;
+	return pp_tok_end(p, loc) == loc + n;
+}
+
+/* the source character at loc, -1 if none */
+int pp_loc_char(const pp *p, uint32_t loc)
+{
+	const fent *e;
+
+	if (!loc_ok(p, loc, &e) || loc - e->base >= e->f->size)
+		return -1;
+	return (unsigned char)e->f->src[loc - e->base];
 }
 
 uint32_t pp_tok_end(const pp *p, uint32_t loc)
@@ -273,7 +334,7 @@ static int diag_where(const pp *p, uint32_t loc, const char **name, uint32_t *nl
 	int r = pp_where(p, loc, name, nl, line, col);
 	const fent *e = loc_fent(p, loc);
 
-	if (r && e && e->spath && loc - e->base <= e->f->size)
+	if (r && e && e->spath && loc - e->base <= e->f->size && *name == e->name)	/* (not a #line name) */
 		*name = e->spath, *nl = (uint32_t)strlen(e->spath);
 	return r;
 }
@@ -471,10 +532,23 @@ static const pmacro *expansion_at(pp *p, uint32_t loc, uint32_t *b, uint32_t *ee
 	return (const pmacro *)m;
 }
 
+/* loc is in the expansion of an object-like macro (-Wexpansion-to-defined) */
+VPRIV bool obj_macro_at(pp *p, uint32_t loc)
+{
+	uint32_t b, ee;
+	const fent *e;
+	const pmacro *m;
+
+	if (!loc_ok(p, loc, &e) || (loc - e->base + 7 <= e->f->size && !memcmp(e->f->src + (loc - e->base), "defined", 7)))
+		return false;	/* spelled here */
+	m = expansion_at(p, loc, &b, &ee);
+	return m && m->kind == MK_OBJ;
+}
+
 static void vdiagx_(pp *p, const pp_dinfo *d, const char *fmt, va_list ap);
 
 /* "expanded from macro 'M'" at the body token spelled like the diagnosed one (the last #define before) */
-static void expansion_note(pp *p, const pmacro *m, uint32_t before, const char *ms, uint32_t mlen)
+static void expansion_note(pp *p, const pmacro *m, uint32_t before, const char *ms, uint32_t mlen, bool rng)
 {
 	uint32_t loc = 0, len = 0;
 
@@ -518,7 +592,7 @@ static void expansion_note(pp *p, const pmacro *m, uint32_t before, const char *
 	}
 	if (loc) {
 		pp_span r = { loc, loc + len };
-		pp_dinfo d = { "note", loc, &r, len > 1, NULL, 0, NULL, 0 };
+		pp_dinfo d = { "note", loc, &r, rng && len > 1, NULL, 0, NULL, 0 };
 
 		pp_diagx(p, &d, "expanded from macro '%.*s'", (int)vintern_ents[m->name].len, vintern_ents[m->name].s);
 	}
@@ -545,7 +619,7 @@ void pp_vdiagx(pp *p, const pp_dinfo *d, const char *fmt, va_list ap)
 			mr[0].b = b, mr[0].e = ee, md.nr = 1;
 		md.r = mr;
 		vdiagx_(p, &md, fmt, ap);
-		expansion_note(p, xm, b, d->ms, d->mlen);
+		expansion_note(p, xm, b, d->ms, d->mlen, d->nr > 0);
 		return;
 	}
 	vdiagx_(p, d, fmt, ap);
@@ -585,8 +659,11 @@ static void vdiagx_(pp *p, const pp_dinfo *d, const char *fmt, va_list ap)
 	if (p->color)
 		vbuf_s(&b, DC_RESET);
 	vbuf_s(&b, "\n");
-	if (has && !p->o->diag_nocaret && d->loc - e->base < e->f->size)
+	/* clang (DiagnosticRenderer): no snippet again for the same location without ranges or fix-its */
+	if (has && !p->o->diag_nocaret && d->loc - e->base < e->f->size &&
+	    !(d->loc + 1 == p->diag_last && !d->nr && !d->nfx && (!p->diag_lastnote || note)))
 		snippet(p, &b, e, d);
+	p->diag_last = d->loc + 1, p->diag_lastnote = note;
 	(void)!write(fd, b.p, b.n);
 	free(b.p);
 	if (what[0] == 'e' || what[0] == 'f')

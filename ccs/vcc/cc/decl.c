@@ -27,6 +27,26 @@ static uint32_t new_attrs(cc *c, const attrs *a)
 	return i;
 }
 
+/* clang's -Wdeprecated-declarations for a use at loc of name, a: the record */
+VPRIV __attribute__((noinline, cold)) void deprecated_use(cc *c, uint32_t loc, uint32_t name, const attrs *a)
+{
+	if (c->fn && (c->syms[c->fn].flags & SF_DEPRECATED))
+		return;	/* clang: not inside a deprecated function */
+	if (a->deprmsg)
+		cc_warnx(c, "deprecated-declarations", true, NULL, loc, NULL, 0, NULL, 0, "'%.*s' is deprecated: %s",
+			 IDF(name), c->strs[a->deprmsg - 1].s);
+	else
+		cc_warnx(c, "deprecated-declarations", true, NULL, loc, NULL, 0, NULL, 0, "'%.*s' is deprecated", IDF(name));
+	note(c, a->depr, "'%.*s' has been explicitly marked deprecated here", IDF(name));
+}
+
+/* a deprecated tag: its record */
+VPRIV void tag_deprecate(cc *c, uint32_t ti, const attrs *a)
+{
+	if (a->depr && !c->tags[ti].depr)
+		c->tags[ti].depr = new_attrs(c, a);
+}
+
 VPRIV void apply_sym_attrs(cc *c, sym *s, const attrs *a)
 {
 	if (attrs_empty(a))
@@ -38,6 +58,8 @@ VPRIV void apply_sym_attrs(cc *c, sym *s, const attrs *a)
 	if (a->aligned > s->align)
 		s->align = a->aligned;
 	if (a->weak) s->flags |= SF_WEAK;
+	if (a->depr) s->flags |= SF_DEPRECATED;
+	if (a->wur) s->flags |= SF_WUR;
 	if (a->noreturn) s->flags |= SF_NORETURN;
 	if (a->always_inline) s->flags |= SF_ALWAYS_INLINE;
 	if (a->noinline) s->flags |= SF_NOINLINE;
@@ -255,6 +277,14 @@ static uint32_t declare(cc *c, const dspec *ds, declr *d, qty t, bool file)
 		else
 			t = QT(QI(ty_vector(c, t, at.vecsize)), QQ(t));
 	}
+	if (at.extvec && ds->sc == SC_TYPEDEF && is_arith(c, t) && !is_complex(c, t)) {
+		/* clang: n elements, the size rounded up to a power of 2 (float3: 16) */
+		uint64_t sz = (uint64_t)at.extvec * ty_size(c, t), p = 1;
+
+		while (p < sz)
+			p <<= 1;
+		t = QT(QI(ty_vector(c, t, (uint32_t)p)), QQ(t));
+	}
 	if (ds->sc == SC_TYPEDEF) {
 		if (at.aligned)
 			t = ty_aligned(c, t, at.aligned);
@@ -270,6 +300,13 @@ static uint32_t declare(cc *c, const dspec *ds, declr *d, qty t, bool file)
 		}
 		s = sym_new(c, S_TYPEDEF, d->name, t, d->loc);
 		c->syms[s].sc = SC_TYPEDEF;
+		c->syms[s].tdef = ds->tdef && QUNQ(t) == QUNQ(ds->ty) ? ds->tdef : 0;
+		if (unlikely(at.depr)) {	/* only what a typedef's use needs */
+			attrs da = { 0 };
+
+			da.depr = at.depr, da.deprmsg = at.deprmsg;
+			apply_sym_attrs(c, &c->syms[s], &da);
+		}
 		sym_bind(c, s);
 		if (is_record(c, t) || KIND(c, t) == TY_ENUM) {
 			tag *r = &c->tags[T(c, t)->aux];
@@ -370,6 +407,7 @@ static uint32_t declare(cc *c, const dspec *ds, declr *d, qty t, bool file)
 	{
 		sym *y = &c->syms[s];
 
+		y->tdef = ds->tdef && QUNQ(t) == QUNQ(ds->ty) ? ds->tdef : 0;
 		y->sc = (uint8_t)(ds->sc == SC_TYPEDEF ? SC_NONE : ds->sc);
 		if (file || ds->sc == SC_EXTERN || kind == S_FUNC)
 			y->flags |= SF_GLOBAL;
@@ -439,7 +477,7 @@ static bool lb_type(cc *c, const char **p, qty *out)
 	case 'Y': t = prim(TY_LONG); break;	/* ptrdiff_t */
 	case 'w': t = c->t_wchar; break;
 	case 'P': t = prim(TY_VOID); break;	/* FILE: only ever as P*, a void * */
-	case 'W': t = prim(TY_LONG); break;	/* int64_t */
+	case 'W': t = prim(CC_I64(c, false)); break;	/* int64_t */
 	case 'Z': t = prim(TY_INT); break;	/* int32_t */
 	default: return false;
 	}
@@ -500,6 +538,13 @@ VPRIV bool lib_builtin_known(const char *n)
 	return libbi_find(n, strlen(n)) != NULL;
 }
 
+VPRIV const char *lib_builtin_sig(const char *n)
+{
+	const struct libbi *b = libbi_find(n, strlen(n));
+
+	return b ? b->sig : NULL;
+}
+
 VPRIV uint32_t lib_builtin(cc *c, uint32_t id, uint32_t loc)
 {
 	const struct libbi *b = libbi_find(idstr_(id), idlen_(id));
@@ -540,6 +585,46 @@ VPRIV uint32_t lib_builtin(cc *c, uint32_t id, uint32_t loc)
 			return s;
 		}
 	}
+}
+
+/* the type clang gives an implicitly declared library function (asin: double
+   (double)), 0: not one (or -fno-builtin) */
+VPRIV qty implicit_lib_type(cc *c, uint32_t id)
+{
+	char nm[128];
+	const char *p;
+	qty ret, par[16];
+	uint32_t np = 0;
+	int fl = 0, enc;
+
+	if (c->o->no_builtin || (size_t)idlen_(id) >= sizeof nm)
+		return 0;
+	memcpy(nm, idstr_(id), idlen_(id));
+	nm[idlen_(id)] = 0;
+	if (!(p = cc_lib_sig(nm, &enc)))
+		return 0;
+	if (!enc)
+		return sig_func_type(c, p);
+	if (!lb_type(c, &p, &ret))
+		return 0;
+	while (*p) {
+		if (*p == '.') {
+			fl |= TF_VARIADIC;
+			break;
+		}
+		if (np == 16 || !lb_type(c, &p, &par[np]))
+			return 0;
+		np++;
+	}
+	return ty_func(c, ret, par, np, fl);
+}
+
+VPRIV uint32_t implicit_lib_func(cc *c, uint32_t id, uint32_t loc, qty t)
+{
+	dspec ds = { .ty = T(c, t)->base, .sc = SC_EXTERN, .loc = loc };
+	declr d = { .name = id, .loc = loc };
+
+	return declare(c, &ds, &d, t, c->depth == 0);
 }
 
 VPRIV uint32_t implicit_func(cc *c, uint32_t id, uint32_t loc)
@@ -693,9 +778,12 @@ VPRIV void declaration(cc *c, vec *out, bool file)
 		}
 		if (accept(c, T_EQUAL)) {
 			sym *y = &c->syms[s];
-			qty it = t;
+			/* int a[]: the size of an earlier declaration (the composite type), if it had one */
+			qty it = is_array(c, t) && (T(c, t)->flags & TF_INCOMPLETE) && is_array(c, y->ty) &&
+				 !(T(c, y->ty)->flags & (TF_INCOMPLETE | TF_VLA)) ? QT(QI(y->ty), QQ(t)) : t;
 			bool st = file || ds.sc == SC_STATIC;
 			uint32_t v;
+			int nerr = c->errors;
 
 			if (ds.sc == SC_TYPEDEF || is_func(c, t))
 				cc_error(c, d.loc, "illegal initializer");
@@ -723,7 +811,10 @@ VPRIV void declaration(cc *c, vec *out, bool file)
 				uint32_t sl = c->cv_loc;
 
 				c->cv_what = CX_INIT, c->cv_loc = d.loc;
+				c->syms[s].defloc = d.loc;
+				c->defer_rt = st, c->ndefer = 0;
 				v = initializer(c, &it, st);
+				c->defer_rt = 0;
 				c->cv_what = sw, c->cv_loc = sl;
 			}
 			y = &c->syms[s];
@@ -737,6 +828,22 @@ VPRIV void declaration(cc *c, vec *out, bool file)
 			}
 			y->body = v;
 			y->flags |= SF_DEFINED;
+			{
+				uint32_t bad = 0;
+
+				/* not after an error in the initializer (clang: no follow-on error) */
+				if (st && v && c->errors == nerr && !static_init_ok(c, y->ty, v, &bad)) {
+					pp_span r = rng(c, bad);
+
+					report(c, "error", expr_loc(c, bad), &r, 1, NULL, 0, "initializer element is not a compile-time constant");
+					/* the runtime-behaviour warnings only for an initializer that runs (not a constant) */
+					for (int k = 0; k < c->ndefer; k++)
+						cc_warnx(c, "division-by-zero", true, NULL, c->defer[k].loc, &c->defer[k].r, 1, NULL, 0,
+							 "%s by zero is undefined", c->defer[k].rem ? "remainder" : "division");
+				}
+				c->ndefer = 0;
+			}
+			y = &c->syms[s];
 			if (out && !st) {
 				uint32_t n = mk2(c, N_DECL, prim(TY_VOID), d.loc, s, v);
 

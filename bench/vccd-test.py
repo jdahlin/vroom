@@ -235,6 +235,26 @@ def request_env_reaches_job():
     finally: v.stop()
 
 @test()
+def compile_shapes_not_forwarded():
+    """-c/-S with the input not last, -o before -c, -fPIC: vcc compiles them (the backend is absent, so a forward fails)"""
+    v = Vccd()
+    try:
+        d = f'{v.dir}/w'; os.makedirs(d, exist_ok=True)
+        src = tu(d, 's.c', 'int g; int f(void) { return g; }\n')
+        env = dict(os.environ, VCC_SOCK=v.sock)
+        for i, argv in enumerate([TARGET + ['-c', src, '-O2', '-o', 'x0.o'],
+                                  ['-o', 'x1.o'] + TARGET + ['-c', src],
+                                  TARGET + ['-fPIC', '-c', '-o', 'x2.o', src],
+                                  TARGET + ['-c', src, '-MD', '-MF', 'x3.d', '-o', 'x3.o'],
+                                  TARGET + ['-S', src, '-o', 'x4.o'],
+                                  TARGET + ['-O2', '-S', src]]):
+            out = f'{d}/x{i}.o' if i < 5 else f'{d}/s.s'	# -S without -o: the basename with .s, as clang
+            p = subprocess.run([SHIM] + argv, cwd=d, env=env, capture_output=True, text=True, process_group=0)
+            check(p.returncode == 0 and os.path.exists(out), f'{argv}: rc {p.returncode} {p.stderr[-300:]}')
+        check(open(f'{d}/x4.o').read().lstrip().startswith('.text'), '-S did not write assembly')
+    finally: v.stop()
+
+@test()
 def killed_client_no_output():
     """the shim killed during a long job: no object is written, and the server keeps serving"""
     v = Vccd()

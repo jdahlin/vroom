@@ -149,6 +149,19 @@ static int mod_kind(const char *s, size_t n)
 		{ "abs_g1_nc", A64_MOD_ABS_G1_NC }, { "abs_g2", A64_MOD_ABS_G2 }, { "abs_g2_nc", A64_MOD_ABS_G2_NC },
 		{ "abs_g3", A64_MOD_ABS_G3 }, { "got", A64_MOD_GOT }, { "got_lo12", A64_MOD_GOT_LO12 },
 		{ "abs_g0_s", A64_MOD_ABS_G0_S }, { "abs_g1_s", A64_MOD_ABS_G1_S }, { "abs_g2_s", A64_MOD_ABS_G2_S },
+		{ "tlsdesc", A64_MOD_TLSDESC }, { "tlsdesc_lo12", A64_MOD_TLSDESC_LO12 },
+		{ "gottprel", A64_MOD_GOTTPREL }, { "gottprel_lo12", A64_MOD_GOTTPREL_LO12_NC },
+		{ "gottprel_g1", A64_MOD_GOTTPREL_G1 }, { "gottprel_g0_nc", A64_MOD_GOTTPREL_G0_NC },
+		{ "tprel_g2", A64_MOD_TPREL_G2 }, { "tprel_g1", A64_MOD_TPREL_G1 }, { "tprel_g1_nc", A64_MOD_TPREL_G1_NC },
+		{ "tprel_g0", A64_MOD_TPREL_G0 }, { "tprel_g0_nc", A64_MOD_TPREL_G0_NC },
+		{ "tprel_hi12", A64_MOD_TPREL_HI12 }, { "tprel_lo12", A64_MOD_TPREL_LO12 }, { "tprel_lo12_nc", A64_MOD_TPREL_LO12_NC },
+		{ "dtprel_g2", A64_MOD_DTPREL_G2 }, { "dtprel_g1", A64_MOD_DTPREL_G1 }, { "dtprel_g1_nc", A64_MOD_DTPREL_G1_NC },
+		{ "dtprel_g0", A64_MOD_DTPREL_G0 }, { "dtprel_g0_nc", A64_MOD_DTPREL_G0_NC },
+		{ "dtprel_hi12", A64_MOD_DTPREL_HI12 }, { "dtprel_lo12", A64_MOD_DTPREL_LO12 }, { "dtprel_lo12_nc", A64_MOD_DTPREL_LO12_NC },
+		{ "prel_g3", A64_MOD_PREL_G3 }, { "prel_g2", A64_MOD_PREL_G2 }, { "prel_g2_nc", A64_MOD_PREL_G2_NC },
+		{ "prel_g1", A64_MOD_PREL_G1 }, { "prel_g1_nc", A64_MOD_PREL_G1_NC },
+		{ "prel_g0", A64_MOD_PREL_G0 }, { "prel_g0_nc", A64_MOD_PREL_G0_NC },
+		{ "vcc_tlvp", A64_MOD_TLVP }, { "vcc_tlvp_lo12", A64_MOD_TLVP_LO12 },
 	};
 	for (size_t i = 0; i < sizeof t / sizeof t[0]; i++) if (sveqi(s, n, t[i].n)) return t[i].k;
 	return -1;
@@ -213,10 +226,11 @@ static int parse_mem(As *a, const char **pp, const char *e, A64Op *op)
 	const char *s = p;
 	while (p < e && isidc((unsigned char)*p)) p++;
 	A64Op r;
-	if (!parse_reg(a, s, (size_t)(p - s), &r, 0) || r.kind != A64O_REG || r.cls != A64_X)
+	if (!parse_reg(a, s, (size_t)(p - s), &r, 0) || r.kind != A64O_REG || (r.cls != A64_X && !(r.cls == A64_Z && r.arr)))
 		return err(a, "invalid operand for instruction");
 	memset(op, 0, sizeof *op);
 	op->kind = A64O_MEM; op->reg = r.reg; op->mode = A64M_OFF;
+	if (r.cls == A64_Z) { op->cls = A64_Z; op->arr = r.arr; }	/* SVE [Zn.T{, #imm}] */
 	p = ws(p, e);
 	if (p < e && *p == ',') {
 		p = ws(p + 1, e);
@@ -224,6 +238,7 @@ static int parse_mem(As *a, const char **pp, const char *e, A64Op *op)
 		while (p < e && isidc((unsigned char)*p)) p++;
 		if (p > s && parse_reg(a, s, (size_t)(p - s), &r, 0) && r.kind == A64O_REG) {
 			op->mode = A64M_REG; op->index = r.reg; op->idxcls = r.cls; op->shift = A64_LSL;
+			if (r.cls == A64_Z) op->idx = r.arr;	/* SVE [Xn, Zm.T{, ext}] */
 			p = ws(p, e);
 			if (p < e && *p == ',') {
 				p = ws(p + 1, e);
@@ -264,6 +279,21 @@ static int parse_mem(As *a, const char **pp, const char *e, A64Op *op)
 	return 0;
 }
 
+/* operand nop of mnemonic mn (lowercase) can only be a label or address */
+static int label_pos(const char *mn, size_t n, int nop, const A64Op *op)
+{
+	(void)op;
+	if (nop == 2 && ((n == 3 && !memcmp(mn, "adr", 3)) || (n == 4 && !memcmp(mn, "adrp", 4))))
+		return 1;
+	if (nop == 1 && ((n == 1 && mn[0] == 'b') || (n == 2 && !memcmp(mn, "bl", 2)) || (n >= 3 && mn[0] == 'b' && mn[1] == '.')))
+		return 1;
+	if (nop == 2 && ((n == 3 && !memcmp(mn, "cbz", 3)) || (n == 4 && !memcmp(mn, "cbnz", 4))))
+		return 1;
+	if (nop == 3 && ((n == 3 && !memcmp(mn, "tbz", 3)) || (n == 4 && !memcmp(mn, "tbnz", 4))))
+		return 1;
+	return 0;
+}
+
 /* mnemonics whose operands can be names (sysregs, barriers, conditions...);
  * m is lowercase */
 static int names_ops(const char *m, size_t n)
@@ -279,7 +309,7 @@ static int names_ops(const char *m, size_t n)
 	case 'h': return N("hint");
 	case 'i': return N("isb") || N("ic");
 	case 'm': return N("msr") || N("mrs");
-	case 'p': return N("prfm") || N("prfum") || N("psb");
+	case 'p': return N("prfm") || N("prfum") || N("psb") || N("prfb") || N("prfh") || N("prfw") || N("prfd");
 	case 's': return N("sys") || N("sysl") || N("sb");
 	case 't': return N("tlbi") || N("tsb");
 	}
@@ -395,8 +425,8 @@ VPRIV int instruction(As *a, const char *p, const char *e, size_t wn)
 				const char *t = p;
 				while (p < e && isidc((unsigned char)*p)) p++;
 				A64Op r;
-				if (!parse_reg(a, t, (size_t)(p - t), &r, 0) || r.kind != A64O_VREG) return err(a, "vector register expected");
-				if (first) { op->reg = r.reg; op->arr = r.arr; op->cls = A64_V; op->nregs = 1; first = 0; }
+				if (!parse_reg(a, t, (size_t)(p - t), &r, 0) || !(r.kind == A64O_VREG || (r.kind == A64O_REG && r.cls == A64_Z && r.arr))) return err(a, "vector register expected");
+				if (first) { op->reg = r.reg; op->arr = r.arr; op->cls = r.kind == A64O_REG ? A64_Z : A64_V; op->nregs = 1; first = 0; }
 				else op->nregs++;
 				p = ws(p, e);
 				if (p < e && *p == '-') {
@@ -404,7 +434,7 @@ VPRIV int instruction(As *a, const char *p, const char *e, size_t wn)
 					t = p;
 					while (p < e && isidc((unsigned char)*p)) p++;
 					A64Op r2;
-					if (!parse_reg(a, t, (size_t)(p - t), &r2, 0) || r2.kind != A64O_VREG) return err(a, "vector register expected");
+					if (!parse_reg(a, t, (size_t)(p - t), &r2, 0) || r2.kind != (op->cls == A64_Z ? A64O_REG : A64O_VREG)) return err(a, "vector register expected");
 					op->nregs = (uint8_t)(((r2.reg - op->reg) & 31) + 1);
 					p = ws(p, e);
 				}
@@ -430,8 +460,27 @@ VPRIV int instruction(As *a, const char *p, const char *e, size_t wn)
 			size_t tn = (size_t)(p - t);
 			int k;
 			const char *q = ws(p, e);
-			if (parse_reg(a, t, tn, op, 0)) {
+			if (parse_reg(a, t, tn, op, 0) && label_pos(mn, mlen, nop, op)) {
+				/* a symbol named like a register (v1, x1, q0): adr/adrp take
+				 * it as the symbol, branches an SVE name (z3, p1: LLVM) and,
+				 * beyond LLVM, any register name (a C function d1 or x1) */
+				memset(op, 0, sizeof *op);
+				p = t;
+				if (parse_imm(a, &p, e, op)) return -1;
+			} else if (op->kind) {
 				if (op->kind == A64O_REG && q < e && *q == '!') { op->wb = 1; p = q + 1; }
+				else if (op->kind == A64O_REG && op->cls == A64_P && q + 1 < e && *q == '/' && ((q[1] | 32) == 'z' || (q[1] | 32) == 'm')) {
+					op->pq = (q[1] | 32) == 'z' ? 1 : 2; p = q + 2;
+				}
+				else if (op->kind == A64O_REG && op->cls == A64_Z && op->arr && q < e && *q == '[') {	/* SVE Zn.T[i] */
+					int64_t ix;
+					q++;
+					if (abs_expr(a, &q, e, &ix)) return -1;
+					q = ws(q, e);
+					if (q >= e || *q != ']' || ix < 0 || ix > 63) return err(a, "']' expected");
+					op->idx = (uint8_t)ix; op->hasidx = 1;
+					p = q + 1;
+				}
 				else if (op->kind == A64O_VREG && q < e && *q == '[') {
 					int64_t ix;
 					q++;
@@ -450,7 +499,12 @@ VPRIV int instruction(As *a, const char *p, const char *e, size_t wn)
 					if (abs_expr(a, &p, e, &amt)) return -1;
 					op->imm = amt; op->hasamt = 1;
 				}
-			} else if (names && (q >= e || *q == ',')) {
+			} else if (tn == 3 && sveqi(t, 3, "mul") && q < e && *q == '#') {	/* SVE: mul #imm */
+				int64_t amt;
+				p = q + 1;
+				if (abs_expr(a, &p, e, &amt)) return -1;
+				op->kind = A64O_SHIFT; op->shift = A64_MUL; op->imm = amt; op->hasamt = 1;
+			} else if ((names || (nop >= 2 && a64_svepat(t, tn) >= 0)) && (q >= e || *q == ',')) {
 				op->kind = A64O_NAME; op->name = t; op->nlen = (uint32_t)tn;
 			} else {
 				p = t;

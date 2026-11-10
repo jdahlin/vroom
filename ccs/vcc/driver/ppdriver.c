@@ -41,6 +41,7 @@
 #include "../pp/ppdata-predef.inc"
 #include "../lib/arena.h"
 #include "../lib/ldhash.h"
+#include "../lib/buf.h"
 
 #ifdef __APPLE__
 #define ST_MTIME_NS(st) ((unsigned long long)(st)->st_mtimespec.tv_sec * 1000000000ull + (unsigned long long)(st)->st_mtimespec.tv_nsec)
@@ -534,6 +535,9 @@ static void obj_release(void)
 	pthread_mutex_unlock(&obj_mu);
 }
 
+/* -c for wasm64: the object's bytes (arch/wasm/as, platform/wasm) */
+static _Thread_local vbuf tl_wasm_obj;
+
 /* lay out tl_obj and write it to out */
 static int write_obj(const char *cwd, const char *out, int outfd, int errfd, int macho)
 {
@@ -624,6 +628,49 @@ static __attribute__((noinline)) size_t env_ndirs(const char *v)
 	return k;
 }
 
+/* -f[un]signed-char against the target's default, the math flags, -pthread */
+static __attribute__((noinline, cold)) void predef_flags(buf *pre, int darwin, int uchar, int fmath)
+{
+	if (uchar >= 0 && uchar != !darwin)
+		bstr(pre, uchar ? "#define __CHAR_UNSIGNED__ 1\n" : "#undef __CHAR_UNSIGNED__\n");
+	if (fmath & 1)
+		bstr(pre, "#undef __FINITE_MATH_ONLY__\n#define __FINITE_MATH_ONLY__ 1\n");
+	if ((fmath & 2) && !darwin)	/* Darwin's default is already no errno */
+		bstr(pre, "#define __NO_MATH_ERRNO__ 1\n");
+	if ((fmath & 16) && darwin)
+		bstr(pre, "#undef __NO_MATH_ERRNO__\n");
+	if (fmath & 4)
+		bstr(pre, "#define __FAST_MATH__ 1\n");
+	if (fmath & 32)
+		bstr(pre, "#define __ARM_FP_FAST 1\n");
+	if (fmath & 8)
+		bstr(pre, "#define _REENTRANT 1\n");
+}
+
+/* C23: char8_t and the %B/%b formats (out of line: the caller's loops stay as compiled) */
+static __attribute__((noinline, cold)) void predef_c23(buf *pre, int darwin)
+{
+	/* char8_t and the %B/%b formats */
+	static const char *const fmt[][2] = {
+		{ "SIZE", "l" }, { "UINT16", "h" }, { "UINT32", "" }, { "UINT64", "l" }, { "UINT8", "hh" },
+		{ "UINTMAX", "l" }, { "UINTPTR", "l" }, { "UINT_FAST16", "h" }, { "UINT_FAST32", "" },
+		{ "UINT_FAST64", "l" }, { "UINT_FAST8", "hh" }, { "UINT_LEAST16", "h" },
+		{ "UINT_LEAST32", "" }, { "UINT_LEAST64", "l" }, { "UINT_LEAST8", "hh" },
+	};
+	char b[96];
+
+	bstr(pre, "#define __CHAR8_TYPE__ unsigned char\n#define __CLANG_ATOMIC_CHAR8_T_LOCK_FREE 2\n"
+		   "#define __GCC_ATOMIC_CHAR8_T_LOCK_FREE 2\n");
+	for (size_t k = 0; k < sizeof(fmt) / sizeof(*fmt); k++) {
+		/* Darwin's 64-bit types are long long */
+		const char *l = darwin && strstr(fmt[k][0], "64") ? "ll" : fmt[k][1];
+
+		snprintf(b, sizeof(b), "#define __%s_FMTB__ \"%sB\"\n#define __%s_FMTb__ \"%sb\"\n",
+			 fmt[k][0], l, fmt[k][0], l);
+		bstr(pre, b);
+	}
+}
+
 /* the elements of v appended to all[n..] (not repeating one from nquote on); an
    empty element is the current directory.  slot: which per-thread copy holds them */
 static __attribute__((noinline)) int env_dirs(const char *v, const char **all, int n, int nquote, int slot)
@@ -687,22 +734,27 @@ int ppd_run(int argc, char **argv, const ppd_env *env)
 	char pmapbuf[4096];
 	jmp_buf jb;
 	vmreg *br = bufr = vmpool_take(&bufpool);
-	buf pre = { .r = &br[0] }, cmdl = { .r = &br[1] }, incl = { .r = &br[2] }, o = { 0 };
+	buf pre = { .r = &br[0] }, cmdl = { .r = &br[1] }, incl = { .r = &br[2] }, imac = { .r = &br[3] }, o = { 0 };
 	/* no --target: the host's own userland (Darwin on a Mac, glibc aarch64 on Linux) */
 #ifdef __APPLE__
 	int darwin = 1;
 #else
 	int darwin = 0;
 #endif
-	int hosted = 1, nostdinc = 0, asm_mode = 0, undef = 0;
+	int wasm = 0, lnx;	/* 64 or 32: wasm64/wasm32-unknown-emscripten (PLAN-wasm.md); lnx: aarch64 Linux */
+	int hosted = 1, nostdinc = 0, asm_mode = 0, undef = 0, raw_asm = -1, xlang = 0;	/* raw_asm -1: by the suffix; xlang: -x given */
 	int march_lse = -1, mcpu_lse = -1, lse;
-	int opt = 0, olevel = 0, os = 0, pie = -1, pic = 0, freestanding = 0, nobuiltin = 0, instr = 0, cfi = -1, strict_align = 0, tiny = 0, gregs = 0;
+	int sjlj = 0;
+	int opt = 0, olevel = 0, os = 0, pie = -1, pic = 0, tlsmodel = 0, sections = 0, debug = 0, freestanding = 0, nobuiltin = 0, instr = 0, cfi = -1, strict_align = 0, tiny = 0, gregs = 0;
 	pp_opts po = { 0 };
 	char *pmap = NULL;
 	double t0;
 	pp *p;
+	int comments = 0, nomarkers = 0;
 	int dmacros = 0, showinc = 0, ddefs = 0, syntax = 0, layout = 0, ms_anon = 0, short_wchar = 0, tokhash = 0, emit = 0, objmode = 0;
-	int tri = -1, std = 0, strict = 0, wimpl_int = 0, wimpl_fn = 0, gnu89_inline = -1, vcc_kernel = 0;
+	const char *stdver = NULL, *macos_min = NULL;
+	int macos_min_flag = 0, uchar = -1, fmath = 0;	/* fmath: 1 finite-only, 2 no errno, 4 __FAST_MATH__, 8 -pthread, 16 errno, 32 __ARM_FP_FAST */
+	int tri = -1, std = 0, strict = 0, wimpl_int = 0, wimpl_fn = 0, gnu89_inline = -1, vcc_kernel = 0, conv_warn = 0;
 	char objbuf[1024];
 
 	for (int i = 1; i < argc; i++) {
@@ -716,9 +768,25 @@ int ppd_run(int argc, char **argv, const ppd_env *env)
 		if (!strcmp(a, "-c")) { objmode = 1; continue; }
 		if (!strcmp(a, "-dM")) { dmacros = 1; continue; }
 		if (!strcmp(a, "-H")) { showinc = 1; continue; }
+		if (!strcmp(a, "-C")) { comments = 1; continue; }
+		if (!strcmp(a, "-P")) { nomarkers = 1; continue; }
+		if (!strcmp(a, "-CC") || !strcmp(a, "-traditional-cpp") || !strcmp(a, "-traditional")) {
+			dprintf(errfd, "vcc: error: %s is not supported\n", a);	/* TODO.md: output modes */
+			status = 2;
+			goto out;
+		}
 		if (!strcmp(a, "-dD")) { ddefs = 1; continue; }
 		if (!strcmp(a, "-fms-anonymous-structs") || !strcmp(a, "-fms-extensions")) { ms_anon = 1; continue; }
 		if (!strcmp(a, "-fshort-wchar")) { short_wchar = 1; continue; }
+		if (!strcmp(a, "-funsigned-char") || !strcmp(a, "-fno-signed-char")) { uchar = 1; continue; }
+		if (!strcmp(a, "-fsigned-char") || !strcmp(a, "-fno-unsigned-char")) { uchar = 0; continue; }
+		if (!strcmp(a, "-ffast-math")) { fmath = (fmath | 39) & ~16; continue; }
+		if (!strcmp(a, "-fno-fast-math")) { fmath &= 8; continue; }
+		if (!strcmp(a, "-ffinite-math-only")) { fmath |= 1; continue; }
+		if (!strcmp(a, "-fno-finite-math-only")) { fmath &= ~5; continue; }
+		if (!strcmp(a, "-fno-math-errno")) { fmath = (fmath | 2) & ~16; continue; }
+		if (!strcmp(a, "-fmath-errno")) { fmath = (fmath & ~6) | 16; continue; }	/* no longer fast-math */
+		if (!strcmp(a, "-pthread")) { fmath |= 8; continue; }	/* (-pthread: _REENTRANT) */
 		if (!strcmp(a, "-fcolor-diagnostics") || !strcmp(a, "-fdiagnostics-color") || !strcmp(a, "-fdiagnostics-color=always")) { dcolor = 1; continue; }
 		if (!strcmp(a, "-fno-color-diagnostics") || !strcmp(a, "-fno-diagnostics-color") || !strcmp(a, "-fdiagnostics-color=never")) { dcolor = -1; continue; }
 		if (!strcmp(a, "-fdiagnostics-color=auto")) { dcolor = 0; continue; }
@@ -726,19 +794,29 @@ int ppd_run(int argc, char **argv, const ppd_env *env)
 		if (!strcmp(a, "-fcaret-diagnostics")) { nocaret = 0; continue; }
 		if (!strncmp(a, "-ferror-limit=", 14)) { elimit = atoi(a + 14); elimit = elimit ? elimit : -1; continue; }
 		if (!strncmp(a, "-std=", 5)) {
-			/* clang's spellings: c89 c90 iso9899:1990 gnu89 gnu90 c99 gnu99 c11 gnu11 c17 c18 gnu17 c23 c2x gnu23 ... */
-			static const struct { const char *s; int v; } stds[] = {
-				{ "89", 89 }, { "90", 89 }, { "1990", 89 }, { "199409", 89 }, { "99", 99 }, { "9x", 99 },
-				{ "1999", 99 }, { "11", 11 }, { "1x", 11 }, { "2011", 11 }, { "17", 17 }, { "18", 17 },
-				{ "2017", 17 }, { "2018", 17 }, { "23", 23 }, { "2x", 23 }, { "2y", 23 }, { "2024", 23 },
+			/* clang's C spellings (LangStandards.def); ver: a __STDC_VERSION__ of its own */
+			static const struct { const char *s; int v; const char *ver; } stds[] = {
+				{ "c89", 89, NULL }, { "c90", 89, NULL }, { "iso9899:1990", 89, NULL }, { "iso9899:199409", 89, "199409L" },
+				{ "gnu89", 89, NULL }, { "gnu90", 89, NULL }, { "c99", 99, NULL }, { "iso9899:1999", 99, NULL }, { "c9x", 99, NULL },
+				{ "iso9899:199x", 99, NULL }, { "gnu99", 99, NULL }, { "gnu9x", 99, NULL }, { "c11", 11, NULL }, { "iso9899:2011", 11, NULL },
+				{ "c1x", 11, NULL }, { "iso9899:201x", 11, NULL }, { "gnu11", 11, NULL }, { "gnu1x", 11, NULL }, { "c17", 17, NULL },
+				{ "iso9899:2017", 17, NULL }, { "c18", 17, NULL }, { "iso9899:2018", 17, NULL }, { "gnu17", 17, NULL }, { "gnu18", 17, NULL },
+				{ "c23", 23, NULL }, { "iso9899:2024", 23, NULL }, { "c2x", 23, NULL }, { "gnu23", 23, NULL }, { "gnu2x", 23, NULL },
+				{ "c2y", 23, "202400L" }, { "gnu2y", 23, "202400L" },
 			};
 			const char *v = a + 5;
+			size_t k;
 
+			for (k = 0; k < sizeof(stds) / sizeof(stds[0]) && strcmp(v, stds[k].s); k++)
+				;
+			if (k == sizeof(stds) / sizeof(stds[0])) {
+				dprintf(errfd, "error: invalid value '%s' in '%s'\n", v, a);	/* clang, without its notes */
+				status = 1;
+				goto out;
+			}
+			std = stds[k].v;
+			stdver = stds[k].ver;
 			strict = strncmp(v, "gnu", 3) != 0;
-			v += strncmp(v, "gnu", 3) == 0 ? 3 : v[0] == 'c' ? 1 : strncmp(v, "iso9899:", 8) == 0 ? 8 : 0;
-			for (size_t k = 0; k < sizeof(stds) / sizeof(stds[0]); k++)
-				if (!strcmp(v, stds[k].s))
-					std = stds[k].v;
 			continue;
 		}
 		if (!strcmp(a, "-ansi")) { std = 89; strict = 1; continue; }
@@ -754,6 +832,15 @@ int ppd_run(int argc, char **argv, const ppd_env *env)
 			wargs[nwargs++] = a;
 		}
 		if (!strcmp(a, "-Wno-implicit-int") || !strcmp(a, "-Wno-error=implicit-int")) { wimpl_int = 1; continue; }
+		if (!strncmp(a, "-Wno-", 5)) {
+			/* errors clang lets -Wno-error= make warnings (pp_wstate has the -W flags) */
+			const char *f = a + 5;
+
+			if (!strncmp(f, "error=", 6))
+				f += 6;
+			conv_warn |= !strcmp(f, "int-conversion") ? 1 : !strcmp(f, "incompatible-pointer-types") ? 2 | 4	/* (the function pointer group is part of it) */
+				     : !strcmp(f, "incompatible-function-pointer-types") ? 4 : 0;
+		}
 		if (!strcmp(a, "-Wno-implicit-function-declaration") || !strcmp(a, "-Wno-error=implicit-function-declaration")) {
 			wimpl_fn = 1;
 			continue;
@@ -792,6 +879,13 @@ int ppd_run(int argc, char **argv, const ppd_env *env)
 		if ((v = ARG("-iquote"))) { dirs_q[nq++] = v; continue; }
 		if ((v = ARG("-isystem"))) { dirs_s[ns++] = v; continue; }
 		if ((v = ARG("-idirafter"))) { dirs_a[na++] = v; continue; }
+		if ((v = ARG("-imacros"))) {
+			/* clang's: the file's macros, its tokens dropped up to the ## (before every -include) */
+			bstr(&imac, "#__include_macros \"");
+			bstr(&imac, v);
+			bstr(&imac, "\"\n##\n");
+			continue;
+		}
 		if ((v = ARG("-include"))) {
 			bstr(&incl, "#include \"");
 			bstr(&incl, v);
@@ -811,10 +905,27 @@ int ppd_run(int argc, char **argv, const ppd_env *env)
 			pmap = pmapbuf;
 			continue;
 		}
-		if (!strncmp(a, "--target=", 9) || !strcmp(a, "-target")) { darwin = strstr(a, "darwin") || strstr(a, "apple"); hosted = 0; }
+		if (!strncmp(a, "--target=", 9) || !strcmp(a, "-target")) {
+			const char *m = strstr(a, "-macos");
+
+			wasm = strstr(a, "wasm64") ? 64 : strstr(a, "wasm32") ? 32 : 0;
+			darwin = !wasm && (strstr(a, "darwin") || strstr(a, "apple"));
+			hosted = 0;
+			if (m && m[6] >= '0' && m[6] <= '9')
+				macos_min = m + 6, macos_min_flag = 2;	/* arm64-apple-macos14.2: wins over the flag */
+		}
+		else if (!strncmp(a, "-mmacosx-version-min=", 21) || !strncmp(a, "-mmacos-version-min=", 20)) {
+			if (macos_min_flag < 2)
+				macos_min = strchr(a, '=') + 1, macos_min_flag = 1;
+		}
 		else if (!strcmp(a, "-nostdinc")) nostdinc = 1;
 		else if (!strcmp(a, "-undef")) undef = 1;
-		else if (!strcmp(a, "-x") && i + 1 < argc) asm_mode = !strcmp(argv[++i], "assembler-with-cpp");
+		else if (!strcmp(a, "-x") && i + 1 < argc) {
+			i++;
+			asm_mode = !strcmp(argv[i], "assembler-with-cpp");
+			raw_asm = !strcmp(argv[i], "assembler") ? 1 : 0;
+			xlang = strcmp(argv[i], "none") != 0;
+		}
 		else if (!strcmp(a, "-O0")) opt = 0, os = 0, olevel = 0;
 		else if (!strcmp(a, "-Os") || !strcmp(a, "-Oz")) { opt = 2; os = 1; olevel = 2; }
 		else if (!strncmp(a, "-O", 2)) opt = 2, os = 0, olevel = !strcmp(a, "-O1") || !strcmp(a, "-Og") ? 1 : 2;
@@ -822,9 +933,30 @@ int ppd_run(int argc, char **argv, const ppd_env *env)
 		else if (!strcmp(a, "-fPIE")) pie = 2, pic = 0;
 		else if (!strcmp(a, "-fpic")) pic = 1, pie = 0;
 		else if (!strcmp(a, "-fPIC")) pic = 2, pie = 0;
+		else if (!strcmp(a, "-g") || !strcmp(a, "-g1") || !strcmp(a, "-g2") || !strcmp(a, "-g3") ||
+			 !strncmp(a, "-ggdb", 5) || !strncmp(a, "-gdwarf", 7) || !strcmp(a, "-gline-tables-only") ||
+			 !strcmp(a, "-glldb") || !strcmp(a, "-gfull"))
+			debug = 1;	/* line tables (the rest of DWARF: TODO.md) */
+		else if (!strcmp(a, "-g0")) debug = 0;
+		else if (!strcmp(a, "-ffunction-sections")) sections |= 1;
+		else if (!strcmp(a, "-fno-function-sections")) sections &= ~1;
+		else if (!strcmp(a, "-fdata-sections")) sections |= 2;
+		else if (!strcmp(a, "-fno-data-sections")) sections &= ~2;
+		else if (!strncmp(a, "-ftls-model=", 12)) {
+			if (!(tlsmodel = vcc_tls_model(a + 12))) {
+				fprintf(stderr, "vcc: error: invalid value '%s' in '%s'\n", a + 12, a);
+				return 1;
+			}
+		}
 		else if (!strcmp(a, "-fno-PIE") || !strcmp(a, "-fno-pie")) pie = 0;
+		else if (!strcmp(a, "-fno-PIC") || !strcmp(a, "-fno-pic")) pic = 0, pie = 0;
 		else if (!strcmp(a, "-ffreestanding")) freestanding = 1;
 		else if (!strcmp(a, "-fno-builtin")) nobuiltin = 1;
+		else if (!strcmp(a, "-mllvm") && i + 1 < argc) {
+			/* emcc -sSUPPORT_LONGJMP=wasm: setjmp/longjmp through wasm exceptions */
+			if (!strcmp(argv[++i], "-wasm-enable-sjlj"))
+				sjlj = 1;
+		}
 		else if (!strcmp(a, "-finstrument-functions")) instr = 1;
 		else if (!strcmp(a, "-fasynchronous-unwind-tables")) cfi = 1;
 		else if (!strcmp(a, "-fno-asynchronous-unwind-tables")) cfi = 0;
@@ -833,17 +965,79 @@ int ppd_run(int argc, char **argv, const ppd_env *env)
 		else if (!strncmp(a, "-march=", 7) && arch_lse(a + 7, false) >= 0) march_lse = arch_lse(a + 7, false);
 		else if (!strncmp(a, "-mcpu=", 6) && arch_lse(a + 6, true) >= 0) mcpu_lse = arch_lse(a + 6, true);
 		else if (!strcmp(a, "-mcmodel=tiny")) tiny = 1;
-		else if (a[0] != '-' && (strstr(a, ".c") || strstr(a, ".S") || strstr(a, ".dts"))) {
+		else if (a[0] != '-' && a[0] && (xlang || strstr(a, ".c") || strstr(a, ".S") || strstr(a, ".dts") ||
+					 (strlen(a) > 2 && !strcmp(a + strlen(a) - 2, ".s")))) {
 			size_t l = strlen(a);
 
 			main_file = a;
 			if (l > 2 && !strcmp(a + l - 2, ".S"))
 				asm_mode = 1;
+			if (l > 2 && !strcmp(a + l - 2, ".s") && raw_asm < 0)
+				raw_asm = 1;	/* clang: .s is assembled without the preprocessor */
 		}
 	}
 	if (!main_file) {
 		dprintf(errfd, "vcc: error: no input file\n");
 		status = 2;
+		goto out;
+	}
+	if (emit == 1 && !objmode && !out && !layout) {
+		/* clang: -S writes the source's basename with .s */
+		out = obj_name(main_file, objbuf, sizeof(objbuf));
+		objbuf[strlen(objbuf) - 1] = 's';
+	}
+	if (raw_asm == 1 && !objmode) {
+		dprintf(errfd, "vcc: error: %s: assembler input needs -c\n", main_file);
+		status = 2;
+		goto out;
+	}
+	if (raw_asm == 1) {
+		/* a .s file (or -x assembler): straight to the assembler, as clang */
+		char path[4096];
+		const char *msg;
+
+		obj_state();
+		if (!out)
+			out = obj_name(main_file, objbuf, sizeof(objbuf));
+		snprintf(path, sizeof(path), "%s%s%s", main_file[0] == '/' || !env->cwd ? "" : env->cwd,
+			 main_file[0] == '/' || !env->cwd ? "" : "/", main_file);
+		int fd = open(path, O_RDONLY);
+		struct stat st;
+
+		if (fd < 0 || fstat(fd, &st)) {
+			dprintf(errfd, "vcc: error: no such file or directory: '%s'\n", main_file);
+			if (fd >= 0)
+				close(fd);
+			status = 1;
+			goto out;
+		}
+		/* padded: the lexer reads 16 bytes past the end */
+		char *t = calloc(1, (size_t)st.st_size + 64);
+		ssize_t got = t ? read(fd, t, (size_t)st.st_size) : -1;
+
+		close(fd);
+		if (got != st.st_size) {
+			dprintf(errfd, "vcc: error: cannot read '%s'\n", main_file);
+			free(t);
+			status = 1;
+			goto out;
+		}
+		as_set_dir(tl_as, env->cwd);
+		size_t tn = (size_t)got;
+
+		if (darwin) {
+			/* Apple's dialect, then the Mach-O writer */
+			char *d = as_darwin_text(t, tn, &tn);
+
+			free(t);
+			t = d;
+		}
+		if (as_run(tl_as, tl_obj, t, tn, main_file, &msg)) {
+			dprintf(errfd, "vcc: error: %s\n", msg);
+			status = 1;
+		} else
+			status = write_obj(env->cwd, out, env->outfd, errfd, darwin);
+		free(t);
 		goto out;
 	}
 	if (objmode) {
@@ -873,14 +1067,14 @@ int ppd_run(int argc, char **argv, const ppd_env *env)
 		snprintf(dfbuf, sizeof(dfbuf), "%.*s.d", (int)(dot ? dot - st : (long)strlen(st)), st);
 		depfile = dfbuf;
 	}
-	/* hosted Linux defaults as clang's: PIE, asynchronous unwind tables (CFI) */
+	/* Linux defaults as clang's: PIE, asynchronous unwind tables (CFI) */
 	{
-		int hl = hosted && !darwin;
+		int hl = !darwin;
 
 		if (pie < 0)
 			pie = hl && !pic ? 2 : 0;
 		if (cfi < 0)
-			cfi = hl;
+			cfi = hl && !freestanding;
 	}
 	/* search path: -iquote, -I, -isystem, -idirafter; exact duplicates dropped */
 	for (int k = 0; k < nq; k++) all[n++] = dirs_q[k];
@@ -901,8 +1095,16 @@ int ppd_run(int argc, char **argv, const ppd_env *env)
 	if (darwin && !nostdinc)
 		ADD(VCC_INCDIR);
 	if (darwin && !nostdinc)
-		for (size_t k = 0; k < sizeof(sysdirs_darwin) / sizeof(sysdirs_darwin[0]); k++)
+		for (size_t k = 0; k < sizeof(sysdirs_darwin) / sizeof(sysdirs_darwin[0]); k++) {
+			size_t l = strlen(sysdirs_darwin[k]);
+			int xc = l > 12 && !strcmp(sysdirs_darwin[k] + l - 12, "/usr/include");
+
+			if (xc)
+				po.xc0 = n;
 			ADD(sysdirs_darwin[k]);
+			if (xc)
+				po.xc1 = n;
+		}
 	if (darwin && (mdeps || depfile || showinc)) {
 		/* clang reads the SDK's SDKSettings.json (the default sysroot: the SDK
 		   of the system directories), and it is the first dependency */
@@ -920,13 +1122,16 @@ int ppd_run(int argc, char **argv, const ppd_env *env)
 		if (!mdeps && !depfile)
 			dfirst = NULL;
 	}
+	(void)hosted;
 #ifdef VCC_RESDIR
 	/* hosted Linux: clang's resource headers, then glibc's (multiarch first) */
 	if (hosted && !darwin && !nostdinc) {
 		ADD(VCC_RESDIR);
 		ADD("/usr/local/include");
+		po.xc0 = n;	/* clang: extern "C" system directories (" 3 4" in line markers) */
 		ADD("/usr/include/aarch64-linux-gnu");
 		ADD("/usr/include");
+		po.xc1 = n;
 	}
 #endif
 	for (int k = 0; k < na; k++) ADD(dirs_a[k]);
@@ -940,10 +1145,14 @@ int ppd_run(int argc, char **argv, const ppd_env *env)
 	po.c89 = std == 89 && strict;
 	po.deps = mdeps || depfile;
 	po.show_includes = showinc;
+	po.comments = comments;
 	po.dump_defines = ddefs;
-	po.dd_order = darwin ? predef_order_darwin : predef_order_linux;
+	lnx = !darwin && !wasm;
+	po.dd_order = darwin ? predef_order_darwin : wasm == 64 ? predef_order_wasm64 : wasm ? predef_order_wasm32 : predef_order_linux;
 	po.ndd_order = darwin ? (int)(sizeof(predef_order_darwin) / sizeof(*predef_order_darwin))
-			      : (int)(sizeof(predef_order_linux) / sizeof(*predef_order_linux));
+		     : wasm == 64 ? (int)(sizeof(predef_order_wasm64) / sizeof(*predef_order_wasm64))
+		     : wasm ? (int)(sizeof(predef_order_wasm32) / sizeof(*predef_order_wasm32))
+			    : (int)(sizeof(predef_order_linux) / sizeof(*predef_order_linux));
 	po.fatal_continue = !emit && !objmode && !syntax && !layout && !tokhash;
 	po.trigraphs = tri >= 0 ? tri : strict && std != 23;	/* clang: strict modes before C23 */
 	{
@@ -959,7 +1168,7 @@ int ppd_run(int argc, char **argv, const ppd_env *env)
 	if (undef)
 		bstr(&pre, asm_mode ? predef_undef_asm : predef_undef_c);
 	else
-		bstr(&pre, darwin ? predef_darwin : predef_aarch64_linux);
+		bstr(&pre, darwin ? predef_darwin : wasm == 64 ? predef_wasm64 : wasm ? predef_wasm32 : predef_aarch64_linux);
 	if (asm_mode && !undef)
 		bstr(&pre, "#define __ASSEMBLER__ 1\n#undef __STDC_VERSION__\n#define __STDC_VERSION__ 201710L\n");
 	else if (!undef && std) {
@@ -967,19 +1176,21 @@ int ppd_run(int argc, char **argv, const ppd_env *env)
 		static const char *const ver[] = { [89] = NULL, [99] = "199901L", [11] = "201112L", [17] = "201710L", [23] = "202311L" };
 
 		bstr(&pre, "#undef __STDC_VERSION__\n");
-		if (ver[std]) {
+		if (stdver || ver[std]) {
 			bstr(&pre, "#define __STDC_VERSION__ ");
-			bstr(&pre, ver[std]);
+			bstr(&pre, stdver ? stdver : ver[std]);
 			bstr(&pre, "\n");
-		} else {
-			bstr(&pre, "#undef __GNUC_STDC_INLINE__\n#define __GNUC_GNU_INLINE__ 1\n");
 		}
+		if (std == 89)
+			bstr(&pre, "#undef __GNUC_STDC_INLINE__\n#define __GNUC_GNU_INLINE__ 1\n");
 		if (strict)
 			bstr(&pre, "#define __STRICT_ANSI__ 1\n#undef linux\n#undef unix\n");
+		if (std == 23)
+			predef_c23(&pre, darwin);
 	} else if (!undef && !asm_mode) {
 		bstr(&pre, "#undef __STDC_VERSION__\n#define __STDC_VERSION__ 201710L\n");
 	}
-	po.target = darwin ? PP_DARWIN : PP_LINUX_AARCH64;
+	po.target = darwin ? PP_DARWIN : wasm == 64 ? PP_WASM64 : wasm ? PP_WASM32 : PP_LINUX_AARCH64;
 	if (opt == 0 && !undef) bstr(&pre, "#undef __OPTIMIZE__\n#define __NO_INLINE__ 1\n");
 	if (os && !undef) bstr(&pre, "#define __OPTIMIZE_SIZE__ 1\n");
 	if ((pie || pic) && !undef) {
@@ -999,7 +1210,7 @@ int ppd_run(int argc, char **argv, const ppd_env *env)
 		bstr(&pre, gnu89_inline ? "#undef __GNUC_STDC_INLINE__\n#undef __GNUC_GNU_INLINE__\n#define __GNUC_GNU_INLINE__ 1\n"
 					: "#undef __GNUC_GNU_INLINE__\n#undef __GNUC_STDC_INLINE__\n#define __GNUC_STDC_INLINE__ 1\n");
 	if (freestanding) bstr(&pre, "#undef __STDC_HOSTED__\n#define __STDC_HOSTED__ 0\n");
-	if (!darwin && !short_wchar && !undef)	/* the Linux table is for the kernel's -fshort-wchar */
+	if (lnx && !short_wchar && !undef)	/* the Linux table is for the kernel's -fshort-wchar */
 		bstr(&pre, "#undef __ARM_SIZEOF_WCHAR_T\n#define __ARM_SIZEOF_WCHAR_T 4\n"
 			   "#undef __SIZEOF_WCHAR_T__\n#define __SIZEOF_WCHAR_T__ 4\n"
 			   "#undef __WCHAR_MAX__\n#define __WCHAR_MAX__ 4294967295U\n"
@@ -1007,22 +1218,58 @@ int ppd_run(int argc, char **argv, const ppd_env *env)
 			   "#undef __WCHAR_TYPE__\n#define __WCHAR_TYPE__ unsigned int\n"
 			   "#undef __WCHAR_WIDTH__\n#define __WCHAR_WIDTH__ 32\n"
 			   "#undef __clang_wide_literal_encoding__\n#define __clang_wide_literal_encoding__ \"UTF-32\"\n");
+	if (!undef && (fmath || (uchar >= 0 && uchar != !darwin)))
+		predef_flags(&pre, darwin, uchar, fmath);
+	if (darwin && macos_min && !undef) {
+		/* clang: MMmmpp (10.x before 10.10: 10mp) */
+		unsigned maj = 0, min = 0, pat = 0, vv;
+		char b[320];
+
+		sscanf(macos_min, "%u.%u.%u", &maj, &min, &pat);
+		vv = maj == 10 && min < 10 ? 1000 + min * 10 + (pat > 9 ? 9 : pat) : maj * 10000 + min * 100 + pat;
+		snprintf(b, sizeof(b), "#undef __ENVIRONMENT_MAC_OS_X_VERSION_MIN_REQUIRED__\n"
+			 "#define __ENVIRONMENT_MAC_OS_X_VERSION_MIN_REQUIRED__ %u\n"
+			 "#undef __ENVIRONMENT_OS_VERSION_MIN_REQUIRED__\n#define __ENVIRONMENT_OS_VERSION_MIN_REQUIRED__ %u\n",
+			 vv, vv);
+		bstr(&pre, b);
+	}
+	if (darwin && short_wchar && !undef)
+		bstr(&pre, "#undef __ARM_SIZEOF_WCHAR_T\n#define __ARM_SIZEOF_WCHAR_T 2\n"
+			   "#undef __SIZEOF_WCHAR_T__\n#define __SIZEOF_WCHAR_T__ 2\n"
+			   "#undef __WCHAR_MAX__\n#define __WCHAR_MAX__ 65535\n"
+			   "#undef __WCHAR_MIN__\n#define __WCHAR_MIN__ 0\n"
+			   "#undef __WCHAR_TYPE__\n#define __WCHAR_TYPE__ unsigned short\n"
+			   "#define __WCHAR_UNSIGNED__ 1\n"
+			   "#undef __WCHAR_WIDTH__\n#define __WCHAR_WIDTH__ 16\n"
+			   "#undef __clang_wide_literal_encoding__\n#define __clang_wide_literal_encoding__ \"UTF-16\"\n");
+	if (darwin && gregs && !undef)	/* the Darwin table has Apple's FP/SIMD features */
+		bstr(&pre, "#undef __ARM_FEATURE_AES\n#undef __ARM_FEATURE_CRYPTO\n#undef __ARM_FEATURE_DOTPROD\n"
+			   "#undef __ARM_FEATURE_FP16_FML\n#undef __ARM_FEATURE_FP16_SCALAR_ARITHMETIC\n"
+			   "#undef __ARM_FEATURE_FP16_VECTOR_ARITHMETIC\n#undef __ARM_FEATURE_SHA2\n"
+			   "#undef __ARM_FEATURE_SHA3\n#undef __ARM_FEATURE_SHA512\n#undef __ARM_FP\n"
+			   "#undef __ARM_NEON\n#undef __ARM_NEON_FP\n");
 	if (cfi && !undef) bstr(&pre, "#define __GCC_HAVE_DWARF2_CFI_ASM 1\n");
+	if (darwin && freestanding && !undef) bstr(&pre, "#undef __GCC_HAVE_DWARF2_CFI_ASM\n");
 	/* the Linux table is for the kernel's -mgeneral-regs-only */
-	if (!darwin && !gregs && !undef)
+	if (lnx && !gregs && !undef)
 		bstr(&pre, "#define __ARM_FP 0xE\n#define __ARM_NEON 1\n#define __ARM_NEON_FP 0xE\n");
 	/* -march wins over -mcpu (clang); Darwin: Apple cores, LSE always */
 	lse = darwin ? 1 : march_lse >= 0 ? march_lse : mcpu_lse >= 0 ? mcpu_lse : 0;
-	if (!darwin && lse && !undef)
+	if (lnx && lse && !undef)
 		bstr(&pre, "#define __ARM_FEATURE_ATOMICS 1\n");
 	if (strict_align) bstr(&pre, "#undef __ARM_FEATURE_UNALIGNED\n");
 	if (tiny) bstr(&pre, "#undef __AARCH64_CMODEL_SMALL__\n#define __AARCH64_CMODEL_TINY__ 1\n");
+	po.markers = nomarkers || cmp || !po.fatal_continue || dmacros ? 0 : undef ? 2 : 1;
+	po.predef_cmdl = (unsigned)pre.n;
 	if (cmdl.n) bput(&pre, cmdl.p, cmdl.n);
+	po.predef_incl = (unsigned)pre.n;
+	if (imac.n) bput(&pre, imac.p, imac.n);
 	if (incl.n) bput(&pre, incl.p, incl.n);
+	po.imacros = imac.n != 0;
 	bput(&pre, "", 1);
 	po.predef = pre.p;
 	po.main = main_file;
-	po.unsigned_char = !darwin;
+	po.unsigned_char = uchar >= 0 ? uchar : lnx;
 	po.cwd = env->cwd;
 	po.errfd = errfd;
 	po.diag_color = dcolor;
@@ -1108,18 +1355,22 @@ int ppd_run(int argc, char **argv, const ppd_env *env)
 	}
 	if (syntax) {
 		cc_opts co = { .target = po.target, .unsigned_char = po.unsigned_char, .dump_layouts = layout, .ms_anon = ms_anon, .short_wchar = short_wchar,
-				.std = std, .implicit_int = std == 89 || wimpl_int, .implicit_fn = std == 89 || wimpl_fn,
-				.gnu89_inline = gnu89_inline, .no_builtin = freestanding || nobuiltin, .instrument = instr,
-				.general_regs_only = gregs, .vcc_kernel = vcc_kernel, .lse = lse, .opt = olevel,
+				.std = std, .implicit_int = std == 89 || wimpl_int, .implicit_fn = std == 89 || wimpl_fn, .conv_warn = conv_warn,
+				.gnu89_inline = gnu89_inline, .no_builtin = freestanding || nobuiltin, .instrument = instr, .wasm_sjlj = sjlj,
+				.general_regs_only = gregs, .vcc_kernel = vcc_kernel, .lse = lse, .opt = olevel, .pic = pic ? 2 : pie ? 1 : 0, .tlsmodel = tlsmodel, .sections = sections, .debug = debug, .cfi = cfi > 0, .dbg_name = main_file,
 			       .outfd = env->outfd };
 		int fd = -1;
 		char outpath[4096], outtmp[4200];
 		bool outrename = false;
 
 		co.emit = emit;
+		char dbgdir[4096];
+		if (debug)
+			co.dbg_dir = env->cwd ? env->cwd : getcwd(dbgdir, sizeof dbgdir);
 		co.nthreads = getenv("VCC_THREADS") ? atoi(getenv("VCC_THREADS")) : 1;
 		co.obj = tl_obj;
 		co.as = tl_as;
+		co.wasm_obj = &tl_wasm_obj;
 		if ((layout || emit == 1) && out && strcmp(out, "-")) {
 			char path[4096];
 
@@ -1157,7 +1408,9 @@ int ppd_run(int argc, char **argv, const ppd_env *env)
 			if (status && outrename)
 				unlink(outtmp);
 		}
-		if (!status && emit == 2)
+		if (!status && emit == 2 && PP_IS_WASM(po.target))
+			status = write_out(env->cwd, out, env->outfd, tl_wasm_obj.p, tl_wasm_obj.n, errfd);
+		else if (!status && emit == 2)
 			status = write_obj(env->cwd, out, env->outfd, errfd, darwin);
 		if (!status && emit == 2 && depfile)
 			status = write_deps(p, env->cwd, depfile, dtarget, dnosys, mphony, dfirst, NULL, -1, errfd);
@@ -1198,12 +1451,18 @@ int ppd_run(int argc, char **argv, const ppd_env *env)
 		const char *msg;
 
 		as_set_dir(tl_as, env->cwd);
-		if (as_run(tl_as, tl_obj, o.p, o.n, main_file, &msg)) {
+		char *dt = NULL;
+		size_t dn = o.n;
+
+		if (darwin)
+			dt = as_darwin_text(o.p, o.n, &dn);
+		if (as_run(tl_as, tl_obj, dt ? dt : o.p, dn, main_file, &msg)) {
 			dprintf(errfd, "vcc: error: %s\n", msg);
 			status = 1;
 		} else {
-			status = write_obj(env->cwd, out, env->outfd, errfd, 0);
+			status = write_obj(env->cwd, out, env->outfd, errfd, darwin);
 		}
+		free(dt);
 		if (!status && depfile)
 			status = write_deps(p, env->cwd, depfile, dtarget, dnosys, mphony, dfirst, NULL, -1, errfd);
 	} else {
@@ -1222,6 +1481,7 @@ out:
 	bfree(&pre);
 	bfree(&cmdl);
 	bfree(&incl);
+	bfree(&imac);
 	vmpool_give(&bufpool, br);
 	bufr = NULL;
 	obj_release();

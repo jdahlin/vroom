@@ -43,6 +43,7 @@ static uint32_t align_of_expr(cc *c, uint32_t e)
 }
 
 static uint32_t unary(cc *c);
+static void ovf_warn(cc *c, int op, uint32_t n, uint32_t loc, uint32_t sub0, uint32_t sub1);
 
 /* the operand of sizeof/_Alignof: "( type-name )" gives UINT32_MAX, *ty and its
    span in *r (if r), anything else the (unevaluated) unary expression; '(' is
@@ -97,15 +98,39 @@ static __attribute__((noinline)) uint32_t unary_op(cc *c)
 	}
 	case T_AMP:
 		next(c);
+		c->after_amp = is(c, T_STAR);
 		n = cast_expr(c);
 		bounds_warn(c, n, true);
+		{
+			uint32_t b = n;	/* &r, &r.m of a register variable (clang: also its members) */
+
+			while (N(b)->op == N_MEMBER)
+				b = N(b)->a;
+			if (N(b)->op == N_VAR && c->syms[N(b)->a].sc == SC_REGISTER)
+			{
+				pp_span r = rng(c, n);
+
+				report(c, "error", loc, &r, 1, NULL, 0, "address of register variable requested");
+			}
+		}
 		return addr_of(c, n, loc);
-	case T_STAR:
+	case T_STAR: {
+		bool amp = c->after_amp;
+
+		c->after_amp = false;
 		next(c);
 		n = cast_expr(c);
 		if (KIND(c, N(n)->ty) == TY_FUNC)
 			return n;
-		return deref(c, n, loc);
+		n = deref(c, n, loc);
+		if (!amp && !c->unevaluated && N(n)->op == N_DEREF && KIND(c, N(n)->ty) == TY_VOID) {
+			pp_span r = rng(c, N(n)->a);
+
+			cc_warnx(c, "void-ptr-dereference", true, NULL, loc, &r, 1, NULL, 0,
+				 "ISO C does not allow indirection on operand of type '%s'", tyname(c, N(N(n)->a)->ty));
+		}
+		return n;
+	}
 	case T_PLUS:
 	case T_MINUS:
 	case T_TILDE: {
@@ -123,6 +148,10 @@ static __attribute__((noinline)) uint32_t unary_op(cc *c)
 
 			N(r)->aux = (uint16_t)op;
 			N(r)->a = n;
+			if (op == T_MINUS) {
+				setspan(c, r, loc);
+				ovf_warn(c, op, r, loc, n, 0);
+			}
 			return r;
 		}
 	}
@@ -380,7 +409,12 @@ static void runtime_warn(cc *c, int op, uint32_t l, uint32_t r, uint32_t loc)
 		return;
 	rr = rng(c, r);
 	if (op == T_SLASH || op == T_PERCENT) {
-		if (!cv.i)
+		if (!cv.i && c->unevaluated)
+			;	/* (sizeof, typeof: never runs) */
+		else if (!cv.i && c->defer_rt) {
+			if (c->ndefer < 8)
+				c->defer[c->ndefer].loc = loc, c->defer[c->ndefer].r = rr, c->defer[c->ndefer++].rem = op == T_PERCENT;
+		} else if (!cv.i)
 			cc_warnx(c, "division-by-zero", true, NULL, loc, &rr, 1, NULL, 0, "%s by zero is undefined",
 			      op == T_SLASH ? "division" : "remainder");
 		return;
@@ -389,6 +423,57 @@ static void runtime_warn(cc *c, int op, uint32_t l, uint32_t r, uint32_t loc)
 		cc_warnx(c, "shift-count-negative", true, NULL, loc, &rr, 1, NULL, 0, "shift count is negative");
 	else if (cv.i >= (i128)ty_size(c, promoted(c, l)) * 8)
 		cc_warnx(c, "shift-count-overflow", true, NULL, loc, &rr, 1, NULL, 0, "shift count >= width of type");
+}
+
+
+/* -Winteger-overflow: n, a signed integer +, -, * or unary - of constants,
+   whose exact value does not fit its type.  Once per expression (NF_OVF). */
+static void ovf_warn(cc *c, int op, uint32_t n, uint32_t loc, uint32_t sub0, uint32_t sub1)
+{
+	cval a, b;
+	i128 v;
+	int bits;
+	qty t = N(n)->ty;
+
+	if ((N(sub0)->flags & NF_OVF) || (sub1 && (N(sub1)->flags & NF_OVF))) {
+		N(n)->flags |= NF_OVF;
+		return;
+	}
+	if (c->dead || c->unevaluated || !is_integer(c, t) || !is_signed(c, t) || (bits = (int)ty_size(c, t) * 8) > 64 ||
+	    !cc_eval(c, sub0, &a) || a.kind != CV_INT || (sub1 && (!cc_eval(c, sub1, &b) || b.kind != CV_INT)))
+		return;
+	if (!sub1)
+		v = -a.i;
+	else if (op == T_PLUS)
+		v = a.i + b.i;
+	else if (op == T_MINUS)
+		v = a.i - b.i;
+	else
+		v = a.i * b.i;
+	if (v >= -((i128)1 << (bits - 1)) && v < ((i128)1 << (bits - 1)))
+		return;
+	N(n)->flags |= NF_OVF;
+	{
+		char d[48], o[64];
+		int64_t w = bits == 64 ? (int64_t)(uint64_t)v : (int64_t)(int32_t)(uint32_t)v;
+		uint64_t m = w < 0 ? -(uint64_t)w : (uint64_t)w;
+		int nd = 0, k = 0;
+		pp_span r = rng(c, n);
+
+		do
+			d[nd++] = (char)('0' + m % 10), m /= 10;
+		while (m);
+		if (w < 0)
+			o[k++] = '-';
+		while (nd) {
+			o[k++] = d[--nd];
+			if (nd && nd % 3 == 0)
+				o[k++] = '\'';
+		}
+		o[k] = 0;
+		cc_warnx(c, "integer-overflow", true, NULL, loc, &r, 1, NULL, 0,
+			 "overflow in expression; result is %s with type '%s'", o, tyname(c, t));
+	}
 }
 
 static uint32_t binary(cc *c, int minp);
@@ -416,10 +501,18 @@ static __attribute__((noinline)) uint32_t binary_ops(cc *c, int minp, uint32_t l
 			c->dead -= dead;
 		}
 		runtime_warn(c, op, l, r, loc);
-		l = binop(c, op, l, r, loc);
-		if (mac)
-			N(l)->flags |= NF_MACRO;
-		setspan(c, l, b);
+		{
+			uint32_t l0 = l;
+
+			l = binop(c, op, l, r, loc);
+			if (mac)
+				N(l)->flags |= NF_MACRO;
+			setspan(c, l, b);
+			if (op == T_PLUS || op == T_MINUS || op == T_STAR)
+				ovf_warn(c, op, l, loc, l0, r);
+			else if ((N(l0)->flags | N(r)->flags) & NF_OVF)
+				N(l)->flags |= NF_OVF;
+		}
 	}
 }
 
@@ -483,6 +576,29 @@ static int assign_op(int k)
 	}
 }
 
+/* -Wself-assign: x = x (parentheses and implicit conversions aside), not volatile */
+static void self_assign(cc *c, uint32_t l, uint32_t r, uint32_t loc)
+{
+	while (N(r)->op == N_CAST && !c->span[r].e && N(r)->a)
+		r = N(r)->a;
+	if (N(l)->op != N_VAR || N(r)->op != N_VAR || N(l)->a != N(r)->a || (QQ(N(l)->ty) & Q_VOLATILE) ||
+	    c->syms[N(l)->a].kind != S_VAR)
+		return;
+	{
+		uint32_t nm = c->syms[N(l)->a].name;
+
+		if (!pp_spells(c->p, N(l)->loc, idstr_(nm), (uint32_t)idlen_(nm)) ||
+		    !pp_spells(c->p, N(r)->loc, idstr_(nm), (uint32_t)idlen_(nm)))
+			return;	/* (clang: not from a macro) */
+	}
+	{
+		pp_span rr[2] = { { N(l)->loc, pp_tok_end(c->p, N(l)->loc) }, { N(r)->loc, pp_tok_end(c->p, N(r)->loc) } };
+
+		cc_warnx(c, "self-assign", false, w_selfassign, loc, rr, 2, NULL, 0,
+			 "explicitly assigning value of variable of type '%s' to itself", tyname(c, N(l)->ty));
+	}
+}
+
 static __attribute__((noinline)) uint32_t assign_rest(cc *c, uint32_t l, int op)
 {
 	uint32_t loc = tok(c)->loc, r;
@@ -490,6 +606,8 @@ static __attribute__((noinline)) uint32_t assign_rest(cc *c, uint32_t l, int op)
 
 	next(c);
 	r = assign_expr(c);
+	if (op < 0 && !mac && !(c->prevflags & PF_MACRO))	/* (the right side's last token) */
+		self_assign(c, l, r, loc);
 	r = assign(c, op < 0 ? 0 : op, l, r, loc);
 	if (mac)
 		N(r)->flags |= NF_MACRO;
@@ -513,6 +631,8 @@ static __attribute__((noinline)) uint32_t comma_rest(cc *c, uint32_t l)
 
 		next(c);
 		r = assign_expr(c);
+		unused_value(c, l, true);
+		set_only(c, l);	/* (a discarded value: clang's IgnoredValueConversions) */
 		l = mk2(c, N_COMMA, QUNQ(N(decay(c, r))->ty), loc, l, decay(c, r));
 	}
 	return l;
