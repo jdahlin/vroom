@@ -1,4 +1,4 @@
-/* diag-flags: -Wno-literal-conversion -Wno-bitfield-constant-conversion -Wno-unused-value */
+/* diag-flags: -Wno-literal-conversion -Wno-bitfield-constant-conversion */
 char a = 300;
 unsigned char b = 256;
 signed char c = 128;

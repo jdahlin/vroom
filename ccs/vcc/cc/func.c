@@ -135,9 +135,7 @@ VPRIV void function_def(cc *c, uint32_t s, const declr *d)
 	c->nrtd = 0;
 	body = compound_stmt(c, NULL);
 	scope_close(c);
-	for (uint32_t i = 0; i < c->nrtd; i++)	/* (clang: only if reachable; not modelled) */
-		cc_warnx(c, "constant-conversion", true, w_conv, c->rtd[i].loc, c->rtd[i].r, 2, NULL, 0, "%s", c->rtd[i].msg);
-	c->nrtd = 0;
+	rt_flush(c);	/* (clang: only if reachable; vcc: not under a constant-false condition) */
 	{
 		uint32_t rb = c->prevloc;	/* the closing brace */
 		const sym *y = &c->syms[s];

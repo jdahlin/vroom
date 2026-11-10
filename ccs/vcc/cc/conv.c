@@ -480,11 +480,7 @@ static void const_conv(cc *c, uint32_t n, qty to)
 		snprintf(msg, sizeof msg, "implicit conversion from '%s' to '%s' changes value from %lld to %lld",
 			 tyname(c, from), tyname(c, to), (long long)v, (long long)t);
 		if (deferred && c->fn && !c->defer_rt) {
-			if (c->nrtd < 16) {
-				c->rtd[c->nrtd].loc = r[1].b;
-				memcpy(c->rtd[c->nrtd].r, r, sizeof r);
-				memcpy(c->rtd[c->nrtd++].msg, msg, sizeof msg);
-			}
+			rt_defer(c, "constant-conversion", w_conv, r[1].b, r, 2, NULL, 0, "%s", msg);
 			return;
 		}
 		cc_warnx(c, "constant-conversion", true, w_conv, r[1].b, r, 2, NULL, 0, "%s", msg);

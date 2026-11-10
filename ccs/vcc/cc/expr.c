@@ -534,8 +534,14 @@ VPRIV uint32_t paren_expr(cc *c, uint32_t loc)
 {
 	uint32_t n;
 
-	if (is(c, T_LBRACE))
-		return stmt_expr(c, loc);
+	if (is(c, T_LBRACE)) {
+		bool mac = tok(c)->flags & PF_MACRO;
+
+		n = stmt_expr(c, loc);
+		if (mac)
+			N(n)->flags |= NF_MACRO;	/* (no -Wunused-value) */
+		return n;
+	}
 	n = expr(c);
 	if (!is(c, T_RPAREN)) {
 		report(c, "error", tok(c)->loc, NULL, 0, NULL, 0, "expected ')'");

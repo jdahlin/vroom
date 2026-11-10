@@ -61,6 +61,156 @@ VPRIV void unused_result(cc *c, uint32_t e, bool last)
 	}
 }
 
+/* clang's Expr::isUnusedResultAWarning: does dropping e's value warn, where */
+typedef struct uvw { uint32_t loc; pp_span r[2]; int nr; uint32_t e; } uvw;
+
+static bool vol(cc *c, uint32_t e)
+{
+	return (QQ(N(e)->ty) & Q_VOLATILE) != 0;
+}
+
+static bool uv_warn(cc *c, uint32_t e, uvw *w)
+{
+	const node *x;
+
+	for (;;) {
+		x = N(e);
+		if (x->op == N_CAST && !c->span[e].e && x->a) {	/* implicit */
+			if (vol(c, x->a) && (N(x->a)->flags & NF_LVALUE))
+				return false;	/* a volatile load */
+			e = x->a;
+			continue;
+		}
+		break;
+	}
+	w->e = e, w->nr = 0;
+	switch (x->op) {
+	case N_PREINC: case N_PREDEC: case N_POSTINC: case N_POSTDEC: case N_ASSIGN: case N_CALL: case N_BUILTIN:
+	case N_VAARG: case N_ZERO: case N_NONE:
+		return false;
+	case N_UNARY:
+		if (x->aux == T_PLUS || x->aux == T_MINUS || x->aux == T_TILDE || x->aux == T_EXCLAIM)
+			goto unop;
+		return false;
+	case N_DEREF:
+		if (vol(c, e))
+			return false;
+		/* fallthrough */
+	case N_ADDR:
+	unop:
+		w->loc = x->loc, w->r[0] = rng(c, x->a), w->nr = 1;
+		return true;
+	case N_COMMA: {
+		uint32_t r = x->b;
+
+		while (N(r)->op == N_CAST && !c->span[r].e && N(r)->a)
+			r = N(r)->a;
+		if (N(r)->op == N_NUM && c->ipool[N(r)->a] == 0)
+			return false;	/* ((x = y), 0): the idiom */
+		return uv_warn(c, x->b, w);
+	}
+	case N_LOGAND: case N_LOGOR: {
+		uvw t;
+
+		if (!uv_warn(c, x->b, &t))
+			return false;
+		w->loc = x->loc, w->r[0] = rng(c, x->a), w->r[1] = rng(c, x->b), w->nr = 2;
+		return true;
+	}
+	case N_BINARY:
+		w->loc = x->loc, w->r[0] = rng(c, x->a), w->r[1] = rng(c, x->b), w->nr = 2;
+		return true;
+	case N_COND: {
+		uvw t;
+
+		if (x->b && !uv_warn(c, x->b, &t))
+			return false;
+		return uv_warn(c, x->c, w);
+	}
+	case N_MEMBER:
+		if (vol(c, e))
+			return false;
+		w->loc = c->span[e].e ? c->span[e].e : x->loc, w->r[0] = rng(c, x->a), w->nr = 1;	/* the member's name */
+		return true;
+	case N_INDEX:
+		if (vol(c, e))
+			return false;
+		w->loc = c->span[e].e ? c->span[e].e : x->loc, w->r[0] = rng(c, x->a), w->r[1] = rng(c, x->b), w->nr = 2;
+		return true;
+	case N_VAR:
+		if (vol(c, e))
+			return false;	/* a volatile load */
+		goto plain;
+	case N_STMTEXPR: {
+		uint32_t b = x->a, n = N(b)->c, ls = n ? c->lists[N(b)->b + n - 1] : 0;
+
+		while (ls && N(ls)->op == N_LABEL)
+			ls = N(ls)->c;
+		if (ls && N(ls)->op == N_EXPR && N(ls)->a)
+			return uv_warn(c, N(ls)->a, w);
+		if (is_void(c, x->ty))
+			return false;
+		w->loc = x->loc, w->r[0] = rng(c, e), w->nr = 1;
+		return true;
+	}
+	case N_CAST:	/* explicit */
+		if (x->aux == CK_VOID)
+			return false;
+		w->loc = c->span[e].b, w->r[0] = rng(c, x->a), w->nr = 1;
+		return true;
+	default:
+	plain:
+		w->loc = rng(c, e).b, w->r[0] = rng(c, e), w->nr = 1;
+		return true;
+	}
+}
+
+/* -Wunused-comparison: e, a dropped comparison (not parenthesized, not from a macro); true if it is one */
+VPRIV bool unused_cmp(cc *c, uint32_t e)
+{
+	if (N(e)->op != N_BINARY || !is_cmp(N(e)->aux) || (N(e)->flags & (NF_PAREN | NF_MACRO | NF_ERR)))
+		return false;
+	{
+		int k = N(e)->aux;
+		uint32_t op = N(e)->loc;
+		pp_span r = { rng(c, N(e)->a).b, rng(c, N(e)->b).e };
+		bool eq = k == T_EQUALEQUAL || k == T_EXCLAIMEQ;
+
+		if (cc_warnx(c, "unused-comparison", true, w_all, op, &r, 1, NULL, 0, "%s comparison result unused",
+			  eq ? "equality" : "relational") && k == T_EQUALEQUAL) {
+			pp_span orr = { op, op + 2 };
+			pp_fixit fx = { op, op + 2, "=" };
+			pp_dinfo d = { "note", op, &orr, 1, &fx, 1, NULL, 0 };
+
+			pp_diagx(c->p, &d, "use '=' to turn this equality comparison into an assignment");
+		}
+	}
+	return true;
+}
+
+/* -Wunused-value: e's value is dropped (a statement; comma: the left operand of a comma) */
+VPRIV void unused_value(cc *c, uint32_t e, bool comma)
+{
+	static const char *const g[] = { "unused", "all", "most", NULL };
+	uvw w;
+	const char *ms = NULL;
+	uint32_t ml = 0;
+
+	if (!c->fn || !e || (N(e)->flags & NF_ERR))
+		return;
+	if (comma && N(e)->op == N_BINARY && is_cmp(N(e)->aux) && !(N(e)->flags & (NF_PAREN | NF_MACRO)) &&
+	    (c->in_stmtexpr || unused_cmp(c, e)))
+		return;	/* a comparison: -Wunused-comparison instead */
+	if (c->dead || !uv_warn(c, e, &w))
+		return;
+	if (N(e)->op == N_STMTEXPR && (N(e)->flags & NF_MACRO))
+		return;	/* clang: a statement expression from a macro */
+	if (N(w.e)->op == N_VAR)
+		ms = idstr_(c->syms[N(w.e)->a].name), ml = (uint32_t)idlen_(c->syms[N(w.e)->a].name);
+	rt_defer(c, "unused-value", g, w.loc, w.r, w.nr, ms, ml, "%s",
+		 comma ? "left operand of comma operator has no effect" : "expression result unused");
+}
+
 /* clang's -Wreturn-stack-address: the address of a local or parameter returned (addr: e's address is taken) */
 static void return_stack_addr(cc *c, uint32_t e, bool addr)
 {
@@ -317,7 +467,7 @@ VPRIV bool at_asm(cc *c)
 
 VPRIV uint32_t compound_stmt(cc *c, qty *last)
 {
-	uint32_t loc = tok(c)->loc, n;
+	uint32_t loc = tok(c)->loc, n, sedone = 0;
 	vec items, locals;
 
 	vinit(&items);
@@ -345,6 +495,15 @@ VPRIV uint32_t compound_stmt(cc *c, qty *last)
 		expect_semi(c, "at end of declaration");
 	}
 	while (!is(c, T_RBRACE)) {
+		if (last && items.n > sedone) {	/* a statement expression: the one before was not the last */
+			uint32_t ls = items.v[items.n - 1];
+
+			while (N(ls)->op == N_LABEL)
+				ls = N(ls)->c;
+			if (N(ls)->op == N_EXPR)
+				unused_value(c, N(ls)->a, false);
+			sedone = items.n;
+		}
 		if (is(c, T_EOF)) {
 			report(c, "error", pp_tok_end(c->p, c->prevloc), NULL, 0, NULL, 0, "expected '}'");
 			note(c, loc, "to match this '{'");
@@ -369,6 +528,7 @@ VPRIV uint32_t compound_stmt(cc *c, qty *last)
 			declaration(c, &items, false);
 			continue;
 		}
+		c->se_direct = last != NULL;
 		vpush(c, &items, statement(c));
 	}
 	next(c);
@@ -410,7 +570,9 @@ VPRIV uint32_t statement(cc *c)
 	ptok *t = tok(c);
 	uint32_t loc = t->loc;
 	int kw = kwof(t);
+	bool sed = c->se_direct;	/* a statement of a statement expression's body: checked there (not the last) */
 
+	c->se_direct = 0;
 	switch (t->kind) {
 	case T_LBRACE:
 		return compound_stmt(c, NULL);
@@ -443,8 +605,10 @@ VPRIV uint32_t statement(cc *c)
 				declaration(c, &items, false);
 				s = mkstmt(c, N_BLOCK, loc, 0, vfreeze(c, &items), items.n);
 				/* the declaration stays in the enclosing scope: (approximation) */
-			} else
+			} else {
+				c->se_direct = sed;	/* (a labeled last statement gives the value) */
 				s = statement(c);
+			}
 			n = mkstmt(c, N_LABEL, loc, l, 0, s);
 			c->labels[l].defined = n;
 			return n;
@@ -536,6 +700,8 @@ VPRIV uint32_t statement(cc *c)
 		c->in_loop++;
 		body = sub_statement(c);
 		c->in_loop--;
+		if (init && N(init)->op == N_EXPR)	/* clang's ActOnForStmt: the first and third clauses */
+			unused_value(c, N(init)->a, false);
 		scope_close(c);
 		vinit(&sb);
 		vpush(c, &sb, step);
@@ -740,24 +906,13 @@ VPRIV uint32_t statement(cc *c)
 	{
 		uint32_t e = expr(c);
 
-		if (N(e)->op == N_BINARY && is_cmp(N(e)->aux) && !c->in_stmtexpr &&
-		    !(N(e)->flags & (NF_PAREN | NF_MACRO | NF_ERR))) {
-			int k = N(e)->aux;
-			uint32_t op = N(e)->loc;
-			pp_span r = { rng(c, N(e)->a).b, rng(c, N(e)->b).e };
-			bool eq = k == T_EQUALEQUAL || k == T_EXCLAIMEQ;
+		bool cmp = !c->in_stmtexpr && unused_cmp(c, e);
 
-			if (cc_warnx(c, "unused-comparison", true, w_all, op, &r, 1, NULL, 0, "%s comparison result unused",
-				  eq ? "equality" : "relational") && k == T_EQUALEQUAL) {
-				pp_span orr = { op, op + 2 };
-				pp_fixit fx = { op, op + 2, "=" };
-				pp_dinfo d = { "note", op, &orr, 1, &fx, 1, NULL, 0 };
-
-				pp_diagx(c->p, &d, "use '=' to turn this equality comparison into an assignment");
-			}
-		}
 		if (!c->in_stmtexpr)
 			unused_result(c, e, true);
+		if (!sed && !cmp && !(c->in_stmtexpr && N(e)->op == N_BINARY && is_cmp(N(e)->aux) &&
+				      !(N(e)->flags & (NF_PAREN | NF_MACRO))))
+			unused_value(c, e, false);
 		expect_semi(c, "after expression");
 		return mkstmt(c, N_EXPR, loc, e, 0, 0);
 	}

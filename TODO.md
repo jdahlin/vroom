@@ -1073,11 +1073,20 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
   AnalyzeBitFieldAssignment.  Done: diag `bitfield_const.c`, 93 warnings
   over the test suite identical.  Not modelled: the macro note finds the
   operator by spelling, so it can show an earlier `=` of the same body.
+- [x] **-Wunused-value**: clang's isUnusedResultAWarning on expression
+  statements, a statement expression's statements but the last, a `for`
+  init, a comma's left operand (a comparison there: -Wunused-comparison);
+  deferred to the end of the function with the conversion warnings
+  (`rt_defer`).  Done: diag `unused_value.c`, `unused_value_comma.c`;
+  kernel, PostgreSQL, test suite 0 differences.  Not modelled: the macro
+  note for a macro argument (its tokens keep their file location); calls
+  of pure/const functions ("ignoring return value of function declared
+  with const attribute").
 - [ ] **Missing warnings** (only 7 `-W` flags):
   `-Wreturn-stack-address` of a compound literal
   (clang prints the initializer with its expression printer),
-  `-Wuninitialized`, `-Wunknown-attributes`, `-Wdeprecated-declarations`,
-  `-Wunused-value`; pp `-Wextra-tokens`,
+  `-Wuninitialized`, `-Wunknown-attributes`, `-Wdeprecated-declarations`;
+  pp `-Wextra-tokens`,
   `-Wexpansion-to-defined`, `-Winvalid-pp-token`, `#pragma GCC warning`.
   *Validate:* one diag test per warning; `vcc-sema.py warn` stays 879/879
   (no false positives on the kernel).  (Done: `-Wmultichar` in C and `#if`, "character constant too long",

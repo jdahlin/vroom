@@ -94,6 +94,34 @@ VPRIV bool cc_warnx(cc *c, const char *flag, bool on, const char *const *groups,
 	return pp_warnx(c->p, flag, on, groups, &d, "%s", msg);
 }
 
+/* a warning for the end of the function body (clang's DiagRuntimeBehavior); ms: the macro note's spelling */
+__attribute__((format(printf, 9, 10)))
+VPRIV void rt_defer(cc *c, const char *flag, const char *const *groups, uint32_t loc, const pp_span *r, int nr,
+		    const char *ms, uint32_t mlen, const char *fmt, ...)
+{
+	va_list ap;
+
+	if (c->nrtd >= 64)
+		return;
+	c->rtd[c->nrtd].flag = flag, c->rtd[c->nrtd].groups = groups, c->rtd[c->nrtd].loc = loc;
+	c->rtd[c->nrtd].ms = ms, c->rtd[c->nrtd].mlen = mlen, c->rtd[c->nrtd].nr = (uint32_t)nr;
+	for (int i = 0; i < nr && i < 2; i++)
+		c->rtd[c->nrtd].r[i] = r[i];
+	va_start(ap, fmt);
+	vsnprintf(c->rtd[c->nrtd++].msg, sizeof c->rtd[0].msg, fmt, ap);
+	va_end(ap);
+}
+
+VPRIV void rt_flush(cc *c)
+{
+	for (uint32_t i = 0; i < c->nrtd; i++) {
+		pp_dinfo d = { "warning", c->rtd[i].loc, c->rtd[i].r, (int)c->rtd[i].nr, NULL, 0, c->rtd[i].ms, c->rtd[i].mlen };
+
+		pp_warnx(c->p, c->rtd[i].flag, true, c->rtd[i].groups, &d, "%s", c->rtd[i].msg);
+	}
+	c->nrtd = 0;
+}
+
 VPRIV const char *idname(uint32_t id, int *len)
 {
 	*len = (int)vintern_ents[id].len;

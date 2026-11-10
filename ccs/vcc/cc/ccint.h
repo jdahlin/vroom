@@ -114,8 +114,10 @@ struct cc {
 	uint8_t defer_rt;	/* parsing a static initializer: -Wdivision-by-zero waits (clang's DiagRuntimeBehavior) */
 	uint8_t ndefer;
 	struct { uint32_t loc; pp_span r; uint8_t rem; } defer[8];
-	uint8_t nrtd;		/* -Wconstant-conversion in a function body: at its end (DiagRuntimeBehavior) */
-	struct { uint32_t loc; pp_span r[2]; char msg[112]; } rtd[16];
+	uint8_t se_direct;	/* the next statement is one of a statement expression's body */
+	uint16_t nrtd;		/* warnings of a function body given at its end (clang's DiagRuntimeBehavior) */
+	struct { const char *flag; const char *const *groups; const char *ms; uint32_t mlen, loc, nr; pp_span r[2];
+		 char msg[112]; } rtd[64];
 	bool after_amp;		/* the unary * being parsed is the operand of & (no -Wvoid-ptr-dereference) */
 	uint8_t cv_what;		/* context of the conversion being checked: CX_* (diagnostics) */
 	uint32_t cv_loc, cv_fn, cv_arg, cv_callee;	/* cv_callee: CX_PASS: the callee expression's first location */	/* CX_PASS: the callee's sym (0: unknown) and the argument */
