@@ -45,7 +45,7 @@ class Vccd:
         self.sock = f'{self.dir}/vccd.sock'
         self.logf = f'{self.dir}/vccd.log'
         pre = (lambda: os.umask(umask)) if umask is not None else None
-        self.p = subprocess.Popen([f'{vd.BIN}/vccd', '--sock', self.sock, '--backend-sock', f'{self.dir}/none.sock',
+        self.p = subprocess.Popen([f'{vd.BIN}/vccd', '--sock', self.sock,
                                    '-j', str(workers)] + list(extra), stdout=open(self.logf, 'w'), stderr=subprocess.STDOUT,
                                   preexec_fn=pre, env=dict(os.environ, **(env or {})))
         for _ in range(200):
@@ -236,7 +236,7 @@ def request_env_reaches_job():
 
 @test()
 def compile_shapes_not_forwarded():
-    """-c/-S with the input not last, -o before -c, -fPIC: vcc compiles them (the backend is absent, so a forward fails)"""
+    """-c/-S with the input not last, -o before -c, -fPIC: vcc compiles them (there is no backend to forward to)"""
     v = Vccd()
     try:
         d = f'{v.dir}/w'; os.makedirs(d, exist_ok=True)

@@ -1,5 +1,6 @@
 /* vcc code generator: data: initialised objects and strings */
 #include "emitimpl.h"
+#include "../lib/f128.h"
 
 /* ---------------- data ---------------- */
 
@@ -159,6 +160,17 @@ static void data_init(ecx *e, uint64_t off, qty ty, uint32_t init)
 			} else {
 				uint64_t u;
 
+				if (n == 16 && X86(c) && KIND(c, ty) == TY_LDOUBLE) {	/* x87: 10 bytes, 6 of padding */
+					u128 q = cv.ld ? cv.q : (u128)ld_of_d(cv.f);
+					uint8_t xb[10];
+					uint64_t lo;
+
+					q_to_x87(q, xb);
+					memcpy(&lo, xb, 8);
+					data_put(e, off, lo, 8);
+					data_put(e, off + 8, (uint64_t)xb[8] | (uint64_t)xb[9] << 8, 8);
+					return;
+				}
 				if (n == 16) {
 					u128 q = cv.ld ? cv.q : (u128)ld_of_d(cv.f);
 
@@ -265,7 +277,7 @@ static void data_bytes(ecx *e, tbuf *b, uint64_t size)
 		if (ri < e->nrel && o == e->rel[ri].off) {
 			uint32_t sz = e->rel[ri].sz ? e->rel[ri].sz : 8;
 
-			tb_s(b, sz == 4 ? (WASM(e->c) ? "\t.int32\t" : "\t.word\t") : WASM(e->c) ? "\t.int64\t" : "\t.xword\t");
+			tb_s(b, sz == 4 ? (WASM(e->c) ? "\t.int32\t" : X86(e->c) ? "\t.long\t" : "\t.word\t") : WASM(e->c) ? "\t.int64\t" : X86(e->c) ? "\t.quad\t" : "\t.xword\t");
 			ref_off(e->c, b, e->rel[ri].ref, e->rel[ri].add);
 			if (e->rel[ri].sub) {
 				tb_c(b, '-');
@@ -295,7 +307,7 @@ static void data_bytes(ecx *e, tbuf *b, uint64_t size)
 
 				/* o < data.n here; past it the bytes are zero, not what the buffer holds */
 				memcpy(&w, d + o, o + 8 <= e->data.n ? 8 : e->data.n - o);
-				tb_s(b, WASM(e->c) ? "\t.int64\t" : "\t.xword\t");
+				tb_s(b, WASM(e->c) ? "\t.int64\t" : X86(e->c) ? "\t.quad\t" : "\t.xword\t");
 				tb_hex(b, w);
 				tb_c(b, '\n');
 				o += 8;
@@ -616,7 +628,7 @@ VPRIV void emit_string(ecx *e, uint32_t i)
 			uint32_t v = 0;
 
 			memcpy(&v, s->s + k, s->esz);
-			tb_s(b, s->esz == 1 ? "\t.byte\t" : s->esz == 2 ? "\t.short\t" : WASM(c) ? "\t.long\t" : "\t.word\t");
+			tb_s(b, s->esz == 1 ? "\t.byte\t" : s->esz == 2 ? "\t.short\t" : WASM(c) || X86(c) ? "\t.long\t" : "\t.word\t");
 			tb_u(b, v);
 			tb_c(b, '\n');
 		}

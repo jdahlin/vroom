@@ -1,7 +1,9 @@
 /*
  * vcc lexer, see lex.h.
  */
+#ifdef __ARM_NEON
 #include <arm_neon.h>
+#endif
 #include <errno.h>
 #include <fcntl.h>
 #include <pthread.h>
@@ -118,6 +120,7 @@ static void init_struct_tables(void)
 
 enum { M_ID, M_WS, M_NL, M_DIG, M_P, M_PAIR, M_X, M_NS, M_COUNT };
 
+#ifdef __ARM_NEON
 /*
  * 64 byte masks to a 64-bit mask, for vectors loaded with vld4q (only bit
  * 7 of each byte counts):
@@ -254,6 +257,70 @@ static inline size_t find_quote(const char *s, size_t p, uint8_t q)
 			return p + (__builtin_ctzll(m) >> 2);
 	}
 }
+
+#else	/* !__ARM_NEON: the same masks and searches a byte at a time (SSE/AVX2: TODO.md) */
+
+static void classify(const uint8_t *s, size_t from, size_t to, uint64_t *m[M_COUNT])
+{
+	for (size_t b = from; b < to; b++) {
+		const uint8_t *q = s + 64 * b;
+		uint64_t mp = 0, mpair = 0, mx = 0, mid = 0, mws = 0, mnl = 0, mdg = 0, mns = 0;
+
+		for (int i = 0; i < 64; i++) {
+			unsigned x = q[i], y = q[i + 1];
+			unsigned t = x < 128 ? ttab[x] : 0, c = x < 128 ? cltab[x] : 0;
+			unsigned gn = y < 64 ? gtab[y] : 0, tg = t & gn;
+			uint64_t bit = (uint64_t)1 << i;
+
+			if (t & 16)
+				mp |= bit;
+			if ((tg & 0x0e) || ((t & 1) && x == y))
+				mpair |= bit;
+			if ((t | x) & 128 || (tg & 64))
+				mx |= bit;
+			if (c & 0x1f)
+				mid |= bit;
+			if (c & 0xe0)
+				mws |= bit;
+			if (c & 0x80)
+				mnl |= bit;
+			if (c & 0x04)
+				mdg |= bit;
+			if (gn & 128)
+				mns |= bit;
+		}
+		m[M_P][b] = mp, m[M_PAIR][b] = mpair, m[M_X][b] = mx, m[M_ID][b] = mid;
+		m[M_WS][b] = mws, m[M_NL][b] = mnl, m[M_DIG][b] = mdg, m[M_NS][b] = mns;
+	}
+}
+
+/* first position >= p holding '*' before '/', a backslash or NUL */
+static inline size_t find_cend(const char *s, size_t p)
+{
+	for (;; p++)
+		if ((s[p] == '*' && s[p + 1] == '/') || s[p] == '\\' || !s[p])
+			return p;
+}
+
+/* first position >= p holding '\n', '\r' or NUL */
+static inline size_t find_nl(const char *s, size_t p)
+{
+	for (;; p++)
+		if (s[p] == '\n' || s[p] == '\r' || !s[p])
+			return p;
+}
+
+/* first position >= p holding q, a backslash or a byte <= '\r' */
+static inline size_t find_quote(const char *s, size_t p, uint8_t q)
+{
+	for (;; p++) {
+		uint8_t ch = (uint8_t)s[p];
+
+		if (ch == q || ch == '\\' || ch <= '\r')
+			return p;
+	}
+}
+#endif	/* __ARM_NEON */
 
 /* ---- pass 2: tokens ------------------------------------------------- */
 
@@ -1702,9 +1769,13 @@ const vlex_file *vlex_get(const char *path, size_t len)
 			publish(e, true);
 			return &e->f;
 		}
-#ifdef __aarch64__
+#if defined(__aarch64__)
 		if (spin < 64)
 			__asm__ volatile("yield");
+		else
+#elif defined(__x86_64__)
+		if (spin < 64)
+			__asm__ volatile("pause");
 		else
 #endif
 			sched_yield();

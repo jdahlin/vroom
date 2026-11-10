@@ -14,9 +14,11 @@
 
 _Thread_local jmp_buf *vjob_jb;
 
+_Thread_local int vjob_fail_fd = 2;
+
 void vjob_fail(const char *msg)
 {
-	fprintf(stderr, "vcc: error: %s\n", msg);
+	dprintf(vjob_fail_fd, "vcc: error: %s\n", msg);
 	if (vjob_jb)
 		longjmp(*vjob_jb, 1);
 	abort();

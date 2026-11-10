@@ -16,7 +16,8 @@ assembler, linker, behind `vcc`/`vas`/`vld` shims and the `vccd` server.
   parallel diff runs.
 
 ## Layout
-- `PLAN.md`, `PLAN-fas2.md`, `PLAN-wasm.md` (WebAssembly as a target): plans
+- `PLAN.md`, `PLAN-fas2.md`, `PLAN-wasm.md` (WebAssembly as a target), `PLAN-x86.md`
+  (x86-64 Linux as a target): plans
   and per-step status (Swedish).  Update the
   status section of a step when it changes.
 - `PLAN-release.md`: what vcc 1.0 is and its release gates G0-G9 (Swedish);
@@ -45,7 +46,8 @@ assembler, linker, behind `vcc`/`vas`/`vld` shims and the `vccd` server.
   - `obj/`: the in-memory object (`obj.h`: sections, frags, symbols, fixups)
     and its layout; with `arch/<cpu>/obj/fixup.c` and `platform/linux/elf.c`
     one module (`obj_SRC`, internal header `objimpl.h`).
-  - `ld/`: the linker `vlink` (`ld.c`, one TU) and `vobjcopy`/`vnm`;
+  - `ld/`: the linker `vlink` (`ld.c`, one TU; also linked into vccd, which
+    calls `ld_main` per link) and `vobjcopy`/`vnm`;
     `wasmld.c` is vlink for WebAssembly (as `wasm-ld` or with `-mwasm64`).
   - `driver/`: one compile job from a clang command line (`ppdriver.c`), the
     declaration cache (`ccsnap.c`) and `vpp`, the driver for parity tests.
@@ -55,6 +57,10 @@ assembler, linker, behind `vcc`/`vas`/`vld` shims and the `vccd` server.
     build uses no llvm-ar) and `rsh.c`, kbuild's recipe subset of sh, run for
     `vsh` (`build/ccs/vsh/sh`, shim.c with `-DVSH`), make's SHELL in
     `bench/vccd-kbuild.sh`; anything outside the subset goes to `$VSH_REAL`.
+    Without `--backend-sock` vccd runs the whole kernel build itself: probes,
+    `-E`/`-c`/`-S` (stdin too), links (vld in-process; `--ld PROG` spawns
+    one), nm/objcopy behind the `vcc-nm`/`vcc-objcopy` shims, and the host
+    programs (vcc + `ldmacho.c`, macOS only); nothing falls back to clang.
   - `arch/a64/`: arm64: instructions in GNU as syntax (`as/parse.c`:
     registers, `.req`, operands, literal pools), the encoder (`as/enc.c`,
     `a64.h`), system registers,
@@ -67,6 +73,12 @@ assembler, linker, behind `vcc`/`vas`/`vld` shims and the `vccd` server.
     and Apple's), builtins, inline asm, the record optimizer (`opt.c`), the
     printer (`print.c`) and the encoder of records (`obj.c`).  It is compiled
     in the `emit` unity TU (`emit_SRC`), so VPRIV stays static.
+  - `emit/walk/` and `emit/rec/`: the shared AST walker (`walk.h`: folding,
+    frame slots, labels, the call sequence; it calls a CPU only through
+    `LO()`) and the machine records with their per-CPU op table (`rec.h`),
+    PLAN-x86.md's layers 1 and 3; `arch/x64/emit/`: x86-64's lowering
+    (`x64impl.h`, `lower.c`), two-address pass and AT&T printer (`print.c`).
+    x86-64 is their only user; arm64 moves to them later (TODO.md).
   - `arch/wasm/emit/`: the WebAssembly (wasm64) code generator, AST to
     LLVM's wasm `.s` (`wimpl.h`; `wasm.c` functions, ABI, header; `wexpr.c`,
     `wcall.c`, `wstmt.c`), also in the `emit` unity TU: every name starts
@@ -76,7 +88,10 @@ assembler, linker, behind `vcc`/`vas`/`vld` shims and the `vccd` server.
     and `vasm --target=wasm64-...` go through it.
   - `platform/linux/`: the ELF writer (`elf.c`: relocations, string table,
     file layout as LLVM MC).
-  - `platform/darwin/`: the Mach-O writer; Apple PMU counters (`pmc.c`).
+  - `platform/darwin/`: the Mach-O writer; vld's Mach-O executables
+    (`ldmacho.c`: libSystem only, chained fixups, ad-hoc signature, chosen
+    when the first input is Mach-O; the kernel's host programs); Apple PMU
+    counters (`pmc.c`).
   - `platform/wasm/`: the wasm object writer (`wasm.c`: layout, symbol table,
     relocations as LLVM's WasmObjectWriter, byte for byte).
   - `pp/`, `cc/` and `emit/` (with `arch/<cpu>/emit/`) are directories of
@@ -116,6 +131,8 @@ bench/vcc-sema.py batch -j 6        # the same in one vpp --batch process: ~3 s 
 bench/vcc-sema.py layout -j 6       # layouts/constants/decl types checked by clang (~70 s)
 bench/var-cmp.py work/build-x       # vcc ar against llvm-ar on an llvm-ar-built tree
 bench/vsh-test.py                   # vsh/rsh against dash on small recipes
+bench/vobjcopy-cmp.sh               # vnm/vobjcopy against llvm-nm/llvm-objcopy on the build's uses
+bench/vobjcopy-any.py work/build-X  # ... and with other options on 200 random .o files
 bench/vcc-driver.py                 # driver: command lines vs clang (predefines from -O), <1 s
 bench/vcc-fpcheck.py -j 6           # no generated FP/SIMD code under -mgeneral-regs-only (~10 s)
 bench/vcc-cfi.py -j 6               # -fasynchronous-unwind-tables: .eh_frame per function, .text unchanged (~1 min)
@@ -154,11 +171,15 @@ bench/vcc-explain.py                # docs/diag pages: the wrong example gives t
 bench/gen-explain.py [--check]      # driver/explain.inc from ccs/vcc/docs/diag/*.md (vcc --explain ID)
 bench/vcc-bflayout.py               # generated bit-field records, layouts checked by clang, Linux + Apple (~1 s)
 bench/vcc-ldconst.py                # generated long double literals and folds, bits vs clang (~2 s)
+bench/vcc-f80.sh [N]                # x87 long double folding (lib/f128.h) vs this x86-64 host's FPU (~3 s)
 bench/vccd-test.py                  # vccd as a service: socket, bad requests, cache invalidation (~11 s)
 vcc --vccd-diagnostics[=json]       # vccd's diagnostics store: summary by flag/file, or every TU's records (JSON lines)
 VCC_DIAG_DEDUP=1 make ...           # under vccd: a header warning another TU of the build printed is left out
+bench/vccd-kbuild.sh work/build-X -j 6   # cold kernel build, vccd only (no clang/vroomd/lld; ~10 s)
+python3 bench/boot-test.py --kernel work/build-X/arch/arm64/boot/Image --timeout 60   # boots Debian
 bench/vbench.py gate                # performance gate: instructions vs the merge-base, budget 1 % (~1 min)
 bench/vcc-wasm.py -j 6              # the C suites for wasm64: vcc -S, clang -c, emcc, node vs clang's build (~2 min)
+bench/vcc-x86.py -j 6               # the C suites for x86-64 on an x86-64 host: vcc -S, clang -c, glibc, native (~10 s; first run ~10 min for the references)
 bench/vcc-wasm.py -j 6 --objcmp     # ... and vpp -c's object byte-identical to clang's for the same .s
 bench/vcc-wasm.py -j 6 --obj --vlink  # ... vcc's side through vpp -c and vlink as emcc's wasm-ld (~9 min)
 bench/vcc-same.py --base DIR -j 6    # test-suite outputs byte-identical with DIR/vpp (vbench.py mkbase REV), ~80 s

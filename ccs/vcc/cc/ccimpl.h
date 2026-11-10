@@ -504,9 +504,12 @@ VPRIV const char *tyname(cc *c, qty t);
 VPRIV void layout_checks(cc *c);
 
 static inline bool is_int_kind(int k) { return k >= TY_BOOL && k <= TY_UINT128; }
-static inline bool is_flt_kind(int k) { return k >= TY_FLOAT16 && k <= TY_LDOUBLE; }
-/* long double as binary128 (aarch64 Linux; Apple's is double) */
-static inline bool is_q(cc *c, qty t) { return KIND(c, t) == TY_LDOUBLE && c->ty[QI(t)].size == 16; }
+static inline bool is_flt_kind(int k) { return k >= TY_FLOAT16 && k <= TY_FLOAT128; }
+/* long double as binary128 (aarch64 Linux; Apple's is double) or x87 extended (x86-64), in
+   binary128's layout (lib/f128.h) */
+static inline bool is_q(cc *c, qty t) { return (KIND(c, t) == TY_LDOUBLE && c->ty[QI(t)].size == 16) || KIND(c, t) == TY_FLOAT128; }
+/* the fraction bits a wide constant of type t is rounded to: 112, or x87's 63 */
+static inline int q_prec(cc *c, qty t) { return c->o->target == PP_LINUX_X86_64 && KIND(c, t) == TY_LDOUBLE ? Q_P80 : 112; }
 /* the binary128 bits of a 16-byte long double constant: the two pool slots after its double */
 static inline void fpool_q(cc *c, u128 q) { memcpy(&c->fpool[c->nfpool], &q, 16); c->nfpool += 2; }
 static inline u128 fnum_q(const cc *c, uint32_t a) { u128 q; memcpy(&q, &c->fpool[a + 1], 16); return q; }

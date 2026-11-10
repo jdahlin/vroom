@@ -12,7 +12,7 @@ VPRIV void init_keywords(void)
 		KW__Bool, KW__Complex, KW___complex__, KW___complex, KW_struct, KW_union, KW_enum, KW_const, KW_volatile, KW_restrict,
 		KW__Atomic, KW_typeof, KW___typeof__, KW___typeof, KW___typeof_unqual__, KW___const__,
 		KW___const, KW___signed__, KW___signed, KW___volatile__, KW___volatile, KW___restrict__,
-		KW___restrict, KW___int128, KW__Float16, KW___fp16, KW__Alignas, KW___attribute__,
+		KW___restrict, KW___int128, KW__Float16, KW___fp16, KW___float128, KW__Alignas, KW___attribute__,
 		KW___attribute, KW___auto_type,
 	};
 	static const uint16_t decls[] = {

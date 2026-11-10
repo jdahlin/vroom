@@ -87,6 +87,8 @@
 /* WebAssembly (wasm64): arch/wasm/emit/ generates the functions, data.c the data */
 #define WASM(c) PP_IS_WASM((c)->o->target)
 #define WASM32(c) ((c)->o->target == PP_WASM32)
+/* x86-64 Linux: emit/walk/ and arch/x64/emit/ generate the functions (PLAN-x86.md) */
+#define X86(c) ((c)->o->target == PP_LINUX_X86_64)
 
 /*
  * A C99 inline definition or GNU extern inline: not emitted (another TU
@@ -375,6 +377,8 @@ typedef struct ecx {
 	size_t nrlog, rlog0;	/* ... and where the current item's starts */
 	jmp_buf bail;
 	struct wst *w;		/* WASM: arch/wasm/emit/ state (wimpl.h) */
+	struct wkst *wk;	/* X86: the walker's state (emit/walk/walk.h) */
+	struct xst *x64;	/* X86: arch/x64/emit/ state (x64impl.h) */
 } ecx;
 enum { FN_MEMCPY, FN_MEMSET, FN_MEMMOVE, FN_UDIVTI3, FN_DIVTI3, FN_UMODTI3, FN_MODTI3, FN_STRLEN,
        FN_ASHLTI3, FN_LSHRTI3, FN_ASHRTI3, FN_FLOATTISF, FN_FLOATTIDF, FN_FLOATUNTISF, FN_FLOATUNTIDF,
@@ -729,6 +733,8 @@ VPRIV void emit_string(ecx *e, uint32_t i);
 /* arch/wasm/emit/ */
 VPRIV void wasm_emit_function(ecx *e, uint32_t s);
 VPRIV void wasm_ecx_free(ecx *e);
+VPRIV void wk_function(ecx *e, uint32_t s);
+VPRIV void wk_ecx_free(ecx *e);
 VPRIV void wasm_data_ref(ecx *e, uint32_t ref);
 VPRIV void wasm_header(cc *c, tbuf *hdr, ecx *ctx, int nthr);
 VPRIV void wasm_tail(cc *c, tbuf *t, _Atomic uint8_t *claimed);

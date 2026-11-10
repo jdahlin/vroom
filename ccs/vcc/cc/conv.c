@@ -970,13 +970,15 @@ VPRIV void need_scalar(cc *c, uint32_t n, const char *what)
 /* n is assigned (or incremented) by the operator at loc */
 VPRIV bool need_lvalue(cc *c, uint32_t n, uint32_t loc)
 {
-	pp_span r = rng(c, n);
+	pp_span r;	/* the operand's range, for the diagnostics only (pp_tok_end is not free) */
 
 	if (!(N(n)->flags & NF_LVALUE)) {
+		r = rng(c, n);
 		report(c, "error", loc, &r, 1, NULL, 0, "expression is not assignable");
 		return false;
 	}
 	if (QQ(N(n)->ty) & Q_CONST) {
+		r = rng(c, n);
 		if (N(n)->op == N_VAR) {
 			const sym *v = &c->syms[N(n)->a];
 			pp_span vr = { v->plb, pp_tok_end(c->p, v->ple) };

@@ -109,6 +109,22 @@ static void cc_init(cc *c, pp *p, const cc_opts *o)
 			vl = ty_ptr(c, prim(TY_CHAR));
 		} else if (PP_IS_WASM(o->target)) {
 			vl = ty_ptr(c, prim(TY_VOID));
+		} else if (o->target == PP_LINUX_X86_64) {
+			/* System V: struct __va_list_tag { unsigned gp_offset, fp_offset; void *overflow_arg_area,
+			   *reg_save_area; } __builtin_va_list[1] */
+			uint32_t ti = tag_new(c, TY_STRUCT, vintern_copy("__va_list_tag\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0", 13), 0);
+			tag *r = &c->tags[ti];
+			qty vp = ty_ptr(c, prim(TY_VOID));
+
+			r->f = halloc(c, 4 * sizeof(field));
+			memset(r->f, 0, 4 * sizeof(field));
+			r->nfield = 4;
+			r->f[0].ty = r->f[1].ty = prim(TY_UINT);
+			r->f[2].ty = r->f[3].ty = vp;
+			lay_record(c, r, NULL, NULL);
+			r->flags |= RF_COMPLETE;
+			c->valist_tag = ti;
+			vl = ty_array(c, QT(r->ty, 0), 1, 0);
 		} else {
 			/* struct __va_list { void *__stack, *__gr_top, *__vr_top; int __gr_offs, __vr_offs; } */
 			uint32_t ti = tag_new(c, TY_STRUCT, vintern_copy("__va_list\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0", 9), 0);

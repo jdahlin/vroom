@@ -1,4 +1,4 @@
-#include <arm_acle.h>
+#include "hostcrc.h"
 #include <stdatomic.h>
 #include <pthread.h>
 #include <stdio.h>
@@ -82,12 +82,16 @@ _Atomic int vtables_full;
 
 /* a server-wide table or region is full: an error for this job (and vccd
    restarts when idle, vtables_full), abort without a job to end */
+_Thread_local int vjob_escape_fd = 2;
+
 void vjob_escape(const char *msg)
 {
 	atomic_store(&vtables_full, 1);
-	fprintf(stderr, "vcc: error: %s\n", msg);
 	void (*hook)(void) = __atomic_load_n(&vintern_full_hook, __ATOMIC_RELAXED);
 
+	dprintf(vjob_escape_fd, "vcc: error: %s\n", msg);
+	if (vjob_escape_fd != 2)	/* (the server's log too) */
+		fprintf(stderr, "vcc: error: %s\n", msg);
 	if (hook)
 		hook();
 	abort();
