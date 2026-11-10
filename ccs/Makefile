@@ -193,7 +193,7 @@ self: $(OUT)/vpp
 	$(SELF_LD) $(call so,$(VCCD_SRC)) $(SELF_PP) $(SELF_LEX) $(SELF_AS) -o $(SO)/vccd
 	$(SELF_LD) $(SO)/as-vasm.o $(SELF_AS) -o $(SO)/vasm
 	$(SELF_LD) $(SO)/lex-lextest.o $(SO)/platform-darwin-pmc.o $(SELF_LEX) -o $(SO)/lextest
-	$(SELF_LD) $(SO)/ld-main.o $(SO)/lib-ldhash.o $(SO)/ld-objcopy.o -o $(SO)/vlink
+	$(SELF_LD) $(SO)/ld-main.o $(SO)/lib-ldhash.o $(SO)/ld-objcopy.o $(SO)/ld-wasmld.o -o $(SO)/vlink
 	$(SELF_LD) $(SO)/vccd-shim.o -o $(SO)/vcc
 
 self-check: self
