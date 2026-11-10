@@ -6,7 +6,7 @@
 Each file is assembled by clang (--target=aarch64-linux-gnu) and by vasm;
 the objects must be byte-identical.  On a mismatch llvm-readelf shows the
 difference.  A file clang rejects must fail in vasm too, with clang's first
-error at the same file:line.  Directives, symbol tables and relocations, <1 s.
+errors at the same file:lines.  Directives, symbol tables and relocations, <1 s.
 """
 import glob, os, subprocess, sys, tempfile
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -24,14 +24,14 @@ def main():
             c, v = f'{t}/c.o', f'{t}/v.o'
             p = subprocess.run([CL, '--target=aarch64-linux-gnu', '-c', f, '-o', c], capture_output=True, text=True)
             q = subprocess.run([VAS, f, '-o', v], capture_output=True, text=True)
-            if p.returncode:    # an error test: same first file:line
+            if p.returncode:    # an error test: the same file:line of every error
                 import re
-                ce = re.search(r'^(\S+?):(\d+):\d+: error', p.stderr, re.M)
-                ve = re.search(r'^(\S+?):(\d+): error', q.stderr, re.M)
-                if q.returncode and ce and ve and ce.groups() == ve.groups(): ok += 1
+                ce = re.findall(r'^(\S+?):(\d+):\d+: error', p.stderr, re.M)
+                ve = re.findall(r'^(\S+?):(\d+): error', q.stderr, re.M)
+                if q.returncode and ce and ce == ve: ok += 1
                 else:
                     bad += 1
-                    print('DIFF', os.path.basename(f), 'clang:', ce and ce.group(0), 'vasm:', ve and ve.group(0) or 'no error')
+                    print('DIFF', os.path.basename(f), 'clang:', ce, 'vasm:', ve or 'no error')
                 continue
             if q.returncode or open(c, 'rb').read() != open(v, 'rb').read():
                 bad += 1

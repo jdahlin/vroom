@@ -869,10 +869,11 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
   `adrp` and `ldr` literal take constants.  *Validated:* `vas-obj`
   `intbranch.s`, `absb.s`.
 - [ ] **Diagnostics**: left: errors inside a macro say the invocation line
-  (clang: `<instantiation>:N`); vasm stops at the first error (clang goes on).
-  (Done: the statement's own line, `# N "file"` markers, end-of-input
+  (clang: `<instantiation>:N`).
+  (Done: vasm goes on after a statement's error as llvm-mc (at most 20), and
+  still reports an unterminated `.if`: `err-many.s`; the statement's own line, `# N "file"` markers, end-of-input
   errors at the line after the last.)  *Validate:* `bench/vas-obj.py` error
-  files (`err-*.s`: clang's first file:line).
+  files (`err-*.s`: clang's file:line of every error).
 
 ### Linker (`ld/ld.c`) and binutils
 - [ ] **ELF input parsing unchecked** [P]: (done: `obj_valid` in `ld/ld.c`

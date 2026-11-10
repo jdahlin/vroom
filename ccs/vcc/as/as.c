@@ -29,9 +29,11 @@ VPRIV int err(As *a, const char *fmt, ...)
 {
 	if (a->err) return -1;
 	a->err = 1;
-	int k = snprintf(a->msg, sizeof a->msg, "%s:%u: error: ", a->fname, curline(a));
+	char *m = a->msg + a->mlen;
+	size_t sz = sizeof a->msg - a->mlen;
+	int k = snprintf(m, sz, "%s%s:%u: error: ", a->mlen ? "\n" : "", a->fname, curline(a));
 	va_list ap; va_start(ap, fmt);
-	vsnprintf(a->msg + k, sizeof a->msg - k, fmt, ap);
+	if ((size_t)k < sz) vsnprintf(m + k, sz - k, fmt, ap);
 	va_end(ap);
 	return -1;
 }
@@ -2325,7 +2327,7 @@ void as_set_dir(As *a, const char *dir) { a->dir = dir; }
  */
 void as_begin(As *a, ElfObj *o, const char *name)
 {
-	a->o = o; a->nfr = 0; a->ncs = 0; a->nss = 0; a->err = 0; a->msg[0] = 0;
+	a->o = o; a->nfr = 0; a->ncs = 0; a->nss = 0; a->err = 0; a->msg[0] = 0; a->mlen = a->nerr = 0;
 	a->xs.used = 0; a->defs.used = 0; a->ninst = 0; a->nal = 0; a->alcap = 0; a->al = 0;
 	memset(a->alh, 0, sizeof a->alh);
 	a->fname = name;
@@ -2363,12 +2365,17 @@ int as_snippet(As *a, const char *text, size_t len)
 		if (statement(a, s, s + n)) {
 			size_t k = strlen(a->msg);
 			snprintf(a->msg + k, sizeof a->msg - k, "\n  in: %.*s", (int)(n > 200 ? 200 : n), s);
-			break;
+			/* as llvm-mc: report it and go on with the next statement (at most 20) */
+			a->mlen = (uint32_t)strlen(a->msg);
+			if (++a->nerr >= 20 || a->mlen + 600 > sizeof a->msg) break;
+			a->err = 0;
+			continue;
 		}
 		if (o->has_err) { err(a, "%s", o->err); break; }
 		if (a->ended) break;	/* .end: the rest of the input is ignored */
 	}
 	a->nfr = 0;
+	if (a->nerr) a->err = 1;
 	return a->err ? -1 : 0;
 }
 
@@ -3193,7 +3200,10 @@ static void symver_finish(As *a)
 int as_end(As *a)
 {
 	ElfObj *o = a->o;
-	if (!a->err && a->ncs) err(a, "unmatched .ifs or .elses");
+	if (a->ncs && (!a->err || a->nerr)) {	/* (after statement errors too, as llvm-mc) */
+		a->err = 0;
+		err(a, "unmatched .ifs or .elses");
+	}
 	if (!a->err && a->npool) flush_pools(a);
 	if (!a->err) {
 		/* undefined numeric forward references */
@@ -3260,7 +3270,7 @@ int as_label(As *a, uint32_t y)
 int as_run(As *a, ElfObj *o, const char *text, size_t len, const char *name, const char **msg)
 {
 	as_begin(a, o, name);
-	if (as_snippet(a, text, len) || as_end(a)) { *msg = a->msg; return -1; }
+	if ((as_snippet(a, text, len) | as_end(a)) != 0) { *msg = a->msg; return -1; }
 	return 0;
 }
 
