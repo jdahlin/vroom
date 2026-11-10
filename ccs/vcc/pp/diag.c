@@ -306,7 +306,7 @@ static int diag_where(const pp *p, uint32_t loc, const char **name, uint32_t *nl
 	int r = pp_where(p, loc, name, nl, line, col);
 	const fent *e = loc_fent(p, loc);
 
-	if (r && e && e->spath && loc - e->base <= e->f->size)
+	if (r && e && e->spath && loc - e->base <= e->f->size && *name == e->name)	/* (not a #line name) */
 		*name = e->spath, *nl = (uint32_t)strlen(e->spath);
 	return r;
 }

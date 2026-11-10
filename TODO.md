@@ -1082,12 +1082,18 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
   note for a macro argument (its tokens keep their file location); calls
   of pure/const functions ("ignoring return value of function declared
   with const attribute").
+- [x] **pp -Wextra-tokens**: after #ifdef/#ifndef/#elifdef/#elifndef's
+  name, #else, #endif, #undef's name, #include's header name and #line's
+  file name, with clang's "//" fix-it; conditionals at the active level
+  also when a skip lands on them.  With it: a #line file name now reaches
+  the diagnostics (`diag_where` replaced it by the file's path).  Done:
+  diag `extra_tokens.c`; parity cmp/lines green.  Not modelled: a
+  macro-expanded #include name.
 - [ ] **Missing warnings** (only 7 `-W` flags):
   `-Wreturn-stack-address` of a compound literal
   (clang prints the initializer with its expression printer),
   `-Wuninitialized`, `-Wunknown-attributes`, `-Wdeprecated-declarations`;
-  pp `-Wextra-tokens`,
-  `-Wexpansion-to-defined`, `-Winvalid-pp-token`, `#pragma GCC warning`.
+  pp `-Wexpansion-to-defined`, `-Winvalid-pp-token`, `#pragma GCC warning`.
   *Validate:* one diag test per warning; `vcc-sema.py warn` stays 879/879
   (no false positives on the kernel).  (Done: `-Wmultichar` in C and `#if`, "character constant too long",
   multi-character wide/Unicode literals as errors: diag `multichar.c`; the

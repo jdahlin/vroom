@@ -3,6 +3,49 @@
 
 /* ---------------- directives ---------------- */
 
+/* -Wextra-tokens: tokens after a conditional's (or #undef's) operands */
+static void extra_loc(pp *p, uint32_t loc, const char *name, int nl)
+{
+	pp_span r = { loc, loc };
+	pp_fixit fx = { loc, loc, "//" };
+	pp_dinfo di = { "warning", loc, &r, 0, &fx, 1, NULL, 0 };
+
+	pp_warnx(p, "extra-tokens", true, NULL, &di, "extra tokens at end of #%.*s directive", nl, name);
+}
+
+VPRIV __attribute__((noinline)) void dir_extra_tok(pp *p, const ctx *c, uint32_t name, uint32_t i)
+{
+	uint32_t loc = c->loc + c->vt[i].off;
+	pp_span r = { loc, loc };
+	pp_fixit fx = { loc, loc, "//" };
+	pp_dinfo di = { "warning", loc, &r, 0, &fx, 1, NULL, 0 };
+	const vtok *n = &c->vt[name];
+
+	pp_warnx(p, "extra-tokens", true, NULL, &di, "extra tokens at end of #%.*s directive", (int)n->len, c->src + n->off);
+}
+
+static void extra_at(pp *p, const ctx *c, const pdir *d, uint32_t i)
+{
+	dir_extra_tok(p, c, d->tok + 1, i);
+}
+
+static inline void dir_extra(pp *p, const ctx *c, const pdir *d)
+{
+	uint32_t i;
+
+	switch (d->kind) {
+	case D_ELSE: case D_ENDIF: i = d->tok + 2; break;
+	case D_IFDEF: case D_IFNDEF: case D_ELIFDEF: case D_ELIFNDEF: case D_UNDEF:
+		i = d->tok + 3;
+		if (d->tok + 2 >= d->end || c->vt[d->tok + 2].kind != T_IDENT)
+			return;
+		break;
+	default: return;
+	}
+	if (unlikely(i < d->end))
+		extra_at(p, c, d, i);
+}
+
 static bool cond_true(pp *p, const ctx *c, const pdir *d)
 {
 	uint32_t b = d->tok + 2;
@@ -39,6 +82,7 @@ static void skip_from(pp *p, ctx *c, uint32_t k)
 	for (;;) {
 		const pdir *d = &dir[k];
 
+		dir_extra(p, c, d);
 		if ((d->kind == D_ELIF || d->kind == D_ELIFDEF || d->kind == D_ELIFNDEF) && !cond_true(p, c, d)) {
 			k = d->next;
 			continue;
@@ -281,6 +325,15 @@ static void line_directive(pp *p, ctx *c, uint32_t b, uint32_t e, bool expand_li
 			*w++ = s[i];
 		}
 		m->namelen = (uint32_t)(w - m->name);
+		if (expand_line) {
+			ptok x;
+
+			p->in_dir++;
+			next_exp(p, &x);
+			p->in_dir--;
+			if (x.kind != T_EOF)
+				extra_loc(p, x.loc, "line", 4);
+		}
 	}
 	pop_to(p, d);
 	if (unlikely(p->out_text)) {
@@ -324,6 +377,7 @@ VPRIV int directive(pp *p, ctx *c, ptok *out)
 		lm_count(p);	/* the command line's first -D/-U/-include */
 	switch (d->kind) {
 	case D_IF: case D_IFDEF: case D_IFNDEF:
+		dir_extra(p, c, d);
 		if (!cond_true(p, c, d))
 			skip_from(p, c, d->next);
 		return 0;
@@ -331,7 +385,8 @@ VPRIV int directive(pp *p, ctx *c, ptok *out)
 		/* the end of a group that was taken: on to #endif */
 		uint32_t k = d->next;
 
-		while (c->fi->dir[k].kind != D_ENDIF)
+		dir_extra(p, c, d);
+		while (dir_extra(p, c, &c->fi->dir[k]), c->fi->dir[k].kind != D_ENDIF)
 			k = c->fi->dir[k].next;
 		c->i = c->fi->dir[k].end;
 		c->di = k + 1;
@@ -339,12 +394,16 @@ VPRIV int directive(pp *p, ctx *c, ptok *out)
 			p->fe[c->fe].cpos = cmt_line_end(c->src + c->vt[c->i - 1].off + c->vt[c->i - 1].len);
 		return 0;
 	}
-	case D_ENDIF: case D_NULL:
+	case D_ENDIF:
+		dir_extra(p, c, d);
+		return 0;
+	case D_NULL:
 		return 0;
 	case D_DEFINE:
 		define(p, c, b + 1, e);
 		return 0;
 	case D_UNDEF:
+		dir_extra(p, c, d);
 		if (b + 1 < e && c->vt[b + 1].kind == T_IDENT)
 {
 			mdef(p, c->vt[b + 1].id, NULL);

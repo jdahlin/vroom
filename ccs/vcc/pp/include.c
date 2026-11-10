@@ -560,6 +560,15 @@ VPRIV void include(pp *p, ctx *c, uint32_t b, uint32_t e, int kind, uint32_t loc
 						p->sig != HNONE
 					    ? &((pfile *)c->fi)->inc[c->di - 1] : NULL;
 
+	if (b < e && (c->vt[b].kind == T_STRING || c->vt[b].kind == T_LESS)) {	/* -Wextra-tokens */
+		uint32_t i = b + 1;
+
+		if (c->vt[b].kind == T_LESS)
+			while (i < e && c->vt[i - 1].kind != T_GREATER)
+				i++;
+		if (unlikely(i < e && c->vt[i - 1].kind != T_LESS))
+			dir_extra_tok(p, c, b - 1, i);
+	}
 	if (site && (ie = atomic_load_explicit(site, memory_order_acquire))) {
 		const char *fp;
 		size_t dl;

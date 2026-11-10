@@ -627,6 +627,7 @@ VPRIV const char *presumed_name(const pp *p, uint32_t fe, uint32_t loc, uint32_t
 VPRIV __attribute__((format(printf, 4, 5))) void pp_diag(pp *p, uint32_t loc, const char *what, const char *fmt, ...);
 void pp_diagx(pp *p, const pp_dinfo *d, const char *fmt, ...);
 bool pp_warnx(pp *p, const char *flag, bool on, const char *const *groups, pp_dinfo *d, const char *fmt, ...);
+VPRIV void dir_extra_tok(pp *p, const ctx *c, uint32_t name, uint32_t i);
 void pp_diag_summary(pp *p);
 /* include.c: dependencies */
 VPRIV uint8_t inc_sys(pp *p, int32_t sdir);
