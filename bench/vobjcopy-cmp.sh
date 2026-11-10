@@ -28,6 +28,8 @@ for f in idreg-override map_kernel map_range relocate lib-fdt lib-fdt_ro; do
 	both $f --prefix-symbols=__pi_ --remove-section=.note.gnu.property $x $W/arch/arm64/kernel/pi/$f.o @O
 done
 $L/llvm-nm -p -S $IN > $T/r.nm; $B/vnm -p -S $IN > $T/m.nm; chk $T/r.nm $T/m.nm "nm -p -S"
+for o in -u -g -U --undefined-only --extern-only --defined-only; do
+  $L/llvm-nm $o $IN > $T/r.nm; $B/vnm $o $IN > $T/m.nm; chk $T/r.nm $T/m.nm "nm $o"; done
 V=$W/arch/arm64/kernel/vdso/vdso.so.dbg
 $L/llvm-nm $V > $T/r.vnm; $B/vnm $V > $T/m.vnm; chk $T/r.vnm $T/m.vnm "nm vdso"
 echo "$ok identical, $bad different"

@@ -1069,8 +1069,8 @@ int nm_main(int argc, char **argv, int dirfd, FILE *out, FILE *err)
 	oerr = err ? err : stderr;
 	oerrors = 0;
 	prog = "vnm";
-	bool nosort = false, numeric = false, size = false;
-	const char *files[64];
+	bool nosort = false, numeric = false, size = false, undef = false, defd = false, ext = false;
+	const char **files = xcalloc((size_t)argc + 1, sizeof *files);
 	int nf = 0;
 	for (int i = 1; i < argc; i++) {
 		const char *a = argv[i];
@@ -1079,6 +1079,9 @@ int nm_main(int argc, char **argv, int dirfd, FILE *out, FILE *err)
 				if (*p == 'p') nosort = true;
 				else if (*p == 'n' || *p == 'v') numeric = true;
 				else if (*p == 'S') size = true;
+				else if (*p == 'u') undef = true;
+				else if (*p == 'U') defd = true;
+				else if (*p == 'g') ext = true;
 				else oerror("unsupported option -%c", *p);
 			}
 		} else if (!strcmp(a, "--no-sort")) {
@@ -1087,14 +1090,24 @@ int nm_main(int argc, char **argv, int dirfd, FILE *out, FILE *err)
 			numeric = true;
 		} else if (!strcmp(a, "--print-size")) {
 			size = true;
-		} else if (nf < 64) {
+		} else if (!strcmp(a, "--undefined-only")) {
+			undef = true;
+		} else if (!strcmp(a, "--defined-only")) {
+			defd = true;
+		} else if (!strcmp(a, "--extern-only")) {
+			ext = true;
+		} else if (a[0] == '-' && a[1]) {
+			oerror("unknown argument '%s'", a);
+		} else {
 			files[nf++] = a;
 		}
 	}
 	if (!nf)
 		files[nf++] = "a.out";
-	if (oerrors)
+	if (oerrors) {
+		free(files);
 		return 1;
+	}
 	for (int f = 0; f < nf; f++) {
 		Elf e;
 		if (elf_open(&e, dirfd, files[f]))
@@ -1122,6 +1135,9 @@ int nm_main(int argc, char **argv, int dirfd, FILE *out, FILE *err)
 			if (type == STT_FILE || type == STT_SECTION)
 				continue;
 			if (e.eh->e_machine == 183 && name[0] == '$' && (name[1] == 'd' || name[1] == 'x'))
+				continue;
+			if ((undef && y->st_shndx != SHN_UNDEF) || (defd && y->st_shndx == SHN_UNDEF) ||
+			    (ext && (y->st_info >> 4) == STB_LOCAL))
 				continue;
 			v[m++] = (NSym){.name = name, .addr = y->st_value, .size = y->st_size,
 					.type = nm_type(&e, y), .defined = y->st_shndx != SHN_UNDEF};
@@ -1152,5 +1168,6 @@ int nm_main(int argc, char **argv, int dirfd, FILE *out, FILE *err)
 		free(v);
 		elf_close(&e);
 	}
+	free(files);
 	return oerrors ? 1 : 0;
 }

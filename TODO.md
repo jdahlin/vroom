@@ -978,9 +978,9 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
   `q`, `p`, `s`; round-trip with llvm-ar.
 - [ ] **vobjcopy / vnm**: missing `--strip-debug`, `--add-section`,
   `--only-keep-debug`, `-O elf64-*`, `--add-gnu-debuglink`,
-  `--set-section-flags`, `--redefine-sym`, `-I`/`-B`; nm `-u`, `-D`,
-  archives, unknown long options taken as files, >64 files dropped
-  (`ld/objcopy.c:1039`).
+  `--set-section-flags`, `--redefine-sym`, `-I`/`-B`; nm `-D`, archives.
+  (Done: nm `-u`/`-U`/`-g` and long forms, unknown options are errors, any
+  number of files.)
   *Validate:* `bench/vobjcopy-cmp.sh` extended with these flags vs
   llvm-objcopy/llvm-nm; unknown options must be errors.
 - [ ] **macho.c**: DWARF dropped (`platform/darwin/macho.c:95`), `.eh_frame` to
