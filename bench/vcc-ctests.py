@@ -60,6 +60,7 @@ RES = subprocess.run([CL, '-print-resource-dir'], capture_output=True, text=True
 
 BASE = ['--target=aarch64-linux-gnu', '-nostdinc', '-I', f'{RT}/include', '-isystem', RES,
         '-fno-PIE', '-fno-asynchronous-unwind-tables', '-fno-stack-protector', '-O2']
+BASE += os.environ.get('VCC_CFLAGS', '').split()	# e.g. -fasynchronous-unwind-tables (both compilers)
 # clang -O2, with gcc's leniency for old code (the tests are compiled by gcc -w)
 CLFL = ['-w', '-Wno-error=implicit-function-declaration', '-Wno-error=implicit-int',
         '-Wno-error=int-conversion', '-Wno-error=incompatible-pointer-types', '-Wno-error=return-type',

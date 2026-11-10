@@ -858,8 +858,15 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
   `__start_X`/`__stop_X` for C-identifier output sections (protected,
   global; not a gc root: lld's default -z start-stop-gc); orphans
   stable-sorted by rank before placement as lld's sortSections: 2 cases.
-  Left: `--gc-sections` with `.eh_frame` (an error: lld's piecewise FDE
-  handling), `--emit-relocs`, `--eh-frame-hdr`
+  `.eh_frame` as lld's EhFrameSection: records split, CIEs merged by
+  contents and relocations, FDEs of dead/discarded sections dropped, CIEs
+  without FDEs dropped, a zero terminator, word aligned; under
+  `--gc-sections` CIE relocations keep their targets, FDE ones only outside
+  code and groups (MarkLive::scanEhFrameSection): 5 cases, and
+  `VCC_LDCMP=1 VCC_CFLAGS=-fasynchronous-unwind-tables vcc-ctests.py`
+  1756/1756 identical.  Orphans placed by lld's rank bits and
+  getRankProximity, then back past sections without inputs (findOrphanPos).
+  Left: `--emit-relocs`, `--eh-frame-hdr`
   (ignored), `-z now` (no effect without dynamic linking).
   *Validate:* `bench/vlink-opts.py` per option; unknown options are errors.
 - [ ] **Relocations**: (done: GOT relaxation adrp+ldr -> adrp+add / nop+adr

@@ -363,6 +363,7 @@ typedef struct ISec {
 	bool thunked;			/* some relocation has a tr_put entry */
 	bool dropped;			/* member of a COMDAT group seen before */
 	uint32_t gnext;			/* next member of its section group + 1, 0: none */
+	uint32_t ehcie;			/* .eh_frame FDE piece: its CIE piece + 1 (the CIE pointer is written) */
 } ISec;
 
 #define OS_DISCARD 0xfffffffeu
@@ -2238,6 +2239,247 @@ static uint32_t new_isec(const char *name, uint8_t kind, uint32_t type, uint64_t
 	return isecs.n - 1;
 }
 
+/* ---------------- .eh_frame (lld's EhFrameSection) ---------------- */
+
+/* an input .eh_frame split into CIE and FDE records (lld EhInputSection::split) */
+typedef struct { uint32_t off, size, r0, r1, cieoff; bool cie; } EhRec;
+
+static bool eh_input(const ISec *is)
+{
+	return is->kind == K_NORMAL && is->obj != NONE && (is->flags & SHF_ALLOC) && !strcmp(is->name, ".eh_frame") &&
+	       !opt.relocatable;
+}
+
+/* the records of input section si, relocations given to the record holding them; NULL on error */
+static EhRec *eh_split(uint32_t si, uint32_t *nrec)
+{
+	const ISec *is = &isecs.v[si];
+	const char *path = objs.v[is->obj]->path;
+	EhRec *v = NULL;
+	uint32_t n = 0, cap = 0, r = 0;
+
+	for (uint64_t off = 0; off + 4 <= is->size;) {
+		uint32_t len = rd32(is->data + off);
+
+		if (len == 0xffffffffu) {
+			error("%s:(.eh_frame+0x%llx): 64-bit DWARF records are not supported", path, (unsigned long long)off);
+			free(v);
+			return NULL;
+		}
+		if (len == 0)	/* a terminator */
+			break;
+		if (len < 4 || off + 4 + len > is->size) {
+			error("%s:(.eh_frame+0x%llx): CIE/FDE too small", path, (unsigned long long)off);
+			free(v);
+			return NULL;
+		}
+		uint32_t id = rd32(is->data + off + 4);
+		EhRec e = {.off = (uint32_t)off, .size = len + 4, .cie = id == 0};
+
+		if (!e.cie) {
+			if (id > off + 4) {
+				error("%s:(.eh_frame+0x%llx): invalid CIE reference", path, (unsigned long long)off);
+				free(v);
+				return NULL;
+			}
+			e.cieoff = (uint32_t)(off + 4 - id);
+		}
+		while (r < is->nrela && is->rela[r].r_offset < off)
+			r++;
+		e.r0 = r;
+		while (r < is->nrela && is->rela[r].r_offset < off + e.size)
+			r++;
+		e.r1 = r;
+		if (n == cap) {
+			cap = cap ? 2 * cap : 16;
+			v = realloc(v, cap * sizeof *v);
+		}
+		v[n++] = e;
+		off += e.size;
+	}
+	for (uint32_t k = 1; k < is->nrela; k++)
+		if (is->rela[k].r_offset < is->rela[k - 1].r_offset) {
+			error("%s:(.eh_frame): relocations are not sorted", path);
+			free(v);
+			return NULL;
+		}
+	*nrec = n;
+	return v;
+}
+
+/* the input section relocation symbol y of object o is in, or NONE */
+static uint32_t rel_isec(const Obj *o, uint32_t y)
+{
+	if (y >= o->firstg) {
+		const G *g = &gsyms[o->gs[y - o->firstg]];
+
+		return g->state == GS_OBJ ? g->sec : NONE;
+	}
+	return o->sym[y].st_shndx && o->sym[y].st_shndx < 0xff00 ? o->isec0 + o->sym[y].st_shndx : NONE;
+}
+
+static bool eh_live(uint32_t s)
+{
+	return s != NONE && isecs.v[s].kind != K_NONE && !isecs.v[s].dropped && isecs.v[s].osec != OS_DISCARD;
+}
+
+/* a CIE's identity: its bytes and its relocations (type, place, addend, target) */
+static bool cie_same(uint32_t sa, const EhRec *a, uint32_t sb, const EhRec *b)
+{
+	const ISec *x = &isecs.v[sa], *y = &isecs.v[sb];
+	const Obj *ox = objs.v[x->obj], *oy = objs.v[y->obj];
+
+	if (a->size != b->size || a->r1 - a->r0 != b->r1 - b->r0 || memcmp(x->data + a->off, y->data + b->off, a->size))
+		return false;
+	for (uint32_t k = 0; k < a->r1 - a->r0; k++) {
+		const Rela *p = &x->rela[a->r0 + k], *q = &y->rela[b->r0 + k];
+		uint32_t py = p->r_info >> 32, qy = q->r_info >> 32;
+
+		if ((uint32_t)p->r_info != (uint32_t)q->r_info || p->r_addend != q->r_addend ||
+		    p->r_offset - a->off != q->r_offset - b->off)
+			return false;
+		bool pg = py >= ox->firstg, qg = qy >= oy->firstg;
+
+		if (pg != qg)
+			return false;
+		if (pg ? ox->gs[py - ox->firstg] != oy->gs[qy - oy->firstg] : (x->obj != y->obj || py != qy))
+			return false;
+	}
+	return true;
+}
+
+/* a record as an input section of its own */
+static uint32_t eh_piece(uint32_t si, const EhRec *e)
+{
+	ISec src = isecs.v[si];
+	uint32_t p = new_isec(src.name, K_NORMAL, src.type, src.flags, 1);
+	ISec *is = &isecs.v[p];
+	Rela *rl = e->r1 > e->r0 ? alloc((e->r1 - e->r0) * sizeof(Rela)) : NULL;
+
+	for (uint32_t k = e->r0; k < e->r1; k++) {
+		rl[k - e->r0] = src.rela[k];
+		rl[k - e->r0].r_offset -= e->off;
+	}
+	is->obj = src.obj;
+	is->shndx = src.shndx;
+	is->isd = src.isd;
+	is->data = src.data + e->off;
+	is->size = e->size;
+	is->rela = rl;
+	is->nrela = e->r1 - e->r0;
+	return p;
+}
+
+/*
+ * The .eh_frame inputs of each input section description become records,
+ * placed where the first of them was: a CIE once per identity, in the order
+ * of first use by a live FDE, each followed by its FDEs; an FDE is kept when
+ * the section its first relocation names is live (lld's isFdeLive), and a
+ * CIE without FDEs is dropped (lld's EhFrameSection::addRecords/finalize).
+ */
+static void eh_frames(void)
+{
+	for (uint32_t d = 0; d < isds.n; d++) {
+		ISD *id = &isds.v[d];
+		uint32_t first = NONE;
+
+		for (uint32_t k = 0; k < id->secs.n && first == NONE; k++)
+			if (eh_input(&isecs.v[id->secs.v[k]]))
+				first = k;
+		if (first == NONE)
+			continue;
+		/* CIE records: (section, record, its FDE pieces) */
+		struct Cie { uint32_t sec; EhRec rec; VVEC(uint32_t) fdes; } *cies = NULL;
+		uint32_t ncie = 0, capc = 0;
+		VVEC(uint32_t) rest = {0};
+
+		for (uint32_t k = 0; k < id->secs.n; k++) {
+			uint32_t si = id->secs.v[k];
+
+			if (!eh_input(&isecs.v[si])) {
+				VVEC_PUSH(rest, si, alloc);
+				continue;
+			}
+			uint32_t nrec;
+			EhRec *rec = eh_split(si, &nrec);
+
+			if (!rec) {
+				isecs.v[si].kind = K_NONE;
+				continue;
+			}
+			const Obj *o = objs.v[isecs.v[si].obj];
+
+			for (uint32_t r = 0; r < nrec; r++) {
+				if (rec[r].cie)
+					continue;
+				const ISec *is = &isecs.v[si];
+
+				if (rec[r].r0 == rec[r].r1 || !eh_live(rel_isec(o, is->rela[rec[r].r0].r_info >> 32)))
+					continue;	/* lld: an FDE without a live target */
+				const EhRec *ce = NULL;
+
+				for (uint32_t q = 0; q < nrec; q++)
+					if (rec[q].cie && rec[q].off == rec[r].cieoff)
+						ce = &rec[q];
+				if (!ce) {
+					error("%s:(.eh_frame+0x%x): invalid CIE reference", o->path, rec[r].off);
+					continue;
+				}
+				uint32_t c = 0;
+
+				while (c < ncie && !cie_same(cies[c].sec, &cies[c].rec, si, ce))
+					c++;
+				if (c == ncie) {
+					if (ncie == capc) {
+						capc = capc ? 2 * capc : 8;
+						cies = realloc(cies, capc * sizeof *cies);
+					}
+					cies[ncie++] = (struct Cie){ .sec = si, .rec = *ce };
+				}
+				uint32_t p = eh_piece(si, &rec[r]);
+
+				VVEC_PUSH(cies[c].fdes, p, alloc);
+			}
+			free(rec);
+			isecs.v[si].kind = K_NONE;	/* replaced by its records */
+		}
+		/* the records in place of the first .eh_frame input */
+		VVEC(uint32_t) out = {0};
+
+		for (uint32_t k = 0; k < first; k++)
+			VVEC_PUSH(out, rest.v[k], alloc);
+		uint32_t out0 = out.n;
+
+		for (uint32_t c = 0; c < ncie; c++) {
+			uint32_t cp = eh_piece(cies[c].sec, &cies[c].rec);
+
+			VVEC_PUSH(out, cp, alloc);
+			for (uint32_t f = 0; f < cies[c].fdes.n; f++) {
+				isecs.v[cies[c].fdes.v[f]].ehcie = cp + 1;
+				VVEC_PUSH(out, cies[c].fdes.v[f], alloc);
+			}
+		}
+		{
+			/* lld: a zero-length CIE as the terminator glibc expects; the section word aligned */
+			static const uint8_t zero4[4];
+			EhRec t = {.size = 4};
+			uint32_t tp = eh_piece(id->secs.v[first], &t);
+
+			isecs.v[tp].data = zero4;
+			isecs.v[tp].nrela = 0;
+			VVEC_PUSH(out, tp, alloc);
+			isecs.v[out.v[out0]].align = 8;
+		}
+		for (uint32_t k = first; k < rest.n; k++)
+			VVEC_PUSH(out, rest.v[k], alloc);
+		id = &isds.v[d];
+		id->secs.v = out.v;
+		id->secs.n = out.n;
+		id->secs.cap = out.cap;
+		free(cies);
+	}
+}
+
 #include "../arch/a64/ld/thunks.inc"
 
 /* ---------------- layout ---------------- */
@@ -2325,20 +2567,32 @@ static void commit_section(OSec *os, ISec *is)
 		os->addralign = is->align;
 }
 
-/* lld's coarse section order: read-only, code, RELRO (TLS, .got,
- * init/fini arrays), writable, bss; -1 for non-allocated */
+/* lld's getSectionRank bits that order allocated sections: read-only, code,
+ * then writable with RELRO (TLS first) before the rest and bss last; -1 for
+ * non-allocated.  Orphans go next to the section whose rank shares the most
+ * leading bits (lld getRankProximity) */
+enum { RF_WRITE = 1 << 14, RF_EXEC = 1 << 12, RF_RODATA = 1 << 11, RF_NOT_RELRO = 1 << 9, RF_NOT_TLS = 1 << 8, RF_BSS = 1 << 7 };
 static int orphan_rank(uint64_t flags, uint32_t type, const char *name)
 {
+	int r;
+
 	if (!(flags & SHF_ALLOC))
 		return -1;
-	if (flags & SHF_EXECINSTR)
-		return 1;
-	if (!(flags & SHF_WRITE))
-		return 0;
-	if ((flags & SHF_TLS) || !strcmp(name, ".got") || type == SHT_INIT_ARRAY || type == SHT_FINI_ARRAY)
-		return 2;
-	return type == SHT_NOBITS ? 4 : 3;
+	r = (flags & SHF_WRITE) ? RF_WRITE : (flags & SHF_EXECINSTR) ? RF_EXEC : RF_RODATA;
+	bool relro = (flags & SHF_WRITE) &&
+		     ((flags & SHF_TLS) || type == SHT_INIT_ARRAY || type == SHT_FINI_ARRAY || type == SHT_PREINIT_ARRAY ||
+		      !strcmp(name, ".got") || !strcmp(name, ".data.rel.ro") || !strcmp(name, ".bss.rel.ro") ||
+		      !strcmp(name, ".ctors") || !strcmp(name, ".dtors") || !strcmp(name, ".jcr") || !strcmp(name, ".eh_frame"));
+	if (!relro)
+		r |= RF_NOT_RELRO;
+	if (!(flags & SHF_TLS))
+		r |= RF_NOT_TLS;
+	if (type == SHT_NOBITS)
+		r |= RF_BSS;
+	return r;
 }
+
+static int rank_prox(int a, int b) { return a == b ? 32 : __builtin_clz((unsigned)(a ^ b)); }
 
 /* the rank of a script output section, from its first input section */
 static int osec_rank(uint32_t oi)
@@ -2393,9 +2647,27 @@ static void gc_sections(const char *entry)
 
 		if (is->kind == K_NONE || is->obj == NONE)
 			continue;
-		if (!strcmp(is->name, ".eh_frame") && (is->flags & SHF_ALLOC)) {
-			error("%s: --gc-sections with .eh_frame is not supported yet", objs.v[is->obj]->path);
-			break;
+		if (eh_input(is)) {
+			/* lld MarkLive::scanEhFrameSection: kept, but its relocations do not
+			 * keep the functions; a CIE's (the personality) keep their targets, an
+			 * FDE's only outside code and section groups (an LSDA) */
+			uint32_t nrec;
+			EhRec *rec = eh_split(i, &nrec);
+			const Obj *o = objs.v[is->obj];
+
+			live[i] = 1;
+			for (uint32_t r = 0; rec && r < nrec; r++)
+				for (uint32_t k = rec[r].r0; k < rec[r].r1; k++) {
+					uint32_t t = rel_isec(o, isecs.v[i].rela[k].r_info >> 32);
+
+					if (t == NONE)
+						continue;
+					if (!rec[r].cie && ((isecs.v[t].flags & SHF_EXECINSTR) || isecs.v[t].gnext))
+						continue;
+					MARK(t);
+				}
+			free(rec);
+			continue;
 		}
 		const char *n = is->name;
 		uint32_t d = match_isd(n);
@@ -2511,14 +2783,22 @@ static void assign_sections(void)
 	{
 		uint32_t n = orphans.n, *tmp = alloc(n * sizeof(uint32_t) + 1), k = 0;
 
-		for (int r = 0; r <= 5; r++)
-			for (uint32_t i = 0; i < n; i++) {
-				const ISec *is = &isecs.v[orphans.v[i]];
-				int q = orphan_rank(is->flags, is->type, is->name);
+		/* stable: by rank, non-allocated last */
+		for (uint32_t i = 0; i < n; i++) {
+			const ISec *is = &isecs.v[orphans.v[i]];
+			unsigned q = (unsigned)orphan_rank(is->flags, is->type, is->name);
+			uint32_t at = k++;
 
-				if ((q < 0 ? 5 : q) == r)
-					tmp[k++] = orphans.v[i];
+			while (at > 0) {
+				const ISec *p = &isecs.v[tmp[at - 1]];
+
+				if ((unsigned)orphan_rank(p->flags, p->type, p->name) <= q)
+					break;
+				tmp[at] = tmp[at - 1];
+				at--;
 			}
+			tmp[at] = orphans.v[i];
+		}
 		memcpy(orphans.v, tmp, n * sizeof(uint32_t));
 	}
 	for (uint32_t i = 0; i < orphans.n; i++) {
@@ -2532,27 +2812,51 @@ static void assign_sections(void)
 		if (found == NONE) {
 			found = get_osec(is->name);
 			VVEC_PUSH(topcmds, ((Cmd){.kind = C_OSEC, .idx = found}), alloc);
-			/* lld findOrphanPos, simplified: an allocated orphan goes after the
-			 * last output section of the same or a lower rank */
+			/* lld findOrphanPos, on the coarse ranks: the first output section of
+			 * the closest rank (sections without input sections do not count),
+			 * then past those as close whose rank is not above the orphan's */
 			int r = orphan_rank(is->flags, is->type, is->name);
 			if (r >= 0) {
 				uint32_t at = NONE;
+				int best = -1;
 				for (uint32_t c = 0; c + 1 < topcmds.n; c++)
 					if (topcmds.v[c].kind == C_OSEC) {
-						/* lld getRankProximity: sections without input sections do not count */
 						int q = osec_rank(topcmds.v[c].idx);
-						if (q >= 0 && q <= r)
+						if (q >= 0 && rank_prox(q, r) > best) {
+							best = rank_prox(q, r);
 							at = c;
+						}
 					}
-				/* lld: when no later output section has input sections,
-				 * the orphan goes at the very end, past the commands */
-				bool later = false;
-				for (uint32_t c = at == NONE ? 0 : at + 1; at != NONE && c + 1 < topcmds.n; c++)
-					later |= topcmds.v[c].kind == C_OSEC && osec_rank(topcmds.v[c].idx) >= 0;
-				if (at != NONE && later) {
-					Cmd cm = topcmds.v[topcmds.n - 1];
-					memmove(&topcmds.v[at + 2], &topcmds.v[at + 1], (topcmds.n - 2 - at) * sizeof(Cmd));
-					topcmds.v[at + 1] = cm;
+				if (at != NONE) {
+					uint32_t c = at;
+					for (; c + 1 < topcmds.n; c++) {
+						if (topcmds.v[c].kind != C_OSEC)
+							continue;
+						int q = osec_rank(topcmds.v[c].idx);
+						if (q < 0)
+							continue;
+						if (rank_prox(q, r) != best || r < q)
+							break;
+					}
+					/* lld: back to just past the last output section with input
+					 * sections, then past symbol assignments other than '.' */
+					if (c + 1 < topcmds.n) {
+						uint32_t j = c;
+						while (j > 0 && !(topcmds.v[j - 1].kind == C_OSEC && osec_rank(topcmds.v[j - 1].idx) >= 0))
+							j--;
+						if (j == 0)	/* none before: not ahead of the commands before the first section */
+							while (j < c && topcmds.v[j].kind != C_OSEC)
+								j++;
+						while (j < c && topcmds.v[j].kind == C_ASSIGN && topcmds.v[j].as->sym != NONE)
+							j++;
+						c = j;
+					}
+					/* lld: with no section with input sections after, the orphan goes at the very end */
+					if (c + 1 < topcmds.n) {
+						Cmd cm = topcmds.v[topcmds.n - 1];
+						memmove(&topcmds.v[c + 1], &topcmds.v[c], (topcmds.n - 1 - c) * sizeof(Cmd));
+						topcmds.v[c] = cm;
+					}
 				}
 			}
 		}
@@ -2623,6 +2927,7 @@ static void assign_sections(void)
 		for (uint32_t m = first_merge; m < merges.n; m++)
 			isecs.v[merges.v[m].isec].align = merges.v[m].align;
 	}
+	eh_frames();
 	/* output section ownership */
 	for (uint32_t i = 0; i < isds.n; i++)
 		for (uint32_t s = 0; s < isds.v[i].secs.n; s++)
@@ -2994,6 +3299,8 @@ static void write_isec(void *arg, size_t j)
 	switch (is->kind) {
 	case K_NORMAL:
 		memcpy(dst, is->data, is->size);
+		if (is->ehcie)	/* an FDE's CIE pointer: from the field to its CIE */
+			wr32(dst + 4, (uint32_t)(isec_va(si, 4) - isec_va(is->ehcie - 1, 0)));
 		if (is->nrela && (is->flags & SHF_ALLOC || !opt.relocatable))
 			relocate_isec(si, dst);
 		break;

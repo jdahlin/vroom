@@ -279,6 +279,21 @@ static int parse_mem(As *a, const char **pp, const char *e, A64Op *op)
 	return 0;
 }
 
+/* operand nop of mnemonic mn (lowercase) can only be a label or address */
+static int label_pos(const char *mn, size_t n, int nop, const A64Op *op)
+{
+	(void)op;
+	if (nop == 2 && ((n == 3 && !memcmp(mn, "adr", 3)) || (n == 4 && !memcmp(mn, "adrp", 4))))
+		return 1;
+	if (nop == 1 && ((n == 1 && mn[0] == 'b') || (n == 2 && !memcmp(mn, "bl", 2)) || (n >= 3 && mn[0] == 'b' && mn[1] == '.')))
+		return 1;
+	if (nop == 2 && ((n == 3 && !memcmp(mn, "cbz", 3)) || (n == 4 && !memcmp(mn, "cbnz", 4))))
+		return 1;
+	if (nop == 3 && ((n == 3 && !memcmp(mn, "tbz", 3)) || (n == 4 && !memcmp(mn, "tbnz", 4))))
+		return 1;
+	return 0;
+}
+
 /* mnemonics whose operands can be names (sysregs, barriers, conditions...);
  * m is lowercase */
 static int names_ops(const char *m, size_t n)
@@ -445,10 +460,10 @@ VPRIV int instruction(As *a, const char *p, const char *e, size_t wn)
 			size_t tn = (size_t)(p - t);
 			int k;
 			const char *q = ws(p, e);
-			if (parse_reg(a, t, tn, op, 0) && nop == 2 && mn[0] == 'a' &&
-			    ((mlen == 3 && !memcmp(mn, "adr", 3)) || (mlen == 4 && !memcmp(mn, "adrp", 4)))) {
+			if (parse_reg(a, t, tn, op, 0) && label_pos(mn, mlen, nop, op)) {
 				/* a symbol named like a register (v1, x1, q0): adr/adrp take
-				 * it as the symbol (LLVM; branches reject it) */
+				 * it as the symbol, branches an SVE name (z3, p1: LLVM) and,
+				 * beyond LLVM, any register name (a C function d1 or x1) */
 				memset(op, 0, sizeof *op);
 				p = t;
 				if (parse_imm(a, &p, e, op)) return -1;

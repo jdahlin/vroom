@@ -76,6 +76,12 @@ CASES = [
     # GOT slots for local symbols: after the globals, by file (lld postScanRelocations)
     ('got local', '{t}/gl.o {t}/cm.o'),
     ('got local no-relax', '--no-relax {t}/gl.o'),
+    # .eh_frame: CIEs merged, FDEs of dead or discarded sections dropped (lld's EhFrameSection)
+    ('eh_frame', '{t}/e1.o {t}/e2.o'),
+    ('eh_frame comdat', '{t}/e1.o {t}/e2.o {t}/e3.o'),
+    ('eh_frame gc', '--gc-sections {t}/e1.o {t}/e2.o {t}/e3.o'),
+    ('eh_frame personality', '{t}/e1.o {t}/e2.o {t}/ep.o {t}/pers.o'),
+    ('eh_frame personality gc', '--gc-sections {t}/e1.o {t}/e2.o {t}/ep.o {t}/pers.o'),
 ]
 MSG = {'-mbad': 'unknown emulation: foo',
        '-l missing': 'unable to find library -lnosuch', '-l no -L': 'unable to find library -lx'}
@@ -120,6 +126,13 @@ GC = {	# with -ffunction-sections -fdata-sections
           '__attribute__((constructor)) void ctor(void) { used_d += s(); }\n'
           'int _start(void) { return leaf(); }\n',
 }
+EH = {	# with -fasynchronous-unwind-tables -ffunction-sections; e3's inline f is a COMDAT
+    'e1': 'int e2a(int); int f(int); int ep(int); int _start(void) { return e2a(1) + f(2) + ep(3); }\n'
+          'int unused1(int x) { return x * 3; }\n',
+    'e2': 'int e2a(int x) { return x + 1; }\nint e2dead(int x) { return x - 1; }\n'
+          'inline __attribute__((weak)) int f(int x) { return x * 2; }\n',
+    'e3': 'inline __attribute__((weak)) int f(int x) { return x * 4; }\nint e3g(int x) { return f(x); }\n',
+}
 LAZY = {	# c -> b1 -> b2 -> b3; w refers to b1 weakly; p1 -> q1 -> p2
     'c': 'int b1(void); int _start(void) { return b1(); }\n',
     'w': '__attribute__((weak)) int b1(void); int _start(void) { return b1 ? b1() : 0; }\n',
@@ -150,6 +163,19 @@ def main():
             open(f'{t}/{name}.c', 'w').write(src)
             subprocess.run([VPP, '--target=aarch64-linux-gnu', '-ffunction-sections', '-fdata-sections',
                             '-c', f'{t}/{name}.c', '-o', f'{t}/{name}.o'], check=True)
+        for name, src in EH.items():
+            open(f'{t}/{name}.c', 'w').write(src)
+            subprocess.run([VPP, '--target=aarch64-linux-gnu', '-w', '-fasynchronous-unwind-tables', '-ffunction-sections',
+                            '-c', f'{t}/{name}.c', '-o', f'{t}/{name}.o'], check=True)
+        # ep: clang -fexceptions, a personality and an LSDA (a cleanup); pers defines the personality
+        open(f'{t}/ep.c', 'w').write('void g(int *);\nstatic void cl(int *p) { g(p); }\n'
+                                     'int ep(int x) { int __attribute__((cleanup(cl))) v = x; g(&v); return v; }\n'
+                                     'void g(int *p) { ++*p; }\n')
+        subprocess.run([llvm('clang'), '--target=aarch64-linux-gnu', '-O1', '-fexceptions', '-ffunction-sections',
+                        '-c', f'{t}/ep.c', '-o', f'{t}/ep.o'], check=True)
+        open(f'{t}/pers.s', 'w').write('.text\n.globl __gcc_personality_v0\n__gcc_personality_v0: ret\n'
+                                       '.globl _Unwind_Resume\n_Unwind_Resume: ret\n')
+        subprocess.run([VPP, '--target=aarch64-linux-gnu', '-c', f'{t}/pers.s', '-o', f'{t}/pers.o'], check=True)
         for name, src in list({'a': SRC, 'x': LIB}.items()) + list(LAZY.items()):
             open(f'{t}/{name}.c', 'w').write(src)
             subprocess.run([VPP, '--target=aarch64-linux-gnu', '-c', f'{t}/{name}.c', '-o', f'{t}/{name}.o'], check=True)
