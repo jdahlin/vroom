@@ -284,6 +284,8 @@ VPRIV void declarator(cc *c, declr *d, bool abstract_ok, uint32_t *first, uint32
 		char b[64];
 
 		fatal(c, tok(c)->loc, "expected identifier or '(' before '%s'", tokspell(tok(c), b, sizeof(b)));
+	} else {
+		d->loc = tok(c)->loc;	/* abstract: where the name would be (clang) */
 	}
 	attribute_list(c, &d->at);
 	for (;;) {

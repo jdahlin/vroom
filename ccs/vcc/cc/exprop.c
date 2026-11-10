@@ -485,6 +485,65 @@ static void ovf_warn(cc *c, int op, uint32_t n, uint32_t loc, uint32_t sub0, uin
 }
 
 static uint32_t binary(cc *c, int minp);
+/* the same object on both sides (clang's diagnoseTautologicalComparison:
+   the same variable, member chain or constant-index element; implicit conversions and parentheses
+   aside; nothing from a macro) */
+static bool same_ref(cc *c, uint32_t a, uint32_t b, int depth)
+{
+	while (N(a)->op == N_CAST && !c->span[a].e && N(a)->a)
+		a = N(a)->a;
+	while (N(b)->op == N_CAST && !c->span[b].e && N(b)->a)
+		b = N(b)->a;
+	if (N(a)->op != N(b)->op || depth > 16)
+		return false;
+	switch (N(a)->op) {
+	case N_VAR: {
+		uint32_t nm = c->syms[N(a)->a].name;
+
+		return N(a)->a == N(b)->a && c->syms[N(a)->a].kind == S_VAR && nm &&
+		       pp_spells(c->p, N(a)->loc, idstr_(nm), (uint32_t)idlen_(nm)) &&
+		       pp_spells(c->p, N(b)->loc, idstr_(nm), (uint32_t)idlen_(nm));
+	}
+	case N_MEMBER: {
+		uint32_t x = N(a)->a, y = N(b)->a;
+
+		if (N(a)->b != N(b)->b || N(a)->c != N(b)->c)
+			return false;
+		if (N(x)->op == N_DEREF && N(y)->op == N_DEREF)	/* p->m */
+			x = N(x)->a, y = N(y)->a;
+		return same_ref(c, x, y, depth + 1);
+	}
+	case N_INDEX: {
+		uint32_t i = N(a)->b, j = N(b)->b;
+
+		while (N(i)->op == N_CAST && !c->span[i].e && N(i)->a)
+			i = N(i)->a;
+		while (N(j)->op == N_CAST && !c->span[j].e && N(j)->a)
+			j = N(j)->a;
+		return N(i)->op == N_NUM && N(j)->op == N_NUM && c->ipool[N(i)->a] == c->ipool[N(j)->a] &&
+		       same_ref(c, N(a)->a, N(b)->a, depth + 1);
+	}
+	default:
+		return false;
+	}
+}
+
+/* -Wtautological-compare: x == x */
+static void self_compare(cc *c, int op, uint32_t l, uint32_t r, uint32_t loc)
+{
+	bool t;
+
+	switch (op) {
+	case T_EQUALEQUAL: case T_LESSEQ: case T_GREATEREQ: t = true; break;
+	case T_EXCLAIMEQ: case T_LESS: case T_GREATER: t = false; break;
+	default: return;
+	}
+	if (is_float(c, N(l)->ty) || is_float(c, N(r)->ty) || !same_ref(c, l, r, 0))
+		return;
+	cc_warnx(c, "tautological-compare", true, NULL, loc, NULL, 0, NULL, 0, "self-comparison always evaluates to %s",
+		 t ? "true" : "false");
+}
+
 
 static __attribute__((noinline)) uint32_t binary_ops(cc *c, int minp, uint32_t l, uint32_t b)
 {
@@ -513,6 +572,8 @@ static __attribute__((noinline)) uint32_t binary_ops(cc *c, int minp, uint32_t l
 			c->dead -= dead;
 		}
 		runtime_warn(c, op, l, r, loc);
+		if (!mac && binprec(op) >= 6 && binprec(op) <= 7)
+			self_compare(c, op, l, r, loc);
 		{
 			uint32_t l0 = l;
 
