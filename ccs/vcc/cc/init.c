@@ -243,6 +243,49 @@ static void il_continue(cc *c, ilist *l, uint64_t pos, bool st);
 static void il_fill(cc *c, ilist *l, uint64_t pos, bool braced, uint32_t first, bool st);
 static uint32_t init_braced(cc *c, qty ty, bool st);
 
+/* a braced initializer skipped (excess elements): its range */
+static pp_span skip_braces(cc *c)
+{
+	int depth = 0;
+	pp_span r = { tok(c)->loc, 0 };
+
+	do {
+		r.e = tok(c)->loc;
+		if (is(c, T_LBRACE))
+			depth++;
+		else if (is(c, T_RBRACE))
+			depth--;
+		else if (is(c, T_EOF))
+			fatal(c, tok(c)->loc, "expected '}'");
+		next(c);
+	} while (depth > 0);
+	r.e = pp_tok_end(c->p, r.e);
+	return r;
+}
+
+/* a string literal for a char array of known size: longer than it (the terminator may go) */
+static void str_fit(cc *c, qty arr, uint32_t s)
+{
+	if (is_array(c, arr) && !(T(c, arr)->flags & (TF_INCOMPLETE | TF_VLA)) && N(s)->op == N_STR &&
+	    c->strs[N(s)->a].esz == 1 && c->strs[N(s)->a].n - 1 > T(c, arr)->n) {
+		pp_span r = rng(c, s);
+
+		cc_warnx(c, "excess-initializers", true, NULL, r.b, &r, 1, NULL, 0, "initializer-string for char array is too long");
+	}
+}
+
+/* clang's -Wexcess-initializers, once per list: at the first excess element */
+static void excess_warn(cc *c, qty ty, bool *done, pp_span r)
+{
+	const char *k = is_array(c, ty) ? "array" : is_vector(c, ty) ? "vector" : KIND(c, ty) == TY_UNION ? "union" :
+			is_record(c, ty) ? "struct" : "scalar";
+
+	if (*done)
+		return;
+	*done = true;
+	cc_warnx(c, "excess-initializers", true, NULL, r.b, &r, 1, NULL, 0, "excess elements in %s initializer", k);
+}
+
 static bool is_char_array(cc *c, qty t)
 {
 	if (!is_array(c, t))
@@ -290,6 +333,7 @@ static void il_elem(cc *c, ilist *l, uint64_t pos, uint32_t v, bool st)
 			sv = string_lit(c);
 			accept(c, T_COMMA);
 			expect(c, T_RBRACE, "'}'");
+			str_fit(c, et, sv);
 			il_set(c, l, pos, sv, NULL);
 			return;
 		}
@@ -316,6 +360,7 @@ static void il_elem(cc *c, ilist *l, uint64_t pos, uint32_t v, bool st)
 		return;
 	}
 	if (is_array(c, et)) {
+		str_fit(c, et, v);
 		il_set(c, l, pos, v, NULL);	/* string literal */
 		return;
 	}
@@ -462,6 +507,8 @@ static uint64_t il_designation(cc *c, ilist *l, bool st)
 
 static void il_fill(cc *c, ilist *l, uint64_t pos, bool braced, uint32_t first, bool st)
 {
+	bool excess = false;
+
 	pos = il_next_pos(c, l, pos);
 	if (first) {
 		if (il_full(l, pos)) {
@@ -490,13 +537,12 @@ static void il_fill(cc *c, ilist *l, uint64_t pos, bool braced, uint32_t first, 
 				return;
 			if (il_full(l, pos)) {
 				/* excess elements: clang warns and drops them */
-				uint32_t v;
-
 				if (is(c, T_LBRACE)) {
-					skip_balanced(c);
+					excess_warn(c, l->ty, &excess, skip_braces(c));
 				} else {
-					v = assign_expr(c);
-					(void)v;
+					uint32_t v = assign_expr(c);
+
+					excess_warn(c, l->ty, &excess, rng(c, v));
 				}
 			} else {
 				il_elem(c, l, pos, 0, st);
@@ -562,13 +608,17 @@ static uint32_t init_braced(cc *c, qty ty, bool st)
 		v = init_braced(c, ty, st);
 	else
 		v = convert_as(c, decay(c, assign_expr(c)), ty, c->cv_what == CX_INIT ? CX_INIT : 0, c->cv_loc);
-	while (accept(c, T_COMMA)) {
-		if (is(c, T_RBRACE))
-			break;
-		if (is(c, T_LBRACE))
-			skip_balanced(c);
-		else
-			assign_expr(c);
+	{
+		bool excess = false;
+
+		while (accept(c, T_COMMA)) {
+			if (is(c, T_RBRACE))
+				break;
+			if (is(c, T_LBRACE))
+				excess_warn(c, ty, &excess, skip_braces(c));
+			else
+				excess_warn(c, ty, &excess, rng(c, assign_expr(c)));
+		}
 	}
 	expect(c, T_RBRACE, "'}'");
 	return v;
@@ -587,6 +637,7 @@ VPRIV uint32_t initializer(cc *c, qty *ty, bool st)
 			s = string_lit(c);
 			accept(c, T_COMMA);
 			expect(c, T_RBRACE, "'}'");
+			str_fit(c, t, s);
 			if (T(c, t)->flags & TF_INCOMPLETE)
 				*ty = QT(QI(ty_array(c, T(c, t)->base, c->strs[N(s)->a].n, 0)), QQ(t));
 			return s;
@@ -620,6 +671,8 @@ VPRIV uint32_t initializer(cc *c, qty *ty, bool st)
 			}
 			if (T(c, t)->flags & TF_INCOMPLETE)
 				*ty = QT(QI(ty_array(c, T(c, t)->base, c->strs[N(v)->a].n, 0)), QQ(t));
+			else
+				str_fit(c, t, v);
 			return v;
 		}
 		if (is_record(c, t) && !is_complex(c, t)) {
