@@ -31,7 +31,7 @@ enum {
 	X_ST,		/* [r1 + off (+ ref)] = r2: sz bytes */
 	X_LEA,		/* r0 = r1 + off (+ ref) */
 	/* r0 = r1 op r2 (sz 4 or 8) */
-	X_ADD, X_SUB, X_AND, X_OR, X_XOR, X_IMUL,
+	X_ADD, X_SUB, X_AND, X_OR, X_XOR, X_IMUL, X_ADC, X_SBB,
 	/* r0 = r1 op imm (32-bit signed) */
 	X_ADDI, X_SUBI, X_ANDI, X_ORI, X_XORI, X_IMULI,
 	X_SHLI, X_SHRI, X_SARI,	/* r0 = r1 op imm */
@@ -49,6 +49,7 @@ enum {
 	X_ADJSP,	/* rsp += imm */
 	X_CQO,		/* rdx = sign of rax (sz 4: cltd, 8: cqto) */
 	X_IDIV, X_DIV,	/* rdx:rax / r1: rax quotient, rdx remainder */
+	X_MULW,		/* rdx:rax = rax * r1 (unsigned, 64 x 64 -> 128) */
 	X_EXT,		/* r0 = r1's low sz bytes extended to 64 bits (cond 1: sign) */
 	X_REP,		/* cond 0: rep movsb (rdi rsi rcx), 1: rep stosb (rdi al rcx) */
 	/* SSE (X_LD/X_ST/X_MOV take xmm registers too) */

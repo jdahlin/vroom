@@ -319,7 +319,22 @@ static void wk_switch(ecx *e, uint32_t n)
 			ldef = l;
 			continue;
 		}
-		if (k->lo == k->hi) {
+		if (wk_mem(e, ct)) {
+			/* __int128: each test a 0/1 value (the value is an object, r its address) */
+			val t = LO(wcmp)(e, k->lo == k->hi ? T_EQUALEQUAL : T_GREATEREQ, sg, (val){ .k = V_REG, .r = (uint8_t)r }, vconst(k->lo));
+			uint32_t skip = wk_newlabel(e);
+
+			LO(tkeep)(e, r);
+			if (k->lo == k->hi) {
+				LO(brz)(e, t, 4, true, l);
+				continue;
+			}
+			LO(brz)(e, t, 4, false, skip);
+			t = LO(wcmp)(e, T_LESSEQ, sg, (val){ .k = V_REG, .r = (uint8_t)r }, vconst(k->hi));
+			LO(tkeep)(e, r);
+			LO(brz)(e, t, 4, true, l);
+			LO(label)(e, skip);
+		} else if (k->lo == k->hi) {
 			LO(cmpbr)(e, T_EQUALEQUAL, w, sg, (val){ .k = V_REG, .r = (uint8_t)r }, vconst(k->lo), l);
 			LO(tkeep)(e, r);
 		} else {
@@ -542,7 +557,7 @@ VPRIV void wk_function(ecx *e, uint32_t s)
 	if (KIND(c, W->rty) != TY_VOID) {
 		int k = KIND(c, W->rty);
 
-		if (k == TY_FLOAT16 || k == TY_INT128 || k == TY_UINT128 || k == TY_VECTOR || k == TY_FLOAT128)
+		if (k == TY_FLOAT16 || ((k == TY_INT128 || k == TY_UINT128) && !LO(i128mem)()) || k == TY_VECTOR || k == TY_FLOAT128)
 			efatal(e, y->loc, "x86-64: this return type is not supported yet (PLAN-x86.md X3)");
 	}
 	if (body->aux > 256)
@@ -558,7 +573,7 @@ VPRIV void wk_function(ecx *e, uint32_t s)
 		qty pt = c->syms[p].ty;
 		int k = KIND(c, pt);
 
-		if (k == TY_FLOAT16 || k == TY_INT128 || k == TY_UINT128 || k == TY_VECTOR || k == TY_FLOAT128)
+		if (k == TY_FLOAT16 || ((k == TY_INT128 || k == TY_UINT128) && !LO(i128mem)()) || k == TY_VECTOR || k == TY_FLOAT128)
 			efatal(e, c->syms[p].loc, "x86-64: this parameter type is not supported yet (PLAN-x86.md X3)");
 		if ((ft->flags & TF_NOPROTO) && k == TY_FLOAT)
 			pt = prim(TY_DOUBLE);	/* K&R: received as the caller promoted it */

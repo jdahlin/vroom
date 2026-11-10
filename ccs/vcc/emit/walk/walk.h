@@ -104,6 +104,13 @@ VPRIV void LO(brz)(ecx *e, val a, int size, bool nz, uint32_t lbl);	/* to lbl if
 /* floating point: float and double values in the CPU's float registers; long double as
    LO(ldmem) says (true: by address, a 16-byte object, as records) */
 VPRIV bool LO(ldmem)(void);
+/* __int128: by address too when LO(i128mem) */
+VPRIV bool LO(i128mem)(void);
+VPRIV val LO(wconst)(ecx *e, i128 v);
+VPRIV val LO(wbin)(ecx *e, int op, bool sgn, val a, val b);	/* b an int for << >> */
+VPRIV val LO(wun)(ecx *e, int op, val a);			/* T_MINUS T_TILDE */
+VPRIV val LO(wcmp)(ecx *e, int op, bool sgn, val a, val b);
+VPRIV val LO(wcvt)(ecx *e, val v, qty from, qty to);	/* __int128 on either side */
 VPRIV int LO(ftreg)(ecx *e);				/* a free float temporary */
 VPRIV val LO(fconst)(ecx *e, uint64_t bits, int size);	/* a float (4) or double (8) constant */
 VPRIV val LO(fbin)(ecx *e, int op, qty t, val a, val b);	/* + - * / */
