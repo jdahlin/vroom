@@ -38,7 +38,8 @@ typedef struct wkarg { uint8_t n, cls[2]; bool mem, x87, up; uint32_t align; uin
 #define WK_MAXLOOP 1024
 #define WK_MAXCASE (1u << 16)
 
-typedef struct wkloop { uint32_t brk, cont; } wkloop;
+typedef struct wkloop { uint32_t brk, cont; int cdepth; } wkloop;	/* cdepth: the cleanups live at its entry */
+#define WK_MAXCLEAN 1024
 typedef struct wkcase { i128 lo, hi; uint32_t node; } wkcase;
 
 typedef struct wkst {
@@ -62,6 +63,13 @@ typedef struct wkst {
 	qty rty;
 	wkarg rrec;		/* a record result: as the ABI returns it */
 	uint32_t fsym;
+	uint32_t clean[WK_MAXCLEAN];	/* variables with __attribute__((cleanup)) in scope, innermost last */
+	int nclean;
+	/* the cleanup scopes as a tree (wk_scan): node k (1..) is a cleanup variable and the one
+	   enclosing it; per sym its node, per user label the innermost node in scope there */
+	struct { uint32_t sym, parent; } cn[WK_MAXCLEAN];
+	uint32_t ncn;
+	uint32_t *csn, *csg, *lcn, *lcg;
 } wkst;
 
 VPRIV wkst *wk_state(ecx *e);
@@ -84,6 +92,7 @@ VPRIV bool wk_signed(cc *c, qty t);
 VPRIV void wk_vla_fix(ecx *e, qty t, bool pure);	/* the VLA sizes in t evaluated now, into slots */
 VPRIV val wk_vla_bytes(ecx *e, qty t);		/* sizeof t (a VLA: computed) */
 VPRIV void wk_vla_decl(ecx *e, uint32_t s, bool zero);	/* a VLA's storage below sp */
+VPRIV void wk_cleanups(ecx *e, int to);	/* the cleanups above depth `to` run, innermost first (not popped) */
 
 /* ---------------- the lowering interface (layer 2) ---------------- */
 
@@ -141,6 +150,8 @@ VPRIV val LO(fbits)(ecx *e, val v, int size);		/* a float's bits in an integer r
 /* control */
 VPRIV void LO(label)(ecx *e, uint32_t l);
 VPRIV void LO(jump)(ecx *e, uint32_t l);
+VPRIV void LO(jumpr)(ecx *e, int r);			/* to the address in r (computed goto) */
+VPRIV void LO(named)(ecx *e, uint32_t ref);		/* a label with a symbol name here (ref: RK_LBL, an address taken) */
 /* calls: the arguments are in frame slots (8 bytes each, extended); ref: a direct callee, else fn */
 VPRIV void LO(classify)(ecx *e, qty t, wkarg *a);
 /* r: a record result (its slot receives it), NULL otherwise; retsize/retsgn: a scalar result */

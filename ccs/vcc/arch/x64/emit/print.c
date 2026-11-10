@@ -315,6 +315,14 @@ VPRIV void x64_print(ecx *e, tbuf *b, uint32_t s)
 			tb_s(b, ", ");
 			x64_memop(c, b, i);
 			break;
+		case X_JMPR:
+			tb_s(b, "\tjmpq\t*");
+			x64_reg(b, i->r[1], 8);
+			break;
+		case X_NAMED:
+			ref_name(c, b, i->ref);
+			tb_c(b, ':');
+			break;
 		case X_MFENCE:
 			tb_s(b, "\tmfence");
 			break;
