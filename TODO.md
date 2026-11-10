@@ -976,12 +976,12 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
   32-bit GNU symtab only; ld skips `/SYM64/` (`ld/ld.c:1622`).
   *Validate:* `bench/var-cmp.py` extended to regular archives and `x`, `d`,
   `q`, `p`, `s`; round-trip with llvm-ar.
-- [ ] **vobjcopy / vnm**: (done: `-g`/`--strip-debug`, `--redefine-sym`, `--add-section`, `--add-gnu-debuglink`, `--set-section-flags`; `.llvm_addrsig`'s
-  link dropped as llvm-objcopy.)  Missing
-  `--only-keep-debug`,
-  (done: `-O`/`-I elf64-littleaarch64`, `-I binary`, `-B`).
-  (Done: nm `-u`/`-U`/`-g`, `-D` with symbol versions, archives (regular and thin), and long forms, unknown options are errors, any
-  number of files.)
+- [x] **vobjcopy / vnm**: (done: `-g`/`--strip-debug`, `--only-keep-debug`
+  (relocatable objects), `--redefine-sym`, `--add-section`,
+  `--add-gnu-debuglink`, `--set-section-flags`, `-O`/`-I elf64-littleaarch64`,
+  `-I binary`, `-B`; `.llvm_addrsig`'s link dropped as llvm-objcopy; nm
+  `-u`/`-U`/`-g`, `-D` with symbol versions, archives (regular and thin),
+  long forms, unknown options are errors, any number of files.)
   *Validate:* `bench/vobjcopy-cmp.sh` extended with these flags vs
   llvm-objcopy/llvm-nm; unknown options must be errors.
 - [ ] **macho.c**: DWARF dropped (`platform/darwin/macho.c:95`), `.eh_frame` to

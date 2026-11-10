@@ -394,7 +394,7 @@ typedef struct {
 
 static struct {
 	const char *in, *out;
-	bool binary, binary_in, strip_all, strip_debug, wildcard;
+	bool binary, binary_in, strip_all, strip_debug, keep_debug, wildcard;
 	const char *prefix_syms, *prefix_alloc;
 	const char **remove;
 	uint32_t nremove;
@@ -589,6 +589,14 @@ static int objcopy_run(int dirfd)
 	}
 	if (!rel && e.sh[0].sh_size)
 		oerror("extended section numbering not supported");
+	/* --only-keep-debug (relocatable objects): allocated sections other than notes keep only their headers */
+	if (oc.keep_debug) {
+		if (!rel)
+			oerror("--only-keep-debug: only relocatable objects are supported");
+		for (uint32_t k = 1; k < ns; k++)
+			if ((sec[k].flags & SHF_ALLOC) && sec[k].type != SHT_NOTE)
+				sec[k].type = SHT_NOBITS;
+	}
 	/* --set-section-flags (llvm-objcopy's getNewShfFlags; NOBITS with contents/load becomes PROGBITS) */
 	for (uint32_t a = 0; a < oc.nssf; a++) {
 		const char *eq = strchr(oc.ssf[a], '=');
@@ -1043,7 +1051,8 @@ static int objcopy_run(int dirfd)
 	}
 	for (uint32_t i = 0; i < nout; i++) {
 		OSec *s = &sec[outside[i]];
-		off = alignto(off, s->align ? s->align : 1);
+		if (!(oc.keep_debug && s->type == SHT_NOBITS))	/* (llvm: not aligned there) */
+			off = alignto(off, s->align ? s->align : 1);
 		s->off = off;
 		if (s->type != SHT_NOBITS)
 			off += s->size;
@@ -1149,6 +1158,8 @@ int objcopy_main(int argc, char **argv, int dirfd, FILE *err)
 			/* (only meaningful with -I binary: aarch64 is the one target) */
 		} else if (OPT("-S") || OPT("--strip-all")) {
 			oc.strip_all = true;
+		} else if (OPT("--only-keep-debug")) {
+			oc.keep_debug = true;
 		} else if (OPT("-g") || OPT("--strip-debug")) {
 			oc.strip_debug = true;
 		} else if (OPT("-w") || OPT("--wildcard")) {
