@@ -374,7 +374,7 @@ static void keep_make(keep *K, cc *c, const emitter *E)
 }
 
 /* emit_tu1's per-TU tables (E.*) and text buffers */
-static vmpool erpool = VMPOOL_INIT(18);
+static vmpool erpool = VMPOOL_INIT(19);
 
 static int emit_tu1(cc *c, const cc_opts *o, bool write_out, uint8_t *mf, bool *again, bool last,
 		    const keep *K, keep *next)
@@ -410,6 +410,9 @@ static int emit_tu1(cc *c, const cc_opts *o, bool write_out, uint8_t *mf, bool *
 	pthread_mutex_init(&E.dmu, NULL);
 	E.walked = vmreg_get(&er[9], c->nsym + 64, "emit.walked");
 	E.fnsize = vmreg_get(&er[10], (c->nsym + 64) * sizeof(uint16_t), "emit.fnsize");
+	E.fnbad = vmreg_get(&er[18], (size_t)(c->nsym + 64) * 3, "emit.fnbad");
+	E.nref = E.fnbad + c->nsym + 64;
+	E.ncall = E.nref + c->nsym + 64;
 	E.cwval = vmreg_get(&er[11], (c->nsym + 64) * sizeof(i128), "emit.cwval");
 	E.luse = vmreg_get(&er[15], (c->nsym + 64) * sizeof(uint16_t), "emit.luse");
 	E.lnoreg = vmreg_get(&er[16], c->nsym + 64, "emit.lnoreg");
@@ -424,6 +427,8 @@ static int emit_tu1(cc *c, const cc_opts *o, bool write_out, uint8_t *mf, bool *
 	E.stats = getenv("VCC_EMIT_STATS") != NULL;
 	E.noopt = getenv("VCC_NOOPT") != NULL;
 	E.opt3 = o->opt >= 3 && !WASM(c) && !getenv("VCC_NOOPT3");
+	if (E.opt3)
+		opt_count_calls(&E, c);
 	/* wasm64: objects from the text, through arch/wasm/as */
 	E.objtext = getenv("VCC_OBJ_TEXT") != NULL || PP_IS_WASM(o->target);
 	/* -g: the line table is the assembler's, from the printer's .loc */
@@ -661,6 +666,8 @@ static int emit_tu1(cc *c, const cc_opts *o, bool write_out, uint8_t *mf, bool *
 				(unsigned long long)E.nfn, (unsigned long long)E.nobj, (unsigned long long)E.ninl,
 				(unsigned long long)E.nins, E.nins * 4 / 1024.0, (t1 - t0) * 1e3, (t2 - t1) * 1e3, nthr,
 				E.print_ns / 1e6, E.walk_ns / 1e6, (unsigned long long)E.nwalk, bytes / 1e6, E.nins * 4 / 1e6 / (t2 - t1));
+			if (E.opt3)
+				fprintf(stderr, "vcc emit: -O3: %llu calls inlined by the heuristics\n", (unsigned long long)E.noptinl);
 		}
 		vmreg_put(&er[13], tail.n);
 	}
@@ -685,6 +692,7 @@ static int emit_tu1(cc *c, const cc_opts *o, bool write_out, uint8_t *mf, bool *
 	vmreg_put(&er[15], (c->nsym + 64) * sizeof(uint16_t));
 	vmreg_put(&er[16], c->nsym + 64);
 	vmreg_put(&er[17], (c->nsym + 64) * 2 * sizeof(uint32_t));
+	vmreg_put(&er[18], (size_t)(c->nsym + 64) * 3);
 	vmpool_give(&erpool, er);
 	return errors;
 }

@@ -165,6 +165,8 @@ typedef struct emitter {
 	_Atomic uint8_t *extref;	/* per sym: referenced (for .weak of undefined syms) */
 	_Atomic uint8_t *walked;
 	uint16_t *fnsize;		/* per function: AST nodes (prepass) */
+	uint8_t *fnbad;			/* per function: never inlined by the -O3 heuristics (prepass) */
+	uint8_t *nref, *ncall;		/* -O3: per function, references and direct calls in the TU (saturating) */
 	uint16_t *luse;			/* per local: uses weighted by loop depth (prepass) */
 	uint8_t *lnoreg;		/* per local: needs memory (address taken, asm operand, {} init) */
 	uint32_t *lspan;		/* per function: [2s] lowest, [2s+1] highest local sym seen */
@@ -188,7 +190,7 @@ typedef struct emitter {
 	chunk *chunks;
 	uint32_t nchunk;
 	_Atomic int errors;
-	_Atomic uint64_t nins, nfn, nobj, ninl;
+	_Atomic uint64_t nins, nfn, nobj, ninl, noptinl;
 	_Atomic uint64_t print_ns, walk_ns, nwalk;
 	uint8_t *mf;			/* per sym: static function to inline everywhere (kept across rounds) */
 	_Atomic uint32_t newmf;		/* marked this round */
@@ -362,6 +364,7 @@ typedef struct ecx {
 	int nclean;
 	fnctx *f;
 	int inline_depth;
+	uint32_t inl_grow;	/* -O3: AST nodes the inlining heuristics put into this function */
 	uint32_t top;		/* sym being emitted */
 	uint32_t asmk;		/* inline asm statements emitted in it so far (%=) */
 	uint32_t *cases;	/* scratch for switch case collection */
@@ -672,7 +675,7 @@ VPRIV void walk_fn(ecx *e, uint32_t s);
 VPRIV void kv_track(ecx *e, uint32_t s, const val *v);
 VPRIV int ael_slot(ecx *e, uint32_t n, bool create);
 VPRIV bool const_var(ecx *e, uint32_t s, const val *v);
-VPRIV bool can_inline(ecx *e, uint32_t s);
+VPRIV bool can_inline(ecx *e, uint32_t s, uint32_t call);
 VPRIV val inline_call(ecx *e, uint32_t s, carg *args, int n);
 VPRIV uint32_t direct_callee(cc *c, uint32_t fn, uint32_t *ref);
 VPRIV val gen_call(ecx *e, uint32_t n);
@@ -718,6 +721,7 @@ VPRIV void wasm_tail(cc *c, tbuf *t, _Atomic uint8_t *claimed);
 VPRIV bool is_aconst(cc *c, uint32_t n);
 VPRIV uint32_t aconst_idx(cc *c, uint32_t n);
 VPRIV void ensure_walked(emitter *E, cc *c, uint32_t s);
+VPRIV void opt_count_calls(emitter *E, cc *c);
 VPRIV int u32_cmp(const void *a, const void *b);
 /* tu.c */
 VPRIV void enqueue(emitter *E, uint32_t item);

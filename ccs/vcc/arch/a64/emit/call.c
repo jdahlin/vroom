@@ -388,10 +388,97 @@ VPRIV bool const_var(ecx *e, uint32_t s, const val *v)
 
 #define INLINE_NODES 40	/* AST nodes: a few statements */
 
-VPRIV bool can_inline(ecx *e, uint32_t s)
+/*
+ * -O3 (E->opt3): inline what clang -O3 would, by AST size (fnsize, the
+ * prepass's node count) against a limit that depends on the callee and the
+ * call site:
+ *   OPT_SMALL   any function defined here (static or not, not weak, not
+ *               preemptible under -fPIC): helpers whose call costs as much
+ *               as their body;
+ *   OPT_INLINE  'inline' functions above the -O2 limit (INLINE_NODES);
+ *   OPT_ONCE    static functions with one call and no other reference in the
+ *               TU: the out-of-line copy goes away (lazy emission only
+ *               emits what emitted code refers to);
+ * plus OPT_CARG per constant argument (folds in the body) and half again
+ * inside a loop.  OPT_GROWTH caps the nodes inlined into one emitted
+ * function, OPT_DEPTH the nesting.  Recursion is cut by the inline stack
+ * (can_inline); functions the prepass marks fnbad (alloca, VLA, return or
+ * frame address, the setjmp family, inline asm, computed goto), variadic,
+ * K&R and noreturn ones are not inlined.  A function whose address is taken
+ * is still inlined at its calls: the reference keeps the out-of-line copy.
+ */
+#define OPT_SMALL 12
+#define OPT_INLINE 60
+#define OPT_ONCE 300
+#define OPT_CARG 4
+#define OPT_DEPTH 6
+#define OPT_GROWTH 2000
+
+/* a function another definition may replace at run time (ELF -fPIC, default visibility) */
+static bool preemptible(cc *c, uint32_t s)
+{
+	const attrs *a;
+
+	if (DARWIN(c) || c->o->pic != 2 || c->syms[s].sc == SC_STATIC)
+		return false;
+	a = sym_attrs(c, s);
+	if (a && a->visibility) {
+		const char *v = c->strs[a->visibility - 1].s;
+
+		return strcmp(v, "hidden") && strcmp(v, "protected");
+	}
+	return true;
+}
+
+/* call: the N_CALL node (0: an implicit call, e.g. a cleanup) */
+static bool opt_inline(ecx *e, uint32_t s, uint32_t call)
 {
 	cc *c = e->c;
 	const sym *y = &c->syms[s];
+	const node *x, *body = N(y->body);
+	uint32_t lim, sz;
+
+	if (!call || e->inline_depth >= OPT_DEPTH || (T(c, y->ty)->flags & TF_NOPROTO) || (y->flags & (SF_NORETURN | SF_WEAK)) ||
+	    preemptible(c, s))
+		return false;
+	x = N(call);
+	if (x->c != body->aux)
+		return false;
+	walk_fn(e, s);
+	if (e->E->fnbad[s])
+		return false;
+	sz = e->E->fnsize[s];
+	if (sz > OPT_ONCE + OPT_ONCE / 2 || e->inl_grow + sz > OPT_GROWTH)
+		return false;
+	if (y->sc == SC_STATIC && e->E->ncall[s] == 1 && e->E->nref[s] == 1)
+		lim = OPT_ONCE;
+	else
+		lim = (y->flags & SF_INLINE) ? OPT_INLINE : OPT_SMALL;
+	for (uint32_t i = 0; i < x->c; i++) {
+		uint32_t a = c->lists[x->b + i];
+		qty pt = c->syms[c->lists[body->a + i]].ty, at = N(a)->ty;
+
+		/* the argument as the parameter's type (prototyped calls convert; anything else stays a call) */
+		if (is_flt(c, pt) != is_flt(c, at) || is_agg(c, pt) != is_agg(c, at) || tsize(c, pt) != tsize(c, at))
+			return false;
+		a = strip_casts(c, a);
+		if (N(a)->op == N_NUM || N(a)->op == N_STR || (N(a)->op == N_ADDR && N(N(a)->a)->op == N_VAR))
+			lim += OPT_CARG;
+	}
+	if (e->nloop)
+		lim += lim / 2;
+	if (sz > lim)
+		return false;
+	e->inl_grow += sz;
+	e->E->noptinl++;
+	return true;
+}
+
+VPRIV bool can_inline(ecx *e, uint32_t s, uint32_t call)
+{
+	cc *c = e->c;
+	const sym *y = &c->syms[s];
+	bool heur = false;
 
 	if (!(y->flags & SF_DEFINED) || !y->body)
 		return false;
@@ -406,16 +493,23 @@ VPRIV bool can_inline(ecx *e, uint32_t s)
 		if (!e->E->mf[s]) {
 			if (y->sc == SC_STATIC)
 				rlog(e, RL_DEP, s);
-			if (!(y->flags & SF_INLINE))
-				return false;
-			walk_fn(e, s);
-			/*
-			 * clang -O2 inlines small inline functions, and the kernel
-			 * leans on it: scs_is_enabled() { return false; } guards
-			 * references to objects that only exist when it is true.
-			 */
-			if (!(e->E->sflags[s] & SA_MUSTFOLD) && e->E->fnsize[s] > INLINE_NODES)
-				return false;
+			if (!(y->flags & SF_INLINE)) {
+				if (!e->E->opt3)
+					return false;
+				heur = true;
+			} else {
+				walk_fn(e, s);
+				/*
+				 * clang -O2 inlines small inline functions, and the kernel
+				 * leans on it: scs_is_enabled() { return false; } guards
+				 * references to objects that only exist when it is true.
+				 */
+				if (!(e->E->sflags[s] & SA_MUSTFOLD) && e->E->fnsize[s] > INLINE_NODES) {
+					if (!e->E->opt3)
+						return false;
+					heur = true;
+				}
+			}
 		}
 	}
 	if (T(c, y->ty)->flags & TF_VARIADIC)
@@ -425,7 +519,7 @@ VPRIV bool can_inline(ecx *e, uint32_t s)
 		return false;
 	if (e->inline_depth >= 48 || on_inline_stack(e, s))
 		return false;
-	return true;
+	return !heur || opt_inline(e, s, call);
 }
 
 /* temporaries an inlined call leaves free when it keeps params and its result in registers:
@@ -629,7 +723,7 @@ VPRIV val gen_call(ecx *e, uint32_t n)
 	}
 	if (!s && !ref)
 		fnv = gen(e, x->a);
-	inl = s && can_inline(e, s);
+	inl = s && can_inline(e, s, n);
 	if (inl)
 		walk_fn(e, s);
 	for (int i = 0; i < na; i++) {

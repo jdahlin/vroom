@@ -187,7 +187,7 @@ static void run_cleanup(ecx *e, uint32_t s)
 	a.t = prim(TY_LONG);
 	a.slot = 1;
 	fn = canon_sym(c, fn);
-	if (can_inline(e, fn)) {
+	if (can_inline(e, fn, 0)) {
 		val r = inline_call(e, fn, &a, 1);
 
 		val_free(e, &r);
