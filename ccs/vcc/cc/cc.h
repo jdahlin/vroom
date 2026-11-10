@@ -136,6 +136,7 @@ enum {
 	SF_DEPRECATED = 1u << 19,	/* deprecated: attrs record's depr/deprmsg */
 	SF_WUR = 1u << 20,	/* warn_unused_result / nodiscard (attrs record's wur) */
 	SF_NONNULL = 1u << 21,	/* a parameter declared nonnull */
+	SF_UVPEND = 1u << 22,	/* -Wuninitialized: declared without an initializer, not yet assigned in the text */
 };
 
 typedef struct sym {

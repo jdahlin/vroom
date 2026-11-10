@@ -808,8 +808,12 @@ VPRIV void declaration(cc *c, vec *out, bool file)
 
 				c->cv_what = CX_INIT, c->cv_loc = d.loc;
 				c->syms[s].defloc = d.loc;
+				uint16_t nr0 = c->syms[s].nref;
+
 				c->defer_rt = st, c->ndefer = 0;
 				v = initializer(c, &it, st);
+				if (c->syms[s].nref != nr0 && !st)
+					c->uv_any |= 2;	/* (a self-reference: -Wuninitialized) */
 				c->defer_rt = 0;
 				c->cv_what = sw, c->cv_loc = sl;
 			}
@@ -857,6 +861,12 @@ VPRIV void declaration(cc *c, vec *out, bool file)
 					uint32_t n = mk2(c, N_DECL, prim(TY_VOID), d.loc, s, 0);
 
 					vpush(c, out, n);
+					if (uv_tracked(c, y->ty)) {
+						c->uv_any |= 1;
+						y->flags |= SF_UVPEND;
+						if (c->nuv < 64)
+							c->uv[c->nuv++] = s;
+					}
 				}
 			}
 		}

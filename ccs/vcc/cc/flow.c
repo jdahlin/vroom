@@ -368,3 +368,639 @@ VPRIV int body_falls_off(cc *c, uint32_t body, uint32_t first_label)
 		return 0;
 	return f.live_ret || f.fake ? 1 : 2;
 }
+
+/*
+ * -Wuninitialized (clang's UninitializedValues, its definite case only):
+ * per tracked variable (a local scalar or vector) two bits, "may be
+ * uninitialized" and "may be initialized", over the statement tree as
+ * above: loops to a fixpoint, labels by a fixpoint over the gotos.  A read
+ * where the variable can only be uninitialized is reported, the first per
+ * variable; a "sometimes" one (-Wsometimes-uninitialized) is not.
+ */
+typedef struct ust { uint64_t u, i; bool live; } ust;
+
+typedef struct uwk {
+	cc *c;
+	flw fl;			/* for fl_const / fl_case_match */
+	uint32_t var[64], nv;
+	uint32_t hs[128];	/* sym + 1 -> index + 1 */
+	uint8_t hi[128];
+	ust *lab;
+	uint8_t *seen;		/* label reached in this pass: a goto to it is backward */
+	uint32_t first, nlab;
+	bool changed, report;
+	ust *brk, *cont, *swin;
+	bool sw_const, sw_hit;
+	i128 sw_val;
+	uint32_t self;		/* the variable whose initializer is walked */
+	bool selfhit;
+	uint32_t selfloc;
+	pp_span selfr;
+	uint64_t done;
+	uint32_t nord, nself;
+	uint32_t blk;		/* the CFG block: clang builds the CFG backwards and reports by block */
+	/* reports (not cleared) */
+	uint32_t uloc[64], order[64], ublk[64];
+	pp_span ur[64];
+	uint32_t sself[16], sloc[16];	/* self-initializations */
+	pp_span sr[16];
+} uwk;
+
+/* the condition can be a constant (fl_const's cases): most are not, and cc_eval is not free */
+static bool uv_maycon(cc *c, uint32_t n)
+{
+	const node *x;
+
+	if (!n)
+		return true;
+	x = N(n);
+	switch (x->op) {
+	case N_NUM: case N_FNUM: case N_STR: case N_LABELADDR:
+		return true;
+	case N_VAR:
+		return (QQ(c->syms[x->a].ty) & Q_CONST) || KIND(c, x->ty) == TY_ARRAY || KIND(c, x->ty) == TY_FUNC;
+	case N_ADDR:
+		return true;	/* (&global, &x->f) */
+	case N_CAST: case N_UNARY:
+		return uv_maycon(c, x->a);
+	case N_BINARY: case N_COMMA:
+		return uv_maycon(c, x->a) && uv_maycon(c, x->b);
+	case N_LOGAND: case N_LOGOR:
+		return uv_maycon(c, x->a) || uv_maycon(c, x->b);
+	case N_COND:
+		return uv_maycon(c, x->a) || (uv_maycon(c, x->b) && uv_maycon(c, x->c));
+	case N_BUILTIN:
+		return true;
+	default:
+		return false;
+	}
+}
+
+static int uv_const(uwk *w, uint32_t n)
+{
+	return uv_maycon(w->c, n) ? fl_const(&w->fl, n) : -1;
+}
+
+static inline void uj(ust *a, const ust *b)
+{
+	if (!b->live)
+		return;
+	if (!a->live) {
+		*a = *b;
+		return;
+	}
+	a->u |= b->u, a->i |= b->i;
+}
+
+static int uv_idx(uwk *w, uint32_t s)
+{
+	uint32_t h = (s * 2654435761u) >> 25;
+
+	for (;; h = (h + 1) & 127) {
+		if (!w->hs[h])
+			return -1;
+		if (w->hs[h] == s + 1)
+			return w->hi[h] - 1;
+	}
+}
+
+static int uv_add(uwk *w, uint32_t s)
+{
+	uint32_t h = (s * 2654435761u) >> 25;
+	int k = uv_idx(w, s);
+
+	if (k >= 0 || w->nv >= 64)
+		return k;
+	while (w->hs[h])
+		h = (h + 1) & 127;
+	w->hs[h] = s + 1, w->hi[h] = (uint8_t)(w->nv + 1);
+	w->var[w->nv] = s;
+	return (int)w->nv++;
+}
+
+static void uv_read(uwk *w, uint32_t n, ust *st)
+{
+	cc *c = w->c;
+	int k;
+	uint64_t b;
+
+	if (!st->live)
+		return;
+	if (w->self && N(n)->a == w->self && !w->selfhit) {
+		w->selfhit = true, w->selfloc = N(n)->loc, w->selfr = rng(w->c, n);
+		return;
+	}
+	if ((k = uv_idx(w, N(n)->a)) < 0)
+		return;
+	b = 1ull << k;
+	if (w->report && (st->u & b) && !(st->i & b) && !(w->done & b)) {
+		w->done |= b;
+		w->uloc[k] = N(n)->loc, w->ur[k] = rng(w->c, n), w->ublk[k] = w->blk;
+		w->order[w->nord++] = (uint32_t)k;
+	}
+}
+
+static void uv_write(uwk *w, uint32_t n, ust *st)
+{
+	cc *c = w->c;
+	int k = uv_idx(w, N(n)->a);
+
+	if (k >= 0)
+		st->u &= ~(1ull << k), st->i |= 1ull << k;
+}
+
+static void uv_ex(uwk *w, uint32_t e, ust *st, bool ignore);
+
+/* an assigned operand: a variable is not read, anything else is */
+static void uv_lv(uwk *w, uint32_t e, ust *st)
+{
+	cc *c = w->c;
+
+	while (e && (N(e)->op == N_MEMBER || N(e)->op == N_UNARY))	/* (a member, __real/__imag) */
+		e = N(e)->a;
+	if (e && N(e)->op != N_VAR)
+		uv_ex(w, e, st, false);
+}
+
+static void uv_stmt(uwk *w, uint32_t n, ust *st);
+
+static void uv_ex(uwk *w, uint32_t e, ust *st, bool ignore)
+{
+	cc *c = w->c;
+	const node *x;
+
+	if (!e)
+		return;
+	x = N(e);
+	switch (x->op) {
+	case N_VAR:
+		if (!ignore)
+			uv_read(w, e, st);
+		return;
+	case N_ASSIGN:
+		if (N(x->a)->op == N_VAR) {
+			if (x->aux)
+				uv_read(w, x->a, st);
+			uv_ex(w, x->b, st, false);
+			uv_write(w, x->a, st);
+		} else {
+			uint32_t v = x->a;
+
+			/* __real/__imag of a _Complex variable: initializes it (clang) */
+			while (N(v)->op == N_MEMBER || N(v)->op == N_UNARY)
+				v = N(v)->a;
+			if (x->aux)
+				uv_ex(w, x->a, st, false);
+			uv_ex(w, x->b, st, false);
+			if (!x->aux)
+				uv_lv(w, x->a, st);
+			if (N(v)->op == N_VAR)
+				uv_write(w, v, st);
+		}
+		return;
+	case N_PREINC: case N_PREDEC: case N_POSTINC: case N_POSTDEC:
+		uv_ex(w, x->a, st, false);
+		if (N(x->a)->op == N_VAR)
+			uv_write(w, x->a, st);
+		return;
+	case N_ADDR: {
+		uint32_t v = x->a;
+
+		while (N(v)->op == N_MEMBER || N(v)->op == N_UNARY)
+			v = N(v)->a;
+		if (N(v)->op == N_VAR)
+			uv_write(w, v, st);	/* (escapes: initialized from here on) */
+		else
+			uv_lv(w, x->a, st);
+		return;
+	}
+	case N_CAST:
+		uv_ex(w, x->a, st, x->aux == CK_VOID);
+		return;
+	case N_CALL:
+		uv_ex(w, x->a, st, false);
+		for (uint32_t i = 0; i < x->c; i++) {
+			uint32_t a = c->lists[x->b + i];
+
+			/* &v for a pointer-to-const parameter: neither a use nor an initialization */
+			if (N(a)->op == N_CAST && N(N(a)->a)->op == N_ADDR && N(N(N(a)->a)->a)->op == N_VAR &&
+			    KIND(c, N(a)->ty) == TY_PTR && (QQ(T(c, N(a)->ty)->base) & Q_CONST))
+				continue;
+			uv_ex(w, a, st, false);
+		}
+		if (fl_noreturn(&w->fl, e))
+			st->live = false;
+		return;
+	case N_BUILTIN:
+		for (uint32_t i = 0; i < x->c; i++) {
+			uint32_t a = c->lists[x->b + i];
+
+			if (i == 0 && (x->aux == BI_VA_START || x->aux == BI_VA_COPY)) {
+				while (N(a)->op == N_CAST || N(a)->op == N_ADDR)
+					a = N(a)->a;
+				if (N(a)->op == N_VAR) {
+					uv_write(w, a, st);	/* (va_start/va_copy initialize their va_list) */
+					continue;
+				}
+			}
+			uv_ex(w, a, st, false);
+		}
+		if (fl_noreturn(&w->fl, e))
+			st->live = false;
+		return;
+	case N_COND: {
+		int k = uv_const(w, x->a);
+		ust t, f;
+
+		uv_ex(w, x->a, st, false);
+		t = *st, f = *st;
+		t.live &= k != 0, f.live &= k != 1;
+		w->blk++;
+		if (x->b)
+			uv_ex(w, x->b, &t, ignore);
+		w->blk++;
+		uv_ex(w, x->c, &f, ignore);
+		w->blk++;
+		*st = (ust){ 0, 0, false };
+		uj(st, &t), uj(st, &f);
+		return;
+	}
+	case N_LOGAND: case N_LOGOR: {
+		int k = uv_const(w, x->a);
+		bool and = x->op == N_LOGAND;
+		ust r, s;
+
+		uv_ex(w, x->a, st, false);
+		r = *st, s = *st;
+		r.live &= and ? k != 0 : k != 1;	/* b evaluated */
+		s.live &= and ? k != 1 : k != 0;	/* short circuit */
+		w->blk++;
+		uv_ex(w, x->b, &r, false);
+		w->blk++;
+		*st = s;
+		uj(st, &r);
+		return;
+	}
+	case N_COMMA:
+		uv_ex(w, x->a, st, true);
+		uv_ex(w, x->b, st, ignore);
+		return;
+	case N_BINARY: case N_CPLX:
+		uv_ex(w, x->a, st, false);
+		uv_ex(w, x->b, st, false);
+		return;
+	case N_INDEX:
+		uv_ex(w, x->a, st, false);
+		uv_ex(w, x->b, st, false);
+		return;
+	case N_UNARY: case N_DEREF: case N_VAARG:
+		uv_ex(w, x->a, st, false);
+		return;
+	case N_MEMBER:
+		uv_ex(w, x->a, st, false);	/* (a struct is not tracked; a _Complex part is a use) */
+		return;
+	case N_STMTEXPR:
+		uv_stmt(w, x->a, st);
+		return;
+	case N_COMPLIT:
+		uv_ex(w, x->a, st, false);
+		return;
+	case N_INIT:
+		if (x->aux == 1)
+			for (uint32_t i = 0; i < x->c; i++)
+				uv_ex(w, c->lists[x->b + 3 * i + 2], st, false);
+		else
+			for (uint32_t i = 0; i < x->c; i++)
+				uv_ex(w, c->lists[x->b + i], st, false);
+		return;
+	default:
+		return;
+	}
+}
+
+static void uv_goto(uwk *w, uint32_t l, const ust *st)
+{
+	ust *d;
+	ust o;
+
+	if (!st->live || l < w->first || l - w->first >= w->nlab)
+		return;
+	d = &w->lab[l - w->first], o = *d;
+	uj(d, st);
+	if (w->seen[l - w->first] && (d->live != o.live || d->u != o.u || d->i != o.i))
+		w->changed = true;	/* (a forward goto is joined when the label is reached) */
+}
+
+/* a loop: body (and cond, step) to a fixpoint without reports, then once more */
+static void uv_loop(uwk *w, const node *x, ust *st)
+{
+	cc *c = w->c;
+	ust in = *st, head = in, out = { 0, 0, false };
+	bool rep = w->report;
+	ust *sb = w->brk, *sc = w->cont;
+	uint32_t cond = x->op == N_FOR ? x->b : x->a;
+	uint32_t body = x->op == N_FOR ? c->lists[x->c + 1] : x->b;
+	uint32_t step = x->op == N_FOR ? c->lists[x->c] : 0;
+	int k = cond || x->op != N_FOR ? uv_const(w, cond) : 1;
+
+	uint32_t nord0 = w->nord, nself0 = w->nself;
+	uint64_t done0 = w->done;
+
+	/* the first pass reports; kept if it is already the fixpoint */
+	for (int it = 0;; it++) {
+		ust s = head, brk = { 0, 0, false }, cont = { 0, 0, false }, back, nh;
+		uint32_t b0 = w->blk;
+		bool last = (w->report && it) || it >= 8;
+
+		out = (ust){ 0, 0, false };
+		w->brk = &brk, w->cont = &cont;
+		if (x->op == N_DO) {
+			uv_stmt(w, body, &s);
+			uj(&s, &cont);
+			uv_ex(w, cond, &s, false);
+			back = s, back.live &= k != 0;
+			out = s, out.live &= k != 1;
+		} else {
+			if (cond)
+				uv_ex(w, cond, &s, false);
+			out = s, out.live &= k != 1;
+			s.live &= k != 0;
+			uv_stmt(w, body, &s);
+			uj(&s, &cont);
+			if (step && N(step)->op == N_STMTEXPR)
+				uv_stmt(w, N(step)->a, &s);
+			else if (step)
+				uv_ex(w, step, &s, true);
+			back = s;
+		}
+		uj(&out, &brk);
+		w->brk = sb, w->cont = sc;
+		if (last)
+			break;
+		w->blk = b0;
+		nh = in;
+		uj(&nh, &back);
+		if (nh.live == head.live && nh.u == head.u && nh.i == head.i) {
+			if (!rep || w->report)
+				break;
+			w->report = true;	/* the reporting pass at the fixpoint */
+			continue;
+		}
+		if (w->report)
+			w->nord = nord0, w->nself = nself0, w->done = done0, w->report = false;
+		head = nh;
+	}
+	w->report = rep;
+	*st = out;
+}
+
+static void uv_stmt(uwk *w, uint32_t n, ust *st)
+{
+	cc *c = w->c;
+	const node *x;
+
+	if (!n)
+		return;
+	x = N(n);
+	if (x->op < N_BLOCK) {
+		uv_ex(w, n, st, true);
+		return;
+	}
+	switch (x->op) {
+	case N_BLOCK:
+		for (uint32_t i = 0; i < x->c; i++)
+			uv_stmt(w, c->lists[x->b + i], st);
+		return;
+	case N_EXPR:
+		uv_ex(w, x->a, st, false);	/* ("x;" is a use) */
+		if (fl_noreturn(&w->fl, x->a))
+			st->live = false;
+		return;
+	case N_DECL: {
+		int k = uv_idx(w, x->a);
+
+		if (!x->b) {
+			if (k >= 0 && st->live)
+				st->u |= 1ull << k, st->i &= ~(1ull << k);
+			return;
+		}
+		if (k >= 0)
+			st->u &= ~(1ull << k), st->i |= 1ull << k;
+		{
+			uint32_t ss = w->self;
+			bool sh = w->selfhit;
+
+			w->self = uv_tracked(c, c->syms[x->a].ty) ? x->a : 0, w->selfhit = false;
+			uv_ex(w, x->b, st, false);
+			if (w->selfhit && w->report && st->live && w->nself < 16) {
+				w->sself[w->nself] = x->a, w->sloc[w->nself] = w->selfloc;
+				w->sr[w->nself++] = w->selfr;
+			}
+			w->self = ss, w->selfhit = sh;
+		}
+		return;
+	}
+	case N_RETURN:
+		uv_ex(w, x->a, st, false);
+		st->live = false;
+		return;
+	case N_IF: {
+		int k = uv_const(w, x->a);
+		ust t, e;
+
+		uv_ex(w, x->a, st, false);
+		t = *st, e = *st;
+		t.live &= k != 0, e.live &= k != 1;
+		w->blk++;
+		uv_stmt(w, x->b, &t);
+		w->blk++;
+		uv_stmt(w, x->c, &e);
+		w->blk++;
+		*st = t;
+		uj(st, &e);
+		return;
+	}
+	case N_WHILE: case N_DO: case N_FOR:
+		if (x->op == N_FOR)
+			uv_stmt(w, x->a, st);
+		w->blk++;
+		uv_loop(w, x, st);
+		w->blk++;
+		return;
+	case N_SWITCH: {
+		ust *sb = w->brk, *si = w->swin, brk = { 0, 0, false }, in;
+		bool sk = w->sw_const, sh = w->sw_hit, def;
+		i128 sv = w->sw_val;
+		cval cv;
+
+		uv_ex(w, x->a, st, false);
+		in = *st;
+		w->brk = &brk, w->swin = &in;
+		w->sw_const = cc_eval(c, x->a, &cv) && cv.kind == CV_INT;
+		w->sw_val = w->sw_const ? cv.i : 0;
+		w->sw_hit = w->sw_const && fl_case_match(&w->fl, x->b, w->sw_val);
+		def = fl_has_default(&w->fl, x->b);
+		def = w->sw_const ? (w->sw_hit || def) : def;
+		st->live = false;
+		uv_stmt(w, x->b, st);
+		w->blk++;
+		uj(st, &brk);
+		if (!def)
+			uj(st, &in);
+		w->brk = sb, w->swin = si, w->sw_const = sk, w->sw_hit = sh, w->sw_val = sv;
+		return;
+	}
+	case N_CASE: case N_DEFAULT:
+		if (w->swin) {
+			bool here = true;
+
+			if (w->sw_const && x->op == N_CASE)
+				here = w->sw_val >= c->ipool[x->a] && w->sw_val <= c->ipool[x->b];
+			else if (w->sw_const)
+				here = !w->sw_hit;
+			if (here)
+				uj(st, w->swin);
+		}
+		w->blk++;
+		uv_stmt(w, x->c, st);
+		return;
+	case N_LABEL:
+		if (x->a >= w->first && x->a - w->first < w->nlab) {
+			uj(st, &w->lab[x->a - w->first]);
+			w->seen[x->a - w->first] = 1;
+		}
+		w->blk++;
+		uv_stmt(w, x->c, st);
+		return;
+	case N_GOTO:
+		uv_goto(w, x->a, st);
+		st->live = false;
+		return;
+	case N_GOTO_IND:
+		uv_ex(w, x->a, st, false);
+		for (uint32_t l = w->first; l < w->first + w->nlab; l++)
+			if (c->labels[l].addr_taken)
+				uv_goto(w, l, st);
+		st->live = false;
+		return;
+	case N_BREAK:
+		if (w->brk)
+			uj(w->brk, st);
+		st->live = false;
+		return;
+	case N_CONTINUE:
+		if (w->cont)
+			uj(w->cont, st);
+		st->live = false;
+		return;
+	case N_ASM: {
+		const casm *a = &c->asms[x->a];
+
+		for (uint32_t i = a->nout; i < a->nout + a->nin; i++)
+			uv_ex(w, a->ops[i].expr, st, false);
+		for (uint32_t i = 0; i < a->nout; i++) {
+			uint32_t e = a->ops[i].expr;
+			const char *cs = a->ops[i].constraint ? c->strs[a->ops[i].constraint - 1].s : "";
+
+			if (N(e)->op == N_VAR) {
+				if (*cs == '+')
+					uv_read(w, e, st);
+				uv_write(w, e, st);
+			} else
+				uv_lv(w, e, st);
+		}
+		for (uint32_t i = 0; i < a->nlabel; i++)
+			uv_goto(w, a->labels[i], st);
+		return;
+	}
+	default:
+		return;
+	}
+}
+
+static const char *uv_zero(cc *c, qty t)
+{
+	int k = KIND(c, canon(c, t));
+
+	if (k == TY_ENUM)
+		return NULL;
+	if (k >= TY_FLOAT16 && k <= TY_LDOUBLE)
+		return " = 0.0";
+	if (k == TY_BOOL && pp_defined(c->p, vintern_cstr("false")))
+		return " = false";
+	if (k == TY_PTR && pp_defined(c->p, vintern_cstr("NULL")))
+		return " = NULL";
+	if (k == TY_CHAR || k == TY_SCHAR || k == TY_UCHAR)
+		return " = '\\0'";
+	return " = 0";
+}
+
+VPRIV void uninit_check(cc *c, uint32_t body, uint32_t first_label)
+{
+	uwk ww, *w = &ww;
+	ust st = { 0, 0, true }, small[16];
+	uint8_t seen[64];
+	uint32_t nl = c->nlabel - first_label;
+
+	if (!pp_wstate(c->p, "uninitialized", false, w_all))
+		return;
+	/* (only the head is cleared: the report arrays are written before they are read) */
+	memset(w, 0, offsetof(uwk, uloc));
+	w->c = c, w->fl.c = c;
+	w->lab = nl <= 16 ? small : calloc(nl, sizeof(ust) + 1), w->first = first_label, w->nlab = nl;
+	if (!w->lab)
+		return;
+	w->seen = nl <= 16 ? seen : (uint8_t *)(w->lab + nl);
+	memset(small, 0, sizeof small);
+	for (uint32_t i = 0; i < c->nuv; i++)
+		uv_add(w, c->uv[i]);
+	if (!w->nv && !(c->uv_any & 2)) {
+		if (w->lab != small)
+			free(w->lab);
+		return;
+	}
+	for (int it = 0; it < 16; it++) {
+		w->changed = false;
+		w->report = true, w->nord = w->nself = 0, w->done = 0, w->blk = 0;
+		memset(w->seen, 0, nl);
+		st = (ust){ 0, 0, true };
+		uv_stmt(w, body, &st);
+		if (!w->changed)
+			break;
+	}
+	for (uint32_t j = 0; j < w->nself; j++) {
+		const sym *y = &c->syms[w->sself[j]];
+		pp_span r[2] = { { y->loc, pp_tok_end(c->p, y->loc) }, w->sr[j] };
+
+		cc_warnx(c, "uninitialized", false, w_all, w->sloc[j], r, 2, NULL, 0,
+			 "variable '%.*s' is uninitialized when used within its own initialization", IDF(y->name));
+	}
+	/* later blocks first, in order within a block */
+	for (uint32_t j = 1; j < w->nord; j++)
+		for (uint32_t i = j; i > 0 && w->ublk[w->order[i]] > w->ublk[w->order[i - 1]]; i--) {
+			uint32_t t = w->order[i];
+
+			w->order[i] = w->order[i - 1], w->order[i - 1] = t;
+		}
+	for (uint32_t j = 0; j < w->nord; j++) {
+		uint32_t k = w->order[j];
+		const sym *y = &c->syms[w->var[k]];
+		const char *z = uv_zero(c, y->ty);
+
+		if (!cc_warnx(c, "uninitialized", false, w_all, w->uloc[k], &w->ur[k], 1, NULL, 0,
+			      "variable '%.*s' is uninitialized when used here", IDF(y->name)))
+			continue;
+		if (z) {
+			/* the declarator's end: the name, or ')' of a function pointer (not an asm label or attributes) */
+			bool fp = KIND(c, canon(c, y->ty)) == TY_PTR && KIND(c, canon(c, T(c, canon(c, y->ty))->base)) == TY_FUNC;
+			uint32_t e = pp_tok_end(c->p, fp && y->ple && !y->asmname && !y->attrs ? y->ple : y->loc);
+			pp_fixit fx = { e, e, z };
+			pp_dinfo d = { "note", e, NULL, 0, &fx, 1, NULL, 0 };
+
+			pp_diagx(c->p, &d, "initialize the variable '%.*s' to silence this warning", IDF(y->name));
+		} else
+			note(c, y->plb ? y->plb : y->loc, "variable '%.*s' is declared here", IDF(y->name));
+	}
+	if (w->lab != small)
+		free(w->lab);
+}

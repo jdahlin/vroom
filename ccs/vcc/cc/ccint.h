@@ -116,6 +116,9 @@ struct cc {
 	struct { uint32_t loc; pp_span r; uint8_t rem; } defer[8];
 	uint32_t unk_loc;	/* the last unknown token given -Winvalid-pp-token */
 	uint8_t se_direct;	/* the next statement is one of a statement expression's body */
+	uint8_t uv_any;		/* -Wuninitialized: 1 the body declares a tracked variable without an initializer, 2 a self-reference */
+	uint8_t nuv;
+	uint32_t uv[64];	/* ... those variables */
 	uint16_t nrtd;		/* warnings of a function body given at its end (clang's DiagRuntimeBehavior) */
 	struct { const char *flag; const char *const *groups; const char *ms; uint32_t mlen, loc, nr; pp_span r[2];
 		 char msg[112]; } rtd[64];
