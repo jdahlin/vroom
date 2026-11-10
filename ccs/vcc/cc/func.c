@@ -132,11 +132,17 @@ VPRIV void function_def(cc *c, uint32_t s, const declr *d)
 		}
 		sym_bind(c, p);
 	}
+	if (!d->kr)	/* tags from the parameter list (clang: visible in the body; not K&R's) */
+		for (uint32_t i = 0; i < c->nptag; i++)
+			sym_bind(c, c->ptag[i]);
 	c->in_loop = c->in_switch = 0;
 	c->nrtd = 0;
-	c->uv_any = 0, c->nuv = 0, c->cnd = 0, c->uv_asg = 0;
+	c->in_proto = 0, c->uv_any = 0, c->nuv = 0, c->cnd = 0, c->uv_asg = 0;
 	body = compound_stmt(c, NULL);
 	scope_close(c);
+	if (d->kr && d->npsyms)	/* (clang: at the end of the body) */
+		cc_warnx(c, "deprecated-non-prototype", true, NULL, d->loc, NULL, 0, NULL, 0,
+			 "a function definition without a prototype is deprecated in all versions of C and is not supported in C23");
 	rt_flush(c);	/* (clang: only if reachable; vcc: not under a constant-false condition) */
 	{
 		uint32_t rb = c->prevloc;	/* the closing brace */

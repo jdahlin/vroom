@@ -76,11 +76,17 @@ static uint32_t tag_lookup_or_new(cc *c, int kind, uint32_t name, uint32_t loc, 
 	{
 		uint32_t ti = tag_new(c, kind, name, loc);
 
+		if (name && c->in_proto)
+			cc_warnx(c, "visibility", true, NULL, loc, NULL, 0, NULL, 0,
+				 "declaration of '%s %.*s' will not be visible outside of this function",
+				 kind == TY_STRUCT ? "struct" : kind == TY_UNION ? "union" : "enum", IDF(name));
 		if (name) {
 			uint32_t ns = sym_new(c, S_TAG, name, QT(c->tags[ti].ty, 0), loc);
 
 			c->syms[ns].val = ti;
 			sym_bind(c, ns);
+			if (c->in_proto == 1 && c->nptag < 8)
+				c->ptag[c->nptag++] = ns;
 		}
 		return ti;
 	}

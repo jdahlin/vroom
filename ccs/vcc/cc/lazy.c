@@ -35,6 +35,8 @@ VPRIV bool lazy_ok(cc *c, uint32_t s, const declr *d)
 
 	if (unlikely(off < 0))	/* (threads race to set it: same value) */
 		__atomic_store_n(&lz_off, off = getenv("VCC_EAGER") != NULL, __ATOMIC_RELAXED);
+	if (c->nptag)	/* (its parameter list declared tags the body sees: function_def binds them) */
+		return false;
 	if (off || y->kind != S_FUNC || y->sc != SC_STATIC || (y->flags & (SF_DEFINED | SF_ATTR_USED | SF_OVERLOAD)))
 		return false;
 	if (a && (a->used || a->constructor || a->destructor || a->alias))

@@ -226,7 +226,14 @@ static __attribute__((noinline)) uint32_t member_slow(cc *c, uint32_t base, uint
 	}
 	ti = T(c, bt)->aux;
 	if (!(c->tags[ti].flags & RF_COMPLETE)) {
-		cc_error(c, loc, "incomplete definition of type");
+		if (N(base)->op == N_VAR && (c->syms[N(base)->a].flags & SF_INVALID))
+			return mk_int(c, 0, prim(TY_INT), loc);	/* (already reported) */
+		{
+			pp_span r = rng(c, base);
+
+			report(c, "error", loc, &r, 1, NULL, 0, "incomplete definition of type '%s'", tyname(c, bt));
+		}
+		note(c, c->tags[ti].loc, "forward declaration of '%s'", tyname(c, QT(QI(bt), 0)));
 		return mk_int(c, 0, prim(TY_INT), loc);
 	}
 	d = find_member(c, ti, name, path, 0);

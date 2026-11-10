@@ -648,9 +648,15 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
 - [ ] **Blocks (`^{}`)** for Darwin headers.
   *Validate:* T3 compile programs including `<dispatch/dispatch.h>` and
   calling a block.
-- [ ] **Scope details**: K&R parameter-list tags (`cc.c:7341`),
-  declarations after labels (`cc.c:7886`).
-  *Validate:* T1 small cases; T4 for the error cases.
+- [x] **Scope details**: (done: a declaration after a label, `case` or
+  `default` (C23; -Wc23-extensions before), also after `__attribute__`s;
+  a prototype definition's parameter-list tags are visible in its body, K&R's
+  not (clang); -Wvisibility, -Wdeprecated-non-prototype (after the body);
+  "variable has incomplete type 'T'" with the forward-declaration note, also
+  with an initializer, the variable then invalid (no follow-on member error);
+  "array has incomplete element type"; "previous definition is here" for a
+  defined function: tests/vcc `label_decl.c`, diag `label_decl_kr_vis.c`,
+  `incomplete_var.c`, `conflict_prev_def.c`.)
 - [ ] **Fixed limits** (struct members now 1M, pointer levels 1024, nested
   declarators stack-guarded): 4096 struct members (`cc.c:6255,6313`), 64
   declarator levels (`cc.c:6047-6113`), `DOPS_MAX` 4096 (`cc.c:5551`), 16

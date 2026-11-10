@@ -383,7 +383,10 @@ static uint32_t declare(cc *c, const dspec *ds, declr *d, qty t, bool file)
 			note(c, y->loc, "previous definition is here");
 		} else if (!compatible(c, y->ty, t)) {
 			cc_error(c, d->loc, "conflicting types for '%.*s'", IDF(d->name));
-			note(c, y->loc, "previous declaration is here");
+			if (kind == S_FUNC && (y->flags & SF_DEFINED) && y->defloc)	/* (clang: a defined function's definition) */
+				note(c, y->defloc, "previous definition is here");
+			else
+				note(c, y->loc, "previous declaration is here");
 		} else {
 			y->ty = QT(QI(composite(c, y->ty, t)), QQ(y->ty) | QQ(t));
 			if (ds->sc == SC_STATIC && kind == S_FUNC)
@@ -642,6 +645,7 @@ static void kr_params(cc *c, const declr *fd)
 
 	/* tags declared here belong to the function, not the file (approximation: not seen by the body) */
 	scope_open(c);
+	c->in_proto++;
 	while (!is(c, T_LBRACE)) {
 		dspec ds;
 
@@ -683,6 +687,7 @@ static void kr_params(cc *c, const declr *fd)
 		}
 		expect_semi(c, "at end of declaration");
 	}
+	c->in_proto--;
 	scope_close(c);
 	if (!c->o->implicit_int)
 		for (uint32_t i = 0; i < fd->npsyms && i < sizeof(seen); i++)
@@ -806,6 +811,18 @@ VPRIV void declaration(cc *c, vec *out, bool file)
 					report(c, "error", d.loc, &r, 1, NULL, 0, "variable-sized object may not be initialized");
 					v = 0;
 				}
+			} else if (!file && ds.sc != SC_EXTERN && ds.sc != SC_TYPEDEF && !is_func(c, t) && !is_array(c, t) &&
+				   !complete(c, t)) {
+				/* clang: the variable is invalid, its initializer not checked */
+				cc_error(c, d.loc, "variable has incomplete type '%s'", tyname(c, t));
+				c->syms[s].flags |= SF_INVALID;
+				if (is_record(c, t) || KIND(c, t) == TY_ENUM)
+					note(c, c->tags[T(c, t)->aux].loc, "forward declaration of '%s'", tyname(c, t));
+				if (is(c, T_LBRACE))
+					skip_vla_init(c);
+				else
+					(void)assign_expr(c);
+				v = 0;
 			} else {
 				uint8_t sw = c->cv_what;
 				uint32_t sl = c->cv_loc;
@@ -856,11 +873,23 @@ VPRIV void declaration(cc *c, vec *out, bool file)
 		} else {
 			sym *y = &c->syms[s];
 
-			if (y->kind == S_VAR && ds.sc != SC_EXTERN && ds.sc != SC_TYPEDEF) {
+			if (y->kind == S_VAR && is_array(c, y->ty) && !complete(c, T(c, y->ty)->base)) {
+				qty e = T(c, y->ty)->base;	/* (clang: on any array declarator; variables here) */
+
+				cc_error(c, pp_tok_end(c->p, d.loc), "array has incomplete element type '%s'", tyname(c, e));
+				if (is_record(c, e) || KIND(c, e) == TY_ENUM)
+					note(c, c->tags[T(c, e)->aux].loc, "forward declaration of '%s'", tyname(c, e));
+			} else if (y->kind == S_VAR && ds.sc != SC_EXTERN && ds.sc != SC_TYPEDEF) {
 				if (file)
 					y->flags |= SF_TENTATIVE;
-				else if (!complete(c, y->ty) && ds.sc != SC_STATIC)
-					cc_error(c, d.loc, "variable has incomplete type");
+				else if (!complete(c, y->ty) && ds.sc != SC_STATIC) {
+					if (is_array(c, y->ty))
+						cc_error(c, d.loc, "definition of variable with array type needs an explicit size or an initializer");
+					else
+						cc_error(c, d.loc, "variable has incomplete type '%s'", tyname(c, y->ty)), y->flags |= SF_INVALID;
+					if (is_record(c, y->ty) || KIND(c, y->ty) == TY_ENUM)
+						note(c, c->tags[T(c, y->ty)->aux].loc, "forward declaration of '%s'", tyname(c, y->ty));
+				}
 				if (out && (y->sc == SC_AUTO || y->sc == SC_REGISTER)) {
 					uint32_t n = mk2(c, N_DECL, prim(TY_VOID), d.loc, s, 0);
 

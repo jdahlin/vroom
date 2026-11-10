@@ -14,6 +14,8 @@ static void param_list(cc *c, dop *op)
 	vinit(&psyms);
 	scope_open(c);
 	op->kr = false;
+	if (!c->in_proto)
+		c->nptag = 0;
 	if (is(c, T_RPAREN)) {
 		fl |= TF_NOPROTO;
 	} else if (iskw(c, KW_void) && peek(c, 1)->kind == T_RPAREN) {
@@ -37,6 +39,9 @@ static void param_list(cc *c, dop *op)
 				break;
 		}
 	} else {
+		if (!c->in_proto)
+			c->nptag = 0;
+		c->in_proto++;
 		for (;;) {
 			dspec ds;
 			declr d;
@@ -110,6 +115,7 @@ static void param_list(cc *c, dop *op)
 			if (!accept(c, T_COMMA))
 				break;
 		}
+		c->in_proto--;
 	}
 	scope_close(c);
 	expect(c, T_RPAREN, "')'");

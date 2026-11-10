@@ -119,6 +119,8 @@ struct cc {
 	uint8_t uv_any;		/* -Wuninitialized: 1 the body declares a tracked variable without an initializer, 2 a self-reference */
 	uint8_t nuv;
 	uint16_t cnd;
+	uint32_t in_proto;
+	uint32_t ptag[8], nptag;	/* tags declared in the outermost parameter list: a definition's body sees them */	/* parameter declarations being parsed: a new tag there is -Wvisibility */
 	uint32_t uv_asg;	/* the variable an '=' being parsed assigns */		/* if/loop/switch bodies being parsed */
 	uint32_t uv[64];
 	uint16_t uvc[64];	/* ... cnd at the declaration */	/* ... those variables */

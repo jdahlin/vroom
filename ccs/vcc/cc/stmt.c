@@ -680,6 +680,38 @@ static uint32_t sub_statement(cc *c)
 	return n;
 }
 
+/* what follows a label, case or default: nothing before '}', a declaration (C23) or a statement */
+static uint32_t label_sub(cc *c, uint32_t loc)
+{
+	if (is(c, T_RBRACE))	/* label at end of compound statement (C23) */
+		return mkstmt(c, N_EXPR, loc, 0, 0, 0);
+	uint32_t dl = tok(c)->loc;
+	bool pend = false;
+
+	if (iskw(c, KW___attribute__) || iskw(c, KW___attribute)) {
+		attrs a = { 0 };
+
+		attribute_list(c, &a);
+		if (accept(c, T_SEMI))
+			return mkstmt(c, N_EXPR, loc, 0, 0, 0);	/* fallthrough; */
+		if (!is_decl_start(c, tok(c)))
+			return statement(c);
+		c->pend = a, c->has_pend = true, pend = true;	/* __attribute__((unused)) int x; */
+	}
+	if (pend || (is_decl_start(c, tok(c)) && !(is(c, T_IDENT) && peek(c, 1)->kind == T_COLON))) {
+		vec items;
+
+		if (kwmap != kwmap_c23)
+			cc_warnx(c, "c23-extensions", true, NULL, dl, NULL, 0, NULL, 0,
+				 "label followed by a declaration is a C23 extension");
+		vinit(&items);
+		declaration(c, &items, false);
+		/* the declaration stays in the enclosing scope: (approximation) */
+		return mkstmt(c, N_BLOCK, loc, 0, vfreeze(c, &items), items.n);
+	}
+	return statement(c);
+}
+
 VPRIV uint32_t statement(cc *c)
 {
 	ptok *t = tok(c);
@@ -711,19 +743,8 @@ VPRIV uint32_t statement(cc *c)
 			attribute_list(c, &la);
 			if (c->labels[l].defined)
 				cc_error(c, loc, "redefinition of label '%.*s'", IDF(c->labels[l].name));
-			if (is(c, T_RBRACE))	/* label at end of compound statement (C23) */
-				s = mkstmt(c, N_EXPR, loc, 0, 0, 0);
-			else if (is_decl_start(c, tok(c)) && !(is(c, T_IDENT) && peek(c, 1)->kind == T_COLON)) {
-				vec items;
-
-				vinit(&items);
-				declaration(c, &items, false);
-				s = mkstmt(c, N_BLOCK, loc, 0, vfreeze(c, &items), items.n);
-				/* the declaration stays in the enclosing scope: (approximation) */
-			} else {
-				c->se_direct = sed;	/* (a labeled last statement gives the value) */
-				s = statement(c);
-			}
+			c->se_direct = sed;	/* (a labeled last statement gives the value) */
+			s = label_sub(c, loc);
 			n = mkstmt(c, N_LABEL, loc, l, 0, s);
 			c->labels[l].defined = n;
 			return n;
@@ -921,10 +942,7 @@ VPRIV uint32_t statement(cc *c)
 			}
 			c->cases[c->ncase++] = (struct swcase){ lo, hi, vloc };
 		}
-		if (is(c, T_RBRACE))
-			s = mkstmt(c, N_EXPR, loc, 0, 0, 0);
-		else
-			s = statement(c);
+		s = label_sub(c, loc);
 		c->ipool[c->nipool] = lo;
 		c->ipool[c->nipool + 1] = hi;
 		n = mkstmt(c, N_CASE, loc, c->nipool, c->nipool + 1, s);
@@ -939,7 +957,7 @@ VPRIV uint32_t statement(cc *c)
 		if (!c->in_switch)
 			cc_error(c, loc, "'default' statement not in switch statement");
 		c->sw_default = true;
-		s = is(c, T_RBRACE) ? mkstmt(c, N_EXPR, loc, 0, 0, 0) : statement(c);
+		s = label_sub(c, loc);
 		return mkstmt(c, N_DEFAULT, loc, 0, 0, s);
 	}
 	case KW_break:
