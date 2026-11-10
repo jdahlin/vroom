@@ -266,6 +266,26 @@ VPRIV void gen_cond(ecx *e, uint32_t n, bool jump_if, uint32_t l)
 			gen_cond(e, x->a, jump_if, l);
 			return;
 		}
+		if (e->E->opt3 && (x->aux == CK_INT || x->aux == CK_NOP || x->aux == CK_P2I) &&
+		    (is_integer(c, x->ty) || is_ptr(c, x->ty)) && (is_integer(c, N(x->a)->ty) || is_ptr(c, N(x->a)->ty)) &&
+		    !is_wide(c, x->ty) && !is_wide(c, N(x->a)->ty) && tsize(c, x->ty) >= tsize(c, N(x->a)->ty)) {
+			/* a widening conversion keeps the truth */
+			gen_cond(e, x->a, jump_if, l);
+			return;
+		}
+		break;
+	case N_BUILTIN:
+		if (e->E->opt3 && (x->aux == BI_EXPECT || x->aux == BI_EXPECT_PROB) && x->c) {
+			const uint32_t *arg = &c->lists[x->b];
+			bool pure = true;
+
+			for (uint32_t i = 1; i < x->c; i++)
+				pure &= !side_effects(c, arg[i]);
+			if (pure) {
+				gen_cond(e, arg[0], jump_if, l);
+				return;
+			}
+		}
 		break;
 	case N_BINARY:
 		if (em_is_cmp(x->aux) && !is_wide(c, N(x->a)->ty) && !is_flt(c, N(x->a)->ty)) {
@@ -281,7 +301,7 @@ VPRIV void gen_cond(ecx *e, uint32_t n, bool jump_if, uint32_t l)
 				int cond = e->in[e->nin - 1].cond ^ 1;
 
 				e->nin--;
-				bcond(e, jump_if ? cond : cond ^ 1, l);
+				bcond_opt(e, jump_if ? cond : cond ^ 1, l);
 				val_free(e, &v);
 				return;
 			}

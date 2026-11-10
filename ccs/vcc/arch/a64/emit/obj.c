@@ -286,16 +286,18 @@ static unsigned enc(const ins *i, uint32_t *w, pfix *f, const uint32_t *loff, ui
 		w[0] = 0x10000000u | R5(i->rd);
 		*f = (pfix){ 0, 1, R_AARCH64_ADR_PREL_LO21, i->label, 0 };
 		return 1;
-	case I_B: case I_BC: case I_CBZ: case I_CBNZ: {
+	case I_B: case I_BC: case I_CBZ: case I_CBNZ: case I_TBZ: case I_TBNZ: {
 		int64_t d = loff ? ((int64_t)loff[i->label] - at) * 4 : 0;
+		uint32_t rt = R_AARCH64_CONDBR19;
 
 		switch (i->op) {
-		case I_B: w[0] = a64_b(d); break;
+		case I_B: w[0] = a64_b(d); rt = R_AARCH64_JUMP26; break;
 		case I_BC: w[0] = a64_bcond(i->cond, d); break;
+		case I_TBZ: case I_TBNZ: w[0] = a64_tbz(i->op == I_TBNZ, R5(i->rd), i->sh, d); rt = R_AARCH64_TSTBR14; break;
 		default: w[0] = a64_cbz(sf, i->op == I_CBNZ, R5(i->rd), d); break;
 		}
 		if (!loff)
-			*f = (pfix){ 0, 1, i->op == I_B ? R_AARCH64_JUMP26 : R_AARCH64_CONDBR19, i->label, 0 };
+			*f = (pfix){ 0, 1, rt, i->label, 0 };
 		return 1;
 	}
 	case I_BL:
@@ -422,9 +424,12 @@ static inline rlab *r_lab(rctx *R, uint32_t l)
 	return L;
 }
 
-/* label-relative ranges, in words: b.cond/cbz/cbnz imm19, adr 21 bits of bytes, b imm26 */
+/* label-relative ranges, in words: b.cond/cbz/cbnz imm19, adr 21 bits of bytes, b imm26; tbz/tbnz imm14 */
 #define BR19_MAX ((1 << 18) - 1)
 #define BR19_MIN (-(1 << 18))
+#define BR14_MAX ((1 << 13) - 1)
+#define BR14_MIN (-(1 << 13))
+static inline bool is_tbz(unsigned op) { return op == I_TBZ || op == I_TBNZ; }
 
 /* the branch record i at (frag, off, p) to placed label L */
 static bool r_branch(rctx *R, uint32_t fid, const ins *i, rlab *L, uint32_t frag, uint32_t off, uint8_t *p)
@@ -437,6 +442,8 @@ static bool r_branch(rctx *R, uint32_t fid, const ins *i, rlab *L, uint32_t frag
 
 		if (i->op != I_B && (d < BR19_MIN || d > BR19_MAX))	/* not relaxed with inline asm in the function */
 			return r_fail(R, "function with inline asm too large: conditional branch or adr beyond 1 MB") == 0;
+		if (is_tbz(i->op) && (d < BR14_MIN || d > BR14_MAX))	/* (tbz_range keeps them in reach) */
+			return r_fail(R, "internal: tbz/tbnz beyond 32 KiB") == 0;
 		R->loff[i->label] = L->off / 4;
 		enc(i, w, &f, R->loff, off / 4);
 		memcpy(p, w, 4);
@@ -603,6 +610,7 @@ static int r_code(rctx *R, const code_hdr *h)
 			d = (int64_t)loff[i->label] - a;
 			if (is_cbr(i->op) ? d < BR19_MIN || d > BR19_MAX :
 			    i->op == I_ADR ? d < BR19_MIN || d > BR19_MAX :
+			    is_tbz(i->op) ? d < BR14_MIN || d > BR14_MAX :
 			    i->op == I_B ? d < -(1 << 25) || d >= 1 << 25 : false)
 				return r_fail(R, i->op == I_ADR ? "function too large: adr to a label beyond 1 MB" :
 							   "function too large: branch out of range");
@@ -677,7 +685,7 @@ static int r_code(rctx *R, const code_hdr *h)
 				}
 				continue;
 			}
-			if (i->op == I_ADR || i->op == I_B || i->op == I_BC || i->op == I_CBZ || i->op == I_CBNZ) {
+			if (i->op == I_ADR || i->op == I_B || i->op == I_BC || i->op == I_CBZ || i->op == I_CBNZ || is_tbz(i->op)) {
 				rlab *L = r_lab(R, i->label);
 
 				if (!(L->flags & RL_NAMED)) {

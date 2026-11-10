@@ -152,6 +152,93 @@ VPRIV int emit_cmp2(ecx *e, int op, bool sg, val *a, val *b)
 	return cmp_cond(op, sg);
 }
 
+/* ---------------- -O3: what the last record says about a register ---------------- */
+
+/*
+ * The last record runs right before whatever is emitted next, so if it
+ * wrote r its result is what r holds: a load extends, a 32-bit operation
+ * clears the upper half, cset gives 0 or 1.  EXT_S | n: r is the sign
+ * extension of its low n bytes; EXT_Z | n: the zero extension (n 0: r is 0
+ * or 1).  0: nothing known (and always below -O3).
+ */
+enum { EXT_Z = 0x10, EXT_S = 0x20 };
+
+/* record i leaves r 0 or 1 (cset, x & 1) */
+static bool prev_bool(const ins *i, int r)
+{
+	if (i->rd != r)
+		return false;
+	return (i->op == I_CSINC && !i->sz && i->rn == ZR && i->rm == ZR) || (i->op == I_ANDI && i->imm == 1);
+}
+
+VPRIV int last_ext(ecx *e, int r)
+{
+	const ins *i;
+
+	if (!e->E->opt3 || !e->reach || !e->nin)
+		return 0;
+	i = &e->in[e->nin - 1];
+	switch (i->op) {
+	case I_LD: case I_LDLO:
+		if (i->rd != r || i->sz == 3)
+			return 0;
+		return i->cond == 1 ? EXT_S | 1 << i->sz : i->cond == 0 ? EXT_Z | 1 << i->sz : EXT_Z | 4;
+	case I_MOVI: {
+		uint64_t v = i->sz ? (uint64_t)i->imm : (uint32_t)i->imm;
+
+		if (i->rd != r)
+			return 0;
+		if (v <= 1)
+			return EXT_Z;
+		if (v <= 0xff)
+			return EXT_Z | 1;
+		if (v <= 0xffff)
+			return EXT_Z | 2;
+		if (v <= 0xffffffffu)
+			return EXT_Z | 4;
+		if ((int64_t)v >= INT8_MIN)
+			return EXT_S | 1;
+		if ((int64_t)v >= INT16_MIN)
+			return EXT_S | 2;
+		return (int64_t)v >= INT32_MIN ? EXT_S | 4 : 0;
+	}
+	case I_SBFM: case I_UBFM:
+		if (i->rd != r)
+			return 0;
+		if (i->sz && i->imm == 0 && (i->sh == 7 || i->sh == 15 || i->sh == 31))
+			return (i->op == I_SBFM ? EXT_S : EXT_Z) | (i->sh + 1) / 8;
+		return i->sz ? 0 : EXT_Z | 4;
+	case I_CSINC:
+		if (i->rd != r)
+			return 0;
+		if (!i->sz && i->rn == ZR && i->rm == ZR)
+			return EXT_Z;	/* cset */
+		return i->sz ? 0 : EXT_Z | 4;
+	case I_ANDI: case I_EORI:
+		if (i->rd != r)
+			return 0;
+		if (i->imm == 1 && (i->op == I_ANDI || (i->rn == r && e->nin >= 2 && prev_bool(&e->in[e->nin - 2], r))))
+			return EXT_Z;	/* x & 1, or !b of a 0/1 b */
+		return i->sz ? 0 : EXT_Z | 4;
+	default:
+		if (i->op >= I_ADD && i->op <= I_REV32 && !i->sz && i->rd == r)
+			return EXT_Z | 4;
+		return 0;
+	}
+}
+
+/* does extension state x (last_ext) make extending the low `from` bytes a no-op? */
+VPRIV bool ext_ok(int x, int from, bool sgn)
+{
+	int n = x & 15;
+
+	if (!x)
+		return false;
+	if (x & EXT_S)
+		return sgn && n <= from;
+	return sgn ? n < from : n <= from;
+}
+
 /* ---------------- truth tests ---------------- */
 
 /* branch to l if (v != 0) == nz; consumes v.  Returns the constant truth or -1. */
@@ -194,10 +281,35 @@ VPRIV int test_zero(ecx *e, val *v, qty t, uint32_t l, bool nz)
 
 		if (cond >= 0) {
 			e->nin--;
-			bcond(e, nz ? cond : cond ^ 1, l);
+			bcond_opt(e, nz ? cond : cond ^ 1, l);
 			val_free(e, v);
 			return -1;
 		}
+	}
+	if (e->E->opt3 && e->reach && e->nin) {
+		const ins *p = &e->in[e->nin - 1];
+		int bit, x;
+
+		if (p->op == I_ANDI && p->rd == r && p->rn == r && (bit = one_bit((uint64_t)p->imm, p->sz)) >= 0 &&
+		    (sz >= 4 || bit < (int)sz * 8)) {
+			/* (r & bit) != 0: test the bit */
+			e->nin--;
+			tbz(e, nz, r, bit, l);
+			val_free(e, v);
+			return -1;
+		}
+		if (sz < 4 && (x = last_ext(e, r)) && (x & 15) <= (int)sz) {
+			/* zero-extended (or sign-extended from within) its size: the whole register */
+			cbz(e, nz, 1, r, l);
+			val_free(e, v);
+			return -1;
+		}
+	}
+	if (e->E->opt3 && KIND(c, t) == TY_BOOL) {
+		/* a bool is 0 or 1 in its low byte (AAPCS64 too): test bit 0 */
+		tbz(e, nz, r, 0, l);
+		val_free(e, v);
+		return -1;
 	}
 	if (is_ptr(c, t) || sz == 8) {
 		cbz(e, nz, 1, r, l);
@@ -231,7 +343,7 @@ VPRIV val tobool(ecx *e, val v, qty t)
 		sz = 8;
 	}
 	r = toreg(e, &v);
-	if (KIND(c, t) == TY_BOOL || last_cset(e, &v) >= 0)
+	if (KIND(c, t) == TY_BOOL || last_cset(e, &v) >= 0 || last_ext(e, r) == EXT_Z)
 		return v;
 	if (is_ptr(c, t) || sz == 8)
 		op3(e, I_SUBS, 1, ZR, r, ZR);
@@ -296,8 +408,10 @@ VPRIV val cast(ecx *e, val v, qty from, qty to, int kind)
 		}
 		if (ts > fs && last_cset(e, &v) < 0) {	/* a cset's 0/1 is already extended */
 			int r = toreg(e, &v);
+			bool sg = kind != CK_P2I && is_signed(c, from);
 
-			extend(e, r, r, (int)fs, kind != CK_P2I && is_signed(c, from));
+			if (!ext_ok(last_ext(e, r), (int)fs, sg))
+				extend(e, r, r, (int)fs, sg);
 		}
 		return v;
 	case CK_VOID:

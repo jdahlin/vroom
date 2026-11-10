@@ -900,6 +900,21 @@ static val gen_incdec(ecx *e, uint32_t n)
 	return nv;
 }
 
+/* -O3: an int expression whose value is 0 or 1: a comparison, !, && or || */
+static bool bool_valued(cc *c, uint32_t n)
+{
+	const node *x = N(n);
+
+	if (!is_integer(c, x->ty) || is_wide(c, x->ty))
+		return false;
+	switch (x->op) {
+	case N_LOGAND: case N_LOGOR: return true;
+	case N_UNARY: return x->aux == T_EXCLAIM;
+	case N_BINARY: return em_is_cmp(x->aux) && !is_vec(c, x->ty) && !is_vec(c, N(x->a)->ty);
+	default: return false;
+	}
+}
+
 VPRIV val gen(ecx *e, uint32_t n)
 {
 	cc *c = e->c;
@@ -1023,8 +1038,11 @@ VPRIV val gen(ecx *e, uint32_t n)
 			return vreg(r);
 		}
 		default: {
-			val v = gen(e, x->a);
+			val v;
 
+			if (e->E->opt3 && x->aux == CK_BOOL && bool_valued(c, x->a))
+				return gen(e, x->a);	/* already 0 or 1 */
+			v = gen(e, x->a);
 			return cast(e, v, N(x->a)->ty, x->ty, x->aux);
 		}
 		}

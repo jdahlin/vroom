@@ -571,6 +571,9 @@ VPRIV void at_ldop(ecx *e, unsigned sz, unsigned opc, int rs, int rt, int rn);
 VPRIV void jump(ecx *e, uint32_t l);
 VPRIV void bcond(ecx *e, int cond, uint32_t l);
 VPRIV void cbz(ecx *e, bool nz, int x, int r, uint32_t l);
+VPRIV void tbz(ecx *e, bool nz, int r, int bit, uint32_t l);
+VPRIV int one_bit(uint64_t m, int x);
+VPRIV void bcond_opt(ecx *e, int cond, uint32_t l);
 /* value.c */
 VPRIV int treg(ecx *e);
 VPRIV void tfree(ecx *e, int r);
@@ -642,6 +645,8 @@ VPRIV int emit_cmp(ecx *e, int op, int x, bool sg, val *a, val *b);
 VPRIV int emit_cmp2(ecx *e, int op, bool sg, val *a, val *b);
 VPRIV int test_zero(ecx *e, val *v, qty t, uint32_t l, bool nz);
 VPRIV val tobool(ecx *e, val v, qty t);
+VPRIV int last_ext(ecx *e, int r);
+VPRIV bool ext_ok(int x, int from, bool sgn);
 /* fp.c */
 static inline void word(ecx *e, uint32_t w);
 VPRIV int fpk(ecx *e, qty t);

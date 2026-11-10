@@ -65,7 +65,7 @@ static unsigned roles_sw(const ins *i)
 		return RN_R | RD_W | RA_W | (i->cond ? RN_W : 0);
 	case I_STP:
 		return RD_R | RA_R | RN_R | (i->cond ? RN_W : 0);
-	case I_CBZ: case I_CBNZ:
+	case I_CBZ: case I_CBNZ: case I_TBZ: case I_TBNZ:
 		return RD_R;
 	case I_PRFM:
 		return RN_R;
@@ -125,7 +125,7 @@ static int brkind_sw(const ins *i)
 {
 	switch (i->op) {
 	case I_B: return BR_UNCOND;
-	case I_BC: case I_CBZ: case I_CBNZ: return BR_COND;
+	case I_BC: case I_CBZ: case I_CBNZ: case I_TBZ: case I_TBNZ: return BR_COND;
 	case I_RET: return BR_END;
 	case I_BR: return BR_INDIRECT;
 	default: return BR_NONE;
