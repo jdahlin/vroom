@@ -798,6 +798,11 @@ vcc-stilen visar den, med källrader, etiketter, noter, `help:` och bilder, fär
 som SARIF.  *Validerat:* `vcc-mutate.py --formats` kontrollerar varje mutants sida:
 välformad, en sektion per post och samma text som textutdata.
 
+Status D8.5 (2026-11-10): inte gjort här.  `-Wuninitialized` och `-Wsometimes-uninitialized`
+(`cc/flow.c`, clangs UninitializedValues) är gjorda på grenen
+`claude/review-remaining-errors-acd5c5` (worktree `vcc-fuzz-51c3af`), inte sammanslagen.
+Kvar efter sammanslagningen: vägen som numrerade steg, med `rp_walk` från D8.2 som förebild.
+
 ## Ordning och milstolpar
 
 | milstolpe | steg | synligt för användaren |
@@ -822,4 +827,5 @@ D1 och D2 hänger ihop (feltypen behöver posten); D0.2 först så att D2 har en
 - [x] D5.1 – D5.8 — 2026-11-10 (D5.7 utom statiska initierare)
 - [x] D6 — 2026-11-10
 - [x] D7 — 2026-11-10
-- [ ] D8
+- [x] D8.1 – D8.4 — 2026-11-10
+- [ ] D8.5 — på grenen `claude/review-remaining-errors-acd5c5`; stegvägen kvar
