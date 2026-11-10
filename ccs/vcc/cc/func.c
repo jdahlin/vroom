@@ -134,7 +134,7 @@ VPRIV void function_def(cc *c, uint32_t s, const declr *d)
 	}
 	c->in_loop = c->in_switch = 0;
 	c->nrtd = 0;
-	c->uv_any = 0, c->nuv = 0;
+	c->uv_any = 0, c->nuv = 0, c->cnd = 0, c->uv_asg = 0;
 	body = compound_stmt(c, NULL);
 	scope_close(c);
 	rt_flush(c);	/* (clang: only if reachable; vcc: not under a constant-false condition) */

@@ -414,6 +414,11 @@ static void snippet(pp *p, vbuf *b, const fent *e, const pp_dinfo *d)
 				rb = ls;
 			if (re > le)
 				re = le;
+			/* clang highlights from the first to the last non-blank column */
+			while (rb < re && (s[rb] == ' ' || s[rb] == '\t'))
+				rb++;
+			while (re > rb && (s[re - 1] == ' ' || s[re - 1] == '\t'))
+				re--;
 			for (uint32_t c0 = dcols(s, ls, rb, 0), c1 = dcols(s, ls, re, 0); c0 < c1 && c0 < lw; c0++)
 				m[c0] = '~';
 		}

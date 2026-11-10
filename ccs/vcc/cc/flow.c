@@ -397,10 +397,17 @@ typedef struct uwk {
 	uint32_t selfloc;
 	pp_span selfr;
 	uint64_t done;
+	uint64_t spend;		/* -Wsometimes-uninitialized: an if left the variable initialized on one arm only */
+	uint64_t sdone;		/* ... reported (a definite report replaces it) */
 	uint32_t nord, nself;
+	uint32_t dep;		/* branch depth of the walk (if arms, ?:, && ||, loop and switch bodies) */
 	uint32_t blk;		/* the CFG block: clang builds the CFG backwards and reports by block */
 	/* reports (not cleared) */
 	uint32_t uloc[64], order[64], ublk[64];
+	uint32_t sif[64];	/* the if */
+	uint8_t sfalse[64];	/* ... uninitialized when its condition is false */
+	uint32_t sdep[64];	/* ... at this branch depth: the use must post-dominate it */
+	uint8_t kind[64];	/* report: 1 definite, 2 sometimes */
 	pp_span ur[64];
 	uint32_t sself[16], sloc[16];	/* self-initializations */
 	pp_span sr[16];
@@ -439,6 +446,34 @@ static bool uv_maycon(cc *c, uint32_t n)
 static int uv_const(uwk *w, uint32_t n)
 {
 	return uv_maycon(w->c, n) ? fl_const(&w->fl, n) : -1;
+}
+
+/* && || ?: in a condition: clang names that operator's edge instead */
+static bool uv_haslogic(cc *c, uint32_t n)
+{
+	while (n && (N(n)->op == N_CAST || N(n)->op == N_UNARY))
+		n = N(n)->a;
+	if (!n)
+		return false;
+	switch (N(n)->op) {
+	case N_LOGAND: case N_LOGOR: case N_COND:
+		return true;
+	case N_BINARY: case N_COMMA: case N_ASSIGN:
+		return uv_haslogic(c, N(n)->a) || uv_haslogic(c, N(n)->b);
+	default:
+		return false;
+	}
+}
+
+/* leaving a branch: pending ifs inside it do not dominate what follows */
+static inline void uv_drop(uwk *w)
+{
+	for (uint64_t m = w->spend; m; m &= m - 1) {
+		int v = __builtin_ctzll(m);
+
+		if (w->sdep[v] > w->dep)
+			w->spend &= ~(1ull << v);
+	}
 }
 
 static inline void uj(ust *a, const ust *b)
@@ -493,8 +528,15 @@ static void uv_read(uwk *w, uint32_t n, ust *st)
 	if ((k = uv_idx(w, N(n)->a)) < 0)
 		return;
 	b = 1ull << k;
-	if (w->report && (st->u & b) && !(st->i & b) && !(w->done & b)) {
-		w->done |= b;
+	if (!w->report || !(st->u & b))
+		return;
+	if (!(st->i & b) && (!(w->done & b) || w->kind[k] == 2)) {
+		if (!(w->done & b))
+			w->order[w->nord++] = (uint32_t)k;
+		w->done |= b, w->kind[k] = 1;
+		w->uloc[k] = N(n)->loc, w->ur[k] = rng(w->c, n), w->ublk[k] = w->blk;
+	} else if ((st->i & b) && (w->spend & b) && w->sdep[k] == w->dep && !(w->done & b)) {
+		w->done |= b, w->kind[k] = 2;
 		w->uloc[k] = N(n)->loc, w->ur[k] = rng(w->c, n), w->ublk[k] = w->blk;
 		w->order[w->nord++] = (uint32_t)k;
 	}
@@ -506,7 +548,7 @@ static void uv_write(uwk *w, uint32_t n, ust *st)
 	int k = uv_idx(w, N(n)->a);
 
 	if (k >= 0)
-		st->u &= ~(1ull << k), st->i |= 1ull << k;
+		st->u &= ~(1ull << k), st->i |= 1ull << k, w->spend &= ~(1ull << k);
 }
 
 static void uv_ex(uwk *w, uint32_t e, ust *st, bool ignore);
@@ -615,12 +657,12 @@ static void uv_ex(uwk *w, uint32_t e, ust *st, bool ignore)
 		uv_ex(w, x->a, st, false);
 		t = *st, f = *st;
 		t.live &= k != 0, f.live &= k != 1;
-		w->blk++;
+		w->blk++, w->dep++;
 		if (x->b)
 			uv_ex(w, x->b, &t, ignore);
 		w->blk++;
 		uv_ex(w, x->c, &f, ignore);
-		w->blk++;
+		w->blk++, w->dep--, uv_drop(w);
 		*st = (ust){ 0, 0, false };
 		uj(st, &t), uj(st, &f);
 		return;
@@ -634,9 +676,9 @@ static void uv_ex(uwk *w, uint32_t e, ust *st, bool ignore)
 		r = *st, s = *st;
 		r.live &= and ? k != 0 : k != 1;	/* b evaluated */
 		s.live &= and ? k != 1 : k != 0;	/* short circuit */
-		w->blk++;
+		w->blk++, w->dep++;
 		uv_ex(w, x->b, &r, false);
-		w->blk++;
+		w->blk++, w->dep--, uv_drop(w);
 		*st = s;
 		uj(st, &r);
 		return;
@@ -811,11 +853,25 @@ static void uv_stmt(uwk *w, uint32_t n, ust *st)
 		uv_ex(w, x->a, st, false);
 		t = *st, e = *st;
 		t.live &= k != 0, e.live &= k != 1;
-		w->blk++;
+		ust b4 = *st;
+
+		w->blk++, w->dep++;
 		uv_stmt(w, x->b, &t);
 		w->blk++;
 		uv_stmt(w, x->c, &e);
-		w->blk++;
+		w->blk++, w->dep--, uv_drop(w);
+		if (b4.live && (!t.live || !e.live))
+			w->spend = 0;	/* (a path leaves: clang finds no branch that always reaches the use) */
+		else if (b4.live && k < 0 && !uv_haslogic(c, x->a)) {
+			uint64_t du = b4.u & ~b4.i;	/* uninitialized before the if */
+			uint64_t ti = t.i & ~t.u, tu = t.u & ~t.i, ei = e.i & ~e.u, eu = e.u & ~e.i;
+
+			for (uint64_t m = du & ((ti & eu) | (tu & ei)); m; m &= m - 1) {
+				int v = __builtin_ctzll(m);
+
+				w->spend |= 1ull << v, w->sif[v] = n, w->sfalse[v] = (ti >> v) & 1, w->sdep[v] = w->dep;
+			}
+		}
 		*st = t;
 		uj(st, &e);
 		return;
@@ -824,7 +880,9 @@ static void uv_stmt(uwk *w, uint32_t n, ust *st)
 		if (x->op == N_FOR)
 			uv_stmt(w, x->a, st);
 		w->blk++;
+		w->spend = 0, w->dep++;
 		uv_loop(w, x, st);
+		w->dep--, uv_drop(w);
 		w->blk++;
 		return;
 	case N_SWITCH: {
@@ -835,6 +893,7 @@ static void uv_stmt(uwk *w, uint32_t n, ust *st)
 
 		uv_ex(w, x->a, st, false);
 		in = *st;
+		w->spend = 0;
 		w->brk = &brk, w->swin = &in;
 		w->sw_const = cc_eval(c, x->a, &cv) && cv.kind == CV_INT;
 		w->sw_val = w->sw_const ? cv.i : 0;
@@ -842,7 +901,9 @@ static void uv_stmt(uwk *w, uint32_t n, ust *st)
 		def = fl_has_default(&w->fl, x->b);
 		def = w->sw_const ? (w->sw_hit || def) : def;
 		st->live = false;
+		w->dep++;
 		uv_stmt(w, x->b, st);
+		w->dep--, uv_drop(w);
 		w->blk++;
 		uj(st, &brk);
 		if (!def)
@@ -869,6 +930,7 @@ static void uv_stmt(uwk *w, uint32_t n, ust *st)
 			uj(st, &w->lab[x->a - w->first]);
 			w->seen[x->a - w->first] = 1;
 		}
+		w->spend = 0;
 		w->blk++;
 		uv_stmt(w, x->c, st);
 		return;
@@ -918,6 +980,39 @@ static void uv_stmt(uwk *w, uint32_t n, ust *st)
 	}
 }
 
+/* the end of a then/else statement as clang's getEndLoc: an expression statement ends with its expression */
+static uint32_t uv_send(cc *c, uint32_t n)
+{
+	if (N(n)->op == N_EXPR && N(n)->a)
+		return rng(c, N(n)->a).e;
+	return pp_tok_end(c->p, c->span[n].e);
+}
+
+static bool uv_sometimes(cc *c, uwk *w, uint32_t k)
+{
+	static const char *const g[] = { "uninitialized", "all", "most", NULL };
+	const sym *y = &c->syms[w->var[k]];
+	const node *x = N(w->sif[k]);
+	pp_span cr = rng(c, x->a), r[2];
+	int nr = 1;
+	bool f = w->sfalse[k];
+	pp_dinfo d = { "note", w->uloc[k], &w->ur[k], 1, NULL, 0, NULL, 0 };
+
+	if (!cc_warnx(c, "sometimes-uninitialized", true, g, cr.b, &cr, 1, NULL, 0,
+		      "variable '%.*s' is used uninitialized whenever 'if' condition is %s", IDF(y->name), f ? "false" : "true"))
+		return false;
+	pp_diagx(c->p, &d, "uninitialized use occurs here");
+	if (f) {
+		r[0] = (pp_span){ c->span[w->sif[k]].b, c->span[x->b].b };
+		if (x->c)	/* (after an expression statement: its ';') */
+			r[1] = (pp_span){ N(x->b)->op == N_EXPR ? c->span[x->b].e : uv_send(c, x->b), uv_send(c, x->c) }, nr = 2;
+	} else
+		r[0] = (pp_span){ c->span[w->sif[k]].b, c->span[x->c].b };
+	d = (pp_dinfo){ "note", r[0].b, r, nr, NULL, 0, NULL, 0 };
+	pp_diagx(c->p, &d, "remove the 'if' if its condition is always %s", f ? "true" : "false");
+	return true;
+}
+
 static const char *uv_zero(cc *c, qty t)
 {
 	int k = KIND(c, canon(c, t));
@@ -961,7 +1056,7 @@ VPRIV void uninit_check(cc *c, uint32_t body, uint32_t first_label)
 	}
 	for (int it = 0; it < 16; it++) {
 		w->changed = false;
-		w->report = true, w->nord = w->nself = 0, w->done = 0, w->blk = 0;
+		w->report = true, w->nord = w->nself = 0, w->done = 0, w->blk = 0, w->spend = 0;
 		memset(w->seen, 0, nl);
 		st = (ust){ 0, 0, true };
 		uv_stmt(w, body, &st);
@@ -987,7 +1082,10 @@ VPRIV void uninit_check(cc *c, uint32_t body, uint32_t first_label)
 		const sym *y = &c->syms[w->var[k]];
 		const char *z = uv_zero(c, y->ty);
 
-		if (!cc_warnx(c, "uninitialized", false, w_all, w->uloc[k], &w->ur[k], 1, NULL, 0,
+		if (w->kind[k] == 2) {
+			if (!uv_sometimes(c, w, k))
+				continue;
+		} else if (!cc_warnx(c, "uninitialized", false, w_all, w->uloc[k], &w->ur[k], 1, NULL, 0,
 			      "variable '%.*s' is uninitialized when used here", IDF(y->name)))
 			continue;
 		if (z) {

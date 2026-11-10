@@ -865,7 +865,7 @@ VPRIV void declaration(cc *c, vec *out, bool file)
 						c->uv_any |= 1;
 						y->flags |= SF_UVPEND;
 						if (c->nuv < 64)
-							c->uv[c->nuv++] = s;
+							c->uvc[c->nuv] = c->cnd, c->uv[c->nuv++] = s;
 					}
 				}
 			}

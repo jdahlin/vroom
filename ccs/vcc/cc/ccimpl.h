@@ -483,6 +483,15 @@ static inline void setspan(cc *c, uint32_t n, uint32_t b)
 		c->span[n] = (pp_span){ b, c->prevloc };
 }
 
+/* the tracked variable s is assigned inside an if/loop/switch nested deeper than its declaration */
+static inline bool uv_deeper(cc *c, uint32_t s)
+{
+	for (uint32_t i = 0; i < c->nuv; i++)
+		if (c->uv[i] == s)
+			return c->cnd > c->uvc[i];
+	return false;
+}
+
 /* -Wuninitialized tracks it (clang's isTrackedVar: scalar or vector, not _Atomic) */
 static inline bool uv_tracked(cc *c, qty t)
 {

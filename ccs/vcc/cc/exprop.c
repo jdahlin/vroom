@@ -605,7 +605,16 @@ static __attribute__((noinline)) uint32_t assign_rest(cc *c, uint32_t l, int op)
 	bool mac = tok(c)->flags & PF_MACRO;
 
 	next(c);
-	r = assign_expr(c);
+	{
+		uint32_t pend = c->uv_asg;
+
+		c->uv_asg = 0;
+		r = assign_expr(c);
+		if (unlikely(pend)) {
+			c->syms[pend].flags &= ~SF_UVPEND;	/* (after the right side: "z = z + 1" reads z first) */
+			c->uv_asg = 0;
+		}
+	}
 	if (op < 0 && !mac && !(c->prevflags & PF_MACRO))	/* (the right side's last token) */
 		self_assign(c, l, r, loc);
 	r = assign(c, op < 0 ? 0 : op, l, r, loc);

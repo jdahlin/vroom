@@ -1,5 +1,6 @@
 /* vcc front end: statements (asm statements included) */
 #include "ccimpl.h"
+#include <ctype.h>
 
 /* ---------------- statements ---------------- */
 
@@ -742,19 +743,27 @@ VPRIV uint32_t statement(cc *c)
 			/* clang: runtime-behaviour warnings only in reachable code */
 			cval cv;
 			int k = cc_eval(c, cnd, &cv) && cv.kind == CV_INT ? cv.i != 0 : -1;
+			uint32_t rp = c->prevloc, tb = tok(c)->loc, eb, n;
 
+			c->cnd++;
 			c->dead += k == 0;
 			th = sub_statement(c);
 			c->dead -= k == 0;
+			setspan(c, th, tb);	/* (for -Wsometimes-uninitialized's notes) */
 			if (iskw(c, KW_else)) {
 				next(c);
+				eb = tok(c)->loc;
 				c->dead += k == 1;
 				el = sub_statement(c);
 				c->dead -= k == 1;
+				setspan(c, el, eb);
 			}
+			c->cnd--;
+			scope_close(c);
+			n = mkstmt(c, N_IF, loc, cnd, th, el);
+			c->span[n] = (pp_span){ loc, rp };
+			return n;
 		}
-		scope_close(c);
-		return mkstmt(c, N_IF, loc, cnd, th, el);
 	}
 	case KW_while: {
 		uint32_t cnd, body;
@@ -763,7 +772,7 @@ VPRIV uint32_t statement(cc *c)
 		scope_open(c);
 		cnd = cond_of(c);
 		c->in_loop++;
-		body = sub_statement(c);
+		c->cnd++, body = sub_statement(c), c->cnd--;
 		c->in_loop--;
 		scope_close(c);
 		return mkstmt(c, N_WHILE, loc, cnd, body, 0);
@@ -774,7 +783,7 @@ VPRIV uint32_t statement(cc *c)
 		next(c);
 		scope_open(c);
 		c->in_loop++;
-		body = sub_statement(c);
+		c->cnd++, body = sub_statement(c), c->cnd--;
 		c->in_loop--;
 		if (!iskw(c, KW_while))
 			fatal(c, tok(c)->loc, "expected 'while' in do/while loop");
@@ -812,7 +821,7 @@ VPRIV uint32_t statement(cc *c)
 			step = expr(c);
 		expect(c, T_RPAREN, "')'");
 		c->in_loop++;
-		body = sub_statement(c);
+		c->cnd++, body = sub_statement(c), c->cnd--;
 		c->in_loop--;
 		if (init && N(init)->op == N_EXPR && N(init)->a)	/* clang's ActOnForStmt: the first and third clauses */
 			set_only(c, N(init)->a), unused_value(c, N(init)->a, false);
@@ -849,7 +858,7 @@ VPRIV uint32_t statement(cc *c)
 
 			c->case_base = c->ncase;
 			c->sw_default = false;
-			body = sub_statement(c);
+			c->cnd++, body = sub_statement(c), c->cnd--;
 			if (!c->sw_default && KIND(c, et) == TY_ENUM)
 				switch_enum_warn(c, et, cnd);
 			if (!c->sw_default) {
