@@ -114,6 +114,8 @@ bench/vcc-sema.py batch -j 6        # the same in one vpp --batch process: ~3 s 
 bench/vcc-sema.py layout -j 6       # layouts/constants/decl types checked by clang (~70 s)
 bench/var-cmp.py work/build-x       # vcc ar against llvm-ar on an llvm-ar-built tree
 bench/vsh-test.py                   # vsh/rsh against dash on small recipes
+bench/vobjcopy-cmp.sh               # vnm/vobjcopy against llvm-nm/llvm-objcopy on the build's uses
+bench/vobjcopy-any.py work/build-X  # ... and with other options on 200 random .o files
 bench/vcc-driver.py                 # driver: command lines vs clang (predefines from -O), <1 s
 bench/vcc-fpcheck.py -j 6           # no generated FP/SIMD code under -mgeneral-regs-only (~10 s)
 bench/vcc-cfi.py -j 6               # -fasynchronous-unwind-tables: .eh_frame per function, .text unchanged (~1 min)
