@@ -708,6 +708,38 @@ runtom (`ppd_run1`): pp +0,26 % mot merge-basen.
   *Validera:* `vccd-test.py`-fall (dedup, ersättning, socket); kärnbygget med `-Wall`:
   antal utskrivna dubbletter före/efter i planen; lager 7 på hela bygget.
 
+**Status (2026-11-10): klart.**  Först en lucka: vccd skrev en lyckad TU:s diagnoser till
+ingenting (fd −1, eller sin logg med `VCC_LOG`), så vcc:s varningar syntes aldrig under vccd.
+Nu går de till en tillfällig fil per tråd (`cc_own`) och till klientens stderr när TU:n lyckas
+(en TU vcc fallerar på går som förut till clang, som rapporterar); färger som för klientens
+terminal (`ppd_env.errtty`).  `vccd/dstore.c`: pp ger varje post i TU:ns slut till en
+`pp_dsink` (`pp_drec`: nivå, flagga, fil, JSON-raden utan `rendered`), och lagret håller dem
+per källfil, så en omkompilering ersätter exakt den TU:ns mängd (en TU som går till clang tar
+bort sin).  `vcc --vccd-diagnostics` (sammanfattning per flagga och per fil) och `=json`
+(varje TU:s poster som JSON-rader med `"tu"`) frågar över socketen; en fråga hör inte till
+något bygge (den avslutar inte det den frågar om).  JSON hålls för högst 500 poster per TU och
+64 MB totalt, därutöver räknas posterna och TU:n får en rad `{"tu":..,"omitted":N}`.
+Dedup: med `VCC_DIAG_DEDUP=1` i klientens miljö (en miljövariabel i stället för
+`-fdiagnostics-dedup`: clang, som får de TU:er vcc fallerar på, känner inte flaggan) lämnas
+en varning i en inkluderad fil bort om en annan TU i samma bygge (makes processgrupp) redan
+skrev den (nyckel: fil, rad, kolumn, flagga, text), och raden "N warnings generated." följs av
+"M header warnings left out: printed by another TU of this build."; sammanfattningen ger
+byggets antal.  Byggets slut kan vccd inte veta (make säger inget), så sammanfattningen ges
+på fråga i stället för vid slutet.  *Mätt (kärnan, allnoconfig + fragment, `-j 6`):* `W=1`
+ger 15 varningar (`-Wunused-but-set-variable`, alla i .c-filer), identiska med clangs på samma
+kommandorader; `W=2` 38, inga dubbletter från headers (vcc saknar ännu `-Wshadow`,
+`-Wsign-compare`); `KCFLAGS=-pedantic`: 1 232 485 varningsrader och 1,44 GB logg utan dedup,
+284 030 skrivna och 947 298 bortlämnade (−77 %) och 311 MB med.  vccd i det bygget: CPU 94,5 s
+(D6) → 93,5 s, högsta RSS 1 132 → 1 238 MB (lagret; före gränserna 4,2 GB).  *Validerat:*
+`vccd-test.py` +3 fall (varningen når klienten; dedup en gång per bygge, nytt bygge börjar
+om; poster per TU ersätts, sammanfattning, `omitted`, felaktig fråga), `vccd-cc.py` under TSan
+utan rapporter (det hittade tre delade buffertar som vccd:s trådar skrev i samtidigt:
+typnamnen i `tyname`/`tyname_sugar` och i -Wformat, nu per TU respektive per kontroll; en
+trådlokal buffert kostade fe +0,8 % på macOS, `tlv_get_addr` per anrop), `vcc-diag.py`
+105/105, sema warn 879/879 och batch 878/879, ctests 1740/1740, stress `--vccd` 24,
+`--formats` 1970/1970, filvis bygge, PostgreSQL genom vccd (`build.sh vccd`, där varningarna
+nu når bygget) 0 varningar som clang inte ger och `meson test` 81 ok.  Grinden mot merge-basen: pp +0,25 %, fe −0,29 %, cc −0,23 %.
+
 ### D8. Senare
 
 Flödesvägar för `-Wuninitialized`, returnerad stackadress och saknad `return` (numrerade
@@ -736,5 +768,5 @@ D1 och D2 hänger ihop (feltypen behöver posten); D0.2 först så att D2 har en
 - [x] D4 — 2026-11-09
 - [x] D5.1 – D5.8 — 2026-11-10 (D5.7 utom statiska initierare)
 - [x] D6 — 2026-11-10
-- [ ] D7
+- [x] D7 — 2026-11-10
 - [ ] D8

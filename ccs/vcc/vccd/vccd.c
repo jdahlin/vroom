@@ -78,6 +78,7 @@
 #include "../pp/dircache.h"
 #include "../driver/ppdriver.h"
 #include "fixdep.h"
+#include "dstore.h"
 #include "ar.h"
 #include "rsh.h"
 
@@ -269,6 +270,7 @@ static int gen_enter(uint32_t pgrp)
 			}
 			vlex_cache_flush();
 			vdir_flush();
+			dstore_new_build();
 			pp_include_flush();
 			atomic_fetch_add(&n_flush, 1);
 			gen_flushing = 0;
@@ -723,13 +725,51 @@ static bool dg_is_compile(const struct req *r, const char *skip)
 static int spawn(const struct req *r, const char *prog);
 static const char *req_env(const struct req *r, const char *name);
 
+/* a -c job vcc compiles itself.  Its diagnostics go to a scratch file and to the
+   client only if it succeeds: a TU vcc fails on goes to clang (or PROG), which
+   reports.  Its records replace the TU's in the build's store (dstore.c). */
+static _Thread_local int cap_fd = -1;
+
+static int cc_own(const struct req *r)
+{
+	const char *dd = req_env(r, "VCC_DIAG_DEDUP");
+	dstore_job j;
+	ppd_env e = { r->cwd, r->fds[1], -1, r->envp, &j.sink, isatty(r->fds[2]) };
+	int st, to;
+	off_t n;
+
+	if (cap_fd < 0) {
+		FILE *f = tmpfile();	/* already unlinked */
+
+		cap_fd = f ? fcntl(fileno(f), F_DUPFD_CLOEXEC, 3) : -1;
+		if (f)
+			fclose(f);
+	}
+	e.errfd = cap_fd >= 0 ? cap_fd : log_requests ? 2 : -1;
+	dstore_begin(&j, r->cwd, r->argv[r->argc - 1], dd && *dd && strcmp(dd, "0"));
+	st = ppd_run(r->argc, r->argv, &e);
+	dstore_end(&j, st == 0);
+	if (cap_fd >= 0 && (n = lseek(cap_fd, 0, SEEK_CUR)) > 0) {
+		char buf[1 << 14];
+
+		to = st == 0 ? r->fds[2] : log_requests ? 2 : -1;
+		for (off_t o = 0; to >= 0 && o < n;) {
+			ssize_t k = pread(cap_fd, buf, (size_t)(n - o < (off_t)sizeof buf ? n - o : (off_t)sizeof buf), o);
+
+			if (k <= 0 || !write_full(to, buf, (size_t)k))
+				break;
+			o += k;
+		}
+		if (ftruncate(cap_fd, 0) || lseek(cap_fd, 0, SEEK_SET))
+			close(cap_fd), cap_fd = -1;
+	}
+	return st;
+}
+
 static int delegate(const struct req *r, const char *prog, const char **kind)
 {
 	if (dg_is_compile(r, req_env(r, "VCC_DELEGATE_SKIP"))) {
-		/* diagnostics only in the log: PROG runs a failed TU again and reports */
-		ppd_env e = { r->cwd, r->fds[1], log_requests ? 2 : -1, r->envp };
-
-		if (ppd_run(r->argc, r->argv, &e) == 0) {
+		if (cc_own(r) == 0) {
 			*kind = "cc-own";
 			atomic_fetch_add(&n_cc, 1);
 			return 0;
@@ -965,12 +1005,17 @@ static int handle1(const struct req *r, const char **kind)
 	for (int i = 1; i < r->argc; i++)
 		if (!strcmp(r->argv[i], "--explain") || !strncmp(r->argv[i], "--explain=", 10) || !strcmp(r->argv[i], "--fix")) {
 			/* vcc's own: the client's output and diagnostics, no clang to fall back to */
-			ppd_env e = { r->cwd, r->fds[1], r->fds[2], r->envp };
+			ppd_env e = { r->cwd, r->fds[1], r->fds[2], r->envp, NULL, 0 };
 
 			*kind = r->argv[i][2] == 'e' ? "cc-explain" : "cc-fix";
 			atomic_fetch_add(&n_cc, 1);
 			return ppd_run(r->argc, r->argv, &e);
 		}
+	if (r->argc == 2 && !strncmp(r->argv[1], "--vccd-diagnostics", 18) && (!r->argv[1][18] || r->argv[1][18] == '=')) {
+		*kind = "cc-diags";
+		atomic_fetch_add(&n_probe, 1);
+		return dstore_query(r->argv[1][18] ? r->argv[1] + 19 : NULL, r->fds[1], r->fds[2]);
+	}
 	probe = cc_probe_kind(r);
 	if (probe) {
 		static const char *const names[] = { "", "cc-probe", "as-probe", "src-probe", "link-probe" };
@@ -980,17 +1025,14 @@ static int handle1(const struct req *r, const char **kind)
 		return cc_probe(r, probe);
 	}
 	if (cc_is_pp(r)) {
-		ppd_env e = { r->cwd, r->fds[1], r->fds[2], r->envp };
+		ppd_env e = { r->cwd, r->fds[1], r->fds[2], r->envp, NULL, 0 };
 
 		*kind = "cc-E";
 		atomic_fetch_add(&n_pp, 1);
 		return ppd_run(r->argc, r->argv, &e);
 	}
 	if (cc_is_compile(r)) {
-		/* diagnostics only in the log: a TU vcc fails on goes to clang, which reports */
-		ppd_env e = { r->cwd, r->fds[1], log_requests ? 2 : -1, r->envp };
-
-		if (ppd_run(r->argc, r->argv, &e) == 0) {
+		if (cc_own(r) == 0) {
 			*kind = "cc-own";
 			atomic_fetch_add(&n_cc, 1);
 			return 0;
@@ -1180,7 +1222,9 @@ static void *worker_main(void *arg)
 			if (h->build && self_build && h->build != self_build) {
 				status = (int32_t)VROOM_STATUS_MISMATCH, kind = "mismatch";
 			} else {
-				int g = gen_enter(h->pgrp);
+				/* a diagnostics query belongs to no build: it must not end the one it asks about */
+				bool q = r.argc == 2 && !strncmp(r.argv[1], "--vccd-diagnostics", 18);
+				int g = gen_enter(q ? 0 : h->pgrp);
 
 				if (g) {
 					status = (int32_t)VROOM_STATUS_RETRY, kind = "retry";

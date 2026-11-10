@@ -1541,6 +1541,30 @@ VPRIV void render_text(pp *p, vbuf *b, const vdiag *d)
 
 static void render_clang(pp *p, vbuf *b, vdiag *d) { render_text(p, b, d); }
 
+/* vccd's dedup: a warning in an included file, printed by another TU of this build */
+static __attribute__((noinline, cold)) bool dsink_dup(pp *p, const vdiag *d)
+{
+	const fent *e;
+	const char *name;
+	uint32_t nl, line, col, lc[2];
+	uint64_t h = 1469598103934665603ull;
+
+	if (d->loc == UINT32_MAX || !loc_ok(p, d->loc, &e) || e->f == p->fe[0].f ||
+	    !diag_where(p, d->loc, &name, &nl, &line, &col))
+		return false;
+#define DH(ptr, len) do { const unsigned char *q_ = (const unsigned char *)(ptr); \
+	for (size_t k_ = 0; k_ < (size_t)(len); k_++) h = (h ^ q_[k_]) * 1099511628211ull; h *= 31; } while (0)
+	lc[0] = line, lc[1] = col;
+	DH(e->f->path, strlen(e->f->path));
+	DH(lc, sizeof lc);
+	if (d->flag)
+		DH(d->flag, strlen(d->flag));
+	if (d->msg)
+		DH(d->msg, strlen(d->msg));
+#undef DH
+	return p->o->dsink->seen(p->o->dsink, h);
+}
+
 void pp_diag_emit(pp *p, vdiag *d)
 {
 	int fd = p->o->errfd ? p->o->errfd : 2;
@@ -1557,6 +1581,13 @@ void pp_diag_emit(pp *p, vdiag *d)
 		p->dtail = d;
 	}
 	macro_adjust(p, top, d);
+	if (unlikely(p->o->dsink) && d == top && d->level == VDL_WARNING && p->o->dsink->dedup && dsink_dup(p, d)) {
+		d->dup = 1;
+		p->o->dsink->ndup++;
+		return;
+	}
+	if (top->dup)
+		return;	/* a note of a left-out warning */
 	if (p->o->diag_format == PP_DIAG_JSON) {
 		/* a record is written when it is complete: at the next one or at the end */
 		if (d == top)
@@ -1614,7 +1645,7 @@ int pp_warnings(const pp *p) { return p->warns; }
 void pp_diag_summary(pp *p)
 {
 	int fd = p->o->errfd ? p->o->errfd : 2;
-	char b[128];
+	char b[192];
 	int n = 0;
 
 	pp_diag_finish(p);
@@ -1627,6 +1658,9 @@ void pp_diag_summary(pp *p)
 		n = snprintf(b, sizeof(b), "%d error%s generated.\n", p->errors, p->errors > 1 ? "s" : "");
 	else if (p->warns)
 		n = snprintf(b, sizeof(b), "%d warning%s generated.\n", p->warns, p->warns > 1 ? "s" : "");
+	if (unlikely(p->o->dsink && p->o->dsink->ndup) && n < (int)sizeof(b))
+		n += snprintf(b + n, sizeof(b) - n, "%u header warning%s left out: printed by another TU of this build.\n",
+			      p->o->dsink->ndup, p->o->dsink->ndup > 1 ? "s" : "");
 	if (n)
-		(void)!write(fd, b, (size_t)n);
+		(void)!write(fd, b, (size_t)(n < (int)sizeof(b) ? n : (int)sizeof(b) - 1));
 }

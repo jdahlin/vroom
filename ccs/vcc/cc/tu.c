@@ -208,6 +208,7 @@ int cc_run(pp *p, const cc_opts *o)
 	errors = c->errors;
 	dc_end(c);
 	cc_free(c);
+	free(c->tyb);
 	free(c);
 	return errors;
 }

@@ -77,7 +77,7 @@ AS_FILES = vcc/arch/a64/as/enc.c vcc/platform/darwin/macho.c
 as_SRC   = vcc/as/as.c vcc/arch/a64/as/parse.c
 LEX_SRC = vcc/lex/lex.c vcc/lib/intern.c
 PP_SRC  = vcc/pp/dircache.c vcc/driver/ppdriver.c vcc/driver/ccsnap.c vcc/lib/ldhash.c
-VCCD_SRC = vcc/vccd/vccd.c vcc/vccd/caps.c vcc/vccd/fixdep.c vcc/vccd/ar.c vcc/vccd/rsh.c
+VCCD_SRC = vcc/vccd/vccd.c vcc/vccd/dstore.c vcc/vccd/caps.c vcc/vccd/fixdep.c vcc/vccd/ar.c vcc/vccd/rsh.c
 # Split modules: a list of files each (MOD_SRC, in this order).  By default
 # each module is compiled as one TU (obj/unity/MOD.c #includes its files, as
 # SQLite's amalgamation), so the code generator sees all of it, also in `make

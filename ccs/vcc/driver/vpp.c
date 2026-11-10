@@ -61,7 +61,7 @@ static void *worker(void *arg)
 	for (;;) {
 		int k = atomic_fetch_add(&nextjob, 1);
 		job *j;
-		ppd_env e = { bdir, nul, getenv("VPP_BATCH_ERR") ? 2 : nul, NULL };
+		ppd_env e = { bdir, nul, getenv("VPP_BATCH_ERR") ? 2 : nul, NULL, NULL, 0 };
 		double t0;
 
 		if (k >= njobs)
@@ -211,7 +211,7 @@ static int batch(const char *file, int nthr, const char *statsf)
 
 int main(int argc, char **argv)
 {
-	ppd_env e = { NULL, 1, 2, NULL };
+	ppd_env e = { NULL, 1, 2, NULL, NULL, 0 };
 	const char *w = getenv("VPP_WARM");
 
 	if (argc == 4 && !strcmp(argv[1], "--cmp-files")) {
@@ -243,7 +243,7 @@ int main(int argc, char **argv)
 	}
 
 	for (int r = w ? atoi(w) : 0; r > 0; r--) {
-		ppd_env q = { NULL, -1, 2, NULL };
+		ppd_env q = { NULL, -1, 2, NULL, NULL, 0 };
 		char *av[argc + 3];
 		int n = 0;
 

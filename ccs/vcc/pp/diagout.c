@@ -108,7 +108,8 @@ static void jincludes(pp *p, vbuf *b, uint32_t loc)
 	vbuf_s(b, "]");
 }
 
-static void json_rec(pp *p, vbuf *b, const vdiag *d, bool top)
+/* top: 0 a child, 1 a record, 2 a record without "rendered" (vccd's store) */
+static void json_rec(pp *p, vbuf *b, const vdiag *d, int top)
 {
 	vbuf_s(b, "{\"id\":");
 	jcstr(b, d->id);
@@ -153,6 +154,10 @@ static void json_rec(pp *p, vbuf *b, const vdiag *d, bool top)
 			json_rec(p, b, k, false);
 			if (k->next)
 				vbuf_s(b, ",");
+		}
+		if (top == 2) {
+			vbuf_s(b, "]}");
+			return;
 		}
 		vbuf_s(b, "],\"rendered\":");
 		/* the text as the text output prints it (in its style), with its include stack */
@@ -415,6 +420,28 @@ static void sarif_log(pp *p, vbuf *b)
 	vbuf_s(b, "]}]}\n");
 }
 
+/* vccd: every top-level record, as JSON, to the build's store */
+static __attribute__((noinline, cold)) void dsink_records(pp *p)
+{
+	for (const vdiag *d = p->dhead; d; d = d->next) {
+		pp_drec r = { .level = d->level, .flag = d->flag };
+		const fent *e;
+		const char *name;
+		uint32_t nl;
+		vbuf b = { 0 };
+
+		if (d->loc != UINT32_MAX && loc_ok(p, d->loc, &e) && diag_where(p, d->loc, &name, &nl, &r.line, &r.col))
+			r.path = e->f->path;
+		if (!p->o->dsink->nojson) {
+			json_rec(p, &b, d, 2);
+			r.json = b.p ? b.p : "";
+			r.jlen = b.n;
+		}
+		p->o->dsink->record(p->o->dsink, &r);
+		free(b.p);
+	}
+}
+
 void pp_diag_finish(pp *p)
 {
 	int fd = p->o->errfd ? p->o->errfd : 2;
@@ -426,6 +453,8 @@ void pp_diag_finish(pp *p)
 	diag_json_flush(p);
 	if (unlikely(p->o->diag_patch || p->o->fix_apply))
 		diag_fixits_out(p);
+	if (unlikely(p->o->dsink && p->o->dsink->record && p->dhead))
+		dsink_records(p);
 	if (p->o->diag_format == PP_DIAG_SARIF || p->o->sarif_file) {
 		vbuf b = { 0 };
 

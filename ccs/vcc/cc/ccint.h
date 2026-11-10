@@ -102,6 +102,8 @@ typedef struct lzfn {
 struct cc {
 	pp *p;
 	const cc_opts *o;
+	struct vfixbuf *tyb;	/* tyname/tyname_sugar: 8 buffers in rotation (allocated at the first) */
+	unsigned tyk;
 	jmp_buf bail;
 	int errors;
 	struct recov *rec;	/* the innermost parser recovery point (diag.c), NULL: errors end the TU */

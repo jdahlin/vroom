@@ -1048,7 +1048,8 @@ static __attribute__((noinline)) int ppd_run1(int argc, char **argv, const ppd_e
 	po.unsigned_char = !darwin;
 	po.cwd = env->cwd;
 	po.errfd = errfd;
-	po.diag_color = dcolor;
+	po.dsink = env->dsink;
+	po.diag_color = dcolor ? dcolor : env->errtty ? 1 : 0;
 	po.diag_nocaret = nocaret;
 	po.diag_show_id = showid;
 	po.diag_style = dstyle;
@@ -1082,7 +1083,7 @@ static __attribute__((noinline)) int ppd_run1(int argc, char **argv, const ppd_e
 			goto out;
 		}
 		vjob_jb = &jo;
-		vintern_full_hook = intern_full;
+		__atomic_store_n(&vintern_full_hook, intern_full, __ATOMIC_RELAXED);	/* (every job: the same value) */
 		p = pp_open(&po);
 		vjob_jb = NULL;
 	}
@@ -1097,7 +1098,7 @@ static __attribute__((noinline)) int ppd_run1(int argc, char **argv, const ppd_e
 		goto done;
 	}
 	vjob_jb = &jb;	/* as/elf overflow ends this TU too */
-	vintern_full_hook = intern_full;	/* (only reaches vjob_jb in the thread that set it) */
+	__atomic_store_n(&vintern_full_hook, intern_full, __ATOMIC_RELAXED);	/* (only reaches vjob_jb in the thread that set it) */
 	if (tokhash) {
 		/* a hash of what pp_next hands the parser: kind, SOL/SPACE, spelling, id, file:line:col, sys */
 		uint64_t h = 1469598103934665603ull;

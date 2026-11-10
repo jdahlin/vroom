@@ -340,13 +340,19 @@ static void type_str(cc *c, qty t, const char *inner, vfixbuf *out, bool *ok)
 	vfixbuf_put(out, b.s, b.n);
 }
 
-/* t as clang spells it in diagnostics (four buffers in rotation) */
+/* the next of the TU's 8 type-name buffers (per TU: vccd compiles on many threads) */
+static vfixbuf *tybuf(cc *c)
+{
+	if (unlikely(!c->tyb) && !(c->tyb = malloc(8 * sizeof(vfixbuf))))
+		abort();
+	return &c->tyb[c->tyk++ & 7];
+}
+
+/* t as clang spells it in diagnostics (buffers in rotation: tybuf) */
 VPRIV const char *tyname(cc *c, qty t)
 {
-	static vfixbuf b[4];
-	static int k;
 	bool ok = true;
-	vfixbuf *o = &b[k++ & 3];
+	vfixbuf *o = tybuf(c);
 
 	o->n = 0, o->s[0] = 0;
 	type_str(c, t, "", o, &ok);
@@ -374,10 +380,8 @@ VPRIV uint32_t expr_tdef(cc *c, uint32_t e, qty t)
 /* t quoted as clang spells it for expression e: "'int64_t' (aka 'long')", "'long'" */
 VPRIV const char *tyname_sugar(cc *c, uint32_t e, qty t)
 {
-	static vfixbuf b[4];
-	static int k;
 	uint32_t td = expr_tdef(c, e, t);
-	vfixbuf *o = &b[k++ & 3];
+	vfixbuf *o = tybuf(c);
 	bool ok = true;
 
 	o->n = 0, o->s[0] = 0;

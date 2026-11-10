@@ -62,6 +62,7 @@ typedef struct pp_opts {
 	int diag_parseable;		/* -fdiagnostics-parseable-fixits: clang's fix-it:"file":{l:c-l:c}:"text" lines */
 	int diag_patch;			/* -fdiagnostics-generate-patch: the fix-its as a unified diff (GCC's) */
 	int fix_apply;			/* --fix: machine-applicable fix-its written to the files */
+	struct pp_dsink *dsink;		/* vccd's whole-build view of the diagnostics (NULL: none) */
 	const char *sarif_file;		/* -fdiagnostics-add-output=sarif:file=F: SARIF there too */
 	char *const *argv;		/* the command line (SARIF's invocation) */
 	int argc;
@@ -134,6 +135,28 @@ void pp_vdiag(pp *p, uint32_t loc, const char *what, const char *fmt, va_list ap
  * (locations [b, e)), and fix-it hints (replace [b, e) with s; b == e
  * inserts) printed under the caret line.
  */
+/*
+ * vccd (D7): each top-level record of a TU at its end (record), and with dedup a
+ * header warning another TU of this build printed is counted, not rendered (seen:
+ * true when key was seen before in this build).
+ */
+typedef struct pp_drec {
+	int level;		/* VDL_* */
+	const char *flag;	/* NULL: none */
+	const char *path;	/* the primary location's file (NULL: none) */
+	uint32_t line, col;
+	const char *json;	/* the record as -fdiagnostics-format=json writes it, without "rendered" and the
+				   newline (NULL once the sink says nojson) */
+	size_t jlen;
+} pp_drec;
+typedef struct pp_dsink {
+	int dedup;
+	unsigned ndup;		/* left out in this TU */
+	int nojson;		/* set by record(): the rest of the TU's records without JSON */
+	bool (*seen)(struct pp_dsink *, uint64_t key);
+	void (*record)(struct pp_dsink *, const pp_drec *);
+} pp_dsink;
+
 typedef struct pp_span { uint32_t b, e; } pp_span;
 typedef struct pp_fixit { uint32_t b, e; const char *s; uint8_t app; } pp_fixit;	/* app: VDA_* (0: unspecified) */
 typedef struct pp_dinfo {
@@ -193,6 +216,7 @@ struct vdiag {
 	uint8_t level;		/* VDL_* as rendered (a -Werror warning is VDL_ERROR) */
 	uint8_t werror;		/* a warning promoted by -Werror */
 	uint8_t emitted;
+	uint8_t dup;		/* a header warning another TU of this build printed: not rendered */
 };
 __attribute__((format(printf, 4, 5)))
 vdiag *pp_diag_begin(pp *p, int level, uint32_t loc, const char *fmt, ...);

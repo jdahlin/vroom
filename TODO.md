@@ -881,6 +881,13 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
   followed and a duplicated token may pick the wrong body occurrence (kernel
   `-pedantic`: 1 031 of 1 536 chains identical to clang's).
   *Validate:* diag tests, the kernel chain comparison.
+- [ ] **Warnings in lazy bodies**: an unused `static` function outside the main
+  file is never parsed (`cc/lazy.c` `lazy_ok`), so its warnings are missing:
+  clang warns `-Wreturn-type` for `static inline int f(void) { }` in a
+  non-system header, vcc only with `VCC_EAGER=1`.  A cheap scan of the kept
+  tokens, or parsing the body when a warning group it could hit is on and the
+  header is not a system one.  *Validate:* a diag test with the function in a
+  header; `vbench.py gate` (fe, cc).
 - [ ] **Longer fuzz runs** and pp-diff over the whole fuzz corpus (PLAN-fas2
   "Status fuzzning").  *Validate:* runs recorded in the plan, findings in
   `regress/`.

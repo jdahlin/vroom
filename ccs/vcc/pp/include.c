@@ -460,9 +460,11 @@ VPRIV void enter_file(pp *p, const vlex_file *f, const char *path, int32_t sdir)
 			longjmp(*p->fatal_jb, 1);
 	}
 	if (fresh) {
-		if (pf_on < 0)
-			pf_on = !getenv("VPP_NOPREFETCH");
-		if (pf_on)
+		int on = __atomic_load_n(&pf_on, __ATOMIC_RELAXED);
+
+		if (on < 0)	/* (threads race to set it: the same value) */
+			__atomic_store_n(&pf_on, on = !getenv("VPP_NOPREFETCH"), __ATOMIC_RELAXED);
+		if (on)
 			prefetch_includes(p, c);
 	}
 	if (k)

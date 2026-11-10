@@ -121,6 +121,8 @@ bench/gen-explain.py [--check]      # driver/explain.inc from ccs/vcc/docs/diag/
 bench/vcc-bflayout.py               # generated bit-field records, layouts checked by clang, Linux + Apple (~1 s)
 bench/vcc-ldconst.py                # generated long double literals and folds, bits vs clang (~2 s)
 bench/vccd-test.py                  # vccd as a service: socket, bad requests, cache invalidation (~11 s)
+vcc --vccd-diagnostics[=json]       # vccd's diagnostics store: summary by flag/file, or every TU's records (JSON lines)
+VCC_DIAG_DEDUP=1 make ...           # under vccd: a header warning another TU of the build printed is left out
 bench/vbench.py gate                # performance gate: instructions vs the merge-base, budget 1 % (~1 min)
 bench/vas-enc.py $PWD/ccs/vcc/tests/vas   # vas encodings vs llvm-mc
 bench/pg/build.sh clang && bench/pg/build.sh vcc   # PostgreSQL (macOS, meson+ninja): build + meson test (~2 min each)

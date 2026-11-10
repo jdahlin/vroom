@@ -170,7 +170,8 @@ enum { W_NONE, W_INT, W_FLT, W_CSTR, W_VPTR, W_WSTR, W_PINT, W_PFLT, W_PVPTR };
 typedef struct want {
 	uint8_t cls;	/* W_* */
 	uint8_t kind;	/* TY_* of the integer or floating type */
-	const char *name;	/* clang's spelling, quotes included */
+	const char *name;	/* clang's spelling, quotes included (often nb) */
+	char nb[48];
 } want;
 
 static int norm_int(int k)
@@ -201,8 +202,6 @@ static void int_want(const char *len, bool sgn, bool ptr, want *w, bool linux)
 	static const char *const sn[] = { "char", "short", "int", "long", "long long" };
 	static const char *const un[] = { "unsigned char", "unsigned short", "unsigned int", "unsigned long", "unsigned long long" };
 	static const int sk[] = { TY_SCHAR, TY_SHORT, TY_INT, TY_LONG, TY_LLONG };
-	static char buf[8][48];
-	static int bi;
 	int r;
 	const char *nm;
 
@@ -223,7 +222,7 @@ static void int_want(const char *len, bool sgn, bool ptr, want *w, bool linux)
 		     : len[0] == 'z' ? (sgn ? "'ssize_t' (aka 'long')" : "'size_t' (aka 'unsigned long')")
 				     : "'ptrdiff_t' (aka 'long')";
 		if (ptr) {
-			char *b = buf[bi++ & 7];
+			char *b = w->nb;
 
 			nm = len[0] == 'j' ? (sgn ? "'intmax_t *' (aka 'long *')" : "'uintmax_t *' (aka 'unsigned long *')")
 			     : len[0] == 'z' ? (sgn ? "'ssize_t *' (aka 'long *')" : "'size_t *' (aka 'unsigned long *')")
@@ -238,12 +237,8 @@ static void int_want(const char *len, bool sgn, bool ptr, want *w, bool linux)
 	w->kind = (uint8_t)(sgn ? sk[r] : norm_int(sk[r]) + 1);
 	if (!sgn && r == 0)
 		w->kind = TY_UCHAR;
-	{
-		char *b = buf[bi++ & 7];
-
-		snprintf(b, 48, "'%s%s'", sgn ? sn[r] : un[r], ptr ? " *" : "");
-		w->name = b;
-	}
+	snprintf(w->nb, sizeof w->nb, "'%s%s'", sgn ? sn[r] : un[r], ptr ? " *" : "");
+	w->name = w->nb;
 }
 
 static bool int_match(cc *c, int want_k, qty a)
