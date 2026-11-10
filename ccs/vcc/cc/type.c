@@ -201,7 +201,8 @@ VPRIV qty ty_func(cc *c, qty ret, const qty *par, uint32_t n, int flags)
 
 			t->flags = (uint8_t)flags, t->base = ret, t->n = n, t->size = 1, t->align = 4;
 			t->aux = c->nparams;
-			memcpy(&c->params[c->nparams], par, n * sizeof(qty));
+			if (n)	/* par is NULL for an implicit or unprototyped function: memcpy(_, NULL, 0) is UB */
+				memcpy(&c->params[c->nparams], par, n * sizeof(qty));
 			c->nparams += n;
 			c->fnhash[i] = idx;
 			if (++c->nfn * 2 > c->fnhcap) {
