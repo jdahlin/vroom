@@ -47,6 +47,17 @@ VPRIV void wk_free(ecx *e, const val *v)
 
 static val wk_vreg(int r) { return (val){ .k = V_REG, .r = (uint8_t)r }; }
 
+/* an address that may be 0 at run time: an undefined weak symbol's */
+static bool wk_weak0(cc *c, val v)
+{
+	const sym *y;
+
+	if (v.k != V_ADDR || RKIND(v.ref) != RK_SYM)
+		return false;
+	y = &c->syms[RIDX(v.ref)];
+	return (y->flags & SF_WEAK) && !(y->flags & SF_DEFINED);
+}
+
 /* v as a value of type t (truncated as an integer of t) */
 static val wk_const(cc *c, i128 v, qty t) { return vconst(em_trunc_to(c, v, t)); }
 
@@ -260,6 +271,7 @@ static void wk_store(ecx *e, const lval *l, qty t, val *v)
 	int r = wk_reg(e, v, t);
 
 	LO(store)(e, r, l, wk_size(e->c, t));
+	LO(tfree)(e, r);
 }
 
 /* ---------------- conversions ---------------- */
@@ -277,8 +289,8 @@ static val wk_conv(ecx *e, val v, qty from, qty to)
 	if (KIND(c, to) == TY_BOOL) {
 		if (v.k == V_CONST)
 			return vconst(v.i != 0);
-		if (v.k == V_ADDR)
-			return vconst(1);	/* (weak symbols: X3) */
+		if (v.k == V_ADDR && !wk_weak0(c, v))
+			return vconst(1);
 		return LO(cmp)(e, T_EXCLAIMEQ, fs > 4 ? 8 : 4, false, v, vconst(0));
 	}
 	if (v.k == V_CONST)
@@ -534,9 +546,22 @@ static val wk_assign(ecx *e, uint32_t n)
 		qty rt = N(x->b)->ty;
 		val a, b;
 
-		l = wk_lval(e, x->a);
-		a = wk_reload(e, &l, lt);
-		b = wk_rhs(e, &a, x->b, lt);
+		/* as clang: the right side first, then the left's address and value */
+		b = wk_gen(e, x->b);
+		if (b.k == V_REG && LO(nfree)(e) < 3) {
+			int32_t sl = wk_slot(e, 8, 8);
+			lval t = { .k = L_FRAME, .off = sl, .align = 8 };
+
+			LO(store)(e, b.r, &t, 8);
+			LO(tfree)(e, b.r);
+			l = wk_lval(e, x->a);
+			a = wk_reload(e, &l, lt);
+			b.r = (uint8_t)LO(treg)(e);
+			LO(load)(e, b.r, &t, 8, false);
+		} else {
+			l = wk_lval(e, x->a);
+			a = wk_reload(e, &l, lt);
+		}
 		if (is_ptr(c, lt)) {
 			v = wk_ptradd(e, a, b, rt, (int64_t)tsize(c, T(c, lt)->base) ?: 1, x->aux == T_MINUS);
 		} else {
@@ -630,10 +655,12 @@ static val wk_call(ecx *e, uint32_t n)
 	if (fx->op == N_CAST && fx->aux == CK_FDECAY && N(fx->a)->op == N_VAR) {
 		uint32_t s = canon_sym(c, N(fx->a)->a);
 
-		if (c->syms[s].kind == S_BUILTIN)
-			wk_unsup(e, n, "a builtin");
-		note_ref(e, REF(RK_SYM, s));
-		ref = REF(RK_SYM, s);
+		if (c->syms[s].kind == S_BUILTIN) {
+			ref = REF(RK_NAME, (uint32_t)c->syms[s].val);	/* a library function by name */
+		} else {
+			note_ref(e, REF(RK_SYM, s));
+			ref = REF(RK_SYM, s);
+		}
 	}
 	for (uint32_t i = 0; i < x->c; i++) {
 		uint32_t an = c->lists[x->b + i];
@@ -676,6 +703,17 @@ static val wk_stmtexpr(ecx *e, uint32_t n)
 		wk_stmt(e, last);
 	}
 	return vconst(0);
+}
+
+/* ---------------- builtins ---------------- */
+
+static val wk_builtin(ecx *e, uint32_t n)
+{
+	cc *c = e->c;
+	char b[64];
+
+	snprintf(b, sizeof b, "builtin %d", N(n)->aux);
+	efatal(e, N(n)->loc, "x86-64: %s is not supported yet (PLAN-x86.md X3)", b);
 }
 
 /* ---------------- expressions ---------------- */
@@ -746,10 +784,17 @@ VPRIV val wk_gen(ecx *e, uint32_t n)
 		return wk_call(e, n);
 	case N_STMTEXPR:
 		return wk_stmtexpr(e, n);
+	case N_BUILTIN:
+		return wk_builtin(e, n);
 	case N_FNUM:
 		wk_unsup(e, n, "floating point");
-	default:
-		wk_unsup(e, n, "this expression");
+	default: {
+		static const char *const nm[N_NKINDS] = { [N_SIZEOF_VLA] = "sizeof of a VLA", [N_COMPLIT] = "a compound literal",
+			[N_INIT] = "an initializer list", [N_LABELADDR] = "a label address", [N_VAARG] = "va_arg",
+			[N_CPLX] = "a complex value", [N_MEMBER] = "a member" };
+
+		wk_unsup(e, n, nm[x->op] ? nm[x->op] : "this expression");
+	}
 	}
 }
 
@@ -831,7 +876,7 @@ VPRIV void wk_cond(ecx *e, uint32_t n, bool jump_if, uint32_t lbl)
 				LO(jump)(e, lbl);
 			return;
 		}
-		if (v.k == V_ADDR) {
+		if (v.k == V_ADDR && !wk_weak0(c, v)) {
 			if (jump_if)
 				LO(jump)(e, lbl);
 			return;
