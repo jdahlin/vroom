@@ -61,6 +61,8 @@ RES = subprocess.run([CL, '-print-resource-dir'], capture_output=True, text=True
 BASE = ['--target=aarch64-linux-gnu', '-nostdinc', '-I', f'{RT}/include', '-isystem', RES,
         '-fno-PIE', '-fno-asynchronous-unwind-tables', '-fno-stack-protector', '-O2']
 BASE += os.environ.get('VCC_CFLAGS', '').split()	# e.g. -fasynchronous-unwind-tables (both compilers)
+# extra flags for vcc only: VCC_CTEST_OPT=-O3 runs the suites through vcc's -O3 optimizer (clang stays at -O2)
+VOPT = os.environ.get('VCC_CTEST_OPT', '').split()
 # clang -O2, with gcc's leniency for old code (the tests are compiled by gcc -w)
 CLFL = ['-w', '-Wno-error=implicit-function-declaration', '-Wno-error=implicit-int',
         '-Wno-error=int-conversion', '-Wno-error=incompatible-pointer-types', '-Wno-error=return-type',
@@ -240,7 +242,7 @@ def one_(t):
     wd = f'{OUT}/w/{suite}/{name}'
     os.makedirs(wd, exist_ok=True)
     cwd = os.path.dirname(path)
-    vfl = BASE + CLFL + flags   # the same flags as clang (vpp ignores what it does not know)
+    vfl = BASE + CLFL + flags + VOPT   # the same flags as clang (vpp ignores what it does not know)
     if FE_ONLY:
         rc, _, err = sh([CL, '-fsyntax-only'] + BASE + CLFL + flags + [path], cwd=cwd)
         if rc:

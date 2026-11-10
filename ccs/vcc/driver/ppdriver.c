@@ -945,7 +945,9 @@ int ppd_run(int argc, char **argv, const ppd_env *env)
 		}
 		else if (!strcmp(a, "-O0")) opt = 0, os = 0, olevel = 0;
 		else if (!strcmp(a, "-Os") || !strcmp(a, "-Oz")) { opt = 2; os = 1; olevel = 2; }
-		else if (!strncmp(a, "-O", 2)) opt = 2, os = 0, olevel = !strcmp(a, "-O1") || !strcmp(a, "-Og") ? 1 : 2;
+		else if (!strncmp(a, "-O", 2))
+			opt = 2, os = 0, olevel = !strcmp(a, "-O1") || !strcmp(a, "-Og") ? 1
+						: !strcmp(a, "-O3") || !strcmp(a, "-O4") || !strcmp(a, "-Ofast") ? 3 : 2;
 		else if (!strcmp(a, "-fpie")) pie = 1, pic = 0;
 		else if (!strcmp(a, "-fPIE")) pie = 2, pic = 0;
 		else if (!strcmp(a, "-fpic")) pic = 1, pie = 0;

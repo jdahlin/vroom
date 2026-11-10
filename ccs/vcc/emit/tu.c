@@ -423,6 +423,7 @@ static int emit_tu1(cc *c, const cc_opts *o, bool write_out, uint8_t *mf, bool *
 	}
 	E.stats = getenv("VCC_EMIT_STATS") != NULL;
 	E.noopt = getenv("VCC_NOOPT") != NULL;
+	E.opt3 = o->opt >= 3 && !WASM(c) && !getenv("VCC_NOOPT3");
 	/* wasm64: objects from the text, through arch/wasm/as */
 	E.objtext = getenv("VCC_OBJ_TEXT") != NULL || PP_IS_WASM(o->target);
 	/* -g: the line table is the assembler's, from the printer's .loc */

@@ -170,6 +170,7 @@ typedef struct emitter {
 	uint32_t *lspan;		/* per function: [2s] lowest, [2s+1] highest local sym seen */
 	int nlreg;			/* locals given callee-saved registers per function (VCC_LREGS) */
 	bool noopt;			/* VCC_NOOPT: no opt.c clean-ups (to compare) */
+	bool opt3;			/* -O3 (cc_opts.opt 3): the -O3 heuristics and instruction selection; VCC_NOOPT3 off */
 	i128 *cwval;		/* per SA_CWRITE variable: the one constant it is assigned */	/* per function: prepass state (0 no, 1 running, 2 done) */
 	uint8_t *sflags;		/* SA_* per sym */
 	uint8_t *ffacts;		/* FF_* per floating local: what every write stores */
