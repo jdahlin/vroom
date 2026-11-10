@@ -983,6 +983,105 @@ static val wk_builtin(ecx *e, uint32_t n)
 	char b[64];
 
 	switch (x->aux) {
+	case BI_CONSTANT_P: {
+		/* clang's rule without the optimizer: 1 if the front end folds the operand (a pointer
+		   only as a string literal at offset 0), else 0 (the operand is not evaluated) */
+		cval cv;
+
+		return vconst(cc_eval(c, arg[0], &cv) && (cv.kind == CV_INT || cv.kind == CV_FLT ||
+							  (cv.kind == CV_ADDR && cv.str && cv.i == 0 && !cv.sym && !cv.label)));
+	}
+	case BI_EXPECT: case BI_EXPECT_PROB: case BI_ASSUME_ALIGNED: case BI_EXTRACT_RETURN_ADDR: {
+		/* the value of the first argument; the others are evaluated first */
+		val v;
+
+		for (uint32_t i = 1; i < x->c; i++) {
+			v = wk_gen(e, arg[i]);
+			wk_free(e, &v);
+		}
+		return wk_gen(e, arg[0]);
+	}
+	case BI_ASSUME: case BI_IS_CONSTANT_EVALUATED:
+		return vconst(0);
+	case BI_PREFETCH: {
+		val v = wk_gen(e, arg[0]);
+
+		wk_free(e, &v);
+		return vconst(0);
+	}
+	case BI_UNREACHABLE: case BI_TRAP:
+		LO(trap)(e);
+		return vconst(0);
+	case BI_RETURN_ADDRESS: case BI_FRAME_ADDRESS: {
+		val v = wk_gen(e, arg[0]);
+
+		if (v.k != V_CONST || v.i != 0)
+			wk_unsup(e, n, "a return or frame address beyond level 0");
+		return LO(frame)(e, x->aux == BI_RETURN_ADDRESS);
+	}
+	case BI_OBJECT_SIZE: case BI_DYNAMIC_OBJECT_SIZE: {
+		val t = wk_gen(e, arg[1]);
+
+		return vconst(t.k == V_CONST && (t.i & 2) ? 0 : (i128)(uint64_t)-1);
+	}
+	case BI_ALLOCA: case BI_ALLOCA_UNINIT: {
+		val v = wk_gen(e, arg[0]);
+
+		e->dyn = true;
+		return LO(alloca)(e, wk_conv(e, v, N(arg[0])->ty, prim(TY_ULONG)));
+	}
+	case BI_CLZ: case BI_CLZL: case BI_CLZLL: case BI_CTZ: case BI_CTZL: case BI_CTZLL:
+	case BI_FFS: case BI_FFSL: case BI_FFSLL: case BI_POPCOUNT: case BI_POPCOUNTL: case BI_POPCOUNTLL:
+	case BI_PARITY: case BI_PARITYL: case BI_PARITYLL: case BI_BSWAP16: case BI_BSWAP32: case BI_BSWAP64: {
+		qty at = N(arg[0])->ty;
+		val v = wk_gen(e, arg[0]);
+		int sz = wk_size(c, at) > 4 ? 8 : 4;
+
+		if (wk_size(c, at) < 4)
+			v = wk_conv(e, v, at, prim(TY_UINT));
+		return LO(bitop)(e, x->aux, sz, v);
+	}
+	case BI_ADD_OVERFLOW: case BI_SUB_OVERFLOW: case BI_MUL_OVERFLOW: {
+		/* the exact result in 128 bits; overflow when it differs from the stored one extended back */
+		qty ta = N(arg[0])->ty, tb = N(arg[1])->ty, tr = T(c, N(arg[2])->ty)->base, w = prim(TY_INT128);
+		int op = x->aux == BI_ADD_OVERFLOW ? T_PLUS : x->aux == BI_SUB_OVERFLOW ? T_MINUS : T_STAR;
+		val a, b, r, lo, back;
+		lval l;
+		int rr, cp, rs;
+
+		if (wk_size(c, ta) > 8 || wk_size(c, tb) > 8 || wk_size(c, tr) > 8 || !LO(i128mem)())
+			wk_unsup(e, n, "a 128-bit overflow builtin");
+		a = wk_conv(e, wk_gen(e, arg[0]), ta, w);
+		b = wk_conv(e, wk_gen(e, arg[1]), tb, w);
+		r = LO(wbin)(e, op, true, a, b);
+		l = wk_fromval(e, wk_gen(e, arg[2]), tr);
+		rr = wk_reg(e, &r, prim(TY_ULONG));
+		cp = LO(treg)(e);
+		LO(mov)(e, cp, rr);
+		lo = wk_conv(e, (val){ .k = V_REG, .r = (uint8_t)cp }, w, tr);
+		rs = wk_reg(e, &lo, tr);
+		LO(store)(e, rs, &l, wk_size(c, tr));
+		wk_lfree(e, &l);
+		back = wk_conv(e, lo, tr, w);
+		return LO(wcmp)(e, T_EXCLAIMEQ, true, (val){ .k = V_REG, .r = (uint8_t)rr }, back);
+	}
+	case BI_SIGNBIT: {
+		qty at = N(arg[0])->ty;
+		val v = wk_gen(e, arg[0]);
+
+		if (wk_mem(e, at)) {
+			/* x87: the sign is bit 15 of the top word */
+			lval l = wk_fromval(e, v, at);
+			int r = LO(treg)(e);
+
+			l.off += 8;
+			LO(load)(e, r, &l, 2, false);
+			wk_lfree(e, &l);
+			return LO(bin)(e, T_GREATERGREATER, 4, false, (val){ .k = V_REG, .r = (uint8_t)r }, vconst(15));
+		}
+		v = LO(fbits)(e, v, wk_size(c, at));
+		return LO(bin)(e, T_GREATERGREATER, 8, false, v, vconst(wk_size(c, at) * 8 - 1));
+	}
 	case BI_VA_START: {
 		int r = wk_valist(e, arg[0]);
 
@@ -1004,8 +1103,13 @@ static val wk_builtin(ecx *e, uint32_t n)
 		LO(tfree)(e, rs);
 		return vconst(0);
 	}
-	default:
+	default: {
+		cval cv;
+
+		if (cc_eval(c, n, &cv) && cv.kind == CV_INT)
+			return vconst(cv.i);	/* folded by the front end (__builtin_classify_type ...) */
 		break;
+	}
 	}
 
 	snprintf(b, sizeof b, "builtin %d", N(n)->aux);

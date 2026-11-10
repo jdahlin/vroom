@@ -50,6 +50,9 @@ enum {
 	X_CQO,		/* rdx = sign of rax (sz 4: cltd, 8: cqto) */
 	X_IDIV, X_DIV,	/* rdx:rax / r1: rax quotient, rdx remainder */
 	X_MULW,		/* rdx:rax = rax * r1 (unsigned, 64 x 64 -> 128) */
+	X_UD2,
+	X_BSF, X_BSR,	/* r0 = index of the lowest / highest set bit of r1 */
+	X_BSWAP,	/* r0 = r0 byte-reversed (sz 4, 8) */
 	X_EXT,		/* r0 = r1's low sz bytes extended to 64 bits (cond 1: sign) */
 	X_REP,		/* cond 0: rep movsb (rdi rsi rcx), 1: rep stosb (rdi al rcx) */
 	/* SSE (X_LD/X_ST/X_MOV take xmm registers too) */

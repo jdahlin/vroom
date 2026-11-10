@@ -7,7 +7,7 @@
 static bool x64_tied(int op)
 {
 	return (op >= X_ADD && op <= X_SBB) || (op >= X_ADDI && op <= X_XORI) || (op >= X_SHLI && op <= X_SAR) ||
-	       op == X_NEG || op == X_NOT || (op >= X_FADD && op <= X_FXOR);
+	       op == X_NEG || op == X_NOT || op == X_BSWAP || (op >= X_FADD && op <= X_FXOR);
 }
 
 static bool x64_commutes(int op)
@@ -301,9 +301,22 @@ VPRIV void x64_print(ecx *e, tbuf *b, uint32_t s)
 		case X_CQO:
 			tb_s(b, sz == 8 ? "\tcqto" : "\tcltd");
 			break;
+		case X_UD2:
+			tb_s(b, "\tud2");
+			break;
+		case X_BSF: case X_BSR:
+			x64_ins(b, i->op == X_BSF ? "bsf" : "bsr", sz);
+			x64_reg(b, i->r[1], sz);
+			tb_s(b, ", ");
+			x64_reg(b, i->r[0], sz);
+			break;
+		case X_BSWAP:
+			x64_ins(b, "bswap", sz);
+			x64_reg(b, i->r[0], sz);
+			break;
 		case X_MULW:
-			x64_ins(b, "mul", 8);
-			x64_reg(b, i->r[1], 8);
+			x64_ins(b, "mul", sz);
+			x64_reg(b, i->r[1], sz);
 			break;
 		case X_IDIV: case X_DIV:
 			x64_ins(b, i->op == X_IDIV ? "idiv" : "div", sz);

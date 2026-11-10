@@ -495,3 +495,119 @@ VPRIV void x64_finish(ecx *e, uint32_t s)
 	e->E->nfn++;
 	out_chunk(e, (uint64_t)s << 1, start);
 }
+
+/* ---------------- builtins ---------------- */
+
+VPRIV void x64_trap(ecx *e) { x64_put(e, X_UD2); }
+
+VPRIV val x64_frame(ecx *e, bool ret)
+{
+	int r = x64_treg(e);
+
+	if (ret) {
+		lval l = { .k = L_REG, .r = RBP, .off = 8 };
+
+		x64_mem(e, X_LD, 8, r, &l, false);
+	} else {
+		x64_mov(e, r, RBP);
+	}
+	return (val){ .k = V_REG, .r = (uint8_t)r };
+}
+
+/* a's bits counted SWAR-style (no popcnt in the x86-64 baseline): the count in a's register */
+static void x64_popcount(ecx *e, int r, int size)
+{
+	int t = x64_treg(e);
+
+	/* r -= (r >> 1) & 0x55..; r = (r & 0x33..) + ((r >> 2) & 0x33..); r = (r + (r >> 4)) & 0x0f..; r = (r * 0x01..) >> (size * 8 - 8) */
+	x64_mov(e, t, r);
+	x64_op3(e, X_SHRI, 8, t, t, XNOREG)->imm = 1;
+	x64_movi(e, R11, 0x5555555555555555);
+	x64_op3(e, X_AND, 8, t, t, R11);
+	x64_op3(e, X_SUB, 8, r, r, t);
+	x64_mov(e, t, r);
+	x64_op3(e, X_SHRI, 8, t, t, XNOREG)->imm = 2;
+	x64_movi(e, R11, 0x3333333333333333);
+	x64_op3(e, X_AND, 8, t, t, R11);
+	x64_op3(e, X_AND, 8, r, r, R11);
+	x64_op3(e, X_ADD, 8, r, r, t);
+	x64_mov(e, t, r);
+	x64_op3(e, X_SHRI, 8, t, t, XNOREG)->imm = 4;
+	x64_op3(e, X_ADD, 8, r, r, t);
+	x64_movi(e, R11, 0x0f0f0f0f0f0f0f0f);
+	x64_op3(e, X_AND, 8, r, r, R11);
+	x64_movi(e, R11, 0x0101010101010101);
+	x64_op3(e, X_IMUL, 8, r, r, R11);
+	x64_op3(e, X_SHRI, 8, r, r, XNOREG)->imm = 56;
+	x64_tfree(e, t);
+	(void)size;
+}
+
+VPRIV val x64_bitop(ecx *e, int bi, int size, val a)
+{
+	int r = x64_toreg(e, &a, size), bits = size * 8;
+
+	if (size == 4)
+		x64_ext(e, r, 4, false);	/* (the count sees the 32 bits only) */
+	switch (bi) {
+	case BI_CLZ: case BI_CLZL: case BI_CLZLL:
+		x64_op3(e, X_BSR, size, r, r, XNOREG);
+		x64_op3(e, X_XORI, 4, r, r, XNOREG)->imm = bits - 1;
+		break;
+	case BI_CTZ: case BI_CTZL: case BI_CTZLL:
+		x64_op3(e, X_BSF, size, r, r, XNOREG);
+		break;
+	case BI_FFS: case BI_FFSL: case BI_FFSLL: {
+		/* x ? ctz(x) + 1 : 0 */
+		uint32_t lz = wk_newlabel(e);
+		rec *j;
+
+		x64_op3(e, X_TEST, size, XNOREG, r, XNOREG);
+		j = x64_put(e, X_JCC);
+		j->cond = CC_E;
+		j->label = lz;
+		x64_op3(e, X_BSF, size, r, r, XNOREG);
+		x64_op3(e, X_ADDI, 4, r, r, XNOREG)->imm = 1;
+		x64_label(e, lz);
+		break;
+	}
+	case BI_POPCOUNT: case BI_POPCOUNTL: case BI_POPCOUNTLL:
+		x64_popcount(e, r, size);
+		break;
+	case BI_PARITY: case BI_PARITYL: case BI_PARITYLL:
+		x64_popcount(e, r, size);
+		x64_op3(e, X_ANDI, 4, r, r, XNOREG)->imm = 1;
+		break;
+	case BI_BSWAP16:
+		x64_op3(e, X_BSWAP, 4, r, r, XNOREG);
+		x64_op3(e, X_SHRI, 4, r, r, XNOREG)->imm = 16;
+		break;
+	case BI_BSWAP32: case BI_BSWAP64:
+		x64_op3(e, X_BSWAP, size, r, r, XNOREG);
+		break;
+	default:
+		efatal(e, e->curloc, "x86-64: builtin %d is not supported yet (PLAN-x86.md X3)", bi);
+	}
+	return (val){ .k = V_REG, .r = (uint8_t)r };
+}
+
+/* n bytes below the stack pointer (nothing is pushed here: the stack stays 16-aligned) */
+VPRIV val x64_alloca(ecx *e, val n)
+{
+	int r = x64_toreg(e, &n, 8);
+
+	x64_op3(e, X_ADDI, 8, r, r, XNOREG)->imm = 15;
+	x64_op3(e, X_ANDI, 8, r, r, XNOREG)->imm = -16;
+	x64_op3(e, X_SUB, 8, RSP, RSP, r);
+	x64_mov(e, r, RSP);
+	return (val){ .k = V_REG, .r = (uint8_t)r };
+}
+
+VPRIV val x64_fbits(ecx *e, val v, int size)
+{
+	int r = x64_treg(e);
+
+	x64_op3(e, X_MOV, size == 4 ? 4 : 8, r, v.r, XNOREG);
+	x64_tfree(e, v.r);
+	return (val){ .k = V_REG, .r = (uint8_t)r };
+}
