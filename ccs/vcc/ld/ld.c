@@ -6376,6 +6376,12 @@ static void reset_state(void)
 	memset(&refsyms, 0, sizeof refsyms);
 	memset(&provides, 0, sizeof provides);
 	memset(&pending, 0, sizeof pending);
+	/* the lazy-archive pass (its vectors are in the arena) */
+	free(lsyms.v);
+	memset(&lsyms, 0, sizeof lsyms);
+	memset(&lcand, 0, sizeof lcand);
+	memset(&lout, 0, sizeof lout);
+	memset(&ltaken, 0, sizeof ltaken);
 	memset(&orphans, 0, sizeof orphans);
 	memset(&thunks, 0, sizeof thunks);
 	memset(&thunksecs, 0, sizeof thunksecs);
