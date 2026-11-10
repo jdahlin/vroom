@@ -31,7 +31,10 @@ VPRIV int err(As *a, const char *fmt, ...)
 	a->err = 1;
 	char *m = a->msg + a->mlen;
 	size_t sz = sizeof a->msg - a->mlen;
-	int k = snprintf(m, sz, "%s%s:%u: error: ", a->mlen ? "\n" : "", a->fname, curline(a));
+	/* inside a macro or .rept: its body's line, as llvm-mc's <instantiation> buffer */
+	bool inst = a->nfr && a->fr[a->nfr - 1].kind != FR_FILE;
+	int k = snprintf(m, sz, "%s%s:%u: error: ", a->mlen ? "\n" : "", inst ? "<instantiation>" : a->fname,
+			 inst ? a->fr[a->nfr - 1].sline : curline(a));
 	va_list ap; va_start(ap, fmt);
 	if ((size_t)k < sz) vsnprintf(m + k, sz - k, fmt, ap);
 	va_end(ap);
@@ -395,6 +398,7 @@ static int push_frame(As *a, const char *p, size_t n, int kind, size_t mark)
 	Frame *f = &a->fr[a->nfr++];
 	f->p = p; f->e = p + n; f->kind = (uint8_t)kind; f->bol = 1;
 	f->ncond = (uint32_t)a->ncs; f->mark = mark; f->line = f->sline = 1;
+	f->pline = a->nfr > 1 ? a->fr[a->nfr - 2].sline : 0;
 	return 0;
 }
 
@@ -1763,6 +1767,7 @@ static int d_rept(As *a, const char *p, const char *e)
 	int64_t cnt;
 	if (abs_expr(a, &p, e, &cnt)) return -1;
 	if (cnt < 0) return err(a, "Count is negative");
+	uint32_t at = a->nfr ? a->fr[a->nfr - 1].sline : 0;	/* (the .rept line, not .endr's) */
 	Sv body;
 	if (collect_body(a, 0, &body)) return -1;
 	size_t mark = a->xs.used;
@@ -1771,7 +1776,9 @@ static int d_rept(As *a, const char *p, const char *e)
 	size_t n = 0;
 	for (int64_t i = 0; i < cnt; i++) n += expand(a, o + n, body.s, t, 0, 0);
 	a->xs.used = (size_t)((uint8_t *)o - a->xs.base) + n;
-	return push_frame(a, o, n, FR_LOOP, mark);
+	if (push_frame(a, o, n, FR_LOOP, mark)) return -1;
+	a->fr[a->nfr - 1].pline = at;
+	return 0;
 }
 
 static int d_irp(As *a, const char *p, const char *e, int chars)
@@ -1797,6 +1804,7 @@ static int d_irp(As *a, const char *p, const char *e, int chars)
 	Sv body;
 	/* the param name lives in a->sb, which collect_body overwrites */
 	par.name = svdup(a, par.name.s, par.name.n);
+	uint32_t at = a->nfr ? a->fr[a->nfr - 1].sline : 0;
 	if (collect_body(a, 0, &body)) return -1;
 	if (chars) {
 		Sv v = vals[0];
@@ -1812,7 +1820,9 @@ static int d_irp(As *a, const char *p, const char *e, int chars)
 	size_t n = 0;
 	for (uint32_t i = 0; i < nv; i++) n += expand(a, o + n, body.s, t, &vals[i], 0);
 	a->xs.used = (size_t)((uint8_t *)o - a->xs.base) + n;
-	return push_frame(a, o, n, FR_LOOP, mark);
+	if (push_frame(a, o, n, FR_LOOP, mark)) return -1;
+	a->fr[a->nfr - 1].pline = at;
+	return 0;
 }
 
 static int d_exitm(As *a)
@@ -2364,7 +2374,11 @@ int as_snippet(As *a, const char *text, size_t len)
 		a->nstmt++; a->nstmtb += n + 1;
 		if (statement(a, s, s + n)) {
 			size_t k = strlen(a->msg);
-			snprintf(a->msg + k, sizeof a->msg - k, "\n  in: %.*s", (int)(n > 200 ? 200 : n), s);
+			k += (size_t)snprintf(a->msg + k, sizeof a->msg - k, "\n  in: %.*s", (int)(n > 200 ? 200 : n), s);
+			/* the instantiations it is in, innermost first (llvm-mc's notes) */
+			for (int i = a->nfr - 1; i > 0 && a->fr[i].kind != FR_FILE && k < sizeof a->msg; i--)
+				k += (size_t)snprintf(a->msg + k, sizeof a->msg - k, "\n%s:%u: note: while in macro instantiation",
+						      a->fr[i - 1].kind == FR_FILE ? a->fname : "<instantiation>", a->fr[i].pline);
 			/* as llvm-mc: report it and go on with the next statement (at most 20) */
 			a->mlen = (uint32_t)strlen(a->msg);
 			if (++a->nerr >= 20 || a->mlen + 600 > sizeof a->msg) break;

@@ -61,6 +61,7 @@ typedef struct {
 	size_t mark;
 	uint32_t line;
 	uint32_t sline;		/* line of the current statement */
+	uint32_t pline;		/* the instantiating statement's line in the frame below */
 } Frame;
 enum { FR_FILE, FR_MACRO, FR_LOOP };
 

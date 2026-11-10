@@ -26,8 +26,8 @@ def main():
             q = subprocess.run([VAS, f, '-o', v], capture_output=True, text=True)
             if p.returncode:    # an error test: the same file:line of every error
                 import re
-                ce = re.findall(r'^(\S+?):(\d+):\d+: error', p.stderr, re.M)
-                ve = re.findall(r'^(\S+?):(\d+): error', q.stderr, re.M)
+                ce = re.findall(r'^(\S+?):(\d+):\d+: (?:error|note)', p.stderr, re.M)
+                ve = re.findall(r'^(\S+?):(\d+): (?:error|note)', q.stderr, re.M)
                 if q.returncode and ce and ce == ve: ok += 1
                 else:
                     bad += 1
