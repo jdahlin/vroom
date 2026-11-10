@@ -1,7 +1,10 @@
 #!/usr/bin/env python3
 """vcc-darwin-s.py: vcc -S on Darwin, assembled by Apple's assembler (TODO.md T3).
 
-    bench/vcc-darwin-s.py [-j N] [-v] [PAT]
+    bench/vcc-darwin-s.py [-j N] [-v] [--clang] [PAT]
+
+--clang: clang's -S of each test assembled by vpp -c and by clang; both
+linked by clang must run the same (Apple's assembly dialect as input).
 
 For each test of the vcc suite and gcc-torture/execute: vcc builds an object
 directly (its own Mach-O writer) and also writes -S text, which clang (the
@@ -61,7 +64,7 @@ def one(src):
             return 'fail', src, 'vpp -c .s: ' + err.decode(errors='replace')[:400]
         if os.path.basename(src) not in NOIDENT and open(f'{wd}/v.o', 'rb').read() != open(f'{wd}/a.o', 'rb').read():
             return 'fail', src, 'vpp -c of -S differs from the direct object'
-        rc, _, err = sh([CLANG, '-c', '-x', 'assembler', f'{wd}/b.s', '-o', f'{wd}/b.o'])
+        rc, _, err = sh([CLANG, '-c', '-x', 'assembler', f'{wd}/b.s', '-o', f'{wd}/b.o'], timeout=60)
         if rc:
             return 'fail', src, 'as: ' + err.decode(errors='replace')[:600]
         rc, _, err = sh([CLANG, f'{wd}/b.o', '-o', f'{wd}/b', '-lm'])
@@ -73,9 +76,38 @@ def one(src):
     return 'pass', src, ''
 
 
+def one_clang(src):
+    """clang -S, assembled by vpp and by clang: both run the same"""
+    fl = flags(src)
+    if fl is None:
+        return 'skip', src, ''
+    d = os.path.dirname(src)
+    with tempfile.TemporaryDirectory() as wd:
+        if sh([CLANG] + FL + fl + ['-S', src, '-o', f'{wd}/c.s'], cwd=d)[0]:
+            return 'skip', src, ''
+        if sh([CLANG, '-c', f'{wd}/c.s', '-o', f'{wd}/c.o'])[0] or sh([CLANG, f'{wd}/c.o', '-o', f'{wd}/c', '-lm'])[0]:
+            return 'skip', src, ''
+        rc_ = sh([f'{wd}/c'], cwd=wd, timeout=10)
+        if rc_[0] < 0:
+            return 'skip', src, ''
+        if sh([f'{wd}/c'], cwd=wd, timeout=10)[1] != rc_[1]:
+            rc_ = (rc_[0], None)
+        rc, _, err = sh([VPP, '-c', f'{wd}/c.s', '-o', f'{wd}/v.o'])
+        if rc:
+            return 'fail', src, 'vpp -c: ' + err.decode(errors='replace')[:300]
+        rc, _, err = sh([CLANG, f'{wd}/v.o', '-o', f'{wd}/v', '-lm'])
+        if rc:
+            return 'fail', src, 'ld: ' + err.decode(errors='replace')[:300]
+        rv = sh([f'{wd}/v'], cwd=wd, timeout=10)
+        if rv[0] != rc_[0] or (rc_[1] is not None and rv[1] != rc_[1]):
+            return 'fail', src, f'run: clang as {rc_[0]}, vpp {rv[0]}'
+    return 'pass', src, ''
+
+
 def main(av):
     j, verbose, pat = 6, '-v' in av, None
-    av = [a for a in av if a != '-v']
+    fn = one_clang if '--clang' in av else one
+    av = [a for a in av if a not in ('-v', '--clang')]
     if '-j' in av:
         i = av.index('-j'); j = int(av[i + 1]); del av[i:i + 2]
     if av:
@@ -86,11 +118,11 @@ def main(av):
         srcs = [s for s in srcs if pat in s]
     n = {'pass': 0, 'fail': 0, 'skip': 0}
     with concurrent.futures.ThreadPoolExecutor(j) as ex:
-        for st, src, msg in ex.map(one, srcs):
+        for st, src, msg in ex.map(fn, srcs):
             n[st] += 1
             if st == 'fail' or (verbose and st != 'pass'):
                 print(f'{st.upper()} {os.path.relpath(src, T)}: {msg}')
-    print(f'darwin -S: {n["pass"]} pass, {n["fail"]} fail, {n["skip"]} skipped')
+    print(f'darwin -S{" (clang)" if fn is one_clang else ""}: {n["pass"]} pass, {n["fail"]} fail, {n["skip"]} skipped')
     return 1 if n['fail'] else 0
 
 

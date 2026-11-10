@@ -797,10 +797,14 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
   `ccs/vcc/tests/vas-obj/tlsops.s`, `tlslocal.s` byte-identical with clang -c.
 - [~] **Mach-O syntax** `@PAGE`/`@PAGEOFF`/`@GOTPAGE…`/`@TLVPPAGE…`: `vpp -c x.s`
   for a Darwin target reads Apple's dialect (`as_darwin_text`, the inverse of
-  emit's `darwin_text`) into the Mach-O writer.  *Validated:* `vcc-darwin-s.py`:
-  vpp -c of vcc's -S is byte-identical to the direct object (1447 tests; not
-  branch_far.c, whose text has no relaxation).  Left: clang's Darwin .s
-  (`.zerofill`, `.tbss`, `.cfi_*`, `.comm` log2 alignment), vasm (ELF only).
+  emit's `darwin_text`: sections, `L` labels, `.zerofill`/`.tbss`/`.comm` log2
+  alignment, NEON `op.T vA, vB` and `mov d0, v1[1]`) into the Mach-O writer
+  (commons now as Mach-O commons).  *Validated:* `vcc-darwin-s.py`: vpp -c of
+  vcc's -S is byte-identical to the direct object (1447 tests; not
+  branch_far.c, whose text has no relaxation); `--clang`: clang's -S assembled
+  by vpp runs as clang's own assembly (1432 tests).  Left: vasm (ELF only);
+  `.cfi_*` is dropped: no compact unwind (`__LD,__compact_unwind`) in vcc's
+  Mach-O, neither direct nor from text.
 - [x] **Wrong output**: GOT relocs against local symbols kept the section
   (fixed: GOT/TLS relocations keep the symbol); integer and absolute-symbol
   branch targets are the pc-relative offset, not `*ABS*` relocations; `adr`,

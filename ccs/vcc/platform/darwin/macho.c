@@ -472,8 +472,11 @@ void macho_emit(ElfObj *o, uint8_t *b)
 		p32(y, m->strx[m->nl[k]]);
 		y[4] = type;
 		y[5] = def ? (uint8_t)m->midx[sym_msec(o, m, s)] : 0;
+		/* .comm: undefined external, n_value the size, n_desc's high byte log2 of the alignment */
+		if (!def && s->common == 1 && s->value)
+			desc |= (uint16_t)(__builtin_ctzll(s->value) << 8);
 		y[6] = (uint8_t)desc; y[7] = (uint8_t)(desc >> 8);
-		p64(y + 8, def ? sym_addr(o, m, s) : 0);
+		p64(y + 8, def ? sym_addr(o, m, s) : s->common == 1 ? s->size : 0);
 	}
 	memcpy(b + m->stroff, m->str, m->strsize);
 }
