@@ -368,6 +368,14 @@ static void snippet_vcc(pp *p, vbuf *b, const fent *e, const vdiag *d, vdiag *co
 		}
 		one_line(p, b, e, d, m, nm, ln[i], width);
 	}
+	for (const char *a = d->art, *z; a && *a; a = *z ? z + 1 : z) {
+		z = strchr(a, '\n');
+		if (!z)
+			z = a + strlen(a);
+		db_c(b, ' ', (int)width + 2);
+		vbuf_put(b, a, (size_t)(z - a));
+		vbuf_s(b, "\n");
+	}
 	if (d->help) {
 		db_c(b, ' ', (int)width + 2);
 		vbuf_s(b, "= help: ");

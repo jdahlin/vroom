@@ -851,6 +851,9 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
   `-Wexpansion-to-defined`, `-Winvalid-pp-token`, `#pragma GCC warning`.
   *Validate:* one diag test per warning; `vcc-sema.py warn` stays 879/879
   (no false positives on the kernel).
+- [ ] **`-Warray-bounds` on a trailing member array**: `p->a[5]` with `a` the last
+  member (`int a[3];`) warns; clang does not (`-fstrict-flex-arrays` default: a trailing
+  array may be a flexible one).  *Validate:* diag test, both orders of members.
 - [ ] **Invalid code accepted**: duplicate enumerator / parameter,
   `_Alignas(3)`, `typeof` on a bitfield, `*(void *)p` as a
   value, `return v();` of void from int function, `-fsyntax-only` missing

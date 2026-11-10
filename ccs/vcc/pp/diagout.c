@@ -123,6 +123,10 @@ static void json_rec(pp *p, vbuf *b, const vdiag *d, int top)
 	jcstr(b, d->label);
 	vbuf_s(b, ",\"help\":");
 	jcstr(b, d->help);
+	if (d->art) {
+		vbuf_s(b, ",\"art\":");
+		jcstr(b, d->art);
+	}
 	vbuf_s(b, ",\"spans\":[");
 	for (uint32_t i = 0; i < d->nspan; i++) {
 		vbuf_s(b, i ? ",{\"start\":" : "{\"start\":");
@@ -367,6 +371,10 @@ noloc:
 	}
 	vbuf_s(b, ",\"properties\":{\"vcc/help\":");
 	jcstr(b, d->help);
+	if (d->art) {
+		vbuf_s(b, ",\"vcc/art\":");
+		jcstr(b, d->art);
+	}
 	vbuf_s(b, ",\"vcc/flag\":");
 	jcstr(b, d->flag);
 	vbuf_f(b, ",\"vcc/werror\":%s}}", d->werror ? "true" : "false");

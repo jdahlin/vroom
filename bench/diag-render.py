@@ -384,6 +384,8 @@ class Renderer:
                 elif gap > 2:
                     out += b' ' * (width - 2) + b'...\n'
             self.one_line(s, d, marks, x, width, out)
+        for a in (d['art'].split('\n') if d.get('art') else []):
+            out += b' ' * (width + 2) + a.encode() + b'\n'
         if d.get('help'):
             out += b' ' * (width + 2) + b'= help: ' + d['help'].encode() + b'\n'
         # whole lines a fix-it inserts away from the shown ones (an #include), as a patch line

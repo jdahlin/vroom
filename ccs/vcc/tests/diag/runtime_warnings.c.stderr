@@ -15,12 +15,22 @@ runtime_warnings.c:7:12: warning: shift count is negative [-Wshift-count-negativ
 runtime_warnings.c:8:10: warning: array index 4 is past the end of the array (that has type 'int[4]') [-Warray-bounds]
     8 |         int u = a[4];
       |                 ^ ~
+      +-----+-----+-----+-----+ +-----+
+      | [0] | [1] | [2] | [3] | | [4] |
+      +-----+-----+-----+-----+ +-----+
+      'a': 4 x 'int', 16 bytes
+                                   ^ index 4: bytes 16..19, just past the end
 runtime_warnings.c:1:1: note: array 'a' declared here
     1 | int a[4];
       | ^
 runtime_warnings.c:9:10: warning: array index -1 is before the beginning of the array [-Warray-bounds]
     9 |         int v = a[-1];
       |                 ^ ~~
+      +------+ +------+------+------+------+
+      | [-1] | | [0]  | [1]  | [2]  | [3]  |
+      +------+ +------+------+------+------+
+               'a': 4 x 'int', 16 bytes
+          ^ index -1: bytes -4..-1, 4 bytes before the start
 runtime_warnings.c:1:1: note: array 'a' declared here
     1 | int a[4];
       | ^

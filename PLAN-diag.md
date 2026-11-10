@@ -782,6 +782,15 @@ loopen.  En andra vandring över satsträdet (`rp_walk` i `func.c`) med den befi
 `case` 0,13 s).  Vägar genom `goto` ges inte.  *Validerat:* diag-fallet `return_path.c`,
 `return_type.c` med de nya stegen.
 
+Status D8.3 (2026-11-10): `-Warray-bounds` ritar fältets celler (`[0] [1] … [n-1]`, högst
+fyra), indexets cell utanför dem med `...` emellan, fältets storlek (`'a': 4 x 'int', 16
+bytes`) och vilka byte indexet når ("8 bytes past the end", "just past the end", "before the
+start"); ASCII eller Unicode efter `-fdiagnostics-text-art-charset`.  Bilden är en ny del av
+posten (`art`): vcc-stilen visar den under källraderna, JSON och SARIF (`vcc/art`) bär den,
+`diag-render.py` återskapar den; clang- och berättarstilen visar den inte.  Clangs not "array
+'a' declared here" ges nu också för medlemmar (vid deklarationens början).  *Validerat:*
+diag-fallet `bounds_art.c`, `runtime_warnings.c` med bilderna, JSON återskapar texten.
+
 ## Ordning och milstolpar
 
 | milstolpe | steg | synligt för användaren |

@@ -1266,6 +1266,16 @@ void pp_diag_label(pp *p, vdiag *d, uint32_t b, uint32_t e, const char *label)
 	d->span[d->nspan++] = (vdspan){ b, e, label ? dstr(p, label, strlen(label)) : NULL };
 }
 
+int pp_diag_art_on(const pp *p)
+{
+	return p->o->diag_style != PP_DSTYLE_VCC ? 0 : p->o->diag_unicode ? 2 : 1;
+}
+
+void pp_diag_art(pp *p, vdiag *d, const char *s, size_t n)
+{
+	d->art = dstr(p, s, n);
+}
+
 void pp_diag_help(pp *p, vdiag *d, const char *fmt, ...)
 {
 	char buf[512];

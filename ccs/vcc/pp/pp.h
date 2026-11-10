@@ -207,6 +207,7 @@ struct vdiag {
 	const char *msg;	/* the message, without the flag */
 	const char *label;	/* the primary location's label, or NULL */
 	const char *help;	/* an action that fixes it, in words ("= help: ..."), or NULL */
+	const char *art;	/* a text-art diagram under the snippet (lines, no final newline), or NULL */
 	const void *track;	/* the return address in vcc's reporting function (VCC_TRACK_DIAG) */
 	const char *ms;		/* the diagnosed token's spelling when it came from a macro */
 	vdspan *span;
@@ -225,6 +226,10 @@ void pp_diag_label(pp *p, vdiag *d, uint32_t b, uint32_t e, const char *label);
 void pp_diag_fix(pp *p, vdiag *d, uint32_t b, uint32_t e, const char *s, int app);
 __attribute__((format(printf, 3, 4)))
 void pp_diag_help(pp *p, vdiag *d, const char *fmt, ...);
+/* a diagram shown under the source lines in the vcc style (GCC's text art) */
+void pp_diag_art(pp *p, vdiag *d, const char *s, size_t n);
+/* 0: the style shows no diagram; 1: ASCII; 2: Unicode box drawing */
+int pp_diag_art_on(const pp *p);
 __attribute__((format(printf, 4, 5)))
 vdiag *pp_diag_note(pp *p, vdiag *d, uint32_t loc, const char *fmt, ...);
 /* the token spelling when loc is a macro expansion's (clang's caret at the invocation) */
