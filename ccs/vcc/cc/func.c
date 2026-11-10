@@ -135,6 +135,23 @@ VPRIV void function_def(cc *c, uint32_t s, const declr *d)
 	body = compound_stmt(c, NULL);
 	scope_close(c);
 	{
+		uint32_t rb = c->prevloc;	/* the closing brace */
+		const sym *y = &c->syms[s];
+		bool nr = y->flags & SF_NORETURN;
+		qty rt = T(c, y->ty)->base;
+		bool main_ = idlen_(y->name) == 4 && !memcmp(idstr_(y->name), "main", 4);
+
+		if (nr || (!is_void(c, rt) && !main_)) {
+			int k = body_falls_off(c, body, first_label);
+
+			if (k && nr)
+				cc_warnx(c, "invalid-noreturn", true, NULL, rb, NULL, 0, NULL, 0, "function declared 'noreturn' should not return");
+			else if (k)
+				cc_warnx(c, "return-type", true, NULL, rb, NULL, 0, NULL, 0, "non-void function does not return a value%s",
+					 k == 1 ? " in all control paths" : "");
+		}
+	}
+	{
 		/* side effects of decayed VLA parameter sizes run first, in order */
 		vec items;
 

@@ -1044,7 +1044,7 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
   vcc-diag.py), 12 flag combinations identical to clang.
 - [ ] **Missing warnings** (only 7 `-W` flags): `-Wunused-variable`,
   `-Winteger-overflow`, `-Wexcess-initializers`, `-Wreturn-stack-address`,
-  `-Wconstant-conversion`, `-Winvalid-noreturn`,
+  `-Wconstant-conversion`,
   `-Wuninitialized`, `-Wunknown-attributes`, `-Wdeprecated-declarations`,
   `-Wunused-value`; pp `-Wextra-tokens`,
   `-Wexpansion-to-defined`, `-Winvalid-pp-token`, `#pragma GCC warning`.
@@ -1052,6 +1052,12 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
   (no false positives on the kernel).  (Done: `-Wmultichar` in C and `#if`, "character constant too long",
   multi-character wide/Unicode literals as errors: diag `multichar.c`; the
   diagnostic printer leaves out the snippet for a repeated location as clang.)
+  (Done: `-Wreturn-type` (fall off the end, "in all control paths") and
+  `-Winvalid-noreturn` (also a return in a noreturn function), "no case
+  matching constant switch condition": `cc/flow.c`, reachability as clang's
+  CFG with constant conditions (also && / || / const variables, the kernel's
+  scoped_guard), noreturn calls and goto; diag `return_type*.c`, kernel warn
+  879/879, PostgreSQL no differences.)
 - [x] **`u8'a'` in C23**: the lexer still gives `u8` and `'a'`; the front
   end and `#if` join them under `-std=c23`/`gnu2x` when adjacent.  Done:
   diag `u8_char.c`, `u8_char_if.c` (and `pp_binop.c`: #if's 'not a valid

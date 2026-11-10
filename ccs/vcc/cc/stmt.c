@@ -516,6 +516,23 @@ VPRIV uint32_t statement(cc *c)
 			body = sub_statement(c);
 			if (!c->sw_default && KIND(c, et) == TY_ENUM)
 				switch_enum_warn(c, et, cnd);
+			if (!c->sw_default) {
+				cval cv;
+
+				if (cc_eval(c, cnd, &cv) && cv.kind == CV_INT) {
+					bool hit = false;
+
+					for (uint32_t i = c->case_base; i < c->ncase && !hit; i++)
+						hit = cv.i >= c->cases[i].lo && cv.i <= c->cases[i].hi;
+					if (!hit) {
+						pp_span r = rng(c, cnd);
+
+						report(c, "warning", r.b, NULL, 0, NULL, 0, is_signed(c, N(cnd)->ty) ?
+						       "no case matching constant switch condition '%lld'" : "no case matching constant switch condition '%llu'",
+						       (long long)cv.i);
+					}
+				}
+			}
 			c->ncase = c->case_base, c->case_base = sb;
 			c->sw_default = sd;
 		}
@@ -620,6 +637,9 @@ VPRIV uint32_t statement(cc *c)
 			       IDF(c->syms[c->fn].name));
 		}
 		expect_semi(c, "after return statement");
+		if (c->fn && (c->syms[c->fn].flags & SF_NORETURN))
+			cc_warnx(c, "invalid-noreturn", true, NULL, loc, NULL, 0, NULL, 0, "function '%.*s' declared 'noreturn' should not return",
+				 IDF(c->syms[c->fn].name));
 		return mkstmt(c, N_RETURN, loc, e, 0, 0);
 	}
 	case KW_goto:
