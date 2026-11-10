@@ -1043,7 +1043,8 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
   `pp_werror_named`).  Done: diag `conv_flags*.c` (`diag-flags:` in
   vcc-diag.py), 12 flag combinations identical to clang.
 - [ ] **Missing warnings** (only 7 `-W` flags): `-Wunused-variable`,
-  `-Winteger-overflow`, `-Wreturn-stack-address`,
+  `-Winteger-overflow`, `-Wreturn-stack-address` of a compound literal
+  (clang prints the initializer with its expression printer),
   `-Wconstant-conversion`,
   `-Wuninitialized`, `-Wunknown-attributes`, `-Wdeprecated-declarations`,
   `-Wunused-value`; pp `-Wextra-tokens`,
@@ -1062,6 +1063,8 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
   elements once per list, strings too long for their char array; an excess
   braced element is skipped whole (it stopped at its first token): diag
   `excess_init.c`.)
+  (Done: `-Wreturn-stack-address` for locals and parameters through &, array
+  decay, members, indexing, casts and ?: (diag `return_stack.c`).)
 - [x] **`u8'a'` in C23**: the lexer still gives `u8` and `'a'`; the front
   end and `#if` join them under `-std=c23`/`gnu2x` when adjacent.  Done:
   diag `u8_char.c`, `u8_char_if.c` (and `pp_binop.c`: #if's 'not a valid

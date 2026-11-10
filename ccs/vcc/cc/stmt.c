@@ -61,6 +61,60 @@ VPRIV void unused_result(cc *c, uint32_t e, bool last)
 	}
 }
 
+/* clang's -Wreturn-stack-address: the address of a local or parameter returned (addr: e's address is taken) */
+static void return_stack_addr(cc *c, uint32_t e, bool addr)
+{
+	while (e) {
+		const node *x = N(e);
+
+		switch (x->op) {
+		case N_CAST:
+			if (x->aux == CK_DECAY) {
+				e = x->a, addr = true;	/* an array's address */
+				continue;
+			}
+			if (addr && x->aux != CK_NOP)
+				return;
+			e = x->a;
+			continue;
+		case N_COND:
+			if (x->b)
+				return_stack_addr(c, x->b, addr);
+			e = x->c;
+			continue;
+		case N_ADDR:
+			if (addr)
+				return;
+			e = x->a, addr = true;
+			continue;
+		case N_MEMBER:
+			if (!addr)
+				return;
+			e = x->a;	/* s.m: s's storage */
+			continue;
+		case N_INDEX:
+			if (!addr)
+				return;
+			e = x->a, addr = false;	/* x[i]: the address x is */
+			continue;
+		case N_VAR: {
+			const sym *y = &c->syms[x->a];
+			pp_span r = rng(c, e);
+
+			if (!addr || y->kind != S_VAR || y->depth == 0 || y->sc == SC_STATIC || y->sc == SC_EXTERN ||
+			    (y->flags & SF_GLOBAL))
+				return;
+			cc_warnx(c, "return-stack-address", true, NULL, r.b, &r, 1, NULL, 0,
+				 "address of stack memory associated with %s '%.*s' returned",
+				 y->flags & SF_PARAM ? "parameter" : "local variable", IDF(y->name));
+			return;
+		}
+		default:
+			return;
+		}
+	}
+}
+
 static void assign_cond_warn(cc *c, uint32_t e)
 {
 	if (N(e)->op == N_ASSIGN && !N(e)->aux && !(N(e)->flags & (NF_PAREN | NF_MACRO | NF_ERR))) {
@@ -637,6 +691,8 @@ VPRIV uint32_t statement(cc *c)
 			       IDF(c->syms[c->fn].name));
 		}
 		expect_semi(c, "after return statement");
+		if (e && c->fn)
+			return_stack_addr(c, e, false);
 		if (c->fn && (c->syms[c->fn].flags & SF_NORETURN))
 			cc_warnx(c, "invalid-noreturn", true, NULL, loc, NULL, 0, NULL, 0, "function '%.*s' declared 'noreturn' should not return",
 				 IDF(c->syms[c->fn].name));
