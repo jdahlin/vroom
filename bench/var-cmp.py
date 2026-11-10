@@ -104,7 +104,10 @@ def main():
         # updating regular archives: r by basename (not with P), q, d, s, m
         [f'cDrs A {four}', 'cDr A kernel/fork.o init/main.o'], [f'cDrs A {four}', 'cDPr A kernel/fork.o'],
         [f'cDrs A {four}', 'q A kernel/fork.o', 'd A fork.o'], [f'cDrs A {four}', 'd A main.o nope.o'],
-        [f'cDrS A {four}', 's A'], [f'cDrs A {four}', 'm A fork.o'], ['q A kernel/fork.o init/main.o'], ['cDPrsT A arch/arm64/kernel/vdso/vdso.so.dbg'],
+        [f'cDrS A {four}', 's A'], [f'cDrs A {four}', 'm A fork.o'], ['q A kernel/fork.o init/main.o'],
+        # BSD format (llvm-ar on macOS when the first member is not ELF), kept on update
+        [f'cDrs A .config {four}'], [f'cDrS A .config {four}'], [f'cDrs A .config {four}', 'd A .config'],
+        [f'cDrs A {four} .config', 'd A fork.o main.o exit.o memory.o'], ['cDr A .config', 'r A kernel/fork.o'], ['cDPrsT A arch/arm64/kernel/vdso/vdso.so.dbg'],
     ]
     ebad = 0
     for arch in ('.varcmp/a.a', 'a.a'):

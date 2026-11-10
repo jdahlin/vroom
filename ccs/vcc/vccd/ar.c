@@ -11,7 +11,9 @@
  * Operations r, m, t, q, s (p, x, d: regular archives only); modifiers c D P s S T u(ignored) i b a, and --thin.
  * A regular archive (GNU format: basenames, "name/" or "/OFFSET" into "//"
  * for names of 16 bytes or more, the data padded to even with '\n') is only
- * created and updated (r by basename, q, d, s, m) with an ELF object first, and read (t, p, x).
+ * created and updated (r by basename, q, d, s, m) and read (t, p, x); a new one
+ * is BSD format when its first member is not ELF (llvm-ar on macOS), an
+ * existing one keeps its format.
  * A thin archive's members are paths, relative to the archive's directory,
  * with no data:
  *
@@ -419,7 +421,105 @@ static const char *base_of(const char *p)
 	return s ? s + 1 : p;
 }
 
-static bool write_archive(arq *q, const char *archive_abs, const char *shown, const mlist *l, bool symtab, bool thin)
+static void le32(vsbuf *b, uint32_t v)
+{
+	unsigned char c[4] = { v, v >> 8, v >> 16, v >> 24 };
+
+	vsbuf_put(b, c, 4);
+}
+
+static const char zeros8[8];
+
+/*
+ * llvm-ar's Darwin (BSD) format, what it writes on macOS when an archive's
+ * first member is not ELF: each member "#1/N" with its name (NUL-padded) at
+ * the start of the data, N such that the data starts 8-aligned, the member
+ * padded with '\n' to end 8-aligned; "__.SYMDEF" (unless S): the byte size
+ * of the (name offset, member offset) pairs, the pairs, the string table's
+ * size and the strings, zero-padded; all little-endian.
+ */
+static bool build_bsd(arq *q, vsbuf *out, const mlist *l, bool symtab)
+{
+	vsbuf syms = { 0 };
+	uint32_t *nsym = calloc(l->n + 1, sizeof *nsym), total = 0;
+	uint64_t *mpos = calloc(l->n + 1, sizeof *mpos), pos, symsize = 0;
+	bool any = false, ok = false;
+	vmapped d;
+
+	if (!nsym || !mpos)
+		goto done;
+	for (size_t i = 0; symtab && i < l->n; i++) {
+		if (!mget(&l->m[i], &d)) {
+			err(q, "ar: error: %s: %s\n", l->m[i].name, strerror(errno));
+			goto done;
+		}
+		bool okm = elf_syms(&d, &syms, &nsym[i], &any);
+		mput(&l->m[i], &d);
+		if (!okm) {
+			err(q, "ar: error: %s: %s\n", l->m[i].name, "malformed ELF symbol table");
+			goto done;
+		}
+		total += nsym[i];
+	}
+	if (symtab) {
+		symsize = 12 + 4 + 8 * (uint64_t)total + 4 + syms.n;
+		symsize += (8 - (8 + 60 + symsize) % 8) % 8;
+	}
+	pos = 8 + (symtab ? 60 + symsize : 0);
+	for (size_t i = 0; i < l->n; i++) {
+		size_t nl = strlen(base_of(l->m[i].name)), npad = (8 - (pos + 60 + nl) % 8) % 8;
+		uint64_t body = nl + npad + l->m[i].size;
+
+		mpos[i] = pos;
+		pos += 60 + body + (8 - (pos + 60 + body) % 8) % 8;
+	}
+	vsbuf_put(out, "!<arch>\n", 8);
+	if (symtab) {
+		uint64_t start = out->n;
+		uint32_t so = 0;
+		const char *sp = (const char *)syms.p;
+
+		header(out, "#1/12", "0", "0", "0", "0", symsize);
+		vsbuf_put(out, "__.SYMDEF\0\0\0", 12);
+		le32(out, 8 * total);
+		for (size_t i = 0; i < l->n; i++)
+			for (uint32_t k = 0; k < nsym[i]; k++) {
+				le32(out, so);
+				le32(out, (uint32_t)mpos[i]);
+				so += (uint32_t)strlen(sp + so) + 1;
+			}
+		le32(out, (uint32_t)syms.n);
+		vsbuf_put(out, syms.p, syms.n);
+		vsbuf_put(out, zeros8, 60 + symsize - (out->n - start));
+	}
+	for (size_t i = 0; i < l->n; i++) {
+		const char *bn = base_of(l->m[i].name);
+		size_t nl = strlen(bn), npad = (8 - (mpos[i] + 60 + nl) % 8) % 8;
+		uint64_t body = nl + npad + l->m[i].size, tail = (8 - (mpos[i] + 60 + body) % 8) % 8;
+		char nm[32];
+
+		snprintf(nm, sizeof nm, "#1/%zu", nl + npad);
+		header(out, nm, "0", "0", "0", "644", body + tail);
+		vsbuf_put(out, bn, nl);
+		vsbuf_put(out, zeros8, npad);
+		if (!mget(&l->m[i], &d)) {
+			err(q, "ar: error: %s: %s\n", l->m[i].name, strerror(errno));
+			goto done;
+		}
+		vsbuf_put(out, d.p, l->m[i].size < d.n ? l->m[i].size : d.n);
+		mput(&l->m[i], &d);
+		vsbuf_put(out, "\n\n\n\n\n\n\n\n", tail);
+	}
+	ok = !out->oom && !syms.oom;
+done:
+	free(syms.p);
+	free(nsym);
+	free(mpos);
+	return ok;
+}
+
+static bool write_archive(arq *q, const char *archive_abs, const char *shown, const mlist *l, bool symtab, bool thin,
+			  bool bsd)
 {
 	vsbuf out = { 0 }, names = { 0 }, syms = { 0 };
 	uint32_t *nsym = NULL, total = 0;
@@ -430,21 +530,10 @@ static bool write_archive(arq *q, const char *archive_abs, const char *shown, co
 	int fd;
 	bool ok = false;
 
-	if (!thin && l->n) {
-		/* llvm-ar takes the format from the first member: GNU for ELF, else the host's (BSD here) */
-		vmapped d;
-		bool elf;
-
-		if (!mget(&l->m[0], &d)) {
-			err(q, "ar: error: %s: %s\n", l->m[0].name, strerror(errno));
+	if (bsd) {
+		if (!build_bsd(q, &out, l, symtab))
 			goto out;
-		}
-		elf = d.n >= 4 && !memcmp(d.p, "\177ELF", 4);
-		mput(&l->m[0], &d);
-		if (!elf) {
-			err(q, "ar: error: %s: %s\n", l->m[0].name, "a regular archive must start with an ELF object");
-			goto out;
-		}
+		goto write;
 	}
 	for (i = 0; i < l->n; i++) {
 		const char *nm = thin ? l->m[i].name : base_of(l->m[i].name);
@@ -532,6 +621,7 @@ static bool write_archive(arq *q, const char *archive_abs, const char *shown, co
 			}
 		}
 	}
+write:
 	if (out.oom || names.oom || syms.oom) {
 		err(q, "ar: error: %s%s\n", "out of memory", "");
 		goto out;
@@ -594,7 +684,7 @@ static bool write_all_fd(int fd, const void *p, size_t n)
 }
 
 /* the members of the regular archive d, in order: names as stored, data in d */
-static bool read_regular(arq *q, const vmapped *d, const char *shown, mlist *l)
+static bool read_regular(arq *q, const vmapped *d, const char *shown, mlist *l, bool *bsd)
 {
 	const char *b = (const char *)d->p, *longn = NULL;
 	size_t sz = d->n, longsz = 0;
@@ -612,6 +702,23 @@ static bool read_regular(arq *q, const vmapped *d, const char *shown, mlist *l)
 			goto bad;
 		if (h[0] == '/' && h[1] == '/' && h[2] == ' ') {
 			longn = h + 60, longsz = msz;
+		} else if (!memcmp(h, "#1/", 3)) {	/* BSD: the name at the start of the data */
+			size_t nlen = strtoull(h + 3, NULL, 10);
+
+			if (nlen > msz)
+				goto bad;
+			*bsd = true;
+			nl = strnlen(h + 60, nlen);
+			snprintf(name, sizeof name, "%.*s", (int)nl, h + 60);
+			if (strcmp(name, "__.SYMDEF") && strcmp(name, "__.SYMDEF SORTED")) {
+				member m = { strdup(name), NULL, 0644, msz - nlen, (const unsigned char *)h + 60 + nlen };
+
+				if (!m.name || !ml_push(l, m)) {
+					free(m.name);
+					err(q, "ar: error: %s%s\n", "out of memory", "");
+					return false;
+				}
+			}
 		} else if (!(h[0] == '/' && (h[1] == ' ' || !memcmp(h, "/SYM64/", 7)))) {
 			if (h[0] == '/') {
 				size_t off = strtoull(h + 1, NULL, 10), e;
@@ -635,7 +742,7 @@ static bool read_regular(arq *q, const vmapped *d, const char *shown, mlist *l)
 				return false;
 			}
 		}
-		o += 60 + msz + (msz & 1);
+		o += 60 + msz + (*bsd ? 0 : (msz & 1));
 	}
 	return true;
 bad:
@@ -652,7 +759,9 @@ static int regular_read(arq *q, const vmapped *d, const char *shown, char op, ch
 	vsbuf out = { 0 };
 	int rc = 0;
 
-	if (!found || !read_regular(q, d, shown, &l)) {
+	bool bsd = false;
+
+	if (!found || !read_regular(q, d, shown, &l, &bsd)) {
 		free(found);
 		ml_free(&l);
 		return 1;
@@ -716,7 +825,7 @@ int ar_run(const char *cwd, int argc, char **argv, int outfd, int errfd)
 	mlist old = { 0 }, res = { 0 }, moved = { 0 };
 	struct stat st;
 	vmapped d = { 0 };
-	bool have_old = false, regular_old = false;
+	bool have_old = false, regular_old = false, bsd = false;
 
 	if (!(files = calloc(argc, sizeof(*files))))
 		return 1;
@@ -774,7 +883,7 @@ int ar_run(const char *cwd, int argc, char **argv, int outfd, int errfd)
 				rc = regular_read(&q, &d, archive, op, files, nfiles);
 				goto out;
 			}
-			if (!read_regular(&q, &d, archive, &old))
+			if (!read_regular(&q, &d, archive, &old, &bsd))
 				goto out;
 			regular_old = true;
 		}
@@ -925,7 +1034,18 @@ int ar_run(const char *cwd, int argc, char **argv, int outfd, int errfd)
 		}
 		free(used);
 	}
-	if (!q.failed && write_archive(&q, archive_abs, archive, &res, symtab, thin))
+	if (!thin && !regular_old && res.n) {
+		/* a new regular archive: llvm-ar's format from its first member (GNU for ELF, else BSD on macOS) */
+		vmapped fm;
+
+		if (!mget(&res.m[0], &fm)) {
+			err(&q, "ar: error: %s: %s\n", res.m[0].name, strerror(errno));
+			goto out_lists;
+		}
+		bsd = !(fm.n >= 4 && !memcmp(fm.p, "\177ELF", 4));
+		mput(&res.m[0], &fm);
+	}
+	if (!q.failed && write_archive(&q, archive_abs, archive, &res, symtab, thin, bsd))
 		rc = 0;
 out_lists:
 	ml_free(&res);
