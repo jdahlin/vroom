@@ -46,6 +46,7 @@ typedef struct attrs {		/* the attributes of one declaration */
 	uint32_t depr;		/* deprecated: the attribute name's location, 0: none */
 	uint32_t deprmsg;	/* deprecated("msg"): string index + 1, 0: none */
 	uint32_t wur;		/* 1: warn_unused_result, 2: [[nodiscard]] */
+	uint32_t ifunc;		/* ifunc("resolver"): alias is the resolver, an STT_GNU_IFUNC symbol */
 	uint32_t counted_by;	/* identifier id */
 	uint32_t errmsg;	/* error("..."): string index + 1, 0: none */
 	uint32_t visibility;

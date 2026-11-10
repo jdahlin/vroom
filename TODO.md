@@ -620,8 +620,11 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
   ("expected attribute name"); clang warns (`-Wignored-attributes`, did you
   mean '_Clang', note at the built-in macro) and takes it as `clang::`.
   *Validate:* diag test.
-- [ ] **Attributes without effect**: `ifunc`, `alloc_size`,
-  `format`, `nonnull`, `returns_twice`, `target`.  (Done: `deprecated`
+- [ ] **Attributes without effect**: `alloc_size`,
+  `format`, `nonnull`, `returns_twice`, `target`.  (Done: `ifunc`
+  (STT_GNU_IFUNC, global as clang, direct under PIE like an alias:
+  `tests/pic/ifunc.c`, `alias.c` in vcc-pic.py, which now also compares
+  symbol types and bindings); `deprecated`
   (functions, variables, typedefs, tags, enumerators; not inside a
   deprecated function) and `warn_unused_result`/`[[nodiscard]]`, also in
   statement expressions: diag `deprecated*.c`; kernel warn 879/879,

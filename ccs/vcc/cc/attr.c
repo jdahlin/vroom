@@ -7,7 +7,7 @@ enum {
 	A_NONE, A_ALIGNED, A_PACKED, A_SECTION, A_MODE, A_CLEANUP, A_ALIAS, A_WEAK, A_USED, A_UNUSED,
 	A_NORETURN, A_ALWAYS_INLINE, A_NOINLINE, A_GNU_INLINE, A_TRANSPARENT_UNION, A_VISIBILITY,
 	A_CONSTRUCTOR, A_DESTRUCTOR, A_COUNTED_BY, A_VECTOR_SIZE, A_COLD, A_NONSTRING, A_MAY_ALIAS,
-	A_WEAKREF, A_NAKED, A_NOCF, A_ERROR, A_OVERLOADABLE, A_NOINSTR, A_TLS_MODEL, A_EXT_VECTOR, A_DEPRECATED, A_WUR, A_NODISCARD,
+	A_WEAKREF, A_NAKED, A_NOCF, A_ERROR, A_OVERLOADABLE, A_NOINSTR, A_TLS_MODEL, A_EXT_VECTOR, A_DEPRECATED, A_WUR, A_NODISCARD, A_IFUNC,
 	A_COUNT
 };
 
@@ -21,7 +21,7 @@ static const char *const attr_names[A_COUNT] = {
 	[A_NONSTRING] = "nonstring", [A_MAY_ALIAS] = "may_alias", [A_WEAKREF] = "weakref",
 	[A_NOINSTR] = "no_instrument_function", [A_NAKED] = "naked", [A_NOCF] = "nocf_check", [A_ERROR] = "error",
 	[A_OVERLOADABLE] = "overloadable", [A_TLS_MODEL] = "tls_model", [A_EXT_VECTOR] = "ext_vector_type",
-	[A_DEPRECATED] = "deprecated", [A_WUR] = "warn_unused_result", [A_NODISCARD] = "nodiscard",
+	[A_DEPRECATED] = "deprecated", [A_WUR] = "warn_unused_result", [A_NODISCARD] = "nodiscard", [A_IFUNC] = "ifunc",
 };
 
 static uint32_t *attr_dir[NDIR];
@@ -299,6 +299,10 @@ __attribute__((noinline)) VPRIV void attribute_list_(cc *c, attrs *a)
 					a->aligned = 16;
 				}
 				continue;
+			case A_IFUNC:
+				a->ifunc = 1;
+				an = A_ALIAS;
+				/* fall through */
 			case A_SECTION:
 			case A_ALIAS:
 			case A_VISIBILITY:
@@ -490,6 +494,7 @@ VPRIV void merge_attrs(attrs *to, const attrs *from)
 	if (from->extvec) to->extvec = from->extvec;
 	if (from->depr) to->depr = from->depr, to->deprmsg = from->deprmsg;
 	if (from->wur) to->wur = from->wur;
+	if (from->ifunc) to->ifunc = from->ifunc;
 	if (from->counted_by) to->counted_by = from->counted_by;
 	if (from->visibility) to->visibility = from->visibility;
 	if (from->errmsg) to->errmsg = from->errmsg;

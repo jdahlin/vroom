@@ -521,14 +521,15 @@ static int emit_tu1(cc *c, const cc_opts *o, bool write_out, uint8_t *mf, bool *
 				const attrs *a = sym_attrs(c, s);
 
 				/* Darwin: clang's (#pragma weak) aliases are local, .weak_reference on a definition */
-				tb_s(&tail, DARWIN(c) ? "" : (y->flags & SF_WEAK) ? "\t.weak\t" : y->sc == SC_STATIC ? "" : "\t.globl\t");
-				if (!DARWIN(c) && (y->sc != SC_STATIC || (y->flags & SF_WEAK))) {
+				/* clang: an ifunc is global even when static */
+				tb_s(&tail, DARWIN(c) ? "" : (y->flags & SF_WEAK) ? "\t.weak\t" : y->sc == SC_STATIC && !a->ifunc ? "" : "\t.globl\t");
+				if (!DARWIN(c) && (y->sc != SC_STATIC || (y->flags & SF_WEAK) || a->ifunc)) {
 					sym_name(c, &tail, s);
 					tb_c(&tail, '\n');
 				}
 				tb_s(&tail, "\t.type\t");
 				sym_name(c, &tail, s);
-				tb_s(&tail, y->kind == S_FUNC ? ",@function\n" : ",@object\n");
+				tb_s(&tail, a->ifunc ? ",@gnu_indirect_function\n" : y->kind == S_FUNC ? ",@function\n" : ",@object\n");
 				tb_s(&tail, "\t.set\t");
 				sym_name(c, &tail, s);
 				tb_s(&tail, DARWIN(c) ? ", _" : ", ");	/* (an assembler name: Mach-O's prefix) */

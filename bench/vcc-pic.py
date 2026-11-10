@@ -2,7 +2,8 @@
 """vcc-pic.py: GOT and TLS use per code model (-fno-pic, -fPIE, -fPIC, the hosted
 default) checked against clang: for every C file in ccs/vcc/tests/pic, the
 symbols with GOT or TLS relocations and the relocation types in each object must
-match clang -c's (<1 s)."""
+match clang -c's, and so must the type and binding of the named symbols
+(STT_GNU_IFUNC for ifunc) (<1 s)."""
 import glob, os, re, subprocess, sys, tempfile
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from hostenv import llvm, BUILD
@@ -18,6 +19,15 @@ def relocs(o):
         if m and ('GOT' in m.group(1) or 'TLS' in m.group(1)): s.add((m.group(1), m.group(2)))
     return s
 
+def syms(o):
+    out = subprocess.run([RE, '-s', o], capture_output=True, text=True, check=True).stdout
+    s = set()
+    for l in out.splitlines():
+        x = l.split()
+        if len(x) == 8 and x[0].endswith(':') and x[3] not in ('SECTION', 'FILE') and not x[7].startswith('.L') and not x[7].startswith('$'):
+            s.add((x[7], x[3], x[4]))
+    return s
+
 TLSM = [f'{p} -ftls-model={m}' for p in ('-fPIC', '-fno-pic') for m in ('global-dynamic', 'local-dynamic', 'initial-exec', 'local-exec')]
 bad = ok = 0
 with tempfile.TemporaryDirectory() as t:
@@ -29,7 +39,7 @@ with tempfile.TemporaryDirectory() as t:
             r = subprocess.run([VPP] + fl + ['-o', f'{t}/v.o'], capture_output=True, text=True)
             if r.returncode:
                 print('FAIL', os.path.basename(f), ' '.join(mode), r.stderr[:200]); bad += 1; continue
-            a, b = relocs(f'{t}/c.o'), relocs(f'{t}/v.o')
+            a, b = relocs(f'{t}/c.o') | syms(f'{t}/c.o'), relocs(f'{t}/v.o') | syms(f'{t}/v.o')
             if a != b:
                 bad += 1
                 print('DIFF', os.path.basename(f), ' '.join(mode) or '(default)', 'clang only:', sorted(a - b), 'vcc only:', sorted(b - a))

@@ -239,6 +239,8 @@ static bool sym_needs_got(cc *c, uint32_t ref)
 			}
 			if (c->o->pic == 2)
 				return true;
+			if (a && a->alias)
+				return false;	/* an alias or ifunc is defined here */
 			if (!(y->flags & (SF_DEFINED | SF_TENTATIVE)) || (y->kind == S_FUNC && !y->body))
 				return true;
 		}
