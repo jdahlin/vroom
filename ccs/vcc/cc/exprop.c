@@ -422,15 +422,25 @@ static void runtime_warn(cc *c, int op, uint32_t l, uint32_t r, uint32_t loc)
 		else if (!cv.i && c->defer_rt) {
 			if (c->ndefer < 8)
 				c->defer[c->ndefer].loc = loc, c->defer[c->ndefer].r = rr, c->defer[c->ndefer++].rem = op == T_PERCENT;
-		} else if (!cv.i)
+		} else if (!cv.i && c->fn)	/* (clang's DiagRuntimeBehavior: at the end of the function) */
+			rt_defer(c, "division-by-zero", NULL, loc, &rr, 1, NULL, 0, "%s by zero is undefined",
+				 op == T_SLASH ? "division" : "remainder");
+		else if (!cv.i)
 			cc_warnx(c, "division-by-zero", true, NULL, loc, &rr, 1, NULL, 0, "%s by zero is undefined",
 			      op == T_SLASH ? "division" : "remainder");
 		return;
 	}
-	if (cv.i < 0)
-		cc_warnx(c, "shift-count-negative", true, NULL, loc, &rr, 1, NULL, 0, "shift count is negative");
-	else if (cv.i >= (i128)ty_size(c, promoted(c, l)) * 8)
-		cc_warnx(c, "shift-count-overflow", true, NULL, loc, &rr, 1, NULL, 0, "shift count >= width of type");
+	{
+		const char *fl = cv.i < 0 ? "shift-count-negative" : "shift-count-overflow";
+		const char *m = cv.i < 0 ? "shift count is negative" : "shift count >= width of type";
+
+		if (cv.i >= 0 && cv.i < (i128)ty_size(c, promoted(c, l)) * 8)
+			return;
+		if (c->fn)
+			rt_defer(c, fl, NULL, loc, &rr, 1, NULL, 0, "%s", m);
+		else
+			cc_warnx(c, fl, true, NULL, loc, &rr, 1, NULL, 0, "%s", m);
+	}
 }
 
 

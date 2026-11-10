@@ -1225,17 +1225,14 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
   uninitialized notes); `c->paren` holds them as distances, so the decl
   cache and replay copy them without fix-ups: diag `paren_ranges.c`.)
   *Validate:* diag tests.
-- [ ] **Diagnostics found missing (2026-11-10)**: -Wshift-count-*,
-  -Wdivision-by-zero come at once (clang: at the end of the function,
-  DiagRuntimeBehavior; tried with rt_defer, diag `runtime_warnings.c` then
-  differs); -Wunused-variable for a variable whose initializer had an error.  (Done: self-comparison
-  (-Wtautological-compare): `self_compare.c`; "; take the address with &",
-  the hints on parenthesized operands, an unnamed parameter's note where its
-  name would be, a parameter type without top-level qualifiers:
+- [x] **Diagnostics found missing (2026-11-10)**: done.  -Wshift-count-*,
+  -Wdivision-by-zero and -Warray-bounds (with its note) at the end of the
+  function (DiagRuntimeBehavior, rt_defer); -Wunused-variable kept after a
+  DefaultError conversion error (clang drops it only after a hard error):
+  `runtime_order.c`.  Self-comparison: `self_compare.c`; "; take the address
+  with &", parenthesized-operand hints, unnamed parameter notes:
   `int_conv_hints.c`, `unnamed_param_note.c`; -Wconditional-type-mismatch,
-  "*(" ")" dereference hints, `p == 0.5` as invalid operands:
-  `cond_mismatch_etc.c`.)
-  *Validate:* one diag test each.
+  "*(" ")" hints, `p == 0.5`: `cond_mismatch_etc.c`.
 - [ ] **Longer fuzz runs** and pp-diff over the whole fuzz corpus (PLAN-fas2
   "Status fuzzning").  *Validate:* runs recorded in the plan, findings in
   `regress/`.

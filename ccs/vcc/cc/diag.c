@@ -120,7 +120,7 @@ VPRIV void rt_defer(cc *c, const char *flag, const char *const *groups, uint32_t
 	if (c->nrtd >= 64)
 		return;
 	c->rtd[c->nrtd].flag = flag, c->rtd[c->nrtd].groups = groups, c->rtd[c->nrtd].loc = loc;
-	c->rtd[c->nrtd].ms = ms, c->rtd[c->nrtd].mlen = mlen, c->rtd[c->nrtd].nr = (uint32_t)nr;
+	c->rtd[c->nrtd].ms = ms, c->rtd[c->nrtd].mlen = mlen, c->rtd[c->nrtd].nr = (uint32_t)nr, c->rtd[c->nrtd].nmsg[0] = 0;
 	for (int i = 0; i < nr && i < 2; i++)
 		c->rtd[c->nrtd].r[i] = r[i];
 	va_start(ap, fmt);
@@ -133,7 +133,8 @@ VPRIV void rt_flush(cc *c)
 	for (uint32_t i = 0; i < c->nrtd; i++) {
 		pp_dinfo d = { "warning", c->rtd[i].loc, c->rtd[i].r, (int)c->rtd[i].nr, NULL, 0, c->rtd[i].ms, c->rtd[i].mlen };
 
-		pp_warnx(c->p, c->rtd[i].flag, true, c->rtd[i].groups, &d, "%s", c->rtd[i].msg);
+		if (pp_warnx(c->p, c->rtd[i].flag, true, c->rtd[i].groups, &d, "%s", c->rtd[i].msg) && c->rtd[i].nmsg[0])
+			note(c, c->rtd[i].nloc, "%s", c->rtd[i].nmsg);
 	}
 	c->nrtd = 0;
 }
