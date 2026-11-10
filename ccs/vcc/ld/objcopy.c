@@ -397,6 +397,8 @@ static struct {
 	const char *prefix_syms, *prefix_alloc;
 	const char **remove;
 	uint32_t nremove;
+	const char **redef;	/* "old=new" */
+	uint32_t nredef;
 	const char **only;
 	uint32_t nonly;
 	const char **unneeded;
@@ -641,11 +643,23 @@ static int objcopy_run(int dirfd)
 		for (uint32_t i = 1; i < nsym; i++) {
 			OSym *y = &sym[i];
 			uint8_t type = y->info & 15, bind = y->info >> 4;
+			for (uint32_t r = 0; r < oc.nredef && type != STT_SECTION; r++) {
+				const char *eq = strchr(oc.redef[r], '=');
+
+				if ((size_t)(eq - oc.redef[r]) == strlen(y->name) && !strncmp(y->name, oc.redef[r], eq - oc.redef[r])) {
+					free(y->newname);
+					y->newname = strdup(eq + 1);
+					break;
+				}
+			}
 			if (oc.prefix_syms && type != STT_SECTION) {
-				size_t a = strlen(oc.prefix_syms), b = strlen(y->name);
+				const char *nm = y->newname ? y->newname : y->name;
+				size_t a = strlen(oc.prefix_syms), b = strlen(nm);
+				char *old = y->newname;
 				y->newname = xcalloc(a + b + 1, 1);
 				memcpy(y->newname, oc.prefix_syms, a);
-				memcpy(y->newname + a, y->name, b + 1);
+				memcpy(y->newname + a, nm, b + 1);
+				free(old);
 			}
 			if (oc.strip_all || (oc.strip_debug && type == STT_FILE))
 				y->removed = true;
@@ -899,8 +913,8 @@ static int objcopy_run(int dirfd)
 		p->p_offset = seg[i].off;
 	}
 	Shdr *sh = (Shdr *)(b + shoff);
-	/* llvm-objcopy: .llvm_addrsig's sh_link is dropped once the symbols may have changed */
-	bool changed = oc.strip_all || oc.strip_debug || oc.nremove || oc.nonly || oc.nunneeded || oc.prefix_syms;
+	/* llvm-objcopy: .llvm_addrsig's sh_link is dropped once sections or symbols may be removed */
+	bool changed = oc.strip_all || oc.strip_debug || oc.nremove || oc.nonly || oc.nunneeded;
 	for (uint32_t k = 1; k < ns; k++) {
 		OSec *s = &sec[k];
 		if (s->removed)
@@ -970,6 +984,10 @@ int objcopy_main(int argc, char **argv, int dirfd, FILE *err)
 			push(&oc.unneeded, &oc.nunneeded, v);
 		} else if ((v = VAL("--dump-section"))) {
 			push(&oc.dump, &oc.ndump, v);
+		} else if ((v = VAL("--redefine-sym"))) {
+			if (!strchr(v, '='))
+				oerror("bad format for --redefine-sym");
+			push(&oc.redef, &oc.nredef, v);
 		} else if ((v = VAL("--prefix-symbols"))) {
 			oc.prefix_syms = v;
 		} else if ((v = VAL("--prefix-alloc-sections"))) {
@@ -996,6 +1014,7 @@ int objcopy_main(int argc, char **argv, int dirfd, FILE *err)
 	free(oc.only);
 	free(oc.unneeded);
 	free(oc.dump);
+	free(oc.redef);
 	return rc || oerrors;
 }
 
