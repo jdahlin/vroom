@@ -330,6 +330,26 @@ kärnan och kan vänta.
 
 ## Status
 
+### X3 (2026-11-10): pågår, i gren `claude/x86-x3` (PR jdahlin/vroom#9)
+- Klart: biblioteksinbyggda som anrop; aggregat (initierare, kopior, sammansatta
+  literaler, medlemmar av rvärden); bit-fält; System V-anrop (klassning,
+  poster som argument och resultat, dold resultatpekare, varargs med
+  registersparområde); flyttal (SSE för float/double, x87 för long double via
+  minnesplatser, `st(0)`-resultat, alla konverteringar); `__int128` (16-byte
+  objekt via adress, libgcc för `/ % <<` och flyttalskonvertering); inbyggda
+  (bitoperationer, overflow via 128 bitar, `alloca`, `constant_p` utan inlining,
+  `signbit` ...).
+- `bench/vcc-x86.py`: 1573/1768. Körfel bara där clangs optimerare krävs
+  (`20030125-1`, `bcp-1`, `builtin-constant`) och 11 länkfel av samma slag eller
+  `__builtin_setjmp`. `vcc-abi.py --target x86_64`: 6/11, med två nya tester
+  (`int_records`, `fp_records`) som klarar alla fyra kombinationerna; resten
+  stannar vid komplexa tal, vektorer, alignment > 16 och packade bit-fält.
+- Kvar i X3: VLA, komplexa tal, GNU-vektorer, TLS, PIC/PIE (GOT, PLT), atomics och
+  `__sync_*`, etikettadresser och beräknat `goto`, cleanup-variabler, alignment
+  över 16, `__float128`-aritmetik (libgcc `__addtf3` ...), inlining av
+  `__always_inline` med `need_fold` och `constant_p` efter inlining,
+  `-mgeneral-regs-only`/`-mno-sse`, UTF-8-namn citerade som clang, `VCC_WALKLOG`.
+
 ### X2 (2026-11-10): påbörjat, i gren `claude/x86-x2-walker`
 - Lagren finns i minsta form: `emit/rec/rec.h` (posthuvudet, `opdesc`),
   `emit/walk/` (vandraren: uttryck med vikning av konstanter, lvärden, villkor
