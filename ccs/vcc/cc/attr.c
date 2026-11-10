@@ -58,11 +58,13 @@ static int attr_of(uint32_t id)
 	return pg ? (int)pg[id & (DIR_PAGE - 1)] : 0;
 }
 
-VPRIV void skip_balanced(cc *c)
+VPRIV uint32_t skip_balanced(cc *c)
 {
 	int depth = 0;
+	uint32_t last;
 
 	do {
+		last = tok(c)->loc;
 		if (is(c, T_LPAREN))
 			depth++;
 		else if (is(c, T_RPAREN))
@@ -71,6 +73,7 @@ VPRIV void skip_balanced(cc *c)
 			fatal(c, tok(c)->loc, "unexpected end of file in attribute");
 		next(c);
 	} while (depth > 0);
+	return last;
 }
 
 VPRIV uint32_t string_index(cc *c)
@@ -104,6 +107,91 @@ VPRIV int mode_kind(cc *c, uint32_t id, bool sgn)
 	if (!strcmp(b, "word") || !strcmp(b, "pointer")) return sgn ? TY_LONG : TY_ULONG;	/* the pointer's width */
 	if (!strcmp(b, "TI")) return sgn ? TY_INT128 : TY_UINT128;
 	return 0;
+}
+
+#include "attrnames.inc"
+
+/* name without __x__, as clang normalises it */
+static void attr_norm(const char **s, size_t *n)
+{
+	if (*n >= 4 && (*s)[0] == '_' && (*s)[1] == '_' && (*s)[*n - 2] == '_' && (*s)[*n - 1] == '_')
+		*s += 2, *n -= 4;
+}
+
+/* whether clang knows GNU attribute s for the target (its __has_attribute) */
+static bool gnu_attr_known(cc *c, const char *s, size_t n)
+{
+	int bit = 1 << (c->o->target == PP_WASM32 ? PP_WASM64 : c->o->target);
+	size_t lo = 0, hi = sizeof(gnu_attrs) / sizeof(gnu_attrs[0]);
+
+	attr_norm(&s, &n);
+	while (lo < hi) {
+		size_t mid = (lo + hi) / 2;
+		int r = strncmp(gnu_attrs[mid].name, s, n);
+
+		if (!r && gnu_attrs[mid].name[n])
+			r = 1;
+		if (!r)
+			return gnu_attrs[mid].on & bit;
+		if (r < 0)
+			lo = mid + 1;
+		else
+			hi = mid;
+	}
+	return false;
+}
+
+/* Levenshtein distance (clang's StringRef::edit_distance with replacements) */
+static unsigned edit_distance(const char *a, size_t na, const char *b, size_t nb)
+{
+	unsigned row[128];
+
+	if (nb >= 128)
+		return ~0u;
+	for (size_t j = 0; j <= nb; j++)
+		row[j] = (unsigned)j;
+	for (size_t i = 1; i <= na; i++) {
+		unsigned prev = row[0];
+
+		row[0] = (unsigned)i;
+		for (size_t j = 1; j <= nb; j++) {
+			unsigned old = row[j], v = prev + (a[i - 1] != b[j - 1]);
+
+			if (row[j - 1] + 1 < v)
+				v = row[j - 1] + 1;
+			if (old + 1 < v)
+				v = old + 1;
+			row[j] = v;
+			prev = old;
+		}
+	}
+	return row[nb];
+}
+
+/*
+ * clang's tryGetCorrectedAttrName with its SimpleTypoCorrection: the first
+ * nearest spelling within (n + 2) / 3 edits, candidates whose length differs
+ * by d skipped unless n / d >= 3; then only if clang knows it.
+ */
+static const char *attr_correction(cc *c, const char *s, size_t n)
+{
+	unsigned max = (unsigned)(n + 2) / 3, best = max + 1;
+	const char *bn = NULL;
+
+	attr_norm(&s, &n);
+	for (size_t i = 0; i < sizeof(attr_spellings) / sizeof(attr_spellings[0]); i++) {
+		size_t cn = strlen(attr_spellings[i]), ld = cn > n ? cn - n : n - cn;
+		unsigned d;
+
+		if (ld && n / ld < 3)
+			continue;
+		d = edit_distance(s, n, attr_spellings[i], cn);
+		if (d < best)
+			best = d, bn = attr_spellings[i];
+	}
+	if (!bn || !best || !gnu_attr_known(c, bn, strlen(bn)))
+		return NULL;
+	return bn;
 }
 
 /* GNU __attribute__((...)) and C23 [[...]] (gnu::name is the GNU attribute) */
@@ -154,6 +242,8 @@ __attribute__((noinline)) VPRIV void attribute_list_(cc *c, attrs *a)
 			an = attr_of(t->id);
 			if (!an && kwof(t) == KW_const)
 				an = A_NONE;
+			const uint32_t tid = t->id;	/* t is the queue head: stale after next() */
+
 			next(c);
 			switch (an) {
 			case A_ALIGNED:
@@ -296,8 +386,27 @@ __attribute__((noinline)) VPRIV void attribute_list_(cc *c, attrs *a)
 				break;
 			default: break;
 			}
-			if (is(c, T_LPAREN))
-				skip_balanced(c);
+			{
+				uint32_t end = loc;
+				const vident *nm = &vintern_ents[tid];
+
+				if (is(c, T_LPAREN))
+					end = skip_balanced(c);
+				if (an == A_NONE && !std && !gnu_attr_known(c, nm->s, nm->len)) {
+					pp_span r = { loc, pp_tok_end(c->p, end) };
+					const char *fix = attr_correction(c, nm->s, nm->len);
+
+					if (fix) {
+						pp_fixit fx = { loc, pp_tok_end(c->p, loc), fix };
+
+						cc_warnx(c, "unknown-attributes", true, NULL, loc, &r, 1, &fx, 1,
+							 "unknown attribute '%.*s' ignored; did you mean '%s'?", (int)nm->len, nm->s, fix);
+					} else {
+						cc_warnx(c, "unknown-attributes", true, NULL, loc, &r, 1, NULL, 0,
+							 "unknown attribute '%.*s' ignored", (int)nm->len, nm->s);
+					}
+				}
+			}
 		}
 		expect(c, close, cs);
 		expect(c, close, cs);

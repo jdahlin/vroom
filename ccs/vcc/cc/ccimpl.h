@@ -313,7 +313,7 @@ VPRIV uint32_t expr(cc *c);
 VPRIV bool const_expr(cc *c, i128 *v, uint32_t *np);
 /* attr.c */
 VPRIV void init_attrs(void);
-VPRIV void skip_balanced(cc *c);
+VPRIV uint32_t skip_balanced(cc *c);
 VPRIV uint32_t string_index(cc *c);
 VPRIV int mode_kind(cc *c, uint32_t id, bool sgn);
 static inline bool at_attribute(cc *c);

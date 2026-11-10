@@ -601,10 +601,13 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
   implements, see above; the rest are builtins vcc lacks).
 - [ ] **SVE in the front end**: `arm_sve.h` types, `target("+sve")`.
   *Validate:* T1 under `qemu -cpu max`, layout checks for the types.
-- [ ] **`ext_vector_type` silently dropped; unknown attributes no warning** [P].
-  `attr_names` `cc.c:5052`.
-  *Validate:* layout `_Static_assert(sizeof(float4)==16)`; T4/diag for
-  `-Wunknown-attributes`.
+- [x] **`ext_vector_type` silently dropped; unknown attributes no warning** [P].
+  Done: `ext_vector_type` (tests/vcc/ext_vector.c);
+  `-Wunknown-attributes` for GNU syntax from clang's attribute names per
+  target (`cc/gen-attrnames.sh` -> `attrnames.inc`) with its typo
+  correction (SimpleTypoCorrection), 625 generated typos identical to clang
+  on all three targets, diag `unknown_attribute.c`.  Left: `[[scope::x]]`
+  and unscoped `[[x]]` (clang warns with `gnu::` corrections).
 - [ ] **Attributes without effect**: `ifunc`, `alloc_size`,
   `format`, `nonnull`, `deprecated`, `warn_unused_result`, `returns_twice`,
   `target`.
