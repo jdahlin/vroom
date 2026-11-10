@@ -330,6 +330,8 @@ static inline bool attrs_empty(const attrs *a);
 /* the 64-bit integer type: long, or long long under ILP32 */
 #define CC_I64(c, uns) (CC_ILP32(c) ? ((uns) ? TY_ULLONG : TY_LLONG) : ((uns) ? TY_ULONG : TY_LONG))
 VPRIV void merge_attrs(attrs *to, const attrs *from);
+/* fmt.c */
+VPRIV void format_check(cc *c, uint32_t fs, const uint32_t *args, const qty *aty, uint32_t nargs);
 VPRIV void asm_label(cc *c, attrs *a);
 /* declspec.c */
 VPRIV void unknown_type(cc *c, dspec *ds);

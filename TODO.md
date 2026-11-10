@@ -620,12 +620,19 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
   ("expected attribute name"); clang warns (`-Wignored-attributes`, did you
   mean '_Clang', note at the built-in macro) and takes it as `clang::`.
   *Validate:* diag test.
-- [ ] **Attributes without effect**: `format` (`-Wformat`).  Accepted
+- [x] **Attributes without effect**: none left.  Accepted
   and needing nothing today: `returns_twice` (locals live in memory:
   `tests/vcc/returns_twice.c`; the optimizer item must honour it when
   locals go to registers), `alloc_size` (only `__builtin_object_size`,
   where vcc's -1 is the conservative answer), `target` (vas gates no
-  instructions yet: the `.arch` item).  (Done: `nonnull` (`-Wnonnull`
+  instructions yet: the `.arch` item).  (Done: `format(printf, i, j)`
+  (`-Wformat`, `-Wformat-extra-args`, `-Wformat-insufficient-args`,
+  `-Wformat-invalid-specifier`, `-Wformat-security`; `cc/fmt.c` after
+  clang's CheckFormatHandler, the type answers per target from clang in
+  `cc/fmttab.inc` by `gen-fmttab.py`; Linux and Darwin, not wasm or
+  `-fshort-wchar`; diag `format*.c`, 16 random 300-call files identical to
+  clang on both targets except typedef names, kernel warn 879/879,
+  PostgreSQL 0 differences); `nonnull` (`-Wnonnull`
   for null constants, plain/indexed/on a parameter: diag `nonnull.c`);
   `ifunc`
   (STT_GNU_IFUNC, global as clang, direct under PIE like an alias:
@@ -1036,7 +1043,7 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
   `-Winteger-overflow`, `-Wexcess-initializers`, `-Wreturn-stack-address`,
   `-Wconstant-conversion`, `-Wmultichar`, `-Winvalid-noreturn`,
   `-Wuninitialized`, `-Wunknown-attributes`, `-Wdeprecated-declarations`,
-  `-Wformat`, `-Wunused-value`; pp `-Wextra-tokens`,
+  `-Wunused-value`; pp `-Wextra-tokens`,
   `-Wexpansion-to-defined`, `-Winvalid-pp-token`, `#pragma GCC warning`.
   *Validate:* one diag test per warning; `vcc-sema.py warn` stays 879/879
   (no false positives on the kernel).
@@ -1053,6 +1060,14 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
 - [x] **`"abc"[1]` as a static initializer**: an element of a string
   literal folds (`eval`); `{ "q"[0] }` in an int array parsed as a string
   initializer.  Done: `tests/vcc/static_strelem.c`.
+- [ ] **Typedef names in -Wformat**: clang prints the argument's typedef
+  (`'size_t' (aka 'unsigned long')`) and fixes `%d` to `%zu`
+  (namedTypeToLengthModifier); vcc keeps no typedef sugar on expressions
+  and prints `'unsigned long'`, `%lu`.  Not modelled (the call is left
+  alone): `%I64d`, `%w32d`, `%b`, `%qd`, `*n$`, Darwin `%D/%O/%U`, a format
+  through a `const char[]` variable or `format_arg` (gettext).
+  *Validate:* `/tmp`-style random files as for format (gen in TODO history:
+  printf calls over typedef'd arguments) identical to clang.
 - [ ] **Vector types in messages**: clang keeps the typedef name (`'v4'`),
   appends ` (vector of 4 'int' values)` after the quoted type.
   `ext_vector_type(N)` is now a vector (it was ignored: `sizeof` wrong;
