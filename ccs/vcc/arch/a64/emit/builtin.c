@@ -474,14 +474,43 @@ VPRIV void at_swp(ecx *e, unsigned sz, int rs, int rt, int rn)
 	tfree(e, ws), tfree(e, t);
 }
 
-/* ld<op>al rs, rt, [rn] (opc: 0 add, 1 clr, 2 eor, 3 set): rt = old, *rn = old op rs */
-VPRIV void at_ldop(ecx *e, unsigned sz, unsigned opc, int rs, int rt, int rn)
+/* u = t op rs for the opc of at_ldop (min/max on the low 1 << sz bytes, signed or not) */
+static void at_opval(ecx *e, unsigned sz, unsigned opc, int u, int t, int rs)
 {
 	static const int op[] = { I_ADD, I_BIC, I_EOR, I_ORR };
+	static const int cond[] = { C_GT, C_LT, C_HI, C_LO };	/* smax smin umax umin: keep t */
+
+	if (opc < 4) {
+		op3(e, op[opc], sz == 3, u, t, rs);
+	} else if (opc == 8) {	/* nand */
+		op3(e, I_AND, 1, u, t, rs);
+		op3(e, I_ORN, 1, u, ZR, u);
+	} else {
+		bool sg = opc < 6;
+		int a = t, b = rs, w = -1;
+
+		if (sz < 2) {
+			w = treg(e);
+			extend(e, u, t, 1 << sz, sg), extend(e, w, rs, 1 << sz, sg);
+			a = u, b = w;
+		}
+		op3(e, I_SUBS, sz == 3, ZR, a, b);
+		op3s(e, I_CSEL, 1, u, t, rs, cond[opc - 4], 0);
+		if (w >= 0)
+			tfree(e, w);
+	}
+}
+
+/*
+ * ld<op>al rs, rt, [rn]: rt = old, *rn = old op rs; opc: 0 add, 1 clr, 2 eor,
+ * 3 set, 4 smax, 5 smin, 6 umax, 7 umin; 8 nand (no LSE form: always a loop)
+ */
+VPRIV void at_ldop(ecx *e, unsigned sz, unsigned opc, int rs, int rt, int rn)
+{
 	int t, u, ws;
 	uint32_t top;
 
-	if (e->c->o->lse) {
+	if (e->c->o->lse && opc < 8) {
 		word(e, sz << 30 | 0x38e00000u | (unsigned)rs << 16 | opc << 12 | (unsigned)rn << 5 | (unsigned)rt);
 		return;
 	}
@@ -489,7 +518,7 @@ VPRIV void at_ldop(ecx *e, unsigned sz, unsigned opc, int rs, int rt, int rn)
 	top = newlabel(e);
 	deflabel_loop(e, top, true);
 	ex_ld(e, sz, t, rn);
-	op3(e, op[opc], sz == 3, u, t, rs);
+	at_opval(e, sz, opc, u, t, rs);
 	ex_st(e, sz, ws, u, rn);
 	cbz(e, true, 0, ws, top);
 	mov(e, 1, rt, t);
@@ -643,9 +672,10 @@ static val gen_atomic(ecx *e, const node *x, const uint32_t *arg)
 		break;
 	}
 	default: {
-		/* ld<op>al: add 000, clr 001, eor 010, set 011 */
-		int base = id >= BI_ATOMIC_ADD_FETCH ? id - BI_ATOMIC_ADD_FETCH : id - BI_ATOMIC_FETCH_ADD;	/* add sub and or xor */
-		static const unsigned opc[] = { 0, 0, 1, 3, 2 };
+		/* ld<op>al: add 000, clr 001, eor 010, set 011, smax 100, smin 101, umax 110, umin 111 */
+		int base = id >= BI_ATOMIC_ADD_FETCH ? id - BI_ATOMIC_ADD_FETCH : id - BI_ATOMIC_FETCH_ADD;	/* add sub and or xor nand max min */
+		static const unsigned opc[] = { 0, 0, 1, 3, 2, 8, 4, 5 };
+		unsigned o = opc[base] + (base >= 6 && !sg ? 2 : 0);
 		int rv = toreg(e, &v1), rs = treg(e), r = treg(e);
 
 		if (base == 1)
@@ -654,12 +684,20 @@ static val gen_atomic(ecx *e, const node *x, const uint32_t *arg)
 			op3(e, I_ORN, 1, rs, ZR, rv);		/* mvn: clear the bits not in v */
 		else
 			mov(e, 1, rs, rv);
-		at_ldop(e, sz, opc[base], rs, r, rp);
+		at_ldop(e, sz, o, rs, r, rp);
 		tfree(e, rs);
 		if (id >= BI_ATOMIC_ADD_FETCH) {
 			static const int bop[] = { I_ADD, I_SUB, I_AND, I_ORR, I_EOR };
 
-			op3(e, bop[base], 1, r, r, rv);
+			if (base < 5) {
+				op3(e, bop[base], 1, r, r, rv);
+			} else {
+				int u = treg(e);
+
+				at_opval(e, sz, o, u, r, rv);
+				mov(e, 1, r, u);
+				tfree(e, u);
+			}
 		}
 		if (n < 8)
 			extend(e, r, r, (int)n, sg);
@@ -897,7 +935,8 @@ VPRIV val gen_builtin(ecx *e, uint32_t n)
 	case BI_ATOMIC_LOAD: case BI_ATOMIC_STORE: case BI_ATOMIC_EXCHANGE: case BI_ATOMIC_CMPXCHG:
 	case BI_ATOMIC_FETCH_ADD: case BI_ATOMIC_FETCH_SUB: case BI_ATOMIC_FETCH_AND: case BI_ATOMIC_FETCH_OR:
 	case BI_ATOMIC_FETCH_XOR: case BI_ATOMIC_ADD_FETCH: case BI_ATOMIC_SUB_FETCH: case BI_ATOMIC_AND_FETCH:
-	case BI_ATOMIC_OR_FETCH: case BI_ATOMIC_XOR_FETCH: case BI_SYNC_VAL_CAS: case BI_SYNC_BOOL_CAS:
+	case BI_ATOMIC_OR_FETCH: case BI_ATOMIC_XOR_FETCH: case BI_ATOMIC_FETCH_NAND: case BI_ATOMIC_FETCH_MAX:
+	case BI_ATOMIC_FETCH_MIN: case BI_ATOMIC_NAND_FETCH: case BI_ATOMIC_MAX_FETCH: case BI_ATOMIC_MIN_FETCH: case BI_SYNC_VAL_CAS: case BI_SYNC_BOOL_CAS:
 		return gen_atomic(e, x, arg);
 	case BI_ATOMIC_THREAD_FENCE: case BI_ATOMIC_SIGNAL_FENCE: {
 		val m = gen(e, arg[0]);
@@ -908,10 +947,11 @@ VPRIV val gen_builtin(ecx *e, uint32_t n)
 		return vnone();
 	}
 	case BI_ATOMIC_LOCK_FREE: {
-		val a = gen(e, arg[0]), b = gen(e, arg[1]);
+		for (uint32_t i = 0; i < x->c; i++) {	/* (size, p); __c11_atomic_is_lock_free: (size) */
+			val a = gen(e, arg[i]);
 
-		val_free(e, &a);
-		val_free(e, &b);
+			val_free(e, &a);
+		}
 		return vconst(1);
 	}
 	case BI_ARM_RSR: {

@@ -108,7 +108,7 @@ VPRIV void slot_tag(ecx *e, ins *i, int64_t off, int64_t len)
 		}
 	}
 }
-static bool sym_needs_got(cc *c, uint32_t ref);
+VPRIV bool sym_needs_got(cc *c, uint32_t ref);
 
 /* address of a symbol into rd */
 VPRIV void addr_of_ref(ecx *e, int rd, uint32_t ref, int64_t off)
@@ -214,7 +214,7 @@ VPRIV int lbase(ecx *e, const lval *l, int64_t *off, int size)
 
 VPRIV int log2sz(uint64_t n) { return n == 1 ? 0 : n == 2 ? 1 : n == 4 ? 2 : 3; }
 
-static bool sym_needs_got(cc *c, uint32_t ref)
+VPRIV bool sym_needs_got(cc *c, uint32_t ref)
 {
 	if (RKIND(ref) == RK_NAME)
 		return DARWIN(c);

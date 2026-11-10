@@ -1,0 +1,7 @@
+sync_nand.c:3:30: warning: the semantics of this intrinsic changed with GCC version 4.4 - the newer semantics are provided here [-Wsync-fetch-and-nand-semantics-changed]
+    3 |         __sync_fetch_and_nand(&iv, 6);
+      |         ~~~~~~~~~~~~~~~~~~~~~       ^
+sync_nand.c:4:29: warning: the semantics of this intrinsic changed with GCC version 4.4 - the newer semantics are provided here [-Wsync-fetch-and-nand-semantics-changed]
+    4 |         __sync_nand_and_fetch(&s, 1);
+      |         ~~~~~~~~~~~~~~~~~~~~~      ^
+2 warnings generated.

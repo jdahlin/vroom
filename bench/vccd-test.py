@@ -547,6 +547,45 @@ def records_replaced_per_tu():
         check(p.returncode == 1 and 'summary or json' in p.stderr, f'bad query: {p.returncode} {p.stderr}')
     finally: v.stop()
 
+@test()
+def links_in_process_independent():
+    """links one after another in one vccd (vld in-process, state reset per link) give vlink's output"""
+    v = Vccd(workers=1)
+    try:
+        d = f'{v.dir}/w'
+        # many named sections, so the script's section-name cache grows past its first size
+        n = 1500
+        src = ''.join(f'__attribute__((section(".t.f{i}"))) int f{i}(void) {{ return {i}; }}\n' for i in range(n))
+        src += ''.join(f'__attribute__((section("set_{k}"), used)) static const int s{k}[2] = {{ {k}, {k} }};\n'
+                       for k in range(4))
+        src += 'extern const int __start_set_1[], __stop_set_1[];\n'
+        src += 'long span(void) { return __stop_set_1 - __start_set_1; }\n'
+        tu(d, 'm.c', src)
+        st, err = v.cc(d, 'm.c', 'm.o')
+        check(st == 0, f'compile: {err[-300:]}')
+        scripts = {
+            'a.lds': 'SECTIONS { . = 0x10000; .text : { *(.t.*) *(.text*) } .data : { *(.data*) } }\n',
+            'b.lds': 'SECTIONS { . = 0x40000; .tx : { *(.text*) } .t : { *(.t.f1*) } .rest : { *(.t.*) } }\n',
+        }
+        for name, text in scripts.items():
+            open(f'{d}/{name}', 'w').write(text)
+        links = [['--eh-frame-hdr', '-T', 'a.lds'], ['-T', 'b.lds'], ['-T', 'a.lds', '-e', 'f7'],
+                 ['-T', 'b.lds', '-e', 'f3']]
+        ref = {}	# vccd's vld adds --vroom-stubs (ld_run)
+        for i, a in enumerate(links):
+            r = subprocess.run([f'{vd.BIN}/vlink', '--vroom-stubs', '-o', f'ref{i}', 'm.o'] + a, cwd=d, capture_output=True,
+                               text=True, timeout=30)
+            check(r.returncode == 0, f'vlink {a}: {r.stderr[-300:]}')
+            ref[i] = open(f'{d}/ref{i}', 'rb').read()
+        for rnd in range(3):
+            for i, a in enumerate(links):
+                r = subprocess.run([f'{vd.BIN}/vld', '-o', f'out{i}', 'm.o'] + a, cwd=d, capture_output=True, text=True,
+                                   env=dict(os.environ, VCC_SOCK=v.sock), timeout=30)
+                check(v.alive(), f'vccd died in link {a} (round {rnd})')
+                check(r.returncode == 0, f'link {a} (round {rnd}): {r.stderr[-300:]}')
+                check(open(f'{d}/out{i}', 'rb').read() == ref[i], f'link {a} (round {rnd}) differs from vlink\'s')
+    finally: v.stop()
+
 def main():
     av = sys.argv[1:]
     verbose = '-v' in av; av = [a for a in av if a != '-v']
