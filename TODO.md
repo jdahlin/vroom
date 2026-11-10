@@ -1060,8 +1060,13 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
   DiagRuntimeBehavior; same-width sign changes skip literals spelled with a
   leading 0 (`N_NUM` aux) and chars in braces.  Done: diag `const_conv.c`,
   kernel/PostgreSQL/test suites 0 differences.  Not modelled: clang drops
-  the deferred ones in unreachable code; `-Wbitfield-constant-conversion`,
-  `-Wliteral-conversion`.
+  the deferred ones in unreachable code; `-Wliteral-conversion`; a member
+  initializer converted to a narrower type (`{ 300 }` for a char member).
+- [x] **-Wbitfield-constant-conversion** (and the single-bit variant): a
+  constant stored in a bit-field, by assignment or initializer, as clang's
+  AnalyzeBitFieldAssignment.  Done: diag `bitfield_const.c`, 93 warnings
+  over the test suite identical.  Not modelled: the macro note finds the
+  operator by spelling, so it can show an earlier `=` of the same body.
 - [ ] **Missing warnings** (only 7 `-W` flags):
   `-Wreturn-stack-address` of a compound literal
   (clang prints the initializer with its expression printer),

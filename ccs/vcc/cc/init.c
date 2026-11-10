@@ -364,6 +364,8 @@ static void il_elem(cc *c, ilist *l, uint64_t pos, uint32_t v, bool st)
 		il_set(c, l, pos, v, NULL);	/* string literal */
 		return;
 	}
+	if (!l->array && is_record(c, l->ty) && c->tags[T(c, l->ty)->aux].f[pos].bitfield)
+		bitfield_const(c, &c->tags[T(c, l->ty)->aux].f[pos], decay(c, v), 0);
 	il_set(c, l, pos, is_record(c, et) && !is_complex(c, et) ? v : convert(c, decay(c, v), et), NULL);
 }
 

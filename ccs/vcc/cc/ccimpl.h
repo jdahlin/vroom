@@ -255,6 +255,7 @@ VPRIV uint32_t cast_node(cc *c, uint32_t n, qty to, int kind);
 VPRIV __attribute__((noinline)) uint32_t decay_slow(cc *c, uint32_t n, qty t, int k);
 static inline uint32_t decay(cc *c, uint32_t n);
 VPRIV const field *bitfield_of(cc *c, uint32_t n);
+VPRIV void bitfield_const(cc *c, const field *f, uint32_t v, uint32_t op);
 VPRIV bool static_init_ok(cc *c, qty ty, uint32_t init, uint32_t *bad);
 VPRIV void deprecated_use(cc *c, uint32_t loc, uint32_t name, const attrs *a);
 VPRIV void tag_deprecate(cc *c, uint32_t ti, const attrs *a);

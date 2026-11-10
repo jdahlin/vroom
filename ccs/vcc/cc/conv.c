@@ -381,6 +381,40 @@ static void const_conv(cc *c, uint32_t n, qty to)
 	}
 }
 
+/* -Wbitfield-constant-conversion: constant v stored in bit-field f; at the
+   operator op (an assignment), or at v (0: an initializer) */
+VPRIV void bitfield_const(cc *c, const field *f, uint32_t v, uint32_t op)
+{
+	static const char *const g[] = { "bitfield-constant-conversion", "constant-conversion", "conversion", NULL };
+	cval cv;
+	int w = f->width;
+	bool sg = is_signed(c, f->ty);
+	i128 x, t;
+
+	if (KIND(c, f->ty) == TY_BOOL || !is_integer(c, N(v)->ty) || KIND(c, N(v)->ty) == TY_BOOL || w <= 0 || w > 64 ||
+	    c->dead || c->unevaluated || !cc_eval(c, v, &cv) || cv.kind != CV_INT)
+		return;
+	x = cv.i;
+	if (!is_signed(c, N(v)->ty) && ty_size(c, N(v)->ty) <= 8)
+		x = (i128)((uint64_t)x & (ty_size(c, N(v)->ty) == 8 ? ~0ull : (1ull << ty_size(c, N(v)->ty) * 8) - 1));
+	t = (i128)((uint64_t)x & (w == 64 ? ~0ull : (1ull << w) - 1));
+	if (sg && (t >> (w - 1)) & 1)
+		t -= (i128)1 << w;
+	if (t == x || (!sg && x < 0 && x >= -((i128)1 << (w - 1))))
+		return;
+	{
+		pp_span r[1] = { rng(c, v) };
+		uint32_t at = op ? op : r[0].b;
+		bool one = sg && w == 1 && x == 1;
+
+		pp_dinfo d = { "warning", at, op ? r : NULL, op ? 1 : 0, NULL, 0, op ? "=" : NULL, op ? 1 : 0 };
+
+		pp_warnx(c->p, one ? "single-bit-bitfield-constant-conversion" : "bitfield-constant-conversion", true,
+			 one ? g : g + 1, &d, "implicit truncation from '%s' to %s changes value from %lld to %lld",
+			 tyname(c, N(v)->ty), one ? "a one-bit wide bit-field" : "bit-field", (long long)x, (long long)t);
+	}
+}
+
 /* convert for an initialization, argument, return or assignment at loc */
 VPRIV uint32_t convert_as(cc *c, uint32_t n, qty to, int what, uint32_t loc)
 {
