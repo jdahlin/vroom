@@ -16,7 +16,8 @@ assembler, linker, behind `vcc`/`vas`/`vld` shims and the `vccd` server.
   parallel diff runs.
 
 ## Layout
-- `PLAN.md`, `PLAN-fas2.md`, `PLAN-wasm.md` (WebAssembly as a target): plans
+- `PLAN.md`, `PLAN-fas2.md`, `PLAN-wasm.md` (WebAssembly as a target), `PLAN-x86.md`
+  (x86-64 Linux as a target): plans
   and per-step status (Swedish).  Update the
   status section of a step when it changes.
 - `RESEARCH-preprocessor.md`: preprocessor design and prior art.
