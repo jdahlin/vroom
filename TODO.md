@@ -1029,7 +1029,8 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
 
 ### rsh
 - [ ] (Done: `trap` with EXIT/0 or no handler goes to the real shell,
-  signal traps stay a no-op; rm/mkdir messages from strerror.)  **fixdep path match by suffix** (`vccd/rsh.c:414`): require the
+  signal traps stay a no-op; rm/mkdir messages from strerror; fixdep only as
+  a whole path component and an existing executable.)  **fixdep path match by suffix** (`vccd/rsh.c:414`): require the
   configured kernel tree.  **Wrong errno text** (`vccd/rsh.c:552,568,577`).
   *Validate:* `bench/vsh-test.py` rows against dash (trap, other fixdep
   paths, ENOENT/EACCES/ENOTDIR messages).

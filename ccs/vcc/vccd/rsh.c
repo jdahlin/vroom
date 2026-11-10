@@ -393,7 +393,8 @@ static bool parse_simple(struct tok *t, int n, struct script *sc, const struct r
 		c->kind = C_MKDIR;
 		c->argv = wordv(w + 2, nw - 2, NULL);
 		return c->argv != NULL;
-	} else if (ops->fixdep && strlen(name) >= 20 && !strcmp(name + strlen(name) - 20, "scripts/basic/fixdep")) {
+	} else if (ops->fixdep && strlen(name) >= 20 && !strcmp(name + strlen(name) - 20, "scripts/basic/fixdep")
+		   && (strlen(name) == 20 || name[strlen(name) - 21] == '/') && !access(name, X_OK)) {
 		/* fixdep D T CMD > FILE */
 		if (nw != 4 || !redir)
 			return false;
