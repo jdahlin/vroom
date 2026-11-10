@@ -805,10 +805,13 @@ VPRIV void wk_vla_decl(ecx *e, uint32_t s, bool zero)
 	LO(tfree)(e, p.r);
 }
 
+/* few temporaries of the kind a value of type t is held in are left: it waits in a slot */
+static bool wk_short(ecx *e, qty t) { return wk_freg(e, t) ? LO(nffree)(e) < 3 : LO(nfree)(e) < 3; }
+
 /* the right operand next: if temporaries are short, the left waits in a slot */
 static val wk_rhs(ecx *e, val *a, uint32_t rn, qty at)
 {
-	if (a->k == V_REG && LO(nfree)(e) < 3) {
+	if (a->k == V_REG && wk_short(e, at)) {
 		int32_t sl = wk_slot(e, 8, 8);
 		lval l = { .k = L_FRAME, .off = sl, .align = 8 };
 		val b;
@@ -1118,7 +1121,7 @@ static val wk_assign(ecx *e, uint32_t n)
 
 		/* as clang: the right side first, then the left's address and value */
 		b = wk_gen(e, x->b);
-		if (b.k == V_REG && LO(nfree)(e) < 3) {
+		if (b.k == V_REG && wk_short(e, rt)) {
 			int32_t sl = wk_slot(e, 8, 8);
 			lval t = { .k = L_FRAME, .off = sl, .align = 8 };
 

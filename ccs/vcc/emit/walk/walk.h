@@ -102,6 +102,7 @@ VPRIV void LO(tfree)(ecx *e, int r);
 VPRIV void LO(mov)(ecx *e, int rd, int rs);			/* rd = rs (64 bits) */
 VPRIV void LO(tkeep)(ecx *e, int r);			/* r in use again (an operation consumed it, the walker still holds it) */
 VPRIV int LO(nfree)(ecx *e);				/* free temporaries left */
+VPRIV int LO(nffree)(ecx *e);				/* free float temporaries left */
 VPRIV int LO(toreg)(ecx *e, val *v, int size);	/* a constant or address into a temporary: v becomes V_REG */
 /* memory: size 1, 2, 4, 8; loads extend to 64 bits by sgn */
 VPRIV void LO(load)(ecx *e, int rd, const lval *l, int size, bool sgn);
