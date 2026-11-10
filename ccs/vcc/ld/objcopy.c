@@ -393,7 +393,7 @@ typedef struct {
 
 static struct {
 	const char *in, *out;
-	bool binary, strip_all, wildcard;
+	bool binary, strip_all, strip_debug, wildcard;
 	const char *prefix_syms, *prefix_alloc;
 	const char **remove;
 	uint32_t nremove;
@@ -583,6 +583,9 @@ static int objcopy_run(int dirfd)
 		if (oc.strip_all && !rm && k != shstr_i && strncmp(s->name, ".gnu.warning", 12) &&
 		    strncmp(s->name, ".gnu_debuglink", 14) && s->type != 0x70000003 && s->parent < 0)
 			rm = !(s->flags & SHF_ALLOC);
+		if (oc.strip_debug && !(s->flags & SHF_ALLOC) &&
+		    (!strncmp(s->name, ".debug", 6) || !strncmp(s->name, ".zdebug", 7) || !strcmp(s->name, ".gdb_index")))
+			rm = true;	/* llvm-objcopy's isDebugSection */
 		if (oc.nonly) {
 			if (match_list(oc.only, oc.nonly, s->name))
 				rm = false;
@@ -644,7 +647,7 @@ static int objcopy_run(int dirfd)
 				memcpy(y->newname, oc.prefix_syms, a);
 				memcpy(y->newname + a, y->name, b + 1);
 			}
-			if (oc.strip_all)
+			if (oc.strip_all || (oc.strip_debug && type == STT_FILE))
 				y->removed = true;
 			else if (oc.nunneeded && match_list(oc.unneeded, oc.nunneeded, yname(y))) {
 				bool unneeded = !referenced || (!referenced[i] && (bind == STB_LOCAL || y->shndx == SHN_UNDEF) &&
@@ -896,6 +899,8 @@ static int objcopy_run(int dirfd)
 		p->p_offset = seg[i].off;
 	}
 	Shdr *sh = (Shdr *)(b + shoff);
+	/* llvm-objcopy: .llvm_addrsig's sh_link is dropped once the symbols may have changed */
+	bool changed = oc.strip_all || oc.strip_debug || oc.nremove || oc.nonly || oc.nunneeded || oc.prefix_syms;
 	for (uint32_t k = 1; k < ns; k++) {
 		OSec *s = &sec[k];
 		if (s->removed)
@@ -904,7 +909,7 @@ static int objcopy_run(int dirfd)
 			memcpy(b + s->off, s->gen ? s->gen : s->data, s->size);
 		sh[s->idx] = (Shdr){.sh_name = (uint32_t)st_find(&names, sname(s)), .sh_type = s->type,
 				    .sh_flags = s->flags, .sh_addr = s->addr, .sh_offset = s->off, .sh_size = s->size,
-				    .sh_link = s->link, .sh_info = s->info, .sh_addralign = s->align,
+				    .sh_link = s->type == 0x6fff4c03 && changed ? 0 : s->link, .sh_info = s->info, .sh_addralign = s->align,
 				    .sh_entsize = s->entsize};
 	}
 	int rc = oerrors ? 1 : write_file(dirfd, oc.out, b, total, rel ? 0666 : 0777);
@@ -953,6 +958,8 @@ int objcopy_main(int argc, char **argv, int dirfd, FILE *err)
 			oc.binary = !strcmp(a + 16, "binary");
 		} else if (OPT("-S") || OPT("--strip-all")) {
 			oc.strip_all = true;
+		} else if (OPT("-g") || OPT("--strip-debug")) {
+			oc.strip_debug = true;
 		} else if (OPT("-w") || OPT("--wildcard")) {
 			oc.wildcard = true;
 		} else if ((v = VAL("--remove-section")) || (v = VAL("-R"))) {
