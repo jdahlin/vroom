@@ -706,6 +706,13 @@ VPRIV uint32_t paren_expr(cc *c, uint32_t loc)
 		note(c, loc, "to match this '('");
 		longjmp(c->bail, 1);
 	}
+	{
+		/* the parentheses around it, as distances (no location fix-up in the caches) */
+		uint32_t b = c->span[n].e ? c->span[n].b : N(n)->loc, e = c->span[n].e ? c->span[n].e : N(n)->loc, rp = tok(c)->loc;
+
+		if (b >= loc && b - loc < 65536 && rp >= e && rp - e < 65536)
+			c->paren[n] = (struct cparen){ (uint16_t)(b - loc), (uint16_t)(rp - e) };
+	}
 	next(c);
 	N(n)->flags |= NF_PAREN;
 	return n;

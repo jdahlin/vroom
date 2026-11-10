@@ -346,6 +346,7 @@ typedef struct drent {
 	tag *tags;
 	node *nodes;
 	pp_span *spans;
+	struct cparen *parens;
 	uint32_t *lists;
 	uint8_t *lk;		/* per list element: K_* */
 	i128 *ip;
@@ -2080,6 +2081,7 @@ static void rec_close(cc *c, uint64_t endpos)
 	}
 	e->nodes = xdup(&c->nodes[e->n0], (e->n1 - e->n0) * sizeof(node));
 	e->spans = xdup(&c->span[e->n0], (e->n1 - e->n0) * sizeof(pp_span));
+	e->parens = xdup(&c->paren[e->n0], (e->n1 - e->n0) * sizeof(*c->paren));
 	e->lists = xdup(&c->lists[e->l0], (e->l1 - e->l0) * sizeof(uint32_t));
 	e->lk = calloc(e->l1 - e->l0 + 1, 1);
 #define MARK(l, cnt, kk, ext_ok)                                                               \
@@ -2288,7 +2290,7 @@ static void rec_close(cc *c, uint64_t endpos)
 		free(e->wk[k]);
 	free(e->ws), free(e->wt), free(e->wy), free(e->wa), free(e->wst), free(e->wl), free(e->wf), free(e->wp);
 	free(e->wb), free(e->wv), free(e->wvp), free(e->ops), free(e->opar), free(e->fin), free(e->syms), free(e->tags);
-	free(e->nodes), free(e->spans), free(e->lists), free(e->lk), free(e->ip), free(e->fp), free(e->strs);
+	free(e->nodes), free(e->spans), free(e->parens), free(e->lists), free(e->lk), free(e->ip), free(e->fp), free(e->strs);
 	for (int k = 0; k < RA_N; k++)
 		free(e->rel[k]), free(e->dof[k]);
 	free(e->attr), free(e->heap), free(e->fpc), free(e->bind), free(e->tl), free(e->lz), free(e->xs), free(e->xt), free(e->xa), free(e->xy);
@@ -2835,6 +2837,7 @@ static void apply(cc *c, const drent *e, uint32_t baseB)
 
 		memcpy(to, e->nodes, nn * sizeof(node));
 		memcpy(sp, e->spans, nn * sizeof(pp_span));
+		memcpy(&c->paren[c->nnode], e->parens, nn * sizeof(*c->paren));
 		rel_apply(&x, (char *)to, RA_NODE);
 		for (uint32_t i = 0; i < nn; i++) {
 			REL_LOC(to[i].loc, lb);

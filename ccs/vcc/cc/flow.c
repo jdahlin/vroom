@@ -600,7 +600,7 @@ static void uv_read(uwk *w, uint32_t n, ust *st)
 	if (!st->live)
 		return;
 	if (w->self && N(n)->a == w->self && !w->selfhit) {
-		w->selfhit = true, w->selfloc = N(n)->loc, w->selfr = rng(w->c, n);
+		w->selfhit = true, w->selfloc = N(n)->loc, w->selfr = rng_np(w->c, n);
 		return;
 	}
 	if ((k = uv_idx(w, N(n)->a)) < 0)
@@ -612,10 +612,10 @@ static void uv_read(uwk *w, uint32_t n, ust *st)
 		if (!(w->done & b))
 			w->order[w->nord++] = (uint32_t)k;
 		w->done |= b, w->kind[k] = 1;
-		w->uloc[k] = N(n)->loc, w->ur[k] = rng(w->c, n), w->ublk[k] = w->blk;
+		w->uloc[k] = N(n)->loc, w->ur[k] = rng_np(w->c, n), w->ublk[k] = w->blk;
 	} else if ((st->i & b) && (w->spend & b) && w->sdep[k] == w->dep && !(w->done & b)) {
 		w->done |= b, w->kind[k] = 2;
-		w->uloc[k] = N(n)->loc, w->ur[k] = rng(w->c, n), w->ublk[k] = w->blk;
+		w->uloc[k] = N(n)->loc, w->ur[k] = rng_np(w->c, n), w->ublk[k] = w->blk;
 		w->order[w->nord++] = (uint32_t)k;
 	}
 }
@@ -1183,7 +1183,7 @@ static void uv_stmt(uwk *w, uint32_t n, ust *st)
 static uint32_t uv_send(cc *c, uint32_t n)
 {
 	if (N(n)->op == N_EXPR && N(n)->a)
-		return rng(c, N(n)->a).e;
+		return rng_np(c, N(n)->a).e;
 	return pp_tok_end(c->p, c->span[n].e);
 }
 
@@ -1192,7 +1192,7 @@ static bool uv_sometimes(cc *c, uwk *w, uint32_t k)
 	static const char *const g[] = { "uninitialized", "all", "most", NULL };
 	const sym *y = &c->syms[w->var[k]];
 	const node *x = N(w->sif[k]);
-	pp_span cr = rng(c, x->a), r[2];
+	pp_span cr = rng_np(c, x->a), r[2];
 	int nr = 1;
 	bool f = w->sfalse[k];
 	pp_dinfo d = { "note", w->uloc[k], &w->ur[k], 1, NULL, 0, NULL, 0 };
@@ -1213,23 +1213,23 @@ static bool uv_sometimes(cc *c, uwk *w, uint32_t k)
 	}
 
 	if (kd == 1 || kd == 2 || kd == 3) {
-		cr = rng(c, x->a);
+		cr = rng_np(c, x->a);
 		if (!cc_warnx(c, "sometimes-uninitialized", true, g, cr.b, &cr, 1, NULL, 0,
 			      "variable '%.*s' is used uninitialized whenever '%s' condition is %s", IDF(y->name), op[kd], f ? "false" : "true"))
 			return false;
 		pp_diagx(c->p, &d, "uninitialized use occurs here");
 		if (kd != 3)
-			r[0] = (pp_span){ cr.b, rng(c, x->b).b };
+			r[0] = (pp_span){ cr.b, rng_np(c, x->b).b };
 		else if (f)
-			r[0] = (pp_span){ cr.b, rng(c, x->b).b }, r[1] = (pp_span){ rng(c, x->b).e, rng(c, x->c).e }, nr = 2;
+			r[0] = (pp_span){ cr.b, rng_np(c, x->b).b }, r[1] = (pp_span){ rng_np(c, x->b).e, rng_np(c, x->c).e }, nr = 2;
 		else
-			r[0] = (pp_span){ cr.b, rng(c, x->c).b };
+			r[0] = (pp_span){ cr.b, rng_np(c, x->c).b };
 		d = (pp_dinfo){ "note", r[0].b, r, nr, NULL, 0, NULL, 0 };
 		pp_diagx(c->p, &d, "remove the '%s' if its condition is always %s", op[kd], f ? "true" : "false");
 		return true;
 	}
 	if (kd == 6) {
-		cr = rng(c, x->op == N_WHILE ? x->a : x->b);
+		cr = rng_np(c, x->op == N_WHILE ? x->a : x->b);
 		if (!cc_warnx(c, "sometimes-uninitialized", true, g, cr.b, &cr, 1, NULL, 0,
 			      "variable '%.*s' is used uninitialized whenever '%s' loop exits because its condition is false",
 			      IDF(y->name), x->op == N_WHILE ? "while" : "for"))

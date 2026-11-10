@@ -257,6 +257,7 @@ VPRIV bool is_typedef_name(cc *c, const ptok *t);
 VPRIV uint32_t mk(cc *c, int op, qty ty, uint32_t loc);
 static inline void setspan(cc *c, uint32_t n, uint32_t b);
 VPRIV pp_span rng(cc *c, uint32_t n);
+VPRIV pp_span rng_np(cc *c, uint32_t n);	/* without the parentheses */
 VPRIV uint32_t mk2(cc *c, int op, qty ty, uint32_t loc, uint32_t a, uint32_t b);
 VPRIV void vinit(vec *v);
 VPRIV void vpush(cc *c, vec *v, uint32_t x);

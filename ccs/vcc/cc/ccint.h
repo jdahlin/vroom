@@ -152,6 +152,7 @@ struct cc {
 	uint32_t nsym;
 	node *nodes;
 	pp_span *span;		/* per node: first and last token (start locations), 0: unknown */
+	struct cparen { uint16_t l, r; } *paren;	/* per node: its outermost parentheses, bytes before span.b / after span.e (0: none) */
 	uint32_t nnode;
 	uint32_t *lists;
 	uint32_t nlist;

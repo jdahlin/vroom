@@ -99,7 +99,7 @@ static bool uv_warn(cc *c, uint32_t e, uvw *w)
 		/* fallthrough */
 	case N_ADDR:
 	unop:
-		w->loc = x->loc, w->r[0] = rng(c, x->a), w->nr = 1;
+		w->loc = x->loc, w->r[0] = rng_np(c, x->a), w->nr = 1;
 		return true;
 	case N_COMMA: {
 		uint32_t r = x->b;
@@ -115,11 +115,11 @@ static bool uv_warn(cc *c, uint32_t e, uvw *w)
 
 		if (!uv_warn(c, x->b, &t))
 			return false;
-		w->loc = x->loc, w->r[0] = rng(c, x->a), w->r[1] = rng(c, x->b), w->nr = 2;
+		w->loc = x->loc, w->r[0] = rng_np(c, x->a), w->r[1] = rng_np(c, x->b), w->nr = 2;
 		return true;
 	}
 	case N_BINARY:
-		w->loc = x->loc, w->r[0] = rng(c, x->a), w->r[1] = rng(c, x->b), w->nr = 2;
+		w->loc = x->loc, w->r[0] = rng_np(c, x->a), w->r[1] = rng_np(c, x->b), w->nr = 2;
 		return true;
 	case N_COND: {
 		uvw t;
@@ -131,12 +131,12 @@ static bool uv_warn(cc *c, uint32_t e, uvw *w)
 	case N_MEMBER:
 		if (vol(c, e))
 			return false;
-		w->loc = c->span[e].e ? c->span[e].e : x->loc, w->r[0] = rng(c, x->a), w->nr = 1;	/* the member's name */
+		w->loc = c->span[e].e ? c->span[e].e : x->loc, w->r[0] = rng_np(c, x->a), w->nr = 1;	/* the member's name */
 		return true;
 	case N_INDEX:
 		if (vol(c, e))
 			return false;
-		w->loc = c->span[e].e ? c->span[e].e : x->loc, w->r[0] = rng(c, x->a), w->r[1] = rng(c, x->b), w->nr = 2;
+		w->loc = c->span[e].e ? c->span[e].e : x->loc, w->r[0] = rng_np(c, x->a), w->r[1] = rng_np(c, x->b), w->nr = 2;
 		return true;
 	case N_VAR:
 		if (vol(c, e))
@@ -151,17 +151,17 @@ static bool uv_warn(cc *c, uint32_t e, uvw *w)
 			return uv_warn(c, N(ls)->a, w);
 		if (is_void(c, x->ty))
 			return false;
-		w->loc = x->loc, w->r[0] = rng(c, e), w->nr = 1;
+		w->loc = x->loc, w->r[0] = rng_np(c, e), w->nr = 1;
 		return true;
 	}
 	case N_CAST:	/* explicit */
 		if (x->aux == CK_VOID)
 			return false;
-		w->loc = c->span[e].b, w->r[0] = rng(c, x->a), w->nr = 1;
+		w->loc = c->span[e].b, w->r[0] = rng_np(c, x->a), w->nr = 1;
 		return true;
 	default:
 	plain:
-		w->loc = rng(c, e).b, w->r[0] = rng(c, e), w->nr = 1;
+		w->loc = rng_np(c, e).b, w->r[0] = rng_np(c, e), w->nr = 1;
 		return true;
 	}
 }
@@ -174,7 +174,7 @@ VPRIV bool unused_cmp(cc *c, uint32_t e)
 	{
 		int k = N(e)->aux;
 		uint32_t op = N(e)->loc;
-		pp_span r = { rng(c, N(e)->a).b, rng(c, N(e)->b).e };
+		pp_span r = { rng_np(c, N(e)->a).b, rng_np(c, N(e)->b).e };
 		bool eq = k == T_EQUALEQUAL || k == T_EXCLAIMEQ;
 
 		if (cc_warnx(c, "unused-comparison", true, w_all, op, &r, 1, NULL, 0, "%s comparison result unused",

@@ -554,7 +554,7 @@ static void const_conv(cc *c, uint32_t n, qty to)
 		return;
 	{
 		uint32_t cl = c->cv_what == CX_PASS ? c->cv_callee : c->cv_loc;
-		pp_span r[2] = { { cl, pp_tok_end(c->p, cl) }, rng(c, n) };
+		pp_span r[2] = { { cl, pp_tok_end(c->p, cl) }, rng_np(c, n) };
 		char msg[112];
 
 		snprintf(msg, sizeof msg, "implicit conversion from '%s' to '%s' changes value from %lld to %lld",

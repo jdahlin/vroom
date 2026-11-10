@@ -4,7 +4,7 @@
 #include "ccimpl.h"
 
 /* the per-TU tables, mapped once and reused (cc_init takes a set, cc_free gives it back) */
-static vmpool ccpool = VMPOOL_INIT(21);
+static vmpool ccpool = VMPOOL_INIT(22);
 static _Thread_local vmreg *ccr;
 
 VPRIV void *halloc(cc *c, size_t n)
@@ -49,6 +49,7 @@ static void cc_init(cc *c, pp *p, const cc_opts *o)
 	c->lzt = vmreg_get(&ccr[18], (size_t)1 << 32, "cc.lzt");
 	c->lzf = vmreg_get(&ccr[19], (size_t)1 << 28, "cc.lzf");
 	c->lzs = vmreg_get(&ccr[20], (size_t)1 << 31, "cc.lzs");
+	c->paren = vmreg_get(&ccr[21], (size_t)1 << 30, "cc.paren");
 	c->hend = c->heap + ((size_t)1 << 32);
 	c->dops = halloc(c, DOPS_MAX * sizeof(dop));
 	c->ndops = 0;
@@ -158,6 +159,7 @@ static void cc_free(cc *c)
 	vmreg_put(&ccr[18], USED(c->nlzt, c->lzt));
 	vmreg_put(&ccr[19], USED(c->nlzf, c->lzf));
 	vmreg_put(&ccr[20], (size_t)c->nlzs + 64);
+	vmreg_put(&ccr[21], USED(c->nnode, c->paren));	/* indexed by node */
 	free(c->cases);
 	free(c->pweak);
 #undef USED

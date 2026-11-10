@@ -1219,11 +1219,20 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
   *Validate:* diag test with vector_size and ext_vector_type.
 - [ ] **Diagnostic details**: columns on `##` and invalid directives,
   `#line` file names ignored, nested macro notes (one level today), the
-  "expanded from macro" note only for undeclared identifiers; a parenthesized
-  operand's range leaves out the parentheses (`1 / (x - 1)`: clang's ParenExpr
-  has them, -Wconstant-conversion and -Wunused-value strip them: needs a second
-  span per paren node, kept through the decl cache's replay).
+  "expanded from macro" note only for undeclared identifiers.  (Done: ranges
+  keep a parenthesized operand's parentheses as clang's ParenExpr, `rng_np`
+  where clang strips them (-Wconstant-conversion, -Wunused-value, the
+  uninitialized notes); `c->paren` holds them as distances, so the decl
+  cache and replay copy them without fix-ups: diag `paren_ranges.c`.)
   *Validate:* diag tests.
+- [ ] **Diagnostics found missing (2026-11-10)**: `x == x` "self-comparison
+  always evaluates to true" (-Wtautological-compare); `p == 0.5` is clang's
+  "invalid operands to binary expression" (vcc: "incompatible types in
+  conversion"); the "; take the address with &" / "; dereference with *"
+  hints on -Wint-conversion of an initializer and a return; -Wconditional-
+  type-mismatch (pointer/integer `?:`); -Wshift-count-negative comes
+  before the other warnings of its function (clang: after, deferred).
+  *Validate:* one diag test each.
 - [ ] **Longer fuzz runs** and pp-diff over the whole fuzz corpus (PLAN-fas2
   "Status fuzzning").  *Validate:* runs recorded in the plan, findings in
   `regress/`.

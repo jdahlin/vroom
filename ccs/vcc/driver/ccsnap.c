@@ -36,7 +36,7 @@
 #define LOC_REL (1u << 31)	/* encoded locations: LOC_REL + (loc - base) */
 
 enum { A_TY, A_PARAMS, A_TAGS, A_SYMS, A_NODES, A_LISTS, A_IPOOL, A_FPOOL, A_STRS, A_LABELS, A_ATTR, A_ASMS,
-       A_SSTACK, A_TOPLEVEL, A_TLASM, A_SPAN, A_LZT, A_LZF, A_LZS, A_HEAP, A_N };
+       A_SSTACK, A_TOPLEVEL, A_TLASM, A_SPAN, A_LZT, A_LZF, A_LZS, A_PAREN, A_HEAP, A_N };
 
 typedef struct dcarr {
 	size_t n;		/* bytes */
@@ -95,6 +95,7 @@ static char *abase(const cc *c, int k, size_t *n)
 	case A_LZT: *n = c->nlzt * sizeof(lztok); return (char *)c->lzt;
 	case A_LZF: *n = c->nlzf * sizeof(lzfn); return (char *)c->lzf;
 	case A_LZS: *n = c->nlzs; return c->lzs;
+	case A_PAREN: *n = c->nnode * sizeof(*c->paren); return (char *)c->paren;
 	default: *n = (size_t)(c->hp - c->heap); return c->heap;
 	}
 }
@@ -350,7 +351,7 @@ static void snap_restore(cc *c, const dcsnap *s, uint32_t base)
 	c->nodes = keep.nodes, c->lists = keep.lists, c->ipool = keep.ipool, c->fpool = keep.fpool;
 	c->strs = keep.strs, c->labels = keep.labels, c->attr = keep.attr, c->asms = keep.asms;
 	c->sstack = keep.sstack, c->toplevel = keep.toplevel, c->tlasm = keep.tlasm;
-	c->span = keep.span;
+	c->span = keep.span, c->paren = keep.paren;
 	c->lzt = keep.lzt, c->lzf = keep.lzf, c->lzs = keep.lzs;
 	/* malloc'd and per TU: the snapshot's would be shared (and realloc'ed) by every TU restoring it */
 	c->cases = keep.cases, c->ncase = keep.ncase, c->capcase = keep.capcase, c->case_base = keep.case_base;
