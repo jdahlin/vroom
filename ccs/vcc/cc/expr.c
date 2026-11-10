@@ -577,6 +577,16 @@ static uint32_t primary_(cc *c)
 
 		if (unlikely(kw))
 			return primary_kw(c, kw, loc);
+		if (unlikely(c->o->std == 23 && idlen_(id) == 2 && !memcmp(idstr_(id), "u8", 2))) {
+			/* C23 u8'a': the lexer gives u8 and 'a' (C17 tokens) */
+			ptok *q = peek(c, 1);
+
+			if (q->kind == T_CHAR && q->loc == loc + 2) {
+				next(c);
+				tok(c)->kind = T_U8CHAR, tok(c)->loc = loc;
+				return char_lit(c);
+			}
+		}
 		s = lookup(c, id);
 		next(c);
 		if (likely(s))

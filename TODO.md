@@ -1052,9 +1052,9 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
   (no false positives on the kernel).  (Done: `-Wmultichar` in C and `#if`, "character constant too long",
   multi-character wide/Unicode literals as errors: diag `multichar.c`; the
   diagnostic printer leaves out the snippet for a repeated location as clang.)
-- [ ] **`u8'a'` in C23**: lexed as `u8` and `'a'` (the lexer has no C23
-  mode; only the digit-separator pass is per standard).
-  *Validate:* diag/vcc test with `-std=c23`.
+- [x] **`u8'a'` in C23**: the lexer still gives `u8` and `'a'`; the front
+  end joins them under `-std=c23`/`gnu2x` when adjacent.  (`#if u8'a'` is
+  not joined.)  Done: diag `u8_char.c`.
 - [x] **Invalid code accepted**: duplicate enumerator / parameter,
   `&register_var`, `_Alignas(3)`, `typeof` on a bitfield, `*(void *)p` as a
   value (and `-Wvoid-ptr-dereference`), `return v();` of void from an int
