@@ -31,8 +31,6 @@ static void wk_scalar(ecx *e, uint32_t n, qty t)
 
 	if (k == TY_FLOAT16 || k == TY_FLOAT128 || ((k == TY_INT128 || k == TY_UINT128) && !LO(i128mem)()))
 		wk_unsup(e, n, k == TY_FLOAT16 ? "_Float16" : k == TY_FLOAT128 ? "__float128" : "__int128");
-	if (k == TY_VECTOR)
-		wk_unsup(e, n, "a vector value");	/* (records are values by address) */
 }
 
 static bool wk_wide(cc *c, qty t) { return KIND(c, t) == TY_INT128 || KIND(c, t) == TY_UINT128; }
@@ -41,7 +39,7 @@ VPRIV bool wk_mem(ecx *e, qty t)
 {
 	cc *c = e->c;
 
-	return is_record(c, t) || is_array(c, t) || (KIND(c, t) == TY_LDOUBLE && LO(ldmem)()) || (wk_wide(c, t) && LO(i128mem)());
+	return is_record(c, t) || is_array(c, t) || is_vec(c, t) || (KIND(c, t) == TY_LDOUBLE && LO(ldmem)()) || (wk_wide(c, t) && LO(i128mem)());
 }
 
 /* a float value's register (float/double: the CPU's float registers) */
@@ -155,6 +153,8 @@ static lval wk_fromval(ecx *e, val v, qty t)
 
 static val wk_ptradd_vla(ecx *e, val p, val i, qty it, qty pt, bool sub);
 static val wk_atomic_rmw(ecx *e, uint32_t n);
+static val wk_reload(ecx *e, const lval *l, qty t);
+static val wk_putmem(ecx *e, lval *l, qty t, val v);
 static val wk_incval(ecx *e, qty t, bool dec, val a);
 
 static void wk_lfree(ecx *e, const lval *l)
@@ -510,7 +510,54 @@ static val wk_cast(ecx *e, uint32_t n)
 	}
 	case CK_NULL:
 		return vconst(0);
+	case CK_VADDR:
+		return wk_gen(e, x->a);	/* a vector value is its address */
+	case CK_VBITS: {
+		/* a vector's bits as a scalar of its size */
+		val v = wk_gen(e, x->a);
+
+		return wk_load(e, wk_fromval(e, v, x->ty), x->ty);
+	}
+	case CK_SPLAT: {
+		/* the scalar into every lane of a new vector */
+		qty et = T(c, x->ty)->base;
+		uint64_t es = tsize(c, et), nl = tsize(c, x->ty) / es;
+		lval d = { .k = L_FRAME, .off = wk_slot(e, tsize(c, x->ty), 16), .align = talign(c, et) };
+		val v = wk_gen(e, x->a);
+		int r = wk_reg(e, &v, et);
+
+		for (uint64_t i = 0; i < nl; i++, d.off += (int64_t)es)
+			LO(store)(e, r, &d, (int)es);
+		LO(tfree)(e, r);
+		d.off -= (int64_t)(nl * es);
+		return wk_vreg(LO(laddr)(e, &d));
+	}
+	case CK_UNION: {
+		/* the operand's bytes at the start of a new object (zeroed when larger) */
+		lval d = { .k = L_FRAME, .off = wk_slot(e, tsize(c, x->ty), talign(c, x->ty) > 16 ? 16 : talign(c, x->ty)), .align = 8 };
+		val v;
+
+		if (tsize(c, x->ty) > tsize(c, from)) {
+			int rz = LO(laddr)(e, &d);
+
+			LO(zero)(e, rz, tsize(c, x->ty));
+			LO(tfree)(e, rz);
+		}
+		v = wk_gen(e, x->a);
+		if (wk_mem(e, from)) {
+			v = wk_putmem(e, &d, from, v);
+			wk_free(e, &v);
+		} else {
+			int r = wk_reg(e, &v, from);
+
+			LO(store)(e, r, &d, wk_size(c, from));
+			LO(tfree)(e, r);
+		}
+		return wk_vreg(LO(laddr)(e, &d));
+	}
 	case CK_NOP: case CK_INT: case CK_BOOL: case CK_P2I: case CK_I2P: case CK_P2P: case CK_I2F: case CK_F2I: case CK_F2F:
+		if (x->aux == CK_NOP && wk_mem(e, x->ty) && wk_mem(e, from))
+			return wk_gen(e, x->a);	/* one representation (vectors of one size, records) */
 		wk_scalar(e, n, x->ty);
 		wk_scalar(e, x->a, from);
 		return wk_conv(e, wk_gen(e, x->a), is_ptr(c, from) ? prim(TY_ULONG) : from, is_ptr(c, x->ty) ? prim(TY_ULONG) : x->ty);
@@ -714,6 +761,93 @@ static val wk_rhs(ecx *e, val *a, uint32_t rn, qty at)
 	return wk_gen(e, rn);
 }
 
+/* a comparison of scalars of type t: 0 or 1 */
+static val wk_cmpv(ecx *e, int op, qty t, val a, val b)
+{
+	cc *c = e->c;
+
+	if (is_flt(c, t))
+		return LO(fcmp)(e, op, t, a, b);
+	if (wk_wide(c, t))
+		return LO(wcmp)(e, op, wk_signed(c, t), a, b);
+	if (a.k == V_CONST && b.k == V_CONST)
+		return vconst(wk_fold_cmp(op, wk_signed(c, t), em_trunc_to(c, a.i, t), em_trunc_to(c, b.i, t)));
+	return LO(cmp)(e, op, is_ptr(c, t) ? 8 : opw(c, t), wk_signed(c, t), a, b);
+}
+
+/* lane i of the vector at r (type t), or (t a scalar) a copy of the scalar in r */
+static val wk_lane(ecx *e, qty t, int r, unsigned i)
+{
+	cc *c = e->c;
+
+	if (is_vec(c, t)) {
+		qty et = T(c, t)->base;
+		lval l = { .k = L_REG, .r = (uint8_t)r, .off = (int64_t)i * (int64_t)tsize(c, et), .align = talign(c, et) };
+
+		return wk_reload(e, &l, et);
+	}
+	{
+		int d = wk_treg(e, t);
+
+		LO(mov)(e, d, r);
+		return wk_vreg(d);
+	}
+}
+
+/*
+ * A GNU vector operation, lane by lane through memory (vectors are values by
+ * address): a op b, one side may be a scalar; unary (b unused) - ~ !;
+ * comparisons give -1 / 0 lanes of rt's element type.  The result is a new
+ * frame object of type rt.
+ */
+static val wk_vlanes(ecx *e, int op, qty at, val a, qty bt, val b, qty rt, bool unary)
+{
+	cc *c = e->c;
+	qty vt = is_vec(c, at) ? at : bt, et = T(c, vt)->base, re = T(c, rt)->base;
+	uint64_t es = tsize(c, re);
+	unsigned nl = (unsigned)(tsize(c, vt) / tsize(c, et));
+	int ra, rb = -1;
+	lval d = { .k = L_FRAME, .off = wk_slot(e, tsize(c, rt), 16), .align = talign(c, re) };
+
+	if (wk_mem(e, et) || wk_mem(e, re))
+		efatal(e, e->curloc, "x86-64: a vector of __int128 or long double is not supported yet (PLAN-x86.md X3)");
+	ra = wk_reg(e, &a, is_vec(c, at) ? prim(TY_ULONG) : at);
+
+	if (!unary)
+		rb = wk_reg(e, &b, is_vec(c, bt) ? prim(TY_ULONG) : bt);
+	for (unsigned i = 0; i < nl; i++) {
+		val x = wk_lane(e, at, ra, i), r;
+
+		if (unary) {
+			if (op == T_EXCLAIM)
+				r = wk_arith(e, T_MINUS, re, vconst(0), wk_cmpv(e, T_EQUALEQUAL, et, x, is_flt(c, et) ? wk_conv(e, vconst(0), prim(TY_INT), et) : vconst(0)));
+			else if (op == T_MINUS)
+				r = is_flt(c, et) ? LO(fneg)(e, et, x) : wk_arith(e, T_MINUS, et, vconst(0), x);
+			else
+				r = wk_arith(e, T_CARET, et, x, vconst(-1));
+		} else {
+			val y = wk_lane(e, bt, rb, i);
+
+			if (wk_is_cmp(op))
+				r = wk_arith(e, T_MINUS, re, vconst(0), wk_cmpv(e, op, et, x, y));
+			else
+				r = wk_arith(e, op, et, x, y);
+		}
+		{
+			int rr = wk_reg(e, &r, re);
+			lval l = d;
+
+			l.off += (int64_t)(i * es);
+			LO(store)(e, rr, &l, (int)es);
+			LO(tfree)(e, rr);
+		}
+	}
+	LO(tfree)(e, ra);
+	if (rb >= 0)
+		LO(tfree)(e, rb);
+	return wk_vreg(LO(laddr)(e, &d));
+}
+
 static val wk_binary(ecx *e, uint32_t n)
 {
 	cc *c = e->c;
@@ -722,6 +856,11 @@ static val wk_binary(ecx *e, uint32_t n)
 	qty lt = N(x->a)->ty, rt = N(x->b)->ty;
 	val a, b;
 
+	if (unlikely(is_vec(c, x->ty) || is_vec(c, lt) || is_vec(c, rt))) {
+		a = wk_gen(e, x->a);
+		b = wk_rhs(e, &a, x->b, is_vec(c, lt) ? prim(TY_ULONG) : lt);
+		return wk_vlanes(e, op, lt, a, rt, b, x->ty, false);
+	}
 	if (wk_is_cmp(op)) {
 		wk_scalar(e, x->a, lt);
 		wk_scalar(e, x->b, rt);
@@ -898,6 +1037,16 @@ static val wk_assign(ecx *e, uint32_t n)
 	}
 	if (x->aux && unlikely(T(c, lt)->flags & TF_ATOMIC))
 		return wk_atomic_rmw(e, n);
+	if (x->aux && unlikely(is_vec(c, lt))) {
+		/* v op= w: the right side first, the lanes into a temporary, its bytes into v */
+		qty rt = N(x->b)->ty;
+		val b = wk_gen(e, x->b), a;
+
+		l = wk_lval(e, x->a);
+		a = wk_reload(e, &l, lt);
+		v = wk_vlanes(e, x->aux, lt, a, rt, b, lt, false);
+		return wk_putmem(e, &l, lt, v);
+	}
 	if (!x->aux) {
 		v = wk_gen(e, x->b);
 		l = wk_lval(e, x->a);
@@ -1121,6 +1270,12 @@ static val wk_unary(ecx *e, uint32_t n)
 	const node *x = N(n);
 	val a;
 
+	if (unlikely(is_vec(c, x->ty))) {
+		a = wk_gen(e, x->a);
+		if (x->aux == T_PLUS)
+			return a;
+		return wk_vlanes(e, x->aux, N(x->a)->ty, a, N(x->a)->ty, vconst(0), x->ty, true);
+	}
 	if (x->aux == T_EXCLAIM)
 		return wk_condval(e, n);
 	wk_scalar(e, n, x->ty);
@@ -1488,6 +1643,43 @@ static val wk_builtin(ecx *e, uint32_t n)
 		val t = wk_gen(e, arg[1]);
 
 		return vconst(t.k == V_CONST && (t.i & 2) ? 0 : (i128)(uint64_t)-1);
+	}
+	case BI_SHUFFLEVECTOR: case BI_CONVERTVECTOR: {
+		/* lane by lane through a frame object (vectors are addresses) */
+		qty at = N(arg[0])->ty, ae = T(c, at)->base, re = T(c, x->ty)->base;
+		int64_t na = (int64_t)(tsize(c, at) / tsize(c, ae)), nr = (int64_t)(tsize(c, x->ty) / tsize(c, re));
+		bool sh = x->aux == BI_SHUFFLEVECTOR;
+		val a = wk_gen(e, arg[0]), bv = sh ? wk_rhs(e, &a, arg[1], prim(TY_ULONG)) : vconst(0);
+		int ra = wk_reg(e, &a, prim(TY_ULONG)), rb = sh ? wk_reg(e, &bv, prim(TY_ULONG)) : -1;
+		lval d = { .k = L_FRAME, .off = wk_slot(e, tsize(c, x->ty), 16), .align = talign(c, re) };
+
+		for (int64_t i = 0; i < nr; i++) {
+			lval dl = d, sl = { .k = L_REG, .align = talign(c, ae) };
+			val v;
+			int r;
+
+			dl.off += i * (int64_t)tsize(c, re);
+			if (sh) {
+				int64_t k = (int64_t)c->ipool[N(arg[2 + i])->a];
+
+				if (k < 0)
+					continue;	/* an undefined lane */
+				sl.r = (uint8_t)(k < na ? ra : rb);
+				sl.off = (k < na ? k : k - na) * (int64_t)tsize(c, ae);
+				v = wk_reload(e, &sl, ae);
+			} else {
+				sl.r = (uint8_t)ra;
+				sl.off = i * (int64_t)tsize(c, ae);
+				v = wk_conv(e, wk_reload(e, &sl, ae), ae, re);
+			}
+			r = wk_reg(e, &v, re);
+			LO(store)(e, r, &dl, (int)tsize(c, re));
+			LO(tfree)(e, r);
+		}
+		LO(tfree)(e, ra);
+		if (rb >= 0)
+			LO(tfree)(e, rb);
+		return wk_vreg(LO(laddr)(e, &d));
 	}
 	case BI_ATOMIC_LOAD_N: case BI_ATOMIC_STORE_N: case BI_ATOMIC_EXCHANGE_N: case BI_ATOMIC_CMPXCHG_N:
 	case BI_ATOMIC_LOAD: case BI_ATOMIC_STORE: case BI_ATOMIC_EXCHANGE: case BI_ATOMIC_CMPXCHG:
