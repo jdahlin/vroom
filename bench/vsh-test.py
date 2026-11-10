@@ -45,6 +45,8 @@ CASES = [
     ("mkdir -p", "mkdir -p a/b//c/ sub d; mkdir -p d/e; echo ok", True, True),
     ("mkdir -p over file", "mkdir -p x.c/y; echo st", True, False),
     ("mkdir -p file", "set -e; mkdir -p x.c; echo after", True, False),
+    ("trap EXIT not ours", "trap 'rm -f t.tmp' EXIT; echo x > t.tmp; echo ok", False, True),
+    ("trap signal", "trap 'rm -f t.tmp; trap - INT; kill -s INT $$' INT; echo ok", True, True),
     ("rm missing ok", "rm -f nope sub/nope; echo done", True, True),
     ("rm dir fails", "set -e; rm -f sub; echo after", True, False),
     ("no errexit", "rm -f sub; echo after", True, False),

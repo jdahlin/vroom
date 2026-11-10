@@ -328,6 +328,12 @@ static bool parse_simple(struct tok *t, int n, struct script *sc, const struct r
 			return false;
 		c->kind = C_SET_E;
 	} else if (!strcmp(name, ":") || !strcmp(name, "true") || !strcmp(name, "trap")) {
+		if (name[0] == 't' && name[1] == 'r')	/* trap: signal handlers only; EXIT/0 must run */
+			for (int i = 2; i < nw; i++)
+				if (!strcmp(w[i].s, "EXIT") || !strcmp(w[i].s, "0"))
+					return false;
+		if (!strcmp(name, "trap") && nw < 3)
+			return false;
 		if (redir)
 			return false;	/* : > file creates it */
 		c->kind = C_NOP;
@@ -468,6 +474,17 @@ static void err(int fd, const char *a, const char *b, const char *c)
 		(void)write_all(fd, line, n < (int)sizeof(line) ? n : (int)sizeof(line) - 1);
 }
 
+/* "<a><b>': <strerror>" as coreutils (EPERM on a directory: unlink's answer on macOS) */
+static void rm_err(int fd, const char *a, const char *b, int e)
+{
+	char m[128] = "': ";
+
+	if (e == EPERM && a[0] == 'r')
+		e = EISDIR;
+	strlcat(m, strerror(e), sizeof m);
+	err(fd, a, b, m);
+}
+
 static bool is_dir(int dir, const char *p)
 {
 	struct stat st;
@@ -540,8 +557,7 @@ static int run(const char *cwd, struct script *sc, bool errexit, const int fds[3
 			st = 0;
 			for (char **p = c->argv; *p; p++)
 				if (unlinkat(dir, *p, 0) < 0 && errno != ENOENT) {
-					err(fds[2], "rm: cannot remove '", *p,
-					    errno == EISDIR || errno == EPERM ? "': Is a directory" : "': Permission denied");
+					rm_err(fds[2], "rm: cannot remove '", *p, errno);
 					st = 1;
 				}
 			break;
@@ -549,8 +565,7 @@ static int run(const char *cwd, struct script *sc, bool errexit, const int fds[3
 			st = 0;
 			for (char **p = c->argv; *p; p++)
 				if (!mkdir_p(dir, *p)) {
-					err(fds[2], "mkdir: cannot create directory '", *p,
-					    errno == EEXIST || errno == ENOTDIR ? "': Not a directory" : "': Permission denied");
+					rm_err(fds[2], "mkdir: cannot create directory '", *p, errno == EEXIST ? ENOTDIR : errno);
 					st = 1;
 				}
 			break;
