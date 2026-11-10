@@ -969,8 +969,11 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
 - [ ] **`--gc-sections`, `--icf`, `--build-id` modes (`ld/ld.c:4026`), erratum
   843419, SHT_REL (`ld/ld.c:1735`)**.
   *Validate:* T8.
-- [ ] **Diagnostics**: undefined symbol with section+offset and all
-  referencing objects (`ld/ld.c:4231`); `-r` output differs from lld.
+- [ ] **Diagnostics**: (done: undefined symbols as lld: every reference
+  with its source file and enclosing function (else section+offset), the
+  first 3 then "referenced N more times", archive members, "did you mean"
+  for the first two, a blank line after a multi-line diagnostic;
+  `bench/vlink-opts.py` compares the whole stderr.)  `-r` output differs from lld.
   *Validate:* T4-style expected-stderr for vlink; T8 `-r` byte diff.
 - [x] **var**: (done: regular GNU archives created, updated (`r` by
   basename, none with `P`; `q`, `d`, `s`, `m`) and read (`t`, `p`, `x`),
