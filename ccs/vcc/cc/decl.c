@@ -807,7 +807,9 @@ VPRIV void declaration(cc *c, vec *out, bool file)
 				uint32_t sl = c->cv_loc;
 
 				c->cv_what = CX_INIT, c->cv_loc = d.loc;
+				c->defer_rt = st, c->ndefer = 0;
 				v = initializer(c, &it, st);
+				c->defer_rt = 0;
 				c->cv_what = sw, c->cv_loc = sl;
 			}
 			y = &c->syms[s];
@@ -829,7 +831,12 @@ VPRIV void declaration(cc *c, vec *out, bool file)
 					pp_span r = rng(c, bad);
 
 					report(c, "error", expr_loc(c, bad), &r, 1, NULL, 0, "initializer element is not a compile-time constant");
+					/* the runtime-behaviour warnings only for an initializer that runs (not a constant) */
+					for (int k = 0; k < c->ndefer; k++)
+						cc_warnx(c, "division-by-zero", true, NULL, c->defer[k].loc, &c->defer[k].r, 1, NULL, 0,
+							 "%s by zero is undefined", c->defer[k].rem ? "remainder" : "division");
 				}
+				c->ndefer = 0;
 			}
 			y = &c->syms[s];
 			if (out && !st) {

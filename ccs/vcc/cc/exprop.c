@@ -404,7 +404,12 @@ static void runtime_warn(cc *c, int op, uint32_t l, uint32_t r, uint32_t loc)
 		return;
 	rr = rng(c, r);
 	if (op == T_SLASH || op == T_PERCENT) {
-		if (!cv.i)
+		if (!cv.i && c->unevaluated)
+			;	/* (sizeof, typeof: never runs) */
+		else if (!cv.i && c->defer_rt) {
+			if (c->ndefer < 8)
+				c->defer[c->ndefer].loc = loc, c->defer[c->ndefer].r = rr, c->defer[c->ndefer++].rem = op == T_PERCENT;
+		} else if (!cv.i)
 			cc_warnx(c, "division-by-zero", true, NULL, loc, &rr, 1, NULL, 0, "%s by zero is undefined",
 			      op == T_SLASH ? "division" : "remainder");
 		return;

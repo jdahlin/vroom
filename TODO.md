@@ -1056,10 +1056,10 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
   function, and the static initializer constness check in the front end
   (`static_init_ok`, also under `-fsyntax-only`).  Done: diag tests
   identical to clang (74/74); sema 878/879, warn 879/879, ctests, pg green.
-- [ ] **Runtime-behaviour warnings in a global initializer** come before
-  the constness error (`int x = 5 % 0;`): clang defers them
-  (DiagRuntimeBehavior) and emits them only for a non-constant initializer.
-  *Validate:* diag test `mod_zero_const.c`.
+- [x] **Runtime-behaviour warnings in a global initializer**: a static
+  initializer's -Wdivision-by-zero waits and follows the constness error,
+  only for a non-constant initializer (clang's DiagRuntimeBehavior); none
+  under sizeof/typeof.  Done: diag `mod_zero_const.c`, `mod_zero_const2.c`.
 - [x] **`"abc"[1]` as a static initializer**: an element of a string
   literal folds (`eval`); `{ "q"[0] }` in an int array parsed as a string
   initializer.  Done: `tests/vcc/static_strelem.c`.
