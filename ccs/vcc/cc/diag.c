@@ -93,6 +93,7 @@ VPRIV void note(cc *c, uint32_t loc, const char *fmt, ...)
 
 const char *const w_all[] = { "all", "most", NULL };
 const char *const w_conv[] = { "conversion", NULL };
+const char *const w_selfassign[] = { "all", "most", NULL };
 
 /* a warning of clang's flag (on: on by default); false if it is off */
 __attribute__((format(printf, 10, 11)))

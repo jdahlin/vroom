@@ -1115,11 +1115,11 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
 - [ ] **Missing warnings**:
   `-Wreturn-stack-address` of a compound literal
   (clang prints the initializer with its expression printer),
-  `-Wuninitialized`, `-Wunused-local-typedef`, `-Wself-assign` (`-Wunknown-attributes` and
+  `-Wuninitialized` (`-Wunknown-attributes` and
   `-Wdeprecated-declarations` are done: PostgreSQL's warnings compare).
   *Validate:* one diag test per warning; `vcc-sema.py warn` stays 879/879
   (no false positives on the kernel).  (Done: `-Wmultichar` in C and `#if`, "character constant too long",
-  multi-character wide/Unicode literals as errors: diag `multichar.c`; the
+  multi-character wide/Unicode literals as errors: diag `multichar.c`; `-Wself-assign` (not through macros) and `-Wunused-local-typedef`: diag `self_assign.c`, PostgreSQL identical; the
   diagnostic printer leaves out the snippet for a repeated location as clang.)
   (Done: `-Wreturn-type` (fall off the end, "in all control paths") and
   `-Winvalid-noreturn` (also a return in a noreturn function), "no case

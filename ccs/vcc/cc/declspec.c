@@ -230,6 +230,7 @@ VPRIV bool decl_specs(cc *c, dspec *ds, bool allow_sc)
 					deprecated_use(c, t->loc, t->id, &c->attr[c->syms[ts].attrs]);
 				named = c->syms[ts].ty;
 				ds->tdef = ts;
+				c->syms[ts].flags |= SF_REF;	/* (-Wunused-local-typedef) */
 				have_named = true;
 				any = true;
 				next(c);

@@ -144,6 +144,7 @@ VPRIV __attribute__((format(printf, 8, 9))) void report(cc *c, const char *what,
 VPRIV __attribute__((format(printf, 3, 4))) void note(cc *c, uint32_t loc, const char *fmt, ...);
 extern const char *const w_all[];
 extern const char *const w_conv[];
+extern const char *const w_selfassign[];
 VPRIV void rt_defer(cc *c, const char *flag, const char *const *groups, uint32_t loc, const pp_span *r, int nr,
 		    const char *ms, uint32_t mlen, const char *fmt, ...) __attribute__((format(printf, 9, 10)));
 VPRIV void rt_flush(cc *c);
@@ -227,6 +228,7 @@ static inline uint32_t dget(uint32_t **dir, uint32_t id);
 VPRIV void scope_open(cc *c);
 VPRIV void scope_close(cc *c);
 VPRIV void unused_statics(cc *c);
+VPRIV void unused_typedefs(cc *c);
 VPRIV uint32_t sym_new(cc *c, int kind, uint32_t name, qty ty, uint32_t loc);
 VPRIV void sym_bind(cc *c, uint32_t s);
 VPRIV uint32_t lookup(cc *c, uint32_t id);

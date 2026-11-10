@@ -197,6 +197,7 @@ int cc_run(pp *p, const cc_opts *o)
 			}
 		}
 		unused_statics(c);
+		unused_typedefs(c);
 	}
 	if (o->dump_layouts && !c->errors)
 		layout_checks(c);

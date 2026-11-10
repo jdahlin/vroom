@@ -113,6 +113,27 @@ VPRIV void unused_statics(cc *c)
 	}
 }
 
+/* -Wunused-local-typedef: a block-scope typedef never named (clang: at the end of the TU) */
+VPRIV void unused_typedefs(cc *c)
+{
+	static const char *const g[] = { "unused-local-typedefs", "unused", "all", "most", NULL };
+
+	if (c->errors || pp_errors(c->p))
+		return;
+	for (uint32_t i = 1; i < c->nsym; i++) {
+		const sym *y = &c->syms[i];
+		const attrs *a = y->attrs ? &c->attr[y->attrs] : NULL;
+
+		if (y->kind != S_TYPEDEF || !y->depth || !y->name || (y->flags & SF_REF) || (a && (a->unused || a->used)))
+			continue;
+		{
+			pp_dinfo d = { "warning", y->loc, NULL, 0, NULL, 0, idstr_(y->name), (uint32_t)idlen_(y->name) };
+
+			pp_warnx(c->p, "unused-local-typedef", false, g, &d, "unused typedef '%.*s'", IDF(y->name));
+		}
+	}
+}
+
 VPRIV void scope_close(cc *c)
 {
 	uint32_t m = c->smark[c->depth];

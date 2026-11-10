@@ -576,6 +576,29 @@ static int assign_op(int k)
 	}
 }
 
+/* -Wself-assign: x = x (parentheses and implicit conversions aside), not volatile */
+static void self_assign(cc *c, uint32_t l, uint32_t r, uint32_t loc)
+{
+	while (N(r)->op == N_CAST && !c->span[r].e && N(r)->a)
+		r = N(r)->a;
+	if (N(l)->op != N_VAR || N(r)->op != N_VAR || N(l)->a != N(r)->a || (QQ(N(l)->ty) & Q_VOLATILE) ||
+	    c->syms[N(l)->a].kind != S_VAR)
+		return;
+	{
+		uint32_t nm = c->syms[N(l)->a].name;
+
+		if (!pp_spells(c->p, N(l)->loc, idstr_(nm), (uint32_t)idlen_(nm)) ||
+		    !pp_spells(c->p, N(r)->loc, idstr_(nm), (uint32_t)idlen_(nm)))
+			return;	/* (clang: not from a macro) */
+	}
+	{
+		pp_span rr[2] = { { N(l)->loc, pp_tok_end(c->p, N(l)->loc) }, { N(r)->loc, pp_tok_end(c->p, N(r)->loc) } };
+
+		cc_warnx(c, "self-assign", false, w_selfassign, loc, rr, 2, NULL, 0,
+			 "explicitly assigning value of variable of type '%s' to itself", tyname(c, N(l)->ty));
+	}
+}
+
 static __attribute__((noinline)) uint32_t assign_rest(cc *c, uint32_t l, int op)
 {
 	uint32_t loc = tok(c)->loc, r;
@@ -583,6 +606,8 @@ static __attribute__((noinline)) uint32_t assign_rest(cc *c, uint32_t l, int op)
 
 	next(c);
 	r = assign_expr(c);
+	if (op < 0 && !mac && !(c->prevflags & PF_MACRO))	/* (the right side's last token) */
+		self_assign(c, l, r, loc);
 	r = assign(c, op < 0 ? 0 : op, l, r, loc);
 	if (mac)
 		N(r)->flags |= NF_MACRO;

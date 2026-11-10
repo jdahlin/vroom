@@ -164,6 +164,7 @@ int pp_warnings(const pp *p);
 /* the end of the token at loc (an identifier, number or punctuator; loc + 1 if unknown) */
 uint32_t pp_tok_end(const pp *p, uint32_t loc);
 int pp_loc_char(const pp *p, uint32_t loc);
+int pp_spells(const pp *p, uint32_t loc, const char *s, uint32_t n);
 void pp_invalid_tok(pp *p, const char *s, uint32_t len, uint32_t loc);
 /* the source text from loc b to loc e (one file), NULL if unknown */
 const char *pp_src(const pp *p, uint32_t b, uint32_t e, size_t *len);

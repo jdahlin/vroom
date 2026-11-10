@@ -242,6 +242,16 @@ void pp_invalid_tok(pp *p, const char *s, uint32_t len, uint32_t loc)
 	}
 }
 
+/* the source at loc spells s[0, n) as a whole token (not a macro's expansion of it) */
+int pp_spells(const pp *p, uint32_t loc, const char *s, uint32_t n)
+{
+	const fent *e;
+
+	if (!loc_ok(p, loc, &e) || loc - e->base + n > e->f->size || memcmp(e->f->src + (loc - e->base), s, n))
+		return 0;
+	return pp_tok_end(p, loc) == loc + n;
+}
+
 /* the source character at loc, -1 if none */
 int pp_loc_char(const pp *p, uint32_t loc)
 {
