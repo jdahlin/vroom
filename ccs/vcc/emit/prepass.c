@@ -317,7 +317,7 @@ static int walk(pre *P, uint32_t n)
 
 		if (callee && sym_attrs(c, callee)->error_fn)
 			P->E->sflags[P->fn] |= SA_MUSTFOLD;
-		if (callee && returns_twice(c, callee))
+		if (P->E->opt3 && callee && returns_twice(c, callee))	/* (-O3 only: 7 compares a call) */
 			P->bad = true;
 		lab = walk(P, x->a);
 	}
