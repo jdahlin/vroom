@@ -631,6 +631,31 @@ void pp_vdiagx(pp *p, const pp_dinfo *d, const char *fmt, va_list ap)
 	vdiagx_(p, d, fmt, ap);
 }
 
+/* 'v4\x01(vector of 4 'int' values)' -> 'v4' (vector of 4 'int' values) (cc's type names) */
+static void vec_suffix(char *m, size_t cap)
+{
+	char *x;
+
+	while ((x = strchr(m, '\x01'))) {
+		char *q = x + 1;
+		int dep = 0;
+
+		for (; *q; q++)
+			if (*q == '(')
+				dep++;
+			else if (*q == ')' && !--dep)
+				break;
+		if (!*q || q[1] != '\'') {
+			*x = ' ';	/* (not inside quotes: just a space) */
+			continue;
+		}
+		/* x: "\x01(...)'" -> "' (...)" : the same length */
+		memmove(x + 2, x + 1, (size_t)(q - x));	/* "(...)" one to the right */
+		x[0] = '\'', x[1] = ' ';
+		(void)cap;
+	}
+}
+
 static void vdiagx_(pp *p, const pp_dinfo *d, const char *fmt, va_list ap)
 {
 	int fd = p->o->errfd ? p->o->errfd : 2;
@@ -643,6 +668,7 @@ static void vdiagx_(pp *p, const pp_dinfo *d, const char *fmt, va_list ap)
 	vbuf b = { 0 };
 
 	vsnprintf(msg, sizeof(msg), fmt, ap);
+	vec_suffix(msg, sizeof(msg));
 	if (has && what[0] != 'n' && (uint32_t)(e - p->fe) + 1 != p->diag_fe)
 		include_stack(p, &b, e);
 	if (has && what[0] != 'n')

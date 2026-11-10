@@ -214,9 +214,10 @@ static void type_str(cc *c, qty t, const char *inner, vfixbuf *out, bool *ok)
 			vfixbuf_puts(&in, x->flags & TF_BLOCK ? "(^" : "(*");
 		else
 			vfixbuf_puts(&in, x->flags & TF_BLOCK ? "^" : "*");
-		if (QQ(t)) {
-			vfixbuf_puts(&in, " ");
+		if (QQ(t)) {	/* clang: "int *const", "int *const *", "int *const p" */
 			quals(&in, QQ(t));
+			if (!inner[0] && in.n && in.s[in.n - 1] == ' ')
+				in.s[--in.n] = 0;
 		}
 		vfixbuf_puts(&in, inner);
 		if (bt->kind == TY_ARRAY || bt->kind == TY_FUNC)
@@ -270,10 +271,30 @@ static void type_str(cc *c, qty t, const char *inner, vfixbuf *out, bool *ok)
 		/* clang without the typedef: __attribute__((__vector_size__(4 * sizeof(int)))) int */
 		vfixbuf el;
 		char n[96];
+		uint32_t td = 0;
 
 		el.n = 0, el.s[0] = 0;
 		type_str(c, x->base, "", &el, ok);
+		/* clang keeps the typedef name (vcc: the first typedef of this vector type) */
+		for (uint32_t i = 1; i < c->nsym && !td; i++)
+			if (c->syms[i].kind == S_TYPEDEF && c->syms[i].name && QI(c->syms[i].ty) == QI(t) && !QQ(c->syms[i].ty))
+				td = i;
 		quals(&b, QQ(t));
+		if (td) {
+			vfixbuf_put(&b, idstr_(c->syms[td].name), idlen_(c->syms[td].name));
+			if (inner[0]) {
+				vfixbuf_puts(&b, " ");
+				vfixbuf_puts(&b, inner);
+			} else {	/* \x01: the diagnostic printer closes the quote before it */
+				snprintf(n, sizeof(n), "\x01(vector of %u '", x->n);
+				vfixbuf_puts(&b, n);
+				vfixbuf_put(&b, el.s, el.n);
+				vfixbuf_puts(&b, "' values)");
+			}
+			vfixbuf_put(out, b.s, b.n);
+			*ok = false;
+			return;
+		}
 		snprintf(n, sizeof(n), "__attribute__((__vector_size__(%llu * sizeof(",
 			 (unsigned long long)(ty_size(c, t) / ty_size(c, x->base)));
 		vfixbuf_puts(&b, n);

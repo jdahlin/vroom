@@ -1186,10 +1186,17 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
   variable or `format_arg` (gettext), a typedef reached through casts or
   other expressions than a variable or member.
   *Validate:* diag tests against clang.
-- [ ] **Vector types in messages**: clang keeps the typedef name (`'v4'`),
-  appends ` (vector of 4 'int' values)` after the quoted type.
-  `ext_vector_type(N)` is now a vector (it was ignored: `sizeof` wrong;
-  `tests/vcc/ext_vector.c`); its `.xyzw` swizzles are not supported.
+- [ ] **Vector types in messages**: (done: the typedef name and
+  ` (vector of 4 'int' values)` after the quoted type (vcc: the first typedef
+  of that vector type), diag `vector_typedef_name.c`; with it
+  -Wincompatible-pointer-types-discards-qualifiers (also "in nested pointer
+  types"), -Wpointer-sign, nested signedness as incompatible, the
+  "; dereference with *" hint and fix-it (simple operands), `int *const`
+  spelled as clang, a decayed array named `int[2]`, and "not a compile-time
+  constant" after a conversion error: diag `ptr_discards_quals.c`,
+  `deref_hint.c`, `ptr_const_spelling.c`.)  Left: `ext_vector_type` splat
+  from a scalar (`f2 h = 1`), the scalar-to-vector truncation error
+  (`v + 1.5`), `.xyzw` swizzles (`tests/vcc/ext_vector.c`).
   *Validate:* diag test with vector_size and ext_vector_type.
 - [ ] **Diagnostic details**: columns on `##` and invalid directives,
   `#line` file names ignored, nested macro notes (one level today), the

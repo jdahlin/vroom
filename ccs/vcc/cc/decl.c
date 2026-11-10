@@ -789,6 +789,7 @@ VPRIV void declaration(cc *c, vec *out, bool file)
 			bool st = file || ds.sc == SC_STATIC;
 			uint32_t v;
 			int nerr = c->errors;
+			uint32_t nconv0 = c->nconv;
 
 			if (ds.sc == SC_TYPEDEF || is_func(c, t))
 				cc_error(c, d.loc, "illegal initializer");
@@ -852,8 +853,16 @@ VPRIV void declaration(cc *c, vec *out, bool file)
 			{
 				uint32_t bad = 0;
 
-				/* not after an error in the initializer (clang: no follow-on error) */
-				if (st && v && c->errors == nerr && !static_init_ok(c, y->ty, v, &bad)) {
+				/* not after an error in the initializer (clang: no follow-on error), but after
+				   conversion errors, which are clang's warnings defaulting to errors */
+				bool ok = true;
+
+				if (st && v && c->errors - c->nconv == nerr - nconv0) {
+					c->sie = c->errors != nerr;
+					ok = static_init_ok(c, y->ty, v, &bad);
+					c->sie = false;
+				}
+				if (!ok) {
 					pp_span r = rng(c, bad);
 
 					report(c, "error", expr_loc(c, bad), &r, 1, NULL, 0, "initializer element is not a compile-time constant");

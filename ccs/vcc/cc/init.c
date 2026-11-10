@@ -710,7 +710,7 @@ VPRIV bool static_init_ok(cc *c, qty ty, uint32_t init, uint32_t *bad)
 	if (!init)
 		return true;
 	x = N(init);
-	if (x->op == N_ZERO || (x->flags & NF_ERR))
+	if (x->op == N_ZERO || ((x->flags & NF_ERR) && !c->sie))
 		return true;
 	if (x->op == N_INIT) {
 		const uint32_t *v = &c->lists[x->b];

@@ -195,27 +195,46 @@ static void param_note(cc *c)
 		note(c, c->syms[p].loc, "passing argument to parameter here");
 }
 
+static const char *arr_tyname(cc *c, qty t);
+
+/* the source type clang names: an array or function before its decay */
+static qty conv_from(cc *c, uint32_t n)
+{
+	if (N(n)->op == N_CAST && (N(n)->aux == CK_DECAY || N(n)->aux == CK_FDECAY))
+		return N(N(n)->a)->ty;
+	return N(n)->ty;
+}
+
 /* "... initializing 'T' with an expression of type 'F'" and the like, per context */
 static void conv_error(cc *c, uint32_t n, qty to, const char *what, const char *flag)
 {
 	pp_span r = rng(c, n);
-	const char *f = tyname(c, N(n)->ty), *t = tyname(c, to);
+	const char *f = arr_tyname(c, conv_from(c, n)), *t = tyname(c, to);
 	uint32_t loc = c->cv_what == CX_PASS || c->cv_what == CX_RETURN ? r.b : c->cv_loc;
 	int bit = !strcmp(flag, "-Wint-conversion") ? 1 : !strcmp(flag, "-Wincompatible-pointer-types") ? 2 : 4;
 	char msg[1024];
+	qty ft = N(n)->ty;
+	int op = N(n)->op;
+	/* clang: "; dereference with *" when *n has the target type (a fix-it; vcc: simple operands only) */
+	bool dr = bit != 4 && is_ptr(c, ft) && compatible(c, QUNQ(T(c, ft)->base), QUNQ(to)) &&
+		  (op == N_VAR || op == N_MEMBER || op == N_CALL || op == N_INDEX) && !(N(n)->flags & NF_PAREN);
+	pp_fixit fx = { r.b, r.b, "*" };
+	char fl[64];
+
+	snprintf(fl, sizeof fl, "%s%s", dr ? "; dereference with * [" : " [", flag);
 
 	switch (c->cv_what) {
 	case CX_INIT:
-		snprintf(msg, sizeof msg, "%s initializing '%s' with an expression of type '%s' [%s]", what, t, f, flag);
+		snprintf(msg, sizeof msg, "%s initializing '%s' with an expression of type '%s'%s]", what, t, f, fl);
 		break;
 	case CX_PASS:
-		snprintf(msg, sizeof msg, "%s passing '%s' to parameter of type '%s' [%s]", what, f, t, flag);
+		snprintf(msg, sizeof msg, "%s passing '%s' to parameter of type '%s'%s]", what, f, t, fl);
 		break;
 	case CX_RETURN:
-		snprintf(msg, sizeof msg, "%s returning '%s' from a function with result type '%s' [%s]", what, f, t, flag);
+		snprintf(msg, sizeof msg, "%s returning '%s' from a function with result type '%s'%s]", what, f, t, fl);
 		break;
 	default:
-		snprintf(msg, sizeof msg, "%s assigning to '%s' from '%s' [%s]", what, t, f, flag);
+		snprintf(msg, sizeof msg, "%s assigning to '%s' from '%s'%s]", what, t, f, fl);
 	}
 	static const char *const ipt[] = { "incompatible-pointer-types", NULL };
 
@@ -227,33 +246,83 @@ static void conv_error(cc *c, uint32_t n, qty to, const char *what, const char *
 			goto err;	/* -Werror= again: clang's own error (no "-Werror,") */
 		if (b && b > msg)
 			b[-1] = 0;
-		if (cc_warnx(c, flag + 2, true, bit == 4 ? ipt : NULL, loc, &r, 1, NULL, 0, "%s", msg) && c->cv_what == CX_PASS)
+		if (cc_warnx(c, flag + 2, true, bit == 4 ? ipt : NULL, loc, &r, 1, &fx, dr, "%s", msg) && c->cv_what == CX_PASS)
 			param_note(c);
 		return;
 	}
 err:
-	report(c, "error", loc, &r, 1, NULL, 0, "%s", msg);
+	report(c, "error", loc, &r, 1, &fx, dr, "%s", msg);
+	c->nconv++;
 	if (c->cv_what == CX_PASS)
 		param_note(c);
 }
 
 /* pointee types that clang's -Wincompatible-pointer-types accepts: compatible once
    qualifiers (at every level) and integer signedness are ignored, or one is void */
-static bool ptr_ok(cc *c, qty a, qty b)
+static bool ptr_ok_(cc *c, qty a, qty b, bool top)
 {
 	int ka, kb;
 
 	a = QUNQ(a), b = QUNQ(b);
 	ka = KIND(c, a), kb = KIND(c, b);
-	if (ka == TY_VOID || kb == TY_VOID || compatible(c, a, b))
+	if (compatible(c, a, b) || (top && (ka == TY_VOID || kb == TY_VOID)))
 		return true;
 	if (ka == TY_PTR && kb == TY_PTR)
-		return ptr_ok(c, T(c, a)->base, T(c, b)->base);
-	if ((is_integer(c, a) || ka == TY_ENUM) && (is_integer(c, b) || kb == TY_ENUM))
-		return ty_size(c, a) == ty_size(c, b);	/* -Wpointer-sign (a warning) */
+		return ptr_ok_(c, T(c, a)->base, T(c, b)->base, false);
+	if (top && (is_integer(c, a) || ka == TY_ENUM) && (is_integer(c, b) || kb == TY_ENUM))
+		return ty_size(c, a) == ty_size(c, b);	/* -Wpointer-sign (a warning; only the pointee itself) */
 	if (ka == TY_ARRAY && kb == TY_ARRAY)
-		return ptr_ok(c, T(c, a)->base, T(c, b)->base);
+		return ptr_ok_(c, T(c, a)->base, T(c, b)->base, false);
 	return false;
+}
+
+static bool ptr_ok(cc *c, qty a, qty b) { return ptr_ok_(c, a, b, true); }
+
+/* -Wincompatible-pointer-types-discards-qualifiers: the pointee loses const/volatile/restrict */
+/* const char ** from char **: the levels below the pointee differ in qualifiers (clang's
+   IncompatibleNestedPointerQualifiers: the types otherwise the same) */
+static bool nested_quals(cc *c, qty a, qty b)
+{
+	bool d = false;
+
+	while (is_ptr(c, a) && is_ptr(c, b)) {
+		a = T(c, a)->base, b = T(c, b)->base;
+		d |= (QQ(a) & Q_MASK) != (QQ(b) & Q_MASK);
+	}
+	return d && compatible(c, QUNQ(a), QUNQ(b));
+}
+
+/* a warning about the implicit conversion of n to to, in clang's words for the context */
+static void conv_warn(cc *c, uint32_t n, qty to, const char *flag, const char *const *g, const char *what)
+{
+	pp_span r = rng(c, n);
+	const char *f = arr_tyname(c, conv_from(c, n)), *t = tyname(c, to);
+	uint32_t loc = c->cv_what == CX_PASS || c->cv_what == CX_RETURN ? r.b : c->cv_loc;
+	bool on;
+
+	switch (c->cv_what) {
+	case CX_INIT:
+		on = cc_warnx(c, flag, true, g, loc, &r, 1, NULL, 0, "initializing '%s' with an expression of type '%s' %s", t, f, what);
+		break;
+	case CX_PASS:
+		on = cc_warnx(c, flag, true, g, loc, &r, 1, NULL, 0, "passing '%s' to parameter of type '%s' %s", f, t, what);
+		break;
+	case CX_RETURN:
+		on = cc_warnx(c, flag, true, g, loc, &r, 1, NULL, 0, "returning '%s' from a function with result type '%s' %s", f, t, what);
+		break;
+	default:
+		on = cc_warnx(c, flag, true, g, loc, &r, 1, NULL, 0, "assigning to '%s' from '%s' %s", t, f, what);
+	}
+	if (on && c->cv_what == CX_PASS)
+		param_note(c);
+}
+
+static void discards(cc *c, uint32_t n, qty to, bool nested)
+{
+	static const char *const g[] = { "incompatible-pointer-types", NULL };
+
+	conv_warn(c, n, to, "incompatible-pointer-types-discards-qualifiers", g,
+		  nested ? "discards qualifiers in nested pointer types" : "discards qualifiers");
 }
 
 /* clang's implicit-conversion errors (int-conversion, incompatible pointer types) */
@@ -274,6 +343,17 @@ static uint32_t conv_check(cc *c, uint32_t n, qty to)
 		else
 			conv_error(c, n, to, "incompatible pointer types", "-Wincompatible-pointer-types");
 	} else {
+		if (is_ptr(c, to) && is_ptr(c, from) && !is_func(c, T(c, to)->base) && !is_func(c, T(c, from)->base) &&
+		    (QQ(T(c, from)->base) & ~QQ(T(c, to)->base) & Q_MASK))
+			discards(c, n, to, false);
+		else if (is_ptr(c, to) && is_ptr(c, from) && nested_quals(c, T(c, to)->base, T(c, from)->base))
+			discards(c, n, to, true);
+		else if (is_ptr(c, to) && is_ptr(c, from) && is_integer(c, T(c, to)->base) && is_integer(c, T(c, from)->base) &&
+			 !compatible(c, QUNQ(T(c, to)->base), QUNQ(T(c, from)->base))) {
+			static const char *const g[] = { "pointer-sign", NULL };
+
+			conv_warn(c, n, to, "pointer-sign", g, "converts between pointers to integer types with different sign");
+		}
 		return n;
 	}
 	N(n)->flags |= NF_ERR;	/* no second message from convert */
