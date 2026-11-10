@@ -1140,12 +1140,11 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
 - [ ] **Missing warnings**:
   `-Wuninitialized` after an
   assignment on another branch earlier in the text (the analysis runs only when a
-  tracked variable is read before its first assignment in the text); two or more
-  ifs breaking out of one `do … while (0)` (clang warns once per if, vcc not at
-  all) (`-Wunknown-attributes` and
+  tracked variable is read before its first assignment in the text) (`-Wunknown-attributes` and
   `-Wdeprecated-declarations` are done: PostgreSQL's warnings compare).
   *Validate:* one diag test per warning; `vcc-sema.py warn` stays 879/879
-  (no false positives on the kernel).  (Done: `-Wsometimes-uninitialized` of an if that breaks out of `do … while (0)` (no
+  (no false positives on the kernel).  (Done: up to 8 ifs breaking out of one `do … while (0)`, one warning each, with
+  clang's multi-line range snippets: diag `sometimes_uninit_do2.c`; `-Wsometimes-uninitialized` of an if that breaks out of `do … while (0)` (no
   back edge: a block), and with `-Wsometimes-uninitialized` alone: diag
   `sometimes_uninit_do.c`, `sometimes_uninit_only.c`; `-Wmultichar` in C and `#if`, "character constant too long",
   multi-character wide/Unicode literals as errors: diag `multichar.c`; `-Wself-assign` (not through macros) and `-Wunused-local-typedef`: diag `self_assign.c`, PostgreSQL identical; `-Wreturn-stack-address` of a compound literal (its initializer printed
