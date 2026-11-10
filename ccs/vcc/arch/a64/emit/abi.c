@@ -26,7 +26,7 @@ static int hfa_walk(cc *c, qty t, int *base, uint64_t *n)
 		*n = 1;
 		return 1;
 	}
-	if (y->kind == TY_FLOAT || y->kind == TY_DOUBLE || (y->kind == TY_LDOUBLE && y->size == 16)) {
+	if (y->kind == TY_FLOAT || y->kind == TY_DOUBLE || y->kind == TY_LDOUBLE) {	/* Apple: long double is 8 bytes */
 		int b = (int)y->size;
 
 		if (*base && *base != b)
@@ -155,12 +155,26 @@ VPRIV void classify_va(ecx *e, qty t, int *nsaa, abiarg *a)
 	*nsaa += a->nreg * 8;
 }
 
+/* the alignment AAPCS64 passes t by: clang's unadjusted alignment (a
+ * record's fields without its own aligned(), a scalar's without a typedef's);
+ * Apple's ABI takes the type's alignment */
+VPRIV uint32_t abi_align(cc *c, qty t)
+{
+	const ctype *ct = T(c, t);
+
+	if (DARWIN(c))
+		return talign(c, t);
+	if (is_record(c, t))
+		return c->tags[ct->aux].ualign;
+	return c->ty[ct->canon].align;
+}
+
 VPRIV void classify(ecx *e, qty t, int *ngrn, int *nsaa, abiarg *a)
 {
 	cc *c = e->c;
 	uint64_t size = tsize(c, t);
 	int n;
-	uint32_t al = talign(c, t);
+	uint32_t al = abi_align(c, t);
 
 	memset(a, 0, sizeof(*a));
 	a->size = (uint32_t)size;
@@ -190,6 +204,16 @@ VPRIV void classify(ecx *e, qty t, int *ngrn, int *nsaa, abiarg *a)
 				return;
 			}
 			e->nsrn = 8;
+			if (DARWIN(c)) {
+				/* Apple: on the stack at its element's alignment and size, as clang */
+				*nsaa = (int)(((uint32_t)*nsaa + (uint32_t)hb - 1) & ~((uint32_t)hb - 1));
+				a->kind = A_STACK;
+				a->stk = *nsaa;
+				a->nreg = (uint8_t)((size + 7) / 8);
+				a->fsz = (uint8_t)hb;	/* the last part may be 4 bytes */
+				*nsaa += (int)size;
+				return;
+			}
 			n = (int)((size + 7) / 8);
 			goto stack;
 		}
@@ -213,8 +237,8 @@ VPRIV void classify(ecx *e, qty t, int *ngrn, int *nsaa, abiarg *a)
 	} else {
 		n = size == 16 ? 2 : 1;
 	}
-	if (n == 2 && al == 16 && (*ngrn & 1))
-		(*ngrn)++;
+	if (n == 2 && al == 16 && (*ngrn & 1) && !DARWIN(c))
+		(*ngrn)++;	/* AAPCS64: an even pair; Apple does not round */
 	if (*ngrn + n <= 8) {
 		a->kind = A_REG;
 		a->reg = (uint8_t)*ngrn;

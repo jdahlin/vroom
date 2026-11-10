@@ -100,6 +100,8 @@ typedef struct tag {
 	uint64_t size;		/* bytes */
 	uint32_t align;		/* bytes */
 	uint32_t maxalign;	/* aligned() on the record, bytes */
+	uint32_t ualign;	/* bytes: the fields' alignment without the record's aligned()
+				   (clang's unadjusted alignment: AAPCS64 argument passing) */
 	uint32_t typedef_name;	/* for anonymous records: first typedef naming it */
 	uint32_t enums, nenum;	/* enum: its enumerator syms (list) */
 } tag;

@@ -311,7 +311,7 @@ VPRIV val va_arg_(ecx *e, const node *x)
 	uint64_t size = tsize(c, t);
 	bool big = is_recabi(c, t) && size > 16;
 	int nreg = big ? 1 : (int)((size + 7) / 8);
-	bool al16 = !big && talign(c, t) == 16;
+	bool al16 = !big && abi_align(c, t) == 16;
 	lval l = gen_lval(e, x->a);
 	val a = laddr(e, &l);
 	int ra = toreg(e, &a), off = treg(e), addr = treg(e);
@@ -368,7 +368,7 @@ VPRIV val va_arg_(ecx *e, const node *x)
 		jump(e, ldone);
 		nreg = (int)((size + 7) / 8);
 		big = false;
-		al16 = talign(c, t) >= 16;
+		al16 = abi_align(c, t) >= 16;
 		goto stack;
 	}
 	mem(e, I_LD, 2, 1, off, ra, 24);

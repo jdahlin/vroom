@@ -597,6 +597,7 @@ VPRIV void vec_small_ret(ecx *e, qty t, int rs);
 VPRIV void vec_small_res(ecx *e, qty t, int32_t sl);
 VPRIV bool is_sret(cc *c, qty t);
 VPRIV void classify_va(ecx *e, qty t, int *nsaa, abiarg *a);
+VPRIV uint32_t abi_align(cc *c, qty t);
 VPRIV void classify(ecx *e, qty t, int *ngrn, int *nsaa, abiarg *a);
 VPRIV void spill_live(ecx *e, spill *s);
 VPRIV void unspill(ecx *e, const spill *s);

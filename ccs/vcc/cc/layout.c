@@ -133,10 +133,11 @@ VPRIV void lay_record(cc *c, tag *r, const uint32_t *fa, const uint8_t *fp)
 
 	if (c->npack && c->pack[c->npack - 1])
 		l.max_field_align = (uint64_t)c->pack[c->npack - 1] * 8;
-	if (r->maxalign)
-		lay_update(&l, (uint64_t)r->maxalign * 8, (uint64_t)r->maxalign * 8);
 	for (uint32_t i = 0; i < r->nfield; i++)
 		lay_field(c, &l, &r->f[i], fa ? fa[i] : 0, fp ? fp[i] : 0);
+	r->ualign = (uint32_t)(l.align / 8);
+	if (r->maxalign)
+		lay_update(&l, (uint64_t)r->maxalign * 8, (uint64_t)r->maxalign * 8);
 	if (l.padded_field_size > l.size)
 		l.size = l.padded_field_size;
 	l.size = align_to(l.size, l.align);

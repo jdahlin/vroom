@@ -178,8 +178,17 @@ adresser i data (`.int32`/`.int64`, tabellindex), varargs-platser minst 4 byte.
 - `run` 6: optimeringsberoende (`bcp-1`, `builtin-constant`,
   `frame-address`, `20030125-1`), `complex-6` (`long double _Complex`) och
   `24_math_library` (bibliotekets signaturer för implicit deklarerade).
-- Inte gjort: `bench/vcc-abi.py --target wasm64` (ABI provat med egna skript,
-  alla fyra kombinationerna, men inte som harness).
+- `bench/vcc-abi.py --target wasm64|wasm32 [--vlink]` (2026-11-10): de fyra
+  kombinationerna clang/vcc × anropare/anropad, `vpp -c`, länkade av emcc och
+  körda i node.  Nytt test `tests/abi/aggregates` (poster 0..48 byte, ett
+  element, unioner, bit-fält, `__int128`, `long double`, `_Complex`, varargs
+  med poster, återanrop åt båda hållen) och `aligned_args`.  Det hittade:
+  en vektor med en lane returneras som skalär (som LLVM), inte genom pekare.
+  wasm64 9/9, wasm32 8/8 (`bitfield_layout` kräver LP64), `--vlink` 9/9.
+  Samma tester hittade fyra arm64-fel (rättade): Linux rundar till ett jämnt
+  registerpar efter clangs "unadjusted" justering (inte postens egen
+  `aligned()`), Apple rundar aldrig; Apples `long double` (8 byte) i HFA;
+  Apples HFA på stacken med elementets justering och storlek.
 
 Senare samma dag: `setjmp`/`longjmp` genom wasm-EH (`-mllvm -wasm-enable-sjlj`,
 som emscriptens `-sSUPPORT_LONGJMP=wasm`: `__wasm_setjmp`/`__wasm_longjmp`,

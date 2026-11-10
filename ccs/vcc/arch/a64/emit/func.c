@@ -553,8 +553,10 @@ static bool emit_function1(ecx *e, uint32_t s, int nlreg)
 				break;
 			}
 			for (int k = 0; k < ab.nreg; k++) {
-				mem(e, I_LD, 3, 0, R_X16, R_FP, 16 + ab.stk + 8 * k);
-				mem(e, I_ST, 3, 0, R_X16, FRAME, bd->slot + 8 * k);
+				int lg = ab.fsz && ab.size - 8 * k < 8 ? 2 : 3;	/* an Apple float HFA's last part */
+
+				mem(e, I_LD, lg, 0, R_X16, R_FP, 16 + ab.stk + 8 * k);
+				mem(e, I_ST, lg, 0, R_X16, FRAME, bd->slot + 8 * k);
 			}
 			break;
 		case A_REF_REG:
