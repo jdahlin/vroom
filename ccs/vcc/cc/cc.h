@@ -134,6 +134,7 @@ enum {
 	SF_REF = 1u << 18,	/* named anywhere (also in sizeof/typeof): a lazy body must be parsed */
 	SF_DEPRECATED = 1u << 19,	/* deprecated: attrs record's depr/deprmsg */
 	SF_WUR = 1u << 20,	/* warn_unused_result / nodiscard (attrs record's wur) */
+	SF_NONNULL = 1u << 21,	/* a parameter declared nonnull */
 };
 
 typedef struct sym {

@@ -621,7 +621,9 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
   mean '_Clang', note at the built-in macro) and takes it as `clang::`.
   *Validate:* diag test.
 - [ ] **Attributes without effect**: `alloc_size`,
-  `format`, `nonnull`, `returns_twice`, `target`.  (Done: `ifunc`
+  `format`, `returns_twice`, `target`.  (Done: `nonnull` (`-Wnonnull`
+  for null constants, plain/indexed/on a parameter: diag `nonnull.c`);
+  `ifunc`
   (STT_GNU_IFUNC, global as clang, direct under PIE like an alias:
   `tests/pic/ifunc.c`, `alias.c` in vcc-pic.py, which now also compares
   symbol types and bindings); `deprecated`

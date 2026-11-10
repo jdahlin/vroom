@@ -666,6 +666,35 @@ static __attribute__((noinline)) uint32_t ovl_pick(cc *c, uint32_t head, const v
 	return best;
 }
 
+/* clang's -Wnonnull: a null pointer constant passed for a nonnull parameter */
+static void nonnull_args(cc *c, uint32_t fs, qty ft, const uint32_t *args, uint32_t n)
+{
+	const sym *y = &c->syms[fs];
+	uint32_t all = y->attrs ? c->attr[y->attrs].nonnull : 0;
+	uint32_t call_end = c->prevloc;	/* ')': where clang points for a plain nonnull */
+	const ctype *f = T(c, ft);
+
+	if (!all && !y->psyms)
+		return;
+	for (uint32_t i = 0; i < n; i++) {
+		uint32_t p = y->psyms && i < f->n ? c->lists[y->psyms - 1 + i] : 0;
+		bool pn = p && (c->syms[p].flags & SF_NONNULL), idx = i < 31 && (all >> (i + 1) & 1);
+		bool any = (all & 1) && i < f->n && is_ptr(c, c->params[f->aux + i]);
+		cval cv;
+
+		if (!pn && !idx && !any)
+			continue;
+		if (!is_ptr(c, N(args[i])->ty) || !eval(c, args[i], &cv) || cv.kind != CV_INT || cv.i)
+			continue;
+		{
+			pp_span r = rng(c, args[i]);
+
+			cc_warnx(c, "nonnull", true, NULL, pn || idx ? r.b : call_end, &r, 1, NULL, 0,
+				 "null passed to a callee that requires a non-null argument");
+		}
+	}
+}
+
 static __attribute__((noinline)) uint32_t call(cc *c, uint32_t fn, uint32_t loc)
 {
 	uint32_t callee;
@@ -763,6 +792,8 @@ static __attribute__((noinline)) uint32_t call(cc *c, uint32_t fn, uint32_t loc)
 		}
 		args.v[i] = a;
 	}
+	if (N(callee)->op == N_VAR && c->syms[N(callee)->a].kind == S_FUNC && !c->unevaluated)
+		nonnull_args(c, N(callee)->a, ft, args.v, args.n);
 	if (!c->o->no_builtin && args.n == 1 && N(callee)->op == N_VAR && c->syms[N(callee)->a].kind == S_FUNC &&
 	    (c->syms[N(callee)->a].flags & SF_GLOBAL)) {
 		/* clang: abs, labs and llabs declared with their library types are builtins (inline) */
