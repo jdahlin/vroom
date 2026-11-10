@@ -170,6 +170,19 @@ against `vpp`, both lexed by vcc's lexer.  A change to `pp/` or `lex.c` is
 only done when the parity run is fully green; a change to `cc/` when both
 vcc-sema.py runs are green (878/879: modpost.c lacks a generated header).
 
+## CI and the premerge gate
+`.github/workflows/premerge.yml` runs one reusable workflow per target in
+parallel (`arm64.yml`: jobs arm64, asan, tsan; `wasm.yml`; x86-64 gets its
+own), each on GitHub's ubuntu-24.04-arm in a Debian 13 container
+(`ci/setup-debian.sh`: clang 23 from apt.llvm.org, qemu, emsdk for wasm).
+The test set is `ci/premerge.sh JOB`: the vendored C suites under qemu and
+the fast harnesses, no kernel, PostgreSQL or anything needing `work/`.
+Locally, as CI: `env/linux/run.sh ci/premerge.sh arm64`.  main is not
+protected (private repo, free plan), so the gate is the workflow: push to
+main through `ci/premerge-push [--watch]` (pushes to `premerge`; job `gate`
+fast-forwards main when everything is green).  A new harness belongs in
+`ci/premerge.sh` when it is fast and needs only the checkout.
+
 ## Sanitizers
 ```
 make -C ccs -j 6 vcc-asan           # -fsanitize=address,undefined -> build/ccs-asan/
