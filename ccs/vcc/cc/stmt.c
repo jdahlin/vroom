@@ -567,6 +567,14 @@ VPRIV uint32_t statement(cc *c)
 			e = decay(c, expr(c));
 			if (!is_void(c, rt) && !is_void(c, N(e)->ty))
 				e = is_record(c, rt) ? e : convert_as(c, e, rt, CX_RETURN, loc);
+			else if (!is_void(c, rt) && is_void(c, N(e)->ty) && !(N(e)->flags & NF_ERR)) {
+				pp_span r = rng(c, e);
+				char f[256];
+
+				snprintf(f, sizeof f, "%s", tyname(c, N(e)->ty));	/* tyname: one buffer */
+				report(c, "error", r.b, &r, 1, NULL, 0, "returning '%s' from a function with incompatible result type '%s'", f,
+				       tyname(c, rt));
+			}
 			else if (is_void(c, rt) && !is_void(c, N(e)->ty) && c->fn && !(N(e)->flags & NF_ERR)) {
 				pp_span r = rng(c, e);
 

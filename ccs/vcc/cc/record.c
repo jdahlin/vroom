@@ -183,6 +183,17 @@ VPRIV void enum_body(cc *c, uint32_t ti, attrs *after)
 		if (!any || v > mx)
 			mx = v;
 		any = true;
+		{
+			uint32_t o = lookup(c, name);
+
+			if (o && c->syms[o].depth == c->depth && c->syms[o].kind != S_TAG) {
+				if (c->syms[o].kind == S_ENUMCONST)
+					cc_error(c, loc, "redefinition of enumerator '%.*s'", IDF(name));
+				else
+					cc_error(c, loc, "redefinition of '%.*s' as different kind of symbol", IDF(name));
+				note(c, c->syms[o].loc, "previous definition is here");
+			}
+		}
 		s = sym_new(c, S_ENUMCONST, name, v >= INT32_MIN && v <= INT32_MAX ? prim(TY_INT) :
 						 v >= 0 && v <= UINT32_MAX ? prim(TY_UINT) : v >= INT64_MIN && v <= INT64_MAX ? prim(CC_I64(c, false)) : prim(CC_I64(c, true)), loc);
 		c->syms[s].val = (int64_t)v;

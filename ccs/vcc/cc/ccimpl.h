@@ -252,6 +252,8 @@ VPRIV uint32_t cast_node(cc *c, uint32_t n, qty to, int kind);
 VPRIV __attribute__((noinline)) uint32_t decay_slow(cc *c, uint32_t n, qty t, int k);
 static inline uint32_t decay(cc *c, uint32_t n);
 VPRIV const field *bitfield_of(cc *c, uint32_t n);
+VPRIV bool static_init_ok(cc *c, qty ty, uint32_t init, uint32_t *bad);
+VPRIV uint32_t expr_loc(cc *c, uint32_t n);
 VPRIV qty promoted(cc *c, uint32_t n);
 VPRIV int conv_kind(cc *c, qty from, qty to, uint32_t n);
 VPRIV bool union_member_for(cc *c, qty u, uint32_t n);

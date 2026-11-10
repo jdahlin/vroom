@@ -614,3 +614,85 @@ VPRIV uint32_t initializer(cc *c, qty *ty, bool st)
 		return convert_as(c, decay(c, v), t, c->cv_what == CX_INIT ? CX_INIT : 0, c->cv_loc);
 	}
 }
+
+/* clang's location for a diagnostic about expression n (getExprLoc: a call's callee) */
+VPRIV uint32_t expr_loc(cc *c, uint32_t n)
+{
+	while (N(n)->op == N_CAST && N(n)->a && !c->span[n].e)
+		n = N(n)->a;
+	if (N(n)->op == N_CALL && N(n)->a)
+		return rng(c, N(n)->a).b;
+	return N(n)->loc;
+}
+
+/*
+ * Whether init can initialise an object of static storage of type ty: the
+ * walk of the emitter's data_init (emit/data.c) without writing, so the error
+ * comes from the front end, also for an object never emitted (clang Sema).
+ * *bad: the first element that is not a constant.
+ */
+VPRIV bool static_init_ok(cc *c, qty ty, uint32_t init, uint32_t *bad)
+{
+	const node *x;
+	cval cv;
+
+	if (!init)
+		return true;
+	x = N(init);
+	if (x->op == N_ZERO || (x->flags & NF_ERR))
+		return true;
+	if (x->op == N_INIT) {
+		const uint32_t *v = &c->lists[x->b];
+
+		if (x->aux == 1) {
+			for (uint32_t i = 0; i < x->c; i++)
+				if (!static_init_ok(c, T(c, ty)->base, v[3 * i + 2], bad))
+					return false;
+			return true;
+		}
+		const tag *r = &c->tags[T(c, ty)->aux];
+
+		for (uint32_t i = 0; i < x->c && i < r->nfield; i++) {
+			const field *f = &r->f[i];
+
+			if ((x->aux == 2 && i != x->a) || !v[i])
+				continue;
+			if (f->bitfield) {
+				if (!eval(c, v[i], &cv) || cv.kind != CV_INT) {
+					*bad = v[i];
+					return false;
+				}
+				continue;
+			}
+			if (!static_init_ok(c, f->ty, v[i], bad))
+				return false;
+		}
+		return true;
+	}
+	if (x->op == N_STR && is_array(c, ty))
+		return true;
+	if (x->op == N_COMPLIT)
+		return static_init_ok(c, ty, x->a, bad);
+	if (x->op == N_CPLX) {
+		qty et = c->tags[T(c, x->ty)->aux].f[0].ty;
+
+		return static_init_ok(c, et, x->a, bad) && static_init_ok(c, et, x->b, bad);
+	}
+	if (x->op == N_CAST && x->aux == CK_NOP && (is_record(c, ty) || is_array(c, ty) || is_vector(c, ty)))
+		return static_init_ok(c, ty, x->a, bad);
+	if ((is_record(c, ty) || is_array(c, ty) || is_vector(c, ty))) {
+		uint32_t m = init;
+
+		while (N(m)->op == N_CAST)
+			m = N(m)->a;
+		if (N(m)->op == N_VAR && c->syms[N(m)->a].body)
+			return true;
+		*bad = init;
+		return false;
+	}
+	if (!eval(c, init, &cv) || (cv.kind != CV_INT && cv.kind != CV_FLT && cv.kind != CV_ADDR)) {
+		*bad = init;
+		return false;
+	}
+	return true;
+}

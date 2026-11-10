@@ -123,8 +123,12 @@ VPRIV void function_def(cc *c, uint32_t s, const declr *d)
 	for (uint32_t i = 0; i < d->npsyms; i++) {
 		uint32_t p = c->lists[d->psyms + i];
 
-		if (!c->syms[p].name)
-			continue;	/* C23: unnamed parameters in definitions (clang accepts) */
+		if (!c->syms[p].name) {	/* C23: unnamed parameters in definitions */
+			if (kwmap != kwmap_c23 && KIND(c, c->syms[p].ty) != TY_VOID)
+				cc_warnx(c, "c23-extensions", true, NULL, c->syms[p].loc, NULL, 0, NULL, 0,
+					 "omitting the parameter name in a function definition is a C23 extension");
+			continue;
+		}
 		sym_bind(c, p);
 	}
 	c->in_loop = c->in_switch = 0;

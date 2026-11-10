@@ -741,6 +741,7 @@ VPRIV void declaration(cc *c, vec *out, bool file)
 				 !(T(c, y->ty)->flags & (TF_INCOMPLETE | TF_VLA)) ? QT(QI(y->ty), QQ(t)) : t;
 			bool st = file || ds.sc == SC_STATIC;
 			uint32_t v;
+			int nerr = c->errors;
 
 			if (ds.sc == SC_TYPEDEF || is_func(c, t))
 				cc_error(c, d.loc, "illegal initializer");
@@ -782,6 +783,17 @@ VPRIV void declaration(cc *c, vec *out, bool file)
 			}
 			y->body = v;
 			y->flags |= SF_DEFINED;
+			{
+				uint32_t bad = 0;
+
+				/* not after an error in the initializer (clang: no follow-on error) */
+				if (st && v && c->errors == nerr && !static_init_ok(c, y->ty, v, &bad)) {
+					pp_span r = rng(c, bad);
+
+					report(c, "error", expr_loc(c, bad), &r, 1, NULL, 0, "initializer element is not a compile-time constant");
+				}
+			}
+			y = &c->syms[s];
 			if (out && !st) {
 				uint32_t n = mk2(c, N_DECL, prim(TY_VOID), d.loc, s, v);
 

@@ -97,15 +97,39 @@ static __attribute__((noinline)) uint32_t unary_op(cc *c)
 	}
 	case T_AMP:
 		next(c);
+		c->after_amp = is(c, T_STAR);
 		n = cast_expr(c);
 		bounds_warn(c, n, true);
+		{
+			uint32_t b = n;	/* &r, &r.m of a register variable (clang: also its members) */
+
+			while (N(b)->op == N_MEMBER)
+				b = N(b)->a;
+			if (N(b)->op == N_VAR && c->syms[N(b)->a].sc == SC_REGISTER)
+			{
+				pp_span r = rng(c, n);
+
+				report(c, "error", loc, &r, 1, NULL, 0, "address of register variable requested");
+			}
+		}
 		return addr_of(c, n, loc);
-	case T_STAR:
+	case T_STAR: {
+		bool amp = c->after_amp;
+
+		c->after_amp = false;
 		next(c);
 		n = cast_expr(c);
 		if (KIND(c, N(n)->ty) == TY_FUNC)
 			return n;
-		return deref(c, n, loc);
+		n = deref(c, n, loc);
+		if (!amp && !c->unevaluated && N(n)->op == N_DEREF && KIND(c, N(n)->ty) == TY_VOID) {
+			pp_span r = rng(c, N(n)->a);
+
+			cc_warnx(c, "void-ptr-dereference", true, NULL, loc, &r, 1, NULL, 0,
+				 "ISO C does not allow indirection on operand of type '%s'", tyname(c, N(N(n)->a)->ty));
+		}
+		return n;
+	}
 	case T_PLUS:
 	case T_MINUS:
 	case T_TILDE: {

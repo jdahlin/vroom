@@ -60,6 +60,8 @@ static void param_list(cc *c, dop *op)
 				}
 			}
 			declarator(c, &d, true, &first, &nops);
+			if (!d.name && !d.loc)
+				d.loc = tok(c)->loc;	/* an unnamed parameter: where its name would be (clang) */
 			attribute_list(c, &d.at);
 			t = apply_declarator(c, ds.ty, first, nops);
 			c->ndops = first;
@@ -89,6 +91,15 @@ static void param_list(cc *c, dop *op)
 				t = ty_ptr(c, t);
 			}
 			vpush(c, &ptys, t);
+			if (d.name) {
+				uint32_t o = lookup(c, d.name);
+
+				if (o && c->syms[o].depth == c->depth && (c->syms[o].flags & SF_PARAM)) {
+					cc_error(c, d.loc, "redefinition of parameter '%.*s'", IDF(d.name));
+					note(c, c->syms[o].loc, "previous declaration is here");
+					d.name = 0;	/* clang: the parameter loses its name */
+				}
+			}
 			s = sym_new(c, S_VAR, d.name, t, d.loc ? d.loc : ds.loc);
 			c->syms[s].flags |= SF_PARAM;
 			c->syms[s].body = vsize;	/* parameters: a decayed VLA's size expression with side effects */

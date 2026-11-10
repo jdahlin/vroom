@@ -1013,12 +1013,18 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
   `-Wexpansion-to-defined`, `-Winvalid-pp-token`, `#pragma GCC warning`.
   *Validate:* one diag test per warning; `vcc-sema.py warn` stays 879/879
   (no false positives on the kernel).
-- [ ] **Invalid code accepted**: duplicate enumerator / parameter,
+- [x] **Invalid code accepted**: duplicate enumerator / parameter,
   `&register_var`, `_Alignas(3)`, `typeof` on a bitfield, `*(void *)p` as a
-  value, `return v();` of void from int function, `-fsyntax-only` missing
-  initializer-constness errors (`static int s = g();`, `5 % 0`).
-  *Validate:* T4 each, then promote to diag.
-- [ ] **`"abc"[1]` rejected as a static initializer**; vector types print as
+  value (and `-Wvoid-ptr-dereference`), `return v();` of void from an int
+  function, and the static initializer constness check in the front end
+  (`static_init_ok`, also under `-fsyntax-only`).  Done: diag tests
+  identical to clang (74/74); sema 878/879, warn 879/879, ctests, pg green.
+- [ ] **Runtime-behaviour warnings in a global initializer** come before
+  the constness error (`int x = 5 % 0;`): clang defers them
+  (DiagRuntimeBehavior) and emits them only for a non-constant initializer.
+  *Validate:* diag test `mod_zero_const.c`.
+- [ ] **`"abc"[1]` rejected as a static initializer** (now also by
+  `-fsyntax-only`, `static_init_ok`'s `eval`); vector types print as
   `''` in messages (`tyname`).  *Validate:* T1; diag test.
 - [ ] **Diagnostic details**: columns on `##` and invalid directives,
   `#line` file names ignored, nested macro notes (one level today), the
