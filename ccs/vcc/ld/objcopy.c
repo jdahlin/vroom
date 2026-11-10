@@ -402,6 +402,8 @@ static struct {
 	const char **add;	/* --add-section name=file */
 	uint32_t nadd;
 	const char *debuglink;
+	const char **ssf;	/* --set-section-flags name=f1,f2 */
+	uint32_t nssf;
 	const char **only;
 	uint32_t nonly;
 	const char **unneeded;
@@ -520,6 +522,42 @@ static int objcopy_run(int dirfd)
 	}
 	if (!rel && e.sh[0].sh_size)
 		oerror("extended section numbering not supported");
+	/* --set-section-flags (llvm-objcopy's getNewShfFlags; NOBITS with contents/load becomes PROGBITS) */
+	for (uint32_t a = 0; a < oc.nssf; a++) {
+		const char *eq = strchr(oc.ssf[a], '=');
+		size_t nl = (size_t)(eq - oc.ssf[a]);
+		uint64_t nf = SHF_WRITE;
+		bool contents = false, load = false;
+
+		for (const char *f = eq + 1; *f;) {
+			size_t l = strcspn(f, ",");
+#define FL(x) (l == sizeof(x) - 1 && !strncmp(f, x, l))
+			if (FL("alloc")) nf |= SHF_ALLOC;
+			else if (FL("readonly")) nf &= ~(uint64_t)SHF_WRITE;
+			else if (FL("code")) nf |= SHF_EXECINSTR;
+			else if (FL("merge")) nf |= SHF_MERGE;
+			else if (FL("strings")) nf |= SHF_STRINGS;
+			else if (FL("exclude")) nf |= 0x80000000u;
+			else if (FL("contents")) contents = true;
+			else if (FL("load")) load = true;
+			else if (!(FL("data") || FL("rom") || FL("share") || FL("debug") || FL("large") || FL("noload")))
+				oerror("unrecognized section flag '%.*s'", (int)l, f);
+#undef FL
+			f += l + (f[l] == ',');
+		}
+		for (uint32_t k = 1; k < ns; k++) {
+			OSec *s = &sec[k];
+			const uint64_t mask = SHF_ALLOC | SHF_WRITE | SHF_EXECINSTR | SHF_MERGE | SHF_STRINGS | 0x80000000u;
+
+			if (strlen(s->name) != nl || strncmp(s->name, oc.ssf[a], nl))
+				continue;
+			s->flags = (s->flags & ~mask) | nf;
+			if (s->type == SHT_NOBITS && (!(s->flags & SHF_ALLOC) || contents || load)) {
+				s->type = SHT_PROGBITS;	/* (llvm: zero-filled contents) */
+				s->gen = xcalloc(s->size + 1, 1);
+			}
+		}
+	}
 	/* --add-section: at the end, after everything else (llvm-objcopy: PROGBITS, or NOTE for .note*) */
 	for (uint32_t a = 0; a < oc.nadd; a++) {
 		const char *eq = strchr(oc.add[a], '=');
@@ -1051,6 +1089,10 @@ int objcopy_main(int argc, char **argv, int dirfd, FILE *err)
 			push(&oc.unneeded, &oc.nunneeded, v);
 		} else if ((v = VAL("--dump-section"))) {
 			push(&oc.dump, &oc.ndump, v);
+		} else if ((v = VAL("--set-section-flags"))) {
+			if (!strchr(v, '=') || v[0] == '=')
+				oerror("bad format for --set-section-flags: missing '='");
+			push(&oc.ssf, &oc.nssf, v);
 		} else if ((v = VAL("--add-gnu-debuglink"))) {
 			oc.debuglink = v;
 		} else if ((v = VAL("--add-section"))) {
@@ -1089,6 +1131,7 @@ int objcopy_main(int argc, char **argv, int dirfd, FILE *err)
 	free(oc.dump);
 	free(oc.redef);
 	free(oc.add);
+	free(oc.ssf);
 	return rc || oerrors;
 }
 

@@ -976,10 +976,10 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
   32-bit GNU symtab only; ld skips `/SYM64/` (`ld/ld.c:1622`).
   *Validate:* `bench/var-cmp.py` extended to regular archives and `x`, `d`,
   `q`, `p`, `s`; round-trip with llvm-ar.
-- [ ] **vobjcopy / vnm**: (done: `-g`/`--strip-debug`, `--redefine-sym`, `--add-section`, `--add-gnu-debuglink`; `.llvm_addrsig`'s
-  link dropped as llvm-objcopy.)  Missing `--add-section`,
+- [ ] **vobjcopy / vnm**: (done: `-g`/`--strip-debug`, `--redefine-sym`, `--add-section`, `--add-gnu-debuglink`, `--set-section-flags`; `.llvm_addrsig`'s
+  link dropped as llvm-objcopy.)  Missing
   `--only-keep-debug`, `-O elf64-*`,
-  `--set-section-flags`, `-I`/`-B`; nm `-D`, archives.
+  `-I`/`-B`; nm `-D`, archives.
   (Done: nm `-u`/`-U`/`-g` and long forms, unknown options are errors, any
   number of files.)
   *Validate:* `bench/vobjcopy-cmp.sh` extended with these flags vs
