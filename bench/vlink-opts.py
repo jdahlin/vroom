@@ -9,7 +9,7 @@ expected (MSG) vlink must print the same text; when both succeed, the loaded
 images (objcopy -O binary) must be byte-identical.  NOSUP lists options lld
 takes that vlink rejects on purpose with a clear error (no dynamic linking).
 """
-import os, shutil, subprocess, sys, tempfile
+import re, os, shutil, subprocess, sys, tempfile
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from hostenv import llvm, BUILD
 
@@ -235,6 +235,48 @@ def main():
         if p.returncode or 'LLD' not in w or not w[w.index('LLD') + 1][:1].isdigit():
             bad += 1
             print(f'FAIL --version: {p.stdout!r}')
+        # -r: vlink -r then a final link (ld.lld) gives what lld -r then the final
+        # link gives (image, or the error), and the section groups are lld -r's
+        def groups(o):
+            out = subprocess.run([llvm('llvm-readelf'), '-gSW', o], capture_output=True, text=True).stdout
+            names = {m.group(1): m.group(2) for m in re.finditer(r'\[\s*(\d+)\] (\S+)', out)}
+            gl = []
+            for l in out.splitlines():
+                m = re.match(r'(\S+) group section \[\s*\d+\] `\.group\' \[(.*)\] contains', l)
+                if m:
+                    gl.append([m.group(1), m.group(2)])
+                m = re.match(r'\s+\[\s*(\d+)\]\s+(\S+)$', l)
+                if m and gl:
+                    gl[-1].append(m.group(2))
+            return gl
+        RCASES = [('-r groups', '{t}/g1.o {t}/g2.o {t}/g4.o'), ('-r comdat three', '{t}/g1.o {t}/g2.o {t}/g3.o'),
+                  ('-r eh_frame comdat', '{t}/e1.o {t}/e2.o {t}/e3.o {t}/ep.o {t}/pers.o')]
+        for name, args in RCASES:
+            a = args.format(t=t).split()
+            sh = [subprocess.run([exe, '-r'] + a + ['-o', f'{t}/{tag}.r.o'], capture_output=True, text=True)
+                  for exe, tag in ((VLINK, 'v'), (LLD, 'l'))]
+            why = None
+            if sh[0].returncode or sh[1].returncode:
+                why = f'-r: vlink rc={sh[0].returncode} {first_err(sh[0].stderr)}, lld rc={sh[1].returncode}'
+            else:
+                imgs = []
+                for ins in ([f'{t}/v.r.o'], [f'{t}/l.r.o']):
+                    q = subprocess.run([LLD, '-T', LDS] + ins + ['-o', f'{t}/r.out'], capture_output=True, text=True)
+                    if q.returncode:
+                        imgs.append(first_err(q.stderr))
+                        continue
+                    subprocess.run([OC, '-O', 'binary', f'{t}/r.out', f'{t}/r.bin'], check=True)
+                    imgs.append(open(f'{t}/r.bin', 'rb').read())
+                if imgs[0] != imgs[1]:
+                    why = f'linking the -r output differs from linking lld -r\'s ({imgs[0] if isinstance(imgs[0], str) else "image"})'
+                elif groups(f'{t}/v.r.o') != groups(f'{t}/l.r.o'):
+                    why = f'groups:\n    vlink {groups(f"{t}/v.r.o")}\n    lld   {groups(f"{t}/l.r.o")}'
+            if why:
+                bad += 1
+                print(f'FAIL {name}: {why}')
+            elif v:
+                print(f'ok   {name}')
+        n0 += len(RCASES)
         n = len(CASES) + 1 + n0
         print(f'vlink-opts: {n - bad}/{n} ok')
     sys.exit(1 if bad else 0)

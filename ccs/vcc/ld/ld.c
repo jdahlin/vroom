@@ -1841,9 +1841,6 @@ static void parse_obj(void *arg, size_t i)
 			o->nsym = o->sh[s].sh_size / sizeof(Sym);
 			o->firstg = o->sh[s].sh_info;
 			o->str = (const char *)o->buf + o->sh[o->sh[s].sh_link].sh_offset;
-		} else if (o->sh[s].sh_type == SHT_GROUP) {
-			if (opt.relocatable)
-				error("%s: section groups not supported with -r", o->path);
 		}
 	}
 	if (o->nsym > o->firstg)
@@ -5222,6 +5219,8 @@ typedef struct {
 	uint64_t nrela, relaoff;
 	uint32_t shidx, relaidx, nameoff, relanameoff;
 	uint32_t secsym;
+	uint32_t grp;			/* a .group: its input SHT_GROUP ISec + 1 */
+	bool member;			/* a group member: its own output section, SHF_GROUP */
 } ROut;
 static VVEC(ROut) routs;
 static uint32_t *rmap;			/* name hash table -> ROut */
@@ -5247,6 +5246,14 @@ static uint32_t rout_get(const char *name)
 	ROut r = {.name = name, .h = h, .align = 1};
 	VVEC_PUSH(routs, r, alloc);
 	rmap[j] = routs.n - 1;
+	return routs.n - 1;
+}
+
+/* an output section of its own (groups and their members, as lld -r) */
+static uint32_t rout_new(const char *name)
+{
+	ROut r = {.name = name, .h = strhash(name, strlen(name)), .align = 1};
+	VVEC_PUSH(routs, r, alloc);
 	return routs.n - 1;
 }
 
@@ -5321,6 +5328,8 @@ static void r_write_globals(void *arg, size_t c)
 			if (s->sec == NONE) {
 				shndx = SHN_ABS;
 				val = objs.v[s->obj]->sym[s->symidx].st_value;
+			} else if (isecs.v[s->sec].kind == K_NONE) {
+				size = 0;	/* in a dropped group member: undefined (lld) */
 			} else {
 				ISec *is = &isecs.v[s->sec];
 				shndx = routs.v[is->osec].shidx;
@@ -5384,10 +5393,37 @@ static int ld_relocatable(void)
 	rmask = cap - 1;
 	for (uint32_t i = 0; i < isecs.n; i++) {
 		ISec *is = &isecs.v[i];
+		const Obj *io = is->obj != NONE ? objs.v[is->obj] : NULL;
+		const Shdr *ih = io && is->shndx < io->nsh ? &io->sh[is->shndx] : NULL;
+
+		if (ih && ih->sh_type == SHT_GROUP) {
+			/* a group whose members are kept (a later COMDAT copy is dropped) */
+			const uint32_t *w = (const uint32_t *)(io->buf + ih->sh_offset);
+			uint32_t nw = (uint32_t)(ih->sh_size / 4);
+
+			if (nw < 2 || isecs.v[io->isec0 + w[1]].dropped)
+				continue;
+			uint32_t gi = rout_new(".group");
+			ROut *g = &routs.v[gi];
+
+			g->type = SHT_GROUP;
+			g->align = 4;
+			g->entsize = 4;
+			g->grp = i + 1;
+			g->size = 4 * (uint64_t)nw;
+			is->osec = gi;
+			continue;
+		}
 		if (is->kind != K_NORMAL)
 			continue;
-		uint32_t ri = rout_get(is->name);
+		bool member = ih && (ih->sh_flags & SHF_GROUP);
+		uint32_t ri = member ? rout_new(is->name) : rout_get(is->name);
 		ROut *r = &routs.v[ri];
+
+		if (member) {
+			r->member = true;
+			is->flags |= SHF_GROUP;
+		}
 		if (!r->secs.n) {
 			r->type = is->type;
 			r->flags = is->flags;
@@ -5500,6 +5536,32 @@ static int ld_relocatable(void)
 	pfor(objs.n, r_write_locals, NULL);
 	pfor(wjobs.n, r_write_isec, NULL);
 	pfor((gorder.n + 4095) / 4096, r_write_globals, NULL);
+	/* groups: the flag word, then the members' output indices (a .rela member: its section's) */
+	for (uint32_t i = 0; i < routs.n; i++) {
+		ROut *g = &routs.v[i];
+
+		if (!g->grp)
+			continue;
+		const ISec *gs = &isecs.v[g->grp - 1];
+		const Obj *o = objs.v[gs->obj];
+		const Shdr *h = &o->sh[gs->shndx];
+		const uint32_t *w = (const uint32_t *)(o->buf + h->sh_offset);
+		uint32_t *d = (uint32_t *)(void *)(rbuf + g->off), n = 0;
+
+		d[n++] = w[0];
+		for (uint64_t k = 1; k < h->sh_size / 4; k++) {
+			const Shdr *m = &o->sh[w[k]];
+			const ISec *mi = &isecs.v[o->isec0 + (m->sh_type == SHT_RELA ? m->sh_info : w[k])];
+
+			if (mi->kind == K_NONE || mi->osec == NONE)
+				continue;
+			uint32_t x = m->sh_type == SHT_RELA ? routs.v[mi->osec].relaidx : routs.v[mi->osec].shidx;
+
+			if (x)
+				d[n++] = x;
+		}
+		g->size = 4 * (uint64_t)n;
+	}
 	{
 		Sym *sy = (Sym *)(rbuf + r_symoff);
 		for (uint32_t i = 0; i < routs.n; i++)
@@ -5516,9 +5578,19 @@ static int ld_relocatable(void)
 		shd[r->shidx] = (Shdr){.sh_name = r->nameoff, .sh_type = r->type, .sh_flags = r->flags,
 				       .sh_offset = r->off, .sh_size = r->size, .sh_addralign = r->align,
 				       .sh_entsize = r->entsize};
+		if (r->grp) {	/* sh_link the symbol table, sh_info the signature */
+			const ISec *gs = &isecs.v[r->grp - 1];
+			const Obj *o = objs.v[gs->obj];
+			uint32_t y = o->sh[gs->shndx].sh_info;
+
+			shd[r->shidx].sh_size = r->size;
+			shd[r->shidx].sh_link = r_symidx;
+			shd[r->shidx].sh_info = y >= o->firstg ? gsyms[o->gs[y - o->firstg]].outidx : lmap[gs->obj][y];
+		}
 		if (r->nrela) {
 			sprintf(shstr + r->relanameoff, ".rela%s", r->name);
-			shd[r->relaidx] = (Shdr){.sh_name = r->relanameoff, .sh_type = SHT_RELA, .sh_flags = SHF_INFO_LINK,
+			shd[r->relaidx] = (Shdr){.sh_name = r->relanameoff, .sh_type = SHT_RELA,
+						 .sh_flags = SHF_INFO_LINK | (r->member ? SHF_GROUP : 0),
 						 .sh_offset = r->relaoff, .sh_size = r->nrela * sizeof(Rela),
 						 .sh_link = r_symidx, .sh_info = r->shidx, .sh_addralign = 8,
 						 .sh_entsize = sizeof(Rela)};

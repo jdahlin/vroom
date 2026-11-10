@@ -899,7 +899,11 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
   signature in file order is kept, later members dropped; their definitions
   still resolve, and a winner in a dropped member is demoted with lld's
   "relocation refers to a symbol in a discarded section"; non-COMDAT groups
-  kept; 5 cases.)  Left: groups under `-r`.
+  kept; 5 cases.  Under `-r` as lld: a kept group is a `.group` section of
+  its own (signature, members renumbered, a member's `.rela` too), members
+  are output sections of their own with SHF_GROUP, a dropped COMDAT copy
+  goes and its definitions become undefined: 3 `-r` cases in
+  `vlink-opts.py`, groups and the final link of the output as lld -r's.)
   *Validate:* T8 static link of a musl `libc.a` hello world (run under
   qemu-user); a C++ template object pair.
 - [ ] **Dynamic linking**: `.dynamic`, `.dynsym`/`.dynstr`, `.gnu.hash`, PLT,
