@@ -990,6 +990,21 @@ static int handle1(const struct req *r, const char **kind)
 		atomic_fetch_add(&n_probe, 1);
 		return write_full(r->fds[1], cc_version_text, strlen(cc_version_text)) ? 0 : 1;
 	}
+	if (r->argc == 3 && !strcmp(r->argv[2], "-dumpmachine") && !strncmp(r->argv[1], "--target=", 9)
+	    && !strchr(r->argv[1], ' ')) {
+		/* the target triple normalized as clang: arch-os-env gets the vendor "unknown" */
+		const char *t = r->argv[1] + 9, *d1 = strchr(t, '-'), *d2 = d1 ? strchr(d1 + 1, '-') : NULL;
+		char line[512];
+		int n;
+
+		*kind = "cc-print";
+		atomic_fetch_add(&n_probe, 1);
+		if (d2 && !strchr(d2 + 1, '-') && !strncmp(d1 + 1, "linux", 5))
+			n = snprintf(line, sizeof line, "%.*s-unknown%s\n", (int)(d1 - t), t, d1);
+		else
+			n = snprintf(line, sizeof line, "%s\n", t);
+		return n < (int)sizeof line && write_full(r->fds[1], line, n) ? 0 : 1;
+	}
 	if (r->argc == 2 && !strncmp(r->argv[1], "-print-file-name=", 17)) {
 		const char *name = r->argv[1] + 17;
 		char line[4096];

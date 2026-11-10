@@ -255,6 +255,19 @@ def compile_shapes_not_forwarded():
     finally: v.stop()
 
 @test()
+def dumpmachine_as_clang():
+    """--target=T -dumpmachine: the triple normalized as clang, answered without a backend"""
+    v = Vccd()
+    try:
+        env = dict(os.environ, VCC_SOCK=v.sock)
+        for t, want in [('aarch64-linux-gnu', 'aarch64-unknown-linux-gnu'), ('arm64-linux-gnu', 'arm64-unknown-linux-gnu'),
+                        ('aarch64-unknown-linux-gnu', 'aarch64-unknown-linux-gnu')]:
+            p = subprocess.run([SHIM, f'--target={t}', '-dumpmachine'], cwd=v.dir, env=env, capture_output=True,
+                               text=True, process_group=0)
+            check(p.returncode == 0 and p.stdout == want + '\n', f'{t}: rc {p.returncode} {p.stdout!r}')
+    finally: v.stop()
+
+@test()
 def killed_client_no_output():
     """the shim killed during a long job: no object is written, and the server keeps serving"""
     v = Vccd()

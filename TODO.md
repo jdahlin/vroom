@@ -1012,8 +1012,8 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
   *Validate:* T11 table generated from clang's option list
   (`clang --help-hidden`): each must be in an explicit table in
   driver/ppdriver.c; a test fails when an option has no entry.
-- [ ] **Missing**: `-print-*` (`-print-file-name` echoes, `vccd/vccd.c:665`),
-  `-dumpmachine`, `-v`, `-###`, `-save-temps`, `-shared`, `-l`/`-L`, `-Wl,`.
+- [ ] **Missing**: (done: `--target=T -dumpmachine` in vccd, vccd-test.)
+  `-print-*` (`-print-file-name` echoes, `vccd/vccd.c:665`), `-v`, `-###`, `-save-temps`, `-shared`, `-l`/`-L`, `-Wl,`.
   *Validate:* T11 rows.
 - [ ] **caps.c probe answers can contradict real compiles** (`vccd/vccd.c:291`,
   `vccd/caps.c:199-208`), unmatched sources forwarded to clang (`vccd/vccd.c:395`),
