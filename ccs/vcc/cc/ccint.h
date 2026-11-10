@@ -209,6 +209,7 @@ struct cc {
 	int unevaluated;	/* sizeof / typeof / _Alignof operand */
 	int cexpr;
 	uint32_t *utd, nutd;	/* block-scope typedefs never named: -Wunused-local-typedef at the TU's end */
+	uint32_t args_rp;	/* args_list's ')' (where it was expected, if missing) */
 	uint32_t fnconv;	/* nconv when the function's body began */
 	int fnerr;		/* errors when the function's body began: none since, its unused-variable warnings */
 	vdiag **rtq;		/* clang's DiagRuntimeBehavior in a function: emitted at the body's end */
@@ -293,7 +294,9 @@ enum {
 	BI_ATOMIC_LOAD_N, BI_ATOMIC_STORE_N, BI_ATOMIC_EXCHANGE_N, BI_ATOMIC_CMPXCHG_N,
 	BI_ATOMIC_LOAD, BI_ATOMIC_STORE, BI_ATOMIC_EXCHANGE, BI_ATOMIC_CMPXCHG,
 	BI_ATOMIC_FETCH_ADD, BI_ATOMIC_FETCH_SUB, BI_ATOMIC_FETCH_AND, BI_ATOMIC_FETCH_OR, BI_ATOMIC_FETCH_XOR,
+	BI_ATOMIC_FETCH_NAND, BI_ATOMIC_FETCH_MAX, BI_ATOMIC_FETCH_MIN,	/* order as the _FETCH forms (emit: base) */
 	BI_ATOMIC_ADD_FETCH, BI_ATOMIC_SUB_FETCH, BI_ATOMIC_AND_FETCH, BI_ATOMIC_OR_FETCH, BI_ATOMIC_XOR_FETCH,
+	BI_ATOMIC_NAND_FETCH, BI_ATOMIC_MAX_FETCH, BI_ATOMIC_MIN_FETCH, BI_ATOMIC_TEST_AND_SET, BI_ATOMIC_CLEAR,
 	BI_ATOMIC_THREAD_FENCE, BI_ATOMIC_SIGNAL_FENCE, BI_ATOMIC_LOCK_FREE,
 	/* legacy __sync_* without an __atomic_* form (the others map onto __atomic_*) */
 	BI_SYNC_VAL_CAS, BI_SYNC_BOOL_CAS, BI_SYNC_LOCK_RELEASE, BI_SYNC_SYNCHRONIZE,

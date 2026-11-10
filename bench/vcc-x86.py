@@ -48,8 +48,12 @@ def rt_obj():
         subprocess.run([CL, TGT, '-O2', '-c', src, '-o', RTO + '.tmp'], check=True)
         os.replace(RTO + '.tmp', RTO)
 
-def link(objs, exe):
-    rc, _, err = sh(LINK + objs + [RTO, '-lm', '-o', exe], timeout=60)
+# --pie / --pic: vcc's side compiled -fPIE / -fPIC and linked -pie (clang's
+# reference stays the -fno-PIE build: the behaviour is the same)
+PIC = None
+
+def link(objs, exe, pie=False):
+    rc, _, err = sh((LINK[:-1] + ['-pie'] if pie else LINK) + objs + [RTO, '-lm', '-o', exe], timeout=60)
     return rc, err.decode(errors='replace')
 
 def run(exe):
@@ -105,13 +109,13 @@ def one(t):
     ref = reference(suite, name, path, flags, wd)
     if 'skip' in ref:
         return t, 'skip', ref['skip'], ref['why']
-    vfl = BASE + ct.CLFL + flags
+    vfl = [PIC if a == '-fno-PIE' and PIC else a for a in BASE] + ct.CLFL + flags
     rc, _, err = sh([VPP, '-S'] + vfl + [path, '-o', f'{wd}/vcc.s'], cwd=cwd)
     if rc:
         e = err.decode(errors='replace')
         return t, 'fail', 'emit', ct.first_err(e) if rc != 'timeout' and rc > 0 else f'vpp: signal/timeout {rc}: ' + ct.first_err(e)
     pk = hashlib.sha1(open(f'{wd}/vcc.s', 'rb').read() + ref['key'].encode()).hexdigest()
-    pf = f'{OUT}/pass/{suite}/{name}'
+    pf = f'{OUT}/pass{PIC or ""}/{suite}/{name}'
     if not NOCACHE:
         try:
             if open(pf).read() == pk:
@@ -123,7 +127,7 @@ def one(t):
     if rc:
         m = re.search(r'error: (.*)', err.decode(errors='replace'))
         return t, 'fail', 'as', re.sub(r'\d+', 'N', m.group(1)) if m else ct.first_err(err.decode(errors='replace'))
-    rc, err = link([f'{wd}/vcc.o'], f'{wd}/vcc')
+    rc, err = link([f'{wd}/vcc.o'], f'{wd}/vcc', pie=bool(PIC))
     if rc:
         m = re.search(r'undefined (?:symbol|reference to) .?(\w+)', err)
         return t, 'fail', 'link', 'undefined ' + m.group(1) if m else ct.first_err(err)
@@ -149,6 +153,8 @@ if __name__ == '__main__':
     nocache = '--no-cache' in av
     av = [a for a in av if a != '--no-cache']
     if '-v' in av: verbose = True; av.remove('-v')
+    for o, f in (('--pie', '-fPIE'), ('--pic', '-fPIC')):
+        if o in av: PIC = f; av.remove(o)
     for opt in ('-j', '--suite', '--show'):
         if opt in av:
             k = av.index(opt); v = av[k + 1]; del av[k:k + 2]

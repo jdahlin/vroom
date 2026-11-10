@@ -2630,9 +2630,29 @@ static uint64_t header_size(void)
 
 /* ---------------- section assignment ---------------- */
 
+/* input section name -> its ISD (or NONE), open addressing; grown at half
+   full: an -ffunction-sections link has about as many names as sections */
 typedef struct { const char *name; uint32_t h; uint32_t isd; } NameEnt;
 static NameEnt *ncache;
-static uint32_t ncmask;
+static uint32_t ncmask, ncount;
+
+static void ncache_grow(void)
+{
+	uint32_t ncap = (ncmask + 1) * 2;
+	NameEnt *nc = alloc(ncap * sizeof *nc);
+
+	memset(nc, 0, ncap * sizeof *nc);
+	for (uint32_t i = 0; i <= ncmask; i++)
+		if (ncache[i].name) {
+			uint32_t j = ncache[i].h & (ncap - 1);
+
+			while (nc[j].name)
+				j = (j + 1) & (ncap - 1);
+			nc[j] = ncache[i];
+		}
+	ncache = nc;
+	ncmask = ncap - 1;
+}
 
 static uint32_t match_isd(const char *name)
 {
@@ -2663,6 +2683,8 @@ static uint32_t match_isd(const char *name)
 		}
 	}
 	ncache[j] = (NameEnt){.name = name, .h = h, .isd = res};
+	if (++ncount * 2 > ncmask + 1)
+		ncache_grow();
 	return res;
 }
 
@@ -2763,7 +2785,9 @@ static void ncache_init(void)
 	while (ncap < isecs.n / 4)
 		ncap *= 2;
 	ncache = alloc(ncap * sizeof *ncache);
+	memset(ncache, 0, ncap * sizeof *ncache);
 	ncmask = ncap - 1;
+	ncount = 0;
 }
 
 /* __start_NAME / __stop_NAME with NAME a C identifier: the NAME, else NULL */
@@ -6393,6 +6417,14 @@ static void reset_state(void)
 	memset(&recorded, 0, sizeof recorded);
 	memset(&script_new, 0, sizeof script_new);
 	memset(&routs, 0, sizeof routs);
+	/* in the arena, which free_arenas unmapped after the last link (vccd runs many) */
+	ncache = NULL;
+	ncmask = ncount = 0;
+	memset(&ehfdes, 0, sizeof ehfdes);
+	memset(&stop_syms, 0, sizeof stop_syms);
+	ehhdr_isec = NONE;	/* set only while NONE */
+	has_tls = headers_loaded = false;
+	tls_tp = tbss_off = 0;
 	stub_names = NULL;
 	nstubs = 0;
 	tr_keys = NULL;
@@ -6411,8 +6443,8 @@ static void reset_state(void)
 	have_phdrs = dyn_live = false;
 	nverdefs = 0;
 	hdr_va = 0;
-	gotsyms.n = 0;
-	gotlocs.n = 0;
+	memset(&gotsyms, 0, sizeof gotsyms);	/* (all of it: its buffer was in the last link's arena) */
+	memset(&gotlocs, 0, sizeof gotlocs);
 	symtab_isec = strtab_isec = shstrtab_isec = NONE;
 	reladyn_buf = NULL;
 	out = NULL;
