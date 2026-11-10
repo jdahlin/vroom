@@ -467,7 +467,21 @@ VPRIV void wk_stmt(ecx *e, uint32_t n)
 		return;
 	}
 	case N_RETURN:
-		if (x->a && KIND(c, W->rty) != TY_VOID) {
+		if (x->a && is_record(c, W->rty)) {
+			/* the object's address; a size not a multiple of 8 through a slot of whole words */
+			val v = wk_gen(e, x->a);
+			int r = wk_reg(e, &v, prim(TY_ULONG));
+
+			if (!W->rrec.mem && W->rrec.size % 8) {
+				lval t = { .k = L_FRAME, .off = wk_slot(e, (W->rrec.size + 7) & ~(uint64_t)7, 8), .align = 8 };
+				int rt = LO(laddr)(e, &t);
+
+				LO(copy)(e, rt, r, W->rrec.size);
+				LO(tfree)(e, r);
+				r = rt;
+			}
+			LO(retrec)(e, r, &W->rrec, W->retlbl);
+		} else if (x->a && KIND(c, W->rty) != TY_VOID) {
 			val v = wk_gen(e, x->a);
 
 			LO(ret)(e, &v, wk_size(c, W->rty), wk_signed(c, W->rty), W->retlbl);
@@ -506,7 +520,7 @@ VPRIV void wk_function(ecx *e, uint32_t s)
 	const ctype *ft = T(c, y->ty);
 	const node *body = N(y->body);
 	wkst *W = wk_state(e);
-	int nreg = LO(nregargs)(), ir = 0, is = 0;
+	wkarg pa[256];
 
 	walk_fn(e, s);
 	W->gen++;
@@ -517,6 +531,7 @@ VPRIV void wk_function(ecx *e, uint32_t s)
 	W->ncases = 0;
 	W->rty = ft->base;
 	W->fsym = s;
+	W->rrec = (wkarg){ 0 };
 	e->top = s;
 	e->reach = true;
 	e->calls = false;
@@ -524,30 +539,36 @@ VPRIV void wk_function(ecx *e, uint32_t s)
 	LO(begin)(e, s);
 	if (_setjmp(e->bail))
 		return;	/* efatal: the function is not emitted, the error counted */
-	if (ft->flags & TF_VARIADIC)
-		efatal(e, y->loc, "x86-64: variadic functions are not supported yet (PLAN-x86.md X3)");
 	if (KIND(c, W->rty) != TY_VOID) {
 		int k = KIND(c, W->rty);
 
-		if (is_flt(c, W->rty) || is_record(c, W->rty) || k == TY_INT128 || k == TY_UINT128 || k == TY_VECTOR)
+		if (is_flt(c, W->rty) || k == TY_INT128 || k == TY_UINT128 || k == TY_VECTOR || k == TY_FLOAT128)
 			efatal(e, y->loc, "x86-64: this return type is not supported yet (PLAN-x86.md X3)");
 	}
+	if (body->aux > 256)
+		efatal(e, y->loc, "x86-64: more than 256 parameters");
 	W->retlbl = wk_newlabel(e);
-	/* parameters: in registers to frame slots, on the stack where they are */
+	if (is_record(c, W->rty)) {
+		LO(classify)(e, W->rty, &W->rrec);
+		W->rrec.slot = wk_slot(e, 8, 8);	/* (memory: the hidden pointer's slot) */
+	}
+	/* parameters: their slots, filled from the registers (or left on the stack) */
 	for (uint32_t i = 0; i < body->aux; i++) {
 		uint32_t p = c->lists[body->a + i];
 		qty pt = c->syms[p].ty;
 		int k = KIND(c, pt);
 
-		if (is_flt(c, pt) || is_record(c, pt) || k == TY_INT128 || k == TY_UINT128 || k == TY_VECTOR)
+		if (is_flt(c, pt) || k == TY_INT128 || k == TY_UINT128 || k == TY_VECTOR || k == TY_FLOAT128)
 			efatal(e, c->syms[p].loc, "x86-64: this parameter type is not supported yet (PLAN-x86.md X3)");
+		LO(classify)(e, pt, &pa[i]);
+		pa[i].slot = wk_slot(e, pa[i].size > 8 ? (pa[i].size + 7) & ~(uint64_t)7 : 8, pa[i].align);
+	}
+	LO(params)(e, pa, (int)body->aux, is_record(c, W->rty) ? &W->rrec : NULL, (ft->flags & TF_VARIADIC) != 0);
+	for (uint32_t i = 0; i < body->aux; i++) {
+		uint32_t p = c->lists[body->a + i];
+
 		W->sgen[p] = W->gen;
-		if (ir < nreg) {
-			W->soff[p] = wk_slot(e, 8, 8);
-			LO(param)(e, ir++, W->soff[p], wk_size(c, pt));
-		} else {
-			W->soff[p] = LO(stackarg)(nreg + is++);
-		}
+		W->soff[p] = pa[i].slot;
 	}
 	wk_stmt(e, y->body);
 	if (wk_is_main(c, s) && KIND(c, W->rty) == TY_INT) {

@@ -780,6 +780,33 @@ static val wk_unary(ecx *e, uint32_t n)
 
 /* ---------------- calls ---------------- */
 
+/* v (of type t) into the argument a's slot: a scalar extended, a record's bytes */
+static void wk_argslot(ecx *e, wkarg *a, qty t, val v)
+{
+	cc *c = e->c;
+	lval l;
+
+	a->slot = wk_slot(e, a->size > 8 ? (a->size + 7) & ~(uint64_t)7 : 8, a->align);
+	l = (lval){ .k = L_FRAME, .off = a->slot, .align = 8 };
+	if (is_record(c, t)) {
+		int rs = wk_reg(e, &v, prim(TY_ULONG)), rd = LO(laddr)(e, &l);
+
+		if (a->size)
+			LO(copy)(e, rd, rs, a->size);
+		LO(tfree)(e, rs);
+		LO(tfree)(e, rd);
+		return;
+	}
+	{
+		int r = wk_reg(e, &v, t);
+
+		if (wk_size(c, t) < 4)
+			LO(ext)(e, r, wk_size(c, t), wk_signed(c, t));
+		LO(store)(e, r, &l, 8);
+		LO(tfree)(e, r);
+	}
+}
+
 static val wk_call(ecx *e, uint32_t n)
 {
 	cc *c = e->c;
@@ -789,15 +816,13 @@ static val wk_call(ecx *e, uint32_t n)
 	const ctype *f = T(c, ft);
 	uint32_t ref = 0;
 	val fn = { 0 };
-	int32_t slots[64];
-	bool var = (f->flags & (TF_VARIADIC | TF_NOPROTO)) != 0;
+	wkarg args[64], r = { 0 };
+	bool var = (f->flags & (TF_VARIADIC | TF_NOPROTO)) != 0, rec_ = is_record(c, f->base);
 
 	if (x->c > 64)
 		wk_unsup(e, n, "a call with more than 64 arguments");
 	if (KIND(c, f->base) != TY_VOID)
 		wk_scalar(e, n, f->base);
-	if (is_record(c, f->base))
-		wk_unsup(e, n, "a call returning a record");
 	if (fx->op == N_CAST && fx->aux == CK_FDECAY && N(fx->a)->op == N_VAR) {
 		uint32_t s = canon_sym(c, N(fx->a)->a);
 
@@ -811,28 +836,29 @@ static val wk_call(ecx *e, uint32_t n)
 	for (uint32_t i = 0; i < x->c; i++) {
 		uint32_t an = c->lists[x->b + i];
 		qty at = N(an)->ty;
-		val v;
-		int r;
-		lval l;
 
 		wk_scalar(e, an, at);
-		if (is_record(c, at))
-			wk_unsup(e, an, "a record argument");
-		v = wk_gen(e, an);
-		r = wk_reg(e, &v, at);
-		if (wk_size(c, at) < 4)
-			LO(ext)(e, r, wk_size(c, at), wk_signed(c, at));
-		slots[i] = wk_slot(e, 8, 8);
-		l = (lval){ .k = L_FRAME, .off = slots[i], .align = 8 };
-		LO(store)(e, r, &l, 8);
-		LO(tfree)(e, r);
+		LO(classify)(e, at, &args[i]);
+		wk_argslot(e, &args[i], at, wk_gen(e, an));
+	}
+	if (rec_) {
+		LO(classify)(e, f->base, &r);
+		r.slot = wk_slot(e, (r.size + 7) & ~(uint64_t)7 ?: 8, r.align);
 	}
 	if (!ref) {
 		fn = wk_gen(e, x->a);
 		wk_reg(e, &fn, prim(TY_ULONG));
 	}
 	e->calls = true;
-	return LO(call)(e, ref, ref ? NULL : &fn, slots, (int)x->c, var, wk_size(c, f->base), wk_signed(c, f->base));
+	{
+		val v = LO(call)(e, ref, ref ? NULL : &fn, args, (int)x->c, var, rec_ ? &r : NULL, wk_size(c, f->base),
+				 wk_signed(c, f->base));
+		lval l = { .k = L_FRAME, .off = r.slot, .align = 8 };
+
+		if (!rec_)
+			return v;
+		return wk_vreg(LO(laddr)(e, &l));	/* a record result: its object's address */
+	}
 }
 
 /* ({ ...; expr; }): the statements, then the last one's value */
@@ -855,10 +881,55 @@ static val wk_stmtexpr(ecx *e, uint32_t n)
 
 /* ---------------- builtins ---------------- */
 
+/* a va_list operand's address in a temporary (x86-64's is an array: it decays) */
+static int wk_valist(ecx *e, uint32_t n)
+{
+	cc *c = e->c;
+
+	if (is_ptr(c, N(n)->ty)) {
+		val v = wk_gen(e, n);
+
+		return wk_reg(e, &v, prim(TY_ULONG));
+	}
+	{
+		lval l = wk_lval(e, n);
+
+		return LO(laddr)(e, &l);
+	}
+}
+
 static val wk_builtin(ecx *e, uint32_t n)
 {
 	cc *c = e->c;
+	const node *x = N(n);
+	const uint32_t *arg = &c->lists[x->b];
 	char b[64];
+
+	switch (x->aux) {
+	case BI_VA_START: {
+		int r = wk_valist(e, arg[0]);
+
+		LO(va_start)(e, r);
+		LO(tfree)(e, r);
+		return vconst(0);
+	}
+	case BI_VA_END: {
+		val v = wk_gen(e, arg[0]);
+
+		wk_free(e, &v);
+		return vconst(0);
+	}
+	case BI_VA_COPY: {
+		int rd = wk_valist(e, arg[0]), rs = wk_valist(e, arg[1]);
+
+		LO(copy)(e, rd, rs, tsize(c, T(c, c->t_valist)->kind == TY_ARRAY ? T(c, c->t_valist)->base : c->t_valist));
+		LO(tfree)(e, rd);
+		LO(tfree)(e, rs);
+		return vconst(0);
+	}
+	default:
+		break;
+	}
 
 	snprintf(b, sizeof b, "builtin %d", N(n)->aux);
 	efatal(e, N(n)->loc, "x86-64: %s is not supported yet (PLAN-x86.md X3)", b);
@@ -939,6 +1010,16 @@ VPRIV val wk_gen(ecx *e, uint32_t n)
 		return wk_stmtexpr(e, n);
 	case N_BUILTIN:
 		return wk_builtin(e, n);
+	case N_VAARG: {
+		int ra = wk_valist(e, x->a), rp;
+		lval l;
+
+		wk_scalar(e, n, x->ty);
+		rp = LO(va_arg)(e, ra, x->ty);
+		LO(tfree)(e, ra);
+		l = (lval){ .k = L_REG, .r = (uint8_t)rp, .align = 8 };
+		return wk_load(e, l, x->ty);
+	}
 	case N_FNUM:
 		wk_unsup(e, n, "floating point");
 	default: {
