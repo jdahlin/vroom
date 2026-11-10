@@ -196,7 +196,10 @@ bench/vccd-cc.py --bin-dir build/ccs-tsan                 # vccd itself, 150 TUs
 Both variants are `-O1 -g` with their own `obj/`; the normal build is
 unchanged.  `--bin-dir DIR` (or `VCC_BIN=DIR`) picks the tools in every
 harness that imports `vcc-diff.py`.  The big reservations (16 GB shared pp
-region, 4 GB NORESERVE arenas) need no special handling.  A TSan batch takes
+region, 4 GB arenas, all MAP_NORESERVE) need no special handling; on Linux
+(CI) run ASan with `ASAN_OPTIONS=detect_leaks=0` (LeakSanitizer is on by
+default there; vcc exits with its arenas mapped) and the default 8 MB stack
+(`ulimit -s unlimited` leaves `vstack_low()` without a stack bottom).  A TSan batch takes
 65-100 s (15-20x the normal build), an ASan suite 12-25 s.  Limits: ASan does
 not see over-reads inside our own mmap'ed arenas (they are never poisoned),
 only in malloc, globals and the stack.  Contract that ASan checks: strings

@@ -720,6 +720,8 @@ VPRIV uint32_t statement(cc *c)
 	bool sed = c->se_direct;	/* a statement of a statement expression's body: checked there (not the last) */
 
 	c->se_direct = 0;
+	if (vstack_low())	/* { { { ... and if/while bodies nest statements (scope_open's limit may come later) */
+		fatal(c, loc, "statements nested too deeply");
 	switch (t->kind) {
 	case T_LBRACE:
 		return compound_stmt(c, NULL);
