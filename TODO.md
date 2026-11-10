@@ -620,8 +620,12 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
   ("expected attribute name"); clang warns (`-Wignored-attributes`, did you
   mean '_Clang', note at the built-in macro) and takes it as `clang::`.
   *Validate:* diag test.
-- [ ] **Attributes without effect**: `alloc_size`,
-  `format`, `returns_twice`, `target`.  (Done: `nonnull` (`-Wnonnull`
+- [ ] **Attributes without effect**: `format` (`-Wformat`).  Accepted
+  and needing nothing today: `returns_twice` (locals live in memory:
+  `tests/vcc/returns_twice.c`; the optimizer item must honour it when
+  locals go to registers), `alloc_size` (only `__builtin_object_size`,
+  where vcc's -1 is the conservative answer), `target` (vas gates no
+  instructions yet: the `.arch` item).  (Done: `nonnull` (`-Wnonnull`
   for null constants, plain/indexed/on a parameter: diag `nonnull.c`);
   `ifunc`
   (STT_GNU_IFUNC, global as clang, direct under PIE like an alias:
