@@ -21,18 +21,35 @@ VPRIV void scope_open(cc *c)
 	c->smark[++c->depth] = c->nsstack;
 }
 
-VPRIV void scope_close(cc *c)
+/* the scope's bindings undone; chk: warn of its unused variables and typedefs */
+static inline __attribute__((always_inline)) void scope_pop(cc *c, bool chk)
 {
-	uint32_t m = c->smark[c->depth];
+	uint32_t m = c->smark[c->depth], top = c->nsstack;
+	bool un = false;
 
 	while (c->nsstack > m) {
 		uint32_t s = c->sstack[--c->nsstack];
 		sym *y = &c->syms[s];
 
+		if (chk)
+			un |= y->kind == S_VAR ? !(y->flags & SF_PARAM) && !y->nref : y->kind == S_TYPEDEF && !(y->flags & SF_REF);
 		/* (bind allocated the page) */
 		(y->kind == S_TAG ? c->tdir : c->odir)[y->name >> DIR_BITS][y->name & (DIR_PAGE - 1)] = y->shadow;
 	}
+	if (unlikely(un))
+		unused_locals(c, m, top);
 	c->depth--;
+}
+
+VPRIV void scope_close(cc *c)
+{
+	scope_pop(c, true);
+}
+
+/* a prototype's scope: parameters and tags, nothing to warn of */
+VPRIV void scope_close_proto(cc *c)
+{
+	scope_pop(c, false);
 }
 
 VPRIV uint32_t sym_new(cc *c, int kind, uint32_t name, qty ty, uint32_t loc)

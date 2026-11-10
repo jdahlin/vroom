@@ -476,7 +476,20 @@ Varje delsteg: nya fall i `tests/diag/` (snapshots, och clang som mätpunkt), la
    `-Wtautological-constant-out-of-range-compare` (d9e360e) två falska varningar (en `int`
    mot en osignerad jämförelse är inte ett intervall), nu rättat; `bench/pg/build.sh` skriver
    nu ut vcc:s varningar som clang inte ger: 0.  Kärnan 879/879, grinden ok (fe +0.66 %).
-   Kvar i D5.1: `-Wall`:s `-Wunused-*`.
+   `-Wunused-*` (klar): `-Wunused-variable` och `-Wunused-but-set-variable` när ett block
+   stängs (i deklarationsordning, som clangs ActOnPopScope; en variabel räknar referenser
+   minus bortkastade `=`, `op=`, `++`, `--` direkt på namnet, som Semas RefsMinusAssignments:
+   `(void)(x = 1)` och sista satsen i `({ })` räknas som läsning, `volatile` bara för `=`),
+   `-Wunused-local-typedef`, och vid TU:ns slut `-Wunused-function`,
+   `-Wunused-const-variable` och `-Wunneeded-internal-declaration` (bara nämnd i `sizeof`/
+   `typeof` eller från sin egen kropp).  Attributen `unused`, `used`, `cleanup`,
+   `constructor`, `alias`-mål tystar; `inline` och variabler i headers varnas inte.  En
+   oparsad lat kropp kan nämna det som deklarerats före den: då sägs inget (saknade
+   varningar, inga falska).  Inget efter ett fel i funktionen (clang: i scopet).  Testfallet
+   unused.c är textidentiskt med clang (`diag-flags:` i testfilen ger flaggor till båda
+   kompilatorerna).  Kärnan 879/879, PostgreSQL 0 varningar som clang inte ger, grinden ok
+   (fe +0.77 %; denna ändring +0.10 %).  Kvar: `#pragma clang/GCC diagnostic` saknas helt
+   (kod som tystar en varning med pragma får den ändå), och unused-varianter för parametrar.
 2. **Makron**: expanderad text med caret i, ramar från systemheaders vikta,
    flernivå-"expanded from" (TODO.md "Diagnostic details").
 3. **`static_assert`**: operanderna utvärderade (`48 == 56`), och för `sizeof` en

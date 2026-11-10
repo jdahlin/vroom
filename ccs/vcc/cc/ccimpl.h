@@ -254,6 +254,7 @@ VPRIV uint32_t *dslot(cc *c, uint32_t **dir, uint32_t id);
 static inline uint32_t dget(uint32_t **dir, uint32_t id);
 VPRIV void scope_open(cc *c);
 VPRIV void scope_close(cc *c);
+VPRIV void scope_close_proto(cc *c);
 VPRIV uint32_t sym_new(cc *c, int kind, uint32_t name, qty ty, uint32_t loc);
 VPRIV void sym_bind(cc *c, uint32_t s);
 VPRIV uint32_t lookup(cc *c, uint32_t id);
@@ -372,6 +373,9 @@ VPRIV void merge_attrs(attrs *to, const attrs *from);
 /* format.c */
 VPRIV uint16_t fmt_pack(int kind, unsigned idx, unsigned first);
 VPRIV void format_call(cc *c, uint32_t s, uint32_t *args, uint32_t n);
+VPRIV void discard(cc *c, uint32_t e);
+VPRIV void unused_locals(cc *c, uint32_t from, uint32_t to);
+VPRIV void unused_globals(cc *c);
 VPRIV void asm_label(cc *c, attrs *a);
 /* declspec.c */
 VPRIV void unknown_type(cc *c, dspec *ds, bool allow_sc);

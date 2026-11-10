@@ -489,6 +489,7 @@ VPRIV void function_def(cc *c, uint32_t s, const declr *d)
 {
 	uint32_t body, first_label = c->nlabel;
 	uint32_t saved_fn = c->fn;
+	int saved_fnerr = c->fnerr;
 
 	if (c->syms[s].flags & SF_DEFINED && !(c->syms[s].flags & SF_GNU_INLINE)) {
 		cc_error(c, d->loc, "redefinition of '%.*s'", IDF(d->name));
@@ -496,6 +497,7 @@ VPRIV void function_def(cc *c, uint32_t s, const declr *d)
 	}
 	c->syms[s].flags |= SF_DEFINED;
 	c->fn = s;
+	c->fnerr = c->errors;
 	{
 		qty rt = T(c, c->syms[s].ty)->base;
 
@@ -561,6 +563,7 @@ VPRIV void function_def(cc *c, uint32_t s, const declr *d)
 	N(body)->a = d->psyms;
 	N(body)->aux = (uint16_t)d->npsyms;
 	c->fn = saved_fn;
+	c->fnerr = saved_fnerr;
 }
 
 /* ---------------- translation unit ---------------- */

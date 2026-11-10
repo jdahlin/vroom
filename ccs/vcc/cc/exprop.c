@@ -962,6 +962,7 @@ static __attribute__((noinline)) uint32_t comma_rest(cc *c, uint32_t l)
 		uint32_t loc = tok(c)->loc, r;
 
 		next(c);
+		discard(c, l);
 		r = assign_expr(c);
 		if (unlikely(ISERR(l) || ISERR(r))) {
 			l = err_node(c, loc);

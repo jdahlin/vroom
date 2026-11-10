@@ -117,7 +117,7 @@ static bool param_list(cc *c, dop *op)
 	}
 	if (unlikely(voidat))	/* the list parsed: "(int, void)", "(void, int)" */
 		cc_error(c, voidat, "'void' must be the first and only parameter if specified");
-	scope_close(c);
+	scope_close_proto(c);
 	bool ok = is(c, T_RPAREN);
 
 	expect_match(c, T_RPAREN, open);

@@ -762,9 +762,9 @@ VPRIV uint32_t builtin_call(cc *c, const builtin *b, uint32_t loc)
 	case BI_CONSTANT_P: {
 		uint32_t n;
 
-		c->unevaluated++;
+		c->unevaluated++, c->bcp++;	/* (clang: what it names is used) */
 		args_list(c, &args);
-		c->unevaluated--;
+		c->unevaluated--, c->bcp--;
 		if (args.n != 1)
 			arity(c, loc, 1, &args);
 		for (uint32_t i = 0; i < args.n; i++)

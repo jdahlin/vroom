@@ -149,7 +149,10 @@ typedef struct sym {
 	uint32_t ovl;		/* overloadable: the next function of the set (0: none); the set's
 				   first function is the one bound in the scope table */
 	uint32_t plb, ple;	/* function: its parameter list's first token and ')'; variable: its declaration's first and last token */
-	uint32_t psyms;		/* function: its latest prototype's parameter syms (list index + 1, 0: none) */
+	union {
+		uint32_t psyms;	/* function: its latest prototype's parameter syms (list index + 1, 0: none) */
+		uint32_t nref;	/* block-scope variable: references minus discarded assignments (-Wunused-but-set-variable) */
+	};
 } sym;
 
 /* ---------------- nodes ---------------- */

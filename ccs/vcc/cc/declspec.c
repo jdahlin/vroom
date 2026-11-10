@@ -604,7 +604,10 @@ again:
 				continue;
 			}
 			if (!have_named && !base && !nlong && !sgn && t->kind == T_IDENT && typedef_id(c, t->id)) {
-				named = c->syms[lookup(c, t->id)].ty;
+				uint32_t s = lookup(c, t->id);
+
+				named = c->syms[s].ty;
+				c->syms[s].flags |= SF_REF;	/* (-Wunused-local-typedef) */
 				have_named = true;
 				any = true;
 				next(c);

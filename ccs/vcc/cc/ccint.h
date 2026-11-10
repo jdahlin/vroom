@@ -175,7 +175,10 @@ struct cc {
 	uint32_t ncase, capcase, case_base;
 	qty switch_ty;
 	int unevaluated;	/* sizeof / typeof / _Alignof operand */
-	int cexpr;		/* in an integer constant expression (clang: no runtime-behavior warnings) */
+	int cexpr;
+	uint32_t *utd, nutd;	/* block-scope typedefs never named: -Wunused-local-typedef at the TU's end */
+	int fnerr;		/* errors when the function's body began: none since, its unused-variable warnings */
+	int bcp;		/* in __builtin_constant_p's argument: unevaluated, but its names are used */		/* in an integer constant expression (clang: no runtime-behavior warnings) */
 	attrs pend;		/* attributes before a block-scope declaration */
 	int in_struct;		/* parsing a struct/union body */
 	int in_tyname;		/* parsing a type name (clang's DSC_type_specifier) */

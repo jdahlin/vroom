@@ -422,11 +422,15 @@ static inline __attribute__((always_inline)) uint32_t primary_sym(cc *c, uint32_
 		N(n)->flags = y->kind == S_VAR ? NF_LVALUE : 0;
 		if (unlikely(y->flags & SF_INVALID))
 			N(n)->flags |= NF_ERR;
-		if (!c->unevaluated && !((y->flags & SF_OVERLOAD) && is(c, T_LPAREN)))
+		/* (clang: a function's references from its own body do not use it) */
+		if ((!c->unevaluated || c->bcp) && !((y->flags & SF_OVERLOAD) && is(c, T_LPAREN)) && s != c->fn)
 			y->flags |= SF_USED;
 		y->flags |= SF_REF;
-		if (unlikely(y->next) && y->depth)
-			c->syms[y->next].flags |= SF_REF;	/* a block-scope extern: the global */
+		if (y->depth) {
+			y->nref += y->kind == S_VAR;	/* (-Wunused-but-set-variable) */
+			if (unlikely(y->next))
+				c->syms[y->next].flags |= SF_REF;	/* a block-scope extern: the global */
+		}
 		return n;
 	}
 }

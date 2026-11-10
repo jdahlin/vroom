@@ -151,6 +151,7 @@ static void cc_free(cc *c)
 	vmreg_put(&ccr[20], (size_t)c->nlzs + 64);
 	free(c->cases);
 	free(c->pweak);
+	free(c->utd);
 #undef USED
 	vmpool_give(&ccpool, ccr);
 	ccr = NULL;
@@ -192,6 +193,7 @@ int cc_run(pp *p, const cc_opts *o)
 				note(c, c->tags[T(c, y->ty)->aux].loc, "forward declaration of '%s'", tyname(c, y->ty));
 			}
 		}
+		unused_globals(c);
 	}
 	delayed_bug_check(c);
 	if (o->dump_layouts && !c->errors)

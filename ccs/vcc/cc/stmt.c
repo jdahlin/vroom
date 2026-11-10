@@ -532,7 +532,7 @@ VPRIV uint32_t statement(cc *c)
 			uint32_t e = 0;
 
 			if (!is(c, T_SEMI))
-				init = mkstmt(c, N_EXPR, loc, e = expr(c), 0, 0);
+				init = mkstmt(c, N_EXPR, loc, e = expr(c), 0, 0), discard(c, e);
 			for_semi(c, e);
 		}
 		if (!is(c, T_SEMI)) {
@@ -543,7 +543,7 @@ VPRIV uint32_t statement(cc *c)
 		for_semi(c, cnd);
 		c->for_head = false;
 		if (!is(c, T_RPAREN))
-			step = expr(c);
+			step = expr(c), discard(c, step);
 		expect_close(c, T_RPAREN, open, step);
 	for_body:
 		REC_POP(c, &r);
@@ -756,6 +756,9 @@ VPRIV uint32_t statement(cc *c)
 			skip_semi(c);	/* clang: after an invalid expression, silently to the ';' */
 		else
 			expect_semi(c, "after expression");
+		/* (the last statement of ({ ... }) gives its value) */
+		if (!c->in_stmtexpr || !is(c, T_RBRACE) || peek(c, 1)->kind != T_RPAREN)
+			discard(c, e);
 		return mkstmt(c, N_EXPR, loc, e, 0, 0);
 	}
 }

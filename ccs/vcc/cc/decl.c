@@ -269,6 +269,8 @@ static uint32_t declare(cc *c, const dspec *ds, declr *d, qty t, bool file)
 		}
 		s = sym_new(c, S_TYPEDEF, d->name, t, d->loc);
 		c->syms[s].sc = SC_TYPEDEF;
+		if (at.unused || at.used)
+			c->syms[s].flags |= SF_REF;	/* (no -Wunused-local-typedef) */
 		sym_bind(c, s);
 		if (is_record(c, t) || KIND(c, t) == TY_ENUM) {
 			tag *r = &c->tags[T(c, t)->aux];
