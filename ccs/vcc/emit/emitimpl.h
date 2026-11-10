@@ -242,6 +242,7 @@ typedef struct kvst {
 	int64_t v[NKV];
 } kvst;
 
+#define CAPNEST (1u << 22)	/* loops/switches and cleanups in scope */
 typedef struct loopctx {
 	uint32_t brk, cont;	/* local labels (cont 0: switch) */
 	int cdepth;
@@ -261,8 +262,6 @@ typedef struct fnctx {		/* one function instance: the emitted function or an inl
 	struct fnctx *up;
 } fnctx;
 
-#define MAXLOOP 256
-#define MAXCLEAN 256
 #define NTEMP 17
 #define MAXLREG 10	/* x19-x28 */
 #define LREGS_DEFAULT 6	/* the rest stay expression temporaries */
@@ -356,9 +355,9 @@ typedef struct ecx {
 	/* control */
 	bool reach;
 	int dry;		/* inside dry(): code is generated and thrown away, no references */
-	loopctx loops[MAXLOOP];
+	loopctx *loops;		/* (nesting is bounded by the node count: reserved for it) */
 	int nloop;
-	uint32_t clean[MAXCLEAN];	/* syms with cleanup, innermost last */
+	uint32_t *clean;	/* syms with cleanup, innermost last */
 	int nclean;
 	fnctx *f;
 	int inline_depth;

@@ -77,7 +77,7 @@ static void dbg_str(tbuf *b, const char *s)
 	tb_c(b, '"');
 }
 
-static vmpool ecxpool = VMPOOL_INIT(15);
+static vmpool ecxpool = VMPOOL_INIT(16);
 
 static void ecx_init(ecx *e, emitter *E, vmreg *r)
 {
@@ -104,6 +104,9 @@ static void ecx_init(ecx *e, emitter *E, vmreg *r)
 	e->rlog = vmreg_get(&r[13], RLOG_CAP * sizeof(uint32_t), "emit.rlog");
 	e->sla = vmreg_get(&r[14], (size_t)CAPSLA * (sizeof(slotal) + sizeof(uint32_t)), "emit.sla");
 	e->sstk = (uint32_t *)(e->sla + CAPSLA);
+	/* nesting: reserved, touched only as deep as it goes (bounded by the parser's stack guard) */
+	e->loops = vmreg_get(&r[15], (size_t)CAPNEST * (sizeof(loopctx) + sizeof(uint32_t)), "emit.loops");
+	e->clean = (uint32_t *)(e->loops + CAPNEST);
 }
 
 /* (after the stitch: the chunks point into e->out) */
@@ -128,6 +131,7 @@ static void ecx_free(ecx *e, vmreg *r)
 	vmreg_put(&r[12], VMREG_SCRATCH);
 	vmreg_put(&r[13], VMREG_SCRATCH);	/* (copied by keep_make before this) */
 	vmreg_put(&r[14], VMREG_SCRATCH);
+	vmreg_put(&r[15], VMREG_SCRATCH);
 	vmpool_give(&ecxpool, r);
 	wasm_ecx_free(e);
 }

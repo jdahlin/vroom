@@ -411,8 +411,6 @@ static void gen_switch(ecx *e, uint32_t n)
 		jump(e, dflt);
 	}
 	e->ncases = base + (e->ncases - base);	/* keep the labels until the body is done */
-	if (e->nloop >= MAXLOOP)
-		efatal(e, x->loc, "nesting too deep");
 	e->loops[e->nloop++] = (loopctx){ lbrk, 0, e->nclean };
 	e->reach = false;
 	gen_stmt(e, x->b);
@@ -686,8 +684,6 @@ static void gen_vla_decl(ecx *e, const node *x, uint32_t s)
 
 		val_free(e, &tv);
 	}
-	if (e->nclean >= MAXCLEAN)
-		efatal(e, x->loc, "too many cleanups");
 	e->clean[e->nclean++] = s;
 }
 
@@ -766,8 +762,6 @@ static void gen_decl(ecx *e, const node *x)
 			kv_track(e, s, NULL);
 	}
 	if (sym_attrs(c, s)->cleanup) {
-		if (e->nclean >= MAXCLEAN)
-			efatal(e, x->loc, "too many cleanups");
 		e->clean[e->nclean++] = s;
 	}
 }
