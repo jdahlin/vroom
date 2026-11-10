@@ -27,6 +27,7 @@ both vdso-g --strip-debug $W/arch/arm64/kernel/vdso/vdso.so.dbg @O
 both pi-g --strip-debug $W/arch/arm64/kernel/pi/map_kernel.o @O
 both pi-rm -R .comment $W/arch/arm64/kernel/pi/map_kernel.o @O
 both pi-redef --redefine-sym map_range=mr --redefine-sym=memset=ms $W/arch/arm64/kernel/pi/map_kernel.o @O
+printf hello > $T/blob; both pi-add --add-section .vroom=$T/blob $W/arch/arm64/kernel/pi/map_kernel.o @O
 for f in idreg-override map_kernel map_range relocate lib-fdt lib-fdt_ro; do
 	x=; case $f in lib-*) x=--prefix-alloc-sections=.init;; esac
 	both $f --prefix-symbols=__pi_ --remove-section=.note.gnu.property $x $W/arch/arm64/kernel/pi/$f.o @O

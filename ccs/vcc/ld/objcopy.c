@@ -399,6 +399,8 @@ static struct {
 	uint32_t nremove;
 	const char **redef;	/* "old=new" */
 	uint32_t nredef;
+	const char **add;	/* --add-section name=file */
+	uint32_t nadd;
 	const char **only;
 	uint32_t nonly;
 	const char **unneeded;
@@ -492,7 +494,7 @@ static int objcopy_run(int dirfd)
 	const Ehdr *eh = e.eh;
 	bool rel = eh->e_type == 1;
 	uint32_t ns = e.nsh;
-	OSec *sec = xcalloc(ns, sizeof *sec);
+	OSec *sec = xcalloc(ns + oc.nadd, sizeof *sec);
 	for (uint32_t i = 0; i < ns; i++) {
 		const Shdr *h = &e.sh[i];
 		OSec *s = &sec[i];
@@ -517,6 +519,34 @@ static int objcopy_run(int dirfd)
 	}
 	if (!rel && e.sh[0].sh_size)
 		oerror("extended section numbering not supported");
+	/* --add-section: at the end, after everything else (llvm-objcopy: PROGBITS, or NOTE for .note*) */
+	for (uint32_t a = 0; a < oc.nadd; a++) {
+		const char *eq = strchr(oc.add[a], '=');
+		OSec *s = &sec[ns];
+		struct stat st;
+		int fd = openat(dirfd, eq + 1, O_RDONLY);
+
+		if (fd < 0 || fstat(fd, &st) < 0) {
+			oerror("'%s': %s", eq + 1, strerror(errno));
+			if (fd >= 0)
+				close(fd);
+			continue;
+		}
+		s->newname = strndup(oc.add[a], (size_t)(eq - oc.add[a]));
+		s->name = s->newname;
+		s->type = !strncmp(s->name, ".note", 5) && strcmp(s->name, ".note.GNU-stack") ? SHT_NOTE : SHT_PROGBITS;
+		s->align = 1;
+		s->size = (uint64_t)st.st_size;
+		s->origoff = UINT64_MAX;
+		s->parent = -1;
+		s->gen = xcalloc(s->size + 1, 1);
+		if (s->size && read(fd, s->gen, s->size) != (ssize_t)s->size)
+			oerror("'%s': short read", eq + 1);
+		if (s->type == SHT_NOTE && s->size && s->size < 12)
+			oerror("'%s': %s data must be either empty or at least 12 bytes long", oc.in, s->name);
+		close(fd);
+		ns++;
+	}
 
 	/* segments: real ones, then the ELF header and program header "segments" */
 	uint32_t ng = e.nph + 2;
@@ -984,6 +1014,10 @@ int objcopy_main(int argc, char **argv, int dirfd, FILE *err)
 			push(&oc.unneeded, &oc.nunneeded, v);
 		} else if ((v = VAL("--dump-section"))) {
 			push(&oc.dump, &oc.ndump, v);
+		} else if ((v = VAL("--add-section"))) {
+			if (!strchr(v, '=') || v[0] == '=')
+				oerror("bad format for --add-section: missing '='");
+			push(&oc.add, &oc.nadd, v);
 		} else if ((v = VAL("--redefine-sym"))) {
 			if (!strchr(v, '='))
 				oerror("bad format for --redefine-sym");
@@ -1015,6 +1049,7 @@ int objcopy_main(int argc, char **argv, int dirfd, FILE *err)
 	free(oc.unneeded);
 	free(oc.dump);
 	free(oc.redef);
+	free(oc.add);
 	return rc || oerrors;
 }
 
