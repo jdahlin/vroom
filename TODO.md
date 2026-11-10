@@ -1053,8 +1053,9 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
   multi-character wide/Unicode literals as errors: diag `multichar.c`; the
   diagnostic printer leaves out the snippet for a repeated location as clang.)
 - [x] **`u8'a'` in C23**: the lexer still gives `u8` and `'a'`; the front
-  end joins them under `-std=c23`/`gnu2x` when adjacent.  (`#if u8'a'` is
-  not joined.)  Done: diag `u8_char.c`.
+  end and `#if` join them under `-std=c23`/`gnu2x` when adjacent.  Done:
+  diag `u8_char.c`, `u8_char_if.c` (and `pp_binop.c`: #if's 'not a valid
+  binary operator' at the token with the operand underlined, as clang).
 - [x] **Invalid code accepted**: duplicate enumerator / parameter,
   `&register_var`, `_Alignas(3)`, `typeof` on a bitfield, `*(void *)p` as a
   value (and `-Wvoid-ptr-dereference`), `return v();` of void from an int
