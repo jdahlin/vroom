@@ -1,0 +1,4 @@
+switch_enum.c:4:10: warning: enumeration value 'B' not handled in switch [-Wswitch]
+    4 |         switch (x) {
+      |                 ^
+1 warning generated.

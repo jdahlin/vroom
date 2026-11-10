@@ -1,0 +1,35 @@
+c23_words.c:6:2: error: use of undeclared identifier 'bool'
+    6 |         bool b = 0;     /* (vcc declares b: no error at its uses, clang has one) */
+      |         ^~~~
+      = help: 'bool' is a keyword in C23: before it, use '_Bool' or include <stdbool.h>
+   1 + #include <stdbool.h>
+c23_words.c:7:2: error: use of undeclared identifier 'constexpr'
+    7 |         constexpr int k = 3;
+      |         ^~~~~~~~~
+      = help: 'constexpr' is a keyword in C23 (-std=c23): before it, use 'static const' or an enum constant
+c23_words.c:8:11: error: use of undeclared identifier 'nullptr'
+    8 |         int *p = nullptr;
+      |                  ^~~~~~~
+      = help: 'nullptr' is a keyword in C23 (-std=c23): before it, use NULL from <stddef.h>
+c23_words.c:9:2: error: call to undeclared function 'static_assert'; ISO C99 and later do not support implicit function declarations [-Wimplicit-function-declaration]
+    9 |         static_assert(1);
+      |         ^
+      = help: 'static_assert' is a keyword in C23: before it, use '_Static_assert' or include <assert.h>
+c23_words.c:10:2: error: call to undeclared function 'typeof'; ISO C99 and later do not support implicit function declarations [-Wimplicit-function-declaration]
+   10 |         typeof(n) y = n;
+      |         ^
+      = help: 'typeof' is a keyword in C23 and the GNU modes (-std=gnu17): in ISO C17, use '__typeof__'
+c23_words.c:10:11: error: expected ';' after expression
+   10 |         typeof(n) y = n;
+      |                  ^
+      |                  ;
+c23_words.c:10:12: error: use of undeclared identifier 'y'
+   10 |         typeof(n) y = n;
+      |                   ^
+c23_words.c:11:9: error: use of undeclared identifier 'k'
+   11 |         return k + y + (p != 0);
+      |                ^
+c23_words.c:11:13: error: use of undeclared identifier 'y'
+   11 |         return k + y + (p != 0);
+      |                    ^
+9 errors generated.

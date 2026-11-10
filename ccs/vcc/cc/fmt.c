@@ -179,16 +179,22 @@ static bool fmt_report(fmtx *x, const char *flag, uint32_t loc, const pp_span *r
 	va_start(ap, fmt);
 	vsnprintf(buf, sizeof(buf), fmt, ap);
 	va_end(ap);
+	bool on;
+
+	pp_diag_next_id = pp_diag_fmt_id(fmt);	/* (the message is formatted here) */
 	if (x->isvia) {
 		/* clang: the warning at the argument (or the format argument), the specifier in a note */
 		pp_span vr[2] = { x->via, nr >= 2 ? r[1] : x->via };
 
-		if (!cc_warnx(x->c, flag, true, NULL, nr >= 2 ? loc : x->via.b, vr, nr >= 2 ? 2 : 1, NULL, 0, "%s", buf))
-			return false;
-		report(x->c, "note", nr && nr < 2 ? loc : nr ? r[0].b : loc, r, nr ? 1 : 0, fx, nfx, "format string is defined here");
-		return true;
+		on = cc_warnx(x->c, flag, true, NULL, nr >= 2 ? loc : x->via.b, vr, nr >= 2 ? 2 : 1, NULL, 0, "%s", buf);
+		pp_diag_next_id = NULL;
+		if (on)
+			report(x->c, "note", nr && nr < 2 ? loc : nr ? r[0].b : loc, r, nr ? 1 : 0, fx, nfx, "format string is defined here");
+		return on;
 	}
-	return cc_warnx(x->c, flag, true, NULL, loc, r, nr, fx, nfx, "%s", buf);
+	on = cc_warnx(x->c, flag, true, NULL, loc, r, nr, fx, nfx, "%s", buf);
+	pp_diag_next_id = NULL;
+	return on;
 }
 
 /* the range of bytes [b, e) */
@@ -428,7 +434,7 @@ VPRIV void format_check(cc *c, uint32_t fs, const uint32_t *args, const qty *aty
 			return;	/* the format parameter of a format function */
 		if (!cst && (is_ptr(c, t) || is_array(c, t))) {
 			pp_span r = rng(c, args[fi]);
-			pp_fixit fx = { r.b, r.b, "\"%s\", " };
+			pp_fixit fx = { r.b, r.b, "\"%s\", ", 0 };
 
 			if (cc_warnx(c, "format-security", true, NULL, r.b, &r, 1, NULL, 0,
 				     "format string is not a string literal (potentially insecure)"))
@@ -722,7 +728,7 @@ VPRIV void format_check(cc *c, uint32_t fs, const uint32_t *args, const qty *aty
 						    "length modifier '%s' results in undefined behavior or no effect with '%c' conversion specifier",
 						    lm, conv) &&
 				    (lm[0] == 'L' || lm[0] == 'q') && strchr("diouxXbBnDOU", conv)) {
-					pp_fixit fx = { l, l + 1, "ll" };
+					pp_fixit fx = { l, l + 1, "ll", 0 };
 
 					report(c, "note", l, NULL, 0, &fx, 1, "did you mean to use 'll'?");
 				}
@@ -798,7 +804,7 @@ VPRIV void format_check(cc *c, uint32_t fs, const uint32_t *args, const qty *aty
 					snprintf(tn, sizeof(tn), "'%s'", en ? tyname(c, T(c, t)->base) : tyname(c, t));
 				if (code > 1) {
 					fmt_fixtext(&x, &f, fl, cl >= FT_PCHAR && cl <= FT_PUCHAR, ft, sizeof(ft));
-					fx = (pp_fixit){ sr.b, sr.e, ft };
+					fx = (pp_fixit){ sr.b, sr.e, ft, 0 };
 				}
 				fmt_report(&x, "format", r[1].b, r, 2, code > 1 ? &fx : NULL, code > 1,
 					   "format specifies type %s but the argument has %stype %s", row->exp,

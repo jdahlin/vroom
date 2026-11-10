@@ -51,6 +51,7 @@ endif
 VCC_CC     = $(CCACHE) $(HOST_CC)
 # VCC_SAN/VCC_OPT: set by the sanitizer variants (vcc-asan, vcc-tsan below)
 VCC_SAN   ?=
+VCC_SANLD ?=
 VCC_OPT   ?= -O3 $(HOST_CPU)
 VCC_CFLAGS = -std=c11 -O2 -Wall -Wextra -Wno-unused-parameter $(HOST_DEFS) -DVCC_INCDIR='"$(abspath vcc/include)"' $(VCC_SAN)
 # LTO: off; the split modules are one TU each (SPLIT_MODS), which gives the
@@ -66,7 +67,7 @@ endif
 VCC_FAST   = $(VCC_CFLAGS) $(VCC_OPT) -pthread
 # -O3 also at link time: the driver passes it to ld, which then folds code
 # (and, with LTO, optimises and generates the code itself)
-VCC_LDFLAGS = -O3 $(VCC_SAN) $(VCC_LTO) $(if $(VCC_LTO),$(LTO_LINK))
+VCC_LDFLAGS = -O3 $(VCC_SAN) $(VCC_SANLD) $(VCC_LTO) $(if $(VCC_LTO),$(LTO_LINK))
 OBJ        = $(OUT)/obj
 
 vcc: $(OUT)/vcc $(OUT)/vsh/sh $(OUT)/vld $(OUT)/vas $(OUT)/var $(OUT)/vccd $(OUT)/lextest $(OUT)/vpp $(OUT)/vlink $(OUT)/vasm
@@ -76,7 +77,7 @@ AS_FILES = vcc/arch/a64/as/enc.c vcc/platform/darwin/macho.c vcc/arch/wasm/as/as
 as_SRC   = vcc/as/as.c vcc/arch/a64/as/parse.c
 LEX_SRC = vcc/lex/lex.c vcc/lib/intern.c
 PP_SRC  = vcc/pp/dircache.c vcc/driver/ppdriver.c vcc/driver/ccsnap.c vcc/lib/ldhash.c
-VCCD_SRC = vcc/vccd/vccd.c vcc/vccd/caps.c vcc/vccd/fixdep.c vcc/vccd/ar.c vcc/vccd/rsh.c
+VCCD_SRC = vcc/vccd/vccd.c vcc/vccd/dstore.c vcc/vccd/caps.c vcc/vccd/fixdep.c vcc/vccd/ar.c vcc/vccd/rsh.c
 # Split modules: a list of files each (MOD_SRC, in this order).  By default
 # each module is compiled as one TU (obj/unity/MOD.c #includes its files, as
 # SQLite's amalgamation), so the code generator sees all of it, also in `make
@@ -131,7 +132,7 @@ $(OUT)/vccd: $(call o,$(VCCD_SRC) $(LEX_SRC)) $(AS_OBJ) $(PP_OBJ)
 	$(VCC_CC) $(VCC_LDFLAGS) -pthread $^ -o $@ $(HOST_LIBS)
 
 $(OUT)/lextest: $(patsubst vcc/%.c,$(OBJ)/no/%.o,vcc/lex/lextest.c vcc/platform/darwin/pmc.c $(LEX_SRC))
-	$(VCC_CC) -O3 $(VCC_SAN) -pthread $^ -o $@
+	$(VCC_CC) -O3 $(VCC_SAN) $(VCC_SANLD) -pthread $^ -o $@
 
 $(OUT)/vasm: $(call o,vcc/as/vasm.c) $(AS_OBJ)
 	$(VCC_CC) $(VCC_LDFLAGS) $^ -o $@
@@ -161,9 +162,13 @@ $(OBJ):
 # ---- sanitizer variants of the vcc tools (AGENTS.md, "Sanitizers") ----
 # Own OUT (and so own obj/), -O1 -g; the normal build is unchanged.
 SAN_COMMON = -O1 -g -fno-omit-frame-pointer -Wno-deprecated-declarations
+# ASan's frames are 2-3x larger: the parser's recursion (vcc-stress block-nest-5000)
+# gets a 64 MB main stack, as vccd's compile threads get 16 MB in the normal build
+ASAN_LD = $(if $(filter Darwin,$(HOST_OS)),-Wl$(comma)-stack_size$(comma)0x4000000)
+comma := ,
 vcc-asan:
 	$(MAKE) vcc OUT=$(OUT)-asan VCC_OPT="-O1 $(HOST_CPU)" VCC_LTO= \
-		VCC_SAN="$(SAN_COMMON) -fsanitize=address,undefined"
+		VCC_SAN="$(SAN_COMMON) -fsanitize=address,undefined" VCC_SANLD="$(ASAN_LD)"
 vcc-tsan:
 	$(MAKE) vcc OUT=$(OUT)-tsan VCC_OPT="-O1 $(HOST_CPU)" VCC_LTO= \
 		VCC_SAN="$(SAN_COMMON) -fsanitize=thread"
@@ -222,7 +227,7 @@ FUZZ_CFLAGS = -std=gnu11 -g -O1 -mcpu=apple-m1 -D_DARWIN_C_SOURCE -pthread \
 FUZZ_OUT = $(OUT)/fuzz
 FUZZ_HDR = vcc/lex/lex.h vcc/lib/intern.h vcc/pp/pp.h vcc/pp/dircache.h
 
-fuzz: $(FUZZ_OUT)/fuzz-lex $(FUZZ_OUT)/fuzz-pp
+fuzz: $(FUZZ_OUT)/fuzz-lex $(FUZZ_OUT)/fuzz-pp $(FUZZ_OUT)/fuzz-diag
 
 $(FUZZ_OUT):
 	mkdir -p $@
@@ -233,10 +238,14 @@ $(FUZZ_OUT)/fuzz-lex: fuzz/fuzz-lex.c fuzz/lexref.c fuzz/fuzz.h $(FUZZ_DRIVER) $
 $(FUZZ_OUT)/fuzz-pp: fuzz/fuzz-pp.c fuzz/fuzz.h $(FUZZ_DRIVER) $(wildcard vcc/pp/*.c vcc/pp/*.h) $(LEX_SRC) $(FUZZ_HDR) | $(FUZZ_OUT)
 	$(FUZZ_CC) $(FUZZ_CFLAGS) $(FUZZ_ENGINE) fuzz/fuzz-pp.c $(FUZZ_DRIVER) $(pp_SRC) vcc/pp/dircache.c $(LEX_SRC) -o $@
 
+$(FUZZ_OUT)/fuzz-diag: fuzz/fuzz-diag.c fuzz/fuzz.h $(FUZZ_DRIVER) $(wildcard vcc/pp/*.c vcc/pp/*.h) $(LEX_SRC) $(FUZZ_HDR) | $(FUZZ_OUT)
+	$(FUZZ_CC) $(FUZZ_CFLAGS) $(FUZZ_ENGINE) fuzz/fuzz-diag.c $(FUZZ_DRIVER) $(pp_SRC) vcc/pp/dircache.c $(LEX_SRC) -o $@
+
 # replay the regression inputs (fuzz/regress/{lex,pp}/): every one must pass
 fuzz-regress: fuzz
 	$(FUZZ_OUT)/fuzz-lex -runs=0 fuzz/regress/lex
 	$(FUZZ_OUT)/fuzz-pp -runs=0 -timeout=10 fuzz/regress/pp
+	$(FUZZ_OUT)/fuzz-diag -runs=0 fuzz/regress/diag
 
 # the differential check (vpp against clang -E -P) on the regression and seed inputs
 fuzz-diff: $(OUT)/vpp

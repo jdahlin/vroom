@@ -1,0 +1,4 @@
+unknown_type.c:3:2: error: use of undeclared identifier 'foo_t'
+    3 |         foo_t x;
+      |         ^~~~~
+1 error generated.

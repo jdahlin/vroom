@@ -11,6 +11,16 @@ VPRIV bool is_cmp(int op)
 	       op == T_EQUALEQUAL || op == T_EXCLAIMEQ;
 }
 
+/* clang -pedantic: arithmetic on void * (GNU: element size 1) */
+static inline void void_ptr_arith(cc *c, qty pt, uint32_t loc, bool two)
+{
+	static const char *const g[] = { "pointer-arith", "gnu", "pedantic", NULL };
+
+	if (unlikely(KIND(c, T(c, pt)->base) == TY_VOID))
+		EXT_WARN(c, "gnu-pointer-arith", g, loc,
+			 two ? "arithmetic on pointers to void is a GNU extension" : "arithmetic on a pointer to void is a GNU extension");
+}
+
 /* clang (GCC vector splat): the scalar s may become the element type et without truncation */
 static bool vec_scalar_ok(cc *c, uint32_t s, qty et)
 {
@@ -170,7 +180,7 @@ VPRIV uint32_t binop(cc *c, int op, uint32_t l, uint32_t r, uint32_t loc)
 		if ((both && T(c, lt)->size != T(c, rt)->size) ||
 		    (!both && !is_arith(c, is_vector(c, lt) ? rt : lt)) ||
 		    ((op == T_PERCENT || op == T_AMP || op == T_PIPE || op == T_CARET || shift) && !is_integer(c, et)))
-			bad_operands(c, l, r, loc);
+			bad_operands(c, op, l, r, loc);
 		else if (!both && !shift && !vec_scalar_check(c, is_vector(c, lt) ? r : l, vt, loc))
 			return mk_bin(c, op, is_cmp(op) ? vec_mask_type(c, vt) : vt, l, l, loc);	/* (stands in; diagnosed) */
 		if (both) {
@@ -190,12 +200,12 @@ VPRIV uint32_t binop(cc *c, int op, uint32_t l, uint32_t r, uint32_t loc)
 
 		if (op == T_LESSLESS || op == T_GREATERGREATER) {
 			if (!is_integer(c, lt) || !is_integer(c, rt))
-				bad_operands(c, l, r, loc);
+				bad_operands(c, op, l, r, loc);
 			return mk_bin(c, op, lt, l, r, loc);
 		}
 		if ((op == T_PERCENT || op == T_AMP || op == T_PIPE || op == T_CARET) &&
 		    (!is_integer(c, lt) || !is_integer(c, rt)))
-			bad_operands(c, l, r, loc);
+			bad_operands(c, op, l, r, loc);
 		ct = arith_conv(c, lt, rt);
 		l = convert(c, l, ct), r = convert(c, r, ct);
 		return mk_bin(c, op, is_cmp(op) ? prim(TY_INT) : ct, l, r, loc);
@@ -207,17 +217,20 @@ VPRIV uint32_t binop(cc *c, int op, uint32_t l, uint32_t r, uint32_t loc)
 		lt = N(l)->ty, rt = N(r)->ty;
 	}
 	if ((op == T_PLUS || op == T_MINUS) && is_ptr(c, lt) && is_integer(c, rt)) {
+		void_ptr_arith(c, lt, loc, false);
 		r = convert(c, r, prim(TY_LONG));
 		return mk_bin(c, op, lt, l, r, loc);
 	}
-	if (op == T_MINUS && is_ptr(c, lt) && is_ptr(c, rt))
+	if (op == T_MINUS && is_ptr(c, lt) && is_ptr(c, rt)) {
+		void_ptr_arith(c, lt, loc, true);
 		return mk_bin(c, op, c->t_ptrdiff, l, r, loc);
+	}
 	if (is_cmp(op) && (is_ptr(c, lt) || is_ptr(c, rt))) {
 		qty ot = is_ptr(c, lt) ? rt : lt;
 
 		if (!is_ptr(c, ot) && !is_integer(c, ot) && KIND(c, ot) != TY_ENUM) {	/* (p == 0.5) */
-			bad_operands(c, l, r, loc);
-			return mk_bin(c, op, prim(TY_INT), l, l, loc);
+			bad_operands(c, op, l, r, loc);
+			return err_node(c, loc);
 		}
 		if (!is_ptr(c, lt))
 			l = convert(c, l, rt);
@@ -225,8 +238,8 @@ VPRIV uint32_t binop(cc *c, int op, uint32_t l, uint32_t r, uint32_t loc)
 			r = convert(c, r, lt);
 		return mk_bin(c, op, prim(TY_INT), l, r, loc);
 	}
-	bad_operands(c, l, r, loc);
-	return mk_bin(c, op, prim(TY_INT), l, r, loc);
+	bad_operands(c, op, l, r, loc);
+	return err_node(c, loc);
 }
 
 VPRIV uint32_t assign(cc *c, int op, uint32_t l, uint32_t r, uint32_t loc)
@@ -234,7 +247,8 @@ VPRIV uint32_t assign(cc *c, int op, uint32_t l, uint32_t r, uint32_t loc)
 	qty lt = QUNQ(N(l)->ty);
 	uint32_t n;
 
-	need_lvalue(c, l, loc);
+	if (unlikely(!need_lvalue(c, l, loc)))
+		return err_node(c, loc);	/* clang: the assignment is invalid */
 	bounds_warn(c, l, false);
 	r = decay(c, r);
 	if (op && (is_complex(c, lt) || is_complex(c, N(r)->ty)))	/* l = l op r (l evaluated twice) */
@@ -254,6 +268,7 @@ VPRIV uint32_t assign(cc *c, int op, uint32_t l, uint32_t r, uint32_t loc)
 		r = rvalue(c, r);
 		rt = N(r)->ty;
 		if (is_ptr(c, lt) && (op == T_PLUS || op == T_MINUS)) {
+			void_ptr_arith(c, lt, loc, false);
 			r = convert(c, r, prim(TY_LONG));
 			pt = lt;
 		} else if (is_vector(c, lt)) {
@@ -270,6 +285,7 @@ VPRIV uint32_t assign(cc *c, int op, uint32_t l, uint32_t r, uint32_t loc)
 			r = convert(c, r, pt);
 		} else {
 			cc_error(c, loc, "invalid operands to compound assignment");
+			return err_node(c, loc);
 		}
 		n = mk2(c, N_ASSIGN, lt, loc, l, r);
 		N(n)->aux = (uint16_t)op;
@@ -331,7 +347,7 @@ VPRIV uint32_t conditional(cc *c, uint32_t cond, uint32_t a, uint32_t b, uint32_
 		t = QUNQ(at);
 	} else {
 		cc_error(c, loc, "incompatible operand types in conditional expression");
-		t = at;
+		return err_node(c, loc);
 	}
 	n = mk(c, N_COND, t, loc);
 	N(n)->a = decay(c, cond);
@@ -379,30 +395,33 @@ static __attribute__((noinline)) uint32_t member_slow(cc *c, uint32_t base, uint
 		pp_span r[2] = { rng(c, base), { loc, pp_tok_end(c->p, c->prevloc) } };
 
 		report(c, "error", loc, r, 2, NULL, 0, "member reference base type '%s' is not a structure or union", tyname(c, bt));
-		return mk_int(c, 0, prim(TY_INT), loc);
+		return err_node(c, loc);
 	}
 	ti = T(c, bt)->aux;
 	if (!(c->tags[ti].flags & RF_COMPLETE)) {
 		if (N(base)->op == N_VAR && (c->syms[N(base)->a].flags & SF_INVALID))
-			return mk_int(c, 0, prim(TY_INT), loc);	/* (already reported) */
+			return err_node(c, loc);	/* (already reported) */
 		{
 			pp_span r = rng(c, base);
 
 			report(c, "error", loc, &r, 1, NULL, 0, "incomplete definition of type '%s'", tyname(c, bt));
 		}
-		note(c, c->tags[ti].loc, "forward declaration of '%s'", tyname(c, QT(QI(bt), 0)));
-		return mk_int(c, 0, prim(TY_INT), loc);
+		fwd_note(c, bt);
+		return err_node(c, loc);
 	}
 	d = find_member(c, ti, name, path, 0);
 	if (d < 0) {
 		pp_span r = rng(c, base);
 
 		report(c, "error", c->prevloc, &r, 1, NULL, 0, "no member named '%.*s' in '%s'", IDF(name), tyname(c, bt));
-		return mk_int(c, 0, prim(TY_INT), loc);
+		return err_node(c, loc);
 	}
 	for (int i = 0; i < d; i++) {
 		const field *f = &c->tags[ti].f[path[i]];
 		uint32_t m = mk(c, N_MEMBER, qualify(c, f->ty, QQ(bt)), loc);
+
+		if (unlikely(f->invalid))
+			return err_node(c, loc);
 
 		N(m)->a = base;
 		N(m)->b = ti;
@@ -410,6 +429,8 @@ static __attribute__((noinline)) uint32_t member_slow(cc *c, uint32_t base, uint
 		N(m)->flags = (uint8_t)((N(base)->flags & NF_LVALUE) | (f->bitfield ? NF_BITFIELD : 0));
 		base = m;
 		bt = N(m)->ty;
+		if (unlikely(f->depr) && i == d - 1)
+			deprecated_use(c, c->prevloc, f->name, &c->attr[f->depr], f->loc);
 		if (is_record(c, bt))
 			ti = T(c, bt)->aux;
 	}
@@ -429,7 +450,13 @@ VPRIV uint32_t member(cc *c, uint32_t base, uint32_t name, uint32_t loc)
 			const field *f = &r->f[i];
 
 			if (f->name == name) {
-				uint32_t m = mk(c, N_MEMBER, qualify(c, f->ty, QQ(bt)), loc);
+				uint32_t m;
+
+				if (unlikely(f->invalid))
+					return err_node(c, loc);
+				if (unlikely(f->depr))
+					deprecated_use(c, c->prevloc, f->name, &c->attr[f->depr], f->loc);
+				m = mk(c, N_MEMBER, qualify(c, f->ty, QQ(bt)), loc);
 
 				N(m)->a = base;
 				N(m)->b = t->aux;
@@ -454,7 +481,7 @@ VPRIV uint32_t deref(cc *c, uint32_t p, uint32_t loc)
 		pp_span r = rng(c, p);
 
 		report(c, "error", loc, &r, 1, NULL, 0, "indirection requires pointer operand ('%s' invalid)", tyname(c, N(p)->ty));
-		return p;
+		return err_node(c, loc);
 	}
 	t = T(c, N(p)->ty)->base;
 	n = mk(c, N_DEREF, t, loc);
@@ -478,8 +505,22 @@ VPRIV uint32_t addr_of(cc *c, uint32_t n, uint32_t loc)
 
 	if (bitfield_of(c, n))
 		cc_error(c, loc, "address of bit-field requested");
-	if (!(N(n)->flags & NF_LVALUE) && KIND(c, t) != TY_FUNC && N(n)->op != N_COMPLIT)
-		cc_error(c, loc, "cannot take the address of an rvalue");
+	if (!(N(n)->flags & NF_LVALUE) && KIND(c, t) != TY_FUNC && N(n)->op != N_COMPLIT) {
+		pp_span sp = rng(c, n);
+
+		report(c, "error", loc, &sp, 1, NULL, 0, "cannot take the address of an rvalue of type '%s'", tyname(c, t));
+	}
+	{
+		uint32_t b = n;
+
+		while (N(b)->op == N_MEMBER)
+			b = N(b)->a;
+		if (N(b)->op == N_VAR && c->syms[N(b)->a].sc == SC_REGISTER && c->syms[N(b)->a].kind == S_VAR) {
+			pp_span sp = rng(c, n);
+
+			report(c, "error", loc, &sp, 1, NULL, 0, "address of register variable requested");
+		}
+	}
 	mark_addr_taken(c, n);
 	r = mk(c, N_ADDR, ty_ptr(c, t), loc);
 	N(r)->a = n;
@@ -492,8 +533,8 @@ static uint32_t generic_sel(cc *c, uint32_t loc)
 {
 	uint32_t ctl, chosen = 0, def = 0;
 	qty ct;
+	uint32_t open = expect_lparen(c);
 
-	expect(c, T_LPAREN, "'('");
 	c->unevaluated++;
 	ctl = decay(c, assign_expr(c));
 	c->unevaluated--;
@@ -515,12 +556,16 @@ static uint32_t generic_sel(cc *c, uint32_t loc)
 				chosen = e;
 		}
 	}
-	expect(c, T_RPAREN, "')'");
+	expect_match(c, T_RPAREN, open);
 	if (!chosen)
 		chosen = def;
 	if (!chosen) {
-		cc_error(c, loc, "controlling expression type not compatible with any generic association type");
-		return mk_int(c, 0, prim(TY_INT), loc);
+		pp_span r = rng(c, ctl);
+
+		if (!ISERR(ctl))	/* (clang: nothing more for an invalid operand; the result is invalid) */
+			report(c, "error", N(ctl)->loc, &r, 1, NULL, 0,
+			       "controlling expression type '%s' not compatible with any generic association type", tyname(c, ct));
+		return err_node(c, loc);
 	}
 	return chosen;
 }
@@ -553,12 +598,17 @@ static inline __attribute__((always_inline)) uint32_t primary_sym(cc *c, uint32_
 {
 	sym *y = &c->syms[s];
 
-	if (unlikely(y->flags & SF_DEPRECATED)) {
-		deprecated_use(c, loc, id, &c->attr[y->attrs]);
+	if (unlikely(y->flags & SF_DEPRECATED) && !(y->flags & SF_OVERLOAD)) {	/* an overload set: the member a call picks */
+		deprecated_use(c, loc, id, &c->attr[y->attrs], y->loc);
 		y = &c->syms[s];
 	}
-	if (y->kind == S_ENUMCONST)
-		return mk_int(c, y->val, y->ty, loc);
+	if (y->kind == S_ENUMCONST) {
+		uint32_t n = mk_int(c, y->val, y->ty, loc);
+
+		if (N(n)->op == N_NUM)
+			N(n)->aux |= NUM_ENUM;
+		return n;
+	}
 	if (unlikely(y->kind == S_TYPEDEF))
 		fatal(c, loc, "unexpected type name '%.*s': expected expression", IDF(id));
 	{
@@ -566,7 +616,10 @@ static inline __attribute__((always_inline)) uint32_t primary_sym(cc *c, uint32_
 
 		N(n)->a = s;
 		N(n)->flags = y->kind == S_VAR ? NF_LVALUE : 0;
-		if (!c->unevaluated && !((y->flags & SF_OVERLOAD) && is(c, T_LPAREN)))
+		if (unlikely(y->flags & SF_INVALID))
+			N(n)->flags |= NF_ERR;
+		/* (clang: a function's references from its own body do not use it) */
+		if ((!c->unevaluated || c->bcp) && !((y->flags & SF_OVERLOAD) && is(c, T_LPAREN)) && s != c->fn)
 			y->flags |= SF_USED;
 		if (unlikely(y->flags & SF_UVPEND)) {
 			if (tok(c)->kind == T_PERIOD)
@@ -629,6 +682,26 @@ static __attribute__((noinline)) uint32_t primary_kw(cc *c, int kw, uint32_t loc
 	bad_primary(c, tok(c));
 }
 
+/* C99: a call to an undeclared function; for one a standard header declares (POSIX's write,
+   open, ...) vcc adds where it is, as help with the #include fix-it */
+static __attribute__((cold, noinline)) void implicit_call_error(cc *c, uint32_t id, uint32_t loc)
+{
+	const char *h = lib_header(c, id);
+	vdiag *d;
+
+	pp_diag_pc = __builtin_return_address(0);
+	error_limit(c), c->errors++, c->ndiag++;
+	d = pp_diag_begin(c->p, VDL_ERROR, loc, "call to undeclared function '%.*s'; ISO C99 and later do not support "
+			  "implicit function declarations", IDF(id));
+	pp_diag_flag(d, "implicit-function-declaration");
+	c23_word_help(c, d, id);
+	if (h) {
+		pp_diag_help(c->p, d, "'%.*s' is declared in <%s>", IDF(id), h);
+		include_fix(c, d, loc, h);
+	}
+	pp_diag_emit(c->p, d);
+}
+
 /* an identifier without a binding (already consumed): builtins, __func__, errors */
 static __attribute__((noinline)) uint32_t primary_unbound(cc *c, uint32_t id, uint32_t loc)
 {
@@ -647,12 +720,21 @@ static __attribute__((noinline)) uint32_t primary_unbound(cc *c, uint32_t id, ui
 			return primary_sym(c, s, id, loc);
 	}
 	if (is(c, T_LPAREN)) {
-		qty lt = implicit_lib_type(c, id);
+		uint32_t ls = lib_func(c, id, loc);
+		qty lt;
 
+		if (ls) {
+			uint32_t n = mk(c, N_VAR, c->syms[ls].ty, loc);
+
+			N(n)->a = ls;
+			c->syms[ls].flags |= SF_USED;
+			return n;
+		}
+		lt = implicit_lib_type(c, id);
 		if (!c->o->implicit_fn && lt)
 			cc_error(c, loc, "call to undeclared library function '%.*s' with type '%s'; ISO C99 and later do not support implicit function declarations [-Wimplicit-function-declaration]", IDF(id), tyname(c, lt));
 		else if (!c->o->implicit_fn)
-			cc_error(c, loc, "call to undeclared function '%.*s'; ISO C99 and later do not support implicit function declarations [-Wimplicit-function-declaration]", IDF(id));
+			implicit_call_error(c, id, loc);
 		if (idlen_(id) == 6 && !memcmp(idstr_(id), "alloca", 6)) {
 			/* clang: an implicitly declared library builtin is the builtin */
 			uint32_t bid = vintern_find("__builtin_alloca", 16, vintern_hash("__builtin_alloca", 16));
@@ -672,7 +754,7 @@ static __attribute__((noinline)) uint32_t primary_unbound(cc *c, uint32_t id, ui
 		}
 	}
 	{
-		uint32_t s = undeclared(c, "use of undeclared identifier", id, loc, false);
+		uint32_t s = undeclared(c, "use of undeclared identifier", id, loc, false, 0, NULL);
 
 		if (s)
 			return primary_sym(c, s, id, loc);	/* clang recovers with the correction */
@@ -693,9 +775,13 @@ static __attribute__((noinline)) uint32_t stmt_expr(cc *c, uint32_t loc)
 	if (!c->fn)
 		cc_error(c, loc, "statement expression not allowed at file scope");
 	c->in_stmtexpr++;
+	bool fh = c->for_head;
+
+	c->for_head = false;
 	b = compound_stmt(c, &last);
+	c->for_head = fh;
 	c->in_stmtexpr--;
-	expect(c, T_RPAREN, "')'");
+	expect_match(c, T_RPAREN, loc);
 	n = mk(c, N_STMTEXPR, last, loc);
 	N(n)->a = b;
 	if (!c->in_stmtexpr)
@@ -709,27 +795,30 @@ VPRIV uint32_t paren_expr(cc *c, uint32_t loc)
 	uint32_t n;
 
 	if (is(c, T_LBRACE)) {
+		static const char *const g[] = { "gnu-statement-expression", "gnu", "pedantic", NULL };
 		bool mac = tok(c)->flags & PF_MACRO;
 
+		if (!(c->prevflags & PF_MACRO))
+			EXT_WARN(c, "gnu-statement-expression", w_gnu, tok(c)->loc, "use of GNU statement expression extension");
+		else if (unlikely(ext_on(c, "gnu-statement-expression-from-macro-expansion", g))) {
+			c->dms = "{";	/* (clang: the '(' from a macro; the caret at the invocation) */
+			ext_warn(c, "gnu-statement-expression-from-macro-expansion", g, tok(c)->loc,
+				 "use of GNU statement expression extension from macro expansion");
+		}
 		n = stmt_expr(c, loc);
 		if (mac)
 			N(n)->flags |= NF_MACRO;	/* (no -Wunused-value) */
 		return n;
 	}
 	n = expr(c);
-	if (!is(c, T_RPAREN)) {
-		report(c, "error", tok(c)->loc, NULL, 0, NULL, 0, "expected ')'");
-		note(c, loc, "to match this '('");
-		longjmp(c->bail, 1);
-	}
-	{
+	if (likely(is(c, T_RPAREN)) && !ISERR(n)) {
 		/* the parentheses around it, as distances (no location fix-up in the caches) */
 		uint32_t b = c->span[n].e ? c->span[n].b : N(n)->loc, e = c->span[n].e ? c->span[n].e : N(n)->loc, rp = tok(c)->loc;
 
 		if (b >= loc && b - loc < 65536 && rp >= e && rp - e < 65536)
 			c->paren[n] = (struct cparen){ (uint16_t)(b - loc), (uint16_t)(rp - e) };
 	}
-	next(c);
+	expect_close(c, T_RPAREN, loc, n);
 	N(n)->flags |= NF_PAREN;
 	return n;
 }
@@ -890,7 +979,9 @@ static void nonnull_args(cc *c, uint32_t fs, qty ft, const uint32_t *args, uint3
 		{
 			pp_span r = rng(c, args[i]);
 
-			cc_warnx(c, "nonnull", true, NULL, pn || idx ? r.b : call_end, &r, 1, NULL, 0,
+			if (quiet_rt(c))	/* (clang: DiagRuntimeBehavior, at the body's end) */
+				continue;
+			rt_defer(c, "nonnull", NULL, pn || idx ? r.b : call_end, &r, 1, NULL, 0,
 				 "null passed to a callee that requires a non-null argument");
 		}
 	}
@@ -906,6 +997,7 @@ static __attribute__((noinline)) uint32_t call(cc *c, uint32_t fn, uint32_t loc)
 	qty aty[64];
 	uint32_t atd[64];
 	bool have_args = false;
+	unsigned aflags = 0;	/* the arguments' NF_* together */
 
 	if (N(fn)->op == N_VAR && (c->syms[N(fn)->a].flags & SF_OVERLOAD) && c->syms[N(fn)->a].kind == S_FUNC) {
 		uint32_t s;
@@ -915,9 +1007,16 @@ static __attribute__((noinline)) uint32_t call(cc *c, uint32_t fn, uint32_t loc)
 		s = ovl_pick(c, N(fn)->a, &args, loc);
 		N(fn)->a = s;
 		N(fn)->ty = c->syms[s].ty;
+		if (unlikely(c->syms[s].flags & SF_DEPRECATED))
+			deprecated_use(c, N(fn)->loc, c->syms[s].name, &c->attr[c->syms[s].attrs], c->syms[s].loc);
 		if (!c->unevaluated)
 			c->syms[s].flags |= SF_USED;
 		c->syms[s].flags |= SF_REF;
+	}
+	if (unlikely(ISERR(fn))) {	/* an invalid declaration (or expression): silent */
+		if (!have_args)
+			args_list(c, &args);
+		return err_node(c, loc);
 	}
 	fn = rvalue(c, fn);
 	callee = fn;
@@ -928,7 +1027,7 @@ static __attribute__((noinline)) uint32_t call(cc *c, uint32_t fn, uint32_t loc)
 		report(c, "error", loc, &r, 1, NULL, 0, "called object type '%s' is not a function or function pointer", tyname(c, ft));
 		if (!have_args)
 			args_list(c, &args);
-		return mk_int(c, 0, prim(TY_INT), loc);
+		return err_node(c, loc);
 	}
 	ft = T(c, ft)->base;
 	f = T(c, ft);
@@ -939,6 +1038,9 @@ static __attribute__((noinline)) uint32_t call(cc *c, uint32_t fn, uint32_t loc)
 		callee = N(callee)->a;
 	if (!(f->flags & TF_NOPROTO)) {
 		if (args.n < f->n || (args.n > f->n && !(f->flags & TF_VARIADIC))) {
+			for (uint32_t i = 0; i < args.n; i++)
+				if (ISERR(args.v[i]))	/* clang: no count check on an invalid argument list */
+					return err_node(c, loc);
 			const char *v = f->flags & TF_VARIADIC ? "at least " : "";
 			uint32_t fs = N(callee)->op == N_VAR && c->syms[N(callee)->a].kind == S_FUNC ? N(callee)->a : 0;
 			uint32_t p1 = fs && c->syms[fs].psyms && f->n == 1 ? c->lists[c->syms[fs].psyms - 1] : 0;
@@ -976,6 +1078,7 @@ static __attribute__((noinline)) uint32_t call(cc *c, uint32_t fn, uint32_t loc)
 				}
 				report(c, "note", y->loc, &pr, t && len ? 1 : 0, NULL, 0, "'%.*s' declared here", IDF(y->name));
 			}
+			return err_node(c, loc);	/* clang: the arguments are not converted */
 		}
 	}
 	{
@@ -1006,6 +1109,7 @@ static __attribute__((noinline)) uint32_t call(cc *c, uint32_t fn, uint32_t loc)
 				a = cast_node(c, a, prim(TY_DOUBLE), CK_F2F);
 		}
 		args.v[i] = a;
+		aflags |= N(a)->flags;
 	}
 	if (N(callee)->op == N_VAR && c->syms[N(callee)->a].kind == S_FUNC && !c->unevaluated)
 		nonnull_args(c, N(callee)->a, ft, args.v, args.n);
@@ -1048,7 +1152,39 @@ static __attribute__((noinline)) uint32_t call(cc *c, uint32_t fn, uint32_t loc)
 	N(n)->a = fn;
 	N(n)->b = vfreeze(c, &args);
 	N(n)->c = args.n;
+	N(n)->flags |= aflags & NF_ERR;	/* clang: a call with an invalid argument is invalid */
 	return n;
+}
+
+/* the postfix operators after an error node: parsed, nothing more said */
+static __attribute__((noinline, cold)) uint32_t postfix_err(cc *c, uint32_t n)
+{
+	for (;;) {
+		switch (tok(c)->kind) {
+		case T_LSQUARE:
+			next(c);
+			expr(c);
+			expect(c, T_RSQUARE, "']'");
+			break;
+		case T_LPAREN: {
+			vec args;
+
+			args_list(c, &args);
+			break;
+		}
+		case T_PERIOD: case T_ARROW:
+			next(c);
+			if (!is(c, T_IDENT))
+				fatal(c, tok(c)->loc, "expected identifier");
+			next(c);
+			break;
+		case T_PLUSPLUS: case T_MINUSMINUS:
+			next(c);
+			break;
+		default:	/* an error node of no type a conversion would look at (decay drops the flag) */
+			return err_node(c, N(n)->loc);
+		}
+	}
 }
 
 VPRIV __attribute__((noinline)) uint32_t postfix_ops(cc *c, uint32_t n)
@@ -1058,6 +1194,8 @@ VPRIV __attribute__((noinline)) uint32_t postfix_ops(cc *c, uint32_t n)
 	for (;; setspan(c, n, b0)) {
 		uint32_t loc = tok(c)->loc;
 
+		if (unlikely(ISERR(n)))
+			return postfix_err(c, n);
 		switch (tok(c)->kind) {
 		case T_LSQUARE: {
 			uint32_t ix, r;
@@ -1066,6 +1204,10 @@ VPRIV __attribute__((noinline)) uint32_t postfix_ops(cc *c, uint32_t n)
 			next(c);
 			ix = expr(c);
 			expect(c, T_RSQUARE, "']'");
+			if (unlikely(ISERR(ix))) {
+				n = err_node(c, loc);
+				continue;
+			}
 			if (is_vector(c, N(n)->ty) && (N(n)->flags & NF_LVALUE)) {
 				/* v[i]: lane i of the vector object */
 				qty et = QT(QI(T(c, N(n)->ty)->base), QQ(N(n)->ty));
@@ -1086,7 +1228,8 @@ VPRIV __attribute__((noinline)) uint32_t postfix_ops(cc *c, uint32_t n)
 				pp_span r[2] = { rng(c, n), rng(c, ix) };
 
 				report(c, "error", loc, r, 2, NULL, 0, "subscripted value is not an array, pointer, or vector");
-				break;
+				n = err_node(c, loc);
+				continue;
 			}
 			r = mk2(c, N_INDEX, T(c, at)->base, loc, n, convert(c, ix, prim(TY_LONG)));
 			N(r)->flags = NF_LVALUE;
@@ -1115,9 +1258,10 @@ VPRIV __attribute__((noinline)) uint32_t postfix_ops(cc *c, uint32_t n)
 				if (is_ptr(c, N(n)->ty) && is_record(c, T(c, N(n)->ty)->base)) {
 					/* clang: fix-it '->', then go on as if it were there */
 					pp_span r = rng(c, n);
-					pp_fixit fx = { loc, loc + 1, "->" };
+					pp_fixit fx = { loc, loc + 1, "->", VDA_MACHINE };
 					pp_span b = c->span[n];
 
+					c->dms = ".";
 					report(c, "error", loc, &r, 1, &fx, 1, "member reference type '%s' is a pointer; did you mean to use '->'?",
 					       tyname(c, N(n)->ty));
 					n = deref(c, n, loc);
@@ -1138,8 +1282,9 @@ VPRIV __attribute__((noinline)) uint32_t postfix_ops(cc *c, uint32_t n)
 				if (is_record(c, N(n)->ty)) {
 					/* clang: fix-it '.', then go on as if it were there */
 					pp_span r[2] = { rng(c, n), { loc, loc + 2 } };
-					pp_fixit fx = { loc, loc + 2, "." };
+					pp_fixit fx = { loc, loc + 2, ".", VDA_MACHINE };
 
+					c->dms = "->";
 					report(c, "error", loc, r, 2, &fx, 1, "member reference type '%s' is not a pointer; did you mean to use '.'?",
 					       tyname(c, N(n)->ty));
 					n = member(c, n, id, loc);

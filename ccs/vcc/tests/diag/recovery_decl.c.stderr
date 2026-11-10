@@ -1,0 +1,32 @@
+recovery_decl.c:4:17: error: expected ')'
+    4 | void abort (void;
+      |            -    ^
+      |            |
+      |            to match this '('
+recovery_decl.c:4:12: note: to match this '('
+recovery_decl.c:7:22: error: field has incomplete type 'struct zz'
+    6 | struct zz;
+      |        - forward declaration of 'struct zz'
+    7 | struct s { struct zz f:3; long b; };
+      |                      ^
+recovery_decl.c:6:8: note: forward declaration of 'struct zz'
+recovery_decl.c:8:23: error: 'long struct' is invalid
+    8 | struct s3 { struct zz long g; int h; };
+      |                       ^
+recovery_decl.c:9:16: error: expected ';' after top level declarator
+    9 | void exit (int)
+      |                ^
+      |                ;
+recovery_decl.c:12:11: error: expected expression
+   12 |         int x[4= ] = { 1 };
+      |                  ^
+recovery_decl.c:13:2: error: 'double' cannot be signed or unsigned
+   13 |         signed double d = 1;
+      |         ^
+recovery_decl.c:17:2: error: use of undeclared identifier 'undecl'
+   17 |         undecl, g(1, 2));
+      |         ^~~~~~
+recovery_decl.c:18:9: error: use of undeclared identifier 'a'
+   18 |         return a @ y;
+      |                ^
+8 errors generated.

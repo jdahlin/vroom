@@ -1,0 +1,4 @@
+bitfield_width.c:1:16: error: width of bit-field 'a' (40 bits) exceeds the width of its type (32 bits)
+    1 | struct s { int a : 40; };
+      |                ^
+1 error generated.

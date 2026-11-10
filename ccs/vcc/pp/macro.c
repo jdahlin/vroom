@@ -81,6 +81,20 @@ static const pmacro *canon_macro(const pmacro *m)
 	return NULL;	/* table crowded here: keep the per-TU one */
 }
 
+/* -Wvariadic-macros (-pedantic): "#define M(args...)"; out of line, define() is hot */
+static __attribute__((noinline, cold)) void named_variadic(pp *p, ctx *c, const vtok *vt, uint32_t b, uint32_t e)
+{
+	for (uint32_t i = b + 2; i + 1 < e && vt[i].kind != T_RPAREN; i++)
+		if (vt[i].kind == T_IDENT && vt[i + 1].kind == T_ELLIPSIS) {
+			static const char *const g[] = { "pedantic", NULL };
+			pp_dinfo d = { "warning", c->loc + vt[i + 1].off, NULL, 0, NULL, 0, NULL, 0 };
+
+			if (pp_warnx(p, "variadic-macros", false, g, &d, "named variadic macros are a GNU extension"))
+				HC_BAD(p);	/* (a replay would not say it) */
+			return;
+		}
+}
+
 VPRIV void define(pp *p, ctx *c, uint32_t b, uint32_t e)
 {
 	const vtok *vt = c->vt;
@@ -108,7 +122,11 @@ VPRIV void define(pp *p, ctx *c, uint32_t b, uint32_t e)
 
 		err = parse_define(vt, b, e, n, site ? mem_shared : mem_perm, &p->perm, &eoff);
 		if (err) {
-			error(p, c->loc + vt[eoff].off, "%s", err);
+			/* parse_define's two messages, each a format of its own (its id) */
+			if (err[0] == '\'')
+				error(p, c->loc + vt[eoff].off, "'##' cannot appear at either end of a macro expansion");
+			else
+				error(p, c->loc + vt[eoff].off, "invalid macro parameter list");
 			return;
 		}
 		n->src = c->src;
@@ -139,6 +157,8 @@ VPRIV void define(pp *p, ctx *c, uint32_t b, uint32_t e)
 		error(p, c->loc + (j < m->nbody ? m->body[j].off : vt[b].off), "'#' is not followed by a macro parameter");
 		return;
 	}
+	if (unlikely((m->flags & MF_VARIADIC) && p->o->nwargs) && c->f != &p->builtin && pp_wc_maybe(p, PPW_VARIADIC))
+		named_variadic(p, c, vt, b, e);
 	{
 		/* -Wmacro-redefined: a different definition replacing a live one */
 		uintptr_t o = mget(p, m->name);

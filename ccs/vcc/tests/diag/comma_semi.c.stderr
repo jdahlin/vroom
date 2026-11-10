@@ -1,0 +1,29 @@
+comma_semi.c:3:11: error: expected ';' at end of declaration
+    3 | int g1 = 1,
+      |           ^
+      |           ;
+comma_semi.c:5:11: error: expected ';' at end of declaration
+    5 | short p[5],
+      |           ^
+      |           ;
+comma_semi.c:9:11: error: expected ';' at end of declaration
+    9 |         int a = 1,
+      |                  ^
+      |                  ;
+comma_semi.c:11:8: error: expected ';' after expression
+   11 |                 a = 2,
+      |                      ^
+      |                      ;
+comma_semi.c:14:8: error: expected ';' after expression
+   14 |         x = -1,
+      |               ^
+      |               ;
+comma_semi.c:16:7: error: expected ';' after expression
+   16 |         a = x:
+      |              ^
+      |              ;
+comma_semi.c:17:10: error: expected ';' after return statement
+   17 |         return a,
+      |                 ^
+      |                 ;
+7 errors generated.

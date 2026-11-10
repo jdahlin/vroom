@@ -45,6 +45,46 @@ static __attribute__((noinline)) uint32_t number_slow(cc *c, const ptok *t)
 	return number_s(c, t, s, n);
 }
 
+/* -Wliteral-range: a constant that rounds to infinity, or to zero although a digit is not 0 */
+static __attribute__((noinline, cold)) void literal_range(cc *c, const ptok *t, const char *s, size_t k, qty ty, bool big)
+{
+	bool hex = k > 1 && s[0] == '0' && (s[1] | 32) == 'x';
+	int kd = KIND(c, ty);
+	bool q = is_q(c, ty);
+	const char *lim;
+	vdiag *d;
+
+	if (!big) {
+		size_t i = hex ? 2 : 0;
+		bool nz = false;
+
+		for (; i < k && (hex ? (s[i] | 32) != 'p' : (s[i] | 32) != 'e'); i++)
+			nz |= (s[i] >= '1' && s[i] <= '9') || (hex && (s[i] | 32) >= 'a' && (s[i] | 32) <= 'f');
+		if (!nz)
+			return;
+	}
+	if (kd == TY_FLOAT)
+		lim = big ? "3.40282347E+38" : "1.40129846E-45";
+	else if (q)
+		lim = big ? "1.18973149535723176508575932662800702E+4932" : "6.47517511943802511092443895822764655E-4966";
+	else
+		lim = big ? "1.7976931348623157E+308" : "4.9406564584124654E-324";
+	d = cc_warn_begin(c, "literal-range", true, NULL, t->loc, "magnitude of floating-point constant too %s for type '%s'; %s is %s",
+			  big ? "large" : "small", tyname(c, ty), big ? "maximum" : "minimum", lim);
+	if (!d)
+		return;
+	pp_diag_label(c->p, d, t->loc, pp_tok_end(c->p, t->loc), NULL);
+	if (kd == TY_LDOUBLE && !q) {	/* a constant binary128 holds: written for Arm Linux */
+		u128 v = q_parse(s, k);
+		unsigned ex = (unsigned)(v >> 112) & 0x7fff;
+
+		if (ex != 0x7fff && v << 1)
+			pp_diag_help(c->p, d, "'long double' is 'double' on Apple; on Arm Linux it has 128 bits, %s",
+				     big ? "up to 1.19E+4932" : "down to 6.48E-4966");
+	}
+	pp_diag_emit(c->p, d);
+}
+
 static uint32_t number_s(cc *c, const ptok *t, const char *s, size_t n)
 {
 	size_t i = 0;
@@ -77,18 +117,28 @@ static uint32_t number_s(cc *c, const ptok *t, const char *s, size_t n)
 			ty = prim(TY_LDOUBLE);
 		if (k >= sizeof(buf))
 			k = sizeof(buf) - 1;
-		if (is_q(c, ty))
-			return mk_fltq(c, q_parse(s, k), ty, t->loc);
+		if (is_q(c, ty)) {
+			u128 q = q_parse(s, k);
+			unsigned ex = (unsigned)(q >> 112) & 0x7fff;
+
+			if (unlikely(ex == 0x7fff || !(q << 1)))
+				literal_range(c, t, s, k, ty, ex == 0x7fff);
+			return mk_fltq(c, q, ty, t->loc);
+		}
 		memcpy(buf, s, k);
 		buf[k] = 0;
 		d = KIND(c, ty) == TY_FLOAT ? (double)strtof(buf, NULL) : strtod(buf, NULL);	/* one rounding */
+		if (unlikely(isinf(d) || d == 0))
+			literal_range(c, t, s, k, ty, isinf(d));
 		return mk_flt(c, d, ty, t->loc);
 	}
 	if (n > 1 && s[0] == '0' && (s[1] == 'x' || s[1] == 'X'))
 		base = 16, i = 2;
-	else if (n > 1 && s[0] == '0' && (s[1] == 'b' || s[1] == 'B'))
+	else if (n > 1 && s[0] == '0' && (s[1] == 'b' || s[1] == 'B')) {
 		base = 2, i = 2;
-	else if (s[0] == '0')
+		if (c->o->std != 23)
+			EXT_WARN(c, "c23-extensions", w_ped, t->loc, "binary integer literals are a C23 extension");
+	} else if (s[0] == '0')
 		base = 8;
 	for (; i < n; i++) {
 		unsigned d;
@@ -129,7 +179,7 @@ static uint32_t number_s(cc *c, const ptok *t, const char *s, size_t n)
 	{
 		uint32_t r = mk_int(c, (i128)v, int_lit_type(c, v, l, u, base == 10), t->loc);
 
-		N(r)->aux = base != 10;	/* spelled with a leading 0 (-Wconstant-conversion) */
+		N(r)->aux = base != 10 ? NUM_RADIX : 0;	/* spelled with a leading 0 (-Wconstant-conversion) */
 		return r;
 	}
 }
@@ -183,7 +233,7 @@ VPRIV uint32_t number(cc *c, const ptok *t)
 	{
 		uint32_t r = mk_int(c, (i128)v, int_lit_type(c, v, l, u, dec), t->loc);
 
-		N(r)->aux = !dec;	/* spelled with a leading 0 (-Wconstant-conversion) */
+		N(r)->aux = dec ? 0 : NUM_RADIX;	/* spelled with a leading 0 (-Wconstant-conversion) */
 		return r;
 	}
 }
@@ -407,6 +457,7 @@ VPRIV uint32_t char_lit(cc *c)
 	i128 v = 0;
 	int nch = 0;
 	qty ty = prim(TY_INT);
+	uint32_t loc;
 
 	while (*s != '\'')
 		s++;
@@ -472,6 +523,7 @@ VPRIV uint32_t char_lit(cc *c)
 		ty = c->o->unsigned_char ? prim(TY_UCHAR) : prim(TY_CHAR);
 		ty = prim(TY_UCHAR);
 	}
+	loc = t->loc;	/* (t is the next token after next()) */
 	next(c);
-	return mk_int(c, v, ty, t->loc);
+	return mk_int(c, v, ty, loc);
 }

@@ -1,0 +1,16 @@
+mod_zero_const2.c:4:22: error: initializer element is not a compile-time constant
+    4 | static int c = 4 % 0 + 1;
+      |                ~~~~~~^~~
+mod_zero_const2.c:4:18: warning: remainder by zero is undefined [-Wdivision-by-zero]
+    4 | static int c = 4 % 0 + 1;
+      |                  ^ ~
+mod_zero_const2.c:5:33: error: initializer element is not a compile-time constant
+    5 | void f(void) { static int d = 1 / 0; int e[2] = { 1 % 0 }; (void)d; (void)e; }
+      |                               ~~^~~
+mod_zero_const2.c:5:33: warning: division by zero is undefined [-Wdivision-by-zero]
+    5 | void f(void) { static int d = 1 / 0; int e[2] = { 1 % 0 }; (void)d; (void)e; }
+      |                                 ^ ~
+mod_zero_const2.c:5:53: warning: remainder by zero is undefined [-Wdivision-by-zero]
+    5 | void f(void) { static int d = 1 / 0; int e[2] = { 1 % 0 }; (void)d; (void)e; }
+      |                                                     ^ ~
+3 warnings and 2 errors generated.

@@ -1,0 +1,25 @@
+unused_function.c:2:13: warning: unused function 'a' [-Wunused-function]
+    2 | static void a(void) {}
+      |             ^
+unused_function.c:3:12: warning: unused function 'b' [-Wunused-function]
+    3 | static int b(void);
+      |            ^
+unused_function.c:4:20: warning: unused function 'c' [-Wunused-function]
+    4 | static inline void c(void) {}
+      |                    ^
+unused_function.c:6:12: warning: unused variable 'e' [-Wunused-variable]
+    6 | static int e = 1;
+      |            ^
+unused_function.c:10:13: warning: unused function 'h' [-Wunused-function]
+   10 | static void h(void) {}
+      |             ^
+unused_function.c:13:15: warning: unused variable 'fp' [-Wunused-variable]
+   13 | static void (*fp)(void) = n;
+      |               ^~
+unused_function.c:16:13: warning: unused function 'r' [-Wunused-function]
+   16 | static void r(void) { q(); }
+      |             ^
+unused_function.c:17:12: warning: variable 'self' is not needed and will not be emitted [-Wunneeded-internal-declaration]
+   17 | static int self = sizeof(self);
+      |            ^~~~
+8 warnings generated.

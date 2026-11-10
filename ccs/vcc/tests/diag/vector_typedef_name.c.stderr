@@ -1,0 +1,10 @@
+vector_typedef_name.c:4:39: error: initializing 'int *' with an expression of incompatible type 'v4' (vector of 4 'int' values)
+    4 | void f(v4 a, f4 b, struct S s) { int *p = a; float *q = b; v4 c = s; }
+      |                                       ^   ~
+vector_typedef_name.c:4:53: error: initializing 'float *' with an expression of incompatible type 'f4' (vector of 4 'float' values)
+    4 | void f(v4 a, f4 b, struct S s) { int *p = a; float *q = b; v4 c = s; }
+      |                                                     ^   ~
+vector_typedef_name.c:4:63: error: initializing 'v4' (vector of 4 'int' values) with an expression of incompatible type 'struct S'
+    4 | void f(v4 a, f4 b, struct S s) { int *p = a; float *q = b; v4 c = s; }
+      |                                                               ^   ~
+3 errors generated.

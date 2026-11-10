@@ -1,0 +1,5 @@
+dot_on_ptr.c:4:10: error: member reference type 'struct s *' is a pointer; did you mean to use '->'?
+    4 |         return p.a;
+      |                ~^
+      |                 ->
+1 error generated.

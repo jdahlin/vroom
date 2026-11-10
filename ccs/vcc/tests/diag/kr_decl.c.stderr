@@ -1,0 +1,13 @@
+kr_decl.c:2:9: error: a parameter list without types is only allowed in a function definition
+    2 | void f1(voi);
+      |         ^
+kr_decl.c:3:8: error: a parameter list without types is only allowed in a function definition
+    3 | int f2(a, b);
+      |        ^
+kr_decl.c:4:10: error: a parameter list without types is only allowed in a function definition
+    4 | int (*f3(a))(int);
+      |          ^
+kr_decl.c:5:23: error: a parameter list without types is only allowed in a function definition
+    5 | void f5(void) { int m(a); }
+      |                       ^
+4 errors generated.

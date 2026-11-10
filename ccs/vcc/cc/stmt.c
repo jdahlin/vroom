@@ -180,7 +180,7 @@ VPRIV bool unused_cmp(cc *c, uint32_t e)
 		if (cc_warnx(c, "unused-comparison", true, w_all, op, &r, 1, NULL, 0, "%s comparison result unused",
 			  eq ? "equality" : "relational") && k == T_EQUALEQUAL) {
 			pp_span orr = { op, op + 2 };
-			pp_fixit fx = { op, op + 2, "=" };
+			pp_fixit fx = { op, op + 2, "=", 0 };
 			pp_dinfo d = { "note", op, &orr, 1, &fx, 1, NULL, 0 };
 
 			pp_diagx(c->p, &d, "use '=' to turn this equality comparison into an assignment");
@@ -386,8 +386,8 @@ static void assign_cond_warn(cc *c, uint32_t e)
 		uint32_t op = N(e)->loc;
 		pp_span r[2] = { rng(c, N(e)->a), rng(c, N(e)->b) };
 		pp_span all = { r[0].b, r[1].e };
-		pp_fixit p2[2] = { { all.b, all.b, "(" }, { all.e, all.e, ")" } };
-		pp_fixit eq = { op, op + 1, "==" };
+		pp_fixit p2[2] = { { all.b, all.b, "(", VDA_MAYBE }, { all.e, all.e, ")", VDA_MAYBE } };
+		pp_fixit eq = { op, op + 1, "==", VDA_MAYBE };
 
 		if (cc_warnx(c, "parentheses", true, w_all, op, &all, 1, NULL, 0,
 			  "using the result of an assignment as a condition without parentheses")) {
@@ -441,20 +441,22 @@ static void switch_enum_warn(cc *c, qty et, uint32_t cnd)
 	}
 }
 
-static uint32_t cond_of(cc *c)
+static uint32_t cond_of(cc *c, const char *kw)
 {
-	uint32_t e;
+	uint32_t e, open = tok(c)->loc;
 
-	expect(c, T_LPAREN, "'('");
+	if (unlikely(!is(c, T_LPAREN)))
+		lparen_fail(c, kw);
+	next(c);
 	e = decay(c, expr(c));
 	assign_cond_warn(c, e);
-	expect(c, T_RPAREN, "')'");
+	expect_close(c, T_RPAREN, open, e);
 	return scalar_cond(c, e, "statement");
 }
 
 static uint32_t asm_string(cc *c)
 {
-	return string_index(c);
+	return string_index(c, 0);
 }
 
 static void asm_operands(cc *c, vec *ops, bool out)
@@ -507,6 +509,9 @@ VPRIV uint32_t asm_stmt(cc *c, bool toplevel)
 {
 	uint32_t loc = tok(c)->loc, ai = c->nasm++, n;
 	casm *a = &c->asms[ai];
+
+	if (kwof(tok(c)) == KW_asm)	/* (clang -pedantic: the GNU spelling) */
+		EXT_WARN_MS(c, "asm", "language-extension-token", w_ped, loc, "extension used");
 	vec outs, ins, clob, labs;
 	int pending = 0;
 
@@ -580,6 +585,118 @@ VPRIV bool at_asm(cc *c)
 	return kw == KW_asm || kw == KW___asm__ || kw == KW___asm;
 }
 
+/* clang: an unknown identifier at the start of a statement that is a typo of a
+   keyword ("retur x;", "stati int n;") is reported with the keyword and parsed as
+   it (decls: a declaration may stand here).  Only before a token that cannot go on
+   an expression, so a valid statement costs a lookup */
+static bool stmt_kw_typo(cc *c, bool decls)
+{
+	ptok *t = tok(c);
+	uint32_t kw;
+	int k;
+
+	if (t->kind != T_IDENT || kwof(t) || lookup(c, t->id))	/* declared: no peek */
+		return false;
+	k = peek(c, 1)->kind;
+	if (k != T_IDENT && k != T_NUMBER && k != T_CHAR && !is_strtok(k) && k != T_LBRACE &&
+	    k != T_SEMI && k != T_STAR)
+		return false;
+	t = tok(c);
+	if (!(kw = typo_keyword(c, t->id, KWS_STMT)))
+		return false;
+	if (!decls && (kwclass[kwmap[kw]] & KC_DECL))
+		return false;
+	undeclared(c, "use of undeclared identifier", t->id, t->loc, false, KWS_STMT, &kw);
+	tok(c)->id = kw;
+	return true;
+}
+
+/* "size_t n = 1;", "FILE *fp;" with the type's header missing: clang reports the
+   undeclared identifier and then each declarator's uses; vcc parses a declaration of an
+   invalid type, so the uses say nothing more.  Only where an expression cannot go on
+   (a name after a name), or "T *p" with T a standard type (cc/libnames.inc) */
+static __attribute__((cold, noinline)) bool undeclared_type_decl(cc *c, vec *items)
+{
+	const ptok *t = tok(c);
+	int i = 1, k;
+
+	if (lookup(c, t->id) || (t->flags & PF_MACRO))
+		return false;
+	if (peek(c, 1)->kind == T_STAR) {
+		if (!lib_header(c, t->id))
+			return false;
+		i = 2;
+	}
+	if (peek(c, i)->kind != T_IDENT || kwof(peek(c, i)))
+		return false;
+	k = peek(c, i + 1)->kind;
+	if (k != T_EQUAL && k != T_SEMI && k != T_COMMA && k != T_LSQUARE)
+		return false;
+	c->undecl_ty = 1;
+	declaration(c, items, false);
+	c->undecl_ty = 0;
+	return true;
+}
+
+/* the ';' after a part (e) of a for header; clang when it is missing: reported
+   (unless e was invalid), then the rest of the part skipped up to a ';' or the ')' */
+static void for_semi(cc *c, uint32_t e)
+{
+	if (likely(accept(c, T_SEMI)))
+		return;
+	if (!e || !ISERR(e))
+		expect_semi(c, "in 'for' statement specifier");
+	skip_close(c, -1);
+	accept(c, T_SEMI);
+}
+
+/* one declaration or statement of a block (at loc), appended to items */
+static void block_item(cc *c, uint32_t loc, vec *items, bool se, uint32_t *sedone)
+{
+	if (se && items->n > *sedone) {	/* a statement expression: the one before was not the last */
+		uint32_t ls = items->v[items->n - 1];
+
+		while (N(ls)->op == N_LABEL)
+			ls = N(ls)->c;
+		if (N(ls)->op == N_EXPR && N(ls)->a)
+			set_only(c, N(ls)->a), unused_value(c, N(ls)->a, false);
+		*sedone = items->n;
+	}
+	if (is(c, T_EOF)) {
+		report(c, "error", pp_main_eof(c->p), NULL, 0, NULL, 0, "expected '}'");
+		note(c, loc, "to match this '{'");
+		longjmp(c->bail, 1);
+	}
+	if (iskw(c, KW___extension__) && is_decl_start(c, peek(c, 1)))
+		next(c);
+	if (iskw(c, KW___attribute__) || iskw(c, KW___attribute) || at_std_attr(c)) {
+		attrs a = { 0 };
+
+		attribute_list(c, &a);
+		if (accept(c, T_SEMI))
+			return;	/* __attribute__((fallthrough)); */
+		if (is_decl_start(c, tok(c))) {
+			c->pend = a;
+			c->has_pend = true;
+			declaration(c, items, false);
+			return;
+		}
+	}
+	if (is_decl_start(c, tok(c)) && !(is(c, T_IDENT) && peek(c, 1)->kind == T_COLON)) {
+		declaration(c, items, false);
+		return;
+	}
+	if (is(c, T_IDENT) && !kwof(tok(c)) && stmt_kw_typo(c, true) && is_decl_start(c, tok(c))) {
+		declaration(c, items, false);
+		return;
+	}
+	if (is(c, T_IDENT) && !kwof(tok(c)) && (peek(c, 1)->kind == T_IDENT || peek(c, 1)->kind == T_STAR) &&
+	    undeclared_type_decl(c, items))
+		return;
+	c->se_direct = se;
+	vpush(c, items, statement(c));
+}
+
 VPRIV uint32_t compound_stmt(cc *c, qty *last)
 {
 	uint32_t loc = tok(c)->loc, n, sedone = 0;
@@ -609,42 +726,14 @@ VPRIV uint32_t compound_stmt(cc *c, qty *last)
 		} while (accept(c, T_COMMA));
 		expect_semi(c, "at end of declaration");
 	}
-	while (!is(c, T_RBRACE)) {
-		if (last && items.n > sedone) {	/* a statement expression: the one before was not the last */
-			uint32_t ls = items.v[items.n - 1];
+	{
+		recov r;
 
-			while (N(ls)->op == N_LABEL)
-				ls = N(ls)->c;
-			if (N(ls)->op == N_EXPR && N(ls)->a)
-				set_only(c, N(ls)->a), unused_value(c, N(ls)->a, false);
-			sedone = items.n;
-		}
-		if (is(c, T_EOF)) {
-			report(c, "error", pp_tok_end(c->p, c->prevloc), NULL, 0, NULL, 0, "expected '}'");
-			note(c, loc, "to match this '{'");
-			longjmp(c->bail, 1);
-		}
-		if (iskw(c, KW___extension__) && is_decl_start(c, peek(c, 1)))
-			next(c);
-		if (iskw(c, KW___attribute__) || iskw(c, KW___attribute) || at_std_attr(c)) {
-			attrs a = { 0 };
-
-			attribute_list(c, &a);
-			if (accept(c, T_SEMI))
-				continue;	/* __attribute__((fallthrough)); */
-			if (is_decl_start(c, tok(c))) {
-				c->pend = a;
-				c->has_pend = true;
-				declaration(c, &items, false);
-				continue;
-			}
-		}
-		if (is_decl_start(c, tok(c)) && !(is(c, T_IDENT) && peek(c, 1)->kind == T_COLON)) {
-			declaration(c, &items, false);
-			continue;
-		}
-		c->se_direct = last != NULL;
-		vpush(c, &items, statement(c));
+		if (REC_ARM(c, &r))
+			rec_restore(c, &r, REC_BLOCK);	/* after a parse error: on with the next statement */
+		while (!is(c, T_RBRACE))
+			block_item(c, loc, &items, last != NULL, &sedone);	/* (sedone: in memory across the longjmp) */
+		REC_POP(c, &r);
 	}
 	next(c);
 	if (last) {
@@ -759,7 +848,7 @@ VPRIV uint32_t statement(cc *c)
 
 		next(c);
 		scope_open(c);	/* C99 6.8.4p3: a selection statement is a block, and so is each substatement */
-		cnd = cond_of(c);
+		cnd = cond_of(c, "if");
 		{
 			/* clang: runtime-behaviour warnings only in reachable code */
 			cval cv;
@@ -791,7 +880,7 @@ VPRIV uint32_t statement(cc *c)
 
 		next(c);
 		scope_open(c);
-		cnd = cond_of(c);
+		cnd = cond_of(c, "while");
 		c->in_loop++;
 		c->cnd++, body = sub_statement(c), c->cnd--;
 		c->in_loop--;
@@ -809,7 +898,7 @@ VPRIV uint32_t statement(cc *c)
 		if (!iskw(c, KW_while))
 			fatal(c, tok(c)->loc, "expected 'while' in do/while loop");
 		next(c);
-		cnd = cond_of(c);
+		cnd = cond_of(c, "while");
 		scope_close(c);
 		expect_semi(c, "after do/while statement");
 		return mkstmt(c, N_DO, loc, cnd, body, 0);
@@ -817,10 +906,21 @@ VPRIV uint32_t statement(cc *c)
 	case KW_for: {
 		uint32_t init = 0, cnd = 0, step = 0, body, n;
 		vec sb;
+		recov r;
+		uint32_t open;
 
 		next(c);
-		expect(c, T_LPAREN, "'('");
+		open = tok(c)->loc;
+		if (unlikely(!is(c, T_LPAREN)))
+			lparen_fail(c, "for");
+		next(c);
 		scope_open(c);
+		if (REC_ARM(c, &r)) {	/* an error in the header: on with the body */
+			rec_restore(c, &r, REC_FOR);
+			init = cnd = step = 0;
+			goto for_body;
+		}
+		c->for_head = true;
 		if (is_decl_start(c, tok(c))) {
 			vec items;
 
@@ -828,19 +928,24 @@ VPRIV uint32_t statement(cc *c)
 			declaration(c, &items, false);
 			init = mkstmt(c, N_BLOCK, loc, 0, vfreeze(c, &items), items.n);
 		} else {
+			uint32_t e = 0;
+
 			if (!is(c, T_SEMI))
-				init = mkstmt(c, N_EXPR, loc, expr(c), 0, 0);
-			expect_semi(c, "in 'for' statement specifier");
+				init = mkstmt(c, N_EXPR, loc, e = expr(c), 0, 0);
+			for_semi(c, e);
 		}
 		if (!is(c, T_SEMI)) {
 			cnd = decay(c, expr(c));
 			assign_cond_warn(c, cnd);
 			cnd = scalar_cond(c, cnd, "for");
 		}
-		expect_semi(c, "in 'for' statement specifier");
+		for_semi(c, cnd);
+		c->for_head = false;
 		if (!is(c, T_RPAREN))
 			step = expr(c);
-		expect(c, T_RPAREN, "')'");
+		expect_close(c, T_RPAREN, open, step);
+	for_body:
+		REC_POP(c, &r);
 		c->in_loop++;
 		c->cnd++, body = sub_statement(c), c->cnd--;
 		c->in_loop--;
@@ -856,21 +961,28 @@ VPRIV uint32_t statement(cc *c)
 		return n;
 	}
 	case KW_switch: {
-		uint32_t cnd, body;
+		uint32_t cnd, body, open;
 		qty et;
 		qty saved = c->switch_ty;
 
 		next(c);
 		scope_open(c);
-		expect(c, T_LPAREN, "'('");
+		open = tok(c)->loc;
+		if (unlikely(!is(c, T_LPAREN)))
+			lparen_fail(c, "switch");
+		next(c);
 		cnd = expr(c);
 		et = N(cnd)->ty;
 		while (N(cnd)->op == N_CAST && N(cnd)->a && !c->span[cnd].e && KIND(c, N(N(cnd)->a)->ty) == TY_ENUM)
 			cnd = N(cnd)->a, et = N(cnd)->ty;	/* -Wswitch looks at the enum before promotion */
 		cnd = rvalue(c, cnd);
-		expect(c, T_RPAREN, "')'");
-		if (!is_integer(c, N(cnd)->ty))
-			cc_error(c, loc, "statement requires expression of integer type");
+		expect_close(c, T_RPAREN, open, cnd);
+		if (!is_integer(c, N(cnd)->ty)) {
+			pp_span r = rng(c, cnd);
+
+			report(c, "error", loc, &r, 1, NULL, 0, "statement requires expression of integer type ('%s' invalid)",
+			       tyname(c, N(cnd)->ty));
+		}
 		c->switch_ty = N(cnd)->ty;
 		c->in_switch++;
 		{
@@ -919,8 +1031,13 @@ VPRIV uint32_t statement(cc *c)
 			cc_error(c, loc, "'case' statement not in switch statement");
 		const_expr(c, &lo, NULL);
 		hi = lo;
-		if (accept(c, T_ELLIPSIS))
+		if (is(c, T_ELLIPSIS)) {
+			static const char *const g[] = { "pedantic", NULL };
+
+			EXT_WARN_MS(c, "...", "c2y-extensions", g, tok(c)->loc, "case ranges are a C2y extension");
+			next(c);
 			const_expr(c, &hi, NULL);
+		}
 		expect(c, T_COLON, "':'");
 		if (c->switch_ty)
 			lo = trunc_to(c, lo, c->switch_ty), hi = trunc_to(c, hi, c->switch_ty);
@@ -998,13 +1115,18 @@ VPRIV uint32_t statement(cc *c)
 
 				report(c, "error", loc, &r, 1, NULL, 0, "void function '%.*s' should not return a value [-Wreturn-mismatch]",
 				       IDF(c->syms[c->fn].name));
-			}
+			} else if (is_void(c, rt) && c->fn)	/* (clang -pedantic) */
+				EXT_WARN(c, "pedantic", NULL, loc, "void function '%.*s' should not return void expression",
+					 IDF(c->syms[c->fn].name));
 		} else if (c->fn && !is_void(c, rt) && !c->o->implicit_int) {
 			report(c, "error", loc, NULL, 0, NULL, 0, "non-void function '%.*s' should return a value [-Wreturn-mismatch]",
 			       IDF(c->syms[c->fn].name));
 		}
-		expect_semi(c, "after return statement");
-		if (e && c->fn)
+		if (unlikely(e && ISERR(e)) && !is(c, T_SEMI))
+			skip_semi(c);	/* clang: after an invalid expression, silently */
+		else
+			expect_semi(c, "after return statement");
+		if (e && c->fn && !ISERR(e))
 			return_stack_addr(c, e, false);
 		if (c->fn && (c->syms[c->fn].flags & SF_NORETURN))
 			cc_warnx(c, "invalid-noreturn", true, NULL, loc, NULL, 0, NULL, 0, "function '%.*s' declared 'noreturn' should not return",
@@ -1013,8 +1135,12 @@ VPRIV uint32_t statement(cc *c)
 	}
 	case KW_goto:
 		next(c);
-		if (accept(c, T_STAR)) {
-			uint32_t e = decay(c, expr(c));
+		if (is(c, T_STAR)) {
+			uint32_t e;
+
+			EXT_WARN_MS(c, "*", "gnu-label-as-value", w_gnu, tok(c)->loc, "use of GNU indirect-goto extension");
+			next(c);
+			e = decay(c, expr(c));
 
 			expect_semi(c, "after goto statement");
 			return mkstmt(c, N_GOTO_IND, loc, e, 0, 0);
@@ -1043,28 +1169,36 @@ VPRIV uint32_t statement(cc *c)
 	default:
 		break;
 	}
+	if (stmt_kw_typo(c, false))
+		return statement(c);
 	if (is(c, T_IDENT) && !kwof(tok(c)) && peek(c, 1)->kind == T_IDENT && !kwof(peek(c, 1)) &&
 	    !lookup(c, tok(c)->id)) {
 		/* "foo_t x;" with foo_t unknown: clang reports the identifier and skips the statement */
-		undeclared(c, "use of undeclared identifier", tok(c)->id, tok(c)->loc, false);
+		undeclared(c, "use of undeclared identifier", tok(c)->id, tok(c)->loc, false, 0, NULL);
 		while (!is(c, T_SEMI) && !is(c, T_RBRACE) && !is(c, T_EOF))
 			next(c);
 		accept(c, T_SEMI);
 		return mkstmt(c, N_EXPR, loc, 0, 0, 0);
 	}
 	{
+		int er = c->errors;
 		uint32_t e = expr(c);
 
-		bool cmp = !c->in_stmtexpr && unused_cmp(c, e);
+		if (likely(!ISERR(e) && c->errors == er)) {	/* (an invalid expression: reported already) */
+			bool cmp = !c->in_stmtexpr && unused_cmp(c, e);
 
-		if (!c->in_stmtexpr)
-			unused_result(c, e, true);
-		if (!sed)
-			set_only(c, e);
-		if (!sed && !cmp && !(c->in_stmtexpr && N(e)->op == N_BINARY && is_cmp(N(e)->aux) &&
-				      !(N(e)->flags & (NF_PAREN | NF_MACRO))))
-			unused_value(c, e, false);
-		expect_semi(c, "after expression");
+			if (!c->in_stmtexpr)
+				unused_result(c, e, true);
+			if (!sed)
+				set_only(c, e);
+			if (!sed && !cmp && !(c->in_stmtexpr && N(e)->op == N_BINARY && is_cmp(N(e)->aux) &&
+					      !(N(e)->flags & (NF_PAREN | NF_MACRO))))
+				unused_value(c, e, false);
+		}
+		if (unlikely(!is(c, T_SEMI)) && ISERR(e))
+			skip_semi(c);	/* clang: after an invalid expression, silently to the ';' */
+		else
+			expect_semi(c, "after expression");
 		return mkstmt(c, N_EXPR, loc, e, 0, 0);
 	}
 }

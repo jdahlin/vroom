@@ -14,7 +14,9 @@ ones are printed with their source.  The same seed gives the same file.
 import os, random, subprocess, sys, tempfile
 
 B = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-VPP = os.environ.get('VCC_BIN', f'{B}/build/ccs') + '/vpp'
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from hostenv import BUILD
+VPP = os.environ.get('VCC_BIN', BUILD) + '/vpp'
 CL = os.environ.get('CLANG', 'clang')
 TGT = '--target=aarch64-linux-gnu'
 

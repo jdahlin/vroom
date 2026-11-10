@@ -1,0 +1,8 @@
+attr_clang_builtin_line.c:2:3: warning: '__clang__' is a predefined macro name, not an attribute scope specifier; did you mean '_Clang' instead? [-Wignored-attributes]
+    2 | [[__clang__::noinline]] void f(void) {}
+      |   ^~~~~~~~~
+      |   _Clang
+<built-in>:2:19: note: expanded from macro '__clang__'
+    2 | #define __clang__ 1
+      |                   ^
+1 warning generated.

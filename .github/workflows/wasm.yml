@@ -1,0 +1,34 @@
+# WebAssembly (wasm64-unknown-emscripten) target: the same C suites through
+# vcc -S, linked by emcc and run under node against clang's build
+# (bench/vcc-wasm.py).  vcc itself runs on an arm64 Linux runner.
+name: wasm
+on:
+  workflow_call:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  wasm:
+    runs-on: ubuntu-24.04-arm
+    container: debian:trixie
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/cache@v4
+        with:
+          path: /opt/emsdk
+          key: emsdk-${{ runner.arch }}-latest-${{ github.run_id }}
+          restore-keys: emsdk-${{ runner.arch }}-latest-
+      - run: ci/setup-debian.sh wasm
+      - uses: actions/cache@v4
+        with:
+          path: ~/.cache/ccache
+          key: ccache-wasm-${{ github.sha }}
+          restore-keys: ccache-wasm-
+      - run: ci/premerge.sh wasm
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: wasm-logs
+          path: build/linux/ci-logs/
+          if-no-files-found: ignore

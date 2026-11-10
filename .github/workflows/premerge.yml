@@ -1,0 +1,54 @@
+# Premerge gate.  main is not protected (a private repo on the free plan has
+# no required checks), so the gate is this workflow: push the commit you want
+# on main to the `premerge` branch,
+#
+#   git push origin HEAD:premerge          (or ci/premerge-push)
+#
+# every target's workflow runs in parallel, and when all pass, `gate`
+# fast-forwards main to that commit.  If main moved meanwhile, gate fails;
+# merge or rebase on origin/main and push again.  Pull requests and pushes to
+# other branches run the same jobs without touching main.
+#
+# One reusable workflow per target (arm64.yml, wasm.yml, x86 later): a new
+# target is its own file plus a line under jobs and gate's needs.
+name: premerge
+on:
+  push:
+    branches: [premerge, 'premerge/**']
+  pull_request:
+  workflow_dispatch:
+concurrency:
+  group: premerge-${{ github.ref }}
+  cancel-in-progress: true
+permissions:
+  contents: read
+jobs:
+  arm64:
+    uses: ./.github/workflows/arm64.yml
+  wasm:
+    uses: ./.github/workflows/wasm.yml
+  gate:
+    needs: [arm64, wasm]
+    if: always()
+    runs-on: ubuntu-24.04-arm
+    permissions:
+      contents: write
+    steps:
+      - name: all targets passed
+        run: |
+          echo '${{ toJSON(needs) }}'
+          [ "${{ contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled') || contains(needs.*.result, 'skipped') }}" = false ]
+      - uses: actions/checkout@v4
+        if: github.event_name == 'push' && github.ref == 'refs/heads/premerge'
+        with:
+          fetch-depth: 0
+      - name: fast-forward main
+        if: github.event_name == 'push' && github.ref == 'refs/heads/premerge'
+        run: |
+          git fetch origin main
+          if ! git merge-base --is-ancestor origin/main "$GITHUB_SHA"; then
+            echo "::error::main moved: merge origin/main into $GITHUB_SHA and push to premerge again"
+            exit 1
+          fi
+          git push origin "$GITHUB_SHA:refs/heads/main"
+          echo "main -> $GITHUB_SHA" >> "$GITHUB_STEP_SUMMARY"

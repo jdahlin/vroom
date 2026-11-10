@@ -1,0 +1,49 @@
+self_compare.c:5:10: warning: self-comparison always evaluates to true [-Wtautological-compare]
+    5 |   r += x == x; r += x != x; r += x < x; r += x <= x; r += x > x; r += x >= x;
+      |          ^
+      = help: both sides are the same variable: was another one meant?
+self_compare.c:5:23: warning: self-comparison always evaluates to false [-Wtautological-compare]
+    5 |   r += x == x; r += x != x; r += x < x; r += x <= x; r += x > x; r += x >= x;
+      |                       ^
+      = help: both sides are the same variable: was another one meant?
+self_compare.c:5:36: warning: self-comparison always evaluates to false [-Wtautological-compare]
+    5 |   r += x == x; r += x != x; r += x < x; r += x <= x; r += x > x; r += x >= x;
+      |                                    ^
+      = help: both sides are the same variable: was another one meant?
+self_compare.c:5:48: warning: self-comparison always evaluates to true [-Wtautological-compare]
+    5 |   r += x == x; r += x != x; r += x < x; r += x <= x; r += x > x; r += x >= x;
+      |                                                ^
+      = help: both sides are the same variable: was another one meant?
+self_compare.c:5:61: warning: self-comparison always evaluates to false [-Wtautological-compare]
+    5 |   r += x == x; r += x != x; r += x < x; r += x <= x; r += x > x; r += x >= x;
+      |                                                             ^
+      = help: both sides are the same variable: was another one meant?
+self_compare.c:5:73: warning: self-comparison always evaluates to true [-Wtautological-compare]
+    5 |   r += x == x; r += x != x; r += x < x; r += x <= x; r += x > x; r += x >= x;
+      |                                                                         ^
+      = help: both sides are the same variable: was another one meant?
+self_compare.c:6:12: warning: self-comparison always evaluates to true [-Wtautological-compare]
+    6 |   r += s.a == s.a; r += ps->a == ps->a; r += (x) == x; r += fl == fl; r += v == v;
+      |            ^
+      = help: both sides are the same object: was another one meant?
+self_compare.c:6:31: warning: self-comparison always evaluates to true [-Wtautological-compare]
+    6 |   r += s.a == s.a; r += ps->a == ps->a; r += (x) == x; r += fl == fl; r += v == v;
+      |                               ^
+      = help: both sides are the same object: was another one meant?
+self_compare.c:6:50: warning: self-comparison always evaluates to true [-Wtautological-compare]
+    6 |   r += s.a == s.a; r += ps->a == ps->a; r += (x) == x; r += fl == fl; r += v == v;
+      |                                                  ^
+      = help: both sides are the same variable: was another one meant?
+self_compare.c:6:78: warning: self-comparison always evaluates to true [-Wtautological-compare]
+    6 |   r += s.a == s.a; r += ps->a == ps->a; r += (x) == x; r += fl == fl; r += v == v;
+      |                                                                              ^
+      = help: both sides are the same variable: was another one meant?
+self_compare.c:7:10: warning: self-comparison always evaluates to true [-Wtautological-compare]
+    7 |   r += p == p; r += arr[0] == arr[0]; r += *p == *p; r += (x + 1) == (x + 1);
+      |          ^
+      = help: both sides are the same variable: was another one meant?
+self_compare.c:7:28: warning: self-comparison always evaluates to true [-Wtautological-compare]
+    7 |   r += p == p; r += arr[0] == arr[0]; r += *p == *p; r += (x + 1) == (x + 1);
+      |                            ^
+      = help: both sides are the same object: was another one meant?
+12 warnings generated.

@@ -1,0 +1,89 @@
+sometimes_uninit.c:3:28: warning: variable 'y' is used uninitialized whenever 'if' condition is false [-Wsometimes-uninitialized]
+    3 | int s1(int c) { int y; if (c) y = 1; return y; }
+      |                        ----^--              - uninitialized use occurs here
+      |                        |
+      |                        remove the 'if' if its condition is always true
+sometimes_uninit.c:3:45: note: uninitialized use occurs here
+sometimes_uninit.c:3:24: note: remove the 'if' if its condition is always true
+sometimes_uninit.c:3:22: note: initialize the variable 'y' to silence this warning
+    3 | int s1(int c) { int y; if (c) y = 1; return y; }
+      |                      ^
+      |                       = 0
+sometimes_uninit.c:4:28: warning: variable 'y' is used uninitialized whenever 'if' condition is false [-Wsometimes-uninitialized]
+    4 | int s2(int c) { int y; if (c) y = 1; else g(0); return y; }
+      |                        ----^--     -----------         - uninitialized use occurs here
+      |                        |
+      |                        remove the 'if' if its condition is always true
+sometimes_uninit.c:4:56: note: uninitialized use occurs here
+sometimes_uninit.c:4:24: note: remove the 'if' if its condition is always true
+sometimes_uninit.c:4:22: note: initialize the variable 'y' to silence this warning
+    4 | int s2(int c) { int y; if (c) y = 1; else g(0); return y; }
+      |                      ^
+      |                       = 0
+sometimes_uninit.c:5:28: warning: variable 'y' is used uninitialized whenever 'if' condition is true [-Wsometimes-uninitialized]
+    5 | int s3(int c) { int y; if (c) g(0); else y = 2; return y; }
+      |                        ----^-------------              - uninitialized use occurs here
+      |                        |
+      |                        remove the 'if' if its condition is always false
+sometimes_uninit.c:5:56: note: uninitialized use occurs here
+sometimes_uninit.c:5:24: note: remove the 'if' if its condition is always false
+sometimes_uninit.c:5:22: note: initialize the variable 'y' to silence this warning
+    5 | int s3(int c) { int y; if (c) g(0); else y = 2; return y; }
+      |                      ^
+      |                       = 0
+sometimes_uninit.c:6:28: warning: variable 'y' is used uninitialized whenever 'if' condition is false [-Wsometimes-uninitialized]
+    6 | int s4(int c) { int y; if (c) { y = 1; } return g(y); }
+      |                        ----^--                    - uninitialized use occurs here
+      |                        |
+      |                        remove the 'if' if its condition is always true
+sometimes_uninit.c:6:51: note: uninitialized use occurs here
+sometimes_uninit.c:6:24: note: remove the 'if' if its condition is always true
+sometimes_uninit.c:6:22: note: initialize the variable 'y' to silence this warning
+    6 | int s4(int c) { int y; if (c) { y = 1; } return g(y); }
+      |                      ^
+      |                       = 0
+sometimes_uninit.c:8:28: warning: variable 'y' is used uninitialized whenever 'if' condition is false [-Wsometimes-uninitialized]
+    8 | int s6(int c) { int y; if (c) y = 1; return y + y; }
+      |                        ----^--              - uninitialized use occurs here
+      |                        |
+      |                        remove the 'if' if its condition is always true
+sometimes_uninit.c:8:45: note: uninitialized use occurs here
+sometimes_uninit.c:8:24: note: remove the 'if' if its condition is always true
+sometimes_uninit.c:8:22: note: initialize the variable 'y' to silence this warning
+    8 | int s6(int c) { int y; if (c) y = 1; return y + y; }
+      |                      ^
+      |                       = 0
+sometimes_uninit.c:9:29: warning: variable 'y' is used uninitialized whenever 'if' condition is true [-Wsometimes-uninitialized]
+    9 | int s3b(int c) { int y; if (c) g(0); else y = 2; return y; }
+      |                         ----^-------------              - uninitialized use occurs here
+      |                         |
+      |                         remove the 'if' if its condition is always false
+sometimes_uninit.c:9:57: note: uninitialized use occurs here
+sometimes_uninit.c:9:25: note: remove the 'if' if its condition is always false
+sometimes_uninit.c:9:23: note: initialize the variable 'y' to silence this warning
+    9 | int s3b(int c) { int y; if (c) g(0); else y = 2; return y; }
+      |                       ^
+      |                        = 0
+sometimes_uninit.c:10:28: warning: variable 'y' is used uninitialized whenever 'if' condition is false [-Wsometimes-uninitialized]
+   10 | int s7(int c) { int y; if (c) { y = 1; } else { g(0); } return y; }
+      |                        ----^--          ---------------        - uninitialized use occurs here
+      |                        |
+      |                        remove the 'if' if its condition is always true
+sometimes_uninit.c:10:64: note: uninitialized use occurs here
+sometimes_uninit.c:10:24: note: remove the 'if' if its condition is always true
+sometimes_uninit.c:10:22: note: initialize the variable 'y' to silence this warning
+   10 | int s7(int c) { int y; if (c) { y = 1; } else { g(0); } return y; }
+      |                      ^
+      |                       = 0
+sometimes_uninit.c:11:28: warning: variable 'y' is used uninitialized whenever 'if' condition is true [-Wsometimes-uninitialized]
+   11 | int s8(int c) { int y; if (c) { g(0); } else { y = 1; } return y; }
+      |                        ----^-----------------                  - uninitialized use occurs here
+      |                        |
+      |                        remove the 'if' if its condition is always false
+sometimes_uninit.c:11:64: note: uninitialized use occurs here
+sometimes_uninit.c:11:24: note: remove the 'if' if its condition is always false
+sometimes_uninit.c:11:22: note: initialize the variable 'y' to silence this warning
+   11 | int s8(int c) { int y; if (c) { g(0); } else { y = 1; } return y; }
+      |                      ^
+      |                       = 0
+8 warnings generated.

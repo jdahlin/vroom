@@ -1,0 +1,10 @@
+conv_flags2.c:4:65: error: incompatible function pointer types initializing 'void (*)(int)' with an expression of type 'int (*)(void)' [-Wincompatible-function-pointer-types]
+    4 | void g(void) { long l; char *s = 0; int (*fp)(void) = 0; void (*q)(int) = fp; f(&l); s = 1; int x = s; (void)x; (void)q; }
+      |                                                                 ^         ~~
+conv_flags2.c:4:88: error: incompatible integer to pointer conversion assigning to 'char *' from 'int' [-Wint-conversion]
+    4 | void g(void) { long l; char *s = 0; int (*fp)(void) = 0; void (*q)(int) = fp; f(&l); s = 1; int x = s; (void)x; (void)q; }
+      |                                                                                        ^ ~
+conv_flags2.c:4:97: error: incompatible pointer to integer conversion initializing 'int' with an expression of type 'char *' [-Wint-conversion]
+    4 | void g(void) { long l; char *s = 0; int (*fp)(void) = 0; void (*q)(int) = fp; f(&l); s = 1; int x = s; (void)x; (void)q; }
+      |                                                                                                 ^   ~
+3 errors generated.

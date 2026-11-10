@@ -206,7 +206,7 @@ static qty conv_from(cc *c, uint32_t n)
 }
 
 /* "... initializing 'T' with an expression of type 'F'" and the like, per context */
-static void conv_error(cc *c, uint32_t n, qty to, const char *what, const char *flag)
+static void conv_error(cc *c, uint32_t n, qty to, const char *what, const char *flag, const char *id)
 {
 	pp_span r = rng(c, n);
 	const char *f = arr_tyname(c, conv_from(c, n)), *t = tyname(c, to);
@@ -224,11 +224,20 @@ static void conv_error(cc *c, uint32_t n, qty to, const char *what, const char *
 	bool ad = !dr && bit != 4 && is_ptr(c, to) && compatible(c, QUNQ(ft), QUNQ(T(c, to)->base)) &&
 		  (op == N_VAR || op == N_MEMBER || op == N_INDEX) && (N(n)->flags & NF_LVALUE) &&
 		  !(N(n)->flags & NF_BITFIELD) && !(op == N_VAR && c->syms[N(n)->a].sc == SC_REGISTER);
-	pp_fixit fx[2] = { { r.b, r.b, wrap ? "*(" : dr ? "*" : "&" }, { r.e, r.e, ")" } };
+	pp_fixit fx[2] = { { r.b, r.b, wrap ? "*(" : dr ? "*" : "&", VDA_MAYBE }, { r.e, r.e, ")", VDA_MAYBE } };
+	const char *h = dr ? "; dereference with *" : ad ? "; take the address with &" : "";
+	int nfx = wrap ? 2 : dr || ad;
 	char fl[64];
 
-	snprintf(fl, sizeof fl, "%s%s", dr ? "; dereference with * [" : ad ? "; take the address with & [" : " [", flag);
-	int nfx = wrap ? 2 : dr || ad;
+	if (bit == 1 && dr) {	/* clang's tryToFixConversion: "; remove &" before "; dereference with *" */
+		uint32_t m = n;
+
+		while (N(m)->op == N_CAST && !c->span[m].e)
+			m = N(m)->a;
+		if (!is_ptr(c, to) && N(m)->op == N_ADDR && compatible(c, QUNQ(N(N(m)->a)->ty), QUNQ(to)))
+			h = "; remove &", fx[0] = (pp_fixit){ rng_np(c, m).b, rng_np(c, m).b + 1, "", VDA_MAYBE }, nfx = 1;
+	}
+	snprintf(fl, sizeof fl, "%s [%s", h, flag);
 
 	switch (c->cv_what) {
 	case CX_INIT:
@@ -253,12 +262,16 @@ static void conv_error(cc *c, uint32_t n, qty to, const char *what, const char *
 			goto err;	/* -Werror= again: clang's own error (no "-Werror,") */
 		if (b && b > msg)
 			b[-1] = 0;
+		pp_diag_next_id = id;
 		if (cc_warnx(c, flag + 2, true, bit == 4 ? ipt : NULL, loc, &r, 1, fx, nfx, "%s", msg) && c->cv_what == CX_PASS)
 			param_note(c);
+		pp_diag_next_id = NULL;
 		return;
 	}
 err:
+	pp_diag_next_id = id;
 	report(c, "error", loc, &r, 1, fx, nfx, "%s", msg);
+	pp_diag_next_id = NULL;
 	c->nconv++;
 	if (c->cv_what == CX_PASS)
 		param_note(c);
@@ -340,15 +353,15 @@ static uint32_t conv_check(cc *c, uint32_t n, qty to)
 	if (N(n)->flags & NF_ERR)
 		return n;
 	if (is_ptr(c, to) && (is_integer(c, from) || KIND(c, from) == TY_ENUM) && !is_npc(c, n) && KIND(c, from) != TY_BOOL) {
-		conv_error(c, n, to, "incompatible integer to pointer conversion", "-Wint-conversion");
+		conv_error(c, n, to, "incompatible integer to pointer conversion", "-Wint-conversion", "ext_typecheck_convert_int_pointer");
 	} else if ((is_integer(c, to) || KIND(c, to) == TY_ENUM) && KIND(c, to) != TY_BOOL && is_ptr(c, from)) {
-		conv_error(c, n, to, "incompatible pointer to integer conversion", "-Wint-conversion");
+		conv_error(c, n, to, "incompatible pointer to integer conversion", "-Wint-conversion", "ext_typecheck_convert_pointer_int");
 	} else if (is_ptr(c, to) && is_ptr(c, from) && !(T(c, to)->flags & TF_BLOCK) && !(T(c, from)->flags & TF_BLOCK) &&
 		   !ptr_ok(c, T(c, to)->base, T(c, from)->base)) {
 		if (is_func(c, T(c, to)->base) && is_func(c, T(c, from)->base))
-			conv_error(c, n, to, "incompatible function pointer types", "-Wincompatible-function-pointer-types");
+			conv_error(c, n, to, "incompatible function pointer types", "-Wincompatible-function-pointer-types", "ext_typecheck_convert_incompatible_function_pointer");
 		else
-			conv_error(c, n, to, "incompatible pointer types", "-Wincompatible-pointer-types");
+			conv_error(c, n, to, "incompatible pointer types", "-Wincompatible-pointer-types", "ext_typecheck_convert_incompatible_pointer");
 	} else {
 		if (is_ptr(c, to) && is_ptr(c, from) && !is_func(c, T(c, to)->base) && !is_func(c, T(c, from)->base) &&
 		    (QQ(T(c, from)->base) & ~QQ(T(c, to)->base) & Q_MASK))
@@ -547,7 +560,7 @@ static void const_conv(cc *c, uint32_t n, qty to)
 
 		while ((ch = pp_loc_char(c->p, b)) == '(' || ch == ' ' || ch == '\t')
 			b++;
-		if ((N(e)->op == N_NUM ? N(e)->aux != 0 : ch == '0') ||
+		if ((N(e)->op == N_NUM ? (N(e)->aux & NUM_RADIX) : ch == '0') ||
 		    ((KIND(c, to) == TY_CHAR || KIND(c, to) == TY_SCHAR) && pp_loc_char(c->p, c->cv_loc) == '{'))
 			return;
 		deferred = false;
@@ -562,15 +575,37 @@ static void const_conv(cc *c, uint32_t n, qty to)
 	{
 		uint32_t cl = c->cv_what == CX_PASS ? c->cv_callee : c->cv_loc;
 		pp_span r[2] = { { cl, pp_tok_end(c->p, cl) }, rng_np(c, n) };
+		uint32_t at = r[1].b;
 		char msg[112];
+
+		while (pp_loc_char(c->p, at) == '(' || pp_loc_char(c->p, at) == ' ')	/* clang: (v) at v */
+			at++;
 
 		snprintf(msg, sizeof msg, "implicit conversion from '%s' to '%s' changes value from %lld to %lld",
 			 tyname(c, from), tyname(c, to), (long long)v, (long long)t);
+		char vs[48];
+
+		snprintf(vs, sizeof vs, "%lld", (long long)v);	/* (clang: "expanded from macro" at the constant) */
 		if (deferred && c->fn && !c->defer_rt) {
-			rt_defer(c, "constant-conversion", w_conv, r[1].b, r, 2, NULL, 0, "%s", msg);
+			pp_diag_next_id = "warn_impcast_integer_precision_constant";
+			rt_defer(c, "constant-conversion", w_conv, at, r, 2, vs, (uint32_t)strlen(vs), "%s", msg);
+			pp_diag_next_id = NULL;
 			return;
 		}
-		cc_warnx(c, "constant-conversion", true, w_conv, r[1].b, r, 2, NULL, 0, "%s", msg);
+		{
+			vdiag *d;
+
+			pp_diag_next_id = "warn_impcast_integer_precision_constant";
+			d = cc_warn_begin(c, "constant-conversion", true, w_conv, at, "%s", msg);
+			pp_diag_next_id = NULL;
+
+			if (d) {
+				pp_diag_label(c->p, d, r[0].b, r[0].e, NULL);
+				pp_diag_label(c->p, d, r[1].b, r[1].e, NULL);
+				pp_diag_macro(d, vs, (uint32_t)strlen(vs));
+				pp_diag_emit(c->p, d);
+			}
+		}
 	}
 }
 
@@ -663,6 +698,156 @@ static const char *arr_tyname(cc *c, qty t)
 	return o;
 }
 
+/* clang's DiagRuntimeBehavior: nothing in unevaluated operands and constant expressions, and in a
+   function nothing in code its CFG finds unreachable (at file scope a dead ?: branch still warns) */
+VPRIV bool quiet_rt(const cc *c)
+{
+	return c->unevaluated || c->cexpr || (c->dead && c->fn);
+}
+
+VPRIV void i128s_(char *b, size_t n, i128 v)
+{
+	char t[48];
+	int k = 0;
+	u128 u = v < 0 ? (u128)0 - (u128)v : (u128)v;
+
+	do
+		t[k++] = (char)('0' + (int)(u % 10)), u /= 10;
+	while (u);
+	if (v < 0)
+		t[k++] = '-';
+	for (int i = 0; i < k && (size_t)i + 1 < n; i++)
+		b[i] = t[k - 1 - i];
+	b[(size_t)k < n ? (size_t)k : n - 1] = 0;
+}
+
+/* plain 'char' in a range help: its sign is the target's, so the warning may be one target's only */
+VPRIV const char *char_sign(cc *c, qty t)
+{
+	if (KIND(c, t) != TY_CHAR)
+		return "";
+	return c->o->target == PP_DARWIN ? " (plain 'char' is signed on Apple and x86, unsigned on Arm and RISC-V Linux)"
+					 : " (plain 'char' is unsigned on Arm and RISC-V Linux, signed on Apple and x86)";
+}
+
+/* -Warray-bounds as a picture (GCC's -fdiagnostics-text-art): the array's elements as cells,
+   the index's cell outside them, "..." for what lies between:
+
+     +-----+-----+-----+-----+     +-----+
+     | [0] | [1] | [2] | [3] | ... | [6] |
+     +-----+-----+-----+-----+     +-----+
+     '- 'a': 4 x 'int', 16 bytes -'
+                                     ^ index 6: bytes 24..27, 8 bytes past the end   */
+typedef struct { char *s; size_t n, cap; } artb;
+
+static void art_put(artb *a, const char *s)
+{
+	size_t n = strlen(s);
+
+	if (a->n + n + 1 > a->cap)
+		return;	/* (the buffer is sized for the picture) */
+	memcpy(a->s + a->n, s, n);
+	a->n += n, a->s[a->n] = 0;
+}
+
+static void art_rep(artb *a, const char *s, int k)
+{
+	for (int i = 0; i < k; i++)
+		art_put(a, s);
+}
+
+static __attribute__((cold, noinline)) void bounds_art(cc *c, vdiag *d, const char *nm, int nml, long long n,
+						       long long i, long long esz, const char *ety)
+{
+	bool u = pp_diag_art_on(c->p) == 2;
+	const char *h = u ? "\xe2\x94\x80" : "-", *v = u ? "\xe2\x94\x82" : "|";
+	const char *cn[2][3] = { { u ? "\xe2\x94\x8c" : "+", u ? "\xe2\x94\xac" : "+", u ? "\xe2\x94\x90" : "+" },
+				 { u ? "\xe2\x94\x94" : "+", u ? "\xe2\x94\xb4" : "+", u ? "\xe2\x94\x98" : "+" } };
+	long long cell[8];
+	bool dots[8] = { 0 };
+	int nc = 0, w = 5, oob = -1, gap = 0, col = 0, ab = -1, ae = 0, ob = 0, ll;
+	char buf[2048], t[160];
+	artb a = { buf, 0, sizeof buf };
+
+	if (i < 0)
+		gap = i < -1, oob = nc, cell[nc++] = i;
+	for (long long k = 0; k < n && k < 4; k++, nc++) {	/* [0] [1] [2] [3], or [0] [1] ... [n-1] */
+		dots[nc] = n > 4 && k == 2;
+		cell[nc] = n > 4 && k == 3 ? n - 1 : k;
+	}
+	if (i >= n)
+		gap = i > n, oob = nc, cell[nc++] = i;
+	for (int k = 0; k < nc; k++) {
+		int l = snprintf(t, sizeof t, "[%lld]", cell[k]) + 2;
+
+		w = l > w ? l : w;
+	}
+	/* top, names, bottom: two groups (the array, the index's cell), "..." between when apart */
+	for (int row = 0; row < 3; row++) {
+		col = 0;
+		for (int k = 0; k < nc; k++) {
+			bool first = k == 0 || k == oob || k - 1 == oob, last = k == nc - 1 || k + 1 == oob || k == oob;
+
+			if (first && k) {
+				art_put(&a, !gap ? " " : row == 1 ? " ... " : "     ");
+				col += gap ? 5 : 1;
+			}
+			if (k == oob)
+				ob = col + 1 + w / 2;
+			else if (ab < 0)
+				ab = col;
+			if (row == 1) {
+				int l = dots[k] ? snprintf(t, sizeof t, "...") : snprintf(t, sizeof t, "[%lld]", cell[k]);
+
+				if (first)
+					art_put(&a, v);
+				art_rep(&a, " ", (w - l) / 2);
+				art_put(&a, t);
+				art_rep(&a, " ", w - l - (w - l) / 2);
+				art_put(&a, v);
+			} else {
+				if (first)
+					art_put(&a, cn[row / 2][0]);
+				art_rep(&a, h, w);
+				art_put(&a, cn[row / 2][last ? 2 : 1]);
+			}
+			col += w + 1 + first;
+			if (k != oob)
+				ae = col;
+		}
+		art_put(&a, "\n");
+	}
+	/* the array's extent under its cells, then the index under its cell */
+	ll = snprintf(t, sizeof t, " '%.*s': %lld x '%s', %lld bytes ", nml, nm, n, ety, n * esz);
+	if (ll >= (int)sizeof t)
+		ll = (int)sizeof t - 1, t[ll - 1] = ' ';
+	art_rep(&a, " ", ab);
+	if (ae - ab >= ll + 4) {
+		int l = (ae - ab - ll - 2) / 2;
+
+		art_put(&a, u ? "\xe2\x95\xb0" : "'");
+		art_rep(&a, h, l);
+		art_put(&a, t);
+		art_rep(&a, h, ae - ab - ll - 2 - l);
+		art_put(&a, u ? "\xe2\x95\xaf" : "'");
+	} else {
+		t[ll - 1] = 0;
+		art_put(&a, t + 1);
+	}
+	art_put(&a, "\n");
+	art_rep(&a, " ", ob);
+	if (i == n)
+		snprintf(t, sizeof t, "^ index %lld: bytes %lld..%lld, just past the end", i, i * esz, i * esz + esz - 1);
+	else if (i > n)
+		snprintf(t, sizeof t, "^ index %lld: bytes %lld..%lld, %lld byte%s past the end", i, i * esz,
+			 i * esz + esz - 1, (i - n) * esz, (i - n) * esz == 1 ? "" : "s");
+	else
+		snprintf(t, sizeof t, "^ index %lld: bytes %lld..%lld, %lld byte%s before the start", i, i * esz,
+			 i * esz + esz - 1, -i * esz, -i * esz == 1 ? "" : "s");
+	art_put(&a, t);
+	pp_diag_art(c->p, d, a.s, a.n);
+}
+
 /* -Warray-bounds: a[CONST] outside a's array type (addr: &a[n] may point one past the end) */
 VPRIV void bounds_warn(cc *c, uint32_t n, bool addr)
 {
@@ -692,21 +877,60 @@ VPRIV void bounds_warn(cc *c, uint32_t n, bool addr)
 		return;
 	{
 		pp_span r[2] = { rng(c, a), rng(c, x->b) };
-		bool on;
+		vdiag *d;
 
 		if (i < 0)
-			on = cc_warnx(c, "array-bounds", true, NULL, r[0].b, &r[1], 1, NULL, 0,
-				   "array index %lld is before the beginning of the array", (long long)i);
+			d = cc_warn_begin(c, "array-bounds", true, NULL, r[0].b,
+					  "array index %lld is before the beginning of the array", (long long)i);
 		else
-			on = cc_warnx(c, "array-bounds", true, NULL, r[0].b, &r[1], 1, NULL, 0,
-				   "array index %lld is past the end of the array (that has type '%s')", (long long)i,
-				   arr_tyname(c, N(a)->ty));
-		if (on && s) {
+			d = cc_warn_begin(c, "array-bounds", true, NULL, r[0].b,
+					  "array index %lld is past the end of the array (that has type '%s')", (long long)i,
+					  arr_tyname(c, N(a)->ty));
+		if (!d)
+			return;
+		pp_diag_label(c->p, d, r[1].b, r[1].e, NULL);
+		if (pp_diag_art_on(c->p) && i > -(1LL << 40) && i < (1LL << 40)) {
+			size_t len;
+			const char *src = pp_src(c->p, r[0].b, r[0].e, &len);
+			int m = 0;
+			const char *nm = s ? idname(c->syms[s].name, &m) : NULL;
+
+			if (!s && src && len <= 32 && !memchr(src, '\n', len))
+				nm = src, m = (int)len;
+			if (nm)
+				bounds_art(c, d, nm, m, (long long)at->n, (long long)i, (long long)ty_size(c, at->base),
+					   tyname(c, at->base));
+		}
+		if (s) {
 			int m;
 			const char *nm = idname(c->syms[s].name, &m);
 
-			note(c, c->syms[s].ple ? c->syms[s].plb : c->syms[s].loc, "array '%.*s' declared here", m, nm);
+			pp_diag_note(c->p, d, c->syms[s].ple ? c->syms[s].plb : c->syms[s].loc, "array '%.*s' declared here", m, nm);
+		} else {	/* a member */
+			const field *f = &c->tags[N(a)->b].f[N(a)->c];
+			int m;
+			const char *nm = idname(f->name, &m);
+			uint32_t at0 = f->loc;
+			size_t len = 0;
+			const char *t = NULL;
+
+			/* clang: at the declaration's start, after the ';', '{' or '}' before it */
+			for (uint32_t k = 256; k && !t; k /= 2)
+				if (f->loc >= k)
+					t = pp_src(c->p, f->loc - k, f->loc, &len);
+			if (t) {
+				size_t j = len;
+
+				while (j && t[j - 1] != ';' && t[j - 1] != '{' && t[j - 1] != '}')
+					j--;
+				while (j < len && (t[j] == ' ' || t[j] == '\t' || t[j] == '\n'))
+					j++;
+				if (j && j < len)
+					at0 = f->loc - (uint32_t)(len - j);
+			}
+			pp_diag_note(c->p, d, at0, "array '%.*s' declared here", m, nm);
 		}
+		rt_emit(c, d);	/* (clang: DiagRuntimeBehavior) */
 	}
 }
 

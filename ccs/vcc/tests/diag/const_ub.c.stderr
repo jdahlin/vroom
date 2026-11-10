@@ -1,0 +1,28 @@
+const_ub.c:5:27: warning: shift count >= width of type [-Wshift-count-overflow]
+    5 | int shl(int x) { return x << 34; }
+      |                           ^  ~~
+      = help: 'int' is 32 bits wide: a shift by 32 or more is undefined; shift a 64-bit value (1ULL << n)
+const_ub.c:6:25: warning: shift count >= width of type [-Wshift-count-overflow]
+    6 | unsigned long wide = 1u << 40;
+      |                         ^  ~~
+      = help: 'unsigned int' is 32 bits wide: a shift by 32 or more is undefined; shift a 64-bit value (1ULL << n)
+const_ub.c:7:13: warning: shift count is negative [-Wshift-count-negative]
+    7 | int neg = 1 << -1;
+      |             ^  ~~
+      = help: a shift by a negative count is undefined
+const_ub.c:8:22: warning: overflow in expression; result is -2'147'483'648 with type 'int' [-Winteger-overflow]
+    8 | int big = 2147483647 + 1;
+      |           ~~~~~~~~~~~^~~
+const_ub.c:9:23: warning: overflow in expression; result is 2'147'483'647 with type 'int' [-Winteger-overflow]
+    9 | int low = -2147483647 - 2;
+      |           ~~~~~~~~~~~~^~~
+const_ub.c:11:22: warning: overflow in expression; result is -2'147'483'648 with type 'int' [-Winteger-overflow]
+   11 | int f(void) { return -(-2147483647 - 1) + 1 / 0; }
+      |                      ^~~~~~~~~~~~~~~~~~
+const_ub.c:11:45: warning: division by zero is undefined [-Wdivision-by-zero]
+   11 | int f(void) { return -(-2147483647 - 1) + 1 / 0; }
+      |                                             ^ ~
+const_ub.c:12:28: warning: overflow in expression; result is 0 with type 'int' [-Winteger-overflow]
+   12 | int g(void) { return 65536 * 65536; }
+      |                      ~~~~~~^~~~~~~
+8 warnings generated.

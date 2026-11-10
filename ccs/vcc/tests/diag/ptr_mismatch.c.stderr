@@ -1,0 +1,8 @@
+ptr_mismatch.c:4:4: error: incompatible pointer types passing 'long *' to parameter of type 'int *' [-Wincompatible-pointer-types]
+    1 | void f(int *p);
+      |             - passing argument to parameter 'p' here
+  ...
+    4 |         f(q);
+      |           ^
+ptr_mismatch.c:1:13: note: passing argument to parameter 'p' here
+1 error generated.

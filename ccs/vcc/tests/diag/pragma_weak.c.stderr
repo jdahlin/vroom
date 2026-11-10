@@ -1,0 +1,22 @@
+pragma_weak.c:2:13: warning: expected identifier in '#pragma weak' - ignored [-Wignored-pragmas]
+    2 | #pragma weak
+      |             ^
+pragma_weak.c:3:14: warning: expected identifier in '#pragma weak' - ignored [-Wignored-pragmas]
+    3 | #pragma weak 3
+      |              ^
+pragma_weak.c:4:16: warning: extra tokens at end of '#pragma weak' - ignored [-Wignored-pragmas]
+    4 | #pragma weak a b
+      |                ^
+pragma_weak.c:5:17: warning: expected identifier in '#pragma weak' - ignored [-Wignored-pragmas]
+    5 | #pragma weak a =
+      |                 ^
+pragma_weak.c:6:14: warning: weak identifier 'never' never declared
+    6 | #pragma weak never
+      |              ^
+pragma_weak.c:7:14: warning: weak identifier 'tgt' never declared
+    7 | #pragma weak al = tgt
+      |              ^
+pragma_weak.c:9:14: warning: weak identifier 'late' never declared
+    9 | #pragma weak late
+      |              ^
+7 warnings generated.

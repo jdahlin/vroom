@@ -1,0 +1,36 @@
+# arm64 (aarch64-linux-gnu) target: vcc built natively on an arm64 Linux
+# runner, the C suites (gcc torture, tcc tests2, ccs/vcc/tests/vcc) run under
+# qemu-system-aarch64 against clang's build, plus the fast harnesses.  ASan
+# and TSan builds are jobs of their own, alongside.  No kernel, no PostgreSQL.
+# ci/premerge.sh holds the commands; run it locally in env/linux/run.sh.
+name: arm64
+on:
+  workflow_call:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  test:
+    name: ${{ matrix.job }}
+    runs-on: ubuntu-24.04-arm
+    container: debian:trixie
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        job: [arm64, asan, tsan]
+    steps:
+      - uses: actions/checkout@v4
+      - run: ci/setup-debian.sh
+      - uses: actions/cache@v4
+        with:
+          path: ~/.cache/ccache
+          key: ccache-${{ matrix.job }}-${{ github.sha }}
+          restore-keys: ccache-${{ matrix.job }}-
+      - run: ci/premerge.sh ${{ matrix.job }}
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: ${{ matrix.job }}-logs
+          path: build/linux/ci-logs/
+          if-no-files-found: ignore

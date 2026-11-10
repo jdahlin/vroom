@@ -1,0 +1,43 @@
+error_nodes.c:4:17: error: field has incomplete type 'void'
+    4 | struct S { void a; int b; };
+      |                 ^
+error_nodes.c:5:1: error: unknown type name 'foo_t'
+    5 | foo_t g;
+      | ^
+error_nodes.c:8:7: error: variable has incomplete type 'void'
+    8 |         void v;
+      |              ^
+error_nodes.c:9:12: error: variable has incomplete type 'struct zz'
+    9 |         struct zz z;
+      |                   ^
+error_nodes.c:3:8: note: forward declaration of 'struct zz'
+    3 | struct zz;
+      |        ^
+error_nodes.c:14:4: error: use of undeclared identifier 'undef'
+   14 |         q[undef] = 1;
+      |           ^~~~~
+error_nodes.c:15:2: error: use of undeclared identifier 'und'
+   15 |         und[2] = *q;
+      |         ^~~
+error_nodes.c:16:6: error: use of undeclared identifier 'undef2'
+   16 |         q = undef2->x + p->nope;
+      |             ^~~~~~
+error_nodes.c:16:21: error: no member named 'nope' in 'struct S'
+   16 |         q = undef2->x + p->nope;
+      |                         ~  ^
+error_nodes.c:17:8: error: use of undeclared identifier 'missing'
+   17 |         k += *missing;
+      |               ^~~~~~~
+error_nodes.c:18:10: error: use of undeclared identifier 'nothere'
+   18 |         k = k ? nothere : 0;
+      |                 ^~~~~~~
+error_nodes.c:19:9: error: use of undeclared identifier 'gone'
+   19 |         k = -(&gone)[1];
+      |                ^~~~
+error_nodes.c:22:17: error: variable has incomplete type 'struct zz'
+   22 | int h(struct zz x) { return x + 1; }
+      |                 ^
+error_nodes.c:3:8: note: forward declaration of 'struct zz'
+    3 | struct zz;
+      |        ^
+12 errors generated.

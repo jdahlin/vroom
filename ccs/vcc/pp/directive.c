@@ -7,7 +7,7 @@
 static void extra_loc(pp *p, uint32_t loc, const char *name, int nl)
 {
 	pp_span r = { loc, loc };
-	pp_fixit fx = { loc, loc, "//" };
+	pp_fixit fx = { loc, loc, "//", 0 };
 	pp_dinfo di = { "warning", loc, &r, 0, &fx, 1, NULL, 0 };
 
 	pp_warnx(p, "extra-tokens", true, NULL, &di, "extra tokens at end of #%.*s directive", nl, name);
@@ -17,7 +17,7 @@ VPRIV __attribute__((noinline)) void dir_extra_tok(pp *p, const ctx *c, uint32_t
 {
 	uint32_t loc = c->loc + c->vt[i].off;
 	pp_span r = { loc, loc };
-	pp_fixit fx = { loc, loc, "//" };
+	pp_fixit fx = { loc, loc, "//", 0 };
 	pp_dinfo di = { "warning", loc, &r, 0, &fx, 1, NULL, 0 };
 	const vtok *n = &c->vt[name];
 
@@ -251,10 +251,11 @@ static __attribute__((cold, noinline)) void pragma_message(pp *p, bool err, cons
 		if (q >= e || *q != ')')
 			goto bad;
 	}
+	pp_diag_next_id = err ? "err_pragma_message" : "warn_pragma_message";
 	if (err)
 		pp_diagx(p, &d, "%.*s", (int)(m - b), b);
-	else
-		pp_warnx(p, "#pragma-messages", true, NULL, &d, "%.*s", (int)(m - b), b);
+	else if (!pp_warnx(p, "#pragma-messages", true, NULL, &d, "%.*s", (int)(m - b), b))
+		pp_diag_next_id = NULL;	/* (off: no record took it) */
 	return;
 bad:
 	d.what = "error";
@@ -306,6 +307,11 @@ VPRIV int pragma_text(pp *p, const char *s, size_t n, uint32_t loc, ptok *out, u
 		if (word(&r, e, "GCC") && (word(&r, e, "system_header") || word(&r, e, "poison") ||
 					    word(&r, e, "dependency")))
 			return 0;
+		r = q;
+		if ((word(&r, e, "clang") || word(&r, e, "GCC")) && word(&r, e, "diagnostic")) {
+			HC_BAD(p);	/* (a replay would not run it) */
+			diag_pragma(p, r, e, loc);	/* (and kept in the output, as clang -E) */
+		}
 		r = q;
 		if (sloc && word(&r, e, "GCC")) {	/* #pragma GCC warning/error "msg" (_Pragma: not modelled) */
 			const char *w = r;
@@ -514,9 +520,19 @@ VPRIV int directive(pp *p, ctx *c, ptok *out)
 			f = &c->vt[b + 1];
 		else
 			f = l + 1;
-		pp_diag(p, nloc, d->kind == D_ERROR ? "error" : "warning", "%.*s%s",
-		     e - b > 1 ? (int)(l->off + l->len - f->off) : 0, e - b > 1 ? c->src + f->off : "",
-		     d->kind == D_WARNING ? " [-W#warnings]" : "");
+		{
+			int lv = d->kind == D_ERROR ? VDL_ERROR : pp_diag_wlevel(p, "#warnings", true, NULL, UINT32_MAX);
+			vdiag *r;
+
+			if (lv < 0)
+				return 0;
+			r = pp_diag_begin(p, lv, nloc, "%.*s", e - b > 1 ? (int)(l->off + l->len - f->off) : 0,
+					  e - b > 1 ? c->src + f->off : "");
+			r->id = d->kind == D_ERROR ? "err_pp_hash_error" : "pp_hash_warning";
+			if (d->kind == D_WARNING)
+				pp_diag_flag(r, "#warnings"), r->werror = lv == VDL_ERROR;
+			pp_diag_emit(p, r);
+		}
 		return 0;
 	}
 	case D_LINEMARK:

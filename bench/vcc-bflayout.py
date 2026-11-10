@@ -15,7 +15,9 @@ failing records are printed.  The same seed gives the same file.
 import os, random, re, subprocess, sys, tempfile
 
 B = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-VPP = os.environ.get('VCC_BIN', f'{B}/build/ccs') + '/vpp'
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from hostenv import BUILD
+VPP = os.environ.get('VCC_BIN', BUILD) + '/vpp'
 CL = os.environ.get('CLANG', 'clang')
 TARGETS = ('aarch64-linux-gnu', 'arm64-apple-darwin', 'wasm64-unknown-emscripten', 'wasm32-unknown-emscripten')
 ILP32 = ('wasm32-unknown-emscripten',)	# long is 32 bits: its own records

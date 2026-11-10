@@ -1,0 +1,7 @@
+c23_auto.c:5:8: error: a type specifier is required for all declarations
+    5 | static x = 1;
+      |        ^
+c23_auto.c:11:7: error: declaration of variable 'y' with deduced type 'auto' requires an initializer
+   11 |         auto y;
+      |              ^
+2 errors generated.

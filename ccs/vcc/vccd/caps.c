@@ -33,7 +33,7 @@ static bool prefix(const char *s, const char *p)
 
 /* options taking the next argument */
 static const char *const cc_with_arg[] = {
-	"-o", "-include", "-isystem", "-iquote", "-x", "-MF", "-MT", "-MQ", NULL
+	"-o", "-include", "-isystem", "-iquote", "-x", "-MF", "-MT", "-MQ", "--explain", NULL
 };
 
 static const char *const cc_exact[] = {
@@ -56,12 +56,22 @@ static const char *const cc_exact[] = {
 	/* language */
 	"-fms-anonymous-structs", "-fms-extensions", "-fstrict-flex-arrays=3",
 	"-std=gnu11", "-std=gnu89", "-std=c11", "-std=gnu99",
+	/* diagnostics (ppdriver.c parses them) */
+	"-fcolor-diagnostics", "-fno-color-diagnostics", "-fdiagnostics-color", "-fno-diagnostics-color",
+	"-fdiagnostics-color=always", "-fdiagnostics-color=never", "-fdiagnostics-color=auto",
+	"-fno-caret-diagnostics", "-fcaret-diagnostics", "-fdiagnostics-show-id", "-fno-diagnostics-show-id",
+	"-fdiagnostics-parseable-fixits", "-fno-diagnostics-parseable-fixits", "-fdiagnostics-generate-patch", "--fix",
+	"-fdiagnostics-format=json", "-fdiagnostics-format=sarif", "-fdiagnostics-format=clang", "-fno-spell-checking",
+	"-fdiagnostics-style=vcc", "-fdiagnostics-style=clang", "-fdiagnostics-style=narrated",
+	"-fdiagnostics-text-art-charset=ascii", "-fdiagnostics-text-art-charset=unicode",
+	"-fdiagnostics-text-art-charset=emoji", "-fdiagnostics-text-art-charset=none",
 	NULL
 };
 
 static const char *const cc_prefix[] = {
 	"-D", "-U", "-I", "-fmacro-prefix-map=", "-ffile-prefix-map=",
 	"-falign-functions=", "-fno-builtin-", "-Wp,-MMD,", "-Wp,-MD,",
+	"-ferror-limit=", "-fmacro-backtrace-limit=", "-fspell-checking-limit=", "-fdiagnostics-add-output=sarif:file=",
 	NULL
 };
 

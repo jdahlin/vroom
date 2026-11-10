@@ -1,0 +1,65 @@
+int_conv_hints.c:6:8: error: incompatible integer to pointer conversion initializing 'int *' with an expression of type 'int'; take the address with & [-Wint-conversion]
+    6 |   int *q = x; long *r = s.b; int *t = arr[1]; int *u = ps->a; take(g); q = x;
+      |        ^   ~
+      |            &
+int_conv_hints.c:6:21: error: incompatible integer to pointer conversion initializing 'long *' with an expression of type 'long'; take the address with & [-Wint-conversion]
+    6 |   int *q = x; long *r = s.b; int *t = arr[1]; int *u = ps->a; take(g); q = x;
+      |                     ^   ~~~
+      |                         &
+int_conv_hints.c:6:35: error: incompatible integer to pointer conversion initializing 'int *' with an expression of type 'int'; take the address with & [-Wint-conversion]
+    6 |   int *q = x; long *r = s.b; int *t = arr[1]; int *u = ps->a; take(g); q = x;
+      |                                   ^   ~~~~~~
+      |                                       &
+int_conv_hints.c:6:52: error: incompatible integer to pointer conversion initializing 'int *' with an expression of type 'int'; take the address with & [-Wint-conversion]
+    6 |   int *q = x; long *r = s.b; int *t = arr[1]; int *u = ps->a; take(g); q = x;
+      |                                                    ^   ~~~~~
+      |                                                        &
+int_conv_hints.c:6:68: error: incompatible integer to pointer conversion passing 'int' to parameter of type 'int *'; take the address with & [-Wint-conversion]
+    4 | void take(int *);
+      |                - passing argument to parameter here
+    5 | int *f(int x, struct S *ps){
+    6 |   int *q = x; long *r = s.b; int *t = arr[1]; int *u = ps->a; take(g); q = x;
+      |                                                                    ^
+      |                                                                    &
+int_conv_hints.c:4:16: note: passing argument to parameter here
+int_conv_hints.c:6:74: error: incompatible integer to pointer conversion assigning to 'int *' from 'int'; take the address with & [-Wint-conversion]
+    6 |   int *q = x; long *r = s.b; int *t = arr[1]; int *u = ps->a; take(g); q = x;
+      |                                                                          ^ ~
+      |                                                                            &
+int_conv_hints.c:7:8: error: incompatible integer to pointer conversion initializing 'int *' with an expression of type 'int'; take the address with & [-Wint-conversion]
+    7 |   int *v = (x); short *w = x; int *z = x + 1;
+      |        ^   ~~~
+      |            &
+int_conv_hints.c:7:24: error: incompatible integer to pointer conversion initializing 'short *' with an expression of type 'int' [-Wint-conversion]
+    7 |   int *v = (x); short *w = x; int *z = x + 1;
+      |                        ^   ~
+int_conv_hints.c:7:36: error: incompatible integer to pointer conversion initializing 'int *' with an expression of type 'int' [-Wint-conversion]
+    7 |   int *v = (x); short *w = x; int *z = x + 1;
+      |                                    ^   ~~~~~
+int_conv_hints.c:8:10: error: incompatible integer to pointer conversion returning 'int' from a function with result type 'int *'; take the address with & [-Wint-conversion]
+    8 |   return x;
+      |          ^
+      |          &
+int_conv_hints.c:11:5: error: conflicting types for 'f'
+   11 | int f(void){ int y = (p); int z = (t.m); y = p; return (p); }
+      |     ^
+int_conv_hints.c:5:6: note: previous definition is here
+    5 | int *f(int x, struct S *ps){
+      |      ^
+int_conv_hints.c:11:18: error: incompatible pointer to integer conversion initializing 'int' with an expression of type 'int *'; dereference with * [-Wint-conversion]
+   11 | int f(void){ int y = (p); int z = (t.m); y = p; return (p); }
+      |                  ^   ~~~
+      |                      *
+int_conv_hints.c:11:31: error: incompatible pointer to integer conversion initializing 'int' with an expression of type 'int *'; dereference with * [-Wint-conversion]
+   11 | int f(void){ int y = (p); int z = (t.m); y = p; return (p); }
+      |                               ^   ~~~~~
+      |                                   *
+int_conv_hints.c:11:44: error: incompatible pointer to integer conversion assigning to 'int' from 'int *'; dereference with * [-Wint-conversion]
+   11 | int f(void){ int y = (p); int z = (t.m); y = p; return (p); }
+      |                                            ^ ~
+      |                                              *
+int_conv_hints.c:11:56: error: incompatible pointer to integer conversion returning 'int *' from a function with result type 'int'; dereference with * [-Wint-conversion]
+   11 | int f(void){ int y = (p); int z = (t.m); y = p; return (p); }
+      |                                                        ^~~
+      |                                                        *
+15 errors generated.

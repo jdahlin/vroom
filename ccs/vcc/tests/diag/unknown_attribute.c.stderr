@@ -1,0 +1,21 @@
+unknown_attribute.c:1:16: warning: unknown attribute 'frobnicate' ignored [-Wunknown-attributes]
+    1 | __attribute__((frobnicate)) int a;
+      |                ^~~~~~~~~~
+unknown_attribute.c:2:22: warning: unknown attribute 'bogus' ignored [-Wunknown-attributes]
+    2 | int b __attribute__((bogus(1, (2))));
+      |                      ^~~~~~~~~~~~~
+unknown_attribute.c:3:20: warning: unknown attribute 'noinlin' ignored; did you mean 'noinline'? [-Wunknown-attributes]
+    3 | int __attribute__((noinlin)) f(void);
+      |                    ^~~~~~~
+      |                    noinline
+unknown_attribute.c:4:22: warning: unknown attribute '__packd__' ignored; did you mean 'packed'? [-Wunknown-attributes]
+    4 | int c __attribute__((__packd__, aligned(8)));
+      |                      ^~~~~~~~~
+      |                      packed
+unknown_attribute.c:5:22: warning: unknown attribute 'alignd' ignored [-Wunknown-attributes]
+    5 | int d __attribute__((alignd));
+      |                      ^~~~~~
+unknown_attribute.c:6:22: warning: unknown attribute 'do' ignored [-Wunknown-attributes]
+    6 | int e __attribute__((do));
+      |                      ^~
+6 warnings generated.

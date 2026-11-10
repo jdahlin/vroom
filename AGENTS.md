@@ -19,6 +19,8 @@ assembler, linker, behind `vcc`/`vas`/`vld` shims and the `vccd` server.
 - `PLAN.md`, `PLAN-fas2.md`, `PLAN-wasm.md` (WebAssembly as a target): plans
   and per-step status (Swedish).  Update the
   status section of a step when it changes.
+- `PLAN-release.md`: what vcc 1.0 is and its release gates G0-G9 (Swedish);
+  work toward the release should move a gate, and update its status there.
 - `RESEARCH-preprocessor.md`: preprocessor design and prior art.
 - `ccs/`: our code; `ccs/Makefile` builds into `build/ccs/`.  Under `ccs/vcc/`
   generic code is in the component directories, code for one target CPU in
@@ -131,11 +133,30 @@ bench/vcc-abi.py --host             # the same for the Apple arm64 ABI, run nati
 bench/vcc-abi.py --target wasm64    # ... for wasm64 (or wasm32; --vlink), emcc + node (~20 s)
 bench/vcc-self.py -j 6              # vcc.wasm built by vcc itself vs the emcc build: -S byte for byte (W6, ~40 s)
 bench/vcc-darwin-s.py -j 6           # Darwin -S assembled by Apple's as, runs as the direct object (~2 min)
+bench/vcc-diag.py -j 6             # tests/diag: vcc's .stderr snapshots, clang's locations/levels/flags (~2 s)
+bench/vcc-diag.py --bin-dir build/ccs-asan   # ... with a sanitizer build (also vcc-mutate.py, VCC_BIN=$PWD/build/ccs-asan)
+bench/vcc-diag.py --bless PATTERN   # ... rewrite the snapshots of a changed message (review the diff)
+bench/gen-diagids.py [--check]      # pp/diagids.inc: each diagnostic format's id (clang's name or vcc_*)
+VCC_TRACK_DIAG=1 vpp ... -fdiagnostics-show-id   # each diagnostic's id and where vcc reported it
+bench/vcc-mutate.py -j 6 --formats  # ... and every mutant's JSON rebuilds its text (diag-render.py), SARIF checked, HTML page has the text
+vpp ... -fdiagnostics-add-output=html:file=F   # a standalone page of the TU's diagnostics, vcc style in colour
+bench/vcc-diag-catalog.py           # build/ccs/diag-catalog.html: every tests/diag case, clang/vcc/narrated/JSON side by side
+vpp -fdiagnostics-style=vcc|clang|narrated -fdiagnostics-text-art-charset=ascii|unicode   # text styles (vcc default)
+bench/sarif-check.py F.sarif        # SARIF structure (+ the official schema once `fetch`ed)
 bench/vcc-darwin-s.py -j 6 --clang   # clang's Darwin -S assembled by vpp -c runs as clang's (~2 min)
 bench/vcc-builtins.py [-v]          # clang builtins unknown to vcc, __has_builtin differences (<1 s)
+bench/clangdiag.py fetch|stats      # clang's Diagnostic*.td -> work/clang-td/VER/ (once); counts per language
+bench/vcc-diagcov.py [-v] [--missing]   # vcc's diagnostics vs clang's table: coverage, gaps (~1 s)
+bench/vcc-mutate.py -j 6             # one injected error per valid TU, vcc vs clang: first error, follow-ons (~25 s warm)
+bench/vcc-mutate.py show firstloc     # ... the mutants of one category with both compilers' errors
+bench/vcc-mutate.py -j 6 --fix       # ... vcc --fix on every rejected mutant: never worse for clang
+bench/vcc-explain.py                # docs/diag pages: the wrong example gives the id, the fixed one nothing
+bench/gen-explain.py [--check]      # driver/explain.inc from ccs/vcc/docs/diag/*.md (vcc --explain ID)
 bench/vcc-bflayout.py               # generated bit-field records, layouts checked by clang, Linux + Apple (~1 s)
 bench/vcc-ldconst.py                # generated long double literals and folds, bits vs clang (~2 s)
 bench/vccd-test.py                  # vccd as a service: socket, bad requests, cache invalidation (~11 s)
+vcc --vccd-diagnostics[=json]       # vccd's diagnostics store: summary by flag/file, or every TU's records (JSON lines)
+VCC_DIAG_DEDUP=1 make ...           # under vccd: a header warning another TU of the build printed is left out
 bench/vbench.py gate                # performance gate: instructions vs the merge-base, budget 1 % (~1 min)
 bench/vcc-wasm.py -j 6              # the C suites for wasm64: vcc -S, clang -c, emcc, node vs clang's build (~2 min)
 bench/vcc-wasm.py -j 6 --objcmp     # ... and vpp -c's object byte-identical to clang's for the same .s
@@ -146,6 +167,7 @@ bench/vas-obj.py                    # vasm objects vs clang -c byte for byte (cc
 bench/vas-corpus.py -j 6 [-O2] [PAT] # clang -S of the test C files: clang -c vs vasm (~6 min for -O0 -O2)
 bench/pg/build.sh clang && bench/pg/build.sh vcc   # PostgreSQL (macOS, meson+ninja): build + meson test (~2 min each)
 bench/pg/build.sh vccd             # ... CC = vcc shim + private vccd (VCC_DELEGATE=bench/pg/cc for the rest)
+                                   # build: "warnings: N, not from clang: M" (M must be 0; logs in work/build-pg-*.build.log)
 bench/pg/speed.py                  # PostgreSQL compile speed: clang, clang -O0, vpp, vpp --batch
 ```
 Fast loop while iterating (cold numbers on a loaded machine, in brackets):
@@ -169,6 +191,19 @@ Parity is a token-stream comparison (kind and spelling) of `clang -E -P`
 against `vpp`, both lexed by vcc's lexer.  A change to `pp/` or `lex.c` is
 only done when the parity run is fully green; a change to `cc/` when both
 vcc-sema.py runs are green (878/879: modpost.c lacks a generated header).
+
+## CI and the premerge gate
+`.github/workflows/premerge.yml` runs one reusable workflow per target in
+parallel (`arm64.yml`: jobs arm64, asan, tsan; `wasm.yml`; x86-64 gets its
+own), each on GitHub's ubuntu-24.04-arm in a Debian 13 container
+(`ci/setup-debian.sh`: clang 23 from apt.llvm.org, qemu, emsdk for wasm).
+The test set is `ci/premerge.sh JOB`: the vendored C suites under qemu and
+the fast harnesses, no kernel, PostgreSQL or anything needing `work/`.
+Locally, as CI: `env/linux/run.sh ci/premerge.sh arm64`.  main is not
+protected (private repo, free plan), so the gate is the workflow: push to
+main through `ci/premerge-push [--watch]` (pushes to `premerge`; job `gate`
+fast-forwards main when everything is green).  A new harness belongs in
+`ci/premerge.sh` when it is fast and needs only the checkout.
 
 ## Sanitizers
 ```
@@ -198,15 +233,18 @@ Targets build with Homebrew LLVM's libFuzzer and ASan+UBSan into
 minus coverage feedback).
 - `fuzz-lex`: vlex on raw bytes; checks token-array invariants, spelling,
   interning, NEON vs a scalar build of lex.c (`lexref.c`), buffer alignment.
+- `fuzz-diag`: control bytes \x01 a source file; random records (spans,
+  labels, fix-its, notes, help) through every style and output.
+  `FUZZ_DIAG_PRINT=1` prints them.
 - `fuzz-pp`: one in-memory TU served by `vlex_get_hook`: main `\x01` a.h
   `\x01` b.h `\x01` sys/c.h, leading `\x02` for asm mode.
   `FUZZ_PP_PRINT=1` prints output and diagnostics.
 ```
-make -C ccs fuzz                    # build both targets
+make -C ccs fuzz                    # build the targets
 ccs/fuzz/gen-corpus.py              # seed corpora from work/linux headers -> build/ccs/fuzz/corpus
 cd build/ccs/fuzz && ./fuzz-pp -fork=2 -max_total_time=180 -dict=../../../ccs/fuzz/c.dict \
     -max_len=4096 -timeout=5 -artifact_prefix=art/ run-pp corpus/pp   # same for fuzz-lex
-make -C ccs fuzz-regress            # replay ccs/fuzz/regress/{lex,pp}
+make -C ccs fuzz-regress            # replay ccs/fuzz/regress/{lex,pp,diag}
 make -C ccs fuzz-diff               # vpp vs clang -E -P on regress + seeds
 ccs/fuzz/pp-diff.py -j 4 --text DIR # ... byte for byte (spacing, indentation, blank lines)
 ccs/fuzz/pp-diff.py -j 4 DIR...     # ... on any corpus; mismatches -> build/ccs/fuzz/diff/

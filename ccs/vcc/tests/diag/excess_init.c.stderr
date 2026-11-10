@@ -1,0 +1,40 @@
+excess_init.c:2:20: warning: excess elements in array initializer [-Wexcess-initializers]
+    2 | int a[2] = { 1, 2, 3 };
+      |                    ^
+excess_init.c:3:36: warning: excess elements in struct initializer [-Wexcess-initializers]
+    3 | struct S { int x, y; } s = { 1, 2, 3 };
+      |                                    ^
+excess_init.c:4:13: warning: initializer-string for char array is too long [-Wexcess-initializers]
+    4 | char c[2] = "abc";
+      |             ^~~~~
+excess_init.c:6:14: warning: excess elements in scalar initializer [-Wexcess-initializers]
+    6 | int e = { 1, 2 };
+      |              ^
+excess_init.c:7:26: warning: excess elements in array initializer [-Wexcess-initializers]
+    7 | struct S t[1] = { { 1 }, { 2 } };
+      |                          ^~~~~
+excess_init.c:8:29: warning: excess elements in array initializer [-Wexcess-initializers]
+    8 | int f[2][2] = { 1, 2, 3, 4, 5 };
+      |                             ^
+excess_init.c:9:38: warning: excess elements in union initializer [-Wexcess-initializers]
+    9 | union U { int i; float f; } u = { 1, 2 };
+      |                                      ^
+excess_init.c:10:18: warning: initializer-string for char array is too long [-Wexcess-initializers]
+   10 | char g[2][3] = { "abcd", "ab" };
+      |                  ^~~~~~
+excess_init.c:11:31: warning: initializer-string for char array is too long [-Wexcess-initializers]
+   11 | struct T { char n[2]; } h = { "xyz" };
+      |                               ^~~~~
+excess_init.c:12:15: warning: initializer-string for char array is too long [-Wexcess-initializers]
+   12 | char i[4] = { "abcde" };
+      |               ^~~~~~~
+excess_init.c:13:20: warning: excess elements in array initializer [-Wexcess-initializers]
+   13 | int j[2] = { 1, 2, { 3 } };
+      |                    ^~~~~
+excess_init.c:14:17: warning: excess elements in array initializer [-Wexcess-initializers]
+   14 | int k[1] = { 1, (2 + 3) * 4 };
+      |                 ^~~~~~~~~~~
+excess_init.c:15:14: warning: excess elements in scalar initializer [-Wexcess-initializers]
+   15 | int l = { 1, { 2 } };
+      |              ^~~~~
+13 warnings generated.

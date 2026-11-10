@@ -170,6 +170,7 @@ typedef struct fent {
 	const char *spath;	/* as spelled, for dependency files */
 	uint8_t sys;		/* a system header (found in a system directory, or included by one) */
 	uint32_t from;		/* the #include's location (0: the main file, <built-in>, or a cached replay) */
+	uint32_t dstate;	/* the #pragma diagnostic state where it was entered (pdnode index) */
 	const char *cpos;	/* -C: its comments before here are printed or dropped (NULL: none yet) */
 } fent;
 
@@ -431,6 +432,10 @@ typedef struct hkidr {		/* a child entry of a level while recording */
 	uint32_t ex0, nex;	/* its exclusions in rec.kex */
 } hkidr;
 
+/* -pedantic warnings on hot paths (__COUNTER__, every #define of a variadic macro): their
+   command-line state, once per TU, so the common case (off, no pragmas) is one test */
+enum { PPW_C2Y, PPW_VARIADIC, PPW_N };
+
 struct pp {
 	uintptr_t *mdir[NMDIR];
 	const pp_opts *o;
@@ -460,6 +465,16 @@ struct pp {
 	uint32_t nonce, oncecap;
 	struct { uint32_t id; uintptr_t m; } *pushed;
 	uint32_t npushed;
+	/* #pragma clang/GCC diagnostic: states are a persistent list (node: one flag's mapping and
+	   the state it was set in, 0: the command line's); the transitions are by location */
+	struct pdnode { uint32_t prev; uint8_t act; char name[59]; } *dn;
+	struct { uint32_t loc, st; } *dtr;
+	uint32_t ndn, ndtr, dcur, ndstk, dstk[64];
+	uint32_t nden;			/* "warning"/"error" nodes: only they turn a warning on */
+	struct mdef *mdx;		/* every #define's site, by name (built for a macro note) */
+	uint32_t nmdx, cmdx, mdx_nfe;
+	const void *wc_o;		/* the options wc[] was computed for */
+	bool wc[PPW_N];			/* -pedantic warnings on hot paths: on (command line) */
 	vlex_file builtin;
 	const char *base_name;
 	uint32_t base_namelen;
@@ -468,6 +483,13 @@ struct pp {
 	uint32_t diag_last;	/* the last diagnostic's location + 1, and whether it was a note */
 	bool diag_lastnote;
 	uint32_t diag_fe;	/* the file of the last diagnostic + 1 (for "In file included from") */
+	vdiag *dhead, *dtail;	/* the TU's diagnostic records (in perm) */
+	bool dtrack;		/* VCC_TRACK_DIAG: vcc's call site after each diagnostic */
+	bool dfinished;		/* pp_diag_finish ran (JSON flushed, SARIF written) */
+	vdiag *dpend;		/* -fdiagnostics-format=json: the record not yet written */
+	vdiag *tpend;		/* vcc's text style: the record not yet rendered (its notes may follow) */
+	uint32_t dlast1;	/* clang's LastLoc + 1 (0: none) and LastLevel: the previous record's */
+	uint8_t dlastlv;
 	struct lmark {		/* #line / GNU line markers */
 		uint32_t fe, off;	/* in fent fe, from byte offset off on */
 		uint32_t pline, line;	/* physical line pline is line */
@@ -552,7 +574,19 @@ struct pp {
 /* ---------------- header cache: recording reads and writes ---------------- */
 
 /* the open regions are not cacheable (something in them depends on more than we record) */
+VPRIV void diag_pragma(pp *p, const char *q, const char *e, uint32_t loc);
+VPRIV void diag_file_end(pp *p, uint32_t fe);
 #define HC_BAD(p) do { if ((p)->rec.n) { (p)->rec.nbad = (p)->rec.n; (p)->rec.badline = __LINE__; } } while (0)
+
+VPRIV void pp_wc_fill(pp *p);
+
+/* false: warning k cannot be reported in this TU (off on the command line, no pragmas) */
+static inline bool pp_wc_maybe(pp *p, int k)
+{
+	if (p->wc_o != p->o)
+		pp_wc_fill(p);
+	return p->wc[k] || p->nden;
+}
 
 #define HC_MAXT (1u << 24)
 
@@ -660,6 +694,26 @@ bool pp_warnx(pp *p, const char *flag, bool on, const char *const *groups, pp_di
 VPRIV bool obj_macro_at(pp *p, uint32_t loc);
 VPRIV void dir_extra_tok(pp *p, const ctx *c, uint32_t name, uint32_t i);
 void pp_diag_summary(pp *p);
+VPRIV const fent *loc_fent(const pp *p, uint32_t loc);
+VPRIV bool loc_ok(const pp *p, uint32_t loc, const fent **e);
+VPRIV int diag_where(const pp *p, uint32_t loc, const char **name, uint32_t *nl, uint32_t *line, uint32_t *col);
+struct vbuf;
+VPRIV void render_text(pp *p, struct vbuf *b, const vdiag *d);
+VPRIV bool render_head(pp *p, struct vbuf *b, const vdiag *d, const fent **ep);
+VPRIV void parseable_fixits(pp *p, struct vbuf *b, const vdiag *d);
+VPRIV uint32_t dcols(const char *s, uint32_t b, uint32_t e, uint32_t col);
+VPRIV void db_c(struct vbuf *b, char c, int n);
+VPRIV void include_stack(pp *p, struct vbuf *b, const fent *e);
+/* diagtext.c: vcc's text style (records rendered when the next one starts, so that
+   their notes can fold into the snippet), the narrated style, the type diff */
+VPRIV void diag_text_flush(pp *p);
+VPRIV void diag_narrate(pp *p, struct vbuf *b, vdiag *d);
+VPRIV void diag_render_rec(pp *p, struct vbuf *b, vdiag *d);
+VPRIV void diag_render_color(pp *p, struct vbuf *b, vdiag *d);
+VPRIV void diag_typediff(struct vbuf *b, const vdiag *d, const char *plain);
+/* diagout.c: JSON lines and SARIF */
+VPRIV void diag_json_flush(pp *p);
+VPRIV void diag_fixits_out(pp *p);
 /* include.c: dependencies */
 VPRIV uint8_t inc_sys(pp *p, int32_t sdir);
 VPRIV void dep_only(pp *p, const char *path, uint8_t sys);
@@ -771,6 +825,7 @@ VPRIV void include(pp *p, ctx *c, uint32_t b, uint32_t e, int kind, uint32_t loc
 /* directive.c */
 VPRIV int pragma_text(pp *p, const char *s, size_t n, uint32_t loc, ptok *out, uint32_t sloc);
 VPRIV int directive(pp *p, ctx *c, ptok *out);
+VPRIV bool pp_pad_at(const char *s, uint32_t ls, uint32_t le, uint32_t x);
 
 /* decimal digits of v at b (no terminator); returns the length */
 static inline int utoa(char *b, unsigned long long v)

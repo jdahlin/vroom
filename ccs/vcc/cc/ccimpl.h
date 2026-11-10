@@ -64,6 +64,7 @@ enum { KC_KW = 1, KC_TYPE = 2, KC_DECL = 4 };
 enum { S_TAG = 16 };
 
 #define N(i) (&c->nodes[i])
+#define ISERR(n) (N(n)->flags & NF_ERR)	/* an error node: say nothing more about it */
 
 /* lists: append to a temporary vector, then freeze into c->lists */
 typedef struct vec {
@@ -90,12 +91,16 @@ typedef struct dspec {
 	qty ty;
 	int sc;
 	bool inline_, noreturn, thread, auto_type, has_type;
+	bool invalid;		/* an unknown type name stands for the type (int) */
+	uint16_t sckw;		/* the storage-class keyword, if any */
+	uint32_t sgnloc, longloc, baseloc;	/* signed/unsigned, the first long, short: for clang's errors */
 	attrs at;
 	uint32_t align;		/* _Alignas */
 	uint32_t loc;
 	uint32_t tagdecl;	/* struct/union/enum defined or declared here: its tag */
 	uint32_t tdef;		/* the typedef name the type came from (sym), 0: none */
 	bool tag_bare;		/* "struct S" with no body (a reference or forward declaration) */
+	uint32_t tds;		/* the typedef the type was named by (its sym, 0: none), for diagnostics */
 } dspec;
 
 typedef struct dop {
@@ -114,6 +119,7 @@ typedef struct declr {
 	uint32_t plb, ple;	/* ... its parameter list: first token, the ')' */
 	bool kr;		/* ... from a K&R identifier list (types follow the declarator) */
 	bool has_func;
+	bool invalid;		/* declare reported its type (a void variable) */
 } declr;
 
 /* the declarator op stack (shared, nested declarators push and pop) */
@@ -160,11 +166,36 @@ VPRIV __attribute__((format(printf, 3, 4), noreturn)) void fatal(cc *c, uint32_t
 VPRIV __attribute__((format(printf, 8, 9))) void report(cc *c, const char *what, uint32_t loc, const pp_span *r, int nr, const pp_fixit *fx, int nfx, const char *fmt, ...);
 VPRIV __attribute__((format(printf, 3, 4))) void note(cc *c, uint32_t loc, const char *fmt, ...);
 extern const char *const w_all[];
+VPRIV bool ext_on_slow(cc *c, const char *flag, const char *const *groups);
+/* is extension warning flag (one of diag.c's ext_flags) on: one test in the common case */
+static inline bool ext_on(cc *c, const char *flag, const char *const *groups)
+{
+	if (likely(c->ext_off > 0) && !*c->nenable)
+		return false;
+	return ext_on_slow(c, flag, groups);
+}
+VPRIV __attribute__((format(printf, 5, 6))) void ext_warn(cc *c, const char *flag, const char *const *groups, uint32_t loc,
+							   const char *fmt, ...);
+extern const char *const w_gnu[];	/* { "gnu", "pedantic" } */
+extern const char *const w_ped[];	/* { "pedantic" } */
+/* an ext_warn that costs a load and a test while it is off */
+#define EXT_WARN(c, flag, groups, loc, ...) \
+	do { if (unlikely(ext_on((c), (flag), (groups)))) ext_warn((c), (flag), (groups), (loc), __VA_ARGS__); } while (0)
+/* ... at a token spelled ms (from a macro: the caret at the invocation, the notes at the body) */
+#define EXT_WARN_MS(c, ms, flag, groups, loc, ...) \
+	do { if (unlikely(ext_on((c), (flag), (groups)))) { (c)->dms = (ms); ext_warn((c), (flag), (groups), (loc), __VA_ARGS__); } } while (0)
+/* ... the token at loc (from the source, not a macro: tf its flags) with a fix-it removing it */
+#define EXT_WARN_DEL(c, ms, tf, flag, groups, loc, ...) \
+	do { if (unlikely(ext_on((c), (flag), (groups)))) { (c)->dms = (ms); \
+		if (!((tf) & PF_MACRO)) (c)->dfx = (pp_fixit){ (loc), (loc) + (uint32_t)strlen(ms), "", VDA_MACHINE }; \
+		ext_warn((c), (flag), (groups), (loc), __VA_ARGS__); } } while (0)
+VPRIV __attribute__((format(printf, 6, 7))) vdiag *cc_warn_begin(cc *c, const char *flag, bool on, const char *const *groups, uint32_t loc, const char *fmt, ...);
 extern const char *const w_conv[];
 extern const char *const w_selfassign[];
 VPRIV void rt_defer(cc *c, const char *flag, const char *const *groups, uint32_t loc, const pp_span *r, int nr,
 		    const char *ms, uint32_t mlen, const char *fmt, ...) __attribute__((format(printf, 9, 10)));
 VPRIV void rt_flush(cc *c);
+VPRIV void rt_emit(cc *c, vdiag *d);
 VPRIV void unused_value(cc *c, uint32_t e, bool comma);
 VPRIV bool unused_cmp(cc *c, uint32_t e);
 VPRIV void set_only(cc *c, uint32_t e);
@@ -222,7 +253,7 @@ extern uint8_t kwclass[KW_END];
 /* identifier id -> the keyword it is in this TU (0: none): C23 spellings map to the
  * GNU ones (bool -> _Bool...), so only -std=c23/gnu23 TUs see them (cc_run sets it) */
 extern _Thread_local const uint16_t *kwmap;
-extern uint16_t kwmap_gnu[KW_END], kwmap_c23[KW_END];
+extern uint16_t kwmap_gnu[KW_END], kwmap_c23[KW_END], kwmap_iso[KW_END];
 VPRIV void init_keywords(void);
 static inline int kwof(const ptok *t);
 VPRIV __attribute__((noinline)) void fetch_directive(cc *c, ptok *t);
@@ -238,13 +269,44 @@ static inline bool iskw(cc *c, int kw);
 static inline __attribute__((always_inline)) bool accept(cc *c, int kind);
 VPRIV const char *tokspell(const ptok *t, char *buf, size_t cap);
 VPRIV __attribute__((noinline, cold, noreturn)) void expect_fail(cc *c, const char *what);
+VPRIV __attribute__((noinline, cold, noreturn)) void lparen_fail(cc *c, const char *kw);
+VPRIV __attribute__((noinline, cold, noreturn)) void expect_here_fail(cc *c, const char *what);
+/* diag.c: parser recovery.  A recovery point in a block, a struct body or at file
+   scope: a parse error (fatal, a failed expect) reports, jumps back to the innermost
+   one, which restores the parser's state and skips to the end of the statement or
+   declaration (GCC's c_parser_skip_to_end_of_block_or_statement); parsing goes on.
+   One _setjmp per block, none per statement.  REC_ARM is true after a jump. */
+typedef struct recov {
+	jmp_buf jb;
+	struct recov *prev;
+	uint32_t depth, ndops, ncase, case_base, dead, fn;
+	int in_loop, in_switch, in_stmtexpr, unevaluated, in_struct, ibr, in_tyname;
+	uint32_t *switch_cases;
+	qty switch_ty;
+	bool sw_default, has_pend, for_head;
+	uint32_t again;		/* the token of the last recovery: an error there again skips it */
+} recov;
+VPRIV void rec_save(cc *c, recov *r);
+VPRIV void skip_stmt(cc *c, bool top);
+VPRIV void skip_semi(cc *c);
+VPRIV __attribute__((noreturn)) void parse_jump(cc *c);
+VPRIV __attribute__((noinline, cold)) void expect_match_fail(cc *c, int kind, uint32_t open);
+VPRIV void skip_close(cc *c, int kind);
+static inline __attribute__((always_inline)) void expect_match(cc *c, int k, uint32_t open);
+enum { REC_BLOCK, REC_TOP, REC_FOR };
+VPRIV void rec_restore(cc *c, recov *r, int mode);
+#define REC_ARM(c, r) (rec_save(c, r), _setjmp((r)->jb))
+#define REC_POP(c, r) ((c)->rec = (r)->prev)
 static inline __attribute__((always_inline)) void expect(cc *c, int kind, const char *what);
-VPRIV void expect_semi(cc *c, const char *after);
+VPRIV bool expect_semi(cc *c, const char *after);
+VPRIV bool not_expr_start(cc *c, const ptok *t);
+VPRIV bool decl_comma_typo(cc *c);
 /* sym.c */
 VPRIV uint32_t *dslot(cc *c, uint32_t **dir, uint32_t id);
 static inline uint32_t dget(uint32_t **dir, uint32_t id);
 VPRIV void scope_open(cc *c);
 VPRIV void scope_close(cc *c);
+VPRIV void scope_close_proto(cc *c);
 VPRIV void unused_statics(cc *c);
 VPRIV void unused_typedefs(cc *c);
 VPRIV uint32_t sym_new(cc *c, int kind, uint32_t name, qty ty, uint32_t loc);
@@ -252,17 +314,26 @@ VPRIV void sym_bind(cc *c, uint32_t s);
 VPRIV uint32_t lookup(cc *c, uint32_t id);
 VPRIV uint32_t lookup_tag(cc *c, uint32_t id);
 static inline bool typedef_id(cc *c, uint32_t id);
-VPRIV uint32_t undeclared(cc *c, const char *msg, uint32_t id, uint32_t loc, bool types);
+enum { KWS_TYPE = 1, KWS_STMT = 2 };	/* keywords offered as typo corrections */
+VPRIV uint32_t undeclared(cc *c, const char *msg, uint32_t id, uint32_t loc, bool types, int kws, uint32_t *kw);
+VPRIV uint32_t typo_keyword(cc *c, uint32_t id, int kws);
 VPRIV bool is_typedef_name(cc *c, const ptok *t);
 VPRIV uint32_t mk(cc *c, int op, qty ty, uint32_t loc);
 static inline void setspan(cc *c, uint32_t n, uint32_t b);
 VPRIV pp_span rng(cc *c, uint32_t n);
 VPRIV pp_span rng_np(cc *c, uint32_t n);	/* without the parentheses */
+VPRIV void fwd_note(cc *c, qty t);
 VPRIV uint32_t mk2(cc *c, int op, qty ty, uint32_t loc, uint32_t a, uint32_t b);
 VPRIV void vinit(vec *v);
 VPRIV void vpush(cc *c, vec *v, uint32_t x);
 VPRIV uint32_t vfreeze(cc *c, const vec *v);
 VPRIV uint32_t mk_int(cc *c, i128 v, qty ty, uint32_t loc);
+VPRIV uint32_t err_node(cc *c, uint32_t loc);
+/* rustc's delay_bug (PLAN-diag D2.1): code that goes quiet because an error was
+   reported (an error node, an invalid declaration) says so; a TU that ends
+   with no error reports "internal error" instead of compiling wrongly */
+VPRIV __attribute__((noinline, cold)) void delayed_bug(cc *c, uint32_t loc, const char *what);
+VPRIV void delayed_bug_check(cc *c);
 VPRIV uint32_t mk_flt(cc *c, double v, qty ty, uint32_t loc);
 VPRIV uint32_t mk_fltq(cc *c, u128 q, qty ty, uint32_t loc);
 /* lit.c */
@@ -272,6 +343,8 @@ VPRIV uint32_t string_lit(cc *c);
 VPRIV uint32_t char_lit(cc *c);
 /* const.c */
 VPRIV i128 trunc_to(cc *c, i128 v, qty t);
+VPRIV bool quiet_rt(const cc *c);
+VPRIV void i128s_(char *b, size_t n, i128 v);
 VPRIV const field *node_field(cc *c, const node *x);
 VPRIV int clz128(u128 x, unsigned bits);
 VPRIV bool eval(cc *c, uint32_t n, cval *v);
@@ -284,8 +357,9 @@ static inline uint32_t decay(cc *c, uint32_t n);
 VPRIV const field *bitfield_of(cc *c, uint32_t n);
 VPRIV void bitfield_const(cc *c, const field *f, uint32_t v, uint32_t op);
 VPRIV bool static_init_ok(cc *c, qty ty, uint32_t init, uint32_t *bad);
-VPRIV void deprecated_use(cc *c, uint32_t loc, uint32_t name, const attrs *a);
+VPRIV void deprecated_use(cc *c, uint32_t loc, uint32_t name, const attrs *a, uint32_t dloc);
 VPRIV void tag_deprecate(cc *c, uint32_t ti, const attrs *a);
+VPRIV uint32_t new_attrs(cc *c, const attrs *a);
 VPRIV void unused_result(cc *c, uint32_t e, bool last);
 VPRIV uint32_t expr_loc(cc *c, uint32_t n);
 VPRIV qty promoted(cc *c, uint32_t n);
@@ -312,7 +386,8 @@ VPRIV uint32_t to_complex(cc *c, uint32_t n, qty t);
 VPRIV uint32_t cplx_bool(cc *c, uint32_t n);
 VPRIV uint32_t scalar_cond(cc *c, uint32_t n, const char *what);
 VPRIV uint32_t neg(cc *c, uint32_t n);
-VPRIV void bad_operands(cc *c, uint32_t l, uint32_t r, uint32_t loc);
+VPRIV void bad_operands(cc *c, int op, uint32_t l, uint32_t r, uint32_t loc);
+VPRIV const char *punct_spell(int k);
 VPRIV uint32_t cplx_binop(cc *c, int op, uint32_t l, uint32_t r, uint32_t loc);
 VPRIV uint32_t cplx_unary(cc *c, int op, uint32_t n, uint32_t loc);
 /* expr.c */
@@ -348,7 +423,7 @@ VPRIV bool const_expr(cc *c, i128 *v, uint32_t *np);
 /* attr.c */
 VPRIV void init_attrs(void);
 VPRIV uint32_t skip_balanced(cc *c);
-VPRIV uint32_t string_index(cc *c);
+VPRIV uint32_t string_index(cc *c, uint32_t attr);
 VPRIV int mode_kind(cc *c, uint32_t id, bool sgn);
 static inline bool at_attribute(cc *c);
 static inline bool at_std_attr(cc *c);
@@ -368,9 +443,10 @@ VPRIV void uninit_check(cc *c, uint32_t body, uint32_t first_label);
 VPRIV uint32_t fmt_attr(cc *c, uint32_t fs);
 VPRIV uint32_t expr_tdef(cc *c, uint32_t n);
 VPRIV void format_check(cc *c, uint32_t fs, const uint32_t *args, const qty *aty, const uint32_t *atd, uint32_t nargs);
+VPRIV void c23_word_help(cc *c, vdiag *d, uint32_t id);
 VPRIV void asm_label(cc *c, attrs *a);
 /* declspec.c */
-VPRIV void unknown_type(cc *c, dspec *ds);
+VPRIV void unknown_type(cc *c, dspec *ds, bool allow_sc);
 VPRIV bool is_type_start(cc *c, const ptok *t);
 VPRIV bool is_decl_start(cc *c, const ptok *t);
 VPRIV uint32_t tag_new(cc *c, int kind, uint32_t name, uint32_t loc);
@@ -397,8 +473,13 @@ VPRIV void name_overload(cc *c, uint32_t s);
 VPRIV uint32_t file_scope_sym(cc *c, uint32_t name);
 VPRIV void pragma_weak(cc *c, const char *s, const char *e, const char *base, uint32_t loc);
 VPRIV void weak_declared(cc *c, uint32_t s);
+VPRIV const char *char_sign(cc *c, qty t);
+VPRIV int semi_app(cc *c);
 VPRIV void weak_finish(cc *c);
 VPRIV uint32_t implicit_func(cc *c, uint32_t id, uint32_t loc);
+VPRIV uint32_t lib_func(cc *c, uint32_t id, uint32_t loc);
+VPRIV const char *lib_header(cc *c, uint32_t id);
+VPRIV void include_fix(cc *c, vdiag *d, uint32_t loc, const char *hdr);
 VPRIV qty implicit_lib_type(cc *c, uint32_t id);
 VPRIV uint32_t implicit_lib_func(cc *c, uint32_t id, uint32_t loc, qty t);
 VPRIV qty sig_func_type(cc *c, const char *sig);
@@ -455,10 +536,13 @@ static inline bool is_nullability(const cc *c, const ptok *t)
 				      t->id == c->id_null[2] || t->id == c->id_null[3]);
 }
 
+_Static_assert(offsetof(ptok, kind) == offsetof(ptok, loc) + 4 && offsetof(ptok, flags) == offsetof(ptok, loc) + 5 &&
+	       offsetof(ptok, ctr) == offsetof(ptok, loc) + 6 && offsetof(ptok, loc) % 8 == 0, "next(): ptok's loc..ctr");
+_Static_assert(offsetof(cc, prevflags) == offsetof(cc, prevloc) + 5, "next(): cc's prev*");
+
 static inline __attribute__((always_inline)) void next(cc *c)
 {
-	c->prevloc = c->tk[0].loc;
-	c->prevflags = c->tk[0].flags;
+	memcpy(&c->prev8, &c->tk[0].loc, 8);
 	if (unlikely(c->ntk > 1))
 		next_shift(c);
 	else
@@ -481,6 +565,43 @@ static inline __attribute__((always_inline)) void expect(cc *c, int kind, const 
 	if (unlikely(c->tk[0].kind != kind))
 		expect_fail(c, what);
 	next(c);
+}
+
+/* an opening '(' whose ')' is expect_match'ed: its location */
+static inline __attribute__((always_inline)) uint32_t expect_lparen(cc *c)
+{
+	uint32_t l = c->tk[0].loc;
+
+	expect(c, T_LPAREN, "'('");
+	return l;
+}
+
+/* a ')' clang diagnoses at the token, without the note (the builtins' closers) */
+static inline __attribute__((always_inline)) void expect_here(cc *c, int kind, const char *what)
+{
+	if (unlikely(c->tk[0].kind != kind))
+		expect_here_fail(c, what);
+	next(c);
+}
+
+/* a closing ')' ']' '}' for the opening one at open (clang's "to match this" note) */
+static inline __attribute__((always_inline)) void expect_match(cc *c, int k, uint32_t open)
+{
+	if (unlikely(c->tk[0].kind != k))
+		expect_match_fail(c, k, open);
+	else
+		next(c);
+}
+
+/* the same after the expression e: when e is invalid, the skip is silent (clang) */
+static inline __attribute__((always_inline)) void expect_close(cc *c, int k, uint32_t open, uint32_t e)
+{
+	if (likely(c->tk[0].kind == k))
+		next(c);
+	else if (ISERR(e))
+		skip_close(c, k);
+	else
+		expect_match_fail(c, k, open);
 }
 
 static inline uint32_t dget(uint32_t **dir, uint32_t id)
@@ -603,7 +724,7 @@ static inline bool attrs_empty(const attrs *a)
 	const unsigned char *p = (const unsigned char *)a;
 	unsigned o = a->prio | a->tlsmodel | a->fmtarg;
 
-	for (size_t i = 0; i <= offsetof(attrs, noinstr); i++)
+	for (size_t i = 0; i <= offsetof(attrs, unavail); i++)
 		o |= p[i];
 	return !o;
 }

@@ -59,7 +59,8 @@ OUT = f'{BUILD}/ctests'
 RES = subprocess.run([CL, '-print-resource-dir'], capture_output=True, text=True).stdout.strip() + '/include'
 
 BASE = ['--target=aarch64-linux-gnu', '-nostdinc', '-I', f'{RT}/include', '-isystem', RES,
-        '-fno-PIE', '-fno-asynchronous-unwind-tables', '-fno-stack-protector', '-O2']
+        '-fno-PIE', '-fno-asynchronous-unwind-tables', '-fno-stack-protector', '-O2',
+        '-mno-outline-atomics']	# a Linux clang that finds libgcc calls __aarch64_ldadd4_acq_rel ..., which rt lacks
 BASE += os.environ.get('VCC_CFLAGS', '').split()	# e.g. -fasynchronous-unwind-tables (both compilers)
 # extra flags for vcc only: VCC_CTEST_OPT=-O3 runs the suites through vcc's -O3 optimizer (clang stays at -O2)
 VOPT = os.environ.get('VCC_CTEST_OPT', '').split()

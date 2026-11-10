@@ -1,0 +1,37 @@
+paren_close.c:4:19: error: expected ')'
+    4 | int a = sizeof(int;
+      |               -   ^
+      |               |
+      |               to match this '('
+paren_close.c:4:15: note: to match this '('
+paren_close.c:5:14: error: expected ')'
+    5 | int b = (int 3;
+      |         -    ^
+      |         |
+      |         to match this '('
+paren_close.c:5:9: note: to match this '('
+paren_close.c:5:15: error: expected expression
+    5 | int b = (int 3;
+      |               ^
+paren_close.c:6:24: error: expected ')'
+    6 | _Static_assert(1, "one";
+      |               -        ^
+      |               |
+      |               to match this '('
+paren_close.c:6:15: note: to match this '('
+paren_close.c:9:12: error: expected ')'
+    9 |         switch (x { default: break; }
+      |                -  ^
+      |                |
+      |                to match this '('
+paren_close.c:9:9: note: to match this '('
+paren_close.c:12:27: error: expected ')'
+   12 | int g(void) { return (int x)3 + sizeof(int y); }
+      |                           ^
+paren_close.c:12:44: error: expected ')'
+   12 | int g(void) { return (int x)3 + sizeof(int y); }
+      |                                            ^
+paren_close.c:15:2: error: expected identifier or '('
+   15 | (int z);
+      |  ^
+8 errors generated.

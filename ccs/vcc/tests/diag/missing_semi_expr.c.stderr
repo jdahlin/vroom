@@ -1,0 +1,5 @@
+missing_semi_expr.c:4:6: error: expected ';' after expression
+    4 |         g(a)
+      |             ^
+      |             ;
+1 error generated.

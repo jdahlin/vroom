@@ -1,0 +1,34 @@
+return_stack.c:2:31: warning: address of stack memory associated with local variable 'x' returned [-Wreturn-stack-address]
+    2 | int *a(void) { int x; return &x; }
+      |                               ^
+return_stack.c:3:33: warning: address of stack memory associated with local variable 'x' returned [-Wreturn-stack-address]
+    3 | int *b(void) { int x[4]; return x; }
+      |                                 ^
+return_stack.c:4:34: warning: address of stack memory associated with local variable 'x' returned [-Wreturn-stack-address]
+    4 | int *c(void) { int x[4]; return &x[1]; }
+      |                                  ^
+return_stack.c:5:25: warning: address of stack memory associated with parameter 'p' returned [-Wreturn-stack-address]
+    5 | int *d(int p) { return &p; }
+      |                         ^
+return_stack.c:7:41: warning: address of stack memory associated with local variable 's' returned [-Wreturn-stack-address]
+    7 | char *f(void) { char s[] = "hi"; return s; }
+      |                                         ^
+return_stack.c:10:52: warning: address of stack memory associated with local variable 's' returned [-Wreturn-stack-address]
+   10 | struct S { int m; } *i(void) { struct S s; return &s; }
+      |                                                    ^
+return_stack.c:11:36: warning: address of stack memory associated with local variable 's' returned [-Wreturn-stack-address]
+   11 | int *j(void) { struct S s; return &s.m; }
+      |                                    ^
+return_stack.c:12:39: warning: address of stack memory associated with local variable 'x' returned [-Wreturn-stack-address]
+   12 | int *k(int c) { int x, y; return c ? &x : &y; }
+      |                                       ^
+return_stack.c:12:44: warning: address of stack memory associated with local variable 'y' returned [-Wreturn-stack-address]
+   12 | int *k(int c) { int x, y; return c ? &x : &y; }
+      |                                            ^
+return_stack.c:13:40: warning: address of stack memory associated with local variable 'x' returned [-Wreturn-stack-address]
+   13 | void *l(void) { int x; return (void *)&x; }
+      |                                        ^
+return_stack.c:15:37: warning: address of stack memory associated with local variable 'x' returned [-Wreturn-stack-address]
+   15 | long o(void) { int x; return (long)&x; }
+      |                                     ^
+11 warnings generated.

@@ -56,6 +56,8 @@ typedef struct attrs {		/* the attributes of one declaration */
 	uint8_t packed, transparent, used, unused, weak, noreturn, constructor, destructor;
 	uint8_t nonstring, may_alias, cold, gnu_inline, always_inline, noinline, ainline, error_fn;
 	uint8_t overloadable, noinstr;
+	uint8_t pure;		/* 1: pure, 2: const (-Wunused-value) */
+	uint8_t unavail;	/* unavailable("msg"): depr/deprmsg say where and why, uses are errors */
 	uint8_t fmtarg;		/* format_arg(i) */
 	uint16_t prio;		/* constructor(N)/destructor(N), 0: none (65535) */
 	uint8_t tlsmodel;	/* tls_model(): VCC_TLS_*, 0: none */
@@ -103,15 +105,33 @@ typedef struct lzfn {
 struct cc {
 	pp *p;
 	const cc_opts *o;
+	struct vfixbuf *tyb;	/* tyname/tyname_sugar: 8 buffers in rotation (allocated at the first) */
+	unsigned tyk;
 	jmp_buf bail;
 	int errors;
+	struct recov *rec;	/* the innermost parser recovery point (diag.c), NULL: errors end the TU */
+	bool for_head;		/* parsing a for (...;...;...) header: clang's form of "expected ';'" */
+	int ibr;		/* initializer '{'s open: after an error the skip closes them first */
+	const char *dbug;	/* the first delayed bug: an error was due, and must have come by the end */
+	uint32_t dbug_loc;
+	uint32_t ntypo;		/* typo corrections tried (clang's -fspell-checking-limit) */
+	uint32_t miss_loc;	/* where the last "expected ')'" was: one per place */
+	uint32_t decl_name, decl_loc, decl_depth;	/* the last declarator's name, where, at which scope depth */
 
 	/* tokens: tk[0] is the current one */
 	ptok tk[4];
 	int ntk;
-	uint32_t prevloc;
-	uint8_t prevflags;
-	uint32_t dead;		/* inside if (0) ... (and the like): no runtime-behaviour warnings */	/* the previous token's flags (PF_MACRO: diagnostics) */
+	/* the previous token's loc, kind, flags (PF_MACRO: diagnostics), as ptok lays
+	   them out: next() copies the 8 bytes with one load and one store */
+	union {
+		struct {
+			uint32_t prevloc;
+			uint8_t prevkind, prevflags;
+			uint16_t prevctr;
+		};
+		uint64_t prev8;
+	};
+	uint32_t dead;		/* inside if (0) ... (and the like): no runtime-behaviour warnings */
 	uint8_t defer_rt;	/* parsing a static initializer: -Wdivision-by-zero waits (clang's DiagRuntimeBehavior) */
 	uint8_t ndefer;
 	struct { uint32_t loc; pp_span r; uint8_t rem; } defer[8];
@@ -128,9 +148,6 @@ struct cc {
 	uint32_t uv_asg;	/* the variable an '=' being parsed assigns */		/* if/loop/switch bodies being parsed */
 	uint32_t uv[64];
 	uint16_t uvc[64];	/* ... cnd at the declaration */	/* ... those variables */
-	uint16_t nrtd;		/* warnings of a function body given at its end (clang's DiagRuntimeBehavior) */
-	struct { const char *flag; const char *const *groups; const char *ms; uint32_t mlen, loc, nr; pp_span r[2];
-		 char msg[112]; } rtd[64];
 	bool after_amp;		/* the unary * being parsed is the operand of & (no -Wvoid-ptr-dereference) */
 	uint8_t cv_what;		/* context of the conversion being checked: CX_* (diagnostics) */
 	uint32_t cv_loc, cv_fn, cv_arg, cv_callee;	/* cv_callee: CX_PASS: the callee expression's first location */	/* CX_PASS: the callee's sym (0: unknown) and the argument */
@@ -190,8 +207,26 @@ struct cc {
 	uint32_t ncase, capcase, case_base;
 	qty switch_ty;
 	int unevaluated;	/* sizeof / typeof / _Alignof operand */
+	int cexpr;
+	uint32_t *utd, nutd;	/* block-scope typedefs never named: -Wunused-local-typedef at the TU's end */
+	uint32_t fnconv;	/* nconv when the function's body began */
+	int fnerr;		/* errors when the function's body began: none since, its unused-variable warnings */
+	vdiag **rtq;		/* clang's DiagRuntimeBehavior in a function: emitted at the body's end */
+	uint32_t nrtq, rtqcap;
+	bool has_depr_tag;
+	uint32_t nnparam;	/* parameters declared nonnull so far */
+	const char *next_k[16];	/* ext_on's cache: flag (a literal), whether it is on (this TU's options) */
+	bool next_v[16];
+	uint32_t next_n;
+	const char *dms;	/* the next record's diagnosed token, spelled, if a macro may hold it (set just before) */
+	pp_fixit dfx;		/* ... and a fix-it for it (s != NULL; machine-applicable), as dms */
+	int8_t ext_off;		/* 1: no extension warning is on (command line); -1: not known yet */
+	const uint32_t *nenable;	/* pp's "#pragma diagnostic warning|error" count (ext_off holds while 0) */
+	int bcp;		/* in __builtin_constant_p's argument: unevaluated, but its names are used */
 	attrs pend;		/* attributes before a block-scope declaration */
 	int in_struct;		/* parsing a struct/union body */
+	int in_tyname;		/* parsing a type name (clang's DSC_type_specifier) */
+	int undecl_ty;		/* unknown_type: say clang's "use of undeclared identifier" (block_item's "size_t n = 1;") */
 	bool has_pend;
 	uint32_t pack[64];	/* #pragma pack stack (bytes, 0: none) */
 	uint64_t packid[64];	/* labels (token.c pragma_pack) */
