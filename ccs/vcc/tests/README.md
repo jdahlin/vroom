@@ -37,7 +37,8 @@ and tcc tests2 covers the same ground).
 
 `bench/fetch-testsuites.sh [NAME...]` downloads these (shallow, sparse) at
 the commits pinned in the script; `work/testsuites/MANIFEST` records what is
-there.  About 320 MB, half a minute.  No harness runs them yet.
+there.  About 320 MB, half a minute.  `bench/vcc-verify.py` runs clang's -verify
+tests (TODO.md T20); the rest have no harness yet.
 
 | name | what (C files) | license |
 |---|---|---|
