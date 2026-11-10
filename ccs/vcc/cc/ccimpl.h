@@ -147,6 +147,21 @@ VPRIV __attribute__((format(printf, 3, 4), noreturn)) void fatal(cc *c, uint32_t
 VPRIV __attribute__((format(printf, 8, 9))) void report(cc *c, const char *what, uint32_t loc, const pp_span *r, int nr, const pp_fixit *fx, int nfx, const char *fmt, ...);
 VPRIV __attribute__((format(printf, 3, 4))) void note(cc *c, uint32_t loc, const char *fmt, ...);
 extern const char *const w_all[];
+VPRIV bool ext_on_slow(cc *c, const char *flag, const char *const *groups);
+/* is extension warning flag (one of diag.c's ext_flags) on: one test in the common case */
+static inline bool ext_on(cc *c, const char *flag, const char *const *groups)
+{
+	if (likely(c->ext_off > 0) && !*c->nenable)
+		return false;
+	return ext_on_slow(c, flag, groups);
+}
+VPRIV __attribute__((format(printf, 5, 6))) void ext_warn(cc *c, const char *flag, const char *const *groups, uint32_t loc,
+							   const char *fmt, ...);
+extern const char *const w_gnu[];	/* { "gnu", "pedantic" } */
+extern const char *const w_ped[];	/* { "pedantic" } */
+/* an ext_warn that costs a load and a test while it is off */
+#define EXT_WARN(c, flag, groups, loc, ...) \
+	do { if (unlikely(ext_on((c), (flag), (groups)))) ext_warn((c), (flag), (groups), (loc), __VA_ARGS__); } while (0)
 VPRIV __attribute__((format(printf, 6, 7))) vdiag *cc_warn_begin(cc *c, const char *flag, bool on, const char *const *groups, uint32_t loc, const char *fmt, ...);
 VPRIV __attribute__((format(printf, 10, 11))) bool cc_warnx(cc *c, const char *flag, bool on, const char *const *groups, uint32_t loc, const pp_span *r, int nr, const pp_fixit *fx, int nfx, const char *fmt, ...);
 VPRIV const char *idname(uint32_t id, int *len);
@@ -201,7 +216,7 @@ extern uint8_t kwclass[KW_END];
 /* identifier id -> the keyword it is in this TU (0: none): C23 spellings map to the
  * GNU ones (bool -> _Bool...), so only -std=c23/gnu23 TUs see them (cc_run sets it) */
 extern _Thread_local const uint16_t *kwmap;
-extern uint16_t kwmap_gnu[KW_END], kwmap_c23[KW_END];
+extern uint16_t kwmap_gnu[KW_END], kwmap_c23[KW_END], kwmap_iso[KW_END];
 VPRIV void init_keywords(void);
 static inline int kwof(const ptok *t);
 VPRIV __attribute__((noinline)) void fetch_directive(cc *c, ptok *t);
@@ -371,6 +386,7 @@ static inline void attribute_list(cc *c, attrs *a);
 static inline bool attrs_empty(const attrs *a);
 VPRIV void merge_attrs(cc *c, attrs *to, const attrs *from);
 VPRIV attrx *attrx_mut(cc *c, attrs *a);
+VPRIV void c23_word_help(cc *c, vdiag *d, uint32_t id);
 /* format.c */
 VPRIV uint16_t fmt_pack(int kind, unsigned idx, unsigned first);
 VPRIV void format_call(cc *c, uint32_t s, uint32_t *args, uint32_t n);
@@ -379,7 +395,7 @@ VPRIV void rt_emit(cc *c, vdiag *d);
 VPRIV void rt_flush(cc *c);
 /* attrcheck.c */
 VPRIV void depr_use(cc *c, uint32_t s, uint32_t loc);
-VPRIV void depr_report(cc *c, uint32_t name, uint32_t x, uint32_t loc);
+VPRIV void depr_report(cc *c, uint32_t name, uint32_t x, uint32_t loc, uint32_t dloc);
 VPRIV uint32_t new_attrs(cc *c, const attrs *a);
 VPRIV void nonnull_call(cc *c, uint32_t fs, const uint32_t *args, uint32_t n, uint32_t rp);
 VPRIV void result_discarded(cc *c, uint32_t e);

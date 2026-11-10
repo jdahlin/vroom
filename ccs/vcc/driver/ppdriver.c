@@ -752,11 +752,17 @@ int ppd_run(int argc, char **argv, const ppd_env *env)
 		if (!strcmp(a, "-fgnu89-inline")) { gnu89_inline = 1; continue; }
 		if (!strcmp(a, "-fvcc-kernel")) { vcc_kernel = 1; continue; }
 		if (!strcmp(a, "-fno-gnu89-inline")) { gnu89_inline = 0; continue; }
-		if ((a[1] == 'W' && a[2] && a[3] != ',') || !strcmp(a, "-w")) {
-			/* warning options, in order, for pp_wstate (some are also handled below) */
+		if ((a[1] == 'W' && a[2] && a[3] != ',') || !strcmp(a, "-w") || strstr(a, "-pedantic") == a + (a[1] == '-')) {
+			/* warning options, in order, for pp_wstate (some are also handled below);
+			   -pedantic is -Wpedantic, -pedantic-errors also -Werror=pedantic (two entries) */
 			if (!wargs)
-				wargs = calloc((size_t)argc + 1, sizeof(*wargs));
-			wargs[nwargs++] = a;
+				wargs = calloc((size_t)argc * 2 + 1, sizeof(*wargs));
+			if (!strcmp(a, "-pedantic") || !strcmp(a, "--pedantic"))
+				wargs[nwargs++] = "-Wpedantic";
+			else if (!strcmp(a, "-pedantic-errors") || !strcmp(a, "--pedantic-errors"))
+				wargs[nwargs++] = "-Wpedantic", wargs[nwargs++] = "-Werror=pedantic";
+			else if (a[1] == 'W' || a[1] == 'w')
+				wargs[nwargs++] = a;
 		}
 		if (!strcmp(a, "-Wno-implicit-int") || !strcmp(a, "-Wno-error=implicit-int")) { wimpl_int = 1; continue; }
 		if (!strcmp(a, "-Wno-implicit-function-declaration") || !strcmp(a, "-Wno-error=implicit-function-declaration")) {

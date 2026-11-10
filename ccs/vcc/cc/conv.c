@@ -219,33 +219,130 @@ static void param_note(cc *c)
 
 /* "... initializing 'T' with an expression of type 'F'" and the like, per context: clang's
    warnings that are errors by default (id: clang's diagnostic, flag: its -W flag) */
-static void conv_error(cc *c, uint32_t n, qty to, const char *what, const char *id, const char *flag)
+/* the type clang names for n: an array's or function's before its decay */
+static qty shown_ty(cc *c, uint32_t n)
+{
+	if (N(n)->op == N_CAST && (N(n)->aux == CK_DECAY || N(n)->aux == CK_FDECAY) && !c->span[n].e)
+		return N(N(n)->a)->ty;
+	return N(n)->ty;
+}
+
+/* a conversion diagnostic in clang's four forms (initializing, passing, returning,
+   assigning), "<pre> initializing ... <post>"; warn: a warning of flag (on by default, groups),
+   else an error.  false: not reported (the warning is off) */
+static bool conv_diag_fx(cc *c, uint32_t n, qty to, const char *pre, const char *post, const char *id, const char *flag,
+			 const char *const *groups, bool warn, const pp_fixit *fx);
+
+static bool conv_diag(cc *c, uint32_t n, qty to, const char *pre, const char *post, const char *id, const char *flag,
+		      const char *const *groups, bool warn)
+{
+	return conv_diag_fx(c, n, to, pre, post, id, flag, groups, warn, NULL);
+}
+
+static bool conv_diag_fx(cc *c, uint32_t n, qty to, const char *pre, const char *post, const char *id, const char *flag,
+			 const char *const *groups, bool warn, const pp_fixit *fx)
 {
 	pp_span r = rng(c, n);
-	const char *f = tyname(c, N(n)->ty), *t = tyname(c, to);
+	const char *f = tyname(c, shown_ty(c, n)), *t = tyname(c, to);
 	uint32_t loc = c->cv_what == CX_PASS || c->cv_what == CX_RETURN ? r.b : c->cv_loc;
+	const char *sp = *pre ? " " : "";
+	int lv = warn ? pp_diag_wlevel(c->p, flag, true, groups, loc) : VDL_ERROR;
 	vdiag *d;
 
-	error_limit(c), c->errors++, c->ndiag++;
+	if (lv < 0)
+		return false;
+	if (lv == VDL_ERROR)
+		error_limit(c), c->errors++;
+	c->ndiag++;
 	switch (c->cv_what) {
 	case CX_INIT:
-		d = pp_diag_begin(c->p, VDL_ERROR, loc, "%s initializing '%s' with an expression of type '%s'", what, t, f);
+		d = pp_diag_begin(c->p, lv, loc, "%s%sinitializing '%s' with an expression of type '%s'%s", pre, sp, t, f, post);
 		break;
 	case CX_PASS:
-		d = pp_diag_begin(c->p, VDL_ERROR, loc, "%s passing '%s' to parameter of type '%s'", what, f, t);
+		d = pp_diag_begin(c->p, lv, loc, "%s%spassing '%s' to parameter of type '%s'%s", pre, sp, f, t, post);
 		break;
 	case CX_RETURN:
-		d = pp_diag_begin(c->p, VDL_ERROR, loc, "%s returning '%s' from a function with result type '%s'", what, f, t);
+		d = pp_diag_begin(c->p, lv, loc, "%s%sreturning '%s' from a function with result type '%s'%s", pre, sp, f, t, post);
 		break;
 	default:
-		d = pp_diag_begin(c->p, VDL_ERROR, loc, "%s assigning to '%s' from '%s'", what, t, f);
+		d = pp_diag_begin(c->p, lv, loc, "%s%sassigning to '%s' from '%s'%s", pre, sp, t, f, post);
 	}
 	d->id = id;
 	pp_diag_flag(d, flag);
+	d->werror = warn && lv == VDL_ERROR;
 	role_label(c, d, r);
+	if (fx)
+		pp_diag_fix(c->p, d, fx->b, fx->e, fx->s, VDA_MAYBE);
 	pp_diag_emit(c->p, d);
 	if (c->cv_what == CX_PASS)
 		param_note(c);
+	return true;
+}
+
+static void conv_error(cc *c, uint32_t n, qty to, const char *what, const char *id, const char *flag)
+{
+	conv_diag(c, n, to, what, "", id, flag, NULL, false);
+}
+
+/* -Wint-conversion with clang's tryToFixConversion: "; remove &", "; dereference with *" or
+   "; take the address with &" when that gives exactly the target type, with the fix-it */
+static void int_conv_error(cc *c, uint32_t n, qty to, bool to_ptr)
+{
+	uint32_t m = n;
+	pp_fixit fx = { 0, 0, NULL };
+	const char *h = "";
+
+	while (N(m)->op == N_CAST && !c->span[m].e)
+		m = N(m)->a;
+	if (!to_ptr && N(m)->op == N_ADDR && compatible(c, QUNQ(N(N(m)->a)->ty), QUNQ(to)))
+		h = "; remove &", fx = (pp_fixit){ rng(c, m).b, rng(c, m).b + 1, "" };
+	else if (!to_ptr && is_ptr(c, N(m)->ty) && compatible(c, QUNQ(T(c, N(m)->ty)->base), QUNQ(to)))
+		h = "; dereference with *", fx = (pp_fixit){ rng(c, m).b, rng(c, m).b, "*" };
+	else if (to_ptr && (N(m)->flags & NF_LVALUE) && compatible(c, QUNQ(T(c, to)->base), QUNQ(N(m)->ty)))
+		h = "; take the address with &", fx = (pp_fixit){ rng(c, m).b, rng(c, m).b, "&" };
+	conv_diag_fx(c, n, to, to_ptr ? "incompatible integer to pointer conversion" : "incompatible pointer to integer conversion",
+		     h, to_ptr ? "ext_typecheck_convert_int_pointer" : "ext_typecheck_convert_pointer_int", "int-conversion", NULL,
+		     false, fx.s ? &fx : NULL);
+}
+
+/* clang's checkPointerTypesForAssignment on pointees that ptr_ok accepted: qualifiers the
+   source's pointee has and the target's lacks (-Wincompatible-pointer-types-discards-
+   qualifiers), deeper levels that differ at all, or integers of another sign (-Wpointer-sign) */
+static void ptr_quals(cc *c, uint32_t n, qty to)
+{
+	static const char *const g[] = { "incompatible-pointer-types", "pedantic", NULL };	/* (ExtWarns: -pedantic-errors) */
+	qty a = T(c, to)->base, b = T(c, N(n)->ty)->base;
+	unsigned qa = QQ(a) & (Q_CONST | Q_VOLATILE | Q_RESTRICT), qb = QQ(b) & (Q_CONST | Q_VOLATILE | Q_RESTRICT);
+
+	if (KIND(c, a) == TY_FUNC || KIND(c, b) == TY_FUNC)
+		return;	/* (void * <-> function pointer: clang says nothing here, -Wpedantic does) */
+	if (qb & ~qa) {
+		conv_diag(c, n, to, "", " discards qualifiers", "ext_typecheck_convert_discards_qualifiers",
+			  "incompatible-pointer-types-discards-qualifiers", g, true);
+		return;
+	}
+	if (KIND(c, a) == TY_VOID || KIND(c, b) == TY_VOID)
+		return;
+	for (qty x = a, y = b; KIND(c, x) == TY_PTR && KIND(c, y) == TY_PTR;) {
+		x = T(c, x)->base, y = T(c, y)->base;
+		if ((QQ(x) ^ QQ(y)) & (Q_CONST | Q_VOLATILE | Q_RESTRICT)) {
+			conv_diag(c, n, to, "", " discards qualifiers in nested pointer types",
+				  "ext_nested_pointer_qualifier_mismatch", "incompatible-pointer-types-discards-qualifiers", g, true);
+			return;
+		}
+		if (KIND(c, x) == TY_VOID || KIND(c, y) == TY_VOID)
+			return;
+	}
+	a = QUNQ(a), b = QUNQ(b);
+	if (QI(canon(c, a)) != QI(canon(c, b)) && is_integer(c, a) && is_integer(c, b) && KIND(c, a) != TY_BOOL &&
+	    KIND(c, b) != TY_BOOL && !compatible(c, a, b)) {
+		static const char *const gs[] = { "pedantic", NULL };
+		bool ch = (KIND(c, a) == TY_CHAR) != (KIND(c, b) == TY_CHAR);
+
+		conv_diag(c, n, to, "", ch ? " converts between pointers to integer types where one is of the unique plain 'char' type "
+				  "and the other is not" : " converts between pointers to integer types with different sign",
+			  "ext_typecheck_convert_incompatible_pointer_sign", "pointer-sign", gs, true);
+	}
 }
 
 /* pointee types that clang's -Wincompatible-pointer-types accepts: compatible once
@@ -434,17 +531,21 @@ static uint32_t conv_check(cc *c, uint32_t n, qty to)
 	if (N(n)->flags & NF_ERR)
 		return n;
 	if (is_ptr(c, to) && (is_integer(c, from) || KIND(c, from) == TY_ENUM) && !is_npc(c, n) && KIND(c, from) != TY_BOOL) {
-		conv_error(c, n, to, "incompatible integer to pointer conversion", "ext_typecheck_convert_int_pointer", "int-conversion");
+		int_conv_error(c, n, to, true);
 	} else if ((is_integer(c, to) || KIND(c, to) == TY_ENUM) && KIND(c, to) != TY_BOOL && is_ptr(c, from)) {
-		conv_error(c, n, to, "incompatible pointer to integer conversion", "ext_typecheck_convert_pointer_int", "int-conversion");
+		int_conv_error(c, n, to, false);
 	} else if (is_ptr(c, to) && is_ptr(c, from) && !(T(c, to)->flags & TF_BLOCK) && !(T(c, from)->flags & TF_BLOCK) &&
 		   !ptr_ok(c, T(c, to)->base, T(c, from)->base)) {
 		if (is_func(c, T(c, to)->base) && is_func(c, T(c, from)->base))
 			conv_error(c, n, to, "incompatible function pointer types", "ext_typecheck_convert_incompatible_function_pointer",
 				   "incompatible-function-pointer-types");
-		else
+		else	/* (clang 23: an error by default) */
 			conv_error(c, n, to, "incompatible pointer types", "ext_typecheck_convert_incompatible_pointer",
 				   "incompatible-pointer-types");
+	} else if (is_ptr(c, to) && is_ptr(c, from) && QI(canon(c, to)) != QI(canon(c, from)) &&
+		   !(T(c, to)->flags & TF_BLOCK) && !(T(c, from)->flags & TF_BLOCK)) {
+		ptr_quals(c, n, to);
+		return n;
 	} else {
 		const_conv_check(c, n, to);
 		return n;

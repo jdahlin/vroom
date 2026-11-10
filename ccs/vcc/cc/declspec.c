@@ -3,6 +3,13 @@
 
 #include "ccimpl.h"
 
+/* const, volatile, restrict in any spelling */
+static bool is_cvr(int k)
+{
+	return k == KW_const || k == KW___const__ || k == KW___const || k == KW_volatile || k == KW___volatile__ ||
+	       k == KW___volatile || k == KW_restrict || k == KW___restrict__ || k == KW___restrict;
+}
+
 /* an identifier where a type name must be: clang's "unknown type name" (with typo
    correction among the typedefs and the type keywords), then on as if it were the
    correction (or int); a keyword is parsed as written so (allow_sc: storage classes) */
@@ -92,6 +99,8 @@ static uint32_t tag_lookup_or_new(cc *c, int kind, uint32_t name, uint32_t loc, 
 	{
 		uint32_t ti = tag_new(c, kind, name, loc);
 
+		if (kind == TY_ENUM && !define)	/* (clang -pedantic) */
+			EXT_WARN(c, "pedantic", NULL, loc, "ISO C forbids forward references to 'enum' types");
 		if (name) {
 			uint32_t ns = sym_new(c, S_TAG, name, QT(c->tags[ti].ty, 0), loc);
 
@@ -299,7 +308,7 @@ VPRIV void static_assert_decl(cc *c)
 		}
 		msg[k] = 0;
 	}
-	if (!v)
+	if (!v && !ISERR(e))	/* (clang: nothing for an invalid condition) */
 		static_assert_failed(c, e, msg);
 	expect_match(c, T_RPAREN, open);
 	expect_semi(c, "after static_assert");
@@ -575,10 +584,25 @@ static __attribute__((noinline, cold)) qty implicit_int_name(cc *c, dspec *ds)
 	return s ? c->syms[s].ty : prim(TY_INT);
 }
 
+/* no type specifier: clang reports it at the declarator's name ("static *p", "volatile (v)") */
+static __attribute__((noinline, cold)) void implicit_int_error(cc *c)
+{
+	uint32_t i = 0, at = tok(c)->loc;
+
+	while (i < 16 && (peek(c, i)->kind == T_STAR || peek(c, i)->kind == T_LPAREN || is_cvr(kwof(peek(c, i)))))
+		i++;
+	if (peek(c, i)->kind == T_IDENT && !kwof(peek(c, i)))
+		at = peek(c, i)->loc;
+	if (c->o->std == 23)
+		cc_error(c, at, "a type specifier is required for all declarations");
+	else
+		cc_error(c, at, "type specifier missing, defaults to 'int'; ISO C99 and later do not support implicit int [-Wimplicit-int]");
+}
+
 VPRIV bool decl_specs(cc *c, dspec *ds, bool allow_sc)
 {
 	int nlong = 0, sgn = 0, base = 0, q = 0;
-	bool any = false, cplx = false;
+	bool any = false, cplx = false, c23auto = false;
 	qty named = 0;
 	bool have_named = false;
 	uint32_t atomic = 0;	/* the _Atomic qualifier's location */
@@ -624,6 +648,10 @@ again:
 
 			if (!allow_sc)
 				cc_error(c, t->loc, "invalid storage class specifier");
+			if (kw == KW_auto && c->o->std == 23) {	/* C23: maybe type inference (decided at the end) */
+				c23auto = true;
+				break;
+			}
 			if (ds->sc && ds->sc != sc) {
 				cc_error(c, t->loc, "cannot combine with previous '%.*s' declaration specifier", IDF(ds->sckw));
 				break;
@@ -815,6 +843,16 @@ again:
 					c->tags[ti].maxalign = pre.aligned;
 					struct_body(c, ti);
 					tag_body_end(c, kind);
+					if (unlikely(ext_on(c, "gnu-empty-struct", w_gnu))) {
+						const tag *r = &c->tags[ti];
+						bool named = false;
+
+						for (uint32_t i = 0; i < r->nfield && !named; i++)
+							named = r->f[i].name || (!r->f[i].bitfield && is_record(c, r->f[i].ty));
+						if (!named)
+							ext_warn(c, "gnu-empty-struct", w_gnu, loc, r->nfield ? "%s without named members is a GNU extension"
+								 : "empty %s is a GNU extension", kind == TY_UNION ? "union" : "struct");
+					}
 				}
 			} else {
 				ds->tag_bare = true;
@@ -828,6 +866,8 @@ again:
 		case KW_typeof: case KW___typeof__: case KW___typeof: case KW___typeof_unqual__:
 			if (have_named || base)
 				goto done;
+			if (kw == KW_typeof && c->o->std != 23)	/* (clang -pedantic: the GNU spelling) */
+				EXT_WARN(c, "language-extension-token", w_ped, t->loc, "extension used");
 			named = typeof_spec(c, kw == KW___typeof_unqual__);
 			have_named = true;
 			any = true;
@@ -849,7 +889,7 @@ done:
 		}
 	}
 	ds->has_type = any;
-	if (!any && !q && !atomic && !ds->sc && !ds->inline_ && !ds->noreturn && !ds->thread && !ds->align)
+	if (!any && !q && !atomic && !ds->sc && !c23auto && !ds->inline_ && !ds->noreturn && !ds->thread && !ds->align)
 		return false;
 	if (have_named) {
 		ds->ty = named;
@@ -864,10 +904,17 @@ done:
 	} else if (base == KW_double) {
 		ds->ty = prim(nlong ? TY_LDOUBLE : TY_DOUBLE);
 	} else {
-		if (!any && !c->o->implicit_int && !pp_in_system_header(c->p, ds->loc))
-			cc_error(c, ds->loc, "type specifier missing, defaults to 'int'; ISO C99 and later do not support implicit int [-Wimplicit-int]");
+		if (unlikely(!any)) {
+			if (c23auto && !nlong && !sgn && !cplx) {
+				/* C23: 'auto' without a type specifier infers the type, as __auto_type */
+				ds->auto_type = true;
+			} else if (!c->o->implicit_int && !pp_in_system_header(c->p, ds->loc))
+				implicit_int_error(c);
+		}
 		ds->ty = int_type(c, nlong, sgn, base, ds->loc);
 	}
+	if (unlikely(c23auto) && !ds->auto_type && !ds->sc)	/* C23 "auto int x": the storage class */
+		ds->sc = SC_AUTO, ds->sckw = KW_auto;
 	if (cplx) {
 		if (!base && !nlong && !sgn && !have_named)
 			ds->ty = prim(TY_DOUBLE);	/* plain _Complex: double (GNU) */

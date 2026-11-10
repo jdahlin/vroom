@@ -14,8 +14,10 @@ static uint32_t sizeof_type(cc *c, qty t, uint32_t loc, uint32_t e, pp_span r)
 		N(n)->b = t;
 		return n;
 	}
-	if (k == TY_VOID || k == TY_FUNC)
+	if (k == TY_VOID || k == TY_FUNC) {
+		EXT_WARN(c, "pointer-arith", w_ped, loc, "invalid application of 'sizeof' to a %s type", k == TY_VOID ? "void" : "function");
 		return mk_int(c, 1, c->t_size, loc);
+	}
 	if (!complete(c, t)) {
 		report(c, "error", loc, &r, 1, NULL, 0, "invalid application of 'sizeof' to an incomplete type '%s'", tyname(c, t));
 		if (is_record(c, t) || k == TY_ENUM)
@@ -160,6 +162,7 @@ static __attribute__((noinline)) uint32_t unary_op(cc *c)
 		next(c);
 		if (!is(c, T_IDENT))
 			fatal(c, tok(c)->loc, "expected identifier");
+		EXT_WARN(c, "gnu-label-as-value", w_gnu, loc, "use of GNU address-of-label extension");
 		r = mk(c, N_LABELADDR, ty_ptr(c, prim(TY_VOID)), loc);
 		N(r)->a = label_ref(c, tok(c)->id, tok(c)->loc);
 		c->labels[N(r)->a].addr_taken = 1;
@@ -203,6 +206,9 @@ static __attribute__((noinline)) uint32_t unary_op(cc *c)
 		if (n == UINT32_MAX) {
 			while (is_array(c, ty))
 				ty = T(c, ty)->base;
+			if (KIND(c, ty) == TY_VOID || KIND(c, ty) == TY_FUNC)
+				EXT_WARN(c, "pointer-arith", w_ped, loc, "invalid application of 'alignof' to a %s type",
+					 KIND(c, ty) == TY_VOID ? "void" : "function");
 			return mk_int(c, ty_align(c, ty), c->t_size, loc);
 		}
 		return mk_int(c, align_of_expr(c, n), c->t_size, loc);
@@ -905,6 +911,9 @@ static __attribute__((noinline)) uint32_t cond_rest(cc *c, uint32_t cnd)
 		c->dead += k == 0;
 		if (!is(c, T_COLON))
 			a = expr(c);
+		else
+			EXT_WARN(c, "gnu-conditional-omitted-operand", w_gnu, tok(c)->loc,
+				 "use of GNU ?: conditional expression extension, omitting middle operand");
 		c->dead -= k == 0;
 		expect(c, T_COLON, "':'");
 		c->dead += k == 1;

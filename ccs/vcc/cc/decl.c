@@ -789,10 +789,32 @@ VPRIV void declaration(cc *c, vec *out, bool file)
 		t = apply_declarator(c, ds.ty, first, nops);
 		c->ndops = first;
 		asm_label(c, &d.at);
+		if (unlikely(file && (ds.sc == SC_AUTO || (ds.sc == SC_REGISTER && !d.at.asmname))) && d.name) {
+			/* (GNU: a global register variable, "register T x asm("reg")", is fine) */
+			/* (clang: the declaration is invalid; a function's at the declaration's start) */
+			if (is_func(c, t))
+				cc_error(c, dbeg, "illegal storage class on function");
+			else
+				cc_error(c, d.loc, "illegal storage class on file-scoped variable");
+			ds.invalid = true;
+		}
 		attribute_list(c, &d.at);
 		if (ds.auto_type) {
 			uint32_t v;
 
+			if (!is(c, T_EQUAL) && c->o->std == 23 && d.name) {
+				/* clang's text for C23 'auto' (vcc cannot tell it from __auto_type here) */
+				dspec d2 = ds;
+
+				cc_error(c, d.loc, "declaration of variable '%.*s' with deduced type 'auto' requires an initializer",
+					 IDF(d.name));
+				d2.auto_type = false, d2.invalid = true, d2.ty = prim(TY_INT);
+				declare(c, &d2, &d, d2.ty, file);	/* (invalid: its uses say nothing more) */
+				if (accept(c, T_COMMA))
+					continue;
+				decl_semi(c, file);
+				return;
+			}
 			expect(c, T_EQUAL, "'=' (__auto_type requires an initializer)");
 			v = decay(c, assign_expr(c));
 			t = QT(QI(QUNQ(N(v)->ty)), QQ(ds.ty));

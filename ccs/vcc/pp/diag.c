@@ -247,6 +247,7 @@ VPRIV void diag_pragma(pp *p, const char *q, const char *e, uint32_t loc)
 	p->dn[p->ndn].act = (uint8_t)act;
 	memcpy(p->dn[p->ndn].name, q, n);
 	p->dn[p->ndn].name[n] = 0;
+	p->nden += act != PD_IGNORED;
 	dtrans(p, p->ndn++, loc);
 }
 
@@ -294,6 +295,17 @@ int pp_diag_npragma(const pp *p)
 	return (int)p->ndtr;
 }
 
+const char *const *pp_diag_wargs(const pp *p, int *n)
+{
+	*n = p->o->nwargs;
+	return p->o->wargs;
+}
+
+const uint32_t *pp_diag_nenable_ref(const pp *p)
+{
+	return &p->nden;
+}
+
 /* the command line's state of flag; *w: -w (no pragma turns it on) */
 static int wstate(const pp *p, const char *flag, bool on, const char *const *groups, bool *w)
 {
@@ -314,7 +326,11 @@ static int wstate(const pp *p, const char *flag, bool on, const char *const *gro
 		if (!strcmp(a, "-Werror")) { allerr = true; continue; }
 		if (!strcmp(a, "-Wno-error")) { allerr = false; continue; }
 		if (!strncmp(n, "error=", 6)) {
-			if (!strcmp(n + 6, flag)) {
+			bool g = !strcmp(n + 6, flag);
+
+			for (int k = 0; !g && groups && groups[k]; k++)	/* clang: -Werror=GROUP too */
+				g = !strcmp(n + 6, groups[k]);
+			if (g) {
 				if (no)
 					noerr = true, err = false;
 				else
@@ -343,6 +359,15 @@ int pp_wstate(const pp *p, const char *flag, bool on, const char *const *groups)
 	bool w;
 
 	return wstate(p, flag, on, groups, &w);
+}
+
+VPRIV void pp_wc_fill(pp *p)
+{
+	static const char *const g[] = { "pedantic", NULL };
+
+	p->wc_o = p->o;
+	p->wc[PPW_C2Y] = pp_wstate(p, "c2y-extensions", false, g) != 0;
+	p->wc[PPW_VARIADIC] = pp_wstate(p, "variadic-macros", false, g) != 0;
 }
 
 /* the level a warning of flag is reported at at loc: VDL_WARNING, VDL_ERROR (-Werror), or -1 (off) */

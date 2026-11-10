@@ -384,6 +384,88 @@ VPRIV vdiag *cc_warn_begin(cc *c, const char *flag, bool on, const char *const *
 	return d;
 }
 
+/* clang's extension warnings (its ext_* diagnostics): off unless -pedantic or the flag or one
+   of its groups is named; whether they are off is kept per flag (wargs are fixed for the TU) */
+const char *const w_gnu[] = { "gnu", "pedantic", NULL };
+const char *const w_ped[] = { "pedantic", NULL };
+
+/* every flag ext_on is asked about, and every group they are in: whether any can be on */
+static const char *const ext_flags[] = {
+	"c23-extensions", "c2y-extensions", "extra-semi", "gnu-conditional-omitted-operand", "gnu-empty-struct",
+	"gnu-label-as-value", "gnu-pointer-arith", "gnu-statement-expression",
+	"gnu-statement-expression-from-macro-expansion", "language-extension-token", "pedantic", "pointer-arith",
+	"zero-length-array", NULL
+};
+static const char *const ext_groups[] = { "pedantic", "gnu", "pointer-arith", "gnu-statement-expression", NULL };
+
+VPRIV bool ext_on_slow(cc *c, const char *flag, const char *const *groups)
+{
+	uint32_t i;
+
+	if (c->ext_off < 0) {	/* off unless an option names one of them ("-Wx", "-Werror=x") */
+		int nw;
+		const char *const *wa = pp_diag_wargs(c->p, &nw);
+
+		c->nenable = pp_diag_nenable_ref(c->p);
+		c->ext_off = 1;
+		for (int k = 0; k < nw && c->ext_off; k++) {
+			const char *a = wa[k];
+
+			if (a[1] != 'W' || !strncmp(a, "-Wno-", 5))
+				continue;
+			a += strncmp(a, "-Werror=", 8) ? 2 : 8;
+			if (!strcmp(a, "everything"))
+				c->ext_off = 0;
+			for (i = 0; ext_flags[i] && c->ext_off; i++)
+				c->ext_off = strcmp(a, ext_flags[i]) != 0;
+			for (i = 0; ext_groups[i] && c->ext_off; i++)
+				c->ext_off = strcmp(a, ext_groups[i]) != 0;
+		}
+	}
+	if (c->ext_off > 0)	/* off on the command line: only a "warning"/"error" pragma turns it on */
+		return *c->nenable != 0;	/* (and then pp_diag_wlevel decides by location) */
+	if (pp_diag_npragma(c->p))
+		return true;	/* (a pragma may turn it off somewhere: pp_diag_wlevel decides) */
+	for (i = 0; i < c->next_n; i++)
+		if (c->next_k[i] == flag)
+			return c->next_v[i];
+	if (i < sizeof(c->next_k) / sizeof(c->next_k[0])) {
+		uint32_t k = 0;
+
+		while (ext_flags[k] && strcmp(ext_flags[k], flag))
+			k++;
+		if (!ext_flags[k]) {	/* (ext_off would hide it) */
+			fprintf(stderr, "vcc: internal error: ext_on(\"%s\") is not in ext_flags\n", flag);
+			abort();
+		}
+		c->next_k[i] = flag;
+		c->next_v[i] = pp_wstate(c->p, flag, false, groups) != 0;
+		c->next_n++;
+		return c->next_v[i];
+	}
+	return true;
+}
+
+VPRIV void ext_warn(cc *c, const char *flag, const char *const *groups, uint32_t loc, const char *fmt, ...)
+{
+	int lv;
+	vdiag *d;
+	va_list ap;
+
+	pp_diag_pc = __builtin_return_address(0);
+	if (!ext_on(c, flag, groups) || (lv = pp_diag_wlevel(c->p, flag, false, groups, loc)) < 0)
+		return;
+	if (lv == VDL_ERROR)
+		error_limit(c), c->errors++;
+	c->ndiag++;
+	va_start(ap, fmt);
+	d = pp_diag_vbegin(c->p, lv, loc, fmt, ap);
+	va_end(ap);
+	pp_diag_flag(d, flag);
+	d->werror = lv == VDL_ERROR;
+	pp_diag_emit(c->p, d);
+}
+
 VPRIV const char *idname(uint32_t id, int *len)
 {
 	*len = (int)vintern_ents[id].len;

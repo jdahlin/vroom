@@ -405,6 +405,8 @@ VPRIV void asm_label(cc *c, attrs *a)
 
 	if (kw != KW_asm && kw != KW___asm__ && kw != KW___asm)
 		return;
+	if (kw == KW_asm)
+		EXT_WARN(c, "language-extension-token", w_ped, tok(c)->loc, "extension used");
 	next(c);
 	expect(c, T_LPAREN, "'('");
 	a->asmname = string_index(c, 0);

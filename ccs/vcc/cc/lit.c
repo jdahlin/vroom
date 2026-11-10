@@ -83,9 +83,11 @@ static uint32_t number_s(cc *c, const ptok *t, const char *s, size_t n)
 	}
 	if (n > 1 && s[0] == '0' && (s[1] == 'x' || s[1] == 'X'))
 		base = 16, i = 2;
-	else if (n > 1 && s[0] == '0' && (s[1] == 'b' || s[1] == 'B'))
+	else if (n > 1 && s[0] == '0' && (s[1] == 'b' || s[1] == 'B')) {
 		base = 2, i = 2;
-	else if (s[0] == '0')
+		if (c->o->std != 23)
+			EXT_WARN(c, "c23-extensions", w_ped, t->loc, "binary integer literals are a C23 extension");
+	} else if (s[0] == '0')
 		base = 8;
 	for (; i < n; i++) {
 		unsigned d;

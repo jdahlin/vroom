@@ -73,4 +73,23 @@ attributes.c:24:26: warning: null passed to a callee that requires a non-null ar
    24 | void h(void) { n1(NULL, 0); }
       |                         ~^
       = help: parameter 2 of 'n1' is declared nonnull
-15 warnings generated.
+attributes.c:29:33: error: 'u' is unavailable
+   28 | struct S3 { int u __attribute__((unavailable)); } s3;
+      |                 - 'u' has been explicitly marked unavailable here
+   29 | int k(void) { return o1(1) + s3.u; }
+      |                                 ^
+attributes.c:28:17: note: 'u' has been explicitly marked unavailable here
+attributes.c:30:17: error: 'o1' is unavailable
+   26 | void o1(...) __attribute__((unavailable, overloadable));
+      |      - 'o1' has been explicitly marked unavailable here
+  ...
+   30 | void k2(void) { o1(s3); u1(); }
+      |                 ^
+attributes.c:26:6: note: 'o1' has been explicitly marked unavailable here
+attributes.c:30:25: error: 'u1' is unavailable: gone
+   30 | void k2(void) { o1(s3); u1(); }
+      |                         ^
+attributes.c:14:43: note: 'u1' has been explicitly marked unavailable here
+   14 | __attribute__((unavailable("gone"))) void u1(void);
+      |                                           ^
+15 warnings and 3 errors generated.

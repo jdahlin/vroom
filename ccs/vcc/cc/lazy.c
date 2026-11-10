@@ -48,8 +48,21 @@ static void lz_tok(cc *c, const ptok *t)
 	} else {
 		z->v = c->nlzs;
 		z->flags = t->flags;
-		memcpy(c->lzs + c->nlzs, t->s, t->len);
-		c->lzs[c->nlzs + t->len] = 0;
+		char *d = c->lzs + c->nlzs;
+		const char *q = t->s;
+		uint32_t n = t->len;
+
+		if (likely(n <= 3)) {	/* punctuators, most numbers: no memcpy call (a stub on Darwin) */
+			if (n)
+				d[0] = q[0];
+			if (n > 1)
+				d[1] = q[1];
+			if (n > 2)
+				d[2] = q[2];
+		} else {
+			memcpy(d, q, n);
+		}
+		d[n] = 0;
 		c->nlzs += t->len + 1;
 	}
 }

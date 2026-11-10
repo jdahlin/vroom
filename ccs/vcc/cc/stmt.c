@@ -156,6 +156,9 @@ VPRIV uint32_t asm_stmt(cc *c, bool toplevel)
 {
 	uint32_t loc = tok(c)->loc, ai = c->nasm++, n;
 	casm *a = &c->asms[ai];
+
+	if (kwof(tok(c)) == KW_asm)	/* (clang -pedantic: the GNU spelling) */
+		EXT_WARN(c, "language-extension-token", w_ped, loc, "extension used");
 	vec outs, ins, clob, labs;
 	int pending = 0;
 
@@ -611,8 +614,13 @@ VPRIV uint32_t statement(cc *c)
 			cc_error(c, loc, "'case' statement not in switch statement");
 		const_expr(c, &lo, NULL);
 		hi = lo;
-		if (accept(c, T_ELLIPSIS))
+		if (is(c, T_ELLIPSIS)) {
+			static const char *const g[] = { "pedantic", NULL };
+
+			EXT_WARN(c, "c2y-extensions", g, tok(c)->loc, "case ranges are a C2y extension");
+			next(c);
 			const_expr(c, &hi, NULL);
+		}
 		expect(c, T_COLON, "':'");
 		if (c->switch_ty)
 			lo = trunc_to(c, lo, c->switch_ty), hi = trunc_to(c, hi, c->switch_ty);
@@ -681,7 +689,9 @@ VPRIV uint32_t statement(cc *c)
 
 				report(c, "error", loc, &r, 1, NULL, 0, "void function '%.*s' should not return a value [-Wreturn-mismatch]",
 				       IDF(c->syms[c->fn].name));
-			}
+			} else if (is_void(c, rt) && c->fn)	/* (clang -pedantic) */
+				EXT_WARN(c, "pedantic", NULL, loc, "void function '%.*s' should not return void expression",
+					 IDF(c->syms[c->fn].name));
 		} else if (c->fn && !is_void(c, rt) && !c->o->implicit_int) {
 			report(c, "error", loc, NULL, 0, NULL, 0, "non-void function '%.*s' should return a value [-Wreturn-mismatch]",
 			       IDF(c->syms[c->fn].name));
@@ -694,8 +704,12 @@ VPRIV uint32_t statement(cc *c)
 	}
 	case KW_goto:
 		next(c);
-		if (accept(c, T_STAR)) {
-			uint32_t e = decay(c, expr(c));
+		if (is(c, T_STAR)) {
+			uint32_t e;
+
+			EXT_WARN(c, "gnu-label-as-value", w_gnu, tok(c)->loc, "use of GNU indirect-goto extension");
+			next(c);
+			e = decay(c, expr(c));
 
 			expect_semi(c, "after goto statement");
 			return mkstmt(c, N_GOTO_IND, loc, e, 0, 0);

@@ -1,0 +1,28 @@
+int_conv_hint.c:5:14: error: illegal storage class on file-scoped variable
+    5 | register int r;
+      |              ^
+int_conv_hint.c:9:6: error: incompatible pointer to integer conversion initializing 'int' with an expression of type 'int *'; remove & [-Wint-conversion]
+    9 |         int a = &x;
+      |             ^   ~~
+int_conv_hint.c:10:7: error: incompatible integer to pointer conversion initializing 'int *' with an expression of type 'int'; take the address with & [-Wint-conversion]
+   10 |         int *q = x;
+      |              ^   ~
+      |                  &
+int_conv_hint.c:11:7: error: incompatible pointer to integer conversion initializing 'long' with an expression of type 'int *' [-Wint-conversion]
+   11 |         long l = p;
+      |              ^   ~
+int_conv_hint.c:12:5: error: incompatible pointer to integer conversion passing 'int *' to parameter of type 'int'; dereference with * [-Wint-conversion]
+   12 |         fi(p);
+      |            ^ argument 1 of 'fi'
+      |            *
+int_conv_hint.c:3:12: note: passing argument to parameter here
+    3 | void fi(int);
+      |            ^
+int_conv_hint.c:13:5: error: incompatible integer to pointer conversion passing 'int' to parameter of type 'int *'; take the address with & [-Wint-conversion]
+   13 |         fp(x);
+      |            ^ argument 1 of 'fp'
+      |            &
+int_conv_hint.c:4:14: note: passing argument to parameter here
+    4 | void fp(int *);
+      |              ^
+6 errors generated.

@@ -23,6 +23,7 @@ static void cc_init(cc *c, pp *p, const cc_opts *o)
 {
 	memset(c, 0, sizeof(*c));
 	c->p = p;
+	c->ext_off = -1;	/* (ext_on: computed at its first use) */
 	c->o = o;
 	ccr = vmpool_take(&ccpool);
 	c->ty = vmreg_get(&ccr[0], (size_t)1 << 30, "cc.ty");
@@ -175,7 +176,7 @@ int cc_run(pp *p, const cc_opts *o)
 	int errors;
 
 	pthread_once(&once, init_tables);	/* vccd runs TUs on many threads */
-	kwmap = o->std == 23 ? kwmap_c23 : kwmap_gnu;	/* the TU's keywords (this thread parses it) */
+	kwmap = o->std == 23 ? kwmap_c23 : o->strict_std ? kwmap_iso : kwmap_gnu;	/* the TU's keywords (this thread parses it) */
 	cc_init(c, p, o);
 	if (unlikely(getenv("VCC_TEST_DELAYED_BUG") != NULL))	/* test hook: vcc-driver.py */
 		delayed_bug(c, 0, "VCC_TEST_DELAYED_BUG");

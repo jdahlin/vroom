@@ -2,7 +2,7 @@
 #include "ccimpl.h"
 
 uint8_t kwclass[KW_END];
-uint16_t kwmap_gnu[KW_END], kwmap_c23[KW_END];
+uint16_t kwmap_gnu[KW_END], kwmap_c23[KW_END], kwmap_iso[KW_END];
 _Thread_local const uint16_t *kwmap = kwmap_gnu;
 
 VPRIV void init_keywords(void)
@@ -46,6 +46,9 @@ VPRIV void init_keywords(void)
 	kwmap_c23[KW_constexpr] = KW_constexpr;
 	kwclass[KW_constexpr] = KC_KW | KC_DECL;	/* (reached only through kwmap_c23) */
 	kwclass[KW_true] = kwclass[KW_false] = kwclass[KW_nullptr] = KC_KW;
+	/* -std=c89..c17: GNU's own spellings are identifiers (clang: typeof, asm) */
+	memcpy(kwmap_iso, kwmap_gnu, sizeof(kwmap_iso));
+	kwmap_iso[KW_typeof] = kwmap_iso[KW_asm] = 0;
 }
 
 static void pragma(cc *c, const ptok *t);

@@ -1,6 +1,13 @@
 /* vcc front end: initializers */
 #include "ccimpl.h"
 
+/* at '{': "{}" before C23 (clang -pedantic) */
+static inline void empty_init_ext(cc *c)
+{
+	if (unlikely(ext_on(c, "c23-extensions", w_ped)) && c->o->std != 23 && peek(c, 1)->kind == T_RBRACE)
+		ext_warn(c, "c23-extensions", w_ped, tok(c)->loc, "use of an empty initializer is a C23 extension");
+}
+
 /* ---------------- initializers ---------------- */
 
 typedef struct irun {
@@ -292,6 +299,7 @@ static void il_elem(cc *c, ilist *l, uint64_t pos, uint32_t v, bool st)
 
 			uint32_t ob = tok(c)->loc;
 
+			empty_init_ext(c);
 			next(c), c->ibr++;
 			il_fill(c, s, 0, true, 0, st);
 			expect_match(c, T_RBRACE, ob), c->ibr--;
@@ -446,6 +454,7 @@ static uint64_t il_designation(cc *c, ilist *l, bool st)
 
 				uint32_t ob = tok(c)->loc;
 
+				empty_init_ext(c);
 				next(c), c->ibr++;
 				il_fill(c, s, 0, true, 0, st);
 				expect_match(c, T_RBRACE, ob), c->ibr--;
@@ -579,6 +588,7 @@ static uint32_t init_braced(cc *c, qty ty, bool st)
 {
 	uint32_t v = 0, loc = tok(c)->loc;
 
+	empty_init_ext(c);
 	expect(c, T_LBRACE, "'{'");
 	if (is(c, T_RBRACE)) {
 		next(c);
@@ -631,6 +641,7 @@ VPRIV uint32_t initializer(cc *c, qty *ty, bool st)
 			l = il_new(c, QUNQ(t));
 			uint32_t ob = tok(c)->loc;
 
+			empty_init_ext(c);
 			next(c), c->ibr++;
 			il_fill(c, l, 0, true, 0, st);
 			expect_match(c, T_RBRACE, ob), c->ibr--;

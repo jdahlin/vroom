@@ -103,7 +103,7 @@ static bool param_list(cc *c, dop *op)
 				ds.invalid = true;
 			}
 			vpush(c, &ptys, t);
-			s = sym_new(c, S_VAR, d.name, t, d.loc ? d.loc : ds.loc);
+			s = sym_new(c, S_VAR, d.name, t, d.name ? d.loc : tok(c)->loc);	/* (clang: unnamed, where the name would be) */
 			c->syms[s].flags |= SF_PARAM | (ds.invalid ? SF_INVALID : 0);
 			if (unlikely(d.at.ext | ds.at.ext) && (c->attrx[d.at.ext].nonnull | c->attrx[ds.at.ext].nonnull))
 				c->syms[s].flags |= SF_NONNULL, c->nnparam++;
@@ -192,6 +192,8 @@ static void array_suffix(cc *c, dop *op, uint32_t name)
 				report(c, "error", r.b, &r, 1, NULL, 0, "array size is negative");
 			v = 1;
 		}
+		if (unlikely(v == 0))
+			EXT_WARN(c, "zero-length-array", w_gnu, rng(c, n).b, "zero size arrays are an extension");
 		op->a = (uint32_t)(uint64_t)v;
 		op->b = (uint32_t)((uint64_t)v >> 32);
 	}

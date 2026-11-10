@@ -228,6 +228,42 @@ VPRIV uint32_t typo_keyword(cc *c, uint32_t id, int kws)
 	return kw;
 }
 
+/* id is a keyword in C23 (or in the GNU modes) but not in this -std: what to use instead */
+static const char *c23_word(cc *c, uint32_t id)
+{
+	static const struct { const char *w, *h; } t[] = {
+		{ "alignas", "'alignas' is a keyword in C23: before it, use '_Alignas' or include <stdalign.h>" },
+		{ "alignof", "'alignof' is a keyword in C23: before it, use '_Alignof' or include <stdalign.h>" },
+		{ "bool", "'bool' is a keyword in C23: before it, use '_Bool' or include <stdbool.h>" },
+		{ "constexpr", "'constexpr' is a keyword in C23 (-std=c23): before it, use 'static const' or an enum constant" },
+		{ "false", "'false' is a keyword in C23: before it, include <stdbool.h>" },
+		{ "nullptr", "'nullptr' is a keyword in C23 (-std=c23): before it, use NULL from <stddef.h>" },
+		{ "static_assert", "'static_assert' is a keyword in C23: before it, use '_Static_assert' or include <assert.h>" },
+		{ "thread_local", "'thread_local' is a keyword in C23: before it, use '_Thread_local' or include <threads.h>" },
+		{ "true", "'true' is a keyword in C23: before it, include <stdbool.h>" },
+		{ "typeof", "'typeof' is a keyword in C23 and the GNU modes (-std=gnu17): in ISO C17, use '__typeof__'" },
+		{ "typeof_unqual", "'typeof_unqual' is a keyword in C23: before it, use '__typeof_unqual__'" },
+	};
+	int m;
+	const char *n;
+
+	if (c->o->std >= 23)
+		return NULL;
+	n = idname(id, &m);
+	for (size_t i = 0; i < sizeof t / sizeof t[0]; i++)
+		if ((int)strlen(t[i].w) == m && !memcmp(t[i].w, n, (size_t)m))
+			return t[i].h;
+	return NULL;
+}
+
+VPRIV void c23_word_help(cc *c, vdiag *d, uint32_t id)
+{
+	const char *h = c23_word(c, id);
+
+	if (h)
+		pp_diag_help(c->p, d, "%s", h);
+}
+
 /* "<msg> 'id'; did you mean 'x'?" with the fix-it and the "declared here" note,
    or just "<msg> 'id'"; returns the correction, a symbol or with kws (KWS_*) and kw
    a keyword in *kw */
@@ -265,9 +301,9 @@ VPRIV uint32_t undeclared(cc *c, const char *msg, uint32_t id, uint32_t loc, boo
 			note(c, c->syms[s].loc, "'%s' declared here", fs);
 	} else {
 		/* clang: a caret alone under an unknown type name, a range under an undeclared identifier */
-		const char *h = lib_header(c, id);
+		const char *h = lib_header(c, id), *w = c23_word(c, id);
 
-		if (h) {
+		if (h || w) {
 			vdiag *d;
 
 			error_limit(c), c->errors++, c->ndiag++;
@@ -275,8 +311,12 @@ VPRIV uint32_t undeclared(cc *c, const char *msg, uint32_t id, uint32_t loc, boo
 					  IDF(id));
 			if (!tn)
 				pp_diag_label(c->p, d, r.b, r.e, NULL);
-			pp_diag_help(c->p, d, "'%.*s' is declared in <%s>", IDF(id), h);
-			include_fix(c, d, loc, h);
+			if (w)
+				pp_diag_help(c->p, d, "%s", w);
+			else
+				pp_diag_help(c->p, d, "'%.*s' is declared in <%s>", IDF(id), h);
+			if (h)
+				include_fix(c, d, loc, h);
 			pp_diag_emit(c->p, d);
 		} else
 			report(c, "error", loc, &r, tn ? 0 : 1, NULL, 0, tn ? "unknown type name '%.*s'"

@@ -56,8 +56,12 @@ __attribute__((noinline)) VPRIV void struct_body(cc *c, uint32_t ti)
 			cc_error(c, pp_tok_end(c->p, c->prevloc), "expected '}'");
 			longjmp(c->bail, 1);
 		}
-		if (accept(c, T_SEMI))
+		if (is(c, T_SEMI)) {
+			EXT_WARN(c, "extra-semi", w_ped, tok(c)->loc, "extra ';' inside a %s",
+				 c->tags[ti].flags & RF_UNION ? "union" : "struct");
+			next(c);
 			continue;
+		}
 		if (iskw(c, KW__Static_assert)) {
 			static_assert_decl(c);
 			continue;
@@ -232,6 +236,13 @@ VPRIV void enum_body(cc *c, uint32_t ti, attrs *after)
 		if (!any || v > mx)
 			mx = v;
 		any = true;
+		if (unlikely(v < INT32_MIN || v > INT32_MAX) && c->o->std != 23) {
+			char b[48];
+
+			i128s_(b, sizeof b, v);
+			EXT_WARN(c, "c23-extensions", w_ped, loc, "enumerator value which exceeds the range of 'int' is a C23 extension "
+				 "(%s is too %s)", b, v < 0 ? "small" : "large");
+		}
 		s = sym_new(c, S_ENUMCONST, name, v >= INT32_MIN && v <= INT32_MAX ? prim(TY_INT) :
 						 v >= 0 && v <= UINT32_MAX ? prim(TY_UINT) : v >= INT64_MIN && v <= INT64_MAX ? prim(TY_LONG) : prim(TY_ULONG), loc);
 		c->syms[s].val = (int64_t)v;

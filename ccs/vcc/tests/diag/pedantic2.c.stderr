@@ -1,0 +1,52 @@
+pedantic2.c:4:12: warning: named variadic macros are a GNU extension [-Wvariadic-macros]
+    4 | #define V(a...) a
+      |            ^
+pedantic2.c:6:10: warning: '__COUNTER__' is a C2y extension [-Wc2y-extensions]
+    6 | int c1 = __COUNTER__;
+      |          ^
+pedantic2.c:7:1: warning: extension used [-Wlanguage-extension-token]
+    7 | typeof(c1) t1;
+      | ^
+pedantic2.c:9:8: warning: extension used [-Wlanguage-extension-token]
+    9 | int a2 asm("a2x");
+      |        ^
+pedantic2.c:10:1: warning: extra ';' outside of a function [-Wextra-semi]
+   10 | ;
+      | ^
+pedantic2.c:11:18: warning: extra ';' inside a struct [-Wextra-semi]
+   11 | struct X { int a;; };
+      |                  ^
+pedantic2.c:12:9: warning: binary integer literals are a C23 extension [-Wc23-extensions]
+   12 | int b = 0b101;
+      |         ^
+pedantic2.c:13:14: warning: use of an empty initializer is a C23 extension [-Wc23-extensions]
+   13 | int arr[2] = {};
+      |              ^
+pedantic2.c:14:26: warning: use of an empty initializer is a C23 extension [-Wc23-extensions]
+   14 | struct Y { int y; } yy = {};
+      |                          ^
+pedantic2.c:15:10: warning: enumerator value which exceeds the range of 'int' is a C23 extension (2147483648 is too large) [-Wc23-extensions]
+   15 | enum E { BIG = 0x80000000 };
+      |          ^
+pedantic2.c:16:6: warning: ISO C forbids forward references to 'enum' types [-Wpedantic]
+   16 | enum F;
+      |      ^
+pedantic2.c:17:9: warning: invalid application of 'sizeof' to a void type [-Wpointer-arith]
+   17 | int s = sizeof(void) + _Alignof(void);
+      |         ^
+pedantic2.c:17:24: warning: invalid application of 'alignof' to a void type [-Wpointer-arith]
+   17 | int s = sizeof(void) + _Alignof(void);
+      |                        ^
+pedantic2.c:19:27: warning: arithmetic on a pointer to void is a GNU extension [-Wgnu-pointer-arith]
+   19 | void *q(void) { return vp + 1; }
+      |                           ^
+pedantic2.c:20:28: warning: arithmetic on pointers to void is a GNU extension [-Wgnu-pointer-arith]
+   20 | long d(void *p) { return p - vp; }
+      |                            ^
+pedantic2.c:22:17: warning: void function 'vg' should not return void expression [-Wpedantic]
+   22 | void vg(void) { return vf(); }
+      |                 ^
+pedantic2.c:23:16: warning: extension used [-Wlanguage-extension-token]
+   23 | int f2(void) { asm("nop"); __asm__("nop"); return V(1) + W(2); }
+      |                ^
+17 warnings generated.

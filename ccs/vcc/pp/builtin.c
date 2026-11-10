@@ -193,6 +193,16 @@ static int has_query(pp *p, int b, const char *name, uint32_t loc)
 
 int (*pp_builtin_known)(const char *name);
 
+/* -Wc2y-extensions (-pedantic): __COUNTER__; out of line, builtin() is hot */
+static __attribute__((noinline, cold)) void counter_ext(pp *p, uint32_t loc)
+{
+	static const char *const g[] = { "pedantic", NULL };
+	pp_dinfo d = { "warning", loc, NULL, 0, NULL, 0, NULL, 0 };
+
+	if (pp_warnx(p, "c2y-extensions", false, g, &d, "'__COUNTER__' is a C2y extension"))
+		HC_BAD(p);
+}
+
 VPRIV int builtin(pp *p, const pmacro *m, ptok *t)
 {
 	uint8_t nf = t->flags & (TF_SOL | TF_SPACE);
@@ -227,6 +237,8 @@ VPRIV int builtin(pp *p, const pmacro *m, ptok *t)
 		mkstr(p, t, p->base_name, p->base_namelen);
 		break;
 	case B_COUNTER:
+		if (unlikely(p->o->nwargs) && pp_wc_maybe(p, PPW_C2Y))
+			counter_ext(p, t->loc);	/* (the kernel's __UNIQUE_ID: keep the common case one test) */
 		if (p->rec.on) {
 			if (p->in_dir)
 				HC_BAD(p);	/* the value decides something */

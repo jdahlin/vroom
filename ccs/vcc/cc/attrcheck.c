@@ -19,11 +19,12 @@ VPRIV void depr_use(cc *c, uint32_t s, uint32_t loc)
 	const sym *y = &c->syms[s];
 
 	if (y->attrs && (!c->fn || c->fn != s))
-		depr_report(c, y->name, c->attr[y->attrs].ext, loc);
+		depr_report(c, y->name, c->attr[y->attrs].ext, loc, y->loc);
 }
 
-/* name, with the attribute record c->attrx[x], used at loc */
-VPRIV void depr_report(cc *c, uint32_t name, uint32_t x, uint32_t loc)
+/* name (declared at dloc), with the attribute record c->attrx[x], used at loc; clang's
+   note is at the attribute for deprecated, at the declaration for unavailable */
+VPRIV void depr_report(cc *c, uint32_t name, uint32_t x, uint32_t loc, uint32_t dloc)
 {
 	const attrx *a = &c->attrx[x];
 	const char *m;
@@ -34,7 +35,7 @@ VPRIV void depr_report(cc *c, uint32_t name, uint32_t x, uint32_t loc)
 	m = msg_of(c, a->deprmsg);
 	if (a->depr == 2) {
 		cc_error(c, loc, "'%.*s' is unavailable%s%s", IDF(name), m && *m ? ": " : "", m && *m ? m : "");
-		note(c, a->deprloc, "'%.*s' has been explicitly marked unavailable here", IDF(name));
+		note(c, dloc ? dloc : a->deprloc, "'%.*s' has been explicitly marked unavailable here", IDF(name));
 		return;
 	}
 	vdiag *d = cc_warn_begin(c, "deprecated-declarations", true, w_depr, loc, "'%.*s' is deprecated%s%s",

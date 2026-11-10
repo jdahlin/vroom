@@ -9,6 +9,16 @@ VPRIV bool is_cmp(int op)
 	       op == T_EQUALEQUAL || op == T_EXCLAIMEQ;
 }
 
+/* clang -pedantic: arithmetic on void * (GNU: element size 1) */
+static inline void void_ptr_arith(cc *c, qty pt, uint32_t loc, bool two)
+{
+	static const char *const g[] = { "pointer-arith", "gnu", "pedantic", NULL };
+
+	if (unlikely(KIND(c, T(c, pt)->base) == TY_VOID))
+		EXT_WARN(c, "gnu-pointer-arith", g, loc,
+			 two ? "arithmetic on pointers to void is a GNU extension" : "arithmetic on a pointer to void is a GNU extension");
+}
+
 VPRIV uint32_t binop(cc *c, int op, uint32_t l, uint32_t r, uint32_t loc)
 {
 	qty lt, rt;
@@ -68,11 +78,14 @@ VPRIV uint32_t binop(cc *c, int op, uint32_t l, uint32_t r, uint32_t loc)
 		lt = N(l)->ty, rt = N(r)->ty;
 	}
 	if ((op == T_PLUS || op == T_MINUS) && is_ptr(c, lt) && is_integer(c, rt)) {
+		void_ptr_arith(c, lt, loc, false);
 		r = convert(c, r, prim(TY_LONG));
 		return mk_bin(c, op, lt, l, r, loc);
 	}
-	if (op == T_MINUS && is_ptr(c, lt) && is_ptr(c, rt))
+	if (op == T_MINUS && is_ptr(c, lt) && is_ptr(c, rt)) {
+		void_ptr_arith(c, lt, loc, true);
 		return mk_bin(c, op, c->t_ptrdiff, l, r, loc);
+	}
 	if (is_cmp(op) && (is_ptr(c, lt) || is_ptr(c, rt))) {
 		if (!is_ptr(c, lt))
 			l = convert(c, l, rt);
@@ -110,6 +123,7 @@ VPRIV uint32_t assign(cc *c, int op, uint32_t l, uint32_t r, uint32_t loc)
 		r = rvalue(c, r);
 		rt = N(r)->ty;
 		if (is_ptr(c, lt) && (op == T_PLUS || op == T_MINUS)) {
+			void_ptr_arith(c, lt, loc, false);
 			r = convert(c, r, prim(TY_LONG));
 			pt = lt;
 		} else if (is_vector(c, lt)) {
@@ -255,7 +269,7 @@ static __attribute__((noinline)) uint32_t member_slow(cc *c, uint32_t base, uint
 		base = m;
 		bt = N(m)->ty;
 		if (unlikely(f->depr) && i == d - 1)
-			depr_report(c, f->name, f->depr, c->prevloc);
+			depr_report(c, f->name, f->depr, c->prevloc, f->loc);
 		if (is_record(c, bt))
 			ti = T(c, bt)->aux;
 	}
@@ -280,7 +294,7 @@ VPRIV uint32_t member(cc *c, uint32_t base, uint32_t name, uint32_t loc)
 				if (unlikely(f->invalid))
 					return err_node(c, loc);
 				if (unlikely(f->depr))
-					depr_report(c, f->name, f->depr, c->prevloc);
+					depr_report(c, f->name, f->depr, c->prevloc, f->loc);
 				m = mk(c, N_MEMBER, qualify(c, f->ty, QQ(bt)), loc);
 
 				N(m)->a = base;
@@ -376,9 +390,10 @@ static uint32_t generic_sel(cc *c, uint32_t loc)
 	if (!chosen) {
 		pp_span r = rng(c, ctl);
 
-		report(c, "error", N(ctl)->loc, &r, 1, NULL, 0,
-		       "controlling expression type '%s' not compatible with any generic association type", tyname(c, ct));
-		return mk_int(c, 0, prim(TY_INT), loc);
+		if (!ISERR(ctl))	/* (clang: nothing more for an invalid operand; the result is invalid) */
+			report(c, "error", N(ctl)->loc, &r, 1, NULL, 0,
+			       "controlling expression type '%s' not compatible with any generic association type", tyname(c, ct));
+		return err_node(c, loc);
 	}
 	return chosen;
 }
@@ -411,7 +426,7 @@ static inline __attribute__((always_inline)) uint32_t primary_sym(cc *c, uint32_
 {
 	sym *y = &c->syms[s];
 
-	if (unlikely(y->flags & SF_DEPR))
+	if (unlikely(y->flags & SF_DEPR) && !(y->flags & SF_OVERLOAD))	/* an overload set: the member a call picks */
 		depr_use(c, s, loc);
 	if (y->kind == S_ENUMCONST) {
 		uint32_t n = mk_int(c, y->val, y->ty, loc);
@@ -497,6 +512,7 @@ static __attribute__((cold, noinline)) void implicit_call_error(cc *c, uint32_t 
 	d = pp_diag_begin(c->p, VDL_ERROR, loc, "call to undeclared function '%.*s'; ISO C99 and later do not support "
 			  "implicit function declarations", IDF(id));
 	pp_diag_flag(d, "implicit-function-declaration");
+	c23_word_help(c, d, id);
 	if (h) {
 		pp_diag_help(c->p, d, "'%.*s' is declared in <%s>", IDF(id), h);
 		include_fix(c, d, loc, h);
@@ -589,8 +605,16 @@ VPRIV uint32_t paren_expr(cc *c, uint32_t loc)
 {
 	uint32_t n;
 
-	if (is(c, T_LBRACE))
+	if (is(c, T_LBRACE)) {
+		static const char *const g[] = { "gnu-statement-expression", "gnu", "pedantic", NULL };
+
+		if (c->prevflags & PF_MACRO)	/* (clang: the '(' from a macro) */
+			EXT_WARN(c, "gnu-statement-expression-from-macro-expansion", g, tok(c)->loc,
+				 "use of GNU statement expression extension from macro expansion");
+		else
+			EXT_WARN(c, "gnu-statement-expression", w_gnu, tok(c)->loc, "use of GNU statement expression extension");
 		return stmt_expr(c, loc);
+	}
 	n = expr(c);
 	expect_close(c, T_RPAREN, loc, n);
 	N(n)->flags |= NF_PAREN;
@@ -738,6 +762,8 @@ static __attribute__((noinline)) uint32_t call(cc *c, uint32_t fn, uint32_t loc)
 		s = ovl_pick(c, N(fn)->a, &args, loc);
 		N(fn)->a = s;
 		N(fn)->ty = c->syms[s].ty;
+		if (unlikely(c->syms[s].flags & SF_DEPR))
+			depr_use(c, s, N(fn)->loc);
 		if (!c->unevaluated)
 			c->syms[s].flags |= SF_USED;
 		c->syms[s].flags |= SF_REF;

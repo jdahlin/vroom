@@ -191,8 +191,13 @@ struct cc {
 	vdiag **rtq;		/* clang's DiagRuntimeBehavior in a function: emitted at the body's end */
 	uint32_t nrtq, rtqcap;
 	bool has_depr_tag;
-	uint32_t nnparam;	/* parameters declared nonnull so far */	/* some tag is deprecated: tag uses are checked */
-	int bcp;		/* in __builtin_constant_p's argument: unevaluated, but its names are used */		/* in an integer constant expression (clang: no runtime-behavior warnings) */
+	uint32_t nnparam;	/* parameters declared nonnull so far */
+	const char *next_k[16];	/* ext_on's cache: flag (a literal), whether it is on (this TU's options) */
+	bool next_v[16];
+	uint32_t next_n;
+	int8_t ext_off;		/* 1: no extension warning is on (command line); -1: not known yet */
+	const uint32_t *nenable;	/* pp's "#pragma diagnostic warning|error" count (ext_off holds while 0) */
+	int bcp;		/* in __builtin_constant_p's argument: unevaluated, but its names are used */
 	attrs pend;		/* attributes before a block-scope declaration */
 	int in_struct;		/* parsing a struct/union body */
 	int in_tyname;		/* parsing a type name (clang's DSC_type_specifier) */

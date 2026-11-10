@@ -22,3 +22,9 @@ int g(void) {
 }
 #define NULL ((void*)0)
 void h(void) { n1(NULL, 0); }
+/* an overload set (tgmath.h's __tg_promote): only the member a call picks is checked */
+void o1(...) __attribute__((unavailable, overloadable));
+int o1(int) __attribute__((overloadable));
+struct S3 { int u __attribute__((unavailable)); } s3;
+int k(void) { return o1(1) + s3.u; }
+void k2(void) { o1(s3); u1(); }

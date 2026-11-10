@@ -110,6 +110,8 @@ void pp_hc_stats(char *buf, size_t n);
 /* errors reported so far */
 int pp_errors(const pp *p);
 int pp_diag_npragma(const pp *p);	/* #pragma diagnostic transitions so far */
+const char *const *pp_diag_wargs(const pp *p, int *n);	/* the -W/-w options, in order */
+const uint32_t *pp_diag_nenable_ref(const pp *p);	/* ... of them "warning" or "error": the count, for a test inline */
 /* a new build (vccd): forget the include answers; with vlex_cache_flush and
  * vdir_flush, every file is looked up and read again.  No TU may be running. */
 void pp_include_flush(void);

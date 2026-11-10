@@ -529,6 +529,57 @@ Varje delsteg: nya fall i `tests/diag/` (snapshots, och clang som mätpunkt), la
    (clang 3519), första fel på clangs plats oförändrat 95.3 %.
 5. **Standardversion**: C23-nyckelord, `-std=c11` mot C23-funktioner, GNU-utvidgningar
    under `-pedantic`.
+   **Status (2026-11-10): klart (utom makroplatsen, se D5.2).**  Referensen är Homebrew
+   clang 23 (`vcc-diff.py`:s CL), inte Apples clang 21 i PATH: där är
+   `-Wincompatible-pointer-types` bara en varning.  Ett C23-nyckelord före C23 (`bool`,
+   `true`, `nullptr`, `constexpr`, `static_assert`, `typeof` under strikt `-std=c11`,
+   `alignas`, `thread_local`, ...) ger clangs fel med en `help:`-rad om vad som stavas så
+   tidigare (`_Bool`/`<stdbool.h>`, `NULL`, `_Static_assert`, `__typeof__`); strikt
+   `-std=cNN` har inte `typeof`/`asm` som nyckelord (clang).  `-pedantic`, `-pedantic-errors`
+   (`[-Werror,-Wflagga]` som clang) och `-Werror=GRUPP`/`-Wno-error=GRUPP` för grupper.
+   clangs ext_*-varningar, av som standard: GNU statement expression (och
+   `-from-macro-expansion`), `?:` utan mitten, tom struct/union och utan namngivna
+   medlemmar, nollängdsarray, case-intervall (`-Wc2y-extensions`), `&&label` och `goto *`;
+   kollen kostar en cachad test per flagga (`EXT_WARN`).  C23 `auto` härleder typen (som
+   `__auto_type`, även `static auto`; `auto int` är lagringsklassen), utan initierare clangs
+   fel; implicit int har C23:s text.  Nya standardvarningar som saknades helt:
+   `-Wincompatible-pointer-types-discards-qualifiers` (första nivån och "in nested pointer
+   types") och `-Wpointer-sign` (även clangs text för ren `char`), typen som clang visar den
+   (arrayen före decay); `-Wint-conversion` får clangs "; remove &", "; dereference with *"
+   och "; take the address with &" med fix-it när det ger exakt måltypen.  "illegal storage
+   class on file-scoped variable/function" saknades (deklarationen blir ogiltig), en `_Generic`
+   utan träff och en `static_assert` på ett ogiltigt villkor säger inget mer, och noten för en
+   namnlös parameter står där namnet skulle stå.  De vanligaste av clangs `-pedantic`-
+   varningar i kärnan (`WFLAGS=-pedantic HIST=20 vcc-sema.py warn`) finns nu också, med clangs platser:
+   `typeof`/`asm` "extension used" (`-Wlanguage-extension-token`, 6,35 M i kärnan), extra
+   `;` utanför funktioner och i struct/union (`-Wextra-semi`), binära literaler, `{}` och
+   enumeratorer utanför `int` (`-Wc23-extensions`), `__COUNTER__` (`-Wc2y-extensions`),
+   namngivna variadiska makron (`-Wvariadic-macros`), framåtreferens till `enum`,
+   `sizeof`/`_Alignof` på void och funktionstyp (`-Wpointer-arith`), aritmetik på `void *`
+   (`-Wgnu-pointer-arith`) och `return f();` i en void-funktion.  PostgreSQL hittade ett fel
+   från D5.8: i en `overloadable`-mängd (tgmath.h:s `__tg_promote(...)` är `unavailable`)
+   kontrolleras nu bara medlemmen som anropet väljer; noten för `unavailable` står vid
+   deklarationens namn och för `deprecated` vid attributet, som clang.  Testfall c23_words.c,
+   c23_auto.c, pedantic.c, pedantic2.c, ptr_quals.c, int_conv_hint.c (textidentiska med clang
+   utom vcc:s egna `help:`), attributes.c (överlagring, fält).
+   *Prestanda:* `ext_on` är inline: en test så länge ingen flagga i `ext_flags` (eller
+   gruppen) nämns på kommandoraden och ingen `#pragma ... warning/error` setts (pp räknar
+   dem, `nden`; kärnans `__diag_ignore` är "ignored" och stänger inte av snabbvägen).  pp:s
+   heta varningar (`__COUNTER__`, varje `#define` av ett variadiskt makro) har samma cache
+   (`pp_wc_maybe`); utan den kostade `__COUNTER__`-kollen pp +8 % (kärnans `__UNIQUE_ID`).
+   En profil (xctrace) visade också att `lazy_capture` kopierade varje tokens stavning med
+   `memcpy` via en Darwin-stub: korta stavningar (≤ 3 byte) kopieras nu direkt.  Grinden mot
+   merge-basen: pp +0,23 %, fe −0,46 %, cc −0,41 % (var fe +1,66 % före kopieringen; mot
+   förra committen fe +0,67 % före den).  *Validerat:* `vcc-diag.py` 99/99, `gen-diagids.py
+   --check`, `vcc-sema.py warn` 879/879 (inga varningar clang inte ger), batch och run 878/879,
+   `vcc-ctests.py` 1740/1740, stress 23 + 24 (vccd), `vcc-mutate.py --formats` 1970/1970,
+   `vcc-diff.py` batch 873/873 och cmp 911/912 (modpost.c), `vccd-test.py` 19, `vcc-abi.py`,
+   fuzz-regress, filvis bygge; PostgreSQL med vcc: 1 504 filer, 0 varningar clang inte ger,
+   `meson test` 81 ok.  `vcc-sema.py warn` fick `WFLAGS=` (extra flaggor till båda) och `HIST=N`
+   (clangs diagnoser som vcc saknar, per flagga).  Kvar: `_BitInt` (TODO.md C23), clangs
+   varning för sifferseparatorer före C23 (lexern), `-fdiagnostics-parseable-fixits` (D6), en
+   statement expression från ett funktionsmakro rapporteras vid `)` i stället för makronamnet
+   (pp ger expansionens token platsen för `)`; D5.2).
 6. **Portabilitet**: Linux mot Apple (`long double`, variadiska argument, `char`-tecken).
 7. **UB vid konstantvikning**: skift ≥ bredd, signerat överspill, med en rad om varför.
    **Status (2026-11-09): klart utom statiska initierare.**  `-Winteger-overflow` (clangs

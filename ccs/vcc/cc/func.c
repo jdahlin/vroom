@@ -579,8 +579,11 @@ VPRIV void translation_unit(cc *c)
 		dc_boundary(c);
 		if (is(c, T_EOF))
 			break;
-		if (accept(c, T_SEMI))
+		if (is(c, T_SEMI)) {
+			EXT_WARN(c, "extra-semi", w_ped, tok(c)->loc, "extra ';' outside of a function");
+			next(c);
 			continue;
+		}
 		if (unlikely(is(c, T_RBRACE))) {
 			cc_error(c, tok(c)->loc, "extraneous closing brace ('}')");
 			next(c);

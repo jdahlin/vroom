@@ -407,6 +407,10 @@ typedef struct hkidr {		/* a child entry of a level while recording */
 	uint32_t ex0, nex;	/* its exclusions in rec.kex */
 } hkidr;
 
+/* -pedantic warnings on hot paths (__COUNTER__, every #define of a variadic macro): their
+   command-line state, once per TU, so the common case (off, no pragmas) is one test */
+enum { PPW_C2Y, PPW_VARIADIC, PPW_N };
+
 struct pp {
 	uintptr_t *mdir[NMDIR];
 	const pp_opts *o;
@@ -438,6 +442,9 @@ struct pp {
 	struct pdnode { uint32_t prev; uint8_t act; char name[59]; } *dn;
 	struct { uint32_t loc, st; } *dtr;
 	uint32_t ndn, ndtr, dcur, ndstk, dstk[64];
+	uint32_t nden;			/* "warning"/"error" nodes: only they turn a warning on */
+	const void *wc_o;		/* the options wc[] was computed for */
+	bool wc[PPW_N];			/* -pedantic warnings on hot paths: on (command line) */
 	vlex_file builtin;
 	const char *base_name;
 	uint32_t base_namelen;
@@ -517,6 +524,16 @@ struct pp {
 VPRIV void diag_pragma(pp *p, const char *q, const char *e, uint32_t loc);
 VPRIV void diag_file_end(pp *p, uint32_t fe);
 #define HC_BAD(p) do { if ((p)->rec.n) { (p)->rec.nbad = (p)->rec.n; (p)->rec.badline = __LINE__; } } while (0)
+
+VPRIV void pp_wc_fill(pp *p);
+
+/* false: warning k cannot be reported in this TU (off on the command line, no pragmas) */
+static inline bool pp_wc_maybe(pp *p, int k)
+{
+	if (p->wc_o != p->o)
+		pp_wc_fill(p);
+	return p->wc[k] || p->nden;
+}
 
 #define HC_MAXT (1u << 24)
 
