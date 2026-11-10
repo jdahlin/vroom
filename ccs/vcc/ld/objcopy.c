@@ -25,6 +25,7 @@
 #include "../lib/hash.h"
 #include "ldelf.h"
 
+#include <ctype.h>
 #include <errno.h>
 #include <fcntl.h>
 #include <fnmatch.h>
@@ -393,7 +394,7 @@ typedef struct {
 
 static struct {
 	const char *in, *out;
-	bool binary, strip_all, strip_debug, wildcard;
+	bool binary, binary_in, strip_all, strip_debug, wildcard;
 	const char *prefix_syms, *prefix_alloc;
 	const char **remove;
 	uint32_t nremove;
@@ -487,6 +488,72 @@ static int write_file(int dirfd, const char *path, const uint8_t *b, uint64_t n,
 		return 1;
 	}
 	return 0;
+}
+
+/* -I binary: the file as .data with _binary_<name>_start/_end/_size, laid out as llvm-objcopy */
+static int binary_in(int dirfd)
+{
+	int fd = openat(dirfd, oc.in, O_RDONLY);
+	struct stat st;
+
+	if (fd < 0 || fstat(fd, &st) < 0) {
+		oerror("'%s': %s", oc.in, strerror(errno));
+		if (fd >= 0)
+			close(fd);
+		return 1;
+	}
+	size_t dsz = (size_t)st.st_size;
+	uint8_t *data = xcalloc(dsz + 1, 1);
+	if (dsz && read(fd, data, dsz) != (ssize_t)dsz)
+		oerror("'%s': short read", oc.in);
+	close(fd);
+	char base[4096], nm[3][4200];
+	size_t bl = 0;
+	for (const char *c = oc.in; *c && bl + 1 < sizeof base; c++)
+		base[bl++] = isalnum((unsigned char)*c) ? *c : '_';
+	base[bl] = 0;
+	static const char *const suf[3] = { "start", "end", "size" };
+	StrTab t = {0};
+	for (int i = 0; i < 3; i++) {
+		snprintf(nm[i], sizeof nm[i], "_binary_%s_%s", base, suf[i]);
+		st_add(&t, nm[i]);
+	}
+	st_add(&t, ".strtab");
+	st_add(&t, ".symtab");
+	st_add(&t, ".data");
+	st_finalize(&t);
+	uint64_t stroff = sizeof(Ehdr), symoff = alignto(stroff + t.size, 8), datoff = symoff + 4 * sizeof(Sym);
+	uint64_t shoff = alignto(datoff + dsz, 8), total = shoff + 4 * sizeof(Shdr);
+	uint8_t *b = xcalloc(total, 1);
+	Ehdr *h = (Ehdr *)b;
+	memcpy(h->e_ident, "\177ELF\2\1\1", 7);
+	h->e_type = 1;
+	h->e_machine = 183;
+	h->e_version = 1;
+	h->e_ehsize = sizeof(Ehdr);
+	h->e_shentsize = sizeof(Shdr);
+	h->e_shoff = shoff;
+	h->e_shnum = 4;
+	h->e_shstrndx = 1;
+	st_write(&t, b + stroff);
+	Sym *y = (Sym *)(b + symoff);
+	uint64_t val[3] = { 0, dsz, dsz };
+	for (int i = 0; i < 3; i++)
+		y[i + 1] = (Sym){.st_name = (uint32_t)st_find(&t, nm[i]), .st_info = STB_GLOBAL << 4,
+				 .st_shndx = i == 2 ? SHN_ABS : 3, .st_value = val[i]};
+	memcpy(b + datoff, data, dsz);
+	Shdr *sh = (Shdr *)(b + shoff);
+	sh[1] = (Shdr){.sh_name = (uint32_t)st_find(&t, ".strtab"), .sh_type = SHT_STRTAB, .sh_offset = stroff,
+		       .sh_size = t.size, .sh_addralign = 1};
+	sh[2] = (Shdr){.sh_name = (uint32_t)st_find(&t, ".symtab"), .sh_type = SHT_SYMTAB, .sh_offset = symoff,
+		       .sh_size = 4 * sizeof(Sym), .sh_link = 1, .sh_info = 1, .sh_addralign = 8, .sh_entsize = sizeof(Sym)};
+	sh[3] = (Shdr){.sh_name = (uint32_t)st_find(&t, ".data"), .sh_type = SHT_PROGBITS, .sh_flags = SHF_WRITE | SHF_ALLOC,
+		       .sh_offset = datoff, .sh_size = dsz, .sh_addralign = 1};
+	int rc = oerrors ? 1 : write_file(dirfd, oc.out, b, total, 0666);
+	st_free(&t);
+	free(b);
+	free(data);
+	return rc;
 }
 
 static int objcopy_run(int dirfd)
@@ -1075,8 +1142,11 @@ int objcopy_main(int argc, char **argv, int dirfd, FILE *err)
 			if (!oc.binary && strcmp(v, "elf64-littleaarch64") && strcmp(v, "elf64-aarch64"))
 				oerror("invalid output format: '%s'", v);
 		} else if ((v = VAL("-I")) || (v = VAL("--input-target"))) {
-			if (strcmp(v, "elf64-littleaarch64") && strcmp(v, "elf64-aarch64"))
+			oc.binary_in = !strcmp(v, "binary");
+			if (!oc.binary_in && strcmp(v, "elf64-littleaarch64") && strcmp(v, "elf64-aarch64"))
 				oerror("unsupported input format: '%s'", v);
+		} else if ((v = VAL("-B")) || (v = VAL("--binary-architecture"))) {
+			/* (only meaningful with -I binary: aarch64 is the one target) */
 		} else if (OPT("-S") || OPT("--strip-all")) {
 			oc.strip_all = true;
 		} else if (OPT("-g") || OPT("--strip-debug")) {
@@ -1125,7 +1195,7 @@ int objcopy_main(int argc, char **argv, int dirfd, FILE *err)
 	if (!oerrors) {
 		oc.in = files[0];
 		oc.out = nf > 1 ? files[1] : files[0];
-		rc = objcopy_run(dirfd);
+		rc = oc.binary_in ? binary_in(dirfd) : objcopy_run(dirfd);
 	}
 	free(oc.remove);
 	free(oc.only);

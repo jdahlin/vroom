@@ -979,7 +979,7 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
 - [ ] **vobjcopy / vnm**: (done: `-g`/`--strip-debug`, `--redefine-sym`, `--add-section`, `--add-gnu-debuglink`, `--set-section-flags`; `.llvm_addrsig`'s
   link dropped as llvm-objcopy.)  Missing
   `--only-keep-debug`,
-  `-I binary`/`-B` (done: `-O`/`-I elf64-littleaarch64`).
+  (done: `-O`/`-I elf64-littleaarch64`, `-I binary`, `-B`).
   (Done: nm `-u`/`-U`/`-g`, `-D` with symbol versions, archives (regular and thin), and long forms, unknown options are errors, any
   number of files.)
   *Validate:* `bench/vobjcopy-cmp.sh` extended with these flags vs
