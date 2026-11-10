@@ -1,0 +1,4 @@
+ptr_int_init.c:1:6: error: initializing 'int *' with an expression of incompatible type 'double'
+    1 | int *p = 1.5;
+      |      ^   ~~~
+1 error generated.

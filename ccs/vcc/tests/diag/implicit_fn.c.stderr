@@ -1,0 +1,4 @@
+implicit_fn.c:3:9: error: call to undeclared function 'frobnicate'; ISO C99 and later do not support implicit function declarations [-Wimplicit-function-declaration]
+    3 |         return frobnicate(1);
+      |                ^
+1 error generated.

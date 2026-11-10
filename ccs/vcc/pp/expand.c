@@ -170,6 +170,7 @@ static bool collect_(pp *p, const pmacro *m, const ptok *name, margs *a, ptok *r
 		if (unlikely(t.kind == T_EOF)) {
 			error(p, name->loc, "unterminated function-like macro invocation");
 			p->svn = base;
+			*rp = t;	/* the end of the file: clang drops the invocation, its name too */
 			return false;
 		}
 		if (t.kind == T_LPAREN) {
@@ -233,6 +234,14 @@ done:
 	a->base = base;
 	memset(a->prest, 0, slots);
 	return true;
+}
+
+/* collect failed: the name stays, as clang's; at the end of the file it is dropped */
+static __attribute__((noinline, cold)) int collect_failed(ptok *t, const ptok *rp)
+{
+	if (rp->kind == T_EOF)
+		*t = *rp;
+	return 1;
 }
 
 static bool collect(pp *p, const pmacro *m, const ptok *name, margs *a, ptok *rp)
@@ -541,7 +550,7 @@ static ptok paste(pp *p, const ptok *l, const ptok *r)
 	t.s = b;
 	t.len = (uint32_t)(w - b);
 	t.kind = (uint8_t)k;
-	t.flags = l->flags & (TF_SOL | TF_SPACE);
+	t.flags = l->flags & (TF_SOL | TF_SPACE | PF_MACRO);	/* (PF_MACRO: diagnostics) */
 	t.id = k == T_IDENT ? vintern_copy(b, t.len) : 0;
 	if (unlikely(r->ctr) && p->rec.on)
 		t.ctr = cp_chain(p, l->ctr, 0, cp_chain(p, r->ctr, ll, 0));
@@ -979,7 +988,7 @@ VPRIV int expand(pp *p, const pmacro *m, ptok *t)
 		return 2;
 	}
 	if (!collect(p, m, t, &a, &rp))
-		return 1;
+		return collect_failed(t, &rp);
 	if (unlikely(p->out_text > 1))
 		cmt_skip_to(p, &rp);	/* -C: comments in macro arguments are dropped */
 	if (!m->nbody) {

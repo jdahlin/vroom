@@ -1,0 +1,65 @@
+format_darwin_dou.c:4:79: warning: format specifies type 'unsigned int' but the argument has type 'long' [-Wformat]
+    4 | void f(long l, int i, char *s){ printf("%D %O %U %lD %hO %#D %+U %.2D|%D", i, l, s, i, i, i, i, i);}
+      |                                            ~~                                 ^
+      |                                            %lO
+format_darwin_dou.c:4:82: warning: format specifies type 'unsigned int' but the argument has type 'char *' [-Wformat]
+    4 | void f(long l, int i, char *s){ printf("%D %O %U %lD %hO %#D %+U %.2D|%D", i, l, s, i, i, i, i, i);}
+      |                                               ~~                                 ^
+      |                                               %s
+format_darwin_dou.c:4:85: warning: format specifies type 'long' but the argument has type 'int' [-Wformat]
+    4 | void f(long l, int i, char *s){ printf("%D %O %U %lD %hO %#D %+U %.2D|%D", i, l, s, i, i, i, i, i);}
+      |                                                  ~~~                                ^
+      |                                                  %D
+format_darwin_dou.c:4:59: warning: flag '#' results in undefined behavior with 'D' conversion specifier [-Wformat]
+    4 | void f(long l, int i, char *s){ printf("%D %O %U %lD %hO %#D %+U %.2D|%D", i, l, s, i, i, i, i, i);}
+      |                                                          ~^~
+format_darwin_dou.c:4:63: warning: flag '+' results in undefined behavior with 'U' conversion specifier [-Wformat]
+    4 | void f(long l, int i, char *s){ printf("%D %O %U %lD %hO %#D %+U %.2D|%D", i, l, s, i, i, i, i, i);}
+      |                                                              ~^~
+format_darwin_dou.c:4:72: warning: more '%' conversions than data arguments [-Wformat-insufficient-args]
+    4 | void f(long l, int i, char *s){ printf("%D %O %U %lD %hO %#D %+U %.2D|%D", i, l, s, i, i, i, i, i);}
+      |                                                                       ~^
+format_darwin_dou.c:5:37: warning: flag '#' results in undefined behavior with 'D' conversion specifier [-Wformat]
+    5 | void f2(void){ printf("%-D %+D % D %#D %0D %'D %.3D %-O %+O % O %#O %0O %'O %.3O %-U %+U % U %#U %0U %'U %.3U %LD %LO", 1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1L,1L);}
+      |                                    ~^~
+format_darwin_dou.c:5:58: warning: flag '+' results in undefined behavior with 'O' conversion specifier [-Wformat]
+    5 | void f2(void){ printf("%-D %+D % D %#D %0D %'D %.3D %-O %+O % O %#O %0O %'O %.3O %-U %+U % U %#U %0U %'U %.3U %LD %LO", 1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1L,1L);}
+      |                                                         ~^~
+format_darwin_dou.c:5:62: warning: flag ' ' results in undefined behavior with 'O' conversion specifier [-Wformat]
+    5 | void f2(void){ printf("%-D %+D % D %#D %0D %'D %.3D %-O %+O % O %#O %0O %'O %.3O %-U %+U % U %#U %0U %'U %.3U %LD %LO", 1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1L,1L);}
+      |                                                             ~^~
+format_darwin_dou.c:5:74: warning: flag ''' results in undefined behavior with 'O' conversion specifier [-Wformat]
+    5 | void f2(void){ printf("%-D %+D % D %#D %0D %'D %.3D %-O %+O % O %#O %0O %'O %.3O %-U %+U % U %#U %0U %'U %.3U %LD %LO", 1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1L,1L);}
+      |                                                                         ~^~
+format_darwin_dou.c:5:87: warning: flag '+' results in undefined behavior with 'U' conversion specifier [-Wformat]
+    5 | void f2(void){ printf("%-D %+D % D %#D %0D %'D %.3D %-O %+O % O %#O %0O %'O %.3O %-U %+U % U %#U %0U %'U %.3U %LD %LO", 1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1L,1L);}
+      |                                                                                      ~^~
+format_darwin_dou.c:5:91: warning: flag ' ' results in undefined behavior with 'U' conversion specifier [-Wformat]
+    5 | void f2(void){ printf("%-D %+D % D %#D %0D %'D %.3D %-O %+O % O %#O %0O %'O %.3O %-U %+U % U %#U %0U %'U %.3U %LD %LO", 1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1L,1L);}
+      |                                                                                          ~^~
+format_darwin_dou.c:5:95: warning: flag '#' results in undefined behavior with 'U' conversion specifier [-Wformat]
+    5 | void f2(void){ printf("%-D %+D % D %#D %0D %'D %.3D %-O %+O % O %#O %0O %'O %.3O %-U %+U % U %#U %0U %'U %.3U %LD %LO", 1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1L,1L);}
+      |                                                                                              ~^~
+format_darwin_dou.c:5:112: warning: length modifier 'L' results in undefined behavior or no effect with 'D' conversion specifier [-Wformat]
+    5 | void f2(void){ printf("%-D %+D % D %#D %0D %'D %.3D %-O %+O % O %#O %0O %'O %.3O %-U %+U % U %#U %0U %'U %.3U %LD %LO", 1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1L,1L);}
+      |                                                                                                               ~^~
+format_darwin_dou.c:5:112: note: did you mean to use 'll'?
+    5 | void f2(void){ printf("%-D %+D % D %#D %0D %'D %.3D %-O %+O % O %#O %0O %'O %.3O %-U %+U % U %#U %0U %'U %.3U %LD %LO", 1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1L,1L);}
+      |                                                                                                                ^
+      |                                                                                                                ll
+format_darwin_dou.c:5:163: warning: format specifies type 'long long' but the argument has type 'long' [-Wformat]
+    5 | void f2(void){ printf("%-D %+D % D %#D %0D %'D %.3D %-O %+O % O %#O %0O %'O %.3O %-U %+U % U %#U %0U %'U %.3U %LD %LO", 1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1L,1L);}
+      |                                                                                                               ~~~                                                 ^~
+      |                                                                                                               %lD
+format_darwin_dou.c:5:116: warning: length modifier 'L' results in undefined behavior or no effect with 'O' conversion specifier [-Wformat]
+    5 | void f2(void){ printf("%-D %+D % D %#D %0D %'D %.3D %-O %+O % O %#O %0O %'O %.3O %-U %+U % U %#U %0U %'U %.3U %LD %LO", 1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1L,1L);}
+      |                                                                                                                   ~^~
+format_darwin_dou.c:5:116: note: did you mean to use 'll'?
+    5 | void f2(void){ printf("%-D %+D % D %#D %0D %'D %.3D %-O %+O % O %#O %0O %'O %.3O %-U %+U % U %#U %0U %'U %.3U %LD %LO", 1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1L,1L);}
+      |                                                                                                                    ^
+      |                                                                                                                    ll
+format_darwin_dou.c:5:166: warning: format specifies type 'unsigned long long' but the argument has type 'long' [-Wformat]
+    5 | void f2(void){ printf("%-D %+D % D %#D %0D %'D %.3D %-O %+O % O %#O %0O %'O %.3O %-U %+U % U %#U %0U %'U %.3U %LD %LO", 1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1L,1L);}
+      |                                                                                                                   ~~~                                                ^~
+      |                                                                                                                   %lO
+17 warnings generated.

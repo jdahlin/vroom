@@ -1,0 +1,118 @@
+sometimes_uninit_do.c:3:56: warning: variable 'x' is uninitialized when used here [-Wuninitialized]
+    3 | int f1(int c) { int x; if (c) { x = 1; } else { return x; } return x; }
+      |                                                        ^
+sometimes_uninit_do.c:3:22: note: initialize the variable 'x' to silence this warning
+    3 | int f1(int c) { int x; if (c) { x = 1; } else { return x; } return x; }
+      |                      ^
+      |                       = 0
+sometimes_uninit_do.c:4:74: warning: variable 'x' is uninitialized when used here [-Wuninitialized]
+    4 | int f2(int c) { int x; switch (c) { case 1: x = 1; break; case 2: return x; } return 0; }
+      |                                                                          ^
+sometimes_uninit_do.c:4:22: note: initialize the variable 'x' to silence this warning
+    4 | int f2(int c) { int x; switch (c) { case 1: x = 1; break; case 2: return x; } return 0; }
+      |                      ^
+      |                       = 0
+sometimes_uninit_do.c:8:33: warning: variable 'x' is used uninitialized whenever 'if' condition is true [-Wsometimes-uninitialized]
+    8 | int f6(int c) { int x; do { if (c) break; x = c; } while (0); return x; }
+      |                             ----^-------                             - uninitialized use occurs here
+      |                             |
+      |                             remove the 'if' if its condition is always false
+sometimes_uninit_do.c:8:70: note: uninitialized use occurs here
+sometimes_uninit_do.c:8:29: note: remove the 'if' if its condition is always false
+sometimes_uninit_do.c:8:22: note: initialize the variable 'x' to silence this warning
+    8 | int f6(int c) { int x; do { if (c) break; x = c; } while (0); return x; }
+      |                      ^
+      |                       = 0
+sometimes_uninit_do.c:9:33: warning: variable 'x' is used uninitialized whenever 'if' condition is true [-Wsometimes-uninitialized]
+    9 | int f7(int c) { int x; do { if (c) continue; x = c; } while (0); return x; }
+      |                             ----^----------                             - uninitialized use occurs here
+      |                             |
+      |                             remove the 'if' if its condition is always false
+sometimes_uninit_do.c:9:73: note: uninitialized use occurs here
+sometimes_uninit_do.c:9:29: note: remove the 'if' if its condition is always false
+sometimes_uninit_do.c:9:22: note: initialize the variable 'x' to silence this warning
+    9 | int f7(int c) { int x; do { if (c) continue; x = c; } while (0); return x; }
+      |                      ^
+      |                       = 0
+sometimes_uninit_do.c:10:33: warning: variable 'x' is used uninitialized whenever 'if' condition is false [-Wsometimes-uninitialized]
+   10 | int f8(int c) { int x; do { if (c) { x = 1; break; } g(0); } while (0); return x; }
+      |                             ----^--                                            - uninitialized use occurs here
+      |                             |
+      |                             remove the 'if' if its condition is always true
+sometimes_uninit_do.c:10:80: note: uninitialized use occurs here
+sometimes_uninit_do.c:10:29: note: remove the 'if' if its condition is always true
+sometimes_uninit_do.c:10:22: note: initialize the variable 'x' to silence this warning
+   10 | int f8(int c) { int x; do { if (c) { x = 1; break; } g(0); } while (0); return x; }
+      |                      ^
+      |                       = 0
+sometimes_uninit_do.c:11:78: warning: variable 'x' is uninitialized when used here [-Wuninitialized]
+   11 | int f9(int c) { int x; do { if (c) break; else return 0; } while (0); return x; }
+      |                                                                              ^
+sometimes_uninit_do.c:11:22: note: initialize the variable 'x' to silence this warning
+   11 | int f9(int c) { int x; do { if (c) break; else return 0; } while (0); return x; }
+      |                      ^
+      |                       = 0
+sometimes_uninit_do.c:12:48: warning: variable 'x' is used uninitialized whenever switch case is taken [-Wsometimes-uninitialized]
+   12 | int f10(int c) { int x; do { switch (c) { case 1: break; default: x = 1; } } while (0); return x; }
+      |                                                ^                                               - uninitialized use occurs here
+sometimes_uninit_do.c:12:96: note: uninitialized use occurs here
+sometimes_uninit_do.c:12:23: note: initialize the variable 'x' to silence this warning
+   12 | int f10(int c) { int x; do { switch (c) { case 1: break; default: x = 1; } } while (0); return x; }
+      |                       ^
+      |                        = 0
+sometimes_uninit_do.c:15:33: warning: variable 'x' is used uninitialized whenever 'if' condition is true [-Wsometimes-uninitialized]
+   15 | int k1(int c) { int x; do { if (c) { break; } x = 1; } while (0); return x; }
+      |                             ----^------------                            - uninitialized use occurs here
+      |                             |
+      |                             remove the 'if' if its condition is always false
+sometimes_uninit_do.c:15:74: note: uninitialized use occurs here
+sometimes_uninit_do.c:15:29: note: remove the 'if' if its condition is always false
+sometimes_uninit_do.c:15:22: note: initialize the variable 'x' to silence this warning
+   15 | int k1(int c) { int x; do { if (c) { break; } x = 1; } while (0); return x; }
+      |                      ^
+      |                       = 0
+sometimes_uninit_do.c:16:33: warning: variable 'x' is used uninitialized whenever 'if' condition is true [-Wsometimes-uninitialized]
+   16 | int k2(int c) { int x; do { if (c) { g(2); break; } x = 1; } while (0); return x; }
+      |                             ----^------------------                            - uninitialized use occurs here
+      |                             |
+      |                             remove the 'if' if its condition is always false
+sometimes_uninit_do.c:16:80: note: uninitialized use occurs here
+sometimes_uninit_do.c:16:29: note: remove the 'if' if its condition is always false
+sometimes_uninit_do.c:16:22: note: initialize the variable 'x' to silence this warning
+   16 | int k2(int c) { int x; do { if (c) { g(2); break; } x = 1; } while (0); return x; }
+      |                      ^
+      |                       = 0
+sometimes_uninit_do.c:17:33: warning: variable 'x' is used uninitialized whenever 'if' condition is true [-Wsometimes-uninitialized]
+   17 | int k3(int c) { int x; do { if (c) { c++; break; } x = 1; } while (0); return x; }
+      |                             ----^-----------------                            - uninitialized use occurs here
+      |                             |
+      |                             remove the 'if' if its condition is always false
+sometimes_uninit_do.c:17:79: note: uninitialized use occurs here
+sometimes_uninit_do.c:17:29: note: remove the 'if' if its condition is always false
+sometimes_uninit_do.c:17:22: note: initialize the variable 'x' to silence this warning
+   17 | int k3(int c) { int x; do { if (c) { c++; break; } x = 1; } while (0); return x; }
+      |                      ^
+      |                       = 0
+sometimes_uninit_do.c:18:32: warning: variable 'x' is used uninitialized whenever 'if' condition is false [-Wsometimes-uninitialized]
+   18 | int h(int c) { int x; do { if (c) g(1); else { break; } x = 1; } while (0); return x; }
+      |                            ----^--    -----------------                            - uninitialized use occurs here
+      |                            |
+      |                            remove the 'if' if its condition is always true
+sometimes_uninit_do.c:18:84: note: uninitialized use occurs here
+sometimes_uninit_do.c:18:28: note: remove the 'if' if its condition is always true
+sometimes_uninit_do.c:18:21: note: initialize the variable 'x' to silence this warning
+   18 | int h(int c) { int x; do { if (c) g(1); else { break; } x = 1; } while (0); return x; }
+      |                     ^
+      |                      = 0
+sometimes_uninit_do.c:19:32: warning: variable 'x' is used uninitialized whenever 'if' condition is true [-Wsometimes-uninitialized]
+   19 | int k(int c) { int x; do { if (c) { g(2); break; } x = 1; } while (0); return x; }
+      |                            ----^------------------                            - uninitialized use occurs here
+      |                            |
+      |                            remove the 'if' if its condition is always false
+sometimes_uninit_do.c:19:79: note: uninitialized use occurs here
+sometimes_uninit_do.c:19:28: note: remove the 'if' if its condition is always false
+sometimes_uninit_do.c:19:21: note: initialize the variable 'x' to silence this warning
+   19 | int k(int c) { int x; do { if (c) { g(2); break; } x = 1; } while (0); return x; }
+      |                     ^
+      |                      = 0
+12 warnings generated.

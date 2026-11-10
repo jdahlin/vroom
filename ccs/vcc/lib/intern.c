@@ -87,11 +87,13 @@ _Thread_local int vjob_escape_fd = 2;
 void vjob_escape(const char *msg)
 {
 	atomic_store(&vtables_full, 1);
+	void (*hook)(void) = __atomic_load_n(&vintern_full_hook, __ATOMIC_RELAXED);
+
 	dprintf(vjob_escape_fd, "vcc: error: %s\n", msg);
 	if (vjob_escape_fd != 2)	/* (the server's log too) */
 		fprintf(stderr, "vcc: error: %s\n", msg);
-	if (vintern_full_hook)
-		vintern_full_hook();
+	if (hook)
+		hook();
 	abort();
 }
 

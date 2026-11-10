@@ -1,0 +1,10 @@
+too_few_args.c:4:12: error: too few arguments to function call, expected 2, have 1
+    1 | int f(int a, int b);
+      |     - ------------
+      |     |
+      |     'f' declared here
+  ...
+    4 |         return f(1);
+      |                ~  ^
+too_few_args.c:1:5: note: 'f' declared here
+1 error generated.

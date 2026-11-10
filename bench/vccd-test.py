@@ -474,6 +474,79 @@ def concurrent_jobs_isolated():
             check(f'v{i}'.encode() in o, f'job {i}: object does not define v{i}')
     finally: v.stop()
 
+# ---------------- diagnostics across the build (PLAN-diag.md D7) ----------------
+
+def shim_build(v, d, cmds, env=None):
+    """the shim commands run as one build (one process group): (status, stderr)"""
+    sh = '; '.join(' '.join([SHIM] + TARGET + ['-fno-color-diagnostics', '-fdiagnostics-style=clang'] + c) for c in cmds)
+    p = subprocess.run(['sh', '-c', sh], cwd=d, capture_output=True, text=True, timeout=60,
+                       env=dict(os.environ, VCC_SOCK=v.sock, **(env or {})), process_group=0)
+    return p.returncode, p.stderr
+
+def query(v, what=None):
+    p = subprocess.run([SHIM, '--vccd-diagnostics' + (f'={what}' if what else '')], capture_output=True, text=True,
+                       timeout=10, env=dict(os.environ, VCC_SOCK=v.sock))
+    check(p.returncode == 0, f'query {what}: {p.returncode} {p.stderr[-300:]}')
+    return p.stdout
+
+@test()
+def own_warnings_reach_client():
+    """a TU vcc compiles with a warning: the client sees it (vccd used to keep it in its log)"""
+    v = Vccd()
+    try:
+        d = f'{v.dir}/w'; tu(d, 'a.c', 'int f(void) { int u; return 0; }\n')
+        st, err = shim_build(v, d, [['-Wall', '-c', 'a.c']])
+        check(st == 0, f'rc {st} {err[-300:]}')
+        check("a.c:1:19: warning: unused variable 'u' [-Wunused-variable]" in err, f'no warning: {err[-300:]}')
+    finally: v.stop()
+
+@test()
+def header_warning_dedup():
+    """VCC_DIAG_DEDUP=1: a header warning another TU of the build printed is left out, once per build"""
+    v = Vccd()
+    try:
+        d = f'{v.dir}/w'; tu(d, 'h.h', '#warning from h\n')
+        tu(d, 'a.c', '#include "h.h"\nint a;\n'); tu(d, 'b.c', '#include "h.h"\nint b;\n')
+        two = [['-c', 'a.c'], ['-c', 'b.c']]
+        st, err = shim_build(v, d, two)
+        check(st == 0 and err.count('warning: from h') == 2, f'without dedup: {st} {err[-400:]}')
+        for build in (1, 2):	# the second build starts with an empty set
+            st, err = shim_build(v, d, two, {'VCC_DIAG_DEDUP': '1'})
+            check(st == 0 and err.count('warning: from h') == 1, f'dedup build {build}: {st} {err[-400:]}')
+            check('1 header warning left out: printed by another TU of this build.' in err, f'no count: {err[-400:]}')
+        check('1 header warning left out in this build' in query(v), 'summary without the count')
+    finally: v.stop()
+
+@test()
+def records_replaced_per_tu():
+    """the store holds each TU's records; compiling it again replaces exactly them"""
+    import json
+    v = Vccd()
+    try:
+        d = f'{v.dir}/w'
+        tu(d, 'a.c', 'int f(void) { int u; return 0; }\n'); tu(d, 'b.c', 'int g(void) { int w; return 0; }\n')
+        st, err = shim_build(v, d, [['-Wall', '-c', 'a.c'], ['-Wall', '-c', 'b.c']]); check(st == 0, err[-300:])
+        recs = [json.loads(l) for l in query(v, 'json').splitlines()]
+        tus = sorted(os.path.basename(r['tu']) for r in recs)
+        check(tus == ['a.c', 'b.c'], f'records {tus}')
+        check(all(r['flag'] == 'unused-variable' and r['location']['line'] == 1 for r in recs), f'records {recs}')
+        s = query(v)
+        check('2 warnings and 0 errors in 2 TUs' in s and '-Wunused-variable' in s, f'summary: {s}')
+        tu(d, 'a.c', 'int f(void) { return 0; }\n')
+        st, err = shim_build(v, d, [['-Wall', '-c', 'a.c']]); check(st == 0, err[-300:])
+        recs = [json.loads(l) for l in query(v, 'json').splitlines()]
+        check([os.path.basename(r['tu']) for r in recs] == ['b.c'], f'after fixing a.c: {recs}')
+        # past 500 records a TU keeps counts and one "omitted" line
+        tu(d, 'c.c', 'void h(void) {\n' + ''.join(f'int u{i};\n' for i in range(600)) + '}\n')
+        st, err = shim_build(v, d, [['-Wall', '-c', 'c.c']]); check(st == 0, err[-300:])
+        recs = [json.loads(l) for l in query(v, 'json').splitlines() if '/c.c"' in l]
+        check(len(recs) == 501 and recs[-1].get('omitted') == 100, f'c.c: {len(recs)} lines, last {recs[-1]}')
+        check('601 warnings and 0 errors in 2 TUs' in query(v), f'summary: {query(v)}')
+        p = subprocess.run([SHIM, '--vccd-diagnostics=xml'], capture_output=True, text=True, timeout=10,
+                           env=dict(os.environ, VCC_SOCK=v.sock))
+        check(p.returncode == 1 and 'summary or json' in p.stderr, f'bad query: {p.returncode} {p.stderr}')
+    finally: v.stop()
+
 @test()
 def links_in_process_independent():
     """links one after another in one vccd (vld in-process, state reset per link) give vlink's output"""

@@ -1,0 +1,74 @@
+unused_value.c:15:4: warning: equality comparison result unused [-Wunused-comparison]
+   15 |         x == 1;
+      |         ~~^~~~
+unused_value.c:15:4: note: use '=' to turn this equality comparison into an assignment
+   15 |         x == 1;
+      |           ^~
+      |           =
+unused_value.c:5:2: warning: expression result unused [-Wunused-value]
+    5 |         x;
+      |         ^
+unused_value.c:6:2: warning: expression result unused [-Wunused-value]
+    6 |         1;
+      |         ^
+unused_value.c:7:4: warning: expression result unused [-Wunused-value]
+    7 |         x + 1;
+      |         ~ ^ ~
+unused_value.c:8:3: warning: left operand of comma operator has no effect [-Wunused-value]
+    8 |         (0, g());
+      |          ^
+unused_value.c:9:7: warning: expression result unused [-Wunused-value]
+    9 |         g(), x;
+      |              ^
+unused_value.c:10:2: warning: expression result unused [-Wunused-value]
+   10 |         -x;
+      |         ^~
+unused_value.c:11:2: warning: expression result unused [-Wunused-value]
+   11 |         *p;
+      |         ^~
+unused_value.c:12:5: warning: expression result unused [-Wunused-value]
+   12 |         a[1];
+      |         ~ ~^
+unused_value.c:13:4: warning: expression result unused [-Wunused-value]
+   13 |         s.m;
+      |         ~ ^
+unused_value.c:16:2: warning: expression result unused [-Wunused-value]
+   16 |         (int)x;
+      |         ^    ~
+unused_value.c:17:10: warning: expression result unused [-Wunused-value]
+   17 |         y ? 1 : 2;
+      |                 ^
+unused_value.c:19:2: warning: expression result unused [-Wunused-value]
+   19 |         &x;
+      |         ^~
+unused_value.c:20:2: warning: expression result unused [-Wunused-value]
+   20 |         sizeof x;
+      |         ^~~~~~~~
+unused_value.c:21:2: warning: expression result unused [-Wunused-value]
+   21 |         "str";
+      |         ^~~~~
+unused_value.c:22:3: warning: expression result unused [-Wunused-value]
+   22 |         (x);
+      |          ^
+unused_value.c:23:2: warning: expression result unused [-Wunused-value]
+   23 |         ~x;
+      |         ^~
+unused_value.c:24:2: warning: expression result unused [-Wunused-value]
+   24 |         !x;
+      |         ^~
+unused_value.c:25:2: warning: left operand of comma operator has no effect [-Wunused-value]
+   25 |         x, x;
+      |         ^
+unused_value.c:25:5: warning: expression result unused [-Wunused-value]
+   25 |         x, x;
+      |            ^
+unused_value.c:26:5: warning: expression result unused [-Wunused-value]
+   26 |         ({ x; });
+      |            ^
+unused_value.c:27:11: warning: expression result unused [-Wunused-value]
+   27 |         ({ x; }) + 1;
+      |         ~~~~~~~~ ^ ~
+unused_value.c:29:9: warning: expression result unused [-Wunused-value]
+   29 |         x = 1, 2;
+      |                ^
+23 warnings generated.

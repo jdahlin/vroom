@@ -1236,7 +1236,7 @@ static bool uv_sometimes(cc *c, uwk *w, uint32_t k)
 			return false;
 		pp_diagx(c->p, &d, "uninitialized use occurs here");
 		{
-			pp_fixit fx = { cr.b, cr.e, "1" };	/* (while: the condition becomes 1; for: it is removed) */
+			pp_fixit fx = { cr.b, cr.e, "1", 0 };	/* (while: the condition becomes 1; for: it is removed) */
 
 			d = (pp_dinfo){ "note", cr.b, &cr, 1, &fx, x->op == N_WHILE, NULL, 0 };
 			pp_diagx(c->p, &d, "remove the condition if it is always true");
@@ -1311,7 +1311,8 @@ VPRIV void uninit_check(cc *c, uint32_t body, uint32_t first_label)
 
 	static const char *const gs[] = { "uninitialized", "all", "most", NULL };
 
-	if (!pp_wstate(c->p, "uninitialized", false, w_all) && !pp_wstate(c->p, "sometimes-uninitialized", false, gs))
+	if (!pp_wstate(c->p, "uninitialized", false, w_all) && !pp_wstate(c->p, "sometimes-uninitialized", false, gs) &&
+	    !pp_diag_pragmas(c->p))	/* (a pragma may turn them on here: each warning asks at its location) */
 		return;	/* (-Wsometimes-uninitialized alone runs it too) */
 	/* (only the head is cleared: the report arrays are written before they are read) */
 	memset(w, 0, offsetof(uwk, uloc));
@@ -1366,7 +1367,7 @@ VPRIV void uninit_check(cc *c, uint32_t body, uint32_t first_label)
 			/* the declarator's end: the name, or ')' of a function pointer (not an asm label or attributes) */
 			bool fp = KIND(c, canon(c, y->ty)) == TY_PTR && KIND(c, canon(c, T(c, canon(c, y->ty))->base)) == TY_FUNC;
 			uint32_t e = pp_tok_end(c->p, fp && y->ple && !y->asmname && !y->attrs ? y->ple : y->loc);
-			pp_fixit fx = { e, e, z };
+			pp_fixit fx = { e, e, z, 0 };
 			pp_dinfo d = { "note", e, NULL, 0, &fx, 1, NULL, 0 };
 
 			pp_diagx(c->p, &d, "initialize the variable '%.*s' to silence this warning", IDF(y->name));

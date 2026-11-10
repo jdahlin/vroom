@@ -767,7 +767,55 @@ static __attribute__((noinline, cold)) int read_stdin_all(int fd, int errfd, con
 	return 0;
 }
 
+/* vcc --explain [ID]: the page of a diagnostic id (ccs/vcc/docs/diag, compiled in), or the
+   list of ids; -1 when the command line has no --explain */
+static const struct { const char *id, *text; } explain_tab[] = {
+#include "explain.inc"
+};
+
+static __attribute__((noinline, cold)) int explain(int argc, char **argv, const ppd_env *env)
+{
+	const char *id = NULL;
+	bool any = false;
+	int outfd = env->outfd >= 0 ? env->outfd : 1;
+
+	for (int i = 1; i < argc; i++)
+		if (!strcmp(argv[i], "--explain")) {
+			any = true;
+			id = i + 1 < argc ? argv[i + 1] : NULL;
+		} else if (!strncmp(argv[i], "--explain=", 10)) {
+			any = true;
+			id = argv[i] + 10;
+		}
+	if (!any)
+		return -1;
+	if (id && id[0] == '[')	/* as -fdiagnostics-show-id prints it: [id] */
+		id++;
+	for (size_t i = 0; id && i < sizeof(explain_tab) / sizeof(explain_tab[0]); i++) {
+		size_t l = strlen(explain_tab[i].id);
+
+		if (!strncmp(id, explain_tab[i].id, l) && (!id[l] || id[l] == ']'))
+			return write_all(outfd, explain_tab[i].text, strlen(explain_tab[i].text)) ? 1 : 0;
+	}
+	if (id)
+		dprintf(env->errfd >= 0 ? env->errfd : 2, "vcc: error: no explanation for '%s' (vcc --explain lists the ids)\n", id);
+	else
+		for (size_t i = 0; i < sizeof(explain_tab) / sizeof(explain_tab[0]); i++)
+			dprintf(outfd, "%s\n", explain_tab[i].id);
+	return id ? 1 : 0;
+}
+
+static __attribute__((noinline)) int ppd_run1(int argc, char **argv, const ppd_env *env);
+
+/* (--explain apart: a call at the top of ppd_run1 costs its token loop registers) */
 int ppd_run(int argc, char **argv, const ppd_env *env)
+{
+	int x = explain(argc, argv, env);
+
+	return x >= 0 ? x : ppd_run1(argc, argv, env);
+}
+
+static __attribute__((noinline)) int ppd_run1(int argc, char **argv, const ppd_env *env)
 {
 	/* each list holds at most argc entries, all of them plus the defaults: one
 	   per-thread allocation, grown to the longest command line seen */
@@ -789,7 +837,8 @@ int ppd_run(int argc, char **argv, const ppd_env *env)
 	const char *cmp = NULL, *out = NULL, *main_file = NULL, *depfile = NULL, *deptarget = NULL;
 	const char *stdin_src = NULL;	/* the input `-`, read whole */
 	size_t stdin_len = 0;
-	int errfd = env->errfd, status = 0, md = 0, mdeps = 0, mphony = 0, dcolor = 0, nocaret = 0, elimit = 0, nwargs = 0;
+	int errfd = env->errfd, status = 0, md = 0, mdeps = 0, mphony = 0, dcolor = 0, nocaret = 0, elimit = 0, mblimit = 0, slimit = 0, showid = 0, dformat = 0, nwargs = 0, dstyle = 0, dunicode = 0;
+	const char *badval = NULL;	/* an option with a value clang would reject */
 	const char **wargs = NULL;
 	char pmapbuf[4096];
 	jmp_buf jb;
@@ -857,7 +906,40 @@ int ppd_run(int argc, char **argv, const ppd_env *env)
 		if (!strcmp(a, "-fdiagnostics-color=auto")) { dcolor = 0; continue; }
 		if (!strcmp(a, "-fno-caret-diagnostics")) { nocaret = 1; continue; }
 		if (!strcmp(a, "-fcaret-diagnostics")) { nocaret = 0; continue; }
+		if (!strcmp(a, "-fdiagnostics-show-id")) { showid = 1; continue; }
+		if (!strncmp(a, "-fdiagnostics-format=", 21)) {
+			const char *f = a + 21;
+
+			dformat = !strcmp(f, "json") ? PP_DIAG_JSON : !strcmp(f, "sarif") ? PP_DIAG_SARIF : PP_DIAG_TEXT;
+			continue;
+		}
+		if (!strncmp(a, "-fdiagnostics-add-output=sarif:file=", 36)) { po.sarif_file = a + 36; continue; }
+		if (!strncmp(a, "-fdiagnostics-add-output=html:file=", 35)) { po.html_file = a + 35; continue; }
+		if (!strncmp(a, "-fdiagnostics-style=", 20)) {	/* vcc (default), clang, narrated */
+			const char *f = a + 20;
+
+			dstyle = !strcmp(f, "clang") ? PP_DSTYLE_CLANG : !strcmp(f, "narrated") ? PP_DSTYLE_NARRATED : PP_DSTYLE_VCC;
+			if (dstyle == PP_DSTYLE_VCC && strcmp(f, "vcc"))
+				badval = a;
+			continue;
+		}
+		if (!strncmp(a, "-fdiagnostics-text-art-charset=", 31)) {	/* GCC's: ascii, unicode, emoji, none */
+			const char *f = a + 31;
+
+			dunicode = !strcmp(f, "unicode") || !strcmp(f, "emoji");
+			if (!dunicode && strcmp(f, "ascii") && strcmp(f, "none"))
+				badval = a;
+			continue;
+		}
+		if (!strcmp(a, "-fno-diagnostics-show-id")) { showid = 0; continue; }
+		if (!strcmp(a, "-fdiagnostics-parseable-fixits")) { po.diag_parseable = 1; continue; }
+		if (!strcmp(a, "-fdiagnostics-generate-patch")) { po.diag_patch = 1; continue; }
+		if (!strcmp(a, "--fix")) { po.fix_apply = 1; continue; }
+		if (!strcmp(a, "-fno-diagnostics-parseable-fixits")) { po.diag_parseable = 0; continue; }
+		if (!strncmp(a, "-fspell-checking-limit=", 23)) { slimit = atoi(a + 23); slimit = slimit ? slimit : -1; continue; }
+		if (!strcmp(a, "-fno-spell-checking")) { slimit = -2; continue; }
 		if (!strncmp(a, "-ferror-limit=", 14)) { elimit = atoi(a + 14); elimit = elimit ? elimit : -1; continue; }
+		if (!strncmp(a, "-fmacro-backtrace-limit=", 24)) { mblimit = atoi(a + 24); mblimit = mblimit ? mblimit : -1; continue; }
 		if (!strncmp(a, "-std=", 5)) {
 			/* clang's C spellings (LangStandards.def); ver: a __STDC_VERSION__ of its own */
 			static const struct { const char *s; int v; const char *ver; } stds[] = {
@@ -890,11 +972,17 @@ int ppd_run(int argc, char **argv, const ppd_env *env)
 		if (!strcmp(a, "-fgnu89-inline")) { gnu89_inline = 1; continue; }
 		if (!strcmp(a, "-fvcc-kernel")) { vcc_kernel = 1; continue; }
 		if (!strcmp(a, "-fno-gnu89-inline")) { gnu89_inline = 0; continue; }
-		if ((a[1] == 'W' && a[2] && a[3] != ',') || !strcmp(a, "-w")) {
-			/* warning options, in order, for pp_wstate (some are also handled below) */
+		if ((a[1] == 'W' && a[2] && a[3] != ',') || !strcmp(a, "-w") || strstr(a, "-pedantic") == a + (a[1] == '-')) {
+			/* warning options, in order, for pp_wstate (some are also handled below);
+			   -pedantic is -Wpedantic, -pedantic-errors also -Werror=pedantic (two entries) */
 			if (!wargs)
-				wargs = calloc((size_t)argc + 1, sizeof(*wargs));
-			wargs[nwargs++] = a;
+				wargs = calloc((size_t)argc * 2 + 1, sizeof(*wargs));
+			if (!strcmp(a, "-pedantic") || !strcmp(a, "--pedantic"))
+				wargs[nwargs++] = "-Wpedantic";
+			else if (!strcmp(a, "-pedantic-errors") || !strcmp(a, "--pedantic-errors"))
+				wargs[nwargs++] = "-Wpedantic", wargs[nwargs++] = "-Werror=pedantic";
+			else if (a[1] == 'W' || a[1] == 'w')
+				wargs[nwargs++] = a;
 		}
 		if (!strcmp(a, "-Wno-implicit-int") || !strcmp(a, "-Wno-error=implicit-int")) { wimpl_int = 1; continue; }
 		if (!strncmp(a, "-Wno-", 5)) {
@@ -1045,6 +1133,13 @@ int ppd_run(int argc, char **argv, const ppd_env *env)
 		}
 	}
 	vjob_fail_fd = vjob_escape_fd = errfd;	/* (vccd: the client's stderr, not the server's) */
+	if (badval) {
+		const char *eq = strchr(badval, '=');
+
+		dprintf(errfd, "vcc: error: invalid value '%s' in '%.*s'\n", eq + 1, (int)(eq + 1 - badval), badval);
+		status = 1;
+		goto out;
+	}
 	if (!main_file) {
 		dprintf(errfd, "vcc: error: no input file\n");
 		status = 2;
@@ -1373,9 +1468,18 @@ int ppd_run(int argc, char **argv, const ppd_env *env)
 	po.unsigned_char = uchar >= 0 ? uchar : lnx;
 	po.cwd = env->cwd;
 	po.errfd = errfd;
-	po.diag_color = dcolor;
+	po.dsink = env->dsink;
+	po.diag_color = dcolor ? dcolor : env->errtty ? 1 : 0;
 	po.diag_nocaret = nocaret;
+	po.diag_show_id = showid;
+	po.diag_style = dstyle;
+	po.diag_unicode = dunicode;
+	po.diag_format = dformat;
+	po.argv = argv;
+	po.argc = argc;
 	po.error_limit = elimit;
+	po.macro_bt_limit = mblimit;
+	po.spell_limit = slimit;
 	po.wargs = wargs, po.nwargs = nwargs;
 	po.asm_mode = asm_mode;
 	if (pmap) {
@@ -1399,7 +1503,7 @@ int ppd_run(int argc, char **argv, const ppd_env *env)
 			goto out;
 		}
 		vjob_jb = &jo;
-		vintern_full_hook = intern_full;
+		__atomic_store_n(&vintern_full_hook, intern_full, __ATOMIC_RELAXED);	/* (every job: the same value) */
 		p = pp_open(&po);
 		vjob_jb = NULL;
 	}
@@ -1414,7 +1518,7 @@ int ppd_run(int argc, char **argv, const ppd_env *env)
 		goto done;
 	}
 	vjob_jb = &jb;	/* as/elf overflow ends this TU too */
-	vintern_full_hook = intern_full;	/* (only reaches vjob_jb in the thread that set it) */
+	__atomic_store_n(&vintern_full_hook, intern_full, __ATOMIC_RELAXED);	/* (only reaches vjob_jb in the thread that set it) */
 	if (tokhash) {
 		/* a hash of what pp_next hands the parser: kind, SOL/SPACE, spelling, id, file:line:col, sys */
 		uint64_t h = 1469598103934665603ull;
@@ -1457,6 +1561,7 @@ int ppd_run(int argc, char **argv, const ppd_env *env)
 	if (syntax) {
 		cc_opts co = { .target = po.target, .unsigned_char = po.unsigned_char, .dump_layouts = layout, .ms_anon = ms_anon, .short_wchar = short_wchar,
 				.std = std, .implicit_int = std == 89 || wimpl_int, .implicit_fn = std == 89 || wimpl_fn, .conv_warn = conv_warn,
+				.strict_std = strict,
 				.gnu89_inline = gnu89_inline, .no_builtin = freestanding || nobuiltin, .instrument = instr, .wasm_sjlj = sjlj,
 				.general_regs_only = gregs, .vcc_kernel = vcc_kernel, .lse = lse, .opt = olevel, .pic = pic ? 2 : pie ? 1 : 0, .tlsmodel = tlsmodel, .sections = sections, .debug = debug, .cfi = cfi > 0, .dbg_name = main_file,
 			       .outfd = env->outfd };

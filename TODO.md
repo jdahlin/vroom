@@ -586,10 +586,18 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
   suite.
 
 ### Front end (`cc.c`)
+- [ ] **Runtime-behavior warnings by reachability** (clang's DiagRuntimeBehavior): in a
+  function body clang defers `-Wconstant-conversion`, `-Warray-bounds`, shift and division
+  warnings and drops those in code its CFG finds unreachable.  vcc approximates with
+  `c->dead` (constant `if`/`?:`), so it still warns after `return`/`break`, in `while (0)`
+  bodies and under `v && 0`.  Queue them per function and filter by the flow walk of
+  `-Wreturn-type` (cc/func.c), which would mark reached statements.
+  *Validate:* tests/diag case with each form; `vcc-sema.py warn` stays 879/879.
 - [ ] **C23 / per-TU `-std`** [P] (partly done: per-TU keyword map `kwmap` (C23 spellings ->
   GNU keywords; true/false/nullptr/constexpr), `#if true`, digit separators through a
   translated copy (vlex_digitsep: `-E` and `#x` print them without the `'`, clang keeps them),
-  tests/vcc/c23_keywords.c, c99_ids.c.  Left: `u8'a'` (one token only in C23: the lexer
+  tests/vcc/c23_keywords.c, c99_ids.c; C23 `auto` type inference and strict `-std=c11` without
+  `typeof`/`asm` keywords (D5.5, tests/diag/c23_auto.c).  Left: `u8'a'` (one token only in C23: the lexer
   cache needs a per-mode entry, which would also give exact separators), nullptr_t,
   constexpr checks, `_BitInt`, `#embed`): one global keyword table (`kwclass`
   `cc.c:740-768`), `o->std` never read.  Per-TU keyword set; then `bool`,
@@ -1071,9 +1079,14 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
   performance by `bench/vbench.py` and a small benchmark set
   (`bench/micro/`: matmul, hash, interpreter, the vcc self-build), numbers
   in the plan.
-- [ ] **Error recovery**: every `expect()` failure is fatal (80 sites + 32
-  `fatal`), missing `;` after a struct ends the TU, typo correction cascades,
-  duplicated errors (`void v;`, compound literal in parens).
+- [ ] **Error recovery**: parse errors recover per block, struct body, for
+  header and TU, missing closers as clang (PLAN-diag.md D2.2, D2.3: first
+  error at clang's place 95.3 %); left: parameter lists: `f(a; )` (clang's
+  "unexpected ';' before ')'"), broken attributes (`__attribute__(( (x))`),
+  clang's "expected expression" for `4(` (vcc: "called object type 'int' is
+  not a function"), "extraneous ')' before ';'" after a builtin's name, the
+  remaining `fatal()` sites one by one; mutants with more follow-on errors
+  than clang 4.8 % (goal 5 % reached).
   *Validate:* `tests/diag/` cases with several independent errors, exact
   clang output (`vcc-diag.py`).
 - [x] **Warnings as errors not controllable**: `-Wno-error=`/`-Wno-` of
@@ -1248,6 +1261,55 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
   with &", parenthesized-operand hints, unnamed parameter notes:
   `int_conv_hints.c`, `unnamed_param_note.c`; -Wconditional-type-mismatch,
   "*(" ")" hints, `p == 0.5`: `cond_mismatch_etc.c`.
+- [ ] **Clang warns, vcc errors** (`bench/vcc-mutate.py show spurious`):
+  `-Wreturn-mismatch` is not in the `return-type` group.
+  *Validate:* `vcc-mutate.py` spurious count; diag tests.
+- [ ] **`-Warray-bounds` on a trailing member array**: `p->a[5]` with `a` the last
+  member (`int a[3];`) warns; clang does not (`-fstrict-flex-arrays` default: a trailing
+  array may be a flexible one).  *Validate:* diag test, both orders of members.
+- [ ] **Designated initializers found by PLAN-diag D1.0**: a designator on a
+  scalar (`int a = { .x = 1 };`) fails with "expected expression" instead of
+  clang's "initialization of non-aggregate type 'int' with a designated
+  initializer list"; after a designator error (`{ .a.b = 1 }` on an array)
+  vcc stops at "expected '}'" and the column is the member, not the `.`.
+  `__atomic_fetch_add` on a `double *` is rejected (clang accepts).
+  `vector_size(3)` on `int` says "invalid vector size" (clang: not an
+  integral multiple of component size); vector element type errors point at
+  the declarator, clang at the attribute.
+  *Validate:* diag tests (`tests/diag/excess_init.c` style).
+- [ ] **Warnings in lazy bodies**: an unused `static` function outside the main
+  file is never parsed (`cc/lazy.c` `lazy_ok`), so its warnings are missing:
+  clang warns `-Wreturn-type` for `static inline int f(void) { }` in a
+  non-system header, vcc only with `VCC_EAGER=1`.  A cheap scan of the kept
+  tokens, or parsing the body when a warning group it could hit is on and the
+  header is not a system one.  *Validate:* a diag test with the function in a
+  header; `vbench.py gate` (fe, cc).
+- [ ] **Invalid code accepted**: `void f(static int x)` (clang: invalid storage
+  class specifier in function declarator).  From `bench/vcc-mutate.py` (PLAN-diag D0.2, `show missed`): `main` with wrong
+  parameter types, an array of an incomplete element type, a call to a
+  function with an incomplete return type (clang: "calling 'f' with incomplete
+  return type"; a definition is an error now), a K&R definition whose
+  parameter count conflicts with an earlier prototype (`void bar(void);` then
+  `void bar(x) { }`: clang "conflicting types for 'bar'").
+  *Validate:* T4 each, then promote to diag.
+- [ ] **Macro notes by spelling**: macro notes are found by spelling in the
+  bodies (PLAN-diag.md D5.2), so a name built by `##` (`CONCATENATE`) is not
+  followed and a duplicated token may pick the wrong body occurrence (kernel
+  `-pedantic`: 1 031 of 1 536 chains identical to clang's).
+  *Validate:* diag tests, the kernel chain comparison.
+- [ ] **Merged diagnostics: cases from the D8 branch**: the merge with main kept main's
+  implementation where both had one (`cc/flow.c`, `cc/fmt.c`, return-stack-address,
+  unused-value/-comparison); the branch's dropped files (`git show ce5d47b:ccs/vcc/cc/`
+  `uninit.c`, `format.c`, `unused.c`, `attrcheck.c`) handled these, now marked
+  `diag-differs` in `tests/diag/*_v2.c`, `portability.c`:
+  - -Wsometimes-uninitialized: `if (c && (x = g())) return x; return x;`, an `if` whose
+    then-branch only breaks or returns, `if (c) x = 1; else if (d) x = 2;`
+    (`uninit_v2.c`), and the edge and the use drawn as numbered path steps;
+  - -Wreturn-type after a switch on an enum that returns in every case (clang: none);
+  - -Wreturn-stack-address: two shapes missed, one extra (`return_stack_v2.c`);
+  - -Wunused-value/-Wunused-comparison: four cases (`unused_value_v2.c`);
+  - -Wformat for scanf and its family (fmt.c checks printf only).
+  *Validate:* `bench/vcc-diag.py`: the `diag-differs` markers go.
 - [ ] **Longer fuzz runs** and pp-diff over the whole fuzz corpus (PLAN-fas2
   "Status fuzzning").  *Validate:* runs recorded in the plan, findings in
   `regress/`.

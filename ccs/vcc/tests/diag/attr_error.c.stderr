@@ -1,0 +1,10 @@
+attr_error.c:10:3: error: call to 'bad' declared with 'error' attribute: no way
+   10 |                 bad();
+      |                 ^
+attr_error.c:13:2: error: call to 'bare' declared with 'error' attribute: 
+   13 |         bare();
+      |         ^
+attr_error.c:6:41: error: call to 'bad' declared with 'error' attribute: no way
+    6 | static inline void wrap(int x) { if (x) bad(); }
+      |                                         ^
+3 errors generated.

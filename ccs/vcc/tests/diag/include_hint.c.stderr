@@ -1,0 +1,31 @@
+include_hint.c:11:2: error: use of undeclared identifier 'size_t'
+   11 |         size_t n = strlen(s);
+      |         ^~~~~~
+      = help: 'size_t' is declared in <stddef.h>
+   8 + #include <stddef.h>
+include_hint.c:11:13: error: call to undeclared library function 'strlen' with type 'unsigned long (const char *)'; ISO C99 and later do not support implicit function declarations [-Wimplicit-function-declaration]
+   11 |         size_t n = strlen(s);
+      |                    ^ include the header <string.h> or explicitly provide a declaration for 'strlen'
+   8 + #include <string.h>
+include_hint.c:11:13: note: include the header <string.h> or explicitly provide a declaration for 'strlen'
+include_hint.c:12:2: error: use of undeclared identifier 'FILE'
+   12 |         FILE *fp = 0;
+      |         ^~~~
+      = help: 'FILE' is declared in <stdio.h>
+   8 + #include <stdio.h>
+include_hint.c:14:2: error: call to undeclared library function 'memcpy' with type 'void *(void *, const void *, unsigned long)'; ISO C99 and later do not support implicit function declarations [-Wimplicit-function-declaration]
+   14 |         memcpy(d, s, n);
+      |         ^ include the header <string.h> or explicitly provide a declaration for 'memcpy'
+   8 + #include <string.h>
+include_hint.c:14:2: note: include the header <string.h> or explicitly provide a declaration for 'memcpy'
+include_hint.c:15:2: error: call to undeclared function 'write'; ISO C99 and later do not support implicit function declarations [-Wimplicit-function-declaration]
+   15 |         write(1, d, n);
+      |         ^
+      = help: 'write' is declared in <unistd.h>
+   8 + #include <unistd.h>
+include_hint.c:16:14: error: use of undeclared identifier 'NULL'
+   16 |         return d == NULL || fp != 0;
+      |                     ^~~~
+      = help: 'NULL' is declared in <stddef.h>
+   8 + #include <stddef.h>
+6 errors generated.

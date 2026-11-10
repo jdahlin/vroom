@@ -1,0 +1,28 @@
+logical_constant.c:9:32: warning: use of logical '&&' with constant operand [-Wconstant-logical-operand]
+    9 | int masked(void) { return mode && 4; }
+      |                                ^  ~
+logical_constant.c:9:32: note: use '&' for a bitwise operation
+    9 | int masked(void) { return mode && 4; }
+      |                                ^~
+      |                                &
+logical_constant.c:9:32: note: remove constant to silence this warning
+    9 | int masked(void) { return mode && 4; }
+      |                                ^~~~
+logical_constant.c:10:32: warning: use of logical '||' with constant operand [-Wconstant-logical-operand]
+   10 | int either(void) { return mode || 0x10; }
+      |                                ^  ~~~~
+logical_constant.c:10:32: note: use '|' for a bitwise operation
+   10 | int either(void) { return mode || 0x10; }
+      |                                ^~
+      |                                |
+logical_constant.c:11:31: warning: use of logical '&&' with constant operand [-Wconstant-logical-operand]
+   11 | int named(void) { return mode && MASK; }
+      |                               ^  ~~~~
+logical_constant.c:11:31: note: use '&' for a bitwise operation
+   11 | int named(void) { return mode && MASK; }
+      |                               ^~
+      |                               &
+logical_constant.c:11:31: note: remove constant to silence this warning
+   11 | int named(void) { return mode && MASK; }
+      |                               ^~~~~~~
+3 warnings generated.

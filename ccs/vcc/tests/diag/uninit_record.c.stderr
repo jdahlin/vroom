@@ -1,0 +1,35 @@
+uninit_record.c:4:40: warning: variable 'p' is uninitialized when used here [-Wuninitialized]
+    4 | struct P r1(void) { struct P p; return p; }
+      |                     -                  ^
+      |                     |
+      |                     variable 'p' is declared here
+uninit_record.c:4:21: note: variable 'p' is declared here
+uninit_record.c:6:33: warning: variable 'p' is uninitialized when used here [-Wuninitialized]
+    6 | void r3(void) { struct P p; use(p); }
+      |                 -               ^
+      |                 |
+      |                 variable 'p' is declared here
+uninit_record.c:6:17: note: variable 'p' is declared here
+uninit_record.c:8:46: warning: variable 'p' is uninitialized when used here [-Wuninitialized]
+    8 | struct P r5(void) { struct P p; struct P q = p; return q; }
+      |                     -                        ^
+      |                     |
+      |                     variable 'p' is declared here
+uninit_record.c:8:21: note: variable 'p' is declared here
+uninit_record.c:10:67: warning: variable 'u' is uninitialized when used here [-Wuninitialized]
+   10 | union U { int i; float f; }; union U r7(void) { union U u; return u; }
+      |                                                 -                 ^
+      |                                                 |
+      |                                                 variable 'u' is declared here
+uninit_record.c:10:49: note: variable 'u' is declared here
+uninit_record.c:11:38: warning: variable 'p' is used uninitialized whenever 'if' condition is false [-Wsometimes-uninitialized]
+   11 | struct P r8(int c) { struct P p; if (c) p = (struct P){1, 2}; return p; }
+      |                      -           ----^--                             - uninitialized use occurs here
+      |                      |           |
+      |                      |           remove the 'if' if its condition is always true
+      |                      |
+      |                      variable 'p' is declared here
+uninit_record.c:11:70: note: uninitialized use occurs here
+uninit_record.c:11:34: note: remove the 'if' if its condition is always true
+uninit_record.c:11:22: note: variable 'p' is declared here
+5 warnings generated.

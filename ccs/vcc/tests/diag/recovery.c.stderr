@@ -1,0 +1,47 @@
+recovery.c:6:1: error: expected identifier or '('
+    6 | if (a) a = 1;
+      | ^
+recovery.c:7:1: error: extraneous closing brace ('}')
+    7 | }
+      | ^
+recovery.c:8:20: error: extraneous ')' before ';'
+    8 | int g(void) { a = 1); return 1; }
+      |                    ^
+recovery.c:9:33: error: extraneous ']' before ';'
+    9 | int h(void) { int q[2]; q[0] = 1]; return q[1]; }
+      |                                 ^
+recovery.c:10:17: error: expected expression
+   10 | int t[3] = { 1, , 2 };
+      |                 ^
+recovery.c:14:18: error: expected expression
+   14 |         int v[4] = { 8, , 9, 10 };
+      |                         ^
+recovery.c:16:3: error: expected ')'
+   15 |         for (i = 0; i < b; i++
+      |             - to match this '('
+   16 |                 n += v[i & 3];
+      |                 ^
+recovery.c:15:6: note: to match this '('
+recovery.c:18:3: error: expected ')'
+   17 |         if (b != (n + 1)
+      |            - to match this '('
+   18 |                 n = 2;
+      |                 ^
+recovery.c:17:5: note: to match this '('
+recovery.c:21:20: error: expected ';' in 'for' statement specifier
+   21 |         for (i = 0; i < b @ 1; i++)
+      |                           ^
+recovery.c:23:9: error: expected ')'
+   23 |         n = f(b;
+      |              - ^
+      |              |
+      |              to match this '('
+recovery.c:23:7: note: to match this '('
+recovery.c:26:12: error: type name requires a specifier or qualifier
+   26 | struct T { a, b; int c };
+      |            ^
+recovery.c:26:23: warning: expected ';' at end of declaration list
+   26 | struct T { a, b; int c };
+      |                       ^
+      |                       ;
+1 warning and 11 errors generated.

@@ -1,0 +1,5 @@
+arrow_on_struct.c:4:10: error: member reference type 'struct s' is not a pointer; did you mean to use '.'?
+    4 |         return a->v;
+      |                ~^~
+      |                 .
+1 error generated.

@@ -26,6 +26,7 @@ static void cc_init(cc *c, pp *p, const cc_opts *o)
 	memset(c, 0, sizeof(*c));
 	c->ptr_lo = 1;
 	c->p = p;
+	c->ext_off = -1;	/* (ext_on: computed at its first use) */
 	c->o = o;
 	ccr = vmpool_take(&ccpool);
 	c->ty = vmreg_get(&ccr[0], (size_t)1 << 30, "cc.ty");
@@ -178,6 +179,8 @@ static void cc_free(cc *c)
 	vmreg_put(&ccr[21], USED(c->nnode, c->paren));	/* indexed by node */
 	free(c->cases);
 	free(c->pweak);
+	free(c->utd);
+	free(c->rtq);
 #undef USED
 	vmpool_give(&ccpool, ccr);
 	ccr = NULL;
@@ -272,8 +275,10 @@ int cc_run(pp *p, const cc_opts *o)
 	int errors;
 
 	pthread_once(&once, init_tables);	/* vccd runs TUs on many threads */
-	kwmap = o->std == 23 ? kwmap_c23 : kwmap_gnu;	/* the TU's keywords (this thread parses it) */
+	kwmap = o->std == 23 ? kwmap_c23 : o->strict_std ? kwmap_iso : kwmap_gnu;	/* the TU's keywords (this thread parses it) */
 	cc_init(c, p, o);
+	if (unlikely(getenv("VCC_TEST_DELAYED_BUG") != NULL))	/* test hook: vcc-driver.py */
+		delayed_bug(c, 0, "VCC_TEST_DELAYED_BUG");
 	c->drb = NULL, c->ndrb = c->cdrb = 0;
 	if (drcov_on)
 		drcov_boundary(c), c->ndrb = 0;	/* (allocates) */
@@ -299,6 +304,7 @@ int cc_run(pp *p, const cc_opts *o)
 		unused_statics(c);
 		unused_typedefs(c);
 	}
+	delayed_bug_check(c);
 	if (o->dump_layouts && !c->errors)
 		layout_checks(c);
 	if (o->emit && !c->errors && !pp_errors(p))
@@ -309,6 +315,7 @@ int cc_run(pp *p, const cc_opts *o)
 	dr_end(c);
 	dc_end(c);
 	cc_free(c);
+	free(c->tyb);
 	free(c);
 	return errors;
 }

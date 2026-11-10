@@ -1,0 +1,4 @@
+member_missing.c:4:11: error: no member named 'z' in 'struct point'
+    4 |         return p.z;
+      |                ~ ^
+1 error generated.

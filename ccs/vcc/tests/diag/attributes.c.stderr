@@ -1,0 +1,87 @@
+attributes.c:18:2: warning: ignoring return value of function declared with 'warn_unused_result' attribute [-Wunused-result]
+   18 |         w1(); (void)w1();
+      |         ^~~~
+attributes.c:19:2: warning: 'd1' is deprecated [-Wdeprecated-declarations]
+   19 |         d1(); d2();
+      |         ^
+attributes.c:8:16: note: 'd1' has been explicitly marked deprecated here
+    8 | __attribute__((deprecated)) void d1(void);
+      |                ^
+attributes.c:19:8: warning: 'd2' is deprecated: use d3 [-Wdeprecated-declarations]
+   19 |         d1(); d2();
+      |               ^
+attributes.c:9:16: note: 'd2' has been explicitly marked deprecated here
+    9 | __attribute__((deprecated("use d3"))) void d2(void);
+      |                ^
+attributes.c:20:9: warning: 'S' is deprecated [-Wdeprecated-declarations]
+   20 |         struct S s; T t = dv + E1; struct S2 s2; s2.f = 1;
+      |                ^
+attributes.c:10:23: note: 'S' has been explicitly marked deprecated here
+   10 | struct __attribute__((deprecated)) S { int x; };
+      |                       ^
+attributes.c:20:14: warning: 'T' is deprecated [-Wdeprecated-declarations]
+   20 |         struct S s; T t = dv + E1; struct S2 s2; s2.f = 1;
+      |                     ^
+attributes.c:11:30: note: 'T' has been explicitly marked deprecated here
+   11 | typedef int T __attribute__((deprecated));
+      |                              ^
+attributes.c:20:20: warning: 'dv' is deprecated [-Wdeprecated-declarations]
+   20 |         struct S s; T t = dv + E1; struct S2 s2; s2.f = 1;
+      |                           ^
+attributes.c:12:23: note: 'dv' has been explicitly marked deprecated here
+   12 | int dv __attribute__((deprecated));
+      |                       ^
+attributes.c:20:25: warning: 'E1' is deprecated [-Wdeprecated-declarations]
+   20 |         struct S s; T t = dv + E1; struct S2 s2; s2.f = 1;
+      |                                ^
+attributes.c:13:26: note: 'E1' has been explicitly marked deprecated here
+   13 | enum { E1 __attribute__((deprecated)) = 1 };
+      |                          ^
+attributes.c:20:46: warning: 'f' is deprecated [-Wdeprecated-declarations]
+   15 | struct S2 { int f __attribute__((deprecated)); };
+      |                                  - 'f' has been explicitly marked deprecated here
+  ...
+   20 |         struct S s; T t = dv + E1; struct S2 s2; s2.f = 1;
+      |                                                     ^
+attributes.c:15:34: note: 'f' has been explicitly marked deprecated here
+attributes.c:17:9: warning: null passed to a callee that requires a non-null argument [-Wnonnull]
+   17 |         n1(0, 0); n2(0, 0); n2((void*)0, (int*)0); n3(0, 0);
+      |            ~   ^
+attributes.c:17:9: warning: null passed to a callee that requires a non-null argument [-Wnonnull]
+   17 |         n1(0, 0); n2(0, 0); n2((void*)0, (int*)0); n3(0, 0);
+      |               ~^
+attributes.c:17:18: warning: null passed to a callee that requires a non-null argument [-Wnonnull]
+   17 |         n1(0, 0); n2(0, 0); n2((void*)0, (int*)0); n3(0, 0);
+      |                         ^
+attributes.c:17:35: warning: null passed to a callee that requires a non-null argument [-Wnonnull]
+   17 |         n1(0, 0); n2(0, 0); n2((void*)0, (int*)0); n3(0, 0);
+      |                                          ^~~~~~~
+attributes.c:17:48: warning: null passed to a callee that requires a non-null argument [-Wnonnull]
+   17 |         n1(0, 0); n2(0, 0); n2((void*)0, (int*)0); n3(0, 0);
+      |                                                       ^
+attributes.c:24:26: warning: null passed to a callee that requires a non-null argument [-Wnonnull]
+   24 | void h(void) { n1(NULL, 0); }
+      |                   ~~~~   ^
+attributes.c:24:26: warning: null passed to a callee that requires a non-null argument [-Wnonnull]
+   24 | void h(void) { n1(NULL, 0); }
+      |                         ~^
+attributes.c:29:33: error: 'u' is unavailable
+   28 | struct S3 { int u __attribute__((unavailable)); } s3;
+      |                 - 'u' has been explicitly marked unavailable here
+   29 | int k(void) { return o1(1) + s3.u; }
+      |                                 ^
+attributes.c:28:17: note: 'u' has been explicitly marked unavailable here
+attributes.c:30:17: error: 'o1' is unavailable
+   26 | void o1(...) __attribute__((unavailable, overloadable));
+      |      - 'o1' has been explicitly marked unavailable here
+  ...
+   30 | void k2(void) { o1(s3); u1(); }
+      |                 ^
+attributes.c:26:6: note: 'o1' has been explicitly marked unavailable here
+attributes.c:30:25: error: 'u1' is unavailable: gone
+   30 | void k2(void) { o1(s3); u1(); }
+      |                         ^
+attributes.c:14:43: note: 'u1' has been explicitly marked unavailable here
+   14 | __attribute__((unavailable("gone"))) void u1(void);
+      |                                           ^
+15 warnings and 3 errors generated.

@@ -1,0 +1,4 @@
+return_void_value.c:3:2: error: void function 'f' should not return a value [-Wreturn-mismatch]
+    3 |         return a;
+      |         ^      ~
+1 error generated.

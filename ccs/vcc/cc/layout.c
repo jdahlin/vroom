@@ -369,19 +369,26 @@ static void type_str(cc *c, qty t, const char *inner, vfixbuf *out, bool *ok)
 	}
 	}
 	if (inner[0]) {
-		vfixbuf_puts(&b, " ");
+		if (inner[0] != '[')	/* clang: 'int[2]', 'int (*)[2]' */
+			vfixbuf_puts(&b, " ");
 		vfixbuf_puts(&b, inner);
 	}
 	vfixbuf_put(out, b.s, b.n);
 }
 
-/* t as clang spells it in diagnostics (four buffers in rotation) */
+/* the next of the TU's 8 type-name buffers (per TU: vccd compiles on many threads) */
+static vfixbuf *tybuf(cc *c)
+{
+	if (unlikely(!c->tyb) && !(c->tyb = malloc(8 * sizeof(vfixbuf))))
+		abort();
+	return &c->tyb[c->tyk++ & 7];
+}
+
+/* t as clang spells it in diagnostics (buffers in rotation: tybuf) */
 VPRIV const char *tyname(cc *c, qty t)
 {
-	static vfixbuf b[4];
-	static int k;
 	bool ok = true;
-	vfixbuf *o = &b[k++ & 3];
+	vfixbuf *o = tybuf(c);
 
 	o->n = 0, o->s[0] = 0;
 	type_str(c, t, "", o, &ok);

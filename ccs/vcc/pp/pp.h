@@ -61,9 +61,23 @@ typedef struct pp_opts {
 	int target;			/* PP_LINUX_AARCH64, PP_DARWIN, PP_WASM64, PP_WASM32 or PP_LINUX_X86_64 (column of the feature table; x86-64: has_tab_x86) */
 	int diag_color;			/* diagnostics: 1 colors, -1 none, 0 when errfd is a terminal */
 	int diag_nocaret;		/* -fno-caret-diagnostics: no source lines */
+	int diag_show_id;		/* -fdiagnostics-show-id: " [id]" after the flag */
+	int diag_format;		/* -fdiagnostics-format=: PP_DIAG_TEXT, _JSON (a record per line), _SARIF */
+	int diag_style;			/* -fdiagnostics-style=: PP_DSTYLE_VCC (default), _CLANG, _NARRATED */
+	int diag_unicode;		/* -fdiagnostics-text-art-charset=unicode: box-drawing gutter and connectors */
+	int diag_parseable;		/* -fdiagnostics-parseable-fixits: clang's fix-it:"file":{l:c-l:c}:"text" lines */
+	int diag_patch;			/* -fdiagnostics-generate-patch: the fix-its as a unified diff (GCC's) */
+	int fix_apply;			/* --fix: machine-applicable fix-its written to the files */
+	struct pp_dsink *dsink;		/* vccd's whole-build view of the diagnostics (NULL: none) */
+	const char *sarif_file;		/* -fdiagnostics-add-output=sarif:file=F: SARIF there too */
+	const char *html_file;		/* -fdiagnostics-add-output=html:file=F: a page of the records */
+	char *const *argv;		/* the command line (SARIF's invocation) */
+	int argc;
 	const char *const *wargs;	/* -W..., -w options in command-line order */
 	int nwargs;
 	int error_limit;		/* -ferror-limit=: 0 default (20), -1 none */
+	int macro_bt_limit;		/* -fmacro-backtrace-limit=: 0 default (6), -1 none */
+	int spell_limit;		/* -fspell-checking-limit=: 0 default (50), -1 none; -2 -fno-spell-checking */
 	int has_epoch;			/* SOURCE_DATE_EPOCH set: __DATE__/__TIME__/__TIMESTAMP__ from epoch, UTC */
 	long long epoch;
 	int trigraphs;			/* strict -std (not c23) or -trigraphs: ??x replaced before lexing */
@@ -118,6 +132,10 @@ int pp_macros(pp *p, char **out, size_t *len);
 void pp_hc_stats(char *buf, size_t n);
 /* errors reported so far */
 int pp_errors(const pp *p);
+int pp_diag_pragmas(const pp *p);
+int pp_diag_npragma(const pp *p);	/* #pragma diagnostic transitions so far */
+const char *const *pp_diag_wargs(const pp *p, int *n);	/* the -W/-w options, in order */
+const uint32_t *pp_diag_nenable_ref(const pp *p);	/* ... of them "warning" or "error": the count, for a test inline */
 /* a new build (vccd): forget the include answers; with vlex_cache_flush and
  * vdir_flush, every file is looked up and read again.  No TU may be running. */
 void pp_include_flush(void);
@@ -136,8 +154,30 @@ void pp_vdiag(pp *p, uint32_t loc, const char *what, const char *fmt, va_list ap
  * (locations [b, e)), and fix-it hints (replace [b, e) with s; b == e
  * inserts) printed under the caret line.
  */
+/*
+ * vccd (D7): each top-level record of a TU at its end (record), and with dedup a
+ * header warning another TU of this build printed is counted, not rendered (seen:
+ * true when key was seen before in this build).
+ */
+typedef struct pp_drec {
+	int level;		/* VDL_* */
+	const char *flag;	/* NULL: none */
+	const char *path;	/* the primary location's file (NULL: none) */
+	uint32_t line, col;
+	const char *json;	/* the record as -fdiagnostics-format=json writes it, without "rendered" and the
+				   newline (NULL once the sink says nojson) */
+	size_t jlen;
+} pp_drec;
+typedef struct pp_dsink {
+	int dedup;
+	unsigned ndup;		/* left out in this TU */
+	int nojson;		/* set by record(): the rest of the TU's records without JSON */
+	bool (*seen)(struct pp_dsink *, uint64_t key);
+	void (*record)(struct pp_dsink *, const pp_drec *);
+} pp_dsink;
+
 typedef struct pp_span { uint32_t b, e; } pp_span;
-typedef struct pp_fixit { uint32_t b, e; const char *s; } pp_fixit;
+typedef struct pp_fixit { uint32_t b, e; const char *s; uint8_t app; } pp_fixit;	/* app: VDA_* (0: unspecified) */
 typedef struct pp_dinfo {
 	const char *what;
 	uint32_t loc;
@@ -160,6 +200,94 @@ int pp_werror_named(const pp *p, const char *flag, const char *const *groups);
 /* report a warning of flag (clang's " [-Wflag]" / " [-Werror,-Wflag]" suffix); false if off */
 __attribute__((format(printf, 6, 7)))
 bool pp_warnx(pp *p, const char *flag, bool on, const char *const *groups, pp_dinfo *d, const char *fmt, ...);
+/*
+ * Diagnostic records (PLAN-diag.md D1.1).  Every diagnostic is built as a
+ * record in the TU's arena and rendered from it (text, JSON, SARIF); the
+ * pp_diag* calls above are thin wrappers.  A note reported after its
+ * diagnostic becomes that diagnostic's child.  Records are only built on the
+ * error path; nothing here runs for a TU without diagnostics.
+ *
+ *   vdiag *d = pp_diag_begin(p, VDL_ERROR, loc, "expected '%s'", "x");
+ *   pp_diag_label(p, d, b, e, "this");		// a range (label NULL: plain ~)
+ *   pp_diag_fix(p, d, b, e, ";", VDA_MACHINE);	// replace [b, e)
+ *   pp_diag_note(p, d, loc2, "to match this '('");
+ *   pp_diag_emit(p, d);
+ */
+enum { VDL_NOTE, VDL_REMARK, VDL_WARNING, VDL_ERROR, VDL_FATAL };
+/* a suggestion's applicability (rustc): safe to apply, maybe, has placeholders */
+enum { VDA_UNSPEC, VDA_MACHINE, VDA_MAYBE, VDA_PLACEHOLDER };
+#define VDA_NAME 0x80	/* (or'ed in) the fix changes a macro's name itself, not its body: kept */
+typedef struct vdspan { uint32_t b, e; const char *label; } vdspan;
+typedef struct vdfix { uint32_t b, e; const char *s; uint8_t app; } vdfix;
+typedef struct vdiag vdiag;
+struct vdiag {
+	vdiag *next;		/* the next record (top level), or the next child */
+	vdiag *kids, *klast;	/* notes, in order */
+	const char *id;		/* clang's diagnostic name or vcc_*; NULL: none yet */
+	const char *fmt;	/* the format the message came from (the id's key) */
+	const char *flag;	/* warning flag without "-W", or NULL */
+	const char *msg;	/* the message, without the flag */
+	const char *label;	/* the primary location's label, or NULL */
+	const char *help;	/* an action that fixes it, in words ("= help: ..."), or NULL */
+	const char *art;	/* a text-art diagram under the snippet (lines, no final newline), or NULL */
+	const void *track;	/* the return address in vcc's reporting function (VCC_TRACK_DIAG) */
+	const char *ms;		/* the diagnosed token's spelling when it came from a macro */
+	vdspan *span;
+	vdfix *fix;
+	uint32_t loc;		/* primary location; UINT32_MAX: none */
+	uint32_t mlen, nspan, nfix, cspan, cfix;
+	uint8_t level;		/* VDL_* as rendered (a -Werror warning is VDL_ERROR) */
+	uint8_t werror;		/* a warning promoted by -Werror */
+	uint8_t emitted;
+	uint8_t dup;		/* a header warning another TU of this build printed: not rendered */
+};
+__attribute__((format(printf, 4, 5)))
+vdiag *pp_diag_begin(pp *p, int level, uint32_t loc, const char *fmt, ...);
+vdiag *pp_diag_vbegin(pp *p, int level, uint32_t loc, const char *fmt, va_list ap);
+void pp_diag_label(pp *p, vdiag *d, uint32_t b, uint32_t e, const char *label);
+void pp_diag_fix(pp *p, vdiag *d, uint32_t b, uint32_t e, const char *s, int app);
+__attribute__((format(printf, 3, 4)))
+void pp_diag_help(pp *p, vdiag *d, const char *fmt, ...);
+/* a diagram shown under the source lines in the vcc style (GCC's text art) */
+void pp_diag_art(pp *p, vdiag *d, const char *s, size_t n);
+/* 0: the style shows no diagram; 1: ASCII; 2: Unicode box drawing */
+int pp_diag_art_on(const pp *p);
+__attribute__((format(printf, 4, 5)))
+vdiag *pp_diag_note(pp *p, vdiag *d, uint32_t loc, const char *fmt, ...);
+/* the token spelling when loc is a macro expansion's (clang's caret at the invocation) */
+void pp_diag_macro(vdiag *d, const char *ms, uint32_t mlen);
+/* a warning's flag (" [-Wflag]"; werror: " [-Werror,-Wflag]") */
+void pp_diag_flag(vdiag *d, const char *flag);
+/* the level a warning of flag is reported at, at loc: VDL_WARNING, VDL_ERROR (-Werror), or -1 (off) */
+int pp_diag_wlevel(pp *p, const char *flag, bool on, const char *const *groups, uint32_t loc);
+/* render (and keep) the record; a fatal error ends the TU */
+void pp_diag_emit(pp *p, vdiag *d);
+/* the TU's records so far, in order (children under kids) */
+const vdiag *pp_diag_records(const pp *p);
+/*
+ * VCC_TRACK_DIAG=1 prints with each diagnostic where in vcc it was reported
+ * (rustc's -Z track-diagnostics): each reporting function (cc_error, report,
+ * pp_diagx, ...) leaves its return address here, and the record keeps it;
+ * it is symbolized (atos) only when printed.  Nothing at the call sites:
+ * a __FILE_NAME__:__LINE__ argument or a thread-local store there changed
+ * the hot paths' code (+0.6 % / +1.5 % pp).
+ */
+extern _Thread_local const void *pp_diag_pc;
+extern _Thread_local const char *pp_diag_next_id;
+const char *pp_diag_fmt_id(const char *fmt);
+/* level name as clang prints it ("error", "fatal error", ...) */
+const char *pp_diag_level(int level);
+enum { PP_DIAG_TEXT, PP_DIAG_JSON, PP_DIAG_SARIF };
+/* the text renderers: vcc's (labels, several lines, folded notes, help), clang's
+   exactly, and one in words for screen readers (miette's "narratable") */
+enum { PP_DSTYLE_VCC, PP_DSTYLE_CLANG, PP_DSTYLE_NARRATED };
+/* the end of the TU's diagnostics: the last JSON record, the SARIF log (pp_diag_summary calls it) */
+void pp_diag_finish(pp *p);
+/* clang's location of the end of the main file: its last newline, or its end without one */
+uint32_t pp_main_eof(const pp *p);
+uint32_t pp_include_point(const pp *p, uint32_t loc);
+/* -fspell-checking-limit= as given (0: default, -1: none, -2: off) */
+int pp_spell_limit(const pp *p);
 /* -ferror-limit= as given (0: default, -1: none) */
 int pp_error_limit(const pp *p);
 /* "N errors generated." (clang's summary), if there were any */
@@ -175,6 +303,13 @@ int pp_defined(pp *p, uint32_t id);
 void pp_invalid_tok(pp *p, const char *s, uint32_t len, uint32_t loc);
 /* the source text from loc b to loc e (one file), NULL if unknown */
 const char *pp_src(const pp *p, uint32_t b, uint32_t e, size_t *len);
+/* the source text from loc b to the end of its file, NULL if unknown */
+const char *pp_src_rest(const pp *p, uint32_t b, size_t *len);
+/* loc is on a macro name: where an object-like macro's body tokens are (vcc gives them the
+   invocation's location and no PF_MACRO) */
+int pp_loc_macro(const pp *p, uint32_t loc);
+/* name is a defined macro now */
+int pp_macro_defined(const pp *p, const char *name);
 
 /*
  * Top-level regions (headers included from the main file, cached or being

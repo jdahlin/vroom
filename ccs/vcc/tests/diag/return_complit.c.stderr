@@ -1,0 +1,28 @@
+return_complit.c:2:24: warning: address of stack memory associated with compound literal '{1, 2}' returned [-Wreturn-stack-address]
+    2 | int *f1(void) { return (int[]){1, 2}; }
+      |                        ^~~~~~~~~~~~~
+return_complit.c:3:31: warning: address of stack memory associated with compound literal '{x, 2}' returned [-Wreturn-stack-address]
+    3 | struct S *f2(int x) { return &(struct S){x, 2}; }
+      |                               ^~~~~~~~~~~~~~~~
+return_complit.c:4:24: warning: address of stack memory associated with compound literal '{0}' returned [-Wreturn-stack-address]
+    4 | int *f3(void) { return (int[3]){0}; }
+      |                        ^~~~~~~~~~~
+return_complit.c:5:31: warning: address of stack memory associated with compound literal '{"hi"}' returned [-Wreturn-stack-address]
+    5 | const char *f4(void) { return (char[]){"hi"}; }
+      |                               ^~~~~~~~~~~~~~
+return_complit.c:7:25: warning: address of stack memory associated with compound literal '{y + 1, 2, 3}' returned [-Wreturn-stack-address]
+    7 | int *f6(int y) { return (int[]){ y+1,2 ,3 }; }
+      |                         ^~~~~~~~~~~~~~~~~~~
+return_complit.c:11:31: warning: address of stack memory associated with compound literal '{.a = x, .b = -x}' returned [-Wreturn-stack-address]
+   11 | struct S *h1(int x) { return &(struct S){ .a = x, .b = -x }; }
+      |                               ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+return_complit.c:12:30: warning: address of stack memory associated with compound literal '{{1, 2}, {3}}' returned [-Wreturn-stack-address]
+   12 | struct T *h2(void) { return &(struct T){ { 1, 2 }, { 3 } }; }
+      |                              ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+return_complit.c:13:25: warning: address of stack memory associated with compound literal '{[1] = x * 2, (int)'c', g(x), !x, x << 1}' returned [-Wreturn-stack-address]
+   13 | int *h3(int x) { return (int[]){ [1] = x * 2, (int)'c', g(x), !x, x << 1 }; }
+      |                         ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+return_complit.c:14:27: warning: address of stack memory associated with compound literal '{x ? 1 : 2, ~x, x && 1}' returned [-Wreturn-stack-address]
+   14 | long *h4(long x) { return (long[]){ x ? 1 : 2, ~x, x&&1 }; }
+      |                           ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+9 warnings generated.

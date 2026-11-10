@@ -1,0 +1,46 @@
+uninit_kinds.c:2:23: warning: variable 'a' is uninitialized when used within its own initialization [-Wuninitialized]
+    2 | int f(void) { int a = a + 1; void *p = &p; int b = (b = 1); int (*fp)(void); return fp() + a + b; }
+      |                   ~   ^
+uninit_kinds.c:2:85: warning: variable 'fp' is uninitialized when used here [-Wuninitialized]
+    2 | int f(void) { int a = a + 1; void *p = &p; int b = (b = 1); int (*fp)(void); return fp() + a + b; }
+      |                                                                                     ^~
+uninit_kinds.c:2:76: note: initialize the variable 'fp' to silence this warning
+    2 | int f(void) { int a = a + 1; void *p = &p; int b = (b = 1); int (*fp)(void); return fp() + a + b; }
+      |                                                                            ^
+      |                                                                             = 0
+uninit_kinds.c:3:90: warning: variable 's' is uninitialized when used here [-Wuninitialized]
+    3 | int g(void) { unsigned short s; long double ld; float _Complex z; signed char sc; return s + ld + sc + z; }
+      |                                                                                          ^
+uninit_kinds.c:3:31: note: initialize the variable 's' to silence this warning
+    3 | int g(void) { unsigned short s; long double ld; float _Complex z; signed char sc; return s + ld + sc + z; }
+      |                               ^
+      |                                = 0
+uninit_kinds.c:3:94: warning: variable 'ld' is uninitialized when used here [-Wuninitialized]
+    3 | int g(void) { unsigned short s; long double ld; float _Complex z; signed char sc; return s + ld + sc + z; }
+      |                                                                                              ^~
+uninit_kinds.c:3:47: note: initialize the variable 'ld' to silence this warning
+    3 | int g(void) { unsigned short s; long double ld; float _Complex z; signed char sc; return s + ld + sc + z; }
+      |                                               ^
+      |                                                = 0.0
+uninit_kinds.c:3:99: warning: variable 'sc' is uninitialized when used here [-Wuninitialized]
+    3 | int g(void) { unsigned short s; long double ld; float _Complex z; signed char sc; return s + ld + sc + z; }
+      |                                                                                                   ^~
+uninit_kinds.c:3:81: note: initialize the variable 'sc' to silence this warning
+    3 | int g(void) { unsigned short s; long double ld; float _Complex z; signed char sc; return s + ld + sc + z; }
+      |                                                                                 ^
+      |                                                                                  = '\0'
+uninit_kinds.c:3:104: warning: variable 'z' is uninitialized when used here [-Wuninitialized]
+    3 | int g(void) { unsigned short s; long double ld; float _Complex z; signed char sc; return s + ld + sc + z; }
+      |                                                                                                        ^
+uninit_kinds.c:3:65: note: initialize the variable 'z' to silence this warning
+    3 | int g(void) { unsigned short s; long double ld; float _Complex z; signed char sc; return s + ld + sc + z; }
+      |                                                                 ^
+      |                                                                  = 0
+uninit_kinds.c:4:30: warning: variable 'x' is uninitialized when used here [-Wuninitialized]
+    4 | int h(void) { int x; int y = x; return y; }
+      |                              ^
+uninit_kinds.c:4:20: note: initialize the variable 'x' to silence this warning
+    4 | int h(void) { int x; int y = x; return y; }
+      |                    ^
+      |                     = 0
+7 warnings generated.

@@ -90,6 +90,12 @@ pp *pp_open(const pp_opts *o)
 
 	vintern_init();
 	p->o = o;
+	p->wc_o = NULL;	/* (the region may be a previous TU's) */
+	{
+		const char *t = getenv("VCC_TRACK_DIAG");
+
+		p->dtrack = t && *t && *t != '0';
+	}
 	p->color = o->diag_color > 0 || (o->diag_color == 0 && isatty(o->errfd ? o->errfd : 2));
 	p->cx = vmreg_get(&ppr[1], MAXCTX * sizeof(ctx), "pp.cx");
 	p->perm.base = p->perm.p = vmreg_get(&ppr[2], 1ull << 30, "pp.perm");
@@ -1033,6 +1039,7 @@ size_t pp_files(const pp *p, const char **names, size_t max, int nosys)
 
 void pp_close(pp *p)
 {
+	diag_text_flush(p);	/* a record still waiting for its notes (no summary ran) */
 	/* back to the thread: the stacks and tmp (reused all along the TU) as they are */
 	vmreg_put(&ppr[1], VMREG_SCRATCH);
 	vmreg_put(&ppr[2], (size_t)(p->perm.p - p->perm.base) + 64);

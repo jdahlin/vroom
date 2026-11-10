@@ -137,6 +137,14 @@ VPRIV bool eval(cc *c, uint32_t n, cval *v)
 	cval a, b;
 
 	memset(v, 0, sizeof(*v));
+#if defined(__has_feature)
+#if __has_feature(address_sanitizer)
+	/* the parser's stack check bounds the nesting (cast_expr); ASan's frames make
+	   this recursion's larger than the parser's (vcc-stress ternary-100k) */
+	if (vstack_low())
+		return false;
+#endif
+#endif
 	switch (x->op) {
 	case N_NUM:
 		v->kind = CV_INT;

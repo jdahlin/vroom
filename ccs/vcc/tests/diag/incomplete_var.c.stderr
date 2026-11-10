@@ -1,0 +1,70 @@
+incomplete_var.c:2:18: warning: declaration of 'struct s' will not be visible outside of this function [-Wvisibility]
+    2 | int m5(a) struct s { int q; } *a; { struct s z = *a; return z.q + sizeof(struct s); }
+      |                  ^
+incomplete_var.c:2:46: error: variable has incomplete type 'struct s'
+    2 | int m5(a) struct s { int q; } *a; { struct s z = *a; return z.q + sizeof(struct s); }
+      |                                            - ^
+      |                                            |
+      |                                            forward declaration of 'struct s'
+incomplete_var.c:2:44: note: forward declaration of 'struct s'
+incomplete_var.c:2:67: error: invalid application of 'sizeof' to an incomplete type 'struct s'
+    2 | int m5(a) struct s { int q; } *a; { struct s z = *a; return z.q + sizeof(struct s); }
+      |                                            -                      ^     ~~~~~~~~~~
+      |                                            |
+      |                                            forward declaration of 'struct s'
+incomplete_var.c:2:44: note: forward declaration of 'struct s'
+incomplete_var.c:2:5: warning: a function definition without a prototype is deprecated in all versions of C and is not supported in C23 [-Wdeprecated-non-prototype]
+    2 | int m5(a) struct s { int q; } *a; { struct s z = *a; return z.q + sizeof(struct s); }
+      |     ^
+incomplete_var.c:3:15: warning: declaration of 'struct t' will not be visible outside of this function [-Wvisibility]
+    3 | int n5(struct t { int r; } *p) { struct t z = *p; return z.r; }
+      |               ^
+incomplete_var.c:5:12: error: array has incomplete element type 'struct q'
+    4 | struct q;
+      |        - forward declaration of 'struct q'
+    5 | struct q gb[2];
+      |            ^
+incomplete_var.c:4:8: note: forward declaration of 'struct q'
+incomplete_var.c:6:19: error: array has incomplete element type 'struct q'
+    4 | struct q;
+      |        - forward declaration of 'struct q'
+    5 | struct q gb[2];
+    6 | extern struct q eb[];
+      |                   ^
+incomplete_var.c:4:8: note: forward declaration of 'struct q'
+incomplete_var.c:7:25: error: variable has incomplete type 'struct q'
+    4 | struct q;
+      |        - forward declaration of 'struct q'
+  ...
+    7 | void f5(void){ struct q z; }
+      |                         ^
+incomplete_var.c:4:8: note: forward declaration of 'struct q'
+incomplete_var.c:8:20: error: definition of variable with array type needs an explicit size or an initializer
+    8 | void g5(void){ int a[]; union u w; struct q b[3]; }
+      |                    ^
+incomplete_var.c:8:33: error: variable has incomplete type 'union u'
+    8 | void g5(void){ int a[]; union u w; struct q b[3]; }
+      |                               - ^
+      |                               |
+      |                               forward declaration of 'union u'
+incomplete_var.c:8:31: note: forward declaration of 'union u'
+incomplete_var.c:8:46: error: array has incomplete element type 'struct q'
+    4 | struct q;
+      |        - forward declaration of 'struct q'
+  ...
+    8 | void g5(void){ int a[]; union u w; struct q b[3]; }
+      |                                              ^
+incomplete_var.c:4:8: note: forward declaration of 'struct q'
+incomplete_var.c:11:31: error: incomplete definition of type 'struct q'
+   11 | int f6(struct q *p) { return p->x; }
+      |                              ~^
+incomplete_var.c:4:8: note: forward declaration of 'struct q'
+    4 | struct q;
+      |        ^
+incomplete_var.c:12:25: error: variable has incomplete type 'struct q'
+   12 | int g6(void) { struct q z; return z.x; }
+      |                         ^
+incomplete_var.c:4:8: note: forward declaration of 'struct q'
+    4 | struct q;
+      |        ^
+3 warnings and 10 errors generated.

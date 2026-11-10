@@ -1,0 +1,58 @@
+keyword_typo.c:4:1: error: unknown type name 'struc'; did you mean 'struct'?
+  the source line is: struc S1 { int a; };
+  fix: replace the text with 'struct' at line 4, column 1
+keyword_typo.c:5:1: error: unknown type name 'stati'; did you mean 'static'?
+  the source line is: stati int g1;
+  fix: replace the text with 'static' at line 5, column 1
+keyword_typo.c:6:1: error: unknown type name 'exter'; did you mean 'extern'?
+  the source line is: exter int g2;
+  fix: replace the text with 'extern' at line 6, column 1
+keyword_typo.c:7:1: error: unknown type name 'typede'; did you mean 'typedef'?
+  the source line is: typede int T1;
+  fix: replace the text with 'typedef' at line 7, column 1
+keyword_typo.c:8:1: error: unknown type name 'cons'; did you mean 'const'?
+  the source line is: cons int g4 = 1;
+  fix: replace the text with 'const' at line 8, column 1
+keyword_typo.c:9:1: error: unknown type name 'unsigne'; did you mean 'unsigned'?
+  the source line is: unsigne g5;
+  fix: replace the text with 'unsigned' at line 9, column 1
+keyword_typo.c:10:1: error: unknown type name 'voi'; did you mean 'void'?
+  the source line is: voi f0(void);
+  fix: replace the text with 'void' at line 10, column 1
+keyword_typo.c:11:1: error: unknown type name '_Boo'; did you mean '_Bool'?
+  the source line is: _Boo g8;
+  fix: replace the text with '_Bool' at line 11, column 1
+keyword_typo.c:12:1: error: unknown type name 'enu'; did you mean 'enum'?
+  the source line is: enu E { A };
+  fix: replace the text with 'enum' at line 12, column 1
+keyword_typo.c:13:8: error: unknown type name 'voi'; did you mean 'void'?
+  the source line is: static voi f1(void);
+  fix: replace the text with 'void' at line 13, column 8
+keyword_typo.c:14:7: error: unknown type name 'unsigne'; did you mean 'unsigned'?
+  the source line is: const unsigne long *g9;
+  fix: replace the text with 'unsigned' at line 14, column 7
+keyword_typo.c:15:14: error: unknown type name 'cha'; did you mean 'char'?
+  the source line is: int f(int x, cha y);
+  fix: replace the text with 'char' at line 15, column 14
+keyword_typo.c:16:12: error: unknown type name 'cons'; did you mean 'const'?
+  the source line is: struct R { cons int m; };
+  fix: replace the text with 'const' at line 16, column 12
+keyword_typo.c:19:2: error: use of undeclared identifier 'cha'; did you mean 'char'?
+  the source line is: cha c = 1;
+  fix: replace the text with 'char' at line 19, column 2
+keyword_typo.c:20:2: error: use of undeclared identifier 'doubl'; did you mean 'double'?
+  the source line is: doubl d = 2;
+  fix: replace the text with 'double' at line 20, column 2
+keyword_typo.c:21:2: error: use of undeclared identifier 'struc'; did you mean 'struct'?
+  the source line is: struc S1 s;
+  fix: replace the text with 'struct' at line 21, column 2
+keyword_typo.c:22:7: error: use of undeclared identifier 'doubl'; did you mean 'double'?
+  the source line is: x = (doubl)x;
+  fix: replace the text with 'double' at line 22, column 7
+keyword_typo.c:23:2: error: call to undeclared function 'whil'; ISO C99 and later do not support implicit function declarations [-Wimplicit-function-declaration]
+  the source line is: whil (x) x--;
+keyword_typo.c:23:10: error: expected ';' after expression
+  the source line is: whil (x) x--;
+  fix: insert ';' at line 23, column 10
+fatal error: too many errors emitted, stopping now [-ferror-limit=]
+20 errors generated.

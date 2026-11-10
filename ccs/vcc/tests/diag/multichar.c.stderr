@@ -1,0 +1,31 @@
+multichar.c:2:9: warning: multi-character character constant [-Wmultichar]
+    2 | int a = 'ab';
+      |         ^
+multichar.c:4:9: warning: multi-character character constant [-Wmultichar]
+    4 | int c = 'abcde';
+      |         ^
+multichar.c:4:9: warning: character constant too long for its type
+    4 | int c = 'abcde';
+      |         ^
+multichar.c:5:9: error: wide character literals may not contain multiple characters
+    5 | int d = L'ab';
+      |         ^
+multichar.c:6:9: warning: multi-character character constant [-Wmultichar]
+    6 | int e = '\n\t';
+      |         ^
+multichar.c:7:9: error: Unicode character literals may not contain multiple characters
+    7 | int g = u'ab';
+      |         ^
+multichar.c:9:9: warning: multi-character character constant [-Wmultichar]
+    9 | int i = '\377\377';
+      |         ^
+multichar.c:10:5: warning: multi-character character constant [-Wmultichar]
+   10 | #if 'ab'
+      |     ^
+multichar.c:12:5: warning: multi-character character constant [-Wmultichar]
+   12 | #if 'abcde'
+      |     ^
+multichar.c:12:5: warning: character constant too long for its type
+   12 | #if 'abcde'
+      |     ^
+8 warnings and 2 errors generated.

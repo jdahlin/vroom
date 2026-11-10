@@ -1,0 +1,35 @@
+cond_mismatch_etc.c:2:43: warning: pointer/integer type mismatch in conditional expression ('int *' and 'int') [-Wconditional-type-mismatch]
+    2 | int *f(int x, int *p, long l){ int *a = x ? p : x; int *b = x ? l : p; int *c = x ? p : 0; return x ? p : 1; }
+      |                                           ^ ~   ~
+cond_mismatch_etc.c:2:63: warning: pointer/integer type mismatch in conditional expression ('long' and 'int *') [-Wconditional-type-mismatch]
+    2 | int *f(int x, int *p, long l){ int *a = x ? p : x; int *b = x ? l : p; int *c = x ? p : 0; return x ? p : 1; }
+      |                                                               ^ ~   ~
+cond_mismatch_etc.c:2:101: warning: pointer/integer type mismatch in conditional expression ('int *' and 'int') [-Wconditional-type-mismatch]
+    2 | int *f(int x, int *p, long l){ int *a = x ? p : x; int *b = x ? l : p; int *c = x ? p : 0; return x ? p : 1; }
+      |                                                                                                     ^ ~   ~
+cond_mismatch_etc.c:4:19: error: incompatible pointer to integer conversion initializing 'int' with an expression of type 'int *'; dereference with * [-Wint-conversion]
+    4 | int f2(void){ int y = x ? p : q; int z = (x ? p : q); int w = p + 1; return x ? p : q; }
+      |                   ^   ~~~~~~~~~
+      |                       *(       )
+cond_mismatch_etc.c:4:38: error: incompatible pointer to integer conversion initializing 'int' with an expression of type 'int *'; dereference with * [-Wint-conversion]
+    4 | int f2(void){ int y = x ? p : q; int z = (x ? p : q); int w = p + 1; return x ? p : q; }
+      |                                      ^   ~~~~~~~~~~~
+      |                                          *
+cond_mismatch_etc.c:4:59: error: incompatible pointer to integer conversion initializing 'int' with an expression of type 'int *'; dereference with * [-Wint-conversion]
+    4 | int f2(void){ int y = x ? p : q; int z = (x ? p : q); int w = p + 1; return x ? p : q; }
+      |                                                           ^   ~~~~~
+      |                                                               *(   )
+cond_mismatch_etc.c:4:77: error: incompatible pointer to integer conversion returning 'int *' from a function with result type 'int'; dereference with * [-Wint-conversion]
+    4 | int f2(void){ int y = x ? p : q; int z = (x ? p : q); int w = p + 1; return x ? p : q; }
+      |                                                                             ^~~~~~~~~
+      |                                                                             *(       )
+cond_mismatch_etc.c:5:47: error: invalid operands to binary expression ('int *' and 'double')
+    5 | int f3(int *p, double d, float fl){ return (p == 0.5) + (d < p) + (p != fl); }
+      |                                             ~ ^  ~~~
+cond_mismatch_etc.c:5:60: error: invalid operands to binary expression ('double' and 'int *')
+    5 | int f3(int *p, double d, float fl){ return (p == 0.5) + (d < p) + (p != fl); }
+      |                                                          ~ ^ ~
+cond_mismatch_etc.c:5:70: error: invalid operands to binary expression ('int *' and 'float')
+    5 | int f3(int *p, double d, float fl){ return (p == 0.5) + (d < p) + (p != fl); }
+      |                                                                    ~ ^  ~~
+3 warnings and 7 errors generated.

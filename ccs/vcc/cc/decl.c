@@ -19,7 +19,7 @@ static void skip_vla_init(cc *c)
 
 /* ---------------- declarations ---------------- */
 
-static uint32_t new_attrs(cc *c, const attrs *a)
+VPRIV uint32_t new_attrs(cc *c, const attrs *a)
 {
 	uint32_t i = c->nattr++;
 
@@ -28,9 +28,17 @@ static uint32_t new_attrs(cc *c, const attrs *a)
 }
 
 /* clang's -Wdeprecated-declarations for a use at loc of name, a: the record */
-VPRIV __attribute__((noinline, cold)) void deprecated_use(cc *c, uint32_t loc, uint32_t name, const attrs *a)
+VPRIV __attribute__((noinline, cold)) void deprecated_use(cc *c, uint32_t loc, uint32_t name, const attrs *a, uint32_t dloc)
 {
-	if (c->fn && (c->syms[c->fn].flags & SF_DEPRECATED))
+	if (unlikely(a->unavail)) {	/* clang: an error, also inside an unavailable function */
+		if (a->deprmsg)
+			cc_error(c, loc, "'%.*s' is unavailable: %s", IDF(name), c->strs[a->deprmsg - 1].s);
+		else
+			cc_error(c, loc, "'%.*s' is unavailable", IDF(name));
+		note(c, dloc, "'%.*s' has been explicitly marked unavailable here", IDF(name));	/* (clang: the declaration) */
+		return;
+	}
+	if (c->fn && (c->syms[c->fn].flags & SF_DEPRECATED) && !c->attr[c->syms[c->fn].attrs].unavail)
 		return;	/* clang: not inside a deprecated function */
 	if (a->deprmsg)
 		cc_warnx(c, "deprecated-declarations", true, NULL, loc, NULL, 0, NULL, 0, "'%.*s' is deprecated: %s",
@@ -273,7 +281,7 @@ static uint32_t declare(cc *c, const dspec *ds, declr *d, qty t, bool file)
 	}
 	if (at.vecsize) {
 		if (!is_arith(c, t) || ty_size(c, t) > at.vecsize || at.vecsize % ty_size(c, t))
-			cc_error(c, d->loc, "invalid vector element type");
+			cc_error(c, d->loc, "invalid vector element type '%s'", tyname(c, t));
 		else
 			t = QT(QI(ty_vector(c, t, at.vecsize)), QQ(t));
 	}
@@ -326,8 +334,10 @@ static uint32_t declare(cc *c, const dspec *ds, declr *d, qty t, bool file)
 		return s;
 	}
 	kind = is_func(c, t) ? S_FUNC : S_VAR;
-	if (kind == S_VAR && is_void(c, t) && ds->sc != SC_EXTERN)
+	if (kind == S_VAR && is_void(c, t) && ds->sc != SC_EXTERN) {
 		cc_error(c, d->loc, "variable has incomplete type 'void'");
+		d->invalid = true;
+	}
 	/* redeclarations: the same entity in the same scope, or a block-scope extern */
 	prev = 0;
 	{
@@ -380,6 +390,8 @@ static uint32_t declare(cc *c, const dspec *ds, declr *d, qty t, bool file)
 			return head;
 		}
 	}
+	if (prev && unlikely(c->syms[prev].flags & SF_INVALID) && c->syms[prev].kind != kind)
+		prev = 0;	/* a placeholder left by parser recovery (rec_restore): replaced */
 	if (prev) {
 		sym *y = &c->syms[prev];
 
@@ -513,6 +525,28 @@ static bool lb_type(cc *c, const char **p, qty *out)
 	return true;
 }
 
+/* a function type from a clang builtin type string (its result in *ret); false: not readable */
+static bool lb_functype(cc *c, const char *p, qty *fty, qty *ret)
+{
+	qty par[16];
+	uint32_t np = 0;
+	int fl = 0;
+
+	if (!lb_type(c, &p, ret))
+		return false;
+	while (*p) {
+		if (*p == '.') {
+			fl |= TF_VARIADIC;
+			break;
+		}
+		if (np == 16 || !lb_type(c, &p, &par[np]))
+			return false;
+		np++;
+	}
+	*fty = ty_func(c, *ret, par, np, fl);
+	return true;
+}
+
 /*
  * __builtin_X for a library function X that vcc has no code for: declared on
  * first use with clang's prototype, its symbol X (clang calls X unless it
@@ -560,26 +594,14 @@ VPRIV uint32_t lib_builtin(cc *c, uint32_t id, uint32_t loc)
 	if (!b)
 		return 0;
 	{
-		const char *p = b->sig;
-		qty ret, par[16];
-		uint32_t np = 0;
-		int fl = 0;
+		qty fty, ret;
 
-		if (!lb_type(c, &p, &ret))
+		if (!lb_functype(c, b->sig, &fty, &ret))
 			return 0;
-		while (*p) {
-			if (*p == '.') {
-				fl |= TF_VARIADIC;
-				break;
-			}
-			if (np == 16 || !lb_type(c, &p, &par[np]))
-				return 0;
-			np++;
-		}
 		{
 			dspec ds = { .ty = ret, .sc = SC_EXTERN, .loc = loc };
 			declr d = { .name = id, .loc = loc };
-			uint32_t s = declare(c, &ds, &d, ty_func(c, ret, par, np, fl), true);
+			uint32_t s = declare(c, &ds, &d, fty, true);
 			size_t ll = strlen(b->lib), pre = c->o->target == PP_DARWIN ? 1 : 0;
 			char *keep = halloc(c, ll + pre + 1);
 			attrs a;
@@ -643,6 +665,110 @@ VPRIV uint32_t implicit_func(cc *c, uint32_t id, uint32_t loc)
 	return declare(c, &ds, &d, ty_func(c, prim(TY_INT), NULL, 0, TF_NOPROTO), c->depth == 0);
 }
 
+/* ---------------- library functions and names with a header (D5.4) ---------------- */
+
+/* clang's library functions with their header (cc/libfuncs.inc, gen-libbuiltins.py) */
+static const struct libfn { const char *name, *hdr, *sig; uint8_t gnu; } libfns[] = {
+#include "libfuncs.inc"
+};
+/* other names standard headers declare (cc/libnames.inc, by hand) */
+static const struct libname { const char *name, *hdr; } libnames[] = {
+#include "libnames.inc"
+};
+
+#define BSEARCH(tab, n, nl, out) do {						\
+	size_t lo_ = 0, hi_ = sizeof(tab) / sizeof((tab)[0]);			\
+	(out) = NULL;								\
+	while (lo_ < hi_) {							\
+		size_t m_ = (lo_ + hi_) / 2;					\
+		int r_ = strncmp((tab)[m_].name, (n), (nl));			\
+		if (r_ == 0 && (tab)[m_].name[nl])				\
+			r_ = 1;							\
+		if (r_ == 0) { (out) = &(tab)[m_]; break; }			\
+		if (r_ < 0) lo_ = m_ + 1; else hi_ = m_;			\
+	}									\
+} while (0)
+
+static const struct libfn *libfn_find(cc *c, uint32_t id)
+{
+	const struct libfn *f;
+
+	if (c->o->no_builtin)
+		return NULL;	/* -ffreestanding / -fno-builtin: clang knows no library functions */
+	BSEARCH(libfns, idstr_(id), (size_t)idlen_(id), f);
+	return f && f->gnu && c->o->strict_std ? NULL : f;
+}
+
+/* the standard header that declares id, or NULL */
+VPRIV const char *lib_header(cc *c, uint32_t id)
+{
+	const struct libfn *f = libfn_find(c, id);
+	const struct libname *n;
+
+	if (f)
+		return f->hdr;
+	BSEARCH(libnames, idstr_(id), (size_t)idlen_(id), n);
+	return n ? n->hdr : NULL;
+}
+
+/* "#include <hdr>" as a fix-it on d, where the file's includes are (or at its top) */
+VPRIV void include_fix(cc *c, vdiag *d, uint32_t loc, const char *hdr)
+{
+	uint32_t at = pp_include_point(c->p, loc);
+	char b[96];
+
+	if (at == UINT32_MAX)
+		return;
+	snprintf(b, sizeof b, "#include <%s>\n", hdr);
+	pp_diag_fix(c->p, d, at, at, b, VDA_MAYBE);
+}
+
+/*
+ * A call to an undeclared library function (clang's Builtins with a header):
+ * declared with the library's prototype, as clang, after clang's diagnostic
+ * ("call to undeclared library function 'memcpy' with type ...", in C89 a
+ * warning) and the note naming the header.  0: not one (or a prototype vcc
+ * cannot read): the caller declares "int id()".
+ */
+VPRIV uint32_t lib_func(cc *c, uint32_t id, uint32_t loc)
+{
+	static const char *const none[] = { NULL };
+	const struct libfn *f = libfn_find(c, id);
+	qty fty, ret;
+	int lv;
+
+	if (!f || strchr(f->sig, 'P') || !lb_functype(c, f->sig, &fty, &ret) || !strcmp(f->name, "alloca"))
+		return 0;	/* FILE * parameters: vcc has no FILE; alloca is the builtin */
+	/* C89, or -Wno-error=implicit-function-declaration: clang's warning; else an error */
+	lv = c->o->std == 89 || c->o->implicit_fn ? pp_diag_wlevel(c->p, "implicit-function-declaration", true, none, loc)
+		: VDL_ERROR;
+	if (lv >= 0) {
+		const char *t = tyname(c, fty);
+		vdiag *d;
+
+		pp_diag_pc = __builtin_return_address(0);
+		if (lv == VDL_ERROR)
+			error_limit(c), c->errors++;
+		c->ndiag++;
+		if (c->o->std == 89)
+			d = pp_diag_begin(c->p, lv, loc, "implicitly declaring library function '%.*s' with type '%s'", IDF(id), t);
+		else
+			d = pp_diag_begin(c->p, lv, loc, "call to undeclared library function '%.*s' with type '%s'; ISO C99 and "
+					  "later do not support implicit function declarations", IDF(id), t);
+		pp_diag_flag(d, "implicit-function-declaration");
+		d->werror = lv == VDL_ERROR && (c->o->std == 89 || c->o->implicit_fn);
+		include_fix(c, d, loc, f->hdr);
+		pp_diag_emit(c->p, d);
+		note(c, loc, "include the header <%s> or explicitly provide a declaration for '%.*s'", f->hdr, IDF(id));
+	}
+	{
+		dspec ds = { .ty = ret, .sc = SC_EXTERN, .loc = loc };
+		declr d = { .name = id, .loc = loc };
+
+		return declare(c, &ds, &d, fty, c->depth == 0);
+	}
+}
+
 /* the declarations between a K&R definition's identifier list and its body */
 static void kr_params(cc *c, const declr *fd)
 {
@@ -657,7 +783,7 @@ static void kr_params(cc *c, const declr *fd)
 		if (!decl_specs(c, &ds, true)) {
 			if (!is(c, T_IDENT) || kwof(tok(c)))
 				fatal(c, tok(c)->loc, "expected ';' after top level declarator");
-			unknown_type(c, &ds);
+			unknown_type(c, &ds, true);
 		}
 		for (;;) {
 			declr d;
@@ -704,6 +830,16 @@ static void kr_params(cc *c, const declr *fd)
 }
 
 /* a declaration; block-scope ones append N_DECL statements to out */
+/* the ';' ending a declaration; clang's ParseDeclGroup when it is missing: unless a
+   declaration starts here, the rest is skipped through the next ';' */
+static void decl_semi(cc *c, bool file)
+{
+	if (likely(accept(c, T_SEMI)))
+		return;
+	if (expect_semi(c, file ? "after top level declarator" : "at end of declaration") && !is_decl_start(c, tok(c)))
+		skip_stmt(c, false);
+}
+
 VPRIV void declaration(cc *c, vec *out, bool file)
 {
 	dspec ds;
@@ -723,14 +859,18 @@ VPRIV void declaration(cc *c, vec *out, bool file)
 			memset(&ds, 0, sizeof(ds));
 			ds.ty = prim(TY_INT);
 			ds.loc = tok(c)->loc;
-			if (!c->o->implicit_int)
-				cc_error(c, ds.loc, "type specifier missing, defaults to 'int'; ISO C99 and later do not support implicit int");
-		} else if (is(c, T_IDENT) && !kwof(tok(c))) {
-			unknown_type(c, &ds);
-		} else {
-			char b[64];
+			if (!c->o->implicit_int) {
+				uint32_t i = 0;
 
-			fatal(c, tok(c)->loc, "expected declaration before '%s'", tokspell(tok(c), b, sizeof(b)));
+				while (peek(c, i)->kind == T_STAR)	/* clang: at the name in "*p = 1;" */
+					i++;
+				cc_error(c, peek(c, i)->kind == T_IDENT ? peek(c, i)->loc : ds.loc,
+					 "type specifier missing, defaults to 'int'; ISO C99 and later do not support implicit int [-Wimplicit-int]");
+			}
+		} else if (is(c, T_IDENT) && !kwof(tok(c))) {
+			unknown_type(c, &ds, true);
+		} else {
+			fatal(c, tok(c)->loc, "expected identifier or '('");
 		}
 	}
 	if (accept(c, T_SEMI))
@@ -744,10 +884,32 @@ VPRIV void declaration(cc *c, vec *out, bool file)
 		t = apply_declarator(c, ds.ty, first, nops);
 		c->ndops = first;
 		asm_label(c, &d.at);
+		if (unlikely(file && (ds.sc == SC_AUTO || (ds.sc == SC_REGISTER && !d.at.asmname))) && d.name) {
+			/* (GNU: a global register variable, "register T x asm("reg")", is fine) */
+			/* (clang: the declaration is invalid; a function's at the declaration's start) */
+			if (is_func(c, t))
+				cc_error(c, dbeg, "illegal storage class on function");
+			else
+				cc_error(c, d.loc, "illegal storage class on file-scoped variable");
+			ds.invalid = true;
+		}
 		attribute_list(c, &d.at);
 		if (ds.auto_type) {
 			uint32_t v;
 
+			if (!is(c, T_EQUAL) && c->o->std == 23 && d.name) {
+				/* clang's text for C23 'auto' (vcc cannot tell it from __auto_type here) */
+				dspec d2 = ds;
+
+				cc_error(c, d.loc, "declaration of variable '%.*s' with deduced type 'auto' requires an initializer",
+					 IDF(d.name));
+				d2.auto_type = false, d2.invalid = true, d2.ty = prim(TY_INT);
+				declare(c, &d2, &d, d2.ty, file);	/* (invalid: its uses say nothing more) */
+				if (accept(c, T_COMMA))
+					continue;
+				decl_semi(c, file);
+				return;
+			}
 			expect(c, T_EQUAL, "'=' (__auto_type requires an initializer)");
 			v = decay(c, assign_expr(c));
 			t = QT(QI(QUNQ(N(v)->ty)), QQ(ds.ty));
@@ -764,17 +926,30 @@ VPRIV void declaration(cc *c, vec *out, bool file)
 
 				vpush(c, out, n);
 			}
+			if (decl_comma_typo(c))
+				return;
 			if (accept(c, T_COMMA))
 				continue;
-			expect_semi(c, "at end of declaration");
+			decl_semi(c, file);
 			return;
 		}
 		if (file && d.kr && is_func(c, t) && !is(c, T_SEMI) && !is(c, T_COMMA) && !is(c, T_EQUAL))
 			kr_params(c, &d);
+		else if (d.kr)
+			cc_error(c, d.plb, "a parameter list without types is only allowed in a function definition");
 		s = declare(c, &ds, &d, t, file);
+		if (unlikely(ds.invalid | d.invalid)) {
+			c->syms[s].flags |= SF_INVALID;	/* its type was an error: uses say nothing more */
+			delayed_bug(c, d.loc, "an invalid declaration without an error");
+		}
 		if (d.has_func && c->syms[s].kind == S_FUNC && is_func(c, c->syms[s].ty) &&
 		    d.npsyms == T(c, c->syms[s].ty)->n)
+		{
 			c->syms[s].psyms = d.psyms + 1, c->syms[s].plb = d.plb, c->syms[s].ple = d.ple;
+			for (uint32_t i = 0; unlikely(c->nnparam) && i < d.npsyms; i++)	/* a nonnull parameter: checked at calls */
+				if (c->syms[c->lists[d.psyms + i]].flags & SF_NONNULL)
+					c->syms[s].flags |= SF_NONNULL;
+		}
 		if (d.at.vecsize || ds.at.vecsize || d.at.mode || ds.at.mode)
 			t = c->syms[s].ty;	/* declare made it a vector / applied mode: initialize that */
 		if (is_func(c, t) && is(c, T_LBRACE)) {
@@ -784,6 +959,14 @@ VPRIV void declaration(cc *c, vec *out, bool file)
 				lazy_capture(c, s, &d);
 			else
 				function_def(c, s, &d);
+			return;
+		}
+		if (unlikely(file && d.has_func) && is_func(c, t) && !is(c, T_SEMI) && !is(c, T_COMMA) &&
+		    !is(c, T_EQUAL) && !at_asm(c) && !iskw(c, KW___attribute__) && !iskw(c, KW___attribute) &&
+		    !is_decl_start(c, tok(c))) {	/* a declaration next: the ';' is missing (decl_semi) */
+			/* clang: "int f(int x) return x; }": the '{' is missing */
+			cc_error(c, tok(c)->loc, "expected function body after function declarator");
+			skip_stmt(c, true);
 			return;
 		}
 		if (accept(c, T_EQUAL)) {
@@ -849,6 +1032,10 @@ VPRIV void declaration(cc *c, vec *out, bool file)
 				/* array size from the initializer */
 				y->ty = QT(QI(it), QQ(y->ty));
 			}
+			if (unlikely(is_record(c, it) && !complete(c, it))) {
+				y->flags |= SF_INVALID;	/* initializer said so: its uses are silent */
+				delayed_bug(c, d.loc, "an incomplete initializer without an error");
+			}
 			if (y->body && file) {
 				cc_error(c, d.loc, "redefinition of '%.*s'", IDF(d.name));
 				note(c, y->loc, "previous definition is here");
@@ -899,10 +1086,11 @@ VPRIV void declaration(cc *c, vec *out, bool file)
 				else if (!complete(c, y->ty) && ds.sc != SC_STATIC) {
 					if (is_array(c, y->ty))
 						cc_error(c, d.loc, "definition of variable with array type needs an explicit size or an initializer");
-					else
-						cc_error(c, d.loc, "variable has incomplete type '%s'", tyname(c, y->ty)), y->flags |= SF_INVALID;
-					if (is_record(c, y->ty) || KIND(c, y->ty) == TY_ENUM)
-						note(c, c->tags[T(c, y->ty)->aux].loc, "forward declaration of '%s'", tyname(c, y->ty));
+					else if (!is_void(c, y->ty)) {	/* void: declare said so */
+						cc_error(c, d.loc, "variable has incomplete type '%s'", tyname(c, y->ty));
+						fwd_note(c, y->ty);
+					}
+					y->flags |= SF_INVALID;
 				}
 				if (out && (y->sc == SC_AUTO || y->sc == SC_REGISTER)) {
 					uint32_t n = mk2(c, N_DECL, prim(TY_VOID), d.loc, s, 0);
@@ -919,9 +1107,11 @@ VPRIV void declaration(cc *c, vec *out, bool file)
 		}
 		if (c->syms[s].kind == S_VAR)	/* the declaration's range, for notes */
 			c->syms[s].plb = dbeg, c->syms[s].ple = c->prevloc;
+		if (decl_comma_typo(c))
+			return;
 		if (accept(c, T_COMMA))
 			continue;
-		expect_semi(c, "at end of declaration");
+		decl_semi(c, file);
 		return;
 	}
 }

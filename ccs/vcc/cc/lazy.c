@@ -60,8 +60,21 @@ static void lz_tok(cc *c, const ptok *t)
 	} else {
 		z->v = c->nlzs;
 		z->flags = t->flags;
-		memcpy(c->lzs + c->nlzs, t->s, t->len);
-		c->lzs[c->nlzs + t->len] = 0;
+		char *d = c->lzs + c->nlzs;
+		const char *q = t->s;
+		uint32_t n = t->len;
+
+		if (likely(n <= 3)) {	/* punctuators, most numbers: no memcpy call (a stub on Darwin) */
+			if (n)
+				d[0] = q[0];
+			if (n > 1)
+				d[1] = q[1];
+			if (n > 2)
+				d[2] = q[2];
+		} else {
+			memcpy(d, q, n);
+		}
+		d[n] = 0;
 		c->nlzs += t->len + 1;
 	}
 }
@@ -144,7 +157,11 @@ static void lazy_parse(cc *c, uint32_t i)
 	fetch(c, &c->tk[0]);
 	c->ntk = 1;
 	c->syms[s].flags &= ~(SF_DEFINED | SF_LAZY);
+	struct recov *rec = c->rec;
+
+	c->rec = NULL;	/* another token stream: no recovery outside the body */
 	function_def(c, s, &d);
+	c->rec = rec;
 	if (!is(c, T_EOF))
 		cc_error(c, tok(c)->loc, "expected end of function body");
 	atomic_fetch_add_explicit(&lz_st_pfn, 1, memory_order_relaxed);

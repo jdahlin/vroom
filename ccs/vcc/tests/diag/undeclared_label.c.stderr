@@ -1,0 +1,4 @@
+undeclared_label.c:3:7: error: use of undeclared label 'out'
+    3 |         goto out;
+      |              ^
+1 error generated.

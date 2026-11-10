@@ -1,0 +1,4 @@
+ext_swizzle_range.c:16:30: error: vector component access exceeds type 'i8' (vector of 8 'int' values)
+   16 |         printf("%d %d %d\n", w.s7, w.sA - 0 * w.s0 > 0 ? 1 : w.s5, w.even.s3);
+      |                                     ^~~
+1 error generated.

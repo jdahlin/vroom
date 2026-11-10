@@ -8,6 +8,7 @@ enum {
 	A_NORETURN, A_ALWAYS_INLINE, A_NOINLINE, A_GNU_INLINE, A_TRANSPARENT_UNION, A_VISIBILITY,
 	A_CONSTRUCTOR, A_DESTRUCTOR, A_COUNTED_BY, A_VECTOR_SIZE, A_COLD, A_NONSTRING, A_MAY_ALIAS,
 	A_WEAKREF, A_NAKED, A_NOCF, A_ERROR, A_OVERLOADABLE, A_NOINSTR, A_TLS_MODEL, A_EXT_VECTOR, A_DEPRECATED, A_WUR, A_NODISCARD, A_IFUNC, A_NONNULL, A_FORMAT, A_FORMAT_ARG,
+	A_PURE, A_CONST, A_UNAVAILABLE,
 	A_COUNT
 };
 
@@ -21,6 +22,7 @@ static const char *const attr_names[A_COUNT] = {
 	[A_NONSTRING] = "nonstring", [A_MAY_ALIAS] = "may_alias", [A_WEAKREF] = "weakref",
 	[A_NOINSTR] = "no_instrument_function", [A_NAKED] = "naked", [A_NOCF] = "nocf_check", [A_ERROR] = "error",
 	[A_OVERLOADABLE] = "overloadable", [A_TLS_MODEL] = "tls_model", [A_EXT_VECTOR] = "ext_vector_type",
+	[A_PURE] = "pure", [A_CONST] = "const", [A_UNAVAILABLE] = "unavailable",
 	[A_DEPRECATED] = "deprecated", [A_WUR] = "warn_unused_result", [A_NODISCARD] = "nodiscard", [A_IFUNC] = "ifunc", [A_NONNULL] = "nonnull", [A_FORMAT] = "format", [A_FORMAT_ARG] = "format_arg",
 };
 
@@ -64,11 +66,13 @@ VPRIV uint32_t skip_balanced(cc *c)
 	int depth = 0;
 	uint32_t last;
 
-	do {
+	do {	/* (...), [...] or {...} (an initializer's braces) */
+		int k = tok(c)->kind;
+
 		last = tok(c)->loc;
-		if (is(c, T_LPAREN))
+		if (k == T_LPAREN || k == T_LSQUARE || k == T_LBRACE)
 			depth++;
-		else if (is(c, T_RPAREN))
+		else if (k == T_RPAREN || k == T_RSQUARE || k == T_RBRACE)
 			depth--;
 		else if (is(c, T_EOF))
 			fatal(c, tok(c)->loc, "unexpected end of file in attribute");
@@ -77,12 +81,23 @@ VPRIV uint32_t skip_balanced(cc *c)
 	return last;
 }
 
-VPRIV uint32_t string_index(cc *c)
+/* a string literal argument; attr: the attribute's name (0: none).  On an error the
+   argument is skipped up to its ')', so the caller's expect() does not report again */
+VPRIV uint32_t string_index(cc *c, uint32_t attr)
 {
 	uint32_t n;
 
 	if (!is_strtok(tok(c)->kind)) {
-		cc_error(c, tok(c)->loc, "expected string literal");
+		if (attr) {
+			int l;
+			const char *s = idname(attr, &l);	/* as written: clang keeps '__alias__' */
+
+			cc_error(c, tok(c)->loc, "expected string literal as argument of '%.*s' attribute", l, s);
+			for (int d = 0; !is(c, T_EOF) && !is(c, T_SEMI) && (d || !is(c, T_RPAREN)); next(c))
+				d += is(c, T_LPAREN) - is(c, T_RPAREN);
+		} else {
+			cc_error(c, tok(c)->loc, "expected string literal");
+		}
 		return 0;
 	}
 	n = string_lit(c);
@@ -269,7 +284,7 @@ __attribute__((noinline)) VPRIV void attribute_list_(cc *c, attrs *a)
 		while (!is(c, close)) {
 			ptok *t = tok(c);
 			int an, scope = std ? 0 : -1;	/* attr_scopes index; -1: GNU syntax */
-			uint32_t loc = t->loc, sloc = t->loc, sid = 0;
+			uint32_t loc = t->loc, sloc = t->loc, sid = 0, aid;
 
 			if (accept(c, T_COMMA))
 				continue;
@@ -277,7 +292,7 @@ __attribute__((noinline)) VPRIV void attribute_list_(cc *c, attrs *a)
 			    peek(c, 1)->kind == T_COLONCOLON && srcbr && pp_spells(c->p, loc, "__clang__", 9)) {
 				/* [[__clang__::x]] as written (not through a macro): clang warns and takes it as clang:: */
 				pp_span r = { loc, pp_tok_end(c->p, loc) };
-				pp_fixit fx = { loc, pp_tok_end(c->p, loc), "_Clang" };
+				pp_fixit fx = { loc, pp_tok_end(c->p, loc), "_Clang", VDA_NAME };	/* (__clang__ itself) */
 
 				pp_dinfo d = { "warning", loc, &r, 1, &fx, 1, "1", 1 };	/* the note at the macro's body */
 
@@ -318,7 +333,8 @@ __attribute__((noinline)) VPRIV void attribute_list_(cc *c, attrs *a)
 					continue;
 				}
 			}
-			an = attr_of(t->id);
+			aid = t->id;	/* t is gone after next() */
+			an = attr_of(aid);
 			if (!an && kwof(t) == KW_const)
 				an = A_NONE;
 			const uint32_t tid = t->id;	/* t is the queue head: stale after next() */
@@ -349,7 +365,7 @@ __attribute__((noinline)) VPRIV void attribute_list_(cc *c, attrs *a)
 				expect(c, T_LPAREN, "'('");
 				{
 					uint32_t sloc = tok(c)->loc;
-					uint32_t s = string_index(c);
+					uint32_t s = string_index(c, aid);
 
 					if (an == A_SECTION && c->o->target == PP_DARWIN && s && !strchr(c->strs[s - 1].s, ','))
 						cc_error(c, sloc, "argument to 'section' attribute is not valid for this target: "
@@ -368,7 +384,7 @@ __attribute__((noinline)) VPRIV void attribute_list_(cc *c, attrs *a)
 				{
 					uint32_t loc = tok(c)->loc;
 
-					a->tlsmodel = (uint8_t)vcc_tls_model(c->strs[string_index(c) - 1].s);
+					a->tlsmodel = (uint8_t)vcc_tls_model(c->strs[string_index(c, aid) - 1].s);
 					if (!a->tlsmodel)
 						cc_error(c, loc, "tls_model must be \"global-dynamic\", \"local-dynamic\", \"initial-exec\" or \"local-exec\"");
 				}
@@ -402,6 +418,10 @@ __attribute__((noinline)) VPRIV void attribute_list_(cc *c, attrs *a)
 				next(c);
 				expect(c, T_RPAREN, "')'");
 				continue;
+			case A_PURE:
+			case A_CONST:	/* (-Wunused-value: a discarded call) */
+				a->pure = an == A_PURE ? 1 : 2;
+				break;
 			case A_VECTOR_SIZE: {
 				i128 v;
 
@@ -414,11 +434,14 @@ __attribute__((noinline)) VPRIV void attribute_list_(cc *c, attrs *a)
 					a->vecsize = (uint32_t)v;
 				continue;
 			}
-			case A_DEPRECATED:	/* deprecated or deprecated("msg") */
-				a->depr = loc, a->deprmsg = 0;
+			case A_DEPRECATED:	/* deprecated or deprecated("msg"[, "replacement"]) */
+			case A_UNAVAILABLE:	/* unavailable or unavailable("msg") */
+				a->depr = loc, a->deprmsg = 0, a->unavail = an == A_UNAVAILABLE;
 				if (is(c, T_LPAREN) && is_strtok(peek(c, 1)->kind)) {
 					next(c);
-					a->deprmsg = string_index(c);
+					a->deprmsg = string_index(c, aid);
+					if (accept(c, T_COMMA) && is_strtok(tok(c)->kind))
+						string_index(c, aid);	/* (the replacement, for a fix-it) */
 					expect(c, T_RPAREN, "')'");
 				}
 				break;
@@ -525,7 +548,7 @@ __attribute__((noinline)) VPRIV void attribute_list_(cc *c, attrs *a)
 				a->error_fn = 1;
 				if (is(c, T_LPAREN) && is_strtok(peek(c, 1)->kind)) {
 					next(c);
-					a->errmsg = string_index(c);
+					a->errmsg = string_index(c, aid);
 					expect(c, T_RPAREN, "')'");
 				}
 				break;
@@ -550,7 +573,7 @@ __attribute__((noinline)) VPRIV void attribute_list_(cc *c, attrs *a)
 
 					if (fix) {
 						char fb[160];
-						pp_fixit fx = { sloc, pp_tok_end(c->p, loc), fb };
+						pp_fixit fx = { sloc, pp_tok_end(c->p, loc), fb, 0 };
 
 						snprintf(fb, sizeof(fb), "%s%s", sp, fix);
 						cc_warnx(c, "unknown-attributes", true, NULL, sloc, &r, 1, &fx, 1,
@@ -569,7 +592,8 @@ __attribute__((noinline)) VPRIV void attribute_list_(cc *c, attrs *a)
 
 /* the 0/1 flags packed .. noinstr are 18 contiguous bytes after the u32 fields */
 _Static_assert(offsetof(attrs, packed) % sizeof(uint32_t) == 0 &&
-	       offsetof(attrs, noinstr) == offsetof(attrs, packed) + 17, "attrs layout");
+	       offsetof(attrs, noinstr) == offsetof(attrs, packed) + 17 && offsetof(attrs, pure) == offsetof(attrs, noinstr) + 1 &&
+	       offsetof(attrs, unavail) == offsetof(attrs, pure) + 1, "attrs layout");
 
 VPRIV void merge_attrs(attrs *to, const attrs *from)
 {
@@ -584,7 +608,7 @@ VPRIV void merge_attrs(attrs *to, const attrs *from)
 	if (from->mode) to->mode = from->mode;
 	if (from->vecsize) to->vecsize = from->vecsize;
 	if (from->extvec) to->extvec = from->extvec;
-	if (from->depr) to->depr = from->depr, to->deprmsg = from->deprmsg;
+	if (from->depr) to->depr = from->depr, to->deprmsg = from->deprmsg, to->unavail = from->unavail;
 	if (from->wur) to->wur = from->wur;
 	if (from->ifunc) to->ifunc = from->ifunc;
 	to->nonnull |= from->nonnull;
@@ -595,6 +619,7 @@ VPRIV void merge_attrs(attrs *to, const attrs *from)
 	if (from->errmsg) to->errmsg = from->errmsg;
 	if (from->prio) to->prio = from->prio;
 	if (from->tlsmodel) to->tlsmodel = from->tlsmodel;
+	if (from->pure) to->pure = from->pure;
 	/* the 0/1 flags packed .. noinstr: or them bytewise */
 	{
 		char *t = (char *)&to->packed;
@@ -614,8 +639,10 @@ VPRIV void asm_label(cc *c, attrs *a)
 
 	if (kw != KW_asm && kw != KW___asm__ && kw != KW___asm)
 		return;
+	if (kw == KW_asm)
+		EXT_WARN_MS(c, "asm", "language-extension-token", w_ped, tok(c)->loc, "extension used");
 	next(c);
 	expect(c, T_LPAREN, "'('");
-	a->asmname = string_index(c);
+	a->asmname = string_index(c, 0);
 	expect(c, T_RPAREN, "')'");
 }

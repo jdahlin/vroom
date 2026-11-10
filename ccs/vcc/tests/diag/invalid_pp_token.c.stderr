@@ -1,0 +1,7 @@
+invalid_pp_token.c:5:11: warning: missing terminating ' character [-Winvalid-pp-token]
+    5 | #define Q 'x
+      |           ^
+invalid_pp_token.c:6:11: warning: missing terminating '"' character [-Winvalid-pp-token]
+    6 | #define S "abc
+      |           ^
+2 warnings generated.

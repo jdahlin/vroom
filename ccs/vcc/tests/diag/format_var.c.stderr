@@ -1,0 +1,34 @@
+format_var.c:7:24: warning: more '%' conversions than data arguments [-Wformat-insufficient-args]
+    3 | static const char a[] = "%d %d\n";
+      |                             -- format string is defined here
+  ...
+    7 | void f(long l){ printf(a, 1); printf(a, 1, 2, 3); printf(p, 1, 2); printf(q, l); printf(w, l); printf("%k %d", l);}
+      |                        ^
+format_var.c:3:30: note: format string is defined here
+format_var.c:7:47: warning: data argument not used by format string [-Wformat-extra-args]
+    3 | static const char a[] = "%d %d\n";
+      |                         ~~~~~~~~~
+  ...
+    7 | void f(long l){ printf(a, 1); printf(a, 1, 2, 3); printf(p, 1, 2); printf(q, l); printf(w, l); printf("%k %d", l);}
+      |                                               ^
+format_var.c:7:58: warning: invalid conversion specifier 'y' [-Wformat-invalid-specifier]
+    4 | static const char *const p = "%y %d";
+      |                               -- format string is defined here
+  ...
+    7 | void f(long l){ printf(a, 1); printf(a, 1, 2, 3); printf(p, 1, 2); printf(q, l); printf(w, l); printf("%k %d", l);}
+      |                                                          ^
+format_var.c:4:32: note: format string is defined here
+format_var.c:7:64: warning: data argument not used by format string [-Wformat-extra-args]
+    4 | static const char *const p = "%y %d";
+      |                              ~~~~~~~
+  ...
+    7 | void f(long l){ printf(a, 1); printf(a, 1, 2, 3); printf(p, 1, 2); printf(q, l); printf(w, l); printf("%k %d", l);}
+      |                                                                ^
+format_var.c:7:105: warning: invalid conversion specifier 'k' [-Wformat-invalid-specifier]
+    7 | void f(long l){ printf(a, 1); printf(a, 1, 2, 3); printf(p, 1, 2); printf(q, l); printf(w, l); printf("%k %d", l);}
+      |                                                                                                        ~^
+format_var.c:7:112: warning: format specifies type 'int' but the argument has type 'long' [-Wformat]
+    7 | void f(long l){ printf(a, 1); printf(a, 1, 2, 3); printf(p, 1, 2); printf(q, l); printf(w, l); printf("%k %d", l);}
+      |                                                                                                           ~~   ^
+      |                                                                                                           %ld
+6 warnings generated.

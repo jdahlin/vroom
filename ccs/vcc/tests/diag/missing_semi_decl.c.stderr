@@ -1,0 +1,5 @@
+missing_semi_decl.c:3:11: error: expected ';' at end of declaration
+    3 |         int a = 1
+      |                  ^
+      |                  ;
+1 error generated.

@@ -1,0 +1,7 @@
+include_in_macro_args.c:4:2: error: embedding a #include directive within macro arguments is not supported
+    4 | #include <stddef.h>
+      |  ^
+include_in_macro_args.c:3:9: note: expansion of macro 'F' requested here
+    3 | int a = F(
+      |         ^
+1 error generated.

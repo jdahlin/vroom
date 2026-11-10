@@ -1,0 +1,37 @@
+uninit_jump.c:1:45: warning: variable 'x' is uninitialized when used here [-Wuninitialized]
+    1 | int f1(int c){int x; if(c) x=1; else return x+1; return x;}
+      |                                             ^
+uninit_jump.c:1:20: note: initialize the variable 'x' to silence this warning
+    1 | int f1(int c){int x; if(c) x=1; else return x+1; return x;}
+      |                    ^
+      |                     = 0
+uninit_jump.c:2:61: warning: variable 'x' is uninitialized when used here [-Wuninitialized]
+    2 | int f2(int c){int x; if(c) goto l; x=1; return x; l: return x;}
+      |                                                             ^
+uninit_jump.c:2:20: note: initialize the variable 'x' to silence this warning
+    2 | int f2(int c){int x; if(c) goto l; x=1; return x; l: return x;}
+      |                    ^
+      |                     = 0
+uninit_jump.c:3:56: warning: variable 'x' is uninitialized when used here [-Wuninitialized]
+    3 | int f3(int c){int x; for(;;){ if(c){x=1;break;} return x;} return x;}
+      |                                                        ^
+uninit_jump.c:3:20: note: initialize the variable 'x' to silence this warning
+    3 | int f3(int c){int x; for(;;){ if(c){x=1;break;} return x;} return x;}
+      |                    ^
+      |                     = 0
+uninit_jump.c:5:50: warning: variable 'x' is used uninitialized whenever switch case is taken [-Wsometimes-uninitialized]
+    5 | int f5(int c){int x; switch(c){case 0: x=1; case 1: return x;} return 0;}
+      |                                                  ^         - uninitialized use occurs here
+uninit_jump.c:5:60: note: uninitialized use occurs here
+uninit_jump.c:5:20: note: initialize the variable 'x' to silence this warning
+    5 | int f5(int c){int x; switch(c){case 0: x=1; case 1: return x;} return 0;}
+      |                    ^
+      |                     = 0
+uninit_jump.c:6:53: warning: variable 'x' is uninitialized when used here [-Wuninitialized]
+    6 | int f6(int c){int x; switch(c){ x=1; case 1: return x;} return 0;}
+      |                                                     ^
+uninit_jump.c:6:20: note: initialize the variable 'x' to silence this warning
+    6 | int f6(int c){int x; switch(c){ x=1; case 1: return x;} return 0;}
+      |                    ^
+      |                     = 0
+5 warnings generated.
