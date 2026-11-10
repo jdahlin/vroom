@@ -1121,6 +1121,12 @@ int ppd_run(int argc, char **argv, const ppd_env *env)
 		free(t);
 		goto out;
 	}
+	if (objmode && x86) {
+		/* x86-64 objects come with its encoder and assembler (PLAN-x86.md X5, X6) */
+		dprintf(errfd, "vcc: error: -c is not supported for x86_64 yet; use -S and an assembler\n");
+		status = 1;
+		goto out;
+	}
 	if (objmode) {
 		obj_state();
 		if (!out)
