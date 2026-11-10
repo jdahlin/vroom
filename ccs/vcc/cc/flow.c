@@ -414,7 +414,8 @@ typedef struct uwk {
 	uint64_t swmask, swcand;
 	uint32_t swc[64][8];	/* per variable: the labels whose edge leaves it uninitialized */
 	uint8_t swa[64][8], nswc[64];	/* ... 0 if, 1 &&, 2 ||, 3 ?:, 4 case, 5 default */
-	uint32_t sdep[64];	/* ... at this branch depth: the use must post-dominate it */
+	uint32_t sdep[64];
+	ust lp_head, lp_cx, lp_brk;	/* the last loop walked: its head at the fixpoint, its exits */	/* ... at this branch depth: the use must post-dominate it */
 	uint8_t kind[64];	/* report: 1 definite, 2 sometimes */
 	pp_span ur[64];
 	uint32_t sself[16], sloc[16];	/* self-initializations */
@@ -857,6 +858,7 @@ static void uv_loop(uwk *w, const node *x, ust *st)
 				uv_ex(w, step, &s, true);
 			back = s;
 		}
+		w->lp_head = head, w->lp_cx = out, w->lp_brk = brk;
 		uj(&out, &brk);
 		w->brk = sb, w->cont = sc;
 		if (last)
@@ -965,6 +967,9 @@ static void uv_stmt(uwk *w, uint32_t n, ust *st)
 		w->spend = 0, w->dep++;
 		uv_loop(w, x, st);
 		w->dep--, uv_drop(w);
+		/* a loop that never loops back: its condition's false edge leaves it uninitialized (clang) */
+		if (x->op != N_DO && (x->op == N_WHILE ? x->a : x->b) && uv_const(w, x->op == N_WHILE ? x->a : x->b) < 0)
+			uv_pend(w, n, 6, &w->lp_head, &w->lp_brk, &w->lp_cx, false);
 		w->blk++;
 		return;
 	case N_SWITCH: {
@@ -1124,6 +1129,21 @@ static bool uv_sometimes(cc *c, uwk *w, uint32_t k)
 			r[0] = (pp_span){ cr.b, rng(c, x->c).b };
 		d = (pp_dinfo){ "note", r[0].b, r, nr, NULL, 0, NULL, 0 };
 		pp_diagx(c->p, &d, "remove the '%s' if its condition is always %s", op[kd], f ? "true" : "false");
+		return true;
+	}
+	if (kd == 6) {
+		cr = rng(c, x->op == N_WHILE ? x->a : x->b);
+		if (!cc_warnx(c, "sometimes-uninitialized", true, g, cr.b, &cr, 1, NULL, 0,
+			      "variable '%.*s' is used uninitialized whenever '%s' loop exits because its condition is false",
+			      IDF(y->name), x->op == N_WHILE ? "while" : "for"))
+			return false;
+		pp_diagx(c->p, &d, "uninitialized use occurs here");
+		{
+			pp_fixit fx = { cr.b, cr.e, "1" };	/* (while: the condition becomes 1; for: it is removed) */
+
+			d = (pp_dinfo){ "note", cr.b, &cr, 1, &fx, x->op == N_WHILE, NULL, 0 };
+			pp_diagx(c->p, &d, "remove the condition if it is always true");
+		}
 		return true;
 	}
 	if (kd == 4) {
