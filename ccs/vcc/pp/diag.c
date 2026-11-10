@@ -504,10 +504,23 @@ static const pmacro *expansion_at(pp *p, uint32_t loc, uint32_t *b, uint32_t *ee
 	return (const pmacro *)m;
 }
 
+/* loc is in the expansion of an object-like macro (-Wexpansion-to-defined) */
+VPRIV bool obj_macro_at(pp *p, uint32_t loc)
+{
+	uint32_t b, ee;
+	const fent *e;
+	const pmacro *m;
+
+	if (!loc_ok(p, loc, &e) || (loc - e->base + 7 <= e->f->size && !memcmp(e->f->src + (loc - e->base), "defined", 7)))
+		return false;	/* spelled here */
+	m = expansion_at(p, loc, &b, &ee);
+	return m && m->kind == MK_OBJ;
+}
+
 static void vdiagx_(pp *p, const pp_dinfo *d, const char *fmt, va_list ap);
 
 /* "expanded from macro 'M'" at the body token spelled like the diagnosed one (the last #define before) */
-static void expansion_note(pp *p, const pmacro *m, uint32_t before, const char *ms, uint32_t mlen)
+static void expansion_note(pp *p, const pmacro *m, uint32_t before, const char *ms, uint32_t mlen, bool rng)
 {
 	uint32_t loc = 0, len = 0;
 
@@ -551,7 +564,7 @@ static void expansion_note(pp *p, const pmacro *m, uint32_t before, const char *
 	}
 	if (loc) {
 		pp_span r = { loc, loc + len };
-		pp_dinfo d = { "note", loc, &r, len > 1, NULL, 0, NULL, 0 };
+		pp_dinfo d = { "note", loc, &r, rng && len > 1, NULL, 0, NULL, 0 };
 
 		pp_diagx(p, &d, "expanded from macro '%.*s'", (int)vintern_ents[m->name].len, vintern_ents[m->name].s);
 	}
@@ -578,7 +591,7 @@ void pp_vdiagx(pp *p, const pp_dinfo *d, const char *fmt, va_list ap)
 			mr[0].b = b, mr[0].e = ee, md.nr = 1;
 		md.r = mr;
 		vdiagx_(p, &md, fmt, ap);
-		expansion_note(p, xm, b, d->ms, d->mlen);
+		expansion_note(p, xm, b, d->ms, d->mlen, d->nr > 0);
 		return;
 	}
 	vdiagx_(p, d, fmt, ap);

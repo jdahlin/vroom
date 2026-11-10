@@ -627,6 +627,7 @@ VPRIV const char *presumed_name(const pp *p, uint32_t fe, uint32_t loc, uint32_t
 VPRIV __attribute__((format(printf, 4, 5))) void pp_diag(pp *p, uint32_t loc, const char *what, const char *fmt, ...);
 void pp_diagx(pp *p, const pp_dinfo *d, const char *fmt, ...);
 bool pp_warnx(pp *p, const char *flag, bool on, const char *const *groups, pp_dinfo *d, const char *fmt, ...);
+VPRIV bool obj_macro_at(pp *p, uint32_t loc);
 VPRIV void dir_extra_tok(pp *p, const ctx *c, uint32_t name, uint32_t i);
 void pp_diag_summary(pp *p);
 /* include.c: dependencies */
@@ -730,7 +731,7 @@ VPRIV void hc_end(pp *p);
 VPRIV void enter_file(pp *p, const vlex_file *f, const char *path, int32_t sdir);
 VPRIV void include(pp *p, ctx *c, uint32_t b, uint32_t e, int kind, uint32_t loc);
 /* directive.c */
-VPRIV int pragma_text(pp *p, const char *s, size_t n, uint32_t loc, ptok *out);
+VPRIV int pragma_text(pp *p, const char *s, size_t n, uint32_t loc, ptok *out, uint32_t sloc);
 VPRIV int directive(pp *p, ctx *c, ptok *out);
 
 /* decimal digits of v at b (no terminator); returns the length */

@@ -222,12 +222,49 @@ static bool word(const char **s, const char *e, const char *w)
 	return true;
 }
 
+/* #pragma GCC warning/error: ("msg") or "msg" from q to e, at loc (the word) */
+static __attribute__((cold, noinline)) void pragma_message(pp *p, bool err, const char *q, const char *e, uint32_t loc)
+{
+	const char *b, *m;
+	bool par = false;
+	pp_dinfo d = { err ? "error" : "warning", loc, NULL, 0, NULL, 0, NULL, 0 };
+
+	while (q < e && (*q == ' ' || *q == '\t'))
+		q++;
+	if (q < e && *q == '(')
+		par = true, q++;
+	while (q < e && (*q == ' ' || *q == '\t'))
+		q++;
+	if (q >= e || *q != '"')
+		goto bad;
+	b = ++q;
+	while (q < e && *q != '"')
+		q += *q == '\\' ? 2 : 1;
+	if (q >= e)
+		goto bad;
+	m = q++;
+	if (par) {
+		while (q < e && (*q == ' ' || *q == '\t'))
+			q++;
+		if (q >= e || *q != ')')
+			goto bad;
+	}
+	if (err)
+		pp_diagx(p, &d, "%.*s", (int)(m - b), b);
+	else
+		pp_warnx(p, "#pragma-messages", true, NULL, &d, "%.*s", (int)(m - b), b);
+	return;
+bad:
+	d.what = "error";
+	pp_diagx(p, &d, "pragma %s requires parenthesized string", err ? "error" : "warning");
+}
+
 /*
  * A pragma, text "pragma ..." (from #pragma or _Pragma).  The ones the
  * preprocessor implements are run and dropped, as clang -E does; the rest
  * become a P_DIRECTIVE token.  Returns 1 if *out was set.
  */
-VPRIV int pragma_text(pp *p, const char *s, size_t n, uint32_t loc, ptok *out)
+VPRIV int pragma_text(pp *p, const char *s, size_t n, uint32_t loc, ptok *out, uint32_t sloc)
 {
 	const char *q = s + 6, *e = s + n;	/* after "pragma" */
 
@@ -267,6 +304,16 @@ VPRIV int pragma_text(pp *p, const char *s, size_t n, uint32_t loc, ptok *out)
 		if (word(&r, e, "GCC") && (word(&r, e, "system_header") || word(&r, e, "poison") ||
 					    word(&r, e, "dependency")))
 			return 0;
+		r = q;
+		if (sloc && word(&r, e, "GCC")) {	/* #pragma GCC warning/error "msg" (_Pragma: not modelled) */
+			const char *w = r;
+			bool err;
+
+			while (w < e && (*w == ' ' || *w == '\t'))
+				w++;
+			if ((err = word(&r, e, "error")) || word(&r, e, "warning"))
+				pragma_message(p, err, r, e, sloc + (uint32_t)(w - s));
+		}
 	}
 	memset(out, 0, sizeof(*out));
 	out->kind = P_DIRECTIVE;
@@ -428,7 +475,7 @@ VPRIV int directive(pp *p, ctx *c, ptok *out)
 	case D_PRAGMA: {
 		const vtok *f = &c->vt[b], *l = &c->vt[e - 1];
 
-		return pragma_text(p, c->src + f->off, l->off + l->len - f->off, loc, out);
+		return pragma_text(p, c->src + f->off, l->off + l->len - f->off, loc, out, c->loc + f->off);
 	}
 	case D_IDENT: {
 		const vtok *f = &c->vt[b], *l = &c->vt[e - 1];

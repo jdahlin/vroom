@@ -1089,11 +1089,18 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
   the diagnostics (`diag_where` replaced it by the file's path).  Done:
   diag `extra_tokens.c`; parity cmp/lines green.  Not modelled: a
   macro-expanded #include name.
+- [x] **pp `#pragma GCC warning`/`error`** ("msg" or ("msg"), else
+  "pragma warning requires parenthesized string") and
+  **-Wexpansion-to-defined** (a `defined` from an object-like macro in
+  #if; function-like: pedantic in clang, not given).  A macro note after a
+  diagnostic without ranges is a bare caret, as clang.  Done: diag
+  `pragma_warning.c`.  Not modelled: from `_Pragma` (clang's
+  "<scratch space>" note).
 - [ ] **Missing warnings** (only 7 `-W` flags):
   `-Wreturn-stack-address` of a compound literal
   (clang prints the initializer with its expression printer),
   `-Wuninitialized`, `-Wunknown-attributes`, `-Wdeprecated-declarations`;
-  pp `-Wexpansion-to-defined`, `-Winvalid-pp-token`, `#pragma GCC warning`.
+  pp `-Winvalid-pp-token`.
   *Validate:* one diag test per warning; `vcc-sema.py warn` stays 879/879
   (no false positives on the kernel).  (Done: `-Wmultichar` in C and `#if`, "character constant too long",
   multi-character wide/Unicode literals as errors: diag `multichar.c`; the

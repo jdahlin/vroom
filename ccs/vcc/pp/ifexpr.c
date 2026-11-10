@@ -201,6 +201,13 @@ static ival eprimary_(ev *e, bool live)
 			ptok n;
 			bool paren;
 
+			if (unlikely(obj_macro_at(p, e->t.loc))) {
+				pp_dinfo d = { "warning", e->t.loc, NULL, 0, NULL, 0, "defined", 7 };
+
+				pp_warnx(p, "expansion-to-defined", true, NULL, &d,
+					 "macro expansion producing 'defined' has undefined behavior");
+			}
+
 			raw(p, &n);
 			paren = n.kind == T_LPAREN;
 			if (paren)

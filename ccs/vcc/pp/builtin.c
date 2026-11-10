@@ -304,7 +304,7 @@ VPRIV int builtin(pp *p, const pmacro *m, ptok *t)
 				d[dn++] = sp[i];
 			}
 		}
-		if (pragma_text(p, d, dn, t->loc, t)) {
+		if (pragma_text(p, d, dn, t->loc, t, 0)) {
 			t->flags = TF_SOL;
 			return 1;
 		}
