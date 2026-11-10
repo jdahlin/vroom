@@ -330,6 +330,26 @@ kärnan och kan vänta.
 
 ## Status
 
+### X1 (2026-11-10): front end klar, x86-data och vcc-ldconst väntar på kodgeneratorn
+- `PP_LINUX_X86_64`: `--target=x86_64-*`, och standard utan `--target` på en
+  x86-64-värd (glibcs `x86_64-linux-gnu`). Clang-data i egna filer från
+  `pp/gen-x86data.sh` (clang 23.1.6): predefines och `-dD`-ordning
+  (`pp/ppdata-x86.inc`), `__has_*` (`has_tab_x86`) och attributnamn
+  (`cc/attrnames-x86.inc`). De andra målens tabeller (23.1.4) rörs inte.
+- `va_list` som `struct __va_list_tag[1]`; `long double` som x87 i konstanter och
+  vikning (`lib/f128.h`: binary128-layout avrundad till 63 bitar, `q_*p`);
+  `__float128` som egen typ (`TY_FLOAT128`, suffix `q`). `char` signed, `wchar_t`
+  int. glibcs huvudfiler går igenom hostat.
+- Verifierat: `-dM` = clang för 29 flaggset, `-dD`-ordning för 17;
+  `vcc-bflayout` 6604 påståenden utan avslag; `bench/vcc-f80.sh` (x87-vikning mot
+  värdens FPU) 16,3M kontroller utan fel; `long double`/`__float128`-vikning och
+  `va_list`-diagnostik som clangs; `-fsyntax-only` över 1903 testfiler som clang
+  utom där aarch64 avviker likadant. arm64 oförändrat: `vcc-same` (enda skillnad:
+  sökvägen till baskopians include-katalog), `vcc-ldconst` 6000/6000.
+- Kvar till senare steg: `vcc-ldconst` och `vcc-sema.py layout` för x86-64 (behöver
+  `-c` resp. ett x86-kärnträd), x87-byte i data (`q_to_x87` finns), inline asm för
+  x86 (X6), `vpp -dM` för `-march`-deltan (`-msse4.2`, `-mavx2`, ...).
+
 ### X0 (2026-11-10): bygger och kör, SIMD-lexer och kärnparitet kvar
 - `make -C ccs vcc` på x86-64 Linux med clang 22: `classify`, `find_cend`,
   `find_nl` och `find_quote` i `lex/lex.c` har en skalär version utan NEON
