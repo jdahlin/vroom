@@ -826,6 +826,7 @@ static val gen_assign(ecx *e, uint32_t n)
 			}
 		}
 		l = gen_lval(e, x->a);
+		l.once = e->E->opt3;
 		store(e, &l, lt, &v);
 		lfree(e, &l);
 		if (l.bf && v.k == V_REG) {
@@ -1001,6 +1002,7 @@ VPRIV val gen(ecx *e, uint32_t n)
 			return vconst(e->kval[k]);
 		lval l = gen_lval(e, n);
 
+		l.once = e->E->opt3;
 		return load_free(e, &l, x->ty);
 	}
 	case N_COMPLIT: {

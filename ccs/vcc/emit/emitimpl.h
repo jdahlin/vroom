@@ -453,6 +453,7 @@ typedef struct lval {
 	uint32_t ref;		/* L_SYM */
 	int64_t off;		/* byte offset (L_FRAME: slot offset) */
 	uint32_t align;		/* known alignment of the address */
+	uint8_t once;		/* -O3: accessed once (load/store may fold the address's last add, fold_index) */
 } lval;
 
 enum { A_IGNORE, A_REG, A_STACK, A_REF_REG, A_REF_STACK, A_VREG, A_HFA };	/* A_VREG: float/double in v<reg>; A_HFA: nreg members of fsz bytes in v<reg>.. */
@@ -647,6 +648,7 @@ VPRIV int emit_cmp2(ecx *e, int op, bool sg, val *a, val *b);
 VPRIV int test_zero(ecx *e, val *v, qty t, uint32_t l, bool nz);
 VPRIV val tobool(ecx *e, val v, qty t);
 VPRIV int last_ext(ecx *e, int r);
+VPRIV bool fold_index(ecx *e, int op, int rd, const lval *l, int n, int ext);
 VPRIV bool ext_ok(int x, int from, bool sgn);
 /* fp.c */
 static inline void word(ecx *e, uint32_t w);

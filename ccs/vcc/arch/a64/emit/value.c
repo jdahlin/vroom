@@ -263,6 +263,26 @@ static uint32_t ref_align(ecx *e, const lval *l)
 	return a < l->align ? a : l->align;
 }
 
+/*
+ * A load or store at [base + off]; at -O3 an offset beyond the immediate
+ * forms (a field deep in a large struct) is split as add x17, base, #hi,
+ * lsl #12 + [x17, #lo] instead of the encoder's mov x17, #off + add +
+ * access.  Frame slots are left alone: their offsets are only final after
+ * the layout.
+ */
+static void mem_far(ecx *e, int op, int sz, int ext, int rd, int base, int64_t off)
+{
+	int64_t lo = off & 0xfff, hi = off - lo;
+
+	if (e->E->opt3 && base != FRAME && base < ZR && off >= 4096 && hi < (1 << 24) && !(lo & ((1 << sz) - 1)) &&
+	    !(!(off & ((1 << sz) - 1)) && (off >> sz) < 4096)) {
+		opi(e, I_ADDI, 1, R_X17, base, hi);
+		mem(e, op, sz, ext, rd, R_X17, lo);
+		return;
+	}
+	mem(e, op, sz, ext, rd, base, off);
+}
+
 /* load a scalar of size n (1,2,4,8) into rd; ext: 0 zero, 1 sign to x */
 VPRIV void load_n(ecx *e, int rd, const lval *l, int n, int ext)
 {
@@ -279,7 +299,7 @@ VPRIV void load_n(ecx *e, int rd, const lval *l, int n, int ext)
 	{
 		int b = lbase(e, l, &off, n);
 
-		mem(e, I_LD, sz, ext, rd, b, off);
+		mem_far(e, I_LD, sz, ext, rd, b, off);
 	}
 }
 
@@ -298,8 +318,47 @@ VPRIV void store_n(ecx *e, int rs, const lval *l, int64_t extra, int n)
 	{
 		int b = lbase(e, l, &off, n);
 
-		mem(e, I_ST, sz, 0, rs, b, off + extra);
+		mem_far(e, I_ST, sz, 0, rs, b, off + extra);
 	}
+}
+
+/*
+ * -O3: a single access through L_REG whose base was just computed as
+ * base + (idx << sh) (ptr_add), possibly after idx was sign- or zero-
+ * extended from 32 bits in place: one register-offset access instead.
+ * The base is a temporary and the lvalue is used once, so dropping the add
+ * changes nothing else; idx's extension is dropped only when idx is a
+ * temporary that ptr_add freed.
+ */
+VPRIV bool fold_index(ecx *e, int op, int rd, const lval *l, int n, int ext)
+{
+	int sz = log2sz((uint64_t)n), xk = X_LSL, ri, sh;
+	const ins *p, *q;
+
+	if (!l->once || l->k != L_REG || l->off || l->bf || !e->reach || !e->nin)
+		return false;
+	p = &e->in[e->nin - 1];
+	if (p->op != I_ADD || !p->sz || p->rd != l->r || p->rn != l->r || p->cond != 0 || (p->sh && p->sh != sz) ||
+	    p->rm >= ZR || p->rm == l->r)
+		return false;
+	ri = p->rm, sh = p->sh;
+	if (tidx(l->r) < 0)
+		return false;
+	e->nin--;
+	/* idx's extension goes too only if idx is a free temporary, not a register variable */
+	if (e->nin && tidx(ri) >= 0 && !(e->live >> tidx(ri) & 1) && (q = &e->in[e->nin - 1])->rd == ri && q->rn == ri) {
+		if (q->op == I_SBFM && q->sz && q->imm == 0 && q->sh == 31)
+			xk = X_SXTW, e->nin--;
+		else if (q->op == I_MOV && !q->sz)
+			xk = X_UXTW, e->nin--;
+	}
+	{
+		ins *i = put(e, op);
+
+		i->sz = (uint8_t)sz, i->cond = (uint8_t)ext, i->rd = (uint8_t)rd, i->rn = l->r, i->rm = (uint8_t)ri;
+		i->ra = (uint8_t)xk, i->sh = (uint8_t)sh;
+	}
+	return true;
 }
 
 /* address of an lvalue into a new register (or a constant address) */

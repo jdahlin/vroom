@@ -69,6 +69,10 @@ static unsigned roles_sw(const ins *i)
 		return RD_R;
 	case I_CCMP:	/* (and the flags) */
 		return RN_R | (i->sh ? 0 : RM_R);
+	case I_LDX:
+		return RN_R | RM_R | RD_W;
+	case I_STX:
+		return RD_R | RN_R | RM_R;
 	case I_PRFM:
 		return RN_R;
 	case I_BL:
@@ -728,7 +732,7 @@ static void slots(ecx *e)
 			for (; w; w &= w - 1)
 				ver[__builtin_ctzll(w)]++;
 			if (SL.rc[k] < 0) {
-				if (i->op == I_ST || i->op == I_STLO || i->op == I_STP || i->op == I_BL || i->op == I_BLR ||
+				if (i->op == I_ST || i->op == I_STLO || i->op == I_STP || i->op == I_STX || i->op == I_BL || i->op == I_BLR ||
 				    i->op == I_TLV || i->op == I_RAW || W.rr[k] == GPRS)
 					mver++;	/* may write an escaped cell */
 				continue;

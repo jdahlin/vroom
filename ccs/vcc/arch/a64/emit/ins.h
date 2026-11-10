@@ -47,7 +47,11 @@ enum {
 	/* -O3 instruction selection (emitter.opt3; never emitted below -O3) */
 	I_TBZ, I_TBNZ,	/* rd, sh: bit number, label (+-32 KiB: tbz_range) */
 	I_CCMP,		/* flags = cond ? rn - (sh ? imm : rm) : ra (nzcv); imm -31..31 (ccmn for < 0) */
+	I_LDX, I_STX,	/* [rn + ext(rm) << sh]; sz/cond as I_LD; ra: extend (X_UXTW, X_LSL, X_SXTW); sh: 0 or sz */
 };
+
+/* extend kinds of register-offset addressing (I_LDX/I_STX.ra: the option field) */
+enum { X_UXTW = 2, X_LSL = 3, X_SXTW = 6 };
 
 enum { TLS_LE = 1, TLS_IE, TLS_DESC };	/* I_TLV.cond on ELF */
 enum { C_EQ, C_NE, C_HS, C_LO, C_MI, C_PL, C_VS, C_VC, C_HI, C_LS, C_GE, C_LT, C_GT, C_LE, C_AL };

@@ -179,7 +179,7 @@ VPRIV int last_ext(ecx *e, int r)
 		return 0;
 	i = &e->in[e->nin - 1];
 	switch (i->op) {
-	case I_LD: case I_LDLO:
+	case I_LD: case I_LDLO: case I_LDX:
 		if (i->rd != r || i->sz == 3)
 			return 0;
 		return i->cond == 1 ? EXT_S | 1 << i->sz : i->cond == 0 ? EXT_Z | 1 << i->sz : EXT_Z | 4;
