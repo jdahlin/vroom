@@ -635,6 +635,7 @@ VPRIV int diag_where(const pp *p, uint32_t loc, const char **name, uint32_t *nl,
 struct vbuf;
 VPRIV void render_text(pp *p, struct vbuf *b, const vdiag *d);
 VPRIV bool render_head(pp *p, struct vbuf *b, const vdiag *d, const fent **ep);
+VPRIV void parseable_fixits(pp *p, struct vbuf *b, const vdiag *d);
 VPRIV uint32_t dcols(const char *s, uint32_t b, uint32_t e, uint32_t col);
 VPRIV void db_c(struct vbuf *b, char c, int n);
 VPRIV void include_stack(pp *p, struct vbuf *b, const fent *e);
@@ -646,6 +647,7 @@ VPRIV void diag_render_rec(pp *p, struct vbuf *b, vdiag *d);
 VPRIV void diag_typediff(struct vbuf *b, const vdiag *d, const char *plain);
 /* diagout.c: JSON lines and SARIF */
 VPRIV void diag_json_flush(pp *p);
+VPRIV void diag_fixits_out(pp *p);
 /* macro.c */
 static inline uintptr_t mget(const pp *p, uint32_t id);
 static inline uintptr_t *mslot(pp *p, uint32_t id);

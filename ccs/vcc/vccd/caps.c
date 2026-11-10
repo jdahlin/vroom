@@ -33,7 +33,7 @@ static bool prefix(const char *s, const char *p)
 
 /* options taking the next argument */
 static const char *const cc_with_arg[] = {
-	"-o", "-include", "-isystem", "-iquote", "-x", "-MF", "-MT", "-MQ", NULL
+	"-o", "-include", "-isystem", "-iquote", "-x", "-MF", "-MT", "-MQ", "--explain", NULL
 };
 
 static const char *const cc_exact[] = {
@@ -59,7 +59,8 @@ static const char *const cc_exact[] = {
 	/* diagnostics (ppdriver.c parses them) */
 	"-fcolor-diagnostics", "-fno-color-diagnostics", "-fdiagnostics-color", "-fno-diagnostics-color",
 	"-fdiagnostics-color=always", "-fdiagnostics-color=never", "-fdiagnostics-color=auto",
-	"-fno-caret-diagnostics", "-fdiagnostics-show-id", "-fno-diagnostics-show-id",
+	"-fno-caret-diagnostics", "-fcaret-diagnostics", "-fdiagnostics-show-id", "-fno-diagnostics-show-id",
+	"-fdiagnostics-parseable-fixits", "-fno-diagnostics-parseable-fixits", "-fdiagnostics-generate-patch", "--fix",
 	"-fdiagnostics-format=json", "-fdiagnostics-format=sarif", "-fdiagnostics-format=clang", "-fno-spell-checking",
 	"-fdiagnostics-style=vcc", "-fdiagnostics-style=clang", "-fdiagnostics-style=narrated",
 	"-fdiagnostics-text-art-charset=ascii", "-fdiagnostics-text-art-charset=unicode",

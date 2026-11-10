@@ -289,17 +289,17 @@ static void conv_error(cc *c, uint32_t n, qty to, const char *what, const char *
 static void int_conv_error(cc *c, uint32_t n, qty to, bool to_ptr)
 {
 	uint32_t m = n;
-	pp_fixit fx = { 0, 0, NULL };
+	pp_fixit fx = { 0, 0, NULL, 0 };
 	const char *h = "";
 
 	while (N(m)->op == N_CAST && !c->span[m].e)
 		m = N(m)->a;
 	if (!to_ptr && N(m)->op == N_ADDR && compatible(c, QUNQ(N(N(m)->a)->ty), QUNQ(to)))
-		h = "; remove &", fx = (pp_fixit){ rng(c, m).b, rng(c, m).b + 1, "" };
+		h = "; remove &", fx = (pp_fixit){ rng(c, m).b, rng(c, m).b + 1, "", VDA_MAYBE };
 	else if (!to_ptr && is_ptr(c, N(m)->ty) && compatible(c, QUNQ(T(c, N(m)->ty)->base), QUNQ(to)))
-		h = "; dereference with *", fx = (pp_fixit){ rng(c, m).b, rng(c, m).b, "*" };
+		h = "; dereference with *", fx = (pp_fixit){ rng(c, m).b, rng(c, m).b, "*", VDA_MAYBE };
 	else if (to_ptr && (N(m)->flags & NF_LVALUE) && compatible(c, QUNQ(T(c, to)->base), QUNQ(N(m)->ty)))
-		h = "; take the address with &", fx = (pp_fixit){ rng(c, m).b, rng(c, m).b, "&" };
+		h = "; take the address with &", fx = (pp_fixit){ rng(c, m).b, rng(c, m).b, "&", VDA_MAYBE };
 	conv_diag_fx(c, n, to, to_ptr ? "incompatible integer to pointer conversion" : "incompatible pointer to integer conversion",
 		     h, to_ptr ? "ext_typecheck_convert_int_pointer" : "ext_typecheck_convert_pointer_int", "int-conversion", NULL,
 		     false, fx.s ? &fx : NULL);

@@ -669,6 +669,35 @@ Varje delsteg: nya fall i `tests/diag/` (snapshots, och clang som mätpunkt), la
   *Validera:* lager 5b; varje dok-exempel testas i CI: det felaktiga ger exakt det id:t, det
   rättade inget; `--fix` på PostgreSQL:s varningar ger ett bygge som klarar `meson test`.
 
+**Status (2026-11-10): klart.**  Varje fix-it har en tillämplighet (`pp_fixit.app`:
+`machine`, `maybe`, `placeholder`; i JSON och SARIF).  Maskin-säkra: `.` ↔ `->`, `,`/`:` i
+stället för `;`, borttagning av ett extra `;` (`EXT_WARN_DEL`) och av en ignorerad
+formatflagga, `%zu`/`%td`/`%jd`, och ett saknat `;` när nästa token börjar en ny rad (och inte
+är `{`); gissningar (`maybe`): `==`, parenteser runt tilldelning, `&`/`*`, stavningsförslag,
+"expected X", ett `;` mitt på raden, ett extra `)`/`]`.  En fix-it vars intervall ligger helt
+inuti ett makronamn tas bort (ändringen hör till makrots definition).
+`-fdiagnostics-parseable-fixits` skriver clangs `fix-it:"fil":{l:k-l:k}:"text"` (i alla tre
+stilarna); på `tests/diag` skiljer sig raderna från clangs bara där förslagen avsiktligt
+gör det (include-förslag, nyckelordsstavning, clangs felaktiga `sizeof`-förslag).
+`-fdiagnostics-generate-patch` skriver alla förslag (postens egna, annars dess första
+nots) som en unified diff, `vcc --fix` skriver de maskin-säkra till filerna (temporär fil som
+byter namn, rättigheterna behålls, aldrig systemheaders) och säger "applied N fix-its".
+`vcc --explain ID` (även `[ID]`-formen ur `-fdiagnostics-show-id`; utan ID: listan) skriver
+`ccs/vcc/docs/diag/ID.md`, inkompilerad via `bench/gen-explain.py` → `driver/explain.inc`;
+12 sidor för de vanligaste diagnoserna.  vccd kör `--explain`/`--fix` själv med klientens
+fd:er (`vcc` via shimmen ger samma fil som `vpp --fix`).  *Validerat:* lager 5b i
+`vcc-diag.py` (`/* diag-fix */`: `--fix` upprepas tills inget mer tillämpas, högst 4 gånger,
+jämförs med `X.c.fixed`, och clang ger färre fel efteråt), `vcc-explain.py` 12/12 (det
+felaktiga exemplet ger id:t, det rättade varken id:t eller ett fel), `vcc-mutate.py --fix`:
+tillämpat på 292 av 1644 avvisade mutanter, originalet återställt i 268, inget fel kvar i 280,
+fler fel än före 0.  PostgreSQL har inga varningar att rätta (0 under clang), så mutationskorpusen
+validerar `--fix` i stället för `meson test`.  Övrigt grönt: `vcc-diag.py` 105/105, sema
+warn 879/879, batch/run 878/879, ctests 1740/1740, stress 23 + 24, `--formats` 1970/1970,
+`vcc-diff.py` batch 873/873, `vccd-test.py` 19, `vcc-driver.py` 56/56, filvis bygge,
+fuzz-regress, PostgreSQL 0 varningar och `meson test` 81 ok.  Grinden: ett anrop först i
+`ppd_run` kostade pp +3,7 % (registren i token-slingan), så `--explain` ligger i ett omslag
+runtom (`ppd_run1`): pp +0,26 % mot merge-basen.
+
 ### D7. Hela bygget i vccd
 
 - Samma varning från en header skrivs en gång med "(också i N andra TU:er)"
@@ -705,7 +734,7 @@ D1 och D2 hänger ihop (feltypen behöver posten); D0.2 först så att D2 har en
 - [x] D2.1 – D2.3 — 2026-11-09
 - [x] D3.1 – D3.3 — 2026-11-09 (officiella SARIF-schemat ej vendrat)
 - [x] D4 — 2026-11-09
-- [ ] D5.1 – D5.8
-- [ ] D6
+- [x] D5.1 – D5.8 — 2026-11-10 (D5.7 utom statiska initierare)
+- [x] D6 — 2026-11-10
 - [ ] D7
 - [ ] D8

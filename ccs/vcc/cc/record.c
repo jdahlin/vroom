@@ -24,7 +24,7 @@ static void fscr_grow(fscratch *x, uint32_t need)
 static __attribute__((noinline, cold)) void member_semi(cc *c)
 {
 	uint32_t e = pp_tok_end(c->p, c->prevloc);
-	pp_fixit fx = { e, e, ";" };
+	pp_fixit fx = { e, e, ";", semi_app(c) };
 	bool end = is(c, T_RBRACE);
 
 	report(c, end ? "warning" : "error", e, NULL, 0, &fx, 1, "expected ';' at end of declaration list");
@@ -57,7 +57,7 @@ __attribute__((noinline)) VPRIV void struct_body(cc *c, uint32_t ti)
 			longjmp(c->bail, 1);
 		}
 		if (is(c, T_SEMI)) {
-			EXT_WARN_MS(c, ";", "extra-semi", w_ped, tok(c)->loc, "extra ';' inside a %s",
+			EXT_WARN_DEL(c, ";", tok(c)->flags, "extra-semi", w_ped, tok(c)->loc, "extra ';' inside a %s",
 				 c->tags[ti].flags & RF_UNION ? "union" : "struct");
 			next(c);
 			continue;

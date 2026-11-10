@@ -274,6 +274,10 @@ static void take_dms(cc *c, vdiag *d)
 			pp_diag_macro(d, c->dms, (uint32_t)strlen(c->dms));
 		c->dms = NULL;
 	}
+	if (unlikely(c->dfx.s != NULL)) {
+		pp_diag_fix(c->p, d, c->dfx.b, c->dfx.e, c->dfx.s, VDA_MACHINE);
+		c->dfx.s = NULL;
+	}
 }
 
 /* the spelling of punctuator kind k ("" for others) */
@@ -297,7 +301,7 @@ static vdiag *rec(cc *c, int level, uint32_t loc, const pp_span *r, int nr, cons
 	for (int i = 0; i < nr; i++)
 		pp_diag_label(c->p, d, r[i].b, r[i].e, NULL);
 	for (int i = 0; i < nfx; i++)
-		pp_diag_fix(c->p, d, fx[i].b, fx[i].e, fx[i].s, VDA_UNSPEC);
+		pp_diag_fix(c->p, d, fx[i].b, fx[i].e, fx[i].s, fx[i].app);
 	return d;
 }
 
@@ -483,7 +487,7 @@ VPRIV void ext_warn(cc *c, const char *flag, const char *const *groups, uint32_t
 
 	pp_diag_pc = __builtin_return_address(0);
 	if (!ext_on(c, flag, groups) || (lv = pp_diag_wlevel(c->p, flag, false, groups, loc)) < 0) {
-		c->dms = NULL;
+		c->dms = NULL, c->dfx.s = NULL;
 		return;
 	}
 	if (lv == VDL_ERROR)

@@ -33,8 +33,8 @@ static void assign_cond_warn(cc *c, uint32_t e)
 		uint32_t op = N(e)->loc;
 		pp_span r[2] = { rng(c, N(e)->a), rng(c, N(e)->b) };
 		pp_span all = { r[0].b, r[1].e };
-		pp_fixit p2[2] = { { all.b, all.b, "(" }, { all.e, all.e, ")" } };
-		pp_fixit eq = { op, op + 1, "==" };
+		pp_fixit p2[2] = { { all.b, all.b, "(", VDA_MAYBE }, { all.e, all.e, ")", VDA_MAYBE } };
+		pp_fixit eq = { op, op + 1, "==", VDA_MAYBE };
 
 		if (cc_warnx(c, "parentheses", true, w_all, op, &all, 1, NULL, 0,
 			  "using the result of an assignment as a condition without parentheses")) {
@@ -760,7 +760,7 @@ VPRIV uint32_t statement(cc *c)
 			if (cc_warnx(c, "unused-comparison", true, w_all, op, &r, 1, NULL, 0, "%s comparison result unused",
 				  eq ? "equality" : "relational") && k == T_EQUALEQUAL) {
 				pp_span orr = { op, op + 2 };
-				pp_fixit fx = { op, op + 2, "=" };
+				pp_fixit fx = { op, op + 2, "=", VDA_MAYBE };
 				pp_dinfo d = { "note", op, &orr, 1, &fx, 1, NULL, 0 };
 
 				pp_diagx(c->p, &d, "use '=' to turn this equality comparison into an assignment");

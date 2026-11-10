@@ -522,7 +522,7 @@ static __attribute__((noinline, cold)) bool valid_after_tag(cc *c)
 static __attribute__((noinline, cold)) void tag_semi(cc *c, int kind)
 {
 	uint32_t e = c->prevflags & PF_MACRO ? tok(c)->loc : pp_tok_end(c->p, c->prevloc);
-	pp_fixit fx = { e, e, ";" };
+	pp_fixit fx = { e, e, ";", VDA_MAYBE };	/* (a guess: often two names in a row) */
 	ptok *t = c->tk;
 
 	report(c, "error", e, NULL, 0, &fx, !(c->prevflags & PF_MACRO), "expected ';' after %s",

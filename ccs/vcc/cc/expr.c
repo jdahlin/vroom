@@ -1000,9 +1000,10 @@ VPRIV __attribute__((noinline)) uint32_t postfix_ops(cc *c, uint32_t n)
 				if (is_ptr(c, N(n)->ty) && is_record(c, T(c, N(n)->ty)->base)) {
 					/* clang: fix-it '->', then go on as if it were there */
 					pp_span r = rng(c, n);
-					pp_fixit fx = { loc, loc + 1, "->" };
+					pp_fixit fx = { loc, loc + 1, "->", VDA_MACHINE };
 					pp_span b = c->span[n];
 
+					c->dms = ".";
 					report(c, "error", loc, &r, 1, &fx, 1, "member reference type '%s' is a pointer; did you mean to use '->'?",
 					       tyname(c, N(n)->ty));
 					n = deref(c, n, loc);
@@ -1023,8 +1024,9 @@ VPRIV __attribute__((noinline)) uint32_t postfix_ops(cc *c, uint32_t n)
 				if (is_record(c, N(n)->ty)) {
 					/* clang: fix-it '.', then go on as if it were there */
 					pp_span r[2] = { rng(c, n), { loc, loc + 2 } };
-					pp_fixit fx = { loc, loc + 2, "." };
+					pp_fixit fx = { loc, loc + 2, ".", VDA_MACHINE };
 
+					c->dms = "->";
 					report(c, "error", loc, r, 2, &fx, 1, "member reference type '%s' is not a pointer; did you mean to use '.'?",
 					       tyname(c, N(n)->ty));
 					n = member(c, n, id, loc);

@@ -1,0 +1,43 @@
+parseable_fixits.c:5:21: warning: extra ';' outside of a function [-Wextra-semi]
+    5 | struct S { int a; };;
+      |                     ^
+fix-it:"parseable_fixits.c":{5:21-5:22}:""
+parseable_fixits.c:7:29: error: member reference type 'struct S *' is a pointer; did you mean to use '->'?
+    7 | int g(struct S *p) { return MEMBER; }
+      |                             ^~~~~~
+parseable_fixits.c:4:17: note: expanded from macro 'MEMBER'
+    4 | #define MEMBER p.a
+      |                 ^
+parseable_fixits.c:9:19: warning: flag '#' results in undefined behavior with 'd' conversion specifier [-Wformat]
+    9 |         printf("a\"\\b\t%#d\n", n);
+      |                         ~^~
+fix-it:"parseable_fixits.c":{9:19-9:20}:""
+parseable_fixits.c:9:26: warning: format specifies type 'int' but the argument has type 'long' [-Wformat]
+    9 |         printf("a\"\\b\t%#d\n", n);
+      |                         ~~~     ^
+      |                         %#ld
+fix-it:"parseable_fixits.c":{9:18-9:21}:"%#ld"
+parseable_fixits.c:10:8: warning: using the result of an assignment as a condition without parentheses [-Wparentheses]
+   10 |         if (x = 1) return p.a;
+      |             ~~^~~
+parseable_fixits.c:10:8: note: place parentheses around the assignment to silence this warning
+   10 |         if (x = 1) return p.a;
+      |               ^  
+      |             (    )
+fix-it:"parseable_fixits.c":{10:6-10:6}:"("
+fix-it:"parseable_fixits.c":{10:11-10:11}:")"
+parseable_fixits.c:10:8: note: use '==' to turn this assignment into an equality comparison
+   10 |         if (x = 1) return p.a;
+      |               ^
+      |               ==
+fix-it:"parseable_fixits.c":{10:8-10:9}:"=="
+parseable_fixits.c:10:21: error: member reference type 'struct S *' is a pointer; did you mean to use '->'?
+   10 |         if (x = 1) return p.a;
+      |                           ~^
+      |                            ->
+fix-it:"parseable_fixits.c":{10:21-10:22}:"->"
+parseable_fixits.c:11:7: error: extraneous ')' before ';'
+   11 |         x = 2);
+      |              ^
+fix-it:"parseable_fixits.c":{11:7-11:8}:""
+4 warnings and 3 errors generated.

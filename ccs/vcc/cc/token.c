@@ -158,7 +158,7 @@ VPRIV __attribute__((noinline, cold, noreturn)) void expect_fail(cc *c, const ch
 	if (n >= 3 && n <= 5 && what[0] == '\'' && what[n - 1] == '\'' && c->prevloc && !(c->prevflags & PF_MACRO)) {
 		uint32_t e = pp_tok_end(c->p, c->prevloc);
 		char *s = halloc(c, n - 1);
-		pp_fixit fx = { e, e, s };
+		pp_fixit fx = { e, e, s, VDA_MAYBE };
 
 		memcpy(s, what + 1, n - 2), s[n - 2] = 0;
 		report(c, "error", e, NULL, 0, &fx, 1, "expected %s", what);
@@ -184,6 +184,14 @@ VPRIV __attribute__((noinline, cold, noreturn)) void lparen_fail(cc *c, const ch
 /* "expected ';' after X": reported at the end of the previous token with a
    fix-it, like clang; parsing goes on as if the ';' were there.  True when the ';'
    is missing and nothing stands in for it (clang's ExpectAndConsumeSemi failing) */
+/* a ';' inserted after the previous token: machine-applicable at the end of a line (the next
+   token starts one, and is no '{' that would begin a function's body), a guess otherwise
+   ("struct s a b", "int fint x)": the mutation corpus, D6) */
+VPRIV int semi_app(cc *c)
+{
+	return (c->tk[0].flags & TF_SOL) && c->tk[0].kind != T_LBRACE ? VDA_MACHINE : VDA_MAYBE;
+}
+
 VPRIV bool expect_semi(cc *c, const char *after)
 {
 	uint32_t e;
@@ -195,7 +203,9 @@ VPRIV bool expect_semi(cc *c, const char *after)
 	}
 	if ((c->tk[0].kind == T_RPAREN || c->tk[0].kind == T_RSQUARE) && peek(c, 1)->kind == T_SEMI) {
 		/* clang: "f);": the stray ')' (or ']') and the ';' are consumed */
-		report(c, "error", c->tk[0].loc, NULL, 0, NULL, 0, "extraneous '%s' before ';'",
+		pp_fixit fx = { c->tk[0].loc, c->tk[0].loc + 1, "", VDA_MAYBE };	/* (or a '(' was lost) */
+
+		report(c, "error", c->tk[0].loc, NULL, 0, &fx, !(c->tk[0].flags & PF_MACRO), "extraneous '%s' before ';'",
 		       c->tk[0].kind == T_RPAREN ? ")" : "]");
 		next(c), next(c);
 		return false;
@@ -208,13 +218,13 @@ VPRIV bool expect_semi(cc *c, const char *after)
 	if (c->tk[0].kind == T_COMMA || c->tk[0].kind == T_COLON) {
 		/* clang's common typo: ',' or ':' for ';', replaced; parsing goes on after it */
 		e = c->tk[0].loc;
-		fx = (pp_fixit){ e, pp_tok_end(c->p, e), ";" };
+		fx = (pp_fixit){ e, pp_tok_end(c->p, e), ";", VDA_MACHINE };
 		report(c, "error", e, NULL, 0, &fx, 1, "expected ';' %s", after);
 		next(c);
 		return false;
 	}
 	e = pp_tok_end(c->p, c->prevloc);
-	fx = (pp_fixit){ e, e, ";" };
+	fx = (pp_fixit){ e, e, ";", semi_app(c) };
 	report(c, "error", e, NULL, 0, &fx, 1, "expected ';' %s", after);
 	return true;
 }
@@ -265,7 +275,7 @@ VPRIV bool decl_comma_typo(cc *c)
 	t = peek(c, 1);
 	if (!(t->flags & TF_SOL) || might_be_declarator(c, t))
 		return false;
-	fx = (pp_fixit){ l, pp_tok_end(c->p, l), ";" };
+	fx = (pp_fixit){ l, pp_tok_end(c->p, l), ";", VDA_MACHINE };
 	report(c, "error", l, NULL, 0, &fx, 1, "expected ';' at end of declaration");
 	next(c);
 	return true;

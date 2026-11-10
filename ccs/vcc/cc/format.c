@@ -611,8 +611,20 @@ static void check_flags(fctx *x, const spec *s)
 		char fl[2] = { (char)s->flags[i], 0 };
 		const char *ok = fl[0] == '#' ? "oxXaAeEfFgG" : fl[0] == '0' ? "diouxXaAeEfFgG" : fl[0] == '+' || fl[0] == ' ' ? "diaAeEfFgG" : NULL;
 
-		if (ok && !strchr(ok, s->cv) && s->cv != '%')
-			warn_at(x, "format", s, s->flagat[i], "flag '%s' results in undefined behavior with '%s' conversion specifier", fl, cv);
+		if (ok && !strchr(ok, s->cv) && s->cv != '%') {
+			pp_span sr;
+			vdiag *d;
+
+			spec_range(x, s, &sr);
+			d = cc_warn_begin(x->c, "format", true, NULL, floc(x->f, s->flagat[i]),
+					  "flag '%s' results in undefined behavior with '%s' conversion specifier", fl, cv);
+			if (!d)
+				continue;
+			pp_diag_label(x->c->p, d, sr.b, sr.e, NULL);
+			if (x->f->loc)	/* clang: remove the flag */
+				pp_diag_fix(x->c->p, d, floc(x->f, s->flagat[i]), floc(x->f, s->flagat[i] + 1), "", VDA_MACHINE);
+			pp_diag_emit(x->c->p, d);
+		}
 	}
 }
 

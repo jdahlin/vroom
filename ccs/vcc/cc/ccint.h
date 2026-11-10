@@ -196,6 +196,7 @@ struct cc {
 	bool next_v[16];
 	uint32_t next_n;
 	const char *dms;	/* the next record's diagnosed token, spelled, if a macro may hold it (set just before) */
+	pp_fixit dfx;		/* ... and a fix-it for it (s != NULL; machine-applicable), as dms */
 	int8_t ext_off;		/* 1: no extension warning is on (command line); -1: not known yet */
 	const uint32_t *nenable;	/* pp's "#pragma diagnostic warning|error" count (ext_off holds while 0) */
 	int bcp;		/* in __builtin_constant_p's argument: unevaluated, but its names are used */

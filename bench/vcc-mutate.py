@@ -20,6 +20,8 @@ runs vcc.  Details of every mutant go to build/ccs/mutate/last.jsonl.
 
   bench/vcc-mutate.py [-j N] [-n N] [--kernel-share F] [--seed S] [--src torture|kernel|all] [--formats]
       --formats: also check every mutant's JSON records rebuild its text and its SARIF log (layer 5a)
+      --fix: also run `vpp --fix` (up to 3 passes) on each rejected mutant: how often a machine-applicable
+             fix restores the original, and that none leaves more errors than before (layer 5b, D6)
   bench/vcc-mutate.py show CATEGORY [KIND] [-n N]   mutants of a category from the last run, with both outputs
       CATEGORY: crash timeout missed spurious firstloc firstline more fewer
 
@@ -265,9 +267,26 @@ def formats_check(a, mp, cwd):
         return f'bad JSON: {e}'
 
 
+def fix_check(a, mp, cwd, src, nerr):
+    """layer 5b on a mutant: --fix until nothing changes; restored (the original again), errors after"""
+    applied = False
+    for _ in range(3):
+        p = subprocess.run([VPP] + COMMON + ['--fix'] + a + [mp], cwd=cwd, capture_output=True, timeout=TIMEOUT)
+        if p.returncode < 0:
+            return {'crash': p.returncode}
+        if b'note: applied' not in p.stderr:
+            break
+        applied = True
+    if not applied:
+        return {'applied': False}
+    after = compile1(VPP, a, mp, cwd)
+    return {'applied': True, 'restored': open(mp, errors='replace').read() == src, 'before': nerr,
+            'after': len(after['errs']) if after['rc'] != 'timeout' else -1}
+
+
 def job(arg):
     """one mutant: (source tu, kind, seed) -> record"""
-    tu, kind, seed, tmp, formats = arg
+    tu, kind, seed, tmp, formats, fix = arg
     src_kind, name, path, args, cwd = tu
     try:
         src = open(path, errors='replace').read()
@@ -285,11 +304,14 @@ def job(arg):
     c = clang_cached(a, mp, mut, cwd)
     v = compile1(VPP, a, mp, cwd, ids=True)
     fmt = formats_check(a, mp, cwd) if formats else None
+    fx = fix_check(a, mp, cwd, src, len(v['errs'])) if fix and v['errs'] else None
     os.unlink(mp)
     os.rmdir(d)
     rec = {'src': src_kind, 'tu': name, 'kind': kind, 'seed': seed, 'path': path, 'clang': c, 'vcc': v}
     if formats:
         rec['formats'] = fmt
+    if fx:
+        rec['fix'] = fx
     rec['cat'] = classify(c, v)
     # the line that was changed, for show
     ol, nl = src.splitlines(), mut.splitlines()
@@ -347,6 +369,7 @@ def baseline_ok(tu):
 def run(argv):
     j, n, share, seed, which = 6, 2000, 0.25, 1, 'all'
     formats = '--formats' in argv
+    fix = '--fix' in argv
     if '-j' in argv:
         j = int(argv[argv.index('-j') + 1])
     if '-n' in argv:
@@ -374,11 +397,11 @@ def run(argv):
     tmp = tempfile.mkdtemp(prefix='vcc-mutate-')
     for i in range(nt):
         if good_t:
-            jobs.append((good_t[i % len(good_t)], kinds[i % len(kinds)], seed * 1000003 + i, tmp, formats))
+            jobs.append((good_t[i % len(good_t)], kinds[i % len(kinds)], seed * 1000003 + i, tmp, formats, fix))
     for i in range(nk):
         if good_k:
             # several mutants per kernel TU: they are expensive to pick
-            jobs.append((good_k[i % len(good_k)], kinds[(i * 7) % len(kinds)], seed * 1000003 + nt + i, tmp, formats))
+            jobs.append((good_k[i % len(good_k)], kinds[(i * 7) % len(kinds)], seed * 1000003 + nt + i, tmp, formats, fix))
     with Pool(j) as pool:
         recs = [r for r in pool.imap_unordered(job, jobs, chunksize=2) if r]
     os.rmdir(tmp)
@@ -393,7 +416,21 @@ def run(argv):
         print(f'  formats (JSON rebuilds the text, SARIF well formed): {len(recs) - len(bad)}/{len(recs)} ok')
         for r in bad[:10]:
             print(f'    {r["tu"]} seed {r["seed"]}: {r["formats"]}')
-    return 1 if any(r['cat'][0] in ('crash', 'timeout') for r in recs) or bad else 0
+    worse = []
+    if fix:
+        fx = [r for r in recs if r.get('fix')]
+        ap = [r for r in fx if r['fix'].get('applied')]
+        worse = [r for r in fx if r['fix'].get('crash') or (r['fix'].get('applied') and
+                 (r['fix']['after'] < 0 or r['fix']['after'] > r['fix']['before']))]
+        print(f'  --fix (layer 5b): applied to {len(ap)} of {len(fx)} rejected mutants, restored the original '
+              f'{sum(1 for r in ap if r["fix"]["restored"])}, no error left '
+              f'{sum(1 for r in ap if r["fix"]["after"] == 0)}, more errors than before {len(worse)}')
+        per = Counter(r['kind'] for r in ap if r['fix']['restored'])
+        print('    restored per kind: ' + ', '.join(f'{k} {per[k]}/{sum(1 for r in ap if r["kind"] == k)}'
+                                                   for k in sorted({r['kind'] for r in ap})))
+        for r in worse[:10]:
+            print(f'    worse: {r["tu"]} seed {r["seed"]} {r["kind"]}: {r["fix"]}')
+    return 1 if any(r['cat'][0] in ('crash', 'timeout') for r in recs) or bad or worse else 0
 
 
 def report(recs, ntu, nktu, dt):

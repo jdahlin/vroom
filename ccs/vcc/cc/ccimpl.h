@@ -166,6 +166,11 @@ extern const char *const w_ped[];	/* { "pedantic" } */
 /* ... at a token spelled ms (from a macro: the caret at the invocation, the notes at the body) */
 #define EXT_WARN_MS(c, ms, flag, groups, loc, ...) \
 	do { if (unlikely(ext_on((c), (flag), (groups)))) { (c)->dms = (ms); ext_warn((c), (flag), (groups), (loc), __VA_ARGS__); } } while (0)
+/* ... the token at loc (from the source, not a macro: tf its flags) with a fix-it removing it */
+#define EXT_WARN_DEL(c, ms, tf, flag, groups, loc, ...) \
+	do { if (unlikely(ext_on((c), (flag), (groups)))) { (c)->dms = (ms); \
+		if (!((tf) & PF_MACRO)) (c)->dfx = (pp_fixit){ (loc), (loc) + (uint32_t)strlen(ms), "", VDA_MACHINE }; \
+		ext_warn((c), (flag), (groups), (loc), __VA_ARGS__); } } while (0)
 VPRIV __attribute__((format(printf, 6, 7))) vdiag *cc_warn_begin(cc *c, const char *flag, bool on, const char *const *groups, uint32_t loc, const char *fmt, ...);
 VPRIV __attribute__((format(printf, 10, 11))) bool cc_warnx(cc *c, const char *flag, bool on, const char *const *groups, uint32_t loc, const pp_span *r, int nr, const pp_fixit *fx, int nfx, const char *fmt, ...);
 VPRIV const char *idname(uint32_t id, int *len);
@@ -438,6 +443,7 @@ VPRIV uint32_t ds_tdef(cc *c, const dspec *ds, qty t);
 VPRIV uint32_t expr_tdef(cc *c, uint32_t e, qty t);
 VPRIV const char *tyname_sugar(cc *c, uint32_t e, qty t);
 VPRIV const char *char_sign(cc *c, qty t);
+VPRIV int semi_app(cc *c);
 VPRIV void weak_finish(cc *c);
 VPRIV uint32_t implicit_func(cc *c, uint32_t id, uint32_t loc);
 VPRIV uint32_t lib_func(cc *c, uint32_t id, uint32_t loc);

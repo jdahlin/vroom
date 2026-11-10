@@ -401,7 +401,7 @@ bool pp_warnx(pp *p, const char *flag, bool on, const char *const *groups, pp_di
 	for (int i = 0; i < di->nr; i++)
 		pp_diag_label(p, d, di->r[i].b, di->r[i].e, NULL);
 	for (int i = 0; i < di->nfx; i++)
-		pp_diag_fix(p, d, di->fx[i].b, di->fx[i].e, di->fx[i].s, VDA_UNSPEC);
+		pp_diag_fix(p, d, di->fx[i].b, di->fx[i].e, di->fx[i].s, di->fx[i].app);
 	pp_diag_macro(d, di->ms, di->mlen);
 	pp_diag_emit(p, d);
 	return true;
@@ -1279,8 +1279,35 @@ void pp_diag_help(pp *p, vdiag *d, const char *fmt, ...)
 		d->help = dstr(p, buf, (size_t)n < sizeof(buf) ? (size_t)n : sizeof(buf) - 1);
 }
 
+/* [b, e) lies in a macro's name in the source: the text to change is in the macro's body,
+   which a fix-it at the invocation would not reach (clang drops such fix-its); a range
+   that covers the whole invocation and more ("&& MASK") is a fix of the source */
+static bool fix_in_macro(const pp *p, uint32_t b, uint32_t e)
+{
+	const fent *f;
+	const char *s;
+	uint32_t i, j, n, at;
+
+	if (e <= b || !loc_ok(p, b, &f) || e - f->base > f->f->size)
+		return false;
+	s = f->f->src, n = f->f->size, at = b - f->base;
+	for (i = at; i > 0 && (isalnum((unsigned char)s[i - 1]) || s[i - 1] == '_' || s[i - 1] == '$'); i--)
+		;
+	for (j = at; j < n && (isalnum((unsigned char)s[j]) || s[j] == '_' || s[j] == '$'); j++)
+		;
+	if (j <= i || isdigit((unsigned char)s[i]) || e - f->base > j)
+		return false;
+	{
+		uint32_t id = vintern_find(s + i, j - i, vintern_hash(s + i, j - i));
+
+		return id && (mget(p, id) & ~(uintptr_t)1);
+	}
+}
+
 void pp_diag_fix(pp *p, vdiag *d, uint32_t b, uint32_t e, const char *s, int app)
 {
+	if (unlikely(fix_in_macro(p, b, e)))
+		return;
 	if (d->nfix == d->cfix) {
 		uint32_t c = d->cfix ? d->cfix * 2 : 4;
 		vdfix *n = varena_alloc(&p->perm, c * sizeof(*n));
@@ -1457,6 +1484,46 @@ VPRIV bool render_head(pp *p, vbuf *b, const vdiag *d, const fent **ep)
 	return has && !p->o->diag_nocaret && d->loc - e->base < e->f->size;
 }
 
+/* -fdiagnostics-parseable-fixits: a line per fix-it after the record's snippet, as clang
+   (TextDiagnostic::emitParseableFixits): 1-based byte columns, the end exclusive, the file
+   name and the text escaped as LLVM's write_escaped */
+static void esc(vbuf *b, const char *s, size_t n)
+{
+	for (size_t i = 0; i < n; i++) {
+		unsigned char ch = (unsigned char)s[i];
+
+		if (ch == '\\' || ch == '"')
+			vbuf_f(b, "\\%c", ch);
+		else if (ch == '\t')
+			vbuf_s(b, "\\t");
+		else if (ch == '\n')
+			vbuf_s(b, "\\n");
+		else if (ch < 0x20 || ch >= 0x7f)
+			vbuf_f(b, "\\%03o", ch);
+		else
+			vbuf_put(b, s + i, 1);
+	}
+}
+
+VPRIV void parseable_fixits(pp *p, vbuf *b, const vdiag *d)
+{
+	if (likely(!p->o->diag_parseable))
+		return;
+	for (uint32_t i = 0; i < d->nfix; i++) {
+		const char *nb, *ne;
+		uint32_t lb, le, l1, c1, l2, c2;
+
+		if (!diag_where(p, d->fix[i].b, &nb, &lb, &l1, &c1) || !diag_where(p, d->fix[i].e, &ne, &le, &l2, &c2) ||
+		    lb != le || memcmp(nb, ne, lb))
+			continue;
+		vbuf_s(b, "fix-it:\"");
+		esc(b, nb, lb);
+		vbuf_f(b, "\":{%u:%u-%u:%u}:\"", l1, c1, l2, c2);
+		esc(b, d->fix[i].s, strlen(d->fix[i].s));
+		vbuf_s(b, "\"\n");
+	}
+}
+
 /* one record in clang's text format */
 VPRIV void render_text(pp *p, vbuf *b, const vdiag *d)
 {
@@ -1466,8 +1533,10 @@ VPRIV void render_text(pp *p, vbuf *b, const vdiag *d)
 	bool same = d->loc + 1 == p->dlast1 && !d->nspan && !d->nfix && !(p->dlastlv == VDL_NOTE && d->level != VDL_NOTE);
 
 	p->dlast1 = d->loc + 1, p->dlastlv = d->level;
-	if (render_head(p, b, d, &e) && !same)
+	if (render_head(p, b, d, &e) && !same) {
 		snippet(p, b, e, d);
+		parseable_fixits(p, b, d);
+	}
 }
 
 static void render_clang(pp *p, vbuf *b, vdiag *d) { render_text(p, b, d); }
@@ -1530,7 +1599,7 @@ void pp_vdiagx(pp *p, const pp_dinfo *di, const char *fmt, va_list ap)
 	for (int i = 0; i < di->nr; i++)
 		pp_diag_label(p, d, di->r[i].b, di->r[i].e, NULL);
 	for (int i = 0; i < di->nfx; i++)
-		pp_diag_fix(p, d, di->fx[i].b, di->fx[i].e, di->fx[i].s, VDA_UNSPEC);
+		pp_diag_fix(p, d, di->fx[i].b, di->fx[i].e, di->fx[i].s, di->fx[i].app);
 	pp_diag_macro(d, di->ms, di->mlen);
 	pp_diag_emit(p, d);
 }

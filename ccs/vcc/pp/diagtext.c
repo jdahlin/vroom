@@ -452,6 +452,9 @@ static void render_vcc(pp *p, vbuf *b, vdiag *top)
 			if (!k->emitted && foldable(e, k, pls))
 				fold[nfold++] = k;
 		snippet_vcc(p, b, e, top, fold, nfold);
+		parseable_fixits(p, b, top);
+		for (int i = 0; i < nfold; i++)
+			parseable_fixits(p, b, fold[i]);
 	} else {
 		help_only(b, top);
 	}
@@ -466,9 +469,10 @@ static void render_vcc(pp *p, vbuf *b, vdiag *top)
 		k->emitted = 1;
 		if (!run_last && !folded && (run_last = macro_run_last(k)))
 			run_first = k;
-		if (render_head(p, b, k, &e) && !folded && (!run_last || k == run_first || k == run_last))
+		if (render_head(p, b, k, &e) && !folded && (!run_last || k == run_first || k == run_last)) {
 			snippet_vcc(p, b, e, k, NULL, 0);
-		else if (!folded)
+			parseable_fixits(p, b, k);
+		} else if (!folded)
 			help_only(b, k);
 		if (k == run_last)
 			run_last = NULL;

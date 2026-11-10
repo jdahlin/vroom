@@ -141,6 +141,31 @@
       }
      ],
      "relatedLocations": [],
+     "fixes": [
+      {
+       "artifactChanges": [
+        {
+         "artifactLocation": {
+          "uri": "recovery.c",
+          "uriBaseId": "%SRCROOT%"
+         },
+         "replacements": [
+          {
+           "deletedRegion": {
+            "startLine": 8,
+            "startColumn": 20,
+            "endLine": 8,
+            "endColumn": 21
+           },
+           "insertedContent": {
+            "text": ""
+           }
+          }
+         ]
+        }
+       ]
+      }
+     ],
      "properties": {
       "vcc/help": null,
       "vcc/flag": null,
@@ -172,6 +197,31 @@
       }
      ],
      "relatedLocations": [],
+     "fixes": [
+      {
+       "artifactChanges": [
+        {
+         "artifactLocation": {
+          "uri": "recovery.c",
+          "uriBaseId": "%SRCROOT%"
+         },
+         "replacements": [
+          {
+           "deletedRegion": {
+            "startLine": 9,
+            "startColumn": 33,
+            "endLine": 9,
+            "endColumn": 34
+           },
+           "insertedContent": {
+            "text": ""
+           }
+          }
+         ]
+        }
+       ]
+      }
+     ],
      "properties": {
       "vcc/help": null,
       "vcc/flag": null,

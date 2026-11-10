@@ -4,8 +4,10 @@ recovery.c:7:1: error: extraneous closing brace ('}')
   the source line is: }
 recovery.c:8:20: error: extraneous ')' before ';'
   the source line is: int g(void) { a = 1); return 1; }
+  fix: remove the text at line 8, column 20
 recovery.c:9:33: error: extraneous ']' before ';'
   the source line is: int h(void) { int q[2]; q[0] = 1]; return q[1]; }
+  fix: remove the text at line 9, column 33
 recovery.c:10:17: error: expected expression
   the source line is: int t[3] = { 1, , 2 };
 recovery.c:14:18: error: expected expression

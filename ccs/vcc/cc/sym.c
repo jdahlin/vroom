@@ -294,7 +294,7 @@ VPRIV uint32_t undeclared(cc *c, const char *msg, uint32_t id, uint32_t loc, boo
 		pp_fixit fx;
 
 		memcpy(fs, t, m), fs[m] = 0;
-		fx = (pp_fixit){ r.b, r.e, fs };
+		fx = (pp_fixit){ r.b, r.e, fs, VDA_MAYBE };
 		report(c, "error", loc, &r, 1, &fx, 1, tn ? "unknown type name '%.*s'; did you mean '%s'?"
 		       : "use of undeclared identifier '%.*s'; did you mean '%s'?", IDF(id), fs);
 		if (s)

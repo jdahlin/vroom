@@ -962,6 +962,15 @@ static int handle1(const struct req *r, const char **kind)
 		n = snprintf(line, sizeof(line), "%s\n", strcmp(name, "include") ? name : cc_resource_include);
 		return n < (int)sizeof(line) && write_full(r->fds[1], line, n) ? 0 : 1;
 	}
+	for (int i = 1; i < r->argc; i++)
+		if (!strcmp(r->argv[i], "--explain") || !strncmp(r->argv[i], "--explain=", 10) || !strcmp(r->argv[i], "--fix")) {
+			/* vcc's own: the client's output and diagnostics, no clang to fall back to */
+			ppd_env e = { r->cwd, r->fds[1], r->fds[2], r->envp };
+
+			*kind = r->argv[i][2] == 'e' ? "cc-explain" : "cc-fix";
+			atomic_fetch_add(&n_cc, 1);
+			return ppd_run(r->argc, r->argv, &e);
+		}
 	probe = cc_probe_kind(r);
 	if (probe) {
 		static const char *const names[] = { "", "cc-probe", "as-probe", "src-probe", "link-probe" };

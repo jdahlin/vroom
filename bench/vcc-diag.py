@@ -25,7 +25,7 @@ identical to clang's.
   bench/vcc-diag.py [-v] [-j N] [--bin-dir DIR] [PATTERN]   -v: the diff of each failure
   bench/vcc-diag.py --bless [PATTERN]       write X.c.stderr from vcc's output
 """
-import difflib, importlib.util, json, os, re, subprocess, sys
+import difflib, importlib.util, json, os, re, shutil, subprocess, sys, tempfile
 from multiprocessing import Pool
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from hostenv import llvm, BUILD
@@ -115,8 +115,9 @@ def one(name, bless=False):
         why.append(f'diagnostic without an id: {noid[0]}')
     # layer 5a: the JSON records rebuild the text exactly (bench/diag-render.py)
     _, out_j = run([VPP], name, ['-fdiagnostics-format=json'])
+    pfx = '-fdiagnostics-parseable-fixits' in open(os.path.join(D, name), errors='replace').read()
     try:
-        rt = render.render(out_j.splitlines(), D).decode(errors='replace')
+        rt = render.render(out_j.splitlines(), D, parseable=pfx).decode(errors='replace')
     except (ValueError, KeyError) as e:
         rt = f'(bad JSON: {e})'
     if rt != out_v:
@@ -126,7 +127,7 @@ def one(name, bless=False):
     # what the "text-identical to clang" count compares
     _, out_k = run([VPP], name, ['-fdiagnostics-style=clang'])
     try:
-        rk = render.render(out_j.splitlines(), D, style='clang').decode(errors='replace')
+        rk = render.render(out_j.splitlines(), D, style='clang', parseable=pfx).decode(errors='replace')
     except (ValueError, KeyError) as e:
         rk = f'(bad JSON: {e})'
     if rk != out_k:
@@ -151,6 +152,38 @@ def one(name, bless=False):
             if not os.path.exists(snapf) or open(snapf).read() != got:
                 ok = False
                 why.append(f'{ext} differs from .{ext}')
+    # layer 5b: /* diag-fix */: --fix on a copy, repeated while it changes something (a fix can
+    # uncover a diagnostic error recovery hid), gives X.c.fixed within 4 passes, and clang
+    # compiles it with fewer errors
+    if re.search(r'/\*\s*diag-fix\s*\*/', src):
+        fixed = os.path.join(D, name + '.fixed')
+        with tempfile.TemporaryDirectory() as t:
+            for h in os.listdir(D):	# the headers next to it
+                if h.endswith('.h'):
+                    shutil.copy(os.path.join(D, h), t)
+            shutil.copy(os.path.join(D, name), t)
+            fl = [f for f in FL] + (re.search(r'/\*\s*diag-flags:\s*(.*?)\s*\*/', src).group(1).split()
+                                     if re.search(r'/\*\s*diag-flags:', src) else [])
+            sub = lambda cmd: subprocess.run(cmd + fl + [name], cwd=t, capture_output=True, timeout=30)
+            for _ in range(4):
+                p2 = sub([VPP, '--fix'])
+                if b'note: applied' not in p2.stderr:
+                    break
+            got = open(os.path.join(t, name), errors='replace').read()
+            if bless:
+                open(fixed, 'w').write(got)
+            nerr = lambda p: len(re.findall(r': (?:fatal )?error: ', p.stderr.decode(errors='replace')))
+            pc0 = subprocess.run([CL] + fl + [name], cwd=D, capture_output=True)
+            pc1 = sub([CL])
+        if not os.path.exists(fixed) or open(fixed, errors='replace').read() != got:
+            ok = False
+            why.append('--fix differs from .fixed')
+        if b'note: applied' in p2.stderr:
+            ok = False
+            why.append('--fix still changes the file after 4 passes')
+        if nerr(pc0) and nerr(pc1) >= nerr(pc0):
+            ok = False
+            why.append(f'clang: {nerr(pc1)} errors after --fix, {nerr(pc0)} before')
     return name, ok, out_c, out_v, want or '', ', '.join(why), out_c == out_k
 
 

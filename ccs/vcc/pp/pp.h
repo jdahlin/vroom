@@ -59,6 +59,9 @@ typedef struct pp_opts {
 	int diag_format;		/* -fdiagnostics-format=: PP_DIAG_TEXT, _JSON (a record per line), _SARIF */
 	int diag_style;			/* -fdiagnostics-style=: PP_DSTYLE_VCC (default), _CLANG, _NARRATED */
 	int diag_unicode;		/* -fdiagnostics-text-art-charset=unicode: box-drawing gutter and connectors */
+	int diag_parseable;		/* -fdiagnostics-parseable-fixits: clang's fix-it:"file":{l:c-l:c}:"text" lines */
+	int diag_patch;			/* -fdiagnostics-generate-patch: the fix-its as a unified diff (GCC's) */
+	int fix_apply;			/* --fix: machine-applicable fix-its written to the files */
 	const char *sarif_file;		/* -fdiagnostics-add-output=sarif:file=F: SARIF there too */
 	char *const *argv;		/* the command line (SARIF's invocation) */
 	int argc;
@@ -132,7 +135,7 @@ void pp_vdiag(pp *p, uint32_t loc, const char *what, const char *fmt, va_list ap
  * inserts) printed under the caret line.
  */
 typedef struct pp_span { uint32_t b, e; } pp_span;
-typedef struct pp_fixit { uint32_t b, e; const char *s; } pp_fixit;
+typedef struct pp_fixit { uint32_t b, e; const char *s; uint8_t app; } pp_fixit;	/* app: VDA_* (0: unspecified) */
 typedef struct pp_dinfo {
 	const char *what;
 	uint32_t loc;

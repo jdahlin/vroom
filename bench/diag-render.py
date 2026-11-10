@@ -10,8 +10,8 @@ Two styles, as vcc's: "vcc" (the default, ccs/vcc/pp/diagtext.c: several
 lines, labels, folded notes, help) and "clang" (-fdiagnostics-style=clang).
 A change to either renderer in C changes this file too.
 
-  bench/diag-render.py [--cwd DIR] [--no-caret] [--style clang] < records.jsonl
-  import: render(lines, cwd, caret=True, style='vcc') -> bytes
+  bench/diag-render.py [--cwd DIR] [--no-caret] [--style clang] [--parseable-fixits] < records.jsonl
+  import: render(lines, cwd, caret=True, style='vcc', parseable=False) -> bytes
 """
 import re, json, os, sys
 
@@ -59,8 +59,8 @@ def dcols(s, b, e, col=0):
 
 
 class Renderer:
-    def __init__(self, cwd, caret=True, style='vcc'):
-        self.cwd, self.caret, self.last, self.style = cwd, caret, None, style
+    def __init__(self, cwd, caret=True, style='vcc', parseable=False):
+        self.cwd, self.caret, self.last, self.style, self.parseable = cwd, caret, None, style, parseable
         self.src = {}
         self.dlast, self.dlastlv = None, None
 
@@ -396,6 +396,35 @@ class Renderer:
             num = str(self.line_no(s, d, st['offset']))
             out += b' ' * (width - len(num)) + num.encode() + b' + ' + t[:-1].encode() + b'\n'
 
+    @staticmethod
+    def esc(s):
+        """LLVM's write_escaped (diag.c esc)"""
+        o = ''
+        for ch in s.encode():
+            c = chr(ch)
+            if c in '\\"':
+                o += '\\' + c
+            elif c == '\t':
+                o += '\\t'
+            elif c == '\n':
+                o += '\\n'
+            elif ch < 0x20 or ch >= 0x7f:
+                o += '\\%03o' % ch
+            else:
+                o += c
+        return o
+
+    def fixits(self, d, out):
+        """-fdiagnostics-parseable-fixits (diag.c parseable_fixits)"""
+        if not self.parseable:
+            return
+        for f in d['fixits']:
+            b, e = f['start'], f['end']
+            if b is None or e is None or b['file'] != e['file']:
+                continue
+            out += (f'fix-it:"{self.esc(b["file"])}":{{{b["line"]}:{b["column"]}-{e["line"]}:{e["column"]}}}:'
+                    f'"{self.esc(f["text"])}"\n').encode()
+
     def vcc(self, d, out):
         s = self.head(d, out)
         fold = []
@@ -404,6 +433,9 @@ class Renderer:
             pls = self.lstart(s, d['location']['offset'])
             fold = [k for k in d['children'] if self.foldable(s, path, k, pls)][:32]
             self.snippet_vcc(s, d, fold, out)
+            self.fixits(d, out)
+            for k in fold:
+                self.fixits(k, out)
         elif d.get('help'):
             out += b'      = help: ' + d['help'].encode() + b'\n'
         kids = d['children']
@@ -424,6 +456,7 @@ class Renderer:
             ks = self.head(k, out)
             if ks is not None and not folded and (last is None or i in (first, last)):
                 self.snippet_vcc(ks, k, [], out)
+                self.fixits(k, out)
             elif not folded and k.get('help'):
                 out += b'      = help: ' + k['help'].encode() + b'\n'
             if i == last:
@@ -457,10 +490,11 @@ class Renderer:
         self.dlast, self.dlastlv = key, d['level']
         if has and self.caret and not same:
             self.snippet(d, out)
+            self.fixits(d, out)
 
 
-def render(lines, cwd='.', caret=True, style='vcc'):
-    r = Renderer(cwd, caret, style)
+def render(lines, cwd='.', caret=True, style='vcc', parseable=False):
+    r = Renderer(cwd, caret, style, parseable)
     out = bytearray()
     errors = warns = 0
     for l in lines:
@@ -492,7 +526,8 @@ def main():
     a = sys.argv[1:]
     cwd = a[a.index('--cwd') + 1] if '--cwd' in a else '.'
     style = a[a.index('--style') + 1] if '--style' in a else 'vcc'
-    sys.stdout.buffer.write(render(sys.stdin.read().splitlines(), cwd, '--no-caret' not in a, style))
+    sys.stdout.buffer.write(render(sys.stdin.read().splitlines(), cwd, '--no-caret' not in a, style,
+                                   '--parseable-fixits' in a))
     return 0
 
 
