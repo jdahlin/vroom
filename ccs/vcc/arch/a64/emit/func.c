@@ -258,7 +258,7 @@ static void tbz_range(ecx *e)
 
 		if (t.op == I_TBZ || t.op == I_TBNZ) {
 			e->in[--d] = (ins){ .op = I_BC, .cond = t.op == I_TBZ ? C_EQ : C_NE, .label = t.label };
-			e->in[--d] = (ins){ .op = I_ANDSI, .sz = t.sh >= 32, .rd = ZR, .rn = t.rd, .imm = (int64_t)1 << t.sh };
+			e->in[--d] = (ins){ .op = I_ANDSI, .sz = t.sh >= 32, .rd = ZR, .rn = t.rd, .imm = (int64_t)(UINT64_C(1) << t.sh) };
 		} else {
 			e->in[--d] = t;
 		}
