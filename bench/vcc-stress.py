@@ -25,12 +25,16 @@ the commit that fixes it).  Exit status 1 on any FAIL or XPASS.
 
 --bin-dir build/ccs-asan runs the sanitizer build (then an ASan report is a
 crash too: ASan exits with status 1 but prints "ERROR: AddressSanitizer").
+With a sanitizer build the timeout is 240 s and time budgets are not checked.
 """
 import os, re, shutil, signal, subprocess, sys, tempfile, time, importlib.util
 spec = importlib.util.spec_from_file_location('vd', os.path.join(os.path.dirname(os.path.abspath(__file__)), 'vcc-diff.py'))
 vd = importlib.util.module_from_spec(spec); spec.loader.exec_module(vd)
 
-TIMEOUT = 60
+# a sanitizer build (build/ccs-asan, ccs-tsan) is 2-20x slower: a longer timeout, and no
+# time budgets (they check that vcc stays linear; the normal build checks that)
+SAN = bool(re.search(r'ccs-[a-z]*san\b', vd.BIN))
+TIMEOUT = 240 if SAN else 60
 TARGET = ['--target=aarch64-linux-gnu', '-nostdinc', '-ffreestanding']
 
 def nest(open_, close, n, inner):
@@ -167,7 +171,7 @@ def main():
             rc, dt, err = run(c, d, vccd)
             server_ok = vccd.alive() if vccd else True
             ok, why = verdict(c, rc, err, server_ok)
-            if ok and c['budget'] and dt > c['budget']: ok, why = False, f'{dt:.1f} s, budget {c["budget"]} s'
+            if ok and c['budget'] and not SAN and dt > c['budget']: ok, why = False, f'{dt:.1f} s, budget {c["budget"]} s'
             if c['xfail'] and not ok: st = 'xfail'; xfails += 1
             elif c['xfail'] and ok: st = 'XPASS'; fails += 1; why += f' -- remove xfail ({c["xfail"]})'
             elif ok: st = 'pass'; passes += 1
