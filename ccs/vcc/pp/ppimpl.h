@@ -487,6 +487,7 @@ struct pp {
 	const char *pk_end;
 	uint8_t sol_on, edir, cmt_sol;	/* cmt_sol: -C, an empty expansion began the line: a comment next starts it */	/* edir: a directive was printed on this line (clang's EmittedDirectiveOnThisLine) */
 	uint32_t cur_line;
+	uint8_t emb_sp, emb_tail;	/* -E after #embed: pending, tokens were suffix()/if_empty() */		/* -E: the previous token was #embed's last byte */
 	uint8_t out_text;	/* pp_text: track lines for the printer */	/* clang's CurLine: the presumed line the output is on */
 	int sol_depth;
 	uint32_t exp_loc;

@@ -28,6 +28,7 @@ enum {
 	PF_NOEXP = 16,		/* painted: never expand (C11 6.10.3.4p2) */
 	PF_NOPASTE = 32,	/* a ## that came from an argument */
 	PF_MACRO = 64,		/* from a macro expansion (diagnostics) */
+	PF_EMBEND = 128,	/* #embed's last byte: -E prints a space after it (clang) */
 };
 
 typedef struct ptok {
@@ -42,6 +43,8 @@ typedef struct ptok {
 typedef struct pp_opts {
 	const char *main;		/* the source file */
 	const char *const *dirs;	/* search path: -iquote dirs, then -I, -isystem, -idirafter */
+	const char *const *edirs;	/* --embed-dir: #embed's search path */
+	int nedirs;
 	int ndirs, nquote;		/* dirs[0..nquote) only for "" includes */
 	int nsys1;			/* dirs[nsys1 - 1..) are system directories (0: none) */
 	int xc0, xc1;			/* dirs[xc0..xc1) are extern "C" system directories (clang's ExternCSystem) */

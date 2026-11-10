@@ -727,7 +727,8 @@ int ppd_run(int argc, char **argv, const ppd_env *env)
 	}
 	const char **dirs_q = dirv, **dirs_i = dirv + per, **dirs_s = dirv + 2 * per, **dirs_a = dirv + 3 * per,
 		   **all = dirv + 4 * per;
-	int nq = 0, ni = 0, ns = 0, na = 0, n = 0;
+	int nq = 0, ni = 0, ns = 0, na = 0, n = 0, ne = 0;
+	static __thread const char *dirs_e[64];	/* --embed-dir */
 	const char *cmp = NULL, *out = NULL, *main_file = NULL, *depfile = NULL, *deptarget = NULL;
 	int errfd = env->errfd, status = 0, md = 0, mdeps = 0, mphony = 0, dcolor = 0, nocaret = 0, elimit = 0, nwargs = 0;
 	const char **wargs = NULL;
@@ -879,6 +880,7 @@ int ppd_run(int argc, char **argv, const ppd_env *env)
 		if ((v = ARG("-iquote"))) { dirs_q[nq++] = v; continue; }
 		if ((v = ARG("-isystem"))) { dirs_s[ns++] = v; continue; }
 		if ((v = ARG("-idirafter"))) { dirs_a[na++] = v; continue; }
+		if ((v = ARG("--embed-dir="))) { if (ne < 64) dirs_e[ne++] = v; continue; }
 		if ((v = ARG("-imacros"))) {
 			/* clang's: the file's macros, its tokens dropped up to the ## (before every -include) */
 			bstr(&imac, "#__include_macros \"");
@@ -1141,6 +1143,7 @@ int ppd_run(int argc, char **argv, const ppd_env *env)
 	}
 	po.dirs = all;
 	po.ndirs = n;
+	po.edirs = dirs_e, po.nedirs = ne;
 	po.c23 = std == 23;
 	po.c89 = std == 89 && strict;
 	po.deps = mdeps || depfile;

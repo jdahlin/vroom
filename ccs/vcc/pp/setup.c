@@ -850,6 +850,16 @@ static inline void render(pp *p, const ptok *t)
 		return;
 	}
 	fc = t->s[0];	/* a token never starts with a splice */
+	if (unlikely(p->emb_sp) && !p->edir) {
+		/* after #embed's data clang prints the next token after one space, on the same line */
+		p->emb_sp = (t->flags & PF_EMBEND) != 0;
+		if (p->emb_tail != 1)	/* after the bytes one space, after suffix()/if_empty() none */
+			out_ch(p, ' ');
+		if (p->emb_tail)
+			p->emb_tail--;
+		goto spaced;
+	}
+	p->emb_sp = (t->flags & PF_EMBEND) != 0;
 	if (sol || p->edir) {
 		/* HandleWhitespaceBeforeTok: indented to its column if it starts a new line */
 		uint32_t loc = p->sol_on ? p->sol_loc : p->cx[p->depth - 1].type != C_FILE ? p->exp_loc : t->loc;
@@ -873,6 +883,7 @@ static inline void render(pp *p, const ptok *t)
 		   (p->col && p->pk_end != t->s && p->pk != T_EOF && avoid_concat(p, t, fc))) {
 		out_ch(p, ' ');
 	}
+spaced:
 	out_reserve(p, t->len);
 	sp = pp_spell(t, p->out + p->nout, &l);
 	if (sp != p->out + p->nout)

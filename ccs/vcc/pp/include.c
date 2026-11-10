@@ -824,8 +824,8 @@ static void emb_params(pp *p, embprm *m, bool paren, uint32_t loc)
 	}
 }
 
-/* clang's #embed search: an absolute name, or "x" in the includer's directory (-I is not searched:
-   that is --embed-dir, not supported yet) */
+/* clang's #embed search: an absolute name; "x" in the includer's directory; then the --embed-dir
+   directories (-I is not searched) */
 static const vlex_file *find_embed(pp *p, const ctx *from, const char *name, size_t nlen, bool angled, const char **path)
 {
 	char buf[4096];
@@ -841,19 +841,36 @@ static const vlex_file *find_embed(pp *p, const ctx *from, const char *name, siz
 		*path = pstrdup(p, buf, nlen);
 		return try_path(p->o, buf, nlen);
 	}
-	if (angled)
-		return NULL;
-	fp = from && from->f != &p->builtin ? from->spath : "./";
-	sl = strrchr(fp, '/');
-	dl = sl ? (size_t)(sl - fp) + 1 : 0;
-	if (!sl && fp[0])
-		fp = "./", dl = 2;
-	if (dl + nlen + 1 >= sizeof(buf))
-		return NULL;
-	memcpy(buf, fp, dl), memcpy(buf + dl, name, nlen), buf[dl + nlen] = 0;
-	if ((f = try_path(p->o, buf, dl + nlen)))
-		*path = pstrdup(p, buf, dl + nlen);
-	return f;
+	if (!angled) {
+		fp = from && from->f != &p->builtin ? from->spath : "./";
+		sl = strrchr(fp, '/');
+		dl = sl ? (size_t)(sl - fp) + 1 : 0;
+		if (!sl && fp[0])
+			fp = "./", dl = 2;
+		if (dl + nlen + 1 < sizeof(buf)) {
+			memcpy(buf, fp, dl), memcpy(buf + dl, name, nlen), buf[dl + nlen] = 0;
+			if ((f = try_path(p->o, buf, dl + nlen))) {
+				*path = pstrdup(p, buf, dl + nlen);
+				return f;
+			}
+		}
+	}
+	for (int k = 0; k < p->o->nedirs; k++) {	/* --embed-dir, in order */
+		const char *d = p->o->edirs[k];
+		size_t l = strlen(d);
+
+		if (l + nlen + 2 >= sizeof(buf))
+			continue;
+		memcpy(buf, d, l);
+		if (l && buf[l - 1] != '/')
+			buf[l++] = '/';
+		memcpy(buf + l, name, nlen), l += nlen, buf[l] = 0;
+		if ((f = try_path(p->o, buf, l))) {
+			*path = pstrdup(p, buf, l);
+			return f;
+		}
+	}
+	return NULL;
 }
 
 /* path names the main file (clang lists it once in -M) */
@@ -918,8 +935,7 @@ VPRIV void embed(pp *p, ctx *c, uint32_t b, uint32_t e, uint32_t loc, uint32_t n
 		return;
 	f = find_embed(p, c, buf, n, angled, &path);
 	if (!f) {
-		pp_span r = { floc, floc + (uint32_t)n + 2 };
-		pp_dinfo di = { "fatal error", floc, &r, 1, NULL, 0, NULL, 0 };
+		pp_dinfo di = { "fatal error", floc, NULL, 0, NULL, 0, NULL, 0 };	/* (clang: no range for #embed) */
 
 		pp_diagx(p, &di, "'%.*s' file not found", (int)n, buf);
 		if (p->fatal_jb && !p->o->fatal_continue)
@@ -947,10 +963,13 @@ VPRIV void embed(pp *p, ctx *c, uint32_t b, uint32_t e, uint32_t loc, uint32_t n
 				*w++ = (ptok){ emb_digits + 4 * v, (uint32_t)strlen(emb_digits + 4 * v), 0, loc, T_NUMBER,
 					       (uint8_t)(i ? TF_SPACE : 0), 0 };
 			}
+			w[-1].flags |= PF_EMBEND;
 			memcpy(w, m.suf, m.nsuf * sizeof(ptok)), w += m.nsuf;
 		} else {
 			memcpy(w, m.emp, m.nemp * sizeof(ptok)), w += m.nemp;
 		}
+		w[-1].flags |= PF_EMBEND;
+		p->emb_tail = !on ? 1 : m.nsuf ? 2 : 0;	/* markers left: 2 bytes then suffix, 1 if_empty/suffix */
 		push_ptok(p, o, (uint32_t)(w - o), 0, 0, 0);
 	}
 }
