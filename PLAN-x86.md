@@ -265,12 +265,12 @@ Det som skiljer x86-64 och som lager 2 och de x86-specifika passen tar hand om:
 |---|----------|-----------|
 | X0 | **vcc bygger och kör på x86-64 Linux** (fortfarande aarch64 som mål). Skalär lexer via `VLEX_SCALAR`, CRC32C med SSE4.2, värd-`#ifdef`s i `ldhash.c`, Makefile per värd-CPU. SSE/AVX2-lexer efteråt som prestandasteg | `make -C ccs vcc` och `fuzz-regress` gröna; `vcc-same.py` mot utdata gjorda på Mac:en (arm64-utdata från x86-värd byte-identiska); paritet `vcc-diff.py cmp`; stänger TODO "x86-64 host build" |
 | X1 | **Målval och front end.** `PP_LINUX_X86_64`, predefines ur clang, layout (tabellen ovan), `lib/f80.h` för x87-konstanter, `__float128` | `vpp -dM -E` = `clang -dM -E` (även `-march`-deltan, `bench/vcc-predef.py`); `vcc-sema.py layout` med x86-64 som mål; `vcc-ldconst.py` för x87; `vcc-bflayout.py` för x86-64; arm64/wasm byte-identiska |
-| X2 | **Lagren på plats, heltals-`-S`.** `emit/rec/rec.h` och x86:s op-tabell; `emit/walk/` med `lower.h` och `LO()`; x86-64 i måltabellen (`emit/tu.c` väljer vandraren för x86-64); `arch/x64/emit/` för heltal, locals i stackplatser, parametrar, direkta anrop, `if`/loopar/`break`/`continue`/`switch` (kedja), `return`; prolog/epilog med `rbp`; `twoaddr.c` (behövs på alla nivåer: posterna är treadress), `print.c`. Bara `-O0`, inga optimeringspass | `-S` assembleras av `clang -c`, länkas mot glibc och körs nativt med samma resultat som clangs; nytt `vcc-ctests.py --target x86_64` (nativ körning, samma cache); arm64/wasm byte-identiska (`vcc-same.py`) |
+| X2 | **Lagren på plats, heltals-`-S`.** `emit/rec/rec.h` och x86:s op-tabell; `emit/walk/` med `lower.h` och `LO()`; x86-64 i måltabellen (`emit/tu.c` väljer vandraren för x86-64); `arch/x64/emit/` för heltal, locals i stackplatser, parametrar, direkta anrop, `if`/loopar/`break`/`continue`/`switch` (kedja), `return`; prolog/epilog med `rbp`; `twoaddr.c` (behövs på alla nivåer: posterna är treadress), `print.c`. Bara `-O0`, inga optimeringspass | `-S` assembleras av `clang -c`, länkas mot glibc och körs nativt med samma resultat som clangs; nytt `bench/vcc-x86.py` (som `vcc-wasm.py`: testhuvudena mot glibc, nativ körning, cache); arm64/wasm byte-identiska (`vcc-same.py`) |
 | X3 | **Hela C i vandraren och sänkningen.** Aggregat och initierare, SysV-klassning (`abi.c`), varargs, hopptabeller, flyttal (SSE, x87), `__int128`, `__float128` via `FN_*`, bit-fält, VLA/`alloca`, atomics, TLS, PIC/PIE, inbyggda, inlining och `need_fold`, kända värden, spill; `VCC_WALKLOG` | gcc-torture och tcc-tests2 vid `-O0`: samma godkända som clang; `vcc-abi.py --target x86_64` (clang/vcc × anropare/anropad, gcc som tredje part); `vcc-pic.py`, `vcc-fpcheck.py` för x86-64; `bench/vcc-walkcmp.py` mot arm64 grönt |
 | X4 | **Gemensamma pass och `-O1`.** `emit/rec/` (liveness, kopiepropagering, döda resultat, stackplatser, hopp) över op-tabellen; `B_LREG` i `rbx r12–r15`; `peep.c`; `twoaddr.c` byter kommutativa operander | Sviterna ovan vid `-O1` och `-O2`; kodstorlek per funktion mot `clang -O1` på kärn-TU:er (mål: inom arm64:s kvot mot clang); tid per funktion mot arm64 med `vbench.py` |
 | X5 | **Objektfiler.** Kodare för det generatorn skriver, fixups, ELF-maskin 62, hoppavslappning; `-c` direkt från posterna utan text; CFI och DWARF med x86-registernummer | `vas-obj.py`: vcc:s `-c` byte-identiskt med `clang -c` av samma `.s`; `vas-enc.py` mot llvm-mc; X4:s sviter med `-c`; `vcc-cfi.py` och `vcc-dwarf.py` för x86-64 |
 | X6 | **Inline asm och `vas` för x86-64.** AT&T-parser, begränsningar och modifierare, flaggutdata, `asm goto`; hela ISA:n inklusive SSE/AVX/AVX-512 (kärnans krypto-`.S`) | `vas-corpus.py` för x86-64 (`clang -S` av testfilerna, `clang -c` mot `vas`); kärnans `.S` byte-identiska med clangs objekt |
-| X7 | **vlink för x86-64.** Relokeringar, GOT/PLT, TLS-avslappning (GD/IE→LE), GOTPCRELX-avslappning | `VCC_LDCMP=1 vcc-ctests.py --target x86_64`: laddad bild byte-identisk med lld:s; `vlink-opts.py` |
+| X7 | **vlink för x86-64.** Relokeringar, GOT/PLT, TLS-avslappning (GD/IE→LE), GOTPCRELX-avslappning | `bench/vcc-x86.py` med vlink: laddad bild byte-identisk med lld:s; `vlink-opts.py` |
 | X8 | **Kärnan.** `-mcmodel=kernel`, `-mno-red-zone`, `-mno-sse -mno-mmx -mno-80387`, `-mstack-alignment=8`, `-mfentry -mrecord-mcount`, retpoline/rethunk (`-mretpoline-external-thunk`, `-mfunction-return=thunk-extern`, `-mindirect-branch-cs-prefix`), IBT (`-fcf-protection=branch`, `endbr64`), `-mharden-sls=all`, `-fpatchable-function-entry`, stackskydd via `%gs` (`-mstack-protector-guard-*`) | objtool utan varningar på alla objekt; `vcc-diff.py`/`vcc-sema.py` på x86-64-trädet; bootar Debian i `qemu-system-x86_64 -enable-kvm`; vccd-bygge med tider |
 | X9 | **Intrinsics.** `__builtin_ia32_*` med vektortyper för clangs `immintrin.h` (SSE4.2-CRC, `popcnt`, AVX2) | `vcc-builtins.py` för x86-64; PostgreSQL byggt och testat på x86-64 Linux (`bench/pg/`) |
 
@@ -329,6 +329,24 @@ kärnan och kan vänta.
   stänger TODO-punkten om Darwin-grenarna.
 
 ## Status
+
+### X2 (2026-11-10): påbörjat, i gren `claude/x86-x2-walker`
+- Lagren finns i minsta form: `emit/rec/rec.h` (posthuvudet, `opdesc`),
+  `emit/walk/` (vandraren: uttryck med vikning av konstanter, lvärden, villkor
+  som hopp, satser, switch som jämförelsekedja, anropssekvensen; `walk.h` med
+  `LO()`-gränssnittet), `arch/x64/emit/` (`lower.c`: fysiska register, `div` och
+  skift sparar sina fasta register, anrop sparar levande temporärer;
+  `print.c`: `twoaddr` och AT&T-skrivaren). `emit/tu.c` väljer vandraren för
+  x86-64, `data.c` skriver `.long`/`.quad` och x87-byte. `-c` för x86-64 är ett fel
+  tills X5.
+- `bench/vcc-x86.py`: 777/1768 godkända (gcc 696, tcc 62, vcc 19), inga
+  körfel; resten avvisas med "not supported yet (PLAN-x86.md X3)" (inbyggda,
+  aggregat, flyttal, bit-fält, varargs ...) och 5 `link_error`-tester som kräver
+  clangs -O2-vikning. Under ASan/UBSan 774: de tre skillnaderna är fel i
+  front end som finns för arm64 också (`cc/record.c:136`, `cc/expr.c:36`,
+  `cc/func.c:7`).
+- Kvar i X2: op-tabellen fylld för x86 och `VCC_WALKLOG`/`vcc-walkcmp.py`
+  (behövs först när passen och inliningen kommer, X3/X4).
 
 ### X1 (2026-11-10): front end klar, x86-data och vcc-ldconst väntar på kodgeneratorn
 - `PP_LINUX_X86_64`: `--target=x86_64-*`, och standard utan `--target` på en
