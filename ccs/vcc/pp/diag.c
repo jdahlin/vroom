@@ -608,8 +608,11 @@ static void vdiagx_(pp *p, const pp_dinfo *d, const char *fmt, va_list ap)
 	if (p->color)
 		vbuf_s(&b, DC_RESET);
 	vbuf_s(&b, "\n");
-	if (has && !p->o->diag_nocaret && d->loc - e->base < e->f->size)
+	/* clang (DiagnosticRenderer): no snippet again for the same location without ranges or fix-its */
+	if (has && !p->o->diag_nocaret && d->loc - e->base < e->f->size &&
+	    !(d->loc + 1 == p->diag_last && !d->nr && !d->nfx && (!p->diag_lastnote || note)))
 		snippet(p, &b, e, d);
+	p->diag_last = d->loc + 1, p->diag_lastnote = note;
 	(void)!write(fd, b.p, b.n);
 	free(b.p);
 	if (what[0] == 'e' || what[0] == 'f')

@@ -428,6 +428,20 @@ VPRIV uint32_t char_lit(cc *c)
 				x = cp;
 			}
 			v = x & 0x7fffffffu;
+			nch++;
+		}
+	}
+	if (unlikely(nch > 1)) {
+		if (kind == T_CHAR) {
+			/* clang: 4 characters are -Wfour-char-constants (off); more is too long as well */
+			if (nch != 4)
+				cc_warnx(c, "multichar", true, NULL, t->loc, NULL, 0, NULL, 0, "multi-character character constant");
+			if (nch > 4)
+				report(c, "warning", t->loc, NULL, 0, NULL, 0, "character constant too long for its type");
+		} else if (kind == T_WCHAR) {
+			cc_error(c, t->loc, "wide character literals may not contain multiple characters");
+		} else {
+			cc_error(c, t->loc, "Unicode character literals may not contain multiple characters");
 		}
 	}
 	if (kind == T_CHAR) {

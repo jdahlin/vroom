@@ -1044,12 +1044,17 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
   vcc-diag.py), 12 flag combinations identical to clang.
 - [ ] **Missing warnings** (only 7 `-W` flags): `-Wunused-variable`,
   `-Winteger-overflow`, `-Wexcess-initializers`, `-Wreturn-stack-address`,
-  `-Wconstant-conversion`, `-Wmultichar`, `-Winvalid-noreturn`,
+  `-Wconstant-conversion`, `-Winvalid-noreturn`,
   `-Wuninitialized`, `-Wunknown-attributes`, `-Wdeprecated-declarations`,
   `-Wunused-value`; pp `-Wextra-tokens`,
   `-Wexpansion-to-defined`, `-Winvalid-pp-token`, `#pragma GCC warning`.
   *Validate:* one diag test per warning; `vcc-sema.py warn` stays 879/879
-  (no false positives on the kernel).
+  (no false positives on the kernel).  (Done: `-Wmultichar` in C and `#if`, "character constant too long",
+  multi-character wide/Unicode literals as errors: diag `multichar.c`; the
+  diagnostic printer leaves out the snippet for a repeated location as clang.)
+- [ ] **`u8'a'` in C23**: lexed as `u8` and `'a'` (the lexer has no C23
+  mode; only the digit-separator pass is per standard).
+  *Validate:* diag/vcc test with `-std=c23`.
 - [x] **Invalid code accepted**: duplicate enumerator / parameter,
   `&register_var`, `_Alignas(3)`, `typeof` on a bitfield, `*(void *)p` as a
   value (and `-Wvoid-ptr-dereference`), `return v();` of void from an int

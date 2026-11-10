@@ -105,6 +105,15 @@ static ival parse_char(pp *p, const ptok *t)
 		}
 		v = narrow ? (v << 8) | (c & 0xff) : c;
 	}
+	if (cnt > 1 && t->kind == T_CHAR) {
+		pp_span sp;
+		pp_dinfo d = { "warning", t->loc, &sp, 0, NULL, 0, NULL, 0 };
+
+		if (cnt != 4)	/* (4: -Wfour-char-constants, off) */
+			pp_warnx(p, "multichar", true, NULL, &d, "multi-character character constant");
+		if (cnt > 4)
+			pp_diag(p, t->loc, "warning", "character constant too long for its type");
+	}
 	if (narrow && cnt == 1 && t->kind == T_CHAR && !p->o->unsigned_char)
 		v = (uint64_t)(int64_t)(int8_t)v;
 	else if (narrow && cnt > 1)
