@@ -190,6 +190,17 @@ const pp_topev *pp_top_events(const pp *p, uint32_t *n);
 /* tokens delivered so far; tokens pp_skip_top dropped */
 uint64_t pp_ntok(const pp *p);
 uint64_t pp_skipped(const pp *p);
+/* VCC_DRCOV: the header-cache hits of the TU so far, as [first token, end) in delivered positions */
+typedef struct pp_hitreg { uint64_t b, e; uint32_t nfile; const void *he; } pp_hitreg;
+const pp_hitreg *pp_hit_regions(const pp *p, uint32_t *n);
+/* VCC_DRCOV/VCC_DRREC/VCC_DR: the hit whose replay is open (its first token's position, its entry; if base:
+   its location base, __COUNTER__ at its start, location span); false if none */
+bool pp_open_hit(const pp *p, uint64_t *b, const void **he, uint32_t *base, unsigned *ctr, uint32_t *span);
+/* the tokens of hit entry he, with its children's */
+uint64_t pp_hit_ntok(const void *he);
+/* drop the rest of that hit, whose first token was the last one delivered (cc/replay.c); 0 if not so
+   (dry: only whether it would) */
+int pp_skip_hit(pp *p, int dry);
 /*
  * Drop the rest of the replayed region that the last event started, whose
  * first token was the last one delivered: as if it had been delivered and

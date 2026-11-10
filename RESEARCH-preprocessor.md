@@ -4,6 +4,70 @@ Research of 2026-11-07. Sources: three research passes (clang/GCC/tcc/warp code,
 LPC talks) and local measurements on the arm64 kernel build (`work/build-o0` flags, Homebrew
 clang 23). Points the research could only infer, not verify, are marked *(unverified)*.
 
+## 0. Overview: what vccd reuses across TUs (2026-11-09)
+
+**The model.** Every layer follows one rule:
+
+> The first time, do the work and note what it read. The next time, if what it
+> read is the same, reuse the result instead of redoing the work.
+
+- **Exact.** The check covers everything the work read, so the result equals a
+  run without the cache. Objects are byte-identical with and without each layer.
+- **The work only happens when a cache misses.**
+- **Three layers**, each built on the one before (details in the sections named):
+
+| layer | what is reused | keyed on (what it read) | on a hit |
+|---|---|---|---|
+| 1. header cache (§3.3, §6) | one `#include`: its tokens and macro effects | the macros it tested or used, `__COUNTER__`, search path | tokens replayed, not lexed or preprocessed; inline bodies kept unparsed (lazy) unless used |
+| 2. prefix snapshots (§6.7) | the parser state after a TU's leading headers: vcc's automatic PCH | the sequence of header-cache entries | one copy, the whole prefix skipped |
+| 3. declaration replay (§6.9, opt-in `VCC_DR=1`) | one later header hit: the declarations it created | its lookups into older declarations (names, types, tags) | records copied and relocated, not parsed |
+
+Layer 1 saves preprocessing, layer 2 saves parsing the opening headers, and
+layer 3 saves parsing the rest of the headers.
+
+**What each layer saves.** The numbers come from these runs:
+- whole process, `vpp --batch -j 1`, mean of two runs;
+- units are G instructions / G cycles; cycles are noisy, about ±5%;
+- "no caches" is `VPP_NOHC=1 VCC_NODC=1`; each later row adds a layer.
+
+| | PG (1574 TUs) | kernel (840 TUs) |
+|---|---|---|
+| no caches | 49.5 / 14.6 | 157.1 / 44.2 |
+| + header cache | 46.8 / 14.7 | 93.9 / 28.9 |
+| + prefix snapshots (today's default) | 42.1 / 14.0 | 85.6 / 27.1 |
+| + declaration replay | 39.1 / 13.8 | 81.3 / 27.0 |
+
+- **Header cache, kernel: −35% of cycles.** Almost all of it is lazy inline
+  bodies. The kernel's headers hold 249 M tokens of inline functions, and only
+  6.5 M of them are parsed. PG has few inline functions; there the cache saves
+  instructions but no cycles: token replay is memory-bound.
+- **Prefix snapshots: 4–6% of cycles.** They skip 40% of the kernel's
+  front-end tokens (242 of 597 M) and 45% of PG's (46.5 of 103 M).
+- **Declaration replay: 5–7% of instructions on top, but only 0–1.5% of
+  cycles.** It replays 125 M kernel tokens and 18.6 M PG tokens. Parsing, with
+  its high IPC, is traded for copies and cache misses.
+
+**What is still done once per TU.** Largest first:
+1. **Copying shared declarations into each TU's own state.** Both snapshots and
+   replay copy them into each TU's arrays. This is the cycles that remain, and
+   it is why replay saves instructions but not time. The way past it is to share
+   a read-only layer instead of copying, as modules do: a different model from
+   today's.
+2. **Header-cache misses**, which preprocess the header again. Kernel: 14.5 k
+   misses against 41 k hits, mostly guard variants. PG had 48 k misses, mostly
+   from per-target search dirs. §6.10 checks each lookup instead, and PG is
+   down to 7.7 k misses and −14% instructions; the table above predates that.
+3. **Header hits without a replay entry**, which are parsed in full: 27 k
+   (kernel) and 21 k (PG). Reasons: first sight, the gain rule said no, or the
+   budget was spent. Half of the kernel's entries are never hit and take half
+   of its budget.
+4. **Code generation of `static inline` functions**, emitted in every object
+   that uses them (`__refcount_sub_and_test` 143 times). Copies beyond the
+   first are 0.5 of the kernel's 8.3 MB of function code (6%); emit is about 7%
+   of the instructions, so this is under 1% of the total.
+5. **The main files**, parsed once each. That is not duplication, only what is
+   left.
+
 ## 1. The workload (measured here)
 
 | per TU (clang `-E -Xclang -print-stats`) | `fs/ext4/inode.c` | `kernel/sched/fair.c` | `lib/klist.c` |
@@ -484,6 +548,717 @@ load 5–7.
   - The larger step is relocatable per-region declaration replay, which needs parser-side
     read sets (name lookups, tags) and identity remapping. That is an AST reader in all
     but name.
+
+### 6.8 Is per-region declaration replay worth it? Measured on PostgreSQL (2026-11-09)
+- **Setup.** The 1574 C compiles of `work/build-pg-clang` (as `bench/pg/speed.py`), one
+  `vpp --batch -c` process at `-j 1`, cold, load 4–6; 1570 ok (the 4 failures are the
+  SVE popcount file and `norm_test.c`, as before). Each row is two alternating runs that
+  agreed within 1%:
+
+  | | instructions | cycles | `cc_run` |
+  |---|---|---|---|
+  | no caches (`VPP_NOHC=1 VCC_NODC=1`) | 43.7 G | 12.3 G | 40.2 G |
+  | header cache only (`VCC_NODC=1`) | 40.2 G | 12.5 G | 37.3 G |
+  | both (default) | 35.8 G | 11.5 G | 32.4 G |
+  | both, warm (`--warm 1`) | 25.5 G | 7.6 G | 23.5 G |
+  | both, 1 GB declaration cache | 34.8 G | 11.7 G | 31.4 G |
+
+  Emit is 4.3 G and the object write 1.3–1.6 G in every row.
+- **Lazy bodies do not help here.** PostgreSQL's headers have few inline functions:
+  31 k bodies are kept (1.0 M tokens; `VCC_EAGER=1` makes no measurable difference), against 265 M tokens
+  in the kernel. What is left in the headers is declarations.
+- **Headers are most of the front end.**
+  - The parser receives 104.5 M tokens (`--vcc-tokhash` counts). Stubs that keep only the
+    main file's directive lines (plus `-iquote` of its directory) receive 93.3 M, so
+    ~89% come from headers.
+  - Without caches the stubs cost 32.3 G of the full run's 40.2 G in `cc_run`, so
+    headers are ~80% of the front end.
+  - With today's caches that is ~24 G, ~68% of all instructions. The declaration cache
+    skips 27.9 M header tokens (981 restores, 256 MB cap reached), so ~65 M are still
+    parsed.
+  - (The stubs are pessimistic with the header cache on: `-iquote` per source directory
+    splits the search-path signature. The split is therefore taken from the no-cache rows.)
+- **The token header cache does not pay in time on PostgreSQL.** It saves 8% of
+  instructions but costs 2% more cycles: replay is memory-bound. The decl cache gives
+  the gain (−11% instructions, −8% cycles).
+  - Its hit count looks low (46.7 k hits against 47.8 k misses, 38 k of the misses
+    "counter name or a child entry", mostly SDK headers). That count is misleading:
+    every nested miss is counted, but only one hit per replayed subtree. In bytes, 75 MB
+    are replayed against 17 MB recorded (81%).
+- **Profile** (`sample`, `bench/vccd-sample.py`, idle `__ulock_wait` left out):
+  preprocessing pulled by the parser 42%, parse + sema 30%, emit 10%, object write 8%,
+  other preprocessing 7%. That matches the 1570-TU profile in `PLAN-fas2.md`.
+- **Estimate for per-region declaration replay.**
+  - Assume header work is done only on misses (~19% of the header text) and a hit costs
+    ~15% of parsing it. Then 36 G → ~19 G instructions, about −45%.
+  - The ceiling is the rest: main file + emit + write ≈ 14 G, −60%.
+  - A hit would also skip token replay, which removes the header cache's cycle cost.
+  - This is compile CPU. In the kernel build, wall time is set by make (`PLAN-fas2.md`).
+- **Conclusion.** On PostgreSQL, a codebase with ordinary headers, declaration replay per
+  region is the largest remaining lever in the compiler, larger than in the kernel,
+  where lazy bodies already took ~45%.
+
+### 6.9 Design: declaration replay per region (2026-11-09)
+Goal: a header-cache hit at a file-scope declaration boundary adds the region's
+declarations to the parser state without delivering or parsing its tokens. The result
+must equal parsing it: the same arrays in the same order, so that objects stay
+byte-identical with the feature off (`VCC_NODR=1`). The prefix snapshots (§6.7) stay.
+They are a cheaper bulk form for the leading run.
+
+**Unit and key.**
+- A *decl entry* hangs off a header-cache entry (`hent`) and is keyed by
+  (`hent`, `__COUNTER__` at its start, front-end option signature). The `hent` already
+  fixes the tokens, the macro reads and the files.
+- The option signature must cover every parse-affecting option. Derive it from one
+  struct, which also fixes the `TODO.md` item "Header/snapshot cache keys incomplete".
+- It is published once (release/acquire), immutable and never freed, like the
+  header cache, with a memory cap like `VCC_DC_MAX_MB`.
+
+**When a region qualifies** (checked at record time; anything else is parsed as today).
+- It starts and ends at a file-scope declaration boundary:
+  - depth 0, no open struct, enum or initializer;
+  - `ntk == 1`, with the region's first token in `tk[0]`;
+  - the end right before the next declaration (`dc_boundary_slow`'s test, for regions
+    at any depth).
+  - This rules out x-macro includes inside arrays and enums (PG's `kwlist.h`, `*.def`
+    patterns).
+- No diagnostics (`ndiag`, `errors`, pp errors unchanged).
+- No front-end pragma (`pack`, `weak`) consumed, and no `dc_kill`.
+- Every read resolves to builtins or to entities created by regions. A read of a
+  main-file entity makes the region uncacheable for that recording.
+
+**What a region does to the state.** These are the parts the entry must reproduce.
+- *Appends*, 1:1 and in order:
+  - syms, tags, nodes and spans;
+  - lists, ipool and fpool, strs, attrs, asms;
+  - toplevel and tlasm;
+  - lzt/lzf/lzs (lazy bodies, usually `lzfn.hc`: tokens referenced in the `hent`);
+  - heap bytes (fields, string bytes).
+- *Type interning*: `ty_intern` dedups against the whole table, so which types a
+  region appends depends on the types that already exist. The entry therefore stores
+  the region's interning calls, the first call per structural type and in order, as
+  structural types (`ctype` with its base/aux/params as references). Replay
+  re-interns them in that order.
+  - That gives the same `ty` array as parsing, provided the pre-state is the same.
+  - The pre-state is the same, by induction over exact earlier replays.
+  - Records and enums (`ty_new`) always append.
+- *Bindings*: each own sym that was bound at file scope is re-bound in order
+  (`sym_bind`). Its `shadow` comes from the consumer's slot, which the reads validated.
+- *Writes to external entities*:
+  - a redeclaration (`declare`'s `prev`: composite type, `sc`, flags, attrs);
+  - a tag completed here but declared earlier (fields, size, flags);
+  - `typedef_name`, `TF_TRANSPARENT`, `cplx[]`.
+  - Each is stored as the entity's full record after the region, with its index
+    fields as references. Replay overwrites it. The read set guarantees that the
+    pre-state of that entity was the recorded one.
+
+**References.**
+- Every index field in a stored record is either *own* (an offset from the region's
+  start counts: `nsym0`, `ntag0`, `nnode0`, …) or *external*.
+- An external reference names an entity by how the region reached it, which is a read
+  (below), so replay maps it to the consumer's index.
+- Builtins (`cc_init`, fixed per option set) are their own class with fixed indices.
+- This needs a schema of every index field:
+  - `sym` (`ty`, `body`, `attrs`, `next`, `ovl`, `psyms`);
+  - `tag`/`field`, `ctype` (`base`, `aux`, `n` for a VLA node);
+  - `node`: a/b/c by `op`, as `N_*` documents;
+  - `attrs` (`cleanup`, string indices), `casm`, `lzfn`.
+- The same schema serves locations: own locations are relative to the region's
+  location base, as in ccsnap's `LOCS`.
+
+**Reads: when an entry is valid.** The pp side is already validated by the `hent` hit.
+On the parser side:
+- *Name lookups* (`lookup`, `lookup_tag`, the `prev` lookup in `declare`,
+  `typedef_id`) of ids not bound by the region itself.
+  - Record (namespace, id) → the binding's *provenance*, or "unbound".
+  - Hooked in `lookup`/`lookup_tag` behind one `c->rec` test.
+  - Unbound reads matter: a typedef name appearing later changes the parse. They are
+    the parser's analogue of pp's `ru` reads.
+- *Provenance*: each sym and tag carries (`decl entry` that created it, its own index
+  there), or BUILTIN, or MAIN (never valid in a replay read).
+  - It is set on append and on replay.
+  - It lives in a side array (`c->prov`, 8 bytes per sym/tag), so `sym` keeps its size.
+- *Mutable state*: an entity read through a lookup may have been changed after its
+  creation by a later region (redeclaration, tag completion). A per-entity *version*
+  (the last writing decl entry) is part of the read: (provenance, version).
+- *Tags reached without a lookup*: in `typedef struct foo foo_t;`, then elsewhere
+  `struct foo {…};`, then `sizeof(foo_t)`, the third region depends on the second, but
+  only looked up `foo_t`. Completion is monotone (incomplete → complete once, then
+  immutable).
+  - At record time, add (tag provenance, completing entry, or "incomplete") for every
+    external tag reachable from the types of the external syms the region read.
+  - Follow `base` through pointers, arrays and functions, and the fields of complete
+    tags.
+  - Use a visited bitset per region, and stop at tags that were complete before the
+    region started *and* are reachable only through complete tags, since their state
+    cannot differ.
+- Validation of a hit is one `dget` per recorded name plus a provenance compare, and one
+  compare per tag. Expect tens to a few hundred per region, against ~350 instructions
+  per token parsed today.
+
+**Replay** (`dr_apply`, in a new `cc/replay.c`):
+1. Validate the reads, as above. On failure, parse the region as today.
+2. Re-intern the types in order. This builds the region-local → consumer type map.
+3. Bulk-copy the own records into the arrays and the heap, with one relocation pass
+   driven by the schema: own += base, external → map, locations += region base.
+4. Apply the external writes. Re-bind the file-scope syms. Append to toplevel and tlasm.
+5. Bump the versions of written entities to this entry, and set provenance on the new ones.
+
+On the pp side, the hit has already applied the macros, files and counter. Dropping the
+tokens needs `pp_skip_top` generalized to a nested replayed region (`pp_skip_region`).
+The cc side needs the boundary test above at the region's first token: an event from
+pp at a region start, at any depth, as `pp_top_events` gives for the top level.
+
+**Recording**, on a header-cache miss whose region qualifies:
+- At region start, save the counts and set `c->rec` (lookups log reads; `ty_intern`
+  logs calls; writes to external entities mark them in a bitset).
+- At region end, if still qualified, encode the decl entry and publish it on the
+  `hent`.
+- Nested regions record independently. A parent's entry covers its children's effects:
+  its own records include theirs, since they are appends in between, and its read set
+  is the union minus what the children's own records bound, as pp's `hkid` composes.
+- Cost: only on misses, which already pay ~15–20% for pp recording.
+
+**Exactness tests.**
+- `VCC_NODR=1` A/B:
+  - objects byte-identical for all PG and kernel TUs (`vcc-cbatch.py`, `bench/pg`);
+  - `-S` and `--vcc-layout-checks` identical;
+  - vcc-sema run/layout 878/879, ctests, fpcheck, diag;
+  - ASan, and TSan (shared entries).
+- A generator in the style of `vcc-bflayout.py`, with random header DAGs:
+  - forward tags completed in another header;
+  - typedefs that shadow, or appear between two includes;
+  - redeclarations with composite types;
+  - enums whose values use earlier constants;
+  - the same headers in different include orders and guard states.
+  - Each TU compiled cold, and after warm TUs that recorded other orders.
+  - Output compared with `VCC_NODR=1`, and layouts with clang.
+- The "unbound read" and tag-completion cases each get a minimal ctest that fails if
+  the corresponding validation is removed.
+
+**Order of work.**
+0. *Measure coverage first.* Count the header-cache hits (any depth) that start and end
+   at a file-scope boundary, and their tokens, on PG and the kernel. Stub that every
+   qualifying hit is replayed for free, without changing the output, to bound the gain.
+   If the boundary tokens are well under the 65 M parsed header tokens on PG, rethink
+   the unit before building.
+   - *Done (2026-11-09).* `VCC_DRCOV=1` makes pp log every header-cache hit (any depth)
+     as [first token, end) in delivered positions, and cc log every file-scope
+     declaration start (with `ntk == 1`). The two are matched at the end of the TU, and
+     `vpp --batch` prints the sums. This is the necessary condition only: diagnostics,
+     pragmas and main-file reads inside a region are not measured yet (step 1).
+
+     | | delivered | dc-skipped | in hits | hits at boundaries | of which top-level |
+     |---|---|---|---|---|---|
+     | PG, `VCC_NODC=1` | 103.0 M | — | 74.9 M | 73.4 M (27 247 of 27 947) | 56.9 M |
+     | PG, default | 75.1 M | 27.9 M | 47.1 M | 46.0 M (25 708 of 26 383) | 29.5 M |
+     | kernel, `VCC_NODC=1` | 597.3 M | — | 541.4 M | 541.4 M (36 065 of 36 095) | 228.4 M |
+     | kernel, default | 491.8 M | 105.5 M | 435.6 M | 435.6 M | 123.2 M |
+
+     ("Delivered" counts lazy bodies skipped in O(1), ~313 M of the kernel's tokens.)
+   - *Reading.* Almost every hit starts and ends at a boundary: 98% of hit tokens on
+     PG, ~100% in the kernel. Headers are included between declarations, and the few
+     x-macro includes are small.
+     - On PG, beyond the prefix snapshots, 46.0 M of the 75.1 M tokens still delivered
+       (61%) are in such hits.
+     - The rest (~29 M) is the main files (~11 M) and the own text of header-cache
+       misses (~18 M). Those misses are mostly guard variants: step 4, or nothing.
+     - 16.5 M of the 46 M lie in nested hits, inside a top-level region that missed.
+       Step 4's "child inside a parent that missed" is therefore not an extra; nested
+       hits must be replayable from step 2 on, which the boundary test already allows.
+     - This is in line with §6.8's estimate, which assumed 81% coverage of the header
+       text. The unit stands.
+   - The instrumentation stays (a `c->drb` test per file-scope declaration, a
+     `pp_drcov` test per hit; `vbench gate` +0.1% on fe/cc). It measures coverage at
+     each later step.
+1. Record-only mode with stats (reads, types and records per entry, bytes). Nothing is
+   replayed yet.
+   - *Done (2026-11-09), `cc/replay.c`, `VCC_DRREC=1`.*
+     - **Where.** Unlike the plan, entries are recorded on a header-cache *hit*, not
+       on a miss. Hits never nest: children are spliced into the parent's replay, so a
+       hit is one disjoint region with no composition. A region parsed at a hit is
+       recorded once, and later hits of the same (`hent`, counter) replay it. That is
+       ccsnap's second-visit rule, per region.
+     - **How.** A recording opens at a boundary where pp's open hit starts
+       (`pp_open_hit`), and closes where that hit ends at a boundary. During it:
+       - `lookup`/`lookup_tag` log names outside the region, bound or unbound;
+       - `ty_intern` works on a table of the region's own, so the first use of each
+         structural type reaches `dr_intern`, which is exactly the type log;
+       - `ty_ptr`'s cache ignores pointer types older than the region (`ptr_lo`);
+       - `pragma` logs `pack`/`weak`;
+       - writes to older entities are found by comparing a copy of the syms, tags,
+         types and attrs from the start. That is slow, and only for measuring which
+         fields a replay must carry.
+     - **Exactness.** Objects are byte-identical with and without `VCC_DRREC=1`
+       (PG 1570/1570, kernel 839/839). `vbench gate` ok: fe +0.33%, cc +0.40%, mostly
+       the `lz_wm | dr_on` test in `lookup`, which a permanent recorder needs anyway.
+       While a region is recorded no ccsnap snapshot can be taken (its type table is
+       not in the heap), so `VCC_DRREC` runs see few restores. The PG "default" column
+       below is from a run before that change, with the same hooks otherwise.
+
+     | PG | `VCC_NODC=1` | default (beyond ccsnap) |
+     |---|---|---|
+     | regions closed at a boundary | 32 963 (70.2 M tokens) | 31 583 (45.6 M) |
+     | diagnostics / main-file reads | 0 / 0 | 0 / 0 |
+     | `#pragma pack` (none started inside a pack) | 1068 (15.2 M) | 814 (10.1 M) |
+     | pure, no writes and no lazy bodies | 24 759 (16.2 M) | 24 687 (16.2 M) |
+     | pure, writes to older entities | 5011 (14.8 M) | 4880 (13.8 M) |
+     | pure, lazy bodies only | 2125 (24.1 M) | 1202 (5.5 M) |
+     | distinct entries | 4762 | 4676 |
+
+     The kernel (`VCC_NODC=1`): 36 556 regions (541 M tokens) close. Pragma regions
+     are 27 (4.5 M); no writes, no lazy: 1.8 M; writes: 308.6 M; lazy bodies only:
+     226.1 M; 3117 distinct entries.
+   - **Per pure region.**
+     - PG: reads 6.4 bound + 86 unbound, type log 4.5 old + 33 new types, 199 syms,
+       9.6 tags, 94 nodes, ~29 KB (25.6 bytes per token).
+     - Kernel: 17 + 217 reads, 11 + 142 types, 619 syms, 35 tags, 108 lazy bodies,
+       ~96 KB (7.8 bytes per token).
+     - Validating ~100–250 lookups against parsing ~1500–12000 tokens is cheap, as
+       planned. Storing every distinct entry would take ~140 MB (PG) and ~300 MB
+       (kernel), the same order as ccsnap's cap.
+   - **Writes to older entities**, all regions (PG / kernel):
+     - tag completions 4044 / 33 035, each with its type's size and align;
+     - sym flags only 5580 / 4378 (`SF_DEFINED | SF_USED | SF_REF`, and in the kernel
+       `SF_ADDR_TAKEN`, `SF_LAZY`);
+     - a redeclaration's `plb`/`ple` 3323 / 4812, and `psyms` 1599 / 1758;
+     - attrs 222 / 528.
+     - No sym's type changes: the composite is always the same type. No other tag
+       fields change.
+     - So "overwrite the older record with the recorded one" covers them. The read
+       set must include those entities' versions.
+   - **Consequence for the order.** Plain regions are only 16 of the 46 M PG tokens.
+     Writes (tag completion above all) and `#pragma pack` (with the pack state at the
+     start as an input) are needed in the first replay step. Lazy bodies are needed
+     for the kernel. Composition (old step 4) is not needed, since entries are taken
+     at hits.
+2. Replay with provenance and versions (side arrays), validation of the read set
+   including reachable tag completion, external writes as record overwrites, and pack
+   state as an input. A/B against `VCC_NODR=1` on PG and the kernel. Target: ~40 M
+   of PG's 46 M.
+   - *2a done (2026-11-09): exact replay, validated structurally; no provenance yet.
+     Opt-in, `VCC_DR=1`; off by default.*
+     - **Entry** (`cc/replay.c`, recorded at a hit as in step 1, published to a
+       process-wide table keyed by (`hent`, counter, pack depth and top, option
+       signature), up to 8 variants per key). It holds:
+       - the reads: (namespace, id, A's sym or 0);
+       - W, the older records they reach, copied at first use: syms, tags with their
+         fields, types with their params, attrs, strings, the psyms/enum lists;
+       - the type log (`ty_intern`, `ty_new`, `ty_func` in call order; `ty_func`
+         works on a region-own table too);
+       - the own records in A's indices, with heap pointers turned into offsets into
+         a heap blob of their own;
+       - the writes to W as (record, changed fields, post value);
+       - the file-scope binds, the toplevel additions and the last token.
+     - **Schemas.** One field table per record kind (sym, tag, field, ctype, attrs,
+       node by `op`, list elements by referrer) says what each field holds: value,
+       location, sym, tag, type, node, list, pool, string, attrs. One table drives
+       recording W, the publish check, validation and translation.
+       - A publish-time pass checks that every reference maps: own, builtin, or in W.
+       - Unreferenced lists (declarator scratch) are copied as they are.
+     - **Validation** at a hit in B: each read is looked up in B and unified with W
+       (worklist, A→B map, injective for syms/tags/types). All of W must be reached;
+       types that came only from interning are mapped by the type log instead.
+     - **Apply**:
+       1. replay the type log through B's interning;
+       2. append the own records translated (index deltas, the type map, W slots,
+          location base);
+       3. set the final content of the region's records;
+       4. apply the writes field by field;
+       5. `sym_bind` the file-scope syms;
+       6. append toplevel, set `prevloc`;
+       7. `pp_skip_hit` drops the rest of the hit; `pp_skip_top` does it for a
+          top-level one, so the decl cache sees the region end.
+     - **Hidden inputs found.**
+       - *Pack depth.* `lazy_ok` refuses inside any `#pragma pack`, so the key holds
+         the depth, not only the alignment in effect.
+       - *An enclosing header being recorded by pp.* No lazy body comes from the
+         header cache then. Regions are only recorded and replayed where
+         `pp_skip_hit` would be allowed.
+       - *Writes.* Struct completion writes size and align into the older record
+         type, which is supported as a write (not for interned types). The step-1
+         count missed this because it only looked at pure regions.
+     - **Not published.** Diagnostics; `#pragma pack`/`weak` inside the region; lazy
+       bodies, labels, asm, `_Complex` (step 3 and later); an older `S_VAR` with an
+       initializer in W; anything unmapped. A key that failed twice is not recorded
+       again.
+     - **Verification.**
+       - `VCC_DRCHECK=1` with `VCC_DR=1` parses each region that would replay and
+         compares field by field with what the replay would write: 0 mismatches in
+         ~18 000 PG regions (two runs) and 5361 kernel regions.
+       - With `VCC_DRREC`, it also refuses regions that wrote to an older record
+         outside W.
+       - Objects are byte-identical with `VCC_DR=1` (PG 1570/1570, kernel 839/839),
+         and so are the diagnostics.
+       - Clean under ASan+UBSan on both.
+       - The default path: parity 873/873 and 911/912; sema run, batch and layout
+         878/879; ctests, stress and vccd tests green; `vbench gate` ok (fe +0.41%,
+         cc +0.37% since the merge-base, steps 0–2a together).
+     - **Numbers**, `vpp --batch -j 1`, cold process:
+
+       | | PG default | PG `VCC_DR=1` | kernel default | kernel `VCC_DR=1` |
+       |---|---|---|---|---|
+       | instructions (jobs) | 36.5 G | 46.4 G (+27%) | 79.4 G | 97.9 G (+23%) |
+       | regions replayed | | 17 392 (16.4 M tok) | | 5194 (0.9 M) |
+       | recorded / published | | 5814 / 3849 | | 16 887 / 3504 |
+       | entries | | 328 MB | | 185 MB |
+       | biggest refusals | | lazy 3.3 M, pragma 6.4 M | | lazy 256 M tok |
+
+       - Per replayed PG region (~940 tokens), validation takes ~27 µs and apply
+         ~17 µs. Parsing it takes ~100 µs.
+       - A cheaper replay does not show yet: record-only (`VCC_DRREC`, nothing
+         applied) costs 47.6 G, and replaying instead saves 1.2 G of that.
+       - The overhead is recording plus validation:
+         - the deep unify of W runs per try (32 282 tries for 17 392 hits);
+         - `pair`/`pair_w` plus the inlined validation are ~30% of a sampled PG
+           run's busy time;
+         - the kernel's W copies at reads take 1.2 s (big structs reached through
+           pointers).
+   - *2b done (2026-11-09): cheaper validation, apply and publish. Still opt-in.*
+     - **A 2a bug.** `rd`/`wr` handled field sizes 1, 2, 4 and 8 only. So the tag range
+       `align..typedef_name` (12 bytes) and `field.width..bitfield` (3 bytes) read as 0:
+       - a replayed struct completion never wrote `align`, `maxalign` or
+         `typedef_name`;
+       - bit-field widths were never compared;
+       - `VCC_DRCHECK` compared the same zeros, so it could not see it.
+
+       Objects stayed identical because codegen reads the type's `align`, not the
+       tag's. Now every field up to 8 bytes is read, and `schema_check` aborts on a
+       wider one (attrs ranges split). It was also behind ~5000 variants that
+       failed to validate, on tag `align`.
+     - **What validation compared.** On PG, 96% of the syms unified per try were
+       enumerators: 3.3 M of 3.4 M, reached through enum tags such as `NodeTag`.
+       Fields of tags came second (1.4 M). Half the work was in tries that failed.
+     - **Provenance, as designed, did not pay.** Tags got (entry, own index, last
+       writer), with hooks at every tag write (`DR_TAGWRITE`), and snapshots carried
+       it. But the same header text gets a new identity in each snapshot, variant or
+       parse: only 27 k of 226 k tag compares certified, and syms unified barely
+       dropped. Identity of creation is the wrong key when equal content is created
+       many times.
+     - **Content memo instead.** The values of a W tag (the tag, its fields and its
+       enumerators, without references and locations) are interned process-wide at
+       publish (1081 distinct contents, 0.5 MB on PG).
+       - A TU remembers, per tag, the content a successful validation compared it
+         with. The memo is cleared by `DR_TAGWRITE` (struct and enum bodies,
+         pre-body packed/aligned, `transparent_union`, `typedef_name`), by replayed
+         writes and by a restore.
+       - A tag that matches its memo has only its references paired. Builtin types
+         and zero references are part of the content, so only the others are
+         paired. Its enumerators are mapped by stored W positions, uncompared.
+       - Equality is always established by a full comparison at least once per TU.
+       - The recording TU sets the memo too, so a tag is hashed once per TU.
+       - `DR_TAGWRITE` also refuses a region that writes an older tag outside W, a
+         write the entry would miss (before, only `VCC_DRCHECK` saw that).
+     - **Cheaper per try.**
+       - W lookups are a hash per kind, not a sorted array with binary search (this
+         also drops a `qsort` per publish).
+       - A first pass over the reads checks binding, kind and flags before any deep
+         compare.
+     - **Apply.** Own records stay in A's indices in the entry. A relocation list
+       built at publish (`rel_build`, which also replaces the publish-time mapping
+       check) names the fields that change: own delta, W slot, own or W type,
+       shadow to 0. Locations are one fixed pass per array, so apply is `memcpy`
+       plus those.
+     - **Recording less.**
+       - A key that already has 8 variants is not recorded (each such recording was
+         thrown away).
+       - A region refused for its own tokens (pragma, lazy body, asm, label,
+         `_Complex`) is not recorded a second time.
+     - **Verification.**
+       - `VCC_DRCHECK`: 0 mismatches (PG 18 324 regions, kernel 5508).
+       - Objects identical with `VCC_DR=1`: PG 1570/1570, kernel 840/840.
+       - ASan+UBSan clean (400 PG and 300 kernel TUs with `VCC_DRCHECK`).
+       - Default path: parity 873/873 and 911/912; sema run, batch and layout
+         878/879; ctests, stress and vccd tests green; the file-by-file build
+         compiles; `vbench gate` ok (fe +0.36%, cc +0.33% since the merge-base).
+     - **Numbers**, PG `vpp --batch -j 1`. Main's `f0ffb6a` (designated-initializer
+       overrides) made 25 TUs with big initializer tables far slower in `il_run`
+       (`gram.c` 0.5 → 247 G instructions), so they are left out: 1549 TUs, default
+       39.2 G.
+
+       | | 2a (bug fixed) | 2b |
+       |---|---|---|
+       | instructions, `VCC_DR=1` | 47.5 G | 41.7 G |
+       | validate / apply / publish / W, ms | 440 / 290 / 300 / 125 | 167 / 85 / 243 / 103 |
+       | regions replayed | 17 394 (17.4 M tok) | 17 394 (17.4 M tok) |
+       | syms unified in validation | 3.4 M | 0.5 M |
+
+       Replay is still 6% above parsing everything. What is left is mostly
+       recording: the W copies at reads and publishing (~80 KB per entry, 338 MB on
+       PG), about 23% of the front end's samples with the replay itself.
+     - **Next.** Step 3 (lazy bodies) for the kernel's 256 M refused tokens. Cheaper
+       recording (W reached lazily, entries smaller) before turning it on by
+       default.
+   - *2c done (2026-11-09): replay pays on PG (−2.9% of `cc_run`). Still opt-in.*
+     - **Measured per phase** with thread instruction counters around each phase
+       (debug code, not kept). Process totals moved ±1% between runs on the loaded
+       machine, so from here on the metric is `cc_run` instructions from `vpp --batch`'s
+       `perf:` line (the job threads only).
+       - Recording a region cost ~230 k instructions in hooks and W copies
+         (~33% on top of parsing it).
+       - At publish, `rel_build` took 1.24 G for 27 M `rel_one` calls: one per
+         field, values included.
+       - Validation made 19.6 M `pair` calls, ~16 per W record, mostly on values.
+       - 1867 of the 3509 published entries were never used: 206 of 328 MB.
+     - **Changes.**
+       - *Record at the second sight.* The never table also counts sights per key,
+         and a key is recorded at its `DR_SEEN`-th sight (2). Recording at the third
+         gave the same `cc_run` with 174 MB instead of 224.
+       - *Stop a doomed recording at once.* When a lazy body, pragma, label, asm or
+         weak pragma appears (checked at each read), the recording stops there
+         instead of copying W until the region's end. On the kernel, 70.6 M of
+         recorded tokens became 0.9 M.
+       - *Value masks.* Per schema variant (sym: tag or not; ctype: 32 by kind and
+         flags), a mask covers the bytes of the `K_IMM` fields. Validation compares
+         a sym, field or type's values with masked word compares and pairs only the
+         references; 0/0 references are skipped. Tag contents are keyed the same
+         way (masked words plus normalized references).
+       - *Specialized publish.* `SYM_REFS`/`FIELD_REFS` list the reference fields,
+         and `schema_check` aborts if they drift from `sym_fd`/`field_fd`.
+         `rel_build` visits only those fields (nodes: ty, loc and the three
+         operands) with constant schemas.
+       - *Delta relocations as offset lists.* Own deltas of 4 bytes are stored per
+         array and op as offsets (4 bytes instead of 12), and apply skips an op
+         whose delta is 0 (all deltas are 0 in a third of PG's replays).
+       - *Tries ordered by hits.* A key's variants are tried by successful
+         validations, most first (27 704 → 23 152 tries before the second-sight
+         change).
+       - The stamp tables are sized once per try, not at every pair.
+         `dr_close` is called only while a recording is open (`dr_on`).
+     - **Numbers**, `vpp --batch -j 1`, `cc_run` instructions:
+
+       | | default | 2b `VCC_DR=1` | 2c `VCC_DR=1` |
+       |---|---|---|---|
+       | PG (1549 TUs) | 33.66 G | 36.37 G (+8.1%) | 32.68 G (−2.9%) |
+       | PG entries | | 3509, 338 MB | 2247, 224 MB |
+       | PG regions replayed | | 17 394 (17.4 M tok) | 16 033 (15.6 M tok) |
+       | kernel (840 TUs) | 81.84 G | 99.10 G (+21%) | 84.62 G (+3.4%) |
+       | kernel entries | | 3668, 214 MB | 1065, 49 MB |
+
+       - PG ms, validate / apply / publish / W: 233 / 122 / 349 / 138 in 2b, and
+         ~100 / 75 / 140 / 80 in 2c.
+       - On the kernel, replay still loses: most of its regions hold lazy bodies
+         (only 0.6 M tokens replay). With nothing recorded at all, replay mode
+         costs ~1% for the bookkeeping at each top-level declaration.
+     - **Verification.**
+       - `VCC_DRCHECK`: 0 mismatches (PG 17 808 regions, kernel 4380; under
+         ASan+UBSan, 400 PG and 300 kernel TUs).
+       - Objects are identical with `VCC_DR=1`: PG 1545/1545 (`pgf.jobs`), kernel
+         840/840.
+       - Default path: the file-by-file build compiles; ctests, stress, sema,
+         parity, vccd tests and `vbench gate` are as in the commit message.
+     - **Next.** Step 3 (lazy bodies) is what the kernel needs. Then decide whether
+       to turn replay on by default for PG-like code.
+3. Lazy bodies through `lzfn.hc` (the kernel's 226 M, PG's 5.5 M).
+   - *Done (2026-11-09), still opt-in. The measurements now use all 1574 PG TUs,
+     since main's `8e5c987` made initializer lists linear again.*
+     - **Lazy bodies.** In a region replayed from the header cache, a lazy body is
+       always `hc`: its tokens stay in the cache entry `z.e`, which is immutable and
+       the same in every TU that replays the region. An entry therefore keeps the
+       region's `lzfn` records, and apply appends them (`lz_tr`):
+       - sym and wm move by the sym delta, psyms by the list delta, and `tk` is B's
+         `nlzt`;
+       - the locations and `z.base` move by the location delta;
+       - their parameter lists are marked `K_SYM`.
+       - A body kept as tokens of its own (`lzt`/`lzs` grew) still refuses the
+         region.
+       - `VCC_DRCHECK` compares the records field by field: 0 mismatches (PG 19 149 regions, kernel 11 491; ASan+UBSan 400 PG + 300 kernel TUs), and objects are identical with `VCC_DR=1` (PG 1570/1570, kernel 840/840).
+     - **Bugs this exposed.**
+       - *Quadratic early check.* The early check (`own_fail` at each read) scanned
+         all of the recording's lazy bodies, which was quadratic in kernel regions
+         with thousands of them. It now checks only the new ones.
+       - *Budget.* With the 512 MB budget spent, every recording still ran to the
+         end and was then dropped (4037 times on the kernel). No recording starts
+         once the budget is spent.
+     - **Worth it?** The replayed kernel tokens are mostly lazy bodies, which
+       parsing skips cheaply anyway. A kernel region's W is large, so many replays
+       cost more than parsing. So publish now estimates both sides:
+       - saving: the tokens outside lazy bodies × `DR_TOKCOST`;
+       - cost: W records × `DR_WCOST`, own records × `DR_OWNCOST`, plus
+         `DR_FIXCOST`;
+       - the region is published only if the saving is at least `VCC_DR_GAIN`/10
+         of the cost; if not, the key is not recorded again.
+       - The constants are fitted by a sweep. Gain 1×, 2×, 4×, 8× and 16× of the
+         first estimate gave kernel 82.79 / 82.37 / 81.45 / 82.05 / 83.10 G and PG
+         33.98 / – / 33.83 / 34.00 / 34.93 G; the best (4×) is now the default.
+       - A bigger budget made it worse: 2 GB gave the kernel 85.5 G.
+     - **Numbers**, `vpp --batch -j 1`, `cc_run` instructions:
+
+       | | default | 2c | 3 |
+       |---|---|---|---|
+       | PG (1574 TUs) | 36.12 G | 34.64 G (−4.1%, before the gain rule) | 33.83 G (−6.3%) |
+       | kernel (840 TUs) | 82.68 G | 84.62 G (+3.4%; default then 81.84) | 81.45 G (−1.5%) |
+
+       On the kernel, 8266 regions replay (105 M tokens, mostly lazy bodies). On
+       PG, 7231 regions replay (19.6 M tokens).
+     - **Next.** Entries are large on the kernel (~190 KB, mostly W), and W's
+       validation is what limits the kernel. Make W cheaper per try, e.g. a TU memo
+       for syms and types like the one for tags, or record W lazily.
+   - *3b (2026-11-09): what costs on the kernel, measured before building a W memo.*
+     - **Validation was no longer the problem.** Per run, the kernel spent
+       validate 170 ms, apply 179 ms, publish 491 ms and W copies 270 ms; PG spent
+       72 / 118 / 126 / 55 ms. A TU memo for syms and types would save part of
+       validation, under 1% of `cc_run`, so it was not built.
+     - **Where the cost was.**
+       - *Late gain check.* The gain rule was applied after building the entry:
+         2032 kernel recordings were recorded, translated and relocated, and
+         then dropped. It now runs before anything is built (`dr_pays`).
+       - *Hopeless recordings ran on.* During a recording, W alone can outweigh
+         the region's whole token count (`pp_hit_ntok`: the hit's tokens with its
+         children's). Such a recording now stops at once (as "no gain").
+       - *"Unmapped" was a bug.* 472 kernel recordings (14.9 M tokens) failed
+         because the parameter list of `f(void)` is an empty list at exactly
+         `l1`, the region's list end, which counted as neither own nor W. Own lists
+         are now `l0 ≤ v ≤ l1`, in `rel_one` and `tr`. DRCHECK found no
+         mismatches with the fix.
+     - **Kernel entries**, 512 MB for 1978 entries:
+       - own syms 175 MB (lazy functions and their parameters);
+       - the type log 52 MB, W tags with fields 44 MB, lazy bodies 40 MB,
+         relocations 38 MB, W types 25 MB.
+
+       A bigger budget no longer pays: 1 or 2 GB gave 79.6–79.9 G, against 79.6 G
+       with 512 MB.
+     - **The gain constants re-fitted** after these changes. Twice the cost
+       estimate gave kernel 78.67 G and PG 33.15 G; the old estimate gave
+       79.56 / 33.17; 4× gave 79.25 / 34.08. The doubled estimate is now the
+       default.
+     - **Numbers**, `vpp --batch -j 1`, `cc_run` instructions:
+
+       | | default | 3 | 3b |
+       |---|---|---|---|
+       | PG (1574 TUs) | 35.90 G | 33.83 G | 33.27 G (−7.3%) |
+       | kernel (840 TUs) | 82.68 G | 81.45 G | 78.86 G (−4.6%) |
+
+       PG run-to-run noise is ~±0.4 G (default measured 35.90 and 36.12 G).
+     - **Verification.**
+       - `VCC_DRCHECK`: 0 mismatches (PG 13 967 regions, kernel 9700; ASan+UBSan
+         on 400 PG and 300 kernel TUs).
+       - Objects are identical with `VCC_DR=1`: PG 1570/1570, kernel 840/840.
+       - The default path: suites and gate green (see the commit).
+     - **Next.** Apply and publish now cost more than validation. Possible steps:
+       - smaller entries: store the type log's final content only for `OP_NEW`,
+         and fold the location passes into the offset lists;
+       - more replay coverage: on PG, 20 833 hits found no entry, most of them
+         keys the gain rule turned down.
+   - *3c (2026-11-09): cheaper publish, by building less of it.*
+     - **Measured per phase** (instructions, temporary counters, kernel / PG).
+       - Publish: relocation lists (`rel_build`) 780 / 183 M, own records
+         305 / 71 M, W tag values 212 / 68 M, the type log 109 / 22 M.
+       - Apply: own records (copy, relocations, location passes) 428 / 303 M,
+         the type log 298 / 94 M, bindings 217 / 93 M.
+     - **Most entries are never used.** Hits per published entry:
+
+       | hits | 0 | 1 | 2–3 | 4–15 | 16+ |
+       |---|---|---|---|---|---|
+       | kernel entries (MB) | 678 (278) | 275 (74) | 240 (77) | 247 (65) | 118 (14) |
+       | PG entries (MB) | 330 (43) | 133 (19) | 112 (14) | 142 (19) | 65 (5) |
+
+       Recording later does not help. At the 3rd or 4th sight instead of the
+       2nd, kernel 79.05 / 79.88 G and PG 33.57 / 33.67 G: the lost hits weigh
+       more than the dead entries.
+     - **Relocation lists at the first valid hit.** They need only the entry
+       (W positions from its `wk` tables), so `rel_ready` builds them once,
+       state in `drent.rst`. Another thread finding them being built parses
+       that hit. An entry whose lists do not map is never applied; none were
+       seen. Their bytes are counted when built, so dead entries leave more
+       budget: the kernel publishes 1618 entries instead of 1558.
+       `VCC_DRCHECK` still builds them at publish, so every recording checks
+       they map.
+     - **Apply was left as it is.** Per kernel replay it copies ~900 syms,
+       ~1060 list elements and ~650 general relocations, at ~28 instructions
+       per element. Splitting the type relocations into their own offset lists,
+       or folding the location passes, would save under 0.1%.
+     - **Gain constants unchanged.** Re-fitted: gain 7 / 10 / 15 / 20 gave kernel
+       78.47 / 78.32 / 78.82 / 78.93 G and PG 33.26 / 33.35 / 33.92 / 34.12 G.
+     - **Numbers**, `cc_run`: kernel 78.61 → 78.32 G (−0.4%). PG is unchanged:
+       on the same machine state, 3b measured 33.34 / 33.42 G and 3c measured
+       33.40–33.47 G. Against the default, kernel −5.3% and PG −7%.
+     - **Next.** Coverage, not cost per replay:
+       - the dead entries take half the kernel budget, and the budget ran out
+         5700 times;
+       - evicting entries without hits, or smaller own syms (175 MB), would let
+         the useful ones in.
+   - *Time, not only instructions (2026-11-09, at 3c).*
+     - **Setup.** Whole process, `vpp --batch -j 1`, mean of two alternating
+       runs, load 6–10. Units are G instructions / G cycles; cycles are noisy,
+       about ±5%.
+
+       | | PG (1574 TUs) | kernel (840 TUs) |
+       |---|---|---|
+       | no caches (`VCC_NODC=1`) | 46.8 / 14.7 | 93.9 / 28.9 |
+       | prefix snapshots only (default) | 42.1 / 14.0 | 85.6 / 27.1 |
+       | replay only (`VCC_NODC=1 VCC_DR=1`) | 40.5 / ~14.4 | 83.9 / ~27.2 |
+       | both (`VCC_DR=1`) | 39.1 / 13.8 | 81.3 / 27.0 |
+
+     - **Instructions.** Replay alone saves more than the snapshots alone (§6.7,
+       vcc's automatic PCH), and the two stack. On top of the snapshots, replay
+       saves 7% (PG) and 5% (kernel).
+     - **Cycles.** On top of the snapshots, replay saves only ~1.4% (PG) and
+       ~0.2% (kernel), within the noise. Wall time at `-j 6` is noisy too: kernel
+       2.26 → 1.97 s, PG no gain. The snapshots alone save 5–6% of cycles.
+     - **Why.** Replay is memory-bound, as the token header cache was (§6.8). It
+       replaces parsing, which has a high IPC, with copies, relocations and W
+       validation over ~500 MB of entries.
+     - **Consequences.**
+       - Steps 2–3c were judged by `cc_run` instructions, and the gain constants
+         were fitted to instructions. From here on replay is judged by cycles
+         (alternating runs; `-j 6` wall time as a check), and a change pays only
+         if it saves cycles.
+       - The gain rule needs re-fitting against cycles.
+       - Memory traffic is the cost. So next: evict entries without hits and
+         shrink entries (own syms, W). Cheaper instructions per replay come
+         after that.
+       - `VCC_DR` stays opt-in until it saves time.
+4. Fold ccsnap into this if per-region replay of the prefix is as cheap as a snapshot
+   restore; otherwise keep both, and let a recording coexist with snapshots (the
+   region's type table in the heap, or no snapshot inside a recording).
+
+**Open questions.**
+- Whether re-interning in call order really reproduces `ty` exactly. Step 1 settles
+  the method: the region's own table makes the log exactly "first call per structural
+  type, in order", including types no record references. Whether replaying that log
+  gives the same `ty` array is checked in step 2 (A/B objects, plus a debug compare of
+  `ty` after replay against a parse). *Settled in 2a: it does (`VCC_DRCHECK`). The
+  count of new types may differ from A's, since B can already have some; the log
+  maps each one.*
+- Where region boundaries fall inside `extern "C"`-like wrappers. In C: SDK headers'
+  `__BEGIN_DECLS` is empty, so this is probably not a problem.
+- Size per entry: own records plus the type log. ccsnap's 3.5 MB per snapshot was for
+  the whole state; one region should be KBs to tens of KBs.
+
+### 6.10 Exact search-dir check instead of the dir-prefix signature (2026-11-09)
+
+- **Problem.** A variant stored the hash (`psig`) of the first `ndirs` search
+  dirs that its lookups depended on. A TU with other dirs there was rejected,
+  even if every lookup would find the same file. PostgreSQL puts a per-target
+  `-Isrc/<target>.p` first, so nearly every lookup depends on it:
+  - 1.81 M of 1.96 M variant tries were rejected on dirs;
+  - 48 k misses, and 10 238 entries not stored (`HC_MAXVAR` full of per-target
+    variants).
+- **Change.** A recording now keeps each `#include`/`__has_include` lookup it
+  made (`hlook`: name, `<>`/`""`, `_next`, the includer's dir and dir index, and
+  the result: file, dir index, system flag). The signature still decides first:
+  if the dirs match, nothing changes. If they differ, `hc_looks_ok` redoes each
+  lookup against this TU's search path and accepts the variant only if every
+  answer is the same.
+  - Still exact: the answer to every lookup is part of what the entry read.
+  - Tested in `bench/vcc-cachekey.py` (`search-dir-*`: shadowing, `__has_include`,
+    same answers, `#include_next`). A mutant that accepts every variant fails
+    three of the rows.
+- **Result.** `vpp --batch -j 1`, G instructions:
+
+  | | PG default | PG `VCC_DR=1` | kernel default | kernel `VCC_DR=1` |
+  |---|---|---|---|---|
+  | before | 42.4 | 36.7 | 86.2 | 81.9 |
+  | after | 36.6 | 30.9 | 86.1 | 81.5 |
+
+  - PG misses fall from 48 k to 7.7 k, and entries not stored from 10 238 to 185.
+  - PG saves 14% of instructions by default and 16% with replay. The kernel has
+    one search path, so it is unchanged.
+  - Cycles were measured at load 60–78, so they are only indicative. PG with
+    `VCC_DR=1` went from 16.2 to 12.4 G cycles, a larger gain than in
+    instructions, because a hit replays no tokens.
+  - Objects are identical before and after: PG 1570/1570, kernel 840/840.
 
 ## Sources
 - clang: TokenLexer.cpp, PPMacroExpansion.cpp, Preprocessor.cpp, MacroArgs.cpp,

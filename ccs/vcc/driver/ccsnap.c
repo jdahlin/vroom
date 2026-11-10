@@ -357,6 +357,8 @@ static void snap_restore(cc *c, const dcsnap *s, uint32_t base)
 	c->heap = keep.heap, c->hend = keep.hend, c->ptrc = keep.ptrc;
 	c->hp = c->heap + s->a[A_HEAP].n;
 	c->dc = keep.dc;
+	c->drb = keep.drb, c->ndrb = keep.ndrb, c->cdrb = keep.cdrb;	/* (VCC_DRCOV: this TU's) */
+	c->dr = keep.dr, c->dr_on = keep.dr_on;
 	c->dops = keep.dops, c->ndops = keep.ndops;	/* (scratch in this TU's heap) */
 	code_cc(&k, c, false);
 	c->prevloc = dec_loc(&k, s->c.prevloc);
@@ -364,6 +366,7 @@ static void snap_restore(cc *c, const dcsnap *s, uint32_t base)
 	LOCS(img, c, DEC);	/* (first: the tags' f is still coded) */
 #undef DEC
 	code_ptrs(&k, img, c, false);
+	dr_restored(c);
 }
 
 /* ---------------- the trie ---------------- */
@@ -510,7 +513,7 @@ void dc_boundary_slow(cc *c)
 			d->pos = E->pos;
 			d->node = child(d->node, E->e, d->open.ctr, true);
 			atomic_fetch_add_explicit(&d->node->visits, 1, memory_order_relaxed);
-			if (!d->stale && atomic_load_explicit(&d->node->visits, memory_order_relaxed) >= 2 &&
+			if (!d->stale && !c->dr_on && atomic_load_explicit(&d->node->visits, memory_order_relaxed) >= 2 &&
 			    !atomic_load_explicit(&d->node->snap, memory_order_acquire) && !c->errors && !c->ndiag &&
 			    !pp_errors(c->p) && atomic_load_explicit(&dc_mem, memory_order_relaxed) <
 			    atomic_load_explicit(&dc_max, memory_order_relaxed)) {

@@ -135,6 +135,23 @@ typedef struct fscratch {
 
 /* tu.c */
 VPRIV void *halloc(cc *c, size_t n);
+VPRIV void drcov_boundary(cc *c);
+VPRIV void dr_read(cc *c, int ns, uint32_t id, uint32_t s);
+VPRIV uint32_t dr_intern(cc *c, const ctype *t);
+VPRIV void dr_pragma(cc *c, int kind);
+VPRIV bool dr_boundary(cc *c);
+VPRIV void dr_close(cc *c);
+VPRIV qty dr_func(cc *c, qty ret, const qty *par, uint32_t n, int flags);
+VPRIV void dr_new(cc *c, uint32_t idx);
+VPRIV void dr_tagwrite(cc *c, uint32_t ti);
+/* a write to tag ti (or its record type) after its creation: replay.c's provenance must see it */
+#define DR_TAGWRITE(c, ti)                       \
+	do {                                     \
+		if (unlikely((c)->dr != NULL))   \
+			dr_tagwrite((c), (ti));  \
+	} while (0)
+VPRIV void dr_begin(cc *c);
+VPRIV void dr_end(cc *c);
 /* diag.c */
 VPRIV void error_limit(cc *c);
 VPRIV void diag(cc *c, uint32_t loc, const char *what, const char *fmt, va_list ap);
@@ -174,6 +191,7 @@ VPRIV bool is_ilagg(cc *c, qty t);
 VPRIV qty canon(cc *c, qty t);
 VPRIV bool is_signed(cc *c, qty t);
 VPRIV uint32_t ty_hash(const ctype *t);
+VPRIV uint32_t fn_hash(qty ret, const qty *par, uint32_t n, int flags);
 VPRIV uint32_t ty_intern(cc *c, const ctype *t);
 VPRIV uint32_t ty_new(cc *c, int kind);
 VPRIV qty ty_ptr(cc *c, qty base);
@@ -392,6 +410,7 @@ VPRIV uint32_t statement(cc *c);
 /* lazy.c */
 VPRIV bool lazy_ok(cc *c, uint32_t s, const declr *d);
 VPRIV void lazy_capture(cc *c, uint32_t s, const declr *d);
+VPRIV void lazy_replayed(const lzfn *L, uint32_t n);
 VPRIV void lazy_closure(cc *c);
 /* func.c */
 VPRIV void function_def(cc *c, uint32_t s, const declr *d);

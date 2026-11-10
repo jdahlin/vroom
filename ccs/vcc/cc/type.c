@@ -64,7 +64,11 @@ VPRIV uint32_t ty_intern(cc *c, const ctype *t)
 		uint32_t e = c->tyhash[i];
 
 		if (!e) {
-			uint32_t idx = c->nty++;
+			uint32_t idx;
+
+			if (unlikely(c->dr_on))
+				return dr_intern(c, t);	/* (a region's own table: first use of t in it) */
+			idx = c->nty++;
 
 			c->ty[idx] = *t;
 			if (!(t->flags & TF_ALIGNED))
@@ -88,8 +92,9 @@ VPRIV uint32_t ty_intern(cc *c, const ctype *t)
 			}
 			return idx;
 		}
-		if (ty_eq(&c->ty[e], t))
+		if (ty_eq(&c->ty[e], t)) {
 			return e;
+		}
 	}
 }
 
@@ -100,6 +105,8 @@ VPRIV uint32_t ty_new(cc *c, int kind)
 	memset(&c->ty[idx], 0, sizeof(ctype));
 	c->ty[idx].kind = (uint8_t)kind;
 	c->ty[idx].canon = idx;
+	if (unlikely(c->dr_on))
+		dr_new(c, idx);	/* (cc/replay.c: the type log) */
 	return idx;
 }
 
@@ -108,7 +115,7 @@ VPRIV qty ty_ptr(cc *c, qty base)
 	uint32_t i = c->ptrc[base];
 
 	/* the cache may be stale (a restored snapshot): the entry must still be the pointer */
-	if (likely(i && i < c->nty)) {
+	if (likely(i >= c->ptr_lo && i < c->nty)) {	/* (ptr_lo: 1, or a recorded region's first type) */
 		const ctype *p = &c->ty[i];
 
 		if (p->kind == TY_PTR && !p->flags && p->base == base && p->align == CC_PTRSIZE(c))
@@ -150,7 +157,7 @@ VPRIV qty ty_vla(cc *c, qty elem, uint32_t sizenode)
 	return QT(ty_intern(c, &t), 0);
 }
 
-static uint32_t fn_hash(qty ret, const qty *par, uint32_t n, int flags)
+VPRIV uint32_t fn_hash(qty ret, const qty *par, uint32_t n, int flags)
 {
 	uint32_t h = (ret * 0x9E3779B1u) ^ (n * 0x85EBCA77u) ^ (uint32_t)flags;
 
@@ -185,7 +192,11 @@ VPRIV qty ty_func(cc *c, qty ret, const qty *par, uint32_t n, int flags)
 		uint32_t e = c->fnhash[i];
 
 		if (!e) {
-			uint32_t idx = ty_new(c, TY_FUNC);
+			uint32_t idx;
+
+			if (unlikely(c->dr_on))
+				return dr_func(c, ret, par, n, flags);	/* (a region's own table: first use) */
+			idx = ty_new(c, TY_FUNC);
 			ctype *t = &c->ty[idx];
 
 			t->flags = (uint8_t)flags, t->base = ret, t->n = n, t->size = 1, t->align = 4;

@@ -172,6 +172,8 @@ VPRIV __attribute__((noinline)) void raw(pp *p, ptok *t)
 				p->pend |= c->he->pend_out;
 			if (c->top == 2)
 				top_event(p, c->he, 0, 0, 1, 1);
+			if (unlikely(pp_drcov))
+				drcov_end(p);
 			p->depth--;
 			continue;
 		}

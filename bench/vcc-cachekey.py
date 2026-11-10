@@ -7,7 +7,8 @@ filled under other options (TODO.md tier 1, "Header/snapshot cache keys").
 For each row (header, main file, flags A, flags B): one `vpp --batch -j 1`
 process compiles the TU with A, then with B (the header cache, declaration
 cache and token cache are shared, as in vccd).  B's object and diagnostics
-must equal a fresh `vpp` run with B.
+must equal a fresh `vpp` run with B.  The header is h.h, or a dict of files
+by path (directories made as needed).
 """
 import os, subprocess, sys, tempfile
 import importlib.util
@@ -16,6 +17,9 @@ vd = importlib.util.module_from_spec(spec); spec.loader.exec_module(vd)
 
 # (-W/-Werror in the header cache key, pp/hcache.c sig_of, is not testable here: --batch prints no diagnostics)
 T = ['--target=aarch64-linux-gnu', '-O2', '-nostdinc']
+SDIRS = {'inc/a.h': '#ifndef A_H\n#define A_H\n#include <x.h>\n#if __has_include(<y.h>)\n#define Y 100\n#else\n#define Y 0\n#endif\n#endif\n',
+         'inc/x.h': '#define X 1\n', 'p1/.keep': '', 'p2/x.h': '#define X 22222\n', 'p3/y.h': '\n', 'p4/.keep': '',
+         'inc/n.h': '#include_next <n.h>\n', 'nx/n.h': '#include <x.h>\n#define N (X * 3)\n', 'p2/n.h': '#include_next <n.h>\n'}
 ROWS = [
     # pp: -W changes what a header's preprocessing reports
     # front end: options that change what declarations mean
@@ -31,6 +35,12 @@ ROWS = [
      '#include "h.h"\nint f(int x) { return g(x); }\n', [], ['-finstrument-functions']),
     ('unsigned-char', 'static char c = -1;\nstatic inline int g(void) { return c; }\n',
      '#include "h.h"\nint f(void) { return g(); }\n', [], ['-funsigned-char']),
+    # pp: a header reached through other first directories (PostgreSQL's per-target -I): its entry
+    # is reused only where its own lookups find the same files (hcache.c dirs_differ, include.c hc_looks_ok)
+    ('search-dir-shadow', SDIRS, '#include <a.h>\nint v = X + Y;\n', ['-Ip1', '-Iinc'], ['-Ip2', '-Iinc']),
+    ('search-dir-has-include', SDIRS, '#include <a.h>\nint v = X + Y;\n', ['-Ip1', '-Iinc'], ['-Ip3', '-Iinc']),
+    ('search-dir-same-answers', SDIRS, '#include <a.h>\nint v = X + Y;\n', ['-Ip1', '-Iinc'], ['-Ip4', '-Iinc']),
+    ('search-dir-next', SDIRS, '#include <n.h>\nint v = N;\n', ['-Ip1', '-Iinc', '-Inx'], ['-Ip2', '-Iinc', '-Inx']),
 ]
 
 def run(cmd, cwd):
@@ -42,7 +52,10 @@ def main():
     bad = 0
     for name, h, m, a, b in ROWS:
         with tempfile.TemporaryDirectory() as d:
-            open(f'{d}/h.h', 'w').write(h); open(f'{d}/m.c', 'w').write(m)
+            for path, text in (h if isinstance(h, dict) else {'h.h': h}).items():
+                os.makedirs(os.path.dirname(f'{d}/{path}'), exist_ok=True)
+                open(f'{d}/{path}', 'w').write(text)
+            open(f'{d}/m.c', 'w').write(m)
             fresh_rc, fresh_err = run([vd.VPP] + T + b + ['-c', 'm.c', '-o', 'fresh.o'], d)
             jobs = f'{d}/jobs'
             with open(jobs, 'w') as f:

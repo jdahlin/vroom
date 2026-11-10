@@ -27,6 +27,7 @@ __attribute__((noinline)) VPRIV void struct_body(cc *c, uint32_t ti)
 	tag *r;
 	attrs post = { 0 };
 
+	DR_TAGWRITE(c, ti);
 	c->tags[ti].flags |= RF_BEING_DEFINED;
 	c->in_struct++;
 	expect(c, T_LBRACE, "'{'");
@@ -161,6 +162,7 @@ VPRIV void enum_body(cc *c, uint32_t ti, attrs *after)
 	vec cs;
 	qty fixed = 0;
 
+	DR_TAGWRITE(c, ti);
 	vinit(&cs);
 	if (accept(c, T_COLON)) {
 		fixed = type_name(c);
