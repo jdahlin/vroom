@@ -606,8 +606,13 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
   `-Wunknown-attributes` for GNU syntax from clang's attribute names per
   target (`cc/gen-attrnames.sh` -> `attrnames.inc`) with its typo
   correction (SimpleTypoCorrection), 625 generated typos identical to clang
-  on all three targets, diag `unknown_attribute.c`.  Left: `[[scope::x]]`
-  and unscoped `[[x]]` (clang warns with `gnu::` corrections).
+  on all three targets, diag `unknown_attribute.c`; `[[x]]`, `[[gnu::x]]`,
+  `[[clang::x]]` (`_Clang`, `__gnu__`) and other vendors from
+  `__has_c_attribute` (`unknown_std_attribute.c`, the 625 again per scope).
+- [ ] **`[[__clang__::x]]`**: `__clang__` expands to `1` and vcc fails
+  ("expected attribute name"); clang warns (`-Wignored-attributes`, did you
+  mean '_Clang', note at the built-in macro) and takes it as `clang::`.
+  *Validate:* diag test.
 - [ ] **Attributes without effect**: `ifunc`, `alloc_size`,
   `format`, `nonnull`, `deprecated`, `warn_unused_result`, `returns_twice`,
   `target`.

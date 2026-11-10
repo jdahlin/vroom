@@ -1,0 +1,16 @@
+[[gnu::nope]] int a;
+[[clang::frob]] int b;
+[[foo::bar]] int c;
+[[nodiscrd]] int f(void);
+[[gnu::packd]] int d;
+[[deprecated]] int e;
+[[gnu::aligned(8)]] int g;
+[[clang::noinlin]] void h(void);
+[[__gnu__::nope]] int i;
+[[gnu::oon]] int sa;
+[[__gnu__::__oon__]] int sb;
+[[gnu::__oon__]] int sc;
+[[__gnu__::oon]] int sd;
+[[__oon__]] int se;
+[[clang::__oon__]] int sf;
+[[_Clang::noinlin]] void e(void);

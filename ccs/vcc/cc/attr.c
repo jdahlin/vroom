@@ -118,13 +118,38 @@ static void attr_norm(const char **s, size_t *n)
 		*s += 2, *n -= 4;
 }
 
-/* whether clang knows GNU attribute s for the target (its __has_attribute) */
-static bool gnu_attr_known(cc *c, const char *s, size_t n)
+/* scope of a [[...]] attribute as clang prints it: "" (none), "gnu::", "clang::" */
+static const char *const attr_scopes[] = { "", "gnu::", "clang::" };
+
+/*
+ * whether clang knows attribute s for the target: GNU syntax (scope < 0, its
+ * __has_attribute), or [[scope::s]] (__has_c_attribute)
+ */
+static bool attr_known(cc *c, int scope, const char *s, size_t n)
 {
 	int bit = 1 << (c->o->target == PP_WASM32 ? PP_WASM64 : c->o->target);
-	size_t lo = 0, hi = sizeof(gnu_attrs) / sizeof(gnu_attrs[0]);
+	size_t lo = 0, hi = scope < 0 ? sizeof(gnu_attrs) / sizeof(gnu_attrs[0]) : sizeof(c_attrs) / sizeof(c_attrs[0]);
+	char k[160];
 
 	attr_norm(&s, &n);
+	if (scope >= 0) {
+		int l = snprintf(k, sizeof(k), "%s%.*s", attr_scopes[scope], (int)n, s);
+
+		if (l < 0 || (size_t)l >= sizeof(k))
+			return false;
+		while (lo < hi) {
+			size_t mid = (lo + hi) / 2;
+			int r = strcmp(c_attrs[mid].name, k);
+
+			if (!r)
+				return c_attrs[mid].on & bit;
+			if (r < 0)
+				lo = mid + 1;
+			else
+				hi = mid;
+		}
+		return false;
+	}
 	while (lo < hi) {
 		size_t mid = (lo + hi) / 2;
 		int r = strncmp(gnu_attrs[mid].name, s, n);
@@ -173,12 +198,13 @@ static unsigned edit_distance(const char *a, size_t na, const char *b, size_t nb
  * nearest spelling within (n + 2) / 3 edits, candidates whose length differs
  * by d skipped unless n / d >= 3; then only if clang knows it.
  */
-static const char *attr_correction(cc *c, const char *s, size_t n)
+static const char *attr_correction(cc *c, int scope, const char *s, size_t n)
 {
-	unsigned max = (unsigned)(n + 2) / 3, best = max + 1;
+	unsigned max, best;
 	const char *bn = NULL;
 
 	attr_norm(&s, &n);
+	max = (unsigned)(n + 2) / 3, best = max + 1;
 	for (size_t i = 0; i < sizeof(attr_spellings) / sizeof(attr_spellings[0]); i++) {
 		size_t cn = strlen(attr_spellings[i]), ld = cn > n ? cn - n : n - cn;
 		unsigned d;
@@ -189,7 +215,7 @@ static const char *attr_correction(cc *c, const char *s, size_t n)
 		if (d < best)
 			best = d, bn = attr_spellings[i];
 	}
-	if (!bn || !best || !gnu_attr_known(c, bn, strlen(bn)))
+	if (!bn || !best || !attr_known(c, scope, bn, strlen(bn)))
 		return NULL;
 	return bn;
 }
@@ -213,8 +239,8 @@ __attribute__((noinline)) VPRIV void attribute_list_(cc *c, attrs *a)
 		}
 		while (!is(c, close)) {
 			ptok *t = tok(c);
-			int an;
-			uint32_t loc = t->loc;
+			int an, scope = std ? 0 : -1;	/* attr_scopes index; -1: GNU syntax */
+			uint32_t loc = t->loc, sloc = t->loc, sid = 0;
 
 			if (accept(c, T_COMMA))
 				continue;
@@ -223,8 +249,11 @@ __attribute__((noinline)) VPRIV void attribute_list_(cc *c, attrs *a)
 			if (std && peek(c, 1)->kind == T_COLONCOLON) {
 				/* vendor::name: gnu and clang name GNU attributes, others are ignored */
 				const vident *ns = &vintern_ents[t->id];
-				bool gnu = (ns->len == 3 && !memcmp(ns->s, "gnu", 3)) || (ns->len == 7 && !memcmp(ns->s, "__gnu__", 7)) ||
-					   (ns->len == 5 && !memcmp(ns->s, "clang", 5));
+				bool cl = (ns->len == 5 && !memcmp(ns->s, "clang", 5)) || (ns->len == 6 && !memcmp(ns->s, "_Clang", 6));
+				bool gnu = (ns->len == 3 && !memcmp(ns->s, "gnu", 3)) || (ns->len == 7 && !memcmp(ns->s, "__gnu__", 7)) || cl;
+
+				sloc = t->loc, sid = t->id;
+				scope = cl ? 2 : gnu ? 1 : 3;
 
 				next(c);
 				next(c);
@@ -232,10 +261,19 @@ __attribute__((noinline)) VPRIV void attribute_list_(cc *c, attrs *a)
 				loc = t->loc;
 				if (t->kind != T_IDENT && !kwof(t))
 					fatal(c, loc, "expected attribute name");
-				if (!gnu) {
+				if (!gnu) {	/* other vendors: ignored, with clang's warning */
+					uint32_t end = t->loc;
+					const vident *sn = &vintern_ents[sid], *nm = &vintern_ents[t->id];
+
 					next(c);
 					if (is(c, T_LPAREN))
-						skip_balanced(c);
+						end = skip_balanced(c);
+					{
+						pp_span r = { sloc, pp_tok_end(c->p, end) };
+
+						cc_warnx(c, "unknown-attributes", true, NULL, sloc, &r, 1, NULL, 0,
+							 "unknown attribute '%.*s::%.*s' ignored", (int)sn->len, sn->s, (int)nm->len, nm->s);
+					}
 					continue;
 				}
 			}
@@ -392,18 +430,27 @@ __attribute__((noinline)) VPRIV void attribute_list_(cc *c, attrs *a)
 
 				if (is(c, T_LPAREN))
 					end = skip_balanced(c);
-				if (an == A_NONE && !std && !gnu_attr_known(c, nm->s, nm->len)) {
-					pp_span r = { loc, pp_tok_end(c->p, end) };
-					const char *fix = attr_correction(c, nm->s, nm->len);
+				if (an == A_NONE && !attr_known(c, scope, nm->s, nm->len)) {
+					/* [[gnu::x]]: from the scope, printed as gnu:: (also for __gnu__::) */
+					const char *sp = scope > 0 ? attr_scopes[scope] : "";
+					pp_span r = { sloc, pp_tok_end(c->p, end) };
+					const char *fix = attr_correction(c, scope, nm->s, nm->len);
+					const char *ns = nm->s;
+					size_t nn = nm->len;
+
+					if (scope >= 0)	/* [[__x__]] prints as x, __attribute__((__x__)) as written */
+						attr_norm(&ns, &nn);
 
 					if (fix) {
-						pp_fixit fx = { loc, pp_tok_end(c->p, loc), fix };
+						char fb[160];
+						pp_fixit fx = { sloc, pp_tok_end(c->p, loc), fb };
 
-						cc_warnx(c, "unknown-attributes", true, NULL, loc, &r, 1, &fx, 1,
-							 "unknown attribute '%.*s' ignored; did you mean '%s'?", (int)nm->len, nm->s, fix);
+						snprintf(fb, sizeof(fb), "%s%s", sp, fix);
+						cc_warnx(c, "unknown-attributes", true, NULL, sloc, &r, 1, &fx, 1,
+							 "unknown attribute '%s%.*s' ignored; did you mean '%s'?", sp, (int)nn, ns, fb);
 					} else {
-						cc_warnx(c, "unknown-attributes", true, NULL, loc, &r, 1, NULL, 0,
-							 "unknown attribute '%.*s' ignored", (int)nm->len, nm->s);
+						cc_warnx(c, "unknown-attributes", true, NULL, sloc, &r, 1, NULL, 0,
+							 "unknown attribute '%s%.*s' ignored", sp, (int)nn, ns);
 					}
 				}
 			}
