@@ -1,0 +1,62 @@
+return_stack.c:4:36: warning: address of stack memory associated with local variable 'x' returned [-Wreturn-stack-address]
+    4 | int *f1(void) { int x = 1; return &x; }
+      |                     ~              ^
+      |                     |
+      |                     declared here, in this function's frame
+      = help: 'x' lives in the frame of 'f1', which is gone once it returns: make it 'static', allocate it, or let the caller pass the storage
+return_stack.c:5:38: warning: address of stack memory associated with local variable 'buf' returned [-Wreturn-stack-address]
+    5 | char *f2(void) { char buf[8]; return buf + 1; }
+      |                       ~~~            ^
+      |                       |
+      |                       declared here, in this function's frame
+      = help: 'buf' lives in the frame of 'f2', which is gone once it returns: make it 'static', allocate it, or let the caller pass the storage
+return_stack.c:6:26: warning: address of stack memory associated with parameter 'p' returned [-Wreturn-stack-address]
+    6 | int *f3(int p) { return &p; }
+      |             ~            ^
+      |             |
+      |             a parameter of this function
+      = help: 'p' lives in the frame of 'f3', which is gone once it returns: make it 'static', allocate it, or let the caller pass the storage
+return_stack.c:7:40: warning: address of stack memory associated with local variable 'x' returned [-Wreturn-stack-address]
+    7 | int *f4(int c) { int x, y; return c ? &x : &y; }
+      |                      ~                 ^
+      |                      |
+      |                      declared here, in this function's frame
+      = help: 'x' lives in the frame of 'f4', which is gone once it returns: make it 'static', allocate it, or let the caller pass the storage
+return_stack.c:7:45: warning: address of stack memory associated with local variable 'y' returned [-Wreturn-stack-address]
+    7 | int *f4(int c) { int x, y; return c ? &x : &y; }
+      |                         ~                   ^
+      |                         |
+      |                         declared here, in this function's frame
+      = help: 'y' lives in the frame of 'f4', which is gone once it returns: make it 'static', allocate it, or let the caller pass the storage
+return_stack.c:8:37: warning: address of stack memory associated with local variable 's' returned [-Wreturn-stack-address]
+    8 | char *f5(void) { struct S s; return s.a; }
+      |                           ~         ^
+      |                           |
+      |                           declared here, in this function's frame
+      = help: 's' lives in the frame of 'f5', which is gone once it returns: make it 'static', allocate it, or let the caller pass the storage
+return_stack.c:9:38: warning: address of stack memory associated with local variable 'x' returned [-Wreturn-stack-address]
+    9 | long f6(void) { int x; return (long)&x; }
+      |                     ~                ^
+      |                     |
+      |                     declared here, in this function's frame
+      = help: 'x' lives in the frame of 'f6', which is gone once it returns: make it 'static', allocate it, or let the caller pass the storage
+return_stack.c:10:24: warning: address of stack memory associated with compound literal '{1, 2}' returned [-Wreturn-stack-address]
+   10 | int *f7(void) { return (int[]){1, 2}; }
+      |                        ^
+      = help: a compound literal in a function lives until the end of its block
+return_stack.c:11:39: warning: address of stack memory associated with local variable 'b' returned [-Wreturn-stack-address]
+   11 | char *f8(void) { char b[4][4]; return b[1]; }
+      |                       ~               ^
+      |                       |
+      |                       declared here, in this function's frame
+      = help: 'b' lives in the frame of 'f8', which is gone once it returns: make it 'static', allocate it, or let the caller pass the storage
+return_stack.c:12:34: warning: address of stack memory associated with local variable 'x' returned [-Wreturn-stack-address]
+   12 | int *f9(void) { int x; return &*&x; }
+      |                     ~            ^
+      |                     |
+      |                     declared here, in this function's frame
+      = help: 'x' lives in the frame of 'f9', which is gone once it returns: make it 'static', allocate it, or let the caller pass the storage
+return_stack.c:16:41: error: address of register variable requested
+   16 | int *bad(void) { register int x; return &x; }
+      |                                         ^~
+10 warnings and 1 error generated.

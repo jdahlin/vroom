@@ -14,6 +14,198 @@ static bool attr_quiet(cc *c, const sym *y)
 	return a && (a->unused || a->used || a->cleanup);
 }
 
+/* ---------------- -Wunused-value (clang's DiagnoseUnusedExprResult) ---------------- */
+
+static const char *const w_uvalue[] = { "unused-value", "unused", "all", "most", NULL };
+static const char *const w_ucmp[] = { "unused-comparison", "unused-value", "unused", "all", "most", NULL };
+
+static bool volatile_lv(cc *c, uint32_t n) { return (N(n)->flags & NF_LVALUE) && (N(n)->ty & Q_VOLATILE); }
+
+/* clang's Expr::isUnusedResultAWarning: the node whose value is thrown away for nothing (0:
+   none) and where clang reports it */
+static uint32_t unused_of(cc *c, uint32_t n, uint32_t *loc, int depth)
+{
+	const node *x = N(n);
+
+	if (!n || depth > 64 || (x->flags & NF_ERR))
+		return 0;
+	switch (x->op) {
+	case N_ASSIGN: case N_PREINC: case N_PREDEC: case N_POSTINC: case N_POSTDEC:
+	case N_BUILTIN: case N_VAARG: case N_INIT: case N_ZERO: case N_DESIG:
+		return 0;
+	case N_CALL: {	/* only pure and const functions (warn_unused_result: result_discarded) */
+		uint32_t f = N(x->a)->op == N_CAST ? N(x->a)->a : x->a;
+		const sym *y;
+
+		if (N(f)->op == N_ADDR)
+			f = N(f)->a;
+		if (N(f)->op != N_VAR || is_void(c, x->ty))
+			return 0;
+		y = &c->syms[N(f)->a];
+		if (!y->attrs || !c->attr[y->attrs].ext || !c->attrx[c->attr[y->attrs].ext].pure)
+			return 0;
+		*loc = N(f)->loc;
+		return n;
+	}
+	case N_COMMA:	/* ((x = ...), 0): an idiom for hiding the result */
+		if (N(x->b)->op == N_NUM && !(N(x->b)->flags & NF_ENUMC) && !(N(x->b)->flags & NF_PAREN)) {
+			cval v;
+
+			if (cc_eval(c, x->b, &v) && v.kind == CV_INT && v.i == 0)
+				return 0;
+		}
+		return unused_of(c, x->b, loc, depth + 1);
+	case N_LOGAND: case N_LOGOR:
+		if (!unused_of(c, x->a, loc, depth + 1) || !unused_of(c, x->b, loc, depth + 1))
+			return 0;
+		*loc = x->loc;
+		return n;
+	case N_COND:	/* only if both arms are: else it is control flow */
+		if (x->b && !unused_of(c, x->b, loc, depth + 1))
+			return 0;
+		return unused_of(c, x->c, loc, depth + 1);
+	case N_CAST:
+		if (!c->span[n].e)	/* implicit: a volatile load is a side effect */
+			return volatile_lv(c, x->a) ? 0 : unused_of(c, x->a, loc, depth + 1);
+		if (x->aux == CK_VOID)
+			return 0;
+		*loc = x->loc;
+		return n;
+	case N_STMTEXPR: {
+		const node *b = N(x->a);
+		uint32_t last = b->c ? c->lists[b->b + b->c - 1] : 0;
+
+		if (last && N(last)->op == N_EXPR)
+			return unused_of(c, N(last)->a, loc, depth + 1);
+		if (is_void(c, x->ty))
+			return 0;
+		*loc = x->loc;
+		return n;
+	}
+	case N_INDEX: {	/* (clang: at the ']') */
+		pp_span r = rng(c, n);
+
+		*loc = r.e > r.b ? r.e - 1 : x->loc;
+		return n;
+	}
+	case N_MEMBER: {	/* (clang: at the member name) */
+		size_t len;
+		uint32_t b = pp_tok_end(c->p, x->loc);
+		const char *s = pp_src_rest(c->p, b, &len);
+
+		if (volatile_lv(c, n))
+			return 0;
+		for (size_t i = 0; s && i < len && i < 64; i++)
+			if (s[i] != ' ' && s[i] != '\t' && s[i] != '\n') {
+				*loc = b + (uint32_t)i;
+				return n;
+			}
+		*loc = x->loc;
+		return n;
+	}
+	default:
+		if (is_void(c, x->ty) || volatile_lv(c, n))
+			return 0;
+		*loc = x->loc;
+		return n;
+	}
+}
+
+static bool is_cmp_node(const node *x)
+{
+	return x->op == N_BINARY && (x->aux == T_EQUALEQUAL || x->aux == T_EXCLAIMEQ || x->aux == T_LESS ||
+				     x->aux == T_GREATER || x->aux == T_LESSEQ || x->aux == T_GREATEREQ);
+}
+
+/* e's value is discarded: an expression statement, a for clause, or (comma) the left operand
+   of ','.  er: the error count before e (none since: e is sound); mac: e's first token (the
+   comma) came from a function-like macro's body.  (vcc gives body tokens the invocation's
+   location, so clang's "in a macro body" is that token flag, NF_MACRO on an operator, and
+   for an object-like macro, whose tokens carry no flag, a location on a macro name.) */
+VPRIV void unused_value(cc *c, uint32_t e, bool comma, int er, bool mac)
+{
+	uint32_t w, loc = 0, top = e;
+	const node *x;
+	vdiag *d;
+	pp_span r;
+
+	if (!e || (N(e)->flags & NF_ERR) || c->unevaluated || !c->fn || c->errors != er)
+		return;
+	while (N(top)->op == N_CAST && !c->span[top].e && !volatile_lv(c, N(top)->a))
+		top = N(top)->a;	/* (IgnoreParenImpCasts) */
+	if (!(w = unused_of(c, e, &loc, 0)))
+		return;
+	x = N(top);
+	/* a statement expression from a macro: a macro usable as a statement or an expression */
+	mac = mac || pp_loc_macro(c->p, rng(c, top).b);
+	if (x->op == N_STMTEXPR && mac)
+		return;
+	if (!comma && is_cmp_node(x) && !(x->flags & NF_PAREN)) {
+		/* clang's DiagnoseUnusedComparison */
+		bool eq = x->aux == T_EQUALEQUAL, ne = x->aux == T_EXCLAIMEQ;
+		uint32_t a = x->a;
+
+		if ((x->flags & NF_MACRO) || pp_loc_macro(c->p, x->loc))
+			return;
+		r = rng(c, top);
+		d = cc_warn_begin(c, "unused-comparison", true, w_ucmp, x->loc, "%s comparison result unused",
+				  eq ? "equality" : ne ? "inequality" : "relational");
+		if (!d)
+			return;
+		pp_diag_label(c->p, d, r.b, r.e, NULL);
+		while (N(a)->op == N_CAST && !c->span[a].e)
+			a = N(a)->a;
+		if ((eq || ne) && (N(a)->flags & NF_LVALUE)) {
+			vdiag *k = pp_diag_note(c->p, d, x->loc, eq ? "use '=' to turn this equality comparison into an assignment"
+							   : "use '|=' to turn this inequality comparison into an or-assignment");
+
+			pp_diag_fix(c->p, k, x->loc, x->loc + 2, eq ? "=" : "|=", VDA_MAYBE);
+		}
+		pp_diag_emit(c->p, d);
+		return;
+	}
+	if (mac || (N(w)->flags & NF_MACRO) || (N(top)->flags & NF_MACRO))	/* written in a macro's body */
+		return;
+	x = N(w);
+	r = rng(c, w);
+	if (x->op == N_CALL) {
+		uint32_t f = N(x->a)->op == N_CAST ? N(x->a)->a : x->a;
+		const sym *y;
+
+		if (N(f)->op == N_ADDR)
+			f = N(f)->a;
+		y = &c->syms[N(f)->a];
+		d = cc_warn_begin(c, "unused-value", true, w_uvalue, loc, "ignoring return value of function declared with %s attribute",
+				  c->attrx[c->attr[y->attrs].ext].pure == 1 ? "pure" : "const");
+		if (d) {
+			pp_diag_label(c->p, d, r.b, r.e, NULL);
+			pp_diag_help(c->p, d, "a %s function has no effect but its result: use it, or remove the call",
+				     c->attrx[c->attr[y->attrs].ext].pure == 1 ? "pure" : "const");
+			pp_diag_emit(c->p, d);
+		}
+		return;
+	}
+	if (x->op == N_CAST && is_ptr(c, x->ty) && is_void(c, T(c, x->ty)->base) && !(x->ty & Q_MASK) &&
+	    !(T(c, x->ty)->base & Q_MASK)) {
+		d = cc_warn_begin(c, "unused-value", true, w_uvalue, loc, "expression result unused; should this cast be to 'void'?");
+		if (d) {
+			pp_diag_label(c->p, d, r.b, r.e, NULL);
+			pp_diag_emit(c->p, d);
+		}
+		return;
+	}
+	if (c->dead)	/* (clang: DiagIfReachable) */
+		return;
+	d = cc_warn_begin(c, "unused-value", true, w_uvalue, loc, comma ? "left operand of comma operator has no effect"
+								      : "expression result unused");
+	if (!d)
+		return;
+	pp_diag_label(c->p, d, r.b, r.e, NULL);
+	pp_diag_help(c->p, d, comma ? "only the right operand's value is used: remove the left one, or cast it to (void)"
+				   : "the value is computed and thrown away: use it, or cast it to (void) if that is intended");
+	rt_emit(c, d);
+}
+
 /* clang: a discarded assignment, compound assignment, ++ or -- of a block-scope variable named
    directly is not a use of it (Sema's RefsMinusAssignments); volatile ones only for '=' */
 VPRIV void discard(cc *c, uint32_t e)

@@ -349,6 +349,17 @@ VPRIV uint32_t addr_of(cc *c, uint32_t n, uint32_t loc)
 
 		report(c, "error", loc, &sp, 1, NULL, 0, "cannot take the address of an rvalue of type '%s'", tyname(c, t));
 	}
+	{
+		uint32_t b = n;
+
+		while (N(b)->op == N_MEMBER)
+			b = N(b)->a;
+		if (N(b)->op == N_VAR && c->syms[N(b)->a].sc == SC_REGISTER && c->syms[N(b)->a].kind == S_VAR) {
+			pp_span sp = rng(c, n);
+
+			report(c, "error", loc, &sp, 1, NULL, 0, "address of register variable requested");
+		}
+	}
 	mark_addr_taken(c, n);
 	r = mk(c, N_ADDR, ty_ptr(c, t), loc);
 	N(r)->a = n;

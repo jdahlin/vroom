@@ -55,6 +55,7 @@ typedef struct attrs {		/* the attributes of one declaration */
 typedef struct attrx {		/* attributes checked at uses (attrcheck.c) */
 	uint8_t wur;		/* 1: warn_unused_result, 2: nodiscard */
 	uint8_t depr;		/* 1: deprecated, 2: unavailable */
+	uint8_t pure;		/* 1: pure, 2: const */
 	uint32_t deprloc;	/* the deprecated/unavailable attribute's name */
 	uint32_t deprmsg, wurmsg;	/* their message: string index + 1, 0: none */
 	uint64_t nonnull;	/* nonnull(i, ...): bit i - 1; ~0: every pointer parameter */

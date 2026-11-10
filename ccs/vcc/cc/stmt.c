@@ -406,6 +406,101 @@ static uint32_t sub_statement(cc *c)
 	return n;
 }
 
+/* -Wreturn-stack-address (clang's CheckReturnStackAddr, its common shapes): the value of
+   return e points into the function's own frame.  obj: n is an lvalue (the object), else
+   a pointer (or an integer made from one) */
+static void rsa_walk(cc *c, uint32_t n, bool obj, int depth)
+{
+	const node *x = N(n);
+
+	if (!n || depth > 32 || (x->flags & NF_ERR))
+		return;
+	if (obj) {
+		switch (x->op) {
+		case N_VAR: {
+			const sym *y = &c->syms[x->a];
+			int m;
+			const char *nm;
+			vdiag *d;
+
+			if (y->kind != S_VAR || (y->flags & SF_GLOBAL) || y->sc == SC_STATIC || y->sc == SC_EXTERN || y->sc == SC_REGISTER ||
+			    (y->flags & SF_THREAD))
+				return;
+			nm = idname(y->name, &m);
+			d = cc_warn_begin(c, "return-stack-address", true, NULL, x->loc,
+					  "address of stack memory associated with %s '%.*s' returned",
+					  y->flags & SF_PARAM ? "parameter" : "local variable", m, nm);
+			if (!d)
+				return;
+			pp_diag_label(c->p, d, y->loc, pp_tok_end(c->p, y->loc),
+				      y->flags & SF_PARAM ? "a parameter of this function" : "declared here, in this function's frame");
+			pp_diag_help(c->p, d, "'%.*s' lives in the frame of '%.*s', which is gone once it returns: make it 'static', "
+				     "allocate it, or let the caller pass the storage", m, nm, IDF(c->syms[c->fn].name));
+			pp_diag_emit(c->p, d);
+			return;
+		}
+		case N_COMPLIT: {
+			size_t l = 0, k = 0;
+			const char *t = pp_src_rest(c->p, N(x->a)->loc, &l);
+			int depth2 = 0;
+			vdiag *d;
+
+			/* the braces as written: to the matching '}' (clang prints the initializer) */
+			for (; t && k < l && k < 200; k++)
+				if (t[k] == '{')
+					depth2++;
+				else if (t[k] == '}' && !--depth2)
+					break;
+			l = t && k < l && k < 200 && t[0] == '{' ? k + 1 : 0;
+
+			if (!x->b || (c->syms[x->b].flags & SF_GLOBAL) || c->syms[x->b].sc == SC_STATIC)
+				return;
+			d = cc_warn_begin(c, "return-stack-address", true, NULL, x->loc,
+					  "address of stack memory associated with compound literal '%.*s' returned",
+					  l ? (int)l : 3, l ? t : "...");
+			if (!d)
+				return;
+			pp_diag_help(c->p, d, "a compound literal in a function lives until the end of its block");
+			pp_diag_emit(c->p, d);
+			return;
+		}
+		case N_MEMBER:
+			rsa_walk(c, x->a, true, depth + 1);
+			return;
+		case N_INDEX:
+		case N_DEREF:
+			rsa_walk(c, x->a, false, depth + 1);
+			return;
+		default:
+			return;
+		}
+	}
+	switch (x->op) {
+	case N_CAST:
+		if (x->aux == CK_DECAY)
+			rsa_walk(c, x->a, true, depth + 1);
+		else if (x->aux == CK_NOP || x->aux == CK_P2P || x->aux == CK_P2I || x->aux == CK_I2P || x->aux == CK_INT)
+			rsa_walk(c, x->a, false, depth + 1);
+		return;
+	case N_ADDR:
+		rsa_walk(c, x->a, true, depth + 1);
+		return;
+	case N_COND:
+		rsa_walk(c, x->b ? x->b : x->a, false, depth + 1);
+		rsa_walk(c, x->c, false, depth + 1);
+		return;
+	case N_COMMA:
+		rsa_walk(c, x->b, false, depth + 1);
+		return;
+	case N_BINARY:
+		if (x->aux == T_PLUS || x->aux == T_MINUS)
+			rsa_walk(c, is_ptr(c, N(x->a)->ty) ? x->a : x->b, false, depth + 1);
+		return;
+	default:
+		return;
+	}
+}
+
 VPRIV uint32_t statement(cc *c)
 {
 	ptok *t = tok(c);
@@ -533,9 +628,12 @@ VPRIV uint32_t statement(cc *c)
 			init = mkstmt(c, N_BLOCK, loc, 0, vfreeze(c, &items), items.n);
 		} else {
 			uint32_t e = 0;
+			int er;
+			bool mac;
 
 			if (!is(c, T_SEMI))
-				init = mkstmt(c, N_EXPR, loc, e = expr(c), 0, 0), discard(c, e);
+				er = c->errors, mac = tok(c)->flags & PF_MACRO,
+				init = mkstmt(c, N_EXPR, loc, e = expr(c), 0, 0), discard(c, e), unused_value(c, e, false, er, mac);
 			for_semi(c, e);
 		}
 		if (!is(c, T_SEMI)) {
@@ -545,8 +643,12 @@ VPRIV uint32_t statement(cc *c)
 		}
 		for_semi(c, cnd);
 		c->for_head = false;
-		if (!is(c, T_RPAREN))
-			step = expr(c), discard(c, step);
+		if (!is(c, T_RPAREN)) {
+			int er = c->errors;
+			bool mac = tok(c)->flags & PF_MACRO;
+
+			step = expr(c), discard(c, step), unused_value(c, step, false, er, mac);
+		}
 		expect_close(c, T_RPAREN, open, step);
 	for_body:
 		REC_POP(c, &r);
@@ -696,6 +798,8 @@ VPRIV uint32_t statement(cc *c)
 			report(c, "error", loc, NULL, 0, NULL, 0, "non-void function '%.*s' should return a value [-Wreturn-mismatch]",
 			       IDF(c->syms[c->fn].name));
 		}
+		if (e && c->fn && !ISERR(e) && !is_void(c, rt) && (is_ptr(c, rt) || is_integer(c, rt)))
+			rsa_walk(c, e, false, 0);
 		if (unlikely(e && ISERR(e)) && !is(c, T_SEMI))
 			skip_semi(c);	/* clang: after an invalid expression, silently */
 		else
@@ -748,31 +852,17 @@ VPRIV uint32_t statement(cc *c)
 		return mkstmt(c, N_EXPR, loc, 0, 0, 0);
 	}
 	{
+		int er = c->errors;
+		bool mac = tok(c)->flags & PF_MACRO;
 		uint32_t e = expr(c);
 
-		if (N(e)->op == N_BINARY && is_cmp(N(e)->aux) && !c->in_stmtexpr &&
-		    !(N(e)->flags & (NF_PAREN | NF_MACRO | NF_ERR))) {
-			int k = N(e)->aux;
-			uint32_t op = N(e)->loc;
-			pp_span r = { rng(c, N(e)->a).b, rng(c, N(e)->b).e };
-			bool eq = k == T_EQUALEQUAL || k == T_EXCLAIMEQ;
-
-			if (cc_warnx(c, "unused-comparison", true, w_all, op, &r, 1, NULL, 0, "%s comparison result unused",
-				  eq ? "equality" : "relational") && k == T_EQUALEQUAL) {
-				pp_span orr = { op, op + 2 };
-				pp_fixit fx = { op, op + 2, "=", VDA_MAYBE };
-				pp_dinfo d = { "note", op, &orr, 1, &fx, 1, NULL, 0 };
-
-				pp_diagx(c->p, &d, "use '=' to turn this equality comparison into an assignment");
-			}
-		}
 		if (unlikely(!is(c, T_SEMI)) && ISERR(e))
 			skip_semi(c);	/* clang: after an invalid expression, silently to the ';' */
 		else
 			expect_semi(c, "after expression");
 		/* (the last statement of ({ ... }) gives its value) */
 		if (!c->in_stmtexpr || !is(c, T_RBRACE) || peek(c, 1)->kind != T_RPAREN)
-			discard(c, e);
+			discard(c, e), unused_value(c, e, false, er, mac);
 		return mkstmt(c, N_EXPR, loc, e, 0, 0);
 	}
 }

@@ -455,6 +455,7 @@ VPRIV uint32_t char_lit(cc *c)
 	i128 v = 0;
 	int nch = 0;
 	qty ty = prim(TY_INT);
+	uint32_t loc;
 
 	while (*s != '\'')
 		s++;
@@ -506,6 +507,7 @@ VPRIV uint32_t char_lit(cc *c)
 		ty = c->o->unsigned_char ? prim(TY_UCHAR) : prim(TY_CHAR);
 		ty = prim(TY_UCHAR);
 	}
+	loc = t->loc;	/* (t is the next token after next()) */
 	next(c);
-	return mk_int(c, v, ty, t->loc);
+	return mk_int(c, v, ty, loc);
 }

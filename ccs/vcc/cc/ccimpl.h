@@ -401,6 +401,7 @@ VPRIV void c23_word_help(cc *c, vdiag *d, uint32_t id);
 VPRIV uint16_t fmt_pack(int kind, unsigned idx, unsigned first);
 VPRIV void format_call(cc *c, uint32_t s, uint32_t *args, uint32_t n);
 VPRIV void discard(cc *c, uint32_t e);
+VPRIV void unused_value(cc *c, uint32_t e, bool comma, int er, bool mac);
 VPRIV void rt_emit(cc *c, vdiag *d);
 VPRIV void rt_flush(cc *c);
 /* attrcheck.c */

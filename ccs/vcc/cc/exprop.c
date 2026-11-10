@@ -977,13 +977,16 @@ VPRIV uint32_t assign_expr(cc *c)
 	return assign_rest(c, l, op);
 }
 
-static __attribute__((noinline)) uint32_t comma_rest(cc *c, uint32_t l)
+static __attribute__((noinline)) uint32_t comma_rest(cc *c, uint32_t l, int er)
 {
 	while (is(c, T_COMMA) && !not_expr_start(c, peek(c, 1))) {
 		uint32_t loc = tok(c)->loc, r;
 
+		bool mac = tok(c)->flags & PF_MACRO;
+
 		next(c);
 		discard(c, l);
+		unused_value(c, l, true, er, mac);
 		r = assign_expr(c);
 		if (unlikely(ISERR(l) || ISERR(r))) {
 			l = err_node(c, loc);
@@ -996,11 +999,12 @@ static __attribute__((noinline)) uint32_t comma_rest(cc *c, uint32_t l)
 
 VPRIV uint32_t expr(cc *c)
 {
+	int er = c->errors;
 	uint32_t l = assign_expr(c);
 
 	if (likely(!is(c, T_COMMA)))
 		return l;
-	return comma_rest(c, l);
+	return comma_rest(c, l, er);
 }
 
 /* a constant expression as an int (array sizes, widths, enum values, cases) */

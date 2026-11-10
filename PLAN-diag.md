@@ -745,6 +745,35 @@ nu når bygget) 0 varningar som clang inte ger och `meson test` 81 ok.  Grinden 
 Flödesvägar för `-Wuninitialized`, returnerad stackadress och saknad `return` (numrerade
 steg, GCC-analysatorn); minnesdiagram för indexering utanför fält; HTML-utdata.
 
+Delsteg (2026-11-10), i värde-per-insats-ordning:
+1. **`-Wreturn-stack-address`** (clangs standardvarning, saknas helt): `&lokal`, en lokal
+   array som decay:ar, `&parameter`, `&a[i]`, genom `?:` och casts; clangs text, plus en not
+   vid deklarationen och `help:` om livstiden.  *Validera:* diag-fall, sema warn 879/879.
+2. **Vägen för `-Wreturn-type`**: numrerade steg från funktionens början till `}` (vilket
+   villkor som är falskt, vilken `case` som bryter), ur den befintliga flödesanalysen.
+3. **Minnesdiagram för `-Warray-bounds`**: fältets element och indexet som textkonst
+   (GCC:s `-fdiagnostics-text-art`), i vcc-stilen.
+4. **HTML-utdata**: `-fdiagnostics-add-output=html:file=F`, posterna med källutdrag som en
+   fristående sida.
+5. **`-Wuninitialized` och `-Wsometimes-uninitialized`** (`-Wall`): en definit-tilldelnings-
+   analys över satsträdet för skalära lokaler vars adress aldrig tas; clangs texter och
+   noter, och vägen som numrerade steg.  *Validera:* clangs fall i diag-tester, kärnan
+   (`-Wall` på varje kommandorad) och PostgreSQL utan falska.
+
+Status D8.1 (2026-11-10): `-Wreturn-stack-address` (lokal, parameter, sammansatt literal,
+genom `?:`, casts, `&a[i]`, decay; register-variabler hoppas över) med en etikett vid
+deklarationen och `help:` om livstiden; `&register` är ett fel.  På vägen `-Wunused-value`
+och `-Wunused-comparison` (TODO "Missing warnings"): clangs `isUnusedResultAWarning`
+(jämförelser med `=`/`|=`-noten, `(void *)x`, `pure`/`const`-anrop, kommats vänsteroperand,
+`(x = …, 0)`-idiomet, volatile, satsuttryck), uppskjutna till funktionens slut och tysta i
+död kod; clangs kolumner (medlemsnamnet, `]`, operatorn).  "Från en makrokropp" är
+token-flaggan `PF_MACRO` för funktionslika makron (vcc ger kroppens token anropets plats)
+och en plats på ett makronamn för objektlika (deras token får ingen flagga: att sätta den i
+pp:s heta väg kostade pp +1,6 %); ett uttryck efter ett fel i samma sats varnar inte
+(felvägarnas platshållare `0`).  Teckenliteraler fick fel plats (nästa tokens).  *Validerat:* diag-fallen
+`return_stack.c` och `unused_value.c` (identiska med clang), sema warn 879/879, kärnparitet
+873/873.
+
 ## Ordning och milstolpar
 
 | milstolpe | steg | synligt för användaren |

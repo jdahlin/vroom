@@ -8,7 +8,7 @@ enum {
 	A_NORETURN, A_ALWAYS_INLINE, A_NOINLINE, A_GNU_INLINE, A_TRANSPARENT_UNION, A_VISIBILITY,
 	A_CONSTRUCTOR, A_DESTRUCTOR, A_COUNTED_BY, A_VECTOR_SIZE, A_COLD, A_NONSTRING, A_MAY_ALIAS,
 	A_WEAKREF, A_NAKED, A_NOCF, A_ERROR, A_OVERLOADABLE, A_NOINSTR, A_FORMAT,
-	A_NONNULL, A_WUR, A_NODISCARD, A_DEPRECATED, A_UNAVAILABLE,
+	A_NONNULL, A_WUR, A_NODISCARD, A_DEPRECATED, A_UNAVAILABLE, A_PURE, A_CONST,
 	A_COUNT
 };
 
@@ -23,7 +23,7 @@ static const char *const attr_names[A_COUNT] = {
 	[A_NOINSTR] = "no_instrument_function", [A_NAKED] = "naked", [A_NOCF] = "nocf_check", [A_ERROR] = "error",
 	[A_OVERLOADABLE] = "overloadable", [A_FORMAT] = "format", [A_NONNULL] = "nonnull",
 	[A_WUR] = "warn_unused_result", [A_NODISCARD] = "nodiscard", [A_DEPRECATED] = "deprecated",
-	[A_UNAVAILABLE] = "unavailable",
+	[A_UNAVAILABLE] = "unavailable", [A_PURE] = "pure", [A_CONST] = "const",
 };
 
 static uint32_t *attr_dir[NDIR];
@@ -272,6 +272,10 @@ __attribute__((noinline)) VPRIV void attribute_list_(cc *c, attrs *a)
 					attrx_mut(c, a)->nonnull = ~(uint64_t)0;
 				}
 				continue;
+			case A_PURE:
+			case A_CONST:	/* (-Wunused-value: a discarded call) */
+				attrx_mut(c, a)->pure = an == A_PURE ? 1 : 2;
+				break;
 			case A_WUR:
 			case A_NODISCARD:
 				attrx_mut(c, a)->wur = an == A_WUR ? 1 : 2;
@@ -382,6 +386,7 @@ VPRIV void merge_attrs(cc *c, attrs *to, const attrs *from)
 			attrx *t = attrx_mut(c, to);
 
 			if (f.wur) t->wur = f.wur, t->wurmsg = f.wurmsg;
+			if (f.pure) t->pure = f.pure;
 			if (f.depr) t->depr = f.depr, t->deprloc = f.deprloc, t->deprmsg = f.deprmsg;
 			t->nonnull |= f.nonnull;
 		}

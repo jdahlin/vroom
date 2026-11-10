@@ -844,15 +844,15 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
   always errors for `-Wincompatible-pointer-types`.
   *Validate:* diag tests with `-Wno-error=…` and `-Wno-…`.
 - [ ] **Missing warnings** (only 7 `-W` flags): `-Wunused-variable`,
-  `-Winteger-overflow`, `-Wexcess-initializers`, `-Wreturn-stack-address`,
+  `-Winteger-overflow`, `-Wexcess-initializers`,
   `-Wconstant-conversion`, `-Wmultichar`, `-Winvalid-noreturn`,
   `-Wuninitialized`, `-Wunknown-attributes`, `-Wdeprecated-declarations`,
-  `-Wformat`, `-Wunused-value`; pp `-Wextra-tokens`,
+  `-Wformat`; pp `-Wextra-tokens`,
   `-Wexpansion-to-defined`, `-Winvalid-pp-token`, `#pragma GCC warning`.
   *Validate:* one diag test per warning; `vcc-sema.py warn` stays 879/879
   (no false positives on the kernel).
 - [ ] **Invalid code accepted**: duplicate enumerator / parameter,
-  `&register_var`, `_Alignas(3)`, `typeof` on a bitfield, `*(void *)p` as a
+  `_Alignas(3)`, `typeof` on a bitfield, `*(void *)p` as a
   value, `return v();` of void from int function, `-fsyntax-only` missing
   initializer-constness errors (`static int s = g();`, `5 % 0`),
   `void f(static int x)` (clang: invalid storage class specifier in function

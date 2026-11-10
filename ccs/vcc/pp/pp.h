@@ -271,6 +271,9 @@ uint32_t pp_tok_end(const pp *p, uint32_t loc);
 const char *pp_src(const pp *p, uint32_t b, uint32_t e, size_t *len);
 /* the source text from loc b to the end of its file, NULL if unknown */
 const char *pp_src_rest(const pp *p, uint32_t b, size_t *len);
+/* loc is on a macro name: where an object-like macro's body tokens are (vcc gives them the
+   invocation's location and no PF_MACRO) */
+int pp_loc_macro(const pp *p, uint32_t loc);
 void pp_widen_parens(const pp *p, uint32_t *b, uint32_t *e);
 
 /*
