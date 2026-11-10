@@ -1429,7 +1429,7 @@ int ppd_run(int argc, char **argv, const ppd_env *env)
 			status = write_out(env->cwd, out, env->outfd, tl_wasm_obj.p, tl_wasm_obj.n, errfd);
 		else if (!status && emit == 2)
 			status = write_obj(env->cwd, out, env->outfd, errfd, darwin);
-		if (!status && emit == 2 && depfile)
+		if (!status && emit && depfile)	/* -S and -c */
 			status = write_deps(p, env->cwd, depfile, dtarget, dnosys, mphony, dfirst, NULL, -1, errfd);
 		if (getenv("VPP_TIME"))
 			dprintf(errfd, "vcc: %.1f ms\n", (now() - t0) * 1e3);
