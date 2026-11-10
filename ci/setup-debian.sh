@@ -30,10 +30,17 @@ if [ "${1:-}" = wasm ]; then
 	"$EMSDK/emsdk" install ${EMSDK_VERSION:-latest}
 	"$EMSDK/emsdk" activate ${EMSDK_VERSION:-latest}
 	if [ -n "${GITHUB_ENV:-}" ]; then
-		# emcc and node on PATH (emsdk_env.sh's exports, for the later steps)
-		. "$EMSDK/emsdk_env.sh" >/dev/null
+		# emcc and node on PATH (emsdk_env.sh's exports, for the later steps).
+		# From sh the script cannot find its own directory: source it from there.
+		cd "$EMSDK"
+		set +u
+		. ./emsdk_env.sh >/dev/null
+		set -u
+		cd - >/dev/null
 		echo "EMSDK=$EMSDK" >> "$GITHUB_ENV"
-		echo "EM_CONFIG=$EM_CONFIG" >> "$GITHUB_ENV"
+		# emsdk 7 sets no EM_CONFIG (the .emscripten next to emsdk is the default)
+		[ -z "${EM_CONFIG:-}" ] || echo "EM_CONFIG=$EM_CONFIG" >> "$GITHUB_ENV"
+		[ -z "${EMSDK_NODE:-}" ] || echo "EMSDK_NODE=$EMSDK_NODE" >> "$GITHUB_ENV"
 		echo "$PATH" | tr : '\n' | grep "^$EMSDK" >> "$GITHUB_PATH"
 	fi
 fi

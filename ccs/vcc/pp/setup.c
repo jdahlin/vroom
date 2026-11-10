@@ -2,9 +2,11 @@
 #include <sys/stat.h>
 #include "ppimpl.h"
 
+/* address space, backed as touched: NORESERVE, or Linux's heuristic overcommit
+   refuses the 16 GB shared region on a machine with less RAM + swap */
 VPRIV void *vm(size_t n)
 {
-	void *p = mmap(NULL, n, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANON, -1, 0);
+	void *p = mmap(NULL, n, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANON | MAP_NORESERVE, -1, 0);
 
 	if (p == MAP_FAILED) {
 		perror("vcc: mmap");
