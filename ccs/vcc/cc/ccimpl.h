@@ -369,6 +369,9 @@ VPRIV __attribute__((noinline)) void attribute_list_(cc *c, attrs *a);
 static inline void attribute_list(cc *c, attrs *a);
 static inline bool attrs_empty(const attrs *a);
 VPRIV void merge_attrs(attrs *to, const attrs *from);
+/* format.c */
+VPRIV uint16_t fmt_pack(int kind, unsigned idx, unsigned first);
+VPRIV void format_call(cc *c, uint32_t s, uint32_t *args, uint32_t n);
 VPRIV void asm_label(cc *c, attrs *a);
 /* declspec.c */
 VPRIV void unknown_type(cc *c, dspec *ds, bool allow_sc);
@@ -612,7 +615,7 @@ static inline bool attrs_empty(const attrs *a)
 	memcpy(w, p, sizeof(w));
 	for (int i = 0; i < 7; i++)
 		o |= w[i];
-	return !o && !p[56] && !p[57] && !p[58] && !p[59] && !p[60] && !p[61];
+	return !o && !p[56] && !p[57] && !p[58] && !p[59] && !p[60] && !p[61] && !a->fmt;
 }
 
 #endif

@@ -238,6 +238,8 @@ int pp_warnings(const pp *p);
 uint32_t pp_tok_end(const pp *p, uint32_t loc);
 /* the source text from loc b to loc e (one file), NULL if unknown */
 const char *pp_src(const pp *p, uint32_t b, uint32_t e, size_t *len);
+/* the source text from loc b to the end of its file, NULL if unknown */
+const char *pp_src_rest(const pp *p, uint32_t b, size_t *len);
 void pp_widen_parens(const pp *p, uint32_t *b, uint32_t *e);
 
 /*

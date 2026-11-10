@@ -740,6 +740,8 @@ static __attribute__((cold, noinline)) void range_compare(cc *c, uint32_t n, int
 	if (!is_integer(c, ot) || (cc_eval(c, os, &ov) && ov.kind == CV_INT) || !cc_eval(c, k, &v) || v.kind != CV_INT)
 		return;
 	w = ty_size(c, ot) * 8;
+	if (is_signed(c, ot) && !is_signed(c, N(k)->ty) && KIND(c, ot) != TY_BOOL)
+		return;	/* a signed operand in an unsigned comparison: not one interval (clang) */
 	if (KIND(c, ot) == TY_BOOL)
 		lo = 0, hi = 1;
 	else if (w >= 64 || w >= ty_size(c, N(k)->ty) * 8)

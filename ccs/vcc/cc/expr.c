@@ -818,6 +818,9 @@ static __attribute__((noinline)) uint32_t call(cc *c, uint32_t fn, uint32_t loc)
 		args.v[i] = a;
 		aflags |= N(a)->flags;
 	}
+	if (N(callee)->op == N_VAR && c->syms[N(callee)->a].kind == S_FUNC && args.n &&
+	    (c->syms[N(callee)->a].fmt || (c->syms[N(callee)->a].flags & SF_GLOBAL)))
+		format_call(c, N(callee)->a, args.v, args.n);
 	if (!c->o->no_builtin && args.n == 1 && N(callee)->op == N_VAR && c->syms[N(callee)->a].kind == S_FUNC &&
 	    (c->syms[N(callee)->a].flags & SF_GLOBAL)) {
 		/* clang: abs, labs and llabs declared with their library types are builtins (inline) */

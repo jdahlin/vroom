@@ -122,6 +122,7 @@ bench/vbench.py gate                # performance gate: instructions vs the merg
 bench/vas-enc.py $PWD/ccs/vcc/tests/vas   # vas encodings vs llvm-mc
 bench/pg/build.sh clang && bench/pg/build.sh vcc   # PostgreSQL (macOS, meson+ninja): build + meson test (~2 min each)
 bench/pg/build.sh vccd             # ... CC = vcc shim + private vccd (VCC_DELEGATE=bench/pg/cc for the rest)
+                                   # build: "warnings: N, not from clang: M" (M must be 0; logs in work/build-pg-*.build.log)
 bench/pg/speed.py                  # PostgreSQL compile speed: clang, clang -O0, vpp, vpp --batch
 ```
 Fast loop while iterating (cold numbers on a loaded machine, in brackets):

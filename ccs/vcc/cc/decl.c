@@ -38,6 +38,7 @@ VPRIV void apply_sym_attrs(cc *c, sym *s, const attrs *a)
 	if (a->aligned > s->align)
 		s->align = a->aligned;
 	if (a->weak) s->flags |= SF_WEAK;
+	if (a->fmt) s->fmt = a->fmt;
 	if (a->noreturn) s->flags |= SF_NORETURN;
 	if (a->always_inline) s->flags |= SF_ALWAYS_INLINE;
 	if (a->noinline) s->flags |= SF_NOINLINE;

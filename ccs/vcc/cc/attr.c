@@ -7,7 +7,7 @@ enum {
 	A_NONE, A_ALIGNED, A_PACKED, A_SECTION, A_MODE, A_CLEANUP, A_ALIAS, A_WEAK, A_USED, A_UNUSED,
 	A_NORETURN, A_ALWAYS_INLINE, A_NOINLINE, A_GNU_INLINE, A_TRANSPARENT_UNION, A_VISIBILITY,
 	A_CONSTRUCTOR, A_DESTRUCTOR, A_COUNTED_BY, A_VECTOR_SIZE, A_COLD, A_NONSTRING, A_MAY_ALIAS,
-	A_WEAKREF, A_NAKED, A_NOCF, A_ERROR, A_OVERLOADABLE, A_NOINSTR,
+	A_WEAKREF, A_NAKED, A_NOCF, A_ERROR, A_OVERLOADABLE, A_NOINSTR, A_FORMAT,
 	A_COUNT
 };
 
@@ -20,7 +20,7 @@ static const char *const attr_names[A_COUNT] = {
 	[A_COUNTED_BY] = "counted_by", [A_VECTOR_SIZE] = "vector_size", [A_COLD] = "cold",
 	[A_NONSTRING] = "nonstring", [A_MAY_ALIAS] = "may_alias", [A_WEAKREF] = "weakref",
 	[A_NOINSTR] = "no_instrument_function", [A_NAKED] = "naked", [A_NOCF] = "nocf_check", [A_ERROR] = "error",
-	[A_OVERLOADABLE] = "overloadable",
+	[A_OVERLOADABLE] = "overloadable", [A_FORMAT] = "format",
 };
 
 static uint32_t *attr_dir[NDIR];
@@ -227,6 +227,32 @@ __attribute__((noinline)) VPRIV void attribute_list_(cc *c, attrs *a)
 				next(c);
 				expect(c, T_RPAREN, "')'");
 				continue;
+			case A_FORMAT:	/* format(printf, i, j): checked at calls (format.c) */
+				if (accept(c, T_LPAREN)) {
+					int kind = 0;
+					i128 i = 0, j = 0;
+
+					if (is(c, T_IDENT)) {
+						const vident *v = &vintern_ents[tok(c)->id];
+						const char *s = v->s;
+						size_t l = v->len;
+
+						if (l > 4 && s[0] == '_' && s[1] == '_' && s[l - 1] == '_' && s[l - 2] == '_')
+							s += 2, l -= 4;
+						if (l > 4 && !memcmp(s, "gnu_", 4))
+							s += 4, l -= 4;
+						kind = l == 6 && !memcmp(s, "printf", 6) ? 1 : l == 5 && !memcmp(s, "scanf", 5) ? 2 : 0;
+						next(c);
+					}
+					if (accept(c, T_COMMA))
+						const_expr(c, &i, NULL);
+					if (accept(c, T_COMMA))
+						const_expr(c, &j, NULL);
+					expect(c, T_RPAREN, "')'");
+					if (kind && i > 0 && j >= 0)
+						a->fmt = fmt_pack(kind, (unsigned)i, (unsigned)j);
+				}
+				continue;
 			case A_VECTOR_SIZE: {
 				i128 v;
 
@@ -292,6 +318,7 @@ VPRIV void merge_attrs(attrs *to, const attrs *from)
 	if (from->counted_by) to->counted_by = from->counted_by;
 	if (from->visibility) to->visibility = from->visibility;
 	if (from->errmsg) to->errmsg = from->errmsg;
+	if (from->fmt) to->fmt = from->fmt;
 	/* the 0/1 flags packed .. noinstr: or them bytewise */
 	{
 		char *t = (char *)&to->packed;

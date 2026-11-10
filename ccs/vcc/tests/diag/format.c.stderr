@@ -1,0 +1,60 @@
+format.c:10:23: warning: format specifies type 'int' but the argument has type 'long' [-Wformat]
+   10 |         printf("%d items\n", count);
+      |                 ~~           ^~~~~
+      |                 %ld
+format.c:11:15: warning: more '%' conversions than data arguments [-Wformat-insufficient-args]
+   11 |         printf("%s: %d\n", name);
+      |                     ~^
+format.c:12:23: warning: data argument not used by format string [-Wformat-extra-args]
+   12 |         printf("%s\n", name, n);
+      |                ~~~~~~        ^
+format.c:13:12: warning: field width should have type 'int', but argument has type 'long' [-Wformat]
+   13 |         printf("%*s|\n", count, name);
+      |                 ~~^      ~~~~~
+format.c:14:12: warning: invalid conversion specifier '\x0a' [-Wformat-invalid-specifier]
+   14 |         printf("%q\n", n);
+      |                 ~~^
+format.c:15:14: warning: invalid conversion specifier '\x0a' [-Wformat-invalid-specifier]
+   15 |         printf("100%\n");
+      |                    ~^
+format.c:16:11: warning: flag '#' results in undefined behavior with 's' conversion specifier [-Wformat]
+   16 |         printf("%#s %+u\n", name, width);
+      |                 ~^~
+format.c:16:15: warning: flag '+' results in undefined behavior with 'u' conversion specifier [-Wformat]
+   16 |         printf("%#s %+u\n", name, width);
+      |                     ~^~
+format.c:17:23: warning: format specifies type 'int' but the argument has type 'double' [-Wformat]
+   17 |         printf("%d %f %p\n", ratio, n, n);
+      |                 ~~           ^~~~~
+      |                 %f
+format.c:17:30: warning: format specifies type 'double' but the argument has type 'int' [-Wformat]
+   17 |         printf("%d %f %p\n", ratio, n, n);
+      |                    ~~               ^
+      |                    %d
+format.c:17:33: warning: format specifies type 'void *' but the argument has type 'int' [-Wformat]
+   17 |         printf("%d %f %p\n", ratio, n, n);
+      |                       ~~               ^
+      |                       %d
+format.c:18:24: warning: format specifies type 'unsigned long' but the argument has type 'unsigned int' [-Wformat]
+   18 |         fprintf(out, "%lu\n", width);
+      |                       ~~~     ^~~~~
+      |                       %u
+format.c:19:14: warning: format specifies type 'int *' but the argument has type 'short *' [-Wformat]
+   19 |         scanf("%d", small);
+      |                ~~   ^~~~~
+      |                %hd
+format.c:20:20: warning: format specifies type 'char *' but the argument has type 'int' [-Wformat]
+   20 |         report(1, "%s\n", n);
+      |                    ~~     ^
+      |                    %d
+format.c:22:9: warning: format string is not a string literal (potentially insecure) [-Wformat-security]
+   22 |         printf(name);
+      |                ^~~~
+format.c:22:9: note: treat the string as an argument to avoid this
+   22 |         printf(name);
+      |                ^
+      |                "%s", 
+format.c:23:16: warning: cannot mix positional and non-positional arguments in format string [-Wformat]
+   23 |         printf("%1$d %d\n", n, n);
+      |                      ~^
+16 warnings generated.

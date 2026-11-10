@@ -49,6 +49,7 @@ typedef struct attrs {		/* the attributes of one declaration */
 	uint8_t packed, transparent, used, unused, weak, noreturn, constructor, destructor;
 	uint8_t nonstring, may_alias, cold, gnu_inline, always_inline, noinline, ainline, error_fn;
 	uint8_t overloadable, noinstr;
+	uint16_t fmt;		/* format(...): fmt_pack() */
 } attrs;
 
 typedef struct asmop {

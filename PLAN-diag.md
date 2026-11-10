@@ -458,7 +458,25 @@ Varje delsteg: nya fall i `tests/diag/` (snapshots, och clang som mätpunkt), la
    clang rapporterar out-of-range-varningar i omvänd ordning inom ett fullt uttryck (efter
    uttrycket), vcc i källordning.  `vcc-sema.py warn` 879/879, PostgreSQL 0, grinden ok
    (fe +0.54 % mot merge-basen; konstantjämförelsen provar bara när en operand är smalare).
-   Kvar i D5.1: `-Wformat`, sedan `-Wall`:s `-Wunused-*`.
+   **`-Wformat` klart (2026-11-10):** cc/format.c.  `format(printf|scanf, i, j)` (även
+   `__printf__`, `gnu_printf`) och C-bibliotekets funktioner enligt clangs Builtins.inc (inte
+   under `-fno-builtin`, som kärnan använder).  Formatsträngen kontrolleras när den är en
+   literal (även en const-variabel med literal som initierare, båda grenarna av ett `?:` med
+   okänt villkor): typer mot clangs matchesType (tecken och heltalsbefordran förlåts, `long`
+   mot `long long` inte), fix-it till den specifikation som passar, för få/för många
+   argument (clangs UncoveredArg: ett argument är bara över om ingen gren läser det), `*`
+   för bredd och precision, positionella argument, ogiltiga konverteringar, odefinierade
+   flaggor, `-Wformat-security`.  Literalens byte avbildas tillbaka på sina källkolumner
+   genom att tokenerna avkodas igen (escapes, konkatenering); misslyckas det hamnar allt på
+   literalens plats.  Testfallet format.c är textidentiskt med clang.  Kvar: typedef-namn
+   (`'size_t' (aka 'unsigned long')`, fix-it `%zu`: vcc har inga typedef-namn i typer, ger
+   `%lu`), Windows `I64`, kontroll av anrop via funktionspekare med format-attribut.
+   **Rättelse:** de tidigare raderna "PostgreSQL 0 varningar" lästes ur fel logg
+   (kompilatorns utdata hamnar i `work/build-pg-vcc.build.log`).  I rätt logg gav
+   `-Wtautological-constant-out-of-range-compare` (d9e360e) två falska varningar (en `int`
+   mot en osignerad jämförelse är inte ett intervall), nu rättat; `bench/pg/build.sh` skriver
+   nu ut vcc:s varningar som clang inte ger: 0.  Kärnan 879/879, grinden ok (fe +0.66 %).
+   Kvar i D5.1: `-Wall`:s `-Wunused-*`.
 2. **Makron**: expanderad text med caret i, ramar från systemheaders vikta,
    flernivå-"expanded from" (TODO.md "Diagnostic details").
 3. **`static_assert`**: operanderna utvärderade (`48 == 56`), och för `sizeof` en

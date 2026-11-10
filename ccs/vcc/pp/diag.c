@@ -268,6 +268,16 @@ const char *pp_src(const pp *p, uint32_t b, uint32_t e, size_t *len)
 	return f->f->src + (b - f->base);
 }
 
+const char *pp_src_rest(const pp *p, uint32_t b, size_t *len)
+{
+	const fent *f;
+
+	if (!loc_ok(p, b, &f))
+		return NULL;
+	*len = f->f->size - (b - f->base);
+	return f->f->src + (b - f->base);
+}
+
 /* the range [*b, *e) widened by the '(' and ')' around it (blanks between), when
    both are there in the same file: clang's ParenExpr range, found on the error path */
 void pp_widen_parens(const pp *p, uint32_t *b, uint32_t *e)
