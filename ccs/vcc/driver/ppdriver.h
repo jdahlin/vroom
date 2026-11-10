@@ -4,6 +4,9 @@ typedef struct ppd_env {
 	const char *cwd;	/* relative paths are relative to this (NULL: process cwd) */
 	int outfd, errfd;	/* output without -o; diagnostics */
 	char **envp;		/* the client's environment (vccd); NULL: this process's */
+	int infd;		/* the input `-` is read from (0: this process's stdin) */
+	const char *in_src;	/* non-NULL: the input `-` already read (vccd keeps it for a fallback) */
+	size_t in_len;
 } ppd_env;
 
 /* the client's umask for files a job creates (-1: the process's own) */

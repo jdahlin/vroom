@@ -248,8 +248,10 @@ def main():
         for args in ('un1.o un2.o -e f', 'st.o lu.a', 'un3.o un1.o -e a1', 'sp.o', 'sp.o un3.o', 'un3.o sp.o',
                      'nope1.o nope2.o'):
             errs = []
-            for exe in (VLINK, LLD):
-                p = subprocess.run([exe] + args.split() + ['-o', 'u.out'], cwd=t, capture_output=True, text=True)
+            # lld scans relocations in parallel: with threads the order of its errors (and so
+            # which two get "did you mean") varies run to run; vlink's is lld's sequential one
+            for exe in ([VLINK], [LLD, '--threads=1']):
+                p = subprocess.run(exe + args.split() + ['-o', 'u.out'], cwd=t, capture_output=True, text=True)
                 errs.append(re.sub(r'^\S+: (error|warning): ', r'\1: ', p.stderr, flags=re.M))
             if errs[0] != errs[1]:
                 bad += 1
