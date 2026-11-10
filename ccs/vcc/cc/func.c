@@ -562,6 +562,7 @@ VPRIV void function_def(cc *c, uint32_t s, const declr *d)
 	/* for the emitter: the parameter syms, on the body block */
 	N(body)->a = d->psyms;
 	N(body)->aux = (uint16_t)d->npsyms;
+	rt_flush(c);
 	c->fn = saved_fn;
 	c->fnerr = saved_fnerr;
 }

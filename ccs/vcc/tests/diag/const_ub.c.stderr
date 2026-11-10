@@ -12,21 +12,21 @@ const_ub.c:7:13: warning: shift count is negative [-Wshift-count-negative]
       = help: a shift by a negative count is undefined
 const_ub.c:8:22: warning: overflow in expression; result is -2'147'483'648 with type 'int' [-Winteger-overflow]
     8 | int big = 2147483647 + 1;
-      |                      ^
+      |           ~~~~~~~~~~~^~~
       = help: the exact result 2'147'483'648 is outside 'int' (-2'147'483'648 to 2'147'483'647); signed overflow is undefined
 const_ub.c:9:23: warning: overflow in expression; result is 2'147'483'647 with type 'int' [-Winteger-overflow]
     9 | int low = -2147483647 - 2;
-      |                       ^
+      |           ~~~~~~~~~~~~^~~
       = help: the exact result -2'147'483'649 is outside 'int' (-2'147'483'648 to 2'147'483'647); signed overflow is undefined
 const_ub.c:11:22: warning: overflow in expression; result is -2'147'483'648 with type 'int' [-Winteger-overflow]
    11 | int f(void) { return -(-2147483647 - 1) + 1 / 0; }
-      |                      ^
+      |                      ^~~~~~~~~~~~~~~~~~
       = help: the exact result 2'147'483'648 is outside 'int' (-2'147'483'648 to 2'147'483'647); signed overflow is undefined
 const_ub.c:11:45: warning: division by zero is undefined [-Wdivision-by-zero]
    11 | int f(void) { return -(-2147483647 - 1) + 1 / 0; }
       |                                             ^ ~
 const_ub.c:12:28: warning: overflow in expression; result is 0 with type 'int' [-Winteger-overflow]
    12 | int g(void) { return 65536 * 65536; }
-      |                            ^
+      |                      ~~~~~~^~~~~~~
       = help: the exact result 4'294'967'296 is outside 'int' (-2'147'483'648 to 2'147'483'647); signed overflow is undefined
 8 warnings generated.

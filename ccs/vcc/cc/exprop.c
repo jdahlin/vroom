@@ -490,6 +490,12 @@ static __attribute__((cold, noinline)) void overflow_check(cc *c, uint32_t n)
 			  tyname(c, t));
 	if (!d)
 		return;
+	{
+		/* (the operands: n's own span is not set yet) */
+		pp_span r = x->op == N_BINARY ? (pp_span){ rng(c, x->a).b, rng(c, x->b).e } : rng(c, x->a);
+
+		pp_diag_label(c->p, d, x->op == N_BINARY ? r.b : x->loc, r.e, NULL);
+	}
 	digits(es, sizeof es, v), digits(los, sizeof los, lo), digits(his, sizeof his, hi);
 	pp_diag_help(c->p, d, "the exact result %s is outside '%s' (%s to %s); signed overflow is undefined", es, tyname(c, t),
 		     los, his);
@@ -509,9 +515,15 @@ static void runtime_warn(cc *c, int op, uint32_t l, uint32_t r, uint32_t loc)
 		return;	/* no warning: no range (pp_tok_end) either */
 	rr = rng(c, r);
 	if (op == T_SLASH || op == T_PERCENT) {
-		if (!cv.i)
-			cc_warnx(c, "division-by-zero", true, NULL, loc, &rr, 1, NULL, 0, "%s by zero is undefined",
-			      op == T_SLASH ? "division" : "remainder");
+		if (!cv.i) {
+			vdiag *d = cc_warn_begin(c, "division-by-zero", true, NULL, loc, "%s by zero is undefined",
+						 op == T_SLASH ? "division" : "remainder");
+
+			if (d) {
+				pp_diag_label(c->p, d, rr.b, rr.e, NULL);
+				rt_emit(c, d);
+			}
+		}
 		return;
 	}
 	{
@@ -529,7 +541,7 @@ static void runtime_warn(cc *c, int op, uint32_t l, uint32_t r, uint32_t loc)
 			pp_diag_help(c->p, d, "'%s' is %llu bits wide: a shift by %lld or more is undefined%s", tyname(c, pt),
 				     (unsigned long long)w, (long long)w,
 				     w < 64 && cv.i < 64 && op == T_LESSLESS ? "; shift a 64-bit value (1ULL << n)" : "");
-		pp_diag_emit(c->p, d);
+		rt_emit(c, d);
 	}
 }
 
@@ -777,7 +789,7 @@ static __attribute__((cold, noinline)) void range_compare(cc *c, uint32_t n, int
 		i128s_(ls, sizeof ls, lo), i128s_(hs, sizeof hs, hi);
 		pp_diag_help(c->p, d, "'%s' holds %s to %s", tyname(c, ot), ls, hs);
 	}
-	pp_diag_emit(c->p, d);
+	rt_emit(c, d);
 }
 
 static inline void range_cmp(cc *c, uint32_t n, uint32_t loc)

@@ -339,10 +339,12 @@ static __attribute__((cold, noinline)) void const_conv(cc *c, uint32_t n, qty to
 			  tyname(c, from), tyname(c, QUNQ(to)), a, b);
 	if (!d)
 		return;
+	if (c->cv_what && !c->ibr && c->cv_loc)	/* clang: the context's token too (name, '=', callee, 'return') */
+		pp_diag_label(c->p, d, c->cv_loc, pp_tok_end(c->p, c->cv_loc), NULL);
 	pp_diag_label(c->p, d, r.b, r.e, NULL);
 	pp_diag_macro(d, a, (uint32_t)strlen(a));	/* clang: "expanded from macro" at the constant */
 	pp_diag_help(c->p, d, "'%s' holds %s to %s: cast the value if the wrap to %s is intended", tyname(c, QUNQ(to)), los, his, b);
-	pp_diag_emit(c->p, d);
+	rt_emit(c, d);	/* (clang: DiagRuntimeBehavior) */
 }
 
 /* -Wconstant-conversion for a conversion of n to the integer type to (gated: narrowing only) */
@@ -529,21 +531,25 @@ VPRIV void bounds_warn(cc *c, uint32_t n, bool addr)
 		return;
 	{
 		pp_span r[2] = { rng(c, a), rng(c, x->b) };
-		bool on;
+		vdiag *d;
 
 		if (i < 0)
-			on = cc_warnx(c, "array-bounds", true, NULL, r[0].b, &r[1], 1, NULL, 0,
-				   "array index %lld is before the beginning of the array", (long long)i);
+			d = cc_warn_begin(c, "array-bounds", true, NULL, r[0].b,
+					  "array index %lld is before the beginning of the array", (long long)i);
 		else
-			on = cc_warnx(c, "array-bounds", true, NULL, r[0].b, &r[1], 1, NULL, 0,
-				   "array index %lld is past the end of the array (that has type '%s')", (long long)i,
-				   arr_tyname(c, N(a)->ty));
-		if (on && s) {
+			d = cc_warn_begin(c, "array-bounds", true, NULL, r[0].b,
+					  "array index %lld is past the end of the array (that has type '%s')", (long long)i,
+					  arr_tyname(c, N(a)->ty));
+		if (!d)
+			return;
+		pp_diag_label(c->p, d, r[1].b, r[1].e, NULL);
+		if (s) {
 			int m;
 			const char *nm = idname(c->syms[s].name, &m);
 
-			note(c, c->syms[s].ple ? c->syms[s].plb : c->syms[s].loc, "array '%.*s' declared here", m, nm);
+			pp_diag_note(c->p, d, c->syms[s].ple ? c->syms[s].plb : c->syms[s].loc, "array '%.*s' declared here", m, nm);
 		}
+		rt_emit(c, d);	/* (clang: DiagRuntimeBehavior) */
 	}
 }
 

@@ -608,6 +608,8 @@ again:
 
 				named = c->syms[s].ty;
 				c->syms[s].flags |= SF_REF;	/* (-Wunused-local-typedef) */
+				if (unlikely(c->syms[s].flags & SF_DEPR))
+					depr_use(c, s, t->loc);
 				have_named = true;
 				any = true;
 				next(c);
@@ -788,6 +790,15 @@ again:
 			}
 			body = is(c, T_LBRACE) || (kind == TY_ENUM && is(c, T_COLON));
 			ti = tag_lookup_or_new(c, kind, name, loc, body, !body && is(c, T_SEMI) && !c->in_struct);
+			if (name && unlikely(attrs_depr(c, &pre) || c->has_depr_tag)) {	/* deprecated tags */
+				uint32_t ts = lookup_tag(c, name);
+
+				if (ts && attrs_depr(c, &pre)) {
+					apply_sym_attrs(c, &c->syms[ts], &pre);
+					c->has_depr_tag = true;
+				} else if (ts && !body && (c->syms[ts].flags & SF_DEPR))
+					depr_use(c, ts, loc);
+			}
 			if (body) {
 				tag *r = &c->tags[ti];
 
@@ -796,7 +807,7 @@ again:
 					note(c, r->loc, "previous definition is here");
 				}
 				if (kind == TY_ENUM) {
-					merge_attrs(&post, &pre);
+					merge_attrs(c, &post, &pre);
 					enum_body(c, ti, &post);
 					tag_body_end(c, kind);
 				} else {

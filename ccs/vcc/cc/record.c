@@ -136,7 +136,7 @@ __attribute__((noinline)) VPRIV void struct_body(cc *c, uint32_t ti)
 				f.width = (uint16_t)w;
 			}
 			attribute_list(c, &d.at);
-			merge_attrs(&d.at, &ds.at);
+			merge_attrs(c, &d.at, &ds.at);
 			if (d.at.mode) {
 				int k = mode_kind(c, d.at.mode, is_signed(c, t));
 
@@ -145,6 +145,7 @@ __attribute__((noinline)) VPRIV void struct_body(cc *c, uint32_t ti)
 			}
 			f.ty = t;
 			f.counted_by = d.at.counted_by;
+			f.depr = unlikely(attrs_depr(c, &d.at)) ? d.at.ext : 0;
 			if (is_func(c, t))
 				cc_error(c, d.loc, "field '%.*s' declared as a function", IDF(d.name));
 			else if (!ds.invalid && !complete(c, t) && !(is_array(c, t) && (T(c, t)->flags & TF_INCOMPLETE))) {
@@ -234,6 +235,8 @@ VPRIV void enum_body(cc *c, uint32_t ti, attrs *after)
 		s = sym_new(c, S_ENUMCONST, name, v >= INT32_MIN && v <= INT32_MAX ? prim(TY_INT) :
 						 v >= 0 && v <= UINT32_MAX ? prim(TY_UINT) : v >= INT64_MIN && v <= INT64_MAX ? prim(TY_LONG) : prim(TY_ULONG), loc);
 		c->syms[s].val = (int64_t)v;
+		if (unlikely(attrs_depr(c, &ea)))
+			apply_sym_attrs(c, &c->syms[s], &ea);
 		sym_bind(c, s);
 		vpush(c, &cs, s);
 		if (!accept(c, T_COMMA))

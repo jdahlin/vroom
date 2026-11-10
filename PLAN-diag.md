@@ -538,6 +538,25 @@ Varje delsteg: nya fall i `tests/diag/` (snapshots, och clang som mätpunkt), la
    Kvar (TODO.md "Invalid code accepted"): `-fsyntax-only` saknar "initializer element is not
    a compile-time constant" (kontrollen görs i emit/data.c).
 8. **Attribut**: `format`, `nonnull`, `warn_unused_result`, `deprecated("...")`.
+   **Status (2026-11-10): klart.**  cc/attrcheck.c.  `nonnull` (utan index: varje
+   pekarparameter; med index; på en parameter) ger `-Wnonnull` för ett null-argument (clangs
+   CheckNonNullExpr: en konstant som är falsk som villkor), på clangs plats (anropets `)` för
+   funktionens rena `nonnull`, annars argumentet).  `warn_unused_result` och `nodiscard`
+   (med meddelande) ger `-Wunused-result` för ett bortkastat anrop.  `deprecated` och
+   `unavailable` (med meddelande) på funktioner, variabler, typedefs, taggar, uppräknare och
+   medlemmar ger `-Wdeprecated-declarations` respektive ett fel, med noten "has been
+   explicitly marked deprecated here"; inget inuti en funktion som själv är deprecated.
+   Varningarna som clang ger via DiagRuntimeBehavior (constant-conversion, division-by-zero,
+   shift-count, tautological-constant-out-of-range, array-bounds, nonnull) köas nu till
+   funktionens slut som i clang (`rt_emit`), så ordningen mot omedelbara varningar stämmer.
+   Intervallen följer clang: konverteringens sammanhang (namnet, `=`, den anropade, `return`)
+   markeras, överspill markerar operanderna.  Attributens sällsynta del ligger i en sidotabell
+   (`attrx`, `attrs.ext` i den oanvända `flags`-platsen) så att `attrs` stannar på 64 byte, och
+   ingår i deklarationscachen (dess plats flyttas som övriga).  Testfallet attributes.c är
+   textidentiskt med clang; const_conversion/const_ub omskrivna (nya intervall, som clang).
+   Kärnan 879/879, PostgreSQL 0 varningar som clang inte ger, vccd-test, grinden ok (fe
+   +0.96 % mot merge-basen; denna ändring +0.18 %: parametrarnas nonnull söks bara när någon
+   finns, den anropades plats räknas en gång per anrop).
 
 ### D6. Fix-its, `--fix` och `--explain`
 

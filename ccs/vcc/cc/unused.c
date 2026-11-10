@@ -25,6 +25,10 @@ VPRIV void discard(cc *c, uint32_t e)
 	if (!e)
 		return;
 	n = N(e);
+	if (n->op == N_CALL) {
+		result_discarded(c, e);
+		return;
+	}
 	if (n->op == N_ASSIGN)
 		rmw = n->aux != 0;
 	else if (n->op >= N_PREINC && n->op <= N_POSTDEC)

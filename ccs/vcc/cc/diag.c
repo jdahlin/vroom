@@ -319,6 +319,29 @@ VPRIV void fwd_note(cc *c, qty t)
 
 const char *const w_all[] = { "all", "most", NULL };
 
+/* a warning clang gives through DiagRuntimeBehavior: inside a function it waits for the
+   end of the body (clang's PossiblyUnreachableDiags), elsewhere it goes out now */
+VPRIV void rt_emit(cc *c, vdiag *d)
+{
+	if (!c->fn) {
+		pp_diag_emit(c->p, d);
+		return;
+	}
+	if (c->nrtq == c->rtqcap) {
+		c->rtqcap = c->rtqcap ? c->rtqcap * 2 : 8;
+		c->rtq = realloc(c->rtq, c->rtqcap * sizeof(vdiag *));
+	}
+	c->rtq[c->nrtq++] = d;
+}
+
+/* the function's body is done */
+VPRIV void rt_flush(cc *c)
+{
+	for (uint32_t i = 0; i < c->nrtq; i++)
+		pp_diag_emit(c->p, c->rtq[i]);
+	c->nrtq = 0;
+}
+
 /* a warning of clang's flag (on: on by default); false if it is off */
 __attribute__((format(printf, 10, 11)))
 VPRIV bool cc_warnx(cc *c, const char *flag, bool on, const char *const *groups, uint32_t loc,

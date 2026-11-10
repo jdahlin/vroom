@@ -45,12 +45,20 @@ typedef struct attrs {		/* the attributes of one declaration */
 	uint32_t counted_by;	/* identifier id */
 	uint32_t errmsg;	/* error("..."): string index + 1, 0: none */
 	uint32_t visibility;
-	uint32_t flags;		/* SF_* */
+	uint32_t ext;		/* the rare part: attrx index, 0: none (never shared when written: attrx_mut) */
 	uint8_t packed, transparent, used, unused, weak, noreturn, constructor, destructor;
 	uint8_t nonstring, may_alias, cold, gnu_inline, always_inline, noinline, ainline, error_fn;
 	uint8_t overloadable, noinstr;
 	uint16_t fmt;		/* format(...): fmt_pack() */
 } attrs;
+
+typedef struct attrx {		/* attributes checked at uses (attrcheck.c) */
+	uint8_t wur;		/* 1: warn_unused_result, 2: nodiscard */
+	uint8_t depr;		/* 1: deprecated, 2: unavailable */
+	uint32_t deprloc;	/* the deprecated/unavailable attribute's name */
+	uint32_t deprmsg, wurmsg;	/* their message: string index + 1, 0: none */
+	uint64_t nonnull;	/* nonnull(i, ...): bit i - 1; ~0: every pointer parameter */
+} attrx;
 
 typedef struct asmop {
 	uint32_t name;		/* [name] id, 0 */
@@ -151,6 +159,8 @@ struct cc {
 	uint32_t nlabel;
 	attrs *attr;
 	uint32_t nattr;
+	attrx *attrx;
+	uint32_t nattrx;
 	casm *asms;
 	uint32_t nasm;
 
@@ -178,6 +188,10 @@ struct cc {
 	int cexpr;
 	uint32_t *utd, nutd;	/* block-scope typedefs never named: -Wunused-local-typedef at the TU's end */
 	int fnerr;		/* errors when the function's body began: none since, its unused-variable warnings */
+	vdiag **rtq;		/* clang's DiagRuntimeBehavior in a function: emitted at the body's end */
+	uint32_t nrtq, rtqcap;
+	bool has_depr_tag;
+	uint32_t nnparam;	/* parameters declared nonnull so far */	/* some tag is deprecated: tag uses are checked */
 	int bcp;		/* in __builtin_constant_p's argument: unevaluated, but its names are used */		/* in an integer constant expression (clang: no runtime-behavior warnings) */
 	attrs pend;		/* attributes before a block-scope declaration */
 	int in_struct;		/* parsing a struct/union body */

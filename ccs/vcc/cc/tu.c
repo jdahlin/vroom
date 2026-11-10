@@ -2,7 +2,7 @@
 #include "ccimpl.h"
 
 /* the per-TU tables, mapped once and reused (cc_init takes a set, cc_free gives it back) */
-static vmpool ccpool = VMPOOL_INIT(21);
+static vmpool ccpool = VMPOOL_INIT(22);
 static _Thread_local vmreg *ccr;
 
 VPRIV void *halloc(cc *c, size_t n)
@@ -46,6 +46,7 @@ static void cc_init(cc *c, pp *p, const cc_opts *o)
 	c->lzt = vmreg_get(&ccr[18], (size_t)1 << 32, "cc.lzt");
 	c->lzf = vmreg_get(&ccr[19], (size_t)1 << 28, "cc.lzf");
 	c->lzs = vmreg_get(&ccr[20], (size_t)1 << 31, "cc.lzs");
+	c->attrx = vmreg_get(&ccr[21], (size_t)1 << 26, "cc.attrx");
 	c->hend = c->heap + ((size_t)1 << 32);
 	c->dops = halloc(c, DOPS_MAX * sizeof(dop));
 	c->ndops = 0;
@@ -57,7 +58,8 @@ static void cc_init(cc *c, pp *p, const cc_opts *o)
 	c->fnhash = halloc(c, c->fnhcap * sizeof(uint32_t));
 	memset(c->fnhash, 0, c->fnhcap * sizeof(uint32_t));
 	/* index 0 of every table is "none" */
-	c->nsym = c->nnode = c->ntag = c->nlabel = c->nattr = c->nstr = 1;
+	c->nsym = c->nnode = c->ntag = c->nlabel = c->nattr = c->nattrx = c->nstr = 1;
+	memset(&c->attrx[0], 0, sizeof(c->attrx[0]));	/* (attrs.ext 0: none, read without a test) */
 	memset(c->cplx, 0, sizeof(c->cplx));
 	c->nlist = 1;
 	/* basic types: index == kind */
@@ -149,9 +151,11 @@ static void cc_free(cc *c)
 	vmreg_put(&ccr[18], USED(c->nlzt, c->lzt));
 	vmreg_put(&ccr[19], USED(c->nlzf, c->lzf));
 	vmreg_put(&ccr[20], (size_t)c->nlzs + 64);
+	vmreg_put(&ccr[21], USED(c->nattrx, c->attrx));
 	free(c->cases);
 	free(c->pweak);
 	free(c->utd);
+	free(c->rtq);
 #undef USED
 	vmpool_give(&ccpool, ccr);
 	ccr = NULL;

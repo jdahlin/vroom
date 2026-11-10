@@ -19,7 +19,7 @@ static void skip_vla_init(cc *c)
 
 /* ---------------- declarations ---------------- */
 
-static uint32_t new_attrs(cc *c, const attrs *a)
+VPRIV uint32_t new_attrs(cc *c, const attrs *a)
 {
 	uint32_t i = c->nattr++;
 
@@ -32,13 +32,20 @@ VPRIV void apply_sym_attrs(cc *c, sym *s, const attrs *a)
 	if (attrs_empty(a))
 		return;		/* (no record: sym_attrs() in emit.c reads attrs 0 as none) */
 	if (s->attrs)
-		merge_attrs(&c->attr[s->attrs], a);
+		merge_attrs(c, &c->attr[s->attrs], a);
 	else
 		s->attrs = new_attrs(c, a);
 	if (a->aligned > s->align)
 		s->align = a->aligned;
 	if (a->weak) s->flags |= SF_WEAK;
 	if (a->fmt) s->fmt = a->fmt;
+	if (unlikely(a->ext)) {
+		const attrx *x = &c->attrx[a->ext];
+
+		if (x->depr) s->flags |= SF_DEPR;
+		if (x->nonnull) s->flags |= SF_NONNULL;
+		if (x->wur) s->flags |= SF_WUR;
+	}
 	if (a->noreturn) s->flags |= SF_NORETURN;
 	if (a->always_inline) s->flags |= SF_ALWAYS_INLINE;
 	if (a->noinline) s->flags |= SF_NOINLINE;
@@ -241,7 +248,7 @@ static uint32_t declare(cc *c, const dspec *ds, declr *d, qty t, bool file)
 	uint32_t s, prev;
 	int kind;
 
-	merge_attrs(&at, &ds->at);
+	merge_attrs(c, &at, &ds->at);
 	if (ds->align > at.aligned)
 		at.aligned = ds->align;
 	if (d->at.mode && is_integer(c, t)) {
@@ -271,6 +278,8 @@ static uint32_t declare(cc *c, const dspec *ds, declr *d, qty t, bool file)
 		c->syms[s].sc = SC_TYPEDEF;
 		if (at.unused || at.used)
 			c->syms[s].flags |= SF_REF;	/* (no -Wunused-local-typedef) */
+		if (unlikely(attrs_depr(c, &at)))
+			apply_sym_attrs(c, &c->syms[s], &at);
 		sym_bind(c, s);
 		if (is_record(c, t) || KIND(c, t) == TY_ENUM) {
 			tag *r = &c->tags[T(c, t)->aux];
@@ -818,7 +827,12 @@ VPRIV void declaration(cc *c, vec *out, bool file)
 		}
 		if (d.has_func && c->syms[s].kind == S_FUNC && is_func(c, c->syms[s].ty) &&
 		    d.npsyms == T(c, c->syms[s].ty)->n)
+		{
 			c->syms[s].psyms = d.psyms + 1, c->syms[s].plb = d.plb, c->syms[s].ple = d.ple;
+			for (uint32_t i = 0; unlikely(c->nnparam) && i < d.npsyms; i++)	/* a nonnull parameter: checked at calls */
+				if (c->syms[c->lists[d.psyms + i]].flags & SF_NONNULL)
+					c->syms[s].flags |= SF_NONNULL;
+		}
 		if (d.at.vecsize || ds.at.vecsize || d.at.mode || ds.at.mode)
 			t = c->syms[s].ty;	/* declare made it a vector / applied mode: initialize that */
 		if (is_func(c, t) && is(c, T_LBRACE)) {

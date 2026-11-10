@@ -82,6 +82,7 @@ typedef struct field {
 	uint8_t invalid;	/* its type was an error: uses say nothing more (clang) */
 	uint32_t loc;
 	uint32_t counted_by;	/* counted_by(member): its identifier id */
+	uint32_t depr;		/* deprecated/unavailable: its attrx record (0: none) */
 } field;
 
 enum {
@@ -130,6 +131,9 @@ enum {
 	SF_LAZY = 1u << 17,	/* a header function whose body is kept as tokens, parsed only if referenced */
 	SF_REF = 1u << 18,	/* named anywhere (also in sizeof/typeof): a lazy body must be parsed */
 	SF_INVALID = 1u << 19,	/* its declaration's type was an error: uses say nothing more (clang) */
+	SF_DEPR = 1u << 20,	/* deprecated or unavailable: a use warns (cc/attrcheck.c) */
+	SF_NONNULL = 1u << 21,	/* function: nonnull parameters (its own or a parameter's attribute); parameter: nonnull */
+	SF_WUR = 1u << 22,	/* warn_unused_result / nodiscard */
 };
 
 typedef struct sym {

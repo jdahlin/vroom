@@ -369,11 +369,20 @@ static inline bool at_std_attr(cc *c);
 VPRIV __attribute__((noinline)) void attribute_list_(cc *c, attrs *a);
 static inline void attribute_list(cc *c, attrs *a);
 static inline bool attrs_empty(const attrs *a);
-VPRIV void merge_attrs(attrs *to, const attrs *from);
+VPRIV void merge_attrs(cc *c, attrs *to, const attrs *from);
+VPRIV attrx *attrx_mut(cc *c, attrs *a);
 /* format.c */
 VPRIV uint16_t fmt_pack(int kind, unsigned idx, unsigned first);
 VPRIV void format_call(cc *c, uint32_t s, uint32_t *args, uint32_t n);
 VPRIV void discard(cc *c, uint32_t e);
+VPRIV void rt_emit(cc *c, vdiag *d);
+VPRIV void rt_flush(cc *c);
+/* attrcheck.c */
+VPRIV void depr_use(cc *c, uint32_t s, uint32_t loc);
+VPRIV void depr_report(cc *c, uint32_t name, uint32_t x, uint32_t loc);
+VPRIV uint32_t new_attrs(cc *c, const attrs *a);
+VPRIV void nonnull_call(cc *c, uint32_t fs, const uint32_t *args, uint32_t n, uint32_t rp);
+VPRIV void result_discarded(cc *c, uint32_t e);
 VPRIV void unused_locals(cc *c, uint32_t from, uint32_t to);
 VPRIV void unused_globals(cc *c);
 VPRIV void asm_label(cc *c, attrs *a);
@@ -620,6 +629,12 @@ static inline bool attrs_empty(const attrs *a)
 	for (int i = 0; i < 7; i++)
 		o |= w[i];
 	return !o && !p[56] && !p[57] && !p[58] && !p[59] && !p[60] && !p[61] && !a->fmt;
+}
+
+/* deprecated (1) or unavailable (2), 0: neither (attrx 0 is all zero) */
+static inline unsigned attrs_depr(const cc *c, const attrs *a)
+{
+	return c->attrx[a->ext].depr;
 }
 
 #endif

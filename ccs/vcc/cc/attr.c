@@ -8,6 +8,7 @@ enum {
 	A_NORETURN, A_ALWAYS_INLINE, A_NOINLINE, A_GNU_INLINE, A_TRANSPARENT_UNION, A_VISIBILITY,
 	A_CONSTRUCTOR, A_DESTRUCTOR, A_COUNTED_BY, A_VECTOR_SIZE, A_COLD, A_NONSTRING, A_MAY_ALIAS,
 	A_WEAKREF, A_NAKED, A_NOCF, A_ERROR, A_OVERLOADABLE, A_NOINSTR, A_FORMAT,
+	A_NONNULL, A_WUR, A_NODISCARD, A_DEPRECATED, A_UNAVAILABLE,
 	A_COUNT
 };
 
@@ -20,7 +21,9 @@ static const char *const attr_names[A_COUNT] = {
 	[A_COUNTED_BY] = "counted_by", [A_VECTOR_SIZE] = "vector_size", [A_COLD] = "cold",
 	[A_NONSTRING] = "nonstring", [A_MAY_ALIAS] = "may_alias", [A_WEAKREF] = "weakref",
 	[A_NOINSTR] = "no_instrument_function", [A_NAKED] = "naked", [A_NOCF] = "nocf_check", [A_ERROR] = "error",
-	[A_OVERLOADABLE] = "overloadable", [A_FORMAT] = "format",
+	[A_OVERLOADABLE] = "overloadable", [A_FORMAT] = "format", [A_NONNULL] = "nonnull",
+	[A_WUR] = "warn_unused_result", [A_NODISCARD] = "nodiscard", [A_DEPRECATED] = "deprecated",
+	[A_UNAVAILABLE] = "unavailable",
 };
 
 static uint32_t *attr_dir[NDIR];
@@ -253,6 +256,48 @@ __attribute__((noinline)) VPRIV void attribute_list_(cc *c, attrs *a)
 						a->fmt = fmt_pack(kind, (unsigned)i, (unsigned)j);
 				}
 				continue;
+			case A_NONNULL:	/* nonnull, nonnull(i, ...): checked at calls (attrcheck.c) */
+				if (accept(c, T_LPAREN)) {
+					while (!is(c, T_RPAREN) && !is(c, T_EOF)) {
+						i128 i = 0;
+
+						const_expr(c, &i, NULL);
+						if (i >= 1 && i <= 64)
+							attrx_mut(c, a)->nonnull |= (uint64_t)1 << (i - 1);
+						if (!accept(c, T_COMMA))
+							break;
+					}
+					expect(c, T_RPAREN, "')'");
+				} else {
+					attrx_mut(c, a)->nonnull = ~(uint64_t)0;
+				}
+				continue;
+			case A_WUR:
+			case A_NODISCARD:
+				attrx_mut(c, a)->wur = an == A_WUR ? 1 : 2;
+				if (is(c, T_LPAREN) && is_strtok(peek(c, 1)->kind)) {
+					next(c);
+					c->attrx[a->ext].wurmsg = string_index(c, aid);
+					expect(c, T_RPAREN, "')'");
+				}
+				break;
+			case A_DEPRECATED:
+			case A_UNAVAILABLE:
+			{
+				attrx *x = attrx_mut(c, a);
+
+				x->depr = an == A_DEPRECATED ? 1 : 2;
+				x->deprloc = loc;
+				x->deprmsg = 0;
+				if (is(c, T_LPAREN) && is_strtok(peek(c, 1)->kind)) {
+					next(c);
+					c->attrx[a->ext].deprmsg = string_index(c, aid);
+					if (accept(c, T_COMMA) && is_strtok(tok(c)->kind))
+						string_index(c, aid);	/* (the replacement, for a fix-it) */
+					expect(c, T_RPAREN, "')'");
+				}
+				break;
+			}
 			case A_VECTOR_SIZE: {
 				i128 v;
 
@@ -303,7 +348,17 @@ __attribute__((noinline)) VPRIV void attribute_list_(cc *c, attrs *a)
 _Static_assert(offsetof(attrs, packed) == 11 * sizeof(uint32_t) &&
 	       offsetof(attrs, noinstr) == offsetof(attrs, packed) + 17, "attrs layout");
 
-VPRIV void merge_attrs(attrs *to, const attrs *from)
+/* a's rare part, to write: a fresh copy, since an attrs copied by value shares its ext */
+VPRIV attrx *attrx_mut(cc *c, attrs *a)
+{
+	uint32_t i = c->nattrx++;
+
+	c->attrx[i] = c->attrx[a->ext];
+	a->ext = i;
+	return &c->attrx[i];
+}
+
+VPRIV void merge_attrs(cc *c, attrs *to, const attrs *from)
 {
 	if (attrs_empty(from))
 		return;
@@ -319,6 +374,18 @@ VPRIV void merge_attrs(attrs *to, const attrs *from)
 	if (from->visibility) to->visibility = from->visibility;
 	if (from->errmsg) to->errmsg = from->errmsg;
 	if (from->fmt) to->fmt = from->fmt;
+	if (unlikely(from->ext)) {
+		if (!to->ext)
+			to->ext = from->ext;
+		else {
+			const attrx f = c->attrx[from->ext];
+			attrx *t = attrx_mut(c, to);
+
+			if (f.wur) t->wur = f.wur, t->wurmsg = f.wurmsg;
+			if (f.depr) t->depr = f.depr, t->deprloc = f.deprloc, t->deprmsg = f.deprmsg;
+			t->nonnull |= f.nonnull;
+		}
+	}
 	/* the 0/1 flags packed .. noinstr: or them bytewise */
 	{
 		char *t = (char *)&to->packed;

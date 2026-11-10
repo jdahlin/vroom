@@ -105,6 +105,8 @@ static bool param_list(cc *c, dop *op)
 			vpush(c, &ptys, t);
 			s = sym_new(c, S_VAR, d.name, t, d.loc ? d.loc : ds.loc);
 			c->syms[s].flags |= SF_PARAM | (ds.invalid ? SF_INVALID : 0);
+			if (unlikely(d.at.ext | ds.at.ext) && (c->attrx[d.at.ext].nonnull | c->attrx[ds.at.ext].nonnull))
+				c->syms[s].flags |= SF_NONNULL, c->nnparam++;
 			if (unlikely(ds.invalid))
 				delayed_bug(c, d.loc, "an invalid parameter without an error");
 			c->syms[s].body = vsize;	/* parameters: a decayed VLA's size expression with side effects */
@@ -277,7 +279,7 @@ VPRIV void declarator(cc *c, declr *d, bool abstract_ok, uint32_t *first, uint32
 		expect_match(c, T_RPAREN, plb0);
 		d->name = id.name;
 		d->loc = id.loc;
-		merge_attrs(&d->at, &id.at);
+		merge_attrs(c, &d->at, &id.at);
 		if (id.has_func) {
 			d->psyms = id.psyms, d->npsyms = id.npsyms, d->kr = id.kr, d->has_func = true;
 			d->plb = id.plb, d->ple = id.ple;

@@ -254,6 +254,8 @@ static __attribute__((noinline)) uint32_t member_slow(cc *c, uint32_t base, uint
 		N(m)->flags = (uint8_t)((N(base)->flags & NF_LVALUE) | (f->bitfield ? NF_BITFIELD : 0));
 		base = m;
 		bt = N(m)->ty;
+		if (unlikely(f->depr) && i == d - 1)
+			depr_report(c, f->name, f->depr, c->prevloc);
 		if (is_record(c, bt))
 			ti = T(c, bt)->aux;
 	}
@@ -277,6 +279,8 @@ VPRIV uint32_t member(cc *c, uint32_t base, uint32_t name, uint32_t loc)
 
 				if (unlikely(f->invalid))
 					return err_node(c, loc);
+				if (unlikely(f->depr))
+					depr_report(c, f->name, f->depr, c->prevloc);
 				m = mk(c, N_MEMBER, qualify(c, f->ty, QQ(bt)), loc);
 
 				N(m)->a = base;
@@ -407,6 +411,8 @@ static inline __attribute__((always_inline)) uint32_t primary_sym(cc *c, uint32_
 {
 	sym *y = &c->syms[s];
 
+	if (unlikely(y->flags & SF_DEPR))
+		depr_use(c, s, loc);
 	if (y->kind == S_ENUMCONST) {
 		uint32_t n = mk_int(c, y->val, y->ty, loc);
 
@@ -804,6 +810,9 @@ static __attribute__((noinline)) uint32_t call(cc *c, uint32_t fn, uint32_t loc)
 			return err_node(c, loc);	/* clang: the arguments are not converted */
 		}
 	}
+	/* (clang's context range for a converted argument: the callee) */
+	uint32_t cxloc = N(callee)->op == N_VAR && !(N(callee)->flags & NF_PAREN) ? N(callee)->loc : rng(c, callee).b;
+
 	for (uint32_t i = 0; i < args.n; i++) {
 		uint32_t a = args.v[i];
 
@@ -811,7 +820,7 @@ static __attribute__((noinline)) uint32_t call(cc *c, uint32_t fn, uint32_t loc)
 		if (!(f->flags & TF_NOPROTO) && i < f->n) {
 			c->cv_fn = N(callee)->op == N_VAR && c->syms[N(callee)->a].kind == S_FUNC ? N(callee)->a : 0;
 			c->cv_arg = i;
-			a = convert_as(c, decay(c, a), c->params[f->aux + i], CX_PASS, loc);
+			a = convert_as(c, decay(c, a), c->params[f->aux + i], CX_PASS, cxloc);
 			c->cv_fn = 0;
 		} else {
 			/* default argument promotions */
@@ -825,6 +834,9 @@ static __attribute__((noinline)) uint32_t call(cc *c, uint32_t fn, uint32_t loc)
 	if (N(callee)->op == N_VAR && c->syms[N(callee)->a].kind == S_FUNC && args.n &&
 	    (c->syms[N(callee)->a].fmt || (c->syms[N(callee)->a].flags & SF_GLOBAL)))
 		format_call(c, N(callee)->a, args.v, args.n);
+	if (unlikely(N(callee)->op == N_VAR && (c->syms[N(callee)->a].flags & SF_NONNULL)) &&
+	    c->syms[N(callee)->a].kind == S_FUNC)
+		nonnull_call(c, N(callee)->a, args.v, args.n, c->prevloc);
 	if (!c->o->no_builtin && args.n == 1 && N(callee)->op == N_VAR && c->syms[N(callee)->a].kind == S_FUNC &&
 	    (c->syms[N(callee)->a].flags & SF_GLOBAL)) {
 		/* clang: abs, labs and llabs declared with their library types are builtins (inline) */
