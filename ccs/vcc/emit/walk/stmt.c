@@ -21,6 +21,9 @@ VPRIV wkst *wk_state(ecx *e)
 		W->ulbl = reserve(((size_t)c->nlabel + 64) * sizeof(uint32_t));
 		W->cgen = reserve(((size_t)c->nnode + 64) * sizeof(uint32_t));
 		W->clbl = reserve(((size_t)c->nnode + 64) * sizeof(uint32_t));
+		W->zgen = reserve(((size_t)c->nsym + 64) * sizeof(uint32_t));
+		W->vgen = reserve(((size_t)c->nnode + 64) * sizeof(uint32_t));
+		W->voff = reserve(((size_t)c->nnode + 64) * sizeof(int32_t));
 	}
 	return W;
 }
@@ -43,6 +46,9 @@ VPRIV void wk_ecx_free(ecx *e)
 		munmap(W->ulbl, ((size_t)c->nlabel + 64) * sizeof(uint32_t));
 		munmap(W->cgen, ((size_t)c->nnode + 64) * sizeof(uint32_t));
 		munmap(W->clbl, ((size_t)c->nnode + 64) * sizeof(uint32_t));
+		munmap(W->zgen, ((size_t)c->nsym + 64) * sizeof(uint32_t));
+		munmap(W->vgen, ((size_t)c->nnode + 64) * sizeof(uint32_t));
+		munmap(W->voff, ((size_t)c->nnode + 64) * sizeof(int32_t));
 	}
 	munmap(W->cases, WK_MAXCASE * sizeof(wkcase));
 	free(W);
@@ -243,10 +249,14 @@ static void wk_decl(ecx *e, const node *x)
 	uint32_t s = x->a;
 	const sym *y = &c->syms[s];
 
+	if (unlikely(vm_type(c, y->ty)))
+		wk_vla_fix(e, y->ty, false);
 	if (y->kind != S_VAR || y->sc == SC_STATIC || y->sc == SC_EXTERN || y->sc == SC_TYPEDEF)
 		return;
-	if (vm_type(c, y->ty))
-		efatal(e, x->loc, "x86-64: variable-length arrays are not supported yet (PLAN-x86.md X3)");
+	if (T(c, y->ty)->flags & TF_VLA) {
+		wk_vla_decl(e, s, x->b != 0);
+		return;
+	}
 	if (sym_attrs(c, s)->cleanup)
 		efatal(e, x->loc, "x86-64: cleanup variables are not supported yet (PLAN-x86.md X3)");
 	{
@@ -254,6 +264,59 @@ static void wk_decl(ecx *e, const node *x)
 
 		l.off = wk_local(e, s);
 		wk_init(e, &l, y->ty, x->b);
+	}
+}
+
+/*
+ * The VLAs declared in the statements under n: their saved sp zeroed on
+ * entry, so a declaration reached again (a goto back) frees the previous
+ * instance first.  (One inside a statement expression is not seen: it is
+ * not freed by a goto back.)
+ */
+static void wk_vla_scan(ecx *e, uint32_t n)
+{
+	cc *c = e->c;
+	wkst *W = e->wk;
+	const node *x;
+
+	if (!n)
+		return;
+	x = N(n);
+	switch (x->op) {
+	case N_DECL: {
+		const sym *y = &c->syms[x->a];
+
+		if (y->kind == S_VAR && y->sc != SC_TYPEDEF && y->sc != SC_STATIC && y->sc != SC_EXTERN &&
+		    (T(c, y->ty)->flags & TF_VLA)) {
+			lval l = { .k = L_FRAME, .off = wk_local(e, x->a) + 8, .align = 8 };
+			val z = vconst(0);
+			int r = LO(toreg)(e, &z, 8);
+
+			LO(store)(e, r, &l, 8);
+			LO(tfree)(e, r);
+			W->zgen[x->a] = W->gen;
+		}
+		return;
+	}
+	case N_BLOCK:
+		for (uint32_t i = 0; i < x->c; i++)
+			wk_vla_scan(e, c->lists[x->b + i]);
+		return;
+	case N_IF:
+		wk_vla_scan(e, x->b);
+		wk_vla_scan(e, x->c);
+		return;
+	case N_WHILE: case N_DO: case N_SWITCH:
+		wk_vla_scan(e, x->b);
+		return;
+	case N_FOR:
+		wk_vla_scan(e, c->lists[x->c + 1]);
+		return;
+	case N_LABEL: case N_CASE: case N_DEFAULT:
+		wk_vla_scan(e, x->c);
+		return;
+	default:
+		return;
 	}
 }
 
@@ -381,10 +444,26 @@ VPRIV void wk_stmt(ecx *e, uint32_t n)
 	x = N(n);
 	e->curloc = x->loc;
 	switch (x->op) {
-	case N_BLOCK:
-		for (uint32_t i = 0; i < x->c; i++)
+	case N_BLOCK: {
+		uint32_t vs = 0;	/* the block's first VLA: its saved sp is restored at the end */
+
+		for (uint32_t i = 0; i < x->c; i++) {
+			const node *d = N(c->lists[x->b + i]);
+
+			if (!vs && d->op == N_DECL && c->syms[d->a].kind == S_VAR && c->syms[d->a].sc != SC_TYPEDEF &&
+			    c->syms[d->a].sc != SC_STATIC && c->syms[d->a].sc != SC_EXTERN && (T(c, c->syms[d->a].ty)->flags & TF_VLA))
+				vs = d->a;
 			wk_stmt(e, c->lists[x->b + i]);
+		}
+		if (vs) {
+			lval l = { .k = L_FRAME, .off = wk_local(e, vs) + 8, .align = 8 };
+			int r = LO(treg)(e);
+
+			LO(load)(e, r, &l, 8, false);
+			LO(spset)(e, r);
+		}
 		return;
+	}
 	case N_EXPR:
 		if (x->a) {
 			val v = wk_gen(e, x->a);
@@ -599,6 +678,13 @@ VPRIV void wk_function(ecx *e, uint32_t s)
 			LO(tfree)(e, r);
 		}
 	}
+	for (uint32_t i = 0; i < body->aux; i++) {	/* int (*a)[n]: n as on entry */
+		qty pt = c->syms[c->lists[body->a + i]].ty;
+
+		if (unlikely(vm_type(c, pt)))
+			wk_vla_fix(e, pt, true);
+	}
+	wk_vla_scan(e, y->body);
 	wk_stmt(e, y->body);
 	if (wk_is_main(c, s) && KIND(c, W->rty) == TY_INT) {
 		val z = vconst(0);

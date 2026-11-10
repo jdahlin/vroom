@@ -51,6 +51,9 @@ typedef struct wkst {
 	uint32_t *lgen, *ulbl;	/* per user label: local label */
 	uint32_t *clbl;		/* per node (N_CASE/N_DEFAULT): local label, valid when cgen == gen */
 	uint32_t *cgen;
+	uint32_t *vgen;		/* per node (a VLA size): its value is in slot voff when vgen == gen */
+	int32_t *voff;
+	uint32_t *zgen;		/* per sym (a VLA): its saved sp was zeroed on entry when zgen == gen */
 	wkloop loop[WK_MAXLOOP];
 	int nloop;
 	wkcase *cases;
@@ -78,6 +81,9 @@ VPRIV int wk_size(cc *c, qty t);
 VPRIV bool wk_mem(ecx *e, qty t);	/* values of t are held by address (records, arrays, x87 long double) */
 VPRIV void ctor_entry(cc *c, tbuf *b, uint32_t s, bool fini);	/* arch/a64/emit/func.c (shared) */
 VPRIV bool wk_signed(cc *c, qty t);
+VPRIV void wk_vla_fix(ecx *e, qty t, bool pure);	/* the VLA sizes in t evaluated now, into slots */
+VPRIV val wk_vla_bytes(ecx *e, qty t);		/* sizeof t (a VLA: computed) */
+VPRIV void wk_vla_decl(ecx *e, uint32_t s, bool zero);	/* a VLA's storage below sp */
 
 /* ---------------- the lowering interface (layer 2) ---------------- */
 
@@ -122,6 +128,8 @@ VPRIV void LO(trap)(ecx *e);				/* __builtin_trap, __builtin_unreachable */
 VPRIV val LO(frame)(ecx *e, bool ret);			/* the return address (ret) or the frame address */
 VPRIV val LO(bitop)(ecx *e, int bi, int size, val a);	/* BI_CLZ.. BI_BSWAP64: a nonzero where the builtin requires it */
 VPRIV val LO(alloca)(ecx *e, val n);			/* n bytes on the stack, 16-aligned */
+VPRIV int LO(spget)(ecx *e);				/* the stack pointer in a temporary */
+VPRIV void LO(spset)(ecx *e, int r);			/* the stack pointer = r (r freed) */
 VPRIV val LO(fbits)(ecx *e, val v, int size);		/* a float's bits in an integer register */
 /* control */
 VPRIV void LO(label)(ecx *e, uint32_t l);

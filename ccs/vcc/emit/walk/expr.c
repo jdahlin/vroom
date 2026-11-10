@@ -153,6 +153,8 @@ static lval wk_fromval(ecx *e, val v, qty t)
 	return l;
 }
 
+static val wk_ptradd_vla(ecx *e, val p, val i, qty it, qty pt, bool sub);
+
 static void wk_lfree(ecx *e, const lval *l)
 {
 	if (l->k == L_REG)
@@ -167,7 +169,10 @@ VPRIV int32_t wk_local(ecx *e, uint32_t s)
 
 	if (W->sgen[s] != W->gen) {
 		W->sgen[s] = W->gen;
-		W->soff[s] = wk_slot(e, tsize(c, c->syms[s].ty) ? tsize(c, c->syms[s].ty) : 1, sym_align(c, s));
+		if (T(c, c->syms[s].ty)->flags & TF_VLA)
+			W->soff[s] = wk_slot(e, 24, 8);	/* { address, sp before it, bytes } */
+		else
+			W->soff[s] = wk_slot(e, tsize(c, c->syms[s].ty) ? tsize(c, c->syms[s].ty) : 1, sym_align(c, s));
 	}
 	return W->soff[s];
 }
@@ -182,6 +187,13 @@ VPRIV lval wk_lval(ecx *e, uint32_t n)
 	case N_VAR: {
 		uint32_t s = x->a, cs;
 
+		if (is_local_var(c, s) && (T(c, c->syms[s].ty)->flags & TF_VLA)) {
+			lval a = { .k = L_FRAME, .off = wk_local(e, s), .align = 8 };
+			int r = LO(treg)(e);
+
+			LO(load)(e, r, &a, 8, false);
+			return wk_fromval(e, wk_vreg(r), c->syms[s].ty);
+		}
 		if (is_local_var(c, s)) {
 			l.k = L_FRAME;
 			l.off = wk_local(e, s);
@@ -229,7 +241,7 @@ VPRIV lval wk_lval(ecx *e, uint32_t n)
 		val p = wk_gen(e, x->a), i = wk_gen(e, x->b);
 
 		if (ptr_to_vla(c, pt))
-			wk_unsup(e, n, "a variable-length array");
+			return wk_fromval(e, wk_ptradd_vla(e, p, i, N(x->b)->ty, pt, false), et);
 		if (i.k == V_CONST && p.k == V_ADDR) {
 			l.k = L_SYM;
 			l.ref = p.ref;
@@ -535,6 +547,139 @@ static val wk_ptradd(ecx *e, val p, val i, qty it, int64_t es, bool sub)
 	}
 }
 
+/* ---------------- variable length arrays ----------------
+ * A VLA's slot holds { address, sp before the allocation, bytes }; the
+ * array is below sp as alloca's memory, and its block's end restores sp.
+ * Each size expression is evaluated once, at its declaration, into a slot
+ * (C11 6.7.6.2p5).
+ */
+static val wk_vla_len(ecx *e, uint32_t sn)
+{
+	wkst *W = e->wk;
+	cc *c = e->c;
+
+	if (W->vgen[sn] == W->gen) {
+		lval l = { .k = L_FRAME, .off = W->voff[sn], .align = 8 };
+		int r = LO(treg)(e);
+
+		LO(load)(e, r, &l, 8, false);
+		return wk_vreg(r);
+	}
+	return wk_conv(e, wk_gen(e, sn), N(sn)->ty, c->t_size);
+}
+
+VPRIV void wk_vla_fix(ecx *e, qty t, bool pure)
+{
+	wkst *W = e->wk;
+	cc *c = e->c;
+
+	for (;;) {
+		const ctype *a = T(c, t);
+
+		if (a->kind == TY_PTR) {
+			t = a->base;
+			continue;
+		}
+		if (a->kind != TY_ARRAY)
+			return;
+		if ((a->flags & TF_VLA) && a->n && N(a->n)->op != N_NUM && !(pure && side_effects(c, a->n))) {
+			val v = wk_conv(e, wk_gen(e, a->n), N(a->n)->ty, c->t_size);
+			int r = wk_reg(e, &v, c->t_size);
+			lval l = { .k = L_FRAME, .off = wk_slot(e, 8, 8), .align = 8 };
+
+			LO(store)(e, r, &l, 8);
+			LO(tfree)(e, r);
+			W->vgen[a->n] = W->gen;
+			W->voff[a->n] = (int32_t)l.off;
+		}
+		t = a->base;
+	}
+}
+
+VPRIV val wk_vla_bytes(ecx *e, qty t)
+{
+	cc *c = e->c;
+	const ctype *a = T(c, t);
+	val n, b;
+
+	if (a->kind != TY_ARRAY || !(a->flags & TF_VLA))
+		return vconst(tsize(c, t));
+	n = wk_vla_len(e, a->n);
+	b = wk_vla_bytes(e, a->base);
+	return wk_arith(e, T_STAR, prim(TY_ULONG), n, b);
+}
+
+/* p +- i elements of a pointer to a VLA */
+static val wk_ptradd_vla(ecx *e, val p, val i, qty it, qty pt, bool sub)
+{
+	cc *c = e->c;
+	int ri = wk_reg(e, &i, it);
+
+	if (wk_size(c, it) < 8)
+		LO(ext)(e, ri, wk_size(c, it), wk_signed(c, it));
+	i = wk_arith(e, T_STAR, prim(TY_ULONG), wk_vreg(ri), wk_vla_bytes(e, T(c, pt)->base));
+	return wk_arith(e, sub ? T_MINUS : T_PLUS, prim(TY_ULONG), p, i);
+}
+
+VPRIV void wk_vla_decl(ecx *e, uint32_t s, bool zero)
+{
+	cc *c = e->c;
+	int32_t off = wk_local(e, s);
+	lval la = { .k = L_FRAME, .off = off, .align = 8 }, lsp = la, ln = la;
+	val n = wk_vla_bytes(e, c->syms[s].ty), p;
+	int r;
+
+	if (sym_align(c, s) > 16)
+		efatal(e, e->curloc, "x86-64: alignment above 16 is not supported yet (PLAN-x86.md X3)");
+	lsp.off += 8, ln.off += 16;
+	r = wk_reg(e, &n, prim(TY_ULONG));
+	LO(store)(e, r, &ln, 8);
+	if (e->wk->zgen[s] == e->wk->gen) {
+		/* reached again (a goto back): the previous instance freed first */
+		uint32_t fresh = wk_newlabel(e);
+		int t = LO(treg)(e);
+
+		LO(load)(e, t, &lsp, 8, false);
+		LO(brz)(e, wk_vreg(t), 8, false, fresh);
+		t = LO(treg)(e);
+		LO(load)(e, t, &lsp, 8, false);
+		LO(spset)(e, t);
+		LO(label)(e, fresh);
+	}
+	{
+		int t = LO(spget)(e);
+
+		LO(store)(e, t, &lsp, 8);
+		LO(tfree)(e, t);
+	}
+	p = LO(alloca)(e, wk_vreg(r));
+	LO(store)(e, p.r, &la, 8);
+	if (zero) {
+		/* = {}: the bytes rounded up to 8 (still inside the 16-aligned allocation) */
+		uint32_t top = wk_newlabel(e), done = wk_newlabel(e);
+		int k = LO(treg)(e), z;
+		val zv = vconst(0);
+
+		LO(load)(e, k, &ln, 8, false);
+		LO(label)(e, top);
+		LO(brz)(e, wk_vreg(k), 8, false, done);
+		LO(tkeep)(e, k);
+		z = LO(toreg)(e, &zv, 8);
+		{
+			lval d = { .k = L_REG, .r = (uint8_t)p.r, .align = 8 };
+
+			LO(store)(e, z, &d, 8);
+		}
+		LO(tfree)(e, z);
+		p = LO(bin)(e, T_PLUS, 8, false, p, vconst(8));
+		k = LO(bin)(e, T_MINUS, 8, false, wk_vreg(k), vconst(8)).r;
+		LO(jump)(e, top);
+		LO(label)(e, done);
+		LO(tfree)(e, k);
+	}
+	LO(tfree)(e, p.r);
+}
+
 /* the right operand next: if temporaries are short, the left waits in a slot */
 static val wk_rhs(ecx *e, val *a, uint32_t rn, qty at)
 {
@@ -577,6 +722,15 @@ static val wk_binary(ecx *e, uint32_t n)
 	wk_scalar(e, n, x->ty);
 	a = wk_gen(e, x->a);
 	b = wk_rhs(e, &a, x->b, lt);
+	if (is_ptr(c, lt) && is_ptr(c, rt) && op == T_MINUS && ptr_to_vla(c, lt)) {
+		val d = wk_arith(e, T_MINUS, prim(TY_LONG), a, b);
+
+		return wk_arith(e, T_SLASH, prim(TY_LONG), d, wk_vla_bytes(e, T(c, lt)->base));
+	}
+	if (is_ptr(c, lt) && ptr_to_vla(c, lt) && (op == T_PLUS || op == T_MINUS))
+		return wk_ptradd_vla(e, a, b, rt, lt, op == T_MINUS);
+	if (is_ptr(c, rt) && ptr_to_vla(c, rt) && op == T_PLUS)
+		return wk_ptradd_vla(e, b, a, lt, rt, false);
 	if (is_ptr(c, lt) && is_ptr(c, rt) && op == T_MINUS) {
 		int64_t es = (int64_t)tsize(c, T(c, lt)->base);
 		val d = wk_arith(e, T_MINUS, prim(TY_LONG), a, b);
@@ -749,7 +903,9 @@ static val wk_assign(ecx *e, uint32_t n)
 			l = wk_lval(e, x->a);
 			a = wk_reload(e, &l, lt);
 		}
-		if (is_ptr(c, lt)) {
+		if (is_ptr(c, lt) && ptr_to_vla(c, lt)) {
+			v = wk_ptradd_vla(e, a, b, rt, lt, x->aux == T_MINUS);
+		} else if (is_ptr(c, lt)) {
 			v = wk_ptradd(e, a, b, rt, (int64_t)tsize(c, T(c, lt)->base) ?: 1, x->aux == T_MINUS);
 		} else {
 			qty ct = wk_optype(c, x->aux, lt, rt);
@@ -803,6 +959,9 @@ static val wk_incdec(ecx *e, uint32_t n)
 	} else if (post) {
 		old = wk_reload(e, &l, t);
 	}
+	if (is_ptr(c, t) && ptr_to_vla(c, t))
+		nv = wk_ptradd_vla(e, wk_reload(e, &l, t), vconst(1), prim(TY_LONG), t, dec);
+	else
 	nv = wk_arith(e, dec ? T_MINUS : T_PLUS, ot, wk_reload(e, &l, t),
 		      is_flt(c, t) ? wk_conv(e, vconst(1), prim(TY_INT), t) : vconst(d ? d : 1));
 	if (wk_mem(e, t)) {
@@ -1243,6 +1402,15 @@ VPRIV val wk_gen(ecx *e, uint32_t n)
 				memcpy(&bits, &d, 8);
 			return LO(fconst)(e, bits, KIND(c, x->ty) == TY_FLOAT ? 4 : 8);
 		}
+	case N_SIZEOF_VLA:
+		if (x->a && N(x->a)->op == N_VAR && is_local_var(c, N(x->a)->a) && (T(c, c->syms[N(x->a)->a].ty)->flags & TF_VLA)) {
+			lval l = { .k = L_FRAME, .off = wk_local(e, N(x->a)->a) + 16, .align = 8 };
+			int r = LO(treg)(e);
+
+			LO(load)(e, r, &l, 8, false);
+			return wk_vreg(r);
+		}
+		return wk_vla_bytes(e, x->b);
 	default: {
 		static const char *const nm[N_NKINDS] = { [N_SIZEOF_VLA] = "sizeof of a VLA", [N_COMPLIT] = "a compound literal",
 			[N_INIT] = "an initializer list", [N_LABELADDR] = "a label address", [N_VAARG] = "va_arg",

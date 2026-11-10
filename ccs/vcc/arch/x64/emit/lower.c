@@ -603,6 +603,20 @@ VPRIV val x64_alloca(ecx *e, val n)
 	return (val){ .k = V_REG, .r = (uint8_t)r };
 }
 
+VPRIV int x64_spget(ecx *e)
+{
+	int r = x64_treg(e);
+
+	x64_mov(e, r, RSP);
+	return r;
+}
+
+VPRIV void x64_spset(ecx *e, int r)
+{
+	x64_mov(e, RSP, r);
+	x64_tfree(e, r);
+}
+
 VPRIV val x64_fbits(ecx *e, val v, int size)
 {
 	int r = x64_treg(e);
