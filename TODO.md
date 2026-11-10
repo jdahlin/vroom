@@ -974,8 +974,9 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
   *Validate:* T4-style expected-stderr for vlink; T8 `-r` byte diff.
 - [ ] **var**: (done: creating a regular GNU archive with an ELF object
   first, byte-identical to llvm-ar; mode 644 for every member as llvm-ar's
-  deterministic mode, also in thin archives.)  Regular archives are not
-  updated or read (`r` on one, `t`), ops `r`/`m`/`t` only,
+  deterministic mode, also in thin archives; `t`, `p`, `x` on a regular
+  archive.)  Regular archives are not updated (`r`/`m` on one); no `d`,
+  `q`, `s`;
   32-bit GNU symtab only; ld skips `/SYM64/` (`ld/ld.c:1622`).
   *Validate:* `bench/var-cmp.py` extended to regular archives and `x`, `d`,
   `q`, `p`, `s`; round-trip with llvm-ar.
