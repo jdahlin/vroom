@@ -105,6 +105,8 @@ static bool param_list(cc *c, dop *op)
 			vpush(c, &ptys, t);
 			s = sym_new(c, S_VAR, d.name, t, d.name ? d.loc : tok(c)->loc);	/* (clang: unnamed, where the name would be) */
 			c->syms[s].flags |= SF_PARAM | (ds.invalid ? SF_INVALID : 0);
+			if (ds.tds)
+				c->syms[s].tdef = ds_tdef(c, &ds, t);
 			if (unlikely(d.at.ext | ds.at.ext) && (c->attrx[d.at.ext].nonnull | c->attrx[ds.at.ext].nonnull))
 				c->syms[s].flags |= SF_NONNULL, c->nnparam++;
 			if (unlikely(ds.invalid))

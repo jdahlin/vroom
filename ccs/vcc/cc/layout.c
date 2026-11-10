@@ -353,6 +353,51 @@ VPRIV const char *tyname(cc *c, qty t)
 	return o->s;
 }
 
+/* the typedef expression e's type t was written with, from its declaration (vcc keeps no
+   sugar in types): a variable, a member, a call's return type; 0: none */
+VPRIV uint32_t expr_tdef(cc *c, uint32_t e, qty t)
+{
+	const node *n = N(e);
+	uint32_t td = 0;
+
+	if (n->op == N_VAR)
+		td = c->syms[n->a].tdef;
+	else if (n->op == N_MEMBER && n->b < c->ntag && n->c < c->tags[n->b].nfield)
+		td = c->tags[n->b].f[n->c].tdef;
+	else if (n->op == N_CALL && N(n->a)->op == N_VAR)
+		td = c->syms[N(n->a)->a].tdef;
+	else if (n->op == N_CALL && N(n->a)->op == N_CAST && N(N(n->a)->a)->op == N_VAR)
+		td = c->syms[N(N(n->a)->a)->a].tdef;	/* (the function-to-pointer decay) */
+	return td && c->syms[td].kind == S_TYPEDEF && QUNQ(c->syms[td].ty) == QUNQ(t) ? td : 0;
+}
+
+/* t quoted as clang spells it for expression e: "'int64_t' (aka 'long')", "'long'" */
+VPRIV const char *tyname_sugar(cc *c, uint32_t e, qty t)
+{
+	static vfixbuf b[4];
+	static int k;
+	uint32_t td = expr_tdef(c, e, t);
+	vfixbuf *o = &b[k++ & 3];
+	bool ok = true;
+
+	o->n = 0, o->s[0] = 0;
+	vfixbuf_puts(o, "'");
+	if (!td) {
+		type_str(c, t, "", o, &ok);
+		vfixbuf_puts(o, "'");
+		return o->s;
+	}
+	if (QQ(t) & Q_CONST)
+		vfixbuf_puts(o, "const ");
+	if (QQ(t) & Q_VOLATILE)
+		vfixbuf_puts(o, "volatile ");
+	vfixbuf_put(o, vintern_ents[c->syms[td].name].s, vintern_ents[c->syms[td].name].len);
+	vfixbuf_puts(o, "' (aka '");
+	type_str(c, t, "", o, &ok);
+	vfixbuf_puts(o, "')");
+	return o->s;
+}
+
 VPRIV void layout_checks(cc *c)
 {
 	vfdbuf o = { malloc(1 << 20), 0, 1 << 20, c->o->outfd };

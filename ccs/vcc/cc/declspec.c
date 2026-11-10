@@ -252,8 +252,19 @@ static __attribute__((cold, noinline)) void static_assert_failed(cc *c, uint32_t
 		report(c, "error", r.b, &r, 1, NULL, 0, "static assertion failed%s%s", msg[0] ? ": " : "", msg);
 		return;
 	}
-	report(c, "error", r.b, &r, 1, NULL, 0, "static assertion failed due to requirement '%.*s'%s%s",
-	       (int)len, t, msg[0] ? ": " : "", msg);
+	{
+		vdiag *d;
+
+		pp_diag_pc = __builtin_return_address(0);
+		error_limit(c), c->errors++, c->ndiag++;
+		d = pp_diag_begin(c->p, VDL_ERROR, r.b, "static assertion failed due to requirement '%.*s'%s%s",
+				  (int)len, t, msg[0] ? ": " : "", msg);
+		pp_diag_label(c->p, d, r.b, r.e, NULL);
+		/* a size that is the target's: say what it is on the other one */
+		if (memmem(t, len, "long double", 11))
+			pp_diag_help(c->p, d, "'long double' has 8 bytes on Apple (it is 'double') and 16 on Arm Linux (binary128)");
+		pp_diag_emit(c->p, d);
+	}
 	while (N(e)->op == N_CAST && !c->span[e].e)
 		e = N(e)->a;
 	if (N(e)->op == N_BINARY && is_cmp(N(e)->aux)) {
@@ -631,6 +642,7 @@ again:
 				uint32_t s = lookup(c, t->id);
 
 				named = c->syms[s].ty;
+				ds->tds = s;
 				c->syms[s].flags |= SF_REF;	/* (-Wunused-local-typedef) */
 				if (unlikely(c->syms[s].flags & SF_DEPR))
 					depr_use(c, s, t->loc);
@@ -893,6 +905,8 @@ done:
 		return false;
 	if (have_named) {
 		ds->ty = named;
+		if (ds->tds && c->syms[ds->tds].ty != named)
+			ds->tds = 0;
 	} else if (base == KW_void) {
 		ds->ty = prim(TY_VOID);
 	} else if (base == KW__Bool) {

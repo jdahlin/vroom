@@ -1,0 +1,53 @@
+portability.c:14:28: warning: format specifies type 'long long' but the argument has type 'int64_t' (aka 'long') [-Wformat]
+   14 |         printf("%lld %u %d %d\n", x, n, d, m);
+      |                 ~~~~              ^
+      |                 %ld
+      = help: 'int64_t' is 'long' on Linux and 'long long' on Apple: PRId64 from <inttypes.h> fits both
+portability.c:14:31: warning: format specifies type 'unsigned int' but the argument has type 'size_t' (aka 'unsigned long') [-Wformat]
+   14 |         printf("%lld %u %d %d\n", x, n, d, m);
+      |                      ~~              ^
+      |                      %zu
+portability.c:14:34: warning: format specifies type 'int' but the argument has type 'ptrdiff_t' (aka 'long') [-Wformat]
+   14 |         printf("%lld %u %d %d\n", x, n, d, m);
+      |                         ~~              ^
+      |                         %td
+portability.c:14:37: warning: format specifies type 'int' but the argument has type 'intmax_t' (aka 'long') [-Wformat]
+   14 |         printf("%lld %u %d %d\n", x, n, d, m);
+      |                            ~~              ^
+      |                            %jd
+portability.c:15:27: warning: format specifies type 'unsigned long long' but the argument has type 'uint64_t' (aka 'unsigned long') [-Wformat]
+   15 |         printf("%llx %d %lld\n", r->id, r->len, total());
+      |                 ~~~~             ^~~~~
+      |                 %lx
+      = help: 'uint64_t' is 'unsigned long' on Linux and 'unsigned long long' on Apple: PRIx64 from <inttypes.h> fits both
+portability.c:15:34: warning: format specifies type 'int' but the argument has type 'size_t' (aka 'unsigned long') [-Wformat]
+   15 |         printf("%llx %d %lld\n", r->id, r->len, total());
+      |                      ~~                 ^~~~~~
+      |                      %zu
+portability.c:15:42: warning: format specifies type 'long long' but the argument has type 'int64_t' (aka 'long') [-Wformat]
+   15 |         printf("%llx %d %lld\n", r->id, r->len, total());
+      |                         ~~~~                    ^~~~~~~
+      |                         %ld
+      = help: 'int64_t' is 'long' on Linux and 'long long' on Apple: PRId64 from <inttypes.h> fits both
+portability.c:16:12: warning: field width should have type 'int', but argument has type 'size_t' (aka 'unsigned long') [-Wformat]
+   16 |         printf("%*d\n", n, 1);
+      |                 ~~^     ~
+portability.c:17:16: warning: format specifies type 'long long *' but the argument has type 'unsigned long *' [-Wformat]
+   17 |         scanf("%lld", p);
+      |                ~~~~   ^
+      |                %ld
+portability.c:19:28: warning: result of comparison of constant -1 with expression of type 'char' is always false [-Wtautological-constant-out-of-range-compare]
+   19 | int neg(char c) { return c == -1; }
+      |                          ~ ^  ~~
+      = help: 'char' holds 0 to 255 (plain 'char' is unsigned on Arm and RISC-V Linux, signed on Apple and x86)
+portability.c:21:15: warning: magnitude of floating-point constant too large for type 'double'; maximum is 1.7976931348623157E+308 [-Wliteral-range]
+   21 | double huge = 1e400;
+      |               ^~~~~
+portability.c:22:14: warning: magnitude of floating-point constant too small for type 'float'; minimum is 1.40129846E-45 [-Wliteral-range]
+   22 | float tiny = 1e-46f;
+      |              ^~~~~~
+portability.c:24:46: warning: implicit conversion from 'int' to 'signed char' changes value from 254 to -2 [-Wconstant-conversion]
+   24 | signed char hexb = 0xfe, octb = 0376, decb = 254;
+      |                                       ~~~~   ^~~
+      = help: 'signed char' holds -128 to 127: cast the value if the wrap to -2 is intended
+13 warnings generated.

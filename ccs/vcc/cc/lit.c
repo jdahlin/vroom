@@ -42,6 +42,46 @@ static __attribute__((noinline)) uint32_t number_slow(cc *c, const ptok *t)
 	return number_s(c, t, s, n);
 }
 
+/* -Wliteral-range: a constant that rounds to infinity, or to zero although a digit is not 0 */
+static __attribute__((noinline, cold)) void literal_range(cc *c, const ptok *t, const char *s, size_t k, qty ty, bool big)
+{
+	bool hex = k > 1 && s[0] == '0' && (s[1] | 32) == 'x';
+	int kd = KIND(c, ty);
+	bool q = is_q(c, ty);
+	const char *lim;
+	vdiag *d;
+
+	if (!big) {
+		size_t i = hex ? 2 : 0;
+		bool nz = false;
+
+		for (; i < k && (hex ? (s[i] | 32) != 'p' : (s[i] | 32) != 'e'); i++)
+			nz |= (s[i] >= '1' && s[i] <= '9') || (hex && (s[i] | 32) >= 'a' && (s[i] | 32) <= 'f');
+		if (!nz)
+			return;
+	}
+	if (kd == TY_FLOAT)
+		lim = big ? "3.40282347E+38" : "1.40129846E-45";
+	else if (q)
+		lim = big ? "1.18973149535723176508575932662800702E+4932" : "6.47517511943802511092443895822764655E-4966";
+	else
+		lim = big ? "1.7976931348623157E+308" : "4.9406564584124654E-324";
+	d = cc_warn_begin(c, "literal-range", true, NULL, t->loc, "magnitude of floating-point constant too %s for type '%s'; %s is %s",
+			  big ? "large" : "small", tyname(c, ty), big ? "maximum" : "minimum", lim);
+	if (!d)
+		return;
+	pp_diag_label(c->p, d, t->loc, pp_tok_end(c->p, t->loc), NULL);
+	if (kd == TY_LDOUBLE && !q) {	/* a constant binary128 holds: written for Arm Linux */
+		u128 v = q_parse(s, k);
+		unsigned ex = (unsigned)(v >> 112) & 0x7fff;
+
+		if (ex != 0x7fff && v << 1)
+			pp_diag_help(c->p, d, "'long double' is 'double' on Apple; on Arm Linux it has 128 bits, %s",
+				     big ? "up to 1.19E+4932" : "down to 6.48E-4966");
+	}
+	pp_diag_emit(c->p, d);
+}
+
 static uint32_t number_s(cc *c, const ptok *t, const char *s, size_t n)
 {
 	size_t i = 0;
@@ -74,11 +114,19 @@ static uint32_t number_s(cc *c, const ptok *t, const char *s, size_t n)
 			ty = prim(TY_LDOUBLE);
 		if (k >= sizeof(buf))
 			k = sizeof(buf) - 1;
-		if (is_q(c, ty))
-			return mk_fltq(c, q_parse(s, k), ty, t->loc);
+		if (is_q(c, ty)) {
+			u128 q = q_parse(s, k);
+			unsigned ex = (unsigned)(q >> 112) & 0x7fff;
+
+			if (unlikely(ex == 0x7fff || !(q << 1)))
+				literal_range(c, t, s, k, ty, ex == 0x7fff);
+			return mk_fltq(c, q, ty, t->loc);
+		}
 		memcpy(buf, s, k);
 		buf[k] = 0;
 		d = KIND(c, ty) == TY_FLOAT ? (double)strtof(buf, NULL) : strtod(buf, NULL);	/* one rounding */
+		if (unlikely(isinf(d) || d == 0))
+			literal_range(c, t, s, k, ty, isinf(d));
 		return mk_flt(c, d, ty, t->loc);
 	}
 	if (n > 1 && s[0] == '0' && (s[1] == 'x' || s[1] == 'X'))
@@ -125,7 +173,13 @@ static uint32_t number_s(cc *c, const ptok *t, const char *s, size_t n)
 	}
 	if (over)
 		cc_error(c, t->loc, "integer literal is too large to be represented in any integer type");
-	return mk_int(c, (i128)v, int_lit_type(v, l, u, base == 10), t->loc);
+	{
+		uint32_t r = mk_int(c, (i128)v, int_lit_type(v, l, u, base == 10), t->loc);
+
+		if (base != 10)
+			N(r)->aux = NUM_RADIX;
+		return r;
+	}
 }
 
 /* the common case: a clean decimal or hex integer with an optional u/l suffix */
@@ -174,7 +228,12 @@ VPRIV uint32_t number(cc *c, const ptok *t)
 		else
 			return number_slow(c, t);	/* float, separators, odd suffixes */
 	}
-	return mk_int(c, (i128)v, int_lit_type(v, l, u, dec), t->loc);
+	{
+		uint32_t r = mk_int(c, (i128)v, int_lit_type(v, l, u, dec), t->loc);
+
+		N(r)->aux = dec ? 0 : NUM_RADIX;
+		return r;
+	}
 }
 
 /* one (possibly multi-byte UTF-8) escape or character of a literal */

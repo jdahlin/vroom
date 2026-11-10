@@ -605,6 +605,30 @@ Varje delsteg: nya fall i `tests/diag/` (snapshots, och clang som mätpunkt), la
    statement expression från ett funktionsmakro rapporteras vid `)` i stället för makronamnet
    (pp ger expansionens token platsen för `)`; D5.2).
 6. **Portabilitet**: Linux mot Apple (`long double`, variadiska argument, `char`-tecken).
+   **Status (2026-11-10): klart.**  vcc har inget typedef-socker i typerna (cc.h), så
+   deklarationen sparar typedefen den skrevs med (`sym.tdef`, `field.tdef`, från
+   `dspec.tds`; bara när typen är just den), och `expr_tdef`/`tyname_sugar` (layout.c) ger
+   clangs "'int64_t' (aka 'long')" för variabler, parametrar, medlemmar och anrop.  -Wformat
+   använder det, med clangs `%zu`/`%td`/`%jd`-fix-its för `size_t`, `ptrdiff_t`, `intmax_t`,
+   och `help:` för `[u]int{,_least,_fast}64_t` ("'long' på Linux och 'long long' på Apple:
+   PRId64 från <inttypes.h> passar båda").  Ett formatarguments plats är uttryckets början
+   (medlemmens bas, anropets funktion), som clang.  Intervallhjälpen för vanlig `char` säger
+   att tecknet är målets (osignerad på Arm/RISC-V Linux, signerad på Apple och x86).
+   `-Wconstant-conversion` tog vanlig `char` som -128..255 på båda målen: nu målets tecken
+   (Apple: `char c = 200` varnar som i clang), och en hex-/oktal-/binärliteral som ryms som
+   osignerad varnar inte (clang: `0xfe` i en `signed char`, `(0xffff)` i `short`; även på
+   Linux var det fel).  Nytt `-Wliteral-range` (clangs text och gränser för float, double,
+   binary128 och Apples `long double`), med en hjälp när värdet hade rymts i Linux 128 bitar;
+   ett misslyckat `_Static_assert` som nämner `long double` säger storleken på båda målen.
+   Variadiska argument: `va_list` är en struct på AAPCS64 Linux och `char *` på Apple, så
+   tilldelning och kopiering fungerar på båda; inget att säga.  Nya fall: `portability.c`,
+   `portability_apple.c` (`--target=arm64-apple-macos`).  Kvar: socker för pekare
+   (`'uint64_t *'`) och explicita omvandlingar (`(int64_t)x`).  *Validerat:* `vcc-diag.py` 103/103,
+   `gen-diagids.py --check`, `vcc-sema.py warn` 879/879, batch, run och layout 878/879,
+   `vcc-ctests.py` 1740/1740, stress 23 + 24, `vcc-mutate.py --formats` 1970/1970, `vcc-diff.py`
+   batch 873/873, `vccd-test.py` 19, `vcc-driver.py` 56/56, `vcc-abi.py` 7, filvis bygge,
+   fuzz-regress; PostgreSQL med vcc: 0 varningar clang inte ger (före literalregeln 7, alla
+   `0x..` i `char`), `meson test` 81 ok.  Grinden: pp +0,24 %, fe −0,18 %, cc −0,17 %.
 7. **UB vid konstantvikning**: skift ≥ bredd, signerat överspill, med en rad om varför.
    **Status (2026-11-09): klart utom statiska initierare.**  `-Winteger-overflow` (clangs
    plats och text, värdet med siffergrupper `-2'147'483'648`) för signerat `+ - *` och unärt `-`

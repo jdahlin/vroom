@@ -17,14 +17,14 @@ const_conversion.c:9:11: warning: implicit conversion from 'long' to 'int' chang
 const_conversion.c:11:19: warning: implicit conversion from 'int' to 'char' changes value from 400 to 144 [-Wconstant-conversion]
    11 | char from_macro = LIMIT;
       |      ~~~~~~~~~~   ^~~~~
-      = help: 'char' holds 0 to 255: cast the value if the wrap to 144 is intended
+      = help: 'char' holds 0 to 255 (plain 'char' is unsigned on Arm and RISC-V Linux, signed on Apple and x86): cast the value if the wrap to 144 is intended
 const_conversion.c:10:15: note: expanded from macro 'LIMIT'
    10 | #define LIMIT 400
       |               ^~~
 const_conversion.c:12:31: warning: implicit conversion from 'int' to 'char' changes value from 999 to 231 [-Wconstant-conversion]
    12 | char pick(int v) { return v ? 999 : 1; }
       |                    ~~~~~~     ^~~
-      = help: 'char' holds 0 to 255: cast the value if the wrap to 231 is intended
+      = help: 'char' holds 0 to 255 (plain 'char' is unsigned on Arm and RISC-V Linux, signed on Apple and x86): cast the value if the wrap to 231 is intended
 const_conversion.c:14:23: warning: implicit conversion from 'int' to 'short' changes value from 65536 to 0 [-Wconstant-conversion]
    14 | void use(void) { call(65536); }
       |                  ~~~~ ^~~~~

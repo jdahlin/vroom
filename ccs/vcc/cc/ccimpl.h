@@ -99,6 +99,7 @@ typedef struct dspec {
 	uint32_t loc;
 	uint32_t tagdecl;	/* struct/union/enum defined or declared here: its tag */
 	bool tag_bare;		/* "struct S" with no body (a reference or forward declaration) */
+	uint32_t tds;		/* the typedef the type was named by (its sym, 0: none), for diagnostics */
 } dspec;
 
 typedef struct dop {
@@ -433,6 +434,10 @@ VPRIV void name_overload(cc *c, uint32_t s);
 VPRIV uint32_t file_scope_sym(cc *c, uint32_t name);
 VPRIV void pragma_weak(cc *c, const char *s, const char *e, const char *base, uint32_t loc);
 VPRIV void weak_declared(cc *c, uint32_t s);
+VPRIV uint32_t ds_tdef(cc *c, const dspec *ds, qty t);
+VPRIV uint32_t expr_tdef(cc *c, uint32_t e, qty t);
+VPRIV const char *tyname_sugar(cc *c, uint32_t e, qty t);
+VPRIV const char *char_sign(cc *c, qty t);
 VPRIV void weak_finish(cc *c);
 VPRIV uint32_t implicit_func(cc *c, uint32_t id, uint32_t loc);
 VPRIV uint32_t lib_func(cc *c, uint32_t id, uint32_t loc);

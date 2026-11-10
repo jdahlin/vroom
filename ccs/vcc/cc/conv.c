@@ -390,6 +390,8 @@ VPRIV void i128s_(char *b, size_t n, i128 v)
 /* clang's -Wconstant-conversion: an integer constant the narrower target type cannot
    hold.  clang's ranges: unsigned w bits holds -2^(w-1) .. 2^w-1 (the bits fit); signed
    its signed range, or up to 2^w-1 from an unsigned source; plain char -128 .. 255 */
+static bool hex_literal(cc *c, uint32_t n);
+
 static __attribute__((cold, noinline)) void const_conv(cc *c, uint32_t n, qty to)
 {
 	const node *x = N(n);
@@ -419,13 +421,15 @@ static __attribute__((cold, noinline)) void const_conv(cc *c, uint32_t n, qty to
 	if (!is_integer(c, from) || KIND(c, from) == TY_BOOL || ty_size(c, to) >= ty_size(c, from) || w > 64 ||
 	    !cc_eval(c, n, &v) || v.kind != CV_INT)
 		return;
-	if (KIND(c, QUNQ(to)) == TY_CHAR || (w == 8 && c->ibr))	/* clang: byte tables in braces */
+	if (w == 8 && c->ibr)	/* clang: byte tables in braces (plain char: its target's sign) */
 		lo = -128, hi = 255;
 	else if (!is_signed(c, to))
 		lo = -((i128)1 << (w - 1)), hi = ((i128)1 << w) - 1;
 	else
 		lo = -((i128)1 << (w - 1)), hi = is_signed(c, from) ? ((i128)1 << (w - 1)) - 1 : ((i128)1 << w) - 1;
 	if (v.i >= lo && v.i <= hi)
+		return;
+	if (v.i >= 0 && v.i <= ((i128)1 << w) - 1 && hex_literal(c, n))	/* clang: 0xfe into a char */
 		return;
 	nv = trunc_to(c, v.i, to);
 	r = rng(c, n);
@@ -440,7 +444,8 @@ static __attribute__((cold, noinline)) void const_conv(cc *c, uint32_t n, qty to
 		pp_diag_label(c->p, d, c->cv_loc, pp_tok_end(c->p, c->cv_loc), NULL);
 	pp_diag_label(c->p, d, r.b, r.e, NULL);
 	pp_diag_macro(d, a, (uint32_t)strlen(a));	/* clang: "expanded from macro" at the constant */
-	pp_diag_help(c->p, d, "'%s' holds %s to %s: cast the value if the wrap to %s is intended", tyname(c, QUNQ(to)), los, his, b);
+	pp_diag_help(c->p, d, "'%s' holds %s to %s%s: cast the value if the wrap to %s is intended", tyname(c, QUNQ(to)), los, his,
+		     char_sign(c, to), b);
 	rt_emit(c, d);	/* (clang: DiagRuntimeBehavior) */
 }
 
@@ -590,6 +595,21 @@ VPRIV __attribute__((noinline)) uint32_t convert_slow(cc *c, uint32_t n, qty to)
 }
 
 /* clang spells the array type of this warning without the space: 'int[4]' */
+/* n is an integer literal written in hex, octal or binary (parentheses are no nodes) */
+static bool hex_literal(cc *c, uint32_t n)
+{
+	return N(n)->op == N_NUM && N(n)->aux == NUM_RADIX;
+}
+
+/* plain 'char' in a range help: its sign is the target's, so the warning may be one target's only */
+VPRIV const char *char_sign(cc *c, qty t)
+{
+	if (KIND(c, t) != TY_CHAR)
+		return "";
+	return c->o->target == PP_DARWIN ? " (plain 'char' is signed on Apple and x86, unsigned on Arm and RISC-V Linux)"
+					 : " (plain 'char' is unsigned on Arm and RISC-V Linux, signed on Apple and x86)";
+}
+
 static const char *arr_tyname(cc *c, qty t)
 {
 	const char *s = tyname(c, t), *sp = strstr(s, " [");

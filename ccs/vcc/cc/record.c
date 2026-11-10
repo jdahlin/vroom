@@ -149,6 +149,7 @@ __attribute__((noinline)) VPRIV void struct_body(cc *c, uint32_t ti)
 			}
 			f.ty = t;
 			f.counted_by = d.at.counted_by;
+			f.tdef = ds.tds ? ds_tdef(c, &ds, t) : 0;
 			f.depr = unlikely(attrs_depr(c, &d.at)) ? d.at.ext : 0;
 			if (is_func(c, t))
 				cc_error(c, d.loc, "field '%.*s' declared as a function", IDF(d.name));

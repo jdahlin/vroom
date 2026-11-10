@@ -242,6 +242,14 @@ VPRIV void weak_finish(cc *c)
 	}
 }
 
+/* the typedef ds named, if t (an object's type or a function's return type) is that type */
+VPRIV uint32_t ds_tdef(cc *c, const dspec *ds, qty t)
+{
+	if (KIND(c, t) == TY_FUNC)
+		t = T(c, t)->base;
+	return QUNQ(t) == QUNQ(ds->ty) ? ds->tds : 0;
+}
+
 static uint32_t declare(cc *c, const dspec *ds, declr *d, qty t, bool file)
 {
 	attrs at = d->at;
@@ -382,6 +390,8 @@ static uint32_t declare(cc *c, const dspec *ds, declr *d, qty t, bool file)
 	{
 		sym *y = &c->syms[s];
 
+		if (ds->tds)
+			y->tdef = ds_tdef(c, ds, t);
 		y->sc = (uint8_t)(ds->sc == SC_TYPEDEF ? SC_NONE : ds->sc);
 		if (file || ds->sc == SC_EXTERN || kind == S_FUNC)
 			y->flags |= SF_GLOBAL;

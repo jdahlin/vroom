@@ -379,6 +379,20 @@ static bool suggest(cc *c, const fstr *f, const spec *s, uint32_t a, int kind, c
 		}
 		if (ik == TY_BOOL)
 			len = "";
+		{
+			/* clang's namedTypeToLengthModifier: a typedef the C library names */
+			uint32_t td = expr_tdef(c, fstrip(c, a), t);
+			const vident *v = td ? &vintern_ents[c->syms[td].name] : NULL;
+
+#define TDN(w) (v->len == sizeof(w) - 1 && !memcmp(v->s, w, sizeof(w) - 1))
+			if (v && (TDN("size_t") || TDN("ssize_t")))
+				len = "z";
+			else if (v && (TDN("intmax_t") || TDN("uintmax_t")))
+				len = "j";
+			else if (v && TDN("ptrdiff_t"))
+				len = "t";
+#undef TDN
+		}
 		cv = keep ? s->cv : ik == TY_CHAR && !keep && s->cv == 's' ? 'c' : is_signed(c, t) || ik == TY_BOOL ? 'd' : 'u';
 		if ((cv == 'd' || cv == 'i') && !is_signed(c, t) && ik != TY_BOOL)
 			cv = 'u';
@@ -410,13 +424,41 @@ static uint32_t argloc(cc *c, uint32_t a)
 {
 	uint32_t s = fstrip(c, a);
 
-	return N(s)->loc != UINT32_MAX ? N(s)->loc : rng(c, s).b;
+	/* clang: the argument's beginning (a member's base, a call's callee) */
+	return N(s)->op == N_MEMBER || N(s)->op == N_CALL || N(s)->loc == UINT32_MAX ? rng(c, s).b : N(s)->loc;
 }
 
 /* the data argument for position p (1-based), or 0 */
 static uint32_t data_arg(fctx *x, int p)
 {
 	return p >= 1 && (uint32_t)p <= x->nargs ? x->args[p - 1] : 0;
+}
+
+/* a 64-bit <stdint.h> typedef: 'long' on Linux, 'long long' on Apple, so neither %ld nor %lld
+   is portable; the help names the <inttypes.h> macro (PRId64, SCNu64) that is */
+static void int64_help(cc *c, vdiag *d, uint32_t e, qty t, const spec *s, int kind)
+{
+	static const char *const names[] = { "int64_t", "uint64_t", "int_least64_t", "uint_least64_t",
+					     "int_fast64_t", "uint_fast64_t" };
+	uint32_t td = expr_tdef(c, e, t);
+	const vident *v = td ? &vintern_ents[c->syms[td].name] : NULL;
+	int k = int_kind(c, t);
+	char cv = s->cv;
+
+	if (!v || (k != TY_LONG && k != TY_ULONG && k != TY_LLONG && k != TY_ULLONG))
+		return;
+	for (size_t i = 0; i < sizeof(names) / sizeof(names[0]); i++)
+		if (v->len == strlen(names[i]) && !memcmp(v->s, names[i], v->len)) {
+			const char *w = names[i][0] == 'u' ? names[i] + 1 : names[i];	/* int64_t, int_least64_t */
+			const char *mid = w[4] == 'l' ? "LEAST" : w[4] == 'f' ? "FAST" : "";
+
+			if (!strchr("diouxX", cv))
+				cv = names[i][0] == 'u' ? 'u' : 'd';
+			pp_diag_help(c->p, d, "'%s' is '%slong' on Linux and '%slong long' on Apple: %s%c%s64 from <inttypes.h> "
+				     "fits both", names[i], names[i][0] == 'u' ? "unsigned " : "", names[i][0] == 'u' ? "unsigned " : "",
+				     kind == FK_SCANF ? "SCN" : "PRI", cv, mid);
+			return;
+		}
 }
 
 static void mismatch(fctx *x, const spec *s, const want *w, uint32_t a)
@@ -430,14 +472,16 @@ static void mismatch(fctx *x, const spec *s, const want *w, uint32_t a)
 	if (KIND(c, N(a)->ty) == TY_DOUBLE && KIND(c, t) == TY_FLOAT && w->cls != W_FLT)
 		t = N(fstrip(c, a))->ty;
 	spec_range(x, s, &sr);
-	d = cc_warn_begin(c, "format", true, NULL, argloc(c, a), "format specifies type %s but the argument has type '%s'", w->name,
-			  tyname(c, is_ptr(c, N(a)->ty) ? N(a)->ty : t));
+	d = cc_warn_begin(c, "format", true, NULL, argloc(c, a), "format specifies type %s but the argument has type %s", w->name,
+			  is_ptr(c, N(a)->ty) ? tyname_sugar(c, a, N(a)->ty) : tyname_sugar(c, fstrip(c, a), t));
 	if (!d)
 		return;
 	pp_diag_label(c->p, d, sr.b, sr.e, NULL);
 	pp_diag_label(c->p, d, ar.b, ar.e, NULL);
 	if (x->f->loc && suggest(c, x->f, s, a, x->kind, fix, sizeof fix))
 		pp_diag_fix(c->p, d, sr.b, sr.e, fix, VDA_MAYBE);
+	if (is_integer(c, t))
+		int64_help(c, d, fstrip(c, a), t, s, x->kind);
 	pp_diag_emit(c->p, d);
 }
 
@@ -472,8 +516,8 @@ static void amount(fctx *x, const spec *s, int star, uint32_t at, bool prec)
 		return;
 	spec_range(x, s, &sr);
 	ar = rng(c, fstrip(c, a));
-	d = cc_warn_begin(c, "format", true, NULL, floc(x->f, at + 1), "field %s should have type 'int', but argument has type '%s'",
-			  prec ? "precision" : "width", tyname(c, N(fstrip(c, a))->ty));
+	d = cc_warn_begin(c, "format", true, NULL, floc(x->f, at + 1), "field %s should have type 'int', but argument has type %s",
+			  prec ? "precision" : "width", tyname_sugar(c, fstrip(c, a), N(fstrip(c, a))->ty));
 	if (!d)
 		return;
 	pp_diag_label(c->p, d, sr.b, sr.e, NULL);

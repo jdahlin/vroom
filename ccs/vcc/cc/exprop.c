@@ -793,7 +793,7 @@ static __attribute__((cold, noinline)) void range_compare(cc *c, uint32_t n, int
 		char ls[48], hs[48];
 
 		i128s_(ls, sizeof ls, lo), i128s_(hs, sizeof hs, hi);
-		pp_diag_help(c->p, d, "'%s' holds %s to %s", tyname(c, ot), ls, hs);
+		pp_diag_help(c->p, d, "'%s' holds %s to %s%s", tyname(c, ot), ls, hs, char_sign(c, ot));
 	}
 	rt_emit(c, d);
 }
