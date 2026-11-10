@@ -341,6 +341,7 @@ static void hc_apply(pp *p, const hent *e)
 		fent *d = &p->fe[p->nfe++];
 
 		d->base = p->next_base + h->rbase;
+		d->dstate = p->dcur;
 		d->f = h->f;
 		d->fi = h->fi;
 		d->name = h->name;

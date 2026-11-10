@@ -98,7 +98,7 @@ VPRIV void unused_globals(cc *c)
 
 	if (c->errors || pp_errors(c->p))
 		return;
-	if (pp_diag_wlevel(c->p, "unused-function", false, w_unused_fn, UINT32_MAX) < 0 &&
+	if (!pp_diag_npragma(c->p) && pp_diag_wlevel(c->p, "unused-function", false, w_unused_fn, UINT32_MAX) < 0 &&
 	    pp_diag_wlevel(c->p, "unneeded-internal-declaration", false, w_unused_fn, UINT32_MAX) < 0 &&
 	    pp_diag_wlevel(c->p, "unused-variable", false, w_unused_var, UINT32_MAX) < 0)
 		goto typedefs;	/* (-Wunused-const-variable is in -Wunused-variable) */

@@ -168,6 +168,7 @@ typedef struct fent {
 	const char *spath;	/* as spelled, for dependency files */
 	uint8_t sys;		/* a system header (found in a system directory, or included by one) */
 	uint32_t from;		/* the #include's location (0: the main file, <built-in>, or a cached replay) */
+	uint32_t dstate;	/* the #pragma diagnostic state where it was entered (pdnode index) */
 } fent;
 
 #define MAXCTX (1u << 15)
@@ -432,6 +433,11 @@ struct pp {
 	uint32_t nonce, oncecap;
 	struct { uint32_t id; uintptr_t m; } *pushed;
 	uint32_t npushed;
+	/* #pragma clang/GCC diagnostic: states are a persistent list (node: one flag's mapping and
+	   the state it was set in, 0: the command line's); the transitions are by location */
+	struct pdnode { uint32_t prev; uint8_t act; char name[59]; } *dn;
+	struct { uint32_t loc, st; } *dtr;
+	uint32_t ndn, ndtr, dcur, ndstk, dstk[64];
 	vlex_file builtin;
 	const char *base_name;
 	uint32_t base_namelen;
@@ -508,6 +514,8 @@ struct pp {
 /* ---------------- header cache: recording reads and writes ---------------- */
 
 /* the open regions are not cacheable (something in them depends on more than we record) */
+VPRIV void diag_pragma(pp *p, const char *q, const char *e, uint32_t loc);
+VPRIV void diag_file_end(pp *p, uint32_t fe);
 #define HC_BAD(p) do { if ((p)->rec.n) { (p)->rec.nbad = (p)->rec.n; (p)->rec.badline = __LINE__; } } while (0)
 
 #define HC_MAXT (1u << 24)

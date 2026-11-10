@@ -488,8 +488,21 @@ Varje delsteg: nya fall i `tests/diag/` (snapshots, och clang som mätpunkt), la
    varningar, inga falska).  Inget efter ett fel i funktionen (clang: i scopet).  Testfallet
    unused.c är textidentiskt med clang (`diag-flags:` i testfilen ger flaggor till båda
    kompilatorerna).  Kärnan 879/879, PostgreSQL 0 varningar som clang inte ger, grinden ok
-   (fe +0.77 %; denna ändring +0.10 %).  Kvar: `#pragma clang/GCC diagnostic` saknas helt
-   (kod som tystar en varning med pragma får den ändå), och unused-varianter för parametrar.
+   (fe +0.77 %; denna ändring +0.10 %).  Kvar: unused-varianter för parametrar.
+   `#pragma clang/GCC diagnostic` och `_Pragma` (klar): push, pop, ignored, warning,
+   error, fatal, grupper och `-Weverything`, för preprocessorns och front endens varningar.
+   Tillståndet gäller per plats som clangs DiagStateMap: varje pragma är en övergång i sin
+   fil, en fil ärver tillståndet där den gick in (sparat i fent, så också vid en
+   header-cache-replay), och ett tillstånd en header ändrar utan pop gäller i den som
+   inkluderade den från `#include` och framåt.  En varning som ges vid ett scopes slut följer
+   pragman före sin plats.  Som clang: `warning` ger en varning också under `-Werror` och
+   `-Werror=flagga`, `-w` vinner över allt.  En header med en diagnostic-pragma spelas inte
+   in i header-cachen.  Matris mot clang (`-Wall`, `-Werror`, `-Werror=format`,
+   `-Wno-error=`, `-w`) lika; testfallet pragma_diagnostic.c textidentiskt.  Kärnans
+   paritet 873/873 (batch) och 911/912 (modpost), vccd-test, PostgreSQL 0 varningar som clang
+   inte ger, grinden ok (pp +0.12 %, fe +0.81 %).  fuzz-pp hittade en use-after-free i
+   `raw` (token.c:149) som finns redan i 96a2f5f: källan från förra körningen, troligen via
+   den delade filcachen (pp/file.c) när samma sökväg får nytt innehåll.
 2. **Makron**: expanderad text med caret i, ramar från systemheaders vikta,
    flernivå-"expanded from" (TODO.md "Diagnostic details").
 3. **`static_assert`**: operanderna utvärderade (`48 == 56`), och för `sizeof` en

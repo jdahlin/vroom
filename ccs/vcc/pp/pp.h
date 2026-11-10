@@ -109,6 +109,7 @@ int pp_macros(pp *p, char **out, size_t *len);
 void pp_hc_stats(char *buf, size_t n);
 /* errors reported so far */
 int pp_errors(const pp *p);
+int pp_diag_npragma(const pp *p);	/* #pragma diagnostic transitions so far */
 /* a new build (vccd): forget the include answers; with vlex_cache_flush and
  * vdir_flush, every file is looked up and read again.  No TU may be running. */
 void pp_include_flush(void);

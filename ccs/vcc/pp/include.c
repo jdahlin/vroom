@@ -285,6 +285,7 @@ static void add_fent(pp *p, ctx *c, const vlex_file *f, const char *name)
 		nl = tl + nl - fl;
 	}
 	e->base = p->next_base;
+	e->dstate = p->dcur;
 	e->f = f;
 	e->fi = c->fi;
 	e->name = name;

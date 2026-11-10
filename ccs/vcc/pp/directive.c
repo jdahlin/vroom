@@ -213,6 +213,11 @@ VPRIV int pragma_text(pp *p, const char *s, size_t n, uint32_t loc, ptok *out)
 		if (word(&r, e, "GCC") && (word(&r, e, "system_header") || word(&r, e, "poison") ||
 					    word(&r, e, "dependency")))
 			return 0;
+		r = q;
+		if ((word(&r, e, "clang") || word(&r, e, "GCC")) && word(&r, e, "diagnostic")) {
+			HC_BAD(p);	/* (a replay would not run it) */
+			diag_pragma(p, r, e, loc);	/* (and kept in the output, as clang -E) */
+		}
 	}
 	memset(out, 0, sizeof(*out));
 	out->kind = P_DIRECTIVE;

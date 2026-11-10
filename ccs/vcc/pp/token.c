@@ -185,6 +185,8 @@ VPRIV __attribute__((noinline)) void raw(pp *p, ptok *t)
 			}
 			if (unlikely(p->rec.on) && p->depth == p->rec.lev[p->rec.n - 1].depth)
 				hc_end(p);
+			if (unlikely(p->ndtr))
+				diag_file_end(p, c->fe);
 			p->nfile--;
 			p->depth--;
 			continue;
