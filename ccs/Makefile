@@ -96,7 +96,7 @@ PP_OBJ  = $(call o,$(PP_SRC)) $(SPLIT_OBJ)
 mod = $(if $(VCC_UNITY),$(OBJ)/unity/$(1).o,$(call o,$($(1)_SRC)))
 AS_SRC  = $(AS_FILES) $(as_SRC) $(obj_SRC)
 AS_OBJ  = $(call o,$(AS_FILES)) $(call mod,as) $(call mod,obj)
-LD_SRC  = vcc/ld/ld.c vcc/lib/ldhash.c vcc/ld/objcopy.c vcc/ld/wasmld.c
+LD_SRC  = vcc/ld/ld.c vcc/lib/ldhash.c vcc/ld/objcopy.c vcc/ld/wasmld.c vcc/platform/darwin/ldmacho.c
 
 $(OBJ)/%.o: vcc/%.c | $(OBJ)
 	@mkdir -p $(dir $@)
@@ -192,7 +192,7 @@ self: $(OUT)/vpp
 	$(SELF_LD) $(call so,$(VCCD_SRC)) $(SELF_PP) $(SELF_LEX) $(SELF_AS) -o $(SO)/vccd
 	$(SELF_LD) $(SO)/as-vasm.o $(SELF_AS) -o $(SO)/vasm
 	$(SELF_LD) $(SO)/lex-lextest.o $(SO)/platform-darwin-pmc.o $(SELF_LEX) -o $(SO)/lextest
-	$(SELF_LD) $(SO)/ld-main.o $(SO)/lib-ldhash.o $(SO)/ld-objcopy.o -o $(SO)/vlink
+	$(SELF_LD) $(SO)/ld-main.o $(SO)/lib-ldhash.o $(SO)/ld-objcopy.o $(SO)/platform-darwin-ldmacho.o -o $(SO)/vlink
 	$(SELF_LD) $(SO)/vccd-shim.o -o $(SO)/vcc
 
 self-check: self
