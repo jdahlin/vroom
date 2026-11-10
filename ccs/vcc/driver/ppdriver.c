@@ -462,6 +462,8 @@ static int write_deps(const pp *p, const char *cwd, const char *depfile, const c
 		const char *f = i == (size_t)-1 ? first : names[i];
 		size_t l;
 
+		if (i == 0 && !strcmp(f, "<stdin>"))
+			continue;	/* clang: a main file from stdin is no dependency */
 		while (f[0] == '.' && f[1] == '/')	/* clang drops "./" */
 			f += 2;
 		l = strlen(f);
@@ -725,6 +727,44 @@ static const char *ppd_getenv(const ppd_env *env, const char *name)
 	return NULL;
 }
 
+/* the input `-`, whole (the lexer wants it padded in one piece); nonzero after an error (reported) */
+static __attribute__((noinline, cold)) int read_stdin_all(int fd, int errfd, const char **src, size_t *len)
+{
+	static _Thread_local char *ib;
+	static _Thread_local size_t icap;
+	size_t n = 0;
+
+	for (;;) {
+		ssize_t k;
+
+		if (icap - n < 65536) {
+			char *nb = realloc(ib, icap = icap ? icap * 2 : 1 << 20);
+
+			if (!nb) {
+				dprintf(errfd, "vcc: error: out of memory reading stdin\n");
+				return 1;
+			}
+			ib = nb;
+		}
+		k = read(fd, ib + n, icap - n);
+		if (k < 0 && errno == EINTR)
+			continue;
+		if (k < 0) {
+			dprintf(errfd, "vcc: error: cannot read stdin: %s\n", strerror(errno));
+			return 1;
+		}
+		if (k == 0)
+			break;
+		n += (size_t)k;
+		if (n >= (1u << 31)) {
+			dprintf(errfd, "vcc: error: <stdin>: file too large (2 GB or more)\n");
+			return 1;
+		}
+	}
+	*src = ib, *len = n;
+	return 0;
+}
+
 int ppd_run(int argc, char **argv, const ppd_env *env)
 {
 	/* each list holds at most argc entries, all of them plus the defaults: one
@@ -745,6 +785,8 @@ int ppd_run(int argc, char **argv, const ppd_env *env)
 	int nq = 0, ni = 0, ns = 0, na = 0, n = 0, ne = 0;
 	static __thread const char *dirs_e[64];	/* --embed-dir */
 	const char *cmp = NULL, *out = NULL, *main_file = NULL, *depfile = NULL, *deptarget = NULL;
+	const char *stdin_src = NULL;	/* the input `-`, read whole */
+	size_t stdin_len = 0;
 	int errfd = env->errfd, status = 0, md = 0, mdeps = 0, mphony = 0, dcolor = 0, nocaret = 0, elimit = 0, nwargs = 0;
 	const char **wargs = NULL;
 	char pmapbuf[4096];
@@ -982,6 +1024,8 @@ int ppd_run(int argc, char **argv, const ppd_env *env)
 		else if (!strncmp(a, "-march=", 7) && arch_lse(a + 7, false) >= 0) march_lse = arch_lse(a + 7, false);
 		else if (!strncmp(a, "-mcpu=", 6) && arch_lse(a + 6, true) >= 0) mcpu_lse = arch_lse(a + 6, true);
 		else if (!strcmp(a, "-mcmodel=tiny")) tiny = 1;
+		else if (!strcmp(a, "-"))
+			main_file = a;	/* stdin, as clang: "<stdin>" in diagnostics and line markers */
 		else if (a[0] != '-' && a[0] && (xlang || src_suffix(a))) {
 			size_t l = strlen(a);
 
@@ -996,6 +1040,19 @@ int ppd_run(int argc, char **argv, const ppd_env *env)
 		dprintf(errfd, "vcc: error: no input file\n");
 		status = 2;
 		goto out;
+	}
+	if (!strcmp(main_file, "-") && raw_asm == 1) {
+		dprintf(errfd, "vcc: error: assembler input from stdin is not supported\n");
+		status = 2;
+		goto out;
+	}
+	if (!strcmp(main_file, "-") && env->in_src) {
+		stdin_src = env->in_src, stdin_len = env->in_len;
+	} else if (!strcmp(main_file, "-")) {
+		if (read_stdin_all(env->infd, errfd, &stdin_src, &stdin_len)) {
+			status = 1;
+			goto out;
+		}
 	}
 	if (emit == 1 && !objmode && !out && !layout) {
 		/* clang: -S writes the source's basename with .s */
@@ -1285,7 +1342,8 @@ int ppd_run(int argc, char **argv, const ppd_env *env)
 	po.imacros = imac.n != 0;
 	bput(&pre, "", 1);
 	po.predef = pre.p;
-	po.main = main_file;
+	po.main = stdin_src ? "<stdin>" : main_file;
+	po.main_src = stdin_src, po.main_len = stdin_len;
 	po.unsigned_char = uchar >= 0 ? uchar : lnx;
 	po.cwd = env->cwd;
 	po.errfd = errfd;
@@ -1429,7 +1487,7 @@ int ppd_run(int argc, char **argv, const ppd_env *env)
 			status = write_out(env->cwd, out, env->outfd, tl_wasm_obj.p, tl_wasm_obj.n, errfd);
 		else if (!status && emit == 2)
 			status = write_obj(env->cwd, out, env->outfd, errfd, darwin);
-		if (!status && emit == 2 && depfile)
+		if (!status && emit && depfile)	/* -S and -c */
 			status = write_deps(p, env->cwd, depfile, dtarget, dnosys, mphony, dfirst, NULL, -1, errfd);
 		if (getenv("VPP_TIME"))
 			dprintf(errfd, "vcc: %.1f ms\n", (now() - t0) * 1e3);
