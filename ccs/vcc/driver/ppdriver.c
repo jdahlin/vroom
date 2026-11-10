@@ -758,6 +758,7 @@ static __attribute__((noinline)) int ppd_run1(int argc, char **argv, const ppd_e
 			continue;
 		}
 		if (!strncmp(a, "-fdiagnostics-add-output=sarif:file=", 36)) { po.sarif_file = a + 36; continue; }
+		if (!strncmp(a, "-fdiagnostics-add-output=html:file=", 35)) { po.html_file = a + 35; continue; }
 		if (!strncmp(a, "-fdiagnostics-style=", 20)) {	/* vcc (default), clang, narrated */
 			const char *f = a + 20;
 

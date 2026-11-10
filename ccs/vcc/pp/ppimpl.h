@@ -644,6 +644,7 @@ VPRIV void include_stack(pp *p, struct vbuf *b, const fent *e);
 VPRIV void diag_text_flush(pp *p);
 VPRIV void diag_narrate(pp *p, struct vbuf *b, vdiag *d);
 VPRIV void diag_render_rec(pp *p, struct vbuf *b, vdiag *d);
+VPRIV void diag_render_color(pp *p, struct vbuf *b, vdiag *d);
 VPRIV void diag_typediff(struct vbuf *b, const vdiag *d, const char *plain);
 /* diagout.c: JSON lines and SARIF */
 VPRIV void diag_json_flush(pp *p);

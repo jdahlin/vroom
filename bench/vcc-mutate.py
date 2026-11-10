@@ -19,7 +19,7 @@ build/ccs/mutate/clang/ (keyed by the mutant and the flags), so a rerun only
 runs vcc.  Details of every mutant go to build/ccs/mutate/last.jsonl.
 
   bench/vcc-mutate.py [-j N] [-n N] [--kernel-share F] [--seed S] [--src torture|kernel|all] [--formats]
-      --formats: also check every mutant's JSON records rebuild its text and its SARIF log (layer 5a)
+      --formats: also check every mutant's JSON records rebuild its text, its SARIF log and its HTML page (layer 5a)
       --fix: also run `vpp --fix` (up to 3 passes) on each rejected mutant: how often a machine-applicable
              fix restores the original, and that none leaves more errors than before (layer 5b, D6)
   bench/vcc-mutate.py show CATEGORY [KIND] [-n N]   mutants of a category from the last run, with both outputs
@@ -255,16 +255,76 @@ def formats_check(a, mp, cwd):
         mods[name] = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(mods[name])
     out = {}
-    for k, extra in (('text', []), ('json', ['-fdiagnostics-format=json']), ('sarif', ['-fdiagnostics-format=sarif'])):
+    hp = mp + '.html'
+    for k, extra in (('text', ['-fdiagnostics-add-output=html:file=' + hp]), ('json', ['-fdiagnostics-format=json']),
+                     ('sarif', ['-fdiagnostics-format=sarif'])):
         p = subprocess.run([VPP] + COMMON + extra + a + [mp], cwd=cwd, capture_output=True, timeout=TIMEOUT)
         out[k] = p.stderr
     try:
         if mods['diagrender'].render(out['json'].decode(errors='replace').splitlines(), cwd or '.') != out['text']:
             return 'JSON does not rebuild the text'
         sp = mods['sarifcheck'].check(json.loads(out['sarif']))
-        return f'SARIF: {sp[0]}' if sp else None
+        if sp:
+            return f'SARIF: {sp[0]}'
+        return html_check(hp, out['text'], out['json'])
     except (ValueError, KeyError) as e:
         return f'bad JSON: {e}'
+    finally:
+        if os.path.exists(hp):
+            os.unlink(hp)
+
+
+def html_check(hp, text, js):
+    """D8.4: the HTML page is well formed, has a section per record, and its text is the text
+    output's (without colour; the summary line aside)"""
+    import html, html.parser
+    try:
+        page = open(hp, encoding='utf-8').read()
+    except (OSError, UnicodeDecodeError) as e:
+        return f'HTML: {e}'
+
+    class P(html.parser.HTMLParser):
+        def __init__(self):
+            super().__init__()
+            self.st, self.bad, self.sec, self.pre, self.cur = [], None, 0, [], None
+
+        def handle_starttag(self, t, at):
+            if t == 'meta':
+                return
+            self.st.append(t)
+            if t == 'section':
+                self.sec += 1
+            if t == 'pre':
+                self.cur = []
+
+        def handle_endtag(self, t):
+            if not self.st or self.st[-1] != t:
+                self.bad = self.bad or f'</{t}> closes {self.st[-1:] or "nothing"}'
+            else:
+                self.st.pop()
+            if t == 'pre' and self.cur is not None:
+                self.pre.append(''.join(self.cur))
+                self.cur = None
+
+        def handle_data(self, d):
+            if self.cur is not None:
+                self.cur.append(d)
+    p = P()
+    p.feed(page)
+    if p.bad or p.st:
+        return f'HTML: {p.bad or "unclosed " + str(p.st)}'
+    nrec = sum(1 for ln in js.decode(errors='replace').splitlines() if ln.startswith('{'))
+    if p.sec != nrec:
+        return f'HTML: {p.sec} sections, {nrec} records'
+    t = text.decode(errors='replace')
+    t = re.sub(r'\n?[^\n]*generated\.\n$', '\n', t) if t.endswith('generated.\n') else t
+    if ''.join(p.pre).strip('\n') != t.strip('\n'):
+        if os.environ.get('MUTATE_HTML_DUMP'):
+            d = os.environ['MUTATE_HTML_DUMP']
+            open(d + '.html.txt', 'w').write(''.join(p.pre))
+            open(d + '.text.txt', 'w').write(t)
+        return 'HTML text differs from the text output'
+    return None
 
 
 def fix_check(a, mp, cwd, src, nerr):
@@ -413,7 +473,7 @@ def run(argv):
     report(recs, len(good_t), len(good_k), time.time() - t0)
     bad = [r for r in recs if r.get('formats')]
     if formats:
-        print(f'  formats (JSON rebuilds the text, SARIF well formed): {len(recs) - len(bad)}/{len(recs)} ok')
+        print(f'  formats (JSON rebuilds the text, SARIF well formed, HTML has the text): {len(recs) - len(bad)}/{len(recs)} ok')
         for r in bad[:10]:
             print(f'    {r["tu"]} seed {r["seed"]}: {r["formats"]}')
     worse = []

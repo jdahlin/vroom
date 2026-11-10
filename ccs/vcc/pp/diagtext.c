@@ -575,6 +575,22 @@ VPRIV void diag_render_rec(pp *p, vbuf *b, vdiag *d)
 			render_text(p, b, k);
 }
 
+/* d and its notes in the vcc style with colour codes, whatever the text style (the HTML page) */
+VPRIV void diag_render_color(pp *p, vbuf *b, vdiag *d)
+{
+	int color = p->color;
+
+	d->emitted = 0;	/* (the text output has printed them) */
+	for (vdiag *k = d->kids; k; k = k->next)
+		k->emitted = 0;
+	p->color = 1;
+	render_vcc(p, b, d);
+	p->color = color;
+	d->emitted = 0;
+	for (vdiag *k = d->kids; k; k = k->next)
+		k->emitted = 0;
+}
+
 /* the narrated style renders at once (no folding) */
 VPRIV void diag_narrate(pp *p, vbuf *b, vdiag *d)
 {

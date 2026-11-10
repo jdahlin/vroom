@@ -791,6 +791,13 @@ posten (`art`): vcc-stilen visar den under källraderna, JSON och SARIF (`vcc/ar
 'a' declared here" ges nu också för medlemmar (vid deklarationens början).  *Validerat:*
 diag-fallet `bounds_art.c`, `runtime_warnings.c` med bilderna, JSON återskapar texten.
 
+Status D8.4 (2026-11-10): `-fdiagnostics-add-output=html:file=F` skriver en fristående sida
+(ljust och mörkt tema, inga externa resurser): en sammanfattning och varje post som
+vcc-stilen visar den, med källrader, etiketter, noter, `help:` och bilder, färgkoderna som
+`<span>` och flaggornas OSC 8-länkar som `<a>`.  Byggs i `pp_diag_finish` ur postlistan,
+som SARIF.  *Validerat:* `vcc-mutate.py --formats` kontrollerar varje mutants sida:
+välformad, en sektion per post och samma text som textutdata.
+
 ## Ordning och milstolpar
 
 | milstolpe | steg | synligt för användaren |

@@ -64,6 +64,7 @@ typedef struct pp_opts {
 	int fix_apply;			/* --fix: machine-applicable fix-its written to the files */
 	struct pp_dsink *dsink;		/* vccd's whole-build view of the diagnostics (NULL: none) */
 	const char *sarif_file;		/* -fdiagnostics-add-output=sarif:file=F: SARIF there too */
+	const char *html_file;		/* -fdiagnostics-add-output=html:file=F: a page of the records */
 	char *const *argv;		/* the command line (SARIF's invocation) */
 	int argc;
 	const char *const *wargs;	/* -W..., -w options in command-line order */
