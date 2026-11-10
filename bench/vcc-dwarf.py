@@ -10,8 +10,10 @@ For every C file in ccs/vcc/tests/vcc and tests/gcc-torture/execute
   - vpp -g -c equals clang -c of vpp -g -S (the line table from the text);
   - rows at lines clang -g has no row for are counted (-v lists them): clang
     -O0 drops an if whose condition folds, vcc -O0 keeps its code.
+Clang's side (whether it compiles, its rows) is cached in build/ccs/dwarfref,
+keyed by the source, the flags and clang's version; --no-cache ignores it.
 """
-import argparse, glob, os, re, subprocess, sys, tempfile
+import argparse, glob, hashlib, json, os, re, subprocess, sys, tempfile
 from multiprocessing import Pool
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from hostenv import llvm, BUILD
@@ -20,6 +22,11 @@ VPP = os.path.join(os.environ.get('VCC_BIN') or BUILD, 'vpp')
 CL, DD, OC = llvm('clang'), llvm('llvm-dwarfdump'), llvm('llvm-objcopy')
 RT = f'{R}/ccs/vcc/tests/rt/include'
 FL = ['--target=aarch64-linux-gnu', '-w', '-ffreestanding', '-I', RT]
+REF = f'{BUILD}/dwarfref'
+CLV = subprocess.run([CL, '--version'], capture_output=True, text=True).stdout
+for _d, _, _fs in sorted(os.walk(RT)):	# the tests include the runtime headers
+    CLV += ''.join(hashlib.sha1(open(f'{_d}/{x}', 'rb').read()).hexdigest() for x in sorted(_fs))
+NOCACHE = False
 
 def run(cmd, **kw):
     return subprocess.run(cmd, capture_output=True, **kw)
@@ -43,12 +50,32 @@ def lines(o, entry=True):
         if m and int(m.group(1)) and (entry or int(m.group(2))): rows.add((names.get(int(m.group(3))), int(m.group(1))))
     return rows
 
+def clang_rows(f, a, t):
+    """clang -g's rows for f (None when clang rejects it), cached"""
+    key = hashlib.sha1(open(f, 'rb').read() + ' '.join(a + [CLV]).encode()).hexdigest()
+    cf = f'{REF}/{key}.json'
+    if not NOCACHE:
+        try:
+            r = json.load(open(cf))
+            return None if r is None else {tuple(x) for x in r}
+        except (OSError, ValueError):
+            pass
+    rows = None
+    if not run([CL] + a + ['-g', '-c', '-o', f'{t}/c.o'], cwd=os.path.dirname(f)).returncode:
+        rows = lines(f'{t}/c.o')
+    os.makedirs(REF, exist_ok=True)
+    with open(f'{cf}.{os.getpid()}', 'w') as o:
+        json.dump(None if rows is None else sorted(rows, key=str), o)
+    os.replace(f'{cf}.{os.getpid()}', cf)
+    return rows
+
 def one(job):
     f, opt = job
     with tempfile.TemporaryDirectory() as t:
         d = os.path.dirname(f); b = os.path.basename(f)
         a = FL + [opt, b]
-        if run([CL] + a + ['-g', '-c', '-o', f'{t}/c.o'], cwd=d).returncode:
+        crows = clang_rows(f, a, t)
+        if crows is None:
             return ('skip', f, '')
         if run([VPP] + a + ['-c', '-o', f'{t}/n.o'], cwd=d).returncode:
             return ('skip', f, '')
@@ -65,21 +92,28 @@ def one(job):
             return ('fail', f, 'vpp -g -S does not assemble with clang')
         if open(f'{t}/s.o', 'rb').read() != open(f'{t}/g.o', 'rb').read():
             return ('fail', f, 'vpp -g -c differs from clang -c of vpp -g -S')
-        extra = lines(f'{t}/g.o', False) - lines(f'{t}/c.o')
+        extra = lines(f'{t}/g.o', False) - crows
         if extra:	# clang -O0 drops an if whose condition folds, vcc keeps its code
             return ('ok', f, f'lines clang has no row for: {sorted(extra)[:5]}')
         return ('ok', f, '')
+
+def _init(nc):
+    global NOCACHE
+    NOCACHE = nc
 
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument('-j', type=int, default=6)
     ap.add_argument('-O', dest='opt', default='0')
     ap.add_argument('-v', action='store_true')
+    ap.add_argument('--no-cache', action='store_true')
     ap.add_argument('pat', nargs='?')
     a = ap.parse_args()
+    global NOCACHE
+    NOCACHE = a.no_cache
     files = sorted(glob.glob(f'{R}/ccs/vcc/tests/vcc/*.c') + glob.glob(f'{R}/ccs/vcc/tests/gcc-torture/execute/*.c'))
     if a.pat: files = [f for f in files if a.pat in f]
-    with Pool(a.j) as p: res = p.map(one, [(f, '-O' + a.opt) for f in files], chunksize=4)
+    with Pool(a.j, initializer=_init, initargs=(a.no_cache,)) as p: res = p.map(one, [(f, '-O' + a.opt) for f in files], chunksize=4)
     n = {'ok': 0, 'fail': 0, 'skip': 0}
     note = 0
     for k, f, m in res:

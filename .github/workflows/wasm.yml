@@ -14,17 +14,20 @@ jobs:
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/cache@v4
-        with:
-          path: /opt/emsdk
-          key: emsdk-${{ runner.arch }}-latest-${{ github.run_id }}
-          restore-keys: emsdk-${{ runner.arch }}-latest-
+      # emsdk itself is not cached: its install takes ~15 s, saving the
+      # directory took ~50 s.  Its cache/ (libraries emcc builds on first use,
+      # wasm64's are not prebuilt) is, with the harness's caches (see arm64.yml).
       - run: ci/setup-debian.sh wasm
+        id: setup
       - uses: actions/cache@v4
         with:
-          path: ~/.cache/ccache
-          key: ccache-wasm-${{ github.sha }}
-          restore-keys: ccache-wasm-
+          path: |
+            ~/.cache/ccache
+            /opt/emsdk/upstream/emscripten/cache
+            build/linux/ccs/wasmtests/ref
+            build/linux/ccs/wasmtests/pass
+          key: ci-wasm-${{ steps.setup.outputs.toolfp }}-${{ github.sha }}
+          restore-keys: ci-wasm-${{ steps.setup.outputs.toolfp }}-
       - run: ci/premerge.sh wasm
       - uses: actions/upload-artifact@v4
         if: failure()

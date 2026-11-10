@@ -56,7 +56,7 @@ build() {	# build MAKE-TARGET: a build failure ends the job
 case $JOB in
 arm64)
 	build vcc
-	step ctests       python3 bench/vcc-ctests.py -j "$J" --no-cache
+	step ctests       python3 bench/vcc-ctests.py -j "$J"
 	step diag         python3 bench/vcc-diag.py -j "$J"
 	step stress       python3 bench/vcc-stress.py
 	step stress-vccd  python3 bench/vcc-stress.py --vccd
@@ -77,7 +77,7 @@ asan)
 	# LeakSanitizer is on by default on Linux (not on macOS): vcc exits with
 	# its arenas and caches mapped, by design, so every compile would "leak"
 	export ASAN_OPTIONS=${ASAN_OPTIONS:+$ASAN_OPTIONS:}detect_leaks=0
-	step ctests-vcc   env VCC_BIN="$B" python3 bench/vcc-ctests.py -j "$J" --no-cache --suite vcc
+	step ctests-vcc   env VCC_BIN="$B" python3 bench/vcc-ctests.py -j "$J" --suite vcc
 	step diag         python3 bench/vcc-diag.py -j "$J" --bin-dir "$B"
 	step stress       python3 bench/vcc-stress.py --bin-dir "$B"
 	step vccd         python3 bench/vccd-test.py --bin-dir "$B"
@@ -86,7 +86,7 @@ asan)
 tsan)
 	build vcc-tsan
 	B=$(dirname "$BUILD")/ccs-tsan
-	step ctests-vcc   env VCC_BIN="$B" python3 bench/vcc-ctests.py -j "$J" --no-cache --suite vcc
+	step ctests-vcc   env VCC_BIN="$B" python3 bench/vcc-ctests.py -j "$J" --suite vcc
 	step vccd         python3 bench/vccd-test.py --bin-dir "$B"
 	step stress-vccd  python3 bench/vcc-stress.py --vccd --bin-dir "$B"
 	;;
