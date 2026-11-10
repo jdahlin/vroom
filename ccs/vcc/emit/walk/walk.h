@@ -129,6 +129,12 @@ VPRIV val LO(frame)(ecx *e, bool ret);			/* the return address (ret) or the fram
 VPRIV val LO(bitop)(ecx *e, int bi, int size, val a);	/* BI_CLZ.. BI_BSWAP64: a nonzero where the builtin requires it */
 VPRIV val LO(alloca)(ecx *e, val n);			/* n bytes on the stack, 16-aligned */
 VPRIV int LO(tlsaddr)(ecx *e, uint32_t ref, int model);	/* a thread-local's address: 0 local-exec, 1 initial-exec, 2 general dynamic */
+/* atomics at [rp], size 1, 2, 4, 8, sequentially consistent; the operand registers stay
+   the caller's; a result is a new temporary, zero-extended:
+   LOAD -> value; STORE rv; XCHG / XADD rv -> the old value; CAS: [rp] = rv if it holds
+   rexp -> the old value; FENCE */
+enum { WK_ALOAD, WK_ASTORE, WK_AXCHG, WK_AXADD, WK_ACAS, WK_AFENCE };
+VPRIV int LO(atomic)(ecx *e, int op, int size, int rp, int rv, int rexp);
 VPRIV int LO(spget)(ecx *e);				/* the stack pointer in a temporary */
 VPRIV void LO(spset)(ecx *e, int r);			/* the stack pointer = r (r freed) */
 VPRIV val LO(fbits)(ecx *e, val v, int size);		/* a float's bits in an integer register */
