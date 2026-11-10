@@ -209,6 +209,7 @@ struct cc {
 	int unevaluated;	/* sizeof / typeof / _Alignof operand */
 	int cexpr;
 	uint32_t *utd, nutd;	/* block-scope typedefs never named: -Wunused-local-typedef at the TU's end */
+	uint32_t fnconv;	/* nconv when the function's body began */
 	int fnerr;		/* errors when the function's body began: none since, its unused-variable warnings */
 	vdiag **rtq;		/* clang's DiagRuntimeBehavior in a function: emitted at the body's end */
 	uint32_t nrtq, rtqcap;

@@ -87,6 +87,19 @@ def sarif_norm(text):
     return json.dumps(doc, indent=1) + '\n'
 
 
+def no_virtual_snippets(t):
+    """the text without the snippet lines of a <built-in> location: JSON names the
+    place, but a reader of the records has no source for a virtual buffer"""
+    out, skip = [], False
+    for l in t.split('\n'):
+        if HEAD.match(l) or not l.startswith(' '):
+            skip = l.startswith('<built-in>:')
+        elif skip:
+            continue
+        out.append(l)
+    return '\n'.join(out)
+
+
 def one(name, bless=False):
     rc_c, out_c = run([CL], name)
     rc_v, out_v = run([VPP], name)
@@ -120,7 +133,7 @@ def one(name, bless=False):
         rt = render.render(out_j.splitlines(), D, parseable=pfx).decode(errors='replace')
     except (ValueError, KeyError) as e:
         rt = f'(bad JSON: {e})'
-    if rt != out_v:
+    if no_virtual_snippets(rt) != no_virtual_snippets(out_v):
         ok = False
         why.append('JSON does not rebuild the text (layer 5a)')
     # clang's style (-fdiagnostics-style=clang): rebuilt from the same records; it is
@@ -130,7 +143,7 @@ def one(name, bless=False):
         rk = render.render(out_j.splitlines(), D, style='clang', parseable=pfx).decode(errors='replace')
     except (ValueError, KeyError) as e:
         rk = f'(bad JSON: {e})'
-    if rk != out_k:
+    if no_virtual_snippets(rk) != no_virtual_snippets(out_k):
         ok = False
         why.append('JSON does not rebuild clang\'s style (layer 5a)')
     # D3.2: the SARIF log is well formed

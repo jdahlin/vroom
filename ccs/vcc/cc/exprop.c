@@ -468,7 +468,10 @@ static void runtime_warn(cc *c, int op, uint32_t l, uint32_t r, uint32_t loc)
 		else if (!cv.i && c->defer_rt) {
 			if (c->ndefer < 8)
 				c->defer[c->ndefer].loc = loc, c->defer[c->ndefer].r = rr, c->defer[c->ndefer++].rem = op == T_PERCENT;
-		} else if (!cv.i)
+		} else if (!cv.i && c->fn)	/* (clang's DiagRuntimeBehavior: at the end of the function) */
+			rt_defer(c, "division-by-zero", NULL, loc, &rr, 1, NULL, 0, "%s by zero is undefined",
+				 op == T_SLASH ? "division" : "remainder");
+		else if (!cv.i)
 			cc_warnx(c, "division-by-zero", true, NULL, loc, &rr, 1, NULL, 0, "%s by zero is undefined",
 			      op == T_SLASH ? "division" : "remainder");
 		return;

@@ -625,11 +625,15 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
   on all three targets, diag `unknown_attribute.c`; `[[x]]`, `[[gnu::x]]`,
   `[[clang::x]]` (`_Clang`, `__gnu__`) and other vendors from
   `__has_c_attribute` (`unknown_std_attribute.c`, the 625 again per scope).
-- [ ] **`[[__clang__::x]]`**: (done: clang's -Wignored-attributes warning with
-  the `_Clang` fix-it, taken as `clang::`; tests/vcc `attr_clang_macro.c`.)
-  Left: the "expanded from macro" note says `<built-in>:460`, clang `:2`: our
-  predefines are sorted (`gen-ppdata.sh`), clang's in definition order.
-  *Validate:* diag test.
+- [x] **`[[__clang__::x]]`**: (done: clang's -Wignored-attributes warning with
+  the `_Clang` fix-it, taken as `clang::`; tests/vcc `attr_clang_macro.c`;
+  the predefine tables in clang's -dD order, so the "expanded from macro"
+  note says `<built-in>:2` as clang: diag `attr_clang_builtin_line.c`.)
+  Only `__clang__` written in the source, after a `[[` written there, as
+  clang: through a macro (`#define A [[__clang__::x]]`, `[[S::x]]`,
+  `B(__clang__)`) it is 1 and the error is clang's "expected ']'" (not
+  "expected attribute name").  The `]` fix-it line and clang's later errors there belong to
+  the error recovery item.)
 - [x] **Attributes without effect**: none left.  Accepted
   and needing nothing today: `returns_twice` (locals live in memory:
   `tests/vcc/returns_twice.c`; the optimizer item must honour it when
@@ -1238,17 +1242,14 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
   uninitialized notes); `c->paren` holds them as distances, so the decl
   cache and replay copy them without fix-ups: diag `paren_ranges.c`.)
   *Validate:* diag tests.
-- [ ] **Diagnostics found missing (2026-11-10)**: -Wshift-count-*,
-  -Wdivision-by-zero come at once (clang: at the end of the function,
-  DiagRuntimeBehavior; tried with rt_defer, diag `runtime_warnings.c` then
-  differs); -Wunused-variable for a variable whose initializer had an error.  (Done: self-comparison
-  (-Wtautological-compare): `self_compare.c`; "; take the address with &",
-  the hints on parenthesized operands, an unnamed parameter's note where its
-  name would be, a parameter type without top-level qualifiers:
+- [x] **Diagnostics found missing (2026-11-10)**: done.  -Wshift-count-*,
+  -Wdivision-by-zero and -Warray-bounds (with its note) at the end of the
+  function (DiagRuntimeBehavior, rt_defer); -Wunused-variable kept after a
+  DefaultError conversion error (clang drops it only after a hard error):
+  `runtime_order.c`.  Self-comparison: `self_compare.c`; "; take the address
+  with &", parenthesized-operand hints, unnamed parameter notes:
   `int_conv_hints.c`, `unnamed_param_note.c`; -Wconditional-type-mismatch,
-  "*(" ")" dereference hints, `p == 0.5` as invalid operands:
-  `cond_mismatch_etc.c`.)
-  *Validate:* one diag test each.
+  "*(" ")" hints, `p == 0.5`: `cond_mismatch_etc.c`.
 - [ ] **Clang warns, vcc errors** (`bench/vcc-mutate.py show spurious`):
   `-Wreturn-mismatch` is not in the `return-type` group.
   *Validate:* `vcc-mutate.py` spurious count; diag tests.

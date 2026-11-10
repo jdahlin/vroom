@@ -246,6 +246,8 @@ __attribute__((noinline)) VPRIV void attribute_list_(cc *c, attrs *a)
 
 		if (!std && !iskw(c, KW___attribute__) && !iskw(c, KW___attribute))
 			break;
+		bool srcbr = std && !(tok(c)->flags & PF_MACRO);	/* [[ written in the source */
+
 		next(c);
 		if (std) {
 			next(c);
@@ -261,10 +263,10 @@ __attribute__((noinline)) VPRIV void attribute_list_(cc *c, attrs *a)
 			if (accept(c, T_COMMA))
 				continue;
 			if (std && t->kind == T_NUMBER && t->len == 1 && t->s[0] == '1' && (t->flags & PF_MACRO) &&
-			    peek(c, 1)->kind == T_COLONCOLON) {
-				/* [[__clang__::x]]: the macro gave 1; clang warns and takes it as clang:: */
+			    peek(c, 1)->kind == T_COLONCOLON && srcbr && pp_spells(c->p, loc, "__clang__", 9)) {
+				/* [[__clang__::x]] as written (not through a macro): clang warns and takes it as clang:: */
 				pp_span r = { loc, pp_tok_end(c->p, loc) };
-				pp_fixit fx = { loc, pp_tok_end(c->p, loc), "_Clang", 0 };
+				pp_fixit fx = { loc, pp_tok_end(c->p, loc), "_Clang", VDA_NAME };	/* (__clang__ itself) */
 
 				pp_dinfo d = { "warning", loc, &r, 1, &fx, 1, "1", 1 };	/* the note at the macro's body */
 
@@ -273,7 +275,7 @@ __attribute__((noinline)) VPRIV void attribute_list_(cc *c, attrs *a)
 				t->kind = T_IDENT, t->id = vintern_cstr("_Clang");
 			}
 			if (t->kind != T_IDENT && !(std && kwof(t)))
-				fatal(c, loc, "expected attribute name");
+				expect(c, close, cs);	/* clang: expected ']' or ')' */
 			if (std && peek(c, 1)->kind == T_COLONCOLON) {
 				/* vendor::name: gnu and clang name GNU attributes, others are ignored */
 				const vident *ns = &vintern_ents[t->id];

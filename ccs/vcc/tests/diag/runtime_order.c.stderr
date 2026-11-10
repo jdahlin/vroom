@@ -1,0 +1,36 @@
+runtime_order.c:4:53: error: incompatible integer to pointer conversion initializing 'int *' with an expression of type 'int'; take the address with & [-Wint-conversion]
+    4 | int f(int x){ int r = x << (-1); r += x << 64; int *q = x; r += x / 0; return r; }
+      |                                                     ^   ~
+      |                                                         &
+runtime_order.c:4:53: warning: unused variable 'q' [-Wunused-variable]
+    4 | int f(int x){ int r = x << (-1); r += x << 64; int *q = x; r += x / 0; return r; }
+      |                                                     ^
+runtime_order.c:4:25: warning: shift count is negative [-Wshift-count-negative]
+    4 | int f(int x){ int r = x << (-1); r += x << 64; int *q = x; r += x / 0; return r; }
+      |                         ^  ~~~~
+      = help: a shift by a negative count is undefined
+runtime_order.c:4:41: warning: shift count >= width of type [-Wshift-count-overflow]
+    4 | int f(int x){ int r = x << (-1); r += x << 64; int *q = x; r += x / 0; return r; }
+      |                                         ^  ~~
+      = help: 'int' is 32 bits wide: a shift by 32 or more is undefined
+runtime_order.c:4:67: warning: division by zero is undefined [-Wdivision-by-zero]
+    4 | int f(int x){ int r = x << (-1); r += x << 64; int *q = x; r += x / 0; return r; }
+      |                                                                   ^ ~
+runtime_order.c:5:21: error: incompatible integer to pointer conversion initializing 'int *' with an expression of type 'int'; take the address with & [-Wint-conversion]
+    5 | int f2(int x){ int *q = x; int r; return 0; }
+      |                     ^   ~
+      |                         &
+runtime_order.c:5:21: warning: unused variable 'q' [-Wunused-variable]
+    5 | int f2(int x){ int *q = x; int r; return 0; }
+      |                     ^
+runtime_order.c:5:32: warning: unused variable 'r' [-Wunused-variable]
+    5 | int f2(int x){ int *q = x; int r; return 0; }
+      |                                ^
+runtime_order.c:6:20: error: incompatible integer to pointer conversion initializing 'int *' with an expression of type 'int'; take the address with & [-Wint-conversion]
+    6 | int g(int x){ int *q = x; return 0; }
+      |                    ^   ~
+      |                        &
+runtime_order.c:6:20: warning: unused variable 'q' [-Wunused-variable]
+    6 | int g(int x){ int *q = x; return 0; }
+      |                    ^
+7 warnings and 3 errors generated.
