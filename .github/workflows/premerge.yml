@@ -7,14 +7,17 @@
 # every target's workflow runs in parallel, and when all pass, `gate`
 # fast-forwards main to that commit.  If main moved meanwhile, gate fails;
 # merge or rebase on origin/main and push again.  Pull requests and pushes to
-# other branches run the same jobs without touching main.
+# other branches run the same jobs without touching main.  Pushes to main run
+# them too (a merged PR; gate's own fast-forward triggers nothing), which is
+# what fills the caches (arm64.yml, wasm.yml) every new PR starts from.
 #
 # One reusable workflow per target (arm64.yml, wasm.yml, x86 later): a new
 # target is its own file plus a line under jobs and gate's needs.
 name: premerge
 on:
   push:
-    branches: [premerge, 'premerge/**']
+    # main: a PR's caches are only visible to that PR; main's to every PR
+    branches: [main, premerge, 'premerge/**']
   pull_request:
   workflow_dispatch:
 concurrency:

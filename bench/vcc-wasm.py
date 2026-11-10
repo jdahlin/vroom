@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """vcc-wasm.py: the C test suites through vcc's WebAssembly target (PLAN-wasm.md).
 
-  bench/vcc-wasm.py [-j N] [--suite gcc|tcc|vcc] [-v] [--show CAT] [--obj] [--objcmp] [--vlink] [--wasm32] [PAT]
+  bench/vcc-wasm.py [-j N] [--suite gcc|tcc|vcc] [-v] [--show CAT] [--obj] [--objcmp] [--vlink] [--wasm32] [--no-cache] [PAT]
 
 Every test of vcc-ctests.py (gcc torture, tcc tests2, our own) is built for
 wasm64-unknown-emscripten twice: by clang (the oracle) and by vcc, each
@@ -18,7 +18,10 @@ Failures by stage: emit (vpp fails), as (clang rejects vcc's assembly),
 objcmp, link (emcc), run.
 The test runtime headers (ccs/vcc/tests/rt/include) are used on both sides,
 emscripten's libc behind them.  Clang's results are cached in
-build/ccs/wasmtests/ref (keyed by the source and flags).
+build/ccs/wasmtests/ref (keyed by the source and flags).  A vcc object
+byte-identical to one that passed before (build/ccs/wasmtests/pass, keyed by
+the object, the link and the reference) is not linked or run again;
+--no-cache runs all.
 --wasm32: wasm32-unknown-emscripten (ILP32, emcc without -sMEMORY64), in
 build/ccs/wasmtests32 (PLAN-wasm.md W7).
 """
@@ -199,12 +202,25 @@ def one_(t):
                 return t, 'fail', 'objcmp', 'vpp -c: ' + ct.first_err(err.decode(errors='replace'))
             if open(f'{wd}/vccobj.o', 'rb').read() != open(f'{wd}/vcc.o', 'rb').read():
                 return t, 'fail', 'objcmp', 'object differs from clang\'s for the same .s'
+    # an object byte-identical to one that passed before (same link, same
+    # reference) passes again: no emcc, no node
+    pk = hashlib.sha1(open(f'{wd}/vcc.o', 'rb').read() + (ref['key'] + str(VLENV is not None) + str(sj)).encode()).hexdigest()
+    pf = f'{OUT}/pass/{suite}/{name}'
+    if not NOCACHE:
+        try:
+            if open(pf).read() == pk:
+                shutil.rmtree(wd, ignore_errors=True)
+                return t, 'pass', '', ''
+        except OSError:
+            pass
     rc, err = link([f'{wd}/vcc.o'], f'{wd}/vcc.js', VLENV is not None, SJLJ_LINK if sj else ())
     if rc:
         m = re.search(r'undefined symbol: (\S+)', err)
         return t, 'fail', 'link', 'undefined ' + m.group(1) if m else ct.first_err(err)
     rc, out = run(f'{wd}/vcc.js')
     if rc == ref['rc'] and out == ref['out']:
+        os.makedirs(os.path.dirname(pf), exist_ok=True)
+        open(pf, 'w').write(pk)
         shutil.rmtree(wd, ignore_errors=True)
         return t, 'pass', '', ''
     why = f'exit {rc} (clang {ref["rc"]})' if rc != ref['rc'] else 'output differs'
@@ -213,9 +229,12 @@ def one_(t):
 
 VLENV = None
 
-def init(obj, objcmp=False, vlenv=None, w32=False):
-    global OBJ, OBJCMP, VLENV
+NOCACHE = False
+
+def init(obj, objcmp=False, vlenv=None, w32=False, nocache=False):
+    global OBJ, OBJCMP, VLENV, NOCACHE
     set_target(w32)
+    NOCACHE = nocache
     OBJ = obj
     OBJCMP = objcmp
     VLENV = vlenv
@@ -226,9 +245,10 @@ if __name__ == '__main__':
     obj = '--obj' in av
     objcmp = '--objcmp' in av
     w32 = '--wasm32' in av
+    nocache = '--no-cache' in av
     set_target(w32)
     vlenv = vlink_env() if '--vlink' in av else None
-    av = [a for a in av if a not in ('--obj', '--objcmp', '--vlink', '--wasm32')]
+    av = [a for a in av if a not in ('--obj', '--objcmp', '--vlink', '--wasm32', '--no-cache')]
     if '-v' in av: verbose = True; av.remove('-v')
     for opt in ('-j', '--suite', '--show'):
         if opt in av:
@@ -240,7 +260,7 @@ if __name__ == '__main__':
     ts = ct.tests(suite, pat)
     t0 = time.time()
     rt_obj()
-    with Pool(j, initializer=init, initargs=(obj, objcmp, vlenv, w32)) as pool:
+    with Pool(j, initializer=init, initargs=(obj, objcmp, vlenv, w32, nocache)) as pool:
         res = pool.map(one, ts, chunksize=1)
     by = defaultdict(Counter)
     whys = defaultdict(Counter)
