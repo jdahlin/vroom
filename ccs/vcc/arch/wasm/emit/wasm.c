@@ -140,8 +140,10 @@ VPRIV wabi wclassify_ret(cc *c, qty t)
 	if (is_void(c, t))
 		return (wabi){ WA_IGNORE, 0, 0, 0 };
 	a = wclassify(c, t);
+	if (a.k == WA_PAIR && a.n == 1 && is_vec(c, t))
+		return (wabi){ WA_SCALAR, a.st, T(c, t)->base, 0 };	/* one lane: as it is, as LLVM */
 	if (a.k == WA_PAIR)
-		a.k = WA_IND;	/* an i128 result: through a pointer, as LLVM demotes it */
+		a.k = WA_IND;	/* an i128 or vector result: through a pointer, as LLVM demotes it */
 	return a;
 }
 

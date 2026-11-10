@@ -1268,7 +1268,7 @@ static void wreturn(ecx *e, const node *x)
 			wget(e, W->sret);
 			wexpr(e, x->a, true);
 			wcopy(e, tsize(c, W->rty));
-		} else if (r.k == WA_SCALAR && is_record(c, W->rty)) {
+		} else if (r.k == WA_SCALAR && (is_record(c, W->rty) || is_vec(c, W->rty))) {
 			wlv l = { .k = WL_MEM };
 
 			wexpr(e, x->a, true);

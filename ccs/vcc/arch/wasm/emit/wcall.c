@@ -609,8 +609,8 @@ VPRIV int wcall(ecx *e, uint32_t n, bool want)
 		}
 		return WT_NONE;
 	}
-	if (is_record(c, f->base)) {
-		/* a single-element record: back into memory */
+	if (is_record(c, f->base) || is_vec(c, f->base)) {
+		/* a single-element record or one-lane vector: back into memory */
 		uint64_t sl = wslot(e, tsize(c, f->base), talign(c, f->base));
 		uint32_t t = wtmp(e, r.st);
 		wlv l = { .k = WL_MEM };
