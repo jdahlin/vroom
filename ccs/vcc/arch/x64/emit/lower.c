@@ -4,7 +4,6 @@
 #define X_MAXREC (1u << 22)
 #define X_BUFREC ((size_t)X_MAXREC * 3)	/* twoaddr.c adds at most two records per record; the buffers swap */
 
-static const uint8_t x64_argreg[6] = { RDI, RSI, RDX, RCX, R8, R9 };
 /* temporaries in the order they are handed out: the argument registers last */
 static const uint8_t x64_order[8] = { R10, R9, R8, RDI, RSI, RDX, RCX, RAX };
 
@@ -48,7 +47,7 @@ VPRIV rec *x64_put(ecx *e, int op)
 	return r;
 }
 
-static rec *x64_op3(ecx *e, int op, int sz, int r0, int r1, int r2)
+VPRIV rec *x64_op3(ecx *e, int op, int sz, int r0, int r1, int r2)
 {
 	rec *i = x64_put(e, op);
 
@@ -62,7 +61,7 @@ VPRIV void x64_mov(ecx *e, int rd, int rs)
 		x64_op3(e, X_MOV, 8, rd, rs, XNOREG);
 }
 
-static void x64_mem(ecx *e, int op, int sz, int r, const lval *l, bool sgn)
+VPRIV void x64_mem(ecx *e, int op, int sz, int r, const lval *l, bool sgn)
 {
 	rec *i = x64_put(e, op);
 
@@ -151,7 +150,7 @@ VPRIV int x64_laddr(ecx *e, const lval *l)
 }
 
 /* registers a block operation needs (rep movsb/stosb), saved if live and not one of keep */
-static uint32_t x64_save(ecx *e, const uint8_t *regs, int n, int k0, int k1)
+VPRIV uint32_t x64_save(ecx *e, const uint8_t *regs, int n, int k0, int k1)
 {
 	xst *X = e->x64;
 	uint32_t sv = 0;
@@ -165,7 +164,7 @@ static uint32_t x64_save(ecx *e, const uint8_t *regs, int n, int k0, int k1)
 	return sv;
 }
 
-static void x64_restore(ecx *e, uint32_t sv)
+VPRIV void x64_restore(ecx *e, uint32_t sv)
 {
 	xst *X = e->x64;
 
@@ -176,7 +175,7 @@ static void x64_restore(ecx *e, uint32_t sv)
 		}
 }
 
-static void x64_movi(ecx *e, int r, int64_t v)
+VPRIV void x64_movi(ecx *e, int r, int64_t v)
 {
 	x64_op3(e, X_MOVI, 8, r, XNOREG, XNOREG)->imm = v;
 }
@@ -448,96 +447,6 @@ VPRIV void x64_brz(ecx *e, val a, int size, bool nz, uint32_t lbl)
 
 VPRIV void x64_label(ecx *e, uint32_t l) { x64_put(e, X_LABEL)->label = l; }
 VPRIV void x64_jump(ecx *e, uint32_t l) { x64_put(e, X_JMP)->label = l; }
-
-/* ---------------- calls ---------------- */
-
-VPRIV int x64_nregargs(void) { return 6; }
-VPRIV int32_t x64_stackarg(int i) { return 16 + 8 * (i - 6); }
-
-VPRIV void x64_param(ecx *e, int i, int32_t slot, int size)
-{
-	lval l = { .k = L_FRAME, .off = slot, .align = 8 };
-
-	(void)size;
-	x64_store(e, x64_argreg[i], &l, 8);
-}
-
-VPRIV val x64_call(ecx *e, uint32_t ref, val *fn, const int32_t *argslot, int nargs, bool variadic, int retsize, bool retsgn)
-{
-	xst *X = e->x64;
-	uint32_t saved = X->live & X_TEMPS;
-	int nstk = nargs > 6 ? nargs - 6 : 0, pad;
-	rec *i;
-
-	for (int r = 0; r < 16; r++)
-		if (saved & (1u << r)) {
-			x64_op3(e, X_PUSH, 8, XNOREG, r, XNOREG);
-			X->pushes++;
-		}
-	pad = (X->pushes + nstk) & 1;
-	if (pad) {
-		x64_put(e, X_ADJSP)->imm = -8;
-		X->pushes++;
-	}
-	for (int k = nargs - 1; k >= 6; k--) {
-		lval l = { .k = L_FRAME, .off = argslot[k], .align = 8 };
-
-		x64_load(e, R11, &l, 8, false);
-		x64_op3(e, X_PUSH, 8, XNOREG, R11, XNOREG);
-		X->pushes++;
-	}
-	if (fn)
-		x64_mov(e, R11, fn->r);
-	for (int k = 0; k < nargs && k < 6; k++) {
-		lval l = { .k = L_FRAME, .off = argslot[k], .align = 8 };
-
-		x64_load(e, x64_argreg[k], &l, 8, false);
-	}
-	if (variadic)
-		x64_op3(e, X_MOVI, 4, RAX, XNOREG, XNOREG)->imm = 0;	/* al: no vector registers */
-	if (fn) {
-		x64_op3(e, X_CALLR, 8, XNOREG, R11, XNOREG);
-	} else {
-		i = x64_put(e, X_CALL);
-		i->ref = ref;
-		i->cond = variadic;
-	}
-	if (nstk + pad) {
-		x64_put(e, X_ADJSP)->imm = 8 * (nstk + pad);
-		X->pushes -= nstk + pad;
-	}
-	if (retsize) {
-		x64_mov(e, R11, RAX);
-		x64_ext(e, R11, retsize, retsgn);
-	}
-	for (int r = 15; r >= 0; r--)
-		if (saved & (1u << r)) {
-			x64_op3(e, X_POP, 8, r, XNOREG, XNOREG);
-			X->pushes--;
-		}
-	if (fn && fn->k == V_REG)
-		x64_tfree(e, fn->r);
-	if (!retsize)
-		return vconst(0);
-	{
-		int r = x64_treg(e);
-
-		x64_mov(e, r, R11);
-		return (val){ .k = V_REG, .r = (uint8_t)r };
-	}
-}
-
-VPRIV void x64_ret(ecx *e, val *v, int size, bool sgn, uint32_t lbl)
-{
-	if (v) {
-		int r = x64_toreg(e, v, size);
-
-		x64_ext(e, r, size, sgn);
-		x64_mov(e, RAX, r);
-		x64_tfree(e, r);
-	}
-	x64_jump(e, lbl);
-}
 
 /* ---------------- the function ---------------- */
 

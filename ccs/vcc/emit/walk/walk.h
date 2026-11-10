@@ -25,6 +25,14 @@
 
 #define LO(name) x64_##name
 
+/*
+ * An argument, parameter or result as the ABI passes it (LO(classify)): n
+ * eightbytes of class cls[i] (WA_INT, WA_SSE), or in memory (mem), or
+ * nothing (n 0, not mem: an empty record).  Its bytes are in the frame slot
+ * slot (8-byte words; a scalar extended to 64 bits).
+ */
+enum { WA_INT, WA_SSE };
+typedef struct wkarg { uint8_t n, cls[2]; bool mem; uint32_t align; uint64_t size; int32_t slot; } wkarg;
 /* ---------------- walker state (one per ecx) ---------------- */
 
 #define WK_MAXLOOP 1024
@@ -49,6 +57,7 @@ typedef struct wkst {
 	uint32_t ncases;
 	uint32_t retlbl;
 	qty rty;
+	wkarg rrec;		/* a record result: as the ABI returns it */
 	uint32_t fsym;
 } wkst;
 
@@ -95,11 +104,15 @@ VPRIV void LO(brz)(ecx *e, val a, int size, bool nz, uint32_t lbl);	/* to lbl if
 VPRIV void LO(label)(ecx *e, uint32_t l);
 VPRIV void LO(jump)(ecx *e, uint32_t l);
 /* calls: the arguments are in frame slots (8 bytes each, extended); ref: a direct callee, else fn */
-VPRIV val LO(call)(ecx *e, uint32_t ref, val *fn, const int32_t *argslot, int nargs, bool variadic, int retsize, bool retsgn);
-VPRIV int LO(nregargs)(void);				/* integer arguments passed in registers */
-VPRIV int32_t LO(stackarg)(int i);			/* frame offset of incoming stack argument i (i >= nregargs) */
-VPRIV void LO(param)(ecx *e, int i, int32_t slot, int size);	/* incoming register argument i to a slot */
+VPRIV void LO(classify)(ecx *e, qty t, wkarg *a);
+/* r: a record result (its slot receives it), NULL otherwise; retsize/retsgn: a scalar result */
+VPRIV val LO(call)(ecx *e, uint32_t ref, val *fn, const wkarg *a, int n, bool variadic, const wkarg *r, int retsize, bool retsgn);
+/* the incoming arguments to their slots; a parameter the caller left on the stack gets that place as its slot */
+VPRIV void LO(params)(ecx *e, wkarg *a, int n, const wkarg *r, bool variadic);
 VPRIV void LO(ret)(ecx *e, val *v, int size, bool sgn, uint32_t lbl);	/* the result (v may be NULL), then to lbl */
+VPRIV void LO(retrec)(ecx *e, int raddr, const wkarg *r, uint32_t lbl);	/* a record result from the object at raddr */
+VPRIV void LO(va_start)(ecx *e, int rap);			/* the va_list at rap */
+VPRIV int LO(va_arg)(ecx *e, int rap, qty t);		/* the next argument's address */
 /* the function: before its body, and once it is generated (frame, prologue, output) */
 VPRIV void LO(begin)(ecx *e, uint32_t s);
 VPRIV void LO(finish)(ecx *e, uint32_t s);

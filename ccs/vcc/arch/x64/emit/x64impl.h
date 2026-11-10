@@ -60,9 +60,22 @@ typedef struct xst {
 	uint32_t ntw;
 	uint32_t live;		/* temporaries in use (bit = register) */
 	int pushes;		/* 8-byte pushes outstanding (the call alignment) */
+	/* the function's incoming arguments (abi.c) */
+	int ngp, nfp;		/* named arguments in general and vector registers */
+	int32_t stk;		/* bytes of named stack arguments */
+	int32_t sret;		/* frame slot of the hidden result pointer (0: none) */
+	int32_t save;		/* variadic: the register save area's slot (0: none) */
 } xst;
 
+/* the integer argument registers, in order */
+static inline int x64_argreg(int i) { static const uint8_t r[6] = { RDI, RSI, RDX, RCX, R8, R9 }; return r[i]; }
 VPRIV xst *x64_state(ecx *e);
+VPRIV rec *x64_op3(ecx *e, int op, int sz, int r0, int r1, int r2);
+VPRIV void x64_mem(ecx *e, int op, int sz, int r, const lval *l, bool sgn);
+VPRIV void x64_mov(ecx *e, int rd, int rs);
+VPRIV void x64_movi(ecx *e, int r, int64_t v);
+VPRIV uint32_t x64_save(ecx *e, const uint8_t *regs, int n, int k0, int k1);
+VPRIV void x64_restore(ecx *e, uint32_t sv);
 VPRIV rec *x64_put(ecx *e, int op);
 VPRIV void x64_twoaddr(ecx *e);
 VPRIV void x64_print(ecx *e, tbuf *b, uint32_t s);
