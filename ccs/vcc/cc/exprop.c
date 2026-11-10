@@ -355,8 +355,16 @@ static __attribute__((noinline)) uint32_t cast_paren(cc *c, uint32_t loc)
 			N(n)->flags = NF_LVALUE;
 			return postfix(c, n);
 		}
-		n = cast_expr(c);
-		return explicit_cast(c, n, ty, loc);
+		{
+			uint32_t td = c->tn_tdef, r;
+
+			n = cast_expr(c);
+			r = explicit_cast(c, n, ty, loc);
+			/* an explicit cast to a typedef in a body: its name on the node's free b (-Wformat) */
+			if (td && c->fn && r != n && N(r)->op == N_CAST && !N(r)->b)
+				N(r)->b = td;
+			return r;
+		}
 	}
 }
 
@@ -561,7 +569,12 @@ VPRIV uint32_t cond_expr(cc *c)
 
 	if (likely(!is(c, T_QUESTION)))
 		return cnd;
-	return cond_rest(c, cnd);
+	{
+		uint32_t b = rng(c, cnd).b, n = cond_rest(c, cnd);
+
+		setspan(c, n, b);	/* (clang: a ?: from its condition) */
+		return n;
+	}
 }
 
 static int assign_op(int k)

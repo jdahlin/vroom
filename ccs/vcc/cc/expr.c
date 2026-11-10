@@ -967,8 +967,7 @@ static __attribute__((noinline)) uint32_t call(cc *c, uint32_t fn, uint32_t loc)
 		if (fmt) {
 			int k = KIND(c, N(a)->ty);
 
-			atd[i] = k == TY_ARRAY ? 0 : N(a)->op == N_VAR ? c->syms[N(a)->a].tdef :
-				 N(a)->op == N_MEMBER && !(N(a)->flags & NF_BITFIELD) ? node_field(c, N(a))->tdef : 0;
+			atd[i] = k == TY_ARRAY ? 0 : expr_tdef(c, a);
 			aty[i] = bitfield_of(c, a) ? 0 : k == TY_ARRAY ? ty_ptr(c, T(c, N(a)->ty)->base) : k == TY_FUNC ? 0 : QUNQ(N(a)->ty);
 		}
 		if (!(f->flags & TF_NOPROTO) && i < f->n) {

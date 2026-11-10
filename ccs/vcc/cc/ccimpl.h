@@ -365,6 +365,7 @@ VPRIV int body_falls_off(cc *c, uint32_t body, uint32_t first_label);
 VPRIV void uninit_check(cc *c, uint32_t body, uint32_t first_label);
 /* fmt.c */
 VPRIV uint32_t fmt_attr(cc *c, uint32_t fs);
+VPRIV uint32_t expr_tdef(cc *c, uint32_t n);
 VPRIV void format_check(cc *c, uint32_t fs, const uint32_t *args, const qty *aty, const uint32_t *atd, uint32_t nargs);
 VPRIV void asm_label(cc *c, attrs *a);
 /* declspec.c */
@@ -582,6 +583,20 @@ static inline void attribute_list(cc *c, attrs *a)
 
 /* no attribute at all (padding excluded) */
 /* the u32 fields then the 0/1 flag bytes packed .. noinstr (attr.c asserts the layout) */
+/* the typedef a declaration records (sym/field tdef, read by -Wformat): the declared type, or the
+   one level below it (a function's result, an array's element, a pointer's target) when that is it */
+static inline uint32_t decl_tdef(cc *c, uint32_t td, qty dsty, qty t)
+{
+	int k;
+
+	if (!td || QUNQ(t) == QUNQ(dsty))
+		return td;
+	k = KIND(c, t);
+	if ((k == TY_FUNC || k == TY_ARRAY || k == TY_PTR) && QUNQ(T(c, t)->base) == QUNQ(dsty))
+		return td;
+	return 0;
+}
+
 static inline bool attrs_empty(const attrs *a)
 {
 	const unsigned char *p = (const unsigned char *)a;
