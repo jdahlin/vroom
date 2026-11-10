@@ -110,10 +110,19 @@ def main():
         [f'cDrs A {four} .config', 'd A fork.o main.o exit.o memory.o'], ['cDr A .config', 'r A kernel/fork.o'], ['cDPrsT A arch/arm64/kernel/vdso/vdso.so.dbg'],
     ]
     ebad = 0
-    for arch in ('.varcmp/a.a', 'a.a'):
-        for seq in cases:
+    # the same sequences with SYM64_THRESHOLD=0 (llvm-ar's test knob, read by vccd from its own
+    # environment): /SYM64/ and __.SYMDEF_64 instead of the 32-bit tables
+    sock64 = sock + '64'
+    d64 = subprocess.Popen([f'{R}/build/ccs/vccd', '--sock', sock64, '--backend-sock', sock64 + 'x'],
+                           stderr=subprocess.DEVNULL, env=dict(os.environ, SYM64_THRESHOLD='0'))
+    time.sleep(0.3)
+    env64 = dict(env, VCC_SOCK=sock64)
+    runs = [(arch, seq, dict(os.environ), env) for arch in ('.varcmp/a.a', 'a.a') for seq in cases]
+    runs += [('a.a', seq, dict(os.environ, SYM64_THRESHOLD='0'), env64) for seq in cases]
+    for arch, seq, lenv, venv in runs:
+        if True:
             outs = []
-            for tool, e in ((LLVM_AR, os.environ), (var, env)):
+            for tool, e in ((LLVM_AR, lenv), (var, venv)):
                 p = os.path.join(b, arch)
                 if os.path.exists(p):
                     os.unlink(p)
@@ -124,11 +133,12 @@ def main():
                     os.unlink(p)
             if outs[0] != outs[1]:
                 ebad += 1
-                print(f'DIFF {arch}: {seq}: failed {outs[0][0]} vs {outs[1][0]}, '
+                print(f'DIFF {arch}{" sym64" if venv is env64 else ""}: {seq}: failed {outs[0][0]} vs {outs[1][0]}, '
                       f'sizes {len(outs[0][1] or b"")} vs {len(outs[1][1] or b"")}')
     subprocess.run(['rm', '-rf', w])
-    print(f'edge cases: {2 * len(cases) - ebad}/{2 * len(cases)} identical')
+    print(f'edge cases: {len(runs) - ebad}/{len(runs)} identical (the last {len(cases)} with SYM64_THRESHOLD=0)')
     d.terminate()
+    d64.terminate()
     sys.exit(1 if bad or tbad or ebad else 0)
 
 

@@ -972,15 +972,15 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
 - [ ] **Diagnostics**: undefined symbol with section+offset and all
   referencing objects (`ld/ld.c:4231`); `-r` output differs from lld.
   *Validate:* T4-style expected-stderr for vlink; T8 `-r` byte diff.
-- [ ] **var**: (done: creating a regular GNU archive with an ELF object
-  first, byte-identical to llvm-ar; mode 644 for every member as llvm-ar's
-  deterministic mode, also in thin archives; `t`, `p`, `x` on a regular
-  archive; updating one: `r` by basename (none with `P`), `q`, `d`, `s`,
-  `m`; the BSD format llvm-ar writes on macOS for a new archive whose first
-  member is not ELF, read and kept on update.)  Left:
-  32-bit GNU symtab only; ld skips `/SYM64/` (`ld/ld.c:1622`).
-  *Validate:* `bench/var-cmp.py` extended to regular archives and `x`, `d`,
-  `q`, `p`, `s`; round-trip with llvm-ar.
+- [x] **var**: (done: regular GNU archives created, updated (`r` by
+  basename, none with `P`; `q`, `d`, `s`, `m`) and read (`t`, `p`, `x`),
+  byte-identical to llvm-ar; its BSD format on macOS for a new archive whose
+  first member is not ELF, kept on update; `/SYM64/` and `__.SYMDEF_64` past
+  4 GB (`SYM64_THRESHOLD` as llvm-ar's, for tests); mode 644 for every
+  member as llvm-ar's deterministic mode.  vlink reads the members' own
+  symbols, so both symbol tables are skipped alike.)  *Validate:*
+  `bench/var-cmp.py`: 416 kernel archives, 12 t/p, 111 edge sequences (37
+  of them again with `SYM64_THRESHOLD=0`).
 - [x] **vobjcopy / vnm**: (done: `-g`/`--strip-debug`, `--only-keep-debug`
   (relocatable objects), `--redefine-sym`, `--add-section`,
   `--add-gnu-debuglink`, `--set-section-flags`, `-O`/`-I elf64-littleaarch64`,

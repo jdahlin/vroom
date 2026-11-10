@@ -232,7 +232,7 @@ static bool read_thin(arq *q, const char *abs, const char *shown, const vmapped 
 		uint64_t sz = num(h + 48, 10, 10);
 
 		off += 60;
-		if (h[0] == '/' && h[1] == ' ') {		/* symbol table */
+		if ((h[0] == '/' && h[1] == ' ') || !memcmp(h, "/SYM64/ ", 8)) {	/* symbol table */
 			off += sz + (sz & 1);
 		} else if (h[0] == '/' && h[1] == '/' && h[2] == ' ') {
 			names = d->p + off;
@@ -461,17 +461,26 @@ static bool build_bsd(arq *q, vsbuf *out, const mlist *l, bool symtab)
 		}
 		total += nsym[i];
 	}
-	if (symtab) {
-		symsize = 12 + 4 + 8 * (uint64_t)total + 4 + syms.n;
-		symsize += (8 - (8 + 60 + symsize) % 8) % 8;
-	}
-	pos = 8 + (symtab ? 60 + symsize : 0);
-	for (size_t i = 0; i < l->n; i++) {
-		size_t nl = strlen(base_of(l->m[i].name)), npad = (8 - (pos + 60 + nl) % 8) % 8;
-		uint64_t body = nl + npad + l->m[i].size;
+	/* "__.SYMDEF_64" (8-byte fields) once a member starts at or past the threshold, as the GNU table */
+	const char *thr_s = getenv("SYM64_THRESHOLD");
+	uint64_t thr = thr_s ? strtoull(thr_s, NULL, 0) : (uint64_t)1 << 32, w = 4;
 
-		mpos[i] = pos;
-		pos += 60 + body + (8 - (pos + 60 + body) % 8) % 8;
+	for (int pass = 0; pass < 2; pass++) {
+		if (symtab) {
+			symsize = 12 + w + 2 * w * (uint64_t)total + w + syms.n;
+			symsize += (8 - (8 + 60 + symsize) % 8) % 8;
+		}
+		pos = 8 + (symtab ? 60 + symsize : 0);
+		for (size_t i = 0; i < l->n; i++) {
+			size_t nl = strlen(base_of(l->m[i].name)), npad = (8 - (pos + 60 + nl) % 8) % 8;
+			uint64_t body = nl + npad + l->m[i].size;
+
+			mpos[i] = pos;
+			pos += 60 + body + (8 - (pos + 60 + body) % 8) % 8;
+		}
+		if (w == 8 || !symtab || !l->n || mpos[l->n - 1] < thr)
+			break;
+		w = 8;
 	}
 	vsbuf_put(out, "!<arch>\n", 8);
 	if (symtab) {
@@ -480,15 +489,17 @@ static bool build_bsd(arq *q, vsbuf *out, const mlist *l, bool symtab)
 		const char *sp = (const char *)syms.p;
 
 		header(out, "#1/12", "0", "0", "0", "0", symsize);
-		vsbuf_put(out, "__.SYMDEF\0\0\0", 12);
-		le32(out, 8 * total);
+		vsbuf_put(out, w == 8 ? "__.SYMDEF_64" : "__.SYMDEF\0\0\0", 12);
+#define LEW(v) do { le32(out, (uint32_t)(v)); if (w == 8) le32(out, (uint32_t)((uint64_t)(v) >> 32)); } while (0)
+		LEW(2 * w * total);
 		for (size_t i = 0; i < l->n; i++)
 			for (uint32_t k = 0; k < nsym[i]; k++) {
-				le32(out, so);
-				le32(out, (uint32_t)mpos[i]);
+				LEW(so);
+				LEW(mpos[i]);
 				so += (uint32_t)strlen(sp + so) + 1;
 			}
-		le32(out, (uint32_t)syms.n);
+		LEW(syms.n);
+#undef LEW
 		vsbuf_put(out, syms.p, syms.n);
 		vsbuf_put(out, zeros8, 60 + symsize - (out->n - start));
 	}
@@ -576,19 +587,41 @@ static bool write_archive(arq *q, const char *archive_abs, const char *shown, co
 
 		if (!mpos)
 			goto out;
-		pos = 8 + (symtab ? 60 + symsize : 0) + (names.n || thin ? 60 + names.n : 0);
-		for (i = 0; i < l->n; i++) {
-			mpos[i] = pos;
-			pos += 60 + (thin ? 0 : l->m[i].size + (l->m[i].size & 1));
+		/* llvm-ar: "/SYM64/" (8-byte count and offsets) once a member starts at or past the
+		   threshold, 4 GB (SYM64_THRESHOLD in the server's environment, as llvm-ar's, for tests) */
+		const char *thr_s = getenv("SYM64_THRESHOLD");
+		uint64_t thr = thr_s ? strtoull(thr_s, NULL, 0) : (uint64_t)1 << 32;
+		bool sym64 = false;
+
+		for (int pass = 0; pass < 2; pass++) {
+			pos = 8 + (symtab ? 60 + symsize : 0) + (names.n || thin ? 60 + names.n : 0);
+			for (i = 0; i < l->n; i++) {
+				mpos[i] = pos;
+				pos += 60 + (thin ? 0 : l->m[i].size + (l->m[i].size & 1));
+			}
+			if (sym64 || !symtab || mpos[l->n - 1] < thr)
+				break;
+			sym64 = true;
+			symsize = 8 + 8 * (uint64_t)total + syms.n;
+			symsize += symsize & 1;
+			if (!total)
+				symsize = 12;	/* llvm-ar: an 8-byte count 0 and four zero bytes */
 		}
 		if (symtab) {
-			header(&out, "/", "0", "0", "0", "0", symsize);
+			uint64_t w = sym64 ? 8 : 4;
+
+			header(&out, sym64 ? "/SYM64/" : "/", "0", "0", "0", "0", symsize);
+			if (sym64)
+				be32(&out, 0);
 			be32(&out, total);
 			for (i = 0; i < l->n; i++)
-				for (uint32_t k = 0; k < nsym[i]; k++)
+				for (uint32_t k = 0; k < nsym[i]; k++) {
+					if (sym64)
+						be32(&out, (uint32_t)(mpos[i] >> 32));
 					be32(&out, (uint32_t)mpos[i]);
+				}
 			vsbuf_put(&out, syms.p, syms.n);
-			vsbuf_put(&out, "\0\0\0\0", symsize - (4 + 4 * (uint64_t)total + syms.n));
+			vsbuf_put(&out, "\0\0\0\0\0\0\0\0", symsize - (w + w * (uint64_t)total + syms.n));	/* (<= 4) */
 		}
 		free(mpos);
 		if (names.n || thin) {
@@ -710,7 +743,7 @@ static bool read_regular(arq *q, const vmapped *d, const char *shown, mlist *l, 
 			*bsd = true;
 			nl = strnlen(h + 60, nlen);
 			snprintf(name, sizeof name, "%.*s", (int)nl, h + 60);
-			if (strcmp(name, "__.SYMDEF") && strcmp(name, "__.SYMDEF SORTED")) {
+			if (strcmp(name, "__.SYMDEF") && strcmp(name, "__.SYMDEF SORTED") && strcmp(name, "__.SYMDEF_64")) {
 				member m = { strdup(name), NULL, 0644, msz - nlen, (const unsigned char *)h + 60 + nlen };
 
 				if (!m.name || !ml_push(l, m)) {
