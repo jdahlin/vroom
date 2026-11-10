@@ -201,9 +201,22 @@ VPRIV lval wk_lval(ecx *e, uint32_t n)
 			return l;
 		}
 		cs = canon_sym(c, s);
-		if ((c->syms[cs].flags | c->syms[s].flags) & SF_THREAD)
-			wk_unsup(e, n, "a thread-local variable");
 		note_ref(e, REF(RK_SYM, cs));
+		if ((c->syms[cs].flags | c->syms[s].flags) & SF_THREAD) {
+			/* as clang: tls_model(), else -ftls-model=, if stronger than the default
+			   (local-exec for a symbol defined here, else initial-exec) */
+			const attrs *ta = sym_attrs(c, cs);
+			int want = ta && ta->tlsmodel ? ta->tlsmodel : c->o->tlsmodel;
+			int def = (c->syms[cs].flags & (SF_DEFINED | SF_TENTATIVE)) ? VCC_TLS_LE : VCC_TLS_IE;
+
+			if (c->o->pic == 2)
+				wk_unsup(e, n, "a thread-local variable under -fPIC");
+			if (want > def)
+				def = want;
+			if (def != VCC_TLS_LE && def != VCC_TLS_IE)
+				wk_unsup(e, n, "this TLS model");
+			return wk_fromval(e, wk_vreg(LO(tlsaddr)(e, REF(RK_SYM, cs), def == VCC_TLS_IE)), c->syms[s].ty);
+		}
 		l.k = L_SYM;
 		l.ref = REF(RK_SYM, cs);
 		l.align = sym_align(c, cs);

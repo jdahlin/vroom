@@ -128,6 +128,7 @@ VPRIV void LO(trap)(ecx *e);				/* __builtin_trap, __builtin_unreachable */
 VPRIV val LO(frame)(ecx *e, bool ret);			/* the return address (ret) or the frame address */
 VPRIV val LO(bitop)(ecx *e, int bi, int size, val a);	/* BI_CLZ.. BI_BSWAP64: a nonzero where the builtin requires it */
 VPRIV val LO(alloca)(ecx *e, val n);			/* n bytes on the stack, 16-aligned */
+VPRIV int LO(tlsaddr)(ecx *e, uint32_t ref, bool ie);	/* a thread-local's address: local-exec, or initial-exec (ie) */
 VPRIV int LO(spget)(ecx *e);				/* the stack pointer in a temporary */
 VPRIV void LO(spset)(ecx *e, int r);			/* the stack pointer = r (r freed) */
 VPRIV val LO(fbits)(ecx *e, val v, int size);		/* a float's bits in an integer register */

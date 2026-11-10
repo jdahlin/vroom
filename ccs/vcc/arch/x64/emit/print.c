@@ -301,6 +301,18 @@ VPRIV void x64_print(ecx *e, tbuf *b, uint32_t s)
 		case X_CQO:
 			tb_s(b, sz == 8 ? "\tcqto" : "\tcltd");
 			break;
+		case X_TLS:
+			tb_s(b, "\tmovq\t%fs:0, ");
+			x64_reg(b, i->r[0], 8);
+			tb_s(b, i->cond ? "\n\taddq\t" : "\n\tleaq\t");
+			ref_off(c, b, i->ref, 0);
+			tb_s(b, i->cond ? "@GOTTPOFF(%rip), " : "@TPOFF(");
+			if (!i->cond) {
+				x64_reg(b, i->r[0], 8);
+				tb_s(b, "), ");
+			}
+			x64_reg(b, i->r[0], 8);
+			break;
 		case X_UD2:
 			tb_s(b, "\tud2");
 			break;

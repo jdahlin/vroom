@@ -498,6 +498,17 @@ VPRIV void x64_finish(ecx *e, uint32_t s)
 
 /* ---------------- builtins ---------------- */
 
+VPRIV int x64_tlsaddr(ecx *e, uint32_t ref, bool ie)
+{
+	int r = x64_treg(e);
+	rec *i = x64_put(e, X_TLS);
+
+	i->r[0] = (uint8_t)r;
+	i->ref = ref;
+	i->cond = ie;
+	return r;
+}
+
 VPRIV void x64_trap(ecx *e) { x64_put(e, X_UD2); }
 
 VPRIV val x64_frame(ecx *e, bool ret)

@@ -51,6 +51,7 @@ enum {
 	X_IDIV, X_DIV,	/* rdx:rax / r1: rax quotient, rdx remainder */
 	X_MULW,		/* rdx:rax = rax * r1 (unsigned, 64 x 64 -> 128) */
 	X_UD2,
+	X_TLS,		/* r0 = the address of ref, thread-local: cond 0 local-exec, 1 initial-exec */
 	X_BSF, X_BSR,	/* r0 = index of the lowest / highest set bit of r1 */
 	X_BSWAP,	/* r0 = r0 byte-reversed (sz 4, 8) */
 	X_EXT,		/* r0 = r1's low sz bytes extended to 64 bits (cond 1: sign) */
@@ -100,5 +101,7 @@ VPRIV int x64_ftreg(ecx *e);
 VPRIV rec *x64_put(ecx *e, int op);
 VPRIV void x64_twoaddr(ecx *e);
 VPRIV void x64_print(ecx *e, tbuf *b, uint32_t s);
+
+VPRIV int x64_tlsaddr(ecx *e, uint32_t ref, bool ie);
 
 #endif
