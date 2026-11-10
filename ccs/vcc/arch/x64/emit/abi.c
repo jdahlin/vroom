@@ -277,7 +277,7 @@ VPRIV val x64_call(ecx *e, uint32_t ref, val *fn, const wkarg *a, int n, bool va
 
 			x64_mem(e, X_ST, r->up ? 16 : 8, r->cls[w] == WA_SSE ? XMM0 + nf++ : (ng++ ? RDX : RAX), &d, false);
 		}
-	} else if (retsize && !retf) {
+	} else if (!r && retsize && !retf) {
 		x64_mov(e, R11, RAX);
 		x64_ext(e, R11, retsize, retsgn);
 	}

@@ -314,43 +314,40 @@ VPRIV lval wk_lval(ecx *e, uint32_t n)
 static int64_t wk_floordiv(int64_t a, int64_t b) { return a >= 0 ? a / b : -((-a + b - 1) / b); }
 
 /* the unit a bit-field is accessed in: its type's size, aligned, or wider
-   for one that crosses it (packed); its offset and the field's bit in it */
-static void wk_bf_unit(ecx *e, const lval *l, qty t, int64_t *uoff, int *us, int *pos)
+   for one that crosses it (packed); its offset and the field's bit in it.
+   false: no aligned unit of up to 8 bytes holds it (it crosses an 8-byte boundary) */
+static bool wk_bf_unit(ecx *e, int64_t bit, int width, qty t, int64_t *uoff, int *us, int *pos)
 {
-	int64_t bit = l->off * 8 + l->bitoff;
 	int s = wk_size(e->c, t);
 
-	for (s = s < 1 ? 1 : s; s <= 8; s *= 2) {
+	for (s = s < 1 ? 1 : s > 8 ? 8 : s; s <= 8; s *= 2) {
 		int64_t ub = wk_floordiv(bit, s * 8);
 		int p = (int)(bit - ub * s * 8);
 
-		if (p + l->width <= s * 8) {
+		if (p + width <= s * 8) {
 			*uoff = ub * s, *us = s, *pos = p;
-			return;
+			return true;
 		}
 	}
-	efatal(e, e->curloc, "x86-64: a bit-field across 8 bytes is not supported yet (PLAN-x86.md X3)");
+	return false;
 }
 
-/* a bit-field's value in a new register (l stays) */
-static val wk_bf_load(ecx *e, const lval *l, qty t)
+/* the smallest aligned unit holding bits [bit, bit + width) (they do not cross 8 bytes) */
+static void wk_bf_unit1(ecx *e, int64_t bit, int width, int64_t *uoff, int *us, int *pos)
+{
+	if (!wk_bf_unit(e, bit, width, prim(TY_CHAR), uoff, us, pos))
+		efatal(e, e->curloc, "internal error: a bit-field part across 8 bytes");
+}
+
+/* width bits at bit pos of the unit (us bytes at uo from l's base), zero-extended, in a new register */
+static val wk_bfu_load(ecx *e, const lval *l, int64_t uo, int us, int pos, int w)
 {
 	lval u = *l;
-	int us, pos, w = l->width;
-	int64_t uo;
 	val v;
 
-	wk_bf_unit(e, l, t, &uo, &us, &pos);
 	u.bf = 0, u.off = uo;
 	v = (val){ .k = V_REG, .r = (uint8_t)LO(treg)(e) };
 	LO(load)(e, v.r, &u, us, false);
-	if (l->sgn) {
-		if (64 - pos - w)
-			v = LO(bin)(e, T_LESSLESS, 8, false, v, vconst(64 - pos - w));
-		if (64 - w)
-			v = LO(bin)(e, T_GREATERGREATER, 8, true, v, vconst(64 - w));
-		return v;
-	}
 	if (pos)
 		v = LO(bin)(e, T_GREATERGREATER, 8, false, v, vconst(pos));
 	if (w < 64)
@@ -358,18 +355,14 @@ static val wk_bf_load(ecx *e, const lval *l, qty t)
 	return v;
 }
 
-/* the low bits of rv into the bit-field (rv stays) */
-static void wk_bf_store(ecx *e, const lval *l, qty t, int rv)
+/* the low w bits of rv into the unit (rv stays) */
+static void wk_bfu_store(ecx *e, const lval *l, int64_t uo, int us, int pos, int w, int rv)
 {
 	lval u = *l;
-	int us, pos, w = l->width;
-	int64_t uo;
-	uint64_t m;
+	uint64_t m = (w >= 64 ? ~(uint64_t)0 : (((uint64_t)1 << w) - 1)) << pos;
 	val old, nv;
 
-	wk_bf_unit(e, l, t, &uo, &us, &pos);
 	u.bf = 0, u.off = uo;
-	m = (w >= 64 ? ~(uint64_t)0 : (((uint64_t)1 << w) - 1)) << pos;
 	if (us < 8)
 		m &= ((uint64_t)1 << (us * 8)) - 1;
 	old = (val){ .k = V_REG, .r = (uint8_t)LO(treg)(e) };
@@ -383,6 +376,68 @@ static void wk_bf_store(ecx *e, const lval *l, qty t, int rv)
 	old = LO(bin)(e, T_PIPE, 8, false, old, nv);
 	LO(store)(e, old.r, &u, us);
 	LO(tfree)(e, old.r);
+}
+
+/* a field crossing an 8-byte boundary: split there, the low part ending at it (wa bits) */
+static int64_t wk_bf_split(ecx *e, const lval *l, int *wa)
+{
+	int64_t bit = l->off * 8 + l->bitoff, b = (wk_floordiv(bit, 64) + 1) * 64;
+
+	if (l->width > 64)
+		efatal(e, e->curloc, "x86-64: a bit-field wider than 64 bits is not supported yet (PLAN-x86.md X3)");
+	*wa = (int)(b - bit);
+	return b;
+}
+
+/* a bit-field's value in a new register (l stays) */
+static val wk_bf_load(ecx *e, const lval *l, qty t)
+{
+	int us, pos, w = l->width;
+	int64_t uo, bit = l->off * 8 + l->bitoff;
+	val v;
+
+	if (wk_bf_unit(e, bit, w, t, &uo, &us, &pos)) {
+		v = wk_bfu_load(e, l, uo, us, pos, w);
+	} else {
+		int wa, ub, pb;
+		int64_t b = wk_bf_split(e, l, &wa), ob;
+		val hi;
+
+		wk_bf_unit1(e, bit, wa, &uo, &us, &pos);
+		v = wk_bfu_load(e, l, uo, us, pos, wa);
+		wk_bf_unit1(e, b, w - wa, &ob, &ub, &pb);
+		hi = wk_bfu_load(e, l, ob, ub, pb, w - wa);
+		hi = LO(bin)(e, T_LESSLESS, 8, false, hi, vconst(wa));
+		v = LO(bin)(e, T_PIPE, 8, false, v, hi);
+	}
+	if (l->sgn && w < 64) {
+		v = LO(bin)(e, T_LESSLESS, 8, false, v, vconst(64 - w));
+		v = LO(bin)(e, T_GREATERGREATER, 8, true, v, vconst(64 - w));
+	}
+	return v;
+}
+
+/* the low bits of rv into the bit-field (rv stays) */
+static void wk_bf_store(ecx *e, const lval *l, qty t, int rv)
+{
+	int us, pos, w = l->width;
+	int64_t uo, bit = l->off * 8 + l->bitoff;
+
+	if (wk_bf_unit(e, bit, w, t, &uo, &us, &pos)) {
+		wk_bfu_store(e, l, uo, us, pos, w, rv);
+	} else {
+		int wa;
+		int64_t b = wk_bf_split(e, l, &wa);
+		val hi = (val){ .k = V_REG, .r = (uint8_t)LO(treg)(e) };
+
+		wk_bf_unit1(e, bit, wa, &uo, &us, &pos);
+		wk_bfu_store(e, l, uo, us, pos, wa, rv);
+		LO(mov)(e, hi.r, rv);
+		hi = LO(bin)(e, T_GREATERGREATER, 8, false, hi, vconst(wa));
+		wk_bf_unit1(e, b, w - wa, &uo, &us, &pos);
+		wk_bfu_store(e, l, uo, us, pos, w - wa, hi.r);
+		LO(tfree)(e, hi.r);
+	}
 }
 
 /* r stored to l as type t (a bit-field or not); r stays */
