@@ -43,7 +43,7 @@ typedef struct pp_opts {
 	const char *main;		/* the source file */
 	const char *const *dirs;	/* search path: -iquote dirs, then -I, -isystem, -idirafter */
 	int ndirs, nquote;		/* dirs[0..nquote) only for "" includes */
-	int nsys;			/* dirs[nsys..) are system directories (0: none) */
+	int nsys;			/* dirs[nsys..) are system directories (-1: none; 0: all) */
 	const char *predef;		/* "<built-in>": #define/#undef/#include lines, run first */
 	const char *prefix_from, *prefix_to;	/* -fmacro-prefix-map (one) */
 	const char *const *fwdirs;	/* framework dirs: <A/b.h> -> DIR/A.framework/Headers/b.h */
@@ -65,6 +65,7 @@ typedef struct pp_opts {
 	const char *const *wargs;	/* -W..., -w options in command-line order */
 	int nwargs;
 	int error_limit;		/* -ferror-limit=: 0 default (20), -1 none */
+	int macro_bt_limit;		/* -fmacro-backtrace-limit=: 0 default (6), -1 none */
 	int spell_limit;		/* -fspell-checking-limit=: 0 default (50), -1 none; -2 -fno-spell-checking */
 	int has_epoch;			/* SOURCE_DATE_EPOCH set: __DATE__/__TIME__/__TIMESTAMP__ from epoch, UTC */
 	long long epoch;

@@ -68,7 +68,7 @@ VPRIV bool sig_of(const pp_opts *o, uint32_t *sig, uint32_t *psig)
 	psig[0] = sig_intern(b, 0);
 	for (int i = 0; i < o->ndirs && ok; i++) {
 		/* each directory with whether it is a quote-only and a system directory */
-		b[n++] = (char)('0' + (i < o->nquote) + 2 * (o->nsys && i >= o->nsys));
+		b[n++] = (char)('0' + (i < o->nquote) + 2 * (o->nsys >= 0 && i >= o->nsys));
 		SIGS(o->dirs[i]);
 		psig[i + 1] = sig_intern(b, n);
 	}

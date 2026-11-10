@@ -57,7 +57,7 @@ __attribute__((noinline)) VPRIV void struct_body(cc *c, uint32_t ti)
 			longjmp(c->bail, 1);
 		}
 		if (is(c, T_SEMI)) {
-			EXT_WARN(c, "extra-semi", w_ped, tok(c)->loc, "extra ';' inside a %s",
+			EXT_WARN_MS(c, ";", "extra-semi", w_ped, tok(c)->loc, "extra ';' inside a %s",
 				 c->tags[ti].flags & RF_UNION ? "union" : "struct");
 			next(c);
 			continue;

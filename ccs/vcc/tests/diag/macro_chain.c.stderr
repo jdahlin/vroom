@@ -1,0 +1,58 @@
+macro_chain.c:23:23: error: use of undeclared identifier 'undefined_name'
+   23 | int f(int k) { return OUTER(k); }
+      |                       ^~~~~~~~
+macro_chain.c:8:18: note: expanded from macro 'OUTER'
+    8 | #define OUTER(y) INNER(y * 2)
+      |                  ^~~~~~~~~~~~
+macro_chain.c:7:25: note: expanded from macro 'INNER'
+    7 | #define INNER(x) ((x) + undefined_name)
+      |                         ^~~~~~~~~~~~~~
+      = help: the expansion of 'INNER' here: `((k * 2) + undefined_name)`
+macro_chain.c:24:28: error: invalid operands to binary expression ('struct S' and 'int')
+   24 | int g(struct S s) { return ADD(s, 1); }
+      |                            ^~~~~~~~~
+macro_chain.c:9:24: note: expanded from macro 'ADD'
+    9 | #define ADD(a, b) ((a) + (b))
+      |                    ~~~ ^ ~~~
+      = help: the expansion of 'ADD' here: `((s) + (1))`
+macro_chain.c:25:22: warning: use of GNU statement expression extension from macro expansion [-Wgnu-statement-expression-from-macro-expansion]
+   25 | int h(void) { return SE(1); }
+      |                      ^
+macro_chain.c:10:16: note: expanded from macro 'SE'
+   10 | #define SE(x) ({ int _t = (x); _t; })
+      |                ^
+      = help: the expansion of 'SE' here: `({ int _t = (1); _t; })`
+macro_chain.c:26:23: error: use of undeclared identifier 'nope2'
+   26 | int j(int k) { return V("%d", k, 2); }
+      |                       ^~~~~~~~~~~~~
+macro_chain.c:13:43: note: expanded from macro 'V'
+   13 | #define V(fmt, ...) vf(fmt, __VA_ARGS__ + nope2)
+      |                                           ^~~~~
+      = help: the expansion of 'V' here: `vf("%d", k, 2 + nope2)`
+macro_chain.c:27:23: error: use of undeclared identifier 'deep_undefined'
+   27 | int l(int k) { return L1(k); }
+      |                       ^~~~~
+macro_chain.c:14:15: note: expanded from macro 'L1'
+   14 | #define L1(x) L2(x)
+      |               ^~~~~
+macro_chain.c:15:15: note: expanded from macro 'L2'
+macro_chain.c:16:15: note: expanded from macro 'L3'
+note: (skipping 1 expansions in backtrace; use -fmacro-backtrace-limit=0 to see all)
+macro_chain.c:18:15: note: expanded from macro 'L5'
+macro_chain.c:19:15: note: expanded from macro 'L6'
+macro_chain.c:20:22: note: expanded from macro 'L7'
+   20 | #define L7(x) ((x) + deep_undefined)
+      |                      ^~~~~~~~~~~~~~
+      = help: the expansion of 'L7' here: `((k) + deep_undefined)`
+macro_chain.c:28:23: error: use of undeclared identifier 'sys_undefined'
+   28 | int m(int k) { return S_OUT(k); }
+      |                       ^~~~~~~~
+./macro_sys.h:4:18: note: expanded from macro 'S_OUT'
+    4 | #define S_OUT(x) S_MID(x)
+      |                  ^~~~~~~~
+./macro_sys.h:3:18: note: expanded from macro 'S_MID'
+./macro_sys.h:2:24: note: expanded from macro 'S_IN'
+    2 | #define S_IN(x) ((x) + sys_undefined)
+      |                        ^~~~~~~~~~~~~
+      = help: the expansion of 'S_IN' here: `((k) + sys_undefined)`
+1 warning and 5 errors generated.

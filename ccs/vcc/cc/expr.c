@@ -43,7 +43,7 @@ VPRIV uint32_t binop(cc *c, int op, uint32_t l, uint32_t r, uint32_t loc)
 		if ((both && T(c, lt)->size != T(c, rt)->size) ||
 		    (!both && !is_arith(c, is_vector(c, lt) ? rt : lt)) ||
 		    ((op == T_PERCENT || op == T_AMP || op == T_PIPE || op == T_CARET || shift) && !is_integer(c, et)))
-			bad_operands(c, l, r, loc);
+			bad_operands(c, op, l, r, loc);
 		if (both) {
 			l = convert(c, l, vt);
 			r = convert(c, r, both && shift ? QUNQ(rt) : vt);
@@ -61,12 +61,12 @@ VPRIV uint32_t binop(cc *c, int op, uint32_t l, uint32_t r, uint32_t loc)
 
 		if (op == T_LESSLESS || op == T_GREATERGREATER) {
 			if (!is_integer(c, lt) || !is_integer(c, rt))
-				bad_operands(c, l, r, loc);
+				bad_operands(c, op, l, r, loc);
 			return mk_bin(c, op, lt, l, r, loc);
 		}
 		if ((op == T_PERCENT || op == T_AMP || op == T_PIPE || op == T_CARET) &&
 		    (!is_integer(c, lt) || !is_integer(c, rt)))
-			bad_operands(c, l, r, loc);
+			bad_operands(c, op, l, r, loc);
 		ct = arith_conv(c, lt, rt);
 		l = convert(c, l, ct), r = convert(c, r, ct);
 		return mk_bin(c, op, is_cmp(op) ? prim(TY_INT) : ct, l, r, loc);
@@ -93,7 +93,7 @@ VPRIV uint32_t binop(cc *c, int op, uint32_t l, uint32_t r, uint32_t loc)
 			r = convert(c, r, lt);
 		return mk_bin(c, op, prim(TY_INT), l, r, loc);
 	}
-	bad_operands(c, l, r, loc);
+	bad_operands(c, op, l, r, loc);
 	return err_node(c, loc);
 }
 
@@ -608,11 +608,13 @@ VPRIV uint32_t paren_expr(cc *c, uint32_t loc)
 	if (is(c, T_LBRACE)) {
 		static const char *const g[] = { "gnu-statement-expression", "gnu", "pedantic", NULL };
 
-		if (c->prevflags & PF_MACRO)	/* (clang: the '(' from a macro) */
-			EXT_WARN(c, "gnu-statement-expression-from-macro-expansion", g, tok(c)->loc,
-				 "use of GNU statement expression extension from macro expansion");
-		else
+		if (!(c->prevflags & PF_MACRO))
 			EXT_WARN(c, "gnu-statement-expression", w_gnu, tok(c)->loc, "use of GNU statement expression extension");
+		else if (unlikely(ext_on(c, "gnu-statement-expression-from-macro-expansion", g))) {
+			c->dms = "{";	/* (clang: the '(' from a macro; the caret at the invocation) */
+			ext_warn(c, "gnu-statement-expression-from-macro-expansion", g, tok(c)->loc,
+				 "use of GNU statement expression extension from macro expansion");
+		}
 		return stmt_expr(c, loc);
 	}
 	n = expr(c);

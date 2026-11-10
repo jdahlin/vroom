@@ -195,6 +195,7 @@ struct cc {
 	const char *next_k[16];	/* ext_on's cache: flag (a literal), whether it is on (this TU's options) */
 	bool next_v[16];
 	uint32_t next_n;
+	const char *dms;	/* the next record's diagnosed token, spelled, if a macro may hold it (set just before) */
 	int8_t ext_off;		/* 1: no extension warning is on (command line); -1: not known yet */
 	const uint32_t *nenable;	/* pp's "#pragma diagnostic warning|error" count (ext_off holds while 0) */
 	int bcp;		/* in __builtin_constant_p's argument: unevaluated, but its names are used */

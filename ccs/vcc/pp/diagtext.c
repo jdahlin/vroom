@@ -118,8 +118,8 @@ static bool foldable(const fent *e, const vdiag *k, uint32_t pls)
 	uint32_t off, ls;
 
 	if (k->level != VDL_NOTE || k->nfix || k->help || k->kids || k->loc == UINT32_MAX || k->loc < e->base ||
-	    k->loc - e->base >= e->f->size)
-		return false;
+	    k->loc - e->base >= e->f->size || (k->id && !strcmp(k->id, "note_macro_expansion_here")))
+		return false;	/* (a macro's body is not this code: its own snippet) */
 	off = k->loc - e->base;
 	ls = lstart(s, off);
 	for (uint32_t i = 0; i < k->nspan; i++)
@@ -412,10 +412,37 @@ static void help_only(vbuf *b, const vdiag *d)
 	}
 }
 
+static bool is_macro_note(const vdiag *k)
+{
+	return k->id && !strcmp(k->id, "note_macro_expansion_here");
+}
+
+static bool is_skip_note(const vdiag *k)
+{
+	return k->level == VDL_NOTE && k->loc == UINT32_MAX && k->msg && !strncmp(k->msg, "(skipping ", 10);
+}
+
+/* a macro backtrace of three frames or more (a run of "expanded from macro" notes, clang's
+   "skipping" note among them) starting at k: its last note, else NULL.  The frames between
+   keep their first line (tools read it) but not their snippets */
+static const vdiag *macro_run_last(const vdiag *k)
+{
+	const vdiag *q, *last = k;
+	int nm = 0;
+
+	if (!is_macro_note(k))
+		return NULL;
+	for (q = k; q && (is_macro_note(q) || is_skip_note(q)); q = q->next)
+		if (is_macro_note(q))
+			nm++, last = q;
+	return nm >= 3 ? last : NULL;
+}
+
 static void render_vcc(pp *p, vbuf *b, vdiag *top)
 {
 	const fent *e;
 	vdiag *fold[MAXMARKS];
+	const vdiag *run_first = NULL, *run_last = NULL;
 	int nfold = 0;
 
 	if (render_head(p, b, top, &e)) {
@@ -437,10 +464,14 @@ static void render_vcc(pp *p, vbuf *b, vdiag *top)
 		for (int i = 0; i < nfold; i++)
 			folded |= fold[i] == k;
 		k->emitted = 1;
-		if (render_head(p, b, k, &e) && !folded)
+		if (!run_last && !folded && (run_last = macro_run_last(k)))
+			run_first = k;
+		if (render_head(p, b, k, &e) && !folded && (!run_last || k == run_first || k == run_last))
 			snippet_vcc(p, b, e, k, NULL, 0);
 		else if (!folded)
 			help_only(b, k);
+		if (k == run_last)
+			run_last = NULL;
 	}
 }
 

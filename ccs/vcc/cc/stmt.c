@@ -158,7 +158,7 @@ VPRIV uint32_t asm_stmt(cc *c, bool toplevel)
 	casm *a = &c->asms[ai];
 
 	if (kwof(tok(c)) == KW_asm)	/* (clang -pedantic: the GNU spelling) */
-		EXT_WARN(c, "language-extension-token", w_ped, loc, "extension used");
+		EXT_WARN_MS(c, "asm", "language-extension-token", w_ped, loc, "extension used");
 	vec outs, ins, clob, labs;
 	int pending = 0;
 
@@ -617,7 +617,7 @@ VPRIV uint32_t statement(cc *c)
 		if (is(c, T_ELLIPSIS)) {
 			static const char *const g[] = { "pedantic", NULL };
 
-			EXT_WARN(c, "c2y-extensions", g, tok(c)->loc, "case ranges are a C2y extension");
+			EXT_WARN_MS(c, "...", "c2y-extensions", g, tok(c)->loc, "case ranges are a C2y extension");
 			next(c);
 			const_expr(c, &hi, NULL);
 		}
@@ -707,7 +707,7 @@ VPRIV uint32_t statement(cc *c)
 		if (is(c, T_STAR)) {
 			uint32_t e;
 
-			EXT_WARN(c, "gnu-label-as-value", w_gnu, tok(c)->loc, "use of GNU indirect-goto extension");
+			EXT_WARN_MS(c, "*", "gnu-label-as-value", w_gnu, tok(c)->loc, "use of GNU indirect-goto extension");
 			next(c);
 			e = decay(c, expr(c));
 

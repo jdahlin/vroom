@@ -13,7 +13,7 @@ A change to either renderer in C changes this file too.
   bench/diag-render.py [--cwd DIR] [--no-caret] [--style clang] < records.jsonl
   import: render(lines, cwd, caret=True, style='vcc') -> bytes
 """
-import json, os, sys
+import re, json, os, sys
 
 
 def cp_width(c):
@@ -222,6 +222,7 @@ class Renderer:
     def foldable(self, s, path, k, pls):
         loc = k['location']
         if (k['level'] != 'note' or k['fixits'] or k.get('help') or k.get('children') or loc is None or
+                k.get('id') == 'note_macro_expansion_here' or
                 loc.get('file') is None or loc['path'] != path or loc['offset'] >= len(s)):
             return False
         ls = self.lstart(s, loc['offset'])
@@ -405,13 +406,28 @@ class Renderer:
             self.snippet_vcc(s, d, fold, out)
         elif d.get('help'):
             out += b'      = help: ' + d['help'].encode() + b'\n'
-        for k in d['children']:
+        kids = d['children']
+        mac = lambda q: q.get('id') == 'note_macro_expansion_here'
+        skip = lambda q: q['level'] == 'note' and q['location'] is None and q['message'].startswith('(skipping ')
+        first = last = None
+        for i, k in enumerate(kids):
             folded = any(k is f for f in fold)
+            if last is None and not folded and mac(k):
+                # diagtext.c macro_run_last: 3+ frames show the first and last snippets only
+                j, nm, lj = i, 0, i
+                while j < len(kids) and (mac(kids[j]) or skip(kids[j])):
+                    if mac(kids[j]):
+                        nm, lj = nm + 1, j
+                    j += 1
+                if nm >= 3:
+                    first, last = i, lj
             ks = self.head(k, out)
-            if ks is not None and not folded:
+            if ks is not None and not folded and (last is None or i in (first, last)):
                 self.snippet_vcc(ks, k, [], out)
             elif not folded and k.get('help'):
                 out += b'      = help: ' + k['help'].encode() + b'\n'
+            if i == last:
+                first = last = None
 
     # ---- clang's style ----
 

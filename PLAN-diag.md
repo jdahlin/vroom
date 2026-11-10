@@ -505,6 +505,30 @@ Varje delsteg: nya fall i `tests/diag/` (snapshots, och clang som mätpunkt), la
    den delade filcachen (pp/file.c) när samma sökväg får nytt innehåll.
 2. **Makron**: expanderad text med caret i, ramar från systemheaders vikta,
    flernivå-"expanded from" (TODO.md "Diagnostic details").
+   **Status (2026-11-10): klart.**  En diagnos vid en token från en makroexpansion får
+   caret vid anropet (objektmakrots namn, inte `)`) och noter "expanded from macro" i flera
+   nivåer, som clangs: cc skickar den diagnostiserade tokenens stavning (`c->dms`,
+   `EXT_WARN_MS`; `bad_operands` operatorn), och pp/diag.c följer den genom kropparna
+   (`xchain`: en direkt träff, annars nästlade anrop; sista förekomsten först).  Kroppar är
+   kanoniska kopior utan fil, så ett latent index över `#define`-platser (`mdef_body`) hittar
+   definitionen vars token stämmer.  Varje ram får ett spann (ett funktionsmakros till och
+   med `)`), operandernas spann förs in på parameterns användning i kroppen (`arg_spans`), och
+   den innersta noten får `help:` med expansionens text (`#`, `##`, variadiskt).
+   `-fmacro-backtrace-limit=N` (standard 6, clangs "skipping N expansions" mitt i);
+   vcc-texten skriver bara rubrikraden för mellanramar i en kedja av ≥ 3 (diag-render.py
+   likaså, JSON oförändrad).  Följder: `-isystem` utan `-I` räknades inte som system (`nsys`
+   −1 betyder nu inga), `##` behåller `PF_MACRO`, `__COUNTER__`-varningen får spann.
+   Kärnan (kernel/fork.o, `-pedantic`): 1 584 varningar, 1 536 med clangs rubrik, 1 031
+   kedjor identiska med clangs; resten är mest namn byggda med `##` (`CONCATENATE`), som en
+   sökning på stavning inte följer, och dubbletter (`;`) där fel förekomst väljs (TODO.md
+   "Diagnostic details").  Clangs egna fel låter vi bli: en token direkt efter `\` +
+   radbrytning får platsen för `\`.  Nya fall: `macro_chain.c` (med en systemheader),
+   `macro_paste.c`.  *Validerat:* `vcc-diag.py` 101/101, `gen-diagids.py --check`
+   (`vcc-diagcov.py` känner `EXT_WARN_MS`), `vcc-sema.py warn` 879/879, batch och run 878/879,
+   `vcc-ctests.py` 1740/1740, stress 23 + 24, `vcc-mutate.py --formats` 1970/1970, `vcc-diff.py`
+   batch 873/873 och cmp 911/912, `vccd-test.py` 19, `vcc-driver.py` 56/56, filvis bygge,
+   fuzz-regress; PostgreSQL med vcc: 0 varningar clang inte ger, `meson test` 81 ok.  Grinden mot
+   merge-basen: pp +0,24 %, fe −0,42 %, cc −0,38 %.
 3. **`static_assert`**: operanderna utvärderade (`48 == 56`), och för `sizeof` en
    layoutnot med var utfyllnaden kom ifrån.
    **Status (2026-11-09): klart.**  Det falska ledet i en `&&`-kedja rapporteras (clangs

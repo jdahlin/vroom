@@ -403,7 +403,7 @@ VPRIV void enter_file(pp *p, const vlex_file *f, const char *path, int32_t sdir)
 		p->rec.ord[p->rec.nord++] = (honce){ f, oi >= 0 };
 	if (oi >= 0)
 		return;
-	sys = sdir == -2 || (sdir >= 0 && p->o->nsys && sdir >= p->o->nsys) ||
+	sys = sdir == -2 || (sdir >= 0 && p->o->nsys >= 0 && sdir >= p->o->nsys) ||
 	      (sdir == -1 && from && p->fe[from->fe].sys);
 	if (f != &p->builtin && from && hc_top(p)) {
 		int d0 = p->depth;

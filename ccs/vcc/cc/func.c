@@ -580,7 +580,7 @@ VPRIV void translation_unit(cc *c)
 		if (is(c, T_EOF))
 			break;
 		if (is(c, T_SEMI)) {
-			EXT_WARN(c, "extra-semi", w_ped, tok(c)->loc, "extra ';' outside of a function");
+			EXT_WARN_MS(c, ";", "extra-semi", w_ped, tok(c)->loc, "extra ';' outside of a function");
 			next(c);
 			continue;
 		}

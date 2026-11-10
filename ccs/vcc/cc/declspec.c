@@ -867,7 +867,7 @@ again:
 			if (have_named || base)
 				goto done;
 			if (kw == KW_typeof && c->o->std != 23)	/* (clang -pedantic: the GNU spelling) */
-				EXT_WARN(c, "language-extension-token", w_ped, t->loc, "extension used");
+				EXT_WARN_MS(c, "typeof", "language-extension-token", w_ped, t->loc, "extension used");
 			named = typeof_spec(c, kw == KW___typeof_unqual__);
 			have_named = true;
 			any = true;

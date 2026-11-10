@@ -162,6 +162,9 @@ extern const char *const w_ped[];	/* { "pedantic" } */
 /* an ext_warn that costs a load and a test while it is off */
 #define EXT_WARN(c, flag, groups, loc, ...) \
 	do { if (unlikely(ext_on((c), (flag), (groups)))) ext_warn((c), (flag), (groups), (loc), __VA_ARGS__); } while (0)
+/* ... at a token spelled ms (from a macro: the caret at the invocation, the notes at the body) */
+#define EXT_WARN_MS(c, ms, flag, groups, loc, ...) \
+	do { if (unlikely(ext_on((c), (flag), (groups)))) { (c)->dms = (ms); ext_warn((c), (flag), (groups), (loc), __VA_ARGS__); } } while (0)
 VPRIV __attribute__((format(printf, 6, 7))) vdiag *cc_warn_begin(cc *c, const char *flag, bool on, const char *const *groups, uint32_t loc, const char *fmt, ...);
 VPRIV __attribute__((format(printf, 10, 11))) bool cc_warnx(cc *c, const char *flag, bool on, const char *const *groups, uint32_t loc, const pp_span *r, int nr, const pp_fixit *fx, int nfx, const char *fmt, ...);
 VPRIV const char *idname(uint32_t id, int *len);
@@ -341,7 +344,8 @@ VPRIV uint32_t to_complex(cc *c, uint32_t n, qty t);
 VPRIV uint32_t cplx_bool(cc *c, uint32_t n);
 VPRIV uint32_t scalar_cond(cc *c, uint32_t n, const char *what);
 VPRIV uint32_t neg(cc *c, uint32_t n);
-VPRIV void bad_operands(cc *c, uint32_t l, uint32_t r, uint32_t loc);
+VPRIV void bad_operands(cc *c, int op, uint32_t l, uint32_t r, uint32_t loc);
+VPRIV const char *punct_spell(int k);
 VPRIV uint32_t cplx_binop(cc *c, int op, uint32_t l, uint32_t r, uint32_t loc);
 VPRIV uint32_t cplx_unary(cc *c, int op, uint32_t n, uint32_t loc);
 /* expr.c */

@@ -876,9 +876,11 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
 - [ ] **`"abc"[1]` rejected as a static initializer**; vector types print as
   `''` in messages (`tyname`).  *Validate:* T1; diag test.
 - [ ] **Diagnostic details**: columns on `##` and invalid directives,
-  `#line` file names ignored, nested macro notes (one level today), the
-  "expanded from macro" note only for undeclared identifiers.
-  *Validate:* diag tests.
+  `#line` file names ignored; macro notes are found by spelling in the
+  bodies (PLAN-diag.md D5.2), so a name built by `##` (`CONCATENATE`) is not
+  followed and a duplicated token may pick the wrong body occurrence (kernel
+  `-pedantic`: 1 031 of 1 536 chains identical to clang's).
+  *Validate:* diag tests, the kernel chain comparison.
 - [ ] **Longer fuzz runs** and pp-diff over the whole fuzz corpus (PLAN-fas2
   "Status fuzzning").  *Validate:* runs recorded in the plan, findings in
   `regress/`.

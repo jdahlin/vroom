@@ -265,11 +265,35 @@ VPRIV void rec_restore(cc *c, recov *r, int mode)
 }
 
 /* a record with clang's ranges and fix-its */
+/* c->dms to the record (pp moves the location to the macro invocation and adds the
+   "expanded from macro" notes at the body token so spelled) */
+static void take_dms(cc *c, vdiag *d)
+{
+	if (unlikely(c->dms != NULL)) {
+		if (*c->dms)
+			pp_diag_macro(d, c->dms, (uint32_t)strlen(c->dms));
+		c->dms = NULL;
+	}
+}
+
+/* the spelling of punctuator kind k ("" for others) */
+VPRIV const char *punct_spell(int k)
+{
+	static const char *const s[] = {
+		"[", "]", "(", ")", "{", "}", ".", "...", "&", "&&", "&=", "*", "*=", "+", "++", "+=", "-", "->", "--",
+		"-=", "~", "!", "!=", "/", "/=", "%", "%=", "<", "<<", "<=", "<<=", ">", ">>", ">=", ">>=", "^", "^=",
+		"|", "||", "|=", "?", ":", "::", ";", "=", "==", ",", "#", "##",
+	};
+	_Static_assert(sizeof(s) / sizeof(s[0]) == T_NKINDS - T_LSQUARE, "punctuators");
+	return k >= T_LSQUARE && k < T_NKINDS ? s[k - T_LSQUARE] : "";
+}
+
 static vdiag *rec(cc *c, int level, uint32_t loc, const pp_span *r, int nr, const pp_fixit *fx, int nfx,
 		  const char *fmt, va_list ap)
 {
 	vdiag *d = pp_diag_vbegin(c->p, level, loc, fmt, ap);
 
+	take_dms(c, d);
 	for (int i = 0; i < nr; i++)
 		pp_diag_label(c->p, d, r[i].b, r[i].e, NULL);
 	for (int i = 0; i < nfx; i++)
@@ -352,8 +376,10 @@ VPRIV bool cc_warnx(cc *c, const char *flag, bool on, const char *const *groups,
 	vdiag *d;
 	va_list ap;
 
-	if (lv < 0)
+	if (lv < 0) {
+		c->dms = NULL;
 		return false;
+	}
 	va_start(ap, fmt);
 	d = rec(c, lv, loc, r, nr, fx, nfx, fmt, ap);
 	va_end(ap);
@@ -371,14 +397,17 @@ VPRIV vdiag *cc_warn_begin(cc *c, const char *flag, bool on, const char *const *
 	vdiag *d;
 	va_list ap;
 
-	if (lv < 0)
+	if (lv < 0) {
+		c->dms = NULL;
 		return NULL;
+	}
 	if (lv == VDL_ERROR)
 		error_limit(c), c->errors++;
 	c->ndiag++;
 	va_start(ap, fmt);
 	d = pp_diag_vbegin(c->p, lv, loc, fmt, ap);
 	va_end(ap);
+	take_dms(c, d);
 	pp_diag_flag(d, flag);
 	d->werror = lv == VDL_ERROR;
 	return d;
@@ -453,14 +482,17 @@ VPRIV void ext_warn(cc *c, const char *flag, const char *const *groups, uint32_t
 	va_list ap;
 
 	pp_diag_pc = __builtin_return_address(0);
-	if (!ext_on(c, flag, groups) || (lv = pp_diag_wlevel(c->p, flag, false, groups, loc)) < 0)
+	if (!ext_on(c, flag, groups) || (lv = pp_diag_wlevel(c->p, flag, false, groups, loc)) < 0) {
+		c->dms = NULL;
 		return;
+	}
 	if (lv == VDL_ERROR)
 		error_limit(c), c->errors++;
 	c->ndiag++;
 	va_start(ap, fmt);
 	d = pp_diag_vbegin(c->p, lv, loc, fmt, ap);
 	va_end(ap);
+	take_dms(c, d);
 	pp_diag_flag(d, flag);
 	d->werror = lv == VDL_ERROR;
 	pp_diag_emit(c->p, d);

@@ -116,6 +116,7 @@ int LLVMFuzzerTestOneInput(const uint8_t *d, size_t n)
 	o.main = names[0];
 	o.dirs = dirs;
 	o.ndirs = 1;
+	o.nsys = -1;	/* (no system directory) */
 	o.nquote = 0;
 	o.nsys = 0;
 	o.predef = predef;

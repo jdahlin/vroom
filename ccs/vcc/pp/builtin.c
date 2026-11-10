@@ -197,7 +197,7 @@ int (*pp_builtin_known)(const char *name);
 static __attribute__((noinline, cold)) void counter_ext(pp *p, uint32_t loc)
 {
 	static const char *const g[] = { "pedantic", NULL };
-	pp_dinfo d = { "warning", loc, NULL, 0, NULL, 0, NULL, 0 };
+	pp_dinfo d = { "warning", loc, NULL, 0, NULL, 0, "__COUNTER__", 11 };
 
 	if (pp_warnx(p, "c2y-extensions", false, g, &d, "'__COUNTER__' is a C2y extension"))
 		HC_BAD(p);

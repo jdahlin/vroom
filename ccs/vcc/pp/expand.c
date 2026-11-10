@@ -541,7 +541,7 @@ static ptok paste(pp *p, const ptok *l, const ptok *r)
 	t.s = b;
 	t.len = (uint32_t)(w - b);
 	t.kind = (uint8_t)k;
-	t.flags = l->flags & (TF_SOL | TF_SPACE);
+	t.flags = l->flags & (TF_SOL | TF_SPACE | PF_MACRO);	/* (PF_MACRO: diagnostics) */
 	t.id = k == T_IDENT ? vintern_copy(b, t.len) : 0;
 	if (unlikely(r->ctr) && p->rec.on)
 		t.ctr = cp_chain(p, l->ctr, 0, cp_chain(p, r->ctr, ll, 0));

@@ -443,6 +443,8 @@ struct pp {
 	struct { uint32_t loc, st; } *dtr;
 	uint32_t ndn, ndtr, dcur, ndstk, dstk[64];
 	uint32_t nden;			/* "warning"/"error" nodes: only they turn a warning on */
+	struct mdef *mdx;		/* every #define's site, by name (built for a macro note) */
+	uint32_t nmdx, cmdx, mdx_nfe;
 	const void *wc_o;		/* the options wc[] was computed for */
 	bool wc[PPW_N];			/* -pedantic warnings on hot paths: on (command line) */
 	vlex_file builtin;

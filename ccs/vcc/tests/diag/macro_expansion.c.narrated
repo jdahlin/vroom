@@ -6,4 +6,5 @@ macro_expansion.c:7:9: error: use of undeclared identifier 'nope'
   the source line is: return ADD(v) + y;
 macro_expansion.c:3:23: note: expanded from macro 'ADD'
   the source line is: #define ADD(a) ((a) + nope)
+  help: the expansion of 'ADD' here: `((v) + nope)`
 2 errors generated.

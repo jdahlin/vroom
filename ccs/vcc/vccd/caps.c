@@ -70,7 +70,7 @@ static const char *const cc_exact[] = {
 static const char *const cc_prefix[] = {
 	"-D", "-U", "-I", "-fmacro-prefix-map=", "-ffile-prefix-map=",
 	"-falign-functions=", "-fno-builtin-", "-Wp,-MMD,", "-Wp,-MD,",
-	"-ferror-limit=", "-fspell-checking-limit=", "-fdiagnostics-add-output=sarif:file=",
+	"-ferror-limit=", "-fmacro-backtrace-limit=", "-fspell-checking-limit=", "-fdiagnostics-add-output=sarif:file=",
 	NULL
 };
 
