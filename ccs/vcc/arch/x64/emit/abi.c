@@ -83,6 +83,10 @@ VPRIV void x64_classify(ecx *e, qty t, wkarg *a)
 	}
 	if (size == 0)
 		return;	/* an empty record: nothing is passed */
+	if (is_record(c, t) && (c->tags[T(c, t)->aux].flags & RF_COMPLEX) && KIND(c, c->tags[T(c, t)->aux].f[0].ty) == TY_LDOUBLE) {
+		a->mem = true, a->x87 = true;	/* COMPLEX_X87: passed in memory, returned in st(0) (real), st(1) */
+		return;
+	}
 	if (size > 16 || !x64_cls(c, t, 0, cls) || cls[0] == XC_MEM || cls[1] == XC_MEM) {
 		a->mem = true;
 		return;
@@ -204,6 +208,10 @@ VPRIV val x64_call(ecx *e, uint32_t ref, val *fn, const wkarg *a, int n, bool va
 		lval d = x64_fr(r->slot);
 
 		x64_x87st(e, &d);
+		if (r->size == 32) {
+			d.off += 16;
+			x64_x87st(e, &d);	/* _Complex long double: the imaginary part from st(1) */
+		}
 	} else if (r && !r->mem && r->n) {
 		/* a record in rax, rdx / xmm0, xmm1 (by class, in order) into its slot */
 		int ng = 0, nf = 0;
@@ -314,6 +322,12 @@ VPRIV void x64_retrec(ecx *e, int raddr, const wkarg *r, uint32_t lbl)
 	if (r->x87) {
 		lval s = { .k = L_REG, .r = (uint8_t)raddr };
 
+		if (r->size == 32) {
+			lval im = s;
+
+			im.off = 16;
+			x64_x87ld(e, &im);	/* _Complex long double: the imaginary part to st(1) */
+		}
 		x64_x87ld(e, &s);	/* long double: in st(0) */
 	} else if (r->mem) {
 		lval s = x64_fr(e->x64->sret);

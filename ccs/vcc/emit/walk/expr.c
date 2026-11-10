@@ -1738,6 +1738,28 @@ VPRIV val wk_gen(ecx *e, uint32_t n)
 			return wk_vreg(r);
 		}
 		return wk_vla_bytes(e, x->b);
+	case N_CPLX: {
+		/* a _Complex value from its parts: both into a temporary object, its address */
+		qty et = c->tags[T(c, x->ty)->aux].f[0].ty;
+		int64_t es = (int64_t)tsize(c, et);
+		lval d = { .k = L_FRAME, .off = wk_slot(e, 2 * (uint64_t)es, talign(c, x->ty)), .align = talign(c, et) };
+
+		for (int k = 0; k < 2; k++, d.off += es) {
+			val v = wk_gen(e, k ? x->b : x->a);
+
+			if (wk_mem(e, et)) {
+				v = wk_putmem(e, &d, et, v);
+				wk_free(e, &v);
+			} else {
+				int r = wk_reg(e, &v, et);
+
+				LO(store)(e, r, &d, (int)es);
+				LO(tfree)(e, r);
+			}
+		}
+		d.off -= 2 * es;
+		return wk_vreg(LO(laddr)(e, &d));
+	}
 	default: {
 		static const char *const nm[N_NKINDS] = { [N_SIZEOF_VLA] = "sizeof of a VLA", [N_COMPLIT] = "a compound literal",
 			[N_INIT] = "an initializer list", [N_LABELADDR] = "a label address", [N_VAARG] = "va_arg",
