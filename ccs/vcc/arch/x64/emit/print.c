@@ -303,6 +303,21 @@ VPRIV void x64_print(ecx *e, tbuf *b, uint32_t s)
 		case X_CQO:
 			tb_s(b, sz == 8 ? "\tcqto" : "\tcltd");
 			break;
+		case X_XCHG: case X_XADD:
+			x64_ins(b, i->op == X_XCHG ? "xchg" : "lock xadd", sz);
+			x64_reg(b, i->r[0], sz);
+			tb_s(b, ", ");
+			x64_memop(c, b, i);
+			break;
+		case X_CMPXCHG:
+			x64_ins(b, "lock cmpxchg", sz);
+			x64_reg(b, i->r[2], sz);
+			tb_s(b, ", ");
+			x64_memop(c, b, i);
+			break;
+		case X_MFENCE:
+			tb_s(b, "\tmfence");
+			break;
 		case X_GOT:
 			tb_s(b, "\tmovq\t");
 			ref_off(c, b, i->ref, 0);

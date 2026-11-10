@@ -54,6 +54,10 @@ enum {
 	X_TLS,		/* r0 = the address of ref, thread-local: cond 0 local-exec, 1 initial-exec;
 			   2 general dynamic: rax = __tls_get_addr(ref's descriptor) (a call) */
 	X_GOT,		/* r0 = ref's address from the GOT */
+	X_XCHG,		/* r0 <-> [r1 + off] (sz; locked) */
+	X_XADD,		/* lock xadd: r0 = [r1 + off], [r1 + off] += old r0 */
+	X_CMPXCHG,	/* lock cmpxchg: if [r1 + off] == rax then = r2, else rax = [r1 + off] */
+	X_MFENCE,
 	X_BSF, X_BSR,	/* r0 = index of the lowest / highest set bit of r1 */
 	X_BSWAP,	/* r0 = r0 byte-reversed (sz 4, 8) */
 	X_EXT,		/* r0 = r1's low sz bytes extended to 64 bits (cond 1: sign) */
