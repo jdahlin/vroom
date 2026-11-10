@@ -108,6 +108,10 @@ static const builtin builtins[] = {
 	{ "__atomic_add_fetch", BI_ATOMIC_ADD_FETCH, 0, "v." }, { "__atomic_sub_fetch", BI_ATOMIC_SUB_FETCH, 0, "v." },
 	{ "__atomic_and_fetch", BI_ATOMIC_AND_FETCH, 0, "v." }, { "__atomic_or_fetch", BI_ATOMIC_OR_FETCH, 0, "v." },
 	{ "__atomic_xor_fetch", BI_ATOMIC_XOR_FETCH, 0, "v." },
+	{ "__atomic_fetch_nand", BI_ATOMIC_FETCH_NAND, 0, "v." }, { "__atomic_nand_fetch", BI_ATOMIC_NAND_FETCH, 0, "v." },
+	{ "__atomic_fetch_max", BI_ATOMIC_FETCH_MAX, 0, "v." }, { "__atomic_max_fetch", BI_ATOMIC_MAX_FETCH, 0, "v." },
+	{ "__atomic_fetch_min", BI_ATOMIC_FETCH_MIN, 0, "v." }, { "__atomic_min_fetch", BI_ATOMIC_MIN_FETCH, 0, "v." },
+	{ "__atomic_test_and_set", BI_ATOMIC_TEST_AND_SET, 0, "v." }, { "__atomic_clear", BI_ATOMIC_CLEAR, 0, "v." },
 	/* legacy __sync_*: the __atomic_* forms with seq_cst (sig "s.": atomic_call appends the order) */
 	{ "__sync_fetch_and_add", BI_ATOMIC_FETCH_ADD, 0, "s." }, { "__sync_fetch_and_sub", BI_ATOMIC_FETCH_SUB, 0, "s." },
 	{ "__sync_fetch_and_and", BI_ATOMIC_FETCH_AND, 0, "s." }, { "__sync_fetch_and_or", BI_ATOMIC_FETCH_OR, 0, "s." },
@@ -115,6 +119,10 @@ static const builtin builtins[] = {
 	{ "__sync_add_and_fetch", BI_ATOMIC_ADD_FETCH, 0, "s." }, { "__sync_sub_and_fetch", BI_ATOMIC_SUB_FETCH, 0, "s." },
 	{ "__sync_and_and_fetch", BI_ATOMIC_AND_FETCH, 0, "s." }, { "__sync_or_and_fetch", BI_ATOMIC_OR_FETCH, 0, "s." },
 	{ "__sync_xor_and_fetch", BI_ATOMIC_XOR_FETCH, 0, "s." },
+	{ "__sync_fetch_and_nand", BI_ATOMIC_FETCH_NAND, 0, "s." }, { "__sync_nand_and_fetch", BI_ATOMIC_NAND_FETCH, 0, "s." },
+	/* int and unsigned only (clang: volatile int * / unsigned *): "si", "su" */
+	{ "__sync_fetch_and_max", BI_ATOMIC_FETCH_MAX, 0, "si" }, { "__sync_fetch_and_min", BI_ATOMIC_FETCH_MIN, 0, "si" },
+	{ "__sync_fetch_and_umax", BI_ATOMIC_FETCH_MAX, 0, "su" }, { "__sync_fetch_and_umin", BI_ATOMIC_FETCH_MIN, 0, "su" },
 	{ "__sync_lock_test_and_set", BI_ATOMIC_EXCHANGE_N, 0, "s." },
 	{ "__sync_val_compare_and_swap", BI_SYNC_VAL_CAS, 0, "s." },
 	{ "__sync_bool_compare_and_swap", BI_SYNC_BOOL_CAS, 0, "s." },
@@ -133,6 +141,8 @@ static const builtin builtins[] = {
 	SYNC_N("__sync_and_and_fetch", BI_ATOMIC_AND_FETCH),
 	SYNC_N("__sync_or_and_fetch", BI_ATOMIC_OR_FETCH),
 	SYNC_N("__sync_xor_and_fetch", BI_ATOMIC_XOR_FETCH),
+	SYNC_N("__sync_fetch_and_nand", BI_ATOMIC_FETCH_NAND),
+	SYNC_N("__sync_nand_and_fetch", BI_ATOMIC_NAND_FETCH),
 	SYNC_N("__sync_lock_test_and_set", BI_ATOMIC_EXCHANGE_N),
 	SYNC_N("__sync_val_compare_and_swap", BI_SYNC_VAL_CAS),
 	SYNC_N("__sync_bool_compare_and_swap", BI_SYNC_BOOL_CAS),
@@ -149,6 +159,13 @@ static const builtin builtins[] = {
 	{ "__c11_atomic_fetch_and", BI_ATOMIC_FETCH_AND, 0, "v." },
 	{ "__c11_atomic_fetch_or", BI_ATOMIC_FETCH_OR, 0, "v." },
 	{ "__c11_atomic_fetch_xor", BI_ATOMIC_FETCH_XOR, 0, "v." },
+	{ "__c11_atomic_fetch_nand", BI_ATOMIC_FETCH_NAND, 0, "v." },
+	{ "__c11_atomic_fetch_max", BI_ATOMIC_FETCH_MAX, 0, "v." },
+	{ "__c11_atomic_fetch_min", BI_ATOMIC_FETCH_MIN, 0, "v." },
+	/* (p, expected, desired, success, failure): __atomic_compare_exchange_n with weak inserted ("vc") */
+	{ "__c11_atomic_compare_exchange_strong", BI_ATOMIC_CMPXCHG_N, 0, "vc" },
+	{ "__c11_atomic_compare_exchange_weak", BI_ATOMIC_CMPXCHG_N, 0, "vc" },
+	{ "__c11_atomic_is_lock_free", BI_ATOMIC_LOCK_FREE, 1, "bz" },
 	{ "__c11_atomic_init", BI_ATOMIC_STORE_N, 0, "s." },
 	{ "__c11_atomic_thread_fence", BI_ATOMIC_THREAD_FENCE, 0, "vi" },
 	{ "__c11_atomic_signal_fence", BI_ATOMIC_SIGNAL_FENCE, 0, "vi" },
@@ -444,6 +461,7 @@ VPRIV uint32_t args_list(cc *c, vec *args)
 			vpush(c, args, assign_expr(c));
 		while (accept(c, T_COMMA));
 	}
+	c->args_rp = tok(c)->loc;
 	expect(c, T_RPAREN, "')'");
 	return args->n;
 }
@@ -562,7 +580,8 @@ static uint32_t atomic_call(cc *c, const builtin *b, uint32_t loc)
 		[BI_ATOMIC_EXCHANGE - BI_ATOMIC_LOAD_N] = 4, [BI_ATOMIC_CMPXCHG - BI_ATOMIC_LOAD_N] = 6,
 	};
 	int id = b->id, want = id <= BI_ATOMIC_CMPXCHG ? nargs[id - BI_ATOMIC_LOAD_N] :
-			       id == BI_SYNC_VAL_CAS || id == BI_SYNC_BOOL_CAS ? 4 : id == BI_SYNC_SYNCHRONIZE ? 1 : 3;
+			       id == BI_SYNC_VAL_CAS || id == BI_SYNC_BOOL_CAS ? 4 : id == BI_SYNC_SYNCHRONIZE ? 1 :
+			       id == BI_ATOMIC_TEST_AND_SET || id == BI_ATOMIC_CLEAR ? 2 : 3;
 	vec args;
 	qty pt, t, rt = prim(TY_VOID), tp;
 
@@ -583,6 +602,18 @@ static uint32_t atomic_call(cc *c, const builtin *b, uint32_t loc)
 	}
 	if (b->sig[0] == 's' && (int)args.n == want - 1)	/* __sync_*: sequentially consistent */
 		vpush(c, &args, mk_int(c, 5, prim(TY_INT), loc));
+	if (b->sig[1] == 'c' && args.n == 5) {	/* __c11_atomic_compare_exchange_*: weak goes before the orders */
+		vpush(c, &args, args.v[4]);
+		args.v[4] = args.v[3];
+		args.v[3] = mk_int(c, 0, prim(TY_INT), loc);
+	}
+	if (b->sig[0] == 's' && (id == BI_ATOMIC_FETCH_NAND || id == BI_ATOMIC_NAND_FETCH))
+	{
+		pp_span r = { loc, pp_tok_end(c->p, loc) };	/* the builtin's name */
+
+		cc_warnx(c, "sync-fetch-and-nand-semantics-changed", true, NULL, c->args_rp, &r, 1, NULL, 0,
+			 "the semantics of this intrinsic changed with GCC version 4.4 - the newer semantics are provided here");
+	}
 	if ((int)args.n != want) {
 		cc_error(c, loc, "too %s arguments to function call", (int)args.n < want ? "few" : "many");
 		return mk_int(c, 0, prim(TY_INT), loc);
@@ -591,6 +622,27 @@ static uint32_t atomic_call(cc *c, const builtin *b, uint32_t loc)
 	if (!is_ptr(c, pt)) {
 		cc_error(c, loc, "address argument to atomic builtin must be a pointer");
 		return mk_int(c, 0, prim(TY_INT), loc);
+	}
+	if (b->sig[1] == 'i' || b->sig[1] == 'u') {	/* __sync_fetch_and_{,u}{max,min}: volatile int * / unsigned * */
+		qty it = prim(b->sig[1] == 'i' ? TY_INT : TY_UINT);
+
+		args.v[0] = convert(c, args.v[0], ty_ptr(c, (it | Q_VOLATILE)));
+		pt = N(args.v[0])->ty;
+	}
+	if (id == BI_ATOMIC_TEST_AND_SET || id == BI_ATOMIC_CLEAR) {
+		/* (p, order) on the byte at p: __atomic_exchange_n(p, 1, o) != 0 / __atomic_store_n(p, 0, o) */
+		qty bt = prim(TY_UCHAR);
+		uint32_t r;
+		vec a;
+
+		vinit(&a);
+		vpush(c, &a, cast_node(c, args.v[0], ty_ptr(c, (bt | (QQ(T(c, pt)->base) & Q_VOLATILE))), CK_NOP));
+		vpush(c, &a, mk_int(c, id == BI_ATOMIC_CLEAR ? 0 : 1, bt, loc));
+		vpush(c, &a, convert(c, args.v[1], prim(TY_INT)));
+		if (id == BI_ATOMIC_CLEAR)
+			return mk_builtin(c, BI_ATOMIC_STORE_N, prim(TY_VOID), loc, &a);
+		r = mk_builtin(c, BI_ATOMIC_EXCHANGE_N, bt, loc, &a);
+		return convert(c, r, prim(TY_BOOL));
 	}
 	t = QUNQ(T(c, pt)->base);
 	tp = ty_ptr(c, t);
@@ -634,6 +686,18 @@ static uint32_t atomic_call(cc *c, const builtin *b, uint32_t loc)
 		args.v[1] = convert(c, args.v[1], t);
 		args.v[2] = convert(c, args.v[2], t);
 		rt = id == BI_SYNC_VAL_CAS ? t : prim(TY_BOOL);
+		break;
+	case BI_ATOMIC_FETCH_MAX: case BI_ATOMIC_FETCH_MIN: case BI_ATOMIC_MAX_FETCH: case BI_ATOMIC_MIN_FETCH:
+		if (!is_integer(c, t) || KIND(c, t) == TY_BOOL)	/* floating max/min: not supported yet */
+			cc_error(c, loc, "address argument to atomic operation must be a pointer to integer");
+		args.v[1] = convert(c, args.v[1], t);
+		rt = t;
+		break;
+	case BI_ATOMIC_FETCH_NAND: case BI_ATOMIC_NAND_FETCH:
+		if (!is_integer(c, t))
+			cc_error(c, loc, "address argument to atomic operation must be a pointer to integer");
+		args.v[1] = convert(c, args.v[1], t);
+		rt = t;
 		break;
 	default:	/* fetch_op / op_fetch */
 		if (!is_integer(c, t) && !is_ptr(c, t))
@@ -819,7 +883,9 @@ VPRIV uint32_t builtin_call(cc *c, const builtin *b, uint32_t loc)
 	case BI_ATOMIC_LOAD: case BI_ATOMIC_STORE: case BI_ATOMIC_EXCHANGE: case BI_ATOMIC_CMPXCHG:
 	case BI_ATOMIC_FETCH_ADD: case BI_ATOMIC_FETCH_SUB: case BI_ATOMIC_FETCH_AND: case BI_ATOMIC_FETCH_OR:
 	case BI_ATOMIC_FETCH_XOR: case BI_ATOMIC_ADD_FETCH: case BI_ATOMIC_SUB_FETCH: case BI_ATOMIC_AND_FETCH:
-	case BI_ATOMIC_OR_FETCH: case BI_ATOMIC_XOR_FETCH:
+	case BI_ATOMIC_OR_FETCH: case BI_ATOMIC_XOR_FETCH: case BI_ATOMIC_FETCH_NAND: case BI_ATOMIC_FETCH_MAX:
+	case BI_ATOMIC_FETCH_MIN: case BI_ATOMIC_NAND_FETCH: case BI_ATOMIC_MAX_FETCH: case BI_ATOMIC_MIN_FETCH:
+	case BI_ATOMIC_TEST_AND_SET: case BI_ATOMIC_CLEAR:
 	case BI_SYNC_VAL_CAS: case BI_SYNC_BOOL_CAS: case BI_SYNC_LOCK_RELEASE: case BI_SYNC_SYNCHRONIZE:
 		return atomic_call(c, b, loc);
 	case BI_CONJ: case BI_CREAL: case BI_CIMAG: {
