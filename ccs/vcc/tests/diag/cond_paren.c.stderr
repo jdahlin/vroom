@@ -1,0 +1,22 @@
+cond_paren.c:4:5: error: expected '(' after 'if'
+    4 |         if x > 0)
+      |            ^
+cond_paren.c:6:8: error: expected '(' after 'while'
+    6 |         while x)
+      |               ^
+cond_paren.c:8:6: error: expected '(' after 'for'
+    8 |         for x = 0; x < 3; x++)
+      |             ^
+cond_paren.c:8:15: warning: relational comparison result unused [-Wunused-comparison]
+    8 |         for x = 0; x < 3; x++)
+      |                    ~~^~~
+cond_paren.c:8:23: error: extraneous ')' before ';'
+    8 |         for x = 0; x < 3; x++)
+      |                              ^
+cond_paren.c:14:9: error: expected '(' after 'switch'
+   14 |         switch x) { default: break; }
+      |                ^
+cond_paren.c:15:16: error: expected '(' after 'while'
+   15 |         do x++; while x < 9);
+      |                       ^
+1 warning and 6 errors generated.

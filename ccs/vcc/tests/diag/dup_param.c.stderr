@@ -1,0 +1,10 @@
+dup_param.c:1:18: error: redefinition of parameter 'a'
+    1 | int f(int a, int a) { return a; }
+      |           -      ^
+      |           |
+      |           previous declaration is here
+dup_param.c:1:11: note: previous declaration is here
+dup_param.c:1:18: warning: omitting the parameter name in a function definition is a C23 extension [-Wc23-extensions]
+    1 | int f(int a, int a) { return a; }
+      |                  ^
+1 warning and 1 error generated.

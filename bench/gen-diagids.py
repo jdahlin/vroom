@@ -1,0 +1,166 @@
+#!/usr/bin/env python3
+"""
+ccs/vcc/pp/diagids.inc: the id of every vcc diagnostic (PLAN-diag.md D1.1, D1.3).
+
+Each format string a diagnostic call in vcc passes (found as in
+bench/vcc-diagcov.py) gets an id: the name of the clang diagnostic it
+matches (clang's .td files, bench/clangdiag.py), or, when clang has none,
+`vcc_` and the format's words.  The table is checked in, like ppdata*.inc:
+the build needs no clang and no .td files.  pp/diag.c looks a record's
+format up in it (binary search, only on the error path) and keeps the id.
+
+  bench/gen-diagids.py           regenerate ccs/vcc/pp/diagids.inc
+  bench/gen-diagids.py --check   exit 1 if it is out of date (lager 2: every
+                                 format has an id, every clang id exists)
+  bench/gen-diagids.py --list    format -> id, with the call sites
+"""
+import importlib.util, os, re, sys
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import clangdiag
+
+R = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+OUT = f'{R}/ccs/vcc/pp/diagids.inc'
+spec = importlib.util.spec_from_file_location('diagcov', f'{R}/bench/vcc-diagcov.py')
+cov = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(cov)
+
+# a few formats the text matcher gets wrong or cannot see: format -> id
+# (None: the call site sets the id itself, the format serves several)
+PINNED = {
+    'expanded from macro \'%.*s\'': 'note_macro_expansion_here',
+    'too many errors emitted, stopping now [-ferror-limit=]': 'fatal_too_many_errors',
+    '%.*s': None,
+    "%s%sinitializing '%s' with an expression of type '%s'%s": None,
+    "%s%spassing '%s' to parameter of type '%s'%s": None,
+    "%s%sreturning '%s' from a function with result type '%s'%s": None,
+    "%s%sassigning to '%s' from '%s'%s": None,
+    "passing '%s' to parameter of incompatible type '%s'": 'err_typecheck_convert_incompatible',
+    "initializing '%s' with an expression of incompatible type '%s'": 'err_typecheck_convert_incompatible',
+    "returning '%s' from a function with incompatible result type '%s'": 'err_typecheck_convert_incompatible',
+    "assigning to '%s' from incompatible type '%s'": 'err_typecheck_convert_incompatible',
+    'initializing with an expression of incompatible type': 'err_typecheck_convert_incompatible',
+    '#if with no expression': 'err_pp_expected_value_in_expr',
+    "expected ':' in preprocessor expression": 'err_expected',
+    "missing ')' after 'defined'": 'err_pp_expected_after',
+    "missing ')' after __has_include": 'err_pp_expected_after',
+    "missing '(' after __has_include": 'err_pp_expected_after',
+    "missing '(' after feature-test macro": 'err_pp_expected_after',
+    'directive in macro arguments ignored': 'ext_embedded_directive',
+}
+
+
+# ids set at call sites (d->id = "..."), found in the sources
+def explicit_ids():
+    got = set()
+    for d in cov.DIRS:
+        for root, _, files in os.walk(f'{cov.V}/{d}'):
+            for f in files:
+                if f.endswith('.c'):
+                    src = open(os.path.join(root, f), errors='replace').read()
+                    got |= set(re.findall(r'->id = "(\w+)"', src))
+                    got |= {x for p in re.findall(r'->id = [^;]*\? "(\w+)" : "(\w+)"', src) for x in p}
+                    for m in re.finditer(r'conv_error\(c, n, to, "[^"]*", "(\w+)"', src):
+                        got.add(m.group(1))
+    return got
+
+
+EXPLICIT = set()
+
+
+def cstr(s):
+    out = []
+    for ch in s.encode():
+        c = chr(ch)
+        if c in '"\\':
+            out.append('\\' + c)
+        elif 32 <= ch < 127:
+            out.append(c)
+        else:
+            out.append(f'\\{ch:03o}')
+    return '"' + ''.join(out) + '"'
+
+
+def slug(fmt, used):
+    s = cov.normalize(fmt).replace(cov.MARK, ' ')
+    w = re.findall(r'[A-Za-z0-9]+', s.lower())
+    base = 'vcc_' + '_'.join(w[:7] or ['diag'])
+    n, i = base, 2
+    while n in used:
+        n, i = f'{base}_{i}', i + 1
+    return n
+
+
+def assign():
+    diags, groups, subst = clangdiag.load()
+    tbl = cov.matcher(diags, subst)
+    ids, sites, kinds = {}, {}, {}
+    for m in cov.vcc_messages():
+        f = m['fmt']
+        if f is None:
+            continue
+        sites.setdefault(f, []).append(m['where'])
+        kinds.setdefault(f, m['kind'])
+    used = set()
+    for f in sorted(sites):
+        if f in PINNED:
+            ids[f] = PINNED[f]
+            continue
+        s = cov.normalize(f)
+        hits = cov.match(s, tbl)
+        if len(hits) > 1:
+            hits = [cov.best(s, kinds[f], hits, diags)]
+        if not hits:
+            p = cov.partial(s, tbl, diags)
+            hits = [p] if p else []
+        ids[f] = hits[0] if hits else None
+    for f in sorted(sites):		# vcc_* names after the clang ones, deterministic
+        if ids[f] is None and f not in PINNED:
+            ids[f] = slug(f, used)
+            used.add(ids[f])
+    return ids, sites, diags
+
+
+def render(ids, diags):
+    names = sorted(set(i for i in ids.values() if i) | EXPLICIT)
+    out = ['/* generated by bench/gen-diagids.py from clang %s\'s Diagnostic*.td and vcc\'s sources: do not edit */'
+           % clangdiag.clang_version(), '',
+           '/* the ids: name, clang\'s class ("vcc": vcc\'s own), -W group ("": none) */']
+    for n in names:
+        r = diags.get(n)
+        out.append(f'DID({n}, {cstr(r["class"] if r else "vcc")}, {cstr((r and r["group"]) or "")})')
+    out += ['', '/* every format vcc reports, sorted by strcmp: its id */']
+    for f in sorted(ids, key=lambda x: x.encode()):
+        if ids[f] is None:
+            continue
+        out.append(f'DFMT({cstr(f)}, {ids[f]})')
+    return '\n'.join(out) + '\n'
+
+
+def main():
+    a = sys.argv[1:]
+    ids, sites, diags = assign()
+    EXPLICIT.update(explicit_ids())
+    text = render(ids, diags)
+    if '--list' in a:
+        for f in sorted(ids):
+            print(f'{ids[f] or "(call site)":48} {f!r:70} {" ".join(sites[f])}')
+        return 0
+    if '--check' in a:
+        cur = open(OUT).read() if os.path.exists(OUT) else ''
+        bad = [i for i in set(ids.values()) | EXPLICIT if i and not i.startswith('vcc_') and i not in diags]
+        if bad:
+            print(f'gen-diagids: ids not in clang\'s table: {", ".join(sorted(bad))}')
+            return 1
+        if cur != text:
+            print('gen-diagids: ccs/vcc/pp/diagids.inc is out of date: run bench/gen-diagids.py')
+            return 1
+        nv = sum(1 for i in set(ids.values()) if i and i.startswith('vcc_'))
+        print(f'gen-diagids: {len(ids)} formats, {len(set(ids.values()))} ids ({nv} vcc_*), up to date')
+        return 0
+    open(OUT, 'w').write(text)
+    print(f'{OUT}: {len(ids)} formats, {len(set(ids.values()))} ids')
+    return 0
+
+
+if __name__ == '__main__':
+    sys.exit(main())

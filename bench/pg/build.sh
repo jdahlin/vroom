@@ -76,7 +76,25 @@ build() {
 		{ grep -A5 '^FAILED' "$W/build-pg-$V.build.log" | head -40; exit 1; }
 	echo "build: $(grep -c 'Compiling C object' "$W/build-pg-$V.build.log") C files, $(( $(date +%s) - t0 )) s"
 	[ -f "$W/build-pg-$V.fail.jsonl" ] && echo "vcc failed on $(wc -l < "$W/build-pg-$V.fail.jsonl") files (clang compiled them)"
+	warnings
 	meson install -C "$B" -q > /dev/null
+}
+
+# the compiler's warnings (file:line:col: message, flags and colors cut); for vcc, the ones
+# the clang build does not give: vcc must print no warning clang does not
+wlist() {
+	grep 'warning:' "$1" | sed -e $'s/\x1b\[[0-9;]*m//g' -e $'s/\x1b\]8;;[^\x1b]*\x1b\\\\//g' -e 's/ \[[^]]*\]$//' | sort -u
+}
+
+warnings() {
+	local L="$W/build-pg-$V.build.log" C="$W/build-pg-clang.build.log" n
+	n=$(wlist "$L" | wc -l | tr -d ' ')
+	if [ "$V" = clang ] || [ ! -f "$C" ]; then
+		echo "warnings: $n"
+		return
+	fi
+	echo "warnings: $n, not from clang: $(comm -13 <(wlist "$C") <(wlist "$L") | wc -l | tr -d ' ')"
+	comm -13 <(wlist "$C") <(wlist "$L") | head -20
 }
 
 tests() {

@@ -1,0 +1,4 @@
+invalid_operands.c:4:11: error: invalid operands to binary expression ('struct s' and 'int')
+    4 |         return a + 1;
+      |                ~ ^ ~
+1 error generated.

@@ -1,0 +1,19 @@
+paren_ranges.c:2:24: warning: division by zero is undefined [-Wdivision-by-zero]
+    2 | int f(int x){ return x / (0) + x % (1-1) + (x << (64)); }
+      |                        ^ ~~~
+paren_ranges.c:2:34: warning: remainder by zero is undefined [-Wdivision-by-zero]
+    2 | int f(int x){ return x / (0) + x % (1-1) + (x << (64)); }
+      |                                  ^ ~~~~~
+paren_ranges.c:2:47: warning: shift count >= width of type [-Wshift-count-overflow]
+    2 | int f(int x){ return x / (0) + x % (1-1) + (x << (64)); }
+      |                                               ^  ~~~~
+      = help: 'int' is 32 bits wide: a shift by 32 or more is undefined
+paren_ranges.c:4:30: warning: format specifies type 'int' but the argument has type 'long' [-Wformat]
+    4 | void p(long v){ printf("%d", (v)); printf("%d", ((v))); }
+      |                         ~~   ^~~
+      |                         %ld
+paren_ranges.c:4:49: warning: format specifies type 'int' but the argument has type 'long' [-Wformat]
+    4 | void p(long v){ printf("%d", (v)); printf("%d", ((v))); }
+      |                                            ~~   ^~~~~
+      |                                            %ld
+5 warnings generated.

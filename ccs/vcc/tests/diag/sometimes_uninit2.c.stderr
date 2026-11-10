@@ -1,0 +1,74 @@
+sometimes_uninit2.c:3:64: warning: variable 'y' is used uninitialized whenever switch case is taken [-Wsometimes-uninitialized]
+    3 | int t1(int c) { int y; switch (c) { case 1: y = 1; break; case 2: break; } return y; }
+      |                                                                ^                  - uninitialized use occurs here
+sometimes_uninit2.c:3:83: note: uninitialized use occurs here
+sometimes_uninit2.c:3:22: note: initialize the variable 'y' to silence this warning
+    3 | int t1(int c) { int y; switch (c) { case 1: y = 1; break; case 2: break; } return y; }
+      |                      ^
+      |                       = 0
+sometimes_uninit2.c:4:59: warning: variable 'y' is used uninitialized whenever switch default is taken [-Wsometimes-uninitialized]
+    4 | int t2(int c) { int y; switch (c) { case 1: y = 1; break; default: break; } return y; }
+      |                                                           ^~~~~~~                  - uninitialized use occurs here
+sometimes_uninit2.c:4:84: note: uninitialized use occurs here
+sometimes_uninit2.c:4:22: note: initialize the variable 'y' to silence this warning
+    4 | int t2(int c) { int y; switch (c) { case 1: y = 1; break; default: break; } return y; }
+      |                      ^
+      |                       = 0
+sometimes_uninit2.c:7:35: warning: variable 'y' is used uninitialized whenever '&&' condition is false [-Wsometimes-uninitialized]
+    7 | int t5(int c, int d) { int y; if (c && (y = d)) g(0); return y; }
+      |                                   ^----                      - uninitialized use occurs here
+      |                                   |
+      |                                   remove the '&&' if its condition is always true
+sometimes_uninit2.c:7:62: note: uninitialized use occurs here
+sometimes_uninit2.c:7:35: note: remove the '&&' if its condition is always true
+sometimes_uninit2.c:7:29: note: initialize the variable 'y' to silence this warning
+    7 | int t5(int c, int d) { int y; if (c && (y = d)) g(0); return y; }
+      |                             ^
+      |                              = 0
+sometimes_uninit2.c:8:35: warning: variable 'y' is used uninitialized whenever '||' condition is true [-Wsometimes-uninitialized]
+    8 | int t6(int c, int d) { int y; if (c || (y = d)) g(0); return y; }
+      |                                   ^----                      - uninitialized use occurs here
+      |                                   |
+      |                                   remove the '||' if its condition is always false
+sometimes_uninit2.c:8:62: note: uninitialized use occurs here
+sometimes_uninit2.c:8:35: note: remove the '||' if its condition is always false
+sometimes_uninit2.c:8:29: note: initialize the variable 'y' to silence this warning
+    8 | int t6(int c, int d) { int y; if (c || (y = d)) g(0); return y; }
+      |                             ^
+      |                              = 0
+sometimes_uninit2.c:9:24: warning: variable 'y' is used uninitialized whenever '?:' condition is false [-Wsometimes-uninitialized]
+    9 | int t7(int c) { int y; c ? (y = 1) : 0; return y; }
+      |                        ^---       ----         - uninitialized use occurs here
+      |                        |
+      |                        remove the '?:' if its condition is always true
+sometimes_uninit2.c:9:48: note: uninitialized use occurs here
+sometimes_uninit2.c:9:24: note: remove the '?:' if its condition is always true
+sometimes_uninit2.c:9:22: note: initialize the variable 'y' to silence this warning
+    9 | int t7(int c) { int y; c ? (y = 1) : 0; return y; }
+      |                      ^
+      |                       = 0
+sometimes_uninit2.c:10:72: warning: variable 'y' is used uninitialized whenever switch case is taken [-Wsometimes-uninitialized]
+   10 | int t8(int c) { int y; switch (c) { case 1: case 2: y = 1; break; case 3: case 4: g(0); break; default: y = 3; } return y; }
+      |                                                                        ^                                                - uninitialized use occurs here
+sometimes_uninit2.c:10:121: note: uninitialized use occurs here
+sometimes_uninit2.c:10:80: warning: variable 'y' is used uninitialized whenever switch case is taken [-Wsometimes-uninitialized]
+   10 | int t8(int c) { int y; switch (c) { case 1: case 2: y = 1; break; case 3: case 4: g(0); break; default: y = 3; } return y; }
+      |                                                                                ^                                        - uninitialized use occurs here
+sometimes_uninit2.c:10:121: note: uninitialized use occurs here
+sometimes_uninit2.c:10:22: note: initialize the variable 'y' to silence this warning
+   10 | int t8(int c) { int y; switch (c) { case 1: case 2: y = 1; break; case 3: case 4: g(0); break; default: y = 3; } return y; }
+      |                      ^
+      |                       = 0
+sometimes_uninit2.c:13:85: warning: variable 'y' is used uninitialized whenever switch case is taken [-Wsometimes-uninitialized]
+   13 | int u2(int c) { int y; switch (c) { case 1: y = 1; break; case 3: g(0); break; case 4: break; } return y; }
+      |                                                                                     ^                  - uninitialized use occurs here
+sometimes_uninit2.c:13:104: note: uninitialized use occurs here
+sometimes_uninit2.c:13:64: warning: variable 'y' is used uninitialized whenever switch case is taken [-Wsometimes-uninitialized]
+   13 | int u2(int c) { int y; switch (c) { case 1: y = 1; break; case 3: g(0); break; case 4: break; } return y; }
+      |                                                                ^                                       - uninitialized use occurs here
+sometimes_uninit2.c:13:104: note: uninitialized use occurs here
+sometimes_uninit2.c:13:22: note: initialize the variable 'y' to silence this warning
+   13 | int u2(int c) { int y; switch (c) { case 1: y = 1; break; case 3: g(0); break; case 4: break; } return y; }
+      |                      ^
+      |                       = 0
+9 warnings generated.

@@ -19,6 +19,19 @@ static void fscr_grow(fscratch *x, uint32_t need)
 	x->cap = cap;
 }
 
+/* clang: a member declaration not ended by ';': a warning before the '}' (on as if it
+   were there), else an error and the rest of the member skipped */
+static __attribute__((noinline, cold)) void member_semi(cc *c)
+{
+	uint32_t e = pp_tok_end(c->p, c->prevloc);
+	pp_fixit fx = { e, e, ";", semi_app(c) };
+	bool end = is(c, T_RBRACE);
+
+	report(c, end ? "warning" : "error", e, NULL, 0, &fx, 1, "expected ';' at end of declaration list");
+	if (!end)
+		skip_semi(c);
+}
+
 __attribute__((noinline)) VPRIV void struct_body(cc *c, uint32_t ti)
 {
 	fscratch *x = &tl_fscr;
@@ -31,19 +44,44 @@ __attribute__((noinline)) VPRIV void struct_body(cc *c, uint32_t ti)
 	c->tags[ti].flags |= RF_BEING_DEFINED;
 	c->in_struct++;
 	expect(c, T_LBRACE, "'{'");
+	recov rv;
+
+	if (REC_ARM(c, &rv)) {
+		rec_restore(c, &rv, REC_BLOCK);	/* after a parse error: on with the next member */
+		nf = x->n - base;
+	}
 	while (!is(c, T_RBRACE)) {
 		dspec ds;
 
-		if (accept(c, T_SEMI))
+		if (is(c, T_EOF)) {
+			cc_error(c, pp_tok_end(c->p, c->prevloc), "expected '}'");
+			longjmp(c->bail, 1);
+		}
+		if (is(c, T_SEMI)) {
+			EXT_WARN_DEL(c, ";", tok(c)->flags, "extra-semi", w_ped, tok(c)->loc, "extra ';' inside a %s",
+				 c->tags[ti].flags & RF_UNION ? "union" : "struct");
+			next(c);
 			continue;
+		}
 		if (iskw(c, KW__Static_assert)) {
 			static_assert_decl(c);
 			continue;
 		}
 		if (!decl_specs(c, &ds, false)) {
+			int k = peek(c, 1)->kind;
+
 			if (!is(c, T_IDENT))
 				fatal(c, tok(c)->loc, "expected member declaration");
-			unknown_type(c, &ds);
+			if (!kwof(tok(c)) && (k == T_COMMA || k == T_SEMI || k == T_COLON)) {
+				/* clang: "struct { a, b; }": int members */
+				cc_error(c, tok(c)->loc, "type name requires a specifier or qualifier");
+				memset(&ds, 0, sizeof(ds));
+				ds.ty = prim(TY_INT);
+				ds.loc = tok(c)->loc;
+				ds.invalid = true;
+			} else {
+				unknown_type(c, &ds, false);
+			}
 		}
 		if (is(c, T_SEMI)) {
 			/* anonymous struct/union member; with -fms-anonymous-structs also a
@@ -80,17 +118,25 @@ __attribute__((noinline)) VPRIV void struct_body(cc *c, uint32_t ti)
 			f.loc = d.loc;
 			if (accept(c, T_COLON)) {
 				i128 w;
+				uint32_t wn = 0;
+				pp_span wr;
 
-				const_expr(c, &w, NULL);
-				if (!is_integer(c, t))
-					cc_error(c, d.loc, "bit-field has non-integral type");
-				if (w < 0)
-					cc_error(c, d.loc, "bit-field has negative width (%lld)", (long long)w), w = 0;
+				const_expr(c, &w, &wn);
+				wr = wn ? rng(c, wn) : (pp_span){ d.loc, d.loc };
+				if (!complete(c, t))
+					;	/* clang: only "field has incomplete type", below */
+				else if (!is_integer(c, t))
+					report(c, "error", d.loc, &wr, 1, NULL, 0, "bit-field '%.*s' has non-integral type '%s'", IDF(d.name),
+					       tyname(c, t));
+				if (!complete(c, t))
+					w = 0;
+				else if (w < 0)
+					cc_error(c, d.loc, "bit-field '%.*s' has negative width (%lld)", IDF(d.name), (long long)w), w = 0;
 				else if ((uint64_t)w > ty_size(c, t) * 8)
 					cc_error(c, d.loc, "width of bit-field '%.*s' (%lld bits) exceeds the width of its type (%llu bits)",
 					      IDF(d.name), (long long)w, (unsigned long long)ty_size(c, t) * 8), w = 0;
 				else if (w == 0 && d.name)
-					cc_error(c, d.loc, "named bit-field has zero width");
+					report(c, "error", d.loc, &wr, 1, NULL, 0, "named bit-field '%.*s' has zero width", IDF(d.name));
 				f.bitfield = 1;
 				f.width = (uint16_t)w;
 			}
@@ -105,10 +151,15 @@ __attribute__((noinline)) VPRIV void struct_body(cc *c, uint32_t ti)
 			f.ty = t;
 			f.tdef = decl_tdef(c, ds.tdef, ds.ty, t);
 			f.counted_by = d.at.counted_by;
+			f.depr = unlikely(d.at.depr) ? new_attrs(c, &d.at) : 0;
 			if (is_func(c, t))
-				cc_error(c, d.loc, "field has function type");
-			else if (!complete(c, t) && !(is_array(c, t) && (T(c, t)->flags & TF_INCOMPLETE)))
-				cc_error(c, d.loc, "field has incomplete type");
+				cc_error(c, d.loc, "field '%.*s' declared as a function", IDF(d.name));
+			else if (!ds.invalid && !complete(c, t) && !(is_array(c, t) && (T(c, t)->flags & TF_INCOMPLETE))) {
+				cc_error(c, d.loc, "field has incomplete type '%s'", tyname(c, t));
+				fwd_note(c, t);
+				f.invalid = 1;
+			}
+			f.invalid |= ds.invalid;
 			if (nf >= (1u << 20))
 				fatal(c, d.loc, "too many members");
 			for (uint32_t i = 0; f.name && i < nf; i++)
@@ -126,8 +177,10 @@ __attribute__((noinline)) VPRIV void struct_body(cc *c, uint32_t ti)
 			if (!accept(c, T_COMMA))
 				break;
 		}
-		expect_semi(c, "at end of declaration");
+		if (unlikely(!accept(c, T_SEMI)))
+			member_semi(c);
 	}
+	REC_POP(c, &rv);
 	next(c);
 	c->in_struct--;
 	attribute_list(c, &post);
@@ -198,6 +251,13 @@ VPRIV void enum_body(cc *c, uint32_t ti, attrs *after)
 					cc_error(c, loc, "redefinition of '%.*s' as different kind of symbol", IDF(name));
 				note(c, c->syms[o].loc, "previous definition is here");
 			}
+		}
+		if (unlikely(v < INT32_MIN || v > INT32_MAX) && c->o->std != 23) {
+			char b[48];
+
+			i128s_(b, sizeof b, v);
+			EXT_WARN(c, "c23-extensions", w_ped, loc, "enumerator value which exceeds the range of 'int' is a C23 extension "
+				 "(%s is too %s)", b, v < 0 ? "small" : "large");
 		}
 		s = sym_new(c, S_ENUMCONST, name, v >= INT32_MIN && v <= INT32_MAX ? prim(TY_INT) :
 						 v >= 0 && v <= UINT32_MAX ? prim(TY_UINT) : v >= INT64_MIN && v <= INT64_MAX ? prim(CC_I64(c, false)) : prim(CC_I64(c, true)), loc);

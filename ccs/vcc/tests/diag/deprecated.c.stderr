@@ -1,0 +1,32 @@
+deprecated.c:6:22: warning: 'S' is deprecated [-Wdeprecated-declarations]
+    3 | struct __attribute__((deprecated)) S { int x; };
+      |                       - 'S' has been explicitly marked deprecated here
+  ...
+    6 | int h(void) { struct S *p = 0; T t = 0; w(); (void)w(); return f() + g + t + (p != 0); }
+      |                      ^
+deprecated.c:3:23: note: 'S' has been explicitly marked deprecated here
+deprecated.c:6:32: warning: 'T' is deprecated [-Wdeprecated-declarations]
+    4 | typedef int T __attribute__((deprecated));
+      |                              - 'T' has been explicitly marked deprecated here
+    5 | __attribute__((warn_unused_result)) int w(void);
+    6 | int h(void) { struct S *p = 0; T t = 0; w(); (void)w(); return f() + g + t + (p != 0); }
+      |                                ^
+deprecated.c:4:30: note: 'T' has been explicitly marked deprecated here
+deprecated.c:6:41: warning: ignoring return value of function declared with 'warn_unused_result' attribute [-Wunused-result]
+    6 | int h(void) { struct S *p = 0; T t = 0; w(); (void)w(); return f() + g + t + (p != 0); }
+      |                                         ^~~
+deprecated.c:6:64: warning: 'f' is deprecated [-Wdeprecated-declarations]
+    1 | __attribute__((deprecated)) int f(void);
+      |                - 'f' has been explicitly marked deprecated here
+  ...
+    6 | int h(void) { struct S *p = 0; T t = 0; w(); (void)w(); return f() + g + t + (p != 0); }
+      |                                                                ^
+deprecated.c:1:16: note: 'f' has been explicitly marked deprecated here
+deprecated.c:6:70: warning: 'g' is deprecated: use g2 [-Wdeprecated-declarations]
+    2 | __attribute__((deprecated("use g2"))) int g;
+      |                - 'g' has been explicitly marked deprecated here
+  ...
+    6 | int h(void) { struct S *p = 0; T t = 0; w(); (void)w(); return f() + g + t + (p != 0); }
+      |                                                                      ^
+deprecated.c:2:16: note: 'g' has been explicitly marked deprecated here
+5 warnings generated.

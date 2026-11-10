@@ -1,0 +1,29 @@
+format_typedef_expr.c:6:56: warning: format specifies type 'int' but the argument has type 'myl' (aka 'long') [-Wformat]
+    6 | void f(int i, myl v){ printf("%d %d %d %d %d %d %d\n", (myl)i, fn(), arr[1], ps->m, (v), v + 1, i ? v : v); }
+      |                               ~~                       ^~~~~~
+      |                               %ld
+format_typedef_expr.c:6:64: warning: format specifies type 'int' but the argument has type 'myl' (aka 'long') [-Wformat]
+    6 | void f(int i, myl v){ printf("%d %d %d %d %d %d %d\n", (myl)i, fn(), arr[1], ps->m, (v), v + 1, i ? v : v); }
+      |                                  ~~                            ^~~~
+      |                                  %ld
+format_typedef_expr.c:6:70: warning: format specifies type 'int' but the argument has type 'myl' (aka 'long') [-Wformat]
+    6 | void f(int i, myl v){ printf("%d %d %d %d %d %d %d\n", (myl)i, fn(), arr[1], ps->m, (v), v + 1, i ? v : v); }
+      |                                     ~~                               ^~~~~~
+      |                                     %ld
+format_typedef_expr.c:6:78: warning: format specifies type 'int' but the argument has type 'myl' (aka 'long') [-Wformat]
+    6 | void f(int i, myl v){ printf("%d %d %d %d %d %d %d\n", (myl)i, fn(), arr[1], ps->m, (v), v + 1, i ? v : v); }
+      |                                        ~~                                    ^~~~~
+      |                                        %ld
+format_typedef_expr.c:6:85: warning: format specifies type 'int' but the argument has type 'myl' (aka 'long') [-Wformat]
+    6 | void f(int i, myl v){ printf("%d %d %d %d %d %d %d\n", (myl)i, fn(), arr[1], ps->m, (v), v + 1, i ? v : v); }
+      |                                           ~~                                        ^~~
+      |                                           %ld
+format_typedef_expr.c:6:90: warning: format specifies type 'int' but the argument has type 'myl' (aka 'long') [-Wformat]
+    6 | void f(int i, myl v){ printf("%d %d %d %d %d %d %d\n", (myl)i, fn(), arr[1], ps->m, (v), v + 1, i ? v : v); }
+      |                                              ~~                                          ^~~~~
+      |                                              %ld
+format_typedef_expr.c:6:97: warning: format specifies type 'int' but the argument has type 'myl' (aka 'long') [-Wformat]
+    6 | void f(int i, myl v){ printf("%d %d %d %d %d %d %d\n", (myl)i, fn(), arr[1], ps->m, (v), v + 1, i ? v : v); }
+      |                                                 ~~                                              ^~~~~~~~~
+      |                                                 %ld
+7 warnings generated.

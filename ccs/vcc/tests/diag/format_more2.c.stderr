@@ -1,0 +1,77 @@
+format_more2.c:6:27: warning: format specifies type 'int' but the argument has type 'long' [-Wformat]
+    6 |   printf(gettext("%d\n"), l);
+      |                   ~~      ^
+      |                   %ld
+format_more2.c:7:25: warning: format specifies type 'char *' but the argument has type 'long' [-Wformat]
+    7 |   printf(mygt(1, "%s"), l);
+      |                   ~~    ^
+      |                   %ld
+format_more2.c:8:12: warning: length modifier 'I64' results in undefined behavior or no effect with 'd' conversion specifier [-Wformat]
+    8 |   printf("%I64d %w32d\n", l, l);
+      |           ~^~~~
+format_more2.c:8:27: warning: format specifies type '__int64' (aka 'long long') but the argument has type 'long' [-Wformat]
+    8 |   printf("%I64d %w32d\n", l, l);
+      |           ~~~~~           ^
+      |           %ld
+format_more2.c:8:19: warning: invalid conversion specifier '3' [-Wformat-invalid-specifier]
+    8 |   printf("%I64d %w32d\n", l, l);
+      |                 ~~^
+format_more2.c:8:30: warning: data argument not used by format string [-Wformat-extra-args]
+    8 |   printf("%I64d %w32d\n", l, l);
+      |          ~~~~~~~~~~~~~~~     ^
+format_more2.c:9:23: warning: format specifies type 'int' but the argument has type 'long' [-Wformat]
+    9 |   printf("%1$*2$d\n", l, w);
+      |           ~~~~~~~     ^
+      |           %1$*2$ld
+format_more2.c:10:14: warning: field width should have type 'int', but argument has type 'long' [-Wformat]
+   10 |   printf("%1$*2$d\n", w, l);
+      |           ~~~^~~~        ~
+format_more2.c:13:23: warning: format specifies type 'int' but the argument has type 'long' [-Wformat]
+   13 |   printf("%1$*2$d\n", l, w);
+      |           ~~~~~~~     ^
+      |           %1$*2$ld
+format_more2.c:14:14: warning: field width should have type 'int', but argument has type 'long' [-Wformat]
+   14 |   printf("%1$*2$d\n", w, l);
+      |           ~~~^~~~        ~
+format_more2.c:15:14: warning: field precision should have type 'int', but argument has type 'long' [-Wformat]
+   15 |   printf("%1$.*2$f %1$*2$.*3$f\n", 1.0, l, w);
+      |           ~~~^~~~~                      ~
+format_more2.c:16:14: warning: '*' specified field width is missing a matching 'int' argument [-Wformat]
+   16 |   printf("%1$*3$d\n", w, w);
+      |           ~~~^~~~
+format_more2.c:17:13: warning: field width should have type 'int', but argument has type 'long' [-Wformat]
+   17 |   printf("%*d\n", l, w);
+      |           ~~^     ~
+format_more2.c:19:34: warning: length modifier 'w' results in undefined behavior or no effect with 'd' conversion specifier [-Wformat]
+   19 | void f4(long l, int i){ printf("%wd|%w32d|%Id|%I32d|%I64x|%I6d|%Iz", i, i, i, i, i, i, i);}
+      |                                 ~^~
+format_more2.c:19:39: warning: invalid conversion specifier '3' [-Wformat-invalid-specifier]
+   19 | void f4(long l, int i){ printf("%wd|%w32d|%Id|%I32d|%I64x|%I6d|%Iz", i, i, i, i, i, i, i);}
+      |                                     ~~^
+format_more2.c:19:44: warning: length modifier 'I' results in undefined behavior or no effect with 'd' conversion specifier [-Wformat]
+   19 | void f4(long l, int i){ printf("%wd|%w32d|%Id|%I32d|%I64x|%I6d|%Iz", i, i, i, i, i, i, i);}
+      |                                           ~^~
+format_more2.c:19:73: warning: format specifies type '__int64' (aka 'long long') but the argument has type 'int' [-Wformat]
+   19 | void f4(long l, int i){ printf("%wd|%w32d|%Id|%I32d|%I64x|%I6d|%Iz", i, i, i, i, i, i, i);}
+      |                                           ~~~                           ^
+      |                                           %d
+format_more2.c:19:48: warning: length modifier 'I32' results in undefined behavior or no effect with 'd' conversion specifier [-Wformat]
+   19 | void f4(long l, int i){ printf("%wd|%w32d|%Id|%I32d|%I64x|%I6d|%Iz", i, i, i, i, i, i, i);}
+      |                                               ~^~~~
+format_more2.c:19:54: warning: length modifier 'I64' results in undefined behavior or no effect with 'x' conversion specifier [-Wformat]
+   19 | void f4(long l, int i){ printf("%wd|%w32d|%Id|%I32d|%I64x|%I6d|%Iz", i, i, i, i, i, i, i);}
+      |                                                     ~^~~~
+format_more2.c:19:79: warning: format specifies type 'unsigned __int64' (aka 'unsigned long long') but the argument has type 'int' [-Wformat]
+   19 | void f4(long l, int i){ printf("%wd|%w32d|%Id|%I32d|%I64x|%I6d|%Iz", i, i, i, i, i, i, i);}
+      |                                                     ~~~~~                     ^
+      |                                                     %x
+format_more2.c:19:61: warning: invalid conversion specifier '6' [-Wformat-invalid-specifier]
+   19 | void f4(long l, int i){ printf("%wd|%w32d|%Id|%I32d|%I64x|%I6d|%Iz", i, i, i, i, i, i, i);}
+      |                                                           ~~^
+format_more2.c:19:66: warning: invalid conversion specifier 'z' [-Wformat-invalid-specifier]
+   19 | void f4(long l, int i){ printf("%wd|%w32d|%Id|%I32d|%I64x|%I6d|%Iz", i, i, i, i, i, i, i);}
+      |                                                                ~~^
+format_more2.c:19:82: warning: data argument not used by format string [-Wformat-extra-args]
+   19 | void f4(long l, int i){ printf("%wd|%w32d|%Id|%I32d|%I64x|%I6d|%Iz", i, i, i, i, i, i, i);}
+      |                                ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~              ^
+23 warnings generated.

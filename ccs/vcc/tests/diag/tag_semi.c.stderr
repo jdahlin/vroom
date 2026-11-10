@@ -1,0 +1,17 @@
+tag_semi.c:3:20: error: expected ';' after struct
+    3 | struct A { int x; }
+      |                    ^
+      |                    ;
+tag_semi.c:5:28: error: expected ';' after union
+    5 | union U { int i; float f; }
+      |                            ^
+      |                            ;
+tag_semi.c:7:18: error: expected ';' after enum
+    7 | enum E { E0, E1 }
+      |                  ^
+      |                  ;
+tag_semi.c:9:9: error: expected ';' after struct
+    9 | struct B
+      |         ^
+      |         ;
+4 errors generated.

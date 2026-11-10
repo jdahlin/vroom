@@ -2,7 +2,7 @@
 #include "ccimpl.h"
 
 uint8_t kwclass[KW_END];
-uint16_t kwmap_gnu[KW_END], kwmap_c23[KW_END];
+uint16_t kwmap_gnu[KW_END], kwmap_c23[KW_END], kwmap_iso[KW_END];
 _Thread_local const uint16_t *kwmap = kwmap_gnu;
 
 VPRIV void init_keywords(void)
@@ -46,6 +46,9 @@ VPRIV void init_keywords(void)
 	kwmap_c23[KW_constexpr] = KW_constexpr;
 	kwclass[KW_constexpr] = KC_KW | KC_DECL;	/* (reached only through kwmap_c23) */
 	kwclass[KW_true] = kwclass[KW_false] = kwclass[KW_nullptr] = KC_KW;
+	/* -std=c89..c17: GNU's own spellings are identifiers (clang: typeof, asm) */
+	memcpy(kwmap_iso, kwmap_gnu, sizeof(kwmap_iso));
+	kwmap_iso[KW_typeof] = kwmap_iso[KW_asm] = 0;
 }
 
 static void pragma(cc *c, const ptok *t);
@@ -145,26 +148,137 @@ VPRIV const char *tokspell(const ptok *t, char *buf, size_t cap)
 }
 
 /* the failure path out of line: tokspell's buffer (a VLA) made every call set up a frame */
+/* clang's ExpectAndConsume: a missing punctuator is reported at the end of the
+   previous token, with the insertion as a fix-it (the closers of a delimiter pair
+   are expect_match: at the token, as clang's BalancedDelimiterTracker) */
 VPRIV __attribute__((noinline, cold, noreturn)) void expect_fail(cc *c, const char *what)
 {
+	size_t n = strlen(what);
+
+	if (n >= 3 && n <= 5 && what[0] == '\'' && what[n - 1] == '\'' && c->prevloc && !(c->prevflags & PF_MACRO)) {
+		uint32_t e = pp_tok_end(c->p, c->prevloc);
+		char *s = halloc(c, n - 1);
+		pp_fixit fx = { e, e, s, VDA_MAYBE };
+
+		memcpy(s, what + 1, n - 2), s[n - 2] = 0;
+		report(c, "error", e, NULL, 0, &fx, 1, "expected %s", what);
+		parse_jump(c);
+	}
 	fatal(c, c->tk[0].loc, "expected %s", what);
 	abort();
 }
 
+VPRIV __attribute__((noinline, cold, noreturn)) void expect_here_fail(cc *c, const char *what)
+{
+	report(c, "error", c->tk[0].loc, NULL, 0, NULL, 0, "expected %s", what);
+	parse_jump(c);
+}
+
+/* clang's "expected '(' after 'if'": at the token, for the statements' conditions */
+VPRIV __attribute__((noinline, cold, noreturn)) void lparen_fail(cc *c, const char *kw)
+{
+	report(c, "error", c->tk[0].loc, NULL, 0, NULL, 0, "expected '(' after '%s'", kw);
+	parse_jump(c);
+}
+
 /* "expected ';' after X": reported at the end of the previous token with a
-   fix-it, like clang; parsing goes on as if the ';' were there */
-VPRIV void expect_semi(cc *c, const char *after)
+   fix-it, like clang; parsing goes on as if the ';' were there.  True when the ';'
+   is missing and nothing stands in for it (clang's ExpectAndConsumeSemi failing) */
+/* a ';' inserted after the previous token: machine-applicable at the end of a line (the next
+   token starts one, and is no '{' that would begin a function's body), a guess otherwise
+   ("struct s a b", "int fint x)": the mutation corpus, D6) */
+VPRIV int semi_app(cc *c)
+{
+	return (c->tk[0].flags & TF_SOL) && c->tk[0].kind != T_LBRACE ? VDA_MACHINE : VDA_MAYBE;
+}
+
+VPRIV bool expect_semi(cc *c, const char *after)
 {
 	uint32_t e;
 	pp_fixit fx;
 
 	if (likely(c->tk[0].kind == T_SEMI)) {
 		next(c);
-		return;
+		return false;
+	}
+	if ((c->tk[0].kind == T_RPAREN || c->tk[0].kind == T_RSQUARE) && peek(c, 1)->kind == T_SEMI) {
+		/* clang: "f);": the stray ')' (or ']') and the ';' are consumed */
+		pp_fixit fx = { c->tk[0].loc, c->tk[0].loc + 1, "", VDA_MAYBE };	/* (or a '(' was lost) */
+
+		report(c, "error", c->tk[0].loc, NULL, 0, &fx, !(c->tk[0].flags & PF_MACRO), "extraneous '%s' before ';'",
+		       c->tk[0].kind == T_RPAREN ? ")" : "]");
+		next(c), next(c);
+		return false;
+	}
+	if (c->for_head) {
+		/* clang: at the token, no fix-it, on as if it were there */
+		report(c, "error", c->tk[0].loc, NULL, 0, NULL, 0, "expected ';' in 'for' statement specifier");
+		return false;
+	}
+	if (c->tk[0].kind == T_COMMA || c->tk[0].kind == T_COLON) {
+		/* clang's common typo: ',' or ':' for ';', replaced; parsing goes on after it */
+		e = c->tk[0].loc;
+		fx = (pp_fixit){ e, pp_tok_end(c->p, e), ";", VDA_MACHINE };
+		report(c, "error", e, NULL, 0, &fx, 1, "expected ';' %s", after);
+		next(c);
+		return false;
 	}
 	e = pp_tok_end(c->p, c->prevloc);
-	fx = (pp_fixit){ e, e, ";" };
+	fx = (pp_fixit){ e, e, ";", semi_app(c) };
 	report(c, "error", e, NULL, 0, &fx, 1, "expected ';' %s", after);
+	return true;
+}
+
+/* clang's isNotExpressionStart: after a ',' this ends the expression, the ',' being a
+   typo for ';' (expect_semi reports it) */
+VPRIV bool not_expr_start(cc *c, const ptok *t)
+{
+	int kw;
+
+	if (t->kind == T_LBRACE || t->kind == T_RBRACE)
+		return true;
+	if (t->kind != T_IDENT)
+		return false;
+	kw = kwof(t);
+	if (kw == KW_for || kw == KW_while || kw == KW_if || kw == KW_else || kw == KW_goto)
+		return true;
+	if (kw == KW___extension__ || kw == KW___attribute__ || kw == KW___attribute)
+		return false;
+	return is_decl_start(c, t);
+}
+
+/* could t start a declarator after a ',' in a declaration (clang's MightBeDeclarator) */
+static bool might_be_declarator(cc *c, const ptok *t)
+{
+	int kw;
+
+	if (t->kind == T_STAR || t->kind == T_LPAREN || t->kind == T_LSQUARE)
+		return true;
+	if (t->kind != T_IDENT)
+		return false;
+	kw = kwof(t);
+	if (kw == KW___attribute__ || kw == KW___attribute)
+		return true;
+	return !kw && !typedef_id(c, t->id);
+}
+
+/* clang's ParseDeclGroup: a ',' that ends a line, followed by something that cannot
+   start a declarator, was meant as ';'.  Reported and consumed: the declaration ends */
+VPRIV bool decl_comma_typo(cc *c)
+{
+	uint32_t l = c->tk[0].loc;
+	const ptok *t;
+	pp_fixit fx;
+
+	if (c->tk[0].kind != T_COMMA)
+		return false;
+	t = peek(c, 1);
+	if (!(t->flags & TF_SOL) || might_be_declarator(c, t))
+		return false;
+	fx = (pp_fixit){ l, pp_tok_end(c->p, l), ";", VDA_MACHINE };
+	report(c, "error", l, NULL, 0, &fx, 1, "expected ';' at end of declaration");
+	next(c);
+	return true;
 }
 
 /* #pragma pack as clang: pack(N), pack(), push[, id][, N], pop[, id][, N],

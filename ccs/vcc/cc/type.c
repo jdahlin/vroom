@@ -281,11 +281,12 @@ VPRIV qty ty_atomic(cc *c, qty t, uint32_t loc)
 	if (v.flags & TF_ATOMIC)
 		return t;
 	if (v.kind == TY_ARRAY || v.kind == TY_FUNC) {
-		cc_error(c, loc, "_Atomic cannot be applied to %s type", v.kind == TY_ARRAY ? "array" : "function");
+		cc_error(c, loc, "_Atomic cannot be applied to %s type '%s' ", v.kind == TY_ARRAY ? "array" : "function", tyname(c, t));
 		return t;
 	}
 	if (!complete(c, t)) {
-		cc_error(c, loc, "_Atomic cannot be applied to incomplete type");
+		cc_error(c, loc, "_Atomic cannot be applied to incomplete type '%s' ", tyname(c, t));
+		fwd_note(c, t);
 		return t;
 	}
 	if (v.kind == TY_VECTOR) {

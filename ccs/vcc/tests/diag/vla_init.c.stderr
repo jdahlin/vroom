@@ -1,0 +1,13 @@
+vla_init.c:3:8: error: variable-sized object may not be initialized
+    3 |         int a[n] = {1};
+      |               ^
+vla_init.c:5:8: error: variable-sized object may not be initialized
+    5 |         int c[2][n] = {0};
+      |               ^
+vla_init.c:6:6: error: variable-sized object may not be initialized
+    6 |         int d[n] = 0;
+      |             ^      ~
+vla_init.c:7:7: error: variable-sized object may not be initialized
+    7 |         char s[n] = "ab";
+      |              ^      ~~~~
+4 errors generated.

@@ -1,0 +1,36 @@
+unnamed_param_note.c:7:37: error: incompatible pointer to integer conversion passing 'int *' to parameter of type 'int'; dereference with * [-Wint-conversion]
+    2 | void a(int);
+      |           - passing argument to parameter here
+  ...
+    7 | void t(void){ int *p=0; long l=0; a(p); b(l); c2(l); d(l); e(l); }
+      |                                     ^
+      |                                     *
+unnamed_param_note.c:2:11: note: passing argument to parameter here
+unnamed_param_note.c:7:43: error: incompatible integer to pointer conversion passing 'long' to parameter of type 'int *' [-Wint-conversion]
+    3 | void b(int *);
+      |             - passing argument to parameter here
+  ...
+    7 | void t(void){ int *p=0; long l=0; a(p); b(l); c2(l); d(l); e(l); }
+      |                                           ^
+unnamed_param_note.c:3:13: note: passing argument to parameter here
+unnamed_param_note.c:7:50: error: incompatible integer to pointer conversion passing 'long' to parameter of type 'int (*)(void)' [-Wint-conversion]
+    4 | void c2(int (*)(void));
+      |               - passing argument to parameter here
+  ...
+    7 | void t(void){ int *p=0; long l=0; a(p); b(l); c2(l); d(l); e(l); }
+      |                                                  ^
+unnamed_param_note.c:4:15: note: passing argument to parameter here
+unnamed_param_note.c:7:56: error: incompatible integer to pointer conversion passing 'long' to parameter of type 'int *' [-Wint-conversion]
+    5 | void d(int []);
+      |            - passing argument to parameter here
+    6 | void e(const int * const);
+    7 | void t(void){ int *p=0; long l=0; a(p); b(l); c2(l); d(l); e(l); }
+      |                                                        ^
+unnamed_param_note.c:5:12: note: passing argument to parameter here
+unnamed_param_note.c:7:62: error: incompatible integer to pointer conversion passing 'long' to parameter of type 'const int *' [-Wint-conversion]
+    6 | void e(const int * const);
+      |                         - passing argument to parameter here
+    7 | void t(void){ int *p=0; long l=0; a(p); b(l); c2(l); d(l); e(l); }
+      |                                                              ^
+unnamed_param_note.c:6:25: note: passing argument to parameter here
+5 errors generated.

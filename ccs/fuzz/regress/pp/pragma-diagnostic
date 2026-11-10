@@ -1,0 +1,14 @@
+#pragma clang diagnostic push
+#pragma GCC diagnostic ignored "-Wmacro-redefined"
+#include "a.h"
+#define X 1
+#define X 2
+#pragma clang diagnostic pop
+#pragma clang diagnostic pop
+_Pragma("clang diagnostic warning \"-W\"")
+#pragma clang diagnostic error "-Wno-x"
+#pragma clang diagnostic fatal
+#define X 3
+#pragma clang diagnostic ignored "-Weverything"
+#define Y 1
+#define Y 2

@@ -1,0 +1,36 @@
+sometimes_uninit_loop.c:5:31: warning: variable 'y' is used uninitialized whenever 'for' loop exits because its condition is false [-Wsometimes-uninitialized]
+    5 | int v3(int c) { int y; for (; c; ) { y = 1; break; } return y; }
+      |                               ^                             - uninitialized use occurs here
+      |                               |
+      |                               remove the condition if it is always true
+sometimes_uninit_loop.c:5:61: note: uninitialized use occurs here
+sometimes_uninit_loop.c:5:31: note: remove the condition if it is always true
+sometimes_uninit_loop.c:5:22: note: initialize the variable 'y' to silence this warning
+    5 | int v3(int c) { int y; for (; c; ) { y = 1; break; } return y; }
+      |                      ^
+      |                       = 0
+sometimes_uninit_loop.c:8:31: warning: variable 'y' is used uninitialized whenever 'while' loop exits because its condition is false [-Wsometimes-uninitialized]
+    8 | int v6(int c) { int y; while (c) { y = 1; break; } return y; }
+      |                               ^                           - uninitialized use occurs here
+sometimes_uninit_loop.c:8:59: note: uninitialized use occurs here
+sometimes_uninit_loop.c:8:31: note: remove the condition if it is always true
+    8 | int v6(int c) { int y; while (c) { y = 1; break; } return y; }
+      |                               ^
+      |                               1
+sometimes_uninit_loop.c:8:22: note: initialize the variable 'y' to silence this warning
+    8 | int v6(int c) { int y; while (c) { y = 1; break; } return y; }
+      |                      ^
+      |                       = 0
+sometimes_uninit_loop.c:9:31: warning: variable 'y' is used uninitialized whenever 'while' loop exits because its condition is false [-Wsometimes-uninitialized]
+    9 | int v7(int c) { int y; while (c > 2) { if (g(c)) { y = 1; break; } return 0; } return y; }
+      |                               ^~~~~                                                   - uninitialized use occurs here
+sometimes_uninit_loop.c:9:87: note: uninitialized use occurs here
+sometimes_uninit_loop.c:9:31: note: remove the condition if it is always true
+    9 | int v7(int c) { int y; while (c > 2) { if (g(c)) { y = 1; break; } return 0; } return y; }
+      |                               ^~~~~
+      |                               1
+sometimes_uninit_loop.c:9:22: note: initialize the variable 'y' to silence this warning
+    9 | int v7(int c) { int y; while (c > 2) { if (g(c)) { y = 1; break; } return 0; } return y; }
+      |                      ^
+      |                       = 0
+3 warnings generated.

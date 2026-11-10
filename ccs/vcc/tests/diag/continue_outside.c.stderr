@@ -1,0 +1,4 @@
+continue_outside.c:3:2: error: 'continue' statement not in loop statement
+    3 |         continue;
+      |         ^
+1 error generated.

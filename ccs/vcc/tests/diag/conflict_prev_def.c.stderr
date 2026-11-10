@@ -1,0 +1,19 @@
+conflict_prev_def.c:2:20: error: conflicting types for 'f'
+    1 | int f(int c) { return c; }
+      |     - previous definition is here
+    2 | void a(void) { int f(char *); }
+      |                    ^
+conflict_prev_def.c:1:5: note: previous definition is here
+conflict_prev_def.c:5:6: error: conflicting types for 'g'
+    4 | int g(int c) { return c; }
+      |     - previous definition is here
+    5 | long g(int);
+      |      ^
+conflict_prev_def.c:4:5: note: previous definition is here
+conflict_prev_def.c:7:6: error: conflicting types for 'h'
+    6 | int h(int);
+      |     - previous declaration is here
+    7 | long h(int);
+      |      ^
+conflict_prev_def.c:6:5: note: previous declaration is here
+3 errors generated.

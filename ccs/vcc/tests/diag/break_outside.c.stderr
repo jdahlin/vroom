@@ -1,0 +1,4 @@
+break_outside.c:3:2: error: 'break' statement not in loop or switch statement
+    3 |         break;
+      |         ^
+1 error generated.

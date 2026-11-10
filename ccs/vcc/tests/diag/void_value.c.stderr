@@ -1,0 +1,4 @@
+void_value.c:4:6: error: initializing 'int' with an expression of incompatible type 'void'
+    4 |         int x = g();
+      |             ^   ~~~
+1 error generated.

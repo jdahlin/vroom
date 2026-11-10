@@ -1,0 +1,8 @@
+uninit_flow.c:46:9: warning: variable 'x' is uninitialized when used here [-Wuninitialized]
+   46 |         (void)(x + 1);
+      |                ^
+uninit_flow.c:44:7: note: initialize the variable 'x' to silence this warning
+   44 |         int x;
+      |              ^
+      |               = 0
+1 warning generated.

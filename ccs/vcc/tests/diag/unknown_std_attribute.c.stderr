@@ -1,0 +1,55 @@
+unknown_std_attribute.c:1:3: warning: unknown attribute 'gnu::nope' ignored; did you mean 'gnu::mode'? [-Wunknown-attributes]
+    1 | [[gnu::nope]] int a;
+      |   ^~~~~~~~~
+      |   gnu::mode
+unknown_std_attribute.c:2:3: warning: unknown attribute 'clang::frob' ignored [-Wunknown-attributes]
+    2 | [[clang::frob]] int b;
+      |   ^~~~~~~~~~~
+unknown_std_attribute.c:3:3: warning: unknown attribute 'foo::bar' ignored [-Wunknown-attributes]
+    3 | [[foo::bar]] int c;
+      |   ^~~~~~~~
+unknown_std_attribute.c:4:3: warning: unknown attribute 'nodiscrd' ignored; did you mean 'nodiscard'? [-Wunknown-attributes]
+    4 | [[nodiscrd]] int f(void);
+      |   ^~~~~~~~
+      |   nodiscard
+unknown_std_attribute.c:5:3: warning: unknown attribute 'gnu::packd' ignored; did you mean 'gnu::packed'? [-Wunknown-attributes]
+    5 | [[gnu::packd]] int d;
+      |   ^~~~~~~~~~
+      |   gnu::packed
+unknown_std_attribute.c:8:3: warning: unknown attribute 'clang::noinlin' ignored; did you mean 'clang::noinline'? [-Wunknown-attributes]
+    8 | [[clang::noinlin]] void h(void);
+      |   ^~~~~~~~~~~~~~
+      |   clang::noinline
+unknown_std_attribute.c:9:3: warning: unknown attribute 'gnu::nope' ignored; did you mean 'gnu::mode'? [-Wunknown-attributes]
+    9 | [[__gnu__::nope]] int i;
+      |   ^~~~~~~~~~~~~
+      |   gnu::mode
+unknown_std_attribute.c:10:3: warning: unknown attribute 'gnu::oon' ignored [-Wunknown-attributes]
+   10 | [[gnu::oon]] int sa;
+      |   ^~~~~~~~
+unknown_std_attribute.c:11:3: warning: unknown attribute 'gnu::oon' ignored [-Wunknown-attributes]
+   11 | [[__gnu__::__oon__]] int sb;
+      |   ^~~~~~~~~~~~~~~~
+unknown_std_attribute.c:12:3: warning: unknown attribute 'gnu::oon' ignored [-Wunknown-attributes]
+   12 | [[gnu::__oon__]] int sc;
+      |   ^~~~~~~~~~~~
+unknown_std_attribute.c:13:3: warning: unknown attribute 'gnu::oon' ignored [-Wunknown-attributes]
+   13 | [[__gnu__::oon]] int sd;
+      |   ^~~~~~~~~~~~
+unknown_std_attribute.c:14:3: warning: unknown attribute 'oon' ignored [-Wunknown-attributes]
+   14 | [[__oon__]] int se;
+      |   ^~~~~~~
+unknown_std_attribute.c:15:3: warning: unknown attribute 'clang::oon' ignored [-Wunknown-attributes]
+   15 | [[clang::__oon__]] int sf;
+      |   ^~~~~~~~~~~~~~
+unknown_std_attribute.c:16:3: warning: unknown attribute 'clang::noinlin' ignored; did you mean 'clang::noinline'? [-Wunknown-attributes]
+   16 | [[_Clang::noinlin]] void e(void);
+      |   ^~~~~~~~~~~~~~~
+      |   clang::noinline
+unknown_std_attribute.c:16:26: error: redefinition of 'e' as different kind of symbol
+   16 | [[_Clang::noinlin]] void e(void);
+      |                          ^
+unknown_std_attribute.c:6:20: note: previous definition is here
+    6 | [[deprecated]] int e;
+      |                    ^
+14 warnings and 1 error generated.

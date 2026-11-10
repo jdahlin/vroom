@@ -1,0 +1,90 @@
+unused_value_v2.c:15:4: warning: equality comparison result unused [-Wunused-comparison]
+   15 |         x == 1;
+      |         ~~^~~~
+unused_value_v2.c:15:4: note: use '=' to turn this equality comparison into an assignment
+   15 |         x == 1;
+      |           ^~
+      |           =
+unused_value_v2.c:16:4: warning: equality comparison result unused [-Wunused-comparison]
+   16 |         x != 1;
+      |         ~~^~~~
+unused_value_v2.c:17:4: warning: relational comparison result unused [-Wunused-comparison]
+   17 |         x < 1;
+      |         ~~^~~
+unused_value_v2.c:47:2: warning: equality comparison result unused [-Wunused-comparison]
+   47 |         CMP;
+      |         ^~~ use '=' to turn this equality comparison into an assignment
+unused_value_v2.c:47:2: note: use '=' to turn this equality comparison into an assignment
+unused_value_v2.c:13:2: warning: expression result unused [-Wunused-value]
+   13 |         x;
+      |         ^
+unused_value_v2.c:14:4: warning: expression result unused [-Wunused-value]
+   14 |         x + 1;
+      |         ~ ^ ~
+unused_value_v2.c:19:2: warning: expression result unused [-Wunused-value]
+   19 |         (void *)p;
+      |         ^       ~
+unused_value_v2.c:20:2: warning: expression result unused [-Wunused-value]
+   20 |         (long)x;
+      |         ^     ~
+unused_value_v2.c:21:2: warning: expression result unused [-Wunused-value]
+   21 |         *p;
+      |         ^~
+unused_value_v2.c:22:2: warning: expression result unused [-Wunused-value]
+   22 |         -x;
+      |         ^~
+unused_value_v2.c:23:2: warning: expression result unused [-Wunused-value]
+   23 |         !x;
+      |         ^~
+unused_value_v2.c:24:2: warning: expression result unused [-Wunused-value]
+   24 |         &x;
+      |         ^~
+unused_value_v2.c:25:6: warning: expression result unused [-Wunused-value]
+   25 |         ps->f;
+      |         ~~  ^
+unused_value_v2.c:26:4: warning: expression result unused [-Wunused-value]
+   26 |         s.f;
+      |         ~ ^
+unused_value_v2.c:27:7: warning: expression result unused [-Wunused-value]
+   27 |         s.a[1];
+      |         ~~~ ~^
+unused_value_v2.c:28:5: warning: expression result unused [-Wunused-value]
+   28 |         p[1];
+      |         ~ ~^
+unused_value_v2.c:32:10: warning: expression result unused [-Wunused-value]
+   32 |         x ? 1 : 2;
+      |                 ^
+unused_value_v2.c:35:4: warning: expression result unused [-Wunused-value]
+   35 |         x && x;
+      |         ~ ^  ~
+unused_value_v2.c:37:3: warning: left operand of comma operator has no effect [-Wunused-value]
+   37 |         (0, g(1));
+      |          ^
+unused_value_v2.c:38:7: warning: left operand of comma operator has no effect [-Wunused-value]
+   38 |         x = (1, g(1));
+      |              ^
+unused_value_v2.c:39:2: warning: expression result unused [-Wunused-value]
+   39 |         sizeof(x);
+      |         ^~~~~~~~~
+unused_value_v2.c:40:2: warning: expression result unused [-Wunused-value]
+   40 |         "str";
+      |         ^~~~~
+unused_value_v2.c:41:2: warning: expression result unused [-Wunused-value]
+   41 |         'c';
+      |         ^~~
+unused_value_v2.c:43:5: warning: expression result unused [-Wunused-value]
+   43 |         ({ 1; });
+      |            ^
+unused_value_v2.c:45:6: warning: expression result unused [-Wunused-value]
+   45 |         M(x + 1);
+      |           ~ ^ ~
+unused_value_v2.c:46:2: warning: expression result unused [-Wunused-value]
+   46 |         BODY;
+      |         ^~~~
+unused_value_v2.c:48:7: warning: expression result unused [-Wunused-value]
+   48 |         for (x; x < 3; x + 1)
+      |              ^
+unused_value_v2.c:51:7: warning: expression result unused [-Wunused-value]
+   51 |         x++, x;
+      |              ^
+28 warnings generated.

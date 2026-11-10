@@ -357,13 +357,13 @@ VPRIV void gen_asm(ecx *e, uint32_t n)
 					idx = idx * 10 + (*p++ - '0');
 				p--;
 			} else {
-				efatal(e, x->loc, "invalid %% in asm string");
+				efatal(e, x->loc, "invalid %% escape in inline assembly string");
 			}
 			if ((uint32_t)idx >= nops) {
 				uint32_t k = (uint32_t)idx - nops;
 
 				if (k >= a->nlabel)
-					efatal(e, x->loc, "invalid operand number in asm string");
+					efatal(e, x->loc, "invalid operand number %d in inline asm string (%u operands, %u labels)", idx, nops, a->nlabel);
 				p_lbl(rb, e->top, tramp[k]);
 				continue;
 			}

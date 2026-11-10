@@ -1,0 +1,4 @@
+not_function.c:3:10: error: called object type 'int' is not a function or function pointer
+    3 |         return a(1);
+      |                ~^
+1 error generated.

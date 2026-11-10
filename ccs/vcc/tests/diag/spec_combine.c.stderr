@@ -1,0 +1,55 @@
+spec_combine.c:2:1: error: 'void' cannot be signed or unsigned
+    2 | unsigned void a;
+      | ^
+spec_combine.c:2:15: error: variable has incomplete type 'void'
+    2 | unsigned void a;
+      |               ^
+spec_combine.c:3:1: error: 'struct' cannot be signed or unsigned
+    3 | signed struct S { int x; } b;
+      | ^
+spec_combine.c:4:1: error: 'long struct' is invalid
+    4 | long struct T { int x; } c;
+      | ^
+spec_combine.c:5:1: error: 'float' cannot be signed or unsigned
+    5 | signed float d;
+      | ^
+spec_combine.c:6:1: error: 'long char' is invalid
+    6 | long char e;
+      | ^
+spec_combine.c:7:1: error: 'short double' is invalid
+    7 | short double f;
+      | ^
+spec_combine.c:8:6: error: cannot combine with previous 'long' declaration specifier
+    8 | long short g;
+      |      ^
+spec_combine.c:9:7: error: cannot combine with previous 'short' declaration specifier
+    9 | short long h;
+      |       ^
+spec_combine.c:10:1: error: 'long long char' is invalid
+   10 | long long char i;
+      | ^
+spec_combine.c:11:1: error: '_Bool' cannot be signed or unsigned
+   11 | unsigned _Bool j;
+      | ^
+spec_combine.c:12:1: error: 'long float' is invalid
+   12 | long float k;
+      | ^
+spec_combine.c:13:5: error: cannot combine with previous 'int' declaration specifier
+   13 | int float l;
+      |     ^
+spec_combine.c:14:6: error: cannot combine with previous 'char' declaration specifier
+   14 | char int m;
+      |      ^
+spec_combine.c:15:8: error: cannot combine with previous 'static' declaration specifier
+   15 | static extern int n;
+      |        ^
+spec_combine.c:16:20: error: 'void' must be the first and only parameter if specified
+   16 | int fn1(int a, void);
+      |                    ^
+spec_combine.c:17:14: error: argument may not have 'void' type
+   17 | int fn2(void x);
+      |              ^
+spec_combine.c:18:14: error: cannot combine with previous 'void' declaration specifier
+   18 | int fn3(void void);
+      |              ^
+18 errors generated.

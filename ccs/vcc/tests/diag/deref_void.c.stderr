@@ -1,0 +1,7 @@
+deref_void.c:1:26: warning: ISO C does not allow indirection on operand of type 'void *' [-Wvoid-ptr-dereference]
+    1 | int f(void *p) { int x = *(void *)p; return x; }
+      |                          ^~~~~~~~~~
+deref_void.c:1:22: error: initializing 'int' with an expression of incompatible type 'void'
+    1 | int f(void *p) { int x = *(void *)p; return x; }
+      |                      ^   ~~~~~~~~~~
+1 warning and 1 error generated.

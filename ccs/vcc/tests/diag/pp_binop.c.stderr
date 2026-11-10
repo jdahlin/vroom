@@ -1,0 +1,22 @@
+pp_binop.c:3:11: error: token is not a valid binary operator in a preprocessor subexpression
+    3 | #if 1 + 2 3
+      |         ~ ^
+pp_binop.c:5:9: error: token is not a valid binary operator in a preprocessor subexpression
+    5 | #if (1) 2
+      |     ~~~ ^
+pp_binop.c:7:7: error: token is not a valid binary operator in a preprocessor subexpression
+    7 | #if X 2
+      |     ~ ^
+pp_binop.c:9:15: error: token is not a valid binary operator in a preprocessor subexpression
+    9 | #if 1 ? 2 : 3 4
+      |             ~ ^
+pp_binop.c:11:7: error: token is not a valid binary operator in a preprocessor subexpression
+   11 | #if 1 X
+      |     ~ ^
+pp_binop.c:2:11: note: expanded from macro 'X'
+    2 | #define X 1
+      |           ^
+pp_binop.c:13:12: error: token is not a valid binary operator in a preprocessor subexpression
+   13 | #if 1 == 2 "s"
+      |          ~ ^
+6 errors generated.

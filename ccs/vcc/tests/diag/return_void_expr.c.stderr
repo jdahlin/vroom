@@ -1,0 +1,4 @@
+return_void_expr.c:1:36: error: returning 'void' from a function with incompatible result type 'int'
+    1 | void v(void); int f(void) { return v(); }
+      |                                    ^~~
+1 error generated.

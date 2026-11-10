@@ -1,0 +1,23 @@
+sometimes_uninit_only.c:3:27: warning: variable 'x' is used uninitialized whenever 'if' condition is false [-Wsometimes-uninitialized]
+    3 | int f(int c) { int x; if (c) x = 1; return x; }
+      |                       ----^--              - uninitialized use occurs here
+      |                       |
+      |                       remove the 'if' if its condition is always true
+sometimes_uninit_only.c:3:44: note: uninitialized use occurs here
+sometimes_uninit_only.c:3:23: note: remove the 'if' if its condition is always true
+sometimes_uninit_only.c:3:21: note: initialize the variable 'x' to silence this warning
+    3 | int f(int c) { int x; if (c) x = 1; return x; }
+      |                     ^
+      |                      = 0
+sometimes_uninit_only.c:4:32: warning: variable 'x' is used uninitialized whenever 'if' condition is true [-Wsometimes-uninitialized]
+    4 | int h(int c) { int x; do { if (c) break; x = c; } while (0); return x; }
+      |                            ----^-------                             - uninitialized use occurs here
+      |                            |
+      |                            remove the 'if' if its condition is always false
+sometimes_uninit_only.c:4:69: note: uninitialized use occurs here
+sometimes_uninit_only.c:4:28: note: remove the 'if' if its condition is always false
+sometimes_uninit_only.c:4:21: note: initialize the variable 'x' to silence this warning
+    4 | int h(int c) { int x; do { if (c) break; x = c; } while (0); return x; }
+      |                     ^
+      |                      = 0
+2 warnings generated.

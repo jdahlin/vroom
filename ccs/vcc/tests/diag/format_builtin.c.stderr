@@ -1,0 +1,85 @@
+format_builtin.c:5:15: warning: format specifies type 'int' but the argument has type 'long' [-Wformat]
+    5 |   printf(fmt, l, s);
+      |          ~~~  ^
+format_builtin.c:4:30: note: format string is defined here
+    4 |   static const char fmt[] = "%d %s\n";
+      |                              ^~
+      |                              %ld
+format_builtin.c:6:38: warning: format specifies type 'int' but the argument has type 'char *' [-Wformat]
+    6 |   const char g[] = "%d\n"; printf(g, s);
+      |                                   ~  ^
+format_builtin.c:6:21: note: format string is defined here
+    6 |   const char g[] = "%d\n"; printf(g, s);
+      |                     ^~
+      |                     %s
+format_builtin.c:7:18: warning: format specifies type 'int' but the argument has type 'char *' [-Wformat]
+    7 |   printf("%b\n", s);
+      |           ~~     ^
+      |           %s
+format_builtin.c:8:19: warning: format specifies type 'long long' but the argument has type 'int' [-Wformat]
+    8 |   printf("%qd\n", 1);
+      |           ~~~     ^
+      |           %d
+format_builtin.c:9:28: warning: format specifies type 'int' but the argument has type 'long' [-Wformat]
+    9 |   printf("%2$d %1$s\n", s, l);
+      |           ~~~~             ^
+      |           %2$ld
+format_builtin.c:11:65: warning: format specifies type 'int' but the argument has type 'long' [-Wformat]
+   11 | void f5(long l, unsigned u, char *s){ printf("%b %lb %B %#b\n", l, s, u, 1.0); printf("%qd %qu\n", l, s);}
+      |                                               ~~                ^
+      |                                               %lb
+format_builtin.c:11:68: warning: format specifies type 'long' but the argument has type 'char *' [-Wformat]
+   11 | void f5(long l, unsigned u, char *s){ printf("%b %lb %B %#b\n", l, s, u, 1.0); printf("%qd %qu\n", l, s);}
+      |                                                  ~~~               ^
+      |                                                  %s
+format_builtin.c:11:74: warning: format specifies type 'int' but the argument has type 'double' [-Wformat]
+   11 | void f5(long l, unsigned u, char *s){ printf("%b %lb %B %#b\n", l, s, u, 1.0); printf("%qd %qu\n", l, s);}
+      |                                                         ~~~              ^~~
+      |                                                         %#f
+format_builtin.c:11:100: warning: format specifies type 'long long' but the argument has type 'long' [-Wformat]
+   11 | void f5(long l, unsigned u, char *s){ printf("%b %lb %B %#b\n", l, s, u, 1.0); printf("%qd %qu\n", l, s);}
+      |                                                                                        ~~~         ^
+      |                                                                                        %ld
+format_builtin.c:11:103: warning: format specifies type 'unsigned long long' but the argument has type 'char *' [-Wformat]
+   11 | void f5(long l, unsigned u, char *s){ printf("%b %lb %B %#b\n", l, s, u, 1.0); printf("%qd %qu\n", l, s);}
+      |                                                                                            ~~~        ^
+      |                                                                                            %s
+format_builtin.c:12:29: warning: flag '+' results in undefined behavior with 'b' conversion specifier [-Wformat]
+   12 | void f6(void){ printf("%-b %+b % b %#b %0b %'b %.3b %-B %+B %#B %0B %'B %Lb %qb %Lx %qx %qn", 1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,(long long*)0);}
+      |                            ~^~
+format_builtin.c:12:33: warning: flag ' ' results in undefined behavior with 'b' conversion specifier [-Wformat]
+   12 | void f6(void){ printf("%-b %+b % b %#b %0b %'b %.3b %-B %+B %#B %0B %'B %Lb %qb %Lx %qx %qn", 1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,(long long*)0);}
+      |                                ~^~
+format_builtin.c:12:45: warning: flag ''' results in undefined behavior with 'b' conversion specifier [-Wformat]
+   12 | void f6(void){ printf("%-b %+b % b %#b %0b %'b %.3b %-B %+B %#B %0B %'B %Lb %qb %Lx %qx %qn", 1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,(long long*)0);}
+      |                                            ~^~
+format_builtin.c:12:58: warning: flag '+' results in undefined behavior with 'B' conversion specifier [-Wformat]
+   12 | void f6(void){ printf("%-b %+b % b %#b %0b %'b %.3b %-B %+B %#B %0B %'B %Lb %qb %Lx %qx %qn", 1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,(long long*)0);}
+      |                                                         ~^~
+format_builtin.c:12:70: warning: flag ''' results in undefined behavior with 'B' conversion specifier [-Wformat]
+   12 | void f6(void){ printf("%-b %+b % b %#b %0b %'b %.3b %-B %+B %#B %0B %'B %Lb %qb %Lx %qx %qn", 1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,(long long*)0);}
+      |                                                                     ~^~
+format_builtin.c:12:74: warning: length modifier 'L' results in undefined behavior or no effect with 'b' conversion specifier [-Wformat]
+   12 | void f6(void){ printf("%-b %+b % b %#b %0b %'b %.3b %-B %+B %#B %0B %'B %Lb %qb %Lx %qx %qn", 1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,(long long*)0);}
+      |                                                                         ~^~
+format_builtin.c:12:74: note: did you mean to use 'll'?
+   12 | void f6(void){ printf("%-b %+b % b %#b %0b %'b %.3b %-B %+B %#B %0B %'B %Lb %qb %Lx %qx %qn", 1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,(long long*)0);}
+      |                                                                          ^
+      |                                                                          ll
+format_builtin.c:12:119: warning: format specifies type 'long long' but the argument has type 'int' [-Wformat]
+   12 | void f6(void){ printf("%-b %+b % b %#b %0b %'b %.3b %-B %+B %#B %0B %'B %Lb %qb %Lx %qx %qn", 1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,(long long*)0);}
+      |                                                                         ~~~                                           ^
+      |                                                                         %b
+format_builtin.c:12:121: warning: format specifies type 'long long' but the argument has type 'int' [-Wformat]
+   12 | void f6(void){ printf("%-b %+b % b %#b %0b %'b %.3b %-B %+B %#B %0B %'B %Lb %qb %Lx %qx %qn", 1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,(long long*)0);}
+      |                                                                             ~~~                                         ^
+      |                                                                             %b
+format_builtin.c:12:123: warning: format specifies type 'unsigned long long' but the argument has type 'int' [-Wformat]
+   12 | void f6(void){ printf("%-b %+b % b %#b %0b %'b %.3b %-B %+B %#B %0B %'B %Lb %qb %Lx %qx %qn", 1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,(long long*)0);}
+      |                                                                                 ~~~                                       ^
+      |                                                                                 %x
+format_builtin.c:12:125: warning: format specifies type 'unsigned long long' but the argument has type 'int' [-Wformat]
+   12 | void f6(void){ printf("%-b %+b % b %#b %0b %'b %.3b %-B %+B %#B %0B %'B %Lb %qb %Lx %qx %qn", 1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,(long long*)0);}
+      |                                                                                     ~~~                                     ^
+      |                                                                                     %x
+20 warnings generated.
