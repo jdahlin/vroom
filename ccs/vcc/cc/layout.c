@@ -332,6 +332,7 @@ static void type_str(cc *c, qty t, const char *inner, vfixbuf *out, bool *ok)
 	case TY_FLOAT: vfixbuf_puts(&b, "float"); break;
 	case TY_DOUBLE: vfixbuf_puts(&b, "double"); break;
 	case TY_LDOUBLE: vfixbuf_puts(&b, "long double"); break;
+	case TY_FLOAT128: vfixbuf_puts(&b, "__float128"); break;
 	case TY_STRUCT: case TY_UNION: case TY_ENUM: {
 		const tag *r = &c->tags[x->aux];
 		char nb[256];
