@@ -43,7 +43,8 @@ assembler, linker, behind `vcc`/`vas`/`vld` shims and the `vccd` server.
   - `obj/`: the in-memory object (`obj.h`: sections, frags, symbols, fixups)
     and its layout; with `arch/<cpu>/obj/fixup.c` and `platform/linux/elf.c`
     one module (`obj_SRC`, internal header `objimpl.h`).
-  - `ld/`: the linker `vlink` (`ld.c`, one TU) and `vobjcopy`/`vnm`;
+  - `ld/`: the linker `vlink` (`ld.c`, one TU; also linked into vccd, which
+    calls `ld_main` per link) and `vobjcopy`/`vnm`;
     `wasmld.c` is vlink for WebAssembly (as `wasm-ld` or with `-mwasm64`).
   - `driver/`: one compile job from a clang command line (`ppdriver.c`), the
     declaration cache (`ccsnap.c`) and `vpp`, the driver for parity tests.
@@ -53,6 +54,10 @@ assembler, linker, behind `vcc`/`vas`/`vld` shims and the `vccd` server.
     build uses no llvm-ar) and `rsh.c`, kbuild's recipe subset of sh, run for
     `vsh` (`build/ccs/vsh/sh`, shim.c with `-DVSH`), make's SHELL in
     `bench/vccd-kbuild.sh`; anything outside the subset goes to `$VSH_REAL`.
+    Without `--backend-sock` vccd runs the whole kernel build itself: probes,
+    `-E`/`-c`/`-S` (stdin too), links (vld in-process; `--ld PROG` spawns
+    one), nm/objcopy behind the `vcc-nm`/`vcc-objcopy` shims, and the host
+    programs (vcc + `ldmacho.c`, macOS only); nothing falls back to clang.
   - `arch/a64/`: arm64: instructions in GNU as syntax (`as/parse.c`:
     registers, `.req`, operands, literal pools), the encoder (`as/enc.c`,
     `a64.h`), system registers,
@@ -74,7 +79,10 @@ assembler, linker, behind `vcc`/`vas`/`vld` shims and the `vccd` server.
     and `vasm --target=wasm64-...` go through it.
   - `platform/linux/`: the ELF writer (`elf.c`: relocations, string table,
     file layout as LLVM MC).
-  - `platform/darwin/`: the Mach-O writer; Apple PMU counters (`pmc.c`).
+  - `platform/darwin/`: the Mach-O writer; vld's Mach-O executables
+    (`ldmacho.c`: libSystem only, chained fixups, ad-hoc signature, chosen
+    when the first input is Mach-O; the kernel's host programs); Apple PMU
+    counters (`pmc.c`).
   - `platform/wasm/`: the wasm object writer (`wasm.c`: layout, symbol table,
     relocations as LLVM's WasmObjectWriter, byte for byte).
   - `pp/`, `cc/` and `emit/` (with `arch/<cpu>/emit/`) are directories of
@@ -138,6 +146,8 @@ bench/vcc-builtins.py [-v]          # clang builtins unknown to vcc, __has_built
 bench/vcc-bflayout.py               # generated bit-field records, layouts checked by clang, Linux + Apple (~1 s)
 bench/vcc-ldconst.py                # generated long double literals and folds, bits vs clang (~2 s)
 bench/vccd-test.py                  # vccd as a service: socket, bad requests, cache invalidation (~11 s)
+bench/vccd-kbuild.sh work/build-X -j 6   # cold kernel build, vccd only (no clang/vroomd/lld; ~10 s)
+python3 bench/boot-test.py --kernel work/build-X/arch/arm64/boot/Image --timeout 60   # boots Debian
 bench/vbench.py gate                # performance gate: instructions vs the merge-base, budget 1 % (~1 min)
 bench/vcc-wasm.py -j 6              # the C suites for wasm64: vcc -S, clang -c, emcc, node vs clang's build (~2 min)
 bench/vcc-wasm.py -j 6 --objcmp     # ... and vpp -c's object byte-identical to clang's for the same .s
