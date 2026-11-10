@@ -1197,6 +1197,18 @@ static void print_counts(void)
 	}
 }
 
+/* compiles recurse (parser, emitter): vstack_low() ends a TU that nests too
+   deeply.  TSan keeps a fixed shadow call stack (64K frames) per thread and
+   corrupts its state past it, so under TSan the guard must fire sooner. */
+#if defined(__has_feature)
+#if __has_feature(thread_sanitizer)
+#define WORKER_STACK (2u << 20)
+#endif
+#endif
+#ifndef WORKER_STACK
+#define WORKER_STACK (16u << 20)
+#endif
+
 static void *worker_main(void *arg)
 {
 	struct worker w;
@@ -1377,7 +1389,7 @@ listening:
 		pthread_attr_t at;
 
 		pthread_attr_init(&at);
-		pthread_attr_setstacksize(&at, 16 << 20);	/* compiles recurse (parser, emitter) */
+		pthread_attr_setstacksize(&at, WORKER_STACK);
 		pthread_create(&t, &at, worker_main, NULL);
 		pthread_attr_destroy(&at);
 	}
