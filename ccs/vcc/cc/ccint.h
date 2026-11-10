@@ -130,6 +130,7 @@ struct cc {
 	uint16_t uvc[64];	/* ... cnd at the declaration */	/* ... those variables */
 	uint16_t nrtd;		/* warnings of a function body given at its end (clang's DiagRuntimeBehavior) */
 	struct { const char *flag; const char *const *groups; const char *ms; uint32_t mlen, loc, nr; pp_span r[2];
+		 uint32_t nloc; char nmsg[80];	/* a note after it (nmsg empty: none) */
 		 char msg[112]; } rtd[64];
 	bool after_amp;		/* the unary * being parsed is the operand of & (no -Wvoid-ptr-dereference) */
 	uint8_t cv_what;		/* context of the conversion being checked: CX_* (diagnostics) */
