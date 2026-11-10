@@ -78,7 +78,7 @@ static uint32_t number_s(cc *c, const ptok *t, const char *s, size_t n)
 		if (k >= sizeof(buf))
 			k = sizeof(buf) - 1;
 		if (is_q(c, ty))
-			return mk_fltq(c, q_parse(s, k), ty, t->loc);
+			return mk_fltq(c, q_parsep(s, k, q_prec(c, ty)), ty, t->loc);
 		memcpy(buf, s, k);
 		buf[k] = 0;
 		d = KIND(c, ty) == TY_FLOAT ? (double)strtof(buf, NULL) : strtod(buf, NULL);	/* one rounding */

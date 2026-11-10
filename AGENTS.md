@@ -136,6 +136,7 @@ bench/vcc-darwin-s.py -j 6 --clang   # clang's Darwin -S assembled by vpp -c run
 bench/vcc-builtins.py [-v]          # clang builtins unknown to vcc, __has_builtin differences (<1 s)
 bench/vcc-bflayout.py               # generated bit-field records, layouts checked by clang, Linux + Apple (~1 s)
 bench/vcc-ldconst.py                # generated long double literals and folds, bits vs clang (~2 s)
+bench/vcc-f80.sh [N]                # x87 long double folding (lib/f128.h) vs this x86-64 host's FPU (~3 s)
 bench/vccd-test.py                  # vccd as a service: socket, bad requests, cache invalidation (~11 s)
 bench/vbench.py gate                # performance gate: instructions vs the merge-base, budget 1 % (~1 min)
 bench/vcc-wasm.py -j 6              # the C suites for wasm64: vcc -S, clang -c, emcc, node vs clang's build (~2 min)
