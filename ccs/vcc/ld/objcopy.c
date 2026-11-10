@@ -1069,12 +1069,14 @@ int objcopy_main(int argc, char **argv, int dirfd, FILE *err)
 #define OPT(s) (!strcmp(a, s))
 #define VAL(s) (!strncmp(a, s "=", sizeof(s)) ? a + sizeof(s) : (OPT(s) && i + 1 < argc) ? argv[++i] : NULL)
 		const char *v;
-		if (OPT("-O") && i + 1 < argc) {
-			oc.binary = !strcmp(argv[++i], "binary");
-			if (!oc.binary)
-				oerror("unsupported output format %s", argv[i]);
-		} else if (!strncmp(a, "--output-target=", 16)) {
-			oc.binary = !strcmp(a + 16, "binary");
+		if ((v = VAL("-O")) || (v = VAL("--output-target"))) {
+			/* binary, or this ELF64 little-endian aarch64 format unchanged */
+			oc.binary = !strcmp(v, "binary");
+			if (!oc.binary && strcmp(v, "elf64-littleaarch64") && strcmp(v, "elf64-aarch64"))
+				oerror("invalid output format: '%s'", v);
+		} else if ((v = VAL("-I")) || (v = VAL("--input-target"))) {
+			if (strcmp(v, "elf64-littleaarch64") && strcmp(v, "elf64-aarch64"))
+				oerror("unsupported input format: '%s'", v);
 		} else if (OPT("-S") || OPT("--strip-all")) {
 			oc.strip_all = true;
 		} else if (OPT("-g") || OPT("--strip-debug")) {
