@@ -618,10 +618,12 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
   `[[clang::x]]` (`_Clang`, `__gnu__`) and other vendors from
   `__has_c_attribute` (`unknown_std_attribute.c`, the 625 again per scope).
 - [ ] **`[[__clang__::x]]`**: (done: clang's -Wignored-attributes warning with
-  the `_Clang` fix-it, taken as `clang::`; tests/vcc `attr_clang_macro.c`.)
-  Left: the "expanded from macro" note says `<built-in>:460`, clang `:2`: our
-  predefines are sorted (`gen-ppdata.sh`), clang's in definition order.
-  *Validate:* diag test.
+  the `_Clang` fix-it, taken as `clang::`; tests/vcc `attr_clang_macro.c`;
+  the predefine tables in clang's -dD order, so the "expanded from macro"
+  note says `<built-in>:2` as clang: diag `attr_clang_builtin_line.c`.)
+  Left: before C23 (gnu17) clang does not special-case it (`__clang__`
+  expands to 1: "expected ']'"), vcc still warns as in C23.
+  *Validate:* diag test with -std=gnu17.
 - [x] **Attributes without effect**: none left.  Accepted
   and needing nothing today: `returns_twice` (locals live in memory:
   `tests/vcc/returns_twice.c`; the optimizer item must honour it when
