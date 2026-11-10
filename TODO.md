@@ -1186,7 +1186,10 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
   *Validate:* diag test with vector_size and ext_vector_type.
 - [ ] **Diagnostic details**: columns on `##` and invalid directives,
   `#line` file names ignored, nested macro notes (one level today), the
-  "expanded from macro" note only for undeclared identifiers.
+  "expanded from macro" note only for undeclared identifiers; a parenthesized
+  operand's range leaves out the parentheses (`1 / (x - 1)`: clang's ParenExpr
+  has them, -Wconstant-conversion and -Wunused-value strip them: needs a second
+  span per paren node, kept through the decl cache's replay).
   *Validate:* diag tests.
 - [ ] **Longer fuzz runs** and pp-diff over the whole fuzz corpus (PLAN-fas2
   "Status fuzzning").  *Validate:* runs recorded in the plan, findings in
