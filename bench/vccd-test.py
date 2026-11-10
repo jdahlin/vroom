@@ -18,7 +18,7 @@ skipped.  Exit status 1 on any FAIL or XPASS.
 --bin-dir build/ccs-asan or build/ccs-tsan runs the sanitizer builds of
 vccd; then also check the vccd log each test prints with -v.
 """
-import array, os, re, signal, socket, stat, struct, subprocess, sys, tempfile, time, importlib.util
+import array, os, re, shutil, signal, socket, stat, struct, subprocess, sys, tempfile, time, importlib.util
 spec = importlib.util.spec_from_file_location('vd', os.path.join(os.path.dirname(os.path.abspath(__file__)), 'vcc-diff.py'))
 vd = importlib.util.module_from_spec(spec); spec.loader.exec_module(vd)
 
@@ -119,7 +119,7 @@ def default_socket_not_in_tmp():
 @test()
 def peer_other_user():
     """a connection from another uid is refused (needs passwordless sudo -u nobody)"""
-    if subprocess.run(['sudo', '-n', '-u', 'nobody', 'true'], capture_output=True).returncode:
+    if not shutil.which('sudo') or subprocess.run(['sudo', '-n', '-u', 'nobody', 'true'], capture_output=True).returncode:
         raise Skip('no passwordless sudo -u nobody')
     v = Vccd(sockdir_mode=0o755)
     try:

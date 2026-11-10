@@ -12,7 +12,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 		> /etc/apt/sources.list.d/llvm.list \
 	&& apt-get update && apt-get install -y --no-install-recommends \
 	clang-$LLVM lld-$LLVM llvm-$LLVM llvm-$LLVM-dev libclang-$LLVM-dev libclang-cpp$LLVM-dev \
-	make python3 git ccache file \
+	make python3 git ccache file procps \
 	bc bison flex libssl-dev libelf-dev cpio kmod rsync \
 	qemu-system-arm ipxe-qemu \
 	&& rm -rf /var/lib/apt/lists/*
