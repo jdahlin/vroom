@@ -1,4 +1,6 @@
 /* vcc front end: expressions: operators, members, primary and postfix */
+#include <ctype.h>
+
 #include "ccimpl.h"
 
 /* ---------------- expressions: operators ---------------- */
@@ -7,6 +9,141 @@ VPRIV bool is_cmp(int op)
 {
 	return op == T_LESS || op == T_LESSEQ || op == T_GREATER || op == T_GREATEREQ ||
 	       op == T_EQUALEQUAL || op == T_EXCLAIMEQ;
+}
+
+/* clang (GCC vector splat): the scalar s may become the element type et without truncation */
+static bool vec_scalar_ok(cc *c, uint32_t s, qty et)
+{
+	qty st = QUNQ(N(s)->ty);
+	cval v;
+	bool k;
+
+	/* (the type before the integer promotion: short, char) */
+	if (N(s)->op == N_CAST && N(s)->aux == CK_INT && !c->span[s].e && is_integer(c, N(N(s)->a)->ty))
+		st = QUNQ(N(N(s)->a)->ty);
+	if (KIND(c, st) == TY_ENUM)
+		st = T(c, st)->base;
+	memset(&v, 0, sizeof v);
+	k = eval(c, s, &v) && (v.kind == CV_INT || v.kind == CV_FLT);
+	if (is_integer(c, et)) {
+		unsigned b = (unsigned)ty_size(c, et) * 8;
+
+		if (is_float(c, st))
+			return false;
+		if (k && v.kind == CV_INT) {
+			if (is_signed(c, et))
+				return v.i >= -((i128)1 << (b - 1)) && v.i < ((i128)1 << (b - 1));
+			return v.i >= -((i128)1 << (b - 1)) && (b >= 128 || v.i < ((i128)1 << b));	/* (clang: -18 into unsigned lanes) */
+		}
+		return ty_size(c, st) < ty_size(c, et) || (ty_size(c, st) == ty_size(c, et) && is_signed(c, st) == is_signed(c, et));
+	}
+	if (k && v.kind == CV_INT)
+		return ty_size(c, et) == 4 ? (i128)(float)v.i == v.i : (i128)(double)v.i == v.i;
+	if (k && v.kind == CV_FLT && !v.ld)
+		return ty_size(c, et) != 4 || (double)(float)v.f == v.f;
+	if (is_float(c, st))
+		return ty_size(c, st) <= ty_size(c, et);
+	return ty_size(c, st) * 8 <= (ty_size(c, et) == 4 ? 24u : 53u);
+}
+
+/* the scalar operand s of a GNU vector operation (vt) at the operator loc: false after the error */
+static bool vec_scalar_check(cc *c, uint32_t s, qty vt, uint32_t loc)
+{
+	if (T(c, vt)->ext || !is_arith(c, N(s)->ty) || vec_scalar_ok(c, s, T(c, vt)->base))
+		return true;
+	cc_error(c, loc, "cannot convert between scalar type '%s' and vector type '%s' as implicit conversion would cause truncation",
+		 tyname(c, QUNQ(N(s)->ty)), tyname(c, vt));
+	return false;
+}
+
+/* ext_vector_type swizzles: v.x, v.xyz, v.s01, v.hi/.lo/.even/.odd (clang's OpenCL components) */
+static int swz_idx(char ch, int set)
+{
+	static const char *const sets[2] = { "xyzw", "rgba" };
+	const char *q = strchr(sets[set], ch);
+
+	return ch && q ? (int)(q - sets[set]) : -1;
+}
+
+static void swz_range_error(cc *c, uint32_t loc, qty vt)
+{
+	pp_span r = { loc, pp_tok_end(c->p, c->prevloc) };	/* (loc: the '.', the name just consumed) */
+
+	report(c, "error", loc, &r, 1, NULL, 0, "vector component access exceeds type '%s'", tyname(c, vt));
+}
+
+static uint32_t swizzle(cc *c, uint32_t n, uint32_t id, uint32_t loc)
+{
+	qty vt = QUNQ(N(n)->ty), et = T(c, vt)->base;
+	int ne = T(c, vt)->ext, k = 0, ix[16];
+	const char *s = idstr_(id);
+	int len = idlen_(id);
+
+	if (len == 2 && !memcmp(s, "hi", 2)) {
+		for (int i = 0; i < (ne + 1) / 2; i++) ix[k++] = (ne + 1) / 2 + i < ne ? (ne + 1) / 2 + i : -1;
+	} else if (len == 2 && !memcmp(s, "lo", 2)) {
+		for (int i = 0; i < (ne + 1) / 2; i++) ix[k++] = i;
+	} else if ((len == 4 && !memcmp(s, "even", 4)) || (len == 3 && !memcmp(s, "odd", 3))) {
+		for (int i = len == 3; i < ne && k < 16; i += 2) ix[k++] = i;
+	} else if ((s[0] == 's' || s[0] == 'S') && len > 1) {
+		for (int i = 1; i < len && k < 16; i++) {
+			int d = isdigit((unsigned char)s[i]) ? s[i] - '0' : isxdigit((unsigned char)s[i]) ? (s[i] | 32) - 'a' + 10 : 99;
+
+			if (d >= ne) {
+				swz_range_error(c, loc, vt);
+				return mk_int(c, 0, et, loc);
+			}
+			ix[k++] = d;
+		}
+	} else {
+		int set = swz_idx(s[0], 0) >= 0 ? 0 : 1;
+
+		for (int i = 0; i < len && k < 16; i++) {
+			int d = swz_idx(s[i], set);
+
+			if (d < 0) {
+				cc_error(c, loc, "illegal vector component name '%c'", s[i]);
+				return mk_int(c, 0, et, loc);
+			}
+			if (d >= ne) {
+				swz_range_error(c, loc, vt);
+				return mk_int(c, 0, et, loc);
+			}
+			ix[k++] = d;
+		}
+	}
+	if (k == 1) {	/* one lane: v[i] (an lvalue when v is one) */
+		uint32_t b;
+
+		if (ix[0] < 0)
+			return mk_int(c, 0, et, loc);
+		if (N(n)->flags & NF_LVALUE)
+			b = cast_node(c, addr_of(c, n, loc), ty_ptr(c, QT(QI(et), QQ(N(n)->ty))), CK_P2P);
+		else
+			b = cast_node(c, rvalue(c, n), ty_ptr(c, et), CK_VADDR);
+		b = mk2(c, N_INDEX, T(c, N(b)->ty)->base, loc, rvalue(c, b), mk_int(c, ix[0], prim(TY_LONG), loc));
+		N(b)->flags = NF_LVALUE;
+		return b;
+	}
+	{	/* several: a shuffle into an ext vector of k lanes (an rvalue; vcc: not assignable) */
+		uint64_t es = ty_size(c, et), p = 1;
+		ctype rv;
+		vec args;
+		uint32_t a = rvalue(c, n);
+		qty rt;
+
+		while (p < (uint64_t)k * es)
+			p <<= 1;
+		rv = *T(c, ty_vector(c, et, (uint32_t)p));
+		rv.ext = (uint16_t)k;
+		rt = QT(ty_intern(c, &rv), 0);
+		vinit(&args);
+		vpush(c, &args, a);
+		vpush(c, &args, a);
+		for (uint64_t i = 0; i < p / es; i++)
+			vpush(c, &args, mk_int(c, i < (uint64_t)k ? ix[i] : -1, prim(TY_INT), loc));
+		return mk_builtin(c, BI_SHUFFLEVECTOR, rt, loc, &args);
+	}
 }
 
 VPRIV uint32_t binop(cc *c, int op, uint32_t l, uint32_t r, uint32_t loc)
@@ -34,6 +171,8 @@ VPRIV uint32_t binop(cc *c, int op, uint32_t l, uint32_t r, uint32_t loc)
 		    (!both && !is_arith(c, is_vector(c, lt) ? rt : lt)) ||
 		    ((op == T_PERCENT || op == T_AMP || op == T_PIPE || op == T_CARET || shift) && !is_integer(c, et)))
 			bad_operands(c, l, r, loc);
+		else if (!both && !shift && !vec_scalar_check(c, is_vector(c, lt) ? r : l, vt, loc))
+			return mk_bin(c, op, is_cmp(op) ? vec_mask_type(c, vt) : vt, l, l, loc);	/* (stands in; diagnosed) */
 		if (both) {
 			l = convert(c, l, vt);
 			r = convert(c, r, both && shift ? QUNQ(rt) : vt);
@@ -114,6 +253,8 @@ VPRIV uint32_t assign(cc *c, int op, uint32_t l, uint32_t r, uint32_t loc)
 		} else if (is_vector(c, lt)) {
 			if (is_vector(c, rt) ? T(c, lt)->size != T(c, rt)->size : !is_arith(c, rt))
 				cc_error(c, loc, "invalid operands to compound assignment");
+			else if (!is_vector(c, rt) && op != T_LESSLESS && op != T_GREATERGREATER)
+				vec_scalar_check(c, r, QUNQ(lt), loc);
 			r = convert(c, r, is_vector(c, rt) ? QUNQ(lt) : T(c, lt)->base);
 			pt = QUNQ(lt);
 		} else if (op == T_LESSLESS || op == T_GREATERGREATER) {
@@ -938,9 +1079,17 @@ VPRIV __attribute__((noinline)) uint32_t postfix_ops(cc *c, uint32_t n)
 			if (!is(c, T_IDENT))
 				fatal(c, tok(c)->loc, "expected identifier");
 			{
-				uint32_t id = tok(c)->id;
+				uint32_t id = tok(c)->id, nloc = tok(c)->loc;
 
 				next(c);
+				if (is_vector(c, N(n)->ty) && T(c, N(n)->ty)->ext) {
+					uint32_t b = c->span[n].e ? c->span[n].b : N(n)->loc;
+
+					n = swizzle(c, n, id, loc);
+					(void)nloc;
+					setspan(c, n, b);
+					continue;
+				}
 				if (is_ptr(c, N(n)->ty) && is_record(c, T(c, N(n)->ty)->base)) {
 					/* clang: fix-it '->', then go on as if it were there */
 					pp_span r = rng(c, n);

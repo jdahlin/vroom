@@ -45,14 +45,14 @@ VPRIV uint32_t ty_hash(const ctype *t)
 
 	h ^= t->base + 0x632BE59BD9B4E019ull + (h << 6) + (h >> 2);
 	h ^= t->n + 0x8CB92BA72F3D8DD7ull + (h << 6) + (h >> 2);
-	h ^= t->aux + (uint64_t)t->flags * 31 + t->align * 131 + (h << 6) + (h >> 2);
+	h ^= t->aux + (uint64_t)t->flags * 31 + t->align * 131 + (uint64_t)t->ext * 7919 + (h << 6) + (h >> 2);
 	return (uint32_t)(h ^ (h >> 32));
 }
 
 static bool ty_eq(const ctype *a, const ctype *b)
 {
 	return a->kind == b->kind && a->flags == b->flags && a->base == b->base && a->n == b->n &&
-	       a->aux == b->aux && a->align == b->align && a->size == b->size;
+	       a->aux == b->aux && a->align == b->align && a->size == b->size && a->ext == b->ext;
 }
 
 /* intern a type (records and enums are created with ty_new) */

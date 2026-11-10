@@ -62,7 +62,7 @@ enum {
 
 typedef struct ctype {
 	uint8_t kind, flags;
-	uint16_t _pad;
+	uint16_t ext;		/* vector: ext_vector_type's element count (a distinct type, as clang), 0: GNU */
 	uint32_t align;		/* bytes */
 	uint64_t size;		/* bytes; arrays: elem size * n */
 	qty base;		/* pointee / element / return / enum underlying */
@@ -222,6 +222,7 @@ enum {
 	CK_VOID,	/* -> void */
 	CK_UNION,	/* -> transparent union / GNU cast to union */
 	CK_NULL,	/* null pointer constant -> pointer */
+	CK_SPLAT,	/* scalar (already the element type) -> every lane of an ext_vector_type */
 	CK_VBITS,	/* GNU vector -> scalar of the same size (the bits) */
 	CK_VADDR,	/* GNU vector rvalue -> pointer to its first lane (v[i] on an rvalue) */
 };

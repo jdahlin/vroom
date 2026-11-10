@@ -283,7 +283,12 @@ static uint32_t declare(cc *c, const dspec *ds, declr *d, qty t, bool file)
 
 		while (p < sz)
 			p <<= 1;
-		t = QT(QI(ty_vector(c, t, (uint32_t)p)), QQ(t));
+		{
+			ctype v = *T(c, ty_vector(c, t, (uint32_t)p));
+
+			v.ext = (uint16_t)at.extvec;
+			t = QT(ty_intern(c, &v), QQ(t));
+		}
 	}
 	if (ds->sc == SC_TYPEDEF) {
 		if (at.aligned)

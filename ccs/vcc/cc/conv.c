@@ -630,6 +630,9 @@ VPRIV __attribute__((noinline)) uint32_t convert_slow(cc *c, uint32_t n, qty to)
 	if (is_complex(c, from) && is_arith(c, to))	/* the real part */
 		return convert(c, rvalue(c, cplx_part(c, n, 0)), to);
 	k = conv_kind(c, from, to, n);
+	if (k < 0 && is_vector(c, to) && T(c, to)->ext && is_arith(c, from) && !is_complex(c, from))
+		/* clang: a scalar converts to an ext_vector_type by splatting */
+		return cast_node(c, convert(c, n, T(c, to)->base), QUNQ(to), CK_SPLAT);
 	if (k < 0) {
 		if (KIND(c, to) == TY_UNION && union_member_for(c, to, n))
 			return cast_node(c, n, to, CK_UNION);

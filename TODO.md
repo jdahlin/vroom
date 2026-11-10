@@ -1186,7 +1186,7 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
   variable or `format_arg` (gettext), a typedef reached through casts or
   other expressions than a variable or member.
   *Validate:* diag tests against clang.
-- [ ] **Vector types in messages**: (done: the typedef name and
+- [x] **Vector types in messages**: (done: the typedef name and
   ` (vector of 4 'int' values)` after the quoted type (vcc: the first typedef
   of that vector type), diag `vector_typedef_name.c`; with it
   -Wincompatible-pointer-types-discards-qualifiers (also "in nested pointer
@@ -1194,9 +1194,13 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
   "; dereference with *" hint and fix-it (simple operands), `int *const`
   spelled as clang, a decayed array named `int[2]`, and "not a compile-time
   constant" after a conversion error: diag `ptr_discards_quals.c`,
-  `deref_hint.c`, `ptr_const_spelling.c`.)  Left: `ext_vector_type` splat
-  from a scalar (`f2 h = 1`), the scalar-to-vector truncation error
-  (`v + 1.5`), `.xyzw` swizzles (`tests/vcc/ext_vector.c`).
+  `deref_hint.c`, `ptr_const_spelling.c`; `ext_vector_type` splat (CK_SPLAT),
+  the scalar-to-vector truncation error, `.xyzw`/`.rgba`/`.sN`/`.hi`/`.lo`/
+  `.even`/`.odd` swizzles: `tests/vcc/ext_swizzle.c`, diag
+  `ext_vector_splat.c`, `vector_scalar_trunc.c`, `ext_swizzle_range.c`.)
+  Not done: assignment to a multi-component swizzle; a `long` constant out
+  of an unsigned lane's range is an error in vcc, a -Wconstant-conversion
+  warning in clang.
   *Validate:* diag test with vector_size and ext_vector_type.
 - [ ] **Diagnostic details**: columns on `##` and invalid directives,
   `#line` file names ignored, nested macro notes (one level today), the

@@ -174,7 +174,7 @@ VPRIV bool eval(cc *c, uint32_t n, cval *v)
 			v->kind = CV_INT;
 			v->ice = eval(c, x->a, &a) && a.ice;
 			return true;
-		case CK_UNION:
+		case CK_UNION: case CK_SPLAT:
 			return false;
 		}
 		if (!eval(c, x->a, &a))

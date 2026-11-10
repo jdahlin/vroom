@@ -990,6 +990,23 @@ VPRIV val gen(ecx *e, uint32_t n)
 			lfree(e, &l);
 			return v;
 		}
+		case CK_SPLAT: {	/* the scalar into every lane of a new vector */
+			qty et = T(c, x->ty)->base;
+			uint64_t es = tsize(c, et), nl = tsize(c, x->ty) / es;
+			int32_t sl = slot(e, tsize(c, x->ty), talign(c, x->ty));
+			val v = gen(e, x->a);
+			int r;
+
+			for (uint64_t i = 0; i < nl; i++) {
+				lval l = { .k = L_FRAME, .off = sl + (int64_t)(i * es), .align = talign(c, et) };
+
+				store(e, &l, et, &v);
+			}
+			val_free(e, &v);
+			r = treg(e);
+			opi(e, I_ADDI, 1, r, FRAME, sl);
+			return vreg(r);
+		}
 		case CK_UNION: {
 			int32_t sl = slot(e, tsize(c, x->ty), talign(c, x->ty));
 			lval l = { .k = L_FRAME, .off = sl, .align = talign(c, x->ty) };

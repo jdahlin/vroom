@@ -1789,6 +1789,25 @@ static int wexpr1(ecx *e, uint32_t n, bool want)
 			wslot_addr(e, sl);
 			return WPT(c);
 		}
+		case CK_SPLAT: {	/* the scalar into every lane of a new vector */
+			qty et = T(c, x->ty)->base;
+			uint64_t es = tsize(c, et), nl = tsize(c, x->ty) / es, sl = wslot(e, tsize(c, x->ty), 16);
+			uint32_t t;
+
+			wexpr(e, x->a, true);
+			t = wtmp(e, wty(c, et));
+			wset(e, t);
+			for (uint64_t i = 0; i < nl; i++) {
+				wlv l = { .k = WL_MEM, .off = i * es };
+
+				wslot_addr(e, sl);
+				wget(e, t);
+				wstore(e, &l, et);
+			}
+			wfree(e, t);
+			wslot_addr(e, sl);
+			return WPT(c);
+		}
 		case CK_VADDR:
 			/* a vector value is already the address of its first lane */
 			wexpr(e, x->a, true);
