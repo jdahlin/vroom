@@ -116,7 +116,7 @@ struct cc {
 	struct { uint32_t loc; pp_span r; uint8_t rem; } defer[8];
 	uint32_t unk_loc;	/* the last unknown token given -Winvalid-pp-token */
 	uint8_t se_direct;	/* the next statement is one of a statement expression's body */
-	uint8_t uv_any;		/* -Wuninitialized: 1 the body declares a tracked variable without an initializer, 2 a self-reference */
+	uint8_t uv_any;		/* -Wuninitialized: 1 the body declares a tracked variable without an initializer, 2 a self-reference, 4 a read before an assignment, 8 a goto or case after a tracked declaration */
 	uint8_t nuv;
 	uint16_t cnd;
 	uint32_t in_proto;

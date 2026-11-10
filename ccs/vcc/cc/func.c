@@ -161,7 +161,7 @@ VPRIV void function_def(cc *c, uint32_t s, const declr *d)
 					 k == 1 ? " in all control paths" : "");
 		}
 	}
-	if (c->uv_any & 6)
+	if (c->uv_any & 14)
 		uninit_check(c, body, first_label);
 	{
 		/* side effects of decayed VLA parameter sizes run first, in order */

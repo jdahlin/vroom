@@ -1107,8 +1107,17 @@ static void uv_stmt(uwk *w, uint32_t n, ust *st)
 				here = w->sw_val >= c->ipool[x->a] && w->sw_val <= c->ipool[x->b];
 			else if (w->sw_const)
 				here = !w->sw_hit;
-			if (here)
+			if (here) {
+				/* a fallthrough that initialized it joins the switch's jump that did not */
+				if (st->live && w->swin->live && w->swbrk == w->brk && !w->sw_const)
+					for (uint64_t m = (w->swin->u & ~w->swin->i) & st->i & ~st->u; m; m &= m - 1) {
+						int v = __builtin_ctzll(m);
+
+						w->spend |= 1ull << v, w->sif[v] = n, w->sfalse[v] = false, w->sdep[v] = w->dep, w->skind[v] = 4;
+						w->swc[v][0] = n, w->swa[v][0] = 0, w->nswc[v] = 1;
+					}
 				uj(st, w->swin);
+			}
 		}
 		w->blk++;
 		uv_stmt(w, x->c, st);

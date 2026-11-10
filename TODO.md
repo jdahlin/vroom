@@ -1138,13 +1138,13 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
   operands that only assign, ++ or -- it; volatile compound ones count),
   given with the unused variables at scope close.  Done: diag
   `unused_but_set.c`; the 31 test-suite warnings identical.
-- [ ] **Missing warnings**:
-  `-Wuninitialized` after an
-  assignment on another branch earlier in the text (the analysis runs only when a
-  tracked variable is read before its first assignment in the text) (`-Wunknown-attributes` and
+- [x] **Missing warnings**:
+  (`-Wunknown-attributes` and
   `-Wdeprecated-declarations` are done: PostgreSQL's warnings compare).
   *Validate:* one diag test per warning; `vcc-sema.py warn` stays 879/879
-  (no false positives on the kernel).  (Done: up to 8 ifs breaking out of one `do … while (0)`, one warning each, with
+  (no false positives on the kernel).  (Done: a read after a goto or a case label that skips the assignment
+  (the analysis also runs after a jump), a case reached by a fallthrough that assigned it
+  ("whenever switch case is taken"): diag `uninit_jump.c`; up to 8 ifs breaking out of one `do … while (0)`, one warning each, with
   clang's multi-line range snippets: diag `sometimes_uninit_do2.c`; `-Wsometimes-uninitialized` of an if that breaks out of `do … while (0)` (no
   back edge: a block), and with `-Wsometimes-uninitialized` alone: diag
   `sometimes_uninit_do.c`, `sometimes_uninit_only.c`; `-Wmultichar` in C and `#if`, "character constant too long",
