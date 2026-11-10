@@ -1,0 +1,306 @@
+/* vcc code generator, x86-64: two-address form and the AT&T printer (x64impl.h) */
+#include "x64impl.h"
+
+/* ---------------- two-address form ---------------- */
+
+/* ops whose result must be their first operand on x86 */
+static bool x64_tied(int op)
+{
+	return (op >= X_ADD && op <= X_IMUL) || (op >= X_ADDI && op <= X_XORI) || (op >= X_SHLI && op <= X_SAR) ||
+	       op == X_NEG || op == X_NOT;
+}
+
+static bool x64_commutes(int op) { return op == X_ADD || op == X_AND || op == X_OR || op == X_XOR || op == X_IMUL; }
+
+/*
+ * r0 = r1 op r2 as x86 has it, r0 = r0 op r2: a mov in front when r0 != r1;
+ * a commutative op whose result is its second operand swaps instead, and
+ * a non-commutative one takes the second operand through r11.
+ */
+VPRIV void x64_twoaddr(ecx *e)
+{
+	xst *X = e->x64;
+	uint32_t n = 0;
+	rec *o = X->tw;
+
+	for (uint32_t k = 0; k < X->nin; k++) {
+		rec i = X->in[k];
+
+		if (x64_tied(i.op) && i.r[0] != i.r[1]) {
+			if (i.r[2] != XNOREG && i.r[0] == i.r[2]) {
+				if (x64_commutes(i.op)) {
+					i.r[2] = i.r[1];
+				} else {
+					o[n++] = (rec){ .op = X_MOV, .sz = 8, .r = { R11, i.r[2], XNOREG, XNOREG } };
+					o[n++] = (rec){ .op = X_MOV, .sz = 8, .r = { i.r[0], i.r[1], XNOREG, XNOREG } };
+					i.r[2] = R11;
+				}
+			} else {
+				o[n++] = (rec){ .op = X_MOV, .sz = 8, .r = { i.r[0], i.r[1], XNOREG, XNOREG } };
+			}
+			i.r[1] = i.r[0];
+		}
+		o[n++] = i;
+	}
+	X->tw = X->in;
+	X->in = o;
+	X->nin = n;
+}
+
+/* ---------------- printing ---------------- */
+
+static const char *const x64_r64[] = { "rax", "rcx", "rdx", "rbx", "rsp", "rbp", "rsi", "rdi",
+				       "r8", "r9", "r10", "r11", "r12", "r13", "r14", "r15", "rip" };
+static const char *const x64_r32[] = { "eax", "ecx", "edx", "ebx", "esp", "ebp", "esi", "edi",
+				       "r8d", "r9d", "r10d", "r11d", "r12d", "r13d", "r14d", "r15d" };
+static const char *const x64_r16[] = { "ax", "cx", "dx", "bx", "sp", "bp", "si", "di",
+				       "r8w", "r9w", "r10w", "r11w", "r12w", "r13w", "r14w", "r15w" };
+static const char *const x64_r8[] = { "al", "cl", "dl", "bl", "spl", "bpl", "sil", "dil",
+				      "r8b", "r9b", "r10b", "r11b", "r12b", "r13b", "r14b", "r15b" };
+static const char *const x64_ccn[] = { "o", "no", "b", "ae", "e", "ne", "be", "a", "s", "ns", "p", "np", "l", "ge", "le", "g" };
+
+static void x64_reg(tbuf *b, int r, int sz)
+{
+	tb_c(b, '%');
+	tb_s(b, sz == 8 ? x64_r64[r] : sz == 4 ? x64_r32[r] : sz == 2 ? x64_r16[r] : x64_r8[r]);
+}
+
+static char x64_sfx(int sz) { return sz == 8 ? 'q' : sz == 4 ? 'l' : sz == 2 ? 'w' : 'b'; }
+
+static void x64_lbl(tbuf *b, uint32_t s, uint32_t l)
+{
+	tb_s(b, ".LBB");
+	tb_u(b, s);
+	tb_c(b, '_');
+	tb_u(b, l);
+}
+
+static void x64_memop(cc *c, tbuf *b, const rec *i)
+{
+	if (i->r[1] == RIP) {
+		ref_off(c, b, i->ref, i->off);
+		tb_s(b, "(%rip)");
+		return;
+	}
+	if (i->off)
+		tb_i(b, i->off);
+	tb_c(b, '(');
+	x64_reg(b, i->r[1], 8);
+	tb_c(b, ')');
+}
+
+/* "\top" with the size suffix, then a tab */
+static void x64_ins(tbuf *b, const char *op, int sz)
+{
+	tb_c(b, '\t');
+	tb_s(b, op);
+	if (sz)
+		tb_c(b, x64_sfx(sz));
+	tb_c(b, '\t');
+}
+
+static void x64_imm(tbuf *b, int64_t v)
+{
+	tb_c(b, '$');
+	tb_i(b, v);
+}
+
+VPRIV void x64_print(ecx *e, tbuf *b, uint32_t s)
+{
+	cc *c = e->c;
+	xst *X = e->x64;
+	static const char *const alu[] = { [X_ADD] = "add", [X_SUB] = "sub", [X_AND] = "and", [X_OR] = "or", [X_XOR] = "xor",
+					   [X_IMUL] = "imul", [X_ADDI] = "add", [X_SUBI] = "sub", [X_ANDI] = "and", [X_ORI] = "or",
+					   [X_XORI] = "xor", [X_SHLI] = "shl", [X_SHRI] = "shr", [X_SARI] = "sar", [X_SHL] = "shl",
+					   [X_SHR] = "shr", [X_SAR] = "sar", [X_NEG] = "neg", [X_NOT] = "not" };
+	int32_t frame = (e->wk->foff + 15) & ~15;
+
+	tb_s(b, "\tpushq\t%rbp\n\tmovq\t%rsp, %rbp\n");
+	if (frame) {
+		tb_s(b, "\tsubq\t$");
+		tb_i(b, frame);
+		tb_s(b, ", %rsp\n");
+	}
+	for (uint32_t k = 0; k < X->nin; k++) {
+		const rec *i = &X->in[k];
+		int sz = i->sz;
+
+		switch (i->op) {
+		case X_LABEL:
+			x64_lbl(b, s, i->label);
+			tb_s(b, ":\n");
+			continue;
+		case X_MOV:
+			x64_ins(b, "mov", sz);
+			x64_reg(b, i->r[1], sz);
+			tb_s(b, ", ");
+			x64_reg(b, i->r[0], sz);
+			break;
+		case X_MOVI: {
+			int64_t v = i->imm;
+
+			if (sz == 4) {
+				x64_ins(b, "mov", 4);
+				x64_imm(b, (int32_t)v);
+				tb_s(b, ", ");
+				x64_reg(b, i->r[0], 4);
+			} else if (v >= INT32_MIN && v <= INT32_MAX) {
+				x64_ins(b, "mov", 8);
+				x64_imm(b, v);
+				tb_s(b, ", ");
+				x64_reg(b, i->r[0], 8);
+			} else if ((uint64_t)v <= UINT32_MAX) {
+				x64_ins(b, "mov", 4);
+				x64_imm(b, v);
+				tb_s(b, ", ");
+				x64_reg(b, i->r[0], 4);
+			} else {
+				x64_ins(b, "movabs", 8);
+				x64_imm(b, v);
+				tb_s(b, ", ");
+				x64_reg(b, i->r[0], 8);
+			}
+			break;
+		}
+		case X_LD: {
+			static const char *const sx[] = { [1] = "\tmovsbq\t", [2] = "\tmovswq\t", [4] = "\tmovslq\t", [8] = "\tmovq\t" };
+			static const char *const zx[] = { [1] = "\tmovzbl\t", [2] = "\tmovzwl\t", [4] = "\tmovl\t", [8] = "\tmovq\t" };
+
+			tb_s(b, i->cond ? sx[sz] : zx[sz]);
+			x64_memop(c, b, i);
+			tb_s(b, ", ");
+			x64_reg(b, i->r[0], i->cond || sz == 8 ? 8 : 4);
+			break;
+		}
+		case X_ST:
+			x64_ins(b, "mov", sz);
+			x64_reg(b, i->r[2], sz);
+			tb_s(b, ", ");
+			x64_memop(c, b, i);
+			break;
+		case X_LEA:
+			x64_ins(b, "lea", 8);
+			x64_memop(c, b, i);
+			tb_s(b, ", ");
+			x64_reg(b, i->r[0], 8);
+			break;
+		case X_ADD: case X_SUB: case X_AND: case X_OR: case X_XOR: case X_IMUL:
+			x64_ins(b, alu[i->op], sz);
+			x64_reg(b, i->r[2], sz);
+			tb_s(b, ", ");
+			x64_reg(b, i->r[0], sz);
+			break;
+		case X_ADDI: case X_SUBI: case X_ANDI: case X_ORI: case X_XORI: case X_SHLI: case X_SHRI: case X_SARI:
+			x64_ins(b, alu[i->op], sz);
+			x64_imm(b, i->imm);
+			tb_s(b, ", ");
+			x64_reg(b, i->r[0], sz);
+			break;
+		case X_IMULI:
+			x64_ins(b, "imul", sz);
+			x64_imm(b, i->imm);
+			tb_s(b, ", ");
+			x64_reg(b, i->r[1], sz);
+			tb_s(b, ", ");
+			x64_reg(b, i->r[0], sz);
+			break;
+		case X_SHL: case X_SHR: case X_SAR:
+			x64_ins(b, alu[i->op], sz);
+			tb_s(b, "%cl, ");
+			x64_reg(b, i->r[0], sz);
+			break;
+		case X_NEG: case X_NOT:
+			x64_ins(b, alu[i->op], sz);
+			x64_reg(b, i->r[0], sz);
+			break;
+		case X_CMP:
+			x64_ins(b, "cmp", sz);
+			x64_reg(b, i->r[2], sz);
+			tb_s(b, ", ");
+			x64_reg(b, i->r[1], sz);
+			break;
+		case X_CMPI:
+			x64_ins(b, "cmp", sz);
+			x64_imm(b, i->imm);
+			tb_s(b, ", ");
+			x64_reg(b, i->r[1], sz);
+			break;
+		case X_TEST:
+			x64_ins(b, "test", sz);
+			x64_reg(b, i->r[1], sz);
+			tb_s(b, ", ");
+			x64_reg(b, i->r[1], sz);
+			break;
+		case X_SETCC:
+			tb_s(b, "\tset");
+			tb_s(b, x64_ccn[i->cond]);
+			tb_c(b, '\t');
+			x64_reg(b, i->r[0], 1);
+			tb_s(b, "\n\tmovzbl\t");
+			x64_reg(b, i->r[0], 1);
+			tb_s(b, ", ");
+			x64_reg(b, i->r[0], 4);
+			break;
+		case X_JMP:
+			tb_s(b, "\tjmp\t");
+			x64_lbl(b, s, i->label);
+			break;
+		case X_JCC:
+			tb_s(b, "\tj");
+			tb_s(b, x64_ccn[i->cond]);
+			tb_c(b, '\t');
+			x64_lbl(b, s, i->label);
+			break;
+		case X_CALL:
+			tb_s(b, "\tcallq\t");
+			ref_name(c, b, i->ref);
+			break;
+		case X_CALLR:
+			tb_s(b, "\tcallq\t*");
+			x64_reg(b, i->r[1], 8);
+			break;
+		case X_PUSH:
+			tb_s(b, "\tpushq\t");
+			x64_reg(b, i->r[1], 8);
+			break;
+		case X_POP:
+			tb_s(b, "\tpopq\t");
+			x64_reg(b, i->r[0], 8);
+			break;
+		case X_ADJSP:
+			tb_s(b, i->imm < 0 ? "\tsubq\t$" : "\taddq\t$");
+			tb_i(b, i->imm < 0 ? -i->imm : i->imm);
+			tb_s(b, ", %rsp");
+			break;
+		case X_CQO:
+			tb_s(b, sz == 8 ? "\tcqto" : "\tcltd");
+			break;
+		case X_IDIV: case X_DIV:
+			x64_ins(b, i->op == X_IDIV ? "idiv" : "div", sz);
+			x64_reg(b, i->r[1], sz);
+			break;
+		case X_EXT: {
+			static const char *const sx[] = { [1] = "\tmovsbq\t", [2] = "\tmovswq\t", [4] = "\tmovslq\t" };
+			static const char *const zx[] = { [1] = "\tmovzbl\t", [2] = "\tmovzwl\t", [4] = "\tmovl\t" };
+
+			tb_s(b, i->cond ? sx[sz] : zx[sz]);
+			x64_reg(b, i->r[1], sz);
+			tb_s(b, ", ");
+			x64_reg(b, i->r[0], i->cond ? 8 : 4);
+			break;
+		}
+		default:
+			efatal(e, e->curloc, "internal error: x86-64 record %d", i->op);
+		}
+		tb_c(b, '\n');
+	}
+	tb_s(b, "\tmovq\t%rbp, %rsp\n\tpopq\t%rbp\n\tretq\n.Lfunc_end");
+	tb_u(b, s);
+	tb_s(b, ":\n\t.size\t");
+	sym_name(c, b, s);
+	tb_s(b, ", .Lfunc_end");
+	tb_u(b, s);
+	tb_c(b, '-');
+	sym_name(c, b, s);
+	tb_c(b, '\n');
+}
