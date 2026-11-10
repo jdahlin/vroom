@@ -866,8 +866,9 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
   `VCC_LDCMP=1 VCC_CFLAGS=-fasynchronous-unwind-tables vcc-ctests.py`
   1756/1756 identical.  Orphans placed by lld's rank bits and
   getRankProximity, then back past sections without inputs (findOrphanPos).
-  Left: `--emit-relocs`, `--eh-frame-hdr`
-  (ignored), `-z now` (no effect without dynamic linking).
+  `--eh-frame-hdr` as lld's EhFrameHeader (sorted table, duplicate
+  locations dropped) and PT_GNU_EH_FRAME: 4 cases.
+  Left: `--emit-relocs`, `-z now` (no effect without dynamic linking).
   *Validate:* `bench/vlink-opts.py` per option; unknown options are errors.
 - [ ] **Relocations**: (done: GOT relaxation adrp+ldr -> adrp+add / nop+adr
   as lld; orphans placed by lld's coarse rank (sections without inputs do not count; nothing with inputs after: at the very end, as lld); `.got` for

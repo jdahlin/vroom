@@ -82,6 +82,10 @@ CASES = [
     ('eh_frame gc', '--gc-sections {t}/e1.o {t}/e2.o {t}/e3.o'),
     ('eh_frame personality', '{t}/e1.o {t}/e2.o {t}/ep.o {t}/pers.o'),
     ('eh_frame personality gc', '--gc-sections {t}/e1.o {t}/e2.o {t}/ep.o {t}/pers.o'),
+    ('--eh-frame-hdr', '--eh-frame-hdr {t}/e1.o {t}/e2.o {t}/e3.o {t}/ep.o {t}/pers.o'),
+    ('--eh-frame-hdr gc', '--eh-frame-hdr --gc-sections {t}/e1.o {t}/e2.o {t}/e3.o {t}/ep.o {t}/pers.o'),
+    ('--eh-frame-hdr without .eh_frame', '--eh-frame-hdr {t}/cm.o'),
+    ('--no-eh-frame-hdr', '--eh-frame-hdr --no-eh-frame-hdr {t}/e1.o {t}/e2.o {t}/ep.o {t}/pers.o'),
 ]
 MSG = {'-mbad': 'unknown emulation: foo',
        '-l missing': 'unable to find library -lnosuch', '-l no -L': 'unable to find library -lx'}
@@ -196,7 +200,7 @@ def main():
                     # and the program headers (type, offsets, sizes, flags, alignment)
                     ph = subprocess.run([llvm('llvm-readelf'), '-lW', out], capture_output=True, text=True).stdout
                     img = (img, [l.split() for l in ph.splitlines()
-                                 if l.strip().split(' ')[0] in ('LOAD', 'TLS', 'GNU_RELRO', 'GNU_STACK', 'PHDR', 'NOTE')])
+                                 if l.strip().split(' ')[0] in ('LOAD', 'TLS', 'GNU_RELRO', 'GNU_EH_FRAME', 'GNU_STACK', 'PHDR', 'NOTE')])
                 r[tool] = (p.returncode, first_err(p.stderr), img)
             (vr, ve, vi), (lr, le, li) = r['vlink'], r['lld']
             why = None

@@ -311,6 +311,7 @@ static struct {
 	bool bstatic;
 	bool gc, print_gc;		/* --gc-sections, --print-gc-sections */
 	bool norelro;			/* -z norelro: no PT_GNU_RELRO */
+	bool eh_frame_hdr;		/* --eh-frame-hdr: .eh_frame_hdr and PT_GNU_EH_FRAME */
 } opt;
 
 static int dirfd_base = AT_FDCWD;
@@ -343,7 +344,7 @@ typedef struct Obj {
 static VVEC(Obj *) objs;
 
 enum { K_NONE, K_NORMAL, K_MERGE_IN, K_MERGE, K_THUNK, K_RELADYN, K_BUILDID,
-       K_SYMTAB, K_STRTAB, K_SHSTRTAB, K_COMMENT, K_GOT };
+       K_SYMTAB, K_STRTAB, K_SHSTRTAB, K_COMMENT, K_GOT, K_EHHDR };
 
 typedef struct ISec {
 	const uint8_t *data;
@@ -2225,6 +2226,8 @@ static VVEC(PhdrSecs) phsecs;		/* first/last osec of each phdr */
 static VVEC(uint32_t) outsecs;		/* live output sections in header order */
 static uint64_t ndyn;			/* RELATIVE relocations */
 static uint32_t reladyn_isec = NONE, buildid_isec = NONE, comment_isec = NONE, got_isec = NONE;
+static uint32_t ehhdr_isec = NONE;	/* --eh-frame-hdr */
+static VVEC(uint32_t) ehfdes;		/* the FDE pieces in the output, for .eh_frame_hdr */
 static VVEC(uint32_t) gotsyms;		/* .got slot -> G id (the globals, first) */
 typedef struct { uint32_t obj, sym; } GotLoc;
 static VVEC(GotLoc) gotlocs;		/* then the locals: slot gotsyms.n + i */
@@ -2457,6 +2460,7 @@ static void eh_frames(void)
 			for (uint32_t f = 0; f < cies[c].fdes.n; f++) {
 				isecs.v[cies[c].fdes.v[f]].ehcie = cp + 1;
 				VVEC_PUSH(out, cies[c].fdes.v[f], alloc);
+				VVEC_PUSH(ehfdes, cies[c].fdes.v[f], alloc);
 			}
 		}
 		{
@@ -2590,6 +2594,16 @@ static int orphan_rank(uint64_t flags, uint32_t type, const char *name)
 	if (type == SHT_NOBITS)
 		r |= RF_BSS;
 	return r;
+}
+
+/* orphans sort by rank; .eh_frame_hdr and .eh_frame are lld synthetics, after
+ * the input orphans of their rank, the header first */
+static uint64_t orphan_key(const ISec *is)
+{
+	unsigned r = (unsigned)orphan_rank(is->flags, is->type, is->name);
+	unsigned syn = !strcmp(is->name, ".eh_frame_hdr") ? 1 : !strcmp(is->name, ".eh_frame") ? 2 : 0;
+
+	return (uint64_t)r << 2 | syn;
 }
 
 static int rank_prox(int a, int b) { return a == b ? 32 : __builtin_clz((unsigned)(a ^ b)); }
@@ -2786,13 +2800,13 @@ static void assign_sections(void)
 		/* stable: by rank, non-allocated last */
 		for (uint32_t i = 0; i < n; i++) {
 			const ISec *is = &isecs.v[orphans.v[i]];
-			unsigned q = (unsigned)orphan_rank(is->flags, is->type, is->name);
+			uint64_t q = orphan_key(is);
 			uint32_t at = k++;
 
 			while (at > 0) {
 				const ISec *p = &isecs.v[tmp[at - 1]];
 
-				if ((unsigned)orphan_rank(p->flags, p->type, p->name) <= q)
+				if (orphan_key(p) <= q)
 					break;
 				tmp[at] = tmp[at - 1];
 				at--;
@@ -2928,6 +2942,8 @@ static void assign_sections(void)
 			isecs.v[merges.v[m].isec].align = merges.v[m].align;
 	}
 	eh_frames();
+	if (ehhdr_isec != NONE)	/* lld EhFrameHeader::getSize: 12 + 8 per FDE */
+		isecs.v[ehhdr_isec].size = 12 + 8 * (uint64_t)ehfdes.n;
 	/* output section ownership */
 	for (uint32_t i = 0; i < isds.n; i++)
 		for (uint32_t s = 0; s < isds.v[i].secs.n; s++)
@@ -3377,6 +3393,66 @@ static void write_isec(void *arg, size_t j)
 	}
 }
 
+/* .eh_frame_hdr (lld EhFrameHeader::write): version 1, eh_frame_ptr pcrel
+ * sdata4, fde_count udata4, a table datarel sdata4 of (initial location,
+ * FDE) sorted by location, duplicate locations dropped; read from the
+ * relocated FDEs */
+static int cmp_u64pair(const void *a, const void *b)
+{
+	const uint64_t *x = a, *y = b;
+	return x[0] != y[0] ? (x[0] < y[0] ? -1 : 1) : x[1] < y[1] ? -1 : x[1] > y[1];	/* lld stable_sort: output order */
+}
+static void write_ehhdr(void)
+{
+	if (ehhdr_isec == NONE)
+		return;
+	uint32_t ho = isec_osec(ehhdr_isec);
+
+	if (ho == NONE || ho == OS_DISCARD)
+		return;
+	uint64_t hva = isec_va(ehhdr_isec, 0);
+	uint8_t *h = out + osecs.v[ho].offset + isecs.v[ehhdr_isec].off;
+	uint64_t (*t)[2] = alloc((ehfdes.n + 1) * sizeof *t);
+	uint32_t n = 0;
+	uint64_t ehva = 0;
+
+	for (uint32_t k = 0; k < ehfdes.n; k++) {
+		uint32_t f = ehfdes.v[k], fo = isec_osec(f);
+		const uint8_t *b = out + osecs.v[fo].offset + isecs.v[f].off;
+		uint64_t fva = isec_va(f, 0);
+
+		if (!k)
+			ehva = osecs.v[fo].va;
+		t[n][0] = fva + 8 + (uint64_t)(int64_t)(int32_t)rd32(b + 8);	/* pc_begin: pcrel sdata4 (vcc, clang) */
+		t[n][1] = fva;
+		n++;
+	}
+	if (!ehfdes.n && isecs.n)
+		for (uint32_t i = 0; i < isecs.n; i++)
+			if (!strcmp(isecs.v[i].name, ".eh_frame") && isecs.v[i].kind == K_NORMAL && isec_osec(i) < osecs.n) {
+				ehva = osecs.v[isec_osec(i)].va;
+				break;
+			}
+	qsort(t, n, sizeof *t, cmp_u64pair);
+	uint32_t m = 0;
+	for (uint32_t k = 0; k < n; k++)
+		if (!m || t[k][0] != t[m - 1][0]) {
+			t[m][0] = t[k][0];
+			t[m][1] = t[k][1];
+			m++;
+		}
+	h[0] = 1;
+	h[1] = 0x1b;	/* DW_EH_PE_pcrel | sdata4 */
+	h[2] = 0x03;	/* udata4 */
+	h[3] = 0x3b;	/* DW_EH_PE_datarel | sdata4 */
+	wr32(h + 4, (uint32_t)(ehva - (hva + 4)));
+	wr32(h + 8, m);
+	for (uint32_t k = 0; k < m; k++) {
+		wr32(h + 12 + 8 * k, (uint32_t)(t[k][0] - hva));
+		wr32(h + 16 + 8 * k, (uint32_t)(t[k][1] - hva));
+	}
+}
+
 /* ---------------- stubs for unresolved symbols (-O0 dead branches) ---------------- */
 
 static int cmp_str(const void *a, const void *b) { return strcmp(*(char *const *)a, *(char *const *)b); }
@@ -3493,7 +3569,9 @@ static bool parse_args(int argc, char **argv)
 		if (ARG("--no-whole-archive") || ARG("-no-whole-archive")) { whole = false; continue; }
 		if (ARG("--start-group") || ARG("--end-group") || ARG("-(") || ARG("-)")) continue;
 		if (ARG("--pic-veneer")) { opt.pic_veneer = true; continue; }
-		if (ARG("-EL") || ARG("--no-undefined-version") || ARG("--eh-frame-hdr")) continue;
+		if (ARG("--eh-frame-hdr")) { opt.eh_frame_hdr = true; continue; }
+		if (ARG("--no-eh-frame-hdr")) { opt.eh_frame_hdr = false; continue; }
+		if (ARG("-EL") || ARG("--no-undefined-version")) continue;
 		if (ARG("--no-undefined") || ARG("-zdefs")) { opt.no_undefined = true; continue; }
 		if (ARG("-X") || ARG("--discard-locals")) { opt.discard_locals = true; continue; }
 		if (ARG("-x") || ARG("--discard-all")) { opt.discard_all = true; continue; }
@@ -4155,6 +4233,8 @@ static void create_phdrs(void)
 		if (rr >= 0)
 			phdrs.v[rr].p_align = 1;
 	}
+	if (ehhdr_isec != NONE && isec_osec(ehhdr_isec) != NONE && isec_osec(ehhdr_isec) != OS_DISCARD)
+		phadd(phnew(PT_GNU_EH_FRAME, PF_R), isec_osec(ehhdr_isec));
 	phnew(PT_GNU_STACK, PF_R | PF_W);
 	int note = -1;
 	for (uint32_t i = 0; i < outsecs.n; i++) {
@@ -4626,6 +4706,10 @@ static void add_synthetic_sections(void)
 		isecs.v[buildid_isec].size = 16 + (!strcmp(opt.build_id, "md5") ? 16 :
 						   !strcmp(opt.build_id, "fast") ? 8 : 20);
 	}
+	/* lld: .eh_frame_hdr when there is an .eh_frame (sized by eh_frames) */
+	for (uint32_t i = 0; opt.eh_frame_hdr && !opt.relocatable && ehhdr_isec == NONE && i < isecs.n; i++)
+		if (eh_input(&isecs.v[i]))
+			ehhdr_isec = new_isec(".eh_frame_hdr", K_EHHDR, SHT_PROGBITS, SHF_ALLOC, 4);
 	/* only when some GOT relocation needs it (lld drops an empty .got); sized after the scan */
 	if (any_got())
 		got_isec = new_isec(".got", K_GOT, SHT_PROGBITS, SHF_ALLOC | SHF_WRITE, 8);
@@ -5094,6 +5178,7 @@ static int run(int argc, char **argv)
 	}
 	final_addresses();
 	pfor(wjobs.n, write_isec, NULL);
+	write_ehhdr();
 	phase("copy + relocate");
 	fill_symtab();
 	write_synthetic();
