@@ -575,7 +575,7 @@ static int fmt(sink *s, const char *f, va_list ap)
 			else {
 				int p = prec ? prec : 1, x = 0;
 				char t[520];
-				expo(t, v, p - 1, 0, 0);
+				t[expo(t, v, p - 1, 0, 0)] = 0;	/* strtol below: no stack bytes after the exponent */
 				x = (int)strtol(strchr(t, 'e') + 1, 0, 10);
 				if (x < -4 || x >= p) n = expo(b, v, p - 1, alt, up);
 				else n = fixed(b, v, p - 1 - x, alt);
