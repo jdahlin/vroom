@@ -1048,7 +1048,8 @@ VPRIV __attribute__((noinline)) qty dr_func(cc *c, qty ret, const qty *par, uint
 	o.a = QI(q);
 	o.t.kind = TY_FUNC, o.t.flags = (uint8_t)flags, o.t.base = ret, o.t.n = n;
 	VGROW(r->opar, n);
-	memcpy(r->opar.v + r->opar.n, par, n * sizeof(qty));
+	if (n)	/* par may be NULL (implicit, unprototyped): memcpy(_, NULL, 0) is UB */
+		memcpy(r->opar.v + r->opar.n, par, n * sizeof(qty));
 	r->opar.n += n;
 	VPUSH(r->ops, o);
 	if (QI(q) < r->y0)
