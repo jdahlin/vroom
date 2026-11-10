@@ -773,12 +773,16 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
   large (2 GB or more)"; an #include of one still says not found) (`lex/lex.c:1373`, `uint32` offsets
   `lex/lex.h:50,61`).  Clear error.
   *Validate:* T5 (sparse 3 GB file → "file too large").
-- [ ] **x86-64 host build**: `lex/lex.c:4` NEON, `lex/lex.c:1517` `yield`,
-  `lib/intern.c:1` `arm_acle.h`.  Scalar fallback (lexref.c exists) or SSE/AVX2
-  port; CRC32 via SSE4.2.
-  *Validate:* CI job building and running `fuzz-regress`, `vcc-diff.py cmp`
-  on x86-64 Linux (cross-target aarch64); `fuzz-lex` already compares NEON
-  vs scalar, add SSE vs scalar.
+- [ ] **x86-64 host build** (builds and runs since 2026-11-10, PLAN-x86.md X0):
+  `classify` and the three searches in `lex/lex.c` have a scalar version
+  for hosts without NEON, CRC32C is SSE4.2 (`lib/hostcrc.h`), `pause` for
+  `yield`, `-march=native -msse4.2`, the fuzz targets use the host's clang
+  and libFuzzer.  Left: an SSE2/AVX2 `classify` (the scalar one is a byte
+  at a time), and the kernel parity runs on this host (no `work/` here).
+  *Validate:* `fuzz-regress`; `fuzz-lex` (window path vs reference) ~1M
+  runs clean; `-S`/`-c`/`-E` of the C suites byte-identical between the
+  x86-64 build and an arm64 cross build under qemu-aarch64 (1903 files x 4).
+  Still to do: `vcc-diff.py cmp` once a kernel tree is here.
 
 ### Assembler (`as/as.c`, `arch/a64/as/enc.c`)
 - [x] **`.cfi_*`** → `.eh_frame` [P]: every directive but personality/LSDA

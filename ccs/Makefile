@@ -46,7 +46,12 @@ HOST_DEFS  = -D_GNU_SOURCE -DVCC_RESDIR='"$(shell $(HOST_CC) -print-resource-dir
 HOST_LIBS  = -lm
 # Apple cores (implementer 0x61: Docker Desktop, Asahi, a VM on a Mac) report no
 # CPU part, so -mcpu=native falls back to generic; name the core instead.
-HOST_CPU  ?= $(if $(shell grep -qm1 'implementer.*0x61' /proc/cpuinfo && echo y),-mcpu=apple-m1,-mcpu=native)
+HOST_CPU_A64 =  $(if $(shell grep -qm1 'implementer.*0x61' /proc/cpuinfo && echo y),-mcpu=apple-m1,-mcpu=native)
+ifeq ($(shell uname -m),x86_64)
+HOST_CPU  ?= -march=native -msse4.2
+else
+HOST_CPU  ?= $(HOST_CPU_A64)
+endif
 endif
 VCC_CC     = $(CCACHE) $(HOST_CC)
 # VCC_SAN/VCC_OPT: set by the sanitizer variants (vcc-asan, vcc-tsan below)
@@ -205,17 +210,18 @@ self-check: self
 # ---- fuzzing (fuzz/; see AGENTS.md) ----
 # libFuzzer from Homebrew LLVM when it has one, else the standalone driver
 # (fuzz/driver.c: replay + blind mutation) with Apple clang.
-FUZZ_LIBFUZZER := $(wildcard $(LLVM)/lib/clang/*/lib/darwin/libclang_rt.fuzzer_osx.a)
+# On Linux: the distro clang's libFuzzer and the host's CPU flags.
+FUZZ_LIBFUZZER := $(wildcard $(LLVM)/lib/clang/*/lib/darwin/libclang_rt.fuzzer_osx.a $(LLVM)/lib/clang/*/lib/linux/libclang_rt.fuzzer-$(shell uname -m).a)
 ifneq ($(FUZZ_LIBFUZZER),)
 FUZZ_CC = $(LLVM)/bin/clang
 FUZZ_ENGINE = -fsanitize=fuzzer
 FUZZ_DRIVER =
 else
-FUZZ_CC = /usr/bin/clang
+FUZZ_CC = $(HOST_CC)
 FUZZ_ENGINE =
 FUZZ_DRIVER = fuzz/driver.c
 endif
-FUZZ_CFLAGS = -std=gnu11 -g -O1 -mcpu=apple-m1 -D_DARWIN_C_SOURCE -pthread \
+FUZZ_CFLAGS = -std=gnu11 -g -O1 $(HOST_CPU) $(HOST_DEFS) -pthread \
 	-fsanitize=address,undefined -fno-sanitize-recover=undefined -fno-omit-frame-pointer \
 	-Wall -Wno-unused-parameter
 FUZZ_OUT = $(OUT)/fuzz

@@ -83,7 +83,7 @@ uint32_t vintern_count(void);
  * inline, so a hit compares two words in L1 and touches neither the shared
  * table nor the spelling.  Hashes agree with vintern_hash().
  */
-#include <arm_acle.h>
+#include "hostcrc.h"
 #include <string.h>
 
 /* identifier ids are below 1 << VINTERN_ID_BITS: tables indexed by id are sized by it */

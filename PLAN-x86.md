@@ -330,5 +330,19 @@ kärnan och kan vänta.
 
 ## Status
 
-Inget steg påbörjat (2026-11-10). Lagerindelningen (vandrare, sänkning, gemensamma
+### X0 (2026-11-10): bygger och kör, SIMD-lexer och kärnparitet kvar
+- `make -C ccs vcc` på x86-64 Linux med clang 22: `classify`, `find_cend`,
+  `find_nl` och `find_quote` i `lex/lex.c` har en skalär version utan NEON
+  (samma masker bit för bit), CRC32C via SSE4.2 (`lib/hostcrc.h`, samma polynom),
+  `pause` i spinnslingan, `-march=native -msse4.2`. Fuzz-målen tar värdens clang
+  och libFuzzer (LeakSanitizer är på som standard på Linux: `ASAN_OPTIONS=detect_leaks=0`
+  för regress-körningen, eftersom den rapporterar läckor redan på tom indata).
+- Verifierat: `fuzz-regress` grönt; `fuzz-lex` ~1M körningar (fönstervägen med
+  skalära masker mot referenslexern) utan fel; `-S -O2`, `-c -O2`, `-S -O0`, `-E` av
+  vcc-, gcc-torture- och tcc-sviterna (1903 filer) byte-identiska mellan x86-64-bygget
+  och ett arm64-korsbygge (NEON) som körs i qemu-aarch64.
+- Kvar: SSE2/AVX2-`classify` (den skalära tar en byte i taget), `vcc-diff.py cmp`
+  och `vcc-ctests.py` här (inget `work/`-träd; qemu-system-aarch64 saknas).
+
+Övriga steg inte påbörjade. Lagerindelningen (vandrare, sänkning, gemensamma
 pass) beslutad 2026-11-10; arm64 och wasm flyttas senare (TODO.md).
