@@ -289,6 +289,9 @@ VPRIV void x64_print(ecx *e, tbuf *b, uint32_t s)
 			x64_reg(b, i->r[0], i->cond ? 8 : 4);
 			break;
 		}
+		case X_REP:
+			tb_s(b, i->cond ? "\trep\tstosb" : "\trep\tmovsb");
+			break;
 		default:
 			efatal(e, e->curloc, "internal error: x86-64 record %d", i->op);
 		}

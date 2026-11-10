@@ -150,6 +150,90 @@ VPRIV int x64_laddr(ecx *e, const lval *l)
 	return r;
 }
 
+/* registers a block operation needs (rep movsb/stosb), saved if live and not one of keep */
+static uint32_t x64_save(ecx *e, const uint8_t *regs, int n, int k0, int k1)
+{
+	xst *X = e->x64;
+	uint32_t sv = 0;
+
+	for (int k = 0; k < n; k++)
+		if ((X->live & (1u << regs[k])) && regs[k] != k0 && regs[k] != k1) {
+			x64_op3(e, X_PUSH, 8, XNOREG, regs[k], XNOREG);
+			X->pushes++;
+			sv |= 1u << regs[k];
+		}
+	return sv;
+}
+
+static void x64_restore(ecx *e, uint32_t sv)
+{
+	xst *X = e->x64;
+
+	for (int r = 15; r >= 0; r--)
+		if (sv & (1u << r)) {
+			x64_op3(e, X_POP, 8, r, XNOREG, XNOREG);
+			X->pushes--;
+		}
+}
+
+static void x64_movi(ecx *e, int r, int64_t v)
+{
+	x64_op3(e, X_MOVI, 8, r, XNOREG, XNOREG)->imm = v;
+}
+
+VPRIV void x64_copy(ecx *e, int rdst, int rsrc, uint64_t n)
+{
+	if (n <= 128) {
+		for (uint64_t o = 0; o < n;) {
+			int k = n - o >= 8 ? 8 : n - o >= 4 ? 4 : n - o >= 2 ? 2 : 1;
+			lval s = { .k = L_REG, .r = (uint8_t)rsrc, .off = (int64_t)o }, d = { .k = L_REG, .r = (uint8_t)rdst, .off = (int64_t)o };
+
+			x64_mem(e, X_LD, k, R11, &s, false);
+			x64_mem(e, X_ST, k, R11, &d, false);
+			o += (uint64_t)k;
+		}
+		return;
+	}
+	{
+		static const uint8_t rr[3] = { RDI, RSI, RCX };
+		uint32_t sv = x64_save(e, rr, 3, -1, -1);
+
+		/* rdst, rsrc may be any of rdi rsi rcx: through r11 and the stack */
+		x64_op3(e, X_PUSH, 8, XNOREG, rsrc, XNOREG);
+		x64_mov(e, R11, rdst);
+		x64_op3(e, X_POP, 8, RSI, XNOREG, XNOREG);
+		x64_mov(e, RDI, R11);
+		x64_movi(e, RCX, (int64_t)n);
+		x64_put(e, X_REP)->cond = 0;
+		x64_restore(e, sv);
+	}
+}
+
+VPRIV void x64_zero(ecx *e, int rdst, uint64_t n)
+{
+	if (n <= 128) {
+		x64_op3(e, X_MOVI, 4, R11, XNOREG, XNOREG)->imm = 0;
+		for (uint64_t o = 0; o < n;) {
+			int k = n - o >= 8 ? 8 : n - o >= 4 ? 4 : n - o >= 2 ? 2 : 1;
+			lval d = { .k = L_REG, .r = (uint8_t)rdst, .off = (int64_t)o };
+
+			x64_mem(e, X_ST, k, R11, &d, false);
+			o += (uint64_t)k;
+		}
+		return;
+	}
+	{
+		static const uint8_t rr[3] = { RDI, RAX, RCX };
+		uint32_t sv = x64_save(e, rr, 3, -1, -1);
+
+		x64_mov(e, RDI, rdst);
+		x64_op3(e, X_MOVI, 4, RAX, XNOREG, XNOREG)->imm = 0;
+		x64_movi(e, RCX, (int64_t)n);
+		x64_put(e, X_REP)->cond = 1;
+		x64_restore(e, sv);
+	}
+}
+
 VPRIV void x64_ext(ecx *e, int r, int from, bool sgn)
 {
 	rec *i;

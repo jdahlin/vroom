@@ -46,6 +46,7 @@ enum {
 	X_CQO,		/* rdx = sign of rax (sz 4: cltd, 8: cqto) */
 	X_IDIV, X_DIV,	/* rdx:rax / r1: rax quotient, rdx remainder */
 	X_EXT,		/* r0 = r1's low sz bytes extended to 64 bits (cond 1: sign) */
+	X_REP,		/* cond 0: rep movsb (rdi rsi rcx), 1: rep stosb (rdi al rcx) */
 	X_NOPS
 };
 

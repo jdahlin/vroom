@@ -55,6 +55,7 @@ typedef struct wkst {
 VPRIV wkst *wk_state(ecx *e);
 VPRIV void wk_function(ecx *e, uint32_t s);	/* emit/walk/func.c: what emit/tu.c calls for x86-64 */
 VPRIV int32_t wk_slot(ecx *e, uint64_t size, uint32_t align);
+VPRIV int32_t wk_local(ecx *e, uint32_t s);	/* a local's slot, made on first use (a goto may reach a use first) */
 VPRIV uint32_t wk_newlabel(ecx *e);
 VPRIV val wk_gen(ecx *e, uint32_t n);
 VPRIV lval wk_lval(ecx *e, uint32_t n);
@@ -62,6 +63,7 @@ VPRIV int wk_reg(ecx *e, val *v, qty t);
 VPRIV void wk_free(ecx *e, const val *v);
 VPRIV void wk_cond(ecx *e, uint32_t n, bool jump_if, uint32_t lbl);
 VPRIV void wk_stmt(ecx *e, uint32_t n);
+VPRIV void wk_init(ecx *e, const lval *dst, qty t, uint32_t init);	/* an object initialized by init (0: none) */
 VPRIV int wk_size(cc *c, qty t);
 VPRIV void ctor_entry(cc *c, tbuf *b, uint32_t s, bool fini);	/* arch/a64/emit/func.c (shared) */
 VPRIV bool wk_signed(cc *c, qty t);
@@ -78,6 +80,8 @@ VPRIV int LO(toreg)(ecx *e, val *v, int size);	/* a constant or address into a t
 VPRIV void LO(load)(ecx *e, int rd, const lval *l, int size, bool sgn);
 VPRIV void LO(store)(ecx *e, int rs, const lval *l, int size);
 VPRIV int LO(laddr)(ecx *e, const lval *l);		/* the address in a temporary (l's register is reused) */
+VPRIV void LO(copy)(ecx *e, int rdst, int rsrc, uint64_t n);	/* n bytes; the address registers stay live */
+VPRIV void LO(zero)(ecx *e, int rdst, uint64_t n);
 /* integers: size 4 or 8 (the operation's width); results in a's register */
 VPRIV val LO(bin)(ecx *e, int op, int size, bool sgn, val a, val b);	/* T_PLUS T_MINUS T_STAR T_SLASH T_PERCENT T_AMP T_PIPE T_CARET T_LESSLESS T_GREATERGREATER */
 VPRIV val LO(un)(ecx *e, int op, int size, val a);			/* T_MINUS T_TILDE */
