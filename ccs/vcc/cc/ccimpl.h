@@ -364,6 +364,7 @@ VPRIV void merge_attrs(attrs *to, const attrs *from);
 VPRIV int body_falls_off(cc *c, uint32_t body, uint32_t first_label);
 VPRIV void uninit_check(cc *c, uint32_t body, uint32_t first_label);
 /* fmt.c */
+VPRIV uint32_t fmt_attr(cc *c, uint32_t fs);
 VPRIV void format_check(cc *c, uint32_t fs, const uint32_t *args, const qty *aty, const uint32_t *atd, uint32_t nargs);
 VPRIV void asm_label(cc *c, attrs *a);
 /* declspec.c */

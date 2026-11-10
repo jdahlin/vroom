@@ -85,6 +85,8 @@ typedef struct fmtx {
 	pp_span all;		/* the format string expression */
 	const char *s;
 	uint32_t n;
+	pp_span via;		/* the format argument when the string is a const variable's initializer */
+	bool isvia;
 } fmtx;
 
 /* the source location of byte i of the format string, 0 if it cannot be mapped */
@@ -176,6 +178,15 @@ static bool fmt_report(fmtx *x, const char *flag, uint32_t loc, const pp_span *r
 	va_start(ap, fmt);
 	vsnprintf(buf, sizeof(buf), fmt, ap);
 	va_end(ap);
+	if (x->isvia) {
+		/* clang: the warning at the argument (or the format argument), the specifier in a note */
+		pp_span vr[2] = { x->via, nr >= 2 ? r[1] : x->via };
+
+		if (!cc_warnx(x->c, flag, true, NULL, nr >= 2 ? loc : x->via.b, vr, nr >= 2 ? 2 : 1, NULL, 0, "%s", buf))
+			return false;
+		report(x->c, "note", nr && nr < 2 ? loc : nr ? r[0].b : loc, r, nr ? 1 : 0, fx, nfx, "format string is defined here");
+		return true;
+	}
 	return cc_warnx(x->c, flag, true, NULL, loc, r, nr, fx, nfx, "%s", buf);
 }
 
@@ -244,7 +255,7 @@ static void fmt_fixtext(fmtx *x, const fspec *f, const char *lc, bool charp, cha
 
 static const char *const fmt_valid_flags[6] = {
 	/* '-' '+' ' ' '#' '0' '\'' */
-	"diouxXcspfFeEgGaA", "difFeEgGaA", "difFeEgGaA", "oxXaAeEfFgG", "diouxXaAeEfFgG", "diufFgG",
+	"diouxXbBcspfFeEgGaA", "difFeEgGaA", "difFeEgGaA", "oxXbBaAeEfFgG", "diouxXbBaAeEfFgG", "diufFgG",
 };
 
 /*
@@ -252,10 +263,57 @@ static const char *const fmt_valid_flags[6] = {
  * its flags, width and precision, length modifier, then (first != 0) the
  * argument; at the end the first data argument no specification used.
  */
+/* format(printf, i, j) of fs: its attribute, or what clang gives a library builtin of the printf
+   family declared with the builtin's type (not with -ffreestanding / -fno-builtin) */
+VPRIV uint32_t fmt_attr(cc *c, uint32_t fs)
+{
+	static const struct { const char *n; uint8_t fi, first; } lib[] = {
+		{ "printf", 1, 2 }, { "sprintf", 2, 3 }, { "snprintf", 3, 4 }, { "asprintf", 2, 3 }, { "fprintf", 2, 3 },
+		{ "vprintf", 1, 0 }, { "vsprintf", 2, 0 }, { "vsnprintf", 3, 0 }, { "vasprintf", 2, 0 }, { "vfprintf", 2, 0 },
+	};
+	const sym *y = &c->syms[fs];
+	const ctype *f;
+	uint32_t len;
+	const char *nm;
+
+	if (y->attrs && c->attr[y->attrs].fmt)
+		return c->attr[y->attrs].fmt;
+	if (c->o->no_builtin || y->kind != S_FUNC || y->sc == SC_STATIC || !y->name)
+		return 0;
+	nm = idstr_(y->name), len = idlen_(y->name);
+	if (len < 6 || len > 9 || !strchr("psafv", nm[0]))
+		return 0;
+	for (size_t i = 0; i < sizeof(lib) / sizeof(lib[0]); i++) {
+		qty pt;
+
+		if (strlen(lib[i].n) != len || memcmp(lib[i].n, nm, len))
+			continue;
+		f = T(c, canon(c, y->ty));
+		if ((f->flags & TF_NOPROTO) || KIND(c, canon(c, f->base)) != TY_INT ||
+		    f->n != lib[i].fi + (lib[i].first ? 0 : 1) || !(f->flags & TF_VARIADIC) != !lib[i].first)
+			return 0;
+		/* the format: const char * */
+		pt = canon(c, c->params[f->aux + lib[i].fi - 1]);
+		if (KIND(c, pt) != TY_PTR || KIND(c, canon(c, T(c, pt)->base)) != TY_CHAR || !(QQ(T(c, pt)->base) & Q_CONST))
+			return 0;
+		/* before it: pointers (char *, char **, FILE *), snprintf's size */
+		for (uint32_t k = 0; k + 1 < lib[i].fi; k++) {
+			qty a = canon(c, c->params[f->aux + k]);
+
+			if (KIND(c, a) != TY_PTR && !(k == 1 && lib[i].fi == 3 && is_integer(c, a)))
+				return 0;
+			/* fprintf/vfprintf: FILE *, a struct */
+			if ((lib[i].n[0] == 'f' || !strcmp(lib[i].n, "vfprintf")) && KIND(c, canon(c, T(c, a)->base)) != TY_STRUCT)
+				return 0;
+		}
+		return 1u << 16 | (uint32_t)lib[i].fi << 8 | lib[i].first;
+	}
+	return 0;
+}
+
 VPRIV void format_check(cc *c, uint32_t fs, const uint32_t *args, const qty *aty, const uint32_t *atd, uint32_t nargs)
 {
-	const sym *y = &c->syms[fs];
-	uint32_t fa = y->attrs ? c->attr[y->attrs].fmt : 0, fi, first, ndata, n;
+	uint32_t fa = fmt_attr(c, fs), fi, first, ndata, n;
 	const fmtspec *tab;
 	fmtx x;
 	uint32_t s;
@@ -303,6 +361,21 @@ VPRIV void format_check(cc *c, uint32_t fs, const uint32_t *args, const qty *aty
 				report(c, "note", r.b, &r, 1, &fx, 1, "treat the string as an argument to avoid this");
 		}
 		return;
+	}
+	x.isvia = false;
+	if (N(s)->op == N_VAR && c->syms[N(s)->a].kind == S_VAR && c->syms[N(s)->a].body) {
+		/* a const char array (or const pointer) initialized with a literal (clang's checkFormatStringExpr) */
+		const sym *v = &c->syms[N(s)->a];
+		qty t = v->ty;
+		bool cst = is_array(c, t) ? (QQ(T(c, t)->base) & Q_CONST) : is_ptr(c, t) && (QQ(t) & Q_CONST);
+		uint32_t b = v->body;
+
+		while (N(b)->op == N_CAST)
+			b = N(b)->a;
+		if (cst && N(b)->op == N_STR) {
+			x.via = rng(c, args[fi]), x.isvia = true;
+			s = b;
+		}
 	}
 	if (N(s)->op != N_STR || (N(s)->flags & NF_PAREN) || c->strs[N(s)->a].esz != 1)
 		return;
@@ -382,7 +455,7 @@ VPRIV void format_check(cc *c, uint32_t fs, const uint32_t *args, const qty *aty
 		}
 		f.lb = p;
 		if (p < n && x.s[p] == 'q') {
-			p++;	/* BSD quad: only as an incomplete specifier */
+			p++;	/* BSD quad (clang: long long) */
 		} else if (p < n && (x.s[p] == 'h' || x.s[p] == 'l')) {
 			p++;
 			if (p < n && x.s[p] == x.s[p - 1])
@@ -403,14 +476,14 @@ VPRIV void format_check(cc *c, uint32_t fs, const uint32_t *args, const qty *aty
 		i = f.end;
 		cv = (unsigned char)x.s[p];
 		/* what this checker does not model leaves the rest of the call alone */
-		if (strchr("IwqbB", (int)cv) || (c->o->target == PP_DARWIN && strchr("DOU", (int)cv)) || cv == 0)
+		if (strchr("Iw", (int)cv) || (c->o->target == PP_DARWIN && strchr("DOU", (int)cv)) || cv == 0)
 			return;
 		havesr = fmt_span(&x, f.start, f.end, &sr);
 		if (!havesr)
 			return;
 		if (cv == '%' || cv == 'm')
 			continue;	/* (consume no argument) */
-		if (!strchr("diouxXcspfFeEgGaAnCS", (int)cv)) {
+		if (!strchr("diouxXbBcspfFeEgGaAnCS", (int)cv)) {
 			/* an invalid conversion: covers its argument (none left: stop) */
 			uint32_t l = fmt_loc(&x, f.conv);
 			uint32_t ai;
@@ -513,7 +586,7 @@ VPRIV void format_check(cc *c, uint32_t fs, const uint32_t *args, const qty *aty
 						fmt_report(&x, "format", l, &sr, 1, NULL, 0,
 							   "field width used with 'n' conversion specifier, resulting in undefined behavior");
 				}
-				if (prec && !strchr("diouxXaAeEfFgGs", conv)) {
+				if (prec && !strchr("diouxXbBaAeEfFgGs", conv)) {
 					uint32_t l = fmt_loc(&x, f.pstar >= 0 ? (uint32_t)f.pstar : f.pb);
 
 					if (l)
@@ -554,7 +627,7 @@ VPRIV void format_check(cc *c, uint32_t fs, const uint32_t *args, const qty *aty
 				if (l && fmt_report(&x, "format", l, &sr, 1, NULL, 0,
 						    "length modifier '%s' results in undefined behavior or no effect with '%c' conversion specifier",
 						    lm, conv) &&
-				    (lm[0] == 'L' || lm[0] == 'q') && strchr("diouxXn", conv)) {
+				    (lm[0] == 'L' || lm[0] == 'q') && strchr("diouxXbBn", conv)) {
 					pp_fixit fx = { l, l + 1, "ll" };
 
 					report(c, "note", l, NULL, 0, &fx, 1, "did you mean to use 'll'?");
@@ -620,7 +693,7 @@ VPRIV void format_check(cc *c, uint32_t fs, const uint32_t *args, const qty *aty
 					if (nc == 'c' && cl <= FT_UCHAR) {
 						snprintf(lcb, sizeof(lcb), "hh%c", is_signed(c, t) ? 'd' : 'u');
 						fl = lcb;
-					} else if (lm && strchr("diouxX", nc)) {
+					} else if (lm && strchr("diouxXbB", nc)) {
 						snprintf(lcb, sizeof(lcb), "%c%c", lm, nc);
 						fl = lcb;
 					}
@@ -645,8 +718,12 @@ VPRIV void format_check(cc *c, uint32_t fs, const uint32_t *args, const qty *aty
 		if (!(covered[ai >> 6] >> (ai & 63) & 1)) {
 			pp_span r = x.all;
 
-			fmt_report(&x, "format-extra-args", rng(c, args[first - 1 + ai]).b, &r, 1, NULL, 0,
-				   "data argument not used by format string");
+			if (x.isvia)	/* (clang: the literal's range, no note) */
+				cc_warnx(c, "format-extra-args", true, NULL, rng(c, args[first - 1 + ai]).b, &r, 1, NULL, 0,
+					 "data argument not used by format string");
+			else
+				fmt_report(&x, "format-extra-args", rng(c, args[first - 1 + ai]).b, &r, 1, NULL, 0,
+					   "data argument not used by format string");
 			return;
 		}
 }

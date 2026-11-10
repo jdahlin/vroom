@@ -11,8 +11,8 @@ it mismatches and the fix-it clang suggests.  Run once (needs clang):
 import os, re, subprocess, sys, tempfile
 
 CLANG = os.environ.get('CLANG', '/opt/homebrew/opt/llvm/bin/clang')
-LENS = ['', 'hh', 'h', 'l', 'll', 'j', 'z', 't', 'L']
-CONVS = 'd i o u x X c s p f F e E g G a A n C S'.split()
+LENS = ['', 'hh', 'h', 'l', 'll', 'j', 'z', 't', 'L', 'q']
+CONVS = 'd i o u x X b B c s p f F e E g G a A n C S'.split()
 # the argument classes, in the order of FMT_T_* in fmt.c
 TYPES = ['char', 'signed char', 'unsigned char', 'short', 'unsigned short', 'int', 'unsigned int',
          'long', 'unsigned long', 'long long', 'unsigned long long', 'float', 'double', 'long double',

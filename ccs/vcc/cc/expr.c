@@ -958,7 +958,7 @@ static __attribute__((noinline)) uint32_t call(cc *c, uint32_t fn, uint32_t loc)
 	{
 		uint32_t fs = N(callee)->op == N_VAR && c->syms[N(callee)->a].kind == S_FUNC ? N(callee)->a : 0;
 
-		fmt = fs && c->syms[fs].attrs && c->attr[c->syms[fs].attrs].fmt && args.n <= 64 && !c->unevaluated ? fs : 0;
+		fmt = fs && fmt_attr(c, fs) && args.n <= 64 && !c->unevaluated ? fs : 0;
 	}
 	for (uint32_t i = 0; i < args.n; i++) {
 		uint32_t a = args.v[i];
