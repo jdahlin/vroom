@@ -1101,10 +1101,12 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
   by the front end with its error: an unknown token always ends in one, so
   no per-token check).  Done: diag `invalid_pp_token.c`.  Not modelled: in
   -E output; clang's recovery after it ("expected ';'").
-- [ ] **Missing warnings** (only 7 `-W` flags):
+- [ ] **Missing warnings**:
   `-Wreturn-stack-address` of a compound literal
   (clang prints the initializer with its expression printer),
-  `-Wuninitialized`, `-Wunknown-attributes`, `-Wdeprecated-declarations`.
+  `-Wuninitialized`, `-Wunused-but-set-variable`, `-Wunused-function`,
+  `-Wunused-local-typedef` (`-Wunknown-attributes` and
+  `-Wdeprecated-declarations` are done: PostgreSQL's warnings compare).
   *Validate:* one diag test per warning; `vcc-sema.py warn` stays 879/879
   (no false positives on the kernel).  (Done: `-Wmultichar` in C and `#if`, "character constant too long",
   multi-character wide/Unicode literals as errors: diag `multichar.c`; the
