@@ -25,7 +25,7 @@ def main():
     b = os.path.abspath(sys.argv[1])
     tmp = tempfile.mkdtemp(prefix='varcmp', dir=os.environ.get('TMPDIR', '/tmp'))
     sock = os.path.join(tmp, 's')
-    d = subprocess.Popen([f'{R}/build/ccs/vccd', '--sock', sock, '--backend-sock', sock + 'x'],
+    d = subprocess.Popen([f'{R}/build/ccs/vccd', '--sock', sock],
                          stderr=subprocess.DEVNULL)
     time.sleep(0.3)
     env = dict(os.environ, VCC_SOCK=sock, PATH=f'{R}/build/ccs:' + os.environ['PATH'])
@@ -113,7 +113,7 @@ def main():
     # the same sequences with SYM64_THRESHOLD=0 (llvm-ar's test knob, read by vccd from its own
     # environment): /SYM64/ and __.SYMDEF_64 instead of the 32-bit tables
     sock64 = sock + '64'
-    d64 = subprocess.Popen([f'{R}/build/ccs/vccd', '--sock', sock64, '--backend-sock', sock64 + 'x'],
+    d64 = subprocess.Popen([f'{R}/build/ccs/vccd', '--sock', sock64],
                            stderr=subprocess.DEVNULL, env=dict(os.environ, SYM64_THRESHOLD='0'))
     time.sleep(0.3)
     env64 = dict(env, VCC_SOCK=sock64)

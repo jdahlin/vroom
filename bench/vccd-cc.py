@@ -6,7 +6,7 @@
 Exercises vccd's own request path (socket, worker threads, cc-own jobs) without
 a kernel build; meant for the sanitizer variants (AGENTS.md, "Sanitizers").
 vccd comes from --bin-dir (or VCC_BIN), the shim from build/ccs.  There is no
-backend: jobs vccd forwards fail (the vDSO's linker script, for one).  vccd's
+backend: vcc does every job.  vccd's
 stderr, with any sanitizer report, goes to $LOG (default $TMPDIR/vccd-cc.log).
 """
 import os, sys, subprocess, tempfile, time, signal, importlib.util
@@ -17,13 +17,13 @@ T = tempfile.mkdtemp(prefix='vccd-cc-')
 sock = f'{T}/vccd.sock'
 logf = os.environ.get('LOG', os.path.join(tempfile.gettempdir(), 'vccd-cc.log'))
 log = open(logf, 'w')
-d = subprocess.Popen([f'{vd.BIN}/vccd', '--sock', sock, '--backend-sock', f'{T}/none.sock', '-j', '6'],
+d = subprocess.Popen([f'{vd.BIN}/vccd', '--sock', sock, '-j', '6'],
                      stderr=log, stdout=log, env=dict(os.environ, VCC_LOG='1'))
 for _ in range(100):
     if os.path.exists(sock): break
     time.sleep(0.05)
 pat = sys.argv[1] if len(sys.argv) > 1 else None
-ts = [t for t in vd.tus(pat) if not t[0].startswith('scripts/') and '-E' not in t[1] and '-mcmodel=tiny' not in t[1]]
+ts = [t for t in vd.tus(pat) if not t[0].startswith('scripts/') and '-E' not in t[1] and '-mcmodel=tiny' not in t[1] and not t[0].endswith('.lds')]
 n = int(os.environ.get('N', 150)); ts = ts[::max(1, len(ts) // n)]
 
 def run(t):

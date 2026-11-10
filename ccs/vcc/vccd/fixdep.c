@@ -13,7 +13,6 @@
 #include <ctype.h>
 #include <errno.h>
 #include <fcntl.h>
-#include <pthread.h>
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -117,62 +116,19 @@ static char *scan_configs(const char *text)
 	return b.p;
 }
 
-/* vlex_file -> its names; a mutex-protected open-addressing table (lookups are cheap next to a compile) */
-static pthread_mutex_t cmu = PTHREAD_MUTEX_INITIALIZER;
-static struct cent {
-	const vlex_file *f;
-	char *names;
-} *ctab;
-static size_t ccap, cn;
-
+/* f's names, computed once per file (the cache entry is immortal); a racing thread may scan too */
 static const char *file_configs(const vlex_file *f)
 {
-	size_t h, m;
-	char *names;
+	vlex_file *w = (vlex_file *)f;
+	char *names = __atomic_load_n(&w->fixdep, __ATOMIC_ACQUIRE), *exp = NULL;
 
-	pthread_mutex_lock(&cmu);
-	if (ctab) {
-		m = ccap - 1;
-		for (h = ((uintptr_t)f >> 4) * 0x9e3779b97f4a7c15ull >> 20 & m; ctab[h].f; h = (h + 1) & m)
-			if (ctab[h].f == f) {
-				names = ctab[h].names;
-				pthread_mutex_unlock(&cmu);
-				return names;
-			}
-	}
-	pthread_mutex_unlock(&cmu);
-	names = scan_configs(f->src);	/* outside the lock; a racing thread may scan too */
-	pthread_mutex_lock(&cmu);
-	if (2 * (cn + 1) > ccap) {
-		size_t nc = ccap ? ccap * 2 : 1 << 14;
-		struct cent *nt = calloc(nc, sizeof(*nt));
-
-		if (!nt)
-			abort();
-		for (size_t i = 0; i < ccap; i++)
-			if (ctab[i].f) {
-				for (h = ((uintptr_t)ctab[i].f >> 4) * 0x9e3779b97f4a7c15ull >> 20 & (nc - 1); nt[h].f;
-				     h = (h + 1) & (nc - 1))
-					;
-				nt[h] = ctab[i];
-			}
-		free(ctab);
-		ctab = nt;
-		ccap = nc;
-	}
-	m = ccap - 1;
-	for (h = ((uintptr_t)f >> 4) * 0x9e3779b97f4a7c15ull >> 20 & m; ctab[h].f; h = (h + 1) & m)
-		if (ctab[h].f == f)
-			break;
-	if (ctab[h].f) {
+	if (names)
+		return names;
+	names = scan_configs(f->src);
+	if (!__atomic_compare_exchange_n(&w->fixdep, &exp, names, false, __ATOMIC_ACQ_REL, __ATOMIC_ACQUIRE)) {
 		free(names);
-		names = ctab[h].names;
-	} else {
-		ctab[h].f = f;
-		ctab[h].names = names;
-		cn++;
+		names = exp;
 	}
-	pthread_mutex_unlock(&cmu);
 	return names;
 }
 

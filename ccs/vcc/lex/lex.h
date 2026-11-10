@@ -62,6 +62,7 @@ typedef struct vlex_file {
 	uint32_t ntok;		/* tokens, excluding the final T_EOF */
 	const vtok *tok;	/* ntok + 1 entries */
 	void *pp;		/* preprocessor's per-file data (pp/file.c), set once with __atomic */
+	char *fixdep;		/* vccd/fixdep.c's CONFIG_ names in src, set once with __atomic */
 	uint64_t dev, ino;	/* the file's identity (0, 0: unknown): #pragma once, as clang */
 } vlex_file;
 

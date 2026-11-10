@@ -3,6 +3,7 @@
 
 /* ---------------- expressions: unary, cast, binary ---------------- */
 
+/* r: the operand's range for a diagnostic; e (if any) gives it, else r.e is its last token's start */
 static uint32_t sizeof_type(cc *c, qty t, uint32_t loc, uint32_t e, pp_span r)
 {
 	int k = KIND(c, t);
@@ -17,6 +18,7 @@ static uint32_t sizeof_type(cc *c, qty t, uint32_t loc, uint32_t e, pp_span r)
 	if (k == TY_VOID || k == TY_FUNC)
 		return mk_int(c, 1, c->t_size, loc);
 	if (!complete(c, t)) {
+		r = e ? rng(c, e) : (pp_span){ r.b, pp_tok_end(c->p, r.e) };
 		report(c, "error", loc, &r, 1, NULL, 0, "invalid application of 'sizeof' to an incomplete type '%s'", tyname(c, t));
 		if (is_record(c, t) || k == TY_ENUM)
 			note(c, c->tags[T(c, t)->aux].loc, "forward declaration of '%s'", tyname(c, t));
@@ -60,7 +62,7 @@ static uint32_t sizeof_operand(cc *c, qty *ty, pp_span *r)
 			*ty = type_name(c);
 			expect(c, T_RPAREN, "')'");
 			if (r)
-				*r = (pp_span){ ploc, pp_tok_end(c->p, c->prevloc) };
+				*r = (pp_span){ ploc, c->prevloc };	/* resolved by sizeof_type if needed */
 			return UINT32_MAX;
 		}
 		c->unevaluated++;
@@ -196,13 +198,13 @@ static __attribute__((noinline)) uint32_t unary_op(cc *c)
 				cl = mk2(c, N_COMPLIT, ty, loc, init, s);
 				N(cl)->flags = NF_LVALUE;
 				n = postfix(c, cl);
-				return sizeof_type(c, N(n)->ty, loc, n, rng(c, n));
+				return sizeof_type(c, N(n)->ty, loc, n, (pp_span){ 0, 0 });
 			}
 			return sizeof_type(c, ty, loc, 0, r);
 		}
 		if (bitfield_of(c, n))
 			cc_error(c, loc, "invalid application of 'sizeof' to bit-field");
-		return sizeof_type(c, N(n)->ty, loc, n, rng(c, n));
+		return sizeof_type(c, N(n)->ty, loc, n, (pp_span){ 0, 0 });
 	}
 	case KW__Alignof:
 	case KW___alignof__:
@@ -415,6 +417,8 @@ static void runtime_warn(cc *c, int op, uint32_t l, uint32_t r, uint32_t loc)
 	if (c->dead || (op != T_SLASH && op != T_PERCENT && op != T_LESSLESS && op != T_GREATERGREATER) ||
 	    !is_integer(c, N(l)->ty) || !is_integer(c, N(r)->ty) || !cc_eval(c, r, &cv) || cv.kind != CV_INT)
 		return;
+	if (op == T_SLASH || op == T_PERCENT ? cv.i != 0 : cv.i >= 0 && cv.i < (i128)ty_size(c, promoted(c, l)) * 8)
+		return;	/* nothing to say: no range needed */
 	rr = rng(c, r);
 	if (op == T_SLASH || op == T_PERCENT) {
 		if (!cv.i && c->unevaluated)

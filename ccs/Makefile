@@ -74,7 +74,7 @@ VCC_FAST   = $(VCC_CFLAGS) $(VCC_OPT) -pthread
 VCC_LDFLAGS = -O3 $(VCC_SAN) $(VCC_LTO) $(if $(VCC_LTO),$(LTO_LINK))
 OBJ        = $(OUT)/obj
 
-vcc: $(OUT)/vcc $(OUT)/vsh/sh $(OUT)/vld $(OUT)/vas $(OUT)/var $(OUT)/vccd $(OUT)/lextest $(OUT)/vpp $(OUT)/vlink $(OUT)/vasm
+vcc: $(OUT)/vcc $(OUT)/vsh/sh $(OUT)/vld $(OUT)/vas $(OUT)/var $(OUT)/vcc-nm $(OUT)/vcc-objcopy $(OUT)/vccd $(OUT)/lextest $(OUT)/vpp $(OUT)/vlink $(OUT)/vasm
 
 o = $(patsubst vcc/%.c,$(OBJ)/%.o,$(1))
 AS_FILES = vcc/arch/a64/as/enc.c vcc/platform/darwin/macho.c vcc/arch/wasm/as/as.c vcc/platform/wasm/wasm.c
@@ -101,7 +101,7 @@ PP_OBJ  = $(call o,$(PP_SRC)) $(SPLIT_OBJ)
 mod = $(if $(VCC_UNITY),$(OBJ)/unity/$(1).o,$(call o,$($(1)_SRC)))
 AS_SRC  = $(AS_FILES) $(as_SRC) $(obj_SRC)
 AS_OBJ  = $(call o,$(AS_FILES)) $(call mod,as) $(call mod,obj)
-LD_SRC  = vcc/ld/ld.c vcc/lib/ldhash.c vcc/ld/objcopy.c vcc/ld/wasmld.c
+LD_SRC  = vcc/ld/ld.c vcc/lib/ldhash.c vcc/ld/objcopy.c vcc/ld/wasmld.c vcc/platform/darwin/ldmacho.c
 
 $(OBJ)/%.o: vcc/%.c | $(OBJ)
 	@mkdir -p $(dir $@)
@@ -129,10 +129,16 @@ $(OBJ)/no/%.o: vcc/%.c | $(OBJ)
 
 $(OBJ)/ld/ld.o: XFLAGS = -DVLD_MAIN
 
+# the linker without main(), for vccd (links, nm and objcopy run in its worker threads)
+VCCD_LD_OBJ = $(OBJ)/ld/ldlib.o $(call o,vcc/ld/objcopy.c vcc/platform/darwin/ldmacho.c)
+$(OBJ)/ld/ldlib.o: vcc/ld/ld.c | $(OBJ)
+	@mkdir -p $(dir $@)
+	$(VCC_CC) $(VCC_FAST) $(VCC_LTO) -MMD -MP -c $< -o $@
+
 $(OUT)/vpp: $(call o,vcc/driver/vpp.c $(LEX_SRC)) $(AS_OBJ) $(PP_OBJ)
 	$(VCC_CC) $(VCC_LDFLAGS) -pthread $^ -o $@ $(HOST_LIBS)
 
-$(OUT)/vccd: $(call o,$(VCCD_SRC) $(LEX_SRC)) $(AS_OBJ) $(PP_OBJ)
+$(OUT)/vccd: $(call o,$(VCCD_SRC) $(LEX_SRC)) $(AS_OBJ) $(PP_OBJ) $(VCCD_LD_OBJ)
 	$(VCC_CC) $(VCC_LDFLAGS) -pthread $^ -o $@ $(HOST_LIBS)
 
 $(OUT)/lextest: $(patsubst vcc/%.c,$(OBJ)/no/%.o,vcc/lex/lextest.c vcc/platform/darwin/pmc.c $(LEX_SRC))
@@ -155,7 +161,7 @@ $(OUT)/vsh/sh: vcc/vccd/shim.c protocol.h | $(OUT)
 	mkdir -p $(OUT)/vsh
 	$(VCC_CC) $(VCC_CFLAGS) -DVSH $< -o $@
 
-$(OUT)/vld $(OUT)/vas $(OUT)/var: $(OUT)/vcc
+$(OUT)/vld $(OUT)/vas $(OUT)/var $(OUT)/vcc-nm $(OUT)/vcc-objcopy: $(OUT)/vcc
 	ln -sf vcc $@
 
 $(OBJ):
@@ -194,10 +200,10 @@ self: $(OUT)/vpp
 	for f in $(SELF_SRC); do o=$$(echo $${f#vcc/} | sed 's,/,-,g'); $(SELF_CC) $(SELF_FLAGS) $$f -o $(SELF)/$${o%.c}.o || exit 1; done
 	$(SELF_CC) $(SELF_FLAGS) -DVLD_MAIN vcc/ld/ld.c -o $(SELF)/ld-main.o
 	$(SELF_LD) $(SO)/driver-vpp.o $(SELF_PP) $(SELF_LEX) $(SELF_AS) -o $(SO)/vpp
-	$(SELF_LD) $(call so,$(VCCD_SRC)) $(SELF_PP) $(SELF_LEX) $(SELF_AS) -o $(SO)/vccd
+	$(SELF_LD) $(call so,$(VCCD_SRC) vcc/ld/ld.c vcc/ld/objcopy.c vcc/platform/darwin/ldmacho.c) $(SELF_PP) $(SELF_LEX) $(SELF_AS) -o $(SO)/vccd
 	$(SELF_LD) $(SO)/as-vasm.o $(SELF_AS) -o $(SO)/vasm
 	$(SELF_LD) $(SO)/lex-lextest.o $(SO)/platform-darwin-pmc.o $(SELF_LEX) -o $(SO)/lextest
-	$(SELF_LD) $(SO)/ld-main.o $(SO)/lib-ldhash.o $(SO)/ld-objcopy.o -o $(SO)/vlink
+	$(SELF_LD) $(SO)/ld-main.o $(SO)/lib-ldhash.o $(SO)/ld-objcopy.o $(SO)/platform-darwin-ldmacho.o -o $(SO)/vlink
 	$(SELF_LD) $(SO)/vccd-shim.o -o $(SO)/vcc
 
 self-check: self

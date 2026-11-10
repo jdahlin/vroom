@@ -29,6 +29,27 @@ static void relocate_isec(uint32_t si, uint8_t *buf)
 	uint32_t nd = 0;
 	bool alloc_ = is->flags & SHF_ALLOC;
 	Target t, t2;
+	/* lld AArch64Relaxer (safeToRelaxAdrpLdr): ADRP+LDR GOT pairs relax only if
+	   every GOT_PAGE of the section is followed by its LO12 */
+	bool got_relax = false;
+	if (opt.relax) {
+		uint32_t r = 0;
+
+		for (; r < is->nrela; r++) {
+			uint32_t ty = (uint32_t)is->rela[r].r_info;
+
+			if (ty == R_AARCH64_ADR_GOT_PAGE) {
+				if (r + 1 < is->nrela && (uint32_t)is->rela[r + 1].r_info == R_AARCH64_LD64_GOT_LO12_NC) {
+					r++;
+					continue;
+				}
+				break;
+			}
+			if (ty == R_AARCH64_LD64_GOT_LO12_NC)
+				break;
+		}
+		got_relax = r == is->nrela;
+	}
 	for (uint32_t r = 0; r < is->nrela; r++) {
 		const Rela *rl = &is->rela[r];
 		uint32_t type = (uint32_t)rl->r_info, symi = rl->r_info >> 32;
@@ -130,8 +151,10 @@ static void relocate_isec(uint32_t si, uint8_t *buf)
 		}
 		case R_AARCH64_ADR_GOT_PAGE:
 			/* lld tryRelaxAdrpLdr: adrp+ldr of a non-preemptible symbol's slot ->
-			 * adrp+add, then tryRelaxAdrpAdd: nop+adr when within 1 MB */
-			if (opt.relax && !opt.shared && r + 1 < is->nrela) {
+			 * adrp+add, then tryRelaxAdrpAdd: nop+adr when within 1 MB.  Under
+			 * -shared a global is preemptible unless -Bsymbolic (the kernel's
+			 * vmlinux and vDSO links; hidden globals are not relaxed there yet) */
+			if (got_relax && (!opt.shared || opt.bsymbolic || !t.global) && r + 1 < is->nrela) {
 				const Rela *r2 = &is->rela[r + 1];
 				uint32_t adrp = rd32(loc), ldr = rl->r_offset + 4 < is->size ? rd32(loc + 4) : 0;
 				uint32_t rd = adrp & 0x1f;

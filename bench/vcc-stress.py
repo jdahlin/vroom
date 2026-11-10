@@ -13,9 +13,8 @@ A signal (SIGSEGV from a stack overflow, SIGABRT from an abort()), a
 timeout, or an exit status other than these is a failure.
 
 --vccd sends every case through the shim to one private vccd (as
-bench/vccd-cc.py does), with no backend: vccd hands a TU it rejects to
-clang, so a rejection shows up as status 127 "backend ... not reachable",
-which counts as a clean error.  A case then also fails if vccd died; vccd is
+bench/vccd-cc.py does), with no backend: a TU vcc rejects fails with vcc's
+own diagnostics.  A case then also fails if vccd died; vccd is
 restarted for the next case.  At the end a normal TU must still compile in
 the surviving server.  In vccd mode one bad TU must not take the other jobs
 with it, which is the point of the test.
@@ -102,7 +101,7 @@ class Vccd:
         self.log = open(f'{tmp}/vccd.log', 'a')
     def start(self):
         if os.path.exists(self.sock): os.unlink(self.sock)
-        self.p = subprocess.Popen([f'{vd.BIN}/vccd', '--sock', self.sock, '--backend-sock', f'{self.tmp}/none.sock', '-j', '4'],
+        self.p = subprocess.Popen([f'{vd.BIN}/vccd', '--sock', self.sock, '-j', '4'],
                                   stdout=self.log, stderr=self.log)
         for _ in range(200):
             if os.path.exists(self.sock): return
@@ -139,8 +138,7 @@ def verdict(c, rc, err, server_ok):
     if rc == 0:
         return (c['expect'] == 'any', 'accepted' if c['expect'] == 'any' else 'accepted, want an error')
     if not has_diag: return False, f'rc {rc} without a diagnostic'
-    # (vccd hands a TU it rejects to the backend: its own message is not shown)
-    if c['regex'] and not re.search(c['regex'], err) and not re.search(r'backend .* not reachable', err): return False, f'diagnostic does not match /{c["regex"]}/: {first(err)}'
+    if c['regex'] and not re.search(c['regex'], err): return False, f'diagnostic does not match /{c["regex"]}/: {first(err)}'
     return True, f'error: {first(err)}'
 
 def first(err):

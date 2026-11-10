@@ -44,7 +44,8 @@ assembler, linker, behind `vcc`/`vas`/`vld` shims and the `vccd` server.
   - `obj/`: the in-memory object (`obj.h`: sections, frags, symbols, fixups)
     and its layout; with `arch/<cpu>/obj/fixup.c` and `platform/linux/elf.c`
     one module (`obj_SRC`, internal header `objimpl.h`).
-  - `ld/`: the linker `vlink` (`ld.c`, one TU) and `vobjcopy`/`vnm`;
+  - `ld/`: the linker `vlink` (`ld.c`, one TU; also linked into vccd, which
+    calls `ld_main` per link) and `vobjcopy`/`vnm`;
     `wasmld.c` is vlink for WebAssembly (as `wasm-ld` or with `-mwasm64`).
   - `driver/`: one compile job from a clang command line (`ppdriver.c`), the
     declaration cache (`ccsnap.c`) and `vpp`, the driver for parity tests.
@@ -54,6 +55,10 @@ assembler, linker, behind `vcc`/`vas`/`vld` shims and the `vccd` server.
     build uses no llvm-ar) and `rsh.c`, kbuild's recipe subset of sh, run for
     `vsh` (`build/ccs/vsh/sh`, shim.c with `-DVSH`), make's SHELL in
     `bench/vccd-kbuild.sh`; anything outside the subset goes to `$VSH_REAL`.
+    Without `--backend-sock` vccd runs the whole kernel build itself: probes,
+    `-E`/`-c`/`-S` (stdin too), links (vld in-process; `--ld PROG` spawns
+    one), nm/objcopy behind the `vcc-nm`/`vcc-objcopy` shims, and the host
+    programs (vcc + `ldmacho.c`, macOS only); nothing falls back to clang.
   - `arch/a64/`: arm64: instructions in GNU as syntax (`as/parse.c`:
     registers, `.req`, operands, literal pools), the encoder (`as/enc.c`,
     `a64.h`), system registers,
@@ -81,7 +86,10 @@ assembler, linker, behind `vcc`/`vas`/`vld` shims and the `vccd` server.
     and `vasm --target=wasm64-...` go through it.
   - `platform/linux/`: the ELF writer (`elf.c`: relocations, string table,
     file layout as LLVM MC).
-  - `platform/darwin/`: the Mach-O writer; Apple PMU counters (`pmc.c`).
+  - `platform/darwin/`: the Mach-O writer; vld's Mach-O executables
+    (`ldmacho.c`: libSystem only, chained fixups, ad-hoc signature, chosen
+    when the first input is Mach-O; the kernel's host programs); Apple PMU
+    counters (`pmc.c`).
   - `platform/wasm/`: the wasm object writer (`wasm.c`: layout, symbol table,
     relocations as LLVM's WasmObjectWriter, byte for byte).
   - `pp/`, `cc/` and `emit/` (with `arch/<cpu>/emit/`) are directories of
@@ -121,6 +129,8 @@ bench/vcc-sema.py batch -j 6        # the same in one vpp --batch process: ~3 s 
 bench/vcc-sema.py layout -j 6       # layouts/constants/decl types checked by clang (~70 s)
 bench/var-cmp.py work/build-x       # vcc ar against llvm-ar on an llvm-ar-built tree
 bench/vsh-test.py                   # vsh/rsh against dash on small recipes
+bench/vobjcopy-cmp.sh               # vnm/vobjcopy against llvm-nm/llvm-objcopy on the build's uses
+bench/vobjcopy-any.py work/build-X  # ... and with other options on 200 random .o files
 bench/vcc-driver.py                 # driver: command lines vs clang (predefines from -O), <1 s
 bench/vcc-fpcheck.py -j 6           # no generated FP/SIMD code under -mgeneral-regs-only (~10 s)
 bench/vcc-cfi.py -j 6               # -fasynchronous-unwind-tables: .eh_frame per function, .text unchanged (~1 min)
@@ -144,6 +154,8 @@ bench/vcc-bflayout.py               # generated bit-field records, layouts check
 bench/vcc-ldconst.py                # generated long double literals and folds, bits vs clang (~2 s)
 bench/vcc-f80.sh [N]                # x87 long double folding (lib/f128.h) vs this x86-64 host's FPU (~3 s)
 bench/vccd-test.py                  # vccd as a service: socket, bad requests, cache invalidation (~11 s)
+bench/vccd-kbuild.sh work/build-X -j 6   # cold kernel build, vccd only (no clang/vroomd/lld; ~10 s)
+python3 bench/boot-test.py --kernel work/build-X/arch/arm64/boot/Image --timeout 60   # boots Debian
 bench/vbench.py gate                # performance gate: instructions vs the merge-base, budget 1 % (~1 min)
 bench/vcc-wasm.py -j 6              # the C suites for wasm64: vcc -S, clang -c, emcc, node vs clang's build (~2 min)
 bench/vcc-x86.py -j 6               # the C suites for x86-64 on an x86-64 host: vcc -S, clang -c, glibc, native (~10 s; first run ~10 min for the references)

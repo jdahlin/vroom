@@ -193,6 +193,9 @@ static int batch(const char *file, int nthr, const char *statsf)
 		if (ppd_bytes_obj)
 			printf("-c: cc_run %.0f ms (codegen+as %.0f ms), finish+write %.0f ms, %.1f MB objects\n", ppd_ns_cc / 1e6,
 			       ppd_ns_emit / 1e6, ppd_ns_obj / 1e6, ppd_bytes_obj / 1e6);
+		if (ppd_tok_out)
+			printf("-c: %.1f M tokens to the parser, %.1f M skipped by the decl cache; %.0f instructions per token\n",
+			       ppd_tok_out / 1e6, ppd_tok_skip / 1e6, (double)ph[PPD_PH_CC].ins / (double)ppd_tok_out);
 	}
 	if (statsf) {
 		FILE *f = fopen(statsf, "w");
