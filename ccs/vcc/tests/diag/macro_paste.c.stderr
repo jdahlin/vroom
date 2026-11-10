@@ -1,0 +1,7 @@
+macro_paste.c:4:23: error: use of undeclared identifier 'undefined_cat'
+    4 | int i(int k) { return CAT(un, defined_cat) + k; }
+      |                       ^~~~~~~~~~~~~~~~~~~~
+macro_paste.c:3:19: note: expanded from macro 'CAT'
+    3 | #define CAT(a, b) a##b
+      |                   ^
+1 error generated.

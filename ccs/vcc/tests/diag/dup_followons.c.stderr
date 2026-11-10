@@ -1,0 +1,37 @@
+dup_followons.c:3:6: error: variable has incomplete type 'void'
+    3 | void v;
+      |      ^
+dup_followons.c:6:66: error: no member named 'zz' in 'struct P'
+    6 | int g(void) { return ((struct P){ 1, 2 }).x + ((struct P){ 1, }).zz; }
+      |                                               ~~~~~~~~~~~~~~~~~~ ^
+dup_followons.c:8:22: error: use of undeclared identifier 'countr'; did you mean 'counter'?
+    7 | int counter;
+      |     - 'counter' declared here
+    8 | int h(void) { return countr + countr * 2; }
+      |                      ^~~~~~
+      |                      counter
+dup_followons.c:7:5: note: 'counter' declared here
+dup_followons.c:8:31: error: use of undeclared identifier 'countr'; did you mean 'counter'?
+    7 | int counter;
+      |     - 'counter' declared here
+    8 | int h(void) { return countr + countr * 2; }
+      |                               ^~~~~~
+      |                               counter
+dup_followons.c:7:5: note: 'counter' declared here
+dup_followons.c:9:15: error: use of undeclared identifier 'countre'; did you mean 'counter'?
+    7 | int counter;
+      |     - 'counter' declared here
+    8 | int h(void) { return countr + countr * 2; }
+    9 | int k(void) { countre = 1; return countre; }
+      |               ^~~~~~~
+      |               counter
+dup_followons.c:7:5: note: 'counter' declared here
+dup_followons.c:9:35: error: use of undeclared identifier 'countre'; did you mean 'counter'?
+    7 | int counter;
+      |     - 'counter' declared here
+    8 | int h(void) { return countr + countr * 2; }
+    9 | int k(void) { countre = 1; return countre; }
+      |                                   ^~~~~~~
+      |                                   counter
+dup_followons.c:7:5: note: 'counter' declared here
+6 errors generated.

@@ -1,0 +1,4 @@
+u8_char_if.c:9:2: error: u8 is 0
+    9 | #error u8 is 0
+      |  ^
+1 error generated.

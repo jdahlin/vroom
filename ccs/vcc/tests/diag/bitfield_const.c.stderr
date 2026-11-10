@@ -1,0 +1,34 @@
+bitfield_const.c:2:17: warning: implicit truncation from 'int' to bit-field changes value from 8 to 0 [-Wbitfield-constant-conversion]
+    2 | struct S s0 = { 8, 5 };
+      |                 ^
+bitfield_const.c:2:20: warning: implicit truncation from 'int' to bit-field changes value from 5 to 1 [-Wbitfield-constant-conversion]
+    2 | struct S s0 = { 8, 5 };
+      |                    ^
+bitfield_const.c:4:7: warning: implicit truncation from 'int' to bit-field changes value from 8 to 0 [-Wbitfield-constant-conversion]
+    4 |         p->f = 8;
+      |              ^ ~
+bitfield_const.c:7:7: warning: implicit truncation from 'int' to bit-field changes value from -3 to 1 [-Wbitfield-constant-conversion]
+    7 |         p->g = -3;
+      |              ^ ~~
+bitfield_const.c:8:7: warning: implicit truncation from 'int' to bit-field changes value from -5 to 3 [-Wbitfield-constant-conversion]
+    8 |         p->g = -5;
+      |              ^ ~~
+bitfield_const.c:9:9: warning: implicit truncation from 'int' to a one-bit wide bit-field changes value from 1 to -1 [-Wsingle-bit-bitfield-constant-conversion]
+    9 |         p->one = 1;
+      |                ^ ~
+bitfield_const.c:11:8: warning: implicit truncation from 'int' to bit-field changes value from 2 to 0 [-Wbitfield-constant-conversion]
+   11 |         p->u1 = 2;
+      |               ^ ~
+bitfield_const.c:14:7: warning: implicit truncation from 'int' to bit-field changes value from -5 to 3 [-Wbitfield-constant-conversion]
+   14 |         p->f = -5;
+      |              ^ ~~
+bitfield_const.c:15:7: warning: implicit truncation from 'long' to bit-field changes value from 1099511627776 to 0 [-Wbitfield-constant-conversion]
+   15 |         p->l = 1L << 40;
+      |              ^ ~~~~~~~~
+bitfield_const.c:17:22: warning: implicit truncation from 'int' to bit-field changes value from 7 to 3 [-Wbitfield-constant-conversion]
+   17 |         struct S t = { .g = 7 };
+      |                             ^
+bitfield_const.c:19:7: warning: implicit truncation from 'int' to bit-field changes value from 7 to -1 [-Wbitfield-constant-conversion]
+   19 |         p->f = 7;
+      |              ^ ~
+11 warnings generated.

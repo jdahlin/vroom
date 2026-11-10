@@ -1,0 +1,52 @@
+label_decl_kr_vis.c:3:5: warning: label followed by a declaration is a C23 extension [-Wc23-extensions]
+    3 |  l: int x = c;
+      |     ^
+label_decl_kr_vis.c:5:23: warning: label followed by a declaration is a C23 extension [-Wc23-extensions]
+    5 |  switch (c) { case 1: int y = 2; return y; default: ; }
+      |                       ^
+label_decl_kr_vis.c:8:73: warning: label followed by a declaration is a C23 extension [-Wc23-extensions]
+    8 | int f2(int c){ switch(c){ case 1: __attribute__((fallthrough)); case 2: __attribute__((unused)) int q = 1; return q; } return 0; }
+      |                                                                         ^
+label_decl_kr_vis.c:9:5: warning: a function definition without a prototype is deprecated in all versions of C and is not supported in C23 [-Wdeprecated-non-prototype]
+    9 | int k(a) int a; { return a; }
+      |     ^
+label_decl_kr_vis.c:10:17: warning: declaration of 'struct s' will not be visible outside of this function [-Wvisibility]
+   10 | int m(a) struct s { int q; } *a; { return a->q; }
+      |                 ^
+label_decl_kr_vis.c:10:5: warning: a function definition without a prototype is deprecated in all versions of C and is not supported in C23 [-Wdeprecated-non-prototype]
+   10 | int m(a) struct s { int q; } *a; { return a->q; }
+      |     ^
+label_decl_kr_vis.c:11:17: warning: declaration of 'struct t' will not be visible outside of this function [-Wvisibility]
+   11 | int n(a) struct t *a; { return 0; }
+      |                 ^
+label_decl_kr_vis.c:11:5: warning: a function definition without a prototype is deprecated in all versions of C and is not supported in C23 [-Wdeprecated-non-prototype]
+   11 | int n(a) struct t *a; { return 0; }
+      |     ^
+label_decl_kr_vis.c:12:15: warning: declaration of 'struct u' will not be visible outside of this function [-Wvisibility]
+   12 | int f3(struct u *p);
+      |               ^
+label_decl_kr_vis.c:13:15: warning: declaration of 'struct v' will not be visible outside of this function [-Wvisibility]
+   13 | int g3(struct v { int a; } *p) { return p->a; }
+      |               ^
+label_decl_kr_vis.c:16:31: warning: declaration of 'struct z1' will not be visible outside of this function [-Wvisibility]
+   16 | void a0(void) { int f9(struct z1 *); }
+      |                               ^
+label_decl_kr_vis.c:17:30: warning: declaration of 'struct z2' will not be visible outside of this function [-Wvisibility]
+   17 | struct S { void (*fp)(struct z2 *); };
+      |                              ^
+label_decl_kr_vis.c:18:25: warning: declaration of 'struct z3' will not be visible outside of this function [-Wvisibility]
+   18 | typedef int (*T)(struct z3 *);
+      |                         ^
+label_decl_kr_vis.c:19:25: warning: declaration of 'struct z4' will not be visible outside of this function [-Wvisibility]
+   19 | void b0(int (*g)(struct z4 *));
+      |                         ^
+label_decl_kr_vis.c:20:14: warning: declaration of 'enum e1' will not be visible outside of this function [-Wvisibility]
+   20 | void c0(enum e1 x);
+      |              ^
+label_decl_kr_vis.c:21:36: warning: declaration of 'struct z5' will not be visible outside of this function [-Wvisibility]
+   21 | void d0(int n, int a[sizeof(struct z5 *)]);
+      |                                    ^
+label_decl_kr_vis.c:22:15: warning: declaration of 'union u1' will not be visible outside of this function [-Wvisibility]
+   22 | void e0(union u1 *p);
+      |               ^
+17 warnings generated.

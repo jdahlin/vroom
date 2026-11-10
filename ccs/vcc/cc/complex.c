@@ -166,12 +166,13 @@ VPRIV uint32_t neg(cc *c, uint32_t n)
 }
 
 /* "invalid operands to binary expression ('L' and 'R')", ranges on both */
-VPRIV void bad_operands(cc *c, uint32_t l, uint32_t r, uint32_t loc)
+VPRIV void bad_operands(cc *c, int op, uint32_t l, uint32_t r, uint32_t loc)
 {
 	pp_span s[2] = { rng(c, l), rng(c, r) };
 
 	if ((N(l)->flags | N(r)->flags) & NF_ERR)
 		return;
+	c->dms = punct_spell(op);
 	report(c, "error", loc, s, 2, NULL, 0, "invalid operands to binary expression ('%s' and '%s')",
 	       tyname(c, N(l)->ty), tyname(c, N(r)->ty));
 }
@@ -186,7 +187,7 @@ VPRIV uint32_t cplx_binop(cc *c, int op, uint32_t l, uint32_t r, uint32_t loc)
 
 	if (!is_arith(c, le) || !is_arith(c, re_) ||
 	    !(op == T_PLUS || op == T_MINUS || op == T_STAR || op == T_SLASH || op == T_EQUALEQUAL || op == T_EXCLAIMEQ)) {
-		bad_operands(c, l, r, loc);
+		bad_operands(c, op, l, r, loc);
 		return mk_int(c, 0, prim(TY_INT), loc);
 	}
 	et = arith_conv(c, promote(c, QUNQ(le)), promote(c, QUNQ(re_)));

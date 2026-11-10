@@ -1,0 +1,33 @@
+fix_apply.c:7:28: warning: extra ';' outside of a function [-Wextra-semi]
+    7 | struct point { int x, y; };;
+      |                            ^
+fix_apply.c:10:11: error: member reference type 'struct point *' is a pointer; did you mean to use '->'?
+   10 |         int a = p.x + q->y
+      |                 ~^
+      |                  ->
+fix_apply.c:10:17: error: member reference type 'struct point' is not a pointer; did you mean to use '.'?
+   10 |         int a = p.x + q->y
+      |                       ~^~
+      |                        .
+fix_apply.c:10:20: error: expected ';' at end of declaration
+   10 |         int a = p.x + q->y
+      |                           ^
+      |                           ;
+fix_apply.c:12:8: warning: using the result of an assignment as a condition without parentheses [-Wparentheses]
+   12 |         if (k = 2) a++;
+      |             ~~^~~
+fix_apply.c:12:8: note: place parentheses around the assignment to silence this warning
+   12 |         if (k = 2) a++;
+      |               ^  
+      |             (    )
+fix_apply.c:12:8: note: use '==' to turn this assignment into an equality comparison
+   12 |         if (k = 2) a++;
+      |               ^
+      |               ==
+fix_apply.c:13:11: error: extraneous ')' before ';'
+   13 |         a = a + 1);
+      |                  ^
+fix_apply.c:14:13: error: use of undeclared identifier 'coutn'
+   14 |         return a + coutn;
+      |                    ^~~~~
+2 warnings and 5 errors generated.

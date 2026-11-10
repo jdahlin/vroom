@@ -1,0 +1,25 @@
+self_assign.c:6:4: warning: explicitly assigning value of variable of type 'int' to itself [-Wself-assign]
+    6 |         m = m;
+      |         ~ ^ ~
+self_assign.c:7:4: warning: explicitly assigning value of variable of type 'int' to itself [-Wself-assign]
+    7 |         p = p;
+      |         ~ ^ ~
+self_assign.c:8:4: warning: explicitly assigning value of variable of type 'int' to itself [-Wself-assign]
+    8 |         g = g;
+      |         ~ ^ ~
+self_assign.c:10:6: warning: explicitly assigning value of variable of type 'int' to itself [-Wself-assign]
+   10 |         (m) = (m);
+      |          ~  ^  ~
+self_assign.c:11:4: warning: explicitly assigning value of variable of type 'int' to itself [-Wself-assign]
+   11 |         m = (m);
+      |         ~ ^  ~
+self_assign.c:16:14: warning: unused typedef 'T1' [-Wunused-local-typedef]
+   16 |         typedef int T1;
+      |                     ^
+self_assign.c:18:17: warning: unused typedef 'T3' [-Wunused-local-typedef]
+   18 |         { typedef long T3; }
+      |                        ^
+self_assign.c:20:19: warning: unused typedef 'LT' [-Wunused-local-typedef]
+   20 |         typedef struct L LT;
+      |                          ^
+8 warnings generated.

@@ -1,0 +1,4 @@
+subscript_int.c:3:10: error: subscripted value is not an array, pointer, or vector
+    3 |         return a[1];
+      |                ~^~
+1 error generated.

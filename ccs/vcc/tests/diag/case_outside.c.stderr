@@ -1,0 +1,4 @@
+case_outside.c:3:2: error: 'case' statement not in switch statement
+    3 |         case 1: ;
+      |         ^
+1 error generated.

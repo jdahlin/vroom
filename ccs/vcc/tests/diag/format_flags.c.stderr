@@ -1,0 +1,140 @@
+format_flags.c:5:7: warning: flag '+' results in undefined behavior with 'u' conversion specifier [-Wformat]
+    5 |         pf("%+5u", vs);
+      |             ~^~~
+format_flags.c:6:7: warning: flag '#' results in undefined behavior with 'd' conversion specifier [-Wformat]
+    6 |         pf("%#hd", vc);
+      |             ~^~~
+format_flags.c:7:14: warning: format specifies type 'short' but the argument has type 'long' [-Wformat]
+    7 |         pf("% 'hd", vl);
+      |             ~~~~~   ^~
+      |             % ld
+format_flags.c:8:14: warning: format specifies type 'double' but the argument has type 'int' [-Wformat]
+    8 |         pf("% #5f", vi);
+      |             ~~~~~   ^~
+      |             % 5d
+format_flags.c:9:7: warning: flag '#' results in undefined behavior with 'd' conversion specifier [-Wformat]
+    9 |         pf("%#0hhd", vd);
+      |             ~^~~~~
+format_flags.c:9:15: warning: format specifies type 'char' but the argument has type 'double' [-Wformat]
+    9 |         pf("%#0hhd", vd);
+      |             ~~~~~~   ^~
+      |             %#0f
+format_flags.c:10:8: warning: flag '0' is ignored when flag '-' is present [-Wformat]
+   10 |         pf("%-08lx", pv);
+      |             ~~^~~~
+format_flags.c:10:15: warning: format specifies type 'unsigned long' but the argument has type 'void *' [-Wformat]
+   10 |         pf("%-08lx", pv);
+      |             ~~~~~~   ^~
+format_flags.c:12:12: warning: format specifies type 'unsigned int' but the argument has type 'long' [-Wformat]
+   12 |         pf("%.u", vl);
+      |             ~~~   ^~
+      |             %ld
+format_flags.c:13:14: warning: format specifies type 'char *' but the argument has type 'double' [-Wformat]
+   13 |         pf("%12.s", vd);
+      |             ~~~~~   ^~
+      |             %12f
+format_flags.c:14:8: warning: precision used with 'c' conversion specifier, resulting in undefined behavior [-Wformat]
+   14 |         pf("%.*c", vi);
+      |             ~~^~
+format_flags.c:14:9: warning: more '%' conversions than data arguments [-Wformat-insufficient-args]
+   14 |         pf("%.*c", vi);
+      |             ~~~^
+format_flags.c:15:7: warning: flag ' ' results in undefined behavior with 's' conversion specifier [-Wformat]
+   15 |         pf("% #5.3s", ps);
+      |             ~^~~~~~
+format_flags.c:15:8: warning: flag '#' results in undefined behavior with 's' conversion specifier [-Wformat]
+   15 |         pf("% #5.3s", ps);
+      |             ~~^~~~~
+format_flags.c:16:7: warning: precision used with 'S' conversion specifier, resulting in undefined behavior [-Wformat]
+   16 |         pf("%.3S", pi);
+      |             ~^~~
+format_flags.c:16:13: warning: format specifies type 'wchar_t *' (aka 'unsigned int *') but the argument has type 'int *' [-Wformat]
+   16 |         pf("%.3S", pi);
+      |             ~~~~   ^~
+format_flags.c:17:7: warning: length modifier 'l' results in undefined behavior or no effect with 'C' conversion specifier [-Wformat]
+   17 |         pf("%lC", vd);
+      |             ~^~
+format_flags.c:17:12: warning: format specifies type 'wchar_t' (aka 'unsigned int') but the argument has type 'double' [-Wformat]
+   17 |         pf("%lC", vd);
+      |             ~~~   ^~
+      |             %f
+format_flags.c:18:7: warning: length modifier 'z' results in undefined behavior or no effect with 'C' conversion specifier [-Wformat]
+   18 |         pf("%zC", vi);
+      |             ~^~
+format_flags.c:19:7: warning: length modifier 'L' results in undefined behavior or no effect with 'n' conversion specifier [-Wformat]
+   19 |         pf("%Ln", pi);
+      |             ~^~
+format_flags.c:19:7: note: did you mean to use 'll'?
+   19 |         pf("%Ln", pi);
+      |              ^
+      |              ll
+format_flags.c:20:8: warning: precision used with 'n' conversion specifier, resulting in undefined behavior [-Wformat]
+   20 |         pf("%.*Ln", vi, pi);
+      |             ~~^~~
+format_flags.c:20:9: warning: length modifier 'L' results in undefined behavior or no effect with 'n' conversion specifier [-Wformat]
+   20 |         pf("%.*Ln", vi, pi);
+      |             ~~~^~
+format_flags.c:20:9: note: did you mean to use 'll'?
+   20 |         pf("%.*Ln", vi, pi);
+      |                ^
+      |                ll
+format_flags.c:21:9: warning: length modifier 'h' results in undefined behavior or no effect with 'f' conversion specifier [-Wformat]
+   21 |         pf("\t%hf%k\n%%", vc, vld, pi);
+      |               ~^~
+format_flags.c:21:20: warning: format specifies type 'double' but the argument has type 'char' [-Wformat]
+   21 |         pf("\t%hf%k\n%%", vc, vld, pi);
+      |               ~~~         ^~
+      |               %c
+format_flags.c:21:12: warning: invalid conversion specifier 'k' [-Wformat-invalid-specifier]
+   21 |         pf("\t%hf%k\n%%", vc, vld, pi);
+      |                  ~^
+format_flags.c:21:24: warning: data argument not used by format string [-Wformat-extra-args]
+   21 |         pf("\t%hf%k\n%%", vc, vld, pi);
+      |            ~~~~~~~~~~~~~      ^
+format_flags.c:22:7: warning: invalid conversion specifier '\x0a' [-Wformat-invalid-specifier]
+   22 |         pf("%\n%d", vi, vl);
+      |             ~^
+format_flags.c:22:18: warning: data argument not used by format string [-Wformat-extra-args]
+   22 |         pf("%\n%d", vi, vl);
+      |            ~~~~~~~      ^
+format_flags.c:23:7: warning: flag ' ' results in undefined behavior with 'c' conversion specifier [-Wformat]
+   23 |         pf("% c", vb);
+      |             ~^~
+format_flags.c:23:12: warning: using '% c' format specifier, but argument has boolean value [-Wformat]
+   23 |         pf("% c", vb);
+      |             ~~~   ^
+format_flags.c:24:7: warning: flag '+' results in undefined behavior with 'o' conversion specifier [-Wformat]
+   24 |         pf("%+ o", vu);
+      |             ~^~~
+format_flags.c:24:8: warning: flag ' ' results in undefined behavior with 'o' conversion specifier [-Wformat]
+   24 |         pf("%+ o", vu);
+      |             ~~^~
+format_flags.c:24:8: warning: flag ' ' is ignored when flag '+' is present [-Wformat]
+   24 |         pf("%+ o", vu);
+      |             ~~^~
+format_flags.c:25:8: warning: flag '0' results in undefined behavior with 'n' conversion specifier [-Wformat]
+   25 |         pf("%-0n", pi);
+      |             ~~^~
+format_flags.c:25:7: warning: flag '-' results in undefined behavior with 'n' conversion specifier [-Wformat]
+   25 |         pf("%-0n", pi);
+      |             ~^~~
+format_flags.c:25:8: warning: flag '0' is ignored when flag '-' is present [-Wformat]
+   25 |         pf("%-0n", pi);
+      |             ~~^~
+format_flags.c:26:7: warning: flag ''' results in undefined behavior with 'e' conversion specifier [-Wformat]
+   26 |         pf("%'e", vd);
+      |             ~^~
+format_flags.c:27:7: warning: field width used with 'n' conversion specifier, resulting in undefined behavior [-Wformat]
+   27 |         pf("%5.3n", pi);
+      |             ~^~~~
+format_flags.c:27:8: warning: precision used with 'n' conversion specifier, resulting in undefined behavior [-Wformat]
+   27 |         pf("%5.3n", pi);
+      |             ~~^~~
+format_flags.c:28:12: warning: using '%lc' format specifier, but argument has boolean value [-Wformat]
+   28 |         pf("%lc", vb);
+      |             ~~~   ^
+format_flags.c:29:12: warning: format specifies type 'wchar_t *' (aka 'unsigned int *') but the argument has type 'char *' [-Wformat]
+   29 |         pf("%ls", ps);
+      |             ~~~   ^~
+      |             %s
+41 warnings generated.

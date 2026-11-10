@@ -1,0 +1,25 @@
+int_overflow.c:1:20: warning: overflow in expression; result is -2'147'483'648 with type 'int' [-Winteger-overflow]
+    1 | int a = 2147483647 + 1;
+      |         ~~~~~~~~~~~^~~
+int_overflow.c:2:16: warning: overflow in expression; result is 0 with type 'int' [-Winteger-overflow]
+    2 | long b = 65536 * 65536;
+      |          ~~~~~~^~~~~~~
+int_overflow.c:4:21: warning: overflow in expression; result is -2'147'483'648 with type 'int' [-Winteger-overflow]
+    4 |         int c = 2147483647 + 1;
+      |                 ~~~~~~~~~~~^~~
+int_overflow.c:5:16: warning: overflow in expression; result is 0 with type 'int' [-Winteger-overflow]
+    5 |         int d = 65536 * 65536;
+      |                 ~~~~~~^~~~~~~
+int_overflow.c:6:10: warning: overflow in expression; result is -2'147'483'648 with type 'int' [-Winteger-overflow]
+    6 |         int e = -(-2147483647 - 1);
+      |                 ^~~~~~~~~~~~~~~~~~
+int_overflow.c:8:25: warning: overflow in expression; result is -2 with type 'int' [-Winteger-overflow]
+    8 |         int g = x + 2147483647 * 2;
+      |                     ~~~~~~~~~~~^~~
+int_overflow.c:9:32: warning: overflow in expression; result is -9'223'372'036'854'775'808 with type 'long' [-Winteger-overflow]
+    9 |         long h = 9223372036854775807L + 1;
+      |                  ~~~~~~~~~~~~~~~~~~~~~^~~
+int_overflow.c:14:17: warning: overflow in expression; result is 1'410'065'408 with type 'int' [-Winteger-overflow]
+   14 |         int k = 100000 * 100000 / 10;
+      |                 ~~~~~~~^~~~~~~~
+8 warnings generated.

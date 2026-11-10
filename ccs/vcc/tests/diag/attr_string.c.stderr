@@ -1,0 +1,7 @@
+attr_string.c:2:30: error: expected string literal as argument of 'section' attribute
+    2 | int x __attribute__((section(1)));
+      |                              ^
+attr_string.c:3:32: error: expected string literal as argument of '__alias__' attribute
+    3 | int y __attribute__((__alias__(2)));
+      |                                ^
+2 errors generated.

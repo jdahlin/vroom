@@ -22,3 +22,4 @@ int k(int a) {
   if (a) { w = 1; }
   return g(a) ? w : 0;
 }
+/* diag-flags: -Wuninitialized -Wsometimes-uninitialized */

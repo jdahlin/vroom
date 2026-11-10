@@ -1,0 +1,7 @@
+dup_enumerator.c:1:14: error: redefinition of enumerator 'A'
+    1 | enum { A, B, A };
+      |        -     ^
+      |        |
+      |        previous definition is here
+dup_enumerator.c:1:8: note: previous definition is here
+1 error generated.

@@ -1,0 +1,10 @@
+macro_args.c:2:14: error: too few arguments provided to function-like macro invocation
+    1 | #define ADD(a, b) ((a) + (b))
+      |         - macro 'ADD' defined here
+    2 | int x = ADD(1);
+      |              ^
+macro_args.c:1:9: note: macro 'ADD' defined here
+macro_args.c:2:9: error: use of undeclared identifier 'ADD'
+    2 | int x = ADD(1);
+      |         ^~~
+2 errors generated.

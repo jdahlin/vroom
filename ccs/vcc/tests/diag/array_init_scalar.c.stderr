@@ -1,0 +1,4 @@
+array_init_scalar.c:1:5: error: array initializer must be an initializer list
+    1 | int a[2] = 5;
+      |     ^
+1 error generated.

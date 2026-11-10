@@ -5,10 +5,12 @@ enum { DQ_ATOMIC = 8 };	/* dop.q: _Atomic on a pointer (beside Q_*) */
 
 /* ---------------- declarators ---------------- */
 
-static void param_list(cc *c, dop *op)
+/* false when the list did not end in its ')' (the declaration is invalid, clang) */
+static bool param_list(cc *c, dop *op)
 {
 	vec ptys, psyms;
 	int fl = 0;
+	uint32_t open = c->prevloc, voidat = 0;	/* the '('; a 'void' that is not alone (clang: after the list) */
 
 	vinit(&ptys);
 	vinit(&psyms);
@@ -59,7 +61,7 @@ static void param_list(cc *c, dop *op)
 					ds.ty = prim(TY_INT);
 					ds.loc = tok(c)->loc;
 				} else if (is(c, T_IDENT)) {
-					unknown_type(c, &ds);
+					unknown_type(c, &ds, true);
 				} else {
 					fatal(c, tok(c)->loc, "expected parameter declarator");
 				}
@@ -76,7 +78,7 @@ static void param_list(cc *c, dop *op)
 
 				if (vs) {
 					if (!is_arith(c, t) || ty_size(c, t) > vs || vs % ty_size(c, t))
-						cc_error(c, d.loc, "invalid vector element type");
+						cc_error(c, d.loc, "invalid vector element type '%s'", tyname(c, t));
 					else
 						t = QT(QI(ty_vector(c, t, vs)), QQ(t));
 				}
@@ -84,7 +86,9 @@ static void param_list(cc *c, dop *op)
 			/* adjustments (C11 6.7.6.3p7-8) */
 			uint32_t vsize = 0;
 
-			if (is_array(c, t)) {
+			int pk = KIND(c, t);
+
+			if (pk == TY_ARRAY) {
 				const dop *ad = nops ? &c->dops[first + nops - 1] : NULL;
 				int q = ad && ad->kind == 1 ? ad->q : 0;
 
@@ -92,8 +96,18 @@ static void param_list(cc *c, dop *op)
 				if ((T(c, t)->flags & TF_VLA) && T(c, t)->n && has_side_effects(c, T(c, t)->n))
 					vsize = T(c, t)->n;
 				t = QT(QI(ty_ptr(c, T(c, t)->base)), q);
-			} else if (is_func(c, t)) {
+			} else if (pk == TY_FUNC) {
 				t = ty_ptr(c, t);
+			} else if (unlikely(pk == TY_VOID)) {
+				if (!d.name && !ptys.n && !is(c, T_COMMA) && !QQ(t))
+					break;	/* "(void void)" after its error, "(void;": still no parameters */
+				/* "(int a, void)", "(void x)": clang's errors (where the name would be);
+				   the parameter is invalid */
+				if (d.name)
+					cc_error(c, d.loc, "argument may not have 'void' type");
+				else if (!voidat)
+					voidat = tok(c)->loc;
+				ds.invalid = true;
 			}
 			vpush(c, &ptys, t);
 			if (d.name) {
@@ -107,7 +121,9 @@ static void param_list(cc *c, dop *op)
 			}
 			s = sym_new(c, S_VAR, d.name, t, d.loc ? d.loc : ds.loc);
 			c->syms[s].tdef = decl_tdef(c, ds.tdef, ds.ty, t);
-			c->syms[s].flags |= SF_PARAM | ((d.at.nonnull | ds.at.nonnull) ? SF_NONNULL : 0);
+			c->syms[s].flags |= SF_PARAM | ((d.at.nonnull | ds.at.nonnull) ? SF_NONNULL : 0) | (ds.invalid ? SF_INVALID : 0);
+			if (unlikely(ds.invalid))
+				delayed_bug(c, d.loc, "an invalid parameter without an error");
 			c->syms[s].body = vsize;	/* parameters: a decayed VLA's size expression with side effects */
 			c->syms[s].sc = ds.sc == SC_REGISTER ? SC_REGISTER : SC_AUTO;
 			sym_bind(c, s);
@@ -117,8 +133,12 @@ static void param_list(cc *c, dop *op)
 		}
 		c->in_proto--;
 	}
-	scope_close(c);
-	expect(c, T_RPAREN, "')'");
+	if (unlikely(voidat))	/* the list parsed: "(int, void)", "(void, int)" */
+		cc_error(c, voidat, "'void' must be the first and only parameter if specified");
+	scope_close_proto(c);
+	bool ok = is(c, T_RPAREN);
+
+	expect_match(c, T_RPAREN, open);
 	op->kind = 2;
 	op->fl = (uint16_t)fl;
 	op->a = vfreeze(c, &ptys);
@@ -126,6 +146,7 @@ static void param_list(cc *c, dop *op)
 	op->np = psyms.n;
 	/* the parameter syms follow the types */
 	vfreeze(c, &psyms);
+	return ok;
 }
 
 static void array_suffix(cc *c, dop *op, uint32_t name)
@@ -169,7 +190,9 @@ static void array_suffix(cc *c, dop *op, uint32_t name)
 
 		expect(c, T_RSQUARE, "']'");
 		if (!is_integer(c, N(n)->ty)) {
-			cc_error(c, N(n)->loc, "size of array has non-integer type");
+			pp_span r = rng(c, n);
+
+			report(c, "error", N(n)->loc, &r, 1, NULL, 0, "size of array has non-integer type '%s'", tyname(c, N(n)->ty));
 			v = 1;
 		} else if (!const_int(c, n, &v)) {
 			op->fl = TF_VLA;
@@ -185,6 +208,8 @@ static void array_suffix(cc *c, dop *op, uint32_t name)
 				report(c, "error", r.b, &r, 1, NULL, 0, "array size is negative");
 			v = 1;
 		}
+		if (unlikely(v == 0))
+			EXT_WARN(c, "zero-length-array", w_gnu, rng(c, n).b, "zero size arrays are an extension");
 		op->a = (uint32_t)(uint64_t)v;
 		op->b = (uint32_t)((uint64_t)v >> 32);
 	}
@@ -264,10 +289,12 @@ VPRIV void declarator(cc *c, declr *d, bool abstract_ok, uint32_t *first, uint32
 		break;
 	}
 	if (is(c, T_LPAREN) && nested_declarator(c, abstract_ok)) {
+		uint32_t plb0 = tok(c)->loc;
+
 		next(c);
 		attribute_list(c, &d->at);
 		declarator(c, &id, abstract_ok, &ifirst, &inops);
-		expect(c, T_RPAREN, "')'");
+		expect_match(c, T_RPAREN, plb0);
 		d->name = id.name;
 		d->loc = id.loc;
 		merge_attrs(&d->at, &id.at);
@@ -279,11 +306,14 @@ VPRIV void declarator(cc *c, declr *d, bool abstract_ok, uint32_t *first, uint32
 	} else if (is(c, T_IDENT) && !kwof(tok(c))) {
 		d->name = tok(c)->id;
 		d->loc = tok(c)->loc;
+		if (!abstract_ok)	/* an error before the declaration ends declares it, invalid (rec_restore) */
+			c->decl_name = d->name, c->decl_loc = d->loc, c->decl_depth = c->depth;
 		next(c);
 	} else if (!abstract_ok) {
-		char b[64];
-
-		fatal(c, tok(c)->loc, "expected identifier or '(' before '%s'", tokspell(tok(c), b, sizeof(b)));
+		/* clang: a '(' that is not a grouping one starts the parameters of a nameless
+		   declarator, and the name was expected after it */
+		fatal(c, is(c, T_LPAREN) ? peek(c, 1)->loc : tok(c)->loc,
+		      c->in_struct ? "expected member name or ';' after declaration specifiers" : "expected identifier or '('");
 	} else {
 		d->loc = tok(c)->loc;	/* abstract: where the name would be (clang) */
 	}
@@ -300,7 +330,8 @@ VPRIV void declarator(cc *c, declr *d, bool abstract_ok, uint32_t *first, uint32
 			plb = tok(c)->loc;
 			if (ns >= 64)
 				fatal(c, tok(c)->loc, "declarator too complex");
-			param_list(c, &sufs[ns]);
+			if (unlikely(!param_list(c, &sufs[ns])))
+				d->invalid = true;
 			/* the innermost function declarator next to the name gives the parameters */
 			if (!inner && !d->has_func && ns == 0) {
 				d->psyms = sufs[ns].a + sufs[ns].b;
@@ -390,14 +421,16 @@ VPRIV qty type_name(cc *c)
 	uint32_t first, nops;
 	qty t;
 
+	c->in_tyname++;
 	if (!decl_specs(c, &ds, false))
 		fatal(c, tok(c)->loc, "expected a type");
+	c->in_tyname--;
 	declarator(c, &d, true, &first, &nops);
 	attribute_list(c, &d.at);
 	t = apply_declarator(c, ds.ty, first, nops);
 	c->ndops = first;
-	if (d.name)
-		cc_error(c, d.loc, "unexpected identifier in type name");
+	if (d.name)	/* clang: the abstract declarator ends before it */
+		cc_error(c, d.loc, "expected ')'");
 	{
 		uint32_t vs = d.at.vecsize ? d.at.vecsize : ds.at.vecsize;
 

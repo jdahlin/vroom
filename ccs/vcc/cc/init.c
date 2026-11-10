@@ -1,6 +1,13 @@
 /* vcc front end: initializers */
 #include "ccimpl.h"
 
+/* at '{': "{}" before C23 (clang -pedantic) */
+static inline void empty_init_ext(cc *c)
+{
+	if (unlikely(ext_on(c, "c23-extensions", w_ped)) && c->o->std != 23 && peek(c, 1)->kind == T_RBRACE)
+		ext_warn(c, "c23-extensions", w_ped, tok(c)->loc, "use of an empty initializer is a C23 extension");
+}
+
 /* ---------------- initializers ---------------- */
 
 typedef struct irun {
@@ -20,6 +27,7 @@ typedef struct ilist {
 	uint32_t nrun, caprun;
 	uint32_t ufield;	/* union: the initialized field */
 	bool uset;
+	bool excess;		/* -Wexcess-initializers reported for this list */
 	uint32_t ubase;	/* union expanded from this value (il_expand), 0: none */
 } ilist;
 
@@ -329,10 +337,10 @@ static void il_elem(cc *c, ilist *l, uint64_t pos, uint32_t v, bool st)
 		if (is_char_array(c, et) && brace_string(c)) {	/* { "string" } */
 			uint32_t sv;
 
-			next(c);
+			next(c), c->ibr++;
 			sv = string_lit(c);
 			accept(c, T_COMMA);
-			expect(c, T_RBRACE, "'}'");
+			expect(c, T_RBRACE, "'}'"), c->ibr--;
 			str_fit(c, et, sv);
 			il_set(c, l, pos, sv, NULL);
 			return;
@@ -340,9 +348,12 @@ static void il_elem(cc *c, ilist *l, uint64_t pos, uint32_t v, bool st)
 		if (is_ilagg(c, et)) {
 			ilist *s = il_new(c, et);
 
-			next(c);
+			uint32_t ob = tok(c)->loc;
+
+			empty_init_ext(c);
+			next(c), c->ibr++;
 			il_fill(c, s, 0, true, 0, st);
-			expect(c, T_RBRACE, "'}'");
+			expect_match(c, T_RBRACE, ob), c->ibr--;
 			il_set(c, l, pos, 0, s);
 		} else {
 			il_set(c, l, pos, init_braced(c, et, st), NULL);
@@ -403,16 +414,17 @@ static uint64_t il_designation(cc *c, ilist *l, bool st)
 		int d;
 
 		if (!is(c, T_IDENT))
-			fatal(c, tok(c)->loc, "expected a field designator");
+			fatal(c, tok(c)->loc, "expected a field designator, such as '.field = 4'");
 		name = tok(c)->id;
 		if (l->array) {
-			cc_error(c, tok(c)->loc, "field designator cannot initialize a non-struct, non-union type");
+			cc_error(c, tok(c)->loc, "field designator cannot initialize a non-struct, non-union type '%s'", tyname(c, l->ty));
 			next(c);
 			return 0;
 		}
 		d = find_member(c, T(c, l->ty)->aux, name, path, 0);
 		if (d < 0) {
-			cc_error(c, tok(c)->loc, "field designator '%.*s' does not refer to any field", IDF(name));
+			cc_error(c, tok(c)->loc, "field designator '%.*s' does not refer to any field in type '%s'", IDF(name),
+				 tyname(c, l->ty));
 			next(c);
 			skip_balanced(c);
 			return l->n;
@@ -430,11 +442,15 @@ static uint64_t il_designation(cc *c, ilist *l, bool st)
 			const_expr(c, &b, NULL);
 		expect(c, T_RSQUARE, "']'");
 		if (!l->array) {
-			cc_error(c, tok(c)->loc, "array designator cannot initialize non-array type");
+			cc_error(c, tok(c)->loc, "array designator cannot initialize non-array type '%s'", tyname(c, l->ty));
 			return 0;
 		}
 		if (a < 0 || b < a || (!l->unknown && (uint64_t)b >= l->n)) {
-			cc_error(c, tok(c)->loc, "array designator index exceeds array bounds");
+			if (a < 0)
+				cc_error(c, tok(c)->loc, "array designator value '%lld' is negative", (long long)a);
+			else
+				cc_error(c, tok(c)->loc, "array designator index (%lld) exceeds array bounds (%llu)",
+					 (long long)(b < a ? a : b), (unsigned long long)l->n);
 			return (uint64_t)(b < 0 ? 0 : b) + 1;
 		}
 		lo = (uint64_t)a, hi = (uint64_t)b;
@@ -484,9 +500,12 @@ static uint64_t il_designation(cc *c, ilist *l, bool st)
 			if (is_ilagg(c, et)) {
 				ilist *s = il_new(c, et);
 
-				next(c);
+				uint32_t ob = tok(c)->loc;
+
+				empty_init_ext(c);
+				next(c), c->ibr++;
 				il_fill(c, s, 0, true, 0, st);
-				expect(c, T_RBRACE, "'}'");
+				expect_match(c, T_RBRACE, ob), c->ibr--;
 				il_run(c, l, lo, hi, 0, s);
 			} else {
 				il_run(c, l, lo, hi, init_braced(c, et, st), NULL);
@@ -500,11 +519,25 @@ static uint64_t il_designation(cc *c, ilist *l, bool st)
 				il_fill(c, s, 0, false, v, st);
 				il_run(c, l, lo, hi, 0, s);
 			} else {
-				il_run(c, l, lo, hi, is_array(c, et) || is_record(c, et) || is_vector(c, et) ? v : convert(c, decay(c, v), et), NULL);
+				if (!(is_array(c, et) || is_record(c, et) || is_vector(c, et))) {
+					v = convert(c, decay(c, v), et);
+				}
+				il_run(c, l, lo, hi, v, NULL);
 			}
 		}
 	}
 	return hi + 1;
+}
+
+/* clang's -Wexcess-initializers, once per list; the elements are dropped */
+static void il_excess(cc *c, ilist *l, uint32_t loc)
+{
+	const char *k = l->array ? (is_vector(c, l->ty) ? "vector" : "array") : l->isunion ? "union" : "struct";
+
+	if (l->excess)
+		return;
+	l->excess = true;
+	cc_warnx(c, "excess-initializers", true, NULL, loc, NULL, 0, NULL, 0, "excess elements in %s initializer", k);
 }
 
 static void il_fill(cc *c, ilist *l, uint64_t pos, bool braced, uint32_t first, bool st)
@@ -514,7 +547,7 @@ static void il_fill(cc *c, ilist *l, uint64_t pos, bool braced, uint32_t first, 
 	pos = il_next_pos(c, l, pos);
 	if (first) {
 		if (il_full(l, pos)) {
-			cc_error(c, N(first)->loc, "excess elements in initializer");
+			il_excess(c, l, N(first)->loc);
 			return;
 		}
 		il_elem(c, l, pos, first, st);
@@ -601,11 +634,13 @@ static uint32_t init_braced(cc *c, qty ty, bool st)
 {
 	uint32_t v = 0, loc = tok(c)->loc;
 
+	empty_init_ext(c);
 	expect(c, T_LBRACE, "'{'");
 	if (is(c, T_RBRACE)) {
 		next(c);
 		return mk(c, N_ZERO, QUNQ(ty), loc);
 	}
+	c->ibr++;
 	if (is(c, T_LBRACE))
 		v = init_braced(c, ty, st);
 	else
@@ -622,7 +657,7 @@ static uint32_t init_braced(cc *c, qty ty, bool st)
 				excess_warn(c, ty, &excess, rng(c, assign_expr(c)));
 		}
 	}
-	expect(c, T_RBRACE, "'}'");
+	expect(c, T_RBRACE, "'}'"), c->ibr--;
 	return v;
 }
 
@@ -635,10 +670,10 @@ VPRIV uint32_t initializer(cc *c, qty *ty, bool st)
 		if (is_char_array(c, t) && brace_string(c)) {
 			uint32_t s;
 
-			next(c);
+			next(c), c->ibr++;
 			s = string_lit(c);
 			accept(c, T_COMMA);
-			expect(c, T_RBRACE, "'}'");
+			expect(c, T_RBRACE, "'}'"), c->ibr--;
 			str_fit(c, t, s);
 			if (T(c, t)->flags & TF_INCOMPLETE)
 				*ty = QT(QI(ty_array(c, T(c, t)->base, c->strs[N(s)->a].n, 0)), QQ(t));
@@ -649,14 +684,18 @@ VPRIV uint32_t initializer(cc *c, qty *ty, bool st)
 			uint32_t n;
 
 			if (is_record(c, t) && !complete(c, t)) {
-				cc_error(c, loc, "variable has incomplete type");
+				cc_error(c, c->cv_what == CX_INIT ? c->cv_loc : loc, "variable has incomplete type '%s'", tyname(c, t));
+				fwd_note(c, t);
 				skip_balanced(c);
 				return mk(c, N_ZERO, t, loc);
 			}
 			l = il_new(c, QUNQ(t));
-			next(c);
+			uint32_t ob = tok(c)->loc;
+
+			empty_init_ext(c);
+			next(c), c->ibr++;
 			il_fill(c, l, 0, true, 0, st);
-			expect(c, T_RBRACE, "'}'");
+			expect_match(c, T_RBRACE, ob), c->ibr--;
 			n = il_finish(c, l, loc);
 			*ty = QT(QI(N(n)->ty), QQ(t));
 			return n;

@@ -6,6 +6,7 @@
                                                     shared caches as in vccd, so also run `run` before a commit)
   bench/vcc-sema.py layout [-j N] [--kernel] [PAT]  vcc's layout/constant claims, checked by clang
   bench/vcc-sema.py warn [-j N] [--kernel] [PAT]    vcc's warnings (file:line:col: warning: ... [-Wflag]) against clang's
+      (WFLAGS="-pedantic": extra flags for both; HIST=N: the N flags clang gives most that vcc misses)
 
 `layout` has vpp write _Static_assert lines (sizeof/_Alignof/offsetof of every
 file-scope struct, union, enum and typedef, sizeof of every global, every
@@ -76,12 +77,15 @@ def warn(t):
     """vcc's diagnostic header lines against clang's -fsyntax-only (same flags): ok when
     every line vcc prints is one clang prints too (vcc may miss some of clang's)."""
     obj, a = t
+    a = a + os.environ.get('WFLAGS', '').split()
     p = subprocess.run([VPP, '-fsyntax-only', '-fno-color-diagnostics'] + a, cwd=B, capture_output=True, text=True)
     q = subprocess.run([CL, '-fsyntax-only', '-fno-color-diagnostics'] + [x for x in a if not x.startswith('-Wp,')],
                        cwd=B, capture_output=True, text=True)
     v, c = WLINE.findall(p.stderr), WLINE.findall(q.stderr)
     extra = [l for l in v if l not in c]
-    return obj, len(extra) and 1, '\n'.join(extra[:8]), (len(v) - len(extra), len(c))
+    missed = [re.sub(r'.*\[-W(?:error,-W)?([^\]]*)\]$', r'\1', l) if l.endswith(']') else 'no flag'
+              for l in c if l not in v and (' warning: ' in l or ' error: ' in l)]
+    return obj, len(extra) and 1, '\n'.join(extra[:8]), (len(v) - len(extra), len(c), missed)
 
 if __name__ == '__main__':
     av = [x for x in sys.argv[1:] if x != '--kernel']; j = 6
@@ -116,6 +120,10 @@ if __name__ == '__main__':
         print(f'{len(res) - len(bad)}/{len(res)} ok; median {tt[len(tt)//2]*1e3:.0f} ms, total {sum(tt):.1f} s')
     elif mode == 'warn':
         print(f'{len(res) - len(bad)}/{len(res)} ok; vcc reproduces {sum(r[3][0] for r in res)} of clang\'s {sum(r[3][1] for r in res)} diagnostics')
+        if os.environ.get('HIST'):	# clang's diagnostics vcc does not give, by flag
+            from collections import Counter
+            h = Counter(f for r in res for f in r[3][2])
+            for k, v in h.most_common(int(os.environ.get('HIST'))): print(f'{v:7d}  {k}')
     else:
         print(f'{len(res) - len(bad)}/{len(res)} ok; {sum(r[3] for r in res)} checks')
     os.rmdir(TMP)

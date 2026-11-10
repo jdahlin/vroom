@@ -1,0 +1,16 @@
+pragma_warning.c:1:13: warning: hello [-W#pragma-messages]
+    1 | #pragma GCC warning "hello"
+      |             ^
+pragma_warning.c:2:13: error: bad
+    2 | #pragma GCC error "bad"
+      |             ^
+pragma_warning.c:4:5: warning: macro expansion producing 'defined' has undefined behavior [-Wexpansion-to-defined]
+    4 | #if D
+      |     ^
+pragma_warning.c:3:11: note: expanded from macro 'D'
+    3 | #define D defined(X)
+      |           ^
+pragma_warning.c:9:13: error: pragma warning requires parenthesized string
+    9 | #pragma GCC warning
+      |             ^
+2 warnings and 2 errors generated.

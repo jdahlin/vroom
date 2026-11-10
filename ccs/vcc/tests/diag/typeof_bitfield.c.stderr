@@ -1,0 +1,4 @@
+typeof_bitfield.c:1:34: error: invalid application of 'typeof' to bit-field
+    1 | struct S { int b : 3; } s; typeof(s.b) y;
+      |                                  ^
+1 error generated.

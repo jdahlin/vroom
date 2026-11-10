@@ -1,0 +1,52 @@
+tautological.c:11:33: warning: self-comparison always evaluates to true [-Wtautological-compare]
+   11 | int same(void) { return retries == retries || c.id != c.id || slots[1] < slots[1]; }
+      |                                 ^
+      = help: both sides are the same variable: was another one meant?
+tautological.c:11:52: warning: self-comparison always evaluates to false [-Wtautological-compare]
+   11 | int same(void) { return retries == retries || c.id != c.id || slots[1] < slots[1]; }
+      |                                                    ^
+      = help: both sides are the same object: was another one meant?
+tautological.c:11:72: warning: self-comparison always evaluates to false [-Wtautological-compare]
+   11 | int same(void) { return retries == retries || c.id != c.id || slots[1] < slots[1]; }
+      |                                                                        ^
+      = help: both sides are the same object: was another one meant?
+tautological.c:13:26: warning: comparison of array 'slots' equal to a null pointer is always false [-Wtautological-pointer-compare]
+   13 | int nulls(void) { return slots == 0 || &c.id != 0 || c.buf == (void *)0 || poll == 0; }
+      |                          ^~~~~    ~
+      = help: array 'slots' is never null
+tautological.c:13:43: warning: comparison of address of 'c.id' not equal to a null pointer is always true [-Wtautological-pointer-compare]
+   13 | int nulls(void) { return slots == 0 || &c.id != 0 || c.buf == (void *)0 || poll == 0; }
+      |                                         ~~^~    ~
+      = help: address of 'c.id' is never null
+tautological.c:13:56: warning: comparison of array 'c.buf' equal to a null pointer is always false [-Wtautological-pointer-compare]
+   13 | int nulls(void) { return slots == 0 || &c.id != 0 || c.buf == (void *)0 || poll == 0; }
+      |                                                      ~~^~~    ~~~~~~~~~
+      = help: array 'c.buf' is never null
+tautological.c:13:76: warning: comparison of function 'poll' equal to a null pointer is always false [-Wtautological-pointer-compare]
+   13 | int nulls(void) { return slots == 0 || &c.id != 0 || c.buf == (void *)0 || poll == 0; }
+      |                                                                            ^~~~    ~
+tautological.c:13:76: note: prefix with the address-of operator to silence this warning
+   13 | int nulls(void) { return slots == 0 || &c.id != 0 || c.buf == (void *)0 || poll == 0; }
+      |                                                                            ^
+      |                                                                            &
+tautological.c:13:76: note: suffix with parentheses to turn this into a function call
+   13 | int nulls(void) { return slots == 0 || &c.id != 0 || c.buf == (void *)0 || poll == 0; }
+      |                                                                            ^
+      |                                                                                ()
+tautological.c:14:28: warning: result of comparison of constant 256 with expression of type 'unsigned char' is always true [-Wtautological-constant-out-of-range-compare]
+   14 | int r1(void) { return byte < 256; }
+      |                       ~~~~ ^ ~~~
+      = help: 'unsigned char' holds 0 to 255
+tautological.c:15:28: warning: result of comparison of constant -1 with expression of type 'unsigned char' is always false [-Wtautological-constant-out-of-range-compare]
+   15 | int r2(void) { return byte == -1; }
+      |                       ~~~~ ^  ~~
+      = help: 'unsigned char' holds 0 to 255
+tautological.c:16:29: warning: result of comparison of constant 2 with expression of type '_Bool' is always false [-Wtautological-constant-out-of-range-compare]
+   16 | int r3(void) { return ready == 2; }
+      |                       ~~~~~ ^  ~
+      = help: '_Bool' holds 0 to 1
+tautological.c:17:27: warning: result of comparison of constant 300 with expression of type 'unsigned char' is always true [-Wtautological-constant-out-of-range-compare]
+   17 | int r4(void) { return 300 > byte; }
+      |                       ~~~ ^ ~~~~
+      = help: 'unsigned char' holds 0 to 255
+11 warnings generated.

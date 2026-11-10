@@ -79,10 +79,11 @@ typedef struct field {
 	uint64_t off;		/* bits */
 	uint16_t width;		/* bit-field width */
 	uint8_t bitfield;
-	uint8_t _pad;
+	uint8_t invalid;	/* its type was an error: uses say nothing more (clang) */
 	uint32_t loc;
 	uint32_t counted_by;	/* counted_by(member): its identifier id */
 	uint32_t tdef;		/* declared with exactly this typedef name's type (sym), 0: none */
+	uint32_t depr;		/* deprecated/unavailable: attrs record index, 0: none */
 } field;
 
 enum {
@@ -167,7 +168,7 @@ typedef struct sym {
 enum {
 	N_NONE,
 	/* expressions */
-	N_NUM,		/* a: constant pool index (integer) */
+	N_NUM,		/* a: constant pool index (integer); aux: NUM_RADIX (a literal not written in decimal), NUM_ENUM */
 	N_FNUM,		/* a: constant pool index (double) */
 	N_STR,		/* a: string index */
 	N_VAR,		/* a: sym */
@@ -187,7 +188,7 @@ enum {
 	N_SIZEOF_VLA,	/* a: expression of VLA type */
 	N_STMTEXPR,	/* a: compound statement */
 	N_COMPLIT,	/* a: init, b: sym of the object */
-	N_INIT,		/* initializer list: b: list of (designator node, value) pairs, c: count */
+	N_INIT,		/* initializer list: b: struct/union (aux 0/2): c values; array (aux 1): c (lo, hi, value) */
 	N_DESIG,	/* aux: 0 field (b: tag, c: field) / 1 index range (a..b) */
 	N_LABELADDR,	/* &&label: a: label */
 	N_VAARG,	/* a: va_list expr */
@@ -227,6 +228,7 @@ enum {
 	CK_VADDR,	/* GNU vector rvalue -> pointer to its first lane (v[i] on an rvalue) */
 };
 
+enum { NUM_RADIX = 1, NUM_ENUM = 2 };	/* N_NUM aux: spelled not in decimal; an enumerator's value */
 enum { NF_LVALUE = 1, NF_BITFIELD = 2, NF_PAREN = 4, NF_NPC = 8,
        NF_ERR = 16,
        NF_MACRO = 32, NF_BOUNDS = 64, NF_OVF = 128 };	/* NF_OVF: a constant subexpression overflowed (-Winteger-overflow given once) */	/* NF_BOUNDS: a[CONST] already checked (-Warray-bounds) */	/* NF_MACRO: the operator came from a macro expansion (no style warnings) */	/* NF_ERR: stands in for an expression already diagnosed (no follow-on errors) */
@@ -264,6 +266,7 @@ typedef struct cc_opts {	/* fields before outfd: parse options, all in the decl 
 	int no_builtin;		/* -ffreestanding / -fno-builtin: abs() etc. are plain calls */
 	int wasm_sjlj;		/* -mllvm -wasm-enable-sjlj: setjmp/longjmp through wasm exceptions */
 	int implicit_fn;	/* implicit function declarations allowed (... implicit-function-declaration) */
+	int strict_std;		/* -std=cNN (not gnuNN): clang's GNU-only library functions are not known */
 	int conv_warn;		/* -Wno-error= (or -Wno-) of: 1 int-conversion, 2 incompatible-pointer-types,
 				   4 incompatible-function-pointer-types: a warning, not an error */
 	int dump_layouts;	/* append _Static_assert checks for clang to verify */

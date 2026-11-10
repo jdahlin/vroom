@@ -1,0 +1,5 @@
+return_type_guard.c:7:48: warning: non-void function does not return a value in all control paths [-Wreturn-type]
+    7 | int g(int x) { scoped(l2) { if (x) return 1; } }
+      |                                                ^
+      = help: 'g' returns 'int': end it with a return statement
+1 warning generated.

@@ -1,0 +1,53 @@
+sometimes_uninit_do2.c:6:9: warning: variable 'x' is used uninitialized whenever 'if' condition is true [-Wsometimes-uninitialized]
+    6 |     if (b) break;
+      |     ----^-------
+      |     |
+      |     remove the 'if' if its condition is always false
+  ...
+    9 |   return x;
+      |          - uninitialized use occurs here
+sometimes_uninit_do2.c:9:10: note: uninitialized use occurs here
+sometimes_uninit_do2.c:6:5: note: remove the 'if' if its condition is always false
+sometimes_uninit_do2.c:5:9: warning: variable 'x' is used uninitialized whenever 'if' condition is true [-Wsometimes-uninitialized]
+    5 |     if (a) break;
+      |     ----^-------
+      |     |
+      |     remove the 'if' if its condition is always false
+  ...
+    9 |   return x;
+      |          - uninitialized use occurs here
+sometimes_uninit_do2.c:9:10: note: uninitialized use occurs here
+sometimes_uninit_do2.c:5:5: note: remove the 'if' if its condition is always false
+sometimes_uninit_do2.c:3:8: note: initialize the variable 'x' to silence this warning
+    3 |   int x;
+      |        ^
+      |         = 0
+sometimes_uninit_do2.c:17:7: warning: variable 'z' is used uninitialized whenever 'if' condition is false [-Wsometimes-uninitialized]
+   17 |   if (a) z = 2;
+      |   ----^--
+      |   |
+      |   remove the 'if' if its condition is always true
+   18 |   return z;
+      |          - uninitialized use occurs here
+sometimes_uninit_do2.c:18:10: note: uninitialized use occurs here
+sometimes_uninit_do2.c:17:3: note: remove the 'if' if its condition is always true
+sometimes_uninit_do2.c:16:8: note: initialize the variable 'z' to silence this warning
+   16 |   int z;
+      |        ^
+      |         = 0
+sometimes_uninit_do2.c:13:7: warning: variable 'y' is used uninitialized whenever 'if' condition is false [-Wsometimes-uninitialized]
+   13 |   if (a) y = 1;
+      |   ----^--     -
+      |   |
+      |   remove the 'if' if its condition is always true
+   14 |   else g(0);
+      | -----------
+   15 |   y = y + 0;
+      |       - uninitialized use occurs here
+sometimes_uninit_do2.c:15:7: note: uninitialized use occurs here
+sometimes_uninit_do2.c:13:3: note: remove the 'if' if its condition is always true
+sometimes_uninit_do2.c:12:8: note: initialize the variable 'y' to silence this warning
+   12 |   int y;
+      |        ^
+      |         = 0
+4 warnings generated.

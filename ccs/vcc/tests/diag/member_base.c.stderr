@@ -1,0 +1,4 @@
+member_base.c:3:10: error: member reference base type 'int' is not a structure or union
+    3 |         return a.x;
+      |                ~^~
+1 error generated.

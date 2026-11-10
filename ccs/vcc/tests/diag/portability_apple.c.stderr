@@ -1,0 +1,41 @@
+portability_apple.c:13:31: warning: format specifies type 'unsigned int' but the argument has type 'size_t' (aka 'unsigned long') [-Wformat]
+   13 |         printf("%lld %u %d %d\n", x, n, d, m);
+      |                      ~~              ^
+      |                      %zu
+portability_apple.c:13:34: warning: format specifies type 'int' but the argument has type 'ptrdiff_t' (aka 'long') [-Wformat]
+   13 |         printf("%lld %u %d %d\n", x, n, d, m);
+      |                         ~~              ^
+      |                         %td
+portability_apple.c:13:37: warning: format specifies type 'int' but the argument has type 'intmax_t' (aka 'long') [-Wformat]
+   13 |         printf("%lld %u %d %d\n", x, n, d, m);
+      |                            ~~              ^
+      |                            %jd
+portability_apple.c:14:34: warning: format specifies type 'int' but the argument has type 'size_t' (aka 'unsigned long') [-Wformat]
+   14 |         printf("%llx %d %lld\n", r->id, r->len, total());
+      |                      ~~                 ^~~~~~
+      |                      %zu
+portability_apple.c:15:12: warning: field width should have type 'int', but argument has type 'size_t' (aka 'unsigned long') [-Wformat]
+   15 |         printf("%*d\n", n, 1);
+      |                 ~~^     ~
+portability_apple.c:19:12: warning: implicit conversion from 'int' to 'char' changes value from 200 to -56 [-Wconstant-conversion]
+   19 | char big = 200;
+      |      ~~~   ^~~
+portability_apple.c:20:15: warning: magnitude of floating-point constant too large for type 'double'; maximum is 1.7976931348623157E+308 [-Wliteral-range]
+   20 | double huge = 1e400;
+      |               ^~~~~
+portability_apple.c:21:14: warning: magnitude of floating-point constant too small for type 'float'; minimum is 1.40129846E-45 [-Wliteral-range]
+   21 | float tiny = 1e-46f;
+      |              ^~~~~~
+portability_apple.c:22:19: warning: magnitude of floating-point constant too large for type 'long double'; maximum is 1.7976931348623157E+308 [-Wliteral-range]
+   22 | long double far = 1e4000L;
+      |                   ^~~~~~~
+      = help: 'long double' is 'double' on Apple; on Arm Linux it has 128 bits, up to 1.19E+4932
+portability_apple.c:23:16: error: static assertion failed due to requirement 'sizeof(long double) == 16': binary128
+   23 | _Static_assert(sizeof(long double) == 16, "binary128");
+      |                ^~~~~~~~~~~~~~~~~~~~~~~~~ expression evaluates to '8 == 16'
+      = help: 'long double' has 8 bytes on Apple (it is 'double') and 16 on Arm Linux (binary128)
+portability_apple.c:23:36: note: expression evaluates to '8 == 16'
+portability_apple.c:24:46: warning: implicit conversion from 'int' to 'signed char' changes value from 254 to -2 [-Wconstant-conversion]
+   24 | signed char hexb = 0xfe, octb = 0376, decb = 254;
+      |                                       ~~~~   ^~~
+10 warnings and 1 error generated.

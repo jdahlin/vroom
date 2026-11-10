@@ -1,0 +1,52 @@
+unused.c:35:8: warning: unused variable 'inner' [-Wunused-variable]
+   35 |         { int inner; }
+      |               ^~~~~
+unused.c:20:6: warning: unused variable 'a' [-Wunused-variable]
+   20 |         int a;
+      |             ^
+unused.c:21:6: warning: unused variable 'b' [-Wunused-variable]
+   21 |         int b = 1;
+      |             ^
+unused.c:23:6: warning: variable 'd' set but not used [-Wunused-but-set-variable]
+   23 |         int d; d = 1;
+      |             ^
+unused.c:25:6: warning: unused variable 'arr' [-Wunused-variable]
+   25 |         int arr[4];
+      |             ^~~
+unused.c:27:6: warning: unused variable 'z1' [-Wunused-variable]
+   27 |         int z1, z2;
+      |             ^~
+unused.c:27:10: warning: unused variable 'z2' [-Wunused-variable]
+   27 |         int z1, z2;
+      |                 ^~
+unused.c:29:6: warning: variable 'q' set but not used [-Wunused-but-set-variable]
+   29 |         int q = 0; q++;
+      |             ^
+unused.c:32:14: warning: unused variable 'pt' [-Wunused-variable]
+   32 |         int t; int *pt = &t;
+      |                     ^~
+unused.c:7:18: warning: unused variable 'g2' [-Wunused-const-variable]
+    7 | static const int g2 = 1;
+      |                  ^~
+unused.c:9:13: warning: unused function 'f1' [-Wunused-function]
+    9 | static void f1(void) {}
+      |             ^~
+unused.c:10:20: warning: unused function 'f2' [-Wunused-function]
+   10 | static inline void f2(void) {}
+      |                    ^~
+unused.c:11:13: warning: unused function 'f3' [-Wunused-function]
+   11 | static void f3(void);
+      |             ^~
+unused.c:13:12: warning: function 'f6' is not needed and will not be emitted [-Wunneeded-internal-declaration]
+   13 | static int f6(void) { return 0; }
+      |            ^~
+unused.c:14:13: warning: function 'rec' is not needed and will not be emitted [-Wunneeded-internal-declaration]
+   14 | static void rec(void) { if (g1) rec(); }
+      |             ^~~
+unused.c:16:12: warning: unused function 'a2' [-Wunused-function]
+   16 | static int a2(void) { return a1(); }
+      |            ^~
+unused.c:36:14: warning: unused typedef 'unused_t' [-Wunused-local-typedef]
+   36 |         typedef int unused_t;
+      |                     ^
+17 warnings generated.

@@ -1,0 +1,28 @@
+ptr_quals.c:10:9: warning: initializing 'char **' with an expression of type 'const char **' discards qualifiers in nested pointer types [-Wincompatible-pointer-types-discards-qualifiers]
+   10 |         char **q = qq;
+      |                ^   ~~
+ptr_quals.c:13:8: warning: initializing 'void *' with an expression of type 'const int *' discards qualifiers [-Wincompatible-pointer-types-discards-qualifiers]
+   13 |         void *vp = c;
+      |               ^    ~
+ptr_quals.c:14:4: warning: passing 'const int *' to parameter of type 'int *' discards qualifiers [-Wincompatible-pointer-types-discards-qualifiers]
+   14 |         g(c);
+      |           ^
+ptr_quals.c:4:13: note: passing argument to parameter here
+    4 | void g(int *);
+      |             ^
+ptr_quals.c:15:4: warning: passing 'unsigned int *' to parameter of type 'int *' converts between pointers to integer types with different sign [-Wpointer-sign]
+   15 |         g(&u);
+      |           ^~
+ptr_quals.c:4:13: note: passing argument to parameter here
+    4 | void g(int *);
+      |             ^
+ptr_quals.c:16:5: warning: passing 'unsigned char *' to parameter of type 'char *' converts between pointers to integer types with different sign [-Wpointer-sign]
+   16 |         ch(&uc);
+      |            ^~~
+ptr_quals.c:5:15: note: passing argument to parameter here
+    5 | void ch(char *);
+      |               ^
+ptr_quals.c:18:9: warning: returning 'const int *' from a function with result type 'int *' discards qualifiers [-Wincompatible-pointer-types-discards-qualifiers]
+   18 |         return c;
+      |                ^
+6 warnings generated.

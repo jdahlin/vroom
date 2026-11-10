@@ -1,0 +1,4 @@
+expected_expr.c:3:9: error: expected expression
+    3 |         return );
+      |                ^
+1 error generated.

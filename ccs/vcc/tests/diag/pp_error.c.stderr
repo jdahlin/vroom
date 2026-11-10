@@ -1,0 +1,4 @@
+pp_error.c:1:2: error: this is not supported
+    1 | #error this is not supported
+      |  ^
+1 error generated.

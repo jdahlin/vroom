@@ -1,0 +1,4 @@
+ext_swizzle_range.c:1:10: fatal error: 'stdio.h' file not found
+    1 | #include <stdio.h>
+      |          ^~~~~~~~~
+1 error generated.

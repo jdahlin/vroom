@@ -1,0 +1,7 @@
+incomplete_type.c:2:10: error: tentative definition has type 'struct s' that is never completed
+    1 | struct s;
+      |        - forward declaration of 'struct s'
+    2 | struct s v;
+      |          ^
+incomplete_type.c:1:8: note: forward declaration of 'struct s'
+1 error generated.

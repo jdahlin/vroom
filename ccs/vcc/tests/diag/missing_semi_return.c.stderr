@@ -1,0 +1,5 @@
+missing_semi_return.c:3:14: error: expected ';' after return statement
+    3 |         return a + 1
+      |                     ^
+      |                     ;
+1 error generated.

@@ -1,0 +1,79 @@
+format.c:6:15: warning: format specifies type 'int' but the argument has type 'long' [-Wformat]
+    6 |         pf("x=%d\n", l);
+      |               ~~     ^
+      |               %ld
+format.c:7:18: warning: format specifies type 'char *' but the argument has type 'int' [-Wformat]
+    7 |         pf("a %5.2s b", i);
+      |               ~~~~~     ^
+      |               %5.2d
+format.c:8:8: warning: flag '0' is ignored when flag '-' is present [-Wformat]
+    8 |         pf("%-08lx", s);
+      |             ~~^~~~
+format.c:8:15: warning: format specifies type 'unsigned long' but the argument has type 'char *' [-Wformat]
+    8 |         pf("%-08lx", s);
+      |             ~~~~~~   ^
+      |             %-8s
+format.c:9:14: warning: format specifies type 'int' but the argument has type 'long' [-Wformat]
+    9 |         pf("%" "d", l);
+      |             ~~~~~   ^
+      |             %ld
+format.c:10:16: warning: format specifies type 'int' but the argument has type 'char *' [-Wformat]
+   10 |         pf("ab\tc%d", s);
+      |                  ~~   ^
+      |                  %s
+format.c:11:10: warning: more '%' conversions than data arguments [-Wformat-insufficient-args]
+   11 |         pf("%d %d", i);
+      |                ~^
+format.c:12:14: warning: data argument not used by format string [-Wformat-extra-args]
+   12 |         pf("%d", i, i, l);
+      |            ~~~~     ^
+format.c:13:7: warning: invalid conversion specifier 'y' [-Wformat-invalid-specifier]
+   13 |         pf("%y", i);
+      |             ~^
+format.c:14:10: warning: incomplete format specifier [-Wformat]
+   14 |         pf("abc %", i);
+      |                 ^
+format.c:15:8: warning: field width should have type 'int', but argument has type 'long' [-Wformat]
+   15 |         pf("%*d", l, i);
+      |             ~~^   ~
+format.c:16:8: warning: field precision should have type 'int', but argument has type 'long' [-Wformat]
+   16 |         pf("%.*d", l, i);
+      |             ~~^~   ~
+format.c:17:11: warning: using '%c' format specifier, but argument has boolean value [-Wformat]
+   17 |         pf("%c", b);
+      |             ~~   ^
+format.c:18:11: warning: format specifies type 'char *' but the argument has underlying type 'unsigned int' [-Wformat]
+   18 |         pf("%s", u);
+      |             ~~   ^
+      |             %u
+format.c:19:7: warning: length modifier 'hh' results in undefined behavior or no effect with 's' conversion specifier [-Wformat]
+   19 |         pf("%hhs", s);
+      |             ~^~~
+format.c:20:7: warning: flag '+' results in undefined behavior with 's' conversion specifier [-Wformat]
+   20 |         pf("%+s", s);
+      |             ~^~
+format.c:21:15: warning: data argument not used by format string [-Wformat-extra-args]
+   21 |         pf("%%d %m", i);
+      |            ~~~~~~~~  ^
+format.c:22:13: warning: format specifies type 'int' but the argument has type 'long' [-Wformat]
+   22 |         pf("%1$d", l);
+      |             ~~~~   ^
+      |             %1$ld
+format.c:23:10: warning: invalid conversion specifier 'y' [-Wformat-invalid-specifier]
+   23 |         vf("%d %y", ap);
+      |                ~^
+format.c:24:5: warning: format string is not a string literal (potentially insecure) [-Wformat-security]
+   24 |         pf(s);
+      |            ^
+format.c:24:5: note: treat the string as an argument to avoid this
+   24 |         pf(s);
+      |            ^
+      |            "%s", 
+format.c:26:7: warning: precision used with 'c' conversion specifier, resulting in undefined behavior [-Wformat]
+   26 |         pf("%.3c", i);
+      |             ~^~~
+format.c:27:19: warning: format specifies type 'long double' but the argument has type 'double' [-Wformat]
+   27 |         pf("%lf %Lf", d, d);
+      |                 ~~~      ^
+      |                 %f
+22 warnings generated.

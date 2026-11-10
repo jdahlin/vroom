@@ -1,0 +1,8 @@
+call_struct_arg.c:5:4: error: passing 'struct s' to parameter of incompatible type 'int'
+    2 | void g(int);
+      |           - passing argument to parameter here
+  ...
+    5 |         g(a);
+      |           ^
+call_struct_arg.c:2:11: note: passing argument to parameter here
+1 error generated.

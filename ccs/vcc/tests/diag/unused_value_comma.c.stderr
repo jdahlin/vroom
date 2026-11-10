@@ -1,0 +1,41 @@
+unused_value_comma.c:3:5: warning: relational comparison result unused [-Wunused-comparison]
+    3 |  (a < b, 1);
+      |   ~~^~~
+unused_value_comma.c:4:5: warning: relational comparison result unused [-Wunused-comparison]
+    4 |  (a < b++, 1);
+      |   ~~^~~~~
+unused_value_comma.c:8:4: warning: equality comparison result unused [-Wunused-comparison]
+    8 |  a == 1, b;
+      |  ~~^~~~
+unused_value_comma.c:8:4: note: use '=' to turn this equality comparison into an assignment
+    8 |  a == 1, b;
+      |    ^~
+      |    =
+unused_value_comma.c:3:10: warning: expression result unused [-Wunused-value]
+    3 |  (a < b, 1);
+      |          ^
+unused_value_comma.c:4:12: warning: expression result unused [-Wunused-value]
+    4 |  (a < b++, 1);
+      |            ^
+unused_value_comma.c:5:5: warning: left operand of comma operator has no effect [-Wunused-value]
+    5 |  (a + b++, 1);
+      |   ~ ^ ~~~
+unused_value_comma.c:5:12: warning: expression result unused [-Wunused-value]
+    5 |  (a + b++, 1);
+      |            ^
+unused_value_comma.c:6:5: warning: left operand of comma operator has no effect [-Wunused-value]
+    6 |  (a + b, 1);
+      |   ~ ^ ~
+unused_value_comma.c:6:10: warning: expression result unused [-Wunused-value]
+    6 |  (a + b, 1);
+      |          ^
+unused_value_comma.c:7:3: warning: left operand of comma operator has no effect [-Wunused-value]
+    7 |  (-a, 1);
+      |   ^~
+unused_value_comma.c:7:7: warning: expression result unused [-Wunused-value]
+    7 |  (-a, 1);
+      |       ^
+unused_value_comma.c:8:10: warning: expression result unused [-Wunused-value]
+    8 |  a == 1, b;
+      |          ^
+12 warnings generated.
