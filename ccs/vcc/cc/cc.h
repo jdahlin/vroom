@@ -176,7 +176,7 @@ enum {
 	N_INDEX,	/* a[b] (pointer + integer, already in that order) */
 	N_CALL,		/* a: callee, b: list, c: count */
 	N_BUILTIN,	/* aux: builtin id, b: list, c: count */
-	N_CAST,		/* aux: cast kind, a: operand */
+	N_CAST,		/* aux: cast kind, a: operand, b: an explicit cast's typedef (sym, in a body) or 0 */
 	N_UNARY,	/* aux: op (T_* kind), a: operand */
 	N_ADDR, N_DEREF,
 	N_PREINC, N_PREDEC, N_POSTINC, N_POSTDEC,

@@ -1,0 +1,25 @@
+format_typedef_expr.c:6:53: warning: format specifies type 'int' but the argument has type 'myl' (aka 'long') [-Wformat]
+    6 | void f(int i, myl v){ printf("%d %d %d %d %d %d\n", (myl)i, fn(), arr[1], ps->m, v + 1, i ? v : v); }
+      |                               ~~                    ^~~~~~
+      |                               %ld
+format_typedef_expr.c:6:61: warning: format specifies type 'int' but the argument has type 'myl' (aka 'long') [-Wformat]
+    6 | void f(int i, myl v){ printf("%d %d %d %d %d %d\n", (myl)i, fn(), arr[1], ps->m, v + 1, i ? v : v); }
+      |                                  ~~                         ^~~~
+      |                                  %ld
+format_typedef_expr.c:6:67: warning: format specifies type 'int' but the argument has type 'myl' (aka 'long') [-Wformat]
+    6 | void f(int i, myl v){ printf("%d %d %d %d %d %d\n", (myl)i, fn(), arr[1], ps->m, v + 1, i ? v : v); }
+      |                                     ~~                            ^~~~~~
+      |                                     %ld
+format_typedef_expr.c:6:75: warning: format specifies type 'int' but the argument has type 'myl' (aka 'long') [-Wformat]
+    6 | void f(int i, myl v){ printf("%d %d %d %d %d %d\n", (myl)i, fn(), arr[1], ps->m, v + 1, i ? v : v); }
+      |                                        ~~                                 ^~~~~
+      |                                        %ld
+format_typedef_expr.c:6:82: warning: format specifies type 'int' but the argument has type 'myl' (aka 'long') [-Wformat]
+    6 | void f(int i, myl v){ printf("%d %d %d %d %d %d\n", (myl)i, fn(), arr[1], ps->m, v + 1, i ? v : v); }
+      |                                           ~~                                     ^~~~~
+      |                                           %ld
+format_typedef_expr.c:6:89: warning: format specifies type 'int' but the argument has type 'myl' (aka 'long') [-Wformat]
+    6 | void f(int i, myl v){ printf("%d %d %d %d %d %d\n", (myl)i, fn(), arr[1], ps->m, v + 1, i ? v : v); }
+      |                                              ~~                                         ^~~~~~~~~
+      |                                              %ld
+6 warnings generated.

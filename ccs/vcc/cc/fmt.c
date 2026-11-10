@@ -274,6 +274,56 @@ static const char *const fmt_valid_flags[6] = {
  * its flags, width and precision, length modifier, then (first != 0) the
  * argument; at the end the first data argument no specification used.
  */
+/* the typedef an expression's type is spelled with, as clang keeps the sugar: candidates from
+   declarations and explicit casts, through calls, indexing, arithmetic, ?:, comma and assignment */
+static uint32_t expr_tdef_raw(cc *c, uint32_t n, int depth)
+{
+	node *x;
+
+	if (!n || depth > 32)
+		return 0;
+	x = N(n);
+	switch (x->op) {
+	case N_VAR:
+		return c->syms[x->a].tdef;
+	case N_MEMBER:
+		return x->flags & NF_BITFIELD ? 0 : node_field(c, x)->tdef;
+	case N_CAST:
+		if (x->b)	/* (an explicit cast's typedef) */
+			return x->b;
+		return expr_tdef_raw(c, x->a, depth + 1);
+	case N_INDEX: case N_DEREF:
+		return expr_tdef_raw(c, x->a, depth + 1);
+	case N_CALL:
+		return expr_tdef_raw(c, x->a, depth + 1);
+	case N_COMMA:
+		return expr_tdef_raw(c, x->b, depth + 1);
+	case N_ASSIGN: case N_PREINC: case N_PREDEC: case N_POSTINC: case N_POSTDEC: case N_UNARY:
+		return expr_tdef_raw(c, x->a, depth + 1);
+	case N_BINARY: {
+		uint32_t l = expr_tdef_raw(c, x->a, depth + 1);
+
+		if (l && QUNQ(canon(c, c->syms[l].ty)) == QUNQ(canon(c, x->ty)))
+			return l;
+		return expr_tdef_raw(c, x->b, depth + 1);
+	}
+	case N_COND: {
+		uint32_t l = expr_tdef_raw(c, x->b ? x->b : x->a, depth + 1);
+
+		return l == expr_tdef_raw(c, x->c, depth + 1) ? l : 0;
+	}
+	default:
+		return 0;
+	}
+}
+
+VPRIV uint32_t expr_tdef(cc *c, uint32_t n)
+{
+	uint32_t td = expr_tdef_raw(c, n, 0);
+
+	return td && QUNQ(canon(c, c->syms[td].ty)) == QUNQ(canon(c, N(n)->ty)) ? td : 0;
+}
+
 /* format(printf, i, j) of fs: its attribute, or what clang gives a library builtin of the printf
    family declared with the builtin's type (not with -ffreestanding / -fno-builtin) */
 VPRIV uint32_t fmt_attr(cc *c, uint32_t fs)

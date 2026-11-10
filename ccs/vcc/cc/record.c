@@ -149,7 +149,7 @@ __attribute__((noinline)) VPRIV void struct_body(cc *c, uint32_t ti)
 					t = prim(k);
 			}
 			f.ty = t;
-			f.tdef = ds.tdef && QUNQ(t) == QUNQ(ds.ty) ? ds.tdef : 0;
+			f.tdef = decl_tdef(c, ds.tdef, ds.ty, t);
 			f.counted_by = d.at.counted_by;
 			f.depr = unlikely(d.at.depr) ? new_attrs(c, &d.at) : 0;
 			if (is_func(c, t))

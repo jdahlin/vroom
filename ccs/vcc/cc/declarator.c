@@ -120,7 +120,7 @@ static bool param_list(cc *c, dop *op)
 				}
 			}
 			s = sym_new(c, S_VAR, d.name, t, d.loc ? d.loc : ds.loc);
-			c->syms[s].tdef = ds.tdef && QUNQ(t) == QUNQ(ds.ty) ? ds.tdef : 0;
+			c->syms[s].tdef = decl_tdef(c, ds.tdef, ds.ty, t);
 			c->syms[s].flags |= SF_PARAM | ((d.at.nonnull | ds.at.nonnull) ? SF_NONNULL : 0) | (ds.invalid ? SF_INVALID : 0);
 			if (unlikely(ds.invalid))
 				delayed_bug(c, d.loc, "an invalid parameter without an error");
@@ -436,5 +436,6 @@ VPRIV qty type_name(cc *c)
 		if (vs && is_arith(c, t) && ty_size(c, t) <= vs && !(vs % ty_size(c, t)))
 			t = QT(QI(ty_vector(c, t, vs)), QQ(t));
 	}
+	c->tn_tdef = ds.tdef && QUNQ(t) == QUNQ(ds.ty) ? ds.tdef : 0;
 	return t;
 }

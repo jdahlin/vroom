@@ -1204,8 +1204,9 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
   print `'size_t' (aka 'unsigned long')`, fix-its use z/j/t and `%hhu` for a
   char typedef as clang's namedTypeToLengthModifier.  Done: diag
   `format_typedef.c`, the random files identical on both targets.
-- [ ] **-Wformat not modelled**: a typedef reached through casts or
-  other expressions than a variable or member.  (Done: the printf family as
+- [x] **-Wformat not modelled**: (Done: typedef names through explicit
+  casts, calls, indexing, `*`, arithmetic, `?:`, comma and assignment as clang
+  keeps the sugar (a `?:` range from its condition): `format_typedef_expr.c`; the printf family as
   library builtins without an attribute (declared with the builtin's type, not
   under -ffreestanding/-fno-builtin), `%b`/`%B`, `%q`, a const array or const
   pointer initialized with a literal ("format string is defined here"): diag

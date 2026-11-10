@@ -22,7 +22,7 @@ portability.c:16:34: warning: format specifies type 'int' but the argument has t
    16 |         printf("%llx %d %lld\n", r->id, r->len, total());
       |                      ~~                 ^~~~~~
       |                      %zu
-portability.c:16:42: warning: format specifies type 'long long' but the argument has type 'long' [-Wformat]
+portability.c:16:42: warning: format specifies type 'long long' but the argument has type 'int64_t' (aka 'long') [-Wformat]
    16 |         printf("%llx %d %lld\n", r->id, r->len, total());
       |                         ~~~~                    ^~~~~~~
       |                         %ld
