@@ -34,6 +34,12 @@
 
 #include "../../protocol.h"
 
+#ifdef MSG_NOSIGNAL
+#define SHIM_NOSIG MSG_NOSIGNAL	/* Linux: no SIGPIPE from a send to a closed peer */
+#else
+#define SHIM_NOSIG 0		/* Darwin: SO_NOSIGPIPE on the socket */
+#endif
+
 extern char **environ;
 
 static char buf[sizeof(struct vroom_req_hdr) + VROOM_MAX_PAYLOAD];
@@ -242,18 +248,33 @@ int main(int argc, char **argv)
 		c->cmsg_len = CMSG_LEN(sizeof(fds));
 		memcpy(CMSG_DATA(c), fds, sizeof(fds));
 
-		/* the first sendmsg carries the fds; any remainder goes with write */
+		/*
+		 * The first sendmsg carries the fds; any remainder goes with send.
+		 * A server that restarts answers RETRY and closes without reading
+		 * the rest: the send then fails with EPIPE (never SIGPIPE: that
+		 * would kill the client before it reads the RETRY), and the status
+		 * is read all the same.
+		 */
+#ifdef SO_NOSIGPIPE
+		{
+			int one = 1;
+
+			(void)setsockopt(s, SOL_SOCKET, SO_NOSIGPIPE, &one, sizeof(one));
+		}
+#endif
 		do
-			n = sendmsg(s, &m, 0);
+			n = sendmsg(s, &m, SHIM_NOSIG);
 		while (n < 0 && errno == EINTR);
-		if (n < 0)
+		if (n < 0 && errno != EPIPE && errno != ECONNRESET)
 			die("vcc: sendmsg failed\n");
-		for (off = n; off < iov.iov_len; off += n) {
-			n = write(s, buf + off, iov.iov_len - off);
+		for (off = n < 0 ? iov.iov_len : (size_t)n; off < iov.iov_len; off += n) {
+			n = send(s, buf + off, iov.iov_len - off, SHIM_NOSIG);
 			if (n < 0 && errno == EINTR) {
 				n = 0;
 				continue;
 			}
+			if (n < 0 && (errno == EPIPE || errno == ECONNRESET))
+				break;	/* the status says whether to retry */
 			if (n <= 0)
 				die("vcc: write failed\n");
 		}

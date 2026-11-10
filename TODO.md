@@ -602,16 +602,16 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
   tests/vcc/vector_builtins.c; vector diagnostics spell clang's unnamed form, without the
   `(vector of N 'T' values)` note and typedef names) [P].  Library builtins (clang's `F`
   ones, 479) are declared from cc/libbuiltins.inc (gen-libbuiltins.py) as calls to the
-  function: `bench/vcc-builtins.py` 473 -> 302 -> 190 unknown of 924 for aarch64 Linux;
+  function: `bench/vcc-builtins.py` 473 -> 302 -> 190 -> 160 unknown of 924 for aarch64 Linux;
   `__has_builtin` is also 1 for what the front end implements (pp_builtin_known, set by
-  cc): 337 -> 237 -> 153 answer 0, none 1 where clang says 0 (the harness fails on that).  Audit the full list against clang's `Builtins.td` for the target
+  cc): 337 -> 237 -> 153 -> 126 answer 0, none 1 where clang says 0 (the harness fails on that).  Audit the full list against clang's `Builtins.td` for the target
   (generate a list, try each).
   *Validate:* T1 per builtin; `bench/vcc-builtins.py` that compiles a
   generated use of each clang builtin and reports unknowns.
   (Partly: `__builtin_clzg`/`ctzg`/`popcountg`, `__builtin_ldexp*`,
   `scalbn`, `trunc*`, `round*`, `floorf`/`ceilf`, `fmaxf`/`fminf` added for
   `make -C ccs self-check`; the generic forms reject a fallback whose
-  argument has side effects.  Sized `__sync_*_N`, `__sync_swap`, `__c11_atomic_*`, `__builtin_rotate{left,right}N` and the ACLE `__builtin_arm_{nop,yield,wfe,wfi,sev,sevl,clrex,isb,dmb,dsb,trap,clz,clz64,rbit,rbit64,cls,cls64}`: tests/vcc/builtin_rotate_arm.c.)
+  argument has side effects.  Sized `__sync_*_N`, `__sync_swap`, `__c11_atomic_*`, `__builtin_rotate{left,right}N` and the ACLE `__builtin_arm_{nop,yield,wfe,wfi,sev,sevl,clrex,isb,dmb,dsb,trap,clz,clz64,rbit,rbit64,cls,cls64}`: tests/vcc/builtin_rotate_arm.c.  Atomic nand/max/min (`__atomic_*`, `__c11_atomic_*`, `__sync_*` with clang's -Wsync-fetch-and-nand-semantics-changed: diag `sync_nand.c`; LSE ld{s,u}{max,min}al, LL/SC without LSE, nand as a loop), `__atomic_test_and_set`/`clear`, `__c11_atomic_compare_exchange_{strong,weak}`, `__c11_atomic_is_lock_free`: tests/vcc/atomic_nand_minmax.c (also `--cpu cortex-a53`, wasm).  Left in that group: floating `__atomic_fetch_{max,min}` and `fmaximum`/`fminimum`, `uinc`/`udec`.)
   ~~`__has_builtin` answers 0 for names absent from the kernel/SDK~~ (done for what vcc
   implements, see above; the rest are builtins vcc lacks).
 - [ ] **SVE in the front end**: `arm_sve.h` types, `target("+sve")`.
@@ -624,11 +624,15 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
   on all three targets, diag `unknown_attribute.c`; `[[x]]`, `[[gnu::x]]`,
   `[[clang::x]]` (`_Clang`, `__gnu__`) and other vendors from
   `__has_c_attribute` (`unknown_std_attribute.c`, the 625 again per scope).
-- [ ] **`[[__clang__::x]]`**: (done: clang's -Wignored-attributes warning with
-  the `_Clang` fix-it, taken as `clang::`; tests/vcc `attr_clang_macro.c`.)
-  Left: the "expanded from macro" note says `<built-in>:460`, clang `:2`: our
-  predefines are sorted (`gen-ppdata.sh`), clang's in definition order.
-  *Validate:* diag test.
+- [x] **`[[__clang__::x]]`**: (done: clang's -Wignored-attributes warning with
+  the `_Clang` fix-it, taken as `clang::`; tests/vcc `attr_clang_macro.c`;
+  the predefine tables in clang's -dD order, so the "expanded from macro"
+  note says `<built-in>:2` as clang: diag `attr_clang_builtin_line.c`.)
+  Only `__clang__` written in the source, after a `[[` written there, as
+  clang: through a macro (`#define A [[__clang__::x]]`, `[[S::x]]`,
+  `B(__clang__)`) it is 1 and the error is clang's "expected ']'" (not
+  "expected attribute name").  The `]` fix-it line and clang's later errors there belong to
+  the error recovery item.)
 - [x] **Attributes without effect**: none left.  Accepted
   and needing nothing today: `returns_twice` (locals live in memory:
   `tests/vcc/returns_twice.c`; the optimizer item must honour it when
@@ -1236,17 +1240,14 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
   uninitialized notes); `c->paren` holds them as distances, so the decl
   cache and replay copy them without fix-ups: diag `paren_ranges.c`.)
   *Validate:* diag tests.
-- [ ] **Diagnostics found missing (2026-11-10)**: -Wshift-count-*,
-  -Wdivision-by-zero come at once (clang: at the end of the function,
-  DiagRuntimeBehavior; tried with rt_defer, diag `runtime_warnings.c` then
-  differs); -Wunused-variable for a variable whose initializer had an error.  (Done: self-comparison
-  (-Wtautological-compare): `self_compare.c`; "; take the address with &",
-  the hints on parenthesized operands, an unnamed parameter's note where its
-  name would be, a parameter type without top-level qualifiers:
+- [x] **Diagnostics found missing (2026-11-10)**: done.  -Wshift-count-*,
+  -Wdivision-by-zero and -Warray-bounds (with its note) at the end of the
+  function (DiagRuntimeBehavior, rt_defer); -Wunused-variable kept after a
+  DefaultError conversion error (clang drops it only after a hard error):
+  `runtime_order.c`.  Self-comparison: `self_compare.c`; "; take the address
+  with &", parenthesized-operand hints, unnamed parameter notes:
   `int_conv_hints.c`, `unnamed_param_note.c`; -Wconditional-type-mismatch,
-  "*(" ")" dereference hints, `p == 0.5` as invalid operands:
-  `cond_mismatch_etc.c`.)
-  *Validate:* one diag test each.
+  "*(" ")" hints, `p == 0.5`: `cond_mismatch_etc.c`.
 - [ ] **Longer fuzz runs** and pp-diff over the whole fuzz corpus (PLAN-fas2
   "Status fuzzning").  *Validate:* runs recorded in the plan, findings in
   `regress/`.

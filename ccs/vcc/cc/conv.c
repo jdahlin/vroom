@@ -694,6 +694,23 @@ VPRIV void bounds_warn(cc *c, uint32_t n, bool addr)
 		pp_span r[2] = { rng(c, a), rng(c, x->b) };
 		bool on;
 
+		if (c->fn) {	/* (clang's DiagRuntimeBehavior: at the end of the function) */
+			if (i < 0)
+				rt_defer(c, "array-bounds", NULL, r[0].b, &r[1], 1, NULL, 0,
+					 "array index %lld is before the beginning of the array", (long long)i);
+			else
+				rt_defer(c, "array-bounds", NULL, r[0].b, &r[1], 1, NULL, 0,
+					 "array index %lld is past the end of the array (that has type '%s')", (long long)i,
+					 arr_tyname(c, N(a)->ty));
+			if (s && c->nrtd && c->rtd[c->nrtd - 1].loc == r[0].b) {
+				int m;
+				const char *nm = idname(c->syms[s].name, &m);
+
+				c->rtd[c->nrtd - 1].nloc = c->syms[s].ple ? c->syms[s].plb : c->syms[s].loc;
+				snprintf(c->rtd[c->nrtd - 1].nmsg, sizeof c->rtd[0].nmsg, "array '%.*s' declared here", m, nm);
+			}
+			return;
+		}
 		if (i < 0)
 			on = cc_warnx(c, "array-bounds", true, NULL, r[0].b, &r[1], 1, NULL, 0,
 				   "array index %lld is before the beginning of the array", (long long)i);

@@ -898,7 +898,7 @@ static int wbi_atomic(ecx *e, uint32_t n, bool want)
 		break;
 	}
 	default: {
-		/* fetch_op / op_fetch: add sub and or xor */
+		/* fetch_op / op_fetch: add sub and or xor nand max min */
 		int base = id >= BI_ATOMIC_ADD_FETCH ? id - BI_ATOMIC_ADD_FETCH : id - BI_ATOMIC_FETCH_ADD;
 		static const int bop[] = { T_PLUS, T_MINUS, T_AMP, T_PIPE, T_CARET };
 		qty at = is_ptr(c, vt) ? prim(TY_ULONG) : k == WT_I32 ? prim(TY_INT) : vt;
@@ -908,8 +908,22 @@ static int wbi_atomic(ecx *e, uint32_t n, bool want)
 		wload(e, &l, vt);
 		wtee(e, cur);
 		wget(e, v1);
-		warith(e, bop[base], at, 0);
-		wconv(e, at, vt);
+		if (base == 5) {	/* nand: ~(cur & v) */
+			warith(e, T_AMP, at, 0);
+			wconst(e, wty(c, at), -1);
+			warith(e, T_CARET, at, 0);
+		} else if (base >= 6) {	/* max/min: select(cur, v, cur > v) */
+			bool sg = is_signed(c, vt);
+
+			wget(e, cur);
+			wget(e, v1);
+			wop(e, k, base == 6 ? (sg ? "gt_s" : "gt_u") : (sg ? "lt_s" : "lt_u"));
+			wop(e, k, "select");
+		} else {
+			warith(e, bop[base], at, 0);
+		}
+		if (base < 6)
+			wconv(e, at, vt);
 		wset(e, nv);
 		wget(e, tp);
 		wget(e, nv);
@@ -1211,7 +1225,8 @@ VPRIV int wbuiltin(ecx *e, uint32_t n, bool want)
 	case BI_ATOMIC_LOAD: case BI_ATOMIC_STORE: case BI_ATOMIC_EXCHANGE: case BI_ATOMIC_CMPXCHG:
 	case BI_ATOMIC_FETCH_ADD: case BI_ATOMIC_FETCH_SUB: case BI_ATOMIC_FETCH_AND: case BI_ATOMIC_FETCH_OR:
 	case BI_ATOMIC_FETCH_XOR: case BI_ATOMIC_ADD_FETCH: case BI_ATOMIC_SUB_FETCH: case BI_ATOMIC_AND_FETCH:
-	case BI_ATOMIC_OR_FETCH: case BI_ATOMIC_XOR_FETCH: case BI_SYNC_VAL_CAS: case BI_SYNC_BOOL_CAS:
+	case BI_ATOMIC_OR_FETCH: case BI_ATOMIC_XOR_FETCH: case BI_ATOMIC_FETCH_NAND: case BI_ATOMIC_FETCH_MAX:
+	case BI_ATOMIC_FETCH_MIN: case BI_ATOMIC_NAND_FETCH: case BI_ATOMIC_MAX_FETCH: case BI_ATOMIC_MIN_FETCH: case BI_SYNC_VAL_CAS: case BI_SYNC_BOOL_CAS:
 	case BI_SYNC_LOCK_RELEASE:
 		return wbi_atomic(e, n, want);
 	case BI_ATOMIC_LOCK_FREE:
