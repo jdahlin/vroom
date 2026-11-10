@@ -153,5 +153,6 @@ static inline __attribute__((always_inline)) uint32_t vintern_fast(vintern_cache
 /* called (in the thread) when the table is full; must not return to the caller */
 extern void (*vintern_full_hook)(void);	/* (the job's escape, see vjob_escape) */
 __attribute__((noreturn)) void vjob_escape(const char *msg);
+extern _Thread_local int vjob_escape_fd;	/* where vjob_escape reports: the job's diagnostics (2) */
 extern _Atomic int vtables_full;	/* set once the table was found full (vccd restarts) */
 #endif

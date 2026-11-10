@@ -1036,6 +1036,7 @@ int ppd_run(int argc, char **argv, const ppd_env *env)
 				raw_asm = 1;	/* clang: .s is assembled without the preprocessor */
 		}
 	}
+	vjob_fail_fd = vjob_escape_fd = errfd;	/* (vccd: the client's stderr, not the server's) */
 	if (!main_file) {
 		dprintf(errfd, "vcc: error: no input file\n");
 		status = 2;
@@ -1555,6 +1556,7 @@ done:
 	pp_diag_summary(p);
 	pp_close(p);	/* frees the text in o */
 out:
+	vjob_fail_fd = vjob_escape_fd = 2;
 	bfree(&pre);
 	bfree(&cmdl);
 	bfree(&incl);

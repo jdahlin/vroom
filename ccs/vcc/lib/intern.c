@@ -82,10 +82,14 @@ _Atomic int vtables_full;
 
 /* a server-wide table or region is full: an error for this job (and vccd
    restarts when idle, vtables_full), abort without a job to end */
+_Thread_local int vjob_escape_fd = 2;
+
 void vjob_escape(const char *msg)
 {
 	atomic_store(&vtables_full, 1);
-	fprintf(stderr, "vcc: error: %s\n", msg);
+	dprintf(vjob_escape_fd, "vcc: error: %s\n", msg);
+	if (vjob_escape_fd != 2)	/* (the server's log too) */
+		fprintf(stderr, "vcc: error: %s\n", msg);
 	if (vintern_full_hook)
 		vintern_full_hook();
 	abort();
