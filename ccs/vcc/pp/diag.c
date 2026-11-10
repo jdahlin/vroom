@@ -1316,6 +1316,14 @@ static bool fix_in_macro(const pp *p, uint32_t b, uint32_t e)
 
 int pp_loc_macro(const pp *p, uint32_t loc) { return fix_in_macro(p, loc, loc + 1); }
 
+int pp_macro_defined(const pp *p, const char *name)
+{
+	size_t n = strlen(name);
+	uint32_t id = vintern_find(name, n, vintern_hash(name, n));
+
+	return id && (mget(p, id) & ~(uintptr_t)1);
+}
+
 void pp_diag_fix(pp *p, vdiag *d, uint32_t b, uint32_t e, const char *s, int app)
 {
 	if (unlikely(fix_in_macro(p, b, e)))

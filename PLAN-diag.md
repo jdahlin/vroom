@@ -798,10 +798,25 @@ vcc-stilen visar den, med källrader, etiketter, noter, `help:` och bilder, fär
 som SARIF.  *Validerat:* `vcc-mutate.py --formats` kontrollerar varje mutants sida:
 välformad, en sektion per post och samma text som textutdata.
 
-Status D8.5 (2026-11-10): inte gjort här.  `-Wuninitialized` och `-Wsometimes-uninitialized`
-(`cc/flow.c`, clangs UninitializedValues) är gjorda på grenen
-`claude/review-remaining-errors-acd5c5` (worktree `vcc-fuzz-51c3af`), inte sammanslagen.
-Kvar efter sammanslagningen: vägen som numrerade steg, med `rp_walk` från D8.2 som förebild.
+Status D8.5 (2026-11-10): `-Wuninitialized` och `-Wsometimes-uninitialized` gjorda här
+(`cc/uninit.c`), med clangs regler: skalära lokala variabler (heltal, enum, flyttal,
+pekare) som aldrig får sin adress tagen, en varning per variabel, efter `-Wreturn-type`.
+Ett tillstånd per variabel (oinitierad, kanske, initierad) längs satsträdet; varje kant
+som lämnar en variabel oinitierad märks (`if`, `&&`, `||`, `?:`, en loops utgång, `case`,
+`default`), och skälet ges bara när varje väg från kanten når användningen.  Loopar körs
+två gånger (först tyst), en bakåt-`goto` eller `asm goto` tystar funktionen.  Clangs noter
+och fix-its (` = 0`, ` = 0.0`, ` = '\0'`, ` = NULL`, ta bort villkoret) ges; vcc-stilen
+ritar kanten och användningen i samma utdrag.  `(void)x`, `va_start`/`va_copy`/`va_end`
+och sammansatta literaler läses som clang (tre falsklarm på kärnan rättade).  Grenen
+`claude/review-remaining-errors-acd5c5` har en egen `cc/flow.c` för samma varningar och
+överlappar D8.1/D8.2: en sammanslagning väljer en av dem.  *Validerat:* diag-fallen
+`uninit.c` (37 fall, samma rubriker och fix-its som clang), `uninit_flow.c` och
+`uninit_pragma.c`; `vcc-sema.py warn` 879/879; PostgreSQL utan varningar som clang inte ger.
+*Mätt:* analysen körs på varje funktion med spårade lokala variabler, även huvudfilernas
+inline-funktioner: grinden fe +0,95 %, cc +0,86 % (budget 1 %).  Två `pp_diag_wlevel` per
+funktion kostade ensamma 3,2 %; flaggornas svar sparas nu en gång per TU (per plats bara
+när `#pragma clang diagnostic` finns).  En loops tysta första varv körs bara när loopen
+skriver en variabel som är oinitierad vid ingången (`defs`).
 
 ## Ordning och milstolpar
 
@@ -828,4 +843,4 @@ D1 och D2 hänger ihop (feltypen behöver posten); D0.2 först så att D2 har en
 - [x] D6 — 2026-11-10
 - [x] D7 — 2026-11-10
 - [x] D8.1 – D8.4 — 2026-11-10
-- [ ] D8.5 — på grenen `claude/review-remaining-errors-acd5c5`; stegvägen kvar
+- [x] D8.5 — 2026-11-10 (grenen `claude/review-remaining-errors-acd5c5` har en egen version)

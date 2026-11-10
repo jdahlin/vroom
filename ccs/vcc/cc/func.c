@@ -188,7 +188,7 @@ static bool expr_noreturn(cc *c, uint32_t n, bool reach, flow *f)
 
 /* a condition's constant value: 1 true, 0 false, -1 not constant (clang's CFG prunes
    the branches of a constant condition) */
-static int cond_value(cc *c, uint32_t n)
+VPRIV int cond_value(cc *c, uint32_t n)
 {
 	const node *x;
 	cval v;
@@ -267,7 +267,7 @@ static void case_values(cc *c, uint32_t n, i128 *v, uint32_t *nv, uint32_t max)
 }
 
 /* a default label of this switch (not of a nested one) */
-static bool has_default(cc *c, uint32_t n)
+VPRIV bool has_default(cc *c, uint32_t n)
 {
 	const node *x;
 
@@ -296,7 +296,7 @@ static bool has_default(cc *c, uint32_t n)
 }
 
 /* clang's CFG: a switch on an enum whose cases name every enumerator has no edge past it */
-static bool enum_covered(cc *c, const node *sw)
+VPRIV bool enum_covered(cc *c, const node *sw)
 {
 	const node *x = N(sw->a);
 	const tag *g;
@@ -787,8 +787,10 @@ VPRIV void function_def(cc *c, uint32_t s, const declr *d)
 
 		body = compound_stmt(c, NULL);
 		rbrace = c->prevloc;
-		if (c->errors == errs)	/* after an error the body is incomplete: no guess */
+		if (c->errors == errs) {	/* after an error the body is incomplete: no guess */
 			return_type_check(c, s, body, rbrace, first_label);
+			uninit_check(c, body, first_label, rbrace);
+		}
 	}
 	scope_close(c);
 	{

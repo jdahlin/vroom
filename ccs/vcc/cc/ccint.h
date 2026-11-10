@@ -236,6 +236,7 @@ struct cc {
 	uint32_t nlzf;
 	char *lzs;
 	uint32_t nlzs;
+	int8_t uninit_on;	/* -Wuninitialized or -Wsometimes-uninitialized by the command line (0: not yet known) */
 	bool lz_on;		/* tokens come from lzt[lzc, lze) or lzz (lz_hc), then T_EOF */
 	bool lz_hc;
 	uint32_t lzc, lze;

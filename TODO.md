@@ -846,7 +846,7 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
 - [ ] **Missing warnings** (only 7 `-W` flags): `-Wunused-variable`,
   `-Winteger-overflow`, `-Wexcess-initializers`,
   `-Wconstant-conversion`, `-Wmultichar`, `-Winvalid-noreturn`,
-  `-Wuninitialized`, `-Wunknown-attributes`, `-Wdeprecated-declarations`,
+  `-Wunknown-attributes`, `-Wdeprecated-declarations`,
   `-Wformat`; pp `-Wextra-tokens`,
   `-Wexpansion-to-defined`, `-Winvalid-pp-token`, `#pragma GCC warning`.
   *Validate:* one diag test per warning; `vcc-sema.py warn` stays 879/879

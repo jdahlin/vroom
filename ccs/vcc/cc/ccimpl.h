@@ -402,6 +402,10 @@ VPRIV uint16_t fmt_pack(int kind, unsigned idx, unsigned first);
 VPRIV void format_call(cc *c, uint32_t s, uint32_t *args, uint32_t n);
 VPRIV void discard(cc *c, uint32_t e);
 VPRIV void unused_value(cc *c, uint32_t e, bool comma, int er, bool mac);
+VPRIV int cond_value(cc *c, uint32_t n);
+VPRIV bool has_default(cc *c, uint32_t n);
+VPRIV bool enum_covered(cc *c, const node *sw);
+VPRIV void uninit_check(cc *c, uint32_t body, uint32_t lab0, uint32_t loc);
 VPRIV void rt_emit(cc *c, vdiag *d);
 VPRIV void rt_flush(cc *c);
 /* attrcheck.c */

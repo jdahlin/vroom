@@ -187,7 +187,7 @@ enum {
 	N_SIZEOF_VLA,	/* a: expression of VLA type */
 	N_STMTEXPR,	/* a: compound statement */
 	N_COMPLIT,	/* a: init, b: sym of the object */
-	N_INIT,		/* initializer list: b: list of (designator node, value) pairs, c: count */
+	N_INIT,		/* initializer list: b: struct/union (aux 0/2): c values; array (aux 1): c (lo, hi, value) */
 	N_DESIG,	/* aux: 0 field (b: tag, c: field) / 1 index range (a..b) */
 	N_LABELADDR,	/* &&label: a: label */
 	N_VAARG,	/* a: va_list expr */
