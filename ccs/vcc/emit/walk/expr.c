@@ -691,9 +691,8 @@ VPRIV void wk_vla_decl(ecx *e, uint32_t s, bool zero)
 	lval la = { .k = L_FRAME, .off = off, .align = 8 }, lsp = la, ln = la;
 	val n = wk_vla_bytes(e, c->syms[s].ty), p;
 	int r;
+	uint32_t al = sym_align(c, s) > talign(c, c->syms[s].ty) ? sym_align(c, s) : talign(c, c->syms[s].ty);
 
-	if (sym_align(c, s) > 16)
-		efatal(e, e->curloc, "x86-64: alignment above 16 is not supported yet (PLAN-x86.md X3)");
 	lsp.off += 8, ln.off += 16;
 	r = wk_reg(e, &n, prim(TY_ULONG));
 	LO(store)(e, r, &ln, 8);
@@ -715,7 +714,13 @@ VPRIV void wk_vla_decl(ecx *e, uint32_t s, bool zero)
 		LO(store)(e, t, &lsp, 8);
 		LO(tfree)(e, t);
 	}
+	if (al > 16)	/* over-allocated, the address rounded up */
+		r = LO(bin)(e, T_PLUS, 8, false, wk_vreg(r), vconst((i128)(al - 16))).r;
 	p = LO(alloca)(e, wk_vreg(r));
+	if (al > 16) {
+		p = LO(bin)(e, T_PLUS, 8, false, p, vconst((i128)(al - 1)));
+		p = LO(bin)(e, T_AMP, 8, false, p, vconst(-(i128)al));
+	}
 	LO(store)(e, p.r, &la, 8);
 	if (zero) {
 		/* = {}: the bytes rounded up to 8 (still inside the 16-aligned allocation) */
@@ -724,6 +729,8 @@ VPRIV void wk_vla_decl(ecx *e, uint32_t s, bool zero)
 		val zv = vconst(0);
 
 		LO(load)(e, k, &ln, 8, false);
+		k = LO(bin)(e, T_PLUS, 8, false, wk_vreg(k), vconst(7)).r;
+		k = LO(bin)(e, T_AMP, 8, false, wk_vreg(k), vconst(-8)).r;
 		LO(label)(e, top);
 		LO(brz)(e, wk_vreg(k), 8, false, done);
 		LO(tkeep)(e, k);

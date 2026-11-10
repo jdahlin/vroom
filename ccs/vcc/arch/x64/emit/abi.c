@@ -157,6 +157,8 @@ VPRIV val x64_call(ecx *e, uint32_t ref, val *fn, const wkarg *a, int n, bool va
 	bool retsgn = wk_signed(c, rt), retf = is_flt(c, rt) && !r;
 	int gp = r && r->mem && !r->x87 && !r->up ? 1 : 0, fp = 0;
 	int64_t total = 0, pad;
+	uint32_t maxal = 16;
+	int32_t spsl = 0;	/* stack arguments aligned above 16: rsp saved here, then aligned */
 	int64_t *place = calloc((size_t)(n ? n : 1), sizeof *place);	/* stack offset, or -1: registers */
 	rec *i;
 
@@ -173,6 +175,8 @@ VPRIV val x64_call(ecx *e, uint32_t ref, val *fn, const wkarg *a, int n, bool va
 			continue;
 		}
 		total = (total + a[k].align - 1) & ~(int64_t)(a[k].align - 1);
+		if (a[k].align > maxal)
+			maxal = a[k].align;
 		place[k] = total;
 		total += (int64_t)((a[k].size + 7) & ~(uint64_t)7);
 	}
@@ -191,7 +195,15 @@ VPRIV val x64_call(ecx *e, uint32_t ref, val *fn, const wkarg *a, int n, bool va
 		}
 	total = (total + 15) & ~(int64_t)15;
 	pad = (X->pushes * 8 + total) % 16 ? 8 : 0;
-	if (total + pad) {
+	if (maxal > 16) {
+		lval sl = x64_fr(spsl = wk_slot(e, 8, 8));
+
+		x64_mem(e, X_ST, 8, RSP, &sl, false);
+		x64_op3(e, X_ANDI, 8, RSP, RSP, XNOREG)->imm = -(int64_t)maxal;
+		total = (total + maxal - 1) & ~(int64_t)(maxal - 1);
+		pad = 0;
+		x64_put(e, X_ADJSP)->imm = -total;
+	} else if (total + pad) {
 		x64_put(e, X_ADJSP)->imm = -(total + pad);
 		X->pushes += (int)((total + pad) / 8);
 	}
@@ -234,7 +246,11 @@ VPRIV val x64_call(ecx *e, uint32_t ref, val *fn, const wkarg *a, int n, bool va
 		i->ref = ref;
 		i->cond = variadic;
 	}
-	if (total + pad) {
+	if (spsl) {
+		lval sl = x64_fr(spsl);
+
+		x64_mem(e, X_LD, 8, RSP, &sl, false);
+	} else if (total + pad) {
 		x64_put(e, X_ADJSP)->imm = total + pad;
 		X->pushes -= (int)((total + pad) / 8);
 	}

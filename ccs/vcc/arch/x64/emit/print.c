@@ -124,9 +124,27 @@ VPRIV void x64_print(ecx *e, tbuf *b, uint32_t s)
 					   [X_XORI] = "xor", [X_SHLI] = "shl", [X_SHRI] = "shr", [X_SARI] = "sar", [X_SHL] = "shl",
 					   [X_SHR] = "shr", [X_SAR] = "sar", [X_NEG] = "neg", [X_NOT] = "not" };
 	int32_t frame = (e->wk->foff + 15) & ~15;
+	uint32_t A = e->wk->falign;
 
 	tb_s(b, "\tpushq\t%rbp\n\tmovq\t%rsp, %rbp\n");
-	if (frame) {
+	if (A > 16) {
+		/* locals aligned above 16: their base is rbx = (rsp + frame + A - 1) & -A
+		   (rbx saved at -8(%rbp)); incoming arguments stay rbp's */
+		tb_s(b, "\tpushq\t%rbx\n\tsubq\t$");
+		tb_i(b, frame + (int32_t)A + 8);
+		tb_s(b, ", %rsp\n\tleaq\t");
+		tb_i(b, frame + (int32_t)A - 1);
+		tb_s(b, "(%rsp), %rbx\n\tandq\t$");
+		tb_i(b, -(int64_t)A);
+		tb_s(b, ", %rbx\n");
+		for (uint32_t k = 0; k < X->nin; k++) {
+			rec *i = &X->in[k];
+
+			if ((i->op == X_LD || i->op == X_ST || i->op == X_LEA || i->op == X_X87 || i->op == X_XCHG ||
+			     i->op == X_XADD || i->op == X_CMPXCHG) && i->r[1] == RBP && i->off < 0)
+				i->r[1] = RBX;
+		}
+	} else if (frame) {
 		tb_s(b, "\tsubq\t$");
 		tb_i(b, frame);
 		tb_s(b, ", %rsp\n");
@@ -464,6 +482,8 @@ VPRIV void x64_print(ecx *e, tbuf *b, uint32_t s)
 		}
 		tb_c(b, '\n');
 	}
+	if (e->wk->falign > 16)
+		tb_s(b, "\tmovq\t-8(%rbp), %rbx\n");
 	tb_s(b, "\tmovq\t%rbp, %rsp\n\tpopq\t%rbp\n\tretq\n.Lfunc_end");
 	tb_u(b, s);
 	tb_s(b, ":\n\t.size\t");

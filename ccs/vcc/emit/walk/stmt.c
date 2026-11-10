@@ -71,8 +71,8 @@ VPRIV int32_t wk_slot(ecx *e, uint64_t size, uint32_t align)
 
 	if (align < 1)
 		align = 1;
-	if (align > 16)
-		efatal(e, e->curloc, "x86-64: alignment above 16 is not supported yet (PLAN-x86.md X3)");
+	if (align > 4096)
+		efatal(e, e->curloc, "x86-64: alignment above 4096 is not supported");
 	if (size > ((uint64_t)1 << 30))
 		efatal(e, e->curloc, "x86-64: frame too large");
 	o = (int64_t)W->foff + (int64_t)size;
