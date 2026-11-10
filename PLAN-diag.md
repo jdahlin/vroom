@@ -855,3 +855,10 @@ D1 och D2 hänger ihop (feltypen behöver posten); D0.2 först så att D2 har en
   styrd -Wuninitialized lades på mains kod.  Kvar: TODO.md "Merged diagnostics".
   Sammanslaget mot main: errors 307 mot 221 av clangs 313, format 106 mot 81, inga
   extra varningar där main har några; gate mot main: cc −1,3 %.
+  Andra sammanslagningen (mains 16 nya commits): mains `fmt_attr` (kontrollerar
+  prototypen som clang) ersatte grenens; mains flerradiga snippets (clangs
+  maybeAddRange, högst 16 rader) flyttades till grenens `vdiag`, men bara för
+  intervall utan etikett (grenens etiketter är inga clang-intervall), och samma logik
+  finns nu i `bench/diag-render.py`.  `sometimes_uninit_do2.c` och `uninit_jump.c`
+  fick `diag-flags` (utan dem varnade ingen av kompilatorerna); 182/182, 162
+  text-identiska med clang.

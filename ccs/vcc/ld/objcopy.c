@@ -25,6 +25,7 @@
 #include "../lib/hash.h"
 #include "ldelf.h"
 
+#include <ctype.h>
 #include <errno.h>
 #include <fcntl.h>
 #include <fnmatch.h>
@@ -393,7 +394,7 @@ typedef struct {
 
 static struct {
 	const char *in, *out;
-	bool binary, strip_all, strip_debug, wildcard;
+	bool binary, binary_in, strip_all, strip_debug, keep_debug, wildcard;
 	const char *prefix_syms, *prefix_alloc;
 	const char **remove;
 	uint32_t nremove;
@@ -489,6 +490,72 @@ static int write_file(int dirfd, const char *path, const uint8_t *b, uint64_t n,
 	return 0;
 }
 
+/* -I binary: the file as .data with _binary_<name>_start/_end/_size, laid out as llvm-objcopy */
+static int binary_in(int dirfd)
+{
+	int fd = openat(dirfd, oc.in, O_RDONLY);
+	struct stat st;
+
+	if (fd < 0 || fstat(fd, &st) < 0) {
+		oerror("'%s': %s", oc.in, strerror(errno));
+		if (fd >= 0)
+			close(fd);
+		return 1;
+	}
+	size_t dsz = (size_t)st.st_size;
+	uint8_t *data = xcalloc(dsz + 1, 1);
+	if (dsz && read(fd, data, dsz) != (ssize_t)dsz)
+		oerror("'%s': short read", oc.in);
+	close(fd);
+	char base[4096], nm[3][4200];
+	size_t bl = 0;
+	for (const char *c = oc.in; *c && bl + 1 < sizeof base; c++)
+		base[bl++] = isalnum((unsigned char)*c) ? *c : '_';
+	base[bl] = 0;
+	static const char *const suf[3] = { "start", "end", "size" };
+	StrTab t = {0};
+	for (int i = 0; i < 3; i++) {
+		snprintf(nm[i], sizeof nm[i], "_binary_%s_%s", base, suf[i]);
+		st_add(&t, nm[i]);
+	}
+	st_add(&t, ".strtab");
+	st_add(&t, ".symtab");
+	st_add(&t, ".data");
+	st_finalize(&t);
+	uint64_t stroff = sizeof(Ehdr), symoff = alignto(stroff + t.size, 8), datoff = symoff + 4 * sizeof(Sym);
+	uint64_t shoff = alignto(datoff + dsz, 8), total = shoff + 4 * sizeof(Shdr);
+	uint8_t *b = xcalloc(total, 1);
+	Ehdr *h = (Ehdr *)b;
+	memcpy(h->e_ident, "\177ELF\2\1\1", 7);
+	h->e_type = 1;
+	h->e_machine = 183;
+	h->e_version = 1;
+	h->e_ehsize = sizeof(Ehdr);
+	h->e_shentsize = sizeof(Shdr);
+	h->e_shoff = shoff;
+	h->e_shnum = 4;
+	h->e_shstrndx = 1;
+	st_write(&t, b + stroff);
+	Sym *y = (Sym *)(b + symoff);
+	uint64_t val[3] = { 0, dsz, dsz };
+	for (int i = 0; i < 3; i++)
+		y[i + 1] = (Sym){.st_name = (uint32_t)st_find(&t, nm[i]), .st_info = STB_GLOBAL << 4,
+				 .st_shndx = i == 2 ? SHN_ABS : 3, .st_value = val[i]};
+	memcpy(b + datoff, data, dsz);
+	Shdr *sh = (Shdr *)(b + shoff);
+	sh[1] = (Shdr){.sh_name = (uint32_t)st_find(&t, ".strtab"), .sh_type = SHT_STRTAB, .sh_offset = stroff,
+		       .sh_size = t.size, .sh_addralign = 1};
+	sh[2] = (Shdr){.sh_name = (uint32_t)st_find(&t, ".symtab"), .sh_type = SHT_SYMTAB, .sh_offset = symoff,
+		       .sh_size = 4 * sizeof(Sym), .sh_link = 1, .sh_info = 1, .sh_addralign = 8, .sh_entsize = sizeof(Sym)};
+	sh[3] = (Shdr){.sh_name = (uint32_t)st_find(&t, ".data"), .sh_type = SHT_PROGBITS, .sh_flags = SHF_WRITE | SHF_ALLOC,
+		       .sh_offset = datoff, .sh_size = dsz, .sh_addralign = 1};
+	int rc = oerrors ? 1 : write_file(dirfd, oc.out, b, total, 0666);
+	st_free(&t);
+	free(b);
+	free(data);
+	return rc;
+}
+
 static int objcopy_run(int dirfd)
 {
 	Elf e;
@@ -522,6 +589,14 @@ static int objcopy_run(int dirfd)
 	}
 	if (!rel && e.sh[0].sh_size)
 		oerror("extended section numbering not supported");
+	/* --only-keep-debug (relocatable objects): allocated sections other than notes keep only their headers */
+	if (oc.keep_debug) {
+		if (!rel)
+			oerror("--only-keep-debug: only relocatable objects are supported");
+		for (uint32_t k = 1; k < ns; k++)
+			if ((sec[k].flags & SHF_ALLOC) && sec[k].type != SHT_NOTE)
+				sec[k].type = SHT_NOBITS;
+	}
 	/* --set-section-flags (llvm-objcopy's getNewShfFlags; NOBITS with contents/load becomes PROGBITS) */
 	for (uint32_t a = 0; a < oc.nssf; a++) {
 		const char *eq = strchr(oc.ssf[a], '=');
@@ -976,7 +1051,8 @@ static int objcopy_run(int dirfd)
 	}
 	for (uint32_t i = 0; i < nout; i++) {
 		OSec *s = &sec[outside[i]];
-		off = alignto(off, s->align ? s->align : 1);
+		if (!(oc.keep_debug && s->type == SHT_NOBITS))	/* (llvm: not aligned there) */
+			off = alignto(off, s->align ? s->align : 1);
 		s->off = off;
 		if (s->type != SHT_NOBITS)
 			off += s->size;
@@ -1069,14 +1145,21 @@ int objcopy_main(int argc, char **argv, int dirfd, FILE *err)
 #define OPT(s) (!strcmp(a, s))
 #define VAL(s) (!strncmp(a, s "=", sizeof(s)) ? a + sizeof(s) : (OPT(s) && i + 1 < argc) ? argv[++i] : NULL)
 		const char *v;
-		if (OPT("-O") && i + 1 < argc) {
-			oc.binary = !strcmp(argv[++i], "binary");
-			if (!oc.binary)
-				oerror("unsupported output format %s", argv[i]);
-		} else if (!strncmp(a, "--output-target=", 16)) {
-			oc.binary = !strcmp(a + 16, "binary");
+		if ((v = VAL("-O")) || (v = VAL("--output-target"))) {
+			/* binary, or this ELF64 little-endian aarch64 format unchanged */
+			oc.binary = !strcmp(v, "binary");
+			if (!oc.binary && strcmp(v, "elf64-littleaarch64") && strcmp(v, "elf64-aarch64"))
+				oerror("invalid output format: '%s'", v);
+		} else if ((v = VAL("-I")) || (v = VAL("--input-target"))) {
+			oc.binary_in = !strcmp(v, "binary");
+			if (!oc.binary_in && strcmp(v, "elf64-littleaarch64") && strcmp(v, "elf64-aarch64"))
+				oerror("unsupported input format: '%s'", v);
+		} else if ((v = VAL("-B")) || (v = VAL("--binary-architecture"))) {
+			/* (only meaningful with -I binary: aarch64 is the one target) */
 		} else if (OPT("-S") || OPT("--strip-all")) {
 			oc.strip_all = true;
+		} else if (OPT("--only-keep-debug")) {
+			oc.keep_debug = true;
 		} else if (OPT("-g") || OPT("--strip-debug")) {
 			oc.strip_debug = true;
 		} else if (OPT("-w") || OPT("--wildcard")) {
@@ -1123,7 +1206,7 @@ int objcopy_main(int argc, char **argv, int dirfd, FILE *err)
 	if (!oerrors) {
 		oc.in = files[0];
 		oc.out = nf > 1 ? files[1] : files[0];
-		rc = objcopy_run(dirfd);
+		rc = oc.binary_in ? binary_in(dirfd) : objcopy_run(dirfd);
 	}
 	free(oc.remove);
 	free(oc.only);
@@ -1207,6 +1290,100 @@ static char nm_type(const Elf *e, const Sym *y)
 	return c;
 }
 
+/* nm's inputs: files, or the members of an archive (regular: copied out, 8-aligned; thin: by path) */
+typedef struct { char *label, *path; uint8_t *mem; size_t size; bool member; } NIn;
+
+static void nin_push(NIn **v, int *n, NIn x)
+{
+	*v = realloc(*v, (size_t)(*n + 1) * sizeof **v);
+	(*v)[(*n)++] = x;
+}
+
+static void nm_inputs(int dirfd, const char *path, NIn **v, int *n)
+{
+	int fd = openat(dirfd, path, O_RDONLY);
+	struct stat st;
+	char magic[8];
+
+	if (fd < 0 || fstat(fd, &st) < 0 || st.st_size < 8 || pread(fd, magic, 8, 0) != 8 ||
+	    (memcmp(magic, "!<arch>\n", 8) && memcmp(magic, "!<thin>\n", 8))) {
+		if (fd >= 0)
+			close(fd);
+		nin_push(v, n, (NIn){.label = strdup(path), .path = strdup(path)});
+		return;
+	}
+	bool thin = magic[2] == 't';
+	size_t sz = (size_t)st.st_size;
+	const uint8_t *b = mmap(NULL, sz, PROT_READ, MAP_PRIVATE, fd, 0);
+	const char *longn = NULL;
+	size_t longsz = 0;
+	const char *slash = strrchr(path, '/');
+
+	close(fd);
+	if (b == MAP_FAILED) {
+		oerror("'%s': %s", path, strerror(errno));
+		return;
+	}
+	for (size_t o = 8; o + 60 <= sz;) {
+		const char *h = (const char *)b + o;
+		char num[11] = { 0 }, name[4096];
+		size_t msz, nl;
+
+		if (h[58] != '`' || h[59] != '\n') {
+			oerror("'%s': truncated or malformed archive", path);
+			break;
+		}
+		memcpy(num, h + 48, 10);
+		msz = strtoull(num, NULL, 10);
+		bool special = h[0] == '/' && (h[1] == ' ' || (h[1] == '/' && h[2] == ' ') || !memcmp(h, "/SYM64/", 7));
+		bool data = !thin || special;	/* thin: only the special members have data */
+		if (data && msz > sz - o - 60) {
+			oerror("'%s': truncated or malformed archive", path);
+			break;
+		}
+		if (h[0] == '/' && h[1] == '/' && h[2] == ' ') {
+			longn = h + 60, longsz = msz;
+		} else if (h[0] == '/' && (h[1] == ' ' || !memcmp(h, "/SYM64/", 7))) {
+			/* symbol table */
+		} else {
+			if (h[0] == '/' && longn) {
+				size_t off = strtoull(h + 1, NULL, 10), e = off;
+
+				while (e < longsz && longn[e] != '\n')
+					e++;
+				nl = e - off;
+				if (off > longsz)
+					nl = 0, off = 0;
+				if (nl && longn[off + nl - 1] == '/')
+					nl--;
+				snprintf(name, sizeof name, "%.*s", (int)nl, longn + off);
+			} else {
+				nl = 0;
+				while (nl < 16 && h[nl] != '/')
+					nl++;
+				snprintf(name, sizeof name, "%.*s", (int)nl, h);
+			}
+			NIn x = {.label = strdup(name), .member = true};
+			if (thin) {
+				char full[8192];
+
+				if (name[0] == '/' || !slash)
+					snprintf(full, sizeof full, "%s", name);
+				else
+					snprintf(full, sizeof full, "%.*s/%s", (int)(slash - path), path, name);
+				x.path = strdup(full);
+			} else {
+				x.mem = xcalloc(msz + 8, 1);
+				memcpy(x.mem, h + 60, msz);
+				x.size = msz;
+			}
+			nin_push(v, n, x);
+		}
+		o += 60 + (data ? msz + (msz & 1) : 0);
+	}
+	munmap((void *)b, sz);
+}
+
 int nm_main(int argc, char **argv, int dirfd, FILE *out, FILE *err)
 {
 	oerr = err ? err : stderr;
@@ -1254,19 +1431,33 @@ int nm_main(int argc, char **argv, int dirfd, FILE *out, FILE *err)
 		free(files);
 		return 1;
 	}
-	for (int f = 0; f < nf; f++) {
+	NIn *in = NULL;
+	int nin = 0;
+	for (int f = 0; f < nf; f++)
+		nm_inputs(dirfd, files[f], &in, &nin);
+	for (int f = 0; f < nin; f++) {
 		Elf e;
-		if (elf_open(&e, dirfd, files[f]))
+		if (in[f].mem) {
+			memset(&e, 0, sizeof e);
+			e.buf = in[f].mem;
+			e.size = in[f].size;
+			e.eh = (const Ehdr *)e.buf;
+			if (e.size < sizeof(Ehdr) || memcmp(e.buf, "\177ELF\2\1", 6) || !elf_valid(&e)) {
+				oerror("'%s': not a valid ELF64 little-endian file", in[f].label);
+				continue;
+			}
+		} else if (elf_open(&e, dirfd, in[f].path))
 			continue;
 		const Shdr *st = NULL;
 		for (uint32_t k = 0; k < e.nsh; k++)
 			if (e.sh[k].sh_type == (dyn ? SHT_DYNSYM : SHT_SYMTAB))
 				st = &e.sh[k];
-		if (nf > 1)
-			fprintf(out, "\n%s:\n", files[f]);
+		if (nf > 1 || in[f].member)
+			fprintf(out, "\n%s:\n", in[f].label);
 		if (!st) {
-			fprintf(oerr, "%s: %s: no symbols\n", prog, files[f]);
-			elf_close(&e);
+			fprintf(oerr, "%s: %s: no symbols\n", prog, in[f].label);
+			if (!in[f].mem)
+				elf_close(&e);
 			continue;
 		}
 		const Sym *ys = (const Sym *)(e.buf + st->sh_offset);
@@ -1364,8 +1555,15 @@ int nm_main(int argc, char **argv, int dirfd, FILE *out, FILE *err)
 			free(owned[i]);
 		free(owned);
 		free(v);
-		elf_close(&e);
+		if (!in[f].mem)
+			elf_close(&e);
 	}
+	for (int f = 0; f < nin; f++) {
+		free(in[f].label);
+		free(in[f].path);
+		free(in[f].mem);
+	}
+	free(in);
 	free(files);
 	return oerrors ? 1 : 0;
 }

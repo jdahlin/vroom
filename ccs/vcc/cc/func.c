@@ -809,7 +809,7 @@ VPRIV void function_def(cc *c, uint32_t s, const declr *d)
 				return_type_warn(c, s, body, rb, first_label, k);
 		}
 	}
-	if ((c->uv_any & 6) && clean)
+	if ((c->uv_any & 14) && clean)
 		uninit_check(c, body, first_label);
 	{
 		/* side effects of decayed VLA parameter sizes run first, in order */

@@ -61,6 +61,7 @@ typedef struct {
 	size_t mark;
 	uint32_t line;
 	uint32_t sline;		/* line of the current statement */
+	uint32_t pline;		/* the instantiating statement's line in the frame below */
 } Frame;
 enum { FR_FILE, FR_MACRO, FR_LOOP };
 
@@ -118,7 +119,8 @@ struct As {
 	   after one, .uleb128/.sleb128 of a label difference), relaxed at the end */
 	struct VarItem { uint32_t frag, end; uint8_t kind, p2, code, fill; uint64_t max, size; Val v; } *pfa;
 	uint32_t npfa, pfacap;		/* a .loc waits for its instruction; a table is due */
-	char msg[512];
+	char msg[4096];		/* the errors so far, one per line group (clang goes on after one) */
+	uint32_t mlen, nerr;
 	int err;
 };
 

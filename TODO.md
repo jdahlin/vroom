@@ -876,11 +876,11 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
   branch targets are the pc-relative offset, not `*ABS*` relocations; `adr`,
   `adrp` and `ldr` literal take constants.  *Validated:* `vas-obj`
   `intbranch.s`, `absb.s`.
-- [ ] **Diagnostics**: left: errors inside a macro say the invocation line
-  (clang: `<instantiation>:N`); vasm stops at the first error (clang goes on).
-  (Done: the statement's own line, `# N "file"` markers, end-of-input
+- [x] **Diagnostics**: (Done: errors inside a macro or `.rept`/`.irp` at
+  `<instantiation>:N` with llvm-mc's "while in macro instantiation" notes: `err-macro.s`; vasm goes on after a statement's error as llvm-mc (at most 20), and
+  still reports an unterminated `.if`: `err-many.s`; the statement's own line, `# N "file"` markers, end-of-input
   errors at the line after the last.)  *Validate:* `bench/vas-obj.py` error
-  files (`err-*.s`: clang's first file:line).
+  files (`err-*.s`: clang's file:line of every error and note).
 
 ### Linker (`ld/ld.c`) and binutils
 - [ ] **ELF input parsing unchecked** [P]: (done: `obj_valid` in `ld/ld.c`
@@ -977,19 +977,27 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
 - [ ] **`--gc-sections`, `--icf`, `--build-id` modes (`ld/ld.c:4026`), erratum
   843419, SHT_REL (`ld/ld.c:1735`)**.
   *Validate:* T8.
-- [ ] **Diagnostics**: undefined symbol with section+offset and all
-  referencing objects (`ld/ld.c:4231`); `-r` output differs from lld.
+- [ ] **Diagnostics**: (done: undefined symbols as lld: every reference
+  with its source file and enclosing function (else section+offset), the
+  first 3 then "referenced N more times", archive members, "did you mean"
+  for the first two, a blank line after a multi-line diagnostic;
+  `bench/vlink-opts.py` compares the whole stderr.)  `-r` output differs from lld.
   *Validate:* T4-style expected-stderr for vlink; T8 `-r` byte diff.
-- [ ] **var**: only thin archives (`vccd/ar.c:286,352,672`), ops `r`/`m`/`t`,
-  32-bit GNU symtab only; ld skips `/SYM64/` (`ld/ld.c:1622`).
-  *Validate:* `bench/var-cmp.py` extended to regular archives and `x`, `d`,
-  `q`, `p`, `s`; round-trip with llvm-ar.
-- [ ] **vobjcopy / vnm**: (done: `-g`/`--strip-debug`, `--redefine-sym`, `--add-section`, `--add-gnu-debuglink`, `--set-section-flags`; `.llvm_addrsig`'s
-  link dropped as llvm-objcopy.)  Missing
-  `--only-keep-debug`, `-O elf64-*`,
-  `-I`/`-B`; nm archives.
-  (Done: nm `-u`/`-U`/`-g`, `-D` with symbol versions, and long forms, unknown options are errors, any
-  number of files.)
+- [x] **var**: (done: regular GNU archives created, updated (`r` by
+  basename, none with `P`; `q`, `d`, `s`, `m`) and read (`t`, `p`, `x`),
+  byte-identical to llvm-ar; its BSD format on macOS for a new archive whose
+  first member is not ELF, kept on update; `/SYM64/` and `__.SYMDEF_64` past
+  4 GB (`SYM64_THRESHOLD` as llvm-ar's, for tests); mode 644 for every
+  member as llvm-ar's deterministic mode.  vlink reads the members' own
+  symbols, so both symbol tables are skipped alike.)  *Validate:*
+  `bench/var-cmp.py`: 416 kernel archives, 12 t/p, 111 edge sequences (37
+  of them again with `SYM64_THRESHOLD=0`).
+- [x] **vobjcopy / vnm**: (done: `-g`/`--strip-debug`, `--only-keep-debug`
+  (relocatable objects), `--redefine-sym`, `--add-section`,
+  `--add-gnu-debuglink`, `--set-section-flags`, `-O`/`-I elf64-littleaarch64`,
+  `-I binary`, `-B`; `.llvm_addrsig`'s link dropped as llvm-objcopy; nm
+  `-u`/`-U`/`-g`, `-D` with symbol versions, archives (regular and thin),
+  long forms, unknown options are errors, any number of files.)
   *Validate:* `bench/vobjcopy-cmp.sh` extended with these flags vs
   llvm-objcopy/llvm-nm; unknown options must be errors.
 - [ ] **macho.c**: DWARF dropped (`platform/darwin/macho.c:95`), `.eh_frame` to
@@ -1142,15 +1150,14 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
   operands that only assign, ++ or -- it; volatile compound ones count),
   given with the unused variables at scope close.  Done: diag
   `unused_but_set.c`; the 31 test-suite warnings identical.
-- [ ] **Missing warnings**:
-  `-Wuninitialized` after an
-  assignment on another branch earlier in the text (the analysis runs only when a
-  tracked variable is read before its first assignment in the text); two or more
-  ifs breaking out of one `do … while (0)` (clang warns once per if, vcc not at
-  all) (`-Wunknown-attributes` and
+- [x] **Missing warnings**:
+  (`-Wunknown-attributes` and
   `-Wdeprecated-declarations` are done: PostgreSQL's warnings compare).
   *Validate:* one diag test per warning; `vcc-sema.py warn` stays 879/879
-  (no false positives on the kernel).  (Done: `-Wsometimes-uninitialized` of an if that breaks out of `do … while (0)` (no
+  (no false positives on the kernel).  (Done: a read after a goto or a case label that skips the assignment
+  (the analysis also runs after a jump), a case reached by a fallthrough that assigned it
+  ("whenever switch case is taken"): diag `uninit_jump.c`; up to 8 ifs breaking out of one `do … while (0)`, one warning each, with
+  clang's multi-line range snippets: diag `sometimes_uninit_do2.c`; `-Wsometimes-uninitialized` of an if that breaks out of `do … while (0)` (no
   back edge: a block), and with `-Wsometimes-uninitialized` alone: diag
   `sometimes_uninit_do.c`, `sometimes_uninit_only.c`; `-Wmultichar` in C and `#if`, "character constant too long",
   multi-character wide/Unicode literals as errors: diag `multichar.c`; `-Wself-assign` (not through macros) and `-Wunused-local-typedef`: diag `self_assign.c`, PostgreSQL identical; `-Wreturn-stack-address` of a compound literal (its initializer printed
@@ -1197,10 +1204,14 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
   print `'size_t' (aka 'unsigned long')`, fix-its use z/j/t and `%hhu` for a
   char typedef as clang's namedTypeToLengthModifier.  Done: diag
   `format_typedef.c`, the random files identical on both targets.
-- [ ] **-Wformat not modelled** (the call is left alone): `%I64d`, `%w32d`,
-  `%b`, `%qd`, `*n$`, Darwin `%D/%O/%U`, a format through a `const char[]`
-  variable or `format_arg` (gettext), a typedef reached through casts or
-  other expressions than a variable or member.
+- [ ] **-Wformat not modelled**: a typedef reached through casts or
+  other expressions than a variable or member.  (Done: the printf family as
+  library builtins without an attribute (declared with the builtin's type, not
+  under -ffreestanding/-fno-builtin), `%b`/`%B`, `%q`, a const array or const
+  pointer initialized with a literal ("format string is defined here"): diag
+  `format_builtin.c`, `format_var.c`, `format_freestanding.c`; `format_arg`
+  (gettext), MS `I`/`I32`/`I64` and `w`, `*n$`: `format_more2.c`; Darwin
+  `%D/%O/%U`: `format_darwin_dou.c`.)
   *Validate:* diag tests against clang.
 - [x] **Vector types in messages**: (done: the typedef name and
   ` (vector of 4 'int' values)` after the quoted type (vcc: the first typedef

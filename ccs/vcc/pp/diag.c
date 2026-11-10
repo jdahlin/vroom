@@ -642,26 +642,23 @@ VPRIV bool pp_pad_at(const char *s, uint32_t ls, uint32_t le, uint32_t x)
 	return (x == ls || (s[x - 1] != ' ' && s[x - 1] != '\t')) && (x >= le || (s[x] != ' ' && s[x] != '\t'));
 }
 
-static void snippet(pp *p, vbuf *b, const fent *e, const vdiag *d)
+/* line start of offset o (in s) */
+static uint32_t sn_ls(const char *s, uint32_t o)
+{
+	while (o > 0 && s[o - 1] != '\n')
+		o--;
+	return o;
+}
+
+/* one source line [ls, le) with its marker line: ~ under the ranges' parts on it, ^ at off if
+   caret; the marker line only when it has a mark (clang) */
+static void sn_line(pp *p, vbuf *b, const fent *e, const vdiag *d, uint32_t ls, uint32_t le, uint32_t line,
+		    uint32_t width, bool caret, uint32_t off, vbuf *cl)
 {
 	const char *s = e->f->src;
-	uint32_t off = d->loc - e->base, size = e->f->size, ls, le, line, width, nd;
 	char num[16];
-	vbuf cl = { 0 }, fl = { 0 };
-	uint32_t ccol;
-	bool anyfix = false;
+	uint32_t nd = (uint32_t)snprintf(num, sizeof(num), "%u", line);
 
-	for (ls = off; ls > 0 && s[ls - 1] != '\n'; ls--)
-		;
-	for (le = off; le < size && s[le] != '\n'; le++)
-		;
-	if (le > ls && s[le - 1] == '\r')
-		le--;
-	line = loc_line(p, d->loc);
-	nd = (uint32_t)snprintf(num, sizeof(num), "%u", line + 16);
-	width = nd > 4 ? nd : 4;
-	nd = (uint32_t)snprintf(num, sizeof(num), "%u", line);
-	/* the source line, tabs expanded */
 	db_c(b, ' ', (int)(width - nd + 1));
 	vbuf_s(b, num);
 	vbuf_s(b, " | ");
@@ -678,10 +675,8 @@ static void snippet(pp *p, vbuf *b, const fent *e, const vdiag *d)
 		}
 	}
 	vbuf_s(b, "\n");
-	/* the caret line: ~ under the ranges, ^ at loc */
-	ccol = dcols(s, ls, off, 0);
 	{
-		uint32_t lw = dcols(s, ls, le, 0) + 1;
+		uint32_t lw = dcols(s, ls, le, 0) + 1, ccol = caret ? dcols(s, ls, off, 0) : UINT32_MAX;
 		char *m = calloc(lw + 1, 1);
 
 		memset(m, ' ', lw);
@@ -691,7 +686,7 @@ static void snippet(pp *p, vbuf *b, const fent *e, const vdiag *d)
 			if (rb < e->base || re < rb)
 				continue;
 			rb -= e->base, re -= e->base;
-			if (re <= ls || rb >= le)
+			if (re <= ls || rb >= le || (re == ls && rb < ls))
 				continue;
 			if (rb < ls)
 				rb = ls;
@@ -731,54 +726,118 @@ static void snippet(pp *p, vbuf *b, const fent *e, const vdiag *d)
 
 			while (n > 0 && m[n - 1] == ' ')
 				n--;
-			vbuf_put(&cl, m, n);
+			cl->n = 0;
+			vbuf_put(cl, m, n);
 			/* clang highlights an insertion's empty range too: the caret line reaches its
 			   column unless a blank is next to it (highlightRange trims blanks) */
-			for (uint32_t i = 0; i < d->nfix; i++) {
+			for (uint32_t i = 0; caret && i < d->nfix; i++) {
 				uint32_t fb = d->fix[i].b, c0;
 
 				if (fb < e->base || fb - e->base < ls || fb - e->base > le || !*d->fix[i].s ||
 				    d->fix[i].e != fb || !pp_pad_at(s, ls, le, fb - e->base))
 					continue;
 				c0 = dcols(s, ls, fb - e->base, 0);
-				if (c0 > cl.n)
-					db_c(&cl, ' ', (int)(c0 - cl.n));
+				if (c0 > cl->n)
+					db_c(cl, ' ', (int)(c0 - cl->n));
 			}
 		}
 		free(m);
 	}
-	db_c(b, ' ', (int)width + 2);
-	vbuf_s(b, "| ");
-	if (p->color)
-		vbuf_s(b, DC_CARET);
-	vbuf_put(b, cl.p, cl.n);
-	if (p->color)
-		vbuf_s(b, DC_RESET);
-	vbuf_s(b, "\n");
-	/* fix-it hints on this line */
-	for (uint32_t i = 0; i < d->nfix; i++) {
-		uint32_t fb = d->fix[i].b;
-		uint32_t c0, have;
-
-		if (fb < e->base || fb - e->base < ls || fb - e->base > le || !*d->fix[i].s)	/* a removal: no text line */
-			continue;
-		c0 = dcols(s, ls, fb - e->base, 0);
-		have = (uint32_t)fl.n;
-		if (c0 < have)
-			c0 = have;
-		db_c(&fl, ' ', (int)(c0 - have));
-		vbuf_s(&fl, d->fix[i].s);
-		anyfix = true;
-	}
-	if (anyfix) {
+	if (cl->n) {
 		db_c(b, ' ', (int)width + 2);
 		vbuf_s(b, "| ");
 		if (p->color)
-			vbuf_s(b, DC_FIXIT);
-		vbuf_put(b, fl.p, fl.n);
+			vbuf_s(b, DC_CARET);
+		vbuf_put(b, cl->p, cl->n);
 		if (p->color)
 			vbuf_s(b, DC_RESET);
 		vbuf_s(b, "\n");
+	}
+}
+
+static void snippet(pp *p, vbuf *b, const fent *e, const vdiag *d)
+{
+	const char *s = e->f->src;
+	uint32_t off = d->loc - e->base, size = e->f->size, ls, le, line, width, nd;
+	char num[16];
+	vbuf cl = { 0 }, fl = { 0 };
+	bool anyfix = false;
+	uint32_t l0, l1;	/* the lines shown (clang: grown to the ranges, at most 16) */
+
+	for (ls = off; ls > 0 && s[ls - 1] != '\n'; ls--)
+		;
+	for (le = off; le < size && s[le] != '\n'; le++)
+		;
+	if (le > ls && s[le - 1] == '\r')
+		le--;
+	line = loc_line(p, d->loc);
+	nd = (uint32_t)snprintf(num, sizeof(num), "%u", line + 16);
+	width = nd > 4 ? nd : 4;
+	l0 = l1 = line;
+	for (uint32_t i = 0; i < d->nspan; i++) {
+		uint32_t rb = d->span[i].b, re = d->span[i].e, a, z;
+
+		if (rb < e->base || re < rb || re - e->base > size || d->span[i].label)	/* (a label: not a clang range) */
+			continue;
+		a = loc_line(p, rb);
+		z = loc_line(p, re > rb && s[re - e->base - 1] == '\n' ? re - 1 : re);
+		/* clang's maybeAddRange (MaxLines 16) */
+		{
+			uint32_t mn = a < l0 ? a : l0, mx = z > l1 ? z : l1;
+
+			if (mx - mn + 1 <= 16)
+				l0 = mn, l1 = mx;
+		}
+	}
+	{
+		/* walk back from the caret line to l0, then print l0 .. l1 */
+		uint32_t st = ls;
+
+		for (uint32_t k = line; k > l0 && st > 0; k--)
+			st = sn_ls(s, st - 1);
+		for (uint32_t k = l0; k <= l1 && st <= size; k++) {
+			uint32_t en = st;
+
+			while (en < size && s[en] != '\n')
+				en++;
+			uint32_t ee = en > st && s[en - 1] == '\r' ? en - 1 : en;
+
+			sn_line(p, b, e, d, st, ee, k, width, k == line, off, &cl);
+			if (k == line && d->nfix)
+				goto fixits;
+		after_fix:
+			if (en >= size)
+				break;
+			st = en + 1;
+			continue;
+		fixits:
+			/* fix-it hints on this line */
+			for (uint32_t i = 0; i < d->nfix; i++) {
+				uint32_t fb = d->fix[i].b;
+				uint32_t c0, have;
+
+				if (fb < e->base || fb - e->base < ls || fb - e->base > le || !*d->fix[i].s)	/* a removal: no text line */
+					continue;
+				c0 = dcols(s, ls, fb - e->base, 0);
+				have = (uint32_t)fl.n;
+				if (c0 < have)
+					c0 = have;
+				db_c(&fl, ' ', (int)(c0 - have));
+				vbuf_s(&fl, d->fix[i].s);
+				anyfix = true;
+			}
+			if (anyfix) {
+				db_c(b, ' ', (int)width + 2);
+				vbuf_s(b, "| ");
+				if (p->color)
+					vbuf_s(b, DC_FIXIT);
+				vbuf_put(b, fl.p, fl.n);
+				if (p->color)
+					vbuf_s(b, DC_RESET);
+				vbuf_s(b, "\n");
+			}
+			goto after_fix;
+		}
 	}
 	free(cl.p);
 	free(fl.p);

@@ -74,21 +74,60 @@ class Renderer:
         return self.src[path]
 
     def snippet(self, d, out):
+        """diag.c snippet: the caret line, grown to the lines of the (unlabelled) ranges, at
+        most 16 (clang's maybeAddRange); the fix-it line after the caret line"""
         loc = d['location']
         s = self.source(loc['path'])
         off = loc['offset']
         if s is None or off >= len(s):
             return
-        ls = off
-        while ls > 0 and s[ls - 1] != 10:
-            ls -= 1
-        le = off
-        while le < len(s) and s[le] != 10:
-            le += 1
+
+        def bol(o):
+            while o > 0 and s[o - 1] != 10:
+                o -= 1
+            return o
+
+        def eol(o):
+            while o < len(s) and s[o] != 10:
+                o += 1
+            return o
+
+        def same(x):
+            return x and x.get('file') is not None and x['path'] == loc['path']
+        ls, le = bol(off), eol(off)
         if le > ls and s[le - 1] == 13:
             le -= 1
         line = loc['line']
         width = max(4, len(str(line + 16)))
+        l0 = l1 = line
+        for sp in d['spans']:
+            if not same(sp['start']) or not same(sp['end']) or sp['label']:
+                continue
+            rb, re_ = sp['start']['offset'], sp['end']['offset']
+            if re_ < rb or re_ > len(s):
+                continue
+            a = line + s.count(b'\n', off, rb) if rb >= off else line - s.count(b'\n', rb, off)
+            ze = re_ - 1 if re_ > rb and s[re_ - 1] == 10 else re_
+            z = line + s.count(b'\n', off, ze) if ze >= off else line - s.count(b'\n', ze, off)
+            mn, mx = min(a, l0), max(z, l1)
+            if mx - mn + 1 <= 16:
+                l0, l1 = mn, mx
+        st = ls
+        for _ in range(line - l0):
+            if st == 0:
+                break
+            st = bol(st - 1)
+        for k in range(l0, l1 + 1):
+            en = eol(st)
+            ee = en - 1 if en > st and s[en - 1] == 13 else en
+            self.sn_line(s, d, out, st, ee, k, width, k == line, off, same)
+            if k == line:
+                self.sn_fixits(s, d, out, ls, le, width, same)
+            if en >= len(s):
+                break
+            st = en + 1
+
+    def sn_line(self, s, d, out, ls, le, line, width, caret, off, same):
         num = str(line).encode()
         text = bytearray()
         col = 0
@@ -102,9 +141,6 @@ class Renderer:
                 if ch & 0xc0 != 0x80:
                     col += 1
         out += b' ' * (width - len(num) + 1) + num + b' | ' + bytes(text) + b'\n'
-
-        def same(x):
-            return x and x.get('file') is not None and x['path'] == loc['path']
         lw = dcols(s, ls, le) + 1
         m = bytearray(b' ' * lw)
         for sp in d['spans']:
@@ -135,18 +171,23 @@ class Renderer:
             for c0 in range(dcols(s, ls, rb), min(dcols(s, ls, re_), lw)):
                 if m[c0] == 32:
                     m[c0] = ord('~')
-        ccol = dcols(s, ls, off)
-        if ccol < lw:
-            m[ccol] = ord('^')
+        if caret:
+            ccol = dcols(s, ls, off)
+            if ccol < lw:
+                m[ccol] = ord('^')
         cl = bytes(m).rstrip(b' ')
+        if caret:
+            for f in d['fixits']:
+                if not (same(f['start']) and ls <= f['start']['offset'] <= le and f['text']):
+                    continue
+                c0 = dcols(s, ls, f['start']['offset'])
+                if pad_at(s, ls, le, f) and c0 > len(cl):
+                    cl += b' ' * (c0 - len(cl))
+        if cl:
+            out += b' ' * (width + 2) + b'| ' + cl + b'\n'
+
+    def sn_fixits(self, s, d, out, ls, le, width, same):
         fixes = [f for f in d['fixits'] if same(f['start']) and ls <= f['start']['offset'] <= le and f['text']]
-        for f in fixes:
-            c0 = dcols(s, ls, f['start']['offset'])
-            if not pad_at(s, ls, le, f) or c0 <= len(cl):
-                continue
-            if c0 > len(cl):
-                cl += b' ' * (c0 - len(cl))
-        out += b' ' * (width + 2) + b'| ' + cl + b'\n'
         fl = bytearray()
         for f in fixes:
             c0 = max(dcols(s, ls, f['start']['offset']), len(fl))

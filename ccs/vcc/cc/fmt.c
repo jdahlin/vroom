@@ -3,7 +3,7 @@
 #include <ctype.h>
 
 typedef struct fmtspec {
-	char spec[4];		/* length modifier and conversion, e.g. "lld" */
+	char spec[6];		/* length modifier and conversion, e.g. "lld", "I64d" */
 	uint8_t badlen;		/* the length modifier is invalid with the conversion */
 	const char *exp;	/* the expected type as clang prints it */
 	uint8_t fix[32];	/* per argument class: 0 matches, 1 mismatch, 255 bool with %c, k: fix-it fmt_fix[k - 1] */
@@ -85,6 +85,8 @@ typedef struct fmtx {
 	pp_span all;		/* the format string expression */
 	const char *s;
 	uint32_t n;
+	pp_span via;		/* the format argument when the string is a const variable's initializer */
+	bool isvia;
 } fmtx;
 
 /* the source location of byte i of the format string, 0 if it cannot be mapped */
@@ -161,6 +163,7 @@ typedef struct fspec {
 	int wstar;		/* width '*' at byte wstar, -1 */
 	uint32_t pb, pe;	/* precision: '.' at pb .. pe, pb == pe: none */
 	int pstar;
+	int32_t wpos, ppos;	/* *n$: n - 1, -1 none */
 	uint32_t lb, le;	/* length modifier */
 	uint32_t conv;		/* the conversion byte */
 } fspec;
@@ -176,13 +179,22 @@ static bool fmt_report(fmtx *x, const char *flag, uint32_t loc, const pp_span *r
 	va_start(ap, fmt);
 	vsnprintf(buf, sizeof(buf), fmt, ap);
 	va_end(ap);
-	pp_diag_next_id = pp_diag_fmt_id(fmt);	/* (the message is formatted here) */
-	{
-		bool on = cc_warnx(x->c, flag, true, NULL, loc, r, nr, fx, nfx, "%s", buf);
+	bool on;
 
+	pp_diag_next_id = pp_diag_fmt_id(fmt);	/* (the message is formatted here) */
+	if (x->isvia) {
+		/* clang: the warning at the argument (or the format argument), the specifier in a note */
+		pp_span vr[2] = { x->via, nr >= 2 ? r[1] : x->via };
+
+		on = cc_warnx(x->c, flag, true, NULL, nr >= 2 ? loc : x->via.b, vr, nr >= 2 ? 2 : 1, NULL, 0, "%s", buf);
 		pp_diag_next_id = NULL;
+		if (on)
+			report(x->c, "note", nr && nr < 2 ? loc : nr ? r[0].b : loc, r, nr ? 1 : 0, fx, nfx, "format string is defined here");
 		return on;
 	}
+	on = cc_warnx(x->c, flag, true, NULL, loc, r, nr, fx, nfx, "%s", buf);
+	pp_diag_next_id = NULL;
+	return on;
 }
 
 /* the range of bytes [b, e) */
@@ -211,7 +223,7 @@ static void fmt_fixtext(fmtx *x, const fspec *f, const char *lc, bool charp, cha
 	bool same = oc == nc || (strchr("diu", oc) && strchr("du", nc));
 	bool minus = f->fminus, plus = f->fplus, space = f->fspace, hash = f->fhash, zero = f->fzero, prec = true;
 	size_t n = 0;
-	char nlc[4];
+	char nlc[6];
 
 	if (plus && (oc == 'd' || oc == 'i') && nc == 'u') {
 		/* clang: d/i turns u for an unsigned argument only without '+' */
@@ -236,11 +248,15 @@ static void fmt_fixtext(fmtx *x, const fspec *f, const char *lc, bool charp, cha
 		n += (size_t)snprintf(out + n, cap - n, "%d$", f->pos + 1);
 	n += (size_t)snprintf(out + n, cap - n, "%s%s%s%s%s", minus ? "-" : "", plus ? "+" : "", space ? " " : "",
 			      hash ? "#" : "", zero ? "0" : "");
-	if (f->wstar >= 0)
+	if (f->wstar >= 0 && f->wpos >= 0)
+		n += (size_t)snprintf(out + n, cap - n, "*%d$", f->wpos + 1);
+	else if (f->wstar >= 0)
 		n += (size_t)snprintf(out + n, cap - n, "*");
 	else if (f->we > f->wb)
 		n += (size_t)snprintf(out + n, cap - n, "%u", (unsigned)strtoul(x->s + f->wb, NULL, 10));
-	if (prec && f->pstar >= 0)
+	if (prec && f->pstar >= 0 && f->ppos >= 0)
+		n += (size_t)snprintf(out + n, cap - n, ".*%d$", f->ppos + 1);
+	else if (prec && f->pstar >= 0)
 		n += (size_t)snprintf(out + n, cap - n, ".*");
 	else if (prec && f->pe > f->pb + 1)
 		n += (size_t)snprintf(out + n, cap - n, ".%u", (unsigned)strtoul(x->s + f->pb + 1, NULL, 10));
@@ -250,47 +266,62 @@ static void fmt_fixtext(fmtx *x, const fspec *f, const char *lc, bool charp, cha
 
 static const char *const fmt_valid_flags[6] = {
 	/* '-' '+' ' ' '#' '0' '\'' */
-	"diouxXcspfFeEgGaA", "difFeEgGaA", "difFeEgGaA", "oxXaAeEfFgG", "diouxXaAeEfFgG", "diufFgG",
+	"diouxXbBcspfFeEgGaADOU", "difFeEgGaAD", "difFeEgGaAD", "oxXbBaAeEfFgGO", "diouxXbBaAeEfFgGDOU", "diufFgGDU",	/* (DOU: Darwin) */
 };
-
-/* the C library's printf functions (clang's builtins with a format attribute): format
-   argument, first data argument (0: a va_list) */
-static const struct libfmt {
-	const char *name;
-	uint8_t idx, first;
-} libfmts[] = {
-	{ "printf", 1, 2 },   { "fprintf", 2, 3 },  { "sprintf", 2, 3 },   { "snprintf", 3, 4 },
-	{ "vprintf", 1, 0 },  { "vfprintf", 2, 0 }, { "vsprintf", 2, 0 },  { "vsnprintf", 3, 0 },
-};
-
-/* the format attribute of a call to fs (arch << 16 | fmt << 8 | first), else the library's
-   for a global printf (clang: implicitly declared, or declared without the attribute) */
-VPRIV uint32_t fmt_attr(cc *c, uint32_t fs)
-{
-	const sym *y = &c->syms[fs];
-	int nl;
-	const char *nm;
-
-	if (y->attrs && c->attr[y->attrs].fmt)
-		return c->attr[y->attrs].fmt;
-	if (c->o->no_builtin || !(y->flags & SF_GLOBAL) || y->sc == SC_STATIC)
-		return 0;
-	nm = idname(y->name, &nl);
-	if (nl > 10 && !memcmp(nm, "__builtin_", 10))
-		nm += 10, nl -= 10;
-	if (nl < 6 || nl > 9 || (nm[0] != 'p' && nm[0] != 'f' && nm[0] != 's' && nm[0] != 'v'))
-		return 0;
-	for (size_t i = 0; i < sizeof libfmts / sizeof *libfmts; i++)
-		if ((int)strlen(libfmts[i].name) == nl && !memcmp(libfmts[i].name, nm, (size_t)nl))
-			return 1u << 16 | (uint32_t)libfmts[i].idx << 8 | libfmts[i].first;
-	return 0;
-}
 
 /*
  * The checks of one N_STR format string, in clang's order: per specification
  * its flags, width and precision, length modifier, then (first != 0) the
  * argument; at the end the first data argument no specification used.
  */
+/* format(printf, i, j) of fs: its attribute, or what clang gives a library builtin of the printf
+   family declared with the builtin's type (not with -ffreestanding / -fno-builtin) */
+VPRIV uint32_t fmt_attr(cc *c, uint32_t fs)
+{
+	static const struct { const char *n; uint8_t fi, first; } lib[] = {
+		{ "printf", 1, 2 }, { "sprintf", 2, 3 }, { "snprintf", 3, 4 }, { "asprintf", 2, 3 }, { "fprintf", 2, 3 },
+		{ "vprintf", 1, 0 }, { "vsprintf", 2, 0 }, { "vsnprintf", 3, 0 }, { "vasprintf", 2, 0 }, { "vfprintf", 2, 0 },
+	};
+	const sym *y = &c->syms[fs];
+	const ctype *f;
+	uint32_t len;
+	const char *nm;
+
+	if (y->attrs && c->attr[y->attrs].fmt)
+		return c->attr[y->attrs].fmt;
+	if (c->o->no_builtin || y->kind != S_FUNC || y->sc == SC_STATIC || !y->name)
+		return 0;
+	nm = idstr_(y->name), len = idlen_(y->name);
+	if (len < 6 || len > 9 || !strchr("psafv", nm[0]))
+		return 0;
+	for (size_t i = 0; i < sizeof(lib) / sizeof(lib[0]); i++) {
+		qty pt;
+
+		if (strlen(lib[i].n) != len || memcmp(lib[i].n, nm, len))
+			continue;
+		f = T(c, canon(c, y->ty));
+		if ((f->flags & TF_NOPROTO) || KIND(c, canon(c, f->base)) != TY_INT ||
+		    f->n != lib[i].fi + (lib[i].first ? 0 : 1) || !(f->flags & TF_VARIADIC) != !lib[i].first)
+			return 0;
+		/* the format: const char * */
+		pt = canon(c, c->params[f->aux + lib[i].fi - 1]);
+		if (KIND(c, pt) != TY_PTR || KIND(c, canon(c, T(c, pt)->base)) != TY_CHAR || !(QQ(T(c, pt)->base) & Q_CONST))
+			return 0;
+		/* before it: pointers (char *, char **, FILE *), snprintf's size */
+		for (uint32_t k = 0; k + 1 < lib[i].fi; k++) {
+			qty a = canon(c, c->params[f->aux + k]);
+
+			if (KIND(c, a) != TY_PTR && !(k == 1 && lib[i].fi == 3 && is_integer(c, a)))
+				return 0;
+			/* fprintf/vfprintf: FILE *, a struct */
+			if ((lib[i].n[0] == 'f' || !strcmp(lib[i].n, "vfprintf")) && KIND(c, canon(c, T(c, a)->base)) != TY_STRUCT)
+				return 0;
+		}
+		return 1u << 16 | (uint32_t)lib[i].fi << 8 | lib[i].first;
+	}
+	return 0;
+}
+
 VPRIV void format_check(cc *c, uint32_t fs, const uint32_t *args, const qty *aty, const uint32_t *atd, uint32_t nargs)
 {
 	uint32_t fa = fmt_attr(c, fs), fi, first, ndata, n;
@@ -322,8 +353,27 @@ VPRIV void format_check(cc *c, uint32_t fs, const uint32_t *args, const qty *aty
 	if (ndata > 256)
 		return;
 	s = args[fi];
-	while (N(s)->op == N_CAST)
-		s = N(s)->a;
+	for (;;) {
+		uint32_t cal;
+
+		while (N(s)->op == N_CAST)
+			s = N(s)->a;
+		/* a call of a format_arg function: its format argument (gettext) */
+		if (N(s)->op != N_CALL)
+			break;
+		cal = N(s)->a;
+		while (N(cal)->op == N_CAST)
+			cal = N(cal)->a;
+		if (N(cal)->op != N_VAR || c->syms[N(cal)->a].kind != S_FUNC || !c->syms[N(cal)->a].attrs)
+			break;
+		{
+			uint32_t k = c->attr[c->syms[N(cal)->a].attrs].fmtarg;
+
+			if (!k || k > N(s)->c)
+				break;
+			s = c->lists[N(s)->b + k - 1];
+		}
+	}
 	if (first && first - 1 == nargs && (N(s)->op == N_VAR || N(s)->op == N_MEMBER)) {
 		/* -Wformat-security: a format that is no literal and no data arguments */
 		qty t = N(s)->ty;
@@ -342,6 +392,21 @@ VPRIV void format_check(cc *c, uint32_t fs, const uint32_t *args, const qty *aty
 		}
 		return;
 	}
+	x.isvia = false;
+	if (N(s)->op == N_VAR && c->syms[N(s)->a].kind == S_VAR && c->syms[N(s)->a].body) {
+		/* a const char array (or const pointer) initialized with a literal (clang's checkFormatStringExpr) */
+		const sym *v = &c->syms[N(s)->a];
+		qty t = v->ty;
+		bool cst = is_array(c, t) ? (QQ(T(c, t)->base) & Q_CONST) : is_ptr(c, t) && (QQ(t) & Q_CONST);
+		uint32_t b = v->body;
+
+		while (N(b)->op == N_CAST)
+			b = N(b)->a;
+		if (cst && N(b)->op == N_STR) {
+			x.via = rng(c, args[fi]), x.isvia = true;
+			s = b;
+		}
+	}
 	if (N(s)->op != N_STR || (N(s)->flags & NF_PAREN) || c->strs[N(s)->a].esz != 1)
 		return;
 	x.c = c, x.node = s;
@@ -352,7 +417,7 @@ VPRIV void format_check(cc *c, uint32_t fs, const uint32_t *args, const qty *aty
 	for (uint32_t i = 0; i < n && !stopped;) {
 		fspec f;
 		uint32_t p;
-		char lc[4];
+		char lc[6];
 		const fmtspec *row = NULL;
 		pp_span sr;
 		bool havesr;
@@ -363,7 +428,7 @@ VPRIV void format_check(cc *c, uint32_t fs, const uint32_t *args, const qty *aty
 			continue;
 		}
 		memset(&f, 0, sizeof(f));
-		f.start = i, f.pos = -1, f.wstar = f.pstar = -1;
+		f.start = i, f.pos = -1, f.wstar = f.pstar = -1, f.wpos = f.ppos = -1;
 		p = i + 1;
 		if (p >= n) {
 			pp_span r;
@@ -398,8 +463,15 @@ VPRIV void format_check(cc *c, uint32_t fs, const uint32_t *args, const qty *aty
 		f.wb = f.we = p;
 		if (p < n && x.s[p] == '*') {
 			f.wstar = (int)p++;
-			if (p < n && x.s[p] >= '0' && x.s[p] <= '9')
-				return;	/* *n$ */
+			if (p < n && x.s[p] >= '0' && x.s[p] <= '9') {	/* *n$ */
+				uint32_t v = 0;
+
+				while (p < n && x.s[p] >= '0' && x.s[p] <= '9' && v < 100000)
+					v = v * 10 + (uint32_t)(x.s[p++] - '0');
+				if (p >= n || x.s[p] != '$' || !v)
+					return;
+				p++, f.wpos = (int32_t)v - 1;
+			}
 		} else {
 			while (p < n && x.s[p] >= '0' && x.s[p] <= '9')
 				p++;
@@ -410,8 +482,15 @@ VPRIV void format_check(cc *c, uint32_t fs, const uint32_t *args, const qty *aty
 			p++;
 			if (p < n && x.s[p] == '*') {
 				f.pstar = (int)p++;
-				if (p < n && x.s[p] >= '0' && x.s[p] <= '9')
-					return;
+				if (p < n && x.s[p] >= '0' && x.s[p] <= '9') {
+					uint32_t v = 0;
+
+					while (p < n && x.s[p] >= '0' && x.s[p] <= '9' && v < 100000)
+						v = v * 10 + (uint32_t)(x.s[p++] - '0');
+					if (p >= n || x.s[p] != '$' || !v)
+						return;
+					p++, f.ppos = (int32_t)v - 1;
+				}
 			} else {
 				while (p < n && x.s[p] >= '0' && x.s[p] <= '9')
 					p++;
@@ -419,8 +498,12 @@ VPRIV void format_check(cc *c, uint32_t fs, const uint32_t *args, const qty *aty
 			f.pe = p;
 		}
 		f.lb = p;
-		if (p < n && x.s[p] == 'q') {
-			p++;	/* BSD quad: only as an incomplete specifier */
+		if (p < n && (x.s[p] == 'q' || x.s[p] == 'w')) {
+			p++;	/* BSD quad (clang: long long); w (C23 wN: clang takes 'w' alone) */
+		} else if (p < n && x.s[p] == 'I') {
+			p++;	/* MS: I, I32, I64 */
+			if (p + 1 < n && ((x.s[p] == '3' && x.s[p + 1] == '2') || (x.s[p] == '6' && x.s[p + 1] == '4')))
+				p += 2;
 		} else if (p < n && (x.s[p] == 'h' || x.s[p] == 'l')) {
 			p++;
 			if (p < n && x.s[p] == x.s[p - 1])
@@ -441,14 +524,14 @@ VPRIV void format_check(cc *c, uint32_t fs, const uint32_t *args, const qty *aty
 		i = f.end;
 		cv = (unsigned char)x.s[p];
 		/* what this checker does not model leaves the rest of the call alone */
-		if (strchr("IwqbB", (int)cv) || (c->o->target == PP_DARWIN && strchr("DOU", (int)cv)) || cv == 0)
+		if (cv == 0)
 			return;
 		havesr = fmt_span(&x, f.start, f.end, &sr);
 		if (!havesr)
 			return;
 		if (cv == '%' || cv == 'm')
 			continue;	/* (consume no argument) */
-		if (!strchr("diouxXcspfFeEgGaAnCS", (int)cv)) {
+		if (!strchr("diouxXbBcspfFeEgGaAnCSDOU", (int)cv) || (c->o->target != PP_DARWIN && strchr("DOU", (int)cv))) {
 			/* an invalid conversion: covers its argument (none left: stop) */
 			uint32_t l = fmt_loc(&x, f.conv);
 			uint32_t ai;
@@ -490,12 +573,14 @@ VPRIV void format_check(cc *c, uint32_t fs, const uint32_t *args, const qty *aty
 
 			if (star < 0)
 				continue;
-			if (positional)
+			int32_t sp = k ? f.ppos : f.wpos;
+
+			if (positional != (sp >= 0))
 				return;
 			if (!first)
 				continue;
-			ai = (uint32_t)argi++;
-			l = fmt_loc(&x, (uint32_t)star + (k ? 0 : 1));
+			ai = positional ? (uint32_t)sp : (uint32_t)argi++;
+			l = fmt_loc(&x, sp >= 0 ? (uint32_t)star - (k ? 1 : 0) : (uint32_t)star + (k ? 0 : 1));	/* (clang: *n$ at '*' or '.') */
 			if (ai >= ndata) {
 				if (l)
 					fmt_report(&x, "format", l, &sr, 1, NULL, 0,
@@ -551,7 +636,7 @@ VPRIV void format_check(cc *c, uint32_t fs, const uint32_t *args, const qty *aty
 						fmt_report(&x, "format", l, &sr, 1, NULL, 0,
 							   "field width used with 'n' conversion specifier, resulting in undefined behavior");
 				}
-				if (prec && !strchr("diouxXaAeEfFgGs", conv)) {
+				if (prec && !strchr("diouxXbBaAeEfFgGsDOU", conv)) {
 					uint32_t l = fmt_loc(&x, f.pstar >= 0 ? (uint32_t)f.pstar : f.pb);
 
 					if (l)
@@ -586,13 +671,13 @@ VPRIV void format_check(cc *c, uint32_t fs, const uint32_t *args, const qty *aty
 			}
 			if (row->badlen) {
 				uint32_t l = fmt_loc(&x, f.lb);
-				char lm[3] = { 0 };
+				char lm[4] = { 0 };
 
 				memcpy(lm, x.s + f.lb, ll);
 				if (l && fmt_report(&x, "format", l, &sr, 1, NULL, 0,
 						    "length modifier '%s' results in undefined behavior or no effect with '%c' conversion specifier",
 						    lm, conv) &&
-				    (lm[0] == 'L' || lm[0] == 'q') && strchr("diouxXn", conv)) {
+				    (lm[0] == 'L' || lm[0] == 'q') && strchr("diouxXbBnDOU", conv)) {
 					pp_fixit fx = { l, l + 1, "ll", 0 };
 
 					report(c, "note", l, NULL, 0, &fx, 1, "did you mean to use 'll'?");
@@ -658,7 +743,7 @@ VPRIV void format_check(cc *c, uint32_t fs, const uint32_t *args, const qty *aty
 					if (nc == 'c' && cl <= FT_UCHAR) {
 						snprintf(lcb, sizeof(lcb), "hh%c", is_signed(c, t) ? 'd' : 'u');
 						fl = lcb;
-					} else if (lm && strchr("diouxX", nc)) {
+					} else if (lm && strchr("diouxXbB", nc)) {
 						snprintf(lcb, sizeof(lcb), "%c%c", lm, nc);
 						fl = lcb;
 					}
@@ -683,8 +768,12 @@ VPRIV void format_check(cc *c, uint32_t fs, const uint32_t *args, const qty *aty
 		if (!(covered[ai >> 6] >> (ai & 63) & 1)) {
 			pp_span r = x.all;
 
-			fmt_report(&x, "format-extra-args", rng(c, args[first - 1 + ai]).b, &r, 1, NULL, 0,
-				   "data argument not used by format string");
+			if (x.isvia)	/* (clang: the literal's range, no note) */
+				cc_warnx(c, "format-extra-args", true, NULL, rng(c, args[first - 1 + ai]).b, &r, 1, NULL, 0,
+					 "data argument not used by format string");
+			else
+				fmt_report(&x, "format-extra-args", rng(c, args[first - 1 + ai]).b, &r, 1, NULL, 0,
+					   "data argument not used by format string");
 			return;
 		}
 }

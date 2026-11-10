@@ -30,6 +30,8 @@ both pi-redef --redefine-sym map_range=mr --redefine-sym=memset=ms $W/arch/arm64
 printf hello > $T/blob; both pi-add --add-section .vroom=$T/blob $W/arch/arm64/kernel/pi/map_kernel.o @O
 both pi-dl --add-gnu-debuglink=$T/blob $W/arch/arm64/kernel/pi/map_kernel.o @O
 both pi-ssf --set-section-flags .text=alloc,readonly,code --set-section-flags .bss=alloc,load,contents $W/arch/arm64/kernel/pi/map_kernel.o @O
+both pi-okd --only-keep-debug $W/arch/arm64/kernel/pi/map_kernel.o @O
+(cd $T && $L/llvm-objcopy -I binary -O elf64-littleaarch64 blob r.bin.o && $B/vobjcopy -I binary -O elf64-littleaarch64 -B aarch64 blob m.bin.o); chk $T/r.bin.o $T/m.bin.o "-I binary"
 for f in idreg-override map_kernel map_range relocate lib-fdt lib-fdt_ro; do
 	x=; case $f in lib-*) x=--prefix-alloc-sections=.init;; esac
 	both $f --prefix-symbols=__pi_ --remove-section=.note.gnu.property $x $W/arch/arm64/kernel/pi/$f.o @O
@@ -40,5 +42,6 @@ for o in -u -g -U --undefined-only --extern-only --defined-only; do
 V=$W/arch/arm64/kernel/vdso/vdso.so.dbg
 $L/llvm-nm $V > $T/r.vnm; $B/vnm $V > $T/m.vnm; chk $T/r.vnm $T/m.vnm "nm vdso"
 $L/llvm-nm -D $V > $T/r.vnm; $B/vnm -D $V > $T/m.vnm; chk $T/r.vnm $T/m.vnm "nm -D vdso"
+for A in $W/lib/lib.a $W/init/built-in.a; do (cd $W && $L/llvm-nm $A > $T/r.anm; $B/vnm $A > $T/m.anm); chk $T/r.anm $T/m.anm "nm $(basename $A)"; done
 echo "$ok identical, $bad different"
 [ $bad = 0 ]

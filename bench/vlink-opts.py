@@ -228,6 +228,34 @@ def main():
             print(f'FAIL --print-gc-sections:\n  vlink {pr[0]}\n  lld   {pr[1]}')
         elif v:
             print(f'ok   --print-gc-sections: {len(pr[0])} removed')
+        # undefined symbols: lld's whole stderr (every reference with its source file and function,
+        # 3 then "referenced N more times", "did you mean" for the first two, archive members,
+        # blank lines after multi-line errors), the program name aside
+        UND = {'un1': 'extern int u1(void); int f(void){return u1();}\nint g(void){return u1()+1;}\n',
+               'un2': 'extern int u1(void); int h(void){return u1();}\n',
+               'un3': 'extern int u1(void); int a1(void){return u1();}int a2(void){return u1();}'
+                      'int a3(void){return u1();}int a4(void){return u1();}\n'
+                      'static int (*p)(void)=u1; int *q(void){return (int*)&p;}\n',
+               'st': 'int h(void); int _start(void){return h();}\n',
+               'sp': 'static int foq(void){return 1;}\nint fooo(void){return 0;} int foo(void); int x_(void);'
+                     ' int _start(void){return x_()+foo()+foq();}\nint ffo(void);int g(void){return ffo();}\n'
+                     'int foqq(void); int k(void){return foqq();}\n'}
+        for name, src in UND.items():
+            open(f'{t}/{name}.c', 'w').write(src)
+            subprocess.run([llvm('clang'), '--target=aarch64-linux-gnu', '-w', '-c', f'{name}.c', '-o', f'{name}.o'],
+                           cwd=t, check=True)
+        subprocess.run([llvm('llvm-ar'), 'rc', f'{t}/lu.a', f'{t}/un2.o'], check=True)
+        for args in ('un1.o un2.o -e f', 'st.o lu.a', 'un3.o un1.o -e a1', 'sp.o', 'sp.o un3.o', 'un3.o sp.o',
+                     'nope1.o nope2.o'):
+            errs = []
+            for exe in (VLINK, LLD):
+                p = subprocess.run([exe] + args.split() + ['-o', 'u.out'], cwd=t, capture_output=True, text=True)
+                errs.append(re.sub(r'^\S+: (error|warning): ', r'\1: ', p.stderr, flags=re.M))
+            if errs[0] != errs[1]:
+                bad += 1
+                print(f'FAIL undefined {args}:\n--- vlink\n{errs[0]}--- lld\n{errs[1]}')
+            elif v:
+                print(f'ok   undefined {args}')
         n0 = 1
         # --version: the word after LLD is a version (scripts/ld-version.sh)
         p = subprocess.run([VLINK, '--version'], capture_output=True, text=True)

@@ -394,6 +394,8 @@ typedef struct uwk {
 	uint64_t dcm;		/* ... variables an if's break arm leaves uninitialized there */
 	uint32_t dcif[64];	/* ... that if (one per variable; dcn counts them) */
 	uint8_t dcf[64], dcn[64];
+	uint32_t dcl[64][8];	/* ... all of them (dcn of them, up to 8), with their dcf */
+	uint8_t dclf[64][8];
 	bool sw_const, sw_hit;
 	i128 sw_val;
 	uint32_t self;		/* the variable whose initializer is walked */
@@ -410,7 +412,9 @@ typedef struct uwk {
 	uint32_t uloc[64], order[64], ublk[64];
 	uint32_t sif[64];	/* the if */
 	uint8_t sfalse[64];	/* ... uninitialized when its condition is false */
-	uint8_t skind[64];
+	uint8_t skind[64];	/* (7: the ifs breaking out of one do-while(0): dl, dlf, ndl) */
+	uint32_t dl[64][8];
+	uint8_t dlf[64][8], ndl[64];
 	pp_span skr[64];	/* ... a case: its value / default's range */
 	/* the switch being walked: the case arm entered from it only, and what it leaves uninitialized */
 	ust *swbrk;
@@ -970,6 +974,8 @@ static void uv_stmt(uwk *w, uint32_t n, ust *st)
 					if (!(w->dcm >> v & 1))
 						w->dcn[v] = 0;
 					w->dcm |= 1ull << v, w->dcif[v] = n, w->dcf[v] = (uint8_t)(!tb.live | (a->u >> v & 1 ? 0 : 2));
+					if (w->dcn[v] < 8)
+						w->dcl[v][w->dcn[v]] = n, w->dclf[v][w->dcn[v]] = w->dcf[v];
 					if (w->dcn[v] < 255)
 						w->dcn[v]++;
 				}
@@ -1005,6 +1011,20 @@ static void uv_stmt(uwk *w, uint32_t n, ust *st)
 				bool binit = w->dcf[v] & 2, inel = w->dcf[v] & 1;	/* the break arm initialized it; it is the else */
 				uint64_t b = 1ull << v;
 
+				if (w->dcn[v] > 1 && w->dcn[v] <= 8) {
+					/* clang: one warning per if whose break leaves it uninitialized (all of them) */
+					bool all = true;
+
+					for (uint32_t j = 0; j < w->dcn[v]; j++)
+						all &= !(w->dclf[v][j] & 2);
+					if (!all || !(st->i & b) || (st->u & b))
+						continue;
+					w->spend |= b, w->sif[v] = w->dcl[v][0], w->sdep[v] = w->dep, w->skind[v] = 7;
+					w->ndl[v] = w->dcn[v];
+					for (uint32_t j = 0; j < w->dcn[v]; j++)
+						w->dl[v][j] = w->dcl[v][j], w->dlf[v][j] = w->dclf[v][j] & 1;
+					continue;
+				}
 				if (w->dcn[v] != 1 || (binit ? !(st->u & b) || (st->i & b) : !(st->i & b) || (st->u & b)))
 					continue;
 				w->spend |= b, w->sif[v] = w->dcif[v], w->sdep[v] = w->dep, w->skind[v] = 0;
@@ -1087,8 +1107,17 @@ static void uv_stmt(uwk *w, uint32_t n, ust *st)
 				here = w->sw_val >= c->ipool[x->a] && w->sw_val <= c->ipool[x->b];
 			else if (w->sw_const)
 				here = !w->sw_hit;
-			if (here)
+			if (here) {
+				/* a fallthrough that initialized it joins the switch's jump that did not */
+				if (st->live && w->swin->live && w->swbrk == w->brk && !w->sw_const)
+					for (uint64_t m = (w->swin->u & ~w->swin->i) & st->i & ~st->u; m; m &= m - 1) {
+						int v = __builtin_ctzll(m);
+
+						w->spend |= 1ull << v, w->sif[v] = n, w->sfalse[v] = false, w->sdep[v] = w->dep, w->skind[v] = 4;
+						w->swc[v][0] = n, w->swa[v][0] = 0, w->nswc[v] = 1;
+					}
 				uj(st, w->swin);
+			}
 		}
 		w->blk++;
 		uv_stmt(w, x->c, st);
@@ -1170,6 +1199,18 @@ static bool uv_sometimes(cc *c, uwk *w, uint32_t k)
 
 	static const char *const op[] = { "if", "&&", "||", "?:" };
 	int kd = w->skind[k];
+
+	if (kd == 7) {	/* each if, the later first (clang's CFG order) */
+		bool any = false;
+
+		w->skind[k] = 0;
+		for (uint32_t j = w->ndl[k]; j-- > 0;) {
+			w->sif[k] = w->dl[k][j], w->sfalse[k] = w->dlf[k][j];
+			any |= uv_sometimes(c, w, k);
+		}
+		w->skind[k] = 7;
+		return any;
+	}
 
 	if (kd == 1 || kd == 2 || kd == 3) {
 		cr = rng(c, x->a);

@@ -1065,6 +1065,8 @@ VPRIV uint32_t statement(cc *c)
 		s = label_sub(c, loc);
 		c->ipool[c->nipool] = lo;
 		c->ipool[c->nipool + 1] = hi;
+		if (c->uv_any & 1)
+			c->uv_any |= 8;	/* (a jump from the switch: run the analysis) */
 		n = mkstmt(c, N_CASE, loc, c->nipool, c->nipool + 1, s);
 		c->nipool += 2;
 		return n;
@@ -1078,6 +1080,8 @@ VPRIV uint32_t statement(cc *c)
 			cc_error(c, loc, "'default' statement not in switch statement");
 		c->sw_default = true;
 		s = label_sub(c, loc);
+		if (c->uv_any & 1)
+			c->uv_any |= 8;
 		return mkstmt(c, N_DEFAULT, loc, 0, 0, s);
 	}
 	case KW_break:
@@ -1151,6 +1155,8 @@ VPRIV uint32_t statement(cc *c)
 
 			next(c);
 			expect_semi(c, "after goto statement");
+			if (c->uv_any & 1)
+				c->uv_any |= 8;	/* (a jump past a later assignment: run the analysis) */
 			return mkstmt(c, N_GOTO, loc, l, 0, 0);
 		}
 	case KW_asm: case KW___asm__: case KW___asm:

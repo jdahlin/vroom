@@ -7,7 +7,7 @@ enum {
 	A_NONE, A_ALIGNED, A_PACKED, A_SECTION, A_MODE, A_CLEANUP, A_ALIAS, A_WEAK, A_USED, A_UNUSED,
 	A_NORETURN, A_ALWAYS_INLINE, A_NOINLINE, A_GNU_INLINE, A_TRANSPARENT_UNION, A_VISIBILITY,
 	A_CONSTRUCTOR, A_DESTRUCTOR, A_COUNTED_BY, A_VECTOR_SIZE, A_COLD, A_NONSTRING, A_MAY_ALIAS,
-	A_WEAKREF, A_NAKED, A_NOCF, A_ERROR, A_OVERLOADABLE, A_NOINSTR, A_TLS_MODEL, A_EXT_VECTOR, A_DEPRECATED, A_WUR, A_NODISCARD, A_IFUNC, A_NONNULL, A_FORMAT,
+	A_WEAKREF, A_NAKED, A_NOCF, A_ERROR, A_OVERLOADABLE, A_NOINSTR, A_TLS_MODEL, A_EXT_VECTOR, A_DEPRECATED, A_WUR, A_NODISCARD, A_IFUNC, A_NONNULL, A_FORMAT, A_FORMAT_ARG,
 	A_PURE, A_CONST, A_UNAVAILABLE,
 	A_COUNT
 };
@@ -22,8 +22,8 @@ static const char *const attr_names[A_COUNT] = {
 	[A_NONSTRING] = "nonstring", [A_MAY_ALIAS] = "may_alias", [A_WEAKREF] = "weakref",
 	[A_NOINSTR] = "no_instrument_function", [A_NAKED] = "naked", [A_NOCF] = "nocf_check", [A_ERROR] = "error",
 	[A_OVERLOADABLE] = "overloadable", [A_TLS_MODEL] = "tls_model", [A_EXT_VECTOR] = "ext_vector_type",
-	[A_DEPRECATED] = "deprecated", [A_WUR] = "warn_unused_result", [A_NODISCARD] = "nodiscard", [A_IFUNC] = "ifunc", [A_NONNULL] = "nonnull", [A_FORMAT] = "format",
 	[A_PURE] = "pure", [A_CONST] = "const", [A_UNAVAILABLE] = "unavailable",
+	[A_DEPRECATED] = "deprecated", [A_WUR] = "warn_unused_result", [A_NODISCARD] = "nodiscard", [A_IFUNC] = "ifunc", [A_NONNULL] = "nonnull", [A_FORMAT] = "format", [A_FORMAT_ARG] = "format_arg",
 };
 
 static uint32_t *attr_dir[NDIR];
@@ -438,6 +438,15 @@ __attribute__((noinline)) VPRIV void attribute_list_(cc *c, attrs *a)
 				}
 				expect(c, T_RPAREN, "')'");
 				continue;
+			case A_FORMAT_ARG: {	/* format_arg(i): the call returns its i-th argument's format */
+				i128 v = 0;
+
+				expect(c, T_LPAREN, "'('");
+				const_expr(c, &v, NULL);
+				expect(c, T_RPAREN, "')'");
+				a->fmtarg = v >= 1 && v <= 255 ? (uint8_t)v : 0;
+				continue;
+			}
 			case A_FORMAT: {	/* format(archetype, fmt, first): printf checked by -Wformat */
 				uint32_t arch = 0;
 				i128 fi = 0, fa = 0;
@@ -576,6 +585,7 @@ VPRIV void merge_attrs(attrs *to, const attrs *from)
 	if (from->ifunc) to->ifunc = from->ifunc;
 	to->nonnull |= from->nonnull;
 	if (from->fmt) to->fmt = from->fmt;
+	if (from->fmtarg) to->fmtarg = from->fmtarg;
 	if (from->counted_by) to->counted_by = from->counted_by;
 	if (from->visibility) to->visibility = from->visibility;
 	if (from->errmsg) to->errmsg = from->errmsg;

@@ -7,7 +7,7 @@
 static void extra_loc(pp *p, uint32_t loc, const char *name, int nl)
 {
 	pp_span r = { loc, loc };
-	pp_fixit fx = { loc, loc, "//" };
+	pp_fixit fx = { loc, loc, "//", 0 };
 	pp_dinfo di = { "warning", loc, &r, 0, &fx, 1, NULL, 0 };
 
 	pp_warnx(p, "extra-tokens", true, NULL, &di, "extra tokens at end of #%.*s directive", nl, name);
@@ -17,7 +17,7 @@ VPRIV __attribute__((noinline)) void dir_extra_tok(pp *p, const ctx *c, uint32_t
 {
 	uint32_t loc = c->loc + c->vt[i].off;
 	pp_span r = { loc, loc };
-	pp_fixit fx = { loc, loc, "//" };
+	pp_fixit fx = { loc, loc, "//", 0 };
 	pp_dinfo di = { "warning", loc, &r, 0, &fx, 1, NULL, 0 };
 	const vtok *n = &c->vt[name];
 

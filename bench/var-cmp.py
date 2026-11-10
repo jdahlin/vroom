@@ -58,9 +58,19 @@ def main():
     tests = [('.', 'kernel/built-in.a'), ('.', './kernel/built-in.a'), ('.', f'{b}/kernel/built-in.a'),
              ('kernel', '../kernel/sched/built-in.a'), ('kernel', 'sched/../sched/built-in.a'),
              ('.', 'built-in-fixup.a'), ('.', 'lib/lib.a'), ('.', 'usr/built-in.a')]
-    for cwd, a in tests:
-        r1 = subprocess.run([LLVM_AR, 't', a], cwd=os.path.join(b, cwd), capture_output=True)
-        r2 = subprocess.run([var, 't', a], cwd=os.path.join(b, cwd), env=env, capture_output=True)
+    tests = [(c, ['t', a]) for c, a in tests]
+    # a regular archive (made by llvm-ar): t, p, a member that is not there
+    os.makedirs(f'{b}/.varcmp', exist_ok=True)
+    reg = f'{b}/.varcmp/r.a'
+    if os.path.exists(reg):
+        os.unlink(reg)
+    subprocess.run([LLVM_AR, 'cDPrs', reg, 'kernel/fork.o', 'init/main.o', '.config'], cwd=b, check=True)
+    tests += [('.', ['t', reg]), ('.', ['t', reg, 'main.o']), ('.', ['p', reg, '.config']),
+              ('.', ['p', reg, 'nope.o'])]
+    for cwd, args in tests:
+        a = ' '.join(args)
+        r1 = subprocess.run([LLVM_AR] + args, cwd=os.path.join(b, cwd), capture_output=True)
+        r2 = subprocess.run([var] + args, cwd=os.path.join(b, cwd), env=env, capture_output=True)
         if (r1.returncode, r1.stdout) != (r2.returncode, r2.stdout):
             tbad += 1
             print(f'DIFF t {cwd} {a}: {r1.stdout[:80]!r} vs {r2.stdout[:80]!r} {r2.stderr[:200]!r}')
@@ -88,12 +98,31 @@ def main():
         [f'cDPrST A {four}', 'mP A kernel/fork.o'],
         [f'cDPrsT A {four}', 'mPi kernel/fork.o A mm/memory.o'],
         [f'cDPrST A {four}', 'mPi nonmember.o A mm/memory.o'],
+        # regular archives (created only): basenames, long names, symbol table, odd sizes
+        [f'cDPrs A {four} .varcmp/e.o'], [f'cDPrS A {four}'], ['crs A kernel/fork.o .config'],
+        ['cDPrs A arch/arm64/kernel/vdso/vdso.so.dbg init/main.o'],
+        # updating regular archives: r by basename (not with P), q, d, s, m
+        [f'cDrs A {four}', 'cDr A kernel/fork.o init/main.o'], [f'cDrs A {four}', 'cDPr A kernel/fork.o'],
+        [f'cDrs A {four}', 'q A kernel/fork.o', 'd A fork.o'], [f'cDrs A {four}', 'd A main.o nope.o'],
+        [f'cDrS A {four}', 's A'], [f'cDrs A {four}', 'm A fork.o'], ['q A kernel/fork.o init/main.o'],
+        # BSD format (llvm-ar on macOS when the first member is not ELF), kept on update
+        [f'cDrs A .config {four}'], [f'cDrS A .config {four}'], [f'cDrs A .config {four}', 'd A .config'],
+        [f'cDrs A {four} .config', 'd A fork.o main.o exit.o memory.o'], ['cDr A .config', 'r A kernel/fork.o'], ['cDPrsT A arch/arm64/kernel/vdso/vdso.so.dbg'],
     ]
     ebad = 0
-    for arch in ('.varcmp/a.a', 'a.a'):
-        for seq in cases:
+    # the same sequences with SYM64_THRESHOLD=0 (llvm-ar's test knob, read by vccd from its own
+    # environment): /SYM64/ and __.SYMDEF_64 instead of the 32-bit tables
+    sock64 = sock + '64'
+    d64 = subprocess.Popen([f'{R}/build/ccs/vccd', '--sock', sock64, '--backend-sock', sock64 + 'x'],
+                           stderr=subprocess.DEVNULL, env=dict(os.environ, SYM64_THRESHOLD='0'))
+    time.sleep(0.3)
+    env64 = dict(env, VCC_SOCK=sock64)
+    runs = [(arch, seq, dict(os.environ), env) for arch in ('.varcmp/a.a', 'a.a') for seq in cases]
+    runs += [('a.a', seq, dict(os.environ, SYM64_THRESHOLD='0'), env64) for seq in cases]
+    for arch, seq, lenv, venv in runs:
+        if True:
             outs = []
-            for tool, e in ((LLVM_AR, os.environ), (var, env)):
+            for tool, e in ((LLVM_AR, lenv), (var, venv)):
                 p = os.path.join(b, arch)
                 if os.path.exists(p):
                     os.unlink(p)
@@ -104,11 +133,12 @@ def main():
                     os.unlink(p)
             if outs[0] != outs[1]:
                 ebad += 1
-                print(f'DIFF {arch}: {seq}: failed {outs[0][0]} vs {outs[1][0]}, '
+                print(f'DIFF {arch}{" sym64" if venv is env64 else ""}: {seq}: failed {outs[0][0]} vs {outs[1][0]}, '
                       f'sizes {len(outs[0][1] or b"")} vs {len(outs[1][1] or b"")}')
     subprocess.run(['rm', '-rf', w])
-    print(f'edge cases: {2 * len(cases) - ebad}/{2 * len(cases)} identical')
+    print(f'edge cases: {len(runs) - ebad}/{len(runs)} identical (the last {len(cases)} with SYM64_THRESHOLD=0)')
     d.terminate()
+    d64.terminate()
     sys.exit(1 if bad or tbad or ebad else 0)
 
 
