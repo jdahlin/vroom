@@ -12,15 +12,16 @@ static val x64_vr(int r) { return (val){ .k = V_REG, .r = (uint8_t)r }; }
 /* an x87 instruction, with its memory operand l (NULL: none) */
 static void x64_x87(ecx *e, int xf, const lval *l, int sz)
 {
+	uint32_t ref = 0;
+	int base = l ? x64_base(e, l, &ref) : 0;
 	rec *i = x64_put(e, X_X87);
 
 	i->cond = (uint8_t)xf;
 	i->sz = (uint8_t)sz;
 	if (l) {
 		i->off = (int32_t)l->off;
-		i->r[1] = l->k == L_FRAME ? RBP : l->k == L_SYM ? RIP : l->r;
-		if (l->k == L_SYM)
-			i->ref = l->ref;
+		i->r[1] = (uint8_t)base;
+		i->ref = ref;
 	}
 }
 

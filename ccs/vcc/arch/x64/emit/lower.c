@@ -61,18 +61,44 @@ VPRIV void x64_mov(ecx *e, int rd, int rs)
 		x64_op3(e, X_MOV, 8, rd, rs, XNOREG);
 }
 
+/* the base register of l's memory operand (ref: its symbol, RIP-relative); a
+   symbol reached through the GOT (-fPIC/-fPIE, an undefined weak) is loaded into r11 */
+VPRIV int x64_base(ecx *e, const lval *l, uint32_t *ref)
+{
+	*ref = 0;
+	if (l->k == L_FRAME)
+		return RBP;
+	if (l->k != L_SYM)
+		return l->r;
+	if (sym_needs_got(e->c, l->ref)) {
+		rec *g = x64_put(e, X_GOT);
+
+		g->sz = 8;
+		g->r[0] = R11;
+		g->ref = l->ref;
+		return R11;
+	}
+	*ref = l->ref;
+	return RIP;
+}
+
 VPRIV void x64_mem(ecx *e, int op, int sz, int r, const lval *l, bool sgn)
 {
-	rec *i = x64_put(e, op);
+	uint32_t ref;
+	int base = x64_base(e, l, &ref);
+	rec *i;
+
+	if (base == R11 && l->k == L_SYM && op == X_ST && r == R11)
+		efatal(e, e->curloc, "internal error: a store through the GOT from r11");
+	i = x64_put(e, op);
 
 	if (l->off < INT32_MIN || l->off > INT32_MAX)
 		efatal(e, e->curloc, "x86-64: offset out of range");
 	i->sz = (uint8_t)sz;
 	i->cond = sgn;
 	i->off = (int32_t)l->off;
-	i->r[1] = l->k == L_FRAME ? RBP : l->k == L_SYM ? RIP : l->r;
-	if (l->k == L_SYM)
-		i->ref = l->ref;
+	i->r[1] = (uint8_t)base;
+	i->ref = ref;
 	if (op == X_ST)
 		i->r[2] = (uint8_t)r;
 	else
@@ -498,15 +524,65 @@ VPRIV void x64_finish(ecx *e, uint32_t s)
 
 /* ---------------- builtins ---------------- */
 
-VPRIV int x64_tlsaddr(ecx *e, uint32_t ref, bool ie)
+VPRIV int x64_tlsaddr(ecx *e, uint32_t ref, int model)
 {
-	int r = x64_treg(e);
-	rec *i = x64_put(e, X_TLS);
+	xst *X = e->x64;
+	int r;
+	rec *i;
 
-	i->r[0] = (uint8_t)r;
-	i->ref = ref;
-	i->cond = ie;
-	return r;
+	if (model < 2) {
+		r = x64_treg(e);
+		i = x64_put(e, X_TLS);
+		i->r[0] = (uint8_t)r;
+		i->ref = ref;
+		i->cond = (uint8_t)model;
+		return r;
+	}
+	/* general dynamic: a call; the live temporaries saved around it, rsp 16-aligned */
+	{
+		uint32_t saved = X->live & X_TEMPS, fsaved = X->live & X_FTEMPS;
+		int pad;
+
+		for (int q = 0; q < 16; q++)
+			if (saved & (1u << q)) {
+				x64_op3(e, X_PUSH, 8, XNOREG, q, XNOREG);
+				X->pushes++;
+			}
+		for (int q = XMM8; q < XMM15; q++)
+			if (fsaved & (1u << q)) {
+				lval d = { .k = L_REG, .r = RSP };
+
+				x64_put(e, X_ADJSP)->imm = -8;
+				x64_mem(e, X_ST, 8, q, &d, false);
+				X->pushes++;
+			}
+		pad = X->pushes % 2 ? 8 : 0;
+		if (pad)
+			x64_put(e, X_ADJSP)->imm = -pad;
+		i = x64_put(e, X_TLS);
+		i->r[0] = RAX;
+		i->ref = ref;
+		i->cond = 2;
+		if (pad)
+			x64_put(e, X_ADJSP)->imm = pad;
+		x64_mov(e, R11, RAX);
+		for (int q = XMM15 - 1; q >= XMM8; q--)
+			if (fsaved & (1u << q)) {
+				lval s = { .k = L_REG, .r = RSP };
+
+				x64_mem(e, X_LD, 8, q, &s, false);
+				x64_put(e, X_ADJSP)->imm = 8;
+				X->pushes--;
+			}
+		for (int q = 15; q >= 0; q--)
+			if (saved & (1u << q)) {
+				x64_op3(e, X_POP, 8, q, XNOREG, XNOREG);
+				X->pushes--;
+			}
+		r = x64_treg(e);
+		x64_mov(e, r, R11);
+		return r;
+	}
 }
 
 VPRIV void x64_trap(ecx *e) { x64_put(e, X_UD2); }

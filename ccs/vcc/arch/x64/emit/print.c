@@ -280,6 +280,8 @@ VPRIV void x64_print(ecx *e, tbuf *b, uint32_t s)
 		case X_CALL:
 			tb_s(b, "\tcallq\t");
 			ref_name(c, b, i->ref);
+			if (c->o->pic && (RKIND(i->ref) == RK_NAME || sym_needs_got(c, i->ref)))
+				tb_s(b, "@PLT");
 			break;
 		case X_CALLR:
 			tb_s(b, "\tcallq\t*");
@@ -301,7 +303,19 @@ VPRIV void x64_print(ecx *e, tbuf *b, uint32_t s)
 		case X_CQO:
 			tb_s(b, sz == 8 ? "\tcqto" : "\tcltd");
 			break;
+		case X_GOT:
+			tb_s(b, "\tmovq\t");
+			ref_off(c, b, i->ref, 0);
+			tb_s(b, "@GOTPCREL(%rip), ");
+			x64_reg(b, i->r[0], 8);
+			break;
 		case X_TLS:
+			if (i->cond == 2) {
+				tb_s(b, "\tdata16\n\tleaq\t");
+				ref_off(c, b, i->ref, 0);
+				tb_s(b, "@TLSGD(%rip), %rdi\n\tdata16\n\tdata16\n\trex64\n\tcallq\t__tls_get_addr@PLT");
+				break;
+			}
 			tb_s(b, "\tmovq\t%fs:0, ");
 			x64_reg(b, i->r[0], 8);
 			tb_s(b, i->cond ? "\n\taddq\t" : "\n\tleaq\t");

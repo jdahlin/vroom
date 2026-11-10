@@ -210,12 +210,13 @@ VPRIV lval wk_lval(ecx *e, uint32_t n)
 			int def = (c->syms[cs].flags & (SF_DEFINED | SF_TENTATIVE)) ? VCC_TLS_LE : VCC_TLS_IE;
 
 			if (c->o->pic == 2)
-				wk_unsup(e, n, "a thread-local variable under -fPIC");
+				def = VCC_TLS_GD;
 			if (want > def)
 				def = want;
-			if (def != VCC_TLS_LE && def != VCC_TLS_IE)
-				wk_unsup(e, n, "this TLS model");
-			return wk_fromval(e, wk_vreg(LO(tlsaddr)(e, REF(RK_SYM, cs), def == VCC_TLS_IE)), c->syms[s].ty);
+			if (def < VCC_TLS_IE)
+				e->calls = true;	/* (local-dynamic as general dynamic) */
+			return wk_fromval(e, wk_vreg(LO(tlsaddr)(e, REF(RK_SYM, cs), def == VCC_TLS_LE ? 0 : def == VCC_TLS_IE ? 1 : 2)),
+					  c->syms[s].ty);
 		}
 		l.k = L_SYM;
 		l.ref = REF(RK_SYM, cs);
