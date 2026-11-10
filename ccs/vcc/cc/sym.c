@@ -21,6 +21,15 @@ VPRIV void scope_open(cc *c)
 	c->smark[++c->depth] = c->nsstack;
 }
 
+/* errors other than clang's DefaultError warnings (-Wint-conversion...): clang's
+   hasUncompilableErrorOccurred */
+static uint32_t hard_errors(cc *c)
+{
+	uint32_t ce = (uint32_t)c->errors, pe = (uint32_t)pp_errors(c->p), e = ce > pe ? ce : pe;
+
+	return e > c->nconv ? e - c->nconv : 0;
+}
+
 /* -Wunused-variable: a block-scope variable never named (clang's
    ActOnPopScope, in declaration order) */
 static void unused_vars(cc *c, uint32_t m)
@@ -60,7 +69,7 @@ VPRIV void unused_statics(cc *c)
 	static const char *const g[] = { "unused", "all", "most", NULL };
 	static const char *const gc[] = { "unused-variable", "unused", "all", "most", NULL };
 
-	if (c->errors || pp_errors(c->p))
+	if (hard_errors(c))
 		return;
 	for (uint32_t i = 1; i < c->nsym; i++)	/* alias("f") uses f */
 		if (c->syms[i].attrs && c->attr[c->syms[i].attrs].alias) {
@@ -139,7 +148,9 @@ static inline __attribute__((always_inline)) void scope_pop(cc *c, bool chk)
 {
 	uint32_t m = c->smark[c->depth];
 
-	if (chk && c->depth > 0 && c->nsstack > m && c->errors == c->fnerr)	/* (clang: none after an error in the function; vcc: in the scope) */
+	/* (clang: none after an uncompilable error in the function, DefaultError warnings aside) */
+	if (chk && c->depth > 0 && c->nsstack > m &&
+	    (uint32_t)(c->errors - c->fnerr) <= c->nconv - c->fnconv)
 		unused_vars(c, m);
 
 	while (c->nsstack > m) {

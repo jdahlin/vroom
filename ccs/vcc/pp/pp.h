@@ -214,6 +214,7 @@ bool pp_warnx(pp *p, const char *flag, bool on, const char *const *groups, pp_di
 enum { VDL_NOTE, VDL_REMARK, VDL_WARNING, VDL_ERROR, VDL_FATAL };
 /* a suggestion's applicability (rustc): safe to apply, maybe, has placeholders */
 enum { VDA_UNSPEC, VDA_MACHINE, VDA_MAYBE, VDA_PLACEHOLDER };
+#define VDA_NAME 0x80	/* (or'ed in) the fix changes a macro's name itself, not its body: kept */
 typedef struct vdspan { uint32_t b, e; const char *label; } vdspan;
 typedef struct vdfix { uint32_t b, e; const char *s; uint8_t app; } vdfix;
 typedef struct vdiag vdiag;

@@ -1491,8 +1491,9 @@ int pp_macro_defined(const pp *p, const char *name)
 
 void pp_diag_fix(pp *p, vdiag *d, uint32_t b, uint32_t e, const char *s, int app)
 {
-	if (unlikely(fix_in_macro(p, b, e)))
+	if (unlikely(!(app & VDA_NAME) && fix_in_macro(p, b, e)))
 		return;
+	app &= ~VDA_NAME;
 	if (d->nfix == d->cfix) {
 		uint32_t c = d->cfix ? d->cfix * 2 : 4;
 		vdfix *n = varena_alloc(&p->perm, c * sizeof(*n));
