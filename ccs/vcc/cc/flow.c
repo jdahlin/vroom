@@ -390,6 +390,10 @@ typedef struct uwk {
 	uint32_t first, nlab;
 	bool changed, report;
 	ust *brk, *cont, *swin;
+	ust *dobrk;		/* the exit of the do-while(0) being walked (no back edge: a block) */
+	uint64_t dcm;		/* ... variables an if's break arm leaves uninitialized there */
+	uint32_t dcif[64];	/* ... that if (one per variable; dcn counts them) */
+	uint8_t dcf[64], dcn[64];
 	bool sw_const, sw_hit;
 	i128 sw_val;
 	uint32_t self;		/* the variable whose initializer is walked */
@@ -937,13 +941,40 @@ static void uv_stmt(uwk *w, uint32_t n, ust *st)
 		uv_ex(w, x->a, st, false);
 		t = *st, e = *st;
 		t.live &= k != 0, e.live &= k != 1;
-		ust b4 = *st;
+		ust b4 = *st, tb = { 0, 0, false }, eb = { 0, 0, false }, *ob = w->brk, *oc = w->cont;
+		bool db = ob && ob == w->dobrk;	/* a break out of a do-while(0) still reaches what follows it */
 
 		w->blk++, w->dep++;
+		if (db)
+			w->brk = w->dobrk = &tb, w->cont = oc == ob ? &tb : oc;
 		uv_stmt(w, x->b, &t);
 		w->blk++;
+		if (db)
+			w->brk = w->dobrk = &eb, w->cont = oc == ob ? &eb : oc;
 		uv_stmt(w, x->c, &e);
 		w->blk++, w->dep--, uv_drop(w);
+		if (db) {
+			w->brk = w->dobrk = ob, w->cont = oc;
+			uj(ob, &tb), uj(ob, &eb);
+			/* an arm that leaves by break while the other falls through: decided after the do */
+			if (b4.live && k < 0 && !uv_haslogic(c, x->a) && (tb.live != eb.live) &&
+			    (tb.live ? !t.live && e.live : !e.live && t.live)) {
+				const ust *a = tb.live ? &tb : &eb;
+
+				const ust *o = tb.live ? &e : &t;	/* the arm that falls through */
+
+				/* uninitialized on one of the two edges so far; the fall-through may still change */
+				for (uint64_t m = b4.u & ~b4.i & (((a->u & ~a->i) & (o->u | o->i)) | ((a->i & ~a->u) & o->u)); m; m &= m - 1) {
+					int v = __builtin_ctzll(m);
+
+					if (!(w->dcm >> v & 1))
+						w->dcn[v] = 0;
+					w->dcm |= 1ull << v, w->dcif[v] = n, w->dcf[v] = (uint8_t)(!tb.live | (a->u >> v & 1 ? 0 : 2));
+					if (w->dcn[v] < 255)
+						w->dcn[v]++;
+				}
+			}
+		}
 		if (b4.live && (!t.live || !e.live))
 			w->spend = 0;	/* (a path leaves: clang finds no branch that always reaches the use) */
 		else if (b4.live && k < 0 && !uv_haslogic(c, x->a)) {
@@ -960,7 +991,32 @@ static void uv_stmt(uwk *w, uint32_t n, ust *st)
 		uj(st, &e);
 		return;
 	}
-	case N_WHILE: case N_DO: case N_FOR:
+	case N_DO:
+		if (uv_const(w, x->a) == 0) {	/* do-while(0): no back edge, a block whose breaks go to its end */
+			ust brk = { 0, 0, false }, *sb = w->brk, *sc = w->cont, *sd = w->dobrk;
+			uint64_t sm = w->dcm;
+
+			w->brk = w->cont = w->dobrk = &brk, w->dcm = 0;
+			uv_stmt(w, x->b, st);
+			w->brk = sb, w->cont = sc, w->dobrk = sd;
+			/* clang: the if's edge to the break reaches the use uninitialized, the fall-through initialized */
+			for (uint64_t m = w->dcm; st->live && m; m &= m - 1) {
+				int v = __builtin_ctzll(m);
+				bool binit = w->dcf[v] & 2, inel = w->dcf[v] & 1;	/* the break arm initialized it; it is the else */
+				uint64_t b = 1ull << v;
+
+				if (w->dcn[v] != 1 || (binit ? !(st->u & b) || (st->i & b) : !(st->i & b) || (st->u & b)))
+					continue;
+				w->spend |= b, w->sif[v] = w->dcif[v], w->sdep[v] = w->dep, w->skind[v] = 0;
+				w->sfalse[v] = binit ? !inel : inel;	/* the edge that reaches the use uninitialized */
+			}
+			w->dcm = sm;	/* (an outer do's candidates: a nested one's are its own) */
+			uj(st, &brk);
+			uv_ex(w, x->a, st, false);
+			return;
+		}
+		/* fall through */
+	case N_WHILE: case N_FOR:
 		if (x->op == N_FOR)
 			uv_stmt(w, x->a, st);
 		w->blk++;
@@ -1182,7 +1238,7 @@ static bool uv_sometimes(cc *c, uwk *w, uint32_t k)
 		if (x->c)	/* (after an expression statement: its ';') */
 			r[1] = (pp_span){ N(x->b)->op == N_EXPR ? c->span[x->b].e : uv_send(c, x->b), uv_send(c, x->c) }, nr = 2;
 	} else
-		r[0] = (pp_span){ c->span[w->sif[k]].b, c->span[x->c].b };
+		r[0] = (pp_span){ c->span[w->sif[k]].b, x->c ? c->span[x->c].b : N(x->b)->op == N_BLOCK ? uv_send(c, x->b) : c->span[x->b].e };	/* (no else: the whole if) */
 	d = (pp_dinfo){ "note", r[0].b, r, nr, NULL, 0, NULL, 0 };
 	pp_diagx(c->p, &d, "remove the 'if' if its condition is always %s", f ? "true" : "false");
 	return true;
@@ -1212,8 +1268,10 @@ VPRIV void uninit_check(cc *c, uint32_t body, uint32_t first_label)
 	uint8_t seen[64];
 	uint32_t nl = c->nlabel - first_label;
 
-	if (!pp_wstate(c->p, "uninitialized", false, w_all))
-		return;
+	static const char *const gs[] = { "uninitialized", "all", "most", NULL };
+
+	if (!pp_wstate(c->p, "uninitialized", false, w_all) && !pp_wstate(c->p, "sometimes-uninitialized", false, gs))
+		return;	/* (-Wsometimes-uninitialized alone runs it too) */
 	/* (only the head is cleared: the report arrays are written before they are read) */
 	memset(w, 0, offsetof(uwk, uloc));
 	w->c = c, w->fl.c = c;
