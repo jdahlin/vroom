@@ -101,11 +101,17 @@ static uint32_t tag_lookup_or_new(cc *c, int kind, uint32_t name, uint32_t loc, 
 
 		if (kind == TY_ENUM && !define)	/* (clang -pedantic) */
 			EXT_WARN(c, "pedantic", NULL, loc, "ISO C forbids forward references to 'enum' types");
+		if (name && c->in_proto)
+			cc_warnx(c, "visibility", true, NULL, loc, NULL, 0, NULL, 0,
+				 "declaration of '%s %.*s' will not be visible outside of this function",
+				 kind == TY_STRUCT ? "struct" : kind == TY_UNION ? "union" : "enum", IDF(name));
 		if (name) {
 			uint32_t ns = sym_new(c, S_TAG, name, QT(c->tags[ti].ty, 0), loc);
 
 			c->syms[ns].val = ti;
 			sym_bind(c, ns);
+			if (c->in_proto == 1 && c->nptag < 8)
+				c->ptag[c->nptag++] = ns;
 		}
 		return ti;
 	}
@@ -353,6 +359,8 @@ static qty typeof_spec(cc *c, bool unqual)
 	uint32_t open;
 
 	next(c);
+	uint32_t loc = tok(c)->loc;	/* clang: at the '(' */
+
 	open = expect_lparen(c);
 	if (is_type_start(c, tok(c))) {
 		t = type_name(c);
@@ -362,6 +370,8 @@ static qty typeof_spec(cc *c, bool unqual)
 		c->unevaluated++;
 		n = expr(c);
 		c->unevaluated--;
+		if (bitfield_of(c, n))
+			cc_error(c, loc, "invalid application of 'typeof' to bit-field");
 		t = N(n)->ty;
 	}
 	expect_match(c, T_RPAREN, open);
@@ -639,13 +649,13 @@ again:
 				continue;
 			}
 			if (!have_named && !base && !nlong && !sgn && t->kind == T_IDENT && typedef_id(c, t->id)) {
-				uint32_t s = lookup(c, t->id);
+				uint32_t ts = lookup(c, t->id);
 
-				named = c->syms[s].ty;
-				ds->tds = s;
-				c->syms[s].flags |= SF_REF;	/* (-Wunused-local-typedef) */
-				if (unlikely(c->syms[s].flags & SF_DEPR))
-					depr_use(c, s, t->loc);
+				if (unlikely(c->syms[ts].flags & SF_DEPRECATED))
+					deprecated_use(c, t->loc, t->id, &c->attr[c->syms[ts].attrs], c->syms[ts].loc);
+				named = c->syms[ts].ty;
+				ds->tdef = ts;
+				c->syms[ts].flags |= SF_REF;	/* (-Wunused-local-typedef) */
 				have_named = true;
 				any = true;
 				next(c);
@@ -714,7 +724,7 @@ again:
 		case KW___extension__:
 			break;
 		case KW__Alignas: {
-			uint32_t a, open;
+			uint32_t a, open, aloc = t->loc;
 
 			next(c);
 			open = expect_lparen(c);
@@ -722,9 +732,15 @@ again:
 				a = ty_align(c, type_name(c));
 			} else {
 				i128 v;
+				uint32_t vn = 0;
 
-				const_expr(c, &v, NULL);
-				a = (uint32_t)v;
+				const_expr(c, &v, &vn);
+				if (v < 0 || (v & (v - 1))) {	/* 0: no effect (C11) */
+					pp_span r = rng(c, vn);
+
+					report(c, "error", aloc, &r, vn ? 1 : 0, NULL, 0, "requested alignment is not a power of 2");
+				}
+				a = v < 0 || (v & (v - 1)) ? 0 : (uint32_t)v;
 			}
 			expect_match(c, T_RPAREN, open);
 			if (a > ds->align)
@@ -830,27 +846,22 @@ again:
 			}
 			body = is(c, T_LBRACE) || (kind == TY_ENUM && is(c, T_COLON));
 			ti = tag_lookup_or_new(c, kind, name, loc, body, !body && is(c, T_SEMI) && !c->in_struct);
-			if (name && unlikely(attrs_depr(c, &pre) || c->has_depr_tag)) {	/* deprecated tags */
-				uint32_t ts = lookup_tag(c, name);
-
-				if (ts && attrs_depr(c, &pre)) {
-					apply_sym_attrs(c, &c->syms[ts], &pre);
-					c->has_depr_tag = true;
-				} else if (ts && !body && (c->syms[ts].flags & SF_DEPR))
-					depr_use(c, ts, loc);
-			}
+			if (!body && c->tags[ti].depr)
+				deprecated_use(c, loc, name, &c->attr[c->tags[ti].depr], c->tags[ti].loc);
 			if (body) {
 				tag *r = &c->tags[ti];
 
+				tag_deprecate(c, ti, &pre);
 				if (r->flags & RF_COMPLETE) {
 					cc_error(c, loc, "redefinition of '%.*s'", IDF(name));
 					note(c, r->loc, "previous definition is here");
 				}
 				if (kind == TY_ENUM) {
-					merge_attrs(c, &post, &pre);
+					merge_attrs(&post, &pre);
 					enum_body(c, ti, &post);
 					tag_body_end(c, kind);
 				} else {
+					DR_TAGWRITE(c, ti);
 					c->tags[ti].flags |= (pre.packed ? RF_PACKED : 0);
 					c->tags[ti].maxalign = pre.aligned;
 					struct_body(c, ti);
@@ -905,8 +916,8 @@ done:
 		return false;
 	if (have_named) {
 		ds->ty = named;
-		if (ds->tds && c->syms[ds->tds].ty != named)
-			ds->tds = 0;
+		if (ds->tdef && c->syms[ds->tdef].ty != named)
+			ds->tdef = 0;
 	} else if (base == KW_void) {
 		ds->ty = prim(TY_VOID);
 	} else if (base == KW__Bool) {

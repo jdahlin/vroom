@@ -6,23 +6,23 @@ ptr_quals.c:13:8: warning: initializing 'void *' with an expression of type 'con
       |               ^    ~
 ptr_quals.c:14:4: warning: passing 'const int *' to parameter of type 'int *' discards qualifiers [-Wincompatible-pointer-types-discards-qualifiers]
    14 |         g(c);
-      |           ^ argument 1 of 'g'
+      |           ^
 ptr_quals.c:4:13: note: passing argument to parameter here
     4 | void g(int *);
       |             ^
 ptr_quals.c:15:4: warning: passing 'unsigned int *' to parameter of type 'int *' converts between pointers to integer types with different sign [-Wpointer-sign]
    15 |         g(&u);
-      |           ^~ argument 1 of 'g'
+      |           ^~
 ptr_quals.c:4:13: note: passing argument to parameter here
     4 | void g(int *);
       |             ^
-ptr_quals.c:16:5: warning: passing 'unsigned char *' to parameter of type 'char *' converts between pointers to integer types where one is of the unique plain 'char' type and the other is not [-Wpointer-sign]
+ptr_quals.c:16:5: warning: passing 'unsigned char *' to parameter of type 'char *' converts between pointers to integer types with different sign [-Wpointer-sign]
    16 |         ch(&uc);
-      |            ^~~ argument 1 of 'ch'
+      |            ^~~
 ptr_quals.c:5:15: note: passing argument to parameter here
     5 | void ch(char *);
       |               ^
 ptr_quals.c:18:9: warning: returning 'const int *' from a function with result type 'int *' discards qualifiers [-Wincompatible-pointer-types-discards-qualifiers]
    18 |         return c;
-      |                ^ the returned value
+      |                ^
 6 warnings generated.

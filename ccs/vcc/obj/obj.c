@@ -64,6 +64,7 @@ void elf_reset(ElfObj *o)
 	o->htab = rpush(&o->arena, (o->hmask + 1) * 4, 64);
 	memset(o->htab, 0, (o->hmask + 1) * 4);
 	o->has_err = 0; o->err[0] = 0;
+	o->addrsig = 0; o->naddrsig = 0; o->has_addrsig = 0;
 }
 
 static const char *copyname(ElfObj *o, const char *s, uint32_t n)
@@ -224,6 +225,17 @@ uint32_t elf_subsection(ElfObj *o, uint32_t sec, int32_t sub)
 	return n;
 }
 
+uint32_t elf_split(ElfObj *o, uint32_t frag)
+{
+	if (o->nsec >= o->nfrag) vjob_fail("too many fragments in the object");
+	ElfFrag *f = elf_frag(o, frag);
+	uint32_t n = newfrag(o, o->nfrag--, f->sec, f->sub);
+	ElfFrag *nf = elf_frag(o, n);
+	f = elf_frag(o, frag);
+	nf->next = f->next; f->next = n; f->cont = n; nf->split = 1;
+	return n;
+}
+
 /* ---- emission ---- */
 
 uint8_t *elf_grow_slow(ElfObj *o, uint32_t frag, size_t n)
@@ -274,7 +286,7 @@ void elf_align(ElfObj *o, uint32_t frag, unsigned p2, int code, uint8_t fill, ui
 	ElfFrag *f = elf_frag(o, frag);
 	ElfSec *s = elf_sec(o, f->sec);
 	if (p2 > s->align) s->align = p2;
-	if (f->sub) f->has_align |= 1u << p2;	/* checked against the base at layout */
+	if (f->sub || f->split) f->has_align |= 1u << p2;	/* checked against the base at layout */
 	uint64_t a = (uint64_t)1 << p2, pad = (a - (f->size & (a - 1))) & (a - 1);
 	if (!pad || (max && pad > max)) return;
 	if (s->type == SHT_NOBITS) { f->size += pad; return; }

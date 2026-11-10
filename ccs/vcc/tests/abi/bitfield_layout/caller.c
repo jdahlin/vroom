@@ -1,3 +1,4 @@
+/* vcc-skip-wasm32: 63-bit long bit-fields need LP64 */
 #include <stdio.h>
 #include "bf.h"
 

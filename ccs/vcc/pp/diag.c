@@ -18,6 +18,8 @@ VPRIV const fent *loc_fent(const pp *p, uint32_t loc)
 		else
 			hi = mid;
 	}
+	while (lo > 0 && !p->fe[lo].f)	/* a dependency-only entry (dep_only) */
+		lo--;
 	return p->nfe ? &p->fe[lo] : NULL;
 }
 
@@ -384,6 +386,35 @@ int pp_diag_wlevel(pp *p, const char *flag, bool on, const char *const *groups, 
 	return st == 2 ? VDL_ERROR : VDL_WARNING;
 }
 
+/* any #pragma clang diagnostic changed a flag's state: per-location answers can differ */
+int pp_diag_pragmas(const pp *p)
+{
+	return p->ndtr != 0;
+}
+
+int pp_werror_named(const pp *p, const char *flag, const char *const *groups)
+{
+	int r = 0;
+
+	for (int i = 0; i < p->o->nwargs; i++) {
+		const char *a = p->o->wargs[i], *n;
+		bool hit;
+
+		if (!strncmp(a, "-Werror=", 8))
+			n = a + 8;
+		else if (!strncmp(a, "-Wno-error=", 11))
+			n = a + 11;
+		else
+			continue;
+		hit = !strcmp(n, flag);
+		for (int g = 0; !hit && groups && groups[g]; g++)
+			hit = !strcmp(n, groups[g]);
+		if (hit)
+			r = a[2] == 'e' ? 1 : -1;
+	}
+	return r;
+}
+
 bool pp_warnx(pp *p, const char *flag, bool on, const char *const *groups, pp_dinfo *di, const char *fmt, ...)
 {
 	pp_diag_pc = __builtin_return_address(0);
@@ -415,6 +446,44 @@ const char *pp_src(const pp *p, uint32_t b, uint32_t e, size_t *len)
 		return NULL;
 	*len = e - b;
 	return f->f->src + (b - f->base);
+}
+
+/* -Winvalid-pp-token: an unknown token that is an unterminated character constant or string */
+void pp_invalid_tok(pp *p, const char *s, uint32_t len, uint32_t loc)
+{
+	uint32_t i = 0;
+
+	if (i < len && (s[i] == 'L' || s[i] == 'U' || s[i] == 'u'))
+		i++;
+	if (i < len && s[0] == 'u' && s[i] == '8')
+		i++;
+	if (i >= len || (s[i] != '\'' && s[i] != '"'))
+		return;
+	{
+		pp_dinfo d = { "warning", loc + i, NULL, 0, NULL, 0, NULL, 0 };
+
+		pp_warnx(p, "invalid-pp-token", true, NULL, &d, "missing terminating %s character", s[i] == '"' ? "'\"'" : "'");
+	}
+}
+
+/* the source at loc spells s[0, n) as a whole token (not a macro's expansion of it) */
+int pp_spells(const pp *p, uint32_t loc, const char *s, uint32_t n)
+{
+	const fent *e;
+
+	if (!loc_ok(p, loc, &e) || loc - e->base + n > e->f->size || memcmp(e->f->src + (loc - e->base), s, n))
+		return 0;
+	return pp_tok_end(p, loc) == loc + n;
+}
+
+/* the source character at loc, -1 if none */
+int pp_loc_char(const pp *p, uint32_t loc)
+{
+	const fent *e;
+
+	if (!loc_ok(p, loc, &e) || loc - e->base >= e->f->size)
+		return -1;
+	return (unsigned char)e->f->src[loc - e->base];
 }
 
 const char *pp_src_rest(const pp *p, uint32_t b, size_t *len)
@@ -542,7 +611,7 @@ VPRIV int diag_where(const pp *p, uint32_t loc, const char **name, uint32_t *nl,
 	int r = pp_where(p, loc, name, nl, line, col);
 	const fent *e = loc_fent(p, loc);
 
-	if (r && e && e->spath && loc - e->base <= e->f->size)
+	if (r && e && e->spath && loc - e->base <= e->f->size && *name == e->name)	/* (not a #line name) */
 		*name = e->spath, *nl = (uint32_t)strlen(e->spath);
 	return r;
 }
@@ -628,6 +697,11 @@ static void snippet(pp *p, vbuf *b, const fent *e, const vdiag *d)
 				rb = ls;
 			if (re > le)
 				re = le;
+			/* clang highlights from the first to the last non-blank column */
+			while (rb < re && (s[rb] == ' ' || s[rb] == '\t'))
+				rb++;
+			while (re > rb && (s[re - 1] == ' ' || s[re - 1] == '\t'))
+				re--;
 			for (uint32_t c0 = dcols(s, ls, rb, 0), c1 = dcols(s, ls, re, 0); c0 < c1 && c0 < lw; c0++)
 				m[c0] = '~';
 		}
@@ -767,6 +841,19 @@ static const pmacro *expansion_at(pp *p, uint32_t loc, uint32_t *b, uint32_t *ee
 	return (const pmacro *)m;
 }
 
+/* loc is in the expansion of an object-like macro (-Wexpansion-to-defined) */
+VPRIV bool obj_macro_at(pp *p, uint32_t loc)
+{
+	uint32_t b, ee;
+	const fent *e;
+	const pmacro *m;
+
+	if (!loc_ok(p, loc, &e) || (loc - e->base + 7 <= e->f->size && !memcmp(e->f->src + (loc - e->base), "defined", 7)))
+		return false;	/* spelled here */
+	m = expansion_at(p, loc, &b, &ee);
+	return m && m->kind == MK_OBJ;
+}
+
 /* "expanded from macro 'M'" at the body token spelled like the diagnosed one (the last #define before) */
 static void kid_after(vdiag *top, vdiag *after, vdiag *n);
 
@@ -785,7 +872,8 @@ static void expansion_note_scan(pp *p, vdiag *top, vdiag *after, const pmacro *m
 			uint32_t b = k + 1, pb = 0, pe = 0, hit = 0, first = 0;
 
 			if (!(q[k].kind == T_IDENT && q[k].id == m->name && q[k - 1].id == KW_define &&
-			      q[k - 2].kind == T_HASH && (q[k - 2].flags & TF_SOL) && p->fe[i].base + q[k].off < before))
+			      q[k - 2].kind == T_HASH && (q[k - 2].flags & TF_SOL) &&
+			      (p->fe[i].base + q[k].off < before || f == &p->builtin)))	/* <built-in> comes first */
 				continue;
 			if (b < f->ntok && q[b].kind == T_LPAREN && !(q[b].flags & TF_SPACE) && !(q[b].flags & TF_SOL)) {
 				pb = b + 1;
@@ -1198,7 +1286,14 @@ static const char *fmt_id(const char *fmt)
 	return NULL;
 }
 
+/* the id of format fmt (for a caller that formats the message itself) */
+const char *pp_diag_fmt_id(const char *fmt)
+{
+	return fmt_id(fmt);
+}
+
 _Thread_local const void *pp_diag_pc;
+_Thread_local const char *pp_diag_next_id;	/* the next record's id when its format serves several (then NULL) */
 
 static const char *const lvname[] = { "note", "remark", "warning", "error", "fatal error" };
 
@@ -1224,17 +1319,45 @@ static char *dstr(pp *p, const char *s, size_t n)
 	return r;
 }
 
+/* 'v4\x01(vector of 4 'int' values)' -> 'v4' (vector of 4 'int' values) (cc's type names) */
+static void vec_suffix(char *m, size_t cap)
+{
+	char *x;
+
+	while ((x = strchr(m, '\x01'))) {
+		char *q = x + 1;
+		int dep = 0;
+
+		for (; *q; q++)
+			if (*q == '(')
+				dep++;
+			else if (*q == ')' && !--dep)
+				break;
+		if (!*q || q[1] != '\'') {
+			*x = ' ';	/* (not inside quotes: just a space) */
+			continue;
+		}
+		/* x: "\x01(...)'" -> "' (...)" : the same length */
+		memmove(x + 2, x + 1, (size_t)(q - x));	/* "(...)" one to the right */
+		x[0] = '\'', x[1] = ' ';
+		(void)cap;
+	}
+}
+
 vdiag *pp_diag_vbegin(pp *p, int level, uint32_t loc, const char *fmt, va_list ap)
 {
 	vdiag *d = varena_alloc(&p->perm, sizeof(*d));
 	char msg[2048];
 	int n = vsnprintf(msg, sizeof(msg), fmt, ap);
 
+	if (unlikely(n > 0 && memchr(msg, '\x01', (size_t)n < sizeof(msg) ? (size_t)n : sizeof(msg) - 1)))
+		vec_suffix(msg, sizeof(msg));	/* (the same length) */
 	memset(d, 0, sizeof(*d));
 	d->level = (uint8_t)level;
 	d->loc = loc;
 	d->fmt = fmt;
-	d->id = fmt_id(fmt);
+	d->id = pp_diag_next_id ? pp_diag_next_id : fmt_id(fmt);
+	pp_diag_next_id = NULL;
 	d->track = pp_diag_pc;
 	pp_diag_pc = NULL;
 	d->msg = dstr(p, msg, n < 0 ? 0 : (size_t)n < sizeof(msg) ? (size_t)n : sizeof(msg) - 1);
@@ -1683,4 +1806,10 @@ void pp_diag_summary(pp *p)
 			      p->o->dsink->ndup, p->o->dsink->ndup > 1 ? "s" : "");
 	if (n)
 		(void)!write(fd, b, (size_t)(n < (int)sizeof(b) ? n : (int)sizeof(b) - 1));
+}
+
+/* the macro id is defined now */
+int pp_defined(pp *p, uint32_t id)
+{
+	return mdefined(p, id);
 }

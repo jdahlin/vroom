@@ -4,19 +4,22 @@
 /* ---------------- literals ---------------- */
 
 /* the type of an integer literal (C11 6.4.4.1p5) */
-static inline qty int_lit_type(u128 v, int l, bool u, bool dec)
+static inline qty int_lit_type(cc *c, u128 v, int l, bool u, bool dec)
 {
+	/* long: 64 bits, or 32 under ILP32 */
+	u128 lmax = CC_ILP32(c) ? INT32_MAX : INT64_MAX, ulmax = CC_ILP32(c) ? UINT32_MAX : UINT64_MAX;
+
 	if (l == 0 && !u && v <= INT32_MAX)
 		return prim(TY_INT);
 	if (l == 0 && (u || !dec) && v <= UINT32_MAX)
 		return prim(TY_UINT);
-	if (l <= 1 && !u && v <= INT64_MAX)
+	if (l <= 1 && !u && v <= lmax)
 		return prim(TY_LONG);
-	if (l <= 1 && (u || !dec))
+	if (l <= 1 && (u || !dec) && v <= ulmax)
 		return prim(TY_ULONG);
 	if (!u && v <= INT64_MAX)
 		return prim(TY_LLONG);
-	return l <= 1 ? prim(TY_ULONG) : prim(TY_ULLONG);
+	return l <= 1 && !CC_ILP32(c) ? prim(TY_ULONG) : prim(TY_ULLONG);
 }
 
 static uint32_t number_s(cc *c, const ptok *t, const char *s, size_t n);
@@ -174,10 +177,9 @@ static uint32_t number_s(cc *c, const ptok *t, const char *s, size_t n)
 	if (over)
 		cc_error(c, t->loc, "integer literal is too large to be represented in any integer type");
 	{
-		uint32_t r = mk_int(c, (i128)v, int_lit_type(v, l, u, base == 10), t->loc);
+		uint32_t r = mk_int(c, (i128)v, int_lit_type(c, v, l, u, base == 10), t->loc);
 
-		if (base != 10)
-			N(r)->aux = NUM_RADIX;
+		N(r)->aux = base != 10 ? NUM_RADIX : 0;	/* spelled with a leading 0 (-Wconstant-conversion) */
 		return r;
 	}
 }
@@ -229,9 +231,9 @@ VPRIV uint32_t number(cc *c, const ptok *t)
 			return number_slow(c, t);	/* float, separators, odd suffixes */
 	}
 	{
-		uint32_t r = mk_int(c, (i128)v, int_lit_type(v, l, u, dec), t->loc);
+		uint32_t r = mk_int(c, (i128)v, int_lit_type(c, v, l, u, dec), t->loc);
 
-		N(r)->aux = dec ? 0 : NUM_RADIX;
+		N(r)->aux = dec ? 0 : NUM_RADIX;	/* spelled with a leading 0 (-Wconstant-conversion) */
 		return r;
 	}
 }
@@ -487,6 +489,20 @@ VPRIV uint32_t char_lit(cc *c)
 				x = cp;
 			}
 			v = x & 0x7fffffffu;
+			nch++;
+		}
+	}
+	if (unlikely(nch > 1)) {
+		if (kind == T_CHAR) {
+			/* clang: 4 characters are -Wfour-char-constants (off); more is too long as well */
+			if (nch != 4)
+				cc_warnx(c, "multichar", true, NULL, t->loc, NULL, 0, NULL, 0, "multi-character character constant");
+			if (nch > 4)
+				report(c, "warning", t->loc, NULL, 0, NULL, 0, "character constant too long for its type");
+		} else if (kind == T_WCHAR) {
+			cc_error(c, t->loc, "wide character literals may not contain multiple characters");
+		} else {
+			cc_error(c, t->loc, "Unicode character literals may not contain multiple characters");
 		}
 	}
 	if (kind == T_CHAR) {

@@ -80,6 +80,7 @@ VPRIV void push_ptok(pp *p, const ptok *t, uint32_t n, uint32_t mid, uint8_t fir
 	c->n = n;
 	c->mid = mid;
 	c->first = first;
+	c->trail = 0;
 	c->barrier = (uint8_t)barrier;
 }
 
@@ -171,6 +172,8 @@ VPRIV __attribute__((noinline)) void raw(pp *p, ptok *t)
 				p->pend |= c->he->pend_out;
 			if (c->top == 2)
 				top_event(p, c->he, 0, 0, 1, 1);
+			if (unlikely(pp_drcov))
+				drcov_end(p);
 			p->depth--;
 			continue;
 		}
@@ -179,6 +182,8 @@ VPRIV __attribute__((noinline)) void raw(pp *p, ptok *t)
 			return;
 		}
 		if (c->type == C_FILE) {
+			if (unlikely(p->out_text > 1))
+				cmt_flush(p, c, c->src + c->f->size);
 			if (p->nfile == 1) {
 				mkeof(t);
 				return;
@@ -189,13 +194,19 @@ VPRIV __attribute__((noinline)) void raw(pp *p, ptok *t)
 				diag_file_end(p, c->fe);
 			p->nfile--;
 			p->depth--;
+			if (unlikely(p->out_text))
+				text_file_change(p, cur_file(p), 0);
 			continue;
 		}
 		if (c->mid)
 			menable(p, c->mid);
 		if (c->first)
 			p->pend |= c->first & 3;
+		if (c->type == C_PTOK && c->trail)
+			p->pend |= TF_SPACE;
 		p->depth--;
+		if (unlikely(p->sol_on) && p->depth <= p->sol_depth && !p->collecting)
+			p->sol_on = 0;	/* the line's first expansion printed nothing */
 	}
 }
 
@@ -209,7 +220,11 @@ VPRIV __attribute__((noinline)) void raw_pop(pp *p, ptok *t)
 			menable(p, c->mid);
 		if (c->first)
 			p->pend |= c->first & 3;
+		if (c->type == C_PTOK && c->trail)
+			p->pend |= TF_SPACE;
 		p->depth--;
+		if (unlikely(p->sol_on) && p->depth <= p->sol_depth && !p->collecting)
+			p->sol_on = 0;	/* the line's first expansion printed nothing */
 		c--;
 	}
 	if (raw_plain(p, c, t))

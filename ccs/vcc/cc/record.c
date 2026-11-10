@@ -40,6 +40,7 @@ __attribute__((noinline)) VPRIV void struct_body(cc *c, uint32_t ti)
 	tag *r;
 	attrs post = { 0 };
 
+	DR_TAGWRITE(c, ti);
 	c->tags[ti].flags |= RF_BEING_DEFINED;
 	c->in_struct++;
 	expect(c, T_LBRACE, "'{'");
@@ -140,7 +141,7 @@ __attribute__((noinline)) VPRIV void struct_body(cc *c, uint32_t ti)
 				f.width = (uint16_t)w;
 			}
 			attribute_list(c, &d.at);
-			merge_attrs(c, &d.at, &ds.at);
+			merge_attrs(&d.at, &ds.at);
 			if (d.at.mode) {
 				int k = mode_kind(c, d.at.mode, is_signed(c, t));
 
@@ -148,9 +149,9 @@ __attribute__((noinline)) VPRIV void struct_body(cc *c, uint32_t ti)
 					t = prim(k);
 			}
 			f.ty = t;
+			f.tdef = ds.tdef && QUNQ(t) == QUNQ(ds.ty) ? ds.tdef : 0;
 			f.counted_by = d.at.counted_by;
-			f.tdef = ds.tds ? ds_tdef(c, &ds, t) : 0;
-			f.depr = unlikely(attrs_depr(c, &d.at)) ? d.at.ext : 0;
+			f.depr = unlikely(d.at.depr) ? new_attrs(c, &d.at) : 0;
 			if (is_func(c, t))
 				cc_error(c, d.loc, "field '%.*s' declared as a function", IDF(d.name));
 			else if (!ds.invalid && !complete(c, t) && !(is_array(c, t) && (T(c, t)->flags & TF_INCOMPLETE))) {
@@ -188,6 +189,8 @@ __attribute__((noinline)) VPRIV void struct_body(cc *c, uint32_t ti)
 	memcpy(r->f, &x->fs[base], nf * sizeof(field));
 	fs = r->f;
 	r->nfield = nf;
+	tag_deprecate(c, ti, &post);
+	r = &c->tags[ti];
 	if (post.packed)
 		r->flags |= RF_PACKED;
 	if (post.aligned > r->maxalign)
@@ -212,6 +215,7 @@ VPRIV void enum_body(cc *c, uint32_t ti, attrs *after)
 	vec cs;
 	qty fixed = 0;
 
+	DR_TAGWRITE(c, ti);
 	vinit(&cs);
 	if (accept(c, T_COLON)) {
 		fixed = type_name(c);
@@ -237,6 +241,17 @@ VPRIV void enum_body(cc *c, uint32_t ti, attrs *after)
 		if (!any || v > mx)
 			mx = v;
 		any = true;
+		{
+			uint32_t o = lookup(c, name);
+
+			if (o && c->syms[o].depth == c->depth && c->syms[o].kind != S_TAG) {
+				if (c->syms[o].kind == S_ENUMCONST)
+					cc_error(c, loc, "redefinition of enumerator '%.*s'", IDF(name));
+				else
+					cc_error(c, loc, "redefinition of '%.*s' as different kind of symbol", IDF(name));
+				note(c, c->syms[o].loc, "previous definition is here");
+			}
+		}
 		if (unlikely(v < INT32_MIN || v > INT32_MAX) && c->o->std != 23) {
 			char b[48];
 
@@ -245,10 +260,10 @@ VPRIV void enum_body(cc *c, uint32_t ti, attrs *after)
 				 "(%s is too %s)", b, v < 0 ? "small" : "large");
 		}
 		s = sym_new(c, S_ENUMCONST, name, v >= INT32_MIN && v <= INT32_MAX ? prim(TY_INT) :
-						 v >= 0 && v <= UINT32_MAX ? prim(TY_UINT) : v >= INT64_MIN && v <= INT64_MAX ? prim(TY_LONG) : prim(TY_ULONG), loc);
-		c->syms[s].val = (int64_t)v;
-		if (unlikely(attrs_depr(c, &ea)))
+						 v >= 0 && v <= UINT32_MAX ? prim(TY_UINT) : v >= INT64_MIN && v <= INT64_MAX ? prim(CC_I64(c, false)) : prim(CC_I64(c, true)), loc);
+		if (unlikely(ea.depr))
 			apply_sym_attrs(c, &c->syms[s], &ea);
+		c->syms[s].val = (int64_t)v;
 		sym_bind(c, s);
 		vpush(c, &cs, s);
 		if (!accept(c, T_COMMA))
@@ -265,14 +280,14 @@ VPRIV void enum_body(cc *c, uint32_t ti, attrs *after)
 		} else if (after->packed) {
 			if (mn < 0)
 				best = mn >= INT8_MIN && mx <= INT8_MAX ? prim(TY_SCHAR) : mn >= INT16_MIN && mx <= INT16_MAX ? prim(TY_SHORT) :
-				       mn >= INT32_MIN && mx <= INT32_MAX ? prim(TY_INT) : prim(TY_LONG);
+				       mn >= INT32_MIN && mx <= INT32_MAX ? prim(TY_INT) : prim(CC_I64(c, false));
 			else
 				best = mx <= UINT8_MAX ? prim(TY_UCHAR) : mx <= UINT16_MAX ? prim(TY_USHORT) :
-				       mx <= UINT32_MAX ? prim(TY_UINT) : prim(TY_ULONG);
+				       mx <= UINT32_MAX ? prim(TY_UINT) : prim(CC_I64(c, true));
 		} else if (mn < 0) {
-			best = mn >= INT32_MIN && mx <= INT32_MAX ? prim(TY_INT) : prim(TY_LONG);
+			best = mn >= INT32_MIN && mx <= INT32_MAX ? prim(TY_INT) : prim(CC_I64(c, false));
 		} else {
-			best = mx <= UINT32_MAX ? prim(TY_UINT) : prim(TY_ULONG);
+			best = mx <= UINT32_MAX ? prim(TY_UINT) : prim(CC_I64(c, true));
 		}
 		et->base = best;
 		et->size = ty_size(c, best);

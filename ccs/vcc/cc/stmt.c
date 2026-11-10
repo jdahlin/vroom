@@ -1,5 +1,6 @@
 /* vcc front end: statements (asm statements included) */
 #include "ccimpl.h"
+#include <ctype.h>
 
 /* ---------------- statements ---------------- */
 
@@ -27,6 +28,361 @@ VPRIV uint32_t mkstmt(cc *c, int op, uint32_t loc, uint32_t a, uint32_t b, uint3
 }
 
 /* -Wparentheses: "if (x = 1)" */
+/*
+ * -Wunused-result for the value e that is dropped: a call of a
+ * warn_unused_result/nodiscard function; a statement expression: its last
+ * expression statement (last: the whole value is dropped), else the others
+ */
+VPRIV void unused_result(cc *c, uint32_t e, bool last)
+{
+	if (N(e)->op == N_STMTEXPR) {
+		uint32_t b = N(e)->a, n = N(b)->c;
+
+		for (uint32_t i = 0; i < n; i++) {
+			uint32_t s = c->lists[N(b)->b + i];
+
+			if (N(s)->op == N_EXPR && N(s)->a && (i + 1 < n ? !last : last))
+				unused_result(c, N(s)->a, true);
+		}
+		return;
+	}
+	if (N(e)->op == N_CALL) {
+		uint32_t f = N(e)->a;
+
+		while (N(f)->op == N_CAST && N(f)->a)
+			f = N(f)->a;
+		if (N(f)->op == N_VAR && (c->syms[N(f)->a].flags & SF_WUR)) {
+			pp_span r = rng(c, e);
+			const attrs *a = &c->attr[c->syms[N(f)->a].attrs];
+
+			cc_warnx(c, "unused-result", true, NULL, rng(c, N(e)->a).b, &r, 1, NULL, 0,
+				 "ignoring return value of function declared with '%s' attribute",
+				 a->wur == 2 ? "nodiscard" : "warn_unused_result");
+		}
+	}
+}
+
+/* clang's Expr::isUnusedResultAWarning: does dropping e's value warn, where */
+typedef struct uvw { uint32_t loc; pp_span r[2]; int nr; uint32_t e; } uvw;
+
+static bool vol(cc *c, uint32_t e)
+{
+	return (QQ(N(e)->ty) & Q_VOLATILE) != 0;
+}
+
+static bool uv_warn(cc *c, uint32_t e, uvw *w)
+{
+	const node *x;
+
+	for (;;) {
+		x = N(e);
+		if (x->op == N_CAST && !c->span[e].e && x->a) {	/* implicit */
+			if (vol(c, x->a) && (N(x->a)->flags & NF_LVALUE))
+				return false;	/* a volatile load */
+			e = x->a;
+			continue;
+		}
+		break;
+	}
+	w->e = e, w->nr = 0;
+	switch (x->op) {
+	case N_PREINC: case N_PREDEC: case N_POSTINC: case N_POSTDEC: case N_ASSIGN: case N_CALL: case N_BUILTIN:
+	case N_VAARG: case N_ZERO: case N_NONE:
+		return false;
+	case N_UNARY:
+		if (x->aux == T_PLUS || x->aux == T_MINUS || x->aux == T_TILDE || x->aux == T_EXCLAIM)
+			goto unop;
+		return false;
+	case N_DEREF:
+		if (vol(c, e))
+			return false;
+		/* fallthrough */
+	case N_ADDR:
+	unop:
+		w->loc = x->loc, w->r[0] = rng(c, x->a), w->nr = 1;
+		return true;
+	case N_COMMA: {
+		uint32_t r = x->b;
+
+		while (N(r)->op == N_CAST && !c->span[r].e && N(r)->a)
+			r = N(r)->a;
+		if (N(r)->op == N_NUM && c->ipool[N(r)->a] == 0)
+			return false;	/* ((x = y), 0): the idiom */
+		return uv_warn(c, x->b, w);
+	}
+	case N_LOGAND: case N_LOGOR: {
+		uvw t;
+
+		if (!uv_warn(c, x->b, &t))
+			return false;
+		w->loc = x->loc, w->r[0] = rng(c, x->a), w->r[1] = rng(c, x->b), w->nr = 2;
+		return true;
+	}
+	case N_BINARY:
+		w->loc = x->loc, w->r[0] = rng(c, x->a), w->r[1] = rng(c, x->b), w->nr = 2;
+		return true;
+	case N_COND: {
+		uvw t;
+
+		if (x->b && !uv_warn(c, x->b, &t))
+			return false;
+		return uv_warn(c, x->c, w);
+	}
+	case N_MEMBER:
+		if (vol(c, e))
+			return false;
+		w->loc = c->span[e].e ? c->span[e].e : x->loc, w->r[0] = rng(c, x->a), w->nr = 1;	/* the member's name */
+		return true;
+	case N_INDEX:
+		if (vol(c, e))
+			return false;
+		w->loc = c->span[e].e ? c->span[e].e : x->loc, w->r[0] = rng(c, x->a), w->r[1] = rng(c, x->b), w->nr = 2;
+		return true;
+	case N_VAR:
+		if (vol(c, e))
+			return false;	/* a volatile load */
+		goto plain;
+	case N_STMTEXPR: {
+		uint32_t b = x->a, n = N(b)->c, ls = n ? c->lists[N(b)->b + n - 1] : 0;
+
+		while (ls && N(ls)->op == N_LABEL)
+			ls = N(ls)->c;
+		if (ls && N(ls)->op == N_EXPR && N(ls)->a)
+			return uv_warn(c, N(ls)->a, w);
+		if (is_void(c, x->ty))
+			return false;
+		w->loc = x->loc, w->r[0] = rng(c, e), w->nr = 1;
+		return true;
+	}
+	case N_CAST:	/* explicit */
+		if (x->aux == CK_VOID)
+			return false;
+		w->loc = c->span[e].b, w->r[0] = rng(c, x->a), w->nr = 1;
+		return true;
+	default:
+	plain:
+		w->loc = rng(c, e).b, w->r[0] = rng(c, e), w->nr = 1;
+		if (x->flags & NF_PAREN)	/* clang: (v) at v */
+			while (pp_loc_char(c->p, w->loc) == '(' || pp_loc_char(c->p, w->loc) == ' ')
+				w->loc++;
+		return true;
+	}
+}
+
+/* -Wunused-comparison: e, a dropped comparison (not parenthesized, not from a macro); true if it is one */
+VPRIV bool unused_cmp(cc *c, uint32_t e)
+{
+	if (N(e)->op != N_BINARY || !is_cmp(N(e)->aux) || (N(e)->flags & (NF_PAREN | NF_MACRO | NF_ERR)))
+		return false;
+	{
+		int k = N(e)->aux;
+		uint32_t op = N(e)->loc;
+		pp_span r = { rng(c, N(e)->a).b, rng(c, N(e)->b).e };
+		bool eq = k == T_EQUALEQUAL || k == T_EXCLAIMEQ;
+
+		if (cc_warnx(c, "unused-comparison", true, w_all, op, &r, 1, NULL, 0, "%s comparison result unused",
+			  eq ? "equality" : "relational") && k == T_EQUALEQUAL) {
+			pp_span orr = { op, op + 2 };
+			pp_fixit fx = { op, op + 2, "=", 0 };
+			pp_dinfo d = { "note", op, &orr, 1, &fx, 1, NULL, 0 };
+
+			pp_diagx(c->p, &d, "use '=' to turn this equality comparison into an assignment");
+		}
+	}
+	return true;
+}
+
+/* clang's MaybeDecrementCount: a discarded full expression that only assigns a local variable */
+VPRIV void set_only(cc *c, uint32_t e)
+{
+	const node *x = N(e);
+	uint32_t v;
+	bool comp;
+
+	if (x->op == N_ASSIGN)
+		v = x->a, comp = x->aux != 0;
+	else if (x->op == N_PREINC || x->op == N_PREDEC || x->op == N_POSTINC || x->op == N_POSTDEC)
+		v = x->a, comp = true;
+	else
+		return;
+	if (N(v)->op != N_VAR || (N(v)->flags & NF_PAREN) || (comp && (QQ(N(v)->ty) & Q_VOLATILE)))
+		return;
+	if (c->syms[N(v)->a].nref && c->syms[N(v)->a].nref != 0xffff)
+		c->syms[N(v)->a].nref--;
+}
+
+/* -Wunused-value: e's value is dropped (a statement; comma: the left operand of a comma) */
+VPRIV void unused_value(cc *c, uint32_t e, bool comma)
+{
+	static const char *const g[] = { "unused", "all", "most", NULL };
+	uvw w;
+	const char *ms = NULL;
+	uint32_t ml = 0;
+
+	if (!c->fn || !e || (N(e)->flags & NF_ERR))
+		return;
+	if (comma && N(e)->op == N_BINARY && is_cmp(N(e)->aux) && !(N(e)->flags & (NF_PAREN | NF_MACRO)) &&
+	    (c->in_stmtexpr || unused_cmp(c, e)))
+		return;	/* a comparison: -Wunused-comparison instead */
+	if (c->dead || !uv_warn(c, e, &w))
+		return;
+	if (N(e)->op == N_STMTEXPR && (N(e)->flags & NF_MACRO))
+		return;	/* clang: a statement expression from a macro */
+	if (N(w.e)->op == N_VAR)
+		ms = idstr_(c->syms[N(w.e)->a].name), ml = (uint32_t)idlen_(c->syms[N(w.e)->a].name);
+	rt_defer(c, "unused-value", g, w.loc, w.r, w.nr, ms, ml, "%s",
+		 comma ? "left operand of comma operator has no effect" : "expression result unused");
+}
+
+/* clang's printing of a compound literal's initializer list from its source "(type){...}":
+   tokens joined, ", " after commas, spaces around binary operators, none inside braces */
+static size_t complit_text(const char *t, size_t len, char *buf, size_t n)
+{
+	size_t i = 0, k = 0;
+	int depth = 0;
+	char prev = 0;	/* 'v' after an operand, 'o' after an operator or '{' '(' ',' */
+
+	if (!t)
+		return 0;
+	/* skip "(type)" */
+	for (; i < len; i++) {
+		if (t[i] == '(')
+			depth++;
+		else if (t[i] == ')' && --depth == 0) {
+			i++;
+			break;
+		}
+	}
+	while (i < len && t[i] != '{')
+		i++;
+	while (i < len && k + 4 < n) {
+		char ch = t[i];
+
+		if (ch == ' ' || ch == '\t' || ch == '\n' || ch == '\r') {
+			i++;
+			continue;
+		}
+		if (ch == '"' || ch == '\'') {
+			size_t s0 = i++;
+
+			while (i < len && t[i] != ch)
+				i += t[i] == '\\' ? 2 : 1;
+			i++;
+			if (i > len)
+				i = len;
+			if (k + (i - s0) + 2 >= n)
+				break;
+			memcpy(buf + k, t + s0, i - s0), k += i - s0;
+			prev = 'v';
+			continue;
+		}
+		if (isalnum((unsigned char)ch) || ch == '_' || ch == '.') {
+			while (i < len && k + 2 < n && (isalnum((unsigned char)t[i]) || t[i] == '_' || t[i] == '.'))
+				buf[k++] = t[i++];
+			prev = 'v';
+			continue;
+		}
+		if (ch == ',') {
+			buf[k++] = ',', buf[k++] = ' ', i++, prev = 'o';
+			continue;
+		}
+		if (ch == '{' || ch == '(' || ch == '[') {
+			buf[k++] = ch, i++, prev = 'o';
+			continue;
+		}
+		if (ch == '}' || ch == ')' || ch == ']') {
+			buf[k++] = ch, i++, prev = 'v';
+			continue;
+		}
+		{
+			/* an operator: up to 3 characters */
+			size_t m = 1;
+
+			while (m < 3 && i + m < len && strchr("+-*/%<>=!&|^", t[i + m]) && strchr("<>=!&|+-", t[i + m - 1]))
+				m++;
+			if (prev == 'v') {	/* binary */
+				buf[k++] = ' ';
+				memcpy(buf + k, t + i, m), k += m;
+				buf[k++] = ' ';
+			} else {
+				memcpy(buf + k, t + i, m), k += m;
+			}
+			i += m, prev = 'o';
+		}
+	}
+	return k;
+}
+
+/* clang's -Wreturn-stack-address: the address of a local or parameter returned (addr: e's address is taken) */
+static void return_stack_addr(cc *c, uint32_t e, bool addr)
+{
+	while (e) {
+		const node *x = N(e);
+
+		switch (x->op) {
+		case N_CAST:
+			if (x->aux == CK_DECAY) {
+				e = x->a, addr = true;	/* an array's address */
+				continue;
+			}
+			if (addr && x->aux != CK_NOP)
+				return;
+			e = x->a;
+			continue;
+		case N_COND:
+			if (x->b)
+				return_stack_addr(c, x->b, addr);
+			e = x->c;
+			continue;
+		case N_ADDR:
+			if (addr)
+				return;
+			e = x->a, addr = true;
+			continue;
+		case N_MEMBER:
+			if (!addr)
+				return;
+			e = x->a;	/* s.m: s's storage */
+			continue;
+		case N_INDEX:
+			if (!addr)
+				return;
+			e = x->a, addr = false;	/* x[i]: the address x is */
+			continue;
+		case N_COMPLIT: {
+			const sym *y = &c->syms[x->b];
+			pp_span r = rng(c, e);
+			size_t len = 0;
+			const char *t;
+			char buf[256];
+			size_t k = 0;
+
+			if (!addr || !x->b || y->depth == 0 || y->sc == SC_STATIC)
+				return;
+			t = pp_src(c->p, r.b, r.e, &len);
+			k = complit_text(t, len, buf, sizeof buf);
+			cc_warnx(c, "return-stack-address", true, NULL, r.b, &r, 1, NULL, 0,
+				 "address of stack memory associated with compound literal '%.*s' returned", (int)k, buf);
+			return;
+		}
+		case N_VAR: {
+			const sym *y = &c->syms[x->a];
+			pp_span r = rng(c, e);
+
+			if (!addr || y->kind != S_VAR || y->depth == 0 || y->sc == SC_STATIC || y->sc == SC_EXTERN ||
+			    (y->flags & SF_GLOBAL))
+				return;
+			cc_warnx(c, "return-stack-address", true, NULL, r.b, &r, 1, NULL, 0,
+				 "address of stack memory associated with %s '%.*s' returned",
+				 y->flags & SF_PARAM ? "parameter" : "local variable", IDF(y->name));
+			return;
+		}
+		default:
+			return;
+		}
+	}
+}
+
 static void assign_cond_warn(cc *c, uint32_t e)
 {
 	if (N(e)->op == N_ASSIGN && !N(e)->aux && !(N(e)->flags & (NF_PAREN | NF_MACRO | NF_ERR))) {
@@ -298,8 +654,17 @@ static void for_semi(cc *c, uint32_t e)
 }
 
 /* one declaration or statement of a block (at loc), appended to items */
-static void block_item(cc *c, uint32_t loc, vec *items)
+static void block_item(cc *c, uint32_t loc, vec *items, bool se, uint32_t *sedone)
 {
+	if (se && items->n > *sedone) {	/* a statement expression: the one before was not the last */
+		uint32_t ls = items->v[items->n - 1];
+
+		while (N(ls)->op == N_LABEL)
+			ls = N(ls)->c;
+		if (N(ls)->op == N_EXPR && N(ls)->a)
+			set_only(c, N(ls)->a), unused_value(c, N(ls)->a, false);
+		*sedone = items->n;
+	}
 	if (is(c, T_EOF)) {
 		report(c, "error", pp_main_eof(c->p), NULL, 0, NULL, 0, "expected '}'");
 		note(c, loc, "to match this '{'");
@@ -331,12 +696,13 @@ static void block_item(cc *c, uint32_t loc, vec *items)
 	if (is(c, T_IDENT) && !kwof(tok(c)) && (peek(c, 1)->kind == T_IDENT || peek(c, 1)->kind == T_STAR) &&
 	    undeclared_type_decl(c, items))
 		return;
+	c->se_direct = se;
 	vpush(c, items, statement(c));
 }
 
 VPRIV uint32_t compound_stmt(cc *c, qty *last)
 {
-	uint32_t loc = tok(c)->loc, n;
+	uint32_t loc = tok(c)->loc, n, sedone = 0;
 	vec items, locals;
 
 	vinit(&items);
@@ -369,7 +735,7 @@ VPRIV uint32_t compound_stmt(cc *c, qty *last)
 		if (REC_ARM(c, &r))
 			rec_restore(c, &r, REC_BLOCK);	/* after a parse error: on with the next statement */
 		while (!is(c, T_RBRACE))
-			block_item(c, loc, &items);
+			block_item(c, loc, &items, last != NULL, &sedone);	/* (sedone: in memory across the longjmp) */
 		REC_POP(c, &r);
 	}
 	next(c);
@@ -406,99 +772,36 @@ static uint32_t sub_statement(cc *c)
 	return n;
 }
 
-/* -Wreturn-stack-address (clang's CheckReturnStackAddr, its common shapes): the value of
-   return e points into the function's own frame.  obj: n is an lvalue (the object), else
-   a pointer (or an integer made from one) */
-static void rsa_walk(cc *c, uint32_t n, bool obj, int depth)
+/* what follows a label, case or default: nothing before '}', a declaration (C23) or a statement */
+static uint32_t label_sub(cc *c, uint32_t loc)
 {
-	const node *x = N(n);
+	if (is(c, T_RBRACE))	/* label at end of compound statement (C23) */
+		return mkstmt(c, N_EXPR, loc, 0, 0, 0);
+	uint32_t dl = tok(c)->loc;
+	bool pend = false;
 
-	if (!n || depth > 32 || (x->flags & NF_ERR))
-		return;
-	if (obj) {
-		switch (x->op) {
-		case N_VAR: {
-			const sym *y = &c->syms[x->a];
-			int m;
-			const char *nm;
-			vdiag *d;
+	if (iskw(c, KW___attribute__) || iskw(c, KW___attribute)) {
+		attrs a = { 0 };
 
-			if (y->kind != S_VAR || (y->flags & SF_GLOBAL) || y->sc == SC_STATIC || y->sc == SC_EXTERN || y->sc == SC_REGISTER ||
-			    (y->flags & SF_THREAD))
-				return;
-			nm = idname(y->name, &m);
-			d = cc_warn_begin(c, "return-stack-address", true, NULL, x->loc,
-					  "address of stack memory associated with %s '%.*s' returned",
-					  y->flags & SF_PARAM ? "parameter" : "local variable", m, nm);
-			if (!d)
-				return;
-			pp_diag_label(c->p, d, y->loc, pp_tok_end(c->p, y->loc),
-				      y->flags & SF_PARAM ? "a parameter of this function" : "declared here, in this function's frame");
-			pp_diag_help(c->p, d, "'%.*s' lives in the frame of '%.*s', which is gone once it returns: make it 'static', "
-				     "allocate it, or let the caller pass the storage", m, nm, IDF(c->syms[c->fn].name));
-			pp_diag_emit(c->p, d);
-			return;
-		}
-		case N_COMPLIT: {
-			size_t l = 0, k = 0;
-			const char *t = pp_src_rest(c->p, N(x->a)->loc, &l);
-			int depth2 = 0;
-			vdiag *d;
-
-			/* the braces as written: to the matching '}' (clang prints the initializer) */
-			for (; t && k < l && k < 200; k++)
-				if (t[k] == '{')
-					depth2++;
-				else if (t[k] == '}' && !--depth2)
-					break;
-			l = t && k < l && k < 200 && t[0] == '{' ? k + 1 : 0;
-
-			if (!x->b || (c->syms[x->b].flags & SF_GLOBAL) || c->syms[x->b].sc == SC_STATIC)
-				return;
-			d = cc_warn_begin(c, "return-stack-address", true, NULL, x->loc,
-					  "address of stack memory associated with compound literal '%.*s' returned",
-					  l ? (int)l : 3, l ? t : "...");
-			if (!d)
-				return;
-			pp_diag_help(c->p, d, "a compound literal in a function lives until the end of its block");
-			pp_diag_emit(c->p, d);
-			return;
-		}
-		case N_MEMBER:
-			rsa_walk(c, x->a, true, depth + 1);
-			return;
-		case N_INDEX:
-		case N_DEREF:
-			rsa_walk(c, x->a, false, depth + 1);
-			return;
-		default:
-			return;
-		}
+		attribute_list(c, &a);
+		if (accept(c, T_SEMI))
+			return mkstmt(c, N_EXPR, loc, 0, 0, 0);	/* fallthrough; */
+		if (!is_decl_start(c, tok(c)))
+			return statement(c);
+		c->pend = a, c->has_pend = true, pend = true;	/* __attribute__((unused)) int x; */
 	}
-	switch (x->op) {
-	case N_CAST:
-		if (x->aux == CK_DECAY)
-			rsa_walk(c, x->a, true, depth + 1);
-		else if (x->aux == CK_NOP || x->aux == CK_P2P || x->aux == CK_P2I || x->aux == CK_I2P || x->aux == CK_INT)
-			rsa_walk(c, x->a, false, depth + 1);
-		return;
-	case N_ADDR:
-		rsa_walk(c, x->a, true, depth + 1);
-		return;
-	case N_COND:
-		rsa_walk(c, x->b ? x->b : x->a, false, depth + 1);
-		rsa_walk(c, x->c, false, depth + 1);
-		return;
-	case N_COMMA:
-		rsa_walk(c, x->b, false, depth + 1);
-		return;
-	case N_BINARY:
-		if (x->aux == T_PLUS || x->aux == T_MINUS)
-			rsa_walk(c, is_ptr(c, N(x->a)->ty) ? x->a : x->b, false, depth + 1);
-		return;
-	default:
-		return;
+	if (pend || (is_decl_start(c, tok(c)) && !(is(c, T_IDENT) && peek(c, 1)->kind == T_COLON))) {
+		vec items;
+
+		if (kwmap != kwmap_c23)
+			cc_warnx(c, "c23-extensions", true, NULL, dl, NULL, 0, NULL, 0,
+				 "label followed by a declaration is a C23 extension");
+		vinit(&items);
+		declaration(c, &items, false);
+		/* the declaration stays in the enclosing scope: (approximation) */
+		return mkstmt(c, N_BLOCK, loc, 0, vfreeze(c, &items), items.n);
 	}
+	return statement(c);
 }
 
 VPRIV uint32_t statement(cc *c)
@@ -506,7 +809,9 @@ VPRIV uint32_t statement(cc *c)
 	ptok *t = tok(c);
 	uint32_t loc = t->loc;
 	int kw = kwof(t);
+	bool sed = c->se_direct;	/* a statement of a statement expression's body: checked there (not the last) */
 
+	c->se_direct = 0;
 	switch (t->kind) {
 	case T_LBRACE:
 		return compound_stmt(c, NULL);
@@ -530,17 +835,8 @@ VPRIV uint32_t statement(cc *c)
 			attribute_list(c, &la);
 			if (c->labels[l].defined)
 				cc_error(c, loc, "redefinition of label '%.*s'", IDF(c->labels[l].name));
-			if (is(c, T_RBRACE))	/* label at end of compound statement (C23) */
-				s = mkstmt(c, N_EXPR, loc, 0, 0, 0);
-			else if (is_decl_start(c, tok(c)) && !(is(c, T_IDENT) && peek(c, 1)->kind == T_COLON)) {
-				vec items;
-
-				vinit(&items);
-				declaration(c, &items, false);
-				s = mkstmt(c, N_BLOCK, loc, 0, vfreeze(c, &items), items.n);
-				/* the declaration stays in the enclosing scope: (approximation) */
-			} else
-				s = statement(c);
+			c->se_direct = sed;	/* (a labeled last statement gives the value) */
+			s = label_sub(c, loc);
 			n = mkstmt(c, N_LABEL, loc, l, 0, s);
 			c->labels[l].defined = n;
 			return n;
@@ -560,19 +856,27 @@ VPRIV uint32_t statement(cc *c)
 			/* clang: runtime-behaviour warnings only in reachable code */
 			cval cv;
 			int k = cc_eval(c, cnd, &cv) && cv.kind == CV_INT ? cv.i != 0 : -1;
+			uint32_t rp = c->prevloc, tb = tok(c)->loc, eb, n;
 
+			c->cnd++;
 			c->dead += k == 0;
 			th = sub_statement(c);
 			c->dead -= k == 0;
+			setspan(c, th, tb);	/* (for -Wsometimes-uninitialized's notes) */
 			if (iskw(c, KW_else)) {
 				next(c);
+				eb = tok(c)->loc;
 				c->dead += k == 1;
 				el = sub_statement(c);
 				c->dead -= k == 1;
+				setspan(c, el, eb);
 			}
+			c->cnd--;
+			scope_close(c);
+			n = mkstmt(c, N_IF, loc, cnd, th, el);
+			c->span[n] = (pp_span){ loc, rp };
+			return n;
 		}
-		scope_close(c);
-		return mkstmt(c, N_IF, loc, cnd, th, el);
 	}
 	case KW_while: {
 		uint32_t cnd, body;
@@ -581,7 +885,7 @@ VPRIV uint32_t statement(cc *c)
 		scope_open(c);
 		cnd = cond_of(c, "while");
 		c->in_loop++;
-		body = sub_statement(c);
+		c->cnd++, body = sub_statement(c), c->cnd--;
 		c->in_loop--;
 		scope_close(c);
 		return mkstmt(c, N_WHILE, loc, cnd, body, 0);
@@ -592,7 +896,7 @@ VPRIV uint32_t statement(cc *c)
 		next(c);
 		scope_open(c);
 		c->in_loop++;
-		body = sub_statement(c);
+		c->cnd++, body = sub_statement(c), c->cnd--;
 		c->in_loop--;
 		if (!iskw(c, KW_while))
 			fatal(c, tok(c)->loc, "expected 'while' in do/while loop");
@@ -628,12 +932,9 @@ VPRIV uint32_t statement(cc *c)
 			init = mkstmt(c, N_BLOCK, loc, 0, vfreeze(c, &items), items.n);
 		} else {
 			uint32_t e = 0;
-			int er;
-			bool mac;
 
 			if (!is(c, T_SEMI))
-				er = c->errors, mac = tok(c)->flags & PF_MACRO,
-				init = mkstmt(c, N_EXPR, loc, e = expr(c), 0, 0), discard(c, e), unused_value(c, e, false, er, mac);
+				init = mkstmt(c, N_EXPR, loc, e = expr(c), 0, 0);
 			for_semi(c, e);
 		}
 		if (!is(c, T_SEMI)) {
@@ -643,18 +944,18 @@ VPRIV uint32_t statement(cc *c)
 		}
 		for_semi(c, cnd);
 		c->for_head = false;
-		if (!is(c, T_RPAREN)) {
-			int er = c->errors;
-			bool mac = tok(c)->flags & PF_MACRO;
-
-			step = expr(c), discard(c, step), unused_value(c, step, false, er, mac);
-		}
+		if (!is(c, T_RPAREN))
+			step = expr(c);
 		expect_close(c, T_RPAREN, open, step);
 	for_body:
 		REC_POP(c, &r);
 		c->in_loop++;
-		body = sub_statement(c);
+		c->cnd++, body = sub_statement(c), c->cnd--;
 		c->in_loop--;
+		if (init && N(init)->op == N_EXPR && N(init)->a)	/* clang's ActOnForStmt: the first and third clauses */
+			set_only(c, N(init)->a), unused_value(c, N(init)->a, false);
+		if (step)
+			set_only(c, step);
 		scope_close(c);
 		vinit(&sb);
 		vpush(c, &sb, step);
@@ -693,9 +994,26 @@ VPRIV uint32_t statement(cc *c)
 
 			c->case_base = c->ncase;
 			c->sw_default = false;
-			body = sub_statement(c);
+			c->cnd++, body = sub_statement(c), c->cnd--;
 			if (!c->sw_default && KIND(c, et) == TY_ENUM)
 				switch_enum_warn(c, et, cnd);
+			if (!c->sw_default) {
+				cval cv;
+
+				if (cc_eval(c, cnd, &cv) && cv.kind == CV_INT) {
+					bool hit = false;
+
+					for (uint32_t i = c->case_base; i < c->ncase && !hit; i++)
+						hit = cv.i >= c->cases[i].lo && cv.i <= c->cases[i].hi;
+					if (!hit) {
+						pp_span r = rng(c, cnd);
+
+						report(c, "warning", r.b, NULL, 0, NULL, 0, is_signed(c, N(cnd)->ty) ?
+						       "no case matching constant switch condition '%lld'" : "no case matching constant switch condition '%llu'",
+						       (long long)cv.i);
+					}
+				}
+			}
 			c->ncase = c->case_base, c->case_base = sb;
 			c->sw_default = sd;
 		}
@@ -744,10 +1062,7 @@ VPRIV uint32_t statement(cc *c)
 			}
 			c->cases[c->ncase++] = (struct swcase){ lo, hi, vloc };
 		}
-		if (is(c, T_RBRACE))
-			s = mkstmt(c, N_EXPR, loc, 0, 0, 0);
-		else
-			s = statement(c);
+		s = label_sub(c, loc);
 		c->ipool[c->nipool] = lo;
 		c->ipool[c->nipool + 1] = hi;
 		n = mkstmt(c, N_CASE, loc, c->nipool, c->nipool + 1, s);
@@ -762,7 +1077,7 @@ VPRIV uint32_t statement(cc *c)
 		if (!c->in_switch)
 			cc_error(c, loc, "'default' statement not in switch statement");
 		c->sw_default = true;
-		s = is(c, T_RBRACE) ? mkstmt(c, N_EXPR, loc, 0, 0, 0) : statement(c);
+		s = label_sub(c, loc);
 		return mkstmt(c, N_DEFAULT, loc, 0, 0, s);
 	}
 	case KW_break:
@@ -786,6 +1101,14 @@ VPRIV uint32_t statement(cc *c)
 			e = decay(c, expr(c));
 			if (!is_void(c, rt) && !is_void(c, N(e)->ty))
 				e = is_record(c, rt) ? e : convert_as(c, e, rt, CX_RETURN, loc);
+			else if (!is_void(c, rt) && is_void(c, N(e)->ty) && !(N(e)->flags & NF_ERR)) {
+				pp_span r = rng(c, e);
+				char f[256];
+
+				snprintf(f, sizeof f, "%s", tyname(c, N(e)->ty));	/* tyname: one buffer */
+				report(c, "error", r.b, &r, 1, NULL, 0, "returning '%s' from a function with incompatible result type '%s'", f,
+				       tyname(c, rt));
+			}
 			else if (is_void(c, rt) && !is_void(c, N(e)->ty) && c->fn && !(N(e)->flags & NF_ERR)) {
 				pp_span r = rng(c, e);
 
@@ -798,12 +1121,15 @@ VPRIV uint32_t statement(cc *c)
 			report(c, "error", loc, NULL, 0, NULL, 0, "non-void function '%.*s' should return a value [-Wreturn-mismatch]",
 			       IDF(c->syms[c->fn].name));
 		}
-		if (e && c->fn && !ISERR(e) && !is_void(c, rt) && (is_ptr(c, rt) || is_integer(c, rt)))
-			rsa_walk(c, e, false, 0);
 		if (unlikely(e && ISERR(e)) && !is(c, T_SEMI))
 			skip_semi(c);	/* clang: after an invalid expression, silently */
 		else
 			expect_semi(c, "after return statement");
+		if (e && c->fn && !ISERR(e))
+			return_stack_addr(c, e, false);
+		if (c->fn && (c->syms[c->fn].flags & SF_NORETURN))
+			cc_warnx(c, "invalid-noreturn", true, NULL, loc, NULL, 0, NULL, 0, "function '%.*s' declared 'noreturn' should not return",
+				 IDF(c->syms[c->fn].name));
 		return mkstmt(c, N_RETURN, loc, e, 0, 0);
 	}
 	case KW_goto:
@@ -853,16 +1179,23 @@ VPRIV uint32_t statement(cc *c)
 	}
 	{
 		int er = c->errors;
-		bool mac = tok(c)->flags & PF_MACRO;
 		uint32_t e = expr(c);
 
+		if (likely(!ISERR(e) && c->errors == er)) {	/* (an invalid expression: reported already) */
+			bool cmp = !c->in_stmtexpr && unused_cmp(c, e);
+
+			if (!c->in_stmtexpr)
+				unused_result(c, e, true);
+			if (!sed)
+				set_only(c, e);
+			if (!sed && !cmp && !(c->in_stmtexpr && N(e)->op == N_BINARY && is_cmp(N(e)->aux) &&
+					      !(N(e)->flags & (NF_PAREN | NF_MACRO))))
+				unused_value(c, e, false);
+		}
 		if (unlikely(!is(c, T_SEMI)) && ISERR(e))
 			skip_semi(c);	/* clang: after an invalid expression, silently to the ';' */
 		else
 			expect_semi(c, "after expression");
-		/* (the last statement of ({ ... }) gives its value) */
-		if (!c->in_stmtexpr || !is(c, T_RBRACE) || peek(c, 1)->kind != T_RPAREN)
-			discard(c, e), unused_value(c, e, false, er, mac);
 		return mkstmt(c, N_EXPR, loc, e, 0, 0);
 	}
 }

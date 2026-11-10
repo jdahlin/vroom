@@ -223,6 +223,13 @@ done:
 		p->svn = base;
 		return false;
 	}
+	if (unlikely(p->out_text))
+		for (ptok *q = p->sv + base, *qe = q + end; q < qe; q++) {	/* clang -E prints an argument on its invocation's line */
+			if (q->flags & TF_SOL)	/* the line break is no space, the indentation is */
+				q->flags = (q->flags & ~(TF_SOL | TF_SPACE)) | (tok_col(p, q->loc) > 1 ? TF_SPACE : 0);
+			if (unlikely(p->out_text > 1) && (q->flags & TF_SPACE) && !(q->flags & PF_MACRO) && q->s[-1] == '/')
+				q->flags &= ~TF_SPACE;	/* -C: right after a comment (which is dropped) */
+		}
 	a->tok = tok;
 	a->base = base;
 	memset(a->prest, 0, slots);
@@ -241,6 +248,8 @@ static bool collect(pp *p, const pmacro *m, const ptok *name, margs *a, ptok *rp
 {
 	bool r;
 
+	if (!p->collecting)
+		p->coll_loc = name->loc, p->coll_name = m->name;
 	p->collecting++;
 	r = collect_(p, m, name, a, rp);
 	p->collecting--;
@@ -685,6 +694,8 @@ plain:
 		}
 		if (before_nonempty)
 			p->svn--;
+		if (before)
+			ngs = false;	/* clang: a placemarker pasted on gives no space */
 		if (va && k == np - 1 && a->elided)
 			remove_va_comma(p, base, &ngs);
 	}
@@ -774,7 +785,7 @@ static void subst_simple(pp *p, const pmacro *m, margs *a, uint8_t nf, uint32_t 
 		n = nb;
 	}
 	if (!n) {
-		p->pend |= nf;
+		p->pend |= nf, p->cmt_sol |= nf & TF_SOL, p->sol_on = p->sol_on && p->sol_depth != p->depth;
 		return;
 	}
 	r = w = varena_alloc(&p->tmp, n * sizeof(ptok));
@@ -808,6 +819,7 @@ static void subst_simple(pp *p, const pmacro *m, margs *a, uint8_t nf, uint32_t 
 		}
 	}
 	push_ptok(p, r, n, m->name, 0, 0);	/* r[0] took the name's SOL/SPACE (the context's "first") */
+	p->cx[p->depth - 1].trail = ngs;
 	mdisable(p, m->name);
 }
 
@@ -877,12 +889,13 @@ static int subst(pp *p, const pmacro *m, const ptok *name, margs *a, uint32_t el
 	}
 	r = svtake(p, base, &n);
 	if (!n) {
-		p->pend |= nf;
+		p->pend |= nf, p->cmt_sol |= nf & TF_SOL, p->sol_on = p->sol_on && p->sol_depth != p->depth;
 		return 0;
 	}
 	/* the context's "first" (the name's SOL/SPACE), applied now: r is ours */
 	r[0].flags = (r[0].flags & ~(TF_SOL | TF_SPACE)) | nf;
 	push_ptok(p, r, n, m->name, 0, 0);
+	p->cx[p->depth - 1].trail = ngs;
 	mdisable(p, m->name);
 	return 0;
 }
@@ -914,12 +927,35 @@ static void single(pp *p, const pmacro *m, ptok *t, uint8_t nf, uint32_t eloc)
 		t->flags |= PF_NOEXP;
 }
 
+/* -E text: before a macro name read from a file is expanded (its column, -C's comments) */
+static __attribute__((noinline, cold)) void expand_text(pp *p, ptok *t)
+{
+	ctx *fc = &p->cx[p->depth - 1];
+
+	p->exp_loc = t->loc;	/* clang's expansion location: where the outermost name is */
+	if ((t->flags & (TF_SOL | TF_SPACE)) == (TF_SOL | TF_SPACE) && !p->sol_on && tok_col(p, t->loc) == 1)
+		t->flags &= ~TF_SPACE;	/* clang: a line break is no leading space */
+	if (unlikely(p->out_text > 1) && !(t->flags & PF_MACRO) && p->fe[fc->fe].cpos && t->s >= p->fe[fc->fe].cpos &&
+	    t->s < fc->src + fc->f->size) {
+		cmt_flush(p, fc, t->s);	/* -C: the comments before it, not those in its arguments */
+		p->fe[fc->fe].cpos = t->s + t->len;
+		if (p->pk_end == t->s)
+			t->flags &= ~TF_SPACE;	/* right after a comment */
+	}
+}
+
 /* expand macro m named by t; 1 if t now holds the result token, 2 if the next raw one */
 VPRIV int expand(pp *p, const pmacro *m, ptok *t)
 {
-	uint8_t nf = t->flags & (TF_SOL | TF_SPACE);
 	margs a;
 	ptok rp;
+
+	if (unlikely(p->out_text) && !p->in_dir && p->cx[p->depth - 1].type == C_FILE)
+		expand_text(p, t);
+	uint8_t nf = t->flags & (TF_SOL | TF_SPACE);
+
+	if ((nf & TF_SOL) && !p->sol_on && !p->in_dir && p->cx[p->depth - 1].type == C_FILE)
+		p->sol_loc = t->loc, p->sol_on = 1, p->sol_depth = p->depth;
 
 	if (m->kind == MK_BUILTIN)
 		return builtin(p, m, t);
@@ -927,7 +963,7 @@ VPRIV int expand(pp *p, const pmacro *m, ptok *t)
 		ctx *c;
 
 		if (!m->nbody) {
-			p->pend |= nf;
+			p->pend |= nf, p->cmt_sol |= nf & TF_SOL, p->sol_on = p->sol_on && p->sol_depth != p->depth;
 			return 0;
 		}
 		if (m->nbody == 1 && trivial(p, m)) {
@@ -953,9 +989,11 @@ VPRIV int expand(pp *p, const pmacro *m, ptok *t)
 	}
 	if (!collect(p, m, t, &a, &rp))
 		return collect_failed(t, &rp);
+	if (unlikely(p->out_text > 1))
+		cmt_skip_to(p, &rp);	/* -C: comments in macro arguments are dropped */
 	if (!m->nbody) {
 		p->svn = a.base;
-		p->pend |= nf;
+		p->pend |= nf, p->cmt_sol |= nf & TF_SOL, p->sol_on = p->sol_on && p->sol_depth != p->depth;
 		return 0;
 	}
 	if (m->nbody == 1 && trivial(p, m)) {

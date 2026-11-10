@@ -79,8 +79,8 @@ static void lay_bitfield(cc *c, layout *l, field *f, uint32_t fattr_align, bool 
 	}
 	if (l->data_size > l->size)
 		l->size = l->data_size;
-	if (c->o->target == PP_DARWIN && !f->name)
-		falign = ufalign = 8;	/* Apple (no useZeroLengthBitfieldAlignment): unnamed bit-fields leave the record's alignment */
+	if (c->o->target != PP_LINUX_AARCH64 && !f->name)
+		falign = ufalign = 8;	/* Apple, wasm (no useZeroLengthBitfieldAlignment): unnamed bit-fields leave the record's alignment */
 	lay_update(l, falign, ufalign);
 }
 
@@ -133,10 +133,11 @@ VPRIV void lay_record(cc *c, tag *r, const uint32_t *fa, const uint8_t *fp)
 
 	if (c->npack && c->pack[c->npack - 1])
 		l.max_field_align = (uint64_t)c->pack[c->npack - 1] * 8;
-	if (r->maxalign)
-		lay_update(&l, (uint64_t)r->maxalign * 8, (uint64_t)r->maxalign * 8);
 	for (uint32_t i = 0; i < r->nfield; i++)
 		lay_field(c, &l, &r->f[i], fa ? fa[i] : 0, fp ? fp[i] : 0);
+	r->ualign = (uint32_t)(l.align / 8);
+	if (r->maxalign)
+		lay_update(&l, (uint64_t)r->maxalign * 8, (uint64_t)r->maxalign * 8);
 	if (l.padded_field_size > l.size)
 		l.size = l.padded_field_size;
 	l.size = align_to(l.size, l.align);
@@ -213,9 +214,10 @@ static void type_str(cc *c, qty t, const char *inner, vfixbuf *out, bool *ok)
 			vfixbuf_puts(&in, x->flags & TF_BLOCK ? "(^" : "(*");
 		else
 			vfixbuf_puts(&in, x->flags & TF_BLOCK ? "^" : "*");
-		if (QQ(t)) {
-			vfixbuf_puts(&in, " ");
+		if (QQ(t)) {	/* clang: "int *const", "int *const *", "int *const p" */
 			quals(&in, QQ(t));
+			if (!inner[0] && in.n && in.s[in.n - 1] == ' ')
+				in.s[--in.n] = 0;
 		}
 		vfixbuf_puts(&in, inner);
 		if (bt->kind == TY_ARRAY || bt->kind == TY_FUNC)
@@ -269,10 +271,30 @@ static void type_str(cc *c, qty t, const char *inner, vfixbuf *out, bool *ok)
 		/* clang without the typedef: __attribute__((__vector_size__(4 * sizeof(int)))) int */
 		vfixbuf el;
 		char n[96];
+		uint32_t td = 0;
 
 		el.n = 0, el.s[0] = 0;
 		type_str(c, x->base, "", &el, ok);
+		/* clang keeps the typedef name (vcc: the first typedef of this vector type) */
+		for (uint32_t i = 1; i < c->nsym && !td; i++)
+			if (c->syms[i].kind == S_TYPEDEF && c->syms[i].name && QI(c->syms[i].ty) == QI(t) && !QQ(c->syms[i].ty))
+				td = i;
 		quals(&b, QQ(t));
+		if (td) {
+			vfixbuf_put(&b, idstr_(c->syms[td].name), idlen_(c->syms[td].name));
+			if (inner[0]) {
+				vfixbuf_puts(&b, " ");
+				vfixbuf_puts(&b, inner);
+			} else {	/* \x01: the diagnostic printer closes the quote before it */
+				snprintf(n, sizeof(n), "\x01(vector of %u '", x->n);
+				vfixbuf_puts(&b, n);
+				vfixbuf_put(&b, el.s, el.n);
+				vfixbuf_puts(&b, "' values)");
+			}
+			vfixbuf_put(out, b.s, b.n);
+			*ok = false;
+			return;
+		}
 		snprintf(n, sizeof(n), "__attribute__((__vector_size__(%llu * sizeof(",
 			 (unsigned long long)(ty_size(c, t) / ty_size(c, x->base)));
 		vfixbuf_puts(&b, n);
@@ -356,49 +378,6 @@ VPRIV const char *tyname(cc *c, qty t)
 
 	o->n = 0, o->s[0] = 0;
 	type_str(c, t, "", o, &ok);
-	return o->s;
-}
-
-/* the typedef expression e's type t was written with, from its declaration (vcc keeps no
-   sugar in types): a variable, a member, a call's return type; 0: none */
-VPRIV uint32_t expr_tdef(cc *c, uint32_t e, qty t)
-{
-	const node *n = N(e);
-	uint32_t td = 0;
-
-	if (n->op == N_VAR)
-		td = c->syms[n->a].tdef;
-	else if (n->op == N_MEMBER && n->b < c->ntag && n->c < c->tags[n->b].nfield)
-		td = c->tags[n->b].f[n->c].tdef;
-	else if (n->op == N_CALL && N(n->a)->op == N_VAR)
-		td = c->syms[N(n->a)->a].tdef;
-	else if (n->op == N_CALL && N(n->a)->op == N_CAST && N(N(n->a)->a)->op == N_VAR)
-		td = c->syms[N(N(n->a)->a)->a].tdef;	/* (the function-to-pointer decay) */
-	return td && c->syms[td].kind == S_TYPEDEF && QUNQ(c->syms[td].ty) == QUNQ(t) ? td : 0;
-}
-
-/* t quoted as clang spells it for expression e: "'int64_t' (aka 'long')", "'long'" */
-VPRIV const char *tyname_sugar(cc *c, uint32_t e, qty t)
-{
-	uint32_t td = expr_tdef(c, e, t);
-	vfixbuf *o = tybuf(c);
-	bool ok = true;
-
-	o->n = 0, o->s[0] = 0;
-	vfixbuf_puts(o, "'");
-	if (!td) {
-		type_str(c, t, "", o, &ok);
-		vfixbuf_puts(o, "'");
-		return o->s;
-	}
-	if (QQ(t) & Q_CONST)
-		vfixbuf_puts(o, "const ");
-	if (QQ(t) & Q_VOLATILE)
-		vfixbuf_puts(o, "volatile ");
-	vfixbuf_put(o, vintern_ents[c->syms[td].name].s, vintern_ents[c->syms[td].name].len);
-	vfixbuf_puts(o, "' (aka '");
-	type_str(c, t, "", o, &ok);
-	vfixbuf_puts(o, "')");
 	return o->s;
 }
 

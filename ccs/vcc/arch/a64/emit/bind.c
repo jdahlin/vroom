@@ -38,7 +38,7 @@ VPRIV void claim_ref(ecx *e, uint32_t ref)
 			if (unlikely(y->flags & SF_LAZY))
 				efatal(e, y->loc, "internal error: '%s' is referenced but its body was never parsed",
 				       vintern_ents[y->name].s);
-			if (!(y->flags & SF_DEFINED) || y->sc != SC_STATIC || !y->body)
+			if (!(y->flags & SF_DEFINED) || !y->body || (y->sc != SC_STATIC && !(WASM(c) && inline_only(y))))
 				return;
 		} else if (y->kind == S_VAR) {
 			bool local_static = y->depth > 0 && y->sc == SC_STATIC;

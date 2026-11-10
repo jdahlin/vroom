@@ -1,4 +1,6 @@
 /* vcc front end: the per-TU tables and the entry points (cc_init, cc_run, cc_free) */
+#include <stdatomic.h>
+
 #include "ccimpl.h"
 
 /* the per-TU tables, mapped once and reused (cc_init takes a set, cc_free gives it back) */
@@ -22,6 +24,7 @@ VPRIV void *halloc(cc *c, size_t n)
 static void cc_init(cc *c, pp *p, const cc_opts *o)
 {
 	memset(c, 0, sizeof(*c));
+	c->ptr_lo = 1;
 	c->p = p;
 	c->ext_off = -1;	/* (ext_on: computed at its first use) */
 	c->o = o;
@@ -47,7 +50,6 @@ static void cc_init(cc *c, pp *p, const cc_opts *o)
 	c->lzt = vmreg_get(&ccr[18], (size_t)1 << 32, "cc.lzt");
 	c->lzf = vmreg_get(&ccr[19], (size_t)1 << 28, "cc.lzf");
 	c->lzs = vmreg_get(&ccr[20], (size_t)1 << 31, "cc.lzs");
-	c->attrx = vmreg_get(&ccr[21], (size_t)1 << 26, "cc.attrx");
 	c->hend = c->heap + ((size_t)1 << 32);
 	c->dops = halloc(c, DOPS_MAX * sizeof(dop));
 	c->ndops = 0;
@@ -59,8 +61,7 @@ static void cc_init(cc *c, pp *p, const cc_opts *o)
 	c->fnhash = halloc(c, c->fnhcap * sizeof(uint32_t));
 	memset(c->fnhash, 0, c->fnhcap * sizeof(uint32_t));
 	/* index 0 of every table is "none" */
-	c->nsym = c->nnode = c->ntag = c->nlabel = c->nattr = c->nattrx = c->nstr = 1;
-	memset(&c->attrx[0], 0, sizeof(c->attrx[0]));	/* (attrs.ext 0: none, read without a test) */
+	c->nsym = c->nnode = c->ntag = c->nlabel = c->nattr = c->nstr = 1;
 	memset(c->cplx, 0, sizeof(c->cplx));
 	c->nlist = 1;
 	/* basic types: index == kind */
@@ -69,6 +70,10 @@ static void cc_init(cc *c, pp *p, const cc_opts *o)
 
 		if (k == TY_LDOUBLE && o->target == PP_DARWIN)
 			t.size = 8, t.align = 8;
+		if (k == TY_LDOUBLE && PP_IS_WASM(o->target))
+			t.align = 8;	/* emscripten: binary128, 8-byte aligned */
+		if ((k == TY_LONG || k == TY_ULONG) && o->target == PP_WASM32)
+			t.size = 4, t.align = 4;	/* ILP32 */
 		c->ty[k] = t;
 		c->ty[k].canon = (uint32_t)k;
 		c->nty++;
@@ -83,7 +88,7 @@ static void cc_init(cc *c, pp *p, const cc_opts *o)
 	}
 	c->t_size = prim(TY_ULONG);
 	c->t_ptrdiff = prim(TY_LONG);
-	c->t_wchar = o->short_wchar ? prim(TY_USHORT) : o->target == PP_DARWIN ? prim(TY_INT) : prim(TY_UINT);
+	c->t_wchar = o->short_wchar ? prim(TY_USHORT) : o->target != PP_LINUX_AARCH64 ? prim(TY_INT) : prim(TY_UINT);
 	c->t_char16 = prim(TY_USHORT);
 	c->t_char32 = prim(TY_UINT);
 	c->id_func = vintern_copy("__func__\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0", 8);
@@ -101,6 +106,8 @@ static void cc_init(cc *c, pp *p, const cc_opts *o)
 
 		if (o->target == PP_DARWIN) {
 			vl = ty_ptr(c, prim(TY_CHAR));
+		} else if (PP_IS_WASM(o->target)) {
+			vl = ty_ptr(c, prim(TY_VOID));
 		} else {
 			/* struct __va_list { void *__stack, *__gr_top, *__vr_top; int __gr_offs, __vr_offs; } */
 			uint32_t ti = tag_new(c, TY_STRUCT, vintern_copy("__va_list\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0", 9), 0);
@@ -152,7 +159,6 @@ static void cc_free(cc *c)
 	vmreg_put(&ccr[18], USED(c->nlzt, c->lzt));
 	vmreg_put(&ccr[19], USED(c->nlzf, c->lzf));
 	vmreg_put(&ccr[20], (size_t)c->nlzs + 64);
-	vmreg_put(&ccr[21], USED(c->nattrx, c->attrx));
 	free(c->cases);
 	free(c->pweak);
 	free(c->utd);
@@ -162,11 +168,86 @@ static void cc_free(cc *c)
 	ccr = NULL;
 }
 
+static int drcov_on;
+
 static void init_tables(void)
 {
+	drcov_on = getenv("VCC_DRCOV") != NULL;
 	init_keywords();
 	init_builtins();
 	init_attrs();
+}
+
+/* ---------------- VCC_DRCOV: coverage of a per-region declaration replay ---------------- */
+
+static _Atomic uint64_t dr_tok, dr_hits, dr_htok, dr_ok, dr_oktok, dr_oktop, dr_endbad, dr_startbad, dr_dc;
+
+VPRIV void drcov_boundary(cc *c)
+{
+	if (c->ndrb == c->cdrb) {
+		c->cdrb = c->cdrb ? c->cdrb * 2 : 4096;
+		c->drb = realloc(c->drb, c->cdrb * sizeof(uint64_t));
+	}
+	if (c->ntk == 1)
+		c->drb[c->ndrb++] = pp_ntok(c->p) - 1;
+}
+
+static bool drb_has(const cc *c, uint64_t x)
+{
+	uint32_t lo = 0, hi = c->ndrb;	/* (ascending) */
+
+	while (lo < hi) {
+		uint32_t m = (lo + hi) / 2;
+
+		if (c->drb[m] < x)
+			lo = m + 1;
+		else
+			hi = m;
+	}
+	return lo < c->ndrb && c->drb[lo] == x;
+}
+
+static void drcov_finish(cc *c)
+{
+	uint32_t n;
+	const pp_hitreg *h = pp_hit_regions(c->p, &n);
+	uint64_t ok = 0, oktok = 0, oktop = 0, htok = 0, eb = 0, sb = 0;
+
+	for (uint32_t i = 0; i < n; i++) {
+		uint64_t len = h[i].e - h[i].b;
+		bool s = drb_has(c, h[i].b), e = drb_has(c, h[i].e);
+
+		htok += len;
+		if (s && e)
+			ok++, oktok += len, oktop += h[i].nfile == 1 ? len : 0;
+		else if (s)
+			eb += len;
+		else
+			sb += len;
+	}
+	atomic_fetch_add(&dr_tok, pp_ntok(c->p));
+	atomic_fetch_add(&dr_hits, n);
+	atomic_fetch_add(&dr_htok, htok);
+	atomic_fetch_add(&dr_ok, ok);
+	atomic_fetch_add(&dr_oktok, oktok);
+	atomic_fetch_add(&dr_oktop, oktop);
+	atomic_fetch_add(&dr_endbad, eb);
+	atomic_fetch_add(&dr_startbad, sb);
+	atomic_fetch_add(&dr_dc, pp_skipped(c->p));
+	free(c->drb);
+	c->drb = NULL;
+}
+
+void cc_drcov_stats(char *buf, size_t n)
+{
+	if (!drcov_on) {
+		*buf = 0;
+		return;
+	}
+	snprintf(buf, n, "drcov: %.1f M tokens delivered (+%.1f M dc-skipped); %llu hits %.1f M tokens; "
+		 "at boundaries %llu hits %.1f M tokens (%.1f M top-level); end not at one %.1f M, start not at one %.1f M",
+		 dr_tok / 1e6, dr_dc / 1e6, (unsigned long long)dr_hits, dr_htok / 1e6, (unsigned long long)dr_ok,
+		 dr_oktok / 1e6, dr_oktop / 1e6, dr_endbad / 1e6, dr_startbad / 1e6);
 }
 
 int cc_run(pp *p, const cc_opts *o)
@@ -180,6 +261,10 @@ int cc_run(pp *p, const cc_opts *o)
 	cc_init(c, p, o);
 	if (unlikely(getenv("VCC_TEST_DELAYED_BUG") != NULL))	/* test hook: vcc-driver.py */
 		delayed_bug(c, 0, "VCC_TEST_DELAYED_BUG");
+	c->drb = NULL, c->ndrb = c->cdrb = 0;
+	if (drcov_on)
+		drcov_boundary(c), c->ndrb = 0;	/* (allocates) */
+	dr_begin(c);
 	if (!setjmp(c->bail)) {
 		dc_begin(c);
 		fetch(c, &c->tk[0]);
@@ -198,7 +283,8 @@ int cc_run(pp *p, const cc_opts *o)
 				note(c, c->tags[T(c, y->ty)->aux].loc, "forward declaration of '%s'", tyname(c, y->ty));
 			}
 		}
-		unused_globals(c);
+		unused_statics(c);
+		unused_typedefs(c);
 	}
 	delayed_bug_check(c);
 	if (o->dump_layouts && !c->errors)
@@ -206,6 +292,9 @@ int cc_run(pp *p, const cc_opts *o)
 	if (o->emit && !c->errors && !pp_errors(p))
 		c->errors += emit_tu(c, o);
 	errors = c->errors;
+	if (c->drb)
+		drcov_finish(c);
+	dr_end(c);
 	dc_end(c);
 	cc_free(c);
 	free(c->tyb);

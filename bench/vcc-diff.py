@@ -3,6 +3,9 @@
 
   bench/vcc-diff.py ref [-j N]          clang -E -P for every C TU -> work/ppref/
   bench/vcc-diff.py cmp [-j N] [PAT]    vpp --cmp against the references
+  bench/vcc-diff.py text [-j N] [PAT]   vpp -E -P byte for byte against the references
+  bench/vcc-diff.py textc [-j N] [PAT]  the same with -C, clang run alongside
+  bench/vcc-diff.py lines [-j N] [PAT]  -E without -P (line markers) vs clang run alongside
   bench/vcc-diff.py args TU             the clang argv for one TU (for vpp)
   bench/vcc-diff.py batch [-j N] [--cmp] [PAT]
                                         all TUs in one vpp process (vpp --batch)
@@ -65,15 +68,76 @@ def cmp(t):
     p = subprocess.run([VPP, '--cmp', refname(obj)] + a, cwd=B, capture_output=True, text=True)
     return obj, p.returncode, (p.stdout + p.stderr)[-1500:]
 
-def dm(t):
-    """-dM: the macro table at the end of the TU, bytes vs clang"""
+def dm(t, fl=('-dM', '-E')):
+    """-dM: the macro table at the end of the TU, bytes vs clang (deps: -M, -MM -MP)"""
     obj, a = t
-    r = [subprocess.run([x] + a + ['-dM', '-E'], cwd=B, capture_output=True) for x in (CL, VPP)]
+    r = [subprocess.run([x] + a + list(fl), cwd=B, capture_output=True) for x in (CL, VPP)]
     if r[0].stdout == r[1].stdout: return obj, 0, ''
     import difflib
     d = difflib.unified_diff(r[0].stdout.decode(errors='replace').splitlines(),
                              r[1].stdout.decode(errors='replace').splitlines(), 'clang', 'vpp', n=0, lineterm='')
     return obj, 1, '\n'.join(list(d)[:12]) + r[1].stderr.decode(errors='replace')[-300:]
+
+def deps(t):
+    """-M and -MM -MP -MQ: the rules byte for byte, else the same files after
+    normalising paths (clang also lists a guard-skipped header under each
+    spelling it was included by; vpp under the first only: TODO.md)"""
+    obj, a = t
+    for fl in (('-E', '-M'), ('-E', '-MM', '-MP', '-MQ', '$(obj)/x.o')):
+        r = [subprocess.run([x] + a + list(fl), cwd=B, capture_output=True) for x in (CL, VPP)]
+        if r[0].stdout == r[1].stdout: continue
+        def files(b):
+            w = b.decode(errors='replace').replace('\\\n', ' ').split('\n')[0].split()[1:]
+            return list(dict.fromkeys(os.path.normpath(os.path.join(B, f)) for f in w))
+        if files(r[0].stdout) != files(r[1].stdout) or r[0].stdout.count(b'\n\n') != r[1].stdout.count(b'\n\n'):
+            return dm(t, fl)
+    return obj, 0, ''
+
+def hdr(t):
+    """-H: the include tree on stderr, lines starting with '.', vs clang"""
+    obj, a = t
+    r = [subprocess.run([x] + a + ['-E', '-H', '-o', '/dev/null'], cwd=B, capture_output=True) for x in (CL, VPP)]
+    h = [[l for l in x.stderr.decode(errors='replace').splitlines() if l.startswith('.')] for x in r]
+    if h[0] == h[1]: return obj, 0, ''
+    import difflib
+    return obj, 1, '\n'.join(list(difflib.unified_diff(h[0], h[1], 'clang', 'vpp', n=0, lineterm=''))[:12])
+
+def text(t):
+    """-E -P output byte for byte vs the clang reference (spacing, indentation, lines)"""
+    obj, a = t
+    if not os.path.exists(refname(obj)): return obj, 0, ''	# clang failed too (modpost)
+    r = subprocess.run([VPP] + a + ['-E', '-P'], cwd=B, capture_output=True)
+    ref = open(refname(obj), 'rb').read()
+    if r.stdout == ref: return obj, 0, ''
+    import difflib
+    d = difflib.unified_diff(ref.decode(errors='replace').splitlines(), r.stdout.decode(errors='replace').splitlines(),
+                             'clang', 'vpp', n=0, lineterm='')
+    return obj, 1, '\n'.join(list(d)[:12]) + r.stderr.decode(errors='replace')[-300:]
+
+def textc(t, fl=('-E', '-P', '-C')):
+    """-E -P -C: with comments, byte for byte vs clang run now"""
+    obj, a = t
+    r = [subprocess.run([x] + a + list(fl), cwd=B, capture_output=True) for x in (CL, VPP)]
+    if r[0].returncode: return obj, 0, ''
+    if r[0].stdout == r[1].stdout: return obj, 0, ''
+    import difflib
+    d = difflib.unified_diff(r[0].stdout.decode(errors='replace').splitlines(),
+                             r[1].stdout.decode(errors='replace').splitlines(), 'clang', 'vpp', n=0, lineterm='')
+    return obj, 1, '\n'.join(list(d)[:12]) + r[1].stderr.decode(errors='replace')[-300:]
+
+def lines(t):
+    """-E without -P: line markers and blank lines byte for byte vs clang run now"""
+    return textc(t, ('-E',))
+
+def dd(t):
+    """-dD: the #define/#undef lines of -E -P -dD, in order, vs clang (the
+    rest of the text is what cmp checks)"""
+    obj, a = t
+    r = [subprocess.run([x] + a + ['-E', '-P', '-dD'], cwd=B, capture_output=True) for x in (CL, VPP)]
+    h = [[l for l in x.stdout.decode(errors='replace').splitlines() if l.startswith(('#define ', '#undef '))] for x in r]
+    if h[0] == h[1]: return obj, 0, ''
+    import difflib
+    return obj, 1, '\n'.join(list(difflib.unified_diff(h[0], h[1], 'clang', 'vpp', n=0, lineterm=''))[:12])
 
 if __name__ == '__main__':
     av = [a for a in sys.argv[1:] if a not in ('--kernel', '--cmp')]; j = 6
@@ -93,7 +157,7 @@ if __name__ == '__main__':
         os.unlink(jf); sys.exit(r.returncode)
     if mode == 'ref': os.makedirs(REF, exist_ok=True)
     with Pool(j) as pool:
-        res = pool.map(mkref if mode == 'ref' else dm if mode == 'dm' else cmp, ts, chunksize=4)
+        res = pool.map({'ref': mkref, 'dm': dm, 'deps': deps, 'hdr': hdr, 'dd': dd, 'text': text, 'textc': textc, 'lines': lines}.get(mode, cmp), ts, chunksize=4)
     bad = [r for r in res if r[1]]
     for obj, rc, err in bad[:int(os.environ.get('SHOW', 20))]:
         print(f'--- {obj} (rc {rc})\n{err}')

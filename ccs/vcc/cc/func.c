@@ -702,51 +702,43 @@ static void return_path(cc *c, uint32_t body, flow *f, vdiag *d, uint32_t rbrace
 	pp_diag_label(c->p, d, rbrace, rbrace + 1, buf);
 }
 
-/* clang's -Wreturn-type at the body's closing brace: "non-void function does not return a
-   value" when no return is reached, "... in all control paths" when some are */
-static __attribute__((noinline)) void return_type_check(cc *c, uint32_t s, uint32_t body, uint32_t rbrace,
-							 uint32_t lab0)
+/* clang's -Wreturn-type at the body's closing brace (flow.c decides: k 1 "in all control
+   paths", 2 no return reached); with returns on some paths, one path that has none is
+   shown as numbered steps */
+static __attribute__((noinline)) void return_type_warn(cc *c, uint32_t s, uint32_t body, uint32_t rbrace,
+							uint32_t lab0, int k)
 {
 	const sym *y = &c->syms[s];
 	uint8_t small[64];
 	flow f = { 0 };
-	bool end;
+	bool end = false;
 	vdiag *d;
 
-	if (is_void(c, T(c, y->ty)->base) || (y->flags & SF_NORETURN) ||
-	    (idlen_(y->name) == 4 && !memcmp(idstr_(y->name), "main", 4)))
+	d = cc_warn_begin(c, "return-type", true, NULL, rbrace, k == 1 ? "non-void function does not return a value in all control paths"
+			  : "non-void function does not return a value");
+	if (!d)
 		return;
-	{	/* most bodies end in a return: their end is not reached, whatever comes before */
-		const node *b = N(body);
-
-		if (b->op == N_BLOCK && b->c && N(c->lists[b->b + b->c - 1])->op == N_RETURN)
-			return;
-	}
 	f.lab0 = lab0, f.nlab = c->nlabel - lab0;
 	f.lab = f.nlab <= sizeof small ? small : calloc(f.nlab, 1);
 	memset(f.lab, 0, f.nlab <= sizeof small ? f.nlab : 0);
-	do {	/* again while a goto reaches a new label (each pass reaches more) */
-		f.more = f.ret = f.brk = f.cont = f.sw = false;
-		end = stmt_flow(c, body, true, &f);
-	} while (f.more && !f.unsure);
-	if (!end || f.unsure)
-		goto out;
-	d = cc_warn_begin(c, "return-type", true, NULL, rbrace, f.ret ? "non-void function does not return a value in all control paths"
-			  : "non-void function does not return a value");
-	if (!d)
-		goto out;
-	if (f.ret)	/* some paths return: show one that does not */
-		return_path(c, body, &f, d, rbrace, y);
+	if (k == 1) {
+		do {	/* again while a goto reaches a new label (each pass reaches more) */
+			f.more = f.ret = f.brk = f.cont = f.sw = false;
+			end = stmt_flow(c, body, true, &f);
+		} while (f.more && !f.unsure);
+		if (end && !f.unsure && f.ret)	/* some paths return: show one that does not */
+			return_path(c, body, &f, d, rbrace, y);
+	}
 	pp_diag_help(c->p, d, "'%.*s' returns '%s': end it with a return statement", IDF(y->name),
 		     tyname(c, T(c, y->ty)->base));
 	pp_diag_emit(c->p, d);
-out:
 	if (f.lab != small)
 		free(f.lab);
 }
 
 VPRIV void function_def(cc *c, uint32_t s, const declr *d)
 {
+	bool clean;
 	uint32_t body, first_label = c->nlabel;
 	uint32_t saved_fn = c->fn;
 	int saved_fnerr = c->fnerr;
@@ -756,6 +748,7 @@ VPRIV void function_def(cc *c, uint32_t s, const declr *d)
 		note(c, c->syms[s].loc, "previous definition is here");
 	}
 	c->syms[s].flags |= SF_DEFINED;
+	c->syms[s].defloc = d->loc;
 	c->fn = s;
 	c->fnerr = c->errors;
 	{
@@ -776,23 +769,48 @@ VPRIV void function_def(cc *c, uint32_t s, const declr *d)
 			fwd_note(c, y->ty);
 			y->flags |= SF_INVALID;
 		}
-		if (!y->name)
-			continue;	/* C23: unnamed parameters in definitions (clang accepts) */
+		if (!y->name) {	/* C23: unnamed parameters in definitions */
+			if (kwmap != kwmap_c23 && KIND(c, y->ty) != TY_VOID)
+				cc_warnx(c, "c23-extensions", true, NULL, y->loc, NULL, 0, NULL, 0,
+					 "omitting the parameter name in a function definition is a C23 extension");
+			continue;
+		}
 		sym_bind(c, p);
 	}
+	if (!d->kr)	/* tags from the parameter list (clang: visible in the body; not K&R's) */
+		for (uint32_t i = 0; i < c->nptag; i++)
+			sym_bind(c, c->ptag[i]);
 	c->in_loop = c->in_switch = 0;
+	c->in_proto = 0, c->uv_any = 0, c->nuv = 0, c->cnd = 0, c->uv_asg = 0;
 	{
 		int errs = c->errors;
-		uint32_t rbrace;
 
 		body = compound_stmt(c, NULL);
-		rbrace = c->prevloc;
-		if (c->errors == errs) {	/* after an error the body is incomplete: no guess */
-			return_type_check(c, s, body, rbrace, first_label);
-			uninit_check(c, body, first_label, rbrace);
-		}
+		clean = c->errors == errs;	/* after an error the body is incomplete: no flow warnings */
 	}
 	scope_close(c);
+	if (d->kr && d->npsyms)	/* (clang: at the end of the body) */
+		cc_warnx(c, "deprecated-non-prototype", true, NULL, d->loc, NULL, 0, NULL, 0,
+			 "a function definition without a prototype is deprecated in all versions of C and is not supported in C23");
+	rt_flush(c);	/* (clang: only if reachable; vcc: not under a constant-false condition) */
+	{
+		uint32_t rb = c->prevloc;	/* the closing brace */
+		const sym *y = &c->syms[s];
+		bool nr = y->flags & SF_NORETURN;
+		qty rt = T(c, y->ty)->base;
+		bool main_ = idlen_(y->name) == 4 && !memcmp(idstr_(y->name), "main", 4);
+
+		if (clean && (nr || (!is_void(c, rt) && !main_))) {
+			int k = body_falls_off(c, body, first_label);
+
+			if (k && nr)
+				cc_warnx(c, "invalid-noreturn", true, NULL, rb, NULL, 0, NULL, 0, "function declared 'noreturn' should not return");
+			else if (k)
+				return_type_warn(c, s, body, rb, first_label, k);
+		}
+	}
+	if ((c->uv_any & 6) && clean)
+		uninit_check(c, body, first_label);
 	{
 		/* side effects of decayed VLA parameter sizes run first, in order */
 		vec items;
@@ -824,7 +842,6 @@ VPRIV void function_def(cc *c, uint32_t s, const declr *d)
 	/* for the emitter: the parameter syms, on the body block */
 	N(body)->a = d->psyms;
 	N(body)->aux = (uint16_t)d->npsyms;
-	rt_flush(c);
 	c->fn = saved_fn;
 	c->fnerr = saved_fnerr;
 }
@@ -838,7 +855,13 @@ VPRIV void translation_unit(cc *c)
 	if (REC_ARM(c, &r))
 		rec_restore(c, &r, REC_TOP);	/* after a parse error: on with the next declaration */
 	for (;;) {
+		if (unlikely(c->dr_on))
+			dr_close(c);	/* (a recording open; before a snapshot can be taken) */
 		dc_boundary(c);
+		if (unlikely(c->drb))
+			drcov_boundary(c);
+		if (unlikely(c->dr) && dr_boundary(c))
+			continue;	/* replayed: at a boundary again */
 		if (is(c, T_EOF))
 			break;
 		if (is(c, T_SEMI)) {

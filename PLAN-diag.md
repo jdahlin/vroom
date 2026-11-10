@@ -844,3 +844,14 @@ D1 och D2 hänger ihop (feltypen behöver posten); D0.2 först så att D2 har en
 - [x] D7 — 2026-11-10
 - [x] D8.1 – D8.4 — 2026-11-10
 - [x] D8.5 — 2026-11-10 (grenen `claude/review-remaining-errors-acd5c5` har en egen version)
+- [x] Sammanslagning med main — 2026-11-10: där båda grenarna hade en egen version
+  vann den som träffade clang bäst per varning (mätt mot clang på tests/diag och
+  gcc-torture/tcc/vcc): mains `flow.c` (-Wuninitialized, -Wreturn-type), `fmt.c`
+  (-Wformat), unused-value/-variable, deprecated/nonnull/warn_unused_result,
+  konverteringsvarningar och integer-overflow; grenens motor, återhämtning, include-
+  tips, pedantic/C23, tautologiska jämförelser, bounds-bild och returvägens steg
+  behölls.  Grenens unavailable, avrådda medlemmar, printf utan format-attribut,
+  "; remove &"/"; take the address with &", -Wnonnull i funktionens slut och pragma-
+  styrd -Wuninitialized lades på mains kod.  Kvar: TODO.md "Merged diagnostics".
+  Sammanslaget mot main: errors 307 mot 221 av clangs 313, format 106 mot 81, inga
+  extra varningar där main har några; gate mot main: cc −1,3 %.

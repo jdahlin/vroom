@@ -1,7 +1,6 @@
 attributes.c:18:2: warning: ignoring return value of function declared with 'warn_unused_result' attribute [-Wunused-result]
    18 |         w1(); (void)w1();
-      |         ^~
-      = help: use the result, or cast the call to (void) if dropping it is intended
+      |         ^~~~
 attributes.c:19:2: warning: 'd1' is deprecated [-Wdeprecated-declarations]
    19 |         d1(); d2();
       |         ^
@@ -48,31 +47,24 @@ attributes.c:15:34: note: 'f' has been explicitly marked deprecated here
 attributes.c:17:9: warning: null passed to a callee that requires a non-null argument [-Wnonnull]
    17 |         n1(0, 0); n2(0, 0); n2((void*)0, (int*)0); n3(0, 0);
       |            ~   ^
-      = help: parameter 1 of 'n1' is declared nonnull
 attributes.c:17:9: warning: null passed to a callee that requires a non-null argument [-Wnonnull]
    17 |         n1(0, 0); n2(0, 0); n2((void*)0, (int*)0); n3(0, 0);
       |               ~^
-      = help: parameter 2 of 'n1' is declared nonnull
 attributes.c:17:18: warning: null passed to a callee that requires a non-null argument [-Wnonnull]
    17 |         n1(0, 0); n2(0, 0); n2((void*)0, (int*)0); n3(0, 0);
       |                         ^
-      = help: parameter 2 of 'n2' is declared nonnull
 attributes.c:17:35: warning: null passed to a callee that requires a non-null argument [-Wnonnull]
    17 |         n1(0, 0); n2(0, 0); n2((void*)0, (int*)0); n3(0, 0);
       |                                          ^~~~~~~
-      = help: parameter 2 of 'n2' is declared nonnull
 attributes.c:17:48: warning: null passed to a callee that requires a non-null argument [-Wnonnull]
    17 |         n1(0, 0); n2(0, 0); n2((void*)0, (int*)0); n3(0, 0);
       |                                                       ^
-      = help: parameter 1 of 'n3' is declared nonnull
 attributes.c:24:26: warning: null passed to a callee that requires a non-null argument [-Wnonnull]
    24 | void h(void) { n1(NULL, 0); }
       |                   ~~~~   ^
-      = help: parameter 1 of 'n1' is declared nonnull
 attributes.c:24:26: warning: null passed to a callee that requires a non-null argument [-Wnonnull]
    24 | void h(void) { n1(NULL, 0); }
       |                         ~^
-      = help: parameter 2 of 'n1' is declared nonnull
 attributes.c:29:33: error: 'u' is unavailable
    28 | struct S3 { int u __attribute__((unavailable)); } s3;
       |                 - 'u' has been explicitly marked unavailable here

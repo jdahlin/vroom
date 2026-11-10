@@ -36,7 +36,7 @@
 #define LOC_REL (1u << 31)	/* encoded locations: LOC_REL + (loc - base) */
 
 enum { A_TY, A_PARAMS, A_TAGS, A_SYMS, A_NODES, A_LISTS, A_IPOOL, A_FPOOL, A_STRS, A_LABELS, A_ATTR, A_ASMS,
-       A_SSTACK, A_TOPLEVEL, A_TLASM, A_SPAN, A_LZT, A_LZF, A_LZS, A_ATTRX, A_HEAP, A_N };
+       A_SSTACK, A_TOPLEVEL, A_TLASM, A_SPAN, A_LZT, A_LZF, A_LZS, A_HEAP, A_N };
 
 typedef struct dcarr {
 	size_t n;		/* bytes */
@@ -95,7 +95,6 @@ static char *abase(const cc *c, int k, size_t *n)
 	case A_LZT: *n = c->nlzt * sizeof(lztok); return (char *)c->lzt;
 	case A_LZF: *n = c->nlzf * sizeof(lzfn); return (char *)c->lzf;
 	case A_LZS: *n = c->nlzs; return c->lzs;
-	case A_ATTRX: *n = c->nattrx * sizeof(attrx); return (char *)c->attrx;
 	default: *n = (size_t)(c->hp - c->heap); return c->heap;
 	}
 }
@@ -150,9 +149,6 @@ static inline uint32_t dec_loc(const coder *k, uint32_t l)
 		pp_span *sp_ = (pp_span *)(img)[A_SPAN];                                         \
 		lztok *lt_ = (lztok *)(img)[A_LZT];                                              \
 		lzfn *lf_ = (lzfn *)(img)[A_LZF];                                                \
-		attrx *ax_ = (attrx *)(img)[A_ATTRX];                                            \
-		for (uint32_t i_ = 1; i_ < (c)->nattrx; i_++)                                    \
-			ax_[i_].deprloc = FIX(ax_[i_].deprloc);                                  \
 		for (uint32_t i_ = 0; i_ < (c)->nlzt; i_++)                                      \
 			lt_[i_].loc = FIX(lt_[i_].loc);                                          \
 		for (uint32_t i_ = 0; i_ < (c)->nlzf; i_++) {                                    \
@@ -352,7 +348,7 @@ static void snap_restore(cc *c, const dcsnap *s, uint32_t base)
 	c->ntk = keep.ntk;
 	c->ty = keep.ty, c->params = keep.params, c->tags = keep.tags, c->syms = keep.syms;
 	c->nodes = keep.nodes, c->lists = keep.lists, c->ipool = keep.ipool, c->fpool = keep.fpool;
-	c->strs = keep.strs, c->labels = keep.labels, c->attr = keep.attr, c->attrx = keep.attrx, c->asms = keep.asms;
+	c->strs = keep.strs, c->labels = keep.labels, c->attr = keep.attr, c->asms = keep.asms;
 	c->sstack = keep.sstack, c->toplevel = keep.toplevel, c->tlasm = keep.tlasm;
 	c->span = keep.span;
 	c->lzt = keep.lzt, c->lzf = keep.lzf, c->lzs = keep.lzs;
@@ -361,6 +357,8 @@ static void snap_restore(cc *c, const dcsnap *s, uint32_t base)
 	c->heap = keep.heap, c->hend = keep.hend, c->ptrc = keep.ptrc;
 	c->hp = c->heap + s->a[A_HEAP].n;
 	c->dc = keep.dc;
+	c->drb = keep.drb, c->ndrb = keep.ndrb, c->cdrb = keep.cdrb;	/* (VCC_DRCOV: this TU's) */
+	c->dr = keep.dr, c->dr_on = keep.dr_on;
 	c->dops = keep.dops, c->ndops = keep.ndops;	/* (scratch in this TU's heap) */
 	c->next_n = 0, c->ext_off = -1;	/* (ext_on's caches: the snapshot TU's options and pp) */
 	code_cc(&k, c, false);
@@ -369,6 +367,7 @@ static void snap_restore(cc *c, const dcsnap *s, uint32_t base)
 	LOCS(img, c, DEC);	/* (first: the tags' f is still coded) */
 #undef DEC
 	code_ptrs(&k, img, c, false);
+	dr_restored(c);
 }
 
 /* ---------------- the trie ---------------- */
@@ -515,7 +514,7 @@ void dc_boundary_slow(cc *c)
 			d->pos = E->pos;
 			d->node = child(d->node, E->e, d->open.ctr, true);
 			atomic_fetch_add_explicit(&d->node->visits, 1, memory_order_relaxed);
-			if (!d->stale && atomic_load_explicit(&d->node->visits, memory_order_relaxed) >= 2 &&
+			if (!d->stale && !c->dr_on && atomic_load_explicit(&d->node->visits, memory_order_relaxed) >= 2 &&
 			    !atomic_load_explicit(&d->node->snap, memory_order_acquire) && !c->errors && !c->ndiag &&
 			    !pp_errors(c->p) && atomic_load_explicit(&dc_mem, memory_order_relaxed) <
 			    atomic_load_explicit(&dc_max, memory_order_relaxed)) {

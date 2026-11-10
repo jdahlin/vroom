@@ -28,6 +28,7 @@ enum {
 	PF_NOEXP = 16,		/* painted: never expand (C11 6.10.3.4p2) */
 	PF_NOPASTE = 32,	/* a ## that came from an argument */
 	PF_MACRO = 64,		/* from a macro expansion (diagnostics) */
+	PF_EMBEND = 128,	/* #embed's last byte: -E prints a space after it (clang) */
 };
 
 typedef struct ptok {
@@ -42,8 +43,11 @@ typedef struct ptok {
 typedef struct pp_opts {
 	const char *main;		/* the source file */
 	const char *const *dirs;	/* search path: -iquote dirs, then -I, -isystem, -idirafter */
+	const char *const *edirs;	/* --embed-dir: #embed's search path */
+	int nedirs;
 	int ndirs, nquote;		/* dirs[0..nquote) only for "" includes */
-	int nsys;			/* dirs[nsys..) are system directories (-1: none; 0: all) */
+	int nsys1;			/* dirs[nsys1 - 1..) are system directories (0: none) */
+	int xc0, xc1;			/* dirs[xc0..xc1) are extern "C" system directories (clang's ExternCSystem) */
 	const char *predef;		/* "<built-in>": #define/#undef/#include lines, run first */
 	const char *prefix_from, *prefix_to;	/* -fmacro-prefix-map (one) */
 	const char *const *fwdirs;	/* framework dirs: <A/b.h> -> DIR/A.framework/Headers/b.h */
@@ -52,7 +56,7 @@ typedef struct pp_opts {
 	const char *cwd;		/* relative paths are relative to this (NULL: process cwd) */
 	int errfd;			/* diagnostics (0: stderr) */
 	int asm_mode;			/* assembler-with-cpp: unknown directives pass, # need not stringify */
-	int target;			/* PP_LINUX_AARCH64 or PP_DARWIN (column of the feature table) */
+	int target;			/* PP_LINUX_AARCH64, PP_DARWIN, PP_WASM64 or PP_WASM32 (column of the feature table) */
 	int diag_color;			/* diagnostics: 1 colors, -1 none, 0 when errfd is a terminal */
 	int diag_nocaret;		/* -fno-caret-diagnostics: no source lines */
 	int diag_show_id;		/* -fdiagnostics-show-id: " [id]" after the flag */
@@ -77,10 +81,21 @@ typedef struct pp_opts {
 	int trigraphs;			/* strict -std (not c23) or -trigraphs: ??x replaced before lexing */
 	int c89;			/* -std=c89/-ansi: no // comments */
 	int c23;			/* -std=c23/gnu23: true is 1 in #if */
+	int dump_defines;		/* -dD: #define/#undef in the -E text */
+	const char *const *dd_order;	/* -dD: clang's order of its predefined macros */
+	int ndd_order;
+	int comments;			/* -C: comments in the -E text (not in directives or macro arguments) */
+	int show_includes;		/* -H: each file entered, dots for its depth, to errfd */
+	int deps;			/* -M/-MD: files skipped by guard or #pragma once are dependencies too */
 	int fatal_continue;		/* -E text: a fatal error (file not found) does not end the TU, as clang */
+	int markers;			/* -E without -P: GNU line markers (# N "file" flags), 2 with -undef */
+	unsigned predef_cmdl, predef_incl;	/* ... and its -imacros/-include part */
+	int imacros;			/* predef has -imacros (#__include_macros): no header cache */		/* markers: where predef's command-line part (-D/-U) starts */
 } pp_opts;
 
-enum { PP_LINUX_AARCH64, PP_DARWIN };
+enum { PP_LINUX_AARCH64, PP_DARWIN, PP_WASM64, PP_WASM32 };
+/* WebAssembly, either width (wasm32: ILP32, PLAN-wasm.md W7) */
+#define PP_IS_WASM(t) ((t) == PP_WASM64 || (t) == PP_WASM32)
 
 /* set by the front end (a constructor): __has_builtin is 1 for a name it implements */
 extern int (*pp_builtin_known)(const char *name);
@@ -93,7 +108,7 @@ void pp_close(pp *p);
 /* fatal errors (missing #include) longjmp here instead of exiting */
 void pp_set_fatal(pp *p, jmp_buf *jb);
 /* the distinct files read so far, as spelled (for -MD dependency files) */
-size_t pp_files(const pp *p, const char **names, size_t max);
+size_t pp_files(const pp *p, const char **names, size_t max, int nosys);
 /* the next token; T_EOF at the end (and ever after) */
 void pp_next(pp *p, ptok *t);
 /*
@@ -115,6 +130,7 @@ int pp_macros(pp *p, char **out, size_t *len);
 void pp_hc_stats(char *buf, size_t n);
 /* errors reported so far */
 int pp_errors(const pp *p);
+int pp_diag_pragmas(const pp *p);
 int pp_diag_npragma(const pp *p);	/* #pragma diagnostic transitions so far */
 const char *const *pp_diag_wargs(const pp *p, int *n);	/* the -W/-w options, in order */
 const uint32_t *pp_diag_nenable_ref(const pp *p);	/* ... of them "warning" or "error": the count, for a test inline */
@@ -177,6 +193,8 @@ void pp_diagx(pp *p, const pp_dinfo *d, const char *fmt, ...);
 /* a warning's state after the -W options: 0 off, 1 warning, 2 error; on: its default
    (flag without "-W"; groups: the warning's groups, NULL-terminated, e.g. "all") */
 int pp_wstate(const pp *p, const char *flag, bool on, const char *const *groups);
+/* the last -Werror=/-Wno-error= naming flag (or one of groups): 1 -Werror=, -1 -Wno-error=, 0 none */
+int pp_werror_named(const pp *p, const char *flag, const char *const *groups);
 /* report a warning of flag (clang's " [-Wflag]" / " [-Werror,-Wflag]" suffix); false if off */
 __attribute__((format(printf, 6, 7)))
 bool pp_warnx(pp *p, const char *flag, bool on, const char *const *groups, pp_dinfo *d, const char *fmt, ...);
@@ -252,6 +270,8 @@ const vdiag *pp_diag_records(const pp *p);
  * the hot paths' code (+0.6 % / +1.5 % pp).
  */
 extern _Thread_local const void *pp_diag_pc;
+extern _Thread_local const char *pp_diag_next_id;
+const char *pp_diag_fmt_id(const char *fmt);
 /* level name as clang prints it ("error", "fatal error", ...) */
 const char *pp_diag_level(int level);
 enum { PP_DIAG_TEXT, PP_DIAG_JSON, PP_DIAG_SARIF };
@@ -273,6 +293,11 @@ void pp_diag_summary(pp *p);
 int pp_warnings(const pp *p);
 /* the end of the token at loc (an identifier, number or punctuator; loc + 1 if unknown) */
 uint32_t pp_tok_end(const pp *p, uint32_t loc);
+int pp_loc_char(const pp *p, uint32_t loc);
+int pp_spells(const pp *p, uint32_t loc, const char *s, uint32_t n);
+/* the macro (interned id) is defined now */
+int pp_defined(pp *p, uint32_t id);
+void pp_invalid_tok(pp *p, const char *s, uint32_t len, uint32_t loc);
 /* the source text from loc b to loc e (one file), NULL if unknown */
 const char *pp_src(const pp *p, uint32_t b, uint32_t e, size_t *len);
 /* the source text from loc b to the end of its file, NULL if unknown */
@@ -303,6 +328,17 @@ const pp_topev *pp_top_events(const pp *p, uint32_t *n);
 /* tokens delivered so far; tokens pp_skip_top dropped */
 uint64_t pp_ntok(const pp *p);
 uint64_t pp_skipped(const pp *p);
+/* VCC_DRCOV: the header-cache hits of the TU so far, as [first token, end) in delivered positions */
+typedef struct pp_hitreg { uint64_t b, e; uint32_t nfile; const void *he; } pp_hitreg;
+const pp_hitreg *pp_hit_regions(const pp *p, uint32_t *n);
+/* VCC_DRCOV/VCC_DRREC/VCC_DR: the hit whose replay is open (its first token's position, its entry; if base:
+   its location base, __COUNTER__ at its start, location span); false if none */
+bool pp_open_hit(const pp *p, uint64_t *b, const void **he, uint32_t *base, unsigned *ctr, uint32_t *span);
+/* the tokens of hit entry he, with its children's */
+uint64_t pp_hit_ntok(const void *he);
+/* drop the rest of that hit, whose first token was the last one delivered (cc/replay.c); 0 if not so
+   (dry: only whether it would) */
+int pp_skip_hit(pp *p, int dry);
 /*
  * Drop the rest of the replayed region that the last event started, whose
  * first token was the last one delivered: as if it had been delivered and

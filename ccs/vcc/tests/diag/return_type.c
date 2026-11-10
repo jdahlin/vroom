@@ -1,21 +1,24 @@
-/* D5.1: -Wreturn-type as clang's CFG decides it: constant conditions pruned
-   (also "x || 1" and a const variable), noreturn calls and builtins end a path,
-   a label is reached only by a reachable goto, a switch on an enum covering every
-   enumerator has no way past it.  No false positive matters most: the kernel
-   builds with -Werror=return-type. */
-_Noreturn void die(void);
-enum e { A, B };
-static const _Bool no = 0;
-int gp(void);
-
-int some(int x) { if (x) return 1; }
-int none(int x) { x++; }
-int loop(int x) { while (1) { if (x) return 1; } }
-int brk(int x) { for (;;) { if (x) break; } }
-int sw(int x) { switch (x) { case 1: return 1; } }
-int en(enum e v) { switch (v) { case A: return 1; case B: return 2; } }
-int nr(int x) { if (x) return 1; die(); }
-int dw(int x) { do { __builtin_unreachable(); } while (0); }
-int guard(void) { for (int s = 0; gp() || !no; ({ goto out; })) if (0) { out: break; } else return 1; }
-int jump(int x) { if (x) goto a; return 1; a: ; }
+/* -Wreturn-type and -Winvalid-noreturn: reachability as clang's CFG (constant conditions, noreturn calls, goto) */
+_Noreturn void a(void) { }
+__attribute__((noreturn)) void b(int x) { if (x) return; }
+_Noreturn void c(void) { for (;;) ; }
+void abort(void) __attribute__((noreturn));
+_Noreturn void d(int x) { if (x) abort(); }
+_Noreturn void e(void) { abort(); }
+_Noreturn int f(void) { while (1) {} }
+int g1(int x) { if (x) return 1; }
+int g2(void) { }
+int g3(int x) { switch (x) { case 1: return 1; default: return 2; } }
+int g4(int x) { while (1) { if (x) break; } }
+int g5(int x) { for (;;) { if (x) return 1; } }
+int g6(int x) { if (x) abort(); else return 1; }
+int g7(int x) { if (x) goto l; return 0; l: ; }
+int g8(int x) { do { return 1; } while (0); }
+int g9(int x) { switch (2) { case 2: return 1; } }
+int g10(int x) { switch (3) { case 2: return 1; } }
+int g11(int x) { x ? abort() : (void)0; }
+int g12(void) { __builtin_unreachable(); }
+int g13(int x) { if (0) return 1; }
+int g14(int x) { switch (x) { case 1: return 1; } }
+int g15(int x) { while (x) return 1; }
 int main(void) { }

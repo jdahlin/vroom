@@ -1,0 +1,26 @@
+mod_zero_const.c:2:11: error: initializer element is not a compile-time constant
+    2 | int x = 5 % 0;
+      |         ~~^~~
+mod_zero_const.c:2:11: warning: remainder by zero is undefined [-Wdivision-by-zero]
+    2 | int x = 5 % 0;
+      |           ^ ~
+mod_zero_const.c:3:11: error: initializer element is not a compile-time constant
+    3 | int y = 5 / 0;
+      |         ~~^~~
+mod_zero_const.c:3:11: warning: division by zero is undefined [-Wdivision-by-zero]
+    3 | int y = 5 / 0;
+      |           ^ ~
+mod_zero_const.c:4:11: warning: shift count >= width of type [-Wshift-count-overflow]
+    4 | int z = 1 << 40;
+      |           ^  ~~
+      = help: 'int' is 32 bits wide: a shift by 32 or more is undefined; shift a 64-bit value (1ULL << n)
+mod_zero_const.c:5:17: error: initializer element is not a compile-time constant
+    5 | int w = (1 / 0) + 1;
+      |         ~~~~~~~~^~~
+mod_zero_const.c:5:12: warning: division by zero is undefined [-Wdivision-by-zero]
+    5 | int w = (1 / 0) + 1;
+      |            ^ ~
+mod_zero_const.c:6:26: warning: remainder by zero is undefined [-Wdivision-by-zero]
+    6 | void f(void) { int a = 5 % 0; (void)a; }
+      |                          ^ ~
+5 warnings and 3 errors generated.

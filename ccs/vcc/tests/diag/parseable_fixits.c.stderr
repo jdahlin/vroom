@@ -11,7 +11,6 @@ parseable_fixits.c:4:17: note: expanded from macro 'MEMBER'
 parseable_fixits.c:9:19: warning: flag '#' results in undefined behavior with 'd' conversion specifier [-Wformat]
     9 |         printf("a\"\\b\t%#d\n", n);
       |                         ~^~
-fix-it:"parseable_fixits.c":{9:19-9:20}:""
 parseable_fixits.c:9:26: warning: format specifies type 'int' but the argument has type 'long' [-Wformat]
     9 |         printf("a\"\\b\t%#d\n", n);
       |                         ~~~     ^

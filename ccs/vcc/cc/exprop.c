@@ -45,8 +45,7 @@ static uint32_t align_of_expr(cc *c, uint32_t e)
 }
 
 static uint32_t unary(cc *c);
-static bool small_const(cc *c, uint32_t n, int depth);
-static void overflow_check(cc *c, uint32_t n);
+static void ovf_warn(cc *c, int op, uint32_t n, uint32_t loc, uint32_t sub0, uint32_t sub1);
 
 /* the operand of sizeof/_Alignof: "( type-name )" gives UINT32_MAX, *ty and its
    span in *r (if r), anything else the (unevaluated) unary expression; '(' is
@@ -103,17 +102,29 @@ static __attribute__((noinline)) uint32_t unary_op(cc *c)
 	}
 	case T_AMP:
 		next(c);
+		c->after_amp = is(c, T_STAR);
 		n = cast_expr(c);
 		if (ISERR(n))
 			return n;
 		bounds_warn(c, n, true);
-		return addr_of(c, n, loc);
-	case T_STAR:
+		return addr_of(c, n, loc);	/* (addr_of: &r of a register variable) */
+	case T_STAR: {
+		bool amp = c->after_amp;
+
+		c->after_amp = false;
 		next(c);
 		n = cast_expr(c);
 		if (KIND(c, N(n)->ty) == TY_FUNC || ISERR(n))
 			return n;
-		return deref(c, n, loc);
+		n = deref(c, n, loc);
+		if (!amp && !c->unevaluated && N(n)->op == N_DEREF && KIND(c, N(n)->ty) == TY_VOID) {
+			pp_span r = rng(c, N(n)->a);
+
+			cc_warnx(c, "void-ptr-dereference", true, NULL, loc, &r, 1, NULL, 0,
+				 "ISO C does not allow indirection on operand of type '%s'", tyname(c, N(N(n)->a)->ty));
+		}
+		return n;
+	}
 	case T_PLUS:
 	case T_MINUS:
 	case T_TILDE: {
@@ -138,8 +149,10 @@ static __attribute__((noinline)) uint32_t unary_op(cc *c)
 
 			N(r)->aux = (uint16_t)op;
 			N(r)->a = n;
-			if (unlikely(op == T_MINUS && small_const(c, n, 3)))
-				overflow_check(c, r);
+			if (op == T_MINUS) {
+				setspan(c, r, loc);
+				ovf_warn(c, op, r, loc, n, 0);
+			}
 			return r;
 		}
 	}
@@ -429,85 +442,6 @@ static int binprec(int k)
 	}
 }
 
-/* v with clang's digit separators: -2'147'483'648 */
-static void digits(char *b, size_t n, i128 v)
-{
-	char t[64];
-	int k = 0, d = 0;
-	u128 u = v < 0 ? (u128)0 - (u128)v : (u128)v;
-
-	do {
-		if (d && d % 3 == 0)
-			t[k++] = '\'';
-		t[k++] = (char)('0' + (int)(u % 10));
-		u /= 10, d++;
-	} while (u);
-	if (v < 0)
-		t[k++] = '-';
-	for (int i = 0; i < k && (size_t)i + 1 < n; i++)
-		b[i] = t[k - 1 - i];
-	b[(size_t)k < n ? (size_t)k : n - 1] = 0;
-}
-
-/* a constant made of literals and arithmetic at most a few levels deep: cheap to tell,
-   so -Winteger-overflow only evaluates what can overflow */
-static bool small_const(cc *c, uint32_t n, int depth)
-{
-	const node *x = N(n);
-
-	while (x->op == N_CAST)
-		x = N(x->a);
-	if (x->op == N_NUM)
-		return true;
-	if (!depth)
-		return false;
-	if (x->op == N_UNARY)
-		return x->aux == T_MINUS && small_const(c, x->a, depth - 1);
-	return x->op == N_BINARY && small_const(c, x->a, depth - 1) && small_const(c, x->b, depth - 1);
-}
-
-/* clang's -Winteger-overflow: a signed +, -, * or unary - of constants whose exact result
-   does not fit its type; with what does fit, as help */
-static __attribute__((cold, noinline)) void overflow_check(cc *c, uint32_t n)
-{
-	const node *x = N(n);
-	qty t = x->ty;
-	cval a, b = { 0 };
-	uint64_t bits;
-	i128 v, lo, hi;
-	char vs[64], los[64], his[64], es[64];
-	vdiag *d;
-
-	if (c->dead || !is_integer(c, t) || !is_signed(c, t) || (bits = ty_size(c, t) * 8) > 64 ||
-	    !cc_eval(c, x->a, &a) || a.kind != CV_INT || (x->op == N_BINARY && (!cc_eval(c, x->b, &b) || b.kind != CV_INT)))
-		return;
-	switch (x->op == N_UNARY ? T_TILDE : x->aux) {
-	case T_PLUS: v = a.i + b.i; break;
-	case T_MINUS: v = a.i - b.i; break;
-	case T_STAR: v = a.i * b.i; break;
-	case T_TILDE: v = -a.i; break;
-	default: return;
-	}
-	lo = -((i128)1 << (bits - 1)), hi = ((i128)1 << (bits - 1)) - 1;
-	if (v >= lo && v <= hi)
-		return;
-	digits(vs, sizeof vs, trunc_to(c, v, t));
-	d = cc_warn_begin(c, "integer-overflow", true, NULL, x->loc, "overflow in expression; result is %s with type '%s'", vs,
-			  tyname(c, t));
-	if (!d)
-		return;
-	{
-		/* (the operands: n's own span is not set yet) */
-		pp_span r = x->op == N_BINARY ? (pp_span){ rng(c, x->a).b, rng(c, x->b).e } : rng(c, x->a);
-
-		pp_diag_label(c->p, d, x->op == N_BINARY ? r.b : x->loc, r.e, NULL);
-	}
-	digits(es, sizeof es, v), digits(los, sizeof los, lo), digits(his, sizeof his, hi);
-	pp_diag_help(c->p, d, "the exact result %s is outside '%s' (%s to %s); signed overflow is undefined", es, tyname(c, t),
-		     los, his);
-	pp_diag_emit(c->p, d);
-}
-
 /* -Wdivision-by-zero, -Wshift-count-*: l op r with a constant r */
 static void runtime_warn(cc *c, int op, uint32_t l, uint32_t r, uint32_t loc)
 {
@@ -521,15 +455,14 @@ static void runtime_warn(cc *c, int op, uint32_t l, uint32_t r, uint32_t loc)
 		return;	/* no warning: no range (pp_tok_end) either */
 	rr = rng(c, r);
 	if (op == T_SLASH || op == T_PERCENT) {
-		if (!cv.i) {
-			vdiag *d = cc_warn_begin(c, "division-by-zero", true, NULL, loc, "%s by zero is undefined",
-						 op == T_SLASH ? "division" : "remainder");
-
-			if (d) {
-				pp_diag_label(c->p, d, rr.b, rr.e, NULL);
-				rt_emit(c, d);
-			}
-		}
+		if (!cv.i && c->unevaluated)
+			;	/* (sizeof, typeof: never runs) */
+		else if (!cv.i && c->defer_rt) {
+			if (c->ndefer < 8)
+				c->defer[c->ndefer].loc = loc, c->defer[c->ndefer].r = rr, c->defer[c->ndefer++].rem = op == T_PERCENT;
+		} else if (!cv.i)
+			cc_warnx(c, "division-by-zero", true, NULL, loc, &rr, 1, NULL, 0, "%s by zero is undefined",
+			      op == T_SLASH ? "division" : "remainder");
 		return;
 	}
 	{
@@ -827,15 +760,66 @@ static inline void logic_const(cc *c, int op, uint32_t l, uint32_t r, uint32_t l
 	if (!is_integer(c, N(r)->ty) || !is_integer(c, N(l)->ty) || KIND(c, N(l)->ty) == TY_BOOL ||
 	    !cc_eval(c, r, &v) || v.kind != CV_INT || v.i == 0 || v.i == 1)
 		return;
-	if (N(r)->flags & NF_ENUMC)
+	if (N(r)->op == N_NUM && (N(r)->aux & NUM_ENUM))
 		return;
-	if (N(l)->flags & NF_ENUMC) {
+	if (N(l)->op == N_NUM && (N(l)->aux & NUM_ENUM)) {
 		cval lv;
 
 		if (cc_eval(c, l, &lv) && lv.kind == CV_INT && lv.i != 0 && lv.i != 1)
 			return;
 	}
 	logic_const_warn(c, op, l, r, loc, v.i);
+}
+
+
+/* -Winteger-overflow: n, a signed integer +, -, * or unary - of constants,
+   whose exact value does not fit its type.  Once per expression (NF_OVF). */
+static void ovf_warn(cc *c, int op, uint32_t n, uint32_t loc, uint32_t sub0, uint32_t sub1)
+{
+	cval a, b;
+	i128 v;
+	int bits;
+	qty t = N(n)->ty;
+
+	if ((N(sub0)->flags & NF_OVF) || (sub1 && (N(sub1)->flags & NF_OVF))) {
+		N(n)->flags |= NF_OVF;
+		return;
+	}
+	if (c->dead || c->unevaluated || !is_integer(c, t) || !is_signed(c, t) || (bits = (int)ty_size(c, t) * 8) > 64 ||
+	    !cc_eval(c, sub0, &a) || a.kind != CV_INT || (sub1 && (!cc_eval(c, sub1, &b) || b.kind != CV_INT)))
+		return;
+	if (!sub1)
+		v = -a.i;
+	else if (op == T_PLUS)
+		v = a.i + b.i;
+	else if (op == T_MINUS)
+		v = a.i - b.i;
+	else
+		v = a.i * b.i;
+	if (v >= -((i128)1 << (bits - 1)) && v < ((i128)1 << (bits - 1)))
+		return;
+	N(n)->flags |= NF_OVF;
+	{
+		char d[48], o[64];
+		int64_t w = bits == 64 ? (int64_t)(uint64_t)v : (int64_t)(int32_t)(uint32_t)v;
+		uint64_t m = w < 0 ? -(uint64_t)w : (uint64_t)w;
+		int nd = 0, k = 0;
+		pp_span r = rng(c, n);
+
+		do
+			d[nd++] = (char)('0' + m % 10), m /= 10;
+		while (m);
+		if (w < 0)
+			o[k++] = '-';
+		while (nd) {
+			o[k++] = d[--nd];
+			if (nd && nd % 3 == 0)
+				o[k++] = '\'';
+		}
+		o[k] = 0;
+		cc_warnx(c, "integer-overflow", true, NULL, loc, &r, 1, NULL, 0,
+			 "overflow in expression; result is %s with type '%s'", o, tyname(c, t));
+	}
 }
 
 static uint32_t binary(cc *c, int minp);
@@ -858,13 +842,22 @@ static __attribute__((noinline)) uint32_t binary_ops(cc *c, int minp, uint32_t l
 			bool dead = (op == T_AMPAMP || op == T_PIPEPIPE) && cc_eval(c, l, &cv) && cv.kind == CV_INT &&
 				    (cv.i != 0) == (op == T_PIPEPIPE);
 
+			bool lg = op == T_AMPAMP || op == T_PIPEPIPE;
+
 			c->dead += dead;
+			c->cnd += lg;	/* (a conditional branch: -Wsometimes-uninitialized's filter) */
 			r = binary(c, p + 1);
+			c->cnd -= lg;
 			c->dead -= dead;
 		}
 		if (unlikely(ISERR(l) || ISERR(r))) {
 			l = err_node(c, loc);
+			if (mac)
+				N(l)->flags |= NF_MACRO;
+			setspan(c, l, b);
 		} else {
+			uint32_t l0 = l;
+
 			if ((op == T_AMPAMP || op == T_PIPEPIPE) && !mac)
 				logic_const(c, op, l, r, loc);
 			else if (is_cmp(op) && !mac) {
@@ -875,15 +868,16 @@ static __attribute__((noinline)) uint32_t binary_ops(cc *c, int minp, uint32_t l
 			}
 			runtime_warn(c, op, l, r, loc);
 			l = binop(c, op, l, r, loc);
+			if (mac)
+				N(l)->flags |= NF_MACRO;
+			setspan(c, l, b);
 			if (is_cmp(op) && !mac && !quiet_rt(c))
 				range_cmp(c, l, loc);
-			if (unlikely((op == T_PLUS || op == T_MINUS || op == T_STAR) && N(l)->op == N_BINARY &&
-				     small_const(c, N(l)->a, 3) && small_const(c, N(l)->b, 3)))
-				overflow_check(c, l);
+			if (op == T_PLUS || op == T_MINUS || op == T_STAR)
+				ovf_warn(c, op, l, loc, l0, r);
+			else if ((N(l0)->flags | N(r)->flags) & NF_OVF)
+				N(l)->flags |= NF_OVF;
 		}
-		if (mac)
-			N(l)->flags |= NF_MACRO;
-		setspan(c, l, b);
 	}
 }
 
@@ -909,6 +903,7 @@ static __attribute__((noinline)) uint32_t cond_rest(cc *c, uint32_t cnd)
 		cnd = scalar_cond(c, decay(c, cnd), "conditional");
 		k = cc_eval(c, cnd, &cv) && cv.kind == CV_INT ? cv.i != 0 : -1;
 		c->dead += k == 0;
+		c->cnd++;
 		if (!is(c, T_COLON))
 			a = expr(c);
 		else
@@ -918,6 +913,7 @@ static __attribute__((noinline)) uint32_t cond_rest(cc *c, uint32_t cnd)
 		expect(c, T_COLON, "':'");
 		c->dead += k == 1;
 		b = cond_expr(c);
+		c->cnd--;
 		c->dead -= k == 1;
 		if (ISERR(cnd) || (a && ISERR(a)) || ISERR(b))
 			return err_node(c, loc);
@@ -952,15 +948,49 @@ static int assign_op(int k)
 	}
 }
 
+/* -Wself-assign: x = x (parentheses and implicit conversions aside), not volatile */
+static void self_assign(cc *c, uint32_t l, uint32_t r, uint32_t loc)
+{
+	while (N(r)->op == N_CAST && !c->span[r].e && N(r)->a)
+		r = N(r)->a;
+	if (N(l)->op != N_VAR || N(r)->op != N_VAR || N(l)->a != N(r)->a || (QQ(N(l)->ty) & Q_VOLATILE) ||
+	    c->syms[N(l)->a].kind != S_VAR)
+		return;
+	{
+		uint32_t nm = c->syms[N(l)->a].name;
+
+		if (!pp_spells(c->p, N(l)->loc, idstr_(nm), (uint32_t)idlen_(nm)) ||
+		    !pp_spells(c->p, N(r)->loc, idstr_(nm), (uint32_t)idlen_(nm)))
+			return;	/* (clang: not from a macro) */
+	}
+	{
+		pp_span rr[2] = { { N(l)->loc, pp_tok_end(c->p, N(l)->loc) }, { N(r)->loc, pp_tok_end(c->p, N(r)->loc) } };
+
+		cc_warnx(c, "self-assign", false, w_selfassign, loc, rr, 2, NULL, 0,
+			 "explicitly assigning value of variable of type '%s' to itself", tyname(c, N(l)->ty));
+	}
+}
+
 static __attribute__((noinline)) uint32_t assign_rest(cc *c, uint32_t l, int op)
 {
 	uint32_t loc = tok(c)->loc, r;
 	bool mac = tok(c)->flags & PF_MACRO;
 
 	next(c);
-	r = assign_expr(c);
+	{
+		uint32_t pend = c->uv_asg;
+
+		c->uv_asg = 0;
+		r = assign_expr(c);
+		if (unlikely(pend)) {
+			c->syms[pend].flags &= ~SF_UVPEND;	/* (after the right side: "z = z + 1" reads z first) */
+			c->uv_asg = 0;
+		}
+	}
 	if (ISERR(l) || ISERR(r))
 		return err_node(c, loc);
+	if (op < 0 && !mac && !(c->prevflags & PF_MACRO))	/* (the right side's last token) */
+		self_assign(c, l, r, loc);
 	r = assign(c, op < 0 ? 0 : op, l, r, loc);
 	if (mac)
 		N(r)->flags |= NF_MACRO;
@@ -977,21 +1007,19 @@ VPRIV uint32_t assign_expr(cc *c)
 	return assign_rest(c, l, op);
 }
 
-static __attribute__((noinline)) uint32_t comma_rest(cc *c, uint32_t l, int er)
+static __attribute__((noinline)) uint32_t comma_rest(cc *c, uint32_t l)
 {
 	while (is(c, T_COMMA) && !not_expr_start(c, peek(c, 1))) {
 		uint32_t loc = tok(c)->loc, r;
 
-		bool mac = tok(c)->flags & PF_MACRO;
-
 		next(c);
-		discard(c, l);
-		unused_value(c, l, true, er, mac);
 		r = assign_expr(c);
 		if (unlikely(ISERR(l) || ISERR(r))) {
 			l = err_node(c, loc);
 			continue;
 		}
+		unused_value(c, l, true);
+		set_only(c, l);	/* (a discarded value: clang's IgnoredValueConversions) */
 		l = mk2(c, N_COMMA, QUNQ(N(decay(c, r))->ty), loc, l, decay(c, r));
 	}
 	return l;
@@ -999,12 +1027,11 @@ static __attribute__((noinline)) uint32_t comma_rest(cc *c, uint32_t l, int er)
 
 VPRIV uint32_t expr(cc *c)
 {
-	int er = c->errors;
 	uint32_t l = assign_expr(c);
 
 	if (likely(!is(c, T_COMMA)))
 		return l;
-	return comma_rest(c, l, er);
+	return comma_rest(c, l);
 }
 
 /* a constant expression as an int (array sizes, widths, enum values, cases) */

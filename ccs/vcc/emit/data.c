@@ -27,13 +27,14 @@ static void data_or(ecx *e, uint64_t off, uint8_t bits)
 	e->data.p[off] |= (char)bits;
 }
 
-static void data_reloc(ecx *e, uint64_t off, uint32_t ref, int64_t add)
+/* an n-byte address (8; 4 for wasm32) */
+static void data_reloc(ecx *e, uint64_t off, uint32_t ref, int64_t add, int n)
 {
-	data_put(e, off, 0, 8);
-	e->rel[e->nrel] = (struct reloc){ off, ref, e->nrel, add, 0, 0 };
+	data_put(e, off, 0, n);
+	e->rel[e->nrel] = (struct reloc){ off, ref, e->nrel, add, 0, n == 8 ? 0 : (uint32_t)n };
 	e->nrel++;
-	if (off + 8 > e->relend)
-		e->relend = off + 8;
+	if (off + (uint64_t)n > e->relend)
+		e->relend = off + (uint64_t)n;
 	note_ref(e, ref);
 }
 
@@ -170,6 +171,11 @@ static void data_init(ecx *e, uint64_t off, qty ty, uint32_t init)
 			}
 			return;
 		case CV_ADDR:
+			if (WASM(c) && cv.label) {
+				/* wasm: a label's address is its number (PLAN-wasm.md W4) */
+				data_put(e, off, (uint64_t)cv.label - (cv.sublabel ? (uint64_t)cv.sublabel : 0) + (uint64_t)cv.i, n);
+				return;
+			}
 			if (cv.sublabel && (n == 4 || n == 8)) {
 				/* label difference: ref - sub, resolved by the assembler */
 				data_put(e, off, 0, n);
@@ -182,14 +188,17 @@ static void data_init(ecx *e, uint64_t off, qty ty, uint32_t init)
 				note_ref(e, REF(RK_LBL, cv.sublabel - 1));
 				return;
 			}
-			if (n != 8)
+			if (n != 8 && !(n == 4 && WASM32(c)))
 				efatal(e, x->loc, "address initializer for a %d-byte object", n);
 			if (cv.label)
-				data_reloc(e, off, REF(RK_LBL, cv.label - 1), (int64_t)cv.i);
+				data_reloc(e, off, REF(RK_LBL, cv.label - 1), (int64_t)cv.i, n);
 			else if (cv.str)
-				data_reloc(e, off, REF(RK_STR, cv.str - 1), (int64_t)cv.i);
-			else
-				data_reloc(e, off, REF(RK_SYM, canon_sym(c, cv.sym)), (int64_t)cv.i);
+				data_reloc(e, off, REF(RK_STR, cv.str - 1), (int64_t)cv.i, n);
+			else {
+				data_reloc(e, off, REF(RK_SYM, canon_sym(c, cv.sym)), (int64_t)cv.i, n);
+				if (WASM(c))
+					wasm_data_ref(e, REF(RK_SYM, canon_sym(c, cv.sym)));
+			}
 			return;
 		default:
 			efatal(e, x->loc, "initializer element is not a compile-time constant");
@@ -256,7 +265,7 @@ static void data_bytes(ecx *e, tbuf *b, uint64_t size)
 		if (ri < e->nrel && o == e->rel[ri].off) {
 			uint32_t sz = e->rel[ri].sz ? e->rel[ri].sz : 8;
 
-			tb_s(b, sz == 4 ? "\t.word\t" : "\t.xword\t");
+			tb_s(b, sz == 4 ? (WASM(e->c) ? "\t.int32\t" : "\t.word\t") : WASM(e->c) ? "\t.int64\t" : "\t.xword\t");
 			ref_off(e->c, b, e->rel[ri].ref, e->rel[ri].add);
 			if (e->rel[ri].sub) {
 				tb_c(b, '-');
@@ -286,7 +295,7 @@ static void data_bytes(ecx *e, tbuf *b, uint64_t size)
 
 				/* o < data.n here; past it the bytes are zero, not what the buffer holds */
 				memcpy(&w, d + o, o + 8 <= e->data.n ? 8 : e->data.n - o);
-				tb_s(b, "\t.xword\t");
+				tb_s(b, WASM(e->c) ? "\t.int64\t" : "\t.xword\t");
 				tb_hex(b, w);
 				tb_c(b, '\n');
 				o += 8;
@@ -334,8 +343,128 @@ VPRIV void emit_object(ecx *e, uint32_t s)
 	zero = e->nrel == 0;
 	for (uint64_t i = 0; zero && i < e->data.n; i++)
 		zero = !e->data.p[i];
-	if (!a->section && (y->flags & SF_THREAD) && !(DARWIN(c) && direct(e)))
+	if (WASM(c)) {
+		/* one section per object, as clang writes them */
+		bool global = y->sc != SC_STATIC && y->depth == 0 && y->name;
+
+		/* _Thread_local: an ordinary object, as LLVM strips TLS from a
+		 * module without shared memory (no -pthread) */
+		tb_s(b, "\t.section\t");
+		if (a->section) {
+			tb_s(b, c->strs[a->section - 1].s);
+		} else {
+			/* a quoted name: the whole section name in quotes, as clang */
+			bool q = sym_quoted(c, s);
+			size_t at;
+
+			if (q)
+				tb_c(b, '"');
+			tb_s(b, all_const(c, y->ty) ? ".rodata." : zero ? ".bss." : ".data.");
+			at = b->n;
+			sym_name(c, b, s);
+			if (q) {
+				memmove(b->p + at, b->p + at + 1, b->n - at - 1);
+				b->n--;
+			}
+		}
+		tb_s(b, ",\"\",@\n");
+		if (global) {
+			tb_s(b, (y->flags & SF_WEAK) ? "\t.weak\t" : "\t.globl\t");
+			sym_name(c, b, s);
+			tb_c(b, '\n');
+		}
+		tb_s(b, "\t.p2align\t");
+		tb_u(b, (uint64_t)__builtin_ctz(align ? align : 1));
+		tb_s(b, "\n\t.type\t");
+		sym_name(c, b, s);
+		tb_s(b, ",@object\n");
+		sym_name(c, b, s);
+		tb_s(b, ":\n");
+		if (zero && !e->nrel) {
+			tb_s(b, "\t.zero\t");
+			tb_u(b, size ? size : 1);
+			tb_c(b, '\n');
+		} else {
+			data_bytes(e, b, size);
+		}
+		tb_s(b, "\t.size\t");
+		sym_name(c, b, s);
+		tb_s(b, ", ");
+		tb_u(b, size ? size : 1);
+		tb_c(b, '\n');
+		e->E->nobj++;
+		out_chunk(e, ((uint64_t)s << 1) | 1, start);
+		return;
+	}
+	if (!a->section && (y->flags & SF_THREAD) && !DARWIN(c)) {
+		/* ELF: .tdata/.tbss; code reaches it through I_TLV (lval.c) */
+		const char *sec = zero && !e->nrel ? "\t.section\t.tbss,\"awT\",@nobits\n" : "\t.section\t.tdata,\"awT\",@progbits\n";
+
+		if (direct(e)) {
+			size_t h;
+
+			b->n = (b->n + 7) & ~(size_t)7;
+			start = b->n;
+			sym_header(e, b, s, false, sec, align);
+			data_item(e, zero && !e->nrel ? (size ? size : 1) : size, zero && !e->nrel);
+			h = it_open(e, IT_OSIZE);
+			*(osize *)it_room(e, sizeof(osize)) = (osize){ .sym = s, .size = size };
+			it_close(e, h);
+			e->E->nobj++;
+			out_chunk(e, ((uint64_t)s << 1) | 1, start);
+			return;
+		}
+		sym_header(e, b, s, false, sec, align);
+		if (zero && !e->nrel) {
+			tb_s(b, "\t.zero\t");
+			tb_u(b, size ? size : 1);
+			tb_c(b, '\n');
+		} else {
+			data_bytes(e, b, size);
+		}
+		tb_s(b, "\t.size\t");
+		sym_name(c, b, s);
+		tb_s(b, ", ");
+		tb_u(b, size);
+		tb_c(b, '\n');
+		e->E->nobj++;
+		out_chunk(e, ((uint64_t)s << 1) | 1, start);
+		return;
+	}
+	if (!a->section && (y->flags & SF_THREAD) && !direct(e) && !DARWIN(e->c))
 		efatal(e, y->loc, "thread-local storage is not supported");
+	if (!direct(e) && DARWIN(e->c) && (y->flags & SF_THREAD)) {
+		/* the same TLV layout as text; darwin_text names the sections */
+		bool global = y->sc != SC_STATIC && y->depth == 0 && y->name;
+
+		tb_s(b, zero ? "\t.section\t.tbss,\"aw\",@nobits\n" : "\t.section\t.tdata,\"aw\",@progbits\n");
+		tb_s(b, "\t.p2align\t");
+		tb_u(b, (uint64_t)__builtin_ctz(align ? align : 1));
+		tb_c(b, '\n');
+		sym_name(c, b, s);
+		tb_s(b, "$tlv$init:\n");
+		if (zero && !e->nrel) {
+			tb_s(b, "\t.zero\t");
+			tb_u(b, size ? size : 1);
+			tb_c(b, '\n');
+		} else {
+			data_bytes(e, b, size);
+		}
+		tb_s(b, "\t.section\t.tlv,\"aw\",@progbits\n");
+		if (global) {
+			tb_s(b, (y->flags & SF_WEAK) ? "\t.weak\t" : "\t.globl\t");
+			sym_name(c, b, s);
+			tb_c(b, '\n');
+		}
+		tb_s(b, "\t.p2align\t3\n");
+		sym_name(c, b, s);
+		tb_s(b, ":\n\t.xword\t__tlv_bootstrap\n\t.xword\t0\n\t.xword\t");
+		sym_name(c, b, s);
+		tb_s(b, "$tlv$init\n");
+		e->E->nobj++;
+		out_chunk(e, ((uint64_t)s << 1) | 1, start);
+		return;
+	}
 	if (direct(e) && (y->flags & SF_THREAD)) {
 		/*
 		 * Darwin TLV: the initial value in __thread_data/__thread_bss under
@@ -351,9 +480,9 @@ VPRIV void emit_object(ecx *e, uint32_t s)
 		tb_s(b, zero ? "\t.section\t.tbss,\"aw\",@nobits\n" : "\t.section\t.tdata,\"aw\",@progbits\n");
 		tb_s(b, "\t.p2align\t");
 		tb_u(b, (uint64_t)__builtin_ctz(align ? align : 1));
-		tb_s(b, "\n.Ltlvi.");
-		tb_u(b, s);
-		tb_s(b, ":\n");
+		tb_c(b, '\n');
+		sym_name(c, b, s);
+		tb_s(b, "$tlv$init:\n");
 		it_close(e, h);
 		data_item(e, zero && !e->nrel ? (size ? size : 1) : size, zero && !e->nrel);
 		h = it_open(e, IT_TEXT);
@@ -365,9 +494,9 @@ VPRIV void emit_object(ecx *e, uint32_t s)
 		}
 		tb_s(b, "\t.p2align\t3\n");
 		sym_name(c, b, s);
-		tb_s(b, ":\n\t.xword\t__tlv_bootstrap\n\t.xword\t0\n\t.xword\t.Ltlvi.");
-		tb_u(b, s);
-		tb_c(b, '\n');
+		tb_s(b, ":\n\t.xword\t__tlv_bootstrap\n\t.xword\t0\n\t.xword\t");
+		sym_name(c, b, s);
+		tb_s(b, "$tlv$init\n");
 		it_close(e, h);
 		e->E->nobj++;
 		out_chunk(e, ((uint64_t)s << 1) | 1, start);
@@ -453,7 +582,9 @@ VPRIV void emit_string(ecx *e, uint32_t i)
 		out_chunk(e, ((uint64_t)1 << 62) | i, start);
 		return;
 	}
-	if (nul)
+	if (WASM(c))
+		tb_f(b, "\t.section\t.rodata..L.str.%u,\"\",@\n", i);
+	else if (nul)
 		tb_s(b, "\t.section\t.rodata,\"a\",@progbits\n");
 	else
 		tb_f(b, "\t.section\t.rodata.str%u.%u,\"aMS\",@progbits,%u\n", s->esz, s->esz, s->esz);
@@ -485,10 +616,12 @@ VPRIV void emit_string(ecx *e, uint32_t i)
 			uint32_t v = 0;
 
 			memcpy(&v, s->s + k, s->esz);
-			tb_s(b, s->esz == 1 ? "\t.byte\t" : s->esz == 2 ? "\t.short\t" : "\t.word\t");
+			tb_s(b, s->esz == 1 ? "\t.byte\t" : s->esz == 2 ? "\t.short\t" : WASM(c) ? "\t.long\t" : "\t.word\t");
 			tb_u(b, v);
 			tb_c(b, '\n');
 		}
 	}
+	if (WASM(c))
+		tb_f(b, "\t.size\t.L.str.%u, %llu\n", i, (unsigned long long)n);
 	out_chunk(e, ((uint64_t)1 << 62) | i, start);
 }

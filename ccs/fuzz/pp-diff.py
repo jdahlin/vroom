@@ -1,14 +1,15 @@
 #!/usr/bin/env python3
 """pp-diff.py: differential check of fuzz-pp inputs, vpp against clang -E -P.
 
-  ccs/fuzz/pp-diff.py [-j N] [--out DIR] [--show N] PATH...
+  ccs/fuzz/pp-diff.py [-j N] [--out DIR] [--show N] [--text] PATH...
 
 PATH is a file or directory of fuzz-pp inputs (corpus, crash-*, regress/pp).
 Each input is unpacked as fuzz-pp sees it (main \\x01 a.h \\x01 b.h \\x01
 sys/c.h, a leading \\x02 for assembler-with-cpp) into a temporary directory,
 preprocessed by clang (-E -P, the kernel's target, -nostdinc -isystem sys)
 and compared by vpp --cmp, which lexes both with vcc's lexer and compares
-kind and spelling, as bench/vcc-diff.py does.
+kind and spelling, as bench/vcc-diff.py does.  --text compares the bytes of
+vpp -E -P instead (spacing, indentation, blank lines).
 
 Inputs that clang rejects (non-zero status) are skipped, as are inputs that
 use __DATE__, __TIME__ or __TIMESTAMP__.  Mismatches (vpp differs, fails, or
@@ -24,6 +25,7 @@ CL = '/opt/homebrew/opt/llvm/bin/clang'
 VPP = f'{R}/build/ccs/vpp'
 NAMES = ['main', 'a.h', 'b.h', 'sys/c.h']
 SKIP = (b'__DATE__', b'__TIME__', b'__TIMESTAMP__')
+TEXT = '--text' in sys.argv
 
 
 def unpack(data, d):
@@ -56,7 +58,16 @@ def check(path):
         if c.returncode:
             return path, 'skip', 'clang rejects'
         try:
-            v = subprocess.run([VPP, '--cmp', ref] + args, cwd=d, capture_output=True, timeout=20)
+            if TEXT:
+                v = subprocess.run([VPP, '-E', '-P'] + args, cwd=d, capture_output=True, timeout=20)
+                r = open(ref, 'rb').read()
+                if v.returncode == 0 and v.stdout != r:
+                    import difflib
+                    dl = difflib.unified_diff(r.decode('latin-1').splitlines(), v.stdout.decode('latin-1').splitlines(),
+                                              'clang', 'vpp', n=0, lineterm='')
+                    return path, 'diff', '\n'.join(list(dl)[:16])
+            else:
+                v = subprocess.run([VPP, '--cmp', ref] + args, cwd=d, capture_output=True, timeout=20)
         except subprocess.TimeoutExpired:
             return path, 'diff', 'vpp timeout (clang finished)'
         if v.returncode == 0:
@@ -83,6 +94,7 @@ def main():
     ap.add_argument('-j', type=int, default=4)
     ap.add_argument('--out', default=f'{R}/build/ccs/fuzz/diff')
     ap.add_argument('--show', type=int, default=10)
+    ap.add_argument('--text', action='store_true')
     ap.add_argument('paths', nargs='+')
     a = ap.parse_args()
     if not os.access(VPP, os.X_OK):

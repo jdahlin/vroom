@@ -13,6 +13,8 @@ Suites (ccs/vcc/tests/, see the README there):
                                          reference, vcc must exit 0 silently
          /* vcc-threads-same */          -S output must be the same with
                                          VCC_THREADS=1 and 8 (four builds)
+         /* vcc-timeout: S */            vcc's compile must finish in S seconds
+                                         (default 60): a bound on compile time
          /* vcc-xfail: TODO item */      known vcc bug: a failure is counted as
                                          xfail, a pass as XPASS (an error: drop
                                          the marker in the commit that fixes it)
@@ -51,13 +53,14 @@ RT = f'{T}/rt'
 CL = llvm('clang')
 VPP = os.path.join(os.environ.get('VCC_BIN') or BUILD, 'vpp')
 OBJCOPY = llvm('llvm-objcopy')
-LLD = shutil.which('ld.lld') or llvm('ld.lld')
+LLD = os.environ.get('VCC_LD') or shutil.which('ld.lld') or llvm('ld.lld')	# VCC_LD=build/ccs/vlink: link with vlink
 QEMU = shutil.which('qemu-system-aarch64') or '/opt/homebrew/bin/qemu-system-aarch64'
 OUT = f'{BUILD}/ctests'
 RES = subprocess.run([CL, '-print-resource-dir'], capture_output=True, text=True).stdout.strip() + '/include'
 
 BASE = ['--target=aarch64-linux-gnu', '-nostdinc', '-I', f'{RT}/include', '-isystem', RES,
         '-fno-PIE', '-fno-asynchronous-unwind-tables', '-fno-stack-protector', '-O2']
+BASE += os.environ.get('VCC_CFLAGS', '').split()	# e.g. -fasynchronous-unwind-tables (both compilers)
 # clang -O2, with gcc's leniency for old code (the tests are compiled by gcc -w)
 CLFL = ['-w', '-Wno-error=implicit-function-declaration', '-Wno-error=implicit-int',
         '-Wno-error=int-conversion', '-Wno-error=incompatible-pointer-types', '-Wno-error=return-type',
@@ -123,8 +126,25 @@ def qemu(elf, cpu='max'):
                       stdin=subprocess.DEVNULL)
     return rc, out.decode('latin-1').replace('\r\n', '\n')
 
+VLINK = os.path.join(os.environ.get('VCC_BIN') or BUILD, 'vlink')
 def link(objs, elf):
-    rc, _, err = sh([LLD, '-T', f'{RT}/link.ld', f'{OUT}/rt/start.o', f'{OUT}/rt/rt.o'] + objs + ['-o', elf])
+    args = ['-T', f'{RT}/link.ld', f'{OUT}/rt/start.o', f'{OUT}/rt/rt.o'] + objs
+    rc, _, err = sh([LLD] + args + ['-o', elf])
+    if not rc and os.environ.get('VCC_LDCMP'):
+        # VCC_LDCMP=1: vlink must give lld's loaded image byte for byte
+        rc2, _, err2 = sh([VLINK] + args + ['-o', elf + '.v'])
+        if rc2:
+            return rc2, 'error: vlink: ' + err2.decode(errors='replace')
+        oc = llvm('llvm-objcopy')
+        sh([oc, '-O', 'binary', elf, elf + '.lb']); sh([oc, '-O', 'binary', elf + '.v', elf + '.vb'])
+        if open(elf + '.lb', 'rb').read() != open(elf + '.vb', 'rb').read():
+            return 1, 'error: vlink image differs from lld'
+        # and the program headers (PT_LOAD split, PT_TLS, PT_GNU_RELRO, ...)
+        rd = llvm('llvm-readelf')
+        ph = [[l.split() for l in subprocess.run([rd, '-lW', e], capture_output=True, text=True).stdout.splitlines()
+               if l.strip()[:4] in ('LOAD', 'TLS ', 'GNU_', 'PHDR', 'NOTE')] for e in (elf, elf + '.v')]
+        if ph[0] != ph[1]:
+            return 1, 'error: vlink program headers differ from lld'
     return rc, err.decode(errors='replace')
 
 def first_err(s):
@@ -213,6 +233,8 @@ def one_(t):
     if suite == 'gcc' and name in GCC_SKIP:
         return t, 'skip', 'compiler-specific', GCC_SKIP[name]
     flags = dg_flags(src) if suite == 'gcc' else exec_marks(src)[0] if suite == 'vcc' else []
+    m = re.search(r'/\*\s*vcc-timeout:\s*(\d+)\s*\*/', src) if suite == 'vcc' else None
+    tmo = int(m.group(1)) if m else 60
     if name.startswith('76_dollars'):
         flags = ['-fdollars-in-identifiers']
     wd = f'{OUT}/w/{suite}/{name}'
@@ -223,14 +245,14 @@ def one_(t):
         rc, _, err = sh([CL, '-fsyntax-only'] + BASE + CLFL + flags + [path], cwd=cwd)
         if rc:
             return t, 'skip', 'clang-rejects', first_err(err.decode(errors='replace'))
-        rc, _, err = sh([VPP, '-fsyntax-only'] + vfl + [path], cwd=cwd)
+        rc, _, err = sh([VPP, '-fsyntax-only'] + vfl + [path], cwd=cwd, timeout=tmo)
         return (t, 'pass', '', '') if rc == 0 else (t, 'fail', 'fe', first_err(err.decode(errors='replace')))
     ref = reference(suite, name, path, flags, RTHASH, wd)
     if 'skip' in ref:
         return t, 'skip', ref['skip'], ref['why']
-    rc, _, err = sh([VPP, '-c'] + vfl + [path, '-o', f'{wd}/vcc.o'], cwd=cwd)
+    rc, _, err = sh([VPP, '-c'] + vfl + [path, '-o', f'{wd}/vcc.o'], cwd=cwd, timeout=tmo)
     if rc:
-        rc2, _, err2 = sh([VPP, '-fsyntax-only'] + vfl + [path], cwd=cwd)
+        rc2, _, err2 = sh([VPP, '-fsyntax-only'] + vfl + [path], cwd=cwd, timeout=tmo)
         if rc2:
             return t, 'fail', 'fe', first_err(err2.decode(errors='replace'))
         e = err.decode(errors='replace')

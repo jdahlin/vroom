@@ -1,0 +1,43 @@
+literal_conv.c:1:9: warning: implicit conversion from 'double' to 'int' changes value from 1.5 to 1 [-Wliteral-conversion]
+    1 | int a = 1.5;
+      |     ~   ^~~
+literal_conv.c:2:9: warning: implicit conversion of out of range value from 'double' to 'int' is undefined [-Wliteral-conversion]
+    2 | int b = 1e20;
+      |     ~   ^~~~
+literal_conv.c:3:9: warning: implicit conversion from 'double' to 'int' changes value from 0.1 to 0 [-Wliteral-conversion]
+    3 | int c = 0.1;
+      |     ~   ^~~
+literal_conv.c:4:9: warning: implicit conversion from 'double' to 'int' changes value from 3.14159265358979 to 3 [-Wliteral-conversion]
+    4 | int d = 3.14159265358979;
+      |     ~   ^~~~~~~~~~~~~~~~
+literal_conv.c:6:11: warning: implicit conversion of out of range value from 'double' to 'short' is undefined [-Wliteral-conversion]
+    6 | short f = 1e6;
+      |       ~   ^~~
+literal_conv.c:7:14: warning: implicit conversion of out of range value from 'double' to 'unsigned int' is undefined [-Wliteral-conversion]
+    7 | unsigned g = -1.5;
+      |          ~   ^~~~
+literal_conv.c:8:9: warning: implicit conversion from 'float' to 'int' changes value from 1.5 to 1 [-Wliteral-conversion]
+    8 | int h = 1.5f;
+      |     ~   ^~~~
+literal_conv.c:9:9: warning: implicit conversion from 'double' to 'int' changes value from 123456789.25 to 123456789 [-Wliteral-conversion]
+    9 | int i = 123456789.25;
+      |     ~   ^~~~~~~~~~~~
+literal_conv.c:10:10: warning: implicit conversion from 'double' to 'int' changes value from 2.5 to 2 [-Wliteral-conversion]
+   10 | int j = (2.5);
+      |     ~    ^~~
+literal_conv.c:11:9: warning: implicit conversion from 'double' to 'int' changes value from -2.5 to -2 [-Wliteral-conversion]
+   11 | int k = -2.5;
+      |     ~   ^~~~
+literal_conv.c:12:10: warning: implicit conversion from 'double' to 'char' changes value from 1.0E-5 to 0 [-Wliteral-conversion]
+   12 | char l = 1e-5;
+      |      ~   ^~~~
+literal_conv.c:13:11: warning: implicit conversion from 'double' to '_Bool' changes value from 0.5 to true [-Wliteral-conversion]
+   13 | _Bool m = 0.5;
+      |       ~   ^~~
+literal_conv.c:15:22: warning: implicit conversion from 'double' to 'int' changes value from 7.75 to 7 [-Wliteral-conversion]
+   15 | void fn(int x) { x = 7.75; }
+      |                    ~ ^~~~
+literal_conv.c:16:22: warning: implicit conversion from 'double' to 'int' changes value from 0.25 to 0 [-Wliteral-conversion]
+   16 | int r(void) { return 0.25; }
+      |               ~~~~~~ ^~~~
+14 warnings generated.

@@ -3,6 +3,6 @@ ptr_mismatch.c:4:4: error: incompatible pointer types passing 'long *' to parame
       |             - passing argument to parameter 'p' here
   ...
     4 |         f(q);
-      |           ^ argument 1 of 'f'
+      |           ^
 ptr_mismatch.c:1:13: note: passing argument to parameter 'p' here
 1 error generated.

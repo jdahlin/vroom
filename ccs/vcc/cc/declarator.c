@@ -16,6 +16,8 @@ static bool param_list(cc *c, dop *op)
 	vinit(&psyms);
 	scope_open(c);
 	op->kr = false;
+	if (!c->in_proto)
+		c->nptag = 0;
 	if (is(c, T_RPAREN)) {
 		fl |= TF_NOPROTO;
 	} else if (iskw(c, KW_void) && peek(c, 1)->kind == T_RPAREN) {
@@ -39,6 +41,9 @@ static bool param_list(cc *c, dop *op)
 				break;
 		}
 	} else {
+		if (!c->in_proto)
+			c->nptag = 0;
+		c->in_proto++;
 		for (;;) {
 			dspec ds;
 			declr d;
@@ -62,6 +67,8 @@ static bool param_list(cc *c, dop *op)
 				}
 			}
 			declarator(c, &d, true, &first, &nops);
+			if (!d.name)
+				d.loc = tok(c)->loc;	/* an unnamed parameter: where its name would be (clang) */
 			attribute_list(c, &d.at);
 			t = apply_declarator(c, ds.ty, first, nops);
 			c->ndops = first;
@@ -103,12 +110,18 @@ static bool param_list(cc *c, dop *op)
 				ds.invalid = true;
 			}
 			vpush(c, &ptys, t);
-			s = sym_new(c, S_VAR, d.name, t, d.name ? d.loc : tok(c)->loc);	/* (clang: unnamed, where the name would be) */
-			c->syms[s].flags |= SF_PARAM | (ds.invalid ? SF_INVALID : 0);
-			if (ds.tds)
-				c->syms[s].tdef = ds_tdef(c, &ds, t);
-			if (unlikely(d.at.ext | ds.at.ext) && (c->attrx[d.at.ext].nonnull | c->attrx[ds.at.ext].nonnull))
-				c->syms[s].flags |= SF_NONNULL, c->nnparam++;
+			if (d.name) {
+				uint32_t o = lookup(c, d.name);
+
+				if (o && c->syms[o].depth == c->depth && (c->syms[o].flags & SF_PARAM)) {
+					cc_error(c, d.loc, "redefinition of parameter '%.*s'", IDF(d.name));
+					note(c, c->syms[o].loc, "previous declaration is here");
+					d.name = 0;	/* clang: the parameter loses its name */
+				}
+			}
+			s = sym_new(c, S_VAR, d.name, t, d.loc ? d.loc : ds.loc);
+			c->syms[s].tdef = ds.tdef && QUNQ(t) == QUNQ(ds.ty) ? ds.tdef : 0;
+			c->syms[s].flags |= SF_PARAM | ((d.at.nonnull | ds.at.nonnull) ? SF_NONNULL : 0) | (ds.invalid ? SF_INVALID : 0);
 			if (unlikely(ds.invalid))
 				delayed_bug(c, d.loc, "an invalid parameter without an error");
 			c->syms[s].body = vsize;	/* parameters: a decayed VLA's size expression with side effects */
@@ -118,6 +131,7 @@ static bool param_list(cc *c, dop *op)
 			if (!accept(c, T_COMMA))
 				break;
 		}
+		c->in_proto--;
 	}
 	if (unlikely(voidat))	/* the list parsed: "(int, void)", "(void, int)" */
 		cc_error(c, voidat, "'void' must be the first and only parameter if specified");
@@ -283,7 +297,7 @@ VPRIV void declarator(cc *c, declr *d, bool abstract_ok, uint32_t *first, uint32
 		expect_match(c, T_RPAREN, plb0);
 		d->name = id.name;
 		d->loc = id.loc;
-		merge_attrs(c, &d->at, &id.at);
+		merge_attrs(&d->at, &id.at);
 		if (id.has_func) {
 			d->psyms = id.psyms, d->npsyms = id.npsyms, d->kr = id.kr, d->has_func = true;
 			d->plb = id.plb, d->ple = id.ple;
@@ -368,7 +382,7 @@ VPRIV qty apply_declarator(cc *c, qty t, uint32_t first, uint32_t nops)
 		switch (o->kind) {
 		case 0:
 			if (o->fl & TF_BLOCK) {
-				ctype b = { .kind = TY_PTR, .flags = TF_BLOCK, .size = 8, .align = 8, .base = t };
+				ctype b = { .kind = TY_PTR, .flags = TF_BLOCK, .size = CC_PTRSIZE(c), .align = CC_PTRSIZE(c), .base = t };
 
 				t = QT(ty_intern(c, &b), o->q & Q_MASK);
 			} else {

@@ -45,14 +45,14 @@ VPRIV uint32_t ty_hash(const ctype *t)
 
 	h ^= t->base + 0x632BE59BD9B4E019ull + (h << 6) + (h >> 2);
 	h ^= t->n + 0x8CB92BA72F3D8DD7ull + (h << 6) + (h >> 2);
-	h ^= t->aux + (uint64_t)t->flags * 31 + t->align * 131 + (h << 6) + (h >> 2);
+	h ^= t->aux + (uint64_t)t->flags * 31 + t->align * 131 + (uint64_t)t->ext * 7919 + (h << 6) + (h >> 2);
 	return (uint32_t)(h ^ (h >> 32));
 }
 
 static bool ty_eq(const ctype *a, const ctype *b)
 {
 	return a->kind == b->kind && a->flags == b->flags && a->base == b->base && a->n == b->n &&
-	       a->aux == b->aux && a->align == b->align && a->size == b->size;
+	       a->aux == b->aux && a->align == b->align && a->size == b->size && a->ext == b->ext;
 }
 
 /* intern a type (records and enums are created with ty_new) */
@@ -64,7 +64,11 @@ VPRIV uint32_t ty_intern(cc *c, const ctype *t)
 		uint32_t e = c->tyhash[i];
 
 		if (!e) {
-			uint32_t idx = c->nty++;
+			uint32_t idx;
+
+			if (unlikely(c->dr_on))
+				return dr_intern(c, t);	/* (a region's own table: first use of t in it) */
+			idx = c->nty++;
 
 			c->ty[idx] = *t;
 			if (!(t->flags & TF_ALIGNED))
@@ -88,8 +92,9 @@ VPRIV uint32_t ty_intern(cc *c, const ctype *t)
 			}
 			return idx;
 		}
-		if (ty_eq(&c->ty[e], t))
+		if (ty_eq(&c->ty[e], t)) {
 			return e;
+		}
 	}
 }
 
@@ -100,6 +105,8 @@ VPRIV uint32_t ty_new(cc *c, int kind)
 	memset(&c->ty[idx], 0, sizeof(ctype));
 	c->ty[idx].kind = (uint8_t)kind;
 	c->ty[idx].canon = idx;
+	if (unlikely(c->dr_on))
+		dr_new(c, idx);	/* (cc/replay.c: the type log) */
 	return idx;
 }
 
@@ -108,14 +115,14 @@ VPRIV qty ty_ptr(cc *c, qty base)
 	uint32_t i = c->ptrc[base];
 
 	/* the cache may be stale (a restored snapshot): the entry must still be the pointer */
-	if (likely(i && i < c->nty)) {
+	if (likely(i >= c->ptr_lo && i < c->nty)) {	/* (ptr_lo: 1, or a recorded region's first type) */
 		const ctype *p = &c->ty[i];
 
-		if (p->kind == TY_PTR && !p->flags && p->base == base && p->align == 8)
+		if (p->kind == TY_PTR && !p->flags && p->base == base && p->align == CC_PTRSIZE(c))
 			return QT(i, 0);
 	}
 	{
-		ctype t = { .kind = TY_PTR, .size = 8, .align = 8, .base = base };
+		ctype t = { .kind = TY_PTR, .size = CC_PTRSIZE(c), .align = CC_PTRSIZE(c), .base = base };
 
 		i = ty_intern(c, &t);
 		c->ptrc[base] = i;
@@ -150,7 +157,7 @@ VPRIV qty ty_vla(cc *c, qty elem, uint32_t sizenode)
 	return QT(ty_intern(c, &t), 0);
 }
 
-static uint32_t fn_hash(qty ret, const qty *par, uint32_t n, int flags)
+VPRIV uint32_t fn_hash(qty ret, const qty *par, uint32_t n, int flags)
 {
 	uint32_t h = (ret * 0x9E3779B1u) ^ (n * 0x85EBCA77u) ^ (uint32_t)flags;
 
@@ -185,7 +192,11 @@ VPRIV qty ty_func(cc *c, qty ret, const qty *par, uint32_t n, int flags)
 		uint32_t e = c->fnhash[i];
 
 		if (!e) {
-			uint32_t idx = ty_new(c, TY_FUNC);
+			uint32_t idx;
+
+			if (unlikely(c->dr_on))
+				return dr_func(c, ret, par, n, flags);	/* (a region's own table: first use) */
+			idx = ty_new(c, TY_FUNC);
 			ctype *t = &c->ty[idx];
 
 			t->flags = (uint8_t)flags, t->base = ret, t->n = n, t->size = 1, t->align = 4;
@@ -233,7 +244,9 @@ VPRIV qty ty_func(cc *c, qty ret, const qty *par, uint32_t n, int flags)
 VPRIV qty ty_vector(cc *c, qty elem, uint32_t size)
 {
 	const ctype *e = T(c, elem);
-	ctype t = { .kind = TY_VECTOR, .base = QUNQ(elem), .size = size, .align = size > 16 ? 16 : size };
+	/* arm64: at most 16 (the NEON registers); wasm: the vector's size */
+	ctype t = { .kind = TY_VECTOR, .base = QUNQ(elem), .size = size,
+		    .align = size > 16 && !PP_IS_WASM(c->o->target) ? 16 : size };
 
 	t.n = e->size ? (uint32_t)(size / e->size) : 0;
 	return QT(ty_intern(c, &t), 0);
@@ -350,7 +363,7 @@ VPRIV qty unsigned_of(cc *c, qty t)
 VPRIV qty vec_mask_type(cc *c, qty v)
 {
 	uint32_t es = (uint32_t)T(c, T(c, v)->base)->size;
-	int k = es == 1 ? TY_SCHAR : es == 2 ? TY_SHORT : es == 4 ? TY_INT : es == 8 ? TY_LONG : TY_INT128;
+	int k = es == 1 ? TY_SCHAR : es == 2 ? TY_SHORT : es == 4 ? TY_INT : es == 8 ? CC_I64(c, false) : TY_INT128;
 
 	return ty_vector(c, prim(k), (uint32_t)T(c, v)->size);
 }

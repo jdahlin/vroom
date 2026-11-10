@@ -1,0 +1,56 @@
+extra_tokens.c:3:10: warning: extra tokens at end of #ifdef directive [-Wextra-tokens]
+    3 | #ifdef A junk
+      |          ^
+      |          //
+extra_tokens.c:4:8: warning: extra tokens at end of #endif directive [-Wextra-tokens]
+    4 | #endif junk
+      |        ^
+      |        //
+extra_tokens.c:5:11: warning: extra tokens at end of #ifndef directive [-Wextra-tokens]
+    5 | #ifndef B x y
+      |           ^
+      |           //
+extra_tokens.c:6:7: warning: extra tokens at end of #else directive [-Wextra-tokens]
+    6 | #else z
+      |       ^
+      |       //
+extra_tokens.c:8:10: warning: extra tokens at end of #undef directive [-Wextra-tokens]
+    8 | #undef A q
+      |          ^
+      |          //
+extra_tokens.c:9:16: warning: extra tokens at end of #include directive [-Wextra-tokens]
+    9 | #include "h.h" w
+      |                ^
+      |                //
+extra_tokens.c:14:12: warning: extra tokens at end of #elifdef directive [-Wextra-tokens]
+   14 | #elifdef B c
+      |            ^
+      |            //
+extra_tokens.c:16:15: warning: extra tokens at end of #line directive [-Wextra-tokens]
+   16 | #line 5 "f.c" x
+      |               ^
+      |               //
+f.c:7:7: warning: extra tokens at end of #else directive [-Wextra-tokens]
+    7 | #else a
+      |       ^
+      |       //
+f.c:8:8: warning: extra tokens at end of #endif directive [-Wextra-tokens]
+    8 | #endif b
+      |        ^
+      |        //
+f.c:10:7: warning: extra tokens at end of #else directive [-Wextra-tokens]
+   10 | #else c
+      |       ^
+      |       //
+f.c:15:7: warning: extra tokens at end of #else directive [-Wextra-tokens]
+   15 | #else f
+      |       ^
+      |       //
+f.c:18:9: error: token is not a valid binary operator in a preprocessor subexpression
+   18 | #elif 1 g
+      |       ~ ^
+f.c:21:12: warning: extra tokens at end of #elifdef directive [-Wextra-tokens]
+   21 | #elifdef X i
+      |            ^
+      |            //
+13 warnings and 1 error generated.

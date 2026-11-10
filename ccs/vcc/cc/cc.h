@@ -62,7 +62,7 @@ enum {
 
 typedef struct ctype {
 	uint8_t kind, flags;
-	uint16_t _pad;
+	uint16_t ext;		/* vector: ext_vector_type's element count (a distinct type, as clang), 0: GNU */
 	uint32_t align;		/* bytes */
 	uint64_t size;		/* bytes; arrays: elem size * n */
 	qty base;		/* pointee / element / return / enum underlying */
@@ -82,8 +82,8 @@ typedef struct field {
 	uint8_t invalid;	/* its type was an error: uses say nothing more (clang) */
 	uint32_t loc;
 	uint32_t counted_by;	/* counted_by(member): its identifier id */
-	uint32_t depr;		/* deprecated/unavailable: its attrx record (0: none) */
-	uint32_t tdef;		/* the typedef its type was written with (0: none; as sym.tdef) */
+	uint32_t tdef;		/* declared with exactly this typedef name's type (sym), 0: none */
+	uint32_t depr;		/* deprecated/unavailable: attrs record index, 0: none */
 } field;
 
 enum {
@@ -102,8 +102,11 @@ typedef struct tag {
 	uint64_t size;		/* bytes */
 	uint32_t align;		/* bytes */
 	uint32_t maxalign;	/* aligned() on the record, bytes */
+	uint32_t ualign;	/* bytes: the fields' alignment without the record's aligned()
+				   (clang's unadjusted alignment: AAPCS64 argument passing) */
 	uint32_t typedef_name;	/* for anonymous records: first typedef naming it */
 	uint32_t enums, nenum;	/* enum: its enumerator syms (list) */
+	uint32_t depr;		/* deprecated: attrs record index, 0: none */
 } tag;
 
 /* ---------------- symbols ---------------- */
@@ -131,16 +134,17 @@ enum {
 	SF_OVERLOAD = 32768,	/* __attribute__((overloadable)): mangled name, member of an overload set */
 	SF_LAZY = 1u << 17,	/* a header function whose body is kept as tokens, parsed only if referenced */
 	SF_REF = 1u << 18,	/* named anywhere (also in sizeof/typeof): a lazy body must be parsed */
-	SF_INVALID = 1u << 19,	/* its declaration's type was an error: uses say nothing more (clang) */
-	SF_DEPR = 1u << 20,	/* deprecated or unavailable: a use warns (cc/attrcheck.c) */
-	SF_NONNULL = 1u << 21,	/* function: nonnull parameters (its own or a parameter's attribute); parameter: nonnull */
-	SF_WUR = 1u << 22,	/* warn_unused_result / nodiscard */
+	SF_DEPRECATED = 1u << 19,	/* deprecated: attrs record's depr/deprmsg */
+	SF_WUR = 1u << 20,	/* warn_unused_result / nodiscard (attrs record's wur) */
+	SF_NONNULL = 1u << 21,	/* a parameter declared nonnull */
+	SF_INVALID = 1u << 23,	/* declared with an error (incomplete type): uses report nothing more (clang) */
+	SF_UVPEND = 1u << 22,	/* -Wuninitialized: declared without an initializer, not yet assigned in the text */
 };
 
 typedef struct sym {
 	uint32_t name, loc;
 	uint8_t kind, sc;
-	uint16_t fmt;		/* format(printf|scanf, i, j): fmt_pack() (cc/format.c), 0: none */
+	uint16_t nref;		/* local variable: references minus discarded assignments (clang's RefsMinusAssignments) */
 	uint32_t flags;
 	qty ty;
 	uint32_t align;		/* aligned() on the declaration, bytes (0: none) */
@@ -154,12 +158,9 @@ typedef struct sym {
 	uint32_t ovl;		/* overloadable: the next function of the set (0: none); the set's
 				   first function is the one bound in the scope table */
 	uint32_t plb, ple;	/* function: its parameter list's first token and ')'; variable: its declaration's first and last token */
-	union {
-		uint32_t psyms;	/* function: its latest prototype's parameter syms (list index + 1, 0: none) */
-		uint32_t nref;	/* block-scope variable: references minus discarded assignments (-Wunused-but-set-variable) */
-	};
-	uint32_t tdef;		/* variable, function (its return type): the typedef its type was written with (0: none);
-				   diagnostics name the type by it, as clang's sugar ("'int64_t' (aka 'long')") */
+	uint32_t psyms;		/* function: its latest prototype's parameter syms (list index + 1, 0: none) */
+	uint32_t tdef;		/* object/typedef: declared with exactly this typedef name's type (sym), 0: none */
+	uint32_t defloc;	/* the definition's name (a redeclaration keeps the first loc), 0: loc */
 } sym;
 
 /* ---------------- nodes ---------------- */
@@ -167,7 +168,7 @@ typedef struct sym {
 enum {
 	N_NONE,
 	/* expressions */
-	N_NUM,		/* a: constant pool index (integer); aux: NUM_RADIX for a literal not written in decimal */
+	N_NUM,		/* a: constant pool index (integer); aux: NUM_RADIX (a literal not written in decimal), NUM_ENUM */
 	N_FNUM,		/* a: constant pool index (double) */
 	N_STR,		/* a: string index */
 	N_VAR,		/* a: sym */
@@ -222,14 +223,15 @@ enum {
 	CK_VOID,	/* -> void */
 	CK_UNION,	/* -> transparent union / GNU cast to union */
 	CK_NULL,	/* null pointer constant -> pointer */
+	CK_SPLAT,	/* scalar (already the element type) -> every lane of an ext_vector_type */
 	CK_VBITS,	/* GNU vector -> scalar of the same size (the bits) */
 	CK_VADDR,	/* GNU vector rvalue -> pointer to its first lane (v[i] on an rvalue) */
 };
 
-enum { NUM_RADIX = 1 };	/* N_NUM aux */
+enum { NUM_RADIX = 1, NUM_ENUM = 2 };	/* N_NUM aux: spelled not in decimal; an enumerator's value */
 enum { NF_LVALUE = 1, NF_BITFIELD = 2, NF_PAREN = 4, NF_NPC = 8,
        NF_ERR = 16,
-       NF_MACRO = 32, NF_BOUNDS = 64, NF_ENUMC = 128 };	/* NF_ENUMC: an enumerator's value */	/* NF_BOUNDS: a[CONST] already checked (-Warray-bounds) */	/* NF_MACRO: the operator came from a macro expansion (no style warnings) */	/* NF_ERR: stands in for an expression already diagnosed (no follow-on errors) */
+       NF_MACRO = 32, NF_BOUNDS = 64, NF_OVF = 128 };	/* NF_OVF: a constant subexpression overflowed (-Winteger-overflow given once) */	/* NF_BOUNDS: a[CONST] already checked (-Warray-bounds) */	/* NF_MACRO: the operator came from a macro expansion (no style warnings) */	/* NF_ERR: stands in for an expression already diagnosed (no follow-on errors) */
 
 typedef struct node {
 	uint8_t op, flags;
@@ -241,8 +243,16 @@ typedef struct node {
 
 /* ---------------- the TU ---------------- */
 
+/* TLS models, in the order clang strengthens them (the larger wins) */
+enum { VCC_TLS_GD = 1, VCC_TLS_LD, VCC_TLS_IE, VCC_TLS_LE };
+static inline int vcc_tls_model(const char *m)
+{
+	return !strcmp(m, "global-dynamic") ? VCC_TLS_GD : !strcmp(m, "local-dynamic") ? VCC_TLS_LD :
+	       !strcmp(m, "initial-exec") ? VCC_TLS_IE : !strcmp(m, "local-exec") ? VCC_TLS_LE : 0;
+}
+
 typedef struct cc_opts {	/* fields before outfd: parse options, all in the decl cache key */
-	int target;		/* PP_LINUX_AARCH64 / PP_DARWIN */
+	int target;		/* PP_LINUX_AARCH64 / PP_DARWIN / PP_WASM64 */
 	int unsigned_char;
 	int ms_anon;		/* -fms-anonymous-structs / -fms-extensions: "struct S;" members */
 	int short_wchar;	/* -fshort-wchar */
@@ -254,15 +264,25 @@ typedef struct cc_opts {	/* fields before outfd: parse options, all in the decl 
 	int lse;		/* target has LSE atomics (else ldaxr/stlxr loops) */
 	int general_regs_only;	/* -mgeneral-regs-only: no FP/SIMD registers (variadic: no v0-v7 save area) */
 	int no_builtin;		/* -ffreestanding / -fno-builtin: abs() etc. are plain calls */
+	int wasm_sjlj;		/* -mllvm -wasm-enable-sjlj: setjmp/longjmp through wasm exceptions */
 	int implicit_fn;	/* implicit function declarations allowed (... implicit-function-declaration) */
 	int strict_std;		/* -std=cNN (not gnuNN): clang's GNU-only library functions are not known */
+	int conv_warn;		/* -Wno-error= (or -Wno-) of: 1 int-conversion, 2 incompatible-pointer-types,
+				   4 incompatible-function-pointer-types: a warning, not an error */
 	int dump_layouts;	/* append _Static_assert checks for clang to verify */
 	int outfd;
 	int emit;		/* generate code (emit/): 1 = assembly text to outfd, 2 = object into obj */
 	int opt;		/* -O level for code generation: 0 (default, -O0), 1 (-O1, -Og), 2 (-O2, -O3, -Os, -Oz, -O) */
+	int sections;		/* 1 -ffunction-sections, 2 -fdata-sections (ELF) */
+	int debug;		/* -g: DWARF line tables (ELF) */
+	int cfi;		/* -fasynchronous-unwind-tables: .cfi_* (ELF), .eh_frame from the assembler */
+	const char *dbg_dir, *dbg_name;	/* the compilation directory and the main file, as named */
+	int tlsmodel;		/* -ftls-model=: VCC_TLS_*, 0: the default */
+	int pic;		/* ELF: 0 none (-fno-pic), 1 PIE (-fpie, the hosted default), 2 PIC (-fpic) */
 	int nthreads;		/* emitter threads (0: 1) */
 	struct ElfObj *obj;	/* emit == 2: the object (reset first; the caller finishes it) */
 	struct As *as;		/* emit == 2: the assembler bound to obj (one per thread) */
+	struct vbuf *wasm_obj;	/* emit == 2 for wasm64: the object's bytes (arch/wasm/as) */
 } cc_opts;
 
 typedef struct cc cc;
@@ -271,5 +291,9 @@ typedef struct cc cc;
 int cc_run(pp *p, const cc_opts *o);
 /* lazy bodies kept and parsed so far (all TUs of the process) */
 void cc_lz_stats(char *buf, size_t n);
+/* VCC_DRCOV: header-cache hits that start and end at file-scope declaration boundaries */
+void cc_drcov_stats(char *buf, size_t n);
+/* VCC_DR / VCC_DRREC: per-region declaration replay (cc/replay.c) */
+void cc_dr_stats(char *buf, size_t n);
 
 #endif

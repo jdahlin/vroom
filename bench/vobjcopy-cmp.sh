@@ -23,12 +23,22 @@ $L/llvm-objcopy -O binary -j .modinfo --dump-section .modinfo=$T/r.modinfo $IN /
 $B/vobjcopy -O binary -j .modinfo --dump-section .modinfo=$T/m.modinfo $IN /dev/null
 chk $T/r.modinfo $T/m.modinfo modinfo
 both vdso -S $W/arch/arm64/kernel/vdso/vdso.so.dbg @O
+both vdso-g --strip-debug $W/arch/arm64/kernel/vdso/vdso.so.dbg @O
+both pi-g --strip-debug $W/arch/arm64/kernel/pi/map_kernel.o @O
+both pi-rm -R .comment $W/arch/arm64/kernel/pi/map_kernel.o @O
+both pi-redef --redefine-sym map_range=mr --redefine-sym=memset=ms $W/arch/arm64/kernel/pi/map_kernel.o @O
+printf hello > $T/blob; both pi-add --add-section .vroom=$T/blob $W/arch/arm64/kernel/pi/map_kernel.o @O
+both pi-dl --add-gnu-debuglink=$T/blob $W/arch/arm64/kernel/pi/map_kernel.o @O
+both pi-ssf --set-section-flags .text=alloc,readonly,code --set-section-flags .bss=alloc,load,contents $W/arch/arm64/kernel/pi/map_kernel.o @O
 for f in idreg-override map_kernel map_range relocate lib-fdt lib-fdt_ro; do
 	x=; case $f in lib-*) x=--prefix-alloc-sections=.init;; esac
 	both $f --prefix-symbols=__pi_ --remove-section=.note.gnu.property $x $W/arch/arm64/kernel/pi/$f.o @O
 done
 $L/llvm-nm -p -S $IN > $T/r.nm; $B/vnm -p -S $IN > $T/m.nm; chk $T/r.nm $T/m.nm "nm -p -S"
+for o in -u -g -U --undefined-only --extern-only --defined-only; do
+  $L/llvm-nm $o $IN > $T/r.nm; $B/vnm $o $IN > $T/m.nm; chk $T/r.nm $T/m.nm "nm $o"; done
 V=$W/arch/arm64/kernel/vdso/vdso.so.dbg
 $L/llvm-nm $V > $T/r.vnm; $B/vnm $V > $T/m.vnm; chk $T/r.vnm $T/m.vnm "nm vdso"
+$L/llvm-nm -D $V > $T/r.vnm; $B/vnm -D $V > $T/m.vnm; chk $T/r.vnm $T/m.vnm "nm -D vdso"
 echo "$ok identical, $bad different"
 [ $bad = 0 ]

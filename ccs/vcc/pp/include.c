@@ -87,12 +87,12 @@ static const vlex_file *find_include_(pp *p, const ctx *from, const char *name, 
 	if (next && from && from->sdir < 0)
 		next = false;	/* #include_next outside the search path: a normal search */
 	if (!angled && !next) {
-		const char *fp = from && from->f != &p->builtin ? from->spath : "";
+		const char *fp = from && from->f != &p->builtin ? from->spath : "./";
 		const char *sl = strrchr(fp, '/');
 		size_t dl = sl ? (size_t)(sl - fp) + 1 : 0;
 
 		if (!sl && fp[0])
-			fp = "./", dl = 2;	/* clang: the includer's directory, "." spelled out */
+			fp = "./", dl = 2;	/* clang: the includer's directory, "." spelled out (-include's too) */
 		if (dl + nlen + 1 < sizeof(buf)) {
 			memcpy(buf, fp, dl);
 			memcpy(buf + dl, name, nlen);
@@ -184,14 +184,80 @@ static inline int32_t inc_mode(const pp *p, const ctx *from, bool angled, bool n
 	int32_t start = nx ? from->sdir + 1 : angled ? p->o->nquote : 0;
 
 	*fp = "", *dl = 0;
-	if (!angled && !nx && from->f != &p->builtin)
-		*fp = from->spath, *dl = from->sdl;
+	if (!angled && !nx) {
+		*fp = from->f != &p->builtin ? from->spath : "", *dl = from->f != &p->builtin ? from->sdl : 0;
+		if (!*dl)
+			*fp = "./", *dl = 2;	/* as find_include_ spells it (-include's too) */
+	}
 	return start * 4 + angled * 2 + nx;
 }
+
+/* is a header found in search directory sdir in a system directory (inc_sys without the includer's case) */
+static inline uint8_t dir_sys(const pp *p, int32_t sdir)
+{
+	return sdir == -2 || (sdir >= 0 && p->o->nsys1 && sdir >= p->o->nsys1 - 1);
+}
+
+/* the innermost recording level made a lookup that depended on the first used search directories */
+static void rec_lookup(pp *p, const ctx *from, const char *name, size_t nlen, bool angled, bool next,
+		       const vlex_file *f, int32_t sdir, const char *path)
+{
+	struct hrec *r = &p->rec;
+	hlook *l;
+
+	if (r->nlk >= HC_MAXLK || nlen >= 4096) {
+		HC_BAD(p);
+		return;
+	}
+	l = &r->lk[r->nlk++];
+	*l = (hlook){ pstrdup(p, name, nlen), from ? from->spath : NULL, f ? path : NULL, f, from ? from->sdir : -1,
+		      f ? sdir : -1, (uint32_t)nlen, from ? from->sdl : 0, angled, next, from && from->f == &p->builtin,
+		      f ? dir_sys(p, sdir) : 0 };
+}
+
+static const vlex_file *find_include_at(pp *p, const ctx *from, const char *name, size_t nlen, bool angled,
+					bool next, int32_t *sdir, const char **path, const incent **ie, uint32_t *usedp);
 
 /* *ie: the cache entry of the answer, if it has one */
 VPRIV const vlex_file *find_include(pp *p, const ctx *from, const char *name, size_t nlen,
 				     bool angled, bool next, int32_t *sdir, const char **path, const incent **ie)
+{
+	uint32_t used;
+	const vlex_file *f = find_include_at(p, from, name, nlen, angled, next, sdir, path, ie, &used);
+
+	inc_used(p, used);
+	if (unlikely(p->rec.on) && used)
+		rec_lookup(p, from, name, nlen, angled, next, f, *sdir, *path);
+	return f;
+}
+
+/* each of e's own lookups that depended on the search directories gives the same answer here */
+VPRIV bool hc_looks_ok(pp *p, const hent *e)
+{
+	for (uint32_t i = 0; i < e->nlk; i++) {
+		const hlook *l = &e->lk[i];
+		ctx fc;
+		int32_t sd = -1;
+		const char *path = NULL;
+		uint32_t used;
+		const vlex_file *f;
+
+		if (l->from) {
+			memset(&fc, 0, sizeof(fc));
+			fc.f = l->from_bi ? &p->builtin : NULL;
+			fc.spath = l->from, fc.sdl = l->from_sdl, fc.sdir = l->from_sdir;
+		}
+		f = find_include_at(p, l->from ? &fc : NULL, l->name, l->nlen, l->angled, l->next, &sd, &path, NULL, &used);
+		if (f != l->f)
+			return false;
+		if (f && (sd != l->sdir || dir_sys(p, sd) != l->sys || strcmp(path, l->path)))
+			return false;
+	}
+	return true;
+}
+
+static const vlex_file *find_include_at(pp *p, const ctx *from, const char *name, size_t nlen, bool angled,
+					bool next, int32_t *sdir, const char **path, const incent **ie, uint32_t *usedp)
 {
 	uint32_t used, i, sig = p->sig, fsig;
 	const vlex_file *f;
@@ -263,7 +329,7 @@ hit:
 slow:
 	f = find_include_(p, from, name, nlen, angled, next, sdir, path, &used);
 done:
-	inc_used(p, used);
+	*usedp = used;
 	return f;
 }
 
@@ -293,6 +359,66 @@ static void add_fent(pp *p, ctx *c, const vlex_file *f, const char *name)
 	c->fe = p->nfe++;
 	c->loc = e->base;
 	p->next_base += f->size + 1;
+}
+
+/* a file skipped by its include guard or #pragma once: still a dependency,
+ * under this spelling (clang's FileSkipped).  An entry with no file and a
+ * one-byte span holds no location (loc_fent passes over it). */
+/* would clang skip f by its guard: it learns a guard at the end of the file,
+ * so f must have been read to its end in this TU (not open now).  Otherwise
+ * clang enters f, and -H shows it. */
+static bool guard_known(const pp *p, const vlex_file *f)
+{
+	bool seen = false;
+
+	for (uint32_t i = 0; i < p->nfe && !seen; i++)
+		seen = p->fe[i].f == f;
+	for (int i = 0; i < p->depth && seen; i++)
+		if (p->cx[i].type == C_FILE && p->cx[i].f == f)
+			return false;
+	return seen;
+}
+
+/* -H: ". path" with a dot per level, as clang (files -include names are not shown) */
+static void show_include(pp *p, const char *path)
+{
+	uint32_t d = 0;
+
+	for (int i = 0; i < p->depth; i++) {
+		if (p->cx[i].type == C_FILE && p->cx[i].f == &p->builtin && i + 1 < p->depth - 1)
+			return;	/* inside an -include'd file */
+		d += p->cx[i].type == C_FILE && p->cx[i].f != &p->builtin;
+	}
+	dprintf(p->o->errfd ? p->o->errfd : 2, "%.*s %s\n", (int)(d > 1 ? d - 1 : 1),
+		"................................................................", path);
+}
+
+/* is a header found in search directory sdir a system header (-1: the includer's
+ * directory): 1, 2 for an extern "C" one */
+VPRIV uint8_t inc_sys(pp *p, int32_t sdir)
+{
+	const ctx *from = cur_file(p);
+
+	uint8_t s = from ? p->fe[from->fe].sys : 0, d = 0;	/* clang: the includer's, if higher */
+
+	if (sdir >= 0 && p->o->nsys1 && sdir >= p->o->nsys1 - 1)
+		d = 1 + (sdir >= p->o->xc0 && sdir < p->o->xc1);	/* 2: extern "C" */
+	else if (sdir == -2)
+		d = 1;
+	else if (sdir != -1)
+		return 0;
+	return d > s ? d : s;
+}
+
+VPRIV void dep_only(pp *p, const char *path, uint8_t sys)
+{
+	fent *e = &p->fe[p->nfe++];
+
+	memset(e, 0, sizeof(*e));
+	e->spath = path;
+	e->name = "";
+	e->sys = sys;
+	e->base = p->next_base++;
 }
 
 /*
@@ -395,16 +521,23 @@ VPRIV void enter_file(pp *p, const vlex_file *f, const char *path, int32_t sdir)
 	int oi;
 	ctx *c;
 
-	if (fi->guard && mguard(p, fi->guard))
+	sys = inc_sys(p, sdir);
+	if (fi->guard && mguard(p, fi->guard) && !(unlikely(p->o->show_includes || p->out_text) && !guard_known(p, f))) {
+		if (p->o->deps)
+			dep_only(p, path, sys);
 		return;
+	}
 	oi = once_index(p, f);
 	if (unlikely(p->rec.on) && p->rec.nord < HC_MAXORD &&
 	    (oi < 0 || oi < (int)p->rec.lev[p->rec.n - 1].nonce0))
 		p->rec.ord[p->rec.nord++] = (honce){ f, oi >= 0 };
-	if (oi >= 0)
+	if (oi >= 0) {
+		if (p->o->deps)
+			dep_only(p, path, sys);
 		return;
-	sys = sdir == -2 || (sdir >= 0 && p->o->nsys >= 0 && sdir >= p->o->nsys) ||
-	      (sdir == -1 && from && p->fe[from->fe].sys);
+	}
+	if (unlikely(p->out_text) && f != &p->builtin)
+		text_file_change(p, from, 1);
 	if (f != &p->builtin && from && hc_top(p)) {
 		int d0 = p->depth;
 		uint32_t b0 = p->next_base;
@@ -415,6 +548,8 @@ VPRIV void enter_file(pp *p, const vlex_file *f, const char *path, int32_t sdir)
 		bool top = p->tokmode == 2 && (p->nfile == 1 || (p->nfile == 2 && from->f == &p->builtin));
 
 		if (k && hc_try(p, k)) {
+			if (unlikely(pp_drcov) && p->tokmode == 2)
+				drcov_hit(p, d0);
 			if (top) {
 				top_event(p, p->hc_last, b0, c0, 0, 1);
 				if (p->depth > d0)
@@ -445,8 +580,13 @@ VPRIV void enter_file(pp *p, const vlex_file *f, const char *path, int32_t sdir)
 		c->sdl = sl ? (uint32_t)(sl - path) + 1 : 0;
 	}
 	p->nfile++;
+	if (unlikely(p->o->show_includes) && from && f != &p->builtin && from->f != &p->builtin)
+		show_include(p, path);
 	add_fent(p, c, f, path);
+	p->fe[c->fe].cpos = f->src;
 	p->fe[c->fe].sys = sys;
+	if (unlikely(p->lmark) && f != &p->builtin)
+		lm_enter(p, &p->fe[c->fe]);
 	p->fe[c->fe].from = from && from->f != &p->builtin && from->i ? from->loc + from->vt[from->i - 1].off : 0;
 	if (unlikely(fi->bad)) {
 		/* clang's message at the directive; the file is not processed */
@@ -488,6 +628,15 @@ VPRIV void include(pp *p, ctx *c, uint32_t b, uint32_t e, int kind, uint32_t loc
 						p->sig != HNONE
 					    ? &((pfile *)c->fi)->inc[c->di - 1] : NULL;
 
+	if (b < e && (c->vt[b].kind == T_STRING || c->vt[b].kind == T_LESS)) {	/* -Wextra-tokens */
+		uint32_t i = b + 1;
+
+		if (c->vt[b].kind == T_LESS)
+			while (i < e && c->vt[i - 1].kind != T_GREATER)
+				i++;
+		if (unlikely(i < e && c->vt[i - 1].kind != T_LESS))
+			dir_extra_tok(p, c, b - 1, i);
+	}
 	if (site && (ie = atomic_load_explicit(site, memory_order_acquire))) {
 		const char *fp;
 		size_t dl;
@@ -496,6 +645,9 @@ VPRIV void include(pp *p, ctx *c, uint32_t b, uint32_t e, int kind, uint32_t loc
 		if (ie->sig == p->sig && ie->mode == mode && inc_valid(p, ie) && dl < ie->klen && !ie->key[dl] &&
 		    !memcmp(ie->key, fp, dl)) {
 			inc_used(p, ie->used);
+			if (unlikely(p->rec.on) && ie->used)
+				rec_lookup(p, c, ie->key + dl + 1, ie->klen - dl - 1, c->vt[b].kind == T_LESS,
+					   kind == D_INCLUDE_NEXT, ie->f, ie->sdir, ie->path);
 			enter_file(p, ie->f, ie->path, ie->sdir);
 			return;
 		}
@@ -533,4 +685,332 @@ VPRIV void include(pp *p, ctx *c, uint32_t b, uint32_t e, int kind, uint32_t loc
 	if (site && ie)
 		atomic_store_explicit(site, ie, memory_order_release);
 	enter_file(p, f, path, sd);
+}
+
+/* ---------------- #embed (C23) ---------------- */
+
+/* a #embed / __has_embed parameter list (after the file name) */
+typedef struct embprm {
+	uint64_t limit, offset;
+	bool has_limit, unknown, bad;
+	const ptok *pre, *suf, *emp;	/* prefix(), suffix(), if_empty() token lists */
+	uint32_t npre, nsuf, nemp;
+} embprm;
+
+/* the spelling of n (0..255): emb_digits[4 n] */
+static char emb_digits[256 * 4 + 16];
+static pthread_once_t emb_once = PTHREAD_ONCE_INIT;
+
+static void emb_init(void)
+{
+	for (int i = 0; i < 256; i++)
+		snprintf(emb_digits + 4 * i, 4, "%d", i);
+}
+
+/* tokens up to the ')' that matches the '(' just read; the list is copied to tmp */
+static bool emb_list(pp *p, const ptok **out, uint32_t *n, bool exp)
+{
+	ptok buf[256], t;
+	uint32_t k = 0;
+	int depth = 0;
+
+	for (;;) {
+		if (exp)
+			next_exp(p, &t);
+		else
+			raw(p, &t);
+		if (t.kind == T_EOF)
+			return false;
+		if (t.kind == T_LPAREN)
+			depth++;
+		else if (t.kind == T_RPAREN && depth-- == 0)
+			break;
+		if (k < 256)
+			buf[k++] = t;
+	}
+	{
+		ptok *c = varena_alloc(&p->tmp, (k ? k : 1) * sizeof(ptok));
+
+		memcpy(c, buf, k * sizeof(ptok));
+		*out = c, *n = k;
+	}
+	return true;
+}
+
+/* an integer parameter value: a number (after expansion) up to ')' */
+static bool emb_int(pp *p, uint64_t *v)
+{
+	const ptok *l;
+	uint32_t n;
+	char s[64];
+
+	if (!emb_list(p, &l, &n, true))
+		return false;
+	if (n != 1 || l[0].kind != T_NUMBER || l[0].len >= sizeof s)
+		return eval_ptoks(p, l, n, v);	/* a constant expression (clang) */
+	memcpy(s, l[0].s, l[0].len), s[l[0].len] = 0;
+	{
+		char *e;
+		size_t len = strlen(s);
+
+		while (len && strchr("uUlL", s[len - 1]))
+			s[--len] = 0;
+		*v = strtoull(s, &e, 0);
+		return *e == 0;
+	}
+}
+
+/* parameters until end (')' for __has_embed, the line's end for #embed); t: the first token after the name */
+static void emb_params(pp *p, embprm *m, bool paren, uint32_t loc)
+{
+	ptok t;
+
+	for (;;) {
+		char nm[64];
+		size_t nl = 0;
+
+		next_exp(p, &t);
+		if (t.kind == T_EOF || (paren && t.kind == T_RPAREN))
+			return;
+		if (t.kind != T_IDENT || t.len >= 40) {
+			m->bad = true;
+			return;
+		}
+		memcpy(nm, t.s, t.len), nl = t.len;
+		next_exp(p, &t);
+		if (t.kind == T_COLONCOLON || t.kind == T_COLON) {	/* vendor::name */
+			if (t.kind == T_COLON)
+				next_exp(p, &t);
+			nm[nl++] = ':', nm[nl++] = ':';
+			next_exp(p, &t);
+			if (t.kind != T_IDENT || nl + t.len >= sizeof nm) {
+				m->bad = true;
+				return;
+			}
+			memcpy(nm + nl, t.s, t.len), nl += t.len;
+			next_exp(p, &t);
+		}
+		nm[nl] = 0;
+		/* __x__ is x */
+		if (nl > 4 && nm[0] == '_' && nm[1] == '_' && nm[nl - 1] == '_' && nm[nl - 2] == '_')
+			memmove(nm, nm + 2, nl - 4), nm[nl - 4] = 0;
+		if (t.kind != T_LPAREN) {
+			m->bad = true;
+			return;
+		}
+		if (!strcmp(nm, "limit")) {
+			m->has_limit = emb_int(p, &m->limit) || (m->bad = true, false);
+		} else if (!strcmp(nm, "clang::offset")) {
+			if (!emb_int(p, &m->offset))
+				m->bad = true;
+		} else if (!strcmp(nm, "prefix")) {
+			if (!emb_list(p, &m->pre, &m->npre, false))
+				m->bad = true;
+		} else if (!strcmp(nm, "suffix")) {
+			if (!emb_list(p, &m->suf, &m->nsuf, false))
+				m->bad = true;
+		} else if (!strcmp(nm, "if_empty")) {
+			if (!emb_list(p, &m->emp, &m->nemp, false))
+				m->bad = true;
+		} else {
+			const ptok *l;
+			uint32_t n;
+
+			if (!paren)
+				error(p, loc, "unknown embed preprocessor parameter '%s'", nm);
+			m->unknown = true;
+			if (!emb_list(p, &l, &n, false)) {
+				m->bad = true;
+				return;
+			}
+		}
+		if (m->bad)
+			return;
+	}
+}
+
+/* clang's #embed search: an absolute name; "x" in the includer's directory; then the --embed-dir
+   directories (-I is not searched) */
+static const vlex_file *find_embed(pp *p, const ctx *from, const char *name, size_t nlen, bool angled, const char **path)
+{
+	char buf[4096];
+	const vlex_file *f;
+	const char *fp;
+	const char *sl;
+	size_t dl;
+
+	if (nlen + 3 >= sizeof(buf))
+		return NULL;
+	if (name[0] == '/') {
+		memcpy(buf, name, nlen), buf[nlen] = 0;
+		*path = pstrdup(p, buf, nlen);
+		return try_path(p->o, buf, nlen);
+	}
+	if (!angled) {
+		fp = from && from->f != &p->builtin ? from->spath : "./";
+		sl = strrchr(fp, '/');
+		dl = sl ? (size_t)(sl - fp) + 1 : 0;
+		if (!sl && fp[0])
+			fp = "./", dl = 2;
+		if (dl + nlen + 1 < sizeof(buf)) {
+			memcpy(buf, fp, dl), memcpy(buf + dl, name, nlen), buf[dl + nlen] = 0;
+			if ((f = try_path(p->o, buf, dl + nlen))) {
+				*path = pstrdup(p, buf, dl + nlen);
+				return f;
+			}
+		}
+	}
+	for (int k = 0; k < p->o->nedirs; k++) {	/* --embed-dir, in order */
+		const char *d = p->o->edirs[k];
+		size_t l = strlen(d);
+
+		if (l + nlen + 2 >= sizeof(buf))
+			continue;
+		memcpy(buf, d, l);
+		if (l && buf[l - 1] != '/')
+			buf[l++] = '/';
+		memcpy(buf + l, name, nlen), l += nlen, buf[l] = 0;
+		if ((f = try_path(p->o, buf, l))) {
+			*path = pstrdup(p, buf, l);
+			return f;
+		}
+	}
+	return NULL;
+}
+
+/* path names the main file (clang lists it once in -M) */
+static bool emb_is_main(const pp *p, const char *path)
+{
+	const char *m = p->o->main;
+
+	if (!m)
+		return false;
+	while (path[0] == '.' && path[1] == '/')
+		path += 2;
+	while (m[0] == '.' && m[1] == '/')
+		m += 2;
+	return !strcmp(path, m);
+}
+
+/* the bytes #embed takes from f: [*b, *b + *n) */
+static void emb_range(const vlex_file *f, const embprm *m, uint64_t *b, uint64_t *n)
+{
+	uint64_t sz = f->size;
+
+	*b = m->offset < sz ? m->offset : sz;
+	*n = sz - *b;
+	if (m->has_limit && m->limit < *n)
+		*n = m->limit;
+}
+
+/* #embed: the file's bytes as a comma-separated list of integer literals */
+VPRIV void embed(pp *p, ctx *c, uint32_t b, uint32_t e, uint32_t loc, uint32_t nloc)
+{
+	char buf[4096];
+	size_t n;
+	bool angled, ok;
+	const char *path;
+	const vlex_file *f;
+	int d = p->depth;
+	ptok t;
+	uint32_t floc;
+	embprm m = { 0 };
+	uint64_t ob, on;
+
+	pthread_once(&emb_once, emb_init);
+	if (!p->o->c23) {
+		pp_dinfo di = { "warning", nloc, NULL, 0, NULL, 0, NULL, 0 };
+
+		pp_warnx(p, "c23-extensions", true, NULL, &di, "#embed is a C23 extension");
+	}
+	push_line(p, c, b, e);
+	raw(p, &t);
+	floc = t.loc;
+	p->in_dir++;
+	ok = (t.kind == T_STRING || t.kind == T_LESS || t.kind == T_IDENT) && header_name(p, buf, sizeof(buf), &n, &angled, &t);
+	if (ok)
+		emb_params(p, &m, false, loc);
+	p->in_dir--;
+	pop_to(p, d);
+	if (!ok) {
+		error(p, loc, "expected \"FILENAME\" or <FILENAME>");
+		return;
+	}
+	if (m.bad || m.unknown)
+		return;
+	f = find_embed(p, c, buf, n, angled, &path);
+	if (!f) {
+		pp_dinfo di = { "fatal error", floc, NULL, 0, NULL, 0, NULL, 0 };	/* (clang: no range for #embed) */
+
+		pp_diagx(p, &di, "'%.*s' file not found", (int)n, buf);
+		if (p->fatal_jb && !p->o->fatal_continue)
+			longjmp(*p->fatal_jb, 1);
+		return;
+	}
+	if (p->o->deps && !emb_is_main(p, path))
+		dep_only(p, path, false);
+	emb_range(f, &m, &ob, &on);
+	if (p->rec.n)	/* the header cache does not record #embed's bytes: the open regions are not cached */
+		p->rec.nbad = p->rec.n;
+	{
+		uint64_t nt = on ? m.npre + 2 * on - 1 + m.nsuf : m.nemp;
+		ptok *o, *w;
+
+		if (!nt)
+			return;
+		o = w = varena_alloc(&p->tmp, nt * sizeof(ptok));
+		if (on) {
+			memcpy(w, m.pre, m.npre * sizeof(ptok)), w += m.npre;
+			for (uint64_t i = 0; i < on; i++) {
+				unsigned char v = (unsigned char)f->src[ob + i];
+
+				if (i) {
+					*w++ = (ptok){ ",", 1, 0, loc, T_COMMA, 0, 0 };
+				}
+				*w++ = (ptok){ emb_digits + 4 * v, (uint32_t)strlen(emb_digits + 4 * v), 0, loc, T_NUMBER,
+					       (uint8_t)(i ? TF_SPACE : 0), 0 };
+			}
+			w[-1].flags |= PF_EMBEND;
+			memcpy(w, m.suf, m.nsuf * sizeof(ptok)), w += m.nsuf;
+		} else {
+			memcpy(w, m.emp, m.nemp * sizeof(ptok)), w += m.nemp;
+		}
+		w[-1].flags |= PF_EMBEND;
+		p->emb_tail = !on ? 1 : m.nsuf ? 2 : 0;	/* markers left: 2 bytes then suffix, 1 if_empty/suffix */
+		push_ptok(p, o, (uint32_t)(w - o), 0, 0, 0);
+	}
+}
+
+/* __has_embed( name params ): 0 not found (or an unknown parameter), 1 found, 2 empty */
+VPRIV int has_embed(pp *p, const ctx *fc, uint32_t loc)
+{
+	char buf[4096];
+	size_t n;
+	bool angled;
+	const char *path;
+	const vlex_file *f;
+	ptok r;
+	embprm m = { 0 };
+	uint64_t ob, on;
+
+	raw(p, &r);
+	if (r.kind != T_LPAREN) {
+		error(p, loc, "missing '(' after __has_embed");
+		return 0;
+	}
+	raw(p, &r);
+	if (!header_name(p, buf, sizeof(buf), &n, &angled, &r)) {
+		error(p, loc, "invalid __has_embed argument");
+		return 0;
+	}
+	emb_params(p, &m, true, loc);
+	if (m.bad || m.unknown)
+		return 0;
+	f = find_embed(p, fc, buf, n, angled, &path);
+	if (!f)
+		return 0;
+	if (p->o->deps && !emb_is_main(p, path))
+		dep_only(p, path, false);
+	emb_range(f, &m, &ob, &on);
+	return on ? 1 : 2;
 }

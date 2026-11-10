@@ -5,9 +5,7 @@ pragma_diagnostic.c:14:34: warning: format specifies type 'int' but the argument
 pragma_diagnostic.c:22:22: error: unused variable 'e' [-Werror,-Wunused-variable]
    22 | void err(void) { int e; }
       |                      ^
-      = help: remove it, or mark it __attribute__((unused)) if it is needed
 pragma_diagnostic.c:26:6: warning: unused variable 'before' [-Wunused-variable]
    26 |         int before;
       |             ^~~~~~
-      = help: remove it, or mark it __attribute__((unused)) if it is needed
 2 warnings and 1 error generated.

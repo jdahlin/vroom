@@ -98,6 +98,7 @@ typedef struct dspec {
 	uint32_t align;		/* _Alignas */
 	uint32_t loc;
 	uint32_t tagdecl;	/* struct/union/enum defined or declared here: its tag */
+	uint32_t tdef;		/* the typedef name the type came from (sym), 0: none */
 	bool tag_bare;		/* "struct S" with no body (a reference or forward declaration) */
 	uint32_t tds;		/* the typedef the type was named by (its sym, 0: none), for diagnostics */
 } dspec;
@@ -140,6 +141,23 @@ typedef struct fscratch {
 
 /* tu.c */
 VPRIV void *halloc(cc *c, size_t n);
+VPRIV void drcov_boundary(cc *c);
+VPRIV void dr_read(cc *c, int ns, uint32_t id, uint32_t s);
+VPRIV uint32_t dr_intern(cc *c, const ctype *t);
+VPRIV void dr_pragma(cc *c, int kind);
+VPRIV bool dr_boundary(cc *c);
+VPRIV void dr_close(cc *c);
+VPRIV qty dr_func(cc *c, qty ret, const qty *par, uint32_t n, int flags);
+VPRIV void dr_new(cc *c, uint32_t idx);
+VPRIV void dr_tagwrite(cc *c, uint32_t ti);
+/* a write to tag ti (or its record type) after its creation: replay.c's provenance must see it */
+#define DR_TAGWRITE(c, ti)                       \
+	do {                                     \
+		if (unlikely((c)->dr != NULL))   \
+			dr_tagwrite((c), (ti));  \
+	} while (0)
+VPRIV void dr_begin(cc *c);
+VPRIV void dr_end(cc *c);
 /* diag.c */
 VPRIV void error_limit(cc *c);
 VPRIV void diag(cc *c, uint32_t loc, const char *what, const char *fmt, va_list ap);
@@ -172,6 +190,15 @@ extern const char *const w_ped[];	/* { "pedantic" } */
 		if (!((tf) & PF_MACRO)) (c)->dfx = (pp_fixit){ (loc), (loc) + (uint32_t)strlen(ms), "", VDA_MACHINE }; \
 		ext_warn((c), (flag), (groups), (loc), __VA_ARGS__); } } while (0)
 VPRIV __attribute__((format(printf, 6, 7))) vdiag *cc_warn_begin(cc *c, const char *flag, bool on, const char *const *groups, uint32_t loc, const char *fmt, ...);
+extern const char *const w_conv[];
+extern const char *const w_selfassign[];
+VPRIV void rt_defer(cc *c, const char *flag, const char *const *groups, uint32_t loc, const pp_span *r, int nr,
+		    const char *ms, uint32_t mlen, const char *fmt, ...) __attribute__((format(printf, 9, 10)));
+VPRIV void rt_flush(cc *c);
+VPRIV void rt_emit(cc *c, vdiag *d);
+VPRIV void unused_value(cc *c, uint32_t e, bool comma);
+VPRIV bool unused_cmp(cc *c, uint32_t e);
+VPRIV void set_only(cc *c, uint32_t e);
 VPRIV __attribute__((format(printf, 10, 11))) bool cc_warnx(cc *c, const char *flag, bool on, const char *const *groups, uint32_t loc, const pp_span *r, int nr, const pp_fixit *fx, int nfx, const char *fmt, ...);
 VPRIV const char *idname(uint32_t id, int *len);
 VPRIV int idlen_(uint32_t id);
@@ -195,6 +222,7 @@ VPRIV bool is_ilagg(cc *c, qty t);
 VPRIV qty canon(cc *c, qty t);
 VPRIV bool is_signed(cc *c, qty t);
 VPRIV uint32_t ty_hash(const ctype *t);
+VPRIV uint32_t fn_hash(qty ret, const qty *par, uint32_t n, int flags);
 VPRIV uint32_t ty_intern(cc *c, const ctype *t);
 VPRIV uint32_t ty_new(cc *c, int kind);
 VPRIV qty ty_ptr(cc *c, qty base);
@@ -279,6 +307,8 @@ static inline uint32_t dget(uint32_t **dir, uint32_t id);
 VPRIV void scope_open(cc *c);
 VPRIV void scope_close(cc *c);
 VPRIV void scope_close_proto(cc *c);
+VPRIV void unused_statics(cc *c);
+VPRIV void unused_typedefs(cc *c);
 VPRIV uint32_t sym_new(cc *c, int kind, uint32_t name, qty ty, uint32_t loc);
 VPRIV void sym_bind(cc *c, uint32_t s);
 VPRIV uint32_t lookup(cc *c, uint32_t id);
@@ -312,10 +342,8 @@ VPRIV uint32_t string_lit(cc *c);
 VPRIV uint32_t char_lit(cc *c);
 /* const.c */
 VPRIV i128 trunc_to(cc *c, i128 v, qty t);
-VPRIV void const_conv_check(cc *c, uint32_t n, qty to);
 VPRIV bool quiet_rt(const cc *c);
 VPRIV void i128s_(char *b, size_t n, i128 v);
-VPRIV void bf_const_conv(cc *c, uint32_t n, const field *f, uint32_t at);
 VPRIV const field *node_field(cc *c, const node *x);
 VPRIV int clz128(u128 x, unsigned bits);
 VPRIV bool eval(cc *c, uint32_t n, cval *v);
@@ -326,6 +354,13 @@ VPRIV uint32_t cast_node(cc *c, uint32_t n, qty to, int kind);
 VPRIV __attribute__((noinline)) uint32_t decay_slow(cc *c, uint32_t n, qty t, int k);
 static inline uint32_t decay(cc *c, uint32_t n);
 VPRIV const field *bitfield_of(cc *c, uint32_t n);
+VPRIV void bitfield_const(cc *c, const field *f, uint32_t v, uint32_t op);
+VPRIV bool static_init_ok(cc *c, qty ty, uint32_t init, uint32_t *bad);
+VPRIV void deprecated_use(cc *c, uint32_t loc, uint32_t name, const attrs *a, uint32_t dloc);
+VPRIV void tag_deprecate(cc *c, uint32_t ti, const attrs *a);
+VPRIV uint32_t new_attrs(cc *c, const attrs *a);
+VPRIV void unused_result(cc *c, uint32_t e, bool last);
+VPRIV uint32_t expr_loc(cc *c, uint32_t n);
 VPRIV qty promoted(cc *c, uint32_t n);
 VPRIV int conv_kind(cc *c, qty from, qty to, uint32_t n);
 VPRIV bool union_member_for(cc *c, qty u, uint32_t n);
@@ -386,7 +421,7 @@ VPRIV uint32_t expr(cc *c);
 VPRIV bool const_expr(cc *c, i128 *v, uint32_t *np);
 /* attr.c */
 VPRIV void init_attrs(void);
-VPRIV void skip_balanced(cc *c);
+VPRIV uint32_t skip_balanced(cc *c);
 VPRIV uint32_t string_index(cc *c, uint32_t attr);
 VPRIV int mode_kind(cc *c, uint32_t id, bool sgn);
 static inline bool at_attribute(cc *c);
@@ -394,28 +429,19 @@ static inline bool at_std_attr(cc *c);
 VPRIV __attribute__((noinline)) void attribute_list_(cc *c, attrs *a);
 static inline void attribute_list(cc *c, attrs *a);
 static inline bool attrs_empty(const attrs *a);
-VPRIV void merge_attrs(cc *c, attrs *to, const attrs *from);
-VPRIV attrx *attrx_mut(cc *c, attrs *a);
+/* the data model: LP64, but ILP32 for wasm32 (long and pointers 4 bytes) */
+#define CC_ILP32(c) ((c)->o->target == PP_WASM32)
+#define CC_PTRSIZE(c) (CC_ILP32(c) ? 4u : 8u)
+/* the 64-bit integer type: long, or long long under ILP32 */
+#define CC_I64(c, uns) (CC_ILP32(c) ? ((uns) ? TY_ULLONG : TY_LLONG) : ((uns) ? TY_ULONG : TY_LONG))
+VPRIV void merge_attrs(attrs *to, const attrs *from);
+/* flow.c */
+VPRIV int body_falls_off(cc *c, uint32_t body, uint32_t first_label);
+VPRIV void uninit_check(cc *c, uint32_t body, uint32_t first_label);
+/* fmt.c */
+VPRIV uint32_t fmt_attr(cc *c, uint32_t fs);
+VPRIV void format_check(cc *c, uint32_t fs, const uint32_t *args, const qty *aty, const uint32_t *atd, uint32_t nargs);
 VPRIV void c23_word_help(cc *c, vdiag *d, uint32_t id);
-/* format.c */
-VPRIV uint16_t fmt_pack(int kind, unsigned idx, unsigned first);
-VPRIV void format_call(cc *c, uint32_t s, uint32_t *args, uint32_t n);
-VPRIV void discard(cc *c, uint32_t e);
-VPRIV void unused_value(cc *c, uint32_t e, bool comma, int er, bool mac);
-VPRIV int cond_value(cc *c, uint32_t n);
-VPRIV bool has_default(cc *c, uint32_t n);
-VPRIV bool enum_covered(cc *c, const node *sw);
-VPRIV void uninit_check(cc *c, uint32_t body, uint32_t lab0, uint32_t loc);
-VPRIV void rt_emit(cc *c, vdiag *d);
-VPRIV void rt_flush(cc *c);
-/* attrcheck.c */
-VPRIV void depr_use(cc *c, uint32_t s, uint32_t loc);
-VPRIV void depr_report(cc *c, uint32_t name, uint32_t x, uint32_t loc, uint32_t dloc);
-VPRIV uint32_t new_attrs(cc *c, const attrs *a);
-VPRIV void nonnull_call(cc *c, uint32_t fs, const uint32_t *args, uint32_t n, uint32_t rp);
-VPRIV void result_discarded(cc *c, uint32_t e);
-VPRIV void unused_locals(cc *c, uint32_t from, uint32_t to);
-VPRIV void unused_globals(cc *c);
 VPRIV void asm_label(cc *c, attrs *a);
 /* declspec.c */
 VPRIV void unknown_type(cc *c, dspec *ds, bool allow_sc);
@@ -438,15 +464,13 @@ VPRIV uint32_t initializer(cc *c, qty *ty, bool st);
 VPRIV void apply_sym_attrs(cc *c, sym *s, const attrs *a);
 VPRIV uint32_t lib_builtin(cc *c, uint32_t id, uint32_t loc);
 VPRIV bool lib_builtin_known(const char *n);
+VPRIV const char *lib_builtin_sig(const char *n);
 /* mangle.c */
 VPRIV void name_overload(cc *c, uint32_t s);
 /* decl.c */
 VPRIV uint32_t file_scope_sym(cc *c, uint32_t name);
 VPRIV void pragma_weak(cc *c, const char *s, const char *e, const char *base, uint32_t loc);
 VPRIV void weak_declared(cc *c, uint32_t s);
-VPRIV uint32_t ds_tdef(cc *c, const dspec *ds, qty t);
-VPRIV uint32_t expr_tdef(cc *c, uint32_t e, qty t);
-VPRIV const char *tyname_sugar(cc *c, uint32_t e, qty t);
 VPRIV const char *char_sign(cc *c, qty t);
 VPRIV int semi_app(cc *c);
 VPRIV void weak_finish(cc *c);
@@ -454,6 +478,9 @@ VPRIV uint32_t implicit_func(cc *c, uint32_t id, uint32_t loc);
 VPRIV uint32_t lib_func(cc *c, uint32_t id, uint32_t loc);
 VPRIV const char *lib_header(cc *c, uint32_t id);
 VPRIV void include_fix(cc *c, vdiag *d, uint32_t loc, const char *hdr);
+VPRIV qty implicit_lib_type(cc *c, uint32_t id);
+VPRIV uint32_t implicit_lib_func(cc *c, uint32_t id, uint32_t loc, qty t);
+VPRIV qty sig_func_type(cc *c, const char *sig);
 VPRIV void declaration(cc *c, vec *out, bool file);
 /* stmt.c */
 VPRIV uint32_t label_ref(cc *c, uint32_t name, uint32_t loc);
@@ -465,6 +492,7 @@ VPRIV uint32_t statement(cc *c);
 /* lazy.c */
 VPRIV bool lazy_ok(cc *c, uint32_t s, const declr *d);
 VPRIV void lazy_capture(cc *c, uint32_t s, const declr *d);
+VPRIV void lazy_replayed(const lzfn *L, uint32_t n);
 VPRIV void lazy_closure(cc *c);
 /* func.c */
 VPRIV void function_def(cc *c, uint32_t s, const declr *d);
@@ -596,6 +624,25 @@ static inline void setspan(cc *c, uint32_t n, uint32_t b)
 		c->span[n] = (pp_span){ b, c->prevloc };
 }
 
+/* the tracked variable s is assigned inside an if/loop/switch nested deeper than its declaration */
+static inline bool uv_deeper(cc *c, uint32_t s)
+{
+	for (uint32_t i = 0; i < c->nuv; i++)
+		if (c->uv[i] == s)
+			return c->cnd > c->uvc[i];
+	return false;
+}
+
+/* -Wuninitialized tracks it (clang's isTrackedVar: scalar or vector, not _Atomic) */
+static inline bool uv_tracked(cc *c, qty t)
+{
+	t = canon(c, t);
+	if (T(c, t)->flags & TF_ATOMIC)
+		return false;
+	/* (records: clang tracks them in C, not an empty one) */
+	return is_scalar(c, t) || KIND(c, t) == TY_VECTOR || (is_record(c, t) && complete(c, t) && ty_size(c, t) > 0);
+}
+
 static inline uint32_t decay(cc *c, uint32_t n)
 {
 	qty t = N(n)->ty;
@@ -655,22 +702,15 @@ static inline void attribute_list(cc *c, attrs *a)
 }
 
 /* no attribute at all (padding excluded) */
-/* 11 u32 fields then the 18 flag bytes (attr.c asserts the layout) */
+/* the u32 fields then the 0/1 flag bytes packed .. noinstr (attr.c asserts the layout) */
 static inline bool attrs_empty(const attrs *a)
 {
-	const char *p = (const char *)a;
-	uint64_t w[7], o = 0;
+	const unsigned char *p = (const unsigned char *)a;
+	unsigned o = a->prio | a->tlsmodel;
 
-	memcpy(w, p, sizeof(w));
-	for (int i = 0; i < 7; i++)
-		o |= w[i];
-	return !o && !p[56] && !p[57] && !p[58] && !p[59] && !p[60] && !p[61] && !a->fmt;
-}
-
-/* deprecated (1) or unavailable (2), 0: neither (attrx 0 is all zero) */
-static inline unsigned attrs_depr(const cc *c, const attrs *a)
-{
-	return c->attrx[a->ext].depr;
+	for (size_t i = 0; i <= offsetof(attrs, unavail); i++)
+		o |= p[i];
+	return !o;
 }
 
 #endif

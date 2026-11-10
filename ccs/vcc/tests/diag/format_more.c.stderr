@@ -1,0 +1,81 @@
+format_more.c:6:17: warning: format specifies type 'wchar_t *' (aka 'unsigned int *') but the argument has type 'char *' [-Wformat]
+    6 |         pf("%C %S", i, s);
+      |                ~~      ^
+      |                %s
+format_more.c:7:7: warning: invalid conversion specifier 'D' [-Wformat-invalid-specifier]
+    7 |         pf("%D %O %U", i, i, i);
+      |             ~^
+format_more.c:7:10: warning: invalid conversion specifier 'O' [-Wformat-invalid-specifier]
+    7 |         pf("%D %O %U", i, i, i);
+      |                ~^
+format_more.c:7:13: warning: invalid conversion specifier 'U' [-Wformat-invalid-specifier]
+    7 |         pf("%D %O %U", i, i, i);
+      |                   ~^
+format_more.c:7:20: warning: data argument not used by format string [-Wformat-extra-args]
+    7 |         pf("%D %O %U", i, i, i);
+      |            ~~~~~~~~~~     ^
+format_more.c:8:6: warning: incomplete format specifier [-Wformat]
+    8 |         pf("%q", i);
+      |             ^~
+format_more.c:9:12: warning: data argument not used by format string [-Wformat-extra-args]
+    9 |         pf("%5%", i);
+      |            ~~~~~  ^
+format_more.c:10:11: warning: format specifies type 'int' but the argument has type 'char *' [-Wformat]
+   10 |         pf("%d", buf);
+      |             ~~   ^~~
+      |             %s
+format_more.c:11:11: warning: format specifies type 'char *' but the argument has type 'long' [-Wformat]
+   11 |         pf("%s", l + i * 2);
+      |             ~~   ^~~~~~~~~
+      |             %ld
+format_more.c:12:10: warning: more '%' conversions than data arguments [-Wformat-insufficient-args]
+   12 |         pf("%d %d %d", i);
+      |                ~^
+format_more.c:13:21: warning: format specifies type 'int' but the argument has type 'long' [-Wformat]
+   13 |         pf("%2$d %1$s", s, l);
+      |             ~~~~           ^
+      |             %2$ld
+format_more.c:14:12: warning: cannot mix positional and non-positional arguments in format string [-Wformat]
+   14 |         pf("%1$d %d", i, i);
+      |                  ~^
+format_more.c:17:11: warning: format specifies type 'int' but the argument has type 'float' [-Wformat]
+   17 |         pf("%d", f);
+      |             ~~   ^
+      |             %f
+format_more.c:18:8: warning: field width should have type 'int', but argument has type 'double' [-Wformat]
+   18 |         pf("%*d", f, i);
+      |             ~~^   ~
+format_more.c:19:12: warning: format specifies type 'wchar_t *' (aka 'unsigned int *') but the argument has type 'char *' [-Wformat]
+   19 |         pf("%ls", (char*)s);
+      |             ~~~   ^~~~~~~~
+      |             %s
+format_more.c:20:7: warning: invalid conversion specifier 'P' [-Wformat-invalid-specifier]
+   20 |         pf("%P", i);
+      |             ~^
+format_more.c:21:7: warning: invalid conversion specifier 'Z' [-Wformat-invalid-specifier]
+   21 |         pf("%Z", i);
+      |             ~^
+format_more.c:22:17: warning: format specifies type 'int' but the argument has type 'long' [-Wformat]
+   22 |         pf("\x25" "d", l);
+      |             ~~~~~~~~   ^
+      |             %ld
+format_more.c:23:15: warning: data argument not used by format string [-Wformat-extra-args]
+   23 |         pf("%d", sh, "x");
+      |            ~~~~      ^
+format_more.c:24:13: warning: format specifies type 'long long' but the argument has type 'int' [-Wformat]
+   24 |         pf("%lld", 1);
+      |             ~~~~   ^
+      |             %d
+format_more.c:27:7: warning: field width used with 'n' conversion specifier, resulting in undefined behavior [-Wformat]
+   27 |         pf("%5.3n", &i);
+      |             ~^~~~
+format_more.c:27:8: warning: precision used with 'n' conversion specifier, resulting in undefined behavior [-Wformat]
+   27 |         pf("%5.3n", &i);
+      |             ~~^~~
+format_more.c:28:23: warning: data argument not used by format string [-Wformat-extra-args]
+   28 |         pf("%*.*s", i, i, s, i);
+      |            ~~~~~~~           ^
+format_more.c:29:9: warning: field width should have type 'int', but argument has type 'long' [-Wformat]
+   29 |         pf("%-*d", l, i);
+      |             ~~~^   ~
+24 warnings generated.

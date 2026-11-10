@@ -1,25 +1,58 @@
-return_type.c:11:36: warning: non-void function does not return a value in all control paths [-Wreturn-type]
-   11 | int some(int x) { if (x) return 1; }
-      |                       ~            ^ (2) 'some' ends here without a return
-      |                       |
-      |                       (1) 'x' is false
-      = help: 'some' returns 'int': end it with a return statement
-return_type.c:12:24: warning: non-void function does not return a value [-Wreturn-type]
-   12 | int none(int x) { x++; }
-      |                        ^
-      = help: 'none' returns 'int': end it with a return statement
-return_type.c:14:45: warning: non-void function does not return a value [-Wreturn-type]
-   14 | int brk(int x) { for (;;) { if (x) break; } }
+return_type.c:2:26: warning: function declared 'noreturn' should not return [-Winvalid-noreturn]
+    2 | _Noreturn void a(void) { }
+      |                          ^
+return_type.c:3:50: warning: function 'b' declared 'noreturn' should not return [-Winvalid-noreturn]
+    3 | __attribute__((noreturn)) void b(int x) { if (x) return; }
+      |                                                  ^
+return_type.c:3:58: warning: function declared 'noreturn' should not return [-Winvalid-noreturn]
+    3 | __attribute__((noreturn)) void b(int x) { if (x) return; }
+      |                                                          ^
+return_type.c:6:43: warning: function declared 'noreturn' should not return [-Winvalid-noreturn]
+    6 | _Noreturn void d(int x) { if (x) abort(); }
+      |                                           ^
+return_type.c:9:34: warning: non-void function does not return a value in all control paths [-Wreturn-type]
+    9 | int g1(int x) { if (x) return 1; }
+      |                     ~            ^ (2) 'g1' ends here without a return
+      |                     |
+      |                     (1) 'x' is false
+      = help: 'g1' returns 'int': end it with a return statement
+return_type.c:10:16: warning: non-void function does not return a value [-Wreturn-type]
+   10 | int g2(void) { }
+      |                ^
+      = help: 'g2' returns 'int': end it with a return statement
+return_type.c:12:45: warning: non-void function does not return a value [-Wreturn-type]
+   12 | int g4(int x) { while (1) { if (x) break; } }
       |                                             ^
-      = help: 'brk' returns 'int': end it with a return statement
-return_type.c:15:50: warning: non-void function does not return a value in all control paths [-Wreturn-type]
-   15 | int sw(int x) { switch (x) { case 1: return 1; } }
-      |                         ~                        ^ (2) 'sw' ends here without a return
+      = help: 'g4' returns 'int': end it with a return statement
+return_type.c:15:47: warning: non-void function does not return a value in all control paths [-Wreturn-type]
+   15 | int g7(int x) { if (x) goto l; return 0; l: ; }
+      |                                               ^
+      = help: 'g7' returns 'int': end it with a return statement
+return_type.c:18:26: warning: no case matching constant switch condition '3'
+   18 | int g10(int x) { switch (3) { case 2: return 1; } }
+      |                          ^
+return_type.c:18:51: warning: non-void function does not return a value [-Wreturn-type]
+   18 | int g10(int x) { switch (3) { case 2: return 1; } }
+      |                                                   ^
+      = help: 'g10' returns 'int': end it with a return statement
+return_type.c:19:41: warning: non-void function does not return a value in all control paths [-Wreturn-type]
+   19 | int g11(int x) { x ? abort() : (void)0; }
+      |                                         ^
+      = help: 'g11' returns 'int': end it with a return statement
+return_type.c:21:35: warning: non-void function does not return a value [-Wreturn-type]
+   21 | int g13(int x) { if (0) return 1; }
+      |                                   ^
+      = help: 'g13' returns 'int': end it with a return statement
+return_type.c:22:51: warning: non-void function does not return a value in all control paths [-Wreturn-type]
+   22 | int g14(int x) { switch (x) { case 1: return 1; } }
+      |                          ~                        ^ (2) 'g14' ends here without a return
+      |                          |
+      |                          (1) 'x' matches no case
+      = help: 'g14' returns 'int': end it with a return statement
+return_type.c:23:38: warning: non-void function does not return a value in all control paths [-Wreturn-type]
+   23 | int g15(int x) { while (x) return 1; }
+      |                         ~            ^ (2) 'g15' ends here without a return
       |                         |
-      |                         (1) 'x' matches no case
-      = help: 'sw' returns 'int': end it with a return statement
-return_type.c:20:49: warning: non-void function does not return a value in all control paths [-Wreturn-type]
-   20 | int jump(int x) { if (x) goto a; return 1; a: ; }
-      |                                                 ^
-      = help: 'jump' returns 'int': end it with a return statement
-5 warnings generated.
+      |                         (1) 'x' is false, so the loop ends
+      = help: 'g15' returns 'int': end it with a return statement
+14 warnings generated.

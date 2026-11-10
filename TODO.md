@@ -37,7 +37,7 @@ Existing gates that every change must keep green: `vcc-diff.py cmp`
   is still the oracle, so a test also documents clang's behaviour.  Supports
   `/* vcc-flags: ... */` and `/* vcc-threads */` (link the runtime's tiny
   thread shim, or run on the Darwin host, see T3).  One file per fixed bug.
-- [ ] **T2 `abi` suite: cross-compiler calls.** (partial: `bench/vcc-abi.py`, Linux/qemu and `--host` Darwin halves, xfail markers; no generator yet.)  `ccs/vcc/tests/abi/NAME/{caller.c,callee.c}`;
+- [ ] **T2 `abi` suite: cross-compiler calls.** (partial: `bench/vcc-abi.py`, Linux/qemu, `--host` Darwin and `--target wasm64|wasm32` halves, xfail markers; no generator yet.)  `ccs/vcc/tests/abi/NAME/{caller.c,callee.c}`;
   the runner builds the 4 combinations (clang/vcc × caller/callee) and runs
   each, on Linux (qemu, `tests/rt`) and on the Darwin host (native, system
   libc).  Covers argument passing, returns, varargs, layout of shared structs.
@@ -66,7 +66,7 @@ Existing gates that every change must keep green: `vcc-diff.py cmp`
   `llvm-readelf -r -S -s` / `llvm-objdump -d`.  For PIC, TLS, CFI, DWARF,
   section groups, branch ranges — things that are about the object, not
   runtime output.
-- [ ] **T7 `as` corpus: compiler-generated assembly.**  `tests/as/*.c` →
+- [ ] **T7 `as` corpus: compiler-generated assembly.** (started: `bench/vas-corpus.py`: clang -S -O0/-O2 of every test C file, clang -c vs vasm byte for byte: 3035/3035 identical on 2026-11-09, `-g`, `-O2 -fPIC`, `-O3`, `-O3 -march=armv8.6-a+...` and `-O3 -march=armv9-a+sve2`, `-O3 -mcpu=neoverse-v1` (`.prefalign`) too.)  `tests/as/*.c` →
   `clang --target=aarch64-linux-gnu -O2 -S` (and `-g`, `-fPIC`, `-march=armv8.5-a+sve2`)
   → assemble with `vasm` and with clang, compare objects with
   `bench/vas-diff.py` (sections, symbols, relocations, bytes).  Plus
@@ -139,9 +139,10 @@ Existing gates that every change must keep green: `vcc-diff.py cmp`
   sed, gawk, bash, openssl, curl, libxml2, glib), the clang build as
   reference; (3) the whole archive only if (1)-(2) still find bugs at a
   rate that justifies it.
-- [ ] **rt `%Lg` with clang's caller**: `printf("%Lg", f())` of 19.0000000000009L prints
-  `1.9e+01` in the clang+rt reference (vcc's build prints `19`, the right answer).  Seen in tests/vcc/deep_mixed.c,
-  which prints `(double)` with `%.17g` instead.
+- [x] **rt `%Lg` with clang's caller**: `%g` read its exponent with
+  `strtol` from an unterminated buffer, so stack bytes after it decided
+  between `19` and `1.9e+01`.  Done: `tests/vcc/printf_Lg.c`,
+  `deep_mixed.c` prints `%Lg` again.
 - [ ] **T18 runtime gaps hide torture tests.**  34 gcc/tcc tests are
   `ref-fail` (`vcc-ctests.py --show ref-fail`): ~15 only because
   `tests/rt` lacks `pow`, `tanh`, `__divsc3`, `__fixsfti`, `tmpnam`,
@@ -149,6 +150,12 @@ Existing gates that every change must keep green: `vcc-diff.py cmp`
   `__builtin_mul_overflow_p` as calls.  Add them to the runtime (or a
   per-test shim) so the tests run.  *Validate:* `ref-fail` count drops,
   the newly run tests pass or become xfail with a TODO item.
+  (Done: rt has a small libm (exp/log/pow/trig/hyperbolic/frexp),
+  `__divsc3`, `__fixsfti`, `tmpnam`, `atomic_signal_fence` and the
+  `__builtin_exit`/`puts`/`isinff` calls; rt's `sqrt` recursed into itself
+  under `-fno-builtin`.  ref-fail 34 -> 25, all 9 pass.  Left: the clang
+  builds that abort or time out (16), `__builtin_mul_overflow_p`,
+  `__builtin_apply_args`, `__builtin_va_arg_pack`.)
 - [ ] **T19 ASan inside our arenas.**  Poison the mmap'ed arenas behind
   `used` (`ASAN_POISON_MEMORY_REGION` under `__has_feature`), so
   over-reads there are reported.  *Validate:* an injected over-read in a
@@ -294,6 +301,8 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
   a struct/array value one member access / element per part, a union value
   is read again through the member the designator picks.  Left, a clean
   error: the overridden value has side effects (clang evaluates it once).
+  Only a run that starts below an earlier one's end scans for covered runs,
+  so in-order lists stay linear (`init_large.c`, `vcc-timeout: 10`).
   Tests `tests/vcc/desig_override.c`, `desig_override2.c`.)
   `.s = "ab", .s[3] = 'z'` loses "ab"; `.i = iv, .i.y = 99` zeroes `i.x`;
   `[0] = side(), [0] = side()` evaluates both.
@@ -492,23 +501,50 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
 ## Tier 3: features general C needs
 
 ### Codegen (`emit.c`)
-- [ ] **PIC/PIE** [P]: `-fPIC`/`-fPIE` only set macros; `sym_needs_got`
-  `emit.c:2362`.  GOT for preemptible symbols under `-fPIC`, direct for
-  local/hidden, PIE default on hosted Linux as clang.
+- [ ] **PIC/PIE** [P]: done: `cc_opts.pic` from the driver (PIE the hosted
+  default, `-fno-pic`), `sym_needs_got` (arch/a64/emit/value.c) as clang:
+  `-fPIC` every default-visibility non-static symbol, `-fPIE` those not
+  defined in the TU, hidden/protected direct, calls direct; checked by
+  `bench/vcc-pic.py` (GOT relocations vs clang per mode).  Left: T8 (a
+  shared library + executable run under qemu), the vDSO.
   *Validate:* T6 (`ADR_GOT_PAGE`/`LD64_GOT_LO12_NC` for extern data under
   `-fPIC`, none for `static`/hidden); T8 link a shared library + an executable
   using it, run under qemu-user; kernel vDSO built by vcc and boot test.
-- [ ] **ELF TLS** [P] (`emit.c:8883`): local-exec / initial-exec / TLSDESC
-  per `-ftls-model` and PIC, `.tbss`/`.tdata`.
+- [ ] **ELF TLS** [P]: done as clang's defaults: local-exec for a symbol
+  defined in the TU, initial-exec for the others, TLSDESC under `-fPIC`
+  (`I_TLV` with `cond` = model, x0 = the address), `.tdata`/`.tbss`
+  "awT"; relocations checked by `bench/vcc-pic.py` (`tests/pic/tls.c`),
+  run by `tests/vcc/tls_static.c` (`tests/rt` sets `tpidr_el0`).  `-ftls-model=` and
+  `tls_model()` as clang (the attribute over the option, the default if
+  stronger; `tests/pic/tls_model.c`).  Left: local-dynamic proper (now
+  TLSDESC per symbol, clang uses `_TLS_MODULE_BASE_` for local symbols), the
+  register choice (always x0/x1, clang allocates).  `-ffunction-sections`/
+  `-fdata-sections` done (ELF, `.text.f`/`.data.d`/`.tbss.t`...; static
+  locals are named after vcc's symbol, `.bss.x.N`, clang `.bss.f.x`;
+  `tests/vcc/data_sections.c`).
   *Validate:* T6 (relocs per model); T1 run under qemu with the runtime's
   TLS setup (`tests/rt` start.S sets `tpidr_el0`); T3 already has TLV.
-- [ ] **CFI / `.eh_frame`** (and Darwin compact unwind) [P].
-  `-fasynchronous-unwind-tables` default on hosted Linux.
+- [~] **CFI / `.eh_frame`** (and Darwin compact unwind) [P].
+  `-fasynchronous-unwind-tables` default on hosted Linux.  ELF done: the
+  printer writes `.cfi_*` (CFA = x29 + 16 after the frame record, the frame
+  record and callee-saved registers), `-c` goes through the text and the
+  assembler's `.eh_frame` (as `-g`).  *Validated:* `bench/vcc-cfi.py`
+  1393/1393: one FDE per function covering it, `.text` unchanged, every
+  frame function's last row CFA=W29+16 with W29/W30 saved.  Left: Darwin
+  (`__eh_frame` or `__LD,__compact_unwind` in the Mach-O writer), the
+  direct object path (-c with unwind tables goes through the text), an
+  unwinder run (T3 `unwind.c`: no unwinder in the freestanding qemu runtime).
   *Validate:* T6 (`.eh_frame` present, `llvm-dwarfdump --eh-frame` valid
   for every function); T3 `unwind.c` (`_Unwind_Backtrace` from a deep vcc
   call chain lists every frame; a C++ exception thrown through vcc frames,
   built with clang++ for the C++ part).
-- [ ] **DWARF** (`-g`): line tables first, then variables/types.
+- [ ] **DWARF** (`-g`): line tables first, then variables/types.  (Line
+  tables done for ELF: `-g` takes `-c` through the printer text and `as_run`;
+  a row per statement start (none for blocks/case/labels, none for `{`
+  without a prologue, as clang), `.file 0` the main file, a v5 CU with
+  low/high pc.  `bench/vcc-dwarf.py`: 1377/1377 verify, `.text` unchanged by
+  `-g`, `-c` = clang -c of `-S`; rows clang lacks (136 files) are ifs clang
+  -O0 folds.  Left: variables, types, frame base; Mach-O; direct objects.)
   *Validate:* T6 (`llvm-dwarfdump --verify`); `llvm-symbolizer` maps
   addresses to the right lines for `tests/vcc`; later a scripted lldb
   session (break at file:line, print local).
@@ -530,10 +566,11 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
   *Validate:* T6 (canary load/check, `paciasp`/`bti c`, `__fentry__`
   call, nops + `__patchable_function_entries`); T1 for a canary-smash
   detection under qemu.
-- [ ] **Fixed limits** (~~128 call arguments~~ fixed in 42ecfb3, 256 nested loops/switches, 256
-  cleanups, 16 tracked constants, 16M instructions / 4M labels per function).
-  *Validate:* T1 `limits.c` (generated: 300 arguments, 1000-deep nested
-  loops, 1000 cleanups); T5 for the extremes.
+- [x] **Fixed limits** (done: call arguments (42ecfb3), nested loops/switches
+  and cleanups: reserved stacks (4M), no fixed array; the loop pushes had no
+  bound check: tests/vcc `limits.c`, 300 arguments, 1000 nested loops, 300
+  nested switches, 1000 cleanups, also under ASan.)  Kept by design, with a
+  clean error: 16M instructions / 4M labels per function.
 - [x] **`-S` on Darwin writes ELF directives** (`.type @function`).  (Done: emit/darwin.c
   rewrites the text into Apple's dialect; far b.cond/cbz in text are long form on both
   targets.  `bench/vcc-darwin-s.py`: 1428 vcc + gcc-torture tests, -S assembled by `as`,
@@ -566,35 +603,69 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
   tests/vcc/vector_builtins.c; vector diagnostics spell clang's unnamed form, without the
   `(vector of N 'T' values)` note and typedef names) [P].  Library builtins (clang's `F`
   ones, 479) are declared from cc/libbuiltins.inc (gen-libbuiltins.py) as calls to the
-  function: `bench/vcc-builtins.py` 473 -> 302 unknown of 924 for aarch64 Linux;
+  function: `bench/vcc-builtins.py` 473 -> 302 -> 190 unknown of 924 for aarch64 Linux;
   `__has_builtin` is also 1 for what the front end implements (pp_builtin_known, set by
-  cc): 337 -> 237 answer 0, none 1 where clang says 0 (the harness fails on that).  Audit the full list against clang's `Builtins.td` for the target
+  cc): 337 -> 237 -> 153 answer 0, none 1 where clang says 0 (the harness fails on that).  Audit the full list against clang's `Builtins.td` for the target
   (generate a list, try each).
   *Validate:* T1 per builtin; `bench/vcc-builtins.py` that compiles a
   generated use of each clang builtin and reports unknowns.
   (Partly: `__builtin_clzg`/`ctzg`/`popcountg`, `__builtin_ldexp*`,
   `scalbn`, `trunc*`, `round*`, `floorf`/`ceilf`, `fmaxf`/`fminf` added for
   `make -C ccs self-check`; the generic forms reject a fallback whose
-  argument has side effects.)
+  argument has side effects.  Sized `__sync_*_N`, `__sync_swap`, `__c11_atomic_*`, `__builtin_rotate{left,right}N` and the ACLE `__builtin_arm_{nop,yield,wfe,wfi,sev,sevl,clrex,isb,dmb,dsb,trap,clz,clz64,rbit,rbit64,cls,cls64}`: tests/vcc/builtin_rotate_arm.c.)
   ~~`__has_builtin` answers 0 for names absent from the kernel/SDK~~ (done for what vcc
   implements, see above; the rest are builtins vcc lacks).
 - [ ] **SVE in the front end**: `arm_sve.h` types, `target("+sve")`.
   *Validate:* T1 under `qemu -cpu max`, layout checks for the types.
-- [ ] **`ext_vector_type` silently dropped; unknown attributes no warning** [P].
-  `attr_names` `cc.c:5052`.
-  *Validate:* layout `_Static_assert(sizeof(float4)==16)`; T4/diag for
-  `-Wunknown-attributes`.
-- [ ] **Attributes without effect**: `ifunc`, `tls_model`, `alloc_size`,
-  `format`, `nonnull`, `deprecated`, `warn_unused_result`, `returns_twice`,
-  `target`.
-  *Validate:* T6 for `ifunc` (STT_GNU_IFUNC) and `tls_model`; diag tests
+- [x] **`ext_vector_type` silently dropped; unknown attributes no warning** [P].
+  Done: `ext_vector_type` (tests/vcc/ext_vector.c);
+  `-Wunknown-attributes` for GNU syntax from clang's attribute names per
+  target (`cc/gen-attrnames.sh` -> `attrnames.inc`) with its typo
+  correction (SimpleTypoCorrection), 625 generated typos identical to clang
+  on all three targets, diag `unknown_attribute.c`; `[[x]]`, `[[gnu::x]]`,
+  `[[clang::x]]` (`_Clang`, `__gnu__`) and other vendors from
+  `__has_c_attribute` (`unknown_std_attribute.c`, the 625 again per scope).
+- [ ] **`[[__clang__::x]]`**: (done: clang's -Wignored-attributes warning with
+  the `_Clang` fix-it, taken as `clang::`; tests/vcc `attr_clang_macro.c`.)
+  Left: the "expanded from macro" note says `<built-in>:460`, clang `:2`: our
+  predefines are sorted (`gen-ppdata.sh`), clang's in definition order.
+  *Validate:* diag test.
+- [x] **Attributes without effect**: none left.  Accepted
+  and needing nothing today: `returns_twice` (locals live in memory:
+  `tests/vcc/returns_twice.c`; the optimizer item must honour it when
+  locals go to registers), `alloc_size` (only `__builtin_object_size`,
+  where vcc's -1 is the conservative answer), `target` (vas gates no
+  instructions yet: the `.arch` item).  (Done: `format(printf, i, j)`
+  (`-Wformat`, `-Wformat-extra-args`, `-Wformat-insufficient-args`,
+  `-Wformat-invalid-specifier`, `-Wformat-security`; `cc/fmt.c` after
+  clang's CheckFormatHandler, the type answers per target from clang in
+  `cc/fmttab.inc` by `gen-fmttab.py`; Linux and Darwin, not wasm or
+  `-fshort-wchar`; diag `format*.c`, 16 random 300-call files identical to
+  clang on both targets except typedef names, kernel warn 879/879,
+  PostgreSQL 0 differences); `nonnull` (`-Wnonnull`
+  for null constants, plain/indexed/on a parameter: diag `nonnull.c`);
+  `ifunc`
+  (STT_GNU_IFUNC, global as clang, direct under PIE like an alias:
+  `tests/pic/ifunc.c`, `alias.c` in vcc-pic.py, which now also compares
+  symbol types and bindings); `deprecated`
+  (functions, variables, typedefs, tags, enumerators; not inside a
+  deprecated function) and `warn_unused_result`/`[[nodiscard]]`, also in
+  statement expressions: diag `deprecated*.c`; kernel warn 879/879,
+  PostgreSQL's 1574 files no new warnings.)
+  *Validate:* T6 for `ifunc` (STT_GNU_IFUNC); diag tests
   for `format`/`nonnull`/`deprecated`/`warn_unused_result` warnings.
 - [ ] **Blocks (`^{}`)** for Darwin headers.
   *Validate:* T3 compile programs including `<dispatch/dispatch.h>` and
   calling a block.
-- [ ] **Scope details**: K&R parameter-list tags (`cc.c:7341`),
-  declarations after labels (`cc.c:7886`).
-  *Validate:* T1 small cases; T4 for the error cases.
+- [x] **Scope details**: (done: a declaration after a label, `case` or
+  `default` (C23; -Wc23-extensions before), also after `__attribute__`s;
+  a prototype definition's parameter-list tags are visible in its body, K&R's
+  not (clang); -Wvisibility, -Wdeprecated-non-prototype (after the body);
+  "variable has incomplete type 'T'" with the forward-declaration note, also
+  with an initializer, the variable then invalid (no follow-on member error);
+  "array has incomplete element type"; "previous definition is here" for a
+  defined function: tests/vcc `label_decl.c`, diag `label_decl_kr_vis.c`,
+  `incomplete_var.c`, `conflict_prev_def.c`.)
 - [ ] **Fixed limits** (struct members now 1M, pointer levels 1024, nested
   declarators stack-guarded): 4096 struct members (`cc.c:6255,6313`), 64
   declarator levels (`cc.c:6047-6113`), `DOPS_MAX` 4096 (`cc.c:5551`), 16
@@ -625,34 +696,78 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
 - [x] **`\U` outside the BMP printed unconverted in `-E`** [P].  (Done: identifiers' UCNs
   print as UTF-8 (not in asm mode, not in literals); `##` accepts UCNs; regress/pp/ucn-ident.c.)
   *Validate:* pp-diff fixture.
-- [ ] **`#include` in macro args accepted** [P].  (`-E` output on errors
+- [x] **`#include` in macro args accepted** [P].  (Done: clang's error and
+  "expansion of macro" note, diag `include_in_macro_args.c`.  `-E` output on errors
   done: printed to stdout with status 1, no file with `-o`, as clang;
   checked by the error row of `bench/vcc-driver.py`.)
   *Validate:* T4.
-- [ ] **`#embed` / `__has_embed`** [P].  *Validate:* pp-diff fixtures plus
-  T1 (`unsigned char d[] = { #embed "bin" };` checksums).
-- [ ] **Output modes ignored**: `-C`, `-CC`, `-dD`, `-M`, `-MM`, `-H`,
-  `-traditional-cpp` (reject); line markers without `-P`; text identical to
-  clang's spacing.
-  *Validate:* `bench/vcc-diff.py` new mode `text` comparing bytes (not
-  tokens) for `-E` with and without `-P`, `-M`/`-MM`.
+- [x] **`#embed` / `__has_embed`** [P].  (done: `#embed "x"` with limit,
+  clang::offset, prefix, suffix, if_empty, `__has_embed` 0/1/2, -Wc23-extensions,
+  -M lists the file, clang's search (absolute, or the includer's directory);
+  tests/vcc `embed.c` checksums the file embedding itself; `--embed-dir` (`<x>`
+  only there, `"x"` after the includer's directory); `-E`/`-E -P` placement of
+  the token after the data, byte for byte as clang; limit() takes a constant
+  expression; a header with #embed is not cached (replay would not see a
+  changed data file).)
+- [ ] **Output modes**: `-CC` (comments in macro definitions and arguments,
+  `//` as `/* */`) and `-traditional-cpp` are rejected with an error.
+  *Validate:* `bench/vcc-diff.py text` (bytes, not tokens) for `-E` with and
+  without `-P`.  (`-E -P` text done: clang's spacing (leading space,
+  AvoidConcat), indentation to the expansion column, MoveToLine's blank lines
+  and file-change newlines, `#line` as a file change, assembler `#` lines
+  re-spaced as tokens; a header guard counts once the file is complete, as for
+  `-H`.  `-C` done: comments printed as clang's comment tokens, dropped in
+  directives, skipped groups and macro arguments; vccd accepts it, so
+  kbuild's `cpp_lds_S` (vdso.lds) no longer needs clang.  Line markers
+  (`-E` without `-P`) done: GNU `# N "file" 1/2/3/3 4` as clang's
+  FileChanged/WriteLineInfo, `<built-in>`/`<command line>` (its line: the
+  predefined macros + 3), `./` for `-include` from the current directory,
+  extern "C" system directories (`/usr/include`, the SDK's), `#line`, up to
+  8 newlines before a marker; `bench/vcc-diff.py lines` 912/912.  The
+  predefined macros now match clang's `-dM` outside the kernel's flags too
+  (Linux PIE/CFI defaults, C23 char8_t/%B, Darwin -fshort-wchar and
+  -mgeneral-regs-only).
+  `bench/vcc-diff.py text` and `textc` (-C) 912/912,
+  `ccs/fuzz/pp-diff.py --text` on regress/pp and the seed corpus.)  (`-M`/`-MM` done: see Depfiles;
+  `-H` done: `bench/vcc-diff.py hdr` 912/912, header cache off under `-H`;
+  `-dD` done: `bench/vcc-diff.py dd` 910/912, predefined macros in clang's
+  order from `predef_order_*` (gen-ppdata-order.py); the two left are the
+  vDSO's cpp runs, which clang gives `__PIC__`/`__PIE__` and the CFI macro
+  (no -fno-PIE there): PIC/PIE item.)
   (`-dM` done: `bench/vcc-diff.py dm` is byte-identical to clang on all 879
   C TUs.  Open: on kernel `.S` files clang's `-dM` leaves out macros defined
   after a point in the headers (strchr.S: all of linux/linkage.h onwards)
   although `#ifdef` sees them; not understood, so `dm` skips `.S`.)
-- [ ] **Depfiles**: `-MMD` lists system headers, `-MD` without `-MF`, default
-  target `-`, `-MP`, `-MQ` [P].
+- [x] **Depfiles**: `-MMD` lists system headers, `-MD` without `-MF`, default
+  target `-`, `-MP`, `-MQ` [P].  (Done: clang's rule format (75-column
+  wrapping), targets and default file names, `-M`/`-MM`, `-MMD` without system
+  headers (an `-isystem` with no `-I` was not a system directory), headers
+  skipped by guard or `#pragma once` and `__has_include` hits listed under
+  each spelling, Darwin's `SDKSettings.json`; `bench/vcc-diff.py deps`
+  912/912 byte-identical.)
   *Validate:* T11 against clang's `.d` files for each flag combination
   (byte comparison after path normalisation).
-- [ ] **Options**: `-imacros`, `-isysroot`/`--sysroot`, `-nostdlibinc`,
+- [x] **Options**: `-imacros`, `-isysroot`/`--sysroot`, `-nostdlibinc`,
   `-iprefix`/`-iwithprefix`, `-mmacosx-version-min`, unknown `-std=` values
   (error), `iso9899:199409`.
   *Validate:* T11 rows; predefine diff (`-dM`) for `-std` and
-  `-mmacosx-version-min`.
+  `-mmacosx-version-min`.  (Done: `-imacros` as clang's `#__include_macros`
+  + `##` in `<built-in>`, before every `-include`, its markers too; the
+  `-std=` table is clang's exact spellings, anything else an error;
+  `iso9899:199409` and `c2y`/`gnu2y` versions; the macOS deployment version
+  from `-mmacosx-version-min` or a versioned `-macosNN` target (which wins);
+  `-isysroot`/`--sysroot`/`-nostdlibinc`/`-iprefix` already matched.
+  `bench/vcc-driver.py` rows, -E and -dM byte for byte.)
 - [ ] **Predefines for other targets and flags**: only two tables;
   `--target=x86_64`, `-m32`, `-funsigned-char`, `-fstack-protector*`,
   `-ffast-math`, `-march=+sve`, `-pthread`, `-fsanitize=*`, `-fexceptions`
-  change nothing.  Generate predefines from (target, flags) using a table
+  change nothing.  (Done: `-f[no-][un]signed-char` (macro, and `char`'s
+  signedness in pp and cc), `-ffast-math`/`-ffinite-math-only`/
+  `-f[no-]math-errno`/`-fno-fast-math` with clang's interplay, `-pthread`;
+  checked by `bench/vcc-driver.py` rows.  Left out on purpose until vcc
+  implements them, so the macros don't promise what isn't there:
+  `-fstack-protector*` (`__SSP*__`), `-fsanitize=*`, `-fexceptions`,
+  `-fopenmp`, `-fblocks`, `-mbranch-protection`, `+sve`.)  Generate predefines from (target, flags) using a table
   extracted from clang per flag delta (`gen-ppdata.sh` extended).
   *Validate:* `bench/vcc-predef.py`: `vpp -dM -E` vs `clang -dM -E` for a
   matrix of targets × flags.
@@ -674,71 +789,180 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
   vs scalar, add SSE vs scalar.
 
 ### Assembler (`as/as.c`, `arch/a64/as/enc.c`)
-- [ ] **`.cfi_*`** → `.eh_frame` [P].  *Validate:* T7 (clang `-S` output
-  with CFI assembles, `.eh_frame` byte-identical).
-- [ ] **`.loc`, `.file N`, DWARF line tables, `.uleb128`/`.sleb128`** [P].
-  *Validate:* T7 with `-g`.
-- [ ] **Scalar FP** (fadd … frint*, `fmov #imm`) [P].  *Validate:* T7
-  encoding tables.
-- [ ] **AdvSIMD arithmetic, long/wide/narrow, by-element, ld2-ld4/st2-st4,
-  single-lane ld1/st1** [P].  *Validate:* T7 encoding tables (generated
-  from llvm-mc's AArch64 instruction list for these classes).
-- [ ] **Integer aliases** sxtw, uxtb, sxt*/uxt*, cls, ngc, mneg, smnegl,
-  CSSC [P].  *Validate:* T7 tables.
-- [ ] **Pointer auth, barriers/hints** (paciasp … xpaclri, csdb, esb, ssbb,
+- [x] **`.cfi_*`** → `.eh_frame` [P]: every directive but personality/LSDA
+  and `.debug_frame` (an error), CIEs per key, FDEs sorted by CIE key as MC.
+  *Validated:* `vas-obj` `cfi-basic.s`, `cfi-all.s`; `bench/vas-corpus.py`.
+- [x] **`.loc`, `.file N`, DWARF line tables, `.uleb128`/`.sleb128`** [P]:
+  the v5 `.debug_line` (+ `.debug_line_str`) as MCDwarfLineTable writes it,
+  rows on the next instruction or data, one sequence per section; gas-style
+  `.file 1 "dir/x.c"` splits the path, directory 0 is the cwd.  `.uleb128`
+  of a label difference not known yet, `.prefalign` and an alignment after
+  one are variable-size items at the end of a split frag (`elf_split`),
+  relaxed as MC at the end.  Left: rows in a subsection > 0 out of address
+  order, `-fdebug-compilation-dir`.
+  *Validated:* `vas-obj` `dwarf-line.s`, `leb128.s`; T7 `-O "0 -g"` 1516/1516.
+- [x] **Scalar FP** [P]: 2/1/3-source arithmetic, frint*, fcmp(e) (also #0.0),
+  fccmp(e), fcsel, fcvt between S/D/H, fcvt[nampz][su] and [su]cvtf (also
+  fixed point), `fmov #imm` and the H moves.  *Validated:*
+  `ccs/vcc/tests/vas/fp-scalar.s` vs llvm-mc (`bench/vas-enc.py` 293/293);
+  `bench/vas-corpus.py -O2` 1441/1519, the rest AdvSIMD.
+- [ ] **AdvSIMD** [P]: done: integer 3-same (mul/mla/mls also by element,
+  sshl/ushl, smax/smin, sabd/uabd), compare with #0, neg/abs, FP 3-same and
+  by element, FP compare (#0.0 too), FP 2-reg misc (frint*, conversions,
+  also the scalar `scvtf d0, d0` forms), `fmov` vector immediates, long/wide
+  (s/u mull/mlal/mlsl/abdl/abal/addl/subl/addw/subw and the 2 forms),
+  shll/sxtl/uxtl, xtn/sqxtn/uqxtn/sqxtun, shrn/rshrn, usra/ssra/urshr/srshr/
+  ursra/srsra, uaddlv/saddlv, mvni, `movi d`, ld2-ld4/st2-st4 and lanes,
+  ldpsw (`ccs/vcc/tests/vas/simd-ops.s` vs llvm-mc).  Left: FP16 vectors,
+  saturating arithmetic (sqadd, sqdmull, ...), pairwise FP, crypto beyond
+  AES/SHA, by-element forms of the long ops, ld1r variants.  *Validate:*
+  `bench/vas-enc.py`, `bench/vas-corpus.py`.
+- [x] **Integer aliases** sxtw, uxtb, sxt*/uxt*, cls, ngc, mneg, smnegl,
+  CSSC [P].  *Validate:* T7 tables.  (Done: sxtb/sxth/sxtw, uxtb/uxth/uxtw
+  (X forms as llvm-mc), cls, rev64 X, ngc(s), mneg, smnegl/umnegl,
+  smsubl/umsubl, bfc, CSSC abs/cnt/ctz and smax/smin/umax/umin (register and
+  immediate; the vector cnt/umax/umin unchanged); `ccs/vcc/tests/vas/int-alias.s`,
+  `bench/vas-enc.py` 128/128 vs llvm-mc.)
+- [x] **Pointer auth, barriers/hints** (paciasp … xpaclri, csdb, esb, ssbb,
   pssbb, dgh, `psb csync`, wfet, chkfeat, sysl, prfum, ldapur, stlur), **MTE
-  irg/addg** [P].  *Validate:* T7 tables.
-- [ ] **SVE/SVE2/SME** (operand parser for `z`/`p` registers first) [P].
-  *Validate:* T7 tables; T7 `-march=armv9-a+sve2` corpus.
-- [ ] **Directives**: `.comm`/`.lcomm`, `.symver`, `.altmacro`,
-  `.float`/`.double`, `.dc.*`, `.eqv`, `.weakref`, `.end`, `.err`,
-  `.addrsig`/`.addrsig_sym`, `.variant_pcs`, `.tlsdesccall`, `.nops`,
-  `.balignw`/`.p2alignl`, `.base64`, `.inst.n`, COMDAT `"G"` sections
-  (`as/as.c:722`), `@gnu_unique_object` (`as/as.c:1125`), full `.reloc` (`as/as.c:836`).
-  Silently ignored today: `.print`, `.warning`, `.ident`, `.arch`, `.cpu`
-  (`as/as.c:2307-2440`).
-  *Validate:* T7 per directive; `.arch` must gate instructions (T4).
-- [ ] **Relocation operators** (TLS `:tlsdesc:`, `:tprel_*:`,
-  `:gottprel*:`, `:dtprel*:`, `:prel_g*:`, literal `ldr x0, :got:v`)
-  (`mod_kind` `as/as.c:1912`, `obj/obj.h:53-72`) [P].  *Validate:* T7 with
-  `-fPIC` and TLS sources.
-- [ ] **Mach-O syntax** `@PAGE`/`@PAGEOFF`/`@GOTPAGE…`; vasm writes ELF
-  only.  *Validate:* T7 with `--target=arm64-apple-darwin` vs clang's Mach-O
-  (`llvm-objdump --macho -r -d`).
-- [ ] **Wrong output**: GOT relocs against local symbols converted to
-  section+addend [P]; integer branch targets as `*ABS*` relocs; `adr x0, 4`
-  rejected (`arch/a64/as/enc.c:1005`).  *Validate:* T7 / T6 relocation comparison.
-- [ ] **Diagnostics**: line numbers off by one (`as/as.c:575/636/133`), `# N
-  "file"` markers ignored (`as/as.c:579`), EOF errors at `:0:` [P].
-  *Validate:* T4 for the assembler (`// expect-error: x.S:2:`).
+  irg/addg** [P].  *Validate:* T7 tables.  (Done: PAC hints and register forms,
+  blraa…brabz, retaa/eretaa, ldraa/ldrab, csdb/esb/ssbb/pssbb/dgh, psb/tsb
+  csync, wfet/wfit, chkfeat, sysl, prfum, ldapur*/stlur*, irg/gmi/addg/subg/
+  subp(s)/cmpp/stgp; `ccs/vcc/tests/vas/pac-hint.s`, `bench/vas-enc.py`
+  vs llvm-mc.)
+- [ ] **SVE/SVE2/SME** [P].  Done (`arch/a64/as/sve.inc`): `p/z`, `p/m`,
+  Z lists, patterns, `mul #n`; the forms clang generates: predicated and
+  unpredicated integer arithmetic, shifts, logic and immediates (dup/dupm/
+  cpy/`mov` aliases), compares, predicate logic and permutes, ptrue/ptest/
+  while*, cnt/inc/dec, addvl/addpl, index, reductions, last[ab], int<->fp
+  converts, ld1/ld1r/ldN/st1/stN contiguous (scalar+imm, scalar+scalar),
+  SVE2 xar/eor3/bcax/bsl/usra; FP arithmetic, fused, unary, converts,
+  compares, reductions, fadda, fmov/fdup/fcpy, dup indexed; splice, unpk,
+  brk*, cntp/incp/decp; gathers/scatters (vector+imm, scalar+vector with
+  uxtw/sxtw/lsl), ldff1/ldnf1/ldnt1/stnt1/ld1rq, prf[bhwd]; by-element
+  fmla/fmls/fmul/mla/mls/mul, sdot/udot.  Left: SVE2 non-temporal gathers,
+  the rest of SVE2 (widening/narrowing, histogram, crypto), SME.  *Validated:*
+  `ccs/vcc/tests/vas/sve.s` vs llvm-mc; T7 `-O "3 -march=armv9-a+sve2"`
+  1519/1519.
+- [ ] **Directives**: left: `.arch`/`.cpu` gating instructions (T4).
+  (`.eqv`, `.nops`, `.inst.n` are GNU-only: clang rejects them.)
+  *Validate:* `bench/vas-obj.py` (`ccs/vcc/tests/vas-obj/`: clang -c and
+  vasm byte for byte).  (Done: COMDAT/`"G"` groups (SHT_GROUP, signature
+  in the group section when undefined), `.addrsig`/`.addrsig_sym`,
+  `.altmacro` (`%expr`, `<text>`, bare parameter names), `.type`
+  `@gnu_unique_object`/`@common` (OS/ABI GNU as MC), `.comm`/`.lcomm`,
+  `.symver` (@@@, remove), `.weakref`, `.float`/`.double`/`.dc.*`,
+  `.base64`, `.balignw`/`.p2alignl`, `.end`, `.ident`, `.print`/`.warning`,
+  `.variant_pcs`, `.tlsdesccall`, `.reloc` at `.`/labels with
+  NONE/TLSDESC_CALL/BFD_RELOC_*; code sections at least 4-aligned.)
+- [x] **Relocation operators**: `:tlsdesc:`, `:tlsdesc_lo12:`, `:gottprel*:`,
+  `:tprel_*:`, `:dtprel_*:` (add, movz/movk, ldst of every size), `:prel_g*:`,
+  `ldr x0, :got:v` / `:gottprel:`, `:pg_hi21_nc:`; TLS relocations make the
+  symbol STT_TLS and labels in TLS sections are STT_TLS, as MC.  *Validated:*
+  `ccs/vcc/tests/vas-obj/tlsops.s`, `tlslocal.s` byte-identical with clang -c.
+- [~] **Mach-O syntax** `@PAGE`/`@PAGEOFF`/`@GOTPAGE…`/`@TLVPPAGE…`: `vpp -c x.s`
+  for a Darwin target reads Apple's dialect (`as_darwin_text`, the inverse of
+  emit's `darwin_text`: sections, `L` labels, `.zerofill`/`.tbss`/`.comm` log2
+  alignment, NEON `op.T vA, vB` and `mov d0, v1[1]`) into the Mach-O writer
+  (commons now as Mach-O commons).  *Validated:* `vcc-darwin-s.py`: vpp -c of
+  vcc's -S is byte-identical to the direct object (1447 tests; not
+  branch_far.c, whose text has no relaxation); `--clang`: clang's -S assembled
+  by vpp runs as clang's own assembly (1432 tests); `vasm --target=arm64-apple-*`
+  writes the same Mach-O object as vpp -c.  Left:
+  `.cfi_*` is dropped: no compact unwind (`__LD,__compact_unwind`) in vcc's
+  Mach-O, neither direct nor from text.
+- [x] **Wrong output**: GOT relocs against local symbols kept the section
+  (fixed: GOT/TLS relocations keep the symbol); integer and absolute-symbol
+  branch targets are the pc-relative offset, not `*ABS*` relocations; `adr`,
+  `adrp` and `ldr` literal take constants.  *Validated:* `vas-obj`
+  `intbranch.s`, `absb.s`.
+- [ ] **Diagnostics**: left: errors inside a macro say the invocation line
+  (clang: `<instantiation>:N`); vasm stops at the first error (clang goes on).
+  (Done: the statement's own line, `# N "file"` markers, end-of-input
+  errors at the line after the last.)  *Validate:* `bench/vas-obj.py` error
+  files (`err-*.s`: clang's first file:line).
 
 ### Linker (`ld/ld.c`) and binutils
-- [ ] **ELF input parsing unchecked** [P]: `parse_obj` `ld/ld.c:1670-1697`,
-  `fill_isecs`, `st_shndx` (`ld/ld.c:1847,2521,2887`), `add_archive`
-  (`ld/ld.c:1609-1655`, long names `ld/ld.c:1633`), reloc width (`ld/ld.c:2987`),
-  objcopy `elf_open` `ld/objcopy.c:113`, misaligned headers in archives
-  (`ld/ld.c:1672`), SHN_XINDEX / `e_shnum == 0` (`ld/ld.c:1684,1850`).
-  *Validate:* T9 `fuzz-elf` (ASan) + `regress/elf/` with the probe's
-  corrupt objects (bad `e_shoff`, truncated, `st_shndx=0x500`, oversized
-  archive member, ABS64 at `size-1`); T8 with a 70k-section object.
-- [ ] **Crashes on ordinary inputs** [P]: no script / script without
-  `.symtab` (`ld/ld.c:4410`), `/DISCARD/` of a merge section (`ld/ld.c:643`).
+- [ ] **ELF input parsing unchecked** [P]: (done: `obj_valid` in `ld/ld.c`
+  checks every header, section, string table, symbol (`st_name`,
+  `st_shndx`), relocation (symbol index, `r_offset` + field width) once, as
+  lld's messages; `e_shnum == 0` takes the count from `sh[0]`; regular
+  archive members (at 4 mod 8) are copied to aligned memory; archive headers,
+  sizes and long-name offsets checked.  `bench/vlink-bad.py`: 29 corruptions
+  under ASan+UBSan, each a clean error; vobjcopy/vnm's `elf_open` checks
+  headers, sections, string and symbol tables (`elf_valid`), the same inputs
+  without a crash.  Left: SHN_XINDEX symbols (rejected), a `fuzz-elf` target,
+  a 70k-section object.)
+- [ ] **Crashes on ordinary inputs** [P]: no script.  (Fixed: a script
+  without `.symtab`/`.strtab`/`.shstrtab` places them as orphans, as lld;
+  `/DISCARD/` of a merge section (`.comment`): `isec_osec`.  Both found by
+  `VCC_LD=build/ccs/vlink bench/vcc-ctests.py --no-cache`, which links every
+  test with vlink: 1750/1750; with `VCC_LDCMP=1` each test is linked by both
+  and vlink's loaded image (objcopy -O binary) must equal lld's: 1750/1750.)
   *Validate:* T8 cases `no-script`, `discard-comment`.
-- [ ] **Options**: `-znotext` swallowed (`ld/ld.c:3315`), `-m X` unchecked
-  (`ld/ld.c:3296`); rejected `-pie`, `-static`, `-L`/`-l`, `-e`,
-  `--gc-sections`, `--dynamic-linker`, `--version`, `--emit-relocs`
-  (`ld/ld.c:3295`); ignored `--start-group` (`ld/ld.c:3284`), `--eh-frame-hdr`
-  (`ld/ld.c:3285`), `-z now/relro/noexecstack`, `--orphan-handling`.
-  *Validate:* T8 per option; unknown options are errors (T11-style table).
-- [ ] **Relocations**: GOT (`ADR_GOT_PAGE`, `LD64_GOT_LO12_NC`) + relaxation,
-  TLS LE/IE/TLSDESC + relaxations + `PT_TLS`, MOVW_*, CONDBR19, TSTBR14,
+- [ ] **Options**: (done: `-e`/`--entry` over `ENTRY()`, else `_start`,
+  lld's warning when absent; `--orphan-handling=place|warn|error`; `-m X` /
+  `-mX` checked against lld's AArch64 emulations ("unknown emulation");
+  `-zX` as `-z X` (`-znotext` was swallowed); `--version`/`-v` with "LLD
+  23.1.4" for `scripts/ld-version.sh`; `-static`/`-Bstatic`/`-Bdynamic`,
+  `-no-pie`; `-L DIR`/`-lNAME`/`-l:FILE` (archives only, "unable to find
+  library"); `-pie` and `--dynamic-linker` a clear error until dynamic
+  linking.  `bench/vlink-opts.py`: 18/18 against ld.lld, image identical.)
+  `--gc-sections` as lld's MarkLive (roots: entry, KEEP, SHF_GNU_RETAIN,
+  non-alloc, init/fini arrays, notes outside groups, .ctors/.init/...,
+  exported symbols under -shared; relocations, groups and SHF_LINK_ORDER
+  propagate), `--print-gc-sections` on stdout as lld: 6 cases.
+  `__start_X`/`__stop_X` for C-identifier output sections (protected,
+  global; not a gc root: lld's default -z start-stop-gc); orphans
+  stable-sorted by rank before placement as lld's sortSections: 2 cases.
+  `.eh_frame` as lld's EhFrameSection: records split, CIEs merged by
+  contents and relocations, FDEs of dead/discarded sections dropped, CIEs
+  without FDEs dropped, a zero terminator, word aligned; under
+  `--gc-sections` CIE relocations keep their targets, FDE ones only outside
+  code and groups (MarkLive::scanEhFrameSection): 5 cases, and
+  `VCC_LDCMP=1 VCC_CFLAGS=-fasynchronous-unwind-tables vcc-ctests.py`
+  1756/1756 identical.  Orphans placed by lld's rank bits and
+  getRankProximity, then back past sections without inputs (findOrphanPos).
+  `--eh-frame-hdr` as lld's EhFrameHeader (sorted table, duplicate
+  locations dropped) and PT_GNU_EH_FRAME: 4 cases.
+  Left: `--emit-relocs`, `-z now` (no effect without dynamic linking).
+  *Validate:* `bench/vlink-opts.py` per option; unknown options are errors.
+- [ ] **Relocations**: (done: GOT relaxation adrp+ldr -> adrp+add / nop+adr
+  as lld; orphans placed by lld's coarse rank (sections without inputs do not count; nothing with inputs after: at the very end, as lld); `.got` for
+  `ADR_GOT_PAGE`/`LD64_GOT_LO12_NC` against globals, 0 for undefined weak,
+  RELATIVE under -pie/-shared; `tests/vcc/got_pic.c`, `pragma_weak.c`; locals
+  after the globals by file as lld's postScanRelocations (`vlink-opts.py`); not:
+  GLOB_DAT for preemptible symbols (dynamic linking)),
+  TLS in shared objects (executables done: LE, IE and TLSDESC relaxed to LE as
+  lld, `PT_TLS`, `.tbss` without address space; text byte-identical to lld
+  for `tests/vcc/tls_{static,ie,desc}.c`; `PT_GNU_RELRO` as lld: isRelroSection,
+  one contiguous run, p_align 1, a new PT_LOAD at relroEnd, `-z norelro`;
+  `VCC_LDCMP=1` also compares program headers: 1756/1756), MOVW_*, CONDBR19, TSTBR14,
   PREL32 to undefined (`ld/ld.c:2560-2570`).
   *Validate:* T8 (each against lld, run under qemu where runnable).
-- [ ] **Archives**: lazy member resolution, `-L`/`-l`, groups (`ld/ld.c:3342`);
-  COMMON (`ld/ld.c:1783`); COMDAT groups (`ld/ld.c:1693`).
+- [x] **`vpp -c x.s`** (done: `.s` and `-x assembler` go to the assembler
+  without the preprocessor, as clang; an explicit `-x` takes any file name;
+  objects identical to clang -c; `vlink-opts.py` builds its inputs so.)
+- [ ] **Archives**: (done: lazy members extracted as lld: a non-weak
+  undefined reference extracts the member defining it, depth first, in lld's
+  file order; an archive's member is extracted when its definition meets an
+  earlier undefined reference; weak references do not extract; order-free, so
+  `--start-group` needs nothing; regular and thin archives.  A sequential pass
+  only when a non-whole archive is linked.  `bench/vlink-opts.py`: 11 lazy
+  cases, images identical to lld.  COMMON as lld: strong beats common beats
+  weak; largest size and alignment, first file with that size; one NOBITS
+  `COMMON` section each after all files' sections, in lld's
+  replaceCommonSymbols order; 7 cases in `vlink-opts.py`.  COMDAT groups as lld: the first group of a
+  signature in file order is kept, later members dropped; their definitions
+  still resolve, and a winner in a dropped member is demoted with lld's
+  "relocation refers to a symbol in a discarded section"; non-COMDAT groups
+  kept; 5 cases.  Under `-r` as lld: a kept group is a `.group` section of
+  its own (signature, members renumbered, a member's `.rela` too), members
+  are output sections of their own with SHF_GROUP, a dropped COMDAT copy
+  goes and its definitions become undefined: 3 `-r` cases in
+  `vlink-opts.py`, groups and the final link of the output as lld -r's.)
   *Validate:* T8 static link of a musl `libc.a` hello world (run under
   qemu-user); a C++ template object pair.
-- [ ] **Default entry** `_start` when no `ENTRY()`.  *Validate:* T8.
 - [ ] **Dynamic linking**: `.dynamic`, `.dynsym`/`.dynstr`, `.gnu.hash`, PLT,
   `DT_NEEDED`, versioning, RELR, `PT_INTERP`, `PT_GNU_RELRO`,
   `.eh_frame_hdr`, reading `.so` inputs (`ld/ld.c:1678`).
@@ -760,11 +984,12 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
   32-bit GNU symtab only; ld skips `/SYM64/` (`ld/ld.c:1622`).
   *Validate:* `bench/var-cmp.py` extended to regular archives and `x`, `d`,
   `q`, `p`, `s`; round-trip with llvm-ar.
-- [ ] **vobjcopy / vnm**: missing `--strip-debug`, `--add-section`,
-  `--only-keep-debug`, `-O elf64-*`, `--add-gnu-debuglink`,
-  `--set-section-flags`, `--redefine-sym`, `-I`/`-B`; nm `-u`, `-D`,
-  archives, unknown long options taken as files, >64 files dropped
-  (`ld/objcopy.c:1039`).
+- [ ] **vobjcopy / vnm**: (done: `-g`/`--strip-debug`, `--redefine-sym`, `--add-section`, `--add-gnu-debuglink`, `--set-section-flags`; `.llvm_addrsig`'s
+  link dropped as llvm-objcopy.)  Missing
+  `--only-keep-debug`, `-O elf64-*`,
+  `-I`/`-B`; nm archives.
+  (Done: nm `-u`/`-U`/`-g`, `-D` with symbol versions, and long forms, unknown options are errors, any
+  number of files.)
   *Validate:* `bench/vobjcopy-cmp.sh` extended with these flags vs
   llvm-objcopy/llvm-nm; unknown options must be errors.
 - [ ] **macho.c**: DWARF dropped (`platform/darwin/macho.c:95`), `.eh_frame` to
@@ -777,8 +1002,11 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
   `otool -l`); `bench/vcc-abi.py --host pragma_weak` (its xfail goes).
 
 ### Driver (`driver/ppdriver.c`, `vccd/vccd.c`, `vccd/caps.c`)
-- [ ] **vccd compiles only `-c … x.c` for aarch64 Linux; the rest goes to
-  clang** (`vccd/vccd.c:460-485`, input must be the last argument).
+- [ ] **vccd compiles only `-c` of one `.c`/`.S` for aarch64 Linux; the rest
+  goes to clang** (done: the input anywhere on the line, `-o` before `-c`,
+  `-fPIC`, `-S` (without `-o`: the basename with `.s`, as clang); vccd-test
+  `compile-shapes-not-forwarded`.  Left: Darwin,
+  other targets).
   *Validate:* T11 (`-c a.c -o a.o`, flags after the input, `-o` before
   `-c`) all handled by vcc (a counter in vccd's stats, or `VCC_NO_FORWARD=1`
   that turns forwarding into an error).
@@ -788,14 +1016,14 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
   configure and build with `CC=vcc`, tests pass.
 - [ ] **Unknown flags silently ignored** [P] (`driver/ppdriver.c:435-533`): `-g`,
   `-fsanitize=*`, `-m32`, `-march=znver4`, `-x c++`, `.cpp` inputs, `@rsp`,
-  several inputs; input detection by `strstr(a, ".c")` (`driver/ppdriver.c:526`).
+  several inputs.  (Done: input detection by suffix, `src_suffix`.)
   Every option is either implemented, explicitly ignored with a documented
   reason, or an error (`-Wunused-command-line-argument` like clang).
   *Validate:* T11 table generated from clang's option list
   (`clang --help-hidden`): each must be in an explicit table in
   driver/ppdriver.c; a test fails when an option has no entry.
-- [ ] **Missing**: `-print-*` (`-print-file-name` echoes, `vccd/vccd.c:665`),
-  `-dumpmachine`, `-v`, `-###`, `-save-temps`, `-shared`, `-l`/`-L`, `-Wl,`.
+- [ ] **Missing**: (done: `--target=T -dumpmachine` in vccd, vccd-test.)
+  `-print-*` (`-print-file-name` echoes, `vccd/vccd.c:665`), `-v`, `-###`, `-save-temps`, `-shared`, `-l`/`-L`, `-Wl,`.
   *Validate:* T11 rows.
 - [ ] **caps.c probe answers can contradict real compiles** (`vccd/vccd.c:291`,
   `vccd/caps.c:199-208`), unmatched sources forwarded to clang (`vccd/vccd.c:395`),
@@ -810,8 +1038,9 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
   answer; T11 for `.tmp_` paths compiled for real.
 
 ### rsh
-- [ ] **`trap` is a no-op** (`vccd/rsh.c:354`); fall back to the real shell
-  instead.  **fixdep path match by suffix** (`vccd/rsh.c:414`): require the
+- [ ] (Done: `trap` with EXIT/0 or no handler goes to the real shell,
+  signal traps stay a no-op; rm/mkdir messages from strerror; fixdep only as
+  a whole path component and an existing executable.)  **fixdep path match by suffix** (`vccd/rsh.c:414`): require the
   configured kernel tree.  **Wrong errno text** (`vccd/rsh.c:552,568,577`).
   *Validate:* `bench/vsh-test.py` rows against dash (trap, other fixdep
   paths, ENOENT/EACCES/ENOTDIR messages).
@@ -837,35 +1066,171 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
   than clang 4.8 % (goal 5 % reached).
   *Validate:* `tests/diag/` cases with several independent errors, exact
   clang output (`vcc-diag.py`).
+- [x] **Warnings as errors not controllable**: `-Wno-error=`/`-Wno-` of
+  `int-conversion`, `incompatible-pointer-types` (its subgroup
+  `incompatible-function-pointer-types` follows) and the function pointer
+  flag; `-Werror=` of one again is clang's plain error (no `-Werror,`:
+  `pp_werror_named`).  Done: diag `conv_flags*.c` (`diag-flags:` in
+  vcc-diag.py), 12 flag combinations identical to clang.
+- [x] **-Winteger-overflow**: signed `+ - *` and unary `-` of constants
+  whose exact value does not fit (innermost only, `NF_OVF`), value with
+  clang's digit separators.  Done: diag `int_overflow.c`; not modelled:
+  overflow inside casts/conditionals reached through other operators.
+- [x] **-Wunused-variable**, `-Wunused-const-variable`: block-scope
+  variables never named, at scope close; main-file statics at end of TU;
+  none after an error, cleanup/unused/used exempt.  Done: diag
+  `unused_var.c`, 90 warnings over the 2032 test-suite files identical to
+  clang.  (A static redeclared and then defined: at the definition, `defloc`.)  Not modelled: bodies of unreferenced
+  lazy header functions are never parsed, so they are not checked.
+- [x] **-Wconstant-conversion**: an integer constant converted to a
+  narrower integer type (init, assignment, argument, return; each `?:` arm,
+  the taken one when the condition is constant; a comma's right operand).
+  Narrowing waits for the end of the function as clang's
+  DiagRuntimeBehavior; same-width sign changes skip literals spelled with a
+  leading 0 (`N_NUM` aux) and chars in braces.  Done: diag `const_conv.c`,
+  kernel/PostgreSQL/test suites 0 differences.  Not modelled: clang drops
+  the deferred ones in unreachable code (vcc: only under a constant-false
+  condition, `c->dead`); a member
+  initializer converted to a narrower type (`{ 300 }` for a char member).
+- [x] **-Wliteral-conversion**: a floating literal (or its negation)
+  converted to an integer type: fractional ("changes value from 1.5 to 1",
+  APFloat::toString's spelling) or out of range.  Done: diag
+  `literal_conv.c`; test suite 183 of 186 identical.  Not modelled: in a
+  macro body the location and the macro note (no spelling to look up).
+- [x] **-Wbitfield-constant-conversion** (and the single-bit variant): a
+  constant stored in a bit-field, by assignment or initializer, as clang's
+  AnalyzeBitFieldAssignment.  Done: diag `bitfield_const.c`, 93 warnings
+  over the test suite identical.  Not modelled: the macro note finds the
+  operator by spelling, so it can show an earlier `=` of the same body.
+- [x] **-Wunused-value**: clang's isUnusedResultAWarning on expression
+  statements, a statement expression's statements but the last, a `for`
+  init, a comma's left operand (a comparison there: -Wunused-comparison);
+  deferred to the end of the function with the conversion warnings
+  (`rt_defer`).  Done: diag `unused_value.c`, `unused_value_comma.c`;
+  kernel, PostgreSQL, test suite 0 differences.  Not modelled: the macro
+  note for a macro argument (its tokens keep their file location); calls
+  of pure/const functions ("ignoring return value of function declared
+  with const attribute").
+- [x] **pp -Wextra-tokens**: after #ifdef/#ifndef/#elifdef/#elifndef's
+  name, #else, #endif, #undef's name, #include's header name and #line's
+  file name, with clang's "//" fix-it; conditionals at the active level
+  also when a skip lands on them.  With it: a #line file name now reaches
+  the diagnostics (`diag_where` replaced it by the file's path).  Done:
+  diag `extra_tokens.c`; parity cmp/lines green.  Not modelled: a
+  macro-expanded #include name.
+- [x] **pp `#pragma GCC warning`/`error`** ("msg" or ("msg"), else
+  "pragma warning requires parenthesized string") and
+  **-Wexpansion-to-defined** (a `defined` from an object-like macro in
+  #if; function-like: pedantic in clang, not given).  A macro note after a
+  diagnostic without ranges is a bare caret, as clang.  Done: diag
+  `pragma_warning.c`.  Not modelled: from `_Pragma` (clang's
+  "<scratch space>" note).
+- [x] **pp -Winvalid-pp-token**: an unterminated ' or " in a #define
+  body (MF_UNKNOWN, so a cached site does not rescan) or in the text (given
+  by the front end with its error: an unknown token always ends in one, so
+  no per-token check).  Done: diag `invalid_pp_token.c`.  Not modelled: in
+  -E output; clang's recovery after it ("expected ';'").
+- [x] **-Wunused-function**, `-Wunneeded-internal-declaration`: static
+  functions of the main file never used, at the definition (`defloc`);
+  named only unevaluated (sizeof): "not needed and will not be emitted";
+  cleanup() and alias() targets count as used.  Done: diag
+  `unused_function.c`; kernel 879/879.  Not modelled: clang also warns a
+  non-inline static function of a header (vcc cannot see the references
+  from unparsed lazy bodies) and a function only calling itself.
+- [x] **-Wunused-but-set-variable**: clang's RefsMinusAssignments
+  (`sym.nref`: references, minus discarded full expressions and comma left
+  operands that only assign, ++ or -- it; volatile compound ones count),
+  given with the unused variables at scope close.  Done: diag
+  `unused_but_set.c`; the 31 test-suite warnings identical.
+- [ ] **Missing warnings**:
+  `-Wuninitialized` after an
+  assignment on another branch earlier in the text (the analysis runs only when a
+  tracked variable is read before its first assignment in the text); two or more
+  ifs breaking out of one `do … while (0)` (clang warns once per if, vcc not at
+  all) (`-Wunknown-attributes` and
+  `-Wdeprecated-declarations` are done: PostgreSQL's warnings compare).
+  *Validate:* one diag test per warning; `vcc-sema.py warn` stays 879/879
+  (no false positives on the kernel).  (Done: `-Wsometimes-uninitialized` of an if that breaks out of `do … while (0)` (no
+  back edge: a block), and with `-Wsometimes-uninitialized` alone: diag
+  `sometimes_uninit_do.c`, `sometimes_uninit_only.c`; `-Wmultichar` in C and `#if`, "character constant too long",
+  multi-character wide/Unicode literals as errors: diag `multichar.c`; `-Wself-assign` (not through macros) and `-Wunused-local-typedef`: diag `self_assign.c`, PostgreSQL identical; `-Wreturn-stack-address` of a compound literal (its initializer printed
+  from the source as clang's printer spaces it): diag `return_complit.c`; `-Wuninitialized` of struct/union variables (whole-value uses; a member access
+  initializes, an empty record is not tracked): diag `uninit_record.c`; `-Wsometimes-uninitialized` of a while/for condition (a loop that never loops
+  back): diag `sometimes_uninit_loop.c`; `-Wsometimes-uninitialized` of `&&`, `||`, `?:` and switch labels (a warning per
+  label edge, clang's CFG order): diag `sometimes_uninit2.c`; `-Wsometimes-uninitialized` of an `if` (the use post-dominates it, as clang's
+  branch search; the notes with clang's ranges): diag `sometimes_uninit.c`; `-Wuninitialized`
+  (definite uses, a dataflow over the statement tree in flow.c, clang's report order
+  by CFG block, self-initialization, the fix-it): diag `uninit.c`, `uninit_kinds.c`,
+  the test suite gives no warning clang does not; the
+  diagnostic printer leaves out the snippet for a repeated location as clang.)
+  (Done: `-Wreturn-type` (fall off the end, "in all control paths") and
+  `-Winvalid-noreturn` (also a return in a noreturn function), "no case
+  matching constant switch condition": `cc/flow.c`, reachability as clang's
+  CFG with constant conditions (also && / || / const variables, the kernel's
+  scoped_guard), noreturn calls and goto; diag `return_type*.c`, kernel warn
+  879/879, PostgreSQL no differences.)
+  (Done: `-Wexcess-initializers`: excess array/struct/union/vector/scalar
+  elements once per list, strings too long for their char array; an excess
+  braced element is skipped whole (it stopped at its first token): diag
+  `excess_init.c`.)
+  (Done: `-Wreturn-stack-address` for locals and parameters through &, array
+  decay, members, indexing, casts and ?: (diag `return_stack.c`).)
+- [x] **`u8'a'` in C23**: the lexer still gives `u8` and `'a'`; the front
+  end and `#if` join them under `-std=c23`/`gnu2x` when adjacent.  Done:
+  diag `u8_char.c`, `u8_char_if.c` (and `pp_binop.c`: #if's 'not a valid
+  binary operator' at the token with the operand underlined, as clang).
+- [x] **Invalid code accepted**: duplicate enumerator / parameter,
+  `&register_var`, `_Alignas(3)`, `typeof` on a bitfield, `*(void *)p` as a
+  value (and `-Wvoid-ptr-dereference`), `return v();` of void from an int
+  function, and the static initializer constness check in the front end
+  (`static_init_ok`, also under `-fsyntax-only`).  Done: diag tests
+  identical to clang (74/74); sema 878/879, warn 879/879, ctests, pg green.
+- [x] **Runtime-behaviour warnings in a global initializer**: a static
+  initializer's -Wdivision-by-zero waits and follows the constness error,
+  only for a non-constant initializer (clang's DiagRuntimeBehavior); none
+  under sizeof/typeof.  Done: diag `mod_zero_const.c`, `mod_zero_const2.c`.
+- [x] **`"abc"[1]` as a static initializer**: an element of a string
+  literal folds (`eval`); `{ "q"[0] }` in an int array parsed as a string
+  initializer.  Done: `tests/vcc/static_strelem.c`.
+- [x] **Typedef names in -Wformat**: variables, parameters and members keep
+  the typedef they were declared with (`sym.tdef`, `field.tdef`): messages
+  print `'size_t' (aka 'unsigned long')`, fix-its use z/j/t and `%hhu` for a
+  char typedef as clang's namedTypeToLengthModifier.  Done: diag
+  `format_typedef.c`, the random files identical on both targets.
+- [ ] **-Wformat not modelled** (the call is left alone): `%I64d`, `%w32d`,
+  `%b`, `%qd`, `*n$`, Darwin `%D/%O/%U`, a format through a `const char[]`
+  variable or `format_arg` (gettext), a typedef reached through casts or
+  other expressions than a variable or member.
+  *Validate:* diag tests against clang.
+- [x] **Vector types in messages**: (done: the typedef name and
+  ` (vector of 4 'int' values)` after the quoted type (vcc: the first typedef
+  of that vector type), diag `vector_typedef_name.c`; with it
+  -Wincompatible-pointer-types-discards-qualifiers (also "in nested pointer
+  types"), -Wpointer-sign, nested signedness as incompatible, the
+  "; dereference with *" hint and fix-it (simple operands), `int *const`
+  spelled as clang, a decayed array named `int[2]`, and "not a compile-time
+  constant" after a conversion error: diag `ptr_discards_quals.c`,
+  `deref_hint.c`, `ptr_const_spelling.c`; `ext_vector_type` splat (CK_SPLAT),
+  the scalar-to-vector truncation error, `.xyzw`/`.rgba`/`.sN`/`.hi`/`.lo`/
+  `.even`/`.odd` swizzles: `tests/vcc/ext_swizzle.c`, diag
+  `ext_vector_splat.c`, `vector_scalar_trunc.c`, `ext_swizzle_range.c`.)
+  Not done: assignment to a multi-component swizzle; a `long` constant out
+  of an unsigned lane's range is an error in vcc, a -Wconstant-conversion
+  warning in clang.
+  *Validate:* diag test with vector_size and ext_vector_type.
+- [ ] **Diagnostic details**: columns on `##` and invalid directives,
+  `#line` file names ignored, nested macro notes (one level today), the
+  "expanded from macro" note only for undeclared identifiers; a parenthesized
+  operand's range leaves out the parentheses (`1 / (x - 1)`: clang's ParenExpr
+  has them, -Wconstant-conversion and -Wunused-value strip them: needs a second
+  span per paren node, kept through the decl cache's replay).
+  *Validate:* diag tests.
 - [ ] **Clang warns, vcc errors** (`bench/vcc-mutate.py show spurious`):
   `-Wreturn-mismatch` is not in the `return-type` group.
   *Validate:* `vcc-mutate.py` spurious count; diag tests.
-- [ ] **Warnings as errors not controllable**: `conv_error` (`cc.c:2622`)
-  always errors for `-Wincompatible-pointer-types`.
-  *Validate:* diag tests with `-Wno-error=…` and `-Wno-…`.
-- [ ] **Missing warnings** (only 7 `-W` flags): `-Wunused-variable`,
-  `-Winteger-overflow`, `-Wexcess-initializers`,
-  `-Wconstant-conversion`, `-Wmultichar`, `-Winvalid-noreturn`,
-  `-Wunknown-attributes`, `-Wdeprecated-declarations`,
-  `-Wformat`; pp `-Wextra-tokens`,
-  `-Wexpansion-to-defined`, `-Winvalid-pp-token`, `#pragma GCC warning`.
-  *Validate:* one diag test per warning; `vcc-sema.py warn` stays 879/879
-  (no false positives on the kernel).
 - [ ] **`-Warray-bounds` on a trailing member array**: `p->a[5]` with `a` the last
   member (`int a[3];`) warns; clang does not (`-fstrict-flex-arrays` default: a trailing
   array may be a flexible one).  *Validate:* diag test, both orders of members.
-- [ ] **Invalid code accepted**: duplicate enumerator / parameter,
-  `_Alignas(3)`, `typeof` on a bitfield, `*(void *)p` as a
-  value, `return v();` of void from int function, `-fsyntax-only` missing
-  initializer-constness errors (`static int s = g();`, `5 % 0`),
-  `void f(static int x)` (clang: invalid storage class specifier in function
-  declarator).  From `bench/vcc-mutate.py` (PLAN-diag D0.2, `show missed`): `main` with wrong
-  parameter types, an array of an incomplete element type, a call to a
-  function with an incomplete return type (clang: "calling 'f' with incomplete
-  return type"; a definition is an error now), a K&R definition whose
-  parameter count conflicts with an earlier prototype (`void bar(void);` then
-  `void bar(x) { }`: clang "conflicting types for 'bar'").
-  *Validate:* T4 each, then promote to diag.
 - [ ] **Designated initializers found by PLAN-diag D1.0**: a designator on a
   scalar (`int a = { .x = 1 };`) fails with "expected expression" instead of
   clang's "initialization of non-aggregate type 'int' with a designated
@@ -876,14 +1241,6 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
   integral multiple of component size); vector element type errors point at
   the declarator, clang at the attribute.
   *Validate:* diag tests (`tests/diag/excess_init.c` style).
-- [ ] **`"abc"[1]` rejected as a static initializer**; vector types print as
-  `''` in messages (`tyname`).  *Validate:* T1; diag test.
-- [ ] **Diagnostic details**: columns on `##` and invalid directives,
-  `#line` file names ignored; macro notes are found by spelling in the
-  bodies (PLAN-diag.md D5.2), so a name built by `##` (`CONCATENATE`) is not
-  followed and a duplicated token may pick the wrong body occurrence (kernel
-  `-pedantic`: 1 031 of 1 536 chains identical to clang's).
-  *Validate:* diag tests, the kernel chain comparison.
 - [ ] **Warnings in lazy bodies**: an unused `static` function outside the main
   file is never parsed (`cc/lazy.c` `lazy_ok`), so its warnings are missing:
   clang warns `-Wreturn-type` for `static inline int f(void) { }` in a
@@ -891,6 +1248,32 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
   tokens, or parsing the body when a warning group it could hit is on and the
   header is not a system one.  *Validate:* a diag test with the function in a
   header; `vbench.py gate` (fe, cc).
+- [ ] **Invalid code accepted**: `void f(static int x)` (clang: invalid storage
+  class specifier in function declarator).  From `bench/vcc-mutate.py` (PLAN-diag D0.2, `show missed`): `main` with wrong
+  parameter types, an array of an incomplete element type, a call to a
+  function with an incomplete return type (clang: "calling 'f' with incomplete
+  return type"; a definition is an error now), a K&R definition whose
+  parameter count conflicts with an earlier prototype (`void bar(void);` then
+  `void bar(x) { }`: clang "conflicting types for 'bar'").
+  *Validate:* T4 each, then promote to diag.
+- [ ] **Macro notes by spelling**: macro notes are found by spelling in the
+  bodies (PLAN-diag.md D5.2), so a name built by `##` (`CONCATENATE`) is not
+  followed and a duplicated token may pick the wrong body occurrence (kernel
+  `-pedantic`: 1 031 of 1 536 chains identical to clang's).
+  *Validate:* diag tests, the kernel chain comparison.
+- [ ] **Merged diagnostics: cases from the D8 branch**: the merge with main kept main's
+  implementation where both had one (`cc/flow.c`, `cc/fmt.c`, return-stack-address,
+  unused-value/-comparison); the branch's dropped files (`git show ce5d47b:ccs/vcc/cc/`
+  `uninit.c`, `format.c`, `unused.c`, `attrcheck.c`) handled these, now marked
+  `diag-differs` in `tests/diag/*_v2.c`, `portability.c`:
+  - -Wsometimes-uninitialized: `if (c && (x = g())) return x; return x;`, an `if` whose
+    then-branch only breaks or returns, `if (c) x = 1; else if (d) x = 2;`
+    (`uninit_v2.c`), and the edge and the use drawn as numbered path steps;
+  - -Wreturn-type after a switch on an enum that returns in every case (clang: none);
+  - -Wreturn-stack-address: two shapes missed, one extra (`return_stack_v2.c`);
+  - -Wunused-value/-Wunused-comparison: four cases (`unused_value_v2.c`);
+  - -Wformat for scanf and its family (fmt.c checks printf only).
+  *Validate:* `bench/vcc-diag.py`: the `diag-differs` markers go.
 - [ ] **Longer fuzz runs** and pp-diff over the whole fuzz corpus (PLAN-fas2
   "Status fuzzning").  *Validate:* runs recorded in the plan, findings in
   `regress/`.

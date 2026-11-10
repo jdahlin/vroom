@@ -42,9 +42,11 @@ enum {
 	I_MOVSP,	/* frame setup pseudo (see finish) */
 	I_NOP,
 	I_WORD,		/* imm: an encoded instruction (registers already in it) */
-	I_TLV,		/* x0 = address of thread-local ref (Darwin TLV descriptor call; clobbers x16, lr) */
+	I_TLV,		/* x0 = address of thread-local ref; cond 0: Darwin TLV descriptor call (clobbers x16, lr),
+			 * TLS_LE/TLS_IE: ELF via tpidr_el0 (clobbers x1), TLS_DESC: ELF TLSDESC call (x1, lr) */
 };
 
+enum { TLS_LE = 1, TLS_IE, TLS_DESC };	/* I_TLV.cond on ELF */
 enum { C_EQ, C_NE, C_HS, C_LO, C_MI, C_PL, C_VS, C_VC, C_HI, C_LS, C_GE, C_LT, C_GT, C_LE, C_AL };
 
 /* I_RAW cond 2: inline asm whose registers follow its text: uint64_t reads, writes */

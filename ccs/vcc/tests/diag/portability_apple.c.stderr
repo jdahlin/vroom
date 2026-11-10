@@ -20,7 +20,6 @@ portability_apple.c:15:12: warning: field width should have type 'int', but argu
 portability_apple.c:19:12: warning: implicit conversion from 'int' to 'char' changes value from 200 to -56 [-Wconstant-conversion]
    19 | char big = 200;
       |      ~~~   ^~~
-      = help: 'char' holds -128 to 127 (plain 'char' is signed on Apple and x86, unsigned on Arm and RISC-V Linux): cast the value if the wrap to -56 is intended
 portability_apple.c:20:15: warning: magnitude of floating-point constant too large for type 'double'; maximum is 1.7976931348623157E+308 [-Wliteral-range]
    20 | double huge = 1e400;
       |               ^~~~~
@@ -39,5 +38,4 @@ portability_apple.c:23:36: note: expression evaluates to '8 == 16'
 portability_apple.c:24:46: warning: implicit conversion from 'int' to 'signed char' changes value from 254 to -2 [-Wconstant-conversion]
    24 | signed char hexb = 0xfe, octb = 0376, decb = 254;
       |                                       ~~~~   ^~~
-      = help: 'signed char' holds -128 to 127: cast the value if the wrap to -2 is intended
 10 warnings and 1 error generated.

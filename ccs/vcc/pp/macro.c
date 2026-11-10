@@ -113,6 +113,10 @@ VPRIV void define(pp *p, ctx *c, uint32_t b, uint32_t e)
 		return;
 	}
 	m = slot ? atomic_load_explicit(slot, memory_order_acquire) : NULL;
+	if (!m || unlikely(m->flags & MF_UNKNOWN))	/* -Winvalid-pp-token (a cached site knows it has none) */
+		for (uint32_t i = b + 1; i < e; i++)
+			if (unlikely(vt[i].kind == T_UNKNOWN))
+				pp_invalid_tok(p, c->src + vt[i].off, vt[i].len, c->loc + vt[i].off);
 	if (!m) {
 		pmacro *n = site ? salloc(sizeof(*n)) : varena_alloc(&p->perm, sizeof(*n));
 
@@ -171,6 +175,8 @@ VPRIV void define(pp *p, ctx *c, uint32_t b, uint32_t e)
 		}
 	}
 	mdef(p, m->name, m);
+	if (unlikely(p->o->dump_defines))
+		dd_out(p, m->name, m, c->f == &p->builtin);
 }
 
 /* -dM: every defined macro as "#define NAME[(params)] body\n", sorted by
@@ -207,6 +213,95 @@ static void dm_tok(char **b, size_t *n, size_t *cap, const char *src, const vtok
 	}
 }
 
+
+/* one macro as "#define NAME[(params)] body\n" (-dM, -dD) */
+static void dm_one(char **bp, size_t *np, size_t *capp, uint32_t id, const pmacro *m)
+{
+	dm_put(bp, np, capp, "#define ", 8);
+	dm_put(bp, np, capp, vintern_ents[id].s, vintern_ents[id].len);
+	if (m->kind == MK_FUNC) {
+		/* spelled from kinds and ids: a canonical copy's src is its body's text only */
+		for (uint32_t j = 0; j < m->nplist; j++) {
+			const vtok *q = &m->plist[j];
+
+			if (q->kind == T_IDENT)
+				dm_put(bp, np, capp, vintern_ents[q->id].s, vintern_ents[q->id].len);
+			else
+				dm_put(bp, np, capp, q->kind == T_LPAREN ? "(" : q->kind == T_RPAREN ? ")" :
+				       q->kind == T_COMMA ? "," : "...", q->kind == T_ELLIPSIS ? 3 : 1);
+		}
+	}
+	dm_put(bp, np, capp, " ", 1);
+	for (uint32_t j = 0; j < m->nbody; j++) {
+		if (j && (m->body[j].flags & TF_SPACE))
+			dm_put(bp, np, capp, " ", 1);
+		dm_tok(bp, np, capp, m->src, &m->body[j]);
+	}
+	dm_put(bp, np, capp, "\n", 1);
+}
+
+/* -dD: the directive in the output, where it is (clang's spelling) */
+static void dd_text(pp *p, uint32_t id, const pmacro *m)
+{
+	char *b = NULL;
+	size_t n = 0, cap = 0;
+
+	if (m) {
+		dm_one(&b, &n, &cap, id, m);
+	} else {
+		dm_put(&b, &n, &cap, "#undef ", 7);
+		dm_put(&b, &n, &cap, vintern_ents[id].s, vintern_ents[id].len);
+		dm_put(&b, &n, &cap, "\n", 1);
+	}
+	if (p->col)
+		out_ch(p, '\n');
+	out_put(p, b, n);
+	p->col = 0;
+	free(b);
+}
+
+/* the predefined macros, as clang prints them: those clang predefines in its
+ * order (dd_order) with their final <built-in> value, then the rest of
+ * <built-in>'s directives (the command line's -D/-U) one by one */
+VPRIV void dd_flush(pp *p)
+{
+	uint8_t *done = calloc(p->ndd + 1, 1);
+
+	p->dd_done = 1;
+	for (int k = 0; k < p->o->ndd_order; k++) {
+		const char *s = p->o->dd_order[k];
+		uint32_t id = vintern_find(s, strlen(s), vintern_hash(s, strlen(s))), any = 0;
+
+		for (uint32_t i = 0; id && i < p->ndd; i++)
+			if (p->dd_ev[i].id == id)
+				done[i] = 1, any = 1;
+		if (any && mget(p, id))
+			dd_text(p, id, (const pmacro *)(mget(p, id) & ~(uintptr_t)1));
+	}
+	for (uint32_t i = 0; i < p->ndd; i++)
+		if (!done[i])
+			dd_text(p, p->dd_ev[i].id, p->dd_ev[i].m);
+	free(done);
+	free(p->dd_ev);
+	p->dd_ev = NULL;
+}
+
+/* -dD: a #define (m) or #undef (NULL) in the text, where it is; <built-in>'s
+ * are kept for dd_flush */
+VPRIV void dd_out(pp *p, uint32_t id, const pmacro *m, bool builtin)
+{
+	if (builtin && !p->dd_done) {
+		if (p->ndd == p->capdd)
+			p->dd_ev = realloc(p->dd_ev, (p->capdd = p->capdd ? 2 * p->capdd : 1024) * sizeof(*p->dd_ev));
+		p->dd_ev[p->ndd].id = id;
+		p->dd_ev[p->ndd++].m = m;
+		return;
+	}
+	if (!p->dd_done)
+		dd_flush(p);
+	dd_text(p, id, m);
+}
+
 int pp_macros(pp *p, char **out, size_t *len)
 {
 	uint32_t *ids = NULL, nid = 0, capid = 0;
@@ -231,29 +326,7 @@ int pp_macros(pp *p, char **out, size_t *len)
 	qsort(ids, nid, sizeof(*ids), mname_cmp);
 	for (uint32_t i = 0; i < nid; i++) {
 		const pmacro *m = (const pmacro *)(mget(p, ids[i]) & ~(uintptr_t)1);
-		const vident *v = &vintern_ents[ids[i]];
-
-		dm_put(&b, &n, &cap, "#define ", 8);
-		dm_put(&b, &n, &cap, v->s, v->len);
-		if (m->kind == MK_FUNC) {
-			/* spelled from kinds and ids: a canonical copy's src is its body's text only */
-			for (uint32_t j = 0; j < m->nplist; j++) {
-				const vtok *q = &m->plist[j];
-
-				if (q->kind == T_IDENT)
-					dm_put(&b, &n, &cap, vintern_ents[q->id].s, vintern_ents[q->id].len);
-				else
-					dm_put(&b, &n, &cap, q->kind == T_LPAREN ? "(" : q->kind == T_RPAREN ? ")" :
-					       q->kind == T_COMMA ? "," : "...", q->kind == T_ELLIPSIS ? 3 : 1);
-			}
-		}
-		dm_put(&b, &n, &cap, " ", 1);
-		for (uint32_t j = 0; j < m->nbody; j++) {
-			if (j && (m->body[j].flags & TF_SPACE))
-				dm_put(&b, &n, &cap, " ", 1);
-			dm_tok(&b, &n, &cap, m->src, &m->body[j]);
-		}
-		dm_put(&b, &n, &cap, "\n", 1);
+		dm_one(&b, &n, &cap, ids[i], m);
 	}
 	free(ids);
 	*out = b ? b : calloc(1, 1);

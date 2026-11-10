@@ -7,13 +7,11 @@ uninit_pragma.c:7:21: note: initialize the variable 'y' to silence this warning
       |                      = 0
 uninit_pragma.c:11:29: warning: variable 'v' is used uninitialized whenever 'if' condition is false [-Wsometimes-uninitialized]
    11 | int on2(int c) { int v; if (c) v = 1; return v; }
-      |                             ^                - uninitialized use occurs here
-      |                             |
-      |                             this edge leaves it uninitialized
+      |                         ----^--              - uninitialized use occurs here
+      |                         |
+      |                         remove the 'if' if its condition is always true
 uninit_pragma.c:11:46: note: uninitialized use occurs here
 uninit_pragma.c:11:25: note: remove the 'if' if its condition is always true
-   11 | int on2(int c) { int v; if (c) v = 1; return v; }
-      |                         ^~~~~~
 uninit_pragma.c:11:23: note: initialize the variable 'v' to silence this warning
    11 | int on2(int c) { int v; if (c) v = 1; return v; }
       |                       ^

@@ -397,10 +397,14 @@ static void pragma(cc *c, const ptok *t)
 	while (s < e && (*s == ' ' || *s == '\t'))
 		s++;
 	if (e - s >= 4 && !memcmp(s, "weak", 4) && (e - s == 4 || s[4] == ' ' || s[4] == '\t')) {
+		if (unlikely(c->dr_on))
+			dr_pragma(c, 1);
 		pragma_weak(c, s + 4, e, t->s, t->loc);
 		return;
 	}
 	if ((size_t)(e - s) < 4 || memcmp(s, "pack", 4))
 		return;
+	if (unlikely(c->dr_on))
+		dr_pragma(c, 2);
 	pragma_pack(c, s + 4, e);
 }

@@ -15,6 +15,16 @@ void cc_lz_stats(char *buf, size_t n)
 		 (unsigned long long)lz_st_pfn, lz_st_ptok / 1e6);
 }
 
+/* n lazy bodies appended by a declaration replay (cc/replay.c): counted as kept */
+VPRIV void lazy_replayed(const lzfn *L, uint32_t n)
+{
+	for (uint32_t i = 0; i < n; i++) {
+		atomic_fetch_add_explicit(&lz_st_fn, 1, memory_order_relaxed);
+		atomic_fetch_add_explicit(&lz_st_tok, L[i].z.close - L[i].z.open + 1, memory_order_relaxed);
+		atomic_fetch_add_explicit(&lz_st_hc, 1, memory_order_relaxed);
+	}
+}
+
 /* a definition whose code only exists if something references it, from a header */
 VPRIV bool lazy_ok(cc *c, uint32_t s, const declr *d)
 {
@@ -25,6 +35,8 @@ VPRIV bool lazy_ok(cc *c, uint32_t s, const declr *d)
 
 	if (unlikely(off < 0))	/* (threads race to set it: same value) */
 		__atomic_store_n(&lz_off, off = getenv("VCC_EAGER") != NULL, __ATOMIC_RELAXED);
+	if (c->nptag)	/* (its parameter list declared tags the body sees: function_def binds them) */
+		return false;
 	if (off || y->kind != S_FUNC || y->sc != SC_STATIC || (y->flags & (SF_DEFINED | SF_ATTR_USED | SF_OVERLOAD)))
 		return false;
 	if (a && (a->used || a->constructor || a->destructor || a->alias))

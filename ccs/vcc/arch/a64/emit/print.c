@@ -170,6 +170,26 @@ static void p_addi(tbuf *b, const ins *i)
 	tb_s(b, i->sz ? ", x17\n" : ", w17\n");
 }
 
+/* a register name (x0, w30, b1, q7, v31, sp, xzr, ...) */
+static bool reg_like(const char *p, size_t n)
+{
+	static const char *const sp[] = { "sp", "wsp", "xzr", "wzr", "lr", "fp" };
+
+	for (size_t k = 0; k < sizeof sp / sizeof *sp; k++)
+		if (n == strlen(sp[k]) && !memcmp(p, sp[k], n))
+			return true;
+	if (n < 2 || n > 3 || !strchr("bhsdqvwxz", p[0]) || p[1] < '0' || p[1] > '9')
+		return false;
+	unsigned r = p[1] - '0';
+
+	if (n == 3) {
+		if (p[2] < '0' || p[2] > '9' || p[1] == '0')
+			return false;
+		r = r * 10 + (p[2] - '0');
+	}
+	return r < 32;
+}
+
 VPRIV void print_ins(cc *c, tbuf *b, const ins *i, uint32_t fid, const char *raw)
 {
 	switch (i->op) {
@@ -344,11 +364,23 @@ VPRIV void print_ins(cc *c, tbuf *b, const ins *i, uint32_t fid, const char *raw
 		p_lbl(b, fid, i->label);
 		tb_c(b, '\n');
 		return;
-	case I_BL:
+	case I_BL: {
 		tb_s(b, "\tbl\t");
+		size_t at = b->n;
+
 		ref_name(c, b, i->ref);
+		if (reg_like(b->p + at, b->n - at)) {
+			/* "bl b1" is a register operand to the assembler (llvm-mc too): quote it */
+			size_t n = b->n - at;
+
+			tb_c(b, '"');
+			tb_c(b, '"');
+			memmove(b->p + at + 1, b->p + at, n);
+			b->p[at] = '"';
+		}
 		tb_c(b, '\n');
 		return;
+	}
 	case I_BLR: case I_BR:
 		tb_s(b, i->op == I_BLR ? "\tblr\t" : "\tbr\t");
 		reg(b, i->rn, 1);
@@ -381,11 +413,26 @@ VPRIV void print_ins(cc *c, tbuf *b, const ins *i, uint32_t fid, const char *raw
 		tb_hex(b, (uint32_t)i->imm);
 		tb_c(b, '\n');
 		return;
-	case I_TLV:
-		tb_s(b, "\t// tlv ");
-		ref_name(c, b, i->ref);
-		tb_c(b, '\n');
+	case I_TLV: {
+		/* ELF: the sequences of obj.c; x0 = the address */
+		static const char *const seq[4][7] = {
+			{ "\tadrp\tx0, :vcc_tlvp:", "\n\tldr\tx0, [x0, :vcc_tlvp_lo12:", "]\n\tldr\tx16, [x0]\n\tblr\tx16\n" },
+			{ "\tmrs\tx1, TPIDR_EL0\n\tadd\tx0, x1, :tprel_hi12:", "\n\tadd\tx0, x0, :tprel_lo12_nc:", "\n" },
+			{ "\tmrs\tx1, TPIDR_EL0\n\tadrp\tx0, :gottprel:", "\n\tldr\tx0, [x0, :gottprel_lo12:", "]\n\tadd\tx0, x1, x0\n" },
+			{ "\tadrp\tx0, :tlsdesc:", "\n\tldr\tx1, [x0, :tlsdesc_lo12:", "]\n\tadd\tx0, x0, :tlsdesc_lo12:",
+			  "\n\t.tlsdesccall\t", "\n\tblr\tx1\n\tmrs\tx1, TPIDR_EL0\n\tadd\tx0, x1, x0\n" },
+		};
+		const char *const *q = seq[i->cond < 4 ? i->cond : 0];
+
+		for (int k = 0; q[k + 1]; k++) {
+			tb_s(b, q[k]);
+			ref_name(c, b, i->ref);
+		}
+		for (int k = 0; q[k]; k++)
+			if (!q[k + 1])
+				tb_s(b, q[k]);
 		return;
+	}
 	default:
 		tb_s(b, "\t// ?\n");
 		return;

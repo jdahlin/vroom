@@ -1,0 +1,4 @@
+addr_register.c:1:43: error: address of register variable requested
+    1 | int f(void) { register int r = 1; return *&r; }
+      |                                           ^~
+1 error generated.

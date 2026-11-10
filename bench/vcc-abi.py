@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """vcc-abi.py: cross-compiler calls (TODO.md T2), Linux under qemu or the Darwin host.
 
-  bench/vcc-abi.py [-v] [--host] [PAT]
+  bench/vcc-abi.py [-v] [--host | --target wasm64|wasm32 [--vlink]] [PAT]
 
 Every ccs/vcc/tests/abi/NAME/ has caller.c (main, the checks) and callee.c
 (the functions it calls, and callbacks into the caller); a header there is
@@ -14,6 +14,11 @@ test.  A line `/* vcc-xfail: TODO item */` in caller.c marks a known bug
 --host only.  Exit status 1 on any failure.
 --host (macOS only): both halves built for the host (Apple arm64 ABI,
 system headers), linked by clang and run natively.
+--target wasm64 or wasm32: both halves built for wasm*-unknown-emscripten as
+bench/vcc-wasm.py builds them (vcc's side by `vpp -c`, its own assembler and
+object writer), linked by emcc (with --vlink: vlink as wasm-ld) and run under
+node.  `/* vcc-xfail-wasm: ... */` marks a known bug there, `/* vcc-skip-wasm32:
+reason */` a test that does not apply to ILP32.
 """
 import importlib.util, os, re, shutil, sys, tempfile
 
@@ -24,11 +29,13 @@ D = f'{ct.T}/abi'
 
 
 HOST = False
+WASM = None	# the vcc-wasm.py module, with its target set, for --target wasm64/wasm32
+VLINK = False
 HOSTFL = ['-O2', '-fno-stack-protector']
 
 
 def compile_(cc, src, obj, inc):
-    base = HOSTFL if HOST else ct.BASE
+    base = HOSTFL if HOST else WASM.BASE if WASM else ct.BASE
     if cc == 'clang':
         cmd = [ct.CL] + base + ct.CLFL + ['-I', inc, '-c', src, '-o', obj]
     else:
@@ -40,8 +47,13 @@ def compile_(cc, src, obj, inc):
 def one(name, wd, verbose):
     d = f'{D}/{name}'
     src = open(f'{d}/caller.c').read()
-    xf = re.search(r'/\*\s*vcc-xfail:(.*?)\*/', src, re.S) or (HOST and re.search(r'/\*\s*vcc-xfail-host:(.*?)\*/', src, re.S))
+    xf = re.search(r'/\*\s*vcc-xfail:(.*?)\*/', src, re.S) or (HOST and re.search(r'/\*\s*vcc-xfail-host:(.*?)\*/', src, re.S)) \
+        or (WASM and re.search(r'/\*\s*vcc-xfail-wasm:(.*?)\*/', src, re.S))
     xf = ' '.join(xf.group(1).split()) if xf else None
+    if WASM and 'wasm32' in WASM.TGT:
+        sk = re.search(r'/\*\s*vcc-skip-wasm32:(.*?)\*/', src, re.S)
+        if sk:
+            return 'skip', ' '.join(sk.group(1).split()), None
     objs = {}
     for half in ('caller', 'callee'):
         for cc in ('clang', 'vcc'):
@@ -58,11 +70,16 @@ def one(name, wd, verbose):
             if HOST:
                 rc, _, err = ct.sh([ct.CL, objs['caller', a], objs['callee', b], '-o', elf])
                 err = err.decode(errors='replace')
+            elif WASM:
+                elf = f'{wd}/{a}-{b}.js'
+                rc, err = WASM.link([objs['caller', a], objs['callee', b]], elf, VLINK)
             else:
                 rc, err = ct.link([objs['caller', a], objs['callee', b]], elf)
             if rc:
                 return 'fail', f'link {a}x{b}: {ct.first_err(err)}', xf
-            if HOST:
+            if WASM:
+                rc, out = WASM.run(elf)
+            elif HOST:
                 rc, out, _ = ct.sh([elf], timeout=20)
                 out = out.decode('latin-1')
             else:
@@ -82,16 +99,36 @@ def main():
     verbose = '-v' in av
     HOST = '--host' in av
     av = [a for a in av if a not in ('-v', '--host')]
+    global WASM, VLINK
+    VLINK = '--vlink' in av
+    av = [a for a in av if a != '--vlink']
+    if '--target' in av:
+        i = av.index('--target')
+        t = av[i + 1]
+        del av[i:i + 2]
+        if t not in ('wasm64', 'wasm32'):
+            sys.exit(f'vcc-abi: --target {t}: wasm64 or wasm32')
+        spec = importlib.util.spec_from_file_location('vw', f'{B}/vcc-wasm.py')
+        WASM = importlib.util.module_from_spec(spec); spec.loader.exec_module(WASM)
+        WASM.set_target(t == 'wasm32')
+        WASM.rt_obj()
+        if VLINK:
+            WASM.VLENV = WASM.vlink_env()
     pat = av[0] if av else None
-    if not HOST:
+    if not HOST and not WASM:
         ct.build_rt()
     names = sorted(n for n in os.listdir(D) if os.path.isdir(f'{D}/{n}') and (not pat or re.search(pat, n)))
     tmp = tempfile.mkdtemp(prefix='vcc-abi-')
-    fails = passes = xfails = 0
+    fails = passes = xfails = skips = 0
     for n in names:
         wd = f'{tmp}/{n}'
         os.makedirs(wd)
         st, why, xf = one(n, wd, verbose)
+        if st == 'skip':
+            skips += 1
+            if verbose:
+                print(f'skip  {n}: {why}', flush=True)
+            continue
         if st == 'test':
             st = 'FAIL'; why = 'broken test: ' + why; fails += 1
         elif xf and st == 'fail':
@@ -105,7 +142,7 @@ def main():
         if st != 'pass' or verbose:
             print(f'{st:5} {n}: {why}', flush=True)
     shutil.rmtree(tmp, ignore_errors=True)
-    print(f'abi{" (host)" if HOST else ""}: {passes} pass, {xfails} xfail, {fails} fail')
+    print(f'abi{" (host)" if HOST else f" ({WASM.TGT[9:]})" if WASM else ""}: {passes} pass, {xfails} xfail, {fails} fail' + (f', {skips} skipped' if skips else ''))
     sys.exit(1 if fails else 0)
 
 

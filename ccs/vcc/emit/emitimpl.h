@@ -84,6 +84,23 @@
 /* Apple arm64 (Mach-O): '_' names, GOT for symbols outside the TU, variadic
  * arguments on the stack, va_list a char *, stack arguments packed */
 #define DARWIN(c) ((c)->o->target == PP_DARWIN)
+/* WebAssembly (wasm64): arch/wasm/emit/ generates the functions, data.c the data */
+#define WASM(c) PP_IS_WASM((c)->o->target)
+#define WASM32(c) ((c)->o->target == PP_WASM32)
+
+/*
+ * A C99 inline definition or GNU extern inline: not emitted (another TU
+ * has the definition).  The wasm target has no inliner, so it emits a local
+ * copy of one it calls, as clang's inlining would make it unneeded.
+ */
+static inline bool inline_only(const sym *y)
+{
+	if (y->kind != S_FUNC || !(y->flags & SF_DEFINED) || !y->body)
+		return false;
+	if ((y->flags & SF_GNU_INLINE) && !(y->flags & SF_INLINE_NOEXTERN))
+		return true;
+	return (y->flags & SF_INLINE) && !(y->flags & SF_GNU_INLINE) && y->sc != SC_EXTERN && y->sc != SC_STATIC;
+}
 /* a symbol offset the relocation itself can carry: ELF RELA 32 bits here, a
  * Mach-O ARM64_RELOC_ADDEND 24 bits signed (clang adds the rest in code) */
 #define SYMOFF_OK(c, off) (DARWIN(c) ? (off) >= -(1 << 23) && (off) < (1 << 23) : (off) >= INT32_MIN && (off) <= INT32_MAX)
@@ -178,6 +195,9 @@ typedef struct emitter {
 	const keep *K;			/* the previous round's functions, or NULL */
 	bool stats;
 	bool objtext;			/* VCC_OBJ_TEXT: objects through the printer and as_run (checks the object backend) */
+	pthread_mutex_t dmu;		/* -g: the file table */
+	char **dfile;			/* .file N (1-based) names */
+	uint32_t ndfile, dfcap;
 	pthread_mutex_t emu;		/* diagnostics */
 	uint32_t errcall[256];		/* error() call sites already reported (under emu) */
 	uint32_t nerrcall_loc;
@@ -222,6 +242,7 @@ typedef struct kvst {
 	int64_t v[NKV];
 } kvst;
 
+#define CAPNEST (1u << 22)	/* loops/switches and cleanups in scope */
 typedef struct loopctx {
 	uint32_t brk, cont;	/* local labels (cont 0: switch) */
 	int cdepth;
@@ -241,8 +262,6 @@ typedef struct fnctx {		/* one function instance: the emitted function or an inl
 	struct fnctx *up;
 } fnctx;
 
-#define MAXLOOP 256
-#define MAXCLEAN 256
 #define NTEMP 17
 #define MAXLREG 10	/* x19-x28 */
 #define LREGS_DEFAULT 6	/* the rest stay expression temporaries */
@@ -280,6 +299,10 @@ typedef struct ecx {
 	uint32_t *sstk, nsstk;	/* the live ones (indices into sla, deepest last) */
 	int novtag;		/* inside a volatile access: its records stay untagged */
 	uint32_t curloc;	/* innermost statement being generated (diagnostics) */
+	struct dbgrow { uint32_t k, file, line, col; } *dl;	/* -g: a row at record k */
+	uint32_t ndl, dlcap;
+	const char *dlname;	/* the last file looked up, and its number */
+	uint32_t dlnlen, dlfile;
 	tbuf raw;		/* inline asm text */
 	tbuf out;		/* this thread's output text */
 	tbuf data;		/* scratch: data object bytes */
@@ -332,9 +355,9 @@ typedef struct ecx {
 	/* control */
 	bool reach;
 	int dry;		/* inside dry(): code is generated and thrown away, no references */
-	loopctx loops[MAXLOOP];
+	loopctx *loops;		/* (nesting is bounded by the node count: reserved for it) */
 	int nloop;
-	uint32_t clean[MAXCLEAN];	/* syms with cleanup, innermost last */
+	uint32_t *clean;	/* syms with cleanup, innermost last */
 	int nclean;
 	fnctx *f;
 	int inline_depth;
@@ -347,6 +370,7 @@ typedef struct ecx {
 	uint32_t *rlog;		/* this round's item logs: (RL_*, value) pairs */
 	size_t nrlog, rlog0;	/* ... and where the current item's starts */
 	jmp_buf bail;
+	struct wst *w;		/* WASM: arch/wasm/emit/ state (wimpl.h) */
 } ecx;
 enum { FN_MEMCPY, FN_MEMSET, FN_MEMMOVE, FN_UDIVTI3, FN_DIVTI3, FN_UMODTI3, FN_MODTI3, FN_STRLEN,
        FN_ASHLTI3, FN_LSHRTI3, FN_ASHRTI3, FN_FLOATTISF, FN_FLOATTIDF, FN_FLOATUNTISF, FN_FLOATUNTIDF,
@@ -504,6 +528,7 @@ VPRIV __attribute__((format(printf, 3, 4), noreturn)) void efatal(ecx *e, uint32
 VPRIV uint32_t canon_sym(cc *c, uint32_t s);
 VPRIV const attrs *sym_attrs(cc *c, uint32_t s);
 VPRIV void sym_name(cc *c, tbuf *b, uint32_t s);
+VPRIV bool sym_quoted(cc *c, uint32_t s);
 VPRIV void ref_name(cc *c, tbuf *b, uint32_t r);
 VPRIV void ref_off(cc *c, tbuf *b, uint32_t r, int64_t off);
 /* darwin.c */
@@ -571,6 +596,7 @@ VPRIV void vec_small_ret(ecx *e, qty t, int rs);
 VPRIV void vec_small_res(ecx *e, qty t, int32_t sl);
 VPRIV bool is_sret(cc *c, qty t);
 VPRIV void classify_va(ecx *e, qty t, int *nsaa, abiarg *a);
+VPRIV uint32_t abi_align(cc *c, qty t);
 VPRIV void classify(ecx *e, qty t, int *ngrn, int *nsaa, abiarg *a);
 VPRIV void spill_live(ecx *e, spill *s);
 VPRIV void unspill(ecx *e, const spill *s);
@@ -669,6 +695,9 @@ VPRIV val gen_block(ecx *e, uint32_t n, bool want);
 VPRIV val vla_bytes(ecx *e, qty t);
 VPRIV void vla_fix(ecx *e, qty t, bool pure);
 VPRIV void gen_stmt(ecx *e, uint32_t n);
+VPRIV bool dbg_where(ecx *e, uint32_t loc, uint32_t *file, uint32_t *line, uint32_t *col);
+VPRIV void dbg_row(ecx *e, uint32_t loc);	/* -g: a line-table row at the next record */
+VPRIV void dbg_remap(ecx *e, uint32_t *j, uint32_t k, uint32_t n);	/* compaction, k ascending */
 /* asm.c */
 VPRIV void gen_asm(ecx *e, uint32_t n);
 /* func.c */
@@ -678,6 +707,12 @@ VPRIV void emit_function(ecx *e, uint32_t s);
 /* data.c */
 VPRIV void emit_object(ecx *e, uint32_t s);
 VPRIV void emit_string(ecx *e, uint32_t i);
+/* arch/wasm/emit/ */
+VPRIV void wasm_emit_function(ecx *e, uint32_t s);
+VPRIV void wasm_ecx_free(ecx *e);
+VPRIV void wasm_data_ref(ecx *e, uint32_t ref);
+VPRIV void wasm_header(cc *c, tbuf *hdr, ecx *ctx, int nthr);
+VPRIV void wasm_tail(cc *c, tbuf *t, _Atomic uint8_t *claimed);
 /* prepass.c */
 VPRIV bool is_aconst(cc *c, uint32_t n);
 VPRIV uint32_t aconst_idx(cc *c, uint32_t n);

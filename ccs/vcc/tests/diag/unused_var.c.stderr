@@ -1,0 +1,28 @@
+unused_var.c:11:11: warning: unused variable 'i' [-Wunused-variable]
+   11 |         for (int i = 0;;) break;
+      |                  ^
+unused_var.c:6:15: warning: unused variable 'v' [-Wunused-variable]
+    6 |         volatile int v;
+      |                      ^
+unused_var.c:7:2: warning: unused variable 'mm' [-Wunused-variable]
+    7 |         M;
+      |         ^
+unused_var.c:3:15: note: expanded from macro 'M'
+    3 | #define M int mm
+      |               ^~
+unused_var.c:22:21: warning: unused variable 'q' [-Wunused-variable]
+   22 | void f3(void) { int q; }
+      |                     ^
+unused_var.c:20:18: warning: unused variable 'k1' [-Wunused-const-variable]
+   20 | static const int k1 = 1;
+      |                  ^~
+unused_var.c:21:12: warning: unused variable 'z1' [-Wunused-variable]
+   21 | static int z1;
+      |            ^~
+unused_var.c:23:12: warning: unused variable 'z2' [-Wunused-variable]
+   23 | static int z2;
+      |            ^~
+unused_var.c:24:12: warning: unused variable 'arr' [-Wunused-variable]
+   24 | static int arr[] = {1};
+      |            ^~~
+8 warnings generated.

@@ -59,7 +59,7 @@
 enum {
 	D_OTHER, D_NULL, D_IF, D_IFDEF, D_IFNDEF, D_ELIF, D_ELIFDEF, D_ELIFNDEF,
 	D_ELSE, D_ENDIF, D_DEFINE, D_UNDEF, D_INCLUDE, D_INCLUDE_NEXT, D_IMPORT,
-	D_PRAGMA, D_ERROR, D_WARNING, D_LINE, D_LINEMARK, D_IDENT,
+	D_PRAGMA, D_ERROR, D_WARNING, D_LINE, D_LINEMARK, D_IDENT, D_IMACROS, D_EMBED,
 };
 
 typedef struct pdir {
@@ -93,6 +93,7 @@ enum {
 	MF_VARIADIC = 1, MF_PASTE = 2, MF_VAOPT = 4,
 	MF_BADHASH = 8,		/* '#' not before a parameter: an error unless assembler */
 	MF_HASH = 16,		/* a '#' in the body */
+	MF_UNKNOWN = 32,	/* an unknown token in the body (-Winvalid-pp-token) */
 };
 enum {
 	B_NONE, B_FILE, B_LINE, B_COUNTER, B_DATE, B_TIME, B_TIMESTAMP,
@@ -102,7 +103,7 @@ enum {
 	B_HAS_CONSTEXPR_BUILTIN, B_IS_TARGET_ARCH, B_IS_TARGET_OS, B_IS_TARGET_VENDOR,
 	B_IS_TARGET_ENVIRONMENT, B_IS_TARGET_VARIANT_OS, B_IS_TARGET_VARIANT_ENVIRONMENT,
 	B_BUILDING_MODULE,
-	B_IS_IDENTIFIER, B_HAS_INCLUDE, B_HAS_INCLUDE_NEXT,
+	B_IS_IDENTIFIER, B_HAS_INCLUDE, B_HAS_INCLUDE_NEXT, B_HAS_EMBED,
 };
 
 /*
@@ -136,6 +137,7 @@ typedef struct ctx {
 	uint8_t barrier;	/* yields T_EOF when exhausted instead of popping */
 	uint8_t first;		/* 0x80 | SOL/SPACE for the first token (macro contexts) */
 	uint8_t offloc;		/* C_VTOK: loc = loc + offset (a directive line) */
+	uint8_t trail;		/* C_PTOK: ended in an empty argument after a space: the next token gets one */
 	uint32_t i, n;
 	uint32_t loc;		/* C_FILE: file base; C_VTOK: expansion loc */
 	uint32_t mid;		/* macro to re-enable when popped */
@@ -169,6 +171,7 @@ typedef struct fent {
 	uint8_t sys;		/* a system header (found in a system directory, or included by one) */
 	uint32_t from;		/* the #include's location (0: the main file, <built-in>, or a cached replay) */
 	uint32_t dstate;	/* the #pragma diagnostic state where it was entered (pdnode index) */
+	const char *cpos;	/* -C: its comments before here are printed or dropped (NULL: none yet) */
 } fent;
 
 #define MAXCTX (1u << 15)
@@ -317,6 +320,23 @@ typedef struct hvec {
 	for (uint32_t hvi_ = 0; hvi_ < (v).nc; hvi_++) \
 		for (const T *x = (const T *)(const void *)(v).c[hvi_]->d, *x##_e = x + (v).c[hvi_]->n; x < x##_e; x++)
 
+/*
+ * An include lookup an entry made itself that depended on the search
+ * directories (used > 0).  The entry's ndirs/psig say the directories it
+ * depended on were the same; where they differ, the entry still holds when
+ * each such lookup gives the same answer here (hc_looks_ok): PostgreSQL
+ * puts a per-target directory first, which every lookup passes through.
+ */
+typedef struct hlook {
+	const char *name;	/* as written */
+	const char *from;	/* the includer's spath (NULL: no includer) */
+	const char *path;	/* the answer's spelling (NULL: not found) */
+	const vlex_file *f;
+	int32_t from_sdir, sdir;
+	uint32_t nlen, from_sdl;
+	uint8_t angled, next, from_bi, sys;
+} hlook;
+
 struct hent {
 	hent *next;
 	hvec rg;		/* inputs: include guards (v: HDEF or 0); checked first */
@@ -341,6 +361,8 @@ struct hent {
 	 */
 	const struct hkid *kid;
 	uint32_t nkid;
+	const hlook *lk;	/* its own lookups that depended on the search directories */
+	uint32_t nlk;
 	size_t ntext, total;	/* own text (tokens); with the children */
 	int32_t level;		/* __INCLUDE_LEVEL__ used: the include depth it ran at (-1: not used) */
 	uint32_t ndirs, psig;	/* leading search directories its lookups depended on; their id */
@@ -349,6 +371,8 @@ struct hent {
 	uint32_t nbr;
 	uint32_t nord, noadd, nfe, nctr, ncrd, nseg, span, counter_delta;
 	uint8_t has_text, first_sol, col_end, pend_out;
+	uint8_t edir_end;
+	uint8_t pk, pk_L, pk_pp;	/* the printer's last token at the end (pp.pk...) */
 };
 
 typedef struct hkey {
@@ -400,6 +424,7 @@ typedef struct hlev {
 	uint8_t first_sol, uses_level;
 	uint32_t nfile, ndirs;
 	uint32_t k0, x0;	/* starts in rec.kid, rec.kex */
+	uint32_t l0;		/* start in rec.lk */
 } hlev;
 
 typedef struct hkidr {		/* a child entry of a level while recording */
@@ -424,6 +449,9 @@ struct pp {
 	uint32_t nfe, next_base;
 	uint64_t ntok_out;	/* tokens pp_next delivered */
 	uint64_t skipped_tok;	/* tokens of regions pp_skip_top dropped */
+	pp_hitreg *drh;		/* VCC_DRCOV: header-cache hits in delivered positions (pp_hit_regions) */
+	uint32_t ndrh, ndrs;
+	struct { uint64_t pos; int depth; const void *he; uint32_t base; unsigned ctr; } drs[64];	/* hits whose replay is still open */
 	pp_topev *tev;		/* top-level region events (pp_top_events) */
 	uint32_t ntev;
 	uint8_t tev_full, top_rec;
@@ -452,6 +480,8 @@ struct pp {
 	uint32_t base_namelen;
 	jmp_buf *fatal_jb;	/* fatal errors end the TU here */
 	int color;		/* diagnostics in colour */
+	uint32_t diag_last;	/* the last diagnostic's location + 1, and whether it was a note */
+	bool diag_lastnote;
 	uint32_t diag_fe;	/* the file of the last diagnostic + 1 (for "In file included from") */
 	vdiag *dhead, *dtail;	/* the TU's diagnostic records (in perm) */
 	bool dtrack;		/* VCC_TRACK_DIAG: vcc's call site after each diagnostic */
@@ -470,10 +500,29 @@ struct pp {
 	int warns;
 	int in_dir;		/* evaluating a directive's tokens (#if, #include, #line) */
 	int collecting;		/* in collect(): directives are inside macro arguments */
+	uint32_t coll_loc, coll_name;	/* the outermost macro collecting: its name token, id */
 	/* -E text (pp_text) */
 	char *out;
 	size_t nout, capout;
 	unsigned col;
+	/* the last token printed, for clang's AvoidConcat: kind, an identifier "L", '.' before it, its end */
+	uint8_t pk, pk_L, pk_pp;
+	const char *pk_end;
+	uint8_t sol_on, edir, cmt_sol;	/* cmt_sol: -C, an empty expansion began the line: a comment next starts it */	/* edir: a directive was printed on this line (clang's EmittedDirectiveOnThisLine) */
+	uint32_t cur_line;
+	uint8_t emb_sp, emb_tail;	/* -E after #embed: pending, tokens were suffix()/if_empty() */		/* -E: the previous token was #embed's last byte */
+	uint8_t out_text;	/* pp_text: track lines for the printer */	/* clang's CurLine: the presumed line the output is on */
+	int sol_depth;
+	uint32_t exp_loc;
+	uint32_t sol_loc;	/* the source macro name a line starts with: expanded tokens' column */
+	/* -E without -P: GNU line markers */
+	uint8_t lmark, lm_blk, lm_sys;	/* on; <built-in>'s block printed; the current file is a system header */
+	uint32_t lm_n, lm_bline;	/* predefined macros before the command line (+1); <built-in>'s line */
+	const char *lm_name;		/* the current file's presumed name */
+	uint32_t lm_nlen;
+	struct { uint32_t id; const pmacro *m; } *dd_ev;	/* -dD: <built-in>'s #define/#undef, until printed */
+	uint32_t ndd, capdd;
+	int dd_done;
 	/* header cache */
 	int hc;			/* on (pp_text or pp_next, not disabled) */
 	int tokmode;		/* 0 unset, 1 text (pp_text), 2 tokens (pp_next) */
@@ -499,6 +548,8 @@ struct pp {
 		uint32_t nkid;
 		uint32_t *kex;
 		uint32_t nkex;
+		hlook *lk;	/* the levels' own lookups (hlook) */
+		uint32_t nlk;
 		cprov *cp;	/* indexed by ptok.ctr */
 		uint32_t ncp;
 		ptok *tk;	/* tokens handed out (token mode) */
@@ -596,6 +647,7 @@ struct incent {
 #define HC_MAXSB ((size_t)1 << 28)
 #define HC_MAXKID (1u << 20)
 #define HC_MAXKEX (1u << 22)
+#define HC_MAXLK (1u << 16)
 
 typedef struct {
 	htouch *t;
@@ -605,6 +657,7 @@ typedef struct {
 	hsegr *seg;
 	hkidr *kid;
 	uint32_t *kex;
+	hlook *lk;
 	cprov *cp;
 } rec_spare_t;
 
@@ -624,10 +677,22 @@ VPRIV const pfile *pfile_get(const vlex_file *f, bool *fresh);
 VPRIV uint32_t file_line(const vlex_file *f, const pfile *cfi, uint32_t off);
 /* diag.c */
 VPRIV uint32_t loc_line(const pp *p, uint32_t loc);
+VPRIV bool move_to_line(pp *p, uint32_t line, bool req);
+VPRIV void out_nl(pp *p);
+VPRIV void cmt_flush(pp *p, ctx *c, const char *upto);
+VPRIV __attribute__((cold)) void cmt_skip_to(pp *p, const ptok *rp);
+VPRIV const char *cmt_line_end(const char *s);
+VPRIV unsigned tok_col(const pp *p, uint32_t loc);
+VPRIV void text_file_change(pp *p, const ctx *from, int enter);
+VPRIV void lm_count(pp *p);
+VPRIV void lm_enter(pp *p, const fent *e);
+VPRIV void lm_rename(pp *p, const char *name, uint32_t nlen, uint32_t line);
 VPRIV const char *presumed_name(const pp *p, uint32_t fe, uint32_t loc, uint32_t *len);
 VPRIV __attribute__((format(printf, 4, 5))) void pp_diag(pp *p, uint32_t loc, const char *what, const char *fmt, ...);
 void pp_diagx(pp *p, const pp_dinfo *d, const char *fmt, ...);
 bool pp_warnx(pp *p, const char *flag, bool on, const char *const *groups, pp_dinfo *d, const char *fmt, ...);
+VPRIV bool obj_macro_at(pp *p, uint32_t loc);
+VPRIV void dir_extra_tok(pp *p, const ctx *c, uint32_t name, uint32_t i);
 void pp_diag_summary(pp *p);
 VPRIV const fent *loc_fent(const pp *p, uint32_t loc);
 VPRIV bool loc_ok(const pp *p, uint32_t loc, const fent **e);
@@ -649,6 +714,14 @@ VPRIV void diag_typediff(struct vbuf *b, const vdiag *d, const char *plain);
 /* diagout.c: JSON lines and SARIF */
 VPRIV void diag_json_flush(pp *p);
 VPRIV void diag_fixits_out(pp *p);
+/* include.c: dependencies */
+VPRIV uint8_t inc_sys(pp *p, int32_t sdir);
+VPRIV void dep_only(pp *p, const char *path, uint8_t sys);
+
+/* macro.c: -dD */
+VPRIV void dd_out(pp *p, uint32_t id, const pmacro *m, bool builtin);
+VPRIV void dd_flush(pp *p);
+
 /* macro.c */
 static inline uintptr_t mget(const pp *p, uint32_t id);
 static inline uintptr_t *mslot(pp *p, uint32_t id);
@@ -691,6 +764,10 @@ static inline ctx *push(pp *p);
 VPRIV void push_ptok(pp *p, const ptok *t, uint32_t n, uint32_t mid, uint8_t first, int barrier);
 VPRIV void push_line(pp *p, const ctx *fc, uint32_t b, uint32_t e);
 VPRIV void pop_to(pp *p, int d);
+#define DRCOV_MAX 65536
+extern int pp_drcov;
+VPRIV void drcov_hit(pp *p, int d0);
+VPRIV void drcov_end(pp *p);
 VPRIV void top_event(pp *p, const void *e, uint32_t base, unsigned ctr, uint8_t end, uint8_t hit);
 VPRIV __attribute__((noinline)) void raw(pp *p, ptok *t);
 static inline __attribute__((always_inline)) bool raw_plain(pp *p, ctx *c, ptok *t);
@@ -711,6 +788,9 @@ VPRIV int builtin(pp *p, const pmacro *m, ptok *t);
 /* ifexpr.c */
 VPRIV ival parse_number(pp *p, const ptok *t);
 VPRIV bool eval_if(pp *p, const ctx *fc, uint32_t b, uint32_t e);
+VPRIV bool eval_ptoks(pp *p, const ptok *t, uint32_t n, uint64_t *v);
+VPRIV void embed(pp *p, ctx *c, uint32_t b, uint32_t e, uint32_t loc, uint32_t nloc);
+VPRIV int has_embed(pp *p, const ctx *fc, uint32_t loc);
 /* directive.c */
 VPRIV const char *parse_define(const vtok *vt, uint32_t b, uint32_t e, pmacro *m, void *(*mem)(void *, size_t), void *mc, uint32_t *eoff);
 VPRIV void *mem_perm(void *a, size_t n);
@@ -721,6 +801,7 @@ VPRIV void define(pp *p, ctx *c, uint32_t b, uint32_t e);
 /* include.c */
 VPRIV const vlex_file *try_path(const pp_opts *o, const char *path, size_t len);
 VPRIV const vlex_file *find_include(pp *p, const ctx *from, const char *name, size_t nlen, bool angled, bool next, int32_t *sdir, const char **path, const incent **ie);
+VPRIV bool hc_looks_ok(pp *p, const hent *e);
 /* hcache.c */
 VPRIV int once_index(const pp *p, const vlex_file *f);
 VPRIV void once_add(pp *p, const vlex_file *f);
@@ -742,7 +823,7 @@ VPRIV void hc_end(pp *p);
 VPRIV void enter_file(pp *p, const vlex_file *f, const char *path, int32_t sdir);
 VPRIV void include(pp *p, ctx *c, uint32_t b, uint32_t e, int kind, uint32_t loc);
 /* directive.c */
-VPRIV int pragma_text(pp *p, const char *s, size_t n, uint32_t loc, ptok *out);
+VPRIV int pragma_text(pp *p, const char *s, size_t n, uint32_t loc, ptok *out, uint32_t sloc);
 VPRIV int directive(pp *p, ctx *c, ptok *out);
 VPRIV bool pp_pad_at(const char *s, uint32_t ls, uint32_t le, uint32_t x);
 

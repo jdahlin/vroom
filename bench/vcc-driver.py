@@ -103,6 +103,49 @@ def diag_rows(d):
             *v(env={'VCC_TEST_DELAYED_BUG': '1'}))),
     ]
 
+# -E without -P: line markers byte for byte (files in the temporary directory, run there)
+MARK_FILES = {
+    'a.h': 'int a;\n',
+    'sys/b.h': '#pragma once\nint b;\n#include "c.h"\n',
+    'sys/c.h': 'int c;\n',
+    'im.h': '#ifndef IMG\n#define IMG\n#include "a.h"\n#define IM 42\nint junk;\n#endif\n',
+}
+MARK_PROBE = ('#include "a.h"\nint x;\n' + '\n' * 10 + 'int y;\n#include <b.h>\n#include <b.h>\n'
+              '#pragma clang assume_nonnull begin\n' + '\n' * 12 + '#pragma clang assume_nonnull end\n'
+              '#line 100 "other.c"\nint z;\n#line 7\nint w;\n# 30 "m\\"q.c"\nint v;\n')
+MARK_ROWS = [(t, f) for t in TARGETS for f in
+             ['', '-undef', '-include a.h -DQ=2 -UQ', '-include sys/b.h -include ./a.h', '-std=c23',
+              '-ffreestanding -std=c89', '-x assembler-with-cpp', '-mgeneral-regs-only -fshort-wchar -fPIC',
+              '-fno-PIE -fno-asynchronous-unwind-tables', '-imacros im.h', '-include a.h -imacros im.h -imacros im.h',
+              '-std=iso9899:199409', '-std=c2y', '-std=gnu1x', '-fsigned-char', '-funsigned-char',
+              '-fno-unsigned-char -fno-signed-char', '-ffast-math', '-ffast-math -fmath-errno -pthread',
+              '-ffast-math -fno-finite-math-only', '-fno-math-errno -ffinite-math-only', '-fmath-errno']]
+MARK_ROWS += [('--target=arm64-apple-macos' + v, f) for v, f in
+              [('', '-mmacosx-version-min=13.0'), ('14', ''), ('15.2', ''), ('10.15', ''), ('10.9', ''),
+               ('11', '-mmacosx-version-min=12.3.1')]]
+
+def mark_rows(verbose):
+    bad = 0
+    with tempfile.TemporaryDirectory() as d:
+        for name, text in MARK_FILES.items():
+            os.makedirs(os.path.join(d, os.path.dirname(name)), exist_ok=True)
+            open(os.path.join(d, name), 'w').write(text)
+        open(os.path.join(d, 'm.c'), 'w').write(MARK_PROBE)
+        for t, flags in MARK_ROWS:
+            for mode in (['-E'], ['-E', '-dM']):
+                fl = [t, '-isystem', 'sys'] + flags.split() + mode + ['m.c']
+                r = [subprocess.run([x] + fl, cwd=d, capture_output=True) for x in (vd.CL, vd.VPP)]
+                ok = r[0].returncode == r[1].returncode and r[0].stdout == r[1].stdout
+                if not ok:
+                    bad += 1
+                if verbose or not ok:
+                    print(f'{"ok  " if ok else "FAIL"} {" ".join(mode)} {t} {flags or "(none)"}')
+                    if not ok:
+                        import difflib
+                        for l in list(difflib.unified_diff(r[0].stdout.decode().splitlines(), r[1].stdout.decode().splitlines(),
+                                                           'clang', 'vpp', n=0, lineterm=''))[:10]:
+                            print('  ' + l)
+    return bad
 
 def main():
     verbose = '-v' in sys.argv
@@ -127,7 +170,8 @@ def main():
             if verbose or not ok:
                 print(f'{"ok  " if ok else "FAIL"} {t} {flags or "(none)"}' +
                       ('' if ok else f'\n  clang: {" ".join(out.split())}\n  vpp:   {" ".join(vout.split())} {verr.strip()}'))
-    n = len(ROWS) + len(ERR_ROWS) + len(drows)
+    bad += mark_rows(verbose)
+    n = len(ROWS) + len(ERR_ROWS) + len(drows) + 2 * len(MARK_ROWS)
     print(f'vcc-driver: {n - bad}/{n} ok')
     sys.exit(1 if bad else 0)
 

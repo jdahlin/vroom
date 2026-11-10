@@ -84,6 +84,12 @@ static void section(tbuf *o, const char *p, const char *e, const char *end)
 	} else if (starts(p, e, ".rodata") || starts(p, e, "\".rodata")) {
 		/* const data holding addresses is __DATA,__const (no text relocations), as clang */
 		tb_s(o, relocs(e + 1, end) ? "\t.section\t__DATA,__const\n" : "\t.section\t__TEXT,__const\n");
+	} else if (starts(p, e, ".tdata")) {
+		tb_s(o, "\t.section\t__DATA,__thread_data,thread_local_regular\n");
+	} else if (starts(p, e, ".tbss")) {
+		tb_s(o, "\t.section\t__DATA,__thread_bss,thread_local_zerofill\n");
+	} else if (starts(p, e, ".tlv")) {
+		tb_s(o, "\t.section\t__DATA,__thread_vars,thread_local_variables\n");
 	} else if (starts(p, e, ".init_array")) {
 		tb_s(o, "\t.section\t__DATA,__mod_init_func,mod_init_funcs\n");
 	} else if (starts(p, e, ".fini_array")) {
@@ -143,6 +149,10 @@ VPRIV void darwin_text(tbuf *o, const char *t, size_t tn)
 			for (const char *q = p; q < le;) {
 				if (ins && *q == ':' && starts(q, le, ":lo12:")) {
 					q = reloc(o, q + 6, le, "@PAGEOFF");
+				} else if (ins && starts(q, le, ":vcc_tlvp_lo12:")) {
+					q = reloc(o, q + 15, le, "@TLVPPAGEOFF");
+				} else if (ins && starts(q, le, ":vcc_tlvp:")) {
+					q = reloc(o, q + 10, le, "@TLVPPAGE");
 				} else if (ins && starts(q, le, ":got_lo12:")) {
 					q = reloc(o, q + 10, le, "@GOTPAGEOFF");
 				} else if (ins && starts(q, le, ":got:")) {

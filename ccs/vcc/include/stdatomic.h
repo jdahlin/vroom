@@ -65,6 +65,9 @@ typedef _Atomic(uintmax_t) atomic_uintmax_t;
 #define atomic_init(p, v) ((void)(*(p) = (v)))
 #define kill_dependency(y) (y)
 
+/* functions as well, as clang's header: their addresses can be taken */
+void atomic_thread_fence(memory_order);
+void atomic_signal_fence(memory_order);
 #define atomic_thread_fence(mo) __atomic_thread_fence(mo)
 #define atomic_signal_fence(mo) __atomic_signal_fence(mo)
 #define atomic_is_lock_free(p) __atomic_is_lock_free(sizeof(*(p)), (p))
@@ -93,6 +96,10 @@ typedef _Atomic(uintmax_t) atomic_uintmax_t;
 
 typedef struct atomic_flag { unsigned char __val; } atomic_flag;
 #define ATOMIC_FLAG_INIT { 0 }
+_Bool atomic_flag_test_and_set(volatile atomic_flag *);
+_Bool atomic_flag_test_and_set_explicit(volatile atomic_flag *, memory_order);
+void atomic_flag_clear(volatile atomic_flag *);
+void atomic_flag_clear_explicit(volatile atomic_flag *, memory_order);
 #define atomic_flag_test_and_set_explicit(p, mo) ((_Bool)__atomic_exchange_n(&(p)->__val, 1, (mo)))
 #define atomic_flag_test_and_set(p) atomic_flag_test_and_set_explicit(p, __ATOMIC_SEQ_CST)
 #define atomic_flag_clear_explicit(p, mo) __atomic_store_n(&(p)->__val, 0, (mo))

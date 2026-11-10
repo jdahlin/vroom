@@ -1,0 +1,88 @@
+ptr_discards_quals.c:2:43: warning: assigning to 'int *' from 'const int *' discards qualifiers [-Wincompatible-pointer-types-discards-qualifiers]
+    2 | void g(const int *cp, int *p) { int *l; l = cp; p = gc; gp = gc; int *m = cp; }
+      |                                           ^ ~~
+ptr_discards_quals.c:2:51: warning: assigning to 'int *' from 'const int *' discards qualifiers [-Wincompatible-pointer-types-discards-qualifiers]
+    2 | void g(const int *cp, int *p) { int *l; l = cp; p = gc; gp = gc; int *m = cp; }
+      |                                                   ^ ~~
+ptr_discards_quals.c:2:60: warning: assigning to 'int *' from 'const int *' discards qualifiers [-Wincompatible-pointer-types-discards-qualifiers]
+    2 | void g(const int *cp, int *p) { int *l; l = cp; p = gc; gp = gc; int *m = cp; }
+      |                                                            ^ ~~
+ptr_discards_quals.c:2:71: warning: initializing 'int *' with an expression of type 'const int *' discards qualifiers [-Wincompatible-pointer-types-discards-qualifiers]
+    2 | void g(const int *cp, int *p) { int *l; l = cp; p = gc; gp = gc; int *m = cp; }
+      |                                                                       ^   ~~
+ptr_discards_quals.c:3:34: error: incompatible pointer types initializing 'char *' with an expression of type 'int[2]' [-Wincompatible-pointer-types]
+    3 | void h(void) { int arr[2]; char *ip = arr; char *jp; jp = arr; }
+      |                                  ^    ~~~
+ptr_discards_quals.c:3:57: error: incompatible pointer types assigning to 'char *' from 'int[2]' [-Wincompatible-pointer-types]
+    3 | void h(void) { int arr[2]; char *ip = arr; char *jp; jp = arr; }
+      |                                                         ^ ~~~
+ptr_discards_quals.c:5:31: warning: passing 'const int *' to parameter of type 'int *' discards qualifiers [-Wincompatible-pointer-types-discards-qualifiers]
+    4 | void take(int *p);
+      |                - passing argument to parameter 'p' here
+    5 | int *ret(const int *q) { take(q); return q; }
+      |                               ^
+ptr_discards_quals.c:4:16: note: passing argument to parameter 'p' here
+ptr_discards_quals.c:5:42: warning: returning 'const int *' from a function with result type 'int *' discards qualifiers [-Wincompatible-pointer-types-discards-qualifiers]
+    5 | int *ret(const int *q) { take(q); return q; }
+      |                                          ^
+ptr_discards_quals.c:6:39: warning: initializing 'char *' with an expression of type 'const char *' discards qualifiers [-Wincompatible-pointer-types-discards-qualifiers]
+    6 | const char *s; void use(void) { char *t = s; volatile int *v; int *w = (void)0, *x = v; }
+      |                                       ^   ~
+ptr_discards_quals.c:6:68: error: initializing 'int *' with an expression of incompatible type 'void'
+    6 | const char *s; void use(void) { char *t = s; volatile int *v; int *w = (void)0, *x = v; }
+      |                                                                    ^   ~~~~~~~
+ptr_discards_quals.c:6:82: warning: initializing 'int *' with an expression of type 'volatile int *' discards qualifiers [-Wincompatible-pointer-types-discards-qualifiers]
+    6 | const char *s; void use(void) { char *t = s; volatile int *v; int *w = (void)0, *x = v; }
+      |                                                                                  ^   ~
+ptr_discards_quals.c:7:104: warning: declaration of 'struct S' will not be visible outside of this function [-Wvisibility]
+    7 | void f2(char **pp, const char **cpp, int *const *ipc, int **ipp, const void *cv, void *v, const struct S *cs) {
+      |                                                                                                        ^
+ptr_discards_quals.c:8:6: warning: assigning to 'const char **' from 'char **' discards qualifiers in nested pointer types [-Wincompatible-pointer-types-discards-qualifiers]
+    8 |  cpp = pp; pp = cpp; ipp = ipc; v = cv; cv = v; char *c = cv; void *w = cs; int *restrict r; int *q = r; const int *const k = 0; int *z = k;
+      |      ^ ~~
+ptr_discards_quals.c:8:15: warning: assigning to 'char **' from 'const char **' discards qualifiers in nested pointer types [-Wincompatible-pointer-types-discards-qualifiers]
+    8 |  cpp = pp; pp = cpp; ipp = ipc; v = cv; cv = v; char *c = cv; void *w = cs; int *restrict r; int *q = r; const int *const k = 0; int *z = k;
+      |               ^ ~~~
+ptr_discards_quals.c:8:26: warning: assigning to 'int **' from 'int *const *' discards qualifiers [-Wincompatible-pointer-types-discards-qualifiers]
+    8 |  cpp = pp; pp = cpp; ipp = ipc; v = cv; cv = v; char *c = cv; void *w = cs; int *restrict r; int *q = r; const int *const k = 0; int *z = k;
+      |                          ^ ~~~
+ptr_discards_quals.c:8:35: warning: assigning to 'void *' from 'const void *' discards qualifiers [-Wincompatible-pointer-types-discards-qualifiers]
+    8 |  cpp = pp; pp = cpp; ipp = ipc; v = cv; cv = v; char *c = cv; void *w = cs; int *restrict r; int *q = r; const int *const k = 0; int *z = k;
+      |                                   ^ ~~
+ptr_discards_quals.c:8:55: warning: initializing 'char *' with an expression of type 'const void *' discards qualifiers [-Wincompatible-pointer-types-discards-qualifiers]
+    8 |  cpp = pp; pp = cpp; ipp = ipc; v = cv; cv = v; char *c = cv; void *w = cs; int *restrict r; int *q = r; const int *const k = 0; int *z = k;
+      |                                                       ^   ~~
+ptr_discards_quals.c:8:69: warning: initializing 'void *' with an expression of type 'const struct S *' discards qualifiers [-Wincompatible-pointer-types-discards-qualifiers]
+    8 |  cpp = pp; pp = cpp; ipp = ipc; v = cv; cv = v; char *c = cv; void *w = cs; int *restrict r; int *q = r; const int *const k = 0; int *z = k;
+      |                                                                     ^   ~~
+ptr_discards_quals.c:8:135: warning: initializing 'int *' with an expression of type 'const int *const' discards qualifiers [-Wincompatible-pointer-types-discards-qualifiers]
+    8 |  cpp = pp; pp = cpp; ipp = ipc; v = cv; cv = v; char *c = cv; void *w = cs; int *restrict r; int *q = r; const int *const k = 0; int *z = k;
+      |                                                                                                                                       ^   ~
+ptr_discards_quals.c:10:106: error: incompatible pointer types assigning to 'void **' from 'int **' [-Wincompatible-pointer-types]
+   10 | void h2(void **vv, int **ii, char **cc2, signed char **sc, unsigned *up, int *ip, const void **cvv) { vv = ii; ii = vv; up = ip; sc = cc2; cvv = vv; void *x = ii; }
+      |                                                                                                          ^ ~~
+ptr_discards_quals.c:10:115: error: incompatible pointer types assigning to 'int **' from 'void **' [-Wincompatible-pointer-types]
+   10 | void h2(void **vv, int **ii, char **cc2, signed char **sc, unsigned *up, int *ip, const void **cvv) { vv = ii; ii = vv; up = ip; sc = cc2; cvv = vv; void *x = ii; }
+      |                                                                                                                   ^ ~~
+ptr_discards_quals.c:10:124: warning: assigning to 'unsigned int *' from 'int *' converts between pointers to integer types with different sign [-Wpointer-sign]
+   10 | void h2(void **vv, int **ii, char **cc2, signed char **sc, unsigned *up, int *ip, const void **cvv) { vv = ii; ii = vv; up = ip; sc = cc2; cvv = vv; void *x = ii; }
+      |                                                                                                                            ^ ~~
+ptr_discards_quals.c:10:133: error: incompatible pointer types assigning to 'signed char **' from 'char **' [-Wincompatible-pointer-types]
+   10 | void h2(void **vv, int **ii, char **cc2, signed char **sc, unsigned *up, int *ip, const void **cvv) { vv = ii; ii = vv; up = ip; sc = cc2; cvv = vv; void *x = ii; }
+      |                                                                                                                                     ^ ~~~
+ptr_discards_quals.c:10:144: warning: assigning to 'const void **' from 'void **' discards qualifiers in nested pointer types [-Wincompatible-pointer-types-discards-qualifiers]
+   10 | void h2(void **vv, int **ii, char **cc2, signed char **sc, unsigned *up, int *ip, const void **cvv) { vv = ii; ii = vv; up = ip; sc = cc2; cvv = vv; void *x = ii; }
+      |                                                                                                                                                ^ ~~
+ptr_discards_quals.c:11:88: warning: assigning to 'const char ***' from 'char ***' discards qualifiers in nested pointer types [-Wincompatible-pointer-types-discards-qualifiers]
+   11 | void g3(char ***a, const char ***b, char *const **c2, unsigned char **u, char **p) { b = a; a = c2; c2 = a; u = p; }
+      |                                                                                        ^ ~
+ptr_discards_quals.c:11:95: warning: assigning to 'char ***' from 'char *const **' discards qualifiers in nested pointer types [-Wincompatible-pointer-types-discards-qualifiers]
+   11 | void g3(char ***a, const char ***b, char *const **c2, unsigned char **u, char **p) { b = a; a = c2; c2 = a; u = p; }
+      |                                                                                               ^ ~~
+ptr_discards_quals.c:11:104: warning: assigning to 'char *const **' from 'char ***' discards qualifiers in nested pointer types [-Wincompatible-pointer-types-discards-qualifiers]
+   11 | void g3(char ***a, const char ***b, char *const **c2, unsigned char **u, char **p) { b = a; a = c2; c2 = a; u = p; }
+      |                                                                                                        ^ ~
+ptr_discards_quals.c:11:111: error: incompatible pointer types assigning to 'unsigned char **' from 'char **' [-Wincompatible-pointer-types]
+   11 | void g3(char ***a, const char ***b, char *const **c2, unsigned char **u, char **p) { b = a; a = c2; c2 = a; u = p; }
+      |                                                                                                               ^ ~
+21 warnings and 7 errors generated.

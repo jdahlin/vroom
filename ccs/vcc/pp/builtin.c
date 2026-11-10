@@ -174,7 +174,7 @@ static int has_query(pp *p, int b, const char *name, uint32_t loc)
 		if (!c)
 			c = strcmp(has_tab[mid].name, name);
 		if (!c)
-			return has_tab[mid].v[p->o->target];
+			return has_tab[mid].v[p->o->target == PP_WASM32 ? PP_WASM64 : p->o->target];	/* wasm32 asks as wasm64 */
 		if (c < 0)
 			lo = mid + 1;
 		else
@@ -316,7 +316,7 @@ VPRIV int builtin(pp *p, const pmacro *m, ptok *t)
 				d[dn++] = sp[i];
 			}
 		}
-		if (pragma_text(p, d, dn, t->loc, t)) {
+		if (pragma_text(p, d, dn, t->loc, t, 0)) {
 			t->flags = TF_SOL;
 			return 1;
 		}
@@ -342,9 +342,22 @@ VPRIV int builtin(pp *p, const pmacro *m, ptok *t)
 		raw(p, &r);
 		if (r.kind != T_RPAREN)
 			error(p, t->loc, "missing ')' after __has_include");
-		mknum(p, t, find_include(p, fc, buf, n, angled, m->builtin == B_HAS_INCLUDE_NEXT, &sd, &path, NULL) != NULL);
+		{
+			const vlex_file *hf = find_include(p, fc, buf, n, angled, m->builtin == B_HAS_INCLUDE_NEXT, &sd, &path, NULL);
+
+			if (hf && p->o->deps)
+				dep_only(p, path, inc_sys(p, sd));	/* a dependency, as clang's */
+			mknum(p, t, hf != NULL);
+		}
 		break;
 	}
+	case B_HAS_EMBED:
+		if (!p->in_dir) {
+			error(p, t->loc, "'__has_embed' must be used within a preprocessing directive");
+			return 1;
+		}
+		mknum(p, t, has_embed(p, fc, t->loc));
+		break;
 	case B_IS_IDENTIFIER:
 		if (!feature_arg(p, buf, sizeof(buf), t->loc))
 			return 1;

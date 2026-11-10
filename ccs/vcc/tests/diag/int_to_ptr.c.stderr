@@ -1,4 +1,4 @@
 int_to_ptr.c:3:9: error: incompatible integer to pointer conversion returning 'int' from a function with result type 'int *' [-Wint-conversion]
     3 |         return 5;
-      |                ^ the returned value
+      |                ^
 1 error generated.

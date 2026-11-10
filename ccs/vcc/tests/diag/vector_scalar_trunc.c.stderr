@@ -1,0 +1,58 @@
+vector_scalar_trunc.c:7:9: error: cannot convert between scalar type 'double' and vector type 'v4' (vector of 4 'int' values) as implicit conversion would cause truncation
+    7 |   a = a + 1.5; a = a + 1.0; a = a + i; a = a + l; a = a + 5000000000; a = a + sh;
+      |         ^
+vector_scalar_trunc.c:7:22: error: cannot convert between scalar type 'double' and vector type 'v4' (vector of 4 'int' values) as implicit conversion would cause truncation
+    7 |   a = a + 1.5; a = a + 1.0; a = a + i; a = a + l; a = a + 5000000000; a = a + sh;
+      |                      ^
+vector_scalar_trunc.c:7:46: error: cannot convert between scalar type 'long' and vector type 'v4' (vector of 4 'int' values) as implicit conversion would cause truncation
+    7 |   a = a + 1.5; a = a + 1.0; a = a + i; a = a + l; a = a + 5000000000; a = a + sh;
+      |                                              ^
+vector_scalar_trunc.c:7:57: error: cannot convert between scalar type 'long' and vector type 'v4' (vector of 4 'int' values) as implicit conversion would cause truncation
+    7 |   a = a + 1.5; a = a + 1.0; a = a + i; a = a + l; a = a + 5000000000; a = a + sh;
+      |                                                         ^
+vector_scalar_trunc.c:8:20: error: cannot convert between scalar type 'int' and vector type 's8' (vector of 8 'short' values) as implicit conversion would cause truncation
+    8 |   b = b + 1; b = b + 70000; b = b + i; b = b + sh; b = b + cc;
+      |                    ^
+vector_scalar_trunc.c:8:35: error: cannot convert between scalar type 'int' and vector type 's8' (vector of 8 'short' values) as implicit conversion would cause truncation
+    8 |   b = b + 1; b = b + 70000; b = b + i; b = b + sh; b = b + cc;
+      |                                   ^
+vector_scalar_trunc.c:9:22: error: cannot convert between scalar type 'double' and vector type 'f4' (vector of 4 'float' values) as implicit conversion would cause truncation
+    9 |   f = f + 1.5; f = f + 0.1; f = f + db; f = f + fl; f = f + i; f = f + l; f = f + 16777217; f = f + 3;
+      |                      ^
+vector_scalar_trunc.c:9:35: error: cannot convert between scalar type 'double' and vector type 'f4' (vector of 4 'float' values) as implicit conversion would cause truncation
+    9 |   f = f + 1.5; f = f + 0.1; f = f + db; f = f + fl; f = f + i; f = f + l; f = f + 16777217; f = f + 3;
+      |                                   ^
+vector_scalar_trunc.c:9:59: error: cannot convert between scalar type 'int' and vector type 'f4' (vector of 4 'float' values) as implicit conversion would cause truncation
+    9 |   f = f + 1.5; f = f + 0.1; f = f + db; f = f + fl; f = f + i; f = f + l; f = f + 16777217; f = f + 3;
+      |                                                           ^
+vector_scalar_trunc.c:9:70: error: cannot convert between scalar type 'long' and vector type 'f4' (vector of 4 'float' values) as implicit conversion would cause truncation
+    9 |   f = f + 1.5; f = f + 0.1; f = f + db; f = f + fl; f = f + i; f = f + l; f = f + 16777217; f = f + 3;
+      |                                                                      ^
+vector_scalar_trunc.c:9:81: error: cannot convert between scalar type 'int' and vector type 'f4' (vector of 4 'float' values) as implicit conversion would cause truncation
+    9 |   f = f + 1.5; f = f + 0.1; f = f + db; f = f + fl; f = f + i; f = f + l; f = f + 16777217; f = f + 3;
+      |                                                                                 ^
+vector_scalar_trunc.c:10:9: error: cannot convert between scalar type 'long' and vector type 'd2' (vector of 2 'double' values) as implicit conversion would cause truncation
+   10 |   d = d + l; d = d + i; d = d + fl;
+      |         ^
+vector_scalar_trunc.c:11:11: error: cannot convert between scalar type 'int' and vector type 'c16' (vector of 16 'char' values) as implicit conversion would cause truncation
+   11 |   ch = ch + 300; ch = ch + 'a'; ch = ch + i;
+      |           ^
+vector_scalar_trunc.c:11:41: error: cannot convert between scalar type 'int' and vector type 'c16' (vector of 16 'char' values) as implicit conversion would cause truncation
+   11 |   ch = ch + 300; ch = ch + 'a'; ch = ch + i;
+      |                                         ^
+vector_scalar_trunc.c:12:34: error: cannot convert between scalar type 'unsigned int' and vector type 'v4' (vector of 4 'int' values) as implicit conversion would cause truncation
+   12 |   a = a + 2u; a = a + 3ul; a = a + (unsigned)i;
+      |                                  ^
+vector_scalar_trunc.c:14:31: error: cannot convert between scalar type 'double' and vector type 'v4' (vector of 4 'int' values) as implicit conversion would cause truncation
+   14 | void t1(v4 a, long l) { a = a + 1.5; a = l * a; a += 1.5; a = a < l; }
+      |                               ^
+vector_scalar_trunc.c:14:44: error: cannot convert between scalar type 'long' and vector type 'v4' (vector of 4 'int' values) as implicit conversion would cause truncation
+   14 | void t1(v4 a, long l) { a = a + 1.5; a = l * a; a += 1.5; a = a < l; }
+      |                                            ^
+vector_scalar_trunc.c:14:51: error: cannot convert between scalar type 'double' and vector type 'v4' (vector of 4 'int' values) as implicit conversion would cause truncation
+   14 | void t1(v4 a, long l) { a = a + 1.5; a = l * a; a += 1.5; a = a < l; }
+      |                                                   ^
+vector_scalar_trunc.c:14:65: error: cannot convert between scalar type 'long' and vector type 'v4' (vector of 4 'int' values) as implicit conversion would cause truncation
+   14 | void t1(v4 a, long l) { a = a + 1.5; a = l * a; a += 1.5; a = a < l; }
+      |                                                                 ^
+19 errors generated.

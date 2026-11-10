@@ -1,0 +1,4 @@
+alignas_not_pow2.c:1:1: error: requested alignment is not a power of 2
+    1 | _Alignas(3) int x;
+      | ^        ~
+1 error generated.

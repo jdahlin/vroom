@@ -27,25 +27,47 @@ VPRIV uint32_t new_attrs(cc *c, const attrs *a)
 	return i;
 }
 
+/* clang's -Wdeprecated-declarations for a use at loc of name, a: the record */
+VPRIV __attribute__((noinline, cold)) void deprecated_use(cc *c, uint32_t loc, uint32_t name, const attrs *a, uint32_t dloc)
+{
+	if (unlikely(a->unavail)) {	/* clang: an error, also inside an unavailable function */
+		if (a->deprmsg)
+			cc_error(c, loc, "'%.*s' is unavailable: %s", IDF(name), c->strs[a->deprmsg - 1].s);
+		else
+			cc_error(c, loc, "'%.*s' is unavailable", IDF(name));
+		note(c, dloc, "'%.*s' has been explicitly marked unavailable here", IDF(name));	/* (clang: the declaration) */
+		return;
+	}
+	if (c->fn && (c->syms[c->fn].flags & SF_DEPRECATED) && !c->attr[c->syms[c->fn].attrs].unavail)
+		return;	/* clang: not inside a deprecated function */
+	if (a->deprmsg)
+		cc_warnx(c, "deprecated-declarations", true, NULL, loc, NULL, 0, NULL, 0, "'%.*s' is deprecated: %s",
+			 IDF(name), c->strs[a->deprmsg - 1].s);
+	else
+		cc_warnx(c, "deprecated-declarations", true, NULL, loc, NULL, 0, NULL, 0, "'%.*s' is deprecated", IDF(name));
+	note(c, a->depr, "'%.*s' has been explicitly marked deprecated here", IDF(name));
+}
+
+/* a deprecated tag: its record */
+VPRIV void tag_deprecate(cc *c, uint32_t ti, const attrs *a)
+{
+	if (a->depr && !c->tags[ti].depr)
+		c->tags[ti].depr = new_attrs(c, a);
+}
+
 VPRIV void apply_sym_attrs(cc *c, sym *s, const attrs *a)
 {
 	if (attrs_empty(a))
 		return;		/* (no record: sym_attrs() in emit.c reads attrs 0 as none) */
 	if (s->attrs)
-		merge_attrs(c, &c->attr[s->attrs], a);
+		merge_attrs(&c->attr[s->attrs], a);
 	else
 		s->attrs = new_attrs(c, a);
 	if (a->aligned > s->align)
 		s->align = a->aligned;
 	if (a->weak) s->flags |= SF_WEAK;
-	if (a->fmt) s->fmt = a->fmt;
-	if (unlikely(a->ext)) {
-		const attrx *x = &c->attrx[a->ext];
-
-		if (x->depr) s->flags |= SF_DEPR;
-		if (x->nonnull) s->flags |= SF_NONNULL;
-		if (x->wur) s->flags |= SF_WUR;
-	}
+	if (a->depr) s->flags |= SF_DEPRECATED;
+	if (a->wur) s->flags |= SF_WUR;
 	if (a->noreturn) s->flags |= SF_NORETURN;
 	if (a->always_inline) s->flags |= SF_ALWAYS_INLINE;
 	if (a->noinline) s->flags |= SF_NOINLINE;
@@ -242,21 +264,13 @@ VPRIV void weak_finish(cc *c)
 	}
 }
 
-/* the typedef ds named, if t (an object's type or a function's return type) is that type */
-VPRIV uint32_t ds_tdef(cc *c, const dspec *ds, qty t)
-{
-	if (KIND(c, t) == TY_FUNC)
-		t = T(c, t)->base;
-	return QUNQ(t) == QUNQ(ds->ty) ? ds->tds : 0;
-}
-
 static uint32_t declare(cc *c, const dspec *ds, declr *d, qty t, bool file)
 {
 	attrs at = d->at;
 	uint32_t s, prev;
 	int kind;
 
-	merge_attrs(c, &at, &ds->at);
+	merge_attrs(&at, &ds->at);
 	if (ds->align > at.aligned)
 		at.aligned = ds->align;
 	if (d->at.mode && is_integer(c, t)) {
@@ -271,11 +285,26 @@ static uint32_t declare(cc *c, const dspec *ds, declr *d, qty t, bool file)
 		else
 			t = QT(QI(ty_vector(c, t, at.vecsize)), QQ(t));
 	}
+	if (at.extvec && ds->sc == SC_TYPEDEF && is_arith(c, t) && !is_complex(c, t)) {
+		/* clang: n elements, the size rounded up to a power of 2 (float3: 16) */
+		uint64_t sz = (uint64_t)at.extvec * ty_size(c, t), p = 1;
+
+		while (p < sz)
+			p <<= 1;
+		{
+			ctype v = *T(c, ty_vector(c, t, (uint32_t)p));
+
+			v.ext = (uint16_t)at.extvec;
+			t = QT(ty_intern(c, &v), QQ(t));
+		}
+	}
 	if (ds->sc == SC_TYPEDEF) {
 		if (at.aligned)
 			t = ty_aligned(c, t, at.aligned);
-		if (at.transparent && KIND(c, t) == TY_UNION)
+		if (at.transparent && KIND(c, t) == TY_UNION) {
+			DR_TAGWRITE(c, T(c, t)->aux);
 			c->ty[QI(t)].flags |= TF_TRANSPARENT;
+		}
 		prev = lookup(c, d->name);
 		if (prev && c->syms[prev].depth == c->depth && c->syms[prev].kind == S_TYPEDEF) {
 			if (!compatible(c, c->syms[prev].ty, t) || QQ(c->syms[prev].ty) != QQ(t))
@@ -284,16 +313,21 @@ static uint32_t declare(cc *c, const dspec *ds, declr *d, qty t, bool file)
 		}
 		s = sym_new(c, S_TYPEDEF, d->name, t, d->loc);
 		c->syms[s].sc = SC_TYPEDEF;
-		if (at.unused || at.used)
-			c->syms[s].flags |= SF_REF;	/* (no -Wunused-local-typedef) */
-		if (unlikely(attrs_depr(c, &at)))
-			apply_sym_attrs(c, &c->syms[s], &at);
+		c->syms[s].tdef = ds->tdef && QUNQ(t) == QUNQ(ds->ty) ? ds->tdef : 0;
+		if (unlikely(at.depr)) {	/* only what a typedef's use needs */
+			attrs da = { 0 };
+
+			da.depr = at.depr, da.deprmsg = at.deprmsg;
+			apply_sym_attrs(c, &c->syms[s], &da);
+		}
 		sym_bind(c, s);
 		if (is_record(c, t) || KIND(c, t) == TY_ENUM) {
 			tag *r = &c->tags[T(c, t)->aux];
 
-			if (!r->name && !r->typedef_name && file)
+			if (!r->name && !r->typedef_name && file) {
+				DR_TAGWRITE(c, T(c, t)->aux);
 				r->typedef_name = d->name;
+			}
 		}
 		if (file)
 			c->toplevel[c->ntoplevel++] = s;
@@ -366,7 +400,10 @@ static uint32_t declare(cc *c, const dspec *ds, declr *d, qty t, bool file)
 			note(c, y->loc, "previous definition is here");
 		} else if (!compatible(c, y->ty, t)) {
 			cc_error(c, d->loc, "conflicting types for '%.*s'", IDF(d->name));
-			note(c, y->loc, "previous declaration is here");
+			if (kind == S_FUNC && (y->flags & SF_DEFINED) && y->defloc)	/* (clang: a defined function's definition) */
+				note(c, y->defloc, "previous definition is here");
+			else
+				note(c, y->loc, "previous declaration is here");
 		} else {
 			y->ty = QT(QI(composite(c, y->ty, t)), QQ(y->ty) | QQ(t));
 			if (ds->sc == SC_STATIC && kind == S_FUNC)
@@ -390,8 +427,7 @@ static uint32_t declare(cc *c, const dspec *ds, declr *d, qty t, bool file)
 	{
 		sym *y = &c->syms[s];
 
-		if (ds->tds)
-			y->tdef = ds_tdef(c, ds, t);
+		y->tdef = ds->tdef && QUNQ(t) == QUNQ(ds->ty) ? ds->tdef : 0;
 		y->sc = (uint8_t)(ds->sc == SC_TYPEDEF ? SC_NONE : ds->sc);
 		if (file || ds->sc == SC_EXTERN || kind == S_FUNC)
 			y->flags |= SF_GLOBAL;
@@ -461,7 +497,7 @@ static bool lb_type(cc *c, const char **p, qty *out)
 	case 'Y': t = prim(TY_LONG); break;	/* ptrdiff_t */
 	case 'w': t = c->t_wchar; break;
 	case 'P': t = prim(TY_VOID); break;	/* FILE: only ever as P*, a void * */
-	case 'W': t = prim(TY_LONG); break;	/* int64_t */
+	case 'W': t = prim(CC_I64(c, false)); break;	/* int64_t */
 	case 'Z': t = prim(TY_INT); break;	/* int32_t */
 	default: return false;
 	}
@@ -544,6 +580,13 @@ VPRIV bool lib_builtin_known(const char *n)
 	return libbi_find(n, strlen(n)) != NULL;
 }
 
+VPRIV const char *lib_builtin_sig(const char *n)
+{
+	const struct libbi *b = libbi_find(n, strlen(n));
+
+	return b ? b->sig : NULL;
+}
+
 VPRIV uint32_t lib_builtin(cc *c, uint32_t id, uint32_t loc)
 {
 	const struct libbi *b = libbi_find(idstr_(id), idlen_(id));
@@ -572,6 +615,46 @@ VPRIV uint32_t lib_builtin(cc *c, uint32_t id, uint32_t loc)
 			return s;
 		}
 	}
+}
+
+/* the type clang gives an implicitly declared library function (asin: double
+   (double)), 0: not one (or -fno-builtin) */
+VPRIV qty implicit_lib_type(cc *c, uint32_t id)
+{
+	char nm[128];
+	const char *p;
+	qty ret, par[16];
+	uint32_t np = 0;
+	int fl = 0, enc;
+
+	if (c->o->no_builtin || (size_t)idlen_(id) >= sizeof nm)
+		return 0;
+	memcpy(nm, idstr_(id), idlen_(id));
+	nm[idlen_(id)] = 0;
+	if (!(p = cc_lib_sig(nm, &enc)))
+		return 0;
+	if (!enc)
+		return sig_func_type(c, p);
+	if (!lb_type(c, &p, &ret))
+		return 0;
+	while (*p) {
+		if (*p == '.') {
+			fl |= TF_VARIADIC;
+			break;
+		}
+		if (np == 16 || !lb_type(c, &p, &par[np]))
+			return 0;
+		np++;
+	}
+	return ty_func(c, ret, par, np, fl);
+}
+
+VPRIV uint32_t implicit_lib_func(cc *c, uint32_t id, uint32_t loc, qty t)
+{
+	dspec ds = { .ty = T(c, t)->base, .sc = SC_EXTERN, .loc = loc };
+	declr d = { .name = id, .loc = loc };
+
+	return declare(c, &ds, &d, t, c->depth == 0);
 }
 
 VPRIV uint32_t implicit_func(cc *c, uint32_t id, uint32_t loc)
@@ -693,6 +776,7 @@ static void kr_params(cc *c, const declr *fd)
 
 	/* tags declared here belong to the function, not the file (approximation: not seen by the body) */
 	scope_open(c);
+	c->in_proto++;
 	while (!is(c, T_LBRACE)) {
 		dspec ds;
 
@@ -734,6 +818,7 @@ static void kr_params(cc *c, const declr *fd)
 		}
 		expect_semi(c, "at end of declaration");
 	}
+	c->in_proto--;
 	scope_close(c);
 	if (!c->o->implicit_int)
 		for (uint32_t i = 0; i < fd->npsyms && i < sizeof(seen); i++)
@@ -886,9 +971,13 @@ VPRIV void declaration(cc *c, vec *out, bool file)
 		}
 		if (accept(c, T_EQUAL)) {
 			sym *y = &c->syms[s];
-			qty it = t;
+			/* int a[]: the size of an earlier declaration (the composite type), if it had one */
+			qty it = is_array(c, t) && (T(c, t)->flags & TF_INCOMPLETE) && is_array(c, y->ty) &&
+				 !(T(c, y->ty)->flags & (TF_INCOMPLETE | TF_VLA)) ? QT(QI(y->ty), QQ(t)) : t;
 			bool st = file || ds.sc == SC_STATIC;
 			uint32_t v;
+			int nerr = c->errors;
+			uint32_t nconv0 = c->nconv;
 
 			if (ds.sc == SC_TYPEDEF || is_func(c, t))
 				cc_error(c, d.loc, "illegal initializer");
@@ -911,12 +1000,31 @@ VPRIV void declaration(cc *c, vec *out, bool file)
 					report(c, "error", d.loc, &r, 1, NULL, 0, "variable-sized object may not be initialized");
 					v = 0;
 				}
+			} else if (!file && ds.sc != SC_EXTERN && ds.sc != SC_TYPEDEF && !is_func(c, t) && !is_array(c, t) &&
+				   !complete(c, t)) {
+				/* clang: the variable is invalid, its initializer not checked */
+				cc_error(c, d.loc, "variable has incomplete type '%s'", tyname(c, t));
+				c->syms[s].flags |= SF_INVALID;
+				if (is_record(c, t) || KIND(c, t) == TY_ENUM)
+					note(c, c->tags[T(c, t)->aux].loc, "forward declaration of '%s'", tyname(c, t));
+				if (is(c, T_LBRACE))
+					skip_vla_init(c);
+				else
+					(void)assign_expr(c);
+				v = 0;
 			} else {
 				uint8_t sw = c->cv_what;
 				uint32_t sl = c->cv_loc;
 
 				c->cv_what = CX_INIT, c->cv_loc = d.loc;
+				c->syms[s].defloc = d.loc;
+				uint16_t nr0 = c->syms[s].nref;
+
+				c->defer_rt = st, c->ndefer = 0;
 				v = initializer(c, &it, st);
+				if (c->syms[s].nref != nr0 && !st)
+					c->uv_any |= 2;	/* (a self-reference: -Wuninitialized) */
+				c->defer_rt = 0;
 				c->cv_what = sw, c->cv_loc = sl;
 			}
 			y = &c->syms[s];
@@ -934,6 +1042,30 @@ VPRIV void declaration(cc *c, vec *out, bool file)
 			}
 			y->body = v;
 			y->flags |= SF_DEFINED;
+			{
+				uint32_t bad = 0;
+
+				/* not after an error in the initializer (clang: no follow-on error), but after
+				   conversion errors, which are clang's warnings defaulting to errors */
+				bool ok = true;
+
+				if (st && v && c->errors - c->nconv == nerr - nconv0) {
+					c->sie = c->errors != nerr;
+					ok = static_init_ok(c, y->ty, v, &bad);
+					c->sie = false;
+				}
+				if (!ok) {
+					pp_span r = rng(c, bad);
+
+					report(c, "error", expr_loc(c, bad), &r, 1, NULL, 0, "initializer element is not a compile-time constant");
+					/* the runtime-behaviour warnings only for an initializer that runs (not a constant) */
+					for (int k = 0; k < c->ndefer; k++)
+						cc_warnx(c, "division-by-zero", true, NULL, c->defer[k].loc, &c->defer[k].r, 1, NULL, 0,
+							 "%s by zero is undefined", c->defer[k].rem ? "remainder" : "division");
+				}
+				c->ndefer = 0;
+			}
+			y = &c->syms[s];
 			if (out && !st) {
 				uint32_t n = mk2(c, N_DECL, prim(TY_VOID), d.loc, s, v);
 
@@ -942,11 +1074,19 @@ VPRIV void declaration(cc *c, vec *out, bool file)
 		} else {
 			sym *y = &c->syms[s];
 
-			if (y->kind == S_VAR && ds.sc != SC_EXTERN && ds.sc != SC_TYPEDEF) {
+			if (y->kind == S_VAR && is_array(c, y->ty) && !complete(c, T(c, y->ty)->base)) {
+				qty e = T(c, y->ty)->base;	/* (clang: on any array declarator; variables here) */
+
+				cc_error(c, pp_tok_end(c->p, d.loc), "array has incomplete element type '%s'", tyname(c, e));
+				if (is_record(c, e) || KIND(c, e) == TY_ENUM)
+					note(c, c->tags[T(c, e)->aux].loc, "forward declaration of '%s'", tyname(c, e));
+			} else if (y->kind == S_VAR && ds.sc != SC_EXTERN && ds.sc != SC_TYPEDEF) {
 				if (file)
 					y->flags |= SF_TENTATIVE;
 				else if (!complete(c, y->ty) && ds.sc != SC_STATIC) {
-					if (!is_void(c, y->ty)) {	/* void: declare said so */
+					if (is_array(c, y->ty))
+						cc_error(c, d.loc, "definition of variable with array type needs an explicit size or an initializer");
+					else if (!is_void(c, y->ty)) {	/* void: declare said so */
 						cc_error(c, d.loc, "variable has incomplete type '%s'", tyname(c, y->ty));
 						fwd_note(c, y->ty);
 					}
@@ -956,6 +1096,12 @@ VPRIV void declaration(cc *c, vec *out, bool file)
 					uint32_t n = mk2(c, N_DECL, prim(TY_VOID), d.loc, s, 0);
 
 					vpush(c, out, n);
+					if (uv_tracked(c, y->ty)) {
+						c->uv_any |= 1;
+						y->flags |= SF_UVPEND;
+						if (c->nuv < 64)
+							c->uvc[c->nuv] = c->cnd, c->uv[c->nuv++] = s;
+					}
 				}
 			}
 		}

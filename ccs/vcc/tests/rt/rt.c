@@ -265,8 +265,9 @@ static double ld2d(long double x)
 	r.u = s << 63 | (unsigned long long)e << 52 | m;
 	return r.d;
 }
-double sqrt(double x) { return __builtin_sqrt(x); }
-float sqrtf(float x) { return __builtin_sqrtf(x); }
+/* not __builtin_sqrt: under -fno-builtin it is a call to sqrt, this function */
+double sqrt(double x) { double r; __asm__("fsqrt %d0, %d1" : "=w"(r) : "w"(x)); return r; }
+float sqrtf(float x) { float r; __asm__("fsqrt %s0, %s1" : "=w"(r) : "w"(x)); return r; }
 double floor(double x) { return __builtin_floor(x); }
 double ceil(double x) { return __builtin_ceil(x); }
 double trunc(double x) { return __builtin_trunc(x); }
@@ -274,6 +275,128 @@ double round(double x) { return __builtin_round(x); }
 double copysign(double x, double y) { return __builtin_copysign(x, y); }
 double fmod(double x, double y) { return x - __builtin_trunc(x / y) * y; }
 double ldexp(double x, int e) { for (; e > 0; e--) x *= 2; for (; e < 0; e++) x /= 2; return x; }
+
+/* ---- a small libm: range reduction and series, double accuracy for the tests ---- */
+#define RT_LN2 0.69314718055994530942
+#define RT_PI 3.14159265358979323846
+double frexp(double x, int *e)
+{
+	union { double d; unsigned long long u; } v = { x };
+	int k = (int)(v.u >> 52 & 0x7ff);
+	*e = 0;
+	if (x == 0 || k == 0x7ff) return x;
+	if (!k) { v.d = x * 0x1p64; k = (int)(v.u >> 52 & 0x7ff) - 64; }
+	*e = k - 1022;
+	v.u = (v.u & ~(0x7ffull << 52)) | 1022ull << 52;
+	return v.d;
+}
+double exp(double x)
+{
+	if (x != x) return x;
+	if (x > 709.8) return __builtin_inf();
+	if (x < -745.2) return 0;
+	double k = __builtin_round(x / RT_LN2), r = (x - k * 0.6931471803691238) - k * 1.9082149292705877e-10, t = 1, s = 1;
+	for (int i = 1; i < 30; i++) { t *= r / i; s += t; }
+	return ldexp(s, (int)k);
+}
+double log(double x)
+{
+	int e;
+	if (x != x || x < 0) return __builtin_nan("");
+	if (x == 0) return -__builtin_inf();
+	if (x == __builtin_inf()) return x;
+	double m = frexp(x, &e);
+	if (m < 0.70710678118654752) m *= 2, e--;
+	double z = (m - 1) / (m + 1), z2 = z * z, t = z, s = 0;
+	for (int i = 1; i < 60; i += 2) { s += t / i; t *= z2; }
+	return 2 * s + e * RT_LN2;
+}
+double log10(double x) { return log(x) / 2.30258509299404568402; }
+double pow(double x, double y)
+{
+	if (y == 0) return 1;
+	if (y == __builtin_trunc(y) && __builtin_fabs(y) < 1e9) {
+		long long n = (long long)y;
+		double r = 1, b = x;
+		for (unsigned long long u = n < 0 ? -(unsigned long long)n : (unsigned long long)n; u; u >>= 1, b *= b)
+			if (u & 1) r *= b;
+		return n < 0 ? 1 / r : r;
+	}
+	if (x < 0) return __builtin_nan("");
+	if (x == 0) return y > 0 ? 0 : __builtin_inf();
+	return exp(y * log(x));
+}
+/* x reduced to [-pi/4, pi/4], *q: the quadrant */
+static double rt_reduce(double x, int *q)
+{
+	double k = __builtin_round(x / (RT_PI / 2));
+	*q = (int)((long long)k & 3);
+	return (x - k * 1.5707963267341256) - k * 6.077100506506192e-11;
+}
+static double rt_sin(double r) { double t = r, s = r; for (int i = 1; i < 14; i++) { t *= -r * r / ((2 * i) * (2 * i + 1)); s += t; } return s; }
+static double rt_cos(double r) { double t = 1, s = 1; for (int i = 1; i < 14; i++) { t *= -r * r / ((2 * i - 1) * (2 * i)); s += t; } return s; }
+double sin(double x) { int q; double r = rt_reduce(x, &q); return q == 0 ? rt_sin(r) : q == 1 ? rt_cos(r) : q == 2 ? -rt_sin(r) : -rt_cos(r); }
+double cos(double x) { int q; double r = rt_reduce(x, &q); return q == 0 ? rt_cos(r) : q == 1 ? -rt_sin(r) : q == 2 ? -rt_cos(r) : rt_sin(r); }
+double tan(double x) { return sin(x) / cos(x); }
+double atan(double x)
+{
+	if (x != x) return x;
+	if (x < 0) return -atan(-x);
+	if (x > 1) return RT_PI / 2 - atan(1 / x);
+	if (x > 0.41421356237309505) return RT_PI / 4 + atan((x - 1) / (x + 1));
+	double t = x, s = 0;
+	for (int i = 1; i < 80; i += 2) { s += t / i; t *= -x * x; }
+	return s;
+}
+double atan2(double y, double x)
+{
+	if (x > 0) return atan(y / x);
+	if (x < 0) return y >= 0 ? atan(y / x) + RT_PI : atan(y / x) - RT_PI;
+	return y > 0 ? RT_PI / 2 : y < 0 ? -RT_PI / 2 : 0;
+}
+double asin(double x) { return atan2(x, sqrt((1 - x) * (1 + x))); }
+double acos(double x) { return RT_PI / 2 - asin(x); }
+double sinh(double x)
+{
+	if (__builtin_fabs(x) < 0.5) { double t = x, s = x; for (int i = 1; i < 12; i++) { t *= x * x / ((2 * i) * (2 * i + 1)); s += t; } return s; }
+	double e = exp(x);
+	return (e - 1 / e) / 2;
+}
+double cosh(double x) { double e = exp(x); return (e + 1 / e) / 2; }
+double tanh(double x)
+{
+	if (__builtin_fabs(x) > 20) return x > 0 ? 1 : -1;
+	if (__builtin_fabs(x) < 0.5) return sinh(x) / cosh(x);
+	double e = exp(2 * x);
+	return (e - 1) / (e + 1);
+}
+
+/* float complex division (compiler-rt's __divsc3, without its scaling) */
+_Complex float __divsc3(float a, float b, float c, float d)
+{
+	float den = c * c + d * d;
+	_Complex float r;
+	__real__ r = (a * c + b * d) / den;
+	__imag__ r = (b * c - a * d) / den;
+	return r;
+}
+__int128 __fixsfti(float f)
+{
+	int neg = f < 0;
+	unsigned __int128 m = 0;
+	float a = neg ? -f : f, p = 0x1p127f;	/* no __floatuntisf here */
+	for (int i = 127; i >= 0; i--, p *= 0.5f)
+		if (a >= p) { a -= p; m |= (unsigned __int128)1 << i; }
+	return neg ? -(__int128)m : (__int128)m;
+}
+
+/* calls clang leaves for GNU builtins it lacks */
+int puts(const char *);
+void __builtin_exit(int c) __attribute__((noreturn));
+void __builtin_exit(int c) { exit(c); __builtin_unreachable(); }
+int __builtin_puts(const char *p) { return puts(p); }
+int __builtin_isinff(float x) { return __builtin_isinf(x); }
+void atomic_signal_fence(int order) { (void)order; __asm__ volatile("" ::: "memory"); }
 
 /* ---- qsort (insertion sort; the tests sort a handful of items) ---- */
 void qsort(void *b, size_t n, size_t sz, int (*cmp)(const void *, const void *))
@@ -452,7 +575,7 @@ static int fmt(sink *s, const char *f, va_list ap)
 			else {
 				int p = prec ? prec : 1, x = 0;
 				char t[520];
-				expo(t, v, p - 1, 0, 0);
+				t[expo(t, v, p - 1, 0, 0)] = 0;	/* strtol below: no stack bytes after the exponent */
 				x = (int)strtol(strchr(t, 'e') + 1, 0, 10);
 				if (x < -4 || x >= p) n = expo(b, v, p - 1, alt, up);
 				else n = fixed(b, v, p - 1 - x, alt);
@@ -508,6 +631,7 @@ FILE *fopen(const char *p, const char *m) { (void)p; (void)m; return 0; }
 int fclose(FILE *f) { (void)f; return 0; }
 int feof(FILE *f) { (void)f; return 1; }
 int remove(const char *p) { (void)p; return -1; }
+char *tmpnam(char *s) { static char b[20] = "/tmp/rt-tmpnam"; if (s) { memcpy(s, b, sizeof b); return s; } return b; }
 void perror(const char *p) { fprintf(stderr, "%s: error\n", p); }
 
 /* main may take argc/argv */

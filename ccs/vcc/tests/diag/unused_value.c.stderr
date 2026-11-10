@@ -1,121 +1,74 @@
-unused_value.c:14:4: warning: equality comparison result unused [-Wunused-comparison]
-   14 |         x == 1;
+unused_value.c:15:4: warning: equality comparison result unused [-Wunused-comparison]
+   15 |         x == 1;
       |         ~~^~~~
-unused_value.c:14:4: note: use '=' to turn this equality comparison into an assignment
-   14 |         x == 1;
+unused_value.c:15:4: note: use '=' to turn this equality comparison into an assignment
+   15 |         x == 1;
       |           ^~
       |           =
-unused_value.c:15:4: warning: inequality comparison result unused [-Wunused-comparison]
-   15 |         x != 1;
-      |         ~~^~~~
-unused_value.c:15:4: note: use '|=' to turn this inequality comparison into an or-assignment
-   15 |         x != 1;
-      |           ^~
-      |           |=
-unused_value.c:16:4: warning: relational comparison result unused [-Wunused-comparison]
-   16 |         x < 1;
-      |         ~~^~~
-unused_value.c:18:2: warning: expression result unused; should this cast be to 'void'? [-Wunused-value]
-   18 |         (void *)p;
-      |         ^~~~~~~~~
-unused_value.c:29:2: warning: ignoring return value of function declared with pure attribute [-Wunused-value]
-   29 |         pf(1);
-      |         ^~~~~
-      = help: a pure function has no effect but its result: use it, or remove the call
-unused_value.c:30:2: warning: ignoring return value of function declared with const attribute [-Wunused-value]
-   30 |         cf(1);
-      |         ^~~~~
-      = help: a const function has no effect but its result: use it, or remove the call
-unused_value.c:12:2: warning: expression result unused [-Wunused-value]
-   12 |         x;
+unused_value.c:5:2: warning: expression result unused [-Wunused-value]
+    5 |         x;
       |         ^
-      = help: the value is computed and thrown away: use it, or cast it to (void) if that is intended
-unused_value.c:13:4: warning: expression result unused [-Wunused-value]
-   13 |         x + 1;
-      |         ~~^~~
-      = help: the value is computed and thrown away: use it, or cast it to (void) if that is intended
-unused_value.c:19:2: warning: expression result unused [-Wunused-value]
-   19 |         (long)x;
-      |         ^~~~~~~
-      = help: the value is computed and thrown away: use it, or cast it to (void) if that is intended
-unused_value.c:20:2: warning: expression result unused [-Wunused-value]
-   20 |         *p;
-      |         ^~
-      = help: the value is computed and thrown away: use it, or cast it to (void) if that is intended
-unused_value.c:21:2: warning: expression result unused [-Wunused-value]
-   21 |         -x;
-      |         ^~
-      = help: the value is computed and thrown away: use it, or cast it to (void) if that is intended
-unused_value.c:22:2: warning: expression result unused [-Wunused-value]
-   22 |         !x;
-      |         ^~
-      = help: the value is computed and thrown away: use it, or cast it to (void) if that is intended
-unused_value.c:23:2: warning: expression result unused [-Wunused-value]
-   23 |         &x;
-      |         ^~
-      = help: the value is computed and thrown away: use it, or cast it to (void) if that is intended
-unused_value.c:24:6: warning: expression result unused [-Wunused-value]
-   24 |         ps->f;
-      |         ~~~~^
-      = help: the value is computed and thrown away: use it, or cast it to (void) if that is intended
-unused_value.c:25:4: warning: expression result unused [-Wunused-value]
-   25 |         s.f;
-      |         ~~^
-      = help: the value is computed and thrown away: use it, or cast it to (void) if that is intended
-unused_value.c:26:7: warning: expression result unused [-Wunused-value]
-   26 |         s.a[1];
-      |         ~~~~~^
-      = help: the value is computed and thrown away: use it, or cast it to (void) if that is intended
-unused_value.c:27:5: warning: expression result unused [-Wunused-value]
-   27 |         p[1];
-      |         ~~~^
-      = help: the value is computed and thrown away: use it, or cast it to (void) if that is intended
-unused_value.c:31:10: warning: expression result unused [-Wunused-value]
-   31 |         x ? 1 : 2;
-      |                 ^
-      = help: the value is computed and thrown away: use it, or cast it to (void) if that is intended
-unused_value.c:34:4: warning: expression result unused [-Wunused-value]
-   34 |         x && x;
-      |         ~~^~~~
-      = help: the value is computed and thrown away: use it, or cast it to (void) if that is intended
-unused_value.c:36:3: warning: left operand of comma operator has no effect [-Wunused-value]
-   36 |         (0, g(1));
+unused_value.c:6:2: warning: expression result unused [-Wunused-value]
+    6 |         1;
+      |         ^
+unused_value.c:7:4: warning: expression result unused [-Wunused-value]
+    7 |         x + 1;
+      |         ~ ^ ~
+unused_value.c:8:3: warning: left operand of comma operator has no effect [-Wunused-value]
+    8 |         (0, g());
       |          ^
-      = help: only the right operand's value is used: remove the left one, or cast it to (void)
-unused_value.c:37:7: warning: left operand of comma operator has no effect [-Wunused-value]
-   37 |         x = (1, g(1));
+unused_value.c:9:7: warning: expression result unused [-Wunused-value]
+    9 |         g(), x;
       |              ^
-      = help: only the right operand's value is used: remove the left one, or cast it to (void)
-unused_value.c:38:2: warning: expression result unused [-Wunused-value]
-   38 |         sizeof(x);
-      |         ^~~~~~~~~
-      = help: the value is computed and thrown away: use it, or cast it to (void) if that is intended
-unused_value.c:39:2: warning: expression result unused [-Wunused-value]
-   39 |         "str";
+unused_value.c:10:2: warning: expression result unused [-Wunused-value]
+   10 |         -x;
+      |         ^~
+unused_value.c:11:2: warning: expression result unused [-Wunused-value]
+   11 |         *p;
+      |         ^~
+unused_value.c:12:5: warning: expression result unused [-Wunused-value]
+   12 |         a[1];
+      |         ~ ~^
+unused_value.c:13:4: warning: expression result unused [-Wunused-value]
+   13 |         s.m;
+      |         ~ ^
+unused_value.c:16:2: warning: expression result unused [-Wunused-value]
+   16 |         (int)x;
+      |         ^    ~
+unused_value.c:17:10: warning: expression result unused [-Wunused-value]
+   17 |         y ? 1 : 2;
+      |                 ^
+unused_value.c:19:2: warning: expression result unused [-Wunused-value]
+   19 |         &x;
+      |         ^~
+unused_value.c:20:2: warning: expression result unused [-Wunused-value]
+   20 |         sizeof x;
+      |         ^~~~~~~~
+unused_value.c:21:2: warning: expression result unused [-Wunused-value]
+   21 |         "str";
       |         ^~~~~
-      = help: the value is computed and thrown away: use it, or cast it to (void) if that is intended
-unused_value.c:40:2: warning: expression result unused [-Wunused-value]
-   40 |         'c';
-      |         ^~~
-      = help: the value is computed and thrown away: use it, or cast it to (void) if that is intended
-unused_value.c:42:5: warning: expression result unused [-Wunused-value]
-   42 |         ({ 1; });
+unused_value.c:22:3: warning: expression result unused [-Wunused-value]
+   22 |         (x);
+      |         ~^~
+unused_value.c:23:2: warning: expression result unused [-Wunused-value]
+   23 |         ~x;
+      |         ^~
+unused_value.c:24:2: warning: expression result unused [-Wunused-value]
+   24 |         !x;
+      |         ^~
+unused_value.c:25:2: warning: left operand of comma operator has no effect [-Wunused-value]
+   25 |         x, x;
+      |         ^
+unused_value.c:25:5: warning: expression result unused [-Wunused-value]
+   25 |         x, x;
       |            ^
-      = help: the value is computed and thrown away: use it, or cast it to (void) if that is intended
-unused_value.c:44:6: warning: expression result unused [-Wunused-value]
-   44 |         M(x + 1);
-      |           ~~^~~
-      = help: the value is computed and thrown away: use it, or cast it to (void) if that is intended
-unused_value.c:47:7: warning: expression result unused [-Wunused-value]
-   47 |         for (x; x < 3; x + 1)
-      |              ^
-      = help: the value is computed and thrown away: use it, or cast it to (void) if that is intended
-unused_value.c:47:19: warning: expression result unused [-Wunused-value]
-   47 |         for (x; x < 3; x + 1)
-      |                        ~~^~~
-      = help: the value is computed and thrown away: use it, or cast it to (void) if that is intended
-unused_value.c:50:7: warning: expression result unused [-Wunused-value]
-   50 |         x++, x;
-      |              ^
-      = help: the value is computed and thrown away: use it, or cast it to (void) if that is intended
-29 warnings generated.
+unused_value.c:26:5: warning: expression result unused [-Wunused-value]
+   26 |         ({ x; });
+      |            ^
+unused_value.c:27:11: warning: expression result unused [-Wunused-value]
+   27 |         ({ x; }) + 1;
+      |         ~~~~~~~~ ^ ~
+unused_value.c:29:9: warning: expression result unused [-Wunused-value]
+   29 |         x = 1, 2;
+      |                ^
+23 warnings generated.

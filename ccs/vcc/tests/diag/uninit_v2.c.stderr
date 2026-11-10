@@ -1,0 +1,183 @@
+uninit_v2.c:9:30: warning: variable 'x' is uninitialized when used here [-Wuninitialized]
+    9 | int u1(void) { int x; return x; }
+      |                              ^
+uninit_v2.c:9:21: note: initialize the variable 'x' to silence this warning
+    9 | int u1(void) { int x; return x; }
+      |                     ^
+      |                      = 0
+uninit_v2.c:10:28: warning: variable 'x' is used uninitialized whenever 'if' condition is false [-Wsometimes-uninitialized]
+   10 | int u2(int c) { int x; if (c) x = 1; return x; }
+      |                        ----^--              - uninitialized use occurs here
+      |                        |
+      |                        remove the 'if' if its condition is always true
+uninit_v2.c:10:45: note: uninitialized use occurs here
+uninit_v2.c:10:24: note: remove the 'if' if its condition is always true
+uninit_v2.c:10:22: note: initialize the variable 'x' to silence this warning
+   10 | int u2(int c) { int x; if (c) x = 1; return x; }
+      |                      ^
+      |                       = 0
+uninit_v2.c:12:64: warning: variable 'x' is used uninitialized whenever switch case is taken [-Wsometimes-uninitialized]
+   12 | int u4(int c) { int x; switch (c) { case 1: x = 1; break; case 2: break; default: x = 3; } return x; }
+      |                                                                ^                                  - uninitialized use occurs here
+uninit_v2.c:12:99: note: uninitialized use occurs here
+uninit_v2.c:12:22: note: initialize the variable 'x' to silence this warning
+   12 | int u4(int c) { int x; switch (c) { case 1: x = 1; break; case 2: break; default: x = 3; } return x; }
+      |                      ^
+      |                       = 0
+uninit_v2.c:17:25: warning: variable 'x' is uninitialized when used within its own initialization [-Wuninitialized]
+   17 | int u9(int c) { int x = x; return x + c; }
+      |                     ~   ^
+uninit_v2.c:18:41: warning: variable 'p' is used uninitialized whenever 'if' condition is false [-Wsometimes-uninitialized]
+   18 | int u10(int c) { char *p; double d; if (c) p = 0, d = 1; return *p + (int)d; }
+      |                                     ----^--                      - uninitialized use occurs here
+      |                                     |
+      |                                     remove the 'if' if its condition is always true
+uninit_v2.c:18:66: note: uninitialized use occurs here
+uninit_v2.c:18:37: note: remove the 'if' if its condition is always true
+uninit_v2.c:18:25: note: initialize the variable 'p' to silence this warning
+   18 | int u10(int c) { char *p; double d; if (c) p = 0, d = 1; return *p + (int)d; }
+      |                         ^
+      |                          = NULL
+uninit_v2.c:18:41: warning: variable 'd' is used uninitialized whenever 'if' condition is false [-Wsometimes-uninitialized]
+   18 | int u10(int c) { char *p; double d; if (c) p = 0, d = 1; return *p + (int)d; }
+      |                                     ----^--                               - uninitialized use occurs here
+      |                                     |
+      |                                     remove the 'if' if its condition is always true
+uninit_v2.c:18:75: note: uninitialized use occurs here
+uninit_v2.c:18:37: note: remove the 'if' if its condition is always true
+uninit_v2.c:18:35: note: initialize the variable 'd' to silence this warning
+   18 | int u10(int c) { char *p; double d; if (c) p = 0, d = 1; return *p + (int)d; }
+      |                                   ^
+      |                                    = 0.0
+uninit_v2.c:20:25: warning: variable 'x' is uninitialized when used here [-Wuninitialized]
+   20 | int u12(int c) { int x; x++; return x; }
+      |                         ^
+uninit_v2.c:20:23: note: initialize the variable 'x' to silence this warning
+   20 | int u12(int c) { int x; x++; return x; }
+      |                       ^
+      |                        = 0
+uninit_v2.c:21:25: warning: variable 'x' is uninitialized when used here [-Wuninitialized]
+   21 | int u13(int c) { int x; x += 1; return x; }
+      |                         ^
+uninit_v2.c:21:23: note: initialize the variable 'x' to silence this warning
+   21 | int u13(int c) { int x; x += 1; return x; }
+      |                       ^
+      |                        = 0
+uninit_v2.c:25:52: warning: variable 'b' is uninitialized when used here [-Wuninitialized]
+   25 | int u17(int c) { _Bool b; float f; long *q; return b + f + (q != 0); }
+      |                                                    ^
+uninit_v2.c:25:25: note: initialize the variable 'b' to silence this warning
+   25 | int u17(int c) { _Bool b; float f; long *q; return b + f + (q != 0); }
+      |                         ^
+      |                          = 0
+uninit_v2.c:25:56: warning: variable 'f' is uninitialized when used here [-Wuninitialized]
+   25 | int u17(int c) { _Bool b; float f; long *q; return b + f + (q != 0); }
+      |                                                        ^
+uninit_v2.c:25:34: note: initialize the variable 'f' to silence this warning
+   25 | int u17(int c) { _Bool b; float f; long *q; return b + f + (q != 0); }
+      |                                  ^
+      |                                   = 0.0
+uninit_v2.c:25:61: warning: variable 'q' is uninitialized when used here [-Wuninitialized]
+   25 | int u17(int c) { _Bool b; float f; long *q; return b + f + (q != 0); }
+      |                                                             ^
+uninit_v2.c:25:43: note: initialize the variable 'q' to silence this warning
+   25 | int u17(int c) { _Bool b; float f; long *q; return b + f + (q != 0); }
+      |                                           ^
+      |                                            = NULL
+uninit_v2.c:27:36: warning: variable 'x' is uninitialized when used here [-Wuninitialized]
+   27 | int u19(int c) { int x; return c ? x : 0; }
+      |                                    ^
+uninit_v2.c:27:23: note: initialize the variable 'x' to silence this warning
+   27 | int u19(int c) { int x; return c ? x : 0; }
+      |                       ^
+      |                        = 0
+uninit_v2.c:30:33: warning: variable 'p' is uninitialized when used here [-Wuninitialized]
+   30 | int f1(int c) { int *p; return *p; }
+      |                                 ^
+uninit_v2.c:30:23: note: initialize the variable 'p' to silence this warning
+   30 | int f1(int c) { int *p; return *p; }
+      |                       ^
+      |                        = NULL
+uninit_v2.c:31:75: warning: variable 'u' is uninitialized when used here [-Wuninitialized]
+   31 | unsigned g2(int c) { unsigned u; unsigned char ch; enum E { A } e; return u + ch + e; }
+      |                                                                           ^
+uninit_v2.c:31:32: note: initialize the variable 'u' to silence this warning
+   31 | unsigned g2(int c) { unsigned u; unsigned char ch; enum E { A } e; return u + ch + e; }
+      |                                ^
+      |                                 = 0
+uninit_v2.c:31:79: warning: variable 'ch' is uninitialized when used here [-Wuninitialized]
+   31 | unsigned g2(int c) { unsigned u; unsigned char ch; enum E { A } e; return u + ch + e; }
+      |                                                                               ^~
+uninit_v2.c:31:50: note: initialize the variable 'ch' to silence this warning
+   31 | unsigned g2(int c) { unsigned u; unsigned char ch; enum E { A } e; return u + ch + e; }
+      |                                                  ^
+      |                                                   = '\0'
+uninit_v2.c:31:84: warning: variable 'e' is uninitialized when used here [-Wuninitialized]
+   31 | unsigned g2(int c) { unsigned u; unsigned char ch; enum E { A } e; return u + ch + e; }
+      |                                                    -                               ^
+      |                                                    |
+      |                                                    variable 'e' is declared here
+uninit_v2.c:31:52: note: variable 'e' is declared here
+uninit_v2.c:33:22: warning: variable 'x' is used uninitialized whenever '?:' condition is false [-Wsometimes-uninitialized]
+   33 | int g4(int c){int x; c ? (x = 1) : 0; return x;}
+      |                      ^---       ----         - uninitialized use occurs here
+      |                      |
+      |                      remove the '?:' if its condition is always true
+uninit_v2.c:33:46: note: uninitialized use occurs here
+uninit_v2.c:33:22: note: remove the '?:' if its condition is always true
+uninit_v2.c:33:20: note: initialize the variable 'x' to silence this warning
+   33 | int g4(int c){int x; c ? (x = 1) : 0; return x;}
+      |                    ^
+      |                     = 0
+uninit_v2.c:35:29: warning: variable 'x' is used uninitialized whenever 'while' loop exits because its condition is false [-Wsometimes-uninitialized]
+   35 | int g6(int c){int x; while (c) { if (g6(c)) { x = 1; break; } } return x;}
+      |                             ^                                          - uninitialized use occurs here
+uninit_v2.c:35:72: note: uninitialized use occurs here
+uninit_v2.c:35:29: note: remove the condition if it is always true
+   35 | int g6(int c){int x; while (c) { if (g6(c)) { x = 1; break; } } return x;}
+      |                             ^
+      |                             1
+uninit_v2.c:35:20: note: initialize the variable 'x' to silence this warning
+   35 | int g6(int c){int x; while (c) { if (g6(c)) { x = 1; break; } } return x;}
+      |                    ^
+      |                     = 0
+uninit_v2.c:37:51: warning: non-void function does not return a value in all control paths [-Wreturn-type]
+   37 | int f2(int c) { int x, y; if (c) return y; y = x; }
+      |                               ~                   ^ (2) 'f2' ends here without a return
+      |                               |
+      |                               (1) 'c' is false
+      = help: 'f2' returns 'int': end it with a return statement
+uninit_v2.c:37:48: warning: variable 'x' is uninitialized when used here [-Wuninitialized]
+   37 | int f2(int c) { int x, y; if (c) return y; y = x; }
+      |                                                ^
+uninit_v2.c:37:22: note: initialize the variable 'x' to silence this warning
+   37 | int f2(int c) { int x, y; if (c) return y; y = x; }
+      |                      ^
+      |                       = 0
+uninit_v2.c:37:41: warning: variable 'y' is uninitialized when used here [-Wuninitialized]
+   37 | int f2(int c) { int x, y; if (c) return y; y = x; }
+      |                                         ^
+uninit_v2.c:37:25: note: initialize the variable 'y' to silence this warning
+   37 | int f2(int c) { int x, y; if (c) return y; y = x; }
+      |                         ^
+      |                          = 0
+uninit_v2.c:42:59: warning: variable 'x' is used uninitialized whenever switch default is taken [-Wsometimes-uninitialized]
+   42 | int n2(int c) { int x; switch (c) { case 1: x = 1; break; default: break; } return x; }
+      |                                                           ^~~~~~~                  - uninitialized use occurs here
+uninit_v2.c:42:84: note: uninitialized use occurs here
+uninit_v2.c:42:22: note: initialize the variable 'x' to silence this warning
+   42 | int n2(int c) { int x; switch (c) { case 1: x = 1; break; default: break; } return x; }
+      |                      ^
+      |                       = 0
+uninit_v2.c:45:33: warning: variable 'x' is used uninitialized whenever 'if' condition is true [-Wsometimes-uninitialized]
+   45 | int s2(int c) { int x; do { if (c) break; x = 1; } while (0); return x; }
+      |                             ----^-------                             - uninitialized use occurs here
+      |                             |
+      |                             remove the 'if' if its condition is always false
+uninit_v2.c:45:70: note: uninitialized use occurs here
+uninit_v2.c:45:29: note: remove the 'if' if its condition is always false
+uninit_v2.c:45:22: note: initialize the variable 'x' to silence this warning
+   45 | int s2(int c) { int x; do { if (c) break; x = 1; } while (0); return x; }
+      |                      ^
+      |                       = 0
+23 warnings generated.

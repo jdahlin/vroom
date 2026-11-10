@@ -60,6 +60,7 @@ typedef struct {
 	uint32_t ncond;
 	size_t mark;
 	uint32_t line;
+	uint32_t sline;		/* line of the current statement */
 } Frame;
 enum { FR_FILE, FR_MACRO, FR_LOOP };
 
@@ -94,6 +95,29 @@ struct As {
 	uint32_t ninst;		/* \@ */
 	uint64_t nstmt, nstmtb;	/* statistics: statements and their bytes */
 	const char *fname;
+	size_t nident;		/* .ident directives seen (.comment's leading NUL) */
+	int ended;		/* .end seen */
+	int altmacro;		/* .altmacro mode */
+	uint32_t eofline;	/* the line after the input's last (errors at the end) */
+	/* .cfi_*: instructions of all FDEs, the FDEs, the open one */
+	struct Cfi { uint8_t op; uint32_t reg, reg2, lab; int64_t off; const uint8_t *esc; } *cfi;
+	uint32_t ncfi, cficap;
+	struct Fde { uint32_t start, end, first, n, ra; uint8_t simple, sig, bkey; } *fde;
+	uint32_t nfde, fdecap;
+	int infde, cfi_eh;	/* inside .cfi_startproc; .cfi_sections without .eh_frame: 1 */
+	struct { uint32_t orig, ver, rm; } *sv; uint32_t nsv, svcap;	/* .symver */
+	uint32_t *asg; uint32_t nasg, asgcap;	/* .addrsig_sym */
+	/* .file N / .loc: DWARF line table (MC's MCDwarfLineTable, version 5) */
+	struct DwFile { Sv name; uint32_t dir; uint8_t md5[16]; uint8_t set, hasmd5; } *dwf;
+	uint32_t ndwf, dwfcap;		/* file slots by number (0 = root) */
+	Sv *dwd; uint32_t ndwd, dwdcap;	/* directories; [0] is the root file's */
+	struct DwLoc { uint32_t frag, file, line, col, disc, isa; uint64_t off; uint8_t flags; } *dwl, dwcur;
+	uint32_t ndwl, dwlcap;
+	int dwlocp, dwtab;
+	/* variable-size items at the end of a split frag (.prefalign, alignment
+	   after one, .uleb128/.sleb128 of a label difference), relaxed at the end */
+	struct VarItem { uint32_t frag, end; uint8_t kind, p2, code, fill; uint64_t max, size; Val v; } *pfa;
+	uint32_t npfa, pfacap;		/* a .loc waits for its instruction; a table is due */
 	char msg[512];
 	int err;
 };

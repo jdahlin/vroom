@@ -1,0 +1,56 @@
+format_typedef.c:7:33: warning: format specifies type 'int' but the argument has type 'size_t' (aka 'unsigned long') [-Wformat]
+    7 |         pf("%d %d %d %s %d %d %d %ld", z, sz, m, u, im, pd, cs, mi);
+      |             ~~                         ^
+      |             %zu
+format_typedef.c:7:36: warning: format specifies type 'int' but the argument has type 'ssize_t' (aka 'long') [-Wformat]
+    7 |         pf("%d %d %d %s %d %d %d %ld", z, sz, m, u, im, pd, cs, mi);
+      |                ~~                         ^~
+      |                %zd
+format_typedef.c:7:40: warning: format specifies type 'int' but the argument has type 'myz' (aka 'unsigned long') [-Wformat]
+    7 |         pf("%d %d %d %s %d %d %d %ld", z, sz, m, u, im, pd, cs, mi);
+      |                   ~~                          ^
+      |                   %zu
+format_typedef.c:7:43: warning: format specifies type 'char *' but the argument has type 'uint8_t' (aka 'unsigned char') [-Wformat]
+    7 |         pf("%d %d %d %s %d %d %d %ld", z, sz, m, u, im, pd, cs, mi);
+      |                      ~~                          ^
+      |                      %hhu
+format_typedef.c:7:46: warning: format specifies type 'int' but the argument has type 'intmax_t' (aka 'long') [-Wformat]
+    7 |         pf("%d %d %d %s %d %d %d %ld", z, sz, m, u, im, pd, cs, mi);
+      |                         ~~                          ^~
+      |                         %jd
+format_typedef.c:7:50: warning: format specifies type 'int' but the argument has type 'ptrdiff_t' (aka 'long') [-Wformat]
+    7 |         pf("%d %d %d %s %d %d %d %ld", z, sz, m, u, im, pd, cs, mi);
+      |                            ~~                           ^~
+      |                            %td
+format_typedef.c:7:54: warning: format specifies type 'int' but the argument has type 'cstr' (aka 'const char *') [-Wformat]
+    7 |         pf("%d %d %d %s %d %d %d %ld", z, sz, m, u, im, pd, cs, mi);
+      |                               ~~                            ^~
+      |                               %s
+format_typedef.c:7:58: warning: format specifies type 'long' but the argument has type 'myint' (aka 'int') [-Wformat]
+    7 |         pf("%d %d %d %s %d %d %d %ld", z, sz, m, u, im, pd, cs, mi);
+      |                                  ~~~                            ^~
+      |                                  %d
+format_typedef.c:8:17: warning: format specifies type 'int' but the argument has type 'size_t' (aka 'unsigned long') [-Wformat]
+    8 |         pf("%d %s %d", p->n, p->b, cz);
+      |             ~~         ^~~~
+      |             %zu
+format_typedef.c:8:23: warning: format specifies type 'char *' but the argument has type 'uint8_t' (aka 'unsigned char') [-Wformat]
+    8 |         pf("%d %s %d", p->n, p->b, cz);
+      |                ~~            ^~~~
+      |                %hhu
+format_typedef.c:8:29: warning: format specifies type 'int' but the argument has type 'size_t' (aka 'unsigned long') [-Wformat]
+    8 |         pf("%d %s %d", p->n, p->b, cz);
+      |                   ~~               ^~
+      |                   %zu
+format_typedef.c:9:17: warning: format specifies type 'char *' but the argument has type 'uint8_t' (aka 'unsigned char') [-Wformat]
+    9 |         pf("%s %c %x", u, z, u);
+      |             ~~         ^
+      |             %hhu
+format_typedef.c:9:20: warning: format specifies type 'int' but the argument has type 'size_t' (aka 'unsigned long') [-Wformat]
+    9 |         pf("%s %c %x", u, z, u);
+      |                ~~         ^
+      |                %zu
+format_typedef.c:10:8: warning: field width should have type 'int', but argument has type 'size_t' (aka 'unsigned long') [-Wformat]
+   10 |         pf("%*d", z, 1);
+      |             ~~^   ~
+14 warnings generated.

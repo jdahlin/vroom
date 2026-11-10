@@ -26,7 +26,7 @@ static const struct { const char *n; int b; } bi[] = {
 	{ "__has_c_attribute", B_HAS_C_ATTRIBUTE },	/* __has_cpp_attribute: not defined in C (clang) */
 	{ "__has_declspec_attribute", B_HAS_DECLSPEC }, { "__has_warning", B_HAS_WARNING },
 	{ "__is_identifier", B_IS_IDENTIFIER }, { "__has_include", B_HAS_INCLUDE },
-	{ "__has_include_next", B_HAS_INCLUDE_NEXT },
+	{ "__has_include_next", B_HAS_INCLUDE_NEXT }, { "__has_embed", B_HAS_EMBED },
 	{ "__has_constexpr_builtin", B_HAS_CONSTEXPR_BUILTIN },
 	{ "__is_target_arch", B_IS_TARGET_ARCH }, { "__is_target_os", B_IS_TARGET_OS },
 	{ "__is_target_vendor", B_IS_TARGET_VENDOR },
@@ -162,6 +162,7 @@ static inline __attribute__((always_inline)) void next_tok(pp *p, ptok *t)
 
 /* the header cache's mode: text for pp_text, tokens for pp_next */
 static int hc_off;
+int pp_drcov;
 
 /* once: a thread that saw the flag but not hc_mem_max stored without a cap (TSan) */
 static void hc_env(void)
@@ -170,6 +171,7 @@ static void hc_env(void)
 
 	hc_mem_max = m ? (size_t)atol(m) << 20 : (size_t)8 << 30;
 	hc_off = getenv("VPP_NOHC") != NULL;
+	pp_drcov = getenv("VCC_DRCOV") || getenv("VCC_DRREC") || getenv("VCC_DR");
 }
 
 static void hc_mode(pp *p, int mode)
@@ -177,7 +179,7 @@ static void hc_mode(pp *p, int mode)
 	static pthread_once_t once = PTHREAD_ONCE_INIT;
 
 	pthread_once(&once, hc_env);
-	p->hc = !hc_off;
+	p->hc = !hc_off && !p->o->show_includes && !p->o->dump_defines && !p->o->comments && !p->o->markers && !p->o->imacros;	/* -H: a replay has no nesting to print */
 	p->tokmode = mode;
 }
 
@@ -265,6 +267,54 @@ uint64_t pp_skipped(const pp *p)
 	return p->skipped_tok;
 }
 
+bool pp_open_hit(const pp *p, uint64_t *b, const void **he, uint32_t *base, unsigned *ctr, uint32_t *span)
+{
+	if (!p->ndrs)
+		return false;
+	*b = p->drs[p->ndrs - 1].pos;
+	*he = p->drs[p->ndrs - 1].he;
+	if (base)
+		*base = p->drs[p->ndrs - 1].base, *ctr = p->drs[p->ndrs - 1].ctr,
+		*span = ((const hent *)*he)->span;
+	return true;
+}
+
+uint64_t pp_hit_ntok(const void *he)
+{
+	return ((const hent *)he)->total;
+}
+
+const pp_hitreg *pp_hit_regions(const pp *p, uint32_t *n)
+{
+	*n = p->ndrh;
+	return p->drh;
+}
+
+/* VCC_DRCOV: a header-cache hit just applied; its replay (if any) is the context at depth d */
+VPRIV void drcov_hit(pp *p, int d0)
+{
+	if (!p->drh)
+		p->drh = varena_alloc(&p->perm, DRCOV_MAX * sizeof(pp_hitreg));
+	if (p->depth > d0 && p->cx[d0].type == C_REPLAY && p->cx[d0].he == p->hc_last) {
+		if (p->ndrs < 64) {
+			p->drs[p->ndrs].pos = p->ntok_out, p->drs[p->ndrs].depth = p->depth;
+			p->drs[p->ndrs].base = p->cx[d0].loc, p->drs[p->ndrs].ctr = p->cx[d0].cbase;
+			p->drs[p->ndrs++].he = p->hc_last;
+		}
+	}
+}
+
+/* VCC_DRCOV: the replay context at the top of the stack is done */
+VPRIV void drcov_end(pp *p)
+{
+	if (p->ndrs && p->drs[p->ndrs - 1].depth == p->depth) {
+		p->ndrs--;
+		if (p->ndrh < DRCOV_MAX && p->ntok_out > p->drs[p->ndrs].pos)
+			p->drh[p->ndrh++] = (pp_hitreg){ p->drs[p->ndrs].pos, p->ntok_out, (uint32_t)p->nfile,
+						    p->drs[p->ndrs].he };
+	}
+}
+
 int pp_skip_top(pp *p)
 {
 	const pp_topev *s = p->ntev && !p->tev_full ? &p->tev[p->ntev - 1] : NULL;
@@ -283,6 +333,8 @@ int pp_skip_top(pp *p)
 		if (p->cx[d].type != C_REPLAY)
 			return 0;
 	p->skipped_tok += p->cx[d0].he->total;
+	while (p->ndrs && p->drs[p->ndrs - 1].depth > d0)
+		p->ndrs--;	/* (VCC_DRCOV: dropped, not counted as a hit) */
 	p->pend |= p->cx[d0].he->pend_out;
 	p->depth = d0;
 	p->ntok_out = s->pos;
@@ -328,32 +380,516 @@ static __attribute__((noinline, cold)) size_t ucn_utf8(char *s, size_t n)
 	return o;
 }
 
+/*
+ * Per-region declaration replay (cc/replay.c): drop the rest of the
+ * innermost open hit, whose first token was the last one delivered, as
+ * pp_skip_top does for a top-level region.  0 if that is not the case.
+ */
+int pp_skip_hit(pp *p, int dry)
+{
+	int d0, top;
+
+	if (!p->ndrs || p->drs[p->ndrs - 1].pos + 1 != p->ntok_out)
+		return 0;
+	d0 = p->drs[p->ndrs - 1].depth - 1;
+	if (d0 < 0 || p->cx[d0].type != C_REPLAY || p->cx[d0].he != p->drs[p->ndrs - 1].he)
+		return 0;
+	for (int d = d0 + 1; d < p->depth; d++)
+		if (p->cx[d].type != C_REPLAY)
+			return 0;
+	if (p->rec.on && !p->cx[d0].norec)
+		return 0;	/* an enclosing header is being recorded: it needs the tokens */
+	top = p->cx[d0].top;
+	if (top == 2) {
+		const pp_topev *t = p->ntev && !p->tev_full ? &p->tev[p->ntev - 1] : NULL;
+
+		if (!t || t->end || !t->hit || t->pos + 1 != p->ntok_out || t->e != p->cx[d0].he)
+			return 0;
+		return dry ? 1 : pp_skip_top(p);
+	}
+	if (dry)
+		return 1;
+	p->skipped_tok += p->cx[d0].he->total;
+	while (p->ndrs && p->drs[p->ndrs - 1].depth > d0)
+		p->ndrs--;
+	if (top)
+		p->pend |= p->cx[d0].he->pend_out;
+	p->depth = d0;
+	p->ntok_out--;
+	return 1;
+}
+
+VPRIV void out_nl(pp *p)
+{
+	if (unlikely(p->rec.on) && !p->rec.lev[p->rec.n - 1].text_started)
+		text_start(p, 1);
+	out_ch(p, '\n');
+}
+
+/* clang's WriteLineInfo: "# N "file" flags" on a line of its own */
+static __attribute__((cold, noinline)) void lm_write(pp *p, uint32_t line, const char *extra)
+{
+	char b[16];
+	int n = snprintf(b, sizeof(b), "# %u \"", line);
+
+	if (p->col || p->edir)
+		out_nl(p);
+	for (int i = 0; i < n; i++)
+		out_ch(p, b[i]);
+	for (uint32_t i = 0; i < p->lm_nlen; i++) {	/* llvm's write_escaped */
+		unsigned char c = (unsigned char)p->lm_name[i];
+
+		if (c == '\\' || c == '"')
+			out_ch(p, '\\'), out_ch(p, (char)c);
+		else if (c == '\t')
+			out_ch(p, '\\'), out_ch(p, 't');
+		else if (c == '\n')
+			out_ch(p, '\\'), out_ch(p, 'n');
+		else if (c < 32 || c > 126) {
+			out_ch(p, '\\');
+			out_ch(p, (char)('0' + (c >> 6)));
+			out_ch(p, (char)('0' + (c >> 3 & 7)));
+			out_ch(p, (char)('0' + (c & 7)));
+		} else
+			out_ch(p, (char)c);
+	}
+	out_ch(p, '"');
+	while (*extra)
+		out_ch(p, *extra++);
+	if (p->lm_sys)
+		out_ch(p, ' '), out_ch(p, '3');
+	if (p->lm_sys == 2)
+		out_ch(p, ' '), out_ch(p, '4');
+	out_nl(p);
+	p->col = 0, p->edir = 0;
+}
+
+static void lm_file(pp *p, const char *name, uint8_t sys)
+{
+	p->lm_name = name;
+	p->lm_nlen = (uint32_t)strlen(name);
+	p->lm_sys = sys;
+}
+
+/* the predefined macros before the command line: clang's <built-in> has a
+ * line for each, and the command line's marker is 3 lines after (1 with -undef) */
+VPRIV void lm_count(pp *p)
+{
+	uint32_t n = 0;
+
+	if (p->lm_n)
+		return;
+	for (uint32_t d = 0; d < NMDIR; d++) {
+		const uintptr_t *pg = p->mdir[d];
+
+		for (uint32_t k = 0; pg && k < MPAGE; k++) {
+			const pmacro *m = (const pmacro *)(pg[k] & ~(uintptr_t)1);
+
+			n += m && m->kind != MK_BUILTIN;
+		}
+	}
+	p->lm_n = n + 1;
+}
+
+/* <built-in>'s command line, after the predefined macros */
+static __attribute__((cold, noinline)) void lm_builtin_block(pp *p)
+{
+	lm_count(p);
+	p->lm_blk = 1;
+	move_to_line(p, p->lm_n - 1 + (p->o->markers == 2 ? 1 : 3), false);
+	lm_file(p, "<command line>", 0);
+	lm_write(p, 1, " 1");
+	lm_file(p, "<built-in>", 0);
+	lm_write(p, 1, " 2");
+	p->cur_line = 1;
+	p->lm_bline = 1;	/* <built-in>'s line where -imacros/-include start */
+	for (unsigned i = 0; i < p->o->predef_incl; i++)
+		p->lm_bline += p->o->predef[i] == '\n';
+}
+
+/* a file entered: its marker (after the #include's line was moved to) */
+VPRIV void lm_enter(pp *p, const fent *e)
+{
+	lm_file(p, e->spath, e->sys);
+	p->cur_line = 1;
+	lm_write(p, 1, " 1");
+}
+
+/* #line N ["file"] / # N "file": clang's FileChanged(RenameFile) */
+VPRIV void lm_rename(pp *p, const char *name, uint32_t nlen, uint32_t line)
+{
+	if (name)
+		p->lm_name = name, p->lm_nlen = nlen;
+	p->cur_line = line;
+	lm_write(p, line, "");
+}
+
+/* clang's PrintPPOutputPPCallbacks::MoveToLine (-P: MinimizeWhitespace off) */
+VPRIV bool move_to_line(pp *p, uint32_t line, bool req)
+{
+	bool nl = false;
+
+	if ((req && p->col) || p->edir) {
+		out_nl(p);
+		nl = true;
+		p->cur_line++;
+		p->col = 0, p->edir = 0;
+	}
+	if (p->cur_line == line)
+		;
+	else if (unlikely(p->lmark)) {
+		if (line - p->cur_line <= 8)
+			for (uint32_t i = p->cur_line; i < line; i++)
+				out_nl(p);
+		else
+			lm_write(p, line, "");
+		nl = true;
+	}
+	else if (!nl && line - p->cur_line == 1)
+		out_nl(p), nl = true;
+	else if (!nl && p->col)
+		out_nl(p), nl = true;
+	if (nl)
+		p->col = 0, p->edir = 0;
+	p->cur_line = line;
+	return nl;
+}
+
+/* FileChanged: entering a file from an #include in `from` moves to its line,
+ * leaving it puts the output on the line after (clang's IncludeLoc) */
+VPRIV void text_file_change(pp *p, const ctx *from, int enter)
+{
+	uint32_t l = 1;
+
+	if (!p->out_text)
+		return;
+	if (unlikely(p->lmark)) {
+		const fent *e;
+
+		if (from && from->f == &p->builtin) {
+			if (!p->lm_blk)
+				lm_builtin_block(p);
+			/* clang's <built-in> after the command line: a line per -include, 2 per -imacros */
+			l = loc_line(p, from->loc + from->vt[from->i - 1].off) - p->lm_bline + 1 + !enter;
+			if (enter)
+				move_to_line(p, l, false);
+			if (!enter) {
+				lm_file(p, "<built-in>", 0);
+				p->cur_line = l;
+				lm_write(p, l, " 2");
+			}
+			return;	/* enter: the -include line is the current one */
+		}
+		if (!enter && !p->lm_blk)
+			lm_builtin_block(p);	/* <built-in> ends */
+		if (from && from->type == C_FILE && from->i)
+			l = loc_line(p, from->loc + from->vt[from->i - 1].off);
+		if (enter) {
+			move_to_line(p, l, false);
+			return;	/* the marker when the file is known (lm_enter) */
+		}
+		e = &p->fe[from->fe];
+		lm_file(p, e->spath, e->sys);
+		if (from->i) {
+			uint32_t pl;
+			const char *pn = presumed_name(p, from->fe, from->loc + from->vt[from->i - 1].off, &pl);
+
+			if (pn != e->name)
+				p->lm_name = pn, p->lm_nlen = pl;
+			l++;
+		}
+		p->cur_line = l;
+		lm_write(p, l, " 2");
+		return;
+	}
+	if (from && from->type == C_FILE && from->i)
+		l = loc_line(p, from->loc + from->vt[from->i - 1].off);
+	else if (enter)
+		return;
+	if (enter) {
+		if (from->f != &p->builtin || from->i)
+			move_to_line(p, l, false);
+		p->cur_line = 1;
+	} else {
+		p->cur_line = from && from->type == C_FILE && from->i ? l + 1 : 1;
+	}
+	if (p->col || p->edir) {	/* startNewLineIfNeeded */
+		out_nl(p);
+		p->col = 0, p->edir = 0;
+	}
+}
+
+/* -C: the start of the line after s (past a directive's tokens): a block
+ * comment that starts on the line continues it */
+VPRIV const char *cmt_line_end(const char *s)
+{
+	for (;;) {
+		if (*s == '\n')
+			return s + 1;
+		if (!*s)
+			return s;	/* the end: files are zero padded */
+		if (s[0] == '/' && s[1] == '*') {
+			for (s += 2; *s && !(s[0] == '*' && s[1] == '/'); s++)
+				;
+			s += *s ? 2 : 0;
+		} else if (s[0] == '\\' && s[1] == '\n') {
+			s += 2;
+		} else if (s[0] == '\\' && s[1] == '\r' && s[2] == '\n') {
+			s += 3;
+		} else if (s[0] == '/' && s[1] == '/') {
+			for (; *s && *s != '\n'; s++)
+				if (s[0] == '\\' && s[1] == '\n')
+					s++;
+		} else {
+			s++;
+		}
+	}
+}
+
+/* -C: a comment token [s, e) of file context c, printed as clang does */
+static void cmt_print(pp *p, const ctx *c, const char *s, const char *e)
+{
+	const char *b = s;
+	bool sol, space;
+	unsigned col;
+
+	while (b > c->src && (b[-1] == ' ' || b[-1] == '\t' || b[-1] == '\f' || b[-1] == '\v'))
+		b--;
+	sol = b == c->src || b[-1] == '\n' || p->cmt_sol;
+	p->cmt_sol = 0;
+	space = b != s;
+	for (col = 1; s - col >= c->src && s[-(ptrdiff_t)col] != '\n'; col++)
+		;
+	if (sol || p->edir) {
+		uint32_t line = loc_line(p, c->loc + (uint32_t)(s - c->src));
+
+		if (move_to_line(p, line, p->edir) || (sol && line == 1)) {
+			out_reserve(p, col);
+			for (; col > 1; col--)
+				p->out[p->nout++] = ' ';
+		} else if (space) {
+			out_ch(p, ' ');
+		}
+	} else if (space || (p->col && p->pk == T_SLASH && p->pk_end != s)) {
+		out_ch(p, ' ');
+	}
+	out_put(p, s, (size_t)(e - s));
+	for (const char *q = s; q < e; q++)
+		p->cur_line += *q == '\n';
+	p->col = 1, p->sol_on = 0;
+	p->pk = T_EOF, p->pk_end = e;
+}
+
+/* -C: print the comments of file context c from its position up to upto */
+VPRIV void cmt_flush(pp *p, ctx *c, const char *upto)
+{
+	const char *s = p->fe[c->fe].cpos;
+
+	if (!s || upto <= s) {
+		if (s && upto > s)
+			p->fe[c->fe].cpos = upto;
+		return;
+	}
+	while (s < upto) {
+		if (s[0] == '/' && s[1] == '*') {
+			const char *e = s + 2;
+
+			while (e < upto && !(e[0] == '*' && e[1] == '/'))
+				e++;
+			if (e >= upto)
+				break;
+			cmt_print(p, c, s, e + 2);
+			s = e + 2;
+		} else if (s[0] == '/' && s[1] == '/') {
+			const char *e = s;
+
+			for (; e < upto && *e != '\n'; e++)
+				if (e[0] == '\\' && e[1] == '\n')
+					e++;
+			if (e > upto)
+				e = upto;
+			while (e > s && (e[-1] == '\r'))
+				e--;
+			cmt_print(p, c, s, e);
+			s = e;
+		} else if (*s == '"' || *s == '\'') {
+			char q = *s++;
+
+			while (s < upto && *s != q && *s != '\n')
+				s += *s == '\\' ? 2 : 1;
+			s++;
+		} else {
+			s++;
+		}
+	}
+	p->fe[c->fe].cpos = upto;
+}
+
+/* -C: the file context's comments up to the end of token rp are dropped (macro arguments) */
+VPRIV void cmt_skip_to(pp *p, const ptok *rp)
+{
+	ctx *fc = &p->cx[p->depth - 1];
+
+	if (fc->type == C_FILE && rp->s >= fc->src && rp->s < fc->src + fc->f->size && p->fe[fc->fe].cpos && p->fe[fc->fe].cpos < rp->s)
+		p->fe[fc->fe].cpos = rp->s + rp->len;
+}
+
+/* clang's TokenConcatenation::AvoidConcat: would prev followed by t, unspaced, lex differently? */
+static bool avoid_concat(const pp *p, const ptok *t, char fc)
+{
+	switch (p->pk) {
+	case T_AMP: case T_PLUS: case T_MINUS: case T_SLASH: case T_LESS: case T_GREATER: case T_PIPE:
+	case T_PERCENT: case T_STAR: case T_EXCLAIM: case T_LESSLESS: case T_GREATERGREATER: case T_CARET:
+	case T_EQUAL:
+		if (t->kind == T_EQUAL || t->kind == T_EQUALEQUAL)
+			return true;
+		break;
+	}
+	switch (p->pk) {
+	case T_IDENT:
+		if (t->kind == T_NUMBER)
+			return fc != '.';
+		if (t->kind == T_IDENT || (t->kind >= T_WCHAR && t->kind <= T_U32CHAR) || (t->kind >= T_WSTRING && t->kind <= T_U32STRING))
+			return true;
+		return (t->kind == T_CHAR || t->kind == T_STRING) && p->pk_L;
+	case T_NUMBER:
+		return idch((unsigned char)fc) || fc == '.' || fc == '+' || fc == '-' || fc == '\\';
+	case T_PERIOD: return (fc == '.' && p->pk_pp) || (fc >= '0' && fc <= '9');
+	case T_AMP: return fc == '&';
+	case T_PLUS: return fc == '+';
+	case T_MINUS: return fc == '-' || fc == '>';
+	case T_SLASH: return fc == '*' || fc == '/';
+	case T_LESS: return fc == '<' || fc == ':' || fc == '%';
+	case T_GREATER: return fc == '>';
+	case T_PIPE: return fc == '|';
+	case T_PERCENT: return fc == '>' || fc == ':';
+	case T_COLON: return fc == '>';
+	case T_HASH: return fc == '#' || fc == '@' || fc == '%';
+	default: return false;
+	}
+}
+
+/* the expansion column of t (1-based, bytes) */
+VPRIV __attribute__((noinline)) unsigned tok_col(const pp *p, uint32_t loc)
+{
+	const char *s, *b;
+
+	{
+		uint32_t lo = 0, hi = p->nfe;
+
+		while (hi - lo > 1) {
+			uint32_t mid = (lo + hi) / 2;
+
+			if (p->fe[mid].base <= loc)
+				lo = mid;
+			else
+				hi = mid;
+		}
+		while (lo > 0 && !p->fe[lo].f)
+			lo--;
+		if (!p->nfe || !p->fe[lo].f || loc - p->fe[lo].base > p->fe[lo].f->size)
+			return 1;
+		b = p->fe[lo].f->src;
+		s = b + (loc - p->fe[lo].base);
+	}
+	for (unsigned c = 1;; c++)
+		if (s == b || s[-1] == '\n' || s[-1] == 0)
+			return c;
+		else
+			s--;
+}
+
 /* the token as clang -E -P prints it */
 static inline void render(pp *p, const ptok *t)
 {
 	bool sol = t->kind == P_DIRECTIVE || (t->flags & TF_SOL);
 	size_t l;
 	const char *sp;
+	char fc;
 
-	if (p->col) {
-		/* assembler-with-cpp: keep the source spacing like clang does, as
-		 * gas syntax is space-sensitive ("\\arg", "1:", ".L x") */
-		if (sol || !p->o->asm_mode || (t->flags & TF_SPACE))
-			out_ch(p, sol ? '\n' : ' ');
-		if (sol)
-			p->col = 0;
+	if (unlikely(p->out_text > 1) && t->kind != P_DIRECTIVE) {
+		ctx *fc = &p->cx[p->depth - 1];
+
+		if (fc->type == C_FILE && !(t->flags & PF_MACRO) && p->fe[fc->fe].cpos && t->s >= p->fe[fc->fe].cpos &&
+		    t->s < fc->src + fc->f->size) {
+			cmt_flush(p, fc, t->s);
+			p->fe[fc->fe].cpos = t->s + t->len;
+		}
+		p->cmt_sol = 0;	/* taken by a comment printed now, else by this token */
 	}
-	if (unlikely(p->rec.on) && !p->rec.lev[p->rec.n - 1].text_started)
+	if (unlikely(p->rec.on) && !p->rec.lev[p->rec.n - 1].text_started) {
+		if (!sol)
+			HC_BAD(p);	/* its separator depends on what was printed before */
 		text_start(p, sol);
+	}
+	if (t->kind == P_DIRECTIVE && t->id) {
+		/* an assembler line passed through: tokens, so indented as clang does */
+		unsigned c = tok_col(p, t->loc);
+
+		move_to_line(p, loc_line(p, t->loc), p->edir);
+		out_reserve(p, t->len + c + 2);
+		if (!p->col)
+			for (p->out[p->nout++] = ' '; c > 2; c--)
+				p->out[p->nout++] = ' ';
+		else
+			p->out[p->nout++] = ' ';
+		p->out[p->nout++] = '#';
+		memcpy(p->out + p->nout, t->s, t->len);
+		p->nout += t->len;
+		p->col = 1, p->sol_on = 0;
+		p->pk = T_EOF, p->pk_end = NULL;
+		return;
+	}
 	if (t->kind == P_DIRECTIVE) {
+		uint32_t line = loc_line(p, t->loc);
+
+		/* clang prints "assume_nonnull end" at the line of what it printed last */
+		if (t->len == 31 && !memcmp(t->s, "pragma clang assume_nonnull end", 31))
+			line = p->cur_line;
+		move_to_line(p, line, true);
 		out_reserve(p, t->len + 2);
 		p->out[p->nout++] = '#';
 		memcpy(p->out + p->nout, t->s, t->len);
 		p->nout += t->len;
-		p->out[p->nout++] = '\n';
-		p->col = 0;
+		p->col = 1, p->edir = 1, p->sol_on = 0;
+		p->pk = T_EOF, p->pk_end = NULL;
 		return;
 	}
+	fc = t->s[0];	/* a token never starts with a splice */
+	if (unlikely(p->emb_sp) && !p->edir) {
+		/* after #embed's data clang prints the next token after one space, on the same line */
+		p->emb_sp = (t->flags & PF_EMBEND) != 0;
+		if (p->emb_tail != 1)	/* after the bytes one space, after suffix()/if_empty() none */
+			out_ch(p, ' ');
+		if (p->emb_tail)
+			p->emb_tail--;
+		goto spaced;
+	}
+	p->emb_sp = (t->flags & PF_EMBEND) != 0;
+	if (sol || p->edir) {
+		/* HandleWhitespaceBeforeTok: indented to its column if it starts a new line */
+		uint32_t loc = p->sol_on ? p->sol_loc : p->cx[p->depth - 1].type != C_FILE ? p->exp_loc : t->loc;
+		uint32_t line = loc_line(p, loc);
+		unsigned c = tok_col(p, loc);
+		/* clang's leading space: not the line break before a token in column 1 */
+		bool space = (t->flags & TF_SPACE) && (p->sol_on || c > 1) && p->pk_end != t->s;
+
+		if (move_to_line(p, line, p->edir) || (sol && line == 1)) {
+			if (c == 1 && space)
+				c = 2;	/* after an empty expansion in column 1 */
+			out_reserve(p, c + 1);
+			if (c <= 1 && t->kind == T_HASH)
+				p->out[p->nout++] = ' ';
+			for (; c > 1; c--)
+				p->out[p->nout++] = ' ';
+		} else if (space || (p->col && p->pk_end != t->s && p->pk != T_EOF && avoid_concat(p, t, fc))) {
+			out_ch(p, ' ');
+		}
+	} else if (((t->flags & TF_SPACE) && p->pk_end != t->s) ||
+		   (p->col && p->pk_end != t->s && p->pk != T_EOF && avoid_concat(p, t, fc))) {
+		out_ch(p, ' ');
+	}
+spaced:
 	out_reserve(p, t->len);
 	sp = pp_spell(t, p->out + p->nout, &l);
 	if (sp != p->out + p->nout)
@@ -369,6 +905,11 @@ static inline void render(pp *p, const ptok *t)
 			else
 				HC_BAD(p);
 		}
+	p->sol_on = 0;
+	p->pk_pp = p->pk == T_PERIOD;
+	p->pk = t->kind;
+	p->pk_L = t->kind == T_IDENT && l == 1 && p->out[p->nout] == 'L';
+	p->pk_end = t->flags & TF_DIRTY ? NULL : t->s + t->len;
 	p->nout += l;
 	p->col++;
 }
@@ -378,16 +919,28 @@ int pp_text(pp *p, const char **out, size_t *len)
 	ptok t;
 
 	hc_mode(p, 1);
+	p->out_text = p->o->comments ? 2 : 1;	/* 2: -C */
+	p->cur_line = 1;
+	if (unlikely(p->o->markers)) {
+		p->lmark = 1;
+		lm_file(p, p->fe[0].spath, p->fe[0].sys);
+		lm_write(p, 1, "");
+		lm_file(p, "<built-in>", 0);
+		lm_write(p, 1, " 1");
+		p->lm_sys = 1;
+		lm_write(p, 1, "");
+	}
 	if (p->o->asm_mode)
 		p->hc = 0;	/* cached text is C-spaced */
 	for (;;) {
 		next_tok(p, &t);
+		if (unlikely(p->o->dump_defines) && !p->dd_done)
+			dd_flush(p);	/* the predefined macros before the first token */
 		if (t.kind == T_EOF)
 			break;
 		render(p, &t);
 	}
-	if (p->col)
-		out_ch(p, '\n');
+	out_ch(p, '\n');	/* clang ends with a newline, also after an empty line */
 	*out = p->out ? p->out : "";
 	*len = p->nout;
 	return p->errors;
@@ -425,7 +978,7 @@ void pp_set_fatal(pp *p, jmp_buf *jb)
 }
 
 /* the distinct file names in entry order (a hash set: TUs enter ~1000 files) */
-size_t pp_files(const pp *p, const char **names, size_t max)
+size_t pp_files(const pp *p, const char **names, size_t max, int nosys)
 {
 	uint32_t cap = 64, stk[1024], *tab;
 	size_t n = 0;
@@ -442,7 +995,7 @@ size_t pp_files(const pp *p, const char **names, size_t max)
 		size_t l = 0;
 		uint32_t k;
 
-		if (p->fe[i].f == &p->builtin)
+		if (p->fe[i].f == &p->builtin || (nosys && p->fe[i].sys))
 			continue;
 		for (; s[l]; l++)
 			h = (h ^ (unsigned char)s[l]) * 1099511628211ull;
@@ -489,7 +1042,7 @@ void pp_close(pp *p)
 	if (p->rec.t && !rec_spare.t) {
 		rec_spare.t = p->rec.t, rec_spare.ord = p->rec.ord, rec_spare.ctr = p->rec.ctr;
 		rec_spare.crd = p->rec.crd, rec_spare.seg = p->rec.seg, rec_spare.cp = p->rec.cp;
-		rec_spare.kid = p->rec.kid, rec_spare.kex = p->rec.kex;
+		rec_spare.kid = p->rec.kid, rec_spare.kex = p->rec.kex, rec_spare.lk = p->rec.lk;
 	} else if (p->rec.t) {
 		munmap(p->rec.t, HC_MAXT * sizeof(htouch));
 		munmap(p->rec.ord, HC_MAXORD * sizeof(honce));
@@ -497,6 +1050,7 @@ void pp_close(pp *p)
 		munmap(p->rec.crd, HC_MAXCRD * sizeof(hcrd));
 		munmap(p->rec.seg, HC_MAXSEG * sizeof(hsegr));
 		munmap(p->rec.cp, (HC_MAXCP + 1) * sizeof(cprov));
+		munmap(p->rec.lk, HC_MAXLK * sizeof(hlook));
 	}
 	vmreg_put(&ppr[0], sizeof(pp));
 	vmpool_give(&pppool, ppr);

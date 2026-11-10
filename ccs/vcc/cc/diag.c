@@ -24,12 +24,26 @@ VPRIV void diag(cc *c, uint32_t loc, const char *what, const char *fmt, va_list 
 	pp_diag_emit(c->p, pp_diag_vbegin(c->p, what[0] == 'e' ? VDL_ERROR : what[0] == 'w' ? VDL_WARNING : VDL_NOTE, loc, fmt, ap));
 }
 
+/* -Winvalid-pp-token for the unknown tokens read ahead (they always end in an error: here, not per token) */
+static void unknown_toks(cc *c)
+{
+	for (int i = 0; i < c->ntk; i++) {
+		const ptok *t = &c->tk[i];
+
+		if (t->kind == T_UNKNOWN && !(t->flags & PF_MACRO) && t->loc != c->unk_loc) {
+			c->unk_loc = t->loc;
+			pp_invalid_tok(c->p, t->s, t->len, t->loc);
+		}
+	}
+}
+
 __attribute__((format(printf, 3, 4)))
 VPRIV void cc_error(cc *c, uint32_t loc, const char *fmt, ...)
 {
 	pp_diag_pc = __builtin_return_address(0);
 	va_list ap;
 
+	unknown_toks(c);
 	error_limit(c);
 	va_start(ap, fmt);
 	diag(c, loc, "error", fmt, ap);
@@ -43,6 +57,7 @@ VPRIV void fatal(cc *c, uint32_t loc, const char *fmt, ...)
 	pp_diag_pc = __builtin_return_address(0);
 	va_list ap;
 
+	unknown_toks(c);
 	error_limit(c);
 	va_start(ap, fmt);
 	diag(c, loc, "error", fmt, ap);
@@ -315,7 +330,7 @@ VPRIV void report(cc *c, const char *what, uint32_t loc, const pp_span *r, int n
 	va_list ap;
 
 	if (lv == VDL_ERROR)
-		error_limit(c), c->errors++;
+		unknown_toks(c), error_limit(c), c->errors++;
 	if (lv != VDL_NOTE)
 		c->ndiag++;
 	va_start(ap, fmt);
@@ -346,6 +361,8 @@ VPRIV void fwd_note(cc *c, qty t)
 }
 
 const char *const w_all[] = { "all", "most", NULL };
+const char *const w_conv[] = { "conversion", NULL };
+const char *const w_selfassign[] = { "all", "most", NULL };
 
 /* a warning clang gives through DiagRuntimeBehavior: inside a function it waits for the
    end of the body (clang's PossiblyUnreachableDiags), elsewhere it goes out now */
@@ -500,6 +517,32 @@ VPRIV void ext_warn(cc *c, const char *flag, const char *const *groups, uint32_t
 	pp_diag_flag(d, flag);
 	d->werror = lv == VDL_ERROR;
 	pp_diag_emit(c->p, d);
+}
+
+/* a warning for the end of the function body (clang's DiagRuntimeBehavior); ms: the macro note's spelling */
+__attribute__((format(printf, 9, 10)))
+VPRIV void rt_defer(cc *c, const char *flag, const char *const *groups, uint32_t loc, const pp_span *r, int nr,
+		    const char *ms, uint32_t mlen, const char *fmt, ...)
+{
+	va_list ap;
+	int lv;
+	vdiag *d;
+
+	pp_diag_pc = __builtin_return_address(0);
+	if ((lv = pp_diag_wlevel(c->p, flag, true, groups, loc)) < 0)
+		return;
+	va_start(ap, fmt);
+	d = rec(c, lv, loc, r, nr, NULL, 0, fmt, ap);	/* (as cc_warnx: its macro notes too) */
+	va_end(ap);
+	pp_diag_flag(d, flag);
+	d->werror = lv == VDL_ERROR;
+	if (ms) {	/* (a copy: the record waits for the body's end) */
+		char *m = halloc(c, mlen + 1);
+
+		memcpy(m, ms, mlen), m[mlen] = 0;
+		pp_diag_macro(d, m, mlen);
+	}
+	rt_emit(c, d);
 }
 
 VPRIV const char *idname(uint32_t id, int *len)

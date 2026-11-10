@@ -42,24 +42,25 @@ typedef struct attrs {		/* the attributes of one declaration */
 	uint32_t cleanup;	/* sym */
 	uint32_t mode;		/* 0, or the integer type kind from mode() */
 	uint32_t vecsize;	/* vector_size(n) bytes, 0: none */
+	uint32_t extvec;	/* ext_vector_type(n) elements, 0: none */
+	uint32_t depr;		/* deprecated: the attribute name's location, 0: none */
+	uint32_t deprmsg;	/* deprecated("msg"): string index + 1, 0: none */
+	uint32_t wur;		/* 1: warn_unused_result, 2: [[nodiscard]] */
+	uint32_t nonnull;	/* nonnull: bit 0 all pointer parameters, bit i parameter i (1-based) */
+	uint32_t fmt;		/* format(printf, i, j): 1 << 16 | i << 8 | j, 0: none or not printf */
+	uint32_t ifunc;		/* ifunc("resolver"): alias is the resolver, an STT_GNU_IFUNC symbol */
 	uint32_t counted_by;	/* identifier id */
 	uint32_t errmsg;	/* error("..."): string index + 1, 0: none */
 	uint32_t visibility;
-	uint32_t ext;		/* the rare part: attrx index, 0: none (never shared when written: attrx_mut) */
+	uint32_t flags;		/* SF_* */
 	uint8_t packed, transparent, used, unused, weak, noreturn, constructor, destructor;
 	uint8_t nonstring, may_alias, cold, gnu_inline, always_inline, noinline, ainline, error_fn;
 	uint8_t overloadable, noinstr;
-	uint16_t fmt;		/* format(...): fmt_pack() */
+	uint8_t pure;		/* 1: pure, 2: const (-Wunused-value) */
+	uint8_t unavail;	/* unavailable("msg"): depr/deprmsg say where and why, uses are errors */
+	uint16_t prio;		/* constructor(N)/destructor(N), 0: none (65535) */
+	uint8_t tlsmodel;	/* tls_model(): VCC_TLS_*, 0: none */
 } attrs;
-
-typedef struct attrx {		/* attributes checked at uses (attrcheck.c) */
-	uint8_t wur;		/* 1: warn_unused_result, 2: nodiscard */
-	uint8_t depr;		/* 1: deprecated, 2: unavailable */
-	uint8_t pure;		/* 1: pure, 2: const */
-	uint32_t deprloc;	/* the deprecated/unavailable attribute's name */
-	uint32_t deprmsg, wurmsg;	/* their message: string index + 1, 0: none */
-	uint64_t nonnull;	/* nonnull(i, ...): bit i - 1; ~0: every pointer parameter */
-} attrx;
 
 typedef struct asmop {
 	uint32_t name;		/* [name] id, 0 */
@@ -130,8 +131,24 @@ struct cc {
 		uint64_t prev8;
 	};
 	uint32_t dead;		/* inside if (0) ... (and the like): no runtime-behaviour warnings */
+	uint8_t defer_rt;	/* parsing a static initializer: -Wdivision-by-zero waits (clang's DiagRuntimeBehavior) */
+	uint8_t ndefer;
+	struct { uint32_t loc; pp_span r; uint8_t rem; } defer[8];
+	uint32_t unk_loc;	/* the last unknown token given -Winvalid-pp-token */
+	uint8_t se_direct;	/* the next statement is one of a statement expression's body */
+	uint8_t uv_any;		/* -Wuninitialized: 1 the body declares a tracked variable without an initializer, 2 a self-reference */
+	uint8_t nuv;
+	uint16_t cnd;
+	uint32_t in_proto;
+	uint32_t nconv;		/* conversion errors (clang's DefaultError warnings): later checks still run */
+	bool sie;		/* static_init_ok looks through NF_ERR (after such an error) */
+	uint32_t ptag[8], nptag;	/* tags declared in the outermost parameter list: a definition's body sees them */	/* parameter declarations being parsed: a new tag there is -Wvisibility */
+	uint32_t uv_asg;	/* the variable an '=' being parsed assigns */		/* if/loop/switch bodies being parsed */
+	uint32_t uv[64];
+	uint16_t uvc[64];	/* ... cnd at the declaration */	/* ... those variables */
+	bool after_amp;		/* the unary * being parsed is the operand of & (no -Wvoid-ptr-dereference) */
 	uint8_t cv_what;		/* context of the conversion being checked: CX_* (diagnostics) */
-	uint32_t cv_loc, cv_fn, cv_arg;	/* CX_PASS: the callee's sym (0: unknown) and the argument */
+	uint32_t cv_loc, cv_fn, cv_arg, cv_callee;	/* cv_callee: CX_PASS: the callee expression's first location */	/* CX_PASS: the callee's sym (0: unknown) and the argument */
 
 	ctype *ty;
 	uint32_t nty;
@@ -141,6 +158,7 @@ struct cc {
 	uint32_t nparams;
 	uint32_t *fnhash, fnhcap, nfn;
 	uint32_t *ptrc;		/* qty -> type index of a pointer to it (a cache, checked on use) */
+	uint32_t ptr_lo;	/* ptrc entries below are not used (1; a recorded region: its first type) */
 
 	tag *tags;
 	uint32_t ntag;
@@ -162,8 +180,6 @@ struct cc {
 	uint32_t nlabel;
 	attrs *attr;
 	uint32_t nattr;
-	attrx *attrx;
-	uint32_t nattrx;
 	casm *asms;
 	uint32_t nasm;
 
@@ -236,12 +252,18 @@ struct cc {
 	uint32_t nlzf;
 	char *lzs;
 	uint32_t nlzs;
-	int8_t uninit_on;	/* -Wuninitialized or -Wsometimes-uninitialized by the command line (0: not yet known) */
 	bool lz_on;		/* tokens come from lzt[lzc, lze) or lzz (lz_hc), then T_EOF */
 	bool lz_hc;
 	uint32_t lzc, lze;
 	pp_lazy lzz;
 	uint32_t lz_wm;		/* parsing a lazy body: file-scope syms from here on are hidden (0: none) */
+
+	/* VCC_DRCOV: delivered positions of file-scope declaration starts (UINT64_MAX: lookahead) */
+	uint64_t *drb;
+	uint32_t ndrb, cdrb;
+	/* VCC_DR / VCC_DRREC: per-region declaration replay (cc/replay.c) */
+	struct drrec *dr;
+	uint8_t dr_on;		/* a region is being recorded: the hooks log */
 };
 
 
@@ -272,6 +294,10 @@ enum {
 	/* legacy __sync_* without an __atomic_* form (the others map onto __atomic_*) */
 	BI_SYNC_VAL_CAS, BI_SYNC_BOOL_CAS, BI_SYNC_LOCK_RELEASE, BI_SYNC_SYNCHRONIZE,
 	BI_CONJ, BI_CREAL, BI_CIMAG,	/* complex parts (the element type is the signature's return) */
+	BI_ROTL8, BI_ROTL16, BI_ROTL32, BI_ROTL64, BI_ROTR8, BI_ROTR16, BI_ROTR32, BI_ROTR64,
+	/* ACLE hints and barriers (side effects: BI_ARM_NOP..BI_ARM_TRAP) */
+	BI_ARM_NOP, BI_ARM_YIELD, BI_ARM_WFE, BI_ARM_WFI, BI_ARM_SEV, BI_ARM_SEVL, BI_ARM_CLREX,
+	BI_ARM_ISB, BI_ARM_DMB, BI_ARM_DSB, BI_ARM_TRAP,
 	BI_LIB,	/* plain library call with a prototype */
 	BI_COUNT
 };
@@ -295,8 +321,10 @@ typedef struct cval {
 #define CN(c, i) (&(c)->nodes[i])
 
 bool cc_eval(cc *c, uint32_t n, cval *v);
+void dr_restored(cc *c);
 bool cc_is_signed(cc *c, qty t);
 const char *cc_builtin_name(int64_t i);
+const char *cc_lib_sig(const char *name, int *clang_enc);
 uint32_t cc_global_named(cc *c, const char *s);
 
 #endif

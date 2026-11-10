@@ -1,3 +1,4 @@
+/* diag-differs: fmt.c checks printf formats only, no scanf (TODO.md: "Merged diagnostics: cases from the D8 branch") */
 /* D5.6: portability between Arm Linux and Apple: typedef names in -Wformat (clang's sugar,
    %zu/%td/%jd fix-its), the <inttypes.h> macro for a 64-bit typedef, plain char's sign,
    -Wliteral-range */

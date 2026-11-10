@@ -1,0 +1,46 @@
+const_conv.c:2:10: warning: implicit conversion from 'int' to 'char' changes value from 300 to 44 [-Wconstant-conversion]
+    2 | char a = 300;
+      |      ~   ^~~
+const_conv.c:3:19: warning: implicit conversion from 'int' to 'unsigned char' changes value from 256 to 0 [-Wconstant-conversion]
+    3 | unsigned char b = 256;
+      |               ~   ^~~
+const_conv.c:4:17: warning: implicit conversion from 'int' to 'signed char' changes value from 128 to -128 [-Wconstant-conversion]
+    4 | signed char c = 128;
+      |             ~   ^~~
+const_conv.c:5:11: warning: implicit conversion from 'int' to 'short' changes value from 70000 to 4464 [-Wconstant-conversion]
+    5 | short s = 70000;
+      |       ~   ^~~~~
+const_conv.c:17:10: warning: implicit conversion from 'long' to 'int' changes value from 3000000000 to -1294967296 [-Wconstant-conversion]
+   17 |         int i = 3000000000;
+      |             ~   ^~~~~~~~~~
+const_conv.c:12:11: warning: implicit conversion from 'int' to 'char' changes value from 1000 to 232 [-Wconstant-conversion]
+   12 |         char x = 1000;
+      |              ~   ^~~~
+const_conv.c:13:6: warning: implicit conversion from 'int' to 'char' changes value from 512 to 0 [-Wconstant-conversion]
+   13 |         x = 512;
+      |           ~ ^~~
+const_conv.c:20:10: warning: implicit conversion from 'int' to 'char' changes value from 300 to 44 [-Wconstant-conversion]
+   20 |         x = 1 ? 300 : 0;
+      |           ~     ^~~
+const_conv.c:28:18: warning: implicit conversion from 'int' to 'char' changes value from 1000 to 232 [-Wconstant-conversion]
+   28 | void h(void) { g(1000); }
+      |                ~ ^~~~
+const_conv.c:29:23: warning: implicit conversion from 'int' to 'char' changes value from 999 to 231 [-Wconstant-conversion]
+   29 | char r(void) { return 999; }
+      |                ~~~~~~ ^~~
+const_conv.c:33:9: warning: implicit conversion from 'int' to 'short' changes value from 35536 to -30000 [-Wconstant-conversion]
+   33 |         g2((0, 35536)); g2(35536);
+      |              ~ ^~~~~
+const_conv.c:33:21: warning: implicit conversion from 'int' to 'short' changes value from 35536 to -30000 [-Wconstant-conversion]
+   33 |         g2((0, 35536)); g2(35536);
+      |                         ~~ ^~~~~
+const_conv.c:34:14: warning: implicit conversion from 'int' to 'short' changes value from 35536 to -30000 [-Wconstant-conversion]
+   34 |         short sa = (35536), sb = -(-35536);
+      |               ~~   ~^~~~~~
+const_conv.c:34:27: warning: implicit conversion from 'int' to 'short' changes value from 35536 to -30000 [-Wconstant-conversion]
+   34 |         short sa = (35536), sb = -(-35536);
+      |                             ~~   ^~~~~~~~~
+const_conv.c:33:6: warning: left operand of comma operator has no effect [-Wunused-value]
+   33 |         g2((0, 35536)); g2(35536);
+      |             ^
+15 warnings generated.

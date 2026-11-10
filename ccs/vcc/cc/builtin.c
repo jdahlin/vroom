@@ -95,6 +95,20 @@ static const builtin builtins[] = {
 	{ "__builtin_isless", BI_ISLESS, 1, "i." }, { "__builtin_islessequal", BI_ISLESSEQUAL, 1, "i." },
 	{ "__builtin_islessgreater", BI_ISLESSGREATER, 1, "i." }, { "__builtin_isunordered", BI_ISUNORDERED, 1, "i." },
 	{ "__builtin_arm_rsr64", BI_ARM_RSR, 0, "WS" },
+	{ "__builtin_rotateleft8", BI_ROTL8, 0, "CCC" }, { "__builtin_rotateleft16", BI_ROTL16, 0, "hhh" },
+	{ "__builtin_rotateleft32", BI_ROTL32, 0, "uuu" }, { "__builtin_rotateleft64", BI_ROTL64, 0, "WWW" },
+	{ "__builtin_rotateright8", BI_ROTR8, 0, "CCC" }, { "__builtin_rotateright16", BI_ROTR16, 0, "hhh" },
+	{ "__builtin_rotateright32", BI_ROTR32, 0, "uuu" }, { "__builtin_rotateright64", BI_ROTR64, 0, "WWW" },
+	/* ACLE (arm_acle.h): bit operations as the generic ones, hints, barriers */
+	{ "__builtin_arm_rbit", BI_BITREVERSE32, 1, "uu" }, { "__builtin_arm_rbit64", BI_BITREVERSE64, 1, "WW" },
+	{ "__builtin_arm_clz", BI_CLZ, 1, "uu" }, { "__builtin_arm_clz64", BI_CLZLL, 1, "uW" },
+	{ "__builtin_arm_cls", BI_CLRSB, 1, "uu" }, { "__builtin_arm_cls64", BI_CLRSBLL, 1, "uW" },
+	{ "__builtin_arm_nop", BI_ARM_NOP, 0, "v" }, { "__builtin_arm_yield", BI_ARM_YIELD, 0, "v" },
+	{ "__builtin_arm_wfe", BI_ARM_WFE, 0, "v" }, { "__builtin_arm_wfi", BI_ARM_WFI, 0, "v" },
+	{ "__builtin_arm_sev", BI_ARM_SEV, 0, "v" }, { "__builtin_arm_sevl", BI_ARM_SEVL, 0, "v" },
+	{ "__builtin_arm_clrex", BI_ARM_CLREX, 0, "v" },
+	{ "__builtin_arm_isb", BI_ARM_ISB, 0, "vu" }, { "__builtin_arm_dmb", BI_ARM_DMB, 0, "vu" },
+	{ "__builtin_arm_dsb", BI_ARM_DSB, 0, "vu" }, { "__builtin_arm_trap", BI_ARM_TRAP, 0, "vu" },
 	{ "__atomic_load_n", BI_ATOMIC_LOAD_N, 0, "v." }, { "__atomic_store_n", BI_ATOMIC_STORE_N, 0, "v." },
 	{ "__atomic_exchange_n", BI_ATOMIC_EXCHANGE_N, 0, "v." },
 	{ "__atomic_compare_exchange_n", BI_ATOMIC_CMPXCHG_N, 0, "v." },
@@ -119,6 +133,38 @@ static const builtin builtins[] = {
 	{ "__sync_bool_compare_and_swap", BI_SYNC_BOOL_CAS, 0, "s." },
 	{ "__sync_lock_release", BI_SYNC_LOCK_RELEASE, 0, "s." },
 	{ "__sync_synchronize", BI_SYNC_SYNCHRONIZE, 0, "s." },
+	/* the sized forms (clang: the size is the operand's; the generic form checks it) and __sync_swap */
+#define SYNC_N(n, bi) { n "_1", bi, 0, "s." }, { n "_2", bi, 0, "s." }, { n "_4", bi, 0, "s." }, { n "_8", bi, 0, "s." }, \
+	{ n "_16", bi, 0, "s." }
+	SYNC_N("__sync_fetch_and_add", BI_ATOMIC_FETCH_ADD),
+	SYNC_N("__sync_fetch_and_sub", BI_ATOMIC_FETCH_SUB),
+	SYNC_N("__sync_fetch_and_and", BI_ATOMIC_FETCH_AND),
+	SYNC_N("__sync_fetch_and_or", BI_ATOMIC_FETCH_OR),
+	SYNC_N("__sync_fetch_and_xor", BI_ATOMIC_FETCH_XOR),
+	SYNC_N("__sync_add_and_fetch", BI_ATOMIC_ADD_FETCH),
+	SYNC_N("__sync_sub_and_fetch", BI_ATOMIC_SUB_FETCH),
+	SYNC_N("__sync_and_and_fetch", BI_ATOMIC_AND_FETCH),
+	SYNC_N("__sync_or_and_fetch", BI_ATOMIC_OR_FETCH),
+	SYNC_N("__sync_xor_and_fetch", BI_ATOMIC_XOR_FETCH),
+	SYNC_N("__sync_lock_test_and_set", BI_ATOMIC_EXCHANGE_N),
+	SYNC_N("__sync_val_compare_and_swap", BI_SYNC_VAL_CAS),
+	SYNC_N("__sync_bool_compare_and_swap", BI_SYNC_BOOL_CAS),
+	SYNC_N("__sync_lock_release", BI_SYNC_LOCK_RELEASE),
+	SYNC_N("__sync_swap", BI_ATOMIC_EXCHANGE_N),
+#undef SYNC_N
+	{ "__sync_swap", BI_ATOMIC_EXCHANGE_N, 0, "s." },
+	/* C11 _Atomic builtins (stdatomic.h): the __atomic_* forms, orders explicit */
+	{ "__c11_atomic_load", BI_ATOMIC_LOAD_N, 0, "v." },
+	{ "__c11_atomic_store", BI_ATOMIC_STORE_N, 0, "v." },
+	{ "__c11_atomic_exchange", BI_ATOMIC_EXCHANGE_N, 0, "v." },
+	{ "__c11_atomic_fetch_add", BI_ATOMIC_FETCH_ADD, 0, "v." },
+	{ "__c11_atomic_fetch_sub", BI_ATOMIC_FETCH_SUB, 0, "v." },
+	{ "__c11_atomic_fetch_and", BI_ATOMIC_FETCH_AND, 0, "v." },
+	{ "__c11_atomic_fetch_or", BI_ATOMIC_FETCH_OR, 0, "v." },
+	{ "__c11_atomic_fetch_xor", BI_ATOMIC_FETCH_XOR, 0, "v." },
+	{ "__c11_atomic_init", BI_ATOMIC_STORE_N, 0, "s." },
+	{ "__c11_atomic_thread_fence", BI_ATOMIC_THREAD_FENCE, 0, "vi" },
+	{ "__c11_atomic_signal_fence", BI_ATOMIC_SIGNAL_FENCE, 0, "vi" },
 	{ "__atomic_thread_fence", BI_ATOMIC_THREAD_FENCE, 0, "vi" },
 	{ "__atomic_signal_fence", BI_ATOMIC_SIGNAL_FENCE, 0, "vi" },
 	{ "__atomic_always_lock_free", BI_ATOMIC_LOCK_FREE, 1, "bzP" },
@@ -168,6 +214,27 @@ static const builtin builtins[] = {
 /* name of a library builtin (sym val of an S_BUILTIN) */
 const char *cc_builtin_name(int64_t i) { return builtins[i].name; }
 
+/* the prototype clang gives an implicitly declared library function name (no
+ * declaration made): vcc's signature letters (*clang_enc 0, see sigtype) or
+ * Builtins.def's (1); NULL: not one */
+const char *cc_lib_sig(const char *name, int *clang_enc)
+{
+	char b[128];
+	size_t n = strlen(name);
+
+	if (n + 11 > sizeof b)
+		return NULL;
+	memcpy(b, "__builtin_", 10);
+	memcpy(b + 10, name, n + 1);
+	for (uint32_t i = 0; builtins[i].name; i++)
+		if (builtins[i].id == BI_LIB && !strcmp(builtins[i].name, b)) {
+			*clang_enc = 0;
+			return builtins[i].sig;
+		}
+	*clang_enc = 1;
+	return lib_builtin_sig(b);
+}
+
 static qty sigtype(cc *c, char ch)
 {
 	switch (ch) {
@@ -194,21 +261,26 @@ static qty sigtype(cc *c, char ch)
 	}
 }
 
-/* the function type of a builtin's signature */
-static qty builtin_type(cc *c, const builtin *b)
+/* the function type of a signature in vcc's letters (sigtype) */
+VPRIV qty sig_func_type(cc *c, const char *sig)
 {
 	qty par[16];
 	uint32_t n = 0;
 	int fl = 0;
 
-	for (const char *s = b->sig + 1; *s; s++) {
+	for (const char *s = sig + 1; *s; s++) {
 		if (*s == '.') {
 			fl |= TF_VARIADIC;
 			break;
 		}
 		par[n++] = sigtype(c, *s);
 	}
-	return ty_func(c, sigtype(c, b->sig[0]), par, n, fl);
+	return ty_func(c, sigtype(c, sig[0]), par, n, fl);
+}
+
+static qty builtin_type(cc *c, const builtin *b)
+{
+	return sig_func_type(c, b->sig);
 }
 
 /* ---------------- expressions: builtins ---------------- */

@@ -1,0 +1,33 @@
+ptr_const_spelling.c:2:5: error: incompatible pointer to integer conversion initializing 'int' with an expression of type 'int *const'; dereference with * [-Wint-conversion]
+    2 | int x = a; int y = b; int z = c; int w = fp; int v = r;
+      |     ^   ~
+      |         *
+ptr_const_spelling.c:2:9: error: initializer element is not a compile-time constant
+    2 | int x = a; int y = b; int z = c; int w = fp; int v = r;
+      |         ^
+ptr_const_spelling.c:2:16: error: incompatible pointer to integer conversion initializing 'int' with an expression of type 'int *const *' [-Wint-conversion]
+    2 | int x = a; int y = b; int z = c; int w = fp; int v = r;
+      |                ^   ~
+ptr_const_spelling.c:2:20: error: initializer element is not a compile-time constant
+    2 | int x = a; int y = b; int z = c; int w = fp; int v = r;
+      |                    ^
+ptr_const_spelling.c:2:27: error: incompatible pointer to integer conversion initializing 'int' with an expression of type 'char *volatile *const' [-Wint-conversion]
+    2 | int x = a; int y = b; int z = c; int w = fp; int v = r;
+      |                           ^   ~
+ptr_const_spelling.c:2:31: error: initializer element is not a compile-time constant
+    2 | int x = a; int y = b; int z = c; int w = fp; int v = r;
+      |                               ^
+ptr_const_spelling.c:2:38: error: incompatible pointer to integer conversion initializing 'int' with an expression of type 'int (*const)(void)' [-Wint-conversion]
+    2 | int x = a; int y = b; int z = c; int w = fp; int v = r;
+      |                                      ^   ~~
+ptr_const_spelling.c:2:42: error: initializer element is not a compile-time constant
+    2 | int x = a; int y = b; int z = c; int w = fp; int v = r;
+      |                                          ^~
+ptr_const_spelling.c:2:50: error: incompatible pointer to integer conversion initializing 'int' with an expression of type 'int *const restrict'; dereference with * [-Wint-conversion]
+    2 | int x = a; int y = b; int z = c; int w = fp; int v = r;
+      |                                                  ^   ~
+      |                                                      *
+ptr_const_spelling.c:2:54: error: initializer element is not a compile-time constant
+    2 | int x = a; int y = b; int z = c; int w = fp; int v = r;
+      |                                                      ^
+10 errors generated.

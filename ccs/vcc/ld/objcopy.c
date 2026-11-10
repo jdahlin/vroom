@@ -88,6 +88,71 @@ typedef struct {
 	const char *shstr;
 } Elf;
 
+/* a table of n entries of sz bytes at off, inside the file and 8-aligned */
+static bool in_file(const Elf *e, uint64_t off, uint64_t n, uint64_t sz)
+{
+	return off % 8 == 0 && off <= e->size && n <= (e->size - off) / sz;
+}
+
+/* everything elf_open's users index, checked once (as vlink's obj_valid) */
+static bool elf_valid(Elf *e)
+{
+	const Ehdr *h = e->eh;
+
+	if ((h->e_shnum && h->e_shentsize != sizeof(Shdr)) || (h->e_phnum && h->e_phentsize != sizeof(Phdr)) ||
+	    !in_file(e, h->e_phoff, h->e_phnum, sizeof(Phdr)) || !in_file(e, h->e_shoff, h->e_shnum, sizeof(Shdr)))
+		return false;
+	e->sh = (const Shdr *)(e->buf + h->e_shoff);
+	e->nsh = h->e_shnum;
+	e->ph = (const Phdr *)(e->buf + h->e_phoff);
+	e->nph = h->e_phnum;
+	e->shstr = "";
+	for (uint32_t k = 0; k < e->nph; k++)
+		if (e->ph[k].p_offset > e->size || e->ph[k].p_filesz > e->size - e->ph[k].p_offset)
+			return false;
+	if (!e->nsh)
+		return h->e_shoff == 0 || h->e_shstrndx == 0;
+	if (h->e_shstrndx >= e->nsh)
+		return false;
+	for (uint32_t k = 1; k < e->nsh; k++) {
+		const Shdr *s = &e->sh[k];
+
+		if (s->sh_type != SHT_NOBITS && (s->sh_offset > e->size || s->sh_size > e->size - s->sh_offset))
+			return false;
+		if (s->sh_addralign & (s->sh_addralign - 1))
+			return false;
+	}
+	const Shdr *ss = &e->sh[h->e_shstrndx];
+
+	if (ss->sh_type != SHT_STRTAB || !ss->sh_size || e->buf[ss->sh_offset + ss->sh_size - 1])
+		return false;
+	e->shstr = (const char *)e->buf + ss->sh_offset;
+	for (uint32_t k = 0; k < e->nsh; k++) {
+		const Shdr *s = &e->sh[k];
+
+		if (s->sh_name >= ss->sh_size)
+			return false;
+		if (s->sh_type == SHT_SYMTAB || s->sh_type == SHT_DYNSYM) {
+			if (s->sh_offset % 8 || s->sh_size % sizeof(Sym) || s->sh_link >= e->nsh)
+				return false;
+			const Shdr *st = &e->sh[s->sh_link];
+
+			if (st->sh_type != SHT_STRTAB || !st->sh_size || e->buf[st->sh_offset + st->sh_size - 1])
+				return false;
+			const Sym *y = (const Sym *)(e->buf + s->sh_offset);
+
+			for (uint64_t j = 0; j < s->sh_size / sizeof(Sym); j++)
+				if (y[j].st_name >= st->sh_size ||
+				    (y[j].st_shndx && y[j].st_shndx < 0xff00 && y[j].st_shndx >= e->nsh))
+					return false;
+		}
+		if (s->sh_type == SHT_RELA &&
+		    (s->sh_offset % 8 || s->sh_size % sizeof(Rela) || s->sh_link >= e->nsh || s->sh_info >= e->nsh))
+			return false;
+	}
+	return true;
+}
+
 static int elf_open(Elf *e, int dirfd, const char *path)
 {
 	memset(e, 0, sizeof *e);
@@ -107,11 +172,12 @@ static int elf_open(Elf *e, int dirfd, const char *path)
 		return -1;
 	}
 	e->eh = (const Ehdr *)e->buf;
-	e->sh = (const Shdr *)(e->buf + e->eh->e_shoff);
-	e->nsh = e->eh->e_shnum;
-	e->ph = (const Phdr *)(e->buf + e->eh->e_phoff);
-	e->nph = e->eh->e_phnum;
-	e->shstr = (const char *)e->buf + e->sh[e->eh->e_shstrndx].sh_offset;
+	if (!elf_valid(e)) {
+		oerror("'%s': invalid ELF file", path);
+		munmap((void *)e->buf, e->size);
+		e->buf = NULL;
+		return -1;
+	}
 	return 0;
 }
 static void elf_close(Elf *e)
@@ -327,10 +393,17 @@ typedef struct {
 
 static struct {
 	const char *in, *out;
-	bool binary, strip_all, wildcard;
+	bool binary, strip_all, strip_debug, wildcard;
 	const char *prefix_syms, *prefix_alloc;
 	const char **remove;
 	uint32_t nremove;
+	const char **redef;	/* "old=new" */
+	uint32_t nredef;
+	const char **add;	/* --add-section name=file */
+	uint32_t nadd;
+	const char *debuglink;
+	const char **ssf;	/* --set-section-flags name=f1,f2 */
+	uint32_t nssf;
 	const char **only;
 	uint32_t nonly;
 	const char **unneeded;
@@ -424,7 +497,7 @@ static int objcopy_run(int dirfd)
 	const Ehdr *eh = e.eh;
 	bool rel = eh->e_type == 1;
 	uint32_t ns = e.nsh;
-	OSec *sec = xcalloc(ns, sizeof *sec);
+	OSec *sec = xcalloc(ns + oc.nadd + 1, sizeof *sec);
 	for (uint32_t i = 0; i < ns; i++) {
 		const Shdr *h = &e.sh[i];
 		OSec *s = &sec[i];
@@ -449,6 +522,106 @@ static int objcopy_run(int dirfd)
 	}
 	if (!rel && e.sh[0].sh_size)
 		oerror("extended section numbering not supported");
+	/* --set-section-flags (llvm-objcopy's getNewShfFlags; NOBITS with contents/load becomes PROGBITS) */
+	for (uint32_t a = 0; a < oc.nssf; a++) {
+		const char *eq = strchr(oc.ssf[a], '=');
+		size_t nl = (size_t)(eq - oc.ssf[a]);
+		uint64_t nf = SHF_WRITE;
+		bool contents = false, load = false;
+
+		for (const char *f = eq + 1; *f;) {
+			size_t l = strcspn(f, ",");
+#define FL(x) (l == sizeof(x) - 1 && !strncmp(f, x, l))
+			if (FL("alloc")) nf |= SHF_ALLOC;
+			else if (FL("readonly")) nf &= ~(uint64_t)SHF_WRITE;
+			else if (FL("code")) nf |= SHF_EXECINSTR;
+			else if (FL("merge")) nf |= SHF_MERGE;
+			else if (FL("strings")) nf |= SHF_STRINGS;
+			else if (FL("exclude")) nf |= 0x80000000u;
+			else if (FL("contents")) contents = true;
+			else if (FL("load")) load = true;
+			else if (!(FL("data") || FL("rom") || FL("share") || FL("debug") || FL("large") || FL("noload")))
+				oerror("unrecognized section flag '%.*s'", (int)l, f);
+#undef FL
+			f += l + (f[l] == ',');
+		}
+		for (uint32_t k = 1; k < ns; k++) {
+			OSec *s = &sec[k];
+			const uint64_t mask = SHF_ALLOC | SHF_WRITE | SHF_EXECINSTR | SHF_MERGE | SHF_STRINGS | 0x80000000u;
+
+			if (strlen(s->name) != nl || strncmp(s->name, oc.ssf[a], nl))
+				continue;
+			s->flags = (s->flags & ~mask) | nf;
+			if (s->type == SHT_NOBITS && (!(s->flags & SHF_ALLOC) || contents || load)) {
+				s->type = SHT_PROGBITS;	/* (llvm: zero-filled contents) */
+				s->gen = xcalloc(s->size + 1, 1);
+			}
+		}
+	}
+	/* --add-section: at the end, after everything else (llvm-objcopy: PROGBITS, or NOTE for .note*) */
+	for (uint32_t a = 0; a < oc.nadd; a++) {
+		const char *eq = strchr(oc.add[a], '=');
+		OSec *s = &sec[ns];
+		struct stat st;
+		int fd = openat(dirfd, eq + 1, O_RDONLY);
+
+		if (fd < 0 || fstat(fd, &st) < 0) {
+			oerror("'%s': %s", eq + 1, strerror(errno));
+			if (fd >= 0)
+				close(fd);
+			continue;
+		}
+		s->newname = strndup(oc.add[a], (size_t)(eq - oc.add[a]));
+		s->name = s->newname;
+		s->type = !strncmp(s->name, ".note", 5) && strcmp(s->name, ".note.GNU-stack") ? SHT_NOTE : SHT_PROGBITS;
+		s->align = 1;
+		s->size = (uint64_t)st.st_size;
+		s->origoff = UINT64_MAX;
+		s->parent = -1;
+		s->gen = xcalloc(s->size + 1, 1);
+		if (s->size && read(fd, s->gen, s->size) != (ssize_t)s->size)
+			oerror("'%s': short read", eq + 1);
+		if (s->type == SHT_NOTE && s->size && s->size < 12)
+			oerror("'%s': %s data must be either empty or at least 12 bytes long", oc.in, s->name);
+		close(fd);
+		ns++;
+	}
+	/* --add-gnu-debuglink (after --add-section): .gnu_debuglink = basename, NUL, padding to 4, CRC-32 of the file */
+	if (oc.debuglink) {
+		OSec *s = &sec[ns];
+		int fd = openat(dirfd, oc.debuglink, O_RDONLY);
+		struct stat st;
+		const char *base = strrchr(oc.debuglink, '/') ? strrchr(oc.debuglink, '/') + 1 : oc.debuglink;
+		size_t bl = strlen(base), sz = (bl + 4) / 4 * 4 + 4;
+		uint32_t crc = 0xffffffff;
+
+		if (fd < 0 || fstat(fd, &st) < 0) {
+			oerror("'%s': %s", oc.debuglink, strerror(errno));
+		} else {
+			uint8_t buf[65536];
+			ssize_t r;
+
+			while ((r = read(fd, buf, sizeof buf)) > 0)
+				for (ssize_t i = 0; i < r; i++) {
+					crc ^= buf[i];
+					for (int b = 0; b < 8; b++)
+						crc = crc >> 1 ^ (0xedb88320 & -(crc & 1));
+				}
+			crc = ~crc;
+			s->name = ".gnu_debuglink";
+			s->type = SHT_PROGBITS;
+			s->align = 4;
+			s->size = sz;
+			s->origoff = UINT64_MAX;
+			s->parent = -1;
+			s->gen = xcalloc(sz, 1);
+			memcpy(s->gen, base, bl);
+			memcpy(s->gen + sz - 4, &crc, 4);
+			ns++;
+		}
+		if (fd >= 0)
+			close(fd);
+	}
 
 	/* segments: real ones, then the ELF header and program header "segments" */
 	uint32_t ng = e.nph + 2;
@@ -517,6 +690,9 @@ static int objcopy_run(int dirfd)
 		if (oc.strip_all && !rm && k != shstr_i && strncmp(s->name, ".gnu.warning", 12) &&
 		    strncmp(s->name, ".gnu_debuglink", 14) && s->type != 0x70000003 && s->parent < 0)
 			rm = !(s->flags & SHF_ALLOC);
+		if (oc.strip_debug && !(s->flags & SHF_ALLOC) &&
+		    (!strncmp(s->name, ".debug", 6) || !strncmp(s->name, ".zdebug", 7) || !strcmp(s->name, ".gdb_index")))
+			rm = true;	/* llvm-objcopy's isDebugSection */
 		if (oc.nonly) {
 			if (match_list(oc.only, oc.nonly, s->name))
 				rm = false;
@@ -572,13 +748,25 @@ static int objcopy_run(int dirfd)
 		for (uint32_t i = 1; i < nsym; i++) {
 			OSym *y = &sym[i];
 			uint8_t type = y->info & 15, bind = y->info >> 4;
+			for (uint32_t r = 0; r < oc.nredef && type != STT_SECTION; r++) {
+				const char *eq = strchr(oc.redef[r], '=');
+
+				if ((size_t)(eq - oc.redef[r]) == strlen(y->name) && !strncmp(y->name, oc.redef[r], eq - oc.redef[r])) {
+					free(y->newname);
+					y->newname = strdup(eq + 1);
+					break;
+				}
+			}
 			if (oc.prefix_syms && type != STT_SECTION) {
-				size_t a = strlen(oc.prefix_syms), b = strlen(y->name);
+				const char *nm = y->newname ? y->newname : y->name;
+				size_t a = strlen(oc.prefix_syms), b = strlen(nm);
+				char *old = y->newname;
 				y->newname = xcalloc(a + b + 1, 1);
 				memcpy(y->newname, oc.prefix_syms, a);
-				memcpy(y->newname + a, y->name, b + 1);
+				memcpy(y->newname + a, nm, b + 1);
+				free(old);
 			}
-			if (oc.strip_all)
+			if (oc.strip_all || (oc.strip_debug && type == STT_FILE))
 				y->removed = true;
 			else if (oc.nunneeded && match_list(oc.unneeded, oc.nunneeded, yname(y))) {
 				bool unneeded = !referenced || (!referenced[i] && (bind == STB_LOCAL || y->shndx == SHN_UNDEF) &&
@@ -830,6 +1018,8 @@ static int objcopy_run(int dirfd)
 		p->p_offset = seg[i].off;
 	}
 	Shdr *sh = (Shdr *)(b + shoff);
+	/* llvm-objcopy: .llvm_addrsig's sh_link is dropped once sections or symbols may be removed */
+	bool changed = oc.strip_all || oc.strip_debug || oc.nremove || oc.nonly || oc.nunneeded;
 	for (uint32_t k = 1; k < ns; k++) {
 		OSec *s = &sec[k];
 		if (s->removed)
@@ -838,7 +1028,7 @@ static int objcopy_run(int dirfd)
 			memcpy(b + s->off, s->gen ? s->gen : s->data, s->size);
 		sh[s->idx] = (Shdr){.sh_name = (uint32_t)st_find(&names, sname(s)), .sh_type = s->type,
 				    .sh_flags = s->flags, .sh_addr = s->addr, .sh_offset = s->off, .sh_size = s->size,
-				    .sh_link = s->link, .sh_info = s->info, .sh_addralign = s->align,
+				    .sh_link = s->type == 0x6fff4c03 && changed ? 0 : s->link, .sh_info = s->info, .sh_addralign = s->align,
 				    .sh_entsize = s->entsize};
 	}
 	int rc = oerrors ? 1 : write_file(dirfd, oc.out, b, total, rel ? 0666 : 0777);
@@ -887,6 +1077,8 @@ int objcopy_main(int argc, char **argv, int dirfd, FILE *err)
 			oc.binary = !strcmp(a + 16, "binary");
 		} else if (OPT("-S") || OPT("--strip-all")) {
 			oc.strip_all = true;
+		} else if (OPT("-g") || OPT("--strip-debug")) {
+			oc.strip_debug = true;
 		} else if (OPT("-w") || OPT("--wildcard")) {
 			oc.wildcard = true;
 		} else if ((v = VAL("--remove-section")) || (v = VAL("-R"))) {
@@ -897,6 +1089,20 @@ int objcopy_main(int argc, char **argv, int dirfd, FILE *err)
 			push(&oc.unneeded, &oc.nunneeded, v);
 		} else if ((v = VAL("--dump-section"))) {
 			push(&oc.dump, &oc.ndump, v);
+		} else if ((v = VAL("--set-section-flags"))) {
+			if (!strchr(v, '=') || v[0] == '=')
+				oerror("bad format for --set-section-flags: missing '='");
+			push(&oc.ssf, &oc.nssf, v);
+		} else if ((v = VAL("--add-gnu-debuglink"))) {
+			oc.debuglink = v;
+		} else if ((v = VAL("--add-section"))) {
+			if (!strchr(v, '=') || v[0] == '=')
+				oerror("bad format for --add-section: missing '='");
+			push(&oc.add, &oc.nadd, v);
+		} else if ((v = VAL("--redefine-sym"))) {
+			if (!strchr(v, '='))
+				oerror("bad format for --redefine-sym");
+			push(&oc.redef, &oc.nredef, v);
 		} else if ((v = VAL("--prefix-symbols"))) {
 			oc.prefix_syms = v;
 		} else if ((v = VAL("--prefix-alloc-sections"))) {
@@ -923,6 +1129,9 @@ int objcopy_main(int argc, char **argv, int dirfd, FILE *err)
 	free(oc.only);
 	free(oc.unneeded);
 	free(oc.dump);
+	free(oc.redef);
+	free(oc.add);
+	free(oc.ssf);
 	return rc || oerrors;
 }
 
@@ -1003,8 +1212,8 @@ int nm_main(int argc, char **argv, int dirfd, FILE *out, FILE *err)
 	oerr = err ? err : stderr;
 	oerrors = 0;
 	prog = "vnm";
-	bool nosort = false, numeric = false, size = false;
-	const char *files[64];
+	bool nosort = false, numeric = false, size = false, undef = false, defd = false, ext = false, dyn = false;
+	const char **files = xcalloc((size_t)argc + 1, sizeof *files);
 	int nf = 0;
 	for (int i = 1; i < argc; i++) {
 		const char *a = argv[i];
@@ -1013,6 +1222,10 @@ int nm_main(int argc, char **argv, int dirfd, FILE *out, FILE *err)
 				if (*p == 'p') nosort = true;
 				else if (*p == 'n' || *p == 'v') numeric = true;
 				else if (*p == 'S') size = true;
+				else if (*p == 'u') undef = true;
+				else if (*p == 'U') defd = true;
+				else if (*p == 'g') ext = true;
+				else if (*p == 'D') dyn = true;
 				else oerror("unsupported option -%c", *p);
 			}
 		} else if (!strcmp(a, "--no-sort")) {
@@ -1021,21 +1234,33 @@ int nm_main(int argc, char **argv, int dirfd, FILE *out, FILE *err)
 			numeric = true;
 		} else if (!strcmp(a, "--print-size")) {
 			size = true;
-		} else if (nf < 64) {
+		} else if (!strcmp(a, "--undefined-only")) {
+			undef = true;
+		} else if (!strcmp(a, "--defined-only")) {
+			defd = true;
+		} else if (!strcmp(a, "--dynamic")) {
+			dyn = true;
+		} else if (!strcmp(a, "--extern-only")) {
+			ext = true;
+		} else if (a[0] == '-' && a[1]) {
+			oerror("unknown argument '%s'", a);
+		} else {
 			files[nf++] = a;
 		}
 	}
 	if (!nf)
 		files[nf++] = "a.out";
-	if (oerrors)
+	if (oerrors) {
+		free(files);
 		return 1;
+	}
 	for (int f = 0; f < nf; f++) {
 		Elf e;
 		if (elf_open(&e, dirfd, files[f]))
 			continue;
 		const Shdr *st = NULL;
 		for (uint32_t k = 0; k < e.nsh; k++)
-			if (e.sh[k].sh_type == SHT_SYMTAB)
+			if (e.sh[k].sh_type == (dyn ? SHT_DYNSYM : SHT_SYMTAB))
 				st = &e.sh[k];
 		if (nf > 1)
 			fprintf(out, "\n%s:\n", files[f]);
@@ -1049,6 +1274,47 @@ int nm_main(int argc, char **argv, int dirfd, FILE *out, FILE *err)
 		uint32_t n = st->sh_size / sizeof(Sym);
 		NSym *v = xcalloc(n, sizeof *v);
 		uint32_t m = 0;
+		/* -D: symbol versions as llvm-nm (name@@VER defined, name@VER hidden or undefined) */
+		const uint16_t *versym = NULL;
+		const char *vname[256] = { 0 };
+		char **owned = dyn ? xcalloc(n, sizeof *owned) : NULL;
+		for (uint32_t k = 0; dyn && k < e.nsh; k++) {
+			const Shdr *h = &e.sh[k];
+			const uint8_t *d = e.buf + h->sh_offset;
+			const char *vs = h->sh_link < e.nsh ? (const char *)e.buf + e.sh[h->sh_link].sh_offset : NULL;
+			if (h->sh_type == 0x6fffffff && h->sh_size >= n * 2)
+				versym = (const uint16_t *)d;
+			else if (h->sh_type == 0x6ffffffd)	/* verdef */
+				for (uint32_t c = 0, o = 0; c < h->sh_info && o + 20 <= h->sh_size; c++) {
+					uint16_t ndx, cnt; uint32_t aux, next, nm_;
+					memcpy(&ndx, d + o + 4, 2); memcpy(&cnt, d + o + 6, 2);
+					memcpy(&aux, d + o + 12, 4); memcpy(&next, d + o + 16, 4);
+					if (cnt && o + aux + 8 <= h->sh_size && ndx < 256) {
+						memcpy(&nm_, d + o + aux, 4);
+						vname[ndx] = vs + nm_;
+					}
+					if (!next)
+						break;
+					o += next;
+				}
+			else if (h->sh_type == 0x6ffffffe)	/* verneed */
+				for (uint32_t c = 0, o = 0; c < h->sh_info && o + 16 <= h->sh_size; c++) {
+					uint16_t cnt; uint32_t aux, next;
+					memcpy(&cnt, d + o + 2, 2); memcpy(&aux, d + o + 8, 4); memcpy(&next, d + o + 12, 4);
+					for (uint32_t j = 0, a = o + aux; j < cnt && a + 16 <= h->sh_size; j++) {
+						uint16_t other; uint32_t nm_, an;
+						memcpy(&other, d + a + 6, 2); memcpy(&nm_, d + a + 8, 4); memcpy(&an, d + a + 12, 4);
+						if (other < 256)
+							vname[other] = vs + nm_;
+						if (!an)
+							break;
+						a += an;
+					}
+					if (!next)
+						break;
+					o += next;
+				}
+		}
 		for (uint32_t i = 1; i < n; i++) {
 			const Sym *y = &ys[i];
 			uint8_t type = y->st_info & 15;
@@ -1057,6 +1323,17 @@ int nm_main(int argc, char **argv, int dirfd, FILE *out, FILE *err)
 				continue;
 			if (e.eh->e_machine == 183 && name[0] == '$' && (name[1] == 'd' || name[1] == 'x'))
 				continue;
+			if ((undef && y->st_shndx != SHN_UNDEF) || (defd && y->st_shndx == SHN_UNDEF) ||
+			    (ext && (y->st_info >> 4) == STB_LOCAL))
+				continue;
+			if (versym && (versym[i] & 0x7fff) > 1 && (versym[i] & 0x7fff) < 256 && vname[versym[i] & 0x7fff]) {
+				const char *vn = vname[versym[i] & 0x7fff];
+				bool at2 = !(versym[i] & 0x8000) && y->st_shndx != SHN_UNDEF;
+				size_t l = strlen(name) + strlen(vn) + 3;
+				owned[i] = malloc(l);
+				snprintf(owned[i], l, "%s%s%s", name, at2 ? "@@" : "@", vn);
+				name = owned[i];
+			}
 			v[m++] = (NSym){.name = name, .addr = y->st_value, .size = y->st_size,
 					.type = nm_type(&e, y), .defined = y->st_shndx != SHN_UNDEF};
 		}
@@ -1083,8 +1360,12 @@ int nm_main(int argc, char **argv, int dirfd, FILE *out, FILE *err)
 		}
 		fwrite(buf, 1, len, out);
 		free(buf);
+		for (uint32_t i = 0; owned && i < n; i++)
+			free(owned[i]);
+		free(owned);
 		free(v);
 		elf_close(&e);
 	}
+	free(files);
 	return oerrors ? 1 : 0;
 }

@@ -112,9 +112,13 @@ class Renderer:
                 continue
             rb = sp['start']['offset']
             re_ = sp['end']['offset'] if same(sp['end']) else 1 << 40
-            if re_ < rb or re_ <= ls or rb >= le:
+            if re_ < rb or re_ <= ls or rb >= le or (re_ == ls and rb < ls):
                 continue
             rb, re_ = max(rb, ls), min(re_, le)
+            while rb < re_ and s[rb] in (32, 9):	# clang: first to last non-blank column
+                rb += 1
+            while re_ > rb and s[re_ - 1] in (32, 9):
+                re_ -= 1
             for c0 in range(dcols(s, ls, rb), min(dcols(s, ls, re_), lw)):
                 m[c0] = ord('~')
         for f in d['fixits']:	# a fix-it's replaced range, without its blanks at either end
