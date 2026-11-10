@@ -496,8 +496,12 @@ static __attribute__((noinline)) uint32_t binary_ops(cc *c, int minp, uint32_t l
 			bool dead = (op == T_AMPAMP || op == T_PIPEPIPE) && cc_eval(c, l, &cv) && cv.kind == CV_INT &&
 				    (cv.i != 0) == (op == T_PIPEPIPE);
 
+			bool lg = op == T_AMPAMP || op == T_PIPEPIPE;
+
 			c->dead += dead;
+			c->cnd += lg;	/* (a conditional branch: -Wsometimes-uninitialized's filter) */
 			r = binary(c, p + 1);
+			c->cnd -= lg;
 			c->dead -= dead;
 		}
 		runtime_warn(c, op, l, r, loc);
@@ -538,12 +542,14 @@ static __attribute__((noinline)) uint32_t cond_rest(cc *c, uint32_t cnd)
 		cnd = scalar_cond(c, decay(c, cnd), "conditional");
 		k = cc_eval(c, cnd, &cv) && cv.kind == CV_INT ? cv.i != 0 : -1;
 		c->dead += k == 0;
+		c->cnd++;
 		if (!is(c, T_COLON))
 			a = expr(c);
 		c->dead -= k == 0;
 		expect(c, T_COLON, "':'");
 		c->dead += k == 1;
 		b = cond_expr(c);
+		c->cnd--;
 		c->dead -= k == 1;
 		return conditional(c, cnd, a, b, loc);
 	}

@@ -406,6 +406,14 @@ typedef struct uwk {
 	uint32_t uloc[64], order[64], ublk[64];
 	uint32_t sif[64];	/* the if */
 	uint8_t sfalse[64];	/* ... uninitialized when its condition is false */
+	uint8_t skind[64];
+	pp_span skr[64];	/* ... a case: its value / default's range */
+	/* the switch being walked: the case arm entered from it only, and what it leaves uninitialized */
+	ust *swbrk;
+	uint32_t swlab[8], nswlab, swarm;	/* the arm's labels (stacked: case A: case B:), its number */
+	uint64_t swmask, swcand;
+	uint32_t swc[64][8];	/* per variable: the labels whose edge leaves it uninitialized */
+	uint8_t swa[64][8], nswc[64];	/* ... 0 if, 1 &&, 2 ||, 3 ?:, 4 case, 5 default */
 	uint32_t sdep[64];	/* ... at this branch depth: the use must post-dominate it */
 	uint8_t kind[64];	/* report: 1 definite, 2 sometimes */
 	pp_span ur[64];
@@ -463,6 +471,67 @@ static bool uv_haslogic(cc *c, uint32_t n)
 	default:
 		return false;
 	}
+}
+
+/* a branch at node n (kind as skind) left the variables uninitialized before it initialized on path a only, uninitialized on path b */
+static void uv_pend(uwk *w, uint32_t n, int kind, const ust *b4, const ust *a, const ust *b, bool f)
+{
+	uint64_t m;
+
+	if (!b4->live || !a->live || !b->live)
+		return;
+	m = (b4->u & ~b4->i) & (a->i & ~a->u) & (b->u & ~b->i);
+	for (; m; m &= m - 1) {
+		int v = __builtin_ctzll(m);
+
+		w->spend |= 1ull << v, w->sif[v] = n, w->sfalse[v] = f, w->sdep[v] = w->dep, w->skind[v] = (uint8_t)kind;
+	}
+}
+
+/* a case arm reaches the switch's end (break, or the end of the body) with st */
+static void uv_swarm(uwk *w, const ust *st)
+{
+	if (!w->nswlab || !st->live)
+		return;
+	for (uint64_t m = w->swmask & st->u & ~st->i; m; m &= m - 1) {
+		int v = __builtin_ctzll(m);
+
+		if (!(w->swcand & (1ull << v)))
+			w->nswc[v] = 0;
+		w->swcand |= 1ull << v;
+		for (uint32_t i = 0; i < w->nswlab && w->nswc[v] < 8; i++) {
+			bool dup = false;
+
+			for (uint32_t j = 0; j < w->nswc[v]; j++)
+				dup |= w->swc[v][j] == w->swlab[i];
+			if (!dup)
+				w->swa[v][w->nswc[v]] = (uint8_t)w->swarm, w->swc[v][w->nswc[v]++] = w->swlab[i];
+		}
+	}
+}
+
+/* a case label's value, default's keyword: the warning's range */
+static pp_span uv_caserange(cc *c, uint32_t n)
+{
+	uint32_t b = N(n)->loc;
+	size_t len = 0;
+	const char *t = NULL;
+	size_t i = 0, e;
+
+	for (uint32_t n = 256; !t && n >= 8; n /= 2)	/* (near the end of the file) */
+		t = pp_src(c->p, b, b + n, &len);
+
+	if (N(n)->op == N_DEFAULT || !t)
+		return (pp_span){ b, b + 7 };
+	if (len > 4 && !memcmp(t, "case", 4))
+		i = 4;
+	while (i < len && (t[i] == ' ' || t[i] == '\t'))
+		i++;
+	for (e = i; e < len && t[e] != ':' && t[e] != '\n'; e++)
+		;
+	while (e > i && (t[e - 1] == ' ' || t[e - 1] == '\t'))
+		e--;
+	return (pp_span){ b + (uint32_t)i, b + (uint32_t)e };
 }
 
 /* leaving a branch: pending ifs inside it do not dominate what follows */
@@ -548,7 +617,7 @@ static void uv_write(uwk *w, uint32_t n, ust *st)
 	int k = uv_idx(w, N(n)->a);
 
 	if (k >= 0)
-		st->u &= ~(1ull << k), st->i |= 1ull << k, w->spend &= ~(1ull << k);
+		st->u &= ~(1ull << k), st->i |= 1ull << k, w->spend &= ~(1ull << k), w->swmask &= ~(1ull << k);
 }
 
 static void uv_ex(uwk *w, uint32_t e, ust *st, bool ignore);
@@ -657,12 +726,18 @@ static void uv_ex(uwk *w, uint32_t e, ust *st, bool ignore)
 		uv_ex(w, x->a, st, false);
 		t = *st, f = *st;
 		t.live &= k != 0, f.live &= k != 1;
+		ust b4 = *st;
+
 		w->blk++, w->dep++;
 		if (x->b)
 			uv_ex(w, x->b, &t, ignore);
 		w->blk++;
 		uv_ex(w, x->c, &f, ignore);
 		w->blk++, w->dep--, uv_drop(w);
+		if (k < 0 && x->b) {
+			uv_pend(w, e, 3, &b4, &t, &f, true);
+			uv_pend(w, e, 3, &b4, &f, &t, false);
+		}
 		*st = (ust){ 0, 0, false };
 		uj(st, &t), uj(st, &f);
 		return;
@@ -676,9 +751,13 @@ static void uv_ex(uwk *w, uint32_t e, ust *st, bool ignore)
 		r = *st, s = *st;
 		r.live &= and ? k != 0 : k != 1;	/* b evaluated */
 		s.live &= and ? k != 1 : k != 0;	/* short circuit */
+		ust b4 = r;
+
 		w->blk++, w->dep++;
 		uv_ex(w, x->b, &r, false);
 		w->blk++, w->dep--, uv_drop(w);
+		if (k < 0)
+			uv_pend(w, e, and ? 1 : 2, &b4, &r, &s, and);
 		*st = s;
 		uj(st, &r);
 		return;
@@ -872,7 +951,7 @@ static void uv_stmt(uwk *w, uint32_t n, ust *st)
 			for (uint64_t m = du & ((ti & eu) | (tu & ei)); m; m &= m - 1) {
 				int v = __builtin_ctzll(m);
 
-				w->spend |= 1ull << v, w->sif[v] = n, w->sfalse[v] = (ti >> v) & 1, w->sdep[v] = w->dep;
+				w->spend |= 1ull << v, w->sif[v] = n, w->sfalse[v] = (ti >> v) & 1, w->sdep[v] = w->dep, w->skind[v] = 0;
 			}
 		}
 		*st = t;
@@ -894,10 +973,17 @@ static void uv_stmt(uwk *w, uint32_t n, ust *st)
 		i128 sv = w->sw_val;
 		cval cv;
 
+		ust *ssb = w->swbrk;
+		uint32_t ssl[8], snl = w->nswlab, sarm = w->swarm;
+		uint64_t ssm = w->swmask, scand = w->swcand;
+
+		memcpy(ssl, w->swlab, sizeof ssl);
+
 		uv_ex(w, x->a, st, false);
 		in = *st;
 		w->spend = 0;
 		w->brk = &brk, w->swin = &in;
+		w->swbrk = &brk, w->nswlab = 0, w->swarm = 0, w->swmask = 0, w->swcand = 0;
 		w->sw_const = cc_eval(c, x->a, &cv) && cv.kind == CV_INT;
 		w->sw_val = w->sw_const ? cv.i : 0;
 		w->sw_hit = w->sw_const && fl_case_match(&w->fl, x->b, w->sw_val);
@@ -906,15 +992,33 @@ static void uv_stmt(uwk *w, uint32_t n, ust *st)
 		st->live = false;
 		w->dep++;
 		uv_stmt(w, x->b, st);
+		uv_swarm(w, st);
 		w->dep--, uv_drop(w);
 		w->blk++;
 		uj(st, &brk);
 		if (!def)
 			uj(st, &in);
+		/* an arm that left a variable uninitialized, which is maybe-initialized after the switch */
+		if (in.live && st->live && !w->sw_const)
+			for (uint64_t m = w->swcand & (in.u & ~in.i) & st->u & st->i; m; m &= m - 1) {
+				int v = __builtin_ctzll(m);
+				w->spend |= 1ull << v, w->sif[v] = n, w->sdep[v] = w->dep, w->skind[v] = 4;
+			}
+		w->swbrk = ssb, w->nswlab = snl, w->swarm = sarm, w->swmask = ssm, w->swcand = scand;
+		memcpy(w->swlab, ssl, sizeof ssl);
 		w->brk = sb, w->swin = si, w->sw_const = sk, w->sw_hit = sh, w->sw_val = sv;
 		return;
 	}
 	case N_CASE: case N_DEFAULT:
+		if (w->swbrk == w->brk) {	/* (a label of the switch being walked, not inside a loop of it) */
+			/* a fallthrough into it continues the arm (case A: case B: ...: A's edge is named) */
+			if (!st->live) {
+				w->nswlab = 0, w->swarm++;
+				w->swmask = w->swin ? w->swin->u & ~w->swin->i : 0;
+			}
+			if (w->nswlab < 8)
+				w->swlab[w->nswlab++] = n;
+		}
 		if (w->swin) {
 			bool here = true;
 
@@ -949,6 +1053,8 @@ static void uv_stmt(uwk *w, uint32_t n, ust *st)
 		st->live = false;
 		return;
 	case N_BREAK:
+		if (w->brk && w->brk == w->swbrk)
+			uv_swarm(w, st);
 		if (w->brk)
 			uj(w->brk, st);
 		st->live = false;
@@ -1001,6 +1107,52 @@ static bool uv_sometimes(cc *c, uwk *w, uint32_t k)
 	bool f = w->sfalse[k];
 	pp_dinfo d = { "note", w->uloc[k], &w->ur[k], 1, NULL, 0, NULL, 0 };
 
+	static const char *const op[] = { "if", "&&", "||", "?:" };
+	int kd = w->skind[k];
+
+	if (kd == 1 || kd == 2 || kd == 3) {
+		cr = rng(c, x->a);
+		if (!cc_warnx(c, "sometimes-uninitialized", true, g, cr.b, &cr, 1, NULL, 0,
+			      "variable '%.*s' is used uninitialized whenever '%s' condition is %s", IDF(y->name), op[kd], f ? "false" : "true"))
+			return false;
+		pp_diagx(c->p, &d, "uninitialized use occurs here");
+		if (kd != 3)
+			r[0] = (pp_span){ cr.b, rng(c, x->b).b };
+		else if (f)
+			r[0] = (pp_span){ cr.b, rng(c, x->b).b }, r[1] = (pp_span){ rng(c, x->b).e, rng(c, x->c).e }, nr = 2;
+		else
+			r[0] = (pp_span){ cr.b, rng(c, x->c).b };
+		d = (pp_dinfo){ "note", r[0].b, r, nr, NULL, 0, NULL, 0 };
+		pp_diagx(c->p, &d, "remove the '%s' if its condition is always %s", op[kd], f ? "true" : "false");
+		return true;
+	}
+	if (kd == 4) {
+		/* each label's edge: later arms first (clang's CFG order), a stack of labels in order */
+		uint32_t ord[8], n = w->nswc[k];
+		bool any = false;
+
+		for (uint32_t i = 0; i < n; i++)
+			ord[i] = i;
+		for (uint32_t i = 1; i < n; i++)
+			for (uint32_t j = i; j > 0 && w->swa[k][ord[j]] > w->swa[k][ord[j - 1]]; j--) {
+				uint32_t t = ord[j];
+
+				ord[j] = ord[j - 1], ord[j - 1] = t;
+			}
+		for (uint32_t i = 0; i < n; i++) {
+			uint32_t ln = w->swc[k][ord[i]];
+			pp_span kr = uv_caserange(c, ln);
+
+			if (!cc_warnx(c, "sometimes-uninitialized", true, g, kr.b, &kr, 1, NULL, 0,
+				      "variable '%.*s' is used uninitialized whenever switch %s is taken", IDF(y->name),
+				      N(ln)->op == N_CASE ? "case" : "default"))
+				continue;
+			d = (pp_dinfo){ "note", w->uloc[k], &w->ur[k], 1, NULL, 0, NULL, 0 };
+			pp_diagx(c->p, &d, "uninitialized use occurs here");
+			any = true;
+		}
+		return any;
+	}
 	if (!cc_warnx(c, "sometimes-uninitialized", true, g, cr.b, &cr, 1, NULL, 0,
 		      "variable '%.*s' is used uninitialized whenever 'if' condition is %s", IDF(y->name), f ? "false" : "true"))
 		return false;

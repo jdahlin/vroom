@@ -1113,8 +1113,7 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
   given with the unused variables at scope close.  Done: diag
   `unused_but_set.c`; the 31 test-suite warnings identical.
 - [ ] **Missing warnings**:
-  `-Wsometimes-uninitialized` through `&&`/`||`/`?:`, `switch` and loops (only the
-  `if` case is done), `-Wuninitialized` after an
+  `-Wsometimes-uninitialized` of a loop condition, `-Wuninitialized` after an
   assignment on another branch earlier in the text (the analysis runs only when a
   tracked variable is read before its first assignment in the text) (`-Wunknown-attributes` and
   `-Wdeprecated-declarations` are done: PostgreSQL's warnings compare).
@@ -1122,7 +1121,8 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
   (no false positives on the kernel).  (Done: `-Wmultichar` in C and `#if`, "character constant too long",
   multi-character wide/Unicode literals as errors: diag `multichar.c`; `-Wself-assign` (not through macros) and `-Wunused-local-typedef`: diag `self_assign.c`, PostgreSQL identical; `-Wreturn-stack-address` of a compound literal (its initializer printed
   from the source as clang's printer spaces it): diag `return_complit.c`; `-Wuninitialized` of struct/union variables (whole-value uses; a member access
-  initializes, an empty record is not tracked): diag `uninit_record.c`; `-Wsometimes-uninitialized` of an `if` (the use post-dominates it, as clang's
+  initializes, an empty record is not tracked): diag `uninit_record.c`; `-Wsometimes-uninitialized` of `&&`, `||`, `?:` and switch labels (a warning per
+  label edge, clang's CFG order): diag `sometimes_uninit2.c`; `-Wsometimes-uninitialized` of an `if` (the use post-dominates it, as clang's
   branch search; the notes with clang's ranges): diag `sometimes_uninit.c`; `-Wuninitialized`
   (definite uses, a dataflow over the statement tree in flow.c, clang's report order
   by CFG block, self-initialization, the fix-it): diag `uninit.c`, `uninit_kinds.c`,
