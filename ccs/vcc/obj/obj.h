@@ -142,6 +142,7 @@ void elf_reset(ElfObj *o);
 #include <setjmp.h>
 extern _Thread_local jmp_buf *vjob_jb;
 __attribute__((noreturn)) void vjob_fail(const char *msg);
+extern _Thread_local int vjob_fail_fd;	/* where vjob_fail reports: the job's diagnostics (2) */
 void elf_free(ElfObj *o);
 void elf_error(ElfObj *o, const char *fmt, ...);
 

@@ -748,7 +748,7 @@ again:
 			continue;
 		}
 		case KW_void: case KW__Bool: case KW_char: case KW_short: case KW_int: case KW_float:
-		case KW_double: case KW___int128: case KW__Float16: case KW___fp16:
+		case KW_double: case KW___int128: case KW__Float16: case KW___fp16: case KW___float128:
 			if (have_named) {
 				if (unlikely(ds->tagdecl) && !base) {
 					spec_clash(c, ds, 0);
@@ -928,6 +928,10 @@ done:
 		ds->ty = prim(TY_FLOAT16);
 	} else if (base == KW_double) {
 		ds->ty = prim(nlong ? TY_LDOUBLE : TY_DOUBLE);
+	} else if (base == KW___float128) {
+		if (c->o->target != PP_LINUX_X86_64)
+			cc_error(c, ds->loc, "__float128 is not supported on this target");
+		ds->ty = prim(c->o->target == PP_LINUX_X86_64 ? TY_FLOAT128 : TY_LDOUBLE);
 	} else {
 		if (unlikely(!any)) {
 			if (c23auto && !nlong && !sgn && !cplx) {

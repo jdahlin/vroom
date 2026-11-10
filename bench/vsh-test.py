@@ -102,7 +102,7 @@ def main():
     tmp = tempfile.mkdtemp(prefix="vsh-test.")
     sock = f"{tmp}/vccd.sock"
     log = open(f"{tmp}/vccd.log", "w")
-    d = subprocess.Popen([f"{B}/vccd", "--sock", sock, "--backend-sock", f"{tmp}/none.sock", "-j", "2"],
+    d = subprocess.Popen([f"{B}/vccd", "--sock", sock, "-j", "2"],
                          stderr=log, env=dict(os.environ, VCC_LOG="1"))
     for _ in range(100):
         if os.path.exists(sock):

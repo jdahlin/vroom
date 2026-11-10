@@ -137,6 +137,7 @@ static void ecx_free(ecx *e, vmreg *r)
 	vmreg_put(&r[15], VMREG_SCRATCH);
 	vmpool_give(&ecxpool, r);
 	wasm_ecx_free(e);
+	wk_ecx_free(e);
 }
 
 /* a function the previous round generated, if nothing it asked about has been marked since */
@@ -180,6 +181,8 @@ static void do_item(ecx *e, uint32_t it)
 	}
 	if (c->syms[it].kind == S_FUNC && WASM(c)) {
 		wasm_emit_function(e, it);
+	} else if (c->syms[it].kind == S_FUNC && X86(c)) {
+		wk_function(e, it);
 	} else if (c->syms[it].kind == S_FUNC) {
 		if (!reuse(e, it))
 			emit_function(e, it);

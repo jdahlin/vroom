@@ -196,7 +196,7 @@ förprocessas 121 gånger.
 | 2.7 | Assembler | alla `.S` och all inline asm; byte-identiskt mot clang `-cc1as` för `.S` |
 | | **`.S` klar**: 30/30 byte-identiska, även via `vpp` (se Status 2.7); inline asm kvar | |
 | 2.8 | Länkare + objcopy | `vmlinux` och `Image` utan lld; bootar |
-| | **2.8 klar** (utom vdso-länken): `vlink` byte-identisk med lld (30 ms mot 340 ms), `vobjcopy`/`vnm` identiska med llvm-objcopy/llvm-nm, Image bootar | |
+| | **2.8 klar** (vdso-länken i 2.12): `vlink` byte-identisk med lld (30 ms mot 340 ms), `vobjcopy`/`vnm` identiska med llvm-objcopy/llvm-nm, Image bootar | |
 | 2.9 | Allt i minnet, profilering, finjustering | kallt bygge < 2 s, bootar Debian till `running` |
 | | **vccd kompilerar själv** (se Status 2.9): alla 877 `-c` av kärnans `.c`/`.S` i vccd, 0 till clang; objekt direkt från emittern utan asm-text; kompileringsfasen 16,7 → 11,7 s | |
 
@@ -391,9 +391,7 @@ aldrig i bygget. Ett TU-test (`bench/vcc-diff.py`) körs över alla kärnfiler.
   - objcopy: strip av vmlinux 20,5 ms (llvm-objcopy 45 ms; golvet för en tråd ~12 ms), Image 9,3 ms (30 ms), `nm -p -S` 24 ms (61 ms). Processgolvet ~2 ms.
 - Kända skillnader: vnm:s standardsortering ordnar helt lika nycklar annorlunda än llvm-nm (libc++ `std::sort` är instabil). Bygget använder den inte.
 - Kvar:
-  - vdso-länken (`-shared` med `.dynamic`/`.dynsym`/hash/versioner) går fortfarande via lld.
-  - Koppla in `vlink`/`vobjcopy`/`vnm` i bygget: shimmen i stället för vroom-ld och llvm-objcopy/llvm-nm.
-  - Kör länken i vccd (ingen process, indata redan i minnet).
+  - ~~vdso-länken via lld~~, ~~`vlink`/`vobjcopy`/`vnm` i bygget~~, ~~länken i vccd~~: klart i 2.12.
   - `Image` kan skrivas direkt från vmlinux.unstripped parallellt med strip.
 
 ### Status 2.9 (2026-11-08): vccd kompilerar kärnans `.c` och `.S` själv, objekt utan asm-text
@@ -425,6 +423,22 @@ aldrig i bygget. Ett TU-test (`bench/vcc-diff.py`) körs över alla kärnfiler.
 - **Acceptans:** steg 2 ↔ steg 3 **byte-identiska (22/22 objekt)**; steg 2-`vpp`: paritet 911/912 (modpost.c som förut), `vcc-sema.py run` 878/879, kärnans 840 objekt byte-identiska med steg 1; steg 1 oförändrat mot föregående commit (0 av 840). `bench/vcc-diff.py` tar `VPP=` från miljön.
 - **Tid:** självkompilering 1,5 s (en tråd, sekventiellt). Steg 2-`vpp` är ~2,6× långsammare än clang `-O3`-bygget (kärnbatch `-j 6`: 4,1 → 10,6 s vägg) — vcc har ingen optimerare.
 - **Kvar:** HFA-argument (fatalt fel), `long double` bara som double; optimering i emittern om steg 2 ska ersätta clang-bygget.
+
+### Status 2.12 (2026-11-10): kärnbygget utan clang, vroomd och lld
+Portat från grenen `claude/parallel-compiler-optimization-2bb32f` (2026-11-08) till mains layout.
+- **vld, delade objekt (vDSO):** `PHDRS` (FILEHDR/PHDRS), `VERSION`-skript (version-lokala → STB_LOCAL), `.dynsym`/`.dynstr`/`.hash`/`.gnu.hash`/`.gnu.version{,_d}`/`.dynamic` i lld:s ordning, `=fill`, `-n`; bara för `-shared` med skript. vDSO:n byte-identisk med ld.lld 23 (utom `$d`-lokalerna, känt). Utan `PHDRS` blir `SIZEOF_HEADERS` 64.
+- **vld, GOT under `-shared`:** ADRP+LDR → ADRP+ADD (→ NOP+ADR) bara när varje ADR_GOT_PAGE i sektionen följs av sitt LD64_GOT_LO12_NC (lld:s safeToRelaxAdrpLdr) och symbolen inte kan ersättas (`-Bsymbolic` eller lokal). Kärnan länkar vmlinux med `-shared -Bsymbolic --no-apply-dynamic-relocs`: utan relaxeringen läste koden orelokerade GOT-platser och en vld-länkad kärna bootade inte (tom konsol). `VCC_LDCMP=1` ctests 1773 → 1775/1775.
+- **vld, flera länkar i en process:** `reset_state` nollställer nu lazy-arkivtabellerna (`lsyms`, `lcand`, `lout`, `ltaken`); förut pekade de in i frigjorda arenor, så vccd:s andra länk med `--start-group lib.a` fallerade eller kraschade (fanns i main, syntes först när vccd länkar själv).
+- **vld, Mach-O (`platform/darwin/ldmacho.c`):** `ld_main` lämnar länken till `ld_macho` när första indatafilen är Mach-O: MH_EXECUTE som ld64 (`__PAGEZERO`, `__TEXT`, `__DATA_CONST,__got`, `__DATA`, `__LINKEDIT`), chained fixups, exporttrie, ad hoc-signatur (`ld_sha256` i ldhash.c). Bara libSystem.
+- **vccd:** länkar i tråden genom `ld_main` (`--vroom-stubs`; `--ld PROG`/`--lld PROG` startar en länkare i stället), nm/objcopy genom vnm/vobjcopy bakom shimmarna `vcc-nm`/`vcc-objcopy` (ett i taget), värdprogram (`scripts/`) kompileras av vcc för macOS och länkas av `ld_macho`, `-` läses från förfrågans stdin (`pp_opts.main_file`). Utan `--backend-sock` faller inget tillbaka till clang: en kärn-TU som vcc avvisar fallerar med vcc:s egna diagnostik (`vjob_fail`/`vjob_escape` skriver nu till jobbets fd, inte serverns stderr). Med `--backend-sock` som förut. `-S` skriver depfilen som `-c`.
+- **`bench/vccd-kbuild.sh`:** startar bara vccd (ingen vroomd), sätter `NM`/`OBJCOPY` till shimmarna, `VCCD_ARGS` till vccd.
+- **Acceptans:** kallt bygge exit 0, 9,9 s (kbuild.py; 11,1 s med skriptets start/stopp), last ~2: 884 kompilerade av vcc, 0 fel, 0 vidarebefordrade, 52 värdjobb, 6 länkar, 14 nm/objcopy, 422 ar. `bench/boot-test.py`: BOOT OK (1,8 s, `results/boot-20261110-133025.log`). Med `VCCD_ARGS="--ld ccs/phase1/vroom-ld"` (lld) bootar samma träd också. vlink-opts 63/63, vlink-bad (ASan) 29/29, vccd-test 21 + 1 skip, vsh-test 37/37, vcc-stress --vccd 23/23, vccd-cc 174/174, var-cmp 12/12 + 111/111.
+- **Kvar:** vld:s Mach-O-väg saknar TLV, SUBTRACTOR och andra bibliotek än libSystem; på Linux-värden går värdprogrammen ännu inte via vld (ingen ELF-värdlänk), så där behövs `--backend-sock`; vroomd byggs men behövs inte av kärnbygget. Konfigfasen i kbuild.py kör fortfarande `ld.lld --version`.
+
+### Plan 2.13 (från grenen, 2026-11-08): konfig i ett steg, deklarationer per header-cache-post
+Mätt på grenen före de lata kropparna (som main redan har, se "Profil av vcc/vccd:s eget arbete"): konfigsteget 0–2,6 s (allnoconfig, `merge_config.sh`, olddefconfig, `conf` två gånger), huvudmaken före första CC 2,6–4,3 s (`SYNC` = syncconfig + `conf` igen och omstart av make), kompileringsfasen CPU-bunden, svans 0,3 s.
+1. **Konfig i ett steg** (bara `bench/kbuild.py`): `make KCONFIG_ALLCONFIG=<fragment> allnoconfig` med samma verktygsvariabler (`LD`, `NM`, `OBJCOPY`, …) som huvudmaken, så att `auto.conf.cmd` stämmer och huvudmaken varken kör `SYNC` eller startar om. Uppmätt en gång: 1,18 s i stället för 2,6 s, `.config` byte-identisk. Väntat −2,5 s. Kontroll: `.config` identisk för `vroom.config`, `vroom-min.config` och defconfig-vägen; bygget bootar.
+2. **Deklarationer per header-cache-post** (punkt 2 i listan under "Profil av vcc/vccd:s eget arbete"): postens delta (nya poster per array, ändringar av äldre) och dess beroenden (uppslag utanför regionen med svar, även negativa) sparas; en TU som når posten på en deklarationsgräns med samma svar spelar upp deltat, preprocessorn tillämpar posten utan att leverera token. Steg 0 är mätning (andel token i poster på deklarationsgränser, beroenden per post, träffar); bygg bara vid ≥ 60 %. Ersätter prefixträdet (`ccsnap.c`). Kontroll: objekt och stderr identiska med `VCC_NODC=1`, sviterna, TSan på vccd-cc.
 
 ### Status testsviter (2026-11-08): gcc c-torture + tcc tests2 importerade
 
@@ -781,7 +795,13 @@ ingen emulering. Samma image fungerar i en qemu-system-aarch64-gäst med `-accel
      headers mest deklarationer (~40 % av dagens tid); prefixträdet når bara ~19 % av tokens.
   3. **fixdep i vccd** 6 % av vccd:s CPU i bygget (`in_hashtable`, mutexväntor i `vfixdep`):
      `CONFIG_`-mängden per fil som internerade id:n, union per TU med generationsstämplad
-     array, inget globalt lås.
+     array, inget globalt lås. **Låset borta (2026-11-10, från grenen):** namnen per fil
+     hänger i `vlex_file.fixdep` (CAS), ingen mutextabell.
+  - **Diagnostikintervall bara när något rapporteras (2026-11-10, från grenen):** `pp_tok_end`
+    räknades vid varje tilldelning (`need_lvalue`), varje `/ % << >>` med konstant och varje
+    `sizeof (T)`; nu först på felvägen. Grenen mätte cbatch 135,4 → 128,7 G instruktioner
+    (−5 %, före de lata kropparna). `vpp --batch` skriver nu antal token till parsern och
+    hur många deklarationscachen hoppade över.
   4. Småsaker: `VCC_LOG`:s `fprintf` tar `flockfile`-lås (bara profilering); `open()` vid
      skrivning 1 %.
 - **Lata kroppar, steg 1: på parsernivå (klart, 2026-11-08).** `cc/lazy.c`: en `static`

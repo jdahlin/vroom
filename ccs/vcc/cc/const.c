@@ -218,7 +218,7 @@ VPRIV bool eval(cc *c, uint32_t n, cval *v)
 			v->kind = CV_FLT;
 			v->ice = false;
 			if (is_q(c, to)) {
-				set_q(v, q_of_i(a.i, is_signed(c, N(x->a)->ty)));
+				set_q(v, q_of_ip(a.i, is_signed(c, N(x->a)->ty), q_prec(c, to)));
 				return true;
 			}
 			v->f = is_signed(c, N(x->a)->ty) ? (double)a.i : (double)(u128)a.i;
@@ -238,7 +238,7 @@ VPRIV bool eval(cc *c, uint32_t n, cval *v)
 				return false;
 			v->ice = false;
 			if (is_q(c, to))
-				set_q(v, get_q(&a, true));
+				set_q(v, q_to_p(get_q(&a, true), q_prec(c, to)));
 			else if (a.ld && KIND(c, to) == TY_FLOAT)
 				v->f = q_to_f(a.q), v->ld = false;	/* one rounding */
 			else if (KIND(c, to) == TY_FLOAT)
@@ -399,16 +399,17 @@ VPRIV bool eval(cc *c, uint32_t n, cval *v)
 		}
 		if ((a.kind == CV_FLT || b.kind == CV_FLT) &&
 		    (a.ld || b.ld || is_q(c, x->ty) || is_q(c, N(x->a)->ty) || is_q(c, N(x->b)->ty))) {
-			u128 l = get_q(&a, is_signed(c, N(x->a)->ty)), r = get_q(&b, is_signed(c, N(x->b)->ty));
+			int p = q_prec(c, N(x->a)->ty) < q_prec(c, N(x->b)->ty) ? q_prec(c, N(x->a)->ty) : q_prec(c, N(x->b)->ty);
+			u128 l = q_to_p(get_q(&a, is_signed(c, N(x->a)->ty)), p), r = q_to_p(get_q(&b, is_signed(c, N(x->b)->ty)), p);
 			int k = q_cmp(l, r);
 
 			v->ice = false;
 			v->ld = false;
 			switch (op) {
-			case T_PLUS: set_q(v, q_add(l, r)); break;
-			case T_MINUS: set_q(v, q_sub(l, r)); break;
-			case T_STAR: set_q(v, q_mul(l, r)); break;
-			case T_SLASH: set_q(v, q_div(l, r)); break;
+			case T_PLUS: set_q(v, q_addp(l, r, p)); break;
+			case T_MINUS: set_q(v, q_subp(l, r, p)); break;
+			case T_STAR: set_q(v, q_mulp(l, r, p)); break;
+			case T_SLASH: set_q(v, q_divp(l, r, p)); break;
 			case T_LESS: v->i = k == -1; break;
 			case T_LESSEQ: v->i = k == -1 || k == 0; break;
 			case T_GREATER: v->i = k == 1; break;

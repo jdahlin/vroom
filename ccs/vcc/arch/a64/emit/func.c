@@ -106,7 +106,7 @@ VPRIV void sym_header(ecx *e, tbuf *b, uint32_t s, bool fn, const char *defsec, 
 }
 
 /* a constructor's or destructor's pointer: .init_array[.prio] / .fini_array[.prio], as clang */
-static void ctor_entry(cc *c, tbuf *b, uint32_t s, bool fini)
+VPRIV void ctor_entry(cc *c, tbuf *b, uint32_t s, bool fini)
 {
 	const attrs *a = sym_attrs(c, s);
 
@@ -115,7 +115,8 @@ static void ctor_entry(cc *c, tbuf *b, uint32_t s, bool fini)
 		tb_c(b, '.');
 		tb_u(b, a->prio);
 	}
-	tb_s(b, fini ? ",\"aw\",@fini_array\n\t.p2align\t3\n\t.xword\t" : ",\"aw\",@init_array\n\t.p2align\t3\n\t.xword\t");
+	tb_s(b, fini ? ",\"aw\",@fini_array\n\t.p2align\t3\n" : ",\"aw\",@init_array\n\t.p2align\t3\n");
+	tb_s(b, X86(c) ? "\t.quad\t" : "\t.xword\t");
 	sym_name(c, b, s);
 	tb_c(b, '\n');
 }
