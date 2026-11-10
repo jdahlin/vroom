@@ -293,6 +293,110 @@ static int crange(i128 v, bool *nn)
 	return w;
 }
 
+/* APFloat::toString(prec, padding 3, truncate zeros) of v */
+static void apf_str(char *o, double v, int prec)
+{
+	char b[64], dg[32];
+	int nd = 0, e10, k = 0, exp;
+
+	if (v < 0)
+		o[k++] = '-', v = -v;
+	snprintf(b, sizeof b, "%.*e", prec - 1, v);
+	for (const char *q = b; *q && *q != 'e'; q++)
+		if (*q >= '0' && *q <= '9')
+			dg[nd++] = *q;
+	e10 = atoi(strchr(b, 'e') + 1);
+	while (nd > 1 && dg[nd - 1] == '0')
+		nd--;
+	exp = e10 - (nd - 1);	/* value = digits * 10^exp */
+	{
+		bool sci;
+		int msd = exp + nd - 1;
+
+		if (exp >= 0)
+			sci = exp > 3 || nd + exp > prec;
+		else
+			sci = msd < 0 && -msd > 3;
+		if (sci) {
+			o[k++] = dg[0], o[k++] = '.';
+			if (nd == 1)
+				o[k++] = '0';
+			for (int i = 1; i < nd; i++)
+				o[k++] = dg[i];
+			k += sprintf(o + k, "E%c%d", msd >= 0 ? '+' : '-', msd < 0 ? -msd : msd);
+		} else if (exp >= 0) {
+			for (int i = 0; i < nd; i++)
+				o[k++] = dg[i];
+			for (int i = 0; i < exp; i++)
+				o[k++] = '0';
+		} else if (nd + exp > 0) {
+			for (int i = 0; i < nd; i++) {
+				if (i == nd + exp)
+					o[k++] = '.';
+				o[k++] = dg[i];
+			}
+		} else {
+			o[k++] = '0', o[k++] = '.';
+			for (int i = 0; i < -(nd + exp); i++)
+				o[k++] = '0';
+			for (int i = 0; i < nd; i++)
+				o[k++] = dg[i];
+		}
+	}
+	o[k] = 0;
+}
+
+/* -Wliteral-conversion: a floating literal (or its negation) converted to an integer type */
+static void literal_conv(cc *c, uint32_t n, qty to)
+{
+	uint32_t e = n, lit;
+	double v, t;
+	char vs[64], ts[48];
+	const char *what = NULL;
+
+	while (N(e)->op == N_CAST && !c->span[e].e && N(e)->a)
+		e = N(e)->a;
+	lit = N(e)->op == N_UNARY && N(e)->aux == T_MINUS ? N(e)->a : e;
+	if (N(lit)->op != N_FNUM || is_q(c, N(lit)->ty) || ty_size(c, N(lit)->ty) > 8)
+		return;
+	v = c->fpool[N(lit)->a];
+	if (lit != e)
+		v = -v;
+	t = trunc(v);
+	if (KIND(c, to) == TY_BOOL) {
+		if (v == 0 || v == 1)
+			return;
+		snprintf(ts, sizeof ts, "%s", v != 0 ? "true" : "false");
+	} else {
+		int w = (int)ty_size(c, to) * 8;
+		bool sg = is_signed(c, to);
+		double lo = sg ? -ldexp(1, w - 1) : 0, hi = sg ? ldexp(1, w - 1) : ldexp(1, w);
+
+		if (!(t >= lo && t < hi))
+			what = "out of range";
+		else if (t == v)
+			return;
+		else
+			snprintf(ts, sizeof ts, "%.0f", t == 0 ? 0.0 : t);
+	}
+	{
+		pp_span r[2] = { { c->cv_what == CX_PASS ? c->cv_callee : c->cv_loc, 0 },
+				 { N(e)->loc, pp_tok_end(c->p, N(lit)->loc) } };
+
+		r[0].e = pp_tok_end(c->p, r[0].b);
+		if (what) {
+			cc_warnx(c, "literal-conversion", true, w_conv, r[1].b, r, 2, NULL, 0,
+				 "implicit conversion of out of range value from '%s' to '%s' is undefined",
+				 tyname(c, N(lit)->ty), tyname(c, to));
+			return;
+		}
+		apf_str(vs, v, ty_size(c, N(lit)->ty) == 4 ? 8 : 16);
+		cc_warnx(c, "literal-conversion", true, w_conv, r[1].b, r, 2, NULL, 0,
+			 "implicit conversion from '%s' to '%s' changes value from %s to %s", tyname(c, N(lit)->ty),
+			 tyname(c, to), vs, ts);
+	}
+}
+
 /* -Wconstant-conversion: integer constant n converted to the narrower integer to */
 static void const_conv(cc *c, uint32_t n, qty to)
 {
@@ -326,8 +430,12 @@ static void const_conv(cc *c, uint32_t n, qty to)
 		c->cv_loc = sl, c->cv_what = sw;
 		return;
 	}
+	if (is_integer(c, to) && is_float(c, from) && !c->unevaluated) {	/* (immediate: also in dead code) */
+		literal_conv(c, n, to);
+		return;
+	}
 	if (!is_integer(c, to) || !is_integer(c, from) || KIND(c, to) == TY_BOOL || KIND(c, from) == TY_BOOL ||
-	    c->dead || c->unevaluated || !cc_eval(c, n, &cv) || cv.kind != CV_INT)
+	    c->unevaluated || !cc_eval(c, n, &cv) || cv.kind != CV_INT)
 		return;
 	tw = (int)ty_size(c, to) * 8, sw = (int)ty_size(c, from) * 8;
 	if (tw >= sw || tw > 64)
@@ -337,7 +445,9 @@ static void const_conv(cc *c, uint32_t n, qty to)
 	if (!is_signed(c, from) && sw <= 64)
 		v = (i128)((uint64_t)v & (sw == 64 ? ~0ull : (1ull << sw) - 1));
 	lw = crange(v, &lnn);
-	if (lw > tw)	/* (+1 for the sign of a negative range: crange counts it) */
+	if (lw > tw && c->dead)	/* clang's DiagRuntimeBehavior: not in unreachable code */
+		return;
+	if (lw > tw)	/* (crange counts a negative range's sign bit) */
 		deferred = true;
 	else if (lw == tw && !tnn && lnn && is_signed(c, from)) {
 		/* clang's isSameWidthConstantConversion: not a hex/octal literal, not a char in braces */
@@ -392,7 +502,7 @@ VPRIV void bitfield_const(cc *c, const field *f, uint32_t v, uint32_t op)
 	i128 x, t;
 
 	if (KIND(c, f->ty) == TY_BOOL || !is_integer(c, N(v)->ty) || KIND(c, N(v)->ty) == TY_BOOL || w <= 0 || w > 64 ||
-	    c->dead || c->unevaluated || !cc_eval(c, v, &cv) || cv.kind != CV_INT)
+	    c->unevaluated || !cc_eval(c, v, &cv) || cv.kind != CV_INT)
 		return;
 	x = cv.i;
 	if (!is_signed(c, N(v)->ty) && ty_size(c, N(v)->ty) <= 8)

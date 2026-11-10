@@ -1060,8 +1060,14 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
   DiagRuntimeBehavior; same-width sign changes skip literals spelled with a
   leading 0 (`N_NUM` aux) and chars in braces.  Done: diag `const_conv.c`,
   kernel/PostgreSQL/test suites 0 differences.  Not modelled: clang drops
-  the deferred ones in unreachable code; `-Wliteral-conversion`; a member
+  the deferred ones in unreachable code (vcc: only under a constant-false
+  condition, `c->dead`); a member
   initializer converted to a narrower type (`{ 300 }` for a char member).
+- [x] **-Wliteral-conversion**: a floating literal (or its negation)
+  converted to an integer type: fractional ("changes value from 1.5 to 1",
+  APFloat::toString's spelling) or out of range.  Done: diag
+  `literal_conv.c`; test suite 183 of 186 identical.  Not modelled: in a
+  macro body the location and the macro note (no spelling to look up).
 - [x] **-Wbitfield-constant-conversion** (and the single-bit variant): a
   constant stored in a bit-field, by assignment or initializer, as clang's
   AnalyzeBitFieldAssignment.  Done: diag `bitfield_const.c`, 93 warnings
