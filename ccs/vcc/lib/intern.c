@@ -1,4 +1,4 @@
-#include <arm_acle.h>
+#include "hostcrc.h"
 #include <stdatomic.h>
 #include <pthread.h>
 #include <stdio.h>

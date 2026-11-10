@@ -204,13 +204,26 @@ static void type_str(cc *c, qty t, const char *inner, vfixbuf *out, bool *ok)
 	vfixbuf b;
 
 	b.n = 0, b.s[0] = 0;
+	if (x->kind == TY_ARRAY && c->valist_tag && T(c, c->t_valist)->canon == x->canon) {
+		/* x86-64's __va_list_tag[1] is spelled by its typedef, the struct as itself */
+		quals(&b, QQ(t));
+		vfixbuf_puts(&b, "__builtin_va_list");
+		if (inner[0]) {
+			vfixbuf_puts(&b, " ");
+			vfixbuf_puts(&b, inner);
+		}
+		vfixbuf_put(out, b.s, b.n);
+		return;
+	}
 	switch (x->kind) {
 	case TY_PTR: {
 		vfixbuf in;
 		const ctype *bt = T(c, x->base);
+		/* __builtin_va_list * (x86-64: an array spelled by its typedef) */
+		bool wrap = (bt->kind == TY_ARRAY && !(c->valist_tag && T(c, c->t_valist)->canon == bt->canon)) || bt->kind == TY_FUNC;
 
 		in.n = 0, in.s[0] = 0;
-		if (bt->kind == TY_ARRAY || bt->kind == TY_FUNC)
+		if (wrap)
 			vfixbuf_puts(&in, x->flags & TF_BLOCK ? "(^" : "(*");
 		else
 			vfixbuf_puts(&in, x->flags & TF_BLOCK ? "^" : "*");
@@ -220,7 +233,7 @@ static void type_str(cc *c, qty t, const char *inner, vfixbuf *out, bool *ok)
 				in.s[--in.n] = 0;
 		}
 		vfixbuf_puts(&in, inner);
-		if (bt->kind == TY_ARRAY || bt->kind == TY_FUNC)
+		if (wrap)
 			vfixbuf_puts(&in, ")");
 		type_str(c, x->base, in.s, out, ok);
 		return;
@@ -319,12 +332,13 @@ static void type_str(cc *c, qty t, const char *inner, vfixbuf *out, bool *ok)
 	case TY_FLOAT: vfixbuf_puts(&b, "float"); break;
 	case TY_DOUBLE: vfixbuf_puts(&b, "double"); break;
 	case TY_LDOUBLE: vfixbuf_puts(&b, "long double"); break;
+	case TY_FLOAT128: vfixbuf_puts(&b, "__float128"); break;
 	case TY_STRUCT: case TY_UNION: case TY_ENUM: {
 		const tag *r = &c->tags[x->aux];
 		char nb[256];
 
 		if (x->aux == c->valist_tag && c->valist_tag) {
-			vfixbuf_puts(&b, "__builtin_va_list");
+			vfixbuf_puts(&b, KIND(c, c->t_valist) == TY_ARRAY ? "struct __va_list_tag" : "__builtin_va_list");
 		} else if (r->name) {
 			uint32_t s = lookup_tag(c, r->name);
 

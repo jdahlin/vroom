@@ -69,16 +69,19 @@ static uint32_t number_s(cc *c, const ptok *t, const char *s, size_t n)
 		qty ty = prim(TY_DOUBLE);
 		double d;
 
-		while (k > 0 && (s[k - 1] == 'f' || s[k - 1] == 'F' || s[k - 1] == 'l' || s[k - 1] == 'L'))
+		while (k > 0 && (s[k - 1] == 'f' || s[k - 1] == 'F' || s[k - 1] == 'l' || s[k - 1] == 'L' ||
+				 s[k - 1] == 'q' || s[k - 1] == 'Q'))
 			k--;
 		if (k < n && (s[k] == 'f' || s[k] == 'F'))
 			ty = prim(TY_FLOAT);
+		else if (k < n && (s[k] == 'q' || s[k] == 'Q'))	/* __float128 (x86-64; binary128 long double elsewhere) */
+			ty = prim(c->o->target == PP_LINUX_X86_64 ? TY_FLOAT128 : TY_LDOUBLE);
 		else if (k < n)
 			ty = prim(TY_LDOUBLE);
 		if (k >= sizeof(buf))
 			k = sizeof(buf) - 1;
 		if (is_q(c, ty))
-			return mk_fltq(c, q_parse(s, k), ty, t->loc);
+			return mk_fltq(c, q_parsep(s, k, q_prec(c, ty)), ty, t->loc);
 		memcpy(buf, s, k);
 		buf[k] = 0;
 		d = KIND(c, ty) == TY_FLOAT ? (double)strtof(buf, NULL) : strtod(buf, NULL);	/* one rounding */

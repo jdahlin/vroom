@@ -2,6 +2,8 @@
 #include "ppimpl.h"
 #include <sys/stat.h>
 #include "ppdata.inc"
+#define PPDATA_X86_HAS
+#include "ppdata-x86.inc"
 
 /* ---------------- builtin macros ---------------- */
 
@@ -166,6 +168,24 @@ static int has_query(pp *p, int b, const char *name, uint32_t loc)
 
 	if (b == B_BUILDING_MODULE)
 		return 0;	/* no modules */
+	if (p->o->target == PP_LINUX_X86_64) {	/* its own table (gen-x86data.sh) */
+		size_t xl = 0, xh = sizeof(has_tab_x86) / sizeof(has_tab_x86[0]);
+
+		while (xl < xh) {
+			size_t mid = (xl + xh) / 2;
+			int c = strcmp(has_tab_x86[mid].q, q[b]);
+
+			if (!c)
+				c = strcmp(has_tab_x86[mid].name, name);
+			if (!c)
+				return has_tab_x86[mid].v;
+			if (c < 0)
+				xl = mid + 1;
+			else
+				xh = mid;
+		}
+		lo = hi;	/* not in the shared table either */
+	}
 	/* the table holds the nonzero answers, sorted by (query, name) */
 	while (lo < hi) {
 		size_t mid = (lo + hi) / 2;

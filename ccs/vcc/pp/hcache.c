@@ -1,6 +1,6 @@
 /* vcc preprocessor: header cache: types, the shared table, regions */
 #include "ppimpl.h"
-#include <arm_acle.h>
+#include "../lib/hostcrc.h"
 
 hstat_t hstat;
 

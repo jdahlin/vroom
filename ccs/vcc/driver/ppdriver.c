@@ -39,6 +39,8 @@
 #include "../as/as.h"
 #include "../obj/obj.h"
 #include "../pp/ppdata-predef.inc"
+#define PPDATA_X86_PREDEF
+#include "../pp/ppdata-x86.inc"
 #include "../lib/arena.h"
 #include "../lib/ldhash.h"
 #include "../lib/buf.h"
@@ -646,9 +648,9 @@ static __attribute__((noinline)) size_t env_ndirs(const char *v)
 }
 
 /* -f[un]signed-char against the target's default, the math flags, -pthread */
-static __attribute__((noinline, cold)) void predef_flags(buf *pre, int darwin, int uchar, int fmath)
+static __attribute__((noinline, cold)) void predef_flags(buf *pre, int darwin, int uchar_def, int uchar, int fmath)
 {
-	if (uchar >= 0 && uchar != !darwin)
+	if (uchar >= 0 && uchar != uchar_def)
 		bstr(pre, uchar ? "#define __CHAR_UNSIGNED__ 1\n" : "#undef __CHAR_UNSIGNED__\n");
 	if (fmath & 1)
 		bstr(pre, "#undef __FINITE_MATH_ONLY__\n#define __FINITE_MATH_ONLY__ 1\n");
@@ -793,11 +795,16 @@ int ppd_run(int argc, char **argv, const ppd_env *env)
 	jmp_buf jb;
 	vmreg *br = bufr = vmpool_take(&bufpool);
 	buf pre = { .r = &br[0] }, cmdl = { .r = &br[1] }, incl = { .r = &br[2] }, imac = { .r = &br[3] }, o = { 0 };
-	/* no --target: the host's own userland (Darwin on a Mac, glibc aarch64 on Linux) */
+	/* no --target: the host's own userland (Darwin on a Mac, glibc aarch64 or x86-64 on Linux) */
 #ifdef __APPLE__
 	int darwin = 1;
 #else
 	int darwin = 0;
+#endif
+#if defined(__x86_64__) && !defined(__APPLE__)
+	int x86 = 1;	/* x86_64-linux-gnu (PLAN-x86.md) */
+#else
+	int x86 = 0;
 #endif
 	int wasm = 0, lnx;	/* 64 or 32: wasm64/wasm32-unknown-emscripten (PLAN-wasm.md); lnx: aarch64 Linux */
 	int hosted = 1, nostdinc = 0, asm_mode = 0, undef = 0, raw_asm = -1, xlang = 0;	/* raw_asm -1: by the suffix; xlang: -x given */
@@ -969,6 +976,7 @@ int ppd_run(int argc, char **argv, const ppd_env *env)
 
 			wasm = strstr(a, "wasm64") ? 64 : strstr(a, "wasm32") ? 32 : 0;
 			darwin = !wasm && (strstr(a, "darwin") || strstr(a, "apple"));
+			x86 = !wasm && !darwin && strstr(a, "x86_64");
 			hosted = 0;
 			if (m && m[6] >= '0' && m[6] <= '9')
 				macos_min = m + 6, macos_min_flag = 2;	/* arm64-apple-macos14.2: wins over the flag */
@@ -1113,6 +1121,12 @@ int ppd_run(int argc, char **argv, const ppd_env *env)
 		free(t);
 		goto out;
 	}
+	if (objmode && x86) {
+		/* x86-64 objects come with its encoder and assembler (PLAN-x86.md X5, X6) */
+		dprintf(errfd, "vcc: error: -c is not supported for x86_64 yet; use -S and an assembler\n");
+		status = 1;
+		goto out;
+	}
 	if (objmode) {
 		obj_state();
 		if (!out)
@@ -1202,7 +1216,7 @@ int ppd_run(int argc, char **argv, const ppd_env *env)
 		ADD(VCC_RESDIR);
 		ADD("/usr/local/include");
 		po.xc0 = n;	/* clang: extern "C" system directories (" 3 4" in line markers) */
-		ADD("/usr/include/aarch64-linux-gnu");
+		ADD(x86 ? "/usr/include/x86_64-linux-gnu" : "/usr/include/aarch64-linux-gnu");
 		ADD("/usr/include");
 		po.xc1 = n;
 	}
@@ -1221,9 +1235,11 @@ int ppd_run(int argc, char **argv, const ppd_env *env)
 	po.show_includes = showinc;
 	po.comments = comments;
 	po.dump_defines = ddefs;
-	lnx = !darwin && !wasm;
-	po.dd_order = darwin ? predef_order_darwin : wasm == 64 ? predef_order_wasm64 : wasm ? predef_order_wasm32 : predef_order_linux;
-	po.ndd_order = darwin ? (int)(sizeof(predef_order_darwin) / sizeof(*predef_order_darwin))
+	lnx = !darwin && !wasm && !x86;
+	po.dd_order = darwin ? predef_order_darwin : wasm == 64 ? predef_order_wasm64 : wasm ? predef_order_wasm32
+		    : x86 ? predef_order_x86_64 : predef_order_linux;
+	po.ndd_order = x86 ? (int)(sizeof(predef_order_x86_64) / sizeof(*predef_order_x86_64))
+		     : darwin ? (int)(sizeof(predef_order_darwin) / sizeof(*predef_order_darwin))
 		     : wasm == 64 ? (int)(sizeof(predef_order_wasm64) / sizeof(*predef_order_wasm64))
 		     : wasm ? (int)(sizeof(predef_order_wasm32) / sizeof(*predef_order_wasm32))
 			    : (int)(sizeof(predef_order_linux) / sizeof(*predef_order_linux));
@@ -1242,7 +1258,8 @@ int ppd_run(int argc, char **argv, const ppd_env *env)
 	if (undef)
 		bstr(&pre, asm_mode ? predef_undef_asm : predef_undef_c);
 	else
-		bstr(&pre, darwin ? predef_darwin : wasm == 64 ? predef_wasm64 : wasm ? predef_wasm32 : predef_aarch64_linux);
+		bstr(&pre, darwin ? predef_darwin : wasm == 64 ? predef_wasm64 : wasm ? predef_wasm32
+			 : x86 ? predef_x86_64_linux : predef_aarch64_linux);
 	if (asm_mode && !undef)
 		bstr(&pre, "#define __ASSEMBLER__ 1\n#undef __STDC_VERSION__\n#define __STDC_VERSION__ 201710L\n");
 	else if (!undef && std) {
@@ -1264,7 +1281,7 @@ int ppd_run(int argc, char **argv, const ppd_env *env)
 	} else if (!undef && !asm_mode) {
 		bstr(&pre, "#undef __STDC_VERSION__\n#define __STDC_VERSION__ 201710L\n");
 	}
-	po.target = darwin ? PP_DARWIN : wasm == 64 ? PP_WASM64 : wasm ? PP_WASM32 : PP_LINUX_AARCH64;
+	po.target = darwin ? PP_DARWIN : wasm == 64 ? PP_WASM64 : wasm ? PP_WASM32 : x86 ? PP_LINUX_X86_64 : PP_LINUX_AARCH64;
 	if (opt == 0 && !undef) bstr(&pre, "#undef __OPTIMIZE__\n#define __NO_INLINE__ 1\n");
 	if (os && !undef) bstr(&pre, "#define __OPTIMIZE_SIZE__ 1\n");
 	if ((pie || pic) && !undef) {
@@ -1292,8 +1309,8 @@ int ppd_run(int argc, char **argv, const ppd_env *env)
 			   "#undef __WCHAR_TYPE__\n#define __WCHAR_TYPE__ unsigned int\n"
 			   "#undef __WCHAR_WIDTH__\n#define __WCHAR_WIDTH__ 32\n"
 			   "#undef __clang_wide_literal_encoding__\n#define __clang_wide_literal_encoding__ \"UTF-32\"\n");
-	if (!undef && (fmath || (uchar >= 0 && uchar != !darwin)))
-		predef_flags(&pre, darwin, uchar, fmath);
+	if (!undef && (fmath || (uchar >= 0 && uchar != lnx)))	/* char is unsigned by default on aarch64 Linux only */
+		predef_flags(&pre, darwin, lnx, uchar, x86 ? fmath & ~32 : fmath);	/* no __ARM_FP_FAST on x86 */
 	if (darwin && macos_min && !undef) {
 		/* clang: MMmmpp (10.x before 10.10: 10mp) */
 		unsigned maj = 0, min = 0, pat = 0, vv;
@@ -1307,6 +1324,14 @@ int ppd_run(int argc, char **argv, const ppd_env *env)
 			 vv, vv);
 		bstr(&pre, b);
 	}
+	if (x86 && short_wchar && !undef)
+		bstr(&pre, "#undef __SIZEOF_WCHAR_T__\n#define __SIZEOF_WCHAR_T__ 2\n"
+			   "#undef __WCHAR_MAX__\n#define __WCHAR_MAX__ 65535\n"
+			   "#undef __WCHAR_MIN__\n#define __WCHAR_MIN__ 0\n"
+			   "#undef __WCHAR_TYPE__\n#define __WCHAR_TYPE__ unsigned short\n"
+			   "#define __WCHAR_UNSIGNED__ 1\n"
+			   "#undef __WCHAR_WIDTH__\n#define __WCHAR_WIDTH__ 16\n"
+			   "#undef __clang_wide_literal_encoding__\n#define __clang_wide_literal_encoding__ \"UTF-16\"\n");
 	if (darwin && short_wchar && !undef)
 		bstr(&pre, "#undef __ARM_SIZEOF_WCHAR_T\n#define __ARM_SIZEOF_WCHAR_T 2\n"
 			   "#undef __SIZEOF_WCHAR_T__\n#define __SIZEOF_WCHAR_T__ 2\n"

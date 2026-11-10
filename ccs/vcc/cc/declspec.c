@@ -320,7 +320,7 @@ VPRIV bool decl_specs(cc *c, dspec *ds, bool allow_sc)
 			continue;
 		}
 		case KW_void: case KW__Bool: case KW_char: case KW_short: case KW_int: case KW_float:
-		case KW_double: case KW___int128: case KW__Float16: case KW___fp16:
+		case KW_double: case KW___int128: case KW__Float16: case KW___fp16: case KW___float128:
 			if (have_named)
 				goto done;
 			if (base && !(base == KW_int && (kw == KW_short || kw == KW_char)) && !(kw == KW_int && (base == KW_short || base == KW_char)) &&
@@ -432,6 +432,10 @@ done:
 		ds->ty = prim(TY_FLOAT16);
 	} else if (base == KW_double) {
 		ds->ty = prim(nlong ? TY_LDOUBLE : TY_DOUBLE);
+	} else if (base == KW___float128) {
+		if (c->o->target != PP_LINUX_X86_64)
+			cc_error(c, ds->loc, "__float128 is not supported on this target");
+		ds->ty = prim(c->o->target == PP_LINUX_X86_64 ? TY_FLOAT128 : TY_LDOUBLE);
 	} else {
 		if (!any && !c->o->implicit_int && !pp_in_system_header(c->p, ds->loc))
 			cc_error(c, ds->loc, "type specifier missing, defaults to 'int'; ISO C99 and later do not support implicit int");

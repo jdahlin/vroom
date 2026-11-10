@@ -58,7 +58,7 @@ typedef struct pp_opts {
 	const char *cwd;		/* relative paths are relative to this (NULL: process cwd) */
 	int errfd;			/* diagnostics (0: stderr) */
 	int asm_mode;			/* assembler-with-cpp: unknown directives pass, # need not stringify */
-	int target;			/* PP_LINUX_AARCH64, PP_DARWIN, PP_WASM64 or PP_WASM32 (column of the feature table) */
+	int target;			/* PP_LINUX_AARCH64, PP_DARWIN, PP_WASM64, PP_WASM32 or PP_LINUX_X86_64 (column of the feature table; x86-64: has_tab_x86) */
 	int diag_color;			/* diagnostics: 1 colors, -1 none, 0 when errfd is a terminal */
 	int diag_nocaret;		/* -fno-caret-diagnostics: no source lines */
 	const char *const *wargs;	/* -W..., -w options in command-line order */
@@ -81,7 +81,7 @@ typedef struct pp_opts {
 	int imacros;			/* predef has -imacros (#__include_macros): no header cache */		/* markers: where predef's command-line part (-D/-U) starts */
 } pp_opts;
 
-enum { PP_LINUX_AARCH64, PP_DARWIN, PP_WASM64, PP_WASM32 };
+enum { PP_LINUX_AARCH64, PP_DARWIN, PP_WASM64, PP_WASM32, PP_LINUX_X86_64 };
 /* WebAssembly, either width (wasm32: ILP32, PLAN-wasm.md W7) */
 #define PP_IS_WASM(t) ((t) == PP_WASM64 || (t) == PP_WASM32)
 

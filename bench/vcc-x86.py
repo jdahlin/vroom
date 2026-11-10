@@ -1,0 +1,188 @@
+#!/usr/bin/env python3
+"""vcc-x86.py: the C test suites through vcc's x86-64 target (PLAN-x86.md).
+
+  bench/vcc-x86.py [-j N] [--suite gcc|tcc|vcc] [-v] [--show CAT] [--no-cache] [PAT]
+
+Every test of vcc-ctests.py (gcc torture, tcc tests2, our own) is built for
+x86_64-linux-gnu twice: by clang (the oracle) and by vcc, each linked by
+clang against this host's glibc and run natively (an x86-64 Linux host).
+vcc passes when its program prints what clang's prints and exits the same
+way.  vcc's side: `vpp -S`, assembled by clang (vcc writes no x86 objects
+yet, X5).  The test runtime headers (ccs/vcc/tests/rt/include) are used on
+both sides, glibc behind them, with rt/wasm.c's __rt_assert.
+
+Failures by stage: emit (vpp fails; "not supported yet" names the plan
+step), as (clang rejects vcc's assembly), link, run.  Clang's results are
+cached in build/.../x86tests/ref (keyed by the source and flags); a vcc
+assembly text byte-identical to one that passed before passes again
+without being assembled, linked or run (--no-cache runs all).
+"""
+import hashlib, importlib.util, json, os, re, shutil, subprocess, sys, time
+from collections import Counter, defaultdict
+from multiprocessing import Pool
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from hostenv import BUILD
+
+_spec = importlib.util.spec_from_file_location('ctests', os.path.join(os.path.dirname(os.path.abspath(__file__)), 'vcc-ctests.py'))
+ct = importlib.util.module_from_spec(_spec)
+_spec.loader.exec_module(ct)
+
+CL = ct.CL
+VPP = ct.VPP
+OUT = f'{BUILD}/x86tests'
+TGT = '--target=x86_64-linux-gnu'
+BASE = [TGT, '-nostdinc', '-I', f'{ct.RT}/include', '-isystem', ct.RES, '-fno-PIE', '-O2']
+LINK = [CL, TGT, '-no-pie']
+RTO = f'{OUT}/rt.o'
+# tests that need what the x86-64 target or glibc does not give the same way
+X86_SKIP = {}
+
+def sh(cmd, timeout=60, **kw):
+    return ct.sh(cmd, timeout=timeout, **kw)
+
+def rt_obj():
+    """rt/wasm.c (__rt_assert), built by clang once per change"""
+    src = f'{ct.RT}/wasm.c'
+    if not os.path.exists(RTO) or os.path.getmtime(RTO) < os.path.getmtime(src):
+        os.makedirs(OUT, exist_ok=True)
+        subprocess.run([CL, TGT, '-O2', '-c', src, '-o', RTO + '.tmp'], check=True)
+        os.replace(RTO + '.tmp', RTO)
+
+def link(objs, exe):
+    rc, _, err = sh(LINK + objs + [RTO, '-lm', '-o', exe], timeout=60)
+    return rc, err.decode(errors='replace')
+
+def run(exe):
+    rc, out, err = sh([exe], timeout=20, stdin=subprocess.DEVNULL)
+    if isinstance(rc, int) and rc < 0:
+        rc = 128 - rc	# a signal as the shell reports it (abort: 134)
+    return rc, out.decode('latin-1')
+
+def reference(suite, name, path, flags, wd):
+    key = hashlib.sha1((open(path, 'rb').read().decode('latin-1') + ' '.join(flags) + ' '.join(ct.CLFL) + ' '.join(BASE + LINK) + 'rt1').encode()).hexdigest()[:16]
+    cf = f'{OUT}/ref/{suite}/{name}.json'
+    try:
+        r = json.load(open(cf))
+        if r['key'] == key:
+            return r
+    except (OSError, ValueError, KeyError):
+        pass
+    r = {'key': key}
+    rc, _, err = sh([CL] + BASE + ct.CLFL + flags + ['-c', path, '-o', f'{wd}/ref.o'], cwd=os.path.dirname(path))
+    if rc:
+        r['skip'] = 'clang-rejects'; r['why'] = ct.first_err(err.decode(errors='replace'))
+    else:
+        rc, err = link([f'{wd}/ref.o'], f'{wd}/ref')
+        if rc:
+            m = re.search(r'undefined (?:symbol|reference to) .?(\w+)', err)
+            r['skip'] = 'ref-fail'; r['why'] = 'link: ' + (m.group(1) if m else ct.first_err(err))
+        else:
+            rc, out = run(f'{wd}/ref')
+            r['rc'] = rc; r['out'] = out
+            if suite in ('gcc', 'vcc') and rc != 0:
+                r['skip'] = 'ref-fail'; r['why'] = f'clang build exits {rc}'
+    os.makedirs(os.path.dirname(cf), exist_ok=True)
+    json.dump(r, open(cf, 'w'))
+    return r
+
+def one(t):
+    suite, name, path = t
+    src = open(path, 'rb').read().decode('latin-1')
+    if suite == 'tcc' and name in ct.TCC_SKIP:
+        return t, 'skip', 'tcc-specific', ct.TCC_SKIP[name]
+    if suite == 'gcc' and name in ct.GCC_SKIP:
+        return t, 'skip', 'compiler-specific', ct.GCC_SKIP[name]
+    if name in X86_SKIP:
+        return t, 'skip', 'x86', X86_SKIP[name]
+    flags = ct.dg_flags(src) if suite == 'gcc' else ct.exec_marks(src)[0] if suite == 'vcc' else []
+    if name.startswith('76_dollars'):
+        flags = ['-fdollars-in-identifiers']
+    if suite == 'vcc' and re.search(r'/\*\s*vcc-noref:', src):
+        return t, 'skip', 'noref', 'no clang reference'
+    wd = f'{OUT}/w/{suite}/{name}'
+    os.makedirs(wd, exist_ok=True)
+    cwd = os.path.dirname(path)
+    ref = reference(suite, name, path, flags, wd)
+    if 'skip' in ref:
+        return t, 'skip', ref['skip'], ref['why']
+    vfl = BASE + ct.CLFL + flags
+    rc, _, err = sh([VPP, '-S'] + vfl + [path, '-o', f'{wd}/vcc.s'], cwd=cwd)
+    if rc:
+        e = err.decode(errors='replace')
+        return t, 'fail', 'emit', ct.first_err(e) if rc != 'timeout' and rc > 0 else f'vpp: signal/timeout {rc}: ' + ct.first_err(e)
+    pk = hashlib.sha1(open(f'{wd}/vcc.s', 'rb').read() + ref['key'].encode()).hexdigest()
+    pf = f'{OUT}/pass/{suite}/{name}'
+    if not NOCACHE:
+        try:
+            if open(pf).read() == pk:
+                shutil.rmtree(wd, ignore_errors=True)
+                return t, 'pass', '', ''
+        except OSError:
+            pass
+    rc, _, err = sh([CL, TGT, '-c', f'{wd}/vcc.s', '-o', f'{wd}/vcc.o'])
+    if rc:
+        m = re.search(r'error: (.*)', err.decode(errors='replace'))
+        return t, 'fail', 'as', re.sub(r'\d+', 'N', m.group(1)) if m else ct.first_err(err.decode(errors='replace'))
+    rc, err = link([f'{wd}/vcc.o'], f'{wd}/vcc')
+    if rc:
+        m = re.search(r'undefined (?:symbol|reference to) .?(\w+)', err)
+        return t, 'fail', 'link', 'undefined ' + m.group(1) if m else ct.first_err(err)
+    rc, out = run(f'{wd}/vcc')
+    if rc == ref['rc'] and out == ref['out']:
+        os.makedirs(os.path.dirname(pf), exist_ok=True)
+        open(pf, 'w').write(pk)
+        shutil.rmtree(wd, ignore_errors=True)
+        return t, 'pass', '', ''
+    why = f'exit {rc} (clang {ref["rc"]})' if rc != ref['rc'] else 'output differs'
+    open(f'{wd}/vcc.out', 'w').write(out); open(f'{wd}/ref.out', 'w').write(ref['out'])
+    return t, 'fail', 'run', why
+
+NOCACHE = False
+
+def init(nocache):
+    global NOCACHE
+    NOCACHE = nocache
+
+if __name__ == '__main__':
+    av = sys.argv[1:]
+    j, suite, show, verbose = 6, None, None, False
+    nocache = '--no-cache' in av
+    av = [a for a in av if a != '--no-cache']
+    if '-v' in av: verbose = True; av.remove('-v')
+    for opt in ('-j', '--suite', '--show'):
+        if opt in av:
+            k = av.index(opt); v = av[k + 1]; del av[k:k + 2]
+            if opt == '-j': j = int(v)
+            elif opt == '--suite': suite = v
+            else: show = v
+    pat = av[0] if av else None
+    ts = ct.tests(suite, pat)
+    t0 = time.time()
+    rt_obj()
+    with Pool(j, initializer=init, initargs=(nocache,)) as pool:
+        res = pool.map(one, ts, chunksize=1)
+    by = defaultdict(Counter)
+    whys = defaultdict(Counter)
+    for (s, n, _), st, cat, why in res:
+        by[s][st] += 1
+        if st != 'pass':
+            by[s][f'{st}:{cat}'] += 1
+            whys[(st, cat)][why] += 1
+        if verbose and st == 'fail':
+            print(f'FAIL {cat:5s} {s}/{n}: {why}')
+        if show and st != 'pass' and cat == show:
+            print(f'{st} {cat} {s}/{n}: {why}')
+    for (st, cat), c in sorted(whys.items()):
+        if st == 'fail' or verbose:
+            print(f'--- {st} {cat}: {sum(c.values())}')
+            for w, k in c.most_common(int(os.environ.get('SHOW', 8))):
+                print(f'  {k:4d}  {w[:150]}')
+    tot = Counter()
+    for s in sorted(by):
+        tot.update(by[s])
+    for s, c in sorted(by.items()) + [('all', tot)]:
+        run_ = c['pass'] + c['fail']
+        det = ' '.join(f'{k}={v}' for k, v in sorted(c.items()) if ':' in k)
+        print(f'{s:4s} {c["pass"]}/{run_} pass ({100 * c["pass"] / max(run_, 1):.1f}%), {c["skip"]} skipped   {det}')
+    print(f'{time.time() - t0:.1f} s')
+    sys.exit(1 if tot['fail'] else 0)

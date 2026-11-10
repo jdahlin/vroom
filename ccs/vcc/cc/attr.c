@@ -111,6 +111,28 @@ VPRIV int mode_kind(cc *c, uint32_t id, bool sgn)
 }
 
 #include "attrnames.inc"
+#include "attrnames-x86.inc"
+
+/* x86-64: name in one of its sorted lists (gen-x86data.sh) */
+static bool attr_x86(const char *const *tab, size_t n, const char *k, size_t kn)
+{
+	size_t lo = 0, hi = n;
+
+	while (lo < hi) {
+		size_t mid = (lo + hi) / 2;
+		int r = strncmp(tab[mid], k, kn);
+
+		if (!r && tab[mid][kn])
+			r = 1;
+		if (!r)
+			return true;
+		if (r < 0)
+			lo = mid + 1;
+		else
+			hi = mid;
+	}
+	return false;
+}
 
 /* name without __x__, as clang normalises it */
 static void attr_norm(const char **s, size_t *n)
@@ -138,6 +160,8 @@ static bool attr_known(cc *c, int scope, const char *s, size_t n)
 
 		if (l < 0 || (size_t)l >= sizeof(k))
 			return false;
+		if (c->o->target == PP_LINUX_X86_64)
+			return attr_x86(c_attrs_x86, sizeof(c_attrs_x86) / sizeof(*c_attrs_x86), k, (size_t)l);
 		while (lo < hi) {
 			size_t mid = (lo + hi) / 2;
 			int r = strcmp(c_attrs[mid].name, k);
@@ -151,6 +175,8 @@ static bool attr_known(cc *c, int scope, const char *s, size_t n)
 		}
 		return false;
 	}
+	if (c->o->target == PP_LINUX_X86_64)
+		return attr_x86(gnu_attrs_x86, sizeof(gnu_attrs_x86) / sizeof(*gnu_attrs_x86), s, n);
 	while (lo < hi) {
 		size_t mid = (lo + hi) / 2;
 		int r = strncmp(gnu_attrs[mid].name, s, n);

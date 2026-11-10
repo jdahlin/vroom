@@ -243,7 +243,8 @@ static qty sigtype(cc *c, char ch)
 	case 'P': return ty_ptr(c, QT(TY_VOID, Q_CONST));
 	case 's': return ty_ptr(c, prim(TY_CHAR));
 	case 'S': return ty_ptr(c, QT(TY_CHAR, Q_CONST));
-	case 'V': return c->t_valist;
+	case 'V':	/* a parameter: x86-64's array type is adjusted to the element pointer */
+		return KIND(c, c->t_valist) == TY_ARRAY ? ty_ptr(c, T(c, c->t_valist)->base) : c->t_valist;
 	default: abort();
 	}
 }
