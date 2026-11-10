@@ -733,6 +733,7 @@ VPRIV int builtin(pp *p, const pmacro *m, ptok *t);
 /* ifexpr.c */
 VPRIV ival parse_number(pp *p, const ptok *t);
 VPRIV bool eval_if(pp *p, const ctx *fc, uint32_t b, uint32_t e);
+VPRIV bool eval_ptoks(pp *p, const ptok *t, uint32_t n, uint64_t *v);
 VPRIV void embed(pp *p, ctx *c, uint32_t b, uint32_t e, uint32_t loc, uint32_t nloc);
 VPRIV int has_embed(pp *p, const ctx *fc, uint32_t loc);
 /* directive.c */

@@ -689,7 +689,8 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
   -M lists the file, clang's search (absolute, or the includer's directory);
   tests/vcc `embed.c` checksums the file embedding itself; `--embed-dir` (`<x>`
   only there, `"x"` after the includer's directory); `-E`/`-E -P` placement of
-  the token after the data, byte for byte as clang.)  Left: a constant expression in limit() (vcc: a number), a header
+  the token after the data, byte for byte as clang; limit() takes a constant
+  expression.)  Left: a header
   with #embed in the header cache (replay does not record it).
 - [ ] **Output modes**: `-CC` (comments in macro definitions and arguments,
   `//` as `/* */`) and `-traditional-cpp` are rejected with an error.

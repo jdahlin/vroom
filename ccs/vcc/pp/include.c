@@ -741,8 +741,10 @@ static bool emb_int(pp *p, uint64_t *v)
 	uint32_t n;
 	char s[64];
 
-	if (!emb_list(p, &l, &n, true) || n != 1 || l[0].kind != T_NUMBER || l[0].len >= sizeof s)
+	if (!emb_list(p, &l, &n, true))
 		return false;
+	if (n != 1 || l[0].kind != T_NUMBER || l[0].len >= sizeof s)
+		return eval_ptoks(p, l, n, v);	/* a constant expression (clang) */
 	memcpy(s, l[0].s, l[0].len), s[l[0].len] = 0;
 	{
 		char *e;

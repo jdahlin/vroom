@@ -410,3 +410,24 @@ VPRIV bool eval_if(pp *p, const ctx *fc, uint32_t b, uint32_t e)
 	pop_to(p, d);
 	return r.v != 0;
 }
+
+/* a constant expression of already expanded tokens (#embed's limit()): false if not one */
+VPRIV bool eval_ptoks(pp *p, const ptok *t, uint32_t n, uint64_t *v)
+{
+	int d = p->depth;
+	ev E = { .p = p, .loc = n ? t[0].loc : 0 };
+	ival r;
+
+	if (!n)
+		return false;
+	push_ptok(p, t, n, 0, 0, 1);
+	p->in_dir++;
+	eadv(&E);
+	r = ecomma(&E, true);
+	p->in_dir--;
+	if (E.t.kind != T_EOF)
+		E.bad = true;
+	pop_to(p, d);
+	*v = (uint64_t)r.v;
+	return !E.bad;
+}

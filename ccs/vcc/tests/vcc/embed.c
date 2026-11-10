@@ -10,7 +10,7 @@ static const unsigned char d[] = {
 #embed "embed_data.bin"
 };
 static const int lim[] = {
-#embed "embed_data.bin" limit(2) prefix(7, ) suffix(, 9)
+#embed "embed_data.bin" limit(1 + (2 > 1)) prefix(7, ) suffix(, 9)
 };
 static const int off[] = {
 #embed "embed_data.bin" clang::offset(3) limit(2)
