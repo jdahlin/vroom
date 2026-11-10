@@ -947,6 +947,8 @@ VPRIV void embed(pp *p, ctx *c, uint32_t b, uint32_t e, uint32_t loc, uint32_t n
 	if (p->o->deps && !emb_is_main(p, path))
 		dep_only(p, path, false);
 	emb_range(f, &m, &ob, &on);
+	if (p->rec.n)	/* the header cache does not record #embed's bytes: the open regions are not cached */
+		p->rec.nbad = p->rec.n;
 	{
 		uint64_t nt = on ? m.npre + 2 * on - 1 + m.nsuf : m.nemp;
 		ptok *o, *w;
