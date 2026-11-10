@@ -341,15 +341,16 @@ kärnan och kan vänta.
   `signbit` ...); VLA (storlekar i platser, arrayen under sp, sp återställs vid
   blockslut och när ett `goto` når deklarationen igen); TLS (local-exec,
   initial-exec, general dynamic under `-fPIC`); PIC/PIE (GOT-laddning via r11
-  enligt arm64:s `sym_needs_got`, `@PLT`-anrop).
-- `bench/vcc-x86.py`: 1591/1769, lika i `--pie` och `--pic` (vcc-sidan
+  enligt arm64:s `sym_needs_got`, `@PLT`-anrop); atomics (`__atomic_*`/`__sync_*`
+  via `LO(atomic)`: mov, xchg, lock xadd, lock cmpxchg, mfence; and/or/xor och
+  `_Atomic`-objektens sammansatta tilldelningar som CAS-slinga i vandraren).
+- `bench/vcc-x86.py`: 1595/1769, lika i `--pie` och `--pic` (vcc-sidan
   `-fPIE`/`-fPIC`, länkad `-pie`). Körfel bara där clangs optimerare krävs
   (`20030125-1`, `bcp-1`, `builtin-constant`) och 11 länkfel av samma slag eller
   `__builtin_setjmp`. `vcc-abi.py --target x86_64`: 6/11, med två nya tester
   (`int_records`, `fp_records`) som klarar alla fyra kombinationerna; resten
   stannar vid komplexa tal, vektorer, alignment > 16 och packade bit-fält.
-- Kvar i X3: komplexa tal, GNU-vektorer, atomics och
-  `__sync_*`, etikettadresser och beräknat `goto`, cleanup-variabler, alignment
+- Kvar i X3: komplexa tal, GNU-vektorer, etikettadresser och beräknat `goto`, cleanup-variabler, alignment
   över 16, `__float128`-aritmetik (libgcc `__addtf3` ...), inlining av
   `__always_inline` med `need_fold` och `constant_p` efter inlining,
   `-mgeneral-regs-only`/`-mno-sse`, UTF-8-namn citerade som clang, `VCC_WALKLOG`.
