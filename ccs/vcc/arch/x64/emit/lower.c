@@ -56,7 +56,7 @@ static rec *x64_op3(ecx *e, int op, int sz, int r0, int r1, int r2)
 	return i;
 }
 
-static void x64_mov(ecx *e, int rd, int rs)
+VPRIV void x64_mov(ecx *e, int rd, int rs)
 {
 	if (rd != rs)
 		x64_op3(e, X_MOV, 8, rd, rs, XNOREG);

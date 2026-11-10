@@ -63,7 +63,8 @@ VPRIV int wk_reg(ecx *e, val *v, qty t);
 VPRIV void wk_free(ecx *e, const val *v);
 VPRIV void wk_cond(ecx *e, uint32_t n, bool jump_if, uint32_t lbl);
 VPRIV void wk_stmt(ecx *e, uint32_t n);
-VPRIV void wk_init(ecx *e, const lval *dst, qty t, uint32_t init);	/* an object initialized by init (0: none) */
+VPRIV void wk_init(ecx *e, const lval *dst, qty t, uint32_t init);
+VPRIV void wk_bfinit(ecx *e, const lval *l, qty t, uint32_t init);	/* a bit-field initialized */	/* an object initialized by init (0: none) */
 VPRIV int wk_size(cc *c, qty t);
 VPRIV void ctor_entry(cc *c, tbuf *b, uint32_t s, bool fini);	/* arch/a64/emit/func.c (shared) */
 VPRIV bool wk_signed(cc *c, qty t);
@@ -73,6 +74,7 @@ VPRIV bool wk_signed(cc *c, qty t);
 /* registers */
 VPRIV int LO(treg)(ecx *e);				/* a free temporary */
 VPRIV void LO(tfree)(ecx *e, int r);
+VPRIV void LO(mov)(ecx *e, int rd, int rs);			/* rd = rs (64 bits) */
 VPRIV void LO(tkeep)(ecx *e, int r);			/* r in use again (an operation consumed it, the walker still holds it) */
 VPRIV int LO(nfree)(ecx *e);				/* free temporaries left */
 VPRIV int LO(toreg)(ecx *e, val *v, int size);	/* a constant or address into a temporary: v becomes V_REG */
