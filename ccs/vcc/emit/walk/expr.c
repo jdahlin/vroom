@@ -30,8 +30,8 @@ static void wk_scalar(ecx *e, uint32_t n, qty t)
 
 	if (is_flt(c, t) || k == TY_INT128 || k == TY_UINT128)
 		wk_unsup(e, n, is_flt(c, t) ? "floating point" : "__int128");
-	if (is_record(c, t) || k == TY_VECTOR)
-		wk_unsup(e, n, "an aggregate value");
+	if (k == TY_VECTOR)
+		wk_unsup(e, n, "a vector value");	/* (records are values by address) */
 }
 
 VPRIV int wk_reg(ecx *e, val *v, qty t)
@@ -144,7 +144,7 @@ static void wk_lfree(ecx *e, const lval *l)
 }
 
 /* a local's frame slot, made on first use */
-static int32_t wk_local(ecx *e, uint32_t s)
+VPRIV int32_t wk_local(ecx *e, uint32_t s)
 {
 	wkst *W = e->wk;
 	cc *c = e->c;
@@ -196,10 +196,10 @@ VPRIV lval wk_lval(ecx *e, uint32_t n)
 		if (f->bitfield)
 			wk_unsup(e, n, "a bit-field");
 		if (b->flags & NF_LVALUE || b->op == N_VAR || b->op == N_DEREF || b->op == N_MEMBER || b->op == N_INDEX ||
-		    b->op == N_STR)
+		    b->op == N_STR || b->op == N_COMPLIT)
 			l = wk_lval(e, x->a);
 		else
-			wk_unsup(e, n, "a member of an rvalue");
+			l = wk_fromval(e, wk_gen(e, x->a), b->ty);	/* a record rvalue is its address */
 		l.off += (int64_t)(f->off / 8);
 		return l;
 	}
@@ -243,7 +243,19 @@ VPRIV lval wk_lval(ecx *e, uint32_t n)
 		wk_free(e, &v);
 		return wk_lval(e, x->b);
 	}
+	case N_COMPLIT: {
+		/* (T){ ... }: an unnamed object (b), initialized where it is reached */
+		uint32_t s = x->b;
+
+		l.k = L_FRAME;
+		l.off = wk_local(e, s);
+		l.align = sym_align(c, s);
+		wk_init(e, &l, c->syms[s].ty, x->a);
+		return l;
+	}
 	default:
+		if (is_record(c, x->ty))
+			return wk_fromval(e, wk_gen(e, n), x->ty);	/* a call, ?:, ({ }) ...: the address it gives */
 		break;
 	}
 	wk_unsup(e, n, "this lvalue");
@@ -539,6 +551,17 @@ static val wk_assign(ecx *e, uint32_t n)
 	val v;
 
 	wk_scalar(e, x->a, lt);
+	if (is_record(c, lt) && !x->aux) {
+		/* the bytes of the right side's object, then the left's address as the value */
+		val s = wk_gen(e, x->b);
+		int rs = wk_reg(e, &s, prim(TY_ULONG)), rd;
+
+		l = wk_lval(e, x->a);
+		rd = LO(laddr)(e, &l);
+		LO(copy)(e, rd, rs, tsize(c, lt));
+		LO(tfree)(e, rs);
+		return (val){ .k = V_REG, .r = (uint8_t)rd };
+	}
 	if (!x->aux) {
 		v = wk_gen(e, x->b);
 		l = wk_lval(e, x->a);
@@ -652,6 +675,8 @@ static val wk_call(ecx *e, uint32_t n)
 		wk_unsup(e, n, "a call with more than 64 arguments");
 	if (KIND(c, f->base) != TY_VOID)
 		wk_scalar(e, n, f->base);
+	if (is_record(c, f->base))
+		wk_unsup(e, n, "a call returning a record");
 	if (fx->op == N_CAST && fx->aux == CK_FDECAY && N(fx->a)->op == N_VAR) {
 		uint32_t s = canon_sym(c, N(fx->a)->a);
 
@@ -670,6 +695,8 @@ static val wk_call(ecx *e, uint32_t n)
 		lval l;
 
 		wk_scalar(e, an, at);
+		if (is_record(c, at))
+			wk_unsup(e, an, "a record argument");
 		v = wk_gen(e, an);
 		r = wk_reg(e, &v, at);
 		if (wk_size(c, at) < 4)
@@ -741,6 +768,11 @@ VPRIV val wk_gen(ecx *e, uint32_t n)
 		}
 		wk_scalar(e, n, x->ty);
 		return wk_load(e, wk_lval(e, n), x->ty);
+	}
+	case N_COMPLIT: {
+		lval l = wk_lval(e, n);
+
+		return wk_load(e, l, x->ty);
 	}
 	case N_STR: case N_MEMBER: case N_INDEX: case N_DEREF:
 		if (!is_array(c, x->ty) && !is_func(c, x->ty))
