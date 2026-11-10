@@ -553,6 +553,28 @@ VPRIV bool eval(cc *c, uint32_t n, cval *v)
 		v->kind = CV_ADDR;
 		v->label = x->a + 1;
 		return true;
+	case N_INDEX:
+	case N_DEREF: {
+		/* "abc"[1], *"abc": an element of a string literal folds (clang) */
+		const cstr *st;
+		size_t sz = is_integer(c, x->ty) ? ty_size(c, x->ty) : 0;
+		int64_t e;
+
+		if (!sz || !eval_addr(c, n, &a) || a.kind != CV_ADDR || !a.str || a.sym || a.label || a.sublabel)
+			return false;
+		st = &c->strs[a.str - 1];
+		if (sz != st->esz || a.i < 0 || a.i % (i128)sz || a.i / (i128)sz >= st->n)
+			return false;
+		e = 0;
+		for (size_t k = 0; k < sz; k++)	/* little endian */
+			e |= (int64_t)(uint8_t)st->s[(size_t)a.i + k] << (8 * k);
+		if (is_signed(c, x->ty) && sz < 8)
+			e = (int64_t)((uint64_t)e << (64 - 8 * sz)) >> (64 - 8 * sz);
+		v->kind = CV_INT;
+		v->i = e;
+		v->ice = false;
+		return true;
+	}
 	case N_BUILTIN:
 		return eval_builtin(c, x, v);
 	default:

@@ -261,13 +261,29 @@ static bool string_initializes(cc *c, qty arr, uint32_t v)
 	       c->strs[N(s)->a].esz == ty_size(c, T(c, arr)->base);
 }
 
+/*
+ * at '{': { "str" } follows, not { "q"[0] } (an element of it).  The token
+ * queue holds 4: concatenated strings ("a" "b") are taken as the string.
+ */
+static bool brace_string(cc *c)
+{
+	int k;
+
+	if (!is_strtok(peek(c, 1)->kind))
+		return false;
+	k = peek(c, 2)->kind;
+	if (is_strtok(k) || k == T_RBRACE)
+		return true;
+	return k == T_COMMA && peek(c, 3)->kind == T_RBRACE;
+}
+
 /* one element at pos: braces, a value, or brace elision into a sub-aggregate */
 static void il_elem(cc *c, ilist *l, uint64_t pos, uint32_t v, bool st)
 {
 	qty et = il_elem_type(c, l, pos);
 
 	if (!v && is(c, T_LBRACE)) {
-		if (is_char_array(c, et) && is_strtok(peek(c, 1)->kind)) {	/* { "string" } */
+		if (is_char_array(c, et) && brace_string(c)) {	/* { "string" } */
 			uint32_t sv;
 
 			next(c);
@@ -564,7 +580,7 @@ VPRIV uint32_t initializer(cc *c, qty *ty, bool st)
 	qty t = *ty;
 
 	if (is(c, T_LBRACE)) {
-		if (is_char_array(c, t) && is_strtok(peek(c, 1)->kind)) {
+		if (is_char_array(c, t) && brace_string(c)) {
 			uint32_t s;
 
 			next(c);

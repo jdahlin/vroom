@@ -1023,9 +1023,13 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
   the constness error (`int x = 5 % 0;`): clang defers them
   (DiagRuntimeBehavior) and emits them only for a non-constant initializer.
   *Validate:* diag test `mod_zero_const.c`.
-- [ ] **`"abc"[1]` rejected as a static initializer** (now also by
-  `-fsyntax-only`, `static_init_ok`'s `eval`); vector types print as
-  `''` in messages (`tyname`).  *Validate:* T1; diag test.
+- [x] **`"abc"[1]` as a static initializer**: an element of a string
+  literal folds (`eval`); `{ "q"[0] }` in an int array parsed as a string
+  initializer.  Done: `tests/vcc/static_strelem.c`.
+- [ ] **Vector types in messages**: clang keeps the typedef name (`'v4'`),
+  appends ` (vector of 4 'int' values)` after the quoted type, and an
+  `ext_vector_type` prints as its typedef, not its element type (vcc:
+  `'float'`).  *Validate:* diag test with vector_size and ext_vector_type.
 - [ ] **Diagnostic details**: columns on `##` and invalid directives,
   `#line` file names ignored, nested macro notes (one level today), the
   "expanded from macro" note only for undeclared identifiers.
