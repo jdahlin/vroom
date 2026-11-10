@@ -175,6 +175,29 @@ int pp_wstate(const pp *p, const char *flag, bool on, const char *const *groups)
 	return err || (allerr && !noerr) ? 2 : 1;
 }
 
+int pp_werror_named(const pp *p, const char *flag, const char *const *groups)
+{
+	int r = 0;
+
+	for (int i = 0; i < p->o->nwargs; i++) {
+		const char *a = p->o->wargs[i], *n;
+		bool hit;
+
+		if (!strncmp(a, "-Werror=", 8))
+			n = a + 8;
+		else if (!strncmp(a, "-Wno-error=", 11))
+			n = a + 11;
+		else
+			continue;
+		hit = !strcmp(n, flag);
+		for (int g = 0; !hit && groups && groups[g]; g++)
+			hit = !strcmp(n, groups[g]);
+		if (hit)
+			r = a[2] == 'e' ? 1 : -1;
+	}
+	return r;
+}
+
 bool pp_warnx(pp *p, const char *flag, bool on, const char *const *groups, pp_dinfo *d, const char *fmt, ...)
 {
 	int st = pp_wstate(p, flag, on, groups);

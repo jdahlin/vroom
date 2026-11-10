@@ -150,6 +150,8 @@ void pp_diagx(pp *p, const pp_dinfo *d, const char *fmt, ...);
 /* a warning's state after the -W options: 0 off, 1 warning, 2 error; on: its default
    (flag without "-W"; groups: the warning's groups, NULL-terminated, e.g. "all") */
 int pp_wstate(const pp *p, const char *flag, bool on, const char *const *groups);
+/* the last -Werror=/-Wno-error= naming flag (or one of groups): 1 -Werror=, -1 -Wno-error=, 0 none */
+int pp_werror_named(const pp *p, const char *flag, const char *const *groups);
 /* report a warning of flag (clang's " [-Wflag]" / " [-Werror,-Wflag]" suffix); false if off */
 __attribute__((format(printf, 6, 7)))
 bool pp_warnx(pp *p, const char *flag, bool on, const char *const *groups, pp_dinfo *d, const char *fmt, ...);

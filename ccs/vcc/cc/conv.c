@@ -217,16 +217,21 @@ static void conv_error(cc *c, uint32_t n, qty to, const char *what, const char *
 	default:
 		snprintf(msg, sizeof msg, "%s assigning to '%s' from '%s' [%s]", what, t, f, flag);
 	}
+	static const char *const ipt[] = { "incompatible-pointer-types", NULL };
+
 	if (c->o->conv_warn & bit) {
 		/* -Wno-error=...: clang's warning (the message without its flag, which pp_warnx adds) */
 		char *b = strrchr(msg, '[');
 
+		if (pp_werror_named(c->p, flag + 2, bit == 4 ? ipt : NULL) == 1)
+			goto err;	/* -Werror= again: clang's own error (no "-Werror,") */
 		if (b && b > msg)
 			b[-1] = 0;
-		if (cc_warnx(c, flag + 2, true, NULL, loc, &r, 1, NULL, 0, "%s", msg) && c->cv_what == CX_PASS)
+		if (cc_warnx(c, flag + 2, true, bit == 4 ? ipt : NULL, loc, &r, 1, NULL, 0, "%s", msg) && c->cv_what == CX_PASS)
 			param_note(c);
 		return;
 	}
+err:
 	report(c, "error", loc, &r, 1, NULL, 0, "%s", msg);
 	if (c->cv_what == CX_PASS)
 		param_note(c);

@@ -26,8 +26,12 @@ FL = ['--target=aarch64-linux-gnu', '-fsyntax-only', '-fno-color-diagnostics']
 
 def run(cmd, name):
     fl = FL
-    if re.search(r'/\*\s*diag-mode:\s*-c\s*\*/', open(os.path.join(D, name), errors='replace').read()):
+    src = open(os.path.join(D, name), errors='replace').read()
+    if re.search(r'/\*\s*diag-mode:\s*-c\s*\*/', src):
         fl = [f for f in FL if f != '-fsyntax-only'] + ['-c', '-o', '/dev/null']
+    m = re.search(r'/\*\s*diag-flags:\s*(.*?)\s*\*/', src)   # extra options for both compilers
+    if m:
+        fl = fl + m.group(1).split()
     p = subprocess.run(cmd + fl + [name], cwd=D, capture_output=True, timeout=30)
     return p.returncode, p.stderr.decode(errors='replace')
 

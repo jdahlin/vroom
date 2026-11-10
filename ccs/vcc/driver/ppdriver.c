@@ -838,7 +838,7 @@ int ppd_run(int argc, char **argv, const ppd_env *env)
 
 			if (!strncmp(f, "error=", 6))
 				f += 6;
-			conv_warn |= !strcmp(f, "int-conversion") ? 1 : !strcmp(f, "incompatible-pointer-types") ? 2
+			conv_warn |= !strcmp(f, "int-conversion") ? 1 : !strcmp(f, "incompatible-pointer-types") ? 2 | 4	/* (the function pointer group is part of it) */
 				     : !strcmp(f, "incompatible-function-pointer-types") ? 4 : 0;
 		}
 		if (!strcmp(a, "-Wno-implicit-function-declaration") || !strcmp(a, "-Wno-error=implicit-function-declaration")) {

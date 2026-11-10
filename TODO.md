@@ -1036,9 +1036,12 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
   duplicated errors (`void v;`, compound literal in parens).
   *Validate:* `tests/diag/` cases with several independent errors, exact
   clang output (`vcc-diag.py`).
-- [ ] **Warnings as errors not controllable**: `conv_error` (`cc.c:2622`)
-  always errors for `-Wincompatible-pointer-types`.
-  *Validate:* diag tests with `-Wno-error=…` and `-Wno-…`.
+- [x] **Warnings as errors not controllable**: `-Wno-error=`/`-Wno-` of
+  `int-conversion`, `incompatible-pointer-types` (its subgroup
+  `incompatible-function-pointer-types` follows) and the function pointer
+  flag; `-Werror=` of one again is clang's plain error (no `-Werror,`:
+  `pp_werror_named`).  Done: diag `conv_flags*.c` (`diag-flags:` in
+  vcc-diag.py), 12 flag combinations identical to clang.
 - [ ] **Missing warnings** (only 7 `-W` flags): `-Wunused-variable`,
   `-Winteger-overflow`, `-Wexcess-initializers`, `-Wreturn-stack-address`,
   `-Wconstant-conversion`, `-Wmultichar`, `-Winvalid-noreturn`,
