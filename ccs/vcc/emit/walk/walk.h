@@ -25,6 +25,14 @@
 
 #define LO(name) x64_##name
 
+/*
+ * An argument, parameter or result as the ABI passes it (LO(classify)): n
+ * eightbytes of class cls[i] (WA_INT, WA_SSE), or in memory (mem), or
+ * nothing (n 0, not mem: an empty record).  Its bytes are in the frame slot
+ * slot (8-byte words; a scalar extended to 64 bits).
+ */
+enum { WA_INT, WA_SSE };
+typedef struct wkarg { uint8_t n, cls[2]; bool mem, x87; uint32_t align; uint64_t size; int32_t slot; } wkarg;	/* x87: returned in st(0) */
 /* ---------------- walker state (one per ecx) ---------------- */
 
 #define WK_MAXLOOP 1024
@@ -49,12 +57,14 @@ typedef struct wkst {
 	uint32_t ncases;
 	uint32_t retlbl;
 	qty rty;
+	wkarg rrec;		/* a record result: as the ABI returns it */
 	uint32_t fsym;
 } wkst;
 
 VPRIV wkst *wk_state(ecx *e);
 VPRIV void wk_function(ecx *e, uint32_t s);	/* emit/walk/func.c: what emit/tu.c calls for x86-64 */
 VPRIV int32_t wk_slot(ecx *e, uint64_t size, uint32_t align);
+VPRIV int32_t wk_local(ecx *e, uint32_t s);	/* a local's slot, made on first use (a goto may reach a use first) */
 VPRIV uint32_t wk_newlabel(ecx *e);
 VPRIV val wk_gen(ecx *e, uint32_t n);
 VPRIV lval wk_lval(ecx *e, uint32_t n);
@@ -62,7 +72,10 @@ VPRIV int wk_reg(ecx *e, val *v, qty t);
 VPRIV void wk_free(ecx *e, const val *v);
 VPRIV void wk_cond(ecx *e, uint32_t n, bool jump_if, uint32_t lbl);
 VPRIV void wk_stmt(ecx *e, uint32_t n);
+VPRIV void wk_init(ecx *e, const lval *dst, qty t, uint32_t init);
+VPRIV void wk_bfinit(ecx *e, const lval *l, qty t, uint32_t init);	/* a bit-field initialized */	/* an object initialized by init (0: none) */
 VPRIV int wk_size(cc *c, qty t);
+VPRIV bool wk_mem(ecx *e, qty t);	/* values of t are held by address (records, arrays, x87 long double) */
 VPRIV void ctor_entry(cc *c, tbuf *b, uint32_t s, bool fini);	/* arch/a64/emit/func.c (shared) */
 VPRIV bool wk_signed(cc *c, qty t);
 
@@ -71,6 +84,7 @@ VPRIV bool wk_signed(cc *c, qty t);
 /* registers */
 VPRIV int LO(treg)(ecx *e);				/* a free temporary */
 VPRIV void LO(tfree)(ecx *e, int r);
+VPRIV void LO(mov)(ecx *e, int rd, int rs);			/* rd = rs (64 bits) */
 VPRIV void LO(tkeep)(ecx *e, int r);			/* r in use again (an operation consumed it, the walker still holds it) */
 VPRIV int LO(nfree)(ecx *e);				/* free temporaries left */
 VPRIV int LO(toreg)(ecx *e, val *v, int size);	/* a constant or address into a temporary: v becomes V_REG */
@@ -78,6 +92,8 @@ VPRIV int LO(toreg)(ecx *e, val *v, int size);	/* a constant or address into a t
 VPRIV void LO(load)(ecx *e, int rd, const lval *l, int size, bool sgn);
 VPRIV void LO(store)(ecx *e, int rs, const lval *l, int size);
 VPRIV int LO(laddr)(ecx *e, const lval *l);		/* the address in a temporary (l's register is reused) */
+VPRIV void LO(copy)(ecx *e, int rdst, int rsrc, uint64_t n);	/* n bytes; the address registers stay live */
+VPRIV void LO(zero)(ecx *e, int rdst, uint64_t n);
 /* integers: size 4 or 8 (the operation's width); results in a's register */
 VPRIV val LO(bin)(ecx *e, int op, int size, bool sgn, val a, val b);	/* T_PLUS T_MINUS T_STAR T_SLASH T_PERCENT T_AMP T_PIPE T_CARET T_LESSLESS T_GREATERGREATER */
 VPRIV val LO(un)(ecx *e, int op, int size, val a);			/* T_MINUS T_TILDE */
@@ -85,15 +101,41 @@ VPRIV void LO(ext)(ecx *e, int r, int from, bool sgn);		/* low `from` bytes of r
 VPRIV val LO(cmp)(ecx *e, int op, int size, bool sgn, val a, val b);	/* 0 or 1 */
 VPRIV void LO(cmpbr)(ecx *e, int op, int size, bool sgn, val a, val b, uint32_t lbl);	/* to lbl if a op b */
 VPRIV void LO(brz)(ecx *e, val a, int size, bool nz, uint32_t lbl);	/* to lbl if (a != 0) == nz */
+/* floating point: float and double values in the CPU's float registers; long double as
+   LO(ldmem) says (true: by address, a 16-byte object, as records) */
+VPRIV bool LO(ldmem)(void);
+/* __int128: by address too when LO(i128mem) */
+VPRIV bool LO(i128mem)(void);
+VPRIV val LO(wconst)(ecx *e, i128 v);
+VPRIV val LO(wbin)(ecx *e, int op, bool sgn, val a, val b);	/* b an int for << >> */
+VPRIV val LO(wun)(ecx *e, int op, val a);			/* T_MINUS T_TILDE */
+VPRIV val LO(wcmp)(ecx *e, int op, bool sgn, val a, val b);
+VPRIV val LO(wcvt)(ecx *e, val v, qty from, qty to);	/* __int128 on either side */
+VPRIV int LO(ftreg)(ecx *e);				/* a free float temporary */
+VPRIV val LO(fconst)(ecx *e, uint64_t bits, int size);	/* a float (4) or double (8) constant */
+VPRIV val LO(fbin)(ecx *e, int op, qty t, val a, val b);	/* + - * / */
+VPRIV val LO(fneg)(ecx *e, qty t, val a);
+VPRIV val LO(fcmp)(ecx *e, int op, qty t, val a, val b);	/* 0 or 1, false when unordered (but !=) */
+VPRIV val LO(cvt)(ecx *e, val v, qty from, qty to);	/* a float on either side (to may be _Bool) */
+/* builtins the CPU does */
+VPRIV void LO(trap)(ecx *e);				/* __builtin_trap, __builtin_unreachable */
+VPRIV val LO(frame)(ecx *e, bool ret);			/* the return address (ret) or the frame address */
+VPRIV val LO(bitop)(ecx *e, int bi, int size, val a);	/* BI_CLZ.. BI_BSWAP64: a nonzero where the builtin requires it */
+VPRIV val LO(alloca)(ecx *e, val n);			/* n bytes on the stack, 16-aligned */
+VPRIV val LO(fbits)(ecx *e, val v, int size);		/* a float's bits in an integer register */
 /* control */
 VPRIV void LO(label)(ecx *e, uint32_t l);
 VPRIV void LO(jump)(ecx *e, uint32_t l);
 /* calls: the arguments are in frame slots (8 bytes each, extended); ref: a direct callee, else fn */
-VPRIV val LO(call)(ecx *e, uint32_t ref, val *fn, const int32_t *argslot, int nargs, bool variadic, int retsize, bool retsgn);
-VPRIV int LO(nregargs)(void);				/* integer arguments passed in registers */
-VPRIV int32_t LO(stackarg)(int i);			/* frame offset of incoming stack argument i (i >= nregargs) */
-VPRIV void LO(param)(ecx *e, int i, int32_t slot, int size);	/* incoming register argument i to a slot */
-VPRIV void LO(ret)(ecx *e, val *v, int size, bool sgn, uint32_t lbl);	/* the result (v may be NULL), then to lbl */
+VPRIV void LO(classify)(ecx *e, qty t, wkarg *a);
+/* r: a record result (its slot receives it), NULL otherwise; retsize/retsgn: a scalar result */
+VPRIV val LO(call)(ecx *e, uint32_t ref, val *fn, const wkarg *a, int n, bool variadic, const wkarg *r, qty rt);
+/* the incoming arguments to their slots; a parameter the caller left on the stack gets that place as its slot */
+VPRIV void LO(params)(ecx *e, wkarg *a, int n, const wkarg *r, bool variadic);
+VPRIV void LO(ret)(ecx *e, val *v, qty t, uint32_t lbl);	/* a scalar result of type t (v may be NULL), then to lbl */
+VPRIV void LO(retrec)(ecx *e, int raddr, const wkarg *r, uint32_t lbl);	/* a record result from the object at raddr */
+VPRIV void LO(va_start)(ecx *e, int rap);			/* the va_list at rap */
+VPRIV int LO(va_arg)(ecx *e, int rap, qty t);		/* the next argument's address */
 /* the function: before its body, and once it is generated (frame, prologue, output) */
 VPRIV void LO(begin)(ecx *e, uint32_t s);
 VPRIV void LO(finish)(ecx *e, uint32_t s);

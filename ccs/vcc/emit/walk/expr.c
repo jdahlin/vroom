@@ -1,6 +1,7 @@
 /* vcc code generator, AST walker: expressions, lvalues, conditions (walk.h) */
 #include "walk.h"
 #include "../../lib/vstack.h"
+#include "../../lib/f128.h"
 
 /* ---------------- types and values ---------------- */
 
@@ -28,11 +29,26 @@ static void wk_scalar(ecx *e, uint32_t n, qty t)
 	cc *c = e->c;
 	int k = KIND(c, t);
 
-	if (is_flt(c, t) || k == TY_INT128 || k == TY_UINT128)
-		wk_unsup(e, n, is_flt(c, t) ? "floating point" : "__int128");
-	if (is_record(c, t) || k == TY_VECTOR)
-		wk_unsup(e, n, "an aggregate value");
+	if (k == TY_FLOAT16 || k == TY_FLOAT128 || ((k == TY_INT128 || k == TY_UINT128) && !LO(i128mem)()))
+		wk_unsup(e, n, k == TY_FLOAT16 ? "_Float16" : k == TY_FLOAT128 ? "__float128" : "__int128");
+	if (k == TY_VECTOR)
+		wk_unsup(e, n, "a vector value");	/* (records are values by address) */
 }
+
+static bool wk_wide(cc *c, qty t) { return KIND(c, t) == TY_INT128 || KIND(c, t) == TY_UINT128; }
+
+VPRIV bool wk_mem(ecx *e, qty t)
+{
+	cc *c = e->c;
+
+	return is_record(c, t) || is_array(c, t) || (KIND(c, t) == TY_LDOUBLE && LO(ldmem)()) || (wk_wide(c, t) && LO(i128mem)());
+}
+
+/* a float value's register (float/double: the CPU's float registers) */
+static bool wk_freg(ecx *e, qty t) { return is_flt(e->c, t) && !wk_mem(e, t); }
+
+/* a new temporary for a value of type t */
+static int wk_treg(ecx *e, qty t) { return wk_freg(e, t) ? LO(ftreg)(e) : LO(treg)(e); }
 
 VPRIV int wk_reg(ecx *e, val *v, qty t)
 {
@@ -46,6 +62,17 @@ VPRIV void wk_free(ecx *e, const val *v)
 }
 
 static val wk_vreg(int r) { return (val){ .k = V_REG, .r = (uint8_t)r }; }
+
+/* an address that may be 0 at run time: an undefined weak symbol's */
+static bool wk_weak0(cc *c, val v)
+{
+	const sym *y;
+
+	if (v.k != V_ADDR || RKIND(v.ref) != RK_SYM)
+		return false;
+	y = &c->syms[RIDX(v.ref)];
+	return (y->flags & SF_WEAK) && !(y->flags & SF_DEFINED);
+}
 
 /* v as a value of type t (truncated as an integer of t) */
 static val wk_const(cc *c, i128 v, qty t) { return vconst(em_trunc_to(c, v, t)); }
@@ -133,7 +160,7 @@ static void wk_lfree(ecx *e, const lval *l)
 }
 
 /* a local's frame slot, made on first use */
-static int32_t wk_local(ecx *e, uint32_t s)
+VPRIV int32_t wk_local(ecx *e, uint32_t s)
 {
 	wkst *W = e->wk;
 	cc *c = e->c;
@@ -182,14 +209,18 @@ VPRIV lval wk_lval(ecx *e, uint32_t n)
 		const field *f = &c->tags[x->b].f[x->c];
 		const node *b = N(x->a);
 
-		if (f->bitfield)
-			wk_unsup(e, n, "a bit-field");
 		if (b->flags & NF_LVALUE || b->op == N_VAR || b->op == N_DEREF || b->op == N_MEMBER || b->op == N_INDEX ||
-		    b->op == N_STR)
+		    b->op == N_STR || b->op == N_COMPLIT)
 			l = wk_lval(e, x->a);
 		else
-			wk_unsup(e, n, "a member of an rvalue");
+			l = wk_fromval(e, wk_gen(e, x->a), b->ty);	/* a record rvalue is its address */
 		l.off += (int64_t)(f->off / 8);
+		if (f->bitfield) {
+			l.bf = 1;
+			l.bitoff = (uint16_t)(f->off % 8);
+			l.width = f->width;
+			l.sgn = is_signed(c, f->ty);
+		}
 		return l;
 	}
 	case N_INDEX: {
@@ -232,10 +263,116 @@ VPRIV lval wk_lval(ecx *e, uint32_t n)
 		wk_free(e, &v);
 		return wk_lval(e, x->b);
 	}
+	case N_COMPLIT: {
+		/* (T){ ... }: an unnamed object (b), initialized where it is reached */
+		uint32_t s = x->b;
+
+		l.k = L_FRAME;
+		l.off = wk_local(e, s);
+		l.align = sym_align(c, s);
+		wk_init(e, &l, c->syms[s].ty, x->a);
+		return l;
+	}
 	default:
+		if (is_record(c, x->ty))
+			return wk_fromval(e, wk_gen(e, n), x->ty);	/* a call, ?:, ({ }) ...: the address it gives */
 		break;
 	}
 	wk_unsup(e, n, "this lvalue");
+}
+
+/* ---------------- bit-fields ---------------- */
+
+static int64_t wk_floordiv(int64_t a, int64_t b) { return a >= 0 ? a / b : -((-a + b - 1) / b); }
+
+/* the unit a bit-field is accessed in: its type's size, aligned, or wider
+   for one that crosses it (packed); its offset and the field's bit in it */
+static void wk_bf_unit(ecx *e, const lval *l, qty t, int64_t *uoff, int *us, int *pos)
+{
+	int64_t bit = l->off * 8 + l->bitoff;
+	int s = wk_size(e->c, t);
+
+	for (s = s < 1 ? 1 : s; s <= 8; s *= 2) {
+		int64_t ub = wk_floordiv(bit, s * 8);
+		int p = (int)(bit - ub * s * 8);
+
+		if (p + l->width <= s * 8) {
+			*uoff = ub * s, *us = s, *pos = p;
+			return;
+		}
+	}
+	efatal(e, e->curloc, "x86-64: a bit-field across 8 bytes is not supported yet (PLAN-x86.md X3)");
+}
+
+/* a bit-field's value in a new register (l stays) */
+static val wk_bf_load(ecx *e, const lval *l, qty t)
+{
+	lval u = *l;
+	int us, pos, w = l->width;
+	int64_t uo;
+	val v;
+
+	wk_bf_unit(e, l, t, &uo, &us, &pos);
+	u.bf = 0, u.off = uo;
+	v = (val){ .k = V_REG, .r = (uint8_t)LO(treg)(e) };
+	LO(load)(e, v.r, &u, us, false);
+	if (l->sgn) {
+		if (64 - pos - w)
+			v = LO(bin)(e, T_LESSLESS, 8, false, v, vconst(64 - pos - w));
+		if (64 - w)
+			v = LO(bin)(e, T_GREATERGREATER, 8, true, v, vconst(64 - w));
+		return v;
+	}
+	if (pos)
+		v = LO(bin)(e, T_GREATERGREATER, 8, false, v, vconst(pos));
+	if (w < 64)
+		v = LO(bin)(e, T_AMP, 8, false, v, vconst((i128)(((uint64_t)1 << w) - 1)));
+	return v;
+}
+
+/* the low bits of rv into the bit-field (rv stays) */
+static void wk_bf_store(ecx *e, const lval *l, qty t, int rv)
+{
+	lval u = *l;
+	int us, pos, w = l->width;
+	int64_t uo;
+	uint64_t m;
+	val old, nv;
+
+	wk_bf_unit(e, l, t, &uo, &us, &pos);
+	u.bf = 0, u.off = uo;
+	m = (w >= 64 ? ~(uint64_t)0 : (((uint64_t)1 << w) - 1)) << pos;
+	if (us < 8)
+		m &= ((uint64_t)1 << (us * 8)) - 1;
+	old = (val){ .k = V_REG, .r = (uint8_t)LO(treg)(e) };
+	LO(load)(e, old.r, &u, us, false);
+	old = LO(bin)(e, T_AMP, 8, false, old, vconst((i128)(int64_t)~m));
+	nv = (val){ .k = V_REG, .r = (uint8_t)LO(treg)(e) };
+	LO(mov)(e, nv.r, rv);
+	if (pos)
+		nv = LO(bin)(e, T_LESSLESS, 8, false, nv, vconst(pos));
+	nv = LO(bin)(e, T_AMP, 8, false, nv, vconst((i128)(int64_t)m));
+	old = LO(bin)(e, T_PIPE, 8, false, old, nv);
+	LO(store)(e, old.r, &u, us);
+	LO(tfree)(e, old.r);
+}
+
+/* r stored to l as type t (a bit-field or not); r stays */
+static void wk_put(ecx *e, const lval *l, qty t, int r)
+{
+	if (l->bf)
+		wk_bf_store(e, l, t, r);
+	else
+		LO(store)(e, r, l, wk_size(e->c, t));
+}
+
+VPRIV void wk_bfinit(ecx *e, const lval *l, qty t, uint32_t init)
+{
+	val v = wk_gen(e, init);
+	int r = wk_reg(e, &v, t);
+
+	wk_bf_store(e, l, t, r);
+	LO(tfree)(e, r);
 }
 
 static val wk_load(ecx *e, lval l, qty t)
@@ -243,11 +380,23 @@ static val wk_load(ecx *e, lval l, qty t)
 	cc *c = e->c;
 	int r;
 
-	if (is_array(c, t) || is_func(c, t) || is_record(c, t)) {
-		/* the object itself: its address (an array or function decays; records: X3) */
+	if (is_func(c, t) || wk_mem(e, t)) {
+		/* the object itself: its address (arrays and functions decay; records, x87 long double) */
 		if (l.k == L_SYM)
 			return (val){ .k = V_ADDR, .ref = l.ref, .i = l.off };
 		return wk_vreg(LO(laddr)(e, &l));
+	}
+	if (l.bf) {
+		val v = wk_bf_load(e, &l, t);
+
+		wk_lfree(e, &l);
+		return v;
+	}
+	if (wk_freg(e, t)) {
+		r = LO(ftreg)(e);
+		LO(load)(e, r, &l, wk_size(c, t), false);
+		wk_lfree(e, &l);
+		return wk_vreg(r);
 	}
 	r = l.k == L_REG ? l.r : LO(treg)(e);
 	LO(load)(e, r, &l, wk_size(c, t), wk_signed(c, t) || KIND(c, t) == TY_BOOL ? wk_signed(c, t) : false);
@@ -260,6 +409,7 @@ static void wk_store(ecx *e, const lval *l, qty t, val *v)
 	int r = wk_reg(e, v, t);
 
 	LO(store)(e, r, l, wk_size(e->c, t));
+	LO(tfree)(e, r);
 }
 
 /* ---------------- conversions ---------------- */
@@ -274,11 +424,21 @@ static val wk_conv(ecx *e, val v, qty from, qty to)
 		wk_free(e, &v);
 		return vconst(0);
 	}
+	if (wk_wide(c, from) || wk_wide(c, to)) {
+		if (wk_wide(c, from) && wk_wide(c, to))
+			return v;
+		return LO(wcvt)(e, v, from, to);
+	}
+	if (is_flt(c, from) || is_flt(c, to)) {
+		if (KIND(c, from) == KIND(c, to))
+			return v;
+		return LO(cvt)(e, v, from, to);
+	}
 	if (KIND(c, to) == TY_BOOL) {
 		if (v.k == V_CONST)
 			return vconst(v.i != 0);
-		if (v.k == V_ADDR)
-			return vconst(1);	/* (weak symbols: X3) */
+		if (v.k == V_ADDR && !wk_weak0(c, v))
+			return vconst(1);
 		return LO(cmp)(e, T_EXCLAIMEQ, fs > 4 ? 8 : 4, false, v, vconst(0));
 	}
 	if (v.k == V_CONST)
@@ -322,7 +482,7 @@ static val wk_cast(ecx *e, uint32_t n)
 	}
 	case CK_NULL:
 		return vconst(0);
-	case CK_NOP: case CK_INT: case CK_BOOL: case CK_P2I: case CK_I2P: case CK_P2P:
+	case CK_NOP: case CK_INT: case CK_BOOL: case CK_P2I: case CK_I2P: case CK_P2P: case CK_I2F: case CK_F2I: case CK_F2F:
 		wk_scalar(e, n, x->ty);
 		wk_scalar(e, x->a, from);
 		return wk_conv(e, wk_gen(e, x->a), is_ptr(c, from) ? prim(TY_ULONG) : from, is_ptr(c, x->ty) ? prim(TY_ULONG) : x->ty);
@@ -339,6 +499,10 @@ static val wk_arith(ecx *e, int op, qty t, val a, val b)
 	cc *c = e->c;
 	i128 r;
 
+	if (is_flt(c, t))
+		return LO(fbin)(e, op, t, a, b);
+	if (wk_wide(c, t))
+		return LO(wbin)(e, op, wk_signed(c, t), a, b);
 	if (a.k == V_CONST && b.k == V_CONST && wk_fold(c, op, t, a.i, b.i, &r))
 		return vconst(r);
 	if (a.k == V_ADDR && b.k == V_CONST && (op == T_PLUS || op == T_MINUS))
@@ -382,9 +546,8 @@ static val wk_rhs(ecx *e, val *a, uint32_t rn, qty at)
 		LO(store)(e, a->r, &l, 8);
 		LO(tfree)(e, a->r);
 		b = wk_gen(e, rn);
-		a->r = (uint8_t)LO(treg)(e);
+		a->r = (uint8_t)wk_treg(e, at);
 		LO(load)(e, a->r, &l, 8, false);
-		(void)at;
 		return b;
 	}
 	return wk_gen(e, rn);
@@ -403,6 +566,10 @@ static val wk_binary(ecx *e, uint32_t n)
 		wk_scalar(e, x->b, rt);
 		a = wk_gen(e, x->a);
 		b = wk_rhs(e, &a, x->b, lt);
+		if (is_flt(c, lt))
+			return LO(fcmp)(e, op, lt, a, b);
+		if (wk_wide(c, lt))
+			return LO(wcmp)(e, op, wk_signed(c, lt), a, b);
 		if (a.k == V_CONST && b.k == V_CONST)
 			return vconst(wk_fold_cmp(op, wk_signed(c, lt), em_trunc_to(c, a.i, lt), em_trunc_to(c, b.i, lt)));
 		return LO(cmp)(e, op, is_ptr(c, lt) ? 8 : opw(c, lt), wk_signed(c, lt), a, b);
@@ -491,7 +658,7 @@ static val wk_ternary(ecx *e, uint32_t n)
 	LO(label)(e, lj);
 	if (vd)
 		return vconst(0);
-	r = LO(treg)(e);
+	r = wk_treg(e, t);
 	LO(load)(e, r, &l, 8, false);
 	return wk_vreg(r);
 }
@@ -499,10 +666,33 @@ static val wk_ternary(ecx *e, uint32_t n)
 /* l's value in a new register (l and its register stay) */
 static val wk_reload(ecx *e, const lval *l, qty t)
 {
-	int r = LO(treg)(e);
+	int r;
 
+	if (l->bf)
+		return wk_bf_load(e, l, t);
+	if (wk_mem(e, t)) {
+		/* the object's address in a new register (l keeps its own) */
+		lval t2 = *l;
+
+		if (t2.k == L_REG) {
+			t2.r = (uint8_t)LO(treg)(e);
+			LO(mov)(e, t2.r, l->r);
+		}
+		return wk_vreg(LO(laddr)(e, &t2));
+	}
+	r = wk_treg(e, t);
 	LO(load)(e, r, l, wk_size(e->c, t), wk_signed(e->c, t));
 	return wk_vreg(r);
+}
+
+/* the bytes of the object at v (type t, held by address) into l; l's address is the value */
+static val wk_putmem(ecx *e, lval *l, qty t, val v)
+{
+	int rs = wk_reg(e, &v, prim(TY_ULONG)), rd = LO(laddr)(e, l);
+
+	LO(copy)(e, rd, rs, tsize(e->c, t));
+	LO(tfree)(e, rs);
+	return wk_vreg(rd);
 }
 
 /* the type l op r is computed in, for l of type lt op= r of type rt */
@@ -510,6 +700,8 @@ static qty wk_optype(cc *c, int op, qty lt, qty rt)
 {
 	qty pl = wk_size(c, lt) >= 4 ? lt : prim(TY_INT);
 
+	if (is_flt(c, lt) || is_flt(c, rt))
+		return !is_flt(c, lt) || (is_flt(c, rt) && KIND(c, rt) > KIND(c, lt)) ? rt : lt;
 	if (op == T_LESSLESS || op == T_GREATERGREATER)
 		return pl;
 	if (wk_size(c, rt) > wk_size(c, pl) || (wk_size(c, rt) == wk_size(c, pl) && !wk_signed(c, rt)))
@@ -527,6 +719,13 @@ static val wk_assign(ecx *e, uint32_t n)
 	val v;
 
 	wk_scalar(e, x->a, lt);
+	if (wk_mem(e, lt) && !x->aux) {
+		/* the bytes of the right side's object, then the left's address as the value */
+		val s = wk_gen(e, x->b);
+
+		l = wk_lval(e, x->a);
+		return wk_putmem(e, &l, lt, s);
+	}
 	if (!x->aux) {
 		v = wk_gen(e, x->b);
 		l = wk_lval(e, x->a);
@@ -534,23 +733,46 @@ static val wk_assign(ecx *e, uint32_t n)
 		qty rt = N(x->b)->ty;
 		val a, b;
 
-		l = wk_lval(e, x->a);
-		a = wk_reload(e, &l, lt);
-		b = wk_rhs(e, &a, x->b, lt);
+		/* as clang: the right side first, then the left's address and value */
+		b = wk_gen(e, x->b);
+		if (b.k == V_REG && LO(nfree)(e) < 3) {
+			int32_t sl = wk_slot(e, 8, 8);
+			lval t = { .k = L_FRAME, .off = sl, .align = 8 };
+
+			LO(store)(e, b.r, &t, 8);
+			LO(tfree)(e, b.r);
+			l = wk_lval(e, x->a);
+			a = wk_reload(e, &l, lt);
+			b.r = (uint8_t)wk_treg(e, rt);
+			LO(load)(e, b.r, &t, 8, false);
+		} else {
+			l = wk_lval(e, x->a);
+			a = wk_reload(e, &l, lt);
+		}
 		if (is_ptr(c, lt)) {
 			v = wk_ptradd(e, a, b, rt, (int64_t)tsize(c, T(c, lt)->base) ?: 1, x->aux == T_MINUS);
 		} else {
 			qty ct = wk_optype(c, x->aux, lt, rt);
 
 			a = wk_conv(e, a, lt, ct);
-			b = wk_conv(e, b, rt, ct);
+			if (x->aux != T_LESSLESS && x->aux != T_GREATERGREATER)
+				b = wk_conv(e, b, rt, ct);	/* (a shift count stays as it is) */
 			v = wk_conv(e, wk_arith(e, x->aux, ct, a, b), ct, lt);
 		}
 	}
+	if (wk_mem(e, lt))
+		return wk_putmem(e, &l, lt, v);
 	{
 		int r = wk_reg(e, &v, lt);
 
-		LO(store)(e, r, &l, wk_size(c, lt));
+		wk_put(e, &l, lt, r);
+		if (l.bf) {
+			/* the value is the field's (truncated to its width) */
+			LO(tfree)(e, r);
+			v = wk_bf_load(e, &l, lt);
+			wk_lfree(e, &l);
+			return v;
+		}
 		wk_lfree(e, &l);
 		return wk_vreg(r);
 	}
@@ -573,11 +795,32 @@ static val wk_incdec(ecx *e, uint32_t n)
 	if (KIND(c, t) == TY_BOOL)
 		wk_unsup(e, n, "++/-- on _Bool");
 	l = wk_lval(e, x->a);
-	if (post)
+	if (post && wk_mem(e, t)) {
+		/* the old value of an object held by address: a copy */
+		lval cp = { .k = L_FRAME, .off = wk_slot(e, tsize(c, t), talign(c, t)), .align = talign(c, t) };
+
+		old = wk_putmem(e, &cp, t, wk_reload(e, &l, t));
+	} else if (post) {
 		old = wk_reload(e, &l, t);
-	nv = wk_arith(e, dec ? T_MINUS : T_PLUS, ot, wk_reload(e, &l, t), vconst(d ? d : 1));
+	}
+	nv = wk_arith(e, dec ? T_MINUS : T_PLUS, ot, wk_reload(e, &l, t),
+		      is_flt(c, t) ? wk_conv(e, vconst(1), prim(TY_INT), t) : vconst(d ? d : 1));
+	if (wk_mem(e, t)) {
+		nv = wk_putmem(e, &l, t, nv);
+		if (post) {
+			wk_free(e, &nv);
+			return old;
+		}
+		return nv;
+	}
 	r = wk_reg(e, &nv, t);
-	LO(store)(e, r, &l, wk_size(c, t));
+	wk_put(e, &l, t, r);
+	if (l.bf && !post) {
+		LO(tfree)(e, r);
+		nv = wk_bf_load(e, &l, t);
+		wk_lfree(e, &l);
+		return nv;
+	}
 	wk_lfree(e, &l);
 	if (post) {
 		LO(tfree)(e, r);
@@ -598,6 +841,10 @@ static val wk_unary(ecx *e, uint32_t n)
 	a = wk_gen(e, x->a);
 	if (x->aux == T_PLUS)
 		return a;
+	if (is_flt(c, x->ty))
+		return LO(fneg)(e, x->ty, a);
+	if (wk_wide(c, x->ty))
+		return LO(wun)(e, x->aux, a);
 	if (a.k == V_CONST)
 		return wk_const(c, x->aux == T_MINUS ? -a.i : ~a.i, x->ty);
 	{
@@ -611,6 +858,33 @@ static val wk_unary(ecx *e, uint32_t n)
 
 /* ---------------- calls ---------------- */
 
+/* v (of type t) into the argument a's slot: a scalar extended, a record's bytes */
+static void wk_argslot(ecx *e, wkarg *a, qty t, val v)
+{
+	cc *c = e->c;
+	lval l;
+
+	a->slot = wk_slot(e, a->size > 8 ? (a->size + 7) & ~(uint64_t)7 : 8, a->align);
+	l = (lval){ .k = L_FRAME, .off = a->slot, .align = 8 };
+	if (wk_mem(e, t)) {
+		int rs = wk_reg(e, &v, prim(TY_ULONG)), rd = LO(laddr)(e, &l);
+
+		if (a->size)
+			LO(copy)(e, rd, rs, a->size);
+		LO(tfree)(e, rs);
+		LO(tfree)(e, rd);
+		return;
+	}
+	{
+		int r = wk_reg(e, &v, t);
+
+		if (wk_size(c, t) < 4 && !is_flt(c, t))
+			LO(ext)(e, r, wk_size(c, t), wk_signed(c, t));
+		LO(store)(e, r, &l, 8);
+		LO(tfree)(e, r);
+	}
+}
+
 static val wk_call(ecx *e, uint32_t n)
 {
 	cc *c = e->c;
@@ -620,8 +894,8 @@ static val wk_call(ecx *e, uint32_t n)
 	const ctype *f = T(c, ft);
 	uint32_t ref = 0;
 	val fn = { 0 };
-	int32_t slots[64];
-	bool var = (f->flags & (TF_VARIADIC | TF_NOPROTO)) != 0;
+	wkarg args[64], r = { 0 };
+	bool var = (f->flags & (TF_VARIADIC | TF_NOPROTO)) != 0, rec_ = wk_mem(e, f->base);
 
 	if (x->c > 64)
 		wk_unsup(e, n, "a call with more than 64 arguments");
@@ -630,34 +904,38 @@ static val wk_call(ecx *e, uint32_t n)
 	if (fx->op == N_CAST && fx->aux == CK_FDECAY && N(fx->a)->op == N_VAR) {
 		uint32_t s = canon_sym(c, N(fx->a)->a);
 
-		if (c->syms[s].kind == S_BUILTIN)
-			wk_unsup(e, n, "a builtin");
-		note_ref(e, REF(RK_SYM, s));
-		ref = REF(RK_SYM, s);
+		if (c->syms[s].kind == S_BUILTIN) {
+			ref = REF(RK_NAME, (uint32_t)c->syms[s].val);	/* a library function by name */
+		} else {
+			note_ref(e, REF(RK_SYM, s));
+			ref = REF(RK_SYM, s);
+		}
 	}
 	for (uint32_t i = 0; i < x->c; i++) {
 		uint32_t an = c->lists[x->b + i];
 		qty at = N(an)->ty;
-		val v;
-		int r;
-		lval l;
 
 		wk_scalar(e, an, at);
-		v = wk_gen(e, an);
-		r = wk_reg(e, &v, at);
-		if (wk_size(c, at) < 4)
-			LO(ext)(e, r, wk_size(c, at), wk_signed(c, at));
-		slots[i] = wk_slot(e, 8, 8);
-		l = (lval){ .k = L_FRAME, .off = slots[i], .align = 8 };
-		LO(store)(e, r, &l, 8);
-		LO(tfree)(e, r);
+		LO(classify)(e, at, &args[i]);
+		wk_argslot(e, &args[i], at, wk_gen(e, an));
+	}
+	if (rec_) {
+		LO(classify)(e, f->base, &r);
+		r.slot = wk_slot(e, (r.size + 7) & ~(uint64_t)7 ?: 8, r.align);
 	}
 	if (!ref) {
 		fn = wk_gen(e, x->a);
 		wk_reg(e, &fn, prim(TY_ULONG));
 	}
 	e->calls = true;
-	return LO(call)(e, ref, ref ? NULL : &fn, slots, (int)x->c, var, wk_size(c, f->base), wk_signed(c, f->base));
+	{
+		val v = LO(call)(e, ref, ref ? NULL : &fn, args, (int)x->c, var, rec_ ? &r : NULL, f->base);
+		lval l = { .k = L_FRAME, .off = r.slot, .align = 8 };
+
+		if (!rec_)
+			return v;
+		return wk_vreg(LO(laddr)(e, &l));	/* a record result: its object's address */
+	}
 }
 
 /* ({ ...; expr; }): the statements, then the last one's value */
@@ -678,6 +956,166 @@ static val wk_stmtexpr(ecx *e, uint32_t n)
 	return vconst(0);
 }
 
+/* ---------------- builtins ---------------- */
+
+/* a va_list operand's address in a temporary (x86-64's is an array: it decays) */
+static int wk_valist(ecx *e, uint32_t n)
+{
+	cc *c = e->c;
+
+	if (is_ptr(c, N(n)->ty)) {
+		val v = wk_gen(e, n);
+
+		return wk_reg(e, &v, prim(TY_ULONG));
+	}
+	{
+		lval l = wk_lval(e, n);
+
+		return LO(laddr)(e, &l);
+	}
+}
+
+static val wk_builtin(ecx *e, uint32_t n)
+{
+	cc *c = e->c;
+	const node *x = N(n);
+	const uint32_t *arg = &c->lists[x->b];
+	char b[64];
+
+	switch (x->aux) {
+	case BI_CONSTANT_P: {
+		/* clang's rule without the optimizer: 1 if the front end folds the operand (a pointer
+		   only as a string literal at offset 0), else 0 (the operand is not evaluated) */
+		cval cv;
+
+		return vconst(cc_eval(c, arg[0], &cv) && (cv.kind == CV_INT || cv.kind == CV_FLT ||
+							  (cv.kind == CV_ADDR && cv.str && cv.i == 0 && !cv.sym && !cv.label)));
+	}
+	case BI_EXPECT: case BI_EXPECT_PROB: case BI_ASSUME_ALIGNED: case BI_EXTRACT_RETURN_ADDR: {
+		/* the value of the first argument; the others are evaluated first */
+		val v;
+
+		for (uint32_t i = 1; i < x->c; i++) {
+			v = wk_gen(e, arg[i]);
+			wk_free(e, &v);
+		}
+		return wk_gen(e, arg[0]);
+	}
+	case BI_ASSUME: case BI_IS_CONSTANT_EVALUATED:
+		return vconst(0);
+	case BI_PREFETCH: {
+		val v = wk_gen(e, arg[0]);
+
+		wk_free(e, &v);
+		return vconst(0);
+	}
+	case BI_UNREACHABLE: case BI_TRAP:
+		LO(trap)(e);
+		return vconst(0);
+	case BI_RETURN_ADDRESS: case BI_FRAME_ADDRESS: {
+		val v = wk_gen(e, arg[0]);
+
+		if (v.k != V_CONST || v.i != 0)
+			wk_unsup(e, n, "a return or frame address beyond level 0");
+		return LO(frame)(e, x->aux == BI_RETURN_ADDRESS);
+	}
+	case BI_OBJECT_SIZE: case BI_DYNAMIC_OBJECT_SIZE: {
+		val t = wk_gen(e, arg[1]);
+
+		return vconst(t.k == V_CONST && (t.i & 2) ? 0 : (i128)(uint64_t)-1);
+	}
+	case BI_ALLOCA: case BI_ALLOCA_UNINIT: {
+		val v = wk_gen(e, arg[0]);
+
+		e->dyn = true;
+		return LO(alloca)(e, wk_conv(e, v, N(arg[0])->ty, prim(TY_ULONG)));
+	}
+	case BI_CLZ: case BI_CLZL: case BI_CLZLL: case BI_CTZ: case BI_CTZL: case BI_CTZLL:
+	case BI_FFS: case BI_FFSL: case BI_FFSLL: case BI_POPCOUNT: case BI_POPCOUNTL: case BI_POPCOUNTLL:
+	case BI_PARITY: case BI_PARITYL: case BI_PARITYLL: case BI_BSWAP16: case BI_BSWAP32: case BI_BSWAP64: {
+		qty at = N(arg[0])->ty;
+		val v = wk_gen(e, arg[0]);
+		int sz = wk_size(c, at) > 4 ? 8 : 4;
+
+		if (wk_size(c, at) < 4)
+			v = wk_conv(e, v, at, prim(TY_UINT));
+		return LO(bitop)(e, x->aux, sz, v);
+	}
+	case BI_ADD_OVERFLOW: case BI_SUB_OVERFLOW: case BI_MUL_OVERFLOW: {
+		/* the exact result in 128 bits; overflow when it differs from the stored one extended back */
+		qty ta = N(arg[0])->ty, tb = N(arg[1])->ty, tr = T(c, N(arg[2])->ty)->base, w = prim(TY_INT128);
+		int op = x->aux == BI_ADD_OVERFLOW ? T_PLUS : x->aux == BI_SUB_OVERFLOW ? T_MINUS : T_STAR;
+		val a, b, r, lo, back;
+		lval l;
+		int rr, cp, rs;
+
+		if (wk_size(c, ta) > 8 || wk_size(c, tb) > 8 || wk_size(c, tr) > 8 || !LO(i128mem)())
+			wk_unsup(e, n, "a 128-bit overflow builtin");
+		a = wk_conv(e, wk_gen(e, arg[0]), ta, w);
+		b = wk_conv(e, wk_gen(e, arg[1]), tb, w);
+		r = LO(wbin)(e, op, true, a, b);
+		l = wk_fromval(e, wk_gen(e, arg[2]), tr);
+		rr = wk_reg(e, &r, prim(TY_ULONG));
+		cp = LO(treg)(e);
+		LO(mov)(e, cp, rr);
+		lo = wk_conv(e, (val){ .k = V_REG, .r = (uint8_t)cp }, w, tr);
+		rs = wk_reg(e, &lo, tr);
+		LO(store)(e, rs, &l, wk_size(c, tr));
+		wk_lfree(e, &l);
+		back = wk_conv(e, lo, tr, w);
+		return LO(wcmp)(e, T_EXCLAIMEQ, true, (val){ .k = V_REG, .r = (uint8_t)rr }, back);
+	}
+	case BI_SIGNBIT: {
+		qty at = N(arg[0])->ty;
+		val v = wk_gen(e, arg[0]);
+
+		if (wk_mem(e, at)) {
+			/* x87: the sign is bit 15 of the top word */
+			lval l = wk_fromval(e, v, at);
+			int r = LO(treg)(e);
+
+			l.off += 8;
+			LO(load)(e, r, &l, 2, false);
+			wk_lfree(e, &l);
+			return LO(bin)(e, T_GREATERGREATER, 4, false, (val){ .k = V_REG, .r = (uint8_t)r }, vconst(15));
+		}
+		v = LO(fbits)(e, v, wk_size(c, at));
+		return LO(bin)(e, T_GREATERGREATER, 8, false, v, vconst(wk_size(c, at) * 8 - 1));
+	}
+	case BI_VA_START: {
+		int r = wk_valist(e, arg[0]);
+
+		LO(va_start)(e, r);
+		LO(tfree)(e, r);
+		return vconst(0);
+	}
+	case BI_VA_END: {
+		val v = wk_gen(e, arg[0]);
+
+		wk_free(e, &v);
+		return vconst(0);
+	}
+	case BI_VA_COPY: {
+		int rd = wk_valist(e, arg[0]), rs = wk_valist(e, arg[1]);
+
+		LO(copy)(e, rd, rs, tsize(c, T(c, c->t_valist)->kind == TY_ARRAY ? T(c, c->t_valist)->base : c->t_valist));
+		LO(tfree)(e, rd);
+		LO(tfree)(e, rs);
+		return vconst(0);
+	}
+	default: {
+		cval cv;
+
+		if (cc_eval(c, n, &cv) && cv.kind == CV_INT)
+			return vconst(cv.i);	/* folded by the front end (__builtin_classify_type ...) */
+		break;
+	}
+	}
+
+	snprintf(b, sizeof b, "builtin %d", N(n)->aux);
+	efatal(e, N(n)->loc, "x86-64: %s is not supported yet (PLAN-x86.md X3)", b);
+}
+
 /* ---------------- expressions ---------------- */
 
 VPRIV val wk_gen(ecx *e, uint32_t n)
@@ -689,6 +1127,8 @@ VPRIV val wk_gen(ecx *e, uint32_t n)
 		efatal(e, x->loc, "expression nested too deeply");
 	switch (x->op) {
 	case N_NUM:
+		if (wk_mem(e, x->ty))
+			return LO(wconst)(e, c->ipool[x->a]);	/* __int128 */
 		return wk_const(c, c->ipool[x->a], x->ty);
 	case N_VAR: {
 		const sym *y = &c->syms[x->a];
@@ -703,6 +1143,11 @@ VPRIV val wk_gen(ecx *e, uint32_t n)
 		}
 		wk_scalar(e, n, x->ty);
 		return wk_load(e, wk_lval(e, n), x->ty);
+	}
+	case N_COMPLIT: {
+		lval l = wk_lval(e, n);
+
+		return wk_load(e, l, x->ty);
 	}
 	case N_STR: case N_MEMBER: case N_INDEX: case N_DEREF:
 		if (!is_array(c, x->ty) && !is_func(c, x->ty))
@@ -746,10 +1191,65 @@ VPRIV val wk_gen(ecx *e, uint32_t n)
 		return wk_call(e, n);
 	case N_STMTEXPR:
 		return wk_stmtexpr(e, n);
+	case N_BUILTIN:
+		return wk_builtin(e, n);
+	case N_VAARG: {
+		int ra = wk_valist(e, x->a), rp;
+		lval l;
+
+		wk_scalar(e, n, x->ty);
+		rp = LO(va_arg)(e, ra, x->ty);
+		LO(tfree)(e, ra);
+		l = (lval){ .k = L_REG, .r = (uint8_t)rp, .align = 8 };
+		return wk_load(e, l, x->ty);
+	}
 	case N_FNUM:
-		wk_unsup(e, n, "floating point");
-	default:
-		wk_unsup(e, n, "this expression");
+		wk_scalar(e, n, x->ty);
+		if (wk_mem(e, x->ty)) {
+			/* a long double constant: its bytes stored to a new object */
+			u128 q;
+
+			/* a 16-byte long double constant keeps its bits after its double in the pool */
+			memcpy(&q, &c->fpool[x->a + 1], 16);
+			uint8_t b[10];
+			uint64_t lo, hi;
+			lval l = { .k = L_FRAME, .off = wk_slot(e, 16, 16), .align = 16 }, h;
+			val v;
+			int r;
+
+			q_to_x87(q, b);
+			memcpy(&lo, b, 8);
+			hi = (uint64_t)b[8] | (uint64_t)b[9] << 8;
+			v = vconst((i128)(int64_t)lo);
+			r = LO(toreg)(e, &v, 8);
+			LO(store)(e, r, &l, 8);
+			LO(tfree)(e, r);
+			v = vconst((i128)hi);
+			r = LO(toreg)(e, &v, 8);
+			h = l;
+			h.off += 8;
+			LO(store)(e, r, &h, 8);
+			LO(tfree)(e, r);
+			return wk_vreg(LO(laddr)(e, &l));
+		}
+		{
+			double d = c->fpool[x->a];
+			float f = (float)d;
+			uint64_t bits = 0;
+
+			if (KIND(c, x->ty) == TY_FLOAT)
+				memcpy(&bits, &f, 4);
+			else
+				memcpy(&bits, &d, 8);
+			return LO(fconst)(e, bits, KIND(c, x->ty) == TY_FLOAT ? 4 : 8);
+		}
+	default: {
+		static const char *const nm[N_NKINDS] = { [N_SIZEOF_VLA] = "sizeof of a VLA", [N_COMPLIT] = "a compound literal",
+			[N_INIT] = "an initializer list", [N_LABELADDR] = "a label address", [N_VAARG] = "va_arg",
+			[N_CPLX] = "a complex value", [N_MEMBER] = "a member" };
+
+		wk_unsup(e, n, nm[x->op] ? nm[x->op] : "this expression");
+	}
 	}
 }
 
@@ -785,7 +1285,7 @@ VPRIV void wk_cond(ecx *e, uint32_t n, bool jump_if, uint32_t lbl)
 		}
 		break;
 	case N_BINARY:
-		if (wk_is_cmp(x->aux) && !is_flt(c, N(x->a)->ty)) {
+		if (wk_is_cmp(x->aux) && !is_flt(c, N(x->a)->ty) && !wk_mem(e, N(x->a)->ty)) {
 			qty lt = N(x->a)->ty;
 			int op = x->aux;
 			val a, b;
@@ -826,12 +1326,17 @@ VPRIV void wk_cond(ecx *e, uint32_t n, bool jump_if, uint32_t lbl)
 	{
 		val v = wk_gen(e, n);
 
+		if (is_flt(c, x->ty) || wk_wide(c, x->ty)) {
+			v = wk_conv(e, v, x->ty, prim(TY_BOOL));	/* != 0.0 (NaN is true) */
+			LO(brz)(e, v, 4, jump_if, lbl);
+			return;
+		}
 		if (v.k == V_CONST) {
 			if ((v.i != 0) == jump_if)
 				LO(jump)(e, lbl);
 			return;
 		}
-		if (v.k == V_ADDR) {
+		if (v.k == V_ADDR && !wk_weak0(c, v)) {
 			if (jump_if)
 				LO(jump)(e, lbl);
 			return;

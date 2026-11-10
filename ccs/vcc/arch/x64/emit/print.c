@@ -6,11 +6,14 @@
 /* ops whose result must be their first operand on x86 */
 static bool x64_tied(int op)
 {
-	return (op >= X_ADD && op <= X_IMUL) || (op >= X_ADDI && op <= X_XORI) || (op >= X_SHLI && op <= X_SAR) ||
-	       op == X_NEG || op == X_NOT;
+	return (op >= X_ADD && op <= X_SBB) || (op >= X_ADDI && op <= X_XORI) || (op >= X_SHLI && op <= X_SAR) ||
+	       op == X_NEG || op == X_NOT || op == X_BSWAP || (op >= X_FADD && op <= X_FXOR);
 }
 
-static bool x64_commutes(int op) { return op == X_ADD || op == X_AND || op == X_OR || op == X_XOR || op == X_IMUL; }
+static bool x64_commutes(int op)
+{
+	return op == X_ADD || op == X_AND || op == X_OR || op == X_XOR || op == X_IMUL || op == X_FADD || op == X_FMUL || op == X_FXOR;
+}
 
 /*
  * r0 = r1 op r2 as x86 has it, r0 = r0 op r2: a mov in front when r0 != r1;
@@ -31,9 +34,11 @@ VPRIV void x64_twoaddr(ecx *e)
 				if (x64_commutes(i.op)) {
 					i.r[2] = i.r[1];
 				} else {
-					o[n++] = (rec){ .op = X_MOV, .sz = 8, .r = { R11, i.r[2], XNOREG, XNOREG } };
+					int t = IS_XMM(i.r[2]) ? XMM15 : R11;
+
+					o[n++] = (rec){ .op = X_MOV, .sz = 8, .r = { (uint8_t)t, i.r[2], XNOREG, XNOREG } };
 					o[n++] = (rec){ .op = X_MOV, .sz = 8, .r = { i.r[0], i.r[1], XNOREG, XNOREG } };
-					i.r[2] = R11;
+					i.r[2] = (uint8_t)t;
 				}
 			} else {
 				o[n++] = (rec){ .op = X_MOV, .sz = 8, .r = { i.r[0], i.r[1], XNOREG, XNOREG } };
@@ -61,6 +66,11 @@ static const char *const x64_ccn[] = { "o", "no", "b", "ae", "e", "ne", "be", "a
 
 static void x64_reg(tbuf *b, int r, int sz)
 {
+	if (IS_XMM(r)) {
+		tb_s(b, "%xmm");
+		tb_u(b, (uint64_t)(r - XMM0));
+		return;
+	}
 	tb_c(b, '%');
 	tb_s(b, sz == 8 ? x64_r64[r] : sz == 4 ? x64_r32[r] : sz == 2 ? x64_r16[r] : x64_r8[r]);
 }
@@ -110,7 +120,7 @@ VPRIV void x64_print(ecx *e, tbuf *b, uint32_t s)
 	cc *c = e->c;
 	xst *X = e->x64;
 	static const char *const alu[] = { [X_ADD] = "add", [X_SUB] = "sub", [X_AND] = "and", [X_OR] = "or", [X_XOR] = "xor",
-					   [X_IMUL] = "imul", [X_ADDI] = "add", [X_SUBI] = "sub", [X_ANDI] = "and", [X_ORI] = "or",
+					   [X_IMUL] = "imul", [X_ADC] = "adc", [X_SBB] = "sbb", [X_ADDI] = "add", [X_SUBI] = "sub", [X_ANDI] = "and", [X_ORI] = "or",
 					   [X_XORI] = "xor", [X_SHLI] = "shl", [X_SHRI] = "shr", [X_SARI] = "sar", [X_SHL] = "shl",
 					   [X_SHR] = "shr", [X_SAR] = "sar", [X_NEG] = "neg", [X_NOT] = "not" };
 	int32_t frame = (e->wk->foff + 15) & ~15;
@@ -131,7 +141,12 @@ VPRIV void x64_print(ecx *e, tbuf *b, uint32_t s)
 			tb_s(b, ":\n");
 			continue;
 		case X_MOV:
-			x64_ins(b, "mov", sz);
+			if (IS_XMM(i->r[0]) && IS_XMM(i->r[1]))
+				tb_s(b, "\tmovaps\t");
+			else if (IS_XMM(i->r[0]) || IS_XMM(i->r[1]))
+				tb_s(b, sz == 4 ? "\tmovd\t" : "\tmovq\t");
+			else
+				x64_ins(b, "mov", sz);
 			x64_reg(b, i->r[1], sz);
 			tb_s(b, ", ");
 			x64_reg(b, i->r[0], sz);
@@ -162,7 +177,15 @@ VPRIV void x64_print(ecx *e, tbuf *b, uint32_t s)
 			}
 			break;
 		}
-		case X_LD: {
+		case X_LD:
+			if (IS_XMM(i->r[0])) {
+				tb_s(b, sz == 4 ? "\tmovss\t" : sz == 8 ? "\tmovsd\t" : "\tmovups\t");
+				x64_memop(c, b, i);
+				tb_s(b, ", ");
+				x64_reg(b, i->r[0], 8);
+				break;
+			}
+			{
 			static const char *const sx[] = { [1] = "\tmovsbq\t", [2] = "\tmovswq\t", [4] = "\tmovslq\t", [8] = "\tmovq\t" };
 			static const char *const zx[] = { [1] = "\tmovzbl\t", [2] = "\tmovzwl\t", [4] = "\tmovl\t", [8] = "\tmovq\t" };
 
@@ -171,9 +194,12 @@ VPRIV void x64_print(ecx *e, tbuf *b, uint32_t s)
 			tb_s(b, ", ");
 			x64_reg(b, i->r[0], i->cond || sz == 8 ? 8 : 4);
 			break;
-		}
+			}
 		case X_ST:
-			x64_ins(b, "mov", sz);
+			if (IS_XMM(i->r[2]))
+				tb_s(b, sz == 4 ? "\tmovss\t" : sz == 8 ? "\tmovsd\t" : "\tmovups\t");
+			else
+				x64_ins(b, "mov", sz);
 			x64_reg(b, i->r[2], sz);
 			tb_s(b, ", ");
 			x64_memop(c, b, i);
@@ -184,7 +210,7 @@ VPRIV void x64_print(ecx *e, tbuf *b, uint32_t s)
 			tb_s(b, ", ");
 			x64_reg(b, i->r[0], 8);
 			break;
-		case X_ADD: case X_SUB: case X_AND: case X_OR: case X_XOR: case X_IMUL:
+		case X_ADD: case X_SUB: case X_AND: case X_OR: case X_XOR: case X_IMUL: case X_ADC: case X_SBB:
 			x64_ins(b, alu[i->op], sz);
 			x64_reg(b, i->r[2], sz);
 			tb_s(b, ", ");
@@ -275,6 +301,23 @@ VPRIV void x64_print(ecx *e, tbuf *b, uint32_t s)
 		case X_CQO:
 			tb_s(b, sz == 8 ? "\tcqto" : "\tcltd");
 			break;
+		case X_UD2:
+			tb_s(b, "\tud2");
+			break;
+		case X_BSF: case X_BSR:
+			x64_ins(b, i->op == X_BSF ? "bsf" : "bsr", sz);
+			x64_reg(b, i->r[1], sz);
+			tb_s(b, ", ");
+			x64_reg(b, i->r[0], sz);
+			break;
+		case X_BSWAP:
+			x64_ins(b, "bswap", sz);
+			x64_reg(b, i->r[0], sz);
+			break;
+		case X_MULW:
+			x64_ins(b, "mul", sz);
+			x64_reg(b, i->r[1], sz);
+			break;
 		case X_IDIV: case X_DIV:
 			x64_ins(b, i->op == X_IDIV ? "idiv" : "div", sz);
 			x64_reg(b, i->r[1], sz);
@@ -289,6 +332,84 @@ VPRIV void x64_print(ecx *e, tbuf *b, uint32_t s)
 			x64_reg(b, i->r[0], i->cond ? 8 : 4);
 			break;
 		}
+		case X_FADD: case X_FSUB: case X_FMUL: case X_FDIV: {
+			static const char *const fo[] = { "add", "sub", "mul", "div" };
+
+			tb_c(b, '\t');
+			tb_s(b, fo[i->op - X_FADD]);
+			tb_s(b, sz == 4 ? "ss\t" : "sd\t");
+			x64_reg(b, i->r[2], 8);
+			tb_s(b, ", ");
+			x64_reg(b, i->r[0], 8);
+			break;
+		}
+		case X_FXOR:
+			tb_s(b, "\txorps\t");
+			x64_reg(b, i->r[2], 8);
+			tb_s(b, ", ");
+			x64_reg(b, i->r[0], 8);
+			break;
+		case X_FCMP:
+			tb_s(b, sz == 4 ? "\tucomiss\t" : "\tucomisd\t");
+			x64_reg(b, i->r[2], 8);
+			tb_s(b, ", ");
+			x64_reg(b, i->r[1], 8);
+			break;
+		case X_FSETCC:
+			tb_s(b, i->cond ? "\tsetne\t" : "\tsete\t");
+			x64_reg(b, i->r[0], 1);
+			tb_s(b, i->cond ? "\n\tsetp\t%r11b\n\torb\t%r11b, " : "\n\tsetnp\t%r11b\n\tandb\t%r11b, ");
+			x64_reg(b, i->r[0], 1);
+			tb_s(b, "\n\tmovzbl\t");
+			x64_reg(b, i->r[0], 1);
+			tb_s(b, ", ");
+			x64_reg(b, i->r[0], 4);
+			break;
+		case X_CVTI2F:
+			tb_s(b, sz == 4 ? "\tcvtsi2ss" : "\tcvtsi2sd");
+			tb_c(b, i->sh == 8 ? 'q' : 'l');
+			tb_c(b, '\t');
+			x64_reg(b, i->r[1], i->sh);
+			tb_s(b, ", ");
+			x64_reg(b, i->r[0], 8);
+			break;
+		case X_CVTF2I:
+			tb_s(b, i->sh == 4 ? "\tcvttss2si" : "\tcvttsd2si");
+			tb_c(b, sz == 8 ? 'q' : 'l');
+			tb_c(b, '\t');
+			x64_reg(b, i->r[1], 8);
+			tb_s(b, ", ");
+			x64_reg(b, i->r[0], sz);
+			break;
+		case X_CVTF2F:
+			tb_s(b, sz == 8 ? "\tcvtss2sd\t" : "\tcvtsd2ss\t");
+			x64_reg(b, i->r[1], 8);
+			tb_s(b, ", ");
+			x64_reg(b, i->r[0], 8);
+			break;
+		case X_X87: {
+			static const char *const xn[] = { [XF_LDT] = "fldt", [XF_STPT] = "fstpt", [XF_ADD] = "faddp\t%st, %st(1)",
+				[XF_SUB] = "fsubrp\t%st, %st(1)", [XF_MUL] = "fmulp\t%st, %st(1)", [XF_DIV] = "fdivrp\t%st, %st(1)",
+				[XF_CHS] = "fchs", [XF_UCOMIP] = "fucomip\t%st(1), %st", [XF_POP] = "fstp\t%st(0)",
+				[XF_STCW] = "fnstcw", [XF_LDCW] = "fldcw", [XF_LDZ] = "fldz" };
+
+			tb_c(b, '\t');
+			if (i->cond == XF_LD || i->cond == XF_STP)
+				tb_s(b, i->cond == XF_LD ? (sz == 4 ? "flds" : "fldl") : (sz == 4 ? "fstps" : "fstpl"));
+			else if (i->cond == XF_ILD || i->cond == XF_ISTP)
+				tb_s(b, i->cond == XF_ILD ? (sz == 2 ? "filds" : sz == 4 ? "fildl" : "fildll")
+							  : (sz == 2 ? "fistps" : sz == 4 ? "fistpl" : "fistpll"));
+			else
+				tb_s(b, xn[i->cond]);
+			if (i->r[1] != XNOREG) {
+				tb_c(b, '\t');
+				x64_memop(c, b, i);
+			}
+			break;
+		}
+		case X_REP:
+			tb_s(b, i->cond ? "\trep\tstosb" : "\trep\tmovsb");
+			break;
 		default:
 			efatal(e, e->curloc, "internal error: x86-64 record %d", i->op);
 		}

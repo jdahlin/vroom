@@ -4,7 +4,6 @@
 #define X_MAXREC (1u << 22)
 #define X_BUFREC ((size_t)X_MAXREC * 3)	/* twoaddr.c adds at most two records per record; the buffers swap */
 
-static const uint8_t x64_argreg[6] = { RDI, RSI, RDX, RCX, R8, R9 };
 /* temporaries in the order they are handed out: the argument registers last */
 static const uint8_t x64_order[8] = { R10, R9, R8, RDI, RSI, RDX, RCX, RAX };
 
@@ -48,7 +47,7 @@ VPRIV rec *x64_put(ecx *e, int op)
 	return r;
 }
 
-static rec *x64_op3(ecx *e, int op, int sz, int r0, int r1, int r2)
+VPRIV rec *x64_op3(ecx *e, int op, int sz, int r0, int r1, int r2)
 {
 	rec *i = x64_put(e, op);
 
@@ -56,13 +55,13 @@ static rec *x64_op3(ecx *e, int op, int sz, int r0, int r1, int r2)
 	return i;
 }
 
-static void x64_mov(ecx *e, int rd, int rs)
+VPRIV void x64_mov(ecx *e, int rd, int rs)
 {
 	if (rd != rs)
 		x64_op3(e, X_MOV, 8, rd, rs, XNOREG);
 }
 
-static void x64_mem(ecx *e, int op, int sz, int r, const lval *l, bool sgn)
+VPRIV void x64_mem(ecx *e, int op, int sz, int r, const lval *l, bool sgn)
 {
 	rec *i = x64_put(e, op);
 
@@ -96,14 +95,26 @@ VPRIV int x64_treg(ecx *e)
 
 VPRIV void x64_tfree(ecx *e, int r)
 {
-	if (r < 16)
+	if (r < 32)
 		e->x64->live &= ~(1u << r);
 }
 
 VPRIV void x64_tkeep(ecx *e, int r)
 {
-	if (r < 16)
+	if (r < 32)
 		e->x64->live |= 1u << r;
+}
+
+VPRIV int x64_ftreg(ecx *e)
+{
+	xst *X = e->x64;
+
+	for (int r = XMM8; r < XMM15; r++)
+		if (!(X->live & (1u << r))) {
+			X->live |= 1u << r;
+			return r;
+		}
+	efatal(e, e->curloc, "x86-64: expression too complex (out of vector registers)");
 }
 
 VPRIV int x64_nfree(ecx *e) { return 8 - __builtin_popcount(e->x64->live & X_TEMPS); }
@@ -148,6 +159,90 @@ VPRIV int x64_laddr(ecx *e, const lval *l)
 	if (l->k != L_REG || l->off)
 		x64_mem(e, X_LEA, 8, r, l, false);
 	return r;
+}
+
+/* registers a block operation needs (rep movsb/stosb), saved if live and not one of keep */
+VPRIV uint32_t x64_save(ecx *e, const uint8_t *regs, int n, int k0, int k1)
+{
+	xst *X = e->x64;
+	uint32_t sv = 0;
+
+	for (int k = 0; k < n; k++)
+		if ((X->live & (1u << regs[k])) && regs[k] != k0 && regs[k] != k1) {
+			x64_op3(e, X_PUSH, 8, XNOREG, regs[k], XNOREG);
+			X->pushes++;
+			sv |= 1u << regs[k];
+		}
+	return sv;
+}
+
+VPRIV void x64_restore(ecx *e, uint32_t sv)
+{
+	xst *X = e->x64;
+
+	for (int r = 15; r >= 0; r--)
+		if (sv & (1u << r)) {
+			x64_op3(e, X_POP, 8, r, XNOREG, XNOREG);
+			X->pushes--;
+		}
+}
+
+VPRIV void x64_movi(ecx *e, int r, int64_t v)
+{
+	x64_op3(e, X_MOVI, 8, r, XNOREG, XNOREG)->imm = v;
+}
+
+VPRIV void x64_copy(ecx *e, int rdst, int rsrc, uint64_t n)
+{
+	if (n <= 128) {
+		for (uint64_t o = 0; o < n;) {
+			int k = n - o >= 8 ? 8 : n - o >= 4 ? 4 : n - o >= 2 ? 2 : 1;
+			lval s = { .k = L_REG, .r = (uint8_t)rsrc, .off = (int64_t)o }, d = { .k = L_REG, .r = (uint8_t)rdst, .off = (int64_t)o };
+
+			x64_mem(e, X_LD, k, R11, &s, false);
+			x64_mem(e, X_ST, k, R11, &d, false);
+			o += (uint64_t)k;
+		}
+		return;
+	}
+	{
+		static const uint8_t rr[3] = { RDI, RSI, RCX };
+		uint32_t sv = x64_save(e, rr, 3, -1, -1);
+
+		/* rdst, rsrc may be any of rdi rsi rcx: through r11 and the stack */
+		x64_op3(e, X_PUSH, 8, XNOREG, rsrc, XNOREG);
+		x64_mov(e, R11, rdst);
+		x64_op3(e, X_POP, 8, RSI, XNOREG, XNOREG);
+		x64_mov(e, RDI, R11);
+		x64_movi(e, RCX, (int64_t)n);
+		x64_put(e, X_REP)->cond = 0;
+		x64_restore(e, sv);
+	}
+}
+
+VPRIV void x64_zero(ecx *e, int rdst, uint64_t n)
+{
+	if (n <= 128) {
+		x64_op3(e, X_MOVI, 4, R11, XNOREG, XNOREG)->imm = 0;
+		for (uint64_t o = 0; o < n;) {
+			int k = n - o >= 8 ? 8 : n - o >= 4 ? 4 : n - o >= 2 ? 2 : 1;
+			lval d = { .k = L_REG, .r = (uint8_t)rdst, .off = (int64_t)o };
+
+			x64_mem(e, X_ST, k, R11, &d, false);
+			o += (uint64_t)k;
+		}
+		return;
+	}
+	{
+		static const uint8_t rr[3] = { RDI, RAX, RCX };
+		uint32_t sv = x64_save(e, rr, 3, -1, -1);
+
+		x64_mov(e, RDI, rdst);
+		x64_op3(e, X_MOVI, 4, RAX, XNOREG, XNOREG)->imm = 0;
+		x64_movi(e, RCX, (int64_t)n);
+		x64_put(e, X_REP)->cond = 1;
+		x64_restore(e, sv);
+	}
 }
 
 VPRIV void x64_ext(ecx *e, int r, int from, bool sgn)
@@ -365,96 +460,6 @@ VPRIV void x64_brz(ecx *e, val a, int size, bool nz, uint32_t lbl)
 VPRIV void x64_label(ecx *e, uint32_t l) { x64_put(e, X_LABEL)->label = l; }
 VPRIV void x64_jump(ecx *e, uint32_t l) { x64_put(e, X_JMP)->label = l; }
 
-/* ---------------- calls ---------------- */
-
-VPRIV int x64_nregargs(void) { return 6; }
-VPRIV int32_t x64_stackarg(int i) { return 16 + 8 * (i - 6); }
-
-VPRIV void x64_param(ecx *e, int i, int32_t slot, int size)
-{
-	lval l = { .k = L_FRAME, .off = slot, .align = 8 };
-
-	(void)size;
-	x64_store(e, x64_argreg[i], &l, 8);
-}
-
-VPRIV val x64_call(ecx *e, uint32_t ref, val *fn, const int32_t *argslot, int nargs, bool variadic, int retsize, bool retsgn)
-{
-	xst *X = e->x64;
-	uint32_t saved = X->live & X_TEMPS;
-	int nstk = nargs > 6 ? nargs - 6 : 0, pad;
-	rec *i;
-
-	for (int r = 0; r < 16; r++)
-		if (saved & (1u << r)) {
-			x64_op3(e, X_PUSH, 8, XNOREG, r, XNOREG);
-			X->pushes++;
-		}
-	pad = (X->pushes + nstk) & 1;
-	if (pad) {
-		x64_put(e, X_ADJSP)->imm = -8;
-		X->pushes++;
-	}
-	for (int k = nargs - 1; k >= 6; k--) {
-		lval l = { .k = L_FRAME, .off = argslot[k], .align = 8 };
-
-		x64_load(e, R11, &l, 8, false);
-		x64_op3(e, X_PUSH, 8, XNOREG, R11, XNOREG);
-		X->pushes++;
-	}
-	if (fn)
-		x64_mov(e, R11, fn->r);
-	for (int k = 0; k < nargs && k < 6; k++) {
-		lval l = { .k = L_FRAME, .off = argslot[k], .align = 8 };
-
-		x64_load(e, x64_argreg[k], &l, 8, false);
-	}
-	if (variadic)
-		x64_op3(e, X_MOVI, 4, RAX, XNOREG, XNOREG)->imm = 0;	/* al: no vector registers */
-	if (fn) {
-		x64_op3(e, X_CALLR, 8, XNOREG, R11, XNOREG);
-	} else {
-		i = x64_put(e, X_CALL);
-		i->ref = ref;
-		i->cond = variadic;
-	}
-	if (nstk + pad) {
-		x64_put(e, X_ADJSP)->imm = 8 * (nstk + pad);
-		X->pushes -= nstk + pad;
-	}
-	if (retsize) {
-		x64_mov(e, R11, RAX);
-		x64_ext(e, R11, retsize, retsgn);
-	}
-	for (int r = 15; r >= 0; r--)
-		if (saved & (1u << r)) {
-			x64_op3(e, X_POP, 8, r, XNOREG, XNOREG);
-			X->pushes--;
-		}
-	if (fn && fn->k == V_REG)
-		x64_tfree(e, fn->r);
-	if (!retsize)
-		return vconst(0);
-	{
-		int r = x64_treg(e);
-
-		x64_mov(e, r, R11);
-		return (val){ .k = V_REG, .r = (uint8_t)r };
-	}
-}
-
-VPRIV void x64_ret(ecx *e, val *v, int size, bool sgn, uint32_t lbl)
-{
-	if (v) {
-		int r = x64_toreg(e, v, size);
-
-		x64_ext(e, r, size, sgn);
-		x64_mov(e, RAX, r);
-		x64_tfree(e, r);
-	}
-	x64_jump(e, lbl);
-}
-
 /* ---------------- the function ---------------- */
 
 VPRIV void x64_begin(ecx *e, uint32_t s)
@@ -489,4 +494,120 @@ VPRIV void x64_finish(ecx *e, uint32_t s)
 	}
 	e->E->nfn++;
 	out_chunk(e, (uint64_t)s << 1, start);
+}
+
+/* ---------------- builtins ---------------- */
+
+VPRIV void x64_trap(ecx *e) { x64_put(e, X_UD2); }
+
+VPRIV val x64_frame(ecx *e, bool ret)
+{
+	int r = x64_treg(e);
+
+	if (ret) {
+		lval l = { .k = L_REG, .r = RBP, .off = 8 };
+
+		x64_mem(e, X_LD, 8, r, &l, false);
+	} else {
+		x64_mov(e, r, RBP);
+	}
+	return (val){ .k = V_REG, .r = (uint8_t)r };
+}
+
+/* a's bits counted SWAR-style (no popcnt in the x86-64 baseline): the count in a's register */
+static void x64_popcount(ecx *e, int r, int size)
+{
+	int t = x64_treg(e);
+
+	/* r -= (r >> 1) & 0x55..; r = (r & 0x33..) + ((r >> 2) & 0x33..); r = (r + (r >> 4)) & 0x0f..; r = (r * 0x01..) >> (size * 8 - 8) */
+	x64_mov(e, t, r);
+	x64_op3(e, X_SHRI, 8, t, t, XNOREG)->imm = 1;
+	x64_movi(e, R11, 0x5555555555555555);
+	x64_op3(e, X_AND, 8, t, t, R11);
+	x64_op3(e, X_SUB, 8, r, r, t);
+	x64_mov(e, t, r);
+	x64_op3(e, X_SHRI, 8, t, t, XNOREG)->imm = 2;
+	x64_movi(e, R11, 0x3333333333333333);
+	x64_op3(e, X_AND, 8, t, t, R11);
+	x64_op3(e, X_AND, 8, r, r, R11);
+	x64_op3(e, X_ADD, 8, r, r, t);
+	x64_mov(e, t, r);
+	x64_op3(e, X_SHRI, 8, t, t, XNOREG)->imm = 4;
+	x64_op3(e, X_ADD, 8, r, r, t);
+	x64_movi(e, R11, 0x0f0f0f0f0f0f0f0f);
+	x64_op3(e, X_AND, 8, r, r, R11);
+	x64_movi(e, R11, 0x0101010101010101);
+	x64_op3(e, X_IMUL, 8, r, r, R11);
+	x64_op3(e, X_SHRI, 8, r, r, XNOREG)->imm = 56;
+	x64_tfree(e, t);
+	(void)size;
+}
+
+VPRIV val x64_bitop(ecx *e, int bi, int size, val a)
+{
+	int r = x64_toreg(e, &a, size), bits = size * 8;
+
+	if (size == 4)
+		x64_ext(e, r, 4, false);	/* (the count sees the 32 bits only) */
+	switch (bi) {
+	case BI_CLZ: case BI_CLZL: case BI_CLZLL:
+		x64_op3(e, X_BSR, size, r, r, XNOREG);
+		x64_op3(e, X_XORI, 4, r, r, XNOREG)->imm = bits - 1;
+		break;
+	case BI_CTZ: case BI_CTZL: case BI_CTZLL:
+		x64_op3(e, X_BSF, size, r, r, XNOREG);
+		break;
+	case BI_FFS: case BI_FFSL: case BI_FFSLL: {
+		/* x ? ctz(x) + 1 : 0 */
+		uint32_t lz = wk_newlabel(e);
+		rec *j;
+
+		x64_op3(e, X_TEST, size, XNOREG, r, XNOREG);
+		j = x64_put(e, X_JCC);
+		j->cond = CC_E;
+		j->label = lz;
+		x64_op3(e, X_BSF, size, r, r, XNOREG);
+		x64_op3(e, X_ADDI, 4, r, r, XNOREG)->imm = 1;
+		x64_label(e, lz);
+		break;
+	}
+	case BI_POPCOUNT: case BI_POPCOUNTL: case BI_POPCOUNTLL:
+		x64_popcount(e, r, size);
+		break;
+	case BI_PARITY: case BI_PARITYL: case BI_PARITYLL:
+		x64_popcount(e, r, size);
+		x64_op3(e, X_ANDI, 4, r, r, XNOREG)->imm = 1;
+		break;
+	case BI_BSWAP16:
+		x64_op3(e, X_BSWAP, 4, r, r, XNOREG);
+		x64_op3(e, X_SHRI, 4, r, r, XNOREG)->imm = 16;
+		break;
+	case BI_BSWAP32: case BI_BSWAP64:
+		x64_op3(e, X_BSWAP, size, r, r, XNOREG);
+		break;
+	default:
+		efatal(e, e->curloc, "x86-64: builtin %d is not supported yet (PLAN-x86.md X3)", bi);
+	}
+	return (val){ .k = V_REG, .r = (uint8_t)r };
+}
+
+/* n bytes below the stack pointer (nothing is pushed here: the stack stays 16-aligned) */
+VPRIV val x64_alloca(ecx *e, val n)
+{
+	int r = x64_toreg(e, &n, 8);
+
+	x64_op3(e, X_ADDI, 8, r, r, XNOREG)->imm = 15;
+	x64_op3(e, X_ANDI, 8, r, r, XNOREG)->imm = -16;
+	x64_op3(e, X_SUB, 8, RSP, RSP, r);
+	x64_mov(e, r, RSP);
+	return (val){ .k = V_REG, .r = (uint8_t)r };
+}
+
+VPRIV val x64_fbits(ecx *e, val v, int size)
+{
+	int r = x64_treg(e);
+
+	x64_op3(e, X_MOV, size == 4 ? 4 : 8, r, v.r, XNOREG);
+	x64_tfree(e, v.r);
+	return (val){ .k = V_REG, .r = (uint8_t)r };
 }

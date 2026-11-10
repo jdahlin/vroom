@@ -16,8 +16,12 @@
 #define VCC_X64IMPL_H
 #include "../../../emit/walk/walk.h"
 
-enum { RAX, RCX, RDX, RBX, RSP, RBP, RSI, RDI, R8, R9, R10, R11, R12, R13, R14, R15, RIP, XNOREG = 0xff };
+enum { RAX, RCX, RDX, RBX, RSP, RBP, RSI, RDI, R8, R9, R10, R11, R12, R13, R14, R15, XMM0 = 16, XMM8 = 24, XMM15 = 31,
+       RIP = 32, XNOREG = 0xff };
 #define X_TEMPS ((1u << RAX) | (1u << RCX) | (1u << RDX) | (1u << RSI) | (1u << RDI) | (1u << R8) | (1u << R9) | (1u << R10))
+/* floating point temporaries: xmm8-xmm14 (xmm0-7 carry arguments and results, xmm15 is scratch) */
+#define X_FTEMPS (((1u << XMM15) - 1) & ~((1u << XMM8) - 1))
+#define IS_XMM(r) ((r) >= XMM0 && (r) <= XMM15)
 
 enum {
 	X_LABEL,	/* label */
@@ -27,7 +31,7 @@ enum {
 	X_ST,		/* [r1 + off (+ ref)] = r2: sz bytes */
 	X_LEA,		/* r0 = r1 + off (+ ref) */
 	/* r0 = r1 op r2 (sz 4 or 8) */
-	X_ADD, X_SUB, X_AND, X_OR, X_XOR, X_IMUL,
+	X_ADD, X_SUB, X_AND, X_OR, X_XOR, X_IMUL, X_ADC, X_SBB,
 	/* r0 = r1 op imm (32-bit signed) */
 	X_ADDI, X_SUBI, X_ANDI, X_ORI, X_XORI, X_IMULI,
 	X_SHLI, X_SHRI, X_SARI,	/* r0 = r1 op imm */
@@ -45,9 +49,26 @@ enum {
 	X_ADJSP,	/* rsp += imm */
 	X_CQO,		/* rdx = sign of rax (sz 4: cltd, 8: cqto) */
 	X_IDIV, X_DIV,	/* rdx:rax / r1: rax quotient, rdx remainder */
+	X_MULW,		/* rdx:rax = rax * r1 (unsigned, 64 x 64 -> 128) */
+	X_UD2,
+	X_BSF, X_BSR,	/* r0 = index of the lowest / highest set bit of r1 */
+	X_BSWAP,	/* r0 = r0 byte-reversed (sz 4, 8) */
 	X_EXT,		/* r0 = r1's low sz bytes extended to 64 bits (cond 1: sign) */
+	X_REP,		/* cond 0: rep movsb (rdi rsi rcx), 1: rep stosb (rdi al rcx) */
+	/* SSE (X_LD/X_ST/X_MOV take xmm registers too) */
+	X_FADD, X_FSUB, X_FMUL, X_FDIV,	/* r0 = r1 op r2 (sz 4 ss, 8 sd) */
+	X_FXOR,		/* r0 = r1 ^ r2 (xorps) */
+	X_FCMP,		/* flags: ucomis r1 ? r2 */
+	X_FSETCC,	/* r0 = (cond 0: ==, 1: !=) after X_FCMP/x87 compare, NaN-aware (r11 scratch) */
+	X_CVTI2F,	/* xmm r0 = gpr r1: sz float size, sh int size (4, 8) */
+	X_CVTF2I,	/* gpr r0 = xmm r1 truncated: sz int size, sh float size */
+	X_CVTF2F,	/* xmm r0 = xmm r1: sz the result's size */
+	X_X87,		/* cond: XF_* (with a memory operand where it takes one) */
 	X_NOPS
 };
+
+enum { XF_LDT, XF_STPT, XF_LD, XF_STP, XF_ILD, XF_ISTP, XF_ADD, XF_SUB, XF_MUL, XF_DIV, XF_CHS, XF_UCOMIP, XF_POP,
+       XF_STCW, XF_LDCW, XF_LDZ };
 
 /* condition codes in encoding order */
 enum { CC_O, CC_NO, CC_B, CC_AE, CC_E, CC_NE, CC_BE, CC_A, CC_S, CC_NS, CC_P, CC_NP, CC_L, CC_GE, CC_LE, CC_G };
@@ -59,9 +80,23 @@ typedef struct xst {
 	uint32_t ntw;
 	uint32_t live;		/* temporaries in use (bit = register) */
 	int pushes;		/* 8-byte pushes outstanding (the call alignment) */
+	/* the function's incoming arguments (abi.c) */
+	int ngp, nfp;		/* named arguments in general and vector registers */
+	int32_t stk;		/* bytes of named stack arguments */
+	int32_t sret;		/* frame slot of the hidden result pointer (0: none) */
+	int32_t save;		/* variadic: the register save area's slot (0: none) */
 } xst;
 
+/* the integer argument registers, in order */
+static inline int x64_argreg(int i) { static const uint8_t r[6] = { RDI, RSI, RDX, RCX, R8, R9 }; return r[i]; }
 VPRIV xst *x64_state(ecx *e);
+VPRIV rec *x64_op3(ecx *e, int op, int sz, int r0, int r1, int r2);
+VPRIV void x64_mem(ecx *e, int op, int sz, int r, const lval *l, bool sgn);
+VPRIV void x64_mov(ecx *e, int rd, int rs);
+VPRIV void x64_movi(ecx *e, int r, int64_t v);
+VPRIV uint32_t x64_save(ecx *e, const uint8_t *regs, int n, int k0, int k1);
+VPRIV void x64_restore(ecx *e, uint32_t sv);
+VPRIV int x64_ftreg(ecx *e);
 VPRIV rec *x64_put(ecx *e, int op);
 VPRIV void x64_twoaddr(ecx *e);
 VPRIV void x64_print(ecx *e, tbuf *b, uint32_t s);
