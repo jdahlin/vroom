@@ -517,7 +517,8 @@ static inline bool uv_tracked(cc *c, qty t)
 	t = canon(c, t);
 	if (T(c, t)->flags & TF_ATOMIC)
 		return false;
-	return is_scalar(c, t) || KIND(c, t) == TY_VECTOR || is_complex(c, t);
+	/* (records: clang tracks them in C, not an empty one) */
+	return is_scalar(c, t) || KIND(c, t) == TY_VECTOR || (is_record(c, t) && complete(c, t) && ty_size(c, t) > 0);
 }
 
 static inline uint32_t decay(cc *c, uint32_t n)

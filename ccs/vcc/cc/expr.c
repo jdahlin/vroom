@@ -405,7 +405,9 @@ static inline __attribute__((always_inline)) uint32_t primary_sym(cc *c, uint32_
 		if (!c->unevaluated && !((y->flags & SF_OVERLOAD) && is(c, T_LPAREN)))
 			y->flags |= SF_USED;
 		if (unlikely(y->flags & SF_UVPEND)) {
-			if (tok(c)->kind != T_EQUAL) {
+			if (tok(c)->kind == T_PERIOD)
+				y->flags &= ~SF_UVPEND;	/* s.m: initializes it for the analysis */
+			else if (tok(c)->kind != T_EQUAL) {
 				y->flags &= ~SF_UVPEND;
 				c->uv_any |= 4;	/* read (or &) before any assignment: run the analysis */
 			} else if (!uv_deeper(c, s))

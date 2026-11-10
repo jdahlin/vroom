@@ -699,7 +699,10 @@ static void uv_ex(uwk *w, uint32_t e, ust *st, bool ignore)
 		uv_ex(w, x->a, st, false);
 		return;
 	case N_MEMBER:
-		uv_ex(w, x->a, st, false);	/* (a struct is not tracked; a _Complex part is a use) */
+		if (N(x->a)->op == N_VAR && is_record(c, N(x->a)->ty) && !is_complex(c, N(x->a)->ty))
+			uv_write(w, x->a, st);	/* s.m of a struct variable: no use, and initialized from here on (clang) */
+		else
+			uv_ex(w, x->a, st, false);	/* (a _Complex part is a use) */
 		return;
 	case N_STMTEXPR:
 		uv_stmt(w, x->a, st);
@@ -1017,7 +1020,7 @@ static const char *uv_zero(cc *c, qty t)
 {
 	int k = KIND(c, canon(c, t));
 
-	if (k == TY_ENUM)
+	if (k == TY_ENUM || ((k == TY_STRUCT || k == TY_UNION) && !is_complex(c, t)))
 		return NULL;
 	if (k >= TY_FLOAT16 && k <= TY_LDOUBLE)
 		return " = 0.0";
