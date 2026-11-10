@@ -1060,14 +1060,16 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
 - [x] **`"abc"[1]` as a static initializer**: an element of a string
   literal folds (`eval`); `{ "q"[0] }` in an int array parsed as a string
   initializer.  Done: `tests/vcc/static_strelem.c`.
-- [ ] **Typedef names in -Wformat**: clang prints the argument's typedef
-  (`'size_t' (aka 'unsigned long')`) and fixes `%d` to `%zu`
-  (namedTypeToLengthModifier); vcc keeps no typedef sugar on expressions
-  and prints `'unsigned long'`, `%lu`.  Not modelled (the call is left
-  alone): `%I64d`, `%w32d`, `%b`, `%qd`, `*n$`, Darwin `%D/%O/%U`, a format
-  through a `const char[]` variable or `format_arg` (gettext).
-  *Validate:* `/tmp`-style random files as for format (gen in TODO history:
-  printf calls over typedef'd arguments) identical to clang.
+- [x] **Typedef names in -Wformat**: variables, parameters and members keep
+  the typedef they were declared with (`sym.tdef`, `field.tdef`): messages
+  print `'size_t' (aka 'unsigned long')`, fix-its use z/j/t and `%hhu` for a
+  char typedef as clang's namedTypeToLengthModifier.  Done: diag
+  `format_typedef.c`, the random files identical on both targets.
+- [ ] **-Wformat not modelled** (the call is left alone): `%I64d`, `%w32d`,
+  `%b`, `%qd`, `*n$`, Darwin `%D/%O/%U`, a format through a `const char[]`
+  variable or `format_arg` (gettext), a typedef reached through casts or
+  other expressions than a variable or member.
+  *Validate:* diag tests against clang.
 - [ ] **Vector types in messages**: clang keeps the typedef name (`'v4'`),
   appends ` (vector of 4 'int' values)` after the quoted type.
   `ext_vector_type(N)` is now a vector (it was ignored: `sizeof` wrong;

@@ -252,7 +252,7 @@ static const char *const fmt_valid_flags[6] = {
  * its flags, width and precision, length modifier, then (first != 0) the
  * argument; at the end the first data argument no specification used.
  */
-VPRIV void format_check(cc *c, uint32_t fs, const uint32_t *args, const qty *aty, uint32_t nargs)
+VPRIV void format_check(cc *c, uint32_t fs, const uint32_t *args, const qty *aty, const uint32_t *atd, uint32_t nargs)
 {
 	const sym *y = &c->syms[fs];
 	uint32_t fa = y->attrs ? c->attr[y->attrs].fmt : 0, fi, first, ndata, n;
@@ -472,10 +472,16 @@ VPRIV void format_check(cc *c, uint32_t fs, const uint32_t *args, const qty *aty
 			if (tab[0].fix[cl] != 0 && tab[0].fix[cl] != 255) {	/* tab[0]: "d", int */
 				pp_span r[2] = { sr, rng(c, args[first - 1 + ai]) };
 
+				uint32_t td = atd[first - 1 + ai];
+				char tn[256];
+
+				if (td && KIND(c, t) != TY_FLOAT)
+					snprintf(tn, sizeof(tn), "'%.*s' (aka '%s')", IDF(c->syms[td].name), tyname(c, t));
+				else
+					snprintf(tn, sizeof(tn), "'%s'", KIND(c, t) == TY_FLOAT ? "double" : tyname(c, t));
 				if (l)
-					fmt_report(&x, "format", l, r, 2, NULL, 0,
-						   "field %s should have type 'int', but argument has type '%s'",
-						   k ? "precision" : "width", KIND(c, t) == TY_FLOAT ? "double" : tyname(c, t));
+					fmt_report(&x, "format", l, r, 2, NULL, 0, "field %s should have type 'int', but argument has type %s",
+						   k ? "precision" : "width", tn);
 				return;
 			}
 		}
@@ -591,13 +597,45 @@ VPRIV void format_check(cc *c, uint32_t fs, const uint32_t *args, const qty *aty
 				pp_fixit fx;
 				bool en = KIND(c, t) == TY_ENUM;
 
+				char lcb[8], tn[256];
+				const char *fl = code > 1 ? fmt_fix[code - 1] : NULL;
+				uint32_t td = atd[first - 1 + ai];
+
+				if (td && fl) {
+					/* clang: a typedef's arguments: size_t, ssize_t -> z, [u]intmax_t -> j, ptrdiff_t -> t;
+					 * one to a char is an integer (%hhd, not %c) */
+					char nc = fl[strlen(fl) - 1], lm = 0;
+
+					for (uint32_t q = td; q && !lm; q = c->syms[q].tdef) {
+						size_t l = idlen_(c->syms[q].name);
+						const char *nm = idstr_(c->syms[q].name);
+
+						if ((l == 6 && !memcmp(nm, "size_t", 6)) || (l == 7 && !memcmp(nm, "ssize_t", 7)))
+							lm = 'z';
+						else if ((l == 8 && !memcmp(nm, "intmax_t", 8)) || (l == 9 && !memcmp(nm, "uintmax_t", 9)))
+							lm = 'j';
+						else if (l == 9 && !memcmp(nm, "ptrdiff_t", 9))
+							lm = 't';
+					}
+					if (nc == 'c' && cl <= FT_UCHAR) {
+						snprintf(lcb, sizeof(lcb), "hh%c", is_signed(c, t) ? 'd' : 'u');
+						fl = lcb;
+					} else if (lm && strchr("diouxX", nc)) {
+						snprintf(lcb, sizeof(lcb), "%c%c", lm, nc);
+						fl = lcb;
+					}
+				}
+				if (td)
+					snprintf(tn, sizeof(tn), "'%.*s' (aka '%s')", IDF(c->syms[td].name), tyname(c, t));
+				else
+					snprintf(tn, sizeof(tn), "'%s'", en ? tyname(c, T(c, t)->base) : tyname(c, t));
 				if (code > 1) {
-					fmt_fixtext(&x, &f, fmt_fix[code - 1], cl >= FT_PCHAR && cl <= FT_PUCHAR, ft, sizeof(ft));
+					fmt_fixtext(&x, &f, fl, cl >= FT_PCHAR && cl <= FT_PUCHAR, ft, sizeof(ft));
 					fx = (pp_fixit){ sr.b, sr.e, ft };
 				}
 				fmt_report(&x, "format", r[1].b, r, 2, code > 1 ? &fx : NULL, code > 1,
-					   "format specifies type %s but the argument has %stype '%s'", row->exp,
-					   en ? "underlying " : "", en ? tyname(c, T(c, t)->base) : tyname(c, t));
+					   "format specifies type %s but the argument has %stype %s", row->exp,
+					   en && !td ? "underlying " : "", tn);
 			}
 		}
 	}

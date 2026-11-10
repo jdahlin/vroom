@@ -101,6 +101,7 @@ static void param_list(cc *c, dop *op)
 				}
 			}
 			s = sym_new(c, S_VAR, d.name, t, d.loc ? d.loc : ds.loc);
+			c->syms[s].tdef = ds.tdef && QUNQ(t) == QUNQ(ds.ty) ? ds.tdef : 0;
 			c->syms[s].flags |= SF_PARAM | ((d.at.nonnull | ds.at.nonnull) ? SF_NONNULL : 0);
 			c->syms[s].body = vsize;	/* parameters: a decayed VLA's size expression with side effects */
 			c->syms[s].sc = ds.sc == SC_REGISTER ? SC_REGISTER : SC_AUTO;

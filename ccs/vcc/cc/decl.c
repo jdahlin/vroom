@@ -298,6 +298,7 @@ static uint32_t declare(cc *c, const dspec *ds, declr *d, qty t, bool file)
 		}
 		s = sym_new(c, S_TYPEDEF, d->name, t, d->loc);
 		c->syms[s].sc = SC_TYPEDEF;
+		c->syms[s].tdef = ds->tdef && QUNQ(t) == QUNQ(ds->ty) ? ds->tdef : 0;
 		if (unlikely(at.depr)) {	/* only what a typedef's use needs */
 			attrs da = { 0 };
 
@@ -402,6 +403,7 @@ static uint32_t declare(cc *c, const dspec *ds, declr *d, qty t, bool file)
 	{
 		sym *y = &c->syms[s];
 
+		y->tdef = ds->tdef && QUNQ(t) == QUNQ(ds->ty) ? ds->tdef : 0;
 		y->sc = (uint8_t)(ds->sc == SC_TYPEDEF ? SC_NONE : ds->sc);
 		if (file || ds->sc == SC_EXTERN || kind == S_FUNC)
 			y->flags |= SF_GLOBAL;

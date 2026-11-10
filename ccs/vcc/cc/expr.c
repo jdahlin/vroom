@@ -703,6 +703,7 @@ static __attribute__((noinline)) uint32_t call(cc *c, uint32_t fn, uint32_t loc)
 	const ctype *f;
 	uint32_t n, fmt;
 	qty aty[64];
+	uint32_t atd[64];
 	bool have_args = false;
 
 	if (N(fn)->op == N_VAR && (c->syms[N(fn)->a].flags & SF_OVERLOAD) && c->syms[N(fn)->a].kind == S_FUNC) {
@@ -788,6 +789,8 @@ static __attribute__((noinline)) uint32_t call(cc *c, uint32_t fn, uint32_t loc)
 		if (fmt) {
 			int k = KIND(c, N(a)->ty);
 
+			atd[i] = k == TY_ARRAY ? 0 : N(a)->op == N_VAR ? c->syms[N(a)->a].tdef :
+				 N(a)->op == N_MEMBER && !(N(a)->flags & NF_BITFIELD) ? node_field(c, N(a))->tdef : 0;
 			aty[i] = bitfield_of(c, a) ? 0 : k == TY_ARRAY ? ty_ptr(c, T(c, N(a)->ty)->base) : k == TY_FUNC ? 0 : QUNQ(N(a)->ty);
 		}
 		if (!(f->flags & TF_NOPROTO) && i < f->n) {
@@ -806,7 +809,7 @@ static __attribute__((noinline)) uint32_t call(cc *c, uint32_t fn, uint32_t loc)
 	if (N(callee)->op == N_VAR && c->syms[N(callee)->a].kind == S_FUNC && !c->unevaluated)
 		nonnull_args(c, N(callee)->a, ft, args.v, args.n);
 	if (fmt)
-		format_check(c, fmt, args.v, aty, args.n);
+		format_check(c, fmt, args.v, aty, atd, args.n);
 	if (!c->o->no_builtin && args.n == 1 && N(callee)->op == N_VAR && c->syms[N(callee)->a].kind == S_FUNC &&
 	    (c->syms[N(callee)->a].flags & SF_GLOBAL)) {
 		/* clang: abs, labs and llabs declared with their library types are builtins (inline) */

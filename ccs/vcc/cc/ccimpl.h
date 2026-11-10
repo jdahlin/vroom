@@ -94,6 +94,7 @@ typedef struct dspec {
 	uint32_t align;		/* _Alignas */
 	uint32_t loc;
 	uint32_t tagdecl;	/* struct/union/enum defined or declared here: its tag */
+	uint32_t tdef;		/* the typedef name the type came from (sym), 0: none */
 	bool tag_bare;		/* "struct S" with no body (a reference or forward declaration) */
 } dspec;
 
@@ -331,7 +332,7 @@ static inline bool attrs_empty(const attrs *a);
 #define CC_I64(c, uns) (CC_ILP32(c) ? ((uns) ? TY_ULLONG : TY_LLONG) : ((uns) ? TY_ULONG : TY_LONG))
 VPRIV void merge_attrs(attrs *to, const attrs *from);
 /* fmt.c */
-VPRIV void format_check(cc *c, uint32_t fs, const uint32_t *args, const qty *aty, uint32_t nargs);
+VPRIV void format_check(cc *c, uint32_t fs, const uint32_t *args, const qty *aty, const uint32_t *atd, uint32_t nargs);
 VPRIV void asm_label(cc *c, attrs *a);
 /* declspec.c */
 VPRIV void unknown_type(cc *c, dspec *ds);

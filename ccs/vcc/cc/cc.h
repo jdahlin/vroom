@@ -82,6 +82,7 @@ typedef struct field {
 	uint8_t _pad;
 	uint32_t loc;
 	uint32_t counted_by;	/* counted_by(member): its identifier id */
+	uint32_t tdef;		/* declared with exactly this typedef name's type (sym), 0: none */
 } field;
 
 enum {
@@ -155,6 +156,7 @@ typedef struct sym {
 				   first function is the one bound in the scope table */
 	uint32_t plb, ple;	/* function: its parameter list's first token and ')'; variable: its declaration's first and last token */
 	uint32_t psyms;		/* function: its latest prototype's parameter syms (list index + 1, 0: none) */
+	uint32_t tdef;		/* object/typedef: declared with exactly this typedef name's type (sym), 0: none */
 } sym;
 
 /* ---------------- nodes ---------------- */
