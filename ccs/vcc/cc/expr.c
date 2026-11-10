@@ -213,6 +213,12 @@ VPRIV uint32_t binop(cc *c, int op, uint32_t l, uint32_t r, uint32_t loc)
 	if (op == T_MINUS && is_ptr(c, lt) && is_ptr(c, rt))
 		return mk_bin(c, op, c->t_ptrdiff, l, r, loc);
 	if (is_cmp(op) && (is_ptr(c, lt) || is_ptr(c, rt))) {
+		qty ot = is_ptr(c, lt) ? rt : lt;
+
+		if (!is_ptr(c, ot) && !is_integer(c, ot) && KIND(c, ot) != TY_ENUM) {	/* (p == 0.5) */
+			bad_operands(c, l, r, loc);
+			return mk_bin(c, op, prim(TY_INT), l, l, loc);
+		}
 		if (!is_ptr(c, lt))
 			l = convert(c, l, rt);
 		else if (!is_ptr(c, rt))
@@ -305,12 +311,22 @@ VPRIV uint32_t conditional(cc *c, uint32_t cond, uint32_t a, uint32_t b, uint32_
 		else
 			t = ty_ptr(c, QT(TY_VOID, q));	/* clang: warning, void * */
 		ra = convert(c, ra, t), rb = convert(c, rb, t);
-	} else if (is_ptr(c, at) && is_integer(c, bt)) {
-		t = at;
-		rb = convert(c, rb, t);
-	} else if (is_ptr(c, bt) && is_integer(c, at)) {
-		t = bt;
-		ra = convert(c, ra, t);
+	} else if ((is_ptr(c, at) && is_integer(c, bt)) || (is_ptr(c, bt) && is_integer(c, at))) {
+		bool pa = is_ptr(c, at);
+
+		if (!is_npc(c, pa ? rb : ra)) {	/* (clang: not for a null pointer constant) */
+			pp_span r[2] = { rng(c, ra), rng(c, rb) };
+			char an[256];
+
+			snprintf(an, sizeof an, "%s", tyname(c, at));
+			cc_warnx(c, "conditional-type-mismatch", true, NULL, loc, r, 2, NULL, 0,
+				 "pointer/integer type mismatch in conditional expression ('%s' and '%s')", an, tyname(c, bt));
+		}
+		t = pa ? at : bt;
+		if (pa)
+			rb = convert(c, rb, t);
+		else
+			ra = convert(c, ra, t);
 	} else if ((is_record(c, at) || is_vector(c, at)) && compatible(c, at, bt)) {
 		t = QUNQ(at);
 	} else {

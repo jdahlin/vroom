@@ -216,17 +216,19 @@ static void conv_error(cc *c, uint32_t n, qty to, const char *what, const char *
 	qty ft = N(n)->ty;
 	int op = N(n)->op;
 	/* clang: "; dereference with *" when *n has the target type (a fix-it; vcc: simple operands only) */
-	bool dr = bit != 4 && is_ptr(c, ft) && compatible(c, QUNQ(T(c, ft)->base), QUNQ(to)) &&
-		  (op == N_VAR || op == N_MEMBER || op == N_CALL || op == N_INDEX);	/* ((p): before the parenthesis) */
+	bool dr = bit != 4 && is_ptr(c, ft) && compatible(c, QUNQ(T(c, ft)->base), QUNQ(to));
+	/* a simple or parenthesized operand takes '*', another '*(' ... ')' */
+	bool wrap = dr && !(op == N_VAR || op == N_MEMBER || op == N_CALL || op == N_INDEX || (N(n)->flags & NF_PAREN) ||
+			    (c->paren[n].l | c->paren[n].r));
 	/* "; take the address with &" when &n has the target type (an lvalue; vcc: simple operands) */
 	bool ad = !dr && bit != 4 && is_ptr(c, to) && compatible(c, QUNQ(ft), QUNQ(T(c, to)->base)) &&
 		  (op == N_VAR || op == N_MEMBER || op == N_INDEX) && (N(n)->flags & NF_LVALUE) &&
 		  !(N(n)->flags & NF_BITFIELD) && !(op == N_VAR && c->syms[N(n)->a].sc == SC_REGISTER);
-	pp_fixit fx = { r.b, r.b, dr ? "*" : "&" };
+	pp_fixit fx[2] = { { r.b, r.b, wrap ? "*(" : dr ? "*" : "&" }, { r.e, r.e, ")" } };
 	char fl[64];
 
 	snprintf(fl, sizeof fl, "%s%s", dr ? "; dereference with * [" : ad ? "; take the address with & [" : " [", flag);
-	dr |= ad;
+	int nfx = wrap ? 2 : dr || ad;
 
 	switch (c->cv_what) {
 	case CX_INIT:
@@ -251,12 +253,12 @@ static void conv_error(cc *c, uint32_t n, qty to, const char *what, const char *
 			goto err;	/* -Werror= again: clang's own error (no "-Werror,") */
 		if (b && b > msg)
 			b[-1] = 0;
-		if (cc_warnx(c, flag + 2, true, bit == 4 ? ipt : NULL, loc, &r, 1, &fx, dr, "%s", msg) && c->cv_what == CX_PASS)
+		if (cc_warnx(c, flag + 2, true, bit == 4 ? ipt : NULL, loc, &r, 1, fx, nfx, "%s", msg) && c->cv_what == CX_PASS)
 			param_note(c);
 		return;
 	}
 err:
-	report(c, "error", loc, &r, 1, &fx, dr, "%s", msg);
+	report(c, "error", loc, &r, 1, fx, nfx, "%s", msg);
 	c->nconv++;
 	if (c->cv_what == CX_PASS)
 		param_note(c);
