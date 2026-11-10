@@ -1385,16 +1385,28 @@ static val wk_stmtexpr(ecx *e, uint32_t n)
 	cc *c = e->c;
 	const node *b = N(N(n)->a);
 
+	int cmark = e->wk->nclean;
+	val v = vconst(0);
+
 	for (uint32_t i = 0; i + 1 < b->c; i++)
 		wk_stmt(e, c->lists[b->b + i]);
 	if (b->c) {
 		uint32_t last = c->lists[b->b + b->c - 1];
 
 		if (N(last)->op == N_EXPR && N(last)->a)
-			return wk_gen(e, N(last)->a);
-		wk_stmt(e, last);
+			v = wk_gen(e, N(last)->a);
+		else
+			wk_stmt(e, last);
 	}
-	return vconst(0);
+	if (e->wk->nclean > cmark) {
+		/* (a register value survives the calls: they save the live temporaries) */
+		if (v.k == V_REG || v.k == V_CONST)
+			wk_cleanups(e, cmark);
+		else
+			wk_unsup(e, n, "a statement expression's value with cleanups");
+		e->wk->nclean = cmark;
+	}
+	return v;
 }
 
 /* ---------------- builtins ---------------- */
@@ -1834,6 +1846,8 @@ VPRIV val wk_gen(ecx *e, uint32_t n)
 	case N_ADDR: {
 		lval l;
 
+		if (N(x->a)->op == N_LABELADDR)
+			return wk_gen(e, x->a);
 		if (N(x->a)->op == N_VAR && c->syms[N(x->a)->a].kind == S_FUNC) {
 			uint32_t s = canon_sym(c, N(x->a)->a);
 
@@ -1869,6 +1883,9 @@ VPRIV val wk_gen(ecx *e, uint32_t n)
 		return wk_call(e, n);
 	case N_STMTEXPR:
 		return wk_stmtexpr(e, n);
+	case N_LABELADDR:
+		note_ref(e, REF(RK_LBL, x->a));
+		return (val){ .k = V_ADDR, .ref = REF(RK_LBL, x->a) };
 	case N_BUILTIN:
 		return wk_builtin(e, n);
 	case N_VAARG: {

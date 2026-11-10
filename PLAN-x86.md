@@ -346,14 +346,17 @@ kärnan och kan vänta.
   `_Atomic`-objektens sammansatta tilldelningar som CAS-slinga i vandraren);
   komplexa tal (`N_CPLX`; `_Complex long double` i st(0)/st(1)); GNU-vektorer
   (via adress, lane för lane i vandraren; SysV-klasser som clang, SSEUP i ett
-  xmm, 32 byte tillbaka i xmm0:xmm1 som clang utan AVX).
-- `bench/vcc-x86.py`: 1648/1770, lika i `--pie` och `--pic` (vcc-sidan
+  xmm, 32 byte tillbaka i xmm0:xmm1 som clang utan AVX); etikettadresser
+  (`.Ltmp.lbl.N` som datainitierarna) och beräknat `goto`; cleanup-variabler
+  (blockslut, `break`/`continue`, `return` med värdet parkerat, `goto` ut ur
+  scopes via ett träd från förskanningen, `for`-satsens första led).
+- `bench/vcc-x86.py`: 1659/1770, lika i `--pie` och `--pic` (vcc-sidan
   `-fPIE`/`-fPIC`, länkad `-pie`). Körfel bara där clangs optimerare krävs
   (`20030125-1`, `bcp-1`, `builtin-constant`) och 11 länkfel av samma slag eller
   `__builtin_setjmp`. `vcc-abi.py --target x86_64`: 10/12, med tre nya tester
   (`int_records`, `fp_records`, `complex_args`) som klarar alla fyra
   kombinationerna; resten stannar vid alignment > 16 och bit-fält över 8 byte.
-- Kvar i X3: vektorer av `__int128`, etikettadresser och beräknat `goto`, cleanup-variabler, alignment
+- Kvar i X3: vektorer av `__int128`, alignment
   över 16, `__float128`-aritmetik (libgcc `__addtf3` ...), inlining av
   `__always_inline` med `need_fold` och `constant_p` efter inlining,
   `-mgeneral-regs-only`/`-mno-sse`, UTF-8-namn citerade som clang, `VCC_WALKLOG`.
