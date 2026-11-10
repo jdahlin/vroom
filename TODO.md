@@ -149,6 +149,12 @@ Existing gates that every change must keep green: `vcc-diff.py cmp`
   `__builtin_mul_overflow_p` as calls.  Add them to the runtime (or a
   per-test shim) so the tests run.  *Validate:* `ref-fail` count drops,
   the newly run tests pass or become xfail with a TODO item.
+  (Done: rt has a small libm (exp/log/pow/trig/hyperbolic/frexp),
+  `__divsc3`, `__fixsfti`, `tmpnam`, `atomic_signal_fence` and the
+  `__builtin_exit`/`puts`/`isinff` calls; rt's `sqrt` recursed into itself
+  under `-fno-builtin`.  ref-fail 34 -> 25, all 9 pass.  Left: the clang
+  builds that abort or time out (16), `__builtin_mul_overflow_p`,
+  `__builtin_apply_args`, `__builtin_va_arg_pack`.)
 - [ ] **T19 ASan inside our arenas.**  Poison the mmap'ed arenas behind
   `used` (`ASAN_POISON_MEMORY_REGION` under `__has_feature`), so
   over-reads there are reported.  *Validate:* an injected over-read in a
