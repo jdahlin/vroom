@@ -362,6 +362,7 @@ static inline bool attrs_empty(const attrs *a);
 VPRIV void merge_attrs(attrs *to, const attrs *from);
 /* flow.c */
 VPRIV int body_falls_off(cc *c, uint32_t body, uint32_t first_label);
+VPRIV void uninit_check(cc *c, uint32_t body, uint32_t first_label);
 /* fmt.c */
 VPRIV void format_check(cc *c, uint32_t fs, const uint32_t *args, const qty *aty, const uint32_t *atd, uint32_t nargs);
 VPRIV void asm_label(cc *c, attrs *a);
@@ -499,6 +500,15 @@ static inline void setspan(cc *c, uint32_t n, uint32_t b)
 {
 	if (n && !c->span[n].e)
 		c->span[n] = (pp_span){ b, c->prevloc };
+}
+
+/* -Wuninitialized tracks it (clang's isTrackedVar: scalar or vector, not _Atomic) */
+static inline bool uv_tracked(cc *c, qty t)
+{
+	t = canon(c, t);
+	if (T(c, t)->flags & TF_ATOMIC)
+		return false;
+	return is_scalar(c, t) || KIND(c, t) == TY_VECTOR || is_complex(c, t);
 }
 
 static inline uint32_t decay(cc *c, uint32_t n)

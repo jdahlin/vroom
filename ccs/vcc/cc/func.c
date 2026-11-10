@@ -134,6 +134,7 @@ VPRIV void function_def(cc *c, uint32_t s, const declr *d)
 	}
 	c->in_loop = c->in_switch = 0;
 	c->nrtd = 0;
+	c->uv_any = 0, c->nuv = 0;
 	body = compound_stmt(c, NULL);
 	scope_close(c);
 	rt_flush(c);	/* (clang: only if reachable; vcc: not under a constant-false condition) */
@@ -154,6 +155,8 @@ VPRIV void function_def(cc *c, uint32_t s, const declr *d)
 					 k == 1 ? " in all control paths" : "");
 		}
 	}
+	if (c->uv_any & 6)
+		uninit_check(c, body, first_label);
 	{
 		/* side effects of decayed VLA parameter sizes run first, in order */
 		vec items;

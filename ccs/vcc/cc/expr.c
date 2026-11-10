@@ -404,6 +404,11 @@ static inline __attribute__((always_inline)) uint32_t primary_sym(cc *c, uint32_
 		N(n)->flags = y->kind == S_VAR ? NF_LVALUE : 0;
 		if (!c->unevaluated && !((y->flags & SF_OVERLOAD) && is(c, T_LPAREN)))
 			y->flags |= SF_USED;
+		if (unlikely(y->flags & SF_UVPEND)) {
+			y->flags &= ~SF_UVPEND;
+			if (tok(c)->kind != T_EQUAL)
+				c->uv_any |= 4;	/* read (or &) before any assignment: run the analysis */
+		}
 		y->flags |= SF_REF;
 		y->nref += y->nref != 0xffff;
 		if (unlikely(y->next) && y->depth)

@@ -703,3 +703,9 @@ void pp_diag_summary(pp *p)
 	if (n)
 		(void)!write(fd, b, (size_t)n);
 }
+
+/* the macro id is defined now */
+int pp_defined(pp *p, uint32_t id)
+{
+	return mdefined(p, id);
+}
