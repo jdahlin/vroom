@@ -40,5 +40,6 @@ for o in -u -g -U --undefined-only --extern-only --defined-only; do
 V=$W/arch/arm64/kernel/vdso/vdso.so.dbg
 $L/llvm-nm $V > $T/r.vnm; $B/vnm $V > $T/m.vnm; chk $T/r.vnm $T/m.vnm "nm vdso"
 $L/llvm-nm -D $V > $T/r.vnm; $B/vnm -D $V > $T/m.vnm; chk $T/r.vnm $T/m.vnm "nm -D vdso"
+for A in $W/lib/lib.a $W/init/built-in.a; do (cd $W && $L/llvm-nm $A > $T/r.anm; $B/vnm $A > $T/m.anm); chk $T/r.anm $T/m.anm "nm $(basename $A)"; done
 echo "$ok identical, $bad different"
 [ $bad = 0 ]

@@ -1207,6 +1207,100 @@ static char nm_type(const Elf *e, const Sym *y)
 	return c;
 }
 
+/* nm's inputs: files, or the members of an archive (regular: copied out, 8-aligned; thin: by path) */
+typedef struct { char *label, *path; uint8_t *mem; size_t size; bool member; } NIn;
+
+static void nin_push(NIn **v, int *n, NIn x)
+{
+	*v = realloc(*v, (size_t)(*n + 1) * sizeof **v);
+	(*v)[(*n)++] = x;
+}
+
+static void nm_inputs(int dirfd, const char *path, NIn **v, int *n)
+{
+	int fd = openat(dirfd, path, O_RDONLY);
+	struct stat st;
+	char magic[8];
+
+	if (fd < 0 || fstat(fd, &st) < 0 || st.st_size < 8 || pread(fd, magic, 8, 0) != 8 ||
+	    (memcmp(magic, "!<arch>\n", 8) && memcmp(magic, "!<thin>\n", 8))) {
+		if (fd >= 0)
+			close(fd);
+		nin_push(v, n, (NIn){.label = strdup(path), .path = strdup(path)});
+		return;
+	}
+	bool thin = magic[2] == 't';
+	size_t sz = (size_t)st.st_size;
+	const uint8_t *b = mmap(NULL, sz, PROT_READ, MAP_PRIVATE, fd, 0);
+	const char *longn = NULL;
+	size_t longsz = 0;
+	const char *slash = strrchr(path, '/');
+
+	close(fd);
+	if (b == MAP_FAILED) {
+		oerror("'%s': %s", path, strerror(errno));
+		return;
+	}
+	for (size_t o = 8; o + 60 <= sz;) {
+		const char *h = (const char *)b + o;
+		char num[11] = { 0 }, name[4096];
+		size_t msz, nl;
+
+		if (h[58] != '`' || h[59] != '\n') {
+			oerror("'%s': truncated or malformed archive", path);
+			break;
+		}
+		memcpy(num, h + 48, 10);
+		msz = strtoull(num, NULL, 10);
+		bool special = h[0] == '/' && (h[1] == ' ' || (h[1] == '/' && h[2] == ' ') || !memcmp(h, "/SYM64/", 7));
+		bool data = !thin || special;	/* thin: only the special members have data */
+		if (data && msz > sz - o - 60) {
+			oerror("'%s': truncated or malformed archive", path);
+			break;
+		}
+		if (h[0] == '/' && h[1] == '/' && h[2] == ' ') {
+			longn = h + 60, longsz = msz;
+		} else if (h[0] == '/' && (h[1] == ' ' || !memcmp(h, "/SYM64/", 7))) {
+			/* symbol table */
+		} else {
+			if (h[0] == '/' && longn) {
+				size_t off = strtoull(h + 1, NULL, 10), e = off;
+
+				while (e < longsz && longn[e] != '\n')
+					e++;
+				nl = e - off;
+				if (off > longsz)
+					nl = 0, off = 0;
+				if (nl && longn[off + nl - 1] == '/')
+					nl--;
+				snprintf(name, sizeof name, "%.*s", (int)nl, longn + off);
+			} else {
+				nl = 0;
+				while (nl < 16 && h[nl] != '/')
+					nl++;
+				snprintf(name, sizeof name, "%.*s", (int)nl, h);
+			}
+			NIn x = {.label = strdup(name), .member = true};
+			if (thin) {
+				char full[8192];
+
+				if (name[0] == '/' || !slash)
+					snprintf(full, sizeof full, "%s", name);
+				else
+					snprintf(full, sizeof full, "%.*s/%s", (int)(slash - path), path, name);
+				x.path = strdup(full);
+			} else {
+				x.mem = xcalloc(msz + 8, 1);
+				memcpy(x.mem, h + 60, msz);
+				x.size = msz;
+			}
+			nin_push(v, n, x);
+		}
+		o += 60 + (data ? msz + (msz & 1) : 0);
+	}
+	munmap((void *)b, sz);
+}
+
 int nm_main(int argc, char **argv, int dirfd, FILE *out, FILE *err)
 {
 	oerr = err ? err : stderr;
@@ -1254,19 +1348,33 @@ int nm_main(int argc, char **argv, int dirfd, FILE *out, FILE *err)
 		free(files);
 		return 1;
 	}
-	for (int f = 0; f < nf; f++) {
+	NIn *in = NULL;
+	int nin = 0;
+	for (int f = 0; f < nf; f++)
+		nm_inputs(dirfd, files[f], &in, &nin);
+	for (int f = 0; f < nin; f++) {
 		Elf e;
-		if (elf_open(&e, dirfd, files[f]))
+		if (in[f].mem) {
+			memset(&e, 0, sizeof e);
+			e.buf = in[f].mem;
+			e.size = in[f].size;
+			e.eh = (const Ehdr *)e.buf;
+			if (e.size < sizeof(Ehdr) || memcmp(e.buf, "\177ELF\2\1", 6) || !elf_valid(&e)) {
+				oerror("'%s': not a valid ELF64 little-endian file", in[f].label);
+				continue;
+			}
+		} else if (elf_open(&e, dirfd, in[f].path))
 			continue;
 		const Shdr *st = NULL;
 		for (uint32_t k = 0; k < e.nsh; k++)
 			if (e.sh[k].sh_type == (dyn ? SHT_DYNSYM : SHT_SYMTAB))
 				st = &e.sh[k];
-		if (nf > 1)
-			fprintf(out, "\n%s:\n", files[f]);
+		if (nf > 1 || in[f].member)
+			fprintf(out, "\n%s:\n", in[f].label);
 		if (!st) {
-			fprintf(oerr, "%s: %s: no symbols\n", prog, files[f]);
-			elf_close(&e);
+			fprintf(oerr, "%s: %s: no symbols\n", prog, in[f].label);
+			if (!in[f].mem)
+				elf_close(&e);
 			continue;
 		}
 		const Sym *ys = (const Sym *)(e.buf + st->sh_offset);
@@ -1364,8 +1472,15 @@ int nm_main(int argc, char **argv, int dirfd, FILE *out, FILE *err)
 			free(owned[i]);
 		free(owned);
 		free(v);
-		elf_close(&e);
+		if (!in[f].mem)
+			elf_close(&e);
 	}
+	for (int f = 0; f < nin; f++) {
+		free(in[f].label);
+		free(in[f].path);
+		free(in[f].mem);
+	}
+	free(in);
 	free(files);
 	return oerrors ? 1 : 0;
 }
