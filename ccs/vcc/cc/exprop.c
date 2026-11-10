@@ -607,6 +607,7 @@ static __attribute__((noinline)) uint32_t comma_rest(cc *c, uint32_t l)
 		next(c);
 		r = assign_expr(c);
 		unused_value(c, l, true);
+		set_only(c, l);	/* (a discarded value: clang's IgnoredValueConversions) */
 		l = mk2(c, N_COMMA, QUNQ(N(decay(c, r))->ty), loc, l, decay(c, r));
 	}
 	return l;

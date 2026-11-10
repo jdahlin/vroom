@@ -32,9 +32,18 @@ static void unused_vars(cc *c, uint32_t m)
 		const attrs *a = y->attrs ? &c->attr[y->attrs] : NULL;
 		pp_span r;
 
-		if (y->kind != S_VAR || !y->name || (y->flags & (SF_REF | SF_PARAM | SF_ATTR_USED)) ||
+		if (y->kind != S_VAR || !y->name || (y->flags & (SF_PARAM | SF_ATTR_USED)) ||
 		    y->sc == SC_EXTERN || (a && (a->unused || a->cleanup || a->used)))
 			continue;
+		if (y->flags & SF_REF) {	/* -Wunused-but-set-variable: only assigned */
+			if (!y->nref) {
+				pp_dinfo d = { "warning", y->loc, NULL, 0, NULL, 0, idstr_(y->name), (uint32_t)idlen_(y->name) };
+				static const char *const gb[] = { "unused-but-set", "unused", "all", "most", NULL };
+
+				pp_warnx(c->p, "unused-but-set-variable", false, gb, &d, "variable '%.*s' set but not used", IDF(y->name));
+			}
+			continue;
+		}
 		r = (pp_span){ y->loc, pp_tok_end(c->p, y->loc) };
 		{
 			pp_dinfo d = { "warning", y->loc, &r, 1, NULL, 0, idstr_(y->name), (uint32_t)idlen_(y->name) };

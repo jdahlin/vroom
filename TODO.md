@@ -1107,11 +1107,15 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
   `unused_function.c`; kernel 879/879.  Not modelled: clang also warns a
   non-inline static function of a header (vcc cannot see the references
   from unparsed lazy bodies) and a function only calling itself.
+- [x] **-Wunused-but-set-variable**: clang's RefsMinusAssignments
+  (`sym.nref`: references, minus discarded full expressions and comma left
+  operands that only assign, ++ or -- it; volatile compound ones count),
+  given with the unused variables at scope close.  Done: diag
+  `unused_but_set.c`; the 31 test-suite warnings identical.
 - [ ] **Missing warnings**:
   `-Wreturn-stack-address` of a compound literal
   (clang prints the initializer with its expression printer),
-  `-Wuninitialized`, `-Wunused-but-set-variable`,
-  `-Wunused-local-typedef` (`-Wunknown-attributes` and
+  `-Wuninitialized`, `-Wunused-local-typedef`, `-Wself-assign` (`-Wunknown-attributes` and
   `-Wdeprecated-declarations` are done: PostgreSQL's warnings compare).
   *Validate:* one diag test per warning; `vcc-sema.py warn` stays 879/879
   (no false positives on the kernel).  (Done: `-Wmultichar` in C and `#if`, "character constant too long",

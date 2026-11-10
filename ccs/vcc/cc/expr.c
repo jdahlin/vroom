@@ -405,6 +405,7 @@ static inline __attribute__((always_inline)) uint32_t primary_sym(cc *c, uint32_
 		if (!c->unevaluated && !((y->flags & SF_OVERLOAD) && is(c, T_LPAREN)))
 			y->flags |= SF_USED;
 		y->flags |= SF_REF;
+		y->nref += y->nref != 0xffff;
 		if (unlikely(y->next) && y->depth)
 			c->syms[y->next].flags |= SF_REF;	/* a block-scope extern: the global */
 		return n;

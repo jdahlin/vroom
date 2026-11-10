@@ -149,6 +149,7 @@ VPRIV void rt_defer(cc *c, const char *flag, const char *const *groups, uint32_t
 VPRIV void rt_flush(cc *c);
 VPRIV void unused_value(cc *c, uint32_t e, bool comma);
 VPRIV bool unused_cmp(cc *c, uint32_t e);
+VPRIV void set_only(cc *c, uint32_t e);
 VPRIV __attribute__((format(printf, 10, 11))) bool cc_warnx(cc *c, const char *flag, bool on, const char *const *groups, uint32_t loc, const pp_span *r, int nr, const pp_fixit *fx, int nfx, const char *fmt, ...);
 VPRIV const char *idname(uint32_t id, int *len);
 VPRIV int idlen_(uint32_t id);

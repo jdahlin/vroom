@@ -188,6 +188,25 @@ VPRIV bool unused_cmp(cc *c, uint32_t e)
 	return true;
 }
 
+/* clang's MaybeDecrementCount: a discarded full expression that only assigns a local variable */
+VPRIV void set_only(cc *c, uint32_t e)
+{
+	const node *x = N(e);
+	uint32_t v;
+	bool comp;
+
+	if (x->op == N_ASSIGN)
+		v = x->a, comp = x->aux != 0;
+	else if (x->op == N_PREINC || x->op == N_PREDEC || x->op == N_POSTINC || x->op == N_POSTDEC)
+		v = x->a, comp = true;
+	else
+		return;
+	if (N(v)->op != N_VAR || (N(v)->flags & NF_PAREN) || (comp && (QQ(N(v)->ty) & Q_VOLATILE)))
+		return;
+	if (c->syms[N(v)->a].nref && c->syms[N(v)->a].nref != 0xffff)
+		c->syms[N(v)->a].nref--;
+}
+
 /* -Wunused-value: e's value is dropped (a statement; comma: the left operand of a comma) */
 VPRIV void unused_value(cc *c, uint32_t e, bool comma)
 {
@@ -500,8 +519,8 @@ VPRIV uint32_t compound_stmt(cc *c, qty *last)
 
 			while (N(ls)->op == N_LABEL)
 				ls = N(ls)->c;
-			if (N(ls)->op == N_EXPR)
-				unused_value(c, N(ls)->a, false);
+			if (N(ls)->op == N_EXPR && N(ls)->a)
+				set_only(c, N(ls)->a), unused_value(c, N(ls)->a, false);
 			sedone = items.n;
 		}
 		if (is(c, T_EOF)) {
@@ -700,8 +719,10 @@ VPRIV uint32_t statement(cc *c)
 		c->in_loop++;
 		body = sub_statement(c);
 		c->in_loop--;
-		if (init && N(init)->op == N_EXPR)	/* clang's ActOnForStmt: the first and third clauses */
-			unused_value(c, N(init)->a, false);
+		if (init && N(init)->op == N_EXPR && N(init)->a)	/* clang's ActOnForStmt: the first and third clauses */
+			set_only(c, N(init)->a), unused_value(c, N(init)->a, false);
+		if (step)
+			set_only(c, step);
 		scope_close(c);
 		vinit(&sb);
 		vpush(c, &sb, step);
@@ -910,6 +931,8 @@ VPRIV uint32_t statement(cc *c)
 
 		if (!c->in_stmtexpr)
 			unused_result(c, e, true);
+		if (!sed)
+			set_only(c, e);
 		if (!sed && !cmp && !(c->in_stmtexpr && N(e)->op == N_BINARY && is_cmp(N(e)->aux) &&
 				      !(N(e)->flags & (NF_PAREN | NF_MACRO))))
 			unused_value(c, e, false);

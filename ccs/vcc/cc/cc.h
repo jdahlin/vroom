@@ -141,7 +141,7 @@ enum {
 typedef struct sym {
 	uint32_t name, loc;
 	uint8_t kind, sc;
-	uint16_t _pad;
+	uint16_t nref;		/* local variable: references minus discarded assignments (clang's RefsMinusAssignments) */
 	uint32_t flags;
 	qty ty;
 	uint32_t align;		/* aligned() on the declaration, bytes (0: none) */
