@@ -27,6 +27,26 @@ static uint32_t new_attrs(cc *c, const attrs *a)
 	return i;
 }
 
+/* clang's -Wdeprecated-declarations for a use at loc of name, a: the record */
+VPRIV __attribute__((noinline, cold)) void deprecated_use(cc *c, uint32_t loc, uint32_t name, const attrs *a)
+{
+	if (c->fn && (c->syms[c->fn].flags & SF_DEPRECATED))
+		return;	/* clang: not inside a deprecated function */
+	if (a->deprmsg)
+		cc_warnx(c, "deprecated-declarations", true, NULL, loc, NULL, 0, NULL, 0, "'%.*s' is deprecated: %s",
+			 IDF(name), c->strs[a->deprmsg - 1].s);
+	else
+		cc_warnx(c, "deprecated-declarations", true, NULL, loc, NULL, 0, NULL, 0, "'%.*s' is deprecated", IDF(name));
+	note(c, a->depr, "'%.*s' has been explicitly marked deprecated here", IDF(name));
+}
+
+/* a deprecated tag: its record */
+VPRIV void tag_deprecate(cc *c, uint32_t ti, const attrs *a)
+{
+	if (a->depr && !c->tags[ti].depr)
+		c->tags[ti].depr = new_attrs(c, a);
+}
+
 VPRIV void apply_sym_attrs(cc *c, sym *s, const attrs *a)
 {
 	if (attrs_empty(a))
@@ -38,6 +58,8 @@ VPRIV void apply_sym_attrs(cc *c, sym *s, const attrs *a)
 	if (a->aligned > s->align)
 		s->align = a->aligned;
 	if (a->weak) s->flags |= SF_WEAK;
+	if (a->depr) s->flags |= SF_DEPRECATED;
+	if (a->wur) s->flags |= SF_WUR;
 	if (a->noreturn) s->flags |= SF_NORETURN;
 	if (a->always_inline) s->flags |= SF_ALWAYS_INLINE;
 	if (a->noinline) s->flags |= SF_NOINLINE;
@@ -276,6 +298,12 @@ static uint32_t declare(cc *c, const dspec *ds, declr *d, qty t, bool file)
 		}
 		s = sym_new(c, S_TYPEDEF, d->name, t, d->loc);
 		c->syms[s].sc = SC_TYPEDEF;
+		if (unlikely(at.depr)) {	/* only what a typedef's use needs */
+			attrs da = { 0 };
+
+			da.depr = at.depr, da.deprmsg = at.deprmsg;
+			apply_sym_attrs(c, &c->syms[s], &da);
+		}
 		sym_bind(c, s);
 		if (is_record(c, t) || KIND(c, t) == TY_ENUM) {
 			tag *r = &c->tags[T(c, t)->aux];

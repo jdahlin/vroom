@@ -27,6 +27,40 @@ VPRIV uint32_t mkstmt(cc *c, int op, uint32_t loc, uint32_t a, uint32_t b, uint3
 }
 
 /* -Wparentheses: "if (x = 1)" */
+/*
+ * -Wunused-result for the value e that is dropped: a call of a
+ * warn_unused_result/nodiscard function; a statement expression: its last
+ * expression statement (last: the whole value is dropped), else the others
+ */
+VPRIV void unused_result(cc *c, uint32_t e, bool last)
+{
+	if (N(e)->op == N_STMTEXPR) {
+		uint32_t b = N(e)->a, n = N(b)->c;
+
+		for (uint32_t i = 0; i < n; i++) {
+			uint32_t s = c->lists[N(b)->b + i];
+
+			if (N(s)->op == N_EXPR && N(s)->a && (i + 1 < n ? !last : last))
+				unused_result(c, N(s)->a, true);
+		}
+		return;
+	}
+	if (N(e)->op == N_CALL) {
+		uint32_t f = N(e)->a;
+
+		while (N(f)->op == N_CAST && N(f)->a)
+			f = N(f)->a;
+		if (N(f)->op == N_VAR && (c->syms[N(f)->a].flags & SF_WUR)) {
+			pp_span r = rng(c, e);
+			const attrs *a = &c->attr[c->syms[N(f)->a].attrs];
+
+			cc_warnx(c, "unused-result", true, NULL, rng(c, N(e)->a).b, &r, 1, NULL, 0,
+				 "ignoring return value of function declared with '%s' attribute",
+				 a->wur == 2 ? "nodiscard" : "warn_unused_result");
+		}
+	}
+}
+
 static void assign_cond_warn(cc *c, uint32_t e)
 {
 	if (N(e)->op == N_ASSIGN && !N(e)->aux && !(N(e)->flags & (NF_PAREN | NF_MACRO | NF_ERR))) {
@@ -646,6 +680,8 @@ VPRIV uint32_t statement(cc *c)
 				pp_diagx(c->p, &d, "use '=' to turn this equality comparison into an assignment");
 			}
 		}
+		if (!c->in_stmtexpr)
+			unused_result(c, e, true);
 		expect_semi(c, "after expression");
 		return mkstmt(c, N_EXPR, loc, e, 0, 0);
 	}

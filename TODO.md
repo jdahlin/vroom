@@ -621,8 +621,11 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
   mean '_Clang', note at the built-in macro) and takes it as `clang::`.
   *Validate:* diag test.
 - [ ] **Attributes without effect**: `ifunc`, `alloc_size`,
-  `format`, `nonnull`, `deprecated`, `warn_unused_result`, `returns_twice`,
-  `target`.
+  `format`, `nonnull`, `returns_twice`, `target`.  (Done: `deprecated`
+  (functions, variables, typedefs, tags, enumerators; not inside a
+  deprecated function) and `warn_unused_result`/`[[nodiscard]]`, also in
+  statement expressions: diag `deprecated*.c`; kernel warn 879/879,
+  PostgreSQL's 1574 files no new warnings.)
   *Validate:* T6 for `ifunc` (STT_GNU_IFUNC); diag tests
   for `format`/`nonnull`/`deprecated`/`warn_unused_result` warnings.
 - [ ] **Blocks (`^{}`)** for Darwin headers.

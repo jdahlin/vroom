@@ -104,6 +104,7 @@ typedef struct tag {
 				   (clang's unadjusted alignment: AAPCS64 argument passing) */
 	uint32_t typedef_name;	/* for anonymous records: first typedef naming it */
 	uint32_t enums, nenum;	/* enum: its enumerator syms (list) */
+	uint32_t depr;		/* deprecated: attrs record index, 0: none */
 } tag;
 
 /* ---------------- symbols ---------------- */
@@ -131,6 +132,8 @@ enum {
 	SF_OVERLOAD = 32768,	/* __attribute__((overloadable)): mangled name, member of an overload set */
 	SF_LAZY = 1u << 17,	/* a header function whose body is kept as tokens, parsed only if referenced */
 	SF_REF = 1u << 18,	/* named anywhere (also in sizeof/typeof): a lazy body must be parsed */
+	SF_DEPRECATED = 1u << 19,	/* deprecated: attrs record's depr/deprmsg */
+	SF_WUR = 1u << 20,	/* warn_unused_result / nodiscard (attrs record's wur) */
 };
 
 typedef struct sym {

@@ -224,7 +224,11 @@ VPRIV bool decl_specs(cc *c, dspec *ds, bool allow_sc)
 				continue;
 			}
 			if (!have_named && !base && !nlong && !sgn && t->kind == T_IDENT && typedef_id(c, t->id)) {
-				named = c->syms[lookup(c, t->id)].ty;
+				uint32_t ts = lookup(c, t->id);
+
+				if (unlikely(c->syms[ts].flags & SF_DEPRECATED))
+					deprecated_use(c, t->loc, t->id, &c->attr[c->syms[ts].attrs]);
+				named = c->syms[ts].ty;
 				have_named = true;
 				any = true;
 				next(c);
@@ -364,9 +368,12 @@ VPRIV bool decl_specs(cc *c, dspec *ds, bool allow_sc)
 			}
 			body = is(c, T_LBRACE) || (kind == TY_ENUM && is(c, T_COLON));
 			ti = tag_lookup_or_new(c, kind, name, loc, body, !body && is(c, T_SEMI) && !c->in_struct);
+			if (!body && c->tags[ti].depr)
+				deprecated_use(c, loc, name, &c->attr[c->tags[ti].depr]);
 			if (body) {
 				tag *r = &c->tags[ti];
 
+				tag_deprecate(c, ti, &pre);
 				if (r->flags & RF_COMPLETE) {
 					cc_error(c, loc, "redefinition of '%.*s'", IDF(name));
 					note(c, r->loc, "previous definition is here");

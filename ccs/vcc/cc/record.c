@@ -134,6 +134,8 @@ __attribute__((noinline)) VPRIV void struct_body(cc *c, uint32_t ti)
 	memcpy(r->f, &x->fs[base], nf * sizeof(field));
 	fs = r->f;
 	r->nfield = nf;
+	tag_deprecate(c, ti, &post);
+	r = &c->tags[ti];
 	if (post.packed)
 		r->flags |= RF_PACKED;
 	if (post.aligned > r->maxalign)
@@ -196,6 +198,8 @@ VPRIV void enum_body(cc *c, uint32_t ti, attrs *after)
 		}
 		s = sym_new(c, S_ENUMCONST, name, v >= INT32_MIN && v <= INT32_MAX ? prim(TY_INT) :
 						 v >= 0 && v <= UINT32_MAX ? prim(TY_UINT) : v >= INT64_MIN && v <= INT64_MAX ? prim(CC_I64(c, false)) : prim(CC_I64(c, true)), loc);
+		if (unlikely(ea.depr))
+			apply_sym_attrs(c, &c->syms[s], &ea);
 		c->syms[s].val = (int64_t)v;
 		sym_bind(c, s);
 		vpush(c, &cs, s);

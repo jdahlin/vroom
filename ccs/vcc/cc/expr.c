@@ -385,6 +385,10 @@ static inline __attribute__((always_inline)) uint32_t primary_sym(cc *c, uint32_
 {
 	sym *y = &c->syms[s];
 
+	if (unlikely(y->flags & SF_DEPRECATED)) {
+		deprecated_use(c, loc, id, &c->attr[y->attrs]);
+		y = &c->syms[s];
+	}
 	if (y->kind == S_ENUMCONST)
 		return mk_int(c, y->val, y->ty, loc);
 	if (unlikely(y->kind == S_TYPEDEF))
@@ -516,6 +520,8 @@ static __attribute__((noinline)) uint32_t stmt_expr(cc *c, uint32_t loc)
 	expect(c, T_RPAREN, "')'");
 	n = mk(c, N_STMTEXPR, last, loc);
 	N(n)->a = b;
+	if (!c->in_stmtexpr)
+		unused_result(c, n, false);	/* the statements before the value */
 	return n;
 }
 

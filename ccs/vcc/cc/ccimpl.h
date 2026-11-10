@@ -253,6 +253,9 @@ VPRIV __attribute__((noinline)) uint32_t decay_slow(cc *c, uint32_t n, qty t, in
 static inline uint32_t decay(cc *c, uint32_t n);
 VPRIV const field *bitfield_of(cc *c, uint32_t n);
 VPRIV bool static_init_ok(cc *c, qty ty, uint32_t init, uint32_t *bad);
+VPRIV void deprecated_use(cc *c, uint32_t loc, uint32_t name, const attrs *a);
+VPRIV void tag_deprecate(cc *c, uint32_t ti, const attrs *a);
+VPRIV void unused_result(cc *c, uint32_t e, bool last);
 VPRIV uint32_t expr_loc(cc *c, uint32_t n);
 VPRIV qty promoted(cc *c, uint32_t n);
 VPRIV int conv_kind(cc *c, qty from, qty to, uint32_t n);
@@ -522,16 +525,15 @@ static inline void attribute_list(cc *c, attrs *a)
 }
 
 /* no attribute at all (padding excluded) */
-/* 12 u32 fields then the 18 flag bytes (attr.c asserts the layout) */
+/* the u32 fields then the 0/1 flag bytes packed .. noinstr (attr.c asserts the layout) */
 static inline bool attrs_empty(const attrs *a)
 {
-	const char *p = (const char *)a;
-	uint64_t w[8], o = 0;
+	const unsigned char *p = (const unsigned char *)a;
+	unsigned o = a->prio | a->tlsmodel;
 
-	memcpy(w, p, sizeof(w));
-	for (int i = 0; i < 8; i++)
-		o |= w[i];
-	return !o && !p[64] && !p[65] && !a->prio && !a->tlsmodel;
+	for (size_t i = 0; i <= offsetof(attrs, noinstr); i++)
+		o |= p[i];
+	return !o;
 }
 
 #endif
