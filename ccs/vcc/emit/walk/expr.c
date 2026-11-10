@@ -29,8 +29,8 @@ static void wk_scalar(ecx *e, uint32_t n, qty t)
 	cc *c = e->c;
 	int k = KIND(c, t);
 
-	if (k == TY_FLOAT16 || k == TY_FLOAT128 || ((k == TY_INT128 || k == TY_UINT128) && !LO(i128mem)()))
-		wk_unsup(e, n, k == TY_FLOAT16 ? "_Float16" : k == TY_FLOAT128 ? "__float128" : "__int128");
+	if (k == TY_FLOAT16 || ((k == TY_INT128 || k == TY_UINT128) && !LO(i128mem)()))
+		wk_unsup(e, n, k == TY_FLOAT16 ? "_Float16" : "__int128");
 }
 
 static bool wk_wide(cc *c, qty t) { return KIND(c, t) == TY_INT128 || KIND(c, t) == TY_UINT128; }
@@ -39,7 +39,7 @@ VPRIV bool wk_mem(ecx *e, qty t)
 {
 	cc *c = e->c;
 
-	return is_record(c, t) || is_array(c, t) || is_vec(c, t) || (KIND(c, t) == TY_LDOUBLE && LO(ldmem)()) || (wk_wide(c, t) && LO(i128mem)());
+	return is_record(c, t) || is_array(c, t) || is_vec(c, t) || KIND(c, t) == TY_FLOAT128 || (KIND(c, t) == TY_LDOUBLE && LO(ldmem)()) || (wk_wide(c, t) && LO(i128mem)());
 }
 
 /* a float value's register (float/double: the CPU's float registers) */
@@ -1977,9 +1977,13 @@ VPRIV val wk_gen(ecx *e, uint32_t n)
 			val v;
 			int r;
 
-			q_to_x87(q, b);
-			memcpy(&lo, b, 8);
-			hi = (uint64_t)b[8] | (uint64_t)b[9] << 8;
+			if (KIND(c, x->ty) == TY_FLOAT128) {	/* binary128 as it is */
+				lo = (uint64_t)q, hi = (uint64_t)(q >> 64);
+			} else {
+				q_to_x87(q, b);
+				memcpy(&lo, b, 8);
+				hi = (uint64_t)b[8] | (uint64_t)b[9] << 8;
+			}
 			v = vconst((i128)(int64_t)lo);
 			r = LO(toreg)(e, &v, 8);
 			LO(store)(e, r, &l, 8);

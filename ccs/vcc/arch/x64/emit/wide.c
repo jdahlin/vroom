@@ -295,6 +295,8 @@ VPRIV val x64_wcvt(ecx *e, val v, qty from, qty to)
 
 	if (fw && tw)
 		return v;
+	if (KIND(c, from) == TY_FLOAT128 || KIND(c, to) == TY_FLOAT128)
+		return x64_cvt(e, v, from, to);	/* (fp.c: libgcc's __fixtfti, __floattitf ...) */
 	if (tw && v.k == V_CONST)
 		return x64_wconst(e, wk_signed(c, from) ? v.i : (i128)(u128)(uint64_t)v.i);
 	if (tw && is_flt(c, from)) {
