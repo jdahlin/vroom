@@ -330,7 +330,7 @@ kärnan och kan vänta.
 
 ## Status
 
-### X3 (2026-11-10): pågår, i gren `claude/x86-x3` (PR jdahlin/vroom#9)
+### X3 (2026-11-10): pågår, i gren `claude/x86-x3-main` (PR jdahlin/vroom#11; #9 hamnade i #4:s gren efter att #4 slagits ihop)
 - Klart: biblioteksinbyggda som anrop; aggregat (initierare, kopior, sammansatta
   literaler, medlemmar av rvärden); bit-fält; System V-anrop (klassning,
   poster som argument och resultat, dold resultatpekare, varargs med
@@ -338,13 +338,17 @@ kärnan och kan vänta.
   minnesplatser, `st(0)`-resultat, alla konverteringar); `__int128` (16-byte
   objekt via adress, libgcc för `/ % <<` och flyttalskonvertering); inbyggda
   (bitoperationer, overflow via 128 bitar, `alloca`, `constant_p` utan inlining,
-  `signbit` ...).
-- `bench/vcc-x86.py`: 1573/1768. Körfel bara där clangs optimerare krävs
+  `signbit` ...); VLA (storlekar i platser, arrayen under sp, sp återställs vid
+  blockslut och när ett `goto` når deklarationen igen); TLS (local-exec,
+  initial-exec, general dynamic under `-fPIC`); PIC/PIE (GOT-laddning via r11
+  enligt arm64:s `sym_needs_got`, `@PLT`-anrop).
+- `bench/vcc-x86.py`: 1591/1769, lika i `--pie` och `--pic` (vcc-sidan
+  `-fPIE`/`-fPIC`, länkad `-pie`). Körfel bara där clangs optimerare krävs
   (`20030125-1`, `bcp-1`, `builtin-constant`) och 11 länkfel av samma slag eller
   `__builtin_setjmp`. `vcc-abi.py --target x86_64`: 6/11, med två nya tester
   (`int_records`, `fp_records`) som klarar alla fyra kombinationerna; resten
   stannar vid komplexa tal, vektorer, alignment > 16 och packade bit-fält.
-- Kvar i X3: VLA, komplexa tal, GNU-vektorer, TLS, PIC/PIE (GOT, PLT), atomics och
+- Kvar i X3: komplexa tal, GNU-vektorer, atomics och
   `__sync_*`, etikettadresser och beräknat `goto`, cleanup-variabler, alignment
   över 16, `__float128`-aritmetik (libgcc `__addtf3` ...), inlining av
   `__always_inline` med `need_fold` och `constant_p` efter inlining,
