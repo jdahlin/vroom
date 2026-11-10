@@ -100,7 +100,11 @@ def main():
         [f'cDPrST A {four}', 'mPi nonmember.o A mm/memory.o'],
         # regular archives (created only): basenames, long names, symbol table, odd sizes
         [f'cDPrs A {four} .varcmp/e.o'], [f'cDPrS A {four}'], ['crs A kernel/fork.o .config'],
-        ['cDPrs A arch/arm64/kernel/vdso/vdso.so.dbg init/main.o'], ['cDPrsT A arch/arm64/kernel/vdso/vdso.so.dbg'],
+        ['cDPrs A arch/arm64/kernel/vdso/vdso.so.dbg init/main.o'],
+        # updating regular archives: r by basename (not with P), q, d, s, m
+        [f'cDrs A {four}', 'cDr A kernel/fork.o init/main.o'], [f'cDrs A {four}', 'cDPr A kernel/fork.o'],
+        [f'cDrs A {four}', 'q A kernel/fork.o', 'd A fork.o'], [f'cDrs A {four}', 'd A main.o nope.o'],
+        [f'cDrS A {four}', 's A'], [f'cDrs A {four}', 'm A fork.o'], ['q A kernel/fork.o init/main.o'], ['cDPrsT A arch/arm64/kernel/vdso/vdso.so.dbg'],
     ]
     ebad = 0
     for arch in ('.varcmp/a.a', 'a.a'):

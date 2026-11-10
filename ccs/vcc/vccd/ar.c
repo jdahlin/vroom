@@ -8,10 +8,10 @@
  *   ar mPi POS A MEMBER...     move MEMBERs before POS (head objects first)
  *   ar t A                     list the members
  *
- * Operations r, m, t (p, x: regular archives only); modifiers c D P s S T u(ignored) i b a, and --thin.
+ * Operations r, m, t, q, s (p, x, d: regular archives only); modifiers c D P s S T u(ignored) i b a, and --thin.
  * A regular archive (GNU format: basenames, "name/" or "/OFFSET" into "//"
  * for names of 16 bytes or more, the data padded to even with '\n') is only
- * created, from files with an ELF object first, and read (t, p, x), not updated.
+ * created and updated (r by basename, q, d, s, m) with an ELF object first, and read (t, p, x).
  * A thin archive's members are paths, relative to the archive's directory,
  * with no data:
  *
@@ -59,6 +59,7 @@ typedef struct member {
 	char *abs;		/* absolute, normalized */
 	uint32_t mode;
 	uint64_t size;
+	const unsigned char *data;	/* a regular archive's member: its bytes in the old archive (abs NULL) */
 } member;
 
 typedef struct mlist {
@@ -290,7 +291,7 @@ static bool add_file(arq *q, const char *path, mlist *l)
 		free(abs);
 		ok = false;
 	} else {
-		member m = { relto(q->dir, abs), abs, st.st_mode & 07777, (uint64_t)st.st_size };
+		member m = { relto(q->dir, abs), abs, st.st_mode & 07777, (uint64_t)st.st_size, NULL };
 
 		ok = m.name && ml_push(l, m);
 		if (!ok) {
@@ -375,6 +376,25 @@ static bool elf_syms(const vmapped *d, vsbuf *names, uint32_t *count, bool *is_o
 
 /* ---------------- writing ---------------- */
 
+/* a member's bytes: the old archive's, or the file mapped */
+static bool mget(const member *m, vmapped *d)
+{
+	struct stat st;
+
+	if (m->data) {
+		d->p = m->data;
+		d->n = m->size;
+		return true;
+	}
+	return vmap_file(m->abs, d, &st);
+}
+
+static void mput(const member *m, vmapped *d)
+{
+	if (!m->data)
+		vunmap_file(d);
+}
+
 static void header(vsbuf *b, const char *name, const char *date, const char *uid, const char *gid,
 		   const char *mode, uint64_t size)
 {
@@ -412,16 +432,15 @@ static bool write_archive(arq *q, const char *archive_abs, const char *shown, co
 
 	if (!thin && l->n) {
 		/* llvm-ar takes the format from the first member: GNU for ELF, else the host's (BSD here) */
-		struct stat st;
 		vmapped d;
 		bool elf;
 
-		if (!vmap_file(l->m[0].abs, &d, &st)) {
+		if (!mget(&l->m[0], &d)) {
 			err(q, "ar: error: %s: %s\n", l->m[0].name, strerror(errno));
 			goto out;
 		}
 		elf = d.n >= 4 && !memcmp(d.p, "\177ELF", 4);
-		vunmap_file(&d);
+		mput(&l->m[0], &d);
 		if (!elf) {
 			err(q, "ar: error: %s: %s\n", l->m[0].name, "a regular archive must start with an ELF object");
 			goto out;
@@ -441,19 +460,18 @@ static bool write_archive(arq *q, const char *archive_abs, const char *shown, co
 		if (!(nsym = calloc(l->n, sizeof(*nsym))))
 			goto out;
 		for (i = 0; i < l->n; i++) {
-			struct stat st;
 			vmapped d;
 
-			if (!vmap_file(l->m[i].abs, &d, &st)) {
+			if (!mget(&l->m[i], &d)) {
 				err(q, "ar: error: %s: %s\n", l->m[i].name, strerror(errno));
 				goto out;
 			}
 			if (!elf_syms(&d, &syms, &nsym[i], &any_obj)) {
-				vunmap_file(&d);
+				mput(&l->m[i], &d);
 				err(q, "ar: error: %s: %s\n", l->m[i].name, "malformed ELF symbol table");
 				goto out;
 			}
-			vunmap_file(&d);
+			mput(&l->m[i], &d);
 			total += nsym[i];
 		}
 		symtab = any_obj;
@@ -501,15 +519,14 @@ static bool write_archive(arq *q, const char *archive_abs, const char *shown, co
 			snprintf(mode, sizeof(mode), "%o", 0644u);	/* (llvm-ar, deterministic: 644 for every member) */
 			header(&out, nm, "0", "0", "0", mode, l->m[i].size);
 			if (!thin) {
-				struct stat st;
 				vmapped d;
 
-				if (!vmap_file(l->m[i].abs, &d, &st)) {
+				if (!mget(&l->m[i], &d)) {
 					err(q, "ar: error: %s: %s\n", l->m[i].name, strerror(errno));
 					goto out;
 				}
 				vsbuf_put(&out, d.p, l->m[i].size < d.n ? l->m[i].size : d.n);
-				vunmap_file(&d);
+				mput(&l->m[i], &d);
 				if (l->m[i].size & 1)
 					vsbuf_put(&out, "\n", 1);
 			}
@@ -576,49 +593,31 @@ static bool write_all_fd(int fd, const void *p, size_t n)
 	return true;
 }
 
-/* t lists the names, p writes the data, x extracts into cwd (mode 644, as llvm-ar's D);
-   named members only when given, each one that is not found an error */
-static int regular_read(arq *q, const vmapped *d, const char *shown, char op, char **files, int nfiles)
+/* the members of the regular archive d, in order: names as stored, data in d */
+static bool read_regular(arq *q, const vmapped *d, const char *shown, mlist *l)
 {
 	const char *b = (const char *)d->p, *longn = NULL;
 	size_t sz = d->n, longsz = 0;
-	bool *found = calloc((size_t)nfiles + 1, 1);
-	vsbuf out = { 0 };
-	int rc = 0;
 
-	if (!found)
-		return 1;
-	for (size_t o = 8; o + 60 <= sz;) {
+	for (size_t o = 8; o < sz;) {
 		const char *h = b + o;
 		char num[11] = { 0 }, name[4096];
 		size_t msz, nl = 0;
 
-		if (h[58] != '`' || h[59] != '\n') {
-			err(q, "ar: error: %s: %s\n", shown, "truncated or malformed archive");
-			rc = 1;
-			break;
-		}
+		if (o + 60 > sz || h[58] != '`' || h[59] != '\n')
+			goto bad;
 		memcpy(num, h + 48, 10);
 		msz = strtoull(num, NULL, 10);
-		if (msz > sz - o - 60) {
-			err(q, "ar: error: %s: %s\n", shown, "truncated or malformed archive");
-			rc = 1;
-			break;
-		}
-		const char *data = h + 60;
+		if (msz > sz - o - 60)
+			goto bad;
 		if (h[0] == '/' && h[1] == '/' && h[2] == ' ') {
-			longn = data, longsz = msz;
-		} else if (h[0] == '/' && (h[1] == ' ' || !memcmp(h, "/SYM64/", 7))) {
-			/* symbol table */
-		} else {
+			longn = h + 60, longsz = msz;
+		} else if (!(h[0] == '/' && (h[1] == ' ' || !memcmp(h, "/SYM64/", 7)))) {
 			if (h[0] == '/') {
 				size_t off = strtoull(h + 1, NULL, 10), e;
 
-				if (!longn || off >= longsz) {
-					err(q, "ar: error: %s: %s\n", shown, "truncated or malformed archive");
-					rc = 1;
-					break;
-				}
+				if (!longn || off >= longsz)
+					goto bad;
 				for (e = off; e < longsz && longn[e] != '\n'; e++)
 					;
 				nl = e - off - (e > off && longn[e - 1] == '/');
@@ -628,37 +627,68 @@ static int regular_read(arq *q, const vmapped *d, const char *shown, char op, ch
 					nl++;
 				snprintf(name, sizeof name, "%.*s", (int)nl, h);
 			}
-			bool want = !nfiles;
-			for (int i = 0; i < nfiles; i++)
-				if (!found[i] && !strcmp(files[i], name)) {
-					found[i] = want = true;
-					break;
-				}
-			if (want) {
-				if (op == 't') {
-					vsbuf_str(&out, name);
-					vsbuf_put(&out, "\n", 1);
-				} else if (op == 'p') {
-					vsbuf_put(&out, data, msz);
-				} else if (strchr(name, '/') || !strcmp(name, "..") || !strcmp(name, ".")) {
-					err(q, "ar: error: %s: %s\n", name, "unsafe member name");
-					rc = 1;
-				} else {
-					char path[8192];
-					int fd;
+			member m = { strdup(name), NULL, 0644, msz, (const unsigned char *)h + 60 };
 
-					snprintf(path, sizeof path, "%s/%s", q->cwd, name);
-					fd = open(path, O_WRONLY | O_CREAT | O_TRUNC, 0644);
-					if (fd < 0 || !write_all_fd(fd, data, msz)) {
-						err(q, "ar: error: %s: %s\n", name, strerror(errno));
-						rc = 1;
-					}
-					if (fd >= 0)
-						close(fd);
-				}
+			if (!m.name || !ml_push(l, m)) {
+				free(m.name);
+				err(q, "ar: error: %s%s\n", "out of memory", "");
+				return false;
 			}
 		}
 		o += 60 + msz + (msz & 1);
+	}
+	return true;
+bad:
+	err(q, "ar: error: %s: %s\n", shown, "truncated or malformed archive");
+	return false;
+}
+
+/* t lists the names, p writes the data, x extracts into cwd (mode 644, as llvm-ar's D);
+   named members only when given, each one that is not found an error */
+static int regular_read(arq *q, const vmapped *d, const char *shown, char op, char **files, int nfiles)
+{
+	mlist l = { 0 };
+	bool *found = calloc((size_t)nfiles + 1, 1);
+	vsbuf out = { 0 };
+	int rc = 0;
+
+	if (!found || !read_regular(q, d, shown, &l)) {
+		free(found);
+		ml_free(&l);
+		return 1;
+	}
+	for (size_t k = 0; k < l.n; k++) {
+		const char *name = l.m[k].name;
+		bool want = !nfiles;
+
+		for (int i = 0; i < nfiles; i++)
+			if (!found[i] && !strcmp(files[i], name)) {
+				found[i] = want = true;
+				break;
+			}
+		if (!want)
+			continue;
+		if (op == 't') {
+			vsbuf_str(&out, name);
+			vsbuf_put(&out, "\n", 1);
+		} else if (op == 'p') {
+			vsbuf_put(&out, l.m[k].data, l.m[k].size);
+		} else if (strchr(name, '/') || !strcmp(name, "..") || !strcmp(name, ".")) {
+			err(q, "ar: error: %s: %s\n", name, "unsafe member name");
+			rc = 1;
+		} else {
+			char path[8192];
+			int fd;
+
+			snprintf(path, sizeof path, "%s/%s", q->cwd, name);
+			fd = open(path, O_WRONLY | O_CREAT | O_TRUNC, 0644);
+			if (fd < 0 || !write_all_fd(fd, l.m[k].data, l.m[k].size)) {
+				err(q, "ar: error: %s: %s\n", name, strerror(errno));
+				rc = 1;
+			}
+			if (fd >= 0)
+				close(fd);
+		}
 	}
 	if (out.n && !write_all_fd(q->outfd, out.p, out.n))
 		rc = 1;
@@ -669,6 +699,7 @@ static int regular_read(arq *q, const vmapped *d, const char *shown, char op, ch
 		}
 	free(out.p);
 	free(found);
+	ml_free(&l);
 	return rc || out.oom;
 }
 
@@ -678,14 +709,14 @@ int ar_run(const char *cwd, int argc, char **argv, int outfd, int errfd)
 {
 	arq q = { cwd, outfd, errfd, NULL, false };
 	const char *ops = NULL, *relpos = NULL, *archive = NULL;
-	bool thin = false, symtab = true, create = false, before = false, after = false;
+	bool thin = false, symtab = true, create = false, before = false, after = false, fullpath = false, sflag = false;
 	char op = 0, *archive_abs = NULL;
 	char **files = NULL;
 	int nfiles = 0, i, rc = 1;
 	mlist old = { 0 }, res = { 0 }, moved = { 0 };
 	struct stat st;
 	vmapped d = { 0 };
-	bool have_old = false;
+	bool have_old = false, regular_old = false;
 
 	if (!(files = calloc(argc, sizeof(*files))))
 		return 1;
@@ -705,7 +736,7 @@ int ar_run(const char *cwd, int argc, char **argv, int outfd, int errfd)
 			ops = a[0] == '-' ? a + 1 : a;
 			for (const char *c = ops; *c; c++) {
 				switch (*c) {
-				case 'r': case 'm': case 't': case 'p': case 'x':
+				case 'r': case 'm': case 't': case 'p': case 'x': case 'd': case 'q':
 					if (op && op != *c) {
 						err(&q, "ar: error: %s%s\n", "only one operation may be specified", "");
 						goto out;
@@ -713,8 +744,9 @@ int ar_run(const char *cwd, int argc, char **argv, int outfd, int errfd)
 					op = *c;
 					break;
 				case 'c': create = true; break;
-				case 'D': case 'P': case 'u': break;
-				case 's': symtab = true; break;
+				case 'P': fullpath = true; break;
+				case 'D': case 'u': break;
+				case 's': symtab = true, sflag = true; break;
 				case 'S': symtab = false; break;
 				case 'T': thin = true; break;
 				case 'i': case 'b': before = true; break;
@@ -726,6 +758,8 @@ int ar_run(const char *cwd, int argc, char **argv, int outfd, int errfd)
 			}
 		}
 	}
+	if (!op && sflag)
+		op = 'r';	/* "ar s A": only the symbol table rewritten (r with no files) */
 	if (!op || !archive) {
 		err(&q, "ar: error: %s%s\n", "expected an operation and an archive", "");
 		goto out;
@@ -735,14 +769,21 @@ int ar_run(const char *cwd, int argc, char **argv, int outfd, int errfd)
 
 	if (vmap_file(archive_abs, &d, &st)) {
 		have_old = true;
-		if (d.n >= 8 && !memcmp(d.p, "!<arch>\n", 8) && (op == 't' || op == 'p' || op == 'x')) {
-			rc = regular_read(&q, &d, archive, op, files, nfiles);
-			goto out;
+		if (d.n >= 8 && !memcmp(d.p, "!<arch>\n", 8)) {
+			if (op == 't' || op == 'p' || op == 'x') {
+				rc = regular_read(&q, &d, archive, op, files, nfiles);
+				goto out;
+			}
+			if (!read_regular(&q, &d, archive, &old))
+				goto out;
+			regular_old = true;
 		}
-		if (!read_thin(&q, archive_abs, archive, &d, &old))
-			goto out;
-		thin = true;
-	} else if (errno != ENOENT || op != 'r') {
+		if (!regular_old) {
+			if (!read_thin(&q, archive_abs, archive, &d, &old))
+				goto out;
+			thin = true;
+		}
+	} else if (errno != ENOENT || (op != 'r' && op != 'q')) {
 		err(&q, "ar: error: %s: %s\n", archive, strerror(errno));
 		goto out;
 	}
@@ -783,11 +824,15 @@ int ar_run(const char *cwd, int argc, char **argv, int outfd, int errfd)
 		err(&q, "ar: error: %s: %s\n", archive, "p and x only for regular archives (a thin one's members are the files)");
 		goto out;
 	}
-	if (!thin && have_old) {
-		err(&q, "ar: error: %s%s\n", "updating a regular archive is not supported", "");
+	if (regular_old && thin) {
+		err(&q, "ar: error: %s: %s\n", archive, "a regular archive cannot be made thin");
 		goto out;
 	}
-	if (!thin && op == 'm') {
+	if (op == 'd' && thin) {
+		err(&q, "ar: error: %s%s\n", "d is only supported for regular archives", "");
+		goto out;
+	}
+	if (!thin && op == 'm' && !have_old) {
 		err(&q, "ar: error: %s: %s\n", archive, strerror(ENOENT));
 		goto out;
 	}
@@ -811,6 +856,13 @@ int ar_run(const char *cwd, int argc, char **argv, int outfd, int errfd)
 
 				if (used[i])
 					continue;
+				if (op == 'q')
+					break;	/* q appends, replacing nothing */
+				if (!m->abs) {	/* regular: the stored basename, never a full path (llvm-ar) */
+					if (!fullpath && !strcmp(base_of(files[i]), m->name))
+						match = i;
+					continue;
+				}
 				fa = norm(cwd, files[i]);
 				if (fa && !strcmp(fa, m->abs))
 					match = i;
@@ -818,6 +870,10 @@ int ar_run(const char *cwd, int argc, char **argv, int outfd, int errfd)
 			}
 			if (match < 0) {
 				ml_push(&res, *m);
+			} else if (op == 'd') {
+				used[match] = true;
+				free(m->name);
+				free(m->abs);
 			} else if (op == 'm') {
 				ml_push(&moved, *m);
 				used[match] = true;
@@ -860,7 +916,7 @@ int ar_run(const char *cwd, int argc, char **argv, int outfd, int errfd)
 			free(moved.m);
 			moved.m = NULL;
 			moved.n = 0;
-		} else {
+		} else if (op != 'd') {
 			for (i = 0; i < nfiles; i++)
 				if (!used[i] && !add_file(&q, files[i], &res)) {
 					free(used);

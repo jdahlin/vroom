@@ -975,8 +975,9 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
 - [ ] **var**: (done: creating a regular GNU archive with an ELF object
   first, byte-identical to llvm-ar; mode 644 for every member as llvm-ar's
   deterministic mode, also in thin archives; `t`, `p`, `x` on a regular
-  archive.)  Regular archives are not updated (`r`/`m` on one); no `d`,
-  `q`, `s`;
+  archive; updating one: `r` by basename (none with `P`), `q`, `d`, `s`,
+  `m`.)  Left: a regular archive whose first member is not ELF (llvm-ar
+  writes BSD format on macOS: an error in var);
   32-bit GNU symtab only; ld skips `/SYM64/` (`ld/ld.c:1622`).
   *Validate:* `bench/var-cmp.py` extended to regular archives and `x`, `d`,
   `q`, `p`, `s`; round-trip with llvm-ar.
