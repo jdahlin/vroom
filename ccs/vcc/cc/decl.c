@@ -807,6 +807,7 @@ VPRIV void declaration(cc *c, vec *out, bool file)
 				uint32_t sl = c->cv_loc;
 
 				c->cv_what = CX_INIT, c->cv_loc = d.loc;
+				c->syms[s].defloc = d.loc;
 				c->defer_rt = st, c->ndefer = 0;
 				v = initializer(c, &it, st);
 				c->defer_rt = 0;

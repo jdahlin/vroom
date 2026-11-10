@@ -1050,8 +1050,7 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
   variables never named, at scope close; main-file statics at end of TU;
   none after an error, cleanup/unused/used exempt.  Done: diag
   `unused_var.c`, 90 warnings over the 2032 test-suite files identical to
-  clang.  Not modelled: a static redeclared and then defined is warned at
-  its first declaration (clang: the definition); bodies of unreferenced
+  clang.  (A static redeclared and then defined: at the definition, `defloc`.)  Not modelled: bodies of unreferenced
   lazy header functions are never parsed, so they are not checked.
 - [x] **-Wconstant-conversion**: an integer constant converted to a
   narrower integer type (init, assignment, argument, return; each `?:` arm,
@@ -1101,10 +1100,17 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
   by the front end with its error: an unknown token always ends in one, so
   no per-token check).  Done: diag `invalid_pp_token.c`.  Not modelled: in
   -E output; clang's recovery after it ("expected ';'").
+- [x] **-Wunused-function**, `-Wunneeded-internal-declaration`: static
+  functions of the main file never used, at the definition (`defloc`);
+  named only unevaluated (sizeof): "not needed and will not be emitted";
+  cleanup() and alias() targets count as used.  Done: diag
+  `unused_function.c`; kernel 879/879.  Not modelled: clang also warns a
+  non-inline static function of a header (vcc cannot see the references
+  from unparsed lazy bodies) and a function only calling itself.
 - [ ] **Missing warnings**:
   `-Wreturn-stack-address` of a compound literal
   (clang prints the initializer with its expression printer),
-  `-Wuninitialized`, `-Wunused-but-set-variable`, `-Wunused-function`,
+  `-Wuninitialized`, `-Wunused-but-set-variable`,
   `-Wunused-local-typedef` (`-Wunknown-attributes` and
   `-Wdeprecated-declarations` are done: PostgreSQL's warnings compare).
   *Validate:* one diag test per warning; `vcc-sema.py warn` stays 879/879

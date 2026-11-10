@@ -157,6 +157,7 @@ typedef struct sym {
 	uint32_t plb, ple;	/* function: its parameter list's first token and ')'; variable: its declaration's first and last token */
 	uint32_t psyms;		/* function: its latest prototype's parameter syms (list index + 1, 0: none) */
 	uint32_t tdef;		/* object/typedef: declared with exactly this typedef name's type (sym), 0: none */
+	uint32_t defloc;	/* the definition's name (a redeclaration keeps the first loc), 0: loc */
 } sym;
 
 /* ---------------- nodes ---------------- */

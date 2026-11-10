@@ -118,6 +118,7 @@ VPRIV void function_def(cc *c, uint32_t s, const declr *d)
 		note(c, c->syms[s].loc, "previous definition is here");
 	}
 	c->syms[s].flags |= SF_DEFINED;
+	c->syms[s].defloc = d->loc;
 	c->fn = s;
 	scope_open(c);
 	for (uint32_t i = 0; i < d->npsyms; i++) {
