@@ -29,17 +29,19 @@ static void wk_scalar(ecx *e, uint32_t n, qty t)
 	cc *c = e->c;
 	int k = KIND(c, t);
 
-	if (k == TY_FLOAT16 || k == TY_FLOAT128 || k == TY_INT128 || k == TY_UINT128)
+	if (k == TY_FLOAT16 || k == TY_FLOAT128 || ((k == TY_INT128 || k == TY_UINT128) && !LO(i128mem)()))
 		wk_unsup(e, n, k == TY_FLOAT16 ? "_Float16" : k == TY_FLOAT128 ? "__float128" : "__int128");
 	if (k == TY_VECTOR)
 		wk_unsup(e, n, "a vector value");	/* (records are values by address) */
 }
 
+static bool wk_wide(cc *c, qty t) { return KIND(c, t) == TY_INT128 || KIND(c, t) == TY_UINT128; }
+
 VPRIV bool wk_mem(ecx *e, qty t)
 {
 	cc *c = e->c;
 
-	return is_record(c, t) || is_array(c, t) || (KIND(c, t) == TY_LDOUBLE && LO(ldmem)());
+	return is_record(c, t) || is_array(c, t) || (KIND(c, t) == TY_LDOUBLE && LO(ldmem)()) || (wk_wide(c, t) && LO(i128mem)());
 }
 
 /* a float value's register (float/double: the CPU's float registers) */
@@ -422,6 +424,11 @@ static val wk_conv(ecx *e, val v, qty from, qty to)
 		wk_free(e, &v);
 		return vconst(0);
 	}
+	if (wk_wide(c, from) || wk_wide(c, to)) {
+		if (wk_wide(c, from) && wk_wide(c, to))
+			return v;
+		return LO(wcvt)(e, v, from, to);
+	}
 	if (is_flt(c, from) || is_flt(c, to)) {
 		if (KIND(c, from) == KIND(c, to))
 			return v;
@@ -494,6 +501,8 @@ static val wk_arith(ecx *e, int op, qty t, val a, val b)
 
 	if (is_flt(c, t))
 		return LO(fbin)(e, op, t, a, b);
+	if (wk_wide(c, t))
+		return LO(wbin)(e, op, wk_signed(c, t), a, b);
 	if (a.k == V_CONST && b.k == V_CONST && wk_fold(c, op, t, a.i, b.i, &r))
 		return vconst(r);
 	if (a.k == V_ADDR && b.k == V_CONST && (op == T_PLUS || op == T_MINUS))
@@ -559,6 +568,8 @@ static val wk_binary(ecx *e, uint32_t n)
 		b = wk_rhs(e, &a, x->b, lt);
 		if (is_flt(c, lt))
 			return LO(fcmp)(e, op, lt, a, b);
+		if (wk_wide(c, lt))
+			return LO(wcmp)(e, op, wk_signed(c, lt), a, b);
 		if (a.k == V_CONST && b.k == V_CONST)
 			return vconst(wk_fold_cmp(op, wk_signed(c, lt), em_trunc_to(c, a.i, lt), em_trunc_to(c, b.i, lt)));
 		return LO(cmp)(e, op, is_ptr(c, lt) ? 8 : opw(c, lt), wk_signed(c, lt), a, b);
@@ -744,7 +755,8 @@ static val wk_assign(ecx *e, uint32_t n)
 			qty ct = wk_optype(c, x->aux, lt, rt);
 
 			a = wk_conv(e, a, lt, ct);
-			b = wk_conv(e, b, rt, ct);
+			if (x->aux != T_LESSLESS && x->aux != T_GREATERGREATER)
+				b = wk_conv(e, b, rt, ct);	/* (a shift count stays as it is) */
 			v = wk_conv(e, wk_arith(e, x->aux, ct, a, b), ct, lt);
 		}
 	}
@@ -831,6 +843,8 @@ static val wk_unary(ecx *e, uint32_t n)
 		return a;
 	if (is_flt(c, x->ty))
 		return LO(fneg)(e, x->ty, a);
+	if (wk_wide(c, x->ty))
+		return LO(wun)(e, x->aux, a);
 	if (a.k == V_CONST)
 		return wk_const(c, x->aux == T_MINUS ? -a.i : ~a.i, x->ty);
 	{
@@ -1009,6 +1023,8 @@ VPRIV val wk_gen(ecx *e, uint32_t n)
 		efatal(e, x->loc, "expression nested too deeply");
 	switch (x->op) {
 	case N_NUM:
+		if (wk_mem(e, x->ty))
+			return LO(wconst)(e, c->ipool[x->a]);	/* __int128 */
 		return wk_const(c, c->ipool[x->a], x->ty);
 	case N_VAR: {
 		const sym *y = &c->syms[x->a];
@@ -1165,7 +1181,7 @@ VPRIV void wk_cond(ecx *e, uint32_t n, bool jump_if, uint32_t lbl)
 		}
 		break;
 	case N_BINARY:
-		if (wk_is_cmp(x->aux) && !is_flt(c, N(x->a)->ty)) {
+		if (wk_is_cmp(x->aux) && !is_flt(c, N(x->a)->ty) && !wk_mem(e, N(x->a)->ty)) {
 			qty lt = N(x->a)->ty;
 			int op = x->aux;
 			val a, b;
@@ -1206,7 +1222,7 @@ VPRIV void wk_cond(ecx *e, uint32_t n, bool jump_if, uint32_t lbl)
 	{
 		val v = wk_gen(e, n);
 
-		if (is_flt(c, x->ty)) {
+		if (is_flt(c, x->ty) || wk_wide(c, x->ty)) {
 			v = wk_conv(e, v, x->ty, prim(TY_BOOL));	/* != 0.0 (NaN is true) */
 			LO(brz)(e, v, 4, jump_if, lbl);
 			return;

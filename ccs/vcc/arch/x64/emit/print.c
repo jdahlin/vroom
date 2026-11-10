@@ -6,7 +6,7 @@
 /* ops whose result must be their first operand on x86 */
 static bool x64_tied(int op)
 {
-	return (op >= X_ADD && op <= X_IMUL) || (op >= X_ADDI && op <= X_XORI) || (op >= X_SHLI && op <= X_SAR) ||
+	return (op >= X_ADD && op <= X_SBB) || (op >= X_ADDI && op <= X_XORI) || (op >= X_SHLI && op <= X_SAR) ||
 	       op == X_NEG || op == X_NOT || (op >= X_FADD && op <= X_FXOR);
 }
 
@@ -120,7 +120,7 @@ VPRIV void x64_print(ecx *e, tbuf *b, uint32_t s)
 	cc *c = e->c;
 	xst *X = e->x64;
 	static const char *const alu[] = { [X_ADD] = "add", [X_SUB] = "sub", [X_AND] = "and", [X_OR] = "or", [X_XOR] = "xor",
-					   [X_IMUL] = "imul", [X_ADDI] = "add", [X_SUBI] = "sub", [X_ANDI] = "and", [X_ORI] = "or",
+					   [X_IMUL] = "imul", [X_ADC] = "adc", [X_SBB] = "sbb", [X_ADDI] = "add", [X_SUBI] = "sub", [X_ANDI] = "and", [X_ORI] = "or",
 					   [X_XORI] = "xor", [X_SHLI] = "shl", [X_SHRI] = "shr", [X_SARI] = "sar", [X_SHL] = "shl",
 					   [X_SHR] = "shr", [X_SAR] = "sar", [X_NEG] = "neg", [X_NOT] = "not" };
 	int32_t frame = (e->wk->foff + 15) & ~15;
@@ -210,7 +210,7 @@ VPRIV void x64_print(ecx *e, tbuf *b, uint32_t s)
 			tb_s(b, ", ");
 			x64_reg(b, i->r[0], 8);
 			break;
-		case X_ADD: case X_SUB: case X_AND: case X_OR: case X_XOR: case X_IMUL:
+		case X_ADD: case X_SUB: case X_AND: case X_OR: case X_XOR: case X_IMUL: case X_ADC: case X_SBB:
 			x64_ins(b, alu[i->op], sz);
 			x64_reg(b, i->r[2], sz);
 			tb_s(b, ", ");
@@ -300,6 +300,10 @@ VPRIV void x64_print(ecx *e, tbuf *b, uint32_t s)
 			break;
 		case X_CQO:
 			tb_s(b, sz == 8 ? "\tcqto" : "\tcltd");
+			break;
+		case X_MULW:
+			x64_ins(b, "mul", 8);
+			x64_reg(b, i->r[1], 8);
 			break;
 		case X_IDIV: case X_DIV:
 			x64_ins(b, i->op == X_IDIV ? "idiv" : "div", sz);
