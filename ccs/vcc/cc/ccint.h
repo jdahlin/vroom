@@ -56,6 +56,7 @@ typedef struct attrs {		/* the attributes of one declaration */
 	uint8_t packed, transparent, used, unused, weak, noreturn, constructor, destructor;
 	uint8_t nonstring, may_alias, cold, gnu_inline, always_inline, noinline, ainline, error_fn;
 	uint8_t overloadable, noinstr;
+	uint8_t fmtarg;		/* format_arg(i) */
 	uint16_t prio;		/* constructor(N)/destructor(N), 0: none (65535) */
 	uint8_t tlsmodel;	/* tls_model(): VCC_TLS_*, 0: none */
 } attrs;

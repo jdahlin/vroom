@@ -1191,13 +1191,14 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
   print `'size_t' (aka 'unsigned long')`, fix-its use z/j/t and `%hhu` for a
   char typedef as clang's namedTypeToLengthModifier.  Done: diag
   `format_typedef.c`, the random files identical on both targets.
-- [ ] **-Wformat not modelled** (the call is left alone): `%I64d`, `%w32d`,
-  `*n$`, Darwin `%D/%O/%U`, `format_arg` (gettext), a typedef reached through casts or
+- [ ] **-Wformat not modelled**: a typedef reached through casts or
   other expressions than a variable or member.  (Done: the printf family as
   library builtins without an attribute (declared with the builtin's type, not
   under -ffreestanding/-fno-builtin), `%b`/`%B`, `%q`, a const array or const
   pointer initialized with a literal ("format string is defined here"): diag
-  `format_builtin.c`, `format_var.c`, `format_freestanding.c`.)
+  `format_builtin.c`, `format_var.c`, `format_freestanding.c`; `format_arg`
+  (gettext), MS `I`/`I32`/`I64` and `w`, `*n$`: `format_more2.c`; Darwin
+  `%D/%O/%U`: `format_darwin_dou.c`.)
   *Validate:* diag tests against clang.
 - [x] **Vector types in messages**: (done: the typedef name and
   ` (vector of 4 'int' values)` after the quoted type (vcc: the first typedef

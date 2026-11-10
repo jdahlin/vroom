@@ -585,7 +585,7 @@ static inline void attribute_list(cc *c, attrs *a)
 static inline bool attrs_empty(const attrs *a)
 {
 	const unsigned char *p = (const unsigned char *)a;
-	unsigned o = a->prio | a->tlsmodel;
+	unsigned o = a->prio | a->tlsmodel | a->fmtarg;
 
 	for (size_t i = 0; i <= offsetof(attrs, noinstr); i++)
 		o |= p[i];

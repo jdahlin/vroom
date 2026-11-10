@@ -3,7 +3,7 @@
 #include <ctype.h>
 
 typedef struct fmtspec {
-	char spec[4];		/* length modifier and conversion, e.g. "lld" */
+	char spec[6];		/* length modifier and conversion, e.g. "lld", "I64d" */
 	uint8_t badlen;		/* the length modifier is invalid with the conversion */
 	const char *exp;	/* the expected type as clang prints it */
 	uint8_t fix[32];	/* per argument class: 0 matches, 1 mismatch, 255 bool with %c, k: fix-it fmt_fix[k - 1] */
@@ -163,6 +163,7 @@ typedef struct fspec {
 	int wstar;		/* width '*' at byte wstar, -1 */
 	uint32_t pb, pe;	/* precision: '.' at pb .. pe, pb == pe: none */
 	int pstar;
+	int32_t wpos, ppos;	/* *n$: n - 1, -1 none */
 	uint32_t lb, le;	/* length modifier */
 	uint32_t conv;		/* the conversion byte */
 } fspec;
@@ -216,7 +217,7 @@ static void fmt_fixtext(fmtx *x, const fspec *f, const char *lc, bool charp, cha
 	bool same = oc == nc || (strchr("diu", oc) && strchr("du", nc));
 	bool minus = f->fminus, plus = f->fplus, space = f->fspace, hash = f->fhash, zero = f->fzero, prec = true;
 	size_t n = 0;
-	char nlc[4];
+	char nlc[6];
 
 	if (plus && (oc == 'd' || oc == 'i') && nc == 'u') {
 		/* clang: d/i turns u for an unsigned argument only without '+' */
@@ -241,11 +242,15 @@ static void fmt_fixtext(fmtx *x, const fspec *f, const char *lc, bool charp, cha
 		n += (size_t)snprintf(out + n, cap - n, "%d$", f->pos + 1);
 	n += (size_t)snprintf(out + n, cap - n, "%s%s%s%s%s", minus ? "-" : "", plus ? "+" : "", space ? " " : "",
 			      hash ? "#" : "", zero ? "0" : "");
-	if (f->wstar >= 0)
+	if (f->wstar >= 0 && f->wpos >= 0)
+		n += (size_t)snprintf(out + n, cap - n, "*%d$", f->wpos + 1);
+	else if (f->wstar >= 0)
 		n += (size_t)snprintf(out + n, cap - n, "*");
 	else if (f->we > f->wb)
 		n += (size_t)snprintf(out + n, cap - n, "%u", (unsigned)strtoul(x->s + f->wb, NULL, 10));
-	if (prec && f->pstar >= 0)
+	if (prec && f->pstar >= 0 && f->ppos >= 0)
+		n += (size_t)snprintf(out + n, cap - n, ".*%d$", f->ppos + 1);
+	else if (prec && f->pstar >= 0)
 		n += (size_t)snprintf(out + n, cap - n, ".*");
 	else if (prec && f->pe > f->pb + 1)
 		n += (size_t)snprintf(out + n, cap - n, ".%u", (unsigned)strtoul(x->s + f->pb + 1, NULL, 10));
@@ -255,7 +260,7 @@ static void fmt_fixtext(fmtx *x, const fspec *f, const char *lc, bool charp, cha
 
 static const char *const fmt_valid_flags[6] = {
 	/* '-' '+' ' ' '#' '0' '\'' */
-	"diouxXbBcspfFeEgGaA", "difFeEgGaA", "difFeEgGaA", "oxXbBaAeEfFgG", "diouxXbBaAeEfFgG", "diufFgG",
+	"diouxXbBcspfFeEgGaADOU", "difFeEgGaAD", "difFeEgGaAD", "oxXbBaAeEfFgGO", "diouxXbBaAeEfFgGDOU", "diufFgGDU",	/* (DOU: Darwin) */
 };
 
 /*
@@ -342,8 +347,27 @@ VPRIV void format_check(cc *c, uint32_t fs, const uint32_t *args, const qty *aty
 	if (ndata > 256)
 		return;
 	s = args[fi];
-	while (N(s)->op == N_CAST)
-		s = N(s)->a;
+	for (;;) {
+		uint32_t cal;
+
+		while (N(s)->op == N_CAST)
+			s = N(s)->a;
+		/* a call of a format_arg function: its format argument (gettext) */
+		if (N(s)->op != N_CALL)
+			break;
+		cal = N(s)->a;
+		while (N(cal)->op == N_CAST)
+			cal = N(cal)->a;
+		if (N(cal)->op != N_VAR || c->syms[N(cal)->a].kind != S_FUNC || !c->syms[N(cal)->a].attrs)
+			break;
+		{
+			uint32_t k = c->attr[c->syms[N(cal)->a].attrs].fmtarg;
+
+			if (!k || k > N(s)->c)
+				break;
+			s = c->lists[N(s)->b + k - 1];
+		}
+	}
 	if (first && first - 1 == nargs && (N(s)->op == N_VAR || N(s)->op == N_MEMBER)) {
 		/* -Wformat-security: a format that is no literal and no data arguments */
 		qty t = N(s)->ty;
@@ -387,7 +411,7 @@ VPRIV void format_check(cc *c, uint32_t fs, const uint32_t *args, const qty *aty
 	for (uint32_t i = 0; i < n && !stopped;) {
 		fspec f;
 		uint32_t p;
-		char lc[4];
+		char lc[6];
 		const fmtspec *row = NULL;
 		pp_span sr;
 		bool havesr;
@@ -398,7 +422,7 @@ VPRIV void format_check(cc *c, uint32_t fs, const uint32_t *args, const qty *aty
 			continue;
 		}
 		memset(&f, 0, sizeof(f));
-		f.start = i, f.pos = -1, f.wstar = f.pstar = -1;
+		f.start = i, f.pos = -1, f.wstar = f.pstar = -1, f.wpos = f.ppos = -1;
 		p = i + 1;
 		if (p >= n) {
 			pp_span r;
@@ -433,8 +457,15 @@ VPRIV void format_check(cc *c, uint32_t fs, const uint32_t *args, const qty *aty
 		f.wb = f.we = p;
 		if (p < n && x.s[p] == '*') {
 			f.wstar = (int)p++;
-			if (p < n && x.s[p] >= '0' && x.s[p] <= '9')
-				return;	/* *n$ */
+			if (p < n && x.s[p] >= '0' && x.s[p] <= '9') {	/* *n$ */
+				uint32_t v = 0;
+
+				while (p < n && x.s[p] >= '0' && x.s[p] <= '9' && v < 100000)
+					v = v * 10 + (uint32_t)(x.s[p++] - '0');
+				if (p >= n || x.s[p] != '$' || !v)
+					return;
+				p++, f.wpos = (int32_t)v - 1;
+			}
 		} else {
 			while (p < n && x.s[p] >= '0' && x.s[p] <= '9')
 				p++;
@@ -445,8 +476,15 @@ VPRIV void format_check(cc *c, uint32_t fs, const uint32_t *args, const qty *aty
 			p++;
 			if (p < n && x.s[p] == '*') {
 				f.pstar = (int)p++;
-				if (p < n && x.s[p] >= '0' && x.s[p] <= '9')
-					return;
+				if (p < n && x.s[p] >= '0' && x.s[p] <= '9') {
+					uint32_t v = 0;
+
+					while (p < n && x.s[p] >= '0' && x.s[p] <= '9' && v < 100000)
+						v = v * 10 + (uint32_t)(x.s[p++] - '0');
+					if (p >= n || x.s[p] != '$' || !v)
+						return;
+					p++, f.ppos = (int32_t)v - 1;
+				}
 			} else {
 				while (p < n && x.s[p] >= '0' && x.s[p] <= '9')
 					p++;
@@ -454,8 +492,12 @@ VPRIV void format_check(cc *c, uint32_t fs, const uint32_t *args, const qty *aty
 			f.pe = p;
 		}
 		f.lb = p;
-		if (p < n && x.s[p] == 'q') {
-			p++;	/* BSD quad (clang: long long) */
+		if (p < n && (x.s[p] == 'q' || x.s[p] == 'w')) {
+			p++;	/* BSD quad (clang: long long); w (C23 wN: clang takes 'w' alone) */
+		} else if (p < n && x.s[p] == 'I') {
+			p++;	/* MS: I, I32, I64 */
+			if (p + 1 < n && ((x.s[p] == '3' && x.s[p + 1] == '2') || (x.s[p] == '6' && x.s[p + 1] == '4')))
+				p += 2;
 		} else if (p < n && (x.s[p] == 'h' || x.s[p] == 'l')) {
 			p++;
 			if (p < n && x.s[p] == x.s[p - 1])
@@ -476,14 +518,14 @@ VPRIV void format_check(cc *c, uint32_t fs, const uint32_t *args, const qty *aty
 		i = f.end;
 		cv = (unsigned char)x.s[p];
 		/* what this checker does not model leaves the rest of the call alone */
-		if (strchr("Iw", (int)cv) || (c->o->target == PP_DARWIN && strchr("DOU", (int)cv)) || cv == 0)
+		if (cv == 0)
 			return;
 		havesr = fmt_span(&x, f.start, f.end, &sr);
 		if (!havesr)
 			return;
 		if (cv == '%' || cv == 'm')
 			continue;	/* (consume no argument) */
-		if (!strchr("diouxXbBcspfFeEgGaAnCS", (int)cv)) {
+		if (!strchr("diouxXbBcspfFeEgGaAnCSDOU", (int)cv) || (c->o->target != PP_DARWIN && strchr("DOU", (int)cv))) {
 			/* an invalid conversion: covers its argument (none left: stop) */
 			uint32_t l = fmt_loc(&x, f.conv);
 			uint32_t ai;
@@ -525,12 +567,14 @@ VPRIV void format_check(cc *c, uint32_t fs, const uint32_t *args, const qty *aty
 
 			if (star < 0)
 				continue;
-			if (positional)
+			int32_t sp = k ? f.ppos : f.wpos;
+
+			if (positional != (sp >= 0))
 				return;
 			if (!first)
 				continue;
-			ai = (uint32_t)argi++;
-			l = fmt_loc(&x, (uint32_t)star + (k ? 0 : 1));
+			ai = positional ? (uint32_t)sp : (uint32_t)argi++;
+			l = fmt_loc(&x, sp >= 0 ? (uint32_t)star - (k ? 1 : 0) : (uint32_t)star + (k ? 0 : 1));	/* (clang: *n$ at '*' or '.') */
 			if (ai >= ndata) {
 				if (l)
 					fmt_report(&x, "format", l, &sr, 1, NULL, 0,
@@ -586,7 +630,7 @@ VPRIV void format_check(cc *c, uint32_t fs, const uint32_t *args, const qty *aty
 						fmt_report(&x, "format", l, &sr, 1, NULL, 0,
 							   "field width used with 'n' conversion specifier, resulting in undefined behavior");
 				}
-				if (prec && !strchr("diouxXbBaAeEfFgGs", conv)) {
+				if (prec && !strchr("diouxXbBaAeEfFgGsDOU", conv)) {
 					uint32_t l = fmt_loc(&x, f.pstar >= 0 ? (uint32_t)f.pstar : f.pb);
 
 					if (l)
@@ -621,13 +665,13 @@ VPRIV void format_check(cc *c, uint32_t fs, const uint32_t *args, const qty *aty
 			}
 			if (row->badlen) {
 				uint32_t l = fmt_loc(&x, f.lb);
-				char lm[3] = { 0 };
+				char lm[4] = { 0 };
 
 				memcpy(lm, x.s + f.lb, ll);
 				if (l && fmt_report(&x, "format", l, &sr, 1, NULL, 0,
 						    "length modifier '%s' results in undefined behavior or no effect with '%c' conversion specifier",
 						    lm, conv) &&
-				    (lm[0] == 'L' || lm[0] == 'q') && strchr("diouxXbBn", conv)) {
+				    (lm[0] == 'L' || lm[0] == 'q') && strchr("diouxXbBnDOU", conv)) {
 					pp_fixit fx = { l, l + 1, "ll" };
 
 					report(c, "note", l, NULL, 0, &fx, 1, "did you mean to use 'll'?");
