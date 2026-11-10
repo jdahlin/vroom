@@ -445,6 +445,263 @@ static bool stmt_flow(cc *c, uint32_t n, bool reach, flow *f)
 	}
 }
 
+/* D8.2: one path to the end of the body, as numbered steps (GCC's analyzer, Rust's notes):
+   which condition is false, which case the switch jumps to, which break leaves a loop.
+   Only for the warning: it re-walks the subtrees with stmt_flow, quadratic in the nesting
+   depth, on a body that warns. */
+typedef struct {
+	uint32_t b, e;		/* the step's range */
+	const char *what;	/* its text */
+	uint32_t tb, te;	/* the source in quotes (te > tb), else none */
+} rstep;
+
+typedef struct {
+	flow *f;
+	rstep st[12];
+	int n;
+	bool fail;		/* a goto or a label: no path given */
+	const char *brk;	/* what a break leaves: "loop", "switch" */
+} rpath;
+
+static void rp_step(cc *c, rpath *P, uint32_t b, uint32_t e, const char *what, uint32_t q)
+{
+	rstep *s;
+
+	if (P->n == (int)(sizeof P->st / sizeof P->st[0])) {
+		P->fail = true;
+		return;
+	}
+	s = &P->st[P->n++];
+	s->b = b, s->e = e, s->what = what, s->tb = s->te = 0;
+	if (q) {
+		pp_span r = rng(c, q);
+
+		s->tb = r.b, s->te = r.e;
+	}
+}
+
+static bool end_of(cc *c, uint32_t n, bool reach, const flow *f, bool *brk)
+{
+	flow g = *f;
+
+	g.brk = g.cont = g.ret = false;
+	reach = stmt_flow(c, n, reach, &g);
+	if (brk)
+		*brk = g.brk;
+	return reach;
+}
+
+static bool rp_walk(cc *c, uint32_t n, bool reach, bool brk, rpath *P);
+
+/* statement i of a block entered: from the block's start or a case/label on the way */
+static bool self_entry(cc *c, uint32_t n, const flow *f)
+{
+	const node *x = N(n);
+
+	return ((x->op == N_CASE || x->op == N_DEFAULT) && f->sw) || (x->op == N_LABEL && label_reached(f, x->a));
+}
+
+/* the block's statements from the latest entry before i up to i, the last one to brk */
+static bool rp_seq(cc *c, const node *x, uint32_t i, bool reach, bool brk, rpath *P)
+{
+	uint32_t j = i;
+	uint8_t small[64], *end = i <= sizeof small ? small : malloc(i);
+	bool r = reach;
+
+	if (!end) {
+		P->fail = true;
+		return false;
+	}
+	for (uint32_t k = 0; k < i; k++)	/* each statement's end, once */
+		end[k] = r = end_of(c, c->lists[x->b + k], r, P->f, NULL);
+	/* back through statements whose end falls into the next, to an entry */
+	while (j > 0 && !self_entry(c, c->lists[x->b + j], P->f) && end[j - 1])
+		j--;
+	if (end != small)
+		free(end);
+	r = j == 0 ? reach : false;
+	for (uint32_t k = j; k <= i; k++) {
+		if (!rp_walk(c, c->lists[x->b + k], r, k == i && brk, P))
+			return false;
+		r = true;
+	}
+	return true;
+}
+
+static bool rp_walk(cc *c, uint32_t n, bool reach, bool brk, rpath *P)
+{
+	const node *x;
+	int mark = P->n, k;
+
+	if (!n)
+		return reach && !brk;
+	if (P->fail)
+		return false;
+	x = N(n);
+	switch (x->op) {
+	case N_BLOCK: {
+		bool in = reach;
+
+		if (!x->c)
+			return reach && !brk;
+		if (!brk)
+			return end_of(c, n, reach, P->f, NULL) && rp_seq(c, x, x->c - 1, reach, false, P);
+		for (uint32_t i = 0; i < x->c; i++) {
+			uint32_t s = c->lists[x->b + i];
+			bool b;
+
+			in = in || self_entry(c, s, P->f);
+			end_of(c, s, in, P->f, &b);
+			if (b) {
+				if (rp_seq(c, x, i, reach, true, P))
+					return true;
+				P->n = mark;
+			}
+			in = end_of(c, s, in, P->f, NULL);
+		}
+		return false;
+	}
+	case N_LABEL:
+		if (!reach && label_reached(P->f, x->a))
+			P->fail = true;	/* reached by a goto */
+		return rp_walk(c, x->c, true, brk, P);
+	case N_CASE: case N_DEFAULT:
+		if (!reach && P->f->sw)
+			rp_step(c, P, x->loc, pp_tok_end(c->p, x->loc), x->op == N_CASE ? "the switch jumps to this case"
+					      : "the switch jumps to 'default'", 0);
+		return rp_walk(c, x->c, true, brk, P);
+	case N_BREAK:
+		if (!reach || !brk)
+			return false;
+		rp_step(c, P, x->loc, pp_tok_end(c->p, x->loc), P->brk && P->brk[0] == 's' ? "this 'break' leaves the switch"
+				      : "this 'break' leaves the loop", 0);
+		return true;
+	case N_IF: {
+		bool t, e, tb, eb;
+
+		k = cond_value(c, x->a);
+		if (!reach)
+			return false;
+		t = end_of(c, x->b, k != 0, P->f, &tb);
+		e = x->c ? end_of(c, x->c, k != 1, P->f, &eb) : (eb = false, k != 1);
+		if (!brk && t && e)
+			return true;	/* both arms go on: this if decides nothing */
+		if (k != 0 && (brk ? tb : t)) {
+			if (k < 0)
+				rp_step(c, P, 0, 0, "is true", x->a);
+			if (rp_walk(c, x->b, true, brk, P))
+				return true;
+			P->n = mark;
+		}
+		if (k != 1 && (brk ? eb : e)) {
+			if (k < 0)
+				rp_step(c, P, 0, 0, "is false", x->a);
+			if (x->c ? rp_walk(c, x->c, true, brk, P) : !brk)
+				return true;
+			P->n = mark;
+		}
+		return false;
+	}
+	case N_WHILE: case N_FOR: case N_DO: {
+		uint32_t cnd = x->op == N_FOR ? x->b : x->a, body = x->op == N_FOR ? c->lists[x->c + 1] : x->b;
+		const char *ob = P->brk;
+		bool ok = false, b;
+
+		if (brk || !reach)
+			return false;	/* (a break inside is this loop's) */
+		k = cond_value(c, cnd);
+		if (x->op == N_FOR && x->a && (N(x->a)->op == N_BLOCK || N(x->a)->op == N_DECL) &&
+		    !end_of(c, x->a, true, P->f, NULL))
+			return false;
+		if (k != 1 && x->op != N_DO) {	/* the first test fails */
+			if (k < 0)
+				rp_step(c, P, 0, 0, "is false, so the loop ends", cnd);
+			return true;
+		}
+		if (k != 1 && rp_walk(c, body, true, false, P)) {	/* do: once round, then the test */
+			if (k < 0)
+				rp_step(c, P, 0, 0, "is false, so the loop ends", cnd);
+			return true;
+		}
+		P->n = mark;
+		end_of(c, body, true, P->f, &b);
+		if (b) {
+			P->brk = "loop";
+			ok = rp_walk(c, body, true, true, P);
+			P->brk = ob;
+		}
+		if (!ok)
+			P->n = mark;
+		return ok;
+	}
+	case N_SWITCH: {
+		const char *ob = P->brk;
+		bool os = P->f->sw, ok;
+
+		if (brk || !reach)
+			return false;
+		if (!has_default(c, x->b) && !enum_covered(c, x)) {
+			rp_step(c, P, 0, 0, "matches no case", x->a);
+			return true;
+		}
+		P->f->sw = true, P->brk = "switch";
+		ok = rp_walk(c, x->b, false, false, P);
+		if (!ok) {
+			P->n = mark;
+			ok = rp_walk(c, x->b, false, true, P);
+		}
+		P->f->sw = os, P->brk = ob;
+		if (!ok)
+			P->n = mark;
+		return ok;
+	}
+	case N_RETURN: case N_GOTO: case N_GOTO_IND: case N_CONTINUE:
+		return false;
+	default:
+		return !brk && end_of(c, n, reach, P->f, NULL);
+	}
+}
+
+static int rstep_cmp(const void *a, const void *b)
+{
+	uint32_t x = ((const rstep *)a)->tb ? ((const rstep *)a)->tb : ((const rstep *)a)->b;
+	uint32_t y = ((const rstep *)b)->tb ? ((const rstep *)b)->tb : ((const rstep *)b)->b;
+
+	return x < y ? -1 : x > y;
+}
+
+/* the steps as labels "(1) 'x > 0' is false", ..., the last at the closing brace */
+static void return_path(cc *c, uint32_t body, flow *f, vdiag *d, uint32_t rbrace, const sym *y)
+{
+	rpath P = { .f = f };
+	char buf[160];
+	int i;
+
+	f->sw = false;
+	if (!rp_walk(c, body, true, false, &P) || P.fail || !P.n)
+		return;
+	qsort(P.st, (size_t)P.n, sizeof P.st[0], rstep_cmp);
+	for (i = 0; i < P.n; i++) {
+		const rstep *s = &P.st[i];
+
+		if (s->te > s->tb) {
+			size_t len;
+			const char *t = pp_src(c->p, s->tb, s->te, &len);
+
+			if (t && len <= 48 && !memchr(t, '\n', len))
+				snprintf(buf, sizeof buf, "(%d) '%.*s' %s", i + 1, (int)len, t, s->what);
+			else
+				snprintf(buf, sizeof buf, "(%d) the condition %s", i + 1, s->what);
+			pp_diag_label(c->p, d, s->tb, s->te, buf);
+		} else {
+			snprintf(buf, sizeof buf, "(%d) %s", i + 1, s->what);
+			pp_diag_label(c->p, d, s->b, s->e, buf);
+		}
+	}
+	snprintf(buf, sizeof buf, "(%d) '%.*s' ends here without a return", i + 1, IDF(y->name));
+	pp_diag_label(c->p, d, rbrace, rbrace + 1, buf);
+}
+
 /* clang's -Wreturn-type at the body's closing brace: "non-void function does not return a
    value" when no return is reached, "... in all control paths" when some are */
 static __attribute__((noinline)) void return_type_check(cc *c, uint32_t s, uint32_t body, uint32_t rbrace,
@@ -472,17 +729,20 @@ static __attribute__((noinline)) void return_type_check(cc *c, uint32_t s, uint3
 		f.more = f.ret = f.brk = f.cont = f.sw = false;
 		end = stmt_flow(c, body, true, &f);
 	} while (f.more && !f.unsure);
-	if (f.lab != small)
-		free(f.lab);
 	if (!end || f.unsure)
-		return;
+		goto out;
 	d = cc_warn_begin(c, "return-type", true, NULL, rbrace, f.ret ? "non-void function does not return a value in all control paths"
 			  : "non-void function does not return a value");
 	if (!d)
-		return;
+		goto out;
+	if (f.ret)	/* some paths return: show one that does not */
+		return_path(c, body, &f, d, rbrace, y);
 	pp_diag_help(c->p, d, "'%.*s' returns '%s': end it with a return statement", IDF(y->name),
 		     tyname(c, T(c, y->ty)->base));
 	pp_diag_emit(c->p, d);
+out:
+	if (f.lab != small)
+		free(f.lab);
 }
 
 VPRIV void function_def(cc *c, uint32_t s, const declr *d)

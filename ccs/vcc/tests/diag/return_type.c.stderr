@@ -1,6 +1,8 @@
 return_type.c:11:36: warning: non-void function does not return a value in all control paths [-Wreturn-type]
    11 | int some(int x) { if (x) return 1; }
-      |                                    ^
+      |                       ~            ^ (2) 'some' ends here without a return
+      |                       |
+      |                       (1) 'x' is false
       = help: 'some' returns 'int': end it with a return statement
 return_type.c:12:24: warning: non-void function does not return a value [-Wreturn-type]
    12 | int none(int x) { x++; }
@@ -12,7 +14,9 @@ return_type.c:14:45: warning: non-void function does not return a value [-Wretur
       = help: 'brk' returns 'int': end it with a return statement
 return_type.c:15:50: warning: non-void function does not return a value in all control paths [-Wreturn-type]
    15 | int sw(int x) { switch (x) { case 1: return 1; } }
-      |                                                  ^
+      |                         ~                        ^ (2) 'sw' ends here without a return
+      |                         |
+      |                         (1) 'x' matches no case
       = help: 'sw' returns 'int': end it with a return statement
 return_type.c:20:49: warning: non-void function does not return a value in all control paths [-Wreturn-type]
    20 | int jump(int x) { if (x) goto a; return 1; a: ; }

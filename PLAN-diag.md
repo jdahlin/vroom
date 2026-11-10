@@ -774,6 +774,14 @@ pp:s heta väg kostade pp +1,6 %); ett uttryck efter ett fel i samma sats varnar
 `return_stack.c` och `unused_value.c` (identiska med clang), sema warn 879/879, kärnparitet
 873/873.
 
+Status D8.2 (2026-11-10): "… in all control paths" visar en väg till `}` som numrerade
+etiketter: villkoret som är falskt eller sant, `switch` utan matchande `case`, vilket `case`
+den hoppar till, `break` som lämnar en loop eller `switch`, loopvillkoret som avslutar
+loopen.  En andra vandring över satsträdet (`rp_walk` i `func.c`) med den befintliga
+`stmt_flow` för delträden; körs bara när varningen ges, linjär i ett blocks längd (20 000
+`case` 0,13 s).  Vägar genom `goto` ges inte.  *Validerat:* diag-fallet `return_path.c`,
+`return_type.c` med de nya stegen.
+
 ## Ordning och milstolpar
 
 | milstolpe | steg | synligt för användaren |
