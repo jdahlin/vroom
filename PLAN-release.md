@@ -80,6 +80,16 @@ kan gå parallellt.
 
 ## Status
 
+### Status 2026-11-11: G1, padding i BitInt-uttryck
+
+Sammansatta tilldelningar normaliserar nu gamla `_BitInt`-värdet innan
+skift, division och rest på både Linux x86-64 och arm64. Det oförändrade
+Kefir-fallet `bitint_assign_shift1` passerar alla fyra Clang/vcc-parningar
+på båda målen. Regressionen provar 9–128 bitar, smutsig padding, tecken och
+engångsevaluering av operander. Unity och separata filer samt kärnans
+sema 887/887 individuellt och i batch är verifierade för den isolerade
+fixen; den kombinerade Kefir-milstolpens slutgrind återstår. G1 är öppen.
+
 ### Status 2026-11-11: G5/G7, registerlokaler på x86
 
 Gemensamt behörighetsurval i `emit/opt/locals.c` används av alla tre

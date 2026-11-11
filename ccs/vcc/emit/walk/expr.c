@@ -1381,6 +1381,26 @@ static qty wk_optype(cc *c, int op, qty lt, qty rt)
 	return pl;
 }
 
+/* Compound assignments reload their lvalue directly instead of through
+ * wk_gen. Normalize that snapshot before arithmetic sees ABI padding. */
+static val wk_bitint_value(ecx *e, val v, qty t)
+{
+	cc *c = e->c;
+	{
+		unsigned bits = T(c, t)->n;
+
+		if (bits > 64)
+			return LO(wbitint)(e, v, bits, is_signed(c, t));
+		if (v.k == V_CONST)
+			return wk_const(c, v.i, t);
+		if (bits < 64) {
+			v = LO(bin)(e, T_LESSLESS, 8, false, v, vconst(64 - bits));
+			v = LO(bin)(e, T_GREATERGREATER, 8, is_signed(c, t), v, vconst(64 - bits));
+		}
+	}
+	return v;
+}
+
 /* x = y, x op= y: the value stored */
 static val wk_assign(ecx *e, uint32_t n)
 {
@@ -1437,6 +1457,8 @@ static val wk_assign(ecx *e, uint32_t n)
 			l = wk_lval(e, x->a);
 			a = wk_reload(e, &l, lt);
 		}
+		if (em_bitint(c, lt))
+			a = wk_bitint_value(e, a, lt);
 		if (is_ptr(c, lt) && ptr_to_vla(c, lt)) {
 			v = wk_ptradd_vla(e, a, b, rt, lt, x->aux == T_MINUS);
 		} else if (is_ptr(c, lt)) {
@@ -2778,19 +2800,7 @@ VPRIV val wk_gen(ecx *e, uint32_t n)
 	if (likely(!em_bitint(c, t)))
 		return wk_gen_inner(e, n);
 	val v = wk_gen_inner(e, n);
-	{
-		unsigned bits = T(c, t)->n;
-
-		if (bits > 64)
-			return LO(wbitint)(e, v, bits, is_signed(c, t));
-		if (v.k == V_CONST)
-			return wk_const(c, v.i, t);
-		if (bits < 64) {
-			v = LO(bin)(e, T_LESSLESS, 8, false, v, vconst(64 - bits));
-			v = LO(bin)(e, T_GREATERGREATER, 8, is_signed(c, t), v, vconst(64 - bits));
-		}
-	}
-	return v;
+	return wk_bitint_value(e, v, t);
 }
 
 static val wk_gen_inner(ecx *e, uint32_t n)
