@@ -3273,3 +3273,28 @@ växelvisa rundor med 28 förprocessade arm64-kärnfiler gav median användar-CP
 0,825 → 0,791 s; två filer uteslöts efter preflight och korta sampel på delad
 värd visar ingen generell hastighetsförändring. Proveniens finns i
 `work/opt-profile/local-values-integration-{cost,cputime}/`.
+
+### Inbyggd strlen med konstant litteraloffset
+
+`__builtin_strlen("abcd" + 2)` blir nu konstant 2 även när pekaren börjar
+inuti en byte-stränglitteral. Offset måste vara ett bieffektsfritt
+heltalskonstantuttryck inom objektet och pekararitmetiken ha elementstorlek
+1; okända, negativa och utanför-objektet offset faller tillbaka. Inbäddad
+nollbyte hanteras från den valda offseten. Detta är frontändens befintliga
+builtin-konstantvärdering och gäller även O0, som Clang; vanliga anrop och
+icke-litteraler får ingen ny genväg.
+
+Kodform och körning O0–O3 passerar på x86, arm64, wasm32 och wasm64 i
+unity- och separatfilbygge; proven täcker nollbyte, terminator, konstantuttryck,
+bieffekt och ogiltiga offset. Samma kodformsprov misslyckas mot basen.
+Semantikkontroll före och efter: 887/887 både batch och per process; vcc
+259/259 med en befintlig xfail. Matchad Callgrind-korpus mot main `f0ec9f67`
+gav compiler-Ir +0,002 % x86, +0,003 % arm64, +0,002 % wasm32 och −0,002 %
+wasm64; två respektive en wasm-filer saknas på båda sidor. Sju växelvisa
+rundor med 28 förprocessade arm64-kärnfiler gav median användar-CPU
+0,76942 → 0,78450 s (+1,96 %); två filer uteslöts och korta sampel på delad
+värd visar ingen generell tidsändring. En mättad 2 000-funktionskontroll med
+vanliga litteraler gav +0,29 % x86 och +0,31 % wasm64 compiler-instruktioner
+med identisk assembler; positiva offset-fall −19,28 % respektive −16,21 %.
+Detta är syntetiska extremfall. Proveniens finns i `work/opt-profile/
+literal-string-offset-{cost,cputime,saturated}/`. G5/G7 återstår.

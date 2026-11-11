@@ -745,3 +745,7 @@ fyrmålsprov, kostnader och begränsningar finns i PLAN-fas2.md. G5/G7 återstå
 
 Lokal värdeåteranvändning från PR #97 och #100 integreras på main; samlade
 fyrmålsprov och kompilatorkostnader finns i PLAN-fas2.md. G5/G7 återstår.
+
+`__builtin_strlen` kan konstantvärderas för säkra byte-offset inuti
+stränglitteraler; fyrmålsprov, semantikkontroller och begränsade kostnader
+redovisas i PLAN-fas2.md. G5/G7 återstår.
