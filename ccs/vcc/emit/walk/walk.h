@@ -20,10 +20,20 @@
  */
 #ifndef VCC_WALK_H
 #define VCC_WALK_H
+#include "prefix.h"	/* generated (bench/gen-walkprefix.py): WK_PREFIX renames the walker's functions; first, so that emitimpl.h's wk_ prototypes are renamed too */
 #include "../emitimpl.h"
 #include "../rec/rec.h"
 
+/* The lowering target: x64_ today.  A second instantiation of the walker
+   (SPEC-vir.md X1) defines WK_PREFIX and LO_PREFIX before including the
+   walker files; LO_PREFIX is then the prefix of the target's operations. */
+#ifdef LO_PREFIX
+#define LO_PASTE_(p, n) p##n
+#define LO_PASTE(p, n) LO_PASTE_(p, n)	/* (the extra level expands LO_PREFIX first) */
+#define LO(name) LO_PASTE(LO_PREFIX, name)
+#else
 #define LO(name) x64_##name
+#endif
 
 /*
  * An argument, parameter or result as the ABI passes it (LO(classify)): n
@@ -140,6 +150,7 @@ VPRIV bool wk_can_inline(ecx *e, uint32_t s);
 VPRIV void wk_function(ecx *e, uint32_t s);	/* emit/walk/func.c: what emit/tu.c calls for x86-64 */
 VPRIV int64_t wk_slot(ecx *e, uint64_t size, uint32_t align);	/* a temporary: free again after the statement */
 VPRIV int64_t wk_pslot(ecx *e, uint64_t size, uint32_t align);	/* for the whole function */
+VPRIV int64_t wk_pslot_kind(ecx *e, uint64_t size, uint32_t align, int kind);	/* wk_pslot, told to LO(slot) as kind (WK_SLOT_*) */
 VPRIV int64_t wk_local(ecx *e, uint32_t s);	/* a local's slot, made on first use (a goto may reach a use first) */
 VPRIV uint32_t wk_newlabel(ecx *e);
 VPRIV val wk_gen(ecx *e, uint32_t n);
@@ -265,6 +276,13 @@ VPRIV int LO(va_arg)(ecx *e, int rap, qty t);		/* the next argument's address */
 VPRIV void LO(begin)(ecx *e, uint32_t s);
 VPRIV void LO(locals_begin)(ecx *e, uint32_t s);
 VPRIV bool LO(local)(ecx *e, uint32_t s, lval *l);
+/* The walker hands out the frame offset off (negative, from the frame base)
+   for size bytes at align: fresh, or an earlier slot of the same size and
+   alignment made free again.  The same offset names different objects at
+   different times; this is the only place a target learns when.  Called once
+   per hand-out. */
+enum { WK_SLOT_TEMP, WK_SLOT_LOCAL, WK_SLOT_PARAM, WK_SLOT_FUNC };	/* WK_SLOT_FUNC: lives for the whole function */
+VPRIV void LO(slot)(ecx *e, int64_t off, uint64_t size, uint32_t align, int kind);
 VPRIV void LO(finish)(ecx *e, uint32_t s);
 
 #endif

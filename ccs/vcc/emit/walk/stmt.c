@@ -45,7 +45,7 @@ VPRIV wkst *wk_state(ecx *e)
 	return W;
 }
 
-VPRIV void x64_ecx_free(ecx *e);
+VPRIV void LO(ecx_free)(ecx *e);
 
 /* the walker's and the lowering's state of this ecx, given back (the TU is done) */
 VPRIV void wk_ecx_free(ecx *e)
@@ -53,7 +53,7 @@ VPRIV void wk_ecx_free(ecx *e)
 	cc *c = e->c;
 	wkst *W = e->wk;
 
-	x64_ecx_free(e);
+	LO(ecx_free)(e);
 	if (!W)
 		return;
 	if (W->sgen) {
@@ -97,9 +97,10 @@ VPRIV int64_t wk_slot(ecx *e, uint64_t size, uint32_t align)
 			W->tf[i] = W->tf[--W->ntf];
 			if (W->ntu < WK_MAXTSLOT)
 				W->tu[W->ntu++] = t;
+			LO(slot)(e, t.off, size, align, WK_SLOT_TEMP);
 			return t.off;
 		}
-	int64_t o = wk_pslot(e, size, align);
+	int64_t o = wk_pslot_kind(e, size, align, WK_SLOT_TEMP);
 
 	if (W->ntu < WK_MAXTSLOT)
 		W->tu[W->ntu++] = (struct wktslot){ o, (uint32_t)size, align };
@@ -108,6 +109,11 @@ VPRIV int64_t wk_slot(ecx *e, uint64_t size, uint32_t align)
 
 /* a frame slot of size bytes for the whole function: its offset from the frame base (negative) */
 VPRIV int64_t wk_pslot(ecx *e, uint64_t size, uint32_t align)
+{
+	return wk_pslot_kind(e, size, align, WK_SLOT_FUNC);
+}
+
+VPRIV int64_t wk_pslot_kind(ecx *e, uint64_t size, uint32_t align, int kind)
 {
 	wkst *W = e->wk;
 	int64_t o;
@@ -124,6 +130,7 @@ VPRIV int64_t wk_pslot(ecx *e, uint64_t size, uint32_t align)
 	W->foff = o;
 	if (align > W->falign)
 		W->falign = align;
+	LO(slot)(e, -(int64_t)o, size, align, kind);
 	return -(int64_t)o;
 }
 
@@ -1512,7 +1519,7 @@ VPRIV void wk_function(ecx *e, uint32_t s)
 		LO(classify)(e, pt, &pa[i], false);
 		lval home;
 		pa[i].slot = LO(local)(e, p, &home) ? 0 :
-			wk_slot(e, pa[i].size > 8 ? (pa[i].size + 7) & ~(uint64_t)7 : 8, pa[i].align);
+			wk_pslot_kind(e, pa[i].size > 8 ? (pa[i].size + 7) & ~(uint64_t)7 : 8, pa[i].align, WK_SLOT_PARAM);	/* (sdepth is 0: wk_slot was wk_pslot) */
 	}
 	LO(params)(e, pa, (int)body->aux, wk_mem(e, W->rty) ? &W->rrec : NULL, (ft->flags & TF_VARIADIC) != 0);
 	for (uint32_t i = 0; i < body->aux; i++) {

@@ -1298,7 +1298,8 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
   record algorithms in `emit/rec/` for register targets. Target instructions,
   register assignment, ABI and structured wasm lowering stay with targets.
   The first rule must be consumed by all three backends, including wasm32
-  and wasm64 for supported types. No new IR/SSA or unbounded pass loops.
+  and wasm64 for supported types. For `-O0`/`-O1`: no new IR/SSA or unbounded pass loops (`-O2` is owned by
+  `PLAN-vir.md`).
   First delivered slice (2026-11-11): unsigned power-of-two div/rem in
   `emit/opt/divpow2.c`, all three consumers, codegen/runtime checks at O0–O3.
   Integer identities now live in separate `emit/opt/identity.c`, shared by
