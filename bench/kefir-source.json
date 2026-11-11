@@ -1,0 +1,45 @@
+{
+  "name": "Kefir C compiler end2end tests",
+  "official_site": "https://kefir.protopopov.lv/",
+  "git_url": "https://git.protopopov.lv/kefir.git",
+  "public_git_auth": {
+    "username": "git",
+    "password": "public",
+    "source": "official website publishes these read-only credentials"
+  },
+  "revision": "7c59547068eaa0723b4db83d3fb70f448b0f0cb1",
+  "migration": {
+    "previous_url": "https://git.sr.ht/~jprotopopov/kefir",
+    "readme_only_revision": "8c3fb1cc6b56f4e1f8ab4c07426ef8c7b3dea1a1",
+    "reason": "old HEAD contains only migration README, zero test sources"
+  },
+  "license": {
+    "tests": "GPL-3.0-only (source SPDX GPL-3.0; notice specifies version3)",
+    "runtime_headers": "BSD-3-Clause, individual source headers retained",
+    "file": "COPYING",
+    "sha256": "3972dc9744f6499f0f9b2dbf76696f2ae7ad8af9b23dde66d6af86c9dfb36986"
+  },
+  "inventory": {
+    "all_c_files": 3312,
+    "end2end_directories": 1106,
+    "runtime_pairs": 875,
+    "host_c_files": 875,
+    "kefir_c_files": 889,
+    "profiles": 986
+  },
+  "contracts": {
+    "host": "Makefile.mk release CFLAGS plus -Wno-int-in-bool-context -UNDEBUG, headers and upstream generated host-env header",
+    "test": "compile.sh flags and each *.kefir.c.profile; default C17+GNU extensions; selected Linux target replaces Kefir host-none",
+    "link": "-no-pie -pthread -latomic -lm from Linux end2end Makefile",
+    "run": "successful exit as run.sh; stdout/stderr retained, no invented stdout comparison",
+    "matrix": "clang/clang reference, then clang/vcc,vcc/clang,vcc/vcc host/test groups",
+    "outside_scope": [
+      "Kefir compiler-internal asmgen/AST/IR/token snapshots",
+      "unknown profile/make/run semantics",
+      "ARM tests containing x86 guards, intrinsics or inline assembly; no inactive-guard passes",
+      "Kefir decimal capability-guarded tests: no inactive guard passes and no forged capability macros"
+    ],
+    "profiles": "Initialize upstream compile.sh base flags before sourcing profile; preserve append, substitution and replacement; record raw text, base/final flags, mapped flags and supported environment"
+  },
+  "snapshot": "Require clean checkout at pinned HEAD; git archive exact pin, record tree ID and every file SHA256"
+}

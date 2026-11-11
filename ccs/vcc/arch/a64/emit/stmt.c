@@ -48,6 +48,9 @@ static void init_elems(ecx *e, const lval *d, qty ty, uint32_t init)
 	cc *c = e->c;
 	const node *x = N(init);
 
+	/* Initialization precedes publication and copies the plain payload. */
+	ty = (T(c, ty)->flags & TF_ATOMIC) ? QT(T(c, ty)->n, 0) : ty;
+
 	if (!init || x->op == N_ZERO)
 		return;
 	if (x->op == N_INIT) {
@@ -149,6 +152,10 @@ VPRIV void gen_init_local(ecx *e, const lval *dst, qty ty, uint32_t init)
 
 	if (!init)
 		return;
+	if (T(c, ty)->flags & TF_ATOMIC) {
+		zero_lval(e, dst, tsize(c, ty));
+		ty = (T(c, ty)->flags & TF_ATOMIC) ? QT(T(c, ty)->n, 0) : ty;
+	}
 	if (x->op == N_INIT || x->op == N_ZERO || (x->op == N_STR && is_array(c, ty))) {
 		zero_lval(e, dst, tsize(c, ty));
 		init_elems(e, dst, ty, init);

@@ -81,6 +81,9 @@
 #endif
 #endif
 
+/* Exact allocation/cell analysis shared by machine-record optimizers. */
+#include "rec/slots.h"
+
 #define N(i) (&c->nodes[i])
 /* Apple arm64 (Mach-O): '_' names, GOT for symbols outside the TU, variadic
  * arguments on the stack, va_list a char *, stack arguments packed */
@@ -540,8 +543,6 @@ VPRIV uint32_t em_rec_fallthrough(void *records, uint32_t count, const em_rec_la
 VPRIV uint32_t em_rec_unreachable(void *records, uint32_t count, size_t stride, size_t op_offset,
 				const uint8_t *flow, size_t nflow,
 				void (*remap)(void *, uint32_t, uint32_t), void *ctx);
-/* Exact allocation/cell analysis shared by machine-record optimizers. */
-#include "rec/slots.h"
 /* insn.c */
 extern const char cond_name[][8];
 VPRIV bool logimm_ok(uint64_t v, int x);
