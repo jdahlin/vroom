@@ -522,3 +522,17 @@ ingen referenskrasch döljs eller räknas som PASS. Loggar:
 `work/opt-pr-tmp/wasm-memory-{own64,baseline-oracle,own32-final}.log`.
 Detta är en lokal referensbegränsning, inte ett påstående att hela
 wasm64-sviten är grön. Ny CI och bredare prestandagrind återstår.
+
+### OPT6: kortslutna konstanta kontrollbeslut (delsteg)
+
+Den målgemensamma hjälparen `emit/opt/control.c` används nu också i wasm:
+rena kombinationer av `__builtin_constant_p`, `!`, `&&`/`||` och literal
+`__builtin_strcmp` väljer bara den levande grenen vid O1–O3. Befintlig
+constant_p-policy och O0-utdata bevaras; okända eller effektfulla uttryck
+fortsätter genom den gamla vägen. `if_call_const` och `cond_dead_and`
+passerar wasm32/64 och är obligatoriska. Nytt SDK-fritt prov
+`bench/vcc-constant-control.py` kör alla fyra nivåer och ligger i CI för
+båda wasm-lägena och native-målen. Inlining, konstant switch med borttagna
+segment och WARN-statement expressions är fortsatt öppna; WARN-provet med
+volatile asm `nop` behöver dessutom stöd för den instruktionen i wasm-asm.
+Se OPT6-status i `PLAN-fas2.md` för bevis, kostnader och avgränsning.

@@ -140,6 +140,7 @@ VPRIV void wk_bfinit(ecx *e, const lval *l, qty t, uint32_t init);	/* a bit-fiel
 VPRIV int wk_size(cc *c, qty t);
 VPRIV bool wk_mem(ecx *e, qty t);	/* values of t are held by address (records, arrays, x87 long double) */
 VPRIV val wk_conv(ecx *e, val v, qty from, qty to);
+VPRIV void wk_store(ecx *e, const lval *l, qty t, val *v);
 VPRIV val wk_reload(ecx *e, const lval *l, qty t);	/* l's value again (a new register or address) */
 VPRIV void wk_store(ecx *e, const lval *l, qty t, val *v);
 VPRIV val wk_putmem(ecx *e, lval *l, qty t, val v);	/* v's bytes (held by address) into l: l's address */

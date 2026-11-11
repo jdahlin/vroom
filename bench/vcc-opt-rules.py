@@ -348,6 +348,68 @@ def check_copies(assembly, arch):
     # than prescribing their physical register allocation.
 
 
+def check_switches(assembly, arch):
+    # The old sparse chain contains equality/range tests only. A balanced
+    # dispatch must split both halves, with bounded native decision paths.
+    wasm = arch.startswith('wasm')
+    for name in ['sw_sparse32', 'sw_ranges32', 'sw_unsigned32', 'sw_unsigned64',
+                 'sw_signed64', 'sw_broad64', 'sw_cross32']:
+        text = body(assembly, name, wasm)
+        split = (r'\bi(?:32|64)\.lt_[su]\b' if wasm else
+                 r'\bb\.(?:lt|lo)\b' if arch == 'aarch64' else r'\bj(?:l|b)\s')
+        if not re.search(split, text):
+            raise RuntimeError(f'{name}: missing balanced split\n{text}')
+    text = body(assembly, 'sw_sparse32', wasm)
+    if wasm:
+        depth = maximum = 0
+        for line in text.splitlines():
+            if re.match(r'^\s*if\s*$', line):
+                depth += 1
+                maximum = max(maximum, depth)
+            elif re.match(r'^\s*end_if\b', line):
+                depth -= 1
+        if maximum != 4:
+            raise RuntimeError(f'sw_sparse32: expected four balanced split levels, got {maximum}')
+        if not re.search(r'\bbr_table\b', body(assembly, 'sw_dense', True)):
+            raise RuntimeError('sw_dense: lost existing wasm branch table')
+        return
+    # Count the maximum conditional decisions along the actual emitted CFG.
+    # The probe is acyclic and contains no calls/loops; labels/directives do
+    # not count as instructions. This rejects the former 31-test chain.
+    instructions, labels = [], {}
+    for line in text.splitlines():
+        label = re.match(r'^([.\w$]+):', line)
+        if label:
+            labels[label[1]] = len(instructions)
+        elif line.strip() and not line.lstrip().startswith(('.', '#', '//')):
+            instructions.append(line.strip())
+    memo, visiting = {}, set()
+    def path(i):
+        if i >= len(instructions):
+            return 0
+        if i in memo:
+            return memo[i]
+        if i in visiting:
+            raise RuntimeError('sw_sparse32: unexpected dispatch cycle')
+        visiting.add(i)
+        line = instructions[i]
+        op = line.split()[0]
+        branch = re.match(r'(?:j\w+|b(?:\.\w+)?)\s+([.\w$]+)', line)
+        if op.startswith('ret'):
+            result = 0
+        elif branch and branch[1] in labels:
+            target = path(labels[branch[1]])
+            result = target if op in ['jmp', 'jmpq', 'b'] else 1 + max(target, path(i + 1))
+        else:
+            result = path(i + 1)
+        visiting.remove(i)
+        memo[i] = result
+        return result
+    maximum = path(0)
+    if maximum > 10:
+        raise RuntimeError(f'sw_sparse32: {maximum} decisions, expected <=10 for 31 cases')
+
+
 def x64_start(check_preserved):
     if not check_preserved:
         return 'call main\nmov %eax, %edi\nmov $60, %eax\nsyscall\n'
@@ -402,7 +464,7 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument('--vpp', default=str(Path(BUILD) / 'vpp'))
     ap.add_argument('--target', default='x86_64-linux-gnu')
-    ap.add_argument('--rule', choices=['pow2', 'signedpow2', 'identities', 'fallthrough', 'loopback', 'unreachable', 'locals', 'localjmp', 'copies', 'extensions', 'all'], default='all')
+    ap.add_argument('--rule', choices=['pow2', 'signedpow2', 'identities', 'fallthrough', 'loopback', 'unreachable', 'locals', 'localjmp', 'copies', 'extensions', 'switches', 'all'], default='all')
     ap.add_argument('--run', action='store_true', help='also execute literal-answer correctness checks')
     ap.add_argument('--clang', default=llvm('clang'))
     ap.add_argument('--vlink', default=str(Path(BUILD) / 'vlink'))
@@ -430,7 +492,8 @@ def main():
              'locals': ('register_locals.c', check_locals),
              'localjmp': ('register_locals_setjmp.c', None),
              'copies': ('record_copies.c', check_copies),
-             'extensions': ('known_extensions.c', check_extensions)}
+             'extensions': ('known_extensions.c', check_extensions),
+             'switches': ('switch_dispatch.c', check_switches)}
     selected = rules if args.rule == 'all' else {args.rule: rules[args.rule]}
     with tempfile.TemporaryDirectory(prefix='vcc-opt-rules-') as tmp:
         directory = Path(tmp)
@@ -445,7 +508,7 @@ def main():
                 checked = ((arch == 'x86_64' and level >= 1) if rule in ['locals', 'copies', 'extensions'] else
                            (not arch.startswith('wasm') and level >= 1) if rule in ['fallthrough', 'unreachable'] else
                            arch.startswith('wasm') if rule == 'loopback' else True)
-                checked = checked and check is not None
+                checked = checked and check is not None and (rule != 'switches' or level >= 1)
                 if checked:
                     check(assembly.read_text(), arch)
                 if args.run:

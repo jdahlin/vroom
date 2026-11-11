@@ -701,12 +701,11 @@ att båda är 16 byte. `emit_SRC` i `ccs/Makefile` behöver ta med nya
 
 ### Ordning, leveranser och verifiering
 
-Alla OPT-steg nedan är **planerade**; endast den tidigare x86-auditen finns.
-Implementera små steg med egen commit och uppdaterad status/mätning här.
-
-**Uppdatering 2026-11-11:** OPT1:s första del är nu implementerad;
-statusen och mätningen nedan gäller bara unsigned tvåpotensdivision/-rest.
-Övriga rader är fortsatt planerade.
+OPT0–OPT4 har levererade delsteg med verifiering och kostnadsmätningar nedan;
+OPT5:s gemensamma cell-/värdekärna finns i main (PR46), medan wasm-adaptern
+ligger i PR47. Varje rad beskriver hela återstående leveransen, inte ett löfte
+om att hela steget redan är färdigt. Statusblocken anger faktisk omfattning.
+Fortsätt med små separata commits och uppdaterad status/mätning här.
 
 | Steg | Leverans och beroende | Bevis innan klart |
 | --- | --- | --- |
@@ -1797,6 +1796,111 @@ Båda host-kontrakten klarar ASan/UBSan. X86:s riktiga unwind och
 funktionsavgränsade debug-/text-/DWARF-kontroller är gröna. Ny CI följer
 PR:n; CPU-mätningarna och instruktionsprofilen ovan har sina uttryckliga
 äldre baser och är inte ett generellt godkännande av G5.
+
+### OPT6 status: balanserad switchdispatch (2026-11-11)
+
+Gemensam policy, 32/64-bitars normalisering och sortering finns i
+`emit/opt/switch.c`; arm64, den delade x86-walkern och wasm använder den för
+verkliga balanserade jämförelseträd vid O1–O3 och minst åtta case-intervall.
+Små switchar behåller den billiga kedjan; wasm behåller sin täta `br_table`.
+O0, `VCC_NOOPT` och 128-bitars fallback är oförändrade. Selektorn utvärderas
+en gång. Case-kroppar, etikettidentitet, fallthrough och goto-modellen flyttas
+inte. Om normalisering vänder/överlappar intervall eller allokering misslyckas
+används den befintliga kedjan. Ingen IR, SSA eller extra funktionspass byggs.
+
+`switch_dispatch.c` och `vcc-opt-rules.py --rule switches --run` passerar
+O0–O3 för x86, arm64, wasm32 och wasm64: osorterade glesa fall, GNU-intervall,
+signed/unsigned 32/64-bitars gränser, intervall över noll och nästan hela
+unsigned64-domänen, default utan/med case, fallthrough, nested case i if(0),
+goto förbi selektorn och wide-fallback. Ett faktiskt utskrivet CFG med 31
+sparse case har högst 9 villkorsbeslut på x86 och 10 på arm64 (tidigare 31);
+wasm har fyra balanserade splitnivåer och behåller den täta tabellen. Den gamla
+basens kedja underkänns av kodkravet. Sanitiserade kontrakt kontrollerar
+normalisering, etikettidentitet, överlapp, densitets-overflow och tabellgräns.
+Unity och fil-för-fil bygger; fil-för-fil kör även x86/wasm64-fallen O0–O3.
+O0- och `VCC_NOOPT`-assemblern är byte-identisk mot basen för alla fyra mål.
+
+Kostnad mot exakt fded15a, identiska clang23-byggen med
+`-O3 -march=x86-64-v3`, Callgrind 3.26 för hela kompilatorprocessen
+`vpp --target=... -O2 -S`. Tre avgränsade korpusar om 500 funktioner:
+
+| Mål | Rak heltalskod, Ir | Summeringsloop, Ir | Små tre-case-switchar, Ir |
+| --- | ---: | ---: | ---: |
+| x86 | −0,0123 % | −0,0069 % | +0,0351 % |
+| arm64 | −0,0242 % | −0,0104 % | +0,0356 % |
+| wasm32 | +0,0095 % | +0,0258 % | +0,1795 % |
+| wasm64 | +0,0097 % | +0,0259 % | +0,1794 % |
+
+Alla tolv assemblerpar är identiska. Råa instruktionstal, binärhashar och
+kommandon finns i `work/opt-profile/switch-profile.json`, respektive `.cg`/
+`.log`, med reproducerbar mätare `switch-measure.py`. Den portabla
+switchregressionens x86-O2-binär exekverar 1 183 812 → 610 952 instruktioner
+(−48,39 %) och 396 541 → 109 244 villkorsgrenar i Callgrind; detta är ett
+riktat kodkvalitetsprov, ingen generell runtime-/nativekostnadsgrind.
+`switch-runtime-profile.json` innehåller hash/kommandon för just detta prov.
+Värdetabeller, utökad inlining och oanvända lokala initierare återstår i OPT6;
+övriga O2-steg och de breda G5/G7-grindarna är fortsatt öppna.
+
+OPT6-integrering: 19c6a63 är switchimplementationen ovan, därefter har PR47:s
+main-uppdatering b63c269 mergats. På kombinationen passerar unitybygget,
+16/16 riktade switchfall, sanitiserade plankontrakt och 219/219 arm64-körtester
+(ett befintligt xfail) samt 214/214 x86-körtester (sex referensskips).
+Fil-för-fil-bygget hittade en ärvd synlighetsmiss i autozero-koden:
+`stmt.c` anropade `expr.c`-lokala `wk_store`. Hjälparen är nu VPRIV med
+prototyp i walk.h. Efter fixen bygger fil-för-fil och passerar samtliga
+164 regel-/nivå-/målkombinationer med körning samt x86-debugkontrollen O0–O3.
+Mätningarna ovan avser uttryckligen fded15a + 19c6a63:s kompilatorkod,
+inte main-uppdateringens separata ändringar.
+
+### OPT6: gemensamma rena kontrollbeslut (delsteg)
+
+`emit/opt/control.c` bevisar konstanta heltalsvillkor, logisk negation,
+kortslutning och `__builtin_strcmp` mellan rena smala strängliteraler. Den
+gemensamma besökaren stannar efter högst 64 noder och besöker aldrig en död
+högeroperand. Okända anrop, volatile/atomic, satser och inlining lämnas till
+den befintliga genereringen; ingen SSA eller AST-mutation tillkommer.
+`__builtin_constant_p` använder respektive måls befintliga policy genom en
+callback. Arm64:s callback behåller sin befintliga dry-generering med
+återställning, och x86:s tidigare dubbla formel i builtin-/villkorsvägen är
+sammanslagen. Det gemensamma beviset anropas en gång vid respektive faktisk
+villkorsingång, inte igen via den delade range-hjälparen `cond_fold`.
+
+Nya beslut gäller O1–O3 med optimeringar aktiva. Åtta fokuserade källfiler
+är byteidentiska mot `781ca69` för både O0 och O2 med `VCC_NOOPT=1`, på
+x86, arm64, wasm32 och wasm64: 64 jämförelser. Native-målens gamla O0-regler
+för strängjämförelser är bevarade. Det nya kör-/kodformsprovet passerar
+16 nivå-/målkombinationer, även fil-för-fil, och kontrollerar exakt en
+utvärdering, bevarade globala volatile-/atomic-laddningar, vanliga
+användardefinierade strcmp-anrop samt höga strängbyte och inbäddad NUL.
+Nio befintliga native-test för constant_p/inlining passerar. Wasm32/64
+passerar båda `if_call_const` och `cond_dead_and`; bara dessa två xfail
+är borttagna. Övriga sex granskade luckor kräver fortsatt arbete med
+switchsegment, värdefakta för statement expressions eller inlining.
+
+Kostnaden mäts mot exakt `781ca69`, lika värdflaggor
+`-O3 -march=x86-64-v3`, hela processen i Callgrind, 500 funktioner per
+prov, O1/O2. De rena skalärkontrollerna är i praktiken oförändrade.
+Pekarslingans kostnad är cirka +0,094 % x86, +0,065 % arm64 och −0,002 %
+wasm. Positivt kortslutnings-/constant_p-prov minskar värdinstruktionerna
+med cirka 16,90 % x86, 2,75 % arm64 och 18,15–18,36 % wasm. Detta är
+avgränsad kompileringskostnad, inte hårdvarucykler eller en full grind.
+Den första provvarianten med null-callback på native gav extra arbete
+utan vinst och ersattes; dess profiler är sparade separat. Bredare
+prestandagrind, CI och full O2-täckning är fortsatt öppna.
+
+Slutlig verifiering av samma implementation: 164 befintliga regel-/nivå-/
+målkombinationer passerar med körning. De nya 16 kombinationerna passerar
+också efter fil-för-fil-bygge. Råprofiler, kommandon och käll-/binärhashar
+finns lokalt i `work/opt-profile/control-final-cost/result.json`; O0/noopt-
+jämförelserna ligger i `work/opt-profile/control-parity/result.json`.
+Den generella algoritmen gör ingen extra helträdsanalys för accepterade
+bevis; wasm:s befintliga fallback för övriga former är avsiktligt kvar.
+
+Efter integration av `54580f7` (PR48:s regressionsunderlag) bygger unity
+och alla 16 nya nivå-/målkontroller passerar igen. Hela egna native-sviten
+ger 216/216 x86-PASS med sex synliga referensundantag och 221/221 arm64-PASS
+med ett befintligt kört XFAIL. Loggar finns i
+`work/opt-pr-tmp/control-integrated-{build,x86,arm}.log`.
 
 ### OPT5 regressionsunderlag: genererade minnesceller (2026-11-11)
 

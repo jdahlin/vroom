@@ -938,6 +938,46 @@ static void wnested_cases(cc *c, uint32_t n, uint32_t **v, uint32_t *nv, uint32_
 	}
 }
 
+/* All targets are enclosing block indices, so wbr accounts for the extra
+ * structured ifs while descending the balanced dispatch tree. */
+static void wswitch_tree(ecx *e, const em_switch_case *v, uint32_t n,
+			 uint32_t t, int k, bool sg, int dflt)
+{
+	if (!n) {
+		wbr(e, "br", dflt);
+		return;
+	}
+	if (n == 1) {
+		wget(e, t);
+		wconst(e, k, (int64_t)v->lo);
+		if (v->lo == v->hi) {
+			wop(e, k, "eq");
+		} else {
+			wop(e, k, "sub");
+			wconst(e, k, (int64_t)(v->hi - v->lo));
+			wop(e, k, "le_u");
+		}
+		wbr(e, "br_if", (int)v->target);
+		wbr(e, "br", dflt);
+		return;
+	}
+	uint32_t mid = n / 2;
+	const em_switch_case *s = &v[mid];
+
+	wget(e, t);
+	wconst(e, k, (int64_t)s->lo);
+	wop(e, k, sg ? "lt_s" : "lt_u");
+	wblock(e, "if");
+	wswitch_tree(e, v, mid, t, k, sg, dflt);
+	wboundary(e, "else");
+	wget(e, t);
+	wconst(e, k, (int64_t)s->hi);
+	wop(e, k, sg ? "le_s" : "le_u");
+	wbr(e, "br_if", (int)s->target);
+	wswitch_tree(e, s + 1, n - mid - 1, t, k, sg, dflt);
+	wend(e, "end_if");
+}
+
 static void wswitch(ecx *e, uint32_t n)
 {
 	cc *c = e->c;
@@ -1122,7 +1162,7 @@ static void wswitch(ecx *e, uint32_t n)
 		}
 		wbr(e, "br", dseg != UINT32_MAX ? sb[dseg] : brk);
 		wfree(e, th);
-	} else if (ncase >= 4 && !ranges && hi - lo < 4 * (i128)ncase + 8 && hi - lo < 65536) {
+	} else if (em_switch_strategy(ncase, lo, hi, ranges, true) == EM_SWITCH_TABLE) {
 		/* dense: a branch table on t - lo */
 		uint32_t span = (uint32_t)(hi - lo) + 1;
 		uint32_t *tg = malloc(span * sizeof *tg);
@@ -1162,22 +1202,39 @@ static void wswitch(ecx *e, uint32_t n)
 		tb_s(b, "}\n");
 		free(tg);
 	} else {
-		for (uint32_t i = 0; i < ncase; i++) {
-			const wswc *s = &W->sw[sw0 + i];
+		bool tree = false;
+		if (e->E->o->opt && !e->E->noopt &&
+		    em_switch_strategy(ncase, lo, hi, ranges, false) == EM_SWITCH_TREE) {
+			em_switch_case *cases = malloc(ncase * sizeof *cases);
+			bool sg = is_signed(c, ct);
 
-			wget(e, t);
-			if (s->lo == s->hi) {
-				wconst(e, k, (int64_t)s->lo);
-				wop(e, k, "eq");
-			} else {
-				wconst(e, k, (int64_t)s->lo);
-				wop(e, k, "sub");
-				wconst(e, k, (int64_t)(s->hi - s->lo));
-				wop(e, k, "le_u");
+			for (uint32_t i = 0; cases && i < ncase; i++) {
+				const wswc *s = &W->sw[sw0 + i];
+				cases[i] = (em_switch_case){ s->lo, s->hi, (uint32_t)sb[s->seg] };
 			}
-			wbr(e, "br_if", sb[s->seg]);
+			tree = cases && em_switch_prepare(cases, ncase, k == WT_I32 ? 32 : 64, sg);
+			if (tree)
+				wswitch_tree(e, cases, ncase, t, k, sg, dseg != UINT32_MAX ? sb[dseg] : brk);
+			free(cases);
 		}
-		wbr(e, "br", dseg != UINT32_MAX ? sb[dseg] : brk);
+		if (!tree) {
+			for (uint32_t i = 0; i < ncase; i++) {
+				const wswc *s = &W->sw[sw0 + i];
+
+				wget(e, t);
+				if (s->lo == s->hi) {
+					wconst(e, k, (int64_t)s->lo);
+					wop(e, k, "eq");
+				} else {
+					wconst(e, k, (int64_t)s->lo);
+					wop(e, k, "sub");
+					wconst(e, k, (int64_t)(s->hi - s->lo));
+					wop(e, k, "le_u");
+				}
+				wbr(e, "br_if", sb[s->seg]);
+			}
+			wbr(e, "br", dseg != UINT32_MAX ? sb[dseg] : brk);
+		}
 	}
 	wfree(e, t);
 	W->brk = brk;
