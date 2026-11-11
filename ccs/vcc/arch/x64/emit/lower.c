@@ -624,6 +624,9 @@ VPRIV void x64_finish(ecx *e, uint32_t s)
 
 	if (e->x64->live)
 		efatal(e, e->curloc, "internal error: x86-64 temporaries left live (%#x)", e->x64->live);
+	if (e->E->o->opt >= 1 && !e->E->noopt)
+		e->x64->nin = em_rec_unreachable(e->x64->in, e->x64->nin, sizeof(rec), offsetof(rec, op),
+						x64_flow_table(), X_NOPS, NULL, NULL);
 	if (e->E->o->opt >= 1)
 		e->x64->nin = em_rec_fallthrough(e->x64->in, e->x64->nin, &layout, NULL, NULL);
 	x64_twoaddr(e);

@@ -232,6 +232,8 @@ static void finish_function(ecx *e, uint32_t s)
 		uint64_t u;
 		const uint32_t csm = (1u << 29) - (1u << 19);	/* x19-x28 */
 
+		if (!e->E->noopt)
+			a64_unreachable(e);
 		drop_fallthrough(e);
 		if (!e->E->noopt)
 			opt_function(e);

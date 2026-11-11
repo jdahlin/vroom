@@ -996,6 +996,45 @@ OPT2 är endast **påbörjat**: full effektbeskrivning, blockkontrakt och
 död kod efter terminator återstår. Registerlokaler (OPT3) och resterande
 OPT-steg/O2-målet är fortsatt öppna.
 
+### Status OPT2 (2026-11-11): onåbara poster och x86-effekter
+
+`emit/rec/unreachable.c` tar i en linjär, allokeringsfri svepning bort
+posterna efter en säker ovillkorlig transfer fram till nästa möjlig
+inträdespunkt. Arm64:s adapter ligger separat i
+`arch/a64/emit/unreachable.c`; x86 har en billig enbyte-flödestabell i
+`arch/x64/emit/effects.c`. O1 och uppåt, med befintlig noopt-spärr.
+Alla etiketter, raw asm, namngivna etiketter, okända instruktioner och
+indirekta transfers är konservativa barriärer. Debug-remapping körs för
+varje gammalt postindex och slutmarkören. Wasm:s strukturerade dödkod
+använder redan motsvarande AST-bevis; dess semantik körtestas också.
+
+Arm64 BRK är **inte** en säker terminator: debugger/arm_trap kan återgå.
+Granskningen fann även att gemensamma side_effects saknade DEBUGTRAP;
+den klassas nu som effekt så ett oanvänt debugtrap-anrop behålls.
+Regressionerna kontrollerar både breakpoint och fortsättning utan att
+exekvera dessa compile-only-funktioner.
+
+X86:s fulla register-/effektkontrakt för kommande kopie-/livenesspass
+finns i samma målspecifika effects.c. Det beskriver implicita register,
+flaggor, partial writes, TLS, REP, x87, FP-miljö, R11-scratch och R12 som
+justerad rambas. Okänd/saknad metadata blir opak, aldrig pure.
+`bench/vcc-rec-effects.py` testar dessa kontrakt normalt och med
+ASan/UBSan; det normala snabba testet ingår i arm64:s premerge-jobb.
+Ingen full registeranalys startas för enkel flödesstädning.
+
+`unreachable_records.c` testar goto/return/break/continue, nåbara effekter,
+volatile, computed goto, asm goto, asm-barriärer, cleanup och VLA.
+Kodkrav avvisar basens x86-kod; literalbaserade körresultat bevaras på
+alla fyra mål vid O0–O3. Auditens x86-probe `oa_cond_fold` går vid O1/O2
+från 16 till 11 instruktioner. Båda byggsätten och relevanta DWARF-test
+verifieras tillsammans med den följande signed-tvåpotensregeln; fulla
+mätdata och revisionshashar redovisas vid OPT8 nedan.
+
+OPT2 är fortfarande **påbörjat**: delade block-/effektadapter för hela
+arm64-optimeraren och full CFG-nåbarhet återstår. Detta är inte generell
+SimplifyCFG. Nästa större steg är registerlokaler med gemensam behörighet
+(OPT3), därefter kopie-/utvidgningsstädning (OPT4).
+
 ## Risker
 - **GNU C-ytan och inline asm** är det stora jobbet. Uppskattat: lexer + pp ~2 kloc,
   parser + sema ~10–15 kloc, emitter ~5 kloc, assembler ~4 kloc, länkare ~3 kloc.

@@ -188,6 +188,38 @@ def check_loopback(assembly, arch):
             raise RuntimeError(f'{name}: expected {expected} loop backedges, found {len(branches)}\n{loop[1]}')
 
 
+def check_unreachable(assembly, arch):
+    # These functions contain a dead call after a direct goto, return, break,
+    # or continue. Inspect symbol references, rather than instruction counts:
+    # register allocation and frame cleanup can independently change size.
+    for name in ['dc_goto', 'dc_return', 'dc_break', 'dc_continue', 'dc_labels', 'dc_vla']:
+        text = body(assembly, name, False)
+        if re.search(r'\bdc_effect\b', text):
+            raise RuntimeError(f'{name}: retained unreachable effect call\n{text}')
+    for name in ['dc_goto', 'dc_return']:
+        text = body(assembly, name, False)
+        if re.search(r'\bdc_seen\b', text):
+            raise RuntimeError(f'{name}: retained unreachable volatile store\n{text}')
+    # Effects on both conditional paths and cleanup transfers must survive.
+    text = body(assembly, 'dc_condition', False)
+    if len(re.findall(r'\b(?:callq?|bl)\s+dc_effect\b', text)) != 2:
+        raise RuntimeError(f'dc_condition: lost a reachable conditional effect\n{text}')
+    text = body(assembly, 'dc_cleanup', False)
+    if not re.search(r'\b(?:callq?|bl)\s+dc_clean\b', text):
+        raise RuntimeError(f'dc_cleanup: lost reachable cleanup\n{text}')
+    if arch == 'x86_64':
+        # The a64 optimizer currently deletes this block before the shared
+        # record pass. x86 directly exercises its conservative opaque barrier.
+        text = body(assembly, 'dc_raw_barrier', False)
+        if 'dc_opaque_barrier' not in text or not re.search(r'\bcallq?\s+dc_effect\b', text):
+            raise RuntimeError(f'dc_raw_barrier: removed opaque asm or its fallthrough\n{text}')
+    else:
+        for name in ['dc_debugtrap', 'dc_builtin_debugtrap']:
+            text = body(assembly, name, False)
+            if not re.search(r'\bbrk\b', text) or not re.search(r'\bbl\s+dc_effect\b', text):
+                raise RuntimeError(f'{name}: removed resumable trap or continuation\n{text}')
+
+
 def execute(args, directory, assembly, arch, source, level):
     obj = directory / 'probe.o'
     exe = directory / ('probe.wasm' if arch.startswith('wasm') else 'probe')
@@ -225,7 +257,7 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument('--vpp', default=str(Path(BUILD) / 'vpp'))
     ap.add_argument('--target', default='x86_64-linux-gnu')
-    ap.add_argument('--rule', choices=['pow2', 'identities', 'fallthrough', 'loopback', 'all'], default='all')
+    ap.add_argument('--rule', choices=['pow2', 'identities', 'fallthrough', 'loopback', 'unreachable', 'all'], default='all')
     ap.add_argument('--run', action='store_true', help='also execute literal-answer correctness checks')
     ap.add_argument('--clang', default=llvm('clang'))
     ap.add_argument('--vlink', default=str(Path(BUILD) / 'vlink'))
@@ -244,7 +276,8 @@ def main():
     rules = {'pow2': ('unsigned_pow2.c', check_pow2),
              'identities': ('integer_identities.c', check_identities),
              'fallthrough': ('branch_fallthrough.c', check_fallthrough),
-             'loopback': ('while_backedge.c', check_loopback)}
+             'loopback': ('while_backedge.c', check_loopback),
+             'unreachable': ('unreachable_records.c', check_unreachable)}
     selected = rules if args.rule == 'all' else {args.rule: rules[args.rule]}
     with tempfile.TemporaryDirectory(prefix='vcc-opt-rules-') as tmp:
         directory = Path(tmp)
@@ -254,7 +287,7 @@ def main():
                 assembly = directory / f'{rule}-O{level}.s'
                 run([args.vpp, f'--target={args.target}', f'-O{level}',
                      '-ffreestanding', '-fno-stack-protector', '-S', source, '-o', assembly])
-                checked = ((not arch.startswith('wasm') and level >= 1) if rule == 'fallthrough' else
+                checked = ((not arch.startswith('wasm') and level >= 1) if rule in ['fallthrough', 'unreachable'] else
                            arch.startswith('wasm') if rule == 'loopback' else True)
                 if checked:
                     check(assembly.read_text(), arch)
