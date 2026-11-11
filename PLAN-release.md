@@ -742,3 +742,6 @@ PLAN-fas2.md. Generell CSE och G5/G7 återstår.
 
 Budgeterad lokal värdeåteranvändning kan även användas i rena tilldelningar;
 fyrmålsprov, kostnader och begränsningar finns i PLAN-fas2.md. G5/G7 återstår.
+
+Lokal värdeåteranvändning från PR #97 och #100 integreras på main; samlade
+fyrmålsprov och kompilatorkostnader finns i PLAN-fas2.md. G5/G7 återstår.

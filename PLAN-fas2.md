@@ -3255,3 +3255,21 @@ En avsiktligt mättad kontroll med 2 000 ogiltigförklarade kandidater gav
 +1,83 % compiler-Ir x86 och +2,22 % wasm64, med identisk assembler. Resultat,
 kommandon och hashad proveniens finns i `work/opt-profile/local-values-assign-
 {cost,cputime,saturated}/`. G5/G7 och generell O2-täckning återstår.
+
+### Integration av lokal värdeåteranvändning
+
+PR #97 och #100 hade slagits ihop i redan integrerade featuregrenar. De
+integreras därför ovanpå main `94c93d3a` (inklusive switch-jumptabeller) i
+merge `345796ab`. Localvalues- och switchproven passerar O0–O3 på x86, arm64,
+wasm32 och wasm64 i unity- och separatfilbygge; O0 och O2 med VCC_NOOPT är
+byteidentiska med main. Vcc-sviten passerar 258/258 med en befintlig xfail;
+ASan/UBSan-provet för värdetabellen passerar.
+
+Matchad Callgrind-korpus mot main ger compiler-Ir +0,204 % x86, +0,174 %
+arm64, +0,112 % wasm32 och +0,104 % wasm64, under 1 %-budgeten. Korpusen har
+12 filer för de inhemska målen, 10 för wasm32 och 11 för wasm64; atomics och
+BitInt-fall som inte stöds av respektive mål uteslöts på båda sidor. Sju
+växelvisa rundor med 28 förprocessade arm64-kärnfiler gav median användar-CPU
+0,825 → 0,791 s; två filer uteslöts efter preflight och korta sampel på delad
+värd visar ingen generell hastighetsförändring. Proveniens finns i
+`work/opt-profile/local-values-integration-{cost,cputime}/`.
