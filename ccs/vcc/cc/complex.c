@@ -56,7 +56,7 @@ static bool cplx_pure(cc *c, uint32_t n, int d)
 		return !(QQ(x->ty) & Q_VOLATILE);
 	case N_MEMBER: case N_CAST: case N_UNARY: case N_DEREF:
 		return !(QQ(x->ty) & Q_VOLATILE) && cplx_pure(c, x->a, d + 1);
-	case N_BINARY: case N_INDEX: case N_CPLX: case N_LOGAND: case N_LOGOR:
+	case N_BINARY: case N_INDEX: case N_CPLX: case N_LOGAND: case N_LOGOR: case N_COMMA:
 		return cplx_pure(c, x->a, d + 1) && cplx_pure(c, x->b, d + 1);
 	default:
 		return false;

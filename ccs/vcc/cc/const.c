@@ -192,7 +192,7 @@ static bool constexpr_object_unwrap(cc *c, const_object *obj, bool *ice)
 
 /* Resolve a constant aggregate subobject to the initializer which supplies it.
    Identity matters: a const object is not a C23 constexpr object. */
-static bool constexpr_subobject(cc *c, uint32_t n, const_object *out, bool *ice)
+static bool constexpr_subobject(cc *c, uint32_t n, const_object *out, bool *ice, bool static_fold)
 {
 	const node *x = N(n);
 	const_object obj;
@@ -205,16 +205,35 @@ static bool constexpr_subobject(cc *c, uint32_t n, const_object *out, bool *ice)
 			return false;
 		out->init = c->syms[x->a].body;
 		return true;
-	case N_COMPLIT:
+	case N_CPLX:
+		out->init = n;
+		*ice = false;
+		return true;
+	case N_COMPLIT: {
+		uint32_t bad = 0;
+
+		/* Static folding must validate the complete literal, including
+		   unselected members and literals reached through comma operands. */
+		if (static_fold && !static_init_ok(c, x->ty, x->a, &bad))
+			return false;
 		out->init = x->a;
 		*ice = false;
 		return x->a != 0;
+	}
 	case N_CAST:
 		if (x->aux != CK_NOP && x->aux != CK_DECAY)
 			return false;
-		return constexpr_subobject(c, x->a, out, ice);
+		return constexpr_subobject(c, x->a, out, ice, static_fold);
+	case N_COMMA: {
+		uint32_t bad = 0;
+
+		if (!static_fold || !static_init_ok(c, N(x->a)->ty, x->a, &bad))
+			return false;
+		*ice = false;
+		return constexpr_subobject(c, x->b, out, ice, static_fold);
+	}
 	case N_MEMBER: {
-		if (!constexpr_subobject(c, x->a, &obj, ice) || !constexpr_object_unwrap(c, &obj, ice))
+		if (!constexpr_subobject(c, x->a, &obj, ice, static_fold) || !constexpr_object_unwrap(c, &obj, ice))
 			return false;
 		uint32_t init = obj.init;
 		if (!init || N(init)->op == N_ZERO)
@@ -232,7 +251,7 @@ static bool constexpr_subobject(cc *c, uint32_t n, const_object *out, bool *ice)
 	case N_INDEX: {
 		cval v;
 
-		if (!constexpr_subobject(c, x->a, &obj, ice) || !constexpr_object_unwrap(c, &obj, ice) ||
+		if (!constexpr_subobject(c, x->a, &obj, ice, static_fold) || !constexpr_object_unwrap(c, &obj, ice) ||
 		    !eval(c, x->b, &v) || v.kind != CV_INT || v.i < 0 || (u128)v.i >= (u128)arr_len(c, obj.ty))
 			return false;
 		uint32_t init = obj.init;
@@ -265,6 +284,30 @@ static bool constexpr_subobject(cc *c, uint32_t n, const_object *out, bool *ice)
 	}
 }
 
+/* Read-only aggregate initializer selection for static data. This does not
+   certify an ordinary const variable as constexpr or permit inactive unions. */
+bool cc_init_subobject(cc *c, uint32_t n, uint32_t *init)
+{
+	const_object obj;
+	bool ice = true, indexed = false;
+	uint32_t root = n;
+
+	if (vstack_low() || (N(n)->op != N_MEMBER && N(n)->op != N_INDEX))
+		return false;
+	while (N(root)->op == N_MEMBER || N(root)->op == N_INDEX || N(root)->op == N_CAST) {
+		indexed |= N(root)->op == N_INDEX;
+		root = N(root)->a;
+	}
+	/* Clang accepts compound-literal member selection here, but not an
+	   indexed array compound literal. C23 constexpr arrays stay separate. */
+	if (indexed && N(root)->op == N_COMPLIT)
+		return false;
+	if (!constexpr_subobject(c, n, &obj, &ice, true) || obj.init == n || (!obj.init && obj.integer))
+		return false;
+	*init = obj.init;
+	return true;
+}
+
 static bool constexpr_value(cc *c, uint32_t n, cval *v)
 {
 	const_object obj;
@@ -280,7 +323,7 @@ static bool constexpr_value(cc *c, uint32_t n, cval *v)
 	struct const_eval frame = { const_eval_path, sym, c };
 
 	const_eval_path = &frame;
-	bool ok = constexpr_subobject(c, n, &obj, &ice) && obj.init != n;
+	bool ok = constexpr_subobject(c, n, &obj, &ice, true) && obj.init != n;
 	if (ok) {
 		if (obj.init) ok = eval(c, obj.init, v);
 		else {
@@ -331,12 +374,12 @@ VPRIV bool constexpr_init_ok(cc *c, uint32_t n)
 		struct const_eval frame = { const_eval_path, x->a, c };
 
 		const_eval_path = &frame;
-		bool ok = constexpr_subobject(c, n, &obj, &ice) && obj.init != n && constexpr_init_ok(c, obj.init);
+		bool ok = constexpr_subobject(c, n, &obj, &ice, false) && obj.init != n && constexpr_init_ok(c, obj.init);
 		const_eval_path = frame.prev;
 		return ok;
 	}
 	case N_MEMBER: case N_INDEX:
-		return eval(c, n, &v) && constexpr_subobject(c, n, &obj, &ice) && obj.init != n && constexpr_init_ok(c, obj.init);
+		return eval(c, n, &v) && constexpr_subobject(c, n, &obj, &ice, false) && obj.init != n && constexpr_init_ok(c, obj.init);
 	case N_COMPLIT:
 		return constexpr_init_ok(c, x->a);
 	case N_CAST: case N_UNARY:

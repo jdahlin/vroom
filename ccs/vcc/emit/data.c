@@ -102,6 +102,18 @@ static void data_init(ecx *e, uint64_t off, qty ty, uint32_t init)
 		}
 		return;
 	}
+	if (x->op == N_COMMA) {
+		data_init(e, off, ty, x->b);
+		return;
+	}
+	{
+		uint32_t selected;
+
+		if (cc_init_subobject(c, init, &selected)) {
+			data_init(e, off, ty, selected);
+			return;
+		}
+	}
 	if (x->op == N_STR && is_array(c, ty)) {
 		const cstr *s = &c->strs[x->a];
 		uint64_t n = (uint64_t)s->n * s->esz, cap = tsize(c, ty);

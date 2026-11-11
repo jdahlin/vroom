@@ -341,6 +341,7 @@ typedef struct cval {
 #define CN(c, i) (&(c)->nodes[i])
 
 bool cc_eval(cc *c, uint32_t n, cval *v);
+bool cc_init_subobject(cc *c, uint32_t n, uint32_t *init);
 void dr_restored(cc *c);
 bool cc_is_signed(cc *c, qty t);
 const char *cc_builtin_name(int64_t i);
