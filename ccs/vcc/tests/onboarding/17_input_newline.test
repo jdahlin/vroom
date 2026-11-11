@@ -1,0 +1,28 @@
+id = "B17"
+title = "Character input follows numeric input without a whitespace policy"
+expect = [
+  { line = 5, severity = "warning", pattern = "(newline|white.?space|remaining.*character|leftover).*|%c.*(consume|skip)" },
+]
+known_gap = "Optional pedagogical heuristic only: consuming newline with %c can be intentional. Demonstration requires input such as 12 followed by newline; no automatic whitespace insertion."
+
+=== broken.c ===
+int scanf(const char *, ...);
+int main(void) {
+    int n; char c;
+    if (scanf("%d", &n) != 1) return 1;
+    if (scanf("%c", &c) != 1) return 1;
+    return c == '\n';
+}
+=== fixed.c ===
+int scanf(const char *, ...);
+int main(void) {
+    int n; char c;
+    if (scanf("%d", &n) != 1) return 1;
+    if (scanf(" %c", &c) != 1) return 1;
+    return c == '\n';
+}
+=== valid.c ===
+int scanf(const char *, ...);
+int main(void) { char c; if (scanf("%c", &c)!=1) return 1; return c == '\n' ? 0 : 1; }
+=== stderr ===
+=== narrated ===

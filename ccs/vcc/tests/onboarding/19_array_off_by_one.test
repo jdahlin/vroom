@@ -1,0 +1,38 @@
+id = "B19"
+title = "Read past the last array element"
+flags = ["-Warray-bounds"]
+expect = [
+  { line = 3, severity = "warning", pattern = "(array|index|subscript).*(bounds|past|outside|beyond)|out.of.bounds" },
+]
+
+=== broken.c ===
+int main(void) {
+    int a[3] = {0};
+    return a[3];
+}
+=== fixed.c ===
+int main(void) {
+    int a[3] = {0};
+    return a[2];
+}
+=== valid.c ===
+int main(void) { int a[3]={0}; int *end=a+3; return end-a != 3; }
+=== stderr ===
+broken.c:3:12: warning: array index 3 is past the end of the array (that has type 'int[3]') [-Warray-bounds]
+    2 |     int a[3] = {0};
+      |     - array 'a' declared here
+    3 |     return a[3];
+      |            ^ ~
+      +-----+-----+-----+ +-----+
+      | [0] | [1] | [2] | | [3] |
+      +-----+-----+-----+ +-----+
+      'a': 3 x 'int', 12 bytes
+                             ^ index 3: bytes 12..15, just past the end
+broken.c:2:5: note: array 'a' declared here
+1 warning generated.
+=== narrated ===
+broken.c:3:12: warning: array index 3 is past the end of the array (that has type 'int[3]') [-Warray-bounds]
+  the source line is: return a[3];
+broken.c:2:5: note: array 'a' declared here
+  the source line is: int a[3] = {0};
+1 warning generated.

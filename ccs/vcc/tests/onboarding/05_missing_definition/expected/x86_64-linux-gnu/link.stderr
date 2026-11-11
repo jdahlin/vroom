@@ -1,3 +1,0 @@
-ld.lld: error: undefined symbol: answer
->>> referenced by <temporary>/vccbroken.o:(main)
-clang: error: linker command failed with exit code 1 (use -v to see invocation)

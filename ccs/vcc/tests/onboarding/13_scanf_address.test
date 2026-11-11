@@ -1,0 +1,24 @@
+id = "B13"
+title = "Numeric input receives a value instead of an address"
+expect = [
+  { line = 4, severity = "warning", pattern = "format.*int.*\\*.*(argument|type)|expects?.*(int.*\\*|pointer|address)|scanf.*address" },
+]
+known_gap = "Observed x86 vcc baseline is silent under -Wall -Wextra -Wconversion for the scanf format/address mismatch; format warnings must be enabled consistently."
+
+=== broken.c ===
+int scanf(const char *, ...);
+int main(void) {
+    int n = 0;
+    return scanf("%d", n) == 1 ? 0 : 1;
+}
+=== fixed.c ===
+int scanf(const char *, ...);
+int main(void) {
+    int n = 0;
+    return scanf("%d", &n) == 1 ? 0 : 1;
+}
+=== valid.c ===
+int scanf(const char *, ...);
+int main(void) { int n=0; int *p=&n; return scanf("%d", p) == 1 ? 0 : 1; }
+=== stderr ===
+=== narrated ===

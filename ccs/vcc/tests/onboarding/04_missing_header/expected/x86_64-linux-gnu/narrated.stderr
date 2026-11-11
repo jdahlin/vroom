@@ -1,3 +1,0 @@
-broken.c:2:5: error: call to undeclared library function 'puts' with type 'int (const char *)'; ISO C99 and later do not support implicit function declarations [-Wimplicit-function-declaration]
-  the source line is: puts("Hello");
-1 error generated.

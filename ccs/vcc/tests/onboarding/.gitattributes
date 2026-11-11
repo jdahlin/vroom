@@ -1,2 +1,2 @@
-# Preserve literal diagnostic caret padding in exact-output fixtures.
-*.stderr whitespace=-blank-at-eol
+# Literal caret padding in exact diagnostic sections is significant.
+*.test whitespace=-blank-at-eol

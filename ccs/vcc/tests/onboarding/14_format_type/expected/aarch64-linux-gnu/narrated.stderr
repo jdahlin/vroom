@@ -1,4 +1,0 @@
-broken.c:4:18: warning: format specifies type 'int' but the argument has type 'long' [-Wformat]
-  the source line is: printf("%d", count);
-  fix: replace the text with '%ld' at line 4, column 13
-1 warning generated.

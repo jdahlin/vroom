@@ -1,6 +1,0 @@
-broken.c:3:1: warning: non-void function does not return a value in all control paths [-Wreturn-type]
-  the source line is: }
-  at line 2, column 9: (1) 'ready' is false
-  at line 3, column 1: (2) 'choose' ends here without a return
-  help: 'choose' returns 'int': end it with a return statement
-1 warning generated.
