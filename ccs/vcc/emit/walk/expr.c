@@ -1357,6 +1357,12 @@ static val wk_binary(ecx *e, uint32_t n)
 	val a, b;
 	uint32_t operand;
 	int bound = em_cmpbounds(e, n, &operand);
+	int repeated = em_repeated_integer(e, n);
+
+	if (repeated == EM_ID_ZERO)
+		return vconst(0);
+	if (repeated == EM_ID_LEFT)
+		return wk_gen(e, x->a);
 
 	if (bound >= 0) {
 		val v = wk_gen(e, operand);
