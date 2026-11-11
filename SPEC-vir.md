@@ -789,12 +789,20 @@ from `x64_ecx_free` (`stmt.c:48`) the walker names no x86 function.
 `x64_`, once as `vir_`, with distinct `wk_*` names, in both the unity and the
 file-by-file build.
 
-**Change.** A generated header `emit/walk/prefix.h` that, when `WK_PREFIX` is
-defined, maps every `wk_*` name to `WK_PREFIX##wk_*`, and `LO(name)` to
-`LO_PREFIX##name`. `bench/gen-walkprefix.py [--check]` regenerates it from the
-definitions (as `gen-diagids.py` does for diagnostics). The VIR instantiation
-is one more file, `emit/vir/walk.c`, that sets the two prefixes and includes
-`walk/*.c`. This is the mechanism the arm64 move needs as well (PLAN-x86,
+**Change (landed).** A generated header `emit/walk/prefix.h` that, when
+`WK_PREFIX` is defined, maps every `wk_*` function the walker defines (130
+names) to `WK_PREFIX` followed by the name, and `LO(name)` to `LO_PREFIX`
+followed by the name. The paste needs two macro levels (`WK_PASTE`,
+`LO_PASTE`), otherwise the prefix macro is not expanded. `walk.h` includes
+`prefix.h` before `emitimpl.h`, because `emitimpl.h` declares
+`wk_switch_values`. `stmt.c` named `x64_ecx_free` outside `LO()`; it is
+`LO(ecx_free)` now. `bench/gen-walkprefix.py [--check]` regenerates the header
+from the definitions (as `gen-diagids.py` does for diagnostics). The VIR
+instantiation is one more file, `emit/vir/walk.c`, that sets the two prefixes
+and includes `walk/*.c`. It must be its own translation unit, not part of the
+`emit` unity TU: the walker files share types, macros and file-scope names
+that a second inclusion in one TU would redefine (the mechanism was checked
+only file by file, with `-DWK_PREFIX=vw_ -DLO_PREFIX=vw_`). This is the mechanism the arm64 move needs as well (PLAN-x86,
 layer 2), so it is built once. Shared state (`wkst`, `ecx`) is not duplicated:
 only one walker runs for a function at a time.
 
@@ -813,7 +821,11 @@ identities "must survive stack-offset reuse".
 **Change.** One call each time an offset is handed out, fresh or reused:
 `LO(slot)(e, off, size, align, kind)` from `wk_pslot`, both reuse paths of
 `wk_slot`, and `wk_local`; `kind` is temporary, local, parameter or
-whole-function. `x64_slot` does nothing today (and can feed `em_slot_*` ids
+whole-function (`WK_SLOT_TEMP`, `_LOCAL`, `_PARAM`, `_FUNC` in `walk.h`).
+`wk_pslot_kind` is `wk_pslot` with a kind, so a hand-out through
+`wk_slot` or `wk_local` is notified once. The static helper `x64_slot` in
+`arch/x64/emit/fp.c` was renamed `x64_tmpslot` to free the name. `x64_slot`
+does nothing today (landed) (and can feed `em_slot_*` ids
 when OPT5 wants them). `vir_slot` creates a `vir_slot` with `hint = off` and
 makes it the current object for that offset range; a later `L_FRAME` access is
 resolved to the slot that currently owns its offset. Accesses spanning two
@@ -830,7 +842,8 @@ never looks at `L_VREG`; it passes the `lval` back to `LO(load)`/`LO(store)`.
 **Needed.** Every scalar local without `lnoreg` as an SSA variable, including
 those of inline copies, with no limit of 256.
 
-**Change.** A new kind `L_VAR` in `emitimpl.h`'s `lval`, with the variable
+**Change.** A new kind `L_VAR` in `emitimpl.h`'s `lval` (landed; `x64_load`,
+`x64_store` and `x64_laddr` fail with an internal error on it), with the variable
 number in the existing 32-bit `ref` field. `vir_local` returns it for an
 eligible local, keyed by (symbol, inline instance) so recursive expansion
 gets separate variables. `vir_load`/`vir_store` on `L_VAR` read and write the
