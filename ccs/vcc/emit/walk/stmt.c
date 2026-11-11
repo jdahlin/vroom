@@ -686,10 +686,37 @@ static void wk_switch(ecx *e, uint32_t n)
 			LO(switch_bitset)(e, r, w, &recipe, wk_caselabel(e, recipe.node), ldef);
 		}
 	}
+	bool table = false;
+	if (!bitset && e->E->o->opt >= 1 && !e->E->noopt && !c->o->no_jump_tables && !wk_mem(e, ct) &&
+	    !em_bitint(c, ct) && count >= 4) {
+		uint32_t nc = 0;
+		for (uint32_t i = c0; i < W->ncases; i++)
+			nc += N(W->cases[i].node)->op != N_DEFAULT;
+		em_switch_case *cases = nc >= 4 ? malloc(nc * sizeof *cases) : NULL;
+		uint32_t j = 0;
+		bool ranges = false;
+		for (uint32_t i = c0; cases && i < W->ncases; i++) {
+			wkcase *k = &W->cases[i];
+			uint32_t l = wk_caselabel(e, k->node);
+			if (N(k->node)->op == N_DEFAULT)
+				ldef = l;
+			else {
+				cases[j++] = (em_switch_case){ k->lo, k->hi, l };
+				ranges |= k->lo != k->hi;
+			}
+		}
+		if (cases && em_switch_prepare(cases, j, (unsigned)w * 8, sg) &&
+		    em_switch_strategy(j, cases[0].lo, cases[j - 1].hi, ranges, true) == EM_SWITCH_TABLE) {
+			if (e->reach)
+				LO(switch_table)(e, r, w, cases, j, ldef);
+			table = true;
+		}
+		free(cases);
+	}
 	if (e->E->o->opt && !e->E->noopt && count >= 8)
 		for (uint32_t i = c0; i < W->ncases; i++)
 			count -= N(W->cases[i].node)->op == N_DEFAULT;
-	bool tree = !bitset && e->E->o->opt >= 1 && !e->E->noopt &&
+	bool tree = !bitset && !table && e->E->o->opt >= 1 && !e->E->noopt &&
 		em_switch_strategy(count, 0, 0, false, false) == EM_SWITCH_TREE && !wk_mem(e, ct);
 	if (tree) {
 		em_switch_case *cases = malloc(count * sizeof *cases);
@@ -708,7 +735,7 @@ static void wk_switch(ecx *e, uint32_t n)
 			wk_switch_tree(e, cases, j, r, w, sg, ldef);
 		free(cases);
 	}
-	for (uint32_t i = c0; !tree && !bitset && i < W->ncases; i++) {
+	for (uint32_t i = c0; !tree && !bitset && !table && i < W->ncases; i++) {
 		wkcase *k = &W->cases[i];
 		uint32_t l = wk_caselabel(e, k->node);
 
@@ -747,7 +774,7 @@ static void wk_switch(ecx *e, uint32_t n)
 	}
 	W->ncases = c0;
 	LO(tfree)(e, r);
-	if (!tree && !bitset)
+	if (!tree && !bitset && !table)
 		LO(jump)(e, ldef);
 	if (W->nloop == WK_MAXLOOP)
 		efatal(e, x->loc, "statements nested too deeply");

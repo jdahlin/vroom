@@ -427,7 +427,7 @@ static void a64_switch_table(ecx *e, const em_switch_case *cases, uint32_t n, in
 }
 
 static bool a64_switch_dispatch(ecx *e, uint32_t base, int r, int cx,
-                                bool sg, uint32_t dflt)
+                                bool sg, bool tables, uint32_t dflt)
 {
 	if (!e->E->o->opt || e->E->noopt || e->ncases - base < 4)
 		return false;
@@ -452,7 +452,7 @@ static bool a64_switch_dispatch(ecx *e, uint32_t base, int r, int cx,
 	}
 	bool valid = em_switch_prepare(cases, count, cx ? 64 : 32, sg);
 	int strat = valid ? em_switch_strategy(count, cases[0].lo, cases[count - 1].hi, ranges,
-	                                       !c->o->no_jump_tables) : EM_SWITCH_LINEAR;
+	                                       tables && !c->o->no_jump_tables) : EM_SWITCH_LINEAR;
 	if (strat == EM_SWITCH_TABLE)
 		a64_switch_table(e, cases, count, r, cx, dflt);
 	else if (strat == EM_SWITCH_TREE)
@@ -552,7 +552,7 @@ static void gen_switch(ecx *e, uint32_t n)
 
 		bool tree = (!em_bitint(c, ct) &&
 		             a64_switch_bitset(e, x->b, base, r, cx, is_signed(c, ct), dflt)) ||
-			    a64_switch_dispatch(e, base, r, cx, is_signed(c, ct), dflt);
+			    a64_switch_dispatch(e, base, r, cx, is_signed(c, ct), !em_bitint(c, ct), dflt);
 		if (!tree) {
 			for (uint32_t k = base; k < e->ncases; k++) {
 				const node *cn = N(e->cases[k]);
