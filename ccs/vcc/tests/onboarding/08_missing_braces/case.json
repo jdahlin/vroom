@@ -1,0 +1,19 @@
+{
+  "id": "B08",
+  "title": "Indentation suggests two controlled statements",
+  "phase": "syntax",
+  "flags": [
+    "-Wmisleading-indentation"
+  ],
+  "broken": "broken.c",
+  "fixed": "fixed.c",
+  "valid": "valid.c",
+  "expect": [
+    {
+      "line": 5,
+      "severity": "warning",
+      "pattern": "misleading.*indent|indent.*(guard|if)|not guard"
+    }
+  ],
+  "known_gap": "Observed x86 vcc baseline is silent with -Wmisleading-indentation; indentation can suggest intent but must not trigger an automatic brace insertion."
+}

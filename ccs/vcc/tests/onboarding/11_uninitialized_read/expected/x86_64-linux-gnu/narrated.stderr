@@ -1,0 +1,10 @@
+broken.c:3:9: warning: variable 'n' is used uninitialized whenever 'if' condition is false [-Wsometimes-uninitialized]
+  the source line is: if (ready) n = 1;
+broken.c:4:12: note: uninitialized use occurs here
+  the source line is: return n;
+broken.c:3:5: note: remove the 'if' if its condition is always true
+  the source line is: if (ready) n = 1;
+broken.c:2:10: note: initialize the variable 'n' to silence this warning
+  the source line is: int n;
+  fix: insert ' = 0' at line 2, column 10
+1 warning generated.

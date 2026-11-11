@@ -1,0 +1,17 @@
+{
+  "id": "B04",
+  "title": "Library call missing its declaration",
+  "phase": "syntax",
+  "flags": [],
+  "broken": "broken.c",
+  "fixed": "fixed.c",
+  "valid": "valid.c",
+  "expect": [
+    {
+      "line": 2,
+      "severity": "error",
+      "pattern": "(undeclared|implicitly declar|implicit declaration|stdio).*puts|puts.*(undeclared|declar|stdio)"
+    }
+  ],
+  "known_gap": null
+}

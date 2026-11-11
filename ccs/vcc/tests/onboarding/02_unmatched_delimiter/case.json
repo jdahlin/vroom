@@ -1,0 +1,17 @@
+{
+  "id": "B02",
+  "title": "Missing closing parenthesis",
+  "phase": "syntax",
+  "flags": [],
+  "broken": "broken.c",
+  "fixed": "fixed.c",
+  "valid": "valid.c",
+  "expect": [
+    {
+      "line": 2,
+      "severity": "error",
+      "pattern": "expected.*'\\)'|missing.*(parenthes|\\))"
+    }
+  ],
+  "known_gap": null
+}
