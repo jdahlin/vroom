@@ -440,6 +440,15 @@ static int emit_tu1(cc *c, const cc_opts *o, bool write_out, uint8_t *mf, bool *
 	/* unwind tables: .eh_frame is the assembler's, from the printer's .cfi_* */
 	if (o->cfi && !DARWIN(c) && !WASM(c))
 		E.objtext = true;
+	/* Lazy walks own only their function's automatic variables. Globals and
+	   static objects can be modified by other functions (including ones not
+	   emitted here); publish conservative immutable facts before workers start.
+	   In particular, never infer a TU-wide constant from one function's writes. */
+	for (uint32_t s = 1; s < c->nsym; s++)
+		if (c->syms[s].kind == S_VAR && !is_local_var(c, s)) {
+			E.sflags[s] = SA_WRITTEN | SA_AESC;
+			E.ffacts[s] = FF_BAD;
+		}
 	/* roots */
 	for (uint32_t i = 0; i < c->ntoplevel; i++) {
 		uint32_t s = c->toplevel[i];

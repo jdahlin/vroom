@@ -141,6 +141,21 @@ W1 kan delvis gå parallellt med W0.
 
 ## Status
 
+### Gemensamma optimeringar (2026-11-11): planerade för wasm32 och wasm64
+
+`PLAN-fas2.md`, **Gemensam optimerare utan SSA**, OPT0–OPT8 äger den nya
+optimeringsplanen. Wasm är obligatorisk konsument av gemensamma C-regler
+och strategier tillsammans med x86 och arm64. Anslutningar finns i
+`wexpr.c` (`wbinary`/`warith`, `wknown`, `wlocal`, `wvlanes`), `wstmt.c`
+(`wswitch`, nåbarhet) och `wcall.c:wcall`. Behåll operandstack, wasm-lokaler,
+strukturerade resultatblock och `br_table`; inga fysiska registerpass krävs.
+Gemensam inliningpolicy måste kompletteras med verkliga wasm-bindningar
+och retur-/goto-/cleanup-remappning. Native-only verktyg eller en x86-grön
+audit räknas inte som wasm-verifiering. Kör båda pekarbredderna, med
+scalar-fallback utan SIMD/tail-call-features. Rena extraktioner skall ge
+samma utdata; nya regler får avsedda, testade förbättringar på wasm också.
+Ingen regel implementerad i detta steg; befintliga W-statusar ändras inte.
+
 Före planen: wasm-*bygget* av vcc via emscripten (`ccs/wasm/`, commit 8e9f9da) och
 explorer-sidan.
 

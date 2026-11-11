@@ -213,9 +213,10 @@ static void node_kinds(const node *x, uint8_t k[3])
 	case N_CALL: k[0] = K_NODE, k[1] = K_LIST; break;
 	case N_BUILTIN: case N_INIT: k[1] = K_LIST; break;
 	case N_CAST: case N_UNARY: case N_ADDR: case N_DEREF: case N_PREINC: case N_PREDEC: case N_POSTINC:
-	case N_POSTDEC: case N_SIZEOF_VLA: case N_STMTEXPR: case N_VAARG: case N_EXPR: case N_GOTO_IND: case N_RETURN:
+	case N_POSTDEC: case N_STMTEXPR: case N_VAARG: case N_EXPR: case N_GOTO_IND: case N_RETURN:
 		k[0] = K_NODE;
 		break;
+	case N_SIZEOF_VLA: k[0] = K_NODE, k[1] = K_TYPE; break;
 	case N_COMPLIT: k[0] = K_NODE, k[1] = K_SYM; break;
 	case N_BLOCK: k[0] = x->aux ? K_LIST : K_LISTO, k[1] = K_LIST; break;
 	case N_DECL: k[0] = K_SYM, k[1] = K_NODE; break;
@@ -1358,7 +1359,7 @@ static uint64_t opt_sig(const cc_opts *o)
 	       (uint64_t)!!o->short_wchar << 10 | (uint64_t)o->std << 11 | (uint64_t)!!o->implicit_int << 20 |
 	       (uint64_t)!!o->gnu89_inline << 21 | (uint64_t)!!o->instrument << 22 |
 	       (uint64_t)!!o->general_regs_only << 23 | (uint64_t)!!o->no_builtin << 24 |
-	       (uint64_t)!!o->implicit_fn << 25 | (uint64_t)!!o->emit << 26;
+	       (uint64_t)!!o->implicit_fn << 25 | (uint64_t)!!o->emit << 26 | (uint64_t)!!o->fast_math << 27 | (uint64_t)!!o->c2y << 28;
 	for (unsigned i = 0; i < CC_DISABLED_BUILTIN_WORDS; i++)
 		sig = (sig ^ o->disabled_builtins[i]) * UINT64_C(1099511628211);
 	return sig;

@@ -1075,8 +1075,15 @@ VPRIV int wbuiltin(ecx *e, uint32_t n, bool want)
 		return WPT(c);
 	}
 	case BI_ALLOCA:
-	case BI_ALLOCA_UNINIT:
-		return walloca(e, warg_n(c, n, 0));
+	case BI_ALLOCA_UNINIT: {
+		int kind = walloca(e, warg_n(c, n, 0));
+
+		for (uint32_t i = 0; i < e->w->nvb; ++i) {
+			wi(e, "global.get\t__stack_pointer");
+			wset(e, e->w->vb[i].sp);
+		}
+		return kind;
+	}
 	case BI_CLZ: case BI_CLZL: case BI_CLZLL:
 	case BI_CTZ: case BI_CTZL: case BI_CTZLL:
 	case BI_POPCOUNT: case BI_POPCOUNTL: case BI_POPCOUNTLL:

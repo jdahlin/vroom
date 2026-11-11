@@ -217,17 +217,21 @@ VPRIV void wvla_fix(ecx *e, qty t, bool pure)
 
 			for (k = 0; k < W->nvsz && W->vszn[k] != a->n; k++)
 				;
+			if (k < W->nvsz) {
+				t = a->base;
+				continue;
+			}
 			if (k == W->nvsz) {
 				if (W->nvsz >= WMAXGD)
 					efatal(e, e->curloc, "too many variable length array sizes in one function");
 				W->vszn[k] = a->n;
 				W->vszl[k] = wnewloc(e, WPT(c));
+				/* Bound emission may recursively capture another VLA dimension. */
+				W->nvsz++;
 			}
 			wexpr(e, a->n, true);
 			wconv(e, N(a->n)->ty, prim(TY_ULONG));
 			wset(e, W->vszl[k]);
-			if (k == W->nvsz)
-				W->nvsz++;
 		}
 		t = a->base;
 	}
@@ -1978,6 +1982,13 @@ static int wexpr1(ecx *e, uint32_t n, bool want)
 		wpconst(e, (int64_t)x->a + 1);
 		return WPT(c);
 	case N_SIZEOF_VLA:
+		if (x->aux == 1) {
+			wvla_fix(e, x->b, false);
+			wvla_bytes(e, x->b);
+			wconv(e, prim(TY_ULONG), x->ty);
+			return k;
+		}
+		if (x->a) wexpr(e, x->a, false);
 		wvla_bytes(e, x->b);
 		wconv(e, prim(TY_ULONG), x->ty);
 		return k;

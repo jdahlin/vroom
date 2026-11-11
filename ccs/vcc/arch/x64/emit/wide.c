@@ -385,6 +385,31 @@ VPRIV val x64_wcvt(ecx *e, val v, qty from, qty to)
 		return v;
 	if (KIND(c, from) == TY_FLOAT128 || KIND(c, to) == TY_FLOAT128)
 		return x64_cvt(e, v, from, to);	/* (fp.c: libgcc's __fixtfti, __floattitf ...) */
+	if (KIND(c, from) == TY_LDOUBLE || KIND(c, to) == TY_LDOUBLE) {
+		/* x86 long double uses the x87 helpers, not binary128's TF ABI.
+		 * Both source representations occupy a 16-byte object; let the
+		 * normal call classifier place it on the stack or in integer regs. */
+		wkarg arg, result;
+		int ra = x64_waddr(e, &v);
+		int fn = tw ? (wk_signed(c, to) ? FN_FIXXFTI : FN_FIXUNSXFTI) :
+			(wk_signed(c, from) ? FN_FLOATTIXF : FN_FLOATUNTIXF);
+
+		x64_classify(e, from, &arg);
+		arg.slot = wk_slot(e, 16, 16);
+		for (int w = 0; w < 2; w++) {
+			lval src = x64_wat(ra, 8 * w);
+			lval dst = { .k = L_FRAME, .off = arg.slot + 8 * w, .align = 8 };
+
+			x64_mem(e, X_LD, 8, R11, &src, false);
+			x64_mem(e, X_ST, 8, R11, &dst, false);
+		}
+		x64_tfree(e, ra);
+		x64_classify(e, to, &result);
+		result.slot = wk_slot(e, 16, 16);
+		x64_call(e, FIXED(fn), NULL, &arg, 1, false, &result, to);
+		lval dst = { .k = L_FRAME, .off = result.slot, .align = 16 };
+		return x64_wv(x64_laddr(e, &dst));
+	}
 	if (tw && v.k == V_CONST)
 		return x64_wconst(e, wk_signed(c, from) ? v.i : (i128)(u128)(uint64_t)v.i);
 	if (tw && is_flt(c, from)) {
@@ -392,8 +417,6 @@ VPRIV val x64_wcvt(ecx *e, val v, qty from, qty to)
 		int64_t w[1];
 		lval d = { .k = L_FRAME, .off = wk_slot(e, 8, 8), .align = 8 };
 
-		if (KIND(c, from) == TY_LDOUBLE)
-			efatal(e, e->curloc, "x86-64: long double to __int128 is not supported yet (PLAN-x86.md X3)");
 		x64_mem(e, X_ST, 8, v.r, &d, false);
 		x64_tfree(e, v.r);
 		w[0] = (int64_t)d.off;
@@ -435,8 +458,6 @@ VPRIV val x64_wcvt(ecx *e, val v, qty from, qty to)
 		int64_t w[2] = { x64_wword(e, ra, 0), x64_wword(e, ra, 8) };
 		lval d = { .k = L_FRAME, .off = wk_slot(e, 8, 8), .align = 8 };
 
-		if (KIND(c, to) == TY_LDOUBLE)
-			efatal(e, e->curloc, "x86-64: __int128 to long double is not supported yet (PLAN-x86.md X3)");
 		x64_tfree(e, ra);
 		x64_lcall(e, KIND(c, from) == TY_INT128 ? (ts == 4 ? FN_FLOATTISF : FN_FLOATTIDF) : (ts == 4 ? FN_FLOATUNTISF : FN_FLOATUNTIDF),
 			  w, 2, -1, (int64_t)d.off, 1, true);

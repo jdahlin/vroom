@@ -63,7 +63,7 @@ typedef struct wkst {
 	uint32_t *lgen, *ulbl;	/* per user label: local label */
 	uint32_t *clbl;		/* per node (N_CASE/N_DEFAULT): local label, valid when cgen == gen */
 	uint32_t *cgen;
-	uint32_t *vgen;		/* per node (a VLA size): its value is in slot voff when vgen == gen */
+	uint32_t *vgen, *vinst;	/* per-node VLA size slot, keyed by function and inline instance */
 	int64_t *voff;
 	uint32_t *zgen;		/* per sym (a VLA): its saved sp was zeroed on entry when zgen == gen */
 	wkloop loop[WK_MAXLOOP];
@@ -76,6 +76,8 @@ typedef struct wkst {
 	uint32_t fsym;
 	uint32_t clean[WK_MAXCLEAN];	/* variables with __attribute__((cleanup)) in scope, innermost last */
 	int nclean;
+	uint32_t vla[WK_MAXCLEAN];	/* active VLA restore points, lowered by explicit alloca */
+	int nvla;
 	/* the cleanup scopes as a tree (wk_scan): node k (1..) is a cleanup variable and the one
 	   enclosing it; per sym its node, per user label the innermost node in scope there */
 	struct { uint32_t sym, parent; } cn[WK_MAXCLEAN];
@@ -183,6 +185,7 @@ VPRIV int LO(ftreg)(ecx *e);				/* a free float temporary */
 VPRIV val LO(fconst)(ecx *e, uint64_t bits, int size);	/* a float (4) or double (8) constant */
 VPRIV val LO(fbin)(ecx *e, int op, qty t, val a, val b);	/* + - * / */
 VPRIV val LO(fneg)(ecx *e, qty t, val a);
+VPRIV val LO(root4)(ecx *e, val a);
 enum { WK_FCMP_UNORDERED = 0x10000, WK_FCMP_ORDERED_NE };
 VPRIV val LO(fcmp)(ecx *e, int op, qty t, val a, val b);	/* 0 or 1, false when unordered (but !=) */
 VPRIV val LO(cvt)(ecx *e, val v, qty from, qty to);	/* a float on either side (to may be _Bool) */

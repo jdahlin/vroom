@@ -104,10 +104,8 @@ typedef struct lzfn {
 	pp_lazy z;
 } lzfn;
 
-struct const_eval;
 
 struct cc {
-	struct const_eval *const_eval;	/* active const-variable initializer evaluations */
 	pp *p;
 	const cc_opts *o;
 	struct vfixbuf *tyb;	/* tyname/tyname_sugar: 8 buffers in rotation (allocated at the first) */
@@ -320,6 +318,9 @@ enum {
 	BI_ISFPCLASS, BI_ISSUBNORMAL, BI_ISZERO,
 	BI_X86_SIMD,
 	BI_ELEMENTWISE_ABS,
+	BI_STDC_ROTL, BI_STDC_ROTR,
+	BI_FAST_ROOT4,	/* internal double sqrt(sqrt(x)), full fast-math only */
+	BI_COMPLEX,
 	BI_COUNT
 };
 

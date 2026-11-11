@@ -193,7 +193,7 @@ enum {
 	N_ASSIGN,	/* aux: 0 or the compound op (T_PLUS, ...), a, b */
 	N_COND,		/* a ? b : c (b == 0: GNU a ?: c) */
 	N_COMMA,
-	N_SIZEOF_VLA,	/* a: expression of VLA type */
+	N_SIZEOF_VLA,	/* a: expression, b: VLA type; aux=1 captures a new type-name bound */
 	N_STMTEXPR,	/* a: compound statement */
 	N_COMPLIT,	/* a: init, b: sym of the object */
 	N_INIT,		/* initializer list: b: struct/union (aux 0/2): c values; array (aux 1): c (lo, hi, value) */
@@ -205,7 +205,7 @@ enum {
 	/* statements */
 	N_BLOCK,	/* b: list, c: count */
 	N_EXPR,		/* a */
-	N_DECL,		/* a: sym, b: init or 0 */
+	N_DECL,		/* a: sym, b: init or 0; aux=1: initializer supplies inferred-type bounds */
 	N_IF, N_WHILE, N_DO,
 	N_FOR,		/* a: init, b: cond, c: list of [step, body] */
 	N_SWITCH,	/* a: cond, b: body */
@@ -241,6 +241,9 @@ enum { NF_LVALUE = 1, NF_BITFIELD = 2, NF_PAREN = 4, NF_NPC = 8,
        NF_ERR = 16,
        NF_MACRO = 32, NF_BOUNDS = 64, NF_OVF = 128 };	/* NF_OVF: a constant subexpression overflowed (-Winteger-overflow given once) */	/* NF_BOUNDS: a[CONST] already checked (-Warray-bounds) */	/* NF_MACRO: the operator came from a macro expansion (no style warnings) */	/* NF_ERR: stands in for an expression already diagnosed (no follow-on errors) */
 
+/* N_COMMA result facts, attached by semantic lowering. NaNs are permitted. */
+enum { NC_FP_NONNEG = 1 };
+
 typedef struct node {
 	uint8_t op, flags;
 	uint16_t aux;
@@ -273,10 +276,12 @@ typedef struct cc_opts {	/* fields before outfd: parse options, all in the decl 
 	int vcc_kernel;		/* -fvcc-kernel (or -D__KERNEL__): error() calls left after folding are dropped */
 	int lse;		/* target has LSE atomics (else ldaxr/stlxr loops) */
 	int general_regs_only;	/* -mgeneral-regs-only: no FP/SIMD registers (variadic: no v0-v7 save area) */
+	int fast_math;		/* full fast-math permits finite, unsigned-zero root transforms */
 	int no_builtin;		/* -ffreestanding / -fno-builtin: abs() etc. are plain calls */
 	uint64_t disabled_builtins[CC_DISABLED_BUILTIN_WORDS]; /* -fno-builtin-NAME */
 	int wasm_sjlj;		/* -mllvm -wasm-enable-sjlj: setjmp/longjmp through wasm exceptions */
 	int implicit_fn;	/* implicit function declarations allowed (... implicit-function-declaration) */
+	int c2y;		/* C2y additions, with the C23 keyword set */
 	int strict_std;		/* -std=cNN (not gnuNN): clang's GNU-only library functions are not known */
 	int conv_warn;		/* -Wno-error= (or -Wno-) of: 1 int-conversion, 2 incompatible-pointer-types,
 				   4 incompatible-function-pointer-types: a warning, not an error */
