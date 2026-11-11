@@ -2015,7 +2015,7 @@ static val wk_call(ecx *e, uint32_t n)
 			wkarg fa;
 			val v;
 
-			LO(classify)(e, N(an)->ty, &fa);
+			LO(classify)(e, N(an)->ty, &fa, false);
 			wk_argslot(e, &fa, N(an)->ty, wk_gen(e, an));
 			e->calls = true;
 			v = LO(call)(e, FIXED(k), NULL, &fa, 1, false, NULL, prim(TY_FLOAT));
