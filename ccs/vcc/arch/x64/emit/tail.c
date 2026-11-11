@@ -10,7 +10,7 @@ VPRIV bool x64_tail_return(ecx *e, uint32_t expr)
 	int64_t slots[6];
 	const node *call;
 
-	if (W->inl || W->inst || W->nclean || W->nvla || W->spneed || e->E->o->sprot ||
+	if (e->x64->interrupt || W->inl || W->inst || W->nclean || W->nvla || W->spneed || e->E->o->sprot ||
 	    W->falign > 16 || !em_tail_candidate(e, W->fsym, expr, 6, &callee))
 		return false;
 	call = N(expr);

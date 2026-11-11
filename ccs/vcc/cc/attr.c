@@ -4,15 +4,16 @@
 /* ---------------- attributes ---------------- */
 
 enum {
-	A_NONE, A_MS_STRUCT, A_ALIGNED, A_PACKED, A_SECTION, A_MODE, A_CLEANUP, A_ALIAS, A_WEAK, A_USED, A_UNUSED,
+	A_NONE, A_INTERRUPT, A_MS_STRUCT, A_ALIGNED, A_PACKED, A_SECTION, A_MODE, A_CLEANUP, A_ALIAS, A_WEAK, A_USED, A_UNUSED,
 	A_NORETURN, A_ALWAYS_INLINE, A_NOINLINE, A_GNU_INLINE, A_TRANSPARENT_UNION, A_VISIBILITY,
 	A_CONSTRUCTOR, A_DESTRUCTOR, A_COUNTED_BY, A_VECTOR_SIZE, A_COLD, A_NONSTRING, A_MAY_ALIAS,
 	A_WEAKREF, A_NAKED, A_NOCF, A_ERROR, A_OVERLOADABLE, A_NOINSTR, A_TLS_MODEL, A_EXT_VECTOR, A_DEPRECATED, A_WUR, A_NODISCARD, A_IFUNC, A_NONNULL, A_FORMAT, A_FORMAT_ARG,
-	A_PURE, A_CONST, A_UNAVAILABLE, A_RETURNS_TWICE, A_DISABLE_TAIL_CALLS, A_NOT_TAIL_CALLED, A_OPTNONE,
+	A_PURE, A_CONST, A_UNAVAILABLE, A_TARGET, A_RETURNS_TWICE, A_DISABLE_TAIL_CALLS, A_NOT_TAIL_CALLED, A_OPTNONE,
 	A_COUNT
 };
 
 static const char *const attr_names[A_COUNT] = {
+	[A_INTERRUPT] = "interrupt",
 	[A_MS_STRUCT] = "ms_struct", [A_ALIGNED] = "aligned", [A_PACKED] = "packed", [A_SECTION] = "section", [A_MODE] = "mode",
 	[A_CLEANUP] = "cleanup", [A_ALIAS] = "alias", [A_WEAK] = "weak", [A_USED] = "used",
 	[A_UNUSED] = "unused", [A_NORETURN] = "noreturn", [A_ALWAYS_INLINE] = "always_inline",
@@ -22,10 +23,9 @@ static const char *const attr_names[A_COUNT] = {
 	[A_NONSTRING] = "nonstring", [A_MAY_ALIAS] = "may_alias", [A_WEAKREF] = "weakref",
 	[A_NOINSTR] = "no_instrument_function", [A_NAKED] = "naked", [A_NOCF] = "nocf_check", [A_ERROR] = "error",
 	[A_OVERLOADABLE] = "overloadable", [A_TLS_MODEL] = "tls_model", [A_EXT_VECTOR] = "ext_vector_type",
-	[A_PURE] = "pure", [A_CONST] = "const", [A_UNAVAILABLE] = "unavailable",
+	[A_TARGET] = "target", [A_PURE] = "pure", [A_CONST] = "const", [A_UNAVAILABLE] = "unavailable",
 	[A_RETURNS_TWICE] = "returns_twice", [A_DISABLE_TAIL_CALLS] = "disable_tail_calls",
-	[A_NOT_TAIL_CALLED] = "not_tail_called",
-	[A_OPTNONE] = "optnone",
+	[A_NOT_TAIL_CALLED] = "not_tail_called", [A_OPTNONE] = "optnone",
 	[A_DEPRECATED] = "deprecated", [A_WUR] = "warn_unused_result", [A_NODISCARD] = "nodiscard", [A_IFUNC] = "ifunc", [A_NONNULL] = "nonnull", [A_FORMAT] = "format", [A_FORMAT_ARG] = "format_arg",
 };
 
@@ -267,6 +267,55 @@ static const char *attr_correction(cc *c, int scope, const char *s, size_t n)
 	return bn;
 }
 
+/* Preserve effective function features; parse arch before feature overrides. */
+static void target_attr(cc *c, attrs *a, uint32_t str, uint32_t loc)
+{
+	if (!str || c->o->target != PP_LINUX_X86_64) return;
+	const char *text = c->strs[str - 1].s;
+	x86_features features = c->o->x86_features_set ? c->o->x86_raw : cc_x86_features(c, 0), disabled = c->o->x86_disabled;
+	char *copy = strdup(text), *save = NULL, *part;
+	bool valid = true;
+	for (part = strtok_r(copy, ",", &save); part; part = strtok_r(NULL, ",", &save)) {
+		if (!strncmp(part, "arch=", 5) && !x86_cpu_features(part + 5, &features)) {
+			pp_dinfo d = { .what = "warning", .loc = loc };
+			pp_warnx(c->p, "ignored-attributes", true, NULL, &d,
+					"unsupported '%s' in the 'target' attribute string; 'target' attribute ignored", part);
+			valid = false;
+		}
+	}
+	for (unsigned i = 0; i < X86_FEATURE_WORDS; i++)
+		features.bits[i] = (features.bits[i] & ~c->o->x86_override_off.bits[i]) | c->o->x86_override_on.bits[i];
+	free(copy);
+	copy = strdup(text); save = NULL;
+	for (part = strtok_r(copy, ",", &save); part; part = strtok_r(NULL, ",", &save)) {
+		if (!strncmp(part, "arch=", 5) || !strcmp(part, "default")) continue;
+		if (!strcmp(part, "general-regs-only")) {
+			const unsigned bits[] = {X86_FEATURE_X87, X86_FEATURE_MMX, X86_FEATURE_SSE};
+			for (unsigned k = 0; k < sizeof(bits)/sizeof(*bits); k++) {
+				x86_feature_apply(&features, bits[k], false);
+				disabled.bits[bits[k]/64] |= UINT64_C(1) << (bits[k]%64);
+			}
+			continue;
+		}
+		bool enable = strncmp(part, "no-", 3) != 0;
+		const char *name = enable ? part : part + 3;
+		if (!strcmp(name, "sse4")) name = enable ? "sse4.2" : "sse4.1";
+		int bit = x86_feature_find(name);
+		if (bit < 0 || !x86_feature_has(x86_attr_valid, (unsigned)bit)) {
+			pp_dinfo d = { .what = "warning", .loc = loc };
+			pp_warnx(c->p, "ignored-attributes", true, NULL, &d,
+					"unsupported '%s' in the 'target' attribute string; 'target' attribute ignored", part);
+			valid = false;
+		} else {
+			x86_feature_apply(&features, (unsigned)bit, enable);
+			if (!enable) disabled.bits[bit / 64] |= UINT64_C(1) << (bit % 64);
+			else disabled.bits[bit / 64] &= ~(UINT64_C(1) << (bit % 64));
+		}
+	}
+	free(copy);
+	if (valid) { x86_features_finish(&features, disabled); a->x86_features = features; a->x86_target = 1; }
+}
+
 /* GNU __attribute__((...)) and C23 [[...]] (gnu::name is the GNU attribute) */
 __attribute__((noinline)) VPRIV void attribute_list_(cc *c, attrs *a)
 {
@@ -360,6 +409,13 @@ __attribute__((noinline)) VPRIV void attribute_list_(cc *c, attrs *a)
 					a->aligned = 16;
 				}
 				continue;
+			case A_TARGET: {
+				expect(c, T_LPAREN, "'('");
+				uint32_t ts = string_index(c, aid);
+				expect(c, T_RPAREN, "')'");
+				target_attr(c, a, ts, loc);
+				continue;
+			}
 			case A_IFUNC:
 				a->ifunc = 1;
 				an = A_ALIAS;
@@ -539,6 +595,7 @@ __attribute__((noinline)) VPRIV void attribute_list_(cc *c, attrs *a)
 			case A_UNUSED: a->unused = 1; break;
 			case A_NORETURN: a->noreturn = 1; break;
 			case A_ALWAYS_INLINE: a->always_inline = 1; break;
+			case A_INTERRUPT: a->interrupt = 1; a->noinline = 1; break;
 			case A_NOINLINE: a->noinline = 1; break;
 			case A_NOINSTR: a->noinstr = 1; break;
 			case A_RETURNS_TWICE: a->flags |= AF_TAIL_RETURNS_TWICE; break;
@@ -625,8 +682,10 @@ VPRIV void merge_attrs(attrs *to, const attrs *from)
 {
 	if (attrs_empty(from))
 		return;
+	if (from->x86_target) to->x86_features = from->x86_features, to->x86_target = 1;
 	if (from->aligned > to->aligned)
 		to->aligned = from->aligned;
+	if (from->interrupt) to->interrupt = from->interrupt;
 	if (from->ms_struct) to->ms_struct = from->ms_struct;
 	if (from->section) to->section = from->section;
 	if (from->alias) to->alias = from->alias;

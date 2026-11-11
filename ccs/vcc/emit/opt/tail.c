@@ -43,6 +43,7 @@ VPRIV bool em_tail_candidate(ecx *e, uint32_t fn, uint32_t expr, uint32_t maxarg
 	target = &c->syms[s];
 	if (target->kind != S_FUNC || (target->flags & (SF_NORETURN | SF_ALWAYS_INLINE | SF_INLINE)) ||
 	    sym_attrs(c, s)->error_fn || sym_attrs(c, s)->ifunc ||
+	    sym_attrs(c, fn)->interrupt || sym_attrs(c, s)->interrupt ||
 	    (sym_attrs(c, fn)->flags & (AF_TAIL_DISABLE | AF_TAIL_RETURNS_TWICE | AF_OPTNONE)) ||
 	    (sym_attrs(c, s)->flags & (AF_TAIL_RETURNS_TWICE | AF_TAIL_NOT_CALLED)))
 		return false;
