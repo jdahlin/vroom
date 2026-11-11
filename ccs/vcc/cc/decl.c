@@ -1022,6 +1022,8 @@ VPRIV void declaration(cc *c, vec *out, bool file)
 				cc_error(c, d.loc, "constexpr can only be used in variable declarations");
 			else {
 				c->syms[s].flags |= SF_CONSTEXPR;
+				if (file)
+					c->syms[s].sc = SC_STATIC;	/* C23: file-scope constexpr has internal linkage */
 				if (!constexpr_type_ok(c, t))
 					cc_error(c, d.loc, "constexpr variable cannot have type '%s'", tyname(c, t));
 			}

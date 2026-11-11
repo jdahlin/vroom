@@ -375,6 +375,15 @@ var redan gröna. Ny regression täcker signerade 66-bitarsfält, packade
 119-bitarsfält, 128-bitarsfält och grannbitar. Fyra GCC-prov och sex
 riktade runtime-prov går per mål, unity/nonunity samt ny regression vid -O0.
 
+Filskopsdeklarerade C23-`constexpr`-objekt får intern länkning även efter
+en tidigare `extern`-deklaration. `c23-constexpr-2a` länkar och kör nu på
+båda Linux-målen. Nytt tvåfilsprov kontrollerar separata skalär-, array-
+och strukturobjekt med samma namn i alla fyra clang/vcc-kombinationer,
+unity/nonunity på x86 och ARM/QEMU. ABI-riggen stöder befintligt
+`vcc-flags`-format per källfil för språkversionen. Kernel-sema är
+887/887 i både per-process- och batchläge. Övriga lagringsklassdiagnoser
+har inte ändrats av denna länkfix.
+
 Kvar:
 - Alla återstående matchande filer och optimeringskonfigurationer; nästlade
   kataloger med egna `.exp`-drivrutiner och LTO har ännu ingen motsvarighet.
