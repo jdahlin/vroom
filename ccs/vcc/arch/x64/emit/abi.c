@@ -4,7 +4,7 @@
 
 /* ---------------- classification (System V 3.2.3) ---------------- */
 
-enum { XC_NONE, XC_INT, XC_SSE, XC_MEM, XC_SSEUP };
+enum { XC_NONE, XC_INT, XC_SSE, XC_MEM, XC_SSEUP, XC_X87, XC_X87UP };
 
 static int x64_merge(int a, int b)
 {
@@ -16,6 +16,8 @@ static int x64_merge(int a, int b)
 		return XC_MEM;
 	if (a == XC_INT || b == XC_INT)
 		return XC_INT;
+	if (a == XC_X87 || a == XC_X87UP || b == XC_X87 || b == XC_X87UP)
+		return XC_MEM;
 	return XC_SSE;
 }
 
@@ -41,8 +43,6 @@ static bool x64_cls(cc *c, qty t, uint64_t off, int cls[2])
 				cls[fo / 8] = x64_merge(cls[fo / 8], XC_INT);
 				continue;
 			}
-			if (talign(c, f->ty) && fo % talign(c, f->ty))
-				return false;	/* an unaligned field: memory */
 			if (!x64_cls(c, f->ty, fo, cls))
 				return false;
 		}
@@ -56,9 +56,14 @@ static bool x64_cls(cc *c, qty t, uint64_t off, int cls[2])
 				return false;
 		return true;
 	}
+	/* ABI alignment is that of the scalar representation, even when a
+	   typedef reduces its source alignment. Such packed leaves use memory. */
+	uint32_t align = c->ty[x->canon].align;
+	if (align && off % align)
+		return false;
 	if (k == TY_VECTOR) {
 		/* clang's classes for vectors: up to 4 bytes INTEGER; 8 bytes SSE (<1 x double>
-		   memory, <1 x i64> INTEGER); 16 bytes SSE + SSEUP; larger: memory (no AVX) */
+		   memory, <1 x i64> SSE); 16 bytes SSE + SSEUP; larger: memory (no AVX) */
 		uint64_t sz = tsize(c, t), es = tsize(c, x->base);
 
 		if (sz <= 4) {
@@ -66,8 +71,8 @@ static bool x64_cls(cc *c, qty t, uint64_t off, int cls[2])
 			return (off % 8) + sz <= 8;
 		}
 		if (sz == 8 && off % 8 == 0) {
-			if (es == 8)
-				return is_flt(c, x->base) ? false : (cls[off / 8] = x64_merge(cls[off / 8], XC_INT), true);
+			if (es == 8 && is_flt(c, x->base))
+				return false;
 			cls[off / 8] = x64_merge(cls[off / 8], XC_SSE);
 			return true;
 		}
@@ -76,6 +81,11 @@ static bool x64_cls(cc *c, qty t, uint64_t off, int cls[2])
 			return true;
 		}
 		return false;	/* (a 32-byte vector alone: see x64_classify) */
+	}
+	if (k == TY_LDOUBLE && off == 0) {
+		cls[0] = x64_merge(cls[0], XC_X87);
+		cls[1] = x64_merge(cls[1], XC_X87UP);
+		return true;
 	}
 	if (k == TY_LDOUBLE || k == TY_FLOAT128 || k == TY_INT128 || k == TY_UINT128)
 		return k == TY_INT128 || k == TY_UINT128 ? (cls[off / 8] = x64_merge(cls[off / 8], XC_INT),
@@ -104,8 +114,8 @@ VPRIV void x64_classify(ecx *e, qty t, wkarg *a)
 	}
 	if (size == 0)
 		return;	/* an empty record: nothing is passed */
-	if (is_vec(c, t) && size == 32) {
-		/* clang without AVX: passed in memory, returned in xmm0, xmm1 (-Wpsabi) */
+	if (is_vec(c, t) && (size == 32 || size == 64)) {
+		/* clang without AVX: passed in memory, returned in 2 or 4 xmm registers (-Wpsabi) */
 		a->mem = true, a->up = true;
 		return;
 	}
@@ -117,6 +127,14 @@ VPRIV void x64_classify(ecx *e, qty t, wkarg *a)
 		a->mem = true;
 		return;
 	}
+	if (cls[0] == XC_X87 && cls[1] == XC_X87UP) {
+		a->mem = true, a->x87 = true;
+		return;
+	}
+	if (cls[0] == XC_X87 || cls[1] == XC_X87UP) {
+		a->mem = true;
+		return;
+	}
 	if (cls[1] == XC_SSEUP) {
 		if (cls[0] != XC_SSE) {
 			a->mem = true;
@@ -125,7 +143,7 @@ VPRIV void x64_classify(ecx *e, qty t, wkarg *a)
 		a->n = 1, a->cls[0] = WA_SSE, a->up = true;	/* one xmm register */
 		return;
 	}
-	a->n = size > 8 ? 2 : 1;
+	a->n = cls[1] != XC_NONE ? 2 : cls[0] != XC_NONE ? 1 : 0;
 	for (int i = 0; i < a->n; i++)
 		a->cls[i] = cls[i] == XC_SSE ? WA_SSE : WA_INT;
 }
@@ -247,7 +265,7 @@ VPRIV val x64_call(ecx *e, uint32_t ref, val *fn, const wkarg *a, int n, bool va
 			x64_x87st(e, &d);	/* _Complex long double: the imaginary part from st(1) */
 		}
 	} else if (r && r->mem && r->up) {
-		for (int w = 0; w < 2; w++) {
+		for (int w = 0; w < (int)(r->size / 16); w++) {
 			lval d = x64_fr(r->slot + 16 * w);
 
 			x64_mem(e, X_ST, 16, XMM0 + w, &d, false);
@@ -261,7 +279,7 @@ VPRIV val x64_call(ecx *e, uint32_t ref, val *fn, const wkarg *a, int n, bool va
 
 			x64_mem(e, X_ST, r->up ? 16 : 8, r->cls[w] == WA_SSE ? XMM0 + nf++ : (ng++ ? RDX : RAX), &d, false);
 		}
-	} else if (retsize && !retf) {
+	} else if (retsize && !retf && !r) {
 		x64_mov(e, R11, RAX);
 		x64_ext(e, R11, retsize, retsgn);
 	}
@@ -370,7 +388,7 @@ VPRIV void x64_retrec(ecx *e, int raddr, const wkarg *r, uint32_t lbl)
 		}
 		x64_x87ld(e, &s);	/* long double: in st(0) */
 	} else if (r->mem && r->up) {
-		for (int w = 0; w < 2; w++) {
+		for (int w = 0; w < (int)(r->size / 16); w++) {
 			lval s = { .k = L_REG, .r = (uint8_t)raddr, .off = 16 * w };
 
 			x64_mem(e, X_LD, 16, XMM0 + w, &s, false);
