@@ -77,6 +77,18 @@ Kvar:
 **Klart när:** ingen krasch; C/ och drs/ helt gröna; antalet godkända går
 bara uppåt.  Varje rättad lucka committas med den nya siffran här.
 
+### S2b Diagnostik för nya C-programmerare — testkorpus klar
+`bench/vcc-onboarding.py` kör 25 konkreta misstag, med reparerad kod och
+avsiktligt giltig grannkod för varje fall (75 C-filer). Kontrakten kontrollerar
+innehåll, plats och nivå samt ID, JSON/text och SARIF. Ett länkfall visar
+uttryckligen den externa länkarens fel, inte vcc:s egen länkarutmatning.
+Båda Linuxmålen verifierade: x86 10 täckta/15 diagnostikluckor, arm64 11/14.
+Alla 50 reparationer/giltiga grannar kompilerar rent med både clang och vcc.
+Standardkörningen misslyckas på luckorna; `--baseline` används i snabb-CI och
+behåller dem som uttryckliga XFAIL, med XPASS-fel när täckningen förbättras.
+Inga felaktiga program körs. Kvar: implementera förklaringarna/varningarna
+som luckorna beskriver och mät om de hjälper nybörjare att reparera koden.
+
 ### S3 gcc c-torture, resten — ej påbörjad
 `bench/vcc-ctests.py` kör redan `execute/` (1701 filer, vendrade).  Utöka:
 - `execute/ieee/` och `execute/builtins/`: körs som de andra

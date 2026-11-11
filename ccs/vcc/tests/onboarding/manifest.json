@@ -1,0 +1,438 @@
+[
+  {
+    "id": "B01",
+    "title": "Missing declaration semicolon",
+    "phase": "syntax",
+    "flags": [],
+    "broken": "01_missing_semicolon/broken.c",
+    "fixed": "01_missing_semicolon/fixed.c",
+    "valid": "01_missing_semicolon/valid.c",
+    "expect": [
+      {
+        "line": 2,
+        "severity": "error",
+        "pattern": "expected.*';'|missing.*semicolon"
+      }
+    ],
+    "known_gap": null
+  },
+  {
+    "id": "B02",
+    "title": "Missing closing parenthesis",
+    "phase": "syntax",
+    "flags": [],
+    "broken": "02_unmatched_delimiter/broken.c",
+    "fixed": "02_unmatched_delimiter/fixed.c",
+    "valid": "02_unmatched_delimiter/valid.c",
+    "expect": [
+      {
+        "line": 2,
+        "severity": "error",
+        "pattern": "expected.*'\\)'|missing.*(parenthes|\\))"
+      }
+    ],
+    "known_gap": null
+  },
+  {
+    "id": "B03",
+    "title": "Misspelled visible variable",
+    "phase": "syntax",
+    "flags": [],
+    "broken": "03_misspelled_identifier/broken.c",
+    "fixed": "03_misspelled_identifier/fixed.c",
+    "valid": "03_misspelled_identifier/valid.c",
+    "expect": [
+      {
+        "line": 3,
+        "severity": "error",
+        "pattern": "(undeclared|unknown|did you mean).*coutn|coutn.*(undeclared|count)"
+      }
+    ],
+    "known_gap": null
+  },
+  {
+    "id": "B04",
+    "title": "Library call missing its declaration",
+    "phase": "syntax",
+    "flags": [],
+    "broken": "04_missing_header/broken.c",
+    "fixed": "04_missing_header/fixed.c",
+    "valid": "04_missing_header/valid.c",
+    "expect": [
+      {
+        "line": 2,
+        "severity": "error",
+        "pattern": "(undeclared|implicitly declar|implicit declaration|stdio).*puts|puts.*(undeclared|declar|stdio)"
+      }
+    ],
+    "known_gap": null
+  },
+  {
+    "id": "B05",
+    "title": "Declared function missing from final link",
+    "phase": "link",
+    "flags": [],
+    "broken": "05_missing_definition/broken.c",
+    "fixed": "05_missing_definition/fixed.c",
+    "valid": "05_missing_definition/valid.c",
+    "expect": [
+      {
+        "line": 3,
+        "severity": "error",
+        "pattern": "undefined (reference|symbol).*answer|answer.*(undefined|not defined)"
+      }
+    ],
+    "known_gap": null
+  },
+  {
+    "id": "B06",
+    "title": "Assignment where comparison may be intended",
+    "phase": "syntax",
+    "flags": [],
+    "broken": "06_assignment_condition/broken.c",
+    "fixed": "06_assignment_condition/fixed.c",
+    "valid": "06_assignment_condition/valid.c",
+    "expect": [
+      {
+        "line": 3,
+        "severity": "warning",
+        "pattern": "assignment.*(condition|truth)|assign.*condition|parentheses.*assignment"
+      }
+    ],
+    "known_gap": null
+  },
+  {
+    "id": "B07",
+    "title": "Empty if body before apparently conditional statement",
+    "phase": "syntax",
+    "flags": [
+      "-Wempty-body",
+      "-Wmisleading-indentation"
+    ],
+    "broken": "07_stray_semicolon/broken.c",
+    "fixed": "07_stray_semicolon/fixed.c",
+    "valid": "07_stray_semicolon/valid.c",
+    "expect": [
+      {
+        "line": 3,
+        "severity": "warning",
+        "pattern": "empty.*(body|if)|if.*empty|misleading.*indent"
+      }
+    ],
+    "known_gap": "Observed x86 vcc baseline is silent with -Wempty-body and -Wmisleading-indentation; preserve deliberate empty bodies while diagnosing the suspicious if body."
+  },
+  {
+    "id": "B08",
+    "title": "Indentation suggests two controlled statements",
+    "phase": "syntax",
+    "flags": [
+      "-Wmisleading-indentation"
+    ],
+    "broken": "08_missing_braces/broken.c",
+    "fixed": "08_missing_braces/fixed.c",
+    "valid": "08_missing_braces/valid.c",
+    "expect": [
+      {
+        "line": 5,
+        "severity": "warning",
+        "pattern": "misleading.*indent|indent.*(guard|if)|not guard"
+      }
+    ],
+    "known_gap": "Observed x86 vcc baseline is silent with -Wmisleading-indentation; indentation can suggest intent but must not trigger an automatic brace insertion."
+  },
+  {
+    "id": "B09",
+    "title": "Chained comparison does not test a mathematical range",
+    "phase": "syntax",
+    "flags": [
+      "-Wno-error=parentheses"
+    ],
+    "broken": "09_chained_comparison/broken.c",
+    "fixed": "09_chained_comparison/fixed.c",
+    "valid": "09_chained_comparison/valid.c",
+    "expect": [
+      {
+        "line": 3,
+        "severity": "warning",
+        "pattern": "comparisons?.*(mathematical|meaning|constant|always)|comparison.*(bool|boolean)|chained"
+      }
+    ],
+    "known_gap": "Observed x86 vcc baseline is silent for chained comparisons; preserve deliberate comparisons of boolean/integer results."
+  },
+  {
+    "id": "B10",
+    "title": "Integer quotient converted to floating point too late",
+    "phase": "syntax",
+    "flags": [],
+    "broken": "10_integer_division/broken.c",
+    "fixed": "10_integer_division/fixed.c",
+    "valid": "10_integer_division/valid.c",
+    "expect": [
+      {
+        "line": 2,
+        "severity": "warning",
+        "pattern": "integer division|integer.*quotient|division.*before.*(float|double|conversion)"
+      }
+    ],
+    "known_gap": "Pedagogical heuristic: legal integer division may intentionally precede conversion; no unconditional repair or required default warning."
+  },
+  {
+    "id": "B11",
+    "title": "Value is missing on one branch",
+    "phase": "syntax",
+    "flags": [],
+    "broken": "11_uninitialized_read/broken.c",
+    "fixed": "11_uninitialized_read/fixed.c",
+    "valid": "11_uninitialized_read/valid.c",
+    "expect": [
+      {
+        "line": 3,
+        "severity": "warning",
+        "pattern": "uninitialized|uninitialised|without.*(initializ|assign)"
+      }
+    ],
+    "known_gap": null
+  },
+  {
+    "id": "B12",
+    "title": "Non-void function misses a return path",
+    "phase": "syntax",
+    "flags": [],
+    "broken": "12_missing_return/broken.c",
+    "fixed": "12_missing_return/fixed.c",
+    "valid": "12_missing_return/valid.c",
+    "expect": [
+      {
+        "line": 3,
+        "severity": "warning",
+        "pattern": "(non-void|nonvoid).*return|control reaches.*end|not all.*return"
+      }
+    ],
+    "known_gap": null
+  },
+  {
+    "id": "B13",
+    "title": "Numeric input receives a value instead of an address",
+    "phase": "syntax",
+    "flags": [],
+    "broken": "13_scanf_address/broken.c",
+    "fixed": "13_scanf_address/fixed.c",
+    "valid": "13_scanf_address/valid.c",
+    "expect": [
+      {
+        "line": 4,
+        "severity": "warning",
+        "pattern": "format.*int.*\\*.*(argument|type)|expects?.*(int.*\\*|pointer|address)|scanf.*address"
+      }
+    ],
+    "known_gap": "Observed x86 vcc baseline is silent under -Wall -Wextra -Wconversion for the scanf format/address mismatch; format warnings must be enabled consistently."
+  },
+  {
+    "id": "B14",
+    "title": "Input and output formats must match argument types",
+    "phase": "syntax",
+    "flags": [],
+    "broken": "14_format_type/broken.c",
+    "fixed": "14_format_type/fixed.c",
+    "valid": "14_format_type/valid.c",
+    "expect": [
+      {
+        "line": 4,
+        "severity": "warning",
+        "pattern": "format.*(int|%d).*(long|argument)|expects?.*int.*long"
+      }
+    ],
+    "known_gap": {
+      "x86_64-linux-gnu": "Observed x86 vcc baseline is silent under -Wall -Wextra -Wconversion for printf int-versus-long mismatch; do not hide the missing format diagnostic."
+    }
+  },
+  {
+    "id": "B15",
+    "title": "Input result is ignored before using the destination",
+    "phase": "syntax",
+    "flags": [],
+    "broken": "15_unchecked_scanf/broken.c",
+    "fixed": "15_unchecked_scanf/fixed.c",
+    "valid": "15_unchecked_scanf/valid.c",
+    "expect": [
+      {
+        "line": 4,
+        "severity": "warning",
+        "pattern": "(scanf|input|conversion).*(result|fail|return)|ignoring return value.*scanf|unchecked.*(input|scanf)"
+      }
+    ],
+    "known_gap": "A declared scanf call does not guarantee assignment; desired guidance needs library-contract knowledge, not merely generic unused-result attributes."
+  },
+  {
+    "id": "B16",
+    "title": "String input has no bound for a known buffer",
+    "phase": "syntax",
+    "flags": [],
+    "broken": "16_unbounded_input/broken.c",
+    "fixed": "16_unbounded_input/fixed.c",
+    "valid": "16_unbounded_input/valid.c",
+    "expect": [
+      {
+        "line": 4,
+        "severity": "warning",
+        "pattern": "(unbounded|width|bound|overflow|buffer).*(scanf|%s|string|input)|scanf.*(bound|width|overflow)|%s.*(bound|width)"
+      }
+    ],
+    "known_gap": "Desired bounded-input warning for known arrays. %c is raw fixed-count input and does not append a terminator; never apply the %s rule to it."
+  },
+  {
+    "id": "B17",
+    "title": "Character input follows numeric input without a whitespace policy",
+    "phase": "syntax",
+    "flags": [],
+    "broken": "17_input_newline/broken.c",
+    "fixed": "17_input_newline/fixed.c",
+    "valid": "17_input_newline/valid.c",
+    "expect": [
+      {
+        "line": 5,
+        "severity": "warning",
+        "pattern": "(newline|white.?space|remaining.*character|leftover).*|%c.*(consume|skip)"
+      }
+    ],
+    "known_gap": "Optional pedagogical heuristic only: consuming newline with %c can be intentional. Demonstration requires input such as 12 followed by newline; no automatic whitespace insertion."
+  },
+  {
+    "id": "B18",
+    "title": "Pointer-size calculation mistaken for element count",
+    "phase": "syntax",
+    "flags": [],
+    "broken": "18_array_parameter_size/broken.c",
+    "fixed": "18_array_parameter_size/fixed.c",
+    "valid": "18_array_parameter_size/valid.c",
+    "expect": [
+      {
+        "line": 2,
+        "severity": "warning",
+        "pattern": "sizeof.*(pointer|array.*parameter)|pointer.*(size|array)"
+      }
+    ],
+    "known_gap": "Observed x86 vcc baseline is silent for sizeof on the adjusted array parameter; explain pointer size versus element count."
+  },
+  {
+    "id": "B19",
+    "title": "Read past the last array element",
+    "phase": "syntax",
+    "flags": [
+      "-Warray-bounds"
+    ],
+    "broken": "19_array_off_by_one/broken.c",
+    "fixed": "19_array_off_by_one/fixed.c",
+    "valid": "19_array_off_by_one/valid.c",
+    "expect": [
+      {
+        "line": 3,
+        "severity": "warning",
+        "pattern": "(array|index|subscript).*(bounds|past|outside|beyond)|out.of.bounds"
+      }
+    ],
+    "known_gap": null
+  },
+  {
+    "id": "B20",
+    "title": "String address comparison mistaken for text comparison",
+    "phase": "syntax",
+    "flags": [],
+    "broken": "20_string_comparison/broken.c",
+    "fixed": "20_string_comparison/fixed.c",
+    "valid": "20_string_comparison/valid.c",
+    "expect": [
+      {
+        "line": 3,
+        "severity": "warning",
+        "pattern": "string.*(compar|address|literal)|comparison.*string|compar.*unspecified"
+      }
+    ],
+    "known_gap": "Observed x86 vcc baseline is silent for comparison against a string literal; preserve intentional address comparisons and avoid automatic strcmp rewrites."
+  },
+  {
+    "id": "B21",
+    "title": "String use requires space for its terminator",
+    "phase": "syntax",
+    "flags": [],
+    "broken": "21_missing_terminator/broken.c",
+    "fixed": "21_missing_terminator/fixed.c",
+    "valid": "21_missing_terminator/valid.c",
+    "expect": [
+      {
+        "line": 3,
+        "severity": "warning",
+        "pattern": "(terminat|nul|initializer.string.*too long|nonstring)"
+      }
+    ],
+    "known_gap": "Observed x86 vcc baseline is silent for a character array initialized without termination then passed to puts; raw nonstring arrays must remain legal."
+  },
+  {
+    "id": "B22",
+    "title": "Pointer declaration creates no pointed-to object",
+    "phase": "syntax",
+    "flags": [],
+    "broken": "22_uninitialized_pointer/broken.c",
+    "fixed": "22_uninitialized_pointer/fixed.c",
+    "valid": "22_uninitialized_pointer/valid.c",
+    "expect": [
+      {
+        "line": 3,
+        "severity": "warning",
+        "pattern": "uninitialized|uninitialised|pointer.*(assign|initializ)"
+      }
+    ],
+    "known_gap": "Observed x86 vcc baseline is silent for dereferencing an uninitialized pointer; distinguish the pointer variable from pointed-to storage."
+  },
+  {
+    "id": "B23",
+    "title": "Allocation uses pointer size instead of object size",
+    "phase": "syntax",
+    "flags": [],
+    "broken": "23_allocation_size/broken.c",
+    "fixed": "23_allocation_size/fixed.c",
+    "valid": "23_allocation_size/valid.c",
+    "expect": [
+      {
+        "line": 5,
+        "severity": "warning",
+        "pattern": "sizeof.*pointer|allocation.*(size|small)|allocat.*(enough|insufficient)|bounds|outside"
+      }
+    ],
+    "known_gap": "Allocation intent needs a controlled heuristic or data-flow evidence; pointer-sized allocations can be intentional. Do not auto-rewrite every sizeof pointer."
+  },
+  {
+    "id": "B24",
+    "title": "Returned address refers to an expired local object",
+    "phase": "syntax",
+    "flags": [],
+    "broken": "24_return_local_address/broken.c",
+    "fixed": "24_return_local_address/fixed.c",
+    "valid": "24_return_local_address/valid.c",
+    "expect": [
+      {
+        "line": 3,
+        "severity": "warning",
+        "pattern": "return.*(local|stack|address)|address.*(local|stack).*return"
+      }
+    ],
+    "known_gap": null
+  },
+  {
+    "id": "B25",
+    "title": "Read through a pointer after freeing its object",
+    "phase": "syntax",
+    "flags": [],
+    "broken": "25_use_after_free/broken.c",
+    "fixed": "25_use_after_free/fixed.c",
+    "valid": "25_use_after_free/valid.c",
+    "expect": [
+      {
+        "line": 8,
+        "severity": "warning",
+        "pattern": "use.after.free|used after.*free|freed.*(memory|object|pointer)|deallocated"
+      }
+    ],
+    "known_gap": "Ordinary frontends may miss even simple post-free uses; explicit analyzer or data-flow support may be required."
+  }
+]
