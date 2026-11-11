@@ -51,6 +51,8 @@ VPRIV void x64_twoaddr(ecx *e)
 		}
 		o[n++] = i;
 	}
+	if (e->ndl)
+		dbg_remap(e, &j, UINT32_MAX, n);
 	X->tw = X->in;
 	X->in = o;
 	X->nin = n;

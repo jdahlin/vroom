@@ -372,6 +372,9 @@ VPRIV int wconstant_p(ecx *e, uint32_t a);
 VPRIV int wsjlj_kind(cc *c, uint32_t n);
 VPRIV void wsj_begin(ecx *e);
 VPRIV void wsj_end(ecx *e);
+/* reachability.c: conservative proofs, without state or allocations */
+VPRIV bool wlabels(cc *c, uint32_t n);
+VPRIV bool wterm(cc *c, uint32_t n);
 /* wstmt.c */
 VPRIV void wgoto_scan(ecx *e, uint32_t body);
 VPRIV void wvla_bytes(ecx *e, qty t);

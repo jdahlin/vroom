@@ -112,6 +112,10 @@ VPRIV void x64_restore(ecx *e, uint32_t sv);
 VPRIV int x64_ftreg(ecx *e);
 VPRIV rec *x64_put(ecx *e, int op);
 VPRIV void x64_twoaddr(ecx *e);
+/* effects.c: logical records before or after two-address expansion. */
+VPRIV const uint8_t *x64_flow_table(void);
+/* Prepared for shared copy/liveness passes; also exercised by contract tests. */
+VPRIV __attribute__((unused)) receffects x64_effects(const ecx *e, const rec *i);
 VPRIV void x64_print(ecx *e, tbuf *b, uint32_t s);
 VPRIV void x64_x87(ecx *e, int xf, const lval *l, int sz);
 

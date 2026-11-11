@@ -614,13 +614,36 @@ VPRIV void x64_begin(ecx *e, uint32_t s)
 	e->asmk = 0;
 }
 
+typedef struct x64_compact_debug {
+	ecx *e;
+	uint32_t cursor;
+} x64_compact_debug;
+
+static void x64_compact_remap(void *ctx, uint32_t old, uint32_t next)
+{
+	x64_compact_debug *d = ctx;
+
+	dbg_remap(d->e, &d->cursor, old, next);
+}
+
 VPRIV void x64_finish(ecx *e, uint32_t s)
 {
+	static const em_rec_layout layout = {
+		sizeof(rec), offsetof(rec, op), offsetof(rec, label), X_JMP, X_LABEL,
+	};
 	tbuf *b = &e->out;
 	size_t start;
+	x64_compact_debug d = { e, 0 };
 
 	if (e->x64->live)
 		efatal(e, e->curloc, "internal error: x86-64 temporaries left live (%#x)", e->x64->live);
+	if (e->E->o->opt >= 1 && !e->E->noopt)
+		e->x64->nin = em_rec_unreachable(e->x64->in, e->x64->nin, sizeof(rec), offsetof(rec, op),
+						x64_flow_table(), X_NOPS, e->ndl ? x64_compact_remap : NULL, &d);
+	d.cursor = 0;
+	if (e->E->o->opt >= 1)
+		e->x64->nin = em_rec_fallthrough(e->x64->in, e->x64->nin, &layout,
+					       e->ndl ? x64_compact_remap : NULL, &d);
 	x64_twoaddr(e);
 	b->n = (b->n + 7) & ~(size_t)7;
 	start = b->n;
