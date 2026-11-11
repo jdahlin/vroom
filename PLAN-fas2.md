@@ -3228,3 +3228,30 @@ kostnad. Exakta kommandon, binär-/källhashar och sampel finns i
 `work/opt-profile/local-values-writes-fast-cost/`,
 `local-values-writes-fast-cputime/`, `local-values-writes-saturated/` och
 `local-values-writes-fast-saturated/`. Generell CSE och joins återstår.
+
+### Lokal värdeåteranvändning i tilldelningar (2026-11-11)
+
+Den budgeterade blockskanningen kan nu återanvända en tidigare lokal i
+högerledet till en ordinär lokal heltalstilldelning, även utvalda sammansatta
+tilldelningar. Målet kan vara den cachade lokalen eller en av dess indata:
+substitutionen gäller bara det rena högerledet före skrivningen. Tidigare
+skrivningar invaliderar som förut; indirekta, volatile och atomiska mål och
+högerled med sidoeffekter avvisas. Rena heltalskonverteringar kan nu ingå i
+det begränsade värdenumreringsbeviset; flyttalskonverteringar förblir
+barriärer. Detta är fortfarande inte generell CSE eller återanvändning över
+kontrollflödesjoin.
+
+Fyrmålsprov O0–O3 i båda bygglägen täcker vanliga och sammansatta mål,
+skrivning till cachat värde/indata före respektive under konsumtion,
+volatile och dold skrivning, heltals-/flyttalskonvertering samt kodform.
+O0/noopt är byteidentiskt mot `143e9c0`; vcc-sviten passerar 256/256 med en
+befintlig xfail, x86-debug och ASan/UBSan-tabellkontrakt passerar. Matchad
+Callgrind-korpus mot den föräldern gav compiler-Ir +0,057 % x86, +0,046 %
+arm64, +0,074 % wasm32 och +0,060 % wasm64; 1 %-grinden passerar med tidigare
+redovisade wasm-uteslutningar. Sju växelvisa O2-rundor med 28 förprocessade
+arm64-kärn-TU:er gav median användar-CPU 0,78612 → 0,79193 s; två TU:er är
+uteslutna och korta sampel på delad värd visar ingen generell tidsgräns.
+En avsiktligt mättad kontroll med 2 000 ogiltigförklarade kandidater gav
++1,83 % compiler-Ir x86 och +2,22 % wasm64, med identisk assembler. Resultat,
+kommandon och hashad proveniens finns i `work/opt-profile/local-values-assign-
+{cost,cputime,saturated}/`. G5/G7 och generell O2-täckning återstår.

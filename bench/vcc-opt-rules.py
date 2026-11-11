@@ -52,6 +52,23 @@ def check_localvalues(assembly, arch):
     text = body(assembly, 'lvr_reuse', wasm)
     if len(re.findall(add, text)) != 1:
         raise RuntimeError(f'declaration value must be reused in return\n{text}')
+    for name in ['lvr_target_assign', 'lvr_target_cached', 'lvr_target_input']:
+        text = body(assembly, name, wasm)
+        if len(re.findall(add, text)) != 1:
+            raise RuntimeError(f'{name}: declaration value must be reused in local assignment\n{text}')
+    for name in ['lvr_target_dep_prior', 'lvr_target_cached_prior', 'lvr_target_hidden']:
+        text = body(assembly, name, wasm)
+        if len(re.findall(add, text)) != 2:
+            raise RuntimeError(f'{name}: invalidated value must be recomputed\n{text}')
+    text = body(assembly, 'lvr_target_compound', wasm)
+    if len(re.findall(add, text)) != 2:
+        raise RuntimeError(f'value must survive integer-cast initializer and compound assignment\n{text}')
+    text = body(assembly, 'lvr_cast_float', wasm)
+    if len(re.findall(add, text)) < 3:
+        raise RuntimeError(f'floating conversion must remain a barrier\n{text}')
+    text = body(assembly, 'lvr_target_volatile', wasm)
+    if len(re.findall(add, text)) != 2:
+        raise RuntimeError(f'volatile assignment must not use cached value\n{text}')
     text = body(assembly, 'lvr_decl', wasm)
     if len(re.findall(add, text)) != 1:
         raise RuntimeError(f'declaration value must be reused in later declaration\n{text}')
