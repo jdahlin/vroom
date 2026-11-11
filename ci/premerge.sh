@@ -66,6 +66,8 @@ arm64)
 	step vas-obj      python3 bench/vas-obj.py
 	step vlink-opts   python3 bench/vlink-opts.py
 	step vsh          python3 bench/vsh-test.py
+	step onboarding-verifier python3 bench/test-onboarding.py
+	step onboarding   python3 bench/vcc-onboarding.py --target aarch64-linux-gnu --baseline
 	step bflayout     python3 bench/vcc-bflayout.py
 	step ldconst      python3 bench/vcc-ldconst.py
 	step cfi          python3 bench/vcc-cfi.py -j "$J"

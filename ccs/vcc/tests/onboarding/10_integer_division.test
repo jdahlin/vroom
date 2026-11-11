@@ -1,0 +1,21 @@
+id = "B10"
+title = "Integer quotient converted to floating point too late"
+expect = [
+  { line = 2, severity = "warning", pattern = "integer division|integer.*quotient|division.*before.*(float|double|conversion)" },
+]
+known_gap = "Pedagogical heuristic: legal integer division may intentionally precede conversion; no unconditional repair or required default warning."
+
+=== broken.c ===
+double average(int total, int count) {
+    return total / count;
+}
+int main(void) { return average(5, 2) != 2.5; }
+=== fixed.c ===
+double average(int total, int count) {
+    return (double)total / count;
+}
+int main(void) { return average(5, 2) != 2.5; }
+=== valid.c ===
+int main(void) { int whole_groups = 5 / 2; return whole_groups != 2; }
+=== stderr ===
+=== narrated ===

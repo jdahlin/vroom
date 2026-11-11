@@ -1,0 +1,23 @@
+id = "B05"
+title = "Declared function missing from final link"
+phase = "link"
+expect = [
+  { line = 3, severity = "error", pattern = "undefined (reference|symbol).*answer|answer.*(undefined|not defined)" },
+]
+
+=== broken.c ===
+int answer(void);
+int main(void) {
+    return answer() != 42;
+}
+=== fixed.c ===
+int answer(void) { return 42; }
+int main(void) {
+    return answer() != 42;
+}
+=== valid.c ===
+int main(void) { return 0; }
+=== stderr ===
+ld.lld: error: undefined symbol: answer
+>>> referenced by <temporary>/vccbroken.o:(main)
+clang: error: linker command failed with exit code 1 (use -v to see invocation)

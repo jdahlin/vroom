@@ -1,0 +1,1331 @@
+{
+  "date": "2026-11-11",
+  "versions": {
+    "gcc": "gcc (Ubuntu 15.2.0-16ubuntu1) 15.2.0",
+    "clang": "Ubuntu clang version 23.1.6 (++20261108033809+c47d7823685a-1~exp1~20261108153913.94)"
+  },
+  "cases": [
+    {
+      "name": "address",
+      "source": "#include <stdio.h>\nvoid f(void) { int n=0; scanf(\"%d\", n); }\n"
+    },
+    {
+      "name": "division",
+      "source": "double f(int total,int count) { return total/count; }\n"
+    },
+    {
+      "name": "array_size",
+      "source": "#include <stddef.h>\nsize_t f(int a[10]) { return sizeof a / sizeof a[0]; }\n"
+    },
+    {
+      "name": "string_compare",
+      "source": "int f(char *a) { return a == \"yes\"; }\n"
+    },
+    {
+      "name": "string_termination",
+      "source": "#include <stdio.h>\nvoid f(void) { char a[3]=\"cat\"; puts(a); }\n"
+    },
+    {
+      "name": "input_bound",
+      "source": "#include <stdio.h>\nvoid f(void) { char a[8]; scanf(\"%s\", a); }\n"
+    },
+    {
+      "name": "input_newline",
+      "source": "#include <stdio.h>\nvoid f(void) { int n; char c; scanf(\"%d\", &n); scanf(\"%c\", &c); }\n"
+    },
+    {
+      "name": "array_offbyone",
+      "source": "int f(void) { int a[3]={0}; return a[3]; }\n"
+    },
+    {
+      "name": "lifetime",
+      "source": "int *f(void) { int n=3; return &n; }\n"
+    },
+    {
+      "name": "assignment",
+      "source": "int f(int n) { if (n=3) return 1; return 0; }\n"
+    },
+    {
+      "name": "semicolon",
+      "source": "int f(void) { int n=3\n return n; }\n"
+    },
+    {
+      "name": "uninitialized",
+      "source": "int f(int ready) { int n; if (ready) n=1; return n; }\n"
+    },
+    {
+      "name": "scope",
+      "source": "int f(void) { { int n=3; (void)n; } return n; }\n"
+    },
+    {
+      "name": "string_identity",
+      "source": "int f(char *a,char *b) { return a == b; }\n"
+    },
+    {
+      "name": "use_after_free",
+      "source": "#include <stdlib.h>\nint f(void) { int *p=malloc(sizeof *p); if(!p)return 0; *p=4; free(p); return *p; }\n"
+    }
+  ],
+  "results": [
+    {
+      "case": "address",
+      "compiler": "gcc",
+      "opt": "-O0",
+      "command": [
+        "/usr/bin/gcc",
+        "-std=c17",
+        "-Wall",
+        "-Wextra",
+        "-Wconversion",
+        "-pedantic-errors",
+        "-fdiagnostics-color=never",
+        "-O0",
+        "-c",
+        "address.c",
+        "-o",
+        "probe.o"
+      ],
+      "exit": 0,
+      "stderr": "address.c: In function \u2018f\u2019:\naddress.c:2:33: warning: format \u2018%d\u2019 expects argument of type \u2018int *\u2019, but argument 2 has type \u2018int\u2019 [-Wformat=]\n    2 | void f(void) { int n=0; scanf(\"%d\", n); }\n      |                                ~^   ~\n      |                                 |   |\n      |                                 |   int\n      |                                 int *\n"
+    },
+    {
+      "case": "address",
+      "compiler": "gcc",
+      "opt": "-O2",
+      "command": [
+        "/usr/bin/gcc",
+        "-std=c17",
+        "-Wall",
+        "-Wextra",
+        "-Wconversion",
+        "-pedantic-errors",
+        "-fdiagnostics-color=never",
+        "-O2",
+        "-c",
+        "address.c",
+        "-o",
+        "probe.o"
+      ],
+      "exit": 0,
+      "stderr": "address.c: In function \u2018f\u2019:\naddress.c:2:33: warning: format \u2018%d\u2019 expects argument of type \u2018int *\u2019, but argument 2 has type \u2018int\u2019 [-Wformat=]\n    2 | void f(void) { int n=0; scanf(\"%d\", n); }\n      |                                ~^   ~\n      |                                 |   |\n      |                                 |   int\n      |                                 int *\naddress.c:2:25: warning: ignoring return value of \u2018scanf\u2019 declared with attribute \u2018warn_unused_result\u2019 [-Wunused-result]\n    2 | void f(void) { int n=0; scanf(\"%d\", n); }\n      |                         ^~~~~~~~~~~~~~\n"
+    },
+    {
+      "case": "address",
+      "compiler": "clang",
+      "opt": "-O0",
+      "command": [
+        "/usr/lib/llvm-23/bin/clang",
+        "-std=c17",
+        "-Wall",
+        "-Wextra",
+        "-Wconversion",
+        "-pedantic-errors",
+        "-fdiagnostics-color=never",
+        "-O0",
+        "-c",
+        "address.c",
+        "-o",
+        "probe.o"
+      ],
+      "exit": 0,
+      "stderr": "address.c:2:37: warning: format specifies type 'int *' but the argument has type 'int' [-Wformat]\n    2 | void f(void) { int n=0; scanf(\"%d\", n); }\n      |                                ~~   ^\n1 warning generated.\n"
+    },
+    {
+      "case": "address",
+      "compiler": "clang",
+      "opt": "-O2",
+      "command": [
+        "/usr/lib/llvm-23/bin/clang",
+        "-std=c17",
+        "-Wall",
+        "-Wextra",
+        "-Wconversion",
+        "-pedantic-errors",
+        "-fdiagnostics-color=never",
+        "-O2",
+        "-c",
+        "address.c",
+        "-o",
+        "probe.o"
+      ],
+      "exit": 0,
+      "stderr": "address.c:2:37: warning: format specifies type 'int *' but the argument has type 'int' [-Wformat]\n    2 | void f(void) { int n=0; scanf(\"%d\", n); }\n      |                                ~~   ^\n1 warning generated.\n"
+    },
+    {
+      "case": "division",
+      "compiler": "gcc",
+      "opt": "-O0",
+      "command": [
+        "/usr/bin/gcc",
+        "-std=c17",
+        "-Wall",
+        "-Wextra",
+        "-Wconversion",
+        "-pedantic-errors",
+        "-fdiagnostics-color=never",
+        "-O0",
+        "-c",
+        "division.c",
+        "-o",
+        "probe.o"
+      ],
+      "exit": 0,
+      "stderr": ""
+    },
+    {
+      "case": "division",
+      "compiler": "gcc",
+      "opt": "-O2",
+      "command": [
+        "/usr/bin/gcc",
+        "-std=c17",
+        "-Wall",
+        "-Wextra",
+        "-Wconversion",
+        "-pedantic-errors",
+        "-fdiagnostics-color=never",
+        "-O2",
+        "-c",
+        "division.c",
+        "-o",
+        "probe.o"
+      ],
+      "exit": 0,
+      "stderr": ""
+    },
+    {
+      "case": "division",
+      "compiler": "clang",
+      "opt": "-O0",
+      "command": [
+        "/usr/lib/llvm-23/bin/clang",
+        "-std=c17",
+        "-Wall",
+        "-Wextra",
+        "-Wconversion",
+        "-pedantic-errors",
+        "-fdiagnostics-color=never",
+        "-O0",
+        "-c",
+        "division.c",
+        "-o",
+        "probe.o"
+      ],
+      "exit": 0,
+      "stderr": ""
+    },
+    {
+      "case": "division",
+      "compiler": "clang",
+      "opt": "-O2",
+      "command": [
+        "/usr/lib/llvm-23/bin/clang",
+        "-std=c17",
+        "-Wall",
+        "-Wextra",
+        "-Wconversion",
+        "-pedantic-errors",
+        "-fdiagnostics-color=never",
+        "-O2",
+        "-c",
+        "division.c",
+        "-o",
+        "probe.o"
+      ],
+      "exit": 0,
+      "stderr": ""
+    },
+    {
+      "case": "array_size",
+      "compiler": "gcc",
+      "opt": "-O0",
+      "command": [
+        "/usr/bin/gcc",
+        "-std=c17",
+        "-Wall",
+        "-Wextra",
+        "-Wconversion",
+        "-pedantic-errors",
+        "-fdiagnostics-color=never",
+        "-O0",
+        "-c",
+        "array_size.c",
+        "-o",
+        "probe.o"
+      ],
+      "exit": 0,
+      "stderr": "array_size.c: In function \u2018f\u2019:\narray_size.c:2:37: warning: \u2018sizeof\u2019 on array function parameter \u2018a\u2019 will return size of \u2018int *\u2019 [-Wsizeof-array-argument]\n    2 | size_t f(int a[10]) { return sizeof a / sizeof a[0]; }\n      |                                     ^\narray_size.c:2:14: note: declared here\n    2 | size_t f(int a[10]) { return sizeof a / sizeof a[0]; }\n      |          ~~~~^~~~~\n"
+    },
+    {
+      "case": "array_size",
+      "compiler": "gcc",
+      "opt": "-O2",
+      "command": [
+        "/usr/bin/gcc",
+        "-std=c17",
+        "-Wall",
+        "-Wextra",
+        "-Wconversion",
+        "-pedantic-errors",
+        "-fdiagnostics-color=never",
+        "-O2",
+        "-c",
+        "array_size.c",
+        "-o",
+        "probe.o"
+      ],
+      "exit": 0,
+      "stderr": "array_size.c: In function \u2018f\u2019:\narray_size.c:2:37: warning: \u2018sizeof\u2019 on array function parameter \u2018a\u2019 will return size of \u2018int *\u2019 [-Wsizeof-array-argument]\n    2 | size_t f(int a[10]) { return sizeof a / sizeof a[0]; }\n      |                                     ^\narray_size.c:2:14: note: declared here\n    2 | size_t f(int a[10]) { return sizeof a / sizeof a[0]; }\n      |          ~~~~^~~~~\n"
+    },
+    {
+      "case": "array_size",
+      "compiler": "clang",
+      "opt": "-O0",
+      "command": [
+        "/usr/lib/llvm-23/bin/clang",
+        "-std=c17",
+        "-Wall",
+        "-Wextra",
+        "-Wconversion",
+        "-pedantic-errors",
+        "-fdiagnostics-color=never",
+        "-O0",
+        "-c",
+        "array_size.c",
+        "-o",
+        "probe.o"
+      ],
+      "exit": 0,
+      "stderr": "array_size.c:2:37: warning: sizeof on array function parameter will return size of 'int *' instead of 'int[10]' [-Wsizeof-array-argument]\n    2 | size_t f(int a[10]) { return sizeof a / sizeof a[0]; }\n      |                                     ^\narray_size.c:2:14: note: declared here\n    2 | size_t f(int a[10]) { return sizeof a / sizeof a[0]; }\n      |              ^\narray_size.c:2:39: warning: 'sizeof a' will return the size of the pointer, not the array itself [-Wsizeof-pointer-div]\n    2 | size_t f(int a[10]) { return sizeof a / sizeof a[0]; }\n      |                              ~~~~~~~~ ^\narray_size.c:2:14: note: pointer 'a' declared here\n    2 | size_t f(int a[10]) { return sizeof a / sizeof a[0]; }\n      |              ^\n2 warnings generated.\n"
+    },
+    {
+      "case": "array_size",
+      "compiler": "clang",
+      "opt": "-O2",
+      "command": [
+        "/usr/lib/llvm-23/bin/clang",
+        "-std=c17",
+        "-Wall",
+        "-Wextra",
+        "-Wconversion",
+        "-pedantic-errors",
+        "-fdiagnostics-color=never",
+        "-O2",
+        "-c",
+        "array_size.c",
+        "-o",
+        "probe.o"
+      ],
+      "exit": 0,
+      "stderr": "array_size.c:2:37: warning: sizeof on array function parameter will return size of 'int *' instead of 'int[10]' [-Wsizeof-array-argument]\n    2 | size_t f(int a[10]) { return sizeof a / sizeof a[0]; }\n      |                                     ^\narray_size.c:2:14: note: declared here\n    2 | size_t f(int a[10]) { return sizeof a / sizeof a[0]; }\n      |              ^\narray_size.c:2:39: warning: 'sizeof a' will return the size of the pointer, not the array itself [-Wsizeof-pointer-div]\n    2 | size_t f(int a[10]) { return sizeof a / sizeof a[0]; }\n      |                              ~~~~~~~~ ^\narray_size.c:2:14: note: pointer 'a' declared here\n    2 | size_t f(int a[10]) { return sizeof a / sizeof a[0]; }\n      |              ^\n2 warnings generated.\n"
+    },
+    {
+      "case": "string_compare",
+      "compiler": "gcc",
+      "opt": "-O0",
+      "command": [
+        "/usr/bin/gcc",
+        "-std=c17",
+        "-Wall",
+        "-Wextra",
+        "-Wconversion",
+        "-pedantic-errors",
+        "-fdiagnostics-color=never",
+        "-O0",
+        "-c",
+        "string_compare.c",
+        "-o",
+        "probe.o"
+      ],
+      "exit": 0,
+      "stderr": "string_compare.c: In function \u2018f\u2019:\nstring_compare.c:1:27: warning: comparison with string literal results in unspecified behavior [-Waddress]\n    1 | int f(char *a) { return a == \"yes\"; }\n      |                           ^~\n"
+    },
+    {
+      "case": "string_compare",
+      "compiler": "gcc",
+      "opt": "-O2",
+      "command": [
+        "/usr/bin/gcc",
+        "-std=c17",
+        "-Wall",
+        "-Wextra",
+        "-Wconversion",
+        "-pedantic-errors",
+        "-fdiagnostics-color=never",
+        "-O2",
+        "-c",
+        "string_compare.c",
+        "-o",
+        "probe.o"
+      ],
+      "exit": 0,
+      "stderr": "string_compare.c: In function \u2018f\u2019:\nstring_compare.c:1:27: warning: comparison with string literal results in unspecified behavior [-Waddress]\n    1 | int f(char *a) { return a == \"yes\"; }\n      |                           ^~\n"
+    },
+    {
+      "case": "string_compare",
+      "compiler": "clang",
+      "opt": "-O0",
+      "command": [
+        "/usr/lib/llvm-23/bin/clang",
+        "-std=c17",
+        "-Wall",
+        "-Wextra",
+        "-Wconversion",
+        "-pedantic-errors",
+        "-fdiagnostics-color=never",
+        "-O0",
+        "-c",
+        "string_compare.c",
+        "-o",
+        "probe.o"
+      ],
+      "exit": 0,
+      "stderr": "string_compare.c:1:27: warning: result of comparison against a string literal is unspecified (use an explicit string comparison function instead) [-Wstring-compare]\n    1 | int f(char *a) { return a == \"yes\"; }\n      |                           ^  ~~~~~\n1 warning generated.\n"
+    },
+    {
+      "case": "string_compare",
+      "compiler": "clang",
+      "opt": "-O2",
+      "command": [
+        "/usr/lib/llvm-23/bin/clang",
+        "-std=c17",
+        "-Wall",
+        "-Wextra",
+        "-Wconversion",
+        "-pedantic-errors",
+        "-fdiagnostics-color=never",
+        "-O2",
+        "-c",
+        "string_compare.c",
+        "-o",
+        "probe.o"
+      ],
+      "exit": 0,
+      "stderr": "string_compare.c:1:27: warning: result of comparison against a string literal is unspecified (use an explicit string comparison function instead) [-Wstring-compare]\n    1 | int f(char *a) { return a == \"yes\"; }\n      |                           ^  ~~~~~\n1 warning generated.\n"
+    },
+    {
+      "case": "string_termination",
+      "compiler": "gcc",
+      "opt": "-O0",
+      "command": [
+        "/usr/bin/gcc",
+        "-std=c17",
+        "-Wall",
+        "-Wextra",
+        "-Wconversion",
+        "-pedantic-errors",
+        "-fdiagnostics-color=never",
+        "-O0",
+        "-c",
+        "string_termination.c",
+        "-o",
+        "probe.o"
+      ],
+      "exit": 0,
+      "stderr": "string_termination.c: In function \u2018f\u2019:\nstring_termination.c:2:26: warning: initializer-string for array of \u2018char\u2019 truncates NUL terminator but destination lacks \u2018nonstring\u2019 attribute (4 chars into 3 available) [-Wunterminated-string-initialization]\n    2 | void f(void) { char a[3]=\"cat\"; puts(a); }\n      |                          ^~~~~\n"
+    },
+    {
+      "case": "string_termination",
+      "compiler": "gcc",
+      "opt": "-O2",
+      "command": [
+        "/usr/bin/gcc",
+        "-std=c17",
+        "-Wall",
+        "-Wextra",
+        "-Wconversion",
+        "-pedantic-errors",
+        "-fdiagnostics-color=never",
+        "-O2",
+        "-c",
+        "string_termination.c",
+        "-o",
+        "probe.o"
+      ],
+      "exit": 0,
+      "stderr": "string_termination.c: In function \u2018f\u2019:\nstring_termination.c:2:26: warning: initializer-string for array of \u2018char\u2019 truncates NUL terminator but destination lacks \u2018nonstring\u2019 attribute (4 chars into 3 available) [-Wunterminated-string-initialization]\n    2 | void f(void) { char a[3]=\"cat\"; puts(a); }\n      |                          ^~~~~\n"
+    },
+    {
+      "case": "string_termination",
+      "compiler": "clang",
+      "opt": "-O0",
+      "command": [
+        "/usr/lib/llvm-23/bin/clang",
+        "-std=c17",
+        "-Wall",
+        "-Wextra",
+        "-Wconversion",
+        "-pedantic-errors",
+        "-fdiagnostics-color=never",
+        "-O0",
+        "-c",
+        "string_termination.c",
+        "-o",
+        "probe.o"
+      ],
+      "exit": 0,
+      "stderr": "string_termination.c:2:26: warning: initializer-string for character array is too long, array size is 3 but initializer has size 4 (including the null terminating character); did you mean to use the 'nonstring' attribute? [-Wunterminated-string-initialization]\n    2 | void f(void) { char a[3]=\"cat\"; puts(a); }\n      |                          ^~~~~\n1 warning generated.\n"
+    },
+    {
+      "case": "string_termination",
+      "compiler": "clang",
+      "opt": "-O2",
+      "command": [
+        "/usr/lib/llvm-23/bin/clang",
+        "-std=c17",
+        "-Wall",
+        "-Wextra",
+        "-Wconversion",
+        "-pedantic-errors",
+        "-fdiagnostics-color=never",
+        "-O2",
+        "-c",
+        "string_termination.c",
+        "-o",
+        "probe.o"
+      ],
+      "exit": 0,
+      "stderr": "string_termination.c:2:26: warning: initializer-string for character array is too long, array size is 3 but initializer has size 4 (including the null terminating character); did you mean to use the 'nonstring' attribute? [-Wunterminated-string-initialization]\n    2 | void f(void) { char a[3]=\"cat\"; puts(a); }\n      |                          ^~~~~\n1 warning generated.\n"
+    },
+    {
+      "case": "input_bound",
+      "compiler": "gcc",
+      "opt": "-O0",
+      "command": [
+        "/usr/bin/gcc",
+        "-std=c17",
+        "-Wall",
+        "-Wextra",
+        "-Wconversion",
+        "-pedantic-errors",
+        "-fdiagnostics-color=never",
+        "-O0",
+        "-c",
+        "input_bound.c",
+        "-o",
+        "probe.o"
+      ],
+      "exit": 0,
+      "stderr": ""
+    },
+    {
+      "case": "input_bound",
+      "compiler": "gcc",
+      "opt": "-O2",
+      "command": [
+        "/usr/bin/gcc",
+        "-std=c17",
+        "-Wall",
+        "-Wextra",
+        "-Wconversion",
+        "-pedantic-errors",
+        "-fdiagnostics-color=never",
+        "-O2",
+        "-c",
+        "input_bound.c",
+        "-o",
+        "probe.o"
+      ],
+      "exit": 0,
+      "stderr": "input_bound.c: In function \u2018f\u2019:\ninput_bound.c:2:27: warning: ignoring return value of \u2018scanf\u2019 declared with attribute \u2018warn_unused_result\u2019 [-Wunused-result]\n    2 | void f(void) { char a[8]; scanf(\"%s\", a); }\n      |                           ^~~~~~~~~~~~~~\n"
+    },
+    {
+      "case": "input_bound",
+      "compiler": "clang",
+      "opt": "-O0",
+      "command": [
+        "/usr/lib/llvm-23/bin/clang",
+        "-std=c17",
+        "-Wall",
+        "-Wextra",
+        "-Wconversion",
+        "-pedantic-errors",
+        "-fdiagnostics-color=never",
+        "-O0",
+        "-c",
+        "input_bound.c",
+        "-o",
+        "probe.o"
+      ],
+      "exit": 0,
+      "stderr": ""
+    },
+    {
+      "case": "input_bound",
+      "compiler": "clang",
+      "opt": "-O2",
+      "command": [
+        "/usr/lib/llvm-23/bin/clang",
+        "-std=c17",
+        "-Wall",
+        "-Wextra",
+        "-Wconversion",
+        "-pedantic-errors",
+        "-fdiagnostics-color=never",
+        "-O2",
+        "-c",
+        "input_bound.c",
+        "-o",
+        "probe.o"
+      ],
+      "exit": 0,
+      "stderr": ""
+    },
+    {
+      "case": "input_newline",
+      "compiler": "gcc",
+      "opt": "-O0",
+      "command": [
+        "/usr/bin/gcc",
+        "-std=c17",
+        "-Wall",
+        "-Wextra",
+        "-Wconversion",
+        "-pedantic-errors",
+        "-fdiagnostics-color=never",
+        "-O0",
+        "-c",
+        "input_newline.c",
+        "-o",
+        "probe.o"
+      ],
+      "exit": 0,
+      "stderr": ""
+    },
+    {
+      "case": "input_newline",
+      "compiler": "gcc",
+      "opt": "-O2",
+      "command": [
+        "/usr/bin/gcc",
+        "-std=c17",
+        "-Wall",
+        "-Wextra",
+        "-Wconversion",
+        "-pedantic-errors",
+        "-fdiagnostics-color=never",
+        "-O2",
+        "-c",
+        "input_newline.c",
+        "-o",
+        "probe.o"
+      ],
+      "exit": 0,
+      "stderr": "input_newline.c: In function \u2018f\u2019:\ninput_newline.c:2:31: warning: ignoring return value of \u2018scanf\u2019 declared with attribute \u2018warn_unused_result\u2019 [-Wunused-result]\n    2 | void f(void) { int n; char c; scanf(\"%d\", &n); scanf(\"%c\", &c); }\n      |                               ^~~~~~~~~~~~~~~\ninput_newline.c:2:48: warning: ignoring return value of \u2018scanf\u2019 declared with attribute \u2018warn_unused_result\u2019 [-Wunused-result]\n    2 | void f(void) { int n; char c; scanf(\"%d\", &n); scanf(\"%c\", &c); }\n      |                                                ^~~~~~~~~~~~~~~\n"
+    },
+    {
+      "case": "input_newline",
+      "compiler": "clang",
+      "opt": "-O0",
+      "command": [
+        "/usr/lib/llvm-23/bin/clang",
+        "-std=c17",
+        "-Wall",
+        "-Wextra",
+        "-Wconversion",
+        "-pedantic-errors",
+        "-fdiagnostics-color=never",
+        "-O0",
+        "-c",
+        "input_newline.c",
+        "-o",
+        "probe.o"
+      ],
+      "exit": 0,
+      "stderr": ""
+    },
+    {
+      "case": "input_newline",
+      "compiler": "clang",
+      "opt": "-O2",
+      "command": [
+        "/usr/lib/llvm-23/bin/clang",
+        "-std=c17",
+        "-Wall",
+        "-Wextra",
+        "-Wconversion",
+        "-pedantic-errors",
+        "-fdiagnostics-color=never",
+        "-O2",
+        "-c",
+        "input_newline.c",
+        "-o",
+        "probe.o"
+      ],
+      "exit": 0,
+      "stderr": ""
+    },
+    {
+      "case": "array_offbyone",
+      "compiler": "gcc",
+      "opt": "-O0",
+      "command": [
+        "/usr/bin/gcc",
+        "-std=c17",
+        "-Wall",
+        "-Wextra",
+        "-Wconversion",
+        "-pedantic-errors",
+        "-fdiagnostics-color=never",
+        "-O0",
+        "-c",
+        "array_offbyone.c",
+        "-o",
+        "probe.o"
+      ],
+      "exit": 0,
+      "stderr": ""
+    },
+    {
+      "case": "array_offbyone",
+      "compiler": "gcc",
+      "opt": "-O2",
+      "command": [
+        "/usr/bin/gcc",
+        "-std=c17",
+        "-Wall",
+        "-Wextra",
+        "-Wconversion",
+        "-pedantic-errors",
+        "-fdiagnostics-color=never",
+        "-O2",
+        "-c",
+        "array_offbyone.c",
+        "-o",
+        "probe.o"
+      ],
+      "exit": 0,
+      "stderr": "array_offbyone.c: In function \u2018f\u2019:\narray_offbyone.c:1:37: warning: array subscript 3 is above array bounds of \u2018int[3]\u2019 [-Warray-bounds=]\n    1 | int f(void) { int a[3]={0}; return a[3]; }\n      |                                    ~^~~\narray_offbyone.c:1:19: note: while referencing \u2018a\u2019\n    1 | int f(void) { int a[3]={0}; return a[3]; }\n      |                   ^\n"
+    },
+    {
+      "case": "array_offbyone",
+      "compiler": "clang",
+      "opt": "-O0",
+      "command": [
+        "/usr/lib/llvm-23/bin/clang",
+        "-std=c17",
+        "-Wall",
+        "-Wextra",
+        "-Wconversion",
+        "-pedantic-errors",
+        "-fdiagnostics-color=never",
+        "-O0",
+        "-c",
+        "array_offbyone.c",
+        "-o",
+        "probe.o"
+      ],
+      "exit": 0,
+      "stderr": "array_offbyone.c:1:36: warning: array index 3 is past the end of the array (that has type 'int[3]') [-Warray-bounds]\n    1 | int f(void) { int a[3]={0}; return a[3]; }\n      |                                    ^ ~\narray_offbyone.c:1:15: note: array 'a' declared here\n    1 | int f(void) { int a[3]={0}; return a[3]; }\n      |               ^\n1 warning generated.\n"
+    },
+    {
+      "case": "array_offbyone",
+      "compiler": "clang",
+      "opt": "-O2",
+      "command": [
+        "/usr/lib/llvm-23/bin/clang",
+        "-std=c17",
+        "-Wall",
+        "-Wextra",
+        "-Wconversion",
+        "-pedantic-errors",
+        "-fdiagnostics-color=never",
+        "-O2",
+        "-c",
+        "array_offbyone.c",
+        "-o",
+        "probe.o"
+      ],
+      "exit": 0,
+      "stderr": "array_offbyone.c:1:36: warning: array index 3 is past the end of the array (that has type 'int[3]') [-Warray-bounds]\n    1 | int f(void) { int a[3]={0}; return a[3]; }\n      |                                    ^ ~\narray_offbyone.c:1:15: note: array 'a' declared here\n    1 | int f(void) { int a[3]={0}; return a[3]; }\n      |               ^\n1 warning generated.\n"
+    },
+    {
+      "case": "lifetime",
+      "compiler": "gcc",
+      "opt": "-O0",
+      "command": [
+        "/usr/bin/gcc",
+        "-std=c17",
+        "-Wall",
+        "-Wextra",
+        "-Wconversion",
+        "-pedantic-errors",
+        "-fdiagnostics-color=never",
+        "-O0",
+        "-c",
+        "lifetime.c",
+        "-o",
+        "probe.o"
+      ],
+      "exit": 0,
+      "stderr": "lifetime.c: In function \u2018f\u2019:\nlifetime.c:1:32: warning: function returns address of local variable [-Wreturn-local-addr]\n    1 | int *f(void) { int n=3; return &n; }\n      |                                ^~\n"
+    },
+    {
+      "case": "lifetime",
+      "compiler": "gcc",
+      "opt": "-O2",
+      "command": [
+        "/usr/bin/gcc",
+        "-std=c17",
+        "-Wall",
+        "-Wextra",
+        "-Wconversion",
+        "-pedantic-errors",
+        "-fdiagnostics-color=never",
+        "-O2",
+        "-c",
+        "lifetime.c",
+        "-o",
+        "probe.o"
+      ],
+      "exit": 0,
+      "stderr": "lifetime.c: In function \u2018f\u2019:\nlifetime.c:1:32: warning: function returns address of local variable [-Wreturn-local-addr]\n    1 | int *f(void) { int n=3; return &n; }\n      |                                ^~\n"
+    },
+    {
+      "case": "lifetime",
+      "compiler": "clang",
+      "opt": "-O0",
+      "command": [
+        "/usr/lib/llvm-23/bin/clang",
+        "-std=c17",
+        "-Wall",
+        "-Wextra",
+        "-Wconversion",
+        "-pedantic-errors",
+        "-fdiagnostics-color=never",
+        "-O0",
+        "-c",
+        "lifetime.c",
+        "-o",
+        "probe.o"
+      ],
+      "exit": 0,
+      "stderr": "lifetime.c:1:33: warning: address of stack memory associated with local variable 'n' returned [-Wreturn-stack-address]\n    1 | int *f(void) { int n=3; return &n; }\n      |                                 ^\n1 warning generated.\n"
+    },
+    {
+      "case": "lifetime",
+      "compiler": "clang",
+      "opt": "-O2",
+      "command": [
+        "/usr/lib/llvm-23/bin/clang",
+        "-std=c17",
+        "-Wall",
+        "-Wextra",
+        "-Wconversion",
+        "-pedantic-errors",
+        "-fdiagnostics-color=never",
+        "-O2",
+        "-c",
+        "lifetime.c",
+        "-o",
+        "probe.o"
+      ],
+      "exit": 0,
+      "stderr": "lifetime.c:1:33: warning: address of stack memory associated with local variable 'n' returned [-Wreturn-stack-address]\n    1 | int *f(void) { int n=3; return &n; }\n      |                                 ^\n1 warning generated.\n"
+    },
+    {
+      "case": "assignment",
+      "compiler": "gcc",
+      "opt": "-O0",
+      "command": [
+        "/usr/bin/gcc",
+        "-std=c17",
+        "-Wall",
+        "-Wextra",
+        "-Wconversion",
+        "-pedantic-errors",
+        "-fdiagnostics-color=never",
+        "-O0",
+        "-c",
+        "assignment.c",
+        "-o",
+        "probe.o"
+      ],
+      "exit": 0,
+      "stderr": "assignment.c: In function \u2018f\u2019:\nassignment.c:1:20: warning: suggest parentheses around assignment used as truth value [-Wparentheses]\n    1 | int f(int n) { if (n=3) return 1; return 0; }\n      |                    ^\n"
+    },
+    {
+      "case": "assignment",
+      "compiler": "gcc",
+      "opt": "-O2",
+      "command": [
+        "/usr/bin/gcc",
+        "-std=c17",
+        "-Wall",
+        "-Wextra",
+        "-Wconversion",
+        "-pedantic-errors",
+        "-fdiagnostics-color=never",
+        "-O2",
+        "-c",
+        "assignment.c",
+        "-o",
+        "probe.o"
+      ],
+      "exit": 0,
+      "stderr": "assignment.c: In function \u2018f\u2019:\nassignment.c:1:20: warning: suggest parentheses around assignment used as truth value [-Wparentheses]\n    1 | int f(int n) { if (n=3) return 1; return 0; }\n      |                    ^\n"
+    },
+    {
+      "case": "assignment",
+      "compiler": "clang",
+      "opt": "-O0",
+      "command": [
+        "/usr/lib/llvm-23/bin/clang",
+        "-std=c17",
+        "-Wall",
+        "-Wextra",
+        "-Wconversion",
+        "-pedantic-errors",
+        "-fdiagnostics-color=never",
+        "-O0",
+        "-c",
+        "assignment.c",
+        "-o",
+        "probe.o"
+      ],
+      "exit": 0,
+      "stderr": "assignment.c:1:21: warning: using the result of an assignment as a condition without parentheses [-Wparentheses]\n    1 | int f(int n) { if (n=3) return 1; return 0; }\n      |                    ~^~\nassignment.c:1:21: note: place parentheses around the assignment to silence this warning\n    1 | int f(int n) { if (n=3) return 1; return 0; }\n      |                     ^ \n      |                    (  )\nassignment.c:1:21: note: use '==' to turn this assignment into an equality comparison\n    1 | int f(int n) { if (n=3) return 1; return 0; }\n      |                     ^\n      |                     ==\n1 warning generated.\n"
+    },
+    {
+      "case": "assignment",
+      "compiler": "clang",
+      "opt": "-O2",
+      "command": [
+        "/usr/lib/llvm-23/bin/clang",
+        "-std=c17",
+        "-Wall",
+        "-Wextra",
+        "-Wconversion",
+        "-pedantic-errors",
+        "-fdiagnostics-color=never",
+        "-O2",
+        "-c",
+        "assignment.c",
+        "-o",
+        "probe.o"
+      ],
+      "exit": 0,
+      "stderr": "assignment.c:1:21: warning: using the result of an assignment as a condition without parentheses [-Wparentheses]\n    1 | int f(int n) { if (n=3) return 1; return 0; }\n      |                    ~^~\nassignment.c:1:21: note: place parentheses around the assignment to silence this warning\n    1 | int f(int n) { if (n=3) return 1; return 0; }\n      |                     ^ \n      |                    (  )\nassignment.c:1:21: note: use '==' to turn this assignment into an equality comparison\n    1 | int f(int n) { if (n=3) return 1; return 0; }\n      |                     ^\n      |                     ==\n1 warning generated.\n"
+    },
+    {
+      "case": "semicolon",
+      "compiler": "gcc",
+      "opt": "-O0",
+      "command": [
+        "/usr/bin/gcc",
+        "-std=c17",
+        "-Wall",
+        "-Wextra",
+        "-Wconversion",
+        "-pedantic-errors",
+        "-fdiagnostics-color=never",
+        "-O0",
+        "-c",
+        "semicolon.c",
+        "-o",
+        "probe.o"
+      ],
+      "exit": 1,
+      "stderr": "semicolon.c: In function \u2018f\u2019:\nsemicolon.c:2:2: error: expected \u2018,\u2019 or \u2018;\u2019 before \u2018return\u2019\n    2 |  return n; }\n      |  ^~~~~~\nsemicolon.c:1:19: warning: unused variable \u2018n\u2019 [-Wunused-variable]\n    1 | int f(void) { int n=3\n      |                   ^\nsemicolon.c:2:12: warning: control reaches end of non-void function [-Wreturn-type]\n    2 |  return n; }\n      |            ^\n"
+    },
+    {
+      "case": "semicolon",
+      "compiler": "gcc",
+      "opt": "-O2",
+      "command": [
+        "/usr/bin/gcc",
+        "-std=c17",
+        "-Wall",
+        "-Wextra",
+        "-Wconversion",
+        "-pedantic-errors",
+        "-fdiagnostics-color=never",
+        "-O2",
+        "-c",
+        "semicolon.c",
+        "-o",
+        "probe.o"
+      ],
+      "exit": 1,
+      "stderr": "semicolon.c: In function \u2018f\u2019:\nsemicolon.c:2:2: error: expected \u2018,\u2019 or \u2018;\u2019 before \u2018return\u2019\n    2 |  return n; }\n      |  ^~~~~~\nsemicolon.c:1:19: warning: unused variable \u2018n\u2019 [-Wunused-variable]\n    1 | int f(void) { int n=3\n      |                   ^\nsemicolon.c:2:12: warning: control reaches end of non-void function [-Wreturn-type]\n    2 |  return n; }\n      |            ^\n"
+    },
+    {
+      "case": "semicolon",
+      "compiler": "clang",
+      "opt": "-O0",
+      "command": [
+        "/usr/lib/llvm-23/bin/clang",
+        "-std=c17",
+        "-Wall",
+        "-Wextra",
+        "-Wconversion",
+        "-pedantic-errors",
+        "-fdiagnostics-color=never",
+        "-O0",
+        "-c",
+        "semicolon.c",
+        "-o",
+        "probe.o"
+      ],
+      "exit": 1,
+      "stderr": "semicolon.c:1:22: error: expected ';' at end of declaration\n    1 | int f(void) { int n=3\n      |                      ^\n      |                      ;\n1 error generated.\n"
+    },
+    {
+      "case": "semicolon",
+      "compiler": "clang",
+      "opt": "-O2",
+      "command": [
+        "/usr/lib/llvm-23/bin/clang",
+        "-std=c17",
+        "-Wall",
+        "-Wextra",
+        "-Wconversion",
+        "-pedantic-errors",
+        "-fdiagnostics-color=never",
+        "-O2",
+        "-c",
+        "semicolon.c",
+        "-o",
+        "probe.o"
+      ],
+      "exit": 1,
+      "stderr": "semicolon.c:1:22: error: expected ';' at end of declaration\n    1 | int f(void) { int n=3\n      |                      ^\n      |                      ;\n1 error generated.\n"
+    },
+    {
+      "case": "uninitialized",
+      "compiler": "gcc",
+      "opt": "-O0",
+      "command": [
+        "/usr/bin/gcc",
+        "-std=c17",
+        "-Wall",
+        "-Wextra",
+        "-Wconversion",
+        "-pedantic-errors",
+        "-fdiagnostics-color=never",
+        "-O0",
+        "-c",
+        "uninitialized.c",
+        "-o",
+        "probe.o"
+      ],
+      "exit": 0,
+      "stderr": ""
+    },
+    {
+      "case": "uninitialized",
+      "compiler": "gcc",
+      "opt": "-O2",
+      "command": [
+        "/usr/bin/gcc",
+        "-std=c17",
+        "-Wall",
+        "-Wextra",
+        "-Wconversion",
+        "-pedantic-errors",
+        "-fdiagnostics-color=never",
+        "-O2",
+        "-c",
+        "uninitialized.c",
+        "-o",
+        "probe.o"
+      ],
+      "exit": 0,
+      "stderr": ""
+    },
+    {
+      "case": "uninitialized",
+      "compiler": "clang",
+      "opt": "-O0",
+      "command": [
+        "/usr/lib/llvm-23/bin/clang",
+        "-std=c17",
+        "-Wall",
+        "-Wextra",
+        "-Wconversion",
+        "-pedantic-errors",
+        "-fdiagnostics-color=never",
+        "-O0",
+        "-c",
+        "uninitialized.c",
+        "-o",
+        "probe.o"
+      ],
+      "exit": 0,
+      "stderr": "uninitialized.c:1:31: warning: variable 'n' is used uninitialized whenever 'if' condition is false [-Wsometimes-uninitialized]\n    1 | int f(int ready) { int n; if (ready) n=1; return n; }\n      |                               ^~~~~\nuninitialized.c:1:50: note: uninitialized use occurs here\n    1 | int f(int ready) { int n; if (ready) n=1; return n; }\n      |                                                  ^\nuninitialized.c:1:27: note: remove the 'if' if its condition is always true\n    1 | int f(int ready) { int n; if (ready) n=1; return n; }\n      |                           ^~~~~~~~~~\nuninitialized.c:1:25: note: initialize the variable 'n' to silence this warning\n    1 | int f(int ready) { int n; if (ready) n=1; return n; }\n      |                         ^\n      |                          = 0\n1 warning generated.\n"
+    },
+    {
+      "case": "uninitialized",
+      "compiler": "clang",
+      "opt": "-O2",
+      "command": [
+        "/usr/lib/llvm-23/bin/clang",
+        "-std=c17",
+        "-Wall",
+        "-Wextra",
+        "-Wconversion",
+        "-pedantic-errors",
+        "-fdiagnostics-color=never",
+        "-O2",
+        "-c",
+        "uninitialized.c",
+        "-o",
+        "probe.o"
+      ],
+      "exit": 0,
+      "stderr": "uninitialized.c:1:31: warning: variable 'n' is used uninitialized whenever 'if' condition is false [-Wsometimes-uninitialized]\n    1 | int f(int ready) { int n; if (ready) n=1; return n; }\n      |                               ^~~~~\nuninitialized.c:1:50: note: uninitialized use occurs here\n    1 | int f(int ready) { int n; if (ready) n=1; return n; }\n      |                                                  ^\nuninitialized.c:1:27: note: remove the 'if' if its condition is always true\n    1 | int f(int ready) { int n; if (ready) n=1; return n; }\n      |                           ^~~~~~~~~~\nuninitialized.c:1:25: note: initialize the variable 'n' to silence this warning\n    1 | int f(int ready) { int n; if (ready) n=1; return n; }\n      |                         ^\n      |                          = 0\n1 warning generated.\n"
+    },
+    {
+      "case": "scope",
+      "compiler": "gcc",
+      "opt": "-O0",
+      "command": [
+        "/usr/bin/gcc",
+        "-std=c17",
+        "-Wall",
+        "-Wextra",
+        "-Wconversion",
+        "-pedantic-errors",
+        "-fdiagnostics-color=never",
+        "-O0",
+        "-c",
+        "scope.c",
+        "-o",
+        "probe.o"
+      ],
+      "exit": 1,
+      "stderr": "scope.c: In function \u2018f\u2019:\nscope.c:1:44: error: \u2018n\u2019 undeclared (first use in this function)\n    1 | int f(void) { { int n=3; (void)n; } return n; }\n      |                                            ^\nscope.c:1:44: note: each undeclared identifier is reported only once for each function it appears in\n"
+    },
+    {
+      "case": "scope",
+      "compiler": "gcc",
+      "opt": "-O2",
+      "command": [
+        "/usr/bin/gcc",
+        "-std=c17",
+        "-Wall",
+        "-Wextra",
+        "-Wconversion",
+        "-pedantic-errors",
+        "-fdiagnostics-color=never",
+        "-O2",
+        "-c",
+        "scope.c",
+        "-o",
+        "probe.o"
+      ],
+      "exit": 1,
+      "stderr": "scope.c: In function \u2018f\u2019:\nscope.c:1:44: error: \u2018n\u2019 undeclared (first use in this function)\n    1 | int f(void) { { int n=3; (void)n; } return n; }\n      |                                            ^\nscope.c:1:44: note: each undeclared identifier is reported only once for each function it appears in\n"
+    },
+    {
+      "case": "scope",
+      "compiler": "clang",
+      "opt": "-O0",
+      "command": [
+        "/usr/lib/llvm-23/bin/clang",
+        "-std=c17",
+        "-Wall",
+        "-Wextra",
+        "-Wconversion",
+        "-pedantic-errors",
+        "-fdiagnostics-color=never",
+        "-O0",
+        "-c",
+        "scope.c",
+        "-o",
+        "probe.o"
+      ],
+      "exit": 1,
+      "stderr": "scope.c:1:44: error: use of undeclared identifier 'n'\n    1 | int f(void) { { int n=3; (void)n; } return n; }\n      |                                            ^\n1 error generated.\n"
+    },
+    {
+      "case": "scope",
+      "compiler": "clang",
+      "opt": "-O2",
+      "command": [
+        "/usr/lib/llvm-23/bin/clang",
+        "-std=c17",
+        "-Wall",
+        "-Wextra",
+        "-Wconversion",
+        "-pedantic-errors",
+        "-fdiagnostics-color=never",
+        "-O2",
+        "-c",
+        "scope.c",
+        "-o",
+        "probe.o"
+      ],
+      "exit": 1,
+      "stderr": "scope.c:1:44: error: use of undeclared identifier 'n'\n    1 | int f(void) { { int n=3; (void)n; } return n; }\n      |                                            ^\n1 error generated.\n"
+    },
+    {
+      "case": "string_identity",
+      "compiler": "gcc",
+      "opt": "-O0",
+      "command": [
+        "/usr/bin/gcc",
+        "-std=c17",
+        "-Wall",
+        "-Wextra",
+        "-Wconversion",
+        "-pedantic-errors",
+        "-fdiagnostics-color=never",
+        "-O0",
+        "-c",
+        "string_identity.c",
+        "-o",
+        "probe.o"
+      ],
+      "exit": 0,
+      "stderr": ""
+    },
+    {
+      "case": "string_identity",
+      "compiler": "gcc",
+      "opt": "-O2",
+      "command": [
+        "/usr/bin/gcc",
+        "-std=c17",
+        "-Wall",
+        "-Wextra",
+        "-Wconversion",
+        "-pedantic-errors",
+        "-fdiagnostics-color=never",
+        "-O2",
+        "-c",
+        "string_identity.c",
+        "-o",
+        "probe.o"
+      ],
+      "exit": 0,
+      "stderr": ""
+    },
+    {
+      "case": "string_identity",
+      "compiler": "clang",
+      "opt": "-O0",
+      "command": [
+        "/usr/lib/llvm-23/bin/clang",
+        "-std=c17",
+        "-Wall",
+        "-Wextra",
+        "-Wconversion",
+        "-pedantic-errors",
+        "-fdiagnostics-color=never",
+        "-O0",
+        "-c",
+        "string_identity.c",
+        "-o",
+        "probe.o"
+      ],
+      "exit": 0,
+      "stderr": ""
+    },
+    {
+      "case": "string_identity",
+      "compiler": "clang",
+      "opt": "-O2",
+      "command": [
+        "/usr/lib/llvm-23/bin/clang",
+        "-std=c17",
+        "-Wall",
+        "-Wextra",
+        "-Wconversion",
+        "-pedantic-errors",
+        "-fdiagnostics-color=never",
+        "-O2",
+        "-c",
+        "string_identity.c",
+        "-o",
+        "probe.o"
+      ],
+      "exit": 0,
+      "stderr": ""
+    },
+    {
+      "case": "use_after_free",
+      "compiler": "gcc",
+      "opt": "-O0",
+      "command": [
+        "/usr/bin/gcc",
+        "-std=c17",
+        "-Wall",
+        "-Wextra",
+        "-Wconversion",
+        "-pedantic-errors",
+        "-fdiagnostics-color=never",
+        "-O0",
+        "-c",
+        "use_after_free.c",
+        "-o",
+        "probe.o"
+      ],
+      "exit": 0,
+      "stderr": "use_after_free.c: In function \u2018f\u2019:\nuse_after_free.c:2:79: warning: pointer \u2018p\u2019 used after \u2018free\u2019 [-Wuse-after-free]\n    2 | int f(void) { int *p=malloc(sizeof *p); if(!p)return 0; *p=4; free(p); return *p; }\n      |                                                                               ^~\nuse_after_free.c:2:63: note: call to \u2018free\u2019 here\n    2 | int f(void) { int *p=malloc(sizeof *p); if(!p)return 0; *p=4; free(p); return *p; }\n      |                                                               ^~~~~~~\n"
+    },
+    {
+      "case": "use_after_free",
+      "compiler": "gcc",
+      "opt": "-O2",
+      "command": [
+        "/usr/bin/gcc",
+        "-std=c17",
+        "-Wall",
+        "-Wextra",
+        "-Wconversion",
+        "-pedantic-errors",
+        "-fdiagnostics-color=never",
+        "-O2",
+        "-c",
+        "use_after_free.c",
+        "-o",
+        "probe.o"
+      ],
+      "exit": 0,
+      "stderr": "use_after_free.c: In function \u2018f\u2019:\nuse_after_free.c:2:79: warning: pointer \u2018p\u2019 used after \u2018free\u2019 [-Wuse-after-free]\n    2 | int f(void) { int *p=malloc(sizeof *p); if(!p)return 0; *p=4; free(p); return *p; }\n      |                                                                               ^~\nuse_after_free.c:2:63: note: call to \u2018free\u2019 here\n    2 | int f(void) { int *p=malloc(sizeof *p); if(!p)return 0; *p=4; free(p); return *p; }\n      |                                                               ^~~~~~~\n"
+    },
+    {
+      "case": "use_after_free",
+      "compiler": "clang",
+      "opt": "-O0",
+      "command": [
+        "/usr/lib/llvm-23/bin/clang",
+        "-std=c17",
+        "-Wall",
+        "-Wextra",
+        "-Wconversion",
+        "-pedantic-errors",
+        "-fdiagnostics-color=never",
+        "-O0",
+        "-c",
+        "use_after_free.c",
+        "-o",
+        "probe.o"
+      ],
+      "exit": 0,
+      "stderr": ""
+    },
+    {
+      "case": "use_after_free",
+      "compiler": "clang",
+      "opt": "-O2",
+      "command": [
+        "/usr/lib/llvm-23/bin/clang",
+        "-std=c17",
+        "-Wall",
+        "-Wextra",
+        "-Wconversion",
+        "-pedantic-errors",
+        "-fdiagnostics-color=never",
+        "-O2",
+        "-c",
+        "use_after_free.c",
+        "-o",
+        "probe.o"
+      ],
+      "exit": 0,
+      "stderr": ""
+    }
+  ]
+}

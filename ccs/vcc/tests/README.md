@@ -71,3 +71,11 @@ string and ctype functions, a bump malloc, exit/atexit/abort, setjmp/longjmp
 (in start.S), qsort.  stdout and stderr both go to the UART.  There's no
 compiler-rt for aarch64-linux here, so clang's build of a test that does
 `long double` arithmetic fails to link and the test is skipped (ref-fail).
+
+## Beginner diagnostic repair stories
+
+`onboarding/` contains 25 broken examples, 25 justified repairs and 25 intentional
+neighbors. `bench/vcc-onboarding.py` checks semantic message contracts, locations,
+structured output, and clean compilation of the repairs/neighbors on Linux x86 and
+ARM. Missing diagnostic coverage is explicit; see [the corpus README](onboarding/README.md)
+for the distinction between a strict run and the known-gap CI baseline.

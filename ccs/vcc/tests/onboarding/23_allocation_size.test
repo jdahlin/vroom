@@ -1,0 +1,35 @@
+id = "B23"
+title = "Allocation uses pointer size instead of object size"
+expect = [
+  { line = 5, severity = "warning", pattern = "sizeof.*pointer|allocation.*(size|small)|allocat.*(enough|insufficient)|bounds|outside" },
+]
+known_gap = "Allocation intent needs a controlled heuristic or data-flow evidence; pointer-sized allocations can be intentional. Do not auto-rewrite every sizeof pointer."
+
+=== broken.c ===
+typedef __SIZE_TYPE__ size_t;
+void *malloc(size_t); void free(void *);
+struct Item { long values[16]; };
+int main(void) {
+    struct Item *p = malloc(sizeof p);
+    if (!p) return 1;
+    p->values[15] = 7;
+    free(p);
+    return 0;
+}
+=== fixed.c ===
+typedef __SIZE_TYPE__ size_t;
+void *malloc(size_t); void free(void *);
+struct Item { long values[16]; };
+int main(void) {
+    struct Item *p = malloc(sizeof *p);
+    if (!p) return 1;
+    p->values[15] = 7;
+    free(p);
+    return 0;
+}
+=== valid.c ===
+typedef __SIZE_TYPE__ size_t;
+void *malloc(size_t); void free(void *);
+int main(void) { int **p=malloc(sizeof *p); if(!p)return 1; *p=0; free(p); return 0; }
+=== stderr ===
+=== narrated ===
