@@ -247,3 +247,30 @@ fixpunkter utan budget (samma regel som `emit/flow/`).
   läsning av `main` är byggaren i stället ett virtuellt `LO`-mål, x86-64 är
   första mål, och VIR ligger på `-O2`.
 - Ingen kod ändrad.
+
+### Förberedelse (2026-11-11): X1–X3 på `main`, utan ändrad kod
+
+Dokumenten ligger på `main`, och tre utdataneutrala ändringar i vandraren är
+gjorda (SPEC-vir.md avsnitt 19, X1–X3); inget under `ccs/vcc/vir/`.
+
+- **X2:** `LO(slot)(e, off, size, align, kind)` anropas en gång per utlämnad
+  frameoffset (`wk_pslot`, båda återanvändningsvägarna i `wk_slot`,
+  `wk_local`; `kind` är `WK_SLOT_TEMP/LOCAL/PARAM/FUNC`).  `x64_slot` är tom.
+  Den statiska hjälpfunktionen `x64_slot` i `fp.c` bytte namn till
+  `x64_tmpslot` (namnkrock som specen inte såg).
+- **X3:** `L_VAR` i `lval`-uppräkningen; `x64_load`/`x64_store`/`x64_laddr`
+  ger internt fel.  Ingen producerar den än.
+- **X1:** `bench/gen-walkprefix.py [--check]` genererar
+  `emit/walk/prefix.h` (130 namn); `WK_PREFIX`/`LO_PREFIX` ger en andra
+  instans.  Bevisat med ett engångsbygge (inte incheckat): `walk/*.c` med och
+  utan `-DWK_PREFIX=vw_ -DLO_PREFIX=vw_` ger 46 globala symboler vardera utan
+  överlapp, inga oprefixade `wk_`/`x64_`-referenser kvar, 74 `vw_`-operationer
+  som ett virtuellt mål ska ge.  Ingen andra instans är tillagd; den måste bli
+  en egen TU (inte `emit`-unity).
+- **Verifiering** (bas = commit före kodändringarna, `vbench.py mkbase`):
+  x86-64 `-S` O0/O1/O2 på 253 testfiler (759 kompileringar) identiska;
+  `vcc-same.py` 14687/14693 (de 6 avvikelserna är `-E`-radmarkeringar med
+  basbygget egen include-sökväg, övriga lägen identiska); `vbench.py check`
+  171/171; `vcc-ctests.py --suite vcc` 252/252 (1 xfail); `vcc-sema.py batch`
+  878/879 (modpost.c, som väntat); `vbench.py gate --base` ok (högst +0,09 %
+  instruktioner).  Båda byggena (unity och `VCC_UNITY=`) utan nya varningar.
