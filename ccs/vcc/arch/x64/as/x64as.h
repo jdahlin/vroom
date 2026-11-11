@@ -1,7 +1,7 @@
 /*
  * The x86-64 assembler's shared part: operands, the encoding form and the
  * encoder (asm.c), used by the instruction families, one file each (sys.c,
- * gpr.c, x87.c, sse.c, avx.c).  A family's function returns X64_NEXT for an
+ * gpr.c, x87.c, sse.c, avx.c, evex.c).  A family's function returns X64_NEXT for an
  * instruction that is not its own; x64_instruction tries them in order.
  */
 #ifndef VCC_X64AS_H
@@ -9,7 +9,7 @@
 #include <stdbool.h>
 #include "../../../as/asimpl.h"
 
-enum { XR_NONE, XR_GPR, XR_XMM, XR_ST, XR_SEG, XR_RIP, XR_CR, XR_DR };
+enum { XR_NONE, XR_GPR, XR_XMM, XR_ST, XR_SEG, XR_RIP, XR_CR, XR_DR, XR_K };
 enum { XK_REG, XK_IMM, XK_MEM, XK_EXPR };	/* XK_EXPR: a bare expression (branch target, absolute memory) */
 /* relocation modifiers: sym@MOD */
 enum { XM_NONE, XM_PLT, XM_GOTPCREL, XM_TPOFF, XM_GOTTPOFF, XM_TLSGD, XM_TLSLD, XM_DTPOFF, XM_GOTOFF, XM_GOT };
@@ -20,6 +20,7 @@ typedef struct {
 	uint8_t scale, seg, mod;	/* seg: 0 none, 0x64 fs, 0x65 gs */
 	Val v;			/* immediate / displacement / target */
 	int hasv;
+	uint8_t mask, zero, broadcast; /* explicit k1..k7, {z}, {1toN} */
 } XOp;
 
 typedef struct {
@@ -41,13 +42,14 @@ typedef struct {
 typedef struct {
 	int w, opsz16, rep;		/* rep: a mandatory F2/F3 prefix */
 	const uint8_t *op; int nop;
-	int reg;			/* ModRM.reg (0..15) */
+	int reg;			/* ModRM.reg (0..31 with EVEX) */
 	const XOp *rm;			/* register or memory */
 	int rex8;			/* an 8-bit register operand that needs REX (spl ...) */
 	int64_t imm; int isz; Val immv; int immsym, immsgn, immmod;
 	int gotx;
 	int oreg;			/* a register in the last opcode byte, + 1 (0: none) */
-	int vex, vvvv, vl;		/* VEX: the second source (0..15), 256-bit; the map from op (0f, 0f 38, 0f 3a) */
+	int evex, mask, zero, broadcast, tuple; /* EVEX LL=vl, disp8 multiplier */
+	int vex, vvvv, vl;		/* second source (0..31); vl: VEX L / EVEX LL; map from op */
 } XForm;
 #define F(...) ((XForm){ __VA_ARGS__ })
 
@@ -82,6 +84,7 @@ VPRIV int x64_i_jump(As *a, char *mn, XOp *o, int nops);
 VPRIV int x64_i_setcc(As *a, char *mn, XOp *o, int nops);
 VPRIV int x64_i_x87(As *a, char *mn, XOp *o, int nops);
 VPRIV int x64_i_sse(As *a, char *mn, XOp *o, int nops);
+VPRIV int x64_i_evex(As *a, char *mn, XOp *o, int nops);
 VPRIV int x64_i_avx(As *a, char *mn, XOp *o, int nops);
 VPRIV int x64_i_sse4(As *a, char *mn, XOp *o, int nops);
 VPRIV int x64_i_ssepk(As *a, char *mn, XOp *o, int nops);

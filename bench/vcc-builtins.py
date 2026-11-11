@@ -1,73 +1,133 @@
 #!/usr/bin/env python3
-"""vcc-builtins.py: clang's builtins that vcc does not know (TODO.md tier 3, builtins).
+"""Report frontend builtin recognition and __has_builtin coverage.
 
-    bench/vcc-builtins.py [-v] [--target T]
-
-The names come from LLVM's generated tables (Builtins.inc, BuiltinsAArch64.inc
-under Homebrew LLVM's include/clang/Basic); those clang's __has_builtin
-accepts for the target in C are the list.  For each:
-  - unknown: vcc -fsyntax-only on a call to it says "undeclared function"
-    (a wrong-argument error means vcc knows the name);
-  - has_builtin: vcc's __has_builtin answer differs from clang's.
-Prints the counts and, with -v, the names.  Exit status 1 if vcc's
-__has_builtin says 1 where clang says 0 (a program would take a path that
-clang's build does not); the rest is a report.
+Names come from Clang's installed builtin tables, or its resource headers
+when development tables are absent. Use --prefix __builtin_ia32_ for X9.
+Recognition (including an argument diagnostic) does not prove code generation;
+run the target's runtime/encoding harnesses to validate implemented semantics.
+Missing names are reported; false-positive __has_builtin answers fail the run.
+Compiler failures or an empty/incomplete inventory are errors, never zero gaps.
 """
-import os, re, subprocess, sys, tempfile
+import argparse
+import json
+import os
+from pathlib import Path
+import re
+import shlex
+import shutil
+import subprocess
+import sys
+import tempfile
 
-R = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-VPP = os.environ.get('VCC_BIN', f'{R}/build/ccs') + '/vpp'
-CLANG = '/opt/homebrew/opt/llvm/bin/clang'
-INC = '/opt/homebrew/opt/llvm/include/clang/Basic'
-
-
-def names():
-    out = set()
-    for f in ('Builtins.inc', 'BuiltinsAArch64.inc'):
-        p = f'{INC}/{f}'
-        if os.path.exists(p):
-            out |= set(re.findall(r'\bBI(__builtin_\w+|__sync_\w+|__atomic_\w+|__c11_atomic_\w+)\b', open(p).read()))
-    return sorted(out)
+ROOT = Path(__file__).resolve().parent.parent
+NAME = r'(?:__builtin_\w+|__sync_\w+|__atomic_\w+|__c11_atomic_\w+)'
 
 
-def has_builtin(cc, target, ns, wd):
-    src = ''.join(f'{n} __has_builtin({n})\n' for n in ns)
-    open(f'{wd}/h.c', 'w').write(src)
-    p = subprocess.run([cc, f'--target={target}', '-E', '-P', '-x', 'c', f'{wd}/h.c'], capture_output=True, text=True)
-    ans = {}
+def invoke(cmd):
+    p = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
+    if p.returncode < 0 or p.returncode > 1:
+        raise RuntimeError(f'compiler exited {p.returncode}: {shlex.join(cmd)}\n{p.stderr}')
+    return p
+
+
+def inventory(clang, include_dir, prefix):
+    inc = Path(include_dir) if include_dir else None
+    if not inc:
+        p = invoke([clang, '-print-resource-dir'])
+        if p.returncode:
+            raise RuntimeError(p.stderr)
+        resource = Path(p.stdout.strip())
+        candidates = [resource.parent.parent.parent / 'include/clang/Basic',
+                      Path(clang).resolve().parent.parent / 'include/clang/Basic']
+        inc = next((x for x in candidates if (x / 'Builtins.inc').exists()), resource / 'include')
+    tables = sorted(inc.glob('Builtins*.inc'))
+    # Architecture wrapper subdirectories contain foreign-target examples.
+    files = tables or sorted(inc.glob('*.h'))
+    names = set()
+    for path in files:
+        text = path.read_text(errors='replace')
+        pattern = rf'\bBI({NAME})\b' if tables else rf'\b({NAME})\b'
+        names.update(re.findall(pattern, text))
+    if prefix:
+        names = {n for n in names if n.startswith(prefix) and len(n) > len(prefix)}
+    if not names:
+        raise RuntimeError(f'no builtin names found in {inc} (prefix {prefix!r})')
+    return sorted(names), str(inc), 'builtin-tables' if tables else 'resource-headers'
+
+
+def has_builtin(compiler, flags, names, wd):
+    source = wd / 'has.c'
+    source.write_text(''.join(f'{n} __has_builtin({n})\n' for n in names))
+    p = invoke([compiler, *flags, '-E', '-P', '-x', 'c', str(source)])
+    if p.returncode:
+        raise RuntimeError(f'__has_builtin preprocessing failed: {p.stderr}')
+    answers = {}
+    wanted = set(names)
     for line in p.stdout.splitlines():
-        t = line.split()
-        if len(t) == 2:
-            ans[t[0]] = t[1] == '1'
-    return ans
+        fields = line.split()
+        if len(fields) == 2 and fields[0] in wanted and fields[1] in ('0', '1'):
+            answers[fields[0]] = fields[1] == '1'
+    if len(answers) != len(names):
+        raise RuntimeError(f'incomplete __has_builtin output: {len(answers)}/{len(names)}')
+    return answers
 
 
-def main(av):
-    verbose = '-v' in av
-    target = av[av.index('--target') + 1] if '--target' in av else 'aarch64-linux-gnu'
-    ns = names()
-    with tempfile.TemporaryDirectory() as wd:
-        cl = has_builtin(CLANG, target, ns, wd)
-        us = has_builtin(VPP, target, ns, wd)
-        known = [n for n in ns if cl.get(n)]
-        unknown = []
-        for i in range(0, len(known), 200):
-            chunk = known[i:i + 200]
-            src = ''.join(f'void f{j}(void) {{ {n}(0); }}\n' for j, n in enumerate(chunk))
-            open(f'{wd}/u.c', 'w').write(src)
-            p = subprocess.run([VPP, f'--target={target}', '-fsyntax-only', '-ferror-limit=0', '-w', f'{wd}/u.c'],
-                               capture_output=True, text=True)
-            unknown += [n for n in chunk if f"undeclared function '{n}'" in p.stderr or f"undeclared identifier '{n}'" in p.stderr]
-    hb = [n for n in known if not us.get(n)]
-    extra = [n for n in ns if us.get(n) and not cl.get(n)]
-    print(f'builtins: {len(known)} accepted by clang for {target}; {len(unknown)} unknown to vcc; '
-          f'{len(hb)} with __has_builtin 0 in vcc; {len(extra)} 1 in vcc, 0 in clang')
-    if verbose:
-        print('unknown:', ' '.join(unknown))
-        print('has_builtin 0:', ' '.join(hb))
-        print('has_builtin 1, clang 0:', ' '.join(extra))
-    return 1 if extra else 0
+def main():
+    p = argparse.ArgumentParser(description=__doc__)
+    p.add_argument('-v', '--verbose', action='store_true')
+    p.add_argument('--target', default='aarch64-linux-gnu')
+    p.add_argument('--clang', default=os.environ.get('CLANG') or shutil.which('clang') or
+                   '/opt/homebrew/opt/llvm/bin/clang')
+    p.add_argument('--bin-dir', type=Path, default=Path(os.environ.get('VCC_BIN', ROOT / 'build/ccs')))
+    p.add_argument('--include-dir', help='Clang builtin-table or resource-header directory')
+    p.add_argument('--prefix', default='', help='limit names, e.g. __builtin_ia32_')
+    p.add_argument('--cflag', action='append', default=[], help='extra flag for both compilers; --cflag=-mavx2')
+    p.add_argument('--json', type=Path, help='write inventory, commands, and separate coverage lists')
+    args = p.parse_args()
+    names, inc, source = inventory(args.clang, args.include_dir, args.prefix)
+    flags = [f'--target={args.target}', *args.cflag]
+    vpp = str(args.bin_dir.resolve() / 'vpp')
+    with tempfile.TemporaryDirectory(prefix='vcc-builtins-') as scratch:
+        wd = Path(scratch)
+        cl = has_builtin(args.clang, flags, names, wd)
+        us = has_builtin(vpp, flags, names, wd)
+        unknown = set()
+        # Include names disabled by Clang's current ISA flags: recognition and
+        # feature availability are separate properties of a target builtin.
+        for i in range(0, len(names), 200):
+            chunk = names[i:i + 200]
+            src = wd / 'calls.c'
+            src.write_text(''.join(f'void f{j}(void) {{ {n}(0); }}\n' for j, n in enumerate(chunk)))
+            r = invoke([vpp, *flags, '-fsyntax-only', '-ferror-limit=0', '-w', str(src)])
+            for n in chunk:
+                if any(message in r.stderr for message in
+                       (f"undeclared function '{n}'", f"undeclared identifier '{n}'", f"unknown builtin '{n}'")):
+                    unknown.add(n)
+            if re.search(r'\b(?:fatal error|internal compiler error):', r.stderr):
+                raise RuntimeError(f'incomplete recognition probe: {r.stderr}')
+    enabled = [n for n in names if cl[n]]
+    missing = [n for n in enabled if not us[n]]
+    extra = [n for n in names if us[n] and not cl[n]]
+    report = dict(target=args.target, flags=flags, clang=args.clang, vpp=vpp,
+                  inventory_source=source, inventory_directory=inc, inventory=names,
+                  recognized=[n for n in names if n not in unknown], unknown=sorted(unknown),
+                  clang_enabled=enabled, has_builtin_missing=missing, has_builtin_extra=extra,
+                  scope='frontend recognition and feature queries; not codegen or runtime validation')
+    if args.json:
+        args.json.parent.mkdir(parents=True, exist_ok=True)
+        args.json.write_text(json.dumps(report, indent=2) + '\n')
+    print(f'builtins: {len(names) - len(unknown)}/{len(names)} names recognized by vcc for {args.target}; '
+          f'{len(enabled)} enabled by clang with selected flags; '
+          f'{len(missing)} missing __has_builtin answers; {len(extra)} extra answers')
+    if args.verbose:
+        for label, rows in [('unknown', sorted(unknown)), ('has_builtin 0', missing), ('has_builtin extra', extra)]:
+            print(label + ':', ' '.join(rows))
+    return bool(extra)
 
 
 if __name__ == '__main__':
-    sys.exit(main(sys.argv[1:]))
+    try:
+        sys.exit(main())
+    except (OSError, RuntimeError, subprocess.TimeoutExpired) as error:
+        print(f'vcc-builtins: error: {error}', file=sys.stderr)
+        sys.exit(2)

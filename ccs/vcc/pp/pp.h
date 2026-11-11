@@ -59,6 +59,8 @@ typedef struct pp_opts {
 	int errfd;			/* diagnostics (0: stderr) */
 	int asm_mode;			/* assembler-with-cpp: unknown directives pass, # need not stringify */
 	int target;			/* PP_LINUX_AARCH64, PP_DARWIN, PP_WASM64, PP_WASM32 or PP_LINUX_X86_64 (column of the feature table; x86-64: has_tab_x86) */
+	const void *target_features;	/* immutable target-query context, valid until pp_close */
+	size_t target_features_size;	/* exact context bytes included in the header-cache key */
 	int diag_color;			/* diagnostics: 1 colors, -1 none, 0 when errfd is a terminal */
 	int diag_nocaret;		/* -fno-caret-diagnostics: no source lines */
 	int diag_show_id;		/* -fdiagnostics-show-id: " [id]" after the flag */
@@ -102,6 +104,9 @@ enum { PP_LINUX_AARCH64, PP_DARWIN, PP_WASM64, PP_WASM32, PP_LINUX_X86_64 };
 
 /* set by the front end (a constructor): __has_builtin is 1 for a name it implements */
 extern int (*pp_builtin_known)(const char *name);
+/* Target-specific availability overrides the reference tables: 0/1 is an
+ * authoritative answer; -1 leaves the existing generic query unchanged. */
+extern int (*pp_target_builtin)(const pp_opts *opts, const char *name);
 
 typedef struct pp pp;
 

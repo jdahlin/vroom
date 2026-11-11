@@ -1609,6 +1609,8 @@ static __attribute__((noinline)) int ppd_run1(int argc, char **argv, const ppd_e
 		bstr(&pre, "#undef __STDC_VERSION__\n#define __STDC_VERSION__ 201710L\n");
 	}
 	po.target = darwin ? PP_DARWIN : wasm == 64 ? PP_WASM64 : wasm ? PP_WASM32 : x86 ? PP_LINUX_X86_64 : PP_LINUX_AARCH64;
+	po.target_features = x86 ? &x86_features_ : NULL;
+	po.target_features_size = x86 ? sizeof(x86_features_) : 0;
 	if (opt == 0 && !undef) bstr(&pre, "#undef __OPTIMIZE__\n#define __NO_INLINE__ 1\n");
 	if (os && !undef) bstr(&pre, "#define __OPTIMIZE_SIZE__ 1\n");
 	if ((pie || pic) && !undef) {

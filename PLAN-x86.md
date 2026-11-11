@@ -284,6 +284,20 @@ Det som skiljer x86-64 och som lager 2 och de x86-specifika passen tar hand om:
 | X8 | **Kärnan.** `-mcmodel=kernel`, `-mno-red-zone`, `-mno-sse -mno-mmx -mno-80387`, `-mstack-alignment=8`, `-mfentry -mrecord-mcount`, retpoline/rethunk (`-mretpoline-external-thunk`, `-mfunction-return=thunk-extern`, `-mindirect-branch-cs-prefix`), IBT (`-fcf-protection=branch`, `endbr64`), `-mharden-sls=all`, `-fpatchable-function-entry`, stackskydd via `%gs` (`-mstack-protector-guard-*`) | objtool utan varningar på alla objekt; `vcc-diff.py`/`vcc-sema.py` på x86-64-trädet; bootar Debian i `qemu-system-x86_64 -enable-kvm`; vccd-bygge med tider |
 | X9 | **Intrinsics.** `__builtin_ia32_*` med vektortyper för clangs `immintrin.h` (SSE4.2-CRC, `popcnt`, AVX2) | `vcc-builtins.py` för x86-64; PostgreSQL byggt och testat på x86-64 Linux (`bench/pg/`) |
 
+**X9 status 2026-11-11 (delvis):** Pinned LLVM 23-data beskriver 2029
+inbyggda namn; 119 har granskade direkta sänkningar och 162 heltalsöverlagringar
+är kartlagda. Detta är inte full täckning. `bench/vcc-x9-oracle.py` jämför
+108 frysta sänkningar mot clang: 91 392 resultat per optimeringsnivå O0–O3,
+både `-S` och `-c`; 136 immediate-fall samt deklarationscache och replay går
+också igenom. `bench/vcc-x86-wide.py` testar AVX-512 inklusive maskad läsning
+mot en skyddad sida. `vas-obj.py` går 64/64; tre av 1800 slumpade kodningar
+använder likvärdig, längre VEX-form än LLVM. PostgreSQL på den kombinerade kompilatorn byggdes utan fallback och testade
+309 fall, 21 hoppades över, inga fel (som clang). Snapshot6 kompilerade
+1580/1580 jobb i samtliga mätlägen; tiderna gäller den äldre snapshoten. Slutlig bred builtin-täckning,
+funktions-/featurekanter och releasegrindarna G1/G4 återstår. Snapshot6 är
+före den sista assemblerns gränskontroll och säkerhetsspärr. Den separata
+PIC-buggen som orsakar DT_TEXTREL-länkvarningar återstår.
+
 Ordningen gör att varje steg syns: X2 ger körbara program via clangs assembler och
 alla tre lagren i minsta form, X4 optimerad kod, X5 egna objekt, X8 kärnan. X0 är förutsättningen för allt (inget går att köra här
 annars) och X1 kan påbörjas parallellt med X0:s lexerdel. X9 behövs inte för

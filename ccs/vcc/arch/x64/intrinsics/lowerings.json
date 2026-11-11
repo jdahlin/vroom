@@ -1,0 +1,1311 @@
+{
+  "__builtin_ia32_blendps": {
+    "class": "XI_TIED",
+    "evidence": {
+      "clang_probe": "__builtin_ia32_blendps.c",
+      "llvm_source": "llvm/lib/Target/X86/X86InstrSSE.td",
+      "probe_immediate": 1,
+      "verified_instruction": "blendps"
+    },
+    "mnemonic": "blendps",
+    "order": "i1r"
+  },
+  "__builtin_ia32_cmpeqpd": {
+    "class": "XI_TIED",
+    "evidence": {
+      "clang_probe": "__builtin_ia32_cmpeqpd.c",
+      "llvm_source": "llvm/lib/Target/X86/X86InstrSSE.td",
+      "probe_immediate": 1,
+      "verified_instruction": "cmpeqpd"
+    },
+    "mnemonic": "cmpeqpd",
+    "order": "1r"
+  },
+  "__builtin_ia32_cmpeqps": {
+    "class": "XI_TIED",
+    "evidence": {
+      "clang_probe": "__builtin_ia32_cmpeqps.c",
+      "llvm_source": "llvm/lib/Target/X86/X86InstrSSE.td",
+      "probe_immediate": 1,
+      "verified_instruction": "cmpeqps"
+    },
+    "mnemonic": "cmpeqps",
+    "order": "1r"
+  },
+  "__builtin_ia32_cmpeqsd": {
+    "class": "XI_TIED",
+    "evidence": {
+      "clang_probe": "__builtin_ia32_cmpeqsd.c",
+      "llvm_source": "llvm/lib/Target/X86/X86InstrSSE.td",
+      "probe_immediate": 1,
+      "verified_instruction": "cmpeqsd"
+    },
+    "mnemonic": "cmpeqsd",
+    "order": "1r"
+  },
+  "__builtin_ia32_cmpeqss": {
+    "class": "XI_TIED",
+    "evidence": {
+      "clang_probe": "__builtin_ia32_cmpeqss.c",
+      "llvm_source": "llvm/lib/Target/X86/X86InstrSSE.td",
+      "probe_immediate": 1,
+      "verified_instruction": "cmpeqss"
+    },
+    "mnemonic": "cmpeqss",
+    "order": "1r"
+  },
+  "__builtin_ia32_cmplepd": {
+    "class": "XI_TIED",
+    "evidence": {
+      "clang_probe": "__builtin_ia32_cmplepd.c",
+      "llvm_source": "llvm/lib/Target/X86/X86InstrSSE.td",
+      "probe_immediate": 1,
+      "verified_instruction": "cmplepd"
+    },
+    "mnemonic": "cmplepd",
+    "order": "1r"
+  },
+  "__builtin_ia32_cmpleps": {
+    "class": "XI_TIED",
+    "evidence": {
+      "clang_probe": "__builtin_ia32_cmpleps.c",
+      "llvm_source": "llvm/lib/Target/X86/X86InstrSSE.td",
+      "probe_immediate": 1,
+      "verified_instruction": "cmpleps"
+    },
+    "mnemonic": "cmpleps",
+    "order": "1r"
+  },
+  "__builtin_ia32_cmplesd": {
+    "class": "XI_TIED",
+    "evidence": {
+      "clang_probe": "__builtin_ia32_cmplesd.c",
+      "llvm_source": "llvm/lib/Target/X86/X86InstrSSE.td",
+      "probe_immediate": 1,
+      "verified_instruction": "cmplesd"
+    },
+    "mnemonic": "cmplesd",
+    "order": "1r"
+  },
+  "__builtin_ia32_cmpless": {
+    "class": "XI_TIED",
+    "evidence": {
+      "clang_probe": "__builtin_ia32_cmpless.c",
+      "llvm_source": "llvm/lib/Target/X86/X86InstrSSE.td",
+      "probe_immediate": 1,
+      "verified_instruction": "cmpless"
+    },
+    "mnemonic": "cmpless",
+    "order": "1r"
+  },
+  "__builtin_ia32_cmpltpd": {
+    "class": "XI_TIED",
+    "evidence": {
+      "clang_probe": "__builtin_ia32_cmpltpd.c",
+      "llvm_source": "llvm/lib/Target/X86/X86InstrSSE.td",
+      "probe_immediate": 1,
+      "verified_instruction": "cmpltpd"
+    },
+    "mnemonic": "cmpltpd",
+    "order": "1r"
+  },
+  "__builtin_ia32_cmpltps": {
+    "class": "XI_TIED",
+    "evidence": {
+      "clang_probe": "__builtin_ia32_cmpltps.c",
+      "llvm_source": "llvm/lib/Target/X86/X86InstrSSE.td",
+      "probe_immediate": 1,
+      "verified_instruction": "cmpltps"
+    },
+    "mnemonic": "cmpltps",
+    "order": "1r"
+  },
+  "__builtin_ia32_cmpltsd": {
+    "class": "XI_TIED",
+    "evidence": {
+      "clang_probe": "__builtin_ia32_cmpltsd.c",
+      "llvm_source": "llvm/lib/Target/X86/X86InstrSSE.td",
+      "probe_immediate": 1,
+      "verified_instruction": "cmpltsd"
+    },
+    "mnemonic": "cmpltsd",
+    "order": "1r"
+  },
+  "__builtin_ia32_cmpltss": {
+    "class": "XI_TIED",
+    "evidence": {
+      "clang_probe": "__builtin_ia32_cmpltss.c",
+      "llvm_source": "llvm/lib/Target/X86/X86InstrSSE.td",
+      "probe_immediate": 1,
+      "verified_instruction": "cmpltss"
+    },
+    "mnemonic": "cmpltss",
+    "order": "1r"
+  },
+  "__builtin_ia32_cmpneqpd": {
+    "class": "XI_TIED",
+    "evidence": {
+      "clang_probe": "__builtin_ia32_cmpneqpd.c",
+      "llvm_source": "llvm/lib/Target/X86/X86InstrSSE.td",
+      "probe_immediate": 1,
+      "verified_instruction": "cmpneqpd"
+    },
+    "mnemonic": "cmpneqpd",
+    "order": "1r"
+  },
+  "__builtin_ia32_cmpneqps": {
+    "class": "XI_TIED",
+    "evidence": {
+      "clang_probe": "__builtin_ia32_cmpneqps.c",
+      "llvm_source": "llvm/lib/Target/X86/X86InstrSSE.td",
+      "probe_immediate": 1,
+      "verified_instruction": "cmpneqps"
+    },
+    "mnemonic": "cmpneqps",
+    "order": "1r"
+  },
+  "__builtin_ia32_cmpneqsd": {
+    "class": "XI_TIED",
+    "evidence": {
+      "clang_probe": "__builtin_ia32_cmpneqsd.c",
+      "llvm_source": "llvm/lib/Target/X86/X86InstrSSE.td",
+      "probe_immediate": 1,
+      "verified_instruction": "cmpneqsd"
+    },
+    "mnemonic": "cmpneqsd",
+    "order": "1r"
+  },
+  "__builtin_ia32_cmpneqss": {
+    "class": "XI_TIED",
+    "evidence": {
+      "clang_probe": "__builtin_ia32_cmpneqss.c",
+      "llvm_source": "llvm/lib/Target/X86/X86InstrSSE.td",
+      "probe_immediate": 1,
+      "verified_instruction": "cmpneqss"
+    },
+    "mnemonic": "cmpneqss",
+    "order": "1r"
+  },
+  "__builtin_ia32_cmpnlepd": {
+    "class": "XI_TIED",
+    "evidence": {
+      "clang_probe": "__builtin_ia32_cmpnlepd.c",
+      "llvm_source": "llvm/lib/Target/X86/X86InstrSSE.td",
+      "probe_immediate": 1,
+      "verified_instruction": "cmpnlepd"
+    },
+    "mnemonic": "cmpnlepd",
+    "order": "1r"
+  },
+  "__builtin_ia32_cmpnleps": {
+    "class": "XI_TIED",
+    "evidence": {
+      "clang_probe": "__builtin_ia32_cmpnleps.c",
+      "llvm_source": "llvm/lib/Target/X86/X86InstrSSE.td",
+      "probe_immediate": 1,
+      "verified_instruction": "cmpnleps"
+    },
+    "mnemonic": "cmpnleps",
+    "order": "1r"
+  },
+  "__builtin_ia32_cmpnlesd": {
+    "class": "XI_TIED",
+    "evidence": {
+      "clang_probe": "__builtin_ia32_cmpnlesd.c",
+      "llvm_source": "llvm/lib/Target/X86/X86InstrSSE.td",
+      "probe_immediate": 1,
+      "verified_instruction": "cmpnlesd"
+    },
+    "mnemonic": "cmpnlesd",
+    "order": "1r"
+  },
+  "__builtin_ia32_cmpnless": {
+    "class": "XI_TIED",
+    "evidence": {
+      "clang_probe": "__builtin_ia32_cmpnless.c",
+      "llvm_source": "llvm/lib/Target/X86/X86InstrSSE.td",
+      "probe_immediate": 1,
+      "verified_instruction": "cmpnless"
+    },
+    "mnemonic": "cmpnless",
+    "order": "1r"
+  },
+  "__builtin_ia32_cmpnltpd": {
+    "class": "XI_TIED",
+    "evidence": {
+      "clang_probe": "__builtin_ia32_cmpnltpd.c",
+      "llvm_source": "llvm/lib/Target/X86/X86InstrSSE.td",
+      "probe_immediate": 1,
+      "verified_instruction": "cmpnltpd"
+    },
+    "mnemonic": "cmpnltpd",
+    "order": "1r"
+  },
+  "__builtin_ia32_cmpnltps": {
+    "class": "XI_TIED",
+    "evidence": {
+      "clang_probe": "__builtin_ia32_cmpnltps.c",
+      "llvm_source": "llvm/lib/Target/X86/X86InstrSSE.td",
+      "probe_immediate": 1,
+      "verified_instruction": "cmpnltps"
+    },
+    "mnemonic": "cmpnltps",
+    "order": "1r"
+  },
+  "__builtin_ia32_cmpnltsd": {
+    "class": "XI_TIED",
+    "evidence": {
+      "clang_probe": "__builtin_ia32_cmpnltsd.c",
+      "llvm_source": "llvm/lib/Target/X86/X86InstrSSE.td",
+      "probe_immediate": 1,
+      "verified_instruction": "cmpnltsd"
+    },
+    "mnemonic": "cmpnltsd",
+    "order": "1r"
+  },
+  "__builtin_ia32_cmpnltss": {
+    "class": "XI_TIED",
+    "evidence": {
+      "clang_probe": "__builtin_ia32_cmpnltss.c",
+      "llvm_source": "llvm/lib/Target/X86/X86InstrSSE.td",
+      "probe_immediate": 1,
+      "verified_instruction": "cmpnltss"
+    },
+    "mnemonic": "cmpnltss",
+    "order": "1r"
+  },
+  "__builtin_ia32_cmpordpd": {
+    "class": "XI_TIED",
+    "evidence": {
+      "clang_probe": "__builtin_ia32_cmpordpd.c",
+      "llvm_source": "llvm/lib/Target/X86/X86InstrSSE.td",
+      "probe_immediate": 1,
+      "verified_instruction": "cmpordpd"
+    },
+    "mnemonic": "cmpordpd",
+    "order": "1r"
+  },
+  "__builtin_ia32_cmpordps": {
+    "class": "XI_TIED",
+    "evidence": {
+      "clang_probe": "__builtin_ia32_cmpordps.c",
+      "llvm_source": "llvm/lib/Target/X86/X86InstrSSE.td",
+      "probe_immediate": 1,
+      "verified_instruction": "cmpordps"
+    },
+    "mnemonic": "cmpordps",
+    "order": "1r"
+  },
+  "__builtin_ia32_cmpordsd": {
+    "class": "XI_TIED",
+    "evidence": {
+      "clang_probe": "__builtin_ia32_cmpordsd.c",
+      "llvm_source": "llvm/lib/Target/X86/X86InstrSSE.td",
+      "probe_immediate": 1,
+      "verified_instruction": "cmpordsd"
+    },
+    "mnemonic": "cmpordsd",
+    "order": "1r"
+  },
+  "__builtin_ia32_cmpordss": {
+    "class": "XI_TIED",
+    "evidence": {
+      "clang_probe": "__builtin_ia32_cmpordss.c",
+      "llvm_source": "llvm/lib/Target/X86/X86InstrSSE.td",
+      "probe_immediate": 1,
+      "verified_instruction": "cmpordss"
+    },
+    "mnemonic": "cmpordss",
+    "order": "1r"
+  },
+  "__builtin_ia32_cmpunordpd": {
+    "class": "XI_TIED",
+    "evidence": {
+      "clang_probe": "__builtin_ia32_cmpunordpd.c",
+      "llvm_source": "llvm/lib/Target/X86/X86InstrSSE.td",
+      "probe_immediate": 1,
+      "verified_instruction": "cmpunordpd"
+    },
+    "mnemonic": "cmpunordpd",
+    "order": "1r"
+  },
+  "__builtin_ia32_cmpunordps": {
+    "class": "XI_TIED",
+    "evidence": {
+      "clang_probe": "__builtin_ia32_cmpunordps.c",
+      "llvm_source": "llvm/lib/Target/X86/X86InstrSSE.td",
+      "probe_immediate": 1,
+      "verified_instruction": "cmpunordps"
+    },
+    "mnemonic": "cmpunordps",
+    "order": "1r"
+  },
+  "__builtin_ia32_cmpunordsd": {
+    "class": "XI_TIED",
+    "evidence": {
+      "clang_probe": "__builtin_ia32_cmpunordsd.c",
+      "llvm_source": "llvm/lib/Target/X86/X86InstrSSE.td",
+      "probe_immediate": 1,
+      "verified_instruction": "cmpunordsd"
+    },
+    "mnemonic": "cmpunordsd",
+    "order": "1r"
+  },
+  "__builtin_ia32_cmpunordss": {
+    "class": "XI_TIED",
+    "evidence": {
+      "clang_probe": "__builtin_ia32_cmpunordss.c",
+      "llvm_source": "llvm/lib/Target/X86/X86InstrSSE.td",
+      "probe_immediate": 1,
+      "verified_instruction": "cmpunordss"
+    },
+    "mnemonic": "cmpunordss",
+    "order": "1r"
+  },
+  "__builtin_ia32_crc32di": {
+    "class": "XI_TIED",
+    "evidence": {
+      "clang_probe": "__builtin_ia32_crc32di.c",
+      "llvm_source": "llvm/lib/Target/X86/X86InstrSSE.td",
+      "probe_immediate": 1,
+      "verified_instruction": "crc32q"
+    },
+    "mnemonic": "crc32q",
+    "order": "1r"
+  },
+  "__builtin_ia32_crc32hi": {
+    "class": "XI_TIED",
+    "evidence": {
+      "clang_probe": "__builtin_ia32_crc32hi.c",
+      "llvm_source": "llvm/lib/Target/X86/X86InstrSSE.td",
+      "probe_immediate": 1,
+      "verified_instruction": "crc32w"
+    },
+    "mnemonic": "crc32w",
+    "order": "1r"
+  },
+  "__builtin_ia32_crc32qi": {
+    "class": "XI_TIED",
+    "evidence": {
+      "clang_probe": "__builtin_ia32_crc32qi.c",
+      "llvm_source": "llvm/lib/Target/X86/X86InstrSSE.td",
+      "probe_immediate": 1,
+      "verified_instruction": "crc32b"
+    },
+    "mnemonic": "crc32b",
+    "order": "1r"
+  },
+  "__builtin_ia32_crc32si": {
+    "class": "XI_TIED",
+    "evidence": {
+      "clang_probe": "__builtin_ia32_crc32si.c",
+      "llvm_source": "llvm/lib/Target/X86/X86InstrSSE.td",
+      "probe_immediate": 1,
+      "verified_instruction": "crc32l"
+    },
+    "mnemonic": "crc32l",
+    "order": "1r"
+  },
+  "__builtin_ia32_cvtpd2dq": {
+    "class": "XI_DIRECT",
+    "evidence": {
+      "clang_probe": "__builtin_ia32_cvtpd2dq.c",
+      "llvm_source": "llvm/lib/Target/X86/X86InstrSSE.td",
+      "probe_immediate": 1,
+      "verified_instruction": "cvtpd2dq"
+    },
+    "mnemonic": "cvtpd2dq",
+    "order": "0r"
+  },
+  "__builtin_ia32_cvtpd2ps": {
+    "class": "XI_DIRECT",
+    "evidence": {
+      "clang_probe": "__builtin_ia32_cvtpd2ps.c",
+      "llvm_source": "llvm/lib/Target/X86/X86InstrSSE.td",
+      "probe_immediate": 1,
+      "verified_instruction": "cvtpd2ps"
+    },
+    "mnemonic": "cvtpd2ps",
+    "order": "0r"
+  },
+  "__builtin_ia32_cvtps2dq": {
+    "class": "XI_DIRECT",
+    "evidence": {
+      "clang_probe": "__builtin_ia32_cvtps2dq.c",
+      "llvm_source": "llvm/lib/Target/X86/X86InstrSSE.td",
+      "probe_immediate": 1,
+      "verified_instruction": "cvtps2dq"
+    },
+    "mnemonic": "cvtps2dq",
+    "order": "0r"
+  },
+  "__builtin_ia32_cvtsd2ss": {
+    "class": "XI_TIED",
+    "evidence": {
+      "clang_probe": "__builtin_ia32_cvtsd2ss.c",
+      "llvm_source": "llvm/lib/Target/X86/X86InstrSSE.td",
+      "probe_immediate": 1,
+      "verified_instruction": "cvtsd2ss"
+    },
+    "mnemonic": "cvtsd2ss",
+    "order": "1r"
+  },
+  "__builtin_ia32_cvttpd2dq": {
+    "class": "XI_DIRECT",
+    "evidence": {
+      "clang_probe": "__builtin_ia32_cvttpd2dq.c",
+      "llvm_source": "llvm/lib/Target/X86/X86InstrSSE.td",
+      "probe_immediate": 1,
+      "verified_instruction": "cvttpd2dq"
+    },
+    "mnemonic": "cvttpd2dq",
+    "order": "0r"
+  },
+  "__builtin_ia32_cvttps2dq": {
+    "class": "XI_DIRECT",
+    "evidence": {
+      "clang_probe": "__builtin_ia32_cvttps2dq.c",
+      "llvm_source": "llvm/lib/Target/X86/X86InstrSSE.td",
+      "probe_immediate": 1,
+      "verified_instruction": "cvttps2dq"
+    },
+    "mnemonic": "cvttps2dq",
+    "order": "0r"
+  },
+  "__builtin_ia32_dppd": {
+    "class": "XI_TIED",
+    "evidence": {
+      "clang_probe": "__builtin_ia32_dppd.c",
+      "llvm_source": "llvm/lib/Target/X86/X86InstrSSE.td",
+      "probe_immediate": 255,
+      "verified_instruction": "dppd"
+    },
+    "mnemonic": "dppd",
+    "order": "i1r"
+  },
+  "__builtin_ia32_dpps": {
+    "class": "XI_TIED",
+    "evidence": {
+      "clang_probe": "__builtin_ia32_dpps.c",
+      "llvm_source": "llvm/lib/Target/X86/X86InstrSSE.td",
+      "probe_immediate": 255,
+      "verified_instruction": "dpps"
+    },
+    "mnemonic": "dpps",
+    "order": "i1r"
+  },
+  "__builtin_ia32_extracti32x4_mask": {
+    "class": "XI_EXTRACT",
+    "evidence": {
+      "clang_probe": "__builtin_ia32_extracti32x4_mask.c",
+      "llvm_source": "llvm/lib/Target/X86/X86InstrSSE.td",
+      "probe_immediate": 1,
+      "verified_instruction": "vextracti32x4"
+    },
+    "mnemonic": "vextracti32x4",
+    "order": "i0r"
+  },
+  "__builtin_ia32_loaddquqi512_mask": {
+    "class": "XI_LOAD",
+    "evidence": {
+      "clang_probe": "__builtin_ia32_loaddquqi512_mask.c",
+      "llvm_source": "llvm/lib/Target/X86/X86InstrSSE.td",
+      "probe_immediate": 1,
+      "verified_instruction": "vmovdqu8"
+    },
+    "mnemonic": "vmovdqu8",
+    "order": "0r"
+  },
+  "__builtin_ia32_maxpd": {
+    "class": "XI_TIED",
+    "evidence": {
+      "clang_probe": "__builtin_ia32_maxpd.c",
+      "llvm_source": "llvm/lib/Target/X86/X86InstrSSE.td",
+      "probe_immediate": 1,
+      "verified_instruction": "maxpd"
+    },
+    "mnemonic": "maxpd",
+    "order": "1r"
+  },
+  "__builtin_ia32_maxps": {
+    "class": "XI_TIED",
+    "evidence": {
+      "clang_probe": "__builtin_ia32_maxps.c",
+      "llvm_source": "llvm/lib/Target/X86/X86InstrSSE.td",
+      "probe_immediate": 1,
+      "verified_instruction": "maxps"
+    },
+    "mnemonic": "maxps",
+    "order": "1r"
+  },
+  "__builtin_ia32_maxsd": {
+    "class": "XI_TIED",
+    "evidence": {
+      "clang_probe": "__builtin_ia32_maxsd.c",
+      "llvm_source": "llvm/lib/Target/X86/X86InstrSSE.td",
+      "probe_immediate": 1,
+      "verified_instruction": "maxsd"
+    },
+    "mnemonic": "maxsd",
+    "order": "1r"
+  },
+  "__builtin_ia32_maxss": {
+    "class": "XI_TIED",
+    "evidence": {
+      "clang_probe": "__builtin_ia32_maxss.c",
+      "llvm_source": "llvm/lib/Target/X86/X86InstrSSE.td",
+      "probe_immediate": 1,
+      "verified_instruction": "maxss"
+    },
+    "mnemonic": "maxss",
+    "order": "1r"
+  },
+  "__builtin_ia32_minpd": {
+    "class": "XI_TIED",
+    "evidence": {
+      "clang_probe": "__builtin_ia32_minpd.c",
+      "llvm_source": "llvm/lib/Target/X86/X86InstrSSE.td",
+      "probe_immediate": 1,
+      "verified_instruction": "minpd"
+    },
+    "mnemonic": "minpd",
+    "order": "1r"
+  },
+  "__builtin_ia32_minps": {
+    "class": "XI_TIED",
+    "evidence": {
+      "clang_probe": "__builtin_ia32_minps.c",
+      "llvm_source": "llvm/lib/Target/X86/X86InstrSSE.td",
+      "probe_immediate": 1,
+      "verified_instruction": "minps"
+    },
+    "mnemonic": "minps",
+    "order": "1r"
+  },
+  "__builtin_ia32_minsd": {
+    "class": "XI_TIED",
+    "evidence": {
+      "clang_probe": "__builtin_ia32_minsd.c",
+      "llvm_source": "llvm/lib/Target/X86/X86InstrSSE.td",
+      "probe_immediate": 1,
+      "verified_instruction": "minsd"
+    },
+    "mnemonic": "minsd",
+    "order": "1r"
+  },
+  "__builtin_ia32_minss": {
+    "class": "XI_TIED",
+    "evidence": {
+      "clang_probe": "__builtin_ia32_minss.c",
+      "llvm_source": "llvm/lib/Target/X86/X86InstrSSE.td",
+      "probe_immediate": 1,
+      "verified_instruction": "minss"
+    },
+    "mnemonic": "minss",
+    "order": "1r"
+  },
+  "__builtin_ia32_movmskpd": {
+    "class": "XI_DIRECT",
+    "evidence": {
+      "clang_probe": "__builtin_ia32_movmskpd.c",
+      "llvm_source": "llvm/lib/Target/X86/X86InstrSSE.td",
+      "probe_immediate": 1,
+      "verified_instruction": "movmskpd"
+    },
+    "mnemonic": "movmskpd",
+    "order": "0r"
+  },
+  "__builtin_ia32_movmskps": {
+    "class": "XI_DIRECT",
+    "evidence": {
+      "clang_probe": "__builtin_ia32_movmskps.c",
+      "llvm_source": "llvm/lib/Target/X86/X86InstrSSE.td",
+      "probe_immediate": 1,
+      "verified_instruction": "movmskps"
+    },
+    "mnemonic": "movmskps",
+    "order": "0r"
+  },
+  "__builtin_ia32_mpsadbw128": {
+    "class": "XI_TIED",
+    "evidence": {
+      "clang_probe": "__builtin_ia32_mpsadbw128.c",
+      "llvm_source": "llvm/lib/Target/X86/X86InstrSSE.td",
+      "probe_immediate": 1,
+      "verified_instruction": "mpsadbw"
+    },
+    "mnemonic": "mpsadbw",
+    "order": "i1r"
+  },
+  "__builtin_ia32_packssdw128": {
+    "class": "XI_TIED",
+    "evidence": {
+      "clang_probe": "__builtin_ia32_packssdw128.c",
+      "llvm_source": "llvm/lib/Target/X86/X86InstrSSE.td",
+      "probe_immediate": 1,
+      "verified_instruction": "packssdw"
+    },
+    "mnemonic": "packssdw",
+    "order": "1r"
+  },
+  "__builtin_ia32_packsswb128": {
+    "class": "XI_TIED",
+    "evidence": {
+      "clang_probe": "__builtin_ia32_packsswb128.c",
+      "llvm_source": "llvm/lib/Target/X86/X86InstrSSE.td",
+      "probe_immediate": 1,
+      "verified_instruction": "packsswb"
+    },
+    "mnemonic": "packsswb",
+    "order": "1r"
+  },
+  "__builtin_ia32_packusdw128": {
+    "class": "XI_TIED",
+    "evidence": {
+      "clang_probe": "__builtin_ia32_packusdw128.c",
+      "llvm_source": "llvm/lib/Target/X86/X86InstrSSE.td",
+      "probe_immediate": 1,
+      "verified_instruction": "packusdw"
+    },
+    "mnemonic": "packusdw",
+    "order": "1r"
+  },
+  "__builtin_ia32_packuswb128": {
+    "class": "XI_TIED",
+    "evidence": {
+      "clang_probe": "__builtin_ia32_packuswb128.c",
+      "llvm_source": "llvm/lib/Target/X86/X86InstrSSE.td",
+      "probe_immediate": 1,
+      "verified_instruction": "packuswb"
+    },
+    "mnemonic": "packuswb",
+    "order": "1r"
+  },
+  "__builtin_ia32_palignr128": {
+    "class": "XI_TIED",
+    "evidence": {
+      "clang_probe": "__builtin_ia32_palignr128.c",
+      "llvm_source": "llvm/lib/Target/X86/X86InstrSSE.td",
+      "probe_immediate": 1,
+      "verified_instruction": "palignr"
+    },
+    "mnemonic": "palignr",
+    "order": "i1r"
+  },
+  "__builtin_ia32_pavgb128": {
+    "class": "XI_TIED",
+    "evidence": {
+      "clang_probe": "__builtin_ia32_pavgb128.c",
+      "llvm_source": "llvm/lib/Target/X86/X86InstrSSE.td",
+      "probe_immediate": 1,
+      "verified_instruction": "pavgb"
+    },
+    "mnemonic": "pavgb",
+    "order": "1r"
+  },
+  "__builtin_ia32_pavgw128": {
+    "class": "XI_TIED",
+    "evidence": {
+      "clang_probe": "__builtin_ia32_pavgw128.c",
+      "llvm_source": "llvm/lib/Target/X86/X86InstrSSE.td",
+      "probe_immediate": 1,
+      "verified_instruction": "pavgw"
+    },
+    "mnemonic": "pavgw",
+    "order": "1r"
+  },
+  "__builtin_ia32_pblendw128": {
+    "class": "XI_TIED",
+    "evidence": {
+      "clang_probe": "__builtin_ia32_pblendw128.c",
+      "llvm_source": "llvm/lib/Target/X86/X86InstrSSE.td",
+      "probe_immediate": 1,
+      "verified_instruction": "pblendw"
+    },
+    "mnemonic": "pblendw",
+    "order": "i1r"
+  },
+  "__builtin_ia32_pclmulqdq512": {
+    "class": "XI_DIRECT",
+    "evidence": {
+      "clang_probe": "__builtin_ia32_pclmulqdq512.c",
+      "llvm_source": "llvm/lib/Target/X86/X86InstrSSE.td",
+      "probe_immediate": 1,
+      "verified_instruction": "vpclmulqdq"
+    },
+    "mnemonic": "vpclmulqdq",
+    "order": "i10r"
+  },
+  "__builtin_ia32_phaddd128": {
+    "class": "XI_TIED",
+    "evidence": {
+      "clang_probe": "__builtin_ia32_phaddd128.c",
+      "llvm_source": "llvm/lib/Target/X86/X86InstrSSE.td",
+      "probe_immediate": 1,
+      "verified_instruction": "phaddd"
+    },
+    "mnemonic": "phaddd",
+    "order": "1r"
+  },
+  "__builtin_ia32_phaddsw128": {
+    "class": "XI_TIED",
+    "evidence": {
+      "clang_probe": "__builtin_ia32_phaddsw128.c",
+      "llvm_source": "llvm/lib/Target/X86/X86InstrSSE.td",
+      "probe_immediate": 1,
+      "verified_instruction": "phaddsw"
+    },
+    "mnemonic": "phaddsw",
+    "order": "1r"
+  },
+  "__builtin_ia32_phaddw128": {
+    "class": "XI_TIED",
+    "evidence": {
+      "clang_probe": "__builtin_ia32_phaddw128.c",
+      "llvm_source": "llvm/lib/Target/X86/X86InstrSSE.td",
+      "probe_immediate": 1,
+      "verified_instruction": "phaddw"
+    },
+    "mnemonic": "phaddw",
+    "order": "1r"
+  },
+  "__builtin_ia32_phminposuw128": {
+    "class": "XI_DIRECT",
+    "evidence": {
+      "clang_probe": "__builtin_ia32_phminposuw128.c",
+      "llvm_source": "llvm/lib/Target/X86/X86InstrSSE.td",
+      "probe_immediate": 1,
+      "verified_instruction": "phminposuw"
+    },
+    "mnemonic": "phminposuw",
+    "order": "0r"
+  },
+  "__builtin_ia32_phsubd128": {
+    "class": "XI_TIED",
+    "evidence": {
+      "clang_probe": "__builtin_ia32_phsubd128.c",
+      "llvm_source": "llvm/lib/Target/X86/X86InstrSSE.td",
+      "probe_immediate": 1,
+      "verified_instruction": "phsubd"
+    },
+    "mnemonic": "phsubd",
+    "order": "1r"
+  },
+  "__builtin_ia32_phsubsw128": {
+    "class": "XI_TIED",
+    "evidence": {
+      "clang_probe": "__builtin_ia32_phsubsw128.c",
+      "llvm_source": "llvm/lib/Target/X86/X86InstrSSE.td",
+      "probe_immediate": 1,
+      "verified_instruction": "phsubsw"
+    },
+    "mnemonic": "phsubsw",
+    "order": "1r"
+  },
+  "__builtin_ia32_phsubw128": {
+    "class": "XI_TIED",
+    "evidence": {
+      "clang_probe": "__builtin_ia32_phsubw128.c",
+      "llvm_source": "llvm/lib/Target/X86/X86InstrSSE.td",
+      "probe_immediate": 1,
+      "verified_instruction": "phsubw"
+    },
+    "mnemonic": "phsubw",
+    "order": "1r"
+  },
+  "__builtin_ia32_pmaddubsw128": {
+    "class": "XI_TIED",
+    "evidence": {
+      "clang_probe": "__builtin_ia32_pmaddubsw128.c",
+      "llvm_source": "llvm/lib/Target/X86/X86InstrSSE.td",
+      "probe_immediate": 1,
+      "verified_instruction": "pmaddubsw"
+    },
+    "mnemonic": "pmaddubsw",
+    "order": "1r"
+  },
+  "__builtin_ia32_pmaddwd128": {
+    "class": "XI_TIED",
+    "evidence": {
+      "clang_probe": "__builtin_ia32_pmaddwd128.c",
+      "llvm_source": "llvm/lib/Target/X86/X86InstrSSE.td",
+      "probe_immediate": 1,
+      "verified_instruction": "pmaddwd"
+    },
+    "mnemonic": "pmaddwd",
+    "order": "1r"
+  },
+  "__builtin_ia32_pmovmskb128": {
+    "class": "XI_DIRECT",
+    "evidence": {
+      "clang_probe": "__builtin_ia32_pmovmskb128.c",
+      "llvm_source": "llvm/lib/Target/X86/X86InstrSSE.td",
+      "probe_immediate": 1,
+      "verified_instruction": "pmovmskb"
+    },
+    "mnemonic": "pmovmskb",
+    "order": "0r"
+  },
+  "__builtin_ia32_pmuldq128": {
+    "class": "XI_TIED",
+    "evidence": {
+      "clang_probe": "__builtin_ia32_pmuldq128.c",
+      "llvm_source": "llvm/lib/Target/X86/X86InstrSSE.td",
+      "probe_immediate": 1,
+      "verified_instruction": "pmuldq"
+    },
+    "mnemonic": "pmuldq",
+    "order": "1r"
+  },
+  "__builtin_ia32_pmulhrsw128": {
+    "class": "XI_TIED",
+    "evidence": {
+      "clang_probe": "__builtin_ia32_pmulhrsw128.c",
+      "llvm_source": "llvm/lib/Target/X86/X86InstrSSE.td",
+      "probe_immediate": 1,
+      "verified_instruction": "pmulhrsw"
+    },
+    "mnemonic": "pmulhrsw",
+    "order": "1r"
+  },
+  "__builtin_ia32_pmulhuw128": {
+    "class": "XI_TIED",
+    "evidence": {
+      "clang_probe": "__builtin_ia32_pmulhuw128.c",
+      "llvm_source": "llvm/lib/Target/X86/X86InstrSSE.td",
+      "probe_immediate": 1,
+      "verified_instruction": "pmulhuw"
+    },
+    "mnemonic": "pmulhuw",
+    "order": "1r"
+  },
+  "__builtin_ia32_pmulhw128": {
+    "class": "XI_TIED",
+    "evidence": {
+      "clang_probe": "__builtin_ia32_pmulhw128.c",
+      "llvm_source": "llvm/lib/Target/X86/X86InstrSSE.td",
+      "probe_immediate": 1,
+      "verified_instruction": "pmulhw"
+    },
+    "mnemonic": "pmulhw",
+    "order": "1r"
+  },
+  "__builtin_ia32_pmuludq128": {
+    "class": "XI_TIED",
+    "evidence": {
+      "clang_probe": "__builtin_ia32_pmuludq128.c",
+      "llvm_source": "llvm/lib/Target/X86/X86InstrSSE.td",
+      "probe_immediate": 1,
+      "verified_instruction": "pmuludq"
+    },
+    "mnemonic": "pmuludq",
+    "order": "1r"
+  },
+  "__builtin_ia32_psadbw128": {
+    "class": "XI_TIED",
+    "evidence": {
+      "clang_probe": "__builtin_ia32_psadbw128.c",
+      "llvm_source": "llvm/lib/Target/X86/X86InstrSSE.td",
+      "probe_immediate": 1,
+      "verified_instruction": "psadbw"
+    },
+    "mnemonic": "psadbw",
+    "order": "1r"
+  },
+  "__builtin_ia32_pshufb128": {
+    "class": "XI_TIED",
+    "evidence": {
+      "clang_probe": "__builtin_ia32_pshufb128.c",
+      "llvm_source": "llvm/lib/Target/X86/X86InstrSSE.td",
+      "probe_immediate": 1,
+      "verified_instruction": "pshufb"
+    },
+    "mnemonic": "pshufb",
+    "order": "1r"
+  },
+  "__builtin_ia32_pshufd": {
+    "class": "XI_DIRECT",
+    "evidence": {
+      "clang_probe": "__builtin_ia32_pshufd.c",
+      "llvm_source": "llvm/lib/Target/X86/X86InstrSSE.td",
+      "probe_immediate": 1,
+      "verified_instruction": "pshufd"
+    },
+    "mnemonic": "pshufd",
+    "order": "i0r"
+  },
+  "__builtin_ia32_pshufhw": {
+    "class": "XI_DIRECT",
+    "evidence": {
+      "clang_probe": "__builtin_ia32_pshufhw.c",
+      "llvm_source": "llvm/lib/Target/X86/X86InstrSSE.td",
+      "probe_immediate": 1,
+      "verified_instruction": "pshufhw"
+    },
+    "mnemonic": "pshufhw",
+    "order": "i0r"
+  },
+  "__builtin_ia32_pshuflw": {
+    "class": "XI_DIRECT",
+    "evidence": {
+      "clang_probe": "__builtin_ia32_pshuflw.c",
+      "llvm_source": "llvm/lib/Target/X86/X86InstrSSE.td",
+      "probe_immediate": 1,
+      "verified_instruction": "pshuflw"
+    },
+    "mnemonic": "pshuflw",
+    "order": "i0r"
+  },
+  "__builtin_ia32_psignb128": {
+    "class": "XI_TIED",
+    "evidence": {
+      "clang_probe": "__builtin_ia32_psignb128.c",
+      "llvm_source": "llvm/lib/Target/X86/X86InstrSSE.td",
+      "probe_immediate": 1,
+      "verified_instruction": "psignb"
+    },
+    "mnemonic": "psignb",
+    "order": "1r"
+  },
+  "__builtin_ia32_psignd128": {
+    "class": "XI_TIED",
+    "evidence": {
+      "clang_probe": "__builtin_ia32_psignd128.c",
+      "llvm_source": "llvm/lib/Target/X86/X86InstrSSE.td",
+      "probe_immediate": 1,
+      "verified_instruction": "psignd"
+    },
+    "mnemonic": "psignd",
+    "order": "1r"
+  },
+  "__builtin_ia32_psignw128": {
+    "class": "XI_TIED",
+    "evidence": {
+      "clang_probe": "__builtin_ia32_psignw128.c",
+      "llvm_source": "llvm/lib/Target/X86/X86InstrSSE.td",
+      "probe_immediate": 1,
+      "verified_instruction": "psignw"
+    },
+    "mnemonic": "psignw",
+    "order": "1r"
+  },
+  "__builtin_ia32_pslld128": {
+    "class": "XI_TIED",
+    "evidence": {
+      "clang_probe": "__builtin_ia32_pslld128.c",
+      "llvm_source": "llvm/lib/Target/X86/X86InstrSSE.td",
+      "probe_immediate": 1,
+      "verified_instruction": "pslld"
+    },
+    "mnemonic": "pslld",
+    "order": "1r"
+  },
+  "__builtin_ia32_pslldqi128_byteshift": {
+    "class": "XI_TIED",
+    "evidence": {
+      "clang_probe": "__builtin_ia32_pslldqi128_byteshift.c",
+      "llvm_source": "llvm/lib/Target/X86/X86InstrSSE.td",
+      "probe_immediate": 1,
+      "verified_instruction": "pslldq"
+    },
+    "mnemonic": "pslldq",
+    "order": "ir"
+  },
+  "__builtin_ia32_psllq128": {
+    "class": "XI_TIED",
+    "evidence": {
+      "clang_probe": "__builtin_ia32_psllq128.c",
+      "llvm_source": "llvm/lib/Target/X86/X86InstrSSE.td",
+      "probe_immediate": 1,
+      "verified_instruction": "psllq"
+    },
+    "mnemonic": "psllq",
+    "order": "1r"
+  },
+  "__builtin_ia32_psllw128": {
+    "class": "XI_TIED",
+    "evidence": {
+      "clang_probe": "__builtin_ia32_psllw128.c",
+      "llvm_source": "llvm/lib/Target/X86/X86InstrSSE.td",
+      "probe_immediate": 1,
+      "verified_instruction": "psllw"
+    },
+    "mnemonic": "psllw",
+    "order": "1r"
+  },
+  "__builtin_ia32_psllwi128": {
+    "class": "XI_SHIFT",
+    "evidence": {
+      "clang_probe": "__builtin_ia32_psllwi128.c",
+      "llvm_source": "llvm/lib/Target/X86/X86InstrSSE.td",
+      "probe_immediate": 1,
+      "verified_instruction": "psllw"
+    },
+    "mnemonic": "psllw",
+    "order": "1r"
+  },
+  "__builtin_ia32_psrad128": {
+    "class": "XI_TIED",
+    "evidence": {
+      "clang_probe": "__builtin_ia32_psrad128.c",
+      "llvm_source": "llvm/lib/Target/X86/X86InstrSSE.td",
+      "probe_immediate": 1,
+      "verified_instruction": "psrad"
+    },
+    "mnemonic": "psrad",
+    "order": "1r"
+  },
+  "__builtin_ia32_psraw128": {
+    "class": "XI_TIED",
+    "evidence": {
+      "clang_probe": "__builtin_ia32_psraw128.c",
+      "llvm_source": "llvm/lib/Target/X86/X86InstrSSE.td",
+      "probe_immediate": 1,
+      "verified_instruction": "psraw"
+    },
+    "mnemonic": "psraw",
+    "order": "1r"
+  },
+  "__builtin_ia32_psrld128": {
+    "class": "XI_TIED",
+    "evidence": {
+      "clang_probe": "__builtin_ia32_psrld128.c",
+      "llvm_source": "llvm/lib/Target/X86/X86InstrSSE.td",
+      "probe_immediate": 1,
+      "verified_instruction": "psrld"
+    },
+    "mnemonic": "psrld",
+    "order": "1r"
+  },
+  "__builtin_ia32_psrldqi128_byteshift": {
+    "class": "XI_TIED",
+    "evidence": {
+      "clang_probe": "__builtin_ia32_psrldqi128_byteshift.c",
+      "llvm_source": "llvm/lib/Target/X86/X86InstrSSE.td",
+      "probe_immediate": 1,
+      "verified_instruction": "psrldq"
+    },
+    "mnemonic": "psrldq",
+    "order": "ir"
+  },
+  "__builtin_ia32_psrlq128": {
+    "class": "XI_TIED",
+    "evidence": {
+      "clang_probe": "__builtin_ia32_psrlq128.c",
+      "llvm_source": "llvm/lib/Target/X86/X86InstrSSE.td",
+      "probe_immediate": 1,
+      "verified_instruction": "psrlq"
+    },
+    "mnemonic": "psrlq",
+    "order": "1r"
+  },
+  "__builtin_ia32_psrlw128": {
+    "class": "XI_TIED",
+    "evidence": {
+      "clang_probe": "__builtin_ia32_psrlw128.c",
+      "llvm_source": "llvm/lib/Target/X86/X86InstrSSE.td",
+      "probe_immediate": 1,
+      "verified_instruction": "psrlw"
+    },
+    "mnemonic": "psrlw",
+    "order": "1r"
+  },
+  "__builtin_ia32_psrlwi128": {
+    "class": "XI_SHIFT",
+    "evidence": {
+      "clang_probe": "__builtin_ia32_psrlwi128.c",
+      "llvm_source": "llvm/lib/Target/X86/X86InstrSSE.td",
+      "probe_immediate": 1,
+      "verified_instruction": "psrlw"
+    },
+    "mnemonic": "psrlw",
+    "order": "1r"
+  },
+  "__builtin_ia32_pternlogq128_mask": {
+    "class": "XI_MASK",
+    "evidence": {
+      "clang_probe": "__builtin_ia32_pternlogq128_mask.c",
+      "llvm_source": "llvm/lib/Target/X86/X86InstrSSE.td",
+      "probe_immediate": 1,
+      "verified_instruction": "vpternlogq"
+    },
+    "mnemonic": "vpternlogq",
+    "order": "i21r"
+  },
+  "__builtin_ia32_pternlogq128_maskz": {
+    "class": "XI_MASKZ",
+    "evidence": {
+      "clang_probe": "__builtin_ia32_pternlogq128_maskz.c",
+      "llvm_source": "llvm/lib/Target/X86/X86InstrSSE.td",
+      "probe_immediate": 1,
+      "verified_instruction": "vpternlogq"
+    },
+    "mnemonic": "vpternlogq",
+    "order": "i21r"
+  },
+  "__builtin_ia32_pternlogq256_mask": {
+    "class": "XI_MASK",
+    "evidence": {
+      "clang_probe": "__builtin_ia32_pternlogq256_mask.c",
+      "llvm_source": "llvm/lib/Target/X86/X86InstrSSE.td",
+      "probe_immediate": 1,
+      "verified_instruction": "vpternlogq"
+    },
+    "mnemonic": "vpternlogq",
+    "order": "i21r"
+  },
+  "__builtin_ia32_pternlogq256_maskz": {
+    "class": "XI_MASKZ",
+    "evidence": {
+      "clang_probe": "__builtin_ia32_pternlogq256_maskz.c",
+      "llvm_source": "llvm/lib/Target/X86/X86InstrSSE.td",
+      "probe_immediate": 1,
+      "verified_instruction": "vpternlogq"
+    },
+    "mnemonic": "vpternlogq",
+    "order": "i21r"
+  },
+  "__builtin_ia32_pternlogq512_mask": {
+    "class": "XI_MASK",
+    "evidence": {
+      "clang_probe": "__builtin_ia32_pternlogq512_mask.c",
+      "llvm_source": "llvm/lib/Target/X86/X86InstrSSE.td",
+      "probe_immediate": 1,
+      "verified_instruction": "vpternlogq"
+    },
+    "mnemonic": "vpternlogq",
+    "order": "i21r"
+  },
+  "__builtin_ia32_pternlogq512_maskz": {
+    "class": "XI_MASKZ",
+    "evidence": {
+      "clang_probe": "__builtin_ia32_pternlogq512_maskz.c",
+      "llvm_source": "llvm/lib/Target/X86/X86InstrSSE.td",
+      "probe_immediate": 1,
+      "verified_instruction": "vpternlogq"
+    },
+    "mnemonic": "vpternlogq",
+    "order": "i21r"
+  },
+  "__builtin_ia32_rcpps": {
+    "class": "XI_DIRECT",
+    "evidence": {
+      "clang_probe": "__builtin_ia32_rcpps.c",
+      "llvm_source": "llvm/lib/Target/X86/X86InstrSSE.td",
+      "probe_immediate": 1,
+      "verified_instruction": "rcpps"
+    },
+    "mnemonic": "rcpps",
+    "order": "0r"
+  },
+  "__builtin_ia32_rcpss": {
+    "class": "XI_TIED",
+    "evidence": {
+      "clang_probe": "__builtin_ia32_rcpss.c",
+      "llvm_source": "llvm/lib/Target/X86/X86InstrSSE.td",
+      "probe_immediate": 1,
+      "verified_instruction": "rcpss"
+    },
+    "mnemonic": "rcpss",
+    "order": "0r"
+  },
+  "__builtin_ia32_roundpd": {
+    "class": "XI_DIRECT",
+    "evidence": {
+      "clang_probe": "__builtin_ia32_roundpd.c",
+      "llvm_source": "llvm/lib/Target/X86/X86InstrSSE.td",
+      "probe_immediate": 1,
+      "verified_instruction": "roundpd"
+    },
+    "mnemonic": "roundpd",
+    "order": "i0r"
+  },
+  "__builtin_ia32_roundps": {
+    "class": "XI_DIRECT",
+    "evidence": {
+      "clang_probe": "__builtin_ia32_roundps.c",
+      "llvm_source": "llvm/lib/Target/X86/X86InstrSSE.td",
+      "probe_immediate": 1,
+      "verified_instruction": "roundps"
+    },
+    "mnemonic": "roundps",
+    "order": "i0r"
+  },
+  "__builtin_ia32_roundsd": {
+    "class": "XI_TIED",
+    "evidence": {
+      "clang_probe": "__builtin_ia32_roundsd.c",
+      "llvm_source": "llvm/lib/Target/X86/X86InstrSSE.td",
+      "probe_immediate": 1,
+      "verified_instruction": "roundsd"
+    },
+    "mnemonic": "roundsd",
+    "order": "i1r"
+  },
+  "__builtin_ia32_roundss": {
+    "class": "XI_TIED",
+    "evidence": {
+      "clang_probe": "__builtin_ia32_roundss.c",
+      "llvm_source": "llvm/lib/Target/X86/X86InstrSSE.td",
+      "probe_immediate": 1,
+      "verified_instruction": "roundss"
+    },
+    "mnemonic": "roundss",
+    "order": "i1r"
+  },
+  "__builtin_ia32_rsqrtps": {
+    "class": "XI_DIRECT",
+    "evidence": {
+      "clang_probe": "__builtin_ia32_rsqrtps.c",
+      "llvm_source": "llvm/lib/Target/X86/X86InstrSSE.td",
+      "probe_immediate": 1,
+      "verified_instruction": "rsqrtps"
+    },
+    "mnemonic": "rsqrtps",
+    "order": "0r"
+  },
+  "__builtin_ia32_rsqrtss": {
+    "class": "XI_TIED",
+    "evidence": {
+      "clang_probe": "__builtin_ia32_rsqrtss.c",
+      "llvm_source": "llvm/lib/Target/X86/X86InstrSSE.td",
+      "probe_immediate": 1,
+      "verified_instruction": "rsqrtss"
+    },
+    "mnemonic": "rsqrtss",
+    "order": "0r"
+  },
+  "__builtin_ia32_shufps": {
+    "class": "XI_TIED",
+    "evidence": {
+      "clang_probe": "__builtin_ia32_shufps.c",
+      "llvm_source": "llvm/lib/Target/X86/X86InstrSSE.td",
+      "probe_immediate": 1,
+      "verified_instruction": "shufps"
+    },
+    "mnemonic": "shufps",
+    "order": "i1r"
+  },
+  "__builtin_ia32_vec_ext_v2di": {
+    "class": "XI_LANE",
+    "evidence": {
+      "clang_probe": "__builtin_ia32_vec_ext_v2di.c",
+      "llvm_source": "llvm/lib/Target/X86/X86InstrSSE.td",
+      "probe_immediate": 1,
+      "verified_instruction": "movq"
+    },
+    "mnemonic": "movq",
+    "order": "i0r"
+  },
+  "__builtin_ia32_xgetbv": {
+    "class": "XI_XGETBV",
+    "evidence": {
+      "clang_probe": "__builtin_ia32_xgetbv.c",
+      "llvm_source": "llvm/lib/Target/X86/X86InstrSSE.td",
+      "probe_immediate": 1,
+      "verified_instruction": "xgetbv"
+    },
+    "mnemonic": "xgetbv",
+    "order": "0r"
+  }
+}

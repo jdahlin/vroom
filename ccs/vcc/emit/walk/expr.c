@@ -2751,6 +2751,7 @@ static val wk_builtin(ecx *e, uint32_t n)
 	char b[64];
 
 	switch (x->aux) {
+	case BI_X86: return LO(intrinsic)(e, n);
 	case BI_X86_PCMPSTR: case BI_X86_BLENDVB: return LO(pcmpstr)(e, n);
 	case BI_FAST_SQRT:
 		return LO(fsqrt)(e, x->ty, wk_gen(e, arg[0]));

@@ -1024,3 +1024,76 @@ VPRIV val x64_pcmpstr(ecx *e, uint32_t n)
 	e->x64->live = live | (1u << result.r);
 	return result;
 }
+
+/* Intrinsic operands are parked before fixed-register assignment. This keeps
+ * nested calls and register pressure independent of the instruction's width.
+ * Wide values never masquerade as allocator-owned 128-bit temporaries. */
+static const uint8_t x64_intrinsic_gpr[] = { RAX, RCX, RDX, RSI, RDI, R8 };
+static int x64_intrinsic_argreg(cc *c, qty t, unsigned i)
+{
+ return is_vec(c, t) || is_flt(c, t) ? XMM0 + 1 + i : x64_intrinsic_gpr[i];
+}
+
+VPRIV val x64_intrinsic(ecx *e, uint32_t n)
+{
+ cc *c = e->c;
+ const node *x = N(n);
+ const x86_intrinsic *d = cc_x86_intrinsic(x->a);
+ uint32_t fn = e->wk->inl ? e->wk->inl->fn : e->wk->fsym;
+ if (!d || d->kind == XI_UNSUPPORTED)
+  efatal(e, x->loc, "x86 intrinsic '%s' has no instruction lowering", d ? d->name : "unknown");
+ if (!x86_intrinsic_features(cc_x86_features(c, fn), d->features))
+  efatal(e, x->loc, "builtin requires target feature '%s'", d->features);
+ if (x->c > 6) efatal(e, x->loc, "x86 intrinsic has too many machine operands");
+ const uint32_t *arg = &c->lists[x->b];
+ int64_t slot[6], saved[32] = {0};
+ bool immediate[6] = {0};
+ const char *sig = strchr(d->sig, ' ');
+ for (unsigned i = 0; i < x->c; i++) {
+  while (sig && *sig == ' ') sig++;
+  immediate[i] = sig && *sig == '!';
+  sig = sig ? strchr(sig, ' ') : NULL;
+  if (immediate[i]) continue;
+  qty t = N(arg[i])->ty;
+  uint64_t size = tsize(c, t);
+  lval l = { .k = L_FRAME, .off = slot[i] = wk_slot(e, size, talign(c, t)) };
+  val v = wk_gen(e, arg[i]);
+  if (wk_mem(e, t)) v = wk_putmem(e, &l, t, v);
+  else { int r = wk_reg(e, &v, t); x64_store(e, r, &l, size); }
+  wk_free(e, &v);
+ }
+ uint32_t live = e->x64->live;
+ uint32_t scratch = (0x7fu << XMM0) | (1u << RAX) | (1u << RCX) | (1u << RDX) | (1u << RSI) | (1u << RDI) | (1u << R8);
+ for (int r = 0; r < 32; r++) if ((live & scratch) & (1u << r)) {
+  int size = IS_XMM(r) ? 16 : 8;
+  lval l = { .k = L_FRAME, .off = saved[r] = wk_slot(e, size, size) };
+  x64_store(e, r, &l, size);
+ }
+ e->x64->live |= scratch;
+ for (unsigned i = 0; i < x->c; i++) if (!immediate[i]) {
+  qty t = N(arg[i])->ty;
+  lval l = { .k = L_FRAME, .off = slot[i] };
+  x64_load(e, x64_intrinsic_argreg(c, t, i), &l, tsize(c, t), false);
+ }
+ bool vector = is_vec(c, x->ty) || is_flt(c, x->ty);
+ int resultreg = vector ? XMM0 : RAX;
+ if (d->kind == XI_TIED || d->kind == XI_SHIFT || d->kind == XI_MASK || d->kind == XI_MASKZ)
+  x64_op3(e, X_MOV, tsize(c, x->ty), resultreg, x64_intrinsic_argreg(c, N(arg[0])->ty, 0), XNOREG);
+ if (d->kind == XI_LOAD || d->kind == XI_EXTRACT)
+  x64_op3(e, X_MOV, tsize(c, x->ty), resultreg, XMM0 + (d->kind == XI_LOAD ? 2 : 3), XNOREG);
+ if (d->kind == XI_SHIFT)
+  x64_op3(e, X_MOV, 4, XMM0 + 2, x64_intrinsic_argreg(c, N(arg[1])->ty, 1), XNOREG);
+ x64_put(e, X_INTRINSIC)->ref = n;
+ uint64_t size = tsize(c, x->ty);
+ lval out = { .k = L_FRAME, .off = wk_slot(e, size ? size : 1, talign(c, x->ty)) };
+ if (size) x64_store(e, resultreg, &out, size);
+ for (int r = 0; r < 32; r++) if (saved[r]) {
+  lval l = { .k = L_FRAME, .off = saved[r] };
+  x64_load(e, r, &l, IS_XMM(r) ? 16 : 8, false);
+ }
+ e->x64->live = live;
+ if (is_vec(c, x->ty)) return (val){ .k = V_REG, .r = x64_laddr(e, &out) };
+ int r = vector ? x64_ftreg(e) : x64_treg(e);
+ if (size) x64_load(e, r, &out, size, is_signed(c, x->ty));
+ return (val){ .k = V_REG, .r = r };
+}

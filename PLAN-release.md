@@ -394,6 +394,15 @@ av `bench/vcc-optaudit.py`; vcc O1/O2/O3 ger samma assembler här.
 Inga optimeringar implementerade eller uppmätt
 körtidsmål; G5 är fortsatt öppet och benchmarksvitens X är inte fastställt.
 
+### Status 2026-11-11: G1/G4, partiell x86-intrinsic-täckning
+
+X9 har granskade sänkningar och fristående körnings-, immediate- och
+cachetester, inklusive en AVX-512-läsning mot skyddad sida. PostgreSQL på
+x86-64 passerar samma 309 tester som clang med den kombinerade kompilatorn
+utan fallback; snapshot6 kompilerar 1580/1580 jobb i varje mätläge. Den
+separata x86-PIC-buggen som ger DT_TEXTREL-länkvarningar är öppen. Mer builtin- och featuretäckning och bredare
+målvalidering återstår; G1/G4 är öppna. Omfattning och evidens: `PLAN-x86.md` X9.
+
 ### Status 2026-11-11: x86-funktionsmål, SSE4 och matematik
 G1/G2 har en sammanhängande x86-featuremodell utan LLVM vid körning:
 CPU/native, funktionsattribut, inlining, SSE4-strängoperationer och interrupt.

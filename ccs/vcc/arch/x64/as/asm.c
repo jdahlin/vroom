@@ -22,6 +22,7 @@ static int x64_regname(const char *s, size_t n, XOp *o)
 	for (size_t i = 0; i < n; i++)
 		b[i] = (char)c_lower((unsigned char)s[i]);
 	b[n] = 0;
+	memset(o, 0, sizeof *o);
 	o->cls = XR_GPR;
 	o->hi8 = 0;
 	o->needrex = 0;
@@ -45,13 +46,22 @@ static int x64_regname(const char *s, size_t n, XOp *o)
 		o->size = !*t ? 8 : !strcmp(t, "d") ? 4 : !strcmp(t, "w") ? 2 : !strcmp(t, "b") ? 1 : 0;
 		return o->size ? 0 : -1;
 	}
-	if ((!strncmp(b, "xmm", 3) || !strncmp(b, "ymm", 3)) && c_digit((unsigned char)b[3])) {
-		int r = atoi(b + 3);
+	if ((!strncmp(b, "xmm", 3) || !strncmp(b, "ymm", 3) || !strncmp(b, "zmm", 3)) && c_digit((unsigned char)b[3])) {
+		int r = 0;
+		const char *t = b + 3;
+		if (*t == '0' && t[1]) return -1;
+		while (c_digit((unsigned char)*t)) {
+			r = r * 10 + *t++ - '0';
+			if (r > 31) return -1;
+		}
 
-		if (r > 15)
+		if (*t)
 			return -1;
-		o->cls = XR_XMM, o->reg = (uint8_t)r, o->size = b[0] == 'y' ? 32 : 16;
+		o->cls = XR_XMM, o->reg = (uint8_t)r, o->size = b[0] == 'z' ? 64 : b[0] == 'y' ? 32 : 16;
 		return 0;
+	}
+	if (n == 2 && b[0] == 'k' && b[1] >= '0' && b[1] <= '7') {
+		o->cls = XR_K, o->reg = b[1] - '0', o->size = 8; return 0;
 	}
 	if (!strcmp(b, "rip")) { o->cls = XR_RIP; return 0; }
 	if ((!strncmp(b, "cr", 2) || !strncmp(b, "db", 2) || !strncmp(b, "dr", 2)) && c_digit((unsigned char)b[2])) {
@@ -316,6 +326,8 @@ VPRIV int x64_emit(As *a, XForm *f)
 {
 	XEnc x = { 0 };
 	const XOp *rm = f->rm;
+	if (!f->evex && (f->reg > 15 || f->vvvv > 15 || (rm && rm->kind == XK_REG && (rm->reg > 15 || rm->size == 64))))
+		return err(a, "register requires EVEX encoding");
 	int rex = 0x40 | (f->w ? 8 : 0) | (f->reg & 8 ? 4 : 0) | (f->oreg && (f->oreg - 1) & 8 ? 1 : 0);
 	int seg = rm && rm->kind != XK_REG ? rm->seg : 0;
 	uint8_t modrm[8];
@@ -346,7 +358,7 @@ VPRIV int x64_emit(As *a, XForm *f)
 
 			if (base >= 0 && base & 8) rex |= 1;
 			if (index >= 0 && index & 8) rex |= 2;
-			md = dsym ? 2 : (base < 0 ? 0 : disp == 0 && (base & 7) != 5 ? 0 : fits8(disp) ? 1 : 2);
+			md = dsym ? 2 : (base < 0 ? 0 : disp == 0 && (base & 7) != 5 ? 0 : (f->evex ? disp % f->tuple == 0 && fits8(disp / f->tuple) : fits8(disp)) ? 1 : 2);
 			if (base < 0) {
 				/* no base: SIB base 101 with mod 00 means disp32 */
 				modrm[nm++] = (uint8_t)((f->reg & 7) << 3 | 4);
@@ -364,17 +376,29 @@ VPRIV int x64_emit(As *a, XForm *f)
 			}
 		}
 	}
+	if (f->evex && dispsz == 1) disp /= f->tuple;
 	if (f->rex8)
 		rex |= 0x40;
 	if (seg)
 		eb(&x, seg);
-	if (f->opsz16 && !f->vex)
+	if (f->opsz16 && !f->vex && !f->evex)
 		eb(&x, 0x66);
 	if (a->x64_lock) {
 		eb(&x, 0xf0);
 		a->x64_lock = 0;
 	}
-	if (f->vex) {
+	if (f->evex) {
+		int R = !(f->reg & 8), Rp = !(f->reg & 16);
+		int X = rm && rm->kind == XK_REG ? !(rm->reg & 16) : !(rex & 2);
+		int B = !(rex & 1);
+		int mm = f->nop == 3 ? (f->op[1] == 0x38 ? 2 : 3) : 1;
+		int pp = f->opsz16 ? 1 : f->rep == 0xf3 ? 2 : f->rep == 0xf2 ? 3 : 0;
+		eb(&x, 0x62);
+		eb(&x, R << 7 | X << 6 | B << 5 | Rp << 4 | mm);
+		eb(&x, f->w << 7 | (~f->vvvv & 15) << 3 | 4 | pp);
+		eb(&x, f->zero << 7 | f->vl << 5 | f->broadcast << 4 | !(f->vvvv & 16) << 3 | f->mask);
+		eb(&x, f->op[f->nop - 1]);
+	} else if (f->vex) {
 		/* VEX: R X B (inverted) and W from REX, mmmmm from the map, pp from the prefix */
 		int R = !(rex & 4), X = !(rex & 2), B = !(rex & 1), W = !!(rex & 8);
 		int mm = f->nop == 3 ? (f->op[1] == 0x38 ? 2 : 3) : 1;
@@ -697,6 +721,28 @@ VPRIV int x64_instruction(As *a, const char *p, const char *e, size_t wn)
 			return err(a, "too many operands");
 		if (x64_operand(a, &p, e, &o[nops]))
 			return -1;
+		p = ws(p, e);
+		while (p < e && *p == '{') {
+			const char *q = ++p;
+			while (p < e && *p != '}') p++;
+			if (p == e) return err(a, "unterminated operand decorator");
+			size_t n = (size_t)(p - q);
+			XOp *v = &o[nops];
+			if (n == 3 && q[0] == '%' && q[1] == 'k' && q[2] >= '1' && q[2] <= '7' && !v->mask)
+				v->mask = q[2] - '0';
+			else if (n == 1 && *q == 'z' && !v->zero) v->zero = 1;
+			else if (n >= 4 && n <= 5 && !memcmp(q, "1to", 3) && !v->broadcast) {
+				int b = 0;
+				for (size_t i = 3; i < n; i++) {
+					if (!c_digit((unsigned char)q[i])) return err(a, "invalid broadcast decorator");
+					b = b * 10 + q[i] - '0';
+				}
+				if (b != 2 && b != 4 && b != 8 && b != 16 && b != 32 && b != 64)
+					return err(a, "invalid broadcast decorator");
+				v->broadcast = (uint8_t)b;
+			} else return err(a, "invalid operand decorator");
+			p = ws(p + 1, e);
+		}
 		nops++;
 		p = ws(p, e);
 		if (p < e && *p == ',')
@@ -704,6 +750,12 @@ VPRIV int x64_instruction(As *a, const char *p, const char *e, size_t wn)
 		else if (p < e)
 			return err(a, "unexpected token in argument list");
 	}
+	for (int i = 0; i < nops; i++)
+		if (o[i].mask || o[i].zero || o[i].broadcast || o[i].cls == XR_K ||
+		    (o[i].kind == XK_REG && o[i].cls == XR_XMM && (o[i].reg >= 16 || o[i].size == 64))) {
+			int r = x64_i_evex(a, mn, o, nops);
+			return r == X64_NEXT ? err(a, "instruction does not support EVEX decorators") : r;
+		}
 	/* string instructions with their implicit operands written out: as without */
 	if (nops && (!strncmp(mn, "movs", 4) || !strncmp(mn, "stos", 4) || !strncmp(mn, "lods", 4) || !strncmp(mn, "cmps", 4) ||
 		     !strncmp(mn, "scas", 4)) && strlen(mn) == 5 && sfxsize(mn[4])) {
@@ -731,6 +783,7 @@ VPRIV int x64_instruction(As *a, const char *p, const char *e, size_t wn)
 			x64_i_setcc,
 			x64_i_x87,
 			x64_i_sse,
+			x64_i_evex,
 			x64_i_avx,
 			x64_i_sse4,
 			x64_i_ssepk,

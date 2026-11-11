@@ -14,16 +14,37 @@ static void arity(cc *c, uint32_t loc, unsigned want, const vec *args)
 	       have < want ? "few" : "many", want, have);
 }
 
+static const x86_intrinsic x86_intrinsics[] = {
+#define X86_INTRINSIC(ID, NAME, SIG, FEATURES, CLASS, MNEMONIC, ORDER, WIDTH, CONSTRAINTS) \
+ { NAME, SIG, FEATURES, MNEMONIC, ORDER, CONSTRAINTS, CLASS, WIDTH },
+#include "../arch/x64/intrinsics.inc"
+#undef X86_INTRINSIC
+#define X86_ELEMENTWISE(OP, SIG, FEATURES, CLASS, MNEMONIC, ORDER, WIDTH) \
+ { "__builtin_elementwise_" #OP, SIG, FEATURES, MNEMONIC, ORDER, "", CLASS, WIDTH },
+#include "../arch/x64/elementwise.inc"
+#undef X86_ELEMENTWISE
+};
+static const unsigned char x86_elementwise_ops[] = {
+#define X86_ELEMENTWISE(OP, SIG, FEATURES, CLASS, MNEMONIC, ORDER, WIDTH) XE_##OP,
+#include "../arch/x64/elementwise.inc"
+#undef X86_ELEMENTWISE
+};
+const x86_intrinsic *cc_x86_intrinsic(unsigned id)
+{ return id < sizeof(x86_intrinsics) / sizeof(*x86_intrinsics) ? &x86_intrinsics[id] : NULL; }
+
 static const builtin builtins[] = {
+#define X86_INTRINSIC(ID, NAME, SIG, FEATURES, CLASS, MNEMONIC, ORDER, WIDTH, CONSTRAINTS) \
+ { NAME, BI_X86, 0, SIG },
+#include "../arch/x64/intrinsics.inc"
+#undef X86_INTRINSIC
+	{ "__builtin_elementwise_min", BI_X86_OVERLOAD, 0, "v." },
+	{ "__builtin_elementwise_max", BI_X86_OVERLOAD, 0, "v." },
+	{ "__builtin_elementwise_add_sat", BI_X86_OVERLOAD, 0, "v." },
+	{ "__builtin_elementwise_sub_sat", BI_X86_OVERLOAD, 0, "v." },
+	{ "__builtin_elementwise_popcount", BI_X86_OVERLOAD, 0, "v." },
+	{ "__builtin_reduce_add", BI_X86_OVERLOAD, 0, "v." },
 	{ "__builtin_ia32_pblendvb128", BI_X86_BLENDVB, 1, "BBBB" },
 	{ "__builtin_elementwise_abs", BI_ELEMENTWISE_ABS, 1, "i." },
-	{ "__builtin_ia32_movmskps", BI_X86_SIMD, 1, "iF" },
-	{ "__builtin_ia32_shufps", BI_X86_SIMD, 1, "FFFi" },
-	{ "__builtin_ia32_maxps", BI_X86_SIMD, 1, "FFF" },
-	{ "__builtin_ia32_minps", BI_X86_SIMD, 1, "FFF" },
-	{ "__builtin_ia32_cmpnleps", BI_X86_SIMD, 1, "FFF" },
-	{ "__builtin_ia32_psllwi128", BI_X86_SIMD, 1, "HHi" },
-	{ "__builtin_ia32_psrlwi128", BI_X86_SIMD, 1, "HHi" },
 	{ "__builtin_ia32_pcmpistri128", BI_X86_PCMPSTR, 1, "iBBc" },
 	{ "__builtin_ia32_pcmpistrm128", BI_X86_PCMPSTR, 1, "BBBc" },
 	{ "__builtin_ia32_pcmpistria128", BI_X86_PCMPSTR, 1, "iBBc" },
@@ -335,9 +356,65 @@ VPRIV qty sig_func_type(cc *c, const char *sig)
 	return ty_func(c, sigtype(c, sig[0]), par, n, fl);
 }
 
+/* Compact generated signatures: prefix pointer/const/vector constructors,
+ * followed by one exact scalar kind. No host-dependent vector typedefs. */
+static qty x86_sigtype(cc *c, const char **cursor)
+{
+ const char *s = *cursor;
+ while (*s == ' ' || *s == '!') s++;
+ char ch = *s++;
+ qty t;
+ if (ch == 'P' || ch == 'K') {
+  t = x86_sigtype(c, &s);
+  t = ch == 'P' ? ty_ptr(c, t) : t | Q_CONST;
+ } else if (ch == 'V') {
+  unsigned lanes = 0;
+  while (*s >= '0' && *s <= '9') lanes = lanes * 10 + *s++ - '0';
+  t = x86_sigtype(c, &s);
+  t = ty_vector(c, t, lanes * ty_size(c, t));
+ } else {
+  switch (ch) {
+  case 'v': t = prim(TY_VOID); break;
+  case 'b': t = prim(TY_BOOL); break;
+  case 'a': t = prim(TY_SCHAR); break;
+  case 'c': t = prim(TY_CHAR); break;
+  case 'C': t = prim(TY_UCHAR); break;
+  case 's': t = prim(TY_SHORT); break;
+  case 'S': t = prim(TY_USHORT); break;
+  case 'i': t = prim(TY_INT); break;
+  case 'I': t = prim(TY_UINT); break;
+  case 'l': t = prim(TY_LONG); break;
+  case 'L': case 't': t = prim(TY_ULONG); break;
+  case 'q': t = prim(TY_LLONG); break;
+  case 'Q': t = prim(TY_ULLONG); break;
+  case 'f': t = prim(TY_FLOAT); break;
+  case 'd': t = prim(TY_DOUBLE); break;
+  case 'h': t = prim(TY_FLOAT16); break;
+  case 'j': t = prim(TY_BFLOAT16); break;
+  case 'z': t = c->t_size; break;
+  default: abort();
+  }
+ }
+ *cursor = s;
+ return t;
+}
+
+static qty x86_sigfunc(cc *c, const char *s)
+{
+ qty rt = x86_sigtype(c, &s), par[32];
+ unsigned np = 0;
+ while (*s) {
+  while (*s == ' ') s++;
+  if (!*s) break;
+  if (np == 32) abort();
+  par[np++] = x86_sigtype(c, &s);
+ }
+ return ty_func(c, rt, par, np, 0);
+}
+
 static qty builtin_type(cc *c, const builtin *b)
 {
-	return sig_func_type(c, b->sig);
+	return b->id == BI_X86 ? x86_sigfunc(c, b->sig) : sig_func_type(c, b->sig);
 }
 
 /* ---------------- expressions: builtins ---------------- */
@@ -349,13 +426,37 @@ static int builtin_known(const char *n)
 {
 	for (uint32_t i = 0; builtins[i].name; i++)
 		if (!strcmp(builtins[i].name, n))
-			return builtins[i].id != BI_IS_CONSTANT_EVALUATED;	/* clang: C++ only */
+			return builtins[i].id == BI_X86 ? cc_x86_intrinsic(i)->kind != XI_UNSUPPORTED : builtins[i].id != BI_IS_CONSTANT_EVALUATED;	/* clang: C++ only */
 	return lib_builtin_known(n);
+}
+
+static int target_builtin_known(const pp_opts *o, const char *name)
+{
+ /* These overloaded families currently implement integer SIMD types only.
+  * Do not claim the full target-independent builtin contract yet. */
+ if (!strcmp(name, "__builtin_elementwise_min") || !strcmp(name, "__builtin_elementwise_max") ||
+     !strcmp(name, "__builtin_elementwise_add_sat") || !strcmp(name, "__builtin_elementwise_sub_sat") ||
+     !strcmp(name, "__builtin_elementwise_popcount") || !strcmp(name, "__builtin_reduce_add")) return 0;
+ if (strncmp(name, "__builtin_ia32_", 15)) return -1;
+ if (o->target != PP_LINUX_X86_64 || !o->target_features || o->target_features_size != sizeof(x86_features)) return 0;
+ x86_features features;
+ memcpy(&features, o->target_features, sizeof features);
+ /* Old string-comparison builtins still have fixed-register plans. */
+ for (unsigned i = XI_ID_COUNT; builtins[i].name; i++)
+  if (!strcmp(builtins[i].name, name)) {
+   if (builtins[i].id == BI_X86_PCMPSTR) return x86_feature_has(features, X86_FEATURE_SSE42);
+   if (builtins[i].id == BI_X86_BLENDVB) return x86_feature_has(features, X86_FEATURE_SSE41);
+  }
+ for (unsigned i = 0; i < XI_ID_COUNT; i++)
+  if (!strcmp(x86_intrinsics[i].name, name))
+   return x86_intrinsics[i].kind != XI_UNSUPPORTED && x86_intrinsic_features(features, x86_intrinsics[i].features);
+ return 0;
 }
 
 __attribute__((constructor)) static void builtin_hook(void)
 {
 	pp_builtin_known = builtin_known;
+	pp_target_builtin = target_builtin_known;
 }
 
 VPRIV void init_builtins(void)
@@ -1408,77 +1509,6 @@ static uint32_t x86_pcmpstr_call(cc *c, const builtin *b, vec *args, qty rt, uin
 	return mk_builtin(c, BI_X86_PCMPSTR, rt, loc, args);
 }
 
-static uint32_t x86_simd_call(cc *c, const builtin *b, vec *args, qty rt, uint32_t loc)
-{
-	const char *name = b->name + sizeof("__builtin_ia32_") - 1;
-	if (!strcmp(name, "shufps")) {
-		i128 imm;
-		if (args->n != 3 || !const_int(c, args->v[2], &imm) || imm < 0 || imm > 255) {
-			cc_error(c, loc, "argument to '%s' must be a constant integer in range [0, 255]", b->name);
-			return err_node(c, loc);
-		}
-		vec lanes;
-		vinit(&lanes);
-		vpush(c, &lanes, args->v[0]); vpush(c, &lanes, args->v[1]);
-		for (unsigned i = 0; i < 4; i++)
-			vpush(c, &lanes, mk_int(c, ((unsigned)imm >> (2 * i) & 3) + (i >= 2 ? 4 : 0), prim(TY_INT), loc));
-		return mk_builtin(c, BI_SHUFFLEVECTOR, rt, loc, &lanes);
-	}
-	if (!strcmp(name, "movmskps")) {
-		if (args->n != 1) return err_node(c, loc);
-		qty vt = N(args->v[0])->ty;
-		uint32_t sym = sym_new(c, S_VAR, 0, vt, loc);
-		c->syms[sym].sc = SC_AUTO;
-		uint32_t saved = mk(c, N_VAR, vt, loc);
-		N(saved)->a = sym; N(saved)->flags = NF_LVALUE;
-		uint32_t result = mk_int(c, 0, prim(TY_INT), loc);
-		for (unsigned i = 0; i < 4; i++) {
-			vec one;
-			vinit(&one);
-			vpush(c, &one, rvalue(c, builtin_vector_lane(c, saved, prim(TY_FLOAT), i, loc)));
-			uint32_t sign = mk_builtin(c, BI_SIGNBIT, prim(TY_INT), loc, &one);
-			sign = convert(c, convert(c, sign, prim(TY_BOOL)), prim(TY_INT));
-			sign = mk_bin(c, T_LESSLESS, prim(TY_INT), sign, mk_int(c, i, prim(TY_INT), loc), loc);
-			result = mk_bin(c, T_PIPE, prim(TY_INT), result, sign, loc);
-		}
-		return with_pre(c, mk2(c, N_ASSIGN, vt, loc, saved, args->v[0]), result);
-	}
-	if (args->n != 2) return err_node(c, loc);
-	bool shift = name[0] == 'p', cmp = name[0] == 'c';
-	qty et = shift ? prim(TY_USHORT) : cmp ? prim(TY_INT) : prim(TY_FLOAT);
-	qty vt = ty_vector(c, et, 16);
-	uint32_t saved[2], pre[2];
-	for (unsigned i = 0; i < 2; i++) {
-		qty t = N(args->v[i])->ty;
-		uint32_t sym = sym_new(c, S_VAR, 0, t, loc);
-		c->syms[sym].sc = SC_AUTO;
-		saved[i] = mk(c, N_VAR, t, loc); N(saved[i])->a = sym; N(saved[i])->flags = NF_LVALUE;
-		pre[i] = mk2(c, N_ASSIGN, t, loc, saved[i], args->v[i]);
-	}
-	uint32_t sym = sym_new(c, S_VAR, 0, vt, loc);
-	c->syms[sym].sc = SC_AUTO;
-	uint32_t out = mk(c, N_VAR, vt, loc); N(out)->a = sym; N(out)->flags = NF_LVALUE;
-	uint32_t result = cast_node(c, rvalue(c, out), rt, CK_NOP);
-	for (unsigned i = 16 / ty_size(c, et); i--;) {
-		uint32_t a = rvalue(c, builtin_vector_lane(c, saved[0], shift ? et : prim(TY_FLOAT), i, loc));
-		uint32_t value;
-		if (shift) {
-			uint32_t count = convert(c, rvalue(c, saved[1]), prim(TY_UINT));
-			uint32_t valid = mk_bin(c, T_LESS, prim(TY_INT), count, mk_int(c, 16, prim(TY_UINT), loc), loc);
-			value = mk_bin(c, name[2] == 'l' ? T_LESSLESS : T_GREATERGREATER, prim(TY_UINT), convert(c, a, prim(TY_UINT)), count, loc);
-			value = conditional(c, valid, value, mk_int(c, 0, prim(TY_UINT), loc), loc);
-			value = convert(c, value, et);
-		} else {
-			uint32_t rhs = rvalue(c, builtin_vector_lane(c, saved[1], prim(TY_FLOAT), i, loc));
-			uint32_t cond = mk_bin(c, cmp ? T_LESSEQ : !strcmp(name, "maxps") ? T_GREATER : T_LESS, prim(TY_INT), a, rhs, loc);
-			value = cmp ? conditional(c, cond, mk_int(c, 0, et, loc), mk_int(c, -1, et, loc), loc) : conditional(c, cond, a, rhs, loc);
-		}
-		uint32_t dst = builtin_vector_lane(c, out, et, i, loc);
-		result = with_pre(c, mk2(c, N_ASSIGN, et, loc, dst, value), result);
-	}
-	return with_pre(c, pre[0], with_pre(c, pre[1], result));
-}
-
 /* Rounding a value promoted from float has an exact float result. Unlike
  * transcendental functions, narrowing these operations cannot double-round. */
 VPRIV uint32_t narrow_math_call(cc *c, const char *name, size_t len, uint32_t arg, uint32_t loc)
@@ -1846,12 +1876,48 @@ static uint32_t atomic_lock_free_call(cc *c, const builtin *b, uint32_t loc)
 	return mk_builtin(c, BI_ATOMIC_LOCK_FREE, prim(TY_BOOL), loc, &args);
 }
 
+static uint32_t x86_elementwise_call(cc *c, const builtin *b, uint32_t loc)
+{
+ if (c->o->target != PP_LINUX_X86_64) {
+  vec args; args_list(c, &args);
+  cc_error(c, loc, "builtin '%s' requires x86-64 instruction lowering", b->name);
+  return err_node(c, loc);
+ }
+ unsigned op = !strcmp(b->name, "__builtin_reduce_add") ? XE_REDUCE_ADD :
+  !strcmp(b->name, "__builtin_elementwise_popcount") ? XE_POPCOUNT :
+  !strcmp(b->name, "__builtin_elementwise_sub_sat") ? XE_SUB_SAT :
+  !strcmp(b->name, "__builtin_elementwise_add_sat") ? XE_ADD_SAT :
+  !strcmp(b->name, "__builtin_elementwise_max") ? XE_MAX : XE_MIN;
+ unsigned want = op == XE_REDUCE_ADD || op == XE_POPCOUNT ? 1 : 2;
+ vec args; args_list(c, &args);
+ if (args.n != want) { arity(c, loc, want, &args); return err_node(c, loc); }
+ for (unsigned i = 0; i < args.n; i++) args.v[i] = decay(c, args.v[i]);
+ qty t = QUNQ(N(args.v[0])->ty);
+ if (want == 2 && !compatible(c, t, QUNQ(N(args.v[1])->ty))) {
+  cc_error(c, loc, "arguments to '%s' must have the same type", b->name);
+  return err_node(c, loc);
+ }
+ for (unsigned j = 0; j < sizeof(x86_elementwise_ops); j++) {
+  if (x86_elementwise_ops[j] != op) continue;
+  const x86_intrinsic *d = &x86_intrinsics[XI_ID_COUNT + j];
+  const char *sig = d->sig;
+  qty rt = x86_sigtype(c, &sig), input = x86_sigtype(c, &sig);
+  if (!compatible(c, t, input)) continue;
+  uint32_t out = mk_builtin(c, BI_X86, rt, loc, &args);
+  N(out)->a = XI_ID_COUNT + j;
+  return out;
+ }
+ cc_error(c, loc, "unsupported operand type '%s' for '%s'", tyname(c, t), b->name);
+ return err_node(c, loc);
+}
+
 VPRIV uint32_t builtin_call(cc *c, const builtin *b, uint32_t loc)
 {
 	vec args;
-	qty rt = sigtype(c, b->sig[0]);
+	qty rt = b->id == BI_X86 ? T(c, builtin_type(c, b))->base : sigtype(c, b->sig[0]);
 
 	switch (b->id) {
+	case BI_X86_OVERLOAD: return x86_elementwise_call(c, b, loc);
 	case BI_ATOMIC_LOCK_FREE:
 		return atomic_lock_free_call(c, b, loc);
 	case BI_STDC_ROTL: case BI_STDC_ROTR:
@@ -2072,10 +2138,38 @@ VPRIV uint32_t builtin_call(cc *c, const builtin *b, uint32_t loc)
 		}
 		if (args.n < np || (args.n > np && !(f->flags & TF_VARIADIC)))
 			arity(c, loc, np, &args);
+		if (b->id == BI_X86) {
+   const x86_intrinsic *d = cc_x86_intrinsic((unsigned)(b - builtins));
+   const char *sig = d->sig;
+   x86_sigtype(c, &sig);
+   for (unsigned i = 0; i < np && i < args.n; i++) {
+    while (*sig == ' ') sig++;
+    bool required = *sig == '!';
+    x86_sigtype(c, &sig);
+    cval cv;
+    if (required && (!eval(c, args.v[i], &cv) || cv.kind != CV_INT || !cv.ice))
+     cc_error(c, N(args.v[i])->loc, "argument to '%s' must be a constant integer", b->name);
+   }
+   const char *range = d->constraints;
+   while (*range) {
+    char *end;
+    unsigned index = strtoul(range, &end, 10);
+    if (*end != ':') break;
+    long lo = strtol(end + 1, &end, 10);
+    if (*end != ':') break;
+    long hi = strtol(end + 1, &end, 10);
+    cval cv;
+    if (index < args.n && (!eval(c, args.v[index], &cv) || cv.kind != CV_INT || !cv.ice || cv.i < lo || cv.i > hi))
+     cc_error(c, N(args.v[index])->loc, "argument to '%s' must be a constant integer in range [%ld, %ld]", b->name, lo, hi);
+    range = *end == ';' ? end + 1 : end;
+   }
+   uint32_t result = mk_builtin(c, BI_X86, rt, loc, &args);
+   N(result)->a = (unsigned)(b - builtins);
+   return result;
+  }
 		if (b->id == BI_X86_PCMPSTR)
 			return x86_pcmpstr_call(c, b, &args, rt, loc);
-		if (b->id == BI_X86_SIMD)
-			return x86_simd_call(c, b, &args, rt, loc);
+
 		switch (b->id) {
 		case BI_ADD_OVERFLOW: case BI_SUB_OVERFLOW: case BI_MUL_OVERFLOW:
 			if (args.n != 3 || !is_ptr(c, N(args.v[2])->ty))
