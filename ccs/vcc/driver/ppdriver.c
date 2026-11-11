@@ -671,6 +671,10 @@ static const char *x86_driver_features(int argc, char **argv,
 			continue;
 		}
 		if (!strcmp(a, "-mllvm")) { i++; continue; }
+		/* These driver switches control generated entry/return sequences. */
+		if (!strcmp(a, "-mfunction-return=thunk-extern") || !strcmp(a, "-mfunction-return=keep") ||
+		    !strcmp(a, "-mretpoline-external-thunk") || !strcmp(a, "-mindirect-branch-cs-prefix"))
+		    continue;
 		if (!strcmp(a, "-mgeneral-regs-only")) {
 			const unsigned bits[] = {X86_FEATURE_X87, X86_FEATURE_MMX, X86_FEATURE_SSE};
 			for (unsigned j = 0; j < sizeof(bits)/sizeof(*bits); j++) {
