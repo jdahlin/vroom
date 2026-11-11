@@ -37,7 +37,7 @@ static bool em_bound_pure(cc *c, uint32_t n, unsigned *budget)
 	}
 }
 
-static bool em_bound_constant(cc *c, uint32_t n, i128 *value)
+VPRIV bool em_bound_constant(cc *c, uint32_t n, i128 *value)
 {
 	const node *x = N(n);
 	unsigned budget = 16;

@@ -2990,3 +2990,24 @@ kompilatorinstruktioner +0,099 % x86, +0,121 % arm64, +0,115 % wasm32 och
 wasm64 ingår; wasm-fall som båda avvisar och mätproveniens finns i
 `work/opt-profile/repeated-integer-cost/result.json`. Det är en liten korpus
 med instruktionstal, inte CPU-tid; generell O2-täckning och G5/G7 återstår.
+
+### Wasm: heltalsjämförelse med noll (2026-11-11)
+
+Ett gemensamt, begränsat recept i `emit/opt/cmpzero.c` känner igen
+heltalslikhet med noll och osignerad `x <= 0` (även med omvända operander).
+Wasm sänker dessa direkt till `i32.eqz`/`i64.eqz` i stället för en konstant
+och en jämförelse. Konstantuttryck kontrolleras med den befintliga begränsade
+konstantevaluatorn; den andra operanden evalueras en gång. Signerad relation,
+dynamisk andra operand och sidoeffekter omfattas av regressionstesten.
+Båda bygglägenas fokuserade O0–O3-prov passerar på fyra mål; O0 och
+`VCC_NOOPT=1` ger byteidentisk assembler mot basen. Vcc-sviten passerar
+253/253 med en befintlig xfail. Receptet används endast där ett enskilt
+målkommando ger konkret effekt; native-sänkningen är oförändrad.
+
+Matchad seriell Callgrind-grind mot `22a91b8` gav förändringar i
+kompilatorinstruktioner −0,028 % x86, −0,024 % arm64, +0,137 % wasm32 och
++0,139 % wasm64; 1 %-grinden passerar. 12 nativefiler, 10 wasm32 och 11
+wasm64 ingår; fallen atomic_ops/bitint_runtime som båda avvisar på respektive
+wasm-mål är redovisade i `work/opt-profile/zero-comparisons-cost/result.json`.
+Det är en liten korpus och instruktionstal, inte CPU-tid. G5/G7 och generell
+O2-täckning är fortsatt öppna.
