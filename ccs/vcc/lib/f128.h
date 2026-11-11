@@ -265,6 +265,16 @@ F128_UNUSED static uint64_t q_trunc(u128 a, int p, int emax, int bias)
 	return (uint64_t)q_round(s, e - 16383 + bias, m, p, emax);
 }
 
+/* bfloat16 storage: float's exponent, seven fraction bits. */
+F128_UNUSED static uint16_t q_to_bf(u128 a) { return (uint16_t)q_trunc(a, 7, 0xff, 127); }
+F128_UNUSED static double bf_to_d(uint16_t h)
+{
+	uint32_t u = (uint32_t)h << 16;
+	float f;
+	memcpy(&f, &u, 4);
+	return (double)f;
+}
+
 /* IEEE binary16 storage, independent of host half support. */
 F128_UNUSED static uint16_t q_to_h(u128 a) { return (uint16_t)q_trunc(a, 10, 0x1f, 15); }
 

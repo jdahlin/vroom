@@ -983,3 +983,46 @@ unsigned long long __fixunstfdi(long double f) { int s; tf_u m = tf_toint(f, &s)
 unsigned __fixunstfsi(long double f) { return (unsigned)__fixunstfdi(f); }
 __int128 __fixtfti(long double f) { int s; tf_u m = tf_toint(f, &s); return s ? -(__int128)m : (__int128)m; }
 tf_u __fixunstfti(long double f) { int s; tf_u m = tf_toint(f, &s); return s ? 0 : m; }
+
+/* Scalar bfloat conversions for freestanding ARM tests. Production Linux links
+ * the same ABI entry points from libgcc. Work on integer IEEE encodings so the
+ * compiler building this runtime cannot emit calls back to these helpers. */
+static uint16_t rt_bfloat_bits(uint64_t u, unsigned p, unsigned eb, int bias)
+{
+    uint16_t sign = (uint16_t)((u >> (p + eb)) << 15);
+    uint64_t mask = (UINT64_C(1) << p) - 1, m = u & mask;
+    unsigned ex = (unsigned)(u >> p) & ((1u << eb) - 1);
+    int e, shift;
+    uint64_t q, rem, halfway;
+    if (ex == (1u << eb) - 1)
+        return sign | 0x7f80 | (m ? 0x40 | (unsigned)(m >> (p - 7)) : 0);
+    if (!ex && !m) return sign;
+    e = (ex ? (int)ex : 1) - bias;
+    if (ex) m |= UINT64_C(1) << p;
+    if (e > 127) return sign | 0x7f80;
+    shift = (int)p - 7 + (e < -126 ? -126 - e : 0);
+    if (shift >= 64) return sign;
+    q = m >> shift;
+    rem = m & ((UINT64_C(1) << shift) - 1);
+    halfway = UINT64_C(1) << (shift - 1);
+    q += rem > halfway || (rem == halfway && (q & 1));
+    return sign | (uint16_t)((e >= -126 ? (e + 126) << 7 : 0) + q);
+}
+float __extendbfsf2(__bf16 x)
+{
+    union { __bf16 f; uint16_t u; } a = { .f = x };
+    union { float f; uint32_t u; } b = { .u = (uint32_t)a.u << 16 };
+    return b.f;
+}
+__bf16 __truncsfbf2(float x)
+{
+    union { float f; uint32_t u; } a = { .f = x };
+    union { __bf16 f; uint16_t u; } b = { .u = rt_bfloat_bits(a.u, 23, 8, 127) };
+    return b.f;
+}
+__bf16 __truncdfbf2(double x)
+{
+    union { double f; uint64_t u; } a = { .f = x };
+    union { __bf16 f; uint16_t u; } b = { .u = rt_bfloat_bits(a.u, 52, 11, 1023) };
+    return b.f;
+}

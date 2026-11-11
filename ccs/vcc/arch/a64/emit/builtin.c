@@ -1166,7 +1166,8 @@ runtime:
 		} else {
 			r = toreg(e, &v);
 		}
-		if (KIND(c, at) == TY_FLOAT16) {
+		if (KIND(c, at) == TY_FLOAT16 || KIND(c, at) == TY_BFLOAT16) {
+			bool bf = KIND(c, at) == TY_BFLOAT16;
 			if (x->aux == BI_SIGNBIT) {
 				shift_imm(e, I_LSRV, 0, r, r, 15);
 				opi(e, I_ANDI, 0, r, r, 1);
@@ -1174,12 +1175,12 @@ runtime:
 			}
 			opi(e, I_ANDI, 0, r, r, 0x7fff);
 			if (x->aux == BI_ISNORMAL) {
-				shift_imm(e, I_LSRV, 0, r, r, 10);
+				shift_imm(e, I_LSRV, 0, r, r, bf ? 7 : 10);
 				opi(e, I_SUBI, 0, r, r, 1);
-				opi(e, I_SUBSI, 0, ZR, r, 30);
+				opi(e, I_SUBSI, 0, ZR, r, bf ? 254 : 30);
 				cset(e, r, C_LO);
 			} else {
-				opi(e, I_SUBSI, 0, ZR, r, 0x7c00);
+				opi(e, I_SUBSI, 0, ZR, r, bf ? 0x7f80 : 0x7c00);
 				cset(e, r, x->aux == BI_ISNAN ? C_HI : x->aux == BI_ISINF ? C_EQ : C_LO);
 			}
 			return vreg(r);

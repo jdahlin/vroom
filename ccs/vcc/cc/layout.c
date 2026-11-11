@@ -353,6 +353,7 @@ static void type_str(cc *c, qty t, const char *inner, vfixbuf *out, bool *ok)
 	quals(&b, QQ(t));
 	switch (x->kind) {
 	case TY_VOID: vfixbuf_puts(&b, "void"); break;
+	case TY_BFLOAT16: vfixbuf_puts(&b, "__bf16"); break;
 	case TY_FLOAT16: vfixbuf_puts(&b, "_Float16"); break;
 	case TY_FLOAT: vfixbuf_puts(&b, "float"); break;
 	case TY_DOUBLE: vfixbuf_puts(&b, "double"); break;

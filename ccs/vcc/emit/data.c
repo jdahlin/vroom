@@ -152,7 +152,7 @@ static void data_init(ecx *e, uint64_t off, qty ty, uint32_t init)
 			return;
 		case CV_FLT:
 			if (n == 2) {
-				data_put(e, off, q_to_h(cv.ld ? cv.q : q_of_d(cv.f)), 2);
+				data_put(e, off, (KIND(c, ty) == TY_BFLOAT16 ? q_to_bf(cv.ld ? cv.q : q_of_d(cv.f)) : q_to_h(cv.ld ? cv.q : q_of_d(cv.f))), 2);
 			} else if (n == 4) {
 				float f = (float)cv.f;
 				uint32_t u;

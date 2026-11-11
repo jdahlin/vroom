@@ -748,7 +748,7 @@ again:
 			continue;
 		}
 		case KW_void: case KW__Bool: case KW_char: case KW_short: case KW_int: case KW_float:
-		case KW_double: case KW___int128: case KW__Float16: case KW___fp16: case KW___float128:
+		case KW_double: case KW___int128: case KW__Float16: case KW___bf16: case KW___fp16: case KW___float128:
 			if (have_named) {
 				if (unlikely(ds->tagdecl) && !base) {
 					spec_clash(c, ds, 0);
@@ -924,6 +924,8 @@ done:
 		ds->ty = prim(TY_BOOL);
 	} else if (base == KW_float) {
 		ds->ty = prim(TY_FLOAT);
+	} else if (base == KW___bf16) {
+		ds->ty = prim(TY_BFLOAT16);
 	} else if (base == KW__Float16 || base == KW___fp16) {
 		ds->ty = prim(TY_FLOAT16);
 	} else if (base == KW_double) {
@@ -947,7 +949,9 @@ done:
 	if (cplx) {
 		if (!base && !nlong && !sgn && !have_named)
 			ds->ty = prim(TY_DOUBLE);	/* plain _Complex: double (GNU) */
-		if (!is_arith(c, ds->ty))
+		if (KIND(c, ds->ty) == TY_BFLOAT16)
+			cc_error(c, ds->loc, "_Complex __bf16 is invalid");
+		else if (!is_arith(c, ds->ty))
 			cc_error(c, ds->loc, "_Complex requires an arithmetic element type");
 		else
 			ds->ty = ty_complex(c, ds->ty);

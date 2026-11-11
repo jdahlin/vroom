@@ -576,6 +576,11 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
   *Validated:* `tests/vcc/float16.c` exhausts all 65,536 encodings;
   `tests/abi/float16` checks all clang/vcc caller/callee combinations on
   both Linux targets. Kernel sema 887/887 and preprocessing parity 920/920.
+- [x] **`__bf16` on Linux x86-64 and arm64.** Distinct type, binary16
+  exponent/bfloat significand layout, literals/conversions/arithmetic and ABI.
+  *Validated:* all 65,536 encodings in `tests/vcc/bfloat16.c`, cross-compiler
+  `tests/abi/bfloat16` calls on both Linux targets, invalid-complex diagnostic,
+  unity/nonunity builds and kernel sema 887/887 (run and batch).
 - [ ] **FP vectors** (`float32x4_t`,
   `emit.c:5886`), **`"w"` asm operands** (`emit.c:7831`), **16-byte atomics**
   (`emit.c:5205`), **128-bit overflow builtins** (`emit.c:4925`),

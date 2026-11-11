@@ -34,6 +34,7 @@ static const char *const fixed_names[] = {
 	"__extenddftf2", "__extendsftf2", "__trunctfdf2", "__trunctfsf2", "__floatsitf", "__floatditf", "__floatunsitf",
 	"__floatunditf", "__floattitf", "__floatuntitf", "__fixtfsi", "__fixtfdi", "__fixunstfsi", "__fixunstfdi",
 	"__fixtfti", "__fixunstfti",
+	"__extendbfsf2", "__truncsfbf2", "__truncdfbf2", "__truncxfbf2", "__trunctfbf2",
 	"__extendhfsf2", "__truncsfhf2", "__truncdfhf2", "__truncxfhf2", "__trunctfhf2",
 };
 

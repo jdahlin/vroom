@@ -9,7 +9,7 @@ const basic_ty basic[TY_PTR] = {
 	[TY_LONG] = { 8, 8 }, [TY_ULONG] = { 8, 8 },
 	[TY_LLONG] = { 8, 8 }, [TY_ULLONG] = { 8, 8 },
 	[TY_INT128] = { 16, 16 }, [TY_UINT128] = { 16, 16 },
-	[TY_FLOAT16] = { 2, 2 }, [TY_FLOAT] = { 4, 4 }, [TY_DOUBLE] = { 8, 8 },
+	[TY_BFLOAT16] = { 2, 2 }, [TY_FLOAT16] = { 2, 2 }, [TY_FLOAT] = { 4, 4 }, [TY_DOUBLE] = { 8, 8 },
 	[TY_LDOUBLE] = { 16, 16 }, [TY_FLOAT128] = { 16, 16 },
 };
 VPRIV bool is_integer(cc *c, qty t) { int k = KIND(c, t); return is_int_kind(k) || k == TY_ENUM; }

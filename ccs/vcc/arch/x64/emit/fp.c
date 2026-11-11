@@ -81,7 +81,7 @@ VPRIV val x64_fbin(ecx *e, int op, qty t, val a, val b)
 	cc *c = e->c;
 	int k = op == T_PLUS ? 0 : op == T_MINUS ? 1 : op == T_STAR ? 2 : 3;
 
-	if (KIND(c, t) == TY_FLOAT16) {
+	if (KIND(c, t) == TY_FLOAT16 || KIND(c, t) == TY_BFLOAT16) {
 		a = x64_cvt(e, a, t, prim(TY_FLOAT));
 		b = x64_cvt(e, b, t, prim(TY_FLOAT));
 		return x64_cvt(e, x64_fbin(e, op, prim(TY_FLOAT), a, b), prim(TY_FLOAT), t);
@@ -119,7 +119,7 @@ VPRIV val x64_fneg(ecx *e, qty t, val a)
 		x64_tfree(e, ra);
 		return x64_vr(rd);
 	}
-	x64_movi(e, R11, (KIND(c, t) == TY_FLOAT16) ? 0x8000 : x64_fsz(c, t) == 4 ? (int64_t)0x80000000 : INT64_MIN);
+	x64_movi(e, R11, (KIND(c, t) == TY_FLOAT16 || KIND(c, t) == TY_BFLOAT16) ? 0x8000 : x64_fsz(c, t) == 4 ? (int64_t)0x80000000 : INT64_MIN);
 	x64_op3(e, X_MOV, x64_fsz(c, t), XMM15, R11, XNOREG);
 	x64_op3(e, X_FXOR, 8, a.r, a.r, XMM15);
 	return a;
@@ -133,7 +133,7 @@ VPRIV val x64_fcmp(ecx *e, int op, qty t, val a, val b)
 	int cc = op == T_LESS || op == T_GREATER ? CC_A : CC_AE;
 	int rd;
 
-	if (KIND(c, t) == TY_FLOAT16) {
+	if (KIND(c, t) == TY_FLOAT16 || KIND(c, t) == TY_BFLOAT16) {
 		a = x64_cvt(e, a, t, prim(TY_FLOAT));
 		b = x64_cvt(e, b, t, prim(TY_FLOAT));
 		return x64_fcmp(e, op, prim(TY_FLOAT), a, b);
@@ -238,6 +238,18 @@ VPRIV val x64_cvt(ecx *e, val v, qty from, qty to)
 	bool ff = is_flt(c, from), tf = is_flt(c, to), fl = x64_isld(c, from), tl = x64_isld(c, to);
 	int fs = wk_size(c, from), ts = wk_size(c, to);
 
+	if (KIND(c, from) == TY_BFLOAT16) {
+		if (KIND(c, to) == TY_BFLOAT16) return v;
+		v = x64_half_call(e, FN_EXTENDBFSF2, v, from, prim(TY_FLOAT));
+		return x64_cvt(e, v, prim(TY_FLOAT), to);
+	}
+	if (KIND(c, to) == TY_BFLOAT16) {
+		if (KIND(c, from) == TY_FLOAT16)
+			v = x64_cvt(e, v, from, prim(TY_FLOAT)), from = prim(TY_FLOAT);
+		if (!ff)
+			v = x64_cvt(e, v, from, prim(TY_DOUBLE)), from = prim(TY_DOUBLE);
+		return x64_half_call(e, x64_isld(c, from) ? FN_TRUNCXFBF2 : KIND(c, from) == TY_FLOAT ? FN_TRUNCSFBF2 : FN_TRUNCDFBF2, v, from, to);
+	}
 	if (KIND(c, from) == TY_FLOAT16) {
 		if (KIND(c, to) == TY_FLOAT16)
 			return v;

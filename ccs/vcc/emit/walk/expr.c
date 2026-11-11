@@ -1719,6 +1719,8 @@ static val wk_fpconst(ecx *e, qty t, double d, u128 q)
 		float f = (float)d;
 		uint64_t bits = 0;
 
+		if (KIND(c, t) == TY_BFLOAT16)
+			return LO(fconst)(e, q_to_bf(q), 2);
 		if (KIND(c, t) == TY_FLOAT16)
 			return LO(fconst)(e, q_to_h(q_of_d(d)), 2);
 		if (KIND(c, t) == TY_FLOAT)
@@ -1909,12 +1911,12 @@ static val wk_builtin(ecx *e, uint32_t n)
 		v = LO(bin)(e, T_AMP, 8, false, v,
 			vconst(sz == 2 ? 0x7fffULL : sz == 4 ? 0x7fffffffULL : 0x7fffffffffffffffULL));
 		if (x->aux == BI_ISNORMAL) {
-			v = LO(bin)(e, T_GREATERGREATER, 8, false, v, vconst(sz == 2 ? 10 : sz == 4 ? 23 : 52));
+			v = LO(bin)(e, T_GREATERGREATER, 8, false, v, vconst(KIND(c, at) == TY_BFLOAT16 ? 7 : sz == 2 ? 10 : sz == 4 ? 23 : 52));
 			v = LO(bin)(e, T_MINUS, 8, false, v, vconst(1));
-			return LO(cmp)(e, T_LESS, 8, false, v, vconst(sz == 2 ? 0x1e : sz == 4 ? 0xfe : 0x7fe));
+			return LO(cmp)(e, T_LESS, 8, false, v, vconst(KIND(c, at) == TY_BFLOAT16 ? 0xfe : sz == 2 ? 0x1e : sz == 4 ? 0xfe : 0x7fe));
 		}
 		return LO(cmp)(e, x->aux == BI_ISNAN ? T_GREATER : x->aux == BI_ISINF ? T_EQUALEQUAL : T_LESS,
-			8, false, v, vconst(sz == 2 ? 0x7c00ULL : sz == 4 ? 0x7f800000ULL : 0x7ff0000000000000ULL));
+			8, false, v, vconst(KIND(c, at) == TY_BFLOAT16 ? 0x7f80ULL : sz == 2 ? 0x7c00ULL : sz == 4 ? 0x7f800000ULL : 0x7ff0000000000000ULL));
 	}
 	case BI_SIGNBIT: {
 		qty at = N(arg[0])->ty;

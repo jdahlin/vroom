@@ -122,6 +122,8 @@ static double ld_to_d(i128 b)
 /* a floating constant of type t */
 VPRIV val f_const_t(ecx *e, qty t, double x)
 {
+	if (KIND(e->c, t) == TY_BFLOAT16)
+		return vconst(q_to_bf(q_of_d(x)));
 	if (KIND(e->c, t) == TY_FLOAT16)
 		return vconst(q_to_h(q_of_d(x)));
 	if (is_ld(e->c, t))
@@ -170,7 +172,7 @@ VPRIV val f_arith(ecx *e, int op, qty ty, val a, val b)
 	int d, ra;
 	uint32_t w;
 
-	if (KIND(e->c, ty) == TY_FLOAT16) {
+	if (KIND(e->c, ty) == TY_FLOAT16 || KIND(e->c, ty) == TY_BFLOAT16) {
 		a = f_cast(e, a, ty, prim(TY_FLOAT));
 		b = f_cast(e, b, ty, prim(TY_FLOAT));
 		return f_cast(e, f_arith(e, op, prim(TY_FLOAT), a, b), prim(TY_FLOAT), ty);
@@ -236,7 +238,7 @@ VPRIV val f_compare(ecx *e, int op, qty t, val a, val b)
 {
 	int d, cond;
 
-	if (KIND(e->c, t) == TY_FLOAT16) {
+	if (KIND(e->c, t) == TY_FLOAT16 || KIND(e->c, t) == TY_BFLOAT16) {
 		a = f_cast(e, a, t, prim(TY_FLOAT));
 		b = f_cast(e, b, t, prim(TY_FLOAT));
 		return f_compare(e, op, prim(TY_FLOAT), a, b);
@@ -268,7 +270,7 @@ VPRIV val f_tobool(ecx *e, val v, qty t)
 {
 	int d;
 
-	if (KIND(e->c, t) == TY_FLOAT16)
+	if (KIND(e->c, t) == TY_FLOAT16 || KIND(e->c, t) == TY_BFLOAT16)
 		return f_tobool(e, f_cast(e, v, t, prim(TY_FLOAT)), prim(TY_FLOAT));
 
 	if (is_ld(e->c, t)) {
@@ -289,7 +291,7 @@ VPRIV val f_neg(ecx *e, val v, qty t)
 {
 	int d;
 
-	if (KIND(e->c, t) == TY_FLOAT16) {
+	if (KIND(e->c, t) == TY_FLOAT16 || KIND(e->c, t) == TY_BFLOAT16) {
 		if (v.k == V_CONST)
 			return vconst(v.i ^ 0x8000);
 		toreg(e, &v);
@@ -387,6 +389,18 @@ VPRIV val f_cast(ecx *e, val v, qty from, qty to)
 
 	if (v.k == V_NONE)
 		return v;
+	if (KIND(c, from) == TY_BFLOAT16) {
+		if (KIND(c, to) == TY_BFLOAT16) return v;
+		v = call_named(e, FIXED(FN_EXTENDBFSF2), &v, &from, 1, prim(TY_FLOAT), false);
+		return f_cast(e, v, prim(TY_FLOAT), to);
+	}
+	if (KIND(c, to) == TY_BFLOAT16) {
+		if (KIND(c, from) == TY_FLOAT16)
+			v = f_cast(e, v, from, prim(TY_FLOAT)), from = prim(TY_FLOAT);
+		if (!ff)
+			v = f_cast(e, v, from, prim(TY_DOUBLE)), from = prim(TY_DOUBLE);
+		return call_named(e, FIXED(is_ld(c, from) ? FN_TRUNCTFBF2 : KIND(c, from) == TY_FLOAT ? FN_TRUNCSFBF2 : FN_TRUNCDFBF2), &v, &from, 1, to, false);
+	}
 	if (KIND(c, from) == TY_FLOAT16 || KIND(c, to) == TY_FLOAT16) {
 		bool fh = KIND(c, from) == TY_FLOAT16;
 		qty wide = fh ? to : from;

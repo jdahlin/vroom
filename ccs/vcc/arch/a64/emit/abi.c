@@ -26,7 +26,7 @@ static int hfa_walk(cc *c, qty t, int *base, uint64_t *n)
 		*n = 1;
 		return 1;
 	}
-	if (y->kind == TY_FLOAT16 || y->kind == TY_FLOAT || y->kind == TY_DOUBLE || y->kind == TY_LDOUBLE) {	/* Apple: long double is 8 bytes */
+	if (y->kind == TY_BFLOAT16 || y->kind == TY_FLOAT16 || y->kind == TY_FLOAT || y->kind == TY_DOUBLE || y->kind == TY_LDOUBLE) {	/* Apple: long double is 8 bytes */
 		int b = (int)y->size;
 
 		if (*base && *base != b)
