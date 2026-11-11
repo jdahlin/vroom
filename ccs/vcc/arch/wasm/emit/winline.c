@@ -8,6 +8,26 @@
 #define WINLINE_PARAMS 8
 #define WINLINE_NODES 48
 
+/* Resolve only the direct function forms understood by wcallee, charging
+ * every stripped node so deeply nested casts cannot bypass the scan budget. */
+static uint32_t winline_target(cc *c, uint32_t n, unsigned *budget)
+{
+	while (n && *budget) {
+		const node *x = N(n);
+		--*budget;
+		if (x->op == N_CAST && (x->aux == CK_FDECAY || x->aux == CK_NOP)) {
+			n = x->a;
+			continue;
+		}
+		if (x->op == N_ADDR && is_func(c, N(x->a)->ty)) {
+			n = x->a;
+			continue;
+		}
+		return x->op == N_VAR && c->syms[x->a].kind == S_FUNC ? canon_sym(c, x->a) : 0;
+	}
+	return 0;
+}
+
 static bool winline_expr(cc *c, uint32_t n, const uint32_t *params, uint32_t np, unsigned *budget)
 {
 	const node *x;
@@ -31,9 +51,8 @@ static bool winline_expr(cc *c, uint32_t n, const uint32_t *params, uint32_t np,
 		return winline_expr(c, x->a, params, np, budget) &&
 		       winline_expr(c, x->b, params, np, budget);
 	case N_CALL: {
-		uint32_t ref = wcallee(c, x->a), s;
-		if (!ref || RKIND(ref) != RK_SYM) return false;
-		s = RIDX(ref);
+		uint32_t s = winline_target(c, x->a, budget);
+		if (!s) return false;
 		if (c->syms[s].sc != SC_STATIC || !(c->syms[s].flags & SF_DEFINED) ||
 		    !c->syms[s].body) return false;
 		for (uint32_t i = 0; i < x->c; i++)

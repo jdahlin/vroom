@@ -3,7 +3,7 @@
 #include "../../../lib/f128.h"
 
 /* the direct callee of a call: its reference (0: an indirect call) */
-VPRIV uint32_t wcallee(cc *c, uint32_t fn)
+static uint32_t wcallee(cc *c, uint32_t fn)
 {
 	for (;;) {
 		const node *x = N(fn);
