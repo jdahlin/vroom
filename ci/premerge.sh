@@ -58,6 +58,7 @@ arm64)
 	build vcc
 	step ctests       python3 bench/vcc-ctests.py -j "$J"
 	step rec-effects  python3 bench/vcc-rec-effects.py
+	step opt-debug-x86 python3 bench/vcc-opt-debug.py
 	step opt-rules-arm64 python3 bench/vcc-opt-rules.py --target aarch64-linux-gnu
 	step opt-rules-x86 python3 bench/vcc-opt-rules.py --target x86_64-linux-gnu
 	step diag         python3 bench/vcc-diag.py -j "$J"

@@ -1302,3 +1302,10 @@ makron.
 
 Kvar: noten för fler diagnostiker än odeklarerade namn, nästlade makron (en
 nivå i dag), fler -Wall-varningar.
+
+### Integration på aktuell main (PR-serie, 2026-11-11)
+
+X86:s nytillkomna debugrader remappas nu genom både onåbarhets- och
+fallthrough-kompaktering, och slutraden remappas även genom twoaddr.
+`bench/vcc-opt-debug.py` kontrollerar källrader vid levande operationer,
+.text med/utan -g och dwarfdump --verify vid O0–O3; ingår i CI.
