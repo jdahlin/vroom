@@ -1,0 +1,13 @@
+array_compound_init.c:2:12: warning: initialization of an array of type 'int[]' from a compound literal of type 'int[2]' is a GNU extension [-Wgnu-compound-literal-initializer]
+    2 | static int good[] = (int[]){ 1, 2 };
+      |            ^
+array_compound_init.c:3:12: error: cannot initialize array of type 'int[3]' with array of type 'int[2]'
+    3 | static int wrong_bound[3] = (int[2]){ 1, 2 };
+      |            ^
+array_compound_init.c:4:18: error: cannot initialize array of type 'const int[]' with array of type 'int[2]'
+    4 | static const int wrong_qualifiers[] = (int[]){ 1, 2 };
+      |                  ^
+array_compound_init.c:7:7: error: cannot initialize array of type 'int[]' with non-constant array of type 'int[1]'
+    7 |   int observable[] = (int[]){ value };
+      |       ^
+1 warning and 3 errors generated.

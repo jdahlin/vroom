@@ -688,6 +688,51 @@ static uint32_t init_braced(cc *c, qty ty, bool st)
 	return v;
 }
 
+/* Clang's GNU array-copy extension accepts nonconstant reads, but not
+   observable effects in the compound literal (including volatile reads). */
+static bool array_copy_effects(cc *c, uint32_t n, bool load, unsigned depth)
+{
+	if (!n) return false;
+	if (depth > 128) return true;
+	const node *x = N(n);
+	if (load && (x->flags & NF_LVALUE) && (QQ(x->ty) & Q_VOLATILE))
+		return true;
+	switch (x->op) {
+	case N_INIT:
+		for (uint32_t i = 0; i < x->c; i++)
+			if (array_copy_effects(c, c->lists[x->b + (x->aux == 1 ? 3 * i + 2 : i)], true, depth + 1))
+				return true;
+		return false;
+	case N_COMPLIT: case N_UNARY: case N_DEREF:
+		return array_copy_effects(c, x->a, true, depth + 1);
+	case N_ADDR: case N_MEMBER:
+		return array_copy_effects(c, x->a, false, depth + 1);
+	case N_CAST:
+		return array_copy_effects(c, x->a, x->aux != CK_DECAY && x->aux != CK_FDECAY, depth + 1);
+	case N_CALL: {
+		uint32_t fn = x->a;
+		while (N(fn)->op == N_CAST) fn = N(fn)->a;
+		if (N(fn)->op != N_VAR) return true;
+		const sym *f = &c->syms[N(fn)->a];
+		if (!f->attrs || !c->attr[f->attrs].pure) return true;
+		for (uint32_t i = 0; i < x->c; i++)
+			if (array_copy_effects(c, c->lists[x->b + i], true, depth + 1)) return true;
+		return false;
+	}
+	case N_BUILTIN: {
+		cval v;
+		return !eval(c, n, &v);
+	}
+	case N_INDEX: case N_BINARY: case N_LOGAND: case N_LOGOR: case N_COMMA: case N_CPLX:
+		return array_copy_effects(c, x->a, true, depth + 1) || array_copy_effects(c, x->b, true, depth + 1);
+	case N_COND:
+		return array_copy_effects(c, x->a, true, depth + 1) || array_copy_effects(c, x->b, true, depth + 1) ||
+		       array_copy_effects(c, x->c, true, depth + 1);
+	default:
+		return has_side_effects(c, n);
+	}
+}
+
 VPRIV uint32_t initializer(cc *c, qty *ty, bool st)
 {
 	uint32_t loc = tok(c)->loc;
@@ -733,6 +778,25 @@ VPRIV uint32_t initializer(cc *c, qty *ty, bool st)
 		uint32_t v = assign_expr(c);
 
 		if (is_array(c, t)) {
+			if (N(v)->op == N_COMPLIT && is_array(c, N(v)->ty)) {
+				uint32_t at = c->cv_what == CX_INIT ? c->cv_loc : loc;
+				if (!compatible(c, t, N(v)->ty)) {
+					cc_error(c, at, "cannot initialize array of type '%s' with array of type '%s'",
+						 tyname(c, t), tyname(c, N(v)->ty));
+					return v;
+				}
+				if (array_copy_effects(c, N(v)->a, true, 0)) {
+					cc_error(c, at, "cannot initialize array of type '%s' with non-constant array of type '%s'",
+						 tyname(c, t), tyname(c, N(v)->ty));
+					return v;
+				}
+				EXT_WARN(c, "gnu-compound-literal-initializer", w_gnu, at,
+					 "initialization of an array of type '%s' from a compound literal of type '%s' is a GNU extension",
+					 tyname(c, t), tyname(c, N(v)->ty));
+				if (T(c, t)->flags & TF_INCOMPLETE)
+					*ty = QT(QI(N(v)->ty), QQ(t));
+				return v;
+			}
 			if (!string_initializes(c, t, v)) {
 				cc_error(c, c->cv_what == CX_INIT ? c->cv_loc : loc, "array initializer must be an initializer list");
 				return v;

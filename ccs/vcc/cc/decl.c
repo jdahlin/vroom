@@ -271,6 +271,7 @@ static uint32_t declare(cc *c, const dspec *ds, declr *d, qty t, bool file)
 	attrs at = d->at;
 	uint32_t s, prev;
 	int kind;
+	bool inherit_type = true;
 
 	merge_attrs(&at, &ds->at);
 	if (ds->align > at.aligned)
@@ -348,7 +349,10 @@ static uint32_t declare(cc *c, const dspec *ds, declr *d, qty t, bool file)
 			cc_error(c, d->loc, "redefinition of '%.*s'", IDF(d->name));
 			note(c, c->syms[p].loc, "previous definition is here");
 		} else if (!file && linkage) {
-			prev = file_scope_sym(c, d->name);
+			/* An extern declaration inherits the nearest visible declaration
+			   with linkage, including one in an enclosing block. */
+			inherit_type = p && (c->syms[p].flags & SF_GLOBAL);
+			prev = inherit_type ? p : file_scope_sym(c, d->name);
 		}
 	}
 	if (prev && kind == S_FUNC && c->syms[prev].kind == S_FUNC &&
@@ -402,15 +406,20 @@ static uint32_t declare(cc *c, const dspec *ds, declr *d, qty t, bool file)
 			else
 				note(c, y->loc, "previous declaration is here");
 		} else {
-			y->ty = QT(QI(composite(c, y->ty, t)), QQ(y->ty) | QQ(t));
+			qty merged = inherit_type ? QT(QI(composite(c, y->ty, t)), QQ(y->ty) | QQ(t)) : t;
+			bool inner = !file && y->depth != c->depth;
+			/* A composite bound is visible in the new declaration's scope;
+			   completing an inner extern must not complete its outer binding. */
+			if (!inner)
+				y->ty = merged;
 			if (ds->sc == SC_STATIC && kind == S_FUNC)
 				y->sc = SC_STATIC;
 			if (ds->inline_)
 				y->flags |= SF_INLINE | (ds->sc != SC_EXTERN ? SF_INLINE_NOEXTERN : 0);
 			apply_sym_attrs(c, y, &at);
-			if (!file && c->syms[prev].depth != c->depth) {
-				/* block-scope extern: a local binding that names the global */
-				s = sym_new(c, kind, d->name, y->ty, d->loc);
+			if (inner) {
+				/* block-scope extern: a local type, linked to the same entity */
+				s = sym_new(c, kind, d->name, merged, d->loc);
 				c->syms[s].sc = SC_EXTERN;
 				c->syms[s].next = prev;
 				c->syms[s].flags = y->flags;

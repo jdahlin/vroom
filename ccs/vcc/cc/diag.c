@@ -441,7 +441,7 @@ const char *const w_ped[] = { "pedantic", NULL };
 
 /* every flag ext_on is asked about, and every group they are in: whether any can be on */
 static const char *const ext_flags[] = {
-	"c23-extensions", "c2y-extensions", "extra-semi", "gnu-conditional-omitted-operand", "gnu-empty-struct",
+	"c23-extensions", "c2y-extensions", "extra-semi", "gnu-conditional-omitted-operand", "gnu-compound-literal-initializer", "gnu-empty-struct",
 	"gnu-label-as-value", "gnu-pointer-arith", "gnu-statement-expression",
 	"gnu-statement-expression-from-macro-expansion", "language-extension-token", "pedantic", "pointer-arith",
 	"zero-length-array", NULL
