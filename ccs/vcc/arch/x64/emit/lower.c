@@ -543,6 +543,9 @@ VPRIV void x64_begin(ecx *e, uint32_t s)
 	X->nin = 0;
 	X->live = 0;
 	X->pushes = 0;
+	memset(X->csslot, 0, sizeof X->csslot);
+	e->raw.n = 0;
+	e->asmk = 0;
 }
 
 VPRIV void x64_finish(ecx *e, uint32_t s)
@@ -704,16 +707,21 @@ VPRIV int x64_atomic(ecx *e, int op, int size, int rp, int rv, int rexp)
 
 VPRIV void x64_trap(ecx *e) { x64_put(e, X_UD2); }
 
-VPRIV val x64_frame(ecx *e, bool ret)
+/* level frames up through the saved rbp chain (every function keeps a frame pointer) */
+VPRIV val x64_frame(ecx *e, bool ret, int level)
 {
 	int r = x64_treg(e);
 
-	if (ret) {
-		lval l = { .k = L_REG, .r = RBP, .off = 8 };
+	x64_mov(e, r, RBP);
+	for (int k = 0; k < level; k++) {
+		lval l = { .k = L_REG, .r = (uint8_t)r };
 
 		x64_mem(e, X_LD, 8, r, &l, false);
-	} else {
-		x64_mov(e, r, RBP);
+	}
+	if (ret) {
+		lval l = { .k = L_REG, .r = (uint8_t)r, .off = 8 };
+
+		x64_mem(e, X_LD, 8, r, &l, false);
 	}
 	return (val){ .k = V_REG, .r = (uint8_t)r };
 }

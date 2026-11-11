@@ -439,7 +439,7 @@ static void wk_bf_store(ecx *e, const lval *l, qty t, int rv)
 }
 
 /* r stored to l as type t (a bit-field or not); r stays */
-static void wk_put(ecx *e, const lval *l, qty t, int r)
+VPRIV void wk_put(ecx *e, const lval *l, qty t, int r)
 {
 	if (l->bf)
 		wk_bf_store(e, l, t, r);
@@ -1398,11 +1398,11 @@ static val wk_call(ecx *e, uint32_t n)
 	const ctype *f = T(c, ft);
 	uint32_t ref = 0;
 	val fn = { 0 };
-	wkarg args[64], r = { 0 };
+	wkarg *args = alloca((x->c ? x->c : 1) * sizeof(wkarg)), r = { 0 };
 	bool var = (f->flags & (TF_VARIADIC | TF_NOPROTO)) != 0, rec_ = wk_mem(e, f->base);
 
-	if (x->c > 64)
-		wk_unsup(e, n, "a call with more than 64 arguments");
+	if (x->c > 4096)
+		wk_unsup(e, n, "a call with more than 4096 arguments");
 	if (KIND(c, f->base) != TY_VOID)
 		wk_scalar(e, n, f->base);
 	if (fx->op == N_CAST && fx->aux == CK_FDECAY && N(fx->a)->op == N_VAR) {
@@ -1931,9 +1931,9 @@ static val wk_builtin(ecx *e, uint32_t n)
 	case BI_RETURN_ADDRESS: case BI_FRAME_ADDRESS: {
 		val v = wk_gen(e, arg[0]);
 
-		if (v.k != V_CONST || v.i != 0)
-			wk_unsup(e, n, "a return or frame address beyond level 0");
-		return LO(frame)(e, x->aux == BI_RETURN_ADDRESS);
+		if (v.k != V_CONST || v.i < 0 || v.i > 4096)
+			wk_unsup(e, n, "a return or frame address of a level not a constant");
+		return LO(frame)(e, x->aux == BI_RETURN_ADDRESS, (int)v.i);
 	}
 	case BI_OBJECT_SIZE: case BI_DYNAMIC_OBJECT_SIZE: {
 		val t = wk_gen(e, arg[1]);

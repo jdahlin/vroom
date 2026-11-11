@@ -105,6 +105,8 @@ static uint32_t wk_ulabel(ecx *e, uint32_t l)
 	return W->ulbl[l];
 }
 
+VPRIV uint32_t wk_userlabel(ecx *e, uint32_t l) { return wk_ulabel(e, l); }
+
 static uint32_t wk_caselabel(ecx *e, uint32_t n)
 {
 	wkst *W = e->wk;
@@ -765,7 +767,8 @@ VPRIV void wk_stmt(ecx *e, uint32_t n)
 		}
 		return;
 	case N_ASM:
-		efatal(e, x->loc, "x86-64: inline asm is not supported yet (PLAN-x86.md X6)");
+		LO(asm)(e, n);
+		return;
 	case N_GOTO_IND: {
 		val v = wk_gen(e, x->a);
 
@@ -943,7 +946,7 @@ VPRIV void wk_function(ecx *e, uint32_t s)
 	const ctype *ft = T(c, y->ty);
 	const node *body = N(y->body);
 	wkst *W = wk_state(e);
-	wkarg pa[256];
+	wkarg *pa;
 
 	walk_fn(e, s);
 	W->gen++;
@@ -972,8 +975,7 @@ VPRIV void wk_function(ecx *e, uint32_t s)
 		if (k == TY_FLOAT16 || ((k == TY_INT128 || k == TY_UINT128) && !LO(i128mem)()))
 			efatal(e, y->loc, "x86-64: this return type is not supported yet (PLAN-x86.md X3)");
 	}
-	if (body->aux > 256)
-		efatal(e, y->loc, "x86-64: more than 256 parameters");
+	pa = alloca((body->aux ? body->aux : 1) * sizeof(wkarg));
 	W->retlbl = wk_newlabel(e);
 	if (wk_mem(e, W->rty)) {
 		LO(classify)(e, W->rty, &W->rrec);

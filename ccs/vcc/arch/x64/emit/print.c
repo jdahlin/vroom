@@ -149,6 +149,14 @@ VPRIV void x64_print(ecx *e, tbuf *b, uint32_t s)
 		tb_i(b, frame);
 		tb_s(b, ", %rsp\n");
 	}
+	for (int r = 0; r < 16; r++)
+		if (X->csslot[r]) {
+			tb_s(b, "\tmovq\t%");
+			tb_s(b, x64_r64[r]);
+			tb_s(b, ", ");
+			tb_i(b, X->csslot[r]);
+			tb_s(b, A > 16 ? "(%rbx)\n" : "(%rbp)\n");
+		}
 	for (uint32_t k = 0; k < X->nin; k++) {
 		const rec *i = &X->in[k];
 		int sz = i->sz;
@@ -333,6 +341,11 @@ VPRIV void x64_print(ecx *e, tbuf *b, uint32_t s)
 			tb_s(b, ", ");
 			x64_memop(c, b, i);
 			break;
+		case X_RAW:
+			tb_s(b, "#APP\n");
+			tb_put(b, e->raw.p + i->off, i->ref);
+			tb_s(b, "\n#NO_APP");
+			break;
 		case X_LEAL:
 			tb_s(b, "\tleaq\t");
 			x64_lbl(b, s, i->label);
@@ -488,6 +501,14 @@ VPRIV void x64_print(ecx *e, tbuf *b, uint32_t s)
 		}
 		tb_c(b, '\n');
 	}
+	for (int r = 0; r < 16; r++)
+		if (X->csslot[r]) {
+			tb_s(b, "\tmovq\t");
+			tb_i(b, X->csslot[r]);
+			tb_s(b, e->wk->falign > 16 ? "(%rbx), %" : "(%rbp), %");
+			tb_s(b, x64_r64[r]);
+			tb_c(b, '\n');
+		}
 	if (e->wk->falign > 16)
 		tb_s(b, "\tmovq\t-8(%rbp), %rbx\n");
 	tb_s(b, "\tmovq\t%rbp, %rsp\n\tpopq\t%rbp\n\tretq\n.Lfunc_end");

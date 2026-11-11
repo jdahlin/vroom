@@ -92,7 +92,7 @@ def reference(suite, name, path, flags, wd):
 def one(t):
     suite, name, path = t
     src = open(path, 'rb').read().decode('latin-1')
-    if suite == 'tcc' and name in ct.TCC_SKIP:
+    if suite == 'tcc' and name in ct.TCC_SKIP and ct.TCC_SKIP[name] != 'x86 asm':	# (those run here)
         return t, 'skip', 'tcc-specific', ct.TCC_SKIP[name]
     if suite == 'gcc' and name in ct.GCC_SKIP:
         return t, 'skip', 'compiler-specific', ct.GCC_SKIP[name]
