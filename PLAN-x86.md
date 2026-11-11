@@ -330,6 +330,14 @@ kärnan och kan vänta.
 
 ## Status
 
+### X3 (2026-11-11): void-lvärden
+GCC:s `compile/20000701-1.c` kraschade när ett void-lvärde gav en
+minnesläsning med storlek noll. Vandraren utvärderar nu adressen och
+frigör dess register utan att läsa minnet, även för `volatile void`.
+`tests/vcc/void_lvalue.c` kontrollerar också sid-effekter i adresser och
+villkorsuttryck. x86:s egna tester: 47/56 godkända, mot 46/56 före
+ändringen; de nio tidigare funktionsluckorna återstår.
+
 ### X3 (2026-11-10): pågår, i gren `claude/x86-x3-main` (PR jdahlin/vroom#11; #9 hamnade i #4:s gren efter att #4 slagits ihop)
 - Klart: biblioteksinbyggda som anrop; aggregat (initierare, kopior, sammansatta
   literaler, medlemmar av rvärden); bit-fält; System V-anrop (klassning,

@@ -408,6 +408,12 @@ static val wk_load(ecx *e, lval l, qty t)
 	cc *c = e->c;
 	int r;
 
+	/* GNU void lvalues evaluate their address, but have no value to load,
+	   including when qualified volatile. */
+	if (KIND(c, t) == TY_VOID) {
+		wk_lfree(e, &l);
+		return vconst(0);
+	}
 	if (is_func(c, t) || wk_mem(e, t)) {
 		/* the object itself: its address (arrays and functions decay; records, x87 long double) */
 		if (l.k == L_SYM)

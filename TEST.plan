@@ -94,6 +94,9 @@ ger 1561 godkända, 54 fel, en vcc-krasch och 398 överhoppade; clang
 kraschar på ytterligare två. Assembleringen av vcc:s utdata kontrolleras.
 Villkorliga eller okända DejaGNU-direktiv hoppas över. Körsviterna återstår.
 
+Efter rättningen av void-lvärden: 1562 godkända, 54 fel, **inga
+vcc-krascher**, samma 398 överhoppade och två clang-krascher.
+
 **Klart när:** inga krascher i `compile/`; `ieee/` och `builtins/` lika
 gröna som `execute/`.
 
