@@ -5169,9 +5169,12 @@ static void write_fills(void)
 		if (topcmds.v[c].kind != C_OSEC)
 			continue;
 		OSec *os = &osecs.v[topcmds.v[c].idx];
-		if (!os->live || !os->fill || os->type == SHT_NOBITS)
+		/* without =FILL lld pads executable sections with the target's trap
+		   instruction: int3 on x86-64 */
+		bool trap = !os->fill && x86_ld && (os->flags & SHF_EXECINSTR);
+		if (!os->live || (!os->fill && !trap) || os->type == SHT_NOBITS)
 			continue;
-		uint32_t v = (uint32_t)ev_value(eval(os->fill));
+		uint32_t v = trap ? 0xccccccccu : (uint32_t)ev_value(eval(os->fill));
 		if (!v)
 			continue;
 		uint8_t f[4] = {v >> 24, v >> 16, v >> 8, v};	/* big-endian (lld readFill) */
