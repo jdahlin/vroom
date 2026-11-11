@@ -3106,3 +3106,27 @@ unity- och filvis bygge samt de 16 semantiska mål-/nivåproven passerar.
 Ingen backend använder tabellen ännu; den optimerar alltså ingen kod och är
 inte en genomförd CSE-lösning. Nästa arbete är en faktisk konsument med säker
 platshantering och dokumenterad kandidat-/kostnadsgräns.
+
+Första konsumenten finns nu i `emit/opt/sibling-values.c`: när båda
+operanderna till en heltalsoperation är rena, strukturellt identiska uttryck
+av ordinära lokala värden, beräknas uttrycket en gång. Begränsningen är 32
+AST-noder och 64 tabelloperationer per kandidat; billig rotkontroll föregår
+allokeringen av den lilla tabellen på stacken. Kollision och budgetslut ger
+konservativ fallback. Kommutativa inre operationer kan ha omvända operander.
+Flyttal, BitInt, indirekta läsningar, volatile, atomic, adresstagna lokaler,
+anrop och obevisade operationer avvisas. Native behåller värdet i separata
+register; wasm använder en typad temporär lokal. Detta är endast återanvändning
+mellan syskon i ett uttryck, inte generell CSE över satser eller block.
+
+O0–O3 körnings-/kodgenereringsprov passerar på x86, arm64, wasm32 och wasm64
+i båda bygglägen, inklusive nästlade uttryck, alias, volatile, atomic, anrop
+och joins. ASan/UBSan-tabellkontrakt passerar; O0/noopt-assembler är identisk
+mot `b261315`. Vcc-sviten passerar 256/256 med en befintlig xfail. Matchad
+Callgrind-korpus mot samma bas gav compiler-Ir +0,085 % x86, +0,088 % arm64,
++0,100 % wasm32, +0,087 % wasm64; 1 %-grinden passerar. Tre växelvisa
+seriella rundor av 28 förprocessade arm64-kärn-TU:er gav median användar-CPU
+0,79110 → 0,79335 s (+0,28 %). Två TU:er är exkluderade och det begränsade
+urvalet på delad värd bevisar inte helt bygges eller wasm-kostnad. Proveniens
+finns i `work/opt-profile/local-values-cost/result.json` och
+`work/opt-profile/local-values-cputime/kernel-batch-result.json`. Återbruk över
+satser/block, generell CSE och G5/G7 återstår.
