@@ -715,7 +715,7 @@ statusen och mätningen nedan gäller bara unsigned tvåpotensdivision/-rest.
 | OPT2 | Gemensamma effekt- och postkontrakt, komplett op-tabell för x86 och adapter för arm64. Extrahera blockidentifiering/kompaktering ur arm64; första generiska städning tar bara säkra fallthrough-hopp och död kod efter terminator. Kräver OPT0. | Arm64:s extraktion byte-identisk; x86:s onödiga hopp/döda arm försvinner; asm goto, `&&label`, switch/case i if(0), noreturn, VLA/cleanup och debug-remapping korrekta. |
 | OPT3 | Flytta kandidaturvalet ur `choose_lregs` till gemensam `locals.c`, koppla till x86:s bindningar. Begränsad top-K efter befintliga loopviktade `luse`; målet anger K/register. Wasm återanvänder behörighetsreglerna, inte en artificiell registergräns. Kräver OPT0 och effektkontraktet i OPT2. | Parametrar/lokaler slutar gå genom stacken i proberna; blandade anrop, rekursion, fasta asm-register, varargs, returns_twice, överjusterad ram, VLA och registertryck. Arm64:s ursprungliga val och utdata identiska i extraktionscommitten. |
 | OPT4 | Återanvänd arm64:s kopie-/dead-result-/utvidgningsalgoritmer i `emit/rec/`, först per block på x86. Måltabeller beskriver registeröverlapp, flaggor och omskrivningar. OPT2 krävs; OPT3 ger större kodvinst men är inte ett krav. | Positiva och negativa kodkrav; inga fel över anrop/asm/blockgränser. 32-bitars självmove på x86 tas bara bort om övre halvan redan är noll. FP- och implicita register/flags bevaras. |
-| OPT5 | Extrahera arm64:s stackcellsalgoritm och anslut x86 via explicit allokerings-/accessmetadata. Återanvänd samma algoritm för load forwarding och DSE. Kräver OPT2/OPT4; välj exakta icke-flydda frame-celler först. | Arm64:s t8/t10-egenskaper portade till C-regressioner: scope-återanvändning, överlapp/union, smala typer, adressflykt, pekare precis efter objekt, anrop/asm/atomics. Volatila läsningar/skrivningar kvar. |
+| OPT5 | **Pågår: cell-/överlapps-/escapeanalys extraherad, målanslutning återstår.** Extrahera arm64:s stackcellsalgoritm och anslut x86 via explicit allokerings-/accessmetadata. Återanvänd samma algoritm för load forwarding och DSE. Kräver OPT2/OPT4; välj exakta icke-flydda frame-celler först. | Arm64:s t8/t10-egenskaper portade till C-regressioner: scope-återanvändning, överlapp/union, smala typer, adressflykt, pekare precis efter objekt, anrop/asm/atomics. Volatila läsningar/skrivningar kvar. |
 | OPT6 | Gemensamt switchval och utökad inliningbehörighet. Separata commits: först balanserade switchträd och värdetabeller; sedan små vanliga statiska funktioner och oanvända lokala initierare. Kräver OPT1/OPT2; inliningens stacktrafik motiverar OPT3/OPT5 först. | Täta/glesa/signed/range-case, overflow vid densitetsräkning och computed goto. Inlining: recursion, labels, VLA, cleanup, asm-immediater och sidoeffekter. Oanvänd init tas bara bort när både objektet och init saknar observerbar effekt. |
 | OPT7 | Gemensam beskrivning för skalade adresser, direkt explicit vektoroperation och store-constant-hook med scalar/register-fallback. Därefter små målspecifika regler för LEA/SIB, NEON/SSE2 och instruktionsfeatures. Kräver OPT1; metadata från OPT2 följer med. | Samma C-resultat på målen; målkrav visar indexerad load/packed add/store-immediate. Negativa alignment-, bredd-, alias-, lane- och featurefall; baseline får aldrig native-instruktioner av misstag. |
 | OPT8 | Gemensam konstantdivisionsalgoritm för signed tvåpotenser och övriga konstanter; targetsänkt mulhi/shift eller normal div enligt målbudget. Begränsade tail calls med gemensam kontroll och ABI-hook i egen commit. Kräver OPT1 och, för tail calls, OPT2/OPT3. | Division/remainder 32/64 bitar, negativa tal, extremvärden, slump och gränser kring multipler. Tail calls: inga pekare till egen ram, stackargument, cleanup eller ABI-konverteringar utan uttryckligt stöd. |
@@ -726,6 +726,47 @@ visar delningen i faktisk användning innan fler regler läggs till. OPT2
 kan förberedas därefter; registerarbetet OPT3 har högre prioritet än
 mer aggressiv inlining. Ingen stor flytt av hela arm64-generatorn krävs
 för att börja dela regler eller postpass.
+
+### OPT5 status: gemensam cellanalys (2026-11-11)
+
+`emit/rec/slots.c` och `slots.h` innehåller nu arm64:s analys av exakta
+allokeringsceller, överlapp och adressflykt. Arm64 använder den direkt;
+registerversioner, liveness och själva load/DSE-omskrivningen ligger än
+så länge kvar i dess adapter. Ingen ny funktionsvandring eller separat
+post-/effekttabell har tillkommit. Scratchkapacitet återanvänds per tråd.
+Allokerings-ID skiljer livstider vid samma offset. ID 0 betecknar en
+omärkt/observerbar åtkomst och spärrar alla överlappande celler, även om
+ingen laddning av cellen överlever. Båda escape-ID:n vid one-past behålls.
+Felaktiga bredder/intervall avvisas före offsetaritmetik.
+
+Verifierat på bas main9d022c3: unity och fil-för-fil bygger; 177/177 egna
+arm64-körtester. 6069/6069 objekt-/textresultat är byte-identiska mot
+eddce37 (2023 filer × O1-objekt/O2-objekt/O2-text; dess arm64-utdata var
+oförändrade av kopieextraktionen i PR43). Ett separat ASan/UBSan-kontrakt
+jämför analysen med en enkel intervallmodell över 400 deterministiska
+48-accessfall, samt explicita livstids-, gräns-, volatile- och escapefall.
+Kontraktet körs i CI. En andra agent har granskat extraktionen.
+
+Avgränsad kostnadsmätning: båda kompilatorerna byggda med clang 23,
+`-O3 -march=x86-64-v3`, Callgrind 3.26, hela `vpp -O2 -S` till arm64,
+`VCC_LREGS=0` för att verkligen belasta slotanalysen. Bas 9d022c3 och
+kandidat 36fe740, 500 funktioner per korpus:
+
+| Korpus | Bas, Ir | Kandidat, Ir | Skillnad |
+| --- | ---: | ---: | ---: |
+| summeringsloop | 35 284 633 | 35 515 725 | +0,655 % |
+| rak heltalskod | 17 330 749 | 17 383 341 | +0,303 % |
+
+Assemblern är byte-identisk för båda proberna. Råprofiler, binärhashar,
+indata och mätkommandot finns i `work/opt-profile/cells-main-*`,
+`cells-main-profile.json` och `cells-measure.py`. Dessa två instrumenterade
+prover är inget generellt godkännande av G7 eller en hårdvarucykelmätning.
+
+Nästa kodsteg: flytta värdetillgänglighet och DSE-beslut till en gemensam
+motor med målens befintliga read/write/blockdata; x86 måste först bära
+stabila allokerings-ID:n och volatile/atomic-fakta från walkern. Wasm
+behöver stabila värde-ID:n och strukturerade minnesoperationer före
+textemission. OPT5, G5/G7 och hela O2-målet är fortsatt öppna.
 
 ### Kontrakt som styr implementationen
 

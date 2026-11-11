@@ -81,6 +81,9 @@
 #endif
 #endif
 
+/* Exact allocation/cell analysis shared by machine-record optimizers. */
+#include "rec/slots.h"
+
 #define N(i) (&c->nodes[i])
 /* Apple arm64 (Mach-O): '_' names, GOT for symbols outside the TU, variadic
  * arguments on the stack, va_list a char *, stack arguments packed */

@@ -123,6 +123,16 @@ kombinationer; x86-egensvit 137/137, arm64 142/142, kors-ABI 22/22.
 CI kör nu x86-prober under qemu-user. Se OPT3 i `PLAN-fas2.md` för
 hashar, mätmetod och återstående arbete. G5/G7/O2-målet fortsatt öppna.
 
+### Status 2026-11-11: G5/G7, delad stackcellanalys
+
+Arm64 använder nu en gemensam analys av exakta allokeringsceller,
+överlapp och adressflykt i `emit/rec/slots.c`. 6069 byte-identiska
+objekt-/textjämförelser, 177 egna arm64-körtester och ett sanitiserat
+intervallkontrakt verifierar flytten. Två begränsade instruktionsprofiler
+visar +0,655/+0,303 % kompilatorarbete; metod och baser i OPT5 i
+`PLAN-fas2.md`. X86-/wasm-anslutning och delade omskrivningar återstår;
+G5/G7 och full O2-täckning är inte klara.
+
 ### Status 2026-11-11: G5/G7, direkt parameterbindning
 
 Utvalda x86-parametrar binds direkt till registerhem utan extra ABI-spill

@@ -59,6 +59,7 @@ arm64)
 	step runtime-exceptions python3 bench/test-runtime-exceptions.py
 	step ctests       python3 bench/vcc-ctests.py -j "$J"
 	step rec-effects  python3 bench/vcc-rec-effects.py
+	step rec-slots python3 bench/vcc-rec-slots.py --sanitize
 	step opt-debug-x86 python3 bench/vcc-opt-debug.py
 	step rec-copies python3 bench/vcc-rec-copies.py
 	step opt-rules-arm64 python3 bench/vcc-opt-rules.py --target aarch64-linux-gnu
