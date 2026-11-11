@@ -80,6 +80,17 @@ kan gå parallellt.
 
 ## Status
 
+### Status 2026-11-11: G1/G4, rotationer över 128 bitar
+
+På basen `a41361e` behålls operandens och räknarens fulla bredd före modulo
+för generiska rotationer. GCC:s oförändrade `builtin-stdc-rotate-1.c` behåller
+`-std=c11`; dess 510-bitarsdel körs bara på x86 (ARM annonserar max 128).
+Riktad verifiering: unity/separatfilbygge, O0/O2/O3 med typer, sidoeffekter och
+stora räknare, plus semantik run/batch. Resultat:
+`work/results/stdc-rotate/validation.json`. Clangs begränsning för dynamiska
+rotationer över 128 bitar är separat dokumenterad; det är inte ett pass.
+Hela S4 har inte körts om och G1/G4 är fortfarande öppna.
+
 ### Status 2026-11-11: G1/G4, livstid för deklarationer efter etiketter
 
 På `a41361e` rättas frontendens syntetiska scope runt deklarationer efter

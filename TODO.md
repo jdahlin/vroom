@@ -263,6 +263,16 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
   T1/T3 `atomic-threads.c` (4 threads × 1M `x++` on `_Atomic int`,
   `_Atomic long double`, `_Atomic struct{char[3]}` → exact count);
   `_Static_assert(sizeof/alignof)` cases in `vcc-sema.py layout` style.
+- [x] **Generic rotations truncate operands/counts above 128 bits** [P].
+  Keep the unsigned wide operand type and the full unsigned count type before
+  normalization. `stdc_rotate_widths.c` covers unsigned scalar/BitInt widths,
+  return types, once-only evaluation and large counts. Unchanged GCC
+  `builtin-stdc-rotate-1.c` passes; its >128-bit section is x86-only because ARM
+  advertises `__BITINT_MAXWIDTH__ == 128`. Clang cannot lower runtime-count
+  funnel shifts above 128 bits: retained separately as an oracle limitation,
+  while the durable wide checks use constant counts and runtime values.
+  *Validate:* unity/file builds, rotation tests O0/O2/O3 x86 then ARM/QEMU,
+  original GCC case, sema run/batch; `work/results/stdc-rotate/validation.json`.
 - [x] **Inlined alloca accumulates across repeated calls** [P]. Linux x86/ARM
   restore the inline function's entry SP at its common return label, after
   argument evaluation. Callee alloca no longer rewrites caller VLA restore
