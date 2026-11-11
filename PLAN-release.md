@@ -102,6 +102,14 @@ av `bench/vcc-optaudit.py`; vcc O1/O2/O3 ger samma assembler här.
 Inga optimeringar implementerade eller uppmätt
 körtidsmål; G5 är fortsatt öppet och benchmarksvitens X är inte fastställt.
 
+### Status 2026-11-11: objektrepresentationer och packade boolvektorer
+`__builtin_bit_cast` har körning och bytebaserad konstanttolkning med okänd
+padding; packade boolvektorer har logiska element, bitlagring och verifierad
+Linux/Wasm-ABI. Isolerad unity/filvis validering är 164/164 egna x86-prov,
+169/169 ARM-prov och 32/32 ABI-prov per mål. TSan och skyddssidesprov är
+gröna; se `TEST.plan` S2 för gränser och validering. Detta flyttar G1/G2 men
+stänger dem inte; separat `nullptr_t`-identitet återstår.
+
 ### Status 2026-11-11: externa tester på Linux x86-64
 ARM64:s stackallokering och slots använder nu 64-bitars offset med kontrollerad
 överflödeshantering. GCC `20031023-{1..4}` kompilerar (4/4); `frame_wide`

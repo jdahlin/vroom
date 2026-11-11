@@ -1,0 +1,25 @@
+packed_bool_constraints.c:4:31: error: invalid operands to binary expression ('B2' (vector of 2 '_Bool' values) and 'B2' (vector of 2 '_Bool' values))
+    4 | B2 add(B2 a, B2 b) { return a + b; }
+      |                             ~ ^ ~
+packed_bool_constraints.c:5:33: error: invalid operands to binary expression ('B2' (vector of 2 '_Bool' values) and 'B2' (vector of 2 '_Bool' values))
+    5 | B2 shift(B2 a, B2 b) { return a << b; }
+      |                               ~ ^  ~
+packed_bool_constraints.c:6:33: error: logical operator requires a scalar operand
+    6 | B2 logical(B2 a, B2 b) { return a && b; }
+      |                                 ^
+packed_bool_constraints.c:6:38: error: logical operator requires a scalar operand
+    6 | B2 logical(B2 a, B2 b) { return a && b; }
+      |                                      ^
+packed_bool_constraints.c:7:32: error: cannot convert between scalar type 'double' and vector type 'B2' (vector of 2 '_Bool' values) as implicit conversion would cause truncation
+    7 | B2 float_bits(B2 a) { return a & 1.0; }
+      |                                ^
+packed_bool_constraints.c:8:28: error: illegal vector component name 'xy'
+    8 | B2 swizzle(B2 a) { return a.xy; }
+      |                            ^
+packed_bool_constraints.c:9:32: error: address of vector element requested
+    9 | _Bool *address(B2 *a) { return &(*a)[1]; }
+      |                                ^
+packed_bool_constraints.c:10:26: error: invalid conversion between vector type 'B3' (vector of 3 '_Bool' values) and type 'B2' (vector of 2 '_Bool' values)
+   10 | B3 resize(B2 a) { return (B3)a; }
+      |                          ^
+8 errors generated.

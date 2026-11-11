@@ -32,7 +32,7 @@
  * slot (8-byte words; a scalar extended to 64 bits).
  */
 enum { WA_INT, WA_SSE };
-typedef struct wkarg { uint8_t n, cls[2]; bool mem, x87, up; uint32_t align; uint64_t size; int64_t slot; } wkarg;	/* x87: returned in st(0); up: one 16-byte SSE word (x86-64 SSEUP) */
+typedef struct wkarg { uint8_t n, cls[2]; bool mem, x87, up; uint32_t align, blanes; uint64_t size; int64_t slot; } wkarg;	/* x87: returned in st(0); up: one 16-byte SSE word (x86-64 SSEUP) */
 /* ---------------- walker state (one per ecx) ---------------- */
 
 #define WK_MAXLOOP 1024
