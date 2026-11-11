@@ -41,6 +41,7 @@ enum {
 	TY_PTR, TY_ARRAY, TY_FUNC, TY_STRUCT, TY_UNION, TY_ENUM,
 	TY_VECTOR,	/* GNU vector_size: base element, n lanes */
 	TY_SVE,		/* AArch64 builtin scalable type: sizeless; aux is its interned name */
+	TY_BITINT, TY_UBITINT, /* bit-precise integers wider than 128 bits */
 	TY_NKINDS
 };
 
@@ -179,6 +180,7 @@ enum {
 	/* expressions */
 	N_NUM,		/* a: constant pool index (integer); aux: NUM_RADIX (a literal not written in decimal), NUM_ENUM */
 	N_FNUM,		/* a: constant pool index (double) */
+	N_BIGNUM,	/* a: immutable LE32 words in lists, b: full storage word count */
 	N_STR,		/* a: string index */
 	N_VAR,		/* a: sym */
 	N_MEMBER,	/* a: base (lvalue struct), b: tag, c: field index */
@@ -238,7 +240,7 @@ enum {
 	CK_VADDR,	/* GNU vector rvalue -> pointer to its first lane (v[i] on an rvalue) */
 };
 
-enum { NUM_RADIX = 1, NUM_ENUM = 2 };	/* N_NUM aux: spelled not in decimal; an enumerator's value */
+enum { NUM_RADIX = 1, NUM_ENUM = 2, NUM_NO_ICE = 4, NUM_NO_CONSTEXPR = 8 };	/* N_NUM aux: spelled not in decimal; an enumerator's value */
 enum { NF_LVALUE = 1, NF_BITFIELD = 2, NF_PAREN = 4, NF_NPC = 8,
        NF_ERR = 16,
        NF_MACRO = 32, NF_BOUNDS = 64, NF_OVF = 128 };	/* NF_OVF: a constant subexpression overflowed (-Winteger-overflow given once) */	/* NF_BOUNDS: a[CONST] already checked (-Warray-bounds) */	/* NF_MACRO: the operator came from a macro expansion (no style warnings) */	/* NF_ERR: stands in for an expression already diagnosed (no follow-on errors) */

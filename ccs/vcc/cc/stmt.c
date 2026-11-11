@@ -882,6 +882,16 @@ static bool at_label(cc *c)
 	       (is(c, T_IDENT) && !kwof(tok(c)) && peek(c, 1)->kind == T_COLON);
 }
 
+/* Wide switches currently retain case bounds in signed i128 storage.  The
+ * source signedness must be checked before that storage loses it. */
+static void case_constant(cc *c, i128 *value)
+{
+	uint32_t n;
+	if (const_expr(c, value, &n) && c->switch_ty && is_bigint(c, c->switch_ty) &&
+	    !is_signed(c, N(n)->ty) && *value < 0)
+		cc_error(c, N(n)->loc, "wide integer constant is not representable in this 128-bit constant-expression context");
+}
+
 static uint32_t label_head(cc *c)
 {
 	ptok *t = tok(c);
@@ -917,7 +927,7 @@ static uint32_t label_head(cc *c)
 		vloc = tok(c)->loc;
 		if (!c->in_switch)
 			cc_error(c, loc, "'case' statement not in switch statement");
-		const_expr(c, &lo, NULL);
+		case_constant(c, &lo);
 		hi = lo;
 		if (is(c, T_ELLIPSIS)) {
 			static const char *const g[] = { "pedantic", NULL };
@@ -925,7 +935,7 @@ static uint32_t label_head(cc *c)
 			if (!c->o->c2y)
 				EXT_WARN_MS(c, "...", "c2y-extensions", g, tok(c)->loc, "case ranges are a C2y extension");
 			next(c);
-			const_expr(c, &hi, NULL);
+			case_constant(c, &hi);
 		}
 		expect(c, T_COLON, "':'");
 		if (c->switch_ty)

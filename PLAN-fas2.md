@@ -1852,6 +1852,90 @@ prototyp i walk.h. Efter fixen bygger fil-för-fil och passerar samtliga
 Mätningarna ovan avser uttryckligen fded15a + 19c6a63:s kompilatorkod,
 inte main-uppdateringens separata ändringar.
 
+### OPT8 status: unsigned32 konstantdivision (2026-11-11)
+
+`emit/opt/udivconst.c` bygger en typad 32-bitars reciprok med fast
+multiplikation/shift och vid behov add-korrektion. Konstruktionen har
+kontrollerats mot Hacker's Delight kapitel 10 och
+[libdivides referensgenerator](https://github.com/ridiculousfish/libdivide/blob/master/libdivide.h),
+med separata clang23-prober. Divisorer större än 2^31 behöver bara en unsigned
+jämförelse. Noll, tvåpotenser, signed, 64/128 bitar och `_BitInt` behåller sina
+befintliga vägar. Detta är ett avgränsat u32-delsteg, inte hela OPT8/O2.
+
+Separata adaptrar i `arch/a64/emit/udivconst.c`, `emit/walk/udivconst.c` och
+`arch/wasm/emit/udivconst.c` använder befintlig 32→64-multiplikation; ingen
+SSA/IR, allocator eller ny funktionsgenomgång. O1–O3 använder regeln; O0 och
+`VCC_NOOPT` är byte-identiska mot basen för alla fyra mål. Native normaliserar
+lata smala värden före 64-bitars produkten och behåller originalet för rest
+eller korrektion. Den faktiska registertoppen kontrolleras före allokering:
+en konstant plus eventuellt sparat original/korrektion, och ytterligare ett
+register om input fortfarande är en adress. Tryck behåller vanlig division.
+Wasm väljer bara enkel reciprok-kvot och jämförelsekvot; add-korrektion och
+rester är uttryckligen kvar i `div_u`/`rem_u` tills deras större sekvenser har
+nytta. Det valda wasm-receptet skickas vidare utan en andra hostdivision.
+
+`vcc-udivconst.py --sanitize` kontrollerar divisorer 2–65 för alla n<65536,
+4096 seedade fullbreddsdivisorer, gränser runt tvåpotenser/multipler samt
+kända reciproker för 3/7/10, mot oberoende division och modulo. Kontrakten
+prövar även båda native-adaptrarnas registerbudget vid 0–8 fria register,
+adress-/registerinput, korrektion/rest och reserverade register.
+`unsigned_divconst.c` kör normal/lazy-cast input, konverterade divisorer,
+17 divisorklasser, compound /= och %=, sidoeffekter, volatile och index++.
+Ett djupt nästlat adressuttryck prövar native-tryck; arm64 behåller där udiv.
+Unity och fil-för-fil bygger; 180 regel-/nivå-/målkombinationer körs,
+220/220 arm64-regressioner (ett befintligt xfail), 215/215 x86-regressioner
+(sex referensskips) och debug O0–O3 passerar. Fil-för-fil-binären kör också
+alla 16 nya u32-fall.
+
+Mätbas: exakt 781ca69; identiska clang23-byggen `-O3 -march=x86-64-v3`,
+Callgrind 3.26 för hela `vpp --target=... -O2 -S`-processen. Korpusar om
+500 funktioner för rak heltalskod, summeringsloop och avsiktligt mättad
+`x/7u + x%10u`-kod:
+
+| Mål | Rak kod, Ir | Loop, Ir | Mättad division, Ir |
+| --- | ---: | ---: | ---: |
+| x86 | +0,0050 % | −0,0019 % | +4,32 % |
+| arm64 | +0,0263 % | −0,0041 % | **+19,54 %** |
+| wasm32 | +0,4416 % | +0,0067 % | +1,06 % |
+| wasm64 | +0,4410 % | +0,0067 % | +1,06 % |
+
+Alla åtta icke tillämpliga kontroll-/loop-assemblerpar är identiska. Den
+mättade arm64-kostnaden är ett verkligt byte av kompilering mot dyrare
+jämförelse-/multiplikationssekvenser: två udiv per funktion försvinner, men
+antal emitterade instruktioner ökar. Wasm behåller båda operationerna i just
+mättnadsprovet enligt sin kostnadspolicy. En separat konfigurerad mix av
+befintliga C-regressioner, med samma c23/resource/runtime-include-flaggor som
+tidigare OPT5-mätning, ger följande instruktionsarbete:
+
+| Mål | Bas Ir → ny Ir | Skillnad | Filer |
+| --- | ---: | ---: | ---: |
+| x86 | 132 564 698 → 132 542 609 | −0,0167 % | 12 |
+| arm64 | 141 117 374 → 141 112 147 | −0,0037 % | 12 |
+| wasm32 | 87 119 802 → 87 135 002 | +0,0174 % | 10 |
+| wasm64 | 97 155 779 → 97 165 511 | +0,0100 % | 11 |
+
+Wasm32-basens `atomic_ops` (layoutassert) och `bitint_runtime`, samt wasm64-
+basens `bitint_runtime`, kompilerar inte med denna konfiguration och ingår
+inte; exakta diagnostiker är sparade. Samma typer/filer stöds på native.
+
+Den mättade aritmetikklassens x86-körprov, 3 miljoner LCG-indata per process,
+två warmups och nio alternerade par, ger median barn-CPU 7,374→3,277 ms
+(−55,56 %); båda svarar 3967102618 som clang. Detta mäter just denna värd
+och aritmetikklass, inte arm64-hårdvara. För wasm undersöktes faktiskt
+clang23-O2-utdata: `/3u` behåller `i32.div_u`. Ett separat Node v26.13.0-prov
+med förvärmda moduler, nio alternerade par och 3 miljoner LCG-indata för
+vardera 3/5/10/11/2147483649 ger −1,5…−5,1 % median väggtid med
+`--no-liftoff` och −28…−31 % med `--liftoff-only`. Alla svar är lika; den
+verifierade objektkoden är oförändrad efter recept-/tryckfixarna. Resultaten
+motiverar den begränsade wasm-klassen på denna engine/värd; inga andra engines
+eller generella prestandalöften ingår.
+
+Kommandon, källor, hashvärden och rådata finns i `work/opt-profile/udivconst/`:
+`compiler-profile.json`, `mixed/result.json`, `native-runtime-profile.json`,
+`runtime-{turbofan,liftoff}.json` och respektive `*-measure.py`/`runtime.js`.
+Signed och u64 konstantreciproker, billigare wasm-rest/korrektion, tail calls,
+bredare G5/G7-grindar och full O2-täckning är fortsatt öppna.
+
 ### OPT6: gemensamma rena kontrollbeslut (delsteg)
 
 `emit/opt/control.c` bevisar konstanta heltalsvillkor, logisk negation,
@@ -2086,3 +2170,11 @@ när mätningar motiverar dem; ingen nivå döps om för att hävda paritet.
 G5/G7 och full O2-täckning förblir öppna. Detta dokumentsteg kör inga byggen
 eller nya benchmarks; annexets mängd-/unikhets-/nivå-/filhashkontroller
 är datakontroller av befintligt underlag.
+OPT8-integrering: implementationen är 58263be; därefter har main54580f7
+(PR48:s genererade minnesregression) mergats som 6b0e195. Konflikten gällde
+bara denna plan; båda statusblocken är bevarade. Kompilatorkällorna är
+oförändrade av denna merge. Unity, 180/180 riktade kör-/kodkrav och de
+sanitiserade reciprok-/tryckkontrakten passerar på kombinationen, liksom
+221/221 arm64-regressioner (ett befintligt xfail) och 216/216 x86-regressioner
+(sex referensskips). Mätningarnas JSON anger exakt 781ca69→58263be och
+`compiler-sources.json` binder de tio ändrade kompilatorfilerna med SHA256.

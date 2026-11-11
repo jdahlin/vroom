@@ -168,7 +168,7 @@ static __attribute__((noinline)) uint32_t unary_op(cc *c)
 				setspan(c, r, loc);
 				ovf_warn(c, op, r, loc, n, 0);
 			}
-			return r;
+			return big_fold_node(c, r);
 		}
 	}
 	case T_EXCLAIM: {
@@ -187,7 +187,7 @@ static __attribute__((noinline)) uint32_t unary_op(cc *c)
 		r = mk(c, N_UNARY, prim(TY_INT), loc);
 		N(r)->aux = T_EXCLAIM;
 		N(r)->a = n;
-		return r;
+		return big_fold_node(c, r);
 	}
 	case T_AMPAMP: {	/* &&label */
 		uint32_t r;
@@ -956,7 +956,7 @@ static __attribute__((noinline)) uint32_t binary_ops(cc *c, int minp, uint32_t l
 					ptr_cmp(c, op, l, r);
 			}
 			runtime_warn(c, op, l, r, loc);
-			l = binop(c, op, l, r, loc);
+			l = big_fold_node(c, binop(c, op, l, r, loc));
 			if (mac)
 				N(l)->flags |= NF_MACRO;
 			setspan(c, l, b);
@@ -1139,6 +1139,16 @@ VPRIV bool const_expr(cc *c, i128 *v, uint32_t *np)
 	c->cexpr--;
 	if (np)
 		*np = n;
+	cval wide;
+	if (is_bigint(c, N(n)->ty) && eval(c, n, &wide) && wide.kind == CV_BIGINT) {
+		if (wide.ice && big_conversion_exact(c, &wide, N(n)->ty, prim(TY_INT128))) {
+			*v = wide.i;
+			return true;
+		}
+		cc_error(c, N(n)->loc, "wide integer constant is not representable in this 128-bit constant-expression context");
+		*v = 0;
+		return false;
+	}
 	if (!const_int(c, n, v)) {
 		cc_error(c, N(n)->loc, "expression is not an integer constant expression");
 		*v = 0;

@@ -172,3 +172,11 @@ static inline uint32_t f_out(int d, int r, int vr) { return (d ? 0x9e660000u : 0
 /* fmov v<vr>.d[1], x<r> / fmov x<r>, v<vr>.d[1] */
 static inline uint32_t q_in_hi(int vr, int r) { return 0x9eaf0000u | (unsigned)r << 5 | (unsigned)vr; }
 static inline uint32_t q_out_hi(int r, int vr) { return 0x9eae0000u | (unsigned)vr << 5 | (unsigned)r; }
+
+/* Address-valued arbitrary-width integers, canonical little-endian limbs. */
+VPRIV val a64_bigconst(ecx *e, qty t, const uint32_t *words, i128 small);
+VPRIV val a64_bigbin(ecx *e, int op, qty t, val a, val b);
+VPRIV val a64_bigcmp(ecx *e, int op, qty t, val a, val b);
+VPRIV val a64_bigcvt(ecx *e, val v, qty from, qty to);
+VPRIV val a64_bigbool(ecx *e, val v, qty t);
+VPRIV val a64_bigcopy(ecx *e, val v, qty t);
