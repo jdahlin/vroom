@@ -137,6 +137,8 @@ static inline void mem(ecx *e, int op, int sz, int ext, int rd, int base, int64_
 	i->imm = off;
 	if (base == FRAME)
 		slot_tag(e, i, off, (int64_t)1 << sz);
+	else if (e->novtag)
+		i->rm = 1;	/* volatile: opt.c's load reuse leaves it alone (a frame access is untagged instead) */
 }
 
 static inline void symop(ecx *e, int op, int sz, int ext, int rd, int rn, uint32_t ref, int64_t off)

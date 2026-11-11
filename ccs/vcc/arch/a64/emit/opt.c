@@ -581,6 +581,79 @@ static void slots(ecx *e)
 	}
 }
 
+/* ---------------- repeated loads ---------------- */
+
+/*
+ * Per block, a few (base register or tagged frame slot, offset, size,
+ * extension) -> register holding that load's value: a load of the same
+ * memory while the register and the base are untouched and nothing wrote
+ * memory (stores, calls, asm, barriers: everything that is not a plain
+ * register operation) is a mov.  A 64-bit store also leaves its register as
+ * the value of its address.  Volatile accesses are marked by mem() (rm 1) or
+ * untagged (frame), and neither use nor make an entry.
+ */
+#define NLV 8
+static void loads(ecx *e)
+{
+	ins *in = e->in;
+	uint32_t nb = W.blk[e->nin - 1] + 1;
+
+	for (uint32_t b = 0; b < nb; b++) {
+		struct { int64_t imm; uint32_t pos; uint8_t base, sz, cond, reg, ok; } t[NLV];
+		unsigned next = 0;
+
+		memset(t, 0, sizeof(t));
+		for (uint32_t k = W.bs[b]; k <= W.be[b]; k++) {
+			ins *i = &in[k];
+			unsigned ro;
+			bool memw, ld, st;
+
+			if (i->op == DELETED)
+				continue;
+			ro = W.ro[k];
+			ld = i->op == I_LD, st = i->op == I_ST;
+			memw = (ro & (OP_ALL | OP_CALL | OP_ASM | OP_TLV | OP_TAIL)) || st || i->op == I_STP || i->op == I_STLO;
+			if (ld || st) {
+				bool plain = i->rn < 31 ? !i->rm : (i->rn == FRAME && SLOT_TAG(i));
+				unsigned q;
+
+				if (!plain)
+					ld = st = false;
+				for (q = 0; ld && q < NLV; q++) {
+					if (t[q].ok && t[q].base == i->rn && t[q].imm == i->imm && t[q].sz == i->sz && t[q].cond == i->cond) {
+						int r = t[q].reg, rd = i->rd;
+
+						for (uint32_t j = t[q].pos; j < k; j++)
+							W.la[j] |= RB(r);
+						if (r == rd) {
+							i->op = DELETED;
+						} else {
+							*i = (ins){ .op = I_MOV, .sz = 1, .rd = (uint8_t)rd, .rn = (uint8_t)r };
+							W.ro[k] = (uint16_t)roles(i);
+							W.rr[k] = reads(i, W.ro[k]);
+						}
+						ld = false;
+						break;
+					}
+				}
+				if (i->op == DELETED)
+					continue;
+			}
+			if (memw)
+				memset(t, 0, sizeof(t));
+			for (unsigned q = 0; q < NLV; q++)
+				if (t[q].ok && (W.ww[k] & (RB(t[q].reg) | (t[q].base < 31 ? RB(t[q].base) : 0))))
+					t[q].ok = 0;
+			if ((ld || st) && i->rd < 31 && !(ld && i->rd == i->rn) && (st ? i->sz == 3 && i->cond == 0 : true)) {
+				unsigned q = next++ % NLV;
+
+				t[q].ok = 1, t[q].imm = i->imm, t[q].pos = k, t[q].base = i->rn, t[q].sz = i->sz;
+				t[q].cond = i->cond, t[q].reg = i->rd;
+			}
+		}
+	}
+}
+
 /* ---------------- known extensions ---------------- */
 
 /*
@@ -1060,6 +1133,7 @@ VPRIV void opt_function(ecx *e)
 	/* copies first, so slots sees the registers values really stay in */
 	copies(e);
 	slots(e);
+	loads(e);
 	exts(e);
 	copies(e);
 	dead(e);
