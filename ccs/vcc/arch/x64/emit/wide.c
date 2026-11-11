@@ -114,6 +114,15 @@ static int32_t x64_wword(ecx *e, int r, int off)
 	return (int32_t)d.off;
 }
 
+/* a frame word into a new temporary */
+static val x64_wload(ecx *e, const lval *l)
+{
+	int r = x64_treg(e);
+
+	x64_mem(e, X_LD, 8, r, l, false);
+	return x64_wv(r);
+}
+
 /* ---------------- arithmetic ---------------- */
 
 VPRIV val x64_wbin(ecx *e, int op, bool sgn, val a, val b)
@@ -122,6 +131,65 @@ VPRIV val x64_wbin(ecx *e, int op, bool sgn, val a, val b)
 	int32_t slot;
 
 	if (op == T_LESSLESS || op == T_GREATERGREATER) {
+		/* inline, as clang (a freestanding vDSO has no libgcc): the words in slots, the count
+		   masked to 0..127, three cases (0, below 64, 64 and over) */
+		int32_t w0, w1;
+		bool shl = op == T_LESSLESS;
+		uint32_t lge = wk_newlabel(e), lzero = wk_newlabel(e), ldone = wk_newlabel(e);
+		lval L0, L1, LC;
+		val v;
+		int r;
+
+		ra = x64_waddr(e, &a);
+		w0 = x64_wword(e, ra, 0);
+		w1 = x64_wword(e, ra, 8);
+		x64_tfree(e, ra);
+		v = x64_bin(e, T_AMP, 8, false, b, vconst(127));
+		r = x64_toreg(e, &v, 8);
+		LC = (lval){ .k = L_FRAME, .off = wk_slot(e, 8, 8), .align = 8 };
+		x64_mem(e, X_ST, 8, r, &LC, false);
+		x64_tfree(e, r);
+		L0 = (lval){ .k = L_FRAME, .off = w0, .align = 8 };
+		L1 = (lval){ .k = L_FRAME, .off = w1, .align = 8 };
+		rd = x64_wnew(e, &slot);
+		x64_tfree(e, rd);
+#define WLD(l) x64_wload(e, &(l))
+#define WST(vv, wo_) do { val t_ = (vv); int rt_ = x64_toreg(e, &t_, 8); lval d_ = { .k = L_FRAME, .off = slot + (wo_), .align = 8 }; \
+		x64_mem(e, X_ST, 8, rt_, &d_, false); x64_tfree(e, rt_); } while (0)
+		x64_cmpbr(e, T_EQUALEQUAL, 8, false, WLD(LC), vconst(0), lzero);
+		x64_cmpbr(e, T_GREATEREQ, 8, false, WLD(LC), vconst(64), lge);
+		if (shl) {	/* lo << c, hi << c | lo >> (64 - c) */
+			WST(x64_bin(e, T_LESSLESS, 8, false, WLD(L0), WLD(LC)), 0);
+			WST(x64_bin(e, T_PIPE, 8, false, x64_bin(e, T_LESSLESS, 8, false, WLD(L1), WLD(LC)),
+				    x64_bin(e, T_GREATERGREATER, 8, false, WLD(L0), x64_bin(e, T_MINUS, 8, false, vconst(64), WLD(LC)))), 8);
+		} else {	/* lo >> c | hi << (64 - c), hi >> c */
+			WST(x64_bin(e, T_PIPE, 8, false, x64_bin(e, T_GREATERGREATER, 8, false, WLD(L0), WLD(LC)),
+				    x64_bin(e, T_LESSLESS, 8, false, WLD(L1), x64_bin(e, T_MINUS, 8, false, vconst(64), WLD(LC)))), 0);
+			WST(x64_bin(e, T_GREATERGREATER, 8, sgn, WLD(L1), WLD(LC)), 8);
+		}
+		x64_jump(e, ldone);
+		x64_label(e, lge);
+		if (shl) {
+			WST(vconst(0), 0);
+			WST(x64_bin(e, T_LESSLESS, 8, false, WLD(L0), x64_bin(e, T_MINUS, 8, false, WLD(LC), vconst(64))), 8);
+		} else {
+			WST(x64_bin(e, T_GREATERGREATER, 8, sgn, WLD(L1), x64_bin(e, T_MINUS, 8, false, WLD(LC), vconst(64))), 0);
+			WST(sgn ? x64_bin(e, T_GREATERGREATER, 8, true, WLD(L1), vconst(63)) : vconst(0), 8);
+		}
+		x64_jump(e, ldone);
+		x64_label(e, lzero);
+		WST(WLD(L0), 0);
+		WST(WLD(L1), 8);
+		x64_label(e, ldone);
+#undef WLD
+#undef WST
+		{
+			lval l = { .k = L_FRAME, .off = slot, .align = 16 };
+
+			return x64_wv(x64_laddr(e, &l));
+		}
+	}
+	if (0) {
 		/* b is an int: __ashlti3, __lshrti3, __ashrti3 (a, (int)b) */
 		int32_t w[3];
 		int rc;
