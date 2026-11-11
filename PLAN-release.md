@@ -628,3 +628,8 @@ med befintliga undantag. Wasm64-preflight går 189/189 med 38 körda XFAIL;
 ExtInt-provet täcker den redan verifierade BitInt-ABI-luckan på Wasm32/64.
 Exakta kommandon, oförändrad kompilatorkod och testmarkörens föräldraprov:
 `work/results/native-stack64-ci-preflight/`.
+
+OPT1-utökningen med tvåpotensmultiplikation och bitkomplement är implementerad
+för x86, arm64 och wasm och har fokuserad O0–O3-validering och en liten
+matchad kompilatorkostnadsprofil i PLAN-fas2.md. G5/G7 och generell O2-täckning
+är fortsatt öppna.

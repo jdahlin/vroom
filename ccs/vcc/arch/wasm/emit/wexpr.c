@@ -1302,6 +1302,11 @@ static bool wbinrule(ecx *e, uint32_t n, qty ty, int *op, i128 *rhs, int *identi
 	if (!cc_eval(c, n, &cv) || cv.kind != CV_INT || (!pure && side_effects(c, n)))
 		return false;
 	*rhs = cv.i;
+	*identity = EM_ID_NONE;
+	if (e->E->o->opt && !e->E->noopt &&
+	    (em_xor_not(c, ty, *op, *rhs) || em_mulshift(c, ty, op, rhs)))
+		return true;
+
 	*identity = em_bin_identity(c, ty, *op, *rhs);
 	if (*identity == EM_ID_NONE && !em_divpow2(c, ty, op, rhs)) {
 		em_sdivpow2_recipe recipe;
@@ -1409,9 +1414,18 @@ static int wbinary(ecx *e, uint32_t n)
 	int identity = EM_ID_NONE;
 	em_udivconst_recipe reciprocal;
 	bool reduced = wbinrule(e, x->b, ty, &reduced_op, &rhs, &identity, &reciprocal, false);
-	wexpr(e, x->a, true);
-	if (QUNQ(lt) != QUNQ(ty) && op != T_LESSLESS && op != T_GREATERGREATER)
-		wconv(e, lt, ty);
+	uint32_t value = x->a;
+	qty value_type = lt;
+	if (!reduced && e->E->o->opt && !e->E->noopt && (op == T_STAR || op == T_CARET)) {
+		reduced_op = op;
+		if ((reduced = wbinrule(e, x->a, ty, &reduced_op, &rhs, &identity, &reciprocal, false))) {
+			value = x->b;
+			value_type = rt;
+		}
+	}
+	wexpr(e, value, true);
+	if (QUNQ(value_type) != QUNQ(ty) && op != T_LESSLESS && op != T_GREATERGREATER)
+		wconv(e, value_type, ty);
 	if (reduced) {
 		wbinreduced(e, ty, reduced_op, rhs, identity, &reciprocal);
 	} else {

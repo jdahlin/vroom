@@ -2653,7 +2653,7 @@ sina exakta angivna versioner; integrationen är ingen ny kostnadsmätning.
 
 ### OPT6: oanvända skalära lokala initierare (avgränsat delsteg)
 
-Implementation under verifiering: `emit/opt/unusedinit.c` delar behörighet och
+Implementerat: `emit/opt/unusedinit.c` delar behörighet och
 recept mellan a64, x64 och wasm32/64. Befintlig `SA_USED` från prepasset avvisar
 refererade objekt direkt; ingen ny funktionsgenomgång, CFG eller SSA tillkommer.
 Endast aldrig refererade automatiska heltalsobjekt på högst 64 bitar omfattas.
@@ -2694,7 +2694,28 @@ Manifest, kommandon, käll-/binärhashar och reproduktionsskript finns i
 `work/opt-profile/unused-init-cost/{result.json,measure.py}`. Detta mäter hela
 kompilatorprocessens användarinstruktioner, inte hårdvarucykler, väggtid eller
 programmens körtid. Det är ett avgränsat exact-parent-prov; den kombinerade
-optimeringsstackens kostnad behöver en separat gate.
+optimeringsstackens separata mätning följer nedan.
+
+Den kombinerade kostnadsgaten (`bench/vcc-opt-cost.py`) passerar: högst 1 %
+ökning per mål, både mot `4a839ba` före stacken och mot `7be5f64` före detta
+delsteg. Kandidaten var `59c686c`; alla tre binärer byggdes med Clang 23
+`-O3 -march=x86-64-v3`. Serien mäter Callgrind-Ir för hela `vpp -O2 -S` på
+ett fast korpus av befintliga regressionsfiler, med samma kandidatprofil i båda
+jämförelserna:
+
+| Mål | Filer | Mot `4a839ba` | Mot `7be5f64` |
+|---|---:|---:|---:|
+| x86-64 | 12 | +0,194974 % | +0,066731 % |
+| arm64 | 12 | +0,113848 % | +0,062119 % |
+| wasm32 | 10 | +0,248758 % | +0,057039 % |
+| wasm64 | 11 | +0,233999 % | +0,057260 % |
+
+Wasm32 saknar `atomic_ops` och `bitint_runtime`, wasm64 saknar
+`bitint_runtime`; samma fall avvisas av alla tre kompilatorerna. Rapporten
+innehåller kommandon, hashvärden, stödutfall och instruktionstal i
+`work/opt-profile/stack-cost/final/result.json`; körloggen finns i
+`work/opt-profile/stack-cost/final-run.log`. Detta är en begränsad gate för
+kompilatorarbete, inte ett mått på körhastighet hos genererade program.
 
 Efter integrering av postfix-föräldern (`e92a939`) passerar unity och nonunity
 alla 16 target×O0–O3 runtime-/kodgenfall vardera, plus fyra `VCC_NOOPT`-fall
@@ -2782,3 +2803,19 @@ ASan/UBSan. `build/linux/postfix-evidence/integration-*.log` innehåller resulta
 Den tidigare breda sviten och matchade Ir-proven har inte körts om; inga
 integreringsfel motiverade det. Rättningen är fortfarande avgränsad till
 registerrepresenterad postfix och ligger kvar ovanpå multiplikationsföräldern.
+
+### OPT1: två bitregler (2026-11-11)
+
+Multiplikation med en tvåpotens sänks direkt till maskinskift för 32-/64-bitars
+heltal; XOR med enbart ettor blir komplement. Recepten ligger i separata
+målgeneriska filer, utan ny AST-vandring. O0 och VCC_NOOPT är oförändrade;
+_BitInt och bredare typer ingår inte. O1–O3, bieffekter och operandkonvertering
+kontrolleras på x86, arm64, wasm32 och wasm64. Unity och filvis bygge samt
+36 O0/noopt/overflow-paritetsprov passerade.
+
+Matchad seriell Callgrind-profil (`work/opt-profile/bit-rule-audit/result.json`,
+kompilatorkällor och binärhashar i manifestet) mäter hela kompilatorprocessens
+instruktioner, inte cykler eller programkörtid. Fyra blandade x86-prov gav
++0,0112 %; 200 regelfria funktioner +0,052–0,469 % beroende på mål; 200
+regelmättade funktioner −1,39–1,79 %. Detta är små prov, inte en fullständig
+prestandagrind. Jämförelseregler för heltalsgränser och bred O2-täckning återstår.

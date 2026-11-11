@@ -555,6 +555,9 @@ VPRIV bool em_sdivconst64(int64_t divisor, bool remainder, em_sdivconst_recipe *
 VPRIV bool em_sdivconst(cc *c, qty ty, int op, i128 rhs, em_sdivconst_recipe *r);
 VPRIV bool a64_sdivconst_ok(ecx *e, val a, const em_sdivconst_recipe *r);
 VPRIV val a64_sdivconst(ecx *e, val a, const em_sdivconst_recipe *r);
+/* opt/mulshift.c and opt/xor-not.c: machine recipes, no operand evaluation. */
+VPRIV bool em_mulshift(cc *c, qty ty, int *op, i128 *rhs);
+VPRIV bool em_xor_not(cc *c, qty ty, int op, i128 rhs);
 /* opt/identity.c */
 enum { EM_ID_NONE, EM_ID_LEFT, EM_ID_ZERO, EM_ID_ONES };
 VPRIV int em_bin_identity(cc *c, qty ty, int op, i128 rhs);
