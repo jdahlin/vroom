@@ -8,6 +8,7 @@ VPRIV bool x64_tail_return(ecx *e, uint32_t expr)
 	wkst *W = e->wk;
 	uint32_t callee;
 	int64_t slots[6];
+	val values[6];
 	const node *call;
 
 	if (e->x64->interrupt || W->inl || W->inst || W->nclean || W->nvla || W->spneed || e->E->o->sprot ||
@@ -15,22 +16,31 @@ VPRIV bool x64_tail_return(ecx *e, uint32_t expr)
 		return false;
 	call = N(expr);
 	/* Snapshot every argument before writing any ABI register. This handles
-	   permutations, repeated arguments and homes overlapping incoming regs. */
+	   permutations, repeated arguments and homes overlapping incoming regs.
+	   Literal values need no frame slot and are materialized after snapshots. */
 	for (uint32_t i = 0; i < call->c; i++) {
 		uint32_t a = c->lists[call->b + i];
 		qty ty = N(a)->ty;
-		val v = wk_gen(e, a);
-		int r = wk_reg(e, &v, ty);
-		lval to = { .k = L_FRAME, .off = slots[i] = wk_slot(e, 8, 8), .align = 8 };
+		values[i] = wk_gen(e, a);
+		slots[i] = 0;
+		if (values[i].k != V_CONST) {
+			int r = wk_reg(e, &values[i], ty);
+			lval to = { .k = L_FRAME, .off = slots[i] = wk_slot(e, 8, 8), .align = 8 };
 
-		x64_store(e, r, &to, 8);
-		wk_free(e, &v);
+			x64_store(e, r, &to, 8);
+			wk_free(e, &values[i]);
+		}
 	}
 	for (uint32_t i = 0; i < call->c; i++) {
 		qty ty = N(c->lists[call->b + i])->ty;
-		lval from = { .k = L_FRAME, .off = slots[i], .align = 8 };
+		if (slots[i]) {
+			lval from = { .k = L_FRAME, .off = slots[i], .align = 8 };
 
-		x64_load(e, x64_argreg((int)i), &from, wk_size(c, ty), wk_signed(c, ty));
+			x64_load(e, x64_argreg((int)i), &from, wk_size(c, ty), wk_signed(c, ty));
+		} else {
+			x64_op3(e, X_MOVI, wk_size(c, ty), x64_argreg((int)i), XNOREG, XNOREG)->imm =
+				(int64_t)em_trunc_to(c, values[i].i, ty);
+		}
 	}
 	note_ref(e, REF(RK_SYM, callee));
 	x64_put(e, X_TAIL)->ref = REF(RK_SYM, callee);
