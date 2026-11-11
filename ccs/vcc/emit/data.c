@@ -113,7 +113,7 @@ static void data_init(ecx *e, uint64_t off, qty ty, uint32_t init)
 					uint64_t bo = f->off, w = f->width;
 					u128 bits;
 
-					if (!cc_eval(c, v[i], &cv) || cv.kind != CV_INT)
+					if (!cc_eval(c, v[i], &cv) || (cv.kind != CV_INT && cv.kind != CV_BIGINT))
 						efatal(e, x->loc, "initializer element is not a compile-time constant");
 					/* The per-bit loop truncates to the field width. Keep the
 					   full constant so shifts through bit 127 remain defined. */
@@ -123,7 +123,7 @@ static void data_init(ecx *e, uint64_t off, qty ty, uint32_t init)
 						uint8_t m = (uint8_t)(1u << ((bo + k) % 8));
 
 						data_or(e, at, 0);
-						e->data.p[at] = (char)((e->data.p[at] & ~m) | (((bits >> k) & 1) ? m : 0));
+						e->data.p[at] = (char)((e->data.p[at] & ~m) | ((cv.kind == CV_BIGINT ? (k/32 < cv.nbig && ((c->lists[cv.big+k/32] >> (k%32)) & 1)) : k < 128 ? ((bits >> k) & 1) : cv.i < 0) ? m : 0));
 					}
 					continue;
 				}
@@ -167,11 +167,11 @@ static void data_init(ecx *e, uint64_t off, qty ty, uint32_t init)
 		data_init(e, off + tsize(c, et), et, x->b);
 		return;
 	}
-	if (x->op == N_CAST && x->aux == CK_NOP && is_agg(c, ty)) {
+	if (x->op == N_CAST && x->aux == CK_NOP && is_agg(c, ty) && !em_bigint(c, ty)) {
 		data_init(e, off, ty, x->a);
 		return;
 	}
-	if (is_agg(c, ty)) {
+	if (is_agg(c, ty) && !em_bigint(c, ty)) {
 		/* a const aggregate object as the initializer (clang extension) */
 		uint32_t m = strip_casts(c, init);
 
@@ -187,7 +187,16 @@ static void data_init(ecx *e, uint64_t off, qty ty, uint32_t init)
 		int n = (int)tsize(c, ty);
 
 		switch (cv.kind) {
+		case CV_BIGINT:
+			for (unsigned i = 0; i < cv.nbig; i++)
+				data_put(e, off + 4 * i, c->lists[cv.big + i], 4);
+			return;
 		case CV_INT:
+			if (em_bigint(c, ty)) {
+				for (int i = 0; i < n; i += 8)
+					data_put(e, off + i, i < 16 ? (uint64_t)((u128)cv.i >> (8*i)) : cv.i < 0 ? UINT64_MAX : 0, 8);
+				return;
+			}
 			if (n == 16) {
 				data_put(e, off, (uint64_t)(u128)cv.i, 8);
 				data_put(e, off + 8, (uint64_t)((u128)cv.i >> 64), 8);

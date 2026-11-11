@@ -203,10 +203,8 @@ static uint32_t number_s(cc *c, const ptok *t, const char *s, size_t n)
 			v ? 64 - (unsigned)__builtin_clzll((uint64_t)v) : 1;
 
 		bits += !u;
-		if (bits > 128 || over128 || l) {
-			cc_error(c, t->loc, "bit-precise integer literal exceeds 128 bits");
-			bits = 128;
-		}
+		if (bits > 128 || over128)
+			return big_literal(c, s, suffix, base, u, t->loc);
 		return mk_int(c, (i128)v, ty_bitint(c, bits, u), t->loc);
 	}
 	if (over)

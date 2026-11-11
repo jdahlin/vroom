@@ -10,7 +10,7 @@ static val const_global(ecx *e, uint32_t s)
 	const sym *y = &c->syms[s];
 	cval cv;
 
-	if (y->kind == S_VAR && (QQ(y->ty) & (Q_CONST | Q_VOLATILE)) == Q_CONST && is_integer(c, y->ty) && y->body &&
+	if (y->kind == S_VAR && (QQ(y->ty) & (Q_CONST | Q_VOLATILE)) == Q_CONST && is_integer(c, y->ty) && !em_bigint(c, y->ty) && y->body &&
 	    N(y->body)->op != N_INIT && cc_eval(c, y->body, &cv) && cv.kind == CV_INT)
 		return vconst(em_trunc_to(c, cv.i, y->ty));
 	if (y->kind == S_VAR && (QQ(y->ty) & (Q_CONST | Q_VOLATILE)) == Q_CONST && is_flt(c, y->ty) &&
@@ -182,7 +182,11 @@ static val gen_cond_expr(ecx *e, uint32_t n)
 		} else {
 			r = toreg(e, &v);
 		}
-		if (is_flt(c, t)) {
+		if (em_bigint(c, t)) {
+			val test = vreg(treg(e));
+			mov(e, 1, test.r, r);
+			test_zero(e, &test, t, lend, true);
+		} else if (is_flt(c, t)) {
 			/* Keep the result value intact while testing its C truth value.
 			 * Testing raw floating bits would incorrectly treat -0.0 as true. */
 			val test = vreg(treg(e));
@@ -479,6 +483,10 @@ static val gen_binary(ecx *e, uint32_t n)
 		return r;
 	}
 
+	if ((op == T_LESSLESS || op == T_GREATERGREATER) && (em_bigint(c, rt) || is_wide(c, rt)))
+		b = cast(e, b, rt, prim(TY_INT), CK_INT);
+	if (em_bigint(c, lt))
+		return em_is_cmp(op) ? a64_bigcmp(e, op, lt, a, b) : a64_bigbin(e, op, ty, a, b);
 	if (is_flt(c, lt) || is_flt(c, ty))
 		return em_is_cmp(op) ? f_compare(e, op, lt, a, b) : f_arith(e, op, ty, a, b);
 	/* pointer arithmetic */
@@ -591,6 +599,7 @@ static val gen_unary(ecx *e, uint32_t n)
 	case T_PLUS:
 		return v;
 	case T_MINUS:
+		if (em_bigint(c, x->ty)) return a64_bigbin(e, T_MINUS, x->ty, vconst(0), v);
 		if (is_flt(c, x->ty))
 			return f_neg(e, v, x->ty);
 		if (v.k == V_CONST)
@@ -605,6 +614,7 @@ static val gen_unary(ecx *e, uint32_t n)
 		op3(e, I_SUB, X(c, x->ty), v.r, ZR, v.r);
 		return v;
 	case T_TILDE:
+		if (em_bigint(c, x->ty)) return a64_bigbin(e, T_CARET, x->ty, v, vconst(-1));
 		if (v.k == V_CONST)
 			return vconst(em_trunc_to(c, ~v.i, x->ty));
 		if (is_wide(c, x->ty)) {
@@ -666,14 +676,24 @@ static val bitint_value(ecx *e, val v, qty t)
 }
 
 /* old op= v (x a compound assignment to an lvalue of type lt): the new value, of type lt */
+
 static val assign_op(ecx *e, const node *x, qty lt, val old, val v)
 {
 	cc *c = e->c;
 	qty pt = x->c;
 	int op = x->aux;
 
-	if (em_bitint(c, lt))
+	if (em_bitint(c, lt) && !em_bigint(c, lt))
 		old = bitint_value(e, old, lt);
+	if (em_bigint(c, pt)) {
+		if (em_bigint(c, lt)) old = a64_bigcopy(e, old, lt);
+		old = a64_bigcvt(e, old, lt, pt);
+		qty rt = N(x->b)->ty;
+		if ((op == T_LESSLESS || op == T_GREATERGREATER) && (em_bigint(c, rt) || is_wide(c, rt)))
+			v = cast(e, v, rt, prim(TY_INT), CK_INT);
+		old = a64_bigbin(e, op, pt, old, v);
+		return a64_bigcvt(e, old, pt, lt);
+	}
 	if (is_ptr(c, lt)) {
 		old = ptr_to_vla(c, lt) ? ptr_add_vla(e, old, v, lt, op == T_MINUS)
 					: ptr_add(e, old, v, (int64_t)elem_size(c, lt), op == T_MINUS);
@@ -793,6 +813,20 @@ static val atomic_rmw(ecx *e, uint32_t n, bool inc, bool post)
 	return nv;
 }
 
+/* Updating a wide scalar keeps its lvalue alive through the final store.
+ * Aggregate-style loads return its address, so give the arithmetic value
+ * separate register ownership before normalization or arithmetic consumes it. */
+static val load_for_update(ecx *e, lval *l, qty t)
+{
+	val v = load(e, l, t);
+	if (em_bigint(e->c, t) && l->k == L_REG && v.k == V_REG && v.r == l->r) {
+		int r = treg(e);
+		mov(e, 1, r, v.r);
+		v.r = (uint8_t)r;
+	}
+	return v;
+}
+
 static val gen_assign(ecx *e, uint32_t n)
 {
 	cc *c = e->c;
@@ -879,7 +913,7 @@ static val gen_assign(ecx *e, uint32_t n)
 		return atomic_rmw(e, n, false, false);
 	v = gen(e, x->b);
 	l = gen_lval(e, x->a);
-	old = load(e, &l, lt);
+	old = load_for_update(e, &l, lt);
 	old = assign_op(e, x, lt, old, v);
 	store(e, &l, lt, &old);
 	lfree(e, &l);
@@ -893,6 +927,17 @@ static val incdec_op(ecx *e, qty t, bool inc, bool post, val *old)
 	val nv;
 	int64_t d = is_ptr(c, t) ? (int64_t)elem_size(c, t) : 1;
 
+	if (em_bigint(c, t)) {
+		if (post) {
+			*old = a64_bigbin(e, T_PLUS, t, *old, vconst(0));
+			val copy = vreg(treg(e));
+			mov(e, 1, copy.r, old->r);
+			return a64_bigbin(e, inc ? T_PLUS : T_MINUS, t, copy, vconst(1));
+		}
+		nv = a64_bigbin(e, inc ? T_PLUS : T_MINUS, t, *old, vconst(1));
+		*old = nv;
+		return nv;
+	}
 	if (KIND(c, t) == TY_BOOL) {
 		nv = vconst(1);
 		if (!inc) {
@@ -982,7 +1027,7 @@ static val gen_incdec(ecx *e, uint32_t n)
 	if (atomic_target(e, x->a, t))
 		return atomic_rmw(e, n, inc, post);
 	l = gen_lval(e, x->a);
-	old = load(e, &l, t);
+	old = load_for_update(e, &l, t);
 	nv = incdec_op(e, t, inc, post, &old);
 	store(e, &l, t, &nv);
 	lfree(e, &l);
@@ -1002,6 +1047,15 @@ VPRIV val gen(ecx *e, uint32_t n)
 	cc *c = e->c;
 	qty t = N(n)->ty;
 
+	if (em_bigint(c, t)) {
+		val v = gen_inner(e, n);
+		switch (N(n)->op) {
+		case N_VAR: case N_MEMBER: case N_INDEX: case N_DEREF: case N_COMPLIT:
+		case N_CALL: case N_VAARG:
+			return a64_bigcopy(e, v, t);
+		default: return v;
+		}
+	}
 	if (likely(!em_bitint(c, t)))
 		return gen_inner(e, n);
 	val v = gen_inner(e, n);
@@ -1014,8 +1068,10 @@ static val gen_inner(ecx *e, uint32_t n)
 	const node *x = N(n);
 
 	switch (x->op) {
+	case N_BIGNUM:
+		return a64_bigconst(e, x->ty, &c->lists[x->a], 0);
 	case N_NUM:
-		return vconst(c->ipool[x->a]);
+		return em_bigint(c, x->ty) ? a64_bigconst(e, x->ty, NULL, c->ipool[x->a]) : vconst(c->ipool[x->a]);
 	case N_FNUM:
 		if (is_ld(c, x->ty)) {
 			u128 q;
@@ -1208,7 +1264,7 @@ static val gen_inner(ecx *e, uint32_t n)
 	case N_VAARG:
 		return va_arg_(e, x);
 	case N_ZERO:
-		return vconst(0);
+		return em_bigint(c, x->ty) ? a64_bigconst(e, x->ty, NULL, 0) : vconst(0);
 	case N_CPLX: {	/* a _Complex value: both parts into a temporary, its address */
 		qty et = c->tags[T(c, x->ty)->aux].f[0].ty;
 		uint64_t es = tsize(c, et);

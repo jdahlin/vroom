@@ -558,6 +558,7 @@ VPRIV uint32_t vfreeze(cc *c, const vec *v)
 
 VPRIV uint32_t mk_int(cc *c, i128 v, qty ty, uint32_t loc)
 {
+	if (is_bigint(c, ty)) return big_int_node(c, v, ty, loc);
 	uint32_t n = mk(c, N_NUM, ty, loc);
 
 	c->ipool[c->nipool] = v;

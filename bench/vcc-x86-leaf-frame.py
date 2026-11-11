@@ -28,7 +28,8 @@ NI int fl_aligned(void)
     return a[0];
 }
 NI int fl_callee(void) { return 11; }
-NI int fl_call(void) { return fl_callee(); }
+/* Keep work after the call so sibling-call lowering cannot remove it. */
+NI int fl_call(void) { return fl_callee() + 1; }
 static __INTPTR_TYPE__ fl_env[5];
 NI int fl_setjmp(void) { return __builtin_setjmp(fl_env); }
 NI int fl_alloca(void)
@@ -45,7 +46,7 @@ int main(void)
     if (!fl_frame() || !fl_return()) return 2;
     fl_raw();
     if (fl_parameter(5) != 6 || fl_stack(1,2,3,4,5,6,7) != 7) return 3;
-    if (fl_aligned() != 7 || fl_call() != 11 || fl_setjmp() != 0) return 4;
+    if (fl_aligned() != 7 || fl_call() != 12 || fl_setjmp() != 0) return 4;
     if (fl_alloca() != 19 || fl_clobber() != 23) return 5;
     return 0;
 }

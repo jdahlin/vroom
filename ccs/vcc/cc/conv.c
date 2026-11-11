@@ -6,7 +6,7 @@ static __attribute__((noinline)) uint32_t fold_f2i(cc *c, uint32_t n, qty to)
 {
 	cval v;
 
-	if (eval(c, n, &v) && v.kind == CV_FLT && v.f > -9.3e18 && v.f < 1.8e19) {
+	if (!is_bigint(c, to) && eval(c, n, &v) && v.kind == CV_FLT && v.f > -9.3e18 && v.f < 1.8e19) {
 		u128 q = v.ld ? v.q : q_of_d(v.f);
 		int bits = (int)int_bits(c, to);
 		bool sg = is_signed(c, to);
@@ -29,7 +29,7 @@ VPRIV uint32_t cast_node(cc *c, uint32_t n, qty to, int kind)
 
 	N(r)->a = n;
 	N(r)->aux = (uint16_t)kind;
-	return r;
+	return big_fold_node(c, r);
 }
 
 VPRIV __attribute__((noinline)) uint32_t decay_slow(cc *c, uint32_t n, qty t, int k)
