@@ -43,6 +43,19 @@ def body(assembly, name, wasm):
     return tail[:end.start()]
 
 
+def check_cmpzero(assembly, arch):
+    if not arch.startswith('wasm'):
+        return
+    for name in ['cz_u32', 'cz_reverse', 'cz_u64', 'cz_signed', 'cz_effect', 'cz_volatile']:
+        text = body(assembly, name, True)
+        if not re.search(r'i(?:32|64)\.eqz\b', text):
+            raise RuntimeError(f'{name}: expected zero-test instruction\n{text}')
+    for name in ['cz_signed_le', 'cz_dynamic']:
+        text = body(assembly, name, True)
+        if not re.search(r'i32\.le_[su]\b', text):
+            raise RuntimeError(f'{name}: comparison must stay relational\n{text}')
+
+
 def check_cmpbounds(assembly, arch):
     wasm = arch.startswith('wasm')
     compare = r'\b(?:cmp[lq]?|[cs]et[a-z]+|i(?:32|64)\.(?:lt|gt|le|ge)_[su])\b'
@@ -908,7 +921,7 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument('--vpp', default=str(Path(BUILD) / 'vpp'))
     ap.add_argument('--target', default='x86_64-linux-gnu')
-    ap.add_argument('--rule', choices=['pow2', 'signedpow2', 'identities', 'fallthrough', 'loopback', 'unreachable', 'locals', 'localjmp', 'copies', 'extensions', 'switches', 'tails', 'udivconst', 'udivconst64', 'sdivconst', 'deadresults', 'mulconst', 'bitrules', 'cmpbounds', 'postfix', 'unusedinit', 'switchvalues', 'all'], default='all')
+    ap.add_argument('--rule', choices=['pow2', 'signedpow2', 'identities', 'fallthrough', 'loopback', 'unreachable', 'locals', 'localjmp', 'copies', 'extensions', 'switches', 'tails', 'udivconst', 'udivconst64', 'sdivconst', 'deadresults', 'mulconst', 'bitrules', 'cmpbounds', 'cmpzero', 'postfix', 'unusedinit', 'switchvalues', 'all'], default='all')
     ap.add_argument('--run', action='store_true', help='also execute literal-answer correctness checks')
     ap.add_argument('--cfi', action='store_true', help='also check unwind state with tail calls')
     ap.add_argument('--sibling-calls', choices=['default', 'on', 'off'], default='default',
@@ -955,6 +968,7 @@ def main():
              'mulconst': ('multiply_constants.c', check_mulconst),
              'bitrules': ('integer_bit_rules.c', check_bitrules),
              'cmpbounds': ('integer_cmp_bounds.c', check_cmpbounds),
+             'cmpzero': ('integer_cmp_zero.c', check_cmpzero),
              'postfix': ('postfix_eval.c', check_postfix),
              'unusedinit': ('unused_scalar_init.c', check_unusedinit)}
     selected = rules if args.rule == 'all' else {args.rule: rules[args.rule]}
@@ -975,7 +989,7 @@ def main():
                 checked = ((arch == 'x86_64' and level >= 1) if rule in ['locals', 'copies', 'extensions', 'deadresults'] else
                            (not arch.startswith('wasm') and level >= 1) if rule in ['fallthrough', 'unreachable'] else
                            arch.startswith('wasm') if rule == 'loopback' else True)
-                checked = checked and check is not None and (rule not in ['switches', 'udivconst', 'udivconst64', 'mulconst', 'bitrules', 'cmpbounds'] or level >= 1)
+                checked = checked and check is not None and (rule not in ['switches', 'udivconst', 'udivconst64', 'mulconst', 'bitrules', 'cmpbounds', 'cmpzero'] or level >= 1)
                 if checked:
                     if rule in ['sdivconst', 'unusedinit', 'switchvalues']:
                         check(assembly.read_text(), arch, optimized=level >= 1)
