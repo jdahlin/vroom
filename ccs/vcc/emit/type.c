@@ -69,10 +69,14 @@ VPRIV void sym_name(cc *c, tbuf *b, uint32_t s)
 	}
 	if (DARWIN(c))
 		tb_c(b, '_');
-	if (WASM(c) && sym_quoted(c, s)) {
-		/* LLVM's wasm assembler takes only ASCII names unquoted (as clang writes them) */
+	if ((WASM(c) || X86(c)) && sym_quoted(c, s)) {
+		/* LLVM's wasm and x86 assemblers take only ASCII names unquoted (as clang writes them) */
 		tb_c(b, '"');
 		tb_put(b, vintern_ents[y->name].s, vintern_ents[y->name].len);
+		if (X86(c) && y->depth > 0 && y->kind == S_VAR && y->sc == SC_STATIC) {
+			tb_c(b, '.');
+			tb_u(b, s);
+		}
 		tb_c(b, '"');
 		return;
 	}
@@ -83,7 +87,7 @@ VPRIV void sym_name(cc *c, tbuf *b, uint32_t s)
 	}
 }
 
-/* wasm: the name needs quotes (a byte outside ASCII; never with an asm label) */
+/* wasm, x86-64 assembly: the name needs quotes (a byte outside ASCII; never with an asm label) */
 VPRIV bool sym_quoted(cc *c, uint32_t s)
 {
 	const sym *y;

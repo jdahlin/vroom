@@ -359,15 +359,16 @@ kärnan och kan vänta.
   isunordered, inf/nan/huge_val, atomics nand/max/min, test_and_set, clear;
   inlining i vandraren (`always_inline` och små `inline`, argument parkerade
   före bindning, etiketter och case per kopia, förskanning per kopia),
-  konstanta lokaler och parametrar, `__builtin_constant_p` efter inlining.
-- `bench/vcc-x86.py`: 1679/1773, lika i `--pie` och `--pic` (vcc-sidan
+  konstanta lokaler och parametrar, `__builtin_constant_p` efter inlining;
+  `-mgeneral-regs-only`/`-mno-sse`/`-mno-sse2`/`-mno-mmx` (makron som clang, inga
+  vektorregister, flyttal ett fel; `vcc-x86.py --fpcheck`); UTF-8-namn citerade.
+- `bench/vcc-x86.py`: 1680/1773, lika i `--pie` och `--pic` (vcc-sidan
   `-fPIE`/`-fPIC`, länkad `-pie`). Körfel bara där clangs optimerare krävs
   (`20030125-1`: `floor` -> `floorf`) och 11 länkfel av samma slag eller
   `__builtin_setjmp`. `vcc-abi.py --target x86_64`: 12/12, med tre nya tester
   (`int_records`, `fp_records`, `complex_args`).
 - Kvar i X3: vektorer av `__int128`, bit-fält bredare än 64 bitar, 128-bitars overflow-inbyggda, `__builtin_setjmp`, `need_fold` (ett
-  error()-anrop kvar efter inlining),
-  `-mgeneral-regs-only`/`-mno-sse`, UTF-8-namn citerade som clang, `VCC_WALKLOG`.
+  error()-anrop kvar efter inlining), `VCC_WALKLOG`.
 
 ### X2 (2026-11-10): påbörjat, i gren `claude/x86-x2-walker`
 - Lagren finns i minsta form: `emit/rec/rec.h` (posthuvudet, `opdesc`),
