@@ -334,12 +334,26 @@ VPRIV void x64_asm(ecx *e, uint32_t n)
 			cval cv;
 
 			/* an integer constant expression as the front end folds it (__builtin_clzll(63), ...) */
-			if (is_integer(e->c, N(en)->ty) && cc_eval(e->c, en, &cv) && cv.kind == CV_INT)
+			uint32_t an = en;
+
+			while (N(an)->op == N_CAST && (N(an)->aux == CK_NOP || N(an)->aux == CK_P2P || N(an)->aux == CK_DECAY ||
+						       N(an)->aux == CK_FDECAY))
+				an = N(an)->a;
+			if (N(an)->op == N_ADDR)
+				an = N(an)->a;
+			if (is_integer(e->c, N(en)->ty) && cc_eval(e->c, en, &cv) && cv.kind == CV_INT) {
 				v = vconst(em_trunc_to(e->c, cv.i, N(en)->ty));
-			else
+			} else if (e->c->o->pic && N(an)->op == N_VAR && (c->syms[N(an)->a].kind == S_FUNC ||
+				   (c->syms[N(an)->a].kind == S_VAR && !is_local_var(c, N(an)->a))) &&
+				   !sym_needs_got(c, REF(RK_SYM, canon_sym(c, N(an)->a)))) {
+				/* &sym of a DSO-local symbol under -fPIC: an immediate (the kernel's -fPIC startup code) */
+				v = (val){ .k = V_ADDR, .ref = REF(RK_SYM, canon_sym(c, N(an)->a)) };
+				note_ref(e, v.ref);
+			} else {
 				v = wk_gen(e, en);
+			}
 		}
-		if (v.k == V_CONST || (v.k == V_ADDR && !e->c->o->pic)) {
+		if (v.k == V_CONST || (v.k == V_ADDR && (!e->c->o->pic || !sym_needs_got(e->c, v.ref)))) {	/* (a DSO-local address: an immediate under -fPIC too, as clang) */
 			bool imm = false;
 
 			for (const char *p = cs; *p; p++)
