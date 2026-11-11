@@ -176,13 +176,15 @@ VPRIV void x64_asm(ecx *e, uint32_t n)
 
 	if (nops > 64 || a->nlabel > 64)
 		efatal(e, x->loc, "too many asm operands");
-	if (a->nlabel)
-		for (uint32_t i = 0; i < a->nout; i++) {
-			const char *cs = c->strs[a->ops[i].constraint - 1].s;
+	/* asm goto with outputs: each label is reached through a trampoline that stores the
+	   outputs as the fall-through does (a copy of its records), then jumps on */
+	uint32_t tl[64];
+	bool tramp = false;
 
-			if (strpbrk(cs, "rqQRgabcdSDxyl"))
-				efatal(e, x->loc, "x86-64: asm goto with register outputs is not supported yet (PLAN-x86.md X6)");
-		}
+	for (uint32_t i = 0; a->nlabel && i < a->nout; i++)
+		tramp = true;
+	for (uint32_t k = 0; tramp && k < a->nlabel; k++)
+		tl[k] = wk_newlabel(e);
 	op = alloca((nops + 1) * sizeof(xopnd));
 	memset(op, 0, (nops + 1) * sizeof(xopnd));
 	/* the fixed registers: clobbers and register constraints */
@@ -520,7 +522,7 @@ VPRIV void x64_asm(ecx *e, uint32_t n)
 
 				if (k >= a->nlabel)
 					efatal(e, x->loc, "invalid operand number %d in inline asm string", idx);
-				x64_asmlabel(e, rb, wk_userlabel(e, a->labels[k]));
+				x64_asmlabel(e, rb, tramp ? tl[k] : wk_userlabel(e, a->labels[k]));
 				continue;
 			}
 			{
@@ -565,6 +567,7 @@ VPRIV void x64_asm(ecx *e, uint32_t n)
 	ri = x64_put(e, X_RAW);
 	ri->off = (int32_t)start;
 	ri->ref = (uint32_t)(rb->n - start);
+	uint32_t post = X->nin;	/* (the fall-through's records from here: copied per trampoline) */
 	/* the x87 stack after the asm: its outputs from st(0) up, then the inputs it did not pop
 	   (one in st(1) is popped by the asm when it clobbers st(1), as GCC's rules) */
 	{
@@ -655,4 +658,19 @@ VPRIV void x64_asm(ecx *e, uint32_t n)
 
 			x64_mem(e, X_LD, 8, r, &s, false);
 		}
+	if (tramp && e->reach) {
+		uint32_t end = X->nin, cont = wk_newlabel(e);
+
+		x64_jump(e, cont);
+		for (uint32_t k = 0; k < a->nlabel; k++) {
+			x64_label(e, tl[k]);
+			for (uint32_t r = post; r < end; r++) {
+				rec *d = x64_put(e, X->in[r].op);
+
+				*d = X->in[r];
+			}
+			x64_jump(e, wk_userlabel(e, a->labels[k]));
+		}
+		x64_label(e, cont);
+	}
 }
