@@ -57,6 +57,7 @@ case $JOB in
 arm64)
 	build vcc
 	step runtime-exceptions python3 bench/test-runtime-exceptions.py
+	step memory-cells-generated python3 bench/gen-memory-cells.py --check
 	step ctests       python3 bench/vcc-ctests.py -j "$J"
 	step switch-plan python3 bench/vcc-switch-plan.py --sanitize
 	step rec-effects  python3 bench/vcc-rec-effects.py
