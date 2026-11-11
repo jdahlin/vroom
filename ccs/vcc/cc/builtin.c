@@ -1145,7 +1145,8 @@ static uint32_t x86_simd_call(cc *c, const builtin *b, vec *args, qty rt, uint32
 			cc_error(c, loc, "argument to '%s' must be a constant integer in range [0, 255]", b->name);
 			return err_node(c, loc);
 		}
-		vec lanes = {0};
+		vec lanes;
+		vinit(&lanes);
 		vpush(c, &lanes, args->v[0]); vpush(c, &lanes, args->v[1]);
 		for (unsigned i = 0; i < 4; i++)
 			vpush(c, &lanes, mk_int(c, ((unsigned)imm >> (2 * i) & 3) + (i >= 2 ? 4 : 0), prim(TY_INT), loc));
@@ -1160,7 +1161,8 @@ static uint32_t x86_simd_call(cc *c, const builtin *b, vec *args, qty rt, uint32
 		N(saved)->a = sym; N(saved)->flags = NF_LVALUE;
 		uint32_t result = mk_int(c, 0, prim(TY_INT), loc);
 		for (unsigned i = 0; i < 4; i++) {
-			vec one = {0};
+			vec one;
+			vinit(&one);
 			vpush(c, &one, rvalue(c, x86_simd_lane(c, saved, prim(TY_FLOAT), i, loc)));
 			uint32_t sign = mk_builtin(c, BI_SIGNBIT, prim(TY_INT), loc, &one);
 			sign = convert(c, convert(c, sign, prim(TY_BOOL)), prim(TY_INT));
@@ -1230,7 +1232,8 @@ VPRIV uint32_t narrow_math_call(cc *c, const char *name, size_t len, uint32_t ar
 		c->syms[s].val = b - builtins;
 		uint32_t fn = mk(c, N_VAR, ft, loc);
 		N(fn)->a = s;
-		vec args = {0};
+		vec args;
+		vinit(&args);
 		vpush(c, &args, N(arg)->a);
 		uint32_t n = mk(c, N_CALL, prim(TY_FLOAT), loc);
 		N(n)->a = decay(c, fn);
@@ -1271,7 +1274,8 @@ VPRIV uint32_t builtin_call(cc *c, const builtin *b, uint32_t loc)
 			return err_node(c, loc);
 		}
 		uint32_t a = cplx_reuse(c, rvalue(c, args.v[0]), &pre);
-		vec unary = {0};
+		vec unary;
+		vinit(&unary);
 		vpush(c, &unary, rvalue(c, a));
 		uint32_t sign = mk_builtin(c, BI_SIGNBIT, prim(TY_INT), loc, &unary);
 		/* Each pair is the negative/positive membership bit, except NaNs,
@@ -1312,7 +1316,8 @@ VPRIV uint32_t builtin_call(cc *c, const builtin *b, uint32_t loc)
 		/* Match clang's classification tree: save the operand once, test zero,
 		 * then NaN and infinity, and finally distinguish normal/subnormal.
 		 * A class code is evaluated as its corresponding test is reached. */
-		vec unary = {0};
+		vec unary;
+		vinit(&unary);
 		vpush(c, &unary, rvalue(c, saved[5]));
 		uint32_t n = conditional(c, mk_builtin(c, BI_ISNORMAL, prim(TY_INT), loc, &unary), saved[2], saved[3], loc);
 		n = with_pre(c, pre[2], with_pre(c, pre[3], n));
