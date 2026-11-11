@@ -342,3 +342,16 @@ registerhem. SSE4-poster har explicita register-/flaggeffekter; fasta
 variadiska boolparametrar verifieras även via indirekta anrop. Båda bygglägen
 klarar egna Linuxsviter (176 x86, 181 ARM), ABI 32 per mål, 220 diagnostikprov
 och 887 kernel-TU:er i båda semalägena. G1/G2/G5 förblir öppna.
+
+### Status 2026-11-11: G5/G7, begränsade native-tail-calls
+
+Gemensam semantisk kontroll och separata måladaptrar ersätter enkla direkta
+return-call-wrappers med epilog följd av symbolgren på x86 och arm64 vid
+O1–O3. Flaggordning, ärvda attribut, ABI-register, CFI och arm64:s direkta
+objektrelokeringar är verifierade. Standard-wasm behåller vanligt call,
+liksom clang utan explicit tail-call-feature. Kärnsema/paritet på integrerad
+main-bas, egna x86-/arm64-prov, båda native-ABI-sviterna och verklig unwind är gröna.
+Två exakta 501-funktions-Ir-profiler visar −12,082 % för wrapperfallet och
++0,338 % för oförändrad aritmetisk kontroll; bara wrapperfallet minskar text.
+Hashar, omfattning och kvarvarande undantag står i OPT8 i PLAN-fas2.md.
+Detta bevisar ingen generell fartvinst. G5/G7 och full O2 är fortsatt öppna.

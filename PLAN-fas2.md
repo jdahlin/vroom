@@ -1947,7 +1947,30 @@ Checkpoint på PR50-bas 10e2cb3: unity bygger; 16 fokuserade O0–O3-mål/nivåe
 klarar kodkrav och körning, native även CFI. Verkligt kärnunderlag finns:
 preprocessor-baslinje 881/881 och kandidatens sema 887/887 både per process och
 batch. Detta är historisk evidens för den basen, inte bevis på senaste main.
-Ny kontrollrigg för blandade flagg-/attributcacher och arm64:s direkta
-objektväg är tillagd men ännu inte körd. Nuvarande main/PR50 ska integreras
-före fler breda regressioner, kostnadsprofil och slutlig granskning. G5/G7 och
-hela O2-målet är fortsatt öppna.
+Uppdaterad integration `2506518` inkluderar PR50 `0a3c988` och main `f97d16d`.
+På den källan är sema grön 887/887 både per process och batch; verklig
+kärnparitet är 881/881. Egna x86-prov klarar 223/223 med sex uttryckliga
+referensundantag; egna arm64-prov klarar 228/228 samt ett befintligt xfail.
+ABI är 32/32 på vardera x86 och arm64. Alla fyra måls
+O0–O3-prov körs korrekt; native provar också CFI. Arm64:s direkta C-till-objekt
+har rätt JUMP26/CALL26-relokeringar och körs korrekt under qemu. 48 blandade
+flagg-/attributjobb med deklarationscache av/på är gröna. Ramregression,
+verklig signal-unwind och registerhems-unwind (vanlig och 64-alignerad ram)
+är gröna. Ändrade C-filer klarar separat syntaxkompilering; effektkontrakten
+är gröna. De snabba cache- och direktobjektproven ingår nu i CI.
+
+Två kalla 501-funktionsprofiler med exakt bas `0a3c988` och kandidat
+`2506518`, båda byggda med `VCC_OPT='-O3 -march=x86-64-v3'`, visar:
+enkla heltalswrappers med en formal och en literal går från 17 934 254 till
+15 767 383 kompilerarinstruktioner (−12,082 %) och 32 064 till 24 038
+`.text`-byte. Icke kvalificerade aritmetiska returer går från 17 211 605 till
+17 269 849 (+0,338 %); assemblern och 24 039 textbyte är identiska.
+`work/opt-profile/tail-cost/report.json` innehåller kommandon, alla spårade
+kompilatorkällors hash, indatakällor och binärhashar; `measure-tail.py`
+återskapar profilerna. Basbinärens SHA256 är
+`d8e6b3b2bc693eb75374d41f4f7f3f871fba1aad78b1eb1a04bf5d65ba99d8cc`,
+kandidatens `dcb4323027bc076c74904eb179d3a9575cb06224a114cf2f31e005fcbc7ad0c2`.
+Detta är två avgränsade Ir-profiler, inte generell kompilerarfart eller
+programkörtid; maskinen var delad och inga väggtidsanspråk görs. G5/G7 och
+hela O2-målet är fortsatt öppna. Allmänna svanspositioner, stack-/FP-/aggregat-
+ABI och uttryckliga wasm-tail-features återstår.
