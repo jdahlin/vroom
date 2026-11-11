@@ -45,6 +45,7 @@ commits, `work/testsuites/MANIFEST`.
 | csmith, yarpgen | slumpprogramgeneratorer (källkod) | BSD-2 / Apache-2.0 |
 | libc-test | musl:s libc-tester (466) | MIT |
 | chibicc, cproc | kompilatorernas egna tester (50, 213) | MIT / ISC |
+| kefir | 875 end2end-runtimepar, 231 interna snapshot-kataloger inventerade separat | GPL-3.0-only; runtime-header BSD-3-Clause |
 
 ### S2 clangs -verify-tester — påbörjad (62ea29a, TODO T20)
 `bench/vcc-verify.py -j 6 [-v] [PAT]`.  Varje `%clang_cc1 … -verify`-rad i
@@ -578,7 +579,7 @@ Detta är fortfarande inte runtime- eller QBE-ekvivalens.
 
 **Klart när:** allt som clang klarar klarar också vcc.
 
-### S5b Kefir — importerad, baslinje under verifiering
+### S5b Kefir — importerad, Linux-baslinje uppmätt
 
 Officiella repot är nu `https://git.protopopov.lv/kefir.git`, låst till
 `7c59547068eaa0723b4db83d3fb70f448b0f0cb1`; gamla sr.ht HEAD innehåller
@@ -600,6 +601,30 @@ Clang-avvisning filtreras separat; signaler, timeouter, saknade verktyg och
 tysta kompilatorfel är synliga fel med exitstatus 1, även när andra fall passerar.
 Tio checkout-only riggtester ingår i CI. Detta är en ny felbaslinje,
 inte en grön svit eller full täckning av Kefirs interna tester.
+
+**Baslinje 2026-11-11**, vcc `0757803` (binär SHA256
+`40ff9fbbde546e93bd306f6511219719dd27a644b08d9456e7d88571531741bb`),
+Clang 23.1.6, 6 arbetare, 30 s kompilering / 5 s körning:
+
+| mål | alla fyra kombinationer godkända | vcc-fel | vcc signal/timeout | referenskompilering avvisad | referenslänk avvisad | referens signal/timeout | unsupported |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| x86-64 Linux | 448 | 129 | 14 | 161 | 6 | 51 | 66 |
+| ARM64 Linux/QEMU | 414 | 38 | 9 | 249 | 6 | 55 | 104 |
+
+Båda körningarna avslutas med status 1. Clang/Clang klarar 591 respektive
+461 runtime-kontrakt. Unsupported är 46 decimalvakter, 19 okända profilflaggor
+och ett extension-fall på båda mål; ARM har dessutom 38 x86/asm-kontrakt.
+Referensfel får inte räknas som godkända vcc-tester. Alla sex referenslänkfel
+per mål har riktiga, icke-tomma länkardiagnostikfiler.
+Artefakter: `/tmp/kefir-final-x86`,
+`work/results/kefir-final-arm`, gemensamt `work/results/kefir-evidence.json`.
+En tidigare partiell ARM-körning stoppades av slut på tmpfs-inoder och
+behålls separat; slutkörningen ovan skrevs till workspace-filsystemet.
+
+Separat tidsgränsprob: `compound_assign_simplify1` på x86, en arbetare och
+30 s körgräns, klarar alla fyra kombinationer. Fullbaslinjens V/C-timeout
+vid 5 s ändras inte; detta är tidsgränsevidens, inte en semantisk rättning.
+Artefakter: `work/results/kefir-slow-probe-x86`.
 
 ### S6 ABI-generatorer — rigg klar, fel rättas
 `gcc.dg/compat/struct-layout-1_generate.c` och clangs `utils/ABITest`
