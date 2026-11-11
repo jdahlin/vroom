@@ -2830,5 +2830,10 @@ pekare, flyttal, _BitInt, bredare typer och övriga konstantuttryck faller
 igenom. Värde och gren testas på x86, arm64, wasm32 och wasm64 O0–O3;
 assemblerkontroller verifierar även anrop och volatila/atomiska läsningar.
 O0 och VCC_NOOPT är byteidentiska mot föräldern på testfilen för alla fyra mål.
-Unity och filvis bygge passerar. Ytterligare gränsregler och kostnadsprofilering
-återstår innan denna gren är klar för granskning.
+Unity och filvis bygge passerar. Ytterligare gränsregler återstår.
+
+Matchad seriell Callgrind-profil mot bitset-föräldern (`work/opt-profile/
+cmpbounds-cost/result.json`, med käll- och binärhashar) mäter instruktioner för
+hela kompilatorprocessen. Fyra blandade x86-filer gav +0,181 %; 200 funktioner
+utan gränsjämförelse gav +0,252–0,295 % och mättade positiva prov −1,35–8,53 %
+beroende på mål. Detta är små prov, inte en fullständig prestandagrind.
