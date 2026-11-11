@@ -119,6 +119,7 @@ __attribute__((noinline)) VPRIV void struct_body(cc *c, uint32_t ti)
 			if (accept(c, T_COLON)) {
 				i128 w;
 				uint32_t wn = 0;
+				uint64_t bits = KIND(c, t) == TY_BOOL ? 1 : int_bits(c, t);
 				pp_span wr;
 
 				const_expr(c, &w, &wn);
@@ -132,9 +133,15 @@ __attribute__((noinline)) VPRIV void struct_body(cc *c, uint32_t ti)
 					w = 0;
 				else if (w < 0)
 					cc_error(c, d.loc, "bit-field '%.*s' has negative width (%lld)", IDF(d.name), (long long)w), w = 0;
-				else if ((uint64_t)w > int_bits(c, t))
-					cc_error(c, d.loc, "width of bit-field '%.*s' (%lld bits) exceeds the width of its type (%llu bits)",
-					      IDF(d.name), (long long)w, (unsigned long long)int_bits(c, t)), w = 0;
+				else if ((uint64_t)w > bits) {
+					if (bits == 1)
+						cc_error(c, d.loc, "width of bit-field '%.*s' (%lld bits) exceeds the width of its type (1 bit)",
+							 IDF(d.name), (long long)w);
+					else
+						cc_error(c, d.loc, "width of bit-field '%.*s' (%lld bits) exceeds the width of its type (%llu bits)",
+							 IDF(d.name), (long long)w, (unsigned long long)bits);
+					w = 0;
+				}
 				else if (w == 0 && d.name)
 					report(c, "error", d.loc, &wr, 1, NULL, 0, "named bit-field '%.*s' has zero width", IDF(d.name));
 				f.bitfield = 1;
@@ -206,8 +213,11 @@ __attribute__((noinline)) VPRIV void struct_body(cc *c, uint32_t ti)
 		c->ty[r->ty].flags |= TF_TRANSPARENT;
 	for (uint32_t i = 0; i < nf; i++)
 		if (is_array(c, fs[i].ty) && (T(c, fs[i].ty)->flags & TF_INCOMPLETE)) {
-			if (i + 1 < nf)
-				;	/* GNU: flexible array not at the end */
+			if (!(r->flags & RF_UNION) && i + 1 < nf) {
+				cc_error(c, fs[i].loc, "flexible array member '%.*s' with type '%s' is not at the end of struct",
+					 IDF(fs[i].name), tyname(c, fs[i].ty));
+				note(c, fs[i + 1].loc, "next field declaration is here");
+			}
 			r->flags |= RF_FLEX;
 		}
 	lay_record(c, r, &x->fa[base], &x->fp[base]);
