@@ -2480,3 +2480,8 @@ Käll-/binärhashar, exakta kommandon och rådata finns i
 `compiler-profile.json`, `mixed/result.json`, `native-runtime-profile.json`
 och `noopt-identity.json` med respektive mätskript. Full G7 och full
 O2-täckning återstår.
+
+Bounded-flow efter stackintegration med signed/tail/u64 (`661d552`): unity,
+sanitiserade flow-/dead-result-kontrakt, 16 mål-/nivåprov med körning och
+x86-debug O0–O3 passerar. Tidigare hela sviter och Ir-mätningar ovan gäller
+sina exakta angivna versioner; integrationen är ingen ny kostnadsmätning.
