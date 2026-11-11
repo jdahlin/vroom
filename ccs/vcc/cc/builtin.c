@@ -1121,7 +1121,7 @@ VPRIV uint32_t vector_builtin(cc *c, bool shuffle, uint32_t loc)
 		rt = type_name(c);
 		expect_here(c, T_RPAREN, "')'");
 		if (!is_vector(c, at) || !is_vector(c, rt) ||
-		    ty_size(c, at) / ty_size(c, T(c, at)->base) != ty_size(c, rt) / ty_size(c, T(c, rt)->base)) {
+		    (T(c, at)->ext ?: T(c, at)->n) != (T(c, rt)->ext ?: T(c, rt)->n)) {
 			cc_error(c, loc, "first two arguments to __builtin_convertvector must have the same number of elements");
 			return mk_int(c, 0, prim(TY_INT), loc);
 		}
@@ -1140,7 +1140,7 @@ VPRIV uint32_t vector_builtin(cc *c, bool shuffle, uint32_t loc)
 	}
 	{
 		qty et = T(c, at)->base;
-		uint64_t n = ty_size(c, at) / ty_size(c, et), k = 0;
+		uint64_t n = T(c, at)->ext ?: T(c, at)->n, k = 0;
 
 		while (accept(c, T_COMMA)) {
 			uint32_t ix = assign_expr(c);
@@ -1152,11 +1152,18 @@ VPRIV uint32_t vector_builtin(cc *c, bool shuffle, uint32_t loc)
 			k++;
 		}
 		expect_here(c, T_RPAREN, "')'");
-		if (k == 0 || (k & (k - 1)) || k * ty_size(c, et) > 64) {
+		if (k == 0 || (is_bool_vector(c, at) ? k > 4096 : ((k & (k - 1)) || k * ty_size(c, et) > 64))) {
 			cc_error(c, loc, "__builtin_shufflevector: the number of indices must be a power of two");
 			return mk_int(c, 0, prim(TY_INT), loc);
 		}
-		rt = ty_vector(c, et, (uint32_t)(k * ty_size(c, et)));
+		if (is_bool_vector(c, at)) {
+			uint32_t size = 1;
+			while (size < (k + 7) / 8) size *= 2;
+			ctype t = *T(c, ty_vector(c, et, size));
+			t.ext = (uint16_t)k, t.n = (uint32_t)k;
+			rt = QT(ty_intern(c, &t), 0);
+		} else
+			rt = ty_vector(c, et, (uint32_t)(k * ty_size(c, et)));
 	}
 	return mk_builtin(c, BI_SHUFFLEVECTOR, rt, loc, &args);
 }

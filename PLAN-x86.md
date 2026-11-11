@@ -403,6 +403,15 @@ konkreta filer, beroenden, kostnadsgränser och tester på alla tre backends.
 De tidigare auditernas x86-regler är fynd/prioritering, inte beslut att
 implementera dem i x86:s `lower.c`. Ingen optimering implementerad; X4 öppet.
 
+### Registerlokaler, delprogress 2026-11-11
+
+OPT3 i `PLAN-fas2.md` har gemensamt urval och x86:s fyra callee-save-hem,
+med asm-/nonlocal-/alignmentsäkerhet. Egna sviten 137/137, kors-ABI 22/22;
+alla kalla auditprober oförändrade efter lönsamhetsfilter. En liten loop
+förbättras men kompilator-CPU-grinden är fortsatt öppen. Direkt ABI-bindning är nu levererad och verifierad med smala argument,
+stackargument, sret och varargs. Kopiestädning återstår; full O2-paritet
+är inte uppnådd. Se OPT3:s nästa statusblock för parade mätningar.
+
 ### X4 (2026-11-11): reproducerbar nivåmatris och testprober
 
 `bench/vcc-optaudit.py` jämför 29 funktioner i
@@ -802,3 +811,37 @@ namngivna YMM/ZMM-parametrar och returvärden är fortfarande spärrade.
 X86-vektorers naturliga alignment är 32/64 byte även utan AVX, medan ARM64
 behåller 16-bytegränsen. 42 variadiska kompilerings-/spärrfall, 18 korsanrop
 med clang och 12 layoutjämförelser passerar i unity och filvis bygge.
+
+### OPT3-integration med X5 (2026-11-11)
+
+Registerlokaler använder samma csslot/CFI som asm. Privata asm-snapshots
+bevarar aktuella hem på alla kanter; riktiga unwind-tester återvinner
+anroparens callee-save-värden genom vanliga och justerade ramar (O1/O2).
+Se OPT3:s PR-status i PLAN-fas2.md; full O2 och prestandagrind kvarstår.
+
+### 2026-11-11: integration av funktionsmål, packad bool-ABI och OPT3
+
+PR39:s funktionsmål behålls vid sammanslagning med `9d022c3` (PR38/PR40).
+ABI-klassificeringen behåller både namngivna/onamngivna argument och packade
+boolvektorers lane-transport; indirekta variadiska anrop använder vandrarens
+information om fasta parametrar. Registerlokaler får fortsatt egna hem,
+medan inlining behåller den aktiva funktionens featureläge.
+SSE4:s blend-/strängposter beskriver nu sina implicita register och flaggor
+för den gemensamma optimeraren. Regressionsprov kontrollerar alla fyra
+strängopvarianter samt fasta boolvektorparametrar via funktionspekare.
+
+Unity och filvis bygge: egna Linuxprov 176/176 x86 (fem referensskip),
+181/181 ARM; ABI 32/32 på båda mål; diagnostik 220/220; sema 887/887 i
+process- och batchläge. OPT-regler O0–O3, registerhem/setjmp, unwind/CFI,
+ASan/UBSan-posteffekter och interrupt-proven passerar. Detta är en
+korrekthetsintegration; ingen ny prestandavinst eller stängd releasegrind
+påstås.
+
+Utökade integrationsgrindar: 587/587 featuremakron och 124/124 SSE4-
+acceptansfall i båda bygglägen; kernel-PP 881/881 i process och batch.
+Wasm32/64 kör det asm-omdöpta matematikprovet 1/1 i båda bygglägen.
+Den första Wasm-starten saknade Emscripten-konfiguration och nådde inte vcc;
+omkörning med explicit SDK-konfiguration är grön. TSan klarar 44 kompileringar
+på 11 käll-/målkombinationer med 1 respektive 6 emittertrådar, identisk
+assembler och inga rapporter. Exakta kommandon och binärhashar sparas i
+`work/results/pr39-merge-validation/`.

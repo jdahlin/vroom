@@ -298,7 +298,7 @@ static uint32_t declare(cc *c, const dspec *ds, declr *d, qty t, bool file)
 	if (at.vecsize) t = vector_attribute(c, t, at.vecsize, d->loc);
 	if (at.extvec && ds->sc == SC_TYPEDEF && is_arith(c, t) && !is_complex(c, t)) {
 		/* clang: n elements, the size rounded up to a power of 2 (float3: 16) */
-		uint64_t sz = (uint64_t)at.extvec * ty_size(c, t), p = 1;
+		uint64_t sz = KIND(c, t) == TY_BOOL ? (at.extvec + 7) / 8 : (uint64_t)at.extvec * ty_size(c, t), p = 1;
 
 		while (p < sz)
 			p <<= 1;
@@ -306,6 +306,10 @@ static uint32_t declare(cc *c, const dspec *ds, declr *d, qty t, bool file)
 			ctype v = *T(c, ty_vector(c, t, (uint32_t)p));
 
 			v.ext = (uint16_t)at.extvec;
+			if (KIND(c, t) == TY_BOOL) {
+				v.n = at.extvec;
+				if (c->o->target == PP_LINUX_X86_64) v.align = (uint32_t)p;
+			}
 			t = QT(ty_intern(c, &v), QQ(t));
 		}
 	}

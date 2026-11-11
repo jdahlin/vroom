@@ -179,6 +179,7 @@ static void warg(ecx *e, uint32_t n, qty t, wabi a)
 		for (uint32_t j = 0; j < a.n; j++) {
 			wlv l = { .k = WL_MEM, .off = j * es };
 
+			if (is_bvec(c, a.ft)) l.off = j / 8, l.bf = 1, l.width = 1, l.bitoff = j % 8;
 			wget(e, ta);
 			wload(e, &l, pt);
 			wretype(e, wty(c, pt), a.st, is_signed(c, pt));
@@ -962,7 +963,7 @@ static int wbi_vector(ecx *e, uint32_t n)
 	const node *x = N(n);
 	uint32_t a0 = warg_n(c, n, 0);
 	qty at = N(a0)->ty, ae = T(c, at)->base, re = T(c, x->ty)->base;
-	uint32_t na = (uint32_t)(tsize(c, at) / tsize(c, ae)), nr = (uint32_t)(tsize(c, x->ty) / tsize(c, re));
+	uint32_t na = T(c, at)->ext ?: T(c, at)->n, nr = T(c, x->ty)->ext ?: T(c, x->ty)->n;
 	bool sh = x->aux == BI_SHUFFLEVECTOR;
 	uint32_t ta = wtmp(e, WPT(c)), tb = wtmp(e, WPT(c));
 	uint64_t sl = wslot(e, tsize(c, x->ty), 16);
@@ -976,6 +977,7 @@ static int wbi_vector(ecx *e, uint32_t n)
 	for (uint32_t i = 0; i < nr; i++) {
 		wlv d = { .k = WL_MEM, .off = i * tsize(c, re) };
 
+		if (is_bvec(c, x->ty)) d.off = i / 8, d.bf = 1, d.width = 1, d.bitoff = i % 8;
 		wslot_addr(e, sl);
 		if (sh) {
 			int64_t kx = (int64_t)c->ipool[N(warg_n(c, n, 2 + i))->a];
@@ -992,12 +994,14 @@ static int wbi_vector(ecx *e, uint32_t n)
 			} else {
 				wlv s = { .k = WL_MEM, .off = (uint64_t)(kx < (int64_t)na ? kx : kx - (int64_t)na) * tsize(c, ae) };
 
+				if (is_bvec(c, at)) { unsigned j = kx < (int64_t)na ? kx : kx - na; s.off = j / 8, s.bf = 1, s.width = 1, s.bitoff = j % 8; }
 				wget(e, kx < (int64_t)na ? ta : tb);
 				wload(e, &s, ae);
 			}
 		} else {
 			wlv s = { .k = WL_MEM, .off = i * tsize(c, ae) };
 
+			if (is_bvec(c, at)) s.off = i / 8, s.bf = 1, s.width = 1, s.bitoff = i % 8;
 			wget(e, ta);
 			wload(e, &s, ae);
 			wconv(e, ae, re);

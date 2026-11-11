@@ -174,6 +174,12 @@ static void wk_elems(ecx *e, const lval *d, qty ty, uint32_t init)
 				for (uint64_t k = lo; k <= hi; k++) {
 					lval el = *d;
 
+					if (is_bvec(c, ty)) {
+						el.off += (int64_t)(k / 8);
+						el.bf = 1, el.width = 1, el.bitoff = k % 8;
+						wk_bfinit(e, &el, et, vi);
+						continue;
+					}
 					el.off += (int64_t)(k * es);
 					wk_elems(e, &el, et, vi);
 				}
@@ -339,7 +345,8 @@ static void wk_decl(ecx *e, const node *x)
 	{
 		lval l = { .k = L_FRAME, .align = sym_align(c, s) };
 
-		l.off = wk_local(e, s);
+		if (!LO(local)(e, s, &l))
+			l.off = wk_local(e, s);
 		wk_init(e, &l, y->ty, x->b);
 	}
 	if (sym_attrs(c, s)->cleanup) {
@@ -1172,11 +1179,12 @@ VPRIV void wk_function(ecx *e, uint32_t s)
 			efatal(e, y->loc, "x86-64: this return type is not supported yet (PLAN-x86.md X3)");
 	}
 	W->retlbl = wk_newlabel(e);
+	LO(locals_begin)(e, s);
 	if (wk_mem(e, W->rty)) {
 		LO(classify)(e, W->rty, &W->rrec, false);
 		W->rrec.slot = wk_slot(e, 8, 8);	/* (memory: the hidden pointer's slot) */
 	}
-	/* parameters: their slots, filled from the registers (or left on the stack) */
+	/* Parameters: slots unless the lowering selected a persistent register home. */
 	for (uint32_t i = 0; i < body->aux; i++) {
 		uint32_t p = c->lists[body->a + i];
 		qty pt = c->syms[p].ty;
@@ -1187,7 +1195,9 @@ VPRIV void wk_function(ecx *e, uint32_t s)
 		if ((ft->flags & TF_NOPROTO) && k == TY_FLOAT)
 			pt = prim(TY_DOUBLE);	/* K&R: received as the caller promoted it */
 		LO(classify)(e, pt, &pa[i], false);
-		pa[i].slot = wk_slot(e, pa[i].size > 8 ? (pa[i].size + 7) & ~(uint64_t)7 : 8, pa[i].align);
+		lval home;
+		pa[i].slot = LO(local)(e, p, &home) ? 0 :
+			wk_slot(e, pa[i].size > 8 ? (pa[i].size + 7) & ~(uint64_t)7 : 8, pa[i].align);
 	}
 	LO(params)(e, pa, (int)body->aux, wk_mem(e, W->rty) ? &W->rrec : NULL, (ft->flags & TF_VARIADIC) != 0);
 	for (uint32_t i = 0; i < body->aux; i++) {

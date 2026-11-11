@@ -29,6 +29,7 @@ static inline void void_ptr_arith(cc *c, qty pt, uint32_t loc, bool two)
 static bool vec_scalar_ok(cc *c, uint32_t s, qty et)
 {
 	qty st = QUNQ(N(s)->ty);
+	if (KIND(c, et) == TY_BOOL) return is_integer(c, st);
 	cval v;
 	bool k;
 
@@ -66,7 +67,7 @@ static bool vec_scalar_ok(cc *c, uint32_t s, qty et)
 /* the scalar operand s of a GNU vector operation (vt) at the operator loc: false after the error */
 static bool vec_scalar_check(cc *c, uint32_t s, qty vt, uint32_t loc)
 {
-	if (T(c, vt)->ext || !is_arith(c, N(s)->ty) || vec_scalar_ok(c, s, T(c, vt)->base))
+	if ((T(c, vt)->ext && !is_bool_vector(c, vt)) || !is_arith(c, N(s)->ty) || vec_scalar_ok(c, s, T(c, vt)->base))
 		return true;
 	cc_error(c, loc, "cannot convert between scalar type '%s' and vector type '%s' as implicit conversion would cause truncation",
 		 tyname(c, QUNQ(N(s)->ty)), tyname(c, vt));
@@ -95,6 +96,11 @@ static uint32_t swizzle(cc *c, uint32_t n, uint32_t id, uint32_t loc)
 	int ne = T(c, vt)->ext, k = 0, ix[16];
 	const char *s = idstr_(id);
 	int len = idlen_(id);
+
+	if (is_bool_vector(c, vt)) {
+		cc_error(c, loc, "illegal vector component name '%.*s'", len, s);
+		return mk_int(c, 0, et, loc);
+	}
 
 	if (len == 2 && !memcmp(s, "hi", 2)) {
 		for (int i = 0; i < (ne + 1) / 2; i++) ix[k++] = (ne + 1) / 2 + i < ne ? (ne + 1) / 2 + i : -1;
@@ -140,6 +146,7 @@ static uint32_t swizzle(cc *c, uint32_t n, uint32_t id, uint32_t loc)
 			b = cast_node(c, rvalue(c, n), ty_ptr(c, et), CK_VADDR);
 		b = mk2(c, N_INDEX, T(c, N(b)->ty)->base, loc, rvalue(c, b), mk_int(c, ix[0], prim(TY_LONG), loc));
 		N(b)->flags = NF_LVALUE;
+		N(b)->c = vt;
 		return b;
 	}
 	{	/* several: a shuffle into an ext vector of k lanes (an rvalue; vcc: not assignable) */
@@ -183,6 +190,9 @@ VPRIV uint32_t binop(cc *c, int op, uint32_t l, uint32_t r, uint32_t loc)
 		bool both = is_vector(c, lt) && is_vector(c, rt);
 		bool shift = op == T_LESSLESS || op == T_GREATERGREATER;
 		qty res = vt;
+
+		if (is_bool_vector(c, vt) && !(op == T_AMP || op == T_PIPE || op == T_CARET || is_cmp(op)))
+			bad_operands(c, op, l, r, loc);
 
 		if ((both && T(c, lt)->size != T(c, rt)->size) ||
 		    (!both && !is_arith(c, is_vector(c, lt) ? rt : lt)) ||
@@ -279,6 +289,8 @@ VPRIV uint32_t assign(cc *c, int op, uint32_t l, uint32_t r, uint32_t loc)
 			r = convert(c, r, prim(TY_LONG));
 			pt = lt;
 		} else if (is_vector(c, lt)) {
+			if (is_bool_vector(c, lt) && op != T_AMP && op != T_PIPE && op != T_CARET)
+				cc_error(c, loc, "invalid operands to compound assignment");
 			if (is_vector(c, rt) ? T(c, lt)->size != T(c, rt)->size : !is_arith(c, rt))
 				cc_error(c, loc, "invalid operands to compound assignment");
 			else if (!is_vector(c, rt) && op != T_LESSLESS && op != T_GREATERGREATER)
@@ -310,6 +322,22 @@ VPRIV uint32_t conditional(cc *c, uint32_t cond, uint32_t a, uint32_t b, uint32_
 	ra = a ? rvalue(c, a) : rvalue(c, cond);
 	rb = rvalue(c, b);
 	at = N(ra)->ty, bt = N(rb)->ty;
+	if (is_bool_vector(c, N(cond)->ty)) {
+		qty vt = N(cond)->ty;
+		if ((!is_bool_vector(c, at) && !is_bool_vector(c, bt)) ||
+		    (is_vector(c, at) && !compatible(c, at, vt)) ||
+		    (is_vector(c, bt) && !compatible(c, bt, vt))) {
+			cc_error(c, loc, "incompatible vector condition and result types");
+			return err_node(c, loc);
+		}
+		uint32_t pre = 0;
+		cond = cplx_reuse(c, rvalue(c, cond), &pre);
+		uint32_t neg = mk(c, N_UNARY, vt, loc);
+		N(neg)->aux = T_TILDE, N(neg)->a = cond;
+		uint32_t result = binop(c, T_PIPE, binop(c, T_AMP, cond, convert(c, ra, vt), loc),
+		                        binop(c, T_AMP, neg, convert(c, rb, vt), loc), loc);
+		return with_pre(c, pre, result);
+	}
 	if ((is_complex(c, at) || is_complex(c, bt)) && (is_arith(c, at) || is_complex(c, at)) &&
 	    (is_arith(c, bt) || is_complex(c, bt))) {
 		t = ty_complex(c, arith_conv(c, is_complex(c, at) ? cplx_elem(c, at) : at, is_complex(c, bt) ? cplx_elem(c, bt) : bt));
@@ -510,6 +538,8 @@ VPRIV uint32_t addr_of(cc *c, uint32_t n, uint32_t loc)
 	uint32_t r;
 	qty t = N(n)->ty;
 
+	if (N(n)->op == N_INDEX && N(n)->aux == 1)
+		cc_error(c, loc, "address of vector element requested");
 	if (bitfield_of(c, n))
 		cc_error(c, loc, "address of bit-field requested");
 	if (!(N(n)->flags & NF_LVALUE) && KIND(c, t) != TY_FUNC && N(n)->op != N_COMPLIT) {
@@ -648,6 +678,10 @@ static inline __attribute__((always_inline)) uint32_t primary_sym(cc *c, uint32_
 /* keywords that start a primary expression (the current token) */
 static __attribute__((noinline)) uint32_t primary_kw(cc *c, int kw, uint32_t loc)
 {
+	if (kw == KW___builtin_bit_cast) {
+		next(c);
+		return bitcast_expr(c, loc);
+	}
 	if (kw == KW__Generic) {
 		next(c);
 		return generic_sel(c, loc);
@@ -1252,6 +1286,7 @@ VPRIV __attribute__((noinline)) uint32_t postfix_ops(cc *c, uint32_t n)
 		case T_LSQUARE: {
 			uint32_t ix, r;
 			qty at, it;
+			qty vector_type = is_vector(c, N(n)->ty) ? N(n)->ty : 0;
 
 			next(c);
 			ix = expr(c);
@@ -1305,6 +1340,8 @@ VPRIV __attribute__((noinline)) uint32_t postfix_ops(cc *c, uint32_t n)
 				void_ptr_arith(c, at, loc, false);
 			r = mk2(c, N_INDEX, T(c, at)->base, loc, n, convert(c, ix, prim(TY_LONG)));
 			N(r)->flags = NF_LVALUE;
+			N(r)->c = vector_type;
+			if (vector_type && is_bool_vector(c, vector_type)) N(r)->aux = 1;
 			n = r;
 			continue;
 		}

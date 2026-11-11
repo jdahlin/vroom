@@ -51,6 +51,8 @@ VPRIV void x64_twoaddr(ecx *e)
 		}
 		o[n++] = i;
 	}
+	if (e->ndl)
+		dbg_remap(e, &j, UINT32_MAX, n);
 	X->tw = X->in;
 	X->in = o;
 	X->nin = n;
@@ -474,6 +476,15 @@ VPRIV void x64_print(ecx *e, tbuf *b, uint32_t s)
 			break;
 		case X_MFENCE:
 			tb_s(b, "\tmfence");
+			break;
+		case X_RESUME_FRAME:
+			/* Match the final prologue even if alignment was discovered after
+			   setjmp (or inside an inline body). Bypass memory operand rewriting. */
+			if (e->wk->falign > 16) {
+				tb_s(b, "\tleaq\t-8(%rbp), %r12\n\tandq\t$");
+				tb_i(b, -(int64_t)e->wk->falign);
+				tb_s(b, ", %r12");
+			}
 			break;
 		case X_BARRIER:
 			tb_s(b, "\t# compiler barrier");

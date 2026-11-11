@@ -94,13 +94,35 @@ Kvar:
 2. De största luckorna, i ordning efter hur många tester de blockerar:
    - SVE/SME-typer (`__SVInt8_t` …) och kontrollerna av streaming-funktioner.
    - `__bf16`, `__mfp8`.
-   - `__builtin_bit_cast`, `_Countof`, `__scoped_atomic_*`.
+   - `_Countof`, `__scoped_atomic_*`; separat `nullptr_t`-identitet för
+     constexpr-bitkast återstår.
    - `_Static_assert` i en struct.
    - `//`-kommentarer under `-std=c89`.
 3. Harnessens egna luckor: `%t`-tester (`split-file`), `-verify-ignore-unexpected`.
 
 **Klart när:** ingen krasch; C/ och drs/ helt gröna; antalet godkända går
 bara uppåt.  Varje rättad lucka committas med den nya siffran här.
+
+Representationssteg 2026-11-11: `__builtin_bit_cast` har nu bytebaserad
+konstanttolkning med kända värdebitar och okänd padding. Skalärer, poster,
+arrayer, vanliga vektorer och pekare hanteras vid körning; konstanta uttryck
+behåller begränsningarna för pekare, unioner, volatilitet och aktiv unionsmedlem.
+Packade boolvektorer använder logiska element och bitlagring, inklusive
+indexering, operatorer och Linux/Wasm-ABI. En direkt bitfältsoperand läses som
+sitt deklarerade skalärvärde; detta avviker avsiktligt från clangs kopiering av
+omgivande lagring (se `ccs/vcc/tests/bitcast/README.md`). Det gäller även ett
+packat boolvektorelement.
+
+Ny isolerad bas på `1f4c8d2`: unity och filvis bygge klarar egna körsviten
+**164/164 x86** (fem befintliga referensundantag) och **169/169 ARM**, hela
+ABI-sviten **32/32 per Linux-mål** samt diagnostik **219/219**. Kärnans sema
+är **887/887** både per process och i batch. TSan klarar **252/252**
+kompileringar med identisk assembler mellan en och sex trådar. Skyddssidans
+fältprov klarar **648** anrop; memo-stressen har över 1 200 separata bevis
+följda av 40 nästlade kast, utan en fast cachestorlek. Wasm32 och Wasm64
+klarar **5/5** fokuserade körprov och **6/6** packade ABI-prov vardera;
+tre explicita Linux-kontrakt räknas som undantag på Wasm, inte som pass.
+G1/G2 är fortsatt öppna, bland annat saknas separat `nullptr_t`-typidentitet.
 
 ### S2b Diagnostik för nya C-programmerare — testkorpus klar
 `bench/vcc-onboarding.py` kör 25 konkreta misstag, med reparerad kod och
