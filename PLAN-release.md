@@ -739,3 +739,6 @@ heltalsinitieringar; fyrmålsprov och avgränsad kostnad finns i PLAN-fas2.md.
 Den begränsade lokala värdeskanningen kan passera oberoende lokala skrivningar
 med invalidation av beroenden; tester, kostnad och mättat kontrollfall finns i
 PLAN-fas2.md. Generell CSE och G5/G7 återstår.
+
+Budgeterad lokal värdeåteranvändning kan även användas i rena tilldelningar;
+fyrmålsprov, kostnader och begränsningar finns i PLAN-fas2.md. G5/G7 återstår.
