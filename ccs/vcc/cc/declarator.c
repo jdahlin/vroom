@@ -5,8 +5,30 @@ enum { DQ_ATOMIC = 8 };	/* dop.q: _Atomic on a pointer (beside Q_*) */
 
 /* ---------------- declarators ---------------- */
 
+/* GNU vector_size modifies the scalar leaf, retaining declarator layers. */
+VPRIV qty vector_attribute(cc *c, qty t, uint32_t size, uint32_t loc)
+{
+	int kind = KIND(c, t);
+	if (kind == TY_PTR || kind == TY_ARRAY || kind == TY_FUNC) {
+		ctype outer = *T(c, t);
+		outer.base = vector_attribute(c, outer.base, size, loc);
+		if (kind == TY_ARRAY) {
+			outer.align = ty_align(c, outer.base);
+			if (!(outer.flags & (TF_VLA | TF_INCOMPLETE)))
+				outer.size = ty_size(c, outer.base) * outer.n;
+		}
+		return QT(ty_intern(c, &outer), QQ(t));
+	}
+	if (!is_arith(c, t) || is_complex(c, t) || !ty_size(c, t) ||
+	    ty_size(c, t) > size || size % ty_size(c, t)) {
+		cc_error(c, loc, "invalid vector element type '%s'", tyname(c, t));
+		return t;
+	}
+	return QT(QI(ty_vector(c, t, size)), QQ(t));
+}
+
 /* false when the list did not end in its ')' (the declaration is invalid, clang) */
-static bool param_list(cc *c, dop *op)
+static bool param_list(cc *c, dop *op, const attrs *leading)
 {
 	vec ptys, psyms;
 	int fl = 0;
@@ -67,6 +89,13 @@ static bool param_list(cc *c, dop *op)
 					fatal(c, tok(c)->loc, "expected parameter declarator");
 				}
 			}
+			if (leading && !ptys.n) {
+				merge_attrs(&ds.at, leading);
+				if (leading->mode) {
+					int kind = mode_kind(c, leading->mode, is_signed(c, ds.ty));
+					if (kind) ds.ty = prim(kind);
+				}
+			}
 			declarator(c, &d, true, &first, &nops);
 			if (!d.name && !d.loc)
 				d.loc = tok(c)->loc;	/* an unnamed parameter: where its name would be (clang) */
@@ -77,12 +106,7 @@ static bool param_list(cc *c, dop *op)
 				/* int __attribute__((vector_size(16))) p: a vector parameter, as a declaration */
 				uint32_t vs = d.at.vecsize ? d.at.vecsize : ds.at.vecsize;
 
-				if (vs) {
-					if (!is_arith(c, t) || ty_size(c, t) > vs || vs % ty_size(c, t))
-						cc_error(c, d.loc, "invalid vector element type '%s'", tyname(c, t));
-					else
-						t = QT(QI(ty_vector(c, t, vs)), QQ(t));
-				}
+				if (vs) t = vector_attribute(c, t, vs, d.loc);
 			}
 			/* adjustments (C11 6.7.6.3p7-8) */
 			uint32_t vsize = 0;
@@ -296,16 +320,29 @@ VPRIV void declarator(cc *c, declr *d, bool abstract_ok, uint32_t *first, uint32
 
 		next(c);
 		attribute_list(c, &d->at);
-		declarator(c, &id, abstract_ok, &ifirst, &inops);
-		expect_match(c, T_RPAREN, plb0);
-		d->name = id.name;
-		d->loc = id.loc;
-		merge_attrs(&d->at, &id.at);
-		if (id.has_func) {
-			d->psyms = id.psyms, d->npsyms = id.npsyms, d->kr = id.kr, d->has_func = true;
-			d->plb = id.plb, d->ple = id.ple;
+		if (abstract_ok && is_decl_start(c, tok(c))) {
+			/* (attributes type ...) starts an abstract function parameter
+			   list, while (attributes *name) still groups a declarator. */
+			attrs leading = d->at;
+			memset(&d->at, 0, sizeof d->at);
+			if (!param_list(c, &sufs[ns], &leading)) d->invalid = true;
+			d->psyms = sufs[ns].a + sufs[ns].b;
+			d->npsyms = sufs[ns].np;
+			d->kr = sufs[ns].kr, d->has_func = true;
+			d->plb = plb0, d->ple = c->prevloc;
+			ns++;
+		} else {
+			declarator(c, &id, abstract_ok, &ifirst, &inops);
+			expect_match(c, T_RPAREN, plb0);
+			d->name = id.name;
+			d->loc = id.loc;
+			merge_attrs(&d->at, &id.at);
+			if (id.has_func) {
+				d->psyms = id.psyms, d->npsyms = id.npsyms, d->kr = id.kr, d->has_func = true;
+				d->plb = id.plb, d->ple = id.ple;
+			}
+			inner = true;
 		}
-		inner = true;
 	} else if (is(c, T_IDENT) && !kwof(tok(c))) {
 		d->name = tok(c)->id;
 		d->loc = tok(c)->loc;
@@ -333,7 +370,7 @@ VPRIV void declarator(cc *c, declr *d, bool abstract_ok, uint32_t *first, uint32
 			plb = tok(c)->loc;
 			if (ns >= 64)
 				fatal(c, tok(c)->loc, "declarator too complex");
-			if (unlikely(!param_list(c, &sufs[ns])))
+			if (unlikely(!param_list(c, &sufs[ns], NULL)))
 				d->invalid = true;
 			/* Grouping a name adds no operators: (f)(int x) still defines x.
 			 * A pointer/array/function inside the group does take precedence. */
@@ -445,8 +482,7 @@ VPRIV qty type_name(cc *c)
 		uint32_t vs = d.at.vecsize ? d.at.vecsize : ds.at.vecsize;
 
 		/* (__attribute__((vector_size(N))) T) */
-		if (vs && is_arith(c, t) && ty_size(c, t) <= vs && !(vs % ty_size(c, t)))
-			t = QT(QI(ty_vector(c, t, vs)), QQ(t));
+		if (vs) t = vector_attribute(c, t, vs, d.loc);
 	}
 	c->tn_tdef = ds.tdef && QUNQ(t) == QUNQ(ds.ty) ? ds.tdef : 0;
 	return t;

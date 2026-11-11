@@ -459,6 +459,7 @@ VPRIV void static_assert_decl(cc *c);
 VPRIV bool decl_specs(cc *c, dspec *ds, bool allow_sc);
 /* declarator.c */
 VPRIV void declarator(cc *c, declr *d, bool abstract_ok, uint32_t *first, uint32_t *nops);
+VPRIV qty vector_attribute(cc *c, qty t, uint32_t size, uint32_t loc);
 VPRIV qty apply_declarator(cc *c, qty t, uint32_t first, uint32_t nops);
 VPRIV qty type_name(cc *c);
 /* record.c */

@@ -148,6 +148,7 @@ __attribute__((noinline)) VPRIV void struct_body(cc *c, uint32_t ti)
 				if (k)
 					t = prim(k);
 			}
+			if (d.at.vecsize) t = vector_attribute(c, t, d.at.vecsize, d.loc);
 			f.ty = t;
 			f.tdef = decl_tdef(c, ds.tdef, ds.ty, t);
 			f.counted_by = d.at.counted_by;

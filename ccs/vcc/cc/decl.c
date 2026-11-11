@@ -281,12 +281,7 @@ static uint32_t declare(cc *c, const dspec *ds, declr *d, qty t, bool file)
 		if (k)
 			t = QT(k, QQ(t));
 	}
-	if (at.vecsize) {
-		if (!is_arith(c, t) || ty_size(c, t) > at.vecsize || at.vecsize % ty_size(c, t))
-			cc_error(c, d->loc, "invalid vector element type '%s'", tyname(c, t));
-		else
-			t = QT(QI(ty_vector(c, t, at.vecsize)), QQ(t));
-	}
+	if (at.vecsize) t = vector_attribute(c, t, at.vecsize, d->loc);
 	if (at.extvec && ds->sc == SC_TYPEDEF && is_arith(c, t) && !is_complex(c, t)) {
 		/* clang: n elements, the size rounded up to a power of 2 (float3: 16) */
 		uint64_t sz = (uint64_t)at.extvec * ty_size(c, t), p = 1;
