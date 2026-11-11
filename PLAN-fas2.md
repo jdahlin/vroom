@@ -1797,3 +1797,16 @@ Båda host-kontrakten klarar ASan/UBSan. X86:s riktiga unwind och
 funktionsavgränsade debug-/text-/DWARF-kontroller är gröna. Ny CI följer
 PR:n; CPU-mätningarna och instruktionsprofilen ovan har sina uttryckliga
 äldre baser och är inte ett generellt godkännande av G5.
+
+### OPT5 regressionsunderlag: genererade minnesceller (2026-11-11)
+
+`bench/gen-memory-cells.py` skapar deterministiskt 12 funktioner med totalt
+384 operationsgrupper och 24 bokstavliga kontrollsummor från en separat
+Python-tolk med explicit breddmaskning. Sex funktioner behåller privata
+32-bitarsceller; sex täcker adressflykt via noinline-hjälpare. Smala celler,
+källregisterändringar, kontrollflöde, unioners flyttalspayload och volatila
+accesser ingår. CI kontrollerar att den incheckade C-filen är regenererbar;
+den vanliga körsviten hittar filen automatiskt. Körresultat kan inte bevisa
+att olästa volatila lagringar finns kvar; det kräver det separata
+`vcc-slot-observable.py`-kontraktet. Detta är avgränsat regressionsunderlag,
+inte ett prestandabevis eller full O2-täckning.
