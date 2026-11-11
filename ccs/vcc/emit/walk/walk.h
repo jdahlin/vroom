@@ -57,9 +57,17 @@ typedef struct wkinl {
 	int nael0;
 } wkinl;
 
+#define WK_MAXTSLOT 1024
+
 typedef struct wkst {
 	int64_t foff;		/* bytes of locals below the frame base so far */
 	uint32_t falign;
+	/* Temporary slots: one handed out inside a statement is dead when the
+	   statement ends (statement expressions give their value outside the
+	   inner statements), so later statements reuse it.  tu: those of the
+	   statements being walked (a stack, marked per statement); tf: free. */
+	struct wktslot { int64_t off; uint32_t size, align; } tu[WK_MAXTSLOT], tf[WK_MAXTSLOT];
+	uint32_t ntu, ntf, sdepth;
 	uint32_t nlabel;	/* local labels handed out in this function (1..) */
 	uint32_t gen;		/* bindings below are valid when their gen is this */
 	uint32_t *sgen;		/* per sym */
@@ -125,7 +133,8 @@ VPRIV val wk_conv(ecx *e, val v, qty from, qty to);
 VPRIV val wk_inline(ecx *e, uint32_t n, uint32_t s);	/* the call n to s, inlined (wk_can_inline) */
 VPRIV bool wk_can_inline(ecx *e, uint32_t s);
 VPRIV void wk_function(ecx *e, uint32_t s);	/* emit/walk/func.c: what emit/tu.c calls for x86-64 */
-VPRIV int64_t wk_slot(ecx *e, uint64_t size, uint32_t align);
+VPRIV int64_t wk_slot(ecx *e, uint64_t size, uint32_t align);	/* a temporary: free again after the statement */
+VPRIV int64_t wk_pslot(ecx *e, uint64_t size, uint32_t align);	/* for the whole function */
 VPRIV int64_t wk_local(ecx *e, uint32_t s);	/* a local's slot, made on first use (a goto may reach a use first) */
 VPRIV uint32_t wk_newlabel(ecx *e);
 VPRIV val wk_gen(ecx *e, uint32_t n);
