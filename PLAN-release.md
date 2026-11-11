@@ -88,7 +88,16 @@ Kefir-fallet `bitint_assign_shift1` passerar alla fyra Clang/vcc-parningar
 på båda målen. Regressionen provar 9–128 bitar, smutsig padding, tecken och
 engångsevaluering av operander. Unity och separata filer samt kärnans
 sema 887/887 individuellt och i batch är verifierade för den isolerade
-fixen; den kombinerade Kefir-milstolpens slutgrind återstår. G1 är öppen.
+fixen. Den kombinerade milstolpen `04209a5` passerar 18 oförändrade Kefir-par
+med fyra kompilatorkombinationer per Linux-mål (144 körningar), båda
+byggsätten, diagnostik 220/220, ABI 32/32 per mål och ASan 19/19 per mål.
+Egna ARM-prov: 189/189; x86: 183/183 plus ett separat godkänt `branch_far`
+med PR37:s granskade 300 s-kontrakt (ursprunglig 60 s-timeout bevaras i
+loggen). Fem övriga x86-referensundantag återstår. Wasm64 går 148/148 med
+31 körda XFAIL och tio referensundantag; fokuserad Wasm32 5/5 med sju XFAIL.
+Padding-testets Wasm-lucka är bevisad med båda tidigare baslinjerna.
+Manifest och slutgrind: `work/validate-kefir-7eca264/validation.json` och
+`final-manifest.json`. G1 är fortsatt öppen.
 
 ### Status 2026-11-11: G5/G7, registerlokaler på x86
 
