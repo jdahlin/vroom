@@ -27,6 +27,9 @@ static const builtin builtins[] = {
 	{ "__builtin_expect", BI_EXPECT, 1, "lll" },
 	{ "__builtin_expect_with_probability", BI_EXPECT_PROB, 1, "llld" },
 	{ "__builtin_va_start", BI_VA_START, 0, "vV." },
+	{ "__builtin_c23_va_start", BI_VA_START, 0, "vV." },
+	{ "__builtin_stdc_rotate_left", BI_STDC_ROTL, 0, "u.." },
+	{ "__builtin_stdc_rotate_right", BI_STDC_ROTR, 0, "u.." },
 	{ "__builtin_va_end", BI_VA_END, 0, "vV" },
 	{ "__builtin_va_copy", BI_VA_COPY, 0, "vVV" },
 	{ "__builtin_clz", BI_CLZ, 1, "iu" }, { "__builtin_clzl", BI_CLZL, 1, "iL" }, { "__builtin_clzll", BI_CLZLL, 1, "iW" },
@@ -1400,12 +1403,55 @@ static uint32_t elementwise_abs_call(cc *c, const builtin *b, uint32_t loc)
 	return with_pre(c, pre, result);
 }
 
+/* Generic rotations preserve the first operand's type and evaluate each
+ * operand once. Normalize the count before narrowing it: the caller may pass
+ * a 64/128-bit count even when rotating a small integer. */
+static uint32_t stdc_rotate(cc *c, const builtin *b, uint32_t loc)
+{
+	vec args;
+	uint32_t prex, precount, pren;
+
+	args_list(c, &args);
+	if (args.n != 2) {
+		arity(c, loc, 2, &args);
+		return err_node(c, loc);
+	}
+	args.v[0] = decay(c, args.v[0]);
+	args.v[1] = decay(c, args.v[1]);
+	qty t = QUNQ(N(args.v[0])->ty), ct = N(args.v[1])->ty;
+	if (!is_integer(c, t) || is_signed(c, t)) {
+		cc_error(c, N(args.v[0])->loc, "rotation operand must have unsigned integer type");
+		return err_node(c, loc);
+	}
+	if (!is_integer(c, ct)) {
+		cc_error(c, N(args.v[1])->loc, "rotation count must have integer type");
+		return err_node(c, loc);
+	}
+	unsigned bits = KIND(c, t) == TY_BOOL ? 1 : int_bits(c, t);
+	qty work = prim(bits <= 32 ? TY_UINT : bits <= 64 ? TY_ULLONG : TY_UINT128);
+	unsigned countbits = int_bits(c, ct);
+	ct = prim(countbits <= 32 ? TY_UINT : countbits <= 64 ? TY_ULLONG : TY_UINT128);
+	uint32_t x = cplx_reuse(c, convert(c, rvalue(c, args.v[0]), work), &prex);
+	uint32_t count = cplx_reuse(c, convert(c, rvalue(c, args.v[1]), ct), &precount);
+	uint32_t n = binop(c, T_PERCENT, rvalue(c, count), mk_int(c, bits, ct, loc), loc);
+	n = cplx_reuse(c, convert(c, n, prim(TY_UINT)), &pren);
+	uint32_t reverse = binop(c, T_MINUS, mk_int(c, bits, prim(TY_UINT), loc), rvalue(c, n), loc);
+	reverse = binop(c, T_PERCENT, reverse, mk_int(c, bits, prim(TY_UINT), loc), loc);
+	bool left = b->id == BI_STDC_ROTL;
+	uint32_t a = binop(c, left ? T_LESSLESS : T_GREATERGREATER, rvalue(c, x), rvalue(c, n), loc);
+	uint32_t z = binop(c, left ? T_GREATERGREATER : T_LESSLESS, rvalue(c, x), reverse, loc);
+	uint32_t value = convert(c, binop(c, T_PIPE, a, z, loc), t);
+	return with_pre(c, prex, with_pre(c, precount, with_pre(c, pren, value)));
+}
+
 VPRIV uint32_t builtin_call(cc *c, const builtin *b, uint32_t loc)
 {
 	vec args;
 	qty rt = sigtype(c, b->sig[0]);
 
 	switch (b->id) {
+	case BI_STDC_ROTL: case BI_STDC_ROTR:
+		return stdc_rotate(c, b, loc);
 	case BI_ELEMENTWISE_ABS:
 		return elementwise_abs_call(c, b, loc);
 	case BI_ISFPCLASS: case BI_ISSUBNORMAL: case BI_ISZERO: {
@@ -1579,6 +1625,10 @@ VPRIV uint32_t builtin_call(cc *c, const builtin *b, uint32_t loc)
 		break;
 	}
 	args_list(c, &args);
+	if (b->id == BI_VA_START && !strcmp(b->name, "__builtin_c23_va_start") && args.n > 2) {
+		arity(c, loc, 2, &args);
+		return err_node(c, loc);
+	}
 	{
 		qty ft = builtin_type(c, b);
 		const ctype *f = T(c, ft);
