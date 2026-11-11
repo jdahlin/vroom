@@ -567,6 +567,7 @@ VPRIV void wasm_emit_function(ecx *e, uint32_t s)
 	W->gen++;
 	W->nloc = W->nparam = 0;
 	W->inline_budget = WINLINE_BUDGET;
+	W->inline_depth = 0;
 	memset(W->nfl, 0, sizeof W->nfl);
 	W->frame = 0;
 	wmem_begin(e);

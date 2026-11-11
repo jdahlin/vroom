@@ -69,6 +69,7 @@ typedef struct wst {
 	uint8_t *lt;		/* local types (WT_I32 ..) */
 	uint32_t nloc, nparam;
 	uint32_t inline_budget;	/* bounded inlined nodes and parameter bindings per caller */
+	uint32_t inline_depth, inline_stack[16];
 	uint32_t *fl[5];	/* free temporaries per type */
 	uint32_t nfl[5];
 	wbind *sb;		/* per sym */
@@ -437,6 +438,7 @@ VPRIV void w16conv(ecx *e, qty from, qty to);
 VPRIV void warith(ecx *e, int op, qty ty, qty rty);
 VPRIV void wcompare(ecx *e, int op, qty t);
 /* wcall.c */
+VPRIV uint32_t wcallee(cc *c, uint32_t fn);
 VPRIV int wcall(ecx *e, uint32_t n, bool want);
 VPRIV int winline_call(ecx *e, uint32_t n, uint32_t s, bool want);
 VPRIV int wbuiltin(ecx *e, uint32_t n, bool want);

@@ -14,6 +14,11 @@ static const char *advance(const char *p, int n) { return p + n; }
 static double half(double x) { return x * 0.5; }
 static int choose(int x, int y) { return x ? x : y; }
 static int side(int x) { return ++effects + x; }
+static int wrapper(int x) { return side(x) + 1; }
+static int wrapper_twice(int x) { return wrapper(x) + wrapper(x); }
+static int mutual_b(int x);
+static int mutual_a(int x) { return x ? mutual_b(x - 1) + 1 : 0; }
+static int mutual_b(int x) { return x ? mutual_a(x - 1) + 1 : 0; }
 static int recurse(int x) { return x ? recurse(x - 1) + 1 : 0; }
 static __attribute__((noinline)) int noinline_add(int x) { return x + 1; }
 int wi_sum8(int x) { return sum8(x,1,2,3,4,5,6,7); }
@@ -82,6 +87,9 @@ int wi_narrow(int x) { return narrow(x); }
 double wi_float(double x) { return half(x); }
 int wi_choose(int x, int y) { return choose(x, y); }
 int wi_side(int x) { return side(x); }
+int wi_wrapper(int x) { return wrapper(x); }
+int wi_wrapper_twice(int x) { return wrapper_twice(x); }
+int wi_mutual(int x) { return mutual_a(x); }
 int wi_recurse(int x) { return recurse(x); }
 int wi_noinline(int x) { return noinline_add(x); }
 int main(void)
@@ -93,6 +101,7 @@ int main(void)
  if (wi_effect(5) != 7 || effects != 1 || wi_unused(5) != 5 || effects != 2 || wi_side(5) != 8 || effects != 3) return 3;
  const char *p = "abcd";
  if (wi_pointer(p) != p + 2) return 5;
- if (wi_recurse(4) != 4 || wi_noinline(4) != 5) return 4;
+ if (wi_wrapper(5) != 10 || effects != 4 || wi_wrapper_twice(5) != 23 || effects != 6) return 8;
+ if (wi_mutual(8) != 8 || wi_recurse(4) != 4 || wi_noinline(4) != 5) return 4;
  return 0;
 }
