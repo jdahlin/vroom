@@ -1170,7 +1170,11 @@ VPRIV val wk_inline(ecx *e, uint32_t n, uint32_t s)
 		for (uint32_t i = 0; i < body->aux; i++) {
 			uint32_t p = c->lists[body->a + i];
 			qty pt = c->syms[p].ty;
-			val v = i < x->c ? wk_gen(e, c->lists[x->b + i]) : vconst(0);
+			/* an argument the copy never reads, without side effects: not evaluated, as clang
+			   (the kernel's __acquire_shared_ctx_lock(RCU): RCU is an extern never defined) */
+			val v = i < x->c && ((e->E->sflags[p] & SA_USED) || side_effects(c, c->lists[x->b + i]) ||
+					     wk_mem(e, pt) || is_flt(c, pt))
+				? wk_gen(e, c->lists[x->b + i]) : vconst(0);
 
 			as[i] = 0;
 			/* (an address constant, &key, stays one too: an asm "i" operand in the copy) */
