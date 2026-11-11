@@ -505,7 +505,7 @@ def execute(args, directory, assembly, arch, source, level):
                           '.catch(e=>{console.error(e);process.exit(99);});\n')
         run([args.node, *args.node_flags, script, exe])
     else:
-        if args.tail_obj:
+        if getattr(args, 'tail_obj', False):
             run([args.vpp, f'--target={args.target}', f'-O{level}', '-ffreestanding',
                  '-fno-stack-protector',
                  '-fasynchronous-unwind-tables' if args.cfi else '-fno-asynchronous-unwind-tables',
