@@ -175,6 +175,7 @@ VPRIV void wk_cleanups(ecx *e, int to);	/* the cleanups above depth `to` run, in
 VPRIV int LO(treg)(ecx *e);				/* a free temporary */
 VPRIV void LO(tfree)(ecx *e, int r);
 VPRIV void LO(mov)(ecx *e, int rd, int rs);			/* rd = rs (64 bits) */
+VPRIV void LO(vol)(ecx *e, int d);			/* d > 0: memory records until the matching -d are volatile accesses */
 VPRIV void LO(tkeep)(ecx *e, int r);			/* r in use again (an operation consumed it, the walker still holds it) */
 VPRIV int LO(nfree)(ecx *e);				/* free temporaries left */
 VPRIV int LO(nffree)(ecx *e);				/* free float temporaries left */

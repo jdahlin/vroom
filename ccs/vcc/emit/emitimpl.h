@@ -549,6 +549,7 @@ typedef struct em_sdivpow2_recipe {
 VPRIV bool em_sdivpow2(cc *c, qty ty, int op, i128 rhs, em_sdivpow2_recipe *r);
 /* opt/mulconst.c: shift for x + (x << shift), or zero to retain multiply. */
 VPRIV unsigned em_mulconst(unsigned bits, i128 rhs);
+VPRIV unsigned em_mulconst_shl(unsigned bits, i128 rhs, unsigned *post);	/* odd 3/5/9 << post */
 
 /* opt/udivconst.c: unsigned32/64 reciprocal; quotient = high_bits(n*magic),
  * optional ((n-q)>>1)+q correction, then shift. compare means q=(n>=d). */
@@ -655,6 +656,32 @@ typedef struct em_rec_copy_scan {
 	void *ctx;
 } em_rec_copy_scan;
 VPRIV bool em_rec_copy_forward(const em_rec_copy_scan *s, uint32_t k, uint32_t end, uint8_t t, uint8_t v);
+/* rec/loads.c: what a record does to memory, for the repeated-load scan.
+ * LOAD: a plain load of reg from base+imm+ref (volatile and atomic ones are OTHER);
+ * STORE: a plain store (forward: reg holds the value a load of that size and
+ * extension 0 would give); OTHER: may write memory (calls, atomics, barriers,
+ * asm); BOUNDARY: a label or branch, where the scan starts over.  write: the
+ * registers the record writes (all of them if unknown).  reuse() turns the load at
+ * k into a copy of register from (or deletes it if that is its own register);
+ * pos is where from got its value.  inspect() is asked again after reuse().
+ */
+enum { EM_MEM_NONE, EM_MEM_LOAD, EM_MEM_STORE, EM_MEM_OTHER, EM_MEM_BOUNDARY };
+typedef struct em_rec_mem {
+	uint8_t kind, base, sz, cond, reg;
+	bool forward;
+	int64_t imm;
+	uint32_t ref;
+	uint64_t write;
+} em_rec_mem;
+typedef struct em_rec_load_scan {
+	void *records;
+	size_t stride, op_offset;
+	uint8_t deleted_op;
+	void (*inspect)(void *ctx, uint32_t k, em_rec_mem *m);
+	void (*reuse)(void *ctx, uint32_t k, uint8_t from, uint32_t pos);
+	void *ctx;
+} em_rec_load_scan;
+VPRIV void em_rec_load_reuse(const em_rec_load_scan *s, uint32_t begin, uint32_t end);
 /* insn.c */
 extern const char cond_name[][8];
 VPRIV bool logimm_ok(uint64_t v, int x);

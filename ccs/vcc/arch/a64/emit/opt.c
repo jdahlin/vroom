@@ -584,74 +584,58 @@ static void slots(ecx *e)
 /* ---------------- repeated loads ---------------- */
 
 /*
- * Per block, a few (base register or tagged frame slot, offset, size,
- * extension) -> register holding that load's value: a load of the same
- * memory while the register and the base are untouched and nothing wrote
- * memory (stores, calls, asm, barriers: everything that is not a plain
- * register operation) is a mov.  A 64-bit store also leaves its register as
- * the value of its address.  Volatile accesses are marked by mem() (rm 1) or
- * untagged (frame), and neither use nor make an entry.
+ * emit/rec/loads.c per block: a load of memory a register still holds (from
+ * a load or a 64-bit store of it) is a mov.  Volatile accesses are marked by
+ * mem() (rm 1) or untagged (frame), and neither use nor make an entry.
  */
-#define NLV 8
+static void a64_mem_inspect(void *ctx, uint32_t k, em_rec_mem *m)
+{
+	const ins *i = &((ecx *)ctx)->in[k];
+	unsigned ro = W.ro[k];
+
+	if (i->op == DELETED)
+		return;
+	m->write = W.rr[k] == GPRS ? ~(uint64_t)0 : W.ww[k];
+	if (i->op == I_LD || i->op == I_ST) {
+		bool plain = i->rn < 31 ? !i->rm : (i->rn == FRAME && SLOT_TAG(i));
+
+		m->kind = !plain ? (i->op == I_ST ? EM_MEM_OTHER : EM_MEM_NONE) : i->op == I_LD ? EM_MEM_LOAD : EM_MEM_STORE;
+		m->base = i->rn, m->sz = i->sz, m->cond = i->cond, m->imm = i->imm, m->reg = i->rd;
+		m->forward = i->op == I_ST && i->sz == 3 && i->cond == 0 && i->rd < 31;
+		if (i->rd >= 31)
+			m->kind = i->op == I_LD ? EM_MEM_NONE : EM_MEM_STORE, m->forward = false;
+	} else if ((ro & (OP_ALL | OP_CALL | OP_ASM | OP_TLV | OP_TAIL)) || i->op == I_STP || i->op == I_STLO) {
+		m->kind = EM_MEM_OTHER;
+	}
+}
+
+static void a64_mem_reuse(void *ctx, uint32_t k, uint8_t r, uint32_t pos)
+{
+	ins *i = &((ecx *)ctx)->in[k];
+	int rd = i->rd;
+
+	for (uint32_t j = pos; j < k; j++)
+		W.la[j] |= RB(r);
+	if (r == rd) {
+		i->op = DELETED;
+		return;
+	}
+	*i = (ins){ .op = I_MOV, .sz = 1, .rd = (uint8_t)rd, .rn = r };
+	W.ro[k] = (uint16_t)roles(i);
+	W.rr[k] = reads(i, W.ro[k]);
+	W.ww[k] = writes(i, W.ro[k]);
+}
+
 static void loads(ecx *e)
 {
-	ins *in = e->in;
+	const em_rec_load_scan scan = {
+		.records = e->in, .stride = sizeof(ins), .op_offset = offsetof(ins, op), .deleted_op = DELETED,
+		.inspect = a64_mem_inspect, .reuse = a64_mem_reuse, .ctx = e,
+	};
 	uint32_t nb = W.blk[e->nin - 1] + 1;
 
-	for (uint32_t b = 0; b < nb; b++) {
-		struct { int64_t imm; uint32_t pos; uint8_t base, sz, cond, reg, ok; } t[NLV];
-		unsigned next = 0;
-
-		memset(t, 0, sizeof(t));
-		for (uint32_t k = W.bs[b]; k <= W.be[b]; k++) {
-			ins *i = &in[k];
-			unsigned ro;
-			bool memw, ld, st;
-
-			if (i->op == DELETED)
-				continue;
-			ro = W.ro[k];
-			ld = i->op == I_LD, st = i->op == I_ST;
-			memw = (ro & (OP_ALL | OP_CALL | OP_ASM | OP_TLV | OP_TAIL)) || st || i->op == I_STP || i->op == I_STLO;
-			if (ld || st) {
-				bool plain = i->rn < 31 ? !i->rm : (i->rn == FRAME && SLOT_TAG(i));
-				unsigned q;
-
-				if (!plain)
-					ld = st = false;
-				for (q = 0; ld && q < NLV; q++) {
-					if (t[q].ok && t[q].base == i->rn && t[q].imm == i->imm && t[q].sz == i->sz && t[q].cond == i->cond) {
-						int r = t[q].reg, rd = i->rd;
-
-						for (uint32_t j = t[q].pos; j < k; j++)
-							W.la[j] |= RB(r);
-						if (r == rd) {
-							i->op = DELETED;
-						} else {
-							*i = (ins){ .op = I_MOV, .sz = 1, .rd = (uint8_t)rd, .rn = (uint8_t)r };
-							W.ro[k] = (uint16_t)roles(i);
-							W.rr[k] = reads(i, W.ro[k]);
-						}
-						ld = false;
-						break;
-					}
-				}
-				if (i->op == DELETED)
-					continue;
-			}
-			if (memw)
-				memset(t, 0, sizeof(t));
-			for (unsigned q = 0; q < NLV; q++)
-				if (t[q].ok && (W.ww[k] & (RB(t[q].reg) | (t[q].base < 31 ? RB(t[q].base) : 0))))
-					t[q].ok = 0;
-			if ((ld || st) && i->rd < 31 && !(ld && i->rd == i->rn) && (st ? i->sz == 3 && i->cond == 0 : true)) {
-				unsigned q = next++ % NLV;
-
-				t[q].ok = 1, t[q].imm = i->imm, t[q].pos = k, t[q].base = i->rn, t[q].sz = i->sz;
-				t[q].cond = i->cond, t[q].reg = i->rd;
-			}
-		}
-	}
+	for (uint32_t b = 0; b < nb; b++)
+		em_rec_load_reuse(&scan, W.bs[b], W.be[b]);
 }
 
 /* ---------------- known extensions ---------------- */

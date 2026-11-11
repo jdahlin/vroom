@@ -9,9 +9,14 @@ VPRIV bool a64_mulconst(ecx *e, qty ty, int r, i128 rhs)
 	uint64_t size = tsize(c, ty);
 	if (size != 4 && size != 8)
 		return false;
-	unsigned shift = em_mulconst((unsigned)size * 8, rhs);
+	unsigned post = 0, shift = em_mulconst((unsigned)size * 8, rhs);
+
+	if (!shift)
+		shift = em_mulconst_shl((unsigned)size * 8, rhs, &post);
 	if (!shift)
 		return false;
 	op3s(e, I_ADD, size == 8, r, r, r, 0, (int)shift);
+	if (post)
+		shift_imm(e, T_LESSLESS, size == 8, r, r, (int)post);
 	return true;
 }

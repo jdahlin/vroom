@@ -98,6 +98,7 @@ typedef struct xst {
 	rec *tw;		/* twoaddr.c's output */
 	uint32_t ntw;
 	uint32_t live;		/* temporaries in use (bit = register) */
+	int vol;		/* inside a volatile access: its memory records carry sh 1 (loads.c leaves them alone) */
 	bool asmcs;		/* inside an asm: out of temporaries, take a callee-saved register (saved by the prologue) */
 	int pushes;		/* 8-byte pushes outstanding (the call alignment) */
 	bool framefree;		/* frame.c: no frame/stack dependency in the final body */
@@ -118,6 +119,8 @@ static inline int x64_argreg(int i) { static const uint8_t r[6] = { RDI, RSI, RD
 VPRIV xst *x64_state(ecx *e);
 VPRIV rec *x64_op3(ecx *e, int op, int sz, int r0, int r1, int r2);
 VPRIV void x64_mem(ecx *e, int op, int sz, int r, const lval *l, bool sgn);
+VPRIV void x64_vol(ecx *e, int d);
+VPRIV void x64_loads(ecx *e, void (*remap)(void *, uint32_t, uint32_t), void *ctx);
 VPRIV void x64_mov(ecx *e, int rd, int rs);
 VPRIV void x64_movi(ecx *e, int r, int64_t v);
 VPRIV uint32_t x64_save(ecx *e, const uint8_t *regs, int n, int k0, int k1);

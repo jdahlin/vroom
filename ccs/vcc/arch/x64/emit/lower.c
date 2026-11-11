@@ -92,6 +92,8 @@ VPRIV int x64_base(ecx *e, const lval *l, uint32_t *ref)
 	return RIP;
 }
 
+VPRIV void x64_vol(ecx *e, int d) { e->x64->vol += d; }
+
 VPRIV void x64_mem(ecx *e, int op, int sz, int r, const lval *l, bool sgn)
 {
 	/* x86 memory displacements are signed 32-bit, but C address offsets are
@@ -128,6 +130,7 @@ VPRIV void x64_mem(ecx *e, int op, int sz, int r, const lval *l, bool sgn)
 	i->off = (int32_t)l->off;
 	i->r[1] = (uint8_t)base;
 	i->ref = ref;
+	i->sh = e->x64->vol != 0;
 	if (op == X_ST)
 		i->r[2] = (uint8_t)r;
 	else
@@ -639,6 +642,9 @@ VPRIV void x64_finish(ecx *e, uint32_t s)
 	if (e->E->o->opt >= 1 && !e->E->noopt)
 		x64_dead(e);
 	x64_twoaddr(e);
+	d.cursor = 0;
+	if (e->E->o->opt >= 1 && !e->E->noopt)
+		x64_loads(e, e->ndl ? x64_compact_remap : NULL, &d);
 	b->n = (b->n + 7) & ~(size_t)7;
 	start = b->n;
 	sym_header(e, b, s, true, "\t.text\n", 16);
@@ -757,7 +763,9 @@ VPRIV int x64_atomic(ecx *e, int op, int size, int rp, int rv, int rexp)
 		lval l = { .k = L_REG, .r = (uint8_t)rp };
 
 		r = x64_treg(e);
+		X->vol++;
 		x64_mem(e, X_LD, size, r, &l, false);	/* a plain load is sequentially consistent */
+		X->vol--;
 		return r;
 	}
 	case WK_ASTORE:

@@ -43,8 +43,8 @@ static bool x64_copy_rewrite(void *ctx, uint32_t j, uint8_t from, uint8_t to, bo
 	/* A partial write or tied result may read bits not represented by an
 	 * independent operand. Do not redirect that register's identity.
 	 */
-	if (x64_effects(e, i).def & X_COPY_BIT(from))
-		return false;
+	if ((x64_effects(e, i).def & X_COPY_BIT(from)) && i->op != X_LD)
+		return false;	/* (a load writes the whole register: only its address is read) */
 	bool found = false;
 	for (unsigned f = 1; f <= 2; f++) {
 		if ((fields & (1u << f)) && i->r[f] == from) {

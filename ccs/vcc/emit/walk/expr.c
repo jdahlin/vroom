@@ -756,7 +756,13 @@ static val wk_load(ecx *e, lval l, qty t)
 		return wk_vreg(r);
 	}
 	r = l.k == L_REG ? l.r : LO(treg)(e);
-	LO(load)(e, r, &l, wk_size(c, t), wk_signed(c, t) || KIND(c, t) == TY_BOOL ? wk_signed(c, t) : false);
+	{
+		int vol = (QQ(t) & Q_VOLATILE) != 0;
+
+		LO(vol)(e, vol);
+		LO(load)(e, r, &l, wk_size(c, t), wk_signed(c, t) || KIND(c, t) == TY_BOOL ? wk_signed(c, t) : false);
+		LO(vol)(e, -vol);
+	}
 	return wk_vreg(r);
 }
 
@@ -765,7 +771,11 @@ VPRIV void wk_store(ecx *e, const lval *l, qty t, val *v)
 {
 	int r = wk_reg(e, v, t);
 
+	int vol = (QQ(t) & Q_VOLATILE) != 0;
+
+	LO(vol)(e, vol);
 	LO(store)(e, r, l, wk_size(e->c, t));
+	LO(vol)(e, -vol);
 	LO(tfree)(e, r);
 }
 
