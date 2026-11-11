@@ -610,7 +610,13 @@ på ARM och korrigerar även x86:s half/BF16-test och signbyte; båda byggsätte
 fem FP-regressioner per mål och alla 65536 half/BF16-mönster går grönt.
 Med den isolerade rättningen och vcc-byggda stödobjekt går **309 ARM-prov**,
 tre referensbyggfel och 31 referenskörfel. Dessa är riktade/isolerade
-resultat; harnessen och den kombinerade milstolpen verifieras separat.
+resultat. Den frysta PR-kombinationen `511d091` är därefter ombyggd och
+fullständigt omkörd: **303/303 clang-giltiga x86-prov** följt av
+**309/309 ARM/QEMU-prov**, samma referensundantag, noll kandidatfel eller
+infrastrukturfel och korrekt slutstatus. Kompilatorns SHA256 är
+`249d770ac3e0cb73c669637a9e20c284bc1018aee674cad547cc66c21f32cfef`;
+fulla artefakter finns i `/tmp/libc-pr-{x86,arm}`. Alla 343 dynamiska
+konfigurationer per mål är redovisade, även de där glibc-oraklet fallerar.
 
 `bench/vcc-libc-test.py` följer nu upstreams Makefile/.mk-graf för alla
 343 dynamiska functional/math/regression-binärer. Varje kompilator bygger
