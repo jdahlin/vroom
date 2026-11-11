@@ -123,11 +123,15 @@ static void error(const char *fmt, ...)
 	diag("error", fmt, ap);
 	va_end(ap);
 }
+static bool fatal_warnings;	/* --fatal-warnings: a warning is an error (as lld) */
+
 static void warn(const char *fmt, ...)
 {
 	va_list ap;
 	va_start(ap, fmt);
-	diag("warning", fmt, ap);
+	if (fatal_warnings)
+		atomic_fetch_add(&nerrors, 1);
+	diag(fatal_warnings ? "error" : "warning", fmt, ap);
 	va_end(ap);
 }
 
@@ -324,7 +328,7 @@ static struct {
 	const char *build_id;		/* NULL, "sha1", "md5", "fast" */
 	const char *map;
 	bool relocatable, shared, bsymbolic, notext, no_apply_dyn, no_undefined;
-	bool discard_locals, discard_all, strip_debug, pic_veneer, nmagic;
+	bool discard_locals, discard_all, discard_none, strip_debug, pic_veneer, nmagic;
 	bool stubs;			/* define unresolved symbols as -O0 stubs */
 	bool relax;
 	uint64_t max_page;
@@ -3458,7 +3462,7 @@ static bool keep_local(const Obj *o, const Sym *y)
 		uint32_t os = isec_osec(s);
 		if (is->kind == K_NONE || os == NONE || os == OS_DISCARD)
 			return false;
-		if (n[0] == '.' && n[1] == 'L' && (opt.discard_locals || (is->flags & SHF_MERGE)))
+		if (n[0] == '.' && n[1] == 'L' && (opt.discard_locals || ((is->flags & SHF_MERGE) && !opt.discard_none)))
 			return false;
 	} else if (n[0] == '.' && n[1] == 'L' && opt.discard_locals) {
 		return false;
@@ -3802,8 +3806,9 @@ static bool parse_args(int argc, char **argv)
 		if (ARG("--no-eh-frame-hdr")) { opt.eh_frame_hdr = false; continue; }
 		if (ARG("-EL") || ARG("--no-undefined-version")) continue;
 		if (ARG("--no-undefined") || ARG("-zdefs")) { opt.no_undefined = true; continue; }
-		if (ARG("-X") || ARG("--discard-locals")) { opt.discard_locals = true; continue; }
-		if (ARG("-x") || ARG("--discard-all")) { opt.discard_all = true; continue; }
+		if (ARG("-X") || ARG("--discard-locals")) { opt.discard_locals = true, opt.discard_all = opt.discard_none = false; continue; }
+		if (ARG("-x") || ARG("--discard-all")) { opt.discard_all = true, opt.discard_locals = opt.discard_none = false; continue; }
+		if (ARG("--discard-none")) { opt.discard_none = true, opt.discard_all = opt.discard_locals = false; continue; }
 		if (ARG("-S") || ARG("--strip-debug")) { opt.strip_debug = true; continue; }
 		if (ARG("-n") || ARG("--nmagic")) { opt.nmagic = true; continue; }
 		if (ARG("--no-apply-dynamic-relocs")) { opt.no_apply_dyn = true; continue; }
@@ -3814,10 +3819,14 @@ static bool parse_args(int argc, char **argv)
 		if (ARG("--print-gc-sections")) { opt.print_gc = true; continue; }
 		if (ARG("--no-print-gc-sections")) { opt.print_gc = false; continue; }
 		if (ARG("--vroom-stubs")) { opt.stubs = true; continue; }
+		if (ARG("--hash-style=both")) continue;
+		if (ARG("--fatal-warnings")) { fatal_warnings = true; continue; }
+		if (ARG("--no-fatal-warnings")) { fatal_warnings = false; continue; }	/* (a shared object gets .hash and .gnu.hash, as lld's both) */
 		if (ARG("--emit-relocs") || ARG("-q")) { error("--emit-relocs is not supported"); continue; }
 		if ((v = VAL("-m")) || (!strncmp(a, "-m", 2) && a[2] && (v = a + 2))) {
-			/* lld's AArch64 little-endian emulations */
-			if (strcmp(v, "aarch64elf") && strcmp(v, "aarch64linux") && strcmp(v, "aarch64_elf64_le_vec"))
+			/* lld's AArch64 little-endian and x86-64 emulations (the machine comes from the inputs) */
+			if (strcmp(v, "aarch64elf") && strcmp(v, "aarch64linux") && strcmp(v, "aarch64_elf64_le_vec") &&
+			    strcmp(v, "elf_x86_64"))
 				error("unknown emulation: %s", v);
 			continue;
 		}
@@ -6050,6 +6059,7 @@ typedef struct {
 	uint32_t secsym;
 	uint32_t grp;			/* a .group: its input SHT_GROUP ISec + 1 */
 	bool member;			/* a group member: its own output section, SHF_GROUP */
+	uint32_t linkr;			/* SHF_LINK_ORDER: the output section it is linked to + 1 (lld: one per target) */
 } ROut;
 static VVEC(ROut) routs;
 static uint32_t *rmap;			/* name hash table -> ROut */
@@ -6220,12 +6230,15 @@ static int ld_relocatable(void)
 	rmap = alloc(cap * sizeof(uint32_t));
 	memset(rmap, 0xff, cap * sizeof(uint32_t));
 	rmask = cap - 1;
+	for (int pass = 0; pass < 2; pass++)
 	for (uint32_t i = 0; i < isecs.n; i++) {
 		ISec *is = &isecs.v[i];
 		const Obj *io = is->obj != NONE ? objs.v[is->obj] : NULL;
 		const Shdr *ih = io && is->shndx < io->nsh ? &io->sh[is->shndx] : NULL;
 
 		if (ih && ih->sh_type == SHT_GROUP) {
+			if (pass)
+				continue;
 			/* a group whose members are kept (a later COMDAT copy is dropped) */
 			const uint32_t *w = (const uint32_t *)(io->buf + ih->sh_offset);
 			uint32_t nw = (uint32_t)(ih->sh_size / 4);
@@ -6245,8 +6258,32 @@ static int ld_relocatable(void)
 		}
 		if (is->kind != K_NORMAL)
 			continue;
+		if (pass == 0 && (is->flags & 0x80))
+			continue;	/* (SHF_LINK_ORDER: after the sections it links to) */
+		if (pass == 1 && !(is->flags & 0x80))
+			continue;
 		bool member = ih && (ih->sh_flags & SHF_GROUP);
-		uint32_t ri = member ? rout_new(is->name) : rout_get(is->name);
+		uint32_t ri, lr = 0;
+
+		if (is->flags & 0x80) {
+			/* one output section per name and linked output section, sh_link to it (lld -r) */
+			uint32_t l = ih ? ih->sh_link : 0;
+			const ISec *t = l && io && l < io->nsh ? &isecs.v[io->isec0 + l] : NULL;
+
+			if (!t || t->kind != K_NORMAL || t->dropped || t->osec == NONE)
+				continue;	/* (its section is gone: so is it) */
+			lr = t->osec + 1;
+			ri = NONE;
+			for (uint32_t k = 0; !member && k < routs.n; k++)
+				if (routs.v[k].linkr == lr && !routs.v[k].member && !strcmp(routs.v[k].name, is->name))
+					ri = k;
+			if (ri == NONE) {
+				ri = rout_new(is->name);
+				routs.v[ri].linkr = lr;
+			}
+		} else {
+			ri = member ? rout_new(is->name) : rout_get(is->name);
+		}
 		ROut *r = &routs.v[ri];
 
 		if (member) {
@@ -6363,6 +6400,10 @@ static int ld_relocatable(void)
 			VVEC_PUSH(wjobs, routs.v[i].secs.v[k], alloc);
 	/* local maps must exist before relocations are rewritten */
 	pfor(objs.n, r_write_locals, NULL);
+	/* x86-64: the gaps between code sections are int3 (lld -r too: objtool decodes them) */
+	for (uint32_t i = 0; x86_ld && i < routs.n; i++)
+		if ((routs.v[i].flags & SHF_EXECINSTR) && routs.v[i].type != SHT_NOBITS && !routs.v[i].grp)
+			memset(rbuf + routs.v[i].off, 0xcc, routs.v[i].size);
 	pfor(wjobs.n, r_write_isec, NULL);
 	pfor((gorder.n + 4095) / 4096, r_write_globals, NULL);
 	/* groups: the flag word, then the members' output indices (a .rela member: its section's) */
@@ -6407,6 +6448,8 @@ static int ld_relocatable(void)
 		shd[r->shidx] = (Shdr){.sh_name = r->nameoff, .sh_type = r->type, .sh_flags = r->flags,
 				       .sh_offset = r->off, .sh_size = r->size, .sh_addralign = r->align,
 				       .sh_entsize = r->entsize};
+		if (r->linkr)
+			shd[r->shidx].sh_link = routs.v[r->linkr - 1].shidx;
 		if (r->grp) {	/* sh_link the symbol table, sh_info the signature */
 			const ISec *gs = &isecs.v[r->grp - 1];
 			const Obj *o = objs.v[gs->obj];
@@ -6501,7 +6544,7 @@ static void reset_state(void)
 	memset(&ehfdes, 0, sizeof ehfdes);
 	memset(&stop_syms, 0, sizeof stop_syms);
 	ehhdr_isec = NONE;	/* set only while NONE */
-	has_tls = headers_loaded = false;
+	has_tls = headers_loaded = fatal_warnings = false;
 	tls_tp = tbss_off = 0;
 	stub_names = NULL;
 	nstubs = 0;
