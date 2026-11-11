@@ -18,10 +18,15 @@ VPRIV bool em_rec_copy_forward(const em_rec_copy_scan *s, uint32_t k, uint32_t e
 
 		if (i[s->op_offset] == s->deleted_op)
 			continue;
-		memcpy(&flags, (const unsigned char *)s->flags + (size_t)j * s->flags_stride, sizeof(flags));
-		if (flags & s->opaque_mask)
-			return false;
-		r = s->read[j], w = s->write[j];
+		if (s->inspect) {
+			if (!s->inspect(s->ctx, j, &r, &w))
+				return false;
+		} else {
+			memcpy(&flags, (const unsigned char *)s->flags + (size_t)j * s->flags_stride, sizeof(flags));
+			if (flags & s->opaque_mask)
+				return false;
+			r = s->read[j], w = s->write[j];
+		}
 		if (r & tb) {
 			/* Preflight every use before changing anything. The callback
 			 * handles whole-record restrictions, including implicit and tied
@@ -31,7 +36,7 @@ VPRIV bool em_rec_copy_forward(const em_rec_copy_scan *s, uint32_t k, uint32_t e
 				return false;
 			rw[nrw++] = j;
 		}
-		if ((w & tb) || !(s->live[j] & tb))
+		if ((w & tb) || (s->live && !(s->live[j] & tb)))
 			break;
 		if (w & vb)
 			return false;
@@ -40,10 +45,12 @@ VPRIV bool em_rec_copy_forward(const em_rec_copy_scan *s, uint32_t k, uint32_t e
 		return false;
 	for (uint32_t q = 0; q < nrw; q++) {
 		s->rewrite(s->ctx, rw[q], t, v, true);
-		s->read[rw[q]] = (s->read[rw[q]] & ~tb) | vb;
+		if (s->read)
+			s->read[rw[q]] = (s->read[rw[q]] & ~tb) | vb;
 	}
-	for (uint32_t q = k; nrw && q < rw[nrw - 1]; q++)
-		s->live[q] |= vb;
+	if (s->live)
+		for (uint32_t q = k; nrw && q < rw[nrw - 1]; q++)
+			s->live[q] |= vb;
 	records[(size_t)k * s->stride + s->op_offset] = s->deleted_op;
 	return true;
 }

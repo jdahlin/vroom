@@ -1613,3 +1613,50 @@ Unity, 116 fokuserade körkombinationer på fyra targetkonfigurationer,
 debugrad-/DWARF-/textkontroll och riktig x86-unwind O1/O2 är gröna efter
 integrationen. Prepassens trådpublicering och VLA-fakta är granskade mot
 registerurvalet. Ny CI krävs på den integrerade committen.
+
+### OPT4 kostnadsgranskning efter integration (2026-11-11)
+
+Den ivriga x86-adaptern avvisas för publicering: parat mot d1ee6f6 gav
+kompilator-CPU loop 68,524→75,594 ms och kontroll 26,064→27,775 ms,
+med konsekvent högre kandidatsampel. Artefakter:
+`/source/vroom/work/opt-pr-tmp/copies-measure/integrated-pair/`.
+
+X86 avkodar nu effekter vid behov via den gemensamma kopiekärnan. Ingen
+egen allokering, full effekt-/liveness-tabell eller bakåtvandring. Utan
+live-tabell krävs uttrycklig full överskrivning av temporären; källans
+ändring eller en opak gräns avbryter hela transaktionen. Detta är mer
+konservativt när ett värde dog före en senare källändring. Arm64 använder
+sina befintliga tabeller utan ny analys. Kopieanropet är dessutom infogat
+i den befintliga twoaddr-vandringen; separata skannings-/kompakteringspass
+är borttagna och samma debugremappning hanterar borttagna kopior.
+Returkopior före hopp/etikett avvisas utan effektavkodning.
+
+Det nya passet behåller cp_stores 26→23 instruktioner och 12→9 register-
+kopior. Sanitiserade kontrakt, x86/arm64:s fokuserade O0–O3-körningar,
+debugrader/DWARF/text och riktig unwind O1/O2 är gröna. Ny mätning mot
+14379fe: före snabbvägen x86 loop 64,638→66,536 och kontroll
+25,153→26,793 ms. Med snabbvägen, vid annat lastläge, loop
+85,539→94,029 och kontroll 30,644→29,524 ms; föregående kandidat i samma
+mätning gav 103,384 respektive 31,356 ms. Absoluta tal mellan rundor är
+inte jämförbara. Looppåslaget är fortfarande en öppen kostnadsfråga,
+inte ett bevisat godkännande av 1 %-grinden. `ondemand-pair/`,
+`fused-pair/` och `fastpath-pair/` innehåller råsampel, hashade binärer och
+kandidatpatchar under samma copies-measure-katalog. Kopiesteget ligger
+fortsatt separat från integrations-PR38; ingen ny PR för det ännu.
+
+### OPT5 konkret genomförandeordning
+
+1. Flytta arm64:s befintliga cell-/överlapps-/escapeanalys och slots-pass
+   till `emit/rec/slots.c`, återanvänd befintliga rr/ww/live/blocktabeller.
+2. Beskriv åtkomster med stabilt allokerings-ID (även andra ID:t vid
+   one-past), offset/bredd/värderegister och explicit observable-markör.
+   X86:s nuvarande LD/ST saknar volatile/atomic-fakta: dessa måste följa
+   med från de typade walker-anropen innan någon DSE kan aktiveras.
+3. X86 börjar med exakta GPR-celler 1/2/4/8 byte; laddning ersätts med
+   MOV/EXT enligt rätt signering. Otaggade/överlappande/observerbara
+   åtkomster blockerar optimering. Testa särskilt olästa volatile stores,
+   scope-återanvändning, adressflykt, one-past, unioner, calls/asm/atomics.
+4. Wasm delar cellanalysen men behöver stabila lokala värde-ID:n och
+   strukturerade minnesoperationsposter eller scalar replacement före
+   textemission. Ingen omskrivning av färdig assemblertext; adress-
+   producenter, smala extensioner och stackbalans måste bevaras.

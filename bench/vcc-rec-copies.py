@@ -12,13 +12,6 @@ SOURCE = r'''
 #include "vcc/arch/x64/emit/effects.c"
 #include "vcc/emit/rec/copies.c"
 #include "vcc/arch/x64/emit/copies.c"
-/* This isolated record fixture has no debug rows. Real debug remapping is
- * exercised through the compiler by vcc-opt-debug.py. */
-VPRIV void dbg_remap(ecx *e, uint32_t *j, uint32_t k, uint32_t n)
-{
-    (void)e; (void)j; (void)k; (void)n;
-    abort();
-}
 #define OP(op_,sz_,d_,a_,b_) ((rec){ .op=op_, .sz=sz_, .r={d_,a_,b_,XNOREG} })
 #define CP(d,s) OP(X_MOV,8,d,s,XNOREG)
 #define IMM(d) OP(X_MOVI,8,d,XNOREG,XNOREG)
@@ -28,8 +21,12 @@ static uint32_t optimize(rec *in, uint32_t count)
     wkst wk = { .falign=16 };
     xst x = { .in=in, .nin=count };
     ecx e = { .wk=&wk, .x64=&x };
-    x64_copies(&e);
-    return x.nin;
+    unsigned n = 0;
+    for (unsigned k = 0; k < count; k++) {
+        if (in[k].op == X_MOV && x64_copy_forward_at(&e, k)) continue;
+        in[n++] = in[k];
+    }
+    return n;
 }
 int main(void)
 {

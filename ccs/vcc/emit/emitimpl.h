@@ -553,6 +553,10 @@ typedef struct em_rec_copy_scan {
 	uint16_t opaque_mask;
 	uint64_t *read, *live;
 	const uint64_t *write;
+	/* Optional on-demand effects. False is an opaque boundary. With no live
+	 * array a copy must reach an explicit overwrite; block end proves nothing.
+	 */
+	bool (*inspect)(void *ctx, uint32_t j, uint64_t *read, uint64_t *write);
 	bool (*rewrite)(void *ctx, uint32_t j, uint8_t from, uint8_t to, bool apply);
 	void *ctx;
 } em_rec_copy_scan;

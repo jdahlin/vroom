@@ -22,8 +22,7 @@ static bool x64_commutes(int op)
  */
 VPRIV void x64_twoaddr(ecx *e)
 {
-	if (e->E->o->opt >= 1 && !e->E->noopt)
-		x64_copies(e);
+	bool copies = e->E->o->opt >= 1 && !e->E->noopt;
 	xst *X = e->x64;
 	uint32_t n = 0;
 	rec *o = X->tw;
@@ -35,6 +34,8 @@ VPRIV void x64_twoaddr(ecx *e)
 
 		if (e->ndl)
 			dbg_remap(e, &j, k, n);	/* (-g rows: to the first record emitted for k) */
+		if (copies && i.op == X_MOV && x64_copy_forward_at(e, k))
+			continue;
 		if (x64_tied(i.op) && i.r[0] != i.r[1]) {
 			if (i.r[2] != XNOREG && i.r[0] == i.r[2]) {
 				if (x64_commutes(i.op)) {
