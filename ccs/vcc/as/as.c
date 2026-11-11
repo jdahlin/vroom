@@ -1217,6 +1217,27 @@ static int d_space(As *a, const char *p, const char *e)
 static int d_fill(As *a, const char *p, const char *e)
 {
 	int64_t n, size = 1, val = 0;
+	{
+		/* .fill end - ., 1, 0xcc: a count the layout settles (the IDT entry stubs), as .skip */
+		const char *q = p;
+		Val v;
+		if (val_expr(a, &q, e, &v)) return -1;
+		if (!is_abs(a, &v)) {
+			int64_t fsz = 1, fv = 0;
+			q = ws(q, e);
+			if (q < e && *q == ',') {
+				q++; if (abs_expr(a, &q, e, &fsz)) return -1;
+				q = ws(q, e);
+				if (q < e && *q == ',') { q++; if (abs_expr(a, &q, e, &fv)) return -1; }
+			}
+			if (fsz != 1 || !deferrable(a, &v)) return err(a, "expected absolute expression");
+			elf_data(a->o, a->cur);
+			struct VarItem *it = var_item(a, VI_SKIP);
+			it->v = v;
+			it->fill = (uint8_t)fv;
+			return 0;
+		}
+	}
 	if (abs_expr(a, &p, e, &n)) return -1;
 	p = ws(p, e);
 	if (p < e && *p == ',') {
