@@ -369,6 +369,72 @@ kärnan och kan vänta.
   genom vcc:s funktioner; `vas-corpus` med `-g` 3679/3680.
 - Kvar: kodning direkt från posterna (utan text), hela ISA:n (AVX, AVX-512 för kärnans
   krypto) och `vas-enc.py` för x86-64.
+### X4 (2026-11-11): audit av billiga optimeringar utan SSA
+
+Audit i separat worktree `audit/x86-optimizations`, bas `52261ef`. Här
+betyder billig låg kompilatorkostnad: lokal sänkning och högst ett linjärt
+pass över maskinposterna, inga fixpunktsiterationer eller global aliasanalys.
+Ingen optimering implementerad; X4 är fortfarande inte färdigt.
+
+På Ryzen 7 9700X jämfördes 13 små funktioner med vcc `-O2`, clang 23.1.6
+och GCC 15.2.0 `-O2 -march=x86-64`; referenserna också med `-march=native`.
+Detta är assemblerinspektion, inte uppmätt körtid eller speedup. Basen är
+committad kod, inte huvudworktreets pågående ändringar. Proberna och de fem
+assemblerfilerna finns lokalt i `build/optaudit/` i audit-worktreet.
+
+| Ordning | Lucka och belägg | Billig implementation utan ny IR/SSA |
+| --- | --- | --- |
+| 1 | `unsigned long x / 8` och `x % 8` använder `divq`; båda referenserna använder `shr` respektive `and` | Specialfall för konstant tvåpotens i `x64_bin`, O(1) per operation. Signed division behöver bias för avrundning mot noll; börja med unsigned. Behåll fel/UB-beteendet för noll separat. |
+| 2 | `add32` innehåller `movl %r10d,%r10d`; `indexed` signutökar ett redan signutökat resultat; returer hoppar till nästa etikett | Ett framåtpass med en liten tabell över registrens kända bredd/utökning samt borttagning av hopp till omedelbart följande etikett. Nollställ fakta vid etiketter, anrop och asm. En 32-bitars självmove kan nollställa övre halvan och får bara tas bort när den redan är känd noll. |
+| 3 | `x*9` använder `imulq`; referenserna `leaq (rdi,rdi,8)` | O(1)-regler för tvåpotenser och 3/5/9; lägg till index/scale i LEA-sänkningen. Behåll flaggornas semantik eller bevisa att de inte används. Undvik långa shift/add-kedjor för godtyckliga konstanter. |
+| 4 | `p[i+3]` använder separat add/mul/add; referenserna `movl 12(rdi,rsi,4),eax` | Matcha adressens AST vid minnesoperationen; bas + index*1/2/4/8 + displacement. Kräver utökning av `lval`/poster/skrivare, men ingen analys över hela funktionen. Respektera bredd, signed index och evaluationsordning. |
+| 5 | `*p=2` materialiserar 2 i ett register | Store-immediate direkt vid sänkning. x86:s 64-bitars store-immediate tar endast signutökad imm32. Att dessutom ta bort en tidigare store är en separat minnesanalysfråga. |
+| 6 | Native referenser använder `popcntq`; vcc använder SWAR | Välj instruktion med en redan beräknad målfeature-bit. Kräver korrekt `-march`/`-m*`-hantering, inte kontroll av byggvärden i backend. SWAR är giltig baseline och är inte i sig en optimeringsbugg. |
+| 7 | Explicit `vector_size(16)` unsigned add går lane för lane via stacken; baseline-referenser använder `paddd` | Direkt SSE2-sänkning för en liten uppsättning explicit angivna vektoroperationer, O(1) per operation. Ingen automatisk vektorisering eller loopanalys behövs. |
+
+Nästa nivå utan SSA, men större arbete:
+
+- **Konstant division utöver tvåpotenser.** `/10` använder `divq`, mot
+  referensernas multiply-high + shift. Beräkna magic multiplier med en
+  verifierad algoritm, högst O(bitbredd) per konstant, gärna cache per TU.
+  Testa 32/64 bitar, signed/unsigned, extremvärden och remainder separat.
+- **Lokalt registercache för frame slots.** Parametrar och lokaler ligger
+  i minnet; alla inkommande parametrar får platser i `wk_function`.
+  Ett begränsat slot→register-cache inom ett basic block kan minska
+  trafik utan SSA. Invalidera för aliasande stores, adressflykt, asm,
+  anrop, joins och volatil/atomisk åtkomst; fysisk registerpress måste
+  hanteras. Detta är större än en peephole, men sannolikt bredare nytta.
+- **Switch.** Åtta konstanta returfall blir en jämförelsekedja; båda
+  referenserna använder värdetabell. Värdetabell för täta konstantfall,
+  hopp-tabell för täta kodfall, balanserat träd för glesa fall. Begränsa
+  tabellstorlek; sortering O(k log k), inte kvadratisk sökning.
+- **Tail calls.** En enkel wrapper gör vanligt anrop och epilog, mot ett
+  `jmp` hos referenserna. Begränsa först till ABI-kompatibla direkta
+  anrop utan stackargument, cleanup, dynamisk stack eller adress till
+  egen ram som kan användas av mottagaren.
+- **Lokal CSE/load forwarding/DSE.** `reload` läser samma pekare två
+  gånger; `stores` behåller båda skrivningarna. Börja bara med exakta,
+  icke adressflydda frame slots. Nuvarande `rec` saknar uttrycklig
+  volatile/atomic-markering; radering av godtyckliga minnesposter är
+  därför inte en säker första regel. Lägg effekter och implicita
+  register/flags i op-tabellen innan generella record-pass.
+
+Befintligt som inte skall räknas som saknat: konstantvikning,
+villkorsvikning med bevarade sidoeffekter, viss lokal konstantpropagering,
+små `inline`/`always_inline`, immediater och direkta jämförelsegrenar.
+`x64_finish` kör i dag bara `x64_twoaddr` före utskrift; registret väljs
+fysiskt vid AST-sänkning. Inget av förslagen kräver att byta det upplägget.
+
+Prioritet: 1–5 först, sedan lokalt registercache; målfeatures och explicit
+SIMD som separata steg. LICM, automatisk vektorisering, global GVN och
+aggressiv inlining hör inte till denna billiga första omgång. SSA är inte
+ett teoretiskt krav för dem heller, men de behöver mer analys och budget.
+Mät varje implementerat steg med instruktioner för kompilatorn och
+körtid/kodstorlek för resultatet; inga prestandasiffror antas av denna audit.
+
+Referenser för terminologi och jämförelse:
+[LLVM passes](https://llvm.org/docs/Passes.html),
+[GCC optimeringsflaggor](https://gcc.gnu.org/onlinedocs/gcc/Optimize-Options.html).
 
 ### X3 (2026-11-11): utökade Linux-körningar
 

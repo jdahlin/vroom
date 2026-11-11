@@ -80,6 +80,13 @@ kan gå parallellt.
 
 ## Status
 
+### Status 2026-11-11: G5, audit av x86-kodkvalitet
+
+`PLAN-x86.md` X4 har en prioriterad audit mot clang 23.1.6 och GCC 15.2.0
+på Ryzen 7 9700X: lokala optimeringar med låg kompilatorkostnad utan
+IR/SSA, belagda med 13 assemblerprober. Inget implementerat eller uppmätt
+körtidsmål; G5 är fortsatt öppet och benchmarksvitens X är inte fastställt.
+
 ### Status 2026-11-11: externa tester på Linux x86-64
 ARM64:s stackallokering och slots använder nu 64-bitars offset med kontrollerad
 överflödeshantering. GCC `20031023-{1..4}` kompilerar (4/4); `frame_wide`
