@@ -1,6 +1,21 @@
 /* vcc code generator: prepass: what the emitter needs to know before it starts */
 #include "emitimpl.h"
 
+/* Object alignment can exceed the C type alignment. The x86-64 SysV ABI
+ * gives arrays of at least 16 bytes 16-byte alignment, unless the declaration
+ * explicitly requests an alignment (matching Clang's aligned attribute). */
+VPRIV uint32_t sym_align(cc *c, uint32_t s)
+{
+	const sym *y = &c->syms[s];
+	uint32_t a = talign(c, y->ty);
+
+	if (y->align > a)
+		a = y->align;
+	if (X86(c) && !y->align && is_array(c, y->ty) && tsize(c, y->ty) >= 16 && a < 16)
+		a = 16;
+	return a;
+}
+
 /* ---------------- prepass: what the emitter needs to know before it starts ---------------- */
 
 /* Declarations of SVE types are useful without SVE lowering (notably libc's
