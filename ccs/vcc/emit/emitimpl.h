@@ -580,6 +580,7 @@ VPRIV val a64_sdivconst(ecx *e, val a, const em_sdivconst_recipe *r);
 VPRIV bool em_bound_constant(cc *c, uint32_t n, i128 *value);
 VPRIV int em_cmpbounds(ecx *e, uint32_t n, uint32_t *operand);
 VPRIV int em_repeated_integer(ecx *e, uint32_t n);
+VPRIV bool em_sibling_values(ecx *e, uint32_t n);
 VPRIV uint32_t em_double_unary(ecx *e, uint32_t n);
 
 VPRIV bool em_cmpzero(ecx *e, uint32_t n, uint32_t *operand);

@@ -43,6 +43,18 @@ def body(assembly, name, wasm):
     return tail[:end.start()]
 
 
+def check_localvalues(assembly, arch):
+    wasm = arch.startswith('wasm')
+    text = body(assembly, 'lvr_square', wasm)
+    add = r'i32\.add\b' if wasm else r'\badd\s+w' if arch == 'aarch64' else r'\baddl\b'
+    if len(re.findall(add, text)) != 1:
+        raise RuntimeError(f'sibling value must be computed once\n{text}')
+    text = body(assembly, 'lvr_volatile', wasm)
+    load = r'i32\.load\b' if wasm else r'\bldr\s+w' if arch == 'aarch64' else r'observed\(%rip\)'
+    if len(re.findall(load, text)) != 2:
+        raise RuntimeError(f'volatile reads must both remain\n{text}')
+
+
 def check_double_unary(assembly, arch):
     wasm = arch.startswith('wasm')
     for name in ['du_neg', 'du_not', 'du_call', 'du_volatile']:
@@ -1010,7 +1022,7 @@ def main():
              'cmpbounds': ('integer_cmp_bounds.c', check_cmpbounds),
              'repeated': ('repeated_integer.c', check_repeated),
              'doubleunary': ('double_unary.c', check_double_unary),
-             'localvalues': ('local_value_reuse.c', None),
+             'localvalues': ('local_value_reuse.c', check_localvalues),
 
              'cmpzero': ('integer_cmp_zero.c', check_cmpzero),
              'postfix': ('postfix_eval.c', check_postfix),
@@ -1033,7 +1045,7 @@ def main():
                 checked = ((arch == 'x86_64' and level >= 1) if rule in ['locals', 'copies', 'extensions', 'deadresults'] else
                            (not arch.startswith('wasm') and level >= 1) if rule in ['fallthrough', 'unreachable'] else
                            arch.startswith('wasm') if rule == 'loopback' else True)
-                checked = checked and check is not None and (rule not in ['switches', 'udivconst', 'udivconst64', 'mulconst', 'bitrules', 'cmpbounds', 'cmpzero', 'repeated', 'doubleunary'] or level >= 1)
+                checked = checked and check is not None and (rule not in ['switches', 'udivconst', 'udivconst64', 'mulconst', 'bitrules', 'cmpbounds', 'cmpzero', 'repeated', 'doubleunary', 'localvalues'] or level >= 1)
                 if checked:
                     if rule in ['sdivconst', 'unusedinit', 'switchvalues']:
                         check(assembly.read_text(), arch, optimized=level >= 1)
