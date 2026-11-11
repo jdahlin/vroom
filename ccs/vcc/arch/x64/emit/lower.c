@@ -131,10 +131,17 @@ VPRIV void x64_tkeep(ecx *e, int r)
 		e->x64->live |= 1u << r;
 }
 
+VPRIV void x64_nofp(ecx *e)
+{
+	if (e->c->o->general_regs_only)
+		efatal(e, e->curloc, "x86-64: floating point with -mgeneral-regs-only or -mno-sse is not supported (PLAN-x86.md X3)");
+}
+
 VPRIV int x64_ftreg(ecx *e)
 {
 	xst *X = e->x64;
 
+	x64_nofp(e);
 	for (int r = XMM8; r < XMM15; r++)
 		if (!(X->live & (1u << r))) {
 			X->live |= 1u << r;

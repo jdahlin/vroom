@@ -143,6 +143,31 @@ def one(t):
 
 NOCACHE = False
 
+# --fpcheck: every test compiled with -mgeneral-regs-only; a float use must fail cleanly
+# (an error, not a crash), and the assembly of what compiles must name no vector or x87
+# register nor an SSE/x87 instruction (the kernel traps on them)
+FPREG = re.compile(r'%(?:[xyz]mm\d+|st\b|st\(\d\)|mm\d)')
+FPOP = re.compile(r'^\t(?:f[a-z]+|(?:v?)(?:mov(?:ss|sd|aps|apd|ups|upd|dq[au]|q2dq)|cvt\w+|u?comis[sd]|(?:add|sub|mul|div|xor|and|or|sqrt|min|max)[ps][sd]|p(?:xor|and|or|add|sub|cmp|unpck|shuf|mov[dq]|ins|ext)\w*|ldmxcsr|stmxcsr))\b')
+
+def fpcheck(t):
+    suite, name, path = t
+    wd = f'{OUT}/fp/{suite}/{name}'
+    os.makedirs(wd, exist_ok=True)
+    src = open(path, 'rb').read().decode('latin-1')
+    flags = ct.dg_flags(src) if suite == 'gcc' else ct.exec_marks(src)[0] if suite == 'vcc' else []
+    rc, _, err = sh([VPP, '-S'] + BASE + ct.CLFL + flags + ['-mgeneral-regs-only', path, '-o', f'{wd}/vcc.s'], cwd=os.path.dirname(path))
+    if rc:
+        e = err.decode(errors='replace')
+        return t, ('pass' if isinstance(rc, int) and 0 < rc < 128 else 'fail'), 'rejects', ct.first_err(e)
+    bad = []
+    for ln in open(f'{wd}/vcc.s', errors='replace'):
+        if FPREG.search(ln) or FPOP.match(ln):
+            bad.append(ln.strip())
+    shutil.rmtree(wd, ignore_errors=True)
+    if bad:
+        return t, 'fail', 'fp', bad[0]
+    return t, 'pass', 'clean', ''
+
 def init(nocache):
     global NOCACHE
     NOCACHE = nocache
@@ -153,6 +178,8 @@ if __name__ == '__main__':
     nocache = '--no-cache' in av
     av = [a for a in av if a != '--no-cache']
     if '-v' in av: verbose = True; av.remove('-v')
+    fpmode = '--fpcheck' in av
+    av = [a for a in av if a != '--fpcheck']
     for o, f in (('--pie', '-fPIE'), ('--pic', '-fPIC')):
         if o in av: PIC = f; av.remove(o)
     for opt in ('-j', '--suite', '--show'):
@@ -166,12 +193,12 @@ if __name__ == '__main__':
     t0 = time.time()
     rt_obj()
     with Pool(j, initializer=init, initargs=(nocache,)) as pool:
-        res = pool.map(one, ts, chunksize=1)
+        res = pool.map(fpcheck if fpmode else one, ts, chunksize=1)
     by = defaultdict(Counter)
     whys = defaultdict(Counter)
     for (s, n, _), st, cat, why in res:
         by[s][st] += 1
-        if st != 'pass':
+        if st != 'pass' or fpmode:
             by[s][f'{st}:{cat}'] += 1
             whys[(st, cat)][why] += 1
         if verbose and st == 'fail':

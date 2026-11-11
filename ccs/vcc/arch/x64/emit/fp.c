@@ -13,6 +13,7 @@ static val x64_vr(int r) { return (val){ .k = V_REG, .r = (uint8_t)r }; }
 /* an x87 instruction, with its memory operand l (NULL: none) */
 static void x64_x87(ecx *e, int xf, const lval *l, int sz)
 {
+	x64_nofp(e);
 	uint32_t ref = 0;
 	int base = l ? x64_base(e, l, &ref) : 0;
 	rec *i = x64_put(e, X_X87);
@@ -55,6 +56,7 @@ static val x64_qzero(ecx *e);
 
 VPRIV val x64_fconst(ecx *e, uint64_t bits, int size)
 {
+	x64_nofp(e);
 	int r = x64_ftreg(e);
 
 	x64_movi(e, R11, (int64_t)bits);
@@ -176,6 +178,7 @@ typedef struct { int k, r; } tfarg;
 
 static val x64_tfcall(ecx *e, int fn, const tfarg *a, int n, int rk)
 {
+	x64_nofp(e);
 	xst *X = e->x64;
 	uint32_t saved, fsaved;
 	int nx = 0, ng = 0, pad, stk = 0, res;

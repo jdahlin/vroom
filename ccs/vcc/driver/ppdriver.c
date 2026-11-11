@@ -860,6 +860,7 @@ static __attribute__((noinline)) int ppd_run1(int argc, char **argv, const ppd_e
 	int march_lse = -1, mcpu_lse = -1, lse;
 	int sjlj = 0;
 	int opt = 0, olevel = 0, os = 0, pie = -1, pic = 0, tlsmodel = 0, sections = 0, debug = 0, freestanding = 0, nobuiltin = 0, instr = 0, cfi = -1, strict_align = 0, tiny = 0, gregs = 0;
+	int nosse = 0, nosse2 = 0, nommx = 0;	/* x86-64: -mno-sse, -mno-sse2, -mno-mmx (last one wins) */
 	pp_opts po = { 0 };
 	char *pmap = NULL;
 	double t0;
@@ -1117,6 +1118,12 @@ static __attribute__((noinline)) int ppd_run1(int argc, char **argv, const ppd_e
 		else if (!strcmp(a, "-fno-asynchronous-unwind-tables")) cfi = 0;
 		else if (!strcmp(a, "-mstrict-align")) strict_align = 1;
 		else if (!strcmp(a, "-mgeneral-regs-only")) gregs = 1;
+		else if (!strcmp(a, "-mno-sse")) nosse = 1;
+		else if (!strcmp(a, "-msse")) nosse = 0;
+		else if (!strcmp(a, "-mno-sse2")) nosse2 = 1;
+		else if (!strcmp(a, "-msse2")) nosse2 = 0;
+		else if (!strcmp(a, "-mno-mmx")) nommx = 1;
+		else if (!strcmp(a, "-mmmx")) nommx = 0;
 		else if (!strncmp(a, "-march=", 7) && arch_lse(a + 7, false) >= 0) march_lse = arch_lse(a + 7, false);
 		else if (!strncmp(a, "-mcpu=", 6) && arch_lse(a + 6, true) >= 0) mcpu_lse = arch_lse(a + 6, true);
 		else if (!strcmp(a, "-mcmodel=tiny")) tiny = 1;
@@ -1443,6 +1450,19 @@ static __attribute__((noinline)) int ppd_run1(int argc, char **argv, const ppd_e
 			   "#undef __ARM_FEATURE_FP16_VECTOR_ARITHMETIC\n#undef __ARM_FEATURE_SHA2\n"
 			   "#undef __ARM_FEATURE_SHA3\n#undef __ARM_FEATURE_SHA512\n#undef __ARM_FP\n"
 			   "#undef __ARM_NEON\n#undef __ARM_NEON_FP\n");
+	if (x86 && !undef) {
+		/* clang: -mgeneral-regs-only is -mno-sse -mno-mmx; without SSE2 no _Float16 either */
+		if (gregs || nosse)
+			bstr(&pre, "#undef __SSE__\n#undef __SSE_MATH__\n");
+		if (gregs || nosse || nosse2)
+			bstr(&pre, "#undef __SSE2__\n#undef __SSE2_MATH__\n#undef __FLT16_DECIMAL_DIG__\n#undef __FLT16_DENORM_MIN__\n"
+				   "#undef __FLT16_DIG__\n#undef __FLT16_EPSILON__\n#undef __FLT16_HAS_DENORM__\n"
+				   "#undef __FLT16_HAS_INFINITY__\n#undef __FLT16_HAS_QUIET_NAN__\n#undef __FLT16_MANT_DIG__\n"
+				   "#undef __FLT16_MAX_10_EXP__\n#undef __FLT16_MAX__\n#undef __FLT16_MAX_EXP__\n"
+				   "#undef __FLT16_MIN_10_EXP__\n#undef __FLT16_MIN__\n#undef __FLT16_MIN_EXP__\n#undef __FLT16_NORM_MAX__\n");
+		if (gregs || nommx)
+			bstr(&pre, "#undef __MMX__\n");
+	}
 	if (cfi && !undef) bstr(&pre, "#define __GCC_HAVE_DWARF2_CFI_ASM 1\n");
 	if (darwin && freestanding && !undef) bstr(&pre, "#undef __GCC_HAVE_DWARF2_CFI_ASM\n");
 	/* the Linux table is for the kernel's -mgeneral-regs-only */
@@ -1563,7 +1583,7 @@ static __attribute__((noinline)) int ppd_run1(int argc, char **argv, const ppd_e
 				.std = std, .implicit_int = std == 89 || wimpl_int, .implicit_fn = std == 89 || wimpl_fn, .conv_warn = conv_warn,
 				.strict_std = strict,
 				.gnu89_inline = gnu89_inline, .no_builtin = freestanding || nobuiltin, .instrument = instr, .wasm_sjlj = sjlj,
-				.general_regs_only = gregs, .vcc_kernel = vcc_kernel, .lse = lse, .opt = olevel, .pic = pic ? 2 : pie ? 1 : 0, .tlsmodel = tlsmodel, .sections = sections, .debug = debug, .cfi = cfi > 0, .dbg_name = main_file,
+				.general_regs_only = gregs || (x86 && (nosse || nosse2)), .vcc_kernel = vcc_kernel, .lse = lse, .opt = olevel, .pic = pic ? 2 : pie ? 1 : 0, .tlsmodel = tlsmodel, .sections = sections, .debug = debug, .cfi = cfi > 0, .dbg_name = main_file,
 			       .outfd = env->outfd };
 		int fd = -1;
 		char outpath[4096], outtmp[4200];

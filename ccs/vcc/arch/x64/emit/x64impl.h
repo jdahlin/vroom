@@ -113,5 +113,6 @@ VPRIV void x64_print(ecx *e, tbuf *b, uint32_t s);
 VPRIV int x64_tlsaddr(ecx *e, uint32_t ref, int model);
 VPRIV bool sym_needs_got(cc *c, uint32_t ref);	/* arch/a64/emit/value.c (shared) */
 VPRIV int x64_base(ecx *e, const lval *l, uint32_t *ref);
+VPRIV void x64_nofp(ecx *e);	/* fatal under -mgeneral-regs-only / -mno-sse */
 
 #endif
