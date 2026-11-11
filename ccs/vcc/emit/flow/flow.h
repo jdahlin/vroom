@@ -39,6 +39,6 @@ VPRIV bool em_flow_build(em_flow_graph *g, uint32_t blocks,
  */
 VPRIV bool em_flow_liveness(const em_flow_graph *g, const em_flow_transfer *t,
 		em_flow_live *live, uint32_t budget);
-VPRIV void em_flow_graph_free(em_flow_graph *g);
-VPRIV void em_flow_live_free(em_flow_live *live);
+VPRIV void em_flow_graph_free(em_flow_graph *g) __attribute__((unused));
+VPRIV void em_flow_live_free(em_flow_live *live) __attribute__((unused));
 #endif
