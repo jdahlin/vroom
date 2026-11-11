@@ -1809,7 +1809,8 @@ static val wk_unary(ecx *e, uint32_t n)
 
 		while (N(tc)->op == N_CAST && N(tc)->a)
 			tc = N(tc)->a;
-		if (N(tc)->op == N_CALL && !is_flt(c, N(x->a)->ty) && !wk_mem(e, N(x->a)->ty)) {
+		if ((N(tc)->op == N_CALL || (!side_effects(c, x->a) && wk_isconst(e, x->a)) || N(tc)->op == N_UNARY) &&
+		    !is_flt(c, N(x->a)->ty) && !wk_mem(e, N(x->a)->ty)) {
 			val v = wk_gen(e, x->a);
 
 			if (v.k == V_CONST)
