@@ -999,7 +999,7 @@ VPRIV uint32_t builtin_call(cc *c, const builtin *b, uint32_t loc)
 			if (cc_eval(c, n, &cv) && cv.kind == CV_INT)
 				return n;
 		}
-		if (b->id == BI_LIB && !c->o->no_builtin && !c->o->no_builtin_strncmp &&
+		if (b->id == BI_LIB && !c->o->no_builtin && !lib_builtin_disabled(c->o, "strncmp", 7) &&
 		    !strcmp(b->name, "__builtin_strncmp")) {
 			uint32_t folded = fold_strncmp_zero(c, &args, loc);
 			if (folded)

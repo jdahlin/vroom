@@ -487,6 +487,7 @@ VPRIV uint32_t fold_strncmp_zero(cc *c, const vec *args, uint32_t loc);
 VPRIV void declaration(cc *c, vec *out, bool file);
 /* stmt.c */
 VPRIV uint32_t label_ref(cc *c, uint32_t name, uint32_t loc);
+VPRIV bool lib_builtin_disabled(const cc_opts *o, const char *name, size_t len);
 VPRIV uint32_t mkstmt(cc *c, int op, uint32_t loc, uint32_t a, uint32_t b, uint32_t cc_);
 VPRIV uint32_t asm_stmt(cc *c, bool toplevel);
 VPRIV bool at_asm(cc *c);

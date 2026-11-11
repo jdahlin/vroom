@@ -859,7 +859,8 @@ static __attribute__((noinline)) int ppd_run1(int argc, char **argv, const ppd_e
 	int hosted = 1, nostdinc = 0, asm_mode = 0, undef = 0, raw_asm = -1, xlang = 0;	/* raw_asm -1: by the suffix; xlang: -x given */
 	int march_lse = -1, mcpu_lse = -1, lse;
 	int sjlj = 0;
-	int opt = 0, olevel = 0, os = 0, pie = -1, pic = 0, tlsmodel = 0, sections = 0, debug = 0, freestanding = 0, nobuiltin = 0, nobuiltin_strncmp = 0, instr = 0, cfi = -1, strict_align = 0, tiny = 0, gregs = 0;
+	int opt = 0, olevel = 0, os = 0, pie = -1, pic = 0, tlsmodel = 0, sections = 0, debug = 0, freestanding = 0, nobuiltin = 0, instr = 0, cfi = -1, strict_align = 0, tiny = 0, gregs = 0;
+	uint64_t disabled_builtins[CC_DISABLED_BUILTIN_WORDS] = { 0 };
 	pp_opts po = { 0 };
 	char *pmap = NULL;
 	double t0;
@@ -1107,7 +1108,7 @@ static __attribute__((noinline)) int ppd_run1(int argc, char **argv, const ppd_e
 		else if (!strcmp(a, "-fno-PIC") || !strcmp(a, "-fno-pic")) pic = 0, pie = 0;
 		else if (!strcmp(a, "-ffreestanding")) freestanding = 1;
 		else if (!strcmp(a, "-fno-builtin")) nobuiltin = 1;
-		else if (!strcmp(a, "-fno-builtin-strncmp")) nobuiltin_strncmp = 1;
+		else if (!strncmp(a, "-fno-builtin-", 13)) cc_disable_builtin(disabled_builtins, a + 13);
 		else if (!strcmp(a, "-mllvm") && i + 1 < argc) {
 			/* emcc -sSUPPORT_LONGJMP=wasm: setjmp/longjmp through wasm exceptions */
 			if (!strcmp(argv[++i], "-wasm-enable-sjlj"))
@@ -1563,13 +1564,14 @@ static __attribute__((noinline)) int ppd_run1(int argc, char **argv, const ppd_e
 		cc_opts co = { .target = po.target, .unsigned_char = po.unsigned_char, .dump_layouts = layout, .ms_anon = ms_anon, .short_wchar = short_wchar,
 				.std = std, .implicit_int = std == 89 || wimpl_int, .implicit_fn = std == 89 || wimpl_fn, .conv_warn = conv_warn,
 				.strict_std = strict,
-				.gnu89_inline = gnu89_inline, .no_builtin = freestanding || nobuiltin, .no_builtin_strncmp = nobuiltin_strncmp, .instrument = instr, .wasm_sjlj = sjlj,
+				.gnu89_inline = gnu89_inline, .no_builtin = freestanding || nobuiltin, .instrument = instr, .wasm_sjlj = sjlj,
 				.general_regs_only = gregs, .vcc_kernel = vcc_kernel, .lse = lse, .opt = olevel, .pic = pic ? 2 : pie ? 1 : 0, .tlsmodel = tlsmodel, .sections = sections, .debug = debug, .cfi = cfi > 0, .dbg_name = main_file,
 			       .outfd = env->outfd };
 		int fd = -1;
 		char outpath[4096], outtmp[4200];
 		bool outrename = false;
 
+		memcpy(co.disabled_builtins, disabled_builtins, sizeof disabled_builtins);
 		co.emit = emit;
 		char dbgdir[4096];
 		if (debug)

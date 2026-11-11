@@ -1354,12 +1354,14 @@ static void fail_count(uint32_t fail, uint64_t tok)
 
 static uint64_t opt_sig(const cc_opts *o)
 {
-	return (uint64_t)o->target | (uint64_t)!!o->unsigned_char << 8 | (uint64_t)!!o->ms_anon << 9 |
+	uint64_t sig = (uint64_t)o->target | (uint64_t)!!o->unsigned_char << 8 | (uint64_t)!!o->ms_anon << 9 |
 	       (uint64_t)!!o->short_wchar << 10 | (uint64_t)o->std << 11 | (uint64_t)!!o->implicit_int << 20 |
 	       (uint64_t)!!o->gnu89_inline << 21 | (uint64_t)!!o->instrument << 22 |
 	       (uint64_t)!!o->general_regs_only << 23 | (uint64_t)!!o->no_builtin << 24 |
-	       (uint64_t)!!o->implicit_fn << 25 | (uint64_t)!!o->emit << 26 |
-	       (uint64_t)!!o->no_builtin_strncmp << 27;
+	       (uint64_t)!!o->implicit_fn << 25 | (uint64_t)!!o->emit << 26;
+	for (unsigned i = 0; i < CC_DISABLED_BUILTIN_WORDS; i++)
+		sig = (sig ^ o->disabled_builtins[i]) * UINT64_C(1099511628211);
+	return sig;
 }
 
 /* copy n bytes of the A heap at p into the entry heap: its offset + 1; 0 if p is not the region's */

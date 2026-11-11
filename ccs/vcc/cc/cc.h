@@ -257,6 +257,8 @@ static inline int vcc_tls_model(const char *m)
 typedef struct cc_opts {	/* fields before outfd: parse options, all in the decl cache key */
 	int target;		/* PP_LINUX_AARCH64 / PP_DARWIN / PP_WASM64 */
 	int unsigned_char;
+enum { CC_DISABLED_BUILTIN_WORDS = 6 };	/* generated libbuiltins.inc indices */
+
 	int ms_anon;		/* -fms-anonymous-structs / -fms-extensions: "struct S;" members */
 	int short_wchar;	/* -fshort-wchar */
 	int std;		/* -std=: 89, 99, 11, 17, 23 (0: gnu17) */
@@ -267,7 +269,7 @@ typedef struct cc_opts {	/* fields before outfd: parse options, all in the decl 
 	int lse;		/* target has LSE atomics (else ldaxr/stlxr loops) */
 	int general_regs_only;	/* -mgeneral-regs-only: no FP/SIMD registers (variadic: no v0-v7 save area) */
 	int no_builtin;		/* -ffreestanding / -fno-builtin: abs() etc. are plain calls */
-	int no_builtin_strncmp;	/* -fno-builtin-strncmp: leave strncmp calls intact */
+	uint64_t disabled_builtins[CC_DISABLED_BUILTIN_WORDS]; /* -fno-builtin-NAME */
 	int wasm_sjlj;		/* -mllvm -wasm-enable-sjlj: setjmp/longjmp through wasm exceptions */
 	int implicit_fn;	/* implicit function declarations allowed (... implicit-function-declaration) */
 	int strict_std;		/* -std=cNN (not gnuNN): clang's GNU-only library functions are not known */
@@ -292,6 +294,8 @@ typedef struct cc_opts {	/* fields before outfd: parse options, all in the decl 
 typedef struct cc cc;
 
 /* parse and analyse the whole TU; returns the number of errors */
+void cc_disable_builtin(uint64_t *bits, const char *name);
+
 int cc_run(pp *p, const cc_opts *o);
 /* lazy bodies kept and parsed so far (all TUs of the process) */
 void cc_lz_stats(char *buf, size_t n);

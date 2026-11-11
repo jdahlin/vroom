@@ -576,6 +576,45 @@ static const struct libbi *libbi_find(const char *n, size_t nl)
 	return NULL;
 }
 
+/* The generated table gives disable flags stable indices within this binary.
+ * Unknown names have no builtin semantics to disable. */
+_Static_assert(sizeof(libbis) / sizeof(libbis[0]) <= CC_DISABLED_BUILTIN_WORDS * 64,
+               "increase the disabled-builtin bitset for libbuiltins.inc");
+
+static const struct libbi *disabled_lib_find(const char *name, size_t len)
+{
+	char full[128];
+	if (len + 11 > sizeof full)
+		return NULL;
+	memcpy(full, "__builtin_", 10);
+	memcpy(full + 10, name, len);
+	full[len + 10] = 0;
+	return libbi_find(full, len + 10);
+}
+
+void cc_disable_builtin(uint64_t *bits, const char *name)
+{
+	const struct libbi *b = disabled_lib_find(name, strlen(name));
+	if (b) {
+		size_t i = (size_t)(b - libbis);
+		bits[i / 64] |= UINT64_C(1) << (i % 64);
+	}
+}
+
+VPRIV bool lib_builtin_disabled(const cc_opts *o, const char *name, size_t len)
+{
+	uint64_t any = 0;
+	for (unsigned i = 0; i < CC_DISABLED_BUILTIN_WORDS; i++)
+		any |= o->disabled_builtins[i];
+	if (!any)
+		return false;
+	const struct libbi *b = disabled_lib_find(name, len);
+	if (!b)
+		return false;
+	size_t i = (size_t)(b - libbis);
+	return (o->disabled_builtins[i / 64] >> (i % 64)) & 1;
+}
+
 /* __has_builtin: a library builtin vcc declares (the table holds only the readable ones) */
 VPRIV bool lib_builtin_known(const char *n)
 {
@@ -629,7 +668,8 @@ VPRIV qty implicit_lib_type(cc *c, uint32_t id)
 	uint32_t np = 0;
 	int fl = 0, enc;
 
-	if (c->o->no_builtin || (size_t)idlen_(id) >= sizeof nm)
+	if (c->o->no_builtin || lib_builtin_disabled(c->o, idstr_(id), idlen_(id)) ||
+	    (size_t)idlen_(id) >= sizeof nm)
 		return 0;
 	memcpy(nm, idstr_(id), idlen_(id));
 	nm[idlen_(id)] = 0;
@@ -695,8 +735,8 @@ static const struct libfn *libfn_find(cc *c, uint32_t id)
 {
 	const struct libfn *f;
 
-	if (c->o->no_builtin)
-		return NULL;	/* -ffreestanding / -fno-builtin: clang knows no library functions */
+	if (c->o->no_builtin || lib_builtin_disabled(c->o, idstr_(id), idlen_(id)))
+		return NULL;	/* disabled builtins have no implicit library declaration */
 	BSEARCH(libfns, idstr_(id), (size_t)idlen_(id), f);
 	return f && f->gnu && c->o->strict_std ? NULL : f;
 }
