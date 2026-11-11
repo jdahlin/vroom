@@ -399,6 +399,13 @@ VPRIV int wcall(ecx *e, uint32_t n, bool want)
 	bool lib = false;
 
 	uint32_t def = 0;
+	i128 constant;
+
+	if (c->o->opt && !e->E->noopt && em_const_strcmp(c, n, &constant)) {
+		if (want)
+			wconst(e, WT_I32, (int64_t)constant);
+		return want ? WT_I32 : WT_NONE;
+	}
 
 	if (ref && RKIND(ref) == RK_SYM && x->c == 1 && !(c->syms[RIDX(ref)].flags & SF_DEFINED) &&
 	    c->syms[RIDX(ref)].name &&

@@ -1936,6 +1936,56 @@ Kommandon, källor, hashvärden och rådata finns i `work/opt-profile/udivconst/
 Signed och u64 konstantreciproker, billigare wasm-rest/korrektion, tail calls,
 bredare G5/G7-grindar och full O2-täckning är fortsatt öppna.
 
+### OPT6: gemensamma rena kontrollbeslut (delsteg)
+
+`emit/opt/control.c` bevisar konstanta heltalsvillkor, logisk negation,
+kortslutning och `__builtin_strcmp` mellan rena smala strängliteraler. Den
+gemensamma besökaren stannar efter högst 64 noder och besöker aldrig en död
+högeroperand. Okända anrop, volatile/atomic, satser och inlining lämnas till
+den befintliga genereringen; ingen SSA eller AST-mutation tillkommer.
+`__builtin_constant_p` använder respektive måls befintliga policy genom en
+callback. Arm64:s callback behåller sin befintliga dry-generering med
+återställning, och x86:s tidigare dubbla formel i builtin-/villkorsvägen är
+sammanslagen. Det gemensamma beviset anropas en gång vid respektive faktisk
+villkorsingång, inte igen via den delade range-hjälparen `cond_fold`.
+
+Nya beslut gäller O1–O3 med optimeringar aktiva. Åtta fokuserade källfiler
+är byteidentiska mot `781ca69` för både O0 och O2 med `VCC_NOOPT=1`, på
+x86, arm64, wasm32 och wasm64: 64 jämförelser. Native-målens gamla O0-regler
+för strängjämförelser är bevarade. Det nya kör-/kodformsprovet passerar
+16 nivå-/målkombinationer, även fil-för-fil, och kontrollerar exakt en
+utvärdering, bevarade globala volatile-/atomic-laddningar, vanliga
+användardefinierade strcmp-anrop samt höga strängbyte och inbäddad NUL.
+Nio befintliga native-test för constant_p/inlining passerar. Wasm32/64
+passerar båda `if_call_const` och `cond_dead_and`; bara dessa två xfail
+är borttagna. Övriga sex granskade luckor kräver fortsatt arbete med
+switchsegment, värdefakta för statement expressions eller inlining.
+
+Kostnaden mäts mot exakt `781ca69`, lika värdflaggor
+`-O3 -march=x86-64-v3`, hela processen i Callgrind, 500 funktioner per
+prov, O1/O2. De rena skalärkontrollerna är i praktiken oförändrade.
+Pekarslingans kostnad är cirka +0,094 % x86, +0,065 % arm64 och −0,002 %
+wasm. Positivt kortslutnings-/constant_p-prov minskar värdinstruktionerna
+med cirka 16,90 % x86, 2,75 % arm64 och 18,15–18,36 % wasm. Detta är
+avgränsad kompileringskostnad, inte hårdvarucykler eller en full grind.
+Den första provvarianten med null-callback på native gav extra arbete
+utan vinst och ersattes; dess profiler är sparade separat. Bredare
+prestandagrind, CI och full O2-täckning är fortsatt öppna.
+
+Slutlig verifiering av samma implementation: 164 befintliga regel-/nivå-/
+målkombinationer passerar med körning. De nya 16 kombinationerna passerar
+också efter fil-för-fil-bygge. Råprofiler, kommandon och käll-/binärhashar
+finns lokalt i `work/opt-profile/control-final-cost/result.json`; O0/noopt-
+jämförelserna ligger i `work/opt-profile/control-parity/result.json`.
+Den generella algoritmen gör ingen extra helträdsanalys för accepterade
+bevis; wasm:s befintliga fallback för övriga former är avsiktligt kvar.
+
+Efter integration av `54580f7` (PR48:s regressionsunderlag) bygger unity
+och alla 16 nya nivå-/målkontroller passerar igen. Hela egna native-sviten
+ger 216/216 x86-PASS med sex synliga referensundantag och 221/221 arm64-PASS
+med ett befintligt kört XFAIL. Loggar finns i
+`work/opt-pr-tmp/control-integrated-{build,x86,arm}.log`.
+
 ### OPT5 regressionsunderlag: genererade minnesceller (2026-11-11)
 
 `bench/gen-memory-cells.py` skapar deterministiskt 12 funktioner med totalt
