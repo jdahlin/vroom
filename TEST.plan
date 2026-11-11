@@ -289,7 +289,34 @@ Linux-målen; det första körs också och matchar clang. Regressioner behåller
 avvisning av unsigned till signed och bredare skalärer. Unity/nonunity,
 positiva/negativa prover och kernel sema 887/887 i run/batch går grönt.
 Detta är en separat frontendrättning efter CI-milstolpens frysta träd;
-PR #28:s pågående CI får inte räknas som verifiering av denna ändring.
+PR #28:s gröna CI gäller dess eget träd och verifierar inte denna senare ändring.
+
+**Full direkt S4-baslinje, fryst `aa584e2` (2026-11-11):** nu körs alla
+**3484 filer per mål**, 1276 direkta `dg-do run` och 2208 direkta
+torture-filer vid -O0, utan `--limit` eller PR-namnfilter. X86:
+**1803 godkända, 83 fel, 1596 filtrerade, 2 referensfel**. ARM/QEMU:
+**1783 godkända, 74 fel, 1625 filtrerade, 2 referensfel**. Ingen
+kompilatorkrasch. X86-felen är 36 runtime-, 29 kompilerings- och 18
+länkfel; ARM har 31 runtime-, 24 kompilerings-, 17 länk- och 2
+assembleringsfel. Båda målen har clang-timeout i `float-exact-1.c` och
+clang SIGSEGV i `vla-tert-1.c`. Felantalet är testfall, inte unika buggar.
+83 x86-fel grupperas i 32 signaturer, bland annat VLA-biverkningar,
+breda bitfält, interrupt-ABI, intrinsicstöd och optimeringskontrakt.
+`fwrapv-2.c` och två tag-alias-tester kräver särskild UB-/optimeringsanalys;
+deras aborter är inte i sig bevis för felgenerering av väldefinierad C.
+Rapporter: `work/results/s4-all-{x86,arm}.json`, `s4-all-summary.json` och
+`s4-all-classification.txt`. Kompilator SHA-256:
+`21aba03551f35a89d577a36a268051fee25dc757f296161981261a1d2b91bdbb`.
+Den tidigare PR-delmängden ersätter inte denna fulla baslinje. Hela
+optimeringsmatrisen och nästlade sviter återstår fortfarande.
+
+Samma frysta kompilators egna runtime-regressioner går **135/135 x86**
+(fem uttryckliga referens-/målundantag) och **140/140 ARM** (inga
+undantag). C23-va_start och signed-vektorskalärer går även på Wasm;
+rotationstestets `_BitInt`-del träffar en verifierad äldre Wasm-lucka och
+måste hållas synlig vid nästa premerge. De tre `pr84682`-asmfallen är nu
+riktat gröna på båda Linux-målen utan nya kodändringar; asm-runtime går
+7/7 x86 med två tidigare undantag och 9/9 ARM.
 
 Kvar:
 - Alla återstående matchande filer och optimeringskonfigurationer; nästlade
