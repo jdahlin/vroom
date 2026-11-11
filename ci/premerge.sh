@@ -96,6 +96,7 @@ arm64)
 	step atomic       python3 bench/vcc-atomic.py --bin-dir "$BUILD" --target aarch64-linux-gnu
 	step bitint-ops   python3 bench/vcc-bitint.py --target aarch64 --bin-dir "$BUILD" --output "$LOGS/bitint-ops" -j "$J"
 	step bitint-abi   python3 bench/vcc-bitint-abi.py --target aarch64 --bin-dir "$BUILD" --output "$LOGS/bitint-abi" -j "$J"
+	step c90-modes    python3 bench/vcc-c90.py --target aarch64-linux-gnu --bin-dir "$BUILD" --output "$LOGS/c90-modes"
 	step extint-alias python3 bench/vcc-extint.py --target aarch64-linux-gnu --bin-dir "$BUILD" --output "$LOGS/extint-alias"
 	step bitint-constants python3 bench/vcc-bitint-constants.py --target aarch64-linux-gnu --bin-dir "$BUILD" --output "$LOGS/bitint-constants"
 	step bitint-float python3 bench/vcc-bitint-float.py --target aarch64-linux-gnu --bin-dir "$BUILD" --output "$LOGS/bitint-float" --cflag=-O3
