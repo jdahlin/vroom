@@ -337,6 +337,67 @@ static void collect_cases(ecx *e, uint32_t n)
 	}
 }
 
+/* The selector is borrowed from gen_switch and stays allocated across every
+ * subtree. Only constants used by one comparison own temporary registers. */
+static void a64_switch_tree(ecx *e, const em_switch_case *cases, uint32_t n,
+                            int r, int cx, bool sg, uint32_t dflt)
+{
+	if (!n) {
+		jump(e, dflt);
+		return;
+	}
+	uint32_t mid = n / 2;
+	const em_switch_case *p = &cases[mid];
+	uint32_t left = mid ? newlabel(e) : dflt;
+	val a = vreg(r), b = vconst(p->lo);
+	int cond = emit_cmp(e, T_LESS, cx, sg, &a, &b);
+
+	val_free(e, &b);
+	bcond(e, cond, left);
+	if (p->lo == p->hi) {
+		/* The lower-bound compare also establishes equality. */
+		bcond(e, C_EQ, p->target);
+	} else {
+		b = vconst(p->hi);
+		cond = emit_cmp(e, T_LESSEQ, cx, sg, &a, &b);
+		val_free(e, &b);
+		bcond(e, cond, p->target);
+	}
+	a64_switch_tree(e, cases + mid + 1, n - mid - 1, r, cx, sg, dflt);
+	if (mid) {
+		deflabel(e, left);
+		a64_switch_tree(e, cases, mid, r, cx, sg, dflt);
+	}
+}
+
+static bool a64_switch_dispatch(ecx *e, uint32_t base, int r, int cx,
+                                bool sg, uint32_t dflt)
+{
+	if (!e->E->o->opt || e->E->noopt || e->ncases - base < 8)
+		return false;
+	cc *c = e->c;
+	uint32_t count = 0;
+	for (uint32_t k = base; k < e->ncases; k++)
+		count += N(e->cases[k])->op == N_CASE;
+	if (em_switch_strategy(count, 0, 0, false, false) != EM_SWITCH_TREE)
+		return false;
+	em_switch_case *cases = malloc((size_t)count * sizeof *cases);
+	if (!cases)
+		return false;
+	uint32_t j = 0;
+	for (uint32_t k = base; k < e->ncases; k++) {
+		uint32_t cn = e->cases[k];
+		if (N(cn)->op == N_CASE)
+			cases[j++] = (em_switch_case){c->ipool[N(cn)->a],
+				c->ipool[N(cn)->b], e->caselbl[cn]};
+	}
+	bool valid = em_switch_prepare(cases, count, cx ? 64 : 32, sg);
+	if (valid)
+		a64_switch_tree(e, cases, count, r, cx, sg, dflt);
+	free(cases);
+	return valid;
+}
+
 static void gen_switch(ecx *e, uint32_t n)
 {
 	cc *c = e->c;
@@ -398,32 +459,36 @@ static void gen_switch(ecx *e, uint32_t n)
 	} else {
 		int r = toreg(e, &v);
 
-		for (uint32_t k = base; k < e->ncases; k++) {
-			const node *cn = N(e->cases[k]);
-			i128 lo, hi;
+		bool tree = a64_switch_dispatch(e, base, r, cx, is_signed(c, ct), dflt);
+		if (!tree) {
+			for (uint32_t k = base; k < e->ncases; k++) {
+				const node *cn = N(e->cases[k]);
+				i128 lo, hi;
 
-			if (cn->op != N_CASE)
-				continue;
-			lo = c->ipool[cn->a], hi = c->ipool[cn->b];
-			if (lo == hi) {
-				val a = vreg(r), b = vconst(lo);
+				if (cn->op != N_CASE)
+					continue;
+				lo = c->ipool[cn->a], hi = c->ipool[cn->b];
+				if (lo == hi) {
+					val a = vreg(r), b = vconst(lo);
 
-				emit_cmp(e, T_EQUALEQUAL, cx, false, &a, &b);
-				val_free(e, &b);
-				bcond(e, C_EQ, e->caselbl[e->cases[k]]);
-			} else {
-				opi(e, I_SUBI, cx, R_X16, r, (int64_t)lo);
-				if (hi - lo <= 4095) {
-					opi(e, I_SUBSI, cx, ZR, R_X16, (int64_t)(hi - lo));
+					emit_cmp(e, T_EQUALEQUAL, cx, false, &a, &b);
+					val_free(e, &b);
+					bcond(e, C_EQ, e->caselbl[e->cases[k]]);
 				} else {
-					movi(e, cx, R_X17, (int64_t)(hi - lo));
-					op3(e, I_SUBS, cx, ZR, R_X16, R_X17);
+					opi(e, I_SUBI, cx, R_X16, r, (int64_t)lo);
+					if (hi - lo <= 4095) {
+						opi(e, I_SUBSI, cx, ZR, R_X16, (int64_t)(hi - lo));
+					} else {
+						movi(e, cx, R_X17, (int64_t)(hi - lo));
+						op3(e, I_SUBS, cx, ZR, R_X16, R_X17);
+					}
+					bcond(e, C_LS, e->caselbl[e->cases[k]]);
 				}
-				bcond(e, C_LS, e->caselbl[e->cases[k]]);
 			}
 		}
 		val_free(e, &v);
-		jump(e, dflt);
+		if (!tree)
+			jump(e, dflt);
 	}
 	e->ncases = base + (e->ncases - base);	/* keep the labels until the body is done */
 	e->loops[e->nloop++] = (loopctx){ lbrk, 0, e->nclean };

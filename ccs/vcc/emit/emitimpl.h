@@ -527,6 +527,16 @@ VPRIV bool em_sdivpow2(cc *c, qty ty, int op, i128 rhs, em_sdivpow2_recipe *r);
 /* opt/identity.c */
 enum { EM_ID_NONE, EM_ID_LEFT, EM_ID_ZERO, EM_ID_ONES };
 VPRIV int em_bin_identity(cc *c, qty ty, int op, i128 rhs);
+/* opt/switch.c: inclusive ranges in controlling-type order. Preparation only
+ * for tree dispatch (>=8 cases); no allocation or target state in the policy.
+ * Preparation rejects wrapped/overlapping ranges: callers retain the chain. */
+typedef struct em_switch_case {
+	i128 lo, hi;
+	uint32_t target;
+} em_switch_case;
+enum { EM_SWITCH_LINEAR, EM_SWITCH_TREE, EM_SWITCH_TABLE };
+VPRIV int em_switch_strategy(uint32_t n, i128 lo, i128 hi, bool ranges, bool tables);
+VPRIV bool em_switch_prepare(em_switch_case *cases, uint32_t n, unsigned bits, bool sg);
 /* opt/locals.c: eligibility and bounded selection from the existing prepass. */
 VPRIV bool em_local_eligible(ecx *e, uint32_t s);
 VPRIV bool em_local_gpr_type(cc *c, qty ty);

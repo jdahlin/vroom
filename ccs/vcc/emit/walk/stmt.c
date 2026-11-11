@@ -522,7 +522,37 @@ static void wk_cases(ecx *e, uint32_t n)
 	}
 }
 
-/* a compare chain: the value once in a register, each case tested in turn */
+/* Every terminal dispatch jumps, so laying out the right subtree first does
+ * not introduce a path into the left subtree or the source-order case body. */
+static void wk_switch_tree(ecx *e, const em_switch_case *cases, uint32_t n,
+			   int r, int w, bool sg, uint32_t dflt)
+{
+	if (!n) {
+		LO(jump)(e, dflt);
+		return;
+	}
+	uint32_t mid = n / 2;
+	const em_switch_case *k = &cases[mid];
+	val v = { .k = V_REG, .r = (uint8_t)r };
+	if (n == 1 && k->lo == k->hi) {
+		LO(cmpbr)(e, T_EQUALEQUAL, w, sg, v, vconst(k->lo), k->target);
+		LO(tkeep)(e, r);
+		LO(jump)(e, dflt);
+		return;
+	}
+	uint32_t left = mid ? wk_newlabel(e) : dflt;
+	LO(cmpbr)(e, T_LESS, w, sg, v, vconst(k->lo), left);
+	LO(tkeep)(e, r);
+	LO(cmpbr)(e, T_LESSEQ, w, sg, v, vconst(k->hi), k->target);
+	LO(tkeep)(e, r);
+	wk_switch_tree(e, k + 1, n - mid - 1, r, w, sg, dflt);
+	if (mid) {
+		wk_label(e, left);
+		wk_switch_tree(e, cases, mid, r, w, sg, dflt);
+	}
+}
+
+/* Evaluate once; small and wide switches retain their comparison chain. */
 static void wk_switch(ecx *e, uint32_t n)
 {
 	cc *c = e->c;
@@ -536,7 +566,30 @@ static void wk_switch(ecx *e, uint32_t n)
 	int r = wk_reg(e, &v, ct);
 
 	wk_cases(e, x->b);
-	for (uint32_t i = c0; i < W->ncases; i++) {
+	uint32_t count = W->ncases - c0;
+	if (e->E->o->opt && !e->E->noopt && count >= 8)
+		for (uint32_t i = c0; i < W->ncases; i++)
+			count -= N(W->cases[i].node)->op == N_DEFAULT;
+	bool tree = e->E->o->opt >= 1 && !e->E->noopt &&
+		em_switch_strategy(count, 0, 0, false, false) == EM_SWITCH_TREE && !wk_mem(e, ct);
+	if (tree) {
+		em_switch_case *cases = malloc(count * sizeof *cases);
+		uint32_t j = 0;
+		for (uint32_t i = c0; cases && i < W->ncases; i++) {
+			wkcase *k = &W->cases[i];
+			uint32_t l = wk_caselabel(e, k->node);
+			if (N(k->node)->op == N_DEFAULT)
+				ldef = l;
+			else
+				cases[j++] = (em_switch_case){ k->lo, k->hi, l };
+		}
+		/* A default label is not a comparison. */
+		tree = cases && em_switch_prepare(cases, j, (unsigned)w * 8, sg);
+		if (tree)
+			wk_switch_tree(e, cases, j, r, w, sg, ldef);
+		free(cases);
+	}
+	for (uint32_t i = c0; !tree && i < W->ncases; i++) {
 		wkcase *k = &W->cases[i];
 		uint32_t l = wk_caselabel(e, k->node);
 
@@ -575,7 +628,8 @@ static void wk_switch(ecx *e, uint32_t n)
 	}
 	W->ncases = c0;
 	LO(tfree)(e, r);
-	LO(jump)(e, ldef);
+	if (!tree)
+		LO(jump)(e, ldef);
 	if (W->nloop == WK_MAXLOOP)
 		efatal(e, x->loc, "statements nested too deeply");
 	W->loop[W->nloop++] = (wkloop){ lbrk, 0, W->nclean };
