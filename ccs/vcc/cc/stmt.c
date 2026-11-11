@@ -1103,7 +1103,7 @@ VPRIV uint32_t statement(cc *c)
 		if (!is(c, T_SEMI)) {
 			e = decay(c, expr(c));
 			if (!is_void(c, rt) && !is_void(c, N(e)->ty))
-				e = is_record(c, rt) ? e : convert_as(c, e, rt, CX_RETURN, loc);
+				e = is_record(c, rt) && !is_complex(c, rt) ? e : convert_as(c, e, rt, CX_RETURN, loc);
 			else if (!is_void(c, rt) && is_void(c, N(e)->ty) && !(N(e)->flags & NF_ERR)) {
 				pp_span r = rng(c, e);
 				char f[256];
