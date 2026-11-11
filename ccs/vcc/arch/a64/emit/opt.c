@@ -37,6 +37,7 @@ enum { RD_R = 1, RN_R = 2, RM_R = 4, RA_R = 8, RD_W = 16, RA_W = 32, RN_W = 64, 
 
 /* the function's raw text, for the registers of inline asm (RAW_MASKS) */
 static _Thread_local const char *rawp;
+static _Thread_local rmask retreads;
 /* control */
 enum { BR_NONE, BR_UNCOND, BR_COND, BR_END, BR_INDIRECT };
 
@@ -152,7 +153,7 @@ __attribute__((noinline)) static rmask reads_slow(const ins *i, unsigned ro)
 	if (ro & OP_CALL)
 		s |= RB(9) - 1;	/* x0-x8: arguments, indirect result */
 	if (ro & OP_RET)
-		s |= RB(0) | RB(1);
+		s |= retreads;
 	return s;
 }
 
@@ -308,7 +309,7 @@ static bool liveness(ecx *e)
 			rmask o = 0, i;
 
 			if (b == nb - 1 && brkind(&in[W.be[b]]) != BR_UNCOND)
-				o |= RB(0) | RB(1);	/* falls into the epilogue: the return value */
+				o |= retreads;	/* falls into the epilogue: the return value */
 			if (W.s0[b] >= 0)
 				o |= W.in[W.s0[b]];
 			if (W.s1[b] >= 0)
@@ -1149,7 +1150,7 @@ static void dead(ecx *e)
 		rmask live = W.out[b];
 
 		if (b == nb - 1 && brkind(&in[W.be[b]]) != BR_UNCOND)
-			live |= RB(0) | RB(1);
+			live |= retreads;
 		for (uint32_t k = W.be[b] + 1; k-- > W.bs[b];) {
 			ins *i = &in[k];
 
@@ -1224,6 +1225,13 @@ VPRIV void opt_function(ecx *e)
 	uint32_t n = 0;
 
 	rawp = e->raw.p;
+	retreads = RB(0) | RB(1);
+	qty rt = T(e->c, e->c->syms[e->top].ty)->base;
+	if (is_bvec(e->c, rt)) {
+		unsigned lanes = T(e->c, rt)->n;
+		if (lanes <= 8 && lanes != 2 && lanes != 4 && lanes != 8)
+			retreads = RB(lanes) - 1;
+	}
 	if (!liveness(e))
 		return;
 	/* a temporary saved around a call and dead after its restore: neither */

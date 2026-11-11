@@ -344,6 +344,7 @@ static val vlane(ecx *e, qty t, int r, unsigned i)
 		qty et = T(c, t)->base;
 		lval l = { .k = L_REG, .r = (uint8_t)r, .off = (int64_t)i * (int64_t)tsize(c, et), .align = talign(c, et) };
 
+		if (is_bvec(c, t)) l.off = i / 8, l.bf = 1, l.width = 1, l.bitoff = i % 8;
 		return load(e, &l, et);
 	}
 	{
@@ -363,7 +364,7 @@ static val gen_vlanes(ecx *e, int op, qty at, val *a, qty bt, val *b, qty rt, bo
 {
 	cc *c = e->c;
 	qty vt = is_vec(c, at) ? at : bt, et = T(c, vt)->base, rte = T(c, rt)->base;
-	unsigned n = (unsigned)(tsize(c, vt) / tsize(c, et));
+	unsigned n = T(c, vt)->n;
 	int ra = toreg(e, a), rb = unary ? -1 : toreg(e, b), rd;
 	int64_t sl = slot(e, tsize(c, rt), 16);
 
@@ -414,6 +415,7 @@ static val gen_vlanes(ecx *e, int op, qty at, val *a, qty bt, val *b, qty rt, bo
 		{
 			lval l = { .k = L_REG, .r = (uint8_t)rd, .off = (int64_t)i * (int64_t)tsize(c, rte), .align = talign(c, rte) };
 
+			if (is_bvec(c, rt)) l.off = i / 8, l.bf = 1, l.width = 1, l.bitoff = i % 8;
 			store(e, &l, rte, &r);
 			val_free(e, &r);
 		}
@@ -428,7 +430,7 @@ static bool vbin_fast(cc *c, int op, qty lt, qty rt, qty ty)
 {
 	uint64_t size = tsize(c, ty);
 
-	return is_vec(c, lt) && is_vec(c, rt) && (size == 8 || size == 16) && !is_flt(c, T(c, ty)->base) &&
+	return !is_bvec(c, ty) && is_vec(c, lt) && is_vec(c, rt) && (size == 8 || size == 16) && !is_flt(c, T(c, ty)->base) &&
 	       (op == T_AMP || op == T_PIPE || op == T_CARET || op == T_PLUS || op == T_MINUS);
 }
 
@@ -1076,6 +1078,47 @@ static val gen_inner(ecx *e, uint32_t n)
 			return gen(e, x->a);
 		case CK_VADDR:
 			return gen(e, x->a);	/* a vector value is its address */
+		case CK_BITS: {
+			qty from = N(x->a)->ty;
+			lval d = { .k = L_FRAME, .off = slot(e, tsize(c, x->ty), talign(c, x->ty)), .align = talign(c, x->ty) };
+			if (N(x->a)->flags & NF_LVALUE) {
+				lval src = gen_lval(e, x->a);
+				if (src.dynbit_slot) {
+					val v = load(e, &src, from);
+					store(e, &d, from, &v); val_free(e, &v); lfree(e, &src);
+				} else if (src.bf) {
+					/* Bounded byte pieces cover wide values and avoid aligned
+					 * container loads beyond a packed object's final byte. */
+					for (unsigned i = 0; i < tsize(c, from); i++) {
+						unsigned bit = i * 8;
+						val v = vconst(0);
+						lval byte = d;
+						byte.off += i;
+						if (bit < src.width || src.sgn) {
+							lval part = src;
+							unsigned start = bit < src.width ? bit : src.width - 1;
+							part.off += (src.bitoff + start) / 8;
+							part.bitoff = (src.bitoff + start) % 8;
+							part.width = bit >= src.width ? 1 : src.width - bit < 8 ? src.width - bit : 8;
+							part.sgn = src.sgn && bit + 8 >= src.width;
+							v = load(e, &part, prim(TY_UCHAR));
+						}
+						store(e, &byte, prim(TY_UCHAR), &v); val_free(e, &v);
+					}
+					lfree(e, &src);
+
+				} else {
+					val p = laddr(e, &src), q = laddr(e, &d);
+					copy_mem(e, toreg(e, &q), toreg(e, &p), tsize(c, from));
+					val_free(e, &p); val_free(e, &q);
+				}
+			} else {
+				val v = gen(e, x->a);
+				store(e, &d, from, &v); val_free(e, &v);
+			}
+			if (is_agg(c, x->ty)) return laddr(e, &d);
+			return load(e, &d, x->ty);
+		}
 		case CK_VBITS: {
 			/* the vector's bits as a scalar: load from its address */
 			val v = gen(e, x->a);
@@ -1088,7 +1131,7 @@ static val gen_inner(ecx *e, uint32_t n)
 		}
 		case CK_SPLAT: {	/* the scalar into every lane of a new vector */
 			qty et = T(c, x->ty)->base;
-			uint64_t es = tsize(c, et), nl = tsize(c, x->ty) / es;
+			uint64_t es = tsize(c, et), nl = T(c, x->ty)->n;
 			int64_t sl = slot(e, tsize(c, x->ty), talign(c, x->ty));
 			val v = gen(e, x->a);
 			int r;
@@ -1096,6 +1139,7 @@ static val gen_inner(ecx *e, uint32_t n)
 			for (uint64_t i = 0; i < nl; i++) {
 				lval l = { .k = L_FRAME, .off = sl + (int64_t)(i * es), .align = talign(c, et) };
 
+				if (is_bvec(c, x->ty)) l.off = sl + i / 8, l.bf = 1, l.width = 1, l.bitoff = i % 8;
 				store(e, &l, et, &v);
 			}
 			val_free(e, &v);
