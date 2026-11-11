@@ -3273,3 +3273,25 @@ växelvisa rundor med 28 förprocessade arm64-kärnfiler gav median användar-CP
 0,825 → 0,791 s; två filer uteslöts efter preflight och korta sampel på delad
 värd visar ingen generell hastighetsförändring. Proveniens finns i
 `work/opt-profile/local-values-integration-{cost,cputime}/`.
+
+### Återanvändning i if-villkor
+
+Den begränsade värdetabellen kan återanvända rena heltalsuttryck i ett
+if-villkor utan label; jämförelser stöds och endast kommutativa operatorer
+kan byta operandordning. Loopar, ingång via label och kontrollflödesjoin är
+fortsatt barriärer. Kodform och körning provas för återanvändning,
+invalidationsfall, volatile, goto, loopar samt operandordning.
+
+O0–O3-proven för localvalues och switch passerar på x86, arm64, wasm32 och
+wasm64 i unity- och separatfilbygge. O0 och O2 med VCC_NOOPT är byteidentiska
+mot integrationsbasen; vcc-sviten passerar 258/258 med en befintlig xfail.
+Matchad Callgrind-korpus mot `dd3dca72` ger compiler-Ir +0,033 % x86,
++0,033 % arm64, +0,036 % wasm32 och +0,031 % wasm64; målens tidigare angivna
+wasm-uteslutningar gäller. Sju växelvisa rundor med 28 förprocessade
+arm64-kärnfiler gav median användar-CPU 0,79958 → 0,79981 s; två filer är
+uteslutna och korta sampel på delad värd visar ingen generell tidsändring.
+Ett tidigare mättat kontrollfall med 2 000 ogiltigförklarade kandidater mot
+förra basen gav +0,60 % compiler-Ir x86 och +0,73 % wasm64, med identisk
+assembler. Resultat och proveniens finns under `work/opt-profile/local-values-
+conditions-{integrated-cost,integrated-cputime,fast-saturated}/`. Generell CSE,
+återanvändning över join samt G5/G7 återstår.
