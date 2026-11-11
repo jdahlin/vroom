@@ -52,6 +52,11 @@ def check_localvalues(assembly, arch):
     text = body(assembly, 'lvr_reuse', wasm)
     if len(re.findall(add, text)) != 1:
         raise RuntimeError(f'declaration value must be reused in return\n{text}')
+    comparison = r'i32\.lt_u\b' if wasm else r'\bsubs\s+wzr' if arch == 'aarch64' else r'\bcmpl\b'
+    for name, count in [('lvr_cmp_repeat', 1), ('lvr_cmp_order', 2)]:
+        text = body(assembly, name, wasm)
+        if len(re.findall(comparison, text)) != count:
+            raise RuntimeError(f'{name}: comparison reuse or ordering failed\n{text}')
     text = body(assembly, 'lvr_if_label', wasm)
     if len(re.findall(add, text)) < 3:
         raise RuntimeError(f'condition with a label must remain a barrier\n{text}')
