@@ -310,6 +310,7 @@ typedef struct ecx {
 	uint32_t *sstk, nsstk;	/* the live ones (indices into sla, deepest last) */
 	int novtag;		/* inside a volatile access: its records stay untagged */
 	uint32_t curloc;	/* innermost statement being generated (diagnostics) */
+	uint32_t reuse_from, reuse_to; /* temporary substitution within one pure expression */
 	struct dbgrow { uint32_t k, file, line, col; } *dl;	/* -g: a row at record k */
 	uint32_t ndl, dlcap;
 	const char *dlname;	/* the last file looked up, and its number */
@@ -588,6 +589,8 @@ VPRIV bool em_bound_constant(cc *c, uint32_t n, i128 *value);
 VPRIV int em_cmpbounds(ecx *e, uint32_t n, uint32_t *operand);
 VPRIV int em_repeated_integer(ecx *e, uint32_t n);
 VPRIV bool em_sibling_values(ecx *e, uint32_t n);
+VPRIV bool em_decl_reuse_values(ecx *e, uint32_t decl, uint32_t consumer, const uint32_t *killed, uint32_t nkilled, uint32_t *from, uint32_t *to);
+VPRIV bool em_block_value_reuse(ecx *e, const node *block, uint32_t first, uint32_t i, uint32_t *from, uint32_t *to);
 VPRIV uint32_t em_double_unary(ecx *e, uint32_t n);
 
 VPRIV bool em_cmpzero(ecx *e, uint32_t n, uint32_t *operand);

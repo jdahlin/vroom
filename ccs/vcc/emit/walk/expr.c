@@ -3230,6 +3230,7 @@ static val wk_gen_inner(ecx *e, uint32_t n);
    another expression observes it. Wide values use private temporary storage. */
 VPRIV val wk_gen(ecx *e, uint32_t n)
 {
+	if (n && n == e->reuse_from) n = e->reuse_to;
 	cc *c = e->c;
 	qty t = N(n)->ty;
 

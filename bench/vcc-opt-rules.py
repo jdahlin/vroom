@@ -49,6 +49,42 @@ def check_localvalues(assembly, arch):
     add = r'i32\.add\b' if wasm else r'\badd\s+w' if arch == 'aarch64' else r'\baddl\b'
     if len(re.findall(add, text)) != 1:
         raise RuntimeError(f'sibling value must be computed once\n{text}')
+    text = body(assembly, 'lvr_reuse', wasm)
+    if len(re.findall(add, text)) != 1:
+        raise RuntimeError(f'declaration value must be reused in return\n{text}')
+    for name in ['lvr_target_assign', 'lvr_target_cached', 'lvr_target_input']:
+        text = body(assembly, name, wasm)
+        if len(re.findall(add, text)) != 1:
+            raise RuntimeError(f'{name}: declaration value must be reused in local assignment\n{text}')
+    for name in ['lvr_target_dep_prior', 'lvr_target_cached_prior', 'lvr_target_hidden']:
+        text = body(assembly, name, wasm)
+        if len(re.findall(add, text)) != 2:
+            raise RuntimeError(f'{name}: invalidated value must be recomputed\n{text}')
+    text = body(assembly, 'lvr_target_compound', wasm)
+    if len(re.findall(add, text)) != 2:
+        raise RuntimeError(f'value must survive integer-cast initializer and compound assignment\n{text}')
+    text = body(assembly, 'lvr_cast_float', wasm)
+    if len(re.findall(add, text)) < 3:
+        raise RuntimeError(f'floating conversion must remain a barrier\n{text}')
+    text = body(assembly, 'lvr_target_volatile', wasm)
+    if len(re.findall(add, text)) != 2:
+        raise RuntimeError(f'volatile assignment must not use cached value\n{text}')
+    text = body(assembly, 'lvr_decl', wasm)
+    if len(re.findall(add, text)) != 1:
+        raise RuntimeError(f'declaration value must be reused in later declaration\n{text}')
+    text = body(assembly, 'lvr_independent', wasm)
+    if len(re.findall(add, text)) != 2:
+        raise RuntimeError(f'value must survive an independent local write\n{text}')
+    text = body(assembly, 'lvr_independent_compound', wasm)
+    if len(re.findall(add, text)) != 2:
+        raise RuntimeError(f'value must survive an independent compound write\n{text}')
+    text = body(assembly, 'lvr_intervening', wasm)
+    if len(re.findall(add, text)) != 2:
+        raise RuntimeError(f'value must survive a pure declaration\n{text}')
+    for name in ['lvr_assignment_call', 'lvr_assignment_volatile', 'lvr_assignment_hidden_write']:
+        text = body(assembly, name, wasm)
+        if len(re.findall(add, text)) < 3:
+            raise RuntimeError(f'{name}: effectful assignment must remain a barrier\n{text}')
     text = body(assembly, 'lvr_volatile', wasm)
     load = r'i32\.load\b' if wasm else r'\bldr\s+w' if arch == 'aarch64' else r'observed\(%rip\)'
     if len(re.findall(load, text)) != 2:

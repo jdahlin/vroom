@@ -1880,6 +1880,7 @@ static int wexpr1(ecx *e, uint32_t n, bool want);
 /* push the value of n (want), or only do what it does; returns the pushed type */
 VPRIV int wexpr(ecx *e, uint32_t n, bool want)
 {
+	if (n && n == e->reuse_from) n = e->reuse_to;
 	int k;
 
 	if (!want && !side_effects(e->c, n))
