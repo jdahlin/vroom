@@ -68,6 +68,7 @@ typedef struct wst {
 	tbuf decl;		/* functions referenced: "name\tsig\n", for the header's .functype lines */
 	uint8_t *lt;		/* local types (WT_I32 ..) */
 	uint32_t nloc, nparam;
+	uint32_t inline_budget;	/* bounded inlined nodes and parameter bindings per caller */
 	uint32_t *fl[5];	/* free temporaries per type */
 	uint32_t nfl[5];
 	wbind *sb;		/* per sym */
@@ -145,6 +146,7 @@ typedef struct wgp { uint32_t label, d, i; } wgp;
 #define WG_SJ (1u << 30)	/* label: the statement of setjmp call site N (W->sj[N]) */
 #define WMAXGD ((size_t)1 << 22)
 
+#define WINLINE_BUDGET 256u
 #define WMAXLOC ((size_t)1 << 22)
 #define WMAXSW ((size_t)1 << 22)
 

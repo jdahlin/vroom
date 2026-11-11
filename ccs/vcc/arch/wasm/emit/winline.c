@@ -48,10 +48,11 @@ VPRIV int winline_call(ecx *e, uint32_t n, uint32_t s, bool want)
 	const ctype *ft = T(c, y->ty);
 	uint32_t params[WINLINE_PARAMS], temps[WINLINE_PARAMS];
 	wbind saved[WINLINE_PARAMS];
-	unsigned budget = WINLINE_NODES;
+	unsigned budget, allowance, cost;
+	bool eligible;
 	int result;
 
-	if (!e->E->o->opt || e->E->noopt || y->sc != SC_STATIC ||
+	if (!W->inline_budget || !e->E->o->opt || e->E->noopt || y->sc != SC_STATIC ||
 	    !(y->flags & SF_DEFINED) || (y->flags & SF_NOINLINE) || !y->body ||
 	    (ft->flags & (TF_VARIADIC | TF_NOPROTO))) return -1;
 	body = N(y->body);
@@ -70,7 +71,14 @@ VPRIV int winline_call(ecx *e, uint32_t n, uint32_t s, bool want)
 		    (T(c, v->ty)->flags & TF_ATOMIC) || sym_attrs(c, p)->cleanup) return -1;
 		params[i] = p;
 	}
-	if (!winline_expr(c, ret->a, params, body->aux, &budget)) return -1;
+	allowance = W->inline_budget < WINLINE_NODES ? W->inline_budget : WINLINE_NODES;
+	budget = allowance;
+	eligible = winline_expr(c, ret->a, params, body->aux, &budget);
+	W->inline_budget -= allowance - budget;
+	if (!eligible) return -1;
+	cost = 2 * body->aux + 1;
+	if (cost > W->inline_budget) return -1;
+	W->inline_budget -= cost;
 	for (uint32_t i = 0; i < body->aux; i++) {
 		uint32_t arg = c->lists[call->b + i];
 		qty pt = c->syms[params[i]].ty;

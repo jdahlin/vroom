@@ -50,6 +50,12 @@ def check_wasm_inline(assembly, arch):
         text = body(assembly, name, True)
         if re.search(r'\bcall\b', text):
             raise RuntimeError(f'{name}: scalar static call should be inlined\n{text}')
+    text = body(assembly, 'wi_budget', True)
+    if not re.search(r'\bcall\b', text) or not re.search(r'\bi32\.add\b', text):
+        raise RuntimeError(f'per-caller inline budget must fall back after bounded reuse\n{text}')
+    text = body(assembly, 'wi_scan_budget', True)
+    if not re.search(r'\bcall\s+add\b', text):
+        raise RuntimeError(f'failed candidate scans must exhaust the caller budget\n{text}')
     for name in ['wi_sum9', 'wi_side', 'wi_recurse', 'wi_noinline']:
         text = body(assembly, name, True)
         if not re.search(r'\bcall\b', text):
