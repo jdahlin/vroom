@@ -536,6 +536,18 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
   `bcp-1` needs `__builtin_constant_p` of an inlined argument.  They are
   `WASM_XFAIL` in `bench/vcc-wasm.py` (premerge's wasm job).
   *Validate:* `bench/vcc-wasm.py -j 6` reports them as XPASS; remove the entries.
+- [ ] **wasm: 128-bit overflow builtins** [C]. `overflow128` covers standard
+  integer operands and destinations independently of `_BitInt`;
+  `overflow128_effects` checks evaluation counts and result stores on overflow.
+  Both are rejected by the Wasm emitter on the same sources with the
+  `1f4c8d2` baseline compiler (code-identical to `b97022e`) and the current
+  compiler, on wasm32 and wasm64. Implement full-width add/subtract/multiply
+  overflow and mixed signedness without truncating operands. The separate
+  `overflow128_bitint` also requires the remaining-target `_BitInt` ABI work.
+  All three remain required on Linux; Wasm expected failures are executed and
+  must become XPASS when fixed, never skipped.
+  *Validate:* `bench/vcc-wasm.py -j 6 --suite vcc --no-cache overflow128`
+  and `--wasm32`; remove each marker after its full runtime test passes.
 - [ ] **wasm: wide integer bitfields** [C]. `bitfield_int128` and
   `bitfield_int128_static` exercise packed fields with `__int128` base types,
   signed extension and neighboring bits. The Wasm emitter handles these as
@@ -555,7 +567,7 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
   `bench/vcc-wasm.py` records each as an explicit expected failure, executes it
   against clang, and rejects XPASS. They are not skipped.
   - Runtime classification/comparison: `fp_classify_builtin`, `fpclassify`,
-    `fp_compare_builtin`, `isfpclass`, `signaling_nan`; long-double
+    `fp_compare_builtin` (long-double comparisons), `isfpclass`, `signaling_nan`; long-double
     classification in `complex_div_runtime`.
   - Integer/aggregate lowering: `atomic_record` (128-bit atomic value conversion),
     `generic_bitcount` (_BitInt runtime precision), `int128_shift_count`
@@ -687,9 +699,13 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
   arm64 now normalize runtime arithmetic, loads, conversions and call results
   to the declared precision. Their clang/vcc cross-call tests cover scalar
   arguments/returns, callbacks, register exhaustion, varargs and aggregates.
+  The dirty-padding compound-assignment regression is executed as a Wasm
+  expected failure: its unchanged source fails with the same unsupported
+  runtime diagnostic on 1f4c8d2, 9d022c3 and 7eca264 for wasm32 and wasm64;
+  both Clang reference programs pass.
   Wider integers and runtime support on other targets remain to implement;
-  overflow builtins with BitInt operands/destinations above 64 bits are still
-  explicitly diagnosed (the existing wide-overflow lowering limitation).
+  On Wasm, overflow builtins with BitInt operands/destinations above 64 bits
+  are still explicitly diagnosed; the Linux 128-bit paths are implemented.
   *Validate:* `tests/vcc/bitint_constants.c`, `bitint_runtime.c` (16 widths,
   eight boundary/pattern inputs, native x86 and ARM/QEMU), `tests/abi/bitint/`
   (all four compiler combinations on each Linux target), cproc's three cases.

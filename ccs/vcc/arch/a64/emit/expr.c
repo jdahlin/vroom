@@ -641,6 +641,30 @@ static val conv_back(ecx *e, val v, qty from, qty to)
 	return cast(e, v, from, to, CK_INT);
 }
 
+/* Normalize a value loaded outside gen(), before a compound operation can
+ * move padding into value bits or interpret it as a signed high word. */
+static val bitint_value(ecx *e, val v, qty t)
+{
+	cc *c = e->c;
+	{
+		unsigned bits = T(c, t)->n;
+		bool sgn = is_signed(c, t);
+
+		if (v.k == V_CONST)
+			return vconst(em_trunc_to(c, v.i, t));
+		if (bits > 64) {
+			toreg2(e, &v, sgn);
+			if (bits < 128)
+				opbf(e, sgn ? I_SBFM : I_UBFM, 1, v.r2, v.r2, 0, bits - 65);
+		} else if (bits < 64) {
+			int r = toreg(e, &v);
+
+			opbf(e, sgn ? I_SBFM : I_UBFM, 1, r, r, 0, bits - 1);
+		}
+	}
+	return v;
+}
+
 /* old op= v (x a compound assignment to an lvalue of type lt): the new value, of type lt */
 static val assign_op(ecx *e, const node *x, qty lt, val old, val v)
 {
@@ -648,6 +672,8 @@ static val assign_op(ecx *e, const node *x, qty lt, val old, val v)
 	qty pt = x->c;
 	int op = x->aux;
 
+	if (em_bitint(c, lt))
+		old = bitint_value(e, old, lt);
 	if (is_ptr(c, lt)) {
 		old = ptr_to_vla(c, lt) ? ptr_add_vla(e, old, v, lt, op == T_MINUS)
 					: ptr_add(e, old, v, (int64_t)elem_size(c, lt), op == T_MINUS);
@@ -979,23 +1005,7 @@ VPRIV val gen(ecx *e, uint32_t n)
 	if (likely(!em_bitint(c, t)))
 		return gen_inner(e, n);
 	val v = gen_inner(e, n);
-	{
-		unsigned bits = T(c, t)->n;
-		bool sgn = is_signed(c, t);
-
-		if (v.k == V_CONST)
-			return vconst(em_trunc_to(c, v.i, t));
-		if (bits > 64) {
-			toreg2(e, &v, sgn);
-			if (bits < 128)
-				opbf(e, sgn ? I_SBFM : I_UBFM, 1, v.r2, v.r2, 0, bits - 65);
-		} else if (bits < 64) {
-			int r = toreg(e, &v);
-
-			opbf(e, sgn ? I_SBFM : I_UBFM, 1, r, r, 0, bits - 1);
-		}
-	}
-	return v;
+	return bitint_value(e, v, t);
 }
 
 static val gen_inner(ecx *e, uint32_t n)

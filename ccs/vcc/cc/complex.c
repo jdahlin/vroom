@@ -56,7 +56,7 @@ static bool cplx_pure(cc *c, uint32_t n, int d)
 		return !(QQ(x->ty) & Q_VOLATILE);
 	case N_MEMBER: case N_CAST: case N_UNARY: case N_DEREF:
 		return !(QQ(x->ty) & Q_VOLATILE) && cplx_pure(c, x->a, d + 1);
-	case N_BINARY: case N_INDEX: case N_CPLX:
+	case N_BINARY: case N_INDEX: case N_CPLX: case N_LOGAND: case N_LOGOR: case N_COMMA:
 		return cplx_pure(c, x->a, d + 1) && cplx_pure(c, x->b, d + 1);
 	default:
 		return false;
@@ -70,6 +70,15 @@ VPRIV uint32_t cplx_reuse(cc *c, uint32_t n, uint32_t *pre)
 	uint32_t s, v;
 
 	*pre = 0;
+	/* A constant conditional must not acquire an automatic temporary merely
+	   because its selected complex value will be used twice. */
+	if (N(n)->op == N_COND && cplx_pure(c, N(n)->a, 0)) {
+		cval cv;
+		if (cc_eval(c, N(n)->a, &cv) && (cv.kind == CV_INT || cv.kind == CV_FLT)) {
+			bool yes = cv.kind == CV_INT ? cv.i != 0 : cv.ld ? q_nz(cv.q) : cv.f != 0;
+			return cplx_reuse(c, yes ? (N(n)->b ? N(n)->b : N(n)->a) : N(n)->c, pre);
+		}
+	}
 	if (cplx_pure(c, n, 0))
 		return n;
 	s = sym_new(c, S_VAR, 0, t, N(n)->loc);

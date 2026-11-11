@@ -869,6 +869,18 @@ VPRIV bool static_init_ok(cc *c, qty ty, uint32_t init, uint32_t *bad)
 		}
 		return true;
 	}
+	if (x->op == N_COMMA) {
+		if (static_init_ok(c, N(x->a)->ty, x->a, bad) && static_init_ok(c, ty, x->b, bad))
+			return true;
+		*bad = init;
+		return false;
+	}
+	{
+		uint32_t selected;
+
+		if (cc_init_subobject(c, init, &selected))
+			return static_init_ok(c, ty, selected, bad);
+	}
 	if (x->op == N_STR && is_array(c, ty))
 		return true;
 	if (x->op == N_COMPLIT)
