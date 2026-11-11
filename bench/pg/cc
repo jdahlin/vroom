@@ -1,9 +1,9 @@
 #!/usr/bin/env -S python3 -I -S
-"""CC for a native macOS PostgreSQL build: C is compiled by vcc, the rest by clang.
+"""CC for a native Linux or macOS PostgreSQL build: C is compiled by vcc, the rest by clang.
 
     CC=bench/pg/cc meson setup ...      (see bench/pg/build.sh)
 
-- `-c` of a .c file: vcc (`$VPP`, default build/ccs/vpp) writes the object and
+- `-c` or `-S` of C (including `-x c` stdin): vcc (`$VPP`, default build/ccs/vpp) writes the object and
   the depfile (-MQ becomes -MT, which is what vpp reads).
 - compile-and-link of .c files (meson's links()/run() probes): each .c is
   compiled by vcc to a temporary object, then clang links.
@@ -20,14 +20,20 @@ probe that only one of them accepts is logged with "probe": the vcc or clang
 side that failed.
 """
 import json
+import platform
+import shutil
+import fcntl
 import os
 import subprocess
 import sys
 import tempfile
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-VPP = os.environ.get("VPP") or os.path.join(HERE, "..", "..", "build", "ccs", "vpp")
-CLANG = os.environ.get("VCC_PG_CLANG", "/opt/homebrew/opt/llvm/bin/clang")
+DEFAULT_BUILD = os.path.join(HERE, "..", "..", "build", *(["linux", "ccs"] if platform.system() == "Linux" else ["ccs"]))
+BUILD = os.environ.get("VCC_BIN") or DEFAULT_BUILD
+VPP = os.environ.get("VPP") or os.path.join(BUILD, "vpp")
+DEFAULT_CLANG = "/opt/homebrew/opt/llvm/bin/clang" if platform.system() == "Darwin" else shutil.which("clang")
+CLANG = os.environ.get("VCC_PG_CLANG") or (os.path.join(os.environ["LLVM"], "bin", "clang") if os.environ.get("LLVM") else DEFAULT_CLANG)
 LOG = os.environ.get("VCC_PG_LOG")
 FALLBACK = os.environ.get("VCC_PG_FALLBACK") == "1"
 
@@ -38,11 +44,14 @@ def clang(argv):
 
 def log(status, argv, err, probe=None):
     if LOG:
-        d = {"status": status, "cwd": os.getcwd(), "argv": argv, "err": err[-2000:]}
+        d = {"status": status, "cwd": os.getcwd(), "argv": argv, "compiler": VPP, "fallback": FALLBACK, "err": err}
         if probe:
             d["probe"] = probe
         with open(LOG, "a") as f:
+            fcntl.flock(f, fcntl.LOCK_EX)
             f.write(json.dumps(d) + "\n")
+            f.flush()
+            fcntl.flock(f, fcntl.LOCK_UN)
 
 
 def clang_probe(argv):
@@ -77,13 +86,21 @@ def is_c(x):
 
 def main():
     argv = sys.argv[1:]
-    if any(x in ("-E", "-S", "-M", "-MM", "--version", "-v", "-###") or x.startswith("-print-")
-           or x.startswith("-dump") for x in argv) or "-x" in argv:
+    if any(x in ("-E", "-M", "-MM", "--version", "-v", "-###") or x.startswith("-print-")
+           or x.startswith("-dump") for x in argv):
         clang(argv)
     srcs = [x for x in argv if is_c(x)]
+    if "-x" in argv:
+        at = argv.index("-x")
+        if at + 1 < len(argv) and argv[at + 1] in ("c", "cpp-output") and not srcs:
+            if "-" in argv:
+                srcs = ["-"]
+            else:
+                sys.stderr.write("pg/cc: explicit C input without a .c name or stdin is unsupported\n")
+                return 2
     if not srcs:
         clang(argv)
-    if "-c" in argv:
+    if "-c" in argv or "-S" in argv:
         st, err = vcc(argv)
         if any("meson-private" in x for x in srcs):
             cst, cerr = clang_probe(argv)
@@ -110,7 +127,7 @@ def main():
             link += [x, argv[i + 1]]
             i += 2
             continue
-        if is_c(x):
+        if x in srcs:
             i += 1
             continue
         if x.startswith(("-l", "-L", "-Wl,", "-framework", "-shared", "-bundle", "-dynamiclib")):
