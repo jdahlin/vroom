@@ -436,6 +436,13 @@ static void wk_vla_scan(ecx *e, uint32_t n, uint32_t *top)
 	case N_FOR: {
 		uint32_t t = *top;
 
+		/* a cleanup variable of the first clause is around the body's labels
+		   (scoped_guard: the step's goto into the body runs no cleanup) */
+		if (x->a && N(x->a)->op == N_BLOCK)
+			for (uint32_t i = 0; i < N(x->a)->c; i++)
+				wk_vla_scan(e, c->lists[N(x->a)->b + i], &t);
+		else
+			wk_vla_scan(e, x->a, &t);
 		wk_vla_scan(e, c->lists[x->c + 1], &t);
 		return;
 	}

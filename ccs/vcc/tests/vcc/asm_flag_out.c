@@ -6,10 +6,6 @@
 static int bt(unsigned long w, long n) { _Bool c; asm("btq %2,%1" : "=@ccc"(c) : "m"(w), "Ir"(n)); return c; }
 static int eqz(int x) { int z; asm("testl %1,%1" : "=@ccz"(z) : "r"(x)); return z; }
 static long above(unsigned a, unsigned b) { long r; asm("cmpl %2,%1" : "=@cca"(r) : "r"(a), "r"(b)); return r; }
-#elif defined(__aarch64__)
-static int bt(unsigned long w, long n) { int c; asm("tst %1, %2\n" : "=@ccne"(c) : "r"(w), "r"(1ul << n)); return c; }
-static int eqz(int x) { int z; asm("cmp %w1, #0" : "=@cceq"(z) : "r"(x)); return z; }
-static long above(unsigned a, unsigned b) { long r; asm("cmp %w1, %w2" : "=@cchi"(r) : "r"(a), "r"(b)); return r; }
 #else
 static int bt(unsigned long w, long n) { return w >> n & 1; }
 static int eqz(int x) { return !x; }
