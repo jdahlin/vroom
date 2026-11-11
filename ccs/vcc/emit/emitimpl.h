@@ -522,6 +522,11 @@ VPRIV bool em_sdivpow2(cc *c, qty ty, int op, i128 rhs, em_sdivpow2_recipe *r);
 /* opt/identity.c */
 enum { EM_ID_NONE, EM_ID_LEFT, EM_ID_ZERO, EM_ID_ONES };
 VPRIV int em_bin_identity(cc *c, qty ty, int op, i128 rhs);
+/* opt/locals.c: eligibility and bounded selection from the existing prepass. */
+VPRIV bool em_local_eligible(ecx *e, uint32_t s);
+VPRIV bool em_local_gpr_type(cc *c, qty ty);
+VPRIV unsigned em_select_locals(ecx *e, uint32_t fn, uint32_t *cand, unsigned max,
+			       bool (*target_ok)(cc *, qty));
 /* rec/fallthrough.c: opaque records; no shared struct layout is assumed. */
 typedef struct em_rec_layout {
 	size_t stride, op_offset, label_offset;

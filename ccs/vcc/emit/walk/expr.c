@@ -197,6 +197,8 @@ VPRIV lval wk_lval(ecx *e, uint32_t n)
 			return wk_fromval(e, wk_vreg(r), c->syms[s].ty);
 		}
 		if (is_local_var(c, s)) {
+			if (LO(local)(e, s, &l))
+				return l;
 			l.k = L_FRAME;
 			l.off = wk_local(e, s);
 			l.align = sym_align(c, s);
@@ -2104,8 +2106,6 @@ static val wk_builtin(ecx *e, uint32_t n)
 		int r = wk_reg(e, &p, prim(TY_ULONG));
 
 		if (x->aux == BI_SETJMP) {
-			if (e->wk->falign > 16)
-				wk_unsup(e, n, "__builtin_setjmp in a function with locals aligned above 16");
 			return LO(setjmp)(e, r);
 		}
 		{

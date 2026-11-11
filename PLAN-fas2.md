@@ -1108,6 +1108,137 @@ builtin setjmp även när setjmp-funktionen själv inte väljer dem: annars
 kan longjmp förbi en promoverad mellanram förstöra anroparens lokaler.
 Detta och asm-clobbers/inline-instansgränser är krav före aktivering.
 
+### Status OPT3 (2026-11-11): gemensamt urval och x86-registerlokaler
+
+`emit/opt/locals.c` äger nu gemensam behörighet och stabilt viktat top-K
+med befintliga lspan/luse/lnoreg. Ingen ny AST-vandring, graf eller
+allokering. Arm64 behåller sitt fysiska registerval och wasm sina
+representationskrav, inklusive FP/i128/SIMD-lokaler. Gemensamma undantag
+är adressflykt, volatile, atomic, VLA, cleanup och fasta asm-register.
+Prepassens adressmarkering följer nu även comma-RHS som emitterarnas
+lvalue-sänkning. Parser och preprocessor är inte ändrade.
+
+X86:s målbindning ligger i separat `arch/x64/emit/locals.c`: högst fyra
+hem i RBX/R13/R14/R15, O1+, !noopt, med VCC_LREGS-budgeten (0 stänger av).
+R12 tillhör justerade ramar. L_VREG läses till en ägd temporär; smal
+läsning använder en direkt X_EXT från hemmet, så högbitar normaliseras
+utan en extra kopia. Hemmens originalvärden sparas i vanliga frame-slotar
+före parameterbindningen och återställs vid gemensamma returetiketten.
+Stackargumentens offset ändras inte. Parametrar går ännu via sina
+befintliga ABI-slotar och läses sedan till hemmet en gång. Inline-kopior
+använder separata minnesbindningar (inst != 0), ingen aliasning av hem.
+
+**Billig lönsamhet:** x86 kräver minst fyra loopviktade referenser och
+utesluter lokaler som redan konstantbinds utan lagring. Högst fyra sådana
+kontroller, ingen andra symbol-/AST-svepning. Filtrerade kandidater fylls
+ännu inte på. Detta undviker extra ABI-spill i kalla enkla funktioner;
+auditen visar nu oförändrad kod för alla kalla prober. Loopfunktionerna
+har fler statiska instruktioner för prolog/epilog men mindre dynamisk
+stacktrafik. Direkt ABI→hem och kopiestädning är nästa möjligheter.
+
+Asm kräver ingen TU-global registerspärr: befintlig asm-sänkning sparar
+alla operand-/clobber-register och återställer dem på varje asm-goto-kant
+före output-skrivningar. Fyra samtidigt levande hem testas mot verkliga
+clobbers och både tagen/fallthrough asm-goto. Inga upprepade asm-skanningar
+eller globala avstängningar av orelaterade funktioner införs.
+
+**Nonlocal jumps:** separat `arch/x64/emit/setjmp.c` sparar alltid alla
+icke-frame callee-save-register RBX/R12/R13/R14/R15, även ärvda värden från
+anroparen när destinationen själv saknar promoverade lokaler. Publik
+builtin-bufferlayout oförändrad. En X_RESUME_FRAME-post återskapar R12
+som align_down(RBP−8, slutlig falign) före privata snapshot-laddningar.
+Skrivaren använder literal LEA/AND så normal minnesomskrivning inte byter
+bas. Ojusterad ram emitterar ingenting. Detta stöder även alignment som
+upptäcks efter setjmp eller i en inline-kropp; den tidigare lokala
+avvisningen kan tas bort. Regressionsfallet hoppar förbi en annan ram
+med alignment 256. Metadata beskriver pseudopostens register/flaggor.
+
+Verifierat: unity och fil-för-fil utan nya varningar; 116 tillämpliga
+regler/nivåer/mål per byggsätt (32 x86, 28 vardera arm64/wasm32/wasm64),
+alla med körning vid O0–O3 och avgränsade kodkrav. Efter aligned-resume-
+ändringen kördes relevanta fyra nonlocal-fall om för båda byggsätten.
+X86-egensvit 137/137 (fem tidigare filtrerade), arm64 142/142, -j 6
+--no-cache. X86 kors-ABI clang/vcc 22/22, O1 DWARF för nya testfiler 2/2,
+metadata-kontrakt med ASan/UBSan grönt. Basen avvisas av nya register-
+kodkrav och nonlocal-regressionen; clang klarar nonlocal-fallet O0–O3.
+Arm64-extraktion: 135/135 kompilerbara befintliga testfiler byte-identiska
+med O1 -g/unwind; wasm32 114 och wasm64 117 byte-identiska. Alla äldre
+avvisningar oförändrade. Indatahashar och resultat i snapshot-JSON.
+
+CI installerar nu qemu-user och kör x86:s libc-fria optimeringssvit från
+arm64-jobbet; QEMU-versionen ingår i toolfingerprint. Harnessen väljer
+qemu-x86_64 på annan värd och kan tvinga emulator lokalt med --qemu-x86.
+Alla x86-fall har även provats med denna prefixväg, inklusive slutliga
+nonlocal-fall. Ingen fjärr-GHA körd eller full wasm-runtime ersatt här.
+
+Bas `eddfc69`, vpp SHA256
+`294cc2a1264fdee3a21c413e826d1ab5062b12a4076c51178882022ed21691a9`.
+Mätkandidat före aligned-resume-tillägget:
+`645d2d05f88339aa11d316bb85fbd1eefba1e354f9f30ff8b47dc63ff51d8c75`;
+slutkandidat före dokumentation:
+`3b399256f3b795cc5267d72394cfdd4dfc9b3a271fc3c30f38ff1dbaef202ade`.
+Artefakter i `build/linux/opt-locals-baseline/`, inklusive före/efter-audit,
+snapshots, kompilatormätning och runtime.py/runtime.json.
+
+Kompilator-CPU (barnets user+sys, tre alternerade repetitioner, fyra
+3000-funktions-TU:er per batch, O1 -S, -j 1 warm=1):
+
+| Mål | Loopkorpus ms, bas→kandidat | Oförändrat kontrollkorpus ms |
+| --- | --- | --- |
+| x86-64 | 55,650 → 61,701 | 24,630 → 25,112 |
+| arm64 | 88,148 → 88,696 | 33,659 → 32,337 |
+| wasm32 | 47,222 → 45,502 | 22,401 → 22,011 |
+| wasm64 | 43,927 → 43,046 | 22,156 → 22,139 |
+
+Native loopkorpus kostar cirka 11 % mer kompilator-CPU i denna syntetiska
+mätning; cold-kod förblir oförändrad men själva urvalet kostar också tid.
+Ingen 1 %-grind eller generell regressionsfrihet är bevisad. Hårdvaru-
+räknare saknas; delad värds frekvens/cache/minneslast påverkar CPU-tid.
+Mätkandidaten ovan är från före det sista, sällan använda resume-stödet.
+
+Kort native programtest, unsigned summa av 4096 element anropad 2000
+gånger via extern funktion (ingen LTO, identisk checksumma 4096177840),
+tre alternerade user+sys-sampel inklusive processstart: vcc O1 bas
+7,830 ms → kandidat 6,345 ms (cirka 19 % kortare). Clang O2 0,778 ms,
+GCC O2 3,330 ms på samma korpus visar fortsatt stor kvalitetslucka.
+Detta är ett litet loopprov, inte generell programspeedup. Auditens
+sum-funktion har 33→43 statiska instruktioner, stackreferenser 14→12
+(ABI-spill ingår); minskad looptrafik betalar här prolog/epilog.
+
+OPT3:s första del är levererad, men direkt parameterbindning, bättre
+lönsamhetsurval och OPT4:s kopie-/utvidgningsstädning återstår. Full O2-
+täckning, allmänna SSA-/alias-/loopanalyser och G5/G7 är fortsatt öppna.
+
+
+### Status OPT3 (2026-11-11): direkt ABI-bindning
+
+X86 binder nu utvalda skalära registerparametrar direkt från ABI-registret
+med deklarerad bredd/signering. Utvalda stackparametrar laddas en gång
+från anroparens befintliga offset. Den separata efterladdningshooken och
+onyttiga parameterslotar är borttagna. Befintlig klassificering äger
+fortfarande GP/FP-budget, aggregate rollback, hidden sret och varargs;
+ingen ny analys, AST-vandring eller allokering.
+
+Unity och fil-för-fil bygger; parameterfallen kör O0–O3 på x86, arm64,
+wasm32 och wasm64. Kodkraven avvisar basens spill/laddning. Nya fall täcker
+smala signed/unsigned typer, register-/stackargument, blandad FP/GP,
+24-byte sret och varargs. X86 kors-ABI 22/22; nonlocal-regression O0–O3; x86-egensvit
+137/137 med fem oförändrade filtreringar (--no-cache, -j 6).
+
+Bas d8e02c8 SHA256
+`3b399256f3b795cc5267d72394cfdd4dfc9b3a271fc3c30f38ff1dbaef202ade`;
+kandidat `08fa144ebfd7166f9e5b499b6f209413a6ba131cf9374064b5d5c0816744a20c`.
+Artefakter `build/linux/opt-params-baseline/`. Samma metod som föregående
+OPT3-mätning, tre alternerade repetitioner: x86 loopkompilator-CPU
+60,282→58,437 ms, kontroll 24,806→25,012 ms. Övriga bakändars källkod är
+oförändrad; deras mättider varierar inom värdens brus. Samma lilla summa-
+program ger 3,263→3,057 ms, identisk checksumma; clang O2 0,508 ms och
+GCC O2 1,793 ms. Tider från olika mättillfällen får inte jämföras direkt.
+Ingen generell speedup eller godkänd 1 %-grind hävdas.
+
+Direktbindningen är levererad. Bättre urval, kopie-/utvidgningsstädning,
+minnesoptimeringar och full O2-täckning återstår; ingen SSA införd.
+
 ## Risker
 - **GNU C-ytan och inline asm** är det stora jobbet. Uppskattat: lexer + pp ~2 kloc,
   parser + sema ~10–15 kloc, emitter ~5 kloc, assembler ~4 kloc, länkare ~3 kloc.
@@ -1382,3 +1513,27 @@ X86:s nytillkomna debugrader remappas nu genom både onåbarhets- och
 fallthrough-kompaktering, och slutraden remappas även genom twoaddr.
 `bench/vcc-opt-debug.py` kontrollerar källrader vid levande operationer,
 .text med/utan -g och dwarfdump --verify vid O0–O3; ingår i CI.
+
+### OPT3 på aktuell main (PR-serie, 2026-11-11)
+
+Registerhemmens ABI-sparning använder nu x86-skrivarens befintliga csslot
+för prolog/epilog och korrekt CFI, även vid realignment. Den separata
+lsave-/restore-hooken är borttagen. Asm tar dessutom privata snapshots av
+aktuella registerhem när fasta operand-/clobber-register överlappar dem;
+temporärägandet återställs på varje kant. Alla asm-output hålls adresserbara
+av prepassens lnoreg-regel, så deras resultat skrivs före snapshot-restore.
+Fasta RBX-output och asm-goto-output testas mot ett samtidigt levande hem.
+
+Rebaserad unity och fil-för-fil bygger. Unity: 116 fokuserade
+regel/nivå/mål-kombinationer med körning, inklusive smala parametrar och
+setjmp/alignment. Relevanta åtta x86-local/nonlocal-fall även fil-för-fil.
+X86 kors-ABI 22/22. `bench/vcc-x86-unwind-locals.py` använder libgcc:s riktiga
+unwinder för att återvinna anroparens RBX/R13–R15 genom vcc-funktioner med
+vanlig och 64-byte-justerad ram vid O1/O2, båda byggsätten. Clang-referensen
+klarar testet; äldre audit-binär avvisas. Skriptet kräver native x86 Linux,
+CI:s arm64-jobb kör fortfarande de libc-fria x86-proberna under QEMU.
+`bench/vcc-opt-debug.py` och ASan/UBSan-effektkontrakt gröna.
+
+Dessa resultat ersätter inte en ny prestandagrind på aktuell main.
+De tidigare mätningarna ovan behåller sina dokumenterade baser/hashar.
+G5/G7 och full O2-täckning är fortsatt öppna.

@@ -80,6 +80,25 @@ kan gå parallellt.
 
 ## Status
 
+### Status 2026-11-11: G5/G7, registerlokaler på x86
+
+Gemensamt behörighetsurval i `emit/opt/locals.c` används av alla tre
+bakändar; x86 håller nu lönsamma skalärer i fyra callee-save-register.
+Cold-prober är oförändrade; ett native loopprov går 7,830→6,345 ms men
+divisionsfritt loopkorpus kostar cirka 11 % mer kompilator-CPU. Det är
+inte en godkänd 1 %-grind. Snapshot/ABI-säkerhet för builtin setjmp och
+sena/inlinade justerade ramar är testad. Båda byggsätten: 116 fokuserade
+kombinationer; x86-egensvit 137/137, arm64 142/142, kors-ABI 22/22.
+CI kör nu x86-prober under qemu-user. Se OPT3 i `PLAN-fas2.md` för
+hashar, mätmetod och återstående arbete. G5/G7/O2-målet fortsatt öppna.
+
+### Status 2026-11-11: G5/G7, direkt parameterbindning
+
+Utvalda x86-parametrar binds direkt till registerhem utan extra ABI-spill
+eller efterladdning. Smala typer, stackargument, mixed GP/FP, hidden sret
+och varargs verifierade O0–O3; kors-ABI 22/22. Parade korta mätningar och
+begränsningar finns i OPT3 i `PLAN-fas2.md`. G5/G7/O2-målet fortsatt öppna.
+
 ### Status 2026-11-11: G5/G7, onåbar kod och signed tvåpotenser
 
 Delat linjärt record-pass tar bort säkert onåbara suffix; x86 har nu

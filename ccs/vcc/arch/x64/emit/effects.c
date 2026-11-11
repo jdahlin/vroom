@@ -95,6 +95,7 @@ static const opdesc x64_desc[X_NOPS] = {
 	[X_CVTF2F] = X_DESC(X_D | OD_USE0 | X_U, OD_FP | OD_TRAP),
 	/* x87 stack and control/status state are not physical GPR/XMM bits. */
 	[X_X87] = X_DESC(X_U, OD_FP | OD_TRAP | OD_BARRIER),
+	[X_RESUME_FRAME] = { .fl = OD_BARRIER | X_W, .idef = X_BIT(R12), .iuse = X_BIT(RBP) },
 };
 
 static rmask x64_effect_reg(unsigned r)
@@ -129,7 +130,12 @@ VPRIV receffects x64_effects(const ecx *e, const rec *i)
 	     i->op == X_XCHG || i->op == X_XADD || i->op == X_CMPXCHG || i->op == X_X87) &&
 	    i->r[1] == RBP && i->off < 0 && (!e || e->wk->falign > 16))
 		f.use |= X_BIT(R12); /* printer's realigned local-frame base */
-	if (i->op == X_TLS) {
+	if (i->op == X_RESUME_FRAME) {
+		if (e && e->wk && e->wk->falign <= 16)
+			f = (receffects){ .fl = OD_BARRIER }; /* printer emits nothing */
+		else if (!e || !e->wk)
+			f.use |= X_BIT(R12); /* unknown alignment may preserve its old value */
+	} else if (i->op == X_TLS) {
 		if (i->cond == 2) {
 			f.def = X_CALL_DEF;
 			f.use = X_CALL_USE & ~X_BIT(RDI); /* descriptor overwrites RDI */
@@ -228,6 +234,7 @@ VPRIV const uint8_t *x64_flow_table(void)
 		[X_CVTF2I] = EM_FLOW_NEXT,
 		[X_CVTF2F] = EM_FLOW_NEXT,
 		[X_X87] = EM_FLOW_NEXT,
+		[X_RESUME_FRAME] = EM_FLOW_NEXT,
 	};
 	return flow;
 }

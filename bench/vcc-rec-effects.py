@@ -89,6 +89,15 @@ int main(void)
     wk.falign = 16;
     assert(!has(x64_effects(&e, &i).use, R12));
 
+    /* Nonlocal resume reconstructs an aligned base before private loads. */
+    i = instruction(X_RESUME_FRAME, 8);
+    f = x64_effects(&e, &i);
+    assert(!f.def && !f.use && !(f.fl & OD_WFLAGS)); /* standard frame: no-op */
+    wk.falign = 64;
+    f = x64_effects(&e, &i);
+    assert(has(f.def, R12) && has(f.use, RBP));
+    assert((f.fl & OD_BARRIER) && (f.fl & OD_WFLAGS));
+
     /* Scalar SSE preserves destination lanes and observes FP environment. */
     const int fp[] = { X_FADD, X_FDIV, X_CVTI2F, X_CVTF2F };
     for (unsigned k = 0; k < sizeof(fp) / sizeof(fp[0]); k++) {

@@ -76,6 +76,7 @@ enum {
 	X_CVTF2I,	/* gpr r0 = xmm r1 truncated: sz int size, sh float size */
 	X_CVTF2F,	/* xmm r0 = xmm r1: sz the result's size */
 	X_X87,		/* cond: XF_* (with a memory operand where it takes one) */
+	X_RESUME_FRAME,	/* rebuild realigned R12 from restored RBP after builtin longjmp */
 	X_NOPS
 };
 
@@ -92,12 +93,15 @@ typedef struct xst {
 	uint32_t ntw;
 	uint32_t live;		/* temporaries in use (bit = register) */
 	int pushes;		/* 8-byte pushes outstanding (the call alignment) */
+	/* locals.c: persistent homes, disjoint from expression temporaries and R12. */
+	uint32_t lsym[4];
+	uint8_t lreg[4], nlreg;
 	/* the function's incoming arguments (abi.c) */
 	int ngp, nfp;		/* named arguments in general and vector registers */
 	int32_t stk;		/* bytes of named stack arguments */
 	int64_t sret;		/* frame slot of the hidden result pointer (0: none) */
 	int64_t save;		/* variadic: the register save area's slot (0: none) */
-	int64_t csslot[16];	/* callee-saved registers inline asm uses: the prologue saves them here */
+	int64_t csslot[16];	/* callee saves for asm and register locals: prologue/epilogue + CFI */
 } xst;
 
 /* the integer argument registers, in order */
@@ -112,6 +116,8 @@ VPRIV void x64_restore(ecx *e, uint32_t sv);
 VPRIV int x64_ftreg(ecx *e);
 VPRIV rec *x64_put(ecx *e, int op);
 VPRIV void x64_twoaddr(ecx *e);
+VPRIV void x64_locals_begin(ecx *e, uint32_t s);
+VPRIV bool x64_local(ecx *e, uint32_t s, lval *l);
 /* effects.c: logical records before or after two-address expansion. */
 VPRIV const uint8_t *x64_flow_table(void);
 /* Prepared for shared copy/liveness passes; also exercised by contract tests. */
