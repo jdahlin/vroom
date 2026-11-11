@@ -131,6 +131,13 @@ VPRIV int clz128(u128 x, unsigned bits)
 	return n;
 }
 
+/* Initializers may refer back to themselves, directly or through another const.
+   Keep the recursion path on the C stack without modifying symbol bodies. */
+struct const_eval {
+	struct const_eval *prev;
+	uint32_t sym;
+};
+
 VPRIV bool eval(cc *c, uint32_t n, cval *v)
 {
 	const node *x = N(n);
@@ -162,10 +169,19 @@ VPRIV bool eval(cc *c, uint32_t n, cval *v)
 		/* a const integer variable with a constant initializer folds (not an ICE) */
 		const sym *s = &c->syms[x->a];
 
-		if (s->kind == S_VAR && (QQ(s->ty) & (Q_CONST | Q_VOLATILE)) == Q_CONST && is_integer(c, s->ty) &&
-		    s->body && eval(c, s->body, v) && v->kind == CV_INT) {
-			v->ice = false;
-			return true;
+		if (s->kind == S_VAR && (QQ(s->ty) & (Q_CONST | Q_VOLATILE)) == Q_CONST && is_integer(c, s->ty) && s->body) {
+			for (struct const_eval *p = c->const_eval; p; p = p->prev)
+				if (p->sym == x->a)
+					return false;
+			struct const_eval frame = { c->const_eval, x->a };
+
+			c->const_eval = &frame;
+			bool ok = eval(c, s->body, v) && v->kind == CV_INT;
+			c->const_eval = frame.prev;
+			if (ok) {
+				v->ice = false;
+				return true;
+			}
 		}
 		return false;
 	}
