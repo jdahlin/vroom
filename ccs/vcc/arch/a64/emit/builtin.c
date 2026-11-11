@@ -311,7 +311,8 @@ VPRIV val va_arg_(ecx *e, const node *x)
 	uint64_t size = tsize(c, t);
 	bool big = is_recabi(c, t) && size > 16;
 	int nreg = big ? 1 : (int)((size + 7) / 8);
-	bool al16 = !big && abi_align(c, t) == 16;
+	/* Empty aggregates consume neither registers nor stack alignment. */
+	bool al16 = size != 0 && !big && abi_align(c, t) == 16;
 	lval l = gen_lval(e, x->a);
 	val a = laddr(e, &l);
 	int ra = toreg(e, &a), off = treg(e), addr = treg(e);

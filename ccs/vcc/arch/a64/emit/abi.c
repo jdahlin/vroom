@@ -50,10 +50,11 @@ static int hfa_walk(cc *c, qty t, int *base, uint64_t *n)
 		for (uint32_t k = 0; k < g->nfield; k++) {
 			uint64_t m;
 
-			/* A zero-width bit-field is an alignment separator, not a
-			   member. Any padding it introduces is rejected by the size
-			   check below, as required for homogeneous aggregates. */
-			if (g->f[k].bitfield && !g->f[k].width)
+			/* Empty fields and zero-width bit-fields contribute no
+			   homogeneous members. Any padding they introduce is rejected
+			   by the size check below. */
+			if ((g->f[k].bitfield && !g->f[k].width) ||
+			    (!g->f[k].bitfield && tsize(c, g->f[k].ty) == 0))
 				continue;
 			if (g->f[k].bitfield || !hfa_walk(c, g->f[k].ty, base, &m))
 				return 0;

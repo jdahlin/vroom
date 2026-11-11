@@ -517,7 +517,9 @@ VPRIV int x64_va_arg(ecx *e, int rap, qty t)
 	}
 	x64_label(e, lstk);
 	x64_mem(e, X_LD, 8, ra, &ov, false);
-	if (a.align > 8) {
+	/* An empty aggregate consumes no argument area, including alignment
+	   padding. Keep the overflow cursor unchanged for the following value. */
+	if (a.size && a.align > 8) {
 		x64_op3(e, X_ADDI, 8, ra, ra, XNOREG)->imm = (int64_t)a.align - 1;
 		x64_op3(e, X_ANDI, 8, ra, ra, XNOREG)->imm = -(int64_t)a.align;
 	}
