@@ -501,3 +501,24 @@ som godkänd eller in i summan. Kommandon, käll-/binärhashar och feltext finns
 lokalt i `work/opt-profile/wasm-cells-mixed-configured-cost/result.json`.
 Detta avgränsade kompileringsprov ersätter inte den ordinarie fulla
 prestandagrinden eller belägger programmets körtid; CI återstår.
+
+### OPT5 integrationskontroll (2026-11-11)
+
+På `opt/wasm-memory`, utifrån PR46 och wasm-steget: unity och fil-för-fil
+bygger. 6120/6120 arm64-objekt/text är identiska mot värdekärnan e6bad4c
+(2040 filer × O1-objekt/O2-objekt/O2-text), inklusive den nya portabla
+wasm_frame_cells-regressionen. Sanitiserade cell-/värdekontrakt och alla
+16 observable-kodkrav (fyra mål × O0–O3), med borttagen unread volatile
+store som negativ mutation, passerar. CI kör nu även observable-kontraktet.
+
+Hela egna wasm32-sviten: 149/149 pass, 30 körda XFAIL och 15
+referensundantag. `parenthesized_function` var felaktigt märkt som XFAIL
+även på wasm32; både f866a31-baslinjen och kandidaten passerar, så wasm32
+kräver nu PASS medan wasm64:s kvarstående signaturbugg fortsatt körs XFAIL.
+Hela egna wasm64-sviten: 153 pass, 31 körda XFAIL, nio referensundantag
+och ett synligt oracle-compile-fel: lokal clang23 kraschar på isinf_sign:s
+unsupported `_Float16`. Samma krasch reproduceras med f866a31-binären;
+ingen referenskrasch döljs eller räknas som PASS. Loggar:
+`work/opt-pr-tmp/wasm-memory-{own64,baseline-oracle,own32-final}.log`.
+Detta är en lokal referensbegränsning, inte ett påstående att hela
+wasm64-sviten är grön. Ny CI och bredare prestandagrind återstår.

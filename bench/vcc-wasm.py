@@ -115,6 +115,9 @@ def set_target(w32):
     BASE = [TGT] + BASE[1:]
     LINK = [a for a in LINK if a != '-sMEMORY64=1']
     RTO = f'{OUT}/rt.o'
+    # Baseline f866a31 already passes this on wasm32; its remaining
+    # function-pointer signature failure is specific to wasm64.
+    WASM_XFAIL.pop('parenthesized_function', None)
 
 def sh(cmd, timeout=60, **kw):
     return ct.sh(cmd, timeout=timeout, **kw)
