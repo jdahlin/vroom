@@ -1583,8 +1583,25 @@ static val wk_unary(ecx *e, uint32_t n)
 			return a;
 		return wk_vlanes(e, x->aux, N(x->a)->ty, a, N(x->a)->ty, vconst(0), x->ty, true);
 	}
-	if (x->aux == T_EXCLAIM)
+	if (x->aux == T_EXCLAIM) {
+		/* !call() with the call folded or inlined to a constant (!__builtin_strcmp(op, "<")):
+		   the constant; else as a condition */
+		uint32_t tc = x->a;
+
+		while (N(tc)->op == N_CAST && N(tc)->a)
+			tc = N(tc)->a;
+		if (N(tc)->op == N_CALL && !is_flt(c, N(x->a)->ty) && !wk_mem(e, N(x->a)->ty)) {
+			val v = wk_gen(e, x->a);
+
+			if (v.k == V_CONST)
+				return vconst(v.i == 0);
+			if (v.k == V_ADDR)
+				return wk_free(e, &v), vconst(0);
+			v = wk_conv(e, v, N(x->a)->ty, prim(TY_BOOL));
+			return wk_arith(e, T_CARET, prim(TY_INT), wk_conv(e, v, prim(TY_BOOL), prim(TY_INT)), vconst(1));
+		}
 		return wk_condval(e, n);
+	}
 	wk_scalar(e, n, x->ty);
 	a = wk_gen(e, x->a);
 	if (x->aux == T_PLUS)

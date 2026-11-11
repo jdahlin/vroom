@@ -776,7 +776,13 @@ VPRIV void wk_stmt(ecx *e, uint32_t n)
 			return;
 		}
 		val test = vnone();
-		if ((cc_eval(c, x->a, &cv) && cv.kind == CV_INT) || wk_isconst(e, x->a)) {
+		uint32_t tc = x->a;
+
+		while ((N(tc)->op == N_CAST && N(tc)->a) || (N(tc)->op == N_UNARY && N(tc)->aux == T_EXCLAIM))
+			tc = N(tc)->a;
+		/* (a call too: an inlined function or a folded builtin may give a constant,
+		   if (!__builtin_strcmp(op, "<")), if (dax_mapping(m))) */
+		if ((cc_eval(c, x->a, &cv) && cv.kind == CV_INT) || wk_isconst(e, x->a) || N(tc)->op == N_CALL) {
 			/* Front-end constant_p can change after binding inline arguments.
 			   Trust the generated value and retain condition effects exactly once. */
 			test = wk_gen(e, x->a);
