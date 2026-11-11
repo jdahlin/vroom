@@ -403,6 +403,10 @@ VPRIV uint32_t neg(cc *c, uint32_t n);
 VPRIV void bad_operands(cc *c, int op, uint32_t l, uint32_t r, uint32_t loc);
 VPRIV const char *punct_spell(int k);
 VPRIV uint32_t cplx_binop(cc *c, int op, uint32_t l, uint32_t r, uint32_t loc);
+VPRIV bool atomic_wide(cc *c, qty t);
+VPRIV uint32_t atomic_load_expr(cc *c, uint32_t n);
+VPRIV uint32_t atomic_assign_expr(cc *c, uint32_t lhs, uint32_t rhs, int op, bool post, uint32_t loc);
+VPRIV uint32_t atomic_builtin_expr(cc *c, int id, qty t, const vec *input, uint32_t loc);
 VPRIV uint32_t cplx_incdec(cc *c, uint32_t n, int op, uint32_t loc);
 VPRIV uint32_t cplx_unary(cc *c, int op, uint32_t n, uint32_t loc);
 /* expr.c */
@@ -693,6 +697,8 @@ static inline qty ty_unatomic(cc *c, qty t)
 
 static inline uint32_t convert(cc *c, uint32_t n, qty to)
 {
+	if ((N(n)->flags & NF_LVALUE) && (T(c, N(n)->ty)->flags & TF_ATOMIC) && atomic_wide(c, N(n)->ty))
+		n = atomic_load_expr(c, n);
 	to = QUNQ(to);
 	if (QI(canon(c, N(n)->ty)) == QI(canon(c, to)) && !bitfield_of(c, n))
 		return n;

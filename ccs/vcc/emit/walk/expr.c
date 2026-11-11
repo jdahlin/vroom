@@ -1381,6 +1381,26 @@ static qty wk_optype(cc *c, int op, qty lt, qty rt)
 	return pl;
 }
 
+/* Compound assignments reload their lvalue directly instead of through
+ * wk_gen. Normalize that snapshot before arithmetic sees ABI padding. */
+static val wk_bitint_value(ecx *e, val v, qty t)
+{
+	cc *c = e->c;
+	{
+		unsigned bits = T(c, t)->n;
+
+		if (bits > 64)
+			return LO(wbitint)(e, v, bits, is_signed(c, t));
+		if (v.k == V_CONST)
+			return wk_const(c, v.i, t);
+		if (bits < 64) {
+			v = LO(bin)(e, T_LESSLESS, 8, false, v, vconst(64 - bits));
+			v = LO(bin)(e, T_GREATERGREATER, 8, is_signed(c, t), v, vconst(64 - bits));
+		}
+	}
+	return v;
+}
+
 /* x = y, x op= y: the value stored */
 static val wk_assign(ecx *e, uint32_t n)
 {
@@ -1437,6 +1457,8 @@ static val wk_assign(ecx *e, uint32_t n)
 			l = wk_lval(e, x->a);
 			a = wk_reload(e, &l, lt);
 		}
+		if (em_bitint(c, lt))
+			a = wk_bitint_value(e, a, lt);
 		if (is_ptr(c, lt) && ptr_to_vla(c, lt)) {
 			v = wk_ptradd_vla(e, a, b, rt, lt, x->aux == T_MINUS);
 		} else if (is_ptr(c, lt)) {
@@ -2240,6 +2262,105 @@ static val wk_fpconst(ecx *e, qty t, double d, u128 q)
 	}
 }
 
+/* Wide overflow arithmetic uses an exact 256-bit two's-complement value.
+ * Base-2^32 limbs keep every multiply/add/carry inside an unsigned 64-bit
+ * operation, including unsigned 128-bit multiplication and mixed signs. */
+static val wk_ovload(ecx *e, int64_t slot, int limb)
+{
+	lval l = { .k = L_FRAME, .off = slot + limb * 4, .align = 4 };
+	int r = LO(treg)(e);
+	LO(load)(e, r, &l, 4, false);
+	return wk_vreg(r);
+}
+
+static void wk_ovstore(ecx *e, int64_t slot, int limb, val v)
+{
+	lval l = { .k = L_FRAME, .off = slot + limb * 4, .align = 4 };
+	int r = wk_reg(e, &v, prim(TY_ULONG));
+	LO(store)(e, r, &l, 4);
+	LO(tfree)(e, r);
+}
+
+static int64_t wk_ovextend(ecx *e, val v, qty t)
+{
+	int64_t slot = wk_slot(e, 32, 16);
+	lval lo = { .k = L_FRAME, .off = slot, .align = 16 };
+	val wide = wk_conv(e, v, t, prim(TY_INT128));
+	wide = wk_putmem(e, &lo, prim(TY_INT128), wide);
+	wk_free(e, &wide);
+	for (int i = 4; i < 8; i++) {
+		val sign = wk_signed(e->c, t)
+			? LO(bin)(e, T_GREATERGREATER, 4, true, wk_ovload(e, slot, 3), vconst(31)) : vconst(0);
+		wk_ovstore(e, slot, i, sign);
+	}
+	return slot;
+}
+
+static val wk_overflow_wide(ecx *e, const uint32_t *arg, int op)
+{
+	cc *c = e->c;
+	qty ta = N(arg[0])->ty, tb = N(arg[1])->ty, tr = T(c, N(arg[2])->ty)->base;
+	int64_t as = wk_ovextend(e, wk_gen(e, arg[0]), ta);
+	int64_t bs = wk_ovextend(e, wk_gen(e, arg[1]), tb);
+	int64_t rs = wk_slot(e, 32, 16), carry = wk_slot(e, 4, 4);
+	lval dst = wk_fromval(e, wk_gen(e, arg[2]), tr);
+	for (int i = 0; i < 8; i++) wk_ovstore(e, rs, i, vconst(0));
+	if (op == T_STAR) {
+		for (int i = 0; i < 8; i++) {
+			wk_ovstore(e, carry, 0, vconst(0));
+			for (int j = 0; j < 8 - i; j++) {
+				val v = LO(bin)(e, T_STAR, 8, false, wk_ovload(e, as, i), wk_ovload(e, bs, j));
+				v = LO(bin)(e, T_PLUS, 8, false, v, wk_ovload(e, rs, i + j));
+				v = LO(bin)(e, T_PLUS, 8, false, v, wk_ovload(e, carry, 0));
+				int r = wk_reg(e, &v, prim(TY_ULONG));
+				wk_ovstore(e, rs, i + j, wk_vreg(wk_dup(e, r)));
+				wk_ovstore(e, carry, 0, LO(bin)(e, T_GREATERGREATER, 8, false, v, vconst(32)));
+			}
+		}
+	} else {
+		wk_ovstore(e, carry, 0, vconst(op == T_MINUS));
+		for (int i = 0; i < 8; i++) {
+			val b = wk_ovload(e, bs, i);
+			if (op == T_MINUS) b = LO(bin)(e, T_CARET, 8, false, b, vconst(0xffffffffu));
+			val v = LO(bin)(e, T_PLUS, 8, false, wk_ovload(e, as, i), b);
+			v = LO(bin)(e, T_PLUS, 8, false, v, wk_ovload(e, carry, 0));
+			int r = wk_reg(e, &v, prim(TY_ULONG));
+			wk_ovstore(e, rs, i, wk_vreg(wk_dup(e, r)));
+			wk_ovstore(e, carry, 0, LO(bin)(e, T_GREATERGREATER, 8, false, v, vconst(32)));
+		}
+	}
+	lval result = { .k = L_FRAME, .off = rs, .align = 16 };
+	val v = wk_conv(e, wk_vreg(LO(laddr)(e, &result)), prim(TY_INT128), tr);
+	if (em_bitint(c, tr)) {
+		unsigned bits = T(c, tr)->n;
+		if (bits > 64 && bits < 128) v = LO(wbitint)(e, v, bits, wk_signed(c, tr));
+		else if (bits < 64) {
+			v = LO(bin)(e, T_LESSLESS, 8, false, v, vconst(64 - bits));
+			v = LO(bin)(e, T_GREATERGREATER, 8, wk_signed(c, tr), v, vconst(64 - bits));
+		}
+	}
+	/* Compare the exact value with the destination conversion, sign-extended
+	 * according to its own type.  Snapshot it before writing an aliased output. */
+	int64_t back = wk_ovextend(e, v, tr);
+	lval converted = { .k = L_FRAME, .off = back, .align = 16 };
+	v = wk_conv(e, wk_vreg(LO(laddr)(e, &converted)), prim(TY_INT128), tr);
+	if (wk_size(c, tr) > 8) {
+		v = wk_putmem(e, &dst, tr, v);
+		wk_free(e, &v);
+	} else {
+		int r = wk_reg(e, &v, tr);
+		LO(store)(e, r, &dst, wk_size(c, tr));
+		LO(tfree)(e, r);
+		wk_lfree(e, &dst);
+	}
+	val different = vconst(0);
+	for (int i = 0; i < 8; i++) {
+		val d = LO(bin)(e, T_CARET, 4, false, wk_ovload(e, rs, i), wk_ovload(e, back, i));
+		different = LO(bin)(e, T_PIPE, 4, false, different, d);
+	}
+	return LO(cmp)(e, T_EXCLAIMEQ, 4, false, different, vconst(0));
+}
+
 static val wk_builtin(ecx *e, uint32_t n)
 {
 	cc *c = e->c;
@@ -2449,6 +2570,8 @@ static val wk_builtin(ecx *e, uint32_t n)
 		return v;
 	}
 	case BI_ADD_OVERFLOW: case BI_SUB_OVERFLOW: case BI_MUL_OVERFLOW: {
+		if (LO(i128mem)() && (wk_size(c, N(arg[0])->ty) > 8 || wk_size(c, N(arg[1])->ty) > 8 || (em_bitint(c, T(c, N(arg[2])->ty)->base) && wk_size(c, T(c, N(arg[2])->ty)->base) > 8)))
+			return wk_overflow_wide(e, arg, x->aux == BI_ADD_OVERFLOW ? T_PLUS : x->aux == BI_SUB_OVERFLOW ? T_MINUS : T_STAR);
 		if (wk_size(c, N(arg[0])->ty) <= 8 && wk_size(c, N(arg[1])->ty) <= 8 && (KIND(c, T(c, N(arg[2])->ty)->base) == TY_INT128 || KIND(c, T(c, N(arg[2])->ty)->base) == TY_UINT128) &&
 		    !em_bitint(c, T(c, N(arg[2])->ty)->base) && LO(i128mem)()) {
 			/*
@@ -2680,19 +2803,7 @@ VPRIV val wk_gen(ecx *e, uint32_t n)
 	if (likely(!em_bitint(c, t)))
 		return wk_gen_inner(e, n);
 	val v = wk_gen_inner(e, n);
-	{
-		unsigned bits = T(c, t)->n;
-
-		if (bits > 64)
-			return LO(wbitint)(e, v, bits, is_signed(c, t));
-		if (v.k == V_CONST)
-			return wk_const(c, v.i, t);
-		if (bits < 64) {
-			v = LO(bin)(e, T_LESSLESS, 8, false, v, vconst(64 - bits));
-			v = LO(bin)(e, T_GREATERGREATER, 8, is_signed(c, t), v, vconst(64 - bits));
-		}
-	}
-	return v;
+	return wk_bitint_value(e, v, t);
 }
 
 static val wk_gen_inner(ecx *e, uint32_t n)

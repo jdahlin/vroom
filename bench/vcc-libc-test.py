@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Linux libc-test dynamic functional/math parity using the upstream make graph.
+"""Linux libc-test runtime and API parity using the upstream make graph.
 
 Clang is the glibc runtime oracle. Reference build/runtime failures are reported
 separately, never counted as compiler passes. vcc compiles all test/support C;
@@ -11,8 +11,14 @@ needs qemu-aarch64 and the /usr/aarch64-linux-gnu cross sysroot. --config-mak
 accepts upstream configuration, e.g. explicit include/link/rpath additions for
 an extracted cross dependency; the full config is retained in the artifacts.
 Default all maps functional, math and regression dynamic executables, preserving
-per-test .mk support objects/DSOs. Static, API and musl-private tests are excluded
-explicitly in mapping.json. The support library is built by each compiler.
+per-test .mk support objects/DSOs. --linkage static or both adds only the static
+variants that upstream defines (math has none); static runs retain the dynamic
+prerequisites and report those incidental outcomes separately. --suite api
+checks each API object with upstream strict flags and the unchanged full link
+aggregate. --suite musl exposes the private-libc dependency; --suite full selects
+all categories. Upstream disables musl/pleval's dynamic run, which is reported
+as unsupported rather than passing its empty .err file. Glibc does not provide its
+private __pleval symbol; Clang may reject the source before reaching that link. The support library is built by each compiler.
 
 Examples:
   LLVM=/usr/lib/llvm-23 bench/vcc-libc-test.py --suite math 'math/fabs*'
@@ -105,6 +111,15 @@ def compiler(config, argv):
     key = hashlib.sha256((' '.join(argv)).encode()).hexdigest()[:16]
     log = Path(cfg['logs']) / key
     base = [cfg['clang'], '--target=' + cfg['target']]
+    if '-E' in argv:
+        cmd = [cfg['vpp'], '--target=' + cfg['target'], *cfg['includes']] if cfg['mode'] == 'vcc' else base
+        path = log.with_suffix('.preprocess.json')
+        rc = execute([*cmd, *argv], cfg['compile_timeout'], path)
+        if rc:
+            record = json.loads(path.read_text())
+            record['error'] = record.get('error') or 'support-preprocess-fail'
+            path.write_text(json.dumps(record, indent=2))
+        return rc
     if cfg['mode'] == 'vcc' and '-c' in argv:
         asm = out + '.s'
         args = list(argv)
@@ -127,11 +142,50 @@ def make(source, args, log):
     return p.returncode
 
 
-def outcomes(root, names, errors=()):
+# This is an upstream .mk contract, not a compiler failure exemption.
+UPSTREAM_DISABLED = {'musl/pleval': 'src/musl/pleval.mk disables the dynamic run: __pleval is private'}
+
+
+def disabled_rules(source):
+    disabled = {}
+    for name, reason in UPSTREAM_DISABLED.items():
+        rule = source / 'src' / (name + '.mk')
+        if rule.is_file() and re.search(r'^\$\(B\)/\$\(N\)\.err:\n\ttouch \$@\s*$', rule.read_text(), re.M):
+            disabled[name] = reason
+    return disabled
+
+
+def corpus(binaries, sources, suite, linkage, patterns, api_objects=None):
+    dynamic = sorted(n for n in binaries if not n.endswith('-static'))
+    static = sorted(n for n in binaries if n.endswith('-static'))
+    api_objects = sorted(api_objects if api_objects is not None else (n.removesuffix('.c') + '.o' for n in sources if n.startswith('api/')))
+    suites = {'all': ('functional', 'math', 'regression'),
+              'full': ('functional', 'math', 'regression', 'api', 'musl')}.get(suite, (suite,))
+    runtime = list(dynamic if linkage == 'dynamic' else static if linkage == 'static' else dynamic + static)
+    # The API aggregate is a single link contract, independent of runtime linkage.
+    if 'api' in suites and 'api/main' not in runtime:
+        runtime.append('api/main')
+    available = runtime + (api_objects if 'api' in suites else [])
+    selected = sorted(n for n in available if n.split('/')[0] in suites and
+                      any(fnmatch.fnmatchcase(n, pat) for pat in patterns))
+    return selected, {'mapped_dynamic': dynamic, 'mapped_static': static,
+                      'api_objects': api_objects, 'upstream_disabled': UPSTREAM_DISABLED,
+                      'implicit_dynamic_prerequisites': sorted(n.removesuffix('-static') for n in selected if n.endswith('-static'))}
+
+
+def build_target(name):
+    return name if name.endswith('.o') else name + '.err'
+
+
+def outcomes(root, names, errors=(), completed=None, disabled=UPSTREAM_DISABLED):
     results = {}
     for name in names:
         exe, err = root / (name + '.exe'), root / (name + '.err')
-        if not exe.exists():
+        if name in disabled:
+            status = 'unsupported-upstream'
+        elif name.endswith('.o'):
+            status = 'pass' if (root / name).is_file() and (completed is None or str(root / name) in completed) else ('build-error' if errors else 'build-fail')
+        elif not exe.exists():
             status = 'build-error' if errors else 'build-fail'
         elif not err.exists() or not (root / (name + '.run-status')).exists():
             status = 'harness-error'
@@ -151,7 +205,8 @@ def main():
     p.add_argument('--source', type=Path, default=Path(WORK) / 'testsuites/libc-test')
     p.add_argument('--config-mak', type=Path, help='upstream config.mak override (copied into artifacts)')
     p.add_argument('--target', choices=['x86_64-linux-gnu', 'aarch64-linux-gnu'], default='x86_64-linux-gnu')
-    p.add_argument('--suite', choices=['functional', 'math', 'regression', 'all'], default='all')
+    p.add_argument('--suite', choices=['functional', 'math', 'regression', 'api', 'musl', 'all', 'full'], default='all')
+    p.add_argument('--linkage', choices=['dynamic', 'static', 'both'], default='dynamic')
     p.add_argument('--output', type=Path)
     p.add_argument('--bin-dir', type=Path, default=Path(os.environ.get('VCC_BIN', BUILD)))
     p.add_argument('-j', type=int, default=6)
@@ -184,19 +239,29 @@ def main():
     includes = [arg for line in listing.splitlines() if line.strip() for arg in ('-isystem', line.strip())]
     # Ask make for its fully expanded binaries: .mk files remove support-only C.
     manifest = out / 'manifest.mk'
-    manifest.write_text('include Makefile\n.PHONY: manifest\nmanifest:\n\t@echo $(BINS)\n')
-    bins = subprocess.check_output(['make', '-s', '-C', str(src), '-f', str(manifest), 'B=build', 'manifest'], text=True).split()
-    mapped = [x.removeprefix('build/').removesuffix('.exe') for x in bins if x.endswith('.exe') and not x.endswith('-static.exe')]
-    suites = ('functional', 'math', 'regression') if args.suite == 'all' else (args.suite,)
-    names = sorted(n for n in mapped if n.split('/')[0] in suites and any(fnmatch.fnmatchcase(n, pat) for pat in args.patterns))
+    manifest.write_text('include Makefile\n.PHONY: manifest\nmanifest:\n\t@echo BINS $(BINS)\n\t@echo API $(api.OBJS)\n')
+    inventory = subprocess.check_output(['make', '-s', '-C', str(src), '-f', str(manifest), 'B=build', 'manifest'], text=True)
+    rows = {}
+    for line in inventory.splitlines():
+        key, _, value = line.partition(' ')
+        rows[key] = value
+    bins = rows['BINS'].split()
+    api_objects = [n.removeprefix('build/') for n in rows['API'].split()]
+    binaries = [x.removeprefix('build/').removesuffix('.exe') for x in bins if x.endswith('.exe')]
+    sources = sorted(str(x.relative_to(src / 'src')) for x in (src / 'src').glob('*/*.c'))
+    names, contracts = corpus(binaries, sources, args.suite, args.linkage, args.patterns, api_objects)
+    disabled = disabled_rules(src)
+    contracts['upstream_disabled'] = disabled
     if not names:
         p.error('no mapped tests selected')
     source_rev = subprocess.run(['git', '-C', str(args.source), 'rev-parse', 'HEAD'], capture_output=True, text=True).stdout.strip()
     mapping = {'source_revision': source_rev, 'target': args.target, 'selected': names,
                'vpp_sha256': hashlib.sha256(vpp.read_bytes()).hexdigest(),
                'clang_version': subprocess.check_output([clang, '--version'], text=True),
-               'mapped_dynamic': sorted(mapped), 'outside_scope': ['static linkage variants', 'api compile-only aggregate', 'musl-private tests'],
-               'sources_without_dynamic_entry': sorted(str(x.relative_to(src)) for x in (src / 'src').glob('*/*.c') if str(x.relative_to(src / 'src')).removesuffix('.c') not in mapped)}
+               **contracts, 'suite': args.suite, 'linkage': args.linkage,
+               'source_counts': dict(Counter(n.split('/')[0] for n in sources)),
+               'outside_scope': ['other libc implementations; no musl runtime is provided'],
+               'sources_without_dynamic_entry': sorted(n for n in sources if n.removesuffix('.c') not in contracts['mapped_dynamic'])}
     (out / 'mapping.json').write_text(json.dumps(mapping, indent=2))
     runner = []
     wrap = out / 'run-target'
@@ -228,23 +293,28 @@ def main():
     supervise.write_text('#!/bin/sh\n' + shlex.join([*runner, str(supervisor), '-t', str(args.timeout), '-w', str(wrap)]) + ' "$@" 2>&1\nrc=$?\necho "$rc" > "${1%.exe}.run-status"\nexit "$rc"\n')
     supervise.chmod(0o755)
     run_test = shlex.quote(str(supervise))
-    results, errors, make_status = [], [], []
+    results, errors, make_status, incidental = [], [], [], {}
     for mode in ('clang', 'vcc'):
         selected = names if mode == 'clang' else [n for n in names if reference[n] == 'pass']
         rc = 0
-        if selected:
+        requested = [n for n in selected if n not in disabled]
+        if requested:
             root = roots[mode]
             rc = make(src, ['B=' + str(root), 'CC=' + str(out / (mode + '-cc')), 'RUN_TEST=' + run_test,
-                           '-j', str(args.j), *[str(root / (n + '.err')) for n in selected]], out / (mode + '-make.log'))
+                           '-j', str(args.j), *[str(root / build_target(n)) for n in requested]], out / (mode + '-make.log'))
             if rc:
                 print(f'{mode} make exited {rc}; inspect artifacts', file=sys.stderr)
         build_errors = stage_errors(out / (mode + '-commands'))
         errors.extend({'mode': mode, **e} for e in build_errors)
-        observed = outcomes(roots[mode], selected, build_errors)
-        fatal_make = bool(selected) and make_error(rc, out / (mode + '-make.log'), out / (mode + '-commands'), observed)
+        records = [json.loads(p.read_text()) for p in (out / (mode + '-commands')).glob('*.json')]
+        completed = {r['argv'][r['argv'].index('-o') + 1] for r in records if r['returncode'] == 0 and '-o' in r['argv']}
+        observed = outcomes(roots[mode], selected, build_errors, completed, disabled)
+        fatal_make = bool(requested) and make_error(rc, out / (mode + '-make.log'), out / (mode + '-commands'), observed)
         make_status.append({'mode': mode, 'returncode': rc, 'fatal': fatal_make})
         if fatal_make:
             errors.append({'mode': mode, 'stage': 'make', 'returncode': rc})
+        dependency_names = [n.removesuffix('-static') for n in selected if n.endswith('-static') and n.removesuffix('-static') not in names]
+        incidental[mode] = outcomes(roots[mode], dependency_names, build_errors, disabled=disabled)
         if mode == 'clang':
             reference = observed
         else:
@@ -252,7 +322,7 @@ def main():
                 status = 'reference-' + reference[n] if reference[n] != 'pass' else ('pass' if observed[n] == 'pass' else 'vcc-' + observed[n])
                 results.append({'name': n, 'status': status})
     counts = dict(Counter(r['status'] for r in results))
-    (out / 'results.json').write_text(json.dumps({**mapping, 'counts': counts, 'results': results, 'stage_errors': errors, 'make_status': make_status}, indent=2))
+    (out / 'results.json').write_text(json.dumps({**mapping, 'counts': counts, 'results': results, 'stage_errors': errors, 'make_status': make_status, 'incidental_dynamic_outcomes': incidental}, indent=2))
     print(json.dumps(counts, sort_keys=True))
     if errors:
         print(f'{len(errors)} infrastructure/compiler stage errors; see results.json', file=sys.stderr)

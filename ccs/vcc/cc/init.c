@@ -386,7 +386,7 @@ static void il_elem(cc *c, ilist *l, uint64_t pos, uint32_t v, bool st)
 	if (!v)
 		v = assign_expr(c);
 	if ((is_ilagg(c, et)) && !string_initializes(c, et, v) &&
-	    !((is_record(c, et) || is_vector(c, et)) && compatible(c, N(v)->ty, et))) {
+	    !((is_record(c, et) || is_vector(c, et)) && compatible(c, ty_unatomic(c, N(v)->ty), ty_unatomic(c, et)))) {
 		ilist *s = il_new(c, et);
 
 		il_fill(c, s, 0, false, v, st);
@@ -402,7 +402,7 @@ static void il_elem(cc *c, ilist *l, uint64_t pos, uint32_t v, bool st)
 		bitfield_const(c, &c->tags[T(c, l->ty)->aux].f[pos], decay(c, v), 0);
 	if (unlikely(c->constexpr_init))
 		constexpr_conversion(c, decay(c, v), et);
-	il_set(c, l, pos, is_record(c, et) && !is_complex(c, et) ? v : convert(c, decay(c, v), et), NULL);
+	il_set(c, l, pos, is_record(c, et) && !is_complex(c, et) ? decay(c, v) : convert(c, decay(c, v), et), NULL);
 }
 
 /* a designation starts here: ".f", "[i]" or the old GNU "f:" */
@@ -538,7 +538,7 @@ static uint64_t il_designation(cc *c, ilist *l, bool st)
 		} else {
 			v = assign_expr(c);
 			if ((is_ilagg(c, et)) && !string_initializes(c, et, v) &&
-			    !((is_record(c, et) || is_vector(c, et)) && compatible(c, N(v)->ty, et))) {
+			    !((is_record(c, et) || is_vector(c, et)) && compatible(c, ty_unatomic(c, N(v)->ty), ty_unatomic(c, et)))) {
 				ilist *s = il_new(c, et);
 
 				il_fill(c, s, 0, false, v, st);
@@ -549,7 +549,7 @@ static uint64_t il_designation(cc *c, ilist *l, bool st)
 						constexpr_conversion(c, decay(c, v), et);
 					v = convert(c, decay(c, v), et);
 				}
-				il_run(c, l, lo, hi, v, NULL);
+				il_run(c, l, lo, hi, (T(c, N(v)->ty)->flags & TF_ATOMIC) ? decay(c, v) : v, NULL);
 			}
 		}
 	}
@@ -809,7 +809,7 @@ VPRIV uint32_t initializer(cc *c, qty *ty, bool st)
 		if (is_record(c, t) && !is_complex(c, t)) {
 			if (!compatible(c, ty_unatomic(c, N(v)->ty), ty_unatomic(c, t)))
 				cc_error(c, loc, "initializing with an expression of incompatible type");
-			return v;
+			return decay(c, v);
 		}
 		return convert_as(c, decay(c, v), t, c->cv_what == CX_INIT ? CX_INIT : 0, c->cv_loc);
 	}
@@ -868,6 +868,18 @@ VPRIV bool static_init_ok(cc *c, qty ty, uint32_t init, uint32_t *bad)
 				return false;
 		}
 		return true;
+	}
+	if (x->op == N_COMMA) {
+		if (static_init_ok(c, N(x->a)->ty, x->a, bad) && static_init_ok(c, ty, x->b, bad))
+			return true;
+		*bad = init;
+		return false;
+	}
+	{
+		uint32_t selected;
+
+		if (cc_init_subobject(c, init, &selected))
+			return static_init_ok(c, ty, selected, bad);
 	}
 	if (x->op == N_STR && is_array(c, ty))
 		return true;
