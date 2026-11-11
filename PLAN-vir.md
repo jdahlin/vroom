@@ -6,7 +6,8 @@ Den ska användas av x86-64 och arm64 (wasm senare), kosta ingenting på `-O0`
 och inte upprepa LLVM IR:s kända misstag.  Formatet och verktygen är specificerade i
 `SPEC-vir.md`; underlaget finns i
 `RESEARCH-vir.md` (LLVM IR:s problem med källor, och vad B3, Cranelift, Zig,
-Go, Turboshaft, LuaJIT, QBE och TPDE valde i stället).
+Go, Turboshaft, LuaJIT, QBE och TPDE valde i stället).  Registerallokeringen
+har ett eget underlag, `RESEARCH-regalloc.md`.
 
 **Beslut (2026-11-11, frågerunda med Johan):**
 - `-O0` behåller dagens direkta kodgenerering.
@@ -151,10 +152,11 @@ De följer `LO()`-gränssnittet, så att byggaren är en tunn översättning:
    grenar, onåbara block.
 3. **Redundans:** värdenumrering över dominatorträdet, lagring→laddning och
    döda lagringar på oflydda stackplatser, död kod.
-4. **Allokera:** linjär genomsökning över SSA-intervall (heltals- och
-   flyttalsklass, callee-sparade register över anrop, parallella flyttar för
-   blockargument, fasta register för `div`, skift och argument).  Inget LICM i
-   1.0.
+4. **Allokera:** girig tilldelning i blockordning på SSA-formen, med utkastning
+   av värdet vars nästa användning ligger längst bort (SPEC-vir.md 15.5–15.11;
+   heltals- och flyttalsklass, parallella flyttar per kant, fasta register för
+   `div`, skift och argument, tips i stället för sammanslagningsfas).  Inget
+   LICM i 1.0.
 5. **Sänk** genom den riktiga CPU:ns `LO`.
 
 Passlistan är fast: vanliga funktionsanrop, ingen passhanterare, inga
@@ -187,7 +189,7 @@ fixpunkter utan budget (samma regel som `emit/flow/`).
 | V1 | **Format och verktyg.** `vir.h`, skrivare, parser, verifierare, tolk, `virtest`, `fuzz-vir` | Skriv–läs–skriv identiskt på alla tester; verifieraren avvisar en mutationsmängd; standardbygget byte-identiskt (`vbench.py check`) |
 | V2 | **Byggare och enklaste sänkning på x86-64.** Vandraren mot `vir_*`; sänkning där varje värde bor i en stackplats; `VCC_VIR=1`; reträtt per funktion | Med `VCC_VIR=1`: `bench/vcc-x86.py`, `vcc-abi.py --target x86_64`, gcc-torture samma godkända som utan; täckning rapporterad per korpus; utan flaggan byte-identiskt |
 | V3 | **Täckning.** Bit-fält, poster i anrop, varargs, atomära, flyttal, switch (vandrarens sänkning), beräknad goto | Täckning ≥ 95 % av PostgreSQL:s funktioner och av vcc:s egna; x86-kärnan bootar med `VCC_VIR=1` (asm-funktioner går den vanliga vägen); objtool utan varningar |
-| V4 | **Registerallokering.** Linjär genomsökning, fasta register, parallella flyttar | Instruktioner på en fast TU-mängd under dagens `-O2`; allokerarens tid redovisad för sig |
+| V4 | **Registerallokering.** Nästa-användning-kedjor bakåt, girig tilldelning framåt, fasta register, parallella flyttar per kant, `vir_alloc_check` | Instruktioner på en fast TU-mängd under dagens `-O2`; allokerarens tid och räknare (spill, omladdningar, flyttar) redovisade för sig; kontrollen grön på testerna och `fuzz-vir` |
 | V5 | **Pass.** Förenkling, värdenumrering, minnesvidarebefordran, död kod | Per pass: tolkekvivalens, instruktioner och `vbench.py`-tid före och efter, i planen |
 | V5b | **Inline asm.** `x64_asm` delas i planering och emission (SPEC X6); `asm` och `asmgoto` byggs | Utan flaggan: kärnobjekten och `vas-corpus.py` byte-identiska; med: täckning ≥ 99 % av x86-kärnans funktioner |
 | V6 | **arm64.** Kräver att arm64 har en `LO`-sänkning (TODO.md "arm64 and wasm on the shared walker"); VIR driver flytten eller väntar på den | ctests 1729/1729, `vcc-abi.py`, arm64-kärnan bootar med `VCC_VIR=1`; `vcc-obj.py` 840/840 |
@@ -297,3 +299,36 @@ SPEC rättad till utkast 0.4 i egen commit (lista i PR:en).
 - **Återstår av V1:** tolken `virrun`, `virgen`, `fuzz-vir`, `--equiv` och
   mikrobenchmarkarna i SPEC 22.8.  Inga pass finns, så `PASSES:` godtar bara
   `canon`.
+
+### Underlag för V4 (2026-11-11): registerallokering, ingen kod
+
+- `RESEARCH-regalloc.md`: vad GCC (IRA, LRA) och LLVM (Greedy, Fast, PBQP,
+  MLGO) gör och var de är svaga; SSA-baserad allokering (kordala grafer,
+  Braun–Hacks spillning, tips i stället för sammanslagning); linjär
+  genomsökning och dess efterföljare (C1, Go, V8, JavaScriptCore, regalloc2,
+  TPDE, LuaJIT, QBE); optimala och inlärda metoder; jämförelsetabell.  Källa
+  per påstående, obekräftade punkter märkta.
+- **Svar på frågan "kan vi göra bättre än clang och gcc?":** på
+  kompileringstid ja, med stor marginal (två linjära svep i stället för
+  intervallträd och prioritetskö); på kodkvalitet nej i allmänhet.  Bättre
+  kod bara på några bestämda ställen: asm-alternativ (`"rm"`) avgörs i
+  allokeraren, valet av callee-sparat register görs med anropens läge känt,
+  och felklasserna kring delregister och tvåadressomskrivning före
+  allokeringen finns inte.  LLVM och GCC ligger före i delning styrd av
+  blockfrekvens, femton års specialfall och shrink-wrapping.
+- **Rekommendation (SPEC-vir.md utkast 0.4, avsnitt 15):** inte linjär
+  genomsökning över intervall.  Svep 5 (bakåt, tillsammans med `dce`) bygger
+  en stack med nästa användning per operand och live-in-listor per block;
+  svep 6 (framåt) tilldelar register girigt, följer tips och kastar ut värdet
+  med längst till nästa användning.  Ett värde med stackplats lagras en gång,
+  efter sin definition.  Antalet svep är oförändrat (7).  Reservalternativ om
+  kvalitetsgrinden i V7 faller på allokeringen: en bakåtspårande allokerare
+  i regalloc2:s stil bakom samma gränssnitt.
+- **Osäkert:** inga egna mätningar (alla tal är andras); kvalitet under
+  registertryck mot dagens Greedy är opublicerad; regeln för irreducibla
+  grafer är härledd här och måste täckas av `vir_alloc_check` och `fuzz-vir`;
+  budgeten 60 ns per VIR-instruktion för svep 5 och 6 är ett förslag.
+- **Mäts i V4:** `vbench.py ab emit` med `VCC_VIR=1`, statiska instruktioner
+  mot dagens `-O2`, clang och gcc, räknarna i `VCC_VIR_STATS`, och samma
+  TU-mängd genom clang med `-mllvm -regalloc=basic` för att se hur mycket
+  allokerarens kvalitet alls är värd.

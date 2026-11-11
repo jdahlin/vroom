@@ -27,6 +27,9 @@ assembler, linker, behind `vcc`/`vas`/`vld` shims and the `vccd` server.
   `RESEARCH-vir.md` (LLVM IR's problems): VIR, an SSA IR used only at `-O2`,
   built by compiling the shared walker a second time against a virtual
   lowering target.  Update the status of a step in `PLAN-vir.md`.
+- `RESEARCH-regalloc.md`: register allocation (GCC, LLVM, SSA-based, linear
+  scan and its descendants, optimal and learned methods) and the allocator
+  `SPEC-vir.md` section 15 specifies for VIR, with its fallback.
 - `ccs/`: our code; `ccs/Makefile` builds into `build/ccs/`.  Under `ccs/vcc/`
   generic code is in the component directories, code for one target CPU in
   `arch/<cpu>/<component>/`, code for one target OS in `platform/<os>/`
