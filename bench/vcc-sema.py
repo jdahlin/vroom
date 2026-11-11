@@ -102,7 +102,7 @@ if __name__ == '__main__':
         with open(jf, 'w') as f:
             for obj, a in ts: f.write('\x1f'.join(['-', '-fsyntax-only'] + a) + '\n')
         r = subprocess.run([VPP, '--batch', jf, '-j', str(j), '-C', B], stdout=subprocess.PIPE, text=True)
-        print(r.stdout.splitlines()[-2] if r.stdout.count('\n') >= 2 else r.stdout, end='\n')
+        print(r.stdout, end='' if r.stdout.endswith('\n') else '\n')
         os.unlink(jf); os.rmdir(TMP); sys.exit(r.returncode)
     with Pool(j) as pool:
         res = pool.map(run if mode == 'run' else warn if mode == 'warn' else layout, ts, chunksize=2)
