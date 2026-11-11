@@ -496,7 +496,7 @@ static void wk_store(ecx *e, const lval *l, qty t, val *v)
 /* ---------------- conversions ---------------- */
 
 /* v (of type from) as type to */
-static val wk_conv(ecx *e, val v, qty from, qty to)
+VPRIV val wk_conv(ecx *e, val v, qty from, qty to)
 {
 	cc *c = e->c;
 	int fs = wk_size(c, from), ts = wk_size(c, to);
@@ -1451,6 +1451,7 @@ static val wk_stmtexpr(ecx *e, uint32_t n)
 	const node *b = N(N(n)->a);
 
 	int cmark = e->wk->nclean;
+	bool r0 = e->reach;	/* (a jump inside does not make what follows the expression dead) */
 	val v = vconst(0);
 
 	for (uint32_t i = 0; i + 1 < b->c; i++)
@@ -1471,13 +1472,14 @@ static val wk_stmtexpr(ecx *e, uint32_t n)
 			wk_unsup(e, n, "a statement expression's value with cleanups");
 		e->wk->nclean = cmark;
 	}
+	e->reach = r0;
 	return v;
 }
 
 /* ---------------- builtins ---------------- */
 
 /* n is a constant once the bound constants are known (no loads, calls or side effects) */
-static bool wk_isconst(ecx *e, uint32_t n)
+VPRIV bool wk_isconst(ecx *e, uint32_t n)
 {
 	cc *c = e->c;
 	const node *x = N(n);

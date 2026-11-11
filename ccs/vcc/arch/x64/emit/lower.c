@@ -491,7 +491,11 @@ VPRIV void x64_brz(ecx *e, val a, int size, bool nz, uint32_t lbl)
 
 /* ---------------- control ---------------- */
 
-VPRIV void x64_label(ecx *e, uint32_t l) { x64_put(e, X_LABEL)->label = l; }
+VPRIV void x64_label(ecx *e, uint32_t l)
+{
+	x64_put(e, X_LABEL)->label = l;
+	e->reach = true;	/* (the walker skips label-free statements after a jump) */
+}
 VPRIV void x64_jump(ecx *e, uint32_t l) { x64_put(e, X_JMP)->label = l; }
 /* buf: rbp, the resume label, rsp (as clang); 0 now, 1 at the label */
 VPRIV val x64_setjmp(ecx *e, int rb)
