@@ -1200,6 +1200,42 @@ VPRIV void wcompare(ecx *e, int op, qty t)
 	wop(e, k, o);
 }
 
+/* The shared rules consume a known RHS; wasm owns its effects and stack. */
+static bool wbinrule(cc *c, uint32_t n, qty ty, int *op, i128 *rhs, int *identity, bool pure)
+{
+	cval cv;
+
+	switch (*op) {
+	case T_PLUS: case T_MINUS: case T_STAR: case T_SLASH: case T_PERCENT:
+	case T_AMP: case T_PIPE: case T_CARET: case T_LESSLESS: case T_GREATERGREATER:
+		break;
+	default:
+		return false;
+	}
+	if (!cc_eval(c, n, &cv) || cv.kind != CV_INT)
+		return false;
+	*rhs = cv.i;
+	*identity = em_bin_identity(c, ty, *op, *rhs);
+	if (*identity == EM_ID_NONE && !em_divpow2(c, ty, op, rhs))
+		return false;
+	return pure || !side_effects(c, n);
+}
+
+/* stack: [lhs] converted to ty; omit a pure RHS and apply its shared rule. */
+static void wbinreduced(ecx *e, qty ty, int op, i128 rhs, int identity)
+{
+	if (identity == EM_ID_LEFT)
+		return;
+	if (identity == EM_ID_ZERO || identity == EM_ID_ONES) {
+		wi(e, "drop");
+		wconst(e, wty(e->c, ty), identity == EM_ID_ZERO ? 0 : (int64_t)em_trunc_to(e->c, -1, ty));
+		return;
+	}
+	/* The replacement RHS already has the operation's wasm stack type. */
+	wconst(e, wty(e->c, ty), (int64_t)rhs);
+	warith(e, op, ty, 0);
+}
+
 static int wbinary(ecx *e, uint32_t n)
 {
 	cc *c = e->c;
@@ -1264,22 +1300,13 @@ static int wbinary(ecx *e, uint32_t n)
 	}
 	int reduced_op = op;
 	i128 rhs = 0;
-	bool reduced = false;
-	if (op == T_SLASH || op == T_PERCENT) {
-		cval cv;
-
-		if (cc_eval(c, x->b, &cv) && cv.kind == CV_INT) {
-			rhs = cv.i;
-			reduced = em_divpow2(c, ty, &reduced_op, &rhs) && !side_effects(c, x->b);
-		}
-	}
+	int identity = EM_ID_NONE;
+	bool reduced = wbinrule(c, x->b, ty, &reduced_op, &rhs, &identity, false);
 	wexpr(e, x->a, true);
 	if (QUNQ(lt) != QUNQ(ty) && op != T_LESSLESS && op != T_GREATERGREATER)
 		wconv(e, lt, ty);
 	if (reduced) {
-		/* The replacement RHS already has the operation's wasm stack type. */
-		wconst(e, wty(c, ty), (int64_t)rhs);
-		warith(e, reduced_op, ty, 0);
+		wbinreduced(e, ty, reduced_op, rhs, identity);
 	} else {
 		wexpr(e, x->b, true);
 		if (QUNQ(rt) != QUNQ(ty) && op != T_LESSLESS && op != T_GREATERGREATER)
@@ -1530,23 +1557,17 @@ static int wassign(ecx *e, uint32_t n, bool want)
 		} else {
 			int reduced_op = op;
 			i128 rhs = 0;
+			int identity = EM_ID_NONE;
 			bool reduced = false;
 
 			if (!pt)
 				pt = lt;
-			if (tb == UINT32_MAX && (op == T_SLASH || op == T_PERCENT)) {
-				cval cv;
-
-				/* No RHS effects: otherwise it was evaluated into tb above. */
-				if (cc_eval(c, x->b, &cv) && cv.kind == CV_INT) {
-					rhs = cv.i;
-					reduced = em_divpow2(c, pt, &reduced_op, &rhs);
-				}
-			}
+			/* No RHS effects: otherwise it was evaluated into tb above. */
+			if (tb == UINT32_MAX)
+				reduced = wbinrule(c, x->b, pt, &reduced_op, &rhs, &identity, true);
 			wconv(e, lt, pt);
 			if (reduced) {
-				wconst(e, wty(c, pt), (int64_t)rhs);
-				warith(e, reduced_op, pt, 0);
+				wbinreduced(e, pt, reduced_op, rhs, identity);
 			} else {
 				if (tb != UINT32_MAX)
 					wget(e, tb);

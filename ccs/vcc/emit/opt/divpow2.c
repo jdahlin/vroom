@@ -1,4 +1,4 @@
-/* Cheap arithmetic rules shared by every target. Callers preserve operand
+/* Unsigned division/remainder by a power of two. Callers preserve operand
    evaluation; this helper only rewrites the operation and constant RHS. */
 #include "../emitimpl.h"
 

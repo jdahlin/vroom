@@ -80,6 +80,15 @@ kan gå parallellt.
 
 ## Status
 
+### Status 2026-11-11: G5/G7, delade heltalsidentiteter
+
+`emit/opt/identity.c` delar nu typkorrekta heltalsidentiteter mellan alla
+bakändar; tvåpotensregeln ligger separat i `divpow2.c`. Unity och
+fil-för-fil klarar 32 kod-/körkontroller vid O0–O3. Egna sviter: x86
+131/131, arm64 136/136. Effekter och smala/höga registerbitar täcks av
+regressioner. Mätbrus hindrar slutsats om små kompilator-CPU-skillnader;
+se OPT1 i `PLAN-fas2.md`. G5/G7 och hela O2-målet är fortsatt öppna.
+
 ### Status 2026-11-11: G5/G7, första gemensamma regel implementerad
 
 Unsigned konstant tvåpotensdivision/-rest sänks nu genom samma hjälpare

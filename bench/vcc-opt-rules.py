@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Bounded unsigned power-of-two lowering checks, at every optimization level.
+"""Bounded shared integer lowering checks, at every optimization level.
 
   bench/vcc-opt-rules.py --target x86_64-linux-gnu --run
   bench/vcc-opt-rules.py --target aarch64-linux-gnu --run
@@ -8,7 +8,7 @@
 Only --run requires target tools: clang/lld and native execution or qemu-aarch64,
 or vcc/vlink and node (Node 24+ for wasm64 table64). No libc or SDK is used.
 The wasm path needs neither Emscripten nor LLVM; --node selects the JS engine.
-The ordinary C regression suites also run unsigned_pow2.c for correctness.
+The ordinary C regression suites also run both source files for correctness.
 """
 import argparse
 from pathlib import Path
@@ -40,7 +40,7 @@ def body(assembly, name, wasm):
     return tail[:end.start()]
 
 
-def check(assembly, arch):
+def check_pow2(assembly, arch):
     wasm = arch.startswith('wasm')
     divide = r'\b(?:i(?:32|64)\.(?:div|rem)_[su]|[su]div|idiv[lq]?|div[lq]?)\b'
     probes = ['opt_u32_div8', 'opt_u32_rem8', 'opt_u32_divhigh',
@@ -68,6 +68,61 @@ def check(assembly, arch):
     text = body(assembly, 'dynamic_div', wasm)
     if not re.search(divide, text):
         raise RuntimeError(f'dynamic_div: missing dynamic divide\n{text}')
+
+
+def check_identities(assembly, arch):
+    wasm = arch.startswith('wasm')
+    # Reject the relevant arithmetic only within each named function. Address
+    # and stack arithmetic may legitimately survive direct lowering.
+    operations = {
+        'mul': r'\b(?:i(?:32|64)\.mul|[i]?mul[lq]?)\b',
+        'div': r'\b(?:i(?:32|64)\.(?:div|rem)_[su]|[su]div|idiv[lq]?|div[lq]?)\b',
+        'or': r'\b(?:i(?:32|64)\.or|orr|or[lq]?)\b',
+        'xor': r'\b(?:i(?:32|64)\.xor|eor|xor[lq]?)\b',
+        'and': r'\b(?:i(?:32|64)\.and|and[lq]?)\b',
+        'shift': r'\b(?:i(?:32|64)\.(?:shl|shr_[su])|[al]s[lr]|s[ah][lr][lq]?)\b',
+    }
+    probes = {
+        'mul': ['id_mul', 'id_mulzero', 'id_umul64'],
+        'div': ['id_div', 'id_remone', 'id_uremone64', 'id_sdiv64', 'id_sremone64'],
+        'or': ['id_or', 'id_orones', 'id_uorones', 'id_uorones64'],
+        'xor': ['id_xor'],
+        'and': ['id_and', 'id_andzero', 'id_uand', 'id_uand64'],
+        'shift': ['id_shl', 'id_shr'],
+    }
+    for operation, names in probes.items():
+        for name in names:
+            text = body(assembly, name, wasm)
+            # x86 zeroing XOR is a valid implementation of a constant zero;
+            # the XOR probe returns its argument and has no reason to zero it.
+            if re.search(operations[operation], text):
+                raise RuntimeError(f'{name}: retained identity {operation}\n{text}')
+    for name, operation in [('id_add', 'add'), ('id_sub', 'sub')]:
+        text = body(assembly, name, wasm)
+        if wasm:
+            redundant = re.search(r'i(?:32|64)\.const\s+0\s*\n\s*i(?:32|64)\.' + operation + r'\b', text)
+        elif arch == 'x86_64':
+            redundant = re.search(r'\b' + operation + r'[lq]?\s+\$0\s*,', text)
+        else:
+            redundant = re.search(r'\b' + operation + r'\s+[^\n]*,\s*#0\s*(?:\n|$)', text)
+        if redundant:
+            raise RuntimeError(f'{name}: retained zero {operation}\n{text}')
+    for name in ['id_effect_mulzero', 'id_effect_andzero', 'id_effect_remone',
+                 'id_effect_orones', 'id_effect_mulone', 'id_rhs_add',
+                 'id_rhs_mulzero', 'id_rhs_andones']:
+        text = body(assembly, name, wasm)
+        if len(re.findall(r'\b(?:callq?|bl)\s+id_next\b', text)) != 1:
+            raise RuntimeError(f'{name}: expected exactly one call to id_next\n{text}')
+    for name in ['id_volatile_zero', 'id_volatile_compound']:
+        text = body(assembly, name, wasm)
+        if wasm:
+            read = re.search(r'\bi32\.load\b', text)
+        elif arch == 'aarch64':
+            read = re.search(r'\bldr\s', text)
+        else:
+            read = re.search(r'\bmov[lq]?\s+[^\n,]*\([^)]*\)[^\n,]*,\s*%', text)
+        if not re.search(r'\bid_input\b', text) or not read:
+            raise RuntimeError(f'{name}: dropped volatile operand read\n{text}')
 
 
 def execute(args, directory, assembly, arch, source, level):
@@ -107,6 +162,7 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument('--vpp', default=str(Path(BUILD) / 'vpp'))
     ap.add_argument('--target', default='x86_64-linux-gnu')
+    ap.add_argument('--rule', choices=['pow2', 'identities', 'all'], default='all')
     ap.add_argument('--run', action='store_true', help='also execute literal-answer correctness checks')
     ap.add_argument('--clang', default=llvm('clang'))
     ap.add_argument('--vlink', default=str(Path(BUILD) / 'vlink'))
@@ -122,17 +178,22 @@ def main():
         # and rejects the removed experimental option. Table64 needs Node 24+.
         if '--experimental-wasm-memory64' in run([args.node, '--v8-options']):
             args.node_flags.append('--experimental-wasm-memory64')
-    source = Path(R) / 'ccs/vcc/tests/vcc/unsigned_pow2.c'
+    rules = {'pow2': ('unsigned_pow2.c', check_pow2),
+             'identities': ('integer_identities.c', check_identities)}
+    selected = rules if args.rule == 'all' else {args.rule: rules[args.rule]}
     with tempfile.TemporaryDirectory(prefix='vcc-opt-rules-') as tmp:
         directory = Path(tmp)
-        for level in range(4):
-            assembly = directory / f'probe-O{level}.s'
-            run([args.vpp, f'--target={args.target}', f'-O{level}',
-                 '-ffreestanding', '-fno-stack-protector', '-S', source, '-o', assembly])
-            check(assembly.read_text(), arch)
-            if args.run:
-                execute(args, directory, assembly, arch, source, level)
-            print(f'{args.target} O{level}: codegen' + (' and execution' if args.run else '') + ' OK')
+        for rule, (filename, check) in selected.items():
+            source = Path(R) / 'ccs/vcc/tests/vcc' / filename
+            for level in range(4):
+                assembly = directory / f'{rule}-O{level}.s'
+                run([args.vpp, f'--target={args.target}', f'-O{level}',
+                     '-ffreestanding', '-fno-stack-protector', '-S', source, '-o', assembly])
+                check(assembly.read_text(), arch)
+                if args.run:
+                    execute(args, directory, assembly, arch, source, level)
+                print(f'{args.target} {rule} O{level}: codegen' +
+                      (' and execution' if args.run else '') + ' OK')
     return 0
 
 
