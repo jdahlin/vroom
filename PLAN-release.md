@@ -35,7 +35,7 @@ gäller.  Varje grind ska ha ett skript med tydligt grönt/rött resultat
 | G2 | Korpus | Linux-kärnan bootar Debian till `running`; PostgreSQL `meson test`, SQLite (TCL-testerna) och vcc självbyggd (stage 2 = stage 3) gröna; Debian-urvalet bygger och klarar sina egna tester med `CC=vcc` |
 | G3 | Drop-in | autoconf, meson och cmake konfigurerar med `CC=vcc` för hela korpusen utan projektpatchar. Okända flaggor ger varning. Flaggtabell mot gcc och clang (`bench/vcc-driver.py` utökad) |
 | G4 | Plattformar | G1–G3 körs på varje mål: macOS arm64, Linux arm64, mac→Linux arm64, Linux x86-64, macOS x86-64, wasm. ABI-tester (`bench/vcc-abi.py`) clang/vcc × anropare/anropad på varje mål |
-| G5 | Kodkvalitet | `-O1`: körtid inom X % av clang -O1 på en fast benchmarksvit; `-O0` oförändrat snabbt att kompilera |
+| G5 | Kodkvalitet | `-O1`: körtid inom X % av clang -O1 på en fast benchmarksvit; `-O0` oförändrat snabbt att kompilera (SSA-vägen `-O2` ägs av `PLAN-vir.md`; G5 mäter `-O1` och stannar hos den icke-SSA optimeraren) |
 | G6 | Diagnostik | `bench/vcc-diag.py` utan regressioner mot clang, och en egen svit med fall där vcc är bevisat bättre än clang (spann genom makron, fix-its, förklaringar) |
 | G7 | Fart | `bench/` publicerar kompileringstid per TU och för hela projekt: vcc mot tcc och clang -O0 (vcc -O0) och mot clang -O1 (vcc -O1), både kallt i egen process och med vccd. Siffrorna står i README |
 | G8 | vccd som default | TODO.md tier 2 tom. Autostart, versionskontroll mellan shim och server, fallback till ren process om vccd saknas eller kraschar. `vccd-test.py` + `vcc-stress.py --vccd` körs i timmar; fungerar i CI och containrar |
@@ -724,3 +724,24 @@ identitetsreceptet, med NaN-regression och fyrmålsmätning i PLAN-fas2.md.
 
 Dubbla unära heltalsoperationer förenklas gemensamt för alla mål; tester och
 avgränsade kompilatorkostnadsprov finns i PLAN-fas2.md. G5/G7 återstår.
+
+En första budgeterad värdetabell återanvänder säkra identiska syskonuttryck
+på alla mål; tester och avgränsade kompilatorkostnader finns i PLAN-fas2.md.
+Generell lokal CSE, G5/G7 och full O2-täckning återstår.
+
+En lokal heltalsinitiering kan återanvändas i en direkt efterföljande ren retur
+på alla mål; verifiering och avgränsade kostnader finns i PLAN-fas2.md.
+Generell lokal CSE samt G5/G7 återstår.
+
+Den budgeterade lokala värdeåteranvändningen omfattar även senare rena
+heltalsinitieringar; fyrmålsprov och avgränsad kostnad finns i PLAN-fas2.md.
+
+Den begränsade lokala värdeskanningen kan passera oberoende lokala skrivningar
+med invalidation av beroenden; tester, kostnad och mättat kontrollfall finns i
+PLAN-fas2.md. Generell CSE och G5/G7 återstår.
+
+Budgeterad lokal värdeåteranvändning kan även användas i rena tilldelningar;
+fyrmålsprov, kostnader och begränsningar finns i PLAN-fas2.md. G5/G7 återstår.
+
+Lokal värdeåteranvändning från PR #97 och #100 integreras på main; samlade
+fyrmålsprov och kompilatorkostnader finns i PLAN-fas2.md. G5/G7 återstår.

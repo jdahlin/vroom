@@ -45,7 +45,7 @@ VPRIV wkst *wk_state(ecx *e)
 	return W;
 }
 
-VPRIV void x64_ecx_free(ecx *e);
+VPRIV void LO(ecx_free)(ecx *e);
 
 /* the walker's and the lowering's state of this ecx, given back (the TU is done) */
 VPRIV void wk_ecx_free(ecx *e)
@@ -53,7 +53,7 @@ VPRIV void wk_ecx_free(ecx *e)
 	cc *c = e->c;
 	wkst *W = e->wk;
 
-	x64_ecx_free(e);
+	LO(ecx_free)(e);
 	if (!W)
 		return;
 	if (W->sgen) {
@@ -97,9 +97,10 @@ VPRIV int64_t wk_slot(ecx *e, uint64_t size, uint32_t align)
 			W->tf[i] = W->tf[--W->ntf];
 			if (W->ntu < WK_MAXTSLOT)
 				W->tu[W->ntu++] = t;
+			LO(slot)(e, t.off, size, align, WK_SLOT_TEMP);
 			return t.off;
 		}
-	int64_t o = wk_pslot(e, size, align);
+	int64_t o = wk_pslot_kind(e, size, align, WK_SLOT_TEMP);
 
 	if (W->ntu < WK_MAXTSLOT)
 		W->tu[W->ntu++] = (struct wktslot){ o, (uint32_t)size, align };
@@ -108,6 +109,11 @@ VPRIV int64_t wk_slot(ecx *e, uint64_t size, uint32_t align)
 
 /* a frame slot of size bytes for the whole function: its offset from the frame base (negative) */
 VPRIV int64_t wk_pslot(ecx *e, uint64_t size, uint32_t align)
+{
+	return wk_pslot_kind(e, size, align, WK_SLOT_FUNC);
+}
+
+VPRIV int64_t wk_pslot_kind(ecx *e, uint64_t size, uint32_t align, int kind)
 {
 	wkst *W = e->wk;
 	int64_t o;
@@ -124,6 +130,7 @@ VPRIV int64_t wk_pslot(ecx *e, uint64_t size, uint32_t align)
 	W->foff = o;
 	if (align > W->falign)
 		W->falign = align;
+	LO(slot)(e, -(int64_t)o, size, align, kind);
 	return -(int64_t)o;
 }
 
@@ -686,10 +693,37 @@ static void wk_switch(ecx *e, uint32_t n)
 			LO(switch_bitset)(e, r, w, &recipe, wk_caselabel(e, recipe.node), ldef);
 		}
 	}
+	bool table = false;
+	if (!bitset && e->E->o->opt >= 1 && !e->E->noopt && !c->o->no_jump_tables && !wk_mem(e, ct) &&
+	    !em_bitint(c, ct) && count >= 4) {
+		uint32_t nc = 0;
+		for (uint32_t i = c0; i < W->ncases; i++)
+			nc += N(W->cases[i].node)->op != N_DEFAULT;
+		em_switch_case *cases = nc >= 4 ? malloc(nc * sizeof *cases) : NULL;
+		uint32_t j = 0;
+		bool ranges = false;
+		for (uint32_t i = c0; cases && i < W->ncases; i++) {
+			wkcase *k = &W->cases[i];
+			uint32_t l = wk_caselabel(e, k->node);
+			if (N(k->node)->op == N_DEFAULT)
+				ldef = l;
+			else {
+				cases[j++] = (em_switch_case){ k->lo, k->hi, l };
+				ranges |= k->lo != k->hi;
+			}
+		}
+		if (cases && em_switch_prepare(cases, j, (unsigned)w * 8, sg) &&
+		    em_switch_strategy(j, cases[0].lo, cases[j - 1].hi, ranges, true) == EM_SWITCH_TABLE) {
+			if (e->reach)
+				LO(switch_table)(e, r, w, cases, j, ldef);
+			table = true;
+		}
+		free(cases);
+	}
 	if (e->E->o->opt && !e->E->noopt && count >= 8)
 		for (uint32_t i = c0; i < W->ncases; i++)
 			count -= N(W->cases[i].node)->op == N_DEFAULT;
-	bool tree = !bitset && e->E->o->opt >= 1 && !e->E->noopt &&
+	bool tree = !bitset && !table && e->E->o->opt >= 1 && !e->E->noopt &&
 		em_switch_strategy(count, 0, 0, false, false) == EM_SWITCH_TREE && !wk_mem(e, ct);
 	if (tree) {
 		em_switch_case *cases = malloc(count * sizeof *cases);
@@ -708,7 +742,7 @@ static void wk_switch(ecx *e, uint32_t n)
 			wk_switch_tree(e, cases, j, r, w, sg, ldef);
 		free(cases);
 	}
-	for (uint32_t i = c0; !tree && !bitset && i < W->ncases; i++) {
+	for (uint32_t i = c0; !tree && !bitset && !table && i < W->ncases; i++) {
 		wkcase *k = &W->cases[i];
 		uint32_t l = wk_caselabel(e, k->node);
 
@@ -747,7 +781,7 @@ static void wk_switch(ecx *e, uint32_t n)
 	}
 	W->ncases = c0;
 	LO(tfree)(e, r);
-	if (!tree && !bitset)
+	if (!tree && !bitset && !table)
 		LO(jump)(e, ldef);
 	if (W->nloop == WK_MAXLOOP)
 		efatal(e, x->loc, "statements nested too deeply");
@@ -898,7 +932,15 @@ static void wk_stmt1(ecx *e, uint32_t n)
 			if (!vs && d->op == N_DECL && c->syms[d->a].kind == S_VAR && c->syms[d->a].sc != SC_TYPEDEF &&
 			    c->syms[d->a].sc != SC_STATIC && c->syms[d->a].sc != SC_EXTERN && (T(c, c->syms[d->a].ty)->flags & TF_VLA))
 				vs = d->a;
-			wk_stmt(e, c->lists[x->b + i]);
+			uint32_t from, to;
+			if (i && em_block_value_reuse(e, x, 0, i, &from, &to)) {
+				uint32_t oldfrom = e->reuse_from, oldto = e->reuse_to;
+				e->reuse_from = from; e->reuse_to = to;
+				wk_stmt(e, c->lists[x->b + i]);
+				e->reuse_from = oldfrom; e->reuse_to = oldto;
+			} else {
+				wk_stmt(e, c->lists[x->b + i]);
+			}
 			if (d->op == N_DECL && c->syms[d->a].kind == S_VAR && c->syms[d->a].sc != SC_TYPEDEF &&
 			    c->syms[d->a].sc != SC_STATIC && c->syms[d->a].sc != SC_EXTERN && (T(c, c->syms[d->a].ty)->flags & TF_VLA)) {
 				if (W->nvla == WK_MAXCLEAN) efatal(e, d->loc, "too many cleanup variables in scope");
@@ -1512,7 +1554,7 @@ VPRIV void wk_function(ecx *e, uint32_t s)
 		LO(classify)(e, pt, &pa[i], false);
 		lval home;
 		pa[i].slot = LO(local)(e, p, &home) ? 0 :
-			wk_slot(e, pa[i].size > 8 ? (pa[i].size + 7) & ~(uint64_t)7 : 8, pa[i].align);
+			wk_pslot_kind(e, pa[i].size > 8 ? (pa[i].size + 7) & ~(uint64_t)7 : 8, pa[i].align, WK_SLOT_PARAM);	/* (sdepth is 0: wk_slot was wk_pslot) */
 	}
 	LO(params)(e, pa, (int)body->aux, wk_mem(e, W->rty) ? &W->rrec : NULL, (ft->flags & TF_VARIADIC) != 0);
 	for (uint32_t i = 0; i < body->aux; i++) {

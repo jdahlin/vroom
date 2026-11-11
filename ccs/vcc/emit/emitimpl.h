@@ -118,6 +118,7 @@ static inline bool inline_only(const sym *y)
 #include "../arch/a64/emit/ins.h"
 #include "rec/rec.h"
 #include "flow/flow.h"
+#include "flow/values.h"
 
 /* references to things with a symbol: kind in the top 4 bits */
 enum { RK_SYM = 0, RK_STR = 1, RK_LBL = 2, RK_NAME = 3, RK_TABLE = 4 };
@@ -309,6 +310,7 @@ typedef struct ecx {
 	uint32_t *sstk, nsstk;	/* the live ones (indices into sla, deepest last) */
 	int novtag;		/* inside a volatile access: its records stay untagged */
 	uint32_t curloc;	/* innermost statement being generated (diagnostics) */
+	uint32_t reuse_from, reuse_to; /* temporary substitution within one pure expression */
 	struct dbgrow { uint32_t k, file, line, col; } *dl;	/* -g: a row at record k */
 	uint32_t ndl, dlcap;
 	const char *dlname;	/* the last file looked up, and its number */
@@ -379,6 +381,9 @@ typedef struct ecx {
 	uint32_t *weakref;	/* weak undefined syms this thread referenced first */
 	uint32_t nweakref;
 	uint32_t ncases;
+	uint32_t *jtl, njtl, capjtl;	/* jump tables of the function: case labels, table after table */
+	struct ejt { uint32_t tab, off, n; } *jt;	/* table label, first entry in jtl, entries */
+	uint32_t njt, capjt;
 	uint32_t *rlog;		/* this round's item logs: (RL_*, value) pairs */
 	size_t nrlog, rlog0;	/* ... and where the current item's starts */
 	jmp_buf bail;
@@ -455,7 +460,11 @@ typedef struct rpend { uint32_t next, k, frag, off; uint8_t *p; } rpend;	/* a br
 
 /* ---------------- lvalues ---------------- */
 
-enum { L_FRAME, L_SYM, L_REG, L_GLOBREG, L_VREG };	/* L_VREG: a B_LREG variable, value in r (no address) */
+enum { L_FRAME, L_SYM, L_REG, L_GLOBREG, L_VREG, L_VAR };
+/* L_VREG: a B_LREG variable, value in r (no address).
+   L_VAR: a variable of a virtual lowering target (PLAN-vir.md, SPEC-vir.md
+   X3), its number in lval.ref, no address.  Only that target makes one; the
+   real targets treat it as an internal error. */
 
 typedef struct lval {
 	uint8_t k;
@@ -579,6 +588,9 @@ VPRIV val a64_sdivconst(ecx *e, val a, const em_sdivconst_recipe *r);
 VPRIV bool em_bound_constant(cc *c, uint32_t n, i128 *value);
 VPRIV int em_cmpbounds(ecx *e, uint32_t n, uint32_t *operand);
 VPRIV int em_repeated_integer(ecx *e, uint32_t n);
+VPRIV bool em_sibling_values(ecx *e, uint32_t n);
+VPRIV bool em_decl_reuse_values(ecx *e, uint32_t decl, uint32_t consumer, const uint32_t *killed, uint32_t nkilled, uint32_t *from, uint32_t *to);
+VPRIV bool em_block_value_reuse(ecx *e, const node *block, uint32_t first, uint32_t i, uint32_t *from, uint32_t *to);
 VPRIV uint32_t em_double_unary(ecx *e, uint32_t n);
 
 VPRIV bool em_cmpzero(ecx *e, uint32_t n, uint32_t *operand);

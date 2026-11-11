@@ -410,6 +410,38 @@ VPRIV bool const_var(ecx *e, uint32_t s, const val *v)
 }
 
 #define INLINE_NODES 40	/* AST nodes: a few statements */
+#ifndef INLINE_STATIC_NODES
+#define INLINE_STATIC_NODES 40	/* the same for a static function not declared inline (clang -O2 inlines it) */
+#endif
+
+/* a static function clang would inline: no inline asm, no locals aligned above 16 */
+static bool tiny_ok(cc *c, uint32_t n)
+{
+	const node *x;
+
+	if (!n)
+		return true;
+	x = N(n);
+	switch (x->op) {
+	case N_ASM:
+		return false;
+	case N_DECL:
+		return c->syms[x->a].kind != S_VAR || sym_align(c, x->a) <= 16;
+	case N_BLOCK:
+		for (uint32_t i = 0; i < x->c; i++)
+			if (!tiny_ok(c, c->lists[x->b + i]))
+				return false;
+		return true;
+	case N_IF:
+		return tiny_ok(c, x->b) && tiny_ok(c, x->c);
+	case N_WHILE: case N_DO: case N_SWITCH: case N_LABEL: case N_CASE: case N_DEFAULT:
+		return tiny_ok(c, x->op == N_LABEL || x->op == N_CASE || x->op == N_DEFAULT ? x->c : x->b);
+	case N_FOR:
+		return tiny_ok(c, c->lists[x->c + 1]);
+	default:
+		return true;
+	}
+}
 
 VPRIV bool can_inline(ecx *e, uint32_t s)
 {
@@ -429,9 +461,14 @@ VPRIV bool can_inline(ecx *e, uint32_t s)
 		if (!e->E->mf[s]) {
 			if (y->sc == SC_STATIC)
 				rlog(e, RL_DEP, s);
-			if (!(y->flags & SF_INLINE))
+			if (!(y->flags & SF_INLINE) && (y->sc != SC_STATIC || !e->E->o->opt))
 				return false;
 			walk_fn(e, s);
+			if (!(y->flags & SF_INLINE)) {
+				/* a plain static function: small, no inline asm or over-aligned locals */
+				if (e->E->fnsize[s] > INLINE_STATIC_NODES || !tiny_ok(c, y->body))
+					return false;
+			}
 			/*
 			 * clang -O2 inlines small inline functions, and the kernel
 			 * leans on it: scs_is_enabled() { return false; } guards

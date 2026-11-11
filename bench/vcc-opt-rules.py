@@ -43,6 +43,58 @@ def body(assembly, name, wasm):
     return tail[:end.start()]
 
 
+def check_localvalues(assembly, arch):
+    wasm = arch.startswith('wasm')
+    text = body(assembly, 'lvr_square', wasm)
+    add = r'i32\.add\b' if wasm else r'\badd\s+w' if arch == 'aarch64' else r'\baddl\b'
+    if len(re.findall(add, text)) != 1:
+        raise RuntimeError(f'sibling value must be computed once\n{text}')
+    text = body(assembly, 'lvr_reuse', wasm)
+    if len(re.findall(add, text)) != 1:
+        raise RuntimeError(f'declaration value must be reused in return\n{text}')
+    for name in ['lvr_target_assign', 'lvr_target_cached', 'lvr_target_input']:
+        text = body(assembly, name, wasm)
+        if len(re.findall(add, text)) != 1:
+            raise RuntimeError(f'{name}: declaration value must be reused in local assignment\n{text}')
+    for name in ['lvr_target_dep_prior', 'lvr_target_cached_prior', 'lvr_target_hidden']:
+        text = body(assembly, name, wasm)
+        if len(re.findall(add, text)) != 2:
+            raise RuntimeError(f'{name}: invalidated value must be recomputed\n{text}')
+    text = body(assembly, 'lvr_target_compound', wasm)
+    if len(re.findall(add, text)) != 2:
+        raise RuntimeError(f'value must survive integer-cast initializer and compound assignment\n{text}')
+    text = body(assembly, 'lvr_cast_float', wasm)
+    if len(re.findall(add, text)) < 3:
+        raise RuntimeError(f'floating conversion must remain a barrier\n{text}')
+    text = body(assembly, 'lvr_target_volatile', wasm)
+    if len(re.findall(add, text)) != 2:
+        raise RuntimeError(f'volatile assignment must not use cached value\n{text}')
+    text = body(assembly, 'lvr_decl', wasm)
+    if len(re.findall(add, text)) != 1:
+        raise RuntimeError(f'declaration value must be reused in later declaration\n{text}')
+    text = body(assembly, 'lvr_independent', wasm)
+    if len(re.findall(add, text)) != 2:
+        raise RuntimeError(f'value must survive an independent local write\n{text}')
+    text = body(assembly, 'lvr_independent_compound', wasm)
+    if len(re.findall(add, text)) != 2:
+        raise RuntimeError(f'value must survive an independent compound write\n{text}')
+    text = body(assembly, 'lvr_intervening', wasm)
+    if len(re.findall(add, text)) != 2:
+        raise RuntimeError(f'value must survive a pure declaration\n{text}')
+    for name in ['lvr_assignment_call', 'lvr_assignment_volatile', 'lvr_assignment_hidden_write']:
+        text = body(assembly, name, wasm)
+        if len(re.findall(add, text)) < 3:
+            raise RuntimeError(f'{name}: effectful assignment must remain a barrier\n{text}')
+    text = body(assembly, 'lvr_volatile', wasm)
+    load = r'i32\.load\b' if wasm else r'\bldr\s+w' if arch == 'aarch64' else r'observed\(%rip\)'
+    if len(re.findall(load, text)) != 2:
+        raise RuntimeError(f'volatile reads must both remain\n{text}')
+    text = body(assembly, 'lvr_atomic', wasm)
+    atomic = r'i32\.load\b' if wasm else r'(?:\bldar\b|\.inst\b)' if arch == 'aarch64' else r'\bmovl\s+\(%r'
+    if len(re.findall(atomic, text)) != 2:
+        raise RuntimeError(f'atomic reads must both remain\n{text}')
+
+
 def check_double_unary(assembly, arch):
     wasm = arch.startswith('wasm')
     for name in ['du_neg', 'du_not', 'du_call', 'du_volatile']:
@@ -961,7 +1013,7 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument('--vpp', default=str(Path(BUILD) / 'vpp'))
     ap.add_argument('--target', default='x86_64-linux-gnu')
-    ap.add_argument('--rule', choices=['pow2', 'signedpow2', 'identities', 'fallthrough', 'loopback', 'unreachable', 'locals', 'localjmp', 'copies', 'extensions', 'switches', 'tails', 'udivconst', 'udivconst64', 'sdivconst', 'deadresults', 'mulconst', 'bitrules', 'cmpbounds', 'cmpzero', 'repeated', 'doubleunary', 'postfix', 'unusedinit', 'switchvalues', 'all'], default='all')
+    ap.add_argument('--rule', choices=['pow2', 'signedpow2', 'identities', 'fallthrough', 'loopback', 'unreachable', 'locals', 'localjmp', 'copies', 'extensions', 'switches', 'tails', 'udivconst', 'udivconst64', 'sdivconst', 'deadresults', 'mulconst', 'bitrules', 'cmpbounds', 'cmpzero', 'repeated', 'doubleunary', 'localvalues', 'postfix', 'unusedinit', 'switchvalues', 'all'], default='all')
     ap.add_argument('--run', action='store_true', help='also execute literal-answer correctness checks')
     ap.add_argument('--cfi', action='store_true', help='also check unwind state with tail calls')
     ap.add_argument('--sibling-calls', choices=['default', 'on', 'off'], default='default',
@@ -1010,6 +1062,7 @@ def main():
              'cmpbounds': ('integer_cmp_bounds.c', check_cmpbounds),
              'repeated': ('repeated_integer.c', check_repeated),
              'doubleunary': ('double_unary.c', check_double_unary),
+             'localvalues': ('local_value_reuse.c', check_localvalues),
 
              'cmpzero': ('integer_cmp_zero.c', check_cmpzero),
              'postfix': ('postfix_eval.c', check_postfix),
@@ -1032,7 +1085,7 @@ def main():
                 checked = ((arch == 'x86_64' and level >= 1) if rule in ['locals', 'copies', 'extensions', 'deadresults'] else
                            (not arch.startswith('wasm') and level >= 1) if rule in ['fallthrough', 'unreachable'] else
                            arch.startswith('wasm') if rule == 'loopback' else True)
-                checked = checked and check is not None and (rule not in ['switches', 'udivconst', 'udivconst64', 'mulconst', 'bitrules', 'cmpbounds', 'cmpzero', 'repeated', 'doubleunary'] or level >= 1)
+                checked = checked and check is not None and (rule not in ['switches', 'udivconst', 'udivconst64', 'mulconst', 'bitrules', 'cmpbounds', 'cmpzero', 'repeated', 'doubleunary', 'localvalues'] or level >= 1)
                 if checked:
                     if rule in ['sdivconst', 'unusedinit', 'switchvalues']:
                         check(assembly.read_text(), arch, optimized=level >= 1)

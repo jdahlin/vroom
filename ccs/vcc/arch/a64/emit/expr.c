@@ -464,6 +464,19 @@ static val gen_binary(ecx *e, uint32_t n)
 	}
 	if (known >= 0)
 		return vconst(known);
+	if (em_sibling_values(e, n)) {
+		int ra, rb;
+		a = gen(e, x->a);
+		if (a.k == V_CONST) {
+			bool ok;
+			val v = fold_int_bin(e, op, ty, ty, a.i, a.i, &ok);
+			if (ok) return v;
+		}
+		ra = toreg(e, &a);
+		rb = treg(e);
+		mov(e, X(c, ty), rb, ra);
+		return arith(e, op, ty, a, vreg(rb));
+	}
 	if (unlikely(vstack_low()))	/* nested operators recurse here: an error before the stack runs out */
 		efatal(e, x->loc, "expression nested too deeply");
 	a = gen(e, x->a);
@@ -1064,6 +1077,7 @@ static val gen_inner(ecx *e, uint32_t n);
 
 VPRIV val gen(ecx *e, uint32_t n)
 {
+	if (n && n == e->reuse_from) n = e->reuse_to;
 	cc *c = e->c;
 	qty t = N(n)->ty;
 

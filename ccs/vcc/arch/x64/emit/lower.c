@@ -225,6 +225,8 @@ VPRIV int x64_toreg(ecx *e, val *v, int size)
 
 VPRIV void x64_load(ecx *e, int rd, const lval *l, int size, bool sgn)
 {
+	if (l->k == L_VAR)
+		efatal(e, e->curloc, "internal error: x86-64 load from a virtual variable");
 	if (l->k == L_VREG) {
 		if (size < 8)
 			x64_op3(e, X_EXT, size, rd, l->r, XNOREG)->cond = sgn;
@@ -239,6 +241,8 @@ VPRIV void x64_load(ecx *e, int rd, const lval *l, int size, bool sgn)
 
 VPRIV void x64_store(ecx *e, int rs, const lval *l, int size)
 {
+	if (l->k == L_VAR)
+		efatal(e, e->curloc, "internal error: x86-64 store to a virtual variable");
 	if (l->k == L_VREG) {
 		x64_mov(e, l->r, rs);
 	} else if (size == 2 && IS_XMM(rs)) {
@@ -250,6 +254,8 @@ VPRIV void x64_store(ecx *e, int rs, const lval *l, int size)
 
 VPRIV int x64_laddr(ecx *e, const lval *l)
 {
+	if (l->k == L_VAR)
+		efatal(e, e->curloc, "internal error: address of a virtual variable");
 	if (l->k == L_VREG)
 		efatal(e, e->curloc, "internal error: address of a register local");
 	int r = l->k == L_REG ? l->r : x64_treg(e);

@@ -174,7 +174,7 @@ VPRIV int64_t wk_local(ecx *e, uint32_t s)
 		if (W->canary && (is_array(c, c->syms[s].ty) || is_agg(c, c->syms[s].ty) || e->E->lnoreg[s]))
 			W->spneed = true;	/* (clang's -fstack-protector-strong, a superset) */
 		if (T(c, c->syms[s].ty)->flags & TF_VLA)
-			W->soff[s] = wk_pslot(e, 24, 8);	/* { address, sp before it, bytes } */
+			W->soff[s] = wk_pslot_kind(e, 24, 8, WK_SLOT_LOCAL);	/* { address, sp before it, bytes } */
 		else {
 			uint64_t size = tsize(c, c->syms[s].ty) ? tsize(c, c->syms[s].ty) : 1;
 			uint32_t align = sym_align(c, s) ? sym_align(c, s) : 1;
@@ -188,12 +188,13 @@ VPRIV int64_t wk_local(ecx *e, uint32_t s)
 				if (i != UINT32_MAX) {
 					W->soff[s] = W->tf[i].off;
 					W->tf[i] = W->tf[--W->ntf];
+					LO(slot)(e, W->soff[s], size, align, WK_SLOT_LOCAL);
 				} else {
-					W->soff[s] = wk_pslot(e, size, align);
+					W->soff[s] = wk_pslot_kind(e, size, align, WK_SLOT_LOCAL);
 				}
 				W->lu[W->nlu++] = (struct wklslot){ W->soff[s], (uint32_t)size, align, s };
 			} else {
-				W->soff[s] = wk_pslot(e, size, align);
+				W->soff[s] = wk_pslot_kind(e, size, align, WK_SLOT_LOCAL);
 			}
 		}
 	}
@@ -1370,6 +1371,16 @@ static val wk_binary(ecx *e, uint32_t n)
 		val v = wk_gen(e, operand);
 		wk_free(e, &v);
 		return vconst(bound);
+	}
+	if (em_sibling_values(e, n)) {
+		int ra, rb;
+		a = wk_gen(e, x->a);
+		if (a.k == V_CONST)
+			return wk_arith(e, op, x->ty, a, a);
+		ra = wk_reg(e, &a, lt);
+		rb = LO(treg)(e);
+		LO(mov)(e, rb, ra);
+		return wk_arith(e, op, x->ty, a, wk_vreg(rb));
 	}
 	if (unlikely(is_vec(c, x->ty) || is_vec(c, lt) || is_vec(c, rt))) {
 		a = wk_gen(e, x->a);
@@ -3251,6 +3262,7 @@ static val wk_gen_inner(ecx *e, uint32_t n);
    another expression observes it. Wide values use private temporary storage. */
 VPRIV val wk_gen(ecx *e, uint32_t n)
 {
+	if (n && n == e->reuse_from) n = e->reuse_to;
 	cc *c = e->c;
 	qty t = N(n)->ty;
 

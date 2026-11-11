@@ -1378,6 +1378,16 @@ static int wbinary(ecx *e, uint32_t n)
 		wop(e, wty(c, N(operand)->ty), "eqz");
 		return WT_I32;
 	}
+	if (em_sibling_values(e, n)) {
+		int k = wty(c, ty);
+		uint32_t temp = wtmp(e, k);
+		wexpr(e, x->a, true);
+		wtee(e, temp);
+		wget(e, temp);
+		wfree(e, temp);
+		warith(e, op, ty, 0);
+		return k;
+	}
 	if (unlikely(vstack_low()))
 		efatal(e, x->loc, "expression nested too deeply");
 	if (is_vec(c, ty) || is_vec(c, lt)) {
@@ -1870,6 +1880,7 @@ static int wexpr1(ecx *e, uint32_t n, bool want);
 /* push the value of n (want), or only do what it does; returns the pushed type */
 VPRIV int wexpr(ecx *e, uint32_t n, bool want)
 {
+	if (n && n == e->reuse_from) n = e->reuse_to;
 	int k;
 
 	if (!want && !side_effects(e->c, n))

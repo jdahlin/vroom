@@ -74,6 +74,7 @@ arm64)
 	step rec-mulconst python3 bench/vcc-rec-mulconst.py --sanitize --check-mutation
 
 	step flow-contracts python3 bench/vcc-flow.py --sanitize
+	step flow-values python3 bench/vcc-flow-values.py --sanitize
 	step rec-dead python3 bench/vcc-rec-dead.py --sanitize
 	step emit-names python3 bench/vcc-emit-names.py --sanitize
 	step unused-init-contracts python3 bench/vcc-unused-init.py --sanitize

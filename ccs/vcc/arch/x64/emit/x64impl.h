@@ -82,6 +82,7 @@ enum {
 	X_CVTF2I,	/* gpr r0 = xmm r1 truncated: sz int size, sh float size */
 	X_CVTF2F,	/* xmm r0 = xmm r1: sz the result's size */
 	X_X87,		/* cond: XF_* (with a memory operand where it takes one) */
+	X_JTE,		/* a jump table word: .long label - ref (both labels) */
 	X_RESUME_FRAME,	/* rebuild realigned R12 from restored RBP after builtin longjmp */
 	X_NOPS
 };
