@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Run GCC c-torture/compile against clang and vcc on x86-64 Linux.
+"""Run GCC c-torture/compile against clang and vcc on x86-64 or arm64 Linux.
 
     LLVM=/usr/lib/llvm-23 bench/vcc-torture-compile.py [-j N] [-v] [PAT]
 
@@ -30,9 +30,9 @@ BASE = ['--target=x86_64-linux-gnu', '-O2', '-w',
         '-Wno-error=int-conversion', '-Wno-error=incompatible-pointer-types',
         '-Wno-error=return-type', '-Wno-error=incompatible-function-pointer-types']
 
-def system_includes():
+def system_includes(target='x86_64-linux-gnu'):
     # vpp does not discover clang's Linux header search path on its own.
-    p = subprocess.run([CLANG, '--target=x86_64-linux-gnu', '-E', '-x', 'c',
+    p = subprocess.run([CLANG, f'--target={target}', '-E', '-x', 'c',
                         '-v', os.devnull], capture_output=True, text=True, check=True)
     listing = p.stderr.split('#include <...> search starts here:', 1)[1].split('End of search list.', 1)[0]
     return [arg for line in listing.splitlines() for arg in ('-isystem', line.strip()) if line.strip()]
@@ -97,7 +97,7 @@ def one(path):
             return path.name, 'crash', 'vpp ' + ('timeout' if rc is None else f'signal {-rc}')
         if rc:
             return path.name, 'fail', 'vpp: ' + detail(err)
-        rc, err = run([CLANG, '--target=x86_64-linux-gnu', '-c', asm, '-o', obj], path.parent)
+        rc, err = run([CLANG, BASE[0], '-c', asm, '-o', obj], path.parent)
         if rc is None or rc < 0:
             return path.name, 'error', 'assembler ' + ('timeout' if rc is None else f'signal {-rc}')
         if rc:
@@ -107,6 +107,7 @@ def one(path):
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__)
+    ap.add_argument('--target', choices=['x86_64-linux-gnu', 'aarch64-linux-gnu'], default='x86_64-linux-gnu')
     ap.add_argument('-j', type=int, default=6)
     ap.add_argument('-v', action='store_true')
     ap.add_argument('pattern', nargs='?', default='')
@@ -115,7 +116,8 @@ def main():
         ap.error('-j must be positive')
     if not ROOT.is_dir():
         ap.error(f'{ROOT} missing; run bench/fetch-testsuites.sh gcc')
-    BASE.extend(system_includes())
+    BASE[0] = f'--target={args.target}'
+    BASE.extend(system_includes(args.target))
     files = [p for p in sorted(ROOT.glob('*.c')) if re.search(args.pattern, p.name)]
     if not files:
         ap.error('no matching tests')
