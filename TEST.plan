@@ -685,6 +685,17 @@ Separat tidsgränsprob: `compound_assign_simplify1` på x86, en arbetare och
 vid 5 s ändras inte; detta är tidsgränsevidens, inte en semantisk rättning.
 Artefakter: `work/results/kefir-slow-probe-x86`.
 
+**Bitfältsrättning på `2dc4ea3`:** resultat av tilldelning, komma och
+prefixinkrement behåller nu fältbredden vid heltalspromotion, separat från
+uttryckets deklarerade typ för `sizeof`/`typeof`. De oförändrade Kefir-fallen
+`assign_bitfield1` och `comma_operator_bitfield1` passerar alla fyra
+kompilatorkombinationer på x86 och ARM/QEMU. Regressionen kontrollerar även
+engångsevaluering, postfix och explicita kast. Båda byggsätten passerar det
+nya provet på båda mål; sema run/batch 887/887, egna x86-prov 223/223 med
+sex referensundantag och ARM 228/228 med ett befintligt kört XFAIL.
+Detta är riktad evidens, inte en ny fullständig Kefir-körning.
+Artefakter: `work/agents/kefir-bitfield/results/`.
+
 ### S6 ABI-generatorer — rigg klar, fel rättas
 `gcc.dg/compat/struct-layout-1_generate.c` och clangs `utils/ABITest`
 genererar tusentals anrop mellan två kompilatorer.  Kopplas in i

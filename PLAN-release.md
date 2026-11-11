@@ -342,3 +342,15 @@ registerhem. SSE4-poster har explicita register-/flaggeffekter; fasta
 variadiska boolparametrar verifieras även via indirekta anrop. Båda bygglägen
 klarar egna Linuxsviter (176 x86, 181 ARM), ABI 32 per mål, 220 diagnostikprov
 och 887 kernel-TU:er i båda semalägena. G1/G2/G5 förblir öppna.
+
+### Status 2026-11-11: G1, promotion av bitfältsuttryck
+
+Smala unsigned-bitfält behåller sin promotionsbredd genom tilldelning,
+sammansatt tilldelning, komma och prefixinkrement. `sizeof`/`typeof`,
+postfix och explicita kast behåller sina separata deklarerade typregler.
+Det rättar två oförändrade Kefir-kontrakt på Linux x86-64 och ARM64/QEMU,
+alla fyra Clang/vcc-parningar. Regressionen provar även sidoeffekter.
+Unity/separata filer, sema run/batch 887/887 och egna körsviter
+223/223 x86 respektive 228/228 ARM är verifierade; sex x86-referensundantag
+och ett befintligt kört ARM-XFAIL redovisas separat. Hela Kefir-sviten och
+G1/G2 återstår. Evidens: `work/agents/kefir-bitfield/results/evidence.txt`.
