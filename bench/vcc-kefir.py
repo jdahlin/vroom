@@ -61,7 +61,7 @@ def invoke(cmd, cwd, prefix, timeout, env=None, stage=None):
     stderr = prefix.with_suffix('.stderr').read_text(errors='replace')
     if rc and re.search(r'unable to execute command|cannot execute|cannot find -l|cannot find .*crt|PLEASE submit a bug report|frontend command failed due to signal|internal compiler error|error while loading shared libraries|Could not open .*ld-linux', stderr, re.I):
         error = error or 'tool-error'
-    if rc and stage in ('compile', 'assemble') and not stderr.strip() and not error:
+    if rc and stage in ('compile', 'assemble', 'link') and not stderr.strip() and not error:
         error = 'silent-tool-failure'
     record['stage'] = stage
     record.update(returncode=rc, error=error, seconds=round(time.monotonic()-start, 4))
@@ -234,13 +234,13 @@ def one(case, args, root, out, includes, host_header):
         exe = wd / (label + '.exe')
         cmd = [args.clang, *target, '-no-pie', *objects[(host,'host')], *objects[(test,'test')],
                '-o', str(exe), '-pthread', '-latomic', '-lm']
-        r = invoke(cmd, root, wd/(label+'-link'), args.compile_timeout)
+        r = invoke(cmd, root, wd/(label+'-link'), args.compile_timeout, stage='link')
         if r['error']:
             return 'error'
         if r['returncode']:
             return 'link-fail'
         runner = ['qemu-aarch64', '-L', '/usr/aarch64-linux-gnu'] if args.target.startswith('aarch64') else []
-        r = invoke([*runner, str(exe)], root, wd/(label+'-run'), args.timeout)
+        r = invoke([*runner, str(exe)], root, wd/(label+'-run'), args.timeout, stage='run')
         if r['error']:
             return 'error'
         return 'pass' if r['returncode'] == 0 else 'runtime-fail'

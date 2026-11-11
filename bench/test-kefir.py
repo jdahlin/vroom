@@ -37,13 +37,14 @@ class Kefir(unittest.TestCase):
             pr.write_text('export SPECIAL_SEMANTICS=yes')
             self.assertIn('unmapped profile statement',h.profile(src,root,root/'logs')['error'])
 
-    def test_driver_signal_and_silent_compile_are_infrastructure_errors(self):
+    def test_driver_signal_and_silent_build_are_infrastructure_errors(self):
         with tempfile.TemporaryDirectory() as d:
             root=Path(d)
             for i,code in enumerate(["import sys;sys.stderr.write('clang: error: clang frontend command failed due to signal');sys.exit(1)", 'import sys;sys.exit(1)']):
-                r=h.invoke([sys.executable,'-c',code],root,root/str(i),1,stage='compile')
-                self.assertTrue(r['error'])
-            r=h.invoke([sys.executable,'-c','import sys;sys.exit(1)'],root,root/'runtime',1)
+                for stage in ('compile','assemble','link'):
+                    r=h.invoke([sys.executable,'-c',code],root,root/(str(i)+stage),1,stage=stage)
+                    self.assertTrue(r['error'])
+            r=h.invoke([sys.executable,'-c','import sys;sys.exit(1)'],root,root/'runtime',1,stage='run')
             self.assertIsNone(r['error'])
 
     def test_assembler_failure_points_to_assembler_record(self):
