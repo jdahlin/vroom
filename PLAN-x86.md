@@ -342,6 +342,10 @@ kärnan och kan vänta.
 - `vcc-x86.py --objcmp`: vcc:s `.s` genom vasm och genom `clang -c`, objekten byte för
   byte: 1846/1846. `vcc-x86.py --obj` (vcc:s sida med `vpp -c`): 1768/1776, som med `-S`;
   lika med `--pic`. arm64: `vas-obj.py` 45/45.
+- `vas-corpus.py --target x86_64-linux-gnu` (clangs `-S` av testfilerna vid `-O0`/`-O2`,
+  vasm mot `clang -c`): 3679/3680 identiska (SSE2-heltal, x87-former, `shld`/`bt`/`prefetch`,
+  CFI med x86:s CIE och `.eh_frame` som `SHT_X86_64_UNWIND`, MC:s relaxering mot förra
+  passets layout). Kvar: `20050224-1 -O2`, ett relaxeringsfall vid en `.prefalign`.
 - Kvar: kodning direkt från posterna (utan text), CFI och DWARF med x86-registernummer,
   hela ISA:n (AVX, AVX-512 för kärnans krypto) och `vas-corpus.py`/`vas-enc.py` för x86-64.
 

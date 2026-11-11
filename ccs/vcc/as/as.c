@@ -2863,6 +2863,10 @@ static void var_finish(As *a)
 					uint64_t size = (uint64_t)eo - frag_base(a, nf);
 					al = 1;
 					while (al < size && al < ((uint64_t)1 << v->p2)) al <<= 1;
+					if (o->machine == EM_X86_64) {	/* x86: never lowered (a size and an alignment inside can oscillate) */
+						if (al < (uint64_t)v->v.c) al = (uint64_t)v->v.c;
+						v->v.c = (int64_t)al;
+					}
 				}
 				ns = (al - (end & (al - 1))) & (al - 1);
 				if (v->max && ns > v->max) ns = 0;

@@ -697,7 +697,7 @@ VPRIV int x64_instruction(As *a, const char *p, const char *e, size_t wn)
 		static const struct { const char *n; uint8_t b[4]; int k; } zero[] = {
 			{ "retq", { 0xc3 }, 1 }, { "ret", { 0xc3 }, 1 }, { "leave", { 0xc9 }, 1 }, { "leaveq", { 0xc9 }, 1 },
 			{ "cltd", { 0x99 }, 1 }, { "cqto", { 0x48, 0x99 }, 2 }, { "cltq", { 0x48, 0x98 }, 2 }, { "cwtl", { 0x98 }, 1 },
-			{ "cwtd", { 0x66, 0x99 }, 2 }, { "nop", { 0x90 }, 1 }, { "ud2", { 0x0f, 0x0b }, 2 }, { "hlt", { 0xf4 }, 1 },
+			{ "cwtd", { 0x66, 0x99 }, 2 }, { "cbtw", { 0x66, 0x98 }, 2 }, { "nop", { 0x90 }, 1 }, { "ud2", { 0x0f, 0x0b }, 2 }, { "hlt", { 0xf4 }, 1 },
 			{ "mfence", { 0x0f, 0xae, 0xf0 }, 3 }, { "lfence", { 0x0f, 0xae, 0xe8 }, 3 }, { "sfence", { 0x0f, 0xae, 0xf8 }, 3 },
 			{ "pause", { 0xf3, 0x90 }, 2 }, { "int3", { 0xcc }, 1 }, { "cpuid", { 0x0f, 0xa2 }, 2 }, { "rdtsc", { 0x0f, 0x31 }, 2 },
 			{ "movsb", { 0xa4 }, 1 }, { "stosb", { 0xaa }, 1 }, { "movsq", { 0x48, 0xa5 }, 2 }, { "stosq", { 0x48, 0xab }, 2 },
@@ -961,6 +961,19 @@ VPRIV int x64_instruction(As *a, const char *p, const char *e, size_t wn)
 					f.imm = c;
 					return x64_emit(a, &f);
 				}
+		}
+		/* pextrw $k, %xmm, %r32 (66 0f c5); pinsrw $k, %r32|m16, %xmm (66 0f c4) */
+		if (nops == 3 && o[0].kind == XK_IMM && (!strcmp(mn, "pextrw") || !strcmp(mn, "pinsrw"))) {
+			int64_t c = 0;
+			int ext = mn[1] == 'e';
+			XForm f = F(.opsz16 = 1, .op = ext ? OPB(0x0f, 0xc5) : OPB(0x0f, 0xc4), .nop = 2, .reg = o[2].reg,
+				    .rm = &o[1], .isz = 1);
+
+			if (o[1].kind == XK_EXPR)
+				o[1].kind = XK_MEM;
+			x64_imm(a, &o[0], &f, &c);
+			f.imm = c;
+			return x64_emit(a, &f);
 		}
 		/* cmpeqss ...: the predicate in the name */
 		if (!strncmp(mn, "cmp", 3) && nops == 2 && o[1].kind == XK_REG && o[1].cls == XR_XMM) {
