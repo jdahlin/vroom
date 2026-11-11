@@ -83,6 +83,7 @@ typedef struct pre {
 	int cdepth;		/* cleanup variables in scope */
 	int loopd;		/* loops around the node */
 	uint32_t llo, lhi;	/* local syms seen (lspan) */
+	bool hascall;		/* a call, builtin or inline asm: not a leaf (FN_HASCALL) */
 } pre;
 
 /* a local is read or written here: count it for register allocation (8x per loop level) */
@@ -249,7 +250,7 @@ VPRIV void ensure_walked(emitter *E, cc *c, uint32_t s)
 			note_local(&P, c->lists[b->a + i]);
 		walk(&P, c->syms[s].body);
 		E->lspan[2 * s] = P.llo, E->lspan[2 * s + 1] = P.lhi;
-		E->fnsize[s] = P.nodes > 65535 ? 65535 : (uint16_t)P.nodes;
+		E->fnsize[s] = (uint16_t)((P.nodes > FN_SIZEMASK ? FN_SIZEMASK : P.nodes) | (P.hascall ? FN_HASCALL : 0));
 		if (E->stats)
 			E->walk_ns += (uint64_t)((now() - t) * 1e9), E->nwalk++;
 		atomic_store_explicit(&E->walked[s], 2, memory_order_release);
@@ -377,6 +378,7 @@ static int walk(pre *P, uint32_t n)
 	}
 		__attribute__((fallthrough));
 	case N_BUILTIN:
+		P->hascall = true;
 		if (x->op == N_BUILTIN && (x->aux == BI_ALLOCA || x->aux == BI_ALLOCA_UNINIT))
 			P->E->nflags[c->syms[P->fn].body] |= NA_ALLOCA;
 		for (uint32_t i = 0; i < x->c; i++)
@@ -494,6 +496,7 @@ static int walk(pre *P, uint32_t n)
 		P->E->lref[x->a] |= LR_REF | (P->E->lref[x->a] & LR_DEF ? LR_BACK : 0);
 		break;
 	case N_ASM: {
+		P->hascall = true;
 		const casm *a = &c->asms[x->a];
 
 		for (uint32_t i = 0; i < a->nout + a->nin; i++) {

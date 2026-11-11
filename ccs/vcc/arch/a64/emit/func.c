@@ -521,6 +521,7 @@ static int emit_function1(ecx *e, uint32_t s, int nlreg, bool leaf)
 	e->vararg = (ft->flags & TF_VARIADIC) != 0;
 	choose_lregs(e, s, nlreg, leaf);
 	e->hasasm = false;
+	e->leafmode = leaf && e->nlr;
 	memset(&F, 0, sizeof(F));
 	F.fn = s;
 	F.inst = ++e->inst_next;
@@ -533,6 +534,9 @@ static int emit_function1(ecx *e, uint32_t s, int nlreg, bool leaf)
 	case 2:
 		e->f = NULL;
 		return 1;
+	case 3:
+		e->f = NULL;
+		return 2;
 	default:
 		e->f = NULL;
 		return 0;
@@ -697,15 +701,17 @@ VPRIV void emit_function(ecx *e, uint32_t s)
 {
 	/* out of temporaries: again without register variables and with more of them free in inlined calls */
 	e->inlfree = INLINE_FREE_FAST;
-	int r = emit_function1(e, s, e->E->nlreg, true);
+	walk_fn(e, s);
+	/* a function with a call is not tried as a leaf: it would be generated twice */
+	bool leaf = !(e->E->fnsize[s] & FN_HASCALL);
+	int r = emit_function1(e, s, e->E->nlreg, leaf);
 
-	if (r && e->E->nlreg) {	/* out of temporaries with the leaf registers, or not a leaf: callee-saved ones */
+	if (r && leaf && e->E->nlreg) {	/* out of temporaries with the leaf registers, or not a leaf: callee-saved ones */
 		reset_bindings(e, s);
 		r = emit_function1(e, s, e->E->nlreg, false);
 	}
 	if (r) {
 		e->inlfree = INLINE_FREE_SAFE;
-		reset_bindings(e, s);
 		if (emit_function1(e, s, 0, false)) {
 			e->spill = 1;	/* still out: spill (expr.c gen_binary) */
 			emit_function1(e, s, 0, false);

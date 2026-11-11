@@ -234,6 +234,7 @@ VPRIV void gen_asm(ecx *e, uint32_t n)
 	int nvreg = 0;
 
 	e->hasasm = true;
+	NOT_LEAF(e);
 	if (!e->reach)
 		return;
 	if (nops > 64 || a->nlabel > 64)

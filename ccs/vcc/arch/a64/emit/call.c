@@ -105,6 +105,7 @@ VPRIV val do_call(ecx *e, uint32_t ref, val *fnv, carg *args, int n, qty rty, bo
 	int hn;
 
 	e->calls = true;
+	NOT_LEAF(e);
 	if (fnv) {
 		if (fnv->k == V_ADDR && fnv->i == 0) {
 			ref = fnv->ref;
@@ -437,7 +438,7 @@ VPRIV bool can_inline(ecx *e, uint32_t s)
 			 * leans on it: scs_is_enabled() { return false; } guards
 			 * references to objects that only exist when it is true.
 			 */
-			if (!(e->E->sflags[s] & SA_MUSTFOLD) && e->E->fnsize[s] > INLINE_NODES)
+			if (!(e->E->sflags[s] & SA_MUSTFOLD) && (e->E->fnsize[s] & FN_SIZEMASK) > INLINE_NODES)
 				return false;
 		}
 	}

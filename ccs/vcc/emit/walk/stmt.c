@@ -1274,7 +1274,7 @@ VPRIV bool wk_can_inline(ecx *e, uint32_t s)
 		if ((y->flags & SF_NOINLINE) || (!(y->flags & SF_INLINE) && y->sc != SC_STATIC))
 			return false;
 		walk_fn(e, s);
-		if (e->E->fnsize[s] > WK_INLINE_NODES)
+		if ((e->E->fnsize[s] & FN_SIZEMASK) > WK_INLINE_NODES)
 			return false;	/* (a tiny static function too, as clang: an empty stub drops its arguments) */
 		if (!(y->flags & SF_INLINE) && !wk_tiny_ok(c, y->body))
 			return false;

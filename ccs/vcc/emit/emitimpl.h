@@ -174,7 +174,7 @@ typedef struct emitter {
 	_Atomic uint8_t *strdone;	/* per string: emitted */
 	_Atomic uint8_t *extref;	/* per sym: referenced (for .weak of undefined syms) */
 	_Atomic uint8_t *walked;
-	uint16_t *fnsize;		/* per function: AST nodes (prepass) */
+	uint16_t *fnsize;		/* per function: AST nodes (prepass) in FN_SIZEMASK, FN_HASCALL: has a call, builtin or asm */
 	uint16_t *luse;			/* per local: uses weighted by loop depth (prepass) */
 	uint8_t *lnoreg;		/* per local: needs memory (address taken, asm operand, {} init) */
 	uint32_t *lspan;		/* per function: [2s] lowest, [2s+1] highest local sym seen */
@@ -272,9 +272,13 @@ typedef struct fnctx {		/* one function instance: the emitted function or an inl
 	struct fnctx *up;
 } fnctx;
 
+#define FN_SIZEMASK 0x7fff
+#define FN_HASCALL 0x8000
+/* a call or inline asm in a function generated in leaf mode: stop, emit_function generates it again (bail code 3) */
+#define NOT_LEAF(e) do { if ((e)->leafmode) _longjmp((e)->bail, 3); } while (0)
 #define NTEMP 17
 #define MAXLREG 10	/* x19-x28 */
-#define LEAF_LREGS 5	/* x15 down: a leaf function's register variables are caller-saved */
+#define LEAF_LREGS 4	/* x15 down: a leaf function's register variables are caller-saved */
 #define LREGS_DEFAULT 6	/* the rest stay expression temporaries */
 #define INLINE_FREE_FAST 5
 #define INLINE_FREE_SAFE 8
@@ -349,7 +353,7 @@ typedef struct ecx {
 	uint32_t nvsz;
 	int64_t cl_top;		/* frame offset above the block's compound literals (kept past statements) */
 	int64_t outmax;		/* outgoing stack argument bytes */
-	bool dyn, calls, vararg, hasasm;
+	bool dyn, calls, vararg, hasasm, leafmode;
 	bool discarded_scalar;	/* lowering exposed an already-emitted unused scalar result */
 	int64_t vaslot;		/* variadic register save area */
 	int ngr_named, nstk_named;	/* variadic: named GPR args, named stack bytes */

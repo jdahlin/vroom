@@ -117,6 +117,7 @@ VPRIV lval gen_lval(ecx *e, uint32_t n)
 			note_ref(e, REF(RK_SYM, cs));
 			if (model == 0 || model == TLS_DESC)
 				e->calls = true;
+				NOT_LEAF(e);
 			if (e->reach) {
 				ins *t = put(e, I_TLV);
 

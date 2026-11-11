@@ -367,6 +367,7 @@ VPRIV void call_fixed(ecx *e, int fn, int a0, int a1, int a2, int64_t n)
 	if (!e->reach)
 		return;
 	e->calls = true;
+	NOT_LEAF(e);
 	spill_live(e, &sp);
 	mov(e, 1, 0, a0);
 	if (a1 == -2)

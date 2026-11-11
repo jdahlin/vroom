@@ -49,7 +49,7 @@ VPRIV int64_t slot(ecx *e, uint64_t size, uint32_t align)
 	if (align < 1)
 		align = 1;
 	if (align > 16) {	/* x28: the base of the realigned frame if it turns out dynamic */
-		if (e->nlr)
+		if (e->nlr && !e->leafmode)
 			_longjmp(e->bail, 2);	/* it holds a register variable (they start at x28): again without */
 		e->resv |= 1u << tidx(R_BP);
 	}
