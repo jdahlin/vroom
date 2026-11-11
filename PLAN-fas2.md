@@ -2508,7 +2508,7 @@ till värdeemittern. `side_effects()` används inte som bevis för frånvaro av 
 Befintliga AST-/symboldata ändras inte; registerlokalvalet undviker att reservera
 ett hem för dessa oanvända objekt.
 
-Verifierat hittills: unitybygge samt fristående receptkontrakt normalt och med
+Verifierat hittills: unity- och nonunitybygge samt fristående receptkontrakt normalt och med
 ASan/UBSan. Kontrakten täcker budget 0/1/exakt gräns, 64/65 noder, behörighet,
 attribut, okända noder, FP-/minnes-/divisionskontroller och initializer-fallback.
 Små O2-assemblerprober visar att x64:s döda multiplikation/addition/store och
@@ -2516,6 +2516,21 @@ wasm32/64:s multiplikation/addition/lokal försvinner; a64:s befintliga efterpas
 hade redan tagit bort aritmetiken i just denna prob. Detta är inte generell
 DCE eller en fullständig lösning på OPT6.
 
-Återstår före färdig status: nonunitybygge, all-target runtime/kodgen med
-negativa kontroller, befintliga regressionssviter och matchad instruktionsmätning
-för kandidatfria och kandidatbelastade indata. Inga nya prestandasiffror hävdas än.
+Matchad kort Callgrind-mätning: exakt `f7327bd` mot `beb6e2b`, båda byggda
+med Clang 23 `-O3 -march=x86-64-v3`, 16 seriella par utan exkluderingar, endast
+O2. Kandidatfria 200-funktionskontroller/loopar gav x64 +0,0551/+0,2239 %,
+a64 +0,0630/+0,1846 %, wasm32 −0,0001/+0,1325 % och wasm64
+−0,0001/+0,1324 % exekverade kompilatorinstruktioner; all assembler var
+byte-identisk. 200 positiva funktioner gav x64 −6,3725 %, a64 −5,2347 %,
+wasm32 −4,1897 % och wasm64 −4,1878 %. a64 gav samma assembler men slapp
+arbete som dess efterpass tidigare utförde. Fyra befintliga x64-regressionsfiler
+(`deep_mixed`, `register_locals`, `atomic_ops`, `integer_identities`) gav
+55 286 799 → 55 297 899 instruktioner (+0,02008 %), alla med samma assembler.
+Manifest, kommandon, käll-/binärhashar och reproduktionsskript finns i
+`work/opt-profile/unused-init-cost/{result.json,measure.py}`. Detta mäter hela
+kompilatorprocessens användarinstruktioner, inte hårdvarucykler, väggtid eller
+programmens körtid. Det är ett avgränsat exact-parent-prov; den kombinerade
+optimeringsstackens kostnad behöver en separat gate.
+
+Återstår före färdig status: all-target runtime/kodgen med negativa kontroller
+samt befintliga regressionssviter. Prestandaprovet ersätter inte dessa tester.
