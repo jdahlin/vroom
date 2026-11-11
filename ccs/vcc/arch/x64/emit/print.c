@@ -29,6 +29,7 @@ VPRIV void x64_twoaddr(ecx *e)
 
 	uint32_t j = 0;
 
+	X->framefree = x64_framefree_candidate(e);
 	for (uint32_t k = 0; k < X->nin; k++) {
 		rec i = X->in[k];
 
@@ -36,6 +37,8 @@ VPRIV void x64_twoaddr(ecx *e)
 			dbg_remap(e, &j, k, n);	/* (-g rows: to the first record emitted for k) */
 		if (copies && i.op == X_MOV && x64_copy_forward_at(e, k))
 			continue;
+		if (X->framefree && !x64_framefree_record(e, &i))
+			X->framefree = false;
 		if (x64_tied(i.op) && i.r[0] != i.r[1]) {
 			if (i.r[2] != XNOREG && i.r[0] == i.r[2]) {
 				if (x64_commutes(i.op)) {
@@ -213,8 +216,9 @@ VPRIV void x64_print(ecx *e, tbuf *b, uint32_t s)
 		tb_s(b, "\tendbr64\n");	/* -fcf-protection=branch: an IBT landing pad */
 	for (int k = e->E->o->pfe_m; k < e->E->o->pfe_n; k++)
 		tb_s(b, "\tnop\n");	/* -fpatchable-function-entry=N,M: N - M after the entry */
-	tb_s(b, cfi ? "\tpushq\t%rbp\n\t.cfi_def_cfa_offset 16\n\t.cfi_offset %rbp, -16\n"
-		      "\tmovq\t%rsp, %rbp\n\t.cfi_def_cfa_register %rbp\n" : "\tpushq\t%rbp\n\tmovq\t%rsp, %rbp\n");
+	if (!X->framefree)
+		tb_s(b, cfi ? "\tpushq\t%rbp\n\t.cfi_def_cfa_offset 16\n\t.cfi_offset %rbp, -16\n"
+			      "\tmovq\t%rsp, %rbp\n\t.cfi_def_cfa_register %rbp\n" : "\tpushq\t%rbp\n\tmovq\t%rsp, %rbp\n");
 	if (A > 16) {
 		tb_s(b, "\tpushq\t%r12\n");
 		if (cfi) tb_s(b, "\t.cfi_offset %r12, -24\n");
@@ -642,7 +646,8 @@ VPRIV void x64_print(ecx *e, tbuf *b, uint32_t s)
 		tb_s(b, "\tmovq\t-8(%rbp), %r12\n");
 		if (cfi) tb_s(b, "\t.cfi_same_value %r12\n");
 	}
-	tb_s(b, cfi ? "\tmovq\t%rbp, %rsp\n\tpopq\t%rbp\n\t.cfi_def_cfa %rsp, 8\n" : "\tmovq\t%rbp, %rsp\n\tpopq\t%rbp\n");
+	if (!X->framefree)
+		tb_s(b, cfi ? "\tmovq\t%rbp, %rsp\n\tpopq\t%rbp\n\t.cfi_def_cfa %rsp, 8\n" : "\tmovq\t%rbp, %rsp\n\tpopq\t%rbp\n");
 	/* -mfunction-return=thunk-extern: the return through __x86_return_thunk (cs-prefixed as clang) */
 	tb_s(b, (e->E->o->xcf & 2) ? ((e->E->o->xcf & 8) ? "\tcs\n\tjmp\t__x86_return_thunk\n" : "\tjmp\t__x86_return_thunk\n") : "\tretq\n");
 	if (e->wk->spneed)

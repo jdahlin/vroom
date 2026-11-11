@@ -840,3 +840,52 @@ hand om borttagning/debugrader. extensions.c bevisar från föregående
 post när högbitar redan är noll. Inga nya fulla pass/allokeringar/SSA.
 Riktade O0–O3-körningar, debug/unwind och sanitiserade kontrakt gröna;
 prestandaprofil och dess begränsningar finns vid OPT4 i PLAN-fas2.md.
+
+### OPT4 blad utan ram (2026-11-11)
+
+`arch/x64/emit/frame.c` avgör nu om en verkligt ramfri bladfunktion kan
+utelämna rbp-prolog/epilog. Beslutet följer den befintliga tvåadressvandringen:
+inga nya fulla pass, allokeringar eller AST-vandringar. Noll frame-bytes och
+ingen justering, canary eller anropsmarkering krävs först; effektbeskrivningen
+av varje kvarvarande post måste sedan sakna rbp/rsp-beroenden och anrop.
+Okänd effekt och rå asm stänger vägen. Stackargument, frame/return-address,
+setjmp, alloca, callee-saves och justerade ramar behåller nuvarande prolog.
+CFI använder den vanliga initiala CFA:n rsp+8; debugrader, endbr, patchbara
+nop-inträden och retur-thunk lämnas kvar.
+
+Drivern tolkar `-fomit-frame-pointer`/`-fno-omit-frame-pointer` i ordning.
+Standard: tillåtet vid O1–O3, O0 behåller ramen; explicit omit tillåter också
+O0 (verifierat mot clang 23). VCC_NOOPT behåller ramen. Policyn ligger före
+`cc_opts.outfd`, så deklarationscachens befintliga optionsignatur tar med den.
+Andra måls ramval ändras inte. Funktionsattributet optnone är sedan tidigare
+ignorerat i parsern; denna leverans inför ingen ny attributsemantik.
+
+Validering: `bench/vcc-x86-leaf-frame.py` klarar nivåer/flaggreordning,
+blandade headercacher med och utan replay, negativa ramkrav, kod och körning,
+patch-inträde, CFI och dwarfdump. En signal avbryter en verkligt anropsfri,
+ramfri bladfunktion; libgcc återfinner både blad och anropare genom dess FDE.
+CI kör den värdoberoende delen med `--no-run`. Egna x86-sviten: 215/215 med
+sex redovisade referensundantag; ABI: 32/32, fyra clang/vcc-kombinationer.
+Befintliga libgcc-prov för registerhem i vanliga/justerade ramar är gröna vid
+O1/O2. Unity-bygge samt fristående syntaxkompilering av ändrade enheter gröna.
+
+Avgränsad CPU-kostnad: kalla separata processer, Callgrind Ir, samma
+`VCC_OPT='-O3 -march=x86-64-v3'`, mål x86-64 O2. Bas 781ca697:s kompilatorkällor
+är hash-verifierat identiska med 54580f7 (enda ccs-skillnaden är en testfil).
+Basbinär SHA256 `6f42919ea1d4eef11100e017f2857b72054e52161620b443a1ada705bab89cf7`,
+kandidat `a01b54686639a58ffe897137851c8abc2fd6793be7533d1ccaa32923cca79672`.
+`work/opt-profile/leaf-cost/report.json` innehåller kommandon, källhashar och diff;
+`work/opt-profile/measure-leaf.py` återskapar de två 501-funktions-TU:erna.
+
+| Korpus | Ir bas → ny | Skillnad | .text bas → ny |
+|---|---:|---:|---:|
+| Positiv: `int fN(void){return 151+N;}` | 10 587 676 → 10 569 032 | −0,176 % | 16 022 → 8 014 byte |
+| Icke tillämplig: `unsigned fN(unsigned x){return x*37u+(x>>3);}` | 16 471 567 → 16 383 053 | −0,537 % | 24 039 → 24 039 byte |
+
+Positiv källhash `eee9910c8737d006d756893be7d52f6bb2e15c36bb39dbf929247aa15d3c362d`;
+kontroll `a939023c599b599a652f3a88ff6fb10aa6cbd2a5d40a1741cf02812063c67b9e`.
+Kontrollens assembler är byte-identisk. Bytevinsten inkluderar funktionsjustering,
+inte bara borttagna instruktioner. Dessa två små syntetiska TU:er mäter varken
+programkörtid, helkorpus eller någon allmän kompilatorförbättring; G5/G7 är öppna.
+Nästa separata kvalitetslucka är kallt använda parametrars vanliga stackhem:
+den nuvarande direkta ABI-bindningen gäller bara lönsamma, utvalda registerhem.
