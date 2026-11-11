@@ -81,6 +81,12 @@ kan gå parallellt.
 ## Status
 
 ### Status 2026-11-11: externa tester på Linux x86-64
+ARM64:s stackallokering och slots använder nu 64-bitars offset med kontrollerad
+överflödeshantering. GCC `20031023-{1..4}` kompilerar (4/4); `frame_wide`
+körs med 64 KiB under QEMU och kompilerar med 1 TiB både direkt till objekt
+och via assemblertext. Isolerad egen ARM64-svit: 115/115. Detta flyttar G1/G2
+men stänger inte grindarna.
+
 G1 har fått mätbara baslinjer från clangs diagnostiktester, GCC:s
 compile-svit och två små körsviter. Fel och krascher återstår; se
 `TEST.plan` S2, S3 och S5. G1 och G2 är inte färdiga.

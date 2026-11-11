@@ -202,7 +202,7 @@ VPRIV lval gen_lval(ecx *e, uint32_t n)
 			return l;
 		}
 		{
-			int32_t sl = bind_slot(e, s);
+			int64_t sl = bind_slot(e, s);
 
 			/* it lives until the end of the block, past the statement's temporaries */
 			if (e->foff > e->cl_top)

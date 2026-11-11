@@ -80,7 +80,7 @@ VPRIV val dry(ecx *e, uint32_t n)
 {
 	uint32_t nin = e->nin, live = e->live, usedcs = e->usedcs;
 	size_t raw = e->raw.n;
-	int32_t foff = e->foff;
+	int64_t foff = e->foff;
 	bool reach = e->reach, calls = e->calls;
 	int nclean = e->nclean, nloop = e->nloop;
 	uint32_t nvsz = e->nvsz;
@@ -347,7 +347,7 @@ VPRIV val va_arg_(ecx *e, const node *x)
 
 	if (hb) {
 		/* an HFA: hn v registers, copied together into a temporary */
-		int32_t sl = slot(e, 64, 16);
+		int64_t sl = slot(e, 64, 16);
 
 		mem(e, I_LD, 2, 1, off, ra, 28);
 		opi(e, I_SUBSI, 1, ZR, off, 0);
@@ -726,7 +726,7 @@ VPRIV val gen_builtin(ecx *e, uint32_t n)
 		unsigned na = (unsigned)(tsize(c, at) / tsize(c, ae)), nr = (unsigned)(tsize(c, x->ty) / tsize(c, re));
 		val a = gen(e, arg[0]), b = x->aux == BI_SHUFFLEVECTOR ? gen(e, arg[1]) : vconst(0);
 		int ra = toreg(e, &a), rb = x->aux == BI_SHUFFLEVECTOR ? toreg(e, &b) : -1;
-		int32_t sl = slot(e, tsize(c, x->ty), 16);
+		int64_t sl = slot(e, tsize(c, x->ty), 16);
 		int rd = treg(e);
 
 		opi(e, I_ADDI, 1, rd, FRAME, sl);

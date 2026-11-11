@@ -28,7 +28,7 @@ static void park(ecx *e, carg *a)
 		return;		/* parked while the arguments were evaluated */
 	if (is_agg(c, a->t)) {
 		uint64_t sz = (tsize(c, a->t) + 7) & ~(uint64_t)7;
-		int32_t sl = slot(e, sz ? sz : 8, talign(c, a->t) > 8 ? 16 : 8);
+		int64_t sl = slot(e, sz ? sz : 8, talign(c, a->t) > 8 ? 16 : 8);
 		int rs = toreg(e, &a->v), rd = treg(e);
 
 		opi(e, I_ADDI, 1, rd, FRAME, sl);
@@ -97,7 +97,7 @@ VPRIV val do_call(ecx *e, uint32_t ref, val *fnv, carg *args, int n, qty rty, bo
 {
 	cc *c = e->c;
 	int ngrn = 0, nsaa = 0;
-	int32_t fslot = 1, rslot = 1;
+	int64_t fslot = 1, rslot = 1;
 	bool sret = is_sret(c, rty);
 	uint32_t keep = 0;	/* temporaries holding register arguments: moved, not parked or spilled */
 	spill sp;
@@ -242,7 +242,7 @@ VPRIV val do_call(ecx *e, uint32_t ref, val *fnv, carg *args, int n, qty rty, bo
 		res = vreg(r);
 	} else if (is_recabi(c, rty) && hfa(c, rty, &hn)) {
 		int hb = hfa(c, rty, &hn);
-		int32_t sl = slot(e, 64, 16);
+		int64_t sl = slot(e, 64, 16);
 		int r = treg(e);
 
 		for (int k = 0; k < hn; k++)
@@ -250,14 +250,14 @@ VPRIV val do_call(ecx *e, uint32_t ref, val *fnv, carg *args, int n, qty rty, bo
 		opi(e, I_ADDI, 1, r, FRAME, sl);
 		res = vreg(r);
 	} else if (vec_small(c, rty)) {
-		int32_t sl = slot(e, 8, 8);
+		int64_t sl = slot(e, 8, 8);
 		int r = treg(e);
 
 		vec_small_res(e, rty, sl);
 		opi(e, I_ADDI, 1, r, FRAME, sl);
 		res = vreg(r);
 	} else if (is_recabi(c, rty)) {
-		int32_t sl = slot(e, 16, 16);
+		int64_t sl = slot(e, 16, 16);
 		int r = treg(e);
 
 		mem(e, I_ST, 3, 0, 0, FRAME, sl);
@@ -519,7 +519,7 @@ VPRIV val inline_call(ecx *e, uint32_t s, carg *args, int n)
 			continue;
 		}
 		{
-			int32_t sl;
+			int64_t sl;
 			lval l = { .k = L_FRAME };
 
 			b->inst = 0;

@@ -111,7 +111,7 @@ VPRIV void vec_small_ret(ecx *e, qty t, int rs)
 }
 
 /* v0 (a call's result) into the slot at sl */
-VPRIV void vec_small_res(ecx *e, qty t, int32_t sl)
+VPRIV void vec_small_res(ecx *e, qty t, int64_t sl)
 {
 	cc *c = e->c;
 	uint32_t n = T(c, t)->n, size = (uint32_t)tsize(c, t), es = n ? size / n : size, w = n > 1 ? 8 / n : 0;

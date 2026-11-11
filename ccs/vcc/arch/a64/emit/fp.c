@@ -55,7 +55,7 @@ static void f_load(ecx *e, int d, int vr, val *v)
 }
 
 /* an FP value of sz bytes (4, 8, 16) between v<vr> and memory at base + off, through x16 */
-VPRIV void vr_store(ecx *e, int sz, int vr, int base, int32_t off)
+VPRIV void vr_store(ecx *e, int sz, int vr, int base, int64_t off)
 {
 	word(e, f_out(sz >= 8, R_X16, vr));
 	mem(e, I_ST, sz >= 8 ? 3 : sz == 2 ? 1 : 2, 0, R_X16, base, off);
@@ -64,7 +64,7 @@ VPRIV void vr_store(ecx *e, int sz, int vr, int base, int32_t off)
 		mem(e, I_ST, 3, 0, R_X16, base, off + 8);
 	}
 }
-VPRIV void vr_load(ecx *e, int sz, int vr, int base, int32_t off)
+VPRIV void vr_load(ecx *e, int sz, int vr, int base, int64_t off)
 {
 	mem(e, I_LD, sz >= 8 ? 3 : sz == 2 ? 1 : 2, 0, R_X16, base, off);
 	word(e, f_in(sz >= 8, vr, R_X16));

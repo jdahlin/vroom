@@ -234,7 +234,7 @@ static val gen_vbin(ecx *e, int op, int ra, int rb, qty t, uint32_t loc)
 	char ab[8];
 	tbuf *rb_ = &e->raw;
 	size_t st;
-	int32_t sl;
+	int64_t sl;
 	int rd;
 	ins *i;
 
@@ -311,7 +311,7 @@ static val gen_vlanes(ecx *e, int op, qty at, val *a, qty bt, val *b, qty rt, bo
 	qty vt = is_vec(c, at) ? at : bt, et = T(c, vt)->base, rte = T(c, rt)->base;
 	unsigned n = (unsigned)(tsize(c, vt) / tsize(c, et));
 	int ra = toreg(e, a), rb = unary ? -1 : toreg(e, b), rd;
-	int32_t sl = slot(e, tsize(c, rt), 16);
+	int64_t sl = slot(e, tsize(c, rt), 16);
 
 	rd = treg(e);
 	opi(e, I_ADDI, 1, rd, FRAME, sl);
@@ -395,7 +395,7 @@ static val gen_binary(ecx *e, uint32_t n)
 	if (unlikely(e->spill) && (a.k == V_REG || a.k == V_REG2) && tidx(a.r) >= 0 &&
 	    !is_vec(c, lt) && N(x->b)->op != N_NUM && N(x->b)->op != N_VAR) {
 		/* out of registers before: the left value waits in the frame while the right is computed */
-		int32_t sl = slot(e, 16, 8);
+		int64_t sl = slot(e, 16, 8);
 		bool two = a.k == V_REG2;
 
 		mem(e, I_ST, 3, 0, a.r, FRAME, sl);
@@ -1035,7 +1035,7 @@ static val gen_inner(ecx *e, uint32_t n)
 		case CK_SPLAT: {	/* the scalar into every lane of a new vector */
 			qty et = T(c, x->ty)->base;
 			uint64_t es = tsize(c, et), nl = tsize(c, x->ty) / es;
-			int32_t sl = slot(e, tsize(c, x->ty), talign(c, x->ty));
+			int64_t sl = slot(e, tsize(c, x->ty), talign(c, x->ty));
 			val v = gen(e, x->a);
 			int r;
 
@@ -1050,7 +1050,7 @@ static val gen_inner(ecx *e, uint32_t n)
 			return vreg(r);
 		}
 		case CK_UNION: {
-			int32_t sl = slot(e, tsize(c, x->ty), talign(c, x->ty));
+			int64_t sl = slot(e, tsize(c, x->ty), talign(c, x->ty));
 			lval l = { .k = L_FRAME, .off = sl, .align = talign(c, x->ty) };
 			val v = gen(e, x->a);
 			int r;
@@ -1104,7 +1104,7 @@ static val gen_inner(ecx *e, uint32_t n)
 	case N_CPLX: {	/* a _Complex value: both parts into a temporary, its address */
 		qty et = c->tags[T(c, x->ty)->aux].f[0].ty;
 		uint64_t es = tsize(c, et);
-		int32_t sl = slot(e, 2 * es, talign(c, x->ty));
+		int64_t sl = slot(e, 2 * es, talign(c, x->ty));
 		lval d = { .k = L_FRAME, .off = sl, .align = talign(c, et) };
 		val v = gen(e, x->a);
 		int r;

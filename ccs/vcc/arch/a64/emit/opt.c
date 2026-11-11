@@ -461,14 +461,14 @@ static bool backward(ecx *e, uint32_t k)
  */
 typedef struct cellent {
 	uint32_t id;		/* allocation + 1; 0: untagged */
-	int32_t off;
+	int64_t off;
 	uint32_t size;
 	bool bad, esc;		/* esc: an address points into its allocation */
 } cellent;
 
 /* per allocation: the one range its accesses use, or several (cells sorted apart) */
 typedef struct alc {
-	int32_t off;
+	int64_t off;
 	uint32_t size;
 	uint8_t state;		/* 0: no access, 1: one range, 2: several */
 	bool esc;
@@ -517,7 +517,7 @@ static int cell_cmp(const void *a, const void *b)
 }
 
 /* an untagged access overlaps [off, off+size) */
-static bool hits_untagged(uint32_t nw, int32_t off, uint32_t size)
+static bool hits_untagged(uint32_t nw, int64_t off, uint32_t size)
 {
 	int64_t end = (int64_t)off + size;
 	uint32_t lo = 0, hi = nw;
@@ -572,7 +572,7 @@ static void slots(ecx *e)
 			continue;
 		id = SLOT_TAG(i);
 		if (i->op == I_LD || i->op == I_ST) {
-			int32_t off = (int32_t)i->imm;
+			int64_t off = i->imm;
 			uint32_t size = 1u << i->sz;
 			alc *a = &SL.a[id];
 
@@ -610,7 +610,7 @@ static void slots(ecx *e)
 		if (i->rn != FRAME || (i->op != I_LD && i->op != I_ST) || !(id = SLOT_TAG(i)) || SL.a[id].state != 2)
 			continue;
 		SL.c = grow_to(SL.c, &SL.capc, nm + 1, sizeof(cellent));
-		SL.c[nm++] = (cellent){ id, (int32_t)i->imm, 1u << i->sz, false, false };
+		SL.c[nm++] = (cellent){ id, i->imm, 1u << i->sz, false, false };
 	}
 	if (nm) {
 		uint32_t u = 0;
@@ -667,7 +667,7 @@ static void slots(ecx *e)
 		if (SL.a[id].state == 1) {
 			cell = id;
 		} else {
-			cellent key = { id, (int32_t)i->imm, 1u << i->sz, false, false };
+			cellent key = { id, i->imm, 1u << i->sz, false, false };
 			uint32_t lo = SL.a[id].mb, hi = lo + SL.a[id].mn;
 
 			while (lo < hi) {
@@ -754,7 +754,7 @@ static void slots(ecx *e)
 		if (i->op != I_ST)
 			continue;	/* (deleted meanwhile) */
 		if (SL.a[cell].state != 1) {
-			cellent key = { cell, (int32_t)i->imm, 1u << i->sz, false, false };
+			cellent key = { cell, i->imm, 1u << i->sz, false, false };
 			uint32_t lo = SL.a[cell].mb, hi = lo + SL.a[cell].mn;
 
 			while (lo < hi) {

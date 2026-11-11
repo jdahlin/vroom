@@ -78,7 +78,7 @@ VPRIV int regvar_reg(cc *c, uint32_t s)
 	return -1;
 }
 
-VPRIV int32_t bind_slot(ecx *e, uint32_t s)
+VPRIV int64_t bind_slot(ecx *e, uint32_t s)
 {
 	cc *c = e->c;
 	bind *b = binding(e, s);
