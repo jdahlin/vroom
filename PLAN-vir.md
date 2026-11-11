@@ -206,6 +206,11 @@ fixpunkter utan budget (samma regel som `emit/flow/`).
 - Tolken jämför före och efter varje pass; `fuzz-vir` med ASan/UBSan.
 - Fartgrind: `bench/vbench.py gate` med flaggan av (±0,1 %) och på (redovisad).
 
+V1 fuzz: `fuzz-vir` täcker parser, verifierare och skriv–läs–skriv för
+verifierade enheter med ASan/UBSan. Två regressionsindata körs i ASan-CI;
+100 000 lokala muterade indata utan fynd. LibFuzzer och reservdrivaren har
+testats. Tolkekvivalens återstår när tolken och pass finns.
+
 ## Risker och öppna frågor
 
 - **G5 mäter `-O1`.** VIR är beslutat till `-O2`, så G5 (`-O1` inom X % av

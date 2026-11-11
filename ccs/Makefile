@@ -245,7 +245,7 @@ FUZZ_CFLAGS = -std=gnu11 -g -O1 $(HOST_CPU) $(HOST_DEFS) -pthread \
 FUZZ_OUT = $(OUT)/fuzz
 FUZZ_HDR = vcc/lex/lex.h vcc/lib/intern.h vcc/pp/pp.h vcc/pp/dircache.h
 
-fuzz: $(FUZZ_OUT)/fuzz-lex $(FUZZ_OUT)/fuzz-pp $(FUZZ_OUT)/fuzz-diag
+fuzz: $(FUZZ_OUT)/fuzz-lex $(FUZZ_OUT)/fuzz-pp $(FUZZ_OUT)/fuzz-diag $(FUZZ_OUT)/fuzz-vir
 
 $(FUZZ_OUT):
 	mkdir -p $@
@@ -256,17 +256,23 @@ $(FUZZ_OUT)/fuzz-lex: fuzz/fuzz-lex.c fuzz/lexref.c fuzz/fuzz.h $(FUZZ_DRIVER) $
 $(FUZZ_OUT)/fuzz-pp: fuzz/fuzz-pp.c fuzz/fuzz.h $(FUZZ_DRIVER) $(wildcard vcc/pp/*.c vcc/pp/*.h) $(LEX_SRC) $(FUZZ_HDR) | $(FUZZ_OUT)
 	$(FUZZ_CC) $(FUZZ_CFLAGS) $(FUZZ_ENGINE) fuzz/fuzz-pp.c $(FUZZ_DRIVER) $(pp_SRC) vcc/pp/dircache.c $(LEX_SRC) -o $@
 
+fuzz-vir: $(FUZZ_OUT)/fuzz-vir
+
+$(FUZZ_OUT)/fuzz-vir: fuzz/fuzz-vir.c $(FUZZ_DRIVER) $(vir_SRC) $(wildcard vcc/vir/*.h) | $(FUZZ_OUT)
+	$(FUZZ_CC) $(FUZZ_CFLAGS) $(FUZZ_ENGINE) fuzz/fuzz-vir.c $(FUZZ_DRIVER) $(vir_SRC) -o $@
+
 $(FUZZ_OUT)/fuzz-diag: fuzz/fuzz-diag.c fuzz/fuzz.h $(FUZZ_DRIVER) $(wildcard vcc/pp/*.c vcc/pp/*.h) $(LEX_SRC) $(FUZZ_HDR) | $(FUZZ_OUT)
 	$(FUZZ_CC) $(FUZZ_CFLAGS) $(FUZZ_ENGINE) fuzz/fuzz-diag.c $(FUZZ_DRIVER) $(pp_SRC) vcc/pp/dircache.c $(LEX_SRC) -o $@
 
-# replay the regression inputs (fuzz/regress/{lex,pp}/): every one must pass
+# replay the regression inputs (fuzz/regress/{lex,pp,diag,vir}/): every one must pass
 fuzz-regress: fuzz
 	$(FUZZ_OUT)/fuzz-lex -runs=0 fuzz/regress/lex
 	$(FUZZ_OUT)/fuzz-pp -runs=0 -timeout=10 fuzz/regress/pp
 	$(FUZZ_OUT)/fuzz-diag -runs=0 fuzz/regress/diag
+	$(FUZZ_OUT)/fuzz-vir -runs=0 fuzz/regress/vir
 
 # the differential check (vpp against clang -E -P) on the regression and seed inputs
 fuzz-diff: $(OUT)/vpp
 	fuzz/pp-diff.py -j 4 fuzz/regress/pp fuzz/seeds/pp
 
-.PHONY: fuzz fuzz-regress fuzz-diff
+.PHONY: fuzz fuzz-vir fuzz-regress fuzz-diff

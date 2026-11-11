@@ -1,0 +1,10 @@
+vir 1
+target x86_64-linux
+sig %s = (int) -> int
+func @f %s {
+b0:
+  v0:i64 = param 0.0
+  br b1(v0)
+b1(v1:i64):
+  ret v1
+}
