@@ -949,6 +949,7 @@ static val wk_arith(ecx *e, int op, qty t, val a, val b)
 		return vconst(r);
 	/* x & 0, x * 0, 0 & x, 0 * x: 0 (x evaluated already, its effects done: IS_DAX(i) = i->i_flags & 0) */
 	if ((op == T_AMP || op == T_STAR) && ((b.k == V_CONST && b.i == 0) || (a.k == V_CONST && a.i == 0))) {
+		e->discarded_scalar |= a.k == V_REG || b.k == V_REG;
 		wk_free(e, &a);
 		wk_free(e, &b);
 		return vconst(0);
@@ -956,6 +957,7 @@ static val wk_arith(ecx *e, int op, qty t, val a, val b)
 	/* 0 << x, 0 >> x, -1 >> x (signed): the constant, whatever x is (as arm64) */
 	if ((op == T_LESSLESS || op == T_GREATERGREATER) && a.k == V_CONST && b.k != V_CONST &&
 	    (em_trunc_to(c, a.i, t) == 0 || (op == T_GREATERGREATER && wk_signed(c, t) && em_trunc_to(c, a.i, t) == -1))) {
+		e->discarded_scalar |= b.k == V_REG;
 		wk_free(e, &b);
 		return vconst(em_trunc_to(c, a.i, t));
 	}
@@ -976,6 +978,7 @@ static val wk_arith(ecx *e, int op, qty t, val a, val b)
 			return a;
 		}
 		if (id == EM_ID_ZERO || id == EM_ID_ONES) {
+			e->discarded_scalar |= a.k == V_REG;
 			wk_free(e, &a);
 			return wk_const(c, id == EM_ID_ZERO ? 0 : -1, t);
 		}

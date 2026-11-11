@@ -115,6 +115,7 @@ static inline bool inline_only(const sym *y)
 
 #include "../arch/a64/emit/ins.h"
 #include "rec/rec.h"
+#include "flow/flow.h"
 
 /* references to things with a symbol: kind in the top 4 bits */
 enum { RK_SYM = 0, RK_STR = 1, RK_LBL = 2, RK_NAME = 3 };
@@ -346,6 +347,7 @@ typedef struct ecx {
 	int64_t cl_top;		/* frame offset above the block's compound literals (kept past statements) */
 	int64_t outmax;		/* outgoing stack argument bytes */
 	bool dyn, calls, vararg;
+	bool discarded_scalar;	/* lowering exposed an already-emitted unused scalar result */
 	int64_t vaslot;		/* variadic register save area */
 	int ngr_named, nstk_named;	/* variadic: named GPR args, named stack bytes */
 	int nvr_named;

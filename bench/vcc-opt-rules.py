@@ -559,6 +559,36 @@ def check_tails(assembly, arch, level, cfi=False, disabled=False):
         raise RuntimeError(f'tc_indirect: expected ordinary indirect call\n{text}')
 
 
+def check_deadresults(assembly, arch):
+    # Assert the semantic operation family, not register choices, instruction
+    # totals or a full assembly snapshot. The discarded result still requires
+    # evaluating effects and potentially trapping instructions.
+    for name in ['dr_mul', 'dr_mul64', 'dr_diamond', 'dr_chain',
+                 'dr_zero_left', 'dr_ones', 'dr_rem_one',
+                 # These controls also discard a multiplication, proving the
+                 # consumer ran while preserving their flags and ABI results.
+                 'dr_overflow', 'dr_carry', 'dr_partial', 'dr_fp_result']:
+        text = body(assembly, name, False)
+        if re.search(r'\bimul[lq]?\b', text):
+            raise RuntimeError(f'{name}: retained dead pure multiplication\n{text}')
+    for name in ['dr_div', 'dr_remainder']:
+        text = body(assembly, name, False)
+        if not re.search(r'\bdiv[lq]?\b', text):
+            raise RuntimeError(f'{name}: removed potentially trapping division\n{text}')
+    text = body(assembly, 'dr_volatile', False)
+    if not re.search(r'\bmovl\s+(?:-?[0-9]+)?\(%(?!rbp\b|rsp\b)\w+\)\s*,\s*%', text):
+        raise RuntimeError(f'dr_volatile: removed volatile operand read\n{text}')
+    text = body(assembly, 'dr_call', False)
+    if len(re.findall(r'\bcallq?\s+dr_effect\b', text)) != 1:
+        raise RuntimeError(f'dr_call: expected exactly one effectful call\n{text}')
+    text = body(assembly, 'dr_fp_div', False)
+    if not re.search(r'\bdivsd\b', text):
+        raise RuntimeError(f'dr_fp_div: removed returned floating-point operation\n{text}')
+    text = body(assembly, 'dr_opaque', False)
+    if 'dr_opaque_barrier' not in text or not re.search(r'\bimul[lq]?\b', text):
+        raise RuntimeError(f'dr_opaque: opaque whole-function fallback was lost\n{text}')
+
+
 def x64_start(check_preserved):
     if not check_preserved:
         return 'call main\nmov %eax, %edi\nmov $60, %eax\nsyscall\n'
@@ -612,7 +642,7 @@ def execute(args, directory, assembly, arch, source, level):
             run([assembler, f'--target={args.target}', '-c', assembly, '-o', obj])
         start = directory / 'start.s'
         start.write_text('.text\n.globl _start\n_start:\n' +
-                         (x64_start(args.rule in ['locals', 'localjmp', 'tails', 'all'])
+                         (x64_start(args.rule in ['locals', 'localjmp', 'tails', 'deadresults', 'all'])
                           if arch == 'x86_64' else
                           'bl main\nmov x8, #93\nsvc #0\n'))
         run([args.clang, f'--target={args.target}', '-fuse-ld=lld',
@@ -627,7 +657,7 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument('--vpp', default=str(Path(BUILD) / 'vpp'))
     ap.add_argument('--target', default='x86_64-linux-gnu')
-    ap.add_argument('--rule', choices=['pow2', 'signedpow2', 'identities', 'fallthrough', 'loopback', 'unreachable', 'locals', 'localjmp', 'copies', 'extensions', 'switches', 'tails', 'udivconst', 'udivconst64', 'sdivconst', 'all'], default='all')
+    ap.add_argument('--rule', choices=['pow2', 'signedpow2', 'identities', 'fallthrough', 'loopback', 'unreachable', 'locals', 'localjmp', 'copies', 'extensions', 'switches', 'tails', 'udivconst', 'udivconst64', 'sdivconst', 'deadresults', 'all'], default='all')
     ap.add_argument('--run', action='store_true', help='also execute literal-answer correctness checks')
     ap.add_argument('--cfi', action='store_true', help='also check unwind state with tail calls')
     ap.add_argument('--sibling-calls', choices=['default', 'on', 'off'], default='default',
@@ -668,7 +698,8 @@ def main():
              'tails': ('tail_calls.c', check_tails),
              'udivconst': ('unsigned_divconst.c', check_udivconst),
              'udivconst64': ('unsigned_divconst64.c', check_udivconst64),
-             'sdivconst': ('signed_divconst.c', check_sdivconst)}
+             'sdivconst': ('signed_divconst.c', check_sdivconst),
+             'deadresults': ('dead_results.c', check_deadresults)}
     selected = rules if args.rule == 'all' else {args.rule: rules[args.rule]}
     with tempfile.TemporaryDirectory(prefix='vcc-opt-rules-') as tmp:
         directory = Path(tmp)
@@ -684,7 +715,7 @@ def main():
                      *(['-foptimize-sibling-calls'] if args.sibling_calls == 'on' else
                        ['-fno-optimize-sibling-calls'] if args.sibling_calls == 'off' else []),
                      '-S', source, '-o', assembly])
-                checked = ((arch == 'x86_64' and level >= 1) if rule in ['locals', 'copies', 'extensions'] else
+                checked = ((arch == 'x86_64' and level >= 1) if rule in ['locals', 'copies', 'extensions', 'deadresults'] else
                            (not arch.startswith('wasm') and level >= 1) if rule in ['fallthrough', 'unreachable'] else
                            arch.startswith('wasm') if rule == 'loopback' else True)
                 checked = checked and check is not None and (rule not in ['switches', 'udivconst', 'udivconst64'] or level >= 1)

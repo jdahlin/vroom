@@ -131,6 +131,8 @@ VPRIV bool x64_framefree_candidate(ecx *e);
 VPRIV bool x64_framefree_record(ecx *e, const rec *i);
 VPRIV bool x64_copy_forward_at(ecx *e, uint32_t k);
 VPRIV bool x64_last_u32(const ecx *e, int r);
+VPRIV void x64_dead(ecx *e);
+VPRIV void x64_dead_budget(ecx *e, uint32_t budget);	/* internal bounded-fallback contracts */
 VPRIV void x64_locals_begin(ecx *e, uint32_t s);
 VPRIV bool x64_local(ecx *e, uint32_t s, lval *l);
 /* effects.c: logical records before or after two-address expansion. */
