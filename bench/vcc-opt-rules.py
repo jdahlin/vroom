@@ -52,6 +52,13 @@ def check_localvalues(assembly, arch):
     text = body(assembly, 'lvr_reuse', wasm)
     if len(re.findall(add, text)) != 1:
         raise RuntimeError(f'declaration value must be reused in return\n{text}')
+    text = body(assembly, 'lvr_if_label', wasm)
+    if len(re.findall(add, text)) < 3:
+        raise RuntimeError(f'condition with a label must remain a barrier\n{text}')
+    for name in ['lvr_if', 'lvr_if_body_write']:
+        text = body(assembly, name, wasm)
+        if len(re.findall(add, text)) != (3 if name == 'lvr_if_body_write' else 1):
+            raise RuntimeError(f'{name}: condition reuse or body invalidation failed\n{text}')
     for name in ['lvr_target_assign', 'lvr_target_cached', 'lvr_target_input']:
         text = body(assembly, name, wasm)
         if len(re.findall(add, text)) != 1:

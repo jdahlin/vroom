@@ -8,6 +8,15 @@ unsigned lvr_distinct(unsigned a, unsigned b) { return (a-b)*(b-a); }
 unsigned lvr_atomic(_Atomic unsigned *p) { return (__c11_atomic_load(p,5)+1)*(__c11_atomic_load(p,5)+1); }
 unsigned lvr_reuse(unsigned a, unsigned b) { unsigned x = a + b; return x * (a + b); }
 unsigned lvr_commute(unsigned a, unsigned b) { return (a + b) ^ (b + a); }
+unsigned lvr_cmp_order(unsigned a, unsigned b) { return (a<b)-(b<a); }
+unsigned lvr_cmp_repeat(unsigned a, unsigned b) { return (a<b)^(a<b); }
+unsigned lvr_if_label(unsigned a, unsigned b, int enter) { if (enter) goto label; unsigned x=a+b; if (x==(a+b)) { label: return a+b; } return 0; }
+unsigned lvr_loop(unsigned a, unsigned b) { unsigned x=a+b; while (x==(a+b)) { a++; if (a>3) break; } return a; }
+unsigned lvr_if(unsigned a, unsigned b) { unsigned x=a+b; if (x==(a+b)) return 1; return 0; }
+unsigned lvr_if_body_write(unsigned a, unsigned b) { unsigned x=a+b; if (x==(a+b)) { a++; return a+b; } return 0; }
+unsigned lvr_if_prior_write(unsigned a, unsigned b) { unsigned x=a+b; a++; if (x==(a+b)) return 1; return 0; }
+unsigned lvr_if_order(unsigned a, unsigned b) { unsigned x=a+b; if (x<(a+b)+1U) return 1; return 0; }
+unsigned lvr_if_volatile(unsigned a, unsigned b) { unsigned x=a+b; if (x==(a+b)+observed) return 1; return 0; }
 unsigned lvr_target_assign(unsigned a, unsigned b) { unsigned x=a+b; unsigned z; z=x*(a+b); return z; }
 unsigned lvr_target_cached(unsigned a, unsigned b) { unsigned x=a+b; x=x*(a+b); return x; }
 unsigned lvr_target_input(unsigned a, unsigned b) { unsigned x=a+b; a=x*(a+b); return a; }
@@ -47,7 +56,10 @@ int main(void)
  unsigned v = 3, w = 5;
  if (lvr_square(2, 3) != 25 || lvr_reuse(2, 3) != 25 || lvr_commute(3, 4) ||
      lvr_nested(2, 3, 4) != 4 || lvr_distinct(5, 2) != (3U * (0U-3U)) ||
-     lvr_target_assign(2, 3) != 25 || lvr_target_cached(2, 3) != 25 || lvr_target_input(2, 3) != 25 ||
+     lvr_cmp_order(1, 2) != 1 || lvr_cmp_order(2, 1) != ~0U || lvr_cmp_repeat(1, 2) ||
+     lvr_if_label(2, 3, 0) != 5 || lvr_if_label(2, 3, 1) != 5 || lvr_loop(2, 3) != 3 ||
+     lvr_if(2, 3) != 1 || lvr_if_body_write(2, 3) != 6 || lvr_if_prior_write(2, 3) != 0 ||
+     lvr_if_order(2, 3) != 1 || lvr_target_assign(2, 3) != 25 || lvr_target_cached(2, 3) != 25 || lvr_target_input(2, 3) != 25 ||
      lvr_target_dep_prior(2, 3) != 30 || lvr_target_cached_prior(2, 3) != 10 ||
      lvr_target_compound(2, 3) != 27 || lvr_target_volatile(2, 3) != 25 || lvr_target_hidden(2, 3) != 30 ||
      lvr_cast_float(2, 3) != 15 || lvr_decl(2, 3) != 25 || lvr_decl_chain(2, 3) != 10 || lvr_decl_write(2, 3) != 25 ||
@@ -63,7 +75,7 @@ int main(void)
  if (lvr_intervening_call(2, 3) != 40 || global_value != 6 ||
      lvr_assignment_call(2, 3, 0) != 40 || global_value != 7) return 6;
  observed = 3;
- if (lvr_volatile() != 16 || lvr_intervening_volatile(2, 3) != 20 || lvr_assignment_volatile(2, 3, 0) != 20) return 3;
+ if (lvr_if_volatile(2, 3) != 0 || lvr_volatile() != 16 || lvr_intervening_volatile(2, 3) != 20 || lvr_assignment_volatile(2, 3, 0) != 20) return 3;
  if (lvr_alias(&v, &v) != 14 || v != 7 || lvr_alias(&v, &w) != 18 || w != 7) return 4;
  return 0;
 }

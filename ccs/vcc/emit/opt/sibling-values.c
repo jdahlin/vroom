@@ -43,11 +43,16 @@ static uint32_t em_sibling_value(cc *c, em_sibling_state *s, uint32_t n)
   key.operation = UINT32_C(0x80000000) | x->aux;
   key.left = left;
  } else if (x->op == N_BINARY && (x->aux == T_PLUS || x->aux == T_MINUS || x->aux == T_STAR ||
-                                  x->aux == T_AMP || x->aux == T_PIPE || x->aux == T_CARET)) {
+                                  x->aux == T_AMP || x->aux == T_PIPE || x->aux == T_CARET ||
+                                  x->aux == T_EQUALEQUAL || x->aux == T_EXCLAIMEQ ||
+                                  x->aux == T_LESS || x->aux == T_LESSEQ ||
+                                  x->aux == T_GREATER || x->aux == T_GREATEREQ)) {
+  bool commutative = x->aux == T_PLUS || x->aux == T_STAR || x->aux == T_AMP ||
+                     x->aux == T_PIPE || x->aux == T_CARET || x->aux == T_EQUALEQUAL || x->aux == T_EXCLAIMEQ;
   left = em_sibling_value(c, s, x->a);
   right = em_sibling_value(c, s, x->b);
   if (!left || !right) return 0;
-  if (x->aux != T_MINUS && left > right) { value = left; left = right; right = value; }
+  if (commutative && left > right) { value = left; left = right; right = value; }
   key.operation = 2 + x->aux;
   key.left = left; key.right = right;
  } else return 0;
@@ -132,7 +137,7 @@ VPRIV bool em_decl_reuse_values(ecx *e, uint32_t decl, uint32_t consumer,
      (s->flags & SF_ADDR_TAKEN) || (QQ(s->ty) & Q_VOLATILE) || (T(c, s->ty)->flags & TF_ATOMIC) ||
      sym_attrs(c, d->a)->cleanup || sym_attrs(c, d->a)->asmname ||
      QUNQ(s->ty) != QUNQ(N(d->b)->ty)) return false;
- if (r->op == N_RETURN) {
+ if (r->op == N_RETURN || (r->op == N_IF && !(e->E->nflags[consumer] & NA_LABEL))) {
   expr = r->a;
  } else if (r->op == N_DECL && r->a != d->a) {
   const sym *out = &c->syms[r->a];
@@ -241,7 +246,7 @@ VPRIV bool em_block_value_reuse(ecx *e, const node *block, uint32_t first, uint3
   if (!assign->b || N(assign->b)->op != N_BINARY) return false;
   rhs = N(assign->b);
   if (N(rhs->a)->op != N_BINARY && N(rhs->b)->op != N_BINARY) return false;
- } else if (N(consumer)->op != N_RETURN && N(consumer)->op != N_DECL) return false;
+ } else if (N(consumer)->op != N_RETURN && N(consumer)->op != N_DECL && N(consumer)->op != N_IF) return false;
  while (i > first && count++ < 8) {
   uint32_t prev = c->lists[block->b + --i];
   if (N(prev)->op == N_EXPR) {
