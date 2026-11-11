@@ -440,6 +440,21 @@ TU:er (`vcc -c` mot `vcc -S | vasm`: samma objekt), tid per TU (vbench).
   genom vcc:s funktioner; `vas-corpus` med `-g` 3679/3680.
 - Kvar: kodning direkt från posterna (utan text), hela ISA:n (AVX, AVX-512 för kärnans
   krypto) och `vas-enc.py` för x86-64.
+### X3 (2026-11-11): interrupt-anropskonvention
+
+- `interrupt` får hårdvaruram/error-parameter från stacken, sparar alla GPR,
+  rensar DF under handlern och återvänder med IRETQ. `-muintr` ger UIRET och
+  `__UINTR__`. Felaktiga signaturer och direkta C-anrop diagnostiseras.
+- Utan `-mgeneral-regs-only` sparas x87/MXCSR/XMM med FXSAVE64/FXRSTOR64;
+  en privat tom x87-stack gör även en full avbruten stack säker. YMM/ZMM-
+  överdelar används inte av vcc; extern kod/inline asm som ändrar dem måste
+  bevara dem själv. Kärnkod utan aktiverat FP-tillstånd använder som vanligt
+  `-mgeneral-regs-only`.
+- `bench/vcc-interrupt.py`: faktiska syntetiska IRETQ-returer, med/utan
+  error-kod, alla GPR/XMM, full x87-stack, DF och överjusterade lokaler;
+  `-O0/-O1/-O2`, både `-S` och `-c`. UIRET kodning och inkommande ram
+  verifieras, men själva instruktionen kräver OS/hårdvarustöd och körs inte.
+
 ### X4 (2026-11-11): implementationsplan flyttad till gemensam emitter
 
 Kodgranskning efter rebase på main: arm64 har redan registerlokaler och
@@ -825,6 +840,39 @@ villkorsuttryck. x86:s egna tester: 47/56 godkända, mot 46/56 före
 Övriga steg inte påbörjade. Lagerindelningen (vandrare, sänkning, gemensamma
 pass) beslutad 2026-11-10; arm64 och wasm flyttas senare (TODO.md).
 
+### 2026-11-11: funktionsmål och genererad x86-featuremodell
+
+- CPU- och featureval (`-march`, `-m`/`-mno-`, `target("...")`) delar nu en
+  statisk LLVM/Clang-23-genererad modell med beroenden och makron. `native`
+  läser CPUID/XGETBV på en x86-värd; ingen LLVM/Clang behövs vid körning.
+  Explicita negativa flaggor och ordningen mellan featureflaggor bevaras.
+- Funktionsattribut sparas, deklarationscache nycklas med featureläget och
+  inlining kräver kompatibelt mål. Inkompatibel `always_inline` ger fel vid
+  kodgenerering. SIMD- och variadiska registerregler använder funktionsmålet.
+- CPU-/featureacceptans betyder inte att alla instruktioner eller ABI-varianter
+  är implementerade. YMM/ZMM-anrop saknas: vektorer större än 16 byte som
+  argument/retur med AVX ger nu ett uttryckligt fel i stället för fel ABI,
+  även vid direktanrop till en extern funktion med AVX-attribut.
+- Validering: `bench/vcc-x86features.py` jämför fullständiga `-dM`-resultat
+  med clang (CPU, featureordning och native; syntetiska CPUID/OS-tester ingår).
+  `bench/vcc-x86target.py` jämför attribut/inlining med clang och kontrollerar
+  ABI-felen. Båda körs i den vanliga premerge-grinden även på ARM-värd.
+- ABI-spärren omfattar även struct/union med breda vektorer, inklusive
+  nästlade fält och arrayomslag. Clangs sammanslagning av klasser styr spärren;
+  stora heltalsrecord och record som fortfarande passerar i minnet tillåts.
+  207 jämförelser mot Clangs LLVM-signaturer (SSE2/AVX/AVX512, globala flaggor,
+  funktionsattribut och externa mål) samt 22 x86-ABI-fall passerar.
+
+### 2026-11-11: granskning av nästlade mål och variadisk AVX-ABI
+Inlining kontrollerar nu den aktiva inlinade anroparens featureläge, inte bara
+funktionens yttersta mål. Åtta orakelfall och åtta verifierade cachevägar
+(deklarationssnapshot respektive replay med DRCHECK) passerar.
+Onamngivna variadiska breda vektorer/record går via stacken och va_arg tillåts;
+namngivna YMM/ZMM-parametrar och returvärden är fortfarande spärrade.
+X86-vektorers naturliga alignment är 32/64 byte även utan AVX, medan ARM64
+behåller 16-bytegränsen. 42 variadiska kompilerings-/spärrfall, 18 korsanrop
+med clang och 12 layoutjämförelser passerar i unity och filvis bygge.
+
 ### OPT3-integration med X5 (2026-11-11)
 
 Registerlokaler använder samma csslot/CFI som asm. Privata asm-snapshots
@@ -832,6 +880,32 @@ bevarar aktuella hem på alla kanter; riktiga unwind-tester återvinner
 anroparens callee-save-värden genom vanliga och justerade ramar (O1/O2).
 Se OPT3:s PR-status i PLAN-fas2.md; full O2 och prestandagrind kvarstår.
 
+### 2026-11-11: integration av funktionsmål, packad bool-ABI och OPT3
+
+PR39:s funktionsmål behålls vid sammanslagning med `9d022c3` (PR38/PR40).
+ABI-klassificeringen behåller både namngivna/onamngivna argument och packade
+boolvektorers lane-transport; indirekta variadiska anrop använder vandrarens
+information om fasta parametrar. Registerlokaler får fortsatt egna hem,
+medan inlining behåller den aktiva funktionens featureläge.
+SSE4:s blend-/strängposter beskriver nu sina implicita register och flaggor
+för den gemensamma optimeraren. Regressionsprov kontrollerar alla fyra
+strängopvarianter samt fasta boolvektorparametrar via funktionspekare.
+
+Unity och filvis bygge: egna Linuxprov 176/176 x86 (fem referensskip),
+181/181 ARM; ABI 32/32 på båda mål; diagnostik 220/220; sema 887/887 i
+process- och batchläge. OPT-regler O0–O3, registerhem/setjmp, unwind/CFI,
+ASan/UBSan-posteffekter och interrupt-proven passerar. Detta är en
+korrekthetsintegration; ingen ny prestandavinst eller stängd releasegrind
+påstås.
+
+Utökade integrationsgrindar: 587/587 featuremakron och 124/124 SSE4-
+acceptansfall i båda bygglägen; kernel-PP 881/881 i process och batch.
+Wasm32/64 kör det asm-omdöpta matematikprovet 1/1 i båda bygglägen.
+Den första Wasm-starten saknade Emscripten-konfiguration och nådde inte vcc;
+omkörning med explicit SDK-konfiguration är grön. TSan klarar 44 kompileringar
+på 11 käll-/målkombinationer med 1 respektive 6 emittertrådar, identisk
+assembler och inga rapporter. Exakta kommandon och binärhashar sparas i
+`work/results/pr39-merge-validation/`.
 ### OPT4 kopior och kanoniska unsigned-resultat (2026-11-11)
 
 Separat copies.c använder delad native-kärna och kräver lokal
