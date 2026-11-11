@@ -670,12 +670,32 @@ VPRIV bool eval_builtin(cc *c, const node *x, cval *v)
 		return true;
 	case BI_STRLEN: {
 		uint32_t s = arg[0];
+		i128 offset = 0;
+		bool pointer_casts = true;
 
-		while (N(s)->op == N_CAST)
+		while (N(s)->op == N_CAST) {
+			if (N(s)->aux != CK_DECAY && N(s)->aux != CK_NOP && N(s)->aux != CK_P2P)
+				pointer_casts = false;
 			s = N(s)->a;
-		if (N(s)->op != N_STR)
+		}
+		if (N(s)->op == N_BINARY && N(s)->aux == T_PLUS) {
+			uint32_t p = N(s)->a, i = N(s)->b;
+			if (!pointer_casts) return false;
+			if (!is_ptr(c, N(p)->ty)) p = N(s)->b, i = N(s)->a;
+			cval index;
+			if (!is_ptr(c, N(p)->ty) || ty_size(c, T(c, N(p)->ty)->base) != 1)
+				return false;
+			s = p;
+			while (N(s)->op == N_CAST && (N(s)->aux == CK_DECAY || N(s)->aux == CK_NOP || N(s)->aux == CK_P2P))
+				s = N(s)->a;
+			if (N(s)->op != N_STR || !eval(c, i, &index) || index.kind != CV_INT || !index.ice || index.i < 0)
+				return false;
+			offset = index.i;
+		}
+		if (N(s)->op != N_STR || offset >= (i128)c->strs[N(s)->a].n ||
+		    (offset && c->strs[N(s)->a].esz != 1))
 			return false;
-		v->i = (i128)strlen(c->strs[N(s)->a].s);
+		v->i = (i128)strlen(c->strs[N(s)->a].s + (size_t)offset);
 		v->ice = false;
 		return true;
 	}

@@ -43,6 +43,18 @@ def body(assembly, name, wasm):
     return tail[:end.start()]
 
 
+def check_strlen_offset(assembly, arch):
+    wasm = arch.startswith('wasm')
+    for name in ['sl_offset', 'sl_embedded', 'sl_terminator', 'sl_expr']:
+        text = body(assembly, name, wasm)
+        if re.search(r'\b(?:callq?|bl)\s+strlen\b|\bcall\s+strlen\b', text):
+            raise RuntimeError(f'{name}: literal offset left a strlen call\n{text}')
+    for name in ['sl_oob', 'sl_negative']:
+        text = body(assembly, name, wasm)
+        if not re.search(r'\b(?:callq?|bl)\s+strlen\b|\bcall\s+strlen\b', text):
+            raise RuntimeError(f'{name}: invalid offset must retain the call\n{text}')
+
+
 def check_localvalues(assembly, arch):
     wasm = arch.startswith('wasm')
     text = body(assembly, 'lvr_square', wasm)
@@ -1013,7 +1025,7 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument('--vpp', default=str(Path(BUILD) / 'vpp'))
     ap.add_argument('--target', default='x86_64-linux-gnu')
-    ap.add_argument('--rule', choices=['pow2', 'signedpow2', 'identities', 'fallthrough', 'loopback', 'unreachable', 'locals', 'localjmp', 'copies', 'extensions', 'switches', 'tails', 'udivconst', 'udivconst64', 'sdivconst', 'deadresults', 'mulconst', 'bitrules', 'cmpbounds', 'cmpzero', 'repeated', 'doubleunary', 'localvalues', 'postfix', 'unusedinit', 'switchvalues', 'all'], default='all')
+    ap.add_argument('--rule', choices=['pow2', 'signedpow2', 'identities', 'fallthrough', 'loopback', 'unreachable', 'locals', 'localjmp', 'copies', 'extensions', 'switches', 'tails', 'udivconst', 'udivconst64', 'sdivconst', 'deadresults', 'mulconst', 'bitrules', 'cmpbounds', 'cmpzero', 'repeated', 'doubleunary', 'localvalues', 'strlenoffset', 'postfix', 'unusedinit', 'switchvalues', 'all'], default='all')
     ap.add_argument('--run', action='store_true', help='also execute literal-answer correctness checks')
     ap.add_argument('--cfi', action='store_true', help='also check unwind state with tail calls')
     ap.add_argument('--sibling-calls', choices=['default', 'on', 'off'], default='default',
@@ -1063,6 +1075,7 @@ def main():
              'repeated': ('repeated_integer.c', check_repeated),
              'doubleunary': ('double_unary.c', check_double_unary),
              'localvalues': ('local_value_reuse.c', check_localvalues),
+             'strlenoffset': ('literal_strlen_offset.c', check_strlen_offset),
 
              'cmpzero': ('integer_cmp_zero.c', check_cmpzero),
              'postfix': ('postfix_eval.c', check_postfix),
