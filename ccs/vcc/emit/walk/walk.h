@@ -104,6 +104,7 @@ VPRIV int64_t wk_local(ecx *e, uint32_t s);	/* a local's slot, made on first use
 VPRIV uint32_t wk_newlabel(ecx *e);
 VPRIV val wk_gen(ecx *e, uint32_t n);
 VPRIV lval wk_lval(ecx *e, uint32_t n);
+VPRIV val wk_sdivpow2(ecx *e, qty t, val a, const em_sdivpow2_recipe *r);
 VPRIV int wk_reg(ecx *e, val *v, qty t);
 VPRIV void wk_free(ecx *e, const val *v);
 VPRIV void wk_cond(ecx *e, uint32_t n, bool jump_if, uint32_t lbl);

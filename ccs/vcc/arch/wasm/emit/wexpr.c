@@ -1216,8 +1216,12 @@ static bool wbinrule(cc *c, uint32_t n, qty ty, int *op, i128 *rhs, int *identit
 		return false;
 	*rhs = cv.i;
 	*identity = em_bin_identity(c, ty, *op, *rhs);
-	if (*identity == EM_ID_NONE && !em_divpow2(c, ty, op, rhs))
-		return false;
+	if (*identity == EM_ID_NONE && !em_divpow2(c, ty, op, rhs)) {
+		em_sdivpow2_recipe recipe;
+
+		if (!em_sdivpow2(c, ty, *op, *rhs, &recipe) || !wsdivpow2_ok(&recipe))
+			return false;
+	}
 	return pure || !side_effects(c, n);
 }
 
@@ -1230,6 +1234,14 @@ static void wbinreduced(ecx *e, qty ty, int op, i128 rhs, int identity)
 		wi(e, "drop");
 		wconst(e, wty(e->c, ty), identity == EM_ID_ZERO ? 0 : (int64_t)em_trunc_to(e->c, -1, ty));
 		return;
+	}
+	{
+		em_sdivpow2_recipe recipe;
+
+		if (em_sdivpow2(e->c, ty, op, rhs, &recipe) && wsdivpow2_ok(&recipe)) {
+			wsdivpow2(e, ty, &recipe);
+			return;
+		}
 	}
 	/* The replacement RHS already has the operation's wasm stack type. */
 	wconst(e, wty(e->c, ty), (int64_t)rhs);

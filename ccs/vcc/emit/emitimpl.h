@@ -513,6 +513,12 @@ static inline bool is_wide(cc *c, qty t);
 VPRIV i128 em_trunc_to(cc *c, i128 v, qty t);
 /* opt/divpow2.c */
 VPRIV bool em_divpow2(cc *c, qty ty, int *op, i128 *rhs);
+/* opt/sdivpow2.c: bias negative dividends to preserve truncation toward zero. */
+typedef struct em_sdivpow2_recipe {
+	uint8_t bits, shift;
+	bool negative, remainder;
+} em_sdivpow2_recipe;
+VPRIV bool em_sdivpow2(cc *c, qty ty, int op, i128 rhs, em_sdivpow2_recipe *r);
 /* opt/identity.c */
 enum { EM_ID_NONE, EM_ID_LEFT, EM_ID_ZERO, EM_ID_ONES };
 VPRIV int em_bin_identity(cc *c, qty ty, int op, i128 rhs);
@@ -686,6 +692,7 @@ VPRIV val ld_cast(ecx *e, val v, qty from, qty to);
 VPRIV val f_cast(ecx *e, val v, qty from, qty to);
 /* arith.c */
 VPRIV val cast(ecx *e, val v, qty from, qty to, int kind);
+VPRIV val a64_sdivpow2(ecx *e, val a, const em_sdivpow2_recipe *r);
 VPRIV void shift_imm(ecx *e, int op, int x, int rd, int rn, int k);
 VPRIV val arith(ecx *e, int op, qty ty, val a, val b);
 VPRIV val arith2(ecx *e, int op, qty ty, val a, val b);

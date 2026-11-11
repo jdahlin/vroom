@@ -342,6 +342,12 @@ VPRIV val arith(ecx *e, int op, qty ty, val a, val b)
 			val_free(e, &a);
 			return vconst(id == EM_ID_ZERO ? 0 : em_trunc_to(c, -1, ty));
 		}
+		{
+			em_sdivpow2_recipe recipe;
+
+			if (em_sdivpow2(c, ty, op, b.i, &recipe))
+				return a64_sdivpow2(e, a, &recipe);
+		}
 		em_divpow2(c, ty, &op, &b.i);
 	}
 	ra = toreg(e, &a);
