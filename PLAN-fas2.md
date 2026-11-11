@@ -2819,8 +2819,7 @@ samt O2 med `VCC_NOOPT`; testet täcker gränsvärden, intervall, hål, sidoeffe
 volatile, flera tabeller och avvisade kontrollflöden. Arm64-direktobjekt med
 PIC, debug och CFI körs också under qemu och dess sektioner, symboler och
 relokeringar överensstämmer med extern assemblering av vcc:s assembler.
-Separat kostnadsmätning för dessa tabeller återstår; resultatet här är ingen
-uppmätt generell kompileringstid eller programhastighet.
+Kostnadsproven nedan ger inte generell kompileringstid eller programhastighet.
 ### OPT1: två bitregler (2026-11-11)
 
 Multiplikation med en tvåpotens sänks direkt till maskinskift för 32-/64-bitars
@@ -2863,7 +2862,7 @@ på native och +20,05–20,16 % på wasm. Detta är kompilatorinstruktioner, int
 cykler, och kräver en realistisk korpus före generell slutsats. Ett separat
 syntetiskt x86-program med 100 000 anrop minskade instruktioner för hela
 programmet från 4 544 608 till 4 217 359 (−7,2 %); det är inte ett generellt
-körtidsmått. De nya stackföräldrarnas sammansatta kostnad har inte mätts här.
+körtidsmått. Den sammansatta stacken mäts separat nedan.
 
 Hela stacken inklusive värdetabeller klarar den fasta 1 %-grinden mot
 `4a839ba`: x86 +0,375 %, arm64 +0,292 %, wasm32 +0,556 %, wasm64 +0,515 %
