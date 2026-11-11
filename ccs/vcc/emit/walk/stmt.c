@@ -684,7 +684,7 @@ VPRIV void wk_stmt(ecx *e, uint32_t n)
 	switch (x->op) {
 	case N_BLOCK: {
 		uint32_t vs = 0;	/* the block's first VLA: its saved sp is restored at the end */
-		int cmark = W->nclean;
+		int cmark = W->nclean, vmark = W->nvla;
 
 		for (uint32_t i = 0; i < x->c; i++) {
 			const node *d = N(c->lists[x->b + i]);
@@ -693,7 +693,13 @@ VPRIV void wk_stmt(ecx *e, uint32_t n)
 			    c->syms[d->a].sc != SC_STATIC && c->syms[d->a].sc != SC_EXTERN && (T(c, c->syms[d->a].ty)->flags & TF_VLA))
 				vs = d->a;
 			wk_stmt(e, c->lists[x->b + i]);
+			if (d->op == N_DECL && c->syms[d->a].kind == S_VAR && c->syms[d->a].sc != SC_TYPEDEF &&
+			    c->syms[d->a].sc != SC_STATIC && c->syms[d->a].sc != SC_EXTERN && (T(c, c->syms[d->a].ty)->flags & TF_VLA)) {
+				if (W->nvla == WK_MAXCLEAN) efatal(e, d->loc, "too many cleanup variables in scope");
+				W->vla[W->nvla++] = d->a;
+			}
 		}
+		W->nvla = vmark;
 		if (W->nclean > cmark) {
 			wk_cleanups(e, cmark);
 			W->nclean = cmark;
@@ -1131,7 +1137,7 @@ VPRIV void wk_function(ecx *e, uint32_t s)
 	W->fsym = s;
 	e->nkv = e->nael = e->kvalid = 0;
 	W->rrec = (wkarg){ 0 };
-	W->nclean = 0;
+	W->nclean = W->nvla = 0;
 	W->inst = 0;
 	W->inl = NULL;
 	W->depth = 0;

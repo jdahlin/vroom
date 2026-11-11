@@ -2229,7 +2229,18 @@ static val wk_builtin(ecx *e, uint32_t n)
 		val v = wk_gen(e, arg[0]);
 
 		e->dyn = true;
-		return LO(alloca)(e, wk_conv(e, v, N(arg[0])->ty, prim(TY_ULONG)));
+		val p = LO(alloca)(e, wk_conv(e, v, N(arg[0])->ty, prim(TY_ULONG)));
+		/* Preserve this allocation across every currently active VLA scope. */
+		if (e->wk->nvla) {
+			int sp = LO(spget)(e);
+
+			for (int i = 0; i < e->wk->nvla; ++i) {
+				lval saved = { .k = L_FRAME, .off = wk_local(e, e->wk->vla[i]) + 8, .align = 8 };
+				LO(store)(e, sp, &saved, 8);
+			}
+			LO(tfree)(e, sp);
+		}
+		return p;
 	}
 	case BI_CLZ: case BI_CLZL: case BI_CLZLL: case BI_CTZ: case BI_CTZL: case BI_CTZLL:
 	case BI_FFS: case BI_FFSL: case BI_FFSLL: case BI_POPCOUNT: case BI_POPCOUNTL: case BI_POPCOUNTLL:

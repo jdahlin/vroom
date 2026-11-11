@@ -335,6 +335,18 @@ Regressionen täcker komma, pekarinkrement och statement expressions,
 inklusive att fast `sizeof` förblir oevaluerad. Unity/nonunity samt
 -O0/-O2 körprov går grönt; sex andra fall i VLA-klustret återstår.
 
+`vla-24` är också rättad: explicit `alloca` flyttar redan aktiva
+VLA-skopers sparade stackpekare, så funktionslivslång lagring överlever
+skopslutet. Senare VLA-skop återtar fortfarande lagring, verifierat med
+16384 iterationer efter en äldre alloca (ingen generell avstängning av
+stackåtertagning). Fryst kombination av `5e6f247` och rättningen bygger i
+unity/nonunity; hela egna runtime-sviten ger **143/143 x86** (fem befintliga
+referensundantag) och **148/148 ARM/QEMU**, utan cache. Fyra riktade
+VLA-regressioner per mål går vid -O0 samt i nonunity-bygget; ursprungligt
+GCC-prov går 1/1 per mål. Resultat: `s4-vla-lifetime-integrated-{x86,arm}.json`.
+Wasm är separat assembleringskontrollerat, inte runtime-verifierat här.
+Återstående VLA-gränsers biverkningar och inline-alloca är inte rättade.
+
 Med full `-ffast-math` sänks en korrekt identifierad extern
 `pow(double, 0.25)` nu till två hårdvarukvadratrötter på Linux x86/ARM.
 Lokala/asm-namngivna funktioner, avstängda builtins och striktare

@@ -76,6 +76,8 @@ typedef struct wkst {
 	uint32_t fsym;
 	uint32_t clean[WK_MAXCLEAN];	/* variables with __attribute__((cleanup)) in scope, innermost last */
 	int nclean;
+	uint32_t vla[WK_MAXCLEAN];	/* active VLA restore points, lowered by explicit alloca */
+	int nvla;
 	/* the cleanup scopes as a tree (wk_scan): node k (1..) is a cleanup variable and the one
 	   enclosing it; per sym its node, per user label the innermost node in scope there */
 	struct { uint32_t sym, parent; } cn[WK_MAXCLEAN];

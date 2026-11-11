@@ -955,6 +955,18 @@ VPRIV val gen_builtin(ecx *e, uint32_t n)
 			i = put(e, I_ADDI);
 			i->sz = 1, i->rd = (uint8_t)r, i->rn = SP, i->imm = 0, i->cond = 0xee;	/* + outgoing area */
 		}
+		/* Older VLA scopes must not reclaim this function-lifetime allocation. */
+		for (int k = 0; k < e->nclean; ++k) {
+			uint32_t sym = e->clean[k];
+			const bind *b = binding(e, sym);
+
+			if ((T(c, c->syms[sym].ty)->flags & TF_VLA) && b->kind == B_INDIRECT) {
+				int sp = treg(e);
+				mov(e, 1, sp, SP);
+				mem(e, I_ST, 3, 0, sp, FRAME, b->slot + 8);
+				tfree(e, sp);
+			}
+		}
 		return s;
 	}
 	case BI_ATOMIC_LOAD_N: case BI_ATOMIC_STORE_N: case BI_ATOMIC_EXCHANGE_N: case BI_ATOMIC_CMPXCHG_N:
