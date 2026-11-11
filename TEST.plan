@@ -447,6 +447,13 @@ binary128-ABI. Ny regression täcker signerade/osignerade gränser,
 trunkering och en operandevaluering på båda Linux-målen och byggsätten.
 Motsvarande oförändrade GCC timode-prov går nu på x86.
 
+ARM:s konstanta heltal→float avrundas direkt till float och tappar inte
+sticky-biten genom en mellanliggande double. Heltal→binary128 använder
+befintlig nearest-even-hjälpare i stället för trunkering. Nya 64/128-bitars
+gränsprov går på båda mål/byggsätt. Oförändrad tillämplig GCC-konverteringsmatris
+är nu **35 godkända x86-konfigurationer** och **30 ARM-konfigurationer**,
+noll fel; befintliga upstream-/orakelfiltreringar är oförändrade.
+
 Kombinerat fryst checkpoint `7afcdea`, före signmask-/typnamnsrättningarna,
 är verifierat i båda byggsätten: **145/145 x86** (fem referensundantag),
 **150/150 ARM/QEMU**, tvåfils-constexpr-ABI samt tre ursprungliga GCC-fall
