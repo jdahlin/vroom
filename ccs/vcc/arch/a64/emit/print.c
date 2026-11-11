@@ -364,8 +364,12 @@ VPRIV void print_ins(cc *c, tbuf *b, const ins *i, uint32_t fid, const char *raw
 		p_lbl(b, fid, i->label);
 		tb_c(b, '\n');
 		return;
+	case I_TAIL:
+		if (!i->cond)
+			return;
+		/* fall through: symbol quoting is identical for bl and b. */
 	case I_BL: {
-		tb_s(b, "\tbl\t");
+		tb_s(b, i->op == I_TAIL ? "\tb\t" : "\tbl\t");
 		size_t at = b->n;
 
 		ref_name(c, b, i->ref);

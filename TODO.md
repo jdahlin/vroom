@@ -705,22 +705,25 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
   `= {}`, `[[...]]` standard attributes, `#embed` (pp).
   *Validate:* T1 `c23-*.c` with `vcc-flags: -std=c23`; T4 that the same
   keywords are identifiers under `-std=c99` (`int bool = 1;`).
-- [ ] **`_BitInt` widths above 128 and remaining targets**: the front end supports
-  distinct signed/unsigned types of 1–128 bits (signed starts at 2), `wb`/`uwb`
-  literals, target layout, integer rank and constant arithmetic. Linux x86 and
-  arm64 now normalize runtime arithmetic, loads, conversions and call results
-  to the declared precision. Their clang/vcc cross-call tests cover scalar
-  arguments/returns, callbacks, register exhaustion, varargs and aggregates.
-  The dirty-padding compound-assignment regression is executed as a Wasm
-  expected failure: its unchanged source fails with the same unsupported
-  runtime diagnostic on 1f4c8d2, 9d022c3 and 7eca264 for wasm32 and wasm64;
-  both Clang reference programs pass.
-  Wider integers and runtime support on other targets remain to implement;
-  On Wasm, overflow builtins with BitInt operands/destinations above 64 bits
-  are still explicitly diagnosed; the Linux 128-bit paths are implemented.
-  *Validate:* `tests/vcc/bitint_constants.c`, `bitint_runtime.c` (16 widths,
-  eight boundary/pattern inputs, native x86 and ARM/QEMU), `tests/abi/bitint/`
-  (all four compiler combinations on each Linux target), cproc's three cases.
+- [ ] **`_BitInt` remaining operations and targets**: Linux x86-64 and arm64
+  now support scalar widths above 128 through limb objects, while preserving
+  the existing 1–128-bit paths. Wider arithmetic, integer conversions,
+  comparisons, bit-fields, generic counts, constants and replay are covered
+  by independent expected values. The declared maximum width is 8388608;
+  runtime validation covers selected widths through 7001, not every width.
+  x86 wide ABI checks use Clang cross-calls. Clang 23 rejects native ARM types
+  above 128 bits, so ARM wide ABI checks use explicitly documented ordinary-C
+  aggregate proxies; they are not native Clang wide-integer ABI verification.
+  Runtime wide integer/floating conversions remain explicitly unsupported,
+  as do vector elements wider than 128 bits and switch bounds outside signed
+  128-bit representation. Constant floating conversions are implemented.
+  Runtime support on other targets remains incomplete. The dirty-padding
+  compound-assignment regression stays a verified Wasm expected failure;
+  Wasm overflow builtins above 64 bits remain explicitly diagnosed.
+  *Validate:* `bench/vcc-bitint.py`, `vcc-bitint-constants.py`,
+  `vcc-bitint-abi.py`, `vcc-bitint-replay.py`, existing
+  `tests/vcc/bitint_constants.c`, `bitint_runtime.c`,
+  `bitint_compound_padding.c` and `tests/abi/bitint/`.
 - [ ] **Builtins**: ~~`__builtin_shufflevector`, `__builtin_convertvector`~~ (done:
   tests/vcc/vector_builtins.c; vector diagnostics spell clang's unnamed form, without the
   `(vector of N 'T' values)` note and typedef names) [P].  Library builtins (clang's `F`

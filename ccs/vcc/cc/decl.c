@@ -298,7 +298,9 @@ static uint32_t declare(cc *c, const dspec *ds, declr *d, qty t, bool file)
 			t = QT(k, QQ(t));
 	}
 	if (at.vecsize) t = vector_attribute(c, t, at.vecsize, d->loc);
-	if (at.extvec && ds->sc == SC_TYPEDEF && is_arith(c, t) && !is_complex(c, t)) {
+	if (at.extvec && ds->sc == SC_TYPEDEF && is_bigint(c, t))
+		cc_error(c, d->loc, "vector integer elements wider than 128 bits are not supported");
+	else if (at.extvec && ds->sc == SC_TYPEDEF && is_arith(c, t) && !is_complex(c, t)) {
 		/* clang: n elements, the size rounded up to a power of 2 (float3: 16) */
 		uint64_t sz = KIND(c, t) == TY_BOOL ? (at.extvec + 7) / 8 : (uint64_t)at.extvec * ty_size(c, t), p = 1;
 

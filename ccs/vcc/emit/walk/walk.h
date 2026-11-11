@@ -140,6 +140,8 @@ VPRIV uint32_t wk_newlabel(ecx *e);
 VPRIV val wk_gen(ecx *e, uint32_t n);
 VPRIV lval wk_lval(ecx *e, uint32_t n);
 VPRIV val wk_sdivpow2(ecx *e, qty t, val a, const em_sdivpow2_recipe *r);
+VPRIV bool wk_udivconst_ok(ecx *e, val a, const em_udivconst_recipe *r);
+VPRIV val wk_udivconst(ecx *e, qty ty, val a, const em_udivconst_recipe *r);
 VPRIV int wk_reg(ecx *e, val *v, qty t);
 VPRIV void wk_free(ecx *e, const val *v);
 VPRIV void wk_cond(ecx *e, uint32_t n, bool jump_if, uint32_t lbl);
@@ -151,7 +153,6 @@ VPRIV bool wk_mem(ecx *e, qty t);	/* values of t are held by address (records, a
 VPRIV val wk_conv(ecx *e, val v, qty from, qty to);
 VPRIV void wk_store(ecx *e, const lval *l, qty t, val *v);
 VPRIV val wk_reload(ecx *e, const lval *l, qty t);	/* l's value again (a new register or address) */
-VPRIV void wk_store(ecx *e, const lval *l, qty t, val *v);
 VPRIV val wk_putmem(ecx *e, lval *l, qty t, val v);	/* v's bytes (held by address) into l: l's address */
 VPRIV void ctor_entry(cc *c, tbuf *b, uint32_t s, bool fini);	/* arch/a64/emit/func.c (shared) */
 VPRIV bool wk_signed(cc *c, qty t);
@@ -180,6 +181,10 @@ VPRIV int LO(laddr)(ecx *e, const lval *l);		/* the address in a temporary (l's 
 VPRIV void LO(copy)(ecx *e, int rdst, int rsrc, uint64_t n);	/* n bytes; the address registers stay live */
 VPRIV void LO(zero)(ecx *e, int rdst, uint64_t n);
 /* integers: size 4 or 8 (the operation's width); results in a's register */
+VPRIV val LO(umulhi)(ecx *e, val a, val b);	/* high64(a*b), consumes both, returns a register */
+VPRIV val LO(smulhi)(ecx *e, val a, val b);	/* signed high64(a*b), same ownership as umulhi */
+VPRIV bool wk_sdivconst_ok(ecx *e, val a, const em_sdivconst_recipe *r);
+VPRIV val wk_sdivconst(ecx *e, qty ty, val a, const em_sdivconst_recipe *r);
 VPRIV val LO(bin)(ecx *e, int op, int size, bool sgn, val a, val b);	/* T_PLUS T_MINUS T_STAR T_SLASH T_PERCENT T_AMP T_PIPE T_CARET T_LESSLESS T_GREATERGREATER */
 VPRIV val LO(un)(ecx *e, int op, int size, val a);			/* T_MINUS T_TILDE */
 VPRIV void LO(ext)(ecx *e, int r, int from, bool sgn);		/* low `from` bytes of r extended to 64 bits */
@@ -193,6 +198,11 @@ VPRIV bool LO(ldmem)(void);
 VPRIV bool LO(i128mem)(void);
 VPRIV val LO(wconst)(ecx *e, i128 v);
 VPRIV val LO(wbitint)(ecx *e, val v, unsigned bits, bool sgn);
+/* Integer objects wider than 128 bits, canonical little-endian limbs. */
+VPRIV val LO(bigconst)(ecx *e, qty t, const uint32_t *words, i128 small);
+VPRIV val LO(bigbin)(ecx *e, int op, qty t, val a, val b);
+VPRIV val LO(bigcmp)(ecx *e, int op, qty t, val a, val b);
+VPRIV val LO(bigcvt)(ecx *e, val v, qty from, qty to);
 VPRIV val LO(wbin)(ecx *e, int op, bool sgn, val a, val b);	/* b an int for << >> */
 VPRIV val LO(wun)(ecx *e, int op, val a);			/* T_MINUS T_TILDE */
 VPRIV val LO(wcmp)(ecx *e, int op, bool sgn, val a, val b);
@@ -238,6 +248,7 @@ VPRIV val LO(call)(ecx *e, uint32_t ref, val *fn, const wkarg *a, int n, bool va
 /* Incoming arguments to their slots or selected register homes; a parameter
    left on the stack keeps the caller's location as its slot. */
 VPRIV void LO(params)(ecx *e, wkarg *a, int n, const wkarg *r, bool variadic);
+VPRIV bool LO(tail_return)(ecx *e, uint32_t expr);
 VPRIV void LO(ret)(ecx *e, val *v, qty t, uint32_t lbl);	/* a scalar result of type t (v may be NULL), then to lbl */
 VPRIV void LO(retrec)(ecx *e, int raddr, const wkarg *r, uint32_t lbl);	/* a record result from the object at raddr */
 VPRIV val LO(pcmpstr)(ecx *e, uint32_t n);

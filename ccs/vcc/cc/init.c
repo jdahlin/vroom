@@ -858,7 +858,7 @@ VPRIV bool static_init_ok(cc *c, qty ty, uint32_t init, uint32_t *bad)
 			if ((x->aux == 2 && i != x->a) || !v[i])
 				continue;
 			if (f->bitfield) {
-				if (!eval(c, v[i], &cv) || cv.kind != CV_INT) {
+				if (!eval(c, v[i], &cv) || (cv.kind != CV_INT && cv.kind != CV_BIGINT)) {
 					*bad = v[i];
 					return false;
 				}
@@ -902,7 +902,7 @@ VPRIV bool static_init_ok(cc *c, qty ty, uint32_t init, uint32_t *bad)
 		*bad = init;
 		return false;
 	}
-	if (!eval(c, init, &cv) || (cv.kind != CV_INT && cv.kind != CV_FLT && cv.kind != CV_ADDR)) {
+	if (!eval(c, init, &cv) || (cv.kind != CV_INT && cv.kind != CV_BIGINT && cv.kind != CV_FLT && cv.kind != CV_ADDR)) {
 		*bad = init;
 		return false;
 	}

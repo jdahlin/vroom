@@ -44,6 +44,7 @@ enum {
 	I_WORD,		/* imm: an encoded instruction (registers already in it) */
 	I_TLV,		/* x0 = address of thread-local ref; cond 0: Darwin TLV descriptor call (clobbers x16, lr),
 			 * TLS_LE/TLS_IE: ELF via tpidr_el0 (clobbers x1), TLS_DESC: ELF TLSDESC call (x1, lr) */
+	I_TAIL,		/* ref: direct sibling target; cond 0 terminal marker, 1 branch after epilogue */
 };
 
 enum { TLS_LE = 1, TLS_IE, TLS_DESC };	/* I_TLV.cond on ELF */

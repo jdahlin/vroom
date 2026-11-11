@@ -117,7 +117,7 @@ static u128 get_q(const cval *v, bool sgn)
 	return v->kind == CV_INT ? q_of_i(v->i, sgn) : v->ld ? v->q : q_of_d(v->f);
 }
 /* nonzero, as a condition */
-static bool cv_nz(const cval *v) { return v->ld ? q_nz(v->q) : v->f != 0; }
+static bool cv_nz(cc *c, const cval *v) { return v->kind == CV_BIGINT ? big_nonzero(c, v) : v->ld ? q_nz(v->q) : v->f != 0; }
 /* an address that may be null: a weak symbol's (clang: Decl::isWeak) */
 static bool cv_weak(const cc *c, const cval *v) { return v->kind == CV_ADDR && v->sym && (c->syms[v->sym].flags & SF_WEAK); }
 
@@ -335,7 +335,7 @@ static bool constexpr_value(cc *c, uint32_t n, cval *v)
 	}
 	const_eval_path = frame.prev;
 	if (ok)
-		v->ice = ice && v->kind == CV_INT;
+		v->ice = ice && (v->kind == CV_INT || v->kind == CV_BIGINT);
 	return ok;
 }
 
@@ -356,7 +356,9 @@ VPRIV bool constexpr_init_ok(cc *c, uint32_t n)
 	if (vector_constant(c,n))
 		return true;
 	switch (x->op) {
-	case N_NUM: case N_FNUM: case N_ZERO: case N_STR:
+	case N_NUM: case N_BIGNUM:
+		return !(x->aux & NUM_NO_CONSTEXPR);
+	case N_FNUM: case N_ZERO: case N_STR:
 		return true;
 	case N_INIT: {
 		const uint32_t *a = &c->lists[x->b];
@@ -394,13 +396,13 @@ VPRIV bool constexpr_init_ok(cc *c, uint32_t n)
 		if (!constexpr_init_ok(c, x->a) || !eval(c, x->a, &v))
 			return false;
 		if ((v.kind == CV_INT && (v.i != 0) == (x->op == N_LOGOR)) ||
-		    (v.kind == CV_FLT && cv_nz(&v) == (x->op == N_LOGOR)))
+		    ((v.kind == CV_FLT || v.kind == CV_BIGINT) && cv_nz(c, &v) == (x->op == N_LOGOR)))
 			return true;
 		return constexpr_init_ok(c, x->b) && eval(c, n, &v);
 	case N_COND:
 		if (!constexpr_init_ok(c, x->a) || !eval(c, x->a, &v))
 			return false;
-		return constexpr_init_ok(c, (v.kind == CV_INT ? v.i != 0 : cv_nz(&v)) ?
+		return constexpr_init_ok(c, (v.kind == CV_INT ? v.i != 0 : cv_nz(c, &v)) ?
 					      (x->b ? x->b : x->a) : x->c) && eval(c, n, &v);
 	case N_CPLX:
 		return constexpr_init_ok(c, x->a) && constexpr_init_ok(c, x->b);
@@ -464,8 +466,10 @@ VPRIV void constexpr_conversion(cc *c, uint32_t n, qty to)
 		cc_error(c, expr_loc(c, n), "constexpr initializer for type '%s' is of type '%s'", tyname(c, to), tyname(c, from));
 		return;
 	}
-	if (is_integer(c, to) && a.kind == CV_INT)
-		exact = trunc_to(c, a.i, to) == a.i;
+	if (a.kind == CV_BIGINT)
+		exact = big_conversion_exact(c, &a, from, to);
+	else if (is_integer(c, to) && a.kind == CV_INT)
+		exact = is_bigint(c, to) ? (is_signed(c, to) || !is_signed(c, from) || a.i >= 0) : trunc_to(c, a.i, to) == a.i;
 	else if (is_float(c, to) && (a.kind == CV_INT || a.kind == CV_FLT)) {
 		uint32_t converted = convert(c, n, to);
 
@@ -489,12 +493,14 @@ VPRIV void constexpr_conversion(cc *c, uint32_t n, qty to)
 	}
 	if (!exact) {
 		char value[96];
+		char *wide = a.kind == CV_BIGINT ? big_value_string(c, &a, from) : NULL;
 
 		if (a.kind == CV_INT)
 			i128s_(value, sizeof value, a.i);
 		else
 			snprintf(value, sizeof value, "%.9g", a.f);
-		cc_error(c, expr_loc(c, n), "constexpr initializer evaluates to %s which is not exactly representable in type '%s'", value, tyname(c, to));
+		cc_error(c, expr_loc(c, n), "constexpr initializer evaluates to %s which is not exactly representable in type '%s'", wide ? wide : value, tyname(c, to));
+		free(wide);
 	}
 }
 
@@ -504,6 +510,9 @@ VPRIV bool eval(cc *c, uint32_t n, cval *v)
 	cval a, b;
 
 	memset(v, 0, sizeof(*v));
+	if (x->op == N_BIGNUM || ((x->op == N_CAST || x->op == N_UNARY) && (is_bigint(c, x->ty) || is_bigint(c, N(x->a)->ty))) ||
+	    (x->op == N_BINARY && (is_bigint(c, N(x->a)->ty) || is_bigint(c, N(x->b)->ty))))
+		return big_read_eval(c, n, v);
 #if defined(__has_feature)
 #if __has_feature(address_sanitizer)
 	/* the parser's stack check bounds the nesting (cast_expr); ASan's frames make
@@ -516,7 +525,7 @@ VPRIV bool eval(cc *c, uint32_t n, cval *v)
 	case N_NUM:
 		v->kind = CV_INT;
 		v->i = c->ipool[x->a];
-		v->ice = true;
+		v->ice = !(x->aux & NUM_NO_ICE);
 		return true;
 	case N_FNUM:
 		v->kind = CV_FLT;
@@ -542,10 +551,10 @@ VPRIV bool eval(cc *c, uint32_t n, cval *v)
 			struct const_eval frame = { const_eval_path, x->a, c };
 
 			const_eval_path = &frame;
-			bool ok = eval(c, s->body, v) && (v->kind == CV_INT || (s->flags & SF_CONSTEXPR));
+			bool ok = eval(c, s->body, v) && (v->kind == CV_INT || v->kind == CV_BIGINT || (s->flags & SF_CONSTEXPR));
 			const_eval_path = frame.prev;
 			if (ok) {
-				v->ice = (s->flags & SF_CONSTEXPR) && v->kind == CV_INT;
+				v->ice = (s->flags & SF_CONSTEXPR) && (v->kind == CV_INT || v->kind == CV_BIGINT);
 				return true;
 			}
 		}
@@ -589,7 +598,7 @@ VPRIV bool eval(cc *c, uint32_t n, cval *v)
 			if (a.kind == CV_INT)
 				v->i = a.i != 0;
 			else if (a.kind == CV_FLT)
-				v->i = cv_nz(&a), v->ice = is_flt_lit(c, x->a);
+				v->i = cv_nz(c, &a), v->ice = is_flt_lit(c, x->a);
 			else if (cv_weak(c, &a))
 				return false;
 			else
@@ -665,7 +674,7 @@ VPRIV bool eval(cc *c, uint32_t n, cval *v)
 			if (x->aux == T_MINUS)
 				v->f = -a.f, v->q = a.q ^ Q_SIGN;
 			else if (x->aux == T_EXCLAIM)
-				v->kind = CV_INT, v->i = !cv_nz(&a), v->ld = false;
+				v->kind = CV_INT, v->i = !cv_nz(c, &a), v->ld = false;
 			return true;
 		}
 		if (a.kind == CV_ADDR) {
@@ -907,7 +916,7 @@ VPRIV bool eval(cc *c, uint32_t n, cval *v)
 			return false;
 		if (cv_weak(c, &a))
 			return false;
-		t = a.kind == CV_INT ? a.i != 0 : a.kind == CV_FLT ? cv_nz(&a) : true;
+		t = a.kind == CV_INT ? a.i != 0 : a.kind == CV_FLT || a.kind == CV_BIGINT ? cv_nz(c, &a) : true;
 		v->kind = CV_INT;
 		if (a.kind == CV_ADDR)
 			a.ice = false;
@@ -918,7 +927,7 @@ VPRIV bool eval(cc *c, uint32_t n, cval *v)
 		}
 		if (!eval(c, x->b, &b) || cv_weak(c, &b))
 			return false;
-		v->i = b.kind == CV_INT ? b.i != 0 : b.kind == CV_FLT ? cv_nz(&b) : 1;
+		v->i = b.kind == CV_INT ? b.i != 0 : b.kind == CV_FLT || b.kind == CV_BIGINT ? cv_nz(c, &b) : 1;
 		v->ice = a.ice && b.ice && b.kind != CV_ADDR;
 		return true;
 	}
@@ -929,7 +938,7 @@ VPRIV bool eval(cc *c, uint32_t n, cval *v)
 			return false;
 		if (cv_weak(c, &a))
 			return false;
-		t = a.kind == CV_INT ? a.i != 0 : a.kind == CV_FLT ? cv_nz(&a) : true;
+		t = a.kind == CV_INT ? a.i != 0 : a.kind == CV_FLT || a.kind == CV_BIGINT ? cv_nz(c, &a) : true;
 		ice = a.ice && a.kind != CV_ADDR;
 		if (!x->b) {	/* a ?: c */
 			if (t) {

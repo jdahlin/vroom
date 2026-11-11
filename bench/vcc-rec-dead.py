@@ -101,6 +101,24 @@ int main(void)
     rec intr[]={IMM(R10),IMM(RAX)}, before[2];
     memcpy(before,intr,sizeof intr);
     assert(optimize(intr,2,UINT32_MAX,false,1)==2 && !memcmp(intr,before,sizeof intr));
+    /* Ordinary functions without a lowering candidate must not allocate a
+       graph. The explicit candidate enables the same real deletion. */
+    em_flow_live_free(&x64_dead_work.live);
+    em_flow_graph_free(&x64_dead_work.graph);
+    rec gated[]={IMM(R10),IMM(RAX)};
+    wkst w={.falign=16}; xst x={.in=gated,.nin=2};
+    ecx e={.wk=&w,.x64=&x};
+    x64_dead(&e);
+    assert(x.nin==2 && !x64_dead_work.graph.storage && !x64_dead_work.live.in);
+    e.discarded_scalar=true;
+    x64_dead(&e);
+    assert(x.nin==1 && gated[0].r[0]==RAX);
+    /* An explicit noreturn convention cannot use the ordinary exit seed. */
+    rec nonreturn[]={IMM(R10),IMM(RAX)};
+    sym syms[2]={{0},{.flags=SF_NORETURN}}; cc c={.syms=syms};
+    w.fsym=1; e.c=&c; x.in=nonreturn; x.nin=2;
+    x64_dead(&e);
+    assert(x.nin==2 && nonreturn[0].r[0]==R10);
     em_flow_live_free(&x64_dead_work.live);
     em_flow_graph_free(&x64_dead_work.graph);
     return 0;

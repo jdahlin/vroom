@@ -211,6 +211,16 @@ extern const basic_ty basic[TY_PTR];
 static inline bool is_int_kind(int k);
 static inline bool is_flt_kind(int k);
 VPRIV bool is_integer(cc *c, qty t);
+VPRIV bool is_bigint(cc *c, qty t);
+VPRIV bool big_conversion_exact(cc *, const cval *, qty, qty);
+VPRIV char *big_value_string(cc *, const cval *, qty);
+VPRIV uint32_t mk_big_words(cc *, const uint32_t *, qty, uint32_t);
+VPRIV uint32_t big_int_node(cc *, i128, qty, uint32_t);
+VPRIV uint32_t big_literal(cc *, const char *, size_t, unsigned, bool, uint32_t);
+VPRIV bool big_read_eval(cc *, uint32_t, cval *);
+VPRIV bool big_nonzero(cc *, const cval *);
+VPRIV uint32_t big_fold_node(cc *, uint32_t);
+
 VPRIV bool is_float(cc *c, qty t);
 VPRIV bool is_arith(cc *c, qty t);
 VPRIV bool is_ptr(cc *c, qty t);
@@ -529,7 +539,7 @@ VPRIV void translation_unit(cc *c);
 VPRIV const char *tyname(cc *c, qty t);
 VPRIV void layout_checks(cc *c);
 
-static inline bool is_int_kind(int k) { return k >= TY_BOOL && k <= TY_UINT128; }
+static inline bool is_int_kind(int k) { return (k >= TY_BOOL && k <= TY_UINT128) || k == TY_BITINT || k == TY_UBITINT; }
 static inline bool is_flt_kind(int k) { return k >= TY_BFLOAT16 && k <= TY_FLOAT128; }
 /* long double as binary128 (aarch64 Linux; Apple's is double) or x87 extended (x86-64), in
    binary128's layout (lib/f128.h) */

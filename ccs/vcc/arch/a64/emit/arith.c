@@ -145,6 +145,10 @@ VPRIV int test_zero(ecx *e, val *v, qty t, uint32_t l, bool nz)
 	uint64_t sz = tsize(c, t);
 	int r;
 
+	if (em_bigint(c, t)) {
+		*v = a64_bigbool(e, *v, t);
+		t = prim(TY_INT); sz = 4;
+	}
 	if (KIND(c, t) == TY_FLOAT16 || KIND(c, t) == TY_BFLOAT16) {
 		*v = f_tobool(e, *v, t);
 		t = prim(TY_INT);
@@ -207,6 +211,7 @@ VPRIV val tobool(ecx *e, val v, qty t)
 	uint64_t sz = tsize(c, t);
 	int r;
 
+	if (em_bigint(c, t)) return a64_bigbool(e, v, t);
 	if (is_flt(c, t))
 		return f_tobool(e, v, t);
 	if (v.k == V_CONST)
@@ -239,6 +244,11 @@ VPRIV val cast(ecx *e, val v, qty from, qty to, int kind)
 	cc *c = e->c;
 	uint64_t fs = tsize(c, from), ts = tsize(c, to);
 
+	if ((em_bigint(c, from) || em_bigint(c, to)) && kind != CK_VOID) {
+		if (kind == CK_BOOL) return tobool(e, v, from);
+		if (is_flt(c, from) || is_flt(c, to)) efatal(e, 0, "arbitrary-width ARM floating conversion is not supported yet");
+		return a64_bigcvt(e, v, from, to);
+	}
 	if ((is_flt(c, from) || is_flt(c, to)) && kind != CK_VOID)
 		return f_cast(e, v, from, to);
 	switch (kind) {
@@ -341,6 +351,17 @@ VPRIV val arith(ecx *e, int op, qty ty, val a, val b)
 		if (id == EM_ID_ZERO || id == EM_ID_ONES) {
 			val_free(e, &a);
 			return vconst(id == EM_ID_ZERO ? 0 : em_trunc_to(c, -1, ty));
+		}
+		if (e->E->o->opt && !e->E->noopt && (op == T_SLASH || op == T_PERCENT)) {
+			em_udivconst_recipe recipe;
+			em_sdivconst_recipe signed_recipe;
+
+			/* All unsigned32 recipes fit <=12 baseline instructions, including
+			 * normalization, two-word constant construction and remainder. */
+			if (em_udivconst(c, ty, op, b.i, &recipe) && a64_udivconst_ok(e, a, &recipe))
+				return a64_udivconst(e, a, &recipe);
+			if (em_sdivconst(c, ty, op, b.i, &signed_recipe) && a64_sdivconst_ok(e, a, &signed_recipe))
+				return a64_sdivconst(e, a, &signed_recipe);
 		}
 		{
 			em_sdivpow2_recipe recipe;
@@ -517,4 +538,308 @@ VPRIV val arith2(ecx *e, int op, qty ty, val a, val b)
 	}
 	val_free(e, &b);
 	return a;
+}
+
+/* The top storage limb is extended from the declared precision. */
+static void a64_bignorm(ecx *e, qty t, int r)
+{
+	unsigned bits = T(e->c, t)->n & 63;
+	if (bits) opbf(e, is_signed(e->c, t) ? I_SBFM : I_UBFM, 1, r, r, 0, bits - 1);
+}
+
+static val a64_bigslot(ecx *e, int64_t sl)
+{
+	lval l = { .k = L_FRAME, .off = sl };
+	return laddr(e, &l);
+}
+
+VPRIV val a64_bigconst(ecx *e, qty t, const uint32_t *words, i128 small)
+{
+	unsigned count = (unsigned)(tsize(e->c, t) / 8);
+	int64_t sl = slot(e, count * 8, 8);
+	int r = treg(e);
+	for (unsigned i = 0; i < count; i++) {
+		uint64_t bits = words ? (uint64_t)words[2*i] | (uint64_t)words[2*i+1] << 32 :
+      i < 2 ? (uint64_t)((u128)small >> (64*i)) : small < 0 ? UINT64_MAX : 0;
+		movi(e, 1, r, (int64_t)bits);
+		if (i + 1 == count) a64_bignorm(e, t, r);
+		mem(e, I_ST, 3, 0, r, FRAME, sl + 8*i);
+	}
+	tfree(e, r);
+	return a64_bigslot(e, sl);
+}
+
+VPRIV val a64_bigcopy(ecx *e, val v, qty t)
+{
+	unsigned count = (unsigned)(tsize(e->c, t) / 8);
+	int64_t sl = slot(e, count * 8, 8);
+	int p = toreg(e, &v), r = treg(e);
+	for (unsigned i = 0; i < count; i++) {
+		mem(e, I_LD, 3, 0, r, p, 8*i);
+		if (i + 1 == count) a64_bignorm(e, t, r);
+		mem(e, I_ST, 3, 0, r, FRAME, sl + 8*i);
+	}
+	tfree(e, r); val_free(e, &v);
+	return a64_bigslot(e, sl);
+}
+
+VPRIV val a64_bigcvt(ecx *e, val v, qty from, qty to)
+{
+	cc *c = e->c;
+	bool src = em_bigint(c, from), dst = em_bigint(c, to);
+	if (src && QUNQ(from) == QUNQ(to)) return v;
+	if (!dst) {
+		int p = toreg(e, &v), lo = treg(e);
+		mem(e, I_LD, 3, 0, lo, p, 0);
+		if (is_wide(c, to)) {
+			int hi = treg(e);
+			mem(e, I_LD, 3, 0, hi, p, 8);
+			val_free(e, &v);
+			return (val){ .k = V_REG2, .r = (uint8_t)lo, .r2 = (uint8_t)hi };
+		}
+		val_free(e, &v);
+		if (tsize(c, to) < 8) extend(e, lo, lo, (int)tsize(c, to), is_signed(c, to));
+		return vreg(lo);
+	}
+	if (!src && v.k == V_CONST && (is_signed(c, from) || v.i >= 0))
+		return a64_bigconst(e, to, NULL, em_trunc_to(c, v.i, from));
+	unsigned count = (unsigned)(tsize(c, to) / 8);
+	unsigned source = src ? (unsigned)(tsize(c, from) / 8) : is_wide(c, from) ? 2 : 1;
+	int64_t sl = slot(e, count * 8, 8);
+	int value = treg(e), fill = treg(e);
+	if (src) {
+		toreg(e, &v);
+		mem(e, I_LD, 3, 0, fill, v.r, 8*(source-1));
+	} else {
+		if (source == 2) toreg2(e, &v, is_signed(c, from)); else toreg(e, &v);
+		mov(e, 1, fill, source == 2 ? v.r2 : v.r);
+		if (tsize(c, from) < 8) extend(e, fill, fill, (int)tsize(c, from), is_signed(c, from));
+	}
+	if (is_signed(c, from)) shift_imm(e, I_ASRV, 1, fill, fill, 63); else movi(e, 1, fill, 0);
+	for (unsigned i = 0; i < count; i++) {
+		if (i >= source) mov(e, 1, value, fill);
+		else if (src) mem(e, I_LD, 3, 0, value, v.r, 8*i);
+		else {
+			mov(e, 1, value, i ? v.r2 : v.r);
+			if (!i && tsize(c, from) < 8) extend(e, value, value, (int)tsize(c, from), is_signed(c, from));
+		}
+		if (i + 1 == count) a64_bignorm(e, to, value);
+		mem(e, I_ST, 3, 0, value, FRAME, sl + 8*i);
+	}
+	tfree(e, value); tfree(e, fill); val_free(e, &v);
+	return a64_bigslot(e, sl);
+}
+
+VPRIV val a64_bigbool(ecx *e, val v, qty t)
+{
+	int p = toreg(e, &v), r = treg(e), limb = treg(e);
+	movi(e, 1, r, 0);
+	for (uint64_t i = 0; i < tsize(e->c, t); i += 8) {
+		mem(e, I_LD, 3, 0, limb, p, (int64_t)i);
+		op3(e, I_ORR, 1, r, r, limb);
+	}
+	op3(e, I_SUBS, 1, ZR, r, ZR);
+	cset(e, r, C_NE);
+	tfree(e, limb); val_free(e, &v);
+	return vreg(r);
+}
+
+VPRIV val a64_bigcmp(ecx *e, int op, qty t, val a, val b)
+{
+	if (a.k == V_CONST) a = a64_bigconst(e, t, NULL, a.i);
+	if (b.k == V_CONST) b = a64_bigconst(e, t, NULL, b.i);
+	int pa = toreg(e, &a), pb = toreg(e, &b), left = treg(e), right = treg(e), result = treg(e);
+	unsigned count = (unsigned)(tsize(e->c, t) / 8);
+	uint32_t done = newlabel(e);
+	for (unsigned i = count; i-- > 0;) {
+		mem(e, I_LD, 3, 0, left, pa, 8*i);
+		mem(e, I_LD, 3, 0, right, pb, 8*i);
+		op3(e, I_SUBS, 1, ZR, left, right);
+		cset(e, result, cmp_cond(op, i + 1 == count && is_signed(e->c, t)));
+		if (i) bcond(e, C_NE, done);
+	}
+	deflabel(e, done);
+	tfree(e, left); tfree(e, right); val_free(e, &a); val_free(e, &b);
+	return vreg(result);
+}
+
+/* Read a limb at a runtime index. Out-of-range limbs are zero, or the
+	* sign extension for an arithmetic right shift. Unsigned bounds also catch
+	* negative indices, without ever forming an out-of-bounds address. */
+static void a64_bigword(ecx *e, int rd, int ptr, unsigned n, int index, bool sign)
+{
+	uint32_t done = newlabel(e);
+	if (sign) {
+		mem(e, I_LD, 3, 0, rd, ptr, 8*(n-1));
+		shift_imm(e, I_ASRV, 1, rd, rd, 63);
+	} else movi(e, 1, rd, 0);
+	opi(e, I_SUBSI, 1, ZR, index, n);
+	bcond(e, C_HS, done);
+	int addr = treg(e);
+	shift_imm(e, T_LESSLESS, 1, addr, index, 3);
+	op3(e, I_ADD, 1, addr, ptr, addr);
+	mem(e, I_LD, 3, 0, rd, addr, 0);
+	tfree(e, addr);
+	deflabel(e, done);
+}
+
+static val a64_bigshift(ecx *e, int op, qty t, val a, val b)
+{
+	unsigned n = (unsigned)tsize(e->c, t)/8;
+	bool right = op == T_GREATERGREATER, sign = right && is_signed(e->c, t);
+	int64_t sl = slot(e, n*8, 8);
+	int pa = toreg(e, &a), count = toreg(e, &b);
+	int whole = treg(e), bits = treg(e), complement = treg(e);
+	shift_imm(e, I_LSRV, 1, whole, count, 6);
+	opbf(e, I_UBFM, 1, bits, count, 0, 5);
+	movi(e, 1, complement, 64);
+	op3(e, I_SUB, 1, complement, complement, bits);
+	int index = treg(e), value = treg(e), adjacent = treg(e);
+	for (unsigned i = 0; i < n; i++) {
+		uint32_t done = newlabel(e);
+		movi(e, 1, index, i);
+		op3(e, right ? I_ADD : I_SUB, 1, index, index, whole);
+		a64_bigword(e, value, pa, n, index, sign);
+		op3(e, right ? I_LSRV : I_LSLV, 1, value, value, bits);
+		op3(e, I_SUBS, 1, ZR, bits, ZR);
+		bcond(e, C_EQ, done);
+		opi(e, right ? I_ADDI : I_SUBI, 1, index, index, 1);
+		a64_bigword(e, adjacent, pa, n, index, sign);
+		op3(e, right ? I_LSLV : I_LSRV, 1, adjacent, adjacent, complement);
+		op3(e, I_ORR, 1, value, value, adjacent);
+		deflabel(e, done);
+		if (i + 1 == n) a64_bignorm(e, t, value);
+		mem(e, I_ST, 3, 0, value, FRAME, sl+8*i);
+	}
+	tfree(e, whole); tfree(e, bits); tfree(e, complement);
+	tfree(e, index); tfree(e, value); tfree(e, adjacent);
+	val_free(e, &a); val_free(e, &b);
+	return a64_bigslot(e, sl);
+}
+
+/* Negate a private limb object when sign is nonzero. Loads and stores do
+	* not alter NZCV, so subtraction borrow travels across every limb. */
+static void a64_bigneg_if(ecx *e, int ptr, unsigned n, int sign)
+{
+	uint32_t done = newlabel(e);
+	op3(e, I_SUBS, 1, ZR, sign, ZR);
+	bcond(e, C_EQ, done);
+	int r = treg(e);
+	for (unsigned i = 0; i < n; i++) {
+		mem(e, I_LD, 3, 0, r, ptr, 8*i);
+		op3(e, i ? I_SBCS : I_SUBS, 1, r, ZR, r);
+		mem(e, I_ST, 3, 0, r, ptr, 8*i);
+	}
+	tfree(e, r);
+	deflabel(e, done);
+}
+
+/* Restoring unsigned division of magnitudes. The extra remainder limb
+	* retains the carry when the divisor occupies the full storage precision. */
+static val a64_bigdiv(ecx *e, int op, qty t, val a, val b)
+{
+	unsigned n = (unsigned)tsize(e->c, t)/8;
+	a = a64_bigcopy(e, a, t);
+	b = a64_bigcopy(e, b, t);
+	int q = toreg(e, &a), d = toreg(e, &b);
+	int64_t sl = slot(e, 8*(n+1), 8);
+	val remval = a64_bigslot(e, sl);
+	int rem = remval.r;
+	for (unsigned i = 0; i <= n; i++) mem(e, I_ST, 3, 0, ZR, rem, 8*i);
+	int sa = treg(e), sb = treg(e);
+	if (is_signed(e->c, t)) {
+		mem(e, I_LD, 3, 0, sa, q, 8*(n-1));
+		mem(e, I_LD, 3, 0, sb, d, 8*(n-1));
+		shift_imm(e, I_ASRV, 1, sa, sa, 63);
+		shift_imm(e, I_ASRV, 1, sb, sb, 63);
+		a64_bigneg_if(e, q, n, sa);
+		a64_bigneg_if(e, d, n, sb);
+	}
+	int r = treg(e), divisor = treg(e), count = treg(e);
+	uint32_t loop = newlabel(e), less = newlabel(e);
+	movi(e, 1, count, 64*n);
+	deflabel(e, loop);
+	for (unsigned i = 0; i < n; i++) {
+		mem(e, I_LD, 3, 0, r, q, 8*i);
+		op3(e, i ? I_ADCS : I_ADDS, 1, r, r, r);
+		mem(e, I_ST, 3, 0, r, q, 8*i);
+	}
+	for (unsigned i = 0; i <= n; i++) {
+		mem(e, I_LD, 3, 0, r, rem, 8*i);
+		op3(e, I_ADCS, 1, r, r, r);
+		mem(e, I_ST, 3, 0, r, rem, 8*i);
+	}
+	/* Compare with a borrow chain, then subtract only if rem >= d. */
+	for (unsigned pass = 0; pass < 2; pass++) {
+		for (unsigned i = 0; i <= n; i++) {
+			mem(e, I_LD, 3, 0, r, rem, 8*i);
+			if (i < n) mem(e, I_LD, 3, 0, divisor, d, 8*i);
+			else movi(e, 1, divisor, 0);
+			op3(e, i ? I_SBCS : I_SUBS, 1, r, r, divisor);
+			if (pass) mem(e, I_ST, 3, 0, r, rem, 8*i);
+		}
+		if (!pass) bcond(e, C_LO, less);
+	}
+	mem(e, I_LD, 3, 0, r, q, 0);
+	opi(e, I_ADDI, 1, r, r, 1); /* quotient low bit is zero after shift */
+	mem(e, I_ST, 3, 0, r, q, 0);
+	deflabel(e, less);
+	opi(e, I_SUBSI, 1, count, count, 1);
+	bcond(e, C_NE, loop);
+	int result = op == T_SLASH ? q : rem;
+	if (is_signed(e->c, t)) {
+		if (op == T_SLASH) op3(e, I_EOR, 1, sa, sa, sb);
+		a64_bigneg_if(e, result, n, sa);
+	}
+	mem(e, I_LD, 3, 0, r, result, 8*(n-1));
+	a64_bignorm(e, t, r);
+	mem(e, I_ST, 3, 0, r, result, 8*(n-1));
+	tfree(e, op == T_SLASH ? rem : q); tfree(e, d);
+	tfree(e, r); tfree(e, divisor); tfree(e, count); tfree(e, sa); tfree(e, sb);
+	return vreg(result);
+}
+
+VPRIV val a64_bigbin(ecx *e, int op, qty t, val a, val b)
+{
+	if (a.k == V_CONST) a = a64_bigconst(e, t, NULL, a.i);
+	if (op == T_LESSLESS || op == T_GREATERGREATER)
+		return a64_bigshift(e, op, t, a, b);
+	if (b.k == V_CONST) b = a64_bigconst(e, t, NULL, b.i);
+	if (op == T_SLASH || op == T_PERCENT) return a64_bigdiv(e, op, t, a, b);
+	unsigned count = (unsigned)(tsize(e->c, t) / 8);
+	int64_t sl = slot(e, count * 8, 8);
+	int pa = toreg(e, &a), pb = toreg(e, &b), left = treg(e), right = treg(e);
+	if (op == T_STAR) {
+		/* Base 2^32 schoolbook multiplication: product + destination + carry
+			* fits exactly in 64 bits. Discard terms above the result precision. */
+		int carry = treg(e), acc = treg(e);
+		for (unsigned i = 0; i < count; i++) mem(e, I_ST, 3, 0, ZR, FRAME, sl+8*i);
+		for (unsigned i = 0; i < 2*count; i++) {
+			movi(e, 1, carry, 0);
+			mem(e, I_LD, 2, 0, left, pa, 4*i);
+			for (unsigned j = 0; j < 2*count-i; j++) {
+				mem(e, I_LD, 2, 0, right, pb, 4*j);
+				mem(e, I_LD, 2, 0, acc, FRAME, sl+4*(i+j));
+				op4(e, I_MADD, 1, right, left, right, acc);
+				op3(e, I_ADD, 1, right, right, carry);
+				mem(e, I_ST, 2, 0, right, FRAME, sl+4*(i+j));
+				shift_imm(e, I_LSRV, 1, carry, right, 32);
+			}
+		}
+		tfree(e, carry); tfree(e, acc);
+		mem(e, I_LD, 3, 0, left, FRAME, sl+8*(count-1));
+		a64_bignorm(e, t, left);
+		mem(e, I_ST, 3, 0, left, FRAME, sl+8*(count-1));
+	} else for (unsigned i = 0; i < count; i++) {
+		mem(e, I_LD, 3, 0, left, pa, 8*i);
+		mem(e, I_LD, 3, 0, right, pb, 8*i);
+		int insn = op == T_PLUS ? (i ? I_ADCS : I_ADDS) : op == T_MINUS ? (i ? I_SBCS : I_SUBS) :
+      op == T_AMP ? I_AND : op == T_PIPE ? I_ORR : op == T_CARET ? I_EOR : 0;
+		if (!insn) efatal(e, 0, "arbitrary-width ARM integer operator is not supported yet");
+		op3(e, insn, 1, left, left, right);
+		if (i + 1 == count) a64_bignorm(e, t, left);
+		mem(e, I_ST, 3, 0, left, FRAME, sl + 8*i);
+	}
+	tfree(e, left); tfree(e, right); val_free(e, &a); val_free(e, &b);
+	return a64_bigslot(e, sl);
 }
