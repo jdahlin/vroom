@@ -582,8 +582,7 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
     `transparent_union_redecl` (member calling convention).
   - Expression/call lowering: `gnu_conditional_float` (GNU floating conditional),
     `parenthesized_function` (nested function-pointer return signature),
-    `void_lvalue` (void expressions leave stack values), `fabs_asm_identity`
-    and `math_library_identity` (asm-renamed functions mistaken for intrinsics).
+    `void_lvalue` (void expressions leave stack values).
   - Optimization/inlining: `array_constants`, `dead_branch_entries`,
     `optimized_conditions` leave unreachable references; `inline_constants`
     needs argument propagation into `__builtin_constant_p`.
