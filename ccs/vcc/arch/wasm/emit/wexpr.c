@@ -1500,15 +1500,19 @@ VPRIV int wknown(ecx *e, uint32_t n)
 {
 	cc *c = e->c;
 	cval cv;
+	int known = c->o->opt && !e->E->noopt ? em_const_truth(e, n, wconstant_p) : -1;
 	uint32_t r = n;
 
+	if (known >= 0)
+		return known;
 	while (N(r)->op == N_CAST && (N(r)->aux == CK_INT || N(r)->aux == CK_NOP || N(r)->aux == CK_BOOL))
 		r = N(r)->a;
 	if (N(r)->op == N_BUILTIN && N(r)->aux == BI_CONSTANT_P)
 		return wconstant_p(e, c->lists[N(r)->b]);
-	if (wbcp_in(c, n))
-		return -1;
-	if (side_effects(c, n) || !cc_eval(c, n, &cv))
+	/* Other front-end constant forms (arithmetic, floats, addresses) retain
+	 * their existing semantics. Never ask cc_eval to reinterpret constant_p
+	 * under a compound expression: target bindings may change its answer. */
+	if (wbcp_in(c, n) || side_effects(c, n) || !cc_eval(c, n, &cv))
 		return -1;
 	if (cv.kind == CV_INT)
 		return cv.i != 0;

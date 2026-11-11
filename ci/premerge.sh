@@ -71,7 +71,9 @@ arm64)
 	step x86-leaf-frame python3 bench/vcc-x86-leaf-frame.py --no-run
 	step rec-copies python3 bench/vcc-rec-copies.py
 	step opt-rules-arm64 python3 bench/vcc-opt-rules.py --target aarch64-linux-gnu
+	step const-control-arm64 python3 bench/vcc-constant-control.py --target aarch64-linux-gnu
 	step opt-rules-x86 python3 bench/vcc-opt-rules.py --target x86_64-linux-gnu --run
+	step const-control-x86 python3 bench/vcc-constant-control.py --target x86_64-linux-gnu
 	step c2y-cache    python3 bench/vcc-c2y-cache.py
 	step diag         python3 bench/vcc-diag.py -j "$J"
 	step x86-features python3 bench/vcc-x86features.py --clang "${LLVM:-/usr/lib/llvm-23}/bin/clang" --vpp "$BUILD/vpp"
@@ -123,6 +125,8 @@ wasm)
 	step opt-rules-wasm32 python3 bench/vcc-opt-rules.py --target wasm32-unknown-emscripten --run
 	step opt-rules-wasm64 python3 bench/vcc-opt-rules.py --target wasm64-unknown-emscripten --run
 	step wasm-cells python3 bench/vcc-wasm-cells.py
+	step const-control-wasm32 python3 bench/vcc-constant-control.py --target wasm32-unknown-emscripten
+	step const-control-wasm64 python3 bench/vcc-constant-control.py --target wasm64-unknown-emscripten
 	step wasm64       python3 bench/vcc-wasm.py -j "$J"
 	;;
 *)
