@@ -2878,3 +2878,20 @@ som LLVM:s assembler kräver. Det fokuserade tabellprovet assembleras även med
 clang för wasm32/64; ett separat switchprov med variabla resultat bevarar
 kontrollen av wasm `br_table`. Båda proven körs O0–O3 på fyra mål. Den
 föregående kostnadsprofilen gäller före denna lilla metadatatilläggning.
+
+### Switch-värdetabeller: snabbare utmatning (2026-11-11)
+
+`perf record` och Callgrind på ett switchmättat wasm64-prov pekade på
+`vsnprintf` via `tb_f` för varje tabellbyte. Byteutmatningen använder nu
+`tb_s`/`tb_u`/`tb_c` i stället och producerar byteidentisk assembler. Matchad
+Clang 23 `-O3 -march=x86-64-v3`, `096ead5` → `0a06d20`: fem växelvisa
+`perf stat`-körningar per binär på 2 000 switchfunktioner gav medianer för
+kompilatorprocessens user-instruktioner / user-cykler: x86 −17,91 / −13,28 %,
+arm64 −17,02 / −12,85 %, wasm32 −18,67 / −14,13 %, wasm64 −18,65 / −13,64 %.
+Regelfria x86/wasm64-kontroller ändrade instruktioner −0,0013 / −0,0017 %;
+cykeltal på denna delade maskin varierar och är inte en generell hastighetsvinst.
+En separat Callgrind-mätning med 200 switchfunktioner gav −12,1–13,1 % Ir.
+Kommandon, binär-/indatahashar och alla mätvärden finns i
+`work/opt-profile/switch-speed/{perf-stat.json,run.log}`. O0–O3-körning och
+optimeringskontroller passerar på fyra mål; wasm assembleras även av clang.
+Detta mäter kompilering, inte den genererade kodens körtid.

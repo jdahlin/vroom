@@ -203,7 +203,11 @@ VPRIV void em_switch_values_emit(ecx *e)
    h=it_open(e,IT_BYTES);memcpy(it_room(e,len),t->data,len);it_close(e,h);
   } else {
    ref_name(e->c,&e->out,ref);tb_s(&e->out,":\n");
-   for (size_t i=0;i<len;i++) tb_f(&e->out,"\t.byte\t%u\n",t->data[i]);
+   for (size_t i=0;i<len;i++) {
+    tb_s(&e->out,"\t.byte\t");
+    tb_u(&e->out,t->data[i]);
+    tb_c(&e->out,'\n');
+   }
    if (WASM(e->c)) {
     tb_s(&e->out,"\t.size\t");ref_name(e->c,&e->out,ref);
     tb_f(&e->out,", %llu\n",(unsigned long long)len);
