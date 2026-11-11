@@ -335,6 +335,18 @@ Regressionen täcker komma, pekarinkrement och statement expressions,
 inklusive att fast `sizeof` förblir oevaluerad. Unity/nonunity samt
 -O0/-O2 körprov går grönt; sex andra fall i VLA-klustret återstår.
 
+Med full `-ffast-math` sänks en korrekt identifierad extern
+`pow(double, 0.25)` nu till två hårdvarukvadratrötter på Linux x86/ARM.
+Lokala/asm-namngivna funktioner, avstängda builtins och striktare
+FP-flaggor behåller sina anrop; `-mgeneral-regs-only` avvisar operationen
+innan FP-utdata skrivs. `pr41094` går i x86-harnessen; ARM-oraklet vid -O0
+kräver självt libm och filtreras, medan separat -O2-orakel och båda
+vcc-utdatavägarna kör originalprovet utan libm. Unity/nonunity, fyra
+runtime-regressioner per mål, 84 flaggkontroller, 28 strikta IEEE-prov,
+24 no-FP-kontroller och separering i båda deklarationscachevägarna går
+grönt. Befintliga driver/predefine-fel är exakt oförändrade mot basen
+(137/212, samma 75 fel); tolv riktade makro-/ordningsprov går grönt.
+
 Kvar:
 - Alla återstående matchande filer och optimeringskonfigurationer; nästlade
   kataloger med egna `.exp`-drivrutiner och LTO har ännu ingen motsvarighet.

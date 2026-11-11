@@ -319,6 +319,7 @@ enum {
 	BI_X86_SIMD,
 	BI_ELEMENTWISE_ABS,
 	BI_STDC_ROTL, BI_STDC_ROTR,
+	BI_FAST_ROOT4,	/* internal double sqrt(sqrt(x)), full fast-math only */
 	BI_COUNT
 };
 

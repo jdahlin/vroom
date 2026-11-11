@@ -2101,6 +2101,8 @@ static val wk_builtin(ecx *e, uint32_t n)
 	char b[64];
 
 	switch (x->aux) {
+	case BI_FAST_ROOT4:
+		return LO(root4)(e, wk_gen(e, arg[0]));
 	case BI_CONSTANT_P: {
 		/* clang's rule without the optimizer: 1 if the front end folds the operand (a pointer
 		   only as a string literal at offset 0), else 0 (the operand is not evaluated) */

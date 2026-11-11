@@ -273,6 +273,7 @@ typedef struct cc_opts {	/* fields before outfd: parse options, all in the decl 
 	int vcc_kernel;		/* -fvcc-kernel (or -D__KERNEL__): error() calls left after folding are dropped */
 	int lse;		/* target has LSE atomics (else ldaxr/stlxr loops) */
 	int general_regs_only;	/* -mgeneral-regs-only: no FP/SIMD registers (variadic: no v0-v7 save area) */
+	int fast_math;		/* full fast-math permits finite, unsigned-zero root transforms */
 	int no_builtin;		/* -ffreestanding / -fno-builtin: abs() etc. are plain calls */
 	uint64_t disabled_builtins[CC_DISABLED_BUILTIN_WORDS]; /* -fno-builtin-NAME */
 	int wasm_sjlj;		/* -mllvm -wasm-enable-sjlj: setjmp/longjmp through wasm exceptions */

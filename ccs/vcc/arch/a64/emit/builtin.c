@@ -789,6 +789,14 @@ VPRIV val gen_builtin(ecx *e, uint32_t n)
 		v = dry(e, arg[0]);
 		return vconst(v.k == V_CONST);
 	}
+	case BI_FAST_ROOT4:
+		v = gen(e, arg[0]);
+		toreg(e, &v);
+		word(e, f_in(1, 16, v.r));
+		word(e, 0x1e61c000u | 16u << 5 | 16u); /* fsqrt d16, d16 */
+		word(e, 0x1e61c000u | 16u << 5 | 16u);
+		word(e, f_out(1, v.r, 16));
+		return v;
 	case BI_EXPECT:
 	case BI_EXPECT_PROB:
 		/* the hint is still evaluated (argument order is unspecified: first, so that

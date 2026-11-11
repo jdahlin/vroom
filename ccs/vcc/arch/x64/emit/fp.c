@@ -124,6 +124,14 @@ VPRIV val x64_fbin(ecx *e, int op, qty t, val a, val b)
 	return a;
 }
 
+VPRIV val x64_root4(ecx *e, val a)
+{
+	/* wk_gen materializes double values in an SSE temporary. */
+	x64_op3(e, X_FSQRT, 8, a.r, a.r, XNOREG);
+	x64_op3(e, X_FSQRT, 8, a.r, a.r, XNOREG);
+	return a;
+}
+
 VPRIV val x64_fneg(ecx *e, qty t, val a)
 {
 	cc *c = e->c;
