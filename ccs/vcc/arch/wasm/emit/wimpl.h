@@ -32,6 +32,7 @@ typedef struct wlv {
 	uint8_t k, bf, sgn;
 	uint16_t bitoff, width;	/* bit-field: bits from the byte at off */
 	uint32_t loc;
+	uint64_t dynbit_slot;
 	uint64_t off;
 	bool vol;
 } wlv;

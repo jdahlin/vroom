@@ -220,6 +220,7 @@ VPRIV bool is_array(cc *c, qty t);
 VPRIV bool is_func(cc *c, qty t);
 VPRIV bool is_record(cc *c, qty t);
 VPRIV bool is_vector(cc *c, qty t);
+VPRIV bool is_bool_vector(cc *c, qty t);
 VPRIV bool is_complex(cc *c, qty t);
 VPRIV bool is_ilagg(cc *c, qty t);
 VPRIV qty canon(cc *c, qty t);
@@ -354,6 +355,10 @@ VPRIV void i128s_(char *b, size_t n, i128 v);
 VPRIV const field *node_field(cc *c, const node *x);
 VPRIV int clz128(u128 x, unsigned bits);
 VPRIV bool eval(cc *c, uint32_t n, cval *v);
+VPRIV uint32_t bitcast_expr(cc *c, uint32_t loc);
+VPRIV bool bitcast_value(cc *c, uint32_t n, cval *v);
+VPRIV bool bitcast_constant(cc *c, uint32_t n);
+VPRIV bool vector_constant(cc *c, uint32_t n);
 VPRIV bool is_npc(cc *c, uint32_t n);
 VPRIV bool const_int(cc *c, uint32_t n, i128 *out);
 /* conv.c */

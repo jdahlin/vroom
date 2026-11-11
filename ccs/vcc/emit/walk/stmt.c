@@ -174,6 +174,12 @@ static void wk_elems(ecx *e, const lval *d, qty ty, uint32_t init)
 				for (uint64_t k = lo; k <= hi; k++) {
 					lval el = *d;
 
+					if (is_bvec(c, ty)) {
+						el.off += (int64_t)(k / 8);
+						el.bf = 1, el.width = 1, el.bitoff = k % 8;
+						wk_bfinit(e, &el, et, vi);
+						continue;
+					}
 					el.off += (int64_t)(k * es);
 					wk_elems(e, &el, et, vi);
 				}

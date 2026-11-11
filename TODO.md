@@ -167,7 +167,7 @@ Existing gates that every change must keep green: `vcc-diff.py cmp`
   `expected-*` directives.  2026-11-10: 412/1841 pass (C/drs 29/70, C/C2y
   32/95, Sema 236/1276), 1 crash (Sema/attr-tls_model.c).  Largest gaps:
   SVE/SME types and builtins (`__SVInt8_t`, streaming checks), `__bf16`,
-  `__mfp8`, `__builtin_bit_cast`, `_Countof`, `__scoped_atomic_*`,
+  `__mfp8`, distinct `nullptr_t` identity for constexpr bit casts, `_Countof`, `__scoped_atomic_*`,
   `_Static_assert` in a struct, `//` comments under -std=c89.  *Validate:*
   no crash; pass count only goes up (results.json lists regressions).
 

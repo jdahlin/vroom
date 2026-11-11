@@ -258,6 +258,25 @@ VPRIV lval wk_lval(ecx *e, uint32_t n)
 		int64_t es = (int64_t)tsize(c, et);
 		val p = wk_gen(e, x->a), i = wk_gen(e, x->b);
 
+		if (x->aux == 1) {
+			if (i.k == V_CONST) {
+				l = wk_fromval(e, p, et);
+				l.off += (int64_t)(i.i / 8);
+				l.bf = 1, l.width = 1, l.bitoff = (uint16_t)(i.i & 7);
+				return l;
+			}
+			int ri = wk_reg(e, &i, prim(TY_LONG)), rb = LO(treg)(e);
+			LO(mov)(e, rb, ri);
+			val bit = LO(bin)(e, T_AMP, 8, false, wk_vreg(rb), vconst(7));
+			lval bs = { .k = L_FRAME, .off = wk_slot(e, 8, 8), .align = 8 };
+			LO(store)(e, bit.r, &bs, 8);
+			LO(tfree)(e, bit.r);
+			i = LO(bin)(e, T_GREATERGREATER, 8, false, wk_vreg(ri), vconst(3));
+			l = wk_fromval(e, LO(bin)(e, T_PLUS, 8, false, p, i), et);
+			l.bf = 1, l.width = 1, l.dynbit_slot = bs.off;
+			return l;
+		}
+
 		if (ptr_to_vla(c, pt))
 			return wk_fromval(e, wk_ptradd_vla(e, p, i, N(x->b)->ty, pt, false), et);
 		if (i.k == V_CONST && p.k == V_ADDR) {
@@ -284,8 +303,8 @@ VPRIV lval wk_lval(ecx *e, uint32_t n)
 		}
 	}
 	case N_CAST:
-		if (x->aux == CK_NOP)
-			return wk_lval(e, x->a);
+		if (x->aux == CK_NOP) return wk_lval(e, x->a);
+		if (x->aux == CK_BITS && wk_mem(e, x->ty)) return wk_fromval(e, wk_gen(e, n), x->ty);
 		break;
 	case N_COMMA: {
 		val v = wk_gen(e, x->a);
@@ -457,6 +476,16 @@ static val wk_bf_load(ecx *e, const lval *l, qty t)
 	int64_t uo;
 	val v;
 
+	if (l->dynbit_slot) {
+		lval bs = { .k = L_FRAME, .off = l->dynbit_slot, .align = 8 };
+		val bit = wk_vreg(LO(treg)(e));
+		v = wk_vreg(LO(treg)(e));
+		LO(load)(e, v.r, l, 1, false);
+		LO(load)(e, bit.r, &bs, 8, false);
+		v = LO(bin)(e, T_GREATERGREATER, 8, false, v, bit);
+		return LO(bin)(e, T_AMP, 8, false, v, vconst(1));
+	}
+
 	wk_bf_unit(e, l, t, &uo, &us, &pos);
 	u.bf = 0, u.off = uo;
 	if (!us) {
@@ -492,6 +521,26 @@ static void wk_bf_store(ecx *e, const lval *l, qty t, int rv)
 	int64_t uo;
 	uint64_t m;
 	val old, nv;
+
+	if (l->dynbit_slot) {
+		lval bs = { .k = L_FRAME, .off = l->dynbit_slot, .align = 8 };
+		val bit = wk_vreg(LO(treg)(e));
+		LO(load)(e, bit.r, &bs, 8, false);
+		val mask = LO(bin)(e, T_LESSLESS, 8, false, vconst(1), bit);
+		int rm = LO(treg)(e);
+		LO(mov)(e, rm, mask.r);
+		old = wk_vreg(LO(treg)(e));
+		LO(load)(e, old.r, l, 1, false);
+		old = LO(bin)(e, T_AMP, 8, false, old, LO(bin)(e, T_CARET, 8, false, mask, vconst(-1)));
+		nv = wk_vreg(LO(treg)(e));
+		LO(mov)(e, nv.r, rv);
+		nv = LO(bin)(e, T_MINUS, 8, false, vconst(0), nv);
+		nv = LO(bin)(e, T_AMP, 8, false, nv, wk_vreg(rm));
+		old = LO(bin)(e, T_PIPE, 8, false, old, nv);
+		LO(store)(e, old.r, l, 1);
+		LO(tfree)(e, old.r);
+		return;
+	}
 
 	wk_bf_unit(e, l, t, &uo, &us, &pos);
 	u.bf = 0, u.off = uo;
@@ -669,6 +718,55 @@ static val wk_cast(ecx *e, uint32_t n)
 		return vconst(0);
 	case CK_VADDR:
 		return wk_gen(e, x->a);	/* a vector value is its address */
+	case CK_BITS: {
+		lval d = { .k = L_FRAME, .off = wk_slot(e, tsize(c, x->ty), talign(c, x->ty)), .align = talign(c, x->ty) };
+		if (N(x->a)->flags & NF_LVALUE) {
+			lval src = wk_lval(e, x->a);
+			if (src.dynbit_slot) {
+				val v = wk_reload(e, &src, from);
+				int r = wk_reg(e, &v, from);
+				LO(store)(e, r, &d, wk_size(c, from)); LO(tfree)(e, r);
+				wk_lfree(e, &src);
+			} else if (src.bf) {
+				/* Extract only field bytes, including packed and wide fields.
+				 * An ordinary aligned container load may exceed the object. */
+				for (unsigned i = 0; i < tsize(c, from); i++) {
+					unsigned bit = i * 8;
+					val v = vconst(0);
+					lval byte = d;
+					byte.off += i;
+					if (bit < src.width || src.sgn) {
+						lval part = src;
+						unsigned start = bit < src.width ? bit : src.width - 1;
+						part.off += (src.bitoff + start) / 8;
+						part.bitoff = (src.bitoff + start) % 8;
+						part.width = bit >= src.width ? 1 : src.width - bit < 8 ? src.width - bit : 8;
+						part.sgn = src.sgn && bit + 8 >= src.width;
+						part.bf = 0;
+						v = wk_bf_load_split(e, part, part.bitoff, part.width);
+						if (part.sgn) {
+							v = LO(bin)(e, T_LESSLESS, 8, false, v, vconst(64 - part.width));
+							v = LO(bin)(e, T_GREATERGREATER, 8, true, v, vconst(64 - part.width));
+						}
+					}
+					int r = wk_reg(e, &v, prim(TY_ULONG));
+					LO(store)(e, r, &byte, 1); LO(tfree)(e, r);
+				}
+				wk_lfree(e, &src);
+
+			} else {
+				int rs = LO(laddr)(e, &src), rd = LO(laddr)(e, &d);
+				LO(copy)(e, rd, rs, tsize(c, from));
+				LO(tfree)(e, rs); LO(tfree)(e, rd);
+			}
+		} else {
+			val v = wk_gen(e, x->a);
+			if (wk_mem(e, from)) { val p = wk_putmem(e, &d, from, v); wk_free(e, &p); }
+			else { int r = wk_reg(e, &v, from); LO(store)(e, r, &d, wk_size(c, from)); LO(tfree)(e, r); }
+		}
+		if (wk_mem(e, x->ty)) return wk_vreg(LO(laddr)(e, &d));
+		return wk_load(e, d, x->ty);
+	}
 	case CK_VBITS: {
 		/* a vector's bits as a scalar of its size */
 		val v = wk_gen(e, x->a);
@@ -678,15 +776,18 @@ static val wk_cast(ecx *e, uint32_t n)
 	case CK_SPLAT: {
 		/* the scalar into every lane of a new vector */
 		qty et = T(c, x->ty)->base;
-		uint64_t es = tsize(c, et), nl = tsize(c, x->ty) / es;
+		uint64_t es = tsize(c, et), nl = T(c, x->ty)->n;
 		lval d = { .k = L_FRAME, .off = wk_slot(e, tsize(c, x->ty), 16), .align = talign(c, et) };
 		val v = wk_gen(e, x->a);
 		int r = wk_reg(e, &v, et);
 
-		for (uint64_t i = 0; i < nl; i++, d.off += (int64_t)es)
-			LO(store)(e, r, &d, (int)es);
+		for (uint64_t i = 0; i < nl; i++) {
+			lval dl = d;
+			if (is_bvec(c, x->ty)) dl.off += i / 8, dl.bf = 1, dl.width = 1, dl.bitoff = i % 8;
+			else dl.off += (int64_t)(i * es);
+			wk_put(e, &dl, et, r);
+		}
 		LO(tfree)(e, r);
-		d.off -= (int64_t)(nl * es);
 		return wk_vreg(LO(laddr)(e, &d));
 	}
 	case CK_UNION: {
@@ -991,6 +1092,7 @@ static val wk_lane(ecx *e, qty t, int r, unsigned i)
 		qty et = T(c, t)->base;
 		lval l = { .k = L_REG, .r = (uint8_t)r, .off = (int64_t)i * (int64_t)tsize(c, et), .align = talign(c, et) };
 
+		if (is_bvec(c, t)) l.off = i / 8, l.bf = 1, l.width = 1, l.bitoff = i % 8;
 		return wk_reload(e, &l, et);
 	}
 	{
@@ -1012,7 +1114,7 @@ static val wk_vlanes(ecx *e, int op, qty at, val a, qty bt, val b, qty rt, bool 
 	cc *c = e->c;
 	qty vt = is_vec(c, at) ? at : bt, et = T(c, vt)->base, re = T(c, rt)->base;
 	uint64_t es = tsize(c, re);
-	unsigned nl = (unsigned)(tsize(c, vt) / tsize(c, et));
+	unsigned nl = T(c, vt)->n;
 	int ra, rb = -1;
 	lval d = { .k = L_FRAME, .off = wk_slot(e, tsize(c, rt), 16), .align = talign(c, re) };
 	/* a constant of a lane type (__int128 and long double lanes are objects, by address) */
@@ -1044,6 +1146,14 @@ static val wk_vlanes(ecx *e, int op, qty at, val a, qty bt, val b, qty rt, bool 
 		{
 			lval l = d;
 
+			if (is_bvec(c, rt)) {
+				l.off += i / 8;
+				l.bf = 1, l.width = 1, l.bitoff = i % 8;
+				int rr = wk_reg(e, &r, re);
+				wk_put(e, &l, re, rr);
+				LO(tfree)(e, rr);
+				continue;
+			}
 			l.off += (int64_t)(i * es);
 			if (wk_mem(e, re)) {
 				r = wk_putmem(e, &l, re, r);
@@ -2203,7 +2313,7 @@ static val wk_builtin(ecx *e, uint32_t n)
 	case BI_SHUFFLEVECTOR: case BI_CONVERTVECTOR: {
 		/* lane by lane through a frame object (vectors are addresses) */
 		qty at = N(arg[0])->ty, ae = T(c, at)->base, re = T(c, x->ty)->base;
-		int64_t na = (int64_t)(tsize(c, at) / tsize(c, ae)), nr = (int64_t)(tsize(c, x->ty) / tsize(c, re));
+		int64_t na = T(c, at)->ext ?: T(c, at)->n, nr = T(c, x->ty)->ext ?: T(c, x->ty)->n;
 		bool sh = x->aux == BI_SHUFFLEVECTOR;
 		val a = wk_gen(e, arg[0]), bv = sh ? wk_rhs(e, &a, arg[1], prim(TY_ULONG)) : vconst(0);
 		int ra = wk_reg(e, &a, prim(TY_ULONG)), rb = sh ? wk_reg(e, &bv, prim(TY_ULONG)) : -1;
@@ -2214,7 +2324,8 @@ static val wk_builtin(ecx *e, uint32_t n)
 			val v;
 			int r;
 
-			dl.off += i * (int64_t)tsize(c, re);
+			if (is_bvec(c, x->ty)) dl.off += i / 8, dl.bf = 1, dl.width = 1, dl.bitoff = i % 8;
+			else dl.off += i * (int64_t)tsize(c, re);
 			if (sh) {
 				int64_t k = (int64_t)c->ipool[N(arg[2 + i])->a];
 
@@ -2222,14 +2333,16 @@ static val wk_builtin(ecx *e, uint32_t n)
 					continue;	/* an undefined lane */
 				sl.r = (uint8_t)(k < na ? ra : rb);
 				sl.off = (k < na ? k : k - na) * (int64_t)tsize(c, ae);
+				if (is_bvec(c, at)) { int64_t j = k < na ? k : k - na; sl.off = j / 8, sl.bf = 1, sl.width = 1, sl.bitoff = j % 8; }
 				v = wk_reload(e, &sl, ae);
 			} else {
 				sl.r = (uint8_t)ra;
 				sl.off = i * (int64_t)tsize(c, ae);
+				if (is_bvec(c, at)) sl.off = i / 8, sl.bf = 1, sl.width = 1, sl.bitoff = i % 8;
 				v = wk_conv(e, wk_reload(e, &sl, ae), ae, re);
 			}
 			r = wk_reg(e, &v, re);
-			LO(store)(e, r, &dl, (int)tsize(c, re));
+			wk_put(e, &dl, re, r);
 			LO(tfree)(e, r);
 		}
 		LO(tfree)(e, ra);

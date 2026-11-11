@@ -32,8 +32,14 @@ static void welems(ecx *e, uint64_t off, qty ty, uint32_t init)
 			uint64_t es = tsize(c, et);
 
 			for (uint32_t i = 0; i < x->c; i++)
-				for (uint64_t k = v[3 * i]; k <= v[3 * i + 1]; k++)
-					welems(e, off + k * es, et, v[3 * i + 2]);
+				for (uint64_t k = v[3 * i]; k <= v[3 * i + 1]; k++) {
+					if (is_bvec(c, ty)) {
+						wlv l = { .k = WL_MEM, .bf = 1, .width = 1, .bitoff = k % 8, .off = k / 8 };
+						wslot_addr(e, off);
+						wexpr(e, v[3*i+2], true);
+						wstore(e, &l, et);
+					} else welems(e, off + k * es, et, v[3 * i + 2]);
+				}
 			return;
 		}
 		{

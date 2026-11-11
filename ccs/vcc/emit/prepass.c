@@ -316,7 +316,7 @@ static int walk(pre *P, uint32_t n)
 		lab = walk(P, x->a);
 		break;
 	case N_CAST:
-		if (x->aux == CK_DECAY)
+		if (x->aux == CK_DECAY || (x->aux == CK_BITS && (N(x->a)->flags & NF_LVALUE)))
 			mark_written(P, x->a, true);
 		lab = walk(P, x->a);
 		break;
