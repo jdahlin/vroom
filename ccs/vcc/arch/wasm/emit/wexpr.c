@@ -2084,7 +2084,10 @@ static int wexpr1(ecx *e, uint32_t n, bool want)
 			return k;
 		}
 		}
-	case N_UNARY:
+	case N_UNARY: {
+		uint32_t operand = em_double_unary(e, n);
+		if (operand)
+			return wexpr(e, operand, want);
 		switch (x->aux) {
 		case T_PLUS:
 			return wexpr(e, x->a, want);
@@ -2131,6 +2134,7 @@ static int wexpr1(ecx *e, uint32_t n, bool want)
 			return WT_I32;
 		}
 		efatal(e, x->loc, "wasm: unsupported unary operator");
+	}
 	case N_PREINC: case N_PREDEC: case N_POSTINC: case N_POSTDEC:
 		return wincdec(e, n, want);
 	case N_BINARY:
