@@ -153,8 +153,8 @@ static lval wk_fromval(ecx *e, val v, qty t)
 
 static val wk_ptradd_vla(ecx *e, val p, val i, qty it, qty pt, bool sub);
 static val wk_atomic_rmw(ecx *e, uint32_t n);
-static val wk_reload(ecx *e, const lval *l, qty t);
-static val wk_putmem(ecx *e, lval *l, qty t, val v);
+VPRIV val wk_reload(ecx *e, const lval *l, qty t);
+VPRIV val wk_putmem(ecx *e, lval *l, qty t, val v);
 static val wk_incval(ecx *e, qty t, bool dec, val a);
 
 static void wk_lfree(ecx *e, const lval *l)
@@ -523,7 +523,7 @@ static void wk_store(ecx *e, const lval *l, qty t, val *v)
 /* ---------------- conversions ---------------- */
 
 /* v (of type from) as type to */
-static val wk_conv(ecx *e, val v, qty from, qty to)
+VPRIV val wk_conv(ecx *e, val v, qty from, qty to)
 {
 	cc *c = e->c;
 	int fs = wk_size(c, from), ts = wk_size(c, to);
@@ -786,7 +786,7 @@ VPRIV void wk_vla_decl(ecx *e, uint32_t s, bool zero)
 		t = LO(treg)(e);
 		LO(load)(e, t, &lsp, 8, false);
 		LO(spset)(e, t);
-		LO(label)(e, fresh);
+		wk_label(e, fresh);
 	}
 	{
 		int t = LO(spget)(e);
@@ -816,7 +816,7 @@ VPRIV void wk_vla_decl(ecx *e, uint32_t s, bool zero)
 		LO(load)(e, k, &ln, 8, false);
 		k = LO(bin)(e, T_PLUS, 8, false, wk_vreg(k), vconst(7)).r;
 		k = LO(bin)(e, T_AMP, 8, false, wk_vreg(k), vconst(-8)).r;
-		LO(label)(e, top);
+		wk_label(e, top);
 		LO(brz)(e, wk_vreg(k), 8, false, done);
 		LO(tkeep)(e, k);
 		z = LO(toreg)(e, &zv, 8);
@@ -829,7 +829,7 @@ VPRIV void wk_vla_decl(ecx *e, uint32_t s, bool zero)
 		p = LO(bin)(e, T_PLUS, 8, false, p, vconst(8));
 		k = LO(bin)(e, T_MINUS, 8, false, wk_vreg(k), vconst(8)).r;
 		LO(jump)(e, top);
-		LO(label)(e, done);
+		wk_label(e, done);
 		LO(tfree)(e, k);
 	}
 	LO(tfree)(e, p.r);
@@ -1016,9 +1016,9 @@ static val wk_condval(ecx *e, uint32_t n)
 	wk_cond(e, n, false, lf);
 	wk_store(e, &l, prim(TY_INT), &one);
 	LO(jump)(e, lj);
-	LO(label)(e, lf);
+	wk_label(e, lf);
 	wk_store(e, &l, prim(TY_INT), &zero);
-	LO(label)(e, lj);
+	wk_label(e, lj);
 	r = LO(treg)(e);
 	LO(load)(e, r, &l, 4, false);
 	return wk_vreg(r);
@@ -1037,6 +1037,13 @@ static val wk_ternary(ecx *e, uint32_t n)
 	val v;
 	int r;
 
+	if (x->b && wk_isconst(e, x->a) &&
+	    !wk_branch_entry(c, x->b) && !wk_branch_entry(c, x->c)) {
+		val k = wk_gen(e, x->a);
+		if (k.k == V_CONST)
+			return wk_gen(e, k.i ? x->b : x->c);
+		wk_free(e, &k);
+	}
 	if (!vd)
 		wk_scalar(e, n, t);
 	if (!x->b) {
@@ -1059,7 +1066,7 @@ static val wk_ternary(ecx *e, uint32_t n)
 		}
 		LO(jump)(e, lj);
 	}
-	LO(label)(e, lf);
+	wk_label(e, lf);
 	v = wk_gen(e, x->c);
 	if (vd) {
 		wk_free(e, &v);
@@ -1068,7 +1075,7 @@ static val wk_ternary(ecx *e, uint32_t n)
 		LO(store)(e, r, &l, 8);
 		LO(tfree)(e, r);
 	}
-	LO(label)(e, lj);
+	wk_label(e, lj);
 	if (vd)
 		return vconst(0);
 	r = wk_treg(e, t);
@@ -1077,7 +1084,7 @@ static val wk_ternary(ecx *e, uint32_t n)
 }
 
 /* l's value in a new register (l and its register stay) */
-static val wk_reload(ecx *e, const lval *l, qty t)
+VPRIV val wk_reload(ecx *e, const lval *l, qty t)
 {
 	int r;
 
@@ -1099,7 +1106,7 @@ static val wk_reload(ecx *e, const lval *l, qty t)
 }
 
 /* the bytes of the object at v (type t, held by address) into l; l's address is the value */
-static val wk_putmem(ecx *e, lval *l, qty t, val v)
+VPRIV val wk_putmem(ecx *e, lval *l, qty t, val v)
 {
 	int rs = wk_reg(e, &v, prim(TY_ULONG)), rd = LO(laddr)(e, l);
 
@@ -1189,6 +1196,16 @@ static val wk_assign(ecx *e, uint32_t n)
 	}
 	if (wk_mem(e, lt))
 		return wk_putmem(e, &l, lt, v);
+	if (e->E->o->opt && tsize(c, lt) <= 8) {
+		int k = ael_slot(e, x->a, true);
+		if (k >= 0) {
+			e->kvalid &= (uint16_t)~(1u << k);
+			if (v.k == V_CONST) {
+				e->kval[k] = (int64_t)em_trunc_to(c, v.i, lt);
+				e->kvalid |= (uint16_t)(1u << k);
+			}
+		}
+	}
 	{
 		int r = wk_reg(e, &v, lt);
 
@@ -1262,7 +1279,7 @@ static val wk_atomic_rmw(ecx *e, uint32_t n)
 	ra = LO(laddr)(e, &l);
 	s.off = wk_slot(e, 8, 8);
 	o = LO(atomic)(e, WK_ALOAD, sz, ra, -1, -1);
-	LO(label)(e, top);
+	wk_label(e, top);
 	LO(store)(e, o, &s, sz);
 	{
 		val a = wk_reload(e, &s, lt), v;
@@ -1307,7 +1324,7 @@ static val wk_atomic_rmw(ecx *e, uint32_t n)
 		if (oldr >= 0)
 			LO(tfree)(e, oldr);
 		LO(jump)(e, top);
-		LO(label)(e, done);
+		wk_label(e, done);
 		res = post ? oldr : r;
 		LO(tkeep)(e, res);
 	}
@@ -1453,7 +1470,9 @@ static val wk_call(ecx *e, uint32_t n)
 
 		if (c->syms[s].kind == S_BUILTIN) {
 			ref = REF(RK_NAME, (uint32_t)c->syms[s].val);	/* a library function by name */
-
+		} else if (wk_can_inline(e, s)) {
+			if (args != argbuf) free(args);
+			return wk_inline(e, n, s);
 		} else {
 			note_ref(e, REF(RK_SYM, s));
 			ref = REF(RK_SYM, s);
@@ -1519,6 +1538,36 @@ static val wk_stmtexpr(ecx *e, uint32_t n)
 }
 
 /* ---------------- builtins ---------------- */
+
+/* n is a constant once the bound constants are known (no loads, calls or side effects) */
+VPRIV bool wk_isconst(ecx *e, uint32_t n)
+{
+	cc *c = e->c;
+	const node *x = N(n);
+	val k;
+
+	if (!is_integer(c, x->ty))
+		return false;
+
+	switch (x->op) {
+	case N_NUM:
+		return true;
+	case N_BUILTIN:
+		return x->aux == BI_CONSTANT_P;
+	case N_VAR:
+		return c->syms[x->a].kind == S_ENUMCONST || wk_const_sym(e, x->a, &k);
+	case N_CAST:
+		return x->aux != CK_DECAY && x->aux != CK_FDECAY && x->aux != CK_VADDR && wk_isconst(e, x->a);
+	case N_UNARY:
+		return wk_isconst(e, x->a);
+	case N_BINARY:
+		return wk_isconst(e, x->a) && wk_isconst(e, x->b);
+	case N_COND:
+		return wk_isconst(e, x->a) && (!x->b || wk_isconst(e, x->b)) && wk_isconst(e, x->c);
+	default:
+		return false;
+	}
+}
 
 /* a va_list operand's address in a temporary (x86-64's is an array: it decays) */
 static int wk_valist(ecx *e, uint32_t n)
@@ -1641,7 +1690,7 @@ static val wk_atomic(ecx *e, uint32_t n)
 		LO(brz)(e, ok, 4, true, done);
 		LO(tkeep)(e, ok.r);
 		LO(store)(e, old, &le, sz);
-		LO(label)(e, done);
+		wk_label(e, done);
 		LO(tfree)(e, old);
 		LO(tfree)(e, ex);
 		LO(tfree)(e, r1);
@@ -1686,7 +1735,7 @@ static val wk_atomic(ecx *e, uint32_t n)
 		uint32_t top = wk_newlabel(e), done = wk_newlabel(e);
 		int old = LO(atomic)(e, WK_ALOAD, sz, rp, -1, -1), nw, got;
 
-		LO(label)(e, top);
+		wk_label(e, top);
 		if (base < 5) {
 			nw = LO(bin)(e, bop[base], 8, false, wk_vreg(wk_dup(e, old)), wk_vreg(wk_dup(e, r1))).r;
 		} else if (base == 5) {	/* nand: ~(old & v) */
@@ -1703,7 +1752,7 @@ static val wk_atomic(ecx *e, uint32_t n)
 			nw = wk_dup(e, old);
 			LO(cmpbr)(e, base == 6 ? T_GREATEREQ : T_LESSEQ, sz > 4 ? 8 : 4, sg, wk_vreg(a), wk_vreg(b), keep);
 			LO(mov)(e, nw, r1);
-			LO(label)(e, keep);
+			wk_label(e, keep);
 		}
 		got = LO(atomic)(e, WK_ACAS, sz, rp, nw, old);
 		LO(cmpbr)(e, T_EQUALEQUAL, 8, false, wk_vreg(got), wk_vreg(old), done);
@@ -1713,7 +1762,7 @@ static val wk_atomic(ecx *e, uint32_t n)
 		LO(tfree)(e, got);
 		LO(tfree)(e, nw);
 		LO(jump)(e, top);
-		LO(label)(e, done);
+		wk_label(e, done);
 		LO(tfree)(e, r1);
 		if (id >= BI_ATOMIC_ADD_FETCH) {
 			LO(tfree)(e, old);
@@ -1794,8 +1843,11 @@ static val wk_builtin(ecx *e, uint32_t n)
 		   only as a string literal at offset 0), else 0 (the operand is not evaluated) */
 		cval cv;
 
-		return vconst(cc_eval(c, arg[0], &cv) && (cv.kind == CV_INT || cv.kind == CV_FLT ||
-							  (cv.kind == CV_ADDR && cv.str && cv.i == 0 && !cv.sym && !cv.label)));
+		if (cc_eval(c, arg[0], &cv) && (cv.kind == CV_INT || cv.kind == CV_FLT ||
+						(cv.kind == CV_ADDR && cv.str && cv.i == 0 && !cv.sym && !cv.label)))
+			return vconst(1);
+		/* after inlining and constant locals: built from constants only, without side effects */
+		return vconst(!side_effects(c, arg[0]) && wk_isconst(e, arg[0]));
 	}
 	case BI_EXPECT: case BI_EXPECT_PROB: case BI_ASSUME_ALIGNED: case BI_EXTRACT_RETURN_ADDR: {
 		/* the value of the first argument; the others are evaluated first */
@@ -2220,6 +2272,12 @@ static val wk_gen_inner(ecx *e, uint32_t n)
 			note_ref(e, REF(RK_SYM, s));
 			return (val){ .k = V_ADDR, .ref = REF(RK_SYM, s) };
 		}
+		{
+			val k;
+
+			if (wk_const_sym(e, x->a, &k))
+				return k;
+		}
 		wk_scalar(e, n, x->ty);
 		return wk_load(e, wk_lval(e, n), x->ty);
 	}
@@ -2228,7 +2286,15 @@ static val wk_gen_inner(ecx *e, uint32_t n)
 
 		return wk_load(e, l, x->ty);
 	}
-	case N_STR: case N_MEMBER: case N_INDEX: case N_DEREF:
+	case N_INDEX: {
+		int k = e->E->o->opt && tsize(c, x->ty) <= 8 ? ael_slot(e, n, false) : -1;
+		if (k >= 0 && (e->kvalid >> k & 1))
+			return wk_const(c, e->kval[k], x->ty);
+		if (!is_array(c, x->ty) && !is_func(c, x->ty))
+			wk_scalar(e, n, x->ty);
+		return wk_load(e, wk_lval(e, n), x->ty);
+	}
+	case N_STR: case N_MEMBER: case N_DEREF:
 		if (!is_array(c, x->ty) && !is_func(c, x->ty))
 			wk_scalar(e, n, x->ty);
 		return wk_load(e, wk_lval(e, n), x->ty);
@@ -2338,11 +2404,125 @@ static val wk_gen_inner(ecx *e, uint32_t n)
 
 /* ---------------- conditions: branches, not values ---------------- */
 
+/* Evaluate integer expressions after binding locals, without emitting code or
+   changing the shared AST. The caller rejects side effects and volatile reads. */
+static bool wk_ival(ecx *e, uint32_t n, i128 *out)
+{
+	cc *c = e->c;
+	const node *x = N(n);
+	cval cv;
+	i128 a, b, v;
+	val k;
+	if (!is_integer(c, x->ty)) return false;
+	if (x->op == N_BUILTIN && x->aux == BI_CONSTANT_P) {
+		uint32_t arg = c->lists[x->b];
+		*out = (cc_eval(c, arg, &cv) && (cv.kind == CV_INT || cv.kind == CV_FLT ||
+			(cv.kind == CV_ADDR && cv.str && cv.i == 0 && !cv.sym && !cv.label))) ||
+			(!side_effects(c, arg) && wk_isconst(e, arg));
+		return true;
+	}
+	if ((x->op == N_NUM || x->op == N_VAR || x->op == N_BUILTIN) &&
+	    cc_eval(c, n, &cv) && cv.kind == CV_INT) {
+		*out = em_trunc_to(c, cv.i, x->ty);
+		return true;
+	}
+	switch (x->op) {
+	case N_INDEX: {
+		int slot = tsize(c, x->ty) <= 8 ? ael_slot(e, n, false) : -1;
+		if (slot < 0 || !(e->kvalid >> slot & 1)) return false;
+		*out = em_trunc_to(c, e->kval[slot], x->ty);
+		return true;
+	}
+	case N_VAR:
+		if (!wk_const_sym(e, x->a, &k)) return false;
+		*out = k.i;
+		return true;
+	case N_CAST:
+		if (x->aux == CK_F2I && N(x->a)->op == N_VAR) {
+			const sym *y = &c->syms[N(x->a)->a];
+			if ((QQ(y->ty) & (Q_CONST | Q_VOLATILE)) != Q_CONST || (y->flags & SF_WEAK) || !y->body ||
+			    !cc_eval(c, y->body, &cv) || cv.kind != CV_FLT) return false;
+			*out = em_trunc_to(c, q_to_int(cv.ld ? cv.q : q_of_d(cv.f),
+				(int)(tsize(c, x->ty) * 8), wk_signed(c, x->ty)), x->ty);
+			return true;
+		}
+		if (!is_integer(c, N(x->a)->ty) || !wk_ival(e, x->a, &a)) return false;
+		*out = x->aux == CK_BOOL ? a != 0 : em_trunc_to(c, a, x->ty);
+		return true;
+	case N_UNARY:
+		if (!wk_ival(e, x->a, &a)) return false;
+		switch (x->aux) {
+		case T_PLUS: v = a; break;
+		case T_MINUS: v = (i128)((u128)0 - (u128)a); break;
+		case T_TILDE: v = ~a; break;
+		case T_EXCLAIM: v = !a; break;
+		default: return false;
+		}
+		*out = em_trunc_to(c, v, x->ty);
+		return true;
+	case N_BINARY:
+		if (!wk_ival(e, x->a, &a)) {
+			int known = is_integer(c, N(x->a)->ty) ? cond_fold(e, n) : -1;
+			if (known < 0) return false;
+			*out = known;
+			return true;
+		}
+		if ((x->aux == T_LESSLESS || x->aux == T_GREATERGREATER) &&
+		    (a == 0 || (a == -1 && x->aux == T_GREATERGREATER && wk_signed(c, x->ty)))) {
+			*out = a;
+			return true;
+		}
+		if (!wk_ival(e, x->b, &b)) return false;
+		if (wk_is_cmp(x->aux))
+			v = wk_fold_cmp(x->aux, wk_signed(c, N(x->a)->ty), a, b);
+		else if (!wk_fold(c, x->aux, x->ty, a, b, &v)) return false;
+		*out = em_trunc_to(c, v, x->ty);
+		return true;
+	case N_COMMA:
+		return wk_ival(e, x->b, out);
+	case N_COND:
+		if (!wk_ival(e, x->a, &a)) return false;
+		if (a && !x->b) { *out = em_trunc_to(c, a, x->ty); return true; }
+		return wk_ival(e, a ? x->b : x->c, out);
+	case N_LOGAND: case N_LOGOR: {
+		bool ka = wk_ival(e, x->a, &a), kb = wk_ival(e, x->b, &b);
+		if (x->op == N_LOGAND && ((ka && !a) || (kb && !b))) *out = 0;
+		else if (x->op == N_LOGOR && ((ka && a) || (kb && b))) *out = 1;
+		else if (ka && kb) *out = x->op == N_LOGAND ? a && b : a || b;
+		else return false;
+		return true;
+	}
+	default: return false;
+	}
+}
+
+/* The existing range/comparison analysis is machine-independent. Its floating
+   facts recognize library calls by name, so do not use it when builtins were
+   disabled. Side effects and volatile reads must still execute. */
+VPRIV int wk_condfold(ecx *e, uint32_t n)
+{
+	i128 v;
+	if (!e->E->o->opt || side_effects(e->c, n))
+		return -1;
+	if (wk_ival(e, n, &v)) return v != 0;
+	if (e->E->o->no_builtin) return -1;
+	for (unsigned i = 0; i < CC_DISABLED_BUILTIN_WORDS; i++)
+		if (e->E->o->disabled_builtins[i])
+			return -1;
+	return cond_fold(e, n);
+}
+
 /* to lbl if (n != 0) == jump_if */
 VPRIV void wk_cond(ecx *e, uint32_t n, bool jump_if, uint32_t lbl)
 {
 	cc *c = e->c;
 	const node *x = N(n);
+	int known = wk_condfold(e, n);
+
+	if (known >= 0) {
+		if (known == (int)jump_if) LO(jump)(e, lbl);
+		return;
+	}
 
 	switch (x->op) {
 	case N_LOGAND: case N_LOGOR: {
@@ -2357,7 +2537,7 @@ VPRIV void wk_cond(ecx *e, uint32_t n, bool jump_if, uint32_t lbl)
 
 			wk_cond(e, x->a, !jump_if, skip);
 			wk_cond(e, x->b, jump_if, lbl);
-			LO(label)(e, skip);
+			wk_label(e, skip);
 		}
 		return;
 	}
