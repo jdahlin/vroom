@@ -3330,3 +3330,25 @@ värd; det korta samplet visar ingen generell tidsändring. Fyrmålsprov O0–O3
 i båda bygglägen, O0/noopt-paritet samt 258/258 vcc och en befintlig xfail
 passerar även efter ändringen. Resultat finns i `work/opt-profile/local-values-
 shifts-prefilter-{cost,cputime,saturated}/`.
+
+### Heltalsuttryck med unära operatorer
+
+Den budgeterade värdenumreringen känner igen rena unära heltalsoperatorer
+`+`, `-`, `~` och `!` inuti uttryck. Operator och typ ingår i värdenyckeln;
+olika operatorer får inte samma värde. Clang 23 -O2 beräknar exempelvis
+`((~a)+b)*((~a)+b)` en gång, medan tidigare vcc beräknade båda delarna.
+
+Kodform och körning O0–O3 passerar för x86, arm64, wasm32 och wasm64 i unity-
+och separatfilbygge, med 32/64 bitar, logisk negation, olika operatorer,
+ändrad operand och volatile. O0 och O2 med VCC_NOOPT är byteidentiska mot
+`6bef1ebf`; vcc-sviten passerar 258/258 med en befintlig xfail. Matchad
+Callgrind-korpus mot den basen gav compiler-Ir −0,003 % x86, −0,006 % arm64,
++0,001 % wasm32 och −0,001 % wasm64; tidigare wasm-uteslutningar gäller.
+Sju växelvisa rundor med 28 förprocessade arm64-kärnfiler gav median
+användar-CPU 0,78780 → 0,78421 s; två filer uteslöts och korta sampel på
+delad värd visar ingen generell tidsändring. Mättad kontroll med 2 000
+icke-matchande unary-uttryck kostade +1,86 % compiler-instruktioner x86 och
++2,12 % wasm64, med identisk assembler; motsvarande positiva fall gav −5,37 %
+och −4,25 %. Detta är syntetiska extremfall. Proveniens finns i
+`work/opt-profile/local-values-unary-{cost,cputime,saturated}/`. Generell
+CSE och G5/G7 återstår.

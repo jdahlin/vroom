@@ -753,3 +753,7 @@ CSE samt G5/G7 återstår.
 Den budgeterade lokala värdeåteranvändningen omfattar även heltalsskift;
 fyrmålsprov och kompilatorkostnader redovisas i PLAN-fas2.md. Generell CSE
 samt G5/G7 återstår.
+
+Budgeterad lokal värdeåteranvändning känner nu även igen rena unära
+heltalsoperatorer inuti uttryck; tester och kostnader finns i PLAN-fas2.md.
+Generell CSE samt G5/G7 återstår.
