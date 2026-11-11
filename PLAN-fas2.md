@@ -3068,3 +3068,30 @@ den delade värdens lilla urval bevisar ingen generell tidsvinst. Proveniens,
 flaggor och sampel: `work/opt-profile/double-unary-cost/result.json` och
 `work/opt-profile/double-unary-cputime/kernel-batch-result.json`. G5/G7 och
 generell O2-täckning återstår.
+
+### Nästa steg: begränsad lokal återanvändning av värden (2026-11-11)
+
+En konkret lucka är `(a+b)*(a+b)`: aktuell x86, arm64 och wasm emitterar
+två additioner, medan Clang 23 `-O2` beräknar summan en gång. Även när
+summan tilldelas en lokal variabel beräknas motsvarande uttryck om. Det här
+är lokal CSE, inte löst av identitetsreglerna ovan.
+
+Första kontrollunderlaget är `tests/vcc/local_value_reuse.c`, som körs O0–O3
+på fyra mål via `--rule localvalues`: vanlig återanvändning och kommutering,
+ändrad operand, anrop som ändrar global data, volatile, möjlig pekaralias och
+kontrollflödesjoin. Dessa är endast semantiska regressioner; de bevisar inte
+att någon optimering är implementerad. Basen passerar alla 16 kombinationer.
+
+Genomför i små granskbara steg: (1) beskriv rena heltalsuttryck med typ,
+operation och stabila värdeidentiteter i en begränsad tabell per grundblock;
+kräv budget och billig kandidatkontroll så vanlig kod slipper allokering och
+fullständiga extra vandringar; (2) invalidera vid definitioner, okända effekter,
+kontrollflödesgränser och aliaserande minne; volatile/atomic, trappande och
+flyttalsmiljöberoende operationer får aldrig återanvändas utan separat bevis;
+(3) ge x86/arm64-adaptrarna korrekt registerlivstid, implicit register-/flaggeffekt
+och debugremappning, och wasm en typad lokal/stackhantering snarare än
+assemblertextomskrivning; (4) lägg till kodformskrav först när respektive
+backend implementerats, samt budget-/barriär-/alias-/joinnegativfall och
+O0/noopt-paritet. Mät faktiskt kompilerings-CPU och instruktioner för både
+kontroller och uttrycksmättade filer samt den sammansatta stacken. Ingen av
+punkterna är implementerad eller godkänd ännu; hela O2 och G5/G7 återstår.
