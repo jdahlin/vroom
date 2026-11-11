@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Check unsigned32 reciprocal construction against division and remainder."""
+"""Check unsigned32/64 reciprocal construction against division and remainder."""
 import argparse
 from pathlib import Path
 import subprocess
@@ -57,6 +57,38 @@ static void divisor(uint32_t d, bool exhaustive)
     }
     if (exhaustive) for (uint32_t n=0;n<65536;n++) check(n,d,&r);
 }
+static uint64_t random64(void) { return ((uint64_t)random32()<<32) | random32(); }
+static void check64(uint64_t n, uint64_t d, const em_udivconst_recipe *r)
+{
+    uint64_t q;
+    if (r->compare) q=n>=d;
+    else {
+        q=(uint64_t)(((u128)n*r->magic)>>64);
+        if (r->add) q += (n-q)>>1;
+        q >>= r->shift;
+    }
+    assert(q==n/d);
+    assert(n-q*d==n%d);
+}
+static void divisor64(uint64_t d)
+{
+    em_udivconst_recipe r,rem;
+    bool accepted=em_udivconst64(d,false,&r);
+    assert(accepted==(d!=0 && (d&(d-1))!=0));
+    if (!accepted) return;
+    assert(r.bits==64 && r.divisor==d && !r.remainder);
+    assert(em_udivconst64(d,true,&rem) && rem.remainder);
+    assert(rem.magic==r.magic && rem.shift==r.shift && rem.add==r.add && rem.compare==r.compare);
+    uint64_t edge[]={0,1,2,d-1,d,d+1,INT64_MAX,UINT64_C(1)<<63,UINT64_MAX-1,UINT64_MAX};
+    for (unsigned i=0;i<sizeof edge/sizeof *edge;i++) check64(edge[i],d,&r);
+    for (unsigned i=0;i<64;i++) {
+        uint64_t n=random64();check64(n,d,&r);
+        uint64_t multiple=(n/d)*d;
+        check64(multiple,d,&r);
+        if (multiple) check64(multiple-1,d,&r);
+        if (multiple!=UINT64_MAX) check64(multiple+1,d,&r);
+    }
+}
 static void pressure(void)
 {
     emitter emit={0};
@@ -95,7 +127,24 @@ int main(void)
     }
     for (unsigned i=0;i<4096;i++) divisor(random32(),false);
     divisor(UINT32_MAX,false); divisor(UINT32_MAX-1,false);
+    divisor64(0); divisor64(1);
+    for (uint64_t d=2;d<=65;d++) divisor64(d);
+    for (unsigned shift=1;shift<64;shift++) {
+        uint64_t d=UINT64_C(1)<<shift;
+        divisor64(d-1);divisor64(d);divisor64(d+1);
+    }
+    for (unsigned i=0;i<4096;i++) divisor64(random64());
+    /* Full-width uniform samples mostly exercise very large divisors. Add
+     * independent samples at each width to vary reciprocal/postshift classes. */
+    for (unsigned bits=2;bits<64;bits++) for (unsigned i=0;i<32;i++) {
+        uint64_t d=(random64() & ((UINT64_C(1)<<bits)-1)) | (UINT64_C(1)<<(bits-1));
+        divisor64(d);
+    }
+    divisor64(UINT64_MAX);divisor64(UINT64_MAX-1);
     em_udivconst_recipe r;
+    assert(em_udivconst64(3,false,&r) && r.magic==UINT64_C(0xaaaaaaaaaaaaaaab) && r.shift==1 && !r.add);
+    assert(em_udivconst64(7,false,&r) && r.magic==UINT64_C(0x2492492492492493) && r.shift==2 && r.add);
+    assert(em_udivconst64(10,false,&r) && r.magic==UINT64_C(0xcccccccccccccccd) && r.shift==3 && !r.add);
     assert(em_udivconst32(3,false,&r) && r.magic==UINT32_C(0xaaaaaaab) && r.shift==1 && !r.add);
     assert(em_udivconst32(7,false,&r) && r.magic==UINT32_C(0x24924925) && r.shift==2 && r.add);
     assert(em_udivconst32(10,false,&r) && r.magic==UINT32_C(0xcccccccd) && r.shift==3 && !r.add);
@@ -119,7 +168,7 @@ def main():
         subprocess.run([args.cc, '-std=gnu11', '-O1', '-g', '-Wno-undefined-internal', '-I', str(Path(R) / 'ccs'),
                         *flags, str(source), '-o', str(binary)], check=True, timeout=30)
         subprocess.run([str(binary)], check=True, timeout=10)
-    print('unsigned32 reciprocal arithmetic contracts: PASS')
+    print('unsigned32/64 reciprocal arithmetic contracts: PASS')
 
 
 if __name__ == '__main__':

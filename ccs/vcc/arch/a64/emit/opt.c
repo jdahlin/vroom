@@ -490,7 +490,7 @@ static void slots(ecx *e)
 			continue;
 		id = SLOT_TAG(i);
 		if (i->op == I_LD || i->op == I_ST) {
-			em_slot_access(cells, id, i->imm, 1u << i->sz);
+			em_slot_collect(cells, id, i->imm, 1u << i->sz);
 		} else {
 			if (!id)
 				return; /* an address vcc cannot place */
@@ -498,13 +498,6 @@ static void slots(ecx *e)
 			if (SLOT_TAG2(i) < na)
 				em_slot_escape(cells, SLOT_TAG2(i));
 		}
-	}
-	/* Only allocations with several exact ranges need the sorted detail list. */
-	for (uint32_t k = 0; cells->multi && k < n; k++) {
-		const ins *i = &in[k];
-
-		if (i->rn == FRAME && (i->op == I_LD || i->op == I_ST))
-			em_slot_detail(cells, SLOT_TAG(i), i->imm, 1u << i->sz);
 	}
 	if (!em_slot_finish(cells))
 		return;

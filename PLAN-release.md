@@ -349,6 +349,16 @@ byte-identiska och extra Callgrind-kompileringsarbete högst +0,180 %; ett
 riktat x86-switchprov minskar exekverade instruktioner 48,39 %. Avgränsning,
 rådata och kvarvarande OPT6-delar står i PLAN-fas2. G5/G7 och full O2 är öppna.
 
+
+### Status 2026-11-11: G5/G7, billigare gemensam cellinsamling
+
+Arm64/wasm använder den delade strömmande intervallinsamlaren utan ändrad
+kodgenerering. Matchade O1/O2-mikrofall minskar hela kompileringens Ir med
+0,145–0,453 % för flera fält; ett fält kostar 0,050–0,053 % och kontroller
+0,006–0,071 %. Randomiserad sanitizer-/mutationsoracle, 118 byteparitetspar,
+observerbara accesser och fokuserade wasm-körfall passerar. Detaljer och
+avvisade varianter finns i PLAN-fas2. Ingen bred prestandagrind eller ny
+optimeringsregel ingår; G5/G7 och full O2 är fortsatt öppna.
 ### Status 2026-11-11: G5/G7, unsigned32 reciprokdivision
 
 OPT8:s u32-del använder gemensamma reciproker för native kvot/rest och
@@ -363,6 +373,18 @@ Signed/u64-reciproker och full O2-täckning återstår.
 Efter integrering med main54580f7: samma kompilatorkod, 180/180 riktade fall,
 221/221 arm64-regressioner (ett befintligt xfail), 216/216 x86-regressioner
 (sex referensskips) samt sanitiserade reciprok-/tryckkontrakt passerar.
+
+### Status 2026-11-11: G5/G7, unsigned64 reciprokdivision
+
+OPT8 har nu separata u32/u64-recept, native högprodukt med bevarade implicita
+register och billig wasm-u64-jämförelsekvot. 196 riktade fall, sanitiserade
+matematik-/registerkontrakt, unity/fil-för-fil, 222 arm64-/217 x86-regressioner,
+ABI och unwind passerar. Mot exakt 046c6dc kostar kontroll-/loopprov högst
++0,00021 % och den konfigurerade mixen −0,00794…+0,00082 %.
+Mättade u64-funktioner kostar däremot +14,10 % x86/+17,99 % arm64 att kompilera;
+ett avgränsat seedat x86-körprov minskar median barn-CPU 69,55 % med samma svar.
+Avvägning, exakta hashvärden och begränsningar står i PLAN-fas2. Signed,
+dyrare wasm-klasser och full O2 återstår; G5/G7 stängs inte av detta delsteg.
 
 ### Status 2026-11-11: G5/G7, x86-blad utan ram
 
@@ -408,6 +430,13 @@ Efter mainf97d16d (#47/#52/#55): unity, 16 unsigned32-mål-/nivåfall,
 16 konstanta kontrollfall och sanitiserade reciprok-/registereffektskontrakt
 passerar igen; de två planernas oberoende statusblock är bevarade.
 
+U64 integrerat med mainf97d16d/PR51head54c8f3f: 196 regelprov, 16 kontrollprov,
+229 arm64-/224 x86-regressioner, ABI, unity/fil-för-fil och sanitizerkontrakt
+passerar. Ny exakt föräldramätning54c8f3f→d8957b3: fixerad mix högst
++0,01955 %, mättad u64-korpus +13,55 % x86/+17,97 % arm64 kompilatorarbete;
+avgränsat x86-körprov −69,26 % barn-CPU. Historiska siffror ovan och fulla
+öppna G5/G7-grindar behålls; se PLAN-fas2 för hashvärden och provens gränser.
+
 Efter main2dc4ea3 (#50:s x86-blad): unity, 16 division-/nivå-/målfall,
 sanitiserade reciprok-/registereffektkontrakt och bladramens policy, cache-,
 debug-/härdnings- och signal-unwindprov passerar. Båda statusblock behålls.
@@ -424,3 +453,7 @@ Två exakta 501-funktions-Ir-profiler visar −12,082 % för wrapperfallet och
 +0,338 % för oförändrad aritmetisk kontroll; bara wrapperfallet minskar text.
 Hashar, omfattning och kvarvarande undantag står i OPT8 i PLAN-fas2.md.
 Detta bevisar ingen generell fartvinst. G5/G7 och full O2 är fortsatt öppna.
+
+U64 har också integrerat main2dc4ea3 via PR51head15551a7: 196 riktade fall,
+sanitiserade kontrakt och hela bladramsharnessen passerar. Reciprokfilerna är
+oförändrade; mätningarna förblir bundna till sina tidigare exakta hashvärden.
