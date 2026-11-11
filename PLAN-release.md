@@ -749,3 +749,7 @@ fyrmålsprov och kompilatorkostnader finns i PLAN-fas2.md. G5/G7 återstår.
 Den budgeterade lokala värdeåteranvändningen omfattar rena if-villkor utan
 labels; fyrmålsprov och kompilatorkostnader redovisas i PLAN-fas2.md. Generell
 CSE samt G5/G7 återstår.
+
+Den budgeterade lokala värdeåteranvändningen omfattar även heltalsskift;
+fyrmålsprov och kompilatorkostnader redovisas i PLAN-fas2.md. Generell CSE
+samt G5/G7 återstår.

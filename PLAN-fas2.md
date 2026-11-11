@@ -3295,3 +3295,26 @@ förra basen gav +0,60 % compiler-Ir x86 och +0,73 % wasm64, med identisk
 assembler. Resultat och proveniens finns under `work/opt-profile/local-values-
 conditions-{integrated-cost,integrated-cputime,fast-saturated}/`. Generell CSE,
 återanvändning över join samt G5/G7 återstår.
+
+### Återanvändning av heltalsskift
+
+Den gemensamma budgeterade värdenumreringen omfattar även vänster- och
+högerskift av heltal. Operanderna kommuteras aldrig; typer, beroenden och
+sidoeffektsbarriärer kontrolleras som för övriga uttryck. Clang 23 -O2
+beräknar `(a<<b)*(a<<b)` en gång; tidigare vcc emitterade två skift.
+
+Prov av kodform och körning O0–O3 passerar på x86, arm64, wasm32 och wasm64
+i unity- och separatfilbygge, inklusive 32/64 bitar, signed högerskift,
+omvända operander, ändrad operand och volatile. O0 och O2 med VCC_NOOPT är
+byteidentiska mot `df173d48`; vcc-sviten passerar 258/258 med en befintlig
+xfail. Matchad Callgrind-korpus mot samma bas ger compiler-Ir −0,044 % x86,
+−0,045 % arm64, −0,059 % wasm32 och −0,056 % wasm64; de tidigare angivna
+wasm-uteslutningarna gäller. Sju växelvisa rundor med 28 förprocessade
+arm64-kärnfiler gav median användar-CPU 0,78011 → 0,77954 s; två filer
+uteslöts och korta sampel på delad värd visar ingen generell tidsändring.
+Ett avsiktligt mättat kontrollfall med 2 000 omvända, icke-matchande skift
+kostade +1,91 % compiler-instruktioner x86 och +2,28 % wasm64, med identisk
+assembler. Motsvarande positiva fall minskade compiler-instruktioner 5,97 %
+respektive 3,04 %; detta är syntetiska fall, inte projektmått. Resultat och
+proveniens finns i `work/opt-profile/local-values-shifts-{cost,cputime,
+saturated}/`. Generell CSE och G5/G7 återstår.
