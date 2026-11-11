@@ -951,6 +951,7 @@ static __attribute__((noinline)) int ppd_run1(int argc, char **argv, const ppd_e
 	int nosse = 0, nosse2 = 0, nommx = 0;	/* x86-64: -mno-sse, -mno-sse2, -mno-mmx (last one wins) */
 	uint64_t disabled_builtins[CC_DISABLED_BUILTIN_WORDS] = { 0 };
 	int omit_frame_pointer = -1; /* unspecified: x86 enables omission above -O0 */
+	int sibling_calls = 0; /* explicit sibling-call flags are ordered independently of -O */
 	int xcf = 0, pfe_n = 0, pfe_m = 0, sprot = 0, sp_gs = 0, autozero = 0;
 	const char *sp_sym = NULL;	/* x86-64 hardening (cc_opts.xcf ...) */
 	pp_opts po = { 0 };
@@ -1248,6 +1249,8 @@ static __attribute__((noinline)) int ppd_run1(int argc, char **argv, const ppd_e
 		else if (!strcmp(a, "-finstrument-functions")) instr = 1;
 		else if (!strcmp(a, "-fomit-frame-pointer")) omit_frame_pointer = 1;
 		else if (!strcmp(a, "-fno-omit-frame-pointer")) omit_frame_pointer = 0;
+		else if (!strcmp(a, "-foptimize-sibling-calls")) sibling_calls = 1;
+		else if (!strcmp(a, "-fno-optimize-sibling-calls")) sibling_calls = -1;
 		else if (!strcmp(a, "-fasynchronous-unwind-tables")) cfi = 1;
 		else if (!strcmp(a, "-fno-asynchronous-unwind-tables")) cfi = 0;
 		else if (!strcmp(a, "-mstrict-align")) strict_align = 1;
@@ -1807,6 +1810,7 @@ static __attribute__((noinline)) int ppd_run1(int argc, char **argv, const ppd_e
 				.x86_features = x86_features_, .x86_disabled = x86_disabled, .x86_features_set = x86, .x86_raw = x86_raw, .x86_override_on = x86_on, .x86_override_off = x86_off,
 				.general_regs_only = gregs || (x86 && (nosse || nosse2)), .vcc_kernel = vcc_kernel, .lse = lse, .opt = olevel, .pic = pic ? 2 : pie ? 1 : 0, .tlsmodel = tlsmodel, .sections = sections, .debug = debug, .cfi = cfi > 0, .dbg_name = main_file,
 				.omit_frame_pointer = x86 && (omit_frame_pointer < 0 ? olevel > 0 : omit_frame_pointer),
+				.sibling_calls = sibling_calls,
 				.xcf = x86 ? xcf : 0, .pfe_n = x86 ? pfe_n : 0, .pfe_m = pfe_m, .sprot = x86 ? sprot : 0, .sp_gs = sp_gs, .sp_sym = sp_sym, .autozero = x86 ? autozero : 0,
 			       .outfd = env->outfd };
 		int fd = -1;

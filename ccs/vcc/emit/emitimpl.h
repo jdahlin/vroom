@@ -115,6 +115,7 @@ static inline bool inline_only(const sym *y)
 
 #include "../arch/a64/emit/ins.h"
 #include "rec/rec.h"
+#include "flow/flow.h"
 
 /* references to things with a symbol: kind in the top 4 bits */
 enum { RK_SYM = 0, RK_STR = 1, RK_LBL = 2, RK_NAME = 3 };
@@ -346,6 +347,7 @@ typedef struct ecx {
 	int64_t cl_top;		/* frame offset above the block's compound literals (kept past statements) */
 	int64_t outmax;		/* outgoing stack argument bytes */
 	bool dyn, calls, vararg;
+	bool discarded_scalar;	/* lowering exposed an already-emitted unused scalar result */
 	int64_t vaslot;		/* variadic register save area */
 	int ngr_named, nstk_named;	/* variadic: named GPR args, named stack bytes */
 	int nvr_named;
@@ -525,17 +527,34 @@ typedef struct em_sdivpow2_recipe {
 	bool negative, remainder;
 } em_sdivpow2_recipe;
 VPRIV bool em_sdivpow2(cc *c, qty ty, int op, i128 rhs, em_sdivpow2_recipe *r);
-/* opt/udivconst.c: unsigned32 reciprocal; quotient = high32(n*magic),
+/* opt/mulconst.c: shift for x + (x << shift), or zero to retain multiply. */
+VPRIV unsigned em_mulconst(unsigned bits, i128 rhs);
+
+/* opt/udivconst.c: unsigned32/64 reciprocal; quotient = high_bits(n*magic),
  * optional ((n-q)>>1)+q correction, then shift. compare means q=(n>=d). */
 typedef struct em_udivconst_recipe {
-	uint32_t divisor, magic;
-	uint8_t shift;
+	uint64_t divisor, magic;
+	uint8_t bits, shift;
 	bool add, compare, remainder;
 } em_udivconst_recipe;
 VPRIV bool em_udivconst32(uint32_t divisor, bool remainder, em_udivconst_recipe *r);
+VPRIV bool em_udivconst64(uint64_t divisor, bool remainder, em_udivconst_recipe *r);
 VPRIV bool em_udivconst(cc *c, qty ty, int op, i128 rhs, em_udivconst_recipe *r);
 VPRIV bool a64_udivconst_ok(ecx *e, val a, const em_udivconst_recipe *r);
 VPRIV val a64_udivconst(ecx *e, val a, const em_udivconst_recipe *r);
+/* opt/sdivconst.c: reciprocal for a positive divisor magnitude. Signed high
+ * product, optional numerator addition, arithmetic shift, then sign correction. */
+typedef struct em_sdivconst_recipe {
+	uint64_t divisor;
+	int64_t magic;
+	uint8_t bits, shift;
+	bool add, negative, remainder;
+} em_sdivconst_recipe;
+VPRIV bool em_sdivconst32(int32_t divisor, bool remainder, em_sdivconst_recipe *r);
+VPRIV bool em_sdivconst64(int64_t divisor, bool remainder, em_sdivconst_recipe *r);
+VPRIV bool em_sdivconst(cc *c, qty ty, int op, i128 rhs, em_sdivconst_recipe *r);
+VPRIV bool a64_sdivconst_ok(ecx *e, val a, const em_sdivconst_recipe *r);
+VPRIV val a64_sdivconst(ecx *e, val a, const em_sdivconst_recipe *r);
 /* opt/identity.c */
 enum { EM_ID_NONE, EM_ID_LEFT, EM_ID_ZERO, EM_ID_ONES };
 VPRIV int em_bin_identity(cc *c, qty ty, int op, i128 rhs);
@@ -550,6 +569,10 @@ enum { EM_SWITCH_LINEAR, EM_SWITCH_TREE, EM_SWITCH_TABLE };
 VPRIV int em_switch_strategy(uint32_t n, i128 lo, i128 hi, bool ranges, bool tables);
 VPRIV bool em_switch_prepare(em_switch_case *cases, uint32_t n, unsigned bits, bool sg);
 /* opt/locals.c: eligibility and bounded selection from the existing prepass. */
+/* opt/tail.c: exact direct forwarding wrappers; target capability/ABI checks follow. */
+VPRIV bool em_tail_candidate(ecx *e, uint32_t fn, uint32_t expr, uint32_t maxargs, uint32_t *callee);
+VPRIV bool a64_tail_return(ecx *e, uint32_t expr);
+VPRIV uint32_t a64_tail_ref(const ecx *e);
 VPRIV bool em_local_eligible(ecx *e, uint32_t s);
 VPRIV bool em_local_gpr_type(cc *c, qty ty);
 VPRIV unsigned em_select_locals(ecx *e, uint32_t fn, uint32_t *cand, unsigned max,
@@ -753,6 +776,7 @@ VPRIV val f_cast(ecx *e, val v, qty from, qty to);
 /* arith.c */
 VPRIV val cast(ecx *e, val v, qty from, qty to, int kind);
 VPRIV val a64_sdivpow2(ecx *e, val a, const em_sdivpow2_recipe *r);
+VPRIV bool a64_mulconst(ecx *e, qty ty, int r, i128 rhs);
 VPRIV void shift_imm(ecx *e, int op, int x, int rd, int rn, int k);
 VPRIV val arith(ecx *e, int op, qty ty, val a, val b);
 VPRIV val arith2(ecx *e, int op, qty ty, val a, val b);

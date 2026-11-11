@@ -1,6 +1,7 @@
-/* Unsigned32 reciprocal recipes use baseline scalar A64 instructions only.
- * At most 12 instructions including normalization/constants and remainder;
- * recipes without correction merge high-half extraction with the final shift. */
+/* Unsigned reciprocal recipes use baseline scalar A64 instructions only.
+ * At most 12 instructions for unsigned32, 14 for unsigned64, including
+ * normalization/constants and remainder (64-bit constants need up to four).
+ * Unsigned32 recipes without correction merge extraction and final shift. */
 #include "../../../emit/emitimpl.h"
 
 /* One magic/divisor register plus a distinct quotient for correction/rem.
@@ -14,36 +15,44 @@ VPRIV bool a64_udivconst_ok(ecx *e, val a, const em_udivconst_recipe *r)
 
 VPRIV val a64_udivconst(ecx *e, val a, const em_udivconst_recipe *r)
 {
+	int x = r->bits == 64;
 	int n = toreg(e, &a);
 	int q = r->add || r->remainder ? treg(e) : n;
 	int m = treg(e);
 
 	/* A lazy narrowing cast may leave high garbage. MADD below is 64-bit. */
-	extend(e, n, n, 4, false);
+	if (!x)
+		extend(e, n, n, 4, false);
 	if (r->compare) {
-		movi(e, 0, m, r->divisor);
-		op3(e, I_SUBS, 0, ZR, n, m);
+		movi(e, x, m, (int64_t)r->divisor);
+		op3(e, I_SUBS, x, ZR, n, m);
 		cset(e, q, C_HS);
 	} else {
-		movi(e, 0, m, r->magic);
-		op4(e, I_MADD, 1, q, n, m, ZR);
+		movi(e, x, m, (int64_t)r->magic);
+		if (x)
+			op3(e, I_UMULH, 1, q, n, m);
+		else
+			op4(e, I_MADD, 1, q, n, m, ZR);
 		if (!r->add) {
-			shift_imm(e, I_LSRV, 1, r->remainder ? q : n, q, 32 + r->shift);
+			if (!x || r->shift)
+				shift_imm(e, I_LSRV, 1, r->remainder ? q : n, q,
+				          (x ? 0 : 32) + r->shift);
 		} else {
-			shift_imm(e, I_LSRV, 1, q, q, 32);
-			op3(e, I_SUB, 0, m, n, q);
-			shift_imm(e, I_LSRV, 0, m, m, 1);
-			op3(e, I_ADD, 0, q, m, q);
+			if (!x)
+				shift_imm(e, I_LSRV, 1, q, q, 32);
+			op3(e, I_SUB, x, m, n, q);
+			shift_imm(e, I_LSRV, x, m, m, 1);
+			op3(e, I_ADD, x, q, m, q);
 			if (r->shift)
-				shift_imm(e, I_LSRV, 0, r->remainder ? q : n, q, r->shift);
+				shift_imm(e, I_LSRV, x, r->remainder ? q : n, q, r->shift);
 			else if (!r->remainder)
-				mov(e, 0, n, q);
+				mov(e, x, n, q);
 		}
 	}
 	if (r->remainder) {
 		if (!r->compare)
-			movi(e, 0, m, r->divisor);
-		op4(e, I_MSUB, 0, n, q, m, n);
+			movi(e, x, m, (int64_t)r->divisor);
+		op4(e, I_MSUB, x, n, q, m, n);
 	}
 	if (q != n)
 		tfree(e, q);

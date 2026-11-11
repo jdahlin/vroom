@@ -1049,6 +1049,10 @@ static void wk_stmt1(ecx *e, uint32_t n)
 		return;
 	}
 	case N_RETURN:
+		if (LO(tail_return)(e, x->a)) {
+			e->reach = false;
+			return;
+		}
 		if (W->inl) {
 			/* an inlined call's return: the value to its slot, then past the body */
 			wkinl *I = W->inl;

@@ -295,6 +295,7 @@ typedef struct cc_opts {	/* fields before outfd: parse options, all in the decl 
 	int dump_layouts;	/* append _Static_assert checks for clang to verify */
 	/* Before outfd so declaration-cache identity includes the frame policy. */
 	int omit_frame_pointer; /* x86: permit frame-free leaf omission; explicit flags win */
+	int sibling_calls; /* 0: optimization-level default, 1: explicit enable, -1: explicit disable */
 	int outfd;
 	int emit;		/* generate code (emit/): 1 = assembly text to outfd, 2 = object into obj */
 	int opt;		/* -O level for code generation: 0 (default, -O0), 1 (-O1, -Og), 2 (-O2, -O3, -Os, -Oz, -O) */
