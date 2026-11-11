@@ -2847,7 +2847,7 @@ static val wk_builtin(ecx *e, uint32_t n)
 		if (e->wk->nvla) {
 			int sp = LO(spget)(e);
 
-			for (int i = 0; i < e->wk->nvla; ++i) {
+			for (int i = e->wk->inl ? e->wk->inl->vbase : 0; i < e->wk->nvla; ++i) {
 				lval saved = { .k = L_FRAME, .off = wk_local(e, e->wk->vla[i]) + 8, .align = 8 };
 				LO(store)(e, sp, &saved, 8);
 			}

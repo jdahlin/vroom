@@ -263,6 +263,15 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
   T1/T3 `atomic-threads.c` (4 threads × 1M `x++` on `_Atomic int`,
   `_Atomic long double`, `_Atomic struct{char[3]}` → exact count);
   `_Static_assert(sizeof/alignof)` cases in `vcc-sema.py layout` style.
+- [x] **Inlined alloca accumulates across repeated calls** [P]. Linux x86/ARM
+  restore the inline function's entry SP at its common return label, after
+  argument evaluation. Callee alloca no longer rewrites caller VLA restore
+  points. Direct allocations in the containing function retain function
+  lifetime. Regression `inline_alloca_lifetime.c` covers nested inline calls,
+  early returns and live caller VLA/alloca objects; unchanged GCC
+  `gcc.dg/pr113596.c` retains its `-O2` contract.
+  *Validate:* unity/file builds, own x86 then ARM/QEMU suites, O0 regression,
+  and kernel sema run/batch; evidence `work/results/pr113596/validation.json`.
 - [x] **VLA pointer `++`/`--`/`+=`/`-=`/difference ignore runtime size** [P].
   Done (emit/expr.c: assign_op, incdec_op, pointer difference).  Found
   with it: `int a[6][n]` (constant outer bound) was laid out as a 0-byte

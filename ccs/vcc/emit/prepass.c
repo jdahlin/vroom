@@ -378,6 +378,8 @@ static int walk(pre *P, uint32_t n)
 	}
 		/* fall through */
 	case N_BUILTIN:
+		if (x->op == N_BUILTIN && (x->aux == BI_ALLOCA || x->aux == BI_ALLOCA_UNINIT))
+			P->E->nflags[c->syms[P->fn].body] |= NA_ALLOCA;
 		for (uint32_t i = 0; i < x->c; i++)
 			lab |= walk(P, c->lists[x->b + i]);
 		/*

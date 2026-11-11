@@ -51,6 +51,7 @@ typedef struct wkinl {
 	qty rty;
 	int64_t rslot;		/* the result's slot (a value held by address: its object) */
 	int cbase;		/* the cleanups live at the call */
+	int vbase;		/* caller VLA saves must outlive callee alloca */
 	bool any, cst_ok;	/* a return seen; every return so far the constant cst */
 	val cst;
 	wkael ael0[16];		/* the caller's known array elements at the call (restored after the copy) */

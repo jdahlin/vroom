@@ -80,6 +80,17 @@ kan gå parallellt.
 
 ## Status
 
+### Status 2026-11-11: G1/G4, livstid för inlinad alloca
+
+På basen `103cdee` återställs stacken vid den inlinade funktionens gemensamma
+returpunkt på Linux x86/ARM, efter argumentens evaluering. Anroparens VLA-
+sparpunkter ändras inte av den inlinade funktionens alloca. GCC:s oförändrade
+`gcc.dg/pr113596.c` behåller `-O2`; regressionen täcker nästlad inlining,
+tidiga returer och levande VLA/alloca i anroparen, även vid `-O0`.
+Resultat från unity/separatfilbygge, egna körsviter och semantik run/batch:
+`work/results/pr113596/validation.json`. Hela S4 har inte körts om;
+G1/G4 och andra mål förblir separata öppna grindar.
+
 ### Status 2026-11-11: G5/G7, wasm frame-cell forwarding
 
 Wasm32/64 använder nu den gemensamma cell-/värdekärnan för exakta

@@ -473,6 +473,7 @@ VPRIV val inline_call(ecx *e, uint32_t s, carg *args, int n, uint32_t call)
 	const node *body = N(y->body);
 	fnctx F;
 	qty rty = T(c, y->ty)->base;
+	int64_t saved_sp = 0;
 	val res;
 
 	walk_fn(e, s);
@@ -551,6 +552,13 @@ VPRIV val inline_call(ecx *e, uint32_t s, carg *args, int n, uint32_t call)
 			val_free(e, &v);
 		}
 	}
+	if (e->E->nflags[y->body] & NA_ALLOCA) {
+		int r = treg(e);
+		saved_sp = slot(e, 8, 8);
+		mov(e, 1, r, SP);
+		mem(e, I_ST, 3, 0, r, FRAME, saved_sp);
+		tfree(e, r);
+	}
 	e->f = &F;
 	e->inline_depth++;
 	e->E->ninl++;
@@ -558,6 +566,12 @@ VPRIV val inline_call(ecx *e, uint32_t s, carg *args, int n, uint32_t call)
 	e->inline_depth--;
 	e->f = F.up;
 	deflabel(e, F.retlbl);
+	if (saved_sp) {
+		int r = treg(e);
+		mem(e, I_LD, 3, 0, r, FRAME, saved_sp);
+		mov(e, 1, SP, r);
+		tfree(e, r);
+	}
 	for (int i = 0; i < (int)body->aux; i++) {
 		bind *b = binding(e, c->lists[body->a + i]);
 
