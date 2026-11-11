@@ -123,6 +123,7 @@ struct As {
 	uint32_t nralias, raliascap;
 	int x64_lock, x64_isz;	/* x86: "lock insn" on one line (after 0x66, as MC); the operation's size (a constant immediate is taken at it) */
 	int x64_code32;		/* x86: after .code32 (until .code64): no REX, 32-bit addresses */
+	int x64_kmask, x64_kz;	/* x86: the instruction's {%kN} (N, 0 none) and {z} (AVX-512) */
 	char msg[4096];		/* the errors so far, one per line group (clang goes on after one) */
 	uint32_t mlen, nerr;
 	int err;

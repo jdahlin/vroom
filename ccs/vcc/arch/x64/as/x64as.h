@@ -9,7 +9,7 @@
 #include <stdbool.h>
 #include "../../../as/asimpl.h"
 
-enum { XR_NONE, XR_GPR, XR_XMM, XR_ST, XR_SEG, XR_RIP, XR_CR, XR_DR };
+enum { XR_NONE, XR_GPR, XR_XMM, XR_ST, XR_SEG, XR_RIP, XR_CR, XR_DR, XR_K };	/* XR_XMM: xmm/ymm/zmm 0-31 (size 16/32/64); XR_K: k0-k7 */
 enum { XK_REG, XK_IMM, XK_MEM, XK_EXPR };	/* XK_EXPR: a bare expression (branch target, absolute memory) */
 /* relocation modifiers: sym@MOD */
 enum { XM_NONE, XM_PLT, XM_GOTPCREL, XM_TPOFF, XM_GOTTPOFF, XM_TLSGD, XM_TLSLD, XM_DTPOFF, XM_GOTOFF, XM_GOT };
@@ -49,6 +49,7 @@ typedef struct {
 	int gotx;
 	int oreg;			/* a register in the last opcode byte, + 1 (0: none) */
 	int vex, vvvv, vl;		/* VEX: the second source (0..15), 256-bit; the map from op (0f, 0f 38, 0f 3a) */
+	int evex, ll, dn;		/* EVEX (with vex set): L'L (0 128, 1 256, 2 512), the disp8 scale N */
 } XForm;
 #define F(...) ((XForm){ __VA_ARGS__ })
 
@@ -84,6 +85,7 @@ VPRIV int x64_i_setcc(As *a, char *mn, XOp *o, int nops);
 VPRIV int x64_i_x87(As *a, char *mn, XOp *o, int nops);
 VPRIV int x64_i_sse(As *a, char *mn, XOp *o, int nops);
 VPRIV int x64_i_avx(As *a, char *mn, XOp *o, int nops);
+VPRIV int x64_i_evex(As *a, char *mn, XOp *o, int nops);
 VPRIV int x64_i_sse4(As *a, char *mn, XOp *o, int nops);
 VPRIV int x64_i_ssepk(As *a, char *mn, XOp *o, int nops);
 VPRIV int x64_i_bits(As *a, char *mn, XOp *o, int nops);

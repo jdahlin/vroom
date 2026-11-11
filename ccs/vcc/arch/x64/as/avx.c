@@ -71,6 +71,18 @@ VPRIV int x64_i_avx(As *a, char *mn, XOp *o, int nops)
 				}
 				if (vx[i].form == 1)
 					f.vvvv = 0;	/* (1111 after inversion) */
+				/* MC: a commutative operation takes the 2-byte VEX when swapping its sources frees VEX.B */
+				if (vx[i].form == 0 && !vx[i].imm && vx[i].map == 1 && !vx[i].w && rm->kind == XK_REG && (rm->reg & 8) &&
+				    !(f.vvvv & 8) &&
+				    (!strcmp(mn, "vpxor") || !strcmp(mn, "vpor") || !strcmp(mn, "vpand") || !strcmp(mn, "vpaddd") ||
+				     !strcmp(mn, "vpaddq") || !strcmp(mn, "vpaddb") || !strcmp(mn, "vpaddw") || !strcmp(mn, "vpmuludq") ||
+				     !strcmp(mn, "vpcmpeqd") || !strcmp(mn, "vpcmpeqb") || !strcmp(mn, "vxorps") || !strcmp(mn, "vxorpd") ||
+				     !strcmp(mn, "vandps") || !strcmp(mn, "vorps"))) {
+					int t = f.vvvv;
+
+					f.vvvv = rm->reg;
+					((XOp *)rm)->reg = (uint8_t)t;
+				}
 				if (vx[i].imm) {
 					x64_imm(a, &o[0], &f, &c);
 					f.imm = c;
@@ -208,6 +220,18 @@ VPRIV int x64_i_avx(As *a, char *mn, XOp *o, int nops)
 			}
 		}
 	}
+	/* kmovb/w/d/q between a GPR and a mask register: VEX 0f 92 (to k) / 93 (from k) */
+	if (nops == 2 && !strncmp(mn, "kmov", 4) && mn[4] && !mn[5] && strchr("bwdq", mn[4])) {
+		int to = o[1].kind == XK_REG && o[1].cls == XR_K;
+		XOp *k = to ? &o[1] : &o[0], *g = to ? &o[0] : &o[1];
+		char s = mn[4];
+		uint8_t ops[2] = { 0x0f, (uint8_t)(to ? 0x92 : 0x93) };
+
+		if (k->kind != XK_REG || k->cls != XR_K || g->kind != XK_REG || g->cls != XR_GPR)
+			return err(a, "invalid operand for instruction");
+		return x64_emit(a, &F(.w = s == 'q', .opsz16 = s == 'b', .rep = s == 'q' || s == 'd' ? 0xf2 : 0, .op = ops, .nop = 2,
+				      .reg = to ? k->reg : g->reg, .rm = to ? g : k, .vex = 1));
+	}
 	/* rorx $imm, r/m, r (BMI2: VEX f2 0f3a f0) */
 	if (nops == 3 && !strncmp(mn, "rorx", 4) && o[0].kind == XK_IMM && o[2].kind == XK_REG && o[2].cls == XR_GPR) {
 		uint8_t ops[3] = { 0x0f, 0x3a, 0xf0 };
@@ -221,4 +245,110 @@ VPRIV int x64_i_avx(As *a, char *mn, XOp *o, int nops)
 		return x64_emit(a, &f);
 	}
 	return X64_NEXT;
+}
+
+/* ---- AVX-512 (EVEX): the instructions the kernel's crypto uses, and the
+   AVX ones whenever an operand needs EVEX (zmm, xmm16-31, a mask) ---- */
+VPRIV int x64_i_evex(As *a, char *mn, XOp *o, int nops)
+{
+	/* form 0: [imm,] rm, vvvv, reg; 1: [imm,] rm, reg; 2: imm, rm, vvvv = dst (/d); 3: [imm,] reg, rm (store)
+	   w: 0 W0 (and WIG), 1 W1; n: the disp8 scale, 0 the vector length; only: no VEX form */
+	static const struct { const char *n; uint8_t pp, map, op, form, w, imm, d, dn, only; } ev[] = {
+		{ "vpxord", 1, 1, 0xef, 0, 0, 0, 0, 0, 1 }, { "vpxorq", 1, 1, 0xef, 0, 1, 0, 0, 0, 1 },
+		{ "vpord", 1, 1, 0xeb, 0, 0, 0, 0, 0, 1 }, { "vporq", 1, 1, 0xeb, 0, 1, 0, 0, 0, 1 },
+		{ "vpandd", 1, 1, 0xdb, 0, 0, 0, 0, 0, 1 }, { "vpandq", 1, 1, 0xdb, 0, 1, 0, 0, 0, 1 },
+		{ "vpandnd", 1, 1, 0xdf, 0, 0, 0, 0, 0, 1 }, { "vpandnq", 1, 1, 0xdf, 0, 1, 0, 0, 0, 1 },
+		{ "vpternlogd", 1, 3, 0x25, 0, 0, 1, 0, 0, 1 }, { "vpternlogq", 1, 3, 0x25, 0, 1, 1, 0, 0, 1 },
+		{ "vprord", 1, 1, 0x72, 2, 0, 1, 0, 0, 1 }, { "vprorq", 1, 1, 0x72, 2, 1, 1, 0, 0, 1 },
+		{ "vprold", 1, 1, 0x72, 2, 0, 1, 1, 0, 1 }, { "vprolq", 1, 1, 0x72, 2, 1, 1, 1, 0, 1 },
+		{ "vpermi2d", 1, 2, 0x76, 0, 0, 0, 0, 0, 1 }, { "vpermi2q", 1, 2, 0x76, 0, 1, 0, 0, 0, 1 },
+		{ "vpermt2d", 1, 2, 0x7e, 0, 0, 0, 0, 0, 1 }, { "vpermt2q", 1, 2, 0x7e, 0, 1, 0, 0, 0, 1 },
+		{ "vbroadcasti32x4", 1, 2, 0x5a, 1, 0, 0, 0, 16, 1 }, { "vbroadcasti64x2", 1, 2, 0x5a, 1, 1, 0, 0, 16, 1 },
+		{ "vbroadcasti32x8", 1, 2, 0x5b, 1, 0, 0, 0, 32, 1 }, { "vbroadcasti64x4", 1, 2, 0x5b, 1, 1, 0, 0, 32, 1 },
+		{ "vextracti32x4", 1, 3, 0x39, 3, 0, 1, 0, 16, 1 }, { "vextracti64x2", 1, 3, 0x39, 3, 1, 1, 0, 16, 1 },
+		{ "vextracti32x8", 1, 3, 0x3b, 3, 0, 1, 0, 32, 1 }, { "vextracti64x4", 1, 3, 0x3b, 3, 1, 1, 0, 32, 1 },
+		{ "vinserti32x4", 1, 3, 0x38, 0, 0, 1, 0, 16, 1 }, { "vinserti64x2", 1, 3, 0x38, 0, 1, 1, 0, 16, 1 },
+		{ "vinserti32x8", 1, 3, 0x3a, 0, 0, 1, 0, 32, 1 }, { "vinserti64x4", 1, 3, 0x3a, 0, 1, 1, 0, 32, 1 },
+		/* with a VEX form too */
+		{ "vaesenc", 1, 2, 0xdc, 0, 0, 0, 0, 0, 0 }, { "vaesenclast", 1, 2, 0xdd, 0, 0, 0, 0, 0, 0 },
+		{ "vaesdec", 1, 2, 0xde, 0, 0, 0, 0, 0, 0 }, { "vaesdeclast", 1, 2, 0xdf, 0, 0, 0, 0, 0, 0 },
+		{ "vpclmulqdq", 1, 3, 0x44, 0, 0, 1, 0, 0, 0 }, { "vpshufb", 1, 2, 0x00, 0, 0, 0, 0, 0, 0 },
+		{ "vpaddd", 1, 1, 0xfe, 0, 0, 0, 0, 0, 0 }, { "vpaddq", 1, 1, 0xd4, 0, 1, 0, 0, 0, 0 },
+		{ "vpsubd", 1, 1, 0xfa, 0, 0, 0, 0, 0, 0 }, { "vpsubq", 1, 1, 0xfb, 0, 1, 0, 0, 0, 0 },
+		{ "vpunpcklqdq", 1, 1, 0x6c, 0, 1, 0, 0, 0, 0 }, { "vpunpckhqdq", 1, 1, 0x6d, 0, 1, 0, 0, 0, 0 },
+		{ "vpalignr", 1, 3, 0x0f, 0, 0, 1, 0, 0, 0 }, { "vpshufd", 1, 1, 0x70, 1, 0, 1, 0, 0, 0 },
+		{ "vpslld", 1, 1, 0x72, 2, 0, 1, 6, 0, 0 }, { "vpsrld", 1, 1, 0x72, 2, 0, 1, 2, 0, 0 },
+		{ "vpsllq", 1, 1, 0x73, 2, 1, 1, 6, 0, 0 }, { "vpsrlq", 1, 1, 0x73, 2, 1, 1, 2, 0, 0 },
+		{ "vpslldq", 1, 1, 0x73, 2, 0, 1, 7, 0, 0 }, { "vpsrldq", 1, 1, 0x73, 2, 0, 1, 3, 0, 0 },
+		{ "vpbroadcastd", 1, 2, 0x58, 1, 0, 0, 0, 4, 0 }, { "vpbroadcastq", 1, 2, 0x59, 1, 1, 0, 0, 8, 0 },
+	};
+	int need = a->x64_kmask || a->x64_kz, vl = 16;
+
+	if (mn[0] != 'v')
+		return X64_NEXT;
+	for (int i = 0; i < nops; i++)
+		if (o[i].kind == XK_REG && o[i].cls == XR_XMM) {
+			if (o[i].size == 64 || o[i].reg > 15)
+				need = 1;
+			if (o[i].size > vl)
+				vl = o[i].size;
+		}
+	/* moves: vmovdqu8/16/32/64 (f2/f3), vmovdqa32/64 (66): 6f load, 7f store */
+	if (nops == 2 && (!strncmp(mn, "vmovdqu", 7) || !strncmp(mn, "vmovdqa", 7)) && mn[7]) {
+		const char *k = mn + 7;
+		int u = mn[6] == 'u', w = !strcmp(k, "16") || !strcmp(k, "64");
+		int ok = u ? (!strcmp(k, "8") || !strcmp(k, "16") || !strcmp(k, "32") || !strcmp(k, "64")) : (!strcmp(k, "32") || !strcmp(k, "64"));
+		int pp = !u ? 1 : (!strcmp(k, "8") || !strcmp(k, "16")) ? 3 : 2;
+		int store = o[1].kind != XK_REG;
+		XOp *r = store ? &o[0] : &o[1], *m = store ? &o[1] : &o[0];
+		uint8_t ops[2] = { 0x0f, (uint8_t)(store ? 0x7f : 0x6f) };
+
+		if (!ok)
+			return X64_NEXT;
+		if (r->kind != XK_REG || r->cls != XR_XMM)
+			return err(a, "invalid operand for instruction");
+		if (m->kind == XK_EXPR)
+			m->kind = XK_MEM;
+		return x64_emit(a, &F(.w = w, .opsz16 = pp == 1, .rep = pp == 2 ? 0xf3 : pp == 3 ? 0xf2 : 0, .op = ops, .nop = 2,
+				      .reg = r->reg, .rm = m, .vex = 1, .evex = 1, .ll = vl == 64 ? 2 : vl == 32, .dn = vl));
+	}
+	for (size_t i = 0; i < sizeof ev / sizeof *ev; i++) {
+		int want = (ev[i].form == 0 ? 3 : 2) + ev[i].imm;
+
+		if (strcmp(mn, ev[i].n) || nops != want || (ev[i].imm && o[0].kind != XK_IMM))
+			continue;
+		/* a GPR source: vpbroadcastd/q %r, %zmm (7c) */
+		XOp *rm = &o[ev[i].imm], *dst = &o[nops - 1];
+		int op = ev[i].op;
+
+		if ((!strcmp(mn, "vpbroadcastd") || !strcmp(mn, "vpbroadcastq")) && rm->kind == XK_REG && rm->cls == XR_GPR)
+			op = 0x7c, need = 1;
+		if (!ev[i].only && !need)
+			return X64_NEXT;	/* (the VEX form) */
+		{
+			uint8_t ops3[3] = { 0x0f, (uint8_t)(ev[i].map == 2 ? 0x38 : 0x3a), (uint8_t)op };
+			uint8_t ops2[2] = { 0x0f, (uint8_t)op };
+			int64_t c = 0;
+			XForm f = F(.w = ev[i].w, .opsz16 = ev[i].pp == 1, .rep = ev[i].pp == 2 ? 0xf3 : ev[i].pp == 3 ? 0xf2 : 0,
+				    .op = ev[i].map == 1 ? ops2 : ops3, .nop = ev[i].map == 1 ? 2 : 3, .isz = ev[i].imm, .vex = 1, .evex = 1,
+				    .ll = vl == 64 ? 2 : vl == 32, .dn = ev[i].dn ? ev[i].dn : vl);
+
+			if (rm->kind == XK_EXPR)
+				rm->kind = XK_MEM;
+			switch (ev[i].form) {
+			case 0: f.reg = dst->reg, f.rm = rm, f.vvvv = o[ev[i].imm + 1].reg; break;
+			case 1: f.reg = dst->reg, f.rm = rm; break;
+			case 2: f.reg = ev[i].d, f.rm = rm, f.vvvv = dst->reg; break;
+			case 3: f.reg = rm->reg, f.rm = dst; f.ll = rm->size == 64 ? 2 : rm->size == 32; break;
+			}
+			if (dst->kind == XK_EXPR)
+				dst->kind = XK_MEM;
+			if (ev[i].imm) {
+				x64_imm(a, &o[0], &f, &c);
+				f.imm = c;
+			}
+			return x64_emit(a, &f);
+		}
+	}
+	return need ? err(a, "unsupported AVX-512 instruction") : X64_NEXT;
 }
