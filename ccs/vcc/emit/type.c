@@ -4,17 +4,17 @@
 VPRIV i128 em_trunc_to(cc *c, i128 v, qty t)
 {
 	int k = KIND(c, t);
-	uint64_t sz;
+	unsigned bits;
 
 	if (k == TY_BOOL)
 		return v != 0;
 	if (k == TY_PTR)
 		return (i128)(uint64_t)v;
-	sz = tsize(c, t);
-	if (sz >= 16)
+	bits = is_integer(c, t) && T(c, t)->n && !(T(c, t)->flags & TF_ATOMIC) ?
+		T(c, t)->n : (unsigned)tsize(c, t) * 8;
+	if (bits >= 128)
 		return is_signed(c, t) ? v : (i128)(u128)v;
 	{
-		unsigned bits = (unsigned)sz * 8;
 		u128 m = ((u128)1 << bits) - 1;
 		u128 x = (u128)v & m;
 
@@ -30,10 +30,14 @@ static const char *const fixed_names[] = {
 	"memcpy", "memset", "memmove", "__udivti3", "__divti3", "__umodti3", "__modti3", "strlen",
 	"__ashlti3", "__lshrti3", "__ashrti3", "__floattisf", "__floattidf", "__floatuntisf", "__floatuntidf",
 	"__fixsfti", "__fixdfti", "__fixunssfti", "__fixunsdfti",
-	"__addtf3", "__subtf3", "__multf3", "__divtf3", "__eqtf2", "__netf2", "__lttf2", "__letf2", "__gttf2", "__getf2",
+	"__addtf3", "__subtf3", "__multf3", "__divtf3", "__eqtf2", "__netf2", "__lttf2", "__letf2", "__gttf2", "__getf2", "__unordtf2",
 	"__extenddftf2", "__extendsftf2", "__trunctfdf2", "__trunctfsf2", "__floatsitf", "__floatditf", "__floatunsitf",
 	"__floatunditf", "__floattitf", "__floatuntitf", "__fixtfsi", "__fixtfdi", "__fixunstfsi", "__fixunstfdi",
-	"__fixtfti", "__fixunstfti",
+	"__fixtfti", "__fixunstfti", "__extendxftf2", "__trunctfxf2",
+	"__extendbfsf2", "__truncsfbf2", "__truncdfbf2", "__truncxfbf2", "__trunctfbf2",
+	"__extendhfsf2", "__truncsfhf2", "__truncdfhf2", "__truncxfhf2", "__trunctfhf2",
+	"__floattixf", "__floatuntixf", "__fixxfti", "__fixunsxfti",
+	"floorf", "ceilf", "truncf", "roundf", "rintf", "nearbyintf", "fabsf",
 };
 
 VPRIV uint32_t canon_sym(cc *c, uint32_t s)
@@ -69,10 +73,14 @@ VPRIV void sym_name(cc *c, tbuf *b, uint32_t s)
 	}
 	if (DARWIN(c))
 		tb_c(b, '_');
-	if (WASM(c) && sym_quoted(c, s)) {
-		/* LLVM's wasm assembler takes only ASCII names unquoted (as clang writes them) */
+	if ((WASM(c) || X86(c)) && sym_quoted(c, s)) {
+		/* LLVM's wasm and x86 assemblers require quotes around non-ASCII names. */
 		tb_c(b, '"');
 		tb_put(b, vintern_ents[y->name].s, vintern_ents[y->name].len);
+		if (y->depth > 0 && y->kind == S_VAR && y->sc == SC_STATIC) {
+			tb_c(b, '.');
+			tb_u(b, s);
+		}
 		tb_c(b, '"');
 		return;
 	}
@@ -83,7 +91,7 @@ VPRIV void sym_name(cc *c, tbuf *b, uint32_t s)
 	}
 }
 
-/* wasm: the name needs quotes (a byte outside ASCII; never with an asm label) */
+/* wasm/x86 assembly: non-ASCII names need quotes (asm labels are explicit). */
 VPRIV bool sym_quoted(cc *c, uint32_t s)
 {
 	const sym *y;

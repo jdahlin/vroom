@@ -78,7 +78,7 @@ VPRIV int regvar_reg(cc *c, uint32_t s)
 	return -1;
 }
 
-VPRIV int32_t bind_slot(ecx *e, uint32_t s)
+VPRIV int64_t bind_slot(ecx *e, uint32_t s)
 {
 	cc *c = e->c;
 	bind *b = binding(e, s);
@@ -178,15 +178,6 @@ VPRIV lval local_lval(ecx *e, uint32_t s)
 	l.k = L_FRAME;
 	l.off = b->slot;
 	return l;
-}
-
-VPRIV uint32_t sym_align(cc *c, uint32_t s)
-{
-	uint32_t a = talign(c, c->syms[s].ty);
-
-	if (c->syms[s].align > a)
-		a = c->syms[s].align;
-	return a;
 }
 
 VPRIV bool is_local_var(cc *c, uint32_t s)

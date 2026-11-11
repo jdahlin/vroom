@@ -101,12 +101,20 @@ VPRIV void sym_header(ecx *e, tbuf *b, uint32_t s, bool fn, const char *defsec, 
 	tb_s(b, fn ? "\n\t.type\t" : "\n\t.type\t");
 	sym_name(c, b, s);
 	tb_s(b, fn ? ",@function\n" : ",@object\n");
+	if (fn && X86(c) && c->o->pfe_m) {
+		/* -fpatchable-function-entry=N,M: M nops before the entry, recorded for ftrace */
+		tb_s(b, ".Lpfe");
+		tb_u(b, s);
+		tb_s(b, ":\n");
+		for (int k = 0; k < c->o->pfe_m; k++)
+			tb_s(b, "\tnop\n");
+	}
 	sym_name(c, b, s);
 	tb_s(b, ":\n");
 }
 
 /* a constructor's or destructor's pointer: .init_array[.prio] / .fini_array[.prio], as clang */
-static void ctor_entry(cc *c, tbuf *b, uint32_t s, bool fini)
+VPRIV void ctor_entry(cc *c, tbuf *b, uint32_t s, bool fini)
 {
 	const attrs *a = sym_attrs(c, s);
 
@@ -115,14 +123,15 @@ static void ctor_entry(cc *c, tbuf *b, uint32_t s, bool fini)
 		tb_c(b, '.');
 		tb_u(b, a->prio);
 	}
-	tb_s(b, fini ? ",\"aw\",@fini_array\n\t.p2align\t3\n\t.xword\t" : ",\"aw\",@init_array\n\t.p2align\t3\n\t.xword\t");
+	tb_s(b, fini ? ",\"aw\",@fini_array\n\t.p2align\t3\n" : ",\"aw\",@init_array\n\t.p2align\t3\n");
+	tb_s(b, X86(c) ? "\t.quad\t" : "\t.xword\t");
 	sym_name(c, b, s);
 	tb_c(b, '\n');
 }
 
 /* finish_function for the object backend: the same function as items */
 /* ctor: 1 constructor, 2 destructor, 4 x28 is the frame base (mov x28, sp after the saves), 8 no frame (leaf) */
-static void finish_direct(ecx *e, uint32_t s, uint32_t align, const int *cs, int ncs, int32_t csave, int32_t total, int ctor)
+static void finish_direct(ecx *e, uint32_t s, uint32_t align, const int *cs, int ncs, int32_t csave, int64_t total, int ctor)
 {
 	cc *c = e->c;
 	tbuf *b = &e->out;
@@ -130,6 +139,7 @@ static void finish_direct(ecx *e, uint32_t s, uint32_t align, const int *cs, int
 	code_hdr *ch;
 	ins *in;
 	uint32_t n = 0, sym_labels = 0;
+	uint32_t tail = a64_tail_ref(e);
 
 	b->n = (b->n + 7) & ~(size_t)7;
 	start = b->n;
@@ -165,7 +175,10 @@ static void finish_direct(ecx *e, uint32_t s, uint32_t align, const int *cs, int
 		PUT(.op = I_MOV, .sz = 1, .rd = SP, .rn = R_FP);
 		PUT(.op = I_LDP, .sz = 1, .rd = R_FP, .ra = R_LR, .rn = SP, .cond = 2, .imm = 16);
 	}
-	PUT(.op = I_RET);
+	if (tail)
+		PUT(.op = I_TAIL, .cond = 1, .ref = tail);
+	else
+		PUT(.op = I_RET);
 #undef PUT
 	/* give back the unused room, then the inline asm text */
 	b->n -= ((size_t)e->nin + 2 * (size_t)ncs + 8 - n) * sizeof(ins);
@@ -191,30 +204,26 @@ static void finish_direct(ecx *e, uint32_t s, uint32_t align, const int *cs, int
 	out_chunk(e, (uint64_t)s << 1, start);
 }
 
-/* drop each b to a label among those right after it: the code falls through anyway */
+typedef struct a64_fallthrough_debug {
+	ecx *e;
+	uint32_t cursor;
+} a64_fallthrough_debug;
+
+static void a64_fallthrough_remap(void *ctx, uint32_t old, uint32_t next)
+{
+	a64_fallthrough_debug *d = ctx;
+
+	dbg_remap(d->e, &d->cursor, old, next);
+}
+
 static void drop_fallthrough(ecx *e)
 {
-	uint32_t n = 0, dj = 0;
+	static const em_rec_layout layout = {
+		sizeof(ins), offsetof(ins, op), offsetof(ins, label), I_B, I_LABEL,
+	};
+	a64_fallthrough_debug d = { e, 0 };
 
-	for (uint32_t k = 0; k < e->nin; k++) {
-		const ins *i = &e->in[k];
-
-		if (e->ndl)
-			dbg_remap(e, &dj, k, n);
-
-		if (i->op == I_B) {
-			uint32_t j = k + 1;
-
-			while (j < e->nin && e->in[j].op == I_LABEL && e->in[j].label != i->label)
-				j++;
-			if (j < e->nin && e->in[j].op == I_LABEL)
-				continue;
-		}
-		e->in[n++] = *i;
-	}
-	if (e->ndl)
-		dbg_remap(e, &dj, UINT32_MAX, n);
-	e->nin = n;
+	e->nin = em_rec_fallthrough(e->in, e->nin, &layout, e->ndl ? a64_fallthrough_remap : NULL, &d);
 }
 
 static void finish_function(ecx *e, uint32_t s)
@@ -223,7 +232,8 @@ static void finish_function(ecx *e, uint32_t s)
 	tbuf *b = &e->out;
 	size_t start = b->n;
 	int cs[16], ncs = 0;
-	int32_t csave, locals, outs, total;
+	int32_t csave;
+	int64_t locals, outs, total;
 	const attrs *a = sym_attrs(c, s);
 	uint32_t align = 4;
 
@@ -234,6 +244,8 @@ static void finish_function(ecx *e, uint32_t s)
 		uint64_t u;
 		const uint32_t csm = (1u << 29) - (1u << 19);	/* x19-x28 */
 
+		if (!e->E->noopt)
+			a64_unreachable(e);
 		drop_fallthrough(e);
 		if (!e->E->noopt)
 			opt_function(e);
@@ -272,8 +284,13 @@ static void finish_function(ecx *e, uint32_t s)
 		if (e->usedcs & (1u << r))
 			cs[ncs++] = r;
 	csave = (ncs * 8 + 15) & ~15;
-	locals = (int32_t)(((uint32_t)e->fmax + e->falign - 1) & ~(e->falign - 1));
-	outs = (int32_t)(((uint32_t)e->outmax + e->falign - 1) & ~(e->falign - 1));
+	if ((uint64_t)e->fmax > (uint64_t)INT64_MAX - e->falign ||
+	    (uint64_t)e->outmax > (uint64_t)INT64_MAX - e->falign)
+		efatal(e, 0, "stack frame too large");
+	locals = (int64_t)(((uint64_t)e->fmax + e->falign - 1) & ~(uint64_t)(e->falign - 1));
+	outs = (int64_t)(((uint64_t)e->outmax + e->falign - 1) & ~(uint64_t)(e->falign - 1));
+	if (locals > INT64_MAX - outs - csave - 16)
+		efatal(e, 0, "stack frame too large");
 	total = 16 + csave + locals + outs;
 	/* rewrite frame-slot references */
 	for (uint32_t k = 0; k < e->nin; k++) {
@@ -392,7 +409,24 @@ static void finish_function(ecx *e, uint32_t s)
 		tb_f(b, "\tldp\tx%d, x%d, [x29, #%d]\n", cs[k], cs[k + 1], -csave + 8 * k);
 	if (ncs & 1)
 		tb_f(b, "\tldr\tx%d, [x29, #%d]\n", cs[ncs - 1], -csave + 8 * (ncs - 1));
-	tb_s(b, leaf ? "\tret\n" : "\tmov\tsp, x29\n\tldp\tx29, x30, [sp], #16\n\tret\n");
+	uint32_t tail = a64_tail_ref(e);
+
+	if (!leaf)
+		tb_s(b, "\tmov\tsp, x29\n\tldp\tx29, x30, [sp], #16\n");
+	if (tail) {
+		if (cfi) {
+			for (int k = 0; k < ncs; k++)
+				tb_f(b, "\t.cfi_restore w%d\n", cs[k]);
+			if (!leaf)
+				tb_s(b, "\t.cfi_restore w29\n\t.cfi_restore w30\n");
+			tb_s(b, "\t.cfi_def_cfa wsp, 0\n");
+		}
+		ins i = { .op = I_TAIL, .cond = 1, .ref = tail };
+
+		print_ins(c, b, &i, s, e->raw.p);
+	} else {
+		tb_s(b, "\tret\n");
+	}
 	if (cfi)
 		tb_s(b, "\t.cfi_endproc\n");
 	tb_s(b, ".Lfe");
@@ -423,35 +457,14 @@ static void finish_function(ecx *e, uint32_t s)
  */
 static void choose_lregs(ecx *e, uint32_t s, int max)
 {
-	cc *c = e->c;
-	emitter *E = e->E;
-	uint32_t lo = E->lspan[2 * s], hi = E->lspan[2 * s + 1];
-	int k = 0;
+	unsigned k;
 	uint32_t cand[MAXLREG];
 
 	e->nlr = 0;
-	if (!max || lo > hi || e->vararg || e->E->o->opt < 1)
+	if (!max || e->vararg || e->E->o->opt < 1)
 		return;
-	for (uint32_t v = lo; v <= hi; v++) {
-		const sym *y = &c->syms[v];
-		qty t = y->ty;
-		int j;
-
-		if (!E->luse[v] || E->lnoreg[v] || y->kind != S_VAR || !is_local_var(c, v) || y->sc == SC_STATIC ||
-		    !(is_integer(c, t) || is_ptr(c, t)) || is_wide(c, t) || (QQ(t) & Q_VOLATILE) ||
-		    tsize(c, t) - 1 >= 8 || (T(c, t)->flags & TF_VLA) || sym_attrs(c, v)->cleanup ||
-		    regvar_reg(c, v) >= 0)
-			continue;
-		if (k == max && E->luse[cand[k - 1]] >= E->luse[v])
-			continue;
-		j = k < max ? k++ : k - 1;
-		while (j > 0 && E->luse[cand[j - 1]] < E->luse[v]) {
-			cand[j] = cand[j - 1];
-			j--;
-		}
-		cand[j] = v;
-	}
-	for (int i = 0; i < k; i++) {
+	k = em_select_locals(e, s, cand, (unsigned)max, em_local_gpr_type);
+	for (unsigned i = 0; i < k; i++) {
 		int r = 28 - i;
 
 		e->lrsym[i] = cand[i];
@@ -550,6 +563,21 @@ static bool emit_function1(ecx *e, uint32_t s, int nlreg)
 			bd->kind = B_SLOT;
 			bd->slot = slot(e, 8, 8);
 			break;
+		case A_BOOL_LANES: {
+			bd->kind = B_SLOT;
+			bd->slot = slot(e, sz, 16);
+			int acc = treg(e), r = treg(e);
+			for (unsigned k = 0; k < T(c, pt)->n; k++) {
+				if (!(k % 8)) movi(e, 1, acc, 0);
+				if (k < ab.nreg) mov(e, 0, r, ab.reg + k);
+				else mem(e, I_LD, 0, 0, r, R_FP, 16 + ab.stk + (k - ab.nreg) * 8);
+				opbf(e, I_UBFM, 1, r, r, 0, 0);
+				op3s(e, I_ORR, 1, acc, acc, r, 0, k % 8);
+				if (k % 8 == 7) mem(e, I_ST, 0, 0, acc, FRAME, bd->slot + k / 8);
+			}
+			tfree(e, acc), tfree(e, r);
+			break;
+		}
 		case A_REG:
 			bd->kind = B_SLOT;
 			bd->slot = slot(e, (sz + 7) & ~(uint64_t)7, talign(c, pt) > 8 ? 16 : 8);

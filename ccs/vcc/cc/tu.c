@@ -52,7 +52,8 @@ static void cc_init(cc *c, pp *p, const cc_opts *o)
 	c->lzs = vmreg_get(&ccr[20], (size_t)1 << 31, "cc.lzs");
 	c->paren = vmreg_get(&ccr[21], (size_t)1 << 30, "cc.paren");
 	c->hend = c->heap + ((size_t)1 << 32);
-	c->dops = halloc(c, DOPS_MAX * sizeof(dop));
+	c->capdops = 4096;
+	c->dops = halloc(c, c->capdops * sizeof(dop));
 	c->ndops = 0;
 	tl_fscr.n = 0;
 	c->tyhcap = 1 << 16;
@@ -109,6 +110,22 @@ static void cc_init(cc *c, pp *p, const cc_opts *o)
 			vl = ty_ptr(c, prim(TY_CHAR));
 		} else if (PP_IS_WASM(o->target)) {
 			vl = ty_ptr(c, prim(TY_VOID));
+		} else if (o->target == PP_LINUX_X86_64) {
+			/* System V: struct __va_list_tag { unsigned gp_offset, fp_offset; void *overflow_arg_area,
+			   *reg_save_area; } __builtin_va_list[1] */
+			uint32_t ti = tag_new(c, TY_STRUCT, vintern_copy("__va_list_tag\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0", 13), 0);
+			tag *r = &c->tags[ti];
+			qty vp = ty_ptr(c, prim(TY_VOID));
+
+			r->f = halloc(c, 4 * sizeof(field));
+			memset(r->f, 0, 4 * sizeof(field));
+			r->nfield = 4;
+			r->f[0].ty = r->f[1].ty = prim(TY_UINT);
+			r->f[2].ty = r->f[3].ty = vp;
+			lay_record(c, r, NULL, NULL);
+			r->flags |= RF_COMPLETE;
+			c->valist_tag = ti;
+			vl = ty_array(c, QT(r->ty, 0), 1, 0);
 		} else {
 			/* struct __va_list { void *__stack, *__gr_top, *__vr_top; int __gr_offs, __vr_offs; } */
 			uint32_t ti = tag_new(c, TY_STRUCT, vintern_copy("__va_list\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0", 9), 0);
@@ -132,6 +149,24 @@ static void cc_init(cc *c, pp *p, const cc_opts *o)
 		sym_bind(c, s);
 		s = sym_new(c, S_TYPEDEF, vintern_copy("__uint128_t\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0", 11), prim(TY_UINT128), 0);
 		sym_bind(c, s);
+		/* Clang exposes these builtin types even without +sve: libc uses them
+		   in declarations. They are distinct sizeless types, not fixed vectors. */
+		if (o->target == PP_LINUX_AARCH64 || o->target == PP_DARWIN) {
+			static const char *const names[] = {
+				"__SVInt8_t", "__SVInt16_t", "__SVInt32_t", "__SVInt64_t",
+				"__SVUint8_t", "__SVUint16_t", "__SVUint32_t", "__SVUint64_t",
+				"__SVFloat16_t", "__SVFloat32_t", "__SVFloat64_t",
+				"__SVBfloat16_t", "__SVMfloat8_t", "__SVBool_t", "__SVCount_t"
+			};
+
+			for (size_t i = 0; i < sizeof(names) / sizeof(names[0]); i++) {
+				uint32_t name = vintern_cstr(names[i]);
+				ctype t = { .kind = TY_SVE, .align = 1, .aux = name };
+
+				s = sym_new(c, S_TYPEDEF, name, QT(ty_intern(c, &t), 0), 0);
+				sym_bind(c, s);
+			}
+		}
 	}
 }
 
@@ -279,7 +314,7 @@ int cc_run(pp *p, const cc_opts *o)
 		for (uint32_t i = 1; i < c->nsym; i++) {
 			const sym *y = &c->syms[i];
 
-			if ((y->flags & (SF_TENTATIVE | SF_DEFINED)) == SF_TENTATIVE && y->kind == S_VAR &&
+			if ((y->flags & (SF_TENTATIVE | SF_DEFINED | SF_INVALID)) == SF_TENTATIVE && y->kind == S_VAR &&
 			    (is_record(c, y->ty) || KIND(c, y->ty) == TY_ENUM) && !complete(c, y->ty) && lookup(c, y->name) == i) {
 				cc_error(c, y->loc, "tentative definition has type '%s' that is never completed", tyname(c, y->ty));
 				note(c, c->tags[T(c, y->ty)->aux].loc, "forward declaration of '%s'", tyname(c, y->ty));

@@ -310,9 +310,9 @@ const uint32_t *pp_diag_nenable_ref(const pp *p)
 }
 
 /* the command line's state of flag; *w: -w (no pragma turns it on) */
-static int wstate(const pp *p, const char *flag, bool on, const char *const *groups, bool *w)
+static int wstate(const pp *p, const char *flag, bool on, const char *const *groups, bool *w, bool deferr)
 {
-	bool err = false, allerr = false, noerr = false;
+	bool err = deferr, allerr = false, noerr = false;
 
 	*w = false;
 
@@ -323,7 +323,7 @@ static int wstate(const pp *p, const char *flag, bool on, const char *const *gro
 		bool hit;
 
 		if (!strcmp(a, "-w")) {
-			on = false;
+			if (!deferr) on = false;
 			continue;
 		}
 		if (!strcmp(a, "-Werror")) { allerr = true; continue; }
@@ -344,13 +344,15 @@ static int wstate(const pp *p, const char *flag, bool on, const char *const *gro
 		hit = !strcmp(n, flag) || !strcmp(n, "everything");
 		for (int g = 0; !hit && groups && groups[g]; g++)
 			hit = !strcmp(n, groups[g]);
-		if (hit)
+		if (hit) {
 			on = !no;
+			if (deferr && no) err = false;
+		}
 	}
 	for (int i = 0; i < p->o->nwargs; i++)
 		if (!strcmp(p->o->wargs[i], "-w")) {
 			*w = true;
-			return 0;
+			if (!deferr || !(err || (allerr && !noerr))) return 0;
 		}
 	if (!on)
 		return 0;
@@ -361,7 +363,7 @@ int pp_wstate(const pp *p, const char *flag, bool on, const char *const *groups)
 {
 	bool w;
 
-	return wstate(p, flag, on, groups, &w);
+	return wstate(p, flag, on, groups, &w, false);
 }
 
 VPRIV void pp_wc_fill(pp *p)
@@ -377,11 +379,25 @@ VPRIV void pp_wc_fill(pp *p)
 int pp_diag_wlevel(pp *p, const char *flag, bool on, const char *const *groups, uint32_t loc)
 {
 	bool w;
-	int st = wstate(p, flag, on, groups, &w);
+	int st = wstate(p, flag, on, groups, &w, false);
 
 	if (unlikely(p->ndtr) && loc != UINT32_MAX && !w)
 		st = dpragma(p, st, flag, groups, loc);
 	if (!st || (loc != UINT32_MAX && pp_in_system_header(p, loc)))
+		return -1;
+	return st == 2 ? VDL_ERROR : VDL_WARNING;
+}
+
+/* A recoverable error: its default severity survives -w/-Wno-error, but
+ * named warning controls and diagnostic pragmas may downgrade or suppress it. */
+int pp_diag_elevel(pp *p, const char *flag, const char *const *groups, uint32_t loc)
+{
+	bool w;
+	int st = wstate(p, flag, true, groups, &w, true);
+
+	if (unlikely(p->ndtr) && loc != UINT32_MAX)
+		st = dpragma(p, st, flag, groups, loc);
+	if (!st || (st != 2 && (w || (loc != UINT32_MAX && pp_in_system_header(p, loc)))))
 		return -1;
 	return st == 2 ? VDL_ERROR : VDL_WARNING;
 }

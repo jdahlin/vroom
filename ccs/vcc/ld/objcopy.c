@@ -822,9 +822,12 @@ static int objcopy_run(int dirfd)
 				sym[i].removed = true;
 		}
 		VAUTOFREE bool *referenced = NULL;
-		if (oc.nunneeded && rel) {
+		/* llvm-objcopy's Symbol::Referenced: named by a kept relocation or group */
+		if ((oc.nunneeded && rel) || oc.nonly) {
 			referenced = xcalloc(nsym, 1);
 			for (uint32_t k = 1; k < ns; k++) {
+				if (!sec[k].removed && sec[k].type == SHT_GROUP && sec[k].info < nsym)
+					referenced[sec[k].info] = true;
 				if (sec[k].removed || sec[k].kind != SK_RELA)
 					continue;
 				const Rela *r = (const Rela *)sec[k].data;
@@ -862,6 +865,9 @@ static int objcopy_run(int dirfd)
 				if (!rel || unneeded)
 					y->removed = true;
 			}
+			/* -j: undefined symbols whose references were all removed go too */
+			if (oc.nonly && y->shndx == SHN_UNDEF && !referenced[i])
+				y->removed = true;
 		}
 		uint32_t idx = 0;
 		for (uint32_t i = 0; i < nsym; i++)

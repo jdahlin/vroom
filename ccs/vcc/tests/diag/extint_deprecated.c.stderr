@@ -1,0 +1,7 @@
+extint_deprecated.c:1:1: warning: '_ExtInt' is deprecated; use '_BitInt' instead [-Wdeprecated-type]
+    1 | _ExtInt(6) value;
+      | ^
+extint_deprecated.c:2:10: warning: '_ExtInt' is deprecated; use '_BitInt' instead [-Wdeprecated-type]
+    2 | unsigned _ExtInt(14) other;
+      |          ^
+2 warnings generated.

@@ -28,6 +28,7 @@
 #include <stdint.h>
 
 #include "../pp/pp.h"
+#include "../lib/x86features.h"
 
 /* ---------------- types ---------------- */
 
@@ -35,9 +36,12 @@ enum {
 	TY_VOID, TY_BOOL,
 	TY_CHAR, TY_SCHAR, TY_UCHAR, TY_SHORT, TY_USHORT, TY_INT, TY_UINT,
 	TY_LONG, TY_ULONG, TY_LLONG, TY_ULLONG, TY_INT128, TY_UINT128,
-	TY_FLOAT16, TY_FLOAT, TY_DOUBLE, TY_LDOUBLE,
+	TY_BFLOAT16, TY_FLOAT16, TY_FLOAT, TY_DOUBLE, TY_LDOUBLE,
+	TY_FLOAT128,	/* __float128 (x86-64): binary128 */
 	TY_PTR, TY_ARRAY, TY_FUNC, TY_STRUCT, TY_UNION, TY_ENUM,
 	TY_VECTOR,	/* GNU vector_size: base element, n lanes */
+	TY_SVE,		/* AArch64 builtin scalable type: sizeless; aux is its interned name */
+	TY_BITINT, TY_UBITINT, /* bit-precise integers wider than 128 bits */
 	TY_NKINDS
 };
 
@@ -66,7 +70,7 @@ typedef struct ctype {
 	uint32_t align;		/* bytes */
 	uint64_t size;		/* bytes; arrays: elem size * n */
 	qty base;		/* pointee / element / return / enum underlying */
-	uint32_t n;		/* array length; function: number of params; VLA: size node */
+	uint32_t n;		/* integer: _BitInt precision (0: standard); array length; function: params; VLA: size node */
 	uint32_t aux;		/* function: index into params; record/enum: tag index */
 	uint32_t canon;		/* canonical type index (itself unless an aligned variant) */
 } ctype;
@@ -77,6 +81,7 @@ typedef struct field {
 	uint32_t name;		/* identifier id, 0 for anonymous members and unnamed bit-fields */
 	qty ty;
 	uint64_t off;		/* bits */
+	uint32_t align;		/* effective field alignment, including packed/aligned/pragma pack */
 	uint16_t width;		/* bit-field width */
 	uint8_t bitfield;
 	uint8_t invalid;	/* its type was an error: uses say nothing more (clang) */
@@ -89,6 +94,8 @@ typedef struct field {
 enum {
 	RF_COMPLETE = 1, RF_UNION = 2, RF_PACKED = 4, RF_FLEX = 8, RF_ENUM = 16,
 	RF_BEING_DEFINED = 32,
+	RF_ENUM_FIXED = 256, RF_ENUM_DEFINED = 512, RF_ENUM_DECLARED = 1024,
+	RF_MS_STRUCT = 128,	/* Microsoft allocation units for bit-fields */
 	RF_COMPLEX = 64,	/* _Complex T: struct { T re, im; } (AAPCS64 passes it like that) */
 };
 
@@ -138,6 +145,9 @@ enum {
 	SF_WUR = 1u << 20,	/* warn_unused_result / nodiscard (attrs record's wur) */
 	SF_NONNULL = 1u << 21,	/* a parameter declared nonnull */
 	SF_INVALID = 1u << 23,	/* declared with an error (incomplete type): uses report nothing more (clang) */
+	SF_BOS_QUERY = 1u << 24,	/* function contains an object-size query */
+	SF_CONSTEXPR = 1u << 26,	/* C23 constant object: initializer is a constant expression */
+	SF_BOS_INIT = 1u << 25,	/* local pointer has a certified immutable initializer */
 	SF_UVPEND = 1u << 22,	/* -Wuninitialized: declared without an initializer, not yet assigned in the text */
 };
 
@@ -170,13 +180,14 @@ enum {
 	/* expressions */
 	N_NUM,		/* a: constant pool index (integer); aux: NUM_RADIX (a literal not written in decimal), NUM_ENUM */
 	N_FNUM,		/* a: constant pool index (double) */
+	N_BIGNUM,	/* a: immutable LE32 words in lists, b: full storage word count */
 	N_STR,		/* a: string index */
 	N_VAR,		/* a: sym */
 	N_MEMBER,	/* a: base (lvalue struct), b: tag, c: field index */
 	N_INDEX,	/* a[b] (pointer + integer, already in that order) */
 	N_CALL,		/* a: callee, b: list, c: count */
 	N_BUILTIN,	/* aux: builtin id, b: list, c: count */
-	N_CAST,		/* aux: cast kind, a: operand, b: an explicit cast's typedef (sym, in a body) or 0 */
+	N_CAST,		/* aux: cast kind, a: operand, b: an explicit cast's typedef (sym, in a body) or 0; c: folded FP emit value or 0 */
 	N_UNARY,	/* aux: op (T_* kind), a: operand */
 	N_ADDR, N_DEREF,
 	N_PREINC, N_PREDEC, N_POSTINC, N_POSTDEC,
@@ -185,7 +196,7 @@ enum {
 	N_ASSIGN,	/* aux: 0 or the compound op (T_PLUS, ...), a, b */
 	N_COND,		/* a ? b : c (b == 0: GNU a ?: c) */
 	N_COMMA,
-	N_SIZEOF_VLA,	/* a: expression of VLA type */
+	N_SIZEOF_VLA,	/* a: expression, b: VLA type; aux=1 captures a new type-name bound */
 	N_STMTEXPR,	/* a: compound statement */
 	N_COMPLIT,	/* a: init, b: sym of the object */
 	N_INIT,		/* initializer list: b: struct/union (aux 0/2): c values; array (aux 1): c (lo, hi, value) */
@@ -197,7 +208,7 @@ enum {
 	/* statements */
 	N_BLOCK,	/* b: list, c: count */
 	N_EXPR,		/* a */
-	N_DECL,		/* a: sym, b: init or 0 */
+	N_DECL,		/* a: sym, b: init or 0; aux=1: initializer supplies inferred-type bounds */
 	N_IF, N_WHILE, N_DO,
 	N_FOR,		/* a: init, b: cond, c: list of [step, body] */
 	N_SWITCH,	/* a: cond, b: body */
@@ -224,14 +235,18 @@ enum {
 	CK_UNION,	/* -> transparent union / GNU cast to union */
 	CK_NULL,	/* null pointer constant -> pointer */
 	CK_SPLAT,	/* scalar (already the element type) -> every lane of an ext_vector_type */
+	CK_BITS,	/* __builtin_bit_cast: a is the source object, without array decay */
 	CK_VBITS,	/* GNU vector -> scalar of the same size (the bits) */
 	CK_VADDR,	/* GNU vector rvalue -> pointer to its first lane (v[i] on an rvalue) */
 };
 
-enum { NUM_RADIX = 1, NUM_ENUM = 2 };	/* N_NUM aux: spelled not in decimal; an enumerator's value */
+enum { NUM_RADIX = 1, NUM_ENUM = 2, NUM_NO_ICE = 4, NUM_NO_CONSTEXPR = 8 };	/* N_NUM aux: spelled not in decimal; an enumerator's value */
 enum { NF_LVALUE = 1, NF_BITFIELD = 2, NF_PAREN = 4, NF_NPC = 8,
        NF_ERR = 16,
        NF_MACRO = 32, NF_BOUNDS = 64, NF_OVF = 128 };	/* NF_OVF: a constant subexpression overflowed (-Winteger-overflow given once) */	/* NF_BOUNDS: a[CONST] already checked (-Warray-bounds) */	/* NF_MACRO: the operator came from a macro expansion (no style warnings) */	/* NF_ERR: stands in for an expression already diagnosed (no follow-on errors) */
+
+/* N_COMMA result facts, attached by semantic lowering. NaNs are permitted. */
+enum { NC_FP_NONNEG = 1 };
 
 typedef struct node {
 	uint8_t op, flags;
@@ -251,10 +266,13 @@ static inline int vcc_tls_model(const char *m)
 	       !strcmp(m, "initial-exec") ? VCC_TLS_IE : !strcmp(m, "local-exec") ? VCC_TLS_LE : 0;
 }
 
+enum { CC_DISABLED_BUILTIN_WORDS = 6 };	/* generated libbuiltins.inc indices */
+
 typedef struct cc_opts {	/* fields before outfd: parse options, all in the decl cache key */
 	int target;		/* PP_LINUX_AARCH64 / PP_DARWIN / PP_WASM64 */
 	int unsigned_char;
 	int ms_anon;		/* -fms-anonymous-structs / -fms-extensions: "struct S;" members */
+	int strict_flex_arrays; /* -fstrict-flex-arrays=0..3 */
 	int short_wchar;	/* -fshort-wchar */
 	int std;		/* -std=: 89, 99, 11, 17, 23 (0: gnu17) */
 	int implicit_int;	/* implicit int allowed (-std=gnu89, -Wno-error=implicit-int) */
@@ -262,14 +280,22 @@ typedef struct cc_opts {	/* fields before outfd: parse options, all in the decl 
 	int instrument;		/* -finstrument-functions */
 	int vcc_kernel;		/* -fvcc-kernel (or -D__KERNEL__): error() calls left after folding are dropped */
 	int lse;		/* target has LSE atomics (else ldaxr/stlxr loops) */
+	x86_features x86_features, x86_disabled, x86_raw, x86_override_on, x86_override_off;
+	int x86_features_set;	/* explicitly resolved by the driver; zero uses x86-64 */
 	int general_regs_only;	/* -mgeneral-regs-only: no FP/SIMD registers (variadic: no v0-v7 save area) */
+	int fast_math;		/* full fast-math permits finite, unsigned-zero root transforms */
 	int no_builtin;		/* -ffreestanding / -fno-builtin: abs() etc. are plain calls */
+	uint64_t disabled_builtins[CC_DISABLED_BUILTIN_WORDS]; /* -fno-builtin-NAME */
 	int wasm_sjlj;		/* -mllvm -wasm-enable-sjlj: setjmp/longjmp through wasm exceptions */
 	int implicit_fn;	/* implicit function declarations allowed (... implicit-function-declaration) */
+	int c2y;		/* C2y additions, with the C23 keyword set */
 	int strict_std;		/* -std=cNN (not gnuNN): clang's GNU-only library functions are not known */
 	int conv_warn;		/* -Wno-error= (or -Wno-) of: 1 int-conversion, 2 incompatible-pointer-types,
 				   4 incompatible-function-pointer-types: a warning, not an error */
 	int dump_layouts;	/* append _Static_assert checks for clang to verify */
+	/* Before outfd so declaration-cache identity includes the frame policy. */
+	int omit_frame_pointer; /* x86: permit frame-free leaf omission; explicit flags win */
+	int sibling_calls; /* 0: optimization-level default, 1: explicit enable, -1: explicit disable */
 	int outfd;
 	int emit;		/* generate code (emit/): 1 = assembly text to outfd, 2 = object into obj */
 	int opt;		/* -O level for code generation: 0 (default, -O0), 1 (-O1, -Og), 2 (-O2, -O3, -Os, -Oz, -O) */
@@ -279,11 +305,20 @@ typedef struct cc_opts {	/* fields before outfd: parse options, all in the decl 
 	const char *dbg_dir, *dbg_name;	/* the compilation directory and the main file, as named */
 	int tlsmodel;		/* -ftls-model=: VCC_TLS_*, 0: the default */
 	int pic;		/* ELF: 0 none (-fno-pic), 1 PIE (-fpie, the hosted default), 2 PIC (-fpic) */
+	/* x86-64 hardening, as clang (the kernel): xcf bits 1 -fcf-protection=branch (endbr64, IBT
+	   note), 2 -mfunction-return=thunk-extern, 4 -mretpoline-external-thunk, 8
+	   -mindirect-branch-cs-prefix; -fpatchable-function-entry=N,M; -fstack-protector (1),
+	   -strong (2), -all (3) with its guard (sp_gs: %gs, sp_sym: the symbol, else %fs:40);
+	   -ftrivial-auto-var-init=zero */
+	int xcf, pfe_n, pfe_m, sprot, sp_gs, autozero;
+	const char *sp_sym;
 	int nthreads;		/* emitter threads (0: 1) */
 	struct ElfObj *obj;	/* emit == 2: the object (reset first; the caller finishes it) */
 	struct As *as;		/* emit == 2: the assembler bound to obj (one per thread) */
 	struct vbuf *wasm_obj;	/* emit == 2 for wasm64: the object's bytes (arch/wasm/as) */
 } cc_opts;
+
+void cc_disable_builtin(uint64_t *bits, const char *name);
 
 typedef struct cc cc;
 

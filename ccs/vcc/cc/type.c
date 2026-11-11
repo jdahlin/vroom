@@ -9,9 +9,10 @@ const basic_ty basic[TY_PTR] = {
 	[TY_LONG] = { 8, 8 }, [TY_ULONG] = { 8, 8 },
 	[TY_LLONG] = { 8, 8 }, [TY_ULLONG] = { 8, 8 },
 	[TY_INT128] = { 16, 16 }, [TY_UINT128] = { 16, 16 },
-	[TY_FLOAT16] = { 2, 2 }, [TY_FLOAT] = { 4, 4 }, [TY_DOUBLE] = { 8, 8 },
-	[TY_LDOUBLE] = { 16, 16 },
+	[TY_BFLOAT16] = { 2, 2 }, [TY_FLOAT16] = { 2, 2 }, [TY_FLOAT] = { 4, 4 }, [TY_DOUBLE] = { 8, 8 },
+	[TY_LDOUBLE] = { 16, 16 }, [TY_FLOAT128] = { 16, 16 },
 };
+VPRIV bool is_bigint(cc *c, qty t) { int k = KIND(c, t); return k == TY_BITINT || k == TY_UBITINT; }
 VPRIV bool is_integer(cc *c, qty t) { int k = KIND(c, t); return is_int_kind(k) || k == TY_ENUM; }
 VPRIV bool is_float(cc *c, qty t) { return is_flt_kind(KIND(c, t)); }
 VPRIV bool is_arith(cc *c, qty t) { return is_integer(c, t) || is_float(c, t); }
@@ -22,6 +23,7 @@ VPRIV bool is_array(cc *c, qty t) { return KIND(c, t) == TY_ARRAY; }
 VPRIV bool is_func(cc *c, qty t) { return KIND(c, t) == TY_FUNC; }
 VPRIV bool is_record(cc *c, qty t) { int k = KIND(c, t); return k == TY_STRUCT || k == TY_UNION; }
 VPRIV bool is_vector(cc *c, qty t) { return KIND(c, t) == TY_VECTOR; }
+VPRIV bool is_bool_vector(cc *c, qty t) { return is_vector(c, t) && KIND(c, T(c, t)->base) == TY_BOOL; }
 /* initialized by a list of elements */
 VPRIV bool is_complex(cc *c, qty t) { return KIND(c, t) == TY_STRUCT && (c->tags[T(c, t)->aux].flags & RF_COMPLEX); }
 VPRIV bool is_ilagg(cc *c, qty t) { int k = KIND(c, t); return (k == TY_STRUCT && !is_complex(c, t)) || k == TY_UNION || k == TY_ARRAY || k == TY_VECTOR; }
@@ -36,7 +38,7 @@ VPRIV bool is_signed(cc *c, qty t)
 		return is_signed(c, T(c, t)->base);
 	if (k == TY_CHAR)
 		return !c->o->unsigned_char;
-	return k == TY_SCHAR || k == TY_SHORT || k == TY_INT || k == TY_LONG || k == TY_LLONG || k == TY_INT128;
+	return k == TY_SCHAR || k == TY_SHORT || k == TY_INT || k == TY_LONG || k == TY_LLONG || k == TY_INT128 || k == TY_BITINT;
 }
 
 VPRIV uint32_t ty_hash(const ctype *t)
@@ -108,6 +110,30 @@ VPRIV uint32_t ty_new(cc *c, int kind)
 	if (unlikely(c->dr_on))
 		dr_new(c, idx);	/* (cc/replay.c: the type log) */
 	return idx;
+}
+
+/* Bit-precise integers retain a storage kind for scalar lowering, but their
+   precision makes them distinct from all standard integer types. */
+VPRIV qty ty_bitint(cc *c, unsigned bits, bool unsign)
+{
+	if (bits > 128) {
+		ctype t = { .kind = unsign ? TY_UBITINT : TY_BITINT, .size = 8 * (((uint64_t)bits + 63) / 64), .align = 8, .n = bits };
+		return QT(ty_intern(c, &t), 0);
+	}
+	unsigned size = bits <= 8 ? 1 : bits <= 16 ? 2 : bits <= 32 ? 4 : bits <= 64 ? 8 : 16;
+	int kind = size == 1 ? TY_SCHAR : size == 2 ? TY_SHORT : size == 4 ? TY_INT : size == 8 ? TY_LLONG : TY_INT128;
+	ctype t = { .kind = (uint8_t)(kind + unsign), .size = size, .align = size > 8 && (c->o->target == PP_LINUX_X86_64 || PP_IS_WASM(c->o->target)) ? 8 : size, .n = bits };
+
+	return QT(ty_intern(c, &t), 0);
+}
+
+VPRIV unsigned int_bits(cc *c, qty t)
+{
+	if (KIND(c, t) == TY_ENUM)
+		return int_bits(c, T(c, t)->base);
+	if (is_int_kind(KIND(c, t)) && !(T(c, t)->flags & TF_ATOMIC) && T(c, t)->n)
+		return T(c, t)->n;
+	return (unsigned)ty_size(c, t) * 8;
 }
 
 VPRIV qty ty_ptr(cc *c, qty base)
@@ -201,7 +227,8 @@ VPRIV qty ty_func(cc *c, qty ret, const qty *par, uint32_t n, int flags)
 
 			t->flags = (uint8_t)flags, t->base = ret, t->n = n, t->size = 1, t->align = 4;
 			t->aux = c->nparams;
-			memcpy(&c->params[c->nparams], par, n * sizeof(qty));
+			if (n)	/* par is NULL for an implicit or unprototyped function: memcpy(_, NULL, 0) is UB */
+				memcpy(&c->params[c->nparams], par, n * sizeof(qty));
 			c->nparams += n;
 			c->fnhash[i] = idx;
 			if (++c->nfn * 2 > c->fnhcap) {
@@ -244,9 +271,9 @@ VPRIV qty ty_func(cc *c, qty ret, const qty *par, uint32_t n, int flags)
 VPRIV qty ty_vector(cc *c, qty elem, uint32_t size)
 {
 	const ctype *e = T(c, elem);
-	/* arm64: at most 16 (the NEON registers); wasm: the vector's size */
+	/* ARM64 caps vector alignment at 16; x86 and wasm use its full size. */
 	ctype t = { .kind = TY_VECTOR, .base = QUNQ(elem), .size = size,
-		    .align = size > 16 && !PP_IS_WASM(c->o->target) ? 16 : size };
+		    .align = size > 16 && !PP_IS_WASM(c->o->target) && c->o->target != PP_LINUX_X86_64 ? 16 : size };
 
 	t.n = e->size ? (uint32_t)(size / e->size) : 0;
 	return QT(ty_intern(c, &t), 0);
@@ -280,6 +307,10 @@ VPRIV qty ty_atomic(cc *c, qty t, uint32_t loc)
 
 	if (v.flags & TF_ATOMIC)
 		return t;
+	if (v.kind == TY_SVE) {
+		cc_error(c, loc, "_Atomic cannot be applied to sizeless type '%s'", tyname(c, t));
+		return t;
+	}
 	if (v.kind == TY_ARRAY || v.kind == TY_FUNC) {
 		cc_error(c, loc, "_Atomic cannot be applied to %s type '%s' ", v.kind == TY_ARRAY ? "array" : "function", tyname(c, t));
 		return t;
@@ -287,6 +318,10 @@ VPRIV qty ty_atomic(cc *c, qty t, uint32_t loc)
 	if (!complete(c, t)) {
 		cc_error(c, loc, "_Atomic cannot be applied to incomplete type '%s' ", tyname(c, t));
 		fwd_note(c, t);
+		return t;
+	}
+	if (is_int_kind(v.kind) && v.n) {
+		cc_error(c, loc, "_Atomic cannot be applied to integer type '%s' ", tyname(c, t));
 		return t;
 	}
 	if (v.kind == TY_VECTOR) {
@@ -338,6 +373,7 @@ VPRIV int rank(cc *c, qty t)
 	case TY_LONG: case TY_ULONG: return 5;
 	case TY_LLONG: case TY_ULLONG: return 6;
 	case TY_INT128: case TY_UINT128: return 7;
+	case TY_BITINT: case TY_UBITINT: return 8;
 	case TY_ENUM: return rank(c, T(c, t)->base);
 	default: return 0;
 	}
@@ -347,6 +383,8 @@ VPRIV qty prim(int k) { return QT(k, 0); }
 
 VPRIV qty unsigned_of(cc *c, qty t)
 {
+	if (is_int_kind(KIND(c, t)) && T(c, t)->n && !(T(c, t)->flags & TF_ATOMIC))
+		return ty_bitint(c, T(c, t)->n, true);
 	switch (KIND(c, t)) {
 	case TY_CHAR: case TY_SCHAR: return prim(TY_UCHAR);
 	case TY_SHORT: return prim(TY_USHORT);
@@ -362,6 +400,7 @@ VPRIV qty unsigned_of(cc *c, qty t)
 /* the result of comparing vectors of type v: signed integers of the lane size */
 VPRIV qty vec_mask_type(cc *c, qty v)
 {
+	if (is_bool_vector(c, v)) return QUNQ(v);
 	uint32_t es = (uint32_t)T(c, T(c, v)->base)->size;
 	int k = es == 1 ? TY_SCHAR : es == 2 ? TY_SHORT : es == 4 ? TY_INT : es == 8 ? CC_I64(c, false) : TY_INT128;
 
@@ -375,7 +414,7 @@ VPRIV qty promote(cc *c, qty t)
 
 	if (k == TY_ENUM)
 		return promote(c, T(c, t)->base);
-	if (is_int_kind(k) && rank(c, t) < 4)
+	if (is_int_kind(k) && !T(c, t)->n && rank(c, t) < 4)
 		return prim(TY_INT);
 	return QT(T(c, t)->canon, 0);
 }
@@ -397,6 +436,11 @@ VPRIV qty arith_conv(cc *c, qty a, qty b)
 		bool sa = is_signed(c, a), sb = is_signed(c, b);
 		int ra = rank(c, a), rb = rank(c, b);
 
+		if (T(c, a)->n || T(c, b)->n) {
+			ra = (int)int_bits(c, a) * 16 + (T(c, a)->n ? 0 : ra);
+			rb = (int)int_bits(c, b) * 16 + (T(c, b)->n ? 0 : rb);
+		}
+
 		if (sa == sb)
 			return ra >= rb ? a : b;
 		if (!sa && ra >= rb)
@@ -404,9 +448,9 @@ VPRIV qty arith_conv(cc *c, qty a, qty b)
 		if (!sb && rb >= ra)
 			return b;
 		/* signed operand has greater rank */
-		if (sa && ty_size(c, a) > ty_size(c, b))
+		if (sa && int_bits(c, a) > int_bits(c, b))
 			return a;
-		if (sb && ty_size(c, b) > ty_size(c, a))
+		if (sb && int_bits(c, b) > int_bits(c, a))
 			return b;
 		return unsigned_of(c, sa ? a : b);
 	}
@@ -415,6 +459,24 @@ VPRIV qty arith_conv(cc *c, qty a, qty b)
 static bool compatible_q(cc *c, qty a, qty b)
 {
 	return QQ(a) == QQ(b) && compatible(c, a, b);
+}
+
+/* GNU transparent unions accept a member type in a function prototype.
+   This does not make the union and that member compatible as object types. */
+static bool compatible_param(cc *c, qty a, qty b)
+{
+	if (compatible(c, a, b)) return true;
+	const ctype *x = T(c, canon(c, a)), *y = T(c, canon(c, b));
+	if (x->kind == TY_UNION && y->kind == TY_UNION) return false;
+	if (y->kind == TY_UNION) {
+		x = y;
+		b = a;
+	}
+	if (x->kind != TY_UNION || !(x->flags & TF_TRANSPARENT)) return false;
+	const tag *r = &c->tags[x->aux];
+	for (uint32_t i = 0; i < r->nfield; i++)
+		if (compatible(c, r->f[i].ty, b)) return true;
+	return false;
 }
 
 VPRIV bool compatible(cc *c, qty a, qty b)
@@ -427,6 +489,8 @@ VPRIV bool compatible(cc *c, qty a, qty b)
 	x = T(c, a), y = T(c, b);
 	if ((x->flags ^ y->flags) & TF_ATOMIC)
 		return false;
+	if (x->flags & TF_ATOMIC)
+		return compatible(c, ty_unatomic(c, a), ty_unatomic(c, b));
 	/* an enum is compatible with its underlying type */
 	if (x->kind == TY_ENUM && y->kind != TY_ENUM)
 		return compatible(c, x->base, b);
@@ -434,14 +498,34 @@ VPRIV bool compatible(cc *c, qty a, qty b)
 		return compatible(c, a, y->base);
 	if (x->kind != y->kind)
 		return false;
+	if (is_int_kind(x->kind) && x->n != y->n)
+		return false;
 	switch (x->kind) {
 	case TY_PTR:
 		return (x->flags & TF_BLOCK) == (y->flags & TF_BLOCK) && compatible_q(c, x->base, y->base);
 	case TY_ARRAY:
 		if (!compatible_q(c, x->base, y->base))
 			return false;
-		if ((x->flags | y->flags) & (TF_INCOMPLETE | TF_VLA))
+		if ((x->flags | y->flags) & TF_INCOMPLETE)
 			return true;
+		if ((x->flags | y->flags) & TF_VLA) {
+			/* A constant outer bound of an array of VLAs still participates
+			 * in compatibility. Only genuinely variable bounds are ignored. */
+			cval xv, yv;
+			uint64_t xn = arr_len(c, a), yn = arr_len(c, b);
+
+			if (x->flags & TF_VLA) {
+				if (!x->n || !eval(c, x->n, &xv) || xv.kind != CV_INT || !xv.ice)
+					return true;
+				xn = (uint64_t)xv.i;
+			}
+			if (y->flags & TF_VLA) {
+				if (!y->n || !eval(c, y->n, &yv) || yv.kind != CV_INT || !yv.ice)
+					return true;
+				yn = (uint64_t)yv.i;
+			}
+			return xn == yn;
+		}
 		return x->n == y->n && x->aux == y->aux;
 	case TY_FUNC:
 		if (!compatible(c, x->base, y->base) || QQ(x->base) != QQ(y->base))
@@ -451,7 +535,7 @@ VPRIV bool compatible(cc *c, qty a, qty b)
 		if (x->n != y->n || (x->flags & TF_VARIADIC) != (y->flags & TF_VARIADIC))
 			return false;
 		for (uint32_t i = 0; i < x->n; i++)
-			if (!compatible(c, c->params[x->aux + i], c->params[y->aux + i]))
+			if (!compatible_param(c, c->params[x->aux + i], c->params[y->aux + i]))
 				return false;
 		return true;
 	default:
@@ -463,6 +547,9 @@ VPRIV bool compatible(cc *c, qty a, qty b)
 VPRIV qty composite(cc *c, qty a, qty b)
 {
 	const ctype *x = T(c, a), *y = T(c, b);
+
+	if ((x->flags & y->flags) & TF_ATOMIC)
+		return qualify(c, ty_atomic(c, composite(c, ty_unatomic(c, a), ty_unatomic(c, b)), 0), QQ(a));
 
 	if (x->kind == TY_ARRAY && y->kind == TY_ARRAY) {
 		qty e = composite(c, x->base, y->base);

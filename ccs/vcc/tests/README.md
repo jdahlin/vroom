@@ -33,6 +33,30 @@ own diagnostics and dumps), clang `test/Sema`/`CodeGen` (lit + FileCheck,
 tied to clang's messages and IR), chibicc/cproc tests (small and C11-only,
 and tcc tests2 covers the same ground).
 
+## External suites, not vendored (`work/testsuites/`)
+
+`bench/fetch-testsuites.sh [NAME...]` downloads these (shallow, sparse) at
+the commits pinned in the script; `work/testsuites/MANIFEST` records what is
+there.  About 320 MB, half a minute.  `bench/vcc-verify.py` runs clang's -verify
+tests (TODO.md T20); see TEST.plan for the other suite harnesses.
+
+| name | what (C files) | license |
+|---|---|---|
+| `llvm` | clang `test/C` (per standard and WG14 paper, `drs/` per Defect Report; 150, 123 with `-verify`), `test/Sema` (1195), `test/Preprocessor` (325), `test/Lexer` (84), `test/Parser` (118); `utils/ABITest` (ABI test generator).  `-verify` files carry their expected diagnostics as `// expected-error {{...}}` | Apache-2.0 WITH LLVM-exception |
+| `gcc` | `gcc.c-torture/compile` (2016), `execute` incl. `ieee/` and `builtins/` (1926), `gcc.dg` (19792: 3338 `dg-do run`, 1720 with `dg-error`, `torture/` 2261, `compat/` struct-layout generator), `c-c++-common` (3436), `gcc.target/aarch64` (9681), `lib/` (dejagnu helpers) | GPL-3.0-or-later |
+| `c-testsuite` | small self-checking programs with expected output (220) | per test (`.c.tags`), runner under its own LICENSE |
+| `llvm-test-suite` | `SingleSource/` UnitTests, Regression/C, Benchmarks, with reference outputs (2520) | Apache-2.0 WITH LLVM-exception |
+| `csmith`, `yarpgen` | random-program generators (T10); source only, not built | BSD-2 / Apache-2.0 |
+| `kefir` | 875 end2end host/test runtime pairs (1764 C files); 231 compiler-internal snapshot directories inventoried separately. `bench/vcc-kefir.py`: Clang oracle and four host/test compiler combinations on Linux | GPL-3.0-only; runtime headers BSD-3-Clause |
+| `libc-test` | musl's libc tests: functional, regression, math edge cases (466) | MIT |
+| `chibicc`, `cproc` | the compilers' own C11 tests (50, 213) | MIT / ISC |
+
+Kefir source provenance, migration, licenses and mapped upstream contracts are
+recorded in `bench/kefir-source.json`. Its baseline requires the clean pinned
+checkout; artifacts retain the immutable source snapshot, hashes, raw profiles
+and every compile/link/run command. Unsupported capabilities and oracle errors
+are reported separately from candidate failures.
+
 ## Updating
 
 ```
@@ -54,3 +78,11 @@ string and ctype functions, a bump malloc, exit/atexit/abort, setjmp/longjmp
 (in start.S), qsort.  stdout and stderr both go to the UART.  There's no
 compiler-rt for aarch64-linux here, so clang's build of a test that does
 `long double` arithmetic fails to link and the test is skipped (ref-fail).
+
+## Beginner diagnostic repair stories
+
+`onboarding/` contains 25 broken examples, 25 justified repairs and 25 intentional
+neighbors. `bench/vcc-onboarding.py` checks semantic message contracts, locations,
+structured output, and clean compilation of the repairs/neighbors on Linux x86 and
+ARM. Missing diagnostic coverage is explicit; see [the corpus README](onboarding/README.md)
+for the distinction between a strict run and the known-gap CI baseline.

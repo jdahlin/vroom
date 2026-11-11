@@ -28,7 +28,7 @@
 	X(__restrict__) X(__restrict) X(__extension__) X(__alignof__) \
 	X(__alignof) X(__auto_type) X(__label__) X(__builtin_va_arg) \
 	X(__builtin_offsetof) X(__builtin_types_compatible_p) \
-	X(__builtin_choose_expr) X(__builtin_shufflevector) X(__builtin_convertvector) X(__int128) X(_Float16) X(__fp16) \
+	X(__builtin_choose_expr) X(__builtin_bit_cast) X(__builtin_shufflevector) X(__builtin_convertvector) X(__int128) X(_BitInt) X(_ExtInt) X(_Float16) X(__bf16) X(__fp16) X(__float128) \
 	X(__thread) X(__real__) X(__imag__) X(_Complex) X(__complex__) X(__complex) X(__real) X(__imag) X(static_assert) \
 	X(bool) X(true) X(false) X(nullptr) X(alignof) X(alignas) X(constexpr) \
 	X(thread_local) \
@@ -83,7 +83,7 @@ uint32_t vintern_count(void);
  * inline, so a hit compares two words in L1 and touches neither the shared
  * table nor the spelling.  Hashes agree with vintern_hash().
  */
-#include <arm_acle.h>
+#include "hostcrc.h"
 #include <string.h>
 
 /* identifier ids are below 1 << VINTERN_ID_BITS: tables indexed by id are sized by it */
@@ -153,5 +153,6 @@ static inline __attribute__((always_inline)) uint32_t vintern_fast(vintern_cache
 /* called (in the thread) when the table is full; must not return to the caller */
 extern void (*vintern_full_hook)(void);	/* (the job's escape, see vjob_escape) */
 __attribute__((noreturn)) void vjob_escape(const char *msg);
+extern _Thread_local int vjob_escape_fd;	/* where vjob_escape reports: the job's diagnostics (2) */
 extern _Atomic int vtables_full;	/* set once the table was found full (vccd restarts) */
 #endif

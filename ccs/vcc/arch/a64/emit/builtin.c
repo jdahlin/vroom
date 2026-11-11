@@ -18,7 +18,8 @@ VPRIV bool side_effects(cc *c, uint32_t n)
 	if (!n)
 		return false;
 	x = N(n);
-	if ((QQ(x->ty) & Q_VOLATILE) && (x->op == N_VAR || x->op == N_DEREF || x->op == N_MEMBER || x->op == N_INDEX))
+	if (((QQ(x->ty) & Q_VOLATILE) || (T(c, x->ty)->flags & TF_ATOMIC)) &&
+	    (x->op == N_VAR || x->op == N_DEREF || x->op == N_MEMBER || x->op == N_INDEX))
 		return true;
 	switch (x->op) {
 	case N_NUM: case N_FNUM: case N_STR: case N_VAR: case N_ZERO: case N_LABELADDR:
@@ -28,7 +29,7 @@ VPRIV bool side_effects(cc *c, uint32_t n)
 		return true;
 	case N_BUILTIN:
 		switch (x->aux) {
-		case BI_VA_START: case BI_VA_COPY: case BI_VA_END: case BI_ALLOCA: case BI_TRAP:
+		case BI_VA_START: case BI_VA_COPY: case BI_VA_END: case BI_ALLOCA: case BI_TRAP: case BI_DEBUGTRAP:
 		case BI_UNREACHABLE:
 		case BI_ADD_OVERFLOW: case BI_SUB_OVERFLOW: case BI_MUL_OVERFLOW:	/* store the result */
 		case BI_ADDC: case BI_SUBC:
@@ -80,7 +81,7 @@ VPRIV val dry(ecx *e, uint32_t n)
 {
 	uint32_t nin = e->nin, live = e->live, usedcs = e->usedcs;
 	size_t raw = e->raw.n;
-	int32_t foff = e->foff;
+	int64_t foff = e->foff;
 	bool reach = e->reach, calls = e->calls;
 	int nclean = e->nclean, nloop = e->nloop;
 	uint32_t nvsz = e->nvsz;
@@ -135,18 +136,145 @@ static val popcount(ecx *e, val v, int x)
 	return v;
 }
 
+/* Extend using source precision, not BitInt's padded storage width. */
+static void overflow_wide_operand(ecx *e, uint32_t n, int64_t sl)
+{
+	cc *c = e->c;
+	qty t = N(n)->ty;
+	unsigned bits = em_bitint(c, t) ? T(c, t)->n : (unsigned)tsize(c, t) * 8;
+	bool sign = is_signed(c, t);
+	val v = gen(e, n);
+	int ext = treg(e);
+
+	toreg2(e, &v, sign);
+	if (bits <= 64) {
+		if (bits < 64) opbf(e, sign ? I_SBFM : I_UBFM, 1, v.r, v.r, 0, bits - 1);
+		if (sign) shift_imm(e, I_ASRV, 1, v.r2, v.r, 63);
+		else movi(e, 1, v.r2, 0);
+	} else if (bits < 128) {
+		opbf(e, sign ? I_SBFM : I_UBFM, 1, v.r2, v.r2, 0, bits - 65);
+	}
+	if (sign) shift_imm(e, I_ASRV, 1, ext, v.r2, 63);
+	else movi(e, 1, ext, 0);
+	mem(e, I_ST, 3, 0, v.r, FRAME, sl);
+	mem(e, I_ST, 3, 0, v.r2, FRAME, sl + 8);
+	mem(e, I_ST, 3, 0, ext, FRAME, sl + 16);
+	mem(e, I_ST, 3, 0, ext, FRAME, sl + 24);
+	tfree(e, ext);
+	val_free(e, &v);
+}
+
+/* Exact 256-bit arithmetic.  The largest unsigned128 product is
+ * 2^256-2^129+1, so it cannot wrap onto a representable <=128-bit result.
+ * Signed products fit signed256.  No runtime helper is needed. */
+static val gen_overflow_wide(ecx *e, const node *x, const uint32_t *arg)
+{
+	cc *c = e->c;
+	qty tr = T(c, N(arg[2])->ty)->base;
+	unsigned bits = em_bitint(c, tr) ? T(c, tr)->n : (unsigned)tsize(c, tr) * 8;
+	bool sign = is_signed(c, tr);
+	int64_t as = slot(e, 32, 8), bs = slot(e, 32, 8), rs = slot(e, 32, 8), ps = slot(e, 8, 8);
+	val p;
+	int a, b, lo, hi, acc;
+
+	overflow_wide_operand(e, arg[0], as);
+	overflow_wide_operand(e, arg[1], bs);
+	p = gen(e, arg[2]);
+	mem(e, I_ST, 3, 0, toreg(e, &p), FRAME, ps);
+	val_free(e, &p);
+	a = treg(e), b = treg(e), lo = treg(e), hi = treg(e), acc = treg(e);
+	if (x->aux != BI_MUL_OVERFLOW) {
+		bool add = x->aux == BI_ADD_OVERFLOW;
+		for (unsigned i = 0; i < 4; i++) {
+			mem(e, I_LD, 3, 0, a, FRAME, as + i * 8);
+			mem(e, I_LD, 3, 0, b, FRAME, bs + i * 8);
+			op3(e, i == 0 ? (add ? I_ADDS : I_SUBS) : (add ? I_ADCS : I_SBCS), 1, lo, a, b);
+			mem(e, I_ST, 3, 0, lo, FRAME, rs + i * 8);
+		}
+	} else {
+		for (unsigned i = 0; i < 4; i++) mem(e, I_ST, 3, 0, ZR, FRAME, rs + i * 8);
+		/* Accumulate four full 64x64 products, propagating every carry. */
+		for (unsigned i = 0; i < 2; i++) for (unsigned j = 0; j < 2; j++) {
+			unsigned k = i + j;
+			mem(e, I_LD, 3, 0, a, FRAME, as + i * 8);
+			mem(e, I_LD, 3, 0, b, FRAME, bs + j * 8);
+			op3(e, I_UMULH, 1, hi, a, b);
+			op4(e, I_MADD, 1, lo, a, b, ZR);
+			mem(e, I_LD, 3, 0, acc, FRAME, rs + k * 8);
+			op3(e, I_ADDS, 1, lo, acc, lo);
+			mem(e, I_ST, 3, 0, lo, FRAME, rs + k * 8);
+			mem(e, I_LD, 3, 0, acc, FRAME, rs + (k + 1) * 8);
+			op3(e, I_ADCS, 1, hi, acc, hi);
+			mem(e, I_ST, 3, 0, hi, FRAME, rs + (k + 1) * 8);
+			for (unsigned h = k + 2; h < 4; h++) {
+				mem(e, I_LD, 3, 0, acc, FRAME, rs + h * 8);
+				op3(e, I_ADCS, 1, acc, acc, ZR);
+				mem(e, I_ST, 3, 0, acc, FRAME, rs + h * 8);
+			}
+		}
+		/* A = unsigned(A)-negative(A)*2^128.  Correct the product's high
+		 * half for each negative factor, using its all-ones sign mask. */
+		for (unsigned i = 0; i < 2; i++) {
+			int64_t s = i ? bs : as, other = i ? as : bs;
+			mem(e, I_LD, 3, 0, acc, FRAME, s + 16);
+			mem(e, I_LD, 3, 0, a, FRAME, other);
+			mem(e, I_LD, 3, 0, b, FRAME, other + 8);
+			op3(e, I_AND, 1, a, a, acc);
+			op3(e, I_AND, 1, b, b, acc);
+			mem(e, I_LD, 3, 0, lo, FRAME, rs + 16);
+			mem(e, I_LD, 3, 0, hi, FRAME, rs + 24);
+			op3(e, I_SUBS, 1, lo, lo, a);
+			op3(e, I_SBC, 1, hi, hi, b);
+			mem(e, I_ST, 3, 0, lo, FRAME, rs + 16);
+			mem(e, I_ST, 3, 0, hi, FRAME, rs + 24);
+		}
+	}
+	/* Compare against the destination conversion extended back to 256 bits;
+	 * keep that conversion for the builtin's mandatory result store. */
+	mem(e, I_LD, 3, 0, lo, FRAME, rs);
+	mem(e, I_LD, 3, 0, hi, FRAME, rs + 8);
+	if (bits <= 64) {
+		if (bits < 64) opbf(e, sign ? I_SBFM : I_UBFM, 1, lo, lo, 0, bits - 1);
+		if (sign) shift_imm(e, I_ASRV, 1, hi, lo, 63);
+		else movi(e, 1, hi, 0);
+	} else if (bits < 128) {
+		opbf(e, sign ? I_SBFM : I_UBFM, 1, hi, hi, 0, bits - 65);
+	}
+	if (sign) shift_imm(e, I_ASRV, 1, b, hi, 63);
+	else movi(e, 1, b, 0);
+	movi(e, 1, acc, 0);
+	for (unsigned i = 0; i < 4; i++) {
+		mem(e, I_LD, 3, 0, a, FRAME, rs + i * 8);
+		op3(e, I_EOR, 1, a, a, i == 0 ? lo : i == 1 ? hi : b);
+		op3(e, I_ORR, 1, acc, acc, a);
+	}
+	op3(e, I_SUBS, 1, ZR, acc, ZR);
+	cset(e, acc, C_NE);
+	tfree(e, a);
+	tfree(e, b);
+	mem(e, I_LD, 3, 0, a = treg(e), FRAME, ps);
+	{
+		lval l = { .k = L_REG, .r = (uint8_t)a, .align = talign(c, tr) };
+		val r = { .k = V_REG2, .r = (uint8_t)lo, .r2 = (uint8_t)hi };
+		store(e, &l, tr, &r);
+		val_free(e, &r);
+		lfree(e, &l);
+	}
+	return vreg(acc);
+}
+
 static val gen_overflow(ecx *e, const node *x, const uint32_t *arg)
 {
 	cc *c = e->c;
 	qty ta = N(arg[0])->ty, tb = N(arg[1])->ty, tr = T(c, N(arg[2])->ty)->base;
+	if (tsize(c, ta) > 8 || tsize(c, tb) > 8 || (em_bitint(c, tr) && T(c, tr)->n > 64))
+		return gen_overflow_wide(e, x, arg);
 	val a = gen(e, arg[0]), b = gen(e, arg[1]), p = gen(e, arg[2]);
-	int bits = (int)tsize(c, tr) * 8;
+	int bits = em_bitint(c, tr) ? (int)T(c, tr)->n : (int)tsize(c, tr) * 8;
 	bool sr = is_signed(c, tr);
 	int lo, hi, t, ok;
 	lval l;
 
-	if (tsize(c, ta) > 8 || tsize(c, tb) > 8)
-		efatal(e, x->loc, "128-bit overflow builtins are not supported");
 	/* exact result in 128 bits */
 	{
 		int ra = toreg(e, &a), rb = toreg(e, &b);
@@ -176,15 +304,15 @@ static val gen_overflow(ecx *e, const node *x, const uint32_t *arg)
 	val_free(e, &b);
 	if (bits == 128) {
 		/*
-		 * Operands of at most 64 bits: the 128 bits are the exact result,
-		 * signed if an operand is.  Signed into unsigned overflows when
-		 * negative; unsigned into signed when the top bit is set.
+		 * Only two unsigned factors can produce a positive result above
+		 * signed 128-bit range.  Addition and subtraction fit signed 128,
+		 * even for unsigned operands (subtraction can be negative).
 		 */
-		bool sx = is_signed(c, ta) || is_signed(c, tb);
+		bool uu = x->aux == BI_MUL_OVERFLOW && !is_signed(c, ta) && !is_signed(c, tb);
 		val r = { .k = V_REG2, .r = (uint8_t)lo, .r2 = (uint8_t)hi };
 
 		ok = treg(e);
-		if (sx != sr)
+		if (uu == sr)
 			shift_imm(e, I_LSRV, 1, ok, hi, 63);
 		else
 			movi(e, 0, ok, 0);
@@ -308,10 +436,13 @@ VPRIV val va_arg_(ecx *e, const node *x)
 {
 	cc *c = e->c;
 	qty t = x->ty;
+	if (!DARWIN(c) && is_bvec(c, t) && (T(c, t)->n == 64 || T(c, t)->n == 128))
+		efatal(e, e->curloc, "arm64: variadic transport of 64/128-lane packed boolean vectors is not supported");
 	uint64_t size = tsize(c, t);
 	bool big = is_recabi(c, t) && size > 16;
 	int nreg = big ? 1 : (int)((size + 7) / 8);
-	bool al16 = !big && abi_align(c, t) == 16;
+	/* Empty aggregates consume neither registers nor stack alignment. */
+	bool al16 = size != 0 && !big && abi_align(c, t) == 16;
 	lval l = gen_lval(e, x->a);
 	val a = laddr(e, &l);
 	int ra = toreg(e, &a), off = treg(e), addr = treg(e);
@@ -346,7 +477,7 @@ VPRIV val va_arg_(ecx *e, const node *x)
 
 	if (hb) {
 		/* an HFA: hn v registers, copied together into a temporary */
-		int32_t sl = slot(e, 64, 16);
+		int64_t sl = slot(e, 64, 16);
 
 		mem(e, I_LD, 2, 1, off, ra, 28);
 		opi(e, I_SUBSI, 1, ZR, off, 0);
@@ -474,14 +605,43 @@ VPRIV void at_swp(ecx *e, unsigned sz, int rs, int rt, int rn)
 	tfree(e, ws), tfree(e, t);
 }
 
-/* ld<op>al rs, rt, [rn] (opc: 0 add, 1 clr, 2 eor, 3 set): rt = old, *rn = old op rs */
-VPRIV void at_ldop(ecx *e, unsigned sz, unsigned opc, int rs, int rt, int rn)
+/* u = t op rs for the opc of at_ldop (min/max on the low 1 << sz bytes, signed or not) */
+static void at_opval(ecx *e, unsigned sz, unsigned opc, int u, int t, int rs)
 {
 	static const int op[] = { I_ADD, I_BIC, I_EOR, I_ORR };
+	static const int cond[] = { C_GT, C_LT, C_HI, C_LO };	/* smax smin umax umin: keep t */
+
+	if (opc < 4) {
+		op3(e, op[opc], sz == 3, u, t, rs);
+	} else if (opc == 8) {	/* nand */
+		op3(e, I_AND, 1, u, t, rs);
+		op3(e, I_ORN, 1, u, ZR, u);
+	} else {
+		bool sg = opc < 6;
+		int a = t, b = rs, w = -1;
+
+		if (sz < 2) {
+			w = treg(e);
+			extend(e, u, t, 1 << sz, sg), extend(e, w, rs, 1 << sz, sg);
+			a = u, b = w;
+		}
+		op3(e, I_SUBS, sz == 3, ZR, a, b);
+		op3s(e, I_CSEL, 1, u, t, rs, cond[opc - 4], 0);
+		if (w >= 0)
+			tfree(e, w);
+	}
+}
+
+/*
+ * ld<op>al rs, rt, [rn]: rt = old, *rn = old op rs; opc: 0 add, 1 clr, 2 eor,
+ * 3 set, 4 smax, 5 smin, 6 umax, 7 umin; 8 nand (no LSE form: always a loop)
+ */
+VPRIV void at_ldop(ecx *e, unsigned sz, unsigned opc, int rs, int rt, int rn)
+{
 	int t, u, ws;
 	uint32_t top;
 
-	if (e->c->o->lse) {
+	if (e->c->o->lse && opc < 8) {
 		word(e, sz << 30 | 0x38e00000u | (unsigned)rs << 16 | opc << 12 | (unsigned)rn << 5 | (unsigned)rt);
 		return;
 	}
@@ -489,7 +649,7 @@ VPRIV void at_ldop(ecx *e, unsigned sz, unsigned opc, int rs, int rt, int rn)
 	top = newlabel(e);
 	deflabel_loop(e, top, true);
 	ex_ld(e, sz, t, rn);
-	op3(e, op[opc], sz == 3, u, t, rs);
+	at_opval(e, sz, opc, u, t, rs);
 	ex_st(e, sz, ws, u, rn);
 	cbz(e, true, 0, ws, top);
 	mov(e, 1, rt, t);
@@ -643,9 +803,10 @@ static val gen_atomic(ecx *e, const node *x, const uint32_t *arg)
 		break;
 	}
 	default: {
-		/* ld<op>al: add 000, clr 001, eor 010, set 011 */
-		int base = id >= BI_ATOMIC_ADD_FETCH ? id - BI_ATOMIC_ADD_FETCH : id - BI_ATOMIC_FETCH_ADD;	/* add sub and or xor */
-		static const unsigned opc[] = { 0, 0, 1, 3, 2 };
+		/* ld<op>al: add 000, clr 001, eor 010, set 011, smax 100, smin 101, umax 110, umin 111 */
+		int base = id >= BI_ATOMIC_ADD_FETCH ? id - BI_ATOMIC_ADD_FETCH : id - BI_ATOMIC_FETCH_ADD;	/* add sub and or xor nand max min */
+		static const unsigned opc[] = { 0, 0, 1, 3, 2, 8, 4, 5 };
+		unsigned o = opc[base] + (base >= 6 && !sg ? 2 : 0);
 		int rv = toreg(e, &v1), rs = treg(e), r = treg(e);
 
 		if (base == 1)
@@ -654,12 +815,20 @@ static val gen_atomic(ecx *e, const node *x, const uint32_t *arg)
 			op3(e, I_ORN, 1, rs, ZR, rv);		/* mvn: clear the bits not in v */
 		else
 			mov(e, 1, rs, rv);
-		at_ldop(e, sz, opc[base], rs, r, rp);
+		at_ldop(e, sz, o, rs, r, rp);
 		tfree(e, rs);
 		if (id >= BI_ATOMIC_ADD_FETCH) {
 			static const int bop[] = { I_ADD, I_SUB, I_AND, I_ORR, I_EOR };
 
-			op3(e, bop[base], 1, r, r, rv);
+			if (base < 5) {
+				op3(e, bop[base], 1, r, r, rv);
+			} else {
+				int u = treg(e);
+
+				at_opval(e, sz, o, u, r, rv);
+				mov(e, 1, r, u);
+				tfree(e, u);
+			}
 		}
 		if (n < 8)
 			extend(e, r, r, (int)n, sg);
@@ -673,6 +842,46 @@ static val gen_atomic(ecx *e, const node *x, const uint32_t *arg)
 	return res;
 }
 
+/* Preserve the existing front-end/literal/dry policy for both builtin values
+ * and shared control proofs. dry() restores the target emission state. */
+VPRIV int a64_constant_p(ecx *e, uint32_t arg)
+{
+	cc *c = e->c;
+	val v;
+	/*
+	 * clang: 1 if the front end folds the operand (a pointer only as a
+	 * string literal at offset 0); else 0 if it has side effects or is
+	 * not arithmetic; else whatever the optimizer folds, which here is
+	 * the operand after inlining (dry).
+	 */
+	cval cv;
+	qty at = N(arg)->ty;
+
+	if (cc_eval(c, arg, &cv) && (cv.kind == CV_INT || cv.kind == CV_FLT ||
+					 (cv.kind == CV_ADDR && cv.str && cv.i == 0 && !cv.sym && !cv.label)))
+		return 1;
+	if (side_effects(c, arg) || !(is_integer(c, at) || is_flt(c, at)))
+		return 0;
+	{
+		/* "hi"[0]: the optimizer reads a character of a literal */
+		uint32_t r = arg;
+		cval ix;
+
+		while (N(r)->op == N_CAST && (N(r)->aux == CK_INT || N(r)->aux == CK_NOP))
+			r = N(r)->a;
+		if (N(r)->op == N_INDEX && cc_eval(c, N(r)->b, &ix) && ix.kind == CV_INT) {
+			uint32_t s = N(r)->a;
+
+			while (N(s)->op == N_CAST && (N(s)->aux == CK_DECAY || N(s)->aux == CK_NOP))
+				s = N(s)->a;
+			if (N(s)->op == N_STR && ix.i >= 0 && (uint64_t)ix.i < c->strs[N(s)->a].n)
+				return 1;
+		}
+	}
+	v = dry(e, arg);
+	return v.k == V_CONST;
+}
+
 VPRIV val gen_builtin(ecx *e, uint32_t n)
 {
 	cc *c = e->c;
@@ -684,10 +893,10 @@ VPRIV val gen_builtin(ecx *e, uint32_t n)
 	case BI_SHUFFLEVECTOR: case BI_CONVERTVECTOR: {
 		/* lane by lane through a frame slot (vectors are addresses here) */
 		qty at = N(arg[0])->ty, ae = T(c, at)->base, re = T(c, x->ty)->base;
-		unsigned na = (unsigned)(tsize(c, at) / tsize(c, ae)), nr = (unsigned)(tsize(c, x->ty) / tsize(c, re));
+		unsigned na = T(c, at)->ext ?: T(c, at)->n, nr = T(c, x->ty)->ext ?: T(c, x->ty)->n;
 		val a = gen(e, arg[0]), b = x->aux == BI_SHUFFLEVECTOR ? gen(e, arg[1]) : vconst(0);
 		int ra = toreg(e, &a), rb = x->aux == BI_SHUFFLEVECTOR ? toreg(e, &b) : -1;
-		int32_t sl = slot(e, tsize(c, x->ty), 16);
+		int64_t sl = slot(e, tsize(c, x->ty), 16);
 		int rd = treg(e);
 
 		opi(e, I_ADDI, 1, rd, FRAME, sl);
@@ -700,13 +909,16 @@ VPRIV val gen_builtin(ecx *e, uint32_t n)
 				lval s = { .k = L_REG, .r = (uint8_t)(k < (int64_t)na ? ra : rb),
 					   .off = (k < (int64_t)na ? k : k - (int64_t)na) * (int64_t)tsize(c, ae), .align = talign(c, ae) };
 
+				if (is_bvec(c, at)) { int64_t j = k < (int64_t)na ? k : k - na; s.off = j / 8, s.bf = 1, s.width = 1, s.bitoff = j % 8; }
 				v = k < 0 ? vconst(0) : load(e, &s, ae);
 			} else {
 				lval s = { .k = L_REG, .r = (uint8_t)ra, .off = (int64_t)i * (int64_t)tsize(c, ae), .align = talign(c, ae) };
 				int ck = is_flt(c, ae) ? (is_flt(c, re) ? CK_F2F : CK_F2I) : is_flt(c, re) ? CK_I2F : CK_INT;
 
-				v = cast(e, load(e, &s, ae), ae, re, ck);
+				if (is_bvec(c, at)) s.off = i / 8, s.bf = 1, s.width = 1, s.bitoff = i % 8;
+				v = cast(e, load(e, &s, ae), ae, re, KIND(c, re) == TY_BOOL ? CK_BOOL : ck);
 			}
+			if (is_bvec(c, x->ty)) d.off = i / 8, d.bf = 1, d.width = 1, d.bitoff = i % 8;
 			store(e, &d, re, &v);
 			val_free(e, &v);
 		}
@@ -715,39 +927,18 @@ VPRIV val gen_builtin(ecx *e, uint32_t n)
 			tfree(e, rb);
 		return vreg(rd);
 	}
-	case BI_CONSTANT_P: {
-		/*
-		 * clang: 1 if the front end folds the operand (a pointer only as a
-		 * string literal at offset 0); else 0 if it has side effects or is
-		 * not arithmetic; else whatever the optimizer folds, which here is
-		 * the operand after inlining (dry).
-		 */
-		cval cv;
-		qty at = N(arg[0])->ty;
-
-		if (cc_eval(c, arg[0], &cv) && (cv.kind == CV_INT || cv.kind == CV_FLT ||
-						 (cv.kind == CV_ADDR && cv.str && cv.i == 0 && !cv.sym && !cv.label)))
-			return vconst(1);
-		if (side_effects(c, arg[0]) || !(is_integer(c, at) || is_flt(c, at)))
-			return vconst(0);
-		{
-			/* "hi"[0]: the optimizer reads a character of a literal */
-			uint32_t r = arg[0];
-			cval ix;
-
-			while (N(r)->op == N_CAST && (N(r)->aux == CK_INT || N(r)->aux == CK_NOP))
-				r = N(r)->a;
-			if (N(r)->op == N_INDEX && cc_eval(c, N(r)->b, &ix) && ix.kind == CV_INT) {
-				uint32_t s = N(r)->a;
-
-				while (N(s)->op == N_CAST && (N(s)->aux == CK_DECAY || N(s)->aux == CK_NOP))
-					s = N(s)->a;
-				if (N(s)->op == N_STR && ix.i >= 0 && (uint64_t)ix.i < c->strs[N(s)->a].n)
-					return vconst(1);
-			}
-		}
-		v = dry(e, arg[0]);
-		return vconst(v.k == V_CONST);
+	case BI_CONSTANT_P:
+		return vconst(a64_constant_p(e, arg[0]));
+	case BI_FAST_ROOT4: case BI_FAST_SQRT: {
+		int d = KIND(c, x->ty) == TY_DOUBLE;
+		v = gen(e, arg[0]);
+		toreg(e, &v);
+		word(e, f_in(d, 16, v.r));
+		word(e, 0x1e21c000u | (uint32_t)d << 22 | 16u << 5 | 16u);
+		if (x->aux == BI_FAST_ROOT4)
+			word(e, 0x1e21c000u | (uint32_t)d << 22 | 16u << 5 | 16u);
+		word(e, f_out(d, v.r, 16));
+		return v;
 	}
 	case BI_EXPECT:
 	case BI_EXPECT_PROB:
@@ -844,23 +1035,42 @@ VPRIV val gen_builtin(ecx *e, uint32_t n)
 		if (e->reach)
 			put(e, I_BRK)->imm = 0xf000;
 		return vnone();
-	case BI_RETURN_ADDRESS: {
+	case BI_RETURN_ADDRESS: case BI_FRAME_ADDRESS: {
+		val depth = gen(e, arg[0]);
 		int r = treg(e);
+		uint32_t level;
 
-		mem(e, I_LD, 3, 0, r, R_FP, 8);
-		return vreg(r);
-	}
-	case BI_FRAME_ADDRESS: {
-		int r = treg(e);
-
+		if (depth.k != V_CONST)
+			efatal(e, x->loc, "a return or frame address requires a constant level");
+		level = (uint32_t)depth.i;
 		mov(e, 1, r, R_FP);
+		if (level <= 4) {
+			for (uint32_t k = 0; k < level; k++)
+				mem(e, I_LD, 3, 0, r, r, 0);
+		} else {
+			int count = treg(e);
+			uint32_t loop = newlabel(e);
+
+			movi(e, 0, count, level);
+			deflabel_loop(e, loop, true);
+			mem(e, I_LD, 3, 0, r, r, 0);
+			opi(e, I_SUBI, 0, count, count, 1);
+			cbz(e, true, 0, count, loop);
+			tfree(e, count);
+		}
+		if (x->aux == BI_RETURN_ADDRESS)
+			mem(e, I_LD, 3, 0, r, r, 8);
 		return vreg(r);
 	}
 	case BI_OBJECT_SIZE:
 	case BI_DYNAMIC_OBJECT_SIZE: {
-		val t = gen(e, arg[1]);
-
-		return vconst(t.k == V_CONST && (t.i & 2) ? 0 : (i128)(uint64_t)-1);
+		cval cv;
+		i128 size;
+		if (e->f && e->f->inl && inline_object_size(e, e->f->fn, e->f->call, arg[0], arg[1], &size))
+			return vconst(size);
+		if (cc_eval(c, n, &cv) && cv.kind == CV_INT)
+			return vconst(cv.i);
+		return vconst((i128)(uint64_t)-1);
 	}
 	case BI_IS_CONSTANT_EVALUATED:
 		return vconst(0);
@@ -891,13 +1101,26 @@ VPRIV val gen_builtin(ecx *e, uint32_t n)
 			i = put(e, I_ADDI);
 			i->sz = 1, i->rd = (uint8_t)r, i->rn = SP, i->imm = 0, i->cond = 0xee;	/* + outgoing area */
 		}
+		/* Older VLA scopes must not reclaim this function-lifetime allocation. */
+		for (int k = e->f && e->f->inl ? e->f->cbase : 0; k < e->nclean; ++k) {
+			uint32_t sym = e->clean[k];
+			const bind *b = binding(e, sym);
+
+			if ((T(c, c->syms[sym].ty)->flags & TF_VLA) && b->kind == B_INDIRECT) {
+				int sp = treg(e);
+				mov(e, 1, sp, SP);
+				mem(e, I_ST, 3, 0, sp, FRAME, b->slot + 8);
+				tfree(e, sp);
+			}
+		}
 		return s;
 	}
 	case BI_ATOMIC_LOAD_N: case BI_ATOMIC_STORE_N: case BI_ATOMIC_EXCHANGE_N: case BI_ATOMIC_CMPXCHG_N:
 	case BI_ATOMIC_LOAD: case BI_ATOMIC_STORE: case BI_ATOMIC_EXCHANGE: case BI_ATOMIC_CMPXCHG:
 	case BI_ATOMIC_FETCH_ADD: case BI_ATOMIC_FETCH_SUB: case BI_ATOMIC_FETCH_AND: case BI_ATOMIC_FETCH_OR:
 	case BI_ATOMIC_FETCH_XOR: case BI_ATOMIC_ADD_FETCH: case BI_ATOMIC_SUB_FETCH: case BI_ATOMIC_AND_FETCH:
-	case BI_ATOMIC_OR_FETCH: case BI_ATOMIC_XOR_FETCH: case BI_SYNC_VAL_CAS: case BI_SYNC_BOOL_CAS:
+	case BI_ATOMIC_OR_FETCH: case BI_ATOMIC_XOR_FETCH: case BI_ATOMIC_FETCH_NAND: case BI_ATOMIC_FETCH_MAX:
+	case BI_ATOMIC_FETCH_MIN: case BI_ATOMIC_NAND_FETCH: case BI_ATOMIC_MAX_FETCH: case BI_ATOMIC_MIN_FETCH: case BI_SYNC_VAL_CAS: case BI_SYNC_BOOL_CAS:
 		return gen_atomic(e, x, arg);
 	case BI_ATOMIC_THREAD_FENCE: case BI_ATOMIC_SIGNAL_FENCE: {
 		val m = gen(e, arg[0]);
@@ -908,10 +1131,11 @@ VPRIV val gen_builtin(ecx *e, uint32_t n)
 		return vnone();
 	}
 	case BI_ATOMIC_LOCK_FREE: {
-		val a = gen(e, arg[0]), b = gen(e, arg[1]);
+		for (uint32_t i = 0; i < x->c; i++) {	/* (size, p); __c11_atomic_is_lock_free: (size) */
+			val a = gen(e, arg[i]);
 
-		val_free(e, &a);
-		val_free(e, &b);
+			val_free(e, &a);
+		}
 		return vconst(1);
 	}
 	case BI_ARM_RSR: {
@@ -1025,6 +1249,140 @@ runtime:
 		}
 		return v;
 	}
+	case BI_ISGREATER: case BI_ISGREATEREQUAL: case BI_ISLESS: case BI_ISLESSEQUAL:
+	case BI_ISLESSGREATER: case BI_ISUNORDERED: {
+		qty at = N(arg[0])->ty, bt = N(arg[1])->ty;
+		qty ct = is_ld(c, at) ? at : is_ld(c, bt) ? bt :
+		         (is_flt(c, at) && tsize(c, at) == 8) ||
+		         (is_flt(c, bt) && tsize(c, bt) == 8) ? prim(TY_DOUBLE) : prim(TY_FLOAT);
+		val a = cast(e, gen(e, arg[0]), at, ct, CK_INT);
+		val b = cast(e, gen(e, arg[1]), bt, ct, CK_INT);
+		int op = x->aux == BI_ISGREATER ? T_GREATER :
+		         x->aux == BI_ISGREATEREQUAL ? T_GREATEREQ :
+		         x->aux == BI_ISLESS ? T_LESS :
+		         x->aux == BI_ISLESSEQUAL ? T_LESSEQ : T_EXCLAIMEQ;
+
+		if (!is_ld(c, ct)) {
+			int cond = f_cmp(e, op, fpk(e, ct), &a, &b);
+			val_free(e, &b);
+			if (x->aux == BI_ISUNORDERED)
+				cond = C_VS;
+			cset(e, a.r, cond);
+			if (x->aux == BI_ISLESSGREATER) {
+				int ordered = treg(e);
+				cset(e, ordered, C_VC);
+				op3(e, I_AND, 0, a.r, a.r, ordered);
+				tfree(e, ordered);
+			}
+			return vreg(a.r);
+		}
+		if (x->aux != BI_ISUNORDERED && x->aux != BI_ISLESSGREATER)
+			return f_compare(e, op, ct, a, b);
+
+		/* Binary128 NaNs: exponent all ones and a nonzero fraction.
+		 * Inspect bits so quiet NaNs do not raise FE_INVALID. Keep the
+		 * original operands for the ordered inequality when needed. */
+		lval saved[2];
+		val operands[2] = { a, b };
+		int nanregs[2];
+		for (int i = 0; i < 2; i++) {
+			if (x->aux == BI_ISLESSGREATER) {
+				saved[i] = (lval){ .k = L_FRAME, .off = slot(e, 16, 16), .align = 16 };
+				store(e, &saved[i], ct, &operands[i]);
+			}
+			toreg2(e, &operands[i], false);
+			int lo = operands[i].r, hi = operands[i].r2;
+			opi(e, I_SUBSI, 1, ZR, lo, 0);
+			cset(e, lo, C_NE);
+			shift_imm(e, T_LESSLESS, 1, hi, hi, 1);
+			op3(e, I_ORR, 1, hi, hi, lo);
+			tfree(e, lo);
+			opi(e, I_SUBSI, 1, ZR, hi, (int64_t)0xfffe000000000000ULL);
+			cset(e, hi, C_HI);
+			nanregs[i] = hi;
+		}
+		op3(e, I_ORR, 0, nanregs[0], nanregs[0], nanregs[1]);
+		tfree(e, nanregs[1]);
+		if (x->aux == BI_ISUNORDERED)
+			return vreg(nanregs[0]);
+		opi(e, I_EORI, 0, nanregs[0], nanregs[0], 1);
+		a = load(e, &saved[0], ct);
+		b = load(e, &saved[1], ct);
+		val ne = f_compare(e, T_EXCLAIMEQ, ct, a, b);
+		toreg(e, &ne);
+		op3(e, I_AND, 0, ne.r, ne.r, nanregs[0]);
+		tfree(e, nanregs[0]);
+		return ne;
+	}
+	case BI_ISINF_SIGN: {
+		/* Inspect the representation once: return +1/-1 for infinities,
+		   zero for every other value, without quieting signaling NaNs. */
+		qty at = N(arg[0])->ty;
+		val a = gen(e, arg[0]);
+		bool ld = is_ld(c, at), half = KIND(c, at) == TY_FLOAT16 || KIND(c, at) == TY_BFLOAT16;
+		bool bf = KIND(c, at) == TY_BFLOAT16;
+		int d = ld || fpk(e, at), r, sign = treg(e);
+		uint64_t inf;
+		if (ld) {
+			toreg2(e, &a, false);
+			r = a.r2;
+			shift_imm(e, I_ASRV, 1, sign, r, 63);
+			opi(e, I_SUBSI, 1, ZR, a.r, 0);
+			cset(e, a.r, C_NE);
+			shift_imm(e, T_LESSLESS, 1, r, r, 1);
+			op3(e, I_ORR, 1, r, r, a.r);
+			tfree(e, a.r);
+			inf = UINT64_C(0xfffe000000000000);
+		} else {
+			r = toreg(e, &a);
+			if (half) {
+				shift_imm(e, T_LESSLESS, 0, sign, r, 16);
+				shift_imm(e, I_ASRV, 0, sign, sign, 31);
+				opi(e, I_ANDI, 0, r, r, 0x7fff);
+				inf = bf ? 0x7f80 : 0x7c00;
+			} else {
+				shift_imm(e, I_ASRV, d, sign, r, d ? 63 : 31);
+				shift_imm(e, T_LESSLESS, d, r, r, 1);
+				inf = d ? UINT64_C(0xffe0000000000000) : UINT64_C(0xff000000);
+			}
+		}
+		opi(e, I_ORRI, 0, sign, sign, 1);
+		opi(e, I_SUBSI, d, ZR, r, (int64_t)inf);
+		cset(e, r, C_EQ);
+		op3(e, I_SUB, 0, r, ZR, r);
+		op3(e, I_AND, 0, r, r, sign);
+		tfree(e, sign);
+		return vreg(r);
+	}
+	case BI_ISSIGNALING: {
+		qty at = N(arg[0])->ty;
+		val a = gen(e, arg[0]);
+		int r, d;
+		uint64_t inf, quiet;
+		if (is_ld(c, at)) {
+			/* Fold low payload bits into a sticky bit after discarding sign. */
+			toreg2(e, &a, false);
+			r = a.r2, d = 1;
+			opi(e, I_SUBSI, 1, ZR, a.r, 0);
+			cset(e, a.r, C_NE);
+			shift_imm(e, T_LESSLESS, 1, r, r, 1);
+			op3(e, I_ORR, 1, r, r, a.r);
+			tfree(e, a.r);
+			inf = UINT64_C(0xfffe000000000000), quiet = UINT64_C(1) << 48;
+		} else {
+			bool half = KIND(c, at) == TY_FLOAT16 || KIND(c, at) == TY_BFLOAT16;
+			bool bf = KIND(c, at) == TY_BFLOAT16;
+			d = fpk(e, at);
+			r = toreg(e, &a);
+			opi(e, I_ANDI, d, r, r, half ? 0x7fff : d ? INT64_MAX : 0x7fffffff);
+			inf = bf ? UINT64_C(0x7f80) : half ? UINT64_C(0x7c00) : d ? UINT64_C(0x7ff0000000000000) : UINT64_C(0x7f800000);
+			quiet = UINT64_C(1) << (bf ? 6 : half ? 9 : d ? 51 : 22);
+		}
+		opi(e, I_SUBI, d, r, r, (int64_t)(inf + 1));
+		opi(e, I_SUBSI, d, ZR, r, (int64_t)(quiet - 1));
+		cset(e, r, C_LO);
+		return vreg(r);
+	}
 	case BI_ISNAN: case BI_ISINF: case BI_ISFINITE: case BI_SIGNBIT: case BI_ISNORMAL: {
 		cval cv;
 
@@ -1060,6 +1418,25 @@ runtime:
 			tfree(e, v.r);
 		} else {
 			r = toreg(e, &v);
+		}
+		if (KIND(c, at) == TY_FLOAT16 || KIND(c, at) == TY_BFLOAT16) {
+			bool bf = KIND(c, at) == TY_BFLOAT16;
+			if (x->aux == BI_SIGNBIT) {
+				shift_imm(e, I_LSRV, 0, r, r, 15);
+				opi(e, I_ANDI, 0, r, r, 1);
+				return vreg(r);
+			}
+			opi(e, I_ANDI, 0, r, r, 0x7fff);
+			if (x->aux == BI_ISNORMAL) {
+				shift_imm(e, I_LSRV, 0, r, r, bf ? 7 : 10);
+				opi(e, I_SUBI, 0, r, r, 1);
+				opi(e, I_SUBSI, 0, ZR, r, bf ? 254 : 30);
+				cset(e, r, C_LO);
+			} else {
+				opi(e, I_SUBSI, 0, ZR, r, bf ? 0x7f80 : 0x7c00);
+				cset(e, r, x->aux == BI_ISNAN ? C_HI : x->aux == BI_ISINF ? C_EQ : C_LO);
+			}
+			return vreg(r);
 		}
 		if (x->aux == BI_SIGNBIT) {
 			shift_imm(e, I_LSRV, d, r, r, bits - 1);

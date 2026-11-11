@@ -54,6 +54,7 @@
 #include <pthread.h>
 #include <stdarg.h>
 #include <stdatomic.h>
+#include <stddef.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -80,6 +81,9 @@
 #endif
 #endif
 
+/* Exact allocation/cell analysis shared by machine-record optimizers. */
+#include "rec/slots.h"
+
 #define N(i) (&c->nodes[i])
 /* Apple arm64 (Mach-O): '_' names, GOT for symbols outside the TU, variadic
  * arguments on the stack, va_list a char *, stack arguments packed */
@@ -87,6 +91,8 @@
 /* WebAssembly (wasm64): arch/wasm/emit/ generates the functions, data.c the data */
 #define WASM(c) PP_IS_WASM((c)->o->target)
 #define WASM32(c) ((c)->o->target == PP_WASM32)
+/* x86-64 Linux: emit/walk/ and arch/x64/emit/ generate the functions (PLAN-x86.md) */
+#define X86(c) ((c)->o->target == PP_LINUX_X86_64)
 
 /*
  * A C99 inline definition or GNU extern inline: not emitted (another TU
@@ -108,6 +114,8 @@ static inline bool inline_only(const sym *y)
 #define KIND(c, t) CKIND(c, t)
 
 #include "../arch/a64/emit/ins.h"
+#include "rec/rec.h"
+#include "flow/flow.h"
 
 /* references to things with a symbol: kind in the top 4 bits */
 enum { RK_SYM = 0, RK_STR = 1, RK_LBL = 2, RK_NAME = 3 };
@@ -155,7 +163,7 @@ enum { SA_WRITTEN = 1, SA_CLEANUP_FN = 2, SA_MUSTFOLD = 4, SA_CWRITE = 8, SA_CMU
        SA_AESC = 128 /* a local array used other than as a[CONST] */ };
 /* USED: a local or param read; NOINL: a static local holds a label address (one copy of the code only) */
 /* CWRITE: only ever assigned integer constants (all cwval unless CMULTI) */	/* per sym; MUSTFOLD: a function that calls an error() function */
-enum { NA_LABEL = 1 };				/* per node: statement contains a label or case */
+enum { NA_LABEL = 1, NA_ALLOCA = 2 };				/* per node: statement contains a label or case */
 
 typedef struct emitter {
 	cc *c;
@@ -225,7 +233,7 @@ typedef struct bind {
 	uint8_t kind;
 	uint8_t reg;		/* register variable: asm("xN") (0xff: none) */
 	uint8_t kv;		/* known-value tracking: index + 1 (0: untracked) */
-	int32_t slot;		/* B_SLOT, B_INDIRECT */
+	int64_t slot;		/* B_SLOT, B_INDIRECT */
 	val v;			/* B_CONST */
 } bind;
 
@@ -249,9 +257,9 @@ typedef struct loopctx {
 } loopctx;
 
 typedef struct fnctx {		/* one function instance: the emitted function or an inlined body */
-	uint32_t fn, inst;
+	uint32_t fn, inst, call;
 	uint32_t retlbl;
-	int32_t retslot;
+	int64_t retslot;
 	uint8_t retreg;		/* inlined: the result's temporary + 1 (0: in retslot) */
 	qty rty;
 	bool inl;
@@ -270,8 +278,8 @@ typedef struct fnctx {		/* one function instance: the emitted function or an inl
 
 /* a stack slot handed out by slot() (offsets are reused across scopes) */
 typedef struct slotal {
-	int32_t off;
-	uint32_t size;
+	int64_t off;
+	uint64_t size;
 } slotal;
 #define CAPSLA (1u << 20)
 /*
@@ -331,17 +339,19 @@ typedef struct ecx {
 	uint32_t nkvs;
 	uint32_t inst_next;
 	/* frame */
-	int32_t foff, fmax;
+	int64_t foff, fmax;
 	uint32_t falign;	/* largest slot alignment; over 16 the prologue realigns sp */
 	/* VLA sizes, evaluated where their declaration is reached (stmt.c vla_fix) */
-	struct { uint32_t node, inst; int32_t slot; } vsz[NVSZ];
+	struct { uint32_t node, inst; int64_t slot; } vsz[NVSZ];
 	uint32_t nvsz;
-	int32_t cl_top;		/* frame offset above the block's compound literals (kept past statements) */
-	int32_t outmax;		/* outgoing stack argument bytes */
+	int64_t cl_top;		/* frame offset above the block's compound literals (kept past statements) */
+	int64_t outmax;		/* outgoing stack argument bytes */
 	bool dyn, calls, vararg;
-	int32_t vaslot;		/* variadic register save area */
+	bool discarded_scalar;	/* lowering exposed an already-emitted unused scalar result */
+	int64_t vaslot;		/* variadic register save area */
 	int ngr_named, nstk_named;	/* variadic: named GPR args, named stack bytes */
-	int nvr_named, vrslot;		/* variadic (Linux): named FP/SIMD args, the v0-v7 save area */
+	int nvr_named;
+	int64_t vrslot;		/* variadic (Linux): named FP/SIMD args, the v0-v7 save area */
 	int nsrn;		/* classify: next SIMD/FP argument register */
 	/* temporaries */
 	uint32_t live;		/* bit i: tempregs[i] in use */
@@ -371,14 +381,18 @@ typedef struct ecx {
 	size_t nrlog, rlog0;	/* ... and where the current item's starts */
 	jmp_buf bail;
 	struct wst *w;		/* WASM: arch/wasm/emit/ state (wimpl.h) */
+	struct wkst *wk;	/* X86: the walker's state (emit/walk/walk.h) */
+	struct xst *x64;	/* X86: arch/x64/emit/ state (x64impl.h) */
 } ecx;
 enum { FN_MEMCPY, FN_MEMSET, FN_MEMMOVE, FN_UDIVTI3, FN_DIVTI3, FN_UMODTI3, FN_MODTI3, FN_STRLEN,
        FN_ASHLTI3, FN_LSHRTI3, FN_ASHRTI3, FN_FLOATTISF, FN_FLOATTIDF, FN_FLOATUNTISF, FN_FLOATUNTIDF,
        FN_FIXSFTI, FN_FIXDFTI, FN_FIXUNSSFTI, FN_FIXUNSDFTI,
-       FN_ADDTF3, FN_SUBTF3, FN_MULTF3, FN_DIVTF3, FN_EQTF2, FN_NETF2, FN_LTTF2, FN_LETF2, FN_GTTF2, FN_GETF2,
+       FN_ADDTF3, FN_SUBTF3, FN_MULTF3, FN_DIVTF3, FN_EQTF2, FN_NETF2, FN_LTTF2, FN_LETF2, FN_GTTF2, FN_GETF2, FN_UNORDTF2,
        FN_EXTENDDFTF2, FN_EXTENDSFTF2, FN_TRUNCTFDF2, FN_TRUNCTFSF2, FN_FLOATSITF, FN_FLOATDITF, FN_FLOATUNSITF,
        FN_FLOATUNDITF, FN_FLOATTITF, FN_FLOATUNTITF, FN_FIXTFSI, FN_FIXTFDI, FN_FIXUNSTFSI, FN_FIXUNSTFDI,
-       FN_FIXTFTI, FN_FIXUNSTFTI };
+       FN_FIXTFTI, FN_FIXUNSTFTI, FN_EXTENDXFTF2, FN_TRUNCTFXF2, FN_EXTENDBFSF2, FN_TRUNCSFBF2, FN_TRUNCDFBF2, FN_TRUNCXFBF2, FN_TRUNCTFBF2, FN_EXTENDHFSF2, FN_TRUNCSFHF2, FN_TRUNCDFHF2, FN_TRUNCXFHF2, FN_TRUNCTFHF2,
+       FN_FLOATTIXF, FN_FLOATUNTIXF, FN_FIXXFTI, FN_FIXUNSXFTI,
+       FN_FLOORF, FN_CEILF, FN_TRUNCF, FN_ROUNDF, FN_RINTF, FN_NEARBYINTF, FN_FABSF };
 #define FIXED(k) REF(RK_NAME, 0x8000000u + (k))
 
 /* ---------------- object backend: records -> machine code ---------------- */
@@ -445,13 +459,14 @@ typedef struct lval {
 	uint8_t r;		/* L_REG: base register (a temp, owned); L_GLOBREG: the register */
 	uint8_t bf;		/* bit-field */
 	uint8_t sgn;		/* bit-field signedness */
+	int64_t dynbit_slot;	/* packed vector lane: saved dynamic bit index, 0 for static */
 	uint16_t bitoff, width;	/* bit-field: bits from the byte at off */
 	uint32_t ref;		/* L_SYM */
 	int64_t off;		/* byte offset (L_FRAME: slot offset) */
 	uint32_t align;		/* known alignment of the address */
 } lval;
 
-enum { A_IGNORE, A_REG, A_STACK, A_REF_REG, A_REF_STACK, A_VREG, A_HFA };	/* A_VREG: float/double in v<reg>; A_HFA: nreg members of fsz bytes in v<reg>.. */
+enum { A_IGNORE, A_REG, A_STACK, A_REF_REG, A_REF_STACK, A_VREG, A_HFA, A_BOOL_LANES };	/* A_VREG: float/double in v<reg>; A_HFA: nreg members of fsz bytes in v<reg>.. */
 
 typedef struct abiarg {
 	uint8_t kind, reg, nreg, fsz;
@@ -466,7 +481,7 @@ typedef struct abiarg {
 
 typedef struct spill {
 	uint32_t mask;
-	int32_t slot[NTEMP];
+	int64_t slot[NTEMP];
 } spill;
 
 #define RLOG_CAP ((size_t)1 << 28)
@@ -477,7 +492,7 @@ typedef struct carg {
 	val v;
 	qty t;
 	abiarg a;
-	int32_t slot;		/* value parked in a frame slot (-1: v is a constant/address) */
+	int64_t slot;		/* value parked in a frame slot (-1: v is a constant/address) */
 } carg;
 
 /* ---------------- across files ---------------- */
@@ -504,6 +519,101 @@ static inline bool is_signed(cc *c, qty t);
 static inline bool is_ld(cc *c, qty t);
 static inline bool is_wide(cc *c, qty t);
 VPRIV i128 em_trunc_to(cc *c, i128 v, qty t);
+/* opt/divpow2.c */
+VPRIV bool em_divpow2(cc *c, qty ty, int *op, i128 *rhs);
+/* opt/sdivpow2.c: bias negative dividends to preserve truncation toward zero. */
+typedef struct em_sdivpow2_recipe {
+	uint8_t bits, shift;
+	bool negative, remainder;
+} em_sdivpow2_recipe;
+VPRIV bool em_sdivpow2(cc *c, qty ty, int op, i128 rhs, em_sdivpow2_recipe *r);
+/* opt/mulconst.c: shift for x + (x << shift), or zero to retain multiply. */
+VPRIV unsigned em_mulconst(unsigned bits, i128 rhs);
+
+/* opt/udivconst.c: unsigned32/64 reciprocal; quotient = high_bits(n*magic),
+ * optional ((n-q)>>1)+q correction, then shift. compare means q=(n>=d). */
+typedef struct em_udivconst_recipe {
+	uint64_t divisor, magic;
+	uint8_t bits, shift;
+	bool add, compare, remainder;
+} em_udivconst_recipe;
+VPRIV bool em_udivconst32(uint32_t divisor, bool remainder, em_udivconst_recipe *r);
+VPRIV bool em_udivconst64(uint64_t divisor, bool remainder, em_udivconst_recipe *r);
+VPRIV bool em_udivconst(cc *c, qty ty, int op, i128 rhs, em_udivconst_recipe *r);
+VPRIV bool a64_udivconst_ok(ecx *e, val a, const em_udivconst_recipe *r);
+VPRIV val a64_udivconst(ecx *e, val a, const em_udivconst_recipe *r);
+/* opt/sdivconst.c: reciprocal for a positive divisor magnitude. Signed high
+ * product, optional numerator addition, arithmetic shift, then sign correction. */
+typedef struct em_sdivconst_recipe {
+	uint64_t divisor;
+	int64_t magic;
+	uint8_t bits, shift;
+	bool add, negative, remainder;
+} em_sdivconst_recipe;
+VPRIV bool em_sdivconst32(int32_t divisor, bool remainder, em_sdivconst_recipe *r);
+VPRIV bool em_sdivconst64(int64_t divisor, bool remainder, em_sdivconst_recipe *r);
+VPRIV bool em_sdivconst(cc *c, qty ty, int op, i128 rhs, em_sdivconst_recipe *r);
+VPRIV bool a64_sdivconst_ok(ecx *e, val a, const em_sdivconst_recipe *r);
+VPRIV val a64_sdivconst(ecx *e, val a, const em_sdivconst_recipe *r);
+/* opt/identity.c */
+enum { EM_ID_NONE, EM_ID_LEFT, EM_ID_ZERO, EM_ID_ONES };
+VPRIV int em_bin_identity(cc *c, qty ty, int op, i128 rhs);
+/* opt/switch.c: inclusive ranges in controlling-type order. Preparation only
+ * for tree dispatch (>=8 cases); no allocation or target state in the policy.
+ * Preparation rejects wrapped/overlapping ranges: callers retain the chain. */
+typedef struct em_switch_case {
+	i128 lo, hi;
+	uint32_t target;
+} em_switch_case;
+enum { EM_SWITCH_LINEAR, EM_SWITCH_TREE, EM_SWITCH_TABLE };
+VPRIV int em_switch_strategy(uint32_t n, i128 lo, i128 hi, bool ranges, bool tables);
+VPRIV bool em_switch_prepare(em_switch_case *cases, uint32_t n, unsigned bits, bool sg);
+/* opt/unusedinit.c: bounded recipes for never-referenced integer declarations. */
+enum { EM_UNUSED_KEEP, EM_UNUSED_OMIT, EM_UNUSED_EVAL };
+VPRIV bool em_unused_local(ecx *e, uint32_t s, uint32_t fn);
+VPRIV unsigned em_unused_init(ecx *e, const node *decl, uint32_t fn, unsigned budget);
+/* opt/locals.c: eligibility and bounded selection from the existing prepass. */
+/* opt/tail.c: exact direct forwarding wrappers; target capability/ABI checks follow. */
+VPRIV bool em_tail_candidate(ecx *e, uint32_t fn, uint32_t expr, uint32_t maxargs, uint32_t *callee);
+VPRIV bool a64_tail_return(ecx *e, uint32_t expr);
+VPRIV uint32_t a64_tail_ref(const ecx *e);
+VPRIV bool em_local_eligible(ecx *e, uint32_t s);
+VPRIV bool em_local_gpr_type(cc *c, qty ty);
+VPRIV unsigned em_select_locals(ecx *e, uint32_t fn, uint32_t *cand, unsigned max,
+			       bool (*target_ok)(cc *, qty));
+/* rec/fallthrough.c: opaque records; no shared struct layout is assumed. */
+typedef struct em_rec_layout {
+	size_t stride, op_offset, label_offset;
+	uint8_t jump_op, label_op;
+} em_rec_layout;
+VPRIV uint32_t em_rec_fallthrough(void *records, uint32_t count, const em_rec_layout *layout,
+				void (*remap)(void *, uint32_t, uint32_t), void *ctx);
+/* rec/unreachable.c: unknown opcodes and opaque records are entry barriers. */
+VPRIV uint32_t em_rec_unreachable(void *records, uint32_t count, size_t stride, size_t op_offset,
+				const uint8_t *flow, size_t nflow,
+				void (*remap)(void *, uint32_t, uint32_t), void *ctx);
+/* rec/copies.c: inclusive block end, whole-register t/v below 64. The target
+ * preflights each rewritten record without mutation (apply=false); applying
+ * the same rewrite must then succeed. Existing conservative liveness is only
+ * enlarged, and no effects/liveness table is built by this scan.
+ */
+typedef struct em_rec_copy_scan {
+	void *records;
+	size_t stride, op_offset;
+	uint8_t deleted_op;
+	const void *flags;
+	size_t flags_stride;
+	uint16_t opaque_mask;
+	uint64_t *read, *live;
+	const uint64_t *write;
+	/* Optional on-demand effects. False is an opaque boundary. With no live
+	 * array a copy must reach an explicit overwrite; block end proves nothing.
+	 */
+	bool (*inspect)(void *ctx, uint32_t j, uint64_t *read, uint64_t *write);
+	bool (*rewrite)(void *ctx, uint32_t j, uint8_t from, uint8_t to, bool apply);
+	void *ctx;
+} em_rec_copy_scan;
+VPRIV bool em_rec_copy_forward(const em_rec_copy_scan *s, uint32_t k, uint32_t end, uint8_t t, uint8_t v);
 /* insn.c */
 extern const char cond_name[][8];
 VPRIV bool logimm_ok(uint64_t v, int x);
@@ -571,7 +681,7 @@ VPRIV void cbz(ecx *e, bool nz, int x, int r, uint32_t l);
 VPRIV int treg(ecx *e);
 VPRIV void tfree(ecx *e, int r);
 VPRIV void val_free(ecx *e, const val *v);
-VPRIV int32_t slot(ecx *e, uint64_t size, uint32_t align);
+VPRIV int64_t slot(ecx *e, uint64_t size, uint32_t align);
 VPRIV void slot_tag(ecx *e, ins *i, int64_t off, int64_t len);
 static inline val vconst(i128 i);
 static inline val vreg(int r);
@@ -592,8 +702,10 @@ VPRIV void zero_mem(ecx *e, int dst, uint64_t n);
 /* abi.c */
 VPRIV int hfa(cc *c, qty t, int *n);
 VPRIV bool vec_small(cc *c, qty t);
+VPRIV void bvec_ret(ecx *e, qty t, int rs);
+VPRIV void bvec_res(ecx *e, qty t, int64_t sl);
 VPRIV void vec_small_ret(ecx *e, qty t, int rs);
-VPRIV void vec_small_res(ecx *e, qty t, int32_t sl);
+VPRIV void vec_small_res(ecx *e, qty t, int64_t sl);
 VPRIV bool is_sret(cc *c, qty t);
 VPRIV void classify_va(ecx *e, qty t, int *nsaa, abiarg *a);
 VPRIV uint32_t abi_align(cc *c, qty t);
@@ -602,14 +714,14 @@ VPRIV void spill_live(ecx *e, spill *s);
 VPRIV void unspill(ecx *e, const spill *s);
 VPRIV void call_fixed(ecx *e, int fn, int a0, int a1, int a2, int64_t n);
 /* bind.c */
-static inline int32_t keep_cl(const ecx *e, int32_t mark);
+static inline int64_t keep_cl(const ecx *e, int64_t mark);
 static inline int X(cc *c, qty t);
 static inline void rlog(ecx *e, uint32_t tag, uint32_t v);
 VPRIV void note_ref(ecx *e, uint32_t ref);
 VPRIV void claim_ref(ecx *e, uint32_t ref);
 VPRIV bind *binding(ecx *e, uint32_t s);
 VPRIV int regvar_reg(cc *c, uint32_t s);
-VPRIV int32_t bind_slot(ecx *e, uint32_t s);
+VPRIV int64_t bind_slot(ecx *e, uint32_t s);
 VPRIV lval local_lval(ecx *e, uint32_t s);
 VPRIV uint32_t sym_align(cc *c, uint32_t s);
 VPRIV bool is_local_var(cc *c, uint32_t s);
@@ -629,11 +741,17 @@ VPRIV void store(ecx *e, lval *l, qty t, val *v);
 VPRIV void extend(ecx *e, int rd, int rs, int from, bool sgn);
 VPRIV int lreg_of(ecx *e, uint32_t s);
 VPRIV void opt_function(ecx *e);
+/* arch/a64/emit/unreachable.c */
+VPRIV void a64_unreachable(ecx *e);
 enum { OPF_ALL = 1, OPF_CALL = 2, OPF_FRAME = 4 };
 VPRIV uint64_t opt_regs(ecx *e, unsigned *fl);
 VPRIV lval bind_lreg(ecx *e, uint32_t s);
 VPRIV val fold_int_bin(ecx *e, int op, qty ot, qty rt, i128 l, i128 r, bool *ok);
 VPRIV bool em_is_cmp(int op);
+/* Pure control proofs: bounded shared walk, no committed target instructions. */
+VPRIV bool em_const_strcmp(cc *c, uint32_t n, i128 *value);
+VPRIV int em_const_truth(ecx *e, uint32_t n, int (*constant_p)(ecx *, uint32_t));
+VPRIV int a64_constant_p(ecx *e, uint32_t arg);
 VPRIV int emit_cmp(ecx *e, int op, int x, bool sg, val *a, val *b);
 VPRIV int emit_cmp2(ecx *e, int op, bool sg, val *a, val *b);
 VPRIV int test_zero(ecx *e, val *v, qty t, uint32_t l, bool nz);
@@ -646,8 +764,8 @@ static inline uint32_t f_out(int d, int r, int vr);
 VPRIV val f_const(int d, double x);
 static inline uint32_t q_in_hi(int vr, int r);
 static inline uint32_t q_out_hi(int r, int vr);
-VPRIV void vr_store(ecx *e, int sz, int vr, int base, int32_t off);
-VPRIV void vr_load(ecx *e, int sz, int vr, int base, int32_t off);
+VPRIV void vr_store(ecx *e, int sz, int vr, int base, int64_t off);
+VPRIV void vr_load(ecx *e, int sz, int vr, int base, int64_t off);
 VPRIV i128 ld_of_d(double x);
 VPRIV val f_const_cv(ecx *e, qty t, const cval *cv);
 VPRIV val f_const_t(ecx *e, qty t, double x);
@@ -661,6 +779,8 @@ VPRIV val ld_cast(ecx *e, val v, qty from, qty to);
 VPRIV val f_cast(ecx *e, val v, qty from, qty to);
 /* arith.c */
 VPRIV val cast(ecx *e, val v, qty from, qty to, int kind);
+VPRIV val a64_sdivpow2(ecx *e, val a, const em_sdivpow2_recipe *r);
+VPRIV bool a64_mulconst(ecx *e, qty ty, int r, i128 rhs);
 VPRIV void shift_imm(ecx *e, int op, int x, int rd, int rn, int k);
 VPRIV val arith(ecx *e, int op, qty ty, val a, val b);
 VPRIV val arith2(ecx *e, int op, qty ty, val a, val b);
@@ -672,7 +792,8 @@ VPRIV void kv_track(ecx *e, uint32_t s, const val *v);
 VPRIV int ael_slot(ecx *e, uint32_t n, bool create);
 VPRIV bool const_var(ecx *e, uint32_t s, const val *v);
 VPRIV bool can_inline(ecx *e, uint32_t s);
-VPRIV val inline_call(ecx *e, uint32_t s, carg *args, int n);
+VPRIV val inline_call(ecx *e, uint32_t s, carg *args, int n, uint32_t call);
+VPRIV bool inline_object_size(ecx *e, uint32_t fn, uint32_t call, uint32_t pointer, uint32_t mode, i128 *size);
 VPRIV uint32_t direct_callee(cc *c, uint32_t fn, uint32_t *ref);
 VPRIV val gen_call(ecx *e, uint32_t n);
 /* builtin.c */
@@ -710,12 +831,16 @@ VPRIV void emit_string(ecx *e, uint32_t i);
 /* arch/wasm/emit/ */
 VPRIV void wasm_emit_function(ecx *e, uint32_t s);
 VPRIV void wasm_ecx_free(ecx *e);
+VPRIV void wk_function(ecx *e, uint32_t s);
+VPRIV void wk_ecx_free(ecx *e);
 VPRIV void wasm_data_ref(ecx *e, uint32_t ref);
 VPRIV void wasm_header(cc *c, tbuf *hdr, ecx *ctx, int nthr);
 VPRIV void wasm_tail(cc *c, tbuf *t, _Atomic uint8_t *claimed);
 /* prepass.c */
 VPRIV bool is_aconst(cc *c, uint32_t n);
 VPRIV uint32_t aconst_idx(cc *c, uint32_t n);
+VPRIV bool sve_codegen_ok(cc *c);
+VPRIV bool bitint_codegen_ok(cc *c);
 VPRIV void ensure_walked(emitter *E, cc *c, uint32_t s);
 VPRIV int u32_cmp(const void *a, const void *b);
 /* tu.c */
@@ -724,18 +849,25 @@ VPRIV void enqueue(emitter *E, uint32_t item);
 /* ---------------- types (the few predicates the emitter needs) ---------------- */
 
 static inline qty prim(int k) { return QT(k, 0); }
-static inline bool k_int(int k) { return (k >= TY_BOOL && k <= TY_UINT128) || k == TY_ENUM; }
+static inline bool k_int(int k) { return (k >= TY_BOOL && k <= TY_UINT128) || k == TY_BITINT || k == TY_UBITINT || k == TY_ENUM; }
+static inline bool em_bigint(cc *c, qty t) { int k = KIND(c, t); return k == TY_BITINT || k == TY_UBITINT; }
 static inline bool is_integer(cc *c, qty t) { return k_int(KIND(c, t)); }
+static inline bool em_bitint(cc *c, qty t)
+{
+	return ((KIND(c, t) >= TY_CHAR && KIND(c, t) <= TY_UINT128) || em_bigint(c, t)) &&
+	       !(T(c, t)->flags & TF_ATOMIC) && T(c, t)->n;
+}
 static inline bool is_ptr(cc *c, qty t) { return KIND(c, t) == TY_PTR; }
-static inline bool is_flt(cc *c, qty t) { int k = KIND(c, t); return k >= TY_FLOAT16 && k <= TY_LDOUBLE; }
+static inline bool is_flt(cc *c, qty t) { int k = KIND(c, t); return k >= TY_BFLOAT16 && k <= TY_FLOAT128; }
 static inline bool is_record(cc *c, qty t) { int k = KIND(c, t); return k == TY_STRUCT || k == TY_UNION; }
 static inline bool is_array(cc *c, qty t) { return KIND(c, t) == TY_ARRAY; }
 static inline bool is_func(cc *c, qty t) { return KIND(c, t) == TY_FUNC; }
 static inline bool is_void(cc *c, qty t) { return KIND(c, t) == TY_VOID; }
 static inline bool is_vec(cc *c, qty t) { return KIND(c, t) == TY_VECTOR; }
+static inline bool is_bvec(cc *c, qty t) { return is_vec(c, t) && KIND(c, T(c, t)->base) == TY_BOOL; }
 /* passed and returned like a record (vcc's own convention for vectors) */
-static inline bool is_recabi(cc *c, qty t) { return is_record(c, t) || is_vec(c, t); }
-static inline bool is_agg(cc *c, qty t) { return is_record(c, t) || is_array(c, t) || is_vec(c, t); }
+static inline bool is_recabi(cc *c, qty t) { return is_record(c, t) || is_vec(c, t) || em_bigint(c, t); }
+static inline bool is_agg(cc *c, qty t) { return is_record(c, t) || is_array(c, t) || is_vec(c, t) || em_bigint(c, t); }
 static inline uint64_t tsize(cc *c, qty t) { return T(c, t)->size; }
 
 /* Apple arm64: an integer under 4 bytes in a register is extended to 32 bits by its producer */
@@ -778,7 +910,7 @@ static inline bool ref_weak(const cc *c, uint32_t ref)
 static inline val vnone(void) { val v = { .k = V_NONE }; return v; }
 
 /* a statement's temporaries end with it; compound literals live on to the end of their block */
-static inline int32_t keep_cl(const ecx *e, int32_t mark)
+static inline int64_t keep_cl(const ecx *e, int64_t mark)
 {
 	return mark > e->cl_top ? mark : e->cl_top;
 }

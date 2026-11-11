@@ -296,8 +296,9 @@ def cmd_mkbase(rev, quiet=False):
             if p.returncode: die(f'base build failed:\n{p.stdout[-1500:]}{p.stderr[-1500:]}')
             open(f'{d}/ok', 'w').close()
         finally: os.rmdir(f'{d}.lock')
-    if not quiet: print(f'{d}/build/ccs')
-    return f'{d}/build/ccs'
+    out = f'{d}/build/linux/ccs' if sys.platform.startswith('linux') else f'{d}/build/ccs'	# ccs/Makefile's OUT
+    if not quiet: print(out)
+    return out
 
 # ---------------- corpus selection ----------------
 

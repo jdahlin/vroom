@@ -342,6 +342,8 @@ VPRIV uint32_t fmt_attr(cc *c, uint32_t fs)
 	if (c->o->no_builtin || y->kind != S_FUNC || y->sc == SC_STATIC || !y->name)
 		return 0;
 	nm = idstr_(y->name), len = idlen_(y->name);
+	if (lib_builtin_disabled(c->o, nm, len))
+		return 0;
 	if (len < 6 || len > 9 || !strchr("psafv", nm[0]))
 		return 0;
 	for (size_t i = 0; i < sizeof(lib) / sizeof(lib[0]); i++) {

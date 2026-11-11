@@ -1,0 +1,26 @@
+id = "B15"
+title = "Input result is ignored before using the destination"
+expect = [
+  { line = 4, severity = "warning", pattern = "(scanf|input|conversion).*(result|fail|return)|ignoring return value.*scanf|unchecked.*(input|scanf)" },
+]
+known_gap = "A declared scanf call does not guarantee assignment; desired guidance needs library-contract knowledge, not merely generic unused-result attributes."
+
+=== broken.c ===
+int scanf(const char *, ...);
+int main(void) {
+    int n;
+    scanf("%d", &n);
+    return n;
+}
+=== fixed.c ===
+int scanf(const char *, ...);
+int main(void) {
+    int n;
+    if (scanf("%d", &n) != 1) return 1;
+    return n;
+}
+=== valid.c ===
+int scanf(const char *, ...);
+int main(void) { int n=0; return scanf("%d", &n) == 1 ? 0 : 1; }
+=== stderr ===
+=== narrated ===

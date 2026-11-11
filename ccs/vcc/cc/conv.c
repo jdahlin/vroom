@@ -6,9 +6,9 @@ static __attribute__((noinline)) uint32_t fold_f2i(cc *c, uint32_t n, qty to)
 {
 	cval v;
 
-	if (eval(c, n, &v) && v.kind == CV_FLT && v.f > -9.3e18 && v.f < 1.8e19) {
+	if (!is_bigint(c, to) && eval(c, n, &v) && v.kind == CV_FLT && v.f > -9.3e18 && v.f < 1.8e19) {
 		u128 q = v.ld ? v.q : q_of_d(v.f);
-		int bits = (int)ty_size(c, to) * 8;
+		int bits = (int)int_bits(c, to);
 		bool sg = is_signed(c, to);
 		i128 i = q_to_int(q, 128, true);
 
@@ -29,13 +29,29 @@ VPRIV uint32_t cast_node(cc *c, uint32_t n, qty to, int kind)
 
 	N(r)->a = n;
 	N(r)->aux = (uint16_t)kind;
+	r = big_fold_node(c, r);
+	if (N(r)->op == N_CAST && ((kind == CK_I2F && is_bigint(c, N(n)->ty)) ||
+	    (kind == CK_F2I && is_bigint(c, to)))) {
+		cval v;
+		if (eval(c, r, &v) && v.kind == CV_FLT) {
+			/* Keep the original cast for constant-expression grammar checks.
+			 * The emitter uses its already rounded floating value. */
+			N(r)->c = v.ld ? mk_fltq(c, v.q, to, N(n)->loc) : mk_flt(c, v.f, to, N(n)->loc);
+		} else {
+			if (c->o->target == PP_LINUX_X86_64 || c->o->target == PP_LINUX_AARCH64)
+				return big_float_cast(c, n, to);
+		}
+	}
 	return r;
 }
 
 VPRIV __attribute__((noinline)) uint32_t decay_slow(cc *c, uint32_t n, qty t, int k)
 {
-	if (T(c, t)->flags & TF_ATOMIC)	/* lvalue conversion drops _Atomic: the load is atomic (emit) */
+	if (T(c, t)->flags & TF_ATOMIC) {
+		if ((N(n)->flags & NF_LVALUE) && atomic_wide(c, t))
+			return atomic_load_expr(c, n);
 		return cast_node(c, n, QUNQ(ty_unatomic(c, t)), CK_NOP);
+	}
 	if (k == TY_ARRAY)
 		return cast_node(c, n, ty_ptr(c, T(c, t)->base), CK_DECAY);
 	return cast_node(c, n, ty_ptr(c, QUNQ(t)), CK_FDECAY);
@@ -50,13 +66,30 @@ VPRIV const field *bitfield_of(cc *c, uint32_t n)
 	return NULL;
 }
 
+/* Some non-lvalue expressions retain bit-field width for integer
+ * promotion. This is separate from bitfield_of: sizeof/typeof may inspect
+ * assignment, comma and prefix-increment results. Postfix results instead
+ * have the ordinary declared type, as do explicit casts. */
+static const field *promotion_bitfield(cc *c, uint32_t n)
+{
+	for (;;) {
+		const node *x = N(n);
+		if (x->op == N_COMMA)
+			n = x->b;
+		else if (x->op == N_ASSIGN || x->op == N_PREINC || x->op == N_PREDEC)
+			n = x->a;
+		else
+			return bitfield_of(c, n);
+	}
+}
+
 /* the type of n as an rvalue after integer promotion (bit-fields included) */
 VPRIV qty promoted(cc *c, uint32_t n)
 {
 	qty t = QUNQ(N(n)->ty);
-	const field *f = bitfield_of(c, n);
+	const field *f = promotion_bitfield(c, n);
 
-	if (f && is_integer(c, t) && KIND(c, t) != TY_BOOL) {
+	if (f && is_integer(c, t) && KIND(c, t) != TY_BOOL && !T(c, t)->n) {
 		if (f->width < 32)
 			return prim(TY_INT);
 		if (f->width == 32 && rank(c, t) <= 4)
@@ -99,11 +132,13 @@ VPRIV int conv_kind(cc *c, qty from, qty to, uint32_t n)
 			return n && is_npc(c, n) ? CK_NULL : CK_I2P;
 		return -1;
 	}
-	if ((tk == TY_STRUCT || tk == TY_UNION) && compatible(c, from, to))
+	if ((tk == TY_STRUCT || tk == TY_UNION) && compatible(c, ty_unatomic(c, from), ty_unatomic(c, to)))
 		return CK_NOP;
 	/* vectors of one size convert lane-agnostically (clang's lax integer vector conversions) */
-	if (tk == TY_VECTOR && fk == TY_VECTOR && T(c, to)->size == T(c, from)->size)
+	if (tk == TY_VECTOR && fk == TY_VECTOR && T(c, to)->size == T(c, from)->size) {
+		if ((is_bool_vector(c, to) || is_bool_vector(c, from)) && !compatible(c, to, from)) return -1;
 		return CK_NOP;
+	}
 	return -1;
 }
 
@@ -287,6 +322,8 @@ static bool ptr_ok_(cc *c, qty a, qty b, bool top)
 	ka = KIND(c, a), kb = KIND(c, b);
 	if (compatible(c, a, b) || (top && (ka == TY_VOID || kb == TY_VOID)))
 		return true;
+	if ((T(c, a)->flags ^ T(c, b)->flags) & TF_ATOMIC)
+		return false;
 	if (ka == TY_PTR && kb == TY_PTR)
 		return ptr_ok_(c, T(c, a)->base, T(c, b)->base, false);
 	if (top && (is_integer(c, a) || ka == TY_ENUM) && (is_integer(c, b) || kb == TY_ENUM))
@@ -468,7 +505,7 @@ static void literal_conv(cc *c, uint32_t n, qty to)
 			return;
 		snprintf(ts, sizeof ts, "%s", v != 0 ? "true" : "false");
 	} else {
-		int w = (int)ty_size(c, to) * 8;
+		int w = (int)int_bits(c, to);
 		bool sg = is_signed(c, to);
 		double lo = sg ? -ldexp(1, w - 1) : 0, hi = sg ? ldexp(1, w - 1) : ldexp(1, w);
 
@@ -537,9 +574,19 @@ static void const_conv(cc *c, uint32_t n, qty to)
 	if (!is_integer(c, to) || !is_integer(c, from) || KIND(c, to) == TY_BOOL || KIND(c, from) == TY_BOOL ||
 	    c->unevaluated || !cc_eval(c, n, &cv) || cv.kind != CV_INT)
 		return;
-	tw = (int)ty_size(c, to) * 8, sw = (int)ty_size(c, from) * 8;
+	tw = (int)int_bits(c, to), sw = (int)int_bits(c, from);
 	if (tw >= sw || tw > 64)
 		return;
+	{
+		/* clang: __builtin_object_size is no constant here (it is evaluated after
+		   optimization): no -Wconstant-conversion for its (size_t)-1 */
+		uint32_t e = n;
+
+		while (N(e)->op == N_CAST && N(e)->a)
+			e = N(e)->a;
+		if (N(e)->op == N_BUILTIN && (N(e)->aux == BI_OBJECT_SIZE || N(e)->aux == BI_DYNAMIC_OBJECT_SIZE))
+			return;
+	}
 	tnn = !is_signed(c, to);
 	v = cv.i;
 	if (!is_signed(c, from) && sw <= 64)
@@ -650,6 +697,8 @@ VPRIV uint32_t convert_as(cc *c, uint32_t n, qty to, int what, uint32_t loc)
 	uint32_t sl = c->cv_loc;
 
 	c->cv_what = (uint8_t)what, c->cv_loc = loc;
+	if (unlikely(c->constexpr_init && what == CX_INIT) && !ISERR(n))
+		constexpr_conversion(c, n, to);
 	if (what) {
 		n = conv_check(c, n, to);
 		if (!(N(n)->flags & NF_ERR))
@@ -954,7 +1003,7 @@ VPRIV uint32_t rvalue(cc *c, uint32_t n)
 	n = decay(c, n);
 	x = N(n), t = T(c, x->ty);
 	/* int and wider, not a bit-field: already promoted */
-	if (t->kind >= TY_INT && t->kind <= TY_UINT128 && t->canon == QI(x->ty) && !(x->op == N_MEMBER && (x->flags & NF_BITFIELD)))
+	if (t->kind >= TY_INT && t->kind <= TY_UINT128 && t->canon == QI(x->ty) && !promotion_bitfield(c, n))
 		return n;
 	if (!is_int_kind(t->kind) && t->kind != TY_ENUM)
 		return n;
@@ -970,13 +1019,15 @@ VPRIV void need_scalar(cc *c, uint32_t n, const char *what)
 /* n is assigned (or incremented) by the operator at loc */
 VPRIV bool need_lvalue(cc *c, uint32_t n, uint32_t loc)
 {
-	pp_span r = rng(c, n);
+	pp_span r;	/* the operand's range, for the diagnostics only (pp_tok_end is not free) */
 
 	if (!(N(n)->flags & NF_LVALUE)) {
+		r = rng(c, n);
 		report(c, "error", loc, &r, 1, NULL, 0, "expression is not assignable");
 		return false;
 	}
 	if (QQ(N(n)->ty) & Q_CONST) {
+		r = rng(c, n);
 		if (N(n)->op == N_VAR) {
 			const sym *v = &c->syms[N(n)->a];
 			pp_span vr = { v->plb, pp_tok_end(c->p, v->ple) };

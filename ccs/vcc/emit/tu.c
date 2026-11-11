@@ -138,6 +138,7 @@ static void ecx_free(ecx *e, vmreg *r)
 	vmreg_put(&r[15], VMREG_SCRATCH);
 	vmpool_give(&ecxpool, r);
 	wasm_ecx_free(e);
+	wk_ecx_free(e);
 }
 
 /* a function the previous round generated, if nothing it asked about has been marked since */
@@ -181,6 +182,8 @@ static void do_item(ecx *e, uint32_t it)
 	}
 	if (c->syms[it].kind == S_FUNC && WASM(c)) {
 		wasm_emit_function(e, it);
+	} else if (c->syms[it].kind == S_FUNC && X86(c)) {
+		wk_function(e, it);
 	} else if (c->syms[it].kind == S_FUNC) {
 		if (!reuse(e, it))
 			emit_function(e, it);
@@ -429,12 +432,24 @@ static int emit_tu1(cc *c, const cc_opts *o, bool write_out, uint8_t *mf, bool *
 	E.noopt = getenv("VCC_NOOPT") != NULL;
 	/* wasm64: objects from the text, through arch/wasm/as */
 	E.objtext = getenv("VCC_OBJ_TEXT") != NULL || PP_IS_WASM(o->target);
+	/* x86-64: objects from the printer's text through arch/x64/as (PLAN-x86.md X5) */
+	if (X86(c))
+		E.objtext = true;
 	/* -g: the line table is the assembler's, from the printer's .loc */
 	if (o->debug && !DARWIN(c) && !WASM(c))
 		E.objtext = true;
 	/* unwind tables: .eh_frame is the assembler's, from the printer's .cfi_* */
 	if (o->cfi && !DARWIN(c) && !WASM(c))
 		E.objtext = true;
+	/* Lazy walks own only their function's automatic variables. Globals and
+	   static objects can be modified by other functions (including ones not
+	   emitted here); publish conservative immutable facts before workers start.
+	   In particular, never infer a TU-wide constant from one function's writes. */
+	for (uint32_t s = 1; s < c->nsym; s++)
+		if (c->syms[s].kind == S_VAR && !is_local_var(c, s)) {
+			E.sflags[s] = SA_WRITTEN | SA_AESC;
+			E.ffacts[s] = FF_BAD;
+		}
 	/* roots */
 	for (uint32_t i = 0; i < c->ntoplevel; i++) {
 		uint32_t s = c->toplevel[i];
@@ -471,6 +486,10 @@ static int emit_tu1(cc *c, const cc_opts *o, bool write_out, uint8_t *mf, bool *
 	tb_reg(&hdr, &er[12], (size_t)1 << 26, "emit.hdr");
 	if (WASM(c))
 		wasm_header(c, &hdr, ctx, nthr);
+	else if (X86(c) && (o->xcf & 1))
+		/* -fcf-protection=branch: GNU_PROPERTY_X86_FEATURE_1_AND = IBT, as clang's start of file */
+		tb_s(&hdr, "\t.section\t.note.gnu.property,\"a\",@note\n\t.p2align\t3, 0x0\n\t.long\t4\n\t.long\t16\n"
+			   "\t.long\t5\n\t.asciz\t\"GNU\"\n\t.long\t3221225474\n\t.long\t4\n\t.long\t1\n\t.p2align\t3, 0x0\n\t.text\n");
 	else
 		tb_s(&hdr, "\t.text\n");
 	bool dbg = o->debug && !DARWIN(c) && !WASM(c);
@@ -547,18 +566,25 @@ static int emit_tu1(cc *c, const cc_opts *o, bool write_out, uint8_t *mf, bool *
 		}
 		if (dbg) {
 			/* one compile unit over .text: producer, C11, name, its line table, dir, pc range */
+			/* (x86: .word is 2 bytes there, so .short/.long/.quad) */
+			bool x = X86(c);
+
 			tb_s(&tail, "\t.text\n.Ldbg_text1:\n"
 				    "\t.section\t.debug_abbrev,\"\",@progbits\n.Ldbg_abbrev:\n"
 				    "\t.byte\t1, 17, 0, 37, 8, 19, 5, 3, 8, 16, 23, 27, 8, 17, 1, 18, 6, 0, 0, 0\n"
-				    "\t.section\t.debug_info,\"\",@progbits\n"
-				    "\t.word\t.Ldbg_cu_end-.Ldbg_cu_start\n.Ldbg_cu_start:\n"
-				    "\t.hword\t5\n\t.byte\t1, 8\n\t.word\t.Ldbg_abbrev\n\t.byte\t1\n\t.asciz\t\"vcc\"\n"
-				    "\t.hword\t29\n\t.asciz\t");
+				    "\t.section\t.debug_info,\"\",@progbits\n");
+			tb_s(&tail, x ? "\t.long\t.Ldbg_cu_end-.Ldbg_cu_start\n.Ldbg_cu_start:\n"
+				        "\t.short\t5\n\t.byte\t1, 8\n\t.long\t.Ldbg_abbrev\n\t.byte\t1\n\t.asciz\t\"vcc\"\n"
+				        "\t.short\t29\n\t.asciz\t" :
+				        "\t.word\t.Ldbg_cu_end-.Ldbg_cu_start\n.Ldbg_cu_start:\n"
+				        "\t.hword\t5\n\t.byte\t1, 8\n\t.word\t.Ldbg_abbrev\n\t.byte\t1\n\t.asciz\t\"vcc\"\n"
+				        "\t.hword\t29\n\t.asciz\t");
 			dbg_str(&tail, o->dbg_name ? o->dbg_name : "<stdin>");
-			tb_s(&tail, "\n\t.word\t.Lline_table_start0\n\t.asciz\t");
+			tb_s(&tail, x ? "\n\t.long\t.Lline_table_start0\n\t.asciz\t" : "\n\t.word\t.Lline_table_start0\n\t.asciz\t");
 			dbg_str(&tail, o->dbg_dir ? o->dbg_dir : ".");
-			tb_s(&tail, "\n\t.xword\t.Ldbg_text0\n\t.word\t.Ldbg_text1-.Ldbg_text0\n.Ldbg_cu_end:\n"
-				    "\t.section\t.debug_line,\"\",@progbits\n.Lline_table_start0:\n");
+			tb_s(&tail, x ? "\n\t.quad\t.Ldbg_text0\n\t.long\t.Ldbg_text1-.Ldbg_text0\n.Ldbg_cu_end:\n" :
+				        "\n\t.xword\t.Ldbg_text0\n\t.word\t.Ldbg_text1-.Ldbg_text0\n.Ldbg_cu_end:\n");
+			tb_s(&tail, "\t.section\t.debug_line,\"\",@progbits\n.Lline_table_start0:\n");
 		}
 		if (WASM(c))
 			wasm_tail(c, &tail, E.claimed);
@@ -595,7 +621,8 @@ static int emit_tu1(cc *c, const cc_opts *o, bool write_out, uint8_t *mf, bool *
 						vbuf_put(o->wasm_obj, ob, on);
 						free(ob);
 					}
-				} else if (as_run(o->as, o->obj, all.p, all.n, "<vcc>", &msg)) {
+				} else if (elf_set_machine(o->obj, X86(c) ? EM_X86_64 : EM_AARCH64),
+					   as_run(o->as, o->obj, all.p, all.n, "<vcc>", &msg)) {
 					as_error(c, "assembler: %s", msg);
 					E.errors++;
 				}
@@ -700,6 +727,9 @@ extern _Atomic unsigned long long ppd_ns_emit;
 
 int emit_tu(cc *c, const cc_opts *o)
 {
+	if (!sve_codegen_ok(c) || !bitint_codegen_ok(c))
+		return 1;
+
 	double t0 = now();
 	vperf v0 = vperf_now();
 	const char *r = getenv("VCC_EMIT_REPEAT");

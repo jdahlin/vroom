@@ -113,6 +113,8 @@ VPRIV wabi wclassify(cc *c, qty t)
 		if (tsize(c, t) == 0)
 			return (wabi){ WA_IGNORE, 0, 0, 0 };
 		s = wsingle(c, t);
+		if (s && is_bvec(c, s))
+			return wclassify(c, s);
 		if (s && !is_record(c, s) && !is_vec(c, s)) {
 			k = wty(c, s);
 			if (k != WT_MEM)
@@ -128,7 +130,7 @@ VPRIV wabi wclassify(cc *c, qty t)
 		/* lane by lane (no simd128), as clang */
 		qty b = T(c, t)->base;
 
-		return (wabi){ WA_PAIR, (uint8_t)wrep(c, wty(c, b)), t, (uint32_t)(tsize(c, t) / tsize(c, b)) };
+		return (wabi){ WA_PAIR, (uint8_t)wrep(c, wty(c, b)), t, T(c, t)->ext ?: T(c, t)->n };
 	}
 	return (wabi){ WA_IND, (uint8_t)WPT(c), t, 0 };
 }
@@ -418,8 +420,7 @@ VPRIV bool wreg_ok(ecx *e, uint32_t s)
 	const sym *y = &c->syms[s];
 	int k = wty(c, y->ty);
 
-	return k != WT_MEM && k != WT_NONE && !e->E->lnoreg[s] && !(y->flags & SF_ADDR_TAKEN) &&
-	       !(QQ(y->ty) & Q_VOLATILE) && !sym_attrs(c, s)->cleanup && !(T(c, y->ty)->flags & TF_ATOMIC);
+	return k != WT_MEM && k != WT_NONE && em_local_eligible(e, s);
 }
 
 /* the parameters: wasm locals 0.. as the ABI passes them, bound to locals or frame slots */
@@ -460,9 +461,11 @@ static void wparams(ecx *e, uint32_t s, uint32_t *np)
 		wbind *b = &W->sb[p];
 
 		b->gen = W->gen;
+		b->cellid = 0;
 		if (a.k == WA_IGNORE) {
 			b->k = WB_FRAME;
 			b->off = wslot(e, 1, 1);
+			b->cellid = wmem_id(e, b->off);
 			continue;
 		}
 		if (a.k == WA_IND) {
@@ -486,6 +489,7 @@ static void wparams(ecx *e, uint32_t s, uint32_t *np)
 		}
 		b->k = WB_FRAME;
 		b->off = wslot(e, tsize(c, y->ty), sym_align(c, p));
+		b->cellid = wmem_id(e, b->off);
 		if (a.k == WA_PAIR) {
 			qty pt1 = wpart_ty(c, a);
 			uint64_t es = tsize(c, pt1);
@@ -493,6 +497,9 @@ static void wparams(ecx *e, uint32_t s, uint32_t *np)
 			for (uint32_t j = 0; j < a.n; j++) {
 				wlv l = { .k = WL_MEM, .off = j * es };
 
+				wmem_lval(e, &l, b->off + j * es);
+
+				if (is_bvec(c, a.ft)) l.off = j / 8, l.bf = 1, l.width = 1, l.bitoff = j % 8;
 				wslot_addr(e, b->off);
 				wget(e, idx++);
 				wstore(e, &l, pt1);
@@ -502,6 +509,7 @@ static void wparams(ecx *e, uint32_t s, uint32_t *np)
 		{
 			wlv l = { .k = WL_MEM };
 
+			wmem_lval(e, &l, b->off);
 			wslot_addr(e, b->off);
 			wget(e, idx++);
 			if (QUNQ(pt) != QUNQ(y->ty) && !is_record(c, y->ty))
@@ -560,6 +568,7 @@ VPRIV void wasm_emit_function(ecx *e, uint32_t s)
 	W->nloc = W->nparam = 0;
 	memset(W->nfl, 0, sizeof W->nfl);
 	W->frame = 0;
+	wmem_begin(e);
 	W->falign = 16;
 	W->fp = W->sp0 = W->rv = W->vap = W->sret = UINT32_MAX;
 	W->dyn = false;
@@ -584,7 +593,7 @@ VPRIV void wasm_emit_function(ecx *e, uint32_t s)
 	if (W->rt != WT_NONE)
 		W->rv = wnewloc(e, W->rt);
 	wgoto_scan(e, y->body);
-	wblock(e, "block");	/* index 0: return branches out of it */
+	wblock(e, "block", WF_BLOCK);	/* index 0: return branches out of it */
 	if (W->nsj)
 		wsj_begin(e);
 	wstmt(e, y->body);
@@ -598,6 +607,8 @@ VPRIV void wasm_emit_function(ecx *e, uint32_t s)
 	wend(e, "end_block");
 	if (W->fp != UINT32_MAX || W->dyn)
 		W->sp0 = wnewloc(e, WPT(c));
+
+	wmem_optimize(e);
 
 	/* the function: header, locals, prologue, body, epilogue */
 	{
@@ -655,7 +666,7 @@ VPRIV void wasm_emit_function(ecx *e, uint32_t s)
 		}
 		tb_s(f, "\tglobal.set\t__stack_pointer\n");
 	}
-	tb_put(f, W->b.p, W->b.n);
+	wmem_render(e, f);
 	if (W->sp0 != UINT32_MAX) {
 		tb_s(f, "\tlocal.get\t");
 		tb_u(f, W->sp0);

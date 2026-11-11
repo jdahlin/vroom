@@ -1,7 +1,79 @@
 /* vcc code generator: prepass: what the emitter needs to know before it starts */
 #include "emitimpl.h"
 
+/* Object alignment can exceed the C type alignment. The x86-64 SysV ABI
+ * gives arrays of at least 16 bytes 16-byte alignment, unless the declaration
+ * explicitly requests an alignment (matching Clang's aligned attribute). */
+VPRIV uint32_t sym_align(cc *c, uint32_t s)
+{
+	const sym *y = &c->syms[s];
+	uint32_t a = talign(c, y->ty);
+
+	if (y->align > a)
+		a = y->align;
+	if (X86(c) && !y->align && is_array(c, y->ty) && tsize(c, y->ty) >= 16 && a < 16)
+		a = 16;
+	return a;
+}
+
 /* ---------------- prepass: what the emitter needs to know before it starts ---------------- */
+
+/* Declarations of SVE types are useful without SVE lowering (notably libc's
+   math prototypes). Reject actual values before any fixed-size frame/ABI work. */
+VPRIV bool sve_codegen_ok(cc *c)
+{
+	uint32_t loc = 0;
+
+	if (c->o->target != PP_LINUX_AARCH64 && c->o->target != PP_DARWIN)
+		return true;
+	for (uint32_t i = 1; i < c->nsym && !loc; i++) {
+		const sym *s = &c->syms[i];
+		const ctype *t = T(c, s->ty);
+
+		if (s->kind != S_FUNC || !s->body)
+			continue;
+		if (KIND(c, t->base) == TY_SVE)
+			loc = s->loc;
+		for (uint32_t j = 0; j < t->n && !loc; j++)
+			if (KIND(c, c->params[t->aux + j]) == TY_SVE)
+				loc = s->loc;
+	}
+	for (uint32_t i = 1; i < c->nnode && !loc; i++) {
+		const node *n = &c->nodes[i];
+
+		if (KIND(c, n->ty) == TY_SVE ||
+		    (n->op == N_DECL && KIND(c, c->syms[n->a].ty) == TY_SVE))
+			loc = n->loc;
+	}
+	if (!loc)
+		return true;
+	pp_diag_emit(c->p, pp_diag_begin(c->p, VDL_ERROR, loc, "SVE value code generation is not supported yet"));
+	return false;
+}
+
+/* Linux x86 and arm64 lower bit-precise values. Keep the other targets
+   explicit until their runtime precision and calling conventions are checked. */
+VPRIV bool bitint_codegen_ok(cc *c)
+{
+	if (c->o->target == PP_LINUX_X86_64 || c->o->target == PP_LINUX_AARCH64)
+		return true;
+	for (uint32_t i = 1; i < c->nsym; i++) {
+		const sym *s = &c->syms[i];
+		const ctype *t = T(c, s->ty);
+		bool bad = false;
+
+		if (s->kind != S_FUNC || !s->body)
+			continue;
+		bad = em_bitint(c, t->base);
+		for (uint32_t j = 0; j < t->n && !bad; j++)
+			bad = em_bitint(c, c->params[t->aux + j]);
+		if (bad) {
+			pp_diag_emit(c->p, pp_diag_begin(c->p, VDL_ERROR, s->loc, "_BitInt runtime ABI is not supported on this target yet"));
+			return false;
+		}
+	}
+	return true;
+}
 
 typedef struct pre {
 	emitter *E;
@@ -59,7 +131,9 @@ static void mark_written(pre *P, uint32_t n, bool addr)
 	for (;;) {
 		const node *x = N(n);
 
-		if (x->op == N_MEMBER || (x->op == N_CAST && (x->aux == CK_NOP || x->aux == CK_DECAY))) {
+		if (x->op == N_COMMA) {
+			n = x->b;	/* match the emitters' comma-lvalue addressing */
+		} else if (x->op == N_MEMBER || (x->op == N_CAST && (x->aux == CK_NOP || x->aux == CK_DECAY))) {
 			n = x->a;
 		} else if (x->op == N_INDEX) {
 			const node *b = N(x->a);
@@ -72,12 +146,12 @@ static void mark_written(pre *P, uint32_t n, bool addr)
 			break;
 		}
 	}
-	if (N(n)->op == N_VAR) {
+	if (N(n)->op == N_VAR && is_local_var(c, N(n)->a)) {
 		P->E->sflags[N(n)->a] |= SA_WRITTEN | SA_AESC, P->E->ffacts[N(n)->a] |= FF_BAD;
 		if (addr && is_local_var(P->c, N(n)->a))
 			P->E->lnoreg[N(n)->a] = 1;
 	}
-	else if (N(n)->op == N_COMPLIT)
+	else if (N(n)->op == N_COMPLIT && is_local_var(c, N(n)->b))
 		P->E->sflags[N(n)->b] |= SA_WRITTEN;
 }
 
@@ -107,10 +181,22 @@ static void note_fwrite(pre *P, uint32_t s, uint32_t rhs)
 			k = cv.q == 0 ? FF_NONNEG | FF_ZERO : !(cv.q >> 127) && (cv.q << 1) <= ((u128)0x7fff << 113) ? FF_NONNEG : 0;
 		else
 			k = v == 0 && !__builtin_signbit(v) ? FF_NONNEG | FF_ZERO : v >= 0 ? FF_NONNEG : 0;
+	} else if (N(rhs)->op == N_COMMA && (N(rhs)->aux & NC_FP_NONNEG)) {
+		k = FF_NONNEG;
 	} else if (N(rhs)->op == N_CALL && (callee = direct_callee(c, N(rhs)->a, &ref))) {
-		const vident *nm = &vintern_ents[c->syms[callee].name];
-
-		if ((nm->len == 4 && !memcmp(nm->s, "fabs", 4)) || (nm->len == 5 && !memcmp(nm->s, "fabsf", 5)))
+		const sym *fn = &c->syms[callee];
+		const vident *nm = &vintern_ents[fn->name];
+		const ctype *ft = T(c, fn->ty);
+		int want = nm->len == 4 && !memcmp(nm->s, "fabs", 4) ? TY_DOUBLE :
+			   nm->len == 5 && !memcmp(nm->s, "fabsf", 5) ? TY_FLOAT : -1;
+		bool enabled = !P->E->o->no_builtin;
+		/* The per-name option table belongs to the front end; conservatively
+		   avoid library facts whenever any named builtin was disabled. */
+		for (unsigned i = 0; i < CC_DISABLED_BUILTIN_WORDS; i++)
+			if (P->E->o->disabled_builtins[i]) enabled = false;
+		if (enabled && want >= 0 && (fn->flags & SF_GLOBAL) && fn->sc != SC_STATIC && !sym_attrs(c, callee)->asmname &&
+		    ft->kind == TY_FUNC && KIND(c, ft->base) == want && ft->n == 1 &&
+		    KIND(c, c->params[ft->aux]) == want)
 			k = FF_NONNEG;
 	}
 	*f = (uint8_t)(*f & FF_SEEN ? (*f & ~(FF_NONNEG | FF_ZERO)) | (*f & k & (FF_NONNEG | FF_ZERO)) | (k & FF_BAD)
@@ -123,7 +209,7 @@ static void note_assign(pre *P, uint32_t s, uint32_t rhs)
 	emitter *E = P->E;
 	cval cv;
 
-	if (E->sflags[s] & SA_WRITTEN)
+	if (!is_local_var(c, s) || (E->sflags[s] & SA_WRITTEN))
 		return;
 	if (!is_integer(c, c->syms[s].ty) || !cc_eval(c, rhs, &cv) || cv.kind != CV_INT) {
 		E->sflags[s] |= SA_WRITTEN;
@@ -142,7 +228,9 @@ static void note_assign(pre *P, uint32_t s, uint32_t rhs)
  * The prepass runs per function, the first time a function is emitted or
  * inlined: most of a TU's functions are header inlines nobody uses.  The
  * facts it records (writes to params and locals, labels) belong to that
- * function alone, so one walk per function is all that is needed.
+ * function alone, so one walk per function is all that is needed. Nonlocal
+ * variables have conservative immutable facts installed before workers start;
+ * no lazy walk may update them.
  */
 static int walk(pre *P, uint32_t n);
 
@@ -223,8 +311,14 @@ static int walk(pre *P, uint32_t n)
 				P->E->sflags[P->fn] |= SA_NOINL;
 		}
 		return false;
-	case N_NUM: case N_FNUM: case N_STR: case N_ZERO: case N_SIZEOF_VLA:
+	case N_NUM: case N_BIGNUM: case N_FNUM: case N_STR: case N_ZERO:
 		return false;
+	case N_SIZEOF_VLA:
+		lab = walk(P, x->a);
+		for (qty t = x->b; is_array(c, t); t = T(c, t)->base)
+			if ((T(c, t)->flags & TF_VLA) && T(c, t)->n)
+				lab |= walk(P, T(c, t)->n);
+		break;
 	case N_LABELADDR:
 		P->E->lref[x->a] |= LR_REF | LR_BACK;
 		return false;
@@ -237,7 +331,7 @@ static int walk(pre *P, uint32_t n)
 		lab = walk(P, x->a);
 		break;
 	case N_CAST:
-		if (x->aux == CK_DECAY)
+		if (x->aux == CK_DECAY || (x->aux == CK_BITS && (N(x->a)->flags & NF_LVALUE)))
 			mark_written(P, x->a, true);
 		lab = walk(P, x->a);
 		break;
@@ -252,8 +346,12 @@ static int walk(pre *P, uint32_t n)
 	case N_ASSIGN:
 		if (!x->aux && N(x->a)->op == N_VAR)
 			note_assign(P, N(x->a)->a, x->b), note_fwrite(P, N(x->a)->a, x->b);
-		else if (!x->aux && is_aconst(c, x->a))
-			P->E->sflags[N(N(N(x->a)->a)->a)->a] |= SA_WRITTEN;
+		else if (!x->aux && is_aconst(c, x->a)) {
+			uint32_t s = N(N(N(x->a)->a)->a)->a;
+
+			if (is_local_var(c, s))
+				P->E->sflags[s] |= SA_WRITTEN;
+		}
 		else
 			mark_written(P, x->a, false);
 		lab = walk(P, x->a) | walk(P, x->b);
@@ -280,6 +378,8 @@ static int walk(pre *P, uint32_t n)
 	}
 		__attribute__((fallthrough));
 	case N_BUILTIN:
+		if (x->op == N_BUILTIN && (x->aux == BI_ALLOCA || x->aux == BI_ALLOCA_UNINIT))
+			P->E->nflags[c->syms[P->fn].body] |= NA_ALLOCA;
 		for (uint32_t i = 0; i < x->c; i++)
 			lab |= walk(P, c->lists[x->b + i]);
 		/*
@@ -323,6 +423,10 @@ static int walk(pre *P, uint32_t n)
 		const sym *y = &c->syms[x->a];
 
 		lab = walk(P, x->b);
+		if (!x->aux)
+			for (qty t = y->ty; is_array(c, t) || is_ptr(c, t); t = T(c, t)->base)
+				if ((T(c, t)->flags & TF_VLA) && T(c, t)->n)
+					lab |= walk(P, T(c, t)->n);
 		if (x->b && y->kind == S_VAR)
 			note_fwrite(P, x->a, x->b);
 		if (is_local_var(c, x->a)) {
@@ -420,4 +524,28 @@ VPRIV int u32_cmp(const void *a, const void *b)
 	uint32_t x = *(const uint32_t *)a, y = *(const uint32_t *)b;
 
 	return x < y ? -1 : x > y;
+}
+
+/* Inlining preserves a never-written pointer parameter's incoming object
+   bound. No AST substitution: emission can run concurrently for other callers.
+   Only direct parameters and effect-free actual arguments are covered here. */
+VPRIV bool inline_object_size(ecx *e, uint32_t fn, uint32_t call, uint32_t pointer, uint32_t mode, i128 *size)
+{
+	cc *c = e->c;
+	if (!fn || !call) return false;
+	while (N(pointer)->op == N_CAST) pointer = N(pointer)->a;
+	if (N(pointer)->op != N_VAR) return false;
+	uint32_t p = N(pointer)->a;
+	if (!is_ptr(c, c->syms[p].ty) || (c->syms[p].flags & SF_ADDR_TAKEN) ||
+	    (e->E->sflags[p] & (SA_WRITTEN | SA_CWRITE)) || (QQ(c->syms[p].ty) & Q_VOLATILE))
+		return false;
+	const node *body = N(c->syms[fn].body), *x = N(call);
+	cval cv;
+	if (!cc_eval(c, mode, &cv) || cv.kind != CV_INT || cv.i < 0 || cv.i > 3) return false;
+	for (uint32_t i = 0; i < body->aux && i < x->c; i++) {
+		if (c->lists[body->a + i] != p) continue;
+		uint32_t arg = c->lists[x->b + i];
+		return !side_effects(c, arg) && cc_object_size(c, arg, (unsigned)cv.i, size);
+	}
+	return false;
 }

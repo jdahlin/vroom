@@ -26,7 +26,7 @@ static int hfa_walk(cc *c, qty t, int *base, uint64_t *n)
 		*n = 1;
 		return 1;
 	}
-	if (y->kind == TY_FLOAT || y->kind == TY_DOUBLE || y->kind == TY_LDOUBLE) {	/* Apple: long double is 8 bytes */
+	if (y->kind == TY_BFLOAT16 || y->kind == TY_FLOAT16 || y->kind == TY_FLOAT || y->kind == TY_DOUBLE || y->kind == TY_LDOUBLE) {	/* Apple: long double is 8 bytes */
 		int b = (int)y->size;
 
 		if (*base && *base != b)
@@ -50,6 +50,12 @@ static int hfa_walk(cc *c, qty t, int *base, uint64_t *n)
 		for (uint32_t k = 0; k < g->nfield; k++) {
 			uint64_t m;
 
+			/* Empty fields and zero-width bit-fields contribute no
+			   homogeneous members. Any padding they introduce is rejected
+			   by the size check below. */
+			if ((g->f[k].bitfield && !g->f[k].width) ||
+			    (!g->f[k].bitfield && tsize(c, g->f[k].ty) == 0))
+				continue;
 			if (g->f[k].bitfield || !hfa_walk(c, g->f[k].ty, base, &m))
 				return 0;
 			if (y->kind == TY_UNION)
@@ -68,6 +74,7 @@ VPRIV int hfa(cc *c, qty t, int *n)
 	int base = 0;
 	uint64_t m = 0;
 
+	if (is_bvec(c, t) && (T(c, t)->n == 64 || T(c, t)->n == 128)) return 0;
 	if (!is_recabi(c, t) || !hfa_walk(c, t, &base, &m) || m > 4)
 		return 0;
 	*n = (int)m;
@@ -80,7 +87,7 @@ VPRIV int hfa(cc *c, qty t, int *n)
  * widened to 8/n bytes (v4qi as 4h, v2hi and v2qi as 2s), one lane as it
  * is.  As an argument it goes in a GPR as its bytes (classify).
  */
-VPRIV bool vec_small(cc *c, qty t) { return is_vec(c, t) && tsize(c, t) < 8; }
+VPRIV bool vec_small(cc *c, qty t) { return is_vec(c, t) && !is_bvec(c, t) && tsize(c, t) < 8; }
 
 /* the vector at [rs] into v0 */
 VPRIV void vec_small_ret(ecx *e, qty t, int rs)
@@ -105,7 +112,7 @@ VPRIV void vec_small_ret(ecx *e, qty t, int rs)
 }
 
 /* v0 (a call's result) into the slot at sl */
-VPRIV void vec_small_res(ecx *e, qty t, int32_t sl)
+VPRIV void vec_small_res(ecx *e, qty t, int64_t sl)
 {
 	cc *c = e->c;
 	uint32_t n = T(c, t)->n, size = (uint32_t)tsize(c, t), es = n ? size / n : size, w = n > 1 ? 8 / n : 0;
@@ -125,11 +132,52 @@ VPRIV void vec_small_res(ecx *e, qty t, int32_t sl)
 	tfree(e, acc);
 }
 
+/* LLVM legalizes small boolean-vector results independently of packed storage.
+ * Power-of-two lane counts 2/4/8/16 use one SIMD register; other counts
+ * through eight use one integer register per lane. Larger results use x8. */
+VPRIV void bvec_ret(ecx *e, qty t, int rs)
+{
+	unsigned n = T(e->c, t)->n;
+	bool simd = n == 2 || n == 4 || n == 8 || n == 16;
+	unsigned stride = n == 16 ? 1 : simd ? 8 / n : 0;
+	int64_t sl = simd ? slot(e, 16, 16) : 0;
+	int r = treg(e);
+	for (unsigned i = 0; i < n; i++) {
+		mem(e, I_LD, 0, 0, r, rs, i / 8);
+		opbf(e, I_UBFM, 1, r, r, i % 8, i % 8);
+		if (simd) mem(e, I_ST, log2sz(stride), 0, r, FRAME, sl + i * stride);
+		else mov(e, 0, i, r);
+	}
+	if (simd) vr_load(e, n == 16 ? 16 : 8, 0, FRAME, sl);
+	tfree(e, r);
+}
+
+VPRIV void bvec_res(ecx *e, qty t, int64_t sl)
+{
+	unsigned n = T(e->c, t)->n;
+	bool simd = n == 2 || n == 4 || n == 8 || n == 16;
+	unsigned stride = n == 16 ? 1 : simd ? 8 / n : 0;
+	int64_t tmp = simd ? slot(e, 16, 16) : 0;
+	int r = treg(e), acc = treg(e);
+	if (simd) vr_store(e, n == 16 ? 16 : 8, 0, FRAME, tmp);
+	movi(e, 1, acc, 0);
+	for (unsigned i = 0; i < n; i++) {
+		if (simd) mem(e, I_LD, log2sz(stride), 0, r, FRAME, tmp + i * stride);
+		else mov(e, 0, r, i);
+		opbf(e, I_UBFM, 1, r, r, 0, 0);
+		op3s(e, I_ORR, 1, acc, acc, r, 0, i);
+	}
+	mem(e, I_ST, n > 8 ? 1 : 0, 0, acc, FRAME, sl);
+	tfree(e, acc);
+	tfree(e, r);
+}
+
 /* a record result returned through x8 */
 VPRIV bool is_sret(cc *c, qty t)
 {
 	int n;
 
+	if (is_bvec(c, t)) return T(c, t)->n > 8 && T(c, t)->n != 16;
 	return is_recabi(c, t) && tsize(c, t) > 16 && !hfa(c, t, &n);
 }
 
@@ -189,6 +237,23 @@ VPRIV void classify(ecx *e, qty t, int *ngrn, int *nsaa, abiarg *a)
 		}
 		e->nsrn = 8;
 		n = size == 16 ? 2 : 1;
+		goto stack;
+	}
+	if (is_bvec(c, t) && (T(c, t)->n == 64 || T(c, t)->n == 128)) {
+		a->kind = A_BOOL_LANES;
+		a->reg = (uint8_t)*ngrn;
+		a->nreg = (uint8_t)(8 - *ngrn);
+		a->stk = *nsaa;
+		*nsaa += (int)(T(c, t)->n - a->nreg) * 8;
+		*ngrn = 8;
+		return;
+	}
+	if (is_bvec(c, t) && size >= 8 && size <= 16) {
+		if (e->nsrn < 8) {
+			a->kind = A_HFA, a->reg = e->nsrn++, a->nreg = 1, a->fsz = size;
+			return;
+		}
+		n = size / 8;
 		goto stack;
 	}
 	if (is_recabi(c, t)) {

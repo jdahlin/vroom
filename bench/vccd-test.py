@@ -18,7 +18,7 @@ skipped.  Exit status 1 on any FAIL or XPASS.
 --bin-dir build/ccs-asan or build/ccs-tsan runs the sanitizer builds of
 vccd; then also check the vccd log each test prints with -v.
 """
-import array, os, re, signal, socket, stat, struct, subprocess, sys, tempfile, time, importlib.util
+import array, os, re, shutil, signal, socket, stat, struct, subprocess, sys, tempfile, time, importlib.util
 spec = importlib.util.spec_from_file_location('vd', os.path.join(os.path.dirname(os.path.abspath(__file__)), 'vcc-diff.py'))
 vd = importlib.util.module_from_spec(spec); spec.loader.exec_module(vd)
 
@@ -45,7 +45,7 @@ class Vccd:
         self.sock = f'{self.dir}/vccd.sock'
         self.logf = f'{self.dir}/vccd.log'
         pre = (lambda: os.umask(umask)) if umask is not None else None
-        self.p = subprocess.Popen([f'{vd.BIN}/vccd', '--sock', self.sock, '--backend-sock', f'{self.dir}/none.sock',
+        self.p = subprocess.Popen([f'{vd.BIN}/vccd', '--sock', self.sock,
                                    '-j', str(workers)] + list(extra), stdout=open(self.logf, 'w'), stderr=subprocess.STDOUT,
                                   preexec_fn=pre, env=dict(os.environ, **(env or {})))
         for _ in range(200):
@@ -119,7 +119,7 @@ def default_socket_not_in_tmp():
 @test()
 def peer_other_user():
     """a connection from another uid is refused (needs passwordless sudo -u nobody)"""
-    if subprocess.run(['sudo', '-n', '-u', 'nobody', 'true'], capture_output=True).returncode:
+    if not shutil.which('sudo') or subprocess.run(['sudo', '-n', '-u', 'nobody', 'true'], capture_output=True).returncode:
         raise Skip('no passwordless sudo -u nobody')
     v = Vccd(sockdir_mode=0o755)
     try:
@@ -236,7 +236,7 @@ def request_env_reaches_job():
 
 @test()
 def compile_shapes_not_forwarded():
-    """-c/-S with the input not last, -o before -c, -fPIC: vcc compiles them (the backend is absent, so a forward fails)"""
+    """-c/-S with the input not last, -o before -c, -fPIC: vcc compiles them (there is no backend to forward to)"""
     v = Vccd()
     try:
         d = f'{v.dir}/w'; os.makedirs(d, exist_ok=True)
@@ -265,6 +265,29 @@ def dumpmachine_as_clang():
             p = subprocess.run([SHIM, f'--target={t}', '-dumpmachine'], cwd=v.dir, env=env, capture_output=True,
                                text=True, process_group=0)
             check(p.returncode == 0 and p.stdout == want + '\n', f'{t}: rc {p.returncode} {p.stdout!r}')
+    finally: v.stop()
+
+@test()
+def stdin_and_host_not_forwarded():
+    """-E and -c of `-` (Kconfig's cc-version.sh, tools-support-relr.sh) and, on an arm64 Mac, a host -c: vcc's
+    (no backend, so a forward fails); stdin's dependency file names no <stdin>, as clang's"""
+    v = Vccd()
+    try:
+        d = f'{v.dir}/w'; os.makedirs(d, exist_ok=True)
+        tu(d, 'h.h', 'int y;\n')
+        env = dict(os.environ, VCC_SOCK=v.sock)
+        run = lambda argv, inp=None: subprocess.run([SHIM] + argv, cwd=d, env=env, input=inp, capture_output=True,
+                                                     text=True, process_group=0)
+        p = run(TARGET + ['-E', '-P', '-x', 'c', '-'], '__clang_major__ __FILE__\n')
+        check(p.returncode == 0 and '"<stdin>"' in p.stdout, f'-E -: rc {p.returncode} {p.stdout[-200:]} {p.stderr[-300:]}')
+        big = '#include "h.h"\nint big[] = {' + ','.join(['1'] * 5000) + '};\n'	# more than a pipe buffer
+        p = run(TARGET + ['-Wp,-MMD,s.d', '-c', '-x', 'c', '-', '-o', 's.o'], big)
+        check(p.returncode == 0 and os.path.exists(f'{d}/s.o'), f'-c -: rc {p.returncode} {p.stderr[-300:]}')
+        check(open(f'{d}/s.d').read() == 's.o: h.h\n', f'stdin deps: {open(f"{d}/s.d").read()!r}')
+        if sys.platform == 'darwin' and os.uname().machine == 'arm64':
+            src = tu(d, 'host.c', 'int main(void) { return 0; }\n')
+            p = run(['-O2', '-c', '-o', 'host.o', src])
+            check(p.returncode == 0 and obj(d, 'host.o')[:4] == b'\xcf\xfa\xed\xfe', f'host -c: rc {p.returncode} {p.stderr[-300:]}')
     finally: v.stop()
 
 @test()
@@ -522,6 +545,45 @@ def records_replaced_per_tu():
         p = subprocess.run([SHIM, '--vccd-diagnostics=xml'], capture_output=True, text=True, timeout=10,
                            env=dict(os.environ, VCC_SOCK=v.sock))
         check(p.returncode == 1 and 'summary or json' in p.stderr, f'bad query: {p.returncode} {p.stderr}')
+    finally: v.stop()
+
+@test()
+def links_in_process_independent():
+    """links one after another in one vccd (vld in-process, state reset per link) give vlink's output"""
+    v = Vccd(workers=1)
+    try:
+        d = f'{v.dir}/w'
+        # many named sections, so the script's section-name cache grows past its first size
+        n = 1500
+        src = ''.join(f'__attribute__((section(".t.f{i}"))) int f{i}(void) {{ return {i}; }}\n' for i in range(n))
+        src += ''.join(f'__attribute__((section("set_{k}"), used)) static const int s{k}[2] = {{ {k}, {k} }};\n'
+                       for k in range(4))
+        src += 'extern const int __start_set_1[], __stop_set_1[];\n'
+        src += 'long span(void) { return __stop_set_1 - __start_set_1; }\n'
+        tu(d, 'm.c', src)
+        st, err = v.cc(d, 'm.c', 'm.o')
+        check(st == 0, f'compile: {err[-300:]}')
+        scripts = {
+            'a.lds': 'SECTIONS { . = 0x10000; .text : { *(.t.*) *(.text*) } .data : { *(.data*) } }\n',
+            'b.lds': 'SECTIONS { . = 0x40000; .tx : { *(.text*) } .t : { *(.t.f1*) } .rest : { *(.t.*) } }\n',
+        }
+        for name, text in scripts.items():
+            open(f'{d}/{name}', 'w').write(text)
+        links = [['--eh-frame-hdr', '-T', 'a.lds'], ['-T', 'b.lds'], ['-T', 'a.lds', '-e', 'f7'],
+                 ['-T', 'b.lds', '-e', 'f3']]
+        ref = {}	# vccd's vld adds --vroom-stubs (ld_run)
+        for i, a in enumerate(links):
+            r = subprocess.run([f'{vd.BIN}/vlink', '--vroom-stubs', '-o', f'ref{i}', 'm.o'] + a, cwd=d, capture_output=True,
+                               text=True, timeout=30)
+            check(r.returncode == 0, f'vlink {a}: {r.stderr[-300:]}')
+            ref[i] = open(f'{d}/ref{i}', 'rb').read()
+        for rnd in range(3):
+            for i, a in enumerate(links):
+                r = subprocess.run([f'{vd.BIN}/vld', '-o', f'out{i}', 'm.o'] + a, cwd=d, capture_output=True, text=True,
+                                   env=dict(os.environ, VCC_SOCK=v.sock), timeout=30)
+                check(v.alive(), f'vccd died in link {a} (round {rnd})')
+                check(r.returncode == 0, f'link {a} (round {rnd}): {r.stderr[-300:]}')
+                check(open(f'{d}/out{i}', 'rb').read() == ref[i], f'link {a} (round {rnd}) differs from vlink\'s')
     finally: v.stop()
 
 def main():

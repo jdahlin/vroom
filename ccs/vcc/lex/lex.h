@@ -62,6 +62,7 @@ typedef struct vlex_file {
 	uint32_t ntok;		/* tokens, excluding the final T_EOF */
 	const vtok *tok;	/* ntok + 1 entries */
 	void *pp;		/* preprocessor's per-file data (pp/file.c), set once with __atomic */
+	char *fixdep;		/* vccd/fixdep.c's CONFIG_ names in src, set once with __atomic */
 	uint64_t dev, ino;	/* the file's identity (0, 0: unknown): #pragma once, as clang */
 } vlex_file;
 
@@ -95,6 +96,7 @@ const vlex_file *vlex_trigraphs(const vlex_file *f);
 /* C23: f with digit separators (1'000) dropped from pp-numbers, as vlex_trigraphs */
 const vlex_file *vlex_digitsep(const vlex_file *f);
 const vlex_file *vlex_c89(const vlex_file *f);
+const vlex_file *vlex_nodigraphs(const vlex_file *f);
 void vlex_cache_flush(void);	/* only with no lookups in flight */
 /*
  * Read-ahead hint: path will probably be needed.  I/O threads open and read

@@ -46,7 +46,12 @@ HOST_DEFS  = -D_GNU_SOURCE -DVCC_RESDIR='"$(shell $(HOST_CC) -print-resource-dir
 HOST_LIBS  = -lm
 # Apple cores (implementer 0x61: Docker Desktop, Asahi, a VM on a Mac) report no
 # CPU part, so -mcpu=native falls back to generic; name the core instead.
-HOST_CPU  ?= $(if $(shell grep -qm1 'implementer.*0x61' /proc/cpuinfo && echo y),-mcpu=apple-m1,-mcpu=native)
+HOST_CPU_A64 =  $(if $(shell grep -qm1 'implementer.*0x61' /proc/cpuinfo && echo y),-mcpu=apple-m1,-mcpu=native)
+ifeq ($(shell uname -m),x86_64)
+HOST_CPU  ?= -march=native -msse4.2
+else
+HOST_CPU  ?= $(HOST_CPU_A64)
+endif
 endif
 VCC_CC     = $(CCACHE) $(HOST_CC)
 # VCC_SAN/VCC_OPT: set by the sanitizer variants (vcc-asan, vcc-tsan below)
@@ -70,11 +75,12 @@ VCC_FAST   = $(VCC_CFLAGS) $(VCC_OPT) -pthread
 VCC_LDFLAGS = -O3 $(VCC_SAN) $(VCC_SANLD) $(VCC_LTO) $(if $(VCC_LTO),$(LTO_LINK))
 OBJ        = $(OUT)/obj
 
-vcc: $(OUT)/vcc $(OUT)/vsh/sh $(OUT)/vld $(OUT)/vas $(OUT)/var $(OUT)/vccd $(OUT)/lextest $(OUT)/vpp $(OUT)/vlink $(OUT)/vasm
+vcc: $(OUT)/vcc $(OUT)/vsh/sh $(OUT)/vld $(OUT)/vas $(OUT)/var $(OUT)/vcc-nm $(OUT)/vcc-objcopy $(OUT)/vccd $(OUT)/lextest $(OUT)/vpp $(OUT)/vlink $(OUT)/vasm
 
 o = $(patsubst vcc/%.c,$(OBJ)/%.o,$(1))
 AS_FILES = vcc/arch/a64/as/enc.c vcc/platform/darwin/macho.c vcc/arch/wasm/as/as.c vcc/platform/wasm/wasm.c
-as_SRC   = vcc/as/as.c vcc/arch/a64/as/parse.c
+as_SRC   = vcc/as/as.c vcc/arch/a64/as/parse.c vcc/arch/x64/as/asm.c vcc/arch/x64/as/sys.c vcc/arch/x64/as/gpr.c \
+           vcc/arch/x64/as/x87.c vcc/arch/x64/as/sse.c vcc/arch/x64/as/avx.c
 LEX_SRC = vcc/lex/lex.c vcc/lib/intern.c
 PP_SRC  = vcc/pp/dircache.c vcc/driver/ppdriver.c vcc/driver/ccsnap.c vcc/lib/ldhash.c
 VCCD_SRC = vcc/vccd/vccd.c vcc/vccd/dstore.c vcc/vccd/caps.c vcc/vccd/fixdep.c vcc/vccd/ar.c vcc/vccd/rsh.c
@@ -85,10 +91,10 @@ VCCD_SRC = vcc/vccd/vccd.c vcc/vccd/dstore.c vcc/vccd/caps.c vcc/vccd/fixdep.c v
 # the headers).  `make VCC_UNITY=` compiles the files one by one.
 SPLIT_MODS = cc pp emit
 # the object writer: the model, the CPU's fixups, the ELF writer (linked with as)
-obj_SRC  = vcc/obj/obj.c vcc/arch/a64/obj/fixup.c vcc/platform/linux/elf.c
+obj_SRC  = vcc/obj/obj.c vcc/arch/a64/obj/fixup.c vcc/arch/x64/obj/fixup.c vcc/platform/linux/elf.c
 cc_SRC   = $(wildcard vcc/cc/*.c)
 pp_SRC   = $(filter-out vcc/pp/dircache.c,$(wildcard vcc/pp/*.c))
-emit_SRC = $(wildcard vcc/emit/*.c vcc/arch/a64/emit/*.c vcc/arch/wasm/emit/*.c)
+emit_SRC = $(wildcard vcc/emit/*.c vcc/emit/opt/*.c vcc/emit/rec/*.c vcc/emit/flow/*.c vcc/arch/a64/emit/*.c vcc/arch/wasm/emit/*.c vcc/emit/walk/*.c vcc/arch/x64/emit/*.c)
 VCC_UNITY ?= y
 SPLIT_SRC = $(foreach m,$(SPLIT_MODS),$($(m)_SRC))
 SPLIT_OBJ = $(if $(VCC_UNITY),$(patsubst %,$(OBJ)/unity/%.o,$(SPLIT_MODS)),$(call o,$(SPLIT_SRC)))
@@ -97,7 +103,7 @@ PP_OBJ  = $(call o,$(PP_SRC)) $(SPLIT_OBJ)
 mod = $(if $(VCC_UNITY),$(OBJ)/unity/$(1).o,$(call o,$($(1)_SRC)))
 AS_SRC  = $(AS_FILES) $(as_SRC) $(obj_SRC)
 AS_OBJ  = $(call o,$(AS_FILES)) $(call mod,as) $(call mod,obj)
-LD_SRC  = vcc/ld/ld.c vcc/lib/ldhash.c vcc/ld/objcopy.c vcc/ld/wasmld.c
+LD_SRC  = vcc/ld/ld.c vcc/lib/ldhash.c vcc/ld/objcopy.c vcc/ld/wasmld.c vcc/platform/darwin/ldmacho.c
 
 $(OBJ)/%.o: vcc/%.c | $(OBJ)
 	@mkdir -p $(dir $@)
@@ -125,10 +131,16 @@ $(OBJ)/no/%.o: vcc/%.c | $(OBJ)
 
 $(OBJ)/ld/ld.o: XFLAGS = -DVLD_MAIN
 
+# the linker without main(), for vccd (links, nm and objcopy run in its worker threads)
+VCCD_LD_OBJ = $(OBJ)/ld/ldlib.o $(call o,vcc/ld/objcopy.c vcc/platform/darwin/ldmacho.c)
+$(OBJ)/ld/ldlib.o: vcc/ld/ld.c | $(OBJ)
+	@mkdir -p $(dir $@)
+	$(VCC_CC) $(VCC_FAST) $(VCC_LTO) -MMD -MP -c $< -o $@
+
 $(OUT)/vpp: $(call o,vcc/driver/vpp.c $(LEX_SRC)) $(AS_OBJ) $(PP_OBJ)
 	$(VCC_CC) $(VCC_LDFLAGS) -pthread $^ -o $@ $(HOST_LIBS)
 
-$(OUT)/vccd: $(call o,$(VCCD_SRC) $(LEX_SRC)) $(AS_OBJ) $(PP_OBJ)
+$(OUT)/vccd: $(call o,$(VCCD_SRC) $(LEX_SRC)) $(AS_OBJ) $(PP_OBJ) $(VCCD_LD_OBJ)
 	$(VCC_CC) $(VCC_LDFLAGS) -pthread $^ -o $@ $(HOST_LIBS)
 
 $(OUT)/lextest: $(patsubst vcc/%.c,$(OBJ)/no/%.o,vcc/lex/lextest.c vcc/platform/darwin/pmc.c $(LEX_SRC))
@@ -151,7 +163,7 @@ $(OUT)/vsh/sh: vcc/vccd/shim.c protocol.h | $(OUT)
 	mkdir -p $(OUT)/vsh
 	$(VCC_CC) $(VCC_CFLAGS) -DVSH $< -o $@
 
-$(OUT)/vld $(OUT)/vas $(OUT)/var: $(OUT)/vcc
+$(OUT)/vld $(OUT)/vas $(OUT)/var $(OUT)/vcc-nm $(OUT)/vcc-objcopy: $(OUT)/vcc
 	ln -sf vcc $@
 
 $(OBJ):
@@ -194,10 +206,10 @@ self: $(OUT)/vpp
 	for f in $(SELF_SRC); do o=$$(echo $${f#vcc/} | sed 's,/,-,g'); $(SELF_CC) $(SELF_FLAGS) $$f -o $(SELF)/$${o%.c}.o || exit 1; done
 	$(SELF_CC) $(SELF_FLAGS) -DVLD_MAIN vcc/ld/ld.c -o $(SELF)/ld-main.o
 	$(SELF_LD) $(SO)/driver-vpp.o $(SELF_PP) $(SELF_LEX) $(SELF_AS) -o $(SO)/vpp
-	$(SELF_LD) $(call so,$(VCCD_SRC)) $(SELF_PP) $(SELF_LEX) $(SELF_AS) -o $(SO)/vccd
+	$(SELF_LD) $(call so,$(VCCD_SRC) vcc/ld/ld.c vcc/ld/objcopy.c vcc/platform/darwin/ldmacho.c) $(SELF_PP) $(SELF_LEX) $(SELF_AS) -o $(SO)/vccd
 	$(SELF_LD) $(SO)/as-vasm.o $(SELF_AS) -o $(SO)/vasm
 	$(SELF_LD) $(SO)/lex-lextest.o $(SO)/platform-darwin-pmc.o $(SELF_LEX) -o $(SO)/lextest
-	$(SELF_LD) $(SO)/ld-main.o $(SO)/lib-ldhash.o $(SO)/ld-objcopy.o -o $(SO)/vlink
+	$(SELF_LD) $(SO)/ld-main.o $(SO)/lib-ldhash.o $(SO)/ld-objcopy.o $(SO)/platform-darwin-ldmacho.o -o $(SO)/vlink
 	$(SELF_LD) $(SO)/vccd-shim.o -o $(SO)/vcc
 
 self-check: self
@@ -210,17 +222,18 @@ self-check: self
 # ---- fuzzing (fuzz/; see AGENTS.md) ----
 # libFuzzer from Homebrew LLVM when it has one, else the standalone driver
 # (fuzz/driver.c: replay + blind mutation) with Apple clang.
-FUZZ_LIBFUZZER := $(wildcard $(LLVM)/lib/clang/*/lib/darwin/libclang_rt.fuzzer_osx.a)
+# On Linux: the distro clang's libFuzzer and the host's CPU flags.
+FUZZ_LIBFUZZER := $(wildcard $(LLVM)/lib/clang/*/lib/darwin/libclang_rt.fuzzer_osx.a $(LLVM)/lib/clang/*/lib/linux/libclang_rt.fuzzer-$(shell uname -m).a)
 ifneq ($(FUZZ_LIBFUZZER),)
 FUZZ_CC = $(LLVM)/bin/clang
 FUZZ_ENGINE = -fsanitize=fuzzer
 FUZZ_DRIVER =
 else
-FUZZ_CC = /usr/bin/clang
+FUZZ_CC = $(HOST_CC)
 FUZZ_ENGINE =
 FUZZ_DRIVER = fuzz/driver.c
 endif
-FUZZ_CFLAGS = -std=gnu11 -g -O1 -mcpu=apple-m1 -D_DARWIN_C_SOURCE -pthread \
+FUZZ_CFLAGS = -std=gnu11 -g -O1 $(HOST_CPU) $(HOST_DEFS) -pthread \
 	-fsanitize=address,undefined -fno-sanitize-recover=undefined -fno-omit-frame-pointer \
 	-Wall -Wno-unused-parameter
 FUZZ_OUT = $(OUT)/fuzz

@@ -16,6 +16,10 @@ static inline void void_ptr_arith(cc *c, qty pt, uint32_t loc, bool two)
 {
 	static const char *const g[] = { "pointer-arith", "gnu", "pedantic", NULL };
 
+	if (unlikely(KIND(c, T(c, pt)->base) == TY_SVE)) {
+		cc_error(c, loc, "arithmetic on a pointer to sizeless type '%s'", tyname(c, T(c, pt)->base));
+		return;
+	}
 	if (unlikely(KIND(c, T(c, pt)->base) == TY_VOID))
 		EXT_WARN(c, "gnu-pointer-arith", g, loc,
 			 two ? "arithmetic on pointers to void is a GNU extension" : "arithmetic on a pointer to void is a GNU extension");
@@ -25,6 +29,7 @@ static inline void void_ptr_arith(cc *c, qty pt, uint32_t loc, bool two)
 static bool vec_scalar_ok(cc *c, uint32_t s, qty et)
 {
 	qty st = QUNQ(N(s)->ty);
+	if (KIND(c, et) == TY_BOOL) return is_integer(c, st);
 	cval v;
 	bool k;
 
@@ -45,7 +50,10 @@ static bool vec_scalar_ok(cc *c, uint32_t s, qty et)
 				return v.i >= -((i128)1 << (b - 1)) && v.i < ((i128)1 << (b - 1));
 			return v.i >= -((i128)1 << (b - 1)) && (b >= 128 || v.i < ((i128)1 << b));	/* (clang: -18 into unsigned lanes) */
 		}
-		return ty_size(c, st) < ty_size(c, et) || (ty_size(c, st) == ty_size(c, et) && is_signed(c, st) == is_signed(c, et));
+		/* Signed-to-unsigned at the same width preserves every source bit.
+		 * The reverse conversion can lose the unsigned scalar's top bit. */
+		return ty_size(c, st) < ty_size(c, et) ||
+		       (ty_size(c, st) == ty_size(c, et) && (!is_signed(c, et) || is_signed(c, st)));
 	}
 	if (k && v.kind == CV_INT)
 		return ty_size(c, et) == 4 ? (i128)(float)v.i == v.i : (i128)(double)v.i == v.i;
@@ -59,7 +67,7 @@ static bool vec_scalar_ok(cc *c, uint32_t s, qty et)
 /* the scalar operand s of a GNU vector operation (vt) at the operator loc: false after the error */
 static bool vec_scalar_check(cc *c, uint32_t s, qty vt, uint32_t loc)
 {
-	if (T(c, vt)->ext || !is_arith(c, N(s)->ty) || vec_scalar_ok(c, s, T(c, vt)->base))
+	if ((T(c, vt)->ext && !is_bool_vector(c, vt)) || !is_arith(c, N(s)->ty) || vec_scalar_ok(c, s, T(c, vt)->base))
 		return true;
 	cc_error(c, loc, "cannot convert between scalar type '%s' and vector type '%s' as implicit conversion would cause truncation",
 		 tyname(c, QUNQ(N(s)->ty)), tyname(c, vt));
@@ -88,6 +96,11 @@ static uint32_t swizzle(cc *c, uint32_t n, uint32_t id, uint32_t loc)
 	int ne = T(c, vt)->ext, k = 0, ix[16];
 	const char *s = idstr_(id);
 	int len = idlen_(id);
+
+	if (is_bool_vector(c, vt)) {
+		cc_error(c, loc, "illegal vector component name '%.*s'", len, s);
+		return mk_int(c, 0, et, loc);
+	}
 
 	if (len == 2 && !memcmp(s, "hi", 2)) {
 		for (int i = 0; i < (ne + 1) / 2; i++) ix[k++] = (ne + 1) / 2 + i < ne ? (ne + 1) / 2 + i : -1;
@@ -133,6 +146,7 @@ static uint32_t swizzle(cc *c, uint32_t n, uint32_t id, uint32_t loc)
 			b = cast_node(c, rvalue(c, n), ty_ptr(c, et), CK_VADDR);
 		b = mk2(c, N_INDEX, T(c, N(b)->ty)->base, loc, rvalue(c, b), mk_int(c, ix[0], prim(TY_LONG), loc));
 		N(b)->flags = NF_LVALUE;
+		N(b)->c = vt;
 		return b;
 	}
 	{	/* several: a shuffle into an ext vector of k lanes (an rvalue; vcc: not assignable) */
@@ -176,6 +190,9 @@ VPRIV uint32_t binop(cc *c, int op, uint32_t l, uint32_t r, uint32_t loc)
 		bool both = is_vector(c, lt) && is_vector(c, rt);
 		bool shift = op == T_LESSLESS || op == T_GREATERGREATER;
 		qty res = vt;
+
+		if (is_bool_vector(c, vt) && !(op == T_AMP || op == T_PIPE || op == T_CARET || is_cmp(op)))
+			bad_operands(c, op, l, r, loc);
 
 		if ((both && T(c, lt)->size != T(c, rt)->size) ||
 		    (!both && !is_arith(c, is_vector(c, lt) ? rt : lt)) ||
@@ -244,13 +261,16 @@ VPRIV uint32_t binop(cc *c, int op, uint32_t l, uint32_t r, uint32_t loc)
 
 VPRIV uint32_t assign(cc *c, int op, uint32_t l, uint32_t r, uint32_t loc)
 {
-	qty lt = QUNQ(N(l)->ty);
+	qty lt = QUNQ(ty_unatomic(c, N(l)->ty));
 	uint32_t n;
 
 	if (unlikely(!need_lvalue(c, l, loc)))
 		return err_node(c, loc);	/* clang: the assignment is invalid */
 	bounds_warn(c, l, false);
 	r = decay(c, r);
+	if ((T(c, N(l)->ty)->flags & TF_ATOMIC) &&
+	    (atomic_wide(c, N(l)->ty) || (op && is_complex(c, lt))))
+		return atomic_assign_expr(c, l, r, op, false, loc);
 	if (op && (is_complex(c, lt) || is_complex(c, N(r)->ty)))	/* l = l op r (l evaluated twice) */
 		return assign(c, 0, l, cplx_binop(c, op, rvalue(c, l), rvalue(c, r), loc), loc);
 	if (!op) {
@@ -272,6 +292,8 @@ VPRIV uint32_t assign(cc *c, int op, uint32_t l, uint32_t r, uint32_t loc)
 			r = convert(c, r, prim(TY_LONG));
 			pt = lt;
 		} else if (is_vector(c, lt)) {
+			if (is_bool_vector(c, lt) && op != T_AMP && op != T_PIPE && op != T_CARET)
+				cc_error(c, loc, "invalid operands to compound assignment");
 			if (is_vector(c, rt) ? T(c, lt)->size != T(c, rt)->size : !is_arith(c, rt))
 				cc_error(c, loc, "invalid operands to compound assignment");
 			else if (!is_vector(c, rt) && op != T_LESSLESS && op != T_GREATERGREATER)
@@ -303,6 +325,22 @@ VPRIV uint32_t conditional(cc *c, uint32_t cond, uint32_t a, uint32_t b, uint32_
 	ra = a ? rvalue(c, a) : rvalue(c, cond);
 	rb = rvalue(c, b);
 	at = N(ra)->ty, bt = N(rb)->ty;
+	if (is_bool_vector(c, N(cond)->ty)) {
+		qty vt = N(cond)->ty;
+		if ((!is_bool_vector(c, at) && !is_bool_vector(c, bt)) ||
+		    (is_vector(c, at) && !compatible(c, at, vt)) ||
+		    (is_vector(c, bt) && !compatible(c, bt, vt))) {
+			cc_error(c, loc, "incompatible vector condition and result types");
+			return err_node(c, loc);
+		}
+		uint32_t pre = 0;
+		cond = cplx_reuse(c, rvalue(c, cond), &pre);
+		uint32_t neg = mk(c, N_UNARY, vt, loc);
+		N(neg)->aux = T_TILDE, N(neg)->a = cond;
+		uint32_t result = binop(c, T_PIPE, binop(c, T_AMP, cond, convert(c, ra, vt), loc),
+		                        binop(c, T_AMP, neg, convert(c, rb, vt), loc), loc);
+		return with_pre(c, pre, result);
+	}
 	if ((is_complex(c, at) || is_complex(c, bt)) && (is_arith(c, at) || is_complex(c, at)) &&
 	    (is_arith(c, bt) || is_complex(c, bt))) {
 		t = ty_complex(c, arith_conv(c, is_complex(c, at) ? cplx_elem(c, at) : at, is_complex(c, bt) ? cplx_elem(c, bt) : bt));
@@ -503,6 +541,8 @@ VPRIV uint32_t addr_of(cc *c, uint32_t n, uint32_t loc)
 	uint32_t r;
 	qty t = N(n)->ty;
 
+	if (N(n)->op == N_INDEX && N(n)->aux == 1)
+		cc_error(c, loc, "address of vector element requested");
 	if (bitfield_of(c, n))
 		cc_error(c, loc, "address of bit-field requested");
 	if (!(N(n)->flags & NF_LVALUE) && KIND(c, t) != TY_FUNC && N(n)->op != N_COMPLIT) {
@@ -603,7 +643,7 @@ static inline __attribute__((always_inline)) uint32_t primary_sym(cc *c, uint32_
 		y = &c->syms[s];
 	}
 	if (y->kind == S_ENUMCONST) {
-		uint32_t n = mk_int(c, y->val, y->ty, loc);
+		uint32_t n = mk_int(c, trunc_to(c, y->val, y->ty), y->ty, loc);
 
 		if (N(n)->op == N_NUM)
 			N(n)->aux |= NUM_ENUM;
@@ -641,6 +681,10 @@ static inline __attribute__((always_inline)) uint32_t primary_sym(cc *c, uint32_
 /* keywords that start a primary expression (the current token) */
 static __attribute__((noinline)) uint32_t primary_kw(cc *c, int kw, uint32_t loc)
 {
+	if (kw == KW___builtin_bit_cast) {
+		next(c);
+		return bitcast_expr(c, loc);
+	}
 	if (kw == KW__Generic) {
 		next(c);
 		return generic_sel(c, loc);
@@ -1105,6 +1149,13 @@ static __attribute__((noinline)) uint32_t call(cc *c, uint32_t fn, uint32_t loc)
 		} else {
 			/* default argument promotions */
 			a = rvalue(c, a);
+			if (!(N(a)->flags & NF_ERR) && !complete(c, N(a)->ty)) {
+				pp_span r = rng(c, a);
+
+				report(c, "error", r.b, &r, 1, NULL, 0, "argument type '%s' is incomplete", tyname(c, N(a)->ty));
+				fwd_note(c, N(a)->ty);
+				a = err_node(c, N(a)->loc);
+			}
 			if (KIND(c, N(a)->ty) == TY_FLOAT)
 				a = cast_node(c, a, prim(TY_DOUBLE), CK_F2F);
 		}
@@ -1115,8 +1166,35 @@ static __attribute__((noinline)) uint32_t call(cc *c, uint32_t fn, uint32_t loc)
 		nonnull_args(c, N(callee)->a, ft, args.v, args.n);
 	if (fmt)
 		format_check(c, fmt, args.v, aty, atd, args.n);
+	if (!c->o->no_builtin && !lib_builtin_disabled(c->o, "strncmp", 7) && args.n == 3 &&
+	    N(callee)->op == N_VAR && c->syms[N(callee)->a].kind == S_FUNC &&
+	    (c->syms[N(callee)->a].flags & SF_GLOBAL) && c->syms[N(callee)->a].sc != SC_STATIC &&
+	    !(c->syms[N(callee)->a].attrs && c->attr[c->syms[N(callee)->a].attrs].asmname)) {
+		int nl;
+		const char *nm = idname(c->syms[N(callee)->a].name, &nl);
+		if (nl == 7 && !memcmp(nm, "strncmp", 7) && f->n == 3 &&
+		    !(f->flags & (TF_NOPROTO | TF_VARIADIC)) && compatible(c, ft, sig_func_type(c, "iSSz"))) {
+			uint32_t folded = fold_strncmp_zero(c, &args, loc);
+			if (folded)
+				return folded;
+		}
+	}
+	if (!c->o->no_builtin && N(callee)->op == N_VAR && c->syms[N(callee)->a].kind == S_FUNC) {
+		const sym *y = &c->syms[N(callee)->a];
+		if ((y->flags & SF_GLOBAL) && y->sc != SC_STATIC && !(y->attrs && c->attr[y->attrs].asmname) &&
+		    !lib_builtin_disabled(c->o, idstr_(y->name), idlen_(y->name))) {
+			uint32_t result = fp_sign_call(c, idstr_(y->name), idlen_(y->name), ft, &args, loc);
+			if (!result) result = fast_math_call(c, idstr_(y->name), idlen_(y->name), ft, &args, loc);
+			if (result) {
+				N(result)->flags |= aflags & NF_ERR;
+				return result;
+			}
+		}
+	}
 	if (!c->o->no_builtin && args.n == 1 && N(callee)->op == N_VAR && c->syms[N(callee)->a].kind == S_FUNC &&
-	    (c->syms[N(callee)->a].flags & SF_GLOBAL)) {
+	    (c->syms[N(callee)->a].flags & SF_GLOBAL) && c->syms[N(callee)->a].sc != SC_STATIC &&
+	    !(c->syms[N(callee)->a].attrs && c->attr[c->syms[N(callee)->a].attrs].asmname) &&
+	    !lib_builtin_disabled(c->o, idstr_(c->syms[N(callee)->a].name), idlen_(c->syms[N(callee)->a].name))) {
 		/* clang: abs, labs and llabs declared with their library types are builtins (inline) */
 		int nl, k = KIND(c, T(c, ft)->base);
 		const char *nm = idname(c->syms[N(callee)->a].name, &nl);
@@ -1130,6 +1208,12 @@ static __attribute__((noinline)) uint32_t call(cc *c, uint32_t fn, uint32_t loc)
 			uint32_t lt = mk_bin(c, T_LESS, prim(TY_INT), x, mk_int(c, 0, t, loc), loc);
 
 			return with_pre(c, pre, conditional(c, lt, neg, x, loc));
+		}
+		if (k == TY_DOUBLE && f->n == 1 && !(f->flags & (TF_NOPROTO | TF_VARIADIC)) &&
+		    KIND(c, c->params[f->aux]) == TY_DOUBLE && c->syms[N(callee)->a].sc != SC_STATIC) {
+			uint32_t narrowed = narrow_math_call(c, nm, (size_t)nl, args.v[0], loc);
+			if (narrowed)
+				return narrowed;
 		}
 		/* clang folds the libm functions on a constant (double f(double)) */
 		static const struct { const char *s; double (*f)(double); } mf[] = {
@@ -1147,6 +1231,11 @@ static __attribute__((noinline)) uint32_t call(cc *c, uint32_t fn, uint32_t loc)
 					if (r == r && (q != 5 || cv.f >= 0) && (q != 4 && q != 9 ? 1 : cv.f > 0))
 						return mk_flt(c, r, prim(TY_DOUBLE), loc);
 				}
+	}
+	if (N(callee)->op == N_VAR) {
+		const sym *fns = &c->syms[N(callee)->a];
+		if (fns->attrs && c->attr[fns->attrs].interrupt)
+			cc_error(c, loc, "interrupt service routine cannot be called directly");
 	}
 	n = mk(c, N_CALL, QUNQ(T(c, ft)->base), loc);
 	N(n)->a = fn;
@@ -1200,6 +1289,7 @@ VPRIV __attribute__((noinline)) uint32_t postfix_ops(cc *c, uint32_t n)
 		case T_LSQUARE: {
 			uint32_t ix, r;
 			qty at, it;
+			qty vector_type = is_vector(c, N(n)->ty) ? N(n)->ty : 0;
 
 			next(c);
 			ix = expr(c);
@@ -1227,12 +1317,34 @@ VPRIV __attribute__((noinline)) uint32_t postfix_ops(cc *c, uint32_t n)
 			if (!is_ptr(c, at) || !is_integer(c, it)) {
 				pp_span r[2] = { rng(c, n), rng(c, ix) };
 
-				report(c, "error", loc, r, 2, NULL, 0, "subscripted value is not an array, pointer, or vector");
+				if (!is_ptr(c, at))
+					report(c, "error", loc, r, 2, NULL, 0, "subscripted value is not an array, pointer, or vector");
+				else
+					report(c, "error", loc, r, 2, NULL, 0, "array subscript is not an integer");
 				n = err_node(c, loc);
 				continue;
 			}
+			if (is_func(c, T(c, at)->base)) {
+				pp_span r = rng(c, n);
+
+				report(c, "error", r.b, &r, 1, NULL, 0, "subscript of pointer to function type '%s'", tyname(c, T(c, at)->base));
+				n = err_node(c, loc);
+				continue;
+			}
+			if (!is_void(c, T(c, at)->base) && !complete(c, T(c, at)->base)) {
+				pp_span r = rng(c, n);
+
+				report(c, "error", loc, &r, 1, NULL, 0, "subscript of pointer to incomplete type '%s'", tyname(c, T(c, at)->base));
+				fwd_note(c, T(c, at)->base);
+				n = err_node(c, loc);
+				continue;
+			}
+			if (KIND(c, T(c, at)->base) == TY_SVE)
+				void_ptr_arith(c, at, loc, false);
 			r = mk2(c, N_INDEX, T(c, at)->base, loc, n, convert(c, ix, prim(TY_LONG)));
 			N(r)->flags = NF_LVALUE;
+			N(r)->c = vector_type;
+			if (vector_type && is_bool_vector(c, vector_type)) N(r)->aux = 1;
 			n = r;
 			continue;
 		}
@@ -1305,8 +1417,18 @@ VPRIV __attribute__((noinline)) uint32_t postfix_ops(cc *c, uint32_t n)
 
 			next(c);
 			need_lvalue(c, n, loc);
+			if (is_complex(c, N(n)->ty)) {
+				n = cplx_incdec(c, n, op, loc);
+				continue;
+			}
+			if ((T(c, N(n)->ty)->flags & TF_ATOMIC) && atomic_wide(c, N(n)->ty)) {
+				n = atomic_assign_expr(c, n, 0, op == N_POSTINC ? T_PLUS : T_MINUS, true, loc);
+				continue;
+			}
 			need_scalar(c, n, "increment");
-			r = mk(c, op, QUNQ(N(n)->ty), loc);
+			if (is_ptr(c, N(n)->ty) && KIND(c, T(c, N(n)->ty)->base) == TY_SVE)
+				void_ptr_arith(c, N(n)->ty, loc, false);
+			r = mk(c, op, QUNQ(ty_unatomic(c, N(n)->ty)), loc);
 			N(r)->a = n;
 			n = r;
 			continue;

@@ -1,0 +1,37 @@
+# WebAssembly (wasm64-unknown-emscripten) target: the same C suites through
+# vcc -S, linked by emcc and run under node against clang's build
+# (bench/vcc-wasm.py).  vcc itself runs on an arm64 Linux runner.
+name: wasm
+on:
+  workflow_call:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  wasm:
+    runs-on: ubuntu-24.04-arm
+    container: debian:trixie
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      # emsdk itself is not cached: its install takes ~15 s, saving the
+      # directory took ~50 s.  Its cache/ (libraries emcc builds on first use,
+      # wasm64's are not prebuilt) is, with the harness's caches (see arm64.yml).
+      - run: ci/setup-debian.sh wasm
+        id: setup
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cache/ccache
+            /opt/emsdk/upstream/emscripten/cache
+            build/linux/ccs/wasmtests/ref
+            build/linux/ccs/wasmtests/pass
+          key: ci-wasm-${{ steps.setup.outputs.toolfp }}-${{ github.sha }}
+          restore-keys: ci-wasm-${{ steps.setup.outputs.toolfp }}-
+      - run: ci/premerge.sh wasm
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: wasm-logs
+          path: build/linux/ci-logs/
+          if-no-files-found: ignore

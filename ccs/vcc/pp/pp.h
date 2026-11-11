@@ -41,7 +41,9 @@ typedef struct ptok {
 } ptok;
 
 typedef struct pp_opts {
-	const char *main;		/* the source file */
+	const char *main;		/* the source file ("<stdin>" with main_src) */
+	const char *main_src;		/* non-NULL: the main file's bytes (stdin), main_len of them */
+	size_t main_len;
 	const char *const *dirs;	/* search path: -iquote dirs, then -I, -isystem, -idirafter */
 	const char *const *edirs;	/* --embed-dir: #embed's search path */
 	int nedirs;
@@ -56,7 +58,7 @@ typedef struct pp_opts {
 	const char *cwd;		/* relative paths are relative to this (NULL: process cwd) */
 	int errfd;			/* diagnostics (0: stderr) */
 	int asm_mode;			/* assembler-with-cpp: unknown directives pass, # need not stringify */
-	int target;			/* PP_LINUX_AARCH64, PP_DARWIN, PP_WASM64 or PP_WASM32 (column of the feature table) */
+	int target;			/* PP_LINUX_AARCH64, PP_DARWIN, PP_WASM64, PP_WASM32 or PP_LINUX_X86_64 (column of the feature table; x86-64: has_tab_x86) */
 	int diag_color;			/* diagnostics: 1 colors, -1 none, 0 when errfd is a terminal */
 	int diag_nocaret;		/* -fno-caret-diagnostics: no source lines */
 	int diag_show_id;		/* -fdiagnostics-show-id: " [id]" after the flag */
@@ -80,6 +82,7 @@ typedef struct pp_opts {
 	long long epoch;
 	int trigraphs;			/* strict -std (not c23) or -trigraphs: ??x replaced before lexing */
 	int c89;			/* -std=c89/-ansi: no // comments */
+	int no_digraphs;		/* strict C89/C90, excluding amendment1 (C94) */
 	int c23;			/* -std=c23/gnu23: true is 1 in #if */
 	int dump_defines;		/* -dD: #define/#undef in the -E text */
 	const char *const *dd_order;	/* -dD: clang's order of its predefined macros */
@@ -93,7 +96,7 @@ typedef struct pp_opts {
 	int imacros;			/* predef has -imacros (#__include_macros): no header cache */		/* markers: where predef's command-line part (-D/-U) starts */
 } pp_opts;
 
-enum { PP_LINUX_AARCH64, PP_DARWIN, PP_WASM64, PP_WASM32 };
+enum { PP_LINUX_AARCH64, PP_DARWIN, PP_WASM64, PP_WASM32, PP_LINUX_X86_64 };
 /* WebAssembly, either width (wasm32: ILP32, PLAN-wasm.md W7) */
 #define PP_IS_WASM(t) ((t) == PP_WASM64 || (t) == PP_WASM32)
 
@@ -257,6 +260,7 @@ void pp_diag_macro(vdiag *d, const char *ms, uint32_t mlen);
 /* a warning's flag (" [-Wflag]"; werror: " [-Werror,-Wflag]") */
 void pp_diag_flag(vdiag *d, const char *flag);
 /* the level a warning of flag is reported at, at loc: VDL_WARNING, VDL_ERROR (-Werror), or -1 (off) */
+int pp_diag_elevel(pp *p, const char *flag, const char *const *groups, uint32_t loc);
 int pp_diag_wlevel(pp *p, const char *flag, bool on, const char *const *groups, uint32_t loc);
 /* render (and keep) the record; a fatal error ends the TU */
 void pp_diag_emit(pp *p, vdiag *d);

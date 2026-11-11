@@ -2,9 +2,11 @@
 #include <sys/stat.h>
 #include "ppimpl.h"
 
+/* address space, backed as touched: NORESERVE, or Linux's heuristic overcommit
+   refuses the 16 GB shared region on a machine with less RAM + swap */
 VPRIV void *vm(size_t n)
 {
-	void *p = mmap(NULL, n, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANON, -1, 0);
+	void *p = mmap(NULL, n, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANON | MAP_NORESERVE, -1, 0);
 
 	if (p == MAP_FAILED) {
 		perror("vcc: mmap");
@@ -56,6 +58,27 @@ static void bi_init(void)
 static vmpool pppool = VMPOOL_INIT(8);
 static _Thread_local vmreg *ppr;
 
+/* the main file from stdin (pp_opts.main_src): lexed here as <built-in> is, its bytes immortal like a cached file's */
+static __attribute__((noinline, cold)) const vlex_file *stdin_file(pp *p, const pp_opts *o)
+{
+	size_t ml = o->main_len;
+	char *ms = salloc(ml + 129);
+	vlex_file *f = varena_alloc(&p->perm, sizeof(*f));
+	vtok *mt = varena_alloc(&p->perm, (ml + 2) * sizeof(vtok));
+	void *scratch = vmreg_get(&ppr[7], vlex_scratch_size(ml) + 4096, "pp.lexscratch");
+
+	memcpy(ms, o->main_src, ml);
+	memset(ms + ml, 0, 129);
+	memset(f, 0, sizeof(*f));
+	f->path = o->main;
+	f->src = ms;
+	f->size = (uint32_t)ml;
+	f->ntok = vlex(ms, ml, mt, scratch);
+	f->tok = mt;
+	vmreg_put(&ppr[7], VMREG_SCRATCH);
+	return f;
+}
+
 pp *pp_open(const pp_opts *o)
 {
 	pp *p = vmreg_get(&(ppr = vmpool_take(&pppool))[0], sizeof(pp), "pp");
@@ -96,7 +119,13 @@ pp *pp_open(const pp_opts *o)
 			mset(p, bi_macro[i]->name, bi_macro[i]);
 	}
 
-	{
+	if (o->main_src) {
+		mf = stdin_file(p, o);
+		if (o->trigraphs) mf = vlex_trigraphs(mf);
+		if (o->c89) mf = vlex_c89(mf);
+		if (o->no_digraphs) mf = vlex_nodigraphs(mf);
+		if (o->c23) mf = vlex_digitsep(mf);
+	} else {
 		/* the caller's string is unpadded; vlex_get hashes by words (ASan) */
 		size_t ml = strlen(o->main);
 		char *mp = varena_alloc(&p->perm, ml + 16);
@@ -149,6 +178,8 @@ pp *pp_open(const pp_opts *o)
 	p->builtin.ntok = vlex(src, n, tok, scratch);
 	p->builtin.tok = tok;
 	vmreg_put(&ppr[7], VMREG_SCRATCH);
+	if (o->no_digraphs)
+		p->builtin = *vlex_nodigraphs(&p->builtin);
 	enter_file(p, &p->builtin, "<built-in>", -1);
 	return p;
 }

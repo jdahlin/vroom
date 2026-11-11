@@ -28,7 +28,7 @@ static void park(ecx *e, carg *a)
 		return;		/* parked while the arguments were evaluated */
 	if (is_agg(c, a->t)) {
 		uint64_t sz = (tsize(c, a->t) + 7) & ~(uint64_t)7;
-		int32_t sl = slot(e, sz ? sz : 8, talign(c, a->t) > 8 ? 16 : 8);
+		int64_t sl = slot(e, sz ? sz : 8, em_bigint(c, a->t) ? talign(c, a->t) : talign(c, a->t) > 8 ? 16 : 8);
 		int rs = toreg(e, &a->v), rd = treg(e);
 
 		opi(e, I_ADDI, 1, rd, FRAME, sl);
@@ -97,7 +97,7 @@ VPRIV val do_call(ecx *e, uint32_t ref, val *fnv, carg *args, int n, qty rty, bo
 {
 	cc *c = e->c;
 	int ngrn = 0, nsaa = 0;
-	int32_t fslot = 1, rslot = 1;
+	int64_t fslot = 1, rslot = 1;
 	bool sret = is_sret(c, rty);
 	uint32_t keep = 0;	/* temporaries holding register arguments: moved, not parked or spilled */
 	spill sp;
@@ -122,6 +122,10 @@ VPRIV val do_call(ecx *e, uint32_t ref, val *fnv, carg *args, int n, qty rty, bo
 	e->nsrn = 0;
 	for (int i = 0; i < n; i++) {
 		carg *a = &args[i];
+
+		if (!DARWIN(c) && nfix >= 0 && i >= nfix && is_bvec(c, a->t) &&
+		    (T(c, a->t)->n == 64 || T(c, a->t)->n == 128))
+			efatal(e, e->curloc, "arm64: variadic transport of 64/128-lane packed boolean vectors is not supported");
 
 		if (nfix >= 0 && i >= nfix && DARWIN(c))
 			classify_va(e, a->t, &nsaa, &a->a);
@@ -181,6 +185,14 @@ VPRIV val do_call(ecx *e, uint32_t ref, val *fnv, carg *args, int n, qty rty, bo
 		carg *a = &args[i];
 
 		switch (a->a.kind) {
+		case A_BOOL_LANES:
+			for (unsigned k = 0; k < T(c, a->t)->n; k++) {
+				int rd = k < a->a.nreg ? a->a.reg + k : R_X16;
+				mem(e, I_LD, 0, 0, rd, FRAME, a->slot + k / 8);
+				opbf(e, I_UBFM, 1, rd, rd, k % 8, k % 8);
+				if (k >= a->a.nreg) mem(e, I_ST, 3, 0, rd, SP, a->a.stk + (k - a->a.nreg) * 8);
+			}
+			break;
 		case A_REG:
 			for (int k = 0; k < a->a.nreg; k++)
 				arg_word(e, a, k, a->a.reg + k);
@@ -240,9 +252,15 @@ VPRIV val do_call(ecx *e, uint32_t ref, val *fnv, carg *args, int n, qty rty, bo
 
 		opi(e, I_ADDI, 1, r, FRAME, rslot);
 		res = vreg(r);
+	} else if (is_bvec(c, rty)) {
+		int64_t sl = slot(e, 8, 8);
+		int r = treg(e);
+		bvec_res(e, rty, sl);
+		opi(e, I_ADDI, 1, r, FRAME, sl);
+		res = vreg(r);
 	} else if (is_recabi(c, rty) && hfa(c, rty, &hn)) {
 		int hb = hfa(c, rty, &hn);
-		int32_t sl = slot(e, 64, 16);
+		int64_t sl = slot(e, 64, 16);
 		int r = treg(e);
 
 		for (int k = 0; k < hn; k++)
@@ -250,14 +268,14 @@ VPRIV val do_call(ecx *e, uint32_t ref, val *fnv, carg *args, int n, qty rty, bo
 		opi(e, I_ADDI, 1, r, FRAME, sl);
 		res = vreg(r);
 	} else if (vec_small(c, rty)) {
-		int32_t sl = slot(e, 8, 8);
+		int64_t sl = slot(e, 8, 8);
 		int r = treg(e);
 
 		vec_small_res(e, rty, sl);
 		opi(e, I_ADDI, 1, r, FRAME, sl);
 		res = vreg(r);
 	} else if (is_recabi(c, rty)) {
-		int32_t sl = slot(e, 16, 16);
+		int64_t sl = slot(e, 16, 16);
 		int r = treg(e);
 
 		mem(e, I_ST, 3, 0, 0, FRAME, sl);
@@ -331,7 +349,7 @@ VPRIV void kv_track(ecx *e, uint32_t s, const val *v)
 	int k;
 
 	if ((e->E->sflags[s] & (SA_WRITTEN | SA_CWRITE)) != SA_CWRITE || !is_integer(c, y->ty) || is_wide(c, y->ty) ||
-	    (QQ(y->ty) & Q_VOLATILE) || sym_attrs(c, s)->cleanup || e->nkv == NKV)
+	    (QQ(y->ty) & Q_VOLATILE) || (T(c, y->ty)->flags & TF_ATOMIC) || sym_attrs(c, s)->cleanup || e->nkv == NKV)
 		return;
 	k = e->nkv++;
 	b->kv = (uint8_t)(k + 1);
@@ -358,7 +376,7 @@ VPRIV int ael_slot(ecx *e, uint32_t n, bool create)
 		return -1;
 	at = T(c, y->ty), et = at->base;
 	if (at->kind != TY_ARRAY || (at->flags & (TF_VLA | TF_INCOMPLETE)) || !is_integer(c, et) || is_wide(c, et) ||
-	    (QQ(et) & Q_VOLATILE) || (QQ(y->ty) & Q_VOLATILE))
+	    (QQ(et) & Q_VOLATILE) || (T(c, et)->flags & TF_ATOMIC) || (QQ(y->ty) & Q_VOLATILE))
 		return -1;
 	idx = aconst_idx(c, n);
 	if (idx >= at->n)
@@ -379,7 +397,7 @@ VPRIV bool const_var(ecx *e, uint32_t s, const val *v)
 {
 	uint8_t f = e->E->sflags[s];
 
-	if (f & (SA_WRITTEN | SA_CMULTI))
+	if ((T(e->c, e->c->syms[s].ty)->flags & TF_ATOMIC) || (f & (SA_WRITTEN | SA_CMULTI)))
 		return false;
 	if (f & SA_CWRITE)
 		return v->k == V_CONST && em_trunc_to(e->c, v->i, e->c->syms[s].ty) == e->E->cwval[s];
@@ -437,7 +455,7 @@ static bool reg_scalar(ecx *e, qty t)
 {
 	cc *c = e->c;
 
-	return (is_integer(c, t) || is_ptr(c, t)) && !is_wide(c, t) && !(QQ(t) & Q_VOLATILE) && tsize(c, t) - 1 < 8;
+	return (is_integer(c, t) || is_ptr(c, t)) && !is_wide(c, t) && !(QQ(t) & Q_VOLATILE) && !(T(c, t)->flags & TF_ATOMIC) && tsize(c, t) - 1 < 8;
 }
 
 static bool is_temp(int r)
@@ -448,18 +466,20 @@ static bool is_temp(int r)
 	return false;
 }
 
-VPRIV val inline_call(ecx *e, uint32_t s, carg *args, int n)
+VPRIV val inline_call(ecx *e, uint32_t s, carg *args, int n, uint32_t call)
 {
 	cc *c = e->c;
 	const sym *y = &c->syms[s];
 	const node *body = N(y->body);
 	fnctx F;
 	qty rty = T(c, y->ty)->base;
+	int64_t saved_sp = 0;
 	val res;
 
 	walk_fn(e, s);
 	memset(&F, 0, sizeof(F));
 	F.fn = s;
+	F.call = call;
 	F.inst = ++e->inst_next;
 	F.inl = true;
 	F.rty = rty;
@@ -472,8 +492,13 @@ VPRIV val inline_call(ecx *e, uint32_t s, carg *args, int n)
 		F.retreg = (uint8_t)(treg(e) + 1);	/* returns put the value there: no slot */
 	else if (!is_void(c, rty))
 		F.retslot = slot(e, tsize(c, rty) ? tsize(c, rty) : 8, talign(c, rty) > 16 ? 16 : talign(c, rty));
-	for (int i = 0; i < n; i++)
-		if (args[i].slot != 1) {	/* parked: back in a register */
+	for (int i = 0; i < (int)body->aux; i++) {
+		uint32_t p = c->lists[body->a + i];
+		const sym *ps = &c->syms[p];
+		bind *b = binding(e, p);
+		/* Reload only this parameter: restoring all parked values together
+		 * exhausts temporaries for wide or numerous inline arguments. */
+		if (i < n && args[i].slot != 1) {	/* parked: back in a register */
 			if (is_agg(c, args[i].t)) {
 				int r = treg(e);
 
@@ -486,10 +511,6 @@ VPRIV val inline_call(ecx *e, uint32_t s, carg *args, int n)
 			}
 			args[i].slot = 1;
 		}
-	for (int i = 0; i < (int)body->aux; i++) {
-		uint32_t p = c->lists[body->a + i];
-		const sym *ps = &c->syms[p];
-		bind *b = binding(e, p);
 		val v = i < n ? args[i].v : vconst(0);
 
 		if (const_var(e, p, &v) && !is_agg(c, ps->ty) &&
@@ -519,7 +540,7 @@ VPRIV val inline_call(ecx *e, uint32_t s, carg *args, int n)
 			continue;
 		}
 		{
-			int32_t sl;
+			int64_t sl;
 			lval l = { .k = L_FRAME };
 
 			b->inst = 0;
@@ -531,6 +552,13 @@ VPRIV val inline_call(ecx *e, uint32_t s, carg *args, int n)
 			val_free(e, &v);
 		}
 	}
+	if (e->E->nflags[y->body] & NA_ALLOCA) {
+		int r = treg(e);
+		saved_sp = slot(e, 8, 8);
+		mov(e, 1, r, SP);
+		mem(e, I_ST, 3, 0, r, FRAME, saved_sp);
+		tfree(e, r);
+	}
 	e->f = &F;
 	e->inline_depth++;
 	e->E->ninl++;
@@ -538,6 +566,12 @@ VPRIV val inline_call(ecx *e, uint32_t s, carg *args, int n)
 	e->inline_depth--;
 	e->f = F.up;
 	deflabel(e, F.retlbl);
+	if (saved_sp) {
+		int r = treg(e);
+		mem(e, I_LD, 3, 0, r, FRAME, saved_sp);
+		mov(e, 1, SP, r);
+		tfree(e, r);
+	}
 	for (int i = 0; i < (int)body->aux; i++) {
 		bind *b = binding(e, c->lists[body->a + i]);
 
@@ -602,7 +636,52 @@ static val fold_strcmp(ecx *e, const node *x)
 	return vconst(r < 0 ? -1 : r > 0);
 }
 
-VPRIV val gen_call(ecx *e, uint32_t n)
+/*
+ * __builtin_memcpy/memmove/memset with a constant size: inline stores, as
+ * clang at every -O and under -fno-builtin/-ffreestanding (LLVM's memcpy
+ * intrinsic; the vDSO has no memcpy to call: get/put_unaligned in
+ * lib/vdso/getrandom.c).  Plain memcpy() stays a call.  The value is dst.
+ */
+static bool mem_inline(ecx *e, uint32_t ref, carg *args, val *res)
+{
+	const char *nm = cc_builtin_name(RIDX(ref));
+	int kind = !strcmp(nm, "__builtin_memcpy") ? 1 : !strcmp(nm, "__builtin_memmove") ? 2 :
+		   !strcmp(nm, "__builtin_memset") ? 3 : 0;
+	uint64_t n;
+	int d;
+
+	if (!kind || args[2].v.k != V_CONST)
+		return false;
+	n = (uint64_t)args[2].v.i;
+	if (n > 128 || (kind == 2 && n & (n - 1)) || (kind == 2 && n > 8) || (kind == 3 && args[1].v.k != V_CONST))
+		return false;	/* memmove: one load before one store (overlap) */
+	d = toreg(e, &args[0].v);
+	if (kind < 3) {
+		int sr = toreg(e, &args[1].v);
+
+		copy_mem(e, d, sr, n);
+		val_free(e, &args[1].v);
+	} else if (!(args[1].v.i & 0xff)) {
+		zero_mem(e, d, n);
+	} else {
+		uint64_t pat = (uint64_t)(args[1].v.i & 0xff) * 0x0101010101010101ull, o = 0;
+		int t = R_X16;	/* as copy_mem: not x17 */
+
+		movi(e, 1, t, (int64_t)pat);
+		while (o < n) {
+			uint64_t k = n - o >= 8 ? 8 : n - o >= 4 ? 4 : n - o >= 2 ? 2 : 1;
+
+			mem(e, I_ST, log2sz(k), 0, t, d, (int64_t)o);
+			o += k;
+		}
+	}
+	*res = args[0].v;
+	return true;
+}
+
+/* Keep the argument scratch buffer out of gen_inner's recursive frame.
+ * Inlining it there charges every arithmetic node for MAXARGS call slots. */
+__attribute__((noinline)) VPRIV val gen_call(ecx *e, uint32_t n)
 {
 	cc *c = e->c;
 	const node *x = N(n);
@@ -652,8 +731,20 @@ VPRIV val gen_call(ecx *e, uint32_t n)
 		    (args[i].v.k == V_REG || args[i].v.k == V_REG2))
 			park(e, &args[i]);
 	}
-	if (inl) {
-		r = inline_call(e, s, args, na);
+	if (!s && RKIND(ref) == RK_NAME && RIDX(ref) < 0x8000000u && na == 1 &&
+	    is_ld(c, x->ty) && !strcmp(cc_builtin_name(RIDX(ref)), "__builtin_fabsl")) {
+		/* Clear binary128's sign without touching a signaling NaN payload. */
+		r = args[0].v;
+		if (r.k == V_CONST)
+			r.i = (i128)((u128)r.i & ~((u128)1 << 127));
+		else {
+			toreg2(e, &r, false);
+			opi(e, I_ANDI, 1, r.r2, r.r2, INT64_MAX);
+		}
+	} else if (inl) {
+		r = inline_call(e, s, args, na, n);
+	} else if (!s && ref && na == 3 && RKIND(ref) == RK_NAME && mem_inline(e, ref, args, &r)) {
+		/* inlined */
 	} else {
 		qty ft = N(x->a)->ty;
 		int nfix = -1;

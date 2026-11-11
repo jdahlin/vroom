@@ -90,7 +90,7 @@ enum { CX_NONE, CX_INIT, CX_PASS, CX_RETURN, CX_ASSIGN };
 typedef struct dspec {
 	qty ty;
 	int sc;
-	bool inline_, noreturn, thread, auto_type, has_type;
+	bool inline_, noreturn, thread, auto_type, has_type, constexpr_;
 	bool invalid;		/* an unknown type name stands for the type (int) */
 	uint16_t sckw;		/* the storage-class keyword, if any */
 	uint32_t sgnloc, longloc, baseloc;	/* signed/unsigned, the first long, short: for clang's errors */
@@ -109,6 +109,7 @@ typedef struct dop {
 	uint16_t fl;		/* array: TF_*; func: TF_* */
 	uint32_t a, b;		/* array: length lo/hi or vla node; func: params start, count */
 	uint32_t np;		/* func: parameter syms (after the types; K&R: no types); array: the size's location */
+	uint32_t loc;		/* array: opening bracket for element-type diagnostics */
 	bool kr;		/* func: K&R identifier list */
 } dop;
 
@@ -123,7 +124,7 @@ typedef struct declr {
 } declr;
 
 /* the declarator op stack (shared, nested declarators push and pop) */
-#define DOPS_MAX 4096
+#define DOPS_MAX (1u << 20)
 #define FM_DEPTH 256	/* nested anonymous members find_member follows */
 
 /* ---------------- struct / union / enum bodies ---------------- */
@@ -189,6 +190,8 @@ extern const char *const w_ped[];	/* { "pedantic" } */
 	do { if (unlikely(ext_on((c), (flag), (groups)))) { (c)->dms = (ms); \
 		if (!((tf) & PF_MACRO)) (c)->dfx = (pp_fixit){ (loc), (loc) + (uint32_t)strlen(ms), "", VDA_MACHINE }; \
 		ext_warn((c), (flag), (groups), (loc), __VA_ARGS__); } } while (0)
+VPRIV void cc_errorx(cc *c, const char *flag, const char *const *groups, uint32_t loc,
+                     const pp_span *r, int nr, const char *fmt, ...) __attribute__((format(printf, 7, 8)));
 VPRIV __attribute__((format(printf, 6, 7))) vdiag *cc_warn_begin(cc *c, const char *flag, bool on, const char *const *groups, uint32_t loc, const char *fmt, ...);
 extern const char *const w_conv[];
 extern const char *const w_selfassign[];
@@ -208,6 +211,18 @@ extern const basic_ty basic[TY_PTR];
 static inline bool is_int_kind(int k);
 static inline bool is_flt_kind(int k);
 VPRIV bool is_integer(cc *c, qty t);
+VPRIV bool is_bigint(cc *c, qty t);
+VPRIV uint32_t big_float_cast(cc *, uint32_t, qty);
+VPRIV uint32_t big_bitcount(cc *, int, uint32_t, uint32_t, unsigned, uint32_t);
+VPRIV bool big_conversion_exact(cc *, const cval *, qty, qty);
+VPRIV char *big_value_string(cc *, const cval *, qty);
+VPRIV uint32_t mk_big_words(cc *, const uint32_t *, qty, uint32_t);
+VPRIV uint32_t big_int_node(cc *, i128, qty, uint32_t);
+VPRIV uint32_t big_literal(cc *, const char *, size_t, unsigned, bool, uint32_t);
+VPRIV bool big_read_eval(cc *, uint32_t, cval *);
+VPRIV bool big_nonzero(cc *, const cval *);
+VPRIV uint32_t big_fold_node(cc *, uint32_t);
+
 VPRIV bool is_float(cc *c, qty t);
 VPRIV bool is_arith(cc *c, qty t);
 VPRIV bool is_ptr(cc *c, qty t);
@@ -217,6 +232,7 @@ VPRIV bool is_array(cc *c, qty t);
 VPRIV bool is_func(cc *c, qty t);
 VPRIV bool is_record(cc *c, qty t);
 VPRIV bool is_vector(cc *c, qty t);
+VPRIV bool is_bool_vector(cc *c, qty t);
 VPRIV bool is_complex(cc *c, qty t);
 VPRIV bool is_ilagg(cc *c, qty t);
 VPRIV qty canon(cc *c, qty t);
@@ -225,6 +241,8 @@ VPRIV uint32_t ty_hash(const ctype *t);
 VPRIV uint32_t fn_hash(qty ret, const qty *par, uint32_t n, int flags);
 VPRIV uint32_t ty_intern(cc *c, const ctype *t);
 VPRIV uint32_t ty_new(cc *c, int kind);
+VPRIV qty ty_bitint(cc *c, unsigned bits, bool unsign);
+VPRIV unsigned int_bits(cc *c, qty t);
 VPRIV qty ty_ptr(cc *c, qty base);
 VPRIV qty ty_array(cc *c, qty elem, uint64_t n, int flags);
 VPRIV uint64_t arr_len(cc *c, qty t);
@@ -279,7 +297,7 @@ VPRIV __attribute__((noinline, cold, noreturn)) void expect_here_fail(cc *c, con
 typedef struct recov {
 	jmp_buf jb;
 	struct recov *prev;
-	uint32_t depth, ndops, ncase, case_base, dead, fn;
+	uint32_t depth, ndops, ncase, case_base, dead, fn, constexpr_init;
 	int in_loop, in_switch, in_stmtexpr, unevaluated, in_struct, ibr, in_tyname;
 	uint32_t *switch_cases;
 	qty switch_ty;
@@ -307,6 +325,7 @@ static inline uint32_t dget(uint32_t **dir, uint32_t id);
 VPRIV void scope_open(cc *c);
 VPRIV void scope_close(cc *c);
 VPRIV void scope_close_proto(cc *c);
+VPRIV void proto_binding(cc *c, uint32_t s);
 VPRIV void unused_statics(cc *c);
 VPRIV void unused_typedefs(cc *c);
 VPRIV uint32_t sym_new(cc *c, int kind, uint32_t name, qty ty, uint32_t loc);
@@ -348,6 +367,10 @@ VPRIV void i128s_(char *b, size_t n, i128 v);
 VPRIV const field *node_field(cc *c, const node *x);
 VPRIV int clz128(u128 x, unsigned bits);
 VPRIV bool eval(cc *c, uint32_t n, cval *v);
+VPRIV uint32_t bitcast_expr(cc *c, uint32_t loc);
+VPRIV bool bitcast_value(cc *c, uint32_t n, cval *v);
+VPRIV bool bitcast_constant(cc *c, uint32_t n);
+VPRIV bool vector_constant(cc *c, uint32_t n);
 VPRIV bool is_npc(cc *c, uint32_t n);
 VPRIV bool const_int(cc *c, uint32_t n, i128 *out);
 /* conv.c */
@@ -356,6 +379,9 @@ VPRIV __attribute__((noinline)) uint32_t decay_slow(cc *c, uint32_t n, qty t, in
 static inline uint32_t decay(cc *c, uint32_t n);
 VPRIV const field *bitfield_of(cc *c, uint32_t n);
 VPRIV void bitfield_const(cc *c, const field *f, uint32_t v, uint32_t op);
+VPRIV bool constexpr_init_ok(cc *c, uint32_t init);
+VPRIV void constexpr_conversion(cc *c, uint32_t n, qty to);
+VPRIV bool constexpr_type_ok(cc *c, qty t);
 VPRIV bool static_init_ok(cc *c, qty ty, uint32_t init, uint32_t *bad);
 VPRIV void deprecated_use(cc *c, uint32_t loc, uint32_t name, const attrs *a, uint32_t dloc);
 VPRIV void tag_deprecate(cc *c, uint32_t ti, const attrs *a);
@@ -389,6 +415,12 @@ VPRIV uint32_t neg(cc *c, uint32_t n);
 VPRIV void bad_operands(cc *c, int op, uint32_t l, uint32_t r, uint32_t loc);
 VPRIV const char *punct_spell(int k);
 VPRIV uint32_t cplx_binop(cc *c, int op, uint32_t l, uint32_t r, uint32_t loc);
+VPRIV uint32_t atomic_lock_free_runtime(cc *c, vec *args, uint32_t loc);
+VPRIV bool atomic_wide(cc *c, qty t);
+VPRIV uint32_t atomic_load_expr(cc *c, uint32_t n);
+VPRIV uint32_t atomic_assign_expr(cc *c, uint32_t lhs, uint32_t rhs, int op, bool post, uint32_t loc);
+VPRIV uint32_t atomic_builtin_expr(cc *c, int id, qty t, const vec *input, uint32_t loc);
+VPRIV uint32_t cplx_incdec(cc *c, uint32_t n, int op, uint32_t loc);
 VPRIV uint32_t cplx_unary(cc *c, int op, uint32_t n, uint32_t loc);
 /* expr.c */
 VPRIV bool is_cmp(int op);
@@ -408,6 +440,9 @@ VPRIV uint32_t args_list(cc *c, vec *args);
 VPRIV uint32_t mk_builtin(cc *c, int id, qty ty, uint32_t loc, const vec *args);
 VPRIV uint32_t vector_builtin(cc *c, bool shuffle, uint32_t loc);
 VPRIV uint32_t offsetof_expr(cc *c, uint32_t loc);
+VPRIV uint32_t fast_math_call(cc *c, const char *name, size_t len, qty ft, const vec *args, uint32_t loc);
+VPRIV uint32_t fp_sign_call(cc *c, const char *name, size_t len, qty ft, const vec *args, uint32_t loc);
+VPRIV uint32_t narrow_math_call(cc *c, const char *name, size_t len, uint32_t arg, uint32_t loc);
 VPRIV uint32_t builtin_call(cc *c, const builtin *b, uint32_t loc);
 /* expr.c */
 VPRIV uint32_t paren_expr(cc *c, uint32_t loc);
@@ -415,6 +450,7 @@ VPRIV uint32_t primary(cc *c);
 VPRIV __attribute__((noinline)) uint32_t postfix_ops(cc *c, uint32_t n);
 static inline uint32_t postfix(cc *c, uint32_t n);
 /* exprop.c */
+VPRIV uint32_t capture_vla_bounds(cc *c, qty ty, uint32_t first, uint32_t value, uint32_t loc);
 VPRIV uint32_t cast_expr(cc *c);
 VPRIV uint32_t cond_expr(cc *c);
 VPRIV uint32_t assign_expr(cc *c);
@@ -454,12 +490,13 @@ VPRIV void static_assert_decl(cc *c);
 VPRIV bool decl_specs(cc *c, dspec *ds, bool allow_sc);
 /* declarator.c */
 VPRIV void declarator(cc *c, declr *d, bool abstract_ok, uint32_t *first, uint32_t *nops);
+VPRIV qty vector_attribute(cc *c, qty t, uint32_t size, uint32_t loc);
 VPRIV qty apply_declarator(cc *c, qty t, uint32_t first, uint32_t nops);
 VPRIV qty type_name(cc *c);
 /* record.c */
 extern _Thread_local fscratch tl_fscr;
 VPRIV __attribute__((noinline)) void struct_body(cc *c, uint32_t ti);
-VPRIV void enum_body(cc *c, uint32_t ti, attrs *after);
+VPRIV void enum_body(cc *c, uint32_t ti, attrs *after, uint32_t loc);
 /* init.c */
 VPRIV uint32_t initializer(cc *c, qty *ty, bool st);
 /* decl.c */
@@ -483,9 +520,11 @@ VPRIV void include_fix(cc *c, vdiag *d, uint32_t loc, const char *hdr);
 VPRIV qty implicit_lib_type(cc *c, uint32_t id);
 VPRIV uint32_t implicit_lib_func(cc *c, uint32_t id, uint32_t loc, qty t);
 VPRIV qty sig_func_type(cc *c, const char *sig);
+VPRIV uint32_t fold_strncmp_zero(cc *c, const vec *args, uint32_t loc);
 VPRIV void declaration(cc *c, vec *out, bool file);
 /* stmt.c */
 VPRIV uint32_t label_ref(cc *c, uint32_t name, uint32_t loc);
+VPRIV bool lib_builtin_disabled(const cc_opts *o, const char *name, size_t len);
 VPRIV uint32_t mkstmt(cc *c, int op, uint32_t loc, uint32_t a, uint32_t b, uint32_t cc_);
 VPRIV uint32_t asm_stmt(cc *c, bool toplevel);
 VPRIV bool at_asm(cc *c);
@@ -503,10 +542,13 @@ VPRIV void translation_unit(cc *c);
 VPRIV const char *tyname(cc *c, qty t);
 VPRIV void layout_checks(cc *c);
 
-static inline bool is_int_kind(int k) { return k >= TY_BOOL && k <= TY_UINT128; }
-static inline bool is_flt_kind(int k) { return k >= TY_FLOAT16 && k <= TY_LDOUBLE; }
-/* long double as binary128 (aarch64 Linux; Apple's is double) */
-static inline bool is_q(cc *c, qty t) { return KIND(c, t) == TY_LDOUBLE && c->ty[QI(t)].size == 16; }
+static inline bool is_int_kind(int k) { return (k >= TY_BOOL && k <= TY_UINT128) || k == TY_BITINT || k == TY_UBITINT; }
+static inline bool is_flt_kind(int k) { return k >= TY_BFLOAT16 && k <= TY_FLOAT128; }
+/* long double as binary128 (aarch64 Linux; Apple's is double) or x87 extended (x86-64), in
+   binary128's layout (lib/f128.h) */
+static inline bool is_q(cc *c, qty t) { return (KIND(c, t) == TY_LDOUBLE && c->ty[QI(t)].size == 16) || KIND(c, t) == TY_FLOAT128; }
+/* the fraction bits a wide constant of type t is rounded to: 112, or x87's 63 */
+static inline int q_prec(cc *c, qty t) { return c->o->target == PP_LINUX_X86_64 && KIND(c, t) == TY_LDOUBLE ? Q_P80 : 112; }
 /* the binary128 bits of a 16-byte long double constant: the two pool slots after its double */
 static inline void fpool_q(cc *c, u128 q) { memcpy(&c->fpool[c->nfpool], &q, 16); c->nfpool += 2; }
 static inline u128 fnum_q(const cc *c, uint32_t a) { u128 q; memcpy(&q, &c->fpool[a + 1], 16); return q; }
@@ -668,6 +710,8 @@ static inline qty ty_unatomic(cc *c, qty t)
 
 static inline uint32_t convert(cc *c, uint32_t n, qty to)
 {
+	if ((N(n)->flags & NF_LVALUE) && (T(c, N(n)->ty)->flags & TF_ATOMIC) && atomic_wide(c, N(n)->ty))
+		n = atomic_load_expr(c, n);
 	to = QUNQ(to);
 	if (QI(canon(c, N(n)->ty)) == QI(canon(c, to)) && !bitfield_of(c, n))
 		return n;

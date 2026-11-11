@@ -44,7 +44,7 @@ VPRIV void val_free(ecx *e, const val *v)
 }
 
 /* a stack slot: returns its offset (FRAME base) */
-VPRIV int32_t slot(ecx *e, uint64_t size, uint32_t align)
+VPRIV int64_t slot(ecx *e, uint64_t size, uint32_t align)
 {
 	if (align < 1)
 		align = 1;
@@ -55,16 +55,18 @@ VPRIV int32_t slot(ecx *e, uint64_t size, uint32_t align)
 	}
 	if (align > e->falign)
 		e->falign = align;	/* over 16: finish_function realigns sp to it */
-	if (size > (1u << 28))
+	/* Keep the allocation and its alignment rounding within signed offsets. */
+	uint64_t limit = (uint64_t)INT64_MAX - align;
+	if ((uint64_t)e->foff > limit || size > limit - (uint64_t)e->foff)
 		efatal(e, 0, "stack object too large");
 	/* allocations past the current top ended with their scope */
 	while (e->nsstk && e->sla[e->sstk[e->nsstk - 1]].off < -e->foff)
 		e->nsstk--;
-	e->foff = (int32_t)(((uint64_t)e->foff + size + align - 1) & ~(uint64_t)(align - 1));
+	e->foff = (int64_t)(((uint64_t)e->foff + size + align - 1) & ~(uint64_t)(align - 1));
 	if (e->foff > e->fmax)
 		e->fmax = e->foff;
 	if (e->nsla < CAPSLA) {
-		e->sla[e->nsla] = (slotal){ -e->foff, (uint32_t)size };
+		e->sla[e->nsla] = (slotal){ -e->foff, size };
 		e->sstk[e->nsstk++] = e->nsla;
 	}
 	e->nsla++;
@@ -108,7 +110,7 @@ VPRIV void slot_tag(ecx *e, ins *i, int64_t off, int64_t len)
 		}
 	}
 }
-static bool sym_needs_got(cc *c, uint32_t ref);
+VPRIV bool sym_needs_got(cc *c, uint32_t ref);
 
 /* address of a symbol into rd */
 VPRIV void addr_of_ref(ecx *e, int rd, uint32_t ref, int64_t off)
@@ -214,7 +216,7 @@ VPRIV int lbase(ecx *e, const lval *l, int64_t *off, int size)
 
 VPRIV int log2sz(uint64_t n) { return n == 1 ? 0 : n == 2 ? 1 : n == 4 ? 2 : 3; }
 
-static bool sym_needs_got(cc *c, uint32_t ref)
+VPRIV bool sym_needs_got(cc *c, uint32_t ref)
 {
 	if (RKIND(ref) == RK_NAME)
 		return DARWIN(c);

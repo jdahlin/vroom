@@ -230,7 +230,8 @@ VPRIV void gen_cond(ecx *e, uint32_t n, bool jump_if, uint32_t l)
 {
 	cc *c = e->c;
 	const node *x = N(n);
-	int k = cond_fold(e, n);
+	int k = e->E->o->opt && !e->E->noopt ? em_const_truth(e, n, a64_constant_p) : -1;
+	if (k < 0) k = cond_fold(e, n);
 
 	if (k >= 0) {
 		if (k == (int)jump_if)

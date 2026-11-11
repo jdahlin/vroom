@@ -61,7 +61,7 @@ static void *worker(void *arg)
 	for (;;) {
 		int k = atomic_fetch_add(&nextjob, 1);
 		job *j;
-		ppd_env e = { bdir, nul, getenv("VPP_BATCH_ERR") ? 2 : nul, NULL, NULL, 0 };
+		ppd_env e = { .cwd = bdir, .outfd = nul, .errfd = getenv("VPP_BATCH_ERR") ? 2 : nul };
 		double t0;
 
 		if (k >= njobs)
@@ -193,6 +193,9 @@ static int batch(const char *file, int nthr, const char *statsf)
 		if (ppd_bytes_obj)
 			printf("-c: cc_run %.0f ms (codegen+as %.0f ms), finish+write %.0f ms, %.1f MB objects\n", ppd_ns_cc / 1e6,
 			       ppd_ns_emit / 1e6, ppd_ns_obj / 1e6, ppd_bytes_obj / 1e6);
+		if (ppd_tok_out)
+			printf("-c: %.1f M tokens to the parser, %.1f M skipped by the decl cache; %.0f instructions per token\n",
+			       ppd_tok_out / 1e6, ppd_tok_skip / 1e6, (double)ph[PPD_PH_CC].ins / (double)ppd_tok_out);
 	}
 	if (statsf) {
 		FILE *f = fopen(statsf, "w");
@@ -221,7 +224,7 @@ static int batch(const char *file, int nthr, const char *statsf)
 
 int main(int argc, char **argv)
 {
-	ppd_env e = { NULL, 1, 2, NULL, NULL, 0 };
+	ppd_env e = { .outfd = 1, .errfd = 2 };
 	const char *w = getenv("VPP_WARM");
 
 	if (argc == 4 && !strcmp(argv[1], "--cmp-files")) {
@@ -253,7 +256,7 @@ int main(int argc, char **argv)
 	}
 
 	for (int r = w ? atoi(w) : 0; r > 0; r--) {
-		ppd_env q = { NULL, -1, 2, NULL, NULL, 0 };
+		ppd_env q = { .outfd = -1, .errfd = 2 };
 		char *av[argc + 3];
 		int n = 0;
 

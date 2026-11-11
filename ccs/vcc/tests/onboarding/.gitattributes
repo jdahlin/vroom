@@ -1,0 +1,2 @@
+# Literal caret padding in exact diagnostic sections is significant.
+*.test whitespace=-blank-at-eol

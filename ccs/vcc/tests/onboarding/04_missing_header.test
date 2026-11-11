@@ -1,0 +1,29 @@
+id = "B04"
+title = "Library call missing its declaration"
+expect = [
+  { line = 2, severity = "error", pattern = "(undeclared|implicitly declar|implicit declaration|stdio).*puts|puts.*(undeclared|declar|stdio)" },
+]
+
+=== broken.c ===
+int main(void) {
+    puts("Hello");
+    return 0;
+}
+=== fixed.c ===
+#include <stdio.h>
+int main(void) {
+    puts("Hello");
+    return 0;
+}
+=== valid.c ===
+int puts(const char *);
+int main(void) { puts("Hello"); return 0; }
+=== stderr ===
+broken.c:2:5: error: call to undeclared library function 'puts' with type 'int (const char *)'; ISO C99 and later do not support implicit function declarations [-Wimplicit-function-declaration]
+    2 |     puts("Hello");
+      |     ^
+1 error generated.
+=== narrated ===
+broken.c:2:5: error: call to undeclared library function 'puts' with type 'int (const char *)'; ISO C99 and later do not support implicit function declarations [-Wimplicit-function-declaration]
+  the source line is: puts("Hello");
+1 error generated.

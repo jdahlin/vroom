@@ -1,0 +1,32 @@
+id = "B24"
+title = "Returned address refers to an expired local object"
+expect = [
+  { line = 3, severity = "warning", pattern = "return.*(local|stack|address)|address.*(local|stack).*return" },
+]
+
+=== broken.c ===
+int *bad(void) {
+    int n = 3;
+    return &n;
+}
+int main(void) { return *bad(); }
+=== fixed.c ===
+int *bad(void) {
+    static int n = 3;
+    return &n;
+}
+int main(void) { return *bad(); }
+=== valid.c ===
+typedef __SIZE_TYPE__ size_t;
+void *malloc(size_t); void free(void *);
+int *make(void) { int *p=malloc(sizeof *p); if(p)*p=3; return p; }
+int main(void) { int *p=make(); if(!p)return 1; int result=*p != 3; free(p); return result; }
+=== stderr ===
+broken.c:3:13: warning: address of stack memory associated with local variable 'n' returned [-Wreturn-stack-address]
+    3 |     return &n;
+      |             ^
+1 warning generated.
+=== narrated ===
+broken.c:3:13: warning: address of stack memory associated with local variable 'n' returned [-Wreturn-stack-address]
+  the source line is: return &n;
+1 warning generated.

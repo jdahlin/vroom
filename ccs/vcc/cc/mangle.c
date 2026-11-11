@@ -76,7 +76,7 @@ static void mg_type(cc *c, mangler *m, qty t)
 		[TY_VOID] = "v", [TY_BOOL] = "b", [TY_CHAR] = "c", [TY_SCHAR] = "a", [TY_UCHAR] = "h",
 		[TY_SHORT] = "s", [TY_USHORT] = "t", [TY_INT] = "i", [TY_UINT] = "j", [TY_LONG] = "l",
 		[TY_ULONG] = "m", [TY_LLONG] = "x", [TY_ULLONG] = "y", [TY_INT128] = "n", [TY_UINT128] = "o",
-		[TY_FLOAT16] = "DF16_", [TY_FLOAT] = "f", [TY_DOUBLE] = "d", [TY_LDOUBLE] = "e",
+		[TY_BFLOAT16] = "DF16b", [TY_FLOAT16] = "DF16_", [TY_FLOAT] = "f", [TY_DOUBLE] = "d", [TY_LDOUBLE] = "e", [TY_FLOAT128] = "g",
 	};
 	int q = QQ(t), k;
 	const ctype *x;

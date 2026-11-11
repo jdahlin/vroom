@@ -63,7 +63,9 @@ static __attribute__((noinline, cold)) void literal_range(cc *c, const ptok *t, 
 		if (!nz)
 			return;
 	}
-	if (kd == TY_FLOAT)
+	if (kd == TY_FLOAT16)
+		lim = big ? "6.5504E+4" : "5.96046E-8";
+	else if (kd == TY_FLOAT)
 		lim = big ? "3.40282347E+38" : "1.40129846E-45";
 	else if (q)
 		lim = big ? "1.18973149535723176508575932662800702E+4932" : "6.47517511943802511092443895822764655E-4966";
@@ -90,7 +92,7 @@ static uint32_t number_s(cc *c, const ptok *t, const char *s, size_t n)
 	size_t i = 0;
 	unsigned base = 10;
 	u128 v = 0;
-	bool over = false, u = false, isf = false;
+	bool over = false, over128 = false, u = false, isf = false, wb = false;
 	int l = 0;
 	char buf[256];
 
@@ -109,16 +111,27 @@ static uint32_t number_s(cc *c, const ptok *t, const char *s, size_t n)
 		qty ty = prim(TY_DOUBLE);
 		double d;
 
-		while (k > 0 && (s[k - 1] == 'f' || s[k - 1] == 'F' || s[k - 1] == 'l' || s[k - 1] == 'L'))
+		if (k >= 3 && (s[k - 3] | 32) == 'f' && s[k - 2] == '1' && s[k - 1] == '6') {
+			uint16_t h = q_to_h(q_parse(s, k - 3));
+
+			ty = prim(TY_FLOAT16);
+			if ((h & 0x7fff) == 0x7c00 || !(h & 0x7fff))
+				literal_range(c, t, s, k - 3, ty, (h & 0x7fff) == 0x7c00);
+			return mk_flt(c, h_to_d(h), ty, t->loc);
+		}
+		while (k > 0 && (s[k - 1] == 'f' || s[k - 1] == 'F' || s[k - 1] == 'l' || s[k - 1] == 'L' ||
+				 s[k - 1] == 'q' || s[k - 1] == 'Q'))
 			k--;
 		if (k < n && (s[k] == 'f' || s[k] == 'F'))
 			ty = prim(TY_FLOAT);
+		else if (k < n && (s[k] == 'q' || s[k] == 'Q'))	/* __float128 (x86-64; binary128 long double elsewhere) */
+			ty = prim(c->o->target == PP_LINUX_X86_64 ? TY_FLOAT128 : TY_LDOUBLE);
 		else if (k < n)
 			ty = prim(TY_LDOUBLE);
 		if (k >= sizeof(buf))
 			k = sizeof(buf) - 1;
 		if (is_q(c, ty)) {
-			u128 q = q_parse(s, k);
+			u128 q = q_parsep(s, k, q_prec(c, ty));
 			unsigned ex = (unsigned)(q >> 112) & 0x7fff;
 
 			if (unlikely(ex == 0x7fff || !(q << 1)))
@@ -160,12 +173,21 @@ static uint32_t number_s(cc *c, const ptok *t, const char *s, size_t n)
 		}
 		if (v > (UINT64_MAX - d) / base)
 			over = true;
+		if (v > (~(u128)0 - d) / base)
+			over128 = true;
 		v = v * base + d;
 	}
+	size_t suffix = i;
 	for (; i < n; i++) {
 		char ch = s[i];
 
-		if (ch == 'u' || ch == 'U')
+		if ((ch == 'w' && i + 1 < n && s[i + 1] == 'b') ||
+		    (ch == 'W' && i + 1 < n && s[i + 1] == 'B')) {
+			if (wb || l)
+				cc_error(c, t->loc, "invalid suffix on bit-precise integer constant");
+			wb = true;
+			i++;
+		} else if (ch == 'u' || ch == 'U')
 			u = true;
 		else if (ch == 'l' || ch == 'L')
 			l++;
@@ -173,6 +195,17 @@ static uint32_t number_s(cc *c, const ptok *t, const char *s, size_t n)
 			cc_error(c, t->loc, "invalid suffix '%.*s' on integer constant", (int)(n - i), s + i);
 			break;
 		}
+	}
+	if (wb) {
+		if (n - suffix != (u ? 3u : 2u))
+			cc_error(c, t->loc, "invalid suffix on bit-precise integer constant");
+		unsigned bits = v >> 64 ? 128 - (unsigned)__builtin_clzll((uint64_t)(v >> 64)) :
+			v ? 64 - (unsigned)__builtin_clzll((uint64_t)v) : 1;
+
+		bits += !u;
+		if (bits > 128 || over128)
+			return big_literal(c, s, suffix, base, u, t->loc);
+		return mk_int(c, (i128)v, ty_bitint(c, bits, u), t->loc);
 	}
 	if (over)
 		cc_error(c, t->loc, "integer literal is too large to be represented in any integer type");
@@ -239,7 +272,7 @@ VPRIV uint32_t number(cc *c, const ptok *t)
 }
 
 /* one (possibly multi-byte UTF-8) escape or character of a literal */
-static uint32_t lit_char(cc *c, const char **ps, const char *e, uint32_t loc, bool *wide_ok)
+static uint32_t lit_char(cc *c, const char **ps, const char *e, const ptok *t, int kind, bool *wide_ok)
 {
 	const unsigned char *s = (const unsigned char *)*ps;
 	uint32_t v;
@@ -266,14 +299,31 @@ static uint32_t lit_char(cc *c, const char **ps, const char *e, uint32_t loc, bo
 	case 'v': v = 11; s++; break;
 	case 'e': case 'E': v = 27; s++; break;
 	case '\\': case '\'': case '"': case '?': v = *s++; break;
-	case 'x':
+	case 'x': {
+		uint32_t limit = kind == T_U16CHAR || kind == T_U16STRING ? 0xffffu :
+			(kind == T_WCHAR || kind == T_WSTRING) ? (c->o->short_wchar ? 0xffffu : UINT32_MAX) :
+			(kind == T_U32CHAR || kind == T_U32STRING) ? UINT32_MAX : 0xffu;
+		bool overflow = false;
+
 		s++;
 		v = 0;
 		while ((const char *)s < e && ((*s >= '0' && *s <= '9') || ((*s | 32) >= 'a' && (*s | 32) <= 'f'))) {
-			v = v * 16 + (uint32_t)(*s <= '9' ? *s - '0' : (*s | 32) - 'a' + 10);
+			uint32_t digit = (uint32_t)(*s <= '9' ? *s - '0' : (*s | 32) - 'a' + 10);
+
+			overflow |= v > (limit - digit) / 16;
+			v = v * 16 + digit;
 			s++;
 		}
+		if (overflow) {
+			uint32_t loc = t->loc;
+
+			if (!(t->flags & (TF_DIRTY | PF_MACRO)))
+				loc += (uint32_t)(*ps - (e + 1 - t->len)) +
+				       (t->kind == T_U8CHAR && t->s[0] == '\'' ? 2 : 0);
+			cc_error(c, loc, "hex escape sequence out of range");
+		}
 		break;
+	}
 	case 'u': case 'U': {
 		int nd = *s == 'u' ? 4 : 8;
 
@@ -291,7 +341,13 @@ static uint32_t lit_char(cc *c, const char **ps, const char *e, uint32_t loc, bo
 			for (int k = 0; k < 3 && *s >= '0' && *s <= '7'; k++, s++)
 				v = v * 8 + (uint32_t)(*s - '0');
 		} else {
-			cc_error(c, loc, "unknown escape sequence '\\%c'", *s);
+			uint32_t loc = t->loc;
+
+			/* Spliced or expanded spelling has no direct byte offset in the source. */
+			if (!(t->flags & (TF_DIRTY | PF_MACRO)))
+				loc += (uint32_t)(*ps - t->s);
+			cc_warnx(c, "unknown-escape-sequence", true, NULL, loc, NULL, 0, NULL, 0,
+				 "unknown escape sequence '\\%c'", *s);
 			v = *s++;
 		}
 	}
@@ -329,27 +385,40 @@ VPRIV uint32_t string_lit(cc *c)
 {
 	uint32_t loc = tok(c)->loc;
 	int kind = T_STRING;
-	size_t n = 0;
-	char *buf = c->hp;	/* built in place at the top of the heap (nothing else allocates meanwhile) */
-	int esz;
+	size_t n = 0, count = 0, cap = 8;
+	ptok local[8], *tokens = local;
 
-	/* first pass: the literal kind (any prefixed one wins) */
-	for (int k = 0;; k++) {
-		ptok *t = peek(c, k);
-
-		if (!is_strtok(t->kind))
-			break;
-		if (t->kind != T_STRING && t->kind != T_U8STRING)
-			kind = t->kind;
-		if (k >= 2) {	/* the lookahead buffer is small: just stop counting */
-			break;
-		}
-	}
-	esz = lit_esz(kind, c->o->short_wchar);
+	/* The final prefix applies to every token, even a narrow escape before
+	 * the prefixed token. Save the complete run before decoding; pp's
+	 * temporary spellings must survive advancing beyond its token window. */
+	pp_hold_tmp(c->p, 1);
 	while (is_strtok(tok(c)->kind)) {
 		ptok *t = tok(c);
+		if (count == cap) {
+			cap *= 2;
+			ptok *more = malloc(cap * sizeof(*more));
+			if (!more)
+				fatal(c, loc, "out of memory");
+			memcpy(more, tokens, count * sizeof(*more));
+			if (tokens != local)
+				free(tokens);
+			tokens = more;
+		}
+		tokens[count++] = *t;
+		if (t->kind != T_STRING) {
+			if (kind != T_STRING && kind != t->kind)
+				cc_error(c, t->loc, "unsupported non-standard concatenation of string literals");
+			else
+				kind = t->kind;
+		}
+		next(c);
+	}
+	int esz = lit_esz(kind, c->o->short_wchar);
+	char *buf = c->hp; /* decoding does not fetch tokens or allocate AST data */
+	for (size_t i = 0; i < count; i++) {
+		const ptok *t = &tokens[i];
 		char *tmp = NULL;
-		size_t sl = t->len, used;
+		size_t sl = t->len;
 		const char *s = t->s, *e;
 
 		if (unlikely(t->flags & TF_DIRTY))
@@ -360,10 +429,6 @@ VPRIV uint32_t string_lit(cc *c)
 			fatal(c, t->loc, "translation unit too large (front-end heap full)");
 		}
 
-		if (t->kind != T_STRING && t->kind != T_U8STRING && t->kind != kind && esz != lit_esz(t->kind, c->o->short_wchar))
-			cc_error(c, t->loc, "unsupported non-standard concatenation of string literals");
-		if (t->kind != T_STRING && t->kind != T_U8STRING && kind == T_STRING)
-			kind = t->kind, esz = lit_esz(kind, c->o->short_wchar);
 		while (*s != '"')
 			s++;
 		s++;
@@ -382,9 +447,9 @@ VPRIV uint32_t string_lit(cc *c)
 				if (s == e)
 					break;
 			}
-			v = lit_char(c, &s, e, t->loc, &ok);
+			v = lit_char(c, &s, e, t, kind, &ok);
 			if (esz == 1) {
-				if (v & 0x80000000u)
+				if (!ok && (v & 0x80000000u))
 					n += utf8_enc(v & 0x7fffffffu, buf + n);
 				else
 					buf[n++] = (char)v;
@@ -400,7 +465,8 @@ VPRIV uint32_t string_lit(cc *c)
 						cp = cp << 6 | ((unsigned char)*s & 63);
 					v = cp;
 				}
-				v &= 0x7fffffffu;
+				if (!ok)
+					v &= 0x7fffffffu;
 				if (esz == 2 && v >= 0x10000) {
 					uint16_t hi = (uint16_t)(0xD800 + ((v - 0x10000) >> 10)), lo = (uint16_t)(0xDC00 + ((v - 0x10000) & 0x3ff));
 
@@ -416,18 +482,10 @@ VPRIV uint32_t string_lit(cc *c)
 			}
 		}
 		free(tmp);
-		/* own the bytes while the next token is fetched */
-		used = (n + 15) & ~(size_t)15;
-		c->hp = buf + used;
-		next(c);
-		if (unlikely(c->hp != buf + used)) {
-			char *nb = halloc(c, used);
-
-			memcpy(nb, buf, n);
-			buf = nb;
-		}
-		c->hp = buf;
 	}
+	pp_hold_tmp(c->p, 0);
+	if (tokens != local)
+		free(tokens);
 	memset(buf + n, 0, (size_t)esz);
 	n += (size_t)esz;
 	{
@@ -436,7 +494,7 @@ VPRIV uint32_t string_lit(cc *c)
 		qty et;
 
 		c->strs[si] = (cstr){ keep, (uint32_t)(n / (size_t)esz), (uint8_t)esz, (uint8_t)kind };
-		et = esz == 1 ? prim(TY_CHAR) : kind == T_WSTRING ? c->t_wchar : kind == T_U16STRING ? c->t_char16 : c->t_char32;
+		et = esz == 1 ? prim(kind == T_U8STRING && kwmap == kwmap_c23 ? TY_UCHAR : TY_CHAR) : kind == T_WSTRING ? c->t_wchar : kind == T_U16STRING ? c->t_char16 : c->t_char32;
 		{
 			uint32_t r = mk(c, N_STR, ty_array(c, et, n / (size_t)esz, 0), loc);
 
@@ -464,10 +522,10 @@ VPRIV uint32_t char_lit(cc *c)
 	s++;
 	while (s < e) {
 		bool ok;
-		uint32_t x = lit_char(c, &s, e, t->loc, &ok);
+		uint32_t x = lit_char(c, &s, e, t, kind, &ok);
 
 		if (kind == T_CHAR) {
-			if (x & 0x80000000u) {
+			if (!ok && (x & 0x80000000u)) {
 				char u[4];
 				size_t k = utf8_enc(x & 0x7fffffffu, u);
 
@@ -488,7 +546,7 @@ VPRIV uint32_t char_lit(cc *c)
 					cp = cp << 6 | ((unsigned char)*s & 63);
 				x = cp;
 			}
-			v = x & 0x7fffffffu;
+			v = ok ? x : x & 0x7fffffffu;
 			nch++;
 		}
 	}

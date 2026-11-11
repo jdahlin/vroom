@@ -52,6 +52,7 @@ enum { STT_NOTYPE = 0, STT_OBJECT = 1, STT_FUNC = 2, STT_SECTION = 3,
 enum { STV_DEFAULT = 0, STV_INTERNAL = 1, STV_HIDDEN = 2, STV_PROTECTED = 3 };
 
 #include "../arch/a64/reloc.h"
+#include "../arch/x64/reloc.h"
 
 typedef struct ElfChunk {
 	struct ElfChunk *next;
@@ -86,6 +87,8 @@ typedef struct {
 	uint8_t comdat;		/* GRP_COMDAT */
 	uint8_t map;		/* mapping state: 0 none, 1 code, 2 data */
 	uint64_t size;		/* after layout */
+	uint32_t linksec;	/* SHF_LINK_ORDER: the section it follows (sh_link), 0 none */
+	uint32_t linksym;	/* ... and the symbol named (one section per symbol, as MC) */
 } ElfSec;
 
 typedef struct {
@@ -132,16 +135,20 @@ typedef struct ElfObj {
 	int has_addrsig;	/* .addrsig: write .llvm_addrsig */
 	char err[256];
 	int has_err;
+	uint16_t machine;	/* EM_AARCH64 (183, the default) or EM_X86_64 (62): elf_set_machine */
 } ElfObj;
 
 ElfObj *elf_new(void);
 void elf_reset(ElfObj *o);
+enum { EM_X86_64 = 62, EM_AARCH64 = 183 };
+static inline void elf_set_machine(ElfObj *o, int m) { o->machine = (uint16_t)m; }	/* kept across elf_reset */
 /* a job's escape for input-driven overflow (an arena or region full): set by
  * the driver around a TU, the assembler and object writer longjmp there with
  * a message instead of abort() taking down vccd; NULL: abort as before */
 #include <setjmp.h>
 extern _Thread_local jmp_buf *vjob_jb;
 __attribute__((noreturn)) void vjob_fail(const char *msg);
+extern _Thread_local int vjob_fail_fd;	/* where vjob_fail reports: the job's diagnostics (2) */
 void elf_free(ElfObj *o);
 void elf_error(ElfObj *o, const char *fmt, ...);
 
@@ -149,6 +156,9 @@ void elf_error(ElfObj *o, const char *fmt, ...);
  * or creates it; returns its id (== its subsection-0 frag). */
 uint32_t elf_section(ElfObj *o, const char *name, uint32_t len, uint32_t type,
 		     uint64_t flags, uint32_t entsize, uint32_t group_sym);
+/* a SHF_LINK_ORDER section linked to section linksec: one per (name, group, linksec), as MC */
+uint32_t elf_section_lo(ElfObj *o, const char *name, uint32_t len, uint32_t type, uint64_t flags, uint32_t entsize,
+			uint32_t group, uint32_t linksec, uint32_t linksym);
 uint32_t elf_find_section(ElfObj *o, const char *name, uint32_t len, uint32_t group_sym);
 uint32_t elf_subsection(ElfObj *o, uint32_t sec, int32_t sub);	/* frag id */
 /* a new frag right after `frag` in its section and subsection: what follows
@@ -173,6 +183,7 @@ static inline uint8_t *elf_grow(ElfObj *o, uint32_t frag, size_t n)
 	return elf_grow_slow(o, frag, n);
 }
 void elf_code_slow(ElfObj *o, uint32_t frag);
+void elf_x86_nops(uint8_t *p, uint64_t n);	/* MC's x86-64 nop padding */
 void elf_data_slow(ElfObj *o, uint32_t frag);
 static inline void elf_code(ElfObj *o, uint32_t frag)
 { if (elf_sec(o, elf_frag(o, frag)->sec)->map != 1) elf_code_slow(o, frag); }
@@ -203,6 +214,8 @@ static inline void elf_vis(ElfObj *o, uint32_t s, int vis) { ElfSym *y = elf_sym
 void elf_size_expr(ElfObj *o, uint32_t sym, ElfVal v);	/* .size sym, expr */
 /* sym = x op y (op: as.c's operator codes), x and y absolute once the layout is known */
 void elf_expr_sym(ElfObj *o, uint32_t sym, int op, ElfVal x, ElfVal y);
+int elf_expr_get(ElfObj *o, uint32_t sym, int *op, ElfVal *x, ElfVal *y);
+int elf_expr_op(int op, int64_t p, int64_t q, int64_t *r);
 /* Registration fixes symbol-table order (MC registers a symbol when it is
  * defined, given an attribute, or used in an emitted value/instruction).
  * elf_define(), elf_fixup() and the mapping symbols register on their own. */

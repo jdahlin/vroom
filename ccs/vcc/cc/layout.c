@@ -7,7 +7,8 @@
 static uint64_t align_to(uint64_t v, uint64_t a) { return a ? (v + a - 1) / a * a : v; }
 
 typedef struct layout {
-	bool is_union, packed;
+	bool is_union, packed, ms_struct;
+	uint64_t last_unit;	/* Microsoft bit-field storage-unit size, or zero */
 	uint64_t max_field_align;	/* bits; #pragma pack */
 	uint64_t data_size, size;	/* bits */
 	uint64_t unfilled;		/* bits unfilled in the last bit-field unit */
@@ -34,6 +35,15 @@ static void lay_bitfield(cc *c, layout *l, field *f, uint32_t fattr_align, bool 
 	uint64_t ufoff;
 	uint64_t mfa = l->max_field_align;
 
+	if (l->ms_struct) {
+		falign = unit;
+		if (l->last_unit != unit || l->unfilled < fsize) {
+			if (!l->last_unit && !fsize)
+				falign = 1; /* zero-width after a non-bitfield has no effect */
+			l->unfilled = 0;
+			l->last_unit = 0;
+		}
+	}
 	off = l->is_union ? 0 : l->data_size - l->unfilled;
 	/* AArch64: useBitFieldTypeAlignment and useZeroLengthBitfieldAlignment */
 	ufalign = falign;
@@ -50,8 +60,15 @@ static void lay_bitfield(cc *c, layout *l, field *f, uint32_t fattr_align, bool 
 		else
 			falign = falign < mfa ? falign : mfa;
 	}
+	if (l->ms_struct && l->is_union)
+		falign = ufalign = 1;
 	ufoff = off;
-	{
+	if (l->ms_struct) {
+		if (!fsize || fsize > l->unfilled) {
+			off = align_to(off, falign);
+			l->unfilled = 0;
+		}
+	} else {
 		bool allow_pad = mfa == 0;
 
 		bool exp = explicit_align && (mfa == 0 || explicit_align <= mfa);	/* useExplicitBitFieldAlignment */
@@ -66,20 +83,28 @@ static void lay_bitfield(cc *c, layout *l, field *f, uint32_t fattr_align, bool 
 			ufoff = align_to(ufoff, explicit_align);
 	}
 	f->off = off;
+	f->align = (uint32_t)((falign + 7) / 8);
 	if (l->is_union) {
-		uint64_t rs = align_to(fsize, 8);
+		uint64_t rs = l->ms_struct ? (fsize ? unit : 8) : align_to(fsize, 8);
 
 		if (rs > l->data_size)
 			l->data_size = rs;
+	} else if (l->ms_struct && fsize) {
+		if (!l->unfilled)
+			l->data_size = off + unit, l->unfilled = unit;
+		l->unfilled -= fsize;
+		l->last_unit = unit;
 	} else {
 		uint64_t ns = off + fsize;
+
+		l->last_unit = 0;
 
 		l->data_size = align_to(ns, 8);
 		l->unfilled = l->data_size - ns;
 	}
 	if (l->data_size > l->size)
 		l->size = l->data_size;
-	if (c->o->target != PP_LINUX_AARCH64 && !f->name)
+	if (!l->ms_struct && c->o->target != PP_LINUX_AARCH64 && !f->name)
 		falign = ufalign = 8;	/* Apple, wasm (no useZeroLengthBitfieldAlignment): unnamed bit-fields leave the record's alignment */
 	lay_update(l, falign, ufalign);
 }
@@ -95,6 +120,7 @@ static void lay_field(cc *c, layout *l, field *f, uint32_t fattr_align, bool fpa
 	}
 	off = l->is_union ? 0 : l->data_size;
 	l->unfilled = 0;
+	l->last_unit = 0;
 	falign = (uint64_t)ty_align(c, f->ty) * 8;
 	fsize = is_array(c, f->ty) && (T(c, f->ty)->flags & TF_INCOMPLETE) ? 0 : ty_size(c, f->ty) * 8;
 	packed = l->packed || fpacked;
@@ -112,6 +138,7 @@ static void lay_field(cc *c, layout *l, field *f, uint32_t fattr_align, bool fpa
 	falign = packed ? palign : ualign;
 	off = align_to(off, falign);
 	f->off = off;
+	f->align = (uint32_t)((falign + 7) / 8);
 	if (l->is_union) {
 		if (fsize > l->data_size)
 			l->data_size = fsize;
@@ -129,7 +156,7 @@ static void lay_field(cc *c, layout *l, field *f, uint32_t fattr_align, bool fpa
 VPRIV void lay_record(cc *c, tag *r, const uint32_t *fa, const uint8_t *fp)
 {
 	layout l = { .is_union = (r->flags & RF_UNION) != 0, .packed = (r->flags & RF_PACKED) != 0,
-		     .align = 8, .unpacked_align = 8 };
+		     .ms_struct = (r->flags & RF_MS_STRUCT) != 0, .align = 8, .unpacked_align = 8 };
 
 	if (c->npack && c->pack[c->npack - 1])
 		l.max_field_align = (uint64_t)c->pack[c->npack - 1] * 8;
@@ -204,13 +231,35 @@ static void type_str(cc *c, qty t, const char *inner, vfixbuf *out, bool *ok)
 	vfixbuf b;
 
 	b.n = 0, b.s[0] = 0;
+	if (x->kind == TY_ARRAY && c->valist_tag && T(c, c->t_valist)->canon == x->canon) {
+		/* x86-64's __va_list_tag[1] is spelled by its typedef, the struct as itself */
+		quals(&b, QQ(t));
+		vfixbuf_puts(&b, "__builtin_va_list");
+		if (inner[0]) {
+			vfixbuf_puts(&b, " ");
+			vfixbuf_puts(&b, inner);
+		}
+		vfixbuf_put(out, b.s, b.n);
+		return;
+	}
 	switch (x->kind) {
+	case TY_SVE:
+		quals(&b, QQ(t));
+		vfixbuf_put(&b, idstr_(x->aux), idlen_(x->aux));
+		if (inner[0]) {
+			vfixbuf_puts(&b, " ");
+			vfixbuf_puts(&b, inner);
+		}
+		vfixbuf_put(out, b.s, b.n);
+		return;
 	case TY_PTR: {
 		vfixbuf in;
 		const ctype *bt = T(c, x->base);
+		/* __builtin_va_list * (x86-64: an array spelled by its typedef) */
+		bool wrap = (bt->kind == TY_ARRAY && !(c->valist_tag && T(c, c->t_valist)->canon == bt->canon)) || bt->kind == TY_FUNC;
 
 		in.n = 0, in.s[0] = 0;
-		if (bt->kind == TY_ARRAY || bt->kind == TY_FUNC)
+		if (wrap)
 			vfixbuf_puts(&in, x->flags & TF_BLOCK ? "(^" : "(*");
 		else
 			vfixbuf_puts(&in, x->flags & TF_BLOCK ? "^" : "*");
@@ -220,7 +269,7 @@ static void type_str(cc *c, qty t, const char *inner, vfixbuf *out, bool *ok)
 				in.s[--in.n] = 0;
 		}
 		vfixbuf_puts(&in, inner);
-		if (bt->kind == TY_ARRAY || bt->kind == TY_FUNC)
+		if (wrap)
 			vfixbuf_puts(&in, ")");
 		type_str(c, x->base, in.s, out, ok);
 		return;
@@ -315,16 +364,18 @@ static void type_str(cc *c, qty t, const char *inner, vfixbuf *out, bool *ok)
 	quals(&b, QQ(t));
 	switch (x->kind) {
 	case TY_VOID: vfixbuf_puts(&b, "void"); break;
+	case TY_BFLOAT16: vfixbuf_puts(&b, "__bf16"); break;
 	case TY_FLOAT16: vfixbuf_puts(&b, "_Float16"); break;
 	case TY_FLOAT: vfixbuf_puts(&b, "float"); break;
 	case TY_DOUBLE: vfixbuf_puts(&b, "double"); break;
 	case TY_LDOUBLE: vfixbuf_puts(&b, "long double"); break;
+	case TY_FLOAT128: vfixbuf_puts(&b, "__float128"); break;
 	case TY_STRUCT: case TY_UNION: case TY_ENUM: {
 		const tag *r = &c->tags[x->aux];
 		char nb[256];
 
 		if (x->aux == c->valist_tag && c->valist_tag) {
-			vfixbuf_puts(&b, "__builtin_va_list");
+			vfixbuf_puts(&b, KIND(c, c->t_valist) == TY_ARRAY ? "struct __va_list_tag" : "__builtin_va_list");
 		} else if (r->name) {
 			uint32_t s = lookup_tag(c, r->name);
 
@@ -347,6 +398,14 @@ static void type_str(cc *c, qty t, const char *inner, vfixbuf *out, bool *ok)
 	}
 	default: {
 		const char *n = int_name(x->kind);
+
+		if (is_int_kind(x->kind) && x->n && !(x->flags & TF_ATOMIC)) {
+			char bn[64];
+
+			snprintf(bn, sizeof(bn), "%s_BitInt(%u)", is_signed(c, t) ? "" : "unsigned ", x->n);
+			vfixbuf_puts(&b, bn);
+			break;
+		}
 
 		if (!n)
 			*ok = false;

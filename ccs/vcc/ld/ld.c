@@ -10,7 +10,9 @@
  *     LD_PREL_LO19 (the 12 types present, plus the obvious neighbours);
  *   - outputs: the final vmlinux (-shared -Bsymbolic -z notext
  *     --no-apply-dynamic-relocs with the kernel's linker script, so absolute
- *     relocations become R_AARCH64_RELATIVE in .rela.dyn) and ld -r.
+ *     relocations become R_AARCH64_RELATIVE in .rela.dyn), the vDSO (-shared
+ *     with PHDRS, VERSION and lld's .dynsym/.dynstr/.hash/.gnu.hash/
+ *     .gnu.version{,_d}/.dynamic, no dynamic relocations) and ld -r.
  *
  * The output is meant to be byte-identical to ld.lld 23 for the same
  * command line, so lld's observable decisions are reproduced: linker-script
@@ -29,6 +31,7 @@
  * No per-symbol malloc: everything comes from bump arenas.
  */
 #include "ld.h"
+#include "../arch/x64/reloc.h"
 #include "../lib/buf.h"
 #include "../lib/defer.h"
 #include "../lib/ckd.h"
@@ -58,6 +61,9 @@
 #include <unistd.h>
 
 #define NONE 0xffffffffu
+
+static bool x86_ld;		/* the inputs are x86-64 (arch/x64/ld/x64.inc) */
+static uint64_t tls_start;	/* x86: the PT_TLS start (dtpoff) */
 
 #include "ldelf.h"
 
@@ -365,7 +371,8 @@ typedef struct Obj {
 static VVEC(Obj *) objs;
 
 enum { K_NONE, K_NORMAL, K_MERGE_IN, K_MERGE, K_THUNK, K_RELADYN, K_BUILDID,
-       K_SYMTAB, K_STRTAB, K_SHSTRTAB, K_COMMENT, K_GOT, K_EHHDR };
+       K_SYMTAB, K_STRTAB, K_SHSTRTAB, K_COMMENT, K_GOT, K_EHHDR,
+       K_DYNSYM, K_DYNSTR, K_HASH, K_GNUHASH, K_VERSYM, K_VERDEF, K_DYNAMIC };
 
 typedef struct ISec {
 	const uint8_t *data;
@@ -445,6 +452,8 @@ typedef struct G {
 	bool fabs, fundef;		/* gsym_isabs(); undefined or demoted */
 	_Atomic uint8_t needgot;	/* some GOT relocation names it */
 	uint32_t gotidx;		/* its .got slot */
+	uint16_t ver;			/* VERSION index: 0 local, 1 global, 2.. named */
+	uint32_t dynidx;		/* index in .dynsym, 0 if not exported */
 } G;
 
 static _Atomic(const char *) *hnames;	/* per slot */
@@ -613,10 +622,32 @@ typedef struct OSec {
 	uint32_t shidx, nameoff;
 	int ptload;			/* index into phdrs, -1 */
 	uint32_t link, info;
+	Expr *fill;			/* =fill */
+	const char *phn[4];		/* :phdr names */
+	uint8_t nphn;
 } OSec;
 static VVEC(OSec) osecs;
 static VVEC(Cmd) topcmds;
 static const char *entry_name;
+
+/* PHDRS */
+typedef struct {
+	const char *name;
+	uint32_t type;
+	Expr *flags;			/* FLAGS(expr) or NULL */
+	bool filehdr, phdrs;
+} SPhdr;
+static VVEC(SPhdr) sphdrs;
+static bool have_phdrs;
+
+/* VERSION: named nodes get version indices 2.. in order (1 is the file) */
+typedef struct {
+	const char *name;		/* "" for an anonymous node */
+	VVEC(const char *) globs;
+} VerNode;
+static VVEC(VerNode) vernodes;
+static VVEC(const char *) ver_locals;
+static uint32_t nverdefs;		/* named nodes */
 
 /* names referenced by expressions, in parse order (lld referencedSymbols) */
 static VVEC(uint32_t) refsyms;
@@ -1426,15 +1457,24 @@ static void poutsec(const char *name)
 	/* trailers: >region, AT>region, :phdr, =fill */
 	for (;;) {
 		sskip();
-		if (sp < sp_end && (*sp == '>' || *sp == '=')) {
-			error("linker script: memory regions/fill not supported in %s", name);
+		if (sp < sp_end && *sp == '>') {
+			error("linker script: memory regions not supported in %s", name);
 			sp = sp_end;
 			break;
 		}
+		if (sp < sp_end && *sp == '=') {
+			sp++;
+			osecs.v[osi].fill = pprimary();	/* lld readFill: a primary */
+			continue;
+		}
 		if (speek(':') && sp + 1 < sp_end && sp[1] != ':') {
-			error("linker script: PHDRS not supported in %s", name);
-			sp = sp_end;
-			break;
+			sp++;
+			OSec *o = &osecs.v[osi];
+			if (o->nphn == 4)
+				serr("too many :phdr names");
+			else
+				o->phn[o->nphn++] = sname();
+			continue;
 		}
 		break;
 	}
@@ -1488,6 +1528,86 @@ static void psections(void)
 	sexpect('}');
 }
 
+static void pphdrs(void)
+{
+	static const struct { const char *n; uint32_t t; } pt[] = {
+		{"PT_NULL", 0}, {"PT_LOAD", 1}, {"PT_DYNAMIC", 2}, {"PT_INTERP", 3}, {"PT_NOTE", 4},
+		{"PT_SHLIB", 5}, {"PT_PHDR", 6}, {"PT_TLS", 7}, {"PT_GNU_EH_FRAME", 0x6474e550},
+		{"PT_GNU_STACK", 0x6474e551}, {"PT_GNU_RELRO", 0x6474e552}, {"PT_GNU_PROPERTY", 0x6474e553},
+	};
+	have_phdrs = true;
+	sexpect('{');
+	while (!satend() && !speek('}')) {
+		if (sconsume(';'))
+			continue;
+		SPhdr h = {.name = sname()};
+		char *t = sname();
+		bool ok = false;
+		for (size_t i = 0; i < sizeof pt / sizeof pt[0] && !ok; i++)
+			if (!strcmp(t, pt[i].n))
+				h.type = pt[i].t, ok = true;
+		if (!ok && *t >= '0' && *t <= '9')
+			h.type = (uint32_t)strtoul(t, NULL, 0), ok = true;
+		if (!ok) {
+			serr("unknown program header type");
+			sp = sp_end;
+			return;
+		}
+		for (;;) {
+			if (sword("FILEHDR")) { h.filehdr = true; continue; }
+			if (sword("PHDRS")) { h.phdrs = true; continue; }
+			if (sword("FLAGS")) { h.flags = pparen(); continue; }
+			if (sword("AT")) { serr("PHDRS AT() not supported"); sp = sp_end; return; }
+			break;
+		}
+		VVEC_PUSH(sphdrs, h, alloc);
+		sexpect(';');
+	}
+	sexpect('}');
+}
+
+static void pversion(void)
+{
+	sexpect('{');
+	while (!satend() && !speek('}')) {
+		VerNode v = {.name = ""};
+		if (!speek('{'))
+			v.name = sname();
+		sexpect('{');
+		bool local = false;
+		while (!satend() && !speek('}')) {
+			if (sconsume(';'))
+				continue;
+			if (sword("global")) { sexpect(':'); local = false; continue; }
+			if (sword("local")) { sexpect(':'); local = true; continue; }
+			if (sword("extern")) { serr("VERSION extern not supported"); sp = sp_end; return; }
+			char *n = sname();
+			if (!*n) {
+				serr("unexpected token in VERSION");
+				sp = sp_end;
+				return;
+			}
+			if (local)
+				VVEC_PUSH(ver_locals, n, alloc);
+			else
+				VVEC_PUSH(v.globs, n, alloc);
+			sexpect(';');
+		}
+		sexpect('}');
+		while (!satend() && !speek(';'))	/* dependencies */
+			if (!*sname()) {
+				serr("unexpected token in VERSION");
+				sp = sp_end;
+				return;
+			}
+		sexpect(';');
+		if (*v.name)
+			nverdefs++;
+		VVEC_PUSH(vernodes, v, alloc);
+	}
+	sexpect('}');
+}
+
 static void parse_script(const char *text, size_t len)
 {
 	sp = sp_file = text;
@@ -1496,6 +1616,8 @@ static void parse_script(const char *text, size_t len)
 		if (sconsume(';'))
 			continue;
 		if (sword("SECTIONS")) { psections(); continue; }
+		if (sword("PHDRS")) { pphdrs(); continue; }
+		if (sword("VERSION")) { pversion(); continue; }
 		if (sword("OUTPUT_ARCH") || sword("OUTPUT_FORMAT") || sword("TARGET") || sword("SEARCH_DIR")) {
 			sexpect('(');
 			while (!satend() && !speek(')'))
@@ -1846,11 +1968,13 @@ static void parse_obj(void *arg, size_t i)
 		o->buf = NULL;
 		return;
 	}
-	if (eh->e_type != 1 || eh->e_machine != 183) {
-		error("%s: not an AArch64 relocatable object", o->path);
+	if (eh->e_type != 1 || (eh->e_machine != 183 && eh->e_machine != 62)) {
+		error("%s: not an AArch64 or x86-64 relocatable object", o->path);
 		o->buf = NULL;
 		return;
 	}
+	if (eh->e_machine == 62)
+		x86_ld = true;	/* (one machine for all inputs: checked once loaded) */
 	if (!obj_valid(o, eh)) {
 		o->buf = NULL;
 		return;
@@ -1872,6 +1996,7 @@ static bool is_content(const Shdr *s)
 	switch (s->sh_type) {
 	case SHT_PROGBITS: case SHT_NOBITS: case SHT_NOTE: case SHT_INIT_ARRAY:
 	case SHT_FINI_ARRAY: case SHT_PREINIT_ARRAY:
+	case 0x70000001: /* SHT_X86_64_UNWIND: x86-64's .eh_frame */
 		return true;
 	default:
 		return false;
@@ -1923,6 +2048,56 @@ static void fill_isecs(void *arg, size_t i)
 				error("%s:(%s): writable SHF_MERGE section is not supported", o->path, is->name);
 			is->kind = K_MERGE_IN;
 		}
+	}
+}
+
+/* .note.gnu.property: lld keeps one synthetic note holding the AND of every
+ * input's FEATURE_1_AND (an input without the note counts as 0).  Only the
+ * common case is done: when the AND is 0 every input note is dropped, as lld
+ * emits none; otherwise the inputs stay as they are (TODO: the merged note) */
+static void drop_gnu_property(void)
+{
+	const uint32_t want = x86_ld ? 0xc0000002u : 0xc0000000u;	/* X86 / AARCH64 FEATURE_1_AND */
+	uint32_t and = ~0u;
+
+	if (opt.relocatable)
+		return;
+	for (uint32_t i = 0; i < objs.n && and; i++) {
+		Obj *o = objs.v[i];
+		uint32_t f = 0;
+
+		for (uint32_t s = 0; o->buf && s < o->nsh; s++) {
+			const Shdr *h = &o->sh[s];
+
+			if (h->sh_type != SHT_NOTE || strcmp(isecs.v[o->isec0 + s].name, ".note.gnu.property"))
+				continue;
+			const uint8_t *p = o->buf + h->sh_offset, *e = p + h->sh_size;
+			while (e - p >= 16) {
+				uint32_t nn, dn, ty;
+				memcpy(&nn, p, 4); memcpy(&dn, p + 4, 4); memcpy(&ty, p + 8, 4);
+				const uint8_t *d = p + 12 + ((nn + 3) & ~3u), *de = d + dn;
+				if (de > e || d > e)
+					break;
+				for (const uint8_t *q = d; ty == 5 && de - q >= 8;) {
+					uint32_t pt, pz;
+					memcpy(&pt, q, 4); memcpy(&pz, q + 4, 4);
+					if (pt == want && pz >= 4 && de - q >= 12)
+						memcpy(&f, q + 8, 4);
+					q += 8 + ((pz + 7) & ~7u);
+				}
+				p = d + ((dn + 7) & ~7u);
+			}
+		}
+		and &= f;
+	}
+	if (and)
+		return;
+	for (uint32_t i = 0; i < objs.n; i++) {
+		Obj *o = objs.v[i];
+
+		for (uint32_t s = 0; o->buf && s < o->nsh; s++)
+			if (o->sh[s].sh_type == SHT_NOTE && !strcmp(isecs.v[o->isec0 + s].name, ".note.gnu.property"))
+				isecs.v[o->isec0 + s].kind = K_NONE;
 	}
 }
 
@@ -2238,7 +2413,7 @@ static inline void reloc_target_final(const Obj *o, uint32_t symidx, int64_t add
 static uint8_t *out;			/* output file image */
 static uint64_t filesize, shoff;
 static VVEC(Phdr) phdrs;
-typedef struct { int first, last; bool lma_set; } PhdrSecs;
+typedef struct { int first, last; bool lma_set, hdr; } PhdrSecs;	/* hdr: FILEHDR/PHDRS */
 static VVEC(PhdrSecs) phsecs;		/* first/last osec of each phdr */
 static VVEC(uint32_t) outsecs;		/* live output sections in header order */
 static uint64_t ndyn;			/* RELATIVE relocations */
@@ -2249,6 +2424,10 @@ static VVEC(uint32_t) gotsyms;		/* .got slot -> G id (the globals, first) */
 typedef struct { uint32_t obj, sym; } GotLoc;
 static VVEC(GotLoc) gotlocs;		/* then the locals: slot gotsyms.n + i */
 static uint32_t symtab_isec = NONE, strtab_isec = NONE, shstrtab_isec = NONE;
+/* -shared: dynamic sections (lld's, for the vDSO; vmlinux discards them) */
+static uint32_t dynsym_isec = NONE, dynstr_isec = NONE, hash_isec = NONE, gnuhash_isec = NONE;
+static uint32_t versym_isec = NONE, verdef_isec = NONE, dynamic_isec = NONE;
+static bool dyn_live;			/* .dynamic survived the script */
 static uint32_t nobj_real;		/* objects excluding synthetic */
 
 static uint32_t new_isec(const char *name, uint8_t kind, uint32_t type, uint64_t flags, uint32_t align)
@@ -2507,14 +2686,34 @@ static void eh_frames(void)
 
 static uint64_t header_size(void)
 {
-	return sizeof(Ehdr) + (uint64_t)phdrs.n * sizeof(Phdr);
+	return sizeof(Ehdr) + (uint64_t)(have_phdrs ? sphdrs.n : phdrs.n) * sizeof(Phdr);
 }
 
 /* ---------------- section assignment ---------------- */
 
+/* input section name -> its ISD (or NONE), open addressing; grown at half
+   full: an -ffunction-sections link has about as many names as sections */
 typedef struct { const char *name; uint32_t h; uint32_t isd; } NameEnt;
 static NameEnt *ncache;
-static uint32_t ncmask;
+static uint32_t ncmask, ncount;
+
+static void ncache_grow(void)
+{
+	uint32_t ncap = (ncmask + 1) * 2;
+	NameEnt *nc = alloc(ncap * sizeof *nc);
+
+	memset(nc, 0, ncap * sizeof *nc);
+	for (uint32_t i = 0; i <= ncmask; i++)
+		if (ncache[i].name) {
+			uint32_t j = ncache[i].h & (ncap - 1);
+
+			while (nc[j].name)
+				j = (j + 1) & (ncap - 1);
+			nc[j] = ncache[i];
+		}
+	ncache = nc;
+	ncmask = ncap - 1;
+}
 
 static uint32_t match_isd(const char *name)
 {
@@ -2545,6 +2744,8 @@ static uint32_t match_isd(const char *name)
 		}
 	}
 	ncache[j] = (NameEnt){.name = name, .h = h, .isd = res};
+	if (++ncount * 2 > ncmask + 1)
+		ncache_grow();
 	return res;
 }
 
@@ -2568,8 +2769,8 @@ static VVEC(uint32_t) orphans;
 static void commit_section(OSec *os, ISec *is)
 {
 	if (os->type != is->type) {
-		if (!os->has_input)
-			os->type = is->type;
+		if (!os->has_input)	/* (lld's .eh_frame is PROGBITS, x86-64's input too) */
+			os->type = is->type == 0x70000001 && !opt.relocatable ? SHT_PROGBITS : is->type;
 		else if (os->type != SHT_NOBITS || is->type != SHT_NOBITS)
 			os->type = SHT_PROGBITS;
 	}
@@ -2645,7 +2846,9 @@ static void ncache_init(void)
 	while (ncap < isecs.n / 4)
 		ncap *= 2;
 	ncache = alloc(ncap * sizeof *ncache);
+	memset(ncache, 0, ncap * sizeof *ncache);
 	ncmask = ncap - 1;
+	ncount = 0;
 }
 
 /* __start_NAME / __stop_NAME with NAME a C identifier: the NAME, else NULL */
@@ -3185,6 +3388,7 @@ static int phnew(uint32_t type, uint32_t flags)
 /* arm64 TLS variant 1: tp = the PT_TLS start - alignup(16, p_align); tprel = va - tls_tp */
 static uint64_t tls_tp;
 static bool has_tls;
+static uint64_t hdr_va;		/* PHDRS FILEHDR: address of the ELF header */
 
 static void assign_file_offsets(void)
 {
@@ -3193,7 +3397,9 @@ static void assign_file_offsets(void)
 		OSec *os = &osecs.v[outsecs.v[i]];
 		if (!(os->flags & SHF_ALLOC))
 			continue;
-		if (os->ptload >= 0 && phsecs.v[os->ptload].first == (int)outsecs.v[i])
+		if (os->ptload >= 0 && phsecs.v[os->ptload].hdr && os->type != SHT_NOBITS)
+			off = os->va - hdr_va;	/* the ELF header is the segment's first "section" */
+		else if (os->ptload >= 0 && phsecs.v[os->ptload].first == (int)outsecs.v[i])
 			off = alignskew(off, phdrs.v[os->ptload].p_align, os->va);
 		else if (os->type == SHT_NOBITS)
 			;
@@ -3222,13 +3428,17 @@ static void assign_file_offsets(void)
 		if (s->first < 0)
 			continue;
 		OSec *f = &osecs.v[s->first], *l = &osecs.v[s->last];
-		p->p_filesz = l->offset - f->offset + (l->type != SHT_NOBITS ? l->size : 0);
-		p->p_memsz = l->va + l->size - f->va;
-		p->p_offset = f->offset;
-		p->p_vaddr = p->p_paddr = f->va;
+		uint64_t foff = s->hdr ? 0 : f->offset, fva = s->hdr ? hdr_va : f->va;
+		p->p_filesz = l->offset - foff + (l->type != SHT_NOBITS ? l->size : 0);
+		p->p_memsz = l->va + l->size - fva;
+		p->p_offset = foff;
+		p->p_vaddr = p->p_paddr = fva;
 		if (p->p_type == PT_TLS) {
 			uint64_t a = p->p_align ? p->p_align : 1;
 			tls_tp = p->p_vaddr - alignup(16, a);
+			if (x86_ld)	/* variant 2: the thread pointer at the block's end */
+				tls_tp = p->p_vaddr + alignup(p->p_memsz, a);
+			tls_start = p->p_vaddr;
 			has_tls = true;
 		}
 	}
@@ -3316,6 +3526,8 @@ static void put_sym(Sym *d, uint8_t *strbuf, uint64_t *stroff, const char *name,
 /* ---------------- writing sections ---------------- */
 
 #include "../arch/a64/ld/relocate.inc"
+static _Atomic bool got_seen;
+#include "../arch/x64/ld/x64.inc"
 
 static VVEC(uint32_t) wjobs;		/* ISecs to write */
 
@@ -3334,8 +3546,12 @@ static void write_isec(void *arg, size_t j)
 		memcpy(dst, is->data, is->size);
 		if (is->ehcie)	/* an FDE's CIE pointer: from the field to its CIE */
 			wr32(dst + 4, (uint32_t)(isec_va(si, 4) - isec_va(is->ehcie - 1, 0)));
-		if (is->nrela && (is->flags & SHF_ALLOC || !opt.relocatable))
-			relocate_isec(si, dst);
+		if (is->nrela && (is->flags & SHF_ALLOC || !opt.relocatable)) {
+			if (x86_ld)
+				x64_relocate_isec(si, dst);
+			else
+				relocate_isec(si, dst);
+		}
 		break;
 	case K_MERGE: {
 		Merge *mg = &merges.v[is->aux];
@@ -3496,7 +3712,7 @@ static Obj *make_stub_obj(const char **names, uint32_t n)
 	char *shstr = str + strsz;
 	memcpy(eh->e_ident, "\177ELF\2\1\1", 7);
 	eh->e_type = 1;
-	eh->e_machine = 183;
+	eh->e_machine = x86_ld ? 62 : 183;
 	eh->e_shoff = sizeof(Ehdr);
 	eh->e_shnum = 5;
 	eh->e_shstrndx = 1;
@@ -3564,7 +3780,7 @@ static const char *find_lib(const char *name)
 static bool parse_args(int argc, char **argv)
 {
 	bool whole = false;
-	opt.max_page = 65536;
+	opt.max_page = 0;	/* (default by machine once the inputs are read: arm64 64 KB, x86-64 4 KB, as lld) */
 	opt.relax = true;
 	opt.comment = "Linker: vld (vroom)";
 	for (int i = 1; i < argc; i++) {
@@ -3673,6 +3889,8 @@ static bool parse_args(int argc, char **argv)
 	}
 	if (!opt.out)
 		opt.out = "a.out";
+	if (opt.nmagic)		/* lld: -n ignores -z max-page-size */
+		opt.max_page = 1;
 	return true;
 }
 
@@ -3864,6 +4082,8 @@ static void load_inputs(void)
 		VVEC_PUSH(objs, o, alloc);
 	}
 	pfor(objs.n, parse_obj, NULL);
+	if (!opt.max_page)
+		opt.max_page = x86_ld ? 4096 : 65536;
 }
 
 static void alloc_isecs(uint32_t from)
@@ -4170,6 +4390,8 @@ static bool is_relro(uint32_t oi)
 		return true;
 	if (got_isec != NONE && isec_osec(got_isec) == oi)
 		return true;
+	if (dynamic_isec != NONE && isec_osec(dynamic_isec) == oi)
+		return true;
 	return !strcmp(n, ".data.rel.ro") || !strcmp(n, ".bss.rel.ro") || !strcmp(n, ".ctors") ||
 	       !strcmp(n, ".dtors") || !strcmp(n, ".jcr") || !strcmp(n, ".eh_frame") ||
 	       !strcmp(n, ".fini_array") || !strcmp(n, ".init_array") || !strcmp(n, ".preinit_array");
@@ -4223,6 +4445,9 @@ static void create_phdrs(void)
 			phadd(tls, oi);
 		}
 	}
+	/* lld: PT_DYNAMIC over .dynamic */
+	if (dyn_live)
+		phadd(phnew(PT_DYNAMIC, phflags(&osecs.v[isec_osec(dynamic_isec)])), isec_osec(dynamic_isec));
 	/* lld: one PT_GNU_RELRO over the contiguous relro sections */
 	if (!opt.norelro && !opt.relocatable) {
 		int rr = -1;
@@ -4395,6 +4620,8 @@ static bool g_in_symtab(uint32_t g)
 static bool g_local(uint32_t g)
 {
 	G *s = &gsyms[g];
+	if (s->ver == 0 && s->state != GS_UNDEF && !s->demoted)	/* VERSION local: */
+		return true;
 	return s->vis == STV_HIDDEN || s->vis == STV_INTERNAL;
 }
 
@@ -4549,7 +4776,7 @@ static void write_headers(void)
 	Ehdr *eh = (Ehdr *)out;
 	memcpy(eh->e_ident, "\177ELF\2\1\1", 7);
 	eh->e_type = opt.relocatable ? 1 : opt.shared ? 3 : 2;
-	eh->e_machine = 183;
+	eh->e_machine = x86_ld ? 62 : 183;
 	eh->e_version = 1;
 	/* lld: -e, else ENTRY(), else _start (silently absent) */
 	const char *en = opt.entry ? opt.entry : entry_name ? entry_name : "_start";
@@ -4620,6 +4847,409 @@ static void write_build_id(void)
 	}
 }
 
+/* ---------------- -shared: versions, dynamic sections, PHDRS ---------------- */
+
+#define SHT_GNU_HASH 0x6ffffff6u
+#define SHT_GNU_VERDEF 0x6ffffffdu
+#define SHT_GNU_VERSYM 0x6fffffffu
+enum {
+	DT_NULL = 0, DT_HASH = 4, DT_STRTAB = 5, DT_SYMTAB = 6, DT_STRSZ = 10, DT_SYMENT = 11,
+	DT_SONAME = 14, DT_FLAGS = 30, DF_SYMBOLIC = 2,
+};
+#define DT_GNU_HASH 0x6ffffef5u
+#define DT_VERSYM 0x6ffffff0u
+#define DT_VERDEF 0x6ffffffcu
+#define DT_VERDEFNUM 0x6ffffffdu
+
+static bool g_referenced(uint32_t g);
+static uint64_t script_ord;
+static VVEC(uint32_t) dsyms;		/* exported globals in .dynsym order (index i + 1) */
+static uint32_t dyn_symndx;		/* first symbol in .gnu.hash */
+static uint32_t gh_nbuckets, gh_maskwords;
+static uint32_t *dsym_hash;		/* GNU hash per dsyms entry */
+static VVEC(char) dynstr;
+static VVEC(uint32_t) dynstr_offs;	/* offsets of added strings (lld dedups) */
+static uint32_t *dsym_name;		/* .dynstr offset per dsyms entry */
+static uint32_t soname_off, *vername_off;
+static uint32_t ndynent;
+
+static uint32_t elf_hash(const char *n)
+{
+	uint32_t h = 0;
+	for (; *n; n++) {
+		h = (h << 4) + (uint8_t)*n;
+		uint32_t g = h & 0xf0000000u;
+		if (g)
+			h ^= g >> 24;
+		h &= ~g;
+	}
+	return h;
+}
+static uint32_t gnu_hash(const char *n)
+{
+	uint32_t h = 5381;
+	for (; *n; n++)
+		h = h * 33 + (uint8_t)*n;
+	return h;
+}
+
+static uint32_t dynstr_add(const char *str)
+{
+	size_t n = strlen(str);
+	for (uint32_t i = 0; i < dynstr_offs.n; i++)
+		if (!strcmp(dynstr.v + dynstr_offs.v[i], str))
+			return dynstr_offs.v[i];
+	uint32_t o = dynstr.n;
+	for (size_t i = 0; i <= n; i++)
+		VVEC_PUSH(dynstr, str[i], alloc);
+	VVEC_PUSH(dynstr_offs, o, alloc);
+	return o;
+}
+
+/* VERSION: local patterns first, then each node's globals override (lld scanVersionScript) */
+static void assign_versions(void)
+{
+	for (uint32_t i = 0; i < gorder.n; i++) {
+		G *s = &gsyms[gorder.v[i]];
+		s->ver = 1;
+		if (!vernodes.n || s->state == GS_UNDEF)
+			continue;
+		const char *n = gname(gorder.v[i]);
+		for (uint32_t k = 0; k < ver_locals.n; k++)
+			if (glob(ver_locals.v[k], n)) {
+				s->ver = 0;
+				break;
+			}
+		uint16_t named = 2;
+		for (uint32_t v = 0; v < vernodes.n; v++) {
+			VerNode *vn = &vernodes.v[v];
+			bool hit = false;
+			for (uint32_t k = 0; k < vn->globs.n && !hit; k++)
+				hit = glob(vn->globs.v[k], n);
+			if (hit)
+				s->ver = *vn->name ? named : 1;
+			if (*vn->name)
+				named++;
+		}
+	}
+}
+
+static bool sec_live(uint32_t isec)
+{
+	uint32_t o = isec == NONE ? NONE : isecs.v[isec].osec;
+	return o != NONE && o != OS_DISCARD;
+}
+
+/* _DYNAMIC: lld defines it (weak, hidden) after the script's symbols */
+static void define_dynamic_sym(void)
+{
+	dyn_live = opt.shared && sec_live(dynamic_isec);
+	if (!dyn_live)
+		return;
+	uint32_t g = gintern("_DYNAMIC");
+	G *s = &gsyms[g];
+	if (!g_referenced(g)) {
+		VVEC_PUSH(gorder, g, alloc);
+		atomic_min64(&s->first, script_ord++);
+	}
+	s->state = GS_SCRIPT;
+	s->ev = (EV){.kind = EV_ISEC, .idx = dynamic_isec, .align = 1};
+	s->bind = STB_WEAK;
+	s->type = STT_NOTYPE;
+	s->vis = STV_HIDDEN;
+	s->thunk = NONE;
+	s->ver = 1;
+}
+
+/* contents and sizes of the dynamic sections (addresses are filled in later) */
+static void build_dynamic(void)
+{
+	if (!dyn_live)
+		return;
+	if (ndyn)
+		error("dynamic relocations in a shared object with .dynamic are not supported");
+	dsyms.n = 0;
+	for (uint32_t i = 0; i < gorder.n; i++) {
+		uint32_t g = gorder.v[i];
+		G *s = &gsyms[g];
+		if (!g_in_symtab(g) || g_local(g))
+			continue;
+		if (s->state == GS_UNDEF && (kget(&s->first) >> 32) >= objs.n)
+			continue;
+		VVEC_PUSH(dsyms, g, alloc);
+	}
+	/* .gnu.hash: undefined symbols first, then stable by bucket */
+	uint32_t n = dsyms.n, nund = 0;
+	uint32_t *tmp = alloc((size_t)(n + 1) * sizeof(uint32_t));
+	for (uint32_t i = 0; i < n; i++)
+		if (gsyms[dsyms.v[i]].state == GS_UNDEF || gsyms[dsyms.v[i]].demoted)
+			tmp[nund++] = dsyms.v[i];
+	uint32_t nh = n - nund;
+	gh_nbuckets = nh / 4 > 1 ? nh / 4 : 1;
+	uint64_t words = (uint64_t)nh * 12 / 64;
+	gh_maskwords = 1;
+	while (gh_maskwords <= words)	/* llvm::NextPowerOf2: strictly greater */
+		gh_maskwords <<= 1;
+	dsym_hash = alloc((size_t)(n + 1) * sizeof(uint32_t));
+	uint32_t w = nund;
+	for (uint32_t b = 0; b < gh_nbuckets; b++)
+		for (uint32_t i = 0; i < n; i++) {
+			G *s = &gsyms[dsyms.v[i]];
+			if (s->state == GS_UNDEF || s->demoted)
+				continue;
+			if (gnu_hash(gname(dsyms.v[i])) % gh_nbuckets == b)
+				tmp[w++] = dsyms.v[i];
+		}
+	if (n)
+		memcpy(dsyms.v, tmp, n * sizeof(uint32_t));
+	dyn_symndx = nund + 1;
+	/* .dynstr: symbol names, then the file's name and version names */
+	dynstr.n = dynstr_offs.n = 0;
+	VVEC_PUSH(dynstr, 0, alloc);
+	dsym_name = alloc((size_t)(n + 1) * sizeof(uint32_t));
+	for (uint32_t i = 0; i < n; i++) {
+		gsyms[dsyms.v[i]].dynidx = i + 1;
+		dsym_hash[i] = gnu_hash(gname(dsyms.v[i]));
+		dsym_name[i] = dynstr_add(gname(dsyms.v[i]));
+	}
+	const char *fname = opt.soname ? opt.soname : opt.out;
+	vername_off = alloc((nverdefs + 1) * sizeof(uint32_t));
+	if (nverdefs) {
+		soname_off = dynstr_add(fname);
+		for (uint32_t v = 0, k = 0; v < vernodes.n; v++)
+			if (*vernodes.v[v].name)
+				vername_off[k++] = dynstr_add(vernodes.v[v].name);
+	}
+	if (opt.soname)
+		soname_off = dynstr_add(opt.soname);
+	ndynent = (opt.soname ? 1 : 0) + (opt.bsymbolic ? 1 : 0) + 4 + 2 + (nverdefs ? 3 : 0) + 1;
+
+	isecs.v[dynsym_isec].size = (uint64_t)(n + 1) * sizeof(Sym);
+	isecs.v[dynstr_isec].size = dynstr.n;
+	isecs.v[hash_isec].size = (uint64_t)(2 + 2 * (n + 1)) * 4;
+	isecs.v[gnuhash_isec].size = 16 + (uint64_t)gh_maskwords * 8 + (uint64_t)gh_nbuckets * 4 + (uint64_t)nh * 4;
+	if (versym_isec != NONE) {
+		isecs.v[versym_isec].size = (uint64_t)(n + 1) * 2;
+		isecs.v[verdef_isec].size = (uint64_t)(nverdefs + 1) * 28;
+	}
+	isecs.v[dynamic_isec].size = (uint64_t)ndynent * 16;
+}
+
+/* sh_link / sh_info of the dynamic sections */
+static void dynamic_shdrs(void)
+{
+	if (!dyn_live)
+		return;
+	uint32_t ds = osecs.v[isec_osec(dynsym_isec)].shidx, dstr = osecs.v[isec_osec(dynstr_isec)].shidx;
+	osecs.v[isec_osec(dynsym_isec)].link = dstr;
+	osecs.v[isec_osec(dynsym_isec)].info = 1;	/* no local dynamic symbols */
+	osecs.v[isec_osec(hash_isec)].link = ds;
+	osecs.v[isec_osec(gnuhash_isec)].link = ds;
+	osecs.v[isec_osec(dynamic_isec)].link = dstr;
+	if (versym_isec != NONE) {
+		osecs.v[isec_osec(versym_isec)].link = ds;
+		osecs.v[isec_osec(verdef_isec)].link = dstr;
+		osecs.v[isec_osec(verdef_isec)].info = nverdefs + 1;
+	}
+}
+
+static uint8_t *isec_out(uint32_t isec)
+{
+	return out + osecs.v[isec_osec(isec)].offset + isecs.v[isec].off;
+}
+
+static void write_dynamic(void)
+{
+	if (!dyn_live)
+		return;
+	uint32_t n = dsyms.n;
+	Sym *ds = (Sym *)(void *)isec_out(dynsym_isec);
+	for (uint32_t i = 0; i < n; i++) {
+		uint32_t g = dsyms.v[i];
+		G *s = &gsyms[g];
+		Sym *d = &ds[i + 1];
+		d->st_name = dsym_name[i];
+		d->st_info = (uint8_t)(s->bind << 4 | s->type);
+		d->st_other = s->vis;
+		if (s->state == GS_SCRIPT) {
+			d->st_shndx = s->ev.kind == EV_ABS ? SHN_ABS : s->ev.kind == EV_OSEC ? osec_shidx(s->ev.idx)
+										: sym_shndx_isec(s->ev.idx);
+			d->st_value = gsym_va(g);
+		} else if (s->state == GS_OBJ && !s->demoted) {
+			d->st_shndx = s->sec == NONE ? SHN_ABS : sym_shndx_isec(s->sec);
+			d->st_value = gsym_va(g);
+			d->st_size = s->size;
+		}
+	}
+	memcpy(isec_out(dynstr_isec), dynstr.v, dynstr.n);
+	/* .hash: nbucket = nchain = symbol count */
+	uint8_t *h = isec_out(hash_isec);
+	uint32_t nb = n + 1, *bk = (uint32_t *)(void *)(h + 8), *ch = bk + nb;
+	wr32(h, nb);
+	wr32(h + 4, nb);
+	for (uint32_t i = 0; i < n; i++) {
+		uint32_t b = elf_hash(gname(dsyms.v[i])) % nb;
+		ch[i + 1] = bk[b];
+		bk[b] = i + 1;
+	}
+	/* .gnu.hash */
+	uint8_t *gh = isec_out(gnuhash_isec);
+	wr32(gh, gh_nbuckets);
+	wr32(gh + 4, dyn_symndx);
+	wr32(gh + 8, gh_maskwords);
+	wr32(gh + 12, 26);
+	uint64_t *bloom = (uint64_t *)(void *)(gh + 16);
+	uint32_t *gb = (uint32_t *)(void *)(gh + 16 + gh_maskwords * 8), *gv = gb + gh_nbuckets;
+	uint32_t old = NONE;
+	for (uint32_t i = dyn_symndx - 1; i < n; i++) {
+		uint32_t hv = dsym_hash[i], b = hv % gh_nbuckets;
+		bloom[(hv / 64) & (gh_maskwords - 1)] |= (uint64_t)1 << (hv % 64) | (uint64_t)1 << ((hv >> 26) % 64);
+		bool last = i + 1 == n || dsym_hash[i + 1] % gh_nbuckets != b;
+		*gv++ = last ? hv | 1 : hv & ~1u;
+		if (b != old) {
+			gb[b] = i + 1;
+			old = b;
+		}
+	}
+	/* .gnu.version, .gnu.version_d */
+	if (versym_isec != NONE) {
+		uint8_t *vs = isec_out(versym_isec);
+		for (uint32_t i = 0; i < n; i++) {
+			uint16_t v = gsyms[dsyms.v[i]].ver;
+			memcpy(vs + 2 * (i + 1), &v, 2);
+		}
+		uint8_t *vd = isec_out(verdef_isec);
+		const char *fname = opt.soname ? opt.soname : opt.out;
+		for (uint32_t k = 0; k <= nverdefs; k++) {
+			uint8_t *e = vd + 28 * k;
+			const char *nm = fname;
+			if (k)
+				for (uint32_t v = 0, c = 0; v < vernodes.n; v++)
+					if (*vernodes.v[v].name && ++c == k)
+						nm = vernodes.v[v].name;
+			uint16_t ver = 1, flags = k ? 0 : 1, ndx = (uint16_t)(k + 1), cnt = 1;
+			memcpy(e, &ver, 2);
+			memcpy(e + 2, &flags, 2);
+			memcpy(e + 4, &ndx, 2);
+			memcpy(e + 6, &cnt, 2);
+			wr32(e + 8, elf_hash(nm));
+			wr32(e + 12, 20);
+			wr32(e + 16, k == nverdefs ? 0 : 28);
+			wr32(e + 20, k ? vername_off[k - 1] : soname_off);
+			wr32(e + 24, 0);
+		}
+	}
+	/* .dynamic (lld DynamicSection::computeContents order) */
+	uint8_t *dy = isec_out(dynamic_isec);
+	uint32_t at = 0;
+#define DYN(tag, v) do { wr64(dy + 16 * at, (uint64_t)(tag)); wr64(dy + 16 * at + 8, (uint64_t)(v)); at++; } while (0)
+	if (opt.soname)
+		DYN(DT_SONAME, soname_off);
+	if (opt.bsymbolic)
+		DYN(DT_FLAGS, DF_SYMBOLIC);
+	DYN(DT_SYMTAB, isec_va(dynsym_isec, 0));
+	DYN(DT_SYMENT, sizeof(Sym));
+	DYN(DT_STRTAB, isec_va(dynstr_isec, 0));
+	DYN(DT_STRSZ, dynstr.n);
+	DYN(DT_GNU_HASH, isec_va(gnuhash_isec, 0));
+	DYN(DT_HASH, isec_va(hash_isec, 0));
+	if (versym_isec != NONE) {
+		DYN(DT_VERSYM, isec_va(versym_isec, 0));
+		DYN(DT_VERDEF, isec_va(verdef_isec, 0));
+		DYN(DT_VERDEFNUM, nverdefs + 1);
+	}
+	DYN(DT_NULL, 0);
+#undef DYN
+}
+
+/* PHDRS: segments from the script, sections assigned by their :phdr lists */
+static void create_script_phdrs(void)
+{
+	phdrs.n = phsecs.n = 0;
+	for (uint32_t i = 0; i < sphdrs.n; i++) {
+		SPhdr *h = &sphdrs.v[i];
+		int k = phnew(h->type, h->flags ? (uint32_t)ev_value(eval(h->flags)) : 0);
+		phsecs.v[k].hdr = (h->filehdr || h->phdrs) && h->type == PT_LOAD;
+	}
+	const char **cur = NULL;
+	uint32_t ncur = 0;
+	uint64_t min = UINT64_MAX;
+	for (uint32_t i = 0; i < outsecs.n; i++) {
+		uint32_t oi = outsecs.v[i];
+		OSec *os = &osecs.v[oi];
+		os->ptload = -1;
+		if (!(os->flags & SHF_ALLOC))
+			continue;
+		if (os->va < min)
+			min = os->va;
+		if (os->nphn) {
+			cur = os->phn;
+			ncur = os->nphn;
+		}
+		if (!ncur)
+			error("section %s is not assigned to a PHDRS segment", os->name);
+		for (uint32_t k = 0; k < ncur; k++) {
+			uint32_t p = 0;
+			while (p < sphdrs.n && strcmp(sphdrs.v[p].name, cur[k]))
+				p++;
+			if (p == sphdrs.n) {
+				error("section header '%s' is not listed in PHDRS", cur[k]);
+				continue;
+			}
+			phadd(p, oi);
+			if (!sphdrs.v[p].flags)
+				phdrs.v[p].p_flags |= phflags(os);
+		}
+	}
+	/* allocateHeaders() with explicit headers */
+	uint64_t hs = header_size();
+	if (min == UINT64_MAX || min < hs)
+		error("could not allocate headers");
+	else
+		hdr_va = (min - hs) & ~(opt.max_page - 1);
+}
+
+/* =fill: lld fills before, between and after the input sections, restarting the pattern per gap */
+static void fill_gap(uint8_t *b, uint64_t n, const uint8_t f[4])
+{
+	uint64_t i = 0;
+	for (; i + 4 < n; i += 4)
+		memcpy(b + i, f, 4);
+	memcpy(b + i, f, n - i);
+}
+static void write_fills(void)
+{
+	for (uint32_t c = 0; c < topcmds.n; c++) {
+		if (topcmds.v[c].kind != C_OSEC)
+			continue;
+		OSec *os = &osecs.v[topcmds.v[c].idx];
+		/* without =FILL lld pads executable sections with the target's trap
+		   instruction: int3 on x86-64 */
+		bool trap = !os->fill && x86_ld && (os->flags & SHF_EXECINSTR);
+		if (!os->live || (!os->fill && !trap) || os->type == SHT_NOBITS)
+			continue;
+		uint32_t v = trap ? 0xccccccccu : (uint32_t)ev_value(eval(os->fill));
+		if (!v)
+			continue;
+		uint8_t f[4] = {v >> 24, v >> 16, v >> 8, v};	/* big-endian (lld readFill) */
+		uint8_t *b = out + os->offset;
+		uint64_t at = 0;
+		for (uint32_t k = 0; k < os->cmds.n; k++) {
+			if (os->cmds.v[k].kind != C_ISD)
+				continue;
+			ISD *d = &isds.v[os->cmds.v[k].idx];
+			for (uint32_t q = 0; q < d->secs.n; q++) {
+				ISec *is = &isecs.v[d->secs.v[q]];
+				if (is->off > at)
+					fill_gap(b + at, is->off - at, f);
+				at = is->off + is->size;
+			}
+		}
+		if (os->size > at)
+			fill_gap(b + at, os->size - at, f);
+	}
+}
+
 /* ---------------- the final link ---------------- */
 
 static void reset_state(void);
@@ -4643,7 +5273,7 @@ static bool any_got(void)
 {
 	atomic_store(&got_seen, false);
 	if (!opt.relocatable)
-		pfor(isecs.n, find_got, NULL);
+		pfor(isecs.n, x86_ld ? x64_find_got : find_got, NULL);
 	return atomic_load(&got_seen);
 }
 
@@ -4713,10 +5343,29 @@ static void add_synthetic_sections(void)
 		c->size = n;
 		c->entsize = 1;
 	}
-	if (pic)
+	/* (lld always has .rela.dyn: dropped when empty, but a script that names it
+	   keeps an empty RELA output section) */
+	if (pic || (x86_ld && opt.script && !opt.relocatable))
 	{
 		reladyn_isec = new_isec(".rela.dyn", K_RELADYN, SHT_RELA, SHF_ALLOC, 8);
 		isecs.v[reladyn_isec].entsize = sizeof(Rela);
+	}
+	/* dynamic sections only under a script (the vDSO; vmlinux discards them): a
+	 * script-less -shared link keeps its old output, with no .dynamic yet */
+	if (opt.shared && opt.script) {
+		dynsym_isec = new_isec(".dynsym", K_DYNSYM, SHT_DYNSYM, SHF_ALLOC, 8);
+		isecs.v[dynsym_isec].entsize = sizeof(Sym);
+		dynstr_isec = new_isec(".dynstr", K_DYNSTR, SHT_STRTAB, SHF_ALLOC, 1);
+		dynamic_isec = new_isec(".dynamic", K_DYNAMIC, SHT_DYNAMIC, SHF_ALLOC | SHF_WRITE, 8);
+		isecs.v[dynamic_isec].entsize = 16;
+		if (nverdefs) {
+			versym_isec = new_isec(".gnu.version", K_VERSYM, SHT_GNU_VERSYM, SHF_ALLOC, 2);
+			isecs.v[versym_isec].entsize = 2;
+			verdef_isec = new_isec(".gnu.version_d", K_VERDEF, SHT_GNU_VERDEF, SHF_ALLOC, 4);
+		}
+		gnuhash_isec = new_isec(".gnu.hash", K_GNUHASH, SHT_GNU_HASH, SHF_ALLOC, 8);
+		hash_isec = new_isec(".hash", K_HASH, SHT_HASH, SHF_ALLOC, 4);
+		isecs.v[hash_isec].entsize = 4;
 	}
 	if (opt.build_id) {
 		buildid_isec = new_isec(".note.gnu.build-id", K_BUILDID, SHT_NOTE, SHF_ALLOC, 4);
@@ -4754,7 +5403,6 @@ static void for_assigns(void (*fn)(Assign *))
 static bool g_referenced(uint32_t g) { return kget(&gsyms[g].first) != UINT64_MAX; }
 static bool g_defined_obj(uint32_t g) { return kget(&gsyms[g].def) != UINT64_MAX; }
 
-static uint64_t script_ord;
 static VVEC(uint32_t) script_new;	/* slots first inserted by the script, in order */
 
 static void script_insert(uint32_t g)
@@ -5042,6 +5690,10 @@ static void report_undefined(void)
 			continue;
 		if ((kget(&s->first) >> 32) >= objs.n)	/* referenced only by the script */
 			continue;
+		/* x86-64 executables relax every GD/LD sequence to LE, and its call
+		   to __tls_get_addr goes with it (lld scans no relocation there) */
+		if (x86_ld && !opt.shared && !strcmp(gname(gorder.v[i]), "__tls_get_addr"))
+			continue;
 		if (opt.no_undefined || !opt.shared) {
 			undef_refs(gorder.v[i], objs.v[kget(&s->first) >> 32], n < 2);	/* (lld: spelling for the first two) */
 			n++;
@@ -5144,6 +5796,7 @@ static int run(int argc, char **argv)
 	alloc_isecs(0);
 	pfor(objs.n, fill_isecs, NULL);
 	dedup_comdats();
+	drop_gnu_property();
 	pfor(objs.n, resolve_obj, NULL);
 	pfor(objs.n, check_dups, NULL);
 	phase("resolve symbols");
@@ -5168,6 +5821,7 @@ static int run(int argc, char **argv)
 	script_symbols();
 	build_gorder();
 	pfor(gorder.n, finish_syms, NULL);
+	assign_versions();
 	phase("script symbols, order");
 
 	if (opt.gc && !opt.relocatable)
@@ -5187,6 +5841,7 @@ static int run(int argc, char **argv)
 					commit_section(os, &isecs.v[d->secs.v[s]]);
 			}
 	}
+	define_dynamic_sym();
 	start_stop_symbols();
 	pfor(gorder.n, demote_symbols, NULL);
 	report_undefined();
@@ -5202,7 +5857,7 @@ static int run(int argc, char **argv)
 		for (uint32_t i = 0; i < objs.n; i++)
 			if (objs.v[i]->buf && objs.v[i]->firstg)
 				objs.v[i]->lgot = calloc(objs.v[i]->firstg, 1);
-	pfor(isecs.n, scan_relocs, NULL);
+	pfor(isecs.n, x86_ld ? x64_scan_relocs : scan_relocs, NULL);
 	/* .got: one slot per symbol, globals in symbol id order, then the locals by
 	 * file (lld postScanRelocations) */
 	for (uint32_t g = 0, ng = atomic_load(&ngsyms); g < ng; g++)
@@ -5232,6 +5887,18 @@ static int run(int argc, char **argv)
 		ndyn += isecs.v[i].ndyn;
 	if (reladyn_isec != NONE)
 		isecs.v[reladyn_isec].size = ndyn * sizeof(Rela);
+	if (reladyn_isec != NONE && !ndyn && sec_live(reladyn_isec)) {
+		/* lld drops an empty .rela.dyn (RelocationSection::isNeeded) */
+		ISD *d = &isds.v[isecs.v[reladyn_isec].isd];
+		uint32_t w = 0;
+		for (uint32_t k = 0; k < d->secs.n; k++)
+			if (d->secs.v[k] != reladyn_isec)
+				d->secs.v[w++] = d->secs.v[k];
+		d->secs.n = w;
+		isecs.v[reladyn_isec].osec = NONE;
+		adjust_output_sections();
+	}
+	build_dynamic();
 	phase("scan relocations");
 	if (atomic_load(&nerrors))
 		return 1;
@@ -5278,11 +5945,16 @@ static int run(int argc, char **argv)
 		return 1;
 
 	/* drop empty thunk sections (none are kept by construction) */
-	create_phdrs();
-	finish_phdrs();
+	if (have_phdrs) {
+		create_script_phdrs();
+	} else {
+		create_phdrs();
+		finish_phdrs();
+	}
 	/* symtab and shstrtab sizes are needed before file offsets */
 	build_shstrtab();
 	build_symtab();
+	dynamic_shdrs();
 	{
 		OSec *os = &osecs.v[isec_osec(symtab_isec)];
 		os->link = osecs.v[isec_osec(strtab_isec)].shidx;
@@ -5333,7 +6005,9 @@ static int run(int argc, char **argv)
 			}
 	}
 	final_addresses();
+	write_fills();
 	pfor(wjobs.n, write_isec, NULL);
+	write_dynamic();
 	write_ehhdr();
 	phase("copy + relocate");
 	fill_symtab();
@@ -5768,7 +6442,7 @@ static int ld_relocatable(void)
 	Ehdr *eh = (Ehdr *)rbuf;
 	memcpy(eh->e_ident, "\177ELF\2\1\1", 7);
 	eh->e_type = 1;
-	eh->e_machine = 183;
+	eh->e_machine = x86_ld ? 62 : 183;
 	eh->e_version = 1;
 	eh->e_shoff = shoff_r;
 	eh->e_ehsize = sizeof(Ehdr);
@@ -5808,6 +6482,12 @@ static void reset_state(void)
 	memset(&refsyms, 0, sizeof refsyms);
 	memset(&provides, 0, sizeof provides);
 	memset(&pending, 0, sizeof pending);
+	/* the lazy-archive pass (its vectors are in the arena) */
+	free(lsyms.v);
+	memset(&lsyms, 0, sizeof lsyms);
+	memset(&lcand, 0, sizeof lcand);
+	memset(&lout, 0, sizeof lout);
+	memset(&ltaken, 0, sizeof ltaken);
 	memset(&orphans, 0, sizeof orphans);
 	memset(&thunks, 0, sizeof thunks);
 	memset(&thunksecs, 0, sizeof thunksecs);
@@ -5819,6 +6499,14 @@ static void reset_state(void)
 	memset(&recorded, 0, sizeof recorded);
 	memset(&script_new, 0, sizeof script_new);
 	memset(&routs, 0, sizeof routs);
+	/* in the arena, which free_arenas unmapped after the last link (vccd runs many) */
+	ncache = NULL;
+	ncmask = ncount = 0;
+	memset(&ehfdes, 0, sizeof ehfdes);
+	memset(&stop_syms, 0, sizeof stop_syms);
+	ehhdr_isec = NONE;	/* set only while NONE */
+	has_tls = headers_loaded = false;
+	tls_tp = tbss_off = 0;
 	stub_names = NULL;
 	nstubs = 0;
 	tr_keys = NULL;
@@ -5826,8 +6514,19 @@ static void reset_state(void)
 	tr_mask = tr_n = 0;
 	entry_name = NULL;
 	reladyn_isec = buildid_isec = comment_isec = got_isec = NONE;
-	gotsyms.n = 0;
-	gotlocs.n = 0;
+	dynsym_isec = dynstr_isec = hash_isec = gnuhash_isec = NONE;
+	versym_isec = verdef_isec = dynamic_isec = NONE;
+	memset(&sphdrs, 0, sizeof sphdrs);
+	memset(&vernodes, 0, sizeof vernodes);
+	memset(&ver_locals, 0, sizeof ver_locals);
+	memset(&dsyms, 0, sizeof dsyms);
+	memset(&dynstr, 0, sizeof dynstr);
+	memset(&dynstr_offs, 0, sizeof dynstr_offs);
+	have_phdrs = dyn_live = false;
+	nverdefs = 0;
+	hdr_va = 0;
+	memset(&gotsyms, 0, sizeof gotsyms);	/* (all of it: its buffer was in the last link's arena) */
+	memset(&gotlocs, 0, sizeof gotlocs);
 	symtab_isec = strtab_isec = shstrtab_isec = NONE;
 	reladyn_buf = NULL;
 	out = NULL;
@@ -5842,8 +6541,32 @@ static void reset_state(void)
 
 static pthread_mutex_t ldlock = PTHREAD_MUTEX_INITIALIZER;
 
+/* the first input file (an argument that is not an option or its value) is Mach-O */
+static bool first_input_macho(int argc, char **argv, int dirfd)
+{
+	for (int i = 1; i < argc; i++) {
+		const char *a = argv[i];
+		if (a[0] == '-') {
+			if (!strcmp(a, "-o") || !strcmp(a, "-T") || !strcmp(a, "-arch") || !strcmp(a, "-L") ||
+			    !strcmp(a, "-syslibroot"))
+				i++;
+			continue;
+		}
+		int fd = openat(dirfd, a, O_RDONLY | O_CLOEXEC);
+		if (fd < 0)
+			return false;
+		uint32_t m = 0;
+		bool r = read(fd, &m, 4) == 4 && m == 0xfeedfacfu;
+		close(fd);
+		return r;
+	}
+	return false;
+}
+
 int ld_main(int argc, char **argv, int dirfd, FILE *err)
 {
+	if (first_input_macho(argc, argv, dirfd))
+		return ld_macho(argc, argv, dirfd, err);
 	VLOCK(ldlock);
 	errf = err ? err : stderr;
 	dirfd_base = dirfd;

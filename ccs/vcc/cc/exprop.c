@@ -3,10 +3,15 @@
 
 /* ---------------- expressions: unary, cast, binary ---------------- */
 
+/* r: the operand's range for a diagnostic; e (if any) gives it, else r.e is its last token's start */
 static uint32_t sizeof_type(cc *c, qty t, uint32_t loc, uint32_t e, pp_span r)
 {
 	int k = KIND(c, t);
 
+	if (k == TY_SVE) {
+		cc_error(c, loc, "invalid application of 'sizeof' to sizeless type '%s'", tyname(c, t));
+		return mk_int(c, 0, c->t_size, loc);
+	}
 	if (k == TY_ARRAY && (T(c, t)->flags & TF_VLA)) {
 		uint32_t n = mk(c, N_SIZEOF_VLA, c->t_size, loc);
 
@@ -19,6 +24,7 @@ static uint32_t sizeof_type(cc *c, qty t, uint32_t loc, uint32_t e, pp_span r)
 		return mk_int(c, 1, c->t_size, loc);
 	}
 	if (!complete(c, t)) {
+		r = e ? rng(c, e) : (pp_span){ r.b, pp_tok_end(c->p, r.e) };
 		report(c, "error", loc, &r, 1, NULL, 0, "invalid application of 'sizeof' to an incomplete type '%s'", tyname(c, t));
 		if (is_record(c, t) || k == TY_ENUM)
 			note(c, c->tags[T(c, t)->aux].loc, "forward declaration of '%s'", tyname(c, t));
@@ -31,6 +37,8 @@ static uint32_t align_of_expr(cc *c, uint32_t e)
 	const node *x = N(e);
 	uint32_t a = ty_align(c, x->ty);
 
+	if (x->op == N_MEMBER)
+		return c->tags[x->b].f[x->c].align;
 	if (x->op == N_VAR && c->syms[x->a].align > a)
 		a = c->syms[x->a].align;
 	if (is_array(c, x->ty)) {
@@ -62,7 +70,7 @@ static uint32_t sizeof_operand(cc *c, qty *ty, pp_span *r)
 			*ty = type_name(c);
 			expect_match(c, T_RPAREN, ploc);
 			if (r)
-				*r = (pp_span){ ploc, pp_tok_end(c->p, c->prevloc) };
+				*r = (pp_span){ ploc, c->prevloc };	/* resolved by sizeof_type if needed */
 			return UINT32_MAX;
 		}
 		c->unevaluated++;
@@ -88,13 +96,20 @@ static __attribute__((noinline)) uint32_t unary_op(cc *c)
 		int op = t->kind == T_PLUSPLUS ? N_PREINC : N_PREDEC;
 
 		next(c);
-		n = unary(c);
+		/* Parenthesized type-names may begin an lvalue compound literal. */
+		n = cast_expr(c);
 		if (ISERR(n))
 			return n;
 		need_lvalue(c, n, t->loc);
+		if (is_complex(c, N(n)->ty))
+			return cplx_incdec(c, n, op, loc);
+		if ((T(c, N(n)->ty)->flags & TF_ATOMIC) && atomic_wide(c, N(n)->ty))
+			return atomic_assign_expr(c, n, 0, op == N_PREINC ? T_PLUS : T_MINUS, false, loc);
 		need_scalar(c, n, "increment");
+		if (is_ptr(c, N(n)->ty) && KIND(c, T(c, N(n)->ty)->base) == TY_SVE)
+			cc_error(c, loc, "arithmetic on a pointer to sizeless type '%s'", tyname(c, T(c, N(n)->ty)->base));
 		{
-			uint32_t r = mk(c, op, QUNQ(N(n)->ty), loc);
+			uint32_t r = mk(c, op, QUNQ(ty_unatomic(c, N(n)->ty)), loc);
 
 			N(r)->a = n;
 			return r;
@@ -153,7 +168,7 @@ static __attribute__((noinline)) uint32_t unary_op(cc *c)
 				setspan(c, r, loc);
 				ovf_warn(c, op, r, loc, n, 0);
 			}
-			return r;
+			return big_fold_node(c, r);
 		}
 	}
 	case T_EXCLAIM: {
@@ -163,11 +178,16 @@ static __attribute__((noinline)) uint32_t unary_op(cc *c)
 		n = cast_expr(c);
 		if (ISERR(n))
 			return n;
+		if (is_bool_vector(c, N(n)->ty)) {
+			r = mk(c, N_UNARY, QUNQ(N(n)->ty), loc);
+			N(r)->aux = T_TILDE, N(r)->a = rvalue(c, n);
+			return r;
+		}
 		n = scalar_cond(c, rvalue(c, n), "'!'");
 		r = mk(c, N_UNARY, prim(TY_INT), loc);
 		N(r)->aux = T_EXCLAIM;
 		N(r)->a = n;
-		return r;
+		return big_fold_node(c, r);
 	}
 	case T_AMPAMP: {	/* &&label */
 		uint32_t r;
@@ -201,13 +221,13 @@ static __attribute__((noinline)) uint32_t unary_op(cc *c)
 				cl = mk2(c, N_COMPLIT, ty, loc, init, s);
 				N(cl)->flags = NF_LVALUE;
 				n = postfix(c, cl);
-				return sizeof_type(c, N(n)->ty, loc, n, rng(c, n));
+				return sizeof_type(c, N(n)->ty, loc, n, (pp_span){ 0, 0 });
 			}
 			return sizeof_type(c, ty, loc, 0, r);
 		}
 		if (bitfield_of(c, n))
 			cc_error(c, loc, "invalid application of 'sizeof' to bit-field");
-		return sizeof_type(c, N(n)->ty, loc, n, rng(c, n));
+		return sizeof_type(c, N(n)->ty, loc, n, (pp_span){ 0, 0 });
 	}
 	case KW__Alignof:
 	case KW___alignof__:
@@ -222,8 +242,12 @@ static __attribute__((noinline)) uint32_t unary_op(cc *c)
 			if (KIND(c, ty) == TY_VOID || KIND(c, ty) == TY_FUNC)
 				EXT_WARN(c, "pointer-arith", w_ped, loc, "invalid application of 'alignof' to a %s type",
 					 KIND(c, ty) == TY_VOID ? "void" : "function");
+			if (KIND(c, ty) == TY_SVE)
+				cc_error(c, loc, "invalid application of 'alignof' to sizeless type '%s'", tyname(c, ty));
 			return mk_int(c, ty_align(c, ty), c->t_size, loc);
 		}
+		if (KIND(c, N(n)->ty) == TY_SVE)
+			cc_error(c, loc, "invalid application of 'alignof' to sizeless type '%s'", tyname(c, N(n)->ty));
 		return mk_int(c, align_of_expr(c, n), c->t_size, loc);
 	}
 	case KW___extension__:
@@ -298,6 +322,12 @@ static uint32_t explicit_cast(cc *c, uint32_t n, qty to, uint32_t loc)
 		}
 		return cast_node(c, n, QUNQ(to), CK_UNION);
 	}
+	if (is_bool_vector(c, to) && is_arith(c, N(n)->ty))
+		return convert(c, n, to); /* explicit scalar casts splat the converted boolean */
+	if ((is_bool_vector(c, to) || is_bool_vector(c, N(n)->ty)) && !compatible(c, to, N(n)->ty)) {
+		cc_error(c, loc, "invalid conversion between vector type '%s' and type '%s'", tyname(c, to), tyname(c, N(n)->ty));
+		return cast_node(c, n, QUNQ(to), CK_NOP);
+	}
 	if (is_vector(c, to) && is_vector(c, N(n)->ty) && T(c, to)->size == T(c, N(n)->ty)->size)
 		return cast_node(c, n, QUNQ(to), CK_NOP);
 	if (is_vector(c, to) != is_vector(c, N(n)->ty) && (is_vector(c, to) || is_scalar(c, to))) {
@@ -350,11 +380,47 @@ static uint32_t explicit_cast(cc *c, uint32_t n, qty to, uint32_t loc)
 	return r;
 }
 
+/* Evaluate and capture only bounds introduced by this type-name. Typedef
+   bounds already have their saved value from the declaration. A synthetic
+   one-dimensional char array lets the existing VLA cache retain each bound. */
+VPRIV uint32_t capture_vla_bounds(cc *c, qty ty, uint32_t first, uint32_t value, uint32_t loc)
+{
+	uint32_t effects = 0;
+
+	for (qty t = ty; is_ptr(c, t) || is_array(c, t); t = T(c, t)->base) {
+		const ctype *a = T(c, t);
+		if (a->kind == TY_ARRAY && (a->flags & TF_VLA) && a->n >= first && a->n) {
+			uint32_t bound = a->n;
+			qty bt = ty_vla(c, prim(TY_CHAR), bound);
+			uint32_t fix = mk(c, N_SIZEOF_VLA, c->t_size, loc);
+
+			N(fix)->a = bound;
+			N(fix)->b = bt;
+			N(fix)->aux = 1; /* capture the bound before reading the cached size */
+			effects = effects ? mk2(c, N_COMMA, c->t_size, loc, effects, fix) : fix;
+		}
+	}
+	if (!effects)
+		return value;
+	if (N(value)->flags & NF_LVALUE) {
+		/* Sequence through the address so a compound literal stays an lvalue,
+		   including when a later postfix operator modifies it. */
+		qty vt = N(value)->ty, pt = ty_ptr(c, vt);
+		uint32_t address = mk2(c, N_ADDR, pt, loc, value, 0);
+		uint32_t sequence = mk2(c, N_COMMA, pt, loc, effects, address);
+		uint32_t result = mk2(c, N_DEREF, vt, loc, sequence, 0);
+
+		N(result)->flags = N(value)->flags;
+		return result;
+	}
+	return mk2(c, N_COMMA, N(value)->ty, loc, effects, value);
+}
+
 /* (type-name) cast-expression or compound literal; '(' (at loc) is consumed */
 static __attribute__((noinline)) uint32_t cast_paren(cc *c, uint32_t loc)
 {
 	{
-		uint32_t n;
+		uint32_t n, first_bound = c->nnode;
 		int e0 = c->errors;
 		qty ty;
 		bool bad;
@@ -374,7 +440,7 @@ static __attribute__((noinline)) uint32_t cast_paren(cc *c, uint32_t loc)
 				c->syms[s].flags |= SF_GLOBAL | SF_DEFINED;
 			n = mk2(c, N_COMPLIT, ty, loc, init, s);
 			N(n)->flags = NF_LVALUE;
-			return postfix(c, n);
+			return postfix(c, capture_vla_bounds(c, ty, first_bound, n, loc));
 		}
 		{
 			uint32_t td = c->tn_tdef, r;
@@ -386,7 +452,7 @@ static __attribute__((noinline)) uint32_t cast_paren(cc *c, uint32_t loc)
 			/* an explicit cast to a typedef in a body: its name on the node's free b (-Wformat) */
 			if (td && c->fn && r != n && N(r)->op == N_CAST && !N(r)->b)
 				N(r)->b = td;
-			return r;
+			return capture_vla_bounds(c, ty, first_bound, r, loc);
 		}
 	}
 }
@@ -459,7 +525,7 @@ static void runtime_warn(cc *c, int op, uint32_t l, uint32_t r, uint32_t loc)
 	if (c->dead || (op != T_SLASH && op != T_PERCENT && op != T_LESSLESS && op != T_GREATERGREATER) ||
 	    !is_integer(c, N(l)->ty) || !is_integer(c, N(r)->ty) || !cc_eval(c, r, &cv) || cv.kind != CV_INT)
 		return;
-	if (op == T_SLASH || op == T_PERCENT ? cv.i : cv.i >= 0 && cv.i < (i128)ty_size(c, promoted(c, l)) * 8)
+	if (op == T_SLASH || op == T_PERCENT ? cv.i != 0 : cv.i >= 0 && cv.i < (i128)ty_size(c, promoted(c, l)) * 8)
 		return;	/* no warning: no range (pp_tok_end) either */
 	rr = rng(c, r);
 	if (op == T_SLASH || op == T_PERCENT) {
@@ -890,7 +956,7 @@ static __attribute__((noinline)) uint32_t binary_ops(cc *c, int minp, uint32_t l
 					ptr_cmp(c, op, l, r);
 			}
 			runtime_warn(c, op, l, r, loc);
-			l = binop(c, op, l, r, loc);
+			l = big_fold_node(c, binop(c, op, l, r, loc));
 			if (mac)
 				N(l)->flags |= NF_MACRO;
 			setspan(c, l, b);
@@ -923,7 +989,8 @@ static __attribute__((noinline)) uint32_t cond_rest(cc *c, uint32_t cnd)
 		int k;
 
 		next(c);
-		cnd = scalar_cond(c, decay(c, cnd), "conditional");
+		if (!is_bool_vector(c, N(cnd)->ty))
+			cnd = scalar_cond(c, decay(c, cnd), "conditional");
 		k = cc_eval(c, cnd, &cv) && cv.kind == CV_INT ? cv.i != 0 : -1;
 		c->dead += k == 0;
 		c->cnd++;
@@ -1072,6 +1139,16 @@ VPRIV bool const_expr(cc *c, i128 *v, uint32_t *np)
 	c->cexpr--;
 	if (np)
 		*np = n;
+	cval wide;
+	if (is_bigint(c, N(n)->ty) && eval(c, n, &wide) && wide.kind == CV_BIGINT) {
+		if (wide.ice && big_conversion_exact(c, &wide, N(n)->ty, prim(TY_INT128))) {
+			*v = wide.i;
+			return true;
+		}
+		cc_error(c, N(n)->loc, "wide integer constant is not representable in this 128-bit constant-expression context");
+		*v = 0;
+		return false;
+	}
 	if (!const_int(c, n, v)) {
 		cc_error(c, N(n)->loc, "expression is not an integer constant expression");
 		*v = 0;

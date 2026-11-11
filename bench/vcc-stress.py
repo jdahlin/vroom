@@ -4,7 +4,8 @@
   bench/vcc-stress.py [--vccd] [--bin-dir DIR] [-v] [PAT]
 
 Every case is generated into a temporary directory and compiled with
-`vpp -c --target=aarch64-linux-gnu`.  What a case expects:
+`vpp -c --target=aarch64-linux-gnu` (front-end-only cases use `-S`,
+including explicit x86-64 targets). What a case expects:
   ok     valid input clang accepts: exit 0
   error  invalid or unreasonable input: exit 1..127 and a diagnostic
          ("error" on stderr, and the case's regex if it has one)
@@ -13,9 +14,8 @@ A signal (SIGSEGV from a stack overflow, SIGABRT from an abort()), a
 timeout, or an exit status other than these is a failure.
 
 --vccd sends every case through the shim to one private vccd (as
-bench/vccd-cc.py does), with no backend: vccd hands a TU it rejects to
-clang, so a rejection shows up as status 127 "backend ... not reachable",
-which counts as a clean error.  A case then also fails if vccd died; vccd is
+bench/vccd-cc.py does), with no backend: a TU vcc rejects fails with vcc's
+own diagnostics.  A case then also fails if vccd died; vccd is
 restarted for the next case.  At the end a normal TU must still compile in
 the surviving server.  In vccd mode one bad TU must not take the other jobs
 with it, which is the point of the test.
@@ -26,12 +26,16 @@ the commit that fixes it).  Exit status 1 on any FAIL or XPASS.
 
 --bin-dir build/ccs-asan runs the sanitizer build (then an ASan report is a
 crash too: ASan exits with status 1 but prints "ERROR: AddressSanitizer").
+With a sanitizer build the timeout is 240 s and time budgets are not checked.
 """
 import os, re, shutil, signal, subprocess, sys, tempfile, time, importlib.util
 spec = importlib.util.spec_from_file_location('vd', os.path.join(os.path.dirname(os.path.abspath(__file__)), 'vcc-diff.py'))
 vd = importlib.util.module_from_spec(spec); spec.loader.exec_module(vd)
 
-TIMEOUT = 60
+# a sanitizer build (build/ccs-asan, ccs-tsan) is 2-20x slower: a longer timeout, and no
+# time budgets (they check that vcc stays linear; the normal build checks that)
+SAN = bool(re.search(r'ccs-[a-z]*san\b', vd.BIN))
+TIMEOUT = 240 if SAN else 60
 TARGET = ['--target=aarch64-linux-gnu', '-nostdinc', '-ffreestanding']
 
 def nest(open_, close, n, inner):
@@ -50,6 +54,22 @@ def cases(d):
     case('ternary-100k', 'any', {'a.c': 'int x = ' + '1 ? ' * 100000 + '1' + ' : 0' * 100000 + ';\n'}, 'a.c')
     case('cast-chain-100k', 'any', {'a.c': 'long x = ' + '(long)' * 100000 + '1;\n'}, 'a.c')
     case('block-nest-5000', 'any', {'a.c': 'void f(void) ' + nest('{', '}', 5000, '') + '\n'}, 'a.c')
+    # Flat sequences use scalable storage and iterative parsing, not C recursion.
+    case('pointer-10k', 'ok', {'a.c': 'int ' + '* ' * 10000 + 'p;\n'}, 'a.c')
+    for order in ('forward', 'reverse'):
+        values = range(100000) if order == 'forward' else reversed(range(100000))
+        labels = ''.join(f'case {i}:' for i in values)
+        case('case-labels-100k-' + order, 'ok',
+             {'a.c': 'int f(int n) { switch(n) {' + labels + 'return 1; default:return 2;} }\n'}, 'a.c')
+    labels = ''.join(f'case {i}:' for i in range(1000))
+    case('case-labels-late-duplicate', 'error',
+         {'a.c': 'int f(int n) { switch(n) {' + labels + 'case 10:return 1;}return 0;}\n'},
+         'a.c', regex='duplicate case')
+    for target in ('x86_64', 'aarch64'):
+        case('record-nest-100k-' + target, 'error',
+             {'a.c': ''.join(f'struct s{i} {{' for i in range(100000)) + 'int x;' + '} x;' * 100000 + '\n'},
+             'a.c', args=('--target=' + target + '-linux-gnu', '-fsyntax-only'),
+             regex='record nested too deeply')
     # preprocessor recursion
     case('pp-if-parens-200k', 'any', {'a.c': '#if ' + nest('(', ')', 200000, '1') + '\nint x;\n#endif\n'}, 'a.c')
     case('pp-macro-nest-100k', 'any', {'a.c': '#define F(x) x\nint y = ' + nest('F(', ')', 100000, '1') + ';\n'}, 'a.c')
@@ -67,6 +87,18 @@ def cases(d):
         return 'volatile long a[64];\nlong f(long x) { return ' + e + '; }\n'
     # right-nested expressions past the temporaries: spilled; far past the stack: an error or code, no crash (clang crashes)
     case('expr-right-nest-250', 'ok', {'a.c': rnest(250)}, 'a.c')
+    # More than 1,000 independent representation proofs followed by a deep tail.
+    # The normal harness timeout detects lost memoization without a tight timing
+    # assertion; valid input must compile rather than hit a fixed cache limit.
+    bit_leaf = '__builtin_bit_cast(unsigned,__builtin_bit_cast(float,1u))'
+    bit_tail = nest('__builtin_bit_cast(unsigned,', ')', 40, '1u')
+    bit_source = ('struct S { unsigned a[601]; };\nconstexpr struct S s = '
+                  '__builtin_bit_cast(struct S,(struct S){{' + ','.join([bit_leaf] * 600 + [bit_tail]) + '}});\n'
+                  'static_assert(s.a[0] == 1 && s.a[600] == 1);\n')
+    for target in ('x86_64', 'aarch64'):
+        case('bit-cast-memo-growth-' + target, 'ok', {'a.c': bit_source}, 'a.c',
+             args=('--target=' + target + '-linux-gnu', '-std=c23', '-fsyntax-only'))
+
     case('expr-right-nest-10k', 'any', {'a.c': rnest(10000)}, 'a.c')	# vccd's stacks are bigger: it compiles
     case('struct-10k-members', 'ok', {'a.c': 'struct s {' + ''.join(f' int m{i};' for i in range(10000)) + ' } v;\n'}, 'a.c')
     case('declarator-100-ptrs', 'ok', {'a.c': 'int ' + '*' * 100 + 'p;\n'}, 'a.c')
@@ -106,7 +138,7 @@ class Vccd:
         self.log = open(f'{tmp}/vccd.log', 'a')
     def start(self):
         if os.path.exists(self.sock): os.unlink(self.sock)
-        self.p = subprocess.Popen([f'{vd.BIN}/vccd', '--sock', self.sock, '--backend-sock', f'{self.tmp}/none.sock', '-j', '4'],
+        self.p = subprocess.Popen([f'{vd.BIN}/vccd', '--sock', self.sock, '-j', '4'],
                                   stdout=self.log, stderr=self.log)
         for _ in range(200):
             if os.path.exists(self.sock): return
@@ -120,7 +152,10 @@ class Vccd:
 
 def run(c, d, vccd):
     out = f'{d}/out.o'
-    argv = TARGET + c['args'] + ['-c', '-o', out, c['main']]
+    # -S also routes front-end-only jobs through vccd's compile path, and
+    # permits x86-64 checks without its unsupported direct-object mode.
+    mode = ['-S' if '-fsyntax-only' in c['args'] else '-c', '-o', out]
+    argv = TARGET + c['args'] + mode + [c['main']]
     if vccd:
         cmd, env = [f'{vd.BIN}/vcc'] + argv, dict(os.environ, VCC_SOCK=vccd.sock)
     else:
@@ -143,8 +178,7 @@ def verdict(c, rc, err, server_ok):
     if rc == 0:
         return (c['expect'] == 'any', 'accepted' if c['expect'] == 'any' else 'accepted, want an error')
     if not has_diag: return False, f'rc {rc} without a diagnostic'
-    # (vccd hands a TU it rejects to the backend: its own message is not shown)
-    if c['regex'] and not re.search(c['regex'], err) and not re.search(r'backend .* not reachable', err): return False, f'diagnostic does not match /{c["regex"]}/: {first(err)}'
+    if c['regex'] and not re.search(c['regex'], err): return False, f'diagnostic does not match /{c["regex"]}/: {first(err)}'
     return True, f'error: {first(err)}'
 
 def first(err):
@@ -169,7 +203,7 @@ def main():
             rc, dt, err = run(c, d, vccd)
             server_ok = vccd.alive() if vccd else True
             ok, why = verdict(c, rc, err, server_ok)
-            if ok and c['budget'] and dt > c['budget']: ok, why = False, f'{dt:.1f} s, budget {c["budget"]} s'
+            if ok and c['budget'] and not SAN and dt > c['budget']: ok, why = False, f'{dt:.1f} s, budget {c["budget"]} s'
             if c['xfail'] and not ok: st = 'xfail'; xfails += 1
             elif c['xfail'] and ok: st = 'XPASS'; fails += 1; why += f' -- remove xfail ({c["xfail"]})'
             elif ok: st = 'pass'; passes += 1

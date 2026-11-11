@@ -89,16 +89,20 @@ def warn(t):
 
 if __name__ == '__main__':
     av = [x for x in sys.argv[1:] if x != '--kernel']; j = 6
+    av = [part for arg in av for part in (['-j', arg[2:]] if arg.startswith('-j') and arg[2:].isdigit() else [arg])]
     if '-j' in av: k = av.index('-j'); j = int(av[k+1]); del av[k:k+2]
     mode = av[0]; pat = av[1] if len(av) > 1 else None
     ts = c_tus(pat)
     if '--kernel' in sys.argv: ts = [t for t in ts if not t[0].startswith('scripts/')]
+    if not ts:
+        os.rmdir(TMP)
+        sys.exit(f'No C translation units matched {pat!r} in {B}')
     if mode == 'batch':
         jf = f'{TMP}/jobs'
         with open(jf, 'w') as f:
             for obj, a in ts: f.write('\x1f'.join(['-', '-fsyntax-only'] + a) + '\n')
         r = subprocess.run([VPP, '--batch', jf, '-j', str(j), '-C', B], stdout=subprocess.PIPE, text=True)
-        print(r.stdout.splitlines()[-2] if r.stdout.count('\n') >= 2 else r.stdout, end='\n')
+        print(r.stdout, end='' if r.stdout.endswith('\n') else '\n')
         os.unlink(jf); os.rmdir(TMP); sys.exit(r.returncode)
     with Pool(j) as pool:
         res = pool.map(run if mode == 'run' else warn if mode == 'warn' else layout, ts, chunksize=2)

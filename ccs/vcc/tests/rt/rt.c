@@ -19,8 +19,27 @@ FILE *stdin = &f_in, *stdout = &f_out, *stderr = &f_err;
 int errno;
 
 /* ---- output ---- */
+#ifdef __x86_64__
+/* x86-64 Linux (start-x86.S): stdout through write(2), buffered; __rt_flush at exit */
+static char obuf[4096];
+static unsigned on;
+void __rt_flush(void)
+{
+	long r;
+	unsigned k = 0;
+
+	while (k < on) {
+		__asm__ volatile("syscall" : "=a"(r) : "a"(1L), "D"(1L), "S"(obuf + k), "d"((long)(on - k)) : "rcx", "r11", "memory");
+		if (r <= 0) break;
+		k += (unsigned)r;
+	}
+	on = 0;
+}
+static void outc(int c) { obuf[on++] = (char)c; if (on == sizeof obuf) __rt_flush(); }
+#else
 static volatile unsigned int *const uart = (unsigned int *)0x09000000;
 static void outc(int c) { *uart = (unsigned char)c; }
+#endif
 
 /* ---- string ---- */
 void *memcpy(void *d, const void *s, size_t n) { char *a = d; const char *b = s; while (n--) *a++ = *b++; return d; }
@@ -266,8 +285,13 @@ static double ld2d(long double x)
 	return r.d;
 }
 /* not __builtin_sqrt: under -fno-builtin it is a call to sqrt, this function */
+#ifdef __x86_64__
+double sqrt(double x) { double r; __asm__("sqrtsd %1, %0" : "=x"(r) : "x"(x)); return r; }
+float sqrtf(float x) { float r; __asm__("sqrtss %1, %0" : "=x"(r) : "x"(x)); return r; }
+#else
 double sqrt(double x) { double r; __asm__("fsqrt %d0, %d1" : "=w"(r) : "w"(x)); return r; }
 float sqrtf(float x) { float r; __asm__("fsqrt %s0, %s1" : "=w"(r) : "w"(x)); return r; }
+#endif
 double floor(double x) { return __builtin_floor(x); }
 double ceil(double x) { return __builtin_ceil(x); }
 double trunc(double x) { return __builtin_trunc(x); }
@@ -371,15 +395,72 @@ double tanh(double x)
 	return (e - 1) / (e + 1);
 }
 
-/* float complex division (compiler-rt's __divsc3, without its scaling) */
-_Complex float __divsc3(float a, float b, float c, float d)
-{
-	float den = c * c + d * d;
-	_Complex float r;
-	__real__ r = (a * c + b * d) / den;
-	__imag__ r = (b * c - a * d) / den;
-	return r;
+/* Complex division normalizes the denominator before squaring it.  The
+ * exceptional cases follow the C complex arithmetic rules also used by
+ * compiler-rt.  Keep scaling freestanding: neither logb nor scalbn is
+ * available in the bare test environment.  Negative scaling is split above
+ * the normal/subnormal boundary so only the final multiplication rounds a
+ * subnormal result. */
+#define RT_COMPLEX_DIV(T, NAME, TAG, MAXEXP, MANT, ABS, SIGN, INF) \
+static T TAG##_pow2(int e) \
+{ \
+	T p = 1, b = e < 0 ? (T)0.5 : (T)2; \
+	unsigned n = e < 0 ? -e : e; \
+	for (; n; n >>= 1) { if (n & 1) p *= b; if (n > 1) b *= b; } \
+	return p; \
+} \
+static T TAG##_scale(T x, int e) \
+{ \
+	const int hi = MAXEXP - 1, min = 2 - MAXEXP, lo = min + MANT; \
+	if (e > hi) { x *= TAG##_pow2(hi); e -= hi; \
+		if (e > hi) { x *= TAG##_pow2(hi); e -= hi; if (e > hi) e = hi; } } \
+	if (e < min) { x *= TAG##_pow2(lo); e -= lo; \
+		if (e < min) { x *= TAG##_pow2(lo); e -= lo; if (e < min) e = min; } } \
+	return x * TAG##_pow2(e); \
+} \
+_Complex T NAME(T a, T b, T c, T d) \
+{ \
+	T m = ABS(c), n = ABS(d); \
+	if (m != m || n > m) m = n; \
+	int e = 0; \
+	if (m > 0 && __builtin_isfinite(m)) { \
+		while (m >= (T)0x1p64) { m *= (T)0x1p-64; e += 64; } \
+		while (m < (T)0x1p-64) { m *= (T)0x1p64; e -= 64; } \
+		while (m >= 2) { m *= (T)0.5; e++; } \
+		while (m < 1) { m *= 2; e--; } \
+		c = TAG##_scale(c, -e); d = TAG##_scale(d, -e); \
+	} \
+	T den = c * c + d * d; \
+	T re = TAG##_scale((a * c + b * d) / den, -e); \
+	T im = TAG##_scale((b * c - a * d) / den, -e); \
+	if (__builtin_isnan(re) && __builtin_isnan(im)) { \
+		if (den == 0 && (!__builtin_isnan(a) || !__builtin_isnan(b))) { \
+			re = SIGN(INF, c) * a; im = SIGN(INF, c) * b; \
+		} else if ((__builtin_isinf(a) || __builtin_isinf(b)) && \
+		           __builtin_isfinite(c) && __builtin_isfinite(d)) { \
+			a = SIGN((T)!!__builtin_isinf(a), a); \
+			b = SIGN((T)!!__builtin_isinf(b), b); \
+			re = INF * (a * c + b * d); im = INF * (b * c - a * d); \
+		} else if (__builtin_isinf(m) && __builtin_isfinite(a) && __builtin_isfinite(b)) { \
+			c = SIGN((T)!!__builtin_isinf(c), c); \
+			d = SIGN((T)!!__builtin_isinf(d), d); \
+			re = (T)0 * (a * c + b * d); im = (T)0 * (b * c - a * d); \
+		} \
+	} \
+	_Complex T r; __real__ r = re; __imag__ r = im; return r; \
 }
+RT_COMPLEX_DIV(float, __divsc3, rt_cdivf, 128, 24,
+               __builtin_fabsf, __builtin_copysignf, __builtin_inff())
+RT_COMPLEX_DIV(double, __divdc3, rt_cdiv, 1024, 53,
+               __builtin_fabs, __builtin_copysign, __builtin_inf())
+#if __LDBL_MANT_DIG__ == 113
+RT_COMPLEX_DIV(long double, __divtc3, rt_cdivl, 16384, 113,
+               __builtin_fabsl, __builtin_copysignl, __builtin_infl())
+#elif __LDBL_MANT_DIG__ == 64
+RT_COMPLEX_DIV(long double, __divxc3, rt_cdivl, 16384, 64,
+               __builtin_fabsl, __builtin_copysignl, __builtin_infl())
+#endif
+#undef RT_COMPLEX_DIV
 __int128 __fixsfti(float f)
 {
 	int neg = f < 0;
@@ -648,6 +729,7 @@ int __rt_main(void)
 	return r;
 }
 
+#ifndef __x86_64__	/* (x86-64: libgcc's, for __float128) */
 /*
  * ---- binary128 soft float (compiler-rt's names and ABI: q registers) ----
  * Only integer arithmetic here, so clang does not call these from within.
@@ -926,3 +1008,47 @@ unsigned long long __fixunstfdi(long double f) { int s; tf_u m = tf_toint(f, &s)
 unsigned __fixunstfsi(long double f) { return (unsigned)__fixunstfdi(f); }
 __int128 __fixtfti(long double f) { int s; tf_u m = tf_toint(f, &s); return s ? -(__int128)m : (__int128)m; }
 tf_u __fixunstfti(long double f) { int s; tf_u m = tf_toint(f, &s); return s ? 0 : m; }
+#endif
+
+/* Scalar bfloat conversions for freestanding ARM tests. Production Linux links
+ * the same ABI entry points from libgcc. Work on integer IEEE encodings so the
+ * compiler building this runtime cannot emit calls back to these helpers. */
+static uint16_t rt_bfloat_bits(uint64_t u, unsigned p, unsigned eb, int bias)
+{
+    uint16_t sign = (uint16_t)((u >> (p + eb)) << 15);
+    uint64_t mask = (UINT64_C(1) << p) - 1, m = u & mask;
+    unsigned ex = (unsigned)(u >> p) & ((1u << eb) - 1);
+    int e, shift;
+    uint64_t q, rem, halfway;
+    if (ex == (1u << eb) - 1)
+        return sign | 0x7f80 | (m ? 0x40 | (unsigned)(m >> (p - 7)) : 0);
+    if (!ex && !m) return sign;
+    e = (ex ? (int)ex : 1) - bias;
+    if (ex) m |= UINT64_C(1) << p;
+    if (e > 127) return sign | 0x7f80;
+    shift = (int)p - 7 + (e < -126 ? -126 - e : 0);
+    if (shift >= 64) return sign;
+    q = m >> shift;
+    rem = m & ((UINT64_C(1) << shift) - 1);
+    halfway = UINT64_C(1) << (shift - 1);
+    q += rem > halfway || (rem == halfway && (q & 1));
+    return sign | (uint16_t)((e >= -126 ? (e + 126) << 7 : 0) + q);
+}
+float __extendbfsf2(__bf16 x)
+{
+    union { __bf16 f; uint16_t u; } a = { .f = x };
+    union { float f; uint32_t u; } b = { .u = (uint32_t)a.u << 16 };
+    return b.f;
+}
+__bf16 __truncsfbf2(float x)
+{
+    union { float f; uint32_t u; } a = { .f = x };
+    union { __bf16 f; uint16_t u; } b = { .u = rt_bfloat_bits(a.u, 23, 8, 127) };
+    return b.f;
+}
+__bf16 __truncdfbf2(double x)
+{
+    union { double f; uint64_t u; } a = { .f = x };
+    union { __bf16 f; uint16_t u; } b = { .u = rt_bfloat_bits(a.u, 52, 11, 1023) };
+    return b.f;
+}

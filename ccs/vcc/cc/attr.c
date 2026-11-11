@@ -4,16 +4,17 @@
 /* ---------------- attributes ---------------- */
 
 enum {
-	A_NONE, A_ALIGNED, A_PACKED, A_SECTION, A_MODE, A_CLEANUP, A_ALIAS, A_WEAK, A_USED, A_UNUSED,
+	A_NONE, A_INTERRUPT, A_MS_STRUCT, A_ALIGNED, A_PACKED, A_SECTION, A_MODE, A_CLEANUP, A_ALIAS, A_WEAK, A_USED, A_UNUSED,
 	A_NORETURN, A_ALWAYS_INLINE, A_NOINLINE, A_GNU_INLINE, A_TRANSPARENT_UNION, A_VISIBILITY,
 	A_CONSTRUCTOR, A_DESTRUCTOR, A_COUNTED_BY, A_VECTOR_SIZE, A_COLD, A_NONSTRING, A_MAY_ALIAS,
 	A_WEAKREF, A_NAKED, A_NOCF, A_ERROR, A_OVERLOADABLE, A_NOINSTR, A_TLS_MODEL, A_EXT_VECTOR, A_DEPRECATED, A_WUR, A_NODISCARD, A_IFUNC, A_NONNULL, A_FORMAT, A_FORMAT_ARG,
-	A_PURE, A_CONST, A_UNAVAILABLE,
+	A_PURE, A_CONST, A_UNAVAILABLE, A_TARGET, A_RETURNS_TWICE, A_DISABLE_TAIL_CALLS, A_NOT_TAIL_CALLED, A_OPTNONE,
 	A_COUNT
 };
 
 static const char *const attr_names[A_COUNT] = {
-	[A_ALIGNED] = "aligned", [A_PACKED] = "packed", [A_SECTION] = "section", [A_MODE] = "mode",
+	[A_INTERRUPT] = "interrupt",
+	[A_MS_STRUCT] = "ms_struct", [A_ALIGNED] = "aligned", [A_PACKED] = "packed", [A_SECTION] = "section", [A_MODE] = "mode",
 	[A_CLEANUP] = "cleanup", [A_ALIAS] = "alias", [A_WEAK] = "weak", [A_USED] = "used",
 	[A_UNUSED] = "unused", [A_NORETURN] = "noreturn", [A_ALWAYS_INLINE] = "always_inline",
 	[A_NOINLINE] = "noinline", [A_GNU_INLINE] = "gnu_inline", [A_TRANSPARENT_UNION] = "transparent_union",
@@ -22,7 +23,9 @@ static const char *const attr_names[A_COUNT] = {
 	[A_NONSTRING] = "nonstring", [A_MAY_ALIAS] = "may_alias", [A_WEAKREF] = "weakref",
 	[A_NOINSTR] = "no_instrument_function", [A_NAKED] = "naked", [A_NOCF] = "nocf_check", [A_ERROR] = "error",
 	[A_OVERLOADABLE] = "overloadable", [A_TLS_MODEL] = "tls_model", [A_EXT_VECTOR] = "ext_vector_type",
-	[A_PURE] = "pure", [A_CONST] = "const", [A_UNAVAILABLE] = "unavailable",
+	[A_TARGET] = "target", [A_PURE] = "pure", [A_CONST] = "const", [A_UNAVAILABLE] = "unavailable",
+	[A_RETURNS_TWICE] = "returns_twice", [A_DISABLE_TAIL_CALLS] = "disable_tail_calls",
+	[A_NOT_TAIL_CALLED] = "not_tail_called", [A_OPTNONE] = "optnone",
 	[A_DEPRECATED] = "deprecated", [A_WUR] = "warn_unused_result", [A_NODISCARD] = "nodiscard", [A_IFUNC] = "ifunc", [A_NONNULL] = "nonnull", [A_FORMAT] = "format", [A_FORMAT_ARG] = "format_arg",
 };
 
@@ -116,6 +119,8 @@ VPRIV int mode_kind(cc *c, uint32_t id, bool sgn)
 		return 0;
 	memcpy(b, s, (size_t)l);
 	(void)c;
+	if (!strcmp(b, "SF")) return TY_FLOAT;
+	if (!strcmp(b, "DF")) return TY_DOUBLE;
 	if (!strcmp(b, "QI")) return sgn ? TY_SCHAR : TY_UCHAR;
 	if (!strcmp(b, "HI")) return sgn ? TY_SHORT : TY_USHORT;
 	if (!strcmp(b, "SI")) return sgn ? TY_INT : TY_UINT;
@@ -126,6 +131,28 @@ VPRIV int mode_kind(cc *c, uint32_t id, bool sgn)
 }
 
 #include "attrnames.inc"
+#include "attrnames-x86.inc"
+
+/* x86-64: name in one of its sorted lists (gen-x86data.sh) */
+static bool attr_x86(const char *const *tab, size_t n, const char *k, size_t kn)
+{
+	size_t lo = 0, hi = n;
+
+	while (lo < hi) {
+		size_t mid = (lo + hi) / 2;
+		int r = strncmp(tab[mid], k, kn);
+
+		if (!r && tab[mid][kn])
+			r = 1;
+		if (!r)
+			return true;
+		if (r < 0)
+			lo = mid + 1;
+		else
+			hi = mid;
+	}
+	return false;
+}
 
 /* name without __x__, as clang normalises it */
 static void attr_norm(const char **s, size_t *n)
@@ -153,6 +180,8 @@ static bool attr_known(cc *c, int scope, const char *s, size_t n)
 
 		if (l < 0 || (size_t)l >= sizeof(k))
 			return false;
+		if (c->o->target == PP_LINUX_X86_64)
+			return attr_x86(c_attrs_x86, sizeof(c_attrs_x86) / sizeof(*c_attrs_x86), k, (size_t)l);
 		while (lo < hi) {
 			size_t mid = (lo + hi) / 2;
 			int r = strcmp(c_attrs[mid].name, k);
@@ -166,6 +195,8 @@ static bool attr_known(cc *c, int scope, const char *s, size_t n)
 		}
 		return false;
 	}
+	if (c->o->target == PP_LINUX_X86_64)
+		return attr_x86(gnu_attrs_x86, sizeof(gnu_attrs_x86) / sizeof(*gnu_attrs_x86), s, n);
 	while (lo < hi) {
 		size_t mid = (lo + hi) / 2;
 		int r = strncmp(gnu_attrs[mid].name, s, n);
@@ -234,6 +265,55 @@ static const char *attr_correction(cc *c, int scope, const char *s, size_t n)
 	if (!bn || !best || !attr_known(c, scope, bn, strlen(bn)))
 		return NULL;
 	return bn;
+}
+
+/* Preserve effective function features; parse arch before feature overrides. */
+static void target_attr(cc *c, attrs *a, uint32_t str, uint32_t loc)
+{
+	if (!str || c->o->target != PP_LINUX_X86_64) return;
+	const char *text = c->strs[str - 1].s;
+	x86_features features = c->o->x86_features_set ? c->o->x86_raw : cc_x86_features(c, 0), disabled = c->o->x86_disabled;
+	char *copy = strdup(text), *save = NULL, *part;
+	bool valid = true;
+	for (part = strtok_r(copy, ",", &save); part; part = strtok_r(NULL, ",", &save)) {
+		if (!strncmp(part, "arch=", 5) && !x86_cpu_features(part + 5, &features)) {
+			pp_dinfo d = { .what = "warning", .loc = loc };
+			pp_warnx(c->p, "ignored-attributes", true, NULL, &d,
+					"unsupported '%s' in the 'target' attribute string; 'target' attribute ignored", part);
+			valid = false;
+		}
+	}
+	for (unsigned i = 0; i < X86_FEATURE_WORDS; i++)
+		features.bits[i] = (features.bits[i] & ~c->o->x86_override_off.bits[i]) | c->o->x86_override_on.bits[i];
+	free(copy);
+	copy = strdup(text); save = NULL;
+	for (part = strtok_r(copy, ",", &save); part; part = strtok_r(NULL, ",", &save)) {
+		if (!strncmp(part, "arch=", 5) || !strcmp(part, "default")) continue;
+		if (!strcmp(part, "general-regs-only")) {
+			const unsigned bits[] = {X86_FEATURE_X87, X86_FEATURE_MMX, X86_FEATURE_SSE};
+			for (unsigned k = 0; k < sizeof(bits)/sizeof(*bits); k++) {
+				x86_feature_apply(&features, bits[k], false);
+				disabled.bits[bits[k]/64] |= UINT64_C(1) << (bits[k]%64);
+			}
+			continue;
+		}
+		bool enable = strncmp(part, "no-", 3) != 0;
+		const char *name = enable ? part : part + 3;
+		if (!strcmp(name, "sse4")) name = enable ? "sse4.2" : "sse4.1";
+		int bit = x86_feature_find(name);
+		if (bit < 0 || !x86_feature_has(x86_attr_valid, (unsigned)bit)) {
+			pp_dinfo d = { .what = "warning", .loc = loc };
+			pp_warnx(c->p, "ignored-attributes", true, NULL, &d,
+					"unsupported '%s' in the 'target' attribute string; 'target' attribute ignored", part);
+			valid = false;
+		} else {
+			x86_feature_apply(&features, (unsigned)bit, enable);
+			if (!enable) disabled.bits[bit / 64] |= UINT64_C(1) << (bit % 64);
+			else disabled.bits[bit / 64] &= ~(UINT64_C(1) << (bit % 64));
+		}
+	}
+	free(copy);
+	if (valid) { x86_features_finish(&features, disabled); a->x86_features = features; a->x86_target = 1; }
 }
 
 /* GNU __attribute__((...)) and C23 [[...]] (gnu::name is the GNU attribute) */
@@ -329,6 +409,13 @@ __attribute__((noinline)) VPRIV void attribute_list_(cc *c, attrs *a)
 					a->aligned = 16;
 				}
 				continue;
+			case A_TARGET: {
+				expect(c, T_LPAREN, "'('");
+				uint32_t ts = string_index(c, aid);
+				expect(c, T_RPAREN, "')'");
+				target_attr(c, a, ts, loc);
+				continue;
+			}
 			case A_IFUNC:
 				a->ifunc = 1;
 				an = A_ALIAS;
@@ -353,17 +440,33 @@ __attribute__((noinline)) VPRIV void attribute_list_(cc *c, attrs *a)
 				}
 				expect(c, T_RPAREN, "')'");
 				continue;
-			case A_TLS_MODEL:
-				expect(c, T_LPAREN, "'('");
-				{
-					uint32_t loc = tok(c)->loc;
+			case A_TLS_MODEL: {
+				if (!accept(c, T_LPAREN)) {
+					cc_error(c, loc, "'tls_model' attribute takes one argument");
+					continue;
+				}
+				uint32_t argloc = tok(c)->loc, si = 0;
+				bool empty = is(c, T_RPAREN);
 
-					a->tlsmodel = (uint8_t)vcc_tls_model(c->strs[string_index(c, aid) - 1].s);
-					if (!a->tlsmodel)
-						cc_error(c, loc, "tls_model must be \"global-dynamic\", \"local-dynamic\", \"initial-exec\" or \"local-exec\"");
+				if (!empty)
+					si = string_index(c, aid);
+				if (empty || is(c, T_COMMA)) {
+					cc_error(c, loc, "'tls_model' attribute takes one argument");
+					while (!is(c, T_RPAREN) && !is(c, T_EOF) && !is(c, T_SEMI)) {
+						if (is(c, T_LPAREN)) skip_balanced(c);
+						else next(c);
+					}
+				} else if (si) {
+					uint8_t model = (uint8_t)vcc_tls_model(c->strs[si - 1].s);
+
+					if (!model)
+						cc_error(c, argloc, "tls_model must be \"global-dynamic\", \"local-dynamic\", \"initial-exec\" or \"local-exec\"");
+					else
+						a->tlsmodel = model, a->tlsloc = loc;
 				}
 				expect(c, T_RPAREN, "')'");
 				continue;
+			}
 			case A_MODE:
 				expect(c, T_LPAREN, "'('");
 				if (is(c, T_IDENT))
@@ -485,14 +588,20 @@ __attribute__((noinline)) VPRIV void attribute_list_(cc *c, attrs *a)
 					a->extvec = (uint32_t)v;
 				continue;
 			}
+			case A_MS_STRUCT: a->ms_struct = 1; break;
 			case A_PACKED: a->packed = 1; break;
 			case A_WEAK: a->weak = 1; break;
 			case A_USED: a->used = 1; break;
 			case A_UNUSED: a->unused = 1; break;
 			case A_NORETURN: a->noreturn = 1; break;
 			case A_ALWAYS_INLINE: a->always_inline = 1; break;
+			case A_INTERRUPT: a->interrupt = 1; a->noinline = 1; break;
 			case A_NOINLINE: a->noinline = 1; break;
 			case A_NOINSTR: a->noinstr = 1; break;
+			case A_RETURNS_TWICE: a->flags |= AF_TAIL_RETURNS_TWICE; break;
+			case A_DISABLE_TAIL_CALLS: a->flags |= AF_TAIL_DISABLE; break;
+			case A_NOT_TAIL_CALLED: a->flags |= AF_TAIL_NOT_CALLED; break;
+			case A_OPTNONE: a->flags |= AF_OPTNONE; break;
 			case A_OVERLOADABLE: a->overloadable = 1; break;
 			case A_GNU_INLINE: a->gnu_inline = 1; break;
 			case A_TRANSPARENT_UNION: a->transparent = 1; break;
@@ -573,8 +682,11 @@ VPRIV void merge_attrs(attrs *to, const attrs *from)
 {
 	if (attrs_empty(from))
 		return;
+	if (from->x86_target) to->x86_features = from->x86_features, to->x86_target = 1;
 	if (from->aligned > to->aligned)
 		to->aligned = from->aligned;
+	if (from->interrupt) to->interrupt = from->interrupt;
+	if (from->ms_struct) to->ms_struct = from->ms_struct;
 	if (from->section) to->section = from->section;
 	if (from->alias) to->alias = from->alias;
 	if (from->asmname) to->asmname = from->asmname;
@@ -592,8 +704,9 @@ VPRIV void merge_attrs(attrs *to, const attrs *from)
 	if (from->visibility) to->visibility = from->visibility;
 	if (from->errmsg) to->errmsg = from->errmsg;
 	if (from->prio) to->prio = from->prio;
-	if (from->tlsmodel) to->tlsmodel = from->tlsmodel;
+	if (from->tlsmodel) to->tlsmodel = from->tlsmodel, to->tlsloc = from->tlsloc;
 	if (from->pure) to->pure = from->pure;
+	to->flags |= from->flags;
 	/* the 0/1 flags packed .. noinstr: or them bytewise */
 	{
 		char *t = (char *)&to->packed;

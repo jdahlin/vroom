@@ -22,6 +22,13 @@ typedef _Atomic(_Bool) atomic_bool;
 typedef _Atomic(char) atomic_char;
 typedef _Atomic(signed char) atomic_schar;
 typedef _Atomic(unsigned char) atomic_uchar;
+#if __STDC_VERSION__ >= 202311L
+typedef _Atomic(unsigned char) atomic_char8_t;
+#define ATOMIC_CHAR8_T_LOCK_FREE __CLANG_ATOMIC_CHAR8_T_LOCK_FREE
+#endif
+typedef _Atomic(__CHAR16_TYPE__) atomic_char16_t;
+typedef _Atomic(__CHAR32_TYPE__) atomic_char32_t;
+typedef _Atomic(__WCHAR_TYPE__) atomic_wchar_t;
 typedef _Atomic(short) atomic_short;
 typedef _Atomic(unsigned short) atomic_ushort;
 typedef _Atomic(int) atomic_int;
@@ -55,6 +62,9 @@ typedef _Atomic(uintmax_t) atomic_uintmax_t;
 
 #define ATOMIC_BOOL_LOCK_FREE 2
 #define ATOMIC_CHAR_LOCK_FREE 2
+#define ATOMIC_CHAR16_T_LOCK_FREE __CLANG_ATOMIC_CHAR16_T_LOCK_FREE
+#define ATOMIC_CHAR32_T_LOCK_FREE __CLANG_ATOMIC_CHAR32_T_LOCK_FREE
+#define ATOMIC_WCHAR_T_LOCK_FREE __CLANG_ATOMIC_WCHAR_T_LOCK_FREE
 #define ATOMIC_SHORT_LOCK_FREE 2
 #define ATOMIC_INT_LOCK_FREE 2
 #define ATOMIC_LONG_LOCK_FREE 2

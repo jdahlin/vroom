@@ -32,11 +32,12 @@ typedef uint64_t rmask;
 
 /* operand roles */
 enum { RD_R = 1, RN_R = 2, RM_R = 4, RA_R = 8, RD_W = 16, RA_W = 32, RN_W = 64, OP_ALL = 128, OP_CALL = 256, OP_ASM = 512,
-       OP_RET = 2048, OP_TLV = 4096 };
-#define OP_SLOW (OP_ALL | OP_CALL | OP_ASM | OP_RET | OP_TLV)	/* reads()/writes() beyond the operand fields */
+       OP_RET = 2048, OP_TLV = 4096, OP_TAIL = 8192 };
+#define OP_SLOW (OP_ALL | OP_CALL | OP_ASM | OP_RET | OP_TLV | OP_TAIL)	/* reads()/writes() beyond the operand fields */
 
 /* the function's raw text, for the registers of inline asm (RAW_MASKS) */
 static _Thread_local const char *rawp;
+static _Thread_local rmask retreads;
 /* control */
 enum { BR_NONE, BR_UNCOND, BR_COND, BR_END, BR_INDIRECT };
 
@@ -79,6 +80,8 @@ static unsigned roles_sw(const ins *i)
 		return RN_R;
 	case I_RET:
 		return OP_RET;	/* reads x0, x1 */
+	case I_TAIL:
+		return OP_TAIL;	/* outgoing x0-x7 survive until the sibling branch */
 	case I_LABEL: case I_B: case I_BC: case I_NOP:
 	case I_BRK:	/* a trap (BUG, WARN, __builtin_trap): the handler may print registers, needs none */
 		return 0;
@@ -126,7 +129,7 @@ static int brkind_sw(const ins *i)
 	switch (i->op) {
 	case I_B: return BR_UNCOND;
 	case I_BC: case I_CBZ: case I_CBNZ: return BR_COND;
-	case I_RET: return BR_END;
+	case I_RET: case I_TAIL: return BR_END;
 	case I_BR: return BR_INDIRECT;
 	default: return BR_NONE;
 	}
@@ -152,7 +155,9 @@ __attribute__((noinline)) static rmask reads_slow(const ins *i, unsigned ro)
 	if (ro & OP_CALL)
 		s |= RB(9) - 1;	/* x0-x8: arguments, indirect result */
 	if (ro & OP_RET)
-		s |= RB(0) | RB(1);
+		s |= retreads;
+	if (ro & OP_TAIL)
+		s |= RB(8) - 1;
 	return s;
 }
 
@@ -308,7 +313,7 @@ static bool liveness(ecx *e)
 			rmask o = 0, i;
 
 			if (b == nb - 1 && brkind(&in[W.be[b]]) != BR_UNCOND)
-				o |= RB(0) | RB(1);	/* falls into the epilogue: the return value */
+				o |= retreads;	/* falls into the epilogue: the return value */
 			if (W.s0[b] >= 0)
 				o |= W.in[W.s0[b]];
 			if (W.s1[b] >= 0)
@@ -357,46 +362,17 @@ static bool is_copy(const ins *i)
 	       (COPYOK & RB(i->rd)) && (COPYOK & RB(i->rn));
 }
 
-/* mov t, v at k: uses of t read v instead */
-static bool forward(ecx *e, uint32_t k)
+/* Operand policy for the shared transaction. Asm registers live in its text,
+ * while tied read/write operands cannot be redirected independently.
+ */
+static bool a64_copy_rewrite(void *ctx, uint32_t j, uint8_t t, uint8_t v, bool apply)
 {
-	ins *in = e->in;
-	int t = in[k].rd, v = in[k].rn;
-	uint32_t b = W.blk[k], j, nrw = 0;
-	static _Thread_local uint32_t rw[256];
+	ecx *e = ctx;
+	unsigned ro = W.ro[j];
 
-	if (!(TEMPS & RB(t)))
-		return false;
-	for (j = k + 1; j <= W.be[b]; j++) {
-		const ins *i = &in[j];
-		unsigned ro;
-		rmask r, w;
-
-		if (i->op == DELETED)
-			continue;
-		ro = W.ro[j];
-		if (ro & OP_ALL)
-			return false;
-		r = W.rr[j], w = W.ww[j];
-		if (r & RB(t)) {
-			if ((ro & OP_ASM) || !can_rewrite(i, ro, t) || nrw == 256)
-				return false;	/* (asm names its registers in its text) */
-			rw[nrw++] = j;
-		}
-		if ((w & RB(t)) || !(W.la[j] & RB(t)))
-			break;	/* t's value dies here */
-		if (w & RB(v))
-			return false;	/* v changes while t still holds the old value */
-	}
-	if (j > W.be[b])
-		return false;
-	for (uint32_t q = 0; q < nrw; q++) {
-		rewrite(&in[rw[q]], W.ro[rw[q]], t, v);
-		W.rr[rw[q]] = (W.rr[rw[q]] & ~RB(t)) | RB(v);
-	}
-	for (uint32_t q = k; nrw && q < rw[nrw - 1]; q++)
-		W.la[q] |= RB(v);	/* v is read further on now */
-	in[k].op = DELETED;
+	if (!apply)
+		return !(ro & OP_ASM) && can_rewrite(&e->in[j], ro, t);
+	rewrite(&e->in[j], ro, t, v);
 	return true;
 }
 
@@ -459,39 +435,11 @@ static bool backward(ecx *e, uint32_t k)
  * stops there) and anything may read it (no store goes).  An untagged
  * address turns the pass off for the function.
  */
-typedef struct cellent {
-	uint32_t id;		/* allocation + 1; 0: untagged */
-	int32_t off;
-	uint32_t size;
-	bool bad, esc;		/* esc: an address points into its allocation */
-} cellent;
-
-/* per allocation: the one range its accesses use, or several (cells sorted apart) */
-typedef struct alc {
-	int32_t off;
-	uint32_t size;
-	uint8_t state;		/* 0: no access, 1: one range, 2: several */
-	bool esc;
-	uint32_t mb, mn;	/* state 2: its cells in SL.c[mb, mb+mn) */
-} alc;
-
 static _Thread_local struct {
-	alc *a;			/* per allocation + 1 */
-	uint32_t capa;
-	cellent *c;		/* cells of state-2 allocations, sorted */
-	uint32_t capc;
-	cellent *w;		/* untagged accesses */
-	uint32_t capw;
-	int64_t *wend;		/* their running maximum end */
-	uint32_t capwe;
+	em_slot_cells cells;
 	int32_t *rc;		/* per record: its cell, or -1 */
 	uint32_t caprc;
-	uint8_t *cf;		/* per cell: bit 0 bad, bit 1 escaped */
-	uint32_t capcf;
-	uint32_t *nld;		/* per cell: loads left */
-	uint32_t capnld;
-	struct av { uint32_t gen, ver, mv, pos, last; int8_t reg; } *av;	/* per cell */
-	uint32_t capav;
+	em_slot_values values;
 } SL;
 
 static void *grow_to(void *p, uint32_t *cap, uint32_t n, size_t sz)
@@ -503,34 +451,6 @@ static void *grow_to(void *p, uint32_t *cap, uint32_t n, size_t sz)
 	if (!p)
 		abort();
 	return p;
-}
-
-static int cell_cmp(const void *a, const void *b)
-{
-	const cellent *x = a, *y = b;
-
-	if (x->id != y->id)
-		return x->id < y->id ? -1 : 1;
-	if (x->off != y->off)
-		return x->off < y->off ? -1 : 1;
-	return x->size < y->size ? -1 : x->size > y->size;
-}
-
-/* an untagged access overlaps [off, off+size) */
-static bool hits_untagged(uint32_t nw, int32_t off, uint32_t size)
-{
-	int64_t end = (int64_t)off + size;
-	uint32_t lo = 0, hi = nw;
-
-	while (lo < hi) {	/* first with w.off >= end */
-		uint32_t mid = (lo + hi) / 2;
-
-		if (SL.w[mid].off < end)
-			lo = mid + 1;
-		else
-			hi = mid;
-	}
-	return lo > 0 && SL.wend[lo - 1] > off;
 }
 
 /* the load at i, its value taken from register r instead (the slot holds r's low bits) */
@@ -556,14 +476,12 @@ static void load_from_reg(ins *i, int r)
 static void slots(ecx *e)
 {
 	ins *in = e->in;
-	uint32_t n = e->nin, na = e->nsla + 1, nm = 0, nw = 0, ncell, nb, nst = 0;
-	bool multi = false;
-	uint32_t ver[32] = { 0 }, mver = 0;	/* mver: memory written through a pointer, or a call */
+	uint32_t n = e->nin, na = e->nsla + 1, ncell, nb, nst = 0;
+	uint32_t ver[32] = { 0 }, mver = 0; /* pointer/call memory version */
+	em_slot_cells *cells = &SL.cells;
 
-	if (e->nsla > 0xffff || !n)
+	if (e->nsla > 0xffff || !n || !em_slot_begin(cells, na))
 		return;
-	SL.a = grow_to(SL.a, &SL.capa, na, sizeof(alc));
-	memset(SL.a, 0, (size_t)na * sizeof(alc));
 	for (uint32_t k = 0; k < n; k++) {
 		const ins *i = &in[k];
 		uint32_t id;
@@ -572,90 +490,18 @@ static void slots(ecx *e)
 			continue;
 		id = SLOT_TAG(i);
 		if (i->op == I_LD || i->op == I_ST) {
-			int32_t off = (int32_t)i->imm;
-			uint32_t size = 1u << i->sz;
-			alc *a = &SL.a[id];
-
-			if (!id) {
-				SL.w = grow_to(SL.w, &SL.capw, nw + 1, sizeof(cellent));
-				SL.w[nw++] = (cellent){ 0, off, size, false, false };
-			} else if (!a->state) {
-				a->state = 1, a->off = off, a->size = size;
-			} else if (a->state == 1 && (a->off != off || a->size != size)) {
-				a->state = 2, multi = true;
-			}
-			continue;
-		}
-		if (!id)
-			return;	/* an address vcc cannot place */
-		SL.a[id].esc = true;
-		if (SLOT_TAG2(i) < na)
-			SL.a[SLOT_TAG2(i)].esc = true;
-	}
-	if (!nw && na == 1)
-		return;	/* (no access of a slot) */
-	{
-		bool any = false;
-
-		for (uint32_t id = 1; id < na && !any; id++)
-			any = SL.a[id].state != 0;
-		if (!any)
-			return;	/* only addresses of slots: nothing to forward or drop */
-	}
-	/* allocations with several ranges: their cells, sorted, overlaps bad */
-	for (uint32_t k = 0; multi && k < n; k++) {
-		const ins *i = &in[k];
-		uint32_t id;
-
-		if (i->rn != FRAME || (i->op != I_LD && i->op != I_ST) || !(id = SLOT_TAG(i)) || SL.a[id].state != 2)
-			continue;
-		SL.c = grow_to(SL.c, &SL.capc, nm + 1, sizeof(cellent));
-		SL.c[nm++] = (cellent){ id, (int32_t)i->imm, 1u << i->sz, false, false };
-	}
-	if (nm) {
-		uint32_t u = 0;
-
-		qsort(SL.c, nm, sizeof(cellent), cell_cmp);
-		for (uint32_t k = 0; k < nm; k++)
-			if (!u || cell_cmp(&SL.c[k], &SL.c[u - 1]))
-				SL.c[u++] = SL.c[k];
-		nm = u;
-		for (uint32_t k = 0, g; k < nm; k = g) {
-			int64_t maxend = INT64_MIN;
-
-			for (g = k; g < nm && SL.c[g].id == SL.c[k].id; g++)
-				;
-			SL.a[SL.c[k].id].mb = k, SL.a[SL.c[k].id].mn = g - k;
-			for (uint32_t q = k; q < g; q++) {
-				int64_t end = (int64_t)SL.c[q].off + SL.c[q].size;
-
-				SL.c[q].bad = SL.c[q].off < maxend || (q + 1 < g && SL.c[q + 1].off < end);
-				if (end > maxend)
-					maxend = end;
-			}
+			em_slot_collect(cells, id, i->imm, 1u << i->sz);
+		} else {
+			if (!id)
+				return; /* an address vcc cannot place */
+			em_slot_escape(cells, id);
+			if (SLOT_TAG2(i) < na)
+				em_slot_escape(cells, SLOT_TAG2(i));
 		}
 	}
-	if (nw) {
-		qsort(SL.w, nw, sizeof(cellent), cell_cmp);	/* (id 0: by offset) */
-		SL.wend = grow_to(SL.wend, &SL.capwe, nw, sizeof(int64_t));
-		for (uint32_t k = 0; k < nw; k++) {
-			int64_t end = (int64_t)SL.w[k].off + SL.w[k].size;
-
-			SL.wend[k] = k && SL.wend[k - 1] > end ? SL.wend[k - 1] : end;
-		}
-	}
-	/* cells: allocation id for one range, na + index for the sorted ones */
-	ncell = na + nm;
-	SL.cf = grow_to(SL.cf, &SL.capcf, ncell, 1);
-	for (uint32_t id = 1; id < na; id++) {
-		const alc *a = &SL.a[id];
-
-		SL.cf[id] = a->state == 1 ? (uint8_t)((nw && hits_untagged(nw, a->off, a->size)) | a->esc << 1) : 1;
-	}
-	SL.cf[0] = 1;
-	for (uint32_t q = 0; q < nm; q++)
-		SL.cf[na + q] = (uint8_t)((SL.c[q].bad || (nw && hits_untagged(nw, SL.c[q].off, SL.c[q].size))) |
-					  SL.a[SL.c[q].id].esc << 1);
+	if (!em_slot_finish(cells))
+		return;
+	ncell = cells->count;
 	SL.rc = grow_to(SL.rc, &SL.caprc, n, sizeof(int32_t));
 	for (uint32_t k = 0; k < n; k++) {
 		const ins *i = &in[k];
@@ -664,29 +510,12 @@ static void slots(ecx *e)
 		SL.rc[k] = -1;
 		if (i->rn != FRAME || (i->op != I_LD && i->op != I_ST) || !(id = SLOT_TAG(i)))
 			continue;
-		if (SL.a[id].state == 1) {
-			cell = id;
-		} else {
-			cellent key = { id, (int32_t)i->imm, 1u << i->sz, false, false };
-			uint32_t lo = SL.a[id].mb, hi = lo + SL.a[id].mn;
-
-			while (lo < hi) {
-				uint32_t mid = (lo + hi) / 2;
-
-				if (cell_cmp(&SL.c[mid], &key) < 0)
-					lo = mid + 1;
-				else
-					hi = mid;
-			}
-			cell = na + lo;
-		}
-		if (!(SL.cf[cell] & 1))
+		cell = em_slot_find(cells, id, i->imm, 1u << i->sz);
+		if (!(cells->flags[cell] & EM_SLOT_BAD))
 			SL.rc[k] = (int32_t)cell;
 	}
-	SL.av = grow_to(SL.av, &SL.capav, ncell, sizeof(*SL.av));
-	memset(SL.av, 0, (size_t)ncell * sizeof(*SL.av));
-	SL.nld = grow_to(SL.nld, &SL.capnld, ncell, sizeof(uint32_t));
-	memset(SL.nld, 0, (size_t)ncell * sizeof(uint32_t));
+	if (!em_slot_values_begin(&SL.values, ncell))
+		return;
 	nb = W.blk[n - 1] + 1;
 	for (uint32_t b = 0; b < nb; b++) {
 		uint32_t gen = b + 1;
@@ -694,18 +523,17 @@ static void slots(ecx *e)
 		for (uint32_t k = W.bs[b]; k <= W.be[b]; k++) {
 			ins *i = &in[k];
 			int32_t ci = SL.rc[k];
-			struct av *a = ci >= 0 ? &SL.av[ci] : NULL;
-			bool esc = ci >= 0 && (SL.cf[ci] & 2);
+			em_slot_value *a = ci >= 0 ? em_slot_value_get(&SL.values, (uint32_t)ci, gen, i->op == I_LD) : NULL;
+			bool esc = ci >= 0 && (cells->flags[ci] & EM_SLOT_ESCAPED);
 			rmask w;
 
 			if (i->op == DELETED)
 				continue;
-			if (a && a->gen != gen)
-				a->gen = gen, a->reg = -1, a->last = UINT32_MAX;
 			if (a && i->op == I_LD) {
-				a->last = UINT32_MAX;	/* the pending store is read */
-				if (a->reg >= 0 && (a->reg == ZR || ver[a->reg] == a->ver) && (!esc || a->mv == mver)) {
-					int r = a->reg;
+				uint32_t version = a->value < ZR ? ver[a->value] : a->version;
+
+				if (em_slot_value_available(a, version, mver, esc)) {
+					int r = (int)a->value;
 
 					if (r != ZR)
 						for (uint32_t q = a->pos; q < k; q++)
@@ -731,19 +559,13 @@ static void slots(ecx *e)
 					mver++;	/* may write an escaped cell */
 				continue;
 			}
-			if (i->op == I_LD)
-				SL.nld[ci]++;
-			if (i->op == I_ST) {
-				SL.rc[nst++] = (int32_t)k;	/* (rc of earlier records is done with) */
-				if (!esc && a->last != UINT32_MAX)
-					in[a->last].op = DELETED;	/* overwritten before any load */
-				a->last = esc ? UINT32_MAX : k;	/* (escaped: read through a pointer, perhaps) */
-			}
-			a->reg = (int8_t)i->rd;	/* (31: zr) */
-			if (a->reg != ZR)
-				a->ver = ver[a->reg];
-			a->mv = mver;
-			a->pos = k;
+			uint32_t overwritten = em_slot_value_record(a, i->op == I_LD, esc, i->rd,
+				i->rd == ZR ? 0 : ver[i->rd], mver, k);
+
+			if (i->op == I_ST)
+				SL.rc[nst++] = (int32_t)k; /* rc of earlier records is done with */
+			if (overwritten != EM_SLOT_NO_STORE)
+				in[overwritten].op = DELETED;
 		}
 	}
 	/* a cell no load reads: its stores go */
@@ -753,21 +575,8 @@ static void slots(ecx *e)
 
 		if (i->op != I_ST)
 			continue;	/* (deleted meanwhile) */
-		if (SL.a[cell].state != 1) {
-			cellent key = { cell, (int32_t)i->imm, 1u << i->sz, false, false };
-			uint32_t lo = SL.a[cell].mb, hi = lo + SL.a[cell].mn;
-
-			while (lo < hi) {
-				uint32_t mid = (lo + hi) / 2;
-
-				if (cell_cmp(&SL.c[mid], &key) < 0)
-					lo = mid + 1;
-				else
-					hi = mid;
-			}
-			cell = na + lo;
-		}
-		if (!SL.nld[cell] && !(SL.cf[cell] & 2))
+		cell = em_slot_find(cells, cell, i->imm, 1u << i->sz);
+		if (em_slot_value_dead(&SL.values, cell, cells->flags[cell] & EM_SLOT_ESCAPED))
 			i->op = DELETED;
 	}
 }
@@ -1149,7 +958,7 @@ static void dead(ecx *e)
 		rmask live = W.out[b];
 
 		if (b == nb - 1 && brkind(&in[W.be[b]]) != BR_UNCOND)
-			live |= RB(0) | RB(1);
+			live |= retreads;
 		for (uint32_t k = W.be[b] + 1; k-- > W.bs[b];) {
 			ins *i = &in[k];
 
@@ -1200,6 +1009,11 @@ VPRIV uint64_t opt_regs(ecx *e, unsigned *fl)
 static void copies(ecx *e)
 {
 	ins *in = e->in;
+	const em_rec_copy_scan scan = {
+		.records = in, .stride = sizeof(ins), .op_offset = offsetof(ins, op), .deleted_op = DELETED,
+		.flags = W.ro, .flags_stride = sizeof(*W.ro), .opaque_mask = OP_ALL,
+		.read = W.rr, .write = W.ww, .live = W.la, .rewrite = a64_copy_rewrite, .ctx = e,
+	};
 
 	for (uint32_t k = 0; k < e->nin; k++) {
 		if (in[k].op == I_MOV && in[k].sz == 1 && in[k].rd == in[k].rn && in[k].rd < 31) {
@@ -1209,8 +1023,8 @@ static void copies(ecx *e)
 		if (is_copy(&in[k])) {
 			if (!(W.la[k] & RB(in[k].rd)) && in[k].rd != 29 && in[k].rd != 30)
 				in[k].op = DELETED;	/* dead */
-			else
-				forward(e, k);
+			else if (TEMPS & RB(in[k].rd))
+				em_rec_copy_forward(&scan, k, W.be[W.blk[k]], in[k].rd, in[k].rn);
 		}
 	}
 	for (uint32_t k = 0; k < e->nin; k++)
@@ -1224,6 +1038,13 @@ VPRIV void opt_function(ecx *e)
 	uint32_t n = 0;
 
 	rawp = e->raw.p;
+	retreads = RB(0) | RB(1);
+	qty rt = T(e->c, e->c->syms[e->top].ty)->base;
+	if (is_bvec(e->c, rt)) {
+		unsigned lanes = T(e->c, rt)->n;
+		if (lanes <= 8 && lanes != 2 && lanes != 4 && lanes != 8)
+			retreads = RB(lanes) - 1;
+	}
 	if (!liveness(e))
 		return;
 	/* a temporary saved around a call and dead after its restore: neither */

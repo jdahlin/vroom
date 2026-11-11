@@ -16,7 +16,8 @@ assembler, linker, behind `vcc`/`vas`/`vld` shims and the `vccd` server.
   parallel diff runs.
 
 ## Layout
-- `PLAN.md`, `PLAN-fas2.md`, `PLAN-wasm.md` (WebAssembly as a target): plans
+- `PLAN.md`, `PLAN-fas2.md`, `PLAN-wasm.md` (WebAssembly as a target), `PLAN-x86.md`
+  (x86-64 Linux as a target): plans
   and per-step status (Swedish).  Update the
   status section of a step when it changes.
 - `PLAN-release.md`: what vcc 1.0 is and its release gates G0-G9 (Swedish);
@@ -49,7 +50,8 @@ assembler, linker, behind `vcc`/`vas`/`vld` shims and the `vccd` server.
   - `obj/`: the in-memory object (`obj.h`: sections, frags, symbols, fixups)
     and its layout; with `arch/<cpu>/obj/fixup.c` and `platform/linux/elf.c`
     one module (`obj_SRC`, internal header `objimpl.h`).
-  - `ld/`: the linker `vlink` (`ld.c`, one TU) and `vobjcopy`/`vnm`;
+  - `ld/`: the linker `vlink` (`ld.c`, one TU; also linked into vccd, which
+    calls `ld_main` per link) and `vobjcopy`/`vnm`;
     `wasmld.c` is vlink for WebAssembly (as `wasm-ld` or with `-mwasm64`).
   - `driver/`: one compile job from a clang command line (`ppdriver.c`), the
     declaration cache (`ccsnap.c`) and `vpp`, the driver for parity tests.
@@ -59,6 +61,10 @@ assembler, linker, behind `vcc`/`vas`/`vld` shims and the `vccd` server.
     build uses no llvm-ar) and `rsh.c`, kbuild's recipe subset of sh, run for
     `vsh` (`build/ccs/vsh/sh`, shim.c with `-DVSH`), make's SHELL in
     `bench/vccd-kbuild.sh`; anything outside the subset goes to `$VSH_REAL`.
+    Without `--backend-sock` vccd runs the whole kernel build itself: probes,
+    `-E`/`-c`/`-S` (stdin too), links (vld in-process; `--ld PROG` spawns
+    one), nm/objcopy behind the `vcc-nm`/`vcc-objcopy` shims, and the host
+    programs (vcc + `ldmacho.c`, macOS only); nothing falls back to clang.
   - `arch/a64/`: arm64: instructions in GNU as syntax (`as/parse.c`:
     registers, `.req`, operands, literal pools), the encoder (`as/enc.c`,
     `a64.h`), system registers,
@@ -71,6 +77,16 @@ assembler, linker, behind `vcc`/`vas`/`vld` shims and the `vccd` server.
     and Apple's), builtins, inline asm, the record optimizer (`opt.c`), the
     printer (`print.c`) and the encoder of records (`obj.c`).  It is compiled
     in the `emit` unity TU (`emit_SRC`), so VPRIV stays static.
+  - `emit/walk/` and `emit/rec/`: the shared AST walker (`walk.h`: folding,
+    frame slots, labels, the call sequence; it calls a CPU only through
+    `LO()`) and the machine records with their per-CPU op table (`rec.h`),
+    PLAN-x86.md's layers 1 and 3; `arch/x64/emit/`: x86-64's lowering
+    (`x64impl.h`, `lower.c`), two-address pass and AT&T printer (`print.c`).
+    x86-64 is their only user; arm64 moves to them later (TODO.md).
+  - `arch/x64/as/`: the x86-64 assembler, AT&T syntax with MC's encodings:
+    operands, the encoder (REX and VEX) and the dispatcher in `asm.c`
+    (shared header `x64as.h`), one file per instruction family (`sys.c`,
+    `gpr.c`, `x87.c`, `sse.c`, `avx.c`); `vas-obj.py` checks `x86-*.s`.
   - `arch/wasm/emit/`: the WebAssembly (wasm64) code generator, AST to
     LLVM's wasm `.s` (`wimpl.h`; `wasm.c` functions, ABI, header; `wexpr.c`,
     `wcall.c`, `wstmt.c`), also in the `emit` unity TU: every name starts
@@ -80,7 +96,10 @@ assembler, linker, behind `vcc`/`vas`/`vld` shims and the `vccd` server.
     and `vasm --target=wasm64-...` go through it.
   - `platform/linux/`: the ELF writer (`elf.c`: relocations, string table,
     file layout as LLVM MC).
-  - `platform/darwin/`: the Mach-O writer; Apple PMU counters (`pmc.c`).
+  - `platform/darwin/`: the Mach-O writer; vld's Mach-O executables
+    (`ldmacho.c`: libSystem only, chained fixups, ad-hoc signature, chosen
+    when the first input is Mach-O; the kernel's host programs); Apple PMU
+    counters (`pmc.c`).
   - `platform/wasm/`: the wasm object writer (`wasm.c`: layout, symbol table,
     relocations as LLVM's WasmObjectWriter, byte for byte).
   - `pp/`, `cc/` and `emit/` (with `arch/<cpu>/emit/`) are directories of
@@ -120,6 +139,8 @@ bench/vcc-sema.py batch -j 6        # the same in one vpp --batch process: ~3 s 
 bench/vcc-sema.py layout -j 6       # layouts/constants/decl types checked by clang (~70 s)
 bench/var-cmp.py work/build-x       # vcc ar against llvm-ar on an llvm-ar-built tree
 bench/vsh-test.py                   # vsh/rsh against dash on small recipes
+bench/vobjcopy-cmp.sh               # vnm/vobjcopy against llvm-nm/llvm-objcopy on the build's uses
+bench/vobjcopy-any.py work/build-X  # ... and with other options on 200 random .o files
 bench/vcc-driver.py                 # driver: command lines vs clang (predefines from -O), <1 s
 bench/vcc-fpcheck.py -j 6           # no generated FP/SIMD code under -mgeneral-regs-only (~10 s)
 bench/vcc-cfi.py -j 6               # -fasynchronous-unwind-tables: .eh_frame per function, .text unchanged (~1 min)
@@ -148,6 +169,8 @@ bench/vcc-diag-catalog.py           # build/ccs/diag-catalog.html: every tests/d
 vpp -fdiagnostics-style=vcc|clang|narrated -fdiagnostics-text-art-charset=ascii|unicode   # text styles (vcc default)
 bench/sarif-check.py F.sarif        # SARIF structure (+ the official schema once `fetch`ed)
 bench/vcc-darwin-s.py -j 6 --clang   # clang's Darwin -S assembled by vpp -c runs as clang's (~2 min)
+bench/fetch-testsuites.sh [NAME]    # external suites -> work/testsuites (clang, gcc, c-testsuite, ...; ~30 s)
+bench/vcc-verify.py -j 6 [-v] [PAT] # clang's -verify tests (C/, Sema/, ...): vcc vs the expected-* directives (~6 s warm, 2.5 min cold)
 bench/vcc-builtins.py [-v]          # clang builtins unknown to vcc, __has_builtin differences (<1 s)
 bench/clangdiag.py fetch|stats      # clang's Diagnostic*.td -> work/clang-td/VER/ (once); counts per language
 bench/vcc-diagcov.py [-v] [--missing]   # vcc's diagnostics vs clang's table: coverage, gaps (~1 s)
@@ -158,11 +181,15 @@ bench/vcc-explain.py                # docs/diag pages: the wrong example gives t
 bench/gen-explain.py [--check]      # driver/explain.inc from ccs/vcc/docs/diag/*.md (vcc --explain ID)
 bench/vcc-bflayout.py               # generated bit-field records, layouts checked by clang, Linux + Apple (~1 s)
 bench/vcc-ldconst.py                # generated long double literals and folds, bits vs clang (~2 s)
+bench/vcc-f80.sh [N]                # x87 long double folding (lib/f128.h) vs this x86-64 host's FPU (~3 s)
 bench/vccd-test.py                  # vccd as a service: socket, bad requests, cache invalidation (~11 s)
 vcc --vccd-diagnostics[=json]       # vccd's diagnostics store: summary by flag/file, or every TU's records (JSON lines)
 VCC_DIAG_DEDUP=1 make ...           # under vccd: a header warning another TU of the build printed is left out
+bench/vccd-kbuild.sh work/build-X -j 6   # cold kernel build, vccd only (no clang/vroomd/lld; ~10 s)
+python3 bench/boot-test.py --kernel work/build-X/arch/arm64/boot/Image --timeout 60   # boots Debian
 bench/vbench.py gate                # performance gate: instructions vs the merge-base, budget 1 % (~1 min)
 bench/vcc-wasm.py -j 6              # the C suites for wasm64: vcc -S, clang -c, emcc, node vs clang's build (~2 min)
+bench/vcc-x86.py -j 6               # the C suites for x86-64 on an x86-64 host: vcc -S, clang -c, glibc, native (~10 s; first run ~10 min for the references)
 bench/vcc-wasm.py -j 6 --objcmp     # ... and vpp -c's object byte-identical to clang's for the same .s
 bench/vcc-wasm.py -j 6 --obj --vlink  # ... vcc's side through vpp -c and vlink as emcc's wasm-ld (~9 min)
 bench/vcc-same.py --base DIR -j 6    # test-suite outputs byte-identical with DIR/vpp (vbench.py mkbase REV), ~80 s
@@ -196,6 +223,19 @@ against `vpp`, both lexed by vcc's lexer.  A change to `pp/` or `lex.c` is
 only done when the parity run is fully green; a change to `cc/` when both
 vcc-sema.py runs are green (878/879: modpost.c lacks a generated header).
 
+## CI and the premerge gate
+`.github/workflows/premerge.yml` runs one reusable workflow per target in
+parallel (`arm64.yml`: jobs arm64, asan, tsan; `wasm.yml`; x86-64 gets its
+own), each on GitHub's ubuntu-24.04-arm in a Debian 13 container
+(`ci/setup-debian.sh`: clang 23 from apt.llvm.org, qemu, emsdk for wasm).
+The test set is `ci/premerge.sh JOB`: the vendored C suites under qemu and
+the fast harnesses, no kernel, PostgreSQL or anything needing `work/`.
+Locally, as CI: `env/linux/run.sh ci/premerge.sh arm64`.  main is not
+protected (private repo, free plan), so the gate is the workflow: push to
+main through `ci/premerge-push [--watch]` (pushes to `premerge`; job `gate`
+fast-forwards main when everything is green).  A new harness belongs in
+`ci/premerge.sh` when it is fast and needs only the checkout.
+
 ## Sanitizers
 ```
 make -C ccs -j 6 vcc-asan           # -fsanitize=address,undefined -> build/ccs-asan/
@@ -209,7 +249,10 @@ bench/vccd-cc.py --bin-dir build/ccs-tsan                 # vccd itself, 150 TUs
 Both variants are `-O1 -g` with their own `obj/`; the normal build is
 unchanged.  `--bin-dir DIR` (or `VCC_BIN=DIR`) picks the tools in every
 harness that imports `vcc-diff.py`.  The big reservations (16 GB shared pp
-region, 4 GB NORESERVE arenas) need no special handling.  A TSan batch takes
+region, 4 GB arenas, all MAP_NORESERVE) need no special handling; on Linux
+(CI) run ASan with `ASAN_OPTIONS=detect_leaks=0` (LeakSanitizer is on by
+default there; vcc exits with its arenas mapped) and the default 8 MB stack
+(`ulimit -s unlimited` leaves `vstack_low()` without a stack bottom).  A TSan batch takes
 65-100 s (15-20x the normal build), an ASan suite 12-25 s.  Limits: ASan does
 not see over-reads inside our own mmap'ed arenas (they are never poisoned),
 only in malloc, globals and the stack.  Contract that ASan checks: strings

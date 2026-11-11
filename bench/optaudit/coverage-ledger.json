@@ -1,0 +1,2189 @@
+{
+  "schema_version": 1,
+  "scope": "Recorded GCC enabled options and LLVM observed Running-pass names, O0-O2, x86-64 baseline only; every distinct item assigned once. Not proof of successful transforms or exhaustive optimization coverage.",
+  "code_revision": "da64f05daeef2aacb73c23a78efc8b505a9a9562",
+  "report": {
+    "path": "/source/vroom/work/opt-profile/audit-switch-integrated/report.json",
+    "sha256": "cb92d9f847cc89ce574ef6fccc91c2ad8ab862a0989f0fa19c76cf607a1658ca",
+    "revision": "54580f794c3aaf9de7c81398255aa9452e2864f8",
+    "versions": {
+      "clang": "Ubuntu clang version 23.1.6 (++20261108033809+c47d7823685a-1~exp1~20261108153913.94)",
+      "gcc": "gcc (Ubuntu 15.2.0-16ubuntu1) 15.2.0"
+    },
+    "cpu": "AMD Ryzen 7 9700X 8-Core Processor",
+    "vpp_sha256": "f938ba004a298132191d6d95652e3549ef6642806211e8c704bad1c433824e7d",
+    "probe_sha256": "37bc84b8cfd6e4219bae29a1b679b13da015d682472b8380a37d4b14fd52a832",
+    "caller_sha256": "fcc05a5f0bec472b5830f6afbcaf2c5c3f193be1c379c12f1faf339925497f32"
+  },
+  "counts": {
+    "gcc": {
+      "O0": 50,
+      "O1": 92,
+      "O2": 141
+    },
+    "clang": {
+      "O0": 6,
+      "O1": 74,
+      "O2": 87
+    }
+  },
+  "limitations": [
+    "Recorded report predates combined code revision; assembly metrics must not be relabeled as combined-code measurements.",
+    "GCC configured_passes_on and LLVM analysis listings are not claimed mapped; requested ledger maps enabled_options and observed_passes only.",
+    "GCC boolean options only: parameter-valued policies, target tuning defaults and unobserved passes are not an exhaustive compiler specification.",
+    "LLVM pass names are deduplicated, losing invocation counts/order; backend machine passes are not fully inventoried by this trace.",
+    "O3, other CPU targets, native ISA, LTO, PGO, C++, OpenMP and coroutines are outside this inventory.",
+    "Code evidence is source inspection, not new positive runtime/codegen/performance tests. Status applies to the whole family, never certifies every listed pass."
+  ],
+  "families": {
+    "integer-simplification": {
+      "category": "semantic",
+      "gcc_options": [
+        {
+          "name": "-fssa-backprop",
+          "levels": [
+            "O0",
+            "O1",
+            "O2"
+          ]
+        },
+        {
+          "name": "-ftree-bit-ccp",
+          "levels": [
+            "O1",
+            "O2"
+          ]
+        },
+        {
+          "name": "-ftree-forwprop",
+          "levels": [
+            "O0",
+            "O1",
+            "O2"
+          ]
+        },
+        {
+          "name": "-ftree-reassoc",
+          "levels": [
+            "O0",
+            "O1",
+            "O2"
+          ]
+        },
+        {
+          "name": "-ftree-slsr",
+          "levels": [
+            "O1",
+            "O2"
+          ]
+        }
+      ],
+      "llvm_passes": [
+        {
+          "name": "AggressiveInstCombinePass",
+          "levels": [
+            "O2"
+          ]
+        },
+        {
+          "name": "DivRemPairsPass",
+          "levels": [
+            "O1",
+            "O2"
+          ]
+        },
+        {
+          "name": "Float2IntPass",
+          "levels": [
+            "O1",
+            "O2"
+          ]
+        },
+        {
+          "name": "InstCombinePass",
+          "levels": [
+            "O1",
+            "O2"
+          ]
+        },
+        {
+          "name": "InstSimplifyPass",
+          "levels": [
+            "O1",
+            "O2"
+          ]
+        },
+        {
+          "name": "LoopInstSimplifyPass",
+          "levels": [
+            "O1",
+            "O2"
+          ]
+        },
+        {
+          "name": "ReassociatePass",
+          "levels": [
+            "O1",
+            "O2"
+          ]
+        }
+      ],
+      "status": "partial",
+      "evidence": {
+        "shared": [
+          "emit/opt/identity.c",
+          "emit/opt/divpow2.c",
+          "emit/opt/sdivpow2.c",
+          "emit/opt/udivconst.c",
+          "cc/const.c"
+        ],
+        "a64": [
+          "arch/a64/emit/arith.c",
+          "arch/a64/emit/sdivpow2.c",
+          "arch/a64/emit/udivconst.c"
+        ],
+        "x64": [
+          "emit/walk/expr.c",
+          "emit/walk/sdivpow2.c",
+          "emit/walk/udivconst.c"
+        ],
+        "wasm": [
+          "arch/wasm/emit/wexpr.c",
+          "arch/wasm/emit/sdivpow2.c",
+          "arch/wasm/emit/udivconst.c"
+        ]
+      },
+      "remaining": "Existing typed identities, signed/unsigned powers of two and limited u32 reciprocals do not establish InstCombine parity. Next: bounded small-multiply/bit-test rules and shared quotient+remainder recipes; signed/u64 reciprocal rules need separate target cost evidence. Float2Int transformations remain unverified, not covered by integer folding."
+    },
+    "value-propagation-and-redundancy": {
+      "category": "semantic",
+      "gcc_options": [
+        {
+          "name": "-fcode-hoisting",
+          "levels": [
+            "O2"
+          ]
+        },
+        {
+          "name": "-fcse-follow-jumps",
+          "levels": [
+            "O2"
+          ]
+        },
+        {
+          "name": "-fforward-propagate",
+          "levels": [
+            "O1",
+            "O2"
+          ]
+        },
+        {
+          "name": "-ffunction-cse",
+          "levels": [
+            "O0",
+            "O1",
+            "O2"
+          ]
+        },
+        {
+          "name": "-fgcse",
+          "levels": [
+            "O2"
+          ]
+        },
+        {
+          "name": "-fgcse-lm",
+          "levels": [
+            "O0",
+            "O1",
+            "O2"
+          ]
+        },
+        {
+          "name": "-frerun-cse-after-loop",
+          "levels": [
+            "O2"
+          ]
+        },
+        {
+          "name": "-ftree-ccp",
+          "levels": [
+            "O1",
+            "O2"
+          ]
+        },
+        {
+          "name": "-ftree-copy-prop",
+          "levels": [
+            "O1",
+            "O2"
+          ]
+        },
+        {
+          "name": "-ftree-dominator-opts",
+          "levels": [
+            "O1",
+            "O2"
+          ]
+        },
+        {
+          "name": "-ftree-fre",
+          "levels": [
+            "O1",
+            "O2"
+          ]
+        },
+        {
+          "name": "-ftree-phiprop",
+          "levels": [
+            "O0",
+            "O1",
+            "O2"
+          ]
+        },
+        {
+          "name": "-ftree-pre",
+          "levels": [
+            "O2"
+          ]
+        },
+        {
+          "name": "-ftree-scev-cprop",
+          "levels": [
+            "O0",
+            "O1",
+            "O2"
+          ]
+        },
+        {
+          "name": "-ftree-sink",
+          "levels": [
+            "O1",
+            "O2"
+          ]
+        },
+        {
+          "name": "-ftree-ter",
+          "levels": [
+            "O1",
+            "O2"
+          ]
+        },
+        {
+          "name": "-ftree-vrp",
+          "levels": [
+            "O2"
+          ]
+        }
+      ],
+      "llvm_passes": [
+        {
+          "name": "ConstraintEliminationPass",
+          "levels": [
+            "O2"
+          ]
+        },
+        {
+          "name": "CorrelatedValuePropagationPass",
+          "levels": [
+            "O2"
+          ]
+        },
+        {
+          "name": "EarlyCSEPass",
+          "levels": [
+            "O1",
+            "O2"
+          ]
+        },
+        {
+          "name": "GVNPass",
+          "levels": [
+            "O2"
+          ]
+        },
+        {
+          "name": "SCCPPass",
+          "levels": [
+            "O1",
+            "O2"
+          ]
+        },
+        {
+          "name": "SpeculativeExecutionPass",
+          "levels": [
+            "O2"
+          ]
+        }
+      ],
+      "status": "partial",
+      "evidence": {
+        "shared": [
+          "emit/rec/copies.c",
+          "emit/rec/slot-values.c",
+          "emit/prepass.c"
+        ],
+        "a64": [
+          "arch/a64/emit/opt.c"
+        ],
+        "x64": [
+          "arch/x64/emit/copies.c",
+          "arch/x64/emit/extensions.c"
+        ],
+        "wasm": [
+          "arch/wasm/emit/slots.c"
+        ]
+      },
+      "remaining": "Local exact-cell/copy facts and selected AST facts exist; no shared global CSE/GVN/PRE or SCCP engine was identified. Add fixed-size block-local pure-value cache first. Later CFG predecessors/dominators and versioned facts permit global propagation; SSA is a candidate representation, not a prerequisite for the local stage."
+    },
+    "dead-work-and-memory": {
+      "category": "semantic",
+      "gcc_options": [
+        {
+          "name": "-fallocation-dce",
+          "levels": [
+            "O0",
+            "O1",
+            "O2"
+          ]
+        },
+        {
+          "name": "-fdce",
+          "levels": [
+            "O0",
+            "O1",
+            "O2"
+          ]
+        },
+        {
+          "name": "-fdse",
+          "levels": [
+            "O1",
+            "O2"
+          ]
+        },
+        {
+          "name": "-fext-dce",
+          "levels": [
+            "O2"
+          ]
+        },
+        {
+          "name": "-flifetime-dse",
+          "levels": [
+            "O0",
+            "O1",
+            "O2"
+          ]
+        },
+        {
+          "name": "-fmalloc-dce",
+          "levels": [
+            "O0",
+            "O1",
+            "O2"
+          ]
+        },
+        {
+          "name": "-fstore-merging",
+          "levels": [
+            "O2"
+          ]
+        },
+        {
+          "name": "-ftree-builtin-call-dce",
+          "levels": [
+            "O1",
+            "O2"
+          ]
+        },
+        {
+          "name": "-ftree-dce",
+          "levels": [
+            "O1",
+            "O2"
+          ]
+        },
+        {
+          "name": "-ftree-dse",
+          "levels": [
+            "O1",
+            "O2"
+          ]
+        }
+      ],
+      "llvm_passes": [
+        {
+          "name": "ADCEPass",
+          "levels": [
+            "O1",
+            "O2"
+          ]
+        },
+        {
+          "name": "BDCEPass",
+          "levels": [
+            "O1",
+            "O2"
+          ]
+        },
+        {
+          "name": "DSEPass",
+          "levels": [
+            "O2"
+          ]
+        },
+        {
+          "name": "LoopLoadEliminationPass",
+          "levels": [
+            "O1",
+            "O2"
+          ]
+        },
+        {
+          "name": "MergedLoadStoreMotionPass",
+          "levels": [
+            "O2"
+          ]
+        }
+      ],
+      "status": "partial",
+      "evidence": {
+        "shared": [
+          "emit/rec/slots.c",
+          "emit/rec/slot-values.c",
+          "emit/rec/unreachable.c"
+        ],
+        "a64": [
+          "arch/a64/emit/opt.c"
+        ],
+        "x64": [
+          "arch/x64/emit/effects.c",
+          "arch/x64/emit/lower.c"
+        ],
+        "wasm": [
+          "arch/wasm/emit/slots.c",
+          "arch/wasm/emit/reachability.c"
+        ]
+      },
+      "remaining": "Straight-line exact frame-cell forwarding/overwritten stores and target dead results exist. Heap/global alias-aware DSE, bit-level DCE, allocation elimination, load/store motion and loop load elimination remain missing/unverified. First remove provably unused pure local initializers with existing escape/effect facts; preserve volatile/atomic/trapping access contracts."
+    },
+    "control-and-switch": {
+      "category": "semantic",
+      "gcc_options": [
+        {
+          "name": "-fbit-tests",
+          "levels": [
+            "O1",
+            "O2"
+          ]
+        },
+        {
+          "name": "-fcrossjumping",
+          "levels": [
+            "O2"
+          ]
+        },
+        {
+          "name": "-fif-conversion",
+          "levels": [
+            "O1",
+            "O2"
+          ]
+        },
+        {
+          "name": "-fif-conversion2",
+          "levels": [
+            "O1",
+            "O2"
+          ]
+        },
+        {
+          "name": "-fisolate-erroneous-paths-dereference",
+          "levels": [
+            "O2"
+          ]
+        },
+        {
+          "name": "-fjump-tables",
+          "levels": [
+            "O1",
+            "O2"
+          ]
+        },
+        {
+          "name": "-fssa-phiopt",
+          "levels": [
+            "O1",
+            "O2"
+          ]
+        },
+        {
+          "name": "-fthread-jumps",
+          "levels": [
+            "O1",
+            "O2"
+          ]
+        },
+        {
+          "name": "-ftree-switch-conversion",
+          "levels": [
+            "O2"
+          ]
+        },
+        {
+          "name": "-ftree-tail-merge",
+          "levels": [
+            "O2"
+          ]
+        }
+      ],
+      "llvm_passes": [
+        {
+          "name": "DFAJumpThreadingPass",
+          "levels": [
+            "O2"
+          ]
+        },
+        {
+          "name": "JumpTableToSwitchPass",
+          "levels": [
+            "O2"
+          ]
+        },
+        {
+          "name": "JumpThreadingPass",
+          "levels": [
+            "O2"
+          ]
+        },
+        {
+          "name": "LoopSimplifyCFGPass",
+          "levels": [
+            "O1",
+            "O2"
+          ]
+        },
+        {
+          "name": "MergeICmpsPass",
+          "levels": [
+            "O1",
+            "O2"
+          ]
+        },
+        {
+          "name": "RelLookupTableConverterPass",
+          "levels": [
+            "O1",
+            "O2"
+          ]
+        },
+        {
+          "name": "SimplifyCFGPass",
+          "levels": [
+            "O1",
+            "O2"
+          ]
+        }
+      ],
+      "status": "partial",
+      "evidence": {
+        "shared": [
+          "emit/opt/control.c",
+          "emit/opt/switch.c",
+          "emit/rec/fallthrough.c",
+          "emit/rec/unreachable.c"
+        ],
+        "a64": [
+          "arch/a64/emit/cond.c",
+          "arch/a64/emit/stmt.c"
+        ],
+        "x64": [
+          "emit/walk/stmt.c"
+        ],
+        "wasm": [
+          "arch/wasm/emit/wstmt.c",
+          "arch/wasm/emit/reachability.c"
+        ]
+      },
+      "remaining": "Constant pure decisions and balanced switch dispatch exist, wasm keeps dense br_table. Value tables, bit-test clusters, compare merging, general jump threading/diamond conversion and tail merging are not established. Extend shared switch strategy with bounded tables/bitsets first; cross-block rewrites need explicit CFG and all external label entries."
+    },
+    "scalar-replacement-and-promotion": {
+      "category": "semantic",
+      "gcc_options": [
+        {
+          "name": "-fsplit-wide-types",
+          "levels": [
+            "O1",
+            "O2"
+          ]
+        },
+        {
+          "name": "-ftree-coalesce-vars",
+          "levels": [
+            "O1",
+            "O2"
+          ]
+        },
+        {
+          "name": "-ftree-sra",
+          "levels": [
+            "O1",
+            "O2"
+          ]
+        }
+      ],
+      "llvm_passes": [
+        {
+          "name": "PromotePass",
+          "levels": [
+            "O1",
+            "O2"
+          ]
+        },
+        {
+          "name": "SROAPass",
+          "levels": [
+            "O1",
+            "O2"
+          ]
+        }
+      ],
+      "status": "partial",
+      "evidence": {
+        "shared": [
+          "emit/opt/locals.c",
+          "emit/prepass.c",
+          "emit/rec/slots.c"
+        ],
+        "a64": [
+          "arch/a64/emit/bind.c"
+        ],
+        "x64": [
+          "arch/x64/emit/locals.c"
+        ],
+        "wasm": [
+          "arch/wasm/emit/wexpr.c",
+          "arch/wasm/emit/slots.c"
+        ]
+      },
+      "remaining": "Selected scalar homes/wasm locals and cell forwarding are not general SROA/mem2reg. Next: nonescaping aggregate fields with stable identities and bounded scalarization, then join-aware promotion. Shared SSA becomes useful for many merge values, not required to select locals or split a straight-line object."
+    },
+    "loop-motion-and-induction": {
+      "category": "semantic",
+      "gcc_options": [
+        {
+          "name": "-faggressive-loop-optimizations",
+          "levels": [
+            "O0",
+            "O1",
+            "O2"
+          ]
+        },
+        {
+          "name": "-fivopts",
+          "levels": [
+            "O0",
+            "O1",
+            "O2"
+          ]
+        },
+        {
+          "name": "-fmove-loop-invariants",
+          "levels": [
+            "O1",
+            "O2"
+          ]
+        },
+        {
+          "name": "-fmove-loop-stores",
+          "levels": [
+            "O1",
+            "O2"
+          ]
+        },
+        {
+          "name": "-ftree-loop-im",
+          "levels": [
+            "O0",
+            "O1",
+            "O2"
+          ]
+        },
+        {
+          "name": "-ftree-loop-ivcanon",
+          "levels": [
+            "O0",
+            "O1",
+            "O2"
+          ]
+        },
+        {
+          "name": "-ftree-loop-optimize",
+          "levels": [
+            "O0",
+            "O1",
+            "O2"
+          ]
+        }
+      ],
+      "llvm_passes": [
+        {
+          "name": "IndVarSimplifyPass",
+          "levels": [
+            "O1",
+            "O2"
+          ]
+        },
+        {
+          "name": "LCSSAPass",
+          "levels": [
+            "O1",
+            "O2"
+          ]
+        },
+        {
+          "name": "LICMPass",
+          "levels": [
+            "O1",
+            "O2"
+          ]
+        },
+        {
+          "name": "LoopSimplifyPass",
+          "levels": [
+            "O1",
+            "O2"
+          ]
+        },
+        {
+          "name": "LoopSinkPass",
+          "levels": [
+            "O1",
+            "O2"
+          ]
+        }
+      ],
+      "status": "missing-general-analysis",
+      "evidence": {
+        "shared": [
+          "emit/prepass.c"
+        ],
+        "a64": [
+          "arch/a64/emit/stmt.c"
+        ],
+        "x64": [
+          "emit/walk/stmt.c"
+        ],
+        "wasm": [
+          "arch/wasm/emit/wstmt.c"
+        ]
+      },
+      "remaining": "Loop lowering and loop-weighted local selection exist; no general shared loop discovery, induction rewrite or LICM identified. Build bounded CFG/dominators/natural-loop facts, then hoist pure nontrapping invariant expressions with effect and zero-trip proofs. SSA/LCSSA is useful for sophisticated loop rewriting, not logically required for first safe hoists."
+    },
+    "loop-shape-and-unrolling": {
+      "category": "semantic",
+      "gcc_options": [
+        {
+          "name": "-fsplit-ivs-in-unroller",
+          "levels": [
+            "O0",
+            "O1",
+            "O2"
+          ]
+        },
+        {
+          "name": "-ftree-ch",
+          "levels": [
+            "O1",
+            "O2"
+          ]
+        },
+        {
+          "name": "-funroll-loops",
+          "levels": [
+            "O2"
+          ]
+        },
+        {
+          "name": "-munroll-only-small-loops",
+          "levels": [
+            "O2"
+          ]
+        }
+      ],
+      "llvm_passes": [
+        {
+          "name": "LoopDeletionPass",
+          "levels": [
+            "O1",
+            "O2"
+          ]
+        },
+        {
+          "name": "LoopDistributePass",
+          "levels": [
+            "O1",
+            "O2"
+          ]
+        },
+        {
+          "name": "LoopFullUnrollPass",
+          "levels": [
+            "O1",
+            "O2"
+          ]
+        },
+        {
+          "name": "LoopRotatePass",
+          "levels": [
+            "O1",
+            "O2"
+          ]
+        },
+        {
+          "name": "LoopUnrollPass",
+          "levels": [
+            "O1",
+            "O2"
+          ]
+        },
+        {
+          "name": "SimpleLoopUnswitchPass",
+          "levels": [
+            "O1",
+            "O2"
+          ]
+        }
+      ],
+      "status": "missing-general-transforms",
+      "evidence": {
+        "shared": [
+          "emit/prepass.c"
+        ],
+        "a64": [
+          "arch/a64/emit/stmt.c"
+        ],
+        "x64": [
+          "emit/walk/stmt.c"
+        ],
+        "wasm": [
+          "arch/wasm/emit/wstmt.c"
+        ]
+      },
+      "remaining": "Direct loop lowering is not rotation/deletion/unrolling/unswitching. Add only after loop trip/effect/entry proofs and code-growth budgets; start exact small constant trip counts. Distribution and unswitching need dependence and profitability evidence. No blanket SSA requirement for syntax-local constant loops."
+    },
+    "vectorization": {
+      "category": "semantic",
+      "gcc_options": [
+        {
+          "name": "-ftree-loop-vectorize",
+          "levels": [
+            "O2"
+          ]
+        },
+        {
+          "name": "-ftree-slp-vectorize",
+          "levels": [
+            "O2"
+          ]
+        }
+      ],
+      "llvm_passes": [
+        {
+          "name": "LoopVectorizePass",
+          "levels": [
+            "O1",
+            "O2"
+          ]
+        },
+        {
+          "name": "SLPVectorizerPass",
+          "levels": [
+            "O2"
+          ]
+        },
+        {
+          "name": "VectorCombinePass",
+          "levels": [
+            "O1",
+            "O2"
+          ]
+        }
+      ],
+      "status": "partial-explicit-only",
+      "evidence": {
+        "shared": [
+          "emit/walk/expr.c"
+        ],
+        "a64": [
+          "arch/a64/emit/expr.c"
+        ],
+        "x64": [
+          "emit/walk/expr.c",
+          "arch/x64/emit/lower.c"
+        ],
+        "wasm": [
+          "arch/wasm/emit/wexpr.c"
+        ]
+      },
+      "remaining": "Arm64 has selected integer NEON operations plus lane fallback; x86/wasm GNU-vector lowering is lane-wise in inspected paths. Explicit packed SSE2/wasm simd128 lowering is a distinct cheap target task before automatic vectorization. General loop/SLP vectorization needs dependence, alignment, reductions, legality, tail handling and target cost models; SSA alone does not provide these."
+    },
+    "inlining-and-calls": {
+      "category": "semantic",
+      "gcc_options": [
+        {
+          "name": "-fearly-inlining",
+          "levels": [
+            "O0",
+            "O1",
+            "O2"
+          ]
+        },
+        {
+          "name": "-findirect-inlining",
+          "levels": [
+            "O2"
+          ]
+        },
+        {
+          "name": "-finline",
+          "levels": [
+            "O1",
+            "O2"
+          ]
+        },
+        {
+          "name": "-finline-functions",
+          "levels": [
+            "O2"
+          ]
+        },
+        {
+          "name": "-finline-functions-called-once",
+          "levels": [
+            "O1",
+            "O2"
+          ]
+        },
+        {
+          "name": "-finline-small-functions",
+          "levels": [
+            "O2"
+          ]
+        },
+        {
+          "name": "-foptimize-sibling-calls",
+          "levels": [
+            "O2"
+          ]
+        },
+        {
+          "name": "-fpartial-inlining",
+          "levels": [
+            "O2"
+          ]
+        },
+        {
+          "name": "-fstdarg-opt",
+          "levels": [
+            "O0",
+            "O1",
+            "O2"
+          ]
+        }
+      ],
+      "llvm_passes": [
+        {
+          "name": "AlwaysInlinerPass",
+          "levels": [
+            "O0",
+            "O1",
+            "O2"
+          ]
+        },
+        {
+          "name": "InlinerPass",
+          "levels": [
+            "O1",
+            "O2"
+          ]
+        },
+        {
+          "name": "ModuleInlinerWrapperPass",
+          "levels": [
+            "O1",
+            "O2"
+          ]
+        },
+        {
+          "name": "TailCallElimPass",
+          "levels": [
+            "O1",
+            "O2"
+          ]
+        }
+      ],
+      "status": "partial-target-asymmetric",
+      "evidence": {
+        "shared": [
+          "emit/prepass.c"
+        ],
+        "a64": [
+          "arch/a64/emit/call.c"
+        ],
+        "x64": [
+          "emit/walk/stmt.c",
+          "emit/walk/expr.c"
+        ],
+        "wasm": [
+          "arch/wasm/emit/wcall.c"
+        ]
+      },
+      "remaining": "Native inlining exists with different target eligibility; wasm has no equivalent inliner in inspected path. No general sibling-call lowering identified. Share bounded eligibility/cost policy first, then implement wasm parameter/result/scope remapping and restricted tail ABI hooks. Partial inlining, indirect promotion and general varargs optimization remain separate work; none requires generic SSA merely to inline AST bodies."
+    },
+    "interprocedural-and-global": {
+      "category": "semantic",
+      "gcc_options": [
+        {
+          "name": "-fdevirtualize",
+          "levels": [
+            "O2"
+          ]
+        },
+        {
+          "name": "-fdevirtualize-speculatively",
+          "levels": [
+            "O2"
+          ]
+        },
+        {
+          "name": "-fipa-bit-cp",
+          "levels": [
+            "O2"
+          ]
+        },
+        {
+          "name": "-fipa-cp",
+          "levels": [
+            "O2"
+          ]
+        },
+        {
+          "name": "-fipa-icf",
+          "levels": [
+            "O2"
+          ]
+        },
+        {
+          "name": "-fipa-icf-functions",
+          "levels": [
+            "O2"
+          ]
+        },
+        {
+          "name": "-fipa-icf-variables",
+          "levels": [
+            "O2"
+          ]
+        },
+        {
+          "name": "-fipa-modref",
+          "levels": [
+            "O1",
+            "O2"
+          ]
+        },
+        {
+          "name": "-fipa-profile",
+          "levels": [
+            "O1",
+            "O2"
+          ]
+        },
+        {
+          "name": "-fipa-pure-const",
+          "levels": [
+            "O1",
+            "O2"
+          ]
+        },
+        {
+          "name": "-fipa-ra",
+          "levels": [
+            "O2"
+          ]
+        },
+        {
+          "name": "-fipa-reference",
+          "levels": [
+            "O1",
+            "O2"
+          ]
+        },
+        {
+          "name": "-fipa-reference-addressable",
+          "levels": [
+            "O1",
+            "O2"
+          ]
+        },
+        {
+          "name": "-fipa-sra",
+          "levels": [
+            "O2"
+          ]
+        },
+        {
+          "name": "-fipa-stack-alignment",
+          "levels": [
+            "O0",
+            "O1",
+            "O2"
+          ]
+        },
+        {
+          "name": "-fipa-strict-aliasing",
+          "levels": [
+            "O0",
+            "O1",
+            "O2"
+          ]
+        },
+        {
+          "name": "-fipa-vrp",
+          "levels": [
+            "O2"
+          ]
+        }
+      ],
+      "llvm_passes": [
+        {
+          "name": "CalledValuePropagationPass",
+          "levels": [
+            "O1",
+            "O2"
+          ]
+        },
+        {
+          "name": "ConstantMergePass",
+          "levels": [
+            "O1",
+            "O2"
+          ]
+        },
+        {
+          "name": "DeadArgumentEliminationPass",
+          "levels": [
+            "O1",
+            "O2"
+          ]
+        },
+        {
+          "name": "DevirtSCCRepeatedPass",
+          "levels": [
+            "O1",
+            "O2"
+          ]
+        },
+        {
+          "name": "EliminateAvailableExternallyPass",
+          "levels": [
+            "O1",
+            "O2"
+          ]
+        },
+        {
+          "name": "ForceFunctionAttrsPass",
+          "levels": [
+            "O1",
+            "O2"
+          ]
+        },
+        {
+          "name": "GlobalDCEPass",
+          "levels": [
+            "O1",
+            "O2"
+          ]
+        },
+        {
+          "name": "GlobalOptPass",
+          "levels": [
+            "O1",
+            "O2"
+          ]
+        },
+        {
+          "name": "IPSCCPPass",
+          "levels": [
+            "O1",
+            "O2"
+          ]
+        },
+        {
+          "name": "InferFunctionAttrsPass",
+          "levels": [
+            "O1",
+            "O2"
+          ]
+        },
+        {
+          "name": "PostOrderFunctionAttrsPass",
+          "levels": [
+            "O1",
+            "O2"
+          ]
+        },
+        {
+          "name": "ReversePostOrderFunctionAttrsPass",
+          "levels": [
+            "O1",
+            "O2"
+          ]
+        }
+      ],
+      "status": "limited-facts-general-ipa-missing",
+      "evidence": {
+        "shared": [
+          "emit/prepass.c",
+          "emit/tu.c"
+        ],
+        "a64": [
+          "arch/a64/emit/call.c"
+        ],
+        "x64": [
+          "emit/walk/stmt.c"
+        ],
+        "wasm": [
+          "arch/wasm/emit/wcall.c"
+        ]
+      },
+      "remaining": "Prepass function facts and TU emission filtering are limited evidence, not whole-program IPA. Require explicit call graph, linkage/interposition/escape summaries before pure-const propagation, argument elimination, specialization or merging. Linker section GC is not compiler global DCE or identical-code folding. C++ devirtualization is outside this C compiler scope; C indirect calls still matter."
+    },
+    "library-and-idiom": {
+      "category": "semantic",
+      "gcc_options": [
+        {
+          "name": "-fno-inline-stringops",
+          "levels": [
+            "O0",
+            "O1",
+            "O2"
+          ]
+        },
+        {
+          "name": "-foptimize-crc",
+          "levels": [
+            "O2"
+          ]
+        },
+        {
+          "name": "-foptimize-strlen",
+          "levels": [
+            "O2"
+          ]
+        },
+        {
+          "name": "-fprintf-return-value",
+          "levels": [
+            "O0",
+            "O1",
+            "O2"
+          ]
+        },
+        {
+          "name": "-ftree-loop-distribute-patterns",
+          "levels": [
+            "O2"
+          ]
+        }
+      ],
+      "llvm_passes": [
+        {
+          "name": "ExpandMemCmpPass",
+          "levels": [
+            "O1",
+            "O2"
+          ]
+        },
+        {
+          "name": "InjectTLIMappings",
+          "levels": [
+            "O1",
+            "O2"
+          ]
+        },
+        {
+          "name": "LibCallsShrinkWrapPass",
+          "levels": [
+            "O1",
+            "O2"
+          ]
+        },
+        {
+          "name": "LoopIdiomRecognizePass",
+          "levels": [
+            "O1",
+            "O2"
+          ]
+        },
+        {
+          "name": "MemCpyOptPass",
+          "levels": [
+            "O1",
+            "O2"
+          ]
+        }
+      ],
+      "status": "partial",
+      "evidence": {
+        "shared": [
+          "emit/opt/control.c"
+        ],
+        "a64": [
+          "arch/a64/emit/call.c",
+          "arch/a64/emit/builtin.c"
+        ],
+        "x64": [
+          "emit/walk/expr.c"
+        ],
+        "wasm": [
+          "arch/wasm/emit/wcall.c"
+        ]
+      },
+      "remaining": "Constant __builtin_strcmp proof and selected explicit memory builtins exist; plain-libcall, strlen/printf value folding, CRC idioms, memcpy-chain optimization and loop idiom recognition are not established. Share bounded literal/known-size recipes with freestanding/builtin controls, object bounds and overlap semantics; do not infer library purity merely from a spelling."
+    },
+    "machine-register-allocation": {
+      "category": "target-policy",
+      "gcc_options": [
+        {
+          "name": "-fcaller-saves",
+          "levels": [
+            "O2"
+          ]
+        },
+        {
+          "name": "-fcprop-registers",
+          "levels": [
+            "O1",
+            "O2"
+          ]
+        },
+        {
+          "name": "-fira-hoist-pressure",
+          "levels": [
+            "O0",
+            "O1",
+            "O2"
+          ]
+        },
+        {
+          "name": "-fira-share-save-slots",
+          "levels": [
+            "O0",
+            "O1",
+            "O2"
+          ]
+        },
+        {
+          "name": "-fira-share-spill-slots",
+          "levels": [
+            "O0",
+            "O1",
+            "O2"
+          ]
+        },
+        {
+          "name": "-flra-remat",
+          "levels": [
+            "O2"
+          ]
+        }
+      ],
+      "llvm_passes": [],
+      "status": "partial-different-model",
+      "evidence": {
+        "shared": [
+          "emit/opt/locals.c",
+          "emit/rec/copies.c"
+        ],
+        "a64": [
+          "arch/a64/emit/bind.c",
+          "arch/a64/emit/opt.c"
+        ],
+        "x64": [
+          "arch/x64/emit/locals.c",
+          "arch/x64/emit/copies.c"
+        ],
+        "wasm": [
+          "arch/wasm/emit/wexpr.c"
+        ]
+      },
+      "remaining": "Native uses persistent homes plus temporary allocation, not general IRA/LRA/live-range splitting. Extend scoped liveness/rematerialization only after measured pressure/spill cases; shared facts, target register/ABI policy. Wasm locals are unbounded VM locations, so physical register algorithms do not map one-for-one."
+    },
+    "machine-combining-and-addressing": {
+      "category": "target-policy",
+      "gcc_options": [
+        {
+          "name": "-fauto-inc-dec",
+          "levels": [
+            "O0",
+            "O1",
+            "O2"
+          ]
+        },
+        {
+          "name": "-fcompare-elim",
+          "levels": [
+            "O1",
+            "O2"
+          ]
+        },
+        {
+          "name": "-ffold-mem-offsets",
+          "levels": [
+            "O0",
+            "O1",
+            "O2"
+          ]
+        },
+        {
+          "name": "-flate-combine-instructions",
+          "levels": [
+            "O2"
+          ]
+        },
+        {
+          "name": "-fpeephole",
+          "levels": [
+            "O0",
+            "O1",
+            "O2"
+          ]
+        },
+        {
+          "name": "-fpeephole2",
+          "levels": [
+            "O2"
+          ]
+        },
+        {
+          "name": "-free",
+          "levels": [
+            "O2"
+          ]
+        }
+      ],
+      "llvm_passes": [],
+      "status": "partial",
+      "evidence": {
+        "shared": [
+          "emit/rec/copies.c"
+        ],
+        "a64": [
+          "arch/a64/emit/arith.c",
+          "arch/a64/emit/opt.c"
+        ],
+        "x64": [
+          "arch/x64/emit/lower.c",
+          "arch/x64/emit/extensions.c"
+        ],
+        "wasm": [
+          "arch/wasm/emit/wexpr.c"
+        ]
+      },
+      "remaining": "Instruction selection and limited extension/copy cleanup exist; no full GCC machine-combine equivalent established. Next cheap work: typed indexed addresses, immediate stores, compare/flags reuse with exact effects and profitable small constant multiplication; a64/x64 encodings and wasm address-stack costs remain target-owned."
+    },
+    "machine-layout-and-scheduling": {
+      "category": "target-policy",
+      "gcc_options": [
+        {
+          "name": "-falign-functions",
+          "levels": [
+            "O2"
+          ]
+        },
+        {
+          "name": "-falign-jumps",
+          "levels": [
+            "O2"
+          ]
+        },
+        {
+          "name": "-falign-labels",
+          "levels": [
+            "O2"
+          ]
+        },
+        {
+          "name": "-falign-loops",
+          "levels": [
+            "O2"
+          ]
+        },
+        {
+          "name": "-fbranch-count-reg",
+          "levels": [
+            "O1",
+            "O2"
+          ]
+        },
+        {
+          "name": "-fguess-branch-probability",
+          "levels": [
+            "O1",
+            "O2"
+          ]
+        },
+        {
+          "name": "-freorder-blocks",
+          "levels": [
+            "O1",
+            "O2"
+          ]
+        },
+        {
+          "name": "-freorder-blocks-and-partition",
+          "levels": [
+            "O2"
+          ]
+        },
+        {
+          "name": "-freorder-functions",
+          "levels": [
+            "O2"
+          ]
+        },
+        {
+          "name": "-fsched-critical-path-heuristic",
+          "levels": [
+            "O0",
+            "O1",
+            "O2"
+          ]
+        },
+        {
+          "name": "-fsched-dep-count-heuristic",
+          "levels": [
+            "O0",
+            "O1",
+            "O2"
+          ]
+        },
+        {
+          "name": "-fsched-group-heuristic",
+          "levels": [
+            "O0",
+            "O1",
+            "O2"
+          ]
+        },
+        {
+          "name": "-fsched-interblock",
+          "levels": [
+            "O0",
+            "O1",
+            "O2"
+          ]
+        },
+        {
+          "name": "-fsched-last-insn-heuristic",
+          "levels": [
+            "O0",
+            "O1",
+            "O2"
+          ]
+        },
+        {
+          "name": "-fsched-rank-heuristic",
+          "levels": [
+            "O0",
+            "O1",
+            "O2"
+          ]
+        },
+        {
+          "name": "-fsched-spec",
+          "levels": [
+            "O0",
+            "O1",
+            "O2"
+          ]
+        },
+        {
+          "name": "-fsched-spec-insn-heuristic",
+          "levels": [
+            "O0",
+            "O1",
+            "O2"
+          ]
+        },
+        {
+          "name": "-fsched-stalled-insns-dep",
+          "levels": [
+            "O0",
+            "O1",
+            "O2"
+          ]
+        },
+        {
+          "name": "-fschedule-fusion",
+          "levels": [
+            "O0",
+            "O1",
+            "O2"
+          ]
+        },
+        {
+          "name": "-fschedule-insns2",
+          "levels": [
+            "O2"
+          ]
+        },
+        {
+          "name": "-ftoplevel-reorder",
+          "levels": [
+            "O1",
+            "O2"
+          ]
+        }
+      ],
+      "llvm_passes": [
+        {
+          "name": "CGProfilePass",
+          "levels": [
+            "O1",
+            "O2"
+          ]
+        }
+      ],
+      "status": "unverified-policy-no-general-scheduler",
+      "evidence": {
+        "shared": [
+          "emit/tu.c"
+        ],
+        "a64": [
+          "arch/a64/emit/print.c"
+        ],
+        "x64": [
+          "arch/x64/emit/print.c"
+        ],
+        "wasm": [
+          "arch/wasm/emit/wasm.c"
+        ]
+      },
+      "remaining": "Emission order/alignment are not evidence of profile-guided block placement or dependency scheduling. First audit target-specific defaults and static likely/unlikely placement; measure code size/fetch effects. Later bounded native instruction scheduling requires dependency/latency data. Wasm structured branches/engine scheduling need a different profitability model."
+    },
+    "abi-frame-security-and-debug": {
+      "category": "target-policy",
+      "gcc_options": [
+        {
+          "name": "-fasynchronous-unwind-tables",
+          "levels": [
+            "O0",
+            "O1",
+            "O2"
+          ]
+        },
+        {
+          "name": "-fcombine-stack-adjustments",
+          "levels": [
+            "O1",
+            "O2"
+          ]
+        },
+        {
+          "name": "-fdefer-pop",
+          "levels": [
+            "O1",
+            "O2"
+          ]
+        },
+        {
+          "name": "-fomit-frame-pointer",
+          "levels": [
+            "O1",
+            "O2"
+          ]
+        },
+        {
+          "name": "-fplt",
+          "levels": [
+            "O0",
+            "O1",
+            "O2"
+          ]
+        },
+        {
+          "name": "-fsemantic-interposition",
+          "levels": [
+            "O0",
+            "O1",
+            "O2"
+          ]
+        },
+        {
+          "name": "-fshrink-wrap",
+          "levels": [
+            "O1",
+            "O2"
+          ]
+        },
+        {
+          "name": "-fshrink-wrap-separate",
+          "levels": [
+            "O0",
+            "O1",
+            "O2"
+          ]
+        },
+        {
+          "name": "-fstack-clash-protection",
+          "levels": [
+            "O0",
+            "O1",
+            "O2"
+          ]
+        }
+      ],
+      "llvm_passes": [
+        {
+          "name": "AssignmentTrackingPass",
+          "levels": [
+            "O1",
+            "O2"
+          ]
+        },
+        {
+          "name": "EntryExitInstrumenterPass",
+          "levels": [
+            "O0",
+            "O1",
+            "O2"
+          ]
+        },
+        {
+          "name": "MoveAutoInitPass",
+          "levels": [
+            "O2"
+          ]
+        }
+      ],
+      "status": "partial-policy-not-optimization-parity",
+      "evidence": {
+        "shared": [
+          "emit/prepass.c"
+        ],
+        "a64": [
+          "arch/a64/emit/func.c"
+        ],
+        "x64": [
+          "arch/x64/emit/frame.c",
+          "arch/x64/emit/print.c"
+        ],
+        "wasm": [
+          "arch/wasm/emit/wasm.c"
+        ]
+      },
+      "remaining": "x86 has conservative proven-frame-free leaf omission; ABI/frame/debug mechanisms differ by target. General shrink wrapping, stack-adjust combining, security/instrumentation options and debug assignment tracking are separate policies/correctness features, not all required speed transforms. Inventory GCC defaults do not prove probe emission or vcc option support; audit driver and target contracts individually."
+    },
+    "fp-semantics-policy": {
+      "category": "language-policy",
+      "gcc_options": [
+        {
+          "name": "-ffp-int-builtin-inexact",
+          "levels": [
+            "O0",
+            "O1",
+            "O2"
+          ]
+        },
+        {
+          "name": "-fmath-errno",
+          "levels": [
+            "O0",
+            "O1",
+            "O2"
+          ]
+        },
+        {
+          "name": "-fsigned-zeros",
+          "levels": [
+            "O0",
+            "O1",
+            "O2"
+          ]
+        },
+        {
+          "name": "-ftrapping-math",
+          "levels": [
+            "O0",
+            "O1",
+            "O2"
+          ]
+        }
+      ],
+      "llvm_passes": [],
+      "status": "policy-unverified",
+      "evidence": {
+        "shared": [
+          "cc/const.c",
+          "lib/f128.h"
+        ],
+        "a64": [
+          "arch/a64/emit/fp.c"
+        ],
+        "x64": [
+          "arch/x64/emit/fp.c"
+        ],
+        "wasm": [
+          "arch/wasm/emit/wexpr.c"
+        ]
+      },
+      "remaining": "These mostly constrain legal transformations and observable FP behavior; enabled does not mean fast-math. Verify option handling/rounding/errno/exceptions separately. Existing integer identities do not authorize FP reassociation, x*0, reciprocal approximation or vectorization under relaxed semantics."
+    },
+    "alias-alignment-and-assumptions": {
+      "category": "semantic-analysis-policy",
+      "gcc_options": [
+        {
+          "name": "-fhoist-adjacent-loads",
+          "levels": [
+            "O2"
+          ]
+        },
+        {
+          "name": "-fstrict-aliasing",
+          "levels": [
+            "O2"
+          ]
+        },
+        {
+          "name": "-ftree-pta",
+          "levels": [
+            "O1",
+            "O2"
+          ]
+        }
+      ],
+      "llvm_passes": [
+        {
+          "name": "AlignmentFromAssumptionsPass",
+          "levels": [
+            "O1",
+            "O2"
+          ]
+        },
+        {
+          "name": "DropUnnecessaryAssumesPass",
+          "levels": [
+            "O1",
+            "O2"
+          ]
+        },
+        {
+          "name": "InferAlignmentPass",
+          "levels": [
+            "O1",
+            "O2"
+          ]
+        },
+        {
+          "name": "InvalidateAnalysisPass<llvm::AAManager>",
+          "levels": [
+            "O1",
+            "O2"
+          ]
+        },
+        {
+          "name": "RecomputeGlobalsAAPass",
+          "levels": [
+            "O1",
+            "O2"
+          ]
+        }
+      ],
+      "status": "partial-exact-objects-only",
+      "evidence": {
+        "shared": [
+          "emit/prepass.c",
+          "emit/rec/slots.c"
+        ],
+        "a64": [
+          "arch/a64/emit/opt.c"
+        ],
+        "x64": [
+          "arch/x64/emit/effects.c"
+        ],
+        "wasm": [
+          "arch/wasm/emit/slots.c"
+        ]
+      },
+      "remaining": "Object/escape/overlap facts serve exact frame cells; no general TBAA/points-to/global alias analysis identified. Add bounded disjoint object and immutable-value facts before moving memory; strict-aliasing language policy and alignment assumptions require explicit front-end contracts and adversarial union/char/overlap tests. Analysis invalidation itself is infrastructure."
+    },
+    "pipeline-and-metadata": {
+      "category": "infrastructure",
+      "gcc_options": [
+        {
+          "name": "-fexpensive-optimizations",
+          "levels": [
+            "O2"
+          ]
+        }
+      ],
+      "llvm_passes": [
+        {
+          "name": "AllocTokenPass",
+          "levels": [
+            "O0",
+            "O1",
+            "O2"
+          ]
+        },
+        {
+          "name": "Annotation2MetadataPass",
+          "levels": [
+            "O1",
+            "O2"
+          ]
+        },
+        {
+          "name": "AnnotationRemarksPass",
+          "levels": [
+            "O0",
+            "O1",
+            "O2"
+          ]
+        },
+        {
+          "name": "InvalidateAnalysisPass<llvm::ShouldNotRunFunctionPassesAnalysis>",
+          "levels": [
+            "O1",
+            "O2"
+          ]
+        },
+        {
+          "name": "LowerCommentStringPass",
+          "levels": [
+            "O0",
+            "O1",
+            "O2"
+          ]
+        },
+        {
+          "name": "LowerConstantIntrinsicsPass",
+          "levels": [
+            "O1",
+            "O2"
+          ]
+        },
+        {
+          "name": "LowerExpectIntrinsicPass",
+          "levels": [
+            "O1",
+            "O2"
+          ]
+        },
+        {
+          "name": "MemProfRemoveInfo",
+          "levels": [
+            "O1",
+            "O2"
+          ]
+        },
+        {
+          "name": "WarnMissedTransformationsPass",
+          "levels": [
+            "O1",
+            "O2"
+          ]
+        }
+      ],
+      "status": "not-one-to-one",
+      "evidence": {
+        "shared": [
+          "emit/emitimpl.h",
+          "emit/tu.c"
+        ],
+        "a64": [
+          "arch/a64/emit/opt.c"
+        ],
+        "x64": [
+          "arch/x64/emit/lower.c"
+        ],
+        "wasm": [
+          "arch/wasm/emit/wasm.c"
+        ]
+      },
+      "remaining": "Pass-manager wrappers, lowering of LLVM intrinsics, remarks and metadata maintenance do not each require a vcc optimization pass. Separate user-visible semantics from representation plumbing. Allocation tokens/memory profile metadata need investigation before claiming any relevant source-level capability."
+    },
+    "other-language-lowering": {
+      "category": "language-specific",
+      "llvm_passes": [
+        {
+          "name": "CoroAnnotationElidePass",
+          "levels": [
+            "O1",
+            "O2"
+          ]
+        },
+        {
+          "name": "CoroCleanupPass",
+          "levels": [
+            "O1",
+            "O2"
+          ]
+        },
+        {
+          "name": "CoroConditionalWrapper",
+          "levels": [
+            "O0"
+          ]
+        },
+        {
+          "name": "CoroEarlyPass",
+          "levels": [
+            "O1",
+            "O2"
+          ]
+        },
+        {
+          "name": "CoroElidePass",
+          "levels": [
+            "O1",
+            "O2"
+          ]
+        },
+        {
+          "name": "CoroSplitPass",
+          "levels": [
+            "O1",
+            "O2"
+          ]
+        },
+        {
+          "name": "OpenMPOptCGSCCPass",
+          "levels": [
+            "O2"
+          ]
+        },
+        {
+          "name": "OpenMPOptPass",
+          "levels": [
+            "O1",
+            "O2"
+          ]
+        }
+      ],
+      "status": "outside-C-probe-transform-evidence",
+      "evidence": {
+        "shared": [],
+        "a64": [],
+        "x64": [],
+        "wasm": []
+      },
+      "remaining": "Coroutine/OpenMP pass names appearing on this C probe do not demonstrate transformations or define supported source languages. Track coroutine/OpenMP support separately from the C O2 optimization backlog.",
+      "gcc_options": []
+    },
+    "atomic-and-unreachable-lowering": {
+      "category": "target-policy",
+      "gcc_options": [
+        {
+          "name": "-finline-atomics",
+          "levels": [
+            "O0",
+            "O1",
+            "O2"
+          ]
+        },
+        {
+          "name": "-funreachable-traps",
+          "levels": [
+            "O0"
+          ]
+        }
+      ],
+      "llvm_passes": [],
+      "status": "partial-lowering-option-parity-unverified",
+      "evidence": {
+        "shared": [
+          "cc/builtin.c"
+        ],
+        "a64": [
+          "arch/a64/emit/builtin.c"
+        ],
+        "x64": [
+          "arch/x64/emit/lower.c"
+        ],
+        "wasm": [
+          "arch/wasm/emit/wcall.c"
+        ]
+      },
+      "remaining": "Atomic target lowering exists; inline versus libcall selection, ordering, target feature fallback and unreachable trap policy need explicit driver/codegen contracts. These are relevant C capabilities, not automatically delivered by optimizer passes."
+    }
+  },
+  "code_evidence_sha256": {
+    "ccs/vcc/arch/a64/emit/arith.c": "c141884a0ad71aa3d139f05ed0eb3ce5faf9a6a401640dd3b5b0a6d2e3370738",
+    "ccs/vcc/arch/a64/emit/bind.c": "6b33d78bfc11fb7a0d08b521be0b2d73b52f9ff07f44f49fe5768b6bc0e79070",
+    "ccs/vcc/arch/a64/emit/builtin.c": "48282756ac9058b83877d5365c5458cd6fece3f25037819fb02390f8b5c89a47",
+    "ccs/vcc/arch/a64/emit/call.c": "a701e717f17e315fe0d7a5e0415492c4fce6441ad1c19d8bd5eddb4beafe5bcb",
+    "ccs/vcc/arch/a64/emit/cond.c": "f006a942fe67d90343baad08691d8e90b12540953826cb4d8fd9a789c1db4b44",
+    "ccs/vcc/arch/a64/emit/expr.c": "964e7046006f0af99764804b72c089efeacdaeaf1f9d42bfa96d3159fbfd34f9",
+    "ccs/vcc/arch/a64/emit/fp.c": "649bc27b36bd3950a462555fd80c4af4c8315840676d98cde999cf1131125a35",
+    "ccs/vcc/arch/a64/emit/func.c": "8e4b43417210562d28fe1a08b789eee6683ae3d4506aab64936eecadd0c61fef",
+    "ccs/vcc/arch/a64/emit/opt.c": "8e672a91050685a02bacc1c1724e3788546c66aba6f327d0beaaf1423afff38a",
+    "ccs/vcc/arch/a64/emit/print.c": "48f8897d6e9b2d4d027f3b644a02f1ab9dfcc2fb0e9cb9a9184c81ab20d5f07f",
+    "ccs/vcc/arch/a64/emit/sdivpow2.c": "82ed30e9c593a1ef422d657759c2c27167427ad51f5b3643da5274ec5c843f5d",
+    "ccs/vcc/arch/a64/emit/stmt.c": "c907e77bae06fd97eeabe9d01443e8a0748f0f689923ac10066556cd5abb1107",
+    "ccs/vcc/arch/a64/emit/udivconst.c": "ada354e4d3e0c359395b5613159a855f63ee41b12c34ea1c98fc5dc299c5b7a7",
+    "ccs/vcc/arch/wasm/emit/reachability.c": "e44ea665467eb62c28cac211ae33c94802518673b788e9205f78665b3e0db712",
+    "ccs/vcc/arch/wasm/emit/sdivpow2.c": "ed5ac7630e597dbaa8af09445ae4bbfac164a64485dc3e07b740ae3681c80e65",
+    "ccs/vcc/arch/wasm/emit/slots.c": "e968b7103f39fc312858b2f0328333888920457181633b79cd3ca426209bcf9b",
+    "ccs/vcc/arch/wasm/emit/udivconst.c": "b1ab793a9bf348cb402d6d43a0c394db8c1c9de76cdb32d7d28f53cabf598cdd",
+    "ccs/vcc/arch/wasm/emit/wasm.c": "d55eb4c2aed954e44412f3005a444715a0fc21636f186f8a0ca2649c01956a40",
+    "ccs/vcc/arch/wasm/emit/wcall.c": "b08bcc6f1bf212702089456b50ad12b672a8e912f05f2cf1e9e4c373674fa138",
+    "ccs/vcc/arch/wasm/emit/wexpr.c": "2e74354c0ddfbe2ac79bef8dcaf0742d2566224292f119f745d1e74f67abb633",
+    "ccs/vcc/arch/wasm/emit/wstmt.c": "111bb63a21d28bf648e7d51f15687f5dc263642114a428a930993bfe9363e0fd",
+    "ccs/vcc/arch/x64/emit/copies.c": "077ea68bb1bc926bcc11955e52d581119270189f4770c05e45f48ea011d10d3c",
+    "ccs/vcc/arch/x64/emit/effects.c": "de45e3fd3ee090191686b0079c59b363a39186fee2da43139e959b4de5528d98",
+    "ccs/vcc/arch/x64/emit/extensions.c": "b8a28e65f91951de7937c8fcf36e5cb323ff1ad3517cadc1922dc6dbfe773979",
+    "ccs/vcc/arch/x64/emit/fp.c": "9b5264ad243078b87d67ef13138446e1a1a2adea03fea691e4245e0628d8b9ff",
+    "ccs/vcc/arch/x64/emit/frame.c": "8cc7787a6754b8270d37a94d03a7a70095bfe5b95940d26971608ed4df53e084",
+    "ccs/vcc/arch/x64/emit/locals.c": "0eb40f6714ecb610a0aaf7695da34420517fba2eccf8b7dc3ecc3871120466de",
+    "ccs/vcc/arch/x64/emit/lower.c": "985b5b664b7b8e45b4f6f9e74d95d423d827343f1fef9f1b4232c9418faf6c0e",
+    "ccs/vcc/arch/x64/emit/print.c": "bb1c5d05dad5328f7c6b2eb10b395fbee953234b29f129ad6507fd7a7d4338de",
+    "ccs/vcc/cc/builtin.c": "aa9830aff0db3195bac7f761c0af56c497d314a33b1afa57065e207832273128",
+    "ccs/vcc/cc/const.c": "af2177d37ef7ca509ac015bbcc98c602160ea5f00e0d2fafc240d6a9934989a4",
+    "ccs/vcc/emit/emitimpl.h": "f8093a20f999c5f2322226f687f91a455acd68f04b8aa91bd21a0db39f10de1b",
+    "ccs/vcc/emit/opt/control.c": "b579bae60130fe3d441f11e0efb725d07511a2af87af2c56c3bb92ddbebd4f1a",
+    "ccs/vcc/emit/opt/divpow2.c": "0fcd067b4c7accb7f0935addc257f4965c07133fb63d5551bc63975d5556b913",
+    "ccs/vcc/emit/opt/identity.c": "9d4bc73b4738d696aee85c45eba44c75a732c5f16ddeb5eae759d94eb7158331",
+    "ccs/vcc/emit/opt/locals.c": "73223221057cb7f73417e59aca3e6c4fd604f43e496e5b9095ef5edc1ea530fc",
+    "ccs/vcc/emit/opt/sdivpow2.c": "ba804bc92bebc0f8b81fc23c3b40086fe5e97c88da76cc0b554da33f3b6349bb",
+    "ccs/vcc/emit/opt/switch.c": "2a0673fe48a89cc0f2d54afa699280ec0f7da70fdf4ccd2ee7af92a371f35bc7",
+    "ccs/vcc/emit/opt/udivconst.c": "21477ae4e3243aa43b60e06cb774117f21ee12fb81a171f2f389e2f62d7befa5",
+    "ccs/vcc/emit/prepass.c": "1af4729e2de61e028fb5f285d12b11fc26b737b81544137012e0cb1ce4778cf9",
+    "ccs/vcc/emit/rec/copies.c": "953394a0ef7ab1eb32445d10ea379d590fc0af02fc4f2b0adfa2f27108da1be3",
+    "ccs/vcc/emit/rec/fallthrough.c": "9ed1dba3168451360bb681398e92051f2a9fe1aac22c1577f5dd706444396c24",
+    "ccs/vcc/emit/rec/slot-values.c": "8a8220cfa08a8b8ed9d0dabe0c3b76bb78e9a9ce67ef0076f1c3a553dcebb049",
+    "ccs/vcc/emit/rec/slots.c": "bbfb54859b2991eb5f69480c9ab7634441d28b7da59e22b505356ca7b2585b49",
+    "ccs/vcc/emit/rec/unreachable.c": "fe40ec8f0f44f184b31ed9cae774dfc8192df01a40eb6b659d43a554c31ebbb3",
+    "ccs/vcc/emit/tu.c": "d681127a4e205d5348e4fd6c2958770da5bb43f62d5f4a3590a133a2e4ca6d9c",
+    "ccs/vcc/emit/walk/expr.c": "c9e18280a95b6ed40e379eb08fda699c9613fcb98585701e97e5e2323a833adb",
+    "ccs/vcc/emit/walk/sdivpow2.c": "10acb9477b962f7b1b8a44dddb822b19c9059f4789f2c7a8cbdac43255c8681d",
+    "ccs/vcc/emit/walk/stmt.c": "ba6d14fe8fe44afeb936d35833ec702a5c4116683a97d94f32f61d159253cbdc",
+    "ccs/vcc/emit/walk/udivconst.c": "170673af87fcb5d1c600a02fa429817213c35766f672f10a13180e96a85b0b8e",
+    "ccs/vcc/lib/f128.h": "236f6e4f8739d8460eb65e8d704179ca5a1c858d9673fe9cfd0489a76ae8d616"
+  },
+  "inventory_flags": [
+    "-O{0,1,2}",
+    "-march=x86-64",
+    "-fno-pie",
+    "-fno-stack-protector",
+    "-fcf-protection=none"
+  ],
+  "inventory_extraction": {
+    "gcc": "gcc FLAGS -Q --help=optimizers: regex ^\\s*(-\\S+)\\s+\\[enabled\\]",
+    "llvm": "clang FLAGS -S probe.c -Xclang -fdebug-pass-manager: deduplicated ^Running pass: (\\S+) on "
+  }
+}

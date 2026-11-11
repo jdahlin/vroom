@@ -6,6 +6,9 @@ typedef struct ppd_env {
 	char **envp;		/* the client's environment (vccd); NULL: this process's */
 	struct pp_dsink *dsink;	/* vccd: the build's diagnostics store (NULL: none) */
 	int errtty;		/* errfd is a capture of a terminal's diagnostics (vccd): colors as for it */
+	int infd;		/* the input `-` is read from (0: this process's stdin) */
+	const char *in_src;	/* non-NULL: the input `-` already read (vccd keeps it for a fallback) */
+	size_t in_len;
 } ppd_env;
 
 /* the client's umask for files a job creates (-1: the process's own) */
@@ -20,6 +23,8 @@ int ppd_compare(const char *ours, size_t on, const char *refpath);
 /* -c phase totals (ns): cc_run (pp + parse + codegen; ppd_ns_emit: codegen
  * + assembler alone), finishing and writing objects; object bytes */
 extern _Atomic unsigned long long ppd_ns_cc, ppd_ns_emit, ppd_ns_obj, ppd_bytes_obj;
+/* -c totals: tokens the parser took from pp_next, tokens skipped (decl cache) */
+extern _Atomic unsigned long long ppd_tok_out, ppd_tok_skip;
 
 /* per-thread instruction/cycle totals by phase (vperf.h), summed over the
  * jobs this thread ran: cc_run (pp + parse + sema + codegen), emit_tu alone

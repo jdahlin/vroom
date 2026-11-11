@@ -15,10 +15,36 @@ static void arity(cc *c, uint32_t loc, unsigned want, const vec *args)
 }
 
 static const builtin builtins[] = {
+	{ "__builtin_ia32_pblendvb128", BI_X86_BLENDVB, 1, "BBBB" },
+	{ "__builtin_elementwise_abs", BI_ELEMENTWISE_ABS, 1, "i." },
+	{ "__builtin_ia32_movmskps", BI_X86_SIMD, 1, "iF" },
+	{ "__builtin_ia32_shufps", BI_X86_SIMD, 1, "FFFi" },
+	{ "__builtin_ia32_maxps", BI_X86_SIMD, 1, "FFF" },
+	{ "__builtin_ia32_minps", BI_X86_SIMD, 1, "FFF" },
+	{ "__builtin_ia32_cmpnleps", BI_X86_SIMD, 1, "FFF" },
+	{ "__builtin_ia32_psllwi128", BI_X86_SIMD, 1, "HHi" },
+	{ "__builtin_ia32_psrlwi128", BI_X86_SIMD, 1, "HHi" },
+	{ "__builtin_ia32_pcmpistri128", BI_X86_PCMPSTR, 1, "iBBc" },
+	{ "__builtin_ia32_pcmpistrm128", BI_X86_PCMPSTR, 1, "BBBc" },
+	{ "__builtin_ia32_pcmpistria128", BI_X86_PCMPSTR, 1, "iBBc" },
+	{ "__builtin_ia32_pcmpistric128", BI_X86_PCMPSTR, 1, "iBBc" },
+	{ "__builtin_ia32_pcmpistrio128", BI_X86_PCMPSTR, 1, "iBBc" },
+	{ "__builtin_ia32_pcmpistris128", BI_X86_PCMPSTR, 1, "iBBc" },
+	{ "__builtin_ia32_pcmpistriz128", BI_X86_PCMPSTR, 1, "iBBc" },
+	{ "__builtin_ia32_pcmpestri128", BI_X86_PCMPSTR, 1, "iBiBic" },
+	{ "__builtin_ia32_pcmpestrm128", BI_X86_PCMPSTR, 1, "BBiBic" },
+	{ "__builtin_ia32_pcmpestria128", BI_X86_PCMPSTR, 1, "iBiBic" },
+	{ "__builtin_ia32_pcmpestric128", BI_X86_PCMPSTR, 1, "iBiBic" },
+	{ "__builtin_ia32_pcmpestrio128", BI_X86_PCMPSTR, 1, "iBiBic" },
+	{ "__builtin_ia32_pcmpestris128", BI_X86_PCMPSTR, 1, "iBiBic" },
+	{ "__builtin_ia32_pcmpestriz128", BI_X86_PCMPSTR, 1, "iBiBic" },
 	{ "__builtin_constant_p", BI_CONSTANT_P, 1, "i." },
 	{ "__builtin_expect", BI_EXPECT, 1, "lll" },
 	{ "__builtin_expect_with_probability", BI_EXPECT_PROB, 1, "llld" },
 	{ "__builtin_va_start", BI_VA_START, 0, "vV." },
+	{ "__builtin_c23_va_start", BI_VA_START, 0, "vV." },
+	{ "__builtin_stdc_rotate_left", BI_STDC_ROTL, 0, "u.." },
+	{ "__builtin_stdc_rotate_right", BI_STDC_ROTR, 0, "u.." },
 	{ "__builtin_va_end", BI_VA_END, 0, "vV" },
 	{ "__builtin_va_copy", BI_VA_COPY, 0, "vVV" },
 	{ "__builtin_clz", BI_CLZ, 1, "iu" }, { "__builtin_clzl", BI_CLZL, 1, "iL" }, { "__builtin_clzll", BI_CLZLL, 1, "iW" },
@@ -38,6 +64,7 @@ static const builtin builtins[] = {
 	{ "__builtin_bitreverse32", BI_BITREVERSE32, 1, "uu" }, { "__builtin_bitreverse64", BI_BITREVERSE64, 1, "WW" },
 	{ "__builtin_unreachable", BI_UNREACHABLE, 0, "v" },
 	{ "__builtin_trap", BI_TRAP, 0, "v" }, { "__builtin_debugtrap", BI_DEBUGTRAP, 0, "v" },
+	{ "__builtin_setjmp", BI_SETJMP, 0, "ip" }, { "__builtin_longjmp", BI_LONGJMP, 0, "vpi" },
 	{ "__builtin_return_address", BI_RETURN_ADDRESS, 0, "pu" },
 	{ "__builtin_frame_address", BI_FRAME_ADDRESS, 0, "pu" },
 	{ "__builtin_extract_return_addr", BI_EXTRACT_RETURN_ADDR, 0, "pp" },
@@ -87,10 +114,15 @@ static const builtin builtins[] = {
 	{ "__builtin_huge_vall", BI_HUGE_VAL, 1, "D" },
 	{ "__builtin_inf", BI_INF, 1, "d" }, { "__builtin_inff", BI_INFF, 1, "f" }, { "__builtin_infl", BI_INF, 1, "D" },
 	{ "__builtin_nan", BI_NAN, 1, "dS" }, { "__builtin_nanf", BI_NANF, 1, "fS" }, { "__builtin_nanl", BI_NAN, 1, "DS" },
+	{ "__builtin_nans", BI_NANS, 1, "dS" }, { "__builtin_nansf", BI_NANS, 1, "fS" }, { "__builtin_nansl", BI_NANS, 1, "DS" },
+	{ "__builtin_issignaling", BI_ISSIGNALING, 1, "i." },
 	{ "__builtin_isnan", BI_ISNAN, 1, "i." }, { "__builtin_isinf", BI_ISINF, 1, "i." },
 	{ "__builtin_isfinite", BI_ISFINITE, 1, "i." }, { "__builtin_signbit", BI_SIGNBIT, 1, "i." },
 	{ "__builtin_fpclassify", BI_FPCLASSIFY, 1, "i." }, { "__builtin_isinf_sign", BI_ISINF_SIGN, 1, "i." },
 	{ "__builtin_isnormal", BI_ISNORMAL, 1, "i." },
+	{ "__builtin_isfpclass", BI_ISFPCLASS, 1, "i." },
+	{ "__builtin_issubnormal", BI_ISSUBNORMAL, 1, "i." },
+	{ "__builtin_iszero", BI_ISZERO, 1, "i." },
 	{ "__builtin_isgreater", BI_ISGREATER, 1, "i." }, { "__builtin_isgreaterequal", BI_ISGREATEREQUAL, 1, "i." },
 	{ "__builtin_isless", BI_ISLESS, 1, "i." }, { "__builtin_islessequal", BI_ISLESSEQUAL, 1, "i." },
 	{ "__builtin_islessgreater", BI_ISLESSGREATER, 1, "i." }, { "__builtin_isunordered", BI_ISUNORDERED, 1, "i." },
@@ -121,6 +153,10 @@ static const builtin builtins[] = {
 	{ "__atomic_add_fetch", BI_ATOMIC_ADD_FETCH, 0, "v." }, { "__atomic_sub_fetch", BI_ATOMIC_SUB_FETCH, 0, "v." },
 	{ "__atomic_and_fetch", BI_ATOMIC_AND_FETCH, 0, "v." }, { "__atomic_or_fetch", BI_ATOMIC_OR_FETCH, 0, "v." },
 	{ "__atomic_xor_fetch", BI_ATOMIC_XOR_FETCH, 0, "v." },
+	{ "__atomic_fetch_nand", BI_ATOMIC_FETCH_NAND, 0, "v." }, { "__atomic_nand_fetch", BI_ATOMIC_NAND_FETCH, 0, "v." },
+	{ "__atomic_fetch_max", BI_ATOMIC_FETCH_MAX, 0, "v." }, { "__atomic_max_fetch", BI_ATOMIC_MAX_FETCH, 0, "v." },
+	{ "__atomic_fetch_min", BI_ATOMIC_FETCH_MIN, 0, "v." }, { "__atomic_min_fetch", BI_ATOMIC_MIN_FETCH, 0, "v." },
+	{ "__atomic_test_and_set", BI_ATOMIC_TEST_AND_SET, 0, "v." }, { "__atomic_clear", BI_ATOMIC_CLEAR, 0, "v." },
 	/* legacy __sync_*: the __atomic_* forms with seq_cst (sig "s.": atomic_call appends the order) */
 	{ "__sync_fetch_and_add", BI_ATOMIC_FETCH_ADD, 0, "s." }, { "__sync_fetch_and_sub", BI_ATOMIC_FETCH_SUB, 0, "s." },
 	{ "__sync_fetch_and_and", BI_ATOMIC_FETCH_AND, 0, "s." }, { "__sync_fetch_and_or", BI_ATOMIC_FETCH_OR, 0, "s." },
@@ -128,6 +164,10 @@ static const builtin builtins[] = {
 	{ "__sync_add_and_fetch", BI_ATOMIC_ADD_FETCH, 0, "s." }, { "__sync_sub_and_fetch", BI_ATOMIC_SUB_FETCH, 0, "s." },
 	{ "__sync_and_and_fetch", BI_ATOMIC_AND_FETCH, 0, "s." }, { "__sync_or_and_fetch", BI_ATOMIC_OR_FETCH, 0, "s." },
 	{ "__sync_xor_and_fetch", BI_ATOMIC_XOR_FETCH, 0, "s." },
+	{ "__sync_fetch_and_nand", BI_ATOMIC_FETCH_NAND, 0, "s." }, { "__sync_nand_and_fetch", BI_ATOMIC_NAND_FETCH, 0, "s." },
+	/* int and unsigned only (clang: volatile int * / unsigned *): "si", "su" */
+	{ "__sync_fetch_and_max", BI_ATOMIC_FETCH_MAX, 0, "si" }, { "__sync_fetch_and_min", BI_ATOMIC_FETCH_MIN, 0, "si" },
+	{ "__sync_fetch_and_umax", BI_ATOMIC_FETCH_MAX, 0, "su" }, { "__sync_fetch_and_umin", BI_ATOMIC_FETCH_MIN, 0, "su" },
 	{ "__sync_lock_test_and_set", BI_ATOMIC_EXCHANGE_N, 0, "s." },
 	{ "__sync_val_compare_and_swap", BI_SYNC_VAL_CAS, 0, "s." },
 	{ "__sync_bool_compare_and_swap", BI_SYNC_BOOL_CAS, 0, "s." },
@@ -146,6 +186,8 @@ static const builtin builtins[] = {
 	SYNC_N("__sync_and_and_fetch", BI_ATOMIC_AND_FETCH),
 	SYNC_N("__sync_or_and_fetch", BI_ATOMIC_OR_FETCH),
 	SYNC_N("__sync_xor_and_fetch", BI_ATOMIC_XOR_FETCH),
+	SYNC_N("__sync_fetch_and_nand", BI_ATOMIC_FETCH_NAND),
+	SYNC_N("__sync_nand_and_fetch", BI_ATOMIC_NAND_FETCH),
 	SYNC_N("__sync_lock_test_and_set", BI_ATOMIC_EXCHANGE_N),
 	SYNC_N("__sync_val_compare_and_swap", BI_SYNC_VAL_CAS),
 	SYNC_N("__sync_bool_compare_and_swap", BI_SYNC_BOOL_CAS),
@@ -162,6 +204,13 @@ static const builtin builtins[] = {
 	{ "__c11_atomic_fetch_and", BI_ATOMIC_FETCH_AND, 0, "v." },
 	{ "__c11_atomic_fetch_or", BI_ATOMIC_FETCH_OR, 0, "v." },
 	{ "__c11_atomic_fetch_xor", BI_ATOMIC_FETCH_XOR, 0, "v." },
+	{ "__c11_atomic_fetch_nand", BI_ATOMIC_FETCH_NAND, 0, "v." },
+	{ "__c11_atomic_fetch_max", BI_ATOMIC_FETCH_MAX, 0, "v." },
+	{ "__c11_atomic_fetch_min", BI_ATOMIC_FETCH_MIN, 0, "v." },
+	/* (p, expected, desired, success, failure): __atomic_compare_exchange_n with weak inserted ("vc") */
+	{ "__c11_atomic_compare_exchange_strong", BI_ATOMIC_CMPXCHG_N, 0, "vc" },
+	{ "__c11_atomic_compare_exchange_weak", BI_ATOMIC_CMPXCHG_N, 0, "vc" },
+	{ "__c11_atomic_is_lock_free", BI_ATOMIC_LOCK_FREE, 1, "bz" },
 	{ "__c11_atomic_init", BI_ATOMIC_STORE_N, 0, "s." },
 	{ "__c11_atomic_thread_fence", BI_ATOMIC_THREAD_FENCE, 0, "vi" },
 	{ "__c11_atomic_signal_fence", BI_ATOMIC_SIGNAL_FENCE, 0, "vi" },
@@ -185,12 +234,15 @@ static const builtin builtins[] = {
 	{ "__builtin_snprintf", BI_LIB, 0, "iszS." }, { "__builtin_vsnprintf", BI_LIB, 0, "iszSV" },
 	{ "__builtin_vsprintf", BI_LIB, 0, "isSV" }, { "__builtin_puts", BI_LIB, 0, "iS" },
 	{ "__builtin_abs", BI_LIB, 1, "ii" }, { "__builtin_labs", BI_LIB, 1, "ll" }, { "__builtin_llabs", BI_LIB, 1, "ww" },
+	{ "__builtin_complex", BI_COMPLEX, 1, "i." },
 	{ "__builtin_conj", BI_CONJ, 0, "d." }, { "__builtin_conjf", BI_CONJ, 0, "f." }, { "__builtin_conjl", BI_CONJ, 0, "D." },
 	{ "__builtin_creal", BI_CREAL, 0, "d." }, { "__builtin_crealf", BI_CREAL, 0, "f." }, { "__builtin_creall", BI_CREAL, 0, "D." },
 	{ "__builtin_cimag", BI_CIMAG, 0, "d." }, { "__builtin_cimagf", BI_CIMAG, 0, "f." }, { "__builtin_cimagl", BI_CIMAG, 0, "D." },
 	{ "__builtin_fabs", BI_LIB, 1, "dd" }, { "__builtin_fabsf", BI_LIB, 1, "ff" }, { "__builtin_fabsl", BI_LIB, 1, "DD" },
 	{ "__builtin_copysign", BI_LIB, 1, "ddd" }, { "__builtin_copysignf", BI_LIB, 1, "fff" },
 	{ "__builtin_copysignl", BI_LIB, 1, "DDD" },
+	{ "__builtin_pow", BI_LIB, 1, "ddd" },
+	{ "__builtin_log2", BI_LIB, 1, "dd" },
 	{ "__builtin_sqrt", BI_LIB, 0, "dd" }, { "__builtin_sqrtf", BI_LIB, 0, "ff" },
 	{ "__builtin_floor", BI_LIB, 0, "dd" }, { "__builtin_ceil", BI_LIB, 0, "dd" },
 	{ "__builtin_fmax", BI_LIB, 0, "ddd" }, { "__builtin_fmin", BI_LIB, 0, "ddd" },
@@ -251,12 +303,17 @@ static qty sigtype(cc *c, char ch)
 	case 'z': return c->t_size;
 	case 'd': return prim(TY_DOUBLE);
 	case 'f': return prim(TY_FLOAT);
+	case 'F': return ty_vector(c, prim(TY_FLOAT), 16);
+	case 'c': return prim(TY_CHAR);
+	case 'B': return ty_vector(c, prim(TY_CHAR), 16);
+	case 'H': return ty_vector(c, prim(TY_SHORT), 16);
 	case 'D': return prim(TY_LDOUBLE);
 	case 'p': return ty_ptr(c, prim(TY_VOID));
 	case 'P': return ty_ptr(c, QT(TY_VOID, Q_CONST));
 	case 's': return ty_ptr(c, prim(TY_CHAR));
 	case 'S': return ty_ptr(c, QT(TY_CHAR, Q_CONST));
-	case 'V': return c->t_valist;
+	case 'V':	/* a parameter: x86-64's array type is adjusted to the element pointer */
+		return KIND(c, c->t_valist) == TY_ARRAY ? ty_ptr(c, T(c, c->t_valist)->base) : c->t_valist;
 	default: abort();
 	}
 }
@@ -356,6 +413,224 @@ static int classify_type(cc *c, qty t)
 bool cc_eval(cc *c, uint32_t n, cval *v) { return eval(c, n, v); }
 bool cc_is_signed(cc *c, qty t) { return is_signed(c, t); }
 
+/* Object-size queries never evaluate their pointer operand. Track an address's
+   enclosing allocation and nearest subobject independently, so modes 0/2 and
+   1/3 retain their distinct bounds through casts and pointer arithmetic. */
+typedef struct object_bound {
+	i128 offset, whole, sub;
+	qty storage;
+} object_bound;
+
+static uint64_t object_init_extent(cc *c, qty ty, uint32_t init, unsigned depth)
+{
+	uint64_t size = ty_size(c, ty);
+	if (!init || depth > 64)
+		return size;
+	const node *x = N(init);
+	if (is_array(c, ty) && x->op == N_STR) {
+		const cstr *s = &c->strs[x->a];
+		uint64_t n = (uint64_t)s->n * s->esz;
+		return (T(c, ty)->flags & TF_INCOMPLETE) && n > size ? n : size;
+	}
+	if (x->op != N_INIT)
+		return size;
+	const uint32_t *v = &c->lists[x->b];
+	if (x->aux == 1) {
+		if (!(T(c, ty)->flags & TF_INCOMPLETE))
+			return size;
+		uint64_t es = ty_size(c, T(c, ty)->base);
+		for (uint32_t i = 0; i < x->c; i++) {
+			uint64_t end = ((uint64_t)v[3 * i + 1] + 1) * es;
+			if (end > size) size = end;
+		}
+	} else if (is_record(c, ty)) {
+		const tag *r = &c->tags[T(c, ty)->aux];
+		for (uint32_t i = 0; i < x->c && i < r->nfield; i++) {
+			const field *f = &r->f[i];
+			if (!v[i] || f->bitfield || (x->aux == 2 && i != x->a))
+				continue;
+			uint64_t end = f->off / 8 + object_init_extent(c, f->ty, v[i], depth + 1);
+			if (end > size) size = end;
+		}
+	}
+	return size;
+}
+
+static uint64_t object_element_size(cc *c, qty pointer)
+{
+	qty base = T(c, pointer)->base;
+	return KIND(c, base) == TY_VOID || KIND(c, base) == TY_FUNC ? 1 : ty_size(c, base);
+}
+
+/* Only the last array member can use the historical struct-hack bound. */
+static bool object_flexible_member(cc *c, const node *x)
+{
+	qty t = node_field(c, x)->ty;
+	if (!is_array(c, t) || x->c + 1 != c->tags[x->b].nfield)
+		return false;
+	if (T(c, t)->flags & TF_INCOMPLETE)
+		return true;
+	uint64_t n = arr_len(c, t);
+	return c->o->strict_flex_arrays == 0 ||
+	       (c->o->strict_flex_arrays == 1 && n <= 1) ||
+	       (c->o->strict_flex_arrays == 2 && n == 0);
+}
+
+static bool object_pointer_bound(cc *c, uint32_t n, object_bound *b, unsigned depth, unsigned mode);
+
+static bool object_lvalue_bound(cc *c, uint32_t n, object_bound *b, unsigned depth, unsigned mode)
+{
+	if (!n || depth > 64)
+		return false;
+	const node *x = N(n);
+	cval index;
+	switch (x->op) {
+	case N_VAR:
+	case N_COMPLIT: {
+		const sym *s = &c->syms[x->op == N_VAR ? x->a : x->b];
+		if (s->kind != S_VAR || (is_array(c, s->ty) &&
+		    ((T(c, s->ty)->flags & TF_VLA) || ((T(c, s->ty)->flags & TF_INCOMPLETE) && !s->body))))
+			return false;
+		*b = (object_bound){ .whole = object_init_extent(c, s->ty, s->body, 0), .storage = s->ty };
+		b->sub = b->whole;
+		return true;
+	}
+	case N_STR:
+		*b = (object_bound){ .whole = (uint64_t)c->strs[x->a].n * c->strs[x->a].esz };
+		b->sub = b->whole;
+		return true;
+	case N_MEMBER: {
+		const field *f = node_field(c, x);
+		if (f->bitfield)
+			return false;
+		bool flexible = object_flexible_member(c, x);
+		if (!object_lvalue_bound(c, x->a, b, depth + 1, mode)) {
+			/* The array's declared subobject bound is independent of the
+			   unknown enclosing allocation. Do not invent a whole bound. */
+			if (!is_array(c, f->ty) || (T(c, f->ty)->flags & TF_INCOMPLETE) || (flexible && mode != 3))
+				return false;
+			*b = (object_bound){ .whole = -1, .sub = ty_size(c, f->ty), .storage = f->ty };
+			return true;
+		}
+		b->offset += f->off / 8;
+		/* Clang treats a trailing array as extending through its enclosing
+		   allocation, even when a fixed bound is written (the struct hack).
+		   A nested record's endpoint was retained by the enclosing member. */
+		/* A declared record object (including an element of a declared
+		   array) does not give its trailing member the record's padding.
+		   Raw allocations/reinterpreted storage still permit the struct hack. */
+		if (mode == 3 || !flexible || (b->storage && !(T(c, f->ty)->flags & TF_INCOMPLETE)))
+			b->sub = b->offset + ty_size(c, f->ty);
+		b->storage = f->ty;
+		return true;
+	}
+	case N_INDEX:
+		if (!object_pointer_bound(c, x->a, b, depth + 1, mode) || !eval(c, x->b, &index) || index.kind != CV_INT)
+			return false;
+		b->offset += index.i * object_element_size(c, N(x->a)->ty);
+		if (is_record(c, x->ty) && b->storage &&
+		    (QUNQ(b->storage) == QUNQ(x->ty) ||
+		     (is_array(c, b->storage) && QUNQ(T(c, b->storage)->base) == QUNQ(x->ty))))
+			b->sub = b->offset + ty_size(c, x->ty);
+		if (b->storage && is_array(c, b->storage))
+			b->storage = T(c, b->storage)->base;
+		return true;
+	case N_DEREF:
+		return object_pointer_bound(c, x->a, b, depth + 1, mode);
+	default:
+		return false;
+	}
+}
+
+static bool object_pointer_bound(cc *c, uint32_t n, object_bound *b, unsigned depth, unsigned mode)
+{
+	if (!n || depth > 64)
+		return false;
+	const node *x = N(n);
+	cval index;
+	if (x->op == N_VAR && (c->syms[x->a].flags & SF_BOS_INIT))
+		return object_pointer_bound(c, c->syms[x->a].body, b, depth + 1, mode);
+	if (x->op == N_CALL && !c->o->no_builtin) {
+		uint32_t callee = x->a;
+		while (N(callee)->op == N_CAST || N(callee)->op == N_ADDR)
+			callee = N(callee)->a;
+		if (N(callee)->op != N_VAR)
+			return false;
+		const sym *s = &c->syms[N(callee)->a];
+		if (s->kind != S_FUNC || !(s->flags & SF_GLOBAL) || s->sc == SC_STATIC || s->asmname ||
+		    lib_builtin_disabled(c->o, idstr_(s->name), idlen_(s->name)))
+			return false;
+		const char *name = idstr_(s->name);
+		uint32_t ai = 0;
+		bool multiply = false;
+		if (idlen_(s->name) == 6 && !memcmp(name, "malloc", 6)) { }
+		else if (idlen_(s->name) == 6 && !memcmp(name, "calloc", 6)) multiply = true;
+		else if (idlen_(s->name) == 7 && !memcmp(name, "realloc", 7)) ai = 1;
+		else return false;
+		const ctype *ft = T(c, s->ty);
+		uint32_t nargs = multiply || ai ? 2 : 1;
+		if (ft->kind != TY_FUNC || (ft->flags & (TF_NOPROTO | TF_VARIADIC)) ||
+		    ft->n != nargs || x->c != nargs || !is_ptr(c, ft->base) || !is_void(c, T(c, ft->base)->base))
+			return false;
+		for (uint32_t i = 0; i < nargs; i++) {
+			qty p = c->params[ft->aux + i];
+			if (ai && i == 0 ? (!is_ptr(c, p) || !is_void(c, T(c, p)->base)) : QUNQ(p) != QUNQ(c->t_size))
+				return false;
+		}
+		if (!eval(c, c->lists[x->b + ai], &index) || index.kind != CV_INT || index.i < 0)
+			return false;
+		u128 size = (u128)index.i;
+		if (multiply) {
+			if (!eval(c, c->lists[x->b + 1], &index) || index.kind != CV_INT || index.i < 0)
+				return false;
+			size *= (u128)index.i;
+		}
+		if (size > (ty_size(c, c->t_size) == 4 ? UINT32_MAX : UINT64_MAX))
+			return false;
+		*b = (object_bound){ .whole = (i128)size, .sub = (i128)size };
+		return true;
+	}
+	if (x->op == N_ADDR || (x->op == N_CAST && x->aux == CK_DECAY))
+		return object_lvalue_bound(c, x->a, b, depth + 1, mode);
+	if (x->op == N_CAST && is_ptr(c, N(x->a)->ty)) {
+		if (!object_pointer_bound(c, x->a, b, depth + 1, mode))
+			return false;
+		if (is_ptr(c, x->ty) && is_record(c, T(c, x->ty)->base)) {
+			qty base = T(c, x->ty)->base;
+			if (!b->storage || (QUNQ(b->storage) != QUNQ(base) &&
+			    !(is_array(c, b->storage) && QUNQ(T(c, b->storage)->base) == QUNQ(base)))) {
+				b->sub = b->whole;
+				b->storage = 0;
+			}
+		}
+		return true;
+	}
+	if (is_array(c, x->ty))
+		return object_lvalue_bound(c, n, b, depth + 1, mode);
+	if (x->op == N_BINARY && (x->aux == T_PLUS || x->aux == T_MINUS)) {
+		uint32_t p = x->a, i = x->b;
+		if (!is_ptr(c, N(p)->ty) && x->aux == T_PLUS) p = x->b, i = x->a;
+		if (!is_ptr(c, N(p)->ty) || !object_pointer_bound(c, p, b, depth + 1, mode) ||
+		    !eval(c, i, &index) || index.kind != CV_INT)
+			return false;
+		b->offset += (x->aux == T_MINUS ? -index.i : index.i) * object_element_size(c, N(p)->ty);
+		return true;
+	}
+	return false;
+}
+
+bool cc_object_size(cc *c, uint32_t pointer, unsigned mode, i128 *size)
+{
+	object_bound b;
+	if (mode > 3 || !object_pointer_bound(c, pointer, &b, 0, mode)) return false;
+	i128 end = (mode & 1) && (b.whole < 0 || b.sub < b.whole) ? b.sub : b.whole;
+	if (end < 0) return false;
+	*size = b.offset < 0 || b.offset > end ? 0 : end - b.offset;
+	return true;
+}
+
+static bool elementwise_abs_effects(cc *c, uint32_t n, bool load);
+
 VPRIV bool eval_builtin(cc *c, const node *x, cval *v)
 {
 	const uint32_t *arg = &c->lists[x->b];
@@ -364,6 +639,19 @@ VPRIV bool eval_builtin(cc *c, const node *x, cval *v)
 	v->kind = CV_INT;
 	v->ice = true;
 	switch (x->aux) {
+	case BI_OBJECT_SIZE: case BI_DYNAMIC_OBJECT_SIZE: {
+		object_bound b;
+		if (!eval(c, arg[1], &a) || a.kind != CV_INT)
+			return false;
+		if (object_pointer_bound(c, arg[0], &b, 0, (unsigned)a.i)) {
+			const i128 end = (a.i & 1) && (b.whole < 0 || b.sub < b.whole) ? b.sub : b.whole;
+			v->i = end < 0 ? (a.i & 2 ? 0 : (i128)(uint64_t)-1) :
+			       b.offset < 0 || b.offset > end ? 0 : end - b.offset;
+		} else
+			v->i = a.i & 2 ? 0 : (i128)(uint64_t)-1;
+		v->ice = false;
+		return true;
+	}
 	case BI_CONSTANT_P:
 		if (eval(c, arg[0], &a) && (a.kind == CV_INT || a.kind == CV_FLT || (a.kind == CV_ADDR && a.str && a.i == 0)))
 			v->i = 1;
@@ -393,8 +681,97 @@ VPRIV bool eval_builtin(cc *c, const node *x, cval *v)
 	case BI_HUGE_VAL: case BI_HUGE_VALF: case BI_INF: case BI_INFF:
 		v->kind = CV_FLT, v->f = __builtin_inf(), v->ice = false;
 		return true;
-	case BI_NAN: case BI_NANF:
-		v->kind = CV_FLT, v->f = __builtin_nan(""), v->ice = false;
+	case BI_NAN: case BI_NANF: case BI_NANS: {
+		uint32_t n = arg[0];
+		while (N(n)->op == N_CAST)
+			n = N(n)->a;
+		if (N(n)->op != N_STR)
+			return false;
+		const char *text = c->strs[N(n)->a].s;
+		int p = KIND(c, x->ty) == TY_FLOAT16 ? 10 : KIND(c, x->ty) == TY_FLOAT ? 23 : KIND(c, x->ty) == TY_DOUBLE ? 52 :
+		        c->o->target == PP_DARWIN ? 52 : c->o->target == PP_LINUX_X86_64 ? 63 : 112;
+		u128 payload = 0;
+		unsigned base = 10;
+		bool valid = true;
+		if (text[0] == '0') {
+			base = 8;
+			if (text[1] == 'x' || text[1] == 'X')
+				base = 16, text += 2;
+			if (base == 16 && !*text)
+				valid = false;
+		}
+		for (; *text; text++) {
+			unsigned digit = *text >= '0' && *text <= '9' ? (unsigned)(*text - '0') :
+			                 *text >= 'a' && *text <= 'f' ? (unsigned)(*text - 'a' + 10) :
+			                 *text >= 'A' && *text <= 'F' ? (unsigned)(*text - 'A' + 10) : base;
+			if (digit >= base || payload > (UINT64_MAX - digit) / base) { valid = false; break; }
+			payload = payload * base + digit;
+		}
+		if (!valid)
+			return false;
+		payload &= (((u128)1 << (p - 1)) - 1);
+		if (x->aux == BI_NANS) {
+			if (!payload)
+				payload = (u128)1 << (p - 2);
+		} else
+			payload |= (u128)1 << (p - 1);
+		v->q = (u128)0x7fff << 112 | payload << (112 - p);
+		v->kind = CV_FLT, v->ld = true, v->f = q_to_d(v->q), v->ice = false;
+		return true;
+	}
+	case BI_ISNAN: case BI_ISINF: case BI_ISINF_SIGN: case BI_ISFINITE: case BI_ISNORMAL: case BI_SIGNBIT: {
+		if (elementwise_abs_effects(c, arg[0], true) || !eval(c, arg[0], &a) || a.kind != CV_FLT)
+			return false;
+		u128 q = a.ld ? a.q : q_of_d(a.f);
+		unsigned exponent = (unsigned)(q >> 112) & 0x7fff;
+		int kind = KIND(c, N(arg[0])->ty);
+		unsigned minimum = kind == TY_FLOAT16 ? 16383 - 14 : kind == TY_FLOAT || kind == TY_BFLOAT16 ? 16383 - 126 :
+		                   kind == TY_DOUBLE || c->o->target == PP_DARWIN ? 16383 - 1022 : 1;
+		switch (x->aux) {
+		case BI_ISNAN: v->i = q_isnan(q); break;
+		case BI_ISINF: v->i = q_isinf(q); break;
+		case BI_ISINF_SIGN: v->i = q_isinf(q) ? (q >> 127 ? -1 : 1) : 0; break;
+		case BI_ISFINITE: v->i = exponent != 0x7fff; break;
+		case BI_ISNORMAL: v->i = exponent >= minimum && exponent != 0x7fff; break;
+		default: v->i = q >> 127; break;
+		}
+		v->ice = false;
+		return true;
+	}
+	case BI_ISGREATER: case BI_ISGREATEREQUAL: case BI_ISLESS: case BI_ISLESSEQUAL:
+	case BI_ISLESSGREATER: case BI_ISUNORDERED: {
+		cval b;
+		if (x->c != 2 || elementwise_abs_effects(c, arg[0], true) || elementwise_abs_effects(c, arg[1], true) ||
+		    !eval(c, arg[0], &a) || !eval(c, arg[1], &b) ||
+		    (a.kind != CV_FLT && a.kind != CV_INT) || (b.kind != CV_FLT && b.kind != CV_INT))
+			return false;
+		int p = 0;
+		for (unsigned i = 0; i < 2; i++) if (is_float(c, N(arg[i])->ty)) {
+			int kind = KIND(c, N(arg[i])->ty);
+			int bits = kind == TY_BFLOAT16 ? 7 : kind == TY_FLOAT16 ? 10 : kind == TY_FLOAT ? 23 :
+			           kind == TY_DOUBLE || c->o->target == PP_DARWIN ? 52 : q_prec(c, N(arg[i])->ty);
+			if (bits > p) p = bits;
+		}
+		if (!p) return false;
+		u128 l = a.kind == CV_FLT ? (a.ld ? a.q : q_of_d(a.f)) : q_of_ip(a.i, is_signed(c, N(arg[0])->ty), p);
+		u128 r = b.kind == CV_FLT ? (b.ld ? b.q : q_of_d(b.f)) : q_of_ip(b.i, is_signed(c, N(arg[1])->ty), p);
+		int order = q_cmp(l, r);
+		switch (x->aux) {
+		case BI_ISGREATER: v->i = order == 1; break;
+		case BI_ISGREATEREQUAL: v->i = order == 1 || order == 0; break;
+		case BI_ISLESS: v->i = order == -1; break;
+		case BI_ISLESSEQUAL: v->i = order == -1 || order == 0; break;
+		case BI_ISLESSGREATER: v->i = order == -1 || order == 1; break;
+		default: v->i = order == 2; break;
+		}
+		v->ice = false;
+		return true;
+	}
+	case BI_ISSIGNALING:
+		if (!eval(c, arg[0], &a) || a.kind != CV_FLT)
+			return false;
+		v->i = a.ld ? q_isnan(a.q) && !(a.q & ((u128)1 << 111)) : 0;
+		v->ice = false;
 		return true;
 	case BI_CLZ: case BI_CLZL: case BI_CLZLL: case BI_CTZ: case BI_CTZL: case BI_CTZLL:
 	case BI_FFS: case BI_FFSL: case BI_FFSLL: case BI_POPCOUNT: case BI_POPCOUNTL: case BI_POPCOUNTLL:
@@ -459,6 +836,7 @@ VPRIV uint32_t args_list(cc *c, vec *args)
 			vpush(c, args, assign_expr(c));
 		while (accept(c, T_COMMA));
 	}
+	c->args_rp = tok(c)->loc;
 	if (unlikely(!is(c, T_RPAREN))) {
 		/* clang: a call without its ')' is invalid; the last argument says so */
 		if (args->n && ISERR(args->v[args->n - 1]))
@@ -494,11 +872,39 @@ static qty unqual_array(cc *c, qty t)
 	}
 }
 
+static bool elementwise_abs_effects(cc *c, uint32_t n, bool load);
+
 VPRIV uint32_t mk_builtin(cc *c, int id, qty ty, uint32_t loc, const vec *args)
 {
+	/* A counted pointer has a runtime extent even if its allocation is
+	   unknown. Read the sibling count at the query, not at declaration.
+	   Restrict this lowering to a stable base so no operand effects are lost. */
+	if (id == BI_DYNAMIC_OBJECT_SIZE && args->n == 2) {
+		uint32_t m = args->v[0];
+		cval mode;
+		while (N(m)->op == N_CAST)
+			m = N(m)->a;
+		if (N(m)->op == N_MEMBER && is_ptr(c, N(m)->ty) &&
+		    !elementwise_abs_effects(c, args->v[0], true) && eval(c, args->v[1], &mode) &&
+		    mode.kind == CV_INT && mode.i >= 0 && mode.i <= 2) {
+			uint32_t count = node_field(c, N(m))->counted_by;
+			const tag *r = &c->tags[N(m)->b];
+			for (uint32_t i = 0; count && i < r->nfield; i++) {
+				if (r->f[i].name != count || !is_integer(c, r->f[i].ty))
+					continue;
+				uint32_t base = N(m)->a;
+				uint64_t size = ty_size(c, T(c, N(m)->ty)->base);
+				if (!size) break;
+				uint32_t cnt = convert(c, rvalue(c, member(c, base, count, loc)), c->t_size);
+				return mk_bin(c, T_STAR, c->t_size, cnt, mk_int(c, size, c->t_size, loc), loc);
+			}
+		}
+	}
 	uint32_t n = mk(c, N_BUILTIN, ty, loc);
 
 	N(n)->aux = (uint16_t)id;
+	if (c->fn && (id == BI_OBJECT_SIZE || id == BI_DYNAMIC_OBJECT_SIZE))
+		c->syms[c->fn].flags |= SF_BOS_QUERY;
 	N(n)->b = vfreeze(c, args);
 	N(n)->c = args->n;
 	return n;
@@ -589,7 +995,8 @@ static uint32_t atomic_call(cc *c, const builtin *b, uint32_t loc)
 		[BI_ATOMIC_EXCHANGE - BI_ATOMIC_LOAD_N] = 4, [BI_ATOMIC_CMPXCHG - BI_ATOMIC_LOAD_N] = 6,
 	};
 	int id = b->id, want = id <= BI_ATOMIC_CMPXCHG ? nargs[id - BI_ATOMIC_LOAD_N] :
-			       id == BI_SYNC_VAL_CAS || id == BI_SYNC_BOOL_CAS ? 4 : id == BI_SYNC_SYNCHRONIZE ? 1 : 3;
+			       id == BI_SYNC_VAL_CAS || id == BI_SYNC_BOOL_CAS ? 4 : id == BI_SYNC_SYNCHRONIZE ? 1 :
+			       id == BI_ATOMIC_TEST_AND_SET || id == BI_ATOMIC_CLEAR ? 2 : 3;
 	vec args;
 	qty pt, t, rt = prim(TY_VOID), tp;
 
@@ -610,6 +1017,18 @@ static uint32_t atomic_call(cc *c, const builtin *b, uint32_t loc)
 	}
 	if (b->sig[0] == 's' && (int)args.n == want - 1)	/* __sync_*: sequentially consistent */
 		vpush(c, &args, mk_int(c, 5, prim(TY_INT), loc));
+	if (b->sig[1] == 'c' && args.n == 5) {	/* __c11_atomic_compare_exchange_*: weak goes before the orders */
+		vpush(c, &args, args.v[4]);
+		args.v[4] = args.v[3];
+		args.v[3] = mk_int(c, 0, prim(TY_INT), loc);
+	}
+	if (b->sig[0] == 's' && (id == BI_ATOMIC_FETCH_NAND || id == BI_ATOMIC_NAND_FETCH))
+	{
+		pp_span r = { loc, pp_tok_end(c->p, loc) };	/* the builtin's name */
+
+		cc_warnx(c, "sync-fetch-and-nand-semantics-changed", true, NULL, c->args_rp, &r, 1, NULL, 0,
+			 "the semantics of this intrinsic changed with GCC version 4.4 - the newer semantics are provided here");
+	}
 	if ((int)args.n != want) {
 		arity(c, loc, (unsigned)want, &args);
 		return mk_int(c, 0, prim(TY_INT), loc);
@@ -621,9 +1040,30 @@ static uint32_t atomic_call(cc *c, const builtin *b, uint32_t loc)
 		report(c, "error", loc, &r, 1, NULL, 0, "address argument to atomic builtin must be a pointer ('%s' invalid)", tyname(c, pt));
 		return mk_int(c, 0, prim(TY_INT), loc);
 	}
+	if (b->sig[1] == 'i' || b->sig[1] == 'u') {	/* __sync_fetch_and_{,u}{max,min}: volatile int * / unsigned * */
+		qty it = prim(b->sig[1] == 'i' ? TY_INT : TY_UINT);
+
+		args.v[0] = convert(c, args.v[0], ty_ptr(c, (it | Q_VOLATILE)));
+		pt = N(args.v[0])->ty;
+	}
+	if (id == BI_ATOMIC_TEST_AND_SET || id == BI_ATOMIC_CLEAR) {
+		/* (p, order) on the byte at p: __atomic_exchange_n(p, 1, o) != 0 / __atomic_store_n(p, 0, o) */
+		qty bt = prim(TY_UCHAR);
+		uint32_t r;
+		vec a;
+
+		vinit(&a);
+		vpush(c, &a, cast_node(c, args.v[0], ty_ptr(c, (bt | (QQ(T(c, pt)->base) & Q_VOLATILE))), CK_NOP));
+		vpush(c, &a, mk_int(c, id == BI_ATOMIC_CLEAR ? 0 : 1, bt, loc));
+		vpush(c, &a, convert(c, args.v[1], prim(TY_INT)));
+		if (id == BI_ATOMIC_CLEAR)
+			return mk_builtin(c, BI_ATOMIC_STORE_N, prim(TY_VOID), loc, &a);
+		r = mk_builtin(c, BI_ATOMIC_EXCHANGE_N, bt, loc, &a);
+		return convert(c, r, prim(TY_BOOL));
+	}
 	t = QUNQ(T(c, pt)->base);
 	tp = ty_ptr(c, t);
-	if (!(T(c, t)->size == 1 || T(c, t)->size == 2 || T(c, t)->size == 4 || T(c, t)->size == 8 || T(c, t)->size == 16)) {
+	if (!(T(c, t)->size == 1 || T(c, t)->size == 2 || T(c, t)->size == 4 || T(c, t)->size == 8 || T(c, t)->size == 16) && !(((id >= BI_ATOMIC_LOAD && id <= BI_ATOMIC_CMPXCHG) || !strncmp(b->name, "__c11_atomic_", 13)) && ty_size(c, t))) {
 		cc_error(c, loc, "address argument to atomic builtin must be a pointer to 1,2,4,8 or 16 byte type ('%s' invalid)", tyname(c, pt));
 		return mk_int(c, 0, prim(TY_INT), loc);
 	}
@@ -664,6 +1104,18 @@ static uint32_t atomic_call(cc *c, const builtin *b, uint32_t loc)
 		args.v[2] = convert(c, args.v[2], t);
 		rt = id == BI_SYNC_VAL_CAS ? t : prim(TY_BOOL);
 		break;
+	case BI_ATOMIC_FETCH_MAX: case BI_ATOMIC_FETCH_MIN: case BI_ATOMIC_MAX_FETCH: case BI_ATOMIC_MIN_FETCH:
+		if (!is_integer(c, t) || KIND(c, t) == TY_BOOL)	/* floating max/min: not supported yet */
+			cc_error(c, loc, "address argument to atomic operation must be a pointer to integer");
+		args.v[1] = convert(c, args.v[1], t);
+		rt = t;
+		break;
+	case BI_ATOMIC_FETCH_NAND: case BI_ATOMIC_NAND_FETCH:
+		if (!is_integer(c, t))
+			cc_error(c, loc, "address argument to atomic operation must be a pointer to integer");
+		args.v[1] = convert(c, args.v[1], t);
+		rt = t;
+		break;
 	default:	/* fetch_op / op_fetch */
 		if (!is_integer(c, t) && !is_ptr(c, t))
 			cc_error(c, loc, "address argument to atomic operation must be a pointer to integer or pointer ('%s' invalid)", tyname(c, pt));
@@ -673,20 +1125,120 @@ static uint32_t atomic_call(cc *c, const builtin *b, uint32_t loc)
 	}
 	for (int i = want - (id == BI_ATOMIC_CMPXCHG_N || id == BI_ATOMIC_CMPXCHG ? 2 : 1); i < want; i++)
 		args.v[i] = convert(c, args.v[i], prim(TY_INT));
+	if (((id >= BI_ATOMIC_LOAD_N && id <= BI_ATOMIC_MIN_FETCH) || id == BI_SYNC_VAL_CAS || id == BI_SYNC_BOOL_CAS) && atomic_wide(c, t))
+		return atomic_builtin_expr(c, id, t, &args, loc);
 	return mk_builtin(c, id, rt, loc, &args);
 }
 
-/* __builtin_clzg/ctzg/popcountg (x[, fallback]), clang's type-generic forms:
-   x unsigned, up to 64 bits; the fixed-width builtin on x widened, clz
-   corrected for the narrower width; the fallback is the result for x == 0
-   (x is then read twice: one with side effects is not supported yet). */
+/* A fixed-width bit operation used by the generic forms. */
+static uint32_t fixed_bitcount(cc *c, int id, uint32_t x, bool wide, uint32_t loc)
+{
+	vec args;
+	int fid = id == BI_CLZG ? (wide ? BI_CLZLL : BI_CLZ) :
+	          id == BI_CTZG ? (wide ? BI_CTZLL : BI_CTZ) :
+	                         (wide ? BI_POPCOUNTLL : BI_POPCOUNT);
+	vinit(&args);
+	vpush(c, &args, x);
+	return mk_builtin(c, fid, prim(TY_INT), loc, &args);
+}
+
+/* A compact limb loop keeps the AST independent of the integer precision.
+ * Explicit declarations preserve operand snapshots across loop iterations. */
+static uint32_t bitcount_local(cc *c, vec *body, qty t, uint32_t init, uint32_t loc)
+{
+	uint32_t sym = sym_new(c, S_VAR, 0, t, loc);
+	c->syms[sym].sc = SC_AUTO;
+	uint32_t var = mk(c, N_VAR, t, loc);
+	N(var)->a = sym;
+	N(var)->flags = NF_LVALUE;
+	vpush(c, body, mk2(c, N_DECL, prim(TY_VOID), loc, sym, init));
+	return var;
+}
+
+static void bitcount_statement(cc *c, vec *body, uint32_t n, uint32_t loc)
+{
+	vpush(c, body, mkstmt(c, N_EXPR, loc, n, 0, 0));
+}
+
+VPRIV uint32_t big_bitcount(cc *c, int id, uint32_t x, uint32_t fallback, unsigned bits, uint32_t loc)
+{
+	cval cv;
+	unsigned limbs = (bits + 63) / 64;
+	if (cc_eval(c, x, &cv) && cv.kind == CV_BIGINT && cv.ice) {
+		unsigned count = 0, words = (bits + 31) / 32;
+		bool nonzero = false;
+		for (unsigned j = 0; j < words; j++) {
+			unsigned i = id == BI_CLZG ? words - 1 - j : j;
+			uint32_t w = c->lists[cv.big + i];
+			if (i == words - 1 && (bits & 31))
+				w &= UINT32_MAX >> (32 - (bits & 31));
+			nonzero |= w != 0;
+			if (id == BI_POPCOUNTG)
+				count += (unsigned)__builtin_popcount(w);
+			else if (w) {
+				count += (unsigned)(id == BI_CLZG ? __builtin_clz(w) : __builtin_ctz(w));
+				break;
+			} else count += 32;
+		}
+		if (!nonzero && fallback)
+			return fallback;
+		if (id == BI_CLZG) count -= words * 32 - bits;
+		return with_pre(c, fallback, mk_int(c, count, prim(TY_INT), loc));
+	}
+	vec body, loop, found;
+	vinit(&body); vinit(&loop); vinit(&found);
+	uint32_t value = bitcount_local(c, &body, QUNQ(N(x)->ty), x, loc);
+	uint32_t fb = fallback ? bitcount_local(c, &body, prim(TY_INT), fallback, loc) : 0;
+	uint32_t result = bitcount_local(c, &body, prim(TY_INT), mk_int(c, 0, prim(TY_INT), loc), loc);
+	uint32_t index = bitcount_local(c, &body, prim(TY_INT), mk_int(c, id == BI_CLZG ? limbs - 1 : 0, prim(TY_INT), loc), loc);
+	uint32_t address = mk(c, N_ADDR, ty_ptr(c, N(value)->ty), loc);
+	N(address)->a = value;
+	address = cast_node(c, address, ty_ptr(c, prim(TY_ULLONG)), CK_NOP);
+	uint32_t word = rvalue(c, deref(c, binop(c, T_PLUS, address, rvalue(c, index), loc), loc));
+	if (bits & 63) {
+		uint32_t top = binop(c, T_EQUALEQUAL, rvalue(c, index), mk_int(c, limbs - 1, prim(TY_INT), loc), loc);
+		uint32_t mask = mk_int(c, (i128)(UINT64_MAX >> (64 - (bits & 63))), prim(TY_ULLONG), loc);
+		word = conditional(c, top, binop(c, T_AMP, word, mask, loc), word, loc);
+	}
+	word = bitcount_local(c, &loop, prim(TY_ULLONG), word, loc);
+	uint32_t count = fixed_bitcount(c, id, rvalue(c, word), true, loc);
+	if (id == BI_POPCOUNTG) {
+		bitcount_statement(c, &loop, assign(c, T_PLUS, result, count, loc), loc);
+	} else {
+		bitcount_statement(c, &found, assign(c, T_PLUS, result, count, loc), loc);
+		vpush(c, &found, mkstmt(c, N_BREAK, loc, 0, 0, 0));
+		uint32_t block = mkstmt(c, N_BLOCK, loc, 0, vfreeze(c, &found), found.n);
+		vpush(c, &loop, mkstmt(c, N_IF, loc, rvalue(c, word), block, 0));
+		bitcount_statement(c, &loop, assign(c, T_PLUS, result, mk_int(c, 64, prim(TY_INT), loc), loc), loc);
+	}
+	bitcount_statement(c, &loop, assign(c, id == BI_CLZG ? T_MINUS : T_PLUS, index, mk_int(c, 1, prim(TY_INT), loc), loc), loc);
+	uint32_t cond = binop(c, id == BI_CLZG ? T_GREATEREQ : T_LESS, rvalue(c, index),
+	                     mk_int(c, id == BI_CLZG ? 0 : limbs, prim(TY_INT), loc), loc);
+	uint32_t block = mkstmt(c, N_BLOCK, loc, 0, vfreeze(c, &loop), loop.n);
+	vpush(c, &body, mkstmt(c, N_WHILE, loc, cond, block, 0));
+	uint32_t out = rvalue(c, result);
+	if (id == BI_CLZG && (bits & 63))
+		out = binop(c, T_MINUS, out, mk_int(c, limbs * 64 - bits, prim(TY_INT), loc), loc);
+	if (fb) {
+		uint32_t zero = binop(c, T_EQUALEQUAL, rvalue(c, result), mk_int(c, limbs * 64, prim(TY_INT), loc), loc);
+		out = conditional(c, zero, rvalue(c, fb), out, loc);
+	}
+	bitcount_statement(c, &body, out, loc);
+	block = mkstmt(c, N_BLOCK, loc, 0, vfreeze(c, &body), body.n);
+	out = mk(c, N_STMTEXPR, prim(TY_INT), loc);
+	N(out)->a = block;
+	return out;
+}
+
+/* Generic bit counts use the operand's precision, without integer promotion.
+ * Save effectful operands before selecting a half or the zero fallback; both
+ * arguments to a builtin call are evaluated even when the fallback is unused. */
 static uint32_t generic_bitcount(cc *c, int id, uint32_t loc)
 {
 	vec args;
-	uint32_t x, r, w;
+	uint32_t x, r, pre, fbpre = 0, fb = 0;
 	qty xt;
-	unsigned bits;
-	int fid;
+	unsigned bits, width;
 
 	args_list(c, &args);
 	if (args.n < 1 || args.n > (id == BI_POPCOUNTG ? 1u : 2u)) {
@@ -694,34 +1246,52 @@ static uint32_t generic_bitcount(cc *c, int id, uint32_t loc)
 		return mk_int(c, 0, prim(TY_INT), loc);
 	}
 	x = decay(c, args.v[0]);
-	xt = QUNQ(N(x)->ty);	/* before promotion: the width counts */
-	if (!is_integer(c, xt) || is_signed(c, xt) || KIND(c, xt) == TY_BOOL || ty_size(c, xt) > 8) {
-		cc_error(c, N(x)->loc, "1st argument must be a scalar unsigned integer type of at most 64 bits");
+	xt = QUNQ(N(x)->ty);
+	if (!is_integer(c, xt) || is_signed(c, xt)) {
+		cc_error(c, N(x)->loc, "1st argument must be a scalar unsigned integer type");
 		return mk_int(c, 0, prim(TY_INT), loc);
 	}
-	bits = (unsigned)ty_size(c, xt) * 8;
-	w = convert(c, x, prim(bits == 64 ? TY_ULLONG : TY_UINT));
-	fid = id == BI_CLZG ? (bits == 64 ? BI_CLZLL : BI_CLZ) : id == BI_CTZG ? (bits == 64 ? BI_CTZLL : BI_CTZ)
-	    : (bits == 64 ? BI_POPCOUNTLL : BI_POPCOUNT);
-	{
-		vec a1;
-
-		vinit(&a1);
-		vpush(c, &a1, w);
-		r = mk_builtin(c, fid, prim(TY_INT), loc, &a1);
-	}
-	if (id == BI_CLZG && bits < 32)
-		r = binop(c, T_MINUS, r, mk_int(c, 32 - bits, prim(TY_INT), loc), loc);
+	bits = KIND(c, xt) == TY_BOOL ? 1 : int_bits(c, xt);
+	width = bits > 64 ? 128 : bits > 32 ? 64 : 32;
 	if (args.n == 2) {
-		uint32_t fb = convert(c, rvalue(c, decay(c, args.v[1])), prim(TY_INT));
-
-		if (has_side_effects(c, x)) {
-			cc_error(c, N(x)->loc, "unsupported: a fallback with an argument that has side effects");
-			return r;
+		uint32_t y = decay(c, args.v[1]);
+		qty ft = promoted(c, y);
+		if (KIND(c, ft) != TY_INT || T(c, ft)->n) {
+			cc_error(c, N(y)->loc, "2nd argument must have type int after integer promotion");
+			return mk_int(c, 0, prim(TY_INT), loc);
 		}
-		r = conditional(c, binop(c, T_EXCLAIMEQ, x, mk_int(c, 0, xt, loc), loc), r, fb, loc);
+		fb = convert(c, y, prim(TY_INT));
 	}
-	return r;
+	if (bits > 128)
+		return big_bitcount(c, id, x, fb, bits, loc);
+	x = cplx_reuse(c, x, &pre);
+	if (fb) fb = cplx_reuse(c, fb, &fbpre);
+	if (width == 128) {
+		uint32_t w = convert(c, x, prim(TY_UINT128));
+		uint32_t lo = convert(c, w, prim(TY_ULLONG));
+		uint32_t hi = convert(c, binop(c, T_GREATERGREATER, w,
+		                             mk_int(c, 64, prim(TY_INT), loc), loc), prim(TY_ULLONG));
+		uint32_t low = fixed_bitcount(c, id, lo, true, loc);
+		uint32_t high = fixed_bitcount(c, id, hi, true, loc);
+		if (id == BI_POPCOUNTG)
+			r = binop(c, T_PLUS, low, high, loc);
+		else {
+			uint32_t first = id == BI_CLZG ? hi : lo;
+			uint32_t count = id == BI_CLZG ? high : low;
+			uint32_t other = id == BI_CLZG ? low : high;
+			uint32_t cond = binop(c, T_EXCLAIMEQ, first, mk_int(c, 0, prim(TY_ULLONG), loc), loc);
+			r = conditional(c, cond, count,
+			                binop(c, T_PLUS, mk_int(c, 64, prim(TY_INT), loc), other, loc), loc);
+		}
+	} else {
+		uint32_t w = convert(c, x, prim(width == 64 ? TY_ULLONG : TY_UINT));
+		r = fixed_bitcount(c, id, w, width == 64, loc);
+	}
+	if (id == BI_CLZG && bits < width)
+		r = binop(c, T_MINUS, r, mk_int(c, width - bits, prim(TY_INT), loc), loc);
+	if (args.n == 2)
+		r = conditional(c, binop(c, T_EXCLAIMEQ, x, mk_int(c, 0, xt, loc), loc), r, fb, loc);
+	return with_pre(c, pre, with_pre(c, fbpre, r));
 }
 
 /*
@@ -745,7 +1315,7 @@ VPRIV uint32_t vector_builtin(cc *c, bool shuffle, uint32_t loc)
 		rt = type_name(c);
 		expect_here(c, T_RPAREN, "')'");
 		if (!is_vector(c, at) || !is_vector(c, rt) ||
-		    ty_size(c, at) / ty_size(c, T(c, at)->base) != ty_size(c, rt) / ty_size(c, T(c, rt)->base)) {
+		    (T(c, at)->ext ?: T(c, at)->n) != (T(c, rt)->ext ?: T(c, rt)->n)) {
 			cc_error(c, loc, "first two arguments to __builtin_convertvector must have the same number of elements");
 			return mk_int(c, 0, prim(TY_INT), loc);
 		}
@@ -764,7 +1334,7 @@ VPRIV uint32_t vector_builtin(cc *c, bool shuffle, uint32_t loc)
 	}
 	{
 		qty et = T(c, at)->base;
-		uint64_t n = ty_size(c, at) / ty_size(c, et), k = 0;
+		uint64_t n = T(c, at)->ext ?: T(c, at)->n, k = 0;
 
 		while (accept(c, T_COMMA)) {
 			uint32_t ix = assign_expr(c);
@@ -776,13 +1346,504 @@ VPRIV uint32_t vector_builtin(cc *c, bool shuffle, uint32_t loc)
 			k++;
 		}
 		expect_here(c, T_RPAREN, "')'");
-		if (k == 0 || (k & (k - 1)) || k * ty_size(c, et) > 64) {
+		if (k == 0 || (is_bool_vector(c, at) ? k > 4096 : ((k & (k - 1)) || k * ty_size(c, et) > 64))) {
 			cc_error(c, loc, "__builtin_shufflevector: the number of indices must be a power of two");
 			return mk_int(c, 0, prim(TY_INT), loc);
 		}
-		rt = ty_vector(c, et, (uint32_t)(k * ty_size(c, et)));
+		if (is_bool_vector(c, at)) {
+			uint32_t size = 1;
+			while (size < (k + 7) / 8) size *= 2;
+			ctype t = *T(c, ty_vector(c, et, size));
+			t.ext = (uint16_t)k, t.n = (uint32_t)k;
+			rt = QT(ty_intern(c, &t), 0);
+		} else
+			rt = ty_vector(c, et, (uint32_t)(k * ty_size(c, et)));
 	}
 	return mk_builtin(c, BI_SHUFFLEVECTOR, rt, loc, &args);
+}
+
+/* A zero bound reads neither string, but all argument expressions still run. */
+VPRIV uint32_t fold_strncmp_zero(cc *c, const vec *args, uint32_t loc)
+{
+	cval cv;
+
+	if (args->n != 3 || !cc_eval(c, args->v[2], &cv) || cv.kind != CV_INT || cv.i)
+		return 0;
+	uint32_t n = mk_int(c, 0, prim(TY_INT), loc);
+	for (int i = 2; i >= 0; i--)
+		n = with_pre(c, args->v[i], n);
+	return n;
+}
+
+/* SSE operations expressed in ordinary vector lanes, preserving argument
+ * evaluation and the instruction's second-operand choice for NaNs and ties. */
+static uint32_t builtin_vector_lane(cc *c, uint32_t v, qty et, unsigned i, uint32_t loc)
+{
+	uint32_t p = cast_node(c, rvalue(c, v), ty_ptr(c, et), CK_VADDR);
+	uint32_t n = mk2(c, N_INDEX, et, loc, p, mk_int(c, i, prim(TY_LONG), loc));
+	N(n)->flags = NF_LVALUE;
+	return n;
+}
+
+/* The builtin converts its constant control to char, as Clang does. The final hidden
+ * argument identifies the result projection and explicit-length variant. */
+static uint32_t x86_pcmpstr_call(cc *c, const builtin *b, vec *args, qty rt, uint32_t loc)
+{
+	bool explicit = strstr(b->name, "pcmpestr") != NULL;
+	unsigned count = explicit ? 5 : 3;
+	i128 imm;
+	if (c->o->target != PP_LINUX_X86_64) {
+		cc_error(c, loc, "'%s' requires an x86-64 target", b->name);
+		return err_node(c, loc);
+	}
+	if (args->n != count) return err_node(c, loc);
+	if (has_side_effects(c, args->v[count - 1]) || !const_int(c, args->v[count - 1], &imm)) {
+		cc_error(c, loc, "argument to '%s' must be a constant integer", b->name);
+		return err_node(c, loc);
+	}
+	const char *name = strstr(b->name, "str") + 3;
+	unsigned kind = name[0] == 'm' ? 1 : name[1] == 'a' ? 2 : name[1] == 'c' ? 3 :
+		name[1] == 'o' ? 4 : name[1] == 's' ? 5 : name[1] == 'z' ? 6 : 0;
+	vpush(c, args, mk_int(c, kind | (explicit ? 8 : 0), prim(TY_INT), loc));
+	return mk_builtin(c, BI_X86_PCMPSTR, rt, loc, args);
+}
+
+static uint32_t x86_simd_call(cc *c, const builtin *b, vec *args, qty rt, uint32_t loc)
+{
+	const char *name = b->name + sizeof("__builtin_ia32_") - 1;
+	if (!strcmp(name, "shufps")) {
+		i128 imm;
+		if (args->n != 3 || !const_int(c, args->v[2], &imm) || imm < 0 || imm > 255) {
+			cc_error(c, loc, "argument to '%s' must be a constant integer in range [0, 255]", b->name);
+			return err_node(c, loc);
+		}
+		vec lanes;
+		vinit(&lanes);
+		vpush(c, &lanes, args->v[0]); vpush(c, &lanes, args->v[1]);
+		for (unsigned i = 0; i < 4; i++)
+			vpush(c, &lanes, mk_int(c, ((unsigned)imm >> (2 * i) & 3) + (i >= 2 ? 4 : 0), prim(TY_INT), loc));
+		return mk_builtin(c, BI_SHUFFLEVECTOR, rt, loc, &lanes);
+	}
+	if (!strcmp(name, "movmskps")) {
+		if (args->n != 1) return err_node(c, loc);
+		qty vt = N(args->v[0])->ty;
+		uint32_t sym = sym_new(c, S_VAR, 0, vt, loc);
+		c->syms[sym].sc = SC_AUTO;
+		uint32_t saved = mk(c, N_VAR, vt, loc);
+		N(saved)->a = sym; N(saved)->flags = NF_LVALUE;
+		uint32_t result = mk_int(c, 0, prim(TY_INT), loc);
+		for (unsigned i = 0; i < 4; i++) {
+			vec one;
+			vinit(&one);
+			vpush(c, &one, rvalue(c, builtin_vector_lane(c, saved, prim(TY_FLOAT), i, loc)));
+			uint32_t sign = mk_builtin(c, BI_SIGNBIT, prim(TY_INT), loc, &one);
+			sign = convert(c, convert(c, sign, prim(TY_BOOL)), prim(TY_INT));
+			sign = mk_bin(c, T_LESSLESS, prim(TY_INT), sign, mk_int(c, i, prim(TY_INT), loc), loc);
+			result = mk_bin(c, T_PIPE, prim(TY_INT), result, sign, loc);
+		}
+		return with_pre(c, mk2(c, N_ASSIGN, vt, loc, saved, args->v[0]), result);
+	}
+	if (args->n != 2) return err_node(c, loc);
+	bool shift = name[0] == 'p', cmp = name[0] == 'c';
+	qty et = shift ? prim(TY_USHORT) : cmp ? prim(TY_INT) : prim(TY_FLOAT);
+	qty vt = ty_vector(c, et, 16);
+	uint32_t saved[2], pre[2];
+	for (unsigned i = 0; i < 2; i++) {
+		qty t = N(args->v[i])->ty;
+		uint32_t sym = sym_new(c, S_VAR, 0, t, loc);
+		c->syms[sym].sc = SC_AUTO;
+		saved[i] = mk(c, N_VAR, t, loc); N(saved[i])->a = sym; N(saved[i])->flags = NF_LVALUE;
+		pre[i] = mk2(c, N_ASSIGN, t, loc, saved[i], args->v[i]);
+	}
+	uint32_t sym = sym_new(c, S_VAR, 0, vt, loc);
+	c->syms[sym].sc = SC_AUTO;
+	uint32_t out = mk(c, N_VAR, vt, loc); N(out)->a = sym; N(out)->flags = NF_LVALUE;
+	uint32_t result = cast_node(c, rvalue(c, out), rt, CK_NOP);
+	for (unsigned i = 16 / ty_size(c, et); i--;) {
+		uint32_t a = rvalue(c, builtin_vector_lane(c, saved[0], shift ? et : prim(TY_FLOAT), i, loc));
+		uint32_t value;
+		if (shift) {
+			uint32_t count = convert(c, rvalue(c, saved[1]), prim(TY_UINT));
+			uint32_t valid = mk_bin(c, T_LESS, prim(TY_INT), count, mk_int(c, 16, prim(TY_UINT), loc), loc);
+			value = mk_bin(c, name[2] == 'l' ? T_LESSLESS : T_GREATERGREATER, prim(TY_UINT), convert(c, a, prim(TY_UINT)), count, loc);
+			value = conditional(c, valid, value, mk_int(c, 0, prim(TY_UINT), loc), loc);
+			value = convert(c, value, et);
+		} else {
+			uint32_t rhs = rvalue(c, builtin_vector_lane(c, saved[1], prim(TY_FLOAT), i, loc));
+			uint32_t cond = mk_bin(c, cmp ? T_LESSEQ : !strcmp(name, "maxps") ? T_GREATER : T_LESS, prim(TY_INT), a, rhs, loc);
+			value = cmp ? conditional(c, cond, mk_int(c, 0, et, loc), mk_int(c, -1, et, loc), loc) : conditional(c, cond, a, rhs, loc);
+		}
+		uint32_t dst = builtin_vector_lane(c, out, et, i, loc);
+		result = with_pre(c, mk2(c, N_ASSIGN, et, loc, dst, value), result);
+	}
+	return with_pre(c, pre[0], with_pre(c, pre[1], result));
+}
+
+/* Rounding a value promoted from float has an exact float result. Unlike
+ * transcendental functions, narrowing these operations cannot double-round. */
+VPRIV uint32_t narrow_math_call(cc *c, const char *name, size_t len, uint32_t arg, uint32_t loc)
+{
+	if (!c->o->opt || N(arg)->op != N_CAST || N(arg)->aux != CK_F2F ||
+	    KIND(c, N(arg)->ty) != TY_DOUBLE || KIND(c, N(N(arg)->a)->ty) != TY_FLOAT)
+		return 0;
+	if (!((len == 5 && (!memcmp(name, "floor", 5) || !memcmp(name, "trunc", 5) || !memcmp(name, "round", 5))) ||
+	      (len == 4 && !memcmp(name, "ceil", 4))))
+		return 0;
+	cval cv;
+	if (cc_eval(c, arg, &cv))
+		return 0;	/* leave constant arguments to the existing libm fold */
+	char target[32] = "__builtin_";
+	memcpy(target + 10, name, len);
+	target[10 + len] = 'f';
+	target[11 + len] = 0;
+	for (const builtin *b = builtins; b->name; b++) {
+		if (strcmp(b->name, target))
+			continue;
+		qty ft = builtin_type(c, b);
+		uint32_t s = sym_new(c, S_BUILTIN, 0, ft, loc);
+		c->syms[s].val = b - builtins;
+		uint32_t fn = mk(c, N_VAR, ft, loc);
+		N(fn)->a = s;
+		vec args;
+		vinit(&args);
+		vpush(c, &args, N(arg)->a);
+		uint32_t n = mk(c, N_CALL, prim(TY_FLOAT), loc);
+		N(n)->a = decay(c, fn);
+		N(n)->b = vfreeze(c, &args);
+		N(n)->c = 1;
+		return convert(c, n, prim(TY_DOUBLE));
+	}
+	return 0;
+}
+
+/* abs has no integer promotions and INT_MIN maps to itself. Do the
+ * negation in the unsigned type so that the generated operation cannot
+ * acquire signed-overflow semantics. */
+static uint32_t elementwise_abs_lane(cc *c, uint32_t a, qty et, uint32_t loc)
+{
+	if (is_integer(c, et)) {
+		qty u = unsigned_of(c, et);
+		uint32_t neg = convert(c, mk_bin(c, T_MINUS, u, mk_int(c, 0, u, loc), convert(c, a, u), loc), et);
+		uint32_t cond = mk_bin(c, T_LESS, prim(TY_INT), a, mk_int(c, 0, et, loc), loc);
+		return convert(c, conditional(c, cond, neg, a, loc), et);
+	}
+	if (ty_size(c, et) == 2) {
+		/* Clearing the sign bit directly also preserves signaling NaNs;
+		 * converting through float would quiet them. */
+		uint32_t sym = sym_new(c, S_VAR, 0, et, loc);
+		c->syms[sym].sc = SC_AUTO;
+		uint32_t tmp = mk(c, N_VAR, et, loc); N(tmp)->a = sym; N(tmp)->flags = NF_LVALUE;
+		uint32_t p = cast_node(c, addr_of(c, tmp, loc), ty_ptr(c, prim(TY_USHORT)), CK_P2P);
+		uint32_t bits = mk(c, N_DEREF, prim(TY_USHORT), loc); N(bits)->a = p; N(bits)->flags = NF_LVALUE;
+		uint32_t masked = mk_bin(c, T_AMP, prim(TY_USHORT), rvalue(c, bits), mk_int(c, 0x7fff, prim(TY_USHORT), loc), loc);
+		uint32_t write = mk2(c, N_ASSIGN, prim(TY_USHORT), loc, bits, masked);
+		return with_pre(c, mk2(c, N_ASSIGN, et, loc, tmp, a), with_pre(c, write, rvalue(c, tmp)));
+	}
+	const char *name = KIND(c, et) == TY_FLOAT ? "__builtin_fabsf" : KIND(c, et) == TY_DOUBLE ? "__builtin_fabs" : "__builtin_fabsl";
+	const builtin *b = builtins;
+	while (strcmp(b->name, name)) b++;
+	qty ft = builtin_type(c, b);
+	uint32_t sym = sym_new(c, S_BUILTIN, 0, ft, loc);
+	c->syms[sym].val = b - builtins;
+	uint32_t fn = mk(c, N_VAR, ft, loc); N(fn)->a = sym;
+	vec args; vinit(&args); vpush(c, &args, a);
+	uint32_t n = mk(c, N_CALL, et, loc);
+	N(n)->a = decay(c, fn); N(n)->b = vfreeze(c, &args); N(n)->c = 1;
+	return n;
+}
+
+/* A folded argument may still contain evaluated comma operands. This
+ * check includes volatile/atomic reads and respects short-circuiting, while
+ * leaving genuinely constant arguments free of synthetic comma expressions
+ * (which would make a C23 constexpr initializer nonconstant). */
+static bool elementwise_abs_effects(cc *c, uint32_t n, bool load)
+{
+	if (!n) return false;
+	const node *x = N(n);
+	if (load && (x->flags & NF_LVALUE) && ((QQ(x->ty) & Q_VOLATILE) || (T(c, x->ty)->flags & TF_ATOMIC)))
+		return true;
+	switch (x->op) {
+	case N_NUM: case N_FNUM: case N_ZERO: case N_STR: case N_VAR: case N_LABELADDR:
+		return false;
+	case N_ADDR: case N_MEMBER:
+		return elementwise_abs_effects(c, x->a, false);
+	case N_CAST:
+		return elementwise_abs_effects(c, x->a, x->aux != CK_DECAY && x->aux != CK_FDECAY);
+	case N_UNARY: case N_DEREF:
+		return elementwise_abs_effects(c, x->a, true);
+	case N_INDEX: case N_BINARY: case N_COMMA: case N_CPLX:
+		return elementwise_abs_effects(c, x->a, true) || elementwise_abs_effects(c, x->b, true);
+	case N_LOGAND: case N_LOGOR: case N_COND: {
+		cval cv;
+		if (elementwise_abs_effects(c, x->a, true)) return true;
+		if (cc_eval(c, x->a, &cv)) {
+			bool truth = cv.kind == CV_INT ? cv.i != 0 : cv.kind == CV_FLT ? (cv.ld ? q_nz(cv.q) : cv.f != 0) : true;
+			if (x->op == N_COND)
+				return elementwise_abs_effects(c, truth ? x->b : x->c, true);
+			return (x->op == N_LOGAND ? truth : !truth) && elementwise_abs_effects(c, x->b, true);
+		}
+		return elementwise_abs_effects(c, x->b, true) || elementwise_abs_effects(c, x->c, true);
+	}
+	case N_BUILTIN: case N_CALL: {
+		if (x->op == N_BUILTIN && x->aux == BI_CONSTANT_P) return false;
+		cval value;
+		if (!cc_eval(c, n, &value)) return true;
+		if (x->op == N_CALL) {
+			uint32_t fn = x->a;
+			while (N(fn)->op == N_CAST) fn = N(fn)->a;
+			if (N(fn)->op != N_VAR || c->syms[N(fn)->a].kind != S_BUILTIN) return true;
+		}
+		for (uint32_t i = 0; i < x->c; i++)
+			if (elementwise_abs_effects(c, c->lists[x->b + i], true)) return true;
+		return false;
+	}
+	default:
+		return true;
+	}
+}
+
+/* fabs/copysign are representation operations: integer masks preserve both
+ * signaling NaNs and signed zero. Anonymous locals evaluate each operand once. */
+VPRIV uint32_t fp_sign_call(cc *c, const char *name, size_t len, qty ft, const vec *args, uint32_t loc)
+{
+	bool copy = (len == 8 && !memcmp(name, "copysign", 8)) ||
+		    (len == 9 && (!memcmp(name, "copysignf", 9) || !memcmp(name, "copysignl", 9)));
+	bool abs = (len == 4 && !memcmp(name, "fabs", 4)) ||
+		   (len == 5 && (!memcmp(name, "fabsf", 5) || !memcmp(name, "fabsl", 5)));
+	if (!copy && !abs) return 0;
+	bool single = name[len - 1] == 'f', extended = name[len - 1] == 'l';
+	qty t = prim(extended ? TY_LDOUBLE : single ? TY_FLOAT : TY_DOUBLE);
+	if ((T(c, ft)->flags & (TF_NOPROTO | TF_VARIADIC)) || args->n != (copy ? 2 : 1) ||
+	    !compatible(c, ft, sig_func_type(c, copy ? (extended ? "DDD" : single ? "fff" : "ddd") : (extended ? "DD" : single ? "ff" : "dd"))))
+		return 0;
+	cval a, b;
+	if (!elementwise_abs_effects(c, args->v[0], true) && cc_eval(c, args->v[0], &a) && a.kind == CV_FLT &&
+	    (!copy || (!elementwise_abs_effects(c, args->v[1], true) && cc_eval(c, args->v[1], &b) && b.kind == CV_FLT)))
+	{
+		u128 q = a.ld ? a.q : q_of_d(a.f);
+		u128 sign = copy ? (b.ld ? b.q : q_of_d(b.f)) & ((u128)1 << 127) : 0;
+		/* Keep the original constant node: converting through host double
+		   would quiet or canonicalize a signaling NaN payload. */
+		return ((q ^ sign) >> 127) ? neg(c, args->v[0]) : args->v[0];
+	}
+	if (extended) return 0;
+	if (c->o->target != PP_LINUX_X86_64 && c->o->target != PP_LINUX_AARCH64)
+		return 0;
+	if (c->o->target == PP_LINUX_X86_64 ?
+	    !x86_feature_has(cc_x86_features(c, c->fn), single ? X86_FEATURE_SSE : X86_FEATURE_SSE2) : c->o->general_regs_only) {
+		cc_error(c, loc, "%s floating point is not supported", "-mgeneral-regs-only:");
+		return err_node(c, loc);
+	}
+	qty bits = prim(single ? TY_UINT : TY_ULLONG);
+	i128 sign = (i128)1 << (single ? 31 : 63);
+	uint32_t tmp[2], raw[2], pre[2];
+	for (uint32_t i = 0; i < args->n; i++) {
+		uint32_t s = sym_new(c, S_VAR, 0, t, loc);
+		c->syms[s].sc = SC_AUTO;
+		tmp[i] = mk(c, N_VAR, t, loc); N(tmp[i])->a = s; N(tmp[i])->flags = NF_LVALUE;
+		pre[i] = mk2(c, N_ASSIGN, t, loc, tmp[i], args->v[i]);
+		uint32_t ptr = cast_node(c, addr_of(c, tmp[i], loc), ty_ptr(c, bits), CK_P2P);
+		raw[i] = mk(c, N_DEREF, bits, loc); N(raw[i])->a = ptr; N(raw[i])->flags = NF_LVALUE;
+	}
+	uint32_t value = mk_bin(c, T_AMP, bits, rvalue(c, raw[0]), mk_int(c, sign - 1, bits, loc), loc);
+	if (copy) {
+		uint32_t source = mk_bin(c, T_AMP, bits, rvalue(c, raw[1]), mk_int(c, sign, bits, loc), loc);
+		value = mk_bin(c, T_PIPE, bits, value, source, loc);
+	}
+	uint32_t result = with_pre(c, mk2(c, N_ASSIGN, bits, loc, raw[0], value), rvalue(c, tmp[0]));
+	if (copy) result = with_pre(c, pre[1], result);
+	result = with_pre(c, pre[0], result);
+	/* Retain fabs facts after its call has become representation operations.
+	   This describes only the result; the comma operands still execute. */
+	if (abs) N(result)->aux |= NC_FP_NONNEG;
+	return result;
+}
+
+static uint32_t elementwise_abs_call(cc *c, const builtin *b, uint32_t loc)
+{
+	vec args;
+	args_list(c, &args);
+	if (args.n != 1) { arity(c, loc, 1, &args); return err_node(c, loc); }
+	uint32_t arg = decay(c, args.v[0]);
+	qty t = QUNQ(N(arg)->ty), et = is_vector(c, t) ? T(c, t)->base : t;
+	int k = KIND(c, et);
+	if ((!is_float(c, et) && (!is_integer(c, et) || !is_signed(c, et))) || k == TY_ENUM || k == TY_BOOL) {
+		cc_error(c, loc, "argument to '%s' must be a scalar or vector of signed integer or floating-point type", b->name);
+		return err_node(c, loc);
+	}
+	/* Retain constant-expression support for scalar integer/floating args. */
+	cval cv;
+	if (!is_vector(c, t) && cc_eval(c, arg, &cv) && (cv.kind == CV_FLT || cv.kind == CV_INT)) {
+		/* A known value need not be a pure expression: constant evaluation
+		 * of a comma expression may ignore an observable left operand.
+		 * Evaluate the original exactly once, then return only its folded
+		 * magnitude. Reusing arg in the integer select would evaluate it twice. */
+		uint32_t folded;
+		if (cv.kind == CV_FLT)
+			folded = cv.ld ? mk_fltq(c, cv.q & ~((u128)1 << 127), et, loc) : mk_flt(c, __builtin_fabs(cv.f), et, loc);
+		else
+			folded = mk_int(c, trunc_to(c, cv.i < 0 ? (i128)(0 - (u128)cv.i) : cv.i, et), et, loc);
+		return elementwise_abs_effects(c, arg, true) ? with_pre(c, arg, folded) : folded;
+	}
+	uint32_t sym = sym_new(c, S_VAR, 0, t, loc);
+	c->syms[sym].sc = SC_AUTO;
+	uint32_t saved = mk(c, N_VAR, t, loc); N(saved)->a = sym; N(saved)->flags = NF_LVALUE;
+	uint32_t pre = mk2(c, N_ASSIGN, t, loc, saved, arg);
+	if (!is_vector(c, t))
+		return with_pre(c, pre, elementwise_abs_lane(c, rvalue(c, saved), et, loc));
+	sym = sym_new(c, S_VAR, 0, t, loc); c->syms[sym].sc = SC_AUTO;
+	uint32_t out = mk(c, N_VAR, t, loc); N(out)->a = sym; N(out)->flags = NF_LVALUE;
+	uint32_t result = rvalue(c, out);
+	for (unsigned i = ty_size(c, t) / ty_size(c, et); i--;) {
+		uint32_t lane = rvalue(c, builtin_vector_lane(c, saved, et, i, loc));
+		uint32_t value = elementwise_abs_lane(c, lane, et, loc);
+		uint32_t dst = builtin_vector_lane(c, out, et, i, loc);
+		result = with_pre(c, mk2(c, N_ASSIGN, et, loc, dst, value), result);
+	}
+	return with_pre(c, pre, result);
+}
+
+/* Generic rotations preserve the first operand's type and evaluate each
+ * operand once. Normalize the count before narrowing it: the caller may pass
+ * a 64/128-bit count even when rotating a small integer. */
+static uint32_t stdc_rotate(cc *c, const builtin *b, uint32_t loc)
+{
+	vec args;
+	uint32_t prex, precount, pren;
+
+	args_list(c, &args);
+	if (args.n != 2) {
+		arity(c, loc, 2, &args);
+		return err_node(c, loc);
+	}
+	args.v[0] = decay(c, args.v[0]);
+	args.v[1] = decay(c, args.v[1]);
+	qty t = QUNQ(N(args.v[0])->ty), ct = N(args.v[1])->ty;
+	if (!is_integer(c, t) || is_signed(c, t)) {
+		cc_error(c, N(args.v[0])->loc, "rotation operand must have unsigned integer type");
+		return err_node(c, loc);
+	}
+	if (!is_integer(c, ct)) {
+		cc_error(c, N(args.v[1])->loc, "rotation count must have integer type");
+		return err_node(c, loc);
+	}
+	unsigned bits = KIND(c, t) == TY_BOOL ? 1 : int_bits(c, t);
+	qty work = bits > 128 ? t : prim(bits <= 32 ? TY_UINT : bits <= 64 ? TY_ULLONG : TY_UINT128);
+	unsigned countbits = int_bits(c, ct);
+	ct = countbits > 128 ? unsigned_of(c, ct) : prim(countbits <= 32 ? TY_UINT : countbits <= 64 ? TY_ULLONG : TY_UINT128);
+	uint32_t x = cplx_reuse(c, convert(c, rvalue(c, args.v[0]), work), &prex);
+	uint32_t count = cplx_reuse(c, convert(c, rvalue(c, args.v[1]), ct), &precount);
+	uint32_t n = binop(c, T_PERCENT, rvalue(c, count), mk_int(c, bits, ct, loc), loc);
+	n = cplx_reuse(c, convert(c, n, prim(TY_UINT)), &pren);
+	uint32_t reverse = binop(c, T_MINUS, mk_int(c, bits, prim(TY_UINT), loc), rvalue(c, n), loc);
+	reverse = binop(c, T_PERCENT, reverse, mk_int(c, bits, prim(TY_UINT), loc), loc);
+	bool left = b->id == BI_STDC_ROTL;
+	uint32_t a = binop(c, left ? T_LESSLESS : T_GREATERGREATER, rvalue(c, x), rvalue(c, n), loc);
+	uint32_t z = binop(c, left ? T_GREATERGREATER : T_LESSLESS, rvalue(c, x), reverse, loc);
+	uint32_t value = convert(c, binop(c, T_PIPE, a, z, loc), t);
+	return with_pre(c, prex, with_pre(c, precount, with_pre(c, pren, value)));
+}
+
+/* Full fast-math permits roots and short multiplication chains without
+ * errno or strict rounding/exception preservation. Library identity is checked
+ * by the caller; builtin spelling is an explicit request for these semantics. */
+VPRIV uint32_t fast_math_call(cc *c, const char *name, size_t len, qty ft, const vec *args, uint32_t loc)
+{
+	if (!c->o->fast_math || (c->o->target != PP_LINUX_X86_64 && c->o->target != PP_LINUX_AARCH64)) return 0;
+	bool power = len == 3 && !memcmp(name, "pow", 3);
+	bool root = (len == 4 && !memcmp(name, "sqrt", 4)) || (len == 5 && !memcmp(name, "sqrtf", 5));
+	if (!power && !root) return 0;
+	bool single = !power && len == 5;
+	qty t = prim(single ? TY_FLOAT : TY_DOUBLE);
+	if ((T(c, ft)->flags & (TF_NOPROTO | TF_VARIADIC)) || args->n != (power ? 2 : 1) ||
+	    !compatible(c, ft, sig_func_type(c, power ? "ddd" : single ? "ff" : "dd"))) return 0;
+	cval exponent;
+	double e = 0.5;
+	if (power) {
+		if (elementwise_abs_effects(c, args->v[1], true) || !cc_eval(c, args->v[1], &exponent) ||
+		    exponent.kind != CV_FLT || exponent.ld) return 0;
+		e = exponent.f;
+		if (e != 0.25 && e != 0.5 && !(e >= -64 && e <= 64 && e == (int)e)) return 0;
+	}
+	if (c->o->target == PP_LINUX_X86_64 ?
+	    !x86_feature_has(cc_x86_features(c, c->fn), single ? X86_FEATURE_SSE : X86_FEATURE_SSE2) : c->o->general_regs_only) {
+		cc_error(c, loc, "%s floating point is not supported", "-mgeneral-regs-only:");
+		return err_node(c, loc);
+	}
+	if (e == 0.25 || e == 0.5) {
+		vec one; vinit(&one); vpush(c, &one, args->v[0]);
+		return mk_builtin(c, e == 0.25 ? BI_FAST_ROOT4 : BI_FAST_SQRT, t, loc, &one);
+	}
+	unsigned n = e < 0 ? (unsigned)-e : (unsigned)e;
+	uint32_t pre[8], np = 0, value = args->v[0], result = mk_flt(c, 1.0, t, loc);
+	for (;;) {
+		/* Every reusable factor is materialized, including the original base:
+		 * volatile reads and calls occur once even for a zero exponent. */
+		uint32_t s = sym_new(c, S_VAR, 0, t, loc);
+		c->syms[s].sc = SC_AUTO;
+		uint32_t tmp = mk(c, N_VAR, t, loc); N(tmp)->a = s; N(tmp)->flags = NF_LVALUE;
+		pre[np++] = mk2(c, N_ASSIGN, t, loc, tmp, value);
+		value = rvalue(c, tmp);
+		if (n & 1) result = mk_bin(c, T_STAR, t, result, value, loc);
+		n >>= 1;
+		if (!n) break;
+		value = mk_bin(c, T_STAR, t, value, value, loc);
+	}
+	if (e < 0) result = mk_bin(c, T_SLASH, t, mk_flt(c, 1.0, t, loc), result, loc);
+	while (np) result = with_pre(c, pre[--np], result);
+	return result;
+}
+
+/* The always query is a constant expression; its pointer is unevaluated.
+ * Only widths emitted as native atomic operations are guaranteed lock-free.
+ * In particular, Linux 16-byte accesses currently use libatomic. */
+static uint32_t atomic_lock_free_call(cc *c, const builtin *b, uint32_t loc)
+{
+	vec args;
+	args_list(c, &args);
+	unsigned want = !strcmp(b->name, "__c11_atomic_is_lock_free") ? 1 : 2;
+	if (args.n != want) { arity(c, loc, want, &args); return err_node(c, loc); }
+	bool always = !strcmp(b->name, "__atomic_always_lock_free");
+	uint32_t size = convert(c, decay(c, args.v[0]), c->t_size);
+	uint32_t pointer = want == 2 ? decay(c, args.v[1]) : mk_int(c, 0, c->t_size, loc);
+	uint64_t alignment = is_ptr(c, N(pointer)->ty) ? ty_align(c, T(c, N(pointer)->ty)->base) : 1;
+	cval cv, pv;
+	bool constant = eval(c, size, &cv) && cv.kind == CV_INT && cv.ice &&
+	                !elementwise_abs_effects(c, size, true);
+	if (eval(c, pointer, &pv) && (pv.kind == CV_INT || pv.kind == CV_ADDR)) {
+		if (pv.kind == CV_INT || (!pv.sym && !pv.str && !pv.label && !pv.sublabel)) {
+			alignment = pv.i ? (uint64_t)pv.i & (0 - (uint64_t)pv.i) : UINT64_MAX;
+		} else if (pv.sym) {
+			alignment = ty_align(c, c->syms[pv.sym].ty);
+			if (c->syms[pv.sym].align > alignment) alignment = c->syms[pv.sym].align;
+			if (pv.i) {
+				uint64_t offset_align = (uint64_t)pv.i & (0 - (uint64_t)pv.i);
+				if (offset_align < alignment) alignment = offset_align;
+			}
+		}
+	}
+	uint32_t address = pointer;
+	while (N(address)->op == N_CAST) address = N(address)->a;
+	if (N(address)->op == N_ADDR && N(N(address)->a)->op == N_MEMBER) {
+		const node *member = N(N(address)->a);
+		uint64_t member_align = c->tags[member->b].f[member->c].align;
+		if (member_align < alignment) alignment = member_align;
+	}
+	pointer = convert(c, pointer, ty_ptr(c, prim(TY_VOID) | Q_CONST | Q_VOLATILE));
+	bool native = constant && (cv.i == 1 || cv.i == 2 || cv.i == 4 || cv.i == 8) && alignment >= (uint64_t)cv.i;
+	if (always) {
+		if (!constant) cc_error(c, loc, "argument to '%s' must be a constant integer", b->name);
+		return mk_int(c, native, prim(TY_BOOL), loc);
+	}
+	/* Like GCC/Clang, a query resolved from size/alignment does not
+	 * evaluate the optional pointer. The runtime path evaluates it once. */
+	if (native)
+		return mk_int(c, 1, prim(TY_BOOL), loc);
+	args.n = 0;
+	vpush(c, &args, size); vpush(c, &args, pointer);
+	if (c->o->target == PP_LINUX_AARCH64 || c->o->target == PP_LINUX_X86_64)
+		return atomic_lock_free_runtime(c, &args, loc);
+	return mk_builtin(c, BI_ATOMIC_LOCK_FREE, prim(TY_BOOL), loc, &args);
 }
 
 VPRIV uint32_t builtin_call(cc *c, const builtin *b, uint32_t loc)
@@ -791,6 +1852,89 @@ VPRIV uint32_t builtin_call(cc *c, const builtin *b, uint32_t loc)
 	qty rt = sigtype(c, b->sig[0]);
 
 	switch (b->id) {
+	case BI_ATOMIC_LOCK_FREE:
+		return atomic_lock_free_call(c, b, loc);
+	case BI_STDC_ROTL: case BI_STDC_ROTR:
+		return stdc_rotate(c, b, loc);
+	case BI_ELEMENTWISE_ABS:
+		return elementwise_abs_call(c, b, loc);
+	case BI_ISFPCLASS: case BI_ISSUBNORMAL: case BI_ISZERO: {
+		i128 mask = b->id == BI_ISSUBNORMAL ? 144 : 96;
+		unsigned nargs = b->id == BI_ISFPCLASS ? 2 : 1;
+		uint32_t pre;
+
+		args_list(c, &args);
+		if (args.n != nargs) {
+			arity(c, loc, nargs, &args);
+			return err_node(c, loc);
+		}
+		if (!is_float(c, N(args.v[0])->ty)) {
+			cc_error(c, N(args.v[0])->loc, "floating point classification requires argument of floating point type (passed in '%s')",
+			         tyname(c, N(args.v[0])->ty));
+			return err_node(c, loc);
+		}
+		if (b->id == BI_ISFPCLASS && !const_int(c, args.v[1], &mask)) {
+			cc_error(c, loc, "argument to '%s' must be a constant integer", b->name);
+			return err_node(c, loc);
+		}
+		if (mask < 0 || mask > 1023) {
+			cc_error(c, loc, "argument value %lld is outside the valid range [0, 1023]", (long long)mask);
+			return err_node(c, loc);
+		}
+		uint32_t a = cplx_reuse(c, rvalue(c, args.v[0]), &pre);
+		vec unary;
+		vinit(&unary);
+		vpush(c, &unary, rvalue(c, a));
+		uint32_t sign = mk_builtin(c, BI_SIGNBIT, prim(TY_INT), loc, &unary);
+		/* Each pair is the negative/positive membership bit, except NaNs,
+		 * whose class is determined by the quiet bit rather than their sign. */
+		const int bits[5][2] = {{0,1}, {2,9}, {3,8}, {4,7}, {5,6}};
+		uint32_t member[5];
+		for (int i = 0; i < 5; i++) {
+			uint32_t neg = mk_int(c, !!(mask & ((i128)1 << bits[i][0])), prim(TY_INT), loc);
+			uint32_t pos = mk_int(c, !!(mask & ((i128)1 << bits[i][1])), prim(TY_INT), loc);
+			uint32_t cond = i ? sign : mk_builtin(c, BI_ISSIGNALING, prim(TY_INT), loc, &unary);
+			member[i] = conditional(c, cond, neg, pos, loc);
+		}
+		uint32_t n = conditional(c, a, member[3], member[4], loc);
+		const int ids[] = {BI_ISNAN, BI_ISINF, BI_ISNORMAL};
+		for (int i = 2; i >= 0; i--)
+			n = conditional(c, mk_builtin(c, ids[i], prim(TY_INT), loc, &unary), member[i], n, loc);
+		return with_pre(c, pre, n);
+	}
+	case BI_FPCLASSIFY: {
+		uint32_t saved[6], pre[6];
+
+		args_list(c, &args);
+		if (args.n != 6) {
+			arity(c, loc, 6, &args);
+			return err_node(c, loc);
+		}
+		if (!is_float(c, N(args.v[5])->ty)) {
+			cc_error(c, N(args.v[5])->loc, "floating point classification requires argument of floating point type (passed in '%s')",
+			         tyname(c, N(args.v[5])->ty));
+			return err_node(c, loc);
+		}
+		for (int i = 0; i < 6; i++) {
+			uint32_t a = rvalue(c, args.v[i]);
+			if (i < 5)
+				a = convert(c, a, prim(TY_INT));
+			saved[i] = cplx_reuse(c, a, &pre[i]);
+		}
+		/* Match clang's classification tree: save the operand once, test zero,
+		 * then NaN and infinity, and finally distinguish normal/subnormal.
+		 * A class code is evaluated as its corresponding test is reached. */
+		vec unary;
+		vinit(&unary);
+		vpush(c, &unary, rvalue(c, saved[5]));
+		uint32_t n = conditional(c, mk_builtin(c, BI_ISNORMAL, prim(TY_INT), loc, &unary), saved[2], saved[3], loc);
+		n = with_pre(c, pre[2], with_pre(c, pre[3], n));
+		const int ids[] = {BI_ISNAN, BI_ISINF};
+		for (int i = 1; i >= 0; i--)
+			n = with_pre(c, pre[i], conditional(c, mk_builtin(c, ids[i], prim(TY_INT), loc, &unary), saved[i], n, loc));
+		n = with_pre(c, pre[4], conditional(c, saved[5], n, saved[4], loc));
+		return with_pre(c, pre[5], n);
+	}
 	case BI_CHOOSE: {
 		uint32_t cond, x, y;
 		i128 v = 0;
@@ -819,17 +1963,18 @@ VPRIV uint32_t builtin_call(cc *c, const builtin *b, uint32_t loc)
 	case BI_OFFSETOF:
 		return offsetof_expr(c, loc);
 	case BI_VA_ARG: {
-		uint32_t ap, n;
+		uint32_t ap, n, first_bound;
 		qty t;
 
 		expect(c, T_LPAREN, "'('");
 		ap = assign_expr(c);
 		expect(c, T_COMMA, "','");
+		first_bound = c->nnode;
 		t = type_name(c);
 		expect_here(c, T_RPAREN, "')'");
 		n = mk(c, N_VAARG, t, loc);
 		N(n)->a = ap;
-		return n;
+		return capture_vla_bounds(c, t, first_bound, n, loc);
 	}
 	case BI_CONSTANT_P: {
 		uint32_t n;
@@ -848,9 +1993,35 @@ VPRIV uint32_t builtin_call(cc *c, const builtin *b, uint32_t loc)
 	case BI_ATOMIC_LOAD: case BI_ATOMIC_STORE: case BI_ATOMIC_EXCHANGE: case BI_ATOMIC_CMPXCHG:
 	case BI_ATOMIC_FETCH_ADD: case BI_ATOMIC_FETCH_SUB: case BI_ATOMIC_FETCH_AND: case BI_ATOMIC_FETCH_OR:
 	case BI_ATOMIC_FETCH_XOR: case BI_ATOMIC_ADD_FETCH: case BI_ATOMIC_SUB_FETCH: case BI_ATOMIC_AND_FETCH:
-	case BI_ATOMIC_OR_FETCH: case BI_ATOMIC_XOR_FETCH:
+	case BI_ATOMIC_OR_FETCH: case BI_ATOMIC_XOR_FETCH: case BI_ATOMIC_FETCH_NAND: case BI_ATOMIC_FETCH_MAX:
+	case BI_ATOMIC_FETCH_MIN: case BI_ATOMIC_NAND_FETCH: case BI_ATOMIC_MAX_FETCH: case BI_ATOMIC_MIN_FETCH:
+	case BI_ATOMIC_TEST_AND_SET: case BI_ATOMIC_CLEAR:
 	case BI_SYNC_VAL_CAS: case BI_SYNC_BOOL_CAS: case BI_SYNC_LOCK_RELEASE: case BI_SYNC_SYNCHRONIZE:
 		return atomic_call(c, b, loc);
+	case BI_COMPLEX: {
+		args_list(c, &args);
+		if (args.n != 2) {
+			arity(c, loc, 2, &args);
+			return err_node(c, loc);
+		}
+		for (int i = 0; i < 2; i++) {
+			args.v[i] = rvalue(c, args.v[i]);
+			if (!is_float(c, N(args.v[i])->ty)) {
+				cc_error(c, N(args.v[i])->loc, "argument type '%s' is not a real floating point type", tyname(c, N(args.v[i])->ty));
+				return err_node(c, loc);
+			}
+		}
+		qty t = N(args.v[0])->ty;
+		if (QI(canon(c, t)) != QI(canon(c, N(args.v[1])->ty))) {
+			cc_error(c, loc, "arguments are of different types ('%s' vs '%s')", tyname(c, t), tyname(c, N(args.v[1])->ty));
+			return err_node(c, loc);
+		}
+		/* Both arguments are evaluated even if a surrounding __real__ or
+		   __imag__ expression only extracts one component. */
+		uint32_t p0, p1;
+		uint32_t re = cplx_reuse(c, args.v[0], &p0), im = cplx_reuse(c, args.v[1], &p1);
+		return with_pre(c, p0, with_pre(c, p1, mk_cplx(c, ty_complex(c, t), re, im, loc)));
+	}
 	case BI_CONJ: case BI_CREAL: case BI_CIMAG: {
 		qty ct = ty_complex(c, sigtype(c, b->sig[0]));
 		uint32_t a;
@@ -883,6 +2054,10 @@ VPRIV uint32_t builtin_call(cc *c, const builtin *b, uint32_t loc)
 		break;
 	}
 	args_list(c, &args);
+	if (b->id == BI_VA_START && !strcmp(b->name, "__builtin_c23_va_start") && args.n > 2) {
+		arity(c, loc, 2, &args);
+		return err_node(c, loc);
+	}
 	{
 		qty ft = builtin_type(c, b);
 		const ctype *f = T(c, ft);
@@ -897,12 +2072,22 @@ VPRIV uint32_t builtin_call(cc *c, const builtin *b, uint32_t loc)
 		}
 		if (args.n < np || (args.n > np && !(f->flags & TF_VARIADIC)))
 			arity(c, loc, np, &args);
+		if (b->id == BI_X86_PCMPSTR)
+			return x86_pcmpstr_call(c, b, &args, rt, loc);
+		if (b->id == BI_X86_SIMD)
+			return x86_simd_call(c, b, &args, rt, loc);
 		switch (b->id) {
 		case BI_ADD_OVERFLOW: case BI_SUB_OVERFLOW: case BI_MUL_OVERFLOW:
 			if (args.n != 3 || !is_ptr(c, N(args.v[2])->ty))
 				cc_error(c, args.n == 3 ? N(args.v[2])->loc : loc, "result argument to overflow builtin must be a pointer to a non-const integer type ('%s' invalid)",
 					 args.n == 3 ? tyname(c, N(args.v[2])->ty) : "void");
 			break;
+		case BI_LONGJMP: {
+			i128 value;
+			if (args.n == 2 && (!const_int(c, args.v[1], &value) || value != 1))
+				cc_error(c, N(args.v[1])->loc, "second argument to '__builtin_longjmp' must be the constant integer 1");
+			break;
+		}
 		case BI_ADDC: case BI_SUBC:
 			if (args.n != 4 || !is_ptr(c, N(args.v[3])->ty))
 				cc_error(c, loc, "carry-out argument to builtin must be a pointer");
@@ -910,16 +2095,40 @@ VPRIV uint32_t builtin_call(cc *c, const builtin *b, uint32_t loc)
 		case BI_ISNAN: case BI_ISINF: case BI_ISFINITE: case BI_SIGNBIT: case BI_ISNORMAL:
 		case BI_ISINF_SIGN: case BI_FPCLASSIFY:
 			break;
+		case BI_ISSIGNALING:
+			if (args.n != 1) {
+				arity(c, loc, 1, &args);
+				return err_node(c, loc);
+			}
+			if (!is_float(c, N(args.v[0])->ty)) {
+				cc_error(c, c->prevloc, "floating point classification requires argument of floating point type (passed in '%s')",
+				         tyname(c, N(args.v[0])->ty));
+				return err_node(c, loc);
+			}
+			break;
 		}
-		if (b->id == BI_STRLEN) {
-			/* folds when the string is known; otherwise the library call */
+		if (b->id == BI_STRLEN || b->id == BI_NAN || b->id == BI_NANF || b->id == BI_NANS) {
+			/* Fold known strings/payloads; otherwise emit the library call. */
+			if (args.n != 1)
+				return err_node(c, loc);
 			uint32_t n = mk_builtin(c, b->id, rt, loc, &args);
 			cval cv;
 
-			if (cc_eval(c, n, &cv) && cv.kind == CV_INT)
+			if (cc_eval(c, n, &cv) && (cv.kind == CV_INT || cv.kind == CV_FLT))
 				return n;
 		}
-		if (b->id == BI_LIB || b->id == BI_STRLEN) {
+		if (b->id == BI_LIB && !c->o->no_builtin && !lib_builtin_disabled(c->o, "strncmp", 7) &&
+		    !strcmp(b->name, "__builtin_strncmp")) {
+			uint32_t folded = fold_strncmp_zero(c, &args, loc);
+			if (folded)
+				return folded;
+		}
+		if (b->id == BI_LIB) {
+			uint32_t result = fp_sign_call(c, b->name + 10, strlen(b->name + 10), ft, &args, loc);
+			if (!result) result = fast_math_call(c, b->name + 10, strlen(b->name + 10), ft, &args, loc);
+			if (result) return result;
+		}
+		if (b->id == BI_LIB || b->id == BI_STRLEN || b->id == BI_NAN || b->id == BI_NANF || b->id == BI_NANS) {
 			/* a call to the library function the builtin names */
 			uint32_t s = sym_new(c, S_BUILTIN, 0, ft, loc), fn, n;
 

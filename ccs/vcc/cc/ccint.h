@@ -36,7 +36,17 @@ typedef struct label {
 	uint8_t addr_taken;
 } label;
 
+/* Call-site restrictions kept with declaration attributes, including redeclarations. */
+enum {
+	AF_TAIL_RETURNS_TWICE = 1u << 0,
+	AF_TAIL_DISABLE = 1u << 1,
+	AF_TAIL_NOT_CALLED = 1u << 2,
+	AF_OPTNONE = 1u << 3,	/* currently prevents the new sibling-call transformation */
+};
+
 typedef struct attrs {		/* the attributes of one declaration */
+	x86_features x86_features;
+	uint32_t x86_target;	/* effective function target features are present */
 	uint32_t aligned;	/* bytes; 0: none */
 	uint32_t section, alias, asmname;	/* string index + 1, 0: none */
 	uint32_t cleanup;	/* sym */
@@ -51,8 +61,11 @@ typedef struct attrs {		/* the attributes of one declaration */
 	uint32_t ifunc;		/* ifunc("resolver"): alias is the resolver, an STT_GNU_IFUNC symbol */
 	uint32_t counted_by;	/* identifier id */
 	uint32_t errmsg;	/* error("..."): string index + 1, 0: none */
+	uint32_t interrupt;	/* x86 interrupt calling convention */
+	uint32_t ms_struct;	/* Microsoft record layout */
+	uint32_t tlsloc;		/* tls_model attribute location */
 	uint32_t visibility;
-	uint32_t flags;		/* SF_* */
+	uint32_t flags;		/* AF_* declaration/call restrictions */
 	uint8_t packed, transparent, used, unused, weak, noreturn, constructor, destructor;
 	uint8_t nonstring, may_alias, cold, gnu_inline, always_inline, noinline, ainline, error_fn;
 	uint8_t overloadable, noinstr;
@@ -75,7 +88,7 @@ typedef struct casm {
 	asmop *ops;		/* outputs then inputs */
 	uint32_t *clob;		/* string indices */
 	uint32_t *labels;	/* label indices */
-	uint8_t vol, go, inl;
+	uint8_t vol, go, inl, extended;
 } casm;
 
 /*
@@ -101,6 +114,7 @@ typedef struct lzfn {
 	uint8_t hc;		/* the tokens are z's, in a header cache entry (ntk 0) */
 	pp_lazy z;
 } lzfn;
+
 
 struct cc {
 	pp *p;
@@ -142,9 +156,10 @@ struct cc {
 	uint16_t cnd;
 	uint32_t in_proto;
 	uint32_t nconv;		/* conversion errors (clang's DefaultError warnings): later checks still run */
+	uint32_t constexpr_init;	/* symbol being initialized as a C23 constant object, 0 otherwise */
 	bool sie;		/* static_init_ok looks through NF_ERR (after such an error) */
 	uint32_t tn_tdef;	/* the last type_name's typedef (sym), 0: none */
-	uint32_t ptag[8], nptag;	/* tags declared in the outermost parameter list: a definition's body sees them */	/* parameter declarations being parsed: a new tag there is -Wvisibility */
+	uint32_t *ptag, nptag, cptag;	/* tags declared in the outermost parameter list: a definition's body sees them */	/* parameter declarations being parsed: a new tag there is -Wvisibility */
 	uint32_t uv_asg;	/* the variable an '=' being parsed assigns */		/* if/loop/switch bodies being parsed */
 	uint32_t uv[64];
 	uint16_t uvc[64];	/* ... cnd at the declaration */	/* ... those variables */
@@ -188,7 +203,7 @@ struct cc {
 
 	char *heap, *hp, *hend;	/* bump allocator for everything else */
 	struct dop *dops;	/* declarator op stack (cc/declarator.c) */
-	uint32_t ndops;
+	uint32_t ndops, capdops;
 
 	/* scopes: identifier id -> innermost binding (sym index) */
 	uint32_t *odir[NDIR], *tdir[NDIR], *ldir[NDIR];
@@ -209,6 +224,7 @@ struct cc {
 	int unevaluated;	/* sizeof / typeof / _Alignof operand */
 	int cexpr;
 	uint32_t *utd, nutd;	/* block-scope typedefs never named: -Wunused-local-typedef at the TU's end */
+	uint32_t args_rp;	/* args_list's ')' (where it was expected, if missing) */
 	uint32_t fnconv;	/* nconv when the function's body began */
 	int fnerr;		/* errors when the function's body began: none since, its unused-variable warnings */
 	vdiag **rtq;		/* clang's DiagRuntimeBehavior in a function: emitted at the body's end */
@@ -231,6 +247,9 @@ struct cc {
 	uint32_t pack[64];	/* #pragma pack stack (bytes, 0: none) */
 	uint64_t packid[64];	/* labels (token.c pragma_pack) */
 	int npack;
+	uint32_t visstk[16];	/* #pragma GCC visibility push: the visibilities (string + 1), innermost last */
+	int nvis;
+	bool ms_struct;		/* #pragma ms_struct on/off/reset */
 	/* #pragma weak (decl.c): waiting for key's declaration (alias: 0, or the weak alias of key) */
 	struct pweak { uint32_t key, alias, loc, sym; } *pweak;
 	uint32_t npweak, cpweak;	/* (the done aliases, sym set, stay for the end-of-TU check) */
@@ -293,7 +312,9 @@ enum {
 	BI_ATOMIC_LOAD_N, BI_ATOMIC_STORE_N, BI_ATOMIC_EXCHANGE_N, BI_ATOMIC_CMPXCHG_N,
 	BI_ATOMIC_LOAD, BI_ATOMIC_STORE, BI_ATOMIC_EXCHANGE, BI_ATOMIC_CMPXCHG,
 	BI_ATOMIC_FETCH_ADD, BI_ATOMIC_FETCH_SUB, BI_ATOMIC_FETCH_AND, BI_ATOMIC_FETCH_OR, BI_ATOMIC_FETCH_XOR,
+	BI_ATOMIC_FETCH_NAND, BI_ATOMIC_FETCH_MAX, BI_ATOMIC_FETCH_MIN,	/* order as the _FETCH forms (emit: base) */
 	BI_ATOMIC_ADD_FETCH, BI_ATOMIC_SUB_FETCH, BI_ATOMIC_AND_FETCH, BI_ATOMIC_OR_FETCH, BI_ATOMIC_XOR_FETCH,
+	BI_ATOMIC_NAND_FETCH, BI_ATOMIC_MAX_FETCH, BI_ATOMIC_MIN_FETCH, BI_ATOMIC_TEST_AND_SET, BI_ATOMIC_CLEAR,
 	BI_ATOMIC_THREAD_FENCE, BI_ATOMIC_SIGNAL_FENCE, BI_ATOMIC_LOCK_FREE,
 	/* legacy __sync_* without an __atomic_* form (the others map onto __atomic_*) */
 	BI_SYNC_VAL_CAS, BI_SYNC_BOOL_CAS, BI_SYNC_LOCK_RELEASE, BI_SYNC_SYNCHRONIZE,
@@ -302,14 +323,24 @@ enum {
 	/* ACLE hints and barriers (side effects: BI_ARM_NOP..BI_ARM_TRAP) */
 	BI_ARM_NOP, BI_ARM_YIELD, BI_ARM_WFE, BI_ARM_WFI, BI_ARM_SEV, BI_ARM_SEVL, BI_ARM_CLREX,
 	BI_ARM_ISB, BI_ARM_DMB, BI_ARM_DSB, BI_ARM_TRAP,
+	BI_SETJMP, BI_LONGJMP,	/* GCC's __builtin_setjmp/__builtin_longjmp: buf[0] frame, [1] resume address, [2] sp */
 	BI_LIB,	/* plain library call with a prototype */
+	BI_NANS, BI_ISSIGNALING,
+	BI_ISFPCLASS, BI_ISSUBNORMAL, BI_ISZERO,
+	BI_X86_SIMD, BI_X86_PCMPSTR, BI_X86_BLENDVB,
+	BI_ELEMENTWISE_ABS,
+	BI_STDC_ROTL, BI_STDC_ROTR,
+	BI_FAST_SQRT,	/* internal hardware sqrt, full fast-math only */
+	BI_FAST_ROOT4,	/* internal double sqrt(sqrt(x)), full fast-math only */
+	BI_COMPLEX,
 	BI_COUNT
 };
 
-enum { CV_NONE, CV_INT, CV_FLT, CV_ADDR };
+enum { CV_NONE, CV_INT, CV_FLT, CV_ADDR, CV_BIGINT };
 
 typedef struct cval {
 	int kind;
+	uint32_t big, nbig;	/* CV_BIGINT: immutable LE32 storage words in lists */
 	bool ice;		/* integer constant expression (C11 6.6p6, clang's rules) */
 	i128 i;			/* CV_INT; CV_ADDR: byte offset */
 	double f;		/* CV_FLT; with ld, the nearest double of q */
@@ -325,10 +356,25 @@ typedef struct cval {
 #define CN(c, i) (&(c)->nodes[i])
 
 bool cc_eval(cc *c, uint32_t n, cval *v);
+bool cc_init_subobject(cc *c, uint32_t n, uint32_t *init);
+/* Constant object representation, little-endian bytes plus a known-bit mask. */
+bool cc_bitcast_read(cc *c, uint32_t n, uint64_t off, unsigned len, unsigned char *data, unsigned char *known);
+bool cc_object_size(cc *c, uint32_t pointer, unsigned mode, i128 *size);
 void dr_restored(cc *c);
 bool cc_is_signed(cc *c, qty t);
 const char *cc_builtin_name(int64_t i);
 const char *cc_lib_sig(const char *name, int *clang_enc);
 uint32_t cc_global_named(cc *c, const char *s);
+
+/* A declaration's target state overrides the translation-unit default. */
+static inline x86_features cc_x86_features(const cc *c, uint32_t fn)
+{
+	if (fn && c->syms[fn].attrs && c->attr[c->syms[fn].attrs].x86_target)
+		return c->attr[c->syms[fn].attrs].x86_features;
+	if (c->o->x86_features_set) return c->o->x86_features;
+	x86_features features = {0};
+	x86_cpu_features("x86-64", &features);
+	return features;
+}
 
 #endif

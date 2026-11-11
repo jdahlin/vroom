@@ -1,5 +1,8 @@
 /* IEEE binary128 on the host, as bits in a u128: the long double of aarch64
    Linux, for constants that must be parsed and folded at that precision.
+   x86's 80-bit long double (x87 extended: binary128's exponent, 64-bit
+   significand) is held in the same layout with the low 49 fraction bits
+   zero: the ...p functions round to p fraction bits, 112 or 63 (Q_P80).
    Integer arithmetic only, round to nearest even, no exception flags (the
    tf soft float in tests/rt is the same algorithm).  Header-only: cc/ and
    emit/ each include it. */
@@ -25,11 +28,20 @@ F128_UNUSED static bool q_isinf(u128 u) { return (u << 1) == ((u128)0x7fff << 11
 F128_UNUSED static bool q_nz(u128 u) { return (u << 1) != 0; }	/* NaN counts as true, as in C */
 F128_UNUSED static u128 q_qnan(void) { return (u128)0x7fff8 << 108; }
 
+/* Exact NaN storage, without a floating conversion that would quiet it.
+ * The payload is left-aligned in binary128, including the quiet bit. */
+F128_UNUSED static uint64_t q_nan_storage(u128 q, int p, int eb)
+{
+	return (uint64_t)(q >> 127) << (p + eb) |
+	       ((UINT64_C(1) << eb) - 1) << p |
+	       (uint64_t)((q & Q_M112) >> (112 - p));
+}
+
 /* sign, biased exponent and significand m, any width, whose value is
    m * 2^(e - bias - p - 3); rounds to nearest even with m's low bit sticky */
 F128_UNUSED static u128 q_round(int s, int e, u128 m, int p, int emax)
 {
-	int eb = emax == 0x7fff ? 15 : emax == 0x7ff ? 11 : 8;
+	int eb = emax == 0x7fff ? 15 : emax == 0x7ff ? 11 : emax == 0x1f ? 5 : 8;
 	unsigned g;
 
 	if (!m)
@@ -67,6 +79,20 @@ F128_UNUSED static u128 q_round(int s, int e, u128 m, int p, int emax)
 	return (u128)s << (p + eb) | (u128)e << p | m;
 }
 
+#define Q_P80 63	/* x87 extended: 63 fraction bits after the explicit integer bit */
+
+/* q_round for binary128's exponent at p fraction bits (112 or Q_P80), in
+   binary128's layout; the value is m * 2^(e - 16383 - 115) as for p 112 */
+F128_UNUSED static u128 q_rndp(int s, int e, u128 m, int p)
+{
+	u128 r;
+
+	if (p == 112)
+		return q_round(s, e, m, 112, 0x7fff);
+	r = q_round(s, e - (112 - p), m, p, 0x7fff);
+	return (r >> (p + 15)) << 127 | ((r >> p) & 0x7fff) << 112 | (r & (((u128)1 << p) - 1)) << (112 - p);
+}
+
 /* exponent (subnormals: 1) and significand with the implicit bit at 112 */
 F128_UNUSED static void q_un(u128 u, int *s, int *e, u128 *m)
 {
@@ -87,7 +113,7 @@ F128_UNUSED static void q_norm(int *e, u128 *m)
 	}
 }
 
-F128_UNUSED static u128 q_add(u128 a, u128 b)
+F128_UNUSED static u128 q_addp(u128 a, u128 b, int p)
 {
 	int sa, ea, sb, eb, d;
 	u128 ma, mb, m;
@@ -118,12 +144,14 @@ F128_UNUSED static u128 q_add(u128 a, u128 b)
 	m = sa == sb ? ma + mb : ma - mb;
 	if (!m)
 		return 0;
-	return q_round(sa, ea, m, 112, 0x7fff);
+	return q_rndp(sa, ea, m, p);
 }
 
-F128_UNUSED static u128 q_sub(u128 a, u128 b) { return q_add(a, b ^ Q_SIGN); }
+F128_UNUSED static u128 q_add(u128 a, u128 b) { return q_addp(a, b, 112); }
+F128_UNUSED static u128 q_sub(u128 a, u128 b) { return q_addp(a, b ^ Q_SIGN, 112); }
+F128_UNUSED static u128 q_subp(u128 a, u128 b, int p) { return q_addp(a, b ^ Q_SIGN, p); }
 
-F128_UNUSED static u128 q_mul(u128 a, u128 b)
+F128_UNUSED static u128 q_mulp(u128 a, u128 b, int p)
 {
 	u128 ma, mb, p00, p01, p10, p11, mid, lo, hi;
 	int sa, ea, sb, eb, s = (int)((a ^ b) >> 127);
@@ -148,10 +176,12 @@ F128_UNUSED static u128 q_mul(u128 a, u128 b)
 	hi += lo < p00;
 	/* the product's leading bit is at 224 or 225: keep 116 bits and a sticky one */
 	lo = (hi << 19) | (lo >> 109) | ((lo & (((u128)1 << 109) - 1)) != 0);
-	return q_round(s, ea + eb - 16383, lo, 112, 0x7fff);
+	return q_rndp(s, ea + eb - 16383, lo, p);
 }
 
-F128_UNUSED static u128 q_div(u128 a, u128 b)
+F128_UNUSED static u128 q_mul(u128 a, u128 b) { return q_mulp(a, b, 112); }
+
+F128_UNUSED static u128 q_divp(u128 a, u128 b, int p)
 {
 	u128 ma, mb, q = 0;
 	int sa, ea, sb, eb, s = (int)((a ^ b) >> 127), e;
@@ -183,8 +213,10 @@ F128_UNUSED static u128 q_div(u128 a, u128 b)
 		}
 		ma <<= 1;
 	}
-	return q_round(s, e, q | (ma != 0), 112, 0x7fff);
+	return q_rndp(s, e, q | (ma != 0), p);
 }
+
+F128_UNUSED static u128 q_div(u128 a, u128 b) { return q_divp(a, b, 112); }
 
 /* -1, 0, 1; 2 when unordered */
 F128_UNUSED static int q_cmp(u128 a, u128 b)
@@ -227,7 +259,7 @@ F128_UNUSED static u128 q_of_d(double d)
 /* rounded to binary64 (p 52) or binary32 (p 23): the bits */
 F128_UNUSED static uint64_t q_trunc(u128 a, int p, int emax, int bias)
 {
-	int s, e, eb = emax == 0x7ff ? 11 : 8;
+	int s, e, eb = emax == 0x7ff ? 11 : emax == 0x1f ? 5 : 8;
 	u128 m;
 
 	q_un(a, &s, &e, &m);
@@ -240,6 +272,41 @@ F128_UNUSED static uint64_t q_trunc(u128 a, int p, int emax, int bias)
 	q_norm(&e, &m);
 	m = (m >> (109 - p)) | ((m & (((u128)1 << (109 - p)) - 1)) != 0);
 	return (uint64_t)q_round(s, e - 16383 + bias, m, p, emax);
+}
+
+/* bfloat16 storage: float's exponent, seven fraction bits. */
+F128_UNUSED static uint16_t q_to_bf(u128 a) { return (uint16_t)q_trunc(a, 7, 0xff, 127); }
+F128_UNUSED static double bf_to_d(uint16_t h)
+{
+	uint32_t u = (uint32_t)h << 16;
+	float f;
+	memcpy(&f, &u, 4);
+	return (double)f;
+}
+
+/* IEEE binary16 storage, independent of host half support. */
+F128_UNUSED static uint16_t q_to_h(u128 a) { return (uint16_t)q_trunc(a, 10, 0x1f, 15); }
+
+F128_UNUSED static double h_to_d(uint16_t h)
+{
+	uint64_t sign = (uint64_t)(h >> 15) << 63, m = h & 1023, bits;
+	int ex = (h >> 10) & 31;
+	double d;
+
+	if (ex == 31)
+		bits = sign | (uint64_t)0x7ff << 52 | m << 42;
+	else if (!ex && !m)
+		bits = sign;
+	else {
+		if (!ex) {
+			ex = 1;
+			while (!(m & 1024)) m <<= 1, ex--;
+			m &= 1023;
+		}
+		bits = sign | (uint64_t)(ex - 15 + 1023) << 52 | m << 42;
+	}
+	memcpy(&d, &bits, 8);
+	return d;
 }
 
 F128_UNUSED static double q_to_d(u128 a)
@@ -261,11 +328,43 @@ F128_UNUSED static float q_to_f(u128 a)
 }
 
 /* an integer, signed or not, rounded */
-F128_UNUSED static u128 q_of_i(i128 v, bool sgn)
+F128_UNUSED static u128 q_of_ip(i128 v, bool sgn, int p)
 {
 	bool neg = sgn && v < 0;
 
-	return q_round(neg, 16383 + 115, neg ? -(u128)v : (u128)v, 112, 0x7fff);
+	return q_rndp(neg, 16383 + 115, neg ? -(u128)v : (u128)v, p);
+}
+
+F128_UNUSED static u128 q_of_i(i128 v, bool sgn) { return q_of_ip(v, sgn, 112); }
+
+/* a value rounded to p fraction bits (binary128 to x87 extended); NaN and
+   infinity stay, a NaN's payload is cut */
+F128_UNUSED static u128 q_to_p(u128 a, int p)
+{
+	int s, e;
+	u128 m;
+
+	if (p == 112 || q_isinf(a) || !q_nz(a))
+		return a;
+	if (q_isnan(a))
+		return a & ~(((u128)1 << (112 - p)) - 1);
+	q_un(a, &s, &e, &m);
+	return q_rndp(s, e, m << 3, p);
+}
+
+/* the 10 bytes of an x87 extended value held as above (little endian:
+   64-bit significand with its explicit integer bit, then sign and exponent) */
+F128_UNUSED static void q_to_x87(u128 a, uint8_t out[10])
+{
+	unsigned e = (unsigned)(a >> 112) & 0x7fff;
+	uint64_t m = (uint64_t)(a >> 49) & ((1ull << 63) - 1);
+	unsigned se = (unsigned)(a >> 127) << 15 | e;
+
+	if (e)
+		m |= 1ull << 63;	/* normal, infinity and NaN: the integer bit set */
+	for (int i = 0; i < 8; i++)
+		out[i] = (uint8_t)(m >> (8 * i));
+	out[8] = (uint8_t)se, out[9] = (uint8_t)(se >> 8);
 }
 
 /* truncated toward zero to a bits-wide integer, saturating out of range
@@ -399,8 +498,9 @@ F128_UNUSED static u128 qb_top(const qbig *b, int lo, bool *sticky)
 	return m;
 }
 
-/* a decimal or hexadecimal floating constant (no suffix), correctly rounded */
-F128_UNUSED static u128 q_parse(const char *s, size_t n)
+/* a decimal or hexadecimal floating constant (no suffix), correctly rounded
+   to p fraction bits */
+F128_UNUSED static u128 q_parsep(const char *s, size_t n, int p)
 {
 	size_t i = 0;
 	int s0 = 0;
@@ -454,7 +554,7 @@ F128_UNUSED static u128 q_parse(const char *s, size_t n)
 			m = m >> 1 | 1;
 			be++;
 		}
-		return q_round(s0, (int)(16383 + 115 + be), m, 112, 0x7fff);
+		return q_rndp(s0, (int)(16383 + 115 + be), m, p);
 	}
 	{
 		/* digits D and exponent E: value D * 10^E */
@@ -518,7 +618,7 @@ F128_UNUSED static u128 q_parse(const char *s, size_t n)
 			free(b.w);
 			if (sticky)	/* 128 bits leave 12 below the rounding point: room for a sticky one */
 				m |= 1;
-			return q_round(s0, 16383 + 115 + k, m, 112, 0x7fff);
+			return q_rndp(s0, 16383 + 115 + k, m, p);
 		}
 		/* D / 10^-E: shift D so that the quotient has 120 bits */
 		d.cap = (int)(-e10 / 9 + 8);
@@ -542,12 +642,14 @@ F128_UNUSED static u128 q_parse(const char *s, size_t n)
 		for (int j = qb_bits(&b) - qb_bits(&d); j >= 0; j--)
 			if (qb_subshl(&b, &d, j))
 				m |= (u128)1 << j;
-		res = q_round(s0, 16383 + 115 - k, m | (qb_bits(&b) != 0), 112, 0x7fff);
+		res = q_rndp(s0, 16383 + 115 - k, m | (qb_bits(&b) != 0), p);
 		free(b.w);
 		free(d.w);
 		return res;
 	}
 }
+
+F128_UNUSED static u128 q_parse(const char *s, size_t n) { return q_parsep(s, n, 112); }
 
 #undef u128
 #undef i128

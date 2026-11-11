@@ -169,7 +169,9 @@ VPRIV void define(pp *p, ctx *c, uint32_t b, uint32_t e)
 			pp_span r = { nloc, nloc + vt[b].len };
 			pp_dinfo d = { "warning", nloc, &r, 0, NULL, 0, NULL, 0 };
 
-			if (c->f != &p->builtin && pp_warnx(p, "macro-redefined", true, NULL, &d, "'%.*s' macro redefined",
+			/* (in <built-in>: the predefines are exempt, -D on the command line is not, as clang) */
+			if ((c->f != &p->builtin || vt[b].off >= p->o->predef_cmdl) &&
+			    pp_warnx(p, "macro-redefined", true, NULL, &d, "'%.*s' macro redefined",
 							    (int)vt[b].len, c->src + vt[b].off))
 				macro_note_(p, om, nloc, "previous definition is here");
 		}

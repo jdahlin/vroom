@@ -1,0 +1,29 @@
+id = "B01"
+title = "Missing declaration semicolon"
+expect = [
+  { line = 2, severity = "error", pattern = "expected.*';'|missing.*semicolon" },
+]
+
+=== broken.c ===
+int main(void) {
+    int n = 3
+    return n != 3;
+}
+=== fixed.c ===
+int main(void) {
+    int n = 3;
+    return n != 3;
+}
+=== valid.c ===
+int main(void) { return 0; }
+=== stderr ===
+broken.c:2:14: error: expected ';' at end of declaration
+    2 |     int n = 3
+      |              ^
+      |              ;
+1 error generated.
+=== narrated ===
+broken.c:2:14: error: expected ';' at end of declaration
+  the source line is: int n = 3
+  fix: insert ';' at line 2, column 14
+1 error generated.
