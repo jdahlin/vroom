@@ -175,7 +175,7 @@ static void note_fwrite(pre *P, uint32_t s, uint32_t rhs)
 		   avoid library facts whenever any named builtin was disabled. */
 		for (unsigned i = 0; i < CC_DISABLED_BUILTIN_WORDS; i++)
 			if (P->E->o->disabled_builtins[i]) enabled = false;
-		if (enabled && want >= 0 && (fn->flags & SF_GLOBAL) && fn->sc != SC_STATIC && !fn->asmname &&
+		if (enabled && want >= 0 && (fn->flags & SF_GLOBAL) && fn->sc != SC_STATIC && !sym_attrs(c, callee)->asmname &&
 		    ft->kind == TY_FUNC && KIND(c, ft->base) == want && ft->n == 1 &&
 		    KIND(c, c->params[ft->aux]) == want)
 			k = FF_NONNEG;
