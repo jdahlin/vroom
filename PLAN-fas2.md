@@ -3039,3 +3039,12 @@ Fem växelvisa `task-clock:u`-sampel per binär gav median bas → kandidat
 misslyckades i denna förenklade körning och ingår inte: detta selektiva,
 lilla urval bevisar inte kompilatorns kostnad på ett helt bygge. Kommandon,
 hashar och sampel finns i `work/opt-profile/repeated-cputime/kernel*.{py,json}`.
+
+Bredare CPU-tidsprov för samma binärer: efter att ha återställt relevanta
+flaggor från kärnans `.cmd` accepterades 28 av de första 30 förprocessade
+Linux-TU:erna av båda. Tre växelvisa seriella rundor av samtliga 28 gav
+median användar-CPU 0,78945 → 0,79150 s (+0,26 %); system-CPU och väggtid
+finns också i rådata. Två TU:er exkluderades efter kandidatens preflight.
+Urvalet är litet, värden är delad och mätningen avser arm64-målet, inte ett
+helt kärnbygge eller wasm. Exakta flaggor, käll-/binärhashar och sampel finns i
+`work/opt-profile/repeated-cputime/kernel-batch{.py,-result.json}`.
