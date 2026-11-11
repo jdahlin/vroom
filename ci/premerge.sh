@@ -68,6 +68,7 @@ arm64)
 	step vsh          python3 bench/vsh-test.py
 	step torture-dg   python3 bench/test-torture-directives.py
 	step gcc-dg       python3 bench/test-gcc-dg.py
+	step libc-test-harness python3 bench/test-libc-test.py
 	step verify-contract python3 bench/test-verify.py
 	step onboarding-verifier python3 bench/test-onboarding.py
 	step onboarding   python3 bench/vcc-onboarding.py --target aarch64-linux-gnu --baseline
