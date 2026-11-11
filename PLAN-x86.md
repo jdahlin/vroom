@@ -353,13 +353,16 @@ kärnan och kan vänta.
   över 16 (lokaler från rbx = justerad ram, stackargument via sparad och
   justerad rsp); bit-fält över en 8-bytegräns (delat vid gränsen); float-
   spill som för heltal; `__float128` (via adress, ett xmm i ABI:t, libgcc:s
-  `__addtf3` ..., `__*tf2`, `__extend*`/`__trunc*` även x87, `__float*tf`/`__fix*tf*`).
-- `bench/vcc-x86.py`: 1670/1771, lika i `--pie` och `--pic` (vcc-sidan
+  `__addtf3` ..., `__*tf2`, `__extend*`/`__trunc*` även x87, `__float*tf`/`__fix*tf*`);
+  inbyggda i vandraren för alla CPU:er: clrsb, bitreverse, isnan/isinf/isfinite/
+  isnormal/isinf_sign/fpclassify på bitmönstret (alla flyttalstyper), isgreater ...
+  isunordered, inf/nan/huge_val, atomics nand/max/min, test_and_set, clear.
+- `bench/vcc-x86.py`: 1675/1772, lika i `--pie` och `--pic` (vcc-sidan
   `-fPIE`/`-fPIC`, länkad `-pie`). Körfel bara där clangs optimerare krävs
   (`20030125-1`, `bcp-1`, `builtin-constant`) och 11 länkfel av samma slag eller
   `__builtin_setjmp`. `vcc-abi.py --target x86_64`: 12/12, med tre nya tester
   (`int_records`, `fp_records`, `complex_args`).
-- Kvar i X3: vektorer av `__int128`, bit-fält bredare än 64 bitar, inlining av
+- Kvar i X3: vektorer av `__int128`, bit-fält bredare än 64 bitar, 128-bitars overflow-inbyggda, `__builtin_setjmp`, inlining av
   `__always_inline` med `need_fold` och `constant_p` efter inlining,
   `-mgeneral-regs-only`/`-mno-sse`, UTF-8-namn citerade som clang, `VCC_WALKLOG`.
 
