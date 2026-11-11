@@ -65,6 +65,7 @@ arm64)
 	step pg-speed-accounting python3 bench/pg/test-speed.py
 	step memory-cells-generated python3 bench/gen-memory-cells.py --check
 	step x86-intrinsic-data python3 bench/test-x86-intrinsic-data.py
+	step x86-intrinsic-cache env VPP="$BUILD/vpp" CLANG="${LLVM:-/usr/lib/llvm-23}/bin/clang" python3 bench/vcc-x9-cache-modes.py
 	step ctests       python3 bench/vcc-ctests.py -j "$J"
 	step switch-plan python3 bench/vcc-switch-plan.py --sanitize
 	step udivconst python3 bench/vcc-udivconst.py --sanitize
