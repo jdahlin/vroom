@@ -735,3 +735,7 @@ Generell lokal CSE samt G5/G7 återstår.
 
 Den budgeterade lokala värdeåteranvändningen omfattar även senare rena
 heltalsinitieringar; fyrmålsprov och avgränsad kostnad finns i PLAN-fas2.md.
+
+Den begränsade lokala värdeskanningen kan passera oberoende lokala skrivningar
+med invalidation av beroenden; tester, kostnad och mättat kontrollfall finns i
+PLAN-fas2.md. Generell CSE och G5/G7 återstår.

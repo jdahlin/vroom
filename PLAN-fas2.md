@@ -3202,3 +3202,29 @@ rundor på 28 förprocessade arm64-kärn-TU:er gav median användar-CPU 0,78387 
 korta prover på delad värd ger ingen generell tidsgräns. Proveniens och sampel:
 `work/opt-profile/local-values-decl-cost/`, `local-values-decl-cputime/` och
 `local-values-decl-o0/`. Generell blocklokal CSE och reuse över joins återstår.
+
+Den begränsade blockskanningen kan nu passera ordinära lokala tilldelningar,
+inkrement och enkla sammansatta tilldelningar. Skrivna symboler samlas upp;
+kandidaten avvisas om den cachade lokalen eller någon indata har skrivits.
+Pekare, volatile/atomic, anrop, dolda skrivningar, division/shift och andra
+obevisade effekter är barriärer. Renhetskontrollen av en tilldelnings högerled
+skjuts upp tills en kandidat överlevt invalidationskontrollen; enkla skrivna
+indata avvisas innan tabellen skapas. Testerna täcker oberoende skrivning,
+skriven indata, skrivet cachat värde, sammansatt tilldelning, inkrement och
+dold skrivning/anrop/volatile; fyra mål O0–O3 och båda bygglägen passerar.
+O0/noopt ger byteidentisk assembler mot `597c521`; vcc 256/256 med en
+befintlig xfail, x86-debug och ASan/UBSan-tabellkontrakt passerar.
+
+Matchad Callgrind mot samma förälder: compiler-Ir +0,156 % x86, +0,147 %
+arm64, +0,044 % wasm32 och +0,046 % wasm64; 1 %-grinden passerar med samma
+redovisade uteslutningar. Sju växelvisa O2-rundor på 28 förprocessade
+arm64-kärn-TU:er gav median användar-CPU 0,78569 → 0,78586 s; två TU:er är
+uteslutna och det korta urvalet på delad värd visar ingen generell tidsgräns.
+Ett avsiktligt mättat kontrollprov med 2 000 ogiltigförklarade kandidater gav
++2,32 % compiler-Ir på x86 och +2,52 % på wasm64, med identisk assembler.
+Före den uppskjutna kontrollen och snabbavvisningen var motsvarande +3,77 %
+och +4,26 %. Det är ett verkligt avgränsat kostnadsfall, inte hela projektets
+kostnad. Exakta kommandon, binär-/källhashar och sampel finns i
+`work/opt-profile/local-values-writes-fast-cost/`,
+`local-values-writes-fast-cputime/`, `local-values-writes-saturated/` och
+`local-values-writes-fast-saturated/`. Generell CSE och joins återstår.
