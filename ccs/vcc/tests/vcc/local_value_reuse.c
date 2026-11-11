@@ -11,6 +11,8 @@ unsigned lvr_commute(unsigned a, unsigned b) { return (a + b) ^ (b + a); }
 unsigned lvr_target_assign(unsigned a, unsigned b) { unsigned x=a+b; unsigned z; z=x*(a+b); return z; }
 unsigned lvr_target_cached(unsigned a, unsigned b) { unsigned x=a+b; x=x*(a+b); return x; }
 unsigned lvr_target_input(unsigned a, unsigned b) { unsigned x=a+b; a=x*(a+b); return a; }
+unsigned lvr_target_dep_prior(unsigned a, unsigned b) { unsigned x=a+b; a^=1U; a=x*(a+b); return a; }
+unsigned lvr_target_cached_prior(unsigned a, unsigned b) { unsigned x=a+b; x^=7U; unsigned z; z=x*(a+b); return z; }
 unsigned lvr_target_compound(unsigned a, unsigned b) { unsigned x=a+b; unsigned z=2; z+=x*(a+b); return z; }
 unsigned lvr_target_volatile(unsigned a, unsigned b) { unsigned x=a+b; volatile unsigned z; z=x*(a+b); return z; }
 unsigned lvr_target_hidden(unsigned a, unsigned b) { unsigned x=a+b; unsigned z; z=(a=3,x*(a+b)); return z; }
@@ -46,6 +48,7 @@ int main(void)
  if (lvr_square(2, 3) != 25 || lvr_reuse(2, 3) != 25 || lvr_commute(3, 4) ||
      lvr_nested(2, 3, 4) != 4 || lvr_distinct(5, 2) != (3U * (0U-3U)) ||
      lvr_target_assign(2, 3) != 25 || lvr_target_cached(2, 3) != 25 || lvr_target_input(2, 3) != 25 ||
+     lvr_target_dep_prior(2, 3) != 30 || lvr_target_cached_prior(2, 3) != 10 ||
      lvr_target_compound(2, 3) != 27 || lvr_target_volatile(2, 3) != 25 || lvr_target_hidden(2, 3) != 30 ||
      lvr_cast_float(2, 3) != 15 || lvr_decl(2, 3) != 25 || lvr_decl_chain(2, 3) != 10 || lvr_decl_write(2, 3) != 25 ||
      lvr_independent(2, 3, 3) != 25 || lvr_independent_compound(2, 3, 3) != 25 ||
