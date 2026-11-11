@@ -18,7 +18,8 @@ against the directives as clang's VerifyDiagnosticConsumer does: per level,
 line (@+N, @-N, @N, @file:N, @*, @#marker), count (N, N+, N-M, +), text a
 substring ({{...}}) or regex (-re, {{...}} parts regex, the rest literal).
 
-  bench/vcc-verify.py [-j N] [-v] [--bin-dir DIR] [--show CAT] [PAT]
+  bench/vcc-verify.py [-j N] [-v] [--bin-dir DIR] [--target TRIPLE] [--show CAT] [PAT]
+      --target: run all lines on x86_64-linux-gnu or aarch64-linux-gnu
       PAT: substring of the test path (e.g. Sema/, C/C11, drs/dr0xx)
       -v: every failure's missing/unexpected diagnostics
       --show CAT: the tests of one category (fail, crash, skip:REASON, ...)
@@ -41,7 +42,13 @@ if '--bin-dir' in sys.argv:
     os.environ['VCC_BIN'] = _BIN
 VPP = f'{_BIN}/vpp'
 CL = llvm('clang')
-OUT = f'{BUILD}/verify'
+TARGET = os.environ.get('VCC_VERIFY_TARGET')
+if '--target' in sys.argv:
+    _k = sys.argv.index('--target'); TARGET = sys.argv[_k + 1]; del sys.argv[_k:_k + 2]
+    os.environ['VCC_VERIFY_TARGET'] = TARGET  # also seen by spawned pool workers
+if TARGET and TARGET not in ('x86_64-linux-gnu', 'aarch64-linux-gnu'):
+    sys.exit('--target must be x86_64-linux-gnu or aarch64-linux-gnu')
+OUT = f'{BUILD}/verify' + (f'/{TARGET}' if TARGET else '')
 TIMEOUT = 20
 
 # cc1 options followed by a separate argument
@@ -87,6 +94,8 @@ def run_lines(src):
 
 def target_for(tr):
     """vcc's target for a RUN line's triple, and whether it was substituted."""
+    if TARGET:
+        return TARGET, bool(tr and tr != TARGET)
     if tr is None:
         return 'aarch64-linux-gnu', False
     t = tr.lower()
@@ -440,7 +449,7 @@ def job(t):
         return name, p, None
     clang, vcc, prefixes, mode, tgt, sub = p
     src = open(path, encoding='utf-8', errors='surrogateescape').read()
-    key = hashlib.sha1((src + '\0' + cmd + '\0' + os.path.realpath(CL)).encode('utf-8', 'surrogateescape')).hexdigest()
+    key = hashlib.sha1((src + '\0' + cmd + '\0' + tgt + '\0' + os.path.realpath(CL)).encode('utf-8', 'surrogateescape')).hexdigest()
     cf = f'{OUT}/clang/{key}.json'
     try:
         ref = json.load(open(cf))

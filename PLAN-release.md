@@ -80,6 +80,11 @@ kan gå parallellt.
 
 ## Status
 
+### Status 2026-11-11: externa tester på Linux x86-64
+G1 har fått mätbara baslinjer från clangs diagnostiktester, GCC:s
+compile-svit och två små körsviter. Fel och krascher återstår; se
+`TEST.plan` S2, S3 och S5. G1 och G2 är inte färdiga.
+
 ### Status 2026-11-09: plan skriven, inga grindar byggda
 Inget av G0–G9 finns som skript än.  Det som finns i dag och blir delar av
 grindarna: `vcc-diff.py`, `vcc-sema.py`, `vcc-ctests.py`, `vcc-abi.py`,
