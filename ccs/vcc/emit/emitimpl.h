@@ -710,6 +710,10 @@ VPRIV uint64_t opt_regs(ecx *e, unsigned *fl);
 VPRIV lval bind_lreg(ecx *e, uint32_t s);
 VPRIV val fold_int_bin(ecx *e, int op, qty ot, qty rt, i128 l, i128 r, bool *ok);
 VPRIV bool em_is_cmp(int op);
+/* Pure control proofs: bounded shared walk, no committed target instructions. */
+VPRIV bool em_const_strcmp(cc *c, uint32_t n, i128 *value);
+VPRIV int em_const_truth(ecx *e, uint32_t n, int (*constant_p)(ecx *, uint32_t));
+VPRIV int a64_constant_p(ecx *e, uint32_t arg);
 VPRIV int emit_cmp(ecx *e, int op, int x, bool sg, val *a, val *b);
 VPRIV int emit_cmp2(ecx *e, int op, bool sg, val *a, val *b);
 VPRIV int test_zero(ecx *e, val *v, qty t, uint32_t l, bool nz);
