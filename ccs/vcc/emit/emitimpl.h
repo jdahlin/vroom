@@ -455,7 +455,11 @@ typedef struct rpend { uint32_t next, k, frag, off; uint8_t *p; } rpend;	/* a br
 
 /* ---------------- lvalues ---------------- */
 
-enum { L_FRAME, L_SYM, L_REG, L_GLOBREG, L_VREG };	/* L_VREG: a B_LREG variable, value in r (no address) */
+enum { L_FRAME, L_SYM, L_REG, L_GLOBREG, L_VREG, L_VAR };
+/* L_VREG: a B_LREG variable, value in r (no address).
+   L_VAR: a variable of a virtual lowering target (PLAN-vir.md, SPEC-vir.md
+   X3), its number in lval.ref, no address.  Only that target makes one; the
+   real targets treat it as an internal error. */
 
 typedef struct lval {
 	uint8_t k;
