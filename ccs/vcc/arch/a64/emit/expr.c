@@ -117,7 +117,7 @@ static val gen_cond_expr(ecx *e, uint32_t n)
 
 	if (!x->b) {		/* a ?: c */
 		v = gen(e, x->a);
-		if (v.k == V_CONST || v.k == V_ADDR) {
+		if (!is_flt(c, t) && (v.k == V_CONST || v.k == V_ADDR)) {
 			if (v.k == V_ADDR || v.i)
 				return v;
 			return gen(e, x->c);
@@ -125,10 +125,24 @@ static val gen_cond_expr(ecx *e, uint32_t n)
 		if (wide) {
 			toreg2(e, &v, is_signed(c, t));
 			r = v.r, r2 = v.r2;
+		} else {
+			r = toreg(e, &v);
+		}
+		if (is_flt(c, t)) {
+			/* Keep the result value intact while testing its C truth value.
+			 * Testing raw floating bits would incorrectly treat -0.0 as true. */
+			val test = vreg(treg(e));
+			mov(e, 1, test.r, r);
+			if (wide) {
+				test.k = V_REG2;
+				test.r2 = treg(e);
+				mov(e, 1, test.r2, r2);
+			}
+			test_zero(e, &test, t, lend, true);
+		} else if (wide) {
 			op3(e, I_ORR, 1, R_X16, r, r2);
 			cbz(e, true, 1, R_X16, lend);
 		} else {
-			r = toreg(e, &v);
 			cbz(e, true, X(c, t), r, lend);
 		}
 		v = gen(e, x->c);

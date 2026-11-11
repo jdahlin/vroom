@@ -20,5 +20,9 @@ int main(void)
 	if (!__builtin_isnan(nan ?: 5.0)) return 4;
 	if ((once(0.0) ?: once(2.0)) != 2.0 || calls != 2) return 5;
 	if ((once(4.0) ?: once(9.0)) != 4.0 || calls != 3) return 6;
+	l = -0.0L;
+	d = -0.0;
+	if ((l ?: 7.0L) != 7.0L || (d ?: 3.0) != 3.0) return 7;
+	if ((-0.0 ?: 3.0) != 3.0 || (-0.0L ?: 7.0L) != 7.0L) return 8;
 	return 0;
 }
