@@ -403,6 +403,12 @@ VPRIV int wcall(ecx *e, uint32_t n, bool want)
 		return want ? WT_I32 : WT_NONE;
 	}
 
+	if (c->o->opt && !e->E->noopt && ref && RKIND(ref) == RK_SYM &&
+	    c->syms[RIDX(ref)].sc == SC_STATIC && c->syms[RIDX(ref)].body) {
+		int inlined = winline_call(e, n, RIDX(ref), want);
+		if (inlined >= 0) return inlined;
+	}
+
 	if (ref && RKIND(ref) == RK_SYM && x->c == 1 && !(c->syms[RIDX(ref)].flags & SF_DEFINED) &&
 	    EM_IDENT_IS(c->syms[RIDX(ref)].name, "alloca"))
 		return walloca(e, c->lists[x->b]);	/* clang: alloca is a builtin, declared or not */

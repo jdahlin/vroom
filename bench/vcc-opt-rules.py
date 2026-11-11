@@ -43,6 +43,19 @@ def body(assembly, name, wasm):
     return tail[:end.start()]
 
 
+def check_wasm_inline(assembly, arch):
+    if not arch.startswith('wasm'):
+        return
+    for name in ['wi_sum8', 'wi_add', 'wi_nested', 'wi_effect', 'wi_unused', 'wi_pointer', 'wi_narrow', 'wi_float', 'wi_choose']:
+        text = body(assembly, name, True)
+        if re.search(r'\bcall\b', text):
+            raise RuntimeError(f'{name}: scalar static call should be inlined\n{text}')
+    for name in ['wi_sum9', 'wi_side', 'wi_recurse', 'wi_noinline']:
+        text = body(assembly, name, True)
+        if not re.search(r'\bcall\b', text):
+            raise RuntimeError(f'{name}: unsupported call must remain\n{text}')
+
+
 def check_localvalues(assembly, arch):
     wasm = arch.startswith('wasm')
     text = body(assembly, 'lvr_square', wasm)
@@ -1013,7 +1026,7 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument('--vpp', default=str(Path(BUILD) / 'vpp'))
     ap.add_argument('--target', default='x86_64-linux-gnu')
-    ap.add_argument('--rule', choices=['pow2', 'signedpow2', 'identities', 'fallthrough', 'loopback', 'unreachable', 'locals', 'localjmp', 'copies', 'extensions', 'switches', 'tails', 'udivconst', 'udivconst64', 'sdivconst', 'deadresults', 'mulconst', 'bitrules', 'cmpbounds', 'cmpzero', 'repeated', 'doubleunary', 'localvalues', 'postfix', 'unusedinit', 'switchvalues', 'all'], default='all')
+    ap.add_argument('--rule', choices=['pow2', 'signedpow2', 'identities', 'fallthrough', 'loopback', 'unreachable', 'locals', 'localjmp', 'copies', 'extensions', 'switches', 'tails', 'udivconst', 'udivconst64', 'sdivconst', 'deadresults', 'mulconst', 'bitrules', 'cmpbounds', 'cmpzero', 'repeated', 'doubleunary', 'localvalues', 'wasminline', 'postfix', 'unusedinit', 'switchvalues', 'all'], default='all')
     ap.add_argument('--run', action='store_true', help='also execute literal-answer correctness checks')
     ap.add_argument('--cfi', action='store_true', help='also check unwind state with tail calls')
     ap.add_argument('--sibling-calls', choices=['default', 'on', 'off'], default='default',
@@ -1063,6 +1076,7 @@ def main():
              'repeated': ('repeated_integer.c', check_repeated),
              'doubleunary': ('double_unary.c', check_double_unary),
              'localvalues': ('local_value_reuse.c', check_localvalues),
+             'wasminline': ('wasm_inline_scalar.c', check_wasm_inline),
 
              'cmpzero': ('integer_cmp_zero.c', check_cmpzero),
              'postfix': ('postfix_eval.c', check_postfix),
@@ -1085,7 +1099,7 @@ def main():
                 checked = ((arch == 'x86_64' and level >= 1) if rule in ['locals', 'copies', 'extensions', 'deadresults'] else
                            (not arch.startswith('wasm') and level >= 1) if rule in ['fallthrough', 'unreachable'] else
                            arch.startswith('wasm') if rule == 'loopback' else True)
-                checked = checked and check is not None and (rule not in ['switches', 'udivconst', 'udivconst64', 'mulconst', 'bitrules', 'cmpbounds', 'cmpzero', 'repeated', 'doubleunary', 'localvalues'] or level >= 1)
+                checked = checked and check is not None and (rule not in ['switches', 'udivconst', 'udivconst64', 'mulconst', 'bitrules', 'cmpbounds', 'cmpzero', 'repeated', 'doubleunary', 'localvalues', 'wasminline'] or level >= 1)
                 if checked:
                     if rule in ['sdivconst', 'unusedinit', 'switchvalues']:
                         check(assembly.read_text(), arch, optimized=level >= 1)

@@ -436,6 +436,7 @@ VPRIV void warith(ecx *e, int op, qty ty, qty rty);
 VPRIV void wcompare(ecx *e, int op, qty t);
 /* wcall.c */
 VPRIV int wcall(ecx *e, uint32_t n, bool want);
+VPRIV int winline_call(ecx *e, uint32_t n, uint32_t s, bool want);
 VPRIV int wbuiltin(ecx *e, uint32_t n, bool want);
 VPRIV int wconstant_p(ecx *e, uint32_t a);
 VPRIV int wsjlj_kind(cc *c, uint32_t n);
