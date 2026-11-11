@@ -1035,6 +1035,79 @@ arm64-optimeraren och full CFG-nåbarhet återstår. Detta är inte generell
 SimplifyCFG. Nästa större steg är registerlokaler med gemensam behörighet
 (OPT3), därefter kopie-/utvidgningsstädning (OPT4).
 
+### Status OPT8 (2026-11-11): signed tvåpotenser med målkostnad
+
+`emit/opt/sdivpow2.c` beskriver en gemensam regel för signed division och
+rest med positiva/negativa konstanta tvåpotenser upp till 64 bitar,
+inklusive minsta divisorn och −1. Bias före aritmetiskt skift ger C:s
+avrundning mot noll. Rester beräknas från lågbitmask och samma bias.
+Magnituden räknas i i128 för att inte ge overflow i kompilatorn.
+Separata `sdivpow2.c` i arm64, walk och wasm äger sänkningen; anropen i
+uttrycksvandrarna är små. Ingen ny analys, allokering, SSA eller AST-mutation.
+_BitInt, bredare heltal, pekare, FP och vektorer omfattas inte.
+
+**Wasm:s kostnadsval:** direkt jämförelse med lokal clang 23 -O2 visar
+att LLVM lämnar /8 och %8 som en div_s/rem_s. Därför expanderar wasm
+inte den långa biassekvensen. Den använder samma recept för billig /−1,
+%−1 och quotient med MIN-divisor (likhetsjämförelse, i64 utvidgas från
+i32). Övriga signed tvåpotenser behåller kompakt wasm-kod för motorn.
+Det är ett målbeslut, inte saknad C-semantik. Pure konstant RHS krävs
+fortfarande i wasm; en effektfull comma-RHS utvärderas normalt.
+
+Tester: `signed_pow2.c` täcker 32/64 bitar, båda divisortecknen, skift
+1/3/4/30/31/62/63, extremvärden, −1 (utesluter MIN/−1 som är C-UB),
+smala promoverade typer, lat trunkering med skräp i högbitarna,
+compound/volatile, exakt en sidoeffekt och nästlade temporärer.
+Referensresultat räknas med volatile dynamiska divisorer, så provet
+jämför maskinens divide-väg mot den nya konstantsänkningen.
+
+Verifiering för OPT2/OPT8 tillsammans: unity och fil-för-fil bygger utan
+nya varningar; båda klarar alla 96 mål-/nivå-/regelkombinationer med
+kodkrav där relevanta och körning på x86, arm64, wasm32 och wasm64.
+X86-egensvit 135/135 (fem tidigare filtrerade), arm64 140/140, -j 6 och
+--no-cache. O1 DWARF-test för nya flödes-/divisionsfall gröna; metadata-
+kontrakt testade med ASan/UBSan. Ingen fjärr-CI eller full wasm-runtime
+med Emscripten har körts. Varken G5/G7 eller hela O2-målet är klara.
+
+Mätbas för serien: `98da0c3`, vpp SHA256
+`384cfd5f6c83fba8852dbc9ff0c1e7ad3ce323a489519164d304d55fcc8b36eb`;
+slutkandidat före dokumentation
+`294cc2a1264fdee3a21c413e826d1ab5062b12a4076c51178882022ed21691a9`.
+`build/linux/opt-next-baseline/paired.json` innehåller tre alternerade
+repetitioner, fyra 3000-funktions-TU:er per batch, O1 -S, -j 1 warm=1.
+Utöver jobbtid sparas barnprocessens user+sys CPU-tid, inklusive warmup
+men utan väntan på andra processers schemaläggning. CPU-tid är inte
+hårdvarucykler och varierar också med värdens frekvens/cache/minneslast.
+Medianer för signed-korpuset i ms (bas→kandidat): x86 46,668→53,825,
+arm64 46,220→52,126, wasm32 46,286→41,464, wasm64 40,145→48,886.
+Flödes- och oförändrat kontrollkorpus samt alla råa repetitioner sparas
+separat. Native biasexpansion genererar fler enkla poster och har en
+mätbar kostnad i det avsiktligt divisionstäta mikrokorpuset. Ingen
+1 %-grind eller generell frånvaro av kompilatorregression påstås.
+Tidigare wasm-biasexpansion förkastades till förmån för kompakt kod.
+
+Trekompilatorsauditen före/efter finns i samma katalog som
+`optaudit-before/` och `optaudit-after/`. Alla 12 baslinjekombinationer
+har samma checksumma `1922a5c83358247b`. X86 signed-/8-proben har vid
+O1 lika många instruktioner (14) men divide går 1→0; onåbar arm i
+`oa_cond_fold` går 16→11 instruktioner. Auditen efter är från kandidaten
+före den separata debugtrap-korrigeringen; slutlig fokuserad verifiering
+omfattar korrigeringen. Programkörtidsvinst är inte uppmätt.
+
+OPT8 är **påbörjat**: övrig konstantdivision (mulhi), gemensam
+kostnadsmodell, samt tail calls återstår. Fortsatt full O2-plan kräver
+även loop-/alias-/globala analyser efter OPT0–OPT8. OPT3 bör nu minska
+stack-/kopietrafiken före mer avancerade pass.
+
+**Förberedelse OPT3:** kodgranskning visar att x86 kan använda
+RBX/R13–R15 för lokaler; R12 tillhör justerade ramar. Gemensamt urval
+återanvänder lspan/luse/lnoreg. Befintliga L_VREG kan användas, men läsning
+måste kopiera till en ägd temporär och normalisera smala typer. Alla
+potentiellt promoverade callee-save-register måste dessutom sparas av
+builtin setjmp även när setjmp-funktionen själv inte väljer dem: annars
+kan longjmp förbi en promoverad mellanram förstöra anroparens lokaler.
+Detta och asm-clobbers/inline-instansgränser är krav före aktivering.
+
 ## Risker
 - **GNU C-ytan och inline asm** är det stora jobbet. Uppskattat: lexer + pp ~2 kloc,
   parser + sema ~10–15 kloc, emitter ~5 kloc, assembler ~4 kloc, länkare ~3 kloc.

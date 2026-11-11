@@ -220,6 +220,48 @@ def check_unreachable(assembly, arch):
                 raise RuntimeError(f'{name}: removed resumable trap or continuation\n{text}')
 
 
+def check_signedpow2(assembly, arch):
+    wasm = arch.startswith('wasm')
+    divide = r'\b(?:i(?:32|64)\.(?:div|rem)_[su]|[su]div|idiv[lq]?|div[lq]?)\b'
+    probes = ['sp_div32_8', 'sp_rem32_8', 'sp_div32_neg8', 'sp_rem32_neg8',
+                 'sp_div64_16', 'sp_rem64_16', 'sp_div64_neg16', 'sp_rem64_neg16',
+                 'sp_div32_min', 'sp_rem32_min', 'sp_div64_min', 'sp_rem64_min',
+                 'sp_div32_neg1', 'sp_rem32_neg1', 'sp_div64_neg1', 'sp_rem64_neg1',
+                 'sp_div32_2', 'sp_rem32_2', 'sp_div32_high', 'sp_rem32_high',
+                 'sp_div64_2', 'sp_rem64_2', 'sp_div64_high', 'sp_rem64_high',
+                 'sp_nested', 'sp_narrow',
+                 'sp_volatile_div', 'sp_compound', 'sp_char', 'sp_short']
+    if wasm:
+        probes = ['sp_div32_min', 'sp_div64_min', 'sp_div32_neg1',
+                  'sp_rem32_neg1', 'sp_div64_neg1', 'sp_rem64_neg1']
+        # LLVM also keeps these compact wasm operations: the engine lowers
+        # constant division. Do not expand a bias sequence into many records.
+        for name, op in [('sp_div32_8', 'div_s'), ('sp_rem32_8', 'rem_s')]:
+            if not re.search(r'\bi32\.' + op + r'\b', body(assembly, name, True)):
+                raise RuntimeError(f'{name}: lost compact wasm {op}')
+    for name in probes:
+        text = body(assembly, name, wasm)
+        if re.search(divide, text):
+            raise RuntimeError(f'{name}: retained signed power-of-two divide/remainder\n{text}')
+    for name in ['sp_effect_div', 'sp_effect_rem']:
+        text = body(assembly, name, wasm)
+        if len(re.findall(r'\b(?:callq?|bl)\s+sp_next\b', text)) != 1:
+            raise RuntimeError(f'{name}: expected exactly one call to sp_next\n{text}')
+    for name in ['sp_volatile_div', 'sp_compound']:
+        text = body(assembly, name, wasm)
+        if wasm:
+            read = re.search(r'\bi32\.load\b', text)
+            store = re.search(r'\bi32\.store\b', text)
+        elif arch == 'aarch64':
+            read = re.search(r'\bldr(?:sw)?\s', text)
+            store = re.search(r'\bstr\s', text)
+        else:
+            read = re.search(r'\bmov(?:slq|[lq])?\s+[^\n,]*\([^)]*\)[^\n,]*,\s*%', text)
+            store = re.search(r'\bmov[lq]?\s+%[^\n,]*,\s*[^\n]*\(', text)
+        if not read or (name == 'sp_compound' and not store):
+            raise RuntimeError(f'{name}: dropped volatile access\n{text}')
+
+
 def execute(args, directory, assembly, arch, source, level):
     obj = directory / 'probe.o'
     exe = directory / ('probe.wasm' if arch.startswith('wasm') else 'probe')
@@ -257,7 +299,7 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument('--vpp', default=str(Path(BUILD) / 'vpp'))
     ap.add_argument('--target', default='x86_64-linux-gnu')
-    ap.add_argument('--rule', choices=['pow2', 'identities', 'fallthrough', 'loopback', 'unreachable', 'all'], default='all')
+    ap.add_argument('--rule', choices=['pow2', 'signedpow2', 'identities', 'fallthrough', 'loopback', 'unreachable', 'all'], default='all')
     ap.add_argument('--run', action='store_true', help='also execute literal-answer correctness checks')
     ap.add_argument('--clang', default=llvm('clang'))
     ap.add_argument('--vlink', default=str(Path(BUILD) / 'vlink'))
@@ -274,6 +316,7 @@ def main():
         if '--experimental-wasm-memory64' in run([args.node, '--v8-options']):
             args.node_flags.append('--experimental-wasm-memory64')
     rules = {'pow2': ('unsigned_pow2.c', check_pow2),
+             'signedpow2': ('signed_pow2.c', check_signedpow2),
              'identities': ('integer_identities.c', check_identities),
              'fallthrough': ('branch_fallthrough.c', check_fallthrough),
              'loopback': ('while_backedge.c', check_loopback),

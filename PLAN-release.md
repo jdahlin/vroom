@@ -80,6 +80,17 @@ kan gå parallellt.
 
 ## Status
 
+### Status 2026-11-11: G5/G7, onåbar kod och signed tvåpotenser
+
+Delat linjärt record-pass tar bort säkert onåbara suffix; x86 har nu
+register-/effektkontrakt för nästa kopie-/livenesssteg. Signed konstant
+tvåpotensdivision/-rest delar ett recept mellan alla bakändar; wasm
+behåller kompakt div/rem där clang också gör det. Separate regelfiler
+och måladaptrar. Båda byggsätten klarar 96 fokuserade kontroller;
+egensviter x86 135/135 och arm64 140/140. Syntetisk kompilator-CPU-kostnad
+och kvarvarande osäkerhet redovisas vid OPT8 i `PLAN-fas2.md`.
+G5/G7 och hela O2-målet är fortsatt öppna.
+
 ### Status 2026-11-11: G5/G7, delad grenstädning
 
 Arm64 och x86 använder nu `emit/rec/fallthrough.c`; arm64:s extraktion

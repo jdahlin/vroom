@@ -701,6 +701,12 @@ static val wk_arith(ecx *e, int op, qty t, val a, val b)
 			wk_free(e, &a);
 			return wk_const(c, id == EM_ID_ZERO ? 0 : -1, t);
 		}
+		{
+			em_sdivpow2_recipe recipe;
+
+			if (em_sdivpow2(c, t, op, b.i, &recipe))
+				return wk_sdivpow2(e, t, a, &recipe);
+		}
 		em_divpow2(c, t, &op, &b.i);
 	}
 	if (a.k == V_ADDR && b.k == V_CONST && (op == T_PLUS || op == T_MINUS))

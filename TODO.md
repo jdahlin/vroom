@@ -1161,7 +1161,11 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
   adapters. Both build modes pass 32 target/level/rule checks.
   Next slice: shared `emit/rec/fallthrough.c` on arm64/x86; wasm
   terminal while-backedge cleanup in separate reachability unit. OPT2
-  remains partial; effect tables and general block cleanup are pending.
+  now also removes unreachable suffixes and has x86 effect metadata.
+  Shared block/liveness contracts remain pending. Signed power-of-two
+  recipes are in separate sdivpow2.c files; wasm chooses compact div/rem
+  except cheaper -1/MIN cases. OPT3 register locals are next; builtin
+  setjmp must preserve all potential promoted callee-save registers.
   Wasm checks use our assembler/linker and plain Node; full replacement
   of Emscripten's test/explorer runtime is tracked in `PLAN-wasm.md` W9.
   *Validate:* common C semantics plus target-specific code assertions;
