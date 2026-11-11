@@ -51,6 +51,7 @@ typedef struct attrs {		/* the attributes of one declaration */
 	uint32_t ifunc;		/* ifunc("resolver"): alias is the resolver, an STT_GNU_IFUNC symbol */
 	uint32_t counted_by;	/* identifier id */
 	uint32_t errmsg;	/* error("..."): string index + 1, 0: none */
+	uint32_t tlsloc;		/* tls_model attribute location */
 	uint32_t visibility;
 	uint32_t flags;		/* SF_* */
 	uint8_t packed, transparent, used, unused, weak, noreturn, constructor, destructor;

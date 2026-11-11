@@ -59,6 +59,8 @@ VPRIV void apply_sym_attrs(cc *c, sym *s, const attrs *a)
 {
 	if (attrs_empty(a))
 		return;		/* (no record: sym_attrs() in emit.c reads attrs 0 as none) */
+	if (a->tlsmodel && (s->kind != S_VAR || !(s->flags & SF_THREAD)))
+		cc_error(c, a->tlsloc, "'tls_model' attribute only applies to thread-local variables");
 	if (s->attrs)
 		merge_attrs(&c->attr[s->attrs], a);
 	else

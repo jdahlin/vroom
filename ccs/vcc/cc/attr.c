@@ -379,17 +379,33 @@ __attribute__((noinline)) VPRIV void attribute_list_(cc *c, attrs *a)
 				}
 				expect(c, T_RPAREN, "')'");
 				continue;
-			case A_TLS_MODEL:
-				expect(c, T_LPAREN, "'('");
-				{
-					uint32_t loc = tok(c)->loc;
+			case A_TLS_MODEL: {
+				if (!accept(c, T_LPAREN)) {
+					cc_error(c, loc, "'tls_model' attribute takes one argument");
+					continue;
+				}
+				uint32_t argloc = tok(c)->loc, si = 0;
+				bool empty = is(c, T_RPAREN);
 
-					a->tlsmodel = (uint8_t)vcc_tls_model(c->strs[string_index(c, aid) - 1].s);
-					if (!a->tlsmodel)
-						cc_error(c, loc, "tls_model must be \"global-dynamic\", \"local-dynamic\", \"initial-exec\" or \"local-exec\"");
+				if (!empty)
+					si = string_index(c, aid);
+				if (empty || is(c, T_COMMA)) {
+					cc_error(c, loc, "'tls_model' attribute takes one argument");
+					while (!is(c, T_RPAREN) && !is(c, T_EOF) && !is(c, T_SEMI)) {
+						if (is(c, T_LPAREN)) skip_balanced(c);
+						else next(c);
+					}
+				} else if (si) {
+					uint8_t model = (uint8_t)vcc_tls_model(c->strs[si - 1].s);
+
+					if (!model)
+						cc_error(c, argloc, "tls_model must be \"global-dynamic\", \"local-dynamic\", \"initial-exec\" or \"local-exec\"");
+					else
+						a->tlsmodel = model, a->tlsloc = loc;
 				}
 				expect(c, T_RPAREN, "')'");
 				continue;
+			}
 			case A_MODE:
 				expect(c, T_LPAREN, "'('");
 				if (is(c, T_IDENT))
@@ -618,7 +634,7 @@ VPRIV void merge_attrs(attrs *to, const attrs *from)
 	if (from->visibility) to->visibility = from->visibility;
 	if (from->errmsg) to->errmsg = from->errmsg;
 	if (from->prio) to->prio = from->prio;
-	if (from->tlsmodel) to->tlsmodel = from->tlsmodel;
+	if (from->tlsmodel) to->tlsmodel = from->tlsmodel, to->tlsloc = from->tlsloc;
 	if (from->pure) to->pure = from->pure;
 	/* the 0/1 flags packed .. noinstr: or them bytewise */
 	{

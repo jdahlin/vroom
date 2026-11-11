@@ -78,6 +78,8 @@ grep -rhoE "($Q)[[:space:]]*\\([[:space:]]*[A-Za-z_0-9:-]+" --include='*.h' --in
 	grep -rhoE '[A-Za-z_][A-Za-z_0-9]*' "$SDKINC" "$RESINC" $EXTRA_INC 2>/dev/null
 	grep -rhoIE '\b__[A-Za-z_0-9]+' --include='*.h' --include='*.c' "$L" 2>/dev/null
 	sed 's/^[^(]*(//' $T/lit
+	# Attribute regression queries absent from the kernel/SDK corpus.
+	printf '%s\n' tls_model __tls_model__
 } | LC_ALL=C sort -u > $T/ids0
 # names that are macros themselves would expand (and may swallow lines)
 { $CL $FL -dM -E -x c /dev/null; $CL $FH -dM -E -x c /dev/null; $CL $FW -dM -E -x c /dev/null; } | awk '{ sub(/\(.*/, "", $2); print $2 }' | LC_ALL=C sort -u > $T/macros
