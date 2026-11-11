@@ -81,6 +81,7 @@ static const opdesc x64_desc[X_NOPS] = {
 	[X_BARRIER] = X_DESC(0, OD_LOAD | OD_STORE | OD_BARRIER | X_R | X_W),
 	[X_LEAL] = X_DESC(X_D, X_P),
 	[X_JMPR] = { .regs = X_U, .br = RB_INDIRECT },
+	[X_JTE] = X_DESC(0, OD_BARRIER),
 	[X_NAMED] = X_DESC(0, OD_LABEL | OD_BARRIER),
 	/* Undefined destination for zero input is conservatively an old value. */
 	[X_BSF] = X_DESC(X_D | OD_USE0 | X_U, X_P | X_W),
@@ -232,6 +233,7 @@ VPRIV const uint8_t *x64_flow_table(void)
 		[X_BARRIER] = EM_FLOW_ENTRY,
 		[X_LEAL] = EM_FLOW_NEXT,
 		[X_JMPR] = EM_FLOW_ENTRY,
+		[X_JTE] = EM_FLOW_ENTRY,
 		[X_NAMED] = EM_FLOW_ENTRY,
 		[X_BSF] = EM_FLOW_NEXT,
 		[X_BSR] = EM_FLOW_NEXT,

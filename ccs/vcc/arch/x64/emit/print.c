@@ -483,6 +483,12 @@ VPRIV void x64_print(ecx *e, tbuf *b, uint32_t s)
 			tb_s(b, ", ");
 			x64_memop(e, b, i);
 			break;
+		case X_JTE:
+			tb_s(b, "\t.long\t");
+			x64_lbl(b, s, i->label);
+			tb_c(b, '-');
+			x64_lbl(b, s, i->ref);
+			break;
 		case X_LEAL:
 			tb_s(b, "\tleaq\t");
 			x64_lbl(b, s, i->label);

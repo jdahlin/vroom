@@ -23,6 +23,10 @@ assembler, linker, behind `vcc`/`vas`/`vld` shims and the `vccd` server.
 - `PLAN-release.md`: what vcc 1.0 is and its release gates G0-G9 (Swedish);
   work toward the release should move a gate, and update its status there.
 - `RESEARCH-preprocessor.md`: preprocessor design and prior art.
+- `PLAN-vir.md` (Swedish, steps V0-V7), `SPEC-vir.md` (VIR format, draft) and
+  `RESEARCH-vir.md` (LLVM IR's problems): VIR, an SSA IR used only at `-O2`,
+  built by compiling the shared walker a second time against a virtual
+  lowering target.  Update the status of a step in `PLAN-vir.md`.
 - `ccs/`: our code; `ccs/Makefile` builds into `build/ccs/`.  Under `ccs/vcc/`
   generic code is in the component directories, code for one target CPU in
   `arch/<cpu>/<component>/`, code for one target OS in `platform/<os>/`
@@ -83,6 +87,9 @@ assembler, linker, behind `vcc`/`vas`/`vld` shims and the `vccd` server.
     PLAN-x86.md's layers 1 and 3; `arch/x64/emit/`: x86-64's lowering
     (`x64impl.h`, `lower.c`), two-address pass and AT&T printer (`print.c`).
     x86-64 is their only user; arm64 moves to them later (TODO.md).
+    `walk/prefix.h` is generated from the walker's definitions: with
+    `WK_PREFIX`/`LO_PREFIX` defined the walker compiles a second time under
+    other names (`bench/gen-walkprefix.py`; PLAN-vir.md).
   - `arch/x64/as/`: the x86-64 assembler, AT&T syntax with MC's encodings:
     operands, the encoder (REX and VEX) and the dispatcher in `asm.c`
     (shared header `x64as.h`), one file per instruction family (`sys.c`,
@@ -179,6 +186,7 @@ bench/vcc-mutate.py show firstloc     # ... the mutants of one category with bot
 bench/vcc-mutate.py -j 6 --fix       # ... vcc --fix on every rejected mutant: never worse for clang
 bench/vcc-explain.py                # docs/diag pages: the wrong example gives the id, the fixed one nothing
 bench/gen-explain.py [--check]      # driver/explain.inc from ccs/vcc/docs/diag/*.md (vcc --explain ID)
+bench/gen-walkprefix.py [--check]   # emit/walk/prefix.h: the walker's function names, WK_PREFIX compiles it under another name (VIR)
 bench/vcc-bflayout.py               # generated bit-field records, layouts checked by clang, Linux + Apple (~1 s)
 bench/vcc-ldconst.py                # generated long double literals and folds, bits vs clang (~2 s)
 bench/vcc-f80.sh [N]                # x87 long double folding (lib/f128.h) vs this x86-64 host's FPU (~3 s)

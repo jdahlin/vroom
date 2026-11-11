@@ -49,6 +49,15 @@ VPRIV void x64_locals_begin(ecx *e, uint32_t s)
 	}
 }
 
+/* Nothing to do for the direct x86-64 lowering.  The VIR target (PLAN-vir.md,
+   SPEC-vir.md X2) makes a slot object per hand-out, so that an access to a
+   reused frame offset resolves to the object that owns it at that point; a
+   shared cell analysis (emit/rec/slots.h) could take its identities here. */
+VPRIV void x64_slot(ecx *e, int64_t off, uint64_t size, uint32_t align, int kind)
+{
+	(void)e, (void)off, (void)size, (void)align, (void)kind;
+}
+
 VPRIV bool x64_local(ecx *e, uint32_t s, lval *l)
 {
 	xst *X = e->x64;

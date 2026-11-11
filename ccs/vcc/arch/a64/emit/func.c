@@ -227,6 +227,76 @@ static void drop_fallthrough(ecx *e)
 	e->nin = em_rec_fallthrough(e->in, e->nin, &layout, e->ndl ? a64_fallthrough_remap : NULL, &d);
 }
 
+static const struct ejt *jt_of(const ecx *e, uint32_t tab)
+{
+	for (uint32_t t = 0; t < e->njt; t++)
+		if (e->jt[t].tab == tab)
+			return &e->jt[t];
+	abort();
+}
+
+/*
+ * I_JT -> adr x16, table; add x17, x16, idx, lsl 2; ldrsw x17, [x17]; add x16, x16, x17;
+ * br x16, then the table in place: its label and one word per entry, target - table in
+ * bytes (no relocation, in .text as clang does on Darwin).  A function with inline asm
+ * assembles the words as text (the labels are named .LBB symbols there).
+ */
+static void expand_tables(ecx *e, uint32_t fid)
+{
+	uint64_t total = e->nin;
+	bool raw = false;
+
+	if (!e->njt)
+		return;
+	for (uint32_t k = 0; k < e->nin; k++) {
+		raw |= e->in[k].op == I_RAW;
+		if (e->in[k].op == I_JT)
+			total += 5 + jt_of(e, e->in[k].label)->n;
+	}
+	raw &= direct(e);
+	if (total > e->capin)
+		efatal(e, 0, "function too large");
+	for (uint32_t r = 0, j = 0, extra = 0; r < e->ndl; r++) {
+		for (; j < e->dl[r].k && j < e->nin; j++)
+			if (e->in[j].op == I_JT)
+				extra += 5 + jt_of(e, e->in[j].label)->n;
+		e->dl[r].k += extra;
+	}
+	uint32_t d = (uint32_t)total;
+	for (uint32_t k = e->nin; k-- > 0; ) {
+		ins x = e->in[k];
+
+		if (x.op != I_JT) {
+			e->in[--d] = x;
+			continue;
+		}
+		const struct ejt *j = jt_of(e, x.label);
+
+		d -= 6 + j->n;
+		ins *o = &e->in[d];
+		o[0] = (ins){ .op = I_ADR, .rd = R_X16, .label = x.label };
+		o[1] = (ins){ .op = I_ADD, .sz = 1, .rd = R_X17, .rn = R_X16, .rm = x.rd, .sh = 2 };
+		o[2] = (ins){ .op = I_LD, .sz = 2, .cond = 1, .rd = R_X17, .rn = R_X17 };
+		o[3] = (ins){ .op = I_ADD, .sz = 1, .rd = R_X16, .rn = R_X16, .rm = R_X17 };
+		o[4] = (ins){ .op = I_BR, .rn = R_X16 };
+		o[5] = (ins){ .op = I_LABEL, .label = j->tab };
+		for (uint32_t n = 0; n < j->n; n++) {
+			uint32_t target = e->jtl[j->off + n];
+
+			if (raw) {
+				char b[64];
+				int len = snprintf(b, sizeof b, "\t.word\t.LBB%x_%x-.LBB%x_%x", fid, target, fid, j->tab);
+
+				o[6 + n] = (ins){ .op = I_RAW, .off = (int32_t)e->raw.n, .ref = (uint32_t)len };
+				tb_put(&e->raw, b, (size_t)len);
+			} else {
+				o[6 + n] = (ins){ .op = I_JTE, .off = (int32_t)target, .ref = j->tab };
+			}
+		}
+	}
+	e->nin = (uint32_t)total;
+}
+
 static void finish_function(ecx *e, uint32_t s)
 {
 	cc *c = e->c;
@@ -267,6 +337,7 @@ static void finish_function(ecx *e, uint32_t s)
 		}
 	}
 
+	expand_tables(e, s);
 	/*
 	 * Frame below x29: callee saves, locals, outgoing arguments.  Slots are
 	 * addressed from sp, so with locals over-aligned (falign > 16) the
@@ -504,6 +575,7 @@ static bool emit_function1(ecx *e, uint32_t s, int nlreg)
 	e->usedcs = 0;
 	e->nloop = e->nclean = 0;
 	e->ncases = 0;
+	e->njt = e->njtl = 0;
 	e->reach = true;
 	e->top = s;
 	e->asmk = 0;
