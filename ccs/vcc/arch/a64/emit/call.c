@@ -473,6 +473,7 @@ VPRIV val inline_call(ecx *e, uint32_t s, carg *args, int n, uint32_t call)
 	const node *body = N(y->body);
 	fnctx F;
 	qty rty = T(c, y->ty)->base;
+	int64_t saved_sp = 0;
 	val res;
 
 	walk_fn(e, s);
@@ -491,8 +492,13 @@ VPRIV val inline_call(ecx *e, uint32_t s, carg *args, int n, uint32_t call)
 		F.retreg = (uint8_t)(treg(e) + 1);	/* returns put the value there: no slot */
 	else if (!is_void(c, rty))
 		F.retslot = slot(e, tsize(c, rty) ? tsize(c, rty) : 8, talign(c, rty) > 16 ? 16 : talign(c, rty));
-	for (int i = 0; i < n; i++)
-		if (args[i].slot != 1) {	/* parked: back in a register */
+	for (int i = 0; i < (int)body->aux; i++) {
+		uint32_t p = c->lists[body->a + i];
+		const sym *ps = &c->syms[p];
+		bind *b = binding(e, p);
+		/* Reload only this parameter: restoring all parked values together
+		 * exhausts temporaries for wide or numerous inline arguments. */
+		if (i < n && args[i].slot != 1) {	/* parked: back in a register */
 			if (is_agg(c, args[i].t)) {
 				int r = treg(e);
 
@@ -505,10 +511,6 @@ VPRIV val inline_call(ecx *e, uint32_t s, carg *args, int n, uint32_t call)
 			}
 			args[i].slot = 1;
 		}
-	for (int i = 0; i < (int)body->aux; i++) {
-		uint32_t p = c->lists[body->a + i];
-		const sym *ps = &c->syms[p];
-		bind *b = binding(e, p);
 		val v = i < n ? args[i].v : vconst(0);
 
 		if (const_var(e, p, &v) && !is_agg(c, ps->ty) &&
@@ -550,6 +552,13 @@ VPRIV val inline_call(ecx *e, uint32_t s, carg *args, int n, uint32_t call)
 			val_free(e, &v);
 		}
 	}
+	if (e->E->nflags[y->body] & NA_ALLOCA) {
+		int r = treg(e);
+		saved_sp = slot(e, 8, 8);
+		mov(e, 1, r, SP);
+		mem(e, I_ST, 3, 0, r, FRAME, saved_sp);
+		tfree(e, r);
+	}
 	e->f = &F;
 	e->inline_depth++;
 	e->E->ninl++;
@@ -557,6 +566,12 @@ VPRIV val inline_call(ecx *e, uint32_t s, carg *args, int n, uint32_t call)
 	e->inline_depth--;
 	e->f = F.up;
 	deflabel(e, F.retlbl);
+	if (saved_sp) {
+		int r = treg(e);
+		mem(e, I_LD, 3, 0, r, FRAME, saved_sp);
+		mov(e, 1, SP, r);
+		tfree(e, r);
+	}
 	for (int i = 0; i < (int)body->aux; i++) {
 		bind *b = binding(e, c->lists[body->a + i]);
 

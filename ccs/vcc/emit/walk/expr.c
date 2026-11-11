@@ -175,8 +175,27 @@ VPRIV int64_t wk_local(ecx *e, uint32_t s)
 			W->spneed = true;	/* (clang's -fstack-protector-strong, a superset) */
 		if (T(c, c->syms[s].ty)->flags & TF_VLA)
 			W->soff[s] = wk_pslot(e, 24, 8);	/* { address, sp before it, bytes } */
-		else
-			W->soff[s] = wk_pslot(e, tsize(c, c->syms[s].ty) ? tsize(c, c->syms[s].ty) : 1, sym_align(c, s));
+		else {
+			uint64_t size = tsize(c, c->syms[s].ty) ? tsize(c, c->syms[s].ty) : 1;
+			uint32_t align = sym_align(c, s) ? sym_align(c, s) : 1;
+			uint32_t i = W->ntf;
+
+			if (W->inlocal && W->nlu < WK_MAXTSLOT && size <= UINT32_MAX) {
+				/* a local of an inline copy: a free slot, given back when the copy ends */
+				while (i-- > 0)
+					if (W->tf[i].size == size && W->tf[i].align == align)
+						break;
+				if (i != UINT32_MAX) {
+					W->soff[s] = W->tf[i].off;
+					W->tf[i] = W->tf[--W->ntf];
+				} else {
+					W->soff[s] = wk_pslot(e, size, align);
+				}
+				W->lu[W->nlu++] = (struct wklslot){ W->soff[s], (uint32_t)size, align, s };
+			} else {
+				W->soff[s] = wk_pslot(e, size, align);
+			}
+		}
 	}
 	return W->soff[s];
 }
@@ -2602,7 +2621,7 @@ static val wk_fpconst(ecx *e, qty t, double d, u128 q)
 		}
 
 		if (KIND(c, t) == TY_BFLOAT16)
-			return LO(fconst)(e, q_to_bf(q), 2);
+			return LO(fconst)(e, q_to_bf(q_of_d(d)), 2);
 		if (KIND(c, t) == TY_FLOAT16)
 			return LO(fconst)(e, q_to_h(q_of_d(d)), 2);
 		if (KIND(c, t) == TY_FLOAT)
@@ -2864,7 +2883,7 @@ static val wk_builtin(ecx *e, uint32_t n)
 		if (e->wk->nvla) {
 			int sp = LO(spget)(e);
 
-			for (int i = 0; i < e->wk->nvla; ++i) {
+			for (int i = e->wk->inl ? e->wk->inl->vbase : 0; i < e->wk->nvla; ++i) {
 				lval saved = { .k = L_FRAME, .off = wk_local(e, e->wk->vla[i]) + 8, .align = 8 };
 				LO(store)(e, sp, &saved, 8);
 			}
@@ -3270,6 +3289,7 @@ static val wk_gen_inner(ecx *e, uint32_t n)
 		return wk_vreg(LO(laddr)(e, &l));
 	}
 	case N_CAST: {
+		if (x->c) return wk_gen(e, x->c);
 		cval cv;
 
 		/* (int)k for a const double k = 1.0: folded, as clang -O2 */

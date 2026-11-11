@@ -12,7 +12,7 @@ VPRIV void init_keywords(void)
 		KW__Bool, KW__Complex, KW___complex__, KW___complex, KW_struct, KW_union, KW_enum, KW_const, KW_volatile, KW_restrict,
 		KW__Atomic, KW_typeof, KW___typeof__, KW___typeof, KW___typeof_unqual__, KW___const__,
 		KW___const, KW___signed__, KW___signed, KW___volatile__, KW___volatile, KW___restrict__,
-		KW___restrict, KW___int128, KW__BitInt, KW__Float16, KW___bf16, KW___fp16, KW___float128, KW__Alignas, KW___attribute__,
+		KW___restrict, KW___int128, KW__BitInt, KW__ExtInt, KW__Float16, KW___bf16, KW___fp16, KW___float128, KW__Alignas, KW___attribute__,
 		KW___attribute, KW___auto_type,
 	};
 	static const uint16_t decls[] = {
@@ -33,6 +33,8 @@ VPRIV void init_keywords(void)
 		kwclass[decls[i]] |= KC_DECL;
 	for (int i = 0; i < KW_END; i++)
 		kwmap_gnu[i] = kwmap_c23[i] = (kwclass[i] & KC_KW) ? (uint16_t)i : 0;
+	/* Legacy Clang spelling is the same type in every language mode. */
+	kwmap_gnu[KW__ExtInt] = kwmap_c23[KW__ExtInt] = KW__BitInt;
 	/* C23 keywords: the GNU keyword with the same meaning, or their own */
 	kwmap_c23[KW_bool] = KW__Bool;
 	kwmap_c23[KW_alignas] = KW__Alignas;

@@ -1102,7 +1102,7 @@ VPRIV val gen_builtin(ecx *e, uint32_t n)
 			i->sz = 1, i->rd = (uint8_t)r, i->rn = SP, i->imm = 0, i->cond = 0xee;	/* + outgoing area */
 		}
 		/* Older VLA scopes must not reclaim this function-lifetime allocation. */
-		for (int k = 0; k < e->nclean; ++k) {
+		for (int k = e->f && e->f->inl ? e->f->cbase : 0; k < e->nclean; ++k) {
 			uint32_t sym = e->clean[k];
 			const bind *b = binding(e, sym);
 

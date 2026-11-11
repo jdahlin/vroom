@@ -241,6 +241,12 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
   accesses use the libatomic pointer ABI when a native 1/2/4/8-byte access is
   unavailable; native 16-byte instructions remain an optimization. Atomic
   vector types remain unsupported by the frontend.
+  Lock-free queries fold guaranteed native 1/2/4/8-byte aligned accesses;
+  `__atomic_always_lock_free` is an integer constant expression and leaves its
+  pointer unevaluated. Unknown Linux sizes/alignment query libatomic instead
+  of claiming every access is lock-free. Library-backed 16-byte operations
+  are conservatively not always lock-free. Tests: `atomic_lock_free.c`,
+  hosted `tests/atomic/lock_free_runtime.c` (both Linux targets).
   Differs from clang on
   purpose: clang 21/23 zero-extend a signed old value when the compound
   operation leaves int arithmetic (`x /= -2` on `_Atomic signed char` -2
@@ -257,6 +263,15 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
   T1/T3 `atomic-threads.c` (4 threads × 1M `x++` on `_Atomic int`,
   `_Atomic long double`, `_Atomic struct{char[3]}` → exact count);
   `_Static_assert(sizeof/alignof)` cases in `vcc-sema.py layout` style.
+- [x] **Inlined alloca accumulates across repeated calls** [P]. Linux x86/ARM
+  restore the inline function's entry SP at its common return label, after
+  argument evaluation. Callee alloca no longer rewrites caller VLA restore
+  points. Direct allocations in the containing function retain function
+  lifetime. Regression `inline_alloca_lifetime.c` covers nested inline calls,
+  early returns and live caller VLA/alloca objects; unchanged GCC
+  `gcc.dg/pr113596.c` retains its `-O2` contract.
+  *Validate:* unity/file builds, own x86 then ARM/QEMU suites, O0 regression,
+  and kernel sema run/batch; evidence `work/results/pr113596/validation.json`.
 - [x] **VLA pointer `++`/`--`/`+=`/`-=`/difference ignore runtime size** [P].
   Done (emit/expr.c: assign_op, incdec_op, pointer difference).  Found
   with it: `int a[6][n]` (constant outer bound) was laid out as a 0-byte
@@ -267,6 +282,19 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
   Was: `ptr_add_vla` `emit.c:6051` only covers binary `+`/`-` and subscripting.
   *Validate:* T1 `vla_ptr.c` (`int (*q)[n]`: `q++`, `q--`, `q += 2`,
   `q -= 1`, `q3 - q`, `&q[1] - q`, 2-D VLA of VLA).
+- [x] **Adjacent string literals decode before the final prefix is known** [P].
+  Collect the complete sequence before decoding so late `u`/`U`/`L` prefixes
+  determine the encoding and escape range; reject incompatible prefixes.
+  *Validate:* `string_concat_late_prefix.c`, diagnostic `string_concat_prefix.c`;
+  unchanged Kefir `string_literals1` and `wide_string_literals2` on x86-64.
+  Their signed-`wchar_t` assumptions are rejected by Clang on ARM; the
+  portable regression covers ARM/QEMU instead.
+- [x] **Foldable VLA bounds lose evaluated side effects** [P]. Array
+  bounds such as `(callback(), 1)` retain their runtime expression even
+  when folding produces an integer. Unevaluated calls in an integer constant
+  expression still permit a fixed array.
+  *Validate:* `vla_bound_effects.c`; unchanged Kefir `vla1`, all four
+  Clang/vcc combinations on Linux x86-64 and ARM/QEMU.
 - [x] **VLA with initializer accepted; garbage at run time** [P].  Done:
   rejected as clang does, same location and range (cc/decl.c); `= {}`
   (accepted by clang in every mode) zeroes the array at run time
@@ -714,16 +742,32 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
   x86 wide ABI checks use Clang cross-calls. Clang 23 rejects native ARM types
   above 128 bits, so ARM wide ABI checks use explicitly documented ordinary-C
   aggregate proxies; they are not native Clang wide-integer ABI verification.
-  Runtime wide integer/floating conversions remain explicitly unsupported,
-  as do vector elements wider than 128 bits and switch bounds outside signed
-  128-bit representation. Constant floating conversions are implemented.
+  Linux wide integer/floating conversions use full-width magnitude and one
+  nearest-even rounding, or exponent/significand decoding with truncation
+  toward zero. Exact IEEE probes cover 129, 193, 310, 500 and 7001 bits in
+  six x86 formats and five ARM formats; dynamic rounding is not implemented.
+  Vector elements wider than 128 bits and switch bounds outside signed
+  128-bit representation remain explicitly unsupported.
   Runtime support on other targets remains incomplete. The dirty-padding
   compound-assignment regression stays a verified Wasm expected failure;
   Wasm overflow builtins above 64 bits remain explicitly diagnosed.
   *Validate:* `bench/vcc-bitint.py`, `vcc-bitint-constants.py`,
-  `vcc-bitint-abi.py`, `vcc-bitint-replay.py`, existing
+  `vcc-bitint-abi.py`, `vcc-bitint-replay.py`, `vcc-bitint-float.py`, existing
   `tests/vcc/bitint_constants.c`, `bitint_runtime.c`,
   `bitint_compound_padding.c` and `tests/abi/bitint/`.
+- [ ] **Strict floating environment for wide integer casts**: Linux wide
+  integer-to-float lowering currently constructs nearest-even bits and does
+  not raise inexact/overflow flags. Accepting `-frounding-math` or
+  `-ffp-model=strict` only disables selected fast-math transforms; it does
+  not establish dynamic-rounding or exception support. Do not claim strict
+  floating-environment conformance for these casts.
+  *Validate:* convert volatile unsigned `_BitInt(193)` `(1 << 53) + 1` to
+  double under all four `fesetround` modes and check `fetestexcept`:
+  upward must produce `0x1.0000000000001p53`, while nearest/downward/toward-zero
+  produce `0x1p53`, all with inexact raised. Also test signed values and
+  destination overflow. The current default-mode Clang 23 cast likewise
+  ignores the environment; its `-frounding-math` wide cast fails in the
+  backend, so use exact IEEE expectations rather than that failed oracle.
 - [ ] **Builtins**: ~~`__builtin_shufflevector`, `__builtin_convertvector`~~ (done:
   tests/vcc/vector_builtins.c; vector diagnostics spell clang's unnamed form, without the
   `(vector of N 'T' values)` note and typedef names) [P].  Library builtins (clang's `F`
@@ -858,12 +902,16 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
   *Validate:* T4.
 - [x] **`#embed` / `__has_embed`** [P].  (done: `#embed "x"` with limit,
   clang::offset, prefix, suffix, if_empty, `__has_embed` 0/1/2, -Wc23-extensions,
-  -M lists the file, clang's search (absolute, or the includer's directory);
+  -M lists the file, clang's search (absolute, or for quoted names the
+  includer's directory followed by the working directory);
   tests/vcc `embed.c` checksums the file embedding itself; `--embed-dir` (`<x>`
-  only there, `"x"` after the includer's directory); `-E`/`-E -P` placement of
+  only there, `"x"` after the includer and working directories); `-E`/`-E -P` placement of
   the token after the data, byte for byte as clang; limit() takes a constant
   expression; a header with #embed is not cached (replay would not see a
   changed data file).)
+  *Validate:* `bench/vcc-embed-search.py`: 40 Clang comparisons on both
+  Linux targets, including search precedence, queries and dependencies;
+  unchanged Kefir `preprocessor_embed7` in all four compiler combinations.
 - [ ] **Output modes**: `-CC` (comments in macro definitions and arguments,
   `//` as `/* */`) and `-traditional-cpp` are rejected with an error.
   *Validate:* `bench/vcc-diff.py text` (bytes, not tokens) for `-E` with and

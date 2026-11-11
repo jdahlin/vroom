@@ -622,9 +622,17 @@ VPRIV void emit_string(ecx *e, uint32_t i)
 	bool nul = false;
 	uint64_t n = (uint64_t)s->n * s->esz;
 
-	for (uint64_t k = 0; k + s->esz < n; k++)
-		if (!s->s[k] && s->esz == 1)
+	/* SHF_STRINGS splits at zero code units, including wide ones.
+	   Only the final terminator may be merged independently. */
+	for (uint64_t k = 0; k + s->esz < n; k += s->esz) {
+		uint32_t unit = 0;
+
+		memcpy(&unit, s->s + k, s->esz);
+		if (!unit) {
 			nul = true;
+			break;
+		}
+	}
 	if (direct(e)) {
 		size_t h;
 		uint32_t ref = REF(RK_STR, i);

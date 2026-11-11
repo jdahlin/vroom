@@ -700,7 +700,10 @@ static const char *x86_driver_features(int argc, char **argv,
 	!strncmp(name, "stack-protector-guard", 21) || !strcmp(name, "64") || !strcmp(name, "red-zone") ||
 	!strcmp(name, "stackrealign") || !strcmp(name, "omit-leaf-frame-pointer") ||
 	!strcmp(name, "stack-arg-probe") || !strcmp(name, "accumulate-outgoing-args") ||
-	!strcmp(name, "outline-atomics") || !strcmp(name, "strict-align")) continue;
+	!strcmp(name, "outline-atomics") || !strcmp(name, "strict-align") ||
+	/* the kernel's: no instructions vcc emits (3DNow!, x87 returns, al before varargs, regparm) */
+	!strcmp(name, "3dnow") || !strcmp(name, "3dnowa") || !strcmp(name, "fp-ret-in-387") ||
+	!strcmp(name, "skip-rax-setup") || !strncmp(name, "regparm=", 8) || !strcmp(name, "retpoline")) continue;
 			return a;
 		}
 		/* Clang's driver retains only the last spelling of each feature before

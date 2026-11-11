@@ -14,7 +14,7 @@ p.add_argument('--clang', default=str(Path(os.environ.get('LLVM', '/usr/lib/llvm
 a = p.parse_args()
 with tempfile.TemporaryDirectory(prefix='vcc-atomic-') as temp:
     temp = Path(temp)
-    for name in ('complex_concurrent', 'wide'):
+    for name in ('complex_concurrent', 'wide', 'lock_free_runtime'):
         source = ROOT/'ccs/vcc/tests/atomic'/f'{name}.c'
         assembly, binary = temp/f'{name}.s', temp/name
         subprocess.run([str(a.bin_dir.resolve()/'vpp'), '--target='+a.target, '-std=c2y', '-O2', '-S', str(source), '-o', str(assembly)], check=True, timeout=30)
