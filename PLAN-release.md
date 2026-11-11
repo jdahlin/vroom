@@ -749,3 +749,7 @@ fyrmålsprov och kompilatorkostnader finns i PLAN-fas2.md. G5/G7 återstår.
 Wasm har begränsad inlining av rena skalära statiska funktioner med budget och
 konservativ fallback; tester och kostnader finns i PLAN-fas2.md. Generell wasm-
 inlining, gemensam policy och G5/G7 återstår.
+
+Wasm-inlinern kan även instansiera skalära wrappers med definierade statiska
+underanrop; effekter och rekursionsgränser provas. Detaljer och kostnad finns
+i PLAN-fas2.md. Generell inlining, gemensam policy och G5/G7 återstår.

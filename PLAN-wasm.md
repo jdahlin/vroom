@@ -610,3 +610,8 @@ bindningar i typade lokaler. Argument värderas en gång; en budget per
 anropare och konservativ fallback begränsar arbete och kodtillväxt. Det är
 inte stöd för generella funktionskroppar, minnesåtkomst eller rekursiv
 inlining. Fyrmålsprov, wasm-sviter och kostnad finns i PLAN-fas2.md.
+
+Skalär inlining omfattar även direkta anrop till definierade statiska
+funktioner inuti returvärdet. Anropens effekter bevaras och budget/aktiv
+funktionsstack begränsar skanning, kodtillväxt och rekursiv expansion.
+Fyrmålsprov, fulla wasm-sviter och kostnad finns i PLAN-fas2.md.
