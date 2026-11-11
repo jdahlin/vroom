@@ -101,6 +101,9 @@ typedef struct wkst {
 	/* -fstack-protector*: the canary's slot (made first: above every local), and whether this
 	   function needs it (an array, an aggregate or an address-taken local; alloca) */
 	int32_t canary;
+	/* a switch on a constant: only its selected case's label is placed (swon, swsel) */
+	bool swon;
+	uint32_t swsel;
 	bool spneed;
 } wkst;
 

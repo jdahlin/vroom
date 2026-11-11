@@ -412,6 +412,8 @@ VPRIV void x64_print(ecx *e, tbuf *b, uint32_t s)
 		case X_NAMED:
 			ref_name(c, b, i->ref);
 			tb_c(b, ':');
+			if (e->E->o->xcf & 1)
+				tb_s(b, "\n\tendbr64");	/* (&&label: an indirect jump's target) */
 			break;
 		case X_MFENCE:
 			tb_s(b, "\tmfence");

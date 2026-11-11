@@ -467,8 +467,42 @@ static void wk_switch(ecx *e, uint32_t n)
 	int w = wk_size(c, ct) > 4 ? 8 : 4;
 	bool sg = wk_signed(c, ct);
 	uint32_t c0 = W->ncases, lbrk = wk_newlabel(e), ldef = lbrk;
-	val v = wk_gen(e, x->a);
-	int r = wk_reg(e, &v, ct);
+	val v;
+	int r;
+
+	if (!side_effects(c, x->a) && !wk_mem(e, ct) && wk_isconst(e, x->a)) {
+		/* a constant (switch (sizeof(x)) in the kernel's macros): only the selected case,
+		   the others dead as clang -O2 drops them (their __bad_size() calls) */
+		bool on0 = W->swon;
+		uint32_t sel0 = W->swsel, sel = 0;
+		i128 k;
+
+		v = wk_gen(e, x->a);
+		if (v.k == V_CONST) {
+			k = em_trunc_to(c, v.i, ct);
+			wk_cases(e, x->b);
+			for (uint32_t i = c0; i < W->ncases && !sel; i++)
+				if (N(W->cases[i].node)->op == N_CASE && W->cases[i].lo <= k && k <= W->cases[i].hi)
+					sel = W->cases[i].node;
+			for (uint32_t i = c0; i < W->ncases && !sel; i++)
+				if (N(W->cases[i].node)->op == N_DEFAULT)
+					sel = W->cases[i].node;
+			W->ncases = c0;
+			if (W->nloop == WK_MAXLOOP)
+				efatal(e, x->loc, "statements nested too deeply");
+			W->loop[W->nloop++] = (wkloop){ lbrk, 0, W->nclean };
+			W->swon = true, W->swsel = sel;
+			e->reach = false;
+			wk_stmt(e, x->b);
+			W->swon = on0, W->swsel = sel0;
+			W->nloop--;
+			LO(label)(e, lbrk);
+			return;
+		}
+		wk_free(e, &v);
+	}
+	v = wk_gen(e, x->a);
+	r = wk_reg(e, &v, ct);
 
 	wk_cases(e, x->b);
 	for (uint32_t i = c0; i < W->ncases; i++) {
@@ -514,7 +548,13 @@ static void wk_switch(ecx *e, uint32_t n)
 	if (W->nloop == WK_MAXLOOP)
 		efatal(e, x->loc, "statements nested too deeply");
 	W->loop[W->nloop++] = (wkloop){ lbrk, 0, W->nclean };
-	wk_stmt(e, x->b);
+	{
+		bool on0 = W->swon;
+
+		W->swon = false;	/* (its cases are this switch's) */
+		wk_stmt(e, x->b);
+		W->swon = on0;
+	}
 	W->nloop--;
 	LO(label)(e, lbrk);
 }
@@ -695,7 +735,8 @@ VPRIV void wk_stmt(ecx *e, uint32_t n)
 		wk_switch(e, n);
 		return;
 	case N_CASE: case N_DEFAULT:
-		LO(label)(e, wk_caselabel(e, n));
+		if (!W->swon || n == W->swsel)
+			LO(label)(e, wk_caselabel(e, n));	/* (a constant switch: the selected case only) */
 		wk_stmt(e, x->c);
 		return;
 	case N_LABEL:

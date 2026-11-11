@@ -366,7 +366,7 @@ VPRIV void x64_asm(ecx *e, uint32_t n)
 				v = wk_gen(e, en);
 			}
 		}
-		if (v.k == V_CONST || (v.k == V_ADDR && (!e->c->o->pic || !sym_needs_got(e->c, v.ref)))) {	/* (a DSO-local address: an immediate under -fPIC too, as clang) */
+		if (v.k == V_CONST || v.k == V_ADDR) {	/* (an address is an immediate under -fPIC too, as clang: the asm names the symbol) */
 			bool imm = false;
 
 			for (const char *p = cs; *p; p++)
@@ -555,9 +555,11 @@ VPRIV void x64_asm(ecx *e, uint32_t n)
 				case XO_IMM:
 					if (mod != 'c' && mod != 'P' && mod != 'a' && mod != 'n')
 						tb_c(rb, '$');
-					if (o->v.k == V_ADDR)
+					if (o->v.k == V_ADDR) {
 						ref_off(c, rb, o->v.ref, (int64_t)o->v.i);
-					else
+						if (mod == 'a')
+							tb_s(rb, "(%rip)");	/* (clang: %a of a symbol is RIP-relative) */
+					} else
 						tb_i(rb, mod == 'n' ? -(int64_t)o->v.i : (int64_t)o->v.i);
 					break;
 				}
