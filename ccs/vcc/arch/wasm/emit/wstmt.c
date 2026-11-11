@@ -206,7 +206,7 @@ static void wstmts(ecx *e, const node *x, uint32_t i0, uint32_t i1)
 		if (dead && !wlabels(c, s))
 			continue;
 		uint32_t from, to;
-		if (i > i0 && em_block_return_values(e, x, i0, i, &from, &to)) {
+		if (i > i0 && em_block_value_reuse(e, x, i0, i, &from, &to)) {
 			uint32_t oldfrom = e->reuse_from, oldto = e->reuse_to;
 			e->reuse_from = from; e->reuse_to = to;
 			wstmt(e, s);

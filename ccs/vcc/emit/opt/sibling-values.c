@@ -83,10 +83,10 @@ VPRIV bool em_sibling_values(ecx *e, uint32_t n)
  return em_sibling_match(c, x->a, x->b);
 }
 
-/* Reuse an ordinary local initialized immediately before a pure return.
- * The return must already reference that local, so unused-init elimination
+/* Reuse an ordinary initialized local in a later pure expression. The
+ * consumer must already reference that local, so unused-init elimination
  * cannot remove its definition. The value-numbering scan fails closed. */
-static __attribute__((noinline)) bool em_decl_return_match(cc *c, uint32_t init, uint32_t ret,
+static __attribute__((noinline)) bool em_decl_reuse_match(cc *c, uint32_t init, uint32_t ret,
                                                             uint32_t symbol, uint32_t *from, uint32_t *to)
 {
  em_sibling_state s = {0};
@@ -102,21 +102,32 @@ static __attribute__((noinline)) bool em_decl_return_match(cc *c, uint32_t init,
  return true;
 }
 
-VPRIV bool em_decl_return_values(ecx *e, uint32_t decl, uint32_t ret, uint32_t *from, uint32_t *to)
+VPRIV bool em_decl_reuse_values(ecx *e, uint32_t decl, uint32_t consumer, uint32_t *from, uint32_t *to)
 {
  cc *c = e->c;
  const node *d, *r;
  const sym *s;
- if (!e->E->o->opt || e->E->noopt || !decl || !ret) return false;
- d = N(decl); r = N(ret);
- if (d->op != N_DECL || !d->b || N(d->b)->op != N_BINARY ||
-     r->op != N_RETURN || !r->a || N(r->a)->op != N_BINARY || c->nsym >= UINT32_MAX - 32) return false;
+ uint32_t expr;
+ if (!e->E->o->opt || e->E->noopt || !decl || !consumer) return false;
+ d = N(decl); r = N(consumer);
+ if (d->op != N_DECL || !d->b || N(d->b)->op != N_BINARY || c->nsym >= UINT32_MAX - 32) return false;
  s = &c->syms[d->a];
  if (!is_local_var(c, d->a) || s->kind != S_VAR || s->sc == SC_STATIC || s->sc == SC_EXTERN ||
      (s->flags & SF_ADDR_TAKEN) || (QQ(s->ty) & Q_VOLATILE) || (T(c, s->ty)->flags & TF_ATOMIC) ||
      sym_attrs(c, d->a)->cleanup || sym_attrs(c, d->a)->asmname ||
      QUNQ(s->ty) != QUNQ(N(d->b)->ty)) return false;
- return em_decl_return_match(c, d->b, r->a, d->a, from, to);
+ if (r->op == N_RETURN) {
+  expr = r->a;
+ } else if (r->op == N_DECL && r->a != d->a) {
+  const sym *out = &c->syms[r->a];
+  if (!is_local_var(c, r->a) || out->kind != S_VAR || out->sc == SC_STATIC || out->sc == SC_EXTERN ||
+      (out->flags & SF_ADDR_TAKEN) || (QQ(out->ty) & Q_VOLATILE) || (T(c, out->ty)->flags & TF_ATOMIC) ||
+      sym_attrs(c, r->a)->cleanup || sym_attrs(c, r->a)->asmname || !r->b ||
+      QUNQ(out->ty) != QUNQ(N(r->b)->ty)) return false;
+  expr = r->b;
+ } else return false;
+ if (!expr || N(expr)->op != N_BINARY) return false;
+ return em_decl_reuse_match(c, d->b, expr, d->a, from, to);
 }
 
 /* A declaration of a new, nonobservable scalar with a pure initializer cannot
@@ -142,18 +153,18 @@ static __attribute__((noinline)) bool em_value_pure_decl(ecx *e, uint32_t n)
 
 /* Scan at most eight immediately preceding pure local declarations. Any
  * other statement is a barrier; no facts cross a branch or side effect. */
-VPRIV bool em_block_return_values(ecx *e, const node *block, uint32_t first, uint32_t i,
+VPRIV bool em_block_value_reuse(ecx *e, const node *block, uint32_t first, uint32_t i,
                                    uint32_t *from, uint32_t *to)
 {
  cc *c = e->c;
- uint32_t ret, count = 0;
+ uint32_t consumer, count = 0;
  if (!e->E->o->opt || e->E->noopt || i <= first) return false;
- ret = c->lists[block->b + i];
- if (N(ret)->op != N_RETURN) return false;
+ consumer = c->lists[block->b + i];
+ if (N(consumer)->op != N_RETURN && N(consumer)->op != N_DECL) return false;
  while (i > first && count++ < 8) {
   uint32_t prev = c->lists[block->b + --i];
   if (N(prev)->op != N_DECL) break;
-  if (em_decl_return_values(e, prev, ret, from, to)) return true;
+  if (em_decl_reuse_values(e, prev, consumer, from, to)) return true;
   if (!em_value_pure_decl(e, prev)) break;
  }
  return false;

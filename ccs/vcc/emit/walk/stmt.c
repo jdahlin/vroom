@@ -899,7 +899,7 @@ static void wk_stmt1(ecx *e, uint32_t n)
 			    c->syms[d->a].sc != SC_STATIC && c->syms[d->a].sc != SC_EXTERN && (T(c, c->syms[d->a].ty)->flags & TF_VLA))
 				vs = d->a;
 			uint32_t from, to;
-			if (i && em_block_return_values(e, x, 0, i, &from, &to)) {
+			if (i && em_block_value_reuse(e, x, 0, i, &from, &to)) {
 				uint32_t oldfrom = e->reuse_from, oldto = e->reuse_to;
 				e->reuse_from = from; e->reuse_to = to;
 				wk_stmt(e, c->lists[x->b + i]);

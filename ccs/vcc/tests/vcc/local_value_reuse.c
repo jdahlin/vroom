@@ -8,6 +8,9 @@ unsigned lvr_distinct(unsigned a, unsigned b) { return (a-b)*(b-a); }
 unsigned lvr_atomic(_Atomic unsigned *p) { return (__c11_atomic_load(p,5)+1)*(__c11_atomic_load(p,5)+1); }
 unsigned lvr_reuse(unsigned a, unsigned b) { unsigned x = a + b; return x * (a + b); }
 unsigned lvr_commute(unsigned a, unsigned b) { return (a + b) ^ (b + a); }
+unsigned lvr_decl(unsigned a, unsigned b) { unsigned x=a+b; unsigned z=x*(a+b); return z; }
+unsigned lvr_decl_chain(unsigned a, unsigned b) { unsigned x=a+b; unsigned y=a^b; unsigned z=x*y+(a+b); return z; }
+unsigned lvr_decl_write(unsigned a, unsigned b) { unsigned x=a+b; unsigned z=(x++)*(a+b); return z; }
 unsigned lvr_intervening(unsigned a, unsigned b) { unsigned x = a+b; unsigned y = a^b; return x*y+(a+b); }
 unsigned lvr_intervening_assign(unsigned a, unsigned b) { unsigned x = a+b; unsigned y = (a=3); return x*y+(a+b); }
 unsigned lvr_intervening_call(unsigned a, unsigned b) { unsigned x = a+b; unsigned y = update(); return x*y+(a+b); }
@@ -25,6 +28,7 @@ int main(void)
  unsigned v = 3, w = 5;
  if (lvr_square(2, 3) != 25 || lvr_reuse(2, 3) != 25 || lvr_commute(3, 4) ||
      lvr_nested(2, 3, 4) != 4 || lvr_distinct(5, 2) != (3U * (0U-3U)) ||
+     lvr_decl(2, 3) != 25 || lvr_decl_chain(2, 3) != 10 || lvr_decl_write(2, 3) != 25 ||
      lvr_intervening(2, 3) != 10 || lvr_intervening_assign(2, 3) != 21 || lvr_intervening_write(2, 3) != 6 ||
      lvr_written(2, 3) != 25 || lvr_volatile_local(2, 3) != 25 ||
      lvr_kill(2, 3) != 11 || lvr_join(2, 3, 0) != 10 || lvr_join(2, 3, 1) != 11) return 1;

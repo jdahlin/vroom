@@ -52,6 +52,9 @@ def check_localvalues(assembly, arch):
     text = body(assembly, 'lvr_reuse', wasm)
     if len(re.findall(add, text)) != 1:
         raise RuntimeError(f'declaration value must be reused in return\n{text}')
+    text = body(assembly, 'lvr_decl', wasm)
+    if len(re.findall(add, text)) != 1:
+        raise RuntimeError(f'declaration value must be reused in later declaration\n{text}')
     text = body(assembly, 'lvr_intervening', wasm)
     if len(re.findall(add, text)) != 2:
         raise RuntimeError(f'value must survive a pure declaration\n{text}')
