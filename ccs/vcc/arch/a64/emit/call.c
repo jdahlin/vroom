@@ -201,8 +201,13 @@ VPRIV val do_call(ecx *e, uint32_t ref, val *fnv, carg *args, int n, qty rty, bo
 			break;
 		case A_STACK:
 			if (DARWIN(c) && a->a.size < 8 && !is_agg(c, a->t)) {	/* Apple: packed */
+				/* a variadic one has an 8-byte slot: store all of it, as clang
+				 * does, so va_arg(ap, T *) of a literal 0 (sqlite's shell)
+				 * reads no stale upper half */
+				int va = nfix >= 0 && i >= nfix;
+
 				arg_word(e, a, 0, R_X16);
-				mem(e, I_ST, log2sz(a->a.size), 0, R_X16, SP, a->a.stk);
+				mem(e, I_ST, va ? 3 : log2sz(a->a.size), 0, R_X16, SP, a->a.stk);
 				break;
 			}
 			for (int k = 0; k < a->a.nreg; k++) {
