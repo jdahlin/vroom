@@ -361,5 +361,8 @@ Ett delat konstanttidsrecept väljer separata native-adaptrar: skalad LEA på
 x86 och skiftad ADD på arm64, O1+ utan VCC_NOOPT. Wasm behåller mul enligt
 referensens kostnadsval. O0/NOOPT/overflow-paritet, modulär sanitizer-/mutationsoracle,
 posteffekter, två bygglägen och fyra måls O0–O3-körfall passerar. Kodformsvinst
-är belagd; matchad kompilatorkostnad och integrations-CI återstår. Faktorer
+är belagd; matchad mikrokostnad mot historisk bas 69c1bd7 är högst +0,126 %
+för kontroller; positivt prov kostar +0,353 % x86 och −2,147 % arm64.
+Wasm är byteidentiskt. Detta är kompileringens Ir, inte körtidsvinst eller full
+prestandagrind; slutlig integrations-CI återstår. Faktorer
 6/7/10/15 och bredare aritmetikregler är öppna. G5/G7 och full O2 förblir öppna.

@@ -2119,5 +2119,27 @@ samt global volatile-laddning. 36 bytejämförelser mot basen bevarar O0,
 utgör inget nytt löfte. ASan/UBSan för receptets modulära oracle och mutation,
 samt x86-posternas användningar/definitioner/flaggor/nollutvidgning passerar.
 CI kör den nya receptkontrollen och befintlig opt-rules tar automatiskt det nya
-fallet. Matchad kompileringskostnad och slutlig integrations-CI återstår.
+fallet. Slutlig integrations-CI återstår; avgränsad kostnadsmätning finns nedan.
 Ingen SSA, generell InstCombine eller full O2-täckning är implementerad.
+
+
+OPT1 matchad kostnad för 3/5/9: exakt ren kandidat `f92b67b` mot historisk
+bas `69c1bd7`, båda värdbyggen `-O3 -march=x86-64-v3`, hela processens
+Callgrind-Ir och 500 funktioner per prov, O1/O2 för alla fyra måltrippelar.
+Skalär kontroll med faktor 37 (receptet avböjs) kostar +0,1256 % x86,
++0,1231 % arm64 och +0,0141–0,0142 % wasm. Pekarslingan kostar +0,0863 %,
++0,0041 % respektive +0,0080 %. Alla kontrollutdata är byteidentiska.
+Positivt prov med faktorerna 3/5/9 kostar +0,3529 % x86, −2,1465 % arm64
+samt +0,0160–0,0161 % wasm. Där blir 500 imul till 500 skalade LEA på
+x86 och 500 materialiserade konstant+madd till 500 skiftade ADD på arm64;
+wasm behåller 500 mul och dess assembler är byteidentisk. Detta mäter
+kompileringsarbete, inte programmets körtid eller hela prestandagrinden.
+
+Kandidatbinärens SHA256 är
+`8492bdd0cb53f89d1ad3173ac48bcb837f668a20a4860b0b3fa64ee232ccf362`.
+`work/opt-profile/mulconst-cost/result.json` bevarar samtliga 24 matchade par,
+exakta kommandon, kompileringsflaggor, käll-/binärhashar och kodformsräkningar.
+`work/opt-profile/mulconst-unity-parity/result.json` bevarar de 16
+byteidentiska bygglägesparen. Bas 69 är avsiktligt historisk; en senare
+integration får inte beskriva dessa tal som mätning mot dess nya förälder.
+Slutlig integrations-CI och full G7 är fortsatt öppna.
