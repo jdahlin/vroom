@@ -27,4 +27,3 @@ VPRIV int em_bin_identity(cc *c, qty ty, int op, i128 rhs)
 		return EM_ID_NONE;
 	}
 }
-
