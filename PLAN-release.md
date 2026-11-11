@@ -252,6 +252,15 @@ av `bench/vcc-optaudit.py`; vcc O1/O2/O3 ger samma assembler här.
 Inga optimeringar implementerade eller uppmätt
 körtidsmål; G5 är fortsatt öppet och benchmarksvitens X är inte fastställt.
 
+### Status 2026-11-11: x86-funktionsmål, SSE4 och matematik
+G1/G2 har en sammanhängande x86-featuremodell utan LLVM vid körning:
+CPU/native, funktionsattribut, inlining, SSE4-strängoperationer och interrupt.
+AVX-ABI för breda vektorer och record diagnostiseras tills transporten finns.
+Fast-math sänker sqrt och begränsade heltalspotenser med bevarad evaluering.
+Isolerad validering på bas 0757803: x86 162/162 (fem referens-/målskip),
+ARM64 167/167, ABI 23/23 per mål, PP 920/920 och sema 887/887 i båda lägena.
+Featuremakron 587/587, attribut/ABI-spärrar 302/302, SSE4-grindar 124/124
+samt GCC pr40470 4/4 passerar. G1/G2 och S4 är fortfarande öppna.
 ### Status 2026-11-11: atomiska helobjekt på Linux
 Större atomiska record, heltal och komplexa värden använder nu libatomic-ABI
 när den inbyggda 1/2/4/8-bytevägen inte räcker. Jämför-och-byt-loopar behåller
@@ -297,3 +306,10 @@ med b63c269 bygger unity/fil-för-fil och passerar 164 riktade kör-/kodkrav,
 byte-identiska och extra Callgrind-kompileringsarbete högst +0,180 %; ett
 riktat x86-switchprov minskar exekverade instruktioner 48,39 %. Avgränsning,
 rådata och kvarvarande OPT6-delar står i PLAN-fas2. G5/G7 och full O2 är öppna.
+### Status 2026-11-11: integration av x86-funktionsmål och OPT3
+
+Funktionsmål och packad bool-ABI delar nu klassificering med optimerarens
+registerhem. SSE4-poster har explicita register-/flaggeffekter; fasta
+variadiska boolparametrar verifieras även via indirekta anrop. Båda bygglägen
+klarar egna Linuxsviter (176 x86, 181 ARM), ABI 32 per mål, 220 diagnostikprov
+och 887 kernel-TU:er i båda semalägena. G1/G2/G5 förblir öppna.
