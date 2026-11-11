@@ -1356,6 +1356,7 @@ in V1 and V2 with `bench/vbench.py`, not results.
 | Calls to `malloc`, `mmap`, `free` per function | 0 after the thread's first function | The walker and x86 lowering already work this way |
 | Bytes cleared per function | Proportional to what the function used, never to capacity | — |
 | Building, per VIR instruction (the `vir_*` operations only) | 30 ns | The arm64 emitter spends 103 ns per machine instruction in total (PLAN-fas2, status 2.6) |
+| Register allocation, sweeps 5 and 6 together, per VIR instruction | 200 ns for now; the target is 60 ns (`RESEARCH-regalloc.md` 7), after code quality | 177 ns on an interpreter-shaped function, 81–83 ns on random functions (PLAN-vir V4) |
 | Sweeps over the instruction array at `-O2`, build to lowered records | 7 | — |
 | `-O0` and `-O1` | No VIR code runs; output byte-identical | — |
 

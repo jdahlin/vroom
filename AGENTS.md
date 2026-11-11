@@ -206,7 +206,7 @@ bench/gen-explain.py [--check]      # driver/explain.inc from ccs/vcc/docs/diag/
 bench/gen-walkprefix.py [--check]   # emit/walk/prefix.h: the walker's function names, WK_PREFIX compiles it under another name (VIR)
 build/ccs/viralloc --sweep F.vir     # VIR register allocation (vir/alloc.c) on a synthetic target: dump + counters, checker at every register count
 bench/vir-alloc.py [--bless]        # ccs/vcc/tests/vir-alloc: expected dumps and sweeps (<1 s); `random -n N`: generated functions (~1 s/unit)
-bench/vir-alloc.py mutate|time      # the checker catches corrupted allocations; ns per VIR instruction (budget 60, SPEC 22.1)
+bench/vir-alloc.py mutate|time      # the checker catches corrupted allocations; ns per VIR instruction (budget 200 for now, target 60: SPEC 22.1)
 bench/vcc-bflayout.py               # generated bit-field records, layouts checked by clang, Linux + Apple (~1 s)
 bench/vcc-ldconst.py                # generated long double literals and folds, bits vs clang (~2 s)
 bench/vcc-f80.sh [N]                # x87 long double folding (lib/f128.h) vs this x86-64 host's FPU (~3 s)

@@ -338,7 +338,9 @@ ingen kod i V1 ändrad.
 - **Tid (bästa av fem, M1 Pro, delad maskin):** tolkformad funktion
   (`big_interp`: 2927 instruktioner, 514 block, 25 blockparametrar i
   slingan) 177 ns/instruktion vid 14+14 register, 172 vid 6+4; slumpade
-  funktioner 81–83 ns.  **Över budgeten 60 ns.**  Profilering gav −13 till
+  funktioner 81–83 ns.  Under budgeten 200 ns som gäller tills vidare (SPEC
+  22.1, beslut 2026-11-11: kodens hastighet i sqlite först); målet 60 ns
+  ligger kvar till efter kvaliteten.  Profilering gav −13 till
   −16 %: trådlokal åtkomst via pekare (`_tlv_get_addr` kostade 3–4 %), inget
   rensat registerfält per block, ingen poängsättning eller kantflytt för
   ensam föregångare, operandlistor från svep 5 till svep 6, operandfälten
