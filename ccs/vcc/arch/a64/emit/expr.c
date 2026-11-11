@@ -321,9 +321,10 @@ static val gen_vlanes(ecx *e, int op, qty at, val *a, qty bt, val *b, qty rt, bo
 
 		if (unary) {
 			if (op == T_MINUS)
-				r = is_flt(c, et) ? f_neg(e, x, et) : arith(e, T_MINUS, et, vconst(0), x);
+				r = is_flt(c, et) ? f_neg(e, x, et) : is_wide(c, et) ? arith2(e, T_MINUS, et, vconst(0), x)
+										 : arith(e, T_MINUS, et, vconst(0), x);
 			else
-				r = arith(e, T_CARET, et, x, vconst(-1));
+				r = is_wide(c, et) ? arith2(e, T_CARET, et, x, vconst(-1)) : arith(e, T_CARET, et, x, vconst(-1));
 		} else if (em_is_cmp(op)) {
 			if (is_flt(c, et)) {
 				r = f_compare(e, op, et, x, y);

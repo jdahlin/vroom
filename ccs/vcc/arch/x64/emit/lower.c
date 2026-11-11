@@ -161,6 +161,7 @@ VPRIV int x64_ftreg(ecx *e)
 }
 
 VPRIV int x64_nfree(ecx *e) { return 8 - __builtin_popcount(e->x64->live & X_TEMPS); }
+VPRIV int x64_nffree(ecx *e) { return XMM15 - XMM8 - __builtin_popcount(e->x64->live & X_FTEMPS); }
 
 VPRIV int x64_toreg(ecx *e, val *v, int size)
 {
