@@ -736,6 +736,10 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
   `pr39343`, `pointer-counted-by-8`) and permanent regressions cover this scope.
   Still missing: general control-flow/alias provenance, transitive inline
   bindings, `alloc_size` inference, and dynamic side-effecting expressions.
+  Wasm inline argument-bound propagation remains unsupported: the unchanged
+  `object_size_inline` regression gives identical assembly and runtime failure
+  with main `9d022c3` and this milestone on wasm32/64; Clang passes. Its
+  expected-failure marker executes the test and rejects XPASS.
   Do not infer a whole allocation from a known subobject or treat unknown as
   known. Full S4 and non-Linux targets remain separate gates.
   *Validate:* unity and file-by-file builds; own x86/ARM runtime suites;

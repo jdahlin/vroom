@@ -106,7 +106,10 @@ Separat supplement använder PR37-harness `761142b` och dess uttryckliga
 Kvar: generell flödes-/aliasanalys, transitiva inline-parametrar,
 `alloc_size`-kontrakt och dynamiska uttryck med sidoeffekter; okända bounds
 ska fortsätta vara okända. Hela S4-korpusen och övriga mål har inte körts om
-för denna milstolpe. G1/G4 är inte färdiga.
+för denna milstolpe. Riktade Wasm32/64-prover går 10/10 med ett kört XFAIL
+för `object_size_inline`: samma test ger byteidentisk assemblerkod och
+samma runtimefel med tidigare `main`; Clang-referensen passerar. Testet
+behöver Wasm-inlining/argumentbounds och är inte överhoppat. G1/G4 är inte färdiga.
 
 ### Status 2026-11-11: G5/G7, registerlokaler på x86
 

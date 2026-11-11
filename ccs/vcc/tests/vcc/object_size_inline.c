@@ -1,3 +1,4 @@
+/* vcc-xfail-wasm: TODO.md wasm: Linux-correctness coverage gaps: no inliner for object-size bounds of call arguments */
 typedef __SIZE_TYPE__ size_t;
 static inline __attribute__((always_inline)) size_t bound(char *p)
 {
