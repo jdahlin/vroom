@@ -142,8 +142,8 @@ Skalära `_BitInt` över 128 bitar har nu limb-baserad kodgenerering för
 Linux x86-64 och arm64, med de befintliga snabbvägarna för högst 128 bitar
 bevarade. Milstolpen omfattar heltalsaritmetik, jämförelser, konvertering
 mellan heltal, bitfält, generiska biträkningar, konstantuttryck och replay.
-Körtidskonvertering till/från flyttal, vektorelement över 128 bitar och
-switch-gränser utanför signed 128-bitars representation avvisas uttryckligen.
+Vektorelement över 128 bitar och switch-gränser utanför signed 128-bitars
+representation avvisas uttryckligen. Flyttalskonvertering följer nedan.
 Detta slutför inte C23 eller G1.
 
 Validering av integrationen på `ae941cb`: unity och separata filer,
@@ -384,3 +384,40 @@ registerhem. SSE4-poster har explicita register-/flaggeffekter; fasta
 variadiska boolparametrar verifieras även via indirekta anrop. Båda bygglägen
 klarar egna Linuxsviter (176 x86, 181 ARM), ABI 32 per mål, 220 diagnostikprov
 och 887 kernel-TU:er i båda semalägena. G1/G2/G5 förblir öppna.
+
+### Status 2026-11-11: G1, breda heltal till/från flyttal
+
+Linux-konverteringar använder hela heltalsmagnituden med guard/sticky-bitar
+och en avrundning till närmaste jämna, respektive avkodning av flyttalets
+exponent och signifikand med trunkering mot noll. Ingen körtids-Clang eller
+128-bitars trunkering av heltalsindata används. Dynamiska avrundningslägen
+ingår inte; detta slutför inte G1.
+
+På den privata milstolpen `7a1691f` passerar 6871 exakta x86-konverteringsprov
+och 5667 ARM-prov över fem heltalsbredder 129–7001, med sex respektive fem
+flyttalsformat. Unity och separata filer ger samma resultat. Clang-avvikelser
+för BF16, x87 och unsigned binary128 registreras separat; vcc måste alltid
+matcha den oberoende Python-orakeln. Oförändrat Kefir `bitint_cast_fix2`
+passerar fyra x86-kombinationer och två ARM-kombinationer med vcc-kallee;
+Clang stöder inte ARM-typens bredd. Snapshot/replay passerar med ASan/UBSan
+efter en separat rättning av ett befintligt nollängds-`memcpy` med nullkälla.
+Verifieringsunderlag: `work/results/bitint-float-reviewed/`.
+
+Återintegrationen på `b0b6107` bevarar de nyare konstant- och aliasoptimeringarna.
+Unity och separata filer passerar samma IEEE-matris, 222/222 egna x86-prov
+(med sex befintliga referensundantag), 227/227 ARM-prov (ett befintligt xfail,
+inga hoppade prov) och kärnans sema
+887/887 både individuellt och i batch. IEEE-matrisen passerar även med `-O3`
+på båda målen. Reglerna O0–O3, constant-control, leaf-frame, slot-values,
+slot-observable, switch-plan och debugrader passerar i båda byggsätten.
+ASan/UBSan passerar IEEE, konstantprov och snapshot/replay på båda målen.
+CI kör nu flyttalsmatrisen och sanitizer-replay. Evidens:
+`work/results/bitint-float-main-reviewed/`.
+
+Importen ovanpå PR #60 behåller dess fulla Linux-baslinjer och ändrar
+endast flyttalsuppföljningen. Båda oförändrade x86-Kefir-fallen
+`bitint_cast_fix2` och `bitint_typeconv6` är nu 2/2 godkända med fyra
+kompilatorkombinationer vardera; motsvarande standard-ARM-körning
+redovisar två Clang-referensavvisningar. Det breda ARM-värdebeviset
+kommer från IEEE-matrisen och de separat redovisade vcc-kalleeanropen.
+G1/G2 och strikt flyttalsmiljö är fortsatt öppna.

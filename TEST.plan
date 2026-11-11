@@ -732,6 +732,21 @@ manifest/jämförelse/fullgrindar: `work/results/bitint-main2dc/`.
 Körtidskonvertering mellan breda heltal och flyttal återstår separat.
 S5b och G1/G2 är fortfarande öppna.
 
+**Flyttalsuppföljning på den breda milstolpen:** de oförändrade
+`bitint_cast_fix2` och `bitint_typeconv6` passerar nu båda på x86 i alla fyra
+kompilatorkombinationer. ARM:s Clang avvisar deras breda kalleetyper;
+standardharnessen redovisar två referenskompileringsfel, inte två pass.
+Separata oförändrade anrop av `bitint_cast_fix2` med vcc-kallee passerar
+med både Clang- och vcc-anropare på ARM/QEMU. Den oberoende IEEE-matrisen
+passerar 6871 x86- och 5667 ARM-värden över bredderna 129–7001, både normalt
+och med `-O3`, med unity och separata filer. Snapshot/replay är också
+ASan/UBSan-grön efter en separat nollängds-kopieringsrättning.
+Dynamiskt avrundningsläge och FP-undantagsflaggor återstår uttryckligen;
+standardläget använder en avrundning till närmaste jämna. Dessa fokuserade
+resultat är inte en ny fullständig 875-parskörning.
+Evidens: `work/results/bitint-float-main-reviewed/` och
+`work/results/kefir-float-final-{x86,arm}/`.
+
 ### S6 ABI-generatorer — rigg klar, fel rättas
 `gcc.dg/compat/struct-layout-1_generate.c` och clangs `utils/ABITest`
 genererar tusentals anrop mellan två kompilatorer.  Kopplas in i
