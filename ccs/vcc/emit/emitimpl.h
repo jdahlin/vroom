@@ -118,6 +118,7 @@ static inline bool inline_only(const sym *y)
 #include "../arch/a64/emit/ins.h"
 #include "rec/rec.h"
 #include "flow/flow.h"
+#include "flow/values.h"
 
 /* references to things with a symbol: kind in the top 4 bits */
 enum { RK_SYM = 0, RK_STR = 1, RK_LBL = 2, RK_NAME = 3, RK_TABLE = 4 };
