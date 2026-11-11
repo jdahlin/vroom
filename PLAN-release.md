@@ -318,6 +318,19 @@ observerbara accesser och fokuserade wasm-körfall passerar. Detaljer och
 avvisade varianter finns i PLAN-fas2. Ingen bred prestandagrind eller ny
 optimeringsregel ingår; G5/G7 och full O2 är fortsatt öppna.
 
+### Status 2026-11-11: G5/G7, x86-blad utan ram
+
+Verkligt ramfria x86-blad kan nu hoppa över rbp-prolog/epilog; policy och
+begränsad effektkontroll ligger i en egen frame.c och den redan befintliga
+postvandringen. Explicit frame-pointer-policy och blandade deklarationscacher
+är testade. CFI/debug, hårdningsinträden och en riktig signal-unwind genom ett
+ramfritt blad är verifierade; övriga funktioner behåller sin ram. Egna x86-prov
+215/215, ABI 32/32 och befintliga registerhems-unwindprov är gröna.
+Två kalla 501-funktions-profiler ger −0,176 %/−0,537 % Ir; kontrollens assembler
+är identisk. Käll-/binärhashar, flaggor och bytebegränsningar står i PLAN-x86.md.
+Ingen generell fart- eller programkörtidsvinst är bevisad. G5/G7 och hela O2
+är fortsatt öppna; parameterhem och bredare mätningar återstår.
+
 ### Status 2026-11-11: G5/G7, rena konstanta kontrollbeslut
 
 OPT6:s gemensamma kontrollhjälpare används av x86, arm64 och wasm med
