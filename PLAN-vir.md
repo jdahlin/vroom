@@ -277,6 +277,11 @@ gjorda (SPEC-vir.md avsnitt 19, X1–X3); inget under `ccs/vcc/vir/`.
 
 ### V1, första halvan (2026-11-11): format, textform och verifierare
 
+V1 parser: en tom blockkropp ger nu verifieringsfelet S3 utan att först
+anropa `memcpy` med en nullkälla och längd noll. Regressionsprov och hela
+VIR-sviten passerar under ASan/UBSan (119/119); mutationsprov med seed 42
+passerar 1 000/1 000. Övriga V1-grindar och VIR-stegen återstår.
+
 Klart: `ccs/vcc/vir/` (modul `vir_SRC`, egen unity-TU, länkad bara in i
 `virtest`; inget i `vpp`, `vccd` eller `emit/` ändrat).  `vir.h` (format,
 opkodstabell som skrivare, parser och verifierare delar), konstruktion med
