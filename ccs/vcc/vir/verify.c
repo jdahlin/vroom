@@ -141,75 +141,115 @@ static bool word_ty_ok(uint32_t want, uint32_t have)
 
 /* ---------------- exposure (6.4) ---------------- */
 
-/* per slot: is a pointer based on it used for more than an address operand? */
-static bool slot_exposed(vir_fn *f, uint32_t s, uint8_t *mark)
+/* Backward exposure edges: a derived value -> each pointer it depends on.
+ * A single traversal classifies every slot, including cycles and backedges. */
+typedef struct vex_edge { uint32_t input, next; } vex_edge;
+typedef struct vex_graph { void *mem; uint32_t *head, *queue; vex_edge *edge; uint8_t *slot; } vex_graph;
+enum { VEX_SAFE, VEX_SINK, VEX_FLOW };
+
+/* Classify an operand use exactly as the exposure contract in 6.4. For a
+ * propagation, out is the derived value; for a branch it is its parameter. */
+static int exposure_use(vir_fn *f, const vir_ins *x, uint32_t ins, uint32_t pos, uint32_t *out)
 {
-	bool exposed = false, ch = true;
-
-	memset(mark, 0, f->nins);
-	for (uint32_t i = 1; i < f->nconst; i++)
-		if (f->ins[i].op == VO_SLOTADDR && f->ins[i].a == s)
-			mark[i] = 1;
-	for (int round = 0; ch && !exposed && round < 1000; round++) {
-		ch = false;
-		for (uint32_t b = 0; b < f->nblk && !exposed; b++)
-			for (uint32_t i = f->blk[b].first; i < f->blk[b].first + f->blk[b].n && i < f->nins; i++) {
-				vir_ins x = f->ins[i];
-				vir_oit it;
-				uint32_t *p;
-
-				if (vir_is_const_op(x.op))
-					continue;
-				vir_oit_init(&it, f, &x, false);
-				while ((p = vir_oit_next(&it))) {
-					uint32_t v = *p, pos = it.pos;
-
-					if (v >= f->nins || !mark[v])
-						continue;
-					switch (x.op) {
-					case VO_LOAD: case VO_ALOAD: case VO_ASTORE: case VO_AXCHG: case VO_AXADD: case VO_ACAS:
-					case VO_VA_START: case VO_VA_ARG: case VO_MEMSET:
-						if (pos == 0) break;
-						exposed = true;
-						break;
-					case VO_STORE:
-						if (pos == 1)
-							exposed = true;
-						break;
-					case VO_MEMCPY: case VO_PSUB: case VO_ICMP:
-						if (pos > 1) exposed = true;
-						break;
-					case VO_PTRADD:
-						if (pos == 0 && !mark[i])
-							mark[i] = ch = true;
-						break;
-					case VO_SELECT:
-						if (pos == 0) {
-							exposed = true;
-						} else if (!mark[i]) {
-							mark[i] = ch = true;
-						}
-						break;
-					case VO_BR: {	/* the argument at list position -> the target's parameter */
-						uint32_t ai = (uint32_t)(p - &f->extra[x.c]);
-
-						if (x.a < f->nblk && ai < f->blk[x.a].nparam) {
-							uint32_t q = f->blk[x.a].first + ai;
-
-							if (q < f->nins && !mark[q])
-								mark[q] = ch = true;
-						}
-						break;
-					}
-					default:
-						exposed = true;
-					}
-					if (exposed)
-						break;
-				}
-			}
+	switch (x->op) {
+	case VO_LOAD: case VO_ALOAD: case VO_ASTORE: case VO_AXCHG: case VO_AXADD: case VO_ACAS:
+	case VO_VA_START: case VO_VA_ARG: case VO_MEMSET:
+		return pos == 0 ? VEX_SAFE : VEX_SINK;
+	case VO_STORE:
+		return pos == 1 ? VEX_SINK : VEX_SAFE;
+	case VO_MEMCPY: case VO_PSUB: case VO_ICMP:
+		return pos > 1 ? VEX_SINK : VEX_SAFE;
+	case VO_PTRADD:
+		if (pos != 0) return VEX_SAFE;
+		*out = ins;
+		return VEX_FLOW;
+	case VO_SELECT:
+		if (pos == 0) return VEX_SINK;
+		*out = ins;
+		return VEX_FLOW;
+	case VO_BR:
+		if (x->a >= f->nblk || pos >= f->blk[x->a].nparam) return VEX_SAFE;
+		*out = f->blk[x->a].first + pos;
+		return *out < f->nins ? VEX_FLOW : VEX_SAFE;
+	default:
+		return VEX_SINK;
 	}
-	return exposed;
+}
+
+static void exposure_enqueue(uint8_t *mark, uint32_t *queue, uint32_t *tail, uint32_t v)
+{
+	if (!mark[v]) {
+		mark[v] = 1;
+		queue[(*tail)++] = v;
+	}
+}
+
+/* Build the propagation edges in two passes so one checked allocation holds
+ * all scratch. Allocation or representation failure rejects verification;
+ * it can never turn an unknown exposure into an accepted claim. */
+static bool exposure_build(vir_fn *f, uint8_t *mark, vex_graph *g)
+{
+	size_t nedges = 0, heads, edges, total;
+	uint32_t at = 0, first = 0, last = 0;
+
+	memset(g, 0, sizeof(*g));
+	for (uint32_t i = f->nconst; i < f->nins; i++) {
+		vir_ins x = f->ins[i];
+		vir_oit it;
+		uint32_t *p, out;
+
+		if (vir_is_const_op(x.op)) continue;
+		vir_oit_init(&it, f, &x, false);
+		while ((p = vir_oit_next(&it))) {
+			uint32_t pos = x.op == VO_BR ? (uint32_t)(p - &f->extra[x.c]) : it.pos;
+			if (*p < f->nins && exposure_use(f, &x, i, pos, &out) == VEX_FLOW && ++nedges >= UINT32_MAX)
+				return false;
+		}
+	}
+	if (__builtin_mul_overflow((size_t)f->nins, sizeof(*g->head), &heads) ||
+	    __builtin_mul_overflow(nedges, sizeof(*g->edge), &edges) ||
+	    __builtin_add_overflow(heads, heads, &total) ||
+	    __builtin_add_overflow(total, edges, &total) ||
+	    __builtin_add_overflow(total, (size_t)f->nslot, &total)) return false;
+	g->mem = malloc(total);
+	if (!g->mem) return false;
+	g->head = g->mem;
+	g->queue = g->head + f->nins;
+	g->edge = (vex_edge *)(g->queue + f->nins);
+	g->slot = (uint8_t *)(g->edge + nedges);
+	memset(g->head, 0xff, heads);
+	memset(g->slot, 0, f->nslot);
+	memset(mark, 0, f->nins);
+	for (uint32_t i = f->nconst; i < f->nins; i++) {
+		vir_ins x = f->ins[i];
+		vir_oit it;
+		uint32_t *p, out;
+
+		if (vir_is_const_op(x.op)) continue;
+		vir_oit_init(&it, f, &x, false);
+		while ((p = vir_oit_next(&it))) {
+			uint32_t v = *p, pos = x.op == VO_BR ? (uint32_t)(p - &f->extra[x.c]) : it.pos;
+			int kind;
+
+			if (v >= f->nins) continue;
+			kind = exposure_use(f, &x, i, pos, &out);
+			if (kind == VEX_SINK) exposure_enqueue(mark, g->queue, &last, v);
+			else if (kind == VEX_FLOW) {
+				g->edge[at] = (vex_edge){ v, g->head[out] };
+				g->head[out] = at++;
+			}
+		}
+	}
+	while (first < last) {
+		uint32_t v = g->queue[first++];
+
+		for (uint32_t i = g->head[v]; i != UINT32_MAX; i = g->edge[i].next)
+			exposure_enqueue(mark, g->queue, &last, g->edge[i].input);
+	}
+	for (uint32_t i = 1; i < f->nconst; i++)
+		if (mark[i] && f->ins[i].op == VO_SLOTADDR && f->ins[i].a < f->nslot)
+			g->slot[f->ins[i].a] = 1;
+	return true;
 }
 
 /* ---------------- phase 1: per instruction ---------------- */
@@ -740,7 +780,16 @@ static void check_slots(vctx *v)
 {
 	vir_fn *f = v->f;
 	uint8_t *mark = (uint8_t *)vir_ctx_get()->aux;
+	vex_graph graph = {0};
+	bool have_slotaddr = false;
 
+	if ((f->fl & VF_EXPOSURE) && f->nslot)
+		for (uint32_t i = 1; i < f->nconst; i++)
+			if (f->ins[i].op == VO_SLOTADDR) { have_slotaddr = true; break; }
+	if (have_slotaddr && !exposure_build(f, mark, &graph)) {
+		vfail(v, "M1", VIR_NOBLK, VIR_NOBLK, "cannot analyze slot exposure: too many uses or out of memory");
+		return;
+	}
 	for (uint32_t s = 0; s < f->nslot; s++) {
 		const vir_slot *sl = &f->slot[s];
 
@@ -753,13 +802,14 @@ static void check_slots(vctx *v)
 			continue;
 		}
 		if (f->fl & VF_EXPOSURE) {
-			bool e = slot_exposed(f, s, mark), claim = (sl->fl & VS_EXPOSED) != 0;
+			bool e = have_slotaddr && graph.slot[s], claim = (sl->fl & VS_EXPOSED) != 0;
 
 			if (e != claim)
 				vfail(v, "M1", VIR_NOBLK, VIR_NOBLK, "slot $%u is %sexposed, the function says %sexposed", s,
 				      e ? "" : "not ", claim ? "" : "not ");
 		}
 	}
+	free(graph.mem);
 }
 
 /* N1: canonical form (2.4) */

@@ -168,6 +168,7 @@ bench/vlink-bad.py                  # corrupt objects/archives: vlink (ASan) fai
 bench/vlink-opts.py                 # vlink options vs ld.lld: errors and loaded image (<1 s)
 bench/vcc-pic.py                    # GOT and TLS relocations per -fno-pic/-fPIE/-fPIC vs clang (<1 s)
 bench/vir-test.py -j 6              # VIR: parser/printer round trip, verifier rules, canon, dominators (ccs/vcc/tests/vir, ~1 s)
+bench/vir-exposure.py               # VIR: generated long, cyclic and multi-slot exposure checks (<1 s)
 bench/vir-test.py --mutate 3000 --bin-dir build/ccs-asan   # random mutants of those units: virtest never crashes (~1 min)
 bench/vcc-ctests.py -j 6 --suite vcc # our own regression tests (ccs/vcc/tests/vcc), ~1 s
 bench/vcc-ctests.py -j 6 --cpu cortex-a53   # vcc's binaries on a CPU without LSE (atomics as LL/SC)

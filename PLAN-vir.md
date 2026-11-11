@@ -297,3 +297,43 @@ SPEC rättad till utkast 0.4 i egen commit (lista i PR:en).
 - **Återstår av V1:** tolken `virrun`, `virgen`, `fuzz-vir`, `--equiv` och
   mikrobenchmarkarna i SPEC 22.8.  Inga pass finns, så `PASSES:` godtar bara
   `canon`.
+
+### V1 verifier: säker och linjär slot-exponering
+
+Den tidigare analysen avbröt efter 1 000 helsvep och kunde då godkänna en
+felaktig `exposure`-deklaration. Ett giltigt dominatorordnat exempel med
+1 003 bakåtpekande blockargument lagrar en slotadress men godkändes utan
+`exposed`; fem länkar avvisades korrekt. Analysen går nu baklänges från
+exponerande användningar via `ptradd`, `select` och blockargument en gång
+för hela funktionen. Arbetet är linjärt i värden, operandanvändningar och
+slotar; en kontrollerad allokering håller temporära kanter och kö. Kan minnet
+eller indexen inte representeras misslyckas verifieringen, aldrig med ett
+obevistat godkännande. Funktioner utan `exposure` eller slotadresser bygger
+ingen sådan graf.
+
+56 genererade fall täcker långa exponerade och oexponerade kedjor, cykler,
+flera slotar och addender samt deterministiska grafer; den ursprungliga
+verifieraren misslyckar det långa regressionsfallet. Befintliga VIR-prov
+118/118 och de nya 56/56 passerar i unity, separatfilbygge och ASan/UBSan.
+Ytterligare 205 små grafer gav exakt samma verifierarresultat som basen.
+VIR-proven körs nu även av arm64- och ASan-premergejobben. Lokal full ASan-
+premerge passerar (en befintlig vccd-peer-kontroll saknar lösenordsfri sudo).
+
+Sju växelvisa `perf stat`-rundor för hela VIR-provkorpusen, inklusive Python-
+driver och 118 barnprocesser, gav +0,006 % user-instruktioner, +0,46 %
+user-cykler och +0,15 % task-clock; korta sampel på delad värd visar ingen
+säker allmän tidsförändring. På syntetiska oexponerade kedjor med 5, 64 och
+1 003 länkar minskade `virtest` user-instruktioner 1,6 %, 35,8 % och 90,4 %;
+med 5, 64 och 1 000 slotar minskade de 0,9 %, 28,3 % och 87,6 %. Dessa är
+hela verktygsprocesser och inte `-O2`-kompilering. Proveniens finns i
+`work/opt-profile/vir-exposure-backward/`. Ändringen länkas bara till virtest:
+32 av 34 gemensamma objekt är byteidentiska mot basen; `vir.o` ändras och
+`ppdriver.o` innehåller worktree-specifik include-sökväg. Åtta riktade
+standardutdata är identiska. `vbench.py check --quick` kunde inte slutföras
+här: workträdets `lex-files.txt` saknas.
+
+Separat tidigare fel på basen: en tom VIR-blockkropp ger UBSan i
+`parse.c:1839` (nollängds `memcpy` med nullkälla). Mutation seed 42 gav
+998/1000 utan sanitizerfel; båda träffarna har samma basfel. Minsta indata
+finns i `work/opt-pr-tmp/vir-empty-block-ubsan.vir`. Parserfelet ingår inte i
+exponeringsändringen; V1:s sanitizer-/fuzzgrind är därför fortsatt öppen.
