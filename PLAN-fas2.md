@@ -2485,3 +2485,33 @@ Bounded-flow efter stackintegration med signed/tail/u64 (`661d552`): unity,
 sanitiserade flow-/dead-result-kontrakt, 16 mål-/nivåprov med körning och
 x86-debug O0–O3 passerar. Tidigare hela sviter och Ir-mätningar ovan gäller
 sina exakta angivna versioner; integrationen är ingen ny kostnadsmätning.
+
+### Gemensam walker: en värdeläsning för skalär postfix (2026-11-11)
+
+Status: implementerat och lokalt verifierat i `opt/postfix-eval`, före
+integreringscommit. `wk_incdec` i `emit/walk/expr.c` läser ett ordinärt
+registerrepresenterat värde en gång, behåller det gamla värdet och gör en
+registerkopia i rätt registerklass före den destruktiva aritmetiken. Detta är
+en evalueringsrättning vid O0–O3, utan optimeringspass, SSA eller kostsam analys.
+Den gemensamma walkern används fortfarande bara av x86; arm64 och wasm behåller
+sina befintliga vägar och valideras av samma semantiska test.
+
+Avgränsning: `_Atomic` går oförändrat genom sin separata RMW/CAS-väg. Typer
+som `wk_mem` håller via adress, exempelvis x86 `__int128` och `long double`,
+behåller också sin befintliga snapshot-/läsningsväg; detta delsteg lovar inte en
+enda originalläsning för dem. Postfix-bitfält använder den nya registerkopian:
+två behållarläsningar återstår, en för fältvärdet och en för att bevara grannbitar,
+som i de undersökta clang/GCC-fallen. Prefix-bitfältens extra resultatläsning och
+fältbreddsnormalisering ändras inte här.
+
+Validering: `postfix_eval.c` och `vcc-opt-rules.py --rule postfix --run`
+kontrollerar exakt en ordinär skalär läsning och skrivning (eller en kombinerad
+RMW), gamla/nya värden, bortkastat och castat resultat, smala heltal, bool,
+FP/GPR-registertryck, fasta adressregister, pekarsteg, sidoeffekt i adressen,
+bitfältsgrannar och separata atomiska/adressbaserade kontroller. Unity och
+filvis bygge klarar samtliga 32 kombinationer av fyra mål och O0–O3. Den tidigare
+oförändrade parent69-postfixvägen avvisas av läsningskontrollen: två läsningar i
+stället för en. x86:s egna C-svit klarar 228/228, med sex befintliga överhoppade.
+Loggar: `build/linux/postfix-evidence/`. Ingen ytterligare bred testkörning behövs
+för detta delsteg. En liten matchad Ir-jämförelse mot exakt f7327bd/v3 görs efter
+checkpoint; inga tids- eller hastighetsanspråk ännu.
