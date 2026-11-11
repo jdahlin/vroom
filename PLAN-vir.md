@@ -3,7 +3,8 @@
 **Mål:** en liten, snabb IR i SSA-form för det som inte går utan SSA: riktig
 registerallokering, global värdenumrering och minnesvidarebefordran över block.
 Den ska användas av x86-64 och arm64 (wasm senare), kosta ingenting på `-O0`
-och inte upprepa LLVM IR:s kända misstag.  Underlaget finns i
+och inte upprepa LLVM IR:s kända misstag.  Formatet och verktygen är specificerade i
+`SPEC-vir.md`; underlaget finns i
 `RESEARCH-vir.md` (LLVM IR:s problem med källor, och vad B3, Cranelift, Zig,
 Go, Turboshaft, LuaJIT, QBE och TPDE valde i stället).
 
@@ -227,6 +228,15 @@ fixpunkter utan budget (samma regel som `emit/flow/`).
 ## Status
 
 ### V0 (2026-11-11): klar för granskning
+
+- `SPEC-vir.md` (utkast 0.1): hela formatet (16-byte-instruktion, block,
+  stackplatser, `extra`), typer, minnesmodell, alla 1.0-operationer med
+  effekter, ABI-signaturer, textform med grammatik, verifierarens 28 regler,
+  tolken, passens kontrakt, registerallokeringens gränssnitt, verktyg, tester
+  och gränser.  Den listar sju ändringar som krävs utanför `vir/` (X1–X7) och
+  sju öppna frågor (O1–O7).  Planens avsnitt Design ovan är en sammanfattning;
+  där de skiljer sig gäller specifikationen (t.ex. bara `br` bär
+  blockargument, och `__builtin_constant_p` avgörs av vandraren).
 
 - `RESEARCH-vir.md`: 29 problem hos LLVM IR i tre grupper (semantik, struktur
   och kompileringstid, C-gränssnittet) med källor, och regeln VIR tar av
