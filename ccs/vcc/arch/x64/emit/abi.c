@@ -77,7 +77,13 @@ static bool x64_cls(cc *c, qty t, uint64_t off, int cls[2])
 		}
 		return false;	/* (a 32-byte vector alone: see x64_classify) */
 	}
-	if (k == TY_LDOUBLE || k == TY_FLOAT128 || k == TY_INT128 || k == TY_UINT128)
+	if (k == TY_FLOAT128) {
+		if (off % 16 || cls[off / 8] != XC_NONE)
+			return false;
+		cls[off / 8] = XC_SSE, cls[off / 8 + 1] = XC_SSEUP;
+		return true;
+	}
+	if (k == TY_LDOUBLE || k == TY_INT128 || k == TY_UINT128)
 		return k == TY_INT128 || k == TY_UINT128 ? (cls[off / 8] = x64_merge(cls[off / 8], XC_INT),
 							    cls[off / 8 + 1] = x64_merge(cls[off / 8 + 1], XC_INT), true) : false;
 	if (tsize(c, t) == 0)
@@ -98,8 +104,10 @@ VPRIV void x64_classify(ecx *e, qty t, wkarg *a)
 	if (!is_record(c, t) && !is_array(c, t) && !is_vec(c, t)) {
 		a->n = size > 8 ? 2 : 1;
 		a->cls[0] = a->cls[1] = is_flt(c, t) ? WA_SSE : WA_INT;
-		if (KIND(c, t) == TY_LDOUBLE || KIND(c, t) == TY_FLOAT128)
-			a->mem = true, a->n = 0, a->x87 = KIND(c, t) == TY_LDOUBLE;	/* passed in memory, returned in st(0) */
+		if (KIND(c, t) == TY_LDOUBLE)
+			a->mem = true, a->n = 0, a->x87 = true;	/* passed in memory, returned in st(0) */
+		if (KIND(c, t) == TY_FLOAT128)
+			a->n = 1, a->cls[0] = WA_SSE, a->up = true;	/* SSE + SSEUP: one xmm register */
 		return;
 	}
 	if (size == 0)

@@ -6,6 +6,7 @@
 VPRIV bool x64_ldmem(void) { return true; }
 
 static bool x64_isld(cc *c, qty t) { return KIND(c, t) == TY_LDOUBLE; }
+static bool x64_isq(cc *c, qty t) { return KIND(c, t) == TY_FLOAT128; }
 static int x64_fsz(cc *c, qty t) { return KIND(c, t) == TY_FLOAT ? 4 : 8; }
 static val x64_vr(int r) { return (val){ .k = V_REG, .r = (uint8_t)r }; }
 
@@ -47,6 +48,11 @@ static void x64_jcc(ecx *e, int cc, uint32_t l)
 	i->label = l;
 }
 
+static val x64_qbin(ecx *e, int k, val a, val b);
+static val x64_qcmp(ecx *e, int op, val a, val b);
+static val x64_qcvt(ecx *e, val v, qty from, qty to);
+static val x64_qzero(ecx *e);
+
 VPRIV val x64_fconst(ecx *e, uint64_t bits, int size)
 {
 	int r = x64_ftreg(e);
@@ -61,6 +67,8 @@ VPRIV val x64_fbin(ecx *e, int op, qty t, val a, val b)
 	cc *c = e->c;
 	int k = op == T_PLUS ? 0 : op == T_MINUS ? 1 : op == T_STAR ? 2 : 3;
 
+	if (x64_isq(c, t))
+		return x64_qbin(e, k, a, b);
 	if (x64_isld(c, t)) {
 		static const int xf[4] = { XF_ADD, XF_SUB, XF_MUL, XF_DIV };
 		int ra = x64_toreg(e, &a, 8), rb = x64_toreg(e, &b, 8), rd = x64_ldnew(e);
@@ -82,6 +90,23 @@ VPRIV val x64_fbin(ecx *e, int op, qty t, val a, val b)
 VPRIV val x64_fneg(ecx *e, qty t, val a)
 {
 	cc *c = e->c;
+
+	if (x64_isq(c, t)) {
+		/* the sign bit flipped in a copy */
+		int ra = x64_toreg(e, &a, 8), rd = x64_ldnew(e);
+
+		x64_copy(e, rd, ra, 16);
+		x64_tfree(e, ra);
+		{
+			lval hi = x64_at(rd);
+
+			hi.off = 15;
+			x64_mem(e, X_LD, 1, R11, &hi, false);
+			x64_op3(e, X_XORI, 4, R11, R11, XNOREG)->imm = 0x80;
+			x64_mem(e, X_ST, 1, R11, &hi, false);
+		}
+		return x64_vr(rd);
+	}
 
 	if (x64_isld(c, t)) {
 		int ra = x64_toreg(e, &a, 8), rd = x64_ldnew(e);
@@ -107,6 +132,8 @@ VPRIV val x64_fcmp(ecx *e, int op, qty t, val a, val b)
 	int cc = op == T_LESS || op == T_GREATER ? CC_A : CC_AE;
 	int rd;
 
+	if (x64_isq(c, t))
+		return x64_qcmp(e, op, a, b);
 	if (x64_isld(c, t)) {
 		int ra = x64_toreg(e, &a, 8), rb = x64_toreg(e, &b, 8);
 		lval ma = x64_at(ra), mb = x64_at(rb);
@@ -132,6 +159,216 @@ VPRIV val x64_fcmp(ecx *e, int op, qty t, val a, val b)
 	else
 		x64_op3(e, X_SETCC, 4, rd, XNOREG, XNOREG)->cond = (uint8_t)cc;
 	return x64_vr(rd);
+}
+
+
+/* ---------------- __float128: libgcc calls ---------------- */
+
+/*
+ * An argument or result of a soft-float call: Q a __float128 object (its
+ * address in r; one xmm register), X an x87 long double object (address;
+ * 16 bytes on the stack in, st(0) out), D/F a double/float in xmm r, I an
+ * integer in r (64 bits), W an __int128 object (address; rdi:rsi in,
+ * rax:rdx out).
+ */
+enum { TQ, TX, TD, TF, TI, TW };
+typedef struct { int k, r; } tfarg;
+
+static val x64_tfcall(ecx *e, int fn, const tfarg *a, int n, int rk)
+{
+	xst *X = e->x64;
+	uint32_t saved, fsaved;
+	int nx = 0, ng = 0, pad, stk = 0, res;
+	lval out = { 0 };
+	rec *i;
+
+	for (int k = 0; k < n; k++)
+		x64_tfree(e, a[k].r);	/* (the values stay in their registers until loaded below) */
+	saved = X->live & X_TEMPS, fsaved = X->live & X_FTEMPS;
+	if (rk == TQ || rk == TX || rk == TW)
+		out = x64_slot(e, 16);
+	e->calls = true;
+	for (int q = 0; q < 16; q++)
+		if (saved & (1u << q)) {
+			x64_op3(e, X_PUSH, 8, XNOREG, q, XNOREG);
+			X->pushes++;
+		}
+	for (int q = XMM8; q < XMM15; q++)
+		if (fsaved & (1u << q)) {
+			lval d = { .k = L_REG, .r = RSP };
+
+			x64_put(e, X_ADJSP)->imm = -8;
+			x64_mem(e, X_ST, 8, q, &d, false);
+			X->pushes++;
+		}
+	for (int k = 0; k < n; k++)
+		stk += a[k].k == TX ? 16 : 0;
+	pad = X->pushes & 1 ? 8 : 0;
+	if (pad + stk)
+		x64_put(e, X_ADJSP)->imm = -(pad + stk);
+	for (int k = 0, so = 0; k < n; k++) {
+		lval m = x64_at(a[k].r);
+
+		switch (a[k].k) {
+		case TQ:
+			x64_mem(e, X_LD, 16, XMM0 + nx++, &m, false);
+			break;
+		case TX:
+			for (int w = 0; w < 2; w++) {
+				lval s = m, d = { .k = L_REG, .r = RSP, .off = so + 8 * w };
+
+				s.off = 8 * w;
+				x64_mem(e, X_LD, 8, R11, &s, false);
+				x64_mem(e, X_ST, 8, R11, &d, false);
+			}
+			so += 16;
+			break;
+		case TD: case TF:
+			x64_op3(e, X_MOV, 8, XMM0 + nx++, a[k].r, XNOREG);
+			break;
+		case TI:
+			x64_mov(e, x64_argreg(ng++), a[k].r);
+			break;
+		case TW: {
+			lval hi = m;
+
+			hi.off = 8;
+			x64_mem(e, X_LD, 8, x64_argreg(ng + 1), &hi, false);
+			x64_mem(e, X_LD, 8, x64_argreg(ng), &m, false);
+			ng += 2;
+			break;
+		}
+		}
+	}
+	i = x64_put(e, X_CALL);
+	i->ref = FIXED(fn);
+	switch (rk) {
+	case TQ:
+		x64_mem(e, X_ST, 16, XMM0, &out, false);
+		break;
+	case TX:
+		x64_x87st(e, &out);
+		break;
+	case TW: {
+		lval hi = out;
+
+		hi.off += 8;
+		x64_mem(e, X_ST, 8, RAX, &out, false);
+		x64_mem(e, X_ST, 8, RDX, &hi, false);
+		break;
+	}
+	case TD: case TF:
+		x64_op3(e, X_MOV, 8, XMM15, XMM0, XNOREG);
+		break;
+	default:
+		x64_mov(e, R11, RAX);
+		break;
+	}
+	if (pad + stk)
+		x64_put(e, X_ADJSP)->imm = pad + stk;
+	for (int q = XMM15 - 1; q >= XMM8; q--)
+		if (fsaved & (1u << q)) {
+			lval s2 = { .k = L_REG, .r = RSP };
+
+			x64_mem(e, X_LD, 8, q, &s2, false);
+			x64_put(e, X_ADJSP)->imm = 8;
+			X->pushes--;
+		}
+	for (int q = 15; q >= 0; q--)
+		if (saved & (1u << q)) {
+			x64_op3(e, X_POP, 8, q, XNOREG, XNOREG);
+			X->pushes--;
+		}
+	if (rk == TQ || rk == TX || rk == TW)
+		return x64_vr(x64_laddr(e, &out));
+	if (rk == TD || rk == TF) {
+		res = x64_ftreg(e);
+		x64_op3(e, X_MOV, 8, res, XMM15, XNOREG);
+		return x64_vr(res);
+	}
+	res = x64_treg(e);
+	x64_mov(e, res, R11);
+	return x64_vr(res);
+}
+
+/* a op b on __float128 objects */
+static val x64_qbin(ecx *e, int k, val a, val b)
+{
+	static const int fn[4] = { FN_ADDTF3, FN_SUBTF3, FN_MULTF3, FN_DIVTF3 };
+	tfarg ar[2] = { { TQ, x64_toreg(e, &a, 8) }, { TQ, x64_toreg(e, &b, 8) } };
+
+	return x64_tfcall(e, fn[k], ar, 2, TQ);
+}
+
+/* a op b on __float128 objects as 0 or 1 (false when unordered, but for !=) */
+static val x64_qcmp(ecx *e, int op, val a, val b)
+{
+	int fn = op == T_EQUALEQUAL ? FN_EQTF2 : op == T_EXCLAIMEQ ? FN_NETF2 : op == T_LESS ? FN_LTTF2 :
+		 op == T_LESSEQ ? FN_LETF2 : op == T_GREATER ? FN_GTTF2 : FN_GETF2;
+	int cc = op == T_EQUALEQUAL ? CC_E : op == T_EXCLAIMEQ ? CC_NE : op == T_LESS ? CC_L :
+		 op == T_LESSEQ ? CC_LE : op == T_GREATER ? CC_G : CC_GE;
+	tfarg ar[2] = { { TQ, x64_toreg(e, &a, 8) }, { TQ, x64_toreg(e, &b, 8) } };
+	val r = x64_tfcall(e, fn, ar, 2, TI);
+
+	x64_op3(e, X_TEST, 4, XNOREG, r.r, XNOREG);
+	x64_op3(e, X_SETCC, 4, r.r, XNOREG, XNOREG)->cond = (uint8_t)cc;
+	return r;
+}
+
+/* a new __float128 zero */
+static val x64_qzero(ecx *e)
+{
+	lval l = x64_slot(e, 16);
+	int r = x64_laddr(e, &l);
+
+	x64_zero(e, r, 16);
+	return x64_vr(r);
+}
+
+/* conversions with a __float128 side (to: not _Bool) */
+static val x64_qcvt(ecx *e, val v, qty from, qty to)
+{
+	cc *c = e->c;
+	bool fq = x64_isq(c, from);
+	qty o = fq ? to : from;	/* the other side */
+	int os = wk_size(c, o), k = KIND(c, o);
+	bool sg = wk_signed(c, o);
+
+	if (fq && x64_isq(c, to))
+		return v;
+	if (is_flt(c, o)) {
+		tfarg a = { k == TY_LDOUBLE ? TX : fq ? TQ : k == TY_FLOAT ? TF : TD,
+			    v.k == V_REG ? v.r : x64_toreg(e, &v, 8) };
+
+		if (fq)
+			return x64_tfcall(e, k == TY_LDOUBLE ? FN_TRUNCTFXF2 : k == TY_FLOAT ? FN_TRUNCTFSF2 : FN_TRUNCTFDF2,
+					  &(tfarg){ TQ, a.r }, 1, k == TY_LDOUBLE ? TX : k == TY_FLOAT ? TF : TD);
+		return x64_tfcall(e, k == TY_LDOUBLE ? FN_EXTENDXFTF2 : k == TY_FLOAT ? FN_EXTENDSFTF2 : FN_EXTENDDFTF2,
+				  &a, 1, TQ);
+	}
+	if (k == TY_INT128 || k == TY_UINT128) {
+		tfarg a = { fq ? TQ : TW, x64_toreg(e, &v, 8) };
+
+		return x64_tfcall(e, fq ? (sg ? FN_FIXTFTI : FN_FIXUNSTFTI) : (sg ? FN_FLOATTITF : FN_FLOATUNTITF), &a, 1, fq ? TW : TQ);
+	}
+	if (fq) {
+		/* to an integer: through 32 or 64 bits, unsigned 32 by the 64-bit fix */
+		tfarg a = { TQ, x64_toreg(e, &v, 8) };
+		int fn = os == 8 ? (sg ? FN_FIXTFDI : FN_FIXUNSTFDI) : os == 4 && !sg ? FN_FIXTFDI : FN_FIXTFSI;
+		val r = x64_tfcall(e, fn, &a, 1, TI);
+
+		if (os < 8)
+			x64_ext(e, r.r, os, sg);
+		return r;
+	}
+	{
+		int r = x64_toreg(e, &v, 8);
+		tfarg a = { TI, r };
+
+		if (os < 8)
+			x64_ext(e, r, os, sg);
+		return x64_tfcall(e, os < 8 ? FN_FLOATDITF : sg ? FN_FLOATDITF : FN_FLOATUNDITF, &a, 1, TQ);
+	}
 }
 
 /* ---------------- conversions ---------------- */
@@ -203,6 +440,10 @@ VPRIV val x64_cvt(ecx *e, val v, qty from, qty to)
 	bool ff = is_flt(c, from), tf = is_flt(c, to), fl = x64_isld(c, from), tl = x64_isld(c, to);
 	int fs = wk_size(c, from), ts = wk_size(c, to);
 
+	if (x64_isq(c, from) && KIND(c, to) == TY_BOOL)
+		return x64_qcmp(e, T_EXCLAIMEQ, v, x64_qzero(e));
+	if (x64_isq(c, from) || x64_isq(c, to))
+		return x64_qcvt(e, v, from, to);
 	if (KIND(c, to) == TY_BOOL) {
 		int rd;
 

@@ -382,7 +382,7 @@ enum { FN_MEMCPY, FN_MEMSET, FN_MEMMOVE, FN_UDIVTI3, FN_DIVTI3, FN_UMODTI3, FN_M
        FN_ADDTF3, FN_SUBTF3, FN_MULTF3, FN_DIVTF3, FN_EQTF2, FN_NETF2, FN_LTTF2, FN_LETF2, FN_GTTF2, FN_GETF2,
        FN_EXTENDDFTF2, FN_EXTENDSFTF2, FN_TRUNCTFDF2, FN_TRUNCTFSF2, FN_FLOATSITF, FN_FLOATDITF, FN_FLOATUNSITF,
        FN_FLOATUNDITF, FN_FLOATTITF, FN_FLOATUNTITF, FN_FIXTFSI, FN_FIXTFDI, FN_FIXUNSTFSI, FN_FIXUNSTFDI,
-       FN_FIXTFTI, FN_FIXUNSTFTI };
+       FN_FIXTFTI, FN_FIXUNSTFTI, FN_EXTENDXFTF2, FN_TRUNCTFXF2 };
 #define FIXED(k) REF(RK_NAME, 0x8000000u + (k))
 
 /* ---------------- object backend: records -> machine code ---------------- */
@@ -733,7 +733,7 @@ static inline qty prim(int k) { return QT(k, 0); }
 static inline bool k_int(int k) { return (k >= TY_BOOL && k <= TY_UINT128) || k == TY_ENUM; }
 static inline bool is_integer(cc *c, qty t) { return k_int(KIND(c, t)); }
 static inline bool is_ptr(cc *c, qty t) { return KIND(c, t) == TY_PTR; }
-static inline bool is_flt(cc *c, qty t) { int k = KIND(c, t); return k >= TY_FLOAT16 && k <= TY_LDOUBLE; }
+static inline bool is_flt(cc *c, qty t) { int k = KIND(c, t); return k >= TY_FLOAT16 && k <= TY_FLOAT128; }	/* (__float128: x86-64 only) */
 static inline bool is_record(cc *c, qty t) { int k = KIND(c, t); return k == TY_STRUCT || k == TY_UNION; }
 static inline bool is_array(cc *c, qty t) { return KIND(c, t) == TY_ARRAY; }
 static inline bool is_func(cc *c, qty t) { return KIND(c, t) == TY_FUNC; }
