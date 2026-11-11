@@ -1239,6 +1239,54 @@ Ingen generell speedup eller godkänd 1 %-grind hävdas.
 Direktbindningen är levererad. Bättre urval, kopie-/utvidgningsstädning,
 minnesoptimeringar och full O2-täckning återstår; ingen SSA införd.
 
+### Status OPT4 (2026-11-11): delad framåtriktad kopiestädning
+
+`emit/rec/copies.c` innehåller nu den gemensamma framåtsökningen från
+arm64:s kopiepass. Postlayout, effekter, livslängd och tillåtna operander
+kommer från målet; omskrivningen förhandskontrolleras innan något ändras.
+Högst 256 användarposter sparas i trådlokal arbetsyta. Ingen ny AST-vandring
+eller SSA byggs. Arm64 återanvänder befintliga block-/livslängdsdata och
+debugmappning. X86:s adapter i `arch/x64/emit/copies.c` gör ett effektpass,
+lokal bakåtlivslängd och kompaktering med återanvänd trådlokal arbetsyta.
+Den aktiveras från O1 för 64-bitars GPR-kopior till temporärer, inom ett
+rakt block och med bevisad lokal överskrivning. Anrop, asm, atomics,
+blockgränser, implicita/tvåadressoperander och partiella skrivningar
+stoppar osäkra omskrivningar. 32-bitarskopior och XMM hanteras inte ännu.
+Wasm har inga sådana maskinposter; dess kodgenerering ändras inte här.
+
+Unity och fil-för-fil bygger. `bench/vcc-rec-copies.py` passerar normalt
+och med ASan/UBSan, inklusive negativa gräns-/bredd-/registerfall och
+transaktionell gräns vid 256 omskrivningar. `--rule copies --run` passerar
+O0–O3 på x86, arm64, wasm32 och wasm64 i båda byggena (32 kombinationer).
+Basen avvisas av det nya x86-kodkravet för `cp_stores` vid O1. C-fallen
+täcker division/skift, smala värden, källöverskrivning, anrop, loop/kanter,
+overflow-flaggor, atomics och native asm. Alla tidigare kompilerbara
+ögonblicksbilder är byte-identiska: arm64 137/137 med `-g` och asynkrona
+unwind-tabeller, wasm32 116/116 och wasm64 119/119; samma källhashar.
+
+Basens vpp SHA256 är
+`08fa144ebfd7166f9e5b499b6f209413a6ba131cf9374064b5d5c0816744a20c`;
+kandidat `e8b8d472eb989f2dfe254317b6c81c916f12c1dca2e631584d3e0cd479b7f77b`.
+Artefakter och reproducerande skript: `build/linux/opt-copies-baseline/`.
+Kompilator-CPU, tre alternerade repetitioner med fyra 3000-funktions-TU:er,
+O1 -S, -j 1, warm=1, cacher av (barnets user+sys, inklusive uppvärmning):
+
+| Mål | Loopkorpus ms, bas→kandidat | Oförändrat kontrollkorpus ms |
+| --- | --- | --- |
+| x86-64 | 76,871 → 69,113 | 26,334 → 27,432 |
+| arm64 | 90,907 → 90,196 | 32,528 → 33,213 |
+| wasm32 | 45,342 → 45,830 | 23,019 → 27,058 |
+| wasm64 | 44,886 → 45,779 | 22,625 → 23,036 |
+
+Ingen konsekvent stor x86-regression syns, men även oförändrad wasm-kod
+varierar 17,5 % i kontrollen. Delad värd och saknade hårdvaruräknare gör
+att detta inte verifierar 1 %-grinden eller en kompilatorvinst. Det korta
+unsigned summaprovet ger 3,785→3,136 ms CPU (clang O2 0,627; GCC O2
+1,776), identisk checksumma 4096177840. Basens och kandidatens assembler
+och objekt är dock byte-identiska, så skillnaden är mätbrus och ingen
+programspeedup från ändringen. Bredare kopiestädning, utvidgningsfakta,
+minnesoptimeringar, full O2-täckning och G5/G7 återstår.
+
 ## Risker
 - **GNU C-ytan och inline asm** är det stora jobbet. Uppskattat: lexer + pp ~2 kloc,
   parser + sema ~10–15 kloc, emitter ~5 kloc, assembler ~4 kloc, länkare ~3 kloc.

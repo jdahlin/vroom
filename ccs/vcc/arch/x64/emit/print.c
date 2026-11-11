@@ -22,6 +22,8 @@ static bool x64_commutes(int op)
  */
 VPRIV void x64_twoaddr(ecx *e)
 {
+	if (e->E->o->opt >= 1 && !e->E->noopt)
+		x64_copies(e);
 	xst *X = e->x64;
 	uint32_t n = 0;
 	rec *o = X->tw;

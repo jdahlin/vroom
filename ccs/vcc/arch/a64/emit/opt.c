@@ -357,46 +357,17 @@ static bool is_copy(const ins *i)
 	       (COPYOK & RB(i->rd)) && (COPYOK & RB(i->rn));
 }
 
-/* mov t, v at k: uses of t read v instead */
-static bool forward(ecx *e, uint32_t k)
+/* Operand policy for the shared transaction. Asm registers live in its text,
+ * while tied read/write operands cannot be redirected independently.
+ */
+static bool a64_copy_rewrite(void *ctx, uint32_t j, uint8_t t, uint8_t v, bool apply)
 {
-	ins *in = e->in;
-	int t = in[k].rd, v = in[k].rn;
-	uint32_t b = W.blk[k], j, nrw = 0;
-	static _Thread_local uint32_t rw[256];
+	ecx *e = ctx;
+	unsigned ro = W.ro[j];
 
-	if (!(TEMPS & RB(t)))
-		return false;
-	for (j = k + 1; j <= W.be[b]; j++) {
-		const ins *i = &in[j];
-		unsigned ro;
-		rmask r, w;
-
-		if (i->op == DELETED)
-			continue;
-		ro = W.ro[j];
-		if (ro & OP_ALL)
-			return false;
-		r = W.rr[j], w = W.ww[j];
-		if (r & RB(t)) {
-			if ((ro & OP_ASM) || !can_rewrite(i, ro, t) || nrw == 256)
-				return false;	/* (asm names its registers in its text) */
-			rw[nrw++] = j;
-		}
-		if ((w & RB(t)) || !(W.la[j] & RB(t)))
-			break;	/* t's value dies here */
-		if (w & RB(v))
-			return false;	/* v changes while t still holds the old value */
-	}
-	if (j > W.be[b])
-		return false;
-	for (uint32_t q = 0; q < nrw; q++) {
-		rewrite(&in[rw[q]], W.ro[rw[q]], t, v);
-		W.rr[rw[q]] = (W.rr[rw[q]] & ~RB(t)) | RB(v);
-	}
-	for (uint32_t q = k; nrw && q < rw[nrw - 1]; q++)
-		W.la[q] |= RB(v);	/* v is read further on now */
-	in[k].op = DELETED;
+	if (!apply)
+		return !(ro & OP_ASM) && can_rewrite(&e->in[j], ro, t);
+	rewrite(&e->in[j], ro, t, v);
 	return true;
 }
 
@@ -1200,6 +1171,11 @@ VPRIV uint64_t opt_regs(ecx *e, unsigned *fl)
 static void copies(ecx *e)
 {
 	ins *in = e->in;
+	const em_rec_copy_scan scan = {
+		.records = in, .stride = sizeof(ins), .op_offset = offsetof(ins, op), .deleted_op = DELETED,
+		.flags = W.ro, .flags_stride = sizeof(*W.ro), .opaque_mask = OP_ALL,
+		.read = W.rr, .write = W.ww, .live = W.la, .rewrite = a64_copy_rewrite, .ctx = e,
+	};
 
 	for (uint32_t k = 0; k < e->nin; k++) {
 		if (in[k].op == I_MOV && in[k].sz == 1 && in[k].rd == in[k].rn && in[k].rd < 31) {
@@ -1209,8 +1185,8 @@ static void copies(ecx *e)
 		if (is_copy(&in[k])) {
 			if (!(W.la[k] & RB(in[k].rd)) && in[k].rd != 29 && in[k].rd != 30)
 				in[k].op = DELETED;	/* dead */
-			else
-				forward(e, k);
+			else if (TEMPS & RB(in[k].rd))
+				em_rec_copy_forward(&scan, k, W.be[W.blk[k]], in[k].rd, in[k].rn);
 		}
 	}
 	for (uint32_t k = 0; k < e->nin; k++)
