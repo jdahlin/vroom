@@ -2684,3 +2684,12 @@ i `work/mulconst-integration-{contracts,policy,runtime}.log`.
 Ingen historisk kostnadsprofil har upprepats: talen ovan gäller fortfarande
 exakt 69c1bd7 till f92b67b, inte denna integrationsförälder. Integrations-CI
 återstår; G5/G7 och hela O2 är fortsatt öppna.
+
+Postfix-integrering efter multiplikationsföräldern: e63bf47 staplar rättningen
+på PR71/f295999. Aktuellt unity-bygge är grönt. Samtliga 16 postfix- och 16
+konstantmultiplikationsfall (fyra mål, O0–O3) klarar kodgenereringskontroller och
+körning; multiplikationsrecept med mutationskontroll och registereffekter klarar
+ASan/UBSan. `build/linux/postfix-evidence/integration-*.log` innehåller resultaten.
+Den tidigare breda sviten och matchade Ir-proven har inte körts om; inga
+integreringsfel motiverade det. Rättningen är fortfarande avgränsad till
+registerrepresenterad postfix och ligger kvar ovanpå multiplikationsföräldern.
