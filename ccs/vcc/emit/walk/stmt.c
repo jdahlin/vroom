@@ -356,6 +356,18 @@ static void wk_decl(ecx *e, const node *x)
 		wk_vla_decl(e, s, x->b != 0);
 		return;
 	}
+	{
+		unsigned recipe = em_unused_init(e, x, e->wk->inl ? e->wk->inl->fn : e->wk->fsym, 64);
+
+		if (recipe != EM_UNUSED_KEEP) {
+			if (recipe == EM_UNUSED_EVAL) {
+				val v = wk_gen(e, x->b);
+
+				wk_free(e, &v);
+			}
+			return;
+		}
+	}
 	e->wk->kgen[s] = 0;
 	if (e->E->o->opt && x->b && !side_effects(c, x->b) && !sym_attrs(c, s)->cleanup) {
 		/* A side-effect-free constant initializer for a local never written. */

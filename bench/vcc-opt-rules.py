@@ -681,6 +681,70 @@ def check_mulconst(assembly, arch):
         raise RuntimeError(f'mc_volatile9: lost volatile global read\n{text}')
 
 
+def check_unusedinit(assembly, arch, optimized=True):
+    wasm = arch.startswith('wasm')
+    multiply = r'\b(?:imul[lq]?|mul|madd|i(?:32|64)\.mul)\b'
+    positives = ['ui_pure', 'ui_unsigned', 'ui_conditional', 'ui_local_read']
+    if optimized:
+        for name in positives:
+            text = body(assembly, name, wasm)
+            if re.search(multiply, text):
+                raise RuntimeError(f'{name}: retained unused pure integer initializer\n{text}')
+    elif arch != 'aarch64':
+        text = body(assembly, 'ui_pure', wasm)
+        if not re.search(multiply, text):
+            raise RuntimeError(f'ui_pure: unexpectedly optimized disabled initializer\n{text}')
+    for name in ['ui_call', 'ui_comma', 'ui_short_effect', 'ui_braced', 'ui_vla', 'ui_cleanup']:
+        text = body(assembly, name, wasm)
+        if len(re.findall(r'\b(?:callq?|bl)\s+ui_touch\b', text)) != 1:
+            raise RuntimeError(f'{name}: expected exactly one retained effect call\n{text}')
+    text = body(assembly, 'ui_cleanup', wasm)
+    if not re.search(r'\b(?:callq?|bl)\s+ui_clean\b', text):
+        raise RuntimeError(f'ui_cleanup: lost cleanup call\n{text}')
+    text = body(assembly, 'ui_volatile_read', wasm)
+    read = r'\bi32\.load\b' if wasm else r'\bldr(?:sw)?\s' if arch == 'aarch64' else r'\bmov(?:slq|[lq])?\s+[^\n,]*\([^)]*\)[^\n,]*,\s*%'
+    if 'ui_input' not in text or not re.search(read, text):
+        raise RuntimeError(f'ui_volatile_read: lost volatile initializer read\n{text}')
+    text = body(assembly, 'ui_load', wasm)
+    if not re.search(read, text):
+        raise RuntimeError(f'ui_load: lost initializer memory read\n{text}')
+    # Existing arm64 record optimization already removes an unused integer
+    # divide. Require retention only where the baseline actually retains it.
+    if arch != 'aarch64':
+        text = body(assembly, 'ui_div', wasm)
+        if not re.search(r'\b(?:idiv[lq]?|i32\.div_s)\b', text):
+            raise RuntimeError(f'ui_div: lost potentially trapping division\n{text}')
+        for name in ['ui_used', 'ui_noopt', 'ui_atomic_destination', 'ui_volatile_destination']:
+            text = body(assembly, name, wasm)
+            if not re.search(multiply, text):
+                raise RuntimeError(f'{name}: excluded initializer was omitted\n{text}')
+        if not wasm:
+            text = body(assembly, 'ui_fixed', False)
+            if not re.search(multiply, text):
+                raise RuntimeError(f'ui_fixed: lost asm-register initializer\n{text}')
+    text = body(assembly, 'ui_float_conversion', wasm)
+    if arch == 'aarch64':
+        # The a64 printer emits FP instructions as .inst. Ignore register
+        # fields, using the opcode from arch/a64/as/enc.c's fdiv entry.
+        words = [int(word, 16) for word in re.findall(r'\.inst\s+0x([0-9a-fA-F]+)', text)]
+        fp_divide = any(word & 0xffe0fc00 == 0x1e601800 for word in words)
+        conversion = any(word & 0xfffffc00 == 0x1e780000 for word in words)
+    else:
+        fp_divide = re.search(r'\b(?:divsd|f64\.div)\b', text)
+        conversion = re.search(r'\b(?:cvttsd2si\w*|i32\.trunc(?:_sat)?_f64_s)\b', text)
+    if not fp_divide or not conversion:
+        raise RuntimeError(f'ui_float_conversion: lost internal FP divide/conversion\n{text}')
+    if optimized:
+        text = body(assembly, 'ui_call', wasm)
+        after_call = re.split(r'\b(?:callq?|bl)\s+ui_touch\b', text, maxsplit=1)[1]
+        if wasm:
+            if not re.match(r'\s*drop\b', after_call):
+                raise RuntimeError(f'ui_call: initializer result retained in destination local\n{text}')
+        elif arch == 'x86_64':
+            if re.search(r'\bmov\w*\s+%[^\n,]+,\s*-?[0-9]+\(%rbp\)', after_call):
+                raise RuntimeError(f'ui_call: initializer result retained in frame destination\n{text}')
+
+
 def x64_start(check_preserved):
     if not check_preserved:
         return 'call main\nmov %eax, %edi\nmov $60, %eax\nsyscall\n'
@@ -749,7 +813,7 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument('--vpp', default=str(Path(BUILD) / 'vpp'))
     ap.add_argument('--target', default='x86_64-linux-gnu')
-    ap.add_argument('--rule', choices=['pow2', 'signedpow2', 'identities', 'fallthrough', 'loopback', 'unreachable', 'locals', 'localjmp', 'copies', 'extensions', 'switches', 'tails', 'udivconst', 'udivconst64', 'sdivconst', 'deadresults', 'mulconst', 'postfix', 'all'], default='all')
+    ap.add_argument('--rule', choices=['pow2', 'signedpow2', 'identities', 'fallthrough', 'loopback', 'unreachable', 'locals', 'localjmp', 'copies', 'extensions', 'switches', 'tails', 'udivconst', 'udivconst64', 'sdivconst', 'deadresults', 'mulconst', 'postfix', 'unusedinit', 'all'], default='all')
     ap.add_argument('--run', action='store_true', help='also execute literal-answer correctness checks')
     ap.add_argument('--cfi', action='store_true', help='also check unwind state with tail calls')
     ap.add_argument('--sibling-calls', choices=['default', 'on', 'off'], default='default',
@@ -793,7 +857,8 @@ def main():
              'sdivconst': ('signed_divconst.c', check_sdivconst),
              'deadresults': ('dead_results.c', check_deadresults),
              'mulconst': ('multiply_constants.c', check_mulconst),
-             'postfix': ('postfix_eval.c', check_postfix)}
+             'postfix': ('postfix_eval.c', check_postfix),
+             'unusedinit': ('unused_scalar_init.c', check_unusedinit)}
     selected = rules if args.rule == 'all' else {args.rule: rules[args.rule]}
     with tempfile.TemporaryDirectory(prefix='vcc-opt-rules-') as tmp:
         directory = Path(tmp)
@@ -814,7 +879,7 @@ def main():
                            arch.startswith('wasm') if rule == 'loopback' else True)
                 checked = checked and check is not None and (rule not in ['switches', 'udivconst', 'udivconst64', 'mulconst'] or level >= 1)
                 if checked:
-                    if rule == 'sdivconst':
+                    if rule in ['sdivconst', 'unusedinit']:
                         check(assembly.read_text(), arch, optimized=level >= 1)
                     elif rule == 'tails':
                         check(assembly.read_text(), arch, level, args.cfi, args.sibling_calls == 'off')
@@ -825,14 +890,14 @@ def main():
                 print(f'{args.target} {rule} O{level}: ' +
                       ('codegen' if checked else 'compile') +
                       (' and execution' if args.run else '') + ' OK')
-            if rule == 'sdivconst':
+            if rule in ['sdivconst', 'unusedinit']:
                 # Check the debugging escape hatch independently of O0.
-                assembly = directory / 'sdivconst-noopt.s'
+                assembly = directory / (rule + '-noopt.s')
                 run([args.vpp, f'--target={args.target}', '-O2',
                      '-ffreestanding', '-fno-stack-protector', '-S', source, '-o', assembly],
                     env={**os.environ, 'VCC_NOOPT': '1'})
-                check_sdivconst(assembly.read_text(), arch, optimized=False)
-                print(f'{args.target} sdivconst O2 VCC_NOOPT: codegen OK')
+                check(assembly.read_text(), arch, optimized=False)
+                print(f'{args.target} {rule} O2 VCC_NOOPT: codegen OK')
     return 0
 
 

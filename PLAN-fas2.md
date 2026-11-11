@@ -2630,6 +2630,96 @@ sanitiserade flow-/dead-result-kontrakt, 16 mål-/nivåprov med körning och
 x86-debug O0–O3 passerar. Tidigare hela sviter och Ir-mätningar ovan gäller
 sina exakta angivna versioner; integrationen är ingen ny kostnadsmätning.
 
+
+### OPT6: oanvända skalära lokala initierare (avgränsat delsteg)
+
+Implementerat: `emit/opt/unusedinit.c` delar behörighet och
+recept mellan a64, x64 och wasm32/64. Befintlig `SA_USED` från prepasset avvisar
+refererade objekt direkt; ingen ny funktionsgenomgång, CFG eller SSA tillkommer.
+Endast aldrig refererade automatiska heltalsobjekt på högst 64 bitar omfattas.
+Volatile/atomic, cleanup, VLA/variabelt modifierade typer, statisk lagring,
+adressflykt, `used`, asm-register och `_BitInt` behåller befintlig väg.
+O0, `VCC_NOOPT` och uttryckligt känd `optnone`-funktion avvisas också.
+
+En kandidatbunden heltalslista får besöka högst 64 AST-noder. Den utesluter
+minnesindirektion, division/rest, skift, FP, anrop, builtins och okända noder.
+Ett bevisat rent initialiseringsuttryck utelämnas. I annat fall evalueras
+heltalsuttrycket som ett värde och frigörs/droppas; endast destinationens lagring
+tas bort. Detta bevarar anrop, läsningar och interna konverteringar som den
+befintliga värdeemittern utför. Budgetslut behåller evalueringen. Brace-/zero-
+initialiseringsposter går kvar genom initialiseringsgången; de skickas aldrig
+till värdeemittern. `side_effects()` används inte som bevis för frånvaro av traps.
+Befintliga AST-/symboldata ändras inte; registerlokalvalet undviker att reservera
+ett hem för dessa oanvända objekt.
+
+Verifierat hittills: unity- och nonunitybygge samt fristående receptkontrakt normalt och med
+ASan/UBSan. Kontrakten täcker budget 0/1/exakt gräns, 64/65 noder, behörighet,
+attribut, okända noder, FP-/minnes-/divisionskontroller och initializer-fallback.
+Små O2-assemblerprober visar att x64:s döda multiplikation/addition/store och
+wasm32/64:s multiplikation/addition/lokal försvinner; a64:s befintliga efterpass
+hade redan tagit bort aritmetiken i just denna prob. Detta är inte generell
+DCE eller en fullständig lösning på OPT6.
+
+Matchad kort Callgrind-mätning: exakt `f7327bd` mot `beb6e2b`, båda byggda
+med Clang 23 `-O3 -march=x86-64-v3`, 16 seriella par utan exkluderingar, endast
+O2. Kandidatfria 200-funktionskontroller/loopar gav x64 +0,0551/+0,2239 %,
+a64 +0,0630/+0,1846 %, wasm32 −0,0001/+0,1325 % och wasm64
+−0,0001/+0,1324 % exekverade kompilatorinstruktioner; all assembler var
+byte-identisk. 200 positiva funktioner gav x64 −6,3725 %, a64 −5,2347 %,
+wasm32 −4,1897 % och wasm64 −4,1878 %. a64 gav samma assembler men slapp
+arbete som dess efterpass tidigare utförde. Fyra befintliga x64-regressionsfiler
+(`deep_mixed`, `register_locals`, `atomic_ops`, `integer_identities`) gav
+55 286 799 → 55 297 899 instruktioner (+0,02008 %), alla med samma assembler.
+Manifest, kommandon, käll-/binärhashar och reproduktionsskript finns i
+`work/opt-profile/unused-init-cost/{result.json,measure.py}`. Detta mäter hela
+kompilatorprocessens användarinstruktioner, inte hårdvarucykler, väggtid eller
+programmens körtid. Det är ett avgränsat exact-parent-prov; den kombinerade
+optimeringsstackens separata mätning följer nedan.
+
+Den kombinerade kostnadsgaten (`bench/vcc-opt-cost.py`) passerar: högst 1 %
+ökning per mål, både mot `4a839ba` före stacken och mot `7be5f64` före detta
+delsteg. Kandidaten var `59c686c`; alla tre binärer byggdes med Clang 23
+`-O3 -march=x86-64-v3`. Serien mäter Callgrind-Ir för hela `vpp -O2 -S` på
+ett fast korpus av befintliga regressionsfiler, med samma kandidatprofil i båda
+jämförelserna:
+
+| Mål | Filer | Mot `4a839ba` | Mot `7be5f64` |
+|---|---:|---:|---:|
+| x86-64 | 12 | +0,194974 % | +0,066731 % |
+| arm64 | 12 | +0,113848 % | +0,062119 % |
+| wasm32 | 10 | +0,248758 % | +0,057039 % |
+| wasm64 | 11 | +0,233999 % | +0,057260 % |
+
+Wasm32 saknar `atomic_ops` och `bitint_runtime`, wasm64 saknar
+`bitint_runtime`; samma fall avvisas av alla tre kompilatorerna. Rapporten
+innehåller kommandon, hashvärden, stödutfall och instruktionstal i
+`work/opt-profile/stack-cost/final/result.json`; körloggen finns i
+`work/opt-profile/stack-cost/final-run.log`. Detta är en begränsad gate för
+kompilatorarbete, inte ett mått på körhastighet hos genererade program.
+
+Efter integrering av postfix-föräldern (`e92a939`) passerar unity och nonunity
+alla 16 target×O0–O3 runtime-/kodgenfall vardera, plus fyra `VCC_NOOPT`-fall
+vardera. Kontrollerna omfattar rena uttryck, anrop en gång, short circuit,
+volatile/atomic destination/läsning, division/minnesläsning/FP-konvertering,
+cleanup/VLA/brace-init, `used`/`optnone`/asm-register och återanvänd inlinad AST.
+Det exakta `f7327bd`-baslinjeverktyget underkänns av det nya x64-positivprovet,
+så kodgenkravet skiljer faktisk ny förmåga från ett redan godkänt utfall.
+ABI-korsanrop passerar 32/32 på x64 och 32/32 på a64. Debugprovet har en egen
+oanvänd initierare före en överlevande radmarkör och passerar O0–O3, inklusive
+DWARF-verifiering och byte-identisk `.text` med/utan `-g`.
+
+Native-regressionskontrollen på samma produktionskälla gav 230 godkända x86-
+fall och 235 arm64-fall, plus ett befintligt arm64-XFAIL. Den nya fixturen
+avvisades först av clang: GNU:s `__atomic_fetch_add` tog en `_Atomic`-pekare.
+Fixturen rättades till typade `__c11_atomic_fetch_add`, som clang godtar;
+det berörda fallet kördes därefter separat och passerar på båda native-målen.
+Sammanlagt verifieras därmed 231 x86-fall (sex referensundantag) och 236
+arm64-fall samt ett befintligt XFAIL. Ingen produktionskod ändrades vid
+rättningen. Alla fyra måls O0–O3-kör-/kodkrav och O2/noopt-prov kördes om
+och passerar med den rättade fixturen. Loggar: `work/opt-pr-tmp/unused-stack-
+{x86,a64}.log`; de två nya separata 1/1-resultaten är berörda-fixtur-körningar,
+inte nya hela svitkörningar. Den kombinerade stackens kostnadsgrind återstår.
+
 ### Gemensam walker: en värdeläsning för skalär postfix (2026-11-11)
 
 Status: implementerat och lokalt verifierat i `opt/postfix-eval`, före

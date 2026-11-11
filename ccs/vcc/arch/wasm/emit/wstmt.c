@@ -875,6 +875,17 @@ static void wdecl_stmt(ecx *e, const node *x)
 		}
 		return;
 	}
+	{
+		unsigned recipe = em_unused_init(e, x, e->w->fsym, 64);
+
+		if (recipe != EM_UNUSED_KEEP) {
+			if (recipe == EM_UNUSED_EVAL) {
+				wexpr(e, x->b, true);
+				wi(e, "drop");
+			}
+			return;
+		}
+	}
 	b = wlocal(e, s);
 	if (sym_attrs(c, s)->cleanup) {
 		wst *W = e->w;
