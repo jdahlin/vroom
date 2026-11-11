@@ -394,6 +394,17 @@ operand, negativa exponenter, INT_MIN, signed zero och NaN/inf upphöjt
 till noll. Kernel-sema 887/887 i båda lägena. Kombinerade fulla totalsiffror
 ovan gäller före denna rättning och följande integration verifieras separat.
 
+Skalära float/double-`fabs` och `copysign`, både explicit builtin och
+korrekt identifierad biblioteksdeklaration, sänks till heltalsmasker.
+Det bevarar signaling-NaN-bitar och signed zero utan onödiga libm-anrop.
+Varje operand evalueras en gång; lokala/asm-omdöpta eller avstängda
+biblioteksfunktioner förblir anrop. De fyra GCC-fallen
+`builtins-{48,49,50}` och `pr56125` går på båda Linux-målen i båda
+byggsätten. Bitvis regression, flagg-/namnprov och kernel-sema
+887/887 i båda lägen är verifierade på isolerad rättning mot `ad4cf9a`.
+Integration med den kommande x86-funktionsspecifika target-policyn kräver
+en separat effektiv-feature-kontroll; detta påstås inte färdigverifierat här.
+
 Kvar:
 - Alla återstående matchande filer och optimeringskonfigurationer; nästlade
   kataloger med egna `.exp`-drivrutiner och LTO har ännu ingen motsvarighet.

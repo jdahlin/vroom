@@ -1359,6 +1359,51 @@ static bool elementwise_abs_effects(cc *c, uint32_t n, bool load)
 	}
 }
 
+/* fabs/copysign are representation operations: integer masks preserve both
+ * signaling NaNs and signed zero. Anonymous locals evaluate each operand once. */
+VPRIV uint32_t fp_sign_call(cc *c, const char *name, size_t len, qty ft, const vec *args, uint32_t loc)
+{
+	if (c->o->target != PP_LINUX_X86_64 && c->o->target != PP_LINUX_AARCH64)
+		return 0;
+	bool copy = (len == 8 && !memcmp(name, "copysign", 8)) ||
+		    (len == 9 && !memcmp(name, "copysignf", 9));
+	bool abs = (len == 4 && !memcmp(name, "fabs", 4)) ||
+		   (len == 5 && !memcmp(name, "fabsf", 5));
+	if (!copy && !abs) return 0;
+	bool single = name[len - 1] == 'f';
+	qty t = prim(single ? TY_FLOAT : TY_DOUBLE);
+	if ((T(c, ft)->flags & (TF_NOPROTO | TF_VARIADIC)) || args->n != (copy ? 2 : 1) ||
+	    !compatible(c, ft, sig_func_type(c, copy ? (single ? "fff" : "ddd") : (single ? "ff" : "dd"))))
+		return 0;
+	cval a, b;
+	if (!elementwise_abs_effects(c, args->v[0], true) && cc_eval(c, args->v[0], &a) && a.kind == CV_FLT &&
+	    (!copy || (!elementwise_abs_effects(c, args->v[1], true) && cc_eval(c, args->v[1], &b) && b.kind == CV_FLT)))
+		return mk_flt(c, __builtin_copysign(a.f, copy ? b.f : 1.0), t, loc);
+	if (c->o->general_regs_only) {
+		cc_error(c, loc, "%s floating point is not supported", "-mgeneral-regs-only:");
+		return err_node(c, loc);
+	}
+	qty bits = prim(single ? TY_UINT : TY_ULLONG);
+	i128 sign = (i128)1 << (single ? 31 : 63);
+	uint32_t tmp[2], raw[2], pre[2];
+	for (uint32_t i = 0; i < args->n; i++) {
+		uint32_t s = sym_new(c, S_VAR, 0, t, loc);
+		c->syms[s].sc = SC_AUTO;
+		tmp[i] = mk(c, N_VAR, t, loc); N(tmp[i])->a = s; N(tmp[i])->flags = NF_LVALUE;
+		pre[i] = mk2(c, N_ASSIGN, t, loc, tmp[i], args->v[i]);
+		uint32_t ptr = cast_node(c, addr_of(c, tmp[i], loc), ty_ptr(c, bits), CK_P2P);
+		raw[i] = mk(c, N_DEREF, bits, loc); N(raw[i])->a = ptr; N(raw[i])->flags = NF_LVALUE;
+	}
+	uint32_t value = mk_bin(c, T_AMP, bits, rvalue(c, raw[0]), mk_int(c, sign - 1, bits, loc), loc);
+	if (copy) {
+		uint32_t source = mk_bin(c, T_AMP, bits, rvalue(c, raw[1]), mk_int(c, sign, bits, loc), loc);
+		value = mk_bin(c, T_PIPE, bits, value, source, loc);
+	}
+	uint32_t result = with_pre(c, mk2(c, N_ASSIGN, bits, loc, raw[0], value), rvalue(c, tmp[0]));
+	if (copy) result = with_pre(c, pre[1], result);
+	return with_pre(c, pre[0], result);
+}
+
 static uint32_t elementwise_abs_call(cc *c, const builtin *b, uint32_t loc)
 {
 	vec args;
@@ -1691,6 +1736,10 @@ VPRIV uint32_t builtin_call(cc *c, const builtin *b, uint32_t loc)
 			uint32_t folded = fold_strncmp_zero(c, &args, loc);
 			if (folded)
 				return folded;
+		}
+		if (b->id == BI_LIB) {
+			uint32_t result = fp_sign_call(c, b->name + 10, strlen(b->name + 10), ft, &args, loc);
+			if (result) return result;
 		}
 		if (b->id == BI_LIB || b->id == BI_STRLEN || b->id == BI_NAN || b->id == BI_NANF || b->id == BI_NANS) {
 			/* a call to the library function the builtin names */

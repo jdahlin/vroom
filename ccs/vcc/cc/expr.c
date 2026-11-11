@@ -1142,6 +1142,17 @@ static __attribute__((noinline)) uint32_t call(cc *c, uint32_t fn, uint32_t loc)
 				return folded;
 		}
 	}
+	if (!c->o->no_builtin && N(callee)->op == N_VAR && c->syms[N(callee)->a].kind == S_FUNC) {
+		const sym *y = &c->syms[N(callee)->a];
+		if ((y->flags & SF_GLOBAL) && y->sc != SC_STATIC && !(y->attrs && c->attr[y->attrs].asmname) &&
+		    !lib_builtin_disabled(c->o, idstr_(y->name), idlen_(y->name))) {
+			uint32_t result = fp_sign_call(c, idstr_(y->name), idlen_(y->name), ft, &args, loc);
+			if (result) {
+				N(result)->flags |= aflags & NF_ERR;
+				return result;
+			}
+		}
+	}
 	/* Under full fast-math, pow(x, 1/4) has the same relaxed contract as
 	 * sqrt(sqrt(x)). Match only the library declaration and a literal exponent:
 	 * neither a renamed/local function nor exponent side effects may disappear. */
