@@ -129,7 +129,7 @@ static int brkind_sw(const ins *i)
 	switch (i->op) {
 	case I_B: return BR_UNCOND;
 	case I_BC: case I_CBZ: case I_CBNZ: return BR_COND;
-	case I_RET: case I_TAIL: return BR_END;
+	case I_RET: case I_TAIL: case I_JT: return BR_END;
 	case I_BR: return BR_INDIRECT;
 	default: return BR_NONE;
 	}

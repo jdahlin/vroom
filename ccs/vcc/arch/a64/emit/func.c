@@ -227,6 +227,70 @@ static void drop_fallthrough(ecx *e)
 	e->nin = em_rec_fallthrough(e->in, e->nin, &layout, e->ndl ? a64_fallthrough_remap : NULL, &d);
 }
 
+/*
+ * I_JT -> adr x16, table; add x17, x16, idx, lsl 2; ldrsw x17, [x17]; add x16, x16, x17;
+ * br x16, and each table after the function's last record: its label, then one word per
+ * entry, target - table in bytes (no relocation; the same as clang's Darwin placement).
+ * A function with inline asm assembles its words as text (labels named .LBB).
+ */
+static void expand_tables(ecx *e, uint32_t fid)
+{
+	uint32_t njt = 0, total, d;
+	bool raw = false;
+
+	if (!e->njt)
+		return;
+	for (uint32_t k = 0; k < e->nin; k++) {
+		njt += e->in[k].op == I_JT;
+		raw |= e->in[k].op == I_RAW;
+	}
+	raw &= direct(e);
+	total = e->nin + 4 * njt;
+	for (uint32_t t = 0; t < e->njt; t++)
+		total += 1 + (raw ? 1 : 1) * e->jt[t].n;
+	if (total > e->capin || total < e->nin)
+		efatal(e, 0, "function too large");
+	for (uint32_t r = 0, j = 0, extra = 0; r < e->ndl; r++) {
+		for (; j < e->dl[r].k && j < e->nin; j++)
+			extra += 4 * (e->in[j].op == I_JT);
+		e->dl[r].k += extra;
+	}
+	d = e->nin + 4 * njt;
+	for (uint32_t k = e->nin; k-- > 0; ) {
+		ins x = e->in[k];
+
+		if (x.op != I_JT) {
+			e->in[--d] = x;
+			continue;
+		}
+		d -= 5;
+		e->in[d] = (ins){ .op = I_ADR, .rd = R_X16, .label = x.label };
+		e->in[d + 1] = (ins){ .op = I_ADD, .sz = 1, .rd = R_X17, .rn = R_X16, .rm = x.rd, .sh = 2 };
+		e->in[d + 2] = (ins){ .op = I_LD, .sz = 2, .cond = 1, .rd = R_X17, .rn = R_X17 };
+		e->in[d + 3] = (ins){ .op = I_ADD, .sz = 1, .rd = R_X16, .rn = R_X16, .rm = R_X17 };
+		e->in[d + 4] = (ins){ .op = I_BR, .rn = R_X16 };
+	}
+	d = e->nin + 4 * njt;
+	for (uint32_t t = 0; t < e->njt; t++) {
+		const struct ejt *j = &e->jt[t];
+
+		e->in[d++] = (ins){ .op = I_LABEL, .label = j->tab };
+		for (uint32_t k = 0; k < j->n; k++) {
+			if (raw) {
+				ins *i = &e->in[d++];
+				char b[64];
+				int n = snprintf(b, sizeof b, "\t.word\t.LBB%x_%x-.LBB%x_%x", fid, e->jtl[j->off + k], fid, j->tab);
+
+				*i = (ins){ .op = I_RAW, .off = (int32_t)e->raw.n, .ref = (uint32_t)n };
+				tb_put(&e->raw, b, (size_t)n);
+			} else {
+				e->in[d++] = (ins){ .op = I_JTE, .off = (int32_t)e->jtl[j->off + k], .ref = j->tab };
+			}
+		}
+	}
+	e->nin = d;
+}
+
 static void finish_function(ecx *e, uint32_t s)
 {
 	cc *c = e->c;
@@ -267,6 +331,7 @@ static void finish_function(ecx *e, uint32_t s)
 		}
 	}
 
+	expand_tables(e, s);
 	/*
 	 * Frame below x29: callee saves, locals, outgoing arguments.  Slots are
 	 * addressed from sp, so with locals over-aligned (falign > 16) the
@@ -504,6 +569,7 @@ static bool emit_function1(ecx *e, uint32_t s, int nlreg)
 	e->usedcs = 0;
 	e->nloop = e->nclean = 0;
 	e->ncases = 0;
+	e->njt = e->njtl = 0;
 	e->reach = true;
 	e->top = s;
 	e->asmk = 0;
