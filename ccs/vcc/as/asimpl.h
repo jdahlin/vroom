@@ -117,11 +117,13 @@ struct As {
 	int dwlocp, dwtab;
 	/* variable-size items at the end of a split frag (.prefalign, alignment
 	   after one, .uleb128/.sleb128 of a label difference), relaxed at the end */
-	struct VarItem { uint32_t frag, end; uint8_t kind, p2, code, fill; uint64_t max, size; Val v; } *pfa;
+	struct VarItem { uint32_t frag, end; uint8_t kind, p2, code, fill, c32; uint64_t max, size; Val v; } *pfa;	/* c32: a branch in .code32 */
 	uint32_t npfa, pfacap;		/* a .loc waits for its instruction; a table is due */
 	struct { uint32_t sym; char reg[8]; } *ralias;	/* x86: name = %reg, the register by another name */
 	uint32_t nralias, raliascap;
 	int x64_lock, x64_isz;	/* x86: "lock insn" on one line (after 0x66, as MC); the operation's size (a constant immediate is taken at it) */
+	int x64_code32;		/* x86: after .code32 (until .code64): no REX, 32-bit addresses */
+	int x64_kmask, x64_kz;	/* x86: the instruction's {%kN} (N, 0 none) and {z} (AVX-512) */
 	char msg[4096];		/* the errors so far, one per line group (clang goes on after one) */
 	uint32_t mlen, nerr;
 	int err;

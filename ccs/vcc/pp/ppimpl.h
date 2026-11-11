@@ -1073,21 +1073,23 @@ static inline __attribute__((always_inline)) void raw_fast(pp *p, ptok *t)
  */
 static __attribute__((noinline, cold)) void dollar_split(pp *p, ptok *t)
 {
-	uint32_t id;
+	uint32_t id, k = 0;
 
-	if (t->len < 2 || t->s[0] != '$' || (t->flags & TF_DIRTY) || t->s[1] == '$' || (t->s[1] >= '0' && t->s[1] <= '9'))
+	while (k < t->len && t->s[k] == '$')
+		k++;	/* ("$$NAME": every '$' is a token of its own) */
+	if (k == t->len || t->s[0] != '$' || (t->flags & TF_DIRTY) || (t->s[k] >= '0' && t->s[k] <= '9'))
 		return;
-	id = vintern_find(t->s + 1, t->len - 1, vintern_hash(t->s + 1, t->len - 1));
+	id = vintern_find(t->s + k, t->len - k, vintern_hash(t->s + k, t->len - k));
 	if (!id || !mget(p, id))
 		return;
 	{
 		ptok *n = varena_alloc(&p->tmp, sizeof(*n));
 
 		*n = *t;
-		n->s = t->s + 1, n->len = t->len - 1, n->id = id, n->loc = t->loc + 1;
+		n->s = t->s + k, n->len = t->len - k, n->id = id, n->loc = t->loc + k;
 		n->flags &= (uint8_t)~(TF_SOL | TF_SPACE);
 		push_ptok(p, n, 1, 0, 0, 0);
-		t->len = 1, t->id = 0, t->kind = T_UNKNOWN;
+		t->len = k, t->id = 0, t->kind = T_UNKNOWN;
 	}
 }
 

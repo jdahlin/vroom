@@ -750,13 +750,16 @@ static int d_section(As *a, const char *p, const char *e, int push)
 		else if (hasprefix(name, ".preinit_array")) type = SHT_PREINIT_ARRAY;
 		else type = SHT_PROGBITS;
 	}
-	if (!have_flags) {
-		if (hasprefix(name, ".rodata") || sveq(name, ".rodata1")) flags = SHF_ALLOC;
-		else if (sveq(name, ".fini") || sveq(name, ".init") || hasprefix(name, ".text")) flags = SHF_ALLOC | SHF_EXECINSTR;
+	{	/* a known name's flags, added to the written ones (MC: .section .data..x,"a" is "aw") */
+		uint64_t df = 0;
+
+		if (hasprefix(name, ".rodata") || sveq(name, ".rodata1")) df = SHF_ALLOC;
+		else if (sveq(name, ".fini") || sveq(name, ".init") || hasprefix(name, ".text")) df = SHF_ALLOC | SHF_EXECINSTR;
 		else if (hasprefix(name, ".data") || sveq(name, ".data1") || hasprefix(name, ".bss") ||
 			 hasprefix(name, ".init_array") || hasprefix(name, ".fini_array") || hasprefix(name, ".preinit_array"))
-			flags = SHF_ALLOC | SHF_WRITE;
-		else if (hasprefix(name, ".tdata") || hasprefix(name, ".tbss")) flags = SHF_ALLOC | SHF_WRITE | SHF_TLS;
+			df = SHF_ALLOC | SHF_WRITE;
+		else if (hasprefix(name, ".tdata") || hasprefix(name, ".tbss")) df = SHF_ALLOC | SHF_WRITE | SHF_TLS;
+		flags = have_flags ? flags | df : df;
 	}
 	if (push) {
 		if (a->nss >= MAXSECSTK) return err(a, "section stack overflow");
@@ -1263,6 +1266,10 @@ static int d_fill(As *a, const char *p, const char *e)
 		if (p < e && *p == ',') { p++; if (abs_expr(a, &p, e, &val)) return -1; }
 	}
 	if (size > 8) size = 8;
+	if (!val && n > 0) {	/* zeros: also in a NOBITS section (.bss: the kernel's boot stack) */
+		elf_fill(a->o, a->cur, (uint64_t)n * (uint64_t)size, 0);
+		return 0;
+	}
 	/* MC: .fill makes no mapping symbol (.space does) */
 	for (int64_t i = 0; i < n; i++) {
 		uint8_t *q = elf_grow(a->o, a->cur, (size_t)size);
@@ -1282,10 +1289,33 @@ static int d_org(As *a, const char *p, const char *e)
 	int64_t target;
 	if (v.add && !v.sub) {
 		ElfSym *y = elf_symp(a->o, v.add);
+		if ((y->flags & ESYM_DEFINED) && y->frag != a->cur && elf_frag(a->o, y->frag)->sec == f->sec) {
+			/* a label before a frag boundary (relaxed jumps, .skip): .skip (sym + c) - ., settled by the layout */
+			Val d = { v.add, here(a), v.c };
+
+			elf_data(a->o, a->cur);
+			struct VarItem *it = var_item(a, VI_SKIP);
+			it->v = d;
+			it->fill = (uint8_t)fill;
+			return 0;
+		}
 		if (!(y->flags & ESYM_DEFINED) || y->frag != a->cur) return err(a, "unsupported .org target");
 		target = (int64_t)y->value + v.c;
 	} else if (!v.add && !v.sub) {
 		if (f->sub) return err(a, "unsupported absolute .org in a subsection");
+		if (a->cur != f->sec) {
+			/* the section has more frags (relaxed jumps, .skip): .skip (start + c) - ., settled by the layout */
+			uint32_t s0 = tmpsym(a);
+			Val d;
+
+			elf_define(a->o, s0, f->sec, 0);
+			d = (Val){ s0, here(a), v.c };
+			elf_data(a->o, a->cur);
+			struct VarItem *it = var_item(a, VI_SKIP);
+			it->v = d;
+			it->fill = (uint8_t)fill;
+			return 0;
+		}
 		target = v.c;
 	} else return err(a, "expected assembly-time absolute expression");
 	if (target < (int64_t)f->size) return err(a, "attempt to move .org backwards");
@@ -1610,6 +1640,11 @@ static int macro_arg_plain(const char **pp, const char *e, int vararg, Sv *out)
 		if (c == '(') depth++;
 		else if (c == ')' && depth) depth--;
 		if (c == '"') return 0;
+		if (c == '\'' && p + 1 < e) {	/* a character constant, 'c' or 'c (' ' and ',' are not separators) */
+			p += 2;
+			if (p < e && *p == '\'') p++;
+			continue;
+		}
 		if (c == ' ' || c == '\t') { p = ws(p, e); continue; }
 		if (isidc((unsigned char)c)) { while (p < e && isidc((unsigned char)*p)) p++; continue; }
 		if (c == '=' && depth == 0) return 0;
@@ -1659,6 +1694,13 @@ static int macro_arg(As *a, const char **pp, const char *e, int vararg, Sv *out)
 			while (p < e && *p != '"') { if (*p == '\\' && p + 1 < e) p++; p++; }
 			memcpy(buf + n, s, (size_t)(p - s)); n += (size_t)(p - s);
 			if (p < e) p++;
+			continue;
+		}
+		if (c == '\'' && p + 1 < e) {	/* a character constant, kept whole */
+			const char *s = p;
+			p += 2;
+			if (p < e && *p == '\'') p++;
+			memcpy(buf + n, s, (size_t)(p - s)); n += (size_t)(p - s);
 			continue;
 		}
 		if (c == ' ' || c == '\t') {
@@ -2176,8 +2218,14 @@ static int directive(As *a, Sv w, const char *p, const char *e)
 	size_t n = w.n - 1;
 #define IS(x) (n == sizeof(x) - 1 && !memcmp(d, x, n))
 	if (a->o->machine == EM_X86_64) {
-		if (IS("att_syntax") || IS("code64"))
-			return 0;	/* (AT&T, 64-bit: what x86-64 text is anyway) */
+		if (IS("att_syntax"))
+			return 0;	/* (AT&T: what x86-64 text is anyway) */
+		if (IS("code64") || IS("code32")) {
+			a->x64_code32 = IS("code32");
+			return 0;
+		}
+		if (IS("code16"))
+			return err(a, ".code16 is not supported");
 		if (IS("intel_syntax"))
 			return err(a, "Intel syntax is not supported");
 	}
@@ -2557,7 +2605,7 @@ void as_begin(As *a, ElfObj *o, const char *name)
 	memset(a->alh, 0, sizeof a->alh);
 	a->fname = name;
 	a->nident = 0; a->ended = 0; a->altmacro = 0; a->eofline = 0;
-	a->ncfi = a->cficap = a->nfde = a->fdecap = 0; a->infde = 0; a->cfi_eh = 0; a->cfi_dbg = 0; a->nsv = a->svcap = 0; a->nasg = a->asgcap = 0;
+	a->ncfi = a->cficap = a->nfde = a->fdecap = 0; a->infde = 0; a->cfi_eh = 0; a->cfi_dbg = 0; a->x64_code32 = 0; a->nsv = a->svcap = 0; a->nasg = a->asgcap = 0;
 	a->ndwf = a->dwfcap = a->ndwd = a->dwdcap = a->ndwl = a->dwlcap = 0; a->npfa = a->pfacap = 0; a->dwlocp = a->dwtab = 0;
 	memset(&a->dwcur, 0, sizeof a->dwcur); a->dwcur.flags = 1;
 	a->mmask = 255; a->mcount = 0;
@@ -2977,6 +3025,7 @@ VPRIV int as_branch(As *a, int cc, Val v, int mod)
 	elf_reg(a->o, v.sub);
 	it = var_item(a, VI_X86BR);
 	it->code = (uint8_t)cc;
+	it->c32 = (uint8_t)a->x64_code32;
 	it->v = v;
 	it->size = 2;
 	return 0;
@@ -3175,7 +3224,7 @@ static void var_finish(As *a)
 			else { q[0] = 0x0f; q[1] = (uint8_t)(0x80 + v->code); }
 			memset(q + pad - 4, 0, 4);
 			t.c -= 4;
-			elf_fixup(o, v->frag, qoff + pad - 4, q + pad - 4, R_X86_64_PLT32, t);	/* (MC: every branch) */
+			elf_fixup(o, v->frag, qoff + pad - 4, q + pad - 4, v->c32 ? R_X86_64_PC32 : R_X86_64_PLT32, t);	/* (MC: every branch; none in 32-bit code) */
 			continue;
 		}
 		if (v->kind == VI_ULEB || v->kind == VI_SLEB) {
