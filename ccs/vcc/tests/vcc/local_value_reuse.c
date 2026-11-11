@@ -17,6 +17,8 @@ unsigned lvr_intervening_call(unsigned a, unsigned b) { unsigned x = a+b; unsign
 unsigned lvr_independent(unsigned a, unsigned b, unsigned z) { unsigned x=a+b; z=z^7U; return x*z+(a+b); }
 unsigned lvr_independent_compound(unsigned a, unsigned b, unsigned z) { unsigned x=a+b; z^=7U; return x*z+(a+b); }
 unsigned lvr_independent_inc(unsigned a, unsigned b, unsigned z) { unsigned x=a+b; z++; return x*z+(a+b); }
+unsigned lvr_assignment_call(unsigned a, unsigned b, unsigned z) { unsigned x=a+b; z=update(); return x*z+(a+b); }
+unsigned lvr_assignment_volatile(unsigned a, unsigned b, unsigned z) { unsigned x=a+b; z=observed; return x*z+(a+b); }
 unsigned lvr_dep_compound(unsigned a, unsigned b) { unsigned x=a+b; a^=1U; return x*a+(a+b); }
 unsigned lvr_value_inc(unsigned a, unsigned b) { unsigned x=a+b; x++; return x*x+(a+b); }
 unsigned lvr_dep_written(unsigned a, unsigned b) { unsigned x=a+b; a=a^1U; return x*a+(a+b); }
@@ -45,9 +47,10 @@ int main(void)
  if (lvr_call() != 22 || global_value != 5) return 2;
  _Atomic unsigned atom = 3;
  if (lvr_atomic(&atom) != 16) return 5;
- if (lvr_intervening_call(2, 3) != 40 || global_value != 6) return 6;
+ if (lvr_intervening_call(2, 3) != 40 || global_value != 6 ||
+     lvr_assignment_call(2, 3, 0) != 40 || global_value != 7) return 6;
  observed = 3;
- if (lvr_volatile() != 16 || lvr_intervening_volatile(2, 3) != 20) return 3;
+ if (lvr_volatile() != 16 || lvr_intervening_volatile(2, 3) != 20 || lvr_assignment_volatile(2, 3, 0) != 20) return 3;
  if (lvr_alias(&v, &v) != 14 || v != 7 || lvr_alias(&v, &w) != 18 || w != 7) return 4;
  return 0;
 }

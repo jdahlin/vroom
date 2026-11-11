@@ -138,6 +138,12 @@ VPRIV bool em_decl_reuse_values(ecx *e, uint32_t decl, uint32_t consumer,
   expr = r->b;
  } else return false;
  if (!expr || N(expr)->op != N_BINARY) return false;
+ /* Common two-variable expressions need no table when an operand was written. */
+ if (nkilled) {
+  const node *init = N(d->b), *a = N(init->a), *b = N(init->b);
+  for (uint32_t i = 0; i < nkilled; i++)
+   if ((a->op == N_VAR && a->a == killed[i]) || (b->op == N_VAR && b->a == killed[i])) return false;
+ }
  return em_decl_reuse_match(c, d->b, expr, d->a, killed, nkilled, from, to);
 }
 
@@ -162,14 +168,13 @@ static __attribute__((noinline)) bool em_value_pure_decl(ecx *e, uint32_t n)
  return em_sibling_value(c, &s, d->b) != 0;
 }
 
-/* Identify an ordinary local write whose RHS is pure. Division, remainder,
- * shifts, memory writes and unknown compound operations remain barriers. */
-static __attribute__((noinline)) bool em_value_local_assignment(ecx *e, uint32_t n, uint32_t *written)
+/* Cheap preflight: identify a possible ordinary local write without walking
+ * its RHS. The RHS is proved only if a later candidate survives invalidation. */
+static bool em_value_local_write(ecx *e, uint32_t n, uint32_t *written)
 {
  cc *c = e->c;
  const node *stmt = N(n), *a, *lhs;
  const sym *y;
- em_sibling_state s = {0};
  bool increment;
  if (stmt->op != N_EXPR || !stmt->a) return false;
  a = N(stmt->a);
@@ -184,15 +189,22 @@ static __attribute__((noinline)) bool em_value_local_assignment(ecx *e, uint32_t
  if (!is_local_var(c, lhs->a) || y->kind != S_VAR || y->sc == SC_STATIC || y->sc == SC_EXTERN ||
      (y->flags & SF_ADDR_TAKEN) || (QQ(y->ty) & Q_VOLATILE) || (T(c, y->ty)->flags & TF_ATOMIC) ||
      sym_attrs(c, lhs->a)->asmname || !is_integer(c, y->ty) || em_bitint(c, y->ty) ||
-     (tsize(c, y->ty) != 4 && tsize(c, y->ty) != 8) || c->nsym >= UINT32_MAX - 32) return false;
- if (!increment) {
-  if (QUNQ(y->ty) != QUNQ(N(a->b)->ty)) return false;
-  s.next = c->nsym + 1; s.nodes = 32;
-  em_values_reset(&s.table, 64);
-  if (!em_sibling_value(c, &s, a->b)) return false;
- }
+     (tsize(c, y->ty) != 4 && tsize(c, y->ty) != 8) || c->nsym >= UINT32_MAX - 32 ||
+     (!increment && QUNQ(y->ty) != QUNQ(N(a->b)->ty))) return false;
  *written = lhs->a;
  return true;
+}
+
+/* Only a surviving candidate pays for the bounded purity proof. */
+static __attribute__((noinline)) bool em_value_local_assignment(ecx *e, uint32_t n)
+{
+ cc *c = e->c;
+ const node *a = N(N(n)->a);
+ em_sibling_state s = {0};
+ if (a->op != N_ASSIGN) return true; /* preflight accepted an increment */
+ s.next = c->nsym + 1; s.nodes = 32;
+ em_values_reset(&s.table, 64);
+ return em_sibling_value(c, &s, a->b) != 0;
 }
 
 /* Scan at most eight preceding declarations or pure local assignments.
@@ -201,7 +213,7 @@ VPRIV bool em_block_value_reuse(ecx *e, const node *block, uint32_t first, uint3
                                    uint32_t *from, uint32_t *to)
 {
  cc *c = e->c;
- uint32_t consumer, count = 0, killed[8], nkilled = 0;
+ uint32_t consumer, count = 0, killed[8], writes[8], nkilled = 0;
  if (!e->E->o->opt || e->E->noopt || i <= first) return false;
  consumer = c->lists[block->b + i];
  if (N(consumer)->op != N_RETURN && N(consumer)->op != N_DECL) return false;
@@ -209,12 +221,17 @@ VPRIV bool em_block_value_reuse(ecx *e, const node *block, uint32_t first, uint3
   uint32_t prev = c->lists[block->b + --i];
   if (N(prev)->op == N_EXPR) {
    uint32_t written;
-   if (!em_value_local_assignment(e, prev, &written)) break;
+   if (!em_value_local_write(e, prev, &written)) break;
+   writes[nkilled] = prev;
    killed[nkilled++] = written;
    continue;
   }
   if (N(prev)->op != N_DECL) break;
-  if (em_decl_reuse_values(e, prev, consumer, killed, nkilled, from, to)) return true;
+  if (em_decl_reuse_values(e, prev, consumer, killed, nkilled, from, to)) {
+   for (uint32_t j = 0; j < nkilled; j++)
+    if (!em_value_local_assignment(e, writes[j])) return false;
+   return true;
+  }
   if (!em_value_pure_decl(e, prev)) break;
  }
  return false;
