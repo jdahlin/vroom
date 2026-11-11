@@ -967,6 +967,103 @@ VPRIV int x64_instruction(As *a, const char *p, const char *e, size_t wn)
 			}
 		}
 	}
+	/* ---- SSSE3/SSE4, AES-NI, PCLMUL, SHA, CRC32 (0f 38 / 0f 3a maps), FS/GS base ---- */
+	{
+		static const struct { const char *n; uint8_t pfx, map, op, imm; } x3[] = {
+			{ "pshufb", 0x66, 0x38, 0x00, 0 }, { "phaddw", 0x66, 0x38, 0x01, 0 }, { "phaddd", 0x66, 0x38, 0x02, 0 },
+			{ "pmaddubsw", 0x66, 0x38, 0x04, 0 }, { "psignb", 0x66, 0x38, 0x08, 0 }, { "pmulhrsw", 0x66, 0x38, 0x0b, 0 },
+			{ "pabsb", 0x66, 0x38, 0x1c, 0 }, { "pabsw", 0x66, 0x38, 0x1d, 0 }, { "pabsd", 0x66, 0x38, 0x1e, 0 },
+			{ "pmovzxbw", 0x66, 0x38, 0x30, 0 }, { "pmovzxbd", 0x66, 0x38, 0x31, 0 }, { "pmovzxbq", 0x66, 0x38, 0x32, 0 },
+			{ "pmovzxwd", 0x66, 0x38, 0x33, 0 }, { "pmovzxwq", 0x66, 0x38, 0x34, 0 }, { "pmovzxdq", 0x66, 0x38, 0x35, 0 },
+			{ "pmovsxbw", 0x66, 0x38, 0x20, 0 }, { "pmovsxdq", 0x66, 0x38, 0x25, 0 }, { "pmuldq", 0x66, 0x38, 0x28, 0 },
+			{ "pcmpeqq", 0x66, 0x38, 0x29, 0 }, { "movntdqa", 0x66, 0x38, 0x2a, 0 }, { "packusdw", 0x66, 0x38, 0x2b, 0 },
+			{ "pminsb", 0x66, 0x38, 0x38, 0 }, { "pminsd", 0x66, 0x38, 0x39, 0 }, { "pminuw", 0x66, 0x38, 0x3a, 0 }, { "pminud", 0x66, 0x38, 0x3b, 0 },
+			{ "pmaxsb", 0x66, 0x38, 0x3c, 0 }, { "pmaxsd", 0x66, 0x38, 0x3d, 0 }, { "pmaxuw", 0x66, 0x38, 0x3e, 0 }, { "pmaxud", 0x66, 0x38, 0x3f, 0 },
+			{ "pmulld", 0x66, 0x38, 0x40, 0 }, { "pcmpgtq", 0x66, 0x38, 0x37, 0 }, { "ptest", 0x66, 0x38, 0x17, 0 },
+			{ "aesimc", 0x66, 0x38, 0xdb, 0 }, { "aesenc", 0x66, 0x38, 0xdc, 0 }, { "aesenclast", 0x66, 0x38, 0xdd, 0 },
+			{ "aesdec", 0x66, 0x38, 0xde, 0 }, { "aesdeclast", 0x66, 0x38, 0xdf, 0 },
+			{ "sha1nexte", 0, 0x38, 0xc8, 0 }, { "sha1msg1", 0, 0x38, 0xc9, 0 }, { "sha1msg2", 0, 0x38, 0xca, 0 },
+			{ "sha256rnds2", 0, 0x38, 0xcb, 0 }, { "sha256msg1", 0, 0x38, 0xcc, 0 }, { "sha256msg2", 0, 0x38, 0xcd, 0 },
+			{ "palignr", 0x66, 0x3a, 0x0f, 1 }, { "pclmulqdq", 0x66, 0x3a, 0x44, 1 }, { "aeskeygenassist", 0x66, 0x3a, 0xdf, 1 },
+			{ "sha1rnds4", 0, 0x3a, 0xcc, 1 }, { "pblendw", 0x66, 0x3a, 0x0e, 1 }, { "blendps", 0x66, 0x3a, 0x0c, 1 },
+			{ "roundss", 0x66, 0x3a, 0x0a, 1 }, { "roundsd", 0x66, 0x3a, 0x0b, 1 }, { "pcmpistri", 0x66, 0x3a, 0x63, 1 },
+		};
+		XOp *src = NULL, *dst = NULL, *im = NULL;
+
+		/* op [imm,] xmm/m, xmm; sha256rnds2 writes its implicit %xmm0 first */
+		if (nops >= 2 && o[nops - 1].kind == XK_REG && o[nops - 1].cls == XR_XMM) {
+			dst = &o[nops - 1], src = &o[nops - 2];
+			if (nops == 3 && o[0].kind == XK_IMM)
+				im = &o[0];
+			else if (nops == 3 && !(o[0].kind == XK_REG && o[0].cls == XR_XMM && o[0].reg == 0 && !strcmp(mn, "sha256rnds2")))
+				src = NULL;
+		}
+		if (src && (src->kind == XK_MEM || src->kind == XK_EXPR || (src->kind == XK_REG && src->cls == XR_XMM)))
+			for (size_t i = 0; i < sizeof x3 / sizeof *x3; i++)
+				if (!strcmp(mn, x3[i].n) && !!im == !!x3[i].imm) {
+					uint8_t ops[3] = { 0x0f, x3[i].map, x3[i].op };
+					int64_t c = 0;
+					XForm f = F(.opsz16 = x3[i].pfx == 0x66, .op = ops, .nop = 3, .reg = dst->reg, .rm = src, .isz = im ? 1 : 0);
+
+					if (src->kind == XK_EXPR)
+						src->kind = XK_MEM;
+					if (im) {
+						x64_imm(a, im, &f, &c);
+						f.imm = c;
+					}
+					return x64_emit(a, &f);
+				}
+		/* crc32[bwlq] r/m, r32/r64: f2 (66) 0f 38 f0/f1 */
+		if (!strncmp(mn, "crc32", 5) && nops == 2 && o[1].kind == XK_REG && o[1].cls == XR_GPR) {
+			int z = mn[5] ? sfxsize(mn[5]) : o[0].kind == XK_REG ? o[0].size : 0;
+			uint8_t ops[3] = { 0x0f, 0x38, (uint8_t)(z == 1 ? 0xf0 : 0xf1) };
+
+			if (!z || (mn[5] && mn[6]))
+				return err(a, "invalid operand for instruction");
+			if (o[0].kind == XK_EXPR)
+				o[0].kind = XK_MEM;
+			return x64_emit(a, &F(.w = z == 8, .opsz16 = z == 2, .rep = 0xf2, .rex8 = z == 1 && o[0].kind == XK_REG && o[0].needrex,
+					      .op = ops, .nop = 3, .reg = o[1].reg, .rm = &o[0]));
+		}
+		/* pinsrd/pextrd/pinsrq/pextrq/pextrb/pinsrb */
+		if (nops == 3 && o[0].kind == XK_IMM && (!strcmp(mn, "pinsrd") || !strcmp(mn, "pinsrq") || !strcmp(mn, "pinsrb") ||
+		    !strcmp(mn, "pextrd") || !strcmp(mn, "pextrq") || !strcmp(mn, "pextrb"))) {
+			bool ins = mn[1] == 'i';
+			XOp *x = ins ? &o[2] : &o[1], *g = ins ? &o[1] : &o[2];
+			uint8_t ops[3] = { 0x0f, 0x3a, (uint8_t)(ins ? (mn[5] == 'b' ? 0x20 : 0x22) : (mn[5] == 'b' ? 0x14 : 0x16)) };
+			int64_t c = 0;
+			XForm f = F(.w = mn[5] == 'q', .opsz16 = 1, .op = ops, .nop = 3, .reg = x->reg, .rm = g, .isz = 1);
+
+			if (x->kind != XK_REG || x->cls != XR_XMM)
+				return err(a, "invalid operand for instruction");
+			if (g->kind == XK_EXPR)
+				g->kind = XK_MEM;
+			x64_imm(a, &o[0], &f, &c);
+			f.imm = c;
+			return x64_emit(a, &f);
+		}
+		/* rd/wr fs/gs base: f3 (rex.w) 0f ae /0../3 */
+		if (nops == 1 && o[0].kind == XK_REG && o[0].cls == XR_GPR && (o[0].size == 8 || o[0].size == 4) &&
+		    (!strcmp(mn, "rdfsbase") || !strcmp(mn, "rdgsbase") || !strcmp(mn, "wrfsbase") || !strcmp(mn, "wrgsbase"))) {
+			uint8_t ops[2] = { 0x0f, 0xae };
+
+			return x64_emit(a, &F(.w = o[0].size == 8, .rep = 0xf3, .op = ops, .nop = 2,
+					      .reg = (mn[0] == 'w' ? 2 : 0) + (mn[2] == 'g'), .rm = &o[0]));
+		}
+		if (nops == 0 && (!strcmp(mn, "emms") || !strcmp(mn, "fnclex") || !strcmp(mn, "mwaitx") || !strcmp(mn, "monitorx"))) {
+			static const uint8_t b0[] = { 0x0f, 0x77 }, b1[] = { 0xdb, 0xe2 }, b2[] = { 0x0f, 0x01, 0xfb }, b3[] = { 0x0f, 0x01, 0xfa };
+
+			return mn[0] == 'e' ? x64_raw(a, b0, 2) : mn[1] == 'n' ? x64_raw(a, b1, 2) : mn[0] == 'm' && mn[1] == 'w' ? x64_raw(a, b2, 3) : x64_raw(a, b3, 3);
+		}
+		if (nops == 1 && (!strcmp(mn, "fnsave") || !strcmp(mn, "frstor") || !strcmp(mn, "fnstenv") || !strcmp(mn, "fldenv"))) {
+			uint8_t ops[1] = { (uint8_t)(mn[2] == 's' || mn[1] == 'r' ? 0xdd : 0xd9) };
+
+			if (o[0].kind == XK_EXPR)
+				o[0].kind = XK_MEM;
+			return x64_emit(a, &F(.op = ops, .nop = 1, .reg = !strcmp(mn, "fnsave") ? 6 : !strcmp(mn, "frstor") ? 4 :
+					      !strcmp(mn, "fnstenv") ? 6 : 4, .rm = &o[0]));
+		}
+	}
 	/* ---- SSE2 packed integer and more SSE (66/none 0f op /r) ---- */
 	{
 		static const struct { const char *n; uint8_t pfx, op; } pk[] = {
