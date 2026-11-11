@@ -835,16 +835,14 @@ static val incdec_op(ecx *e, qty t, bool inc, bool post, val *old)
 			nv = *old = f_arith(e, inc ? T_PLUS : T_MINUS, t, cp, one);
 		}
 	} else if (is_flt(c, t)) {
-		int d = fpk(e, t);
-
 		toreg(e, old);
 		if (post) {
 			int r = treg(e);
 
 			mov(e, 1, r, old->r);
-			nv = f_arith(e, inc ? T_PLUS : T_MINUS, t, vreg(r), f_const(d, 1.0));
+			nv = f_arith(e, inc ? T_PLUS : T_MINUS, t, vreg(r), f_const_t(e, t, 1.0));
 		} else {
-			nv = *old = f_arith(e, inc ? T_PLUS : T_MINUS, t, *old, f_const(d, 1.0));
+			nv = *old = f_arith(e, inc ? T_PLUS : T_MINUS, t, *old, f_const_t(e, t, 1.0));
 		}
 	} else if (is_wide(c, t)) {
 		val one = vconst(1), cp = *old;

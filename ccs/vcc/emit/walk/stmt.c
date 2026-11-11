@@ -776,7 +776,7 @@ VPRIV void wk_function(ecx *e, uint32_t s)
 	if (KIND(c, W->rty) != TY_VOID) {
 		int k = KIND(c, W->rty);
 
-		if (k == TY_FLOAT16 || ((k == TY_INT128 || k == TY_UINT128) && !LO(i128mem)()) || k == TY_FLOAT128)
+		if (((k == TY_INT128 || k == TY_UINT128) && !LO(i128mem)()) || k == TY_FLOAT128)
 			efatal(e, y->loc, "x86-64: this return type is not supported yet (PLAN-x86.md X3)");
 	}
 	if (body->aux > 256)
@@ -792,7 +792,7 @@ VPRIV void wk_function(ecx *e, uint32_t s)
 		qty pt = c->syms[p].ty;
 		int k = KIND(c, pt);
 
-		if (k == TY_FLOAT16 || ((k == TY_INT128 || k == TY_UINT128) && !LO(i128mem)()) || k == TY_FLOAT128)
+		if (((k == TY_INT128 || k == TY_UINT128) && !LO(i128mem)()) || k == TY_FLOAT128)
 			efatal(e, c->syms[p].loc, "x86-64: this parameter type is not supported yet (PLAN-x86.md X3)");
 		if ((ft->flags & TF_NOPROTO) && k == TY_FLOAT)
 			pt = prim(TY_DOUBLE);	/* K&R: received as the caller promoted it */

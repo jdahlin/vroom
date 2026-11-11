@@ -170,12 +170,20 @@ VPRIV int x64_toreg(ecx *e, val *v, int size)
 
 VPRIV void x64_load(ecx *e, int rd, const lval *l, int size, bool sgn)
 {
-	x64_mem(e, X_LD, size, rd, l, sgn);
+	if (size == 2 && IS_XMM(rd)) {
+		x64_mem(e, X_LD, 2, R11, l, false);
+		x64_op3(e, X_MOV, 4, rd, R11, XNOREG);
+	} else
+		x64_mem(e, X_LD, size, rd, l, sgn);
 }
 
 VPRIV void x64_store(ecx *e, int rs, const lval *l, int size)
 {
-	x64_mem(e, X_ST, size, rs, l, false);
+	if (size == 2 && IS_XMM(rs)) {
+		x64_op3(e, X_MOV, 4, R11, rs, XNOREG);
+		x64_mem(e, X_ST, 2, R11, l, false);
+	} else
+		x64_mem(e, X_ST, size, rs, l, false);
 }
 
 VPRIV int x64_laddr(ecx *e, const lval *l)
@@ -781,7 +789,8 @@ VPRIV val x64_fbits(ecx *e, val v, int size)
 {
 	int r = x64_treg(e);
 
-	x64_op3(e, X_MOV, size == 4 ? 4 : 8, r, v.r, XNOREG);
+	x64_op3(e, X_MOV, size <= 4 ? 4 : 8, r, v.r, XNOREG);
+	if (size == 2) x64_op3(e, X_ANDI, 4, r, r, XNOREG)->imm = 0xffff;
 	x64_tfree(e, v.r);
 	return (val){ .k = V_REG, .r = (uint8_t)r };
 }

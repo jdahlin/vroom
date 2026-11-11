@@ -238,7 +238,9 @@ VPRIV bool eval(cc *c, uint32_t n, cval *v)
 				return true;
 			}
 			v->f = is_signed(c, N(x->a)->ty) ? (double)a.i : (double)(u128)a.i;
-			if (KIND(c, to) == TY_FLOAT)
+			if (KIND(c, to) == TY_FLOAT16)
+				v->f = h_to_d(q_to_h(q_of_i(a.i, is_signed(c, N(x->a)->ty))));
+			else if (KIND(c, to) == TY_FLOAT)
 				v->f = is_signed(c, N(x->a)->ty) ? (double)(float)a.i : (double)(float)(u128)a.i;	/* one rounding */
 			return true;
 		case CK_F2I:
@@ -255,6 +257,8 @@ VPRIV bool eval(cc *c, uint32_t n, cval *v)
 			v->ice = false;
 			if (is_q(c, to))
 				set_q(v, q_to_p(get_q(&a, true), q_prec(c, to)));
+			else if (KIND(c, to) == TY_FLOAT16)
+				v->f = h_to_d(q_to_h(get_q(&a, true))), v->ld = false;
 			else if (a.ld && KIND(c, to) == TY_FLOAT)
 				v->f = q_to_f(a.q), v->ld = false;	/* one rounding */
 			else if (KIND(c, to) == TY_FLOAT)
@@ -455,6 +459,8 @@ VPRIV bool eval(cc *c, uint32_t n, cval *v)
 			case T_EXCLAIMEQ: v->i = l != r; break;
 			default: return false;
 			}
+			if (v->kind == CV_FLT && KIND(c, x->ty) == TY_FLOAT16)
+				v->f = h_to_d(q_to_h(q_of_d(v->f)));
 			if (v->kind == CV_FLT && KIND(c, x->ty) == TY_FLOAT)
 				v->f = (float)v->f;
 			return true;

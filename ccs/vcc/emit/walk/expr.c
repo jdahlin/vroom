@@ -29,8 +29,8 @@ static void wk_scalar(ecx *e, uint32_t n, qty t)
 	cc *c = e->c;
 	int k = KIND(c, t);
 
-	if (k == TY_FLOAT16 || k == TY_FLOAT128 || ((k == TY_INT128 || k == TY_UINT128) && !LO(i128mem)()))
-		wk_unsup(e, n, k == TY_FLOAT16 ? "_Float16" : k == TY_FLOAT128 ? "__float128" : "__int128");
+	if (k == TY_FLOAT128 || ((k == TY_INT128 || k == TY_UINT128) && !LO(i128mem)()))
+		wk_unsup(e, n, k == TY_FLOAT128 ? "__float128" : "__int128");
 }
 
 static bool wk_wide(cc *c, qty t) { return KIND(c, t) == TY_INT128 || KIND(c, t) == TY_UINT128; }
@@ -1719,6 +1719,8 @@ static val wk_fpconst(ecx *e, qty t, double d, u128 q)
 		float f = (float)d;
 		uint64_t bits = 0;
 
+		if (KIND(c, t) == TY_FLOAT16)
+			return LO(fconst)(e, q_to_h(q_of_d(d)), 2);
 		if (KIND(c, t) == TY_FLOAT)
 			memcpy(&bits, &f, 4);
 		else
@@ -1905,14 +1907,14 @@ static val wk_builtin(ecx *e, uint32_t n)
 		}
 		v = LO(fbits)(e, v, sz);
 		v = LO(bin)(e, T_AMP, 8, false, v,
-			vconst(sz == 4 ? 0x7fffffffULL : 0x7fffffffffffffffULL));
+			vconst(sz == 2 ? 0x7fffULL : sz == 4 ? 0x7fffffffULL : 0x7fffffffffffffffULL));
 		if (x->aux == BI_ISNORMAL) {
-			v = LO(bin)(e, T_GREATERGREATER, 8, false, v, vconst(sz == 4 ? 23 : 52));
+			v = LO(bin)(e, T_GREATERGREATER, 8, false, v, vconst(sz == 2 ? 10 : sz == 4 ? 23 : 52));
 			v = LO(bin)(e, T_MINUS, 8, false, v, vconst(1));
-			return LO(cmp)(e, T_LESS, 8, false, v, vconst(sz == 4 ? 0xfe : 0x7fe));
+			return LO(cmp)(e, T_LESS, 8, false, v, vconst(sz == 2 ? 0x1e : sz == 4 ? 0xfe : 0x7fe));
 		}
 		return LO(cmp)(e, x->aux == BI_ISNAN ? T_GREATER : x->aux == BI_ISINF ? T_EQUALEQUAL : T_LESS,
-			8, false, v, vconst(sz == 4 ? 0x7f800000ULL : 0x7ff0000000000000ULL));
+			8, false, v, vconst(sz == 2 ? 0x7c00ULL : sz == 4 ? 0x7f800000ULL : 0x7ff0000000000000ULL));
 	}
 	case BI_SIGNBIT: {
 		qty at = N(arg[0])->ty;

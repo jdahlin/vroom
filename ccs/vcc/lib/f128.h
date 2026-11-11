@@ -32,7 +32,7 @@ F128_UNUSED static u128 q_qnan(void) { return (u128)0x7fff8 << 108; }
    m * 2^(e - bias - p - 3); rounds to nearest even with m's low bit sticky */
 F128_UNUSED static u128 q_round(int s, int e, u128 m, int p, int emax)
 {
-	int eb = emax == 0x7fff ? 15 : emax == 0x7ff ? 11 : 8;
+	int eb = emax == 0x7fff ? 15 : emax == 0x7ff ? 11 : emax == 0x1f ? 5 : 8;
 	unsigned g;
 
 	if (!m)
@@ -250,7 +250,7 @@ F128_UNUSED static u128 q_of_d(double d)
 /* rounded to binary64 (p 52) or binary32 (p 23): the bits */
 F128_UNUSED static uint64_t q_trunc(u128 a, int p, int emax, int bias)
 {
-	int s, e, eb = emax == 0x7ff ? 11 : 8;
+	int s, e, eb = emax == 0x7ff ? 11 : emax == 0x1f ? 5 : 8;
 	u128 m;
 
 	q_un(a, &s, &e, &m);
@@ -263,6 +263,31 @@ F128_UNUSED static uint64_t q_trunc(u128 a, int p, int emax, int bias)
 	q_norm(&e, &m);
 	m = (m >> (109 - p)) | ((m & (((u128)1 << (109 - p)) - 1)) != 0);
 	return (uint64_t)q_round(s, e - 16383 + bias, m, p, emax);
+}
+
+/* IEEE binary16 storage, independent of host half support. */
+F128_UNUSED static uint16_t q_to_h(u128 a) { return (uint16_t)q_trunc(a, 10, 0x1f, 15); }
+
+F128_UNUSED static double h_to_d(uint16_t h)
+{
+	uint64_t sign = (uint64_t)(h >> 15) << 63, m = h & 1023, bits;
+	int ex = (h >> 10) & 31;
+	double d;
+
+	if (ex == 31)
+		bits = sign | (uint64_t)0x7ff << 52 | m << 42;
+	else if (!ex && !m)
+		bits = sign;
+	else {
+		if (!ex) {
+			ex = 1;
+			while (!(m & 1024)) m <<= 1, ex--;
+			m &= 1023;
+		}
+		bits = sign | (uint64_t)(ex - 15 + 1023) << 52 | m << 42;
+	}
+	memcpy(&d, &bits, 8);
+	return d;
 }
 
 F128_UNUSED static double q_to_d(u128 a)

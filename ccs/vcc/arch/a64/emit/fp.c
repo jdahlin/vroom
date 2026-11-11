@@ -1,5 +1,6 @@
 /* vcc code generator: floating point (long double through libcalls) */
 #include "../../../emit/emitimpl.h"
+#include "../../../lib/f128.h"
 
 enum { FV0 = 16, FV1 = 17 };
 
@@ -7,7 +8,7 @@ VPRIV int fpk(ecx *e, qty t)
 {
 	uint64_t sz = tsize(e->c, t);
 
-	if (sz != 4 && sz != 8)
+	if (sz != 2 && sz != 4 && sz != 8)
 		efatal(e, e->curloc, "%s floating point is not supported", sz == 2 ? "16-bit" : "128-bit");
 	return sz == 8;
 }
@@ -57,7 +58,7 @@ static void f_load(ecx *e, int d, int vr, val *v)
 VPRIV void vr_store(ecx *e, int sz, int vr, int base, int32_t off)
 {
 	word(e, f_out(sz >= 8, R_X16, vr));
-	mem(e, I_ST, sz >= 8 ? 3 : 2, 0, R_X16, base, off);
+	mem(e, I_ST, sz >= 8 ? 3 : sz == 2 ? 1 : 2, 0, R_X16, base, off);
 	if (sz == 16) {
 		word(e, q_out_hi(R_X16, vr));
 		mem(e, I_ST, 3, 0, R_X16, base, off + 8);
@@ -65,7 +66,7 @@ VPRIV void vr_store(ecx *e, int sz, int vr, int base, int32_t off)
 }
 VPRIV void vr_load(ecx *e, int sz, int vr, int base, int32_t off)
 {
-	mem(e, I_LD, sz >= 8 ? 3 : 2, 0, R_X16, base, off);
+	mem(e, I_LD, sz >= 8 ? 3 : sz == 2 ? 1 : 2, 0, R_X16, base, off);
 	word(e, f_in(sz >= 8, vr, R_X16));
 	if (sz == 16) {
 		mem(e, I_LD, 3, 0, R_X16, base, off + 8);
@@ -121,6 +122,8 @@ static double ld_to_d(i128 b)
 /* a floating constant of type t */
 VPRIV val f_const_t(ecx *e, qty t, double x)
 {
+	if (KIND(e->c, t) == TY_FLOAT16)
+		return vconst(q_to_h(q_of_d(x)));
 	if (is_ld(e->c, t))
 		return vconst(ld_of_d(x));
 	return f_const(fpk(e, t), x);
@@ -167,6 +170,11 @@ VPRIV val f_arith(ecx *e, int op, qty ty, val a, val b)
 	int d, ra;
 	uint32_t w;
 
+	if (KIND(e->c, ty) == TY_FLOAT16) {
+		a = f_cast(e, a, ty, prim(TY_FLOAT));
+		b = f_cast(e, b, ty, prim(TY_FLOAT));
+		return f_cast(e, f_arith(e, op, prim(TY_FLOAT), a, b), prim(TY_FLOAT), ty);
+	}
 	if (is_ld(e->c, ty)) {
 		val v[2] = { a, b };
 		qty ts[2] = { ty, ty };
@@ -228,6 +236,11 @@ VPRIV val f_compare(ecx *e, int op, qty t, val a, val b)
 {
 	int d, cond;
 
+	if (KIND(e->c, t) == TY_FLOAT16) {
+		a = f_cast(e, a, t, prim(TY_FLOAT));
+		b = f_cast(e, b, t, prim(TY_FLOAT));
+		return f_compare(e, op, prim(TY_FLOAT), a, b);
+	}
 	if (is_ld(e->c, t))
 		return ld_compare(e, op, t, a, b);
 	d = fpk(e, t);
@@ -255,6 +268,9 @@ VPRIV val f_tobool(ecx *e, val v, qty t)
 {
 	int d;
 
+	if (KIND(e->c, t) == TY_FLOAT16)
+		return f_tobool(e, f_cast(e, v, t, prim(TY_FLOAT)), prim(TY_FLOAT));
+
 	if (is_ld(e->c, t)) {
 		if (v.k == V_CONST)
 			return vconst(((u128)v.i << 1) != 0);
@@ -272,6 +288,14 @@ VPRIV val f_tobool(ecx *e, val v, qty t)
 VPRIV val f_neg(ecx *e, val v, qty t)
 {
 	int d;
+
+	if (KIND(e->c, t) == TY_FLOAT16) {
+		if (v.k == V_CONST)
+			return vconst(v.i ^ 0x8000);
+		toreg(e, &v);
+		opi(e, I_EORI, 0, v.r, v.r, 0x8000);
+		return v;
+	}
 
 	if (is_ld(e->c, t)) {
 		if (v.k == V_CONST)
@@ -363,6 +387,30 @@ VPRIV val f_cast(ecx *e, val v, qty from, qty to)
 
 	if (v.k == V_NONE)
 		return v;
+	if (KIND(c, from) == TY_FLOAT16 || KIND(c, to) == TY_FLOAT16) {
+		bool fh = KIND(c, from) == TY_FLOAT16;
+		qty wide = fh ? to : from;
+
+		if (from == to)
+			return v;
+		if (fh && (!tf || is_ld(c, to)))
+			return f_cast(e, f_cast(e, v, from, prim(TY_FLOAT)), prim(TY_FLOAT), to);
+		if (!fh && is_ld(c, from))
+			return call_named(e, FIXED(FN_TRUNCTFHF2), &v, &from, 1, to, false);
+		if (!fh && !ff)
+			return f_cast(e, f_cast(e, v, from, prim(TY_DOUBLE)), prim(TY_DOUBLE), to);
+		if (v.k == V_CONST)
+			return fh ? f_const_t(e, to, h_to_d((uint16_t)v.i)) : vconst(q_to_h(q_of_d(f_val(fpk(e, from), v.i))));
+		{
+			bool d = KIND(c, wide) == TY_DOUBLE;
+			uint32_t op = fh ? (d ? 0x1ee2c000u : 0x1ee24000u) : (d ? 0x1e63c000u : 0x1e23c000u);
+
+			f_load(e, !fh && d, FV0, &v);
+			word(e, op | FV0 << 5 | FV0);
+			word(e, f_out(fh && d, v.r, FV0));
+			return v;
+		}
+	}
 	if (KIND(c, to) == TY_BOOL)
 		return f_tobool(e, v, from);
 	if (is_ld(c, from) || is_ld(c, to))

@@ -63,7 +63,9 @@ static __attribute__((noinline, cold)) void literal_range(cc *c, const ptok *t, 
 		if (!nz)
 			return;
 	}
-	if (kd == TY_FLOAT)
+	if (kd == TY_FLOAT16)
+		lim = big ? "6.5504E+4" : "5.96046E-8";
+	else if (kd == TY_FLOAT)
 		lim = big ? "3.40282347E+38" : "1.40129846E-45";
 	else if (q)
 		lim = big ? "1.18973149535723176508575932662800702E+4932" : "6.47517511943802511092443895822764655E-4966";
@@ -109,6 +111,14 @@ static uint32_t number_s(cc *c, const ptok *t, const char *s, size_t n)
 		qty ty = prim(TY_DOUBLE);
 		double d;
 
+		if (k >= 3 && (s[k - 3] | 32) == 'f' && s[k - 2] == '1' && s[k - 1] == '6') {
+			uint16_t h = q_to_h(q_parse(s, k - 3));
+
+			ty = prim(TY_FLOAT16);
+			if ((h & 0x7fff) == 0x7c00 || !(h & 0x7fff))
+				literal_range(c, t, s, k - 3, ty, (h & 0x7fff) == 0x7c00);
+			return mk_flt(c, h_to_d(h), ty, t->loc);
+		}
 		while (k > 0 && (s[k - 1] == 'f' || s[k - 1] == 'F' || s[k - 1] == 'l' || s[k - 1] == 'L' ||
 				 s[k - 1] == 'q' || s[k - 1] == 'Q'))
 			k--;

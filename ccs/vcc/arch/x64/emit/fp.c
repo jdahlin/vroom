@@ -47,12 +47,32 @@ static void x64_jcc(ecx *e, int cc, uint32_t l)
 	i->label = l;
 }
 
+/* Compiler-runtime conversion helpers take/return half bits in xmm0.
+   Use the regular ABI call path so every live temporary survives. */
+static val x64_half_call(ecx *e, int name, val v, qty from, qty to)
+{
+	wkarg a;
+	lval slot = x64_slot(e, 16);
+
+	x64_classify(e, from, &a);
+	a.slot = (int32_t)slot.off;
+	if (x64_isld(e->c, from)) {
+		lval src = x64_at(x64_toreg(e, &v, 8));
+
+		x64_x87ld(e, &src);
+		x64_x87st(e, &slot);
+	} else
+		x64_store(e, v.r, &slot, wk_size(e->c, from));
+	x64_tfree(e, v.r);
+	return x64_call(e, FIXED(name), NULL, &a, 1, false, NULL, to);
+}
+
 VPRIV val x64_fconst(ecx *e, uint64_t bits, int size)
 {
 	int r = x64_ftreg(e);
 
 	x64_movi(e, R11, (int64_t)bits);
-	x64_op3(e, X_MOV, size == 4 ? 4 : 8, r, R11, XNOREG);
+	x64_op3(e, X_MOV, size <= 4 ? 4 : 8, r, R11, XNOREG);
 	return x64_vr(r);
 }
 
@@ -60,6 +80,12 @@ VPRIV val x64_fbin(ecx *e, int op, qty t, val a, val b)
 {
 	cc *c = e->c;
 	int k = op == T_PLUS ? 0 : op == T_MINUS ? 1 : op == T_STAR ? 2 : 3;
+
+	if (KIND(c, t) == TY_FLOAT16) {
+		a = x64_cvt(e, a, t, prim(TY_FLOAT));
+		b = x64_cvt(e, b, t, prim(TY_FLOAT));
+		return x64_cvt(e, x64_fbin(e, op, prim(TY_FLOAT), a, b), prim(TY_FLOAT), t);
+	}
 
 	if (x64_isld(c, t)) {
 		static const int xf[4] = { XF_ADD, XF_SUB, XF_MUL, XF_DIV };
@@ -93,7 +119,7 @@ VPRIV val x64_fneg(ecx *e, qty t, val a)
 		x64_tfree(e, ra);
 		return x64_vr(rd);
 	}
-	x64_movi(e, R11, x64_fsz(c, t) == 4 ? (int64_t)0x80000000 : INT64_MIN);
+	x64_movi(e, R11, (KIND(c, t) == TY_FLOAT16) ? 0x8000 : x64_fsz(c, t) == 4 ? (int64_t)0x80000000 : INT64_MIN);
 	x64_op3(e, X_MOV, x64_fsz(c, t), XMM15, R11, XNOREG);
 	x64_op3(e, X_FXOR, 8, a.r, a.r, XMM15);
 	return a;
@@ -107,6 +133,11 @@ VPRIV val x64_fcmp(ecx *e, int op, qty t, val a, val b)
 	int cc = op == T_LESS || op == T_GREATER ? CC_A : CC_AE;
 	int rd;
 
+	if (KIND(c, t) == TY_FLOAT16) {
+		a = x64_cvt(e, a, t, prim(TY_FLOAT));
+		b = x64_cvt(e, b, t, prim(TY_FLOAT));
+		return x64_fcmp(e, op, prim(TY_FLOAT), a, b);
+	}
 	if (op == WK_FCMP_UNORDERED)
 		cc = CC_P;
 	else if (op == WK_FCMP_ORDERED_NE)
@@ -207,6 +238,17 @@ VPRIV val x64_cvt(ecx *e, val v, qty from, qty to)
 	bool ff = is_flt(c, from), tf = is_flt(c, to), fl = x64_isld(c, from), tl = x64_isld(c, to);
 	int fs = wk_size(c, from), ts = wk_size(c, to);
 
+	if (KIND(c, from) == TY_FLOAT16) {
+		if (KIND(c, to) == TY_FLOAT16)
+			return v;
+		v = x64_half_call(e, FN_EXTENDHFSF2, v, from, prim(TY_FLOAT));
+		return x64_cvt(e, v, prim(TY_FLOAT), to);
+	}
+	if (KIND(c, to) == TY_FLOAT16) {
+		if (!ff)
+			v = x64_cvt(e, v, from, prim(TY_DOUBLE)), from = prim(TY_DOUBLE);
+		return x64_half_call(e, x64_isld(c, from) ? FN_TRUNCXFHF2 : KIND(c, from) == TY_FLOAT ? FN_TRUNCSFHF2 : FN_TRUNCDFHF2, v, from, to);
+	}
 	if (KIND(c, to) == TY_BOOL) {
 		int rd;
 

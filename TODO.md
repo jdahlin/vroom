@@ -571,11 +571,16 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
   fatal "out of registers" (`emit.c:2176-2195`).
   *Validate:* T1 `deep_expr.c` (generated: right-nested depth 10..200,
   mixed int/FP/calls); T5 for depth 10k (no crash).
-- [ ] **`_Float16`** (`emit.c:3520`), **FP vectors** (`float32x4_t`,
+- [x] **`_Float16` on Linux x86-64 and arm64.** Storage, literals,
+  rounding, arithmetic/conversions, classification, and half-float HFA calls.
+  *Validated:* `tests/vcc/float16.c` exhausts all 65,536 encodings;
+  `tests/abi/float16` checks all clang/vcc caller/callee combinations on
+  both Linux targets. Kernel sema 887/887 and preprocessing parity 920/920.
+- [ ] **FP vectors** (`float32x4_t`,
   `emit.c:5886`), **`"w"` asm operands** (`emit.c:7831`), **16-byte atomics**
   (`emit.c:5205`), **128-bit overflow builtins** (`emit.c:4925`),
-  **`__atomic_fetch_nand`**, **HVA / half-float HFA** (`hfa_walk` `emit.c:2526`).
-  *Validate:* one T1 file each (`f16.c`, `neon-float.c`, `asm-w.c`,
+  **`__atomic_fetch_nand`**, **HVA** (`hfa_walk` `emit.c:2526`).
+  *Validate:* one T1 file each (`neon-float.c`, `asm-w.c`,
   `atomic128.c`, `ovf128.c`); T2 for HVA/half HFA.
 - [ ] **Stack protector, BTI/PAC (`-mbranch-protection`), `-pg`,
   `-fpatchable-function-entry`**; `-finstrument-functions` is parsed but
