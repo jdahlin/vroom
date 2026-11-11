@@ -216,7 +216,7 @@ VPRIV lval gen_lval(ecx *e, uint32_t n)
 	case N_CAST:
 		if (x->aux == CK_NOP && (N(x->a)->flags & NF_LVALUE))
 			return gen_lval(e, x->a);
-		/* fall through */
+		__attribute__((fallthrough));
 	default: {
 		val v = gen(e, n);
 

@@ -96,7 +96,7 @@ static bool uv_warn(cc *c, uint32_t e, uvw *w)
 	case N_DEREF:
 		if (vol(c, e))
 			return false;
-		/* fallthrough */
+		__attribute__((fallthrough));
 	case N_ADDR:
 	unop:
 		w->loc = x->loc, w->r[0] = rng_np(c, x->a), w->nr = 1;

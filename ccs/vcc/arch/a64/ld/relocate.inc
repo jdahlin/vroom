@@ -156,7 +156,7 @@ static void relocate_isec(uint32_t si, uint8_t *buf)
 					}
 				}
 			}
-			/* fall through */
+			__attribute__((fallthrough));
 		case R_AARCH64_LD64_GOT_LO12_NC: {
 			uint64_t slot = isec_va(got_isec, 8 * (uint64_t)(symi < o->firstg ? o->lgotidx[symi] :
 									  gsyms[o->gs[symi - o->firstg]].gotidx));

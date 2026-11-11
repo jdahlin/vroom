@@ -1035,7 +1035,7 @@ static void uv_stmt(uwk *w, uint32_t n, ust *st)
 			uv_ex(w, x->a, st, false);
 			return;
 		}
-		/* fall through */
+		__attribute__((fallthrough));
 	case N_WHILE: case N_FOR:
 		if (x->op == N_FOR)
 			uv_stmt(w, x->a, st);

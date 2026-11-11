@@ -1465,7 +1465,7 @@ VPRIV void wstmt(ecx *e, uint32_t n)
 		/* nested: its switch reaches it as a goto target (wswitch) */
 		if (!W->ngl || !wglabel(W, WG_CASE | n))
 			efatal(e, x->loc, "wasm: a case label in a nested statement of a switch whose body is not a compound statement");
-		/* fall through */
+		__attribute__((fallthrough));
 	case N_LABEL:
 		wstmt(e, x->c);
 		break;

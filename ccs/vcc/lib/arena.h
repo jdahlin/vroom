@@ -43,6 +43,8 @@
 #include <sys/mman.h>
 #include <unistd.h>
 
+#include "attr.h"
+
 typedef struct vmreg {
 	char *p;
 	size_t cap;
@@ -55,7 +57,7 @@ typedef struct vmreg {
 #define VMREG_MIN ((size_t)64 << 20)
 #define VMREG_PAGE ((size_t)16384)	/* arm64 macOS; a smaller real page only means more zeroing */
 
-static inline void *vmreg_map(size_t n)
+static inline VUSE VRETNONNULL void *vmreg_map(size_t n)
 {
 	void *p = mmap(NULL, n, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANON | MAP_NORESERVE, -1, 0);
 
@@ -140,7 +142,7 @@ __attribute__((noinline, cold)) static void vmreg_dbg_put(vmreg *r, size_t used)
 /* ---- the regions ---- */
 
 /* at least n bytes, zero (or, for a scratch region, whatever the last job left) */
-static inline void *vmreg_get(vmreg *r, size_t n, const char *name)
+static inline VUSE VNONNULL(1) void *vmreg_get(vmreg *r, size_t n, const char *name)
 {
 	if (__builtin_expect(r->cap < n || r->busy, 0)) {
 		if (r->p)
@@ -218,7 +220,7 @@ static inline void vmpool_give(vmpool *pl, vmreg *r)
 /* ---------------- reservations, regions, arenas ---------------- */
 
 /* n bytes of anonymous memory (flags: MAP_NORESERVE or 0); perror(msg) and abort on failure */
-static inline void *vreserve(size_t n, int flags, const char *msg)
+static inline VUSE VRETNONNULL void *vreserve(size_t n, int flags, const char *msg)
 {
 	void *p = mmap(NULL, n, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANON | flags, -1, 0);
 
@@ -233,7 +235,7 @@ static inline void *vreserve(size_t n, int flags, const char *msg)
 typedef struct vregion { uint8_t *base; size_t used, cap; } vregion;
 
 /* n bytes aligned to al (a power of two); prints msg and aborts when full */
-static inline void *vregion_push(vregion *r, size_t n, size_t al, const char *msg)
+static inline VUSE VRETNONNULL VNONNULL(1) void *vregion_push(vregion *r, size_t n, size_t al, const char *msg)
 {
 	size_t u = (r->used + al - 1) & ~(al - 1);
 
@@ -250,7 +252,7 @@ typedef struct varena {
 	char *base, *p, *end;
 } varena;
 
-static inline void *varena_alloc(varena *a, size_t n)
+static inline VUSE VRETNONNULL VNONNULL(1) void *varena_alloc(varena *a, size_t n)
 {
 	char *r = a->p;
 

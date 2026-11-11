@@ -2480,7 +2480,7 @@ static bool pair(un *u, int k, uint64_t a64, uint64_t b64)
 		if (QQ(a) != QQ(b))
 			return false;
 		a = QI(a), b = QI(b);
-		/* fallthrough */
+		__attribute__((fallthrough));
 	case K_TIDX:
 		if (a < e->nty_bi || b < e->nty_bi)
 			return a == b;
@@ -2495,7 +2495,7 @@ static bool pair(un *u, int k, uint64_t a64, uint64_t b64)
 		if (!a || !b)
 			return a == b;
 		a--, b--;
-		/* fallthrough */
+		__attribute__((fallthrough));
 	case K_STR:
 		if (!a || !b)
 			return a == b;
@@ -2512,7 +2512,7 @@ static bool pair(un *u, int k, uint64_t a64, uint64_t b64)
 		if (!a || !b)
 			return a == b;
 		a--, b--;
-		/* fallthrough */
+		__attribute__((fallthrough));
 	case K_LIST:
 		return pair_w(u, W_LIST, a, b, &found) && found;
 	default:

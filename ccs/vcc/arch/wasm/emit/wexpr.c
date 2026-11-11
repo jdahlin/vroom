@@ -386,7 +386,7 @@ VPRIV void wlval(ecx *e, uint32_t n, wlv *l, qty t)
 			wlval(e, x->a, l, t);
 			return;
 		}
-		/* fall through */
+		__attribute__((fallthrough));
 	default:
 		if (wty(c, x->ty) != WT_MEM)
 			efatal(e, x->loc, "wasm: unsupported lvalue (node %d)", x->op);
@@ -1338,7 +1338,7 @@ static bool wbcp_in(cc *c, uint32_t n)
 	case N_BUILTIN:
 		if (x->aux == BI_CONSTANT_P)
 			return true;
-		/* fall through */
+		__attribute__((fallthrough));
 	case N_CALL:
 		for (uint32_t i = 0; i < x->c; i++)
 			if (wbcp_in(c, c->lists[x->b + i]))
