@@ -425,6 +425,16 @@ byggsätten, samt faktiskt wasm64-runtime (två VLA-prov). Kernel-sema
 med en VM-typedef kan fortfarande evaluera om dess redan sparade gräns;
 den generella typedef-återanvändningen och inline-alloca är inte färdiga.
 
+Efterföljande emitterrättning återanvänder nu VM-typedefens sparade
+gränser också vid senare variabeldeklarationer. Cachen skiljer funktion
+och inline-instans; samma deklarations kod körs fortfarande på varje
+loopvarv. Ny regression kontrollerar ändrade gränsvariabler, nästlade
+typedefs, nitton loopvarv och två inline-instanser. Sju relevanta
+runtimeprov per Linux-mål/byggsätt, -O0/-O2 och tre faktiska wasm64-prov
+går grönt. Större VLA-urval har ännu ett fel (`vla-16`, compound-literal
+lvalue), tio oförändrade referens-/kontraktsfiltreringar och Clangs
+befintliga frontendkrasch i `vla-tert-1`; dessa döljs inte.
+
 `__builtin_complex` konstruerar komplexa tal utan att tappa signed zero,
 NaN-bitar eller argumentbiverkningar. Komplexa `++`/`--` uppdaterar bara
 realdelen med en läsning, en beräkning och en skrivning; imaginärdelen

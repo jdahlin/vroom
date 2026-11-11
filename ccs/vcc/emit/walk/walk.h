@@ -63,7 +63,7 @@ typedef struct wkst {
 	uint32_t *lgen, *ulbl;	/* per user label: local label */
 	uint32_t *clbl;		/* per node (N_CASE/N_DEFAULT): local label, valid when cgen == gen */
 	uint32_t *cgen;
-	uint32_t *vgen;		/* per node (a VLA size): its value is in slot voff when vgen == gen */
+	uint32_t *vgen, *vinst;	/* per-node VLA size slot, keyed by function and inline instance */
 	int64_t *voff;
 	uint32_t *zgen;		/* per sym (a VLA): its saved sp was zeroed on entry when zgen == gen */
 	wkloop loop[WK_MAXLOOP];

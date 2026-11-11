@@ -776,7 +776,7 @@ static val wk_vla_len(ecx *e, uint32_t sn)
 	wkst *W = e->wk;
 	cc *c = e->c;
 
-	if (W->vgen[sn] == W->gen) {
+	if (W->vgen[sn] == W->gen && W->vinst[sn] == W->inst) {
 		lval l = { .k = L_FRAME, .off = W->voff[sn], .align = 8 };
 		int r = LO(treg)(e);
 
@@ -801,6 +801,12 @@ VPRIV void wk_vla_fix(ecx *e, qty t, bool pure)
 		if (a->kind != TY_ARRAY)
 			return;
 		if ((a->flags & TF_VLA) && a->n && N(a->n)->op != N_NUM && !(pure && side_effects(c, a->n))) {
+			/* Already captured by this declaration/typedef in this instance.
+			   The original store still executes on every loop iteration. */
+			if (W->vgen[a->n] == W->gen && W->vinst[a->n] == W->inst) {
+				t = a->base;
+				continue;
+			}
 			val v = wk_conv(e, wk_gen(e, a->n), N(a->n)->ty, c->t_size);
 			int r = wk_reg(e, &v, c->t_size);
 			lval l = { .k = L_FRAME, .off = wk_slot(e, 8, 8), .align = 8 };
@@ -808,6 +814,7 @@ VPRIV void wk_vla_fix(ecx *e, qty t, bool pure)
 			LO(store)(e, r, &l, 8);
 			LO(tfree)(e, r);
 			W->vgen[a->n] = W->gen;
+			W->vinst[a->n] = W->inst;
 			W->voff[a->n] = (int64_t)l.off;
 		}
 		t = a->base;

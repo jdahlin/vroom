@@ -585,6 +585,17 @@ VPRIV void vla_fix(ecx *e, qty t, bool pure)
 		if (a->kind != TY_ARRAY)
 			return;
 		if ((a->flags & TF_VLA) && a->n && N(a->n)->op != N_NUM && !(pure && side_effects(c, a->n))) {
+			bool captured = false;
+
+			for (uint32_t k = e->nvsz; k-- > 0;)
+				if (e->vsz[k].node == a->n && e->vsz[k].inst == e->f->inst) {
+					captured = true;
+					break;
+				}
+			if (captured) {
+				t = a->base;
+				continue;
+			}
 			val v = cast(e, gen(e, a->n), N(a->n)->ty, c->t_size, CK_INT);
 			int r = toreg(e, &v);
 			int64_t sl = slot(e, 8, 8);

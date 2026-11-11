@@ -217,6 +217,10 @@ VPRIV void wvla_fix(ecx *e, qty t, bool pure)
 
 			for (k = 0; k < W->nvsz && W->vszn[k] != a->n; k++)
 				;
+			if (k < W->nvsz) {
+				t = a->base;
+				continue;
+			}
 			if (k == W->nvsz) {
 				if (W->nvsz >= WMAXGD)
 					efatal(e, e->curloc, "too many variable length array sizes in one function");

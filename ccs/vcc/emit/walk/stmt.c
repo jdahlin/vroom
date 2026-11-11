@@ -39,6 +39,7 @@ VPRIV wkst *wk_state(ecx *e)
 		W->lcg = reserve(((size_t)c->nlabel + 64) * sizeof(uint32_t));
 		W->zgen = reserve(((size_t)c->nsym + 64) * sizeof(uint32_t));
 		W->vgen = reserve(((size_t)c->nnode + 64) * sizeof(uint32_t));
+		W->vinst = reserve(((size_t)c->nnode + 64) * sizeof(uint32_t));
 		W->voff = reserve(((size_t)c->nnode + 64) * sizeof(int64_t));
 	}
 	return W;
@@ -72,6 +73,7 @@ VPRIV void wk_ecx_free(ecx *e)
 		munmap(W->lcg, ((size_t)c->nlabel + 64) * sizeof(uint32_t));
 		munmap(W->zgen, ((size_t)c->nsym + 64) * sizeof(uint32_t));
 		munmap(W->vgen, ((size_t)c->nnode + 64) * sizeof(uint32_t));
+		munmap(W->vinst, ((size_t)c->nnode + 64) * sizeof(uint32_t));
 		munmap(W->voff, ((size_t)c->nnode + 64) * sizeof(int64_t));
 	}
 	munmap(W->cases, WK_MAXCASE * sizeof(wkcase));
