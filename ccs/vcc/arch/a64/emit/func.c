@@ -101,6 +101,14 @@ VPRIV void sym_header(ecx *e, tbuf *b, uint32_t s, bool fn, const char *defsec, 
 	tb_s(b, fn ? "\n\t.type\t" : "\n\t.type\t");
 	sym_name(c, b, s);
 	tb_s(b, fn ? ",@function\n" : ",@object\n");
+	if (fn && X86(c) && c->o->pfe_m) {
+		/* -fpatchable-function-entry=N,M: M nops before the entry, recorded for ftrace */
+		tb_s(b, ".Lpfe");
+		tb_u(b, s);
+		tb_s(b, ":\n");
+		for (int k = 0; k < c->o->pfe_m; k++)
+			tb_s(b, "\tnop\n");
+	}
 	sym_name(c, b, s);
 	tb_s(b, ":\n");
 }

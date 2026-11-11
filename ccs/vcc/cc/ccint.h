@@ -236,6 +236,8 @@ struct cc {
 	uint32_t pack[64];	/* #pragma pack stack (bytes, 0: none) */
 	uint64_t packid[64];	/* labels (token.c pragma_pack) */
 	int npack;
+	uint32_t visstk[16];	/* #pragma GCC visibility push: the visibilities (string + 1), innermost last */
+	int nvis;
 	bool ms_struct;		/* #pragma ms_struct on/off/reset */
 	/* #pragma weak (decl.c): waiting for key's declaration (alias: 0, or the weak alias of key) */
 	struct pweak { uint32_t key, alias, loc, sym; } *pweak;
@@ -344,6 +346,7 @@ bool cc_eval(cc *c, uint32_t n, cval *v);
 bool cc_init_subobject(cc *c, uint32_t n, uint32_t *init);
 /* Constant object representation, little-endian bytes plus a known-bit mask. */
 bool cc_bitcast_read(cc *c, uint32_t n, uint64_t off, unsigned len, unsigned char *data, unsigned char *known);
+bool cc_object_size(cc *c, uint32_t pointer, unsigned mode, i128 *size);
 void dr_restored(cc *c);
 bool cc_is_signed(cc *c, qty t);
 const char *cc_builtin_name(int64_t i);

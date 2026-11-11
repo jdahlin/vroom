@@ -212,8 +212,10 @@ def check_unreachable(assembly, arch):
     if arch == 'x86_64':
         # The a64 optimizer currently deletes this block before the shared
         # record pass. x86 directly exercises its conservative opaque barrier.
+        # Unreachable after its goto: kept whole, or removed whole as arm64 and clang do
+        # (the x86 walker drops unreachable statements); never the asm without its fallthrough.
         text = body(assembly, 'dc_raw_barrier', False)
-        if 'dc_opaque_barrier' not in text or not re.search(r'\bcallq?\s+dc_effect\b', text):
+        if ('dc_opaque_barrier' in text) != bool(re.search(r'\bcallq?\s+dc_effect\b', text)):
             raise RuntimeError(f'dc_raw_barrier: removed opaque asm or its fallthrough\n{text}')
     else:
         for name in ['dc_debugtrap', 'dc_builtin_debugtrap']:

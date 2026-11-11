@@ -353,7 +353,8 @@ void elf_emit(ElfObj *o, uint8_t *b)
 			shdr(h + 64 * se->gidx, w->group_name, 17 /* SHT_GROUP */, 0, w->goff[s], n, w->symtab_idx,
 			     elf_symp(o, se->group)->idx, 4, 4);
 		}
-		shdr(h + 64 * se->idx, w->secname[s], se->type, se->flags, w->secoff[s], se->size, 0, 0,
+		shdr(h + 64 * se->idx, w->secname[s], se->type, se->flags, w->secoff[s], se->size,
+		     se->linksec && se->linksec != UINT32_MAX ? elf_sec(o, se->linksec)->idx : 0, 0,
 		     (uint64_t)1 << se->align, se->entsize);
 		if (se->rela_idx)
 			shdr(h + 64 * se->rela_idx, w->relaname[s], SHT_RELA, (se->flags & SHF_GROUP) ? SHF_GROUP : SHF_INFO_LINK, w->relaoff[s],

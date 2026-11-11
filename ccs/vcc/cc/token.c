@@ -402,6 +402,36 @@ static void pragma(cc *c, const ptok *t)
 		pragma_weak(c, s + 4, e, t->s, t->loc);
 		return;
 	}
+	if (e - s > 14 && !memcmp(s, "GCC visibility", 14)) {
+		/* #pragma GCC visibility push(hidden) / pop: the default for later declarations */
+		const char *q = s + 14;
+
+		while (q < e && (*q == ' ' || *q == '\t'))
+			q++;
+		if (e - q >= 3 && !memcmp(q, "pop", 3)) {
+			if (c->nvis)
+				c->nvis--;
+		} else if (e - q >= 4 && !memcmp(q, "push", 4)) {
+			const char *a = memchr(q, '(', (size_t)(e - q)), *b = a ? memchr(a, ')', (size_t)(e - a)) : NULL;
+
+			if (a && b && c->nvis < 16) {
+				size_t n;
+				char *keep;
+
+				for (a++; a < b && (*a == ' ' || *a == '\t'); a++)
+					;
+				while (b > a && (b[-1] == ' ' || b[-1] == '\t'))
+					b--;
+				n = (size_t)(b - a);
+				keep = halloc(c, n + 1);
+				memcpy(keep, a, n);
+				keep[n] = 0;
+				c->strs[c->nstr] = (cstr){ keep, (uint32_t)(n + 1), 1, T_STRING };
+				c->visstk[c->nvis++] = ++c->nstr;	/* (string index + 1, as attrs.visibility) */
+			}
+		}
+		return;
+	}
 	if (e - s >= 9 && !memcmp(s, "ms_struct", 9) && (e - s == 9 || s[9] == ' ' || s[9] == '\t')) {
 		if (unlikely(c->dr_on))
 			dr_pragma(c, 2);

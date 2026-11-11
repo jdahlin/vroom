@@ -94,6 +94,37 @@ Lokal wasm64-referenskrasch är baslinjereproducerad och synlig; se
 PLAN-wasm.md. X86:s adapter är fortsatt experimentell på grund av kostnad;
 smala wasm-celler, generell unread-DSE, full O2 och G5/G7 återstår.
 
+### Status 2026-11-11: G1/G4, objektstorlek på Linux
+
+På basen `9d022c3` skiljer objektstorleksanalysen deklarerade delobjekt från
+rå allokering och padding. `-fstrict-flex-arrays=0..3` ingår i cacheidentiteten;
+läge 3 behåller deklarerad minsta storlek. `counted_by` på stabila pekarfält
+använder aktuell räknare i dynamiska lägen 0–2; volatila baser/fält lämnas
+okända utan läsning. Inlining bevarar bounds bara för direkta, oskrivna och
+icke-aliaserade pekarparametrar med effektfria argument.
+
+Verifiering omfattar unity/separatfilbygge, egna körsviter på Linux x86-64
+följt av ARM64/QEMU, fem oförändrade GCC-fall (`pr101836_1/2/3`, `pr39343`,
+`pointer-counted-by-8`), oberoende strikt-flex/volatile/allokeringsprober och
+kärnans semantik i både process- och batchläge. Exakta resultat och binärhashar:
+`work/results/objsize-main-validation.json` och
+`work/results/objsize-main-independent/results.json`.
+Båda byggena: ARM 185/185, semantik run/batch 887/887, GCC 5/5 per mål;
+34 oberoende konfigurationer gav 102 matchande körningar (272 kommandon).
+Ursprunglig x86-körning: 179/179 och sex skip, varav `branch_far` var en
+Clang-referenstimeout efter 60 s, inte ett godkänt compilerresultat.
+Separat supplement använder PR37-harness `761142b` och dess uttryckliga
+300 s-kontrakt: 1/1 utan skip på båda mål med båda byggena. Resultat sparas i
+`work/results/objsize-main-branchfar/results.json`. Ursprungliga loggar ändras inte.
+
+Kvar: generell flödes-/aliasanalys, transitiva inline-parametrar,
+`alloc_size`-kontrakt och dynamiska uttryck med sidoeffekter; okända bounds
+ska fortsätta vara okända. Hela S4-korpusen och övriga mål har inte körts om
+för denna milstolpe. Riktade Wasm32/64-prover går 10/10 med ett kört XFAIL
+för `object_size_inline`: samma test ger byteidentisk assemblerkod och
+samma runtimefel med tidigare `main`; Clang-referensen passerar. Testet
+behöver Wasm-inlining/argumentbounds och är inte överhoppat. G1/G4 är inte färdiga.
+
 ### Status 2026-11-11: G5/G7, kopior och direkt utvidgningsbevis
 
 Delad native kopiekärna återanvänder arm64:s analys; x86 gör endast
