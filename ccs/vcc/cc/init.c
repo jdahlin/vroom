@@ -229,8 +229,9 @@ static bool il_full(const ilist *l, uint64_t pos)
 {
 	if (l->array)
 		return !l->unknown && pos >= l->n;
+	/* Unnamed bit-fields can precede the first initializable union member. */
 	if (l->isunion)
-		return pos >= 1 || l->uset;
+		return pos >= l->n || l->uset;
 	return pos >= l->n;
 }
 
