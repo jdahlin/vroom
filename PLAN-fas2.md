@@ -3318,3 +3318,15 @@ assembler. Motsvarande positiva fall minskade compiler-instruktioner 5,97 %
 respektive 3,04 %; detta är syntetiska fall, inte projektmått. Resultat och
 proveniens finns i `work/opt-profile/local-values-shifts-{cost,cputime,
 saturated}/`. Generell CSE och G5/G7 återstår.
+
+En billig kontroll av skift med lokala operander avvisar nu olika ordnade
+värden före tabellbygget. Samma mättade kontroll gav därefter −0,62 % x86
+och −0,74 % wasm64 compiler-instruktioner mot basen, med identisk assembler;
+det positiva fallet gav −5,88 % respektive −2,93 %. Små skillnader kan bero
+på kompilatorns kodlayout. Ny matchad Callgrind-korpus gav −0,038 % x86,
+−0,045 % arm64, −0,058 % wasm32 och −0,058 % wasm64. Sju växelvisa rundor
+med samma 28 kärnfiler gav median användar-CPU 0,85256 → 0,83624 s på delad
+värd; det korta samplet visar ingen generell tidsändring. Fyrmålsprov O0–O3
+i båda bygglägen, O0/noopt-paritet samt 258/258 vcc och en befintlig xfail
+passerar även efter ändringen. Resultat finns i `work/opt-profile/local-values-
+shifts-prefilter-{cost,cputime,saturated}/`.
