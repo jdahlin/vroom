@@ -718,7 +718,7 @@ VPRIV uint32_t initializer(cc *c, qty *ty, bool st)
 			return v;
 		}
 		if (is_record(c, t) && !is_complex(c, t)) {
-			if (!compatible(c, N(v)->ty, t))
+			if (!compatible(c, ty_unatomic(c, N(v)->ty), ty_unatomic(c, t)))
 				cc_error(c, loc, "initializing with an expression of incompatible type");
 			return v;
 		}

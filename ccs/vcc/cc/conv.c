@@ -99,7 +99,7 @@ VPRIV int conv_kind(cc *c, qty from, qty to, uint32_t n)
 			return n && is_npc(c, n) ? CK_NULL : CK_I2P;
 		return -1;
 	}
-	if ((tk == TY_STRUCT || tk == TY_UNION) && compatible(c, from, to))
+	if ((tk == TY_STRUCT || tk == TY_UNION) && compatible(c, ty_unatomic(c, from), ty_unatomic(c, to)))
 		return CK_NOP;
 	/* vectors of one size convert lane-agnostically (clang's lax integer vector conversions) */
 	if (tk == TY_VECTOR && fk == TY_VECTOR && T(c, to)->size == T(c, from)->size)
@@ -287,6 +287,8 @@ static bool ptr_ok_(cc *c, qty a, qty b, bool top)
 	ka = KIND(c, a), kb = KIND(c, b);
 	if (compatible(c, a, b) || (top && (ka == TY_VOID || kb == TY_VOID)))
 		return true;
+	if ((T(c, a)->flags ^ T(c, b)->flags) & TF_ATOMIC)
+		return false;
 	if (ka == TY_PTR && kb == TY_PTR)
 		return ptr_ok_(c, T(c, a)->base, T(c, b)->base, false);
 	if (top && (is_integer(c, a) || ka == TY_ENUM) && (is_integer(c, b) || kb == TY_ENUM))

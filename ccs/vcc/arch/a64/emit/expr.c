@@ -642,7 +642,7 @@ static val atomic_rmw(ecx *e, uint32_t n, bool inc, bool post)
 	cc *c = e->c;
 	const node *x = N(n);
 	bool asg = x->op == N_ASSIGN;
-	qty t = x->ty;
+	qty t = N(x->a)->ty;
 	val v = vnone(), old, nv;
 	lval l;
 	int sz, ra, ob, cmp, nb;
@@ -715,7 +715,7 @@ static val gen_assign(ecx *e, uint32_t n)
 {
 	cc *c = e->c;
 	const node *x = N(n);
-	qty lt = x->ty;
+	qty lt = N(x->a)->ty;
 	lval l;
 	val v, old;
 
@@ -892,7 +892,7 @@ static val gen_incdec(ecx *e, uint32_t n)
 {
 	cc *c = e->c;
 	const node *x = N(n);
-	qty t = x->ty;
+	qty t = N(x->a)->ty;
 	bool inc = x->op == N_PREINC || x->op == N_POSTINC, post = x->op == N_POSTINC || x->op == N_POSTDEC;
 	lval l;
 	val old, nv;

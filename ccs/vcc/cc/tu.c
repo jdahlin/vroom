@@ -313,7 +313,7 @@ int cc_run(pp *p, const cc_opts *o)
 		for (uint32_t i = 1; i < c->nsym; i++) {
 			const sym *y = &c->syms[i];
 
-			if ((y->flags & (SF_TENTATIVE | SF_DEFINED)) == SF_TENTATIVE && y->kind == S_VAR &&
+			if ((y->flags & (SF_TENTATIVE | SF_DEFINED | SF_INVALID)) == SF_TENTATIVE && y->kind == S_VAR &&
 			    (is_record(c, y->ty) || KIND(c, y->ty) == TY_ENUM) && !complete(c, y->ty) && lookup(c, y->name) == i) {
 				cc_error(c, y->loc, "tentative definition has type '%s' that is never completed", tyname(c, y->ty));
 				note(c, c->tags[T(c, y->ty)->aux].loc, "forward declaration of '%s'", tyname(c, y->ty));

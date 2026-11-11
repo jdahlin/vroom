@@ -244,8 +244,6 @@ VPRIV int atomic_sz(ecx *e, qty t)
 	cc *c = e->c;
 	uint64_t n = tsize(c, t);
 
-	if (is_agg(c, t))
-		efatal(e, 0, "loads and stores of _Atomic structs and unions are not supported");
 	if (n != 1 && n != 2 && n != 4 && n != 8)
 		efatal(e, 0, "%u-byte _Atomic objects are not supported", (unsigned)n);
 	return log2sz(n);
@@ -281,6 +279,14 @@ static val ldar_load(ecx *e, lval *l, qty t)
 	word(e, (unsigned)sz << 30 | 0x08dffc00u | (unsigned)ra << 5 | (unsigned)r);	/* ldar */
 	if (own)
 		tfree(e, ra);
+	if (is_agg(c, t)) {
+		/* Aggregate values are addresses. Materialize one atomic snapshot,
+		 * rather than returning the address of mutable atomic storage. */
+		lval tmp = { .k = L_FRAME, .off = slot(e, 1u << sz, 1u << sz), .align = 1u << sz };
+		store_n(e, r, &tmp, 0, 1u << sz);
+		tfree(e, r);
+		return laddr(e, &tmp);
+	}
 	if (sz < 3 && !is_flt(c, t) && is_signed(c, t))
 		extend(e, r, r, 1 << sz, true);
 	return vreg(r);
@@ -288,13 +294,36 @@ static val ldar_load(ecx *e, lval *l, qty t)
 
 static void stlr_store(ecx *e, lval *l, qty t, val *v)
 {
-	int sz = atomic_sz(e, t), r = v->k == V_CONST && v->i == 0 ? ZR : toreg(e, v), ra;
+	cc *c = e->c;
+	int sz = atomic_sz(e, t), r, ra;
 	bool own;
+	bool aggregate = is_agg(c, t);
 
+	if (aggregate) {
+		qty plain = QT(T(c, t)->n, 0);
+		uint64_t bytes = tsize(c, plain);
+		lval src = { .k = L_REG, .r = toreg(e, v), .align = talign(c, plain) };
+		if (bytes != (1u << sz)) {
+			/* Atomic layout may round a three-byte record up to four bytes.
+			 * Do not read the rounded padding past the source object. */
+			lval tmp = { .k = L_FRAME, .off = slot(e, 1u << sz, 1u << sz), .align = 1u << sz };
+			store_n(e, ZR, &tmp, 0, 1u << sz);
+			val addr = laddr(e, &tmp);
+			copy_mem(e, toreg(e, &addr), src.r, bytes);
+			val_free(e, &addr);
+			src = tmp;
+		}
+		r = treg(e);
+		load_n(e, r, &src, 1u << sz, 0);
+	} else {
+		r = v->k == V_CONST && v->i == 0 ? ZR : toreg(e, v);
+	}
 	ra = atomic_addr(e, l, &own);
-	word(e, (unsigned)sz << 30 | 0x089ffc00u | (unsigned)ra << 5 | (unsigned)r);	/* stlr */
+	word(e, (unsigned)sz << 30 | 0x089ffc00u | (unsigned)ra << 5 | (unsigned)r); /* stlr */
 	if (own)
 		tfree(e, ra);
+	if (aggregate)
+		tfree(e, r);
 }
 
 

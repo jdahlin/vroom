@@ -104,7 +104,7 @@ static __attribute__((noinline)) uint32_t unary_op(cc *c)
 		if (is_ptr(c, N(n)->ty) && KIND(c, T(c, N(n)->ty)->base) == TY_SVE)
 			cc_error(c, loc, "arithmetic on a pointer to sizeless type '%s'", tyname(c, T(c, N(n)->ty)->base));
 		{
-			uint32_t r = mk(c, op, QUNQ(N(n)->ty), loc);
+			uint32_t r = mk(c, op, QUNQ(ty_unatomic(c, N(n)->ty)), loc);
 
 			N(r)->a = n;
 			return r;

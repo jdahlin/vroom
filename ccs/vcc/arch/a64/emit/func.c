@@ -440,7 +440,7 @@ static void choose_lregs(ecx *e, uint32_t s, int max)
 
 		if (!E->luse[v] || E->lnoreg[v] || y->kind != S_VAR || !is_local_var(c, v) || y->sc == SC_STATIC ||
 		    !(is_integer(c, t) || is_ptr(c, t)) || is_wide(c, t) || (QQ(t) & Q_VOLATILE) ||
-		    tsize(c, t) - 1 >= 8 || (T(c, t)->flags & TF_VLA) || sym_attrs(c, v)->cleanup ||
+		    tsize(c, t) - 1 >= 8 || (T(c, t)->flags & (TF_VLA | TF_ATOMIC)) || sym_attrs(c, v)->cleanup ||
 		    regvar_reg(c, v) >= 0)
 			continue;
 		if (k == max && E->luse[cand[k - 1]] >= E->luse[v])

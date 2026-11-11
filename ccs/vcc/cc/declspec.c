@@ -709,7 +709,18 @@ again:
 				uint32_t open = tok(c)->loc;
 
 				next(c);
-				named = ty_atomic(c, type_name(c), aloc);
+				qty operand = type_name(c);
+
+				if (T(c, operand)->flags & TF_ATOMIC) {
+					cc_error(c, aloc, "_Atomic cannot be applied to atomic type '%s'", tyname(c, operand));
+					ds->invalid = true;
+				} else if (QQ(operand)) {
+					cc_error(c, aloc, "_Atomic cannot be applied to qualified type '%s'", tyname(c, operand));
+					ds->invalid = true;
+				}
+				int errors = c->errors;
+				named = ty_atomic(c, operand, aloc);
+				ds->invalid |= c->errors != errors;
 				have_named = true;
 				expect_match(c, T_RPAREN, open);
 				any = true;

@@ -331,7 +331,7 @@ VPRIV void kv_track(ecx *e, uint32_t s, const val *v)
 	int k;
 
 	if ((e->E->sflags[s] & (SA_WRITTEN | SA_CWRITE)) != SA_CWRITE || !is_integer(c, y->ty) || is_wide(c, y->ty) ||
-	    (QQ(y->ty) & Q_VOLATILE) || sym_attrs(c, s)->cleanup || e->nkv == NKV)
+	    (QQ(y->ty) & Q_VOLATILE) || (T(c, y->ty)->flags & TF_ATOMIC) || sym_attrs(c, s)->cleanup || e->nkv == NKV)
 		return;
 	k = e->nkv++;
 	b->kv = (uint8_t)(k + 1);
@@ -358,7 +358,7 @@ VPRIV int ael_slot(ecx *e, uint32_t n, bool create)
 		return -1;
 	at = T(c, y->ty), et = at->base;
 	if (at->kind != TY_ARRAY || (at->flags & (TF_VLA | TF_INCOMPLETE)) || !is_integer(c, et) || is_wide(c, et) ||
-	    (QQ(et) & Q_VOLATILE) || (QQ(y->ty) & Q_VOLATILE))
+	    (QQ(et) & Q_VOLATILE) || (T(c, et)->flags & TF_ATOMIC) || (QQ(y->ty) & Q_VOLATILE))
 		return -1;
 	idx = aconst_idx(c, n);
 	if (idx >= at->n)
@@ -379,7 +379,7 @@ VPRIV bool const_var(ecx *e, uint32_t s, const val *v)
 {
 	uint8_t f = e->E->sflags[s];
 
-	if (f & (SA_WRITTEN | SA_CMULTI))
+	if ((T(e->c, e->c->syms[s].ty)->flags & TF_ATOMIC) || (f & (SA_WRITTEN | SA_CMULTI)))
 		return false;
 	if (f & SA_CWRITE)
 		return v->k == V_CONST && em_trunc_to(e->c, v->i, e->c->syms[s].ty) == e->E->cwval[s];
@@ -437,7 +437,7 @@ static bool reg_scalar(ecx *e, qty t)
 {
 	cc *c = e->c;
 
-	return (is_integer(c, t) || is_ptr(c, t)) && !is_wide(c, t) && !(QQ(t) & Q_VOLATILE) && tsize(c, t) - 1 < 8;
+	return (is_integer(c, t) || is_ptr(c, t)) && !is_wide(c, t) && !(QQ(t) & Q_VOLATILE) && !(T(c, t)->flags & TF_ATOMIC) && tsize(c, t) - 1 < 8;
 }
 
 static bool is_temp(int r)

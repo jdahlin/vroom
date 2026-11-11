@@ -248,7 +248,7 @@ VPRIV uint32_t binop(cc *c, int op, uint32_t l, uint32_t r, uint32_t loc)
 
 VPRIV uint32_t assign(cc *c, int op, uint32_t l, uint32_t r, uint32_t loc)
 {
-	qty lt = QUNQ(N(l)->ty);
+	qty lt = QUNQ(ty_unatomic(c, N(l)->ty));
 	uint32_t n;
 
 	if (unlikely(!need_lvalue(c, l, loc)))
@@ -1358,7 +1358,7 @@ VPRIV __attribute__((noinline)) uint32_t postfix_ops(cc *c, uint32_t n)
 			need_scalar(c, n, "increment");
 			if (is_ptr(c, N(n)->ty) && KIND(c, T(c, N(n)->ty)->base) == TY_SVE)
 				void_ptr_arith(c, N(n)->ty, loc, false);
-			r = mk(c, op, QUNQ(N(n)->ty), loc);
+			r = mk(c, op, QUNQ(ty_unatomic(c, N(n)->ty)), loc);
 			N(r)->a = n;
 			n = r;
 			continue;

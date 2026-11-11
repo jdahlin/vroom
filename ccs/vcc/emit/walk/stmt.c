@@ -225,7 +225,14 @@ static void wk_elems(ecx *e, const lval *d, qty ty, uint32_t init)
 		val v = wk_gen(e, init);
 		int rs = wk_reg(e, &v, prim(TY_ULONG)), rd = wk_addr(e, d);
 
-		LO(copy)(e, rd, rs, tsize(c, ty));
+		uint64_t bytes = tsize(c, ty);
+		if (is_record(c, ty) && (T(c, ty)->flags & TF_ATOMIC)) {
+			/* Initialization is not a concurrent store; copy only the source
+			   payload and initialize any padding added by _Atomic. */
+			LO(zero)(e, rd, bytes);
+			bytes = tsize(c, QT(T(c, ty)->n, 0));
+		}
+		LO(copy)(e, rd, rs, bytes);
 		LO(tfree)(e, rs);
 		LO(tfree)(e, rd);
 		return;

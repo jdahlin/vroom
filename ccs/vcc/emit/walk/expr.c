@@ -477,6 +477,16 @@ VPRIV void wk_bfinit(ecx *e, const lval *l, qty t, uint32_t init)
 	LO(tfree)(e, r);
 }
 
+/* Atomic records travel as immutable snapshots, never as their shared address. */
+static int wk_atomic_record_size(ecx *e, qty t)
+{
+	uint64_t size = tsize(e->c, t);
+
+	if (size != 1 && size != 2 && size != 4 && size != 8)
+		efatal(e, e->curloc, "x86-64: atomic aggregate size %llu is not supported yet", (unsigned long long)size);
+	return (int)size;
+}
+
 static val wk_load(ecx *e, lval l, qty t)
 {
 	cc *c = e->c;
@@ -487,6 +497,17 @@ static val wk_load(ecx *e, lval l, qty t)
 	if (KIND(c, t) == TY_VOID) {
 		wk_lfree(e, &l);
 		return vconst(0);
+	}
+	if (is_record(c, t) && (T(c, t)->flags & TF_ATOMIC)) {
+		int size = wk_atomic_record_size(e, t);
+		lval tmp = { .k = L_FRAME, .off = wk_slot(e, size, size), .align = (uint32_t)size };
+		int rp = LO(laddr)(e, &l);
+		int value = LO(atomic)(e, WK_ALOAD, size, rp, -1, -1);
+
+		LO(tfree)(e, rp);
+		LO(store)(e, value, &tmp, size);
+		LO(tfree)(e, value);
+		return wk_vreg(LO(laddr)(e, &tmp));
 	}
 	if (is_func(c, t) || wk_mem(e, t)) {
 		/* the object itself: its address (arrays and functions decay; records, x87 long double) */
@@ -1110,6 +1131,25 @@ VPRIV val wk_putmem(ecx *e, lval *l, qty t, val v)
 {
 	int rs = wk_reg(e, &v, prim(TY_ULONG)), rd = LO(laddr)(e, l);
 
+	if (is_record(e->c, t) && (T(e->c, t)->flags & TF_ATOMIC)) {
+		int size = wk_atomic_record_size(e, t);
+		uint64_t payload = tsize(e->c, QT(T(e->c, t)->n, 0));
+		lval tmp = { .k = L_FRAME, .off = wk_slot(e, size, size), .align = (uint32_t)size };
+		int snapshot = LO(laddr)(e, &tmp);
+		int value;
+
+		/* Padding belongs to the atomic representation, not the RHS object. */
+		LO(zero)(e, snapshot, size);
+		LO(copy)(e, snapshot, rs, payload);
+		LO(tfree)(e, rs);
+		value = LO(treg)(e);
+		LO(load)(e, value, &tmp, size, false);
+		LO(atomic)(e, WK_ASTORE, size, rd, value, -1);
+		LO(tfree)(e, value);
+		LO(tfree)(e, rd);
+		/* Assignment yields the stored value even if another writer changes l. */
+		return wk_vreg(snapshot);
+	}
 	LO(copy)(e, rd, rs, tsize(e->c, t));
 	LO(tfree)(e, rs);
 	return wk_vreg(rd);

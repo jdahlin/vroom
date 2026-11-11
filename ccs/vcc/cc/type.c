@@ -481,6 +481,8 @@ VPRIV bool compatible(cc *c, qty a, qty b)
 	x = T(c, a), y = T(c, b);
 	if ((x->flags ^ y->flags) & TF_ATOMIC)
 		return false;
+	if (x->flags & TF_ATOMIC)
+		return compatible(c, ty_unatomic(c, a), ty_unatomic(c, b));
 	/* an enum is compatible with its underlying type */
 	if (x->kind == TY_ENUM && y->kind != TY_ENUM)
 		return compatible(c, x->base, b);
@@ -537,6 +539,9 @@ VPRIV bool compatible(cc *c, qty a, qty b)
 VPRIV qty composite(cc *c, qty a, qty b)
 {
 	const ctype *x = T(c, a), *y = T(c, b);
+
+	if ((x->flags & y->flags) & TF_ATOMIC)
+		return qualify(c, ty_atomic(c, composite(c, ty_unatomic(c, a), ty_unatomic(c, b)), 0), QQ(a));
 
 	if (x->kind == TY_ARRAY && y->kind == TY_ARRAY) {
 		qty e = composite(c, x->base, y->base);
