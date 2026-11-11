@@ -59,6 +59,19 @@ VPRIV void apply_sym_attrs(cc *c, sym *s, const attrs *a)
 {
 	if (attrs_empty(a))
 		return;		/* (no record: sym_attrs() in emit.c reads attrs 0 as none) */
+	if (a->interrupt) {
+		const ctype *ft = T(c, s->ty);
+		if (c->o->target != PP_LINUX_X86_64)
+			cc_error(c, s->loc, "interrupt calling convention is supported only for x86-64 Linux");
+		else if (s->kind != S_FUNC || ft->kind != TY_FUNC)
+			cc_error(c, s->loc, "'interrupt' attribute only applies to functions");
+		else if (KIND(c, ft->base) != TY_VOID)
+			cc_error(c, s->loc, "interrupt function must return void");
+		else if ((ft->flags & TF_NOPROTO) || ft->n < 1 || ft->n > 2 || !is_ptr(c, c->params[ft->aux]))
+			cc_error(c, s->loc, "interrupt function requires a pointer parameter optionally followed by an unsigned long");
+		else if (ft->n == 2 && KIND(c, c->params[ft->aux + 1]) != TY_ULONG && KIND(c, c->params[ft->aux + 1]) != TY_ULLONG)
+			cc_error(c, s->loc, "interrupt function second parameter must have unsigned long type");
+	}
 	if (a->tlsmodel && (s->kind != S_VAR || !(s->flags & SF_THREAD)))
 		cc_error(c, a->tlsloc, "'tls_model' attribute only applies to thread-local variables");
 	if (s->attrs)

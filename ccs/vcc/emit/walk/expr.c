@@ -2015,7 +2015,7 @@ static val wk_call(ecx *e, uint32_t n)
 			wkarg fa;
 			val v;
 
-			LO(classify)(e, N(an)->ty, &fa);
+			LO(classify)(e, N(an)->ty, &fa, false);
 			wk_argslot(e, &fa, N(an)->ty, wk_gen(e, an));
 			e->calls = true;
 			v = LO(call)(e, FIXED(k), NULL, &fa, 1, false, NULL, prim(TY_FLOAT));
@@ -2030,11 +2030,11 @@ static val wk_call(ecx *e, uint32_t n)
 		qty at = N(an)->ty;
 
 		wk_scalar(e, an, at);
-		LO(classify)(e, at, &args[i]);
+		LO(classify)(e, at, &args[i], (f->flags & TF_VARIADIC) && i >= f->n);
 		wk_argslot(e, &args[i], at, wk_gen(e, an));
 	}
 	if (rec_) {
-		LO(classify)(e, f->base, &r);
+		LO(classify)(e, f->base, &r, false);
 		r.slot = wk_slot(e, (r.size + 7) & ~(uint64_t)7 ?: 8, r.align);
 	}
 	if (!ref) {
@@ -2638,6 +2638,9 @@ static val wk_builtin(ecx *e, uint32_t n)
 	char b[64];
 
 	switch (x->aux) {
+	case BI_X86_PCMPSTR: case BI_X86_BLENDVB: return LO(pcmpstr)(e, n);
+	case BI_FAST_SQRT:
+		return LO(fsqrt)(e, x->ty, wk_gen(e, arg[0]));
 	case BI_FAST_ROOT4:
 		return LO(root4)(e, wk_gen(e, arg[0]));
 	case BI_CONSTANT_P: {
