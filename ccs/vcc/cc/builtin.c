@@ -1306,6 +1306,56 @@ static uint32_t elementwise_abs_lane(cc *c, uint32_t a, qty et, uint32_t loc)
 	return n;
 }
 
+/* A folded argument may still contain evaluated comma operands. This
+ * check includes volatile/atomic reads and respects short-circuiting, while
+ * leaving genuinely constant arguments free of synthetic comma expressions
+ * (which would make a C23 constexpr initializer nonconstant). */
+static bool elementwise_abs_effects(cc *c, uint32_t n, bool load)
+{
+	if (!n) return false;
+	const node *x = N(n);
+	if (load && (x->flags & NF_LVALUE) && ((QQ(x->ty) & Q_VOLATILE) || (T(c, x->ty)->flags & TF_ATOMIC)))
+		return true;
+	switch (x->op) {
+	case N_NUM: case N_FNUM: case N_ZERO: case N_STR: case N_VAR: case N_LABELADDR:
+		return false;
+	case N_ADDR: case N_MEMBER:
+		return elementwise_abs_effects(c, x->a, false);
+	case N_CAST:
+		return elementwise_abs_effects(c, x->a, x->aux != CK_DECAY && x->aux != CK_FDECAY);
+	case N_UNARY: case N_DEREF:
+		return elementwise_abs_effects(c, x->a, true);
+	case N_INDEX: case N_BINARY: case N_COMMA: case N_CPLX:
+		return elementwise_abs_effects(c, x->a, true) || elementwise_abs_effects(c, x->b, true);
+	case N_LOGAND: case N_LOGOR: case N_COND: {
+		cval cv;
+		if (elementwise_abs_effects(c, x->a, true)) return true;
+		if (cc_eval(c, x->a, &cv)) {
+			bool truth = cv.kind == CV_INT ? cv.i != 0 : cv.kind == CV_FLT ? (cv.ld ? q_nz(cv.q) : cv.f != 0) : true;
+			if (x->op == N_COND)
+				return elementwise_abs_effects(c, truth ? x->b : x->c, true);
+			return (x->op == N_LOGAND ? truth : !truth) && elementwise_abs_effects(c, x->b, true);
+		}
+		return elementwise_abs_effects(c, x->b, true) || elementwise_abs_effects(c, x->c, true);
+	}
+	case N_BUILTIN: case N_CALL: {
+		if (x->op == N_BUILTIN && x->aux == BI_CONSTANT_P) return false;
+		cval value;
+		if (!cc_eval(c, n, &value)) return true;
+		if (x->op == N_CALL) {
+			uint32_t fn = x->a;
+			while (N(fn)->op == N_CAST) fn = N(fn)->a;
+			if (N(fn)->op != N_VAR || c->syms[N(fn)->a].kind != S_BUILTIN) return true;
+		}
+		for (uint32_t i = 0; i < x->c; i++)
+			if (elementwise_abs_effects(c, c->lists[x->b + i], true)) return true;
+		return false;
+	}
+	default:
+		return true;
+	}
+}
+
 static uint32_t elementwise_abs_call(cc *c, const builtin *b, uint32_t loc)
 {
 	vec args;
@@ -1320,10 +1370,17 @@ static uint32_t elementwise_abs_call(cc *c, const builtin *b, uint32_t loc)
 	}
 	/* Retain constant-expression support for scalar integer/floating args. */
 	cval cv;
-	if (!is_vector(c, t) && cc_eval(c, arg, &cv)) {
+	if (!is_vector(c, t) && cc_eval(c, arg, &cv) && (cv.kind == CV_FLT || cv.kind == CV_INT)) {
+		/* A known value need not be a pure expression: constant evaluation
+		 * of a comma expression may ignore an observable left operand.
+		 * Evaluate the original exactly once, then return only its folded
+		 * magnitude. Reusing arg in the integer select would evaluate it twice. */
+		uint32_t folded;
 		if (cv.kind == CV_FLT)
-			return cv.ld ? mk_fltq(c, cv.q & ~((u128)1 << 127), et, loc) : mk_flt(c, __builtin_fabs(cv.f), et, loc);
-		return elementwise_abs_lane(c, arg, et, loc);
+			folded = cv.ld ? mk_fltq(c, cv.q & ~((u128)1 << 127), et, loc) : mk_flt(c, __builtin_fabs(cv.f), et, loc);
+		else
+			folded = mk_int(c, trunc_to(c, cv.i < 0 ? (i128)(0 - (u128)cv.i) : cv.i, et), et, loc);
+		return elementwise_abs_effects(c, arg, true) ? with_pre(c, arg, folded) : folded;
 	}
 	uint32_t sym = sym_new(c, S_VAR, 0, t, loc);
 	c->syms[sym].sc = SC_AUTO;

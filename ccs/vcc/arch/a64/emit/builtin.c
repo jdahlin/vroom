@@ -18,7 +18,8 @@ VPRIV bool side_effects(cc *c, uint32_t n)
 	if (!n)
 		return false;
 	x = N(n);
-	if ((QQ(x->ty) & Q_VOLATILE) && (x->op == N_VAR || x->op == N_DEREF || x->op == N_MEMBER || x->op == N_INDEX))
+	if (((QQ(x->ty) & Q_VOLATILE) || (T(c, x->ty)->flags & TF_ATOMIC)) &&
+	    (x->op == N_VAR || x->op == N_DEREF || x->op == N_MEMBER || x->op == N_INDEX))
 		return true;
 	switch (x->op) {
 	case N_NUM: case N_FNUM: case N_STR: case N_VAR: case N_ZERO: case N_LABELADDR:
