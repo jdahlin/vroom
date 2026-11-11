@@ -1957,3 +1957,12 @@ på samma experimentella x86-binär med slots av/på går från 88 till 77
 frame-moves (382 till 378 instruktioner). Motsvarande wasm32-fall går från
 46 till 32 i32.load och 31 till 29 i32.store mot tidigare referensbinär.
 Det sista är en avgränsad jämförelse mellan binärer, inte isolerad kostnad.
+
+OPT8-integrering: implementationen är 58263be; därefter har main54580f7
+(PR48:s genererade minnesregression) mergats som 6b0e195. Konflikten gällde
+bara denna plan; båda statusblocken är bevarade. Kompilatorkällorna är
+oförändrade av denna merge. Unity, 180/180 riktade kör-/kodkrav och de
+sanitiserade reciprok-/tryckkontrakten passerar på kombinationen, liksom
+221/221 arm64-regressioner (ett befintligt xfail) och 216/216 x86-regressioner
+(sex referensskips). Mätningarnas JSON anger exakt 781ca69→58263be och
+`compiler-sources.json` binder de tio ändrade kompilatorfilerna med SHA256.

@@ -308,3 +308,7 @@ konfigurerad 10–12-filers mix mellan −0,017 % och +0,018 %. En mättad
 arm64-divisionskorpus kostar däremot +19,54 % att kompilera; avvägningen och
 avgränsade x86/wasm-körprov står i PLAN-fas2. Detta stänger inte G5/G7.
 Signed/u64-reciproker och full O2-täckning återstår.
+
+Efter integrering med main54580f7: samma kompilatorkod, 180/180 riktade fall,
+221/221 arm64-regressioner (ett befintligt xfail), 216/216 x86-regressioner
+(sex referensskips) samt sanitiserade reciprok-/tryckkontrakt passerar.
