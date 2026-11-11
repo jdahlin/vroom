@@ -96,7 +96,8 @@ static __attribute__((noinline)) uint32_t unary_op(cc *c)
 		int op = t->kind == T_PLUSPLUS ? N_PREINC : N_PREDEC;
 
 		next(c);
-		n = unary(c);
+		/* Parenthesized type-names may begin an lvalue compound literal. */
+		n = cast_expr(c);
 		if (ISERR(n))
 			return n;
 		need_lvalue(c, n, t->loc);
@@ -386,7 +387,20 @@ VPRIV uint32_t capture_vla_bounds(cc *c, qty ty, uint32_t first, uint32_t value,
 			effects = effects ? mk2(c, N_COMMA, c->t_size, loc, effects, fix) : fix;
 		}
 	}
-	return effects ? mk2(c, N_COMMA, N(value)->ty, loc, effects, value) : value;
+	if (!effects)
+		return value;
+	if (N(value)->flags & NF_LVALUE) {
+		/* Sequence through the address so a compound literal stays an lvalue,
+		   including when a later postfix operator modifies it. */
+		qty vt = N(value)->ty, pt = ty_ptr(c, vt);
+		uint32_t address = mk2(c, N_ADDR, pt, loc, value, 0);
+		uint32_t sequence = mk2(c, N_COMMA, pt, loc, effects, address);
+		uint32_t result = mk2(c, N_DEREF, vt, loc, sequence, 0);
+
+		N(result)->flags = N(value)->flags;
+		return result;
+	}
+	return mk2(c, N_COMMA, N(value)->ty, loc, effects, value);
 }
 
 /* (type-name) cast-expression or compound literal; '(' (at loc) is consumed */
@@ -413,7 +427,7 @@ static __attribute__((noinline)) uint32_t cast_paren(cc *c, uint32_t loc)
 				c->syms[s].flags |= SF_GLOBAL | SF_DEFINED;
 			n = mk2(c, N_COMPLIT, ty, loc, init, s);
 			N(n)->flags = NF_LVALUE;
-			return capture_vla_bounds(c, ty, first_bound, postfix(c, n), loc);
+			return postfix(c, capture_vla_bounds(c, ty, first_bound, n, loc));
 		}
 		{
 			uint32_t td = c->tn_tdef, r;

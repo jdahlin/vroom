@@ -435,6 +435,15 @@ går grönt. Större VLA-urval har ännu ett fel (`vla-16`, compound-literal
 lvalue), tio oförändrade referens-/kontraktsfiltreringar och Clangs
 befintliga frontendkrasch i `vla-tert-1`; dessa döljs inte.
 
+VM-compound literals behåller nu lvalue-kategorin genom en intern
+adresssekvens, och prefixinkrement kan parsa compound-literal-operander.
+Wasm reserverar dimensionscacheposten före rekursiv gränsemission.
+Därmed går även `vla-16`: hela direkta VLA-urvalets clang-giltiga
+konfigurationer är **11/11 per Linux-mål**, tio oförändrade uttryckliga
+referens-/kontraktsfiltreringar och en Clang-krasch redovisas separat.
+Åtta egna VLA-prov per mål/byggsätt, -O0/-O2, fyra faktiska wasm64-prov,
+kernel-sema 887/887 i båda lägen och diagnostik 217/217 går grönt.
+
 `__builtin_complex` konstruerar komplexa tal utan att tappa signed zero,
 NaN-bitar eller argumentbiverkningar. Komplexa `++`/`--` uppdaterar bara
 realdelen med en läsning, en beräkning och en skrivning; imaginärdelen

@@ -226,12 +226,12 @@ VPRIV void wvla_fix(ecx *e, qty t, bool pure)
 					efatal(e, e->curloc, "too many variable length array sizes in one function");
 				W->vszn[k] = a->n;
 				W->vszl[k] = wnewloc(e, WPT(c));
+				/* Bound emission may recursively capture another VLA dimension. */
+				W->nvsz++;
 			}
 			wexpr(e, a->n, true);
 			wconv(e, N(a->n)->ty, prim(TY_ULONG));
 			wset(e, W->vszl[k]);
-			if (k == W->nvsz)
-				W->nvsz++;
 		}
 		t = a->base;
 	}
