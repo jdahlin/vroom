@@ -174,7 +174,7 @@ VPRIV int64_t wk_local(ecx *e, uint32_t s)
 		if (W->canary && (is_array(c, c->syms[s].ty) || is_agg(c, c->syms[s].ty) || e->E->lnoreg[s]))
 			W->spneed = true;	/* (clang's -fstack-protector-strong, a superset) */
 		if (T(c, c->syms[s].ty)->flags & TF_VLA)
-			W->soff[s] = wk_pslot(e, 24, 8);	/* { address, sp before it, bytes } */
+			W->soff[s] = wk_pslot_kind(e, 24, 8, WK_SLOT_LOCAL);	/* { address, sp before it, bytes } */
 		else {
 			uint64_t size = tsize(c, c->syms[s].ty) ? tsize(c, c->syms[s].ty) : 1;
 			uint32_t align = sym_align(c, s) ? sym_align(c, s) : 1;
@@ -188,12 +188,13 @@ VPRIV int64_t wk_local(ecx *e, uint32_t s)
 				if (i != UINT32_MAX) {
 					W->soff[s] = W->tf[i].off;
 					W->tf[i] = W->tf[--W->ntf];
+					LO(slot)(e, W->soff[s], size, align, WK_SLOT_LOCAL);
 				} else {
-					W->soff[s] = wk_pslot(e, size, align);
+					W->soff[s] = wk_pslot_kind(e, size, align, WK_SLOT_LOCAL);
 				}
 				W->lu[W->nlu++] = (struct wklslot){ W->soff[s], (uint32_t)size, align, s };
 			} else {
-				W->soff[s] = wk_pslot(e, size, align);
+				W->soff[s] = wk_pslot_kind(e, size, align, WK_SLOT_LOCAL);
 			}
 		}
 	}

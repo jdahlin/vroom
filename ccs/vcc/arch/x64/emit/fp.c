@@ -41,12 +41,12 @@ VPRIV void x64_x87ld(ecx *e, const lval *l) { x64_x87(e, XF_LDT, l, 10); }
 VPRIV void x64_x87st(ecx *e, const lval *l) { x64_x87(e, XF_STPT, l, 10); }
 
 static lval x64_at(int r) { return (lval){ .k = L_REG, .r = (uint8_t)r, .align = 16 }; }
-static lval x64_slot(ecx *e, uint64_t n) { return (lval){ .k = L_FRAME, .off = wk_slot(e, n, n >= 16 ? 16 : 8), .align = 8 }; }
+static lval x64_tmpslot(ecx *e, uint64_t n) { return (lval){ .k = L_FRAME, .off = wk_slot(e, n, n >= 16 ? 16 : 8), .align = 8 }; }
 
 /* a new long double object: its address in a temporary */
 static int x64_ldnew(ecx *e)
 {
-	lval l = x64_slot(e, 16);
+	lval l = x64_tmpslot(e, 16);
 
 	return x64_laddr(e, &l);
 }
@@ -68,7 +68,7 @@ static val x64_qzero(ecx *e);
 static val x64_half_call(ecx *e, int name, val v, qty from, qty to)
 {
 	wkarg a;
-	lval slot = x64_slot(e, 16);
+	lval slot = x64_tmpslot(e, 16);
 
 	x64_classify(e, from, &a, false);
 	a.slot = slot.off;
@@ -247,7 +247,7 @@ static val x64_tfcall(ecx *e, int fn, const tfarg *a, int n, int rk)
 		x64_tfree(e, a[k].r);	/* (the values stay in their registers until loaded below) */
 	saved = X->live & X_TEMPS, fsaved = X->live & X_FTEMPS;
 	if (rk == TQ || rk == TX || rk == TW)
-		out = x64_slot(e, 16);
+		out = x64_tmpslot(e, 16);
 	e->calls = true;
 	for (int q = 0; q < 16; q++)
 		if (saved & (1u << q)) {
@@ -392,7 +392,7 @@ static val x64_qcmp(ecx *e, int op, val a, val b)
 /* a new __float128 zero */
 static val x64_qzero(ecx *e)
 {
-	lval l = x64_slot(e, 16);
+	lval l = x64_tmpslot(e, 16);
 	int r = x64_laddr(e, &l);
 
 	x64_zero(e, r, 16);
@@ -576,7 +576,7 @@ VPRIV val x64_cvt(ecx *e, val v, qty from, qty to)
 		}
 		if (tl) {
 			/* float, double -> long double: through memory */
-			lval t = x64_slot(e, 8);
+			lval t = x64_tmpslot(e, 8);
 			int rd = x64_ldnew(e);
 			lval md = x64_at(rd);
 
@@ -588,7 +588,7 @@ VPRIV val x64_cvt(ecx *e, val v, qty from, qty to)
 		}
 		{
 			int ra = x64_toreg(e, &v, 8), x;
-			lval m = x64_at(ra), t = x64_slot(e, 8);
+			lval m = x64_at(ra), t = x64_tmpslot(e, 8);
 
 			x64_x87(e, XF_LDT, &m, 10);
 			x64_x87(e, XF_STP, &t, ts);
@@ -615,7 +615,7 @@ VPRIV val x64_cvt(ecx *e, val v, qty from, qty to)
 		}
 		if (tl) {
 			int r = x64_toreg(e, &v, 8), rd;
-			lval t = x64_slot(e, 8), md;
+			lval t = x64_tmpslot(e, 8), md;
 			uint32_t ldone = wk_newlabel(e);
 
 			if (fs < 8)
@@ -624,7 +624,7 @@ VPRIV val x64_cvt(ecx *e, val v, qty from, qty to)
 			x64_x87(e, XF_ILD, &t, 8);
 			if (!sg && fs == 8) {
 				/* fild took the top bit as a sign: add 2^64 back */
-				lval k = x64_slot(e, 8);
+				lval k = x64_tmpslot(e, 8);
 
 				x64_op3(e, X_TEST, 8, XNOREG, r, XNOREG);
 				x64_jcc(e, CC_NS, ldone);
@@ -652,7 +652,7 @@ VPRIV val x64_cvt(ecx *e, val v, qty from, qty to)
 	if (fl) {
 		/* truncation: the control word's rounding set to zero around fistp */
 		int ra = x64_toreg(e, &v, 8), r;
-		lval m = x64_at(ra), cw = x64_slot(e, 8), cw2 = x64_slot(e, 8), t = x64_slot(e, 8);
+		lval m = x64_at(ra), cw = x64_tmpslot(e, 8), cw2 = x64_tmpslot(e, 8), t = x64_tmpslot(e, 8);
 
 		x64_x87(e, XF_STCW, &cw, 2);
 		x64_mem(e, X_LD, 2, R11, &cw, false);
@@ -665,7 +665,7 @@ VPRIV val x64_cvt(ecx *e, val v, qty from, qty to)
 		if (ts == 8 && !wk_signed(c, to)) {
 			/* fistp only stores signed integers. Split the unsigned range at
 			 * 2^63, subtracting that exact value before the signed conversion. */
-			lval bias = x64_slot(e, 8);
+			lval bias = x64_tmpslot(e, 8);
 			uint32_t low = wk_newlabel(e), done = wk_newlabel(e);
 
 			x64_movi(e, R11, 0x5f000000); /* float 2^63 */
