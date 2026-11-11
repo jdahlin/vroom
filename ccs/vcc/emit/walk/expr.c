@@ -966,6 +966,19 @@ static val wk_arith(ecx *e, int op, qty t, val a, val b)
 		return LO(wbin)(e, op, wk_signed(c, t), a, b);
 	if (a.k == V_CONST && b.k == V_CONST && wk_fold(c, op, t, a.i, b.i, &r))
 		return vconst(r);
+	if (e->E->o->opt && !e->E->noopt && (op == T_STAR || op == T_CARET)) {
+		/* Constants commute here; both operands have already been evaluated. */
+		if (a.k == V_CONST && b.k != V_CONST) {
+			val tmp = a;
+			a = b, b = tmp;
+		}
+		if (b.k == V_CONST) {
+			if (em_xor_not(c, t, op, b.i))
+				return LO(un)(e, T_TILDE, opw(c, t), a);
+			em_mulshift(c, t, &op, &b.i);
+		}
+	}
+
 	/* x & 0, x * 0, 0 & x, 0 * x: 0 (x evaluated already, its effects done: IS_DAX(i) = i->i_flags & 0) */
 	if ((op == T_AMP || op == T_STAR) && ((b.k == V_CONST && b.i == 0) || (a.k == V_CONST && a.i == 0))) {
 		e->discarded_scalar |= a.k == V_REG || b.k == V_REG;
@@ -1342,7 +1355,14 @@ static val wk_binary(ecx *e, uint32_t n)
 	int op = x->aux;
 	qty lt = N(x->a)->ty, rt = N(x->b)->ty;
 	val a, b;
+	uint32_t operand;
+	int bound = em_cmpbounds(e, n, &operand);
 
+	if (bound >= 0) {
+		val v = wk_gen(e, operand);
+		wk_free(e, &v);
+		return vconst(bound);
+	}
 	if (unlikely(is_vec(c, x->ty) || is_vec(c, lt) || is_vec(c, rt))) {
 		a = wk_gen(e, x->a);
 		b = wk_rhs(e, &a, x->b, is_vec(c, lt) ? prim(TY_ULONG) : lt);
@@ -3550,7 +3570,16 @@ VPRIV void wk_cond(ecx *e, uint32_t n, bool jump_if, uint32_t lbl)
 			return;
 		}
 		break;
-	case N_BINARY:
+	case N_BINARY: {
+		uint32_t operand;
+		int bound = em_cmpbounds(e, n, &operand);
+		if (bound >= 0) {
+			val v = wk_gen(e, operand);
+			wk_free(e, &v);
+			if (bound == (int)jump_if)
+				LO(jump)(e, lbl), wk_state(e)->cjump = true;
+			return;
+		}
 		if (wk_is_cmp(x->aux) && !is_flt(c, N(x->a)->ty) && !wk_mem(e, N(x->a)->ty)) {
 			qty lt = N(x->a)->ty;
 			int op = x->aux;
@@ -3571,6 +3600,7 @@ VPRIV void wk_cond(ecx *e, uint32_t n, bool jump_if, uint32_t lbl)
 			return;
 		}
 		break;
+	}
 	case N_CAST:
 		if ((x->aux == CK_BOOL || x->aux == CK_NOP || x->aux == CK_INT) && !is_flt(c, N(x->a)->ty) &&
 		    wk_size(c, x->ty) >= wk_size(c, N(x->a)->ty)) {

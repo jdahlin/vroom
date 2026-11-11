@@ -625,6 +625,7 @@ static void wk_switch_tree(ecx *e, const em_switch_case *cases, uint32_t n,
 /* Evaluate once; small and wide switches retain their comparison chain. */
 static void wk_switch(ecx *e, uint32_t n)
 {
+	if (wk_switch_values(e,n)) return;
 	cc *c = e->c;
 	wkst *W = e->wk;
 	const node *x = N(n);
@@ -672,10 +673,23 @@ static void wk_switch(ecx *e, uint32_t n)
 
 	wk_cases(e, x->b);
 	uint32_t count = W->ncases - c0;
+	bool bitset = false;
+	if (count >= 4 && count <= 65 && e->E->o->opt && !e->E->noopt &&
+	    !wk_mem(e, ct) && !em_bitint(c, ct)) {
+		em_switch_bitset_recipe recipe;
+		bitset = em_switch_bitset_plan(c, x->b, count, (unsigned)w * 8, sg, &recipe);
+		if (bitset) {
+			/* Discover the default only after the bounded proof succeeds. */
+			for (uint32_t i = c0; i < W->ncases; i++)
+				if (N(W->cases[i].node)->op == N_DEFAULT)
+					ldef = wk_caselabel(e, W->cases[i].node);
+			LO(switch_bitset)(e, r, w, &recipe, wk_caselabel(e, recipe.node), ldef);
+		}
+	}
 	if (e->E->o->opt && !e->E->noopt && count >= 8)
 		for (uint32_t i = c0; i < W->ncases; i++)
 			count -= N(W->cases[i].node)->op == N_DEFAULT;
-	bool tree = e->E->o->opt >= 1 && !e->E->noopt &&
+	bool tree = !bitset && e->E->o->opt >= 1 && !e->E->noopt &&
 		em_switch_strategy(count, 0, 0, false, false) == EM_SWITCH_TREE && !wk_mem(e, ct);
 	if (tree) {
 		em_switch_case *cases = malloc(count * sizeof *cases);
@@ -694,7 +708,7 @@ static void wk_switch(ecx *e, uint32_t n)
 			wk_switch_tree(e, cases, j, r, w, sg, ldef);
 		free(cases);
 	}
-	for (uint32_t i = c0; !tree && i < W->ncases; i++) {
+	for (uint32_t i = c0; !tree && !bitset && i < W->ncases; i++) {
 		wkcase *k = &W->cases[i];
 		uint32_t l = wk_caselabel(e, k->node);
 
@@ -733,7 +747,7 @@ static void wk_switch(ecx *e, uint32_t n)
 	}
 	W->ncases = c0;
 	LO(tfree)(e, r);
-	if (!tree)
+	if (!tree && !bitset)
 		LO(jump)(e, ldef);
 	if (W->nloop == WK_MAXLOOP)
 		efatal(e, x->loc, "statements nested too deeply");
@@ -1434,6 +1448,7 @@ static bool wk_is_main(cc *c, uint32_t s)
 
 VPRIV void wk_function(ecx *e, uint32_t s)
 {
+	em_switch_values_reset(e);
 	cc *c = e->c;
 	const sym *y = &c->syms[s];
 	const ctype *ft = T(c, y->ty);

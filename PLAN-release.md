@@ -439,6 +439,15 @@ grindarna: `vcc-diff.py`, `vcc-sema.py`, `vcc-ctests.py`, `vcc-abi.py`,
 LICENSE, x86-64-backend, wasm-backend, -O1, SQLite-korpus, Debian-urval,
 Csmith/YARPGen-rigg och paketering.
 
+### Status 2026-11-11: G5/G7, switchmedlemskap med bitmask
+
+OPT6 känner igen begränsade staplade case med en gemensam destination och
+sänker dem till en intervallskyddad bitmask på arm64, x86 och båda wasm-målen.
+Riktade kör- och kodkontroller passerar O0–O3 och `VCC_NOOPT`; vcc-sviten
+passerar 246/246 med en befintlig xfail. Ett riktat x86-exempel minskar från
+131 till 85 byte. Mätningens begränsningar och kvarvarande arbete finns i
+PLAN-fas2; G5/G7 och full O2 är fortsatt öppna.
+
 ### Status 2026-11-11: G5/G7, balanserad switchdispatch
 
 OPT6:s första del använder gemensamt strategival/sortering och balanserade
@@ -673,3 +682,27 @@ Exakta kommandon, oförändrad kompilatorkod och testmarkörens föräldraprov:
 G7: ett profilstyrt emittersteg minskar upprepad identifierar- och x86-register-
 matchning. Den fasta instruktionsgrinden och de riktade proverna finns i
 PLAN-fas2.md; faktisk kompileringstid på hela projekt återstår att mäta.
+
+OPT1-utökningen med tvåpotensmultiplikation och bitkomplement är implementerad
+för x86, arm64 och wasm och har fokuserad O0–O3-validering och en liten
+matchad kompilatorkostnadsprofil i PLAN-fas2.md. G5/G7 och generell O2-täckning
+är fortsatt öppna.
+
+Begränsade switch-värdetabeller har validerats på fyra mål; syntetiska
+kompilatorkostnader och deras begränsningar finns i PLAN-fas2.md. G5/G7 och
+en realistisk sammansatt kostnadsgrind återstår.
+
+Avgränsade heltalsjämförelser vid typgränser är implementerade för alla fyra
+mål och har fokuserade korrekthets- och kompilatorkostnadsprov i PLAN-fas2.md.
+G5/G7 och generell O2-täckning är fortsatt öppna.
+
+Den sammansatta optimeringsstacken med värdetabeller klarar den begränsade
+1 %-kompilatorkostnadsgrinden på fyra mål (PLAN-fas2.md); den mättade
+switchkostnaden och releasegrindarna G5/G7 återstår att följa upp.
+
+Switch-värdetabellernas byteutmatning har snabbats upp efter `perf`-profilering;
+matchade mätningar och deras begränsningar finns i PLAN-fas2.md. G5/G7 kvarstår.
+
+Aritmetik- och switchstacken som tidigare hamnade i featuregrenar integreras
+nu på main. Fyra måls fokuserade tester, native-sviter och aktuell matchad
+kompilatorinstruktionsgrind redovisas i PLAN-fas2.md. G5/G7 återstår.
