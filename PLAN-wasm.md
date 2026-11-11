@@ -489,3 +489,15 @@ hela processens värdinstruktioner mot basen. De tolv assemblerutdata för
 kontroll-, sling- och structproven är byteidentiska före/efter sorteringsbytet.
 De sanitiserade intervall-/värdekontrakten och 16 wasm-kombinationer passerar;
 intervallprovet har också uttryckliga fall på båda sidor om gränsen 16.
+
+Ett kort blandat C-prov efter sorteringsändringen kompilerar elva befintliga
+regressionsfiler till wasm64 O2: djupa blandade uttryck, registerlokaler,
+bitkastningar, ramceller, heltalsregler, djupa villkor, potenstvådivisioner,
+atomics, minnesinbyggda och de nya ramcellsfallen. Resurshuvuden från LLVM 23
+anges uttryckligen. Summan för elva separata processer är 96 456 389 till
+97 034 041 värdinstruktioner (+0,599 %); enskilda filer ligger på +0,115 till
++1,337 %. `_BitInt`-runtimefilen avvisas redan av basbygget och räknas inte
+som godkänd eller in i summan. Kommandon, käll-/binärhashar och feltext finns
+lokalt i `work/opt-profile/wasm-cells-mixed-configured-cost/result.json`.
+Detta avgränsade kompileringsprov ersätter inte den ordinarie fulla
+prestandagrinden eller belägger programmets körtid; CI återstår.
