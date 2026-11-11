@@ -1308,6 +1308,7 @@ static bool wbinrule(ecx *e, uint32_t n, qty ty, int *op, i128 *rhs, int *identi
 
 		if ((!em_sdivpow2(c, ty, *op, *rhs, &recipe) || !wsdivpow2_ok(&recipe)) &&
 		    !(*op == T_SLASH && e->E->o->opt && !e->E->noopt &&
+		      (tsize(c, ty) == 4 || (tsize(c, ty) == 8 && (uint64_t)*rhs > (UINT64_C(1) << 63))) &&
 		      em_udivconst(c, ty, *op, *rhs, reciprocal) && wudivconst_ok(reciprocal)))
 			return false;
 	}

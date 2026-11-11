@@ -172,6 +172,7 @@ VPRIV int LO(laddr)(ecx *e, const lval *l);		/* the address in a temporary (l's 
 VPRIV void LO(copy)(ecx *e, int rdst, int rsrc, uint64_t n);	/* n bytes; the address registers stay live */
 VPRIV void LO(zero)(ecx *e, int rdst, uint64_t n);
 /* integers: size 4 or 8 (the operation's width); results in a's register */
+VPRIV val LO(umulhi)(ecx *e, val a, val b);	/* high64(a*b), consumes both, returns a register */
 VPRIV val LO(bin)(ecx *e, int op, int size, bool sgn, val a, val b);	/* T_PLUS T_MINUS T_STAR T_SLASH T_PERCENT T_AMP T_PIPE T_CARET T_LESSLESS T_GREATERGREATER */
 VPRIV val LO(un)(ecx *e, int op, int size, val a);			/* T_MINUS T_TILDE */
 VPRIV void LO(ext)(ecx *e, int r, int from, bool sgn);		/* low `from` bytes of r extended to 64 bits */

@@ -1966,3 +1966,14 @@ sanitiserade reciprok-/tryckkontrakten passerar på kombinationen, liksom
 221/221 arm64-regressioner (ett befintligt xfail) och 216/216 x86-regressioner
 (sex referensskips). Mätningarnas JSON anger exakt 781ca69→58263be och
 `compiler-sources.json` binder de tio ändrade kompilatorfilerna med SHA256.
+
+### OPT8 pågår: unsigned64 reciprokdivision (2026-11-11)
+
+Arbetsgrenen från 046c6dc utökar det gemensamma receptet med separat u64-
+konstruktion i host-u128; u32 behåller sin egen billigare konstruktion.
+Native använder befintlig UMULH/MULW via en ny walker-hook, med sparning av
+levande implicita RAX/RDX och samma explicita toppbudget för temporärer.
+Wasm avvisar u64-reciproker före konstruktionen och väljer bara kvot genom
+jämförelse vid divisor>2^63. Sexton nya mål-/nivåprober och sanitiserade
+u64-matematik-/registerparskontrakt passerar; breda tester, fil-för-fil,
+ABI/unwind och parade kostnadsmätningar mot exakt 046c6dc återstår före PR.
