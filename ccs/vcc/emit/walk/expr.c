@@ -219,9 +219,21 @@ static void wk_ael_drop(ecx *e, uint32_t s, int64_t k, bool all)
 VPRIV void wk_ael_clear(ecx *e, uint32_t s)
 {
 	if (s == UINT32_MAX)
-		e->wk->nael = 0;
+		e->wk->nael = 0, e->wk->npk = 0;
 	else
 		wk_ael_drop(e, s, 0, true);
+}
+
+VPRIV bool wk_pk_get(ecx *e, uint32_t s, val *v)
+{
+	wkst *W = e->wk;
+
+	for (int i = 0; i < W->npk; i++)
+		if (W->pk[i].s == s && W->pk[i].gen == W->gen) {	/* (the parameters of one copy: its own syms) */
+			*v = W->pk[i].v;
+			return true;
+		}
+	return false;
 }
 
 VPRIV lval wk_lval(ecx *e, uint32_t n)
@@ -235,6 +247,10 @@ VPRIV lval wk_lval(ecx *e, uint32_t n)
 
 		if (wk_ael_of(e, n, &as, &ak))
 			wk_ael_drop(e, as, ak, false);	/* (written, or its address used) */
+		if (x->op == N_VAR && e->wk->npk)	/* (a provisional constant ends at a write, or its address) */
+			for (int i = 0; i < e->wk->npk; i++)
+				if (e->wk->pk[i].s == x->a)
+					e->wk->pk[i] = e->wk->pk[--e->wk->npk], i--;
 	}
 
 	switch (x->op) {

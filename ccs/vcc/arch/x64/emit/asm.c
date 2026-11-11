@@ -231,6 +231,15 @@ VPRIV void x64_asm(ecx *e, uint32_t n)
 			X->live |= 1u << r;
 		}
 	X->asmcs = true;	/* (operands may take callee-saved registers from here) */
+	/* inputs that are inlined parameters still holding their constant: read before an
+	   output writes them (rip_rel_ptr: "=r"(p) : "i"(p)) */
+	val pkv[64];
+	uint64_t pkm = 0;
+
+	for (uint32_t i = a->nout; i < nops && i < 64; i++)
+		if (N(a->ops[i].expr)->op == N_VAR && strpbrk(c->strs[a->ops[i].constraint - 1].s, "in") &&
+		    wk_pk_get(e, N(a->ops[i].expr)->a, &pkv[i]))
+			pkm |= 1ull << i;
 	/* outputs: lvalues; a register's value read first for + */
 	for (uint32_t i = 0; i < a->nout; i++) {
 		const char *cs = c->strs[a->ops[i].constraint - 1].s;
@@ -341,7 +350,9 @@ VPRIV void x64_asm(ecx *e, uint32_t n)
 				an = N(an)->a;
 			if (N(an)->op == N_ADDR)
 				an = N(an)->a;
-			if (is_integer(e->c, N(en)->ty) && cc_eval(e->c, en, &cv) && cv.kind == CV_INT) {
+			if (i < 64 && (pkm >> i & 1)) {
+				v = pkv[i];	/* an inlined parameter still holding its constant argument */
+			} else if (is_integer(e->c, N(en)->ty) && cc_eval(e->c, en, &cv) && cv.kind == CV_INT) {
 				v = vconst(em_trunc_to(e->c, cv.i, N(en)->ty));
 			} else if (e->c->o->pic && N(an)->op == N_VAR && (c->syms[N(an)->a].kind == S_FUNC ||
 				   (c->syms[N(an)->a].kind == S_VAR && !is_local_var(c, N(an)->a))) &&

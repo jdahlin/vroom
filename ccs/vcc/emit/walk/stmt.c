@@ -939,6 +939,16 @@ VPRIV val wk_inline(ecx *e, uint32_t n, uint32_t s)
 				continue;
 			}
 			W->kgen[p] = 0;
+			if ((av[i].k == V_CONST || (av[i].k == V_ADDR && is_ptr(c, pt) && !wk_weak0(c, av[i]))) && !wk_mem(e, pt) &&
+			    !is_flt(c, pt) && W->npk < 16) {
+				int k;
+
+				for (int j = 0; j < W->npk; j++)	/* (an earlier copy's binding) */
+					if (W->pk[j].s == p)
+						W->pk[j] = W->pk[--W->npk], j--;
+				k = W->npk++;
+				W->pk[k].s = p, W->pk[k].gen = W->gen, W->pk[k].inst = 0, W->pk[k].v = av[i];
+			}
 			v = as[i] ? wk_reload(e, &t, pt) : av[i];
 			if (wk_mem(e, pt)) {
 				v = wk_putmem(e, &l, pt, v);

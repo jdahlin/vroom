@@ -89,16 +89,21 @@ typedef struct wkst {
 	uint32_t inst, ninst, *linst, *cinst;
 	struct wkinl *inl;	/* the innermost inlined call, NULL in the function itself */
 	int depth;
-	bool cjump;
+	bool cjump;	/* wk_cond jumped whatever the condition (N_IF: the branch it skips is dead) */
 	/* a[K] = constant for local arrays used only as a[CONST] (no SA_AESC): straight-line
 	   code only (a label drops them all), as arm64's ael */
 	struct { uint32_t s, gen, inst; int64_t idx; i128 v; } ael[16];
-	int nael;	/* wk_cond jumped whatever the condition (N_IF: the branch it skips is dead) */
+	int nael;
+	/* a parameter of an inlined copy that is written later, bound to its constant argument
+	   until its first write or a label: only an asm "i" operand reads it (rip_rel_ptr) */
+	struct { uint32_t s, gen, inst; val v; } pk[16];
+	int npk;
 } wkst;
 
 VPRIV wkst *wk_state(ecx *e);
 VPRIV bool wk_const_sym(ecx *e, uint32_t s, val *v);
 VPRIV void wk_ael_clear(ecx *e, uint32_t s);
+VPRIV bool wk_pk_get(ecx *e, uint32_t s, val *v);	/* a provisional constant of parameter s (wkst.pk) */
 VPRIV bool wk_weak0(cc *c, val v);	/* the address of a weak undefined symbol (may be 0) */	/* UINT32_MAX: every array */
 VPRIV bool wk_isconst(ecx *e, uint32_t n);	/* n is a constant (constants, bound locals, no loads) */
 VPRIV val wk_conv(ecx *e, val v, qty from, qty to);	/* s is bound to the constant *v */
