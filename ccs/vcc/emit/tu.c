@@ -553,13 +553,13 @@ static int emit_tu1(cc *c, const cc_opts *o, bool write_out, uint8_t *mf, bool *
 				    "\t.section\t.debug_abbrev,\"\",@progbits\n.Ldbg_abbrev:\n"
 				    "\t.byte\t1, 17, 0, 37, 8, 19, 5, 3, 8, 16, 23, 27, 8, 17, 1, 18, 6, 0, 0, 0\n"
 				    "\t.section\t.debug_info,\"\",@progbits\n"
-				    "\t.word\t.Ldbg_cu_end-.Ldbg_cu_start\n.Ldbg_cu_start:\n"
-				    "\t.hword\t5\n\t.byte\t1, 8\n\t.word\t.Ldbg_abbrev\n\t.byte\t1\n\t.asciz\t\"vcc\"\n"
-				    "\t.hword\t29\n\t.asciz\t");
+				    "\t.long\t.Ldbg_cu_end-.Ldbg_cu_start\n.Ldbg_cu_start:\n"
+				    "\t.short\t5\n\t.byte\t1, 8\n\t.long\t.Ldbg_abbrev\n\t.byte\t1\n\t.asciz\t\"vcc\"\n"
+				    "\t.short\t29\n\t.asciz\t");
 			dbg_str(&tail, o->dbg_name ? o->dbg_name : "<stdin>");
-			tb_s(&tail, "\n\t.word\t.Lline_table_start0\n\t.asciz\t");
+			tb_s(&tail, "\n\t.long\t.Lline_table_start0\n\t.asciz\t");
 			dbg_str(&tail, o->dbg_dir ? o->dbg_dir : ".");
-			tb_s(&tail, "\n\t.xword\t.Ldbg_text0\n\t.word\t.Ldbg_text1-.Ldbg_text0\n.Ldbg_cu_end:\n"
+			tb_s(&tail, "\n\t.quad\t.Ldbg_text0\n\t.long\t.Ldbg_text1-.Ldbg_text0\n.Ldbg_cu_end:\n"
 				    "\t.section\t.debug_line,\"\",@progbits\n.Lline_table_start0:\n");
 		}
 		if (WASM(c))
