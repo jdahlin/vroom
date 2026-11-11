@@ -103,6 +103,8 @@ static __attribute__((noinline)) uint32_t unary_op(cc *c)
 		need_lvalue(c, n, t->loc);
 		if (is_complex(c, N(n)->ty))
 			return cplx_incdec(c, n, op, loc);
+		if ((T(c, N(n)->ty)->flags & TF_ATOMIC) && atomic_wide(c, N(n)->ty))
+			return atomic_assign_expr(c, n, 0, op == N_PREINC ? T_PLUS : T_MINUS, false, loc);
 		need_scalar(c, n, "increment");
 		if (is_ptr(c, N(n)->ty) && KIND(c, T(c, N(n)->ty)->base) == TY_SVE)
 			cc_error(c, loc, "arithmetic on a pointer to sizeless type '%s'", tyname(c, T(c, N(n)->ty)->base));

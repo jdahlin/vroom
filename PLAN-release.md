@@ -161,6 +161,15 @@ av `bench/vcc-optaudit.py`; vcc O1/O2/O3 ger samma assembler här.
 Inga optimeringar implementerade eller uppmätt
 körtidsmål; G5 är fortsatt öppet och benchmarksvitens X är inte fastställt.
 
+### Status 2026-11-11: atomiska helobjekt på Linux
+Större atomiska record, heltal och komplexa värden använder nu libatomic-ABI
+när den inbyggda 1/2/4/8-bytevägen inte räcker. Jämför-och-byt-loopar behåller
+hela objektet och rätt förväntat värde även vid padding och konkurrens.
+Pthread-prov samt atomikregressioner klarar Linux x86 och ARM i unity,
+filvis bygge och ASan/UBSan; kernel-sema är 887/887 i båda körsätten.
+Den nya snabba värdriggen körs i normal och ASan-CI. Atomiska vektortyper
+återstår i frontend; G1/G2 är fortsatt öppna.
+
 ### Status 2026-11-11: objektrepresentationer och packade boolvektorer
 `__builtin_bit_cast` har körning och bytebaserad konstanttolkning med okänd
 padding; packade boolvektorer har logiska element, bitlagring och verifierad

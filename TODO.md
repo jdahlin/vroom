@@ -208,12 +208,15 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
   *Validate:* T1 `align_local.c` (`_Alignas(32/64/128/4096)` locals, arrays
   and VLAs of over-aligned types, inside recursion and alongside alloca;
   check `(uintptr_t)&x % A == 0`).
-- [ ] **Atomic complex increment/decrement** [P]. Non-atomic complex
+- [x] **Atomic complex increment/decrement** [P]. Non-atomic complex
   `++`/`--` update only the real component and preserve the imaginary bits.
-  `_Atomic(_Complex T)` still requires a whole-object compare-exchange loop;
-  reject it explicitly rather than lowering to a non-atomic component write.
-  *Validate:* concurrent increments on `_Atomic(_Complex float/double)` on
-  both Linux targets, including unchanged imaginary NaN/signed-zero bits.
+  Atomic complex values up to eight bytes use a whole-object compare-exchange
+  loop (`tests/vcc/atomic_complex_incdec.c`, `tests/atomic/complex_concurrent.c`).
+  Linux wider complex values use the generic libatomic whole-object ABI and
+  CAS retries. Validated concurrent double/long-double increments, imaginary
+  signed-zero retention, 64-byte aggregate snapshots and 128-bit integer RMW
+  on both Linux targets (`tests/atomic/wide.c`, link with `-latomic -pthread`).
+  Wider atomic operations on other targets remain unsupported.
 
 - [x] **`_Atomic` dropped** [P].  Done: `_Atomic(T)` and the qualifier
   (also `T *_Atomic`) make a type of its own (`TF_ATOMIC`, `ty_atomic()` in
@@ -221,9 +224,11 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
   T; emit loads with `ldar`, stores with `stlr`, and every compound
   assignment and `++`/`--` is a `casal` loop around the operator's usual
   code (`atomic_rmw`, emit/expr.c).  Tests: `atomic_layout.c`,
-  `atomic_ops.c`.  Left, each a clean error today: 16-byte atomics
-  (`_Atomic __int128`, `long double`; needs `caspal`), loads and stores of
-  whole `_Atomic` structs/unions, `_Atomic` vectors.  Differs from clang on
+  `atomic_ops.c`. Linux whole-object records and wider integer, FP and complex
+  accesses use the libatomic pointer ABI when a native 1/2/4/8-byte access is
+  unavailable; native 16-byte instructions remain an optimization. Atomic
+  vector types remain unsupported by the frontend.
+  Differs from clang on
   purpose: clang 21/23 zero-extend a signed old value when the compound
   operation leaves int arithmetic (`x /= -2` on `_Atomic signed char` -2
   gives -127); vcc gives 1 as C says.  Clang rejects `+=` on an atomic

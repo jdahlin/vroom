@@ -68,6 +68,7 @@ arm64)
 	step stress-vccd  python3 bench/vcc-stress.py --vccd
 	step vccd         python3 bench/vccd-test.py
 	step abi          python3 bench/vcc-abi.py
+	step atomic       python3 bench/vcc-atomic.py --bin-dir "$BUILD" --target aarch64-linux-gnu
 	step pic          python3 bench/vcc-pic.py
 	step vas-obj      python3 bench/vas-obj.py
 	step vlink-opts   python3 bench/vlink-opts.py
@@ -92,6 +93,7 @@ asan)
 	# its arenas and caches mapped, by design, so every compile would "leak"
 	export ASAN_OPTIONS=${ASAN_OPTIONS:+$ASAN_OPTIONS:}detect_leaks=0
 	step ctests-vcc   env VCC_BIN="$B" python3 bench/vcc-ctests.py -j "$J" --suite vcc
+	step atomic       python3 bench/vcc-atomic.py --bin-dir "$B" --target aarch64-linux-gnu
 	step diag         python3 bench/vcc-diag.py -j "$J" --bin-dir "$B"
 	step stress       python3 bench/vcc-stress.py --bin-dir "$B"
 	step vccd         python3 bench/vccd-test.py --bin-dir "$B"
