@@ -97,6 +97,14 @@ Villkorliga eller okända DejaGNU-direktiv hoppas över. Körsviterna återstår
 Efter rättningen av void-lvärden: 1562 godkända, 54 fel, **inga
 vcc-krascher**, samma 398 överhoppade och två clang-krascher.
 
+`bench/vcc-torture-execute.py -j 6 --target x86_64-linux-gnu` kör nu
+IEEE och builtins, med companion-filerna och suite-main. `--target
+aarch64-linux-gnu` kör under QEMU. IEEE: 49 godkända, inga fel och
+30 filtrerade på båda målen. Villkorliga direktiv som riggen ännu inte
+tolkar räknas som överhoppade; det är inte full täckning. Builtins körs
+vid -O0; optimerade varianter behöver motsvarigheter till GCC:s
+avstängda optimeringspass. Sprintf-felet är rättat; strncmp återstår.
+
 **Klart när:** inga krascher i `compile/`; `ieee/` och `builtins/` lika
 gröna som `execute/`.
 
@@ -117,8 +125,17 @@ Samma rigg som `vcc-ctests.py`: bygg med clang och vcc, kör under qemu,
 jämför utdata.
 
 **Linux x86-64 2026-11-11:** `bench/vcc-small.py -j 6` klarar alla
-220 c-testsuite-fall. `--suite chibicc` ger 10 godkända, ett fel och
-30 överhoppade av clang-filtret. cproc och LLVM återstår, liksom arm64.
+220 c-testsuite-fall. `--target aarch64` kör samma rigg under QEMU.
+Efter rättningen av okända escape-sekvenser är chibicc grön bland de
+clang-giltiga fallen: x86 12 godkända/29 filtrerade, arm64 11/30.
+`--suite llvm` täcker direkta C-filer i UnitTests och Regression/C:
+x86 121 godkända/8 fel, arm64 120/2 och 7 uppströms arkitekturexkluderingar.
+Underkatalogernas egna CMake-flaggor och tester återstår.
+
+`bench/vcc-cproc.py --target x86_64|aarch64` ger kompilering/assemblering
+för QBE-fallen, tokenparitet för `.pp`, och avvisning för `.err`, med
+clang som filter. Det jämför inte QBE IR eller runtime-semantik.
+Baslinje: x86 166 godkända/17 fel/13 filtrerade, arm64 168/15/13.
 
 **Klart när:** allt som clang klarar klarar också vcc.
 
