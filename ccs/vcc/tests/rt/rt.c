@@ -371,15 +371,72 @@ double tanh(double x)
 	return (e - 1) / (e + 1);
 }
 
-/* float complex division (compiler-rt's __divsc3, without its scaling) */
-_Complex float __divsc3(float a, float b, float c, float d)
-{
-	float den = c * c + d * d;
-	_Complex float r;
-	__real__ r = (a * c + b * d) / den;
-	__imag__ r = (b * c - a * d) / den;
-	return r;
+/* Complex division normalizes the denominator before squaring it.  The
+ * exceptional cases follow the C complex arithmetic rules also used by
+ * compiler-rt.  Keep scaling freestanding: neither logb nor scalbn is
+ * available in the bare test environment.  Negative scaling is split above
+ * the normal/subnormal boundary so only the final multiplication rounds a
+ * subnormal result. */
+#define RT_COMPLEX_DIV(T, NAME, TAG, MAXEXP, MANT, ABS, SIGN, INF) \
+static T TAG##_pow2(int e) \
+{ \
+	T p = 1, b = e < 0 ? (T)0.5 : (T)2; \
+	unsigned n = e < 0 ? -e : e; \
+	for (; n; n >>= 1) { if (n & 1) p *= b; if (n > 1) b *= b; } \
+	return p; \
+} \
+static T TAG##_scale(T x, int e) \
+{ \
+	const int hi = MAXEXP - 1, min = 2 - MAXEXP, lo = min + MANT; \
+	if (e > hi) { x *= TAG##_pow2(hi); e -= hi; \
+		if (e > hi) { x *= TAG##_pow2(hi); e -= hi; if (e > hi) e = hi; } } \
+	if (e < min) { x *= TAG##_pow2(lo); e -= lo; \
+		if (e < min) { x *= TAG##_pow2(lo); e -= lo; if (e < min) e = min; } } \
+	return x * TAG##_pow2(e); \
+} \
+_Complex T NAME(T a, T b, T c, T d) \
+{ \
+	T m = ABS(c), n = ABS(d); \
+	if (m != m || n > m) m = n; \
+	int e = 0; \
+	if (m > 0 && __builtin_isfinite(m)) { \
+		while (m >= (T)0x1p64) { m *= (T)0x1p-64; e += 64; } \
+		while (m < (T)0x1p-64) { m *= (T)0x1p64; e -= 64; } \
+		while (m >= 2) { m *= (T)0.5; e++; } \
+		while (m < 1) { m *= 2; e--; } \
+		c = TAG##_scale(c, -e); d = TAG##_scale(d, -e); \
+	} \
+	T den = c * c + d * d; \
+	T re = TAG##_scale((a * c + b * d) / den, -e); \
+	T im = TAG##_scale((b * c - a * d) / den, -e); \
+	if (__builtin_isnan(re) && __builtin_isnan(im)) { \
+		if (den == 0 && (!__builtin_isnan(a) || !__builtin_isnan(b))) { \
+			re = SIGN(INF, c) * a; im = SIGN(INF, c) * b; \
+		} else if ((__builtin_isinf(a) || __builtin_isinf(b)) && \
+		           __builtin_isfinite(c) && __builtin_isfinite(d)) { \
+			a = SIGN((T)!!__builtin_isinf(a), a); \
+			b = SIGN((T)!!__builtin_isinf(b), b); \
+			re = INF * (a * c + b * d); im = INF * (b * c - a * d); \
+		} else if (__builtin_isinf(m) && __builtin_isfinite(a) && __builtin_isfinite(b)) { \
+			c = SIGN((T)!!__builtin_isinf(c), c); \
+			d = SIGN((T)!!__builtin_isinf(d), d); \
+			re = (T)0 * (a * c + b * d); im = (T)0 * (b * c - a * d); \
+		} \
+	} \
+	_Complex T r; __real__ r = re; __imag__ r = im; return r; \
 }
+RT_COMPLEX_DIV(float, __divsc3, rt_cdivf, 128, 24,
+               __builtin_fabsf, __builtin_copysignf, __builtin_inff())
+RT_COMPLEX_DIV(double, __divdc3, rt_cdiv, 1024, 53,
+               __builtin_fabs, __builtin_copysign, __builtin_inf())
+#if __LDBL_MANT_DIG__ == 113
+RT_COMPLEX_DIV(long double, __divtc3, rt_cdivl, 16384, 113,
+               __builtin_fabsl, __builtin_copysignl, __builtin_infl())
+#elif __LDBL_MANT_DIG__ == 64
+RT_COMPLEX_DIV(long double, __divxc3, rt_cdivl, 16384, 64,
+               __builtin_fabsl, __builtin_copysignl, __builtin_infl())
+#endif
+#undef RT_COMPLEX_DIV
 __int128 __fixsfti(float f)
 {
 	int neg = f < 0;
