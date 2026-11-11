@@ -479,6 +479,14 @@ VPRIV bool wk_branch_entry(cc *c, uint32_t n)
 			if (wk_branch_entry(c, a->ops[i].expr)) return true;
 		return false;
 	}
+	case N_DECL: {
+		/* (a VLA or a cleanup variable needs its scope walked; else only its initializer) */
+		const sym *y = &c->syms[x->a];
+
+		if (y->kind == S_VAR && ((T(c, y->ty)->flags & TF_VLA) || sym_attrs(c, x->a)->cleanup))
+			return true;
+		return y->kind == S_VAR && y->sc != SC_STATIC && y->sc != SC_EXTERN && wk_branch_entry(c, x->b);
+	}
 	default:
 		return true;
 	}
