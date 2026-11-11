@@ -708,8 +708,23 @@ VPRIV void wk_stmt(ecx *e, uint32_t n)
 			LO(ret)(e, NULL, prim(TY_VOID), W->retlbl);
 		}
 		return;
-	case N_ASM:
+	case N_ASM: {
+		const casm *a = &c->asms[x->a];
+		bool empty = a->tmpl && !*c->strs[a->tmpl - 1].s && !a->nout && !a->nin && !a->go;
+
+		for (uint32_t i = 0; empty && i < a->nclob; i++) {
+			const char *s = c->strs[a->clob[i] - 1].s;
+
+			empty = !strcmp(s, "memory") || !strcmp(s, "cc");
+		}
+		if (empty) {
+			/* Locals live in memory; the record preserves the sequencing point
+			   for passes that will cache loads or schedule instructions. */
+			LO(barrier)(e);
+			return;
+		}
 		efatal(e, x->loc, "x86-64: inline asm is not supported yet (PLAN-x86.md X6)");
+	}
 	case N_GOTO_IND: {
 		val v = wk_gen(e, x->a);
 

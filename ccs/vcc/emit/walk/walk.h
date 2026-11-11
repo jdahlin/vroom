@@ -135,6 +135,7 @@ VPRIV val LO(fcmp)(ecx *e, int op, qty t, val a, val b);	/* 0 or 1, false when u
 VPRIV val LO(cvt)(ecx *e, val v, qty from, qty to);	/* a float on either side (to may be _Bool) */
 /* builtins the CPU does */
 VPRIV void LO(trap)(ecx *e);				/* __builtin_trap, __builtin_unreachable */
+VPRIV void LO(barrier)(ecx *e);			/* compiler barrier: no machine instruction */
 VPRIV val LO(frame)(ecx *e, bool ret);			/* the return address (ret) or the frame address */
 VPRIV val LO(bitop)(ecx *e, int bi, int size, val a);	/* BI_CLZ.. BI_BSWAP64: a nonzero where the builtin requires it */
 VPRIV val LO(alloca)(ecx *e, val n);			/* n bytes on the stack, 16-aligned */

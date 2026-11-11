@@ -58,6 +58,7 @@ enum {
 	X_XADD,		/* lock xadd: r0 = [r1 + off], [r1 + off] += old r0 */
 	X_CMPXCHG,	/* lock cmpxchg: if [r1 + off] == rax then = r2, else rax = [r1 + off] */
 	X_MFENCE,
+	X_BARRIER,	/* empty asm: a compiler memory/flags barrier, no machine instruction */
 	X_JMPR,		/* jmp *r1 */
 	X_NAMED,	/* ref's name as a label here */
 	X_BSF, X_BSR,	/* r0 = index of the lowest / highest set bit of r1 */

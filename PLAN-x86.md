@@ -330,6 +330,12 @@ kärnan och kan vänta.
 
 ## Status
 
+### X6 (2026-11-11): tomma compiler barriers
+Tom inline asm utan operander, med `memory`/`cc`-clobber, bevaras som
+en barrier-post utan maskininstruktion. Andra asm-former återstår.
+GCC IEEE ger nu 49 godkända, inga fel, 30 filtrerade på x86 Linux,
+samma som arm64/QEMU. Regression: `asm_barrier.c`.
+
 ### X3 (2026-11-11): flyttalsinbyggda
 Vandraren sänker nu ordnade/oordnade jämförelseinbyggda för float,
 double och x87 long double, och konstantfoldade NaN/infinity-värden.

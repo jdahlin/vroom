@@ -326,6 +326,9 @@ VPRIV void x64_print(ecx *e, tbuf *b, uint32_t s)
 		case X_MFENCE:
 			tb_s(b, "\tmfence");
 			break;
+		case X_BARRIER:
+			tb_s(b, "\t# compiler barrier");
+			break;
 		case X_GOT:
 			tb_s(b, "\tmovq\t");
 			ref_off(c, b, i->ref, 0);

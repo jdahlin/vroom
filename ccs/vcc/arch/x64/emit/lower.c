@@ -658,6 +658,7 @@ VPRIV int x64_atomic(ecx *e, int op, int size, int rp, int rv, int rexp)
 }
 
 VPRIV void x64_trap(ecx *e) { x64_put(e, X_UD2); }
+VPRIV void x64_barrier(ecx *e) { x64_put(e, X_BARRIER); }
 
 VPRIV val x64_frame(ecx *e, bool ret)
 {
