@@ -1,0 +1,7 @@
+stdc_rotate_types.c:2:63: error: rotation operand must have unsigned integer type
+    2 | unsigned bad_value(int x) { return __builtin_stdc_rotate_left(x, 1); }
+      |                                                               ^
+stdc_rotate_types.c:3:72: error: rotation count must have integer type
+    3 | unsigned bad_count(unsigned x) { return __builtin_stdc_rotate_right(x, 1.0); }
+      |                                                                        ^
+2 errors generated.

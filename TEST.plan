@@ -241,6 +241,15 @@ och ett assembleringsfel. `pow`/`fabsl`-länkfelen är verkliga skillnader i
 lowering/optimering, inte skäl att lägga till `-lm` i riggen när upstream
 inte begär det. Resultat: `work/results/vroom-milestone-s4-pr-{x86,arm}.json`.
 
+Efter baslinjen är två frontendluckor rättade: `__builtin_c23_va_start`
+(även ellipsis utan namngiven parameter och ignorerad valfri andra operand)
+och generiska `__builtin_stdc_rotate_left/right` med typbevarande modulo-
+rotation och engångsevaluering. `pr48731` och `pr117492-1` kompilerar och
+assembleras på båda Linux-målen. Två runtime-regressioner per mål och
+ogiltiga operandtyper kontrolleras; unity/nonunity samt kernelns sema
+887/887 i båda körsätten går grönt. Detta är riktad evidens; S4:s fulla
+baslinjesiffror ovan har inte räknats om efter rättningen.
+
 Kvar:
 - Alla återstående matchande filer och optimeringskonfigurationer; nästlade
   kataloger med egna `.exp`-drivrutiner och LTO har ännu ingen motsvarighet.
