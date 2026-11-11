@@ -1239,6 +1239,54 @@ Ingen generell speedup eller godkänd 1 %-grind hävdas.
 Direktbindningen är levererad. Bättre urval, kopie-/utvidgningsstädning,
 minnesoptimeringar och full O2-täckning återstår; ingen SSA införd.
 
+### Status OPT4 (2026-11-11): delad framåtriktad kopiestädning
+
+`emit/rec/copies.c` innehåller nu den gemensamma framåtsökningen från
+arm64:s kopiepass. Postlayout, effekter, livslängd och tillåtna operander
+kommer från målet; omskrivningen förhandskontrolleras innan något ändras.
+Högst 256 användarposter sparas i trådlokal arbetsyta. Ingen ny AST-vandring
+eller SSA byggs. Arm64 återanvänder befintliga block-/livslängdsdata och
+debugmappning. X86:s adapter i `arch/x64/emit/copies.c` gör ett effektpass,
+lokal bakåtlivslängd och kompaktering med återanvänd trådlokal arbetsyta.
+Den aktiveras från O1 för 64-bitars GPR-kopior till temporärer, inom ett
+rakt block och med bevisad lokal överskrivning. Anrop, asm, atomics,
+blockgränser, implicita/tvåadressoperander och partiella skrivningar
+stoppar osäkra omskrivningar. 32-bitarskopior och XMM hanteras inte ännu.
+Wasm har inga sådana maskinposter; dess kodgenerering ändras inte här.
+
+Unity och fil-för-fil bygger. `bench/vcc-rec-copies.py` passerar normalt
+och med ASan/UBSan, inklusive negativa gräns-/bredd-/registerfall och
+transaktionell gräns vid 256 omskrivningar. `--rule copies --run` passerar
+O0–O3 på x86, arm64, wasm32 och wasm64 i båda byggena (32 kombinationer).
+Basen avvisas av det nya x86-kodkravet för `cp_stores` vid O1. C-fallen
+täcker division/skift, smala värden, källöverskrivning, anrop, loop/kanter,
+overflow-flaggor, atomics och native asm. Alla tidigare kompilerbara
+ögonblicksbilder är byte-identiska: arm64 137/137 med `-g` och asynkrona
+unwind-tabeller, wasm32 116/116 och wasm64 119/119; samma källhashar.
+
+Basens vpp SHA256 är
+`08fa144ebfd7166f9e5b499b6f209413a6ba131cf9374064b5d5c0816744a20c`;
+kandidat `e8b8d472eb989f2dfe254317b6c81c916f12c1dca2e631584d3e0cd479b7f77b`.
+Artefakter och reproducerande skript: `build/linux/opt-copies-baseline/`.
+Kompilator-CPU, tre alternerade repetitioner med fyra 3000-funktions-TU:er,
+O1 -S, -j 1, warm=1, cacher av (barnets user+sys, inklusive uppvärmning):
+
+| Mål | Loopkorpus ms, bas→kandidat | Oförändrat kontrollkorpus ms |
+| --- | --- | --- |
+| x86-64 | 76,871 → 69,113 | 26,334 → 27,432 |
+| arm64 | 90,907 → 90,196 | 32,528 → 33,213 |
+| wasm32 | 45,342 → 45,830 | 23,019 → 27,058 |
+| wasm64 | 44,886 → 45,779 | 22,625 → 23,036 |
+
+Ingen konsekvent stor x86-regression syns, men även oförändrad wasm-kod
+varierar 17,5 % i kontrollen. Delad värd och saknade hårdvaruräknare gör
+att detta inte verifierar 1 %-grinden eller en kompilatorvinst. Det korta
+unsigned summaprovet ger 3,785→3,136 ms CPU (clang O2 0,627; GCC O2
+1,776), identisk checksumma 4096177840. Basens och kandidatens assembler
+och objekt är dock byte-identiska, så skillnaden är mätbrus och ingen
+programspeedup från ändringen. Bredare kopiestädning, utvidgningsfakta,
+minnesoptimeringar, full O2-täckning och G5/G7 återstår.
+
 ## Risker
 - **GNU C-ytan och inline asm** är det stora jobbet. Uppskattat: lexer + pp ~2 kloc,
   parser + sema ~10–15 kloc, emitter ~5 kloc, assembler ~4 kloc, länkare ~3 kloc.
@@ -1538,6 +1586,23 @@ Dessa resultat ersätter inte en ny prestandagrind på aktuell main.
 De tidigare mätningarna ovan behåller sina dokumenterade baser/hashar.
 G5/G7 och full O2-täckning är fortsatt öppna.
 
+### OPT4 på aktuell main (lokal fortsättning, 2026-11-11)
+
+Kopiepasset är överflyttat till PR-seriens nya bas i separat lokal gren
+`opt/native-copies`; ingår ännu inte i de fem öppna PR:arna. X86:s
+kompaktering remappar nu varje debug-index och slutraden före twoaddr.
+Debugregressionen har en extra funktionslokal markör efter borttagbara
+registerkopior. Unity och fil-för-fil bygger; 16 nya regel/nivå/mål-fall
+med körning klaras i unity, fyra x86-fall även fil-för-fil. Debugrader,
+.text-likhet och DWARF-struktur klaras O0–O3 i båda byggsätten; sanitiserade
+record-kontrakt och riktig native unwind genom vanliga/justerade ramar
+klaras. Äldre mätningar ovan är fortfarande knutna till sin äldre bas;
+ny prestandagrind och PR/CI för denna fortsättning återstår.
+
+Den delade värdens /tmp fick slut på inoder. 756 befintliga snapshotfiler
+arkiverades och verifierades byte-för-byte före lokal städning i
+`/source/vroom/work/opt-audit-artifacts/copy-snapshots.tar`; JSON/hashar och
+mätdata är kvar i den ursprungliga opt-copies-baseline-katalogen.
 ### Leveransintegration (2026-11-11)
 
 PR33–36 mergades i sina stackbaser efter att föregående bas redan var
@@ -1548,3 +1613,103 @@ Unity, 116 fokuserade körkombinationer på fyra targetkonfigurationer,
 debugrad-/DWARF-/textkontroll och riktig x86-unwind O1/O2 är gröna efter
 integrationen. Prepassens trådpublicering och VLA-fakta är granskade mot
 registerurvalet. Ny CI krävs på den integrerade committen.
+
+### OPT4 kostnadsgranskning efter integration (2026-11-11)
+
+Den ivriga x86-adaptern avvisas för publicering: parat mot d1ee6f6 gav
+kompilator-CPU loop 68,524→75,594 ms och kontroll 26,064→27,775 ms,
+med konsekvent högre kandidatsampel. Artefakter:
+`/source/vroom/work/opt-pr-tmp/copies-measure/integrated-pair/`.
+
+X86 avkodar nu effekter vid behov via den gemensamma kopiekärnan. Ingen
+egen allokering, full effekt-/liveness-tabell eller bakåtvandring. Utan
+live-tabell krävs uttrycklig full överskrivning av temporären; källans
+ändring eller en opak gräns avbryter hela transaktionen. Detta är mer
+konservativt när ett värde dog före en senare källändring. Arm64 använder
+sina befintliga tabeller utan ny analys. Kopieanropet är dessutom infogat
+i den befintliga twoaddr-vandringen; separata skannings-/kompakteringspass
+är borttagna och samma debugremappning hanterar borttagna kopior.
+Returkopior före hopp/etikett avvisas utan effektavkodning.
+
+Det nya passet behåller cp_stores 26→23 instruktioner och 12→9 register-
+kopior. Sanitiserade kontrakt, x86/arm64:s fokuserade O0–O3-körningar,
+debugrader/DWARF/text och riktig unwind O1/O2 är gröna. Ny mätning mot
+14379fe: före snabbvägen x86 loop 64,638→66,536 och kontroll
+25,153→26,793 ms. Med snabbvägen, vid annat lastläge, loop
+85,539→94,029 och kontroll 30,644→29,524 ms; föregående kandidat i samma
+mätning gav 103,384 respektive 31,356 ms. Absoluta tal mellan rundor är
+inte jämförbara. Looppåslaget är fortfarande en öppen kostnadsfråga,
+inte ett bevisat godkännande av 1 %-grinden. `ondemand-pair/`,
+`fused-pair/` och `fastpath-pair/` innehåller råsampel, hashade binärer och
+kandidatpatchar under samma copies-measure-katalog. Kopiesteget ligger
+fortsatt separat från integrations-PR38; ingen ny PR för det ännu.
+
+### OPT5 konkret genomförandeordning
+
+1. Flytta arm64:s befintliga cell-/överlapps-/escapeanalys och slots-pass
+   till `emit/rec/slots.c`, återanvänd befintliga rr/ww/live/blocktabeller.
+2. Beskriv åtkomster med stabilt allokerings-ID (även andra ID:t vid
+   one-past), offset/bredd/värderegister och explicit observable-markör.
+   X86:s nuvarande LD/ST saknar volatile/atomic-fakta: dessa måste följa
+   med från de typade walker-anropen innan någon DSE kan aktiveras.
+3. X86 börjar med exakta GPR-celler 1/2/4/8 byte; laddning ersätts med
+   MOV/EXT enligt rätt signering. Otaggade/överlappande/observerbara
+   åtkomster blockerar optimering. Testa särskilt olästa volatile stores,
+   scope-återanvändning, adressflykt, one-past, unioner, calls/asm/atomics.
+4. Wasm delar cellanalysen men behöver stabila lokala värde-ID:n och
+   strukturerade minnesoperationsposter eller scalar replacement före
+   textemission. Ingen omskrivning av färdig assemblertext; adress-
+   producenter, smala extensioner och stackbalans måste bevaras.
+
+### Verifierad leverans (2026-11-11)
+
+Integrations-PR38 är mergad till main med head 14379fe. Slutlig CI-körning
+43017255611 klarade arm64, wasm, ASan, TSan och gate. Det tidigare felet
+med saknad X_FSQRT-effektmetadata är åtgärdat, med riktade kontrakt för
+skalära FP-resultat och bevarade övre SIMD-lanes. DNS-felet från första
+ASan-installationen återkom inte. OPT4:s nya kopiearbete ligger kvar i
+separat lokal gren och är ännu inte publicerat på grund av kostnadsfrågan.
+
+### OPT4: direkt känd nollutvidgning och instruktionsprofil (2026-11-11)
+
+`arch/x64/emit/extensions.c` bevisar nu från endast föregående post att ett
+GPR-resultat redan är nollutvidgat från 32 bitar. `x64_ext` utelämnar då
+sin redundanta unsigned 32→64-normalisering vid O1+, !noopt. Inga nya
+vandringar, tabeller eller allokeringar. Regeln gäller explicita fulla
+32-bitarsskrivningar och unsigned laddningar/utvidgningar, inte okända
+poster, etiketter, partiella/signed skrivningar, shifts eller BSF/BSR.
+Signed normalisering behålls. Arm64:s befintliga extensionspass och wasm:s
+typade operandstack ändras inte av denna instruktionsegenskap.
+
+Nya known_extensions.c kör O0–O3 på x86, arm64, wasm32 och wasm64.
+X86:s funktionsavgränsade kodkrav avvisar äldre binären. Höga 64-bitar,
+negativa värden, smala typer, wraparound, skift0 och volatile läsning
+kontrolleras; register-/breddkontrakt klarar ASan/UBSan. Debugproben är grön.
+
+Valgrind3.26 installerades endast i en lokal artefaktkatalog, inte i
+systemet. Native-march-byggen använder AVX512 som verktyget inte stöder;
+båda profileringsbinärerna byggdes därför identiskt med -O3
+-march=x86-64-v3. Bas är14379fe. 500-funktions-TU:er, mål x86-64 O1 -S,
+hela processen inklusive uppstart, Callgrind Ir:
+
+| Korpus | Bas | Kopiepass | Kopior + direkt utvidgningsregel |
+| --- | --- | --- | --- |
+| Loop | 35 695 355 | 36 202 950 (+1,42%) | 35 775 862 (+0,23%) |
+| Kontroll | 16 278 936 | 16 328 031 (+0,30%) | 16 158 711 (−0,74%) |
+
+Detta gör kostnaden reproducerbar för dessa v3-prober; det är inte en ny
+vbench-/native-CPU-/helkorpusgrind. Native CPU-sampel ovan har stor värdlast-
+variation. Råprofiler, versionerad lokal verktygspaketfil och binärer finns
+i `/source/vroom/work/opt-profile/`. Slutlig verifiering och CI på aktuell
+main krävs fortfarande före leverans av OPT4.
+
+### OPT4 verifiering på ny main (2026-11-11)
+
+Main9d022c3 är integrerad utan att ta bort dess bitcast/packed-bool-stöd.
+Unity och fil-för-fil bygger. 148 fokuserade regel/nivå/mål-kombinationer
+med körning är gröna (40 x86, 36 vardera arm64/wasm32/wasm64); åtta
+x86-kopie-/utvidgningsfall och debugkontroll upprepade fil-för-fil.
+Båda host-kontrakten klarar ASan/UBSan. X86:s riktiga unwind och
+funktionsavgränsade debug-/text-/DWARF-kontroller är gröna. Ny CI följer
+PR:n; CPU-mätningarna och instruktionsprofilen ovan har sina uttryckliga
+äldre baser och är inte ett generellt godkännande av G5.
