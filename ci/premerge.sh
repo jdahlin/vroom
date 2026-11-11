@@ -63,6 +63,7 @@ arm64)
 	step memory-cells-generated python3 bench/gen-memory-cells.py --check
 	step ctests       python3 bench/vcc-ctests.py -j "$J"
 	step switch-plan python3 bench/vcc-switch-plan.py --sanitize
+	step udivconst python3 bench/vcc-udivconst.py --sanitize
 	step rec-effects  python3 bench/vcc-rec-effects.py
 	step rec-slots python3 bench/vcc-rec-slots.py --sanitize
 	step rec-slot-values python3 bench/vcc-rec-slot-values.py --sanitize

@@ -349,6 +349,21 @@ byte-identiska och extra Callgrind-kompileringsarbete högst +0,180 %; ett
 riktat x86-switchprov minskar exekverade instruktioner 48,39 %. Avgränsning,
 rådata och kvarvarande OPT6-delar står i PLAN-fas2. G5/G7 och full O2 är öppna.
 
+### Status 2026-11-11: G5/G7, unsigned32 reciprokdivision
+
+OPT8:s u32-del använder gemensamma reciproker för native kvot/rest och
+begränsade wasm-kvoter. 180 riktade kör-/kodkrav, sanitiserade matematik- och
+tryckkontrakt, unity/fil-för-fil samt 220 arm64-/215 x86-regressioner passerar.
+Mot exakt 781ca69 ligger extra arbete i kontroller under +0,442 % och en
+konfigurerad 10–12-filers mix mellan −0,017 % och +0,018 %. En mättad
+arm64-divisionskorpus kostar däremot +19,54 % att kompilera; avvägningen och
+avgränsade x86/wasm-körprov står i PLAN-fas2. Detta stänger inte G5/G7.
+Signed/u64-reciproker och full O2-täckning återstår.
+
+Efter integrering med main54580f7: samma kompilatorkod, 180/180 riktade fall,
+221/221 arm64-regressioner (ett befintligt xfail), 216/216 x86-regressioner
+(sex referensskips) samt sanitiserade reciprok-/tryckkontrakt passerar.
+
 ### Status 2026-11-11: G5/G7, x86-blad utan ram
 
 Verkligt ramfria x86-blad kan nu hoppa över rbp-prolog/epilog; policy och
@@ -384,6 +399,18 @@ registerhem. SSE4-poster har explicita register-/flaggeffekter; fasta
 variadiska boolparametrar verifieras även via indirekta anrop. Båda bygglägen
 klarar egna Linuxsviter (176 x86, 181 ARM), ABI 32 per mål, 220 diagnostikprov
 och 887 kernel-TU:er i båda semalägena. G1/G2/G5 förblir öppna.
+
+Efter konfliktintegration med main4bb6d52 via OPT3-huvudet 9b18f64: unitybygge,
+16/16 riktade unsigned32-fall på fyra mål samt sanitiserade reciprok-/tryck-
+och registereffektkontrakt passerar. Båda planernas status behålls.
+
+Efter mainf97d16d (#47/#52/#55): unity, 16 unsigned32-mål-/nivåfall,
+16 konstanta kontrollfall och sanitiserade reciprok-/registereffektskontrakt
+passerar igen; de två planernas oberoende statusblock är bevarade.
+
+Efter main2dc4ea3 (#50:s x86-blad): unity, 16 division-/nivå-/målfall,
+sanitiserade reciprok-/registereffektkontrakt och bladramens policy, cache-,
+debug-/härdnings- och signal-unwindprov passerar. Båda statusblock behålls.
 
 ### Status 2026-11-11: G1, breda heltal till/från flyttal
 
