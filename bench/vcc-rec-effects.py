@@ -39,9 +39,9 @@ int main(void)
     /* Legacy scalar square root retains the destination's upper SIMD lanes
        and can raise an FP exception; it neither branches nor changes flags. */
     for (int size = 4; size <= 8; size += 4) {
-        i = (rec){ .op=X_FSQRT, .sz=size, .r={XMM8,XMM1,XNOREG,XNOREG} };
+        i = (rec){ .op=X_FSQRT, .sz=size, .r={XMM8,(XMM0 + 1),XNOREG,XNOREG} };
         f = x64_effects(NULL, &i);
-        assert(has(f.def,XMM8) && has(f.use,XMM8) && has(f.use,XMM1));
+        assert(has(f.def,XMM8) && has(f.use,XMM8) && has(f.use,(XMM0 + 1)));
         assert((f.fl & (OD_FP|OD_TRAP)) == (OD_FP|OD_TRAP));
         assert(!(f.fl & (OD_PURE|OD_WFLAGS)) && f.br == RB_NONE);
         assert(x64_flow_table()[X_FSQRT] == EM_FLOW_NEXT);
