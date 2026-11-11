@@ -3011,3 +3011,13 @@ wasm64 ingår; fallen atomic_ops/bitint_runtime som båda avvisar på respektive
 wasm-mål är redovisade i `work/opt-profile/zero-comparisons-cost/result.json`.
 Det är en liten korpus och instruktionstal, inte CPU-tid. G5/G7 och generell
 O2-täckning är fortsatt öppna.
+
+Samma recept omfattar nu också heltalsjämförelser mellan två läsningar av
+samma ordinära lokala variabel, även direkt i x86:s villkorssänkning.
+Flyttalsjämförelser behålls på grund av NaN. Utökade fokuserade O0–O3-prov
+passerar på fyra mål i båda bygglägen; vcc-sviten 254/254 med en befintlig
+xfail och O0/noopt-assembler identisk med den stackade föräldern. Matchad
+Callgrind mot PR #89:s `16d5feb` för hela den utökade regeln: x86 +0,133 %,
+arm64 +0,123 %, wasm32 +0,139 %, wasm64 +0,109 % kompilatorinstruktioner;
+1 %-grinden passerar på samma begränsade korpus. Exakta fall och proveniens:
+`work/opt-profile/repeated-expanded-cost/result.json`. Detta mäter inte CPU-tid.

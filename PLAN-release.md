@@ -718,3 +718,6 @@ PLAN-fas2.md; G5/G7 och generell O2-täckning är fortsatt öppna.
 Avgränsade identiteter för samma ordinära lokala heltalsvariabel förenklas
 på alla mål. Fyrmålstester och kompilatorinstruktionsmätning finns i
 PLAN-fas2.md; G5/G7 och generell O2-täckning är fortsatt öppna.
+
+Även självjämförelser av ordinära lokala heltal hanteras av det gemensamma
+identitetsreceptet, med NaN-regression och fyrmålsmätning i PLAN-fas2.md.
