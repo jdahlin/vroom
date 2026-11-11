@@ -362,6 +362,11 @@ bool cc_bitcast_read(cc *c, uint32_t n, uint64_t off, unsigned len, unsigned cha
 bool cc_object_size(cc *c, uint32_t pointer, unsigned mode, i128 *size);
 void dr_restored(cc *c);
 bool cc_is_signed(cc *c, qty t);
+/* Kinds for library builtins that the emitter treats specially. Other
+ * builtins retain their normal call path. */
+enum { CC_LIB_OTHER, CC_LIB_MEMCPY, CC_LIB_MEMMOVE, CC_LIB_MEMSET,
+       CC_LIB_STRCMP, CC_LIB_FABSL };
+int cc_builtin_libkind(int64_t i);
 const char *cc_builtin_name(int64_t i);
 const char *cc_lib_sig(const char *name, int *clang_enc);
 uint32_t cc_global_named(cc *c, const char *s);

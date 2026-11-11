@@ -630,7 +630,7 @@ static val fold_strcmp(ecx *e, const node *x)
 	int r;
 
 	if (N(f)->op != N_VAR || c->syms[N(f)->a].kind != S_BUILTIN || N(a)->op != N_STR || N(b)->op != N_STR ||
-	    strcmp(cc_builtin_name(c->syms[N(f)->a].val), "__builtin_strcmp"))
+	    cc_builtin_libkind(c->syms[N(f)->a].val) != CC_LIB_STRCMP)
 		return vnone();
 	r = strcmp(c->strs[N(a)->a].s, c->strs[N(b)->a].s);
 	return vconst(r < 0 ? -1 : r > 0);
@@ -644,13 +644,11 @@ static val fold_strcmp(ecx *e, const node *x)
  */
 static bool mem_inline(ecx *e, uint32_t ref, carg *args, val *res)
 {
-	const char *nm = cc_builtin_name(RIDX(ref));
-	int kind = !strcmp(nm, "__builtin_memcpy") ? 1 : !strcmp(nm, "__builtin_memmove") ? 2 :
-		   !strcmp(nm, "__builtin_memset") ? 3 : 0;
+	int kind = cc_builtin_libkind(RIDX(ref));
 	uint64_t n;
 	int d;
 
-	if (!kind || args[2].v.k != V_CONST)
+	if (kind < CC_LIB_MEMCPY || kind > CC_LIB_MEMSET || args[2].v.k != V_CONST)
 		return false;
 	n = (uint64_t)args[2].v.i;
 	if (n > 128 || (kind == 2 && n & (n - 1)) || (kind == 2 && n > 8) || (kind == 3 && args[1].v.k != V_CONST))
@@ -732,7 +730,7 @@ __attribute__((noinline)) VPRIV val gen_call(ecx *e, uint32_t n)
 			park(e, &args[i]);
 	}
 	if (!s && RKIND(ref) == RK_NAME && RIDX(ref) < 0x8000000u && na == 1 &&
-	    is_ld(c, x->ty) && !strcmp(cc_builtin_name(RIDX(ref)), "__builtin_fabsl")) {
+	    is_ld(c, x->ty) && cc_builtin_libkind(RIDX(ref)) == CC_LIB_FABSL) {
 		/* Clear binary128's sign without touching a signaling NaN payload. */
 		r = args[0].v;
 		if (r.k == V_CONST)

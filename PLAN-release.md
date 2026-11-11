@@ -669,3 +669,7 @@ med befintliga undantag. Wasm64-preflight går 189/189 med 38 körda XFAIL;
 ExtInt-provet täcker den redan verifierade BitInt-ABI-luckan på Wasm32/64.
 Exakta kommandon, oförändrad kompilatorkod och testmarkörens föräldraprov:
 `work/results/native-stack64-ci-preflight/`.
+
+G7: ett profilstyrt emittersteg minskar upprepad identifierar- och x86-register-
+matchning. Den fasta instruktionsgrinden och de riktade proverna finns i
+PLAN-fas2.md; faktisk kompileringstid på hela projekt återstår att mäta.

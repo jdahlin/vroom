@@ -2783,3 +2783,34 @@ ASan/UBSan. `build/linux/postfix-evidence/integration-*.log` innehåller resulta
 Den tidigare breda sviten och matchade Ir-proven har inte körts om; inga
 integreringsfel motiverade det. Rättningen är fortfarande avgränsad till
 registerrepresenterad postfix och ligger kvar ovanpå multiplikationsföräldern.
+
+### Emitter: namn- och registerjämförelser (2026-11-11)
+
+På bas `12957dc` används internade identifierares redan lagrade ord för korta
+namn (`emit/name.h`), heltalstaggar från den befintliga builtintabellen för
+särbehandlade bibliotekskall och direkt avkodning av x86:s asm-registernamn.
+Den oanvända parallella registertabellsökningen har tagits bort. Antalet
+källrader med `strcmp`/`strncmp`/`memcmp` i emitter och tre backender minskar
+från 60 till 33; kvar finns bland annat faktiska C-strängjämförelser,
+variabla asm-operandnamn, sektions-/synlighetsnamn och debugfiler. Dessa är
+inte borttagna bara genom att flytta eller återskapa en jämförelseloop.
+
+Matchad `perf stat`, fem växelvisa körningar på denna delade maskin med clang 23
+`-O3 -march=x86-64-v3`, `12957dc` → `2727265`: 1 000 x86-funktioner med
+inline-asm-klobber gav −7,586 % kompilatorinstruktioner, och 1 000 vanliga
+anrop respektive `__builtin_memcpy` gav x86 −0,235 / −0,146 %, arm64
+−0,202 / −0,103 %. Utdataassemblern var identisk. På wasm ökade samma
+anropsprov +0,033–0,035 %; kontrollproven −0,027 till +0,012 % på fyra mål.
+Dessa mättade prov mäter inte generell kompileringstid. De fem korta
+cykelmätningarna varierar och bevisar ingen 1 %-tidsgräns. Kommandon,
+binär-/källhashar och observationer: `work/opt-profile/emitname/final-result.json`.
+
+Den fasta 1 %-instruktionsgrinden mot samma bas passerar: x86 −0,002 %, arm64
++0,020 %, wasm32 +0,042 %, wasm64 +0,039 %; 12/12 nativefiler, 10 wasm32 och
+11 wasm64, med avvisade wasmfall uttryckligen redovisade. Underlag och exakt
+byggproveniens: `work/opt-profile/emitname-final-gate/result.json`. Unity- och
+filvis bygge passerar; före/efter-kärnans sema 887/887 i batch och individuellt;
+248/248 arm64-vcc-regressioner, en befintlig xfail; 90 assemblerpar O0/O2,
+187 x86-klobberstavningar, fyra måls O0–O3-kontrollflöde samt ASan/UBSan-
+kontrakt. Vidare genomgång av de kvarvarande jämförelserna och realistisk
+vägg-/CPU-tidsmätning återstår.

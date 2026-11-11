@@ -219,10 +219,10 @@ static const builtin builtins[] = {
 	{ "__atomic_always_lock_free", BI_ATOMIC_LOCK_FREE, 1, "bzP" },
 	{ "__atomic_is_lock_free", BI_ATOMIC_LOCK_FREE, 1, "bzP" },
 	/* library functions */
-	{ "__builtin_memcpy", BI_LIB, 0, "ppPz" }, { "__builtin_memmove", BI_LIB, 0, "ppPz" },
-	{ "__builtin_memset", BI_LIB, 0, "ppiz" }, { "__builtin_memcmp", BI_LIB, 0, "iPPz" },
+	{ "__builtin_memcpy", BI_LIB, (CC_LIB_MEMCPY << 1) | 0, "ppPz" }, { "__builtin_memmove", BI_LIB, (CC_LIB_MEMMOVE << 1) | 0, "ppPz" },
+	{ "__builtin_memset", BI_LIB, (CC_LIB_MEMSET << 1) | 0, "ppiz" }, { "__builtin_memcmp", BI_LIB, 0, "iPPz" },
 	{ "__builtin_memchr", BI_LIB, 0, "pPiz" }, { "__builtin_bzero", BI_LIB, 0, "vpz" },
-	{ "__builtin_strcmp", BI_LIB, 0, "iSS" }, { "__builtin_strncmp", BI_LIB, 0, "iSSz" },
+	{ "__builtin_strcmp", BI_LIB, (CC_LIB_STRCMP << 1) | 0, "iSS" }, { "__builtin_strncmp", BI_LIB, 0, "iSSz" },
 	{ "__builtin_strcpy", BI_LIB, 0, "ssS" }, { "__builtin_strncpy", BI_LIB, 0, "ssSz" },
 	{ "__builtin_strcat", BI_LIB, 0, "ssS" }, { "__builtin_strncat", BI_LIB, 0, "ssSz" },
 	{ "__builtin_strchr", BI_LIB, 0, "sSi" }, { "__builtin_strrchr", BI_LIB, 0, "sSi" },
@@ -238,7 +238,7 @@ static const builtin builtins[] = {
 	{ "__builtin_conj", BI_CONJ, 0, "d." }, { "__builtin_conjf", BI_CONJ, 0, "f." }, { "__builtin_conjl", BI_CONJ, 0, "D." },
 	{ "__builtin_creal", BI_CREAL, 0, "d." }, { "__builtin_crealf", BI_CREAL, 0, "f." }, { "__builtin_creall", BI_CREAL, 0, "D." },
 	{ "__builtin_cimag", BI_CIMAG, 0, "d." }, { "__builtin_cimagf", BI_CIMAG, 0, "f." }, { "__builtin_cimagl", BI_CIMAG, 0, "D." },
-	{ "__builtin_fabs", BI_LIB, 1, "dd" }, { "__builtin_fabsf", BI_LIB, 1, "ff" }, { "__builtin_fabsl", BI_LIB, 1, "DD" },
+	{ "__builtin_fabs", BI_LIB, 1, "dd" }, { "__builtin_fabsf", BI_LIB, 1, "ff" }, { "__builtin_fabsl", BI_LIB, (CC_LIB_FABSL << 1) | 1, "DD" },
 	{ "__builtin_copysign", BI_LIB, 1, "ddd" }, { "__builtin_copysignf", BI_LIB, 1, "fff" },
 	{ "__builtin_copysignl", BI_LIB, 1, "DDD" },
 	{ "__builtin_pow", BI_LIB, 1, "ddd" },
@@ -265,6 +265,7 @@ static const builtin builtins[] = {
 
 /* name of a library builtin (sym val of an S_BUILTIN) */
 const char *cc_builtin_name(int64_t i) { return builtins[i].name; }
+int cc_builtin_libkind(int64_t i) { return builtins[i].flags >> 1; }
 
 /* the prototype clang gives an implicitly declared library function name (no
  * declaration made): vcc's signature letters (*clang_enc 0, see sigtype) or

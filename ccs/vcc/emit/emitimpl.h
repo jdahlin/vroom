@@ -71,6 +71,8 @@
 #include "../lib/arena.h"
 #include "../lib/tbuf.h"
 
+#include "name.h"
+
 /* functions one file defines and another calls: static when the directory is
    compiled as one TU (VCC_UNITY, the default build), so they stay internal */
 #ifndef VPRIV

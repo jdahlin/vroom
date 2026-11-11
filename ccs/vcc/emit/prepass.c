@@ -185,10 +185,9 @@ static void note_fwrite(pre *P, uint32_t s, uint32_t rhs)
 		k = FF_NONNEG;
 	} else if (N(rhs)->op == N_CALL && (callee = direct_callee(c, N(rhs)->a, &ref))) {
 		const sym *fn = &c->syms[callee];
-		const vident *nm = &vintern_ents[fn->name];
 		const ctype *ft = T(c, fn->ty);
-		int want = nm->len == 4 && !memcmp(nm->s, "fabs", 4) ? TY_DOUBLE :
-			   nm->len == 5 && !memcmp(nm->s, "fabsf", 5) ? TY_FLOAT : -1;
+		int want = EM_IDENT_IS(fn->name, "fabs") ? TY_DOUBLE :
+			   EM_IDENT_IS(fn->name, "fabsf") ? TY_FLOAT : -1;
 		bool enabled = !P->E->o->no_builtin;
 		/* The per-name option table belongs to the front end; conservatively
 		   avoid library facts whenever any named builtin was disabled. */
