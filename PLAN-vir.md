@@ -13,6 +13,7 @@ Go, Turboshaft, LuaJIT, QBE och TPDE valde i stället).
   null är en vanlig adress), med striktare regler som flaggor man slår på.
 - x86-64 och arm64 är båda mål.  (Första frågerundan sa "arm64 först"; den
   byggde på en gren som låg 566 commits efter `main` och saknade x86-64.)
+- VIR ligger **bara på `-O2`**.  `-O1` förblir OPT0–OPT8 utan SSA.
 
 ## Utgångsläge (2026-11-11, `main` 8bdc940-serien + x86)
 
@@ -205,9 +206,8 @@ fixpunkter utan budget (samma regel som `emit/flow/`).
 
 ## Risker och öppna frågor
 
-- **Nivå.** Planen lägger VIR på `-O2` och låter `-O1` vara OPT0–OPT8 utan
-  SSA, som PLAN-x86 säger.  Om G5 (`-O1` inom X % av clang -O1) inte nås utan
-  registerallokering får `-O1` flytta till VIR; det avgörs av mätning vid V4.
+- **G5 mäter `-O1`.** VIR är beslutat till `-O2`, så G5 (`-O1` inom X % av
+  clang -O1) måste nås av OPT0–OPT8 ensamt.  VIR:s egen grind är V7.
 - **`LO` med begärt resultatregister.**  I dag väljer målet själv register
   (`treg`) och returnerar ett `val`.  Sänkningen från VIR måste kunna säga
   vilket register resultatet ska till, annars blir det en `mov` per operation
