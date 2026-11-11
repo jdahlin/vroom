@@ -60,6 +60,7 @@ enum {
 	X_MFENCE,
 	X_RAW,		/* raw inline asm: off/length in e->raw */
 	X_BARRIER,	/* empty asm: a compiler memory/flags barrier, no machine instruction */
+	X_LEAL,		/* address of a local code label */
 	X_JMPR,		/* jmp *r1 */
 	X_NAMED,	/* ref's name as a label here */
 	X_BSF, X_BSR,	/* r0 = index of the lowest / highest set bit of r1 */

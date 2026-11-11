@@ -313,6 +313,7 @@ enum {
 	BI_ARM_ISB, BI_ARM_DMB, BI_ARM_DSB, BI_ARM_TRAP,
 	BI_LIB,	/* plain library call with a prototype */
 	BI_NANS, BI_ISSIGNALING,
+	BI_SETJMP, BI_LONGJMP,
 	BI_COUNT
 };
 

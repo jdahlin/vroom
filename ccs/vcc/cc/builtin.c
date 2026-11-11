@@ -38,6 +38,7 @@ static const builtin builtins[] = {
 	{ "__builtin_bitreverse32", BI_BITREVERSE32, 1, "uu" }, { "__builtin_bitreverse64", BI_BITREVERSE64, 1, "WW" },
 	{ "__builtin_unreachable", BI_UNREACHABLE, 0, "v" },
 	{ "__builtin_trap", BI_TRAP, 0, "v" }, { "__builtin_debugtrap", BI_DEBUGTRAP, 0, "v" },
+	{ "__builtin_setjmp", BI_SETJMP, 0, "ip" }, { "__builtin_longjmp", BI_LONGJMP, 0, "vpi" },
 	{ "__builtin_return_address", BI_RETURN_ADDRESS, 0, "pu" },
 	{ "__builtin_frame_address", BI_FRAME_ADDRESS, 0, "pu" },
 	{ "__builtin_extract_return_addr", BI_EXTRACT_RETURN_ADDR, 0, "pp" },
@@ -1026,6 +1027,12 @@ VPRIV uint32_t builtin_call(cc *c, const builtin *b, uint32_t loc)
 				cc_error(c, args.n == 3 ? N(args.v[2])->loc : loc, "result argument to overflow builtin must be a pointer to a non-const integer type ('%s' invalid)",
 					 args.n == 3 ? tyname(c, N(args.v[2])->ty) : "void");
 			break;
+		case BI_LONGJMP: {
+			i128 value;
+			if (args.n == 2 && (!const_int(c, args.v[1], &value) || value != 1))
+				cc_error(c, N(args.v[1])->loc, "second argument to '__builtin_longjmp' must be the constant integer 1");
+			break;
+		}
 		case BI_ADDC: case BI_SUBC:
 			if (args.n != 4 || !is_ptr(c, N(args.v[3])->ty))
 				cc_error(c, loc, "carry-out argument to builtin must be a pointer");

@@ -1789,6 +1789,23 @@ static val wk_builtin(ecx *e, uint32_t n)
 	case BI_UNREACHABLE: case BI_TRAP:
 		LO(trap)(e);
 		return vconst(0);
+	case BI_SETJMP: case BI_LONGJMP: {
+		val p = wk_gen(e, arg[0]);
+		int r = wk_reg(e, &p, prim(TY_ULONG));
+
+		if (x->aux == BI_SETJMP) {
+			if (e->wk->falign > 16)
+				wk_unsup(e, n, "__builtin_setjmp in a function with locals aligned above 16");
+			return LO(setjmp)(e, r);
+		}
+		{
+			val k = wk_gen(e, arg[1]);	/* (GCC requires 1) */
+
+			wk_free(e, &k);
+		}
+		LO(longjmp)(e, r);
+		return vconst(0);
+	}
 	case BI_RETURN_ADDRESS: case BI_FRAME_ADDRESS: {
 		val v = wk_gen(e, arg[0]);
 
