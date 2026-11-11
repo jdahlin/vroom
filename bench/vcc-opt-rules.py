@@ -12,6 +12,7 @@ The wasm path needs neither Emscripten nor LLVM; --node selects the JS engine.
 The ordinary C regression suites also run the source files for correctness.
 """
 import argparse
+import os
 import platform
 from pathlib import Path
 import re
@@ -23,8 +24,8 @@ import tempfile
 from hostenv import BUILD, R, llvm
 
 
-def run(cmd):
-    p = subprocess.run([str(x) for x in cmd], capture_output=True, text=True, timeout=60)
+def run(cmd, env=None):
+    p = subprocess.run([str(x) for x in cmd], capture_output=True, text=True, timeout=60, env=env)
     if p.returncode:
         raise RuntimeError(f'{cmd}: exit {p.returncode}\n{p.stdout}{p.stderr}')
     return p.stdout
@@ -348,6 +349,31 @@ def check_copies(assembly, arch):
     # than prescribing their physical register allocation.
 
 
+def check_sdivconst(assembly, arch, optimized=True):
+    wasm = arch.startswith('wasm')
+    divide = r'\b(?:i(?:32|64)\.(?:div|rem)_s|sdiv|idiv[lq]?)\b'
+    suffixes = ['p3', 'n3', 'p6', 'n6', 'p12', 'n12', 'p7', 'n7', 'p10', 'n10', 'p37', 'n37',
+                'plarge', 'nlarge', 'pmax', 'nmax']
+    for width in [32, 64]:
+        selected = suffixes + (['p9', 'n9', 'p129', 'n129', 'pwide', 'nwide'] if width == 64 else [])
+        for operation in ['q', 'r']:
+            for suffix in selected:
+                name = f'sd{width}_{operation}_{suffix}'
+                text = body(assembly, name, wasm)
+                retained = re.search(divide, text) is not None
+                # Wasm has no economical signed high-product instruction.
+                if retained != (wasm or not optimized):
+                    expectation = 'retained' if wasm or not optimized else 'expanded'
+                    raise RuntimeError(f'{name}: expected {expectation} signed division\n{text}')
+            name = f'sd{width}_dynamic_{operation}'
+            if not re.search(divide, body(assembly, name, wasm)):
+                raise RuntimeError(f'{name}: lost genuine runtime division')
+    for name in ['sd_effect', 'sd_effect_r', 'sd_rhs', 'sd_rhs_r', 'sd_compound_rhs']:
+        text = body(assembly, name, wasm)
+        if len(re.findall(r'\b(?:callq?|bl)\s+next\b', text)) != 1:
+            raise RuntimeError(f'{name}: expected one call to next\n{text}')
+
+
 def check_udivconst64(assembly, arch):
     wasm = arch.startswith('wasm')
     divide = r'\b(?:i64\.(?:div|rem)_[su]|[su]div|idiv[lq]?|div[lq]?)\b'
@@ -601,7 +627,7 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument('--vpp', default=str(Path(BUILD) / 'vpp'))
     ap.add_argument('--target', default='x86_64-linux-gnu')
-    ap.add_argument('--rule', choices=['pow2', 'signedpow2', 'identities', 'fallthrough', 'loopback', 'unreachable', 'locals', 'localjmp', 'copies', 'extensions', 'switches', 'tails', 'udivconst', 'udivconst64', 'all'], default='all')
+    ap.add_argument('--rule', choices=['pow2', 'signedpow2', 'identities', 'fallthrough', 'loopback', 'unreachable', 'locals', 'localjmp', 'copies', 'extensions', 'switches', 'tails', 'udivconst', 'udivconst64', 'sdivconst', 'all'], default='all')
     ap.add_argument('--run', action='store_true', help='also execute literal-answer correctness checks')
     ap.add_argument('--cfi', action='store_true', help='also check unwind state with tail calls')
     ap.add_argument('--sibling-calls', choices=['default', 'on', 'off'], default='default',
@@ -641,7 +667,8 @@ def main():
              'switches': ('switch_dispatch.c', check_switches),
              'tails': ('tail_calls.c', check_tails),
              'udivconst': ('unsigned_divconst.c', check_udivconst),
-             'udivconst64': ('unsigned_divconst64.c', check_udivconst64)}
+             'udivconst64': ('unsigned_divconst64.c', check_udivconst64),
+             'sdivconst': ('signed_divconst.c', check_sdivconst)}
     selected = rules if args.rule == 'all' else {args.rule: rules[args.rule]}
     with tempfile.TemporaryDirectory(prefix='vcc-opt-rules-') as tmp:
         directory = Path(tmp)
@@ -662,7 +689,9 @@ def main():
                            arch.startswith('wasm') if rule == 'loopback' else True)
                 checked = checked and check is not None and (rule not in ['switches', 'udivconst', 'udivconst64'] or level >= 1)
                 if checked:
-                    if rule == 'tails':
+                    if rule == 'sdivconst':
+                        check(assembly.read_text(), arch, optimized=level >= 1)
+                    elif rule == 'tails':
                         check(assembly.read_text(), arch, level, args.cfi, args.sibling_calls == 'off')
                     else:
                         check(assembly.read_text(), arch)
@@ -671,6 +700,14 @@ def main():
                 print(f'{args.target} {rule} O{level}: ' +
                       ('codegen' if checked else 'compile') +
                       (' and execution' if args.run else '') + ' OK')
+            if rule == 'sdivconst':
+                # Check the debugging escape hatch independently of O0.
+                assembly = directory / 'sdivconst-noopt.s'
+                run([args.vpp, f'--target={args.target}', '-O2',
+                     '-ffreestanding', '-fno-stack-protector', '-S', source, '-o', assembly],
+                    env={**os.environ, 'VCC_NOOPT': '1'})
+                check_sdivconst(assembly.read_text(), arch, optimized=False)
+                print(f'{args.target} sdivconst O2 VCC_NOOPT: codegen OK')
     return 0
 
 

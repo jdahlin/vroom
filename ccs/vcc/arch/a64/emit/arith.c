@@ -354,11 +354,14 @@ VPRIV val arith(ecx *e, int op, qty ty, val a, val b)
 		}
 		if (e->E->o->opt && !e->E->noopt && (op == T_SLASH || op == T_PERCENT)) {
 			em_udivconst_recipe recipe;
+			em_sdivconst_recipe signed_recipe;
 
 			/* All unsigned32 recipes fit <=12 baseline instructions, including
 			 * normalization, two-word constant construction and remainder. */
 			if (em_udivconst(c, ty, op, b.i, &recipe) && a64_udivconst_ok(e, a, &recipe))
 				return a64_udivconst(e, a, &recipe);
+			if (em_sdivconst(c, ty, op, b.i, &signed_recipe) && a64_sdivconst_ok(e, a, &signed_recipe))
+				return a64_sdivconst(e, a, &signed_recipe);
 		}
 		{
 			em_sdivpow2_recipe recipe;

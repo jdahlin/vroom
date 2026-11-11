@@ -537,6 +537,19 @@ VPRIV bool em_udivconst64(uint64_t divisor, bool remainder, em_udivconst_recipe 
 VPRIV bool em_udivconst(cc *c, qty ty, int op, i128 rhs, em_udivconst_recipe *r);
 VPRIV bool a64_udivconst_ok(ecx *e, val a, const em_udivconst_recipe *r);
 VPRIV val a64_udivconst(ecx *e, val a, const em_udivconst_recipe *r);
+/* opt/sdivconst.c: reciprocal for a positive divisor magnitude. Signed high
+ * product, optional numerator addition, arithmetic shift, then sign correction. */
+typedef struct em_sdivconst_recipe {
+	uint64_t divisor;
+	int64_t magic;
+	uint8_t bits, shift;
+	bool add, negative, remainder;
+} em_sdivconst_recipe;
+VPRIV bool em_sdivconst32(int32_t divisor, bool remainder, em_sdivconst_recipe *r);
+VPRIV bool em_sdivconst64(int64_t divisor, bool remainder, em_sdivconst_recipe *r);
+VPRIV bool em_sdivconst(cc *c, qty ty, int op, i128 rhs, em_sdivconst_recipe *r);
+VPRIV bool a64_sdivconst_ok(ecx *e, val a, const em_sdivconst_recipe *r);
+VPRIV val a64_sdivconst(ecx *e, val a, const em_sdivconst_recipe *r);
 /* opt/identity.c */
 enum { EM_ID_NONE, EM_ID_LEFT, EM_ID_ZERO, EM_ID_ONES };
 VPRIV int em_bin_identity(cc *c, qty ty, int op, i128 rhs);

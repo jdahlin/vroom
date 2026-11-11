@@ -64,6 +64,7 @@ arm64)
 	step ctests       python3 bench/vcc-ctests.py -j "$J"
 	step switch-plan python3 bench/vcc-switch-plan.py --sanitize
 	step udivconst python3 bench/vcc-udivconst.py --sanitize
+	step sdivconst python3 bench/vcc-sdivconst.py --sanitize
 	step mulhi python3 bench/vcc-mulhi.py --sanitize
 	step rec-effects  python3 bench/vcc-rec-effects.py
 	step rec-slots python3 bench/vcc-rec-slots.py --sanitize

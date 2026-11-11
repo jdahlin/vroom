@@ -51,6 +51,7 @@ enum {
 	X_CQO,		/* rdx = sign of rax (sz 4: cltd, 8: cqto) */
 	X_IDIV, X_DIV,	/* rdx:rax / r1: rax quotient, rdx remainder */
 	X_MULW,		/* rdx:rax = rax * r1 (unsigned, 64 x 64 -> 128) */
+	X_SMULW,	/* rdx:rax = rax * r1 (signed, 64 x 64 -> 128) */
 	X_UD2,
 	X_TLS,		/* r0 = the address of ref, thread-local: cond 0 local-exec, 1 initial-exec;
 			   2 general dynamic: rax = __tls_get_addr(ref's descriptor) (a call) */
