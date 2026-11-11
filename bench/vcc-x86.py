@@ -58,37 +58,52 @@ def link(objs, exe, pie=False):
     rc, _, err = sh((LINK[:-1] + ['-pie'] if pie else LINK) + objs + [RTO, '-lm', '-o', exe], timeout=60)
     return rc, err.decode(errors='replace')
 
-def run(exe):
+def run(exe, diagnostics=False):
     rc, out, err = sh([exe], timeout=20, stdin=subprocess.DEVNULL)
-    if isinstance(rc, int) and rc < 0:
+    if not diagnostics and isinstance(rc, int) and rc < 0:
         rc = 128 - rc	# a signal as the shell reports it (abort: 134)
-    return rc, out.decode('latin-1')
+    result = (rc, out.decode('latin-1'))
+    return (*result, err) if diagnostics else result
 
 def reference(suite, name, path, flags, wd):
-    key = hashlib.sha1((open(path, 'rb').read().decode('latin-1') + ' '.join(flags) + ' '.join(ct.CLFL) + ' '.join(BASE + LINK) + 'rt1').encode()).hexdigest()[:16]
+    with open(path, 'rb') as source:
+        src = source.read().decode('latin-1')
+    key = hashlib.sha1(('oracle-status-v2 ' + src + ' '.join(flags) + ' '.join(ct.CLFL) + ' '.join(BASE + LINK) + 'rt1').encode()).hexdigest()[:16]
     cf = f'{OUT}/ref/{suite}/{name}.json'
     try:
-        r = json.load(open(cf))
-        if r['key'] == key:
+        with open(cf) as cache:
+            r = json.load(cache)
+        if r['key'] == key and 'error' not in r:
             return r
     except (OSError, ValueError, KeyError):
         pass
     r = {'key': key}
-    rc, _, err = sh([CL] + BASE + ct.CLFL + flags + ['-c', path, '-o', f'{wd}/ref.o'], cwd=os.path.dirname(path))
+    timeout = ct.reference_timeout(path)
+    rc, _, err = sh([CL] + BASE + ct.CLFL + flags + ['-c', path, '-o', f'{wd}/ref.o'], cwd=os.path.dirname(path), timeout=timeout)
+    failure = ct.oracle_error(rc, err, 'compile', timeout)
+    if failure:
+        return dict(r, **failure)
     if rc:
         r['skip'] = 'clang-rejects'; r['why'] = ct.first_err(err.decode(errors='replace'))
     else:
         rc, err = link([f'{wd}/ref.o'], f'{wd}/ref')
+        failure = ct.oracle_error(rc, err, 'link', 60)
+        if failure:
+            return dict(r, **failure)
         if rc:
             m = re.search(r'undefined (?:symbol|reference to) .?(\w+)', err)
             r['skip'] = 'ref-fail'; r['why'] = 'link: ' + (m.group(1) if m else ct.first_err(err))
         else:
-            rc, out = run(f'{wd}/ref')
+            rc, out, err = run(f'{wd}/ref', diagnostics=True)
+            failure = ct.oracle_error(rc, err, 'run', 20)
+            if failure:
+                return dict(r, **failure)
             r['rc'] = rc; r['out'] = out
             if suite in ('gcc', 'vcc') and rc != 0:
                 r['skip'] = 'ref-fail'; r['why'] = f'clang build exits {rc}'
     os.makedirs(os.path.dirname(cf), exist_ok=True)
-    json.dump(r, open(cf, 'w'))
+    with open(cf, 'w') as cache:
+        json.dump(r, cache)
     return r
 
 def one(t):
@@ -109,6 +124,8 @@ def one(t):
     os.makedirs(wd, exist_ok=True)
     cwd = os.path.dirname(path)
     ref = reference(suite, name, path, flags, wd)
+    if 'error' in ref:
+        return t, 'error', ref['error'], ref['why']
     if 'skip' in ref:
         return t, 'skip', ref['skip'], ref['why']
     vfl = [PIC if a == '-fno-PIE' and PIC else a for a in BASE] + ct.CLFL + flags
@@ -117,13 +134,13 @@ def one(t):
         rc, _, err = sh([VPP, '-c'] + vfl + [path, '-o', f'{wd}/vcc.o'], cwd=cwd)
         if rc:
             e = err.decode(errors='replace')
-            return t, 'fail', 'emit', ct.first_err(e) if rc != 'timeout' and rc > 0 else f'vpp: signal/timeout {rc}: ' + ct.first_err(e)
+            return t, 'fail', 'emit', ct.first_err(e) if isinstance(rc, int) and rc > 0 else f'vpp: signal/timeout {rc}: ' + ct.first_err(e)
         open(f'{wd}/vcc.s', 'wb').write(open(f'{wd}/vcc.o', 'rb').read())	# (the pass key: the object's bytes)
     else:
         rc, _, err = sh([VPP, '-S'] + vfl + [path, '-o', f'{wd}/vcc.s'], cwd=cwd)
     if rc:
         e = err.decode(errors='replace')
-        return t, 'fail', 'emit', ct.first_err(e) if rc != 'timeout' and rc > 0 else f'vpp: signal/timeout {rc}: ' + ct.first_err(e)
+        return t, 'fail', 'emit', ct.first_err(e) if isinstance(rc, int) and rc > 0 else f'vpp: signal/timeout {rc}: ' + ct.first_err(e)
     pk = hashlib.sha1(open(f'{wd}/vcc.s', 'rb').read() + ref['key'].encode()).hexdigest()
     pf = f'{OUT}/pass{PIC or ""}{"-obj" if OBJ else ""}/{suite}/{name}'
     if not NOCACHE:
@@ -173,6 +190,9 @@ def objcmp(t):
     if rc:
         return t, 'skip', 'emit', ct.first_err(err.decode(errors='replace'))
     rc, _, err = sh([CL, TGT, '-c', f'{wd}/vcc.s', '-o', f'{wd}/ref.o'])
+    failure = ct.oracle_error(rc, err, 'assemble', 60)
+    if failure:
+        return t, 'error', failure['error'], failure['why']
     if rc:
         return t, 'skip', 'clang-as', ct.first_err(err.decode(errors='replace'))
     rc, _, err = sh([VASM, TGT, f'{wd}/vcc.s', '-o', f'{wd}/vas.o'])
@@ -219,13 +239,24 @@ def vlink1(t):
     src = open(path, 'rb').read().decode('latin-1')
     flags = ct.dg_flags(src) if suite == 'gcc' else ct.exec_marks(src)[0] if suite == 'vcc' else []
     fl = BASE + ct.CLFL + flags
-    if sh([CL] + fl + ['-c', path, '-o', f'{wd}/ref.o'], cwd=cwd)[0]:
-        return t, 'skip', 'clang-rejects', ''
+    timeout = ct.reference_timeout(path)
+    rc, _, err = sh([CL] + fl + ['-c', path, '-o', f'{wd}/ref.o'], cwd=cwd, timeout=timeout)
+    failure = ct.oracle_error(rc, err, 'compile', timeout)
+    if failure:
+        return t, 'error', failure['error'], failure['why']
+    if rc:
+        return t, 'skip', 'clang-rejects', ct.first_err(err.decode(errors='replace'))
     rc, err = link86(LLD, [f'{wd}/ref.o'], f'{wd}/ref')
+    failure = ct.oracle_error(rc, err, 'link', 60)
+    if failure:
+        return t, 'error', failure['error'], failure['why']
     if rc:
         m = re.search(r'undefined symbol: (\S+)', err)
         return t, 'skip', 'ref-fail', 'link: ' + (m.group(1) if m else ct.first_err(err))
-    rrc, rout = run(f'{wd}/ref')
+    rrc, rout, err = run(f'{wd}/ref', diagnostics=True)
+    failure = ct.oracle_error(rrc, err, 'run', 20)
+    if failure:
+        return t, 'error', failure['error'], failure['why']
     if suite in ('gcc', 'vcc') and rrc != 0:
         return t, 'skip', 'ref-fail', f'clang build exits {rrc}'
     rc, _, err = sh([VPP, '-c'] + fl + [path, '-o', f'{wd}/vcc.o'], cwd=cwd)
@@ -312,12 +343,12 @@ if __name__ == '__main__':
         if st != 'pass' or fpmode:
             by[s][f'{st}:{cat}'] += 1
             whys[(st, cat)][why] += 1
-        if verbose and st == 'fail':
-            print(f'FAIL {cat:5s} {s}/{n}: {why}')
+        if verbose and st in ('fail', 'error'):
+            print(f'{st.upper()} {cat:5s} {s}/{n}: {why}')
         if show and st != 'pass' and cat == show:
             print(f'{st} {cat} {s}/{n}: {why}')
     for (st, cat), c in sorted(whys.items()):
-        if st == 'fail' or verbose:
+        if st in ('fail', 'error') or verbose:
             print(f'--- {st} {cat}: {sum(c.values())}')
             for w, k in c.most_common(int(os.environ.get('SHOW', 8))):
                 print(f'  {k:4d}  {w[:150]}')
@@ -325,8 +356,8 @@ if __name__ == '__main__':
     for s in sorted(by):
         tot.update(by[s])
     for s, c in sorted(by.items()) + [('all', tot)]:
-        run_ = c['pass'] + c['fail']
+        run_ = c['pass'] + c['fail'] + c['error']
         det = ' '.join(f'{k}={v}' for k, v in sorted(c.items()) if ':' in k)
         print(f'{s:4s} {c["pass"]}/{run_} pass ({100 * c["pass"] / max(run_, 1):.1f}%), {c["skip"]} skipped   {det}')
     print(f'{time.time() - t0:.1f} s')
-    sys.exit(1 if tot['fail'] else 0)
+    sys.exit(1 if tot['fail'] or tot['error'] else 0)
