@@ -864,6 +864,8 @@ again:
 					c->tags[ti].flags |= (pre.packed ? RF_PACKED : 0) | ((pre.ms_struct || c->ms_struct) ? RF_MS_STRUCT : 0);
 					c->tags[ti].maxalign = pre.aligned;
 					struct_body(c, ti);
+					if (kind == TY_UNION && pre.transparent)
+						c->ty[c->tags[ti].ty].flags |= TF_TRANSPARENT;
 					tag_body_end(c, kind);
 					if (unlikely(ext_on(c, "gnu-empty-struct", w_gnu))) {
 						const tag *r = &c->tags[ti];

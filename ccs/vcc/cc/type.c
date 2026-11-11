@@ -422,6 +422,24 @@ static bool compatible_q(cc *c, qty a, qty b)
 	return QQ(a) == QQ(b) && compatible(c, a, b);
 }
 
+/* GNU transparent unions accept a member type in a function prototype.
+   This does not make the union and that member compatible as object types. */
+static bool compatible_param(cc *c, qty a, qty b)
+{
+	if (compatible(c, a, b)) return true;
+	const ctype *x = T(c, canon(c, a)), *y = T(c, canon(c, b));
+	if (x->kind == TY_UNION && y->kind == TY_UNION) return false;
+	if (y->kind == TY_UNION) {
+		x = y;
+		b = a;
+	}
+	if (x->kind != TY_UNION || !(x->flags & TF_TRANSPARENT)) return false;
+	const tag *r = &c->tags[x->aux];
+	for (uint32_t i = 0; i < r->nfield; i++)
+		if (compatible(c, r->f[i].ty, b)) return true;
+	return false;
+}
+
 VPRIV bool compatible(cc *c, qty a, qty b)
 {
 	const ctype *x, *y;
@@ -474,7 +492,7 @@ VPRIV bool compatible(cc *c, qty a, qty b)
 		if (x->n != y->n || (x->flags & TF_VARIADIC) != (y->flags & TF_VARIADIC))
 			return false;
 		for (uint32_t i = 0; i < x->n; i++)
-			if (!compatible(c, c->params[x->aux + i], c->params[y->aux + i]))
+			if (!compatible_param(c, c->params[x->aux + i], c->params[y->aux + i]))
 				return false;
 		return true;
 	default:
