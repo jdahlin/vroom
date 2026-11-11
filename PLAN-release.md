@@ -447,6 +447,19 @@ variadiska boolparametrar verifieras även via indirekta anrop. Båda bygglägen
 klarar egna Linuxsviter (176 x86, 181 ARM), ABI 32 per mål, 220 diagnostikprov
 och 887 kernel-TU:er i båda semalägena. G1/G2/G5 förblir öppna.
 
+
+### Status 2026-11-11: G5/G7, enoperationsrecept för gånger 3/5/9
+
+Ett delat konstanttidsrecept väljer separata native-adaptrar: skalad LEA på
+x86 och skiftad ADD på arm64, O1+ utan VCC_NOOPT. Wasm behåller mul enligt
+referensens kostnadsval. O0/NOOPT/overflow-paritet, modulär sanitizer-/mutationsoracle,
+posteffekter, två bygglägen och fyra måls O0–O3-körfall passerar. Kodformsvinst
+är belagd; matchad mikrokostnad mot historisk bas 69c1bd7 är högst +0,126 %
+för kontroller; positivt prov kostar +0,353 % x86 och −2,147 % arm64.
+Wasm är byteidentiskt. Detta är kompileringens Ir, inte körtidsvinst eller full
+prestandagrind; slutlig integrations-CI återstår. Faktorer
+6/7/10/15 och bredare aritmetikregler är öppna. G5/G7 och full O2 förblir öppna.
+
 Efter konfliktintegration med main4bb6d52 via OPT3-huvudet 9b18f64: unitybygge,
 16/16 riktade unsigned32-fall på fyra mål samt sanitiserade reciprok-/tryck-
 och registereffektkontrakt passerar. Båda planernas status behålls.
@@ -500,3 +513,10 @@ kompilatorinstruktioner. Mättad native signed32/64-kod kostar +14,21…+30,03 %
 ett avgränsat x86-körprov ger −63,59 % barn-CPU, med clang-identiska svar.
 Åtta O0/noopt-assemblerjämförelser är byte-identiska. Fulla G5/G7 förblir öppna.
 Implementations- och valideringsgränserna står i PLAN-fas2:s signed-status.
+
+
+OPT1-integrationskontroll på 60027c7 efter wasm-föräldern 6d60e73:
+båda bygglägen, 16 fulla assemblerpar, 16 mål/nivå-körfall, sanitiserade
+recept-/postkontrakt och 36 policy-/overflow-paritetsjämförelser passerar.
+Tidigare kompilatorkostnad gäller fortfarande historiska 69c1bd7 till f92b67b;
+den tillskrivs inte denna nya förälder. Integrations-CI och full G7 återstår.

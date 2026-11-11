@@ -2358,6 +2358,64 @@ när mätningar motiverar dem; ingen nivå döps om för att hävda paritet.
 G5/G7 och full O2-täckning förblir öppna. Detta dokumentsteg kör inga byggen
 eller nya benchmarks; annexets mängd-/unikhets-/nivå-/filhashkontroller
 är datakontroller av befintligt underlag.
+
+
+### OPT1: små konstantmultiplikationer med målkostnad (2026-11-11)
+
+Implementerat första avgränsade steget: `opt/mulconst.c` normaliserar konstanten
+till 32/64 bitar och väljer i konstant tid skift 1/2/3 för faktorerna 3/5/9.
+Separata `arch/{a64,x64}/emit/mulconst.c` använder receptet vid O1+ och utan
+`VCC_NOOPT`: arm64 väljer befintlig ADD med skiftad operand, x86 en ny ren
+skalad LEA-post med båda registeranvändningarna och utan flagg-/minneseffekter.
+32-bitarsresultatet nollutvidgas innan en eventuell senare teckenutvidgning.
+Ingen extra temp, AST-genomgång eller operandutvärdering behövs. Wasm behåller
+mul, som Clang 23; ett påtvingat skift/add-recept skulle lägga till operationer.
+
+Lokal audit mot 69c1bd7 (aritmetikfiler identiska med main 2dc4ea3) och
+Clang 23.1.6/GCC 15.2.0 visar att detta saknas på båda native-målen.
+Arm64 har redan multiplikation med tvåpotenser; noll/ett finns i gemensam regel.
+Faktorer 6/7/10/15 skjuts upp: referenserna använder två operationer där x86
+har en omedelbar imul och arm64 två mov/madd; bredare målkostnad krävs.
+Manifest med käll-/binärhashar, samtliga 36 auditkommandon och assembler ligger
+lokalt i `work/opt-profile/multiply-audit/`. Basbinären har SHA256
+`61249ca189d71743da9c506100c3d3dc8451cb3338e2898bc904b03d7cda87f4`.
+Detta är kodformsbelägg, inte uppmätt körtidsvinst.
+
+Verifierat före kostnadsmätning: unity och fil-för-fil med j2, 16 fullständigt
+byteidentiska assemblerpar mellan byggena, 16 mål/nivå-kombinationer O0–O3
+med bokstavliga körsvar och avsedda kodformer. Fallen omfattar signed/unsigned
+32/64, negativa definierade produkter, wraparound, smalning med smutsiga höga
+bitar, efterföljande utvidgning, *=, kommuterad konstant, en enda pekar-/värdefunktion
+samt global volatile-laddning. 36 bytejämförelser mot basen bevarar O0,
+`VCC_NOOPT` och overflow-builtins. Det redan ignorerade attributet optnone
+utgör inget nytt löfte. ASan/UBSan för receptets modulära oracle och mutation,
+samt x86-posternas användningar/definitioner/flaggor/nollutvidgning passerar.
+CI kör den nya receptkontrollen och befintlig opt-rules tar automatiskt det nya
+fallet. Slutlig integrations-CI återstår; avgränsad kostnadsmätning finns nedan.
+Ingen SSA, generell InstCombine eller full O2-täckning är implementerad.
+
+
+OPT1 matchad kostnad för 3/5/9: exakt ren kandidat `f92b67b` mot historisk
+bas `69c1bd7`, båda värdbyggen `-O3 -march=x86-64-v3`, hela processens
+Callgrind-Ir och 500 funktioner per prov, O1/O2 för alla fyra måltrippelar.
+Skalär kontroll med faktor 37 (receptet avböjs) kostar +0,1256 % x86,
++0,1231 % arm64 och +0,0141–0,0142 % wasm. Pekarslingan kostar +0,0863 %,
++0,0041 % respektive +0,0080 %. Alla kontrollutdata är byteidentiska.
+Positivt prov med faktorerna 3/5/9 kostar +0,3529 % x86, −2,1465 % arm64
+samt +0,0160–0,0161 % wasm. Där blir 500 imul till 500 skalade LEA på
+x86 och 500 materialiserade konstant+madd till 500 skiftade ADD på arm64;
+wasm behåller 500 mul och dess assembler är byteidentisk. Detta mäter
+kompileringsarbete, inte programmets körtid eller hela prestandagrinden.
+
+Kandidatbinärens SHA256 är
+`8492bdd0cb53f89d1ad3173ac48bcb837f668a20a4860b0b3fa64ee232ccf362`.
+`work/opt-profile/mulconst-cost/result.json` bevarar samtliga 24 matchade par,
+exakta kommandon, kompileringsflaggor, käll-/binärhashar och kodformsräkningar.
+`work/opt-profile/mulconst-unity-parity/result.json` bevarar de 16
+byteidentiska bygglägesparen. Bas 69 är avsiktligt historisk; en senare
+integration får inte beskriva dessa tal som mätning mot dess nya förälder.
+Slutlig integrations-CI och full G7 är fortsatt öppna.
+
 OPT8-integrering: implementationen är 58263be; därefter har main54580f7
 (PR48:s genererade minnesregression) mergats som 6b0e195. Konflikten gällde
 bara denna plan; båda statusblocken är bevarade. Kompilatorkällorna är
@@ -2571,3 +2629,21 @@ Bounded-flow efter stackintegration med signed/tail/u64 (`661d552`): unity,
 sanitiserade flow-/dead-result-kontrakt, 16 mål-/nivåprov med körning och
 x86-debug O0–O3 passerar. Tidigare hela sviter och Ir-mätningar ovan gäller
 sina exakta angivna versioner; integrationen är ingen ny kostnadsmätning.
+
+
+OPT1 integration efter wasm-flödesföräldern: på `60027c7` med förälder
+`6d60e73` passerar unity och fil-för-fil (j2), 16 kompletta byteidentiska
+assemblerpar mellan bygglägena, samtliga 16 multiplikationsfall O0–O3 på
+x86/arm64/wasm32/wasm64, sanitiserat recept med mutation och posteffektskontrakt.
+36 O0/VCC_NOOPT/overflow-jämförelser mot förälderns binär är byteidentiska
+(byggd 1458a90, produktionskällor verifierat identiska med 6d60e73).
+Native-körharnessen kontrollerar nu även bevarade register för detta fall.
+CI-/harness-unionen behåller tails, deadresults, flödeskontrakt, wasm-flow och
+mulconst. Aktuell unity-binär har SHA256
+`398f139ca1489cd83a8822c0db8958f54df72cc73cc7fb252e5add4781a30a2e`;
+kommandon/binärhashar och 16 par finns i
+`work/opt-profile/mulconst-integration-parity/result.json`, kör-/kontraktsloggar
+i `work/mulconst-integration-{contracts,policy,runtime}.log`.
+Ingen historisk kostnadsprofil har upprepats: talen ovan gäller fortfarande
+exakt 69c1bd7 till f92b67b, inte denna integrationsförälder. Integrations-CI
+återstår; G5/G7 och hela O2 är fortsatt öppna.

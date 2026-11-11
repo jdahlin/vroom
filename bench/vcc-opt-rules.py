@@ -589,6 +589,34 @@ def check_deadresults(assembly, arch):
         raise RuntimeError(f'dr_opaque: opaque whole-function fallback was lost\n{text}')
 
 
+def check_mulconst(assembly, arch):
+    wasm = arch.startswith('wasm')
+    probes = [(f'mc_{tag}_{factor}', shift) for tag in ['u32', 's32', 'u64', 's64']
+              for factor, shift in [(3, 1), (5, 2), (9, 3)]]
+    probes += [('mc_commuted', 2), ('mc_narrow', 1), ('mc_compound', 3),
+               ('mc_post', 2), ('mc_pointer3', 1), ('mc_call5', 2), ('mc_volatile9', 3)]
+    for name, shift in probes:
+        text = body(assembly, name, wasm)
+        if wasm:
+            if not re.search(r'\bi(?:32|64)\.mul\b', text):
+                raise RuntimeError(f'{name}: wasm should retain multiply\n{text}')
+        elif arch == 'aarch64':
+            if re.search(r'\b(?:madd|mul)\b', text) or not re.search(
+                    r'\badd\s+[^\n]+,\s*lsl\s*#' + str(shift) + r'\b', text):
+                raise RuntimeError(f'{name}: missing one shifted add\n{text}')
+        elif re.search(r'\bimul[lq]?\b', text) or not re.search(
+                r'\blea[lq]\s+[^\n]*,[^\n]*,' + str(1 << shift) + r'\)', text):
+            raise RuntimeError(f'{name}: missing one scaled LEA\n{text}')
+    # The direct volatile load is independent of the pre-existing x86
+    # volatile-postincrement issue. Its multiply must still read the global.
+    text = body(assembly, 'mc_volatile9', wasm)
+    observed_load = (r'\bi32\.load\b' if wasm else
+                     r'\bldr\s+w[^\n]*:lo12:mc_observed' if arch == 'aarch64' else
+                     r'\bmovl\s+mc_observed\(%rip\),')
+    if not re.search(observed_load, text):
+        raise RuntimeError(f'mc_volatile9: lost volatile global read\n{text}')
+
+
 def x64_start(check_preserved):
     if not check_preserved:
         return 'call main\nmov %eax, %edi\nmov $60, %eax\nsyscall\n'
@@ -642,7 +670,7 @@ def execute(args, directory, assembly, arch, source, level):
             run([assembler, f'--target={args.target}', '-c', assembly, '-o', obj])
         start = directory / 'start.s'
         start.write_text('.text\n.globl _start\n_start:\n' +
-                         (x64_start(args.rule in ['locals', 'localjmp', 'tails', 'deadresults', 'all'])
+                         (x64_start(args.rule in ['locals', 'localjmp', 'tails', 'deadresults', 'mulconst', 'all'])
                           if arch == 'x86_64' else
                           'bl main\nmov x8, #93\nsvc #0\n'))
         run([args.clang, f'--target={args.target}', '-fuse-ld=lld',
@@ -657,7 +685,7 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument('--vpp', default=str(Path(BUILD) / 'vpp'))
     ap.add_argument('--target', default='x86_64-linux-gnu')
-    ap.add_argument('--rule', choices=['pow2', 'signedpow2', 'identities', 'fallthrough', 'loopback', 'unreachable', 'locals', 'localjmp', 'copies', 'extensions', 'switches', 'tails', 'udivconst', 'udivconst64', 'sdivconst', 'deadresults', 'all'], default='all')
+    ap.add_argument('--rule', choices=['pow2', 'signedpow2', 'identities', 'fallthrough', 'loopback', 'unreachable', 'locals', 'localjmp', 'copies', 'extensions', 'switches', 'tails', 'udivconst', 'udivconst64', 'sdivconst', 'deadresults', 'mulconst', 'all'], default='all')
     ap.add_argument('--run', action='store_true', help='also execute literal-answer correctness checks')
     ap.add_argument('--cfi', action='store_true', help='also check unwind state with tail calls')
     ap.add_argument('--sibling-calls', choices=['default', 'on', 'off'], default='default',
@@ -699,7 +727,8 @@ def main():
              'udivconst': ('unsigned_divconst.c', check_udivconst),
              'udivconst64': ('unsigned_divconst64.c', check_udivconst64),
              'sdivconst': ('signed_divconst.c', check_sdivconst),
-             'deadresults': ('dead_results.c', check_deadresults)}
+             'deadresults': ('dead_results.c', check_deadresults),
+             'mulconst': ('multiply_constants.c', check_mulconst)}
     selected = rules if args.rule == 'all' else {args.rule: rules[args.rule]}
     with tempfile.TemporaryDirectory(prefix='vcc-opt-rules-') as tmp:
         directory = Path(tmp)
@@ -718,7 +747,7 @@ def main():
                 checked = ((arch == 'x86_64' and level >= 1) if rule in ['locals', 'copies', 'extensions', 'deadresults'] else
                            (not arch.startswith('wasm') and level >= 1) if rule in ['fallthrough', 'unreachable'] else
                            arch.startswith('wasm') if rule == 'loopback' else True)
-                checked = checked and check is not None and (rule not in ['switches', 'udivconst', 'udivconst64'] or level >= 1)
+                checked = checked and check is not None and (rule not in ['switches', 'udivconst', 'udivconst64', 'mulconst'] or level >= 1)
                 if checked:
                     if rule == 'sdivconst':
                         check(assembly.read_text(), arch, optimized=level >= 1)

@@ -462,6 +462,8 @@ VPRIV val x64_bin(ecx *e, int op, int size, bool sgn, val a, val b)
 		a = b, b = t;
 	}
 	ra = x64_toreg(e, &a, size);
+	if (op == T_STAR && b.k == V_CONST && x64_mulconst(e, size, ra, b.i))
+		return a;
 	if (x64_imm32(b)) {
 		rec *i = x64_op3(e, xopi, size, ra, ra, XNOREG);
 
