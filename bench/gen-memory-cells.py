@@ -1,0 +1,199 @@
+#!/usr/bin/env python3
+"""Generate bounded portable memory regressions and independent u32 answers.
+
+Fixed xorshift seed 0x6d656d35; no compiler or target output enters the oracle.
+Six functions keep the u32 struct private; six pass field addresses to a helper.
+The operation interpreter uses Python integers plus explicit C-width masks.
+Run --check to verify that the checked-in fixture matches this generator.
+"""
+import argparse
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parent.parent
+OUTPUT = ROOT / 'ccs/vcc/tests/vcc/generated_memory_cells.c'
+MASK = (1 << 32) - 1
+INPUTS = (0x12345678, 0xfffffedc)
+SEED = 0x6d656d35
+
+
+def operations():
+    seed = SEED
+
+    def next_():
+        nonlocal seed
+        seed ^= seed << 13 & MASK
+        seed ^= seed >> 17
+        seed ^= seed << 5 & MASK
+        seed &= MASK
+        return seed
+
+    result = []
+    for function in range(12):
+        ops = []
+        kinds = list(range(14)) * 2 + [next_() % 14 for _ in range(4)]
+        for k in range(len(kinds) - 1, 0, -1):
+            j = next_() % (k + 1)
+            kinds[k], kinds[j] = kinds[j], kinds[k]
+        for kind in kinds:
+            # Keep half the functions eligible for exact-cell optimization.
+            # Addressing any field escapes the entire struct allocation.
+            if function < 6 and kind == 8:
+                kind = 12
+            ops.append((kind, next_() % 4, next_() % 4,
+                        next_() % 3, next_() % 3, next_(), next_() % 31))
+        result.append(ops)
+    return result
+
+
+def model(ops, x):
+    # This state interpreter is separate from C source emission. Every update
+    # applies the destination's width, and RHS values precede destination writes.
+    cells = [x, (x + 17) & MASK, x ^ 0xabcdef01, (x * 13) & MASK]
+    halves = [65531, 17, x & 65535]
+    bytes_ = [249, 3, x & 255]
+    acc = 7
+    union_bits = 0
+    for kind, i, j, h, b, n, shift in ops:
+        if kind == 0:
+            cells[i] = (cells[j] + n) & MASK
+        elif kind == 1:
+            acc = (acc + cells[i]) & MASK
+        elif kind == 2:
+            cells[i] = n
+            cells[i] = (cells[j] ^ (n >> 1)) & MASK
+        elif kind == 3:
+            halves[h] = (cells[j] ^ n) & 65535
+        elif kind == 4:
+            bytes_[b] = (cells[j] + n) & 255
+        elif kind == 5:
+            acc = (acc + halves[h] + bytes_[b]) & MASK
+        elif kind == 6:
+            old = cells[i]
+            cells[i] = cells[j] ^ ((old + n) & MASK)
+            acc ^= old
+        elif kind == 7:
+            cells[i] = ((cells[i] + n) & MASK) if x & (1 << shift) else cells[i] ^ n
+        elif kind == 8:
+            old = cells[i]
+            cells[i] = ((old ^ n) + 7) & MASK
+            acc = (acc + old) & MASK
+        elif kind == 9:
+            union_bits = (0x3f800001, 0x80000000, 0x41200000)[h]
+            acc ^= union_bits
+        elif kind == 10:
+            acc = (acc + cells[i]) & MASK
+        elif kind == 11:
+            acc ^= (cells[i] + cells[i]) & MASK
+        elif kind == 12:
+            cells[i] = (cells[i] + halves[h] + bytes_[b]) & MASK
+        else:
+            temporary = (cells[i] + n) & MASK
+            cells[j] = temporary
+            # The extra clobber changes the source variable, never stored bytes.
+            temporary ^= n
+            acc = (acc + cells[i]) & MASK
+    for i, value in enumerate(cells):
+        acc ^= value * (i + 3) & MASK
+    for i, value in enumerate(halves):
+        acc = (acc + value * (i + 11)) & MASK
+    for i, value in enumerate(bytes_):
+        acc ^= value << (i * 8)
+    return (acc ^ union_bits) & MASK
+
+
+def emit_operation(op):
+    kind, i, j, h, b, n, shift = op
+    c, d, half, byte = f'cells.f{i}', f'cells.f{j}', f'halves[{h}]', f'bytes[{b}]'
+    number = f'0x{n:08x}u'
+    patterns = {
+        0: f'{c} = {d} + {number};',
+        1: f'acc += {c};',
+        2: f'{c} = {number}; {c} = {d} ^ ({number} >> 1);',
+        3: f'{half} = (unsigned short)({d} ^ {number});',
+        4: f'{byte} = (unsigned char)({d} + {number});',
+        5: f'acc += {half} + {byte};',
+        6: f'temporary = {c}; {c} = {d} ^ (temporary + {number}); acc ^= temporary;',
+        7: f'if (x & (1u << {shift})) {c} += {number}; else {c} ^= {number};',
+        8: f'acc += memory_change(&{c}, {number});',
+        9: f'bits.u = 0x{(0x3f800001, 0x80000000, 0x41200000)[h]:08x}u; '
+           'copy.f = bits.f; acc ^= copy.u;',
+        10: f'observable[0] = {c}; temporary = observable[0]; '
+            f'observable[1] = {number}; acc += temporary;',
+        11: f'acc ^= {c} + {c};',
+        12: f'{c} += {half} + {byte};',
+        13: f'temporary = {c}; temporary += {number}; {d} = temporary; '
+            f'temporary ^= {number}; acc += {c};',
+    }
+    return patterns[kind]
+
+
+def generate():
+    functions = operations()
+    lines = [
+        '/* Generated by bench/gen-memory-cells.py; seed 0x6d656d35.',
+        ' * Python u32 interpreter supplies literal answers; no compiler oracle.',
+        ' * 12 functions x 32 bounded operation groups, two inputs per function.',
+        ' * Cases 0-5 use private scalar struct fields without array address decay;',
+        ' * cases 6-11 exercise helper escapes of fields from the same struct.',
+        ' * Union payloads are finite IEEE binary32 or negative zero; no FP math.',
+        ' * Volatile stores to observable[1] are deliberately unread; runtime',
+        ' * checks cannot prove their preservation (vcc-slot-observable.py does). */',
+        '_Static_assert(sizeof(unsigned) == 4 && sizeof(float) == 4, "32-bit cells");',
+        '#define NI __attribute__((noinline))',
+        'union word_bits { unsigned u; float f; };',
+        'struct four_cells { unsigned f0, f1, f2, f3; };',
+        'static volatile unsigned input;',
+        'static NI unsigned memory_change(unsigned *p, unsigned change)',
+        '{ unsigned previous = *p; *p = (previous ^ change) + 7u; return previous; }',
+        '',
+    ]
+    for index, ops in enumerate(functions):
+        lines.extend([
+            f'static NI unsigned memory_case_{index}(unsigned x)',
+            '{',
+            '    struct four_cells cells;',
+            '    cells.f0 = x; cells.f1 = x + 17u;',
+            '    cells.f2 = x ^ 0xabcdef01u; cells.f3 = x * 13u;',
+            '    unsigned short halves[3] = { 65531, 17, (unsigned short)x };',
+            '    unsigned char bytes[3] = { 249, 3, (unsigned char)x };',
+            '    volatile unsigned observable[2];',
+            '    union word_bits bits, copy = { .u = 0 };',
+            '    unsigned acc = 7, temporary;',
+        ])
+        lines.extend('    ' + emit_operation(op) for op in ops)
+        lines.extend([
+            '    acc ^= cells.f0 * 3u;',
+            '    acc ^= cells.f1 * 4u;',
+            '    acc ^= cells.f2 * 5u;',
+            '    acc ^= cells.f3 * 6u;',
+            '    for (unsigned i = 0; i < 3; ++i) acc += halves[i] * (i + 11u);',
+            '    for (unsigned i = 0; i < 3; ++i) acc ^= (unsigned)bytes[i] << (i * 8u);',
+            '    return acc ^ copy.u;',
+            '}',
+            '',
+        ])
+    lines.extend(['int main(void)', '{'])
+    for index, ops in enumerate(functions):
+        for sample, x in enumerate(INPUTS):
+            lines.append(f'    input = 0x{x:08x}u;')
+            lines.append(f'    if (memory_case_{index}(input) != 0x{model(ops, x):08x}u) '
+                         f'return {index * 2 + sample + 1};')
+    lines.extend(['    return 0;', '}', ''])
+    return '\n'.join(lines)
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--check', action='store_true')
+    args = parser.parse_args()
+    text = generate()
+    if args.check:
+        if OUTPUT.read_text() != text:
+            raise SystemExit('generated_memory_cells.c differs; rerun generator')
+    else:
+        OUTPUT.write_text(text)
+    print('generated memory cells: 12 functions, 384 operation groups, 24 literal checks')
+
+
+if __name__ == '__main__':
+    main()

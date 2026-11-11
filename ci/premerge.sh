@@ -60,6 +60,7 @@ arm64)
 		step interrupt python3 bench/vcc-interrupt.py
 	fi
 	step runtime-exceptions python3 bench/test-runtime-exceptions.py
+	step memory-cells-generated python3 bench/gen-memory-cells.py --check
 	step ctests       python3 bench/vcc-ctests.py -j "$J"
 	step rec-effects  python3 bench/vcc-rec-effects.py
 	step rec-slots python3 bench/vcc-rec-slots.py --sanitize
