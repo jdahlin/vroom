@@ -2,6 +2,13 @@
 static volatile unsigned observed;
 static unsigned global_value;
 static unsigned update(void) { global_value++; return 7; }
+unsigned lvr_unary_not(unsigned a, unsigned b) { return ((~a)+b)*((~a)+b); }
+unsigned long long lvr_unary_64(unsigned long long a, unsigned long long b) { return ((~a)+b)*((~a)+b); }
+unsigned lvr_unary_logic(unsigned a, unsigned b) { return ((!a)+b)*((!a)+b); }
+unsigned lvr_unary_neg(unsigned a, unsigned b) { return ((-a)+b)*((-a)+b); }
+unsigned lvr_unary_different(unsigned a, unsigned b) { return ((~a)+b)*((-a)+b); }
+unsigned lvr_unary_kill(unsigned a, unsigned b) { unsigned x=(~a)+b; a++; return x+((~a)+b); }
+unsigned lvr_unary_volatile(unsigned b) { return ((~observed)+b)*((~observed)+b); }
 unsigned lvr_shift(unsigned a, unsigned b) { return (a << b) * (a << b); }
 unsigned long long lvr_shift64(unsigned long long a, unsigned b) { return (a >> b)*(a >> b); }
 unsigned lvr_shift_decl(unsigned a, unsigned b) { unsigned x=a >> b; return x+(a >> b); }
@@ -62,7 +69,9 @@ unsigned lvr_join(unsigned a, unsigned b, int c) { unsigned x = a + b; if (c) a+
 int main(void)
 {
  unsigned v = 3, w = 5;
- if (lvr_shift(3, 2) != 144 || lvr_shift64(1ULL << 40, 20) != (1ULL << 40) || lvr_shift_decl(20, 2) != 10 || lvr_shift_kill(20, 2) != 7 ||
+ if (lvr_unary_not(3, 6) != 4 || lvr_unary_64(3, 6) != 4 || lvr_unary_logic(0, 6) != 49 || lvr_unary_logic(1, 6) != 36 || lvr_unary_neg(3, 6) != 9 ||
+     lvr_unary_different(3, 6) != 6 || lvr_unary_kill(3, 6) != 3 ||
+     lvr_shift(3, 2) != 144 || lvr_shift64(1ULL << 40, 20) != (1ULL << 40) || lvr_shift_decl(20, 2) != 10 || lvr_shift_kill(20, 2) != 7 ||
      lvr_shift_different(3, 2, 1) != 6 || lvr_shift_order(3, 2) != (12U-16U) || lvr_shift_signed(-20, 2) != -10 ||
      lvr_square(2, 3) != 25 || lvr_reuse(2, 3) != 25 || lvr_commute(3, 4) ||
      lvr_nested(2, 3, 4) != 4 || lvr_distinct(5, 2) != (3U * (0U-3U)) ||
@@ -85,7 +94,7 @@ int main(void)
  if (lvr_intervening_call(2, 3) != 40 || global_value != 6 ||
      lvr_assignment_call(2, 3, 0) != 40 || global_value != 7) return 6;
  observed = 3;
- if (lvr_shift_volatile(2) != 256 || lvr_if_volatile(2, 3) != 0 || lvr_volatile() != 16 || lvr_intervening_volatile(2, 3) != 20 || lvr_assignment_volatile(2, 3, 0) != 20) return 3;
+ if (lvr_unary_volatile(6) != 4 || lvr_shift_volatile(2) != 256 || lvr_if_volatile(2, 3) != 0 || lvr_volatile() != 16 || lvr_intervening_volatile(2, 3) != 20 || lvr_assignment_volatile(2, 3, 0) != 20) return 3;
  if (lvr_alias(&v, &v) != 14 || v != 7 || lvr_alias(&v, &w) != 18 || w != 7) return 4;
  return 0;
 }

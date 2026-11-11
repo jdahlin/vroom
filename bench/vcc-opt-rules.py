@@ -56,6 +56,9 @@ def check_localvalues(assembly, arch):
         raise RuntimeError('64-bit repeated shift must be computed once')
     text = body(assembly, 'lvr_square', wasm)
     add = r'i32\.add\b' if wasm else r'\badd\s+w' if arch == 'aarch64' else r'\baddl\b'
+    for name, count in [('lvr_unary_not', 1), ('lvr_unary_neg', 1), ('lvr_unary_different', 2)]:
+        if len(re.findall(add, body(assembly, name, wasm))) != count:
+            raise RuntimeError(f'{name}: unary expression reuse or distinction failed')
     if len(re.findall(add, text)) != 1:
         raise RuntimeError(f'sibling value must be computed once\n{text}')
     text = body(assembly, 'lvr_reuse', wasm)

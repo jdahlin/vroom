@@ -37,6 +37,12 @@ static uint32_t em_sibling_value(cc *c, em_sibling_state *s, uint32_t n)
  if (x->op == N_NUM) {
   key.operation = 1;
   key.immediate = (uint64_t)em_trunc_to(c, c->ipool[x->a], x->ty);
+ } else if (x->op == N_UNARY && (x->aux == T_PLUS || x->aux == T_MINUS ||
+                                  x->aux == T_TILDE || x->aux == T_EXCLAIM)) {
+  left = em_sibling_value(c, s, x->a);
+  if (!left) return 0;
+  key.operation = UINT32_C(0x40000000) | x->aux;
+  key.left = left;
  } else if (x->op == N_CAST && (x->aux == CK_INT || x->aux == CK_NOP || x->aux == CK_BOOL)) {
   left = em_sibling_value(c, s, x->a);
   if (!left) return 0;
