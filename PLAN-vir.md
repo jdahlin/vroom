@@ -231,7 +231,7 @@ fixpunkter utan budget (samma regel som `emit/flow/`).
 
 - `SPEC-vir.md` (utkast 0.1): hela formatet (16-byte-instruktion, block,
   stackplatser, `extra`), typer, minnesmodell, alla 1.0-operationer med
-  effekter, ABI-signaturer, textform med grammatik, verifierarens 28 regler,
+  effekter, ABI-signaturer, textform med grammatik, verifierarens 27 regler,
   tolken, passens kontrakt, registerallokeringens gränssnitt, verktyg, tester
   och gränser.  Den listar sju ändringar som krävs utanför `vir/` (X1–X7) och
   sju öppna frågor (O1–O7).  Planens avsnitt Design ovan är en sammanfattning;
