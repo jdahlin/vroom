@@ -464,6 +464,17 @@ fortfarande körda Wasm-XFAIL med TODO-referenser: samma källor fallerar
 redan med byteverifierad uppströmsbas `2339f69`. Linuxproven är fortsatt
 obligatoriska. Wasm-felen döljs inte som godkända eller överhoppade prov.
 
+TSan hittade en verklig kapplöpning när parallella emittertrådar värderade
+konstanta initialiserare: delad rekursionskedja pekade in i andra trådars
+stackar, och implicita noll-/strängelement skapade nya AST-noder under
+emissionen. Rekursionskedjan är nu trådlokal och nycklad per cc/symbol;
+allokeringsfria delobjektsbeskrivningar ersätter AST-mutationerna.
+Ursprungsreproduceraren går från TSan exit66 till grönt med sex trådar.
+Normal/nonunity/TSan klarar tre constexpr-runtimeprov på båda Linux-målen,
+cykeldiagnostik samt kernel-sema 887/887 i båda lägen. Ny permanent
+500-globalsregression använder riggens `vcc-threads-same`-markör för
+upprepade parallella emissioner även i TSan-CI.
+
 Kombinerat fryst checkpoint `7afcdea`, före signmask-/typnamnsrättningarna,
 är verifierat i båda byggsätten: **145/145 x86** (fem referensundantag),
 **150/150 ARM/QEMU**, tvåfils-constexpr-ABI samt tre ursprungliga GCC-fall

@@ -104,10 +104,8 @@ typedef struct lzfn {
 	pp_lazy z;
 } lzfn;
 
-struct const_eval;
 
 struct cc {
-	struct const_eval *const_eval;	/* active const-variable initializer evaluations */
 	pp *p;
 	const cc_opts *o;
 	struct vfixbuf *tyb;	/* tyname/tyname_sugar: 8 buffers in rotation (allocated at the first) */
