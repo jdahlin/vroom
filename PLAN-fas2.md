@@ -3185,3 +3185,20 @@ CPU-tidsgräns. Rådata och hashad proveniens finns i
 `work/opt-profile/decl-return-expanded-cost/`, `decl-return-expanded-cputime/`,
 `decl-return-expanded-cputime7/` och `decl-return-expanded-o0-7/`. Sökning över
 andra satser, joinpunkter och generell CSE återstår.
+
+Samma begränsade blockskanning återanvänder nu värden även i en senare ren
+lokal heltalsinitiering, inte enbart i retur. Mottagaren måste redan läsa den
+tidigare lokalen; skrivning, anrop, volatile/atomic och övriga barriärer
+avvisas som tidigare. Nya körnings- och kodformskrav passerar O0–O3 på fyra
+mål i båda bygglägen, inklusive en skrivande initierare som negativfall.
+O0/noopt-assembler är byteidentisk mot `597c521`; vcc-sviten är 256/256 med
+en befintlig xfail och x86:s debugprov passerar.
+
+Den uppdaterade fasta Callgrind-korpusen mot samma bas ger compiler-Ir
++0,151 % x86, +0,130 % arm64, +0,036 % wasm32 och +0,031 % wasm64; 1 %-
+grinden passerar med tidigare redovisade uteslutningar. Sju växelvisa O2-
+rundor på 28 förprocessade arm64-kärn-TU:er gav median användar-CPU 0,78387 →
+0,78438 s; tre O0-rundor gav 0,76742 → 0,75814 s. Två TU:er exkluderades och
+korta prover på delad värd ger ingen generell tidsgräns. Proveniens och sampel:
+`work/opt-profile/local-values-decl-cost/`, `local-values-decl-cputime/` och
+`local-values-decl-o0/`. Generell blocklokal CSE och reuse över joins återstår.

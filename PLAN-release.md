@@ -732,3 +732,6 @@ Generell lokal CSE, G5/G7 och full O2-täckning återstår.
 En lokal heltalsinitiering kan återanvändas i en direkt efterföljande ren retur
 på alla mål; verifiering och avgränsade kostnader finns i PLAN-fas2.md.
 Generell lokal CSE samt G5/G7 återstår.
+
+Den budgeterade lokala värdeåteranvändningen omfattar även senare rena
+heltalsinitieringar; fyrmålsprov och avgränsad kostnad finns i PLAN-fas2.md.
