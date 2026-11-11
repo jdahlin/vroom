@@ -214,6 +214,14 @@ Unicode-lokala statiska symbolers namn är också rättade. De återstående 20
 Wasm-fallen dokumenteras individuellt i TODO.md och körs som uttryckliga
 XFAIL, inte skip. En framtida rättning ger XPASS-fel tills markören tas bort.
 Detta är inte ett påstående om att dessa 20 Wasm-buggar är rättade.
+Full lokal Wasm-körning efter CI-rättningarna: **1809 godkända**, 31
+uttryckliga XFAIL (20 nytäckta plus 11 tidigare), 141 filtrerade, inga
+oväntade fel eller XPASS. TSan:s daemonstress avslöjade dessutom att
+`gen_call` inlinades i rekursiva ARM-uttryck: dess 8 KiB argumentbuffert
+reserverades för varje aritmetiknod. En separat funktionsgräns minskar
+AArch64-TSan-ramen i `gen_inner` från 8608 till 432 byte. Det oförändrade
+250-nivåprovet och efterföljande giltig TU går nu grönt med samma 2 MiB
+workerstack; stackgränser, test och sanitizerkontroller har inte ändrats.
 
 ### S4 gcc.dg — påbörjad (2026-11-11)
 `bench/vcc-gcc-dg.py -j 6 --target x86_64-linux-gnu` kör direkta

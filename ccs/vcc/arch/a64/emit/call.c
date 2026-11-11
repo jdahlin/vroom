@@ -645,7 +645,9 @@ static bool mem_inline(ecx *e, uint32_t ref, carg *args, val *res)
 	return true;
 }
 
-VPRIV val gen_call(ecx *e, uint32_t n)
+/* Keep the argument scratch buffer out of gen_inner's recursive frame.
+ * Inlining it there charges every arithmetic node for MAXARGS call slots. */
+__attribute__((noinline)) VPRIV val gen_call(ecx *e, uint32_t n)
 {
 	cc *c = e->c;
 	const node *x = N(n);
