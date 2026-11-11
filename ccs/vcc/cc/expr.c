@@ -49,7 +49,10 @@ static bool vec_scalar_ok(cc *c, uint32_t s, qty et)
 				return v.i >= -((i128)1 << (b - 1)) && v.i < ((i128)1 << (b - 1));
 			return v.i >= -((i128)1 << (b - 1)) && (b >= 128 || v.i < ((i128)1 << b));	/* (clang: -18 into unsigned lanes) */
 		}
-		return ty_size(c, st) < ty_size(c, et) || (ty_size(c, st) == ty_size(c, et) && is_signed(c, st) == is_signed(c, et));
+		/* Signed-to-unsigned at the same width preserves every source bit.
+		 * The reverse conversion can lose the unsigned scalar's top bit. */
+		return ty_size(c, st) < ty_size(c, et) ||
+		       (ty_size(c, st) == ty_size(c, et) && (!is_signed(c, et) || is_signed(c, st)));
 	}
 	if (k && v.kind == CV_INT)
 		return ty_size(c, et) == 4 ? (i128)(float)v.i == v.i : (i128)(double)v.i == v.i;
@@ -1139,6 +1142,41 @@ static __attribute__((noinline)) uint32_t call(cc *c, uint32_t fn, uint32_t loc)
 				return folded;
 		}
 	}
+	if (!c->o->no_builtin && N(callee)->op == N_VAR && c->syms[N(callee)->a].kind == S_FUNC) {
+		const sym *y = &c->syms[N(callee)->a];
+		if ((y->flags & SF_GLOBAL) && y->sc != SC_STATIC && !(y->attrs && c->attr[y->attrs].asmname) &&
+		    !lib_builtin_disabled(c->o, idstr_(y->name), idlen_(y->name))) {
+			uint32_t result = fp_sign_call(c, idstr_(y->name), idlen_(y->name), ft, &args, loc);
+			if (result) {
+				N(result)->flags |= aflags & NF_ERR;
+				return result;
+			}
+		}
+	}
+	/* Under full fast-math, pow(x, 1/4) has the same relaxed contract as
+	 * sqrt(sqrt(x)). Match only the library declaration and a literal exponent:
+	 * neither a renamed/local function nor exponent side effects may disappear. */
+	if (c->o->fast_math && !c->o->no_builtin && !lib_builtin_disabled(c->o, "pow", 3) &&
+	    (c->o->target == PP_LINUX_X86_64 || c->o->target == PP_LINUX_AARCH64) &&
+	    args.n == 2 && N(callee)->op == N_VAR && c->syms[N(callee)->a].kind == S_FUNC) {
+		const sym *y = &c->syms[N(callee)->a];
+		cval exponent;
+
+		if ((y->flags & SF_GLOBAL) && y->sc != SC_STATIC && !(y->attrs && c->attr[y->attrs].asmname) &&
+		    idlen_(y->name) == 3 && !memcmp(idstr_(y->name), "pow", 3) &&
+		    f->n == 2 && !(f->flags & (TF_NOPROTO | TF_VARIADIC)) &&
+		    compatible(c, ft, sig_func_type(c, "ddd")) && N(args.v[1])->op == N_FNUM &&
+		    cc_eval(c, args.v[1], &exponent) && exponent.kind == CV_FLT && !exponent.ld && exponent.f == 0.25) {
+			if (c->o->general_regs_only) {
+				cc_error(c, loc, "floating-point root operation is not supported with '-mgeneral-regs-only'");
+				return err_node(c, loc);
+			}
+			args.n = 1;
+			uint32_t root = mk_builtin(c, BI_FAST_ROOT4, prim(TY_DOUBLE), loc, &args);
+			N(root)->flags |= aflags & NF_ERR;
+			return root;
+		}
+	}
 	if (!c->o->no_builtin && args.n == 1 && N(callee)->op == N_VAR && c->syms[N(callee)->a].kind == S_FUNC &&
 	    (c->syms[N(callee)->a].flags & SF_GLOBAL) && c->syms[N(callee)->a].sc != SC_STATIC &&
 	    !(c->syms[N(callee)->a].attrs && c->attr[c->syms[N(callee)->a].attrs].asmname) &&
@@ -1357,6 +1395,10 @@ VPRIV __attribute__((noinline)) uint32_t postfix_ops(cc *c, uint32_t n)
 
 			next(c);
 			need_lvalue(c, n, loc);
+			if (is_complex(c, N(n)->ty)) {
+				n = cplx_incdec(c, n, op, loc);
+				continue;
+			}
 			need_scalar(c, n, "increment");
 			if (is_ptr(c, N(n)->ty) && KIND(c, T(c, N(n)->ty)->base) == TY_SVE)
 				void_ptr_arith(c, N(n)->ty, loc, false);

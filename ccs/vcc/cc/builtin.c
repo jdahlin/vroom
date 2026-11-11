@@ -27,6 +27,9 @@ static const builtin builtins[] = {
 	{ "__builtin_expect", BI_EXPECT, 1, "lll" },
 	{ "__builtin_expect_with_probability", BI_EXPECT_PROB, 1, "llld" },
 	{ "__builtin_va_start", BI_VA_START, 0, "vV." },
+	{ "__builtin_c23_va_start", BI_VA_START, 0, "vV." },
+	{ "__builtin_stdc_rotate_left", BI_STDC_ROTL, 0, "u.." },
+	{ "__builtin_stdc_rotate_right", BI_STDC_ROTR, 0, "u.." },
 	{ "__builtin_va_end", BI_VA_END, 0, "vV" },
 	{ "__builtin_va_copy", BI_VA_COPY, 0, "vVV" },
 	{ "__builtin_clz", BI_CLZ, 1, "iu" }, { "__builtin_clzl", BI_CLZL, 1, "iL" }, { "__builtin_clzll", BI_CLZLL, 1, "iW" },
@@ -216,6 +219,7 @@ static const builtin builtins[] = {
 	{ "__builtin_snprintf", BI_LIB, 0, "iszS." }, { "__builtin_vsnprintf", BI_LIB, 0, "iszSV" },
 	{ "__builtin_vsprintf", BI_LIB, 0, "isSV" }, { "__builtin_puts", BI_LIB, 0, "iS" },
 	{ "__builtin_abs", BI_LIB, 1, "ii" }, { "__builtin_labs", BI_LIB, 1, "ll" }, { "__builtin_llabs", BI_LIB, 1, "ww" },
+	{ "__builtin_complex", BI_COMPLEX, 1, "i." },
 	{ "__builtin_conj", BI_CONJ, 0, "d." }, { "__builtin_conjf", BI_CONJ, 0, "f." }, { "__builtin_conjl", BI_CONJ, 0, "D." },
 	{ "__builtin_creal", BI_CREAL, 0, "d." }, { "__builtin_crealf", BI_CREAL, 0, "f." }, { "__builtin_creall", BI_CREAL, 0, "D." },
 	{ "__builtin_cimag", BI_CIMAG, 0, "d." }, { "__builtin_cimagf", BI_CIMAG, 0, "f." }, { "__builtin_cimagl", BI_CIMAG, 0, "D." },
@@ -1356,6 +1360,55 @@ static bool elementwise_abs_effects(cc *c, uint32_t n, bool load)
 	}
 }
 
+/* fabs/copysign are representation operations: integer masks preserve both
+ * signaling NaNs and signed zero. Anonymous locals evaluate each operand once. */
+VPRIV uint32_t fp_sign_call(cc *c, const char *name, size_t len, qty ft, const vec *args, uint32_t loc)
+{
+	bool copy = (len == 8 && !memcmp(name, "copysign", 8)) ||
+		    (len == 9 && !memcmp(name, "copysignf", 9));
+	bool abs = (len == 4 && !memcmp(name, "fabs", 4)) ||
+		   (len == 5 && !memcmp(name, "fabsf", 5));
+	if (!copy && !abs) return 0;
+	bool single = name[len - 1] == 'f';
+	qty t = prim(single ? TY_FLOAT : TY_DOUBLE);
+	if ((T(c, ft)->flags & (TF_NOPROTO | TF_VARIADIC)) || args->n != (copy ? 2 : 1) ||
+	    !compatible(c, ft, sig_func_type(c, copy ? (single ? "fff" : "ddd") : (single ? "ff" : "dd"))))
+		return 0;
+	cval a, b;
+	if (!elementwise_abs_effects(c, args->v[0], true) && cc_eval(c, args->v[0], &a) && a.kind == CV_FLT &&
+	    (!copy || (!elementwise_abs_effects(c, args->v[1], true) && cc_eval(c, args->v[1], &b) && b.kind == CV_FLT)))
+		return mk_flt(c, __builtin_copysign(a.f, copy ? b.f : 1.0), t, loc);
+	if (c->o->target != PP_LINUX_X86_64 && c->o->target != PP_LINUX_AARCH64)
+		return 0;
+	if (c->o->general_regs_only) {
+		cc_error(c, loc, "%s floating point is not supported", "-mgeneral-regs-only:");
+		return err_node(c, loc);
+	}
+	qty bits = prim(single ? TY_UINT : TY_ULLONG);
+	i128 sign = (i128)1 << (single ? 31 : 63);
+	uint32_t tmp[2], raw[2], pre[2];
+	for (uint32_t i = 0; i < args->n; i++) {
+		uint32_t s = sym_new(c, S_VAR, 0, t, loc);
+		c->syms[s].sc = SC_AUTO;
+		tmp[i] = mk(c, N_VAR, t, loc); N(tmp[i])->a = s; N(tmp[i])->flags = NF_LVALUE;
+		pre[i] = mk2(c, N_ASSIGN, t, loc, tmp[i], args->v[i]);
+		uint32_t ptr = cast_node(c, addr_of(c, tmp[i], loc), ty_ptr(c, bits), CK_P2P);
+		raw[i] = mk(c, N_DEREF, bits, loc); N(raw[i])->a = ptr; N(raw[i])->flags = NF_LVALUE;
+	}
+	uint32_t value = mk_bin(c, T_AMP, bits, rvalue(c, raw[0]), mk_int(c, sign - 1, bits, loc), loc);
+	if (copy) {
+		uint32_t source = mk_bin(c, T_AMP, bits, rvalue(c, raw[1]), mk_int(c, sign, bits, loc), loc);
+		value = mk_bin(c, T_PIPE, bits, value, source, loc);
+	}
+	uint32_t result = with_pre(c, mk2(c, N_ASSIGN, bits, loc, raw[0], value), rvalue(c, tmp[0]));
+	if (copy) result = with_pre(c, pre[1], result);
+	result = with_pre(c, pre[0], result);
+	/* Retain fabs facts after its call has become representation operations.
+	   This describes only the result; the comma operands still execute. */
+	if (abs) N(result)->aux |= NC_FP_NONNEG;
+	return result;
+}
+
 static uint32_t elementwise_abs_call(cc *c, const builtin *b, uint32_t loc)
 {
 	vec args;
@@ -1400,12 +1453,55 @@ static uint32_t elementwise_abs_call(cc *c, const builtin *b, uint32_t loc)
 	return with_pre(c, pre, result);
 }
 
+/* Generic rotations preserve the first operand's type and evaluate each
+ * operand once. Normalize the count before narrowing it: the caller may pass
+ * a 64/128-bit count even when rotating a small integer. */
+static uint32_t stdc_rotate(cc *c, const builtin *b, uint32_t loc)
+{
+	vec args;
+	uint32_t prex, precount, pren;
+
+	args_list(c, &args);
+	if (args.n != 2) {
+		arity(c, loc, 2, &args);
+		return err_node(c, loc);
+	}
+	args.v[0] = decay(c, args.v[0]);
+	args.v[1] = decay(c, args.v[1]);
+	qty t = QUNQ(N(args.v[0])->ty), ct = N(args.v[1])->ty;
+	if (!is_integer(c, t) || is_signed(c, t)) {
+		cc_error(c, N(args.v[0])->loc, "rotation operand must have unsigned integer type");
+		return err_node(c, loc);
+	}
+	if (!is_integer(c, ct)) {
+		cc_error(c, N(args.v[1])->loc, "rotation count must have integer type");
+		return err_node(c, loc);
+	}
+	unsigned bits = KIND(c, t) == TY_BOOL ? 1 : int_bits(c, t);
+	qty work = prim(bits <= 32 ? TY_UINT : bits <= 64 ? TY_ULLONG : TY_UINT128);
+	unsigned countbits = int_bits(c, ct);
+	ct = prim(countbits <= 32 ? TY_UINT : countbits <= 64 ? TY_ULLONG : TY_UINT128);
+	uint32_t x = cplx_reuse(c, convert(c, rvalue(c, args.v[0]), work), &prex);
+	uint32_t count = cplx_reuse(c, convert(c, rvalue(c, args.v[1]), ct), &precount);
+	uint32_t n = binop(c, T_PERCENT, rvalue(c, count), mk_int(c, bits, ct, loc), loc);
+	n = cplx_reuse(c, convert(c, n, prim(TY_UINT)), &pren);
+	uint32_t reverse = binop(c, T_MINUS, mk_int(c, bits, prim(TY_UINT), loc), rvalue(c, n), loc);
+	reverse = binop(c, T_PERCENT, reverse, mk_int(c, bits, prim(TY_UINT), loc), loc);
+	bool left = b->id == BI_STDC_ROTL;
+	uint32_t a = binop(c, left ? T_LESSLESS : T_GREATERGREATER, rvalue(c, x), rvalue(c, n), loc);
+	uint32_t z = binop(c, left ? T_GREATERGREATER : T_LESSLESS, rvalue(c, x), reverse, loc);
+	uint32_t value = convert(c, binop(c, T_PIPE, a, z, loc), t);
+	return with_pre(c, prex, with_pre(c, precount, with_pre(c, pren, value)));
+}
+
 VPRIV uint32_t builtin_call(cc *c, const builtin *b, uint32_t loc)
 {
 	vec args;
 	qty rt = sigtype(c, b->sig[0]);
 
 	switch (b->id) {
+	case BI_STDC_ROTL: case BI_STDC_ROTR:
+		return stdc_rotate(c, b, loc);
 	case BI_ELEMENTWISE_ABS:
 		return elementwise_abs_call(c, b, loc);
 	case BI_ISFPCLASS: case BI_ISSUBNORMAL: case BI_ISZERO: {
@@ -1513,17 +1609,18 @@ VPRIV uint32_t builtin_call(cc *c, const builtin *b, uint32_t loc)
 	case BI_OFFSETOF:
 		return offsetof_expr(c, loc);
 	case BI_VA_ARG: {
-		uint32_t ap, n;
+		uint32_t ap, n, first_bound;
 		qty t;
 
 		expect(c, T_LPAREN, "'('");
 		ap = assign_expr(c);
 		expect(c, T_COMMA, "','");
+		first_bound = c->nnode;
 		t = type_name(c);
 		expect_here(c, T_RPAREN, "')'");
 		n = mk(c, N_VAARG, t, loc);
 		N(n)->a = ap;
-		return n;
+		return capture_vla_bounds(c, t, first_bound, n, loc);
 	}
 	case BI_CONSTANT_P: {
 		uint32_t n;
@@ -1547,6 +1644,30 @@ VPRIV uint32_t builtin_call(cc *c, const builtin *b, uint32_t loc)
 	case BI_ATOMIC_TEST_AND_SET: case BI_ATOMIC_CLEAR:
 	case BI_SYNC_VAL_CAS: case BI_SYNC_BOOL_CAS: case BI_SYNC_LOCK_RELEASE: case BI_SYNC_SYNCHRONIZE:
 		return atomic_call(c, b, loc);
+	case BI_COMPLEX: {
+		args_list(c, &args);
+		if (args.n != 2) {
+			arity(c, loc, 2, &args);
+			return err_node(c, loc);
+		}
+		for (int i = 0; i < 2; i++) {
+			args.v[i] = rvalue(c, args.v[i]);
+			if (!is_float(c, N(args.v[i])->ty)) {
+				cc_error(c, N(args.v[i])->loc, "argument type '%s' is not a real floating point type", tyname(c, N(args.v[i])->ty));
+				return err_node(c, loc);
+			}
+		}
+		qty t = N(args.v[0])->ty;
+		if (QI(canon(c, t)) != QI(canon(c, N(args.v[1])->ty))) {
+			cc_error(c, loc, "arguments are of different types ('%s' vs '%s')", tyname(c, t), tyname(c, N(args.v[1])->ty));
+			return err_node(c, loc);
+		}
+		/* Both arguments are evaluated even if a surrounding __real__ or
+		   __imag__ expression only extracts one component. */
+		uint32_t p0, p1;
+		uint32_t re = cplx_reuse(c, args.v[0], &p0), im = cplx_reuse(c, args.v[1], &p1);
+		return with_pre(c, p0, with_pre(c, p1, mk_cplx(c, ty_complex(c, t), re, im, loc)));
+	}
 	case BI_CONJ: case BI_CREAL: case BI_CIMAG: {
 		qty ct = ty_complex(c, sigtype(c, b->sig[0]));
 		uint32_t a;
@@ -1579,6 +1700,10 @@ VPRIV uint32_t builtin_call(cc *c, const builtin *b, uint32_t loc)
 		break;
 	}
 	args_list(c, &args);
+	if (b->id == BI_VA_START && !strcmp(b->name, "__builtin_c23_va_start") && args.n > 2) {
+		arity(c, loc, 2, &args);
+		return err_node(c, loc);
+	}
 	{
 		qty ft = builtin_type(c, b);
 		const ctype *f = T(c, ft);
@@ -1641,6 +1766,10 @@ VPRIV uint32_t builtin_call(cc *c, const builtin *b, uint32_t loc)
 			uint32_t folded = fold_strncmp_zero(c, &args, loc);
 			if (folded)
 				return folded;
+		}
+		if (b->id == BI_LIB) {
+			uint32_t result = fp_sign_call(c, b->name + 10, strlen(b->name + 10), ft, &args, loc);
+			if (result) return result;
 		}
 		if (b->id == BI_LIB || b->id == BI_STRLEN || b->id == BI_NAN || b->id == BI_NANF || b->id == BI_NANS) {
 			/* a call to the library function the builtin names */

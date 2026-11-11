@@ -102,6 +102,8 @@ static bool uv_warn(cc *c, uint32_t e, uvw *w)
 		w->loc = x->loc, w->r[0] = rng_np(c, x->a), w->nr = 1;
 		return true;
 	case N_COMMA: {
+		if (x->aux == N_PREINC || x->aux == N_PREDEC || x->aux == N_POSTINC || x->aux == N_POSTDEC)
+			return false; /* lowered complex increment/decrement */
 		uint32_t r = x->b;
 
 		while (N(r)->op == N_CAST && !c->span[r].e && N(r)->a)
@@ -915,7 +917,8 @@ static uint32_t label_head(cc *c)
 		if (is(c, T_ELLIPSIS)) {
 			static const char *const g[] = { "pedantic", NULL };
 
-			EXT_WARN_MS(c, "...", "c2y-extensions", g, tok(c)->loc, "case ranges are a C2y extension");
+			if (!c->o->c2y)
+				EXT_WARN_MS(c, "...", "c2y-extensions", g, tok(c)->loc, "case ranges are a C2y extension");
 			next(c);
 			const_expr(c, &hi, NULL);
 		}

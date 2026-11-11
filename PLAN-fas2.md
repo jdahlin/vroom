@@ -1603,3 +1603,13 @@ Den delade värdens /tmp fick slut på inoder. 756 befintliga snapshotfiler
 arkiverades och verifierades byte-för-byte före lokal städning i
 `/source/vroom/work/opt-audit-artifacts/copy-snapshots.tar`; JSON/hashar och
 mätdata är kvar i den ursprungliga opt-copies-baseline-katalogen.
+### Leveransintegration (2026-11-11)
+
+PR33–36 mergades i sina stackbaser efter att föregående bas redan var
+mergad till main. Deras optimeringar fanns därför inte i main. Grenen
+`opt/optimizer-integration` samlar de redan granskade ändringarna med
+main b0b483d och behåller samtliga CI-kontroller, inklusive C2y-cache.
+Unity, 116 fokuserade körkombinationer på fyra targetkonfigurationer,
+debugrad-/DWARF-/textkontroll och riktig x86-unwind O1/O2 är gröna efter
+integrationen. Prepassens trådpublicering och VLA-fakta är granskade mot
+registerurvalet. Ny CI krävs på den integrerade committen.

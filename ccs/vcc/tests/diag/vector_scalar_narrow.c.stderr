@@ -1,0 +1,7 @@
+vector_scalar_narrow.c:3:45: error: cannot convert between scalar type 'unsigned int' and vector type 'vi' (vector of 4 'int' values) as implicit conversion would cause truncation
+    3 | vi bad_unsigned(vi v, unsigned x) { return v+x; }
+      |                                             ^
+vector_scalar_narrow.c:4:51: error: cannot convert between scalar type 'unsigned long long' and vector type 'vu' (vector of 4 'unsigned int' values) as implicit conversion would cause truncation
+    4 | vu bad_wide(vu v, unsigned long long x) { return v+x; }
+      |                                                   ^
+2 errors generated.

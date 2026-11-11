@@ -592,7 +592,7 @@ static val gen_unary(ecx *e, uint32_t n)
 		if (is_flt(c, x->ty))
 			return f_neg(e, v, x->ty);
 		if (v.k == V_CONST)
-			return vconst(em_trunc_to(c, -v.i, x->ty));
+			return vconst(em_trunc_to(c, (i128)((u128)0 - (u128)v.i), x->ty));
 		if (is_wide(c, x->ty)) {
 			toreg2(e, &v, is_signed(c, x->ty));
 			op3(e, I_SUBS, 1, v.r, ZR, v.r);
@@ -1174,6 +1174,10 @@ static val gen_inner(ecx *e, uint32_t n)
 		return vreg(r);
 	}
 	case N_SIZEOF_VLA: {
+		if (x->aux == 1) {
+			vla_fix(e, x->b, false);
+			return vla_bytes(e, x->b);
+		}
 		const sym *y = x->a && N(x->a)->op == N_VAR ? &c->syms[N(x->a)->a] : NULL;
 
 		if (y && y->kind == S_VAR && binding(e, N(x->a)->a)->kind == B_INDIRECT &&
@@ -1182,6 +1186,11 @@ static val gen_inner(ecx *e, uint32_t n)
 
 			mem(e, I_LD, 3, 0, r, FRAME, binding(e, N(x->a)->a)->slot + 16);
 			return vreg(r);
+		}
+		if (x->a) {
+			val operand = gen(e, x->a);
+
+			val_free(e, &operand);
 		}
 		return vla_bytes(e, x->b);
 	}

@@ -327,6 +327,77 @@ static void stlr_store(ecx *e, lval *l, qty t, val *v)
 }
 
 
+/* Read/write one word of a wide bit-field. Use only bytes covered by the
+   field, including packed fields whose final byte is at the object's end. */
+static int bf_piece(int pos, int width)
+{
+	int bytes = (pos + width + 7) / 8;
+	return bytes >= 8 ? 8 : bytes >= 4 ? 4 : bytes >= 2 ? 2 : 1;
+}
+
+static int bf_read_word(ecx *e, const lval *l, int start, int width)
+{
+	lval u = *l;
+	int pos = (l->bitoff + start) % 8, done = 0;
+	int out = treg(e), part = treg(e);
+	u.off += (l->bitoff + start) / 8;
+	movi(e, 1, out, 0);
+	while (width) {
+		int size = bf_piece(pos, width), bits = size * 8 - pos;
+		if (bits > width) bits = width;
+		load_n(e, part, &u, size, 0);
+		if (pos) opbf(e, I_UBFM, 1, part, part, pos, 63);
+		opbf(e, I_BFM, 1, out, part, (64 - done) & 63, bits - 1);
+		done += bits, width -= bits, pos = 0, u.off += size;
+	}
+	tfree(e, part);
+	return out;
+}
+
+static void bf_write_word(ecx *e, const lval *l, int start, int width, int value)
+{
+	lval u = *l;
+	int pos = (l->bitoff + start) % 8, done = 0;
+	int old = treg(e), part = treg(e);
+	u.off += (l->bitoff + start) / 8;
+	while (width) {
+		int size = bf_piece(pos, width), bits = size * 8 - pos;
+		if (bits > width) bits = width;
+		if (done) shift_imm(e, I_LSRV, 1, part, value, done);
+		else mov(e, 1, part, value);
+		if (bits == size * 8) {
+			store_n(e, part, &u, 0, size);
+		} else {
+			load_n(e, old, &u, size, 0);
+			opbf(e, I_BFM, 1, old, part, (64 - pos) & 63, bits - 1);
+			store_n(e, old, &u, 0, size);
+		}
+		done += bits, width -= bits, pos = 0, u.off += size;
+	}
+	tfree(e, part);
+	tfree(e, old);
+}
+
+static void bf_extend_wide(ecx *e, const lval *l, val *v)
+{
+	if (l->width > 64) {
+		opbf(e, l->sgn ? I_SBFM : I_UBFM, 1, v->r2, v->r2, 0, l->width - 65);
+	} else {
+		opbf(e, l->sgn ? I_SBFM : I_UBFM, 1, v->r, v->r, 0, l->width - 1);
+		if (l->sgn) opbf(e, I_SBFM, 1, v->r2, v->r, 63, 63);
+		else movi(e, 1, v->r2, 0);
+	}
+}
+
+static val bf_load_wide(ecx *e, const lval *l)
+{
+	int low = l->width < 64 ? l->width : 64;
+	val v = { .k = V_REG2, .r = (uint8_t)bf_read_word(e, l, 0, low) };
+	v.r2 = (uint8_t)(l->width > 64 ? bf_read_word(e, l, 64, l->width - 64) : treg(e));
+	bf_extend_wide(e, l, &v);
+	return v;
+}
+
 static val load1(ecx *e, lval *l, qty t);
 
 /* a volatile access stays untagged: opt.c then leaves its slot alone */
@@ -358,6 +429,8 @@ static val load1(ecx *e, lval *l, qty t)
 		mov(e, 1, r, l->r);
 		return vreg(r);
 	}
+	if (l->bf && size == 16)
+		return bf_load_wide(e, l);
 	if (l->bf) {
 		int bits = l->bitoff + l->width, nb = bf_bytes(bits);
 
@@ -449,6 +522,13 @@ static void store1(ecx *e, lval *l, qty t, val *v)
 			else
 				mov(e, 1, l->r, r);
 		}
+		return;
+	}
+	if (l->bf && size == 16) {
+		toreg2(e, v, l->sgn);
+		bf_write_word(e, l, 0, l->width < 64 ? l->width : 64, v->r);
+		if (l->width > 64) bf_write_word(e, l, 64, l->width - 64, v->r2);
+		bf_extend_wide(e, l, v);
 		return;
 	}
 	if (l->bf && l->bitoff + l->width > 64) {
