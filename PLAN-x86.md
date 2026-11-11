@@ -330,6 +330,21 @@ kärnan och kan vänta.
 
 ## Status
 
+### X5/X6 (2026-11-11): assembler och objekt, påbörjat
+- `arch/x64/as/asm.c`: AT&T-parser och kodare (heltal, SSE, x87, prefix, `@PLT`/`@GOTPCREL`/
+  TLS-modifierare), med MC:s val av form (ackumulatorformer, imm8/disp8, `c7`/`b8`, `d1` för
+  skift med 1); hopp till etiketter som relaxerade poster i `as.c` (`VI_X86BR`, kort tills
+  avståndet eller målet kräver nära form med `PC32`/`PLT32`). `arch/x64/obj/fixup.c`:
+  x86:s fixups (lösta på plats som MC, GOT/TLS behåller symbolen); `ElfObj.machine`
+  (EM_X86_64: inga mappningssymboler, MC:s nop-utfyllnad); `#`-kommentarer, citerade
+  etiketter. `vasm --target=x86_64-linux-gnu`; `-c` för x86-64 går genom texten
+  (`E.objtext`) och assemblern.
+- `vcc-x86.py --objcmp`: vcc:s `.s` genom vasm och genom `clang -c`, objekten byte för
+  byte: 1846/1846. `vcc-x86.py --obj` (vcc:s sida med `vpp -c`): 1768/1776, som med `-S`;
+  lika med `--pic`. arm64: `vas-obj.py` 45/45.
+- Kvar: kodning direkt från posterna (utan text), CFI och DWARF med x86-registernummer,
+  hela ISA:n (AVX, AVX-512 för kärnans krypto) och `vas-corpus.py`/`vas-enc.py` för x86-64.
+
 ### X3 (2026-11-10): pågår, i gren `claude/x86-x3-main` (PR jdahlin/vroom#11; #9 hamnade i #4:s gren efter att #4 slagits ihop)
 - Klart: biblioteksinbyggda som anrop; aggregat (initierare, kopior, sammansatta
   literaler, medlemmar av rvärden); bit-fält; System V-anrop (klassning,

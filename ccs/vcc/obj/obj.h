@@ -52,6 +52,7 @@ enum { STT_NOTYPE = 0, STT_OBJECT = 1, STT_FUNC = 2, STT_SECTION = 3,
 enum { STV_DEFAULT = 0, STV_INTERNAL = 1, STV_HIDDEN = 2, STV_PROTECTED = 3 };
 
 #include "../arch/a64/reloc.h"
+#include "../arch/x64/reloc.h"
 
 typedef struct ElfChunk {
 	struct ElfChunk *next;
@@ -132,10 +133,13 @@ typedef struct ElfObj {
 	int has_addrsig;	/* .addrsig: write .llvm_addrsig */
 	char err[256];
 	int has_err;
+	uint16_t machine;	/* EM_AARCH64 (183, the default) or EM_X86_64 (62): elf_set_machine */
 } ElfObj;
 
 ElfObj *elf_new(void);
 void elf_reset(ElfObj *o);
+enum { EM_X86_64 = 62, EM_AARCH64 = 183 };
+static inline void elf_set_machine(ElfObj *o, int m) { o->machine = (uint16_t)m; }	/* kept across elf_reset */
 /* a job's escape for input-driven overflow (an arena or region full): set by
  * the driver around a TU, the assembler and object writer longjmp there with
  * a message instead of abort() taking down vccd; NULL: abort as before */
@@ -174,6 +178,7 @@ static inline uint8_t *elf_grow(ElfObj *o, uint32_t frag, size_t n)
 	return elf_grow_slow(o, frag, n);
 }
 void elf_code_slow(ElfObj *o, uint32_t frag);
+void elf_x86_nops(uint8_t *p, uint64_t n);	/* MC's x86-64 nop padding */
 void elf_data_slow(ElfObj *o, uint32_t frag);
 static inline void elf_code(ElfObj *o, uint32_t frag)
 { if (elf_sec(o, elf_frag(o, frag)->sec)->map != 1) elf_code_slow(o, frag); }

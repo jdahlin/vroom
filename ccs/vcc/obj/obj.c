@@ -42,6 +42,7 @@ ElfObj *elf_new(void)
 	o->syms.base = reserve(SYMS_CAP); o->syms.cap = SYMS_CAP;
 	o->fixes.base = reserve(FIX_CAP); o->fixes.cap = FIX_CAP;
 	o->regs.base = reserve(SYMS_CAP); o->regs.cap = SYMS_CAP;
+	o->machine = EM_AARCH64;
 	elf_reset(o);
 	return o;
 }
@@ -296,6 +297,7 @@ void elf_align(ElfObj *o, uint32_t frag, unsigned p2, int code, uint8_t fill, ui
 	if (s->type == SHT_NOBITS) { f->size += pad; return; }
 	uint8_t *p = elf_grow(o, frag, pad);
 	if (!code) { memset(p, fill, pad); return; }
+	if (o->machine == EM_X86_64) { elf_x86_nops(p, pad); return; }
 	uint64_t z = pad & 3;
 	memset(p, 0, z);
 	for (p += z, pad -= z; pad; pad -= 4, p += 4) { p[0] = 0x1f; p[1] = 0x20; p[2] = 0x03; p[3] = 0xd5; }
@@ -306,9 +308,28 @@ static void mapsym(ElfObj *o, uint32_t frag, const char *n)
 	uint32_t y = elf_sym_anon(o, n, 2);
 	elf_define(o, y, frag, elf_frag(o, frag)->size);
 }
+/* x86-64 nops as MC's writeNopData: the longest of up to 10 bytes, repeated */
+void elf_x86_nops(uint8_t *p, uint64_t n)
+{
+	static const uint8_t nop[11][10] = {
+		{ 0 }, { 0x90 }, { 0x66, 0x90 }, { 0x0f, 0x1f, 0x00 }, { 0x0f, 0x1f, 0x40, 0x00 },
+		{ 0x0f, 0x1f, 0x44, 0x00, 0x00 }, { 0x66, 0x0f, 0x1f, 0x44, 0x00, 0x00 },
+		{ 0x0f, 0x1f, 0x80, 0x00, 0x00, 0x00, 0x00 }, { 0x0f, 0x1f, 0x84, 0x00, 0x00, 0x00, 0x00, 0x00 },
+		{ 0x66, 0x0f, 0x1f, 0x84, 0x00, 0x00, 0x00, 0x00, 0x00 },
+		{ 0x66, 0x2e, 0x0f, 0x1f, 0x84, 0x00, 0x00, 0x00, 0x00, 0x00 },
+	};
+	while (n) {
+		uint64_t k = n > 10 ? 10 : n;
+
+		memcpy(p, nop[k], k);
+		p += k, n -= k;
+	}
+}
+
 void elf_code_slow(ElfObj *o, uint32_t frag)
 {
 	ElfSec *s = elf_sec(o, elf_frag(o, frag)->sec);
+	if (o->machine == EM_X86_64) { s->map = 1; return; }	/* (no mapping symbols, no minimum alignment) */
 	s->map = 1;
 	if (s->align < 2) s->align = 2;
 	mapsym(o, frag, "$x");
@@ -316,6 +337,7 @@ void elf_code_slow(ElfObj *o, uint32_t frag)
 void elf_data_slow(ElfObj *o, uint32_t frag)
 {
 	elf_sec(o, elf_frag(o, frag)->sec)->map = 2;
+	if (o->machine == EM_X86_64) return;
 	mapsym(o, frag, "$d");
 }
 

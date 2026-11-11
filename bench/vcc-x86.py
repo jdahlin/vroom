@@ -51,6 +51,7 @@ def rt_obj():
 # --pie / --pic: vcc's side compiled -fPIE / -fPIC and linked -pie (clang's
 # reference stays the -fno-PIE build: the behaviour is the same)
 PIC = None
+OBJ = False	# --obj: vcc's side by vpp -c
 
 def link(objs, exe, pie=False):
     rc, _, err = sh((LINK[:-1] + ['-pie'] if pie else LINK) + objs + [RTO, '-lm', '-o', exe], timeout=60)
@@ -110,12 +111,20 @@ def one(t):
     if 'skip' in ref:
         return t, 'skip', ref['skip'], ref['why']
     vfl = [PIC if a == '-fno-PIE' and PIC else a for a in BASE] + ct.CLFL + flags
-    rc, _, err = sh([VPP, '-S'] + vfl + [path, '-o', f'{wd}/vcc.s'], cwd=cwd)
+    if OBJ:
+        # --obj: vpp -c (vcc's assembler and object writer), linked and run the same way
+        rc, _, err = sh([VPP, '-c'] + vfl + [path, '-o', f'{wd}/vcc.o'], cwd=cwd)
+        if rc:
+            e = err.decode(errors='replace')
+            return t, 'fail', 'emit', ct.first_err(e) if rc != 'timeout' and rc > 0 else f'vpp: signal/timeout {rc}: ' + ct.first_err(e)
+        open(f'{wd}/vcc.s', 'wb').write(open(f'{wd}/vcc.o', 'rb').read())	# (the pass key: the object's bytes)
+    else:
+        rc, _, err = sh([VPP, '-S'] + vfl + [path, '-o', f'{wd}/vcc.s'], cwd=cwd)
     if rc:
         e = err.decode(errors='replace')
         return t, 'fail', 'emit', ct.first_err(e) if rc != 'timeout' and rc > 0 else f'vpp: signal/timeout {rc}: ' + ct.first_err(e)
     pk = hashlib.sha1(open(f'{wd}/vcc.s', 'rb').read() + ref['key'].encode()).hexdigest()
-    pf = f'{OUT}/pass{PIC or ""}/{suite}/{name}'
+    pf = f'{OUT}/pass{PIC or ""}{"-obj" if OBJ else ""}/{suite}/{name}'
     if not NOCACHE:
         try:
             if open(pf).read() == pk:
@@ -123,7 +132,7 @@ def one(t):
                 return t, 'pass', '', ''
         except OSError:
             pass
-    rc, _, err = sh([CL, TGT, '-c', f'{wd}/vcc.s', '-o', f'{wd}/vcc.o'])
+    rc, _, err = (0, b'', b'') if OBJ else sh([CL, TGT, '-c', f'{wd}/vcc.s', '-o', f'{wd}/vcc.o'])
     if rc:
         m = re.search(r'error: (.*)', err.decode(errors='replace'))
         return t, 'fail', 'as', re.sub(r'\d+', 'N', m.group(1)) if m else ct.first_err(err.decode(errors='replace'))
@@ -148,6 +157,33 @@ NOCACHE = False
 # register nor an SSE/x87 instruction (the kernel traps on them)
 FPREG = re.compile(r'%(?:[xyz]mm\d+|st\b|st\(\d\)|mm\d)')
 FPOP = re.compile(r'^\t(?:f[a-z]+|(?:v?)(?:mov(?:ss|sd|aps|apd|ups|upd|dq[au]|q2dq)|cvt\w+|u?comis[sd]|(?:add|sub|mul|div|xor|and|or|sqrt|min|max)[ps][sd]|p(?:xor|and|or|add|sub|cmp|unpck|shuf|mov[dq]|ins|ext)\w*|ldmxcsr|stmxcsr))\b')
+
+# --objcmp: the generated .s assembled by vasm and by clang -c, the objects compared byte
+# for byte (vcc's assembler and object writer against LLVM MC, PLAN-x86.md X5/X6)
+VASM = os.path.join(os.path.dirname(VPP), 'vasm')
+
+def objcmp(t):
+    suite, name, path = t
+    wd = f'{OUT}/oc/{suite}/{name}'
+    os.makedirs(wd, exist_ok=True)
+    src = open(path, 'rb').read().decode('latin-1')
+    flags = ct.dg_flags(src) if suite == 'gcc' else ct.exec_marks(src)[0] if suite == 'vcc' else []
+    rc, _, err = sh([VPP, '-S'] + BASE + ct.CLFL + flags + [path, '-o', f'{wd}/vcc.s'], cwd=os.path.dirname(path))
+    if rc:
+        return t, 'skip', 'emit', ct.first_err(err.decode(errors='replace'))
+    rc, _, err = sh([CL, TGT, '-c', f'{wd}/vcc.s', '-o', f'{wd}/ref.o'])
+    if rc:
+        return t, 'skip', 'clang-as', ct.first_err(err.decode(errors='replace'))
+    rc, _, err = sh([VASM, TGT, f'{wd}/vcc.s', '-o', f'{wd}/vas.o'])
+    if rc:
+        e = err.decode(errors='replace')
+        m = re.search(r'error: (.*)', e)
+        return t, 'fail', 'vasm', (m.group(1) if m else ct.first_err(e))[:120]
+    a, b = open(f'{wd}/ref.o', 'rb').read(), open(f'{wd}/vas.o', 'rb').read()
+    if a != b:
+        return t, 'fail', 'differs', f'{len(a)} vs {len(b)} bytes'
+    shutil.rmtree(wd, ignore_errors=True)
+    return t, 'pass', '', ''
 
 def fpcheck(t):
     suite, name, path = t
@@ -179,9 +215,11 @@ if __name__ == '__main__':
     av = [a for a in av if a != '--no-cache']
     if '-v' in av: verbose = True; av.remove('-v')
     fpmode = '--fpcheck' in av
-    av = [a for a in av if a != '--fpcheck']
+    ocmode = '--objcmp' in av
+    av = [a for a in av if a not in ('--fpcheck', '--objcmp')]
     for o, f in (('--pie', '-fPIE'), ('--pic', '-fPIC')):
         if o in av: PIC = f; av.remove(o)
+    if '--obj' in av: OBJ = True; av.remove('--obj')
     for opt in ('-j', '--suite', '--show'):
         if opt in av:
             k = av.index(opt); v = av[k + 1]; del av[k:k + 2]
@@ -193,7 +231,7 @@ if __name__ == '__main__':
     t0 = time.time()
     rt_obj()
     with Pool(j, initializer=init, initargs=(nocache,)) as pool:
-        res = pool.map(fpcheck if fpmode else one, ts, chunksize=1)
+        res = pool.map(fpcheck if fpmode else objcmp if ocmode else one, ts, chunksize=1)
     by = defaultdict(Counter)
     whys = defaultdict(Counter)
     for (s, n, _), st, cat, why in res:

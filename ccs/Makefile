@@ -79,7 +79,7 @@ vcc: $(OUT)/vcc $(OUT)/vsh/sh $(OUT)/vld $(OUT)/vas $(OUT)/var $(OUT)/vcc-nm $(O
 
 o = $(patsubst vcc/%.c,$(OBJ)/%.o,$(1))
 AS_FILES = vcc/arch/a64/as/enc.c vcc/platform/darwin/macho.c vcc/arch/wasm/as/as.c vcc/platform/wasm/wasm.c
-as_SRC   = vcc/as/as.c vcc/arch/a64/as/parse.c
+as_SRC   = vcc/as/as.c vcc/arch/a64/as/parse.c vcc/arch/x64/as/asm.c
 LEX_SRC = vcc/lex/lex.c vcc/lib/intern.c
 PP_SRC  = vcc/pp/dircache.c vcc/driver/ppdriver.c vcc/driver/ccsnap.c vcc/lib/ldhash.c
 VCCD_SRC = vcc/vccd/vccd.c vcc/vccd/dstore.c vcc/vccd/caps.c vcc/vccd/fixdep.c vcc/vccd/ar.c vcc/vccd/rsh.c
@@ -90,7 +90,7 @@ VCCD_SRC = vcc/vccd/vccd.c vcc/vccd/dstore.c vcc/vccd/caps.c vcc/vccd/fixdep.c v
 # the headers).  `make VCC_UNITY=` compiles the files one by one.
 SPLIT_MODS = cc pp emit
 # the object writer: the model, the CPU's fixups, the ELF writer (linked with as)
-obj_SRC  = vcc/obj/obj.c vcc/arch/a64/obj/fixup.c vcc/platform/linux/elf.c
+obj_SRC  = vcc/obj/obj.c vcc/arch/a64/obj/fixup.c vcc/arch/x64/obj/fixup.c vcc/platform/linux/elf.c
 cc_SRC   = $(wildcard vcc/cc/*.c)
 pp_SRC   = $(filter-out vcc/pp/dircache.c,$(wildcard vcc/pp/*.c))
 emit_SRC = $(wildcard vcc/emit/*.c vcc/arch/a64/emit/*.c vcc/arch/wasm/emit/*.c vcc/emit/walk/*.c vcc/arch/x64/emit/*.c)

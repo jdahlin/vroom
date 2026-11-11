@@ -40,6 +40,9 @@ VPRIV void elf_reloc(ElfObj *o, Out *w, ElfFix *x, uint64_t P, uint32_t type, El
 	/* GOT and TLS relocations name the symbol (MC); TLS ones make it STT_TLS */
 	int tls = type >= 523 && type <= 573;
 	int keep = tls || type == R_AARCH64_ADR_GOT_PAGE || type == R_AARCH64_LD64_GOT_LO12_NC || type == R_AARCH64_GOT_LD_PREL19;
+
+	if (o->machine == EM_X86_64)
+		keep = x64_keepsym(type, &tls);
 	if (a && tls && a->type == STT_NOTYPE) a->type = STT_TLS;
 	if (a && !keep && insec(a) && a->bind == STB_LOCAL && !(a->flags & ESYM_SECTION) && a->type != STT_GNU_IFUNC &&
 	    !(add && (elf_sec(o, symsec(o, a))->flags & SHF_MERGE))) {
@@ -276,7 +279,7 @@ void elf_emit(ElfObj *o, uint8_t *b)
 	memset(b, 0, w->size);
 	static const uint8_t ident[16] = { 0x7f, 'E', 'L', 'F', 2, 1, 1, 0 };
 	memcpy(b, ident, 16);
-	p16(b + 16, 1); p16(b + 18, 183); p32(b + 20, 1);
+	p16(b + 16, 1); p16(b + 18, o->machine); p32(b + 20, 1);
 	p64(b + 40, w->shoff); p16(b + 52, 64); p16(b + 58, 64); p16(b + 60, w->nshdr); p16(b + 62, 1);
 	/* section data */
 	for (uint32_t s = 1; s < ns; s++) {

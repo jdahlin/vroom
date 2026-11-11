@@ -429,6 +429,13 @@ static inline const char *find_stop(const char *p, const char *e)
 	return p;
 }
 
+/* x86-64 text: '#' starts a comment too */
+static inline const char *find_stop86(const char *p, const char *e)
+{
+	while (p < e && !sstop[(uint8_t)*p] && *p != '#') p++;
+	return p;
+}
+
 /* The general case: copy the statement into a->sb without comments. */
 static __attribute__((noinline)) size_t next_stmt_copy(As *a, Frame *f)
 {
@@ -460,8 +467,12 @@ static __attribute__((noinline)) size_t next_stmt_copy(As *a, Frame *f)
 				continue;
 			}
 		}
+		if (c == '#' && a->o->machine == EM_X86_64) {	/* x86: a comment to the end of the line */
+			while (p < e && *p != '\n') p++;
+			continue;
+		}
 		if (!sstop[(uint8_t)c]) {	/* plain run: copy it whole */
-			const char *q = find_stop(p + 1, e);
+			const char *q = a->o->machine == EM_X86_64 ? find_stop86(p + 1, e) : find_stop(p + 1, e);
 			size_t k = (size_t)(q - p);
 			if (k > cap - n) k = cap - n;
 			memcpy(o + n, p, k); n += k; p = q;
@@ -506,6 +517,7 @@ static inline __attribute__((always_inline)) size_t next_stmt(As *a, Frame *f, c
 	f->sline = f->line;
 	const char *q = p;
 	int bol = f->bol;
+	if (a->o->machine == EM_X86_64) goto slow;	/* ('#' comments: the copying scanner) */
 	if (bol) {
 		while (q < e && (*q == ' ' || *q == '\t' || *q == '\r')) q++;
 		if (q < e && *q != '\n') bol = 0;
@@ -583,7 +595,7 @@ static int d_loc(As *a, const char *p, const char *e);
 static void loc_row(As *a);
 static uint64_t frag_base(As *a, uint32_t frag);
 static int d_prefalign(As *a, const char *p, const char *e);
-enum { VI_PREFALIGN, VI_ALIGN, VI_ULEB, VI_SLEB };
+enum { VI_PREFALIGN, VI_ALIGN, VI_ULEB, VI_SLEB, VI_X86BR };	/* VI_X86BR: jmp (code 16) / jcc (code cc) to v */
 static struct VarItem *var_item(As *a, int kind);
 /* .section name [, "flags" [, @type [, entsize]]] ; push = .pushsection */
 static int d_section(As *a, const char *p, const char *e, int push)
@@ -716,6 +728,8 @@ VPRIV int emit_value(As *a, int size, Val *v)
 	}
 	memset(p, 0, (size_t)size);
 	uint32_t t = size == 8 ? R_AARCH64_ABS64 : size == 4 ? R_AARCH64_ABS32 : size == 2 ? R_AARCH64_ABS16 : R_VCC_ABS8;
+	if (o->machine == EM_X86_64)
+		t = size == 8 ? R_X86_64_64 : size == 4 ? R_X86_64_32 : size == 2 ? R_X86_64_16 : R_X86_64_8;
 	elf_fixup(o, a->cur, off, p, t, *v);
 	return 0;
 }
@@ -2263,6 +2277,20 @@ static int statement(As *a, const char *p, const char *e)
 	int rc, lab = 0;
 	if (w.s[0] == '.' && cond_dir(a, w, w.s + w.n, e, &rc)) return rc;
 	if (cond_ignore(a)) return 0;
+	/* a quoted label: "name": (names with bytes outside ASCII, as clang writes them) */
+	while (p < e && *p == '"') {
+		const char *t = p;
+		Sv qn;
+
+		if (parse_name(a, &t, e, &qn)) return -1;
+		t = ws(t, e);
+		if (t >= e || *t != ':') break;
+		if (define_label(a, qn.s, qn.n)) return -1;
+		p = ws(t + 1, e);
+		if (p >= e) return 0;
+		w = first_word(p, e);
+		lab = 1;
+	}
 	/* labels */
 	const char *q;
 	for (;;) {
@@ -2303,6 +2331,8 @@ static int statement(As *a, const char *p, const char *e)
 	if (m) return invoke(a, m, w.s + w.n, e);
 	if (w.s[0] == '.') return directive(a, w, w.s + w.n, e);
 	if (a->dwlocp) loc_row(a);
+	if (a->o->machine == EM_X86_64)
+		return x64_instruction(a, w.s, e, w.n);
 	return instruction(a, w.s, e, w.n);
 }
 
@@ -2682,6 +2712,21 @@ static struct VarItem *var_item(As *a, int kind)
 	return v;
 }
 
+/* an x86-64 jump to v (cc 16: jmp): short while a local target in this section is
+ * in range, else the near form with a fixup (MC's relaxation) */
+VPRIV int as_branch(As *a, int cc, Val v, int mod)
+{
+	struct VarItem *it;
+
+	(void)mod;
+	elf_code(a->o, a->cur);
+	it = var_item(a, VI_X86BR);
+	it->code = (uint8_t)cc;
+	it->v = v;
+	it->size = 2;
+	return 0;
+}
+
 /* .prefalign p2, end, nop|fill: align to min(2^p2, the power of two that
  * holds [here, end)) (MC) */
 static int d_prefalign(As *a, const char *p, const char *e)
@@ -2726,6 +2771,8 @@ static int sym_secoff(As *a, uint32_t y, uint32_t *sec, int64_t *off)
 	*off = (int64_t)(frag_base(a, s->frag) + s->value);
 	return 0;
 }
+
+static int fits_i8(int64_t v) { return v >= -128 && v <= 127; }
 
 static int leb_len(int64_t v, int sgn)
 {
@@ -2773,6 +2820,21 @@ static void var_finish(As *a)
 					unsigned lg = (unsigned)__builtin_ctzll(al);
 					if (lg > s->align) s->align = lg;
 				}
+			} else if (v->kind == VI_X86BR) {
+				/* the short form while the target is a local label of this section within reach */
+				uint64_t big = v->code == 16 ? 5 : 6;
+				Val t = v->v;
+				uint32_t sc; int64_t to;
+
+				fold(a, &t);
+				ns = v->size;
+				if (ns == 2) {
+					ElfSym *y = t.add ? elf_symp(o, t.add) : NULL;
+
+					if (!y || t.sub || y->bind != STB_LOCAL || sym_secoff(a, t.add, &sc, &to) || sc != elf_frag(o, v->frag)->sec ||
+					    !fits_i8(to + t.c - (int64_t)(end + 2)))
+						ns = big;
+				}
 			} else {
 				int64_t x;
 				if (var_eval(a, v, &x)) { err(a, "expected absolute expression"); return; }
@@ -2789,7 +2851,27 @@ static void var_finish(As *a)
 		uint64_t pad = v->size;
 		elf_frag(o, v->frag)->aux = 0;
 		if (!pad) continue;
+		uint64_t qoff = elf_frag(o, v->frag)->size;
 		uint8_t *q = elf_grow(o, v->frag, pad);
+		if (v->kind == VI_X86BR) {
+			Val t = v->v;
+
+			fold(a, &t);
+			if (pad == 2) {
+				uint32_t sc; int64_t to = 0;
+
+				sym_secoff(a, t.add, &sc, &to);
+				q[0] = (uint8_t)(v->code == 16 ? 0xeb : 0x70 + v->code);
+				q[1] = (uint8_t)(to + t.c - (int64_t)(frag_base(a, v->frag) + qoff + 2));
+				continue;
+			}
+			if (v->code == 16) { q[0] = 0xe9; }
+			else { q[0] = 0x0f; q[1] = (uint8_t)(0x80 + v->code); }
+			memset(q + pad - 4, 0, 4);
+			t.c -= 4;
+			elf_fixup(o, v->frag, qoff + pad - 4, q + pad - 4, t.add && !elf_symp(o, t.add)->bind ? R_X86_64_PC32 : R_X86_64_PLT32, t);
+			continue;
+		}
 		if (v->kind == VI_ULEB || v->kind == VI_SLEB) {
 			int64_t x; var_eval(a, v, &x);
 			uint8_t t[16]; Buf8 b = { t, 0 };
@@ -2803,6 +2885,7 @@ static void var_finish(As *a)
 			continue;
 		}
 		if (!v->code) { memset(q, v->fill, pad); continue; }
+		if (o->machine == EM_X86_64) { elf_x86_nops(q, pad); continue; }
 		uint64_t z = pad & 3;
 		memset(q, 0, z);
 		for (q += z, pad -= z; pad; pad -= 4, q += 4) { q[0] = 0x1f; q[1] = 0x20; q[2] = 0x03; q[3] = 0xd5; }
