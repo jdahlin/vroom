@@ -314,6 +314,7 @@ enum {
 	BI_LIB,	/* plain library call with a prototype */
 	BI_NANS, BI_ISSIGNALING,
 	BI_SETJMP, BI_LONGJMP,
+	BI_X86_SIMD,
 	BI_COUNT
 };
 
