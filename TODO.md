@@ -176,6 +176,12 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
 
 ## Tier 1: silent wrong code
 
+- [ ] **arm64: unary minus on `__int128` vector lanes keeps 32 bits.**
+  `-a` for `a` a `vector_size(32)` of `__int128` gives `4294967293` for a
+  lane of 3 (`gen_vlanes` negates through `arith` at the element's width as
+  if 32 bits).  x86-64's walker does it right.
+  *Validate:* `ccs/vcc/tests/vcc/vec_wide_lanes.c` (xfail on arm64).
+
 - [x] **Branch range: no relaxation for b.cond/cbz/tbz/adr** [P].  Done for
   functions without inline asm (`r_relax` in emit.c: b.!cond .+8; b label,
   iterated to a fixed point, only for functions over 1 MB); with inline asm,

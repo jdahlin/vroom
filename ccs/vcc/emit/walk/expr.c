@@ -871,40 +871,48 @@ static val wk_vlanes(ecx *e, int op, qty at, val a, qty bt, val b, qty rt, bool 
 	unsigned nl = (unsigned)(tsize(c, vt) / tsize(c, et));
 	int ra, rb = -1;
 	lval d = { .k = L_FRAME, .off = wk_slot(e, tsize(c, rt), 16), .align = talign(c, re) };
+	/* a constant of a lane type (__int128 and long double lanes are objects, by address) */
+#define WK_LK(t, k) (wk_wide(c, t) ? LO(wconst)(e, (k)) : is_flt(c, t) ? wk_conv(e, vconst(k), prim(TY_INT), t) : vconst(k))
 
-	if (wk_mem(e, et) || wk_mem(e, re))
-		efatal(e, e->curloc, "x86-64: a vector of __int128 or long double is not supported yet (PLAN-x86.md X3)");
-	ra = wk_reg(e, &a, is_vec(c, at) ? prim(TY_ULONG) : at);
-
+	ra = wk_reg(e, &a, is_vec(c, at) || wk_mem(e, at) ? prim(TY_ULONG) : at);
 	if (!unary)
-		rb = wk_reg(e, &b, is_vec(c, bt) ? prim(TY_ULONG) : bt);
+		rb = wk_reg(e, &b, is_vec(c, bt) || wk_mem(e, bt) ? prim(TY_ULONG) : bt);
 	for (unsigned i = 0; i < nl; i++) {
 		val x = wk_lane(e, at, ra, i), r;
 
 		if (unary) {
 			if (op == T_EXCLAIM)
-				r = wk_arith(e, T_MINUS, re, vconst(0), wk_cmpv(e, T_EQUALEQUAL, et, x, is_flt(c, et) ? wk_conv(e, vconst(0), prim(TY_INT), et) : vconst(0)));
+				r = wk_arith(e, T_MINUS, re, WK_LK(re, 0), wk_conv(e, wk_cmpv(e, T_EQUALEQUAL, et, x, WK_LK(et, 0)), prim(TY_INT), re));
 			else if (op == T_MINUS)
-				r = is_flt(c, et) ? LO(fneg)(e, et, x) : wk_arith(e, T_MINUS, et, vconst(0), x);
+				r = is_flt(c, et) ? LO(fneg)(e, et, x) : wk_arith(e, T_MINUS, et, WK_LK(et, 0), x);
 			else
-				r = wk_arith(e, T_CARET, et, x, vconst(-1));
+				r = wk_arith(e, T_CARET, et, x, WK_LK(et, -1));
 		} else {
 			val y = wk_lane(e, bt, rb, i);
 
 			if (wk_is_cmp(op))
-				r = wk_arith(e, T_MINUS, re, vconst(0), wk_cmpv(e, op, et, x, y));
+				r = wk_arith(e, T_MINUS, re, WK_LK(re, 0), wk_conv(e, wk_cmpv(e, op, et, x, y), prim(TY_INT), re));
+			else if ((op == T_LESSLESS || op == T_GREATERGREATER) && wk_wide(c, et))	/* (a 128-bit shift counts in an int) */
+				r = wk_arith(e, op, et, x, wk_conv(e, y, is_vec(c, bt) ? T(c, bt)->base : bt, prim(TY_INT)));
 			else
 				r = wk_arith(e, op, et, x, y);
 		}
 		{
-			int rr = wk_reg(e, &r, re);
 			lval l = d;
 
 			l.off += (int64_t)(i * es);
-			LO(store)(e, rr, &l, (int)es);
-			LO(tfree)(e, rr);
+			if (wk_mem(e, re)) {
+				r = wk_putmem(e, &l, re, r);
+				wk_free(e, &r);
+			} else {
+				int rr = wk_reg(e, &r, re);
+
+				LO(store)(e, rr, &l, (int)es);
+				LO(tfree)(e, rr);
+			}
 		}
 	}
+#undef WK_LK
 	LO(tfree)(e, ra);
 	if (rb >= 0)
 		LO(tfree)(e, rb);
