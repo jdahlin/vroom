@@ -1568,6 +1568,45 @@ static val wk_call(ecx *e, uint32_t n)
 		uint32_t s = canon_sym(c, N(fx->a)->a);
 
 		if (c->syms[s].kind == S_BUILTIN) {
+			const char *bn = cc_builtin_name((int64_t)c->syms[s].val);
+			cval cv;
+
+			if (!strncmp(bn, "__builtin_", 10))
+				bn += 10;
+			/* memcpy/memmove/memset of a constant size up to 64 bytes: inline, as clang (8 stores
+			   of 8 bytes; a freestanding vDSO has no memcpy) */
+			if (x->c == 3 && (!strcmp(bn, "memcpy") || !strcmp(bn, "memmove") || !strcmp(bn, "memset")) &&
+			    cc_eval(c, c->lists[x->b + 2], &cv) && cv.kind == CV_INT && cv.i >= 0 && cv.i <= 64 &&
+			    (bn[3] != 's' || (cc_eval(c, c->lists[x->b + 1], &cv) && cv.kind == CV_INT && cv.i == 0))) {
+				uint64_t len;
+				val d = wk_gen(e, c->lists[x->b]), v2;
+				int rd = wk_reg(e, &d, prim(TY_ULONG));
+
+				cc_eval(c, c->lists[x->b + 2], &cv);
+				len = (uint64_t)cv.i;
+				if (bn[3] == 's') {
+					v2 = wk_gen(e, c->lists[x->b + 1]);
+					wk_free(e, &v2);
+					if (len)
+						LO(zero)(e, rd, len);
+				} else {
+					val sv = wk_gen(e, c->lists[x->b + 1]);
+					int rs = wk_reg(e, &sv, prim(TY_ULONG));
+
+					if (len && bn[3] == 'm') {	/* memmove: through a slot (the two may overlap) */
+						lval t = { .k = L_FRAME, .off = wk_slot(e, len, 8), .align = 8 };
+						int rt = LO(laddr)(e, &t);
+
+						LO(copy)(e, rt, rs, len);
+						LO(copy)(e, rd, rt, len);
+						LO(tfree)(e, rt);
+					} else if (len) {
+						LO(copy)(e, rd, rs, len);
+					}
+					LO(tfree)(e, rs);
+				}
+				return wk_vreg(rd);	/* (the destination, as the call returns) */
+			}
 			ref = REF(RK_NAME, (uint32_t)c->syms[s].val);	/* a library function by name */
 		} else if (wk_can_inline(e, s)) {
 			return wk_inline(e, n, s);
