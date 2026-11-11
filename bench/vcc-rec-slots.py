@@ -61,6 +61,13 @@ int main(void)
                         {4,0,8},{4,2,2},{4,7,2},{5,32,8},{0,39,1},
                         {6,64,8},{0,72,1},{7,80,8},{8,88,8} };
     check(&s,explicit,sizeof(explicit)/sizeof(*explicit),(1u<<7)|(1u<<8));
+    /* Exact duplicate poison ranges may coalesce; same-offset wider ranges
+     * must still poison cells beyond the earlier narrow range. */
+    test_access poison[]={ {1,4,4},{2,8,4},{0,0,1},{0,0,1},
+                           {0,0,8},{0,0,8},{0,8,1},{0,8,1} };
+    check(&s,poison,sizeof(poison)/sizeof(*poison),0);
+    assert(s.nw == 3);
+    check(&s,explicit,sizeof(explicit)/sizeof(*explicit),(1u<<7)|(1u<<8));
     assert(em_slot_find(&s,3,16,8)==0);
     assert(em_slot_find(&s,2,-16,4)==0);
     assert(em_slot_find(&s,99,0,8)==0);
@@ -72,6 +79,11 @@ int main(void)
         a[0]=(test_access){1,0,8};
         for (unsigned k=1;k<48;k++)
             a[k]=(test_access){next()%9,(int64_t)(next()%96)-48,1u<<(next()%4)};
+        /* Include duplicate poison runs in the randomized interval oracle. */
+        if (!(trial % 3)) {
+            a[1]=(test_access){0,(int64_t)(next()%96)-48,1u<<(next()%4)};
+            a[2]=a[3]=a[1];
+        }
         check(&s,a,48,next()&0x1fe);
     }
     assert(em_slot_begin(&s,2));
@@ -134,14 +146,18 @@ def main():
             implementation=(Path(R)/'ccs/vcc/emit/rec/slots.c').read_text()
             implementation=implementation.replace('#include "../emitimpl.h"',
                 '#include "'+str(Path(R)/'ccs/vcc/emit/emitimpl.h')+'"')
-            dropped=implementation.replace('if (before == 1)', 'if (false)')
-            assert dropped != implementation
-            source.write_text(SOURCE.replace('#include "vcc/emit/rec/slots.c"',dropped))
-            subprocess.run([args.cc,'-std=gnu11','-O1','-g','-I',str(Path(R)/'ccs'),
-                            *flags,str(source),'-o',str(binary)],check=True,timeout=30)
-            result=subprocess.run([str(binary)],capture_output=True,cwd=tmp,timeout=10)
-            if result.returncode==0 or b'Assertion' not in result.stderr:
-                raise RuntimeError('streaming first-range mutation was not rejected')
+            mutations = [
+                ('streaming first-range', implementation.replace('if (before == 1)', 'if (false)')),
+                ('poison width', implementation.replace(' && s->w[s->nw - 1].size == size', '')),
+            ]
+            for name, dropped in mutations:
+                assert dropped != implementation
+                source.write_text(SOURCE.replace('#include "vcc/emit/rec/slots.c"',dropped))
+                subprocess.run([args.cc,'-std=gnu11','-O1','-g','-I',str(Path(R)/'ccs'),
+                                *flags,str(source),'-o',str(binary)],check=True,timeout=30)
+                result=subprocess.run([str(binary)],capture_output=True,cwd=tmp,timeout=10)
+                if result.returncode==0 or b'Assertion' not in result.stderr:
+                    raise RuntimeError(name + ' mutation was not rejected')
     print('machine record exact-slot contracts: PASS')
 
 

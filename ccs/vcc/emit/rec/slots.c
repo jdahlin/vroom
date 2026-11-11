@@ -83,6 +83,9 @@ VPRIV void em_slot_access(em_slot_cells *s, uint32_t id, int64_t off, uint32_t s
 		return;
 	}
 	if (!id) {
+		/* Poison classification needs the range union, not multiplicity. */
+		if (s->nw && s->w[s->nw - 1].off == off && s->w[s->nw - 1].size == size)
+			return;
 		s->w = em_slot_grow(s->w, &s->capw, s->nw + 1, sizeof(*s->w));
 		s->w[s->nw++] = (em_slot_range){ 0, off, size, false, false };
 	} else {
