@@ -186,6 +186,72 @@ def objcmp(t):
     shutil.rmtree(wd, ignore_errors=True)
     return t, 'pass', '', ''
 
+# --vlink: the bare runtime (tests/rt: rt.c, start-x86.S, link-x86.ld, libgcc), static: clang's
+# object linked by lld is the reference; vcc's (vpp -c) is linked by lld and by vlink, whose
+# loaded images and program headers must be identical, and vlink's program is run
+# (PLAN-x86.md X7, as VCC_LDCMP for arm64)
+RTO86 = f'{OUT}/rt86'
+LIBGCC = subprocess.run(['gcc', '-print-libgcc-file-name'], capture_output=True, text=True).stdout.strip() if shutil.which('gcc') else ''
+VLINK = os.path.join(os.path.dirname(VPP), 'vlink')
+LLD = os.path.join(os.path.dirname(CL), 'ld.lld')
+
+def rt86():
+    os.makedirs(RTO86, exist_ok=True)
+    for src, o in (('rt.c', 'rt.o'), ('start-x86.S', 'start.o')):
+        if not os.path.exists(f'{RTO86}/{o}') or os.path.getmtime(f'{RTO86}/{o}') < os.path.getmtime(f'{ct.RT}/{src}'):
+            subprocess.run([CL, TGT, '-O2', '-fno-PIE', '-ffreestanding', '-fno-builtin', '-I', f'{ct.RT}/include', '-c',
+                            f'{ct.RT}/{src}', '-o', f'{RTO86}/{o}'], check=True)
+            subprocess.run([os.path.join(os.path.dirname(CL), 'llvm-objcopy'), '--weaken', f'{RTO86}/{o}'], check=True)
+
+def link86(ld, objs, exe):
+    rc, _, err = sh([ld, '-static', '-T', f'{ct.RT}/link-x86.ld', f'{RTO86}/start.o'] + objs + [f'{RTO86}/rt.o', LIBGCC, '-o', exe], timeout=60)
+    return rc, err.decode(errors='replace')
+
+def vlink1(t):
+    suite, name, path = t
+    if suite == 'tcc' and name in ct.TCC_SKIP and ct.TCC_SKIP[name] != 'x86 asm':
+        return t, 'skip', 'tcc-specific', ct.TCC_SKIP[name]
+    if suite == 'gcc' and name in ct.GCC_SKIP:
+        return t, 'skip', 'compiler-specific', ct.GCC_SKIP[name]
+    wd = f'{OUT}/vl/{suite}/{name}'
+    os.makedirs(wd, exist_ok=True)
+    cwd = os.path.dirname(path)
+    src = open(path, 'rb').read().decode('latin-1')
+    flags = ct.dg_flags(src) if suite == 'gcc' else ct.exec_marks(src)[0] if suite == 'vcc' else []
+    fl = BASE + ct.CLFL + flags
+    if sh([CL] + fl + ['-c', path, '-o', f'{wd}/ref.o'], cwd=cwd)[0]:
+        return t, 'skip', 'clang-rejects', ''
+    rc, err = link86(LLD, [f'{wd}/ref.o'], f'{wd}/ref')
+    if rc:
+        m = re.search(r'undefined symbol: (\S+)', err)
+        return t, 'skip', 'ref-fail', 'link: ' + (m.group(1) if m else ct.first_err(err))
+    rrc, rout = run(f'{wd}/ref')
+    if suite in ('gcc', 'vcc') and rrc != 0:
+        return t, 'skip', 'ref-fail', f'clang build exits {rrc}'
+    rc, _, err = sh([VPP, '-c'] + fl + [path, '-o', f'{wd}/vcc.o'], cwd=cwd)
+    if rc:
+        return t, 'skip', 'emit', ct.first_err(err.decode(errors='replace'))
+    rc, err = link86(LLD, [f'{wd}/vcc.o'], f'{wd}/vcc.lld')
+    if rc:
+        return t, 'skip', 'lld', ct.first_err(err)
+    rc, err = link86(VLINK, [f'{wd}/vcc.o'], f'{wd}/vcc.vl')
+    if rc:
+        return t, 'fail', 'vlink', ct.first_err(err)[:120]
+    oc = os.path.join(os.path.dirname(CL), 'llvm-objcopy')
+    sh([oc, '-O', 'binary', f'{wd}/vcc.lld', f'{wd}/l.bin']); sh([oc, '-O', 'binary', f'{wd}/vcc.vl', f'{wd}/v.bin'])
+    if open(f'{wd}/l.bin', 'rb').read() != open(f'{wd}/v.bin', 'rb').read():
+        return t, 'fail', 'image', 'loaded image differs from lld'
+    rd = os.path.join(os.path.dirname(CL), 'llvm-readelf')
+    ph = [[l.split() for l in subprocess.run([rd, '-lW', e], capture_output=True, text=True).stdout.splitlines()
+           if l.strip()[:4] in ('LOAD', 'TLS ', 'GNU_', 'PHDR', 'NOTE')] for e in (f'{wd}/vcc.lld', f'{wd}/vcc.vl')]
+    if ph[0] != ph[1]:
+        return t, 'fail', 'phdrs', 'program headers differ from lld'
+    rc, out = run(f'{wd}/vcc.vl')
+    if rc != rrc or out != rout:
+        return t, 'fail', 'run', f'exit {rc} (clang {rrc})' if rc != rrc else 'output differs'
+    shutil.rmtree(wd, ignore_errors=True)
+    return t, 'pass', '', ''
+
 def fpcheck(t):
     suite, name, path = t
     wd = f'{OUT}/fp/{suite}/{name}'
@@ -217,7 +283,10 @@ if __name__ == '__main__':
     if '-v' in av: verbose = True; av.remove('-v')
     fpmode = '--fpcheck' in av
     ocmode = '--objcmp' in av
-    av = [a for a in av if a not in ('--fpcheck', '--objcmp')]
+    vlmode = '--vlink' in av
+    av = [a for a in av if a not in ('--fpcheck', '--objcmp', '--vlink')]
+    if vlmode:
+        rt86()
     for o, f in (('--pie', '-fPIE'), ('--pic', '-fPIC')):
         if o in av: PIC = f; av.remove(o)
     if '--obj' in av: OBJ = True; av.remove('--obj')
@@ -232,7 +301,7 @@ if __name__ == '__main__':
     t0 = time.time()
     rt_obj()
     with Pool(j, initializer=init, initargs=(nocache,)) as pool:
-        res = pool.map(fpcheck if fpmode else objcmp if ocmode else one, ts, chunksize=1)
+        res = pool.map(fpcheck if fpmode else objcmp if ocmode else vlink1 if vlmode else one, ts, chunksize=1)
     by = defaultdict(Counter)
     whys = defaultdict(Counter)
     for (s, n, _), st, cat, why in res:

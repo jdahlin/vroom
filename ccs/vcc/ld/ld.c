@@ -31,6 +31,7 @@
  * No per-symbol malloc: everything comes from bump arenas.
  */
 #include "ld.h"
+#include "../arch/x64/reloc.h"
 #include "../lib/buf.h"
 #include "../lib/vec.h"
 #include "../lib/ldhash.h"
@@ -58,6 +59,9 @@
 #include <unistd.h>
 
 #define NONE 0xffffffffu
+
+static bool x86_ld;		/* the inputs are x86-64 (arch/x64/ld/x64.inc) */
+static uint64_t tls_start;	/* x86: the PT_TLS start (dtpoff) */
 
 #include "ldelf.h"
 
@@ -1960,11 +1964,13 @@ static void parse_obj(void *arg, size_t i)
 		o->buf = NULL;
 		return;
 	}
-	if (eh->e_type != 1 || eh->e_machine != 183) {
-		error("%s: not an AArch64 relocatable object", o->path);
+	if (eh->e_type != 1 || (eh->e_machine != 183 && eh->e_machine != 62)) {
+		error("%s: not an AArch64 or x86-64 relocatable object", o->path);
 		o->buf = NULL;
 		return;
 	}
+	if (eh->e_machine == 62)
+		x86_ld = true;	/* (one machine for all inputs: checked once loaded) */
 	if (!obj_valid(o, eh)) {
 		o->buf = NULL;
 		return;
@@ -1986,6 +1992,7 @@ static bool is_content(const Shdr *s)
 	switch (s->sh_type) {
 	case SHT_PROGBITS: case SHT_NOBITS: case SHT_NOTE: case SHT_INIT_ARRAY:
 	case SHT_FINI_ARRAY: case SHT_PREINIT_ARRAY:
+	case 0x70000001: /* SHT_X86_64_UNWIND: x86-64's .eh_frame */
 		return true;
 	default:
 		return false;
@@ -3375,6 +3382,9 @@ static void assign_file_offsets(void)
 		if (p->p_type == PT_TLS) {
 			uint64_t a = p->p_align ? p->p_align : 1;
 			tls_tp = p->p_vaddr - alignup(16, a);
+			if (x86_ld)	/* variant 2: the thread pointer at the block's end */
+				tls_tp = p->p_vaddr + alignup(p->p_memsz, a);
+			tls_start = p->p_vaddr;
 			has_tls = true;
 		}
 	}
@@ -3462,6 +3472,8 @@ static void put_sym(Sym *d, uint8_t *strbuf, uint64_t *stroff, const char *name,
 /* ---------------- writing sections ---------------- */
 
 #include "../arch/a64/ld/relocate.inc"
+static _Atomic bool got_seen;
+#include "../arch/x64/ld/x64.inc"
 
 static VVEC(uint32_t) wjobs;		/* ISecs to write */
 
@@ -3480,8 +3492,12 @@ static void write_isec(void *arg, size_t j)
 		memcpy(dst, is->data, is->size);
 		if (is->ehcie)	/* an FDE's CIE pointer: from the field to its CIE */
 			wr32(dst + 4, (uint32_t)(isec_va(si, 4) - isec_va(is->ehcie - 1, 0)));
-		if (is->nrela && (is->flags & SHF_ALLOC || !opt.relocatable))
-			relocate_isec(si, dst);
+		if (is->nrela && (is->flags & SHF_ALLOC || !opt.relocatable)) {
+			if (x86_ld)
+				x64_relocate_isec(si, dst);
+			else
+				relocate_isec(si, dst);
+		}
 		break;
 	case K_MERGE: {
 		Merge *mg = &merges.v[is->aux];
@@ -3642,7 +3658,7 @@ static Obj *make_stub_obj(const char **names, uint32_t n)
 	char *shstr = str + strsz;
 	memcpy(eh->e_ident, "\177ELF\2\1\1", 7);
 	eh->e_type = 1;
-	eh->e_machine = 183;
+	eh->e_machine = x86_ld ? 62 : 183;
 	eh->e_shoff = sizeof(Ehdr);
 	eh->e_shnum = 5;
 	eh->e_shstrndx = 1;
@@ -3710,7 +3726,7 @@ static const char *find_lib(const char *name)
 static bool parse_args(int argc, char **argv)
 {
 	bool whole = false;
-	opt.max_page = 65536;
+	opt.max_page = 0;	/* (default by machine once the inputs are read: arm64 64 KB, x86-64 4 KB, as lld) */
 	opt.relax = true;
 	opt.comment = "Linker: vld (vroom)";
 	for (int i = 1; i < argc; i++) {
@@ -4012,6 +4028,8 @@ static void load_inputs(void)
 		VVEC_PUSH(objs, o, alloc);
 	}
 	pfor(objs.n, parse_obj, NULL);
+	if (!opt.max_page)
+		opt.max_page = x86_ld ? 4096 : 65536;
 }
 
 static void alloc_isecs(uint32_t from)
@@ -4704,7 +4722,7 @@ static void write_headers(void)
 	Ehdr *eh = (Ehdr *)out;
 	memcpy(eh->e_ident, "\177ELF\2\1\1", 7);
 	eh->e_type = opt.relocatable ? 1 : opt.shared ? 3 : 2;
-	eh->e_machine = 183;
+	eh->e_machine = x86_ld ? 62 : 183;
 	eh->e_version = 1;
 	/* lld: -e, else ENTRY(), else _start (silently absent) */
 	const char *en = opt.entry ? opt.entry : entry_name ? entry_name : "_start";
@@ -5198,7 +5216,7 @@ static bool any_got(void)
 {
 	atomic_store(&got_seen, false);
 	if (!opt.relocatable)
-		pfor(isecs.n, find_got, NULL);
+		pfor(isecs.n, x86_ld ? x64_find_got : find_got, NULL);
 	return atomic_load(&got_seen);
 }
 
@@ -5775,7 +5793,7 @@ static int run(int argc, char **argv)
 		for (uint32_t i = 0; i < objs.n; i++)
 			if (objs.v[i]->buf && objs.v[i]->firstg)
 				objs.v[i]->lgot = calloc(objs.v[i]->firstg, 1);
-	pfor(isecs.n, scan_relocs, NULL);
+	pfor(isecs.n, x86_ld ? x64_scan_relocs : scan_relocs, NULL);
 	/* .got: one slot per symbol, globals in symbol id order, then the locals by
 	 * file (lld postScanRelocations) */
 	for (uint32_t g = 0, ng = atomic_load(&ngsyms); g < ng; g++)
@@ -6360,7 +6378,7 @@ static int ld_relocatable(void)
 	Ehdr *eh = (Ehdr *)rbuf;
 	memcpy(eh->e_ident, "\177ELF\2\1\1", 7);
 	eh->e_type = 1;
-	eh->e_machine = 183;
+	eh->e_machine = x86_ld ? 62 : 183;
 	eh->e_version = 1;
 	eh->e_shoff = shoff_r;
 	eh->e_ehsize = sizeof(Ehdr);
