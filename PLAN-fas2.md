@@ -3030,3 +3030,12 @@ kontroll 25,19 → 25,87 ms. Kontrollernas assembler är identisk. Den lilla,
 delade värdens korta sampel varierar och visar inte att CPU-tidspåslaget på
 verkliga projekt är under 1 %. Mätkommandon, binär-/indatahashar och alla
 sampel finns i `work/opt-profile/repeated-cputime/{measure.py,result.json}`.
+
+Kompletterande verkliga indata: två förprocessade Linux-TU:er bland de första
+30 tillgängliga accepterades av den fristående `-O2 -ffreestanding`-proben.
+Fem växelvisa `task-clock:u`-sampel per binär gav median bas → kandidat
+23,03 → 23,02 ms för `kernel__printk__sysctl.o.i` och 15,89 → 15,59 ms för
+`fs__fs_dirent.o.i`; assemblern var identisk i båda fallen. De övriga 28
+misslyckades i denna förenklade körning och ingår inte: detta selektiva,
+lilla urval bevisar inte kompilatorns kostnad på ett helt bygge. Kommandon,
+hashar och sampel finns i `work/opt-profile/repeated-cputime/kernel*.{py,json}`.
