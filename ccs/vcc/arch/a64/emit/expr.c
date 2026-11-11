@@ -448,6 +448,14 @@ static val gen_binary(ecx *e, uint32_t n)
 	val a, b;
 	uint32_t operand;
 	int bound = em_cmpbounds(e, n, &operand);
+	int repeated = em_repeated_integer(e, n);
+
+	if (repeated == EM_ID_ZERO)
+		return vconst(0);
+	if (repeated == EM_ID_TRUE)
+		return vconst(1);
+	if (repeated == EM_ID_LEFT)
+		return gen(e, x->a);
 
 	if (bound >= 0) {
 		val v = gen(e, operand);
@@ -598,7 +606,12 @@ static val gen_unary(ecx *e, uint32_t n)
 	cc *c = e->c;
 	const node *x = N(n);
 	qty t = N(x->a)->ty;
-	val v = gen(e, x->a);
+	uint32_t operand = em_double_unary(e, n);
+	val v;
+
+	if (operand)
+		return gen(e, operand);
+	v = gen(e, x->a);
 
 	if (is_vec(c, x->ty) && (x->aux == T_MINUS || x->aux == T_TILDE))
 		return gen_vlanes(e, x->aux, t, &v, t, NULL, x->ty, true);
