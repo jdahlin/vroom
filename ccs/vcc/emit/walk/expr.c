@@ -681,6 +681,8 @@ static val wk_arith(ecx *e, int op, qty t, val a, val b)
 		return LO(wbin)(e, op, wk_signed(c, t), a, b);
 	if (a.k == V_CONST && b.k == V_CONST && wk_fold(c, op, t, a.i, b.i, &r))
 		return vconst(r);
+	if (b.k == V_CONST)
+		em_divpow2(c, t, &op, &b.i);
 	if (a.k == V_ADDR && b.k == V_CONST && (op == T_PLUS || op == T_MINUS))
 		return (val){ .k = V_ADDR, .ref = a.ref, .i = op == T_PLUS ? a.i + b.i : a.i - b.i };
 	{

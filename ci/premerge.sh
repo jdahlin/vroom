@@ -57,6 +57,8 @@ case $JOB in
 arm64)
 	build vcc
 	step ctests       python3 bench/vcc-ctests.py -j "$J"
+	step opt-rules-arm64 python3 bench/vcc-opt-rules.py --target aarch64-linux-gnu
+	step opt-rules-x86 python3 bench/vcc-opt-rules.py --target x86_64-linux-gnu
 	step diag         python3 bench/vcc-diag.py -j "$J"
 	step stress       python3 bench/vcc-stress.py
 	step stress-vccd  python3 bench/vcc-stress.py --vccd
@@ -98,6 +100,8 @@ tsan)
 	;;
 wasm)
 	build vcc
+	step opt-rules-wasm32 python3 bench/vcc-opt-rules.py --target wasm32-unknown-emscripten --run
+	step opt-rules-wasm64 python3 bench/vcc-opt-rules.py --target wasm64-unknown-emscripten --run
 	step wasm64       python3 bench/vcc-wasm.py -j "$J"
 	;;
 *)

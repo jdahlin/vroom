@@ -1262,13 +1262,30 @@ static int wbinary(ecx *e, uint32_t n)
 		wcompare(e, op, t);
 		return WT_I32;
 	}
+	int reduced_op = op;
+	i128 rhs = 0;
+	bool reduced = false;
+	if (op == T_SLASH || op == T_PERCENT) {
+		cval cv;
+
+		if (cc_eval(c, x->b, &cv) && cv.kind == CV_INT) {
+			rhs = cv.i;
+			reduced = em_divpow2(c, ty, &reduced_op, &rhs) && !side_effects(c, x->b);
+		}
+	}
 	wexpr(e, x->a, true);
 	if (QUNQ(lt) != QUNQ(ty) && op != T_LESSLESS && op != T_GREATERGREATER)
 		wconv(e, lt, ty);
-	wexpr(e, x->b, true);
-	if (QUNQ(rt) != QUNQ(ty) && op != T_LESSLESS && op != T_GREATERGREATER)
-		wconv(e, rt, ty);
-	warith(e, op, ty, (op == T_LESSLESS || op == T_GREATERGREATER) ? rt : 0);
+	if (reduced) {
+		/* The replacement RHS already has the operation's wasm stack type. */
+		wconst(e, wty(c, ty), (int64_t)rhs);
+		warith(e, reduced_op, ty, 0);
+	} else {
+		wexpr(e, x->b, true);
+		if (QUNQ(rt) != QUNQ(ty) && op != T_LESSLESS && op != T_GREATERGREATER)
+			wconv(e, rt, ty);
+		warith(e, op, ty, (op == T_LESSLESS || op == T_GREATERGREATER) ? rt : 0);
+	}
 	return wty(c, ty);
 }
 
@@ -1511,16 +1528,34 @@ static int wassign(ecx *e, uint32_t n, bool want)
 			wscale(e, lt, es);
 			wpop(e, op == T_PLUS ? "add" : "sub");
 		} else {
+			int reduced_op = op;
+			i128 rhs = 0;
+			bool reduced = false;
+
 			if (!pt)
 				pt = lt;
+			if (tb == UINT32_MAX && (op == T_SLASH || op == T_PERCENT)) {
+				cval cv;
+
+				/* No RHS effects: otherwise it was evaluated into tb above. */
+				if (cc_eval(c, x->b, &cv) && cv.kind == CV_INT) {
+					rhs = cv.i;
+					reduced = em_divpow2(c, pt, &reduced_op, &rhs);
+				}
+			}
 			wconv(e, lt, pt);
-			if (tb != UINT32_MAX)
-				wget(e, tb);
-			else
-				wexpr(e, x->b, true);
-			if (op != T_LESSLESS && op != T_GREATERGREATER && QUNQ(bt) != QUNQ(pt))
-				wconv(e, bt, pt);
-			warith(e, op, pt, (op == T_LESSLESS || op == T_GREATERGREATER) ? bt : 0);
+			if (reduced) {
+				wconst(e, wty(c, pt), (int64_t)rhs);
+				warith(e, reduced_op, pt, 0);
+			} else {
+				if (tb != UINT32_MAX)
+					wget(e, tb);
+				else
+					wexpr(e, x->b, true);
+				if (op != T_LESSLESS && op != T_GREATERGREATER && QUNQ(bt) != QUNQ(pt))
+					wconv(e, bt, pt);
+				warith(e, op, pt, (op == T_LESSLESS || op == T_GREATERGREATER) ? bt : 0);
+			}
 			wconv(e, pt, lt);
 		}
 		if (!want) {

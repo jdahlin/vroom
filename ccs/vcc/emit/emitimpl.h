@@ -509,6 +509,8 @@ static inline bool is_signed(cc *c, qty t);
 static inline bool is_ld(cc *c, qty t);
 static inline bool is_wide(cc *c, qty t);
 VPRIV i128 em_trunc_to(cc *c, i128 v, qty t);
+/* opt/arith.c: rewrite unsigned division/remainder by a power of two. */
+VPRIV bool em_divpow2(cc *c, qty ty, int *op, i128 *rhs);
 /* insn.c */
 extern const char cond_name[][8];
 VPRIV bool logimm_ok(uint64_t v, int x);

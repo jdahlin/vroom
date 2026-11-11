@@ -80,6 +80,17 @@ kan gå parallellt.
 
 ## Status
 
+### Status 2026-11-11: G5/G7, första gemensamma regel implementerad
+
+Unsigned konstant tvåpotensdivision/-rest sänks nu genom samma hjälpare
+för x86, arm64 och wasm32/64. Alla 16 mål-/nivåkombinationer klarar
+kodkrav och literalbaserad körkontroll, även fil-för-fil. Egna sviter:
+x86 130/130, arm64 135/135. Wasm-testvägen använder vcc:s egna objekt
+och länkare plus systemets Node 24/25, utan Emscripten; full
+runtimeersättning är W9 i `PLAN-wasm.md`. Korta före/efter-mätningar
+och begränsningarna för hårdvaruräknare är dokumenterade vid OPT1
+i `PLAN-fas2.md`. Detta är delprogress; G5/G7 är fortsatt öppna.
+
 ### Status 2026-11-11: G5/G7, gemensam implementationsplan
 
 `PLAN-fas2.md` **Gemensam optimerare utan SSA** äger nu OPT0–OPT8 efter

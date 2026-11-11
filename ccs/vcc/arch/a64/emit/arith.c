@@ -318,6 +318,8 @@ VPRIV val arith(ecx *e, int op, qty ty, val a, val b)
 	int x = X(c, ty), ra, rb;
 	bool sg = is_signed(c, ty);
 
+	if (b.k == V_CONST)
+		em_divpow2(c, ty, &op, &b.i);
 	/* commutative: constant on the right */
 	if (a.k == V_CONST && b.k != V_CONST && (op == T_PLUS || op == T_STAR || op == T_AMP || op == T_PIPE || op == T_CARET)) {
 		val t = a;

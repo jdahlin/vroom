@@ -704,6 +704,10 @@ att båda är 16 byte. `emit_SRC` i `ccs/Makefile` behöver ta med nya
 Alla OPT-steg nedan är **planerade**; endast den tidigare x86-auditen finns.
 Implementera små steg med egen commit och uppdaterad status/mätning här.
 
+**Uppdatering 2026-11-11:** OPT1:s första del är nu implementerad;
+statusen och mätningen nedan gäller bara unsigned tvåpotensdivision/-rest.
+Övriga rader är fortsatt planerade.
+
 | Steg | Leverans och beroende | Bevis innan klart |
 | --- | --- | --- |
 | OPT0 | Ny byggd bas efter rebase; dela probe-förväntningar i C-semantik och per-mål-kodkrav. Utöka auditens anropare med befintliga arm64/wasm-runners utan krav på att alla referenser finns i CI. | Befintligt x86-resultat reproducerat; tillgängliga mål kör samma definierade indata. Separata resultat för optflagga och mål. Inget gammalt mätvärde ges en ny revision. |
@@ -827,6 +831,74 @@ inklusive uteslutna fall och saknade verktyg. Befintlig `vbench.py gate`
 gäller; tills dess x86-stöd är bekräftat får den inte anges som körd
 x86-grind. Godkänn ingen tänkt passbudget som en uppmätt siffra. Spara
 basrevision, binärhash och mätresultat vid varje färdigt OPT-steg här.
+
+### Status OPT0/OPT1 (2026-11-11): första delade aritmetikregeln
+
+Ny bas byggd på `990c9fe` (main-kod från `4daebd9`); vpp SHA256
+`b1d0c06a74de9695c8c04e67993c81e686d91d946afd8f32ecea169843af91f3`.
+Basens x86-egensvit går 130/130, fem filtrerade fall. Basen sparades som
+`build/linux/opt-baseline/vpp` före ändringen.
+
+`emit/opt/arith.c:em_divpow2` äger nu en gemensam regel för unsigned
+vanliga heltal upp till 64 bitar: division med konstant 2^k blir logiskt
+högerskift och rest blir AND med 2^k−1. Divisorn normaliseras till
+operationens promoverade typ före testet; noll, signed, pekare, FP,
+vektorer, _BitInt och bredare heltal faller tillbaka. Ingen allokering,
+AST-modifiering, SSA eller passloop; regeln gäller även O0.
+
+Anslutningar: arm64:s centrala `arith`, x86-vandrarens `wk_arith`, och
+wasms `wbinary`/`wassign`. Binära uttryck samt skalära `/=` och `%=`
+omfattas. Registermålens operander är redan utvärderade; wasm byter bara
+en bevisat effektfri konstant RHS och behåller övrig evaluation och
+stacktyper. Vektorlaner med dynamisk representation och andra algebra-
+identiteter är inte nya leveranser i detta steg.
+
+`tests/vcc/unsigned_pow2.c` testar literalbaserade svar, 32/64-bitars
+maxvärden/högbit, divisor 1, trunkerade/signed-konverterade konstanter,
+signed/non-power/dynamiska kontrollfall, volatile-effekter, anrop,
+comma-RHS och compound-tilldelningar. `bench/vcc-opt-rules.py` granskar
+funktionerna separat vid O0–O3 och kan köra utan libc på alla fyra mål.
+Wasm använder vpp:s egna C→objektväg och vlink, inte Emscripten; se
+`PLAN-wasm.md` W9. En .s-fil genom vpp -c väljer i dag inte wasm-
+assemblern, så testet kompilerar samma C med samma nivå till eget objekt.
+Detta är en känd driverlucka, inte en LLVM-fallback i testet.
+
+Kandidat SHA256 före dokumentation
+`77c05982e3bc056476aeeac6cc02c3309cba10026db19ecbd5e3a846b1dde440`.
+Kort interfolierad mätning på Ryzen 7 9700X: tre repetitioner, åtta
+6000-funktions-TU:er, seriell batch, warm=1, O1 -S, utan header-/declcache.
+Median för summan av jobbtiderna (ms, bas→kandidat):
+
+| Mål | Tvåpotensaritmetik | Oförändrat kontrollkorpus |
+| --- | --- | --- |
+| x86-64 | 44,370 → 37,864 | 36,940 → 36,176 |
+| arm64 | 57,737 → 54,005 | 53,619 → 53,747 |
+| wasm64 | 34,475 → 35,131 | 32,468 → 32,616 |
+
+Detta är väggtid i korta varma jobb, inte hårdvaruinstruktioner eller
+bevis på en 1 %-grind: perf är blockerat (perf_event_paranoid=4) och
+Linux-vperf ger noll. Ingen systeminställning ändrad. Små differenser är
+brus; mätningen visar ingen stor kontrollregression. Källor, kommandon,
+rådata och parade resultat finns i `build/linux/opt-perf/paired.json`.
+Två minimala kodexempel, unsigned /8 och %8: x86 16→12 instruktioner
+vardera; arm64 11→10 för division och 12→10 för rest; wasm32/64 får
+shr_u/and i stället för div_u/rem_u med lika många stackoperationer.
+Ingen påstådd förbättring av programmets körtid är uppmätt här.
+
+Verifierat: kandidatens x86-egensvit 130/130 (samma fem filtrerade fall
+som basen), arm64-egensvit 135/135 via QEMU, med -j 6 och --no-cache.
+Unity och fullt fil-för-fil-bygge gröna; båda byggsätten klarar alla
+16 kombinationer av fyra mål och O0–O3 i kod-/körharnessen. Systemets
+Node 24.22.2 och därefter 25.9.0 klarar wasm32/64 utan SDK-sökväg.
+Den nya kodgrinden avvisar före-basens division på alla fyra mål, så
+den detekterar själva optimeringsluckan utöver korrekt C-resultat.
+Syntaxkontroll av Python och shell samt `git diff --check` gröna.
+GHA-hookar är tillagda men ingen fjärr-CI eller full Emscripten-baserad
+wasm-svit har körts i detta steg.
+
+OPT1 är därmed **påbörjat**, inte helt klart: identiteterna och övriga
+OPT-steg återstår. Emscripten-oberoende wasm-testväg är levererad separat
+från ersättningen av full runtime/explorer. G5/G7 är fortsatt öppna.
 
 ## Risker
 - **GNU C-ytan och inline asm** är det stora jobbet. Uppskattat: lexer + pp ~2 kloc,
