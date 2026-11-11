@@ -1979,3 +1979,110 @@ flerfältsfall är i praktiken oförändrade. Båda belastningarna finns kvar i
 hela slutversionens basjämförelser finns i `stream-collectors-prune{,-large}-cost`.
 Separat x86-integration rapporterar 13 397 färre Ir i sin riktiga grind;
 det är inte en full grind för denna arm64-/wasm-ändring. Ingen emissionsändring.
+
+### Fortsatt O0–O2-täckning: familjeledger efter OPT0–OPT8 (2026-11-11)
+
+**OPT0–OPT8 är första delsteg, inte hela O2-målet.** Den här kartan binder
+fortsättningen till verkliga inventarier och källkod i den privata
+kombinationen `da64f05` (ingen ny kompilatormätning i detta dokumentsteg).
+`bench/optaudit/coverage-ledger.json` grupperar **varje** distinkt post i
+rapportens GCC-`enabled_options` och LLVM-`observed_passes`, O0/O1/O2, exakt
+en gång i 20 familjer. Där finns fullständiga namn, nivåmedlemskap,
+konkreta kodfiler per mål, familjestatus och återstående arbete. Det är en
+avprickad *inventariemappning*, inte full optimeringstäckning.
+
+Underlag: `work/opt-profile/audit-switch-integrated/report.json`, SHA256
+`cb92d9f847cc89ce574ef6fccc91c2ad8ab862a0989f0fa19c76cf607a1658ca`.
+Rapportens vcc-revision är `54580f7`, alltså **före** kodkombinationen ovan;
+dess assemblymått får inte märkas om till `da64f05`. Referenserna är GCC
+15.2.0 (Ubuntu 15.2.0-16ubuntu1) och Ubuntu Clang 23.1.6 (byggrevision
+c47d7823685a), på Ryzen 7 9700X. Samma 29 C-funktioner används vid
+`-march=x86-64 -fno-pie -fno-stack-protector -fcf-protection=none`.
+Probe-/anroparkällornas SHA256, vpp-binärhash, full versionssträng och
+SHA256 för granskade kompilatorkällor finns i annexet.
+
+| Inventarium | O0 | O1 | O2 | Union O0–O2 |
+| --- | ---: | ---: | ---: | ---: |
+| GCC: booleska alternativ märkta `[enabled]` | 50 | 92 | 141 | 142 |
+| LLVM: unika observerade `Running pass`-namn | 6 | 74 | 87 | 88 |
+
+Aktiverat GCC-alternativ betyder inte att motsvarande transform kördes
+eller ändrade något; även O0 listar flera sådana alternativ. Namn som
+`-fno-inline-stringops`, FP-/aliasregler och unwind är dessutom policy.
+Ett observerat LLVM-pass kan vara en tom genomgång, en wrapper eller
+metadatahantering. Rapportens GCC-`configured_passes_on` är ett separat
+inventarium och ingår inte i denna namnmappning. Parameterstyrda GCC-val,
+fullständiga maskinpass, körordning/antal, andra ISA:er, O3, LTO och PGO
+är inte inventerade här. Backendkolumnerna nedan är källgranskning,
+**inte** nya GCC/Clang-inventarier på arm64/wasm eller nya körbevis.
+
+I tabellen betyder **delvis** att en verklig begränsad implementation
+finns, inte att alla flaggor/pass i familjen täcks. **Saknas generellt**
+betyder att ingen motsvarande generell analys/transform identifierades
+i den granskade kodvägen; **overifierat** kräver riktade prober innan
+ett påstående om stöd eller avsaknad görs.
+
+| Familj, exempel ur inventariet | Faktiskt underlag i vcc och kvarvarande lucka |
+| --- | --- |
+| Heltalsförenkling: InstCombine, reassoc, div/rem | **Delvis, alla tre.** `opt/{identity,divpow2,sdivpow2,udivconst}.c` med separata adaptrar. U32-reciproker har målkostnad/fallback; inte generell InstCombine. Små konstantmultiplikationer, fler bitregler, delat kvot/rest-recept och signed/u64-reciproker återstår. Float2Int är inte bevisat av heltalsreglerna. |
+| Värdefakta, CSE/PRE, intervall: CCP, GVN, SCCP | **Delvis lokalt.** `rec/copies.c`, `rec/slot-values.c` och förpassfakta; a64:s `opt.c`, x64:s `copies.c`/`extensions.c`, wasms `slots.c`. Ingen gemensam global GVN/PRE/SCCP eller generell intervallanalys. Börja med begränsad blocklokal cache för rena uttryck. |
+| Död kod och minne: DCE/DSE, store merging | **Delvis.** Gemensamma exakta frame-celler/storefakta och nåbarhetsstädning; a64 har egna dead-result-pass, x64 effektbeskrivning, wasm typade accesshändelser. Heap/global-DSE, bitvis DCE, allokeringseliminering, generell last/store-motion och looplasteliminering återstår/är overifierade. |
+| Kontroll och switch: SimplifyCFG, jump threading, bit tests | **Delvis.** `opt/control.c`, `opt/switch.c`, `rec/{fallthrough,unreachable}.c`; alla mål använder delade beslut, wasm har tät `br_table`. Värdetabeller/bitset-kluster, generell threading, compare merging och tail merging återstår. |
+| Skalär ersättning/promotion: SROA, mem2reg | **Delvis.** `opt/locals.c`, förpass och celler; a64 registerbindning, x64 fyra valda GPR-hem, wasm typade lokaler. Detta är inte generell aggregatsplittring eller join-medveten mem2reg. |
+| Loopmotion/induktion: LICM, IV opts, loop sink | **Saknas generellt.** Alla mål sänker loopar; förpassets loopviktade lokalval är inte LICM. CFG, dominans, loop-/beroendefakta och bevis om noll iterationer behövs före säker hoisting/IV-omskrivning. |
+| Loopform: rotation, deletion, unroll, unswitch/distribute | **Saknas generellt.** Målen har direkt satssänkning, inte dessa transformpass. Kräver trip-count-/effekt-/entrybevis och kodstorleksbudget; börja eventuellt med små exakt konstanta loopar. |
+| Vektorisering: loop, SLP, VectorCombine | **Delvis endast explicit.** A64 `expr.c:gen_vbin` har utvalda NEON-operationer plus lanefallback; x64-walkern och wasm `wexpr.c` använder lanevis väg för granskade GNU-vektorer. Packed SSE2/simd128-sänkning är ett eget tidigare steg. Automatisk loop/SLP kräver beroende-, alignment-, reduktions-, tail- och kostnadsmodell. |
+| Inlining/anrop: early/partial inline, TailCallElim | **Delvis, asymmetriskt.** A64 `call.c:can_inline`, x64 `walk/stmt.c:wk_can_inline` har olika behörighet; x64 stöder redan små vanliga statiska funktioner. Wasm `wcall.c` saknar motsvarande inliner. Delad policy, wasm-instansiering och begränsade tail calls återstår; general varargs/partial inline är senare arbete. |
+| IPA/globalt: IPSCCP, attrs, global DCE, ICF | **Begränsade förpassfakta; generell IPA saknas.** `prepass.c`/`tu.c` och native-inlining är inte helprogramsanalys. Callgraph, linkage/interposition och escape/modref-sammanfattningar behövs. Länkarens section-GC är inte compiler-GlobalDCE eller ICF; C++-devirtualisering är en annan språkfråga. |
+| Bibliotek/idiom: strlen, CRC, MemCpyOpt | **Delvis.** Delad literal-`__builtin_strcmp`, utvalda native-minnesbuiltins; wasm har sin egen anropsväg. Loopidiom, generella memcpy-kedjor och strlen/printf/CRC-förenklingar är inte etablerade. Behåll freestanding-, builtin-, bounds- och overlap-kontrakt. |
+| Registerpolicy: IRA/LRA, remat, caller saves | **Delvis, annan modell.** Gemensamt lokalurval, a64 `bind.c`/`opt.c`, x64 `locals.c` och temporärpooler. Ingen generell live-range-splitting/IRA/LRA identifierad. Wasm-lokaler är VM-lokaler, inte ett krav på samma fysiska allocator. |
+| Maskinkombinering/adresser: peephole, compare elim, REE | **Delvis.** A64 aritmetik/ext-fakta, x64 `lower.c` och sista-post-u32-faktum i `extensions.c`; wasm stack-/uttryckssänkning. Delade adress-/konstantrecept kan hjälpa, men SIB/NEON/SSE/flags är målmekanik. Generell compare-/combine-paritet är overifierad. |
+| Layout/schemaläggning: align/reorder/sched, CGProfile | **Overifierad policy; generell scheduler saknas i granskningen.** `tu.c` och målens printers har ordning/alignment; detta bevisar inte profilbaserad placering eller latensschemaläggning. Börja med sannolika grenar och mät code-size/fetch. Wasm behöver egen strukturerad policy. |
+| ABI/ram/debug/säkerhet: omit-frame, shrink-wrap, unwind | **Delvis policy.** X64 `frame.c` bevisar ramfri leaf; målens prolog/CFI har egna kontrakt. Inte generell shrink wrapping. Stack-clash, assignment tracking, instrumentering, PLT/interposition är separata användar-/korrekthetskrav; GCC-default i inventariet bevisar inte vcc-flaggstöd. |
+| FP-semantik: signed-zero, errno, trapping | **Policy, exakt flaggparitet overifierad.** `cc/const.c`, `lib/f128.h`, native `fp.c` och wasm FP-sänkning finns. Dessa flaggor är främst begränsningar för tillåtna omskrivningar, inte bevis på fast-math eller tillstånd att återassociera FP. |
+| Alias/alignment/assumptions: PTA, strict-alias, InferAlignment | **Delvis exakta objekt.** Förpass/escape/cellöverlapp finns på målen, inte generell TBAA/points-to/global-AA. Utöka objekt-/disjunkthetsfakta före minnesmotion; språkpolicy och char/union/overlap måste testas separat. Analysinvalidering är infrastruktur. |
+| Pipeline/metadata: annotations, intrinsic lowering, remarks | **Ingen ett-till-ett-lucka.** LLVM:s passmanager, metadata och representationssänkning kräver inte samma vcc-pass. AllocToken/MemProf och intrinsicer måste kopplas till verklig källsemantik före eventuell implementation. |
+| Andra språk: Coro*, OpenMP* | **Utanför den här C-probens transformbevis.** Att passnamnen körts säger inget om coroutine-/OpenMP-optimering i provet. Eventuellt språkstöd planeras separat. |
+| Atomics/unreachable-policy | **Delvis sänkning; flaggparitet overifierad.** `cc/builtin.c` och måladaptrar har atomic-vägar. Inline/libcall-val, ordering, featurefallback och unreachable-trap-policy behöver egna konkreta kontrakt; de är relevanta C-krav. |
+
+**Nästa implementationer, i kostnadsordning:**
+
+1. **Billiga gemensamma recept utan ny IR/SSA.** Slutför källnära
+   OPT6/OPT7: oanvända *rena* lokala initierare, små multiplikationer/
+   bitregler, typade skalade adresser och konstant-store-hook. Använd
+   befintliga förpassfakta och O(1)-beslut, inte upprepad AST-sökning.
+   Lägg till bounded switch-värdetabeller/bitset-kluster där målet visar
+   vinst. Explicit packed vektorsänkning använder gemensam semantik men
+   målets instruktioner/features; den kräver inte en autovektoriserare.
+2. **Begränsade lokala värdefakta.** En faststor cache per block för rena
+   uttryck/konstanter, med registerversioner, exakta clobbers och tydlig
+   invalidation. Återanvänd cellkärnan för små icke-flydda aggregatfält.
+   Bevara trapping/volatile/atomic och implicit flags/asm. Kvot/rest-delning
+   och rematerialisering prövas på konkreta tryckfall, inte som nya
+   helfunktionspass utan mätt nytta.
+3. **Anrop med målkontrakt.** Gemensam bounded inline-behörighet och
+   kostnad, därefter wasms egna parameter-/resultat-/scope-mekanismer.
+   Inför begränsade sibling calls med ABI-, ramflykt-, cleanup- och
+   unwindbevis. Delad policy ensam levererar ingen wasm-inliner/tail call.
+4. **Gemensam CFG innan globala omskrivningar.** Extrahera återanvändbara
+   block/edges, komplett label-entry och konservativ liveness utan att
+   försämra a64:s befintliga analys. Sätt arbetsbudget för dominans och
+   dataflow; budgetslut ger fallback, aldrig ofärdiga säkerhetsbevis.
+   Därefter join-medveten konstant/intervallpropagering, branch threading,
+   dead-result/DSE över block och de första säkra loopinvarianterna.
+5. **Avancerad O2 i separata familjesteg.** Global GVN/PRE, aggregat-
+   promotion, loop-/induktionsomskrivning, autovektorisering och IPA får
+   varsin korrekthets-/kodformsgrind och mätt CPU-/minnesbudget. SSA är
+   motiverat att utvärdera för många join-värden, sparsam global dataflow,
+   GVN och loopomskrivning; varken CFG, lokal CSE, AST-inlining eller ett
+   enkelt säkert LICM-fall kräver automatiskt SSA. Auto-SIMD behöver även
+   minnesberoenden och målkostnad, inte bara en ny representation.
+
+Varje familjesteg kräver ett negativt basfall som visar luckan, ett
+positivt per-mål-kodkrav och C-resultat/effektkontroller på a64/x64/wasm32/
+wasm64. Mät hela kompilatorns extra arbete, undvik pass när kandidater
+saknas och redovisa vad som inte täcks. Separata O1/O2-policyer införs först
+när mätningar motiverar dem; ingen nivå döps om för att hävda paritet.
+G5/G7 och full O2-täckning förblir öppna. Detta dokumentsteg kör inga byggen
+eller nya benchmarks; annexets mängd-/unikhets-/nivå-/filhashkontroller
+är datakontroller av befintligt underlag.
