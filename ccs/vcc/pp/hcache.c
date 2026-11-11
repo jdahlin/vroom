@@ -56,6 +56,19 @@ VPRIV bool sig_of(const pp_opts *o, uint32_t *sig, uint32_t *psig)
 	if (n + l_ + 8 < (1 << 17)) { memcpy(b + n, s_, l_); n += l_; b[n++] = 0; } else ok = false; } while (0)
 	n += (size_t)snprintf(b, 64, "%d %d %d %d %d %d %d %d", o->nfwdirs, o->unsigned_char, o->asm_mode, o->target,
 			      o->nwargs, o->error_limit, o->trigraphs, o->deps * 8 + o->c89 * 4 + o->c23 * 2 + o->fatal_continue) + 1;
+	/* The same header and macros can ask different target builtin questions.
+	 * Compare context contents, never the per-job pointer address. */
+	if (o->target_features_size && (!o->target_features ||
+	    o->target_features_size >= (1u << 17) - n - sizeof(size_t))) {
+		free(b);
+		return false;
+	}
+	memcpy(b + n, &o->target_features_size, sizeof(size_t));
+	n += sizeof(size_t);
+	if (o->target_features_size) {
+		memcpy(b + n, o->target_features, o->target_features_size);
+		n += o->target_features_size;
+	}
 	for (int i = 0; i < o->nwargs; i++)	/* -W/-Werror decide which replayed diagnostics are errors */
 		SIGS(o->wargs[i]);
 	for (int i = 0; i < o->nfwdirs; i++)

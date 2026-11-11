@@ -168,6 +168,11 @@ static int has_query(pp *p, int b, const char *name, uint32_t loc)
 
 	if (b == B_BUILDING_MODULE)
 		return 0;	/* no modules */
+	if (b == B_HAS_BUILTIN && pp_target_builtin) {
+		int answer = pp_target_builtin(p->o, name);
+		if (answer >= 0)
+			return answer;
+	}
 	if (p->o->target == PP_LINUX_X86_64) {	/* its own table (gen-x86data.sh) */
 		size_t xl = 0, xh = sizeof(has_tab_x86) / sizeof(has_tab_x86[0]);
 
@@ -212,6 +217,7 @@ static int has_query(pp *p, int b, const char *name, uint32_t loc)
 }
 
 int (*pp_builtin_known)(const char *name);
+int (*pp_target_builtin)(const pp_opts *opts, const char *name);
 
 /* -Wc2y-extensions (-pedantic): __COUNTER__; out of line, builtin() is hot */
 static __attribute__((noinline, cold)) void counter_ext(pp *p, uint32_t loc)
