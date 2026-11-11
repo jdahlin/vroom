@@ -1402,7 +1402,11 @@ VPRIV uint32_t fp_sign_call(cc *c, const char *name, size_t len, qty ft, const v
 	}
 	uint32_t result = with_pre(c, mk2(c, N_ASSIGN, bits, loc, raw[0], value), rvalue(c, tmp[0]));
 	if (copy) result = with_pre(c, pre[1], result);
-	return with_pre(c, pre[0], result);
+	result = with_pre(c, pre[0], result);
+	/* Retain fabs facts after its call has become representation operations.
+	   This describes only the result; the comma operands still execute. */
+	if (abs) N(result)->aux |= NC_FP_NONNEG;
+	return result;
 }
 
 static uint32_t elementwise_abs_call(cc *c, const builtin *b, uint32_t loc)
