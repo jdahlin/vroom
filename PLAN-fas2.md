@@ -1702,3 +1702,14 @@ vbench-/native-CPU-/helkorpusgrind. Native CPU-sampel ovan har stor värdlast-
 variation. Råprofiler, versionerad lokal verktygspaketfil och binärer finns
 i `/source/vroom/work/opt-profile/`. Slutlig verifiering och CI på aktuell
 main krävs fortfarande före leverans av OPT4.
+
+### OPT4 verifiering på ny main (2026-11-11)
+
+Main9d022c3 är integrerad utan att ta bort dess bitcast/packed-bool-stöd.
+Unity och fil-för-fil bygger. 148 fokuserade regel/nivå/mål-kombinationer
+med körning är gröna (40 x86, 36 vardera arm64/wasm32/wasm64); åtta
+x86-kopie-/utvidgningsfall och debugkontroll upprepade fil-för-fil.
+Båda host-kontrakten klarar ASan/UBSan. X86:s riktiga unwind och
+funktionsavgränsade debug-/text-/DWARF-kontroller är gröna. Ny CI följer
+PR:n; CPU-mätningarna och instruktionsprofilen ovan har sina uttryckliga
+äldre baser och är inte ett generellt godkännande av G5.

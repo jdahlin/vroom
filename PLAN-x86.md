@@ -770,3 +770,12 @@ Registerlokaler använder samma csslot/CFI som asm. Privata asm-snapshots
 bevarar aktuella hem på alla kanter; riktiga unwind-tester återvinner
 anroparens callee-save-värden genom vanliga och justerade ramar (O1/O2).
 Se OPT3:s PR-status i PLAN-fas2.md; full O2 och prestandagrind kvarstår.
+
+### OPT4 kopior och kanoniska unsigned-resultat (2026-11-11)
+
+Separat copies.c använder delad native-kärna och kräver lokal
+överskrivning innan en kopia kan försvinna; tvåadressvandringen tar även
+hand om borttagning/debugrader. extensions.c bevisar från föregående
+post när högbitar redan är noll. Inga nya fulla pass/allokeringar/SSA.
+Riktade O0–O3-körningar, debug/unwind och sanitiserade kontrakt gröna;
+prestandaprofil och dess begränsningar finns vid OPT4 i PLAN-fas2.md.

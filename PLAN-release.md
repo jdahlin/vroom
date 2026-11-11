@@ -80,6 +80,19 @@ kan gå parallellt.
 
 ## Status
 
+### Status 2026-11-11: G5/G7, kopior och direkt utvidgningsbevis
+
+Delad native kopiekärna återanvänder arm64:s analys; x86 gör endast
+kandidatsökning i sin befintliga tvåadressvandring, utan egna allokeringar
+eller livenesspass. Separat extensions.c utelämnar bevisat redundant
+unsigned32-normalisering från föregående skrivning. 148 fokuserade
+körkombinationer gröna efter integration med main9d022c3, inklusive
+volatile/high-bit/signed-regressioner; båda byggsätt och sanitiserade
+kontrakt verifierade. 500-funktions v3-instruktionsprober mot14379fe ger
++0,23% loop och −0,74% kontroll för kombinationen. Profilens räckvidd
+är begränsad; vbench/native helkorpus och hela G5/G7/O2-målet kvarstår.
+
+
 ### Status 2026-11-11: G5/G7, registerlokaler på x86
 
 Gemensamt behörighetsurval i `emit/opt/locals.c` används av alla tre
