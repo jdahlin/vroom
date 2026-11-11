@@ -1355,6 +1355,18 @@ static int wbinary(ecx *e, uint32_t n)
 	qty lt = N(x->a)->ty, rt = N(x->b)->ty, ty = x->ty;
 	uint32_t operand;
 	int bound = em_cmpbounds(e, n, &operand);
+	int repeated = em_repeated_integer(e, n);
+
+	if (repeated == EM_ID_ZERO) {
+		wconst(e, wty(c, ty), 0);
+		return wty(c, ty);
+	}
+	if (repeated == EM_ID_TRUE) {
+		wconst(e, WT_I32, 1);
+		return WT_I32;
+	}
+	if (repeated == EM_ID_LEFT)
+		return wexpr(e, x->a, true);
 
 	if (bound >= 0) {
 		wexpr(e, operand, false);

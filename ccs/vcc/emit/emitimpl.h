@@ -578,11 +578,13 @@ VPRIV val a64_sdivconst(ecx *e, val a, const em_sdivconst_recipe *r);
 /* opt/mulshift.c and opt/xor-not.c: machine recipes, no operand evaluation. */
 VPRIV bool em_bound_constant(cc *c, uint32_t n, i128 *value);
 VPRIV int em_cmpbounds(ecx *e, uint32_t n, uint32_t *operand);
+VPRIV int em_repeated_integer(ecx *e, uint32_t n);
+
 VPRIV bool em_cmpzero(ecx *e, uint32_t n, uint32_t *operand);
 VPRIV bool em_mulshift(cc *c, qty ty, int *op, i128 *rhs);
 VPRIV bool em_xor_not(cc *c, qty ty, int op, i128 rhs);
 /* opt/identity.c */
-enum { EM_ID_NONE, EM_ID_LEFT, EM_ID_ZERO, EM_ID_ONES };
+enum { EM_ID_NONE, EM_ID_LEFT, EM_ID_ZERO, EM_ID_ONES, EM_ID_TRUE };
 VPRIV int em_bin_identity(cc *c, qty ty, int op, i128 rhs);
 /* opt/switch.c: inclusive ranges in controlling-type order. Preparation only
  * for tree dispatch (>=8 cases); no allocation or target state in the policy.
