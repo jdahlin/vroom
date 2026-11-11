@@ -1810,3 +1810,12 @@ den vanliga körsviten hittar filen automatiskt. Körresultat kan inte bevisa
 att olästa volatila lagringar finns kvar; det kräver det separata
 `vcc-slot-observable.py`-kontraktet. Detta är avgränsat regressionsunderlag,
 inte ett prestandabevis eller full O2-täckning.
+
+Verifiering: O1/O2 på x86, arm64/QEMU och wasm32/64 gav 192 matchande
+bokstavliga kontroller; Clang ASan/UBSan och generatorns `--check` passerar.
+Strukturens fält initieras separat: aggregatinitiering och arrayindexering
+skapar konservativ adressflykt i nuvarande adaptrar. Ett positivt O2-fall
+på samma experimentella x86-binär med slots av/på går från 88 till 77
+frame-moves (382 till 378 instruktioner). Motsvarande wasm32-fall går från
+46 till 32 i32.load och 31 till 29 i32.store mot tidigare referensbinär.
+Det sista är en avgränsad jämförelse mellan binärer, inte isolerad kostnad.
