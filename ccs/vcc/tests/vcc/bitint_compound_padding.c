@@ -1,3 +1,4 @@
+/* vcc-xfail-wasm: TODO.md _BitInt remaining targets: wasm runtime precision not implemented. */
 /* Padding bits are not value bits. Compound loads must normalize before
  * arithmetic, including values supplied through an external ABI or bytes. */
 static int addresses, operands;
