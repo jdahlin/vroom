@@ -3364,3 +3364,9 @@ värd; variationen och det korta samplet medger ingen generell tidsgräns.
 Fyrmålsprov O0–O3 i båda bygglägen, O0/noopt-paritet samt vcc 258/258 och en
 befintlig xfail passerar. Proveniens finns i `work/opt-profile/local-values-
 unary-prefilter-{cost,cputime,saturated}/`.
+En upprepning med 15 växelvisa rundor mot föräldern gav 0,76740 → 0,78199 s
+(+1,90 %). Direkt jämförelse före/efter enbart förfiltret, också 15 rundor,
+gav 0,77786 → 0,77767 s (−0,02 %). Detta avgränsade sampel visar alltså inte
+att förfiltret orsakar skillnaden; variation på delad värd och uppstart av 28
+processer per runda begränsar slutsatsen. Resultat finns i
+`work/opt-profile/local-values-unary-prefilter-{cputime-repeat,direct-cputime}/`.
