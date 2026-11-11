@@ -966,6 +966,19 @@ static val wk_arith(ecx *e, int op, qty t, val a, val b)
 		return LO(wbin)(e, op, wk_signed(c, t), a, b);
 	if (a.k == V_CONST && b.k == V_CONST && wk_fold(c, op, t, a.i, b.i, &r))
 		return vconst(r);
+	if (e->E->o->opt && !e->E->noopt && (op == T_STAR || op == T_CARET)) {
+		/* Constants commute here; both operands have already been evaluated. */
+		if (a.k == V_CONST && b.k != V_CONST) {
+			val tmp = a;
+			a = b, b = tmp;
+		}
+		if (b.k == V_CONST) {
+			if (em_xor_not(c, t, op, b.i))
+				return LO(un)(e, T_TILDE, opw(c, t), a);
+			em_mulshift(c, t, &op, &b.i);
+		}
+	}
+
 	/* x & 0, x * 0, 0 & x, 0 * x: 0 (x evaluated already, its effects done: IS_DAX(i) = i->i_flags & 0) */
 	if ((op == T_AMP || op == T_STAR) && ((b.k == V_CONST && b.i == 0) || (a.k == V_CONST && a.i == 0))) {
 		e->discarded_scalar |= a.k == V_REG || b.k == V_REG;
