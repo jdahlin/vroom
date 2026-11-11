@@ -2849,3 +2849,13 @@ assemblerkontroller verifierar även anrop och volatila/atomiska läsningar.
 O0 och VCC_NOOPT är byteidentiska mot föräldern på testfilen för alla fyra mål.
 Unity och filvis bygge passerar. Ytterligare gränsregler och kostnadsprofilering
 återstår innan denna gren är klar för granskning.
+
+Värdetabellernas separata matchade Callgrind-prov mot basen före dessa senare
+steg finns i `work/opt-profile/switch-values-cost/result.json`. Ett prov med
+200 funktioner utan switch ändrade kompilatorarbetet +0,003–0,023 %; ett
+avsiktligt mättat prov med 200 värdetabell-switchar ökade det +6,16–6,36 %
+på native och +20,05–20,16 % på wasm. Detta är kompilatorinstruktioner, inte
+cykler, och kräver en realistisk korpus före generell slutsats. Ett separat
+syntetiskt x86-program med 100 000 anrop minskade instruktioner för hela
+programmet från 4 544 608 till 4 217 359 (−7,2 %); det är inte ett generellt
+körtidsmått. De nya stackföräldrarnas sammansatta kostnad har inte mätts här.

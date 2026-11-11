@@ -633,3 +633,7 @@ OPT1-utökningen med tvåpotensmultiplikation och bitkomplement är implementera
 för x86, arm64 och wasm och har fokuserad O0–O3-validering och en liten
 matchad kompilatorkostnadsprofil i PLAN-fas2.md. G5/G7 och generell O2-täckning
 är fortsatt öppna.
+
+Begränsade switch-värdetabeller har validerats på fyra mål; syntetiska
+kompilatorkostnader och deras begränsningar finns i PLAN-fas2.md. G5/G7 och
+en realistisk sammansatt kostnadsgrind återstår.
