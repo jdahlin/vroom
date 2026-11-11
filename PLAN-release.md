@@ -84,7 +84,11 @@ kan gå parallellt.
 
 `PLAN-x86.md` X4 har en prioriterad audit mot clang 23.1.6 och GCC 15.2.0
 på Ryzen 7 9700X: lokala optimeringar med låg kompilatorkostnad utan
-IR/SSA, belagda med 13 assemblerprober. Inget implementerat eller uppmätt
+IR/SSA. Utökad med 29 reproducerbara prober vid O0–O3, baseline och
+native: 24/24 körningar ger samma checksumma samt klarar gränsvärden och
+kodkontroller för befintliga egenskaper. Flaggor, passloggar och kod sparas
+av `bench/vcc-optaudit.py`; vcc O1/O2/O3 ger samma assembler här.
+Inga optimeringar implementerade eller uppmätt
 körtidsmål; G5 är fortsatt öppet och benchmarksvitens X är inte fastställt.
 
 ### Status 2026-11-11: externa tester på Linux x86-64

@@ -369,6 +369,126 @@ kärnan och kan vänta.
   genom vcc:s funktioner; `vas-corpus` med `-g` 3679/3680.
 - Kvar: kodning direkt från posterna (utan text), hela ISA:n (AVX, AVX-512 för kärnans
   krypto) och `vas-enc.py` för x86-64.
+### X4 (2026-11-11): reproducerbar nivåmatris och testprober
+
+`bench/vcc-optaudit.py` jämför 29 funktioner i
+`bench/optaudit/probe.c` vid O0/O1/O2/O3, baseline x86-64 och Ryzen-native.
+Körning: `PATH=/usr/lib/llvm-23/bin:$PATH python3 bench/vcc-optaudit.py --native`.
+Separat worktree `audit/x86-optimizations`, vcc byggd från `52261ef`,
+clang 23.1.6 och GCC 15.2.0 på Ryzen 7 9700X. Huvudworktreets
+ocommittade ändringar ingår inte. Ingen kompilatorkod ändrad.
+
+Alla 24 kombinationer kompilerar, assemblerar, länkar och ger samma
+checksumma `1922a5c83358247b`. Samma clang-byggda anropare används för alla
+objekt. Den testar 512 deterministiska indatauppsättningar, looplängder
+0–64, signed division med positiva/negativa värden och explicita
+gränsvärden inklusive LONG_MIN/ULONG_MAX. Detta är riktad differentiell
+kontroll, inte ett bevis för all indata. Ingen tidtagning eller tung last.
+Distrohärdning normaliseras med `-fno-stack-protector -fcf-protection=none`;
+alla använder `-fno-pie`.
+
+**Matrisen nedan anger första observerade nivå för just proben.** `saknas`
+betyder att transformationen inte sker vid någon av O0–O3 i denna probe,
+inte att ett helt optimeringsområde är uttömmande testat. En högre nivå
+kan välja annan kod, och samma effekt kan åstadkommas av flera pass.
+
+| Transformation / probe | vcc | Clang | GCC |
+| --- | --- | --- | --- |
+| Literal konstantvikning (`fold`) | O0 | O0 | O0 |
+| Konstant lokalskalär ersätts med literal (`local_const`) | O1 | O1 | O1 |
+| Kända arrayelement viks (`array_const`) | O1, men stores kvar | O1, array borta | O1, array borta |
+| `always_inline` (`always`) | O0 | O0 | O0 |
+| Liten explicit `inline` (`inline`) | O1 | O1 | O1 |
+| Liten vanlig statisk funktion inline (`auto_inline`) | saknas | O1 | O1 |
+| Ta bort `+0` och `*1` helt (`identity`) | saknas | O1 | O0 |
+| Unsigned `/8` med shift (`div8`) | saknas | O0 | O0 |
+| Unsigned `%8` med mask (`mod8`) | saknas | O0 | O0 |
+| Signed `/8` utan idiv (`sdiv8`) | saknas | O1 | O0 |
+| Unsigned `/10` utan div (`div10`) | saknas | O1 | O0 |
+| `x*9` med en LEA (`mul9`) | saknas | O1 | O1; shift/add redan O0 |
+| `p[i+3]` som en indexerad minnesoperand (`indexed`) | saknas | O0 | O1 |
+| Skalära parametrar/lokaler utan stackspill (`add32`, `aggregate`) | saknas | O1 | O1 |
+| Store-immediate (`stores`) | saknas | O0 | O0 |
+| Ta bort överskriven store (`stores`) | saknas | O1 | O1 |
+| Återanvänd icke-volatil load (`reload`) | saknas | O1 | O1 |
+| Behåll båda volatila läsningarna (`volatile`, kontrollfall) | O0–O3 | O0–O3 | O0–O3 |
+| Gemensamt deluttryck beräknas en gång (`cse`) | saknas | O1 | O1 |
+| Eliminera andra intervalltestet (`range`) | saknas | O1 | O1 |
+| Wrapper som tail jump (`tail`) | saknas | O1 | O2 |
+| Täta konstanta switch-resultat som värdetabell (`switch`) | saknas | O1 | O2; kod-hopptabell O1 |
+| Explicit 128-bitars heltalsvektor med packed add (`vector_add`) | saknas, skalär | O0 | O0 |
+| Sum-loop automatiskt vektoriserad (`sum`, baseline) | saknas | O2 | O3 |
+| Sum-loop automatiskt vektoriserad (`sum`, native) | saknas | O2 | O2 |
+| Invariant `x*y+1` ut ur loopen (`licm`) | saknas | O1 | O1 |
+| Restrict-copy-loop blir memcpy (`copy`) | saknas | O1 | O2 |
+| Oanvänd lokal beräkning tas bort (`dead_local`) | saknas | O1 | O1 |
+| Konstant if: död arm tas bort (`cond_fold`) | saknas; grenen väljs men döda instruktioner kvar | O0 | O0 |
+| POPCNT med native-mål (`popcount`) | saknas, SWAR | O0 | O0 |
+
+**Vcc:s nivåer:** `driver/ppdriver.c` skickar opt=0 för O0, opt=1 för O1
+och opt=2 för O2/O3. Alla opt-kontroller i x86-vandraren testar bara
+noll/skilt från noll; `x64_finish` har bara tvåadresspasset. O1/O2/O3 ger
+byte-identisk assembler i detta korpus, både baseline och native.
+Native ändrar inte vcc:s assembler här. Detta visar ingen effektiv
+native-instruktionsselektion för dessa fall; det betyder inte att värden
+alltid skall vara målmaskinen. FP-temporärer ligger redan i SSE-register;
+hela TODO:s äldre formulering om FP-register gäller inte x86 rakt av.
+
+**Aktiverade alternativ kontra verkliga transformationer:**
+`build/linux/optaudit-levels/` innehåller per kombination `.s`, `.o`,
+`.dis`, `.passes` och körbar fil; för GCC även `.options` och `.remarks`.
+`report.json` har kommandon, versioner, CPU, revision, SHA256 för vpp och
+proberna, funktionsstorlekar och råa instruktioner samt passinventarier.
+GCC:s options kommer från `-Q --help=optimizers`, passlistan från
+`-fdump-passes`; Clangs observerade pass och remarks från
+`-Xclang -fdebug-pass-manager -Rpass=.* -Rpass-missed=.* -Rpass-analysis=.*`.
+GCC:s flagglista, dess konfigurerade pass och LLVM:s körda pass är olika
+mått. ON innebär inte att ett pass ändrade programmet; LLVM-listan är
+inte en fullständig inventering av alla backend-transformationer.
+
+Exempel: LLVM kör `LoopVectorizePass` även vid O1 här men sum-loopen
+vektoriseras först vid O2. GCC har loopvektorisering aktiverad vid O2
+men väljer skalär baseline-kod i sum-proben; native får vektorkod redan
+vid O2. O3 gör alltså inte en transformation automatiskt lämplig.
+
+Observerad skillnad O2→O3: GCC lägger bland annat till loop interchange,
+unroll-and-jam, peeling, unswitching, predictive commoning och IPA
+constant-propagation cloning. LLVM:s logg tillför passnamnen
+`ArgumentPromotionPass`, `CallSiteSplittingPass` och
+`ControlHeightReductionPass`; andra redan förekommande pass kan ändra
+budget och heuristik utan att ett nytt namn tillkommer. Dessa områden
+är inventerade men har inte egna isolerade beteendeprober i denna omgång.
+Vcc har inte motsvarande generell analys/pipeline på x86 i auditbasen.
+
+**Från prober till regressionstester:** körkontrollen är redan en testbas.
+Harnessen kräver också två volatila inputläsningar, vikning av
+literaluttrycket och frånvaro av anrop i `always_inline` vid alla nivåer.
+För varje implementerad optimering tillkommer ett riktat kodkrav, t.ex.
+ingen div i unsigned `/8`, packed add för explicit vektor, eller en enda
+icke-volatil läsning. Kraven skall vara funktions- och målavgränsade,
+inte en hel assembler-snapshot eller allmän instruktionstakgräns.
+Saknade optimeringar rapporteras nu som fynd, inte som godkända tester.
+Framtida minnesoptimeringar behöver negativa fall för alias, volatile,
+atomics och asm; loopoptimeringar behöver noll iterationer; inlining
+behöver sidoeffekter och ABI-fall. Prestanda mäts separat för både
+kompilatorn och genererad kod. Denna utvecklaraudit är ingen ny CI-grind:
+den kräver native x86, två referenskompilatorer och GNU binutils och
+jämför även saknade egenskaper. G5:s benchmarkkrav är fortfarande öppet.
+
+GCC använder assembly- och optimeringsdumpkontroller
+([dg-final](https://gcc.gnu.org/onlinedocs/gccint/Final-Actions.html)); LLVM
+har isolerade pass/IR- och backendtester med FileCheck
+([TestingGuide](https://llvm.org/docs/TestingGuide.html)) och separat
+helprogramssvit för korrekthet, kör- och kompileringstid
+([TestSuiteGuide](https://llvm.org/docs/TestSuiteGuide.html)). Deras tester
+är bra förebilder för struktur men ingen garanti för optimalt resultat
+på godtycklig kod. För vcc är små C-tester och maskinpost/assemblerkrav
+mer direkt återanvändbara än LLVM:s IR-tester.
+Vår befintliga `vcc-gcc-dg.py` avvisar kontrakt med `dg-final` (testat i
+`test-gcc-dg.py`); den kör alltså inte GCC:s assemblykontroller i dag.
+Återanvändning av sådana upstreamfall kräver en medveten utökning eller
+portning av kodkravet, inte bara att filerna kompilerar och kör rätt.
+
 ### X4 (2026-11-11): audit av billiga optimeringar utan SSA
 
 Audit i separat worktree `audit/x86-optimizations`, bas `52261ef`. Här
