@@ -227,19 +227,14 @@ VPRIV int wsjlj_kind(cc *c, uint32_t n)
 {
 	uint32_t ref;
 	const sym *y;
-	const char *s;
-	uint32_t len;
 
 	if (!c->o->wasm_sjlj || N(n)->op != N_CALL || !(ref = wcallee(c, N(n)->a)) || RKIND(ref) != RK_SYM)
 		return 0;
 	y = &c->syms[RIDX(ref)];
 	if (!y->name || y->sc == SC_STATIC)
 		return 0;
-	s = vintern_ents[y->name].s;
-	len = vintern_ents[y->name].len;
-	if (len && *s == '_')
-		s++, len--;
-	return len == 6 && !memcmp(s, "setjmp", 6) ? 1 : len == 7 && !memcmp(s, "longjmp", 7) ? 2 : 0;
+	return EM_IDENT_IS(y->name, "setjmp") || EM_IDENT_IS(y->name, "_setjmp") ? 1 :
+	       EM_IDENT_IS(y->name, "longjmp") || EM_IDENT_IS(y->name, "_longjmp") ? 2 : 0;
 }
 
 /* setjmp(env) at site k: the value a longjmp resumed with, else __wasm_setjmp and 0 */
@@ -409,8 +404,7 @@ VPRIV int wcall(ecx *e, uint32_t n, bool want)
 	}
 
 	if (ref && RKIND(ref) == RK_SYM && x->c == 1 && !(c->syms[RIDX(ref)].flags & SF_DEFINED) &&
-	    c->syms[RIDX(ref)].name &&
-	    vintern_ents[c->syms[RIDX(ref)].name].len == 6 && !memcmp(vintern_ents[c->syms[RIDX(ref)].name].s, "alloca", 6))
+	    EM_IDENT_IS(c->syms[RIDX(ref)].name, "alloca"))
 		return walloca(e, c->lists[x->b]);	/* clang: alloca is a builtin, declared or not */
 	switch (wsjlj_kind(c, n)) {
 	case 1:

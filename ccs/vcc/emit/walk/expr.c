@@ -2036,12 +2036,10 @@ static val wk_call(ecx *e, uint32_t n)
 		uint32_t s = canon_sym(c, N(fx->a)->a);
 
 		if (c->syms[s].kind == S_BUILTIN) {
-			const char *bn = cc_builtin_name((int64_t)c->syms[s].val);
+			int kind = cc_builtin_libkind(c->syms[s].val);
 			cval cv;
 
-			if (!strncmp(bn, "__builtin_", 10))
-				bn += 10;
-			if (x->c == 2 && !strcmp(bn, "strcmp")) {
+			if (x->c == 2 && kind == CC_LIB_STRCMP) {
 				/* two string literals: folded (the kernel's vruntime_cmp(a, "<", b)) */
 				uint32_t sa = c->lists[x->b], sb = c->lists[x->b + 1];
 
@@ -2057,16 +2055,16 @@ static val wk_call(ecx *e, uint32_t n)
 			}
 			/* memcpy/memmove/memset of a constant size up to 64 bytes: inline, as clang (8 stores
 			   of 8 bytes; a freestanding vDSO has no memcpy) */
-			if (x->c == 3 && (!strcmp(bn, "memcpy") || !strcmp(bn, "memmove") || !strcmp(bn, "memset")) &&
+			if (x->c == 3 && (kind >= CC_LIB_MEMCPY && kind <= CC_LIB_MEMSET) &&
 			    cc_eval(c, c->lists[x->b + 2], &cv) && cv.kind == CV_INT && cv.i >= 0 && cv.i <= 64 &&
-			    (bn[3] != 's' || (cc_eval(c, c->lists[x->b + 1], &cv) && cv.kind == CV_INT && cv.i == 0))) {
+			    (kind != CC_LIB_MEMSET || (cc_eval(c, c->lists[x->b + 1], &cv) && cv.kind == CV_INT && cv.i == 0))) {
 				uint64_t len;
 				val d = wk_gen(e, c->lists[x->b]), v2;
 				int rd = wk_reg(e, &d, prim(TY_ULONG));
 
 				cc_eval(c, c->lists[x->b + 2], &cv);
 				len = (uint64_t)cv.i;
-				if (bn[3] == 's') {
+				if (kind == CC_LIB_MEMSET) {
 					v2 = wk_gen(e, c->lists[x->b + 1]);
 					wk_free(e, &v2);
 					if (len)
@@ -2075,7 +2073,7 @@ static val wk_call(ecx *e, uint32_t n)
 					val sv = wk_gen(e, c->lists[x->b + 1]);
 					int rs = wk_reg(e, &sv, prim(TY_ULONG));
 
-					if (len && bn[3] == 'm') {	/* memmove: through a slot (the two may overlap) */
+					if (len && kind == CC_LIB_MEMMOVE) {	/* memmove: through a slot (the two may overlap) */
 						lval t = { .k = L_FRAME, .off = wk_slot(e, len, 8), .align = 8 };
 						int rt = LO(laddr)(e, &t);
 

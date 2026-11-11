@@ -78,7 +78,7 @@ typedef struct vec {
 typedef struct builtin {
 	const char *name;
 	uint8_t id;
-	uint8_t constexpr_;	/* folds when its arguments do (ICE if they are) */
+	uint8_t flags;		/* bit 0: constexpr; upper bits: CC_LIB_* kind */
 	const char *sig;	/* return type then parameters; '.' variadic (see sigtype) */
 } builtin;
 

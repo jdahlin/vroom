@@ -39,30 +39,44 @@ static int x64_creg(int ch)
 /* the register a clobber or register variable names (with or without %), -1 for none */
 static int x64_rname(const char *s)
 {
-	static const char *const n64[] = { "rax", "rcx", "rdx", "rbx", "rsp", "rbp", "rsi", "rdi" };
-	static const char *const n32[] = { "eax", "ecx", "edx", "ebx", "esp", "ebp", "esi", "edi" };
-	static const char *const n16[] = { "ax", "cx", "dx", "bx", "sp", "bp", "si", "di" };
-	static const char *const n8[] = { "al", "cl", "dl", "bl", "spl", "bpl", "sil", "dil" };
-
 	if (*s == '%')
 		s++;
-	for (int i = 0; i < 8; i++)
-		if (!strcmp(s, n64[i]) || !strcmp(s, n32[i]) || !strcmp(s, n16[i]) || !strcmp(s, n8[i]))
-			return i;
-	if (!strcmp(s, "ah"))
-		return RAX;
-	if (!strcmp(s, "bh"))
-		return RBX;
-	if (!strcmp(s, "ch"))
-		return RCX;
-	if (!strcmp(s, "dh"))
-		return RDX;
+	/* The legacy registers have one letter family and a small set of width
+	 * spellings. Decode them directly instead of searching four name tables. */
+	if ((s[0] == 'r' || s[0] == 'e') && s[1] && s[2] && !s[3]) {
+		const char *p = s + 1;
+		if (p[1] == 'x') {
+			switch (p[0]) {
+			case 'a': return RAX; case 'c': return RCX;
+			case 'd': return RDX; case 'b': return RBX;
+			}
+		} else if (p[1] == 'p') {
+			if (p[0] == 's') return RSP;
+			if (p[0] == 'b') return RBP;
+		} else if (p[1] == 'i') {
+			if (p[0] == 's') return RSI;
+			if (p[0] == 'd') return RDI;
+		}
+	}
+	if (s[0] && s[1]) {
+		int r = s[0] == 'a' ? RAX : s[0] == 'c' ? RCX :
+			s[0] == 'd' ? RDX : s[0] == 'b' ? RBX : -1;
+		if (r >= 0 && (s[1] == 'x' || s[1] == 'l' || s[1] == 'h') && !s[2])
+			return r;
+		if ((s[0] == 's' || s[0] == 'b' || s[0] == 'd') &&
+		    (s[1] == 'p' || s[1] == 'i') &&
+		    (!s[2] || (s[2] == 'l' && !s[3]))) {
+			if (s[0] == 's') return s[1] == 'p' ? RSP : RSI;
+			if (s[0] == 'b' && s[1] == 'p') return RBP;
+			if (s[0] == 'd' && s[1] == 'i') return RDI;
+		}
+	}
 	if (s[0] == 'r' && s[1] >= '0' && s[1] <= '9') {
 		int r = atoi(s + 1);
 
 		return r >= 8 && r <= 15 ? r : -1;
 	}
-	if (!strncmp(s, "xmm", 3)) {
+	if (s[0] == 'x' && s[1] == 'm' && s[2] == 'm') {
 		int r = atoi(s + 3);
 
 		return r >= 0 && r <= 15 ? XMM0 + r : -1;

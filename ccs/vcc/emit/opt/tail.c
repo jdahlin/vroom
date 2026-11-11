@@ -49,13 +49,9 @@ VPRIV bool em_tail_candidate(ecx *e, uint32_t fn, uint32_t expr, uint32_t maxarg
 		return false;
 	/* The standard nonlocal-jump entry points are special even when a caller
 	   supplies a plain prototype without the usual returns_twice attribute. */
-	if (target->name) {
-		const char *n = vintern_ents[target->name].s;
-
-		if (!strcmp(n, "setjmp") || !strcmp(n, "_setjmp") || !strcmp(n, "sigsetjmp") ||
-		    !strcmp(n, "__sigsetjmp"))
-			return false;
-	}
+	if (EM_IDENT_IS(target->name, "setjmp") || EM_IDENT_IS(target->name, "_setjmp") ||
+	    EM_IDENT_IS(target->name, "sigsetjmp") || EM_IDENT_IS(target->name, "__sigsetjmp"))
+		return false;
 	ct = T(c, target->ty);
 	if (ct->kind != TY_FUNC || (ct->flags & (TF_VARIADIC | TF_NOPROTO)) ||
 	    ct->n != call->c || QUNQ(ct->base) != QUNQ(ft->base))

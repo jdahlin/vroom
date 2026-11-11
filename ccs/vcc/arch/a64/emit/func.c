@@ -653,7 +653,7 @@ static bool emit_function1(ecx *e, uint32_t s, int nlreg)
 	}
 	gen_stmt(e, y->body);
 	/* falling off the end of main returns 0 */
-	if (e->reach && y->name && vintern_ents[y->name].len == 4 && !memcmp(vintern_ents[y->name].s, "main", 4))
+	if (e->reach && EM_IDENT_IS(y->name, "main"))
 		movi(e, 0, 0, 0);
 	deflabel(e, F.retlbl);
 	e->f = NULL;

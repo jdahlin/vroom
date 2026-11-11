@@ -147,7 +147,6 @@ VPRIV void x64_x87(ecx *e, int xf, const lval *l, int sz);
 
 VPRIV void x64_lbl(tbuf *b, uint32_t s, uint32_t l);
 VPRIV void x64_reg(tbuf *b, int r, int sz);
-VPRIV int x64_asm_namedreg(const char *name);
 VPRIV int x64_tlsaddr(ecx *e, uint32_t ref, int model);
 VPRIV bool sym_needs_got(cc *c, uint32_t ref);	/* arch/a64/emit/value.c (shared) */
 VPRIV int x64_base(ecx *e, const lval *l, uint32_t *ref);

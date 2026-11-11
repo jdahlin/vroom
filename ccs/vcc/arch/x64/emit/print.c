@@ -76,15 +76,6 @@ static const char *const x64_r8[] = { "al", "cl", "dl", "bl", "spl", "bpl", "sil
 				      "r8b", "r9b", "r10b", "r11b", "r12b", "r13b", "r14b", "r15b" };
 static const char *const x64_ccn[] = { "o", "no", "b", "ae", "e", "ne", "be", "a", "s", "ns", "p", "np", "l", "ge", "le", "g" };
 
-VPRIV int x64_asm_namedreg(const char *name)
-{
-	if (*name == '%') name++;
-	for (int r = 0; r < 16; r++)
-		if (!strcmp(name, x64_r64[r]) || !strcmp(name, x64_r32[r]) ||
-		    !strcmp(name, x64_r16[r]) || !strcmp(name, x64_r8[r])) return r;
-	return -1;
-}
-
 VPRIV void x64_reg(tbuf *b, int r, int sz)
 {
 	if (IS_XMM(r)) {

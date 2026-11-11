@@ -345,7 +345,7 @@ VPRIV val x64_call(ecx *e, uint32_t ref, val *fn, const wkarg *a, int n, bool va
 	/* An explicit builtin needs no libm symbol. Copy the x87 representation
 	 * and clear only its sign, without an FP load that could alter a NaN. */
 	if (RKIND(ref) == RK_NAME && RIDX(ref) < 0x8000000u && n == 1 && r && r->x87 &&
-	    KIND(c, rt) == TY_LDOUBLE && !strcmp(cc_builtin_name(RIDX(ref)), "__builtin_fabsl")) {
+	    KIND(c, rt) == TY_LDOUBLE && cc_builtin_libkind(RIDX(ref)) == CC_LIB_FABSL) {
 		int q = x64_treg(e);
 		lval src = x64_fr(a[0].slot), dst = x64_fr(r->slot);
 

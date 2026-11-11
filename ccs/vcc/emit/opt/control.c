@@ -30,7 +30,7 @@ VPRIV bool em_const_strcmp(cc *c, uint32_t n, i128 *value)
 		return false;
 	fn = em_control_decay(c, x->a);
 	if (N(fn)->op != N_VAR || c->syms[N(fn)->a].kind != S_BUILTIN ||
-	    strcmp(cc_builtin_name(c->syms[N(fn)->a].val), "__builtin_strcmp"))
+	    cc_builtin_libkind(c->syms[N(fn)->a].val) != CC_LIB_STRCMP)
 		return false;
 	a = em_control_decay(c, c->lists[x->b]);
 	b = em_control_decay(c, c->lists[x->b + 1]);

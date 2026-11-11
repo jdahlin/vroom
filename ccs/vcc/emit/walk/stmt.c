@@ -1429,8 +1429,7 @@ static bool wk_is_main(cc *c, uint32_t s)
 {
 	const sym *y = &c->syms[s];
 
-	return y->name && y->depth == 0 && y->sc != SC_STATIC && vintern_ents[y->name].len == 4 &&
-	       !memcmp(vintern_ents[y->name].s, "main", 4);	/* (spellings are not NUL-terminated) */
+	return y->depth == 0 && y->sc != SC_STATIC && EM_IDENT_IS(y->name, "main");
 }
 
 VPRIV void wk_function(ecx *e, uint32_t s)

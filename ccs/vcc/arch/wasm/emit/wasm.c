@@ -222,8 +222,7 @@ VPRIV bool wis_main(cc *c, uint32_t s)
 {
 	const sym *y = &c->syms[s];
 
-	return y->name && y->depth == 0 && y->kind == S_FUNC && vintern_ents[y->name].len == 4 &&
-	       !memcmp(vintern_ents[y->name].s, "main", 4);
+	return y->depth == 0 && y->kind == S_FUNC && EM_IDENT_IS(y->name, "main");
 }
 
 /* a function's assembler name (main is renamed as clang does for emscripten) */
