@@ -84,7 +84,7 @@ kan gå parallellt.
 
 På `1d8e29a` använder wasm32/64 den gemensamma budgeterade flödeslösaren
 för privata exakta 4/8-byte ramceller. Typade kontrollhändelser och unika
-blocktoken ersätter inget med textparsning eller SSA. Överskrivna stores
+blocktoken beskriver flödet utan textparsning eller SSA. Överskrivna stores
 tas bort genom strukturerade joins; operandutvärderingar och riktiga
 barriärer bevaras. Loopar, dispatchers/goto, asm, SJLJ och dynamiska ramar
 avstår. Full konvergens krävs före publicering.
@@ -95,8 +95,14 @@ Oberoende review är klar. Hela egna SDK-sviter avslutar med status 0:
 wasm32 178/178 PASS, 36 XFAIL, 16 skips; wasm64 182/182 PASS, 37 XFAIL,
 11 skips. Undantagen räknas inte som PASS; kategorier och loggar står i
 `PLAN-fas2.md`/`PLAN-wasm.md`. CI-steget är tillagt, fjärrkörning återstår.
-Kompilatorkostnad och kod-/programvinst är ännu inte mätta för detta
-delsteg; äldre mätningar återanvänds inte som dess kostnadsbevis. G5/G7,
+Senare integration `1458a90` mot exakt flödesförälder `f7327bd` passerar
+samma 114 kontroller och 66 byteidentiska O0/noopt-par. Matchade clang 23
+v3-byggen ger +0,314–0,552 % Callgrind-Ir i oförändrade kontroller,
++0,106/+0,095 % i fast wasm32/64-blandning, och +4,494–4,683 % i
+koncentrerade positiva diamantprov. De senare minskar stores 800/1000
+till 200 och relocerbara objekt 2,886–3,325 %. Aktiv analys kostar mer än
+1 % där; resultatet ersätter inte full prestandagrind eller uppmätt
+programfart. Exakta korpusundantag och metod står i planerna. G5/G7,
 generell DSE och full O2 förblir öppna.
 
 ### Status 2026-11-11: G5/G7, wasm frame-cell forwarding

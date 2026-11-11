@@ -577,7 +577,28 @@ Hela egna SDK-baserade sviter på samma revision avslutar med status 0:
 Undantag räknas inte som PASS. Loggarna är
 `work/opt-pr-tmp/wasm-flow-full32.log` och `wasm-flow-full64.log`.
 Fokuserad validering, källbevis och isolerade mutantloggar/hashar finns i
-`build/linux/flow-evidence/`. Kompilatorkostnad, kodstorlek och
-programkörtidsvinst för denna konsument är **ännu inte mätta**; siffrorna
-för tidigare raka cellsegment ovan gäller inte joins-steget. Kostnadsgrind,+bredare kontrollflöde och generell DSE återstår; OPT5/O2 och G5/G7 stängs
-inte av dessa korrekthetsresultat.
+`build/linux/flow-evidence/`. Efter integration av exakt flödesförälder
+`f7327bd` till `1458a90` passerar samma 114 konfigurationer och fristående
+syntaxkontroll igen. 66 O0-/O2-noopt-par är byteidentiska mot föräldern;
+två ytterligare par avvisas av bådas befintliga ILP32-layoutassert i
+`atomic_ops`. SDK-helsvitssiffrorna ovan gäller fortfarande `1d8e29a`.
+
+Matchade clang 23-värdbyggen med `-O3 -march=x86-64-v3`, exakt `f7327bd`
+mot `1458a90`, ger följande separata Callgrind-underlag. Hela processen
+inklusive start räknas, wasm32/64 O2 `-S`, seriellt en gång per prov/binär:
+200-funktionskontroller med rak kod, villkor och uteslutna loopar kostar
++0,314–0,552 % värd-Ir med byteidentisk assembler och objekt. Två positiva
+diamantprov kostar +4,494–4,683 % extra värd-Ir; stores går från 800/1000
+till 200 och vanliga `-c`-objekt minskar 2,886–3,325 %. Aktiv analys är
+alltså dyrare än 1 % i dessa koncentrerade positiva prov.
+
+En fast blandning av befintliga regressionsfiler ger sammanlagt +0,106 %
+värd-Ir på wasm32 (10 filer) och +0,095 % på wasm64 (11 filer).
+`atomic_ops` utesluts på wasm32 eftersom båda byggen avvisar dess
+LP64-layoutassert; detta är inte PASS. Två assemblerutdata ändras per mål.
+Kommandon, hashmanifest, råprofiler, objekt och undantag finns i
+`build/linux/flow-evidence/cost/result.json`; hela tabellen står i
+`PLAN-fas2.md`. Relocerbar objektstorlek är inte laddad kodstorlek eller
+programfart, och detta ersätter inte full prestandagrind eller fjärr-CI.
+Programkörtidsvinst är fortfarande omätt; bredare kontrollflöde, generell
+DSE, OPT5/O2 och G5/G7 återstår.

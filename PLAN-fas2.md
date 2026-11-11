@@ -2213,11 +2213,44 @@ wasm32 **178/178 PASS**, 36 körda XFAIL och 16 skips (12 clang-reject,
 (8 clang-reject, 1 noref, 2 ref-fail). Undantagen är inte PASS.
 Loggar: `work/opt-pr-tmp/wasm-flow-full32.log` och `wasm-flow-full64.log`;
 källbevis, mutanthashar och fokuserade resultat i
-`build/linux/flow-evidence/`. Kompilatorkostnad, genererad kodstorlek och
-programkörtidsvinst är **inte mätta för detta delsteg**. Tidigare
-cell-/flödesmätningar gäller inte denna konsument. OPT5/O2 och G5/G7 är
-fortsatt öppna tills separat kostnadsgranskning och återstående grindar är
-klara.
+`build/linux/flow-evidence/`. Efter sammanslagning av den exakta
+flödesföräldern `f7327bd` till `1458a90` passerar återigen alla 114
+konfigurationer och fristående syntaxkontroll av ändrade wasm-C-filer.
+66 O0-/O2-noopt-par är byteidentiska mot den föräldern; två ytterligare
+par avvisas av båda byggenas befintliga ILP32-layoutassert i `atomic_ops`.
+De SDK-baserade helsvitssiffrorna ovan hör fortfarande till `1d8e29a`,
+inte den senare integrationen.
+
+Avgränsad kostnadsjämförelse: exakt `f7327bd` mot `1458a90`, båda vpp
+byggda av clang 23 med `-O3 -march=x86-64-v3`. Callgrind räknar hela
+processen inklusive start, en seriell mätning per binär/källa/mål, wasm32
+och wasm64 med `-O2 -S`, uttryckliga LLVM-resurs-/rt-huvuden och samma
+källfiler. Inga väggklocke- eller programkörtidsvärden används.
+
+| Prov | wasm32 extra värd-Ir | wasm64 extra värd-Ir |
+|---|---:|---:|
+| Rak skalärkod, 200 funktioner | +0,314 % | +0,314 % |
+| Villkor utan privata ramceller, 200 funktioner | +0,552 % | +0,552 % |
+| Loopar som avstår från analys, 200 funktioner | +0,351 % | +0,351 % |
+| Positiva diamanter, 200 funktioner | +4,495 % | +4,494 % |
+| Positiva nästlade diamanter, 200 funktioner | +4,683 % | +4,682 % |
+| Befintlig fast blandning, processernas summa | +0,106 % | +0,095 % |
+
+Kontrollernas assembler och objekt är byteidentiska. De positiva proven
+minskar 800 respektive 1000 stores till 200; separat vanlig `-c` ger
+2,886–3,325 % mindre relocerbara objekt totalt. Detta är objektstorlek,
+inte laddad kodstorlek eller uppmätt programfart. Aktiv analys kostar
+alltså mer än 1 % i dessa koncentrerade positiva prov; tabellen gäller
+inte som en generell kostnadsgrind. Den fasta blandningen är elva
+befintliga regressionsfiler för wasm64 och tio för wasm32: `atomic_ops`
+avvisas av både bas och kandidat på sin LP64-layoutassert i wasm32 och
+utesluts öppet. Två av blandningens assemblerutdata ändras per mål.
+
+Fulla kommandon, käll-/binärhashar, råa Callgrind-filer, objekt och
+feltexter finns i `build/linux/flow-evidence/cost/result.json` med
+angränsande artefakter; pariteten i `noopt-parity.json`. Dessa mätningar
+hör till denna konsument och ersätter inte full prestandagrind,
+programkörtidsmätning eller fjärr-CI. OPT5/O2 och G5/G7 är fortsatt öppna.
 
 ### Fortsatt O0–O2-täckning: familjeledger efter OPT0–OPT8 (2026-11-11)
 
