@@ -540,6 +540,113 @@ VPRIV bool wk_branch_entry(cc *c, uint32_t n)
 	}
 }
 
+/* An unreachable statement with labels in it is dead too when nothing outside
+   it can enter: every goto to its labels is inside it, no label's address is
+   taken, every case belongs to a switch inside it (scoped_cond_guard's label,
+   reached only from its own for step: clang drops it, and the calls in it). */
+typedef struct { uint32_t def[64], go[256]; int nd, ng; bool bad; } wkdead;
+
+static void wk_dead_scan(cc *c, uint32_t n, wkdead *d, bool insw)
+{
+	if (!n || d->bad) return;
+	const node *x = N(n);
+	switch (x->op) {
+	case N_NONE: case N_NUM: case N_FNUM: case N_STR: case N_VAR: case N_ZERO: case N_BREAK: case N_CONTINUE:
+		return;
+	case N_LABELADDR:
+		d->bad = true;
+		return;
+	case N_LABEL:
+		if (c->labels[x->a].addr_taken || d->nd == 64) { d->bad = true; return; }
+		d->def[d->nd++] = x->a;
+		wk_dead_scan(c, x->c, d, insw);
+		return;
+	case N_GOTO:
+		if (d->ng == 256) { d->bad = true; return; }
+		d->go[d->ng++] = x->a;
+		return;
+	case N_CASE: case N_DEFAULT:
+		if (!insw) { d->bad = true; return; }
+		wk_dead_scan(c, x->c, d, insw);
+		return;
+	case N_SWITCH:
+		wk_dead_scan(c, x->a, d, insw);
+		wk_dead_scan(c, x->b, d, true);
+		return;
+	case N_BLOCK: case N_BUILTIN:
+		for (uint32_t i = 0; i < x->c; i++) wk_dead_scan(c, c->lists[x->b + i], d, insw);
+		return;
+	case N_CALL:
+		wk_dead_scan(c, x->a, d, insw);
+		for (uint32_t i = 0; i < x->c; i++) wk_dead_scan(c, c->lists[x->b + i], d, insw);
+		return;
+	case N_MEMBER: case N_UNARY: case N_ADDR: case N_DEREF: case N_CAST:
+	case N_PREINC: case N_PREDEC: case N_POSTINC: case N_POSTDEC:
+	case N_STMTEXPR: case N_VAARG: case N_EXPR: case N_RETURN: case N_GOTO_IND:
+		wk_dead_scan(c, x->a, d, insw);
+		return;
+	case N_INDEX: case N_BINARY: case N_LOGAND: case N_LOGOR:
+	case N_ASSIGN: case N_COMMA: case N_CPLX: case N_WHILE: case N_DO:
+		wk_dead_scan(c, x->a, d, insw);
+		wk_dead_scan(c, x->b, d, insw);
+		return;
+	case N_COND: case N_IF:
+		wk_dead_scan(c, x->a, d, insw);
+		wk_dead_scan(c, x->b, d, insw);
+		wk_dead_scan(c, x->c, d, insw);
+		return;
+	case N_FOR:
+		wk_dead_scan(c, x->a, d, insw);
+		wk_dead_scan(c, x->b, d, insw);
+		wk_dead_scan(c, c->lists[x->c], d, insw);
+		wk_dead_scan(c, c->lists[x->c + 1], d, insw);
+		return;
+	case N_ASM: {
+		const casm *a = &c->asms[x->a];
+
+		for (uint32_t i = 0; i < a->nout + a->nin; i++) wk_dead_scan(c, a->ops[i].expr, d, insw);
+		for (uint32_t k = 0; k < a->nlabel && !d->bad; k++) {
+			if (d->ng == 256) { d->bad = true; return; }
+			d->go[d->ng++] = a->labels[k];
+		}
+		return;
+	}
+	case N_DECL: {
+		const sym *y = &c->syms[x->a];
+
+		if (y->kind == S_VAR && y->sc != SC_STATIC && y->sc != SC_EXTERN)
+			wk_dead_scan(c, x->b, d, insw);
+		return;
+	}
+	default:
+		d->bad = true;
+		return;
+	}
+}
+
+static bool wk_dead_closed(ecx *e, uint32_t n)
+{
+	cc *c = e->c;
+	wkst *W = e->wk;
+	wkdead in = { .nd = 0 }, all = { .nd = 0 };
+
+	wk_dead_scan(c, n, &in, false);
+	if (in.bad)
+		return false;
+	wk_dead_scan(c, c->syms[W->inl ? W->inl->fn : W->fsym].body, &all, false);
+	if (all.bad)
+		return false;
+	for (int i = 0; i < in.nd; i++) {
+		int ki = 0, ka = 0;
+
+		for (int j = 0; j < in.ng; j++) ki += in.go[j] == in.def[i];
+		for (int j = 0; j < all.ng; j++) ka += all.go[j] == in.def[i];
+		if (ki != ka)
+			return false;
+	}
+	return true;
+}
+
 /* ---------------- switch ---------------- */
 
 static void wk_cases(ecx *e, uint32_t n)
@@ -858,6 +965,8 @@ static void wk_stmt1(ecx *e, uint32_t n)
 	x = N(n);
 	if (!e->reach && !(e->E->nflags[n] & NA_LABEL) && x->op != N_BLOCK)
 		return;	/* unreachable and no label or case in it: nothing to generate */
+	if (!e->reach && (e->E->nflags[n] & NA_LABEL) && e->E->o->opt && wk_dead_closed(e, n))
+		return;	/* unreachable, and its labels only reached from inside it */
 	e->curloc = x->loc;
 	if (unlikely(e->E->o->debug) && x->op != N_BLOCK)
 		LO(dbgrow)(e, x->loc);
@@ -938,9 +1047,14 @@ static void wk_stmt1(ecx *e, uint32_t n)
 		}
 		uint32_t lelse = wk_newlabel(e), lend = wk_newlabel(e);
 
+		uint32_t w0 = W->lwatch, h0 = W->lhits, hits;
+
+		W->lwatch = lelse, W->lhits = 0;
 		if (test.k == V_NONE) {
 			e->wk->cjump = false;
 			wk_cond(e, x->a, false, lelse);
+			hits = W->lhits;
+			W->lwatch = w0, W->lhits = h0;
 			if (e->wk->cjump && e->reach && !(e->E->nflags[x->b] & NA_LABEL)) {
 				/* false whatever its operands (0 << x != 0, a dead && operand): the then branch is dead */
 				e->wk->cjump = false;
@@ -951,15 +1065,27 @@ static void wk_stmt1(ecx *e, uint32_t n)
 				return;
 			}
 		} else {
+			W->lwatch = w0, W->lhits = h0;
+			hits = 1;
 			LO(brz)(e, wk_conv(e, test, N(x->a)->ty, prim(TY_BOOL)), 4, false, lelse);
 		}
 		wk_stmt(e, x->b);
+		/* no branch to the else (the condition always holds, after inlining) and the then branch
+		   does not fall through: what follows is reached only through its own labels */
+		bool dead_else = !hits && e->E->o->opt;
 		if (x->c) {
-			LO(jump)(e, lend);
-			wk_label(e, lelse);
+			bool tr = e->reach;
+
+			if (tr || !dead_else)
+				LO(jump)(e, lend);
+			if (!dead_else)
+				wk_label(e, lelse);
+			else
+				e->reach = false;
 			wk_stmt(e, x->c);
-			wk_label(e, lend);
-		} else {
+			if (tr || e->reach || !dead_else)
+				wk_label(e, lend);
+		} else if (!dead_else || e->reach) {
 			wk_label(e, lelse);
 		}
 		return;

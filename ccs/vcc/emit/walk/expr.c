@@ -3365,6 +3365,13 @@ static bool wk_ival(ecx *e, uint32_t n, i128 *out)
 		*out = em_trunc_to(c, v, x->ty);
 		return true;
 	case N_BINARY:
+		/* x & 0, x * 0 (x without side effects: wk_condfold checked the whole condition):
+		   IS_DAX(inode) with S_DAX 0 */
+		if ((x->aux == T_AMP || x->aux == T_STAR) && is_integer(c, x->ty) && !side_effects(c, n) &&
+		    ((wk_ival(e, x->b, &b) && b == 0) || (wk_ival(e, x->a, &a) && a == 0))) {
+			*out = 0;
+			return true;
+		}
 		if (!wk_ival(e, x->a, &a)) {
 			int known = is_integer(c, N(x->a)->ty) ? cond_fold(e, n) : -1;
 			if (known < 0) return false;
@@ -3420,6 +3427,13 @@ VPRIV int wk_condfold(ecx *e, uint32_t n)
 }
 
 /* to lbl if (n != 0) == jump_if */
+/* a branch to lbl: counted when it is the watched label */
+static inline void wk_hit(ecx *e, uint32_t lbl)
+{
+	if (lbl == e->wk->lwatch)
+		e->wk->lhits++;
+}
+
 VPRIV void wk_cond(ecx *e, uint32_t n, bool jump_if, uint32_t lbl)
 {
 	cc *c = e->c;
@@ -3428,7 +3442,7 @@ VPRIV void wk_cond(ecx *e, uint32_t n, bool jump_if, uint32_t lbl)
 
 	if (known >= 0) {
 		if (known == (int)jump_if)
-			LO(jump)(e, lbl), wk_state(e)->cjump = true;	/* (always: what follows is dead) */
+			(wk_hit(e, lbl), LO(jump)(e, lbl)), wk_state(e)->cjump = true;	/* (always: what follows is dead) */
 		return;
 	}
 
@@ -3472,13 +3486,13 @@ VPRIV void wk_cond(ecx *e, uint32_t n, bool jump_if, uint32_t lbl)
 			b = wk_rhs(e, &a, x->b, lt);
 			if (a.k == V_CONST && b.k == V_CONST) {
 				if (wk_fold_cmp(op, wk_signed(c, lt), em_trunc_to(c, a.i, lt), em_trunc_to(c, b.i, lt)) == jump_if)
-					LO(jump)(e, lbl), wk_state(e)->cjump = true;	/* (always: what follows is dead) */
+					(wk_hit(e, lbl), LO(jump)(e, lbl)), wk_state(e)->cjump = true;	/* (always: what follows is dead) */
 				return;
 			}
 			if (!jump_if)
 				op = op == T_LESS ? T_GREATEREQ : op == T_LESSEQ ? T_GREATER : op == T_GREATER ? T_LESSEQ :
 				     op == T_GREATEREQ ? T_LESS : op == T_EQUALEQUAL ? T_EXCLAIMEQ : T_EQUALEQUAL;
-			LO(cmpbr)(e, op, is_ptr(c, lt) ? 8 : opw(c, lt), wk_signed(c, lt), a, b, lbl);
+			wk_hit(e, lbl), LO(cmpbr)(e, op, is_ptr(c, lt) ? 8 : opw(c, lt), wk_signed(c, lt), a, b, lbl);
 			return;
 		}
 		break;
@@ -3505,19 +3519,19 @@ VPRIV void wk_cond(ecx *e, uint32_t n, bool jump_if, uint32_t lbl)
 
 		if (is_flt(c, x->ty) || wk_wide(c, x->ty)) {
 			v = wk_conv(e, v, x->ty, prim(TY_BOOL));	/* != 0.0 (NaN is true) */
-			LO(brz)(e, v, 4, jump_if, lbl);
+			wk_hit(e, lbl), LO(brz)(e, v, 4, jump_if, lbl);
 			return;
 		}
 		if (v.k == V_CONST) {
 			if ((v.i != 0) == jump_if)
-				LO(jump)(e, lbl), wk_state(e)->cjump = true;	/* (always: what follows is dead) */
+				(wk_hit(e, lbl), LO(jump)(e, lbl)), wk_state(e)->cjump = true;	/* (always: what follows is dead) */
 			return;
 		}
 		if (v.k == V_ADDR && !wk_weak0(c, v)) {
 			if (jump_if)
-				LO(jump)(e, lbl), wk_state(e)->cjump = true;	/* (always: what follows is dead) */
+				(wk_hit(e, lbl), LO(jump)(e, lbl)), wk_state(e)->cjump = true;	/* (always: what follows is dead) */
 			return;
 		}
-		LO(brz)(e, v, is_ptr(c, x->ty) ? 8 : opw(c, x->ty), jump_if, lbl);
+		wk_hit(e, lbl), LO(brz)(e, v, is_ptr(c, x->ty) ? 8 : opw(c, x->ty), jump_if, lbl);
 	}
 }

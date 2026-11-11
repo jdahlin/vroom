@@ -63,6 +63,8 @@ WASM_XFAIL.update({
     'dead_after_inline_return': 'wasm: statements after an inlined return are generated (the x86 walker drops them)',
     'inline_unused_arg': 'wasm: an inlined function evaluates its unused arguments (the x86 walker skips them)',
     'warn_once_const': 'wasm: a statement expression constant does not decide an if (the x86 walker folds it)',
+    'dead_closed_label': 'wasm: an unreachable labelled statement reached only from inside it is kept (the x86 walker drops it)',
+    'dead_after_const_or': 'wasm: an if that never reaches its else keeps what follows a returning then (the x86 walker drops it)',
     'autoinit_zero': 'wasm: -ftrivial-auto-var-init=zero is x86-64 only so far (TODO.md tier 1)',
 })
 

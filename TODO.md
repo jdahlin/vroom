@@ -542,6 +542,14 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
 ## Tier 3: features general C needs
 
 ### Codegen (`emit.c`)
+
+- [ ] **arm64/wasm: an unreachable statement whose labels are only reached
+  from inside it is still generated.**  The x86 walker drops it
+  (`wk_dead_closed`: every goto to its labels inside it, no address taken, its
+  cases in its own switch), as clang: the kernel's `scoped_cond_guard` after
+  an inlined `return 0` otherwise calls functions no one defines
+  (p4d_free_pud_page, __scoped_seqlock_bug, ...).
+  *Validate:* `ccs/vcc/tests/vcc/dead_closed_label.c` (xfail on arm64 and wasm).
 - [ ] **wasm: the optimizations the gcc torture tests assume** [P].  The
   wasm generator (`arch/wasm/emit/`) has no inliner or dead-code removal:
   `20020720-1`, `20030216-1`, `20041114-1`, `compare-3`, `pure-1`,
