@@ -71,6 +71,9 @@ static const opdesc x64_desc[X_NOPS] = {
 	[X_XADD] = X_DESC(X_D | OD_USE0 | X_U, X_MEM | OD_BARRIER | X_W),
 	[X_CMPXCHG] = { .regs = X_U | X_V, .fl = X_MEM | OD_BARRIER | X_W, .idef = X_BIT(RAX), .iuse = X_BIT(RAX) },
 	[X_MFENCE] = X_DESC(0, OD_BARRIER),
+	[X_BLENDVB] = { .fl = X_P, .idef = X_BIT(XMM0 + 1),
+		.iuse = X_BIT(XMM0) | X_BIT(XMM0 + 1) | X_BIT(XMM0 + 2) },
+	[X_PCMPSTR] = { .fl = X_P | X_W, .iuse = X_BIT(XMM0) | X_BIT(XMM0 + 1) },
 	[X_RAW] = { .br = RB_INDIRECT, .fl = X_MEM | OD_BARRIER | X_R | X_W | OD_FP, .idef = X_ALL_REGS, .iuse = X_ALL_REGS },
 	[X_BARRIER] = X_DESC(0, OD_LOAD | OD_STORE | OD_BARRIER | X_R | X_W),
 	[X_LEAL] = X_DESC(X_D, X_P),
@@ -136,6 +139,9 @@ VPRIV receffects x64_effects(const ecx *e, const rec *i)
 			f = (receffects){ .fl = OD_BARRIER }; /* printer emits nothing */
 		else if (!e || !e->wk)
 			f.use |= X_BIT(R12); /* unknown alignment may preserve its old value */
+	} else if (i->op == X_PCMPSTR) {
+		f.def |= X_BIT((i->cond & 1) ? RCX : XMM0);
+		if (!(i->cond & 2)) f.use |= X_BIT(RAX) | X_BIT(RDX);
 	} else if (i->op == X_TLS) {
 		if (i->cond == 2) {
 			f.def = X_CALL_DEF;
@@ -214,6 +220,8 @@ VPRIV const uint8_t *x64_flow_table(void)
 		[X_XADD] = EM_FLOW_NEXT,
 		[X_CMPXCHG] = EM_FLOW_NEXT,
 		[X_MFENCE] = EM_FLOW_NEXT,
+		[X_BLENDVB] = EM_FLOW_NEXT,
+		[X_PCMPSTR] = EM_FLOW_NEXT,
 		[X_RAW] = EM_FLOW_ENTRY,
 		[X_BARRIER] = EM_FLOW_ENTRY,
 		[X_LEAL] = EM_FLOW_NEXT,

@@ -70,7 +70,7 @@ static val x64_half_call(ecx *e, int name, val v, qty from, qty to)
 	wkarg a;
 	lval slot = x64_slot(e, 16);
 
-	x64_classify(e, from, &a);
+	x64_classify(e, from, &a, false);
 	a.slot = slot.off;
 	if (x64_isld(e->c, from)) {
 		lval src = x64_at(x64_toreg(e, &v, 8));
@@ -121,6 +121,12 @@ VPRIV val x64_fbin(ecx *e, int op, qty t, val a, val b)
 	}
 	x64_op3(e, X_FADD + k, x64_fsz(c, t), a.r, a.r, b.r);
 	x64_tfree(e, b.r);
+	return a;
+}
+
+VPRIV val x64_fsqrt(ecx *e, qty t, val a)
+{
+	x64_op3(e, X_FSQRT, x64_fsz(e->c, t), a.r, a.r, XNOREG);
 	return a;
 }
 

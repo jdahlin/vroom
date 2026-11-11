@@ -4,7 +4,7 @@
 
 VPRIV bool x64_framefree_candidate(ecx *e)
 {
-	return e->E->o->omit_frame_pointer && !e->E->noopt &&
+	return e->E->o->omit_frame_pointer && !e->E->noopt && !e->x64->interrupt &&
 	       !e->wk->foff && e->wk->falign <= 16 && !e->wk->spneed && !e->calls;
 }
 

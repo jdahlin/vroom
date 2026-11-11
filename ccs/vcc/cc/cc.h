@@ -28,6 +28,7 @@
 #include <stdint.h>
 
 #include "../pp/pp.h"
+#include "../lib/x86features.h"
 
 /* ---------------- types ---------------- */
 
@@ -277,6 +278,8 @@ typedef struct cc_opts {	/* fields before outfd: parse options, all in the decl 
 	int instrument;		/* -finstrument-functions */
 	int vcc_kernel;		/* -fvcc-kernel (or -D__KERNEL__): error() calls left after folding are dropped */
 	int lse;		/* target has LSE atomics (else ldaxr/stlxr loops) */
+	x86_features x86_features, x86_disabled, x86_raw, x86_override_on, x86_override_off;
+	int x86_features_set;	/* explicitly resolved by the driver; zero uses x86-64 */
 	int general_regs_only;	/* -mgeneral-regs-only: no FP/SIMD registers (variadic: no v0-v7 save area) */
 	int fast_math;		/* full fast-math permits finite, unsigned-zero root transforms */
 	int no_builtin;		/* -ffreestanding / -fno-builtin: abs() etc. are plain calls */

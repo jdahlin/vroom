@@ -190,6 +190,9 @@ static void x64_cs_cfi(tbuf *b, int r, int64_t off)
 	tb_c(b, '\n');
 }
 
+/* R12 first keeps its incoming value at -8(%rbp), as for normal realignment. */
+static const int interrupt_saved[14] = { R12, RAX, RCX, RDX, RBX, RSI, RDI, R8, R9, R10, R11, R13, R14, R15 };
+
 VPRIV void x64_print(ecx *e, tbuf *b, uint32_t s)
 {
 	cc *c = e->c;
@@ -200,6 +203,7 @@ VPRIV void x64_print(ecx *e, tbuf *b, uint32_t s)
 					   [X_SHR] = "shr", [X_SAR] = "sar", [X_NEG] = "neg", [X_NOT] = "not" };
 	int64_t frame = (e->wk->foff + 15) & ~(int64_t)15;
 	uint32_t A = e->wk->falign;
+	bool uintr = x86_feature_has(cc_x86_features(c, s), X86_FEATURE_UINTR);
 	bool cfi = e->E->o->cfi;	/* unwind tables: .cfi_* as clang writes them */
 	uint32_t dj = 0;		/* -g: the next row */
 
@@ -213,18 +217,50 @@ VPRIV void x64_print(ecx *e, tbuf *b, uint32_t s)
 	if (cfi)
 		tb_s(b, "\t.cfi_startproc\n");
 	if (e->E->o->xcf & 1)
-		tb_s(b, "\tendbr64\n");	/* -fcf-protection=branch: an IBT landing pad */
+		tb_s(b, "\tendbr64\n");
 	for (int k = e->E->o->pfe_m; k < e->E->o->pfe_n; k++)
-		tb_s(b, "\tnop\n");	/* -fpatchable-function-entry=N,M: N - M after the entry */
-	if (!X->framefree)
-		tb_s(b, cfi ? "\tpushq\t%rbp\n\t.cfi_def_cfa_offset 16\n\t.cfi_offset %rbp, -16\n"
-			      "\tmovq\t%rsp, %rbp\n\t.cfi_def_cfa_register %rbp\n" : "\tpushq\t%rbp\n\tmovq\t%rsp, %rbp\n");
-	if (A > 16) {
-		tb_s(b, "\tpushq\t%r12\n");
-		if (cfi) tb_s(b, "\t.cfi_offset %r12, -24\n");
-		tb_s(b, "\tandq\t$");
-		tb_i(b, -(int64_t)A);
-		tb_s(b, ", %rsp\n\tmovq\t%rsp, %r12\n");
+		tb_s(b, "\tnop\n");
+	if (X->interrupt) {
+		int cfa = X->interrupt == 2 ? 24 : 16;
+		if (cfi) {
+			tb_s(b, "\t.cfi_signal_frame\n");
+			tb_f(b, "\t.cfi_def_cfa %%rsp, %d\n\t.cfi_offset %%rsp, %d\n", cfa - 8, uintr ? 8 : 16);
+		}
+		tb_s(b, "\tpushq\t%rbp\n\tmovq\t%rsp, %rbp\n");
+		if (cfi) {
+			tb_f(b, "\t.cfi_def_cfa %%rbp, %d\n\t.cfi_offset %%rbp, %d\n", cfa, -cfa);
+			tb_f(b, "\t.cfi_offset %%rsp, %d\n", uintr ? 8 : 16);
+		}
+		int off = 0;
+		for (int k = 0; k < 14; k++) {
+			int r = interrupt_saved[k];
+			tb_f(b, "\tpushq\t%%%s\n", x64_r64[r]);
+			off -= 8;
+			if (cfi) tb_f(b, "\t.cfi_offset %%%s, %d\n", x64_r64[r], off - cfa);
+		}
+		tb_f(b, "\tandq\t$-%u, %%rsp\n", A);
+		if (!x64_nosimd(e)) {
+			/* Keep the complete legacy FP state, including a possibly full x87
+			   stack, MXCSR and all sixteen XMM registers. Reserve a multiple
+			   of the local frame alignment so R12 stays suitably aligned. */
+			uint32_t fpframe = A > 512 ? A : 512;
+			tb_f(b, "\tsubq\t$%u, %%rsp\n", fpframe);
+			tb_s(b, "\t.byte 0x48, 0x0f, 0xae, 0x04, 0x24 # fxsave64 (%rsp)\n\tfninit\n\tfldcw\t(%rsp)\n");
+		}
+		tb_s(b, "\tmovq\t%rsp, %r12\n\tcld\n");
+		if (cfi && !x64_nosimd(e))
+			for (int k = 0; k < 16; k++) x64_cs_cfi(b, 17 + k, 160 + 16 * k);
+	} else {
+		if (!X->framefree)
+			tb_s(b, cfi ? "\tpushq\t%rbp\n\t.cfi_def_cfa_offset 16\n\t.cfi_offset %rbp, -16\n"
+				      "\tmovq\t%rsp, %rbp\n\t.cfi_def_cfa_register %rbp\n" : "\tpushq\t%rbp\n\tmovq\t%rsp, %rbp\n");
+		if (A > 16) {
+			tb_s(b, "\tpushq\t%r12\n");
+			if (cfi) tb_s(b, "\t.cfi_offset %r12, -24\n");
+			tb_s(b, "\tandq\t$");
+			tb_i(b, -(int64_t)A);
+			tb_s(b, ", %rsp\n\tmovq\t%rsp, %r12\n");
+		}
 	}
 	if (frame > INT32_MAX) {
 		tb_s(b, "\tmovabsq\t$");
@@ -448,6 +484,15 @@ VPRIV void x64_print(ecx *e, tbuf *b, uint32_t s)
 			tb_s(b, "(%rip), ");
 			x64_reg(b, i->r[0], 8);
 			break;
+		case X_BLENDVB:
+			tb_s(b, "\tpblendvb\t%xmm0, %xmm2, %xmm1");
+			break;
+		case X_PCMPSTR:
+			tb_s(b, i->cond & 2 ? "\tpcmpi" : "\tpcmpe");
+			tb_s(b, i->cond & 1 ? "stri\t$" : "strm\t$");
+			tb_u(b, (uint8_t)i->imm);
+			tb_s(b, ", %xmm1, %xmm0");
+			break;
 		case X_RAW:
 			if (i->cond && e->wk->falign > 16)
 				efatal(e, e->curloc, "inline asm r12 operand or clobber conflicts with aligned frame base");
@@ -558,7 +603,7 @@ VPRIV void x64_print(ecx *e, tbuf *b, uint32_t s)
 			x64_reg(b, i->r[0], 8);
 			break;
 		case X_FSQRT:
-			tb_s(b, "\tsqrtsd\t");
+			tb_s(b, sz == 4 ? "\tsqrtss\t" : "\tsqrtsd\t");
 			x64_reg(b, i->r[1], 8);
 			tb_s(b, ", ");
 			x64_reg(b, i->r[0], 8);
@@ -642,14 +687,33 @@ VPRIV void x64_print(ecx *e, tbuf *b, uint32_t s)
 		if (dj + 1 == e->ndl)
 			tb_f(b, dj ? "\t.loc\t%u %u %u\n" : "\t.loc\t%u %u %u prologue_end\n",
 			     e->dl[dj].file, e->dl[dj].line, e->dl[dj].col);
-	if (e->wk->falign > 16) {
-		tb_s(b, "\tmovq\t-8(%rbp), %r12\n");
-		if (cfi) tb_s(b, "\t.cfi_same_value %r12\n");
+	if (X->interrupt) {
+		if (!x64_nosimd(e))
+			tb_s(b, "\t.byte 0x49, 0x0f, 0xae, 0x0c, 0x24 # fxrstor64 (%r12)\n");
+		if (cfi && !x64_nosimd(e))
+			for (int k = 0; k < 16; k++) tb_f(b, "\t.cfi_escape 0x08, %u\n", 17 + k);
+		tb_s(b, "\tleaq\t-112(%rbp), %rsp\n");
+		for (int k = 13; k >= 0; k--) {
+			int r = interrupt_saved[k];
+			tb_f(b, "\tpopq\t%%%s\n", x64_r64[r]);
+			if (cfi) tb_f(b, "\t.cfi_same_value %%%s\n", x64_r64[r]);
+		}
+		tb_s(b, "\tpopq\t%rbp\n");
+		if (cfi) tb_f(b, "\t.cfi_def_cfa %%rsp, %d\n\t.cfi_same_value %%rbp\n", X->interrupt == 2 ? 16 : 8);
+		if (X->interrupt == 2) tb_s(b, "\taddq\t$8, %rsp\n");
+		if (cfi) tb_s(b, "\t.cfi_def_cfa %rsp, 8\n\t.cfi_same_value %rbp\n");
+		/* Encodings accepted by the integrated assembler as well as GNU as. */
+		tb_s(b, uintr ? "\t.byte 0xf3, 0x0f, 0x01, 0xec # uiret\n" : "\t.byte 0x48, 0xcf # iretq\n");
+	} else {
+		if (e->wk->falign > 16) {
+			tb_s(b, "\tmovq\t-8(%rbp), %r12\n");
+			if (cfi) tb_s(b, "\t.cfi_same_value %r12\n");
+		}
+		if (!X->framefree)
+			tb_s(b, cfi ? "\tmovq\t%rbp, %rsp\n\tpopq\t%rbp\n\t.cfi_def_cfa %rsp, 8\n" : "\tmovq\t%rbp, %rsp\n\tpopq\t%rbp\n");
+		/* An interrupt returns to its saved frame; ordinary functions use the selected return thunk. */
+		tb_s(b, (e->E->o->xcf & 2) ? ((e->E->o->xcf & 8) ? "\tcs\n\tjmp\t__x86_return_thunk\n" : "\tjmp\t__x86_return_thunk\n") : "\tretq\n");
 	}
-	if (!X->framefree)
-		tb_s(b, cfi ? "\tmovq\t%rbp, %rsp\n\tpopq\t%rbp\n\t.cfi_def_cfa %rsp, 8\n" : "\tmovq\t%rbp, %rsp\n\tpopq\t%rbp\n");
-	/* -mfunction-return=thunk-extern: the return through __x86_return_thunk (cs-prefixed as clang) */
-	tb_s(b, (e->E->o->xcf & 2) ? ((e->E->o->xcf & 8) ? "\tcs\n\tjmp\t__x86_return_thunk\n" : "\tjmp\t__x86_return_thunk\n") : "\tretq\n");
 	if (e->wk->spneed)
 		tb_f(b, ".Lspfail%u:\n\tcallq\t__stack_chk_fail%s\n", s, e->E->o->pic ? "@PLT" : "");
 	tb_s(b, cfi ? "\t.cfi_endproc\n.Lfunc_end" : ".Lfunc_end");

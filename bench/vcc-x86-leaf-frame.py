@@ -13,6 +13,8 @@ SOURCE = r'''
 #define NI __attribute__((noinline))
 NI int fl_literal(void) { return 151; }
 NI void fl_empty(void) {}
+struct fl_interrupt_frame { unsigned long ip, cs, flags, sp, ss; };
+__attribute__((interrupt)) void fl_interrupt(struct fl_interrupt_frame *frame) { (void)frame; }
 NI int fl_other_literal(void) { return 152; }
 NI void *fl_frame(void) { return __builtin_frame_address(0); }
 NI void *fl_return(void) { return __builtin_return_address(0); }
@@ -190,7 +192,7 @@ def main():
                 if framed(body(text, function)) == omit:
                     raise RuntimeError(f'{name}: wrong frame policy for {function}')
             for function in ['fl_frame', 'fl_return', 'fl_raw', 'fl_parameter',
-                             'fl_stack', 'fl_aligned', 'fl_call', 'fl_setjmp', 'fl_alloca', 'fl_clobber']:
+                             'fl_stack', 'fl_aligned', 'fl_call', 'fl_setjmp', 'fl_alloca', 'fl_clobber', 'fl_interrupt']:
                 if not framed(body(text, function)):
                     raise RuntimeError(f'{name}: required frame omitted in {function}')
             if not args.no_run:
