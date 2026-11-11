@@ -2799,3 +2799,16 @@ instruktioner, inte cykler eller programkörtid. Fyra blandade x86-prov gav
 +0,0112 %; 200 regelfria funktioner +0,052–0,469 % beroende på mål; 200
 regelmättade funktioner −1,39–1,79 %. Detta är små prov, inte en fullständig
 prestandagrind. Jämförelseregler för heltalsgränser och bred O2-täckning återstår.
+
+### OPT1: heltalsjämförelser vid gränsvärden (2026-11-11)
+
+Ett gemensamt recept i `emit/opt/cmpbounds.c` känner igen relationer med
+konstant resultat vid lägsta/högsta värdet för konverterade 32-/64-bitars
+heltal. Operanden evalueras fortfarande: anrop och volatila/atomiska läsningar
+bevaras. Endast numeriska AST-litteraler med identisk konverterad typ ingår;
+pekare, flyttal, _BitInt, bredare typer och övriga konstantuttryck faller
+igenom. Värde och gren testas på x86, arm64, wasm32 och wasm64 O0–O3;
+assemblerkontroller verifierar även anrop och volatila/atomiska läsningar.
+O0 och VCC_NOOPT är byteidentiska mot föräldern på testfilen för alla fyra mål.
+Unity och filvis bygge passerar. Ytterligare gränsregler och kostnadsprofilering
+återstår innan denna gren är klar för granskning.
