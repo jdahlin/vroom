@@ -426,6 +426,7 @@ VPRIV uint32_t primary(cc *c);
 VPRIV __attribute__((noinline)) uint32_t postfix_ops(cc *c, uint32_t n);
 static inline uint32_t postfix(cc *c, uint32_t n);
 /* exprop.c */
+VPRIV uint32_t capture_vla_bounds(cc *c, qty ty, uint32_t first, uint32_t value, uint32_t loc);
 VPRIV uint32_t cast_expr(cc *c);
 VPRIV uint32_t cond_expr(cc *c);
 VPRIV uint32_t assign_expr(cc *c);

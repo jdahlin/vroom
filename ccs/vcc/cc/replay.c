@@ -213,9 +213,10 @@ static void node_kinds(const node *x, uint8_t k[3])
 	case N_CALL: k[0] = K_NODE, k[1] = K_LIST; break;
 	case N_BUILTIN: case N_INIT: k[1] = K_LIST; break;
 	case N_CAST: case N_UNARY: case N_ADDR: case N_DEREF: case N_PREINC: case N_PREDEC: case N_POSTINC:
-	case N_POSTDEC: case N_SIZEOF_VLA: case N_STMTEXPR: case N_VAARG: case N_EXPR: case N_GOTO_IND: case N_RETURN:
+	case N_POSTDEC: case N_STMTEXPR: case N_VAARG: case N_EXPR: case N_GOTO_IND: case N_RETURN:
 		k[0] = K_NODE;
 		break;
+	case N_SIZEOF_VLA: k[0] = K_NODE, k[1] = K_TYPE; break;
 	case N_COMPLIT: k[0] = K_NODE, k[1] = K_SYM; break;
 	case N_BLOCK: k[0] = x->aux ? K_LIST : K_LISTO, k[1] = K_LIST; break;
 	case N_DECL: k[0] = K_SYM, k[1] = K_NODE; break;

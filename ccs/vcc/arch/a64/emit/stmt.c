@@ -715,7 +715,7 @@ static void gen_decl(ecx *e, const node *x)
 	const sym *y = &c->syms[s];
 	bind *b;
 
-	if (unlikely(vm_type(c, y->ty)))
+	if (!x->aux && unlikely(vm_type(c, y->ty)))
 		vla_fix(e, y->ty, false);
 	if (y->kind != S_VAR || y->sc == SC_STATIC || y->sc == SC_EXTERN || y->sc == SC_TYPEDEF)
 		return;

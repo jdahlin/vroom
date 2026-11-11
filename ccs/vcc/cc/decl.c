@@ -1006,6 +1006,7 @@ VPRIV void declaration(cc *c, vec *out, bool file)
 			if (out) {
 				uint32_t n = mk2(c, N_DECL, prim(TY_VOID), d.loc, s, v);
 
+				N(n)->aux = 1; /* inferred type: its bounds are evaluated by the initializer */
 				vpush(c, out, n);
 			}
 			if (decl_comma_typo(c))
@@ -1206,6 +1207,13 @@ VPRIV void declaration(cc *c, vec *out, bool file)
 					}
 				}
 			}
+		}
+		if (out && ds.sc == SC_TYPEDEF) {
+			for (qty vm = t; is_array(c, vm) || is_ptr(c, vm); vm = T(c, vm)->base)
+				if (T(c, vm)->flags & TF_VLA) {
+					vpush(c, out, mk2(c, N_DECL, prim(TY_VOID), d.loc, s, 0));
+					break;
+				}
 		}
 		if (c->syms[s].kind == S_VAR)	/* the declaration's range, for notes */
 			c->syms[s].plb = dbeg, c->syms[s].ple = c->prevloc;

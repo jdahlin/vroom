@@ -193,7 +193,7 @@ enum {
 	N_ASSIGN,	/* aux: 0 or the compound op (T_PLUS, ...), a, b */
 	N_COND,		/* a ? b : c (b == 0: GNU a ?: c) */
 	N_COMMA,
-	N_SIZEOF_VLA,	/* a: expression of VLA type */
+	N_SIZEOF_VLA,	/* a: expression, b: VLA type; aux=1 captures a new type-name bound */
 	N_STMTEXPR,	/* a: compound statement */
 	N_COMPLIT,	/* a: init, b: sym of the object */
 	N_INIT,		/* initializer list: b: struct/union (aux 0/2): c values; array (aux 1): c (lo, hi, value) */
@@ -205,7 +205,7 @@ enum {
 	/* statements */
 	N_BLOCK,	/* b: list, c: count */
 	N_EXPR,		/* a */
-	N_DECL,		/* a: sym, b: init or 0 */
+	N_DECL,		/* a: sym, b: init or 0; aux=1: initializer supplies inferred-type bounds */
 	N_IF, N_WHILE, N_DO,
 	N_FOR,		/* a: init, b: cond, c: list of [step, body] */
 	N_SWITCH,	/* a: cond, b: body */

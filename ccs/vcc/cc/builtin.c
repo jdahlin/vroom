@@ -1604,17 +1604,18 @@ VPRIV uint32_t builtin_call(cc *c, const builtin *b, uint32_t loc)
 	case BI_OFFSETOF:
 		return offsetof_expr(c, loc);
 	case BI_VA_ARG: {
-		uint32_t ap, n;
+		uint32_t ap, n, first_bound;
 		qty t;
 
 		expect(c, T_LPAREN, "'('");
 		ap = assign_expr(c);
 		expect(c, T_COMMA, "','");
+		first_bound = c->nnode;
 		t = type_name(c);
 		expect_here(c, T_RPAREN, "')'");
 		n = mk(c, N_VAARG, t, loc);
 		N(n)->a = ap;
-		return n;
+		return capture_vla_bounds(c, t, first_bound, n, loc);
 	}
 	case BI_CONSTANT_P: {
 		uint32_t n;

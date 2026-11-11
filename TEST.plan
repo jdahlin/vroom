@@ -405,6 +405,21 @@ byggsätten. Bitvis regression, flagg-/namnprov och kernel-sema
 Integration med den kommande x86-funktionsspecifika target-policyn kräver
 en separat effektiv-feature-kontroll; detta påstås inte färdigverifierat här.
 
+VLA-gränser i nya cast-/compound-literal-/`va_arg`-typnamn evalueras och
+sparas nu där typen skapas. Tidigare typedef-gränser återanvänds;
+`__auto_type` låter initialiseraren styra ordningen utan dubbel evaluering.
+Prepass ser deklarationsgränserna och replay flyttar VLA-typoperanden som
+typ, inte heltal. `vla-{12,13,14}` och `vla-stexp-7` går därmed på båda
+Linux-målen (det senare kraschade tidigare på ARM). Isolerad rättning
+klarar unity/nonunity, -O0/-O2 regressioner och kernel-sema 887/887 i båda
+lägen. Nya regressionen kör också grönt i wasm64 via emsdk/node.
+Två `typeof`-fall, `pr114831-2` och `vla-15`, samt inline-alloca återstår.
+
+Kombinerat fryst checkpoint `7afcdea`, före signmask-/typnamnsrättningarna,
+är verifierat i båda byggsätten: **145/145 x86** (fem referensundantag),
+**150/150 ARM/QEMU**, tvåfils-constexpr-ABI samt tre ursprungliga GCC-fall
+per mål. Fulla binärhashar/loggar: `work/results/checkpoint-7afcdea-validation.json`.
+
 Kvar:
 - Alla återstående matchande filer och optimeringskonfigurationer; nästlade
   kataloger med egna `.exp`-drivrutiner och LTO har ännu ingen motsvarighet.

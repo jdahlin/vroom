@@ -1174,6 +1174,10 @@ static val gen_inner(ecx *e, uint32_t n)
 		return vreg(r);
 	}
 	case N_SIZEOF_VLA: {
+		if (x->aux == 1) {
+			vla_fix(e, x->b, false);
+			return vla_bytes(e, x->b);
+		}
 		const sym *y = x->a && N(x->a)->op == N_VAR ? &c->syms[N(x->a)->a] : NULL;
 
 		if (y && y->kind == S_VAR && binding(e, N(x->a)->a)->kind == B_INDIRECT &&

@@ -396,6 +396,10 @@ static int walk(pre *P, uint32_t n)
 		const sym *y = &c->syms[x->a];
 
 		lab = walk(P, x->b);
+		if (!x->aux)
+			for (qty t = y->ty; is_array(c, t) || is_ptr(c, t); t = T(c, t)->base)
+				if ((T(c, t)->flags & TF_VLA) && T(c, t)->n)
+					lab |= walk(P, T(c, t)->n);
 		if (x->b && y->kind == S_VAR)
 			note_fwrite(P, x->a, x->b);
 		if (is_local_var(c, x->a)) {

@@ -2657,6 +2657,10 @@ static val wk_gen_inner(ecx *e, uint32_t n)
 		return wk_fpconst(e, x->ty, c->fpool[x->a], q);
 	}
 	case N_SIZEOF_VLA:
+		if (x->aux == 1) {
+			wk_vla_fix(e, x->b, false);
+			return wk_vla_bytes(e, x->b);
+		}
 		if (x->a && N(x->a)->op == N_VAR && is_local_var(c, N(x->a)->a) && (T(c, c->syms[N(x->a)->a].ty)->flags & TF_VLA)) {
 			lval l = { .k = L_FRAME, .off = wk_local(e, N(x->a)->a) + 16, .align = 8 };
 			int r = LO(treg)(e);

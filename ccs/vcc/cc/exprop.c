@@ -364,11 +364,34 @@ static uint32_t explicit_cast(cc *c, uint32_t n, qty to, uint32_t loc)
 	return r;
 }
 
+/* Evaluate and capture only bounds introduced by this type-name. Typedef
+   bounds already have their saved value from the declaration. A synthetic
+   one-dimensional char array lets the existing VLA cache retain each bound. */
+VPRIV uint32_t capture_vla_bounds(cc *c, qty ty, uint32_t first, uint32_t value, uint32_t loc)
+{
+	uint32_t effects = 0;
+
+	for (qty t = ty; is_ptr(c, t) || is_array(c, t); t = T(c, t)->base) {
+		const ctype *a = T(c, t);
+		if (a->kind == TY_ARRAY && (a->flags & TF_VLA) && a->n >= first && a->n) {
+			uint32_t bound = a->n;
+			qty bt = ty_vla(c, prim(TY_CHAR), bound);
+			uint32_t fix = mk(c, N_SIZEOF_VLA, c->t_size, loc);
+
+			N(fix)->a = bound;
+			N(fix)->b = bt;
+			N(fix)->aux = 1; /* capture the bound before reading the cached size */
+			effects = effects ? mk2(c, N_COMMA, c->t_size, loc, effects, fix) : fix;
+		}
+	}
+	return effects ? mk2(c, N_COMMA, N(value)->ty, loc, effects, value) : value;
+}
+
 /* (type-name) cast-expression or compound literal; '(' (at loc) is consumed */
 static __attribute__((noinline)) uint32_t cast_paren(cc *c, uint32_t loc)
 {
 	{
-		uint32_t n;
+		uint32_t n, first_bound = c->nnode;
 		int e0 = c->errors;
 		qty ty;
 		bool bad;
@@ -388,7 +411,7 @@ static __attribute__((noinline)) uint32_t cast_paren(cc *c, uint32_t loc)
 				c->syms[s].flags |= SF_GLOBAL | SF_DEFINED;
 			n = mk2(c, N_COMPLIT, ty, loc, init, s);
 			N(n)->flags = NF_LVALUE;
-			return postfix(c, n);
+			return capture_vla_bounds(c, ty, first_bound, postfix(c, n), loc);
 		}
 		{
 			uint32_t td = c->tn_tdef, r;
@@ -400,7 +423,7 @@ static __attribute__((noinline)) uint32_t cast_paren(cc *c, uint32_t loc)
 			/* an explicit cast to a typedef in a body: its name on the node's free b (-Wformat) */
 			if (td && c->fn && r != n && N(r)->op == N_CAST && !N(r)->b)
 				N(r)->b = td;
-			return r;
+			return capture_vla_bounds(c, ty, first_bound, r, loc);
 		}
 	}
 }
