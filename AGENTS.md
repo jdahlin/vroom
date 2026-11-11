@@ -31,7 +31,11 @@ assembler, linker, behind `vcc`/`vas`/`vld` shims and the `vccd` server.
     the emitter's text buffer (`tbuf.h`), growable arrays (`vec.h`), string
     hashes (`hash.h`; XXH3/BLAKE3 in `ldhash.c`), file mapping (`mapfile.h`),
     interning (`intern.c`), binary128 (`f128.h`), thread counters
-    (`vperf.h`).  Variants not yet merged are listed in TODO.md.
+    (`vperf.h`), scoped resources through `cleanup` (`defer.h`: VAUTOFREE,
+    VAUTOCLOSE, VLOCK; not across a longjmp), attributes for our own
+    declarations (`attr.h`: VUSE, VNONNULL) and overflow-checked bounds for
+    sizes read from input files (`ckd.h`: vckd_range, vckd_add, vckd_mul).
+    Variants not yet merged are listed in TODO.md.
   - `lex/`: SIMD lexer and token cache; `lextest.c` drives it.
   - `pp/`: preprocessor (pull model, clang-exact expansion), its generated
     tables (`ppdata*.inc` via `gen-ppdata.sh`) and the include-directory cache.
