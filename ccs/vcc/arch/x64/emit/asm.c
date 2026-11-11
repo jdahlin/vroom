@@ -146,7 +146,7 @@ static bool x64_immok(int ch, i128 v)
 }
 
 /* a callee-saved register the asm uses: saved by the prologue */
-static void x64_csused(ecx *e, int r)
+VPRIV void x64_csused(ecx *e, int r)
 {
 	xst *X = e->x64;
 
@@ -230,6 +230,7 @@ VPRIV void x64_asm(ecx *e, uint32_t n)
 			}
 			X->live |= 1u << r;
 		}
+	X->asmcs = true;	/* (operands may take callee-saved registers from here) */
 	/* outputs: lvalues; a register's value read first for + */
 	for (uint32_t i = 0; i < a->nout; i++) {
 		const char *cs = c->strs[a->ops[i].constraint - 1].s;
@@ -622,6 +623,7 @@ VPRIV void x64_asm(ecx *e, uint32_t n)
 			x64_tfree(e, o->l.r);
 	}
 	X->live &= ~reserved;
+	X->asmcs = false;
 	for (int r = 0; r < 32; r++)
 		if (saved & (1u << r)) {
 			lval s = { .k = L_FRAME, .off = sslot[r], .align = 8 };

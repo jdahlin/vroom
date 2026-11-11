@@ -90,6 +90,7 @@ typedef struct xst {
 	rec *tw;		/* twoaddr.c's output */
 	uint32_t ntw;
 	uint32_t live;		/* temporaries in use (bit = register) */
+	bool asmcs;		/* inside an asm: out of temporaries, take a callee-saved register (saved by the prologue) */
 	int pushes;		/* 8-byte pushes outstanding (the call alignment) */
 	/* the function's incoming arguments (abi.c) */
 	int ngp, nfp;		/* named arguments in general and vector registers */
@@ -109,6 +110,7 @@ VPRIV void x64_movi(ecx *e, int r, int64_t v);
 VPRIV uint32_t x64_save(ecx *e, const uint8_t *regs, int n, int k0, int k1);
 VPRIV void x64_restore(ecx *e, uint32_t sv);
 VPRIV int x64_ftreg(ecx *e);
+VPRIV void x64_csused(ecx *e, int r);	/* a callee-saved register used: the prologue saves it */
 VPRIV rec *x64_put(ecx *e, int op);
 VPRIV void x64_twoaddr(ecx *e);
 VPRIV void x64_print(ecx *e, tbuf *b, uint32_t s);

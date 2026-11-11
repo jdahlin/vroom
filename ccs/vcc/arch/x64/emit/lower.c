@@ -116,6 +116,18 @@ VPRIV int x64_treg(ecx *e)
 			X->live |= 1u << x64_order[k];
 			return x64_order[k];
 		}
+	if (X->asmcs) {
+		/* an asm that clobbers every temporary (call_on_stack): its operands in callee-saved
+		   registers, as clang (the prologue saves them) */
+		static const int cs[] = { RBX, R12, R13, R14, R15 };
+
+		for (int k = 0; k < 5; k++)
+			if (!(X->live & (1u << cs[k]))) {
+				X->live |= 1u << cs[k];
+				x64_csused(e, cs[k]);
+				return cs[k];
+			}
+	}
 	efatal(e, e->curloc, "x86-64: expression too complex (out of registers)");
 }
 
