@@ -1065,6 +1065,71 @@ runtime:
 		}
 		return v;
 	}
+	case BI_ISGREATER: case BI_ISGREATEREQUAL: case BI_ISLESS: case BI_ISLESSEQUAL:
+	case BI_ISLESSGREATER: case BI_ISUNORDERED: {
+		qty at = N(arg[0])->ty, bt = N(arg[1])->ty;
+		qty ct = is_ld(c, at) ? at : is_ld(c, bt) ? bt :
+		         (is_flt(c, at) && tsize(c, at) == 8) ||
+		         (is_flt(c, bt) && tsize(c, bt) == 8) ? prim(TY_DOUBLE) : prim(TY_FLOAT);
+		val a = cast(e, gen(e, arg[0]), at, ct, CK_INT);
+		val b = cast(e, gen(e, arg[1]), bt, ct, CK_INT);
+		int op = x->aux == BI_ISGREATER ? T_GREATER :
+		         x->aux == BI_ISGREATEREQUAL ? T_GREATEREQ :
+		         x->aux == BI_ISLESS ? T_LESS :
+		         x->aux == BI_ISLESSEQUAL ? T_LESSEQ : T_EXCLAIMEQ;
+
+		if (!is_ld(c, ct)) {
+			int cond = f_cmp(e, op, fpk(e, ct), &a, &b);
+			val_free(e, &b);
+			if (x->aux == BI_ISUNORDERED)
+				cond = C_VS;
+			cset(e, a.r, cond);
+			if (x->aux == BI_ISLESSGREATER) {
+				int ordered = treg(e);
+				cset(e, ordered, C_VC);
+				op3(e, I_AND, 0, a.r, a.r, ordered);
+				tfree(e, ordered);
+			}
+			return vreg(a.r);
+		}
+		if (x->aux != BI_ISUNORDERED && x->aux != BI_ISLESSGREATER)
+			return f_compare(e, op, ct, a, b);
+
+		/* Binary128 NaNs: exponent all ones and a nonzero fraction.
+		 * Inspect bits so quiet NaNs do not raise FE_INVALID. Keep the
+		 * original operands for the ordered inequality when needed. */
+		lval saved[2];
+		val operands[2] = { a, b };
+		int nanregs[2];
+		for (int i = 0; i < 2; i++) {
+			if (x->aux == BI_ISLESSGREATER) {
+				saved[i] = (lval){ .k = L_FRAME, .off = slot(e, 16, 16), .align = 16 };
+				store(e, &saved[i], ct, &operands[i]);
+			}
+			toreg2(e, &operands[i], false);
+			int lo = operands[i].r, hi = operands[i].r2;
+			opi(e, I_SUBSI, 1, ZR, lo, 0);
+			cset(e, lo, C_NE);
+			shift_imm(e, T_LESSLESS, 1, hi, hi, 1);
+			op3(e, I_ORR, 1, hi, hi, lo);
+			tfree(e, lo);
+			opi(e, I_SUBSI, 1, ZR, hi, (int64_t)0xfffe000000000000ULL);
+			cset(e, hi, C_HI);
+			nanregs[i] = hi;
+		}
+		op3(e, I_ORR, 0, nanregs[0], nanregs[0], nanregs[1]);
+		tfree(e, nanregs[1]);
+		if (x->aux == BI_ISUNORDERED)
+			return vreg(nanregs[0]);
+		opi(e, I_EORI, 0, nanregs[0], nanregs[0], 1);
+		a = load(e, &saved[0], ct);
+		b = load(e, &saved[1], ct);
+		val ne = f_compare(e, T_EXCLAIMEQ, ct, a, b);
+		toreg(e, &ne);
+		op3(e, I_AND, 0, ne.r, ne.r, nanregs[0]);
+		tfree(e, nanregs[0]);
+		return ne;
+	}
 	case BI_ISNAN: case BI_ISINF: case BI_ISFINITE: case BI_SIGNBIT: case BI_ISNORMAL: {
 		cval cv;
 
