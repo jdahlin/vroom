@@ -61,6 +61,7 @@ WASM_XFAIL.update({
     'if_call_const': 'wasm: an if on a call folded to a constant keeps both branches (the x86 walker folds it)',
     'cond_dead_and': 'wasm: the dead operand of a known && is generated (the x86 walker drops it)',
     'and_zero_fold': 'wasm: x & 0 with x not constant is not folded (the x86 walker folds it)',
+    'if_stmtexpr_const': 'wasm: a statement expression constant does not decide an if (the x86 walker folds it)',
     'autoinit_zero': 'wasm: -ftrivial-auto-var-init=zero is x86-64 only so far (TODO.md tier 1)',
 })
 

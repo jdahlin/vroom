@@ -808,7 +808,8 @@ VPRIV void wk_stmt(ecx *e, uint32_t n)
 			tc = N(tc)->a;
 		/* (a call too: an inlined function or a folded builtin may give a constant,
 		   if (!__builtin_strcmp(op, "<")), if (dax_mapping(m))) */
-		if ((cc_eval(c, x->a, &cv) && cv.kind == CV_INT) || wk_isconst(e, x->a) || N(tc)->op == N_CALL) {
+		if ((cc_eval(c, x->a, &cv) && cv.kind == CV_INT) || wk_isconst(e, x->a) || N(tc)->op == N_CALL ||
+		    (N(tc)->op == N_STMTEXPR && !(e->E->nflags[tc] & NA_LABEL))) {	/* (WARN_ON_ONCE(1): a constant from a statement expression) */
 			/* Front-end constant_p can change after binding inline arguments.
 			   Trust the generated value and retain condition effects exactly once. */
 			test = wk_gen(e, x->a);
