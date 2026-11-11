@@ -4,7 +4,7 @@
 
 /* ---------------- classification (System V 3.2.3) ---------------- */
 
-enum { XC_NONE, XC_INT, XC_SSE, XC_MEM, XC_SSEUP };
+enum { XC_NONE, XC_INT, XC_SSE, XC_MEM, XC_SSEUP, XC_X87, XC_X87UP };
 
 static int x64_merge(int a, int b)
 {
@@ -16,6 +16,8 @@ static int x64_merge(int a, int b)
 		return XC_MEM;
 	if (a == XC_INT || b == XC_INT)
 		return XC_INT;
+	if (a == XC_X87 || a == XC_X87UP || b == XC_X87 || b == XC_X87UP)
+		return XC_MEM;
 	return XC_SSE;
 }
 
@@ -41,13 +43,16 @@ static bool x64_cls(cc *c, qty t, uint64_t off, int cls[2])
 				cls[fo / 8] = x64_merge(cls[fo / 8], XC_INT);
 				continue;
 			}
-			if (talign(c, f->ty) && fo % talign(c, f->ty))
-				return false;	/* an unaligned field: memory */
 			if (!x64_cls(c, f->ty, fo, cls))
 				return false;
 		}
 		return true;
 	}
+	/* Natural alignment applies even to zero-length arrays: a packed
+	   array at an unaligned offset still gives the record MEMORY class. */
+	uint32_t align = c->ty[x->canon].align;
+	if (align && off % align)
+		return false;
 	if (k == TY_ARRAY) {
 		uint64_t es = tsize(c, x->base), n = es ? tsize(c, t) / es : 0;
 
@@ -58,7 +63,7 @@ static bool x64_cls(cc *c, qty t, uint64_t off, int cls[2])
 	}
 	if (k == TY_VECTOR) {
 		/* clang's classes for vectors: up to 4 bytes INTEGER; 8 bytes SSE (<1 x double>
-		   memory, <1 x i64> INTEGER); 16 bytes SSE + SSEUP; larger: memory (no AVX) */
+		   memory, <1 x i64> SSE); 16 bytes SSE + SSEUP; larger: memory (no AVX) */
 		uint64_t sz = tsize(c, t), es = tsize(c, x->base);
 
 		if (sz <= 4) {
@@ -66,8 +71,8 @@ static bool x64_cls(cc *c, qty t, uint64_t off, int cls[2])
 			return (off % 8) + sz <= 8;
 		}
 		if (sz == 8 && off % 8 == 0) {
-			if (es == 8)
-				return is_flt(c, x->base) ? false : (cls[off / 8] = x64_merge(cls[off / 8], XC_INT), true);
+			if (es == 8 && is_flt(c, x->base))
+				return false;
 			cls[off / 8] = x64_merge(cls[off / 8], XC_SSE);
 			return true;
 		}
@@ -81,6 +86,11 @@ static bool x64_cls(cc *c, qty t, uint64_t off, int cls[2])
 		if (off % 16 || cls[off / 8] != XC_NONE)
 			return false;
 		cls[off / 8] = XC_SSE, cls[off / 8 + 1] = XC_SSEUP;
+		return true;
+	}
+	if (k == TY_LDOUBLE && off == 0) {
+		cls[0] = x64_merge(cls[0], XC_X87);
+		cls[1] = x64_merge(cls[1], XC_X87UP);
 		return true;
 	}
 	if (k == TY_LDOUBLE || k == TY_INT128 || k == TY_UINT128)
@@ -124,8 +134,8 @@ VPRIV void x64_classify0(ecx *e, qty t, wkarg *a)
 	}
 	if (size == 0)
 		return;	/* an empty record: nothing is passed */
-	if (is_vec(c, t) && size == 32) {
-		/* clang without AVX: passed in memory, returned in xmm0, xmm1 (-Wpsabi) */
+	if (is_vec(c, t) && (size == 32 || size == 64)) {
+		/* clang without AVX: passed in memory, returned in 2 or 4 xmm registers (-Wpsabi) */
 		a->mem = true, a->up = true;
 		return;
 	}
@@ -137,6 +147,14 @@ VPRIV void x64_classify0(ecx *e, qty t, wkarg *a)
 		a->mem = true;
 		return;
 	}
+	if (cls[0] == XC_X87 && cls[1] == XC_X87UP) {
+		a->mem = true, a->x87 = true;
+		return;
+	}
+	if (cls[0] == XC_X87 || cls[1] == XC_X87UP) {
+		a->mem = true;
+		return;
+	}
 	if (cls[1] == XC_SSEUP) {
 		if (cls[0] != XC_SSE) {
 			a->mem = true;
@@ -145,7 +163,7 @@ VPRIV void x64_classify0(ecx *e, qty t, wkarg *a)
 		a->n = 1, a->cls[0] = WA_SSE, a->up = true;	/* one xmm register */
 		return;
 	}
-	a->n = size > 8 ? 2 : 1;
+	a->n = cls[1] != XC_NONE ? 2 : cls[0] != XC_NONE ? 1 : 0;
 	for (int i = 0; i < a->n; i++)
 		a->cls[i] = cls[i] == XC_SSE ? WA_SSE : WA_INT;
 }
@@ -166,19 +184,37 @@ VPRIV void x64_x87st(ecx *e, const lval *l);
 
 /* ---------------- calls ---------------- */
 
-static lval x64_fr(int32_t off) { return (lval){ .k = L_FRAME, .off = off, .align = 8 }; }
+static lval x64_fr(int64_t off) { return (lval){ .k = L_FRAME, .off = off, .align = 8 }; }
 
 VPRIV val x64_call(ecx *e, uint32_t ref, val *fn, const wkarg *a, int n, bool variadic, const wkarg *r, qty rt)
 {
 	cc *c = e->c;
+
+	/* An explicit builtin needs no libm symbol. Copy the x87 representation
+	 * and clear only its sign, without an FP load that could alter a NaN. */
+	if (RKIND(ref) == RK_NAME && RIDX(ref) < 0x8000000u && n == 1 && r && r->x87 &&
+	    KIND(c, rt) == TY_LDOUBLE && !strcmp(cc_builtin_name(RIDX(ref)), "__builtin_fabsl")) {
+		int q = x64_treg(e);
+		lval src = x64_fr(a[0].slot), dst = x64_fr(r->slot);
+
+		x64_mem(e, X_LD, 8, q, &src, false);
+		x64_mem(e, X_ST, 8, q, &dst, false);
+		src.off += 8;
+		dst.off += 8;
+		x64_mem(e, X_LD, 2, q, &src, false);
+		x64_op3(e, X_ANDI, 8, q, q, XNOREG)->imm = 0x7fff;
+		x64_mem(e, X_ST, 2, q, &dst, false);
+		x64_tfree(e, q);
+		return vconst(0);
+	}
 	xst *X = e->x64;
 	uint32_t saved = X->live & X_TEMPS, fsaved = X->live & X_FTEMPS;
 	int retsize = KIND(c, rt) == TY_VOID ? 0 : wk_size(c, rt);
 	bool retsgn = wk_signed(c, rt), retf = is_flt(c, rt) && !r;
 	int gp = r && r->mem && !r->x87 && !r->up ? 1 : 0, fp = 0;
 	int64_t total = 0, pad;
-	uint32_t maxal = 16;
-	int32_t spsl = 0;	/* stack arguments aligned above 16: rsp saved here, then aligned */
+	uint32_t stackalign = 16;
+	int64_t savedsp = 0;
 	int64_t *place = calloc((size_t)(n ? n : 1), sizeof *place);	/* stack offset, or -1: registers */
 	rec *i;
 
@@ -194,9 +230,9 @@ VPRIV val x64_call(ecx *e, uint32_t ref, val *fn, const wkarg *a, int n, bool va
 			place[k] = -1;
 			continue;
 		}
+		if (a[k].align > stackalign)
+			stackalign = a[k].align;
 		total = (total + a[k].align - 1) & ~(int64_t)(a[k].align - 1);
-		if (a[k].align > maxal)
-			maxal = a[k].align;
 		place[k] = total;
 		total += (int64_t)((a[k].size + 7) & ~(uint64_t)7);
 	}
@@ -213,26 +249,41 @@ VPRIV val x64_call(ecx *e, uint32_t ref, val *fn, const wkarg *a, int n, bool va
 			x64_mem(e, X_ST, 8, q, &d, false);
 			X->pushes++;
 		}
+	if (stackalign > 16) {
+		lval slot = x64_fr(savedsp = wk_slot(e, 8, 8));
+
+		x64_mem(e, X_ST, 8, RSP, &slot, false);
+	}
 	total = (total + 15) & ~(int64_t)15;
 	pad = (X->pushes * 8 + total) % 16 ? 8 : 0;
-	if (maxal > 16) {
-		lval sl = x64_fr(spsl = wk_slot(e, 8, 8));
-
-		x64_mem(e, X_ST, 8, RSP, &sl, false);
-		x64_op3(e, X_ANDI, 8, RSP, RSP, XNOREG)->imm = -(int64_t)maxal;
-		total = (total + maxal - 1) & ~(int64_t)(maxal - 1);
-		pad = 0;
-		x64_put(e, X_ADJSP)->imm = -total;
-	} else if (total + pad) {
+	if (total + pad) {
 		x64_put(e, X_ADJSP)->imm = -(total + pad);
 		X->pushes += (int)((total + pad) / 8);
 	}
+	if (stackalign > 16)
+		x64_op3(e, X_ANDI, 8, RSP, RSP, XNOREG)->imm = -(int64_t)stackalign;
 	/* stack arguments: their slots' words into the outgoing area */
 	for (int k = 0; k < n; k++) {
 		if (place[k] < 0)
 			continue;
+		if (a[k].size > 128) {
+			/* A large by-value aggregate must not expand to one record per
+			   word. Preserve live values (including an indirect callee)
+			   while using the same REP copy as ordinary record assignment. */
+			static const uint8_t regs[] = { RDI, RSI, RCX };
+			uint32_t sv = x64_save(e, regs, 3, -1, -1);
+			lval s = x64_fr(a[k].slot);
+			lval d = { .k = L_REG, .r = RSP, .off = place[k] + 8 * __builtin_popcount(sv) };
+
+			x64_mem(e, X_LEA, 8, RSI, &s, false);
+			x64_mem(e, X_LEA, 8, RDI, &d, false);
+			x64_movi(e, RCX, (int64_t)a[k].size);
+			x64_put(e, X_REP)->cond = 0;
+			x64_restore(e, sv);
+			continue;
+		}
 		for (uint64_t o = 0; o < a[k].size; o += 8) {
-			lval s = x64_fr(a[k].slot + (int32_t)o), d = { .k = L_REG, .r = RSP, .off = place[k] + (int64_t)o };
+			lval s = x64_fr(a[k].slot + (int64_t)o), d = { .k = L_REG, .r = RSP, .off = place[k] + (int64_t)o };
 
 			x64_mem(e, X_LD, 8, R11, &s, false);
 			x64_mem(e, X_ST, 8, R11, &d, false);
@@ -266,10 +317,11 @@ VPRIV val x64_call(ecx *e, uint32_t ref, val *fn, const wkarg *a, int n, bool va
 		i->ref = ref;
 		i->cond = variadic;
 	}
-	if (spsl) {
-		lval sl = x64_fr(spsl);
+	if (savedsp) {
+		lval slot = x64_fr(savedsp);
 
-		x64_mem(e, X_LD, 8, RSP, &sl, false);
+		x64_mem(e, X_LD, 8, RSP, &slot, false);
+		X->pushes -= (int)((total + pad) / 8);
 	} else if (total + pad) {
 		x64_put(e, X_ADJSP)->imm = total + pad;
 		X->pushes -= (int)((total + pad) / 8);
@@ -283,7 +335,7 @@ VPRIV val x64_call(ecx *e, uint32_t ref, val *fn, const wkarg *a, int n, bool va
 			x64_x87st(e, &d);	/* _Complex long double: the imaginary part from st(1) */
 		}
 	} else if (r && r->mem && r->up) {
-		for (int w = 0; w < 2; w++) {
+		for (int w = 0; w < (int)(r->size / 16); w++) {
 			lval d = x64_fr(r->slot + 16 * w);
 
 			x64_mem(e, X_ST, 16, XMM0 + w, &d, false);
@@ -297,7 +349,7 @@ VPRIV val x64_call(ecx *e, uint32_t ref, val *fn, const wkarg *a, int n, bool va
 
 			x64_mem(e, X_ST, r->up ? 16 : 8, r->cls[w] == WA_SSE ? XMM0 + nf++ : (ng++ ? RDX : RAX), &d, false);
 		}
-	} else if (!r && retsize && !retf) {
+	} else if (retsize && !retf && !r) {
 		x64_mov(e, R11, RAX);
 		x64_ext(e, R11, retsize, retsgn);
 	}
@@ -362,7 +414,7 @@ VPRIV void x64_params(ecx *e, wkarg *a, int n, const wkarg *r, bool variadic)
 		}
 		/* on the stack: the parameter is where the caller put it */
 		stk = (stk + a[k].align - 1) & ~(int64_t)(a[k].align - 1);
-		a[k].slot = (int32_t)(16 + stk);
+		a[k].slot = 16 + stk;
 		stk += (int64_t)((a[k].size + 7) & ~(uint64_t)7);
 	}
 	X->ngp = gp, X->nfp = fp, X->stk = (int32_t)stk;
@@ -408,7 +460,7 @@ VPRIV void x64_retrec(ecx *e, int raddr, const wkarg *r, uint32_t lbl)
 		}
 		x64_x87ld(e, &s);	/* long double: in st(0) */
 	} else if (r->mem && r->up) {
-		for (int w = 0; w < 2; w++) {
+		for (int w = 0; w < (int)(r->size / 16); w++) {
 			lval s = { .k = L_REG, .r = (uint8_t)raddr, .off = 16 * w };
 
 			x64_mem(e, X_LD, 16, XMM0 + w, &s, false);
@@ -521,7 +573,9 @@ VPRIV int x64_va_arg(ecx *e, int rap, qty t)
 	}
 	x64_label(e, lstk);
 	x64_mem(e, X_LD, 8, ra, &ov, false);
-	if (a.align > 8) {
+	/* An empty aggregate consumes no argument area, including alignment
+	   padding. Keep the overflow cursor unchanged for the following value. */
+	if (a.size && a.align > 8) {
 		x64_op3(e, X_ADDI, 8, ra, ra, XNOREG)->imm = (int64_t)a.align - 1;
 		x64_op3(e, X_ANDI, 8, ra, ra, XNOREG)->imm = -(int64_t)a.align;
 	}

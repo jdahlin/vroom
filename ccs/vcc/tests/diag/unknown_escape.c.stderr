@@ -1,0 +1,13 @@
+unknown_escape.c:1:13: warning: unknown escape sequence '\j' [-Wunknown-escape-sequence]
+    1 | char *s = "a\j\q";
+      |             ^
+unknown_escape.c:1:15: warning: unknown escape sequence '\q' [-Wunknown-escape-sequence]
+    1 | char *s = "a\j\q";
+      |               ^
+unknown_escape.c:2:10: warning: unknown escape sequence '\j' [-Wunknown-escape-sequence]
+    2 | int c = '\j';
+      |          ^
+unknown_escape.c:3:11: warning: unknown escape sequence '\q' [-Wunknown-escape-sequence]
+    3 | int w = L'\q';
+      |           ^
+4 warnings generated.

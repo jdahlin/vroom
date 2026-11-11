@@ -1,0 +1,16 @@
+sve_pointer_arithmetic.c:3:14: error: arithmetic on a pointer to sizeless type '__SVFloat32_t'
+    3 |     (void)(p + 1);
+      |              ^
+sve_pointer_arithmetic.c:4:14: error: arithmetic on a pointer to sizeless type '__SVFloat32_t'
+    4 |     (void)(p - p);
+      |              ^
+sve_pointer_arithmetic.c:5:6: error: arithmetic on a pointer to sizeless type '__SVFloat32_t'
+    5 |     p++;
+      |      ^
+sve_pointer_arithmetic.c:6:5: error: arithmetic on a pointer to sizeless type '__SVFloat32_t'
+    6 |     ++p;
+      |     ^
+sve_pointer_arithmetic.c:7:13: error: arithmetic on a pointer to sizeless type '__SVFloat32_t'
+    7 |     (void)&p[1];
+      |             ^
+5 errors generated.

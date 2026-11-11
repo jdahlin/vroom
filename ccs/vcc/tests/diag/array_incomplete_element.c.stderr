@@ -1,0 +1,23 @@
+array_incomplete_element.c:3:16: error: array has incomplete element type 'void'
+    3 | void void_array[2];
+      |                ^
+array_incomplete_element.c:4:28: error: array has incomplete element type 'struct Forward'
+    1 | struct Forward;
+      |        - forward declaration of 'struct Forward'
+  ...
+    4 | struct Forward record_array[2];
+      |                            ^
+array_incomplete_element.c:1:8: note: forward declaration of 'struct Forward'
+array_incomplete_element.c:5:26: error: array has incomplete element type 'int[]'
+    5 | UnknownBound nested_array[2];
+      |                          ^
+array_incomplete_element.c:6:21: error: array has incomplete element type 'int[]'
+    6 | int multidimensional[2][];
+      |                     ^
+array_incomplete_element.c:7:21: error: array has incomplete element type 'int[]'
+    7 | void parameter(int a[][]);
+      |                     ^
+array_incomplete_element.c:10:10: error: array has incomplete element type 'int[]'
+   10 |     int a[2][];
+      |          ^
+6 errors generated.

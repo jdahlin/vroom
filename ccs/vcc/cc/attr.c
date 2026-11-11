@@ -4,7 +4,7 @@
 /* ---------------- attributes ---------------- */
 
 enum {
-	A_NONE, A_ALIGNED, A_PACKED, A_SECTION, A_MODE, A_CLEANUP, A_ALIAS, A_WEAK, A_USED, A_UNUSED,
+	A_NONE, A_MS_STRUCT, A_ALIGNED, A_PACKED, A_SECTION, A_MODE, A_CLEANUP, A_ALIAS, A_WEAK, A_USED, A_UNUSED,
 	A_NORETURN, A_ALWAYS_INLINE, A_NOINLINE, A_GNU_INLINE, A_TRANSPARENT_UNION, A_VISIBILITY,
 	A_CONSTRUCTOR, A_DESTRUCTOR, A_COUNTED_BY, A_VECTOR_SIZE, A_COLD, A_NONSTRING, A_MAY_ALIAS,
 	A_WEAKREF, A_NAKED, A_NOCF, A_ERROR, A_OVERLOADABLE, A_NOINSTR, A_TLS_MODEL, A_EXT_VECTOR, A_DEPRECATED, A_WUR, A_NODISCARD, A_IFUNC, A_NONNULL, A_FORMAT, A_FORMAT_ARG,
@@ -13,7 +13,7 @@ enum {
 };
 
 static const char *const attr_names[A_COUNT] = {
-	[A_ALIGNED] = "aligned", [A_PACKED] = "packed", [A_SECTION] = "section", [A_MODE] = "mode",
+	[A_MS_STRUCT] = "ms_struct", [A_ALIGNED] = "aligned", [A_PACKED] = "packed", [A_SECTION] = "section", [A_MODE] = "mode",
 	[A_CLEANUP] = "cleanup", [A_ALIAS] = "alias", [A_WEAK] = "weak", [A_USED] = "used",
 	[A_UNUSED] = "unused", [A_NORETURN] = "noreturn", [A_ALWAYS_INLINE] = "always_inline",
 	[A_NOINLINE] = "noinline", [A_GNU_INLINE] = "gnu_inline", [A_TRANSPARENT_UNION] = "transparent_union",
@@ -116,6 +116,8 @@ VPRIV int mode_kind(cc *c, uint32_t id, bool sgn)
 		return 0;
 	memcpy(b, s, (size_t)l);
 	(void)c;
+	if (!strcmp(b, "SF")) return TY_FLOAT;
+	if (!strcmp(b, "DF")) return TY_DOUBLE;
 	if (!strcmp(b, "QI")) return sgn ? TY_SCHAR : TY_UCHAR;
 	if (!strcmp(b, "HI")) return sgn ? TY_SHORT : TY_USHORT;
 	if (!strcmp(b, "SI")) return sgn ? TY_INT : TY_UINT;
@@ -379,17 +381,33 @@ __attribute__((noinline)) VPRIV void attribute_list_(cc *c, attrs *a)
 				}
 				expect(c, T_RPAREN, "')'");
 				continue;
-			case A_TLS_MODEL:
-				expect(c, T_LPAREN, "'('");
-				{
-					uint32_t loc = tok(c)->loc;
+			case A_TLS_MODEL: {
+				if (!accept(c, T_LPAREN)) {
+					cc_error(c, loc, "'tls_model' attribute takes one argument");
+					continue;
+				}
+				uint32_t argloc = tok(c)->loc, si = 0;
+				bool empty = is(c, T_RPAREN);
 
-					a->tlsmodel = (uint8_t)vcc_tls_model(c->strs[string_index(c, aid) - 1].s);
-					if (!a->tlsmodel)
-						cc_error(c, loc, "tls_model must be \"global-dynamic\", \"local-dynamic\", \"initial-exec\" or \"local-exec\"");
+				if (!empty)
+					si = string_index(c, aid);
+				if (empty || is(c, T_COMMA)) {
+					cc_error(c, loc, "'tls_model' attribute takes one argument");
+					while (!is(c, T_RPAREN) && !is(c, T_EOF) && !is(c, T_SEMI)) {
+						if (is(c, T_LPAREN)) skip_balanced(c);
+						else next(c);
+					}
+				} else if (si) {
+					uint8_t model = (uint8_t)vcc_tls_model(c->strs[si - 1].s);
+
+					if (!model)
+						cc_error(c, argloc, "tls_model must be \"global-dynamic\", \"local-dynamic\", \"initial-exec\" or \"local-exec\"");
+					else
+						a->tlsmodel = model, a->tlsloc = loc;
 				}
 				expect(c, T_RPAREN, "')'");
 				continue;
+			}
 			case A_MODE:
 				expect(c, T_LPAREN, "'('");
 				if (is(c, T_IDENT))
@@ -511,6 +529,7 @@ __attribute__((noinline)) VPRIV void attribute_list_(cc *c, attrs *a)
 					a->extvec = (uint32_t)v;
 				continue;
 			}
+			case A_MS_STRUCT: a->ms_struct = 1; break;
 			case A_PACKED: a->packed = 1; break;
 			case A_WEAK: a->weak = 1; break;
 			case A_USED: a->used = 1; break;
@@ -601,6 +620,7 @@ VPRIV void merge_attrs(attrs *to, const attrs *from)
 		return;
 	if (from->aligned > to->aligned)
 		to->aligned = from->aligned;
+	if (from->ms_struct) to->ms_struct = from->ms_struct;
 	if (from->section) to->section = from->section;
 	if (from->alias) to->alias = from->alias;
 	if (from->asmname) to->asmname = from->asmname;
@@ -618,7 +638,7 @@ VPRIV void merge_attrs(attrs *to, const attrs *from)
 	if (from->visibility) to->visibility = from->visibility;
 	if (from->errmsg) to->errmsg = from->errmsg;
 	if (from->prio) to->prio = from->prio;
-	if (from->tlsmodel) to->tlsmodel = from->tlsmodel;
+	if (from->tlsmodel) to->tlsmodel = from->tlsmodel, to->tlsloc = from->tlsloc;
 	if (from->pure) to->pure = from->pure;
 	/* the 0/1 flags packed .. noinstr: or them bytewise */
 	{

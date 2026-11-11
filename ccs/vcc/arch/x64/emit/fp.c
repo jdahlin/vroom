@@ -14,6 +14,16 @@ static val x64_vr(int r) { return (val){ .k = V_REG, .r = (uint8_t)r }; }
 VPRIV void x64_x87(ecx *e, int xf, const lval *l, int sz)
 {
 	x64_nofp(e);
+	if (l && (l->off < INT32_MIN || l->off > INT32_MAX)) {
+		uint32_t live = e->x64->live;
+		if (l->k == L_REG && l->r < 32) e->x64->live |= 1u << l->r;
+		int address = x64_treg(e);
+		x64_mem(e, X_LEA, 8, address, l, false);
+		lval at = { .k = L_REG, .r = (uint8_t)address };
+		x64_x87(e, xf, &at, sz);
+		e->x64->live = live;
+		return;
+	}
 	uint32_t ref = 0;
 	int base = l ? x64_base(e, l, &ref) : 0;
 	rec *i = x64_put(e, X_X87);
@@ -53,6 +63,25 @@ static val x64_qbin(ecx *e, int k, val a, val b);
 static val x64_qcmp(ecx *e, int op, val a, val b);
 static val x64_qcvt(ecx *e, val v, qty from, qty to);
 static val x64_qzero(ecx *e);
+/* Compiler-runtime conversion helpers take/return half bits in xmm0.
+   Use the regular ABI call path so every live temporary survives. */
+static val x64_half_call(ecx *e, int name, val v, qty from, qty to)
+{
+	wkarg a;
+	lval slot = x64_slot(e, 16);
+
+	x64_classify(e, from, &a);
+	a.slot = slot.off;
+	if (x64_isld(e->c, from)) {
+		lval src = x64_at(x64_toreg(e, &v, 8));
+
+		x64_x87ld(e, &src);
+		x64_x87st(e, &slot);
+	} else
+		x64_store(e, v.r, &slot, wk_size(e->c, from));
+	x64_tfree(e, v.r);
+	return x64_call(e, FIXED(name), NULL, &a, 1, false, NULL, to);
+}
 
 VPRIV val x64_fconst(ecx *e, uint64_t bits, int size)
 {
@@ -60,7 +89,7 @@ VPRIV val x64_fconst(ecx *e, uint64_t bits, int size)
 	int r = x64_ftreg(e);
 
 	x64_movi(e, R11, (int64_t)bits);
-	x64_op3(e, X_MOV, size == 4 ? 4 : 8, r, R11, XNOREG);
+	x64_op3(e, X_MOV, size <= 4 ? 4 : 8, r, R11, XNOREG);
 	return x64_vr(r);
 }
 
@@ -71,6 +100,12 @@ VPRIV val x64_fbin(ecx *e, int op, qty t, val a, val b)
 
 	if (x64_isq(c, t))
 		return x64_qbin(e, k, a, b);
+	if (KIND(c, t) == TY_FLOAT16 || KIND(c, t) == TY_BFLOAT16) {
+		a = x64_cvt(e, a, t, prim(TY_FLOAT));
+		b = x64_cvt(e, b, t, prim(TY_FLOAT));
+		return x64_cvt(e, x64_fbin(e, op, prim(TY_FLOAT), a, b), prim(TY_FLOAT), t);
+	}
+
 	if (x64_isld(c, t)) {
 		static const int xf[4] = { XF_ADD, XF_SUB, XF_MUL, XF_DIV };
 		int ra = x64_toreg(e, &a, 8), rb = x64_toreg(e, &b, 8), rd = x64_ldnew(e);
@@ -120,7 +155,7 @@ VPRIV val x64_fneg(ecx *e, qty t, val a)
 		x64_tfree(e, ra);
 		return x64_vr(rd);
 	}
-	x64_movi(e, R11, x64_fsz(c, t) == 4 ? (int64_t)0x80000000 : INT64_MIN);
+	x64_movi(e, R11, (KIND(c, t) == TY_FLOAT16 || KIND(c, t) == TY_BFLOAT16) ? 0x8000 : x64_fsz(c, t) == 4 ? (int64_t)0x80000000 : INT64_MIN);
 	x64_op3(e, X_MOV, x64_fsz(c, t), XMM15, R11, XNOREG);
 	x64_op3(e, X_FXOR, 8, a.r, a.r, XMM15);
 	return a;
@@ -136,6 +171,15 @@ VPRIV val x64_fcmp(ecx *e, int op, qty t, val a, val b)
 
 	if (x64_isq(c, t))
 		return x64_qcmp(e, op, a, b);
+	if (KIND(c, t) == TY_FLOAT16 || KIND(c, t) == TY_BFLOAT16) {
+		a = x64_cvt(e, a, t, prim(TY_FLOAT));
+		b = x64_cvt(e, b, t, prim(TY_FLOAT));
+		return x64_fcmp(e, op, prim(TY_FLOAT), a, b);
+	}
+	if (op == WK_FCMP_UNORDERED)
+		cc = CC_P;
+	else if (op == WK_FCMP_ORDERED_NE)
+		cc = CC_NE;
 	if (x64_isld(c, t)) {
 		int ra = x64_toreg(e, &a, 8), rb = x64_toreg(e, &b, 8);
 		lval ma = x64_at(ra), mb = x64_at(rb);
@@ -306,9 +350,22 @@ static val x64_qbin(ecx *e, int k, val a, val b)
 /* a op b on __float128 objects as 0 or 1 (false when unordered, but for !=) */
 static val x64_qcmp(ecx *e, int op, val a, val b)
 {
-	int fn = op == T_EQUALEQUAL ? FN_EQTF2 : op == T_EXCLAIMEQ ? FN_NETF2 : op == T_LESS ? FN_LTTF2 :
+	if (op == WK_FCMP_ORDERED_NE) {
+		/* Both ordered inequalities are false for NaN. Keep the original
+		   addresses live across the first helper call for the second one. */
+		int ar = x64_toreg(e, &a, 8), br = x64_toreg(e, &b, 8);
+		int ac = x64_treg(e), bc = x64_treg(e);
+		x64_mov(e, ac, ar);
+		x64_mov(e, bc, br);
+		val lt = x64_qcmp(e, T_LESS, x64_vr(ac), x64_vr(bc));
+		val gt = x64_qcmp(e, T_GREATER, a, b);
+		x64_op3(e, X_OR, 4, lt.r, lt.r, gt.r);
+		x64_tfree(e, gt.r);
+		return lt;
+	}
+	int fn = op == WK_FCMP_UNORDERED ? FN_UNORDTF2 : op == T_EQUALEQUAL ? FN_EQTF2 : op == T_EXCLAIMEQ ? FN_NETF2 : op == T_LESS ? FN_LTTF2 :
 		 op == T_LESSEQ ? FN_LETF2 : op == T_GREATER ? FN_GTTF2 : FN_GETF2;
-	int cc = op == T_EQUALEQUAL ? CC_E : op == T_EXCLAIMEQ ? CC_NE : op == T_LESS ? CC_L :
+	int cc = op == WK_FCMP_UNORDERED ? CC_NE : op == T_EQUALEQUAL ? CC_E : op == T_EXCLAIMEQ ? CC_NE : op == T_LESS ? CC_L :
 		 op == T_LESSEQ ? CC_LE : op == T_GREATER ? CC_G : CC_GE;
 	tfarg ar[2] = { { TQ, x64_toreg(e, &a, 8) }, { TQ, x64_toreg(e, &b, 8) } };
 	val r = x64_tfcall(e, fn, ar, 2, TI);
@@ -443,6 +500,35 @@ VPRIV val x64_cvt(ecx *e, val v, qty from, qty to)
 	bool ff = is_flt(c, from), tf = is_flt(c, to), fl = x64_isld(c, from), tl = x64_isld(c, to);
 	int fs = wk_size(c, from), ts = wk_size(c, to);
 
+	if (KIND(c, from) == TY_BFLOAT16) {
+		if (KIND(c, to) == TY_BFLOAT16) return v;
+		v = x64_half_call(e, FN_EXTENDBFSF2, v, from, prim(TY_FLOAT));
+		return x64_cvt(e, v, prim(TY_FLOAT), to);
+	}
+	if (KIND(c, to) == TY_BFLOAT16) {
+		if (x64_isq(c, from))
+			return x64_tfcall(e, FN_TRUNCTFBF2,
+					  &(tfarg){ TQ, x64_toreg(e, &v, 8) }, 1, TF);
+		if (KIND(c, from) == TY_FLOAT16)
+			v = x64_cvt(e, v, from, prim(TY_FLOAT)), from = prim(TY_FLOAT);
+		if (!ff)
+			v = x64_cvt(e, v, from, prim(TY_DOUBLE)), from = prim(TY_DOUBLE);
+		return x64_half_call(e, x64_isld(c, from) ? FN_TRUNCXFBF2 : KIND(c, from) == TY_FLOAT ? FN_TRUNCSFBF2 : FN_TRUNCDFBF2, v, from, to);
+	}
+	if (KIND(c, from) == TY_FLOAT16) {
+		if (KIND(c, to) == TY_FLOAT16)
+			return v;
+		v = x64_half_call(e, FN_EXTENDHFSF2, v, from, prim(TY_FLOAT));
+		return x64_cvt(e, v, prim(TY_FLOAT), to);
+	}
+	if (KIND(c, to) == TY_FLOAT16) {
+		if (x64_isq(c, from))
+			return x64_tfcall(e, FN_TRUNCTFHF2,
+					  &(tfarg){ TQ, x64_toreg(e, &v, 8) }, 1, TF);
+		if (!ff)
+			v = x64_cvt(e, v, from, prim(TY_DOUBLE)), from = prim(TY_DOUBLE);
+		return x64_half_call(e, x64_isld(c, from) ? FN_TRUNCXFHF2 : KIND(c, from) == TY_FLOAT ? FN_TRUNCSFHF2 : FN_TRUNCDFHF2, v, from, to);
+	}
 	if (x64_isq(c, from) && KIND(c, to) == TY_BOOL)
 		return x64_qcmp(e, T_EXCLAIMEQ, v, x64_qzero(e));
 	if (x64_isq(c, from) || x64_isq(c, to))

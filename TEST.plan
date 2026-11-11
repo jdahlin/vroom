@@ -19,6 +19,17 @@ om clang (Homebrew, samma omskrivna kommandorad) klarar det.  Om clang
 underkänner ett test är det inte vcc:s fel.  Om harnessen tolkar ett test
 annorlunda än sviten själv räknas testet inte heller.
 
+## Aktuell prioritering
+
+Frontend- och backendbuggar går först: krascher, giltig C som avvisas,
+ogiltig C som accepteras, felaktiga konstanta värden, felgenererad kod
+och ABI-avvikelser. Varje rättning ska få ett minimalt regressionstest;
+körning valideras först på Linux x86 och sedan ARM/QEMU. Diagnostikens
+formulering och presentation har lägre prioritet. En avvikelse i
+externa förväntade noter, antal eller källrader är inte i sig bevis för
+en semantisk kompilatorbugg. Sådana kontraktsfel redovisas separat i
+utredningen och får inte beskrivas som lika många kompilatorbuggar.
+
 ## Steg
 
 ### S1 Hämtning — klar (2026-11-10, c1098d5)
@@ -41,9 +52,23 @@ commits, `work/testsuites/MANIFEST`.
 diagnostiker står i filen (`// expected-error {{...}}`).  `test/C` är ordnad
 per standard, WG14-paper och Defect Report (`drs/`), och är det som ligger
 närmast test262.  Harnessen läser direktiven ur rå källkod med `#line`;
-överhoppade `#if`-grenar tar den reda på via clang.  Matchningen följer
-clangs VerifyDiagnosticConsumer.  Clangs sida cachas.  `results.json` visar
-tester som gått från godkänd till underkänd.
+överhoppade `#if`-grenar tar den reda på via clang. Matchningen kontrollerar
+diagnostikens nivå, fil, rad och antal. Vcc:s formuleringar får skilja sig
+från clangs; våra egna snapshots verifierar vcc:s hela meddelanden.
+`--match-messages` är en frivillig jämförelse med clangs text. Clangs sida
+cachas och dess ursprungliga kontrakt kontrolleras fortfarande. Separata
+`results.locations.json` och `results.messages.json` visar förändringar
+inom samma jämförelsepolicy.
+
+**Linux x86-64 2026-11-11:** `bench/vcc-verify.py --target
+x86_64-linux-gnu -j 6` ger nu **443/1640 godkända, 1197 fel och inga
+krascher** med oberoende meddelandetext. ARM-målets frontendkontroll ger
+**450/1805 godkända, 1355 fel, inga krascher**; testkällorna körs inte som
+program i denna svit. Detta frigör 34 tester per mål från rena textkrav,
+utan någon semantisk kompilatorändring. Föregående strikta textjämförelse
+gav 409 respektive 416 godkända. Resultat och referenser hålls skilda per
+mål; arm64 väljs med `--target aarch64-linux-gnu`. Återstående fel kräver
+utredning av semantik, diagnostiknivå, rad, antal och återhämtning.
 
 **Status 2026-11-10:** 412/1841 giltiga tester godkända (22 %), 1 krasch.
 
@@ -64,8 +89,8 @@ C++/ObjC/OpenCL/OpenMP-rader, 66 som harnessen inte tolkar som clang, 59
 med lit-substitutioner (`%t`, `%{...}`).
 
 Kvar:
-1. Kraschen: segfault på `Sema/attr-tls_model.c` (`tls_model` med två
-   argument).  Rättas först, med ett test i `tests/diag`.
+1. De två kända krascherna är rättade med regressionstester; behåll
+   kraschfri körning när täckningen utökas.
 2. De största luckorna, i ordning efter hur många tester de blockerar:
    - SVE/SME-typer (`__SVInt8_t` …) och kontrollerna av streaming-funktioner.
    - `__bf16`, `__mfp8`.
@@ -89,46 +114,294 @@ behåller dem som uttryckliga XFAIL, med XPASS-fel när täckningen förbättras
 Inga felaktiga program körs. Kvar: implementera förklaringarna/varningarna
 som luckorna beskriver och mät om de hjälper nybörjare att reparera koden.
 
-### S3 gcc c-torture, resten — ej påbörjad
+### S3 gcc c-torture, resten — påbörjad
 `bench/vcc-ctests.py` kör redan `execute/` (1701 filer, vendrade).  Utöka:
 - `execute/ieee/` och `execute/builtins/`: körs som de andra
   (`builtins/` behöver sina `-lib.c`-filer).
 - `compile/` (2016): endast `-c`.  vcc ska varken krascha eller avvisa det
   clang tar.
 
+**Linux x86-64 2026-11-11:** `bench/vcc-torture-compile.py -j 6`
+ger 1561 godkända, 54 fel, en vcc-krasch och 398 överhoppade; clang
+kraschar på ytterligare två. Assembleringen av vcc:s utdata kontrolleras.
+Villkorliga eller okända DejaGNU-direktiv hoppas över. Körsviterna återstår.
+
+Efter rättningen av void-lvärden: 1562 godkända, 54 fel, **inga
+vcc-krascher**, samma 398 överhoppade och två clang-krascher.
+
+`bench/vcc-torture-execute.py -j 6 --target x86_64-linux-gnu` kör nu
+IEEE och builtins, med companion-filerna och suite-main. `--target
+aarch64-linux-gnu` kör under QEMU. IEEE: 49 godkända, inga fel och
+30 filtrerade på båda målen. Villkorliga direktiv som riggen ännu inte
+tolkar räknas som överhoppade; det är inte full täckning. Builtins körs
+vid -O0; optimerade varianter behöver motsvarigheter till GCC:s
+avstängda optimeringspass. Sprintf och strncmp är rättade.
+
+Utökad DejaGNU-tolkning (målvillkor, krav och kända `.x`-skript) ger
+1801 godkända/57 fel/156 överhoppade i compile, utan vcc-krascher
+(två clang-fel). Körning efter generisk `-fno-builtin-NAME`: x86
+101 godkända/19 fel/18 överhoppade, arm64 101/3/34. Kvarvarande fel
+är komplex division, signalerande NaN och x86 inline-asm. Senare
+riktade rättningar verifieras separat innan nästa fulla körning.
+
+Senaste fulla körning av IEEE/builtins: x86 **120 godkända, 0 fel,
+18 filtrerade**; ARM/QEMU **104 godkända, 0 fel, 34 filtrerade**.
+ARM:s ytterligare 16 filtreringar är clangs avsaknad av nonlocal-builtins.
+Vendrade runtime-sviter med den kombinerade arbetskopian: x86
+**1807/1815 godkända, 8 fel, 134 filtrerade**; ARM/QEMU
+**1822/1822 godkända, 0 fel, 127 filtrerade**. De åtta x86-felen är
+optimeringsfall under arbete; detta är inte ett godkännande av hela S3.
+Kernelns frontendkontroller går samtidigt 887/887 i både separata
+processer och batch.
+
+Ny compile-körning med isolerad committad `1009175` ger
+**1843 godkända, 16 fel, 0 krascher, 155 filtrerade och 2 referensfel**
+på x86. Kvar finns stora statiska stackramar (4), vektordeklaratorer/attribut
+(4), två array-/scopefall, ett stort argumentkopieringsfall, två
+return-mismatch-flaggfall, två parsergränser och en saknad SIMD-builtin.
+Riktade rättningar räknas först efter isolerad validering; detta är den
+senaste fulla baslinjen.
+
+**Compile-milstolpe 2026-11-11, fryst commit `5e17f47`:** hela de 2016
+filerna har nu kontrollerats på båda Linux-målen. X86: **1859 godkända,
+0 vcc-fel, 0 vcc-krascher, 155 filtrerade och 2 referensfel**. ARM/QEMU:s
+kompileringsmål: **1855 godkända, 0 vcc-fel, 0 vcc-krascher, 159
+filtrerade och 2 referensfel**. Detta är kompilering/assemblering, inte
+körning av dessa filer. Referensfelen är clang SIGSEGV i
+`limits-exprparen.c` och `limits-structnest.c` på båda målen; harnessen
+avslutas därför fortfarande med felstatus. Vcc:s egen djupa record-krasch
+är rättad med ett separat stressprov som även verifierar daemonens
+överlevnad. ARM:s sista registertrycksfel (`20121107-1.c`) är rättat och
+hela ARM-sviten omkörd. Loggar: `/tmp/vroom-milestone-compile-{x86,arm}.log`.
+Kompilatorns SHA-256:
+`d08f33e9ea2e0f61e7203d246fdd398b71cebca4e3b1a69d21589ebbea2a0de0`.
+Kombinerad verifiering på samma commit är nu också klar: vendrade
+runtime-sviter **1839/1839 x86** (134 filtrerade) och **1846/1846 ARM/QEMU**
+(127 filtrerade). ASan/UBSan: **124 x86-regressioner** och **129 ARM** utan
+fynd; x86:s stora `branch_far` kontrollerades separat efter en 60-sekunders
+timeout i clangreferensen. En exakt referensomkörning tog 39,2 s och dess
+program gav förväntad utdata; därefter gick ASan-fallet. Fem bestående
+x86-referensluckor redovisas fortfarande uttryckligen. Stress: **29/29**
+standalone och **30/30** med daemonöverlevnad. Normal- och sanitizerkörningar
+har separata `VCC_BUILD`-kataloger; x86-runtime kördes om isolerat efter att
+en delad referenskatalog upptäckts. Detta innebär inte att hela S3 eller
+testplanen är klar. Upstream-integration kräver egna körningar.
+
 **Klart när:** inga krascher i `compile/`; `ieee/` och `builtins/` lika
 gröna som `execute/`.
 
-### S4 gcc.dg — ej påbörjad
-- `dg-do run` (3338) och `gcc.dg/torture/` (2261): körs som c-torture under
-  qemu.  Harnessen läser `dg-options`, `dg-require-*` och `dg-skip-if`; clang
-  är filter.
-- `dg-error` (1720) används omvänt: vcc ska avvisa varje rad som clang
-  avvisar och godta resten.  Raden räknas, inte texten.
+**Upstream-integrerad kontroll, träd `4ef4ea8`:** [PR #28](https://github.com/jdahlin/vroom/pull/28)
+är draft medan integrationsfel rättas. ARM compile går 1855/0/0 med
+159 filtrerade och två kända clang-krascher. X86 går 1858/1/0 med samma
+155 filtrerade och två clang-krascher: en ny registertrycksregression i
+`asmgoto-3.c` är rättad separat och full omkörning återstår. Den rättade
+asm-motorn går 18/18 GCC-asmprov vid -O0/-O2, asm-runtime samt unity/nonunity.
+Runtime på frysta trädet: **1847/1847 x86**, **1852/1852 ARM**; ASan/UBSan
+**130/130 x86**, **135/135 ARM**, stress 29/29 respektive daemon 30/30.
+ABI-generatorerna går åter 777+1000 på x86 och 778+1000 på ARM med samma
+referensundantag som ovan. Kernel sema går 887/887 i båda körsätten och
+PP 920/920; diagnostik 215/215. Unity/nonunity och riktade CFI/debug/
+direktobjekt-kontroller går grönt. Dessa siffror gäller frysta trädet före
+asm-rättningen; de är inte ett påstående om färdig premerge. Wasm-CI har
+22 nytäckta fel som utreds mot upstreams kompilator separat.
+
+**CI-uppföljning:** asm-rättningen på `837cc15` har nu full x86-compile-
+evidens: åter **1859 godkända, inga vcc-fel/krascher**, 155 filtrerade och
+två kända clang-krascher. Wasm-jämförelsen mot `2339f69` skiljer en verklig
+FP-konstantregression från tidigare luckor. NaN-payload/signaleringsbitar och
+binary128-konstanter är rättade och får ett nytt omarkerat regressionstest;
+Unicode-lokala statiska symbolers namn är också rättade. De återstående 20
+Wasm-fallen dokumenteras individuellt i TODO.md och körs som uttryckliga
+XFAIL, inte skip. En framtida rättning ger XPASS-fel tills markören tas bort.
+Detta är inte ett påstående om att dessa 20 Wasm-buggar är rättade.
+Full lokal Wasm-körning efter CI-rättningarna: **1809 godkända**, 31
+uttryckliga XFAIL (20 nytäckta plus 11 tidigare), 141 filtrerade, inga
+oväntade fel eller XPASS. TSan:s daemonstress avslöjade dessutom att
+`gen_call` inlinades i rekursiva ARM-uttryck: dess 8 KiB argumentbuffert
+reserverades för varje aritmetiknod. En separat funktionsgräns minskar
+AArch64-TSan-ramen i `gen_inner` från 8608 till 432 byte. Det oförändrade
+250-nivåprovet och efterföljande giltig TU går nu grönt med samma 2 MiB
+workerstack; stackgränser, test och sanitizerkontroller har inte ändrats.
+
+### S4 gcc.dg — påbörjad (2026-11-11)
+`bench/vcc-gcc-dg.py -j 6 --target x86_64-linux-gnu` kör direkta
+`gcc.dg/*.c` med `dg-do run` (1276 filer) och direkta
+`gcc.dg/torture/*.c` (2208 filer). `--target aarch64-linux-gnu` använder
+QEMU och Linux-sysroot. Harnessen läser målfilter, options och companion-filer;
+clang är orakel och filter. Rotens standardflaggor följer `dg.exp`
+(`-ansi -pedantic-errors`, ersatta av `dg-options`). Torture kör som standard
+vid -O0; `--matrix` väljer de sex icke-LTO-konfigurationerna i `gcc-dg.exp`.
+Okända direktiv/selektorer hoppas uttryckligen över; lyckad exit följer
+`dg-do run`, medan ännu ostödda `dg-output`/`dg-final` inte räknas.
+
+**Avgränsad baslinje:** `--suite torture --limit 400 '^torture/pr'`
+ger x86 270 godkända/11 fel/119 filtrerade och arm64 273/8/119,
+inga kompilatorkrascher. Detta är 400 av 1563 matchande PR-filer vid -O0,
+inte hela sviten. Ett hittat runtime-segfault (`pr116454-1`) är rättat:
+retur av en skalär till `_Complex` konverteras nu innan kodgenerering.
+Båda upstreamfallen `pr116454-{1,2}` och en regression med skalära och
+komplexa returkonverteringar går på båda målen.
+
+`--suite errors` jämför nu samtliga felrader mot clang för de 1214 direkta
+`gcc.dg/*.c` som har `dg-error`. Relativa rader, `dg-line` och målselektorer
+stöds; varje saknad eller extra felrad ger fel. Clang-fel utanför aktiva
+annoteringar och okända kontrakt filtreras uttryckligen. Detta mäter
+felradsparitet, inte GCC:s meddelandetext eller varningar/noter.
+Baslinje: x86 359 godkända/369 fel/1 krasch/482 filtrerade/3 referensfel;
+arm64 353/373/0/485/3. Kraschen (`cwsc0.c`) kom från ett ofullständigt
+`void`-argument i ett oprototypat anrop och är rättad med en egen regression.
+Den riktade kontrollen kraschar inte längre, men static-chain-builtin saknas
+fortfarande och upstreamfallet är därför inte grönt. Fulla omkörningar efter
+rättningen återstår.
+Arraytypkontrollen ligger nu vid själva deklaratorn, även för fält,
+typedefs och parametrar: `array-9.c` och `array-15.c` går i riktade
+kontroller på båda Linux-målen. Regressionen kontrollerar både ogiltiga
+elementtyper och giltiga ofullständiga ytterdimensioner/VLA-prototyper.
+Indexering av funktionspekare och pekare till ofullständiga typer avvisas
+nu också: `array-8.c` och `pointer-arith-{1,2,3}.c` går på båda målen.
+Det isolerade paketets array-/incomplete-/subscript-diagnostiktester går
+10/10, både med unity- och filvis byggd kompilator.
+
+**Utökad fryst baslinje `5e17f47`:** samtliga 1563 matchande
+`torture/pr`-filer vid -O0 har nu kontrollerats, utan `--limit`.
+X86: **1189 godkända, 18 fel, 356 filtrerade, inga kompilatorkrascher
+eller referenskrascher**. ARM/QEMU: **1184 godkända, 6 fel, 373
+filtrerade, inga krascher**. Detta är fortfarande en delmängd av S4,
+inte hela gcc.dg eller optimeringsmatrisen. X86-felen omfattar bland annat
+interrupt-ABI, inline-asm, saknade builtins och ett reproducerat fel vid
+128-bitars skift (`pr69909`); ARM har bland annat samma frontendluckor
+och ett assembleringsfel. `pow`/`fabsl`-länkfelen är verkliga skillnader i
+lowering/optimering, inte skäl att lägga till `-lm` i riggen när upstream
+inte begär det. Resultat: `work/results/vroom-milestone-s4-pr-{x86,arm}.json`.
+
+Kvar:
+- Alla återstående matchande filer och optimeringskonfigurationer; nästlade
+  kataloger med egna `.exp`-drivrutiner och LTO har ännu ingen motsvarighet.
+- Fler verifierade effektiva mål och villkorliga direktiv; okända kontrakt
+  får inte bli tysta godkännanden.
+- De nästlade `dg-error`-fallen och kvarvarande ostödda diagnostikkontrakt
+  (bland annat källradsmappning, rad 0 och multiline-direktiv).
 
 **Klart när:** körtesterna lika gröna som clangs; ingen fil som clang godtar
 avvisas av vcc.
 
-### S5 Små körsviter — ej påbörjad
+### S5 Små körsviter — påbörjad
 c-testsuite (220, `.expected`), chibicc (50), cproc (213), llvm-test-suite
 `SingleSource/UnitTests` och `Regression/C` (med `reference_output`).
 Samma rigg som `vcc-ctests.py`: bygg med clang och vcc, kör under qemu,
 jämför utdata.
 
+**Linux x86-64 2026-11-11:** `bench/vcc-small.py -j 6` klarar alla
+220 c-testsuite-fall. `--target aarch64` kör samma rigg under QEMU.
+Efter rättningen av okända escape-sekvenser är chibicc grön bland de
+clang-giltiga fallen: x86 12 godkända/29 filtrerade, arm64 11/30.
+`--suite llvm` täcker direkta C-filer i UnitTests och Regression/C:
+x86 128 godkända/1 fel, arm64 121/1 och 7 uppströms arkitekturexkluderingar
+efter bitfälts-, Microsoft-layout- och sizeless SVE-deklarationsstöd.
+Återstående fel i denna delmängd är `_Float16`. C-testsuite är nu
+220/220 på båda målen.
+Nästa utökning följer underkatalogernas CMake-flaggor och exkluderingar.
+Full körning i upstreams `--small`-läge ger nu **165 godkända, 0 fel**
+på x86 och **156 godkända, 0 fel** på ARM/QEMU. Överhoppade filer är
+2252 respektive 2261: främst den separata GCC-torture-underkatalogen
+(1708), kataloger som upstream inte aktiverar för basmålet och några
+arkitekturexkluderingar. Detta betyder inte att alla 2417 upptäckta
+C-filer har körts. Standardstorlek på x86 gav 164 godkända och en
+20-sekunders timeout i `Vector/build2.c`; tidsgränsen är fortsatt en
+synlig begränsning.
+
+`bench/vcc-cproc.py --target x86_64|aarch64` ger kompilering/assemblering
+för QBE-fallen, tokenparitet för `.pp`, och avvisning för `.err`, med
+clang som filter. Det jämför inte QBE IR eller runtime-semantik.
+Baslinje: x86 166 godkända/17 fel/13 filtrerade, arm64 168/15/13.
+Efter rättningar: 183 godkända/0 fel/13 filtrerade på båda målen.
+Detta är fortfarande inte runtime- eller QBE-ekvivalens.
+
 **Klart när:** allt som clang klarar klarar också vcc.
 
-### S6 ABI-generatorer — ej påbörjad
+### S6 ABI-generatorer — rigg klar, fel rättas
 `gcc.dg/compat/struct-layout-1_generate.c` och clangs `utils/ABITest`
 genererar tusentals anrop mellan två kompilatorer.  Kopplas in i
 `bench/vcc-abi.py`: clang/vcc × anropare/anropad, Linux under qemu och
 Apple nativt.
 
+`bench/vcc-abi.py --generated --target x86_64|aarch64` kör alla fyra
+kombinationer av clang/vcc som anropare/anropad. Källor, kommandon och
+utdata sparas. Baslinje med 1000 fall per generator: x86 GCC 654 godkända,
+122 fel, 1 vcc-krasch, 222 clang-filtrerade och 1 clang-krasch; LLVM
+857/143. ARM GCC 673/105/222 filtrerade och LLVM 987/13.
+Rättningar av vektoranrop, packade returvärden, unionsinitialisering,
+fältalignering och homogena ARM-aggregat verifieras nu mot samma fall.
+Siffrorna är baslinjer, inte ett påstående om slutligt gröna körningar.
+
+Ny isolerad körning av den committade kompilatorn `1009175`: x86 GCC
+**777 godkända, 0 vcc-fel, 222 clang-filtrerade och 1 clang-krasch**;
+LLVM **1000/1000**. ARM GCC **769 godkända, 9 fel, 222 filtrerade**;
+LLVM **1000/1000**. De nio ARM-fallen verifieras mot ännu ej committade
+rättningar för tomma aggregat/HFA och varargs. Att den kombinerade
+arbetskopian tidigare gick grönt ersätter inte isolerad verifiering av
+committade ändringar. Källor/kommandon finns i
+`work/abi-generated/committed-{x86,arm}/`.
+
+Efter isolerad rättning av tomma HFA-medlemmar och tomma variadiska
+argument (`8461ee2`) går den fulla ARM-omkörningen **778 GCC-fall och
+1000 LLVM-fall utan vcc-fel** (222 clang-filtrerade). Alla fyra
+anroparkombinationer körs per fall. Tillsammans med x86-körningen ovan
+är den valda mängden om 1000 genererade fall per generator nu grön på
+båda Linux-målen bland clang-giltiga fall. ARM-evidens:
+`work/abi-generated/empty-fixed-arm/results.json`. Utökning av frön/antal
+och senare ABI-ändringar kräver nya körningar.
+
+**Kombinerad omkörning `5e17f47`:** efter de senare frame-, atomic-
+och kopieringsrättningarna går återigen alla clang-giltiga fall i alla
+fyra anroparkombinationer. X86: **777 GCC + 1000 LLVM godkända**, 222
+filtrerade decimalfall och en clang-krasch (GCC 466). ARM/QEMU: **778
+GCC + 1000 LLVM godkända**, 222 filtrerade decimalfall, inga referensfel.
+Inga vcc-fel eller vcc-krascher på något mål. Rapporter:
+`work/abi-generated/milestone-{x86,arm}/results.json`; båda lagrar samma
+kompilatorhash som S3:s compile-milstolpe. Kernelkontrollerna för samma
+commit är också gröna: sema run/batch **887/887** vardera och PP-paritet
+**920/920**. Testharnessen för compile-milstolpen finns separat i
+[PR #27](https://github.com/jdahlin/vroom/pull/27); kompilatorrättningarnas
+upstream-integration valideras för en följande PR.
+
 **Klart när:** N genererade fall per plattform utan skillnad.
 
-### S7 Slumpprogram (TODO T10) — ej påbörjad
+### S7 Slumpprogram (TODO T10) — rigg klar, långkörningar återstår
 csmith och yarpgen byggs från `work/testsuites/`.  `bench/vcc-csmith.py`
 bygger programmen med clang -O0 och vcc, kör dem och jämför checksummor.
 Avvikelser reduceras med creduce till tester i `tests/vcc`.
+
+Status 2026-11-11: båda pinnade generatorerna byggda med CMake.
+`LLVM=/usr/lib/llvm-23 bench/vcc-csmith.py --count 3 -j 2` sparar källor,
+frön, kommandon, utdata och kompilatorhash i `work/random-tests/`.
+Clang -O0, -O2 och UBSan med trap måste ge samma checksumma före jämförelsen;
+fel i oraklet redovisas som skip, aldrig pass. Körningen använder en egen
+kopia av vpp så samtidiga ombyggnader inte byter kompilator mitt i ett prov.
+YARPGen begränsas i röktestet till två arraydimensioner (`--max-array-dims=0`
+återställer generatorns standard); standardens frö 1 gav över 14 GB globala
+arrayer och clang kunde inte länka det med den lilla kodmodellen.
+Frön 1–3: x86 Csmith 3/3, YARPGen 2/3 (frö 3 träffar X3:s gräns på
+64 anropsargument); ARM/QEMU Csmith 3/3, YARPGen 3/3. Gränserna på
+64 anropsargument och 256 parametrar har därefter tagits bort; en separat
+återkörning av frö 3 matchar clang på båda målen, och ett ABI-test med
+291 parametrar går i alla fyra kompilatorkombinationer. Ingen 24h-körning
+eller reducering påstås vara klar; S2–S6 måste verifieras först.
+
+En begränsad x86-Csmith-körning med fyra arbetare, `--duration 1800
+--max-failures 100`, gav **1159 godkända, 0 vcc-fel och 200 filtrerade**.
+151 filtrerades vid clang -O0:s körning (timeout), 49 vid UBSan (trap).
+Källor, kommandon och sammanfattning finns i
+`work/random-tests/20261111-083106-752654-x86_64-linux-gnu/`.
+Riggen sparar mellanresultat och slutar schemalägga när tid eller felgräns
+nås; redan körande prov avslutas. Felgränsen räknar felande prov, inte
+unika kompilatorbuggar. Detta ersätter inte 24h-grinden.
+
+En efterföljande ARM/QEMU-rökprovning med Csmith-frön 3000000–3000019
+(`52261ef`, två arbetare) ger **16 godkända, 0 vcc-fel och 4 filtrerade**
+på grund av clang -O0-körningens timeout. Evidens:
+`work/random-tests/20261111-100225-3305520-aarch64-linux-gnu/`.
+Detta är 20 genererade prov, inte en långkörning.
 
 **Klart när:** 24 h per generator utan avvikelse, på båda målen
 (PLAN-release G1).

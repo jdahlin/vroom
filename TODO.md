@@ -524,6 +524,32 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
   `bcp-1` needs `__builtin_constant_p` of an inlined argument.  They are
   `WASM_XFAIL` in `bench/vcc-wasm.py` (premerge's wasm job).
   *Validate:* `bench/vcc-wasm.py -j 6` reports them as XPASS; remove the entries.
+- [ ] **wasm: Linux-correctness coverage gaps** [C]. The Linux milestone
+  adds tests for behavior fixed in the x86/ARM emitters but still missing in
+  the separate Wasm emitter. All 20 tests below also fail with upstream
+  `2339f69`; some fail earlier in its parser, so this is a capability boundary,
+  not evidence that their newly reachable Wasm lowering is correct.
+  `bench/vcc-wasm.py` records each as an explicit expected failure, executes it
+  against clang, and rejects XPASS. They are not skipped.
+  - Runtime classification/comparison: `fp_classify_builtin`, `fpclassify`,
+    `fp_compare_builtin`, `isfpclass`, `signaling_nan`; long-double
+    classification in `complex_div_runtime`.
+  - Integer/aggregate lowering: `atomic_record` (128-bit atomic value conversion),
+    `generic_bitcount` (_BitInt runtime precision), `int128_shift_count`
+    (wide shift counts), `deep_conditional` (wide GNU omitted-middle values),
+    `transparent_union_redecl` (member calling convention).
+  - Expression/call lowering: `gnu_conditional_float` (GNU floating conditional),
+    `parenthesized_function` (nested function-pointer return signature),
+    `void_lvalue` (void expressions leave stack values), `fabs_asm_identity`
+    and `math_library_identity` (asm-renamed functions mistaken for intrinsics).
+  - Optimization/inlining: `array_constants`, `dead_branch_entries`,
+    `optimized_conditions` leave unreachable references; `inline_constants`
+    needs argument propagation into `__builtin_constant_p`.
+  The actual `fp_class_builtins` regression and Unicode static-symbol collision
+  are fixed and must pass without expected-failure markers.
+  *Validate:* `bench/vcc-wasm.py -j 6 --suite vcc --no-cache -v` using emcc 7
+  and Node 24; every named probe must become XPASS when repaired, then remove
+  its corresponding entry and rerun. Also retain the unmarked GCC/TCC gates.
 - [ ] **PIC/PIE** [P]: done: `cc_opts.pic` from the driver (PIE the hosted
   default, `-fno-pic`), `sym_needs_got` (arch/a64/emit/value.c) as clang:
   `-fPIC` every default-visibility non-static symbol, `-fPIE` those not
@@ -577,11 +603,21 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
   fatal "out of registers" (`emit.c:2176-2195`).
   *Validate:* T1 `deep_expr.c` (generated: right-nested depth 10..200,
   mixed int/FP/calls); T5 for depth 10k (no crash).
-- [ ] **`_Float16`** (`emit.c:3520`), **FP vectors** (`float32x4_t`,
+- [x] **`_Float16` on Linux x86-64 and arm64.** Storage, literals,
+  rounding, arithmetic/conversions, classification, and half-float HFA calls.
+  *Validated:* `tests/vcc/float16.c` exhausts all 65,536 encodings;
+  `tests/abi/float16` checks all clang/vcc caller/callee combinations on
+  both Linux targets. Kernel sema 887/887 and preprocessing parity 920/920.
+- [x] **`__bf16` on Linux x86-64 and arm64.** Distinct type, two-byte
+  bfloat exponent/significand layout, literals/conversions/arithmetic and ABI.
+  *Validated:* all 65,536 encodings in `tests/vcc/bfloat16.c`, cross-compiler
+  `tests/abi/bfloat16` calls on both Linux targets, invalid-complex diagnostic,
+  unity/nonunity builds and kernel sema 887/887 (run and batch).
+- [ ] **FP vectors** (`float32x4_t`,
   `emit.c:5886`), **`"w"` asm operands** (`emit.c:7831`), **16-byte atomics**
   (`emit.c:5205`), **128-bit overflow builtins** (`emit.c:4925`),
-  **`__atomic_fetch_nand`**, **HVA / half-float HFA** (`hfa_walk` `emit.c:2526`).
-  *Validate:* one T1 file each (`f16.c`, `neon-float.c`, `asm-w.c`,
+  **`__atomic_fetch_nand`**, **HVA** (`hfa_walk` `emit.c:2526`).
+  *Validate:* one T1 file each (`neon-float.c`, `asm-w.c`,
   `atomic128.c`, `ovf128.c`); T2 for HVA/half HFA.
 - [ ] **Stack protector, BTI/PAC (`-mbranch-protection`), `-pg`,
   `-fpatchable-function-entry`**; `-finstrument-functions` is parsed but
@@ -622,6 +658,18 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
   `= {}`, `[[...]]` standard attributes, `#embed` (pp).
   *Validate:* T1 `c23-*.c` with `vcc-flags: -std=c23`; T4 that the same
   keywords are identifiers under `-std=c99` (`int bool = 1;`).
+- [ ] **`_BitInt` widths above 128 and remaining targets**: the front end supports
+  distinct signed/unsigned types of 1–128 bits (signed starts at 2), `wb`/`uwb`
+  literals, target layout, integer rank and constant arithmetic. Linux x86 and
+  arm64 now normalize runtime arithmetic, loads, conversions and call results
+  to the declared precision. Their clang/vcc cross-call tests cover scalar
+  arguments/returns, callbacks, register exhaustion, varargs and aggregates.
+  Wider integers and runtime support on other targets remain to implement;
+  overflow builtins with BitInt operands/destinations above 64 bits are still
+  explicitly diagnosed (the existing wide-overflow lowering limitation).
+  *Validate:* `tests/vcc/bitint_constants.c`, `bitint_runtime.c` (16 widths,
+  eight boundary/pattern inputs, native x86 and ARM/QEMU), `tests/abi/bitint/`
+  (all four compiler combinations on each Linux target), cproc's three cases.
 - [ ] **Builtins**: ~~`__builtin_shufflevector`, `__builtin_convertvector`~~ (done:
   tests/vcc/vector_builtins.c; vector diagnostics spell clang's unnamed form, without the
   `(vector of N 'T' values)` note and typedef names) [P].  Library builtins (clang's `F`
@@ -638,7 +686,12 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
   argument has side effects.  Sized `__sync_*_N`, `__sync_swap`, `__c11_atomic_*`, `__builtin_rotate{left,right}N` and the ACLE `__builtin_arm_{nop,yield,wfe,wfi,sev,sevl,clrex,isb,dmb,dsb,trap,clz,clz64,rbit,rbit64,cls,cls64}`: tests/vcc/builtin_rotate_arm.c.  Atomic nand/max/min (`__atomic_*`, `__c11_atomic_*`, `__sync_*` with clang's -Wsync-fetch-and-nand-semantics-changed: diag `sync_nand.c`; LSE ld{s,u}{max,min}al, LL/SC without LSE, nand as a loop), `__atomic_test_and_set`/`clear`, `__c11_atomic_compare_exchange_{strong,weak}`, `__c11_atomic_is_lock_free`: tests/vcc/atomic_nand_minmax.c (also `--cpu cortex-a53`, wasm).  Left in that group: floating `__atomic_fetch_{max,min}` and `fmaximum`/`fminimum`, `uinc`/`udec`.)
   ~~`__has_builtin` answers 0 for names absent from the kernel/SDK~~ (done for what vcc
   implements, see above; the rest are builtins vcc lacks).
-- [ ] **SVE in the front end**: `arm_sve.h` types, `target("+sve")`.
+- [ ] **SVE in the front end**: baseline AArch64 builtin sizeless types and
+  libc declarations work; invalid size, array, field, storage and pointer
+  arithmetic uses are diagnosed. Four diagnostics and declaration runtime
+  checks pass on Linux x86/ARM; ARM c-testsuite 220/220. Full `arm_sve.h`
+  tuple/intrinsic APIs, `target("+sve")` validation and scalable lowering
+  remain unsupported and are diagnosed explicitly.
   *Validate:* T1 under `qemu -cpu max`, layout checks for the types.
 - [x] **`ext_vector_type` silently dropped; unknown attributes no warning** [P].
   Done: `ext_vector_type` (tests/vcc/ext_vector.c);
@@ -693,12 +746,16 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
   "array has incomplete element type"; "previous definition is here" for a
   defined function: tests/vcc `label_decl.c`, diag `label_decl_kr_vis.c`,
   `incomplete_var.c`, `conflict_prev_def.c`.)
-- [ ] **Fixed limits** (struct members now 1M, pointer levels 1024, nested
-  declarators stack-guarded): 4096 struct members (`cc.c:6255,6313`), 64
-  declarator levels (`cc.c:6047-6113`), `DOPS_MAX` 4096 (`cc.c:5551`), 16
-  nested anonymous members (`find_member` `cc.c:3310`), 256 K&R params
-  (`cc.c:7339`).
-  *Validate:* T1 `fe-limits.c` (generated, at 2× each limit).
+- [ ] **Fixed limits** (struct members now 1M; flat declarator operators use
+  growing arena buffers with a 1M resource budget; genuinely nested declarators
+  remain stack-guarded). Flat labels parse iteratively into flat AST lists;
+  large switch duplicate checks use a sorted interval sweep. GCC's unchanged
+  10,000-pointer and 100,000-case tests compile on Linux x86-64 and ARM64.
+  Remaining limits include 16 nested anonymous members (`find_member`) and
+  256 K&R parameters.
+  *Validate:* `flat_declarators_labels.c`, stress `pointer-10k` and
+  `case-labels-*`; GCC `limits-pointer.c` and `limits-caselabels.c`;
+  excessive pointer storage and genuine expression nesting fail cleanly.
 
 ### Preprocessor and lexer (`pp.c`, `lex/lex.c`)
 - [x] **`#pragma once` by path string, capped at 4096** [P].  (Done: by (dev, ino) from

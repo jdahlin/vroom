@@ -1680,6 +1680,9 @@ static int wexpr1(ecx *e, uint32_t n, bool want)
 {
 	cc *c = e->c;
 	const node *x = N(n);
+
+	if (unlikely(em_bitint(c, x->ty)))
+		efatal(e, x->loc, "_BitInt runtime code generation is not supported yet");
 	int k = wty(c, x->ty);
 
 	switch (x->op) {

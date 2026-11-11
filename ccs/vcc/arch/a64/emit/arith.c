@@ -145,6 +145,11 @@ VPRIV int test_zero(ecx *e, val *v, qty t, uint32_t l, bool nz)
 	uint64_t sz = tsize(c, t);
 	int r;
 
+	if (KIND(c, t) == TY_FLOAT16 || KIND(c, t) == TY_BFLOAT16) {
+		*v = f_tobool(e, *v, t);
+		t = prim(TY_INT);
+		sz = 4;
+	}
 	if (v->k == V_CONST || v->k == V_ADDR) {
 		bool truth = v->k == V_ADDR || v->i != 0;
 

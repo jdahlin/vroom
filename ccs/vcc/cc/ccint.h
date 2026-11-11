@@ -51,6 +51,8 @@ typedef struct attrs {		/* the attributes of one declaration */
 	uint32_t ifunc;		/* ifunc("resolver"): alias is the resolver, an STT_GNU_IFUNC symbol */
 	uint32_t counted_by;	/* identifier id */
 	uint32_t errmsg;	/* error("..."): string index + 1, 0: none */
+	uint32_t ms_struct;	/* Microsoft record layout */
+	uint32_t tlsloc;		/* tls_model attribute location */
 	uint32_t visibility;
 	uint32_t flags;		/* SF_* */
 	uint8_t packed, transparent, used, unused, weak, noreturn, constructor, destructor;
@@ -75,7 +77,7 @@ typedef struct casm {
 	asmop *ops;		/* outputs then inputs */
 	uint32_t *clob;		/* string indices */
 	uint32_t *labels;	/* label indices */
-	uint8_t vol, go, inl;
+	uint8_t vol, go, inl, extended;
 } casm;
 
 /*
@@ -102,7 +104,10 @@ typedef struct lzfn {
 	pp_lazy z;
 } lzfn;
 
+struct const_eval;
+
 struct cc {
+	struct const_eval *const_eval;	/* active const-variable initializer evaluations */
 	pp *p;
 	const cc_opts *o;
 	struct vfixbuf *tyb;	/* tyname/tyname_sugar: 8 buffers in rotation (allocated at the first) */
@@ -142,9 +147,10 @@ struct cc {
 	uint16_t cnd;
 	uint32_t in_proto;
 	uint32_t nconv;		/* conversion errors (clang's DefaultError warnings): later checks still run */
+	uint32_t constexpr_init;	/* symbol being initialized as a C23 constant object, 0 otherwise */
 	bool sie;		/* static_init_ok looks through NF_ERR (after such an error) */
 	uint32_t tn_tdef;	/* the last type_name's typedef (sym), 0: none */
-	uint32_t ptag[8], nptag;	/* tags declared in the outermost parameter list: a definition's body sees them */	/* parameter declarations being parsed: a new tag there is -Wvisibility */
+	uint32_t *ptag, nptag, cptag;	/* tags declared in the outermost parameter list: a definition's body sees them */	/* parameter declarations being parsed: a new tag there is -Wvisibility */
 	uint32_t uv_asg;	/* the variable an '=' being parsed assigns */		/* if/loop/switch bodies being parsed */
 	uint32_t uv[64];
 	uint16_t uvc[64];	/* ... cnd at the declaration */	/* ... those variables */
@@ -188,7 +194,7 @@ struct cc {
 
 	char *heap, *hp, *hend;	/* bump allocator for everything else */
 	struct dop *dops;	/* declarator op stack (cc/declarator.c) */
-	uint32_t ndops;
+	uint32_t ndops, capdops;
 
 	/* scopes: identifier id -> innermost binding (sym index) */
 	uint32_t *odir[NDIR], *tdir[NDIR], *ldir[NDIR];
@@ -232,6 +238,7 @@ struct cc {
 	uint32_t pack[64];	/* #pragma pack stack (bytes, 0: none) */
 	uint64_t packid[64];	/* labels (token.c pragma_pack) */
 	int npack;
+	bool ms_struct;		/* #pragma ms_struct on/off/reset */
 	/* #pragma weak (decl.c): waiting for key's declaration (alias: 0, or the weak alias of key) */
 	struct pweak { uint32_t key, alias, loc, sym; } *pweak;
 	uint32_t npweak, cpweak;	/* (the done aliases, sym set, stay for the end-of-TU check) */
@@ -307,6 +314,10 @@ enum {
 	BI_ARM_ISB, BI_ARM_DMB, BI_ARM_DSB, BI_ARM_TRAP,
 	BI_SETJMP, BI_LONGJMP,	/* GCC's __builtin_setjmp/__builtin_longjmp: buf[0] frame, [1] resume address, [2] sp */
 	BI_LIB,	/* plain library call with a prototype */
+	BI_NANS, BI_ISSIGNALING,
+	BI_ISFPCLASS, BI_ISSUBNORMAL, BI_ISZERO,
+	BI_X86_SIMD,
+	BI_ELEMENTWISE_ABS,
 	BI_COUNT
 };
 

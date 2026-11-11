@@ -105,6 +105,58 @@ VPRIV void move_to(ecx *e, int r, int r2, val *v, qty t)
 	}
 }
 
+/* In the pressure retry, a conditional's merge value waits in the frame
+ * instead of reserving temporaries across arbitrarily nested alternatives. */
+static void cond_spill_value(ecx *e, int64_t sl, qty t, val *v)
+{
+	bool wide = is_wide(e->c, t);
+
+	if (wide)
+		toreg2(e, v, is_signed(e->c, t));
+	else
+		toreg(e, v);
+	mem(e, I_ST, 3, 0, v->r, FRAME, sl);
+	if (wide)
+		mem(e, I_ST, 3, 0, v->r2, FRAME, sl + 8);
+}
+
+static val gen_cond_spill(ecx *e, uint32_t n)
+{
+	cc *c = e->c;
+	const node *x = N(n);
+	qty t = x->ty;
+	bool wide = is_wide(c, t);
+	int64_t sl = slot(e, wide ? 16 : 8, 8);
+	uint32_t lelse = newlabel(e), lend = newlabel(e);
+	val v = gen(e, x->a);
+
+	if (!x->b) {
+		/* GNU a ?: c evaluates a once; save it before the truth test
+		   consumes its registers. The false alternative may then reuse them. */
+		cond_spill_value(e, sl, t, &v);
+		test_zero(e, &v, t, lend, true);
+	} else {
+		test_zero(e, &v, N(x->a)->ty, lelse, false);
+		v = gen(e, x->b);
+		cond_spill_value(e, sl, t, &v);
+		val_free(e, &v);
+		jump(e, lend);
+		deflabel(e, lelse);
+	}
+	v = gen(e, x->c);
+	cond_spill_value(e, sl, t, &v);
+	val_free(e, &v);
+	deflabel(e, lend);
+	v = vreg(treg(e));
+	mem(e, I_LD, 3, 0, v.r, FRAME, sl);
+	if (wide) {
+		v.k = V_REG2;
+		v.r2 = treg(e);
+		mem(e, I_LD, 3, 0, v.r2, FRAME, sl + 8);
+	}
+	return v;
+}
+
 static val gen_cond_expr(ecx *e, uint32_t n)
 {
 	cc *c = e->c;
@@ -115,9 +167,11 @@ static val gen_cond_expr(ecx *e, uint32_t n)
 	int r = -1, r2 = -1;
 	val v;
 
+	if (unlikely(e->spill) && !vd)
+		return gen_cond_spill(e, n);
 	if (!x->b) {		/* a ?: c */
 		v = gen(e, x->a);
-		if (v.k == V_CONST || v.k == V_ADDR) {
+		if (!is_flt(c, t) && (v.k == V_CONST || v.k == V_ADDR)) {
 			if (v.k == V_ADDR || v.i)
 				return v;
 			return gen(e, x->c);
@@ -125,10 +179,24 @@ static val gen_cond_expr(ecx *e, uint32_t n)
 		if (wide) {
 			toreg2(e, &v, is_signed(c, t));
 			r = v.r, r2 = v.r2;
+		} else {
+			r = toreg(e, &v);
+		}
+		if (is_flt(c, t)) {
+			/* Keep the result value intact while testing its C truth value.
+			 * Testing raw floating bits would incorrectly treat -0.0 as true. */
+			val test = vreg(treg(e));
+			mov(e, 1, test.r, r);
+			if (wide) {
+				test.k = V_REG2;
+				test.r2 = treg(e);
+				mov(e, 1, test.r2, r2);
+			}
+			test_zero(e, &test, t, lend, true);
+		} else if (wide) {
 			op3(e, I_ORR, 1, R_X16, r, r2);
 			cbz(e, true, 1, R_X16, lend);
 		} else {
-			r = toreg(e, &v);
 			cbz(e, true, X(c, t), r, lend);
 		}
 		v = gen(e, x->c);
@@ -220,7 +288,7 @@ static val gen_vbin(ecx *e, int op, int ra, int rb, qty t, uint32_t loc)
 	char ab[8];
 	tbuf *rb_ = &e->raw;
 	size_t st;
-	int32_t sl;
+	int64_t sl;
 	int rd;
 	ins *i;
 
@@ -297,7 +365,7 @@ static val gen_vlanes(ecx *e, int op, qty at, val *a, qty bt, val *b, qty rt, bo
 	qty vt = is_vec(c, at) ? at : bt, et = T(c, vt)->base, rte = T(c, rt)->base;
 	unsigned n = (unsigned)(tsize(c, vt) / tsize(c, et));
 	int ra = toreg(e, a), rb = unary ? -1 : toreg(e, b), rd;
-	int32_t sl = slot(e, tsize(c, rt), 16);
+	int64_t sl = slot(e, tsize(c, rt), 16);
 
 	rd = treg(e);
 	opi(e, I_ADDI, 1, rd, FRAME, sl);
@@ -307,9 +375,10 @@ static val gen_vlanes(ecx *e, int op, qty at, val *a, qty bt, val *b, qty rt, bo
 
 		if (unary) {
 			if (op == T_MINUS)
-				r = is_flt(c, et) ? f_neg(e, x, et) : arith(e, T_MINUS, et, vconst(0), x);
+				r = is_flt(c, et) ? f_neg(e, x, et) : is_wide(c, et) ? arith2(e, T_MINUS, et, vconst(0), x)
+										 : arith(e, T_MINUS, et, vconst(0), x);
 			else
-				r = arith(e, T_CARET, et, x, vconst(-1));
+				r = is_wide(c, et) ? arith2(e, T_CARET, et, x, vconst(-1)) : arith(e, T_CARET, et, x, vconst(-1));
 		} else if (em_is_cmp(op)) {
 			if (is_flt(c, et)) {
 				r = f_compare(e, op, et, x, y);
@@ -380,7 +449,7 @@ static val gen_binary(ecx *e, uint32_t n)
 	if (unlikely(e->spill) && (a.k == V_REG || a.k == V_REG2) && tidx(a.r) >= 0 &&
 	    !is_vec(c, lt) && N(x->b)->op != N_NUM && N(x->b)->op != N_VAR) {
 		/* out of registers before: the left value waits in the frame while the right is computed */
-		int32_t sl = slot(e, 16, 8);
+		int64_t sl = slot(e, 16, 8);
 		bool two = a.k == V_REG2;
 
 		mem(e, I_ST, 3, 0, a.r, FRAME, sl);
@@ -627,7 +696,7 @@ static val atomic_rmw(ecx *e, uint32_t n, bool inc, bool post)
 	cc *c = e->c;
 	const node *x = N(n);
 	bool asg = x->op == N_ASSIGN;
-	qty t = x->ty;
+	qty t = N(x->a)->ty;
 	val v = vnone(), old, nv;
 	lval l;
 	int sz, ra, ob, cmp, nb;
@@ -700,7 +769,7 @@ static val gen_assign(ecx *e, uint32_t n)
 {
 	cc *c = e->c;
 	const node *x = N(n);
-	qty lt = x->ty;
+	qty lt = N(x->a)->ty;
 	lval l;
 	val v, old;
 
@@ -821,16 +890,14 @@ static val incdec_op(ecx *e, qty t, bool inc, bool post, val *old)
 			nv = *old = f_arith(e, inc ? T_PLUS : T_MINUS, t, cp, one);
 		}
 	} else if (is_flt(c, t)) {
-		int d = fpk(e, t);
-
 		toreg(e, old);
 		if (post) {
 			int r = treg(e);
 
 			mov(e, 1, r, old->r);
-			nv = f_arith(e, inc ? T_PLUS : T_MINUS, t, vreg(r), f_const(d, 1.0));
+			nv = f_arith(e, inc ? T_PLUS : T_MINUS, t, vreg(r), f_const_t(e, t, 1.0));
 		} else {
-			nv = *old = f_arith(e, inc ? T_PLUS : T_MINUS, t, *old, f_const(d, 1.0));
+			nv = *old = f_arith(e, inc ? T_PLUS : T_MINUS, t, *old, f_const_t(e, t, 1.0));
 		}
 	} else if (is_wide(c, t)) {
 		val one = vconst(1), cp = *old;
@@ -879,7 +946,7 @@ static val gen_incdec(ecx *e, uint32_t n)
 {
 	cc *c = e->c;
 	const node *x = N(n);
-	qty t = x->ty;
+	qty t = N(x->a)->ty;
 	bool inc = x->op == N_PREINC || x->op == N_POSTINC, post = x->op == N_POSTINC || x->op == N_POSTDEC;
 	lval l;
 	val old, nv;
@@ -900,7 +967,36 @@ static val gen_incdec(ecx *e, uint32_t n)
 	return nv;
 }
 
+static val gen_inner(ecx *e, uint32_t n);
+
 VPRIV val gen(ecx *e, uint32_t n)
+{
+	cc *c = e->c;
+	qty t = N(n)->ty;
+
+	if (likely(!em_bitint(c, t)))
+		return gen_inner(e, n);
+	val v = gen_inner(e, n);
+	{
+		unsigned bits = T(c, t)->n;
+		bool sgn = is_signed(c, t);
+
+		if (v.k == V_CONST)
+			return vconst(em_trunc_to(c, v.i, t));
+		if (bits > 64) {
+			toreg2(e, &v, sgn);
+			if (bits < 128)
+				opbf(e, sgn ? I_SBFM : I_UBFM, 1, v.r2, v.r2, 0, bits - 65);
+		} else if (bits < 64) {
+			int r = toreg(e, &v);
+
+			opbf(e, sgn ? I_SBFM : I_UBFM, 1, r, r, 0, bits - 1);
+		}
+	}
+	return v;
+}
+
+static val gen_inner(ecx *e, uint32_t n)
 {
 	cc *c = e->c;
 	const node *x = N(n);
@@ -993,7 +1089,7 @@ VPRIV val gen(ecx *e, uint32_t n)
 		case CK_SPLAT: {	/* the scalar into every lane of a new vector */
 			qty et = T(c, x->ty)->base;
 			uint64_t es = tsize(c, et), nl = tsize(c, x->ty) / es;
-			int32_t sl = slot(e, tsize(c, x->ty), talign(c, x->ty));
+			int64_t sl = slot(e, tsize(c, x->ty), talign(c, x->ty));
 			val v = gen(e, x->a);
 			int r;
 
@@ -1008,7 +1104,7 @@ VPRIV val gen(ecx *e, uint32_t n)
 			return vreg(r);
 		}
 		case CK_UNION: {
-			int32_t sl = slot(e, tsize(c, x->ty), talign(c, x->ty));
+			int64_t sl = slot(e, tsize(c, x->ty), talign(c, x->ty));
 			lval l = { .k = L_FRAME, .off = sl, .align = talign(c, x->ty) };
 			val v = gen(e, x->a);
 			int r;
@@ -1062,7 +1158,7 @@ VPRIV val gen(ecx *e, uint32_t n)
 	case N_CPLX: {	/* a _Complex value: both parts into a temporary, its address */
 		qty et = c->tags[T(c, x->ty)->aux].f[0].ty;
 		uint64_t es = tsize(c, et);
-		int32_t sl = slot(e, 2 * es, talign(c, x->ty));
+		int64_t sl = slot(e, 2 * es, talign(c, x->ty));
 		lval d = { .k = L_FRAME, .off = sl, .align = talign(c, et) };
 		val v = gen(e, x->a);
 		int r;

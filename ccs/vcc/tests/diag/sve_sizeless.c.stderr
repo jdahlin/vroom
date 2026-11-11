@@ -1,0 +1,13 @@
+sve_sizeless.c:1:22: error: non-local variable with sizeless type '__SVFloat32_t'
+    1 | extern __SVFloat32_t nonlocal;
+      |                      ^
+sve_sizeless.c:2:12: error: invalid application of 'sizeof' to sizeless type '__SVFloat32_t'
+    2 | int size = sizeof(__SVFloat32_t);
+      |            ^
+sve_sizeless.c:3:17: error: invalid application of 'alignof' to sizeless type '__SVFloat64_t'
+    3 | int alignment = _Alignof(__SVFloat64_t);
+      |                 ^
+sve_sizeless.c:4:23: error: field has sizeless type '__SVBool_t'
+    4 | struct S { __SVBool_t field; };
+      |                       ^
+4 errors generated.

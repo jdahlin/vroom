@@ -32,11 +32,11 @@
  * slot (8-byte words; a scalar extended to 64 bits).
  */
 enum { WA_INT, WA_SSE };
-typedef struct wkarg { uint8_t n, cls[2]; bool mem, x87, up; uint32_t align; uint64_t size; int32_t slot; } wkarg;	/* x87: returned in st(0); up: one 16-byte SSE word (x86-64 SSEUP) */
+typedef struct wkarg { uint8_t n, cls[2]; bool mem, x87, up; uint32_t align; uint64_t size; int64_t slot; } wkarg;	/* x87: returned in st(0); up: one 16-byte SSE word (x86-64 SSEUP) */
 /* ---------------- walker state (one per ecx) ---------------- */
 
 #define WK_MAXLOOP 1024
-#define WK_MAXCASE (1u << 16)
+#define WK_MAXCASE (1u << 20)
 
 typedef struct wkloop { uint32_t brk, cont; int cdepth; } wkloop;	/* cdepth: the cleanups live at its entry */
 #define WK_MAXCLEAN 1024
@@ -47,24 +47,24 @@ typedef struct wkinl {
 	struct wkinl *up;
 	uint32_t fn, endlbl, inst;
 	qty rty;
-	int32_t rslot;		/* the result's slot (a value held by address: its object) */
+	int64_t rslot;		/* the result's slot (a value held by address: its object) */
 	int cbase;		/* the cleanups live at the call */
 	bool any, cst_ok;	/* a return seen; every return so far the constant cst */
 	val cst;
 } wkinl;
 
 typedef struct wkst {
-	int32_t foff;		/* bytes of locals below the frame base so far */
+	int64_t foff;		/* bytes of locals below the frame base so far */
 	uint32_t falign;
 	uint32_t nlabel;	/* local labels handed out in this function (1..) */
 	uint32_t gen;		/* bindings below are valid when their gen is this */
 	uint32_t *sgen;		/* per sym */
-	int32_t *soff;		/* per sym: frame offset */
+	int64_t *soff;		/* per sym: frame offset */
 	uint32_t *lgen, *ulbl;	/* per user label: local label */
 	uint32_t *clbl;		/* per node (N_CASE/N_DEFAULT): local label, valid when cgen == gen */
 	uint32_t *cgen;
 	uint32_t *vgen;		/* per node (a VLA size): its value is in slot voff when vgen == gen */
-	int32_t *voff;
+	int64_t *voff;
 	uint32_t *zgen;		/* per sym (a VLA): its saved sp was zeroed on entry when zgen == gen */
 	wkloop loop[WK_MAXLOOP];
 	int nloop;
@@ -81,8 +81,7 @@ typedef struct wkst {
 	struct { uint32_t sym, parent; } cn[WK_MAXCLEAN];
 	uint32_t ncn;
 	uint32_t *csn, *csg, *lcn, *lcg;
-	/* constants: a local or parameter never written (or only ever assigned its initial
-	   constant) is that constant, bound per sym when kgen == gen */
+	/* Constants for locals or parameters never written, bound per sym when kgen == gen. */
 	uint32_t *kgen;
 	val *kval;
 	/* inlining: the copy being generated (0: the function itself), labels per copy */
@@ -92,14 +91,16 @@ typedef struct wkst {
 } wkst;
 
 VPRIV wkst *wk_state(ecx *e);
-VPRIV bool wk_const_sym(ecx *e, uint32_t s, val *v);
-VPRIV bool wk_isconst(ecx *e, uint32_t n);	/* n is a constant (constants, bound locals, no loads) */
-VPRIV val wk_conv(ecx *e, val v, qty from, qty to);	/* s is bound to the constant *v */
+VPRIV void wk_label(ecx *e, uint32_t label);
+VPRIV bool wk_isconst(ecx *e, uint32_t n);
+VPRIV int wk_condfold(ecx *e, uint32_t n);
+VPRIV bool wk_branch_entry(cc *c, uint32_t n);
+VPRIV bool wk_const_sym(ecx *e, uint32_t s, val *v);	/* s is bound to the constant *v */
 VPRIV val wk_inline(ecx *e, uint32_t n, uint32_t s);	/* the call n to s, inlined (wk_can_inline) */
 VPRIV bool wk_can_inline(ecx *e, uint32_t s);
 VPRIV void wk_function(ecx *e, uint32_t s);	/* emit/walk/func.c: what emit/tu.c calls for x86-64 */
-VPRIV int32_t wk_slot(ecx *e, uint64_t size, uint32_t align);
-VPRIV int32_t wk_local(ecx *e, uint32_t s);	/* a local's slot, made on first use (a goto may reach a use first) */
+VPRIV int64_t wk_slot(ecx *e, uint64_t size, uint32_t align);
+VPRIV int64_t wk_local(ecx *e, uint32_t s);	/* a local's slot, made on first use (a goto may reach a use first) */
 VPRIV uint32_t wk_newlabel(ecx *e);
 VPRIV val wk_gen(ecx *e, uint32_t n);
 VPRIV lval wk_lval(ecx *e, uint32_t n);
@@ -111,6 +112,7 @@ VPRIV void wk_init(ecx *e, const lval *dst, qty t, uint32_t init);
 VPRIV void wk_bfinit(ecx *e, const lval *l, qty t, uint32_t init);	/* a bit-field initialized */	/* an object initialized by init (0: none) */
 VPRIV int wk_size(cc *c, qty t);
 VPRIV bool wk_mem(ecx *e, qty t);	/* values of t are held by address (records, arrays, x87 long double) */
+VPRIV val wk_conv(ecx *e, val v, qty from, qty to);
 VPRIV val wk_reload(ecx *e, const lval *l, qty t);	/* l's value again (a new register or address) */
 VPRIV val wk_putmem(ecx *e, lval *l, qty t, val v);	/* v's bytes (held by address) into l: l's address */
 VPRIV void ctor_entry(cc *c, tbuf *b, uint32_t s, bool fini);	/* arch/a64/emit/func.c (shared) */
@@ -118,9 +120,10 @@ VPRIV bool wk_signed(cc *c, qty t);
 VPRIV void wk_vla_fix(ecx *e, qty t, bool pure);	/* the VLA sizes in t evaluated now, into slots */
 VPRIV val wk_vla_bytes(ecx *e, qty t);		/* sizeof t (a VLA: computed) */
 VPRIV void wk_vla_decl(ecx *e, uint32_t s, bool zero);	/* a VLA's storage below sp */
-VPRIV void wk_cleanups(ecx *e, int to);
-VPRIV uint32_t wk_userlabel(ecx *e, uint32_t l);	/* a C label's local label (asm goto) */
-VPRIV void wk_put(ecx *e, const lval *l, qty t, int r);	/* r stored to l as type t (bit-fields too) */	/* the cleanups above depth `to` run, innermost first (not popped) */
+VPRIV uint32_t wk_userlabel(ecx *e, uint32_t l);
+VPRIV void wk_put(ecx *e, const lval *l, qty t, int r);
+VPRIV void wk_goto(ecx *e, uint32_t label);
+VPRIV void wk_cleanups(ecx *e, int to);	/* the cleanups above depth `to` run, innermost first (not popped) */
 
 /* ---------------- the lowering interface (layer 2) ---------------- */
 
@@ -151,6 +154,7 @@ VPRIV bool LO(ldmem)(void);
 /* __int128: by address too when LO(i128mem) */
 VPRIV bool LO(i128mem)(void);
 VPRIV val LO(wconst)(ecx *e, i128 v);
+VPRIV val LO(wbitint)(ecx *e, val v, unsigned bits, bool sgn);
 VPRIV val LO(wbin)(ecx *e, int op, bool sgn, val a, val b);	/* b an int for << >> */
 VPRIV val LO(wun)(ecx *e, int op, val a);			/* T_MINUS T_TILDE */
 VPRIV val LO(wcmp)(ecx *e, int op, bool sgn, val a, val b);
@@ -159,11 +163,16 @@ VPRIV int LO(ftreg)(ecx *e);				/* a free float temporary */
 VPRIV val LO(fconst)(ecx *e, uint64_t bits, int size);	/* a float (4) or double (8) constant */
 VPRIV val LO(fbin)(ecx *e, int op, qty t, val a, val b);	/* + - * / */
 VPRIV val LO(fneg)(ecx *e, qty t, val a);
+enum { WK_FCMP_UNORDERED = 0x10000, WK_FCMP_ORDERED_NE };
 VPRIV val LO(fcmp)(ecx *e, int op, qty t, val a, val b);	/* 0 or 1, false when unordered (but !=) */
 VPRIV val LO(cvt)(ecx *e, val v, qty from, qty to);	/* a float on either side (to may be _Bool) */
 /* builtins the CPU does */
 VPRIV void LO(trap)(ecx *e);				/* __builtin_trap, __builtin_unreachable */
-VPRIV val LO(frame)(ecx *e, bool ret, int level);	/* the return address (ret) or the frame address, level frames up */
+VPRIV void LO(asm)(ecx *e, uint32_t n);
+VPRIV void LO(barrier)(ecx *e);			/* compiler barrier: no machine instruction */
+VPRIV val LO(setjmp)(ecx *e, int rbuf);
+VPRIV void LO(longjmp)(ecx *e, int rbuf);
+VPRIV val LO(frame)(ecx *e, bool ret, uint32_t level);			/* the return address (ret) or the frame address */
 VPRIV val LO(bitop)(ecx *e, int bi, int size, val a);	/* BI_CLZ.. BI_BSWAP64: a nonzero where the builtin requires it */
 VPRIV val LO(alloca)(ecx *e, val n);			/* n bytes on the stack, 16-aligned */
 VPRIV int LO(tlsaddr)(ecx *e, uint32_t ref, int model);	/* a thread-local's address: 0 local-exec, 1 initial-exec, 2 general dynamic */
@@ -173,14 +182,11 @@ VPRIV int LO(tlsaddr)(ecx *e, uint32_t ref, int model);	/* a thread-local's addr
    rexp -> the old value; FENCE */
 enum { WK_ALOAD, WK_ASTORE, WK_AXCHG, WK_AXADD, WK_ACAS, WK_AFENCE };
 VPRIV int LO(atomic)(ecx *e, int op, int size, int rp, int rv, int rexp);
-VPRIV val LO(setjmp)(ecx *e, int rbuf);		/* __builtin_setjmp: 0, then 1 when longjmp comes back */
-VPRIV void LO(longjmp)(ecx *e, int rbuf);
 VPRIV int LO(spget)(ecx *e);				/* the stack pointer in a temporary */
 VPRIV void LO(spset)(ecx *e, int r);			/* the stack pointer = r (r freed) */
 VPRIV val LO(fbits)(ecx *e, val v, int size);		/* a float's bits in an integer register */
 /* control */
-VPRIV void LO(asm)(ecx *e, uint32_t n);			/* an asm statement (the CPU's constraints and syntax) */
-VPRIV void LO(dbgrow)(ecx *e, uint32_t loc);		/* -g: a line-table row at the next instruction */
+VPRIV void LO(dbgrow)(ecx *e, uint32_t loc);	/* -g: line row at the next instruction */
 VPRIV void LO(label)(ecx *e, uint32_t l);
 VPRIV void LO(jump)(ecx *e, uint32_t l);
 VPRIV void LO(jumpr)(ecx *e, int r);			/* to the address in r (computed goto) */

@@ -84,6 +84,27 @@ VPRIV int x64_base(ecx *e, const lval *l, uint32_t *ref)
 
 VPRIV void x64_mem(ecx *e, int op, int sz, int r, const lval *l, bool sgn)
 {
+	/* x86 memory displacements are signed 32-bit, but C address offsets are
+	   pointer-width. Materialize a full address before the final memory op. */
+	if (l->off < INT32_MIN || l->off > INT32_MAX) {
+		if (op == X_ST && r == R11 && l->k == L_SYM && sym_needs_got(e->c, l->ref))
+			efatal(e, e->curloc, "internal error: a store through the GOT from r11");
+		uint32_t live = e->x64->live;
+		if (r < 32) e->x64->live |= 1u << r;
+		if (l->k == L_REG && l->r < 32) e->x64->live |= 1u << l->r;
+		int address = x64_treg(e), offset = x64_treg(e);
+		lval origin = *l;
+		/* A negative frame displacement marks a local for the printer's final
+		   R12 realignment rewrite. Keep that marker in the address anchor. */
+		origin.off = l->k == L_FRAME && l->off < 0 ? -1 : 0;
+		x64_mem(e, X_LEA, 8, address, &origin, false);
+		x64_movi(e, offset, l->off - origin.off);
+		x64_op3(e, X_ADD, 8, address, address, offset);
+		lval at = { .k = L_REG, .r = (uint8_t)address };
+		x64_mem(e, op, sz, r, &at, sgn);
+		e->x64->live = live;
+		return;
+	}
 	uint32_t ref;
 	int base = x64_base(e, l, &ref);
 	rec *i;
@@ -92,8 +113,6 @@ VPRIV void x64_mem(ecx *e, int op, int sz, int r, const lval *l, bool sgn)
 		efatal(e, e->curloc, "internal error: a store through the GOT from r11");
 	i = x64_put(e, op);
 
-	if (l->off < INT32_MIN || l->off > INT32_MAX)
-		efatal(e, e->curloc, "x86-64: offset out of range");
 	i->sz = (uint8_t)sz;
 	i->cond = sgn;
 	i->off = (int32_t)l->off;
@@ -178,12 +197,20 @@ VPRIV int x64_toreg(ecx *e, val *v, int size)
 
 VPRIV void x64_load(ecx *e, int rd, const lval *l, int size, bool sgn)
 {
-	x64_mem(e, X_LD, size, rd, l, sgn);
+	if (size == 2 && IS_XMM(rd)) {
+		x64_mem(e, X_LD, 2, R11, l, false);
+		x64_op3(e, X_MOV, 4, rd, R11, XNOREG);
+	} else
+		x64_mem(e, X_LD, size, rd, l, sgn);
 }
 
 VPRIV void x64_store(ecx *e, int rs, const lval *l, int size)
 {
-	x64_mem(e, X_ST, size, rs, l, false);
+	if (size == 2 && IS_XMM(rs)) {
+		x64_op3(e, X_MOV, 4, R11, rs, XNOREG);
+		x64_mem(e, X_ST, 2, R11, l, false);
+	} else
+		x64_mem(e, X_ST, size, rs, l, false);
 }
 
 VPRIV int x64_laddr(ecx *e, const lval *l)
@@ -202,10 +229,14 @@ VPRIV uint32_t x64_save(ecx *e, const uint8_t *regs, int n, int k0, int k1)
 	uint32_t sv = 0;
 
 	for (int k = 0; k < n; k++)
-		if ((X->live & (1u << regs[k])) && regs[k] != k0 && regs[k] != k1) {
-			x64_op3(e, X_PUSH, 8, XNOREG, regs[k], XNOREG);
-			X->pushes++;
+		if ((X->live & (1u << regs[k])) && regs[k] != k0 && regs[k] != k1)
 			sv |= 1u << regs[k];
+	/* x64_restore pops in descending register order, independent of the
+	   caller's list order. Match it even when several registers are live. */
+	for (int r = 0; r < 16; r++)
+		if (sv & (1u << r)) {
+			x64_op3(e, X_PUSH, 8, XNOREG, r, XNOREG);
+			X->pushes++;
 		}
 	return sv;
 }
@@ -520,6 +551,16 @@ VPRIV val x64_setjmp(ecx *e, int rb)
 	lval b0 = { .k = L_REG, .r = (uint8_t)rb }, b1 = b0, b2 = b0;
 	rec *i;
 	int r;
+	uint32_t saved = e->x64->live & (X_TEMPS | X_FTEMPS) & ~(1u << rb);
+	int64_t slots[32] = {0};
+
+	/* A nonlocal return also clobbers temporaries live around the call. */
+	for (int q = 0; q < 32; q++) if (saved & (1u << q)) {
+		int size = IS_XMM(q) ? 16 : 8;
+		slots[q] = wk_slot(e, size, size);
+		lval slot = { .k = L_FRAME, .off = slots[q] };
+		x64_mem(e, X_ST, size, q, &slot, false);
+	}
 
 	b1.off = 8, b2.off = 16;
 	x64_mem(e, X_ST, 8, RBP, &b0, false);
@@ -535,6 +576,10 @@ VPRIV val x64_setjmp(ecx *e, int rb)
 	x64_label(e, resume);
 	x64_movi(e, r, 1);
 	x64_label(e, done);
+	for (int q = 0; q < 32; q++) if (saved & (1u << q)) {
+		lval slot = { .k = L_FRAME, .off = slots[q] };
+		x64_mem(e, X_LD, IS_XMM(q) ? 16 : 8, q, &slot, false);
+	}
 	return (val){ .k = V_REG, .r = (uint8_t)r };
 }
 
@@ -727,21 +772,34 @@ VPRIV int x64_atomic(ecx *e, int op, int size, int rp, int rv, int rexp)
 }
 
 VPRIV void x64_trap(ecx *e) { x64_put(e, X_UD2); }
+VPRIV void x64_barrier(ecx *e) { x64_put(e, X_BARRIER); }
 
-/* level frames up through the saved rbp chain (every function keeps a frame pointer) */
-VPRIV val x64_frame(ecx *e, bool ret, int level)
+VPRIV val x64_frame(ecx *e, bool ret, uint32_t level)
 {
 	int r = x64_treg(e);
+	lval l = { .k = L_REG, .r = (uint8_t)r };
 
 	x64_mov(e, r, RBP);
-	for (int k = 0; k < level; k++) {
-		lval l = { .k = L_REG, .r = (uint8_t)r };
+	if (level <= 4) {
+		for (uint32_t k = 0; k < level; k++)
+			x64_mem(e, X_LD, 8, r, &l, false);
+	} else {
+		/* Keep code size bounded even for a large constant frame depth. */
+		int count = x64_treg(e);
+		uint32_t loop = wk_newlabel(e);
+		rec *j;
 
+		x64_movi(e, count, level);
+		x64_label(e, loop);
 		x64_mem(e, X_LD, 8, r, &l, false);
+		x64_op3(e, X_SUBI, 4, count, count, XNOREG)->imm = 1;
+		j = x64_put(e, X_JCC);
+		j->cond = CC_NE;
+		j->label = loop;
+		x64_tfree(e, count);
 	}
 	if (ret) {
-		lval l = { .k = L_REG, .r = (uint8_t)r, .off = 8 };
-
+		l.off = 8;
 		x64_mem(e, X_LD, 8, r, &l, false);
 	}
 	return (val){ .k = V_REG, .r = (uint8_t)r };
@@ -854,7 +912,8 @@ VPRIV val x64_fbits(ecx *e, val v, int size)
 {
 	int r = x64_treg(e);
 
-	x64_op3(e, X_MOV, size == 4 ? 4 : 8, r, v.r, XNOREG);
+	x64_op3(e, X_MOV, size <= 4 ? 4 : 8, r, v.r, XNOREG);
+	if (size == 2) x64_op3(e, X_ANDI, 4, r, r, XNOREG)->imm = 0xffff;
 	x64_tfree(e, v.r);
 	return (val){ .k = V_REG, .r = (uint8_t)r };
 }

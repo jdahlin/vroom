@@ -16,6 +16,10 @@ static inline void void_ptr_arith(cc *c, qty pt, uint32_t loc, bool two)
 {
 	static const char *const g[] = { "pointer-arith", "gnu", "pedantic", NULL };
 
+	if (unlikely(KIND(c, T(c, pt)->base) == TY_SVE)) {
+		cc_error(c, loc, "arithmetic on a pointer to sizeless type '%s'", tyname(c, T(c, pt)->base));
+		return;
+	}
 	if (unlikely(KIND(c, T(c, pt)->base) == TY_VOID))
 		EXT_WARN(c, "gnu-pointer-arith", g, loc,
 			 two ? "arithmetic on pointers to void is a GNU extension" : "arithmetic on a pointer to void is a GNU extension");
@@ -244,7 +248,7 @@ VPRIV uint32_t binop(cc *c, int op, uint32_t l, uint32_t r, uint32_t loc)
 
 VPRIV uint32_t assign(cc *c, int op, uint32_t l, uint32_t r, uint32_t loc)
 {
-	qty lt = QUNQ(N(l)->ty);
+	qty lt = QUNQ(ty_unatomic(c, N(l)->ty));
 	uint32_t n;
 
 	if (unlikely(!need_lvalue(c, l, loc)))
@@ -603,7 +607,7 @@ static inline __attribute__((always_inline)) uint32_t primary_sym(cc *c, uint32_
 		y = &c->syms[s];
 	}
 	if (y->kind == S_ENUMCONST) {
-		uint32_t n = mk_int(c, y->val, y->ty, loc);
+		uint32_t n = mk_int(c, trunc_to(c, y->val, y->ty), y->ty, loc);
 
 		if (N(n)->op == N_NUM)
 			N(n)->aux |= NUM_ENUM;
@@ -1105,6 +1109,13 @@ static __attribute__((noinline)) uint32_t call(cc *c, uint32_t fn, uint32_t loc)
 		} else {
 			/* default argument promotions */
 			a = rvalue(c, a);
+			if (!(N(a)->flags & NF_ERR) && !complete(c, N(a)->ty)) {
+				pp_span r = rng(c, a);
+
+				report(c, "error", r.b, &r, 1, NULL, 0, "argument type '%s' is incomplete", tyname(c, N(a)->ty));
+				fwd_note(c, N(a)->ty);
+				a = err_node(c, N(a)->loc);
+			}
 			if (KIND(c, N(a)->ty) == TY_FLOAT)
 				a = cast_node(c, a, prim(TY_DOUBLE), CK_F2F);
 		}
@@ -1115,8 +1126,23 @@ static __attribute__((noinline)) uint32_t call(cc *c, uint32_t fn, uint32_t loc)
 		nonnull_args(c, N(callee)->a, ft, args.v, args.n);
 	if (fmt)
 		format_check(c, fmt, args.v, aty, atd, args.n);
+	if (!c->o->no_builtin && !lib_builtin_disabled(c->o, "strncmp", 7) && args.n == 3 &&
+	    N(callee)->op == N_VAR && c->syms[N(callee)->a].kind == S_FUNC &&
+	    (c->syms[N(callee)->a].flags & SF_GLOBAL) && c->syms[N(callee)->a].sc != SC_STATIC &&
+	    !(c->syms[N(callee)->a].attrs && c->attr[c->syms[N(callee)->a].attrs].asmname)) {
+		int nl;
+		const char *nm = idname(c->syms[N(callee)->a].name, &nl);
+		if (nl == 7 && !memcmp(nm, "strncmp", 7) && f->n == 3 &&
+		    !(f->flags & (TF_NOPROTO | TF_VARIADIC)) && compatible(c, ft, sig_func_type(c, "iSSz"))) {
+			uint32_t folded = fold_strncmp_zero(c, &args, loc);
+			if (folded)
+				return folded;
+		}
+	}
 	if (!c->o->no_builtin && args.n == 1 && N(callee)->op == N_VAR && c->syms[N(callee)->a].kind == S_FUNC &&
-	    (c->syms[N(callee)->a].flags & SF_GLOBAL)) {
+	    (c->syms[N(callee)->a].flags & SF_GLOBAL) && c->syms[N(callee)->a].sc != SC_STATIC &&
+	    !(c->syms[N(callee)->a].attrs && c->attr[c->syms[N(callee)->a].attrs].asmname) &&
+	    !lib_builtin_disabled(c->o, idstr_(c->syms[N(callee)->a].name), idlen_(c->syms[N(callee)->a].name))) {
 		/* clang: abs, labs and llabs declared with their library types are builtins (inline) */
 		int nl, k = KIND(c, T(c, ft)->base);
 		const char *nm = idname(c->syms[N(callee)->a].name, &nl);
@@ -1130,6 +1156,12 @@ static __attribute__((noinline)) uint32_t call(cc *c, uint32_t fn, uint32_t loc)
 			uint32_t lt = mk_bin(c, T_LESS, prim(TY_INT), x, mk_int(c, 0, t, loc), loc);
 
 			return with_pre(c, pre, conditional(c, lt, neg, x, loc));
+		}
+		if (k == TY_DOUBLE && f->n == 1 && !(f->flags & (TF_NOPROTO | TF_VARIADIC)) &&
+		    KIND(c, c->params[f->aux]) == TY_DOUBLE && c->syms[N(callee)->a].sc != SC_STATIC) {
+			uint32_t narrowed = narrow_math_call(c, nm, (size_t)nl, args.v[0], loc);
+			if (narrowed)
+				return narrowed;
 		}
 		/* clang folds the libm functions on a constant (double f(double)) */
 		static const struct { const char *s; double (*f)(double); } mf[] = {
@@ -1227,10 +1259,30 @@ VPRIV __attribute__((noinline)) uint32_t postfix_ops(cc *c, uint32_t n)
 			if (!is_ptr(c, at) || !is_integer(c, it)) {
 				pp_span r[2] = { rng(c, n), rng(c, ix) };
 
-				report(c, "error", loc, r, 2, NULL, 0, "subscripted value is not an array, pointer, or vector");
+				if (!is_ptr(c, at))
+					report(c, "error", loc, r, 2, NULL, 0, "subscripted value is not an array, pointer, or vector");
+				else
+					report(c, "error", loc, r, 2, NULL, 0, "array subscript is not an integer");
 				n = err_node(c, loc);
 				continue;
 			}
+			if (is_func(c, T(c, at)->base)) {
+				pp_span r = rng(c, n);
+
+				report(c, "error", r.b, &r, 1, NULL, 0, "subscript of pointer to function type '%s'", tyname(c, T(c, at)->base));
+				n = err_node(c, loc);
+				continue;
+			}
+			if (!is_void(c, T(c, at)->base) && !complete(c, T(c, at)->base)) {
+				pp_span r = rng(c, n);
+
+				report(c, "error", loc, &r, 1, NULL, 0, "subscript of pointer to incomplete type '%s'", tyname(c, T(c, at)->base));
+				fwd_note(c, T(c, at)->base);
+				n = err_node(c, loc);
+				continue;
+			}
+			if (KIND(c, T(c, at)->base) == TY_SVE)
+				void_ptr_arith(c, at, loc, false);
 			r = mk2(c, N_INDEX, T(c, at)->base, loc, n, convert(c, ix, prim(TY_LONG)));
 			N(r)->flags = NF_LVALUE;
 			n = r;
@@ -1306,7 +1358,9 @@ VPRIV __attribute__((noinline)) uint32_t postfix_ops(cc *c, uint32_t n)
 			next(c);
 			need_lvalue(c, n, loc);
 			need_scalar(c, n, "increment");
-			r = mk(c, op, QUNQ(N(n)->ty), loc);
+			if (is_ptr(c, N(n)->ty) && KIND(c, T(c, N(n)->ty)->base) == TY_SVE)
+				void_ptr_arith(c, N(n)->ty, loc, false);
+			r = mk(c, op, QUNQ(ty_unatomic(c, N(n)->ty)), loc);
 			N(r)->a = n;
 			n = r;
 			continue;

@@ -123,7 +123,7 @@ VPRIV void ctor_entry(cc *c, tbuf *b, uint32_t s, bool fini)
 
 /* finish_function for the object backend: the same function as items */
 /* ctor: 1 constructor, 2 destructor, 4 x28 is the frame base (mov x28, sp after the saves), 8 no frame (leaf) */
-static void finish_direct(ecx *e, uint32_t s, uint32_t align, const int *cs, int ncs, int32_t csave, int32_t total, int ctor)
+static void finish_direct(ecx *e, uint32_t s, uint32_t align, const int *cs, int ncs, int32_t csave, int64_t total, int ctor)
 {
 	cc *c = e->c;
 	tbuf *b = &e->out;
@@ -224,7 +224,8 @@ static void finish_function(ecx *e, uint32_t s)
 	tbuf *b = &e->out;
 	size_t start = b->n;
 	int cs[16], ncs = 0;
-	int32_t csave, locals, outs, total;
+	int32_t csave;
+	int64_t locals, outs, total;
 	const attrs *a = sym_attrs(c, s);
 	uint32_t align = 4;
 
@@ -273,8 +274,13 @@ static void finish_function(ecx *e, uint32_t s)
 		if (e->usedcs & (1u << r))
 			cs[ncs++] = r;
 	csave = (ncs * 8 + 15) & ~15;
-	locals = (int32_t)(((uint32_t)e->fmax + e->falign - 1) & ~(e->falign - 1));
-	outs = (int32_t)(((uint32_t)e->outmax + e->falign - 1) & ~(e->falign - 1));
+	if ((uint64_t)e->fmax > (uint64_t)INT64_MAX - e->falign ||
+	    (uint64_t)e->outmax > (uint64_t)INT64_MAX - e->falign)
+		efatal(e, 0, "stack frame too large");
+	locals = (int64_t)(((uint64_t)e->fmax + e->falign - 1) & ~(uint64_t)(e->falign - 1));
+	outs = (int64_t)(((uint64_t)e->outmax + e->falign - 1) & ~(uint64_t)(e->falign - 1));
+	if (locals > INT64_MAX - outs - csave - 16)
+		efatal(e, 0, "stack frame too large");
 	total = 16 + csave + locals + outs;
 	/* rewrite frame-slot references */
 	for (uint32_t k = 0; k < e->nin; k++) {
@@ -440,7 +446,7 @@ static void choose_lregs(ecx *e, uint32_t s, int max)
 
 		if (!E->luse[v] || E->lnoreg[v] || y->kind != S_VAR || !is_local_var(c, v) || y->sc == SC_STATIC ||
 		    !(is_integer(c, t) || is_ptr(c, t)) || is_wide(c, t) || (QQ(t) & Q_VOLATILE) ||
-		    tsize(c, t) - 1 >= 8 || (T(c, t)->flags & TF_VLA) || sym_attrs(c, v)->cleanup ||
+		    tsize(c, t) - 1 >= 8 || (T(c, t)->flags & (TF_VLA | TF_ATOMIC)) || sym_attrs(c, v)->cleanup ||
 		    regvar_reg(c, v) >= 0)
 			continue;
 		if (k == max && E->luse[cand[k - 1]] >= E->luse[v])

@@ -14,16 +14,20 @@ headers of clang as -isystem) and the test counts only if
      (so a directive grammar the harness does not know cannot blame vcc).
 vcc then runs -fsyntax-only (-E for preprocessor-only lines) with
 -fdiagnostics-format=json; its diagnostics (notes included) are matched
-against the directives as clang's VerifyDiagnosticConsumer does: per level,
-line (@+N, @-N, @N, @file:N, @*, @#marker), count (N, N+, N-M, +), text a
-substring ({{...}}) or regex (-re, {{...}} parts regex, the rest literal).
+against the directives by level, source file, line (@+N, @-N, @N, @file:N,
+@*, @#marker), and count (N, N+, N-M, +). Wording is vcc-owned: clang
+message substrings/regexes are checked only with --match-messages. Clang
+always validates its original message contract before the test is counted.
 
-  bench/vcc-verify.py [-j N] [-v] [--bin-dir DIR] [--show CAT] [PAT]
+  bench/vcc-verify.py [-j N] [-v] [--bin-dir DIR] [--target TRIPLE] [--show CAT] [PAT]
+      --target: run all lines on x86_64-linux-gnu or aarch64-linux-gnu
       PAT: substring of the test path (e.g. Sema/, C/C11, drs/dr0xx)
       -v: every failure's missing/unexpected diagnostics
       --show CAT: the tests of one category (fail, crash, skip:REASON, ...)
+      --match-messages: additionally compare vcc wording to clang directives
 Clang's side is cached under build/ccs/verify/ (by file content and line);
-results.json there is compared with the previous run: tests that changed
+Separate results.locations.json and results.messages.json baselines are
+compared with the previous run of the same policy: tests that changed
 from pass to fail (and back) are listed.
 """
 import hashlib, json, os, re, shlex, subprocess, sys
@@ -41,7 +45,13 @@ if '--bin-dir' in sys.argv:
     os.environ['VCC_BIN'] = _BIN
 VPP = f'{_BIN}/vpp'
 CL = llvm('clang')
-OUT = f'{BUILD}/verify'
+TARGET = os.environ.get('VCC_VERIFY_TARGET')
+if '--target' in sys.argv:
+    _k = sys.argv.index('--target'); TARGET = sys.argv[_k + 1]; del sys.argv[_k:_k + 2]
+    os.environ['VCC_VERIFY_TARGET'] = TARGET  # also seen by spawned pool workers
+if TARGET and TARGET not in ('x86_64-linux-gnu', 'aarch64-linux-gnu'):
+    sys.exit('--target must be x86_64-linux-gnu or aarch64-linux-gnu')
+OUT = f'{BUILD}/verify' + (f'/{TARGET}' if TARGET else '')
 TIMEOUT = 20
 
 # cc1 options followed by a separate argument
@@ -87,6 +97,8 @@ def run_lines(src):
 
 def target_for(tr):
     """vcc's target for a RUN line's triple, and whether it was substituted."""
+    if TARGET:
+        return TARGET, bool(tr and tr != TARGET)
     if tr is None:
         return 'aarch64-linux-gnu', False
     t = tr.lower()
@@ -368,7 +380,7 @@ def directives(cs, prefixes):
 MACRO_NOTE = re.compile(r'expanded from (here|macro )|in instantiation of|while substituting')
 
 
-def check(dirs, diags, path):
+def check(dirs, diags, path, match_text=True):
     """(missing, unexpected) lists of diagnostics [(level, file, line, msg)];
     macro backtrace notes are part of their diagnostic's text, not checked."""
     left = [d for d in diags if not (d[0] == 'note' and MACRO_NOTE.match(d[3]))]
@@ -383,11 +395,11 @@ def check(dirs, diags, path):
                 continue
             if not df or not (df == file or df.endswith('/' + file)) or (line is not None and dn != line):
                 continue
-            if (text.search(dm) if hasattr(text, 'search') else text in dm):
+            if not match_text or (text.search(dm) if hasattr(text, 'search') else text in dm):
                 left.remove(d); got += 1
         if got < lo:
             missing.append((lvl, os.path.basename(file), line,
-                            text.pattern if hasattr(text, 'pattern') else text))
+                            (text.pattern if hasattr(text, 'pattern') else text) if match_text else '<diagnostic at this location>'))
     return missing, left
 
 
@@ -433,14 +445,14 @@ def vcc_diags(text, cwd):
 # ---- one test -------------------------------------------------------------------
 
 def job(t):
-    path, idx, cmd, RES = t
+    path, idx, cmd, RES, match_messages = t
     name = f'{os.path.relpath(path, T)}#{idx}'
     p = parse_run(cmd, path)
     if isinstance(p, str):
         return name, p, None
     clang, vcc, prefixes, mode, tgt, sub = p
     src = open(path, encoding='utf-8', errors='surrogateescape').read()
-    key = hashlib.sha1((src + '\0' + cmd + '\0' + os.path.realpath(CL)).encode('utf-8', 'surrogateescape')).hexdigest()
+    key = hashlib.sha1((src + '\0' + cmd + '\0' + tgt + '\0' + os.path.realpath(CL)).encode('utf-8', 'surrogateescape')).hexdigest()
     cf = f'{OUT}/clang/{key}.json'
     try:
         ref = json.load(open(cf))
@@ -481,7 +493,7 @@ def job(t):
         return name, 'timeout', {'sub': sub}
     if r.returncode < 0 or r.returncode >= 128:
         return name, 'crash', {'sub': sub, 'rc': r.returncode, 'err': r.stderr[-1500:], 'argv': argv}
-    missing, unexp = check(dirs, vcc_diags(r.stdout + '\n' + r.stderr, os.path.dirname(path)), rp)
+    missing, unexp = check(dirs, vcc_diags(r.stdout + '\n' + r.stderr, os.path.dirname(path)), rp, match_text=match_messages)
     if not missing and not unexp:
         return name, 'pass', {'sub': sub}
     return name, 'fail', {'sub': sub, 'missing': missing, 'unexpected': unexp, 'argv': argv}
@@ -489,6 +501,7 @@ def job(t):
 
 def main():
     j, verbose, show, pats = 6, False, None, []
+    match_messages = False
     a = sys.argv[1:]
     while a:
         x = a.pop(0)
@@ -496,6 +509,7 @@ def main():
         elif x.startswith('-j'): j = int(x[2:])
         elif x == '-v': verbose = True
         elif x == '--show': show = a.pop(0)
+        elif x == '--match-messages': match_messages = True
         else: pats.append(x)
     if not os.path.isdir(T):
         sys.exit(f'{T}: missing; run bench/fetch-testsuites.sh llvm')
@@ -515,7 +529,11 @@ def main():
                     continue
                 for i, c in enumerate(run_lines(src)):
                     if '-verify' in c:
-                        jobs.append((p, i, c, RES))
+                        jobs.append((p, i, c, RES, match_messages))
+    if not jobs:
+        sys.exit('no verify tests matched the requested pattern')
+    policy = 'messages' if match_messages else 'locations'
+    print(f'diagnostic matching: {policy} (level, file, line and count always checked)', flush=True)
     with Pool(j) as pool:
         res = pool.map(job, jobs, chunksize=4)
     res.sort()
@@ -538,7 +556,7 @@ def main():
     print('  not counted: ' + ', '.join(f'{k} {n}' for k, n in sorted(cat.items())
                                         if k not in ('pass', 'fail', 'crash', 'timeout')))
     os.makedirs(OUT, exist_ok=True)
-    rf = f'{OUT}/results.json'
+    rf = f'{OUT}/results.{policy}.json'
     now = {n: c for n, c, _ in res}
     if not pats and os.path.exists(rf):
         old = json.load(open(rf))
@@ -550,7 +568,7 @@ def main():
             print(f'  REGRESSED ({len(worse)}): ' + ' '.join(worse[:30]))
     if not pats:
         json.dump(now, open(rf, 'w'), indent=0, sort_keys=True)
-    json.dump({n: x for n, c, x in res if c in ('fail', 'crash')}, open(f'{OUT}/failures.json', 'w'))
+    json.dump({n: x for n, c, x in res if c in ('fail', 'crash')}, open(f'{OUT}/failures.{policy}.json', 'w'))
     for n, c, x in res:
         if c == 'crash' and (verbose or show in (None, 'crash')):
             print(f'CRASH {n} rc={x["rc"]}: ' + ' '.join(shlex.quote(q) for q in x['argv']))
