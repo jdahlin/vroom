@@ -325,6 +325,8 @@ VPRIV void x64_ext(ecx *e, int r, int from, bool sgn)
 
 	if (from >= 8)
 		return;
+	if (from == 4 && !sgn && e->E->o->opt >= 1 && !e->E->noopt && x64_last_u32(e, r))
+		return;
 	i = x64_op3(e, X_EXT, from, r, r, XNOREG);
 	i->cond = sgn;
 }

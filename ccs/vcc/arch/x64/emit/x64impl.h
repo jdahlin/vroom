@@ -117,6 +117,8 @@ VPRIV void x64_restore(ecx *e, uint32_t sv);
 VPRIV int x64_ftreg(ecx *e);
 VPRIV rec *x64_put(ecx *e, int op);
 VPRIV void x64_twoaddr(ecx *e);
+VPRIV bool x64_copy_forward_at(ecx *e, uint32_t k);
+VPRIV bool x64_last_u32(const ecx *e, int r);
 VPRIV void x64_locals_begin(ecx *e, uint32_t s);
 VPRIV bool x64_local(ecx *e, uint32_t s, lval *l);
 /* effects.c: logical records before or after two-address expansion. */

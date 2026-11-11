@@ -543,6 +543,28 @@ VPRIV uint32_t em_rec_fallthrough(void *records, uint32_t count, const em_rec_la
 VPRIV uint32_t em_rec_unreachable(void *records, uint32_t count, size_t stride, size_t op_offset,
 				const uint8_t *flow, size_t nflow,
 				void (*remap)(void *, uint32_t, uint32_t), void *ctx);
+/* rec/copies.c: inclusive block end, whole-register t/v below 64. The target
+ * preflights each rewritten record without mutation (apply=false); applying
+ * the same rewrite must then succeed. Existing conservative liveness is only
+ * enlarged, and no effects/liveness table is built by this scan.
+ */
+typedef struct em_rec_copy_scan {
+	void *records;
+	size_t stride, op_offset;
+	uint8_t deleted_op;
+	const void *flags;
+	size_t flags_stride;
+	uint16_t opaque_mask;
+	uint64_t *read, *live;
+	const uint64_t *write;
+	/* Optional on-demand effects. False is an opaque boundary. With no live
+	 * array a copy must reach an explicit overwrite; block end proves nothing.
+	 */
+	bool (*inspect)(void *ctx, uint32_t j, uint64_t *read, uint64_t *write);
+	bool (*rewrite)(void *ctx, uint32_t j, uint8_t from, uint8_t to, bool apply);
+	void *ctx;
+} em_rec_copy_scan;
+VPRIV bool em_rec_copy_forward(const em_rec_copy_scan *s, uint32_t k, uint32_t end, uint8_t t, uint8_t v);
 /* insn.c */
 extern const char cond_name[][8];
 VPRIV bool logimm_ok(uint64_t v, int x);
