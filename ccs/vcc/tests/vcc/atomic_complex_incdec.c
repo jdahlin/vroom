@@ -16,11 +16,21 @@ int main(void){
  union {float f;unsigned u;} a,b;
  a.f=__imag__ old;b.f=__imag__ now;
  if(a.u!=0x7f800123u||b.u!=a.u||__real__ now!=2)return 4;
+ /* Keep the ordinary complex-float checks on every target. Half types are
+  * optional: the Wasm reference does not implement _Float16 or __bf16. */
+#ifdef __FLT16_MANT_DIG__
  typedef __typeof__(__builtin_complex((_Float16)1,(_Float16)2)) hc;
- typedef __typeof__(__builtin_complex((__bf16)1,(__bf16)2)) bc;
  _Atomic(hc) h=__builtin_complex((_Float16)1,(_Float16)-0.0);
+ hc hr=++h;
+ if(__real__ hr!=2||!__builtin_signbit(__imag__ hr))return 5;
+#endif
+ /* Clang has no __BFLT16_MANT_DIG__ capability macro on these targets.
+  * Exercise bfloat on the two native targets that implement the type. */
+#if defined(__aarch64__) || defined(__x86_64__)
+ typedef __typeof__(__builtin_complex((__bf16)1,(__bf16)2)) bc;
  _Atomic(bc) bv=__builtin_complex((__bf16)1,(__bf16)-0.0);
- hc hr=++h;bc br=bv++;
- if(__real__ hr!=2||!__builtin_signbit(__imag__ hr)||__real__ br!=1||!__builtin_signbit(__imag__ br))return 5;
+ bc br=bv++;
+ if(__real__ br!=1||!__builtin_signbit(__imag__ br))return 6;
+#endif
  return 0;
 }

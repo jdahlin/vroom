@@ -1226,7 +1226,16 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
   Shared locals.c eligibility/selection now feeds all targets and x86
   promotes profitable scalar locals in four callee-save homes. Direct
   ABI-to-home binding is now direct for selected register/stack parameters;
-  generic copy/extension cleanup and improved profitability remain pending.
+  `emit/rec/copies.c` now shares arm64's forward-copy search with the x86
+  adapter in `arch/x64/emit/copies.c`: bounded transactional rewrites of
+  full-width GPR temporaries within a block, with target effect/operand
+  contracts. Native 32-bit/XMM copy cleanup, shared extension facts and
+  improved profitability remain pending. Unity/nonunity builds, 32 focused
+  target/level runtime combinations and normal/sanitized record contracts
+  pass; prior arm64 debug/unwind and wasm output snapshots are unchanged.
+  Short paired compiler CPU samples are noisy (even unchanged wasm control
+  varies 17.5%); the unchanged sum program's runtime difference is noise.
+  OPT4 documents raw before/after numbers; the 1% performance gate is open.
   Wasm checks use our assembler/linker and plain Node; full replacement
   of Emscripten's test/explorer runtime is tracked in `PLAN-wasm.md` W9.
   *Validate:* common C semantics plus target-specific code assertions;

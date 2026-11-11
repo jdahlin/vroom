@@ -111,6 +111,18 @@ för `object_size_inline`: samma test ger byteidentisk assemblerkod och
 samma runtimefel med tidigare `main`; Clang-referensen passerar. Testet
 behöver Wasm-inlining/argumentbounds och är inte överhoppat. G1/G4 är inte färdiga.
 
+### Status 2026-11-11: G5/G7, kopior och direkt utvidgningsbevis
+
+Delad native kopiekärna återanvänder arm64:s analys; x86 gör endast
+kandidatsökning i sin befintliga tvåadressvandring, utan egna allokeringar
+eller livenesspass. Separat extensions.c utelämnar bevisat redundant
+unsigned32-normalisering från föregående skrivning. 148 fokuserade
+körkombinationer gröna efter integration med main9d022c3, inklusive
+volatile/high-bit/signed-regressioner; båda byggsätt och sanitiserade
+kontrakt verifierade. 500-funktions v3-instruktionsprober mot14379fe ger
++0,23% loop och −0,74% kontroll för kombinationen. Profilens räckvidd
+är begränsad; vbench/native helkorpus och hela G5/G7/O2-målet kvarstår.
+
 ### Status 2026-11-11: G1, padding i BitInt-uttryck
 
 Sammansatta tilldelningar normaliserar nu gamla `_BitInt`-värdet innan
@@ -141,6 +153,16 @@ sena/inlinade justerade ramar är testad. Båda byggsätten: 116 fokuserade
 kombinationer; x86-egensvit 137/137, arm64 142/142, kors-ABI 22/22.
 CI kör nu x86-prober under qemu-user. Se OPT3 i `PLAN-fas2.md` för
 hashar, mätmetod och återstående arbete. G5/G7/O2-målet fortsatt öppna.
+
+### Status 2026-11-11: G5/G7, delad stackcellanalys
+
+Arm64 använder nu en gemensam analys av exakta allokeringsceller,
+överlapp och adressflykt i `emit/rec/slots.c`. 6069 byte-identiska
+objekt-/textjämförelser, 177 egna arm64-körtester och ett sanitiserat
+intervallkontrakt verifierar flytten. Två begränsade instruktionsprofiler
+visar +0,655/+0,303 % kompilatorarbete; metod och baser i OPT5 i
+`PLAN-fas2.md`. X86-/wasm-anslutning och delade omskrivningar återstår;
+G5/G7 och full O2-täckning är inte klara.
 
 ### Status 2026-11-11: G5/G7, direkt parameterbindning
 
