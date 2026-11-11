@@ -435,6 +435,12 @@ nya regressioner går på båda Linux-målen, unity/nonunity; kernel-sema
 båda varmordningarna och cachevägarna. Atomära komplexa uppdateringar
 avvisas ännu uttryckligen och följs separat i TODO.md.
 
+x87→unsigned64 använder nu båda värdehalvorna runt 2^63 i stället för
+enbart signerad `fistp`. Regressionen kontrollerar gränser, trunkering,
+en operandevaluering och återställd x87-kontrollordning. Ursprungligt
+`fp-int-convert-long-double` samt ny regression går på båda Linux-målen
+i unity/nonunity; ARM:s befintliga binary128-väg hålls separat.
+
 Kombinerat fryst checkpoint `7afcdea`, före signmask-/typnamnsrättningarna,
 är verifierat i båda byggsätten: **145/145 x86** (fem referensundantag),
 **150/150 ARM/QEMU**, tvåfils-constexpr-ABI samt tre ursprungliga GCC-fall

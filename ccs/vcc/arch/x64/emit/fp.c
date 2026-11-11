@@ -654,11 +654,35 @@ VPRIV val x64_cvt(ecx *e, val v, qty from, qty to)
 		x64_mem(e, X_ST, 2, R11, &cw2, false);
 		x64_x87(e, XF_LDCW, &cw2, 2);
 		x64_x87(e, XF_LDT, &m, 10);
-		x64_x87(e, XF_ISTP, &t, 8);
-		x64_x87(e, XF_LDCW, &cw, 2);
 		x64_tfree(e, ra);
 		r = x64_treg(e);
-		x64_mem(e, X_LD, 8, r, &t, false);
+		if (ts == 8 && !wk_signed(c, to)) {
+			/* fistp only stores signed integers. Split the unsigned range at
+			 * 2^63, subtracting that exact value before the signed conversion. */
+			lval bias = x64_slot(e, 8);
+			uint32_t low = wk_newlabel(e), done = wk_newlabel(e);
+
+			x64_movi(e, R11, 0x5f000000); /* float 2^63 */
+			x64_mem(e, X_ST, 4, R11, &bias, false);
+			x64_x87(e, XF_LD, &bias, 4);
+			x64_x87(e, XF_UCOMIP, NULL, 0); /* bias > input; leaves input */
+			x64_jcc(e, CC_A, low);
+			x64_x87(e, XF_LD, &bias, 4);
+			x64_x87(e, XF_SUB, NULL, 0);
+			x64_x87(e, XF_ISTP, &t, 8);
+			x64_mem(e, X_LD, 8, r, &t, false);
+			x64_movi(e, R11, UINT64_C(1) << 63);
+			x64_op3(e, X_XOR, 8, r, r, R11);
+			x64_jump(e, done);
+			x64_label(e, low);
+			x64_x87(e, XF_ISTP, &t, 8);
+			x64_mem(e, X_LD, 8, r, &t, false);
+			x64_label(e, done);
+		} else {
+			x64_x87(e, XF_ISTP, &t, 8);
+			x64_mem(e, X_LD, 8, r, &t, false);
+		}
+		x64_x87(e, XF_LDCW, &cw, 2);
 		if (ts < 8)
 			x64_ext(e, r, ts, wk_signed(c, to));
 		return x64_vr(r);
