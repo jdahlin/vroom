@@ -767,6 +767,15 @@ VPRIV void wk_stmt(ecx *e, uint32_t n)
 		return;
 	}
 	case N_EXPR:
+		if (x->a && e->E->o->opt && !side_effects(c, x->a)) {
+			/* a plain load whose value is dropped: not even made, as clang -O2 ((void)RCU) */
+			uint32_t t = x->a;
+
+			while (N(t)->op == N_CAST && N(t)->a)
+				t = N(t)->a;
+			if (N(t)->op == N_VAR || N(t)->op == N_NUM)
+				return;
+		}
 		if (x->a) {
 			val v = wk_gen(e, x->a);
 

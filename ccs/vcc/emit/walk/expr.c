@@ -2776,6 +2776,14 @@ static val wk_gen_inner(ecx *e, uint32_t n)
 			if (is_integer(c, x->ty) && wk_global_cv(e, x->a, &cv))
 				return vconst(em_trunc_to(c, cv.i, x->ty));
 		}
+		if (y->sc == SC_REGISTER && sym_attrs(c, x->a)->asmname && !is_local_var(c, x->a)) {
+			/* a global register variable read (current_stack_pointer: register ... asm("rsp")) */
+			const char *rn = c->strs[sym_attrs(c, x->a)->asmname - 1].s;
+
+			if (!strcmp(rn, "rsp") || !strcmp(rn, "esp") || !strcmp(rn, "sp"))
+				return wk_vreg(LO(spget)(e));
+			wk_unsup(e, n, "a global register variable other than the stack pointer");
+		}
 		wk_scalar(e, n, x->ty);
 		return wk_load(e, wk_lval(e, n), x->ty);
 	}
