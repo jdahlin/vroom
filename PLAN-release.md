@@ -710,3 +710,7 @@ kompilatorinstruktionsgrind redovisas i PLAN-fas2.md. G5/G7 återstår.
 Typgränser skrivna som begränsade rena konstantuttryck förenklas nu på de
 fyra målen. Tester och den avgränsade kompilatorinstruktionsmätningen finns i
 PLAN-fas2.md; G5/G7 och generell O2-täckning är fortsatt öppna.
+
+Wasm sänker heltalslikhet med noll och osignerad `x <= 0` till en direkt
+nolltestinstruktion. Fyrmålstester och avgränsad kompilatorkostnad finns i
+PLAN-fas2.md; G5/G7 och generell O2-täckning är fortsatt öppna.

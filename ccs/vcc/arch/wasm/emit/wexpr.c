@@ -1361,6 +1361,11 @@ static int wbinary(ecx *e, uint32_t n)
 		wconst(e, WT_I32, bound);
 		return WT_I32;
 	}
+	if (em_cmpzero(e, n, &operand)) {
+		wexpr(e, operand, true);
+		wop(e, wty(c, N(operand)->ty), "eqz");
+		return WT_I32;
+	}
 	if (unlikely(vstack_low()))
 		efatal(e, x->loc, "expression nested too deeply");
 	if (is_vec(c, ty) || is_vec(c, lt)) {
