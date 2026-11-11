@@ -87,6 +87,8 @@ typedef struct {
 	uint8_t comdat;		/* GRP_COMDAT */
 	uint8_t map;		/* mapping state: 0 none, 1 code, 2 data */
 	uint64_t size;		/* after layout */
+	uint32_t linksec;	/* SHF_LINK_ORDER: the section it follows (sh_link), 0 none */
+	uint32_t linksym;	/* ... and the symbol named (one section per symbol, as MC) */
 } ElfSec;
 
 typedef struct {
@@ -154,6 +156,9 @@ void elf_error(ElfObj *o, const char *fmt, ...);
  * or creates it; returns its id (== its subsection-0 frag). */
 uint32_t elf_section(ElfObj *o, const char *name, uint32_t len, uint32_t type,
 		     uint64_t flags, uint32_t entsize, uint32_t group_sym);
+/* a SHF_LINK_ORDER section linked to section linksec: one per (name, group, linksec), as MC */
+uint32_t elf_section_lo(ElfObj *o, const char *name, uint32_t len, uint32_t type, uint64_t flags, uint32_t entsize,
+			uint32_t group, uint32_t linksec, uint32_t linksym);
 uint32_t elf_find_section(ElfObj *o, const char *name, uint32_t len, uint32_t group_sym);
 uint32_t elf_subsection(ElfObj *o, uint32_t sec, int32_t sub);	/* frag id */
 /* a new frag right after `frag` in its section and subsection: what follows

@@ -330,6 +330,30 @@ kärnan och kan vänta.
 
 ## Status
 
+### X8 (2026-11-11): x86-kärnan byggs med vpp, påbörjat
+
+- `work/vcc-x86-cc.sh` (vpp som CC, bara versionsfrågorna till clang),
+  `make O=work/build-x86 ARCH=x86_64 LLVM=1 CC=... defconfig vmlinux`.
+  Kbuilds sonder ger nu samma `.config` som clang:s (utom CC_CAN_LINK):
+  okända -W och gcc-flaggor avvisas som clang, -D som omdefinierar ett
+  fördefinierat makro varnar.
+- Härdningen som kärnan begär, som clang skriver den: `-fcf-protection=branch`
+  (endbr64, IBT-noten), `-fpatchable-function-entry=N,M` (nop:ar, sektionen
+  `__patchable_function_entries` med SHF_LINK_ORDER per funktion),
+  `-mfunction-return=thunk-extern`, `-mretpoline-external-thunk` med
+  `-mindirect-branch-cs-prefix`, `-fstack-protector*` med
+  `-mstack-protector-guard-reg/-symbol`, `-ftrivial-auto-var-init=zero`.
+- Rättat på vägen: statiska grenar (adress-argument bundna vid inlining,
+  "i" från frontändens konstant), ASM_CALL_CONSTRAINT (%rsp), cpuid (utdata
+  via pekare), call_on_stack (callee-saved operander), rip_rel_ptr,
+  `#pragma GCC visibility`, döda &&-operander, asm goto med utdata,
+  ALTERNATIVE (.skip/.fill som layouten avgör), x86-assemblern (SSE4, AES,
+  SHA, CRC32, AVX/AVX2 via VEX, system- och CET-instruktioner, kontroll-
+  register, registeralias), x86-assemblern delad per instruktionsfamilj.
+- Kvar (24 objekt av ~2950): `.code32`/`.code16` (realmode, efi-mixed,
+  vdso32, kompat-entry), AVX-512 (EVEX) i krypto, `.org`-mål, några
+  direktiv; sedan länkning (vlink), objtool och boot under qemu.
+
 ### X4 (2026-11-11): påbörjat, vikningar i vandraren
 
 - `wk_cond` och `if`/`?:` använder arm64:s formvikningar (`cond_fold`: x >> 0 != x,

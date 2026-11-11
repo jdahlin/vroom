@@ -323,6 +323,13 @@ static void wk_decl(ecx *e, const node *x)
 		lval l = { .k = L_FRAME, .align = sym_align(c, s) };
 
 		l.off = wk_local(e, s);
+		if (!x->b && e->E->o->autozero && tsize(c, y->ty) && !(y->sc == SC_REGISTER && sym_attrs(c, s)->asmname)) {
+			/* -ftrivial-auto-var-init=zero: a local without an initializer starts as zeros */
+			int rd = LO(laddr)(e, &l);
+
+			LO(zero)(e, rd, tsize(c, y->ty));
+			LO(tfree)(e, rd);
+		}
 		wk_init(e, &l, y->ty, x->b);
 	}
 	if (sym_attrs(c, s)->cleanup) {
@@ -1035,6 +1042,8 @@ VPRIV void wk_function(ecx *e, uint32_t s)
 	LO(begin)(e, s);
 	if (_setjmp(e->bail))
 		return;	/* efatal: the function is not emitted, the error counted */
+	W->canary = e->E->o->sprot ? wk_slot(e, 8, 8) : 0;
+	W->spneed = e->E->o->sprot == 3;
 	if (KIND(c, W->rty) != TY_VOID) {
 		int k = KIND(c, W->rty);
 

@@ -182,6 +182,13 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
   if 32 bits).  x86-64's walker does it right.
   *Validate:* `ccs/vcc/tests/vcc/vec_wide_lanes.c` (xfail on arm64).
 
+- [ ] **arm64: the hardening options are accepted and ignored.**
+  `-ftrivial-auto-var-init=zero`, `-fstack-protector*`, `-fpatchable-function-entry`
+  (and on x86 only `-fcf-protection`, `-mfunction-return=`, `-mretpoline-external-thunk`)
+  are implemented for x86-64 (cc_opts.xcf ...); arm64 accepts them silently,
+  so a kernel built with them lacks the protection.
+  *Validate:* `ccs/vcc/tests/vcc/autoinit_zero.c` (xfail on arm64).
+
 - [x] **Branch range: no relaxation for b.cond/cbz/tbz/adr** [P].  Done for
   functions without inline asm (`r_relax` in emit.c: b.!cond .+8; b label,
   iterated to a fixed point, only for functions over 1 MB); with inline asm,

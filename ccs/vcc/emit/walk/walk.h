@@ -98,6 +98,10 @@ typedef struct wkst {
 	   until its first write or a label: only an asm "i" operand reads it (rip_rel_ptr) */
 	struct { uint32_t s, gen, inst; val v; } pk[16];
 	int npk;
+	/* -fstack-protector*: the canary's slot (made first: above every local), and whether this
+	   function needs it (an array, an aggregate or an address-taken local; alloca) */
+	int32_t canary;
+	bool spneed;
 } wkst;
 
 VPRIV wkst *wk_state(ecx *e);

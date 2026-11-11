@@ -860,7 +860,9 @@ static __attribute__((noinline)) int ppd_run1(int argc, char **argv, const ppd_e
 	int march_lse = -1, mcpu_lse = -1, lse;
 	int sjlj = 0;
 	int opt = 0, olevel = 0, os = 0, pie = -1, pic = 0, tlsmodel = 0, sections = 0, debug = 0, freestanding = 0, nobuiltin = 0, instr = 0, cfi = -1, strict_align = 0, tiny = 0, gregs = 0;
-	int nosse = 0, nosse2 = 0, nommx = 0;	/* x86-64: -mno-sse, -mno-sse2, -mno-mmx (last one wins) */
+	int nosse = 0, nosse2 = 0, nommx = 0;
+	int xcf = 0, pfe_n = 0, pfe_m = 0, sprot = 0, sp_gs = 0, autozero = 0;
+	const char *sp_sym = NULL;	/* x86-64 hardening (cc_opts.xcf ...) */	/* x86-64: -mno-sse, -mno-sse2, -mno-mmx (last one wins) */
 	pp_opts po = { 0 };
 	char *pmap = NULL;
 	double t0;
@@ -1148,6 +1150,24 @@ static __attribute__((noinline)) int ppd_run1(int argc, char **argv, const ppd_e
 		else if (!strncmp(a, "-march=", 7) && arch_lse(a + 7, false) >= 0) march_lse = arch_lse(a + 7, false);
 		else if (!strncmp(a, "-mcpu=", 6) && arch_lse(a + 6, true) >= 0) mcpu_lse = arch_lse(a + 6, true);
 		else if (!strcmp(a, "-mcmodel=tiny")) tiny = 1;
+		else if (!strcmp(a, "-fcf-protection=branch") || !strcmp(a, "-fcf-protection=full") || !strcmp(a, "-fcf-protection")) xcf |= 1;
+		else if (!strcmp(a, "-fcf-protection=none") || !strcmp(a, "-fcf-protection=return")) xcf &= ~1;
+		else if (!strcmp(a, "-mfunction-return=thunk-extern")) xcf |= 2;
+		else if (!strcmp(a, "-mfunction-return=keep")) xcf &= ~2;
+		else if (!strcmp(a, "-mretpoline-external-thunk")) xcf |= 4;
+		else if (!strcmp(a, "-mindirect-branch-cs-prefix")) xcf |= 8;
+		else if (!strncmp(a, "-fpatchable-function-entry=", 27)) {
+			pfe_n = atoi(a + 27), pfe_m = strchr(a + 27, ',') ? atoi(strchr(a + 27, ',') + 1) : 0;
+		}
+		else if (!strcmp(a, "-fstack-protector")) sprot = 1;
+		else if (!strcmp(a, "-fstack-protector-strong")) sprot = 2;
+		else if (!strcmp(a, "-fstack-protector-all")) sprot = 3;
+		else if (!strcmp(a, "-fno-stack-protector")) sprot = 0;
+		else if (!strcmp(a, "-mstack-protector-guard-reg=gs")) sp_gs = 1;
+		else if (!strcmp(a, "-mstack-protector-guard-reg=fs")) sp_gs = 0;
+		else if (!strncmp(a, "-mstack-protector-guard-symbol=", 31)) sp_sym = a + 31;
+		else if (!strcmp(a, "-ftrivial-auto-var-init=zero")) autozero = 1;
+		else if (!strcmp(a, "-ftrivial-auto-var-init=uninitialized")) autozero = 0;
 		else if (!strcmp(a, "-"))
 			main_file = a;	/* stdin, as clang: "<stdin>" in diagnostics and line markers */
 		else if (a[0] != '-' && a[0] && (xlang || src_suffix(a))) {
@@ -1658,6 +1678,7 @@ static __attribute__((noinline)) int ppd_run1(int argc, char **argv, const ppd_e
 				.strict_std = strict,
 				.gnu89_inline = gnu89_inline, .no_builtin = freestanding || nobuiltin, .instrument = instr, .wasm_sjlj = sjlj,
 				.general_regs_only = gregs || (x86 && (nosse || nosse2)), .vcc_kernel = vcc_kernel, .lse = lse, .opt = olevel, .pic = pic ? 2 : pie ? 1 : 0, .tlsmodel = tlsmodel, .sections = sections, .debug = debug, .cfi = cfi > 0, .dbg_name = main_file,
+				.xcf = x86 ? xcf : 0, .pfe_n = x86 ? pfe_n : 0, .pfe_m = pfe_m, .sprot = x86 ? sprot : 0, .sp_gs = sp_gs, .sp_sym = sp_sym, .autozero = x86 ? autozero : 0,
 			       .outfd = env->outfd };
 		int fd = -1;
 		char outpath[4096], outtmp[4200];

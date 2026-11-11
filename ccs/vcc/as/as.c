@@ -657,7 +657,7 @@ static int d_section(As *a, const char *p, const char *e, int push)
 {
 	Sv name;
 	if (parse_name(a, &p, e, &name)) return -1;
-	uint32_t type = 0; uint64_t flags = 0; uint32_t entsize = 0, group = 0;
+	uint32_t type = 0; uint64_t flags = 0; uint32_t entsize = 0, group = 0, linksec = 0, linksym = 0;
 	int have_flags = 0, comdat = 0;
 	int64_t sub = 0;
 	p = ws(p, e);
@@ -709,6 +709,16 @@ static int d_section(As *a, const char *p, const char *e, int push)
 						entsize = (uint32_t)es;
 						p = ws(p, e);
 					}
+					if ((flags & SHF_LINK_ORDER) && p < e && *p == ',') {
+						/* ,sym: the section it follows is sym's */
+						p++;
+						Sv ls;
+						if (parse_name(a, &p, e, &ls)) return -1;
+						uint32_t ly = elf_sym_lookup(a->o, ls.s, (uint32_t)ls.n);
+						if (ly && (elf_symp(a->o, ly)->flags & ESYM_DEFINED) && !(elf_symp(a->o, ly)->flags & ESYM_ABS))
+							linksec = elf_frag(a->o, elf_symp(a->o, ly)->frag)->sec, linksym = ly;
+						p = ws(p, e);
+					}
 					if ((flags & SHF_GROUP) && p < e && *p == ',') {
 						p++;
 						Sv g;
@@ -747,7 +757,8 @@ static int d_section(As *a, const char *p, const char *e, int push)
 		a->ss[a->nss].cur = a->cur; a->ss[a->nss].prev = a->prev; a->nss++;
 	}
 	if ((flags & SHF_GROUP) && !group) return err(a, "expected group name");
-	uint32_t s = elf_section(a->o, name.s, name.n, type, flags, entsize, group);
+	uint32_t s = linksec ? elf_section_lo(a->o, name.s, name.n, type, flags, entsize, group, linksec, linksym)
+			     : elf_section(a->o, name.s, name.n, type, flags, entsize, group);
 	if (group) { elf_reg(a->o, group); elf_sec(a->o, s)->comdat = (uint8_t)comdat; }
 	{	/* MC: a code section is at least 4-aligned once switched to */
 		ElfSec *se = elf_sec(a->o, s);

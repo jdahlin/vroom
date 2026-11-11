@@ -476,6 +476,10 @@ static int emit_tu1(cc *c, const cc_opts *o, bool write_out, uint8_t *mf, bool *
 	tb_reg(&hdr, &er[12], (size_t)1 << 26, "emit.hdr");
 	if (WASM(c))
 		wasm_header(c, &hdr, ctx, nthr);
+	else if (X86(c) && (o->xcf & 1))
+		/* -fcf-protection=branch: GNU_PROPERTY_X86_FEATURE_1_AND = IBT, as clang's start of file */
+		tb_s(&hdr, "\t.section\t.note.gnu.property,\"a\",@note\n\t.p2align\t3, 0x0\n\t.long\t4\n\t.long\t16\n"
+			   "\t.long\t5\n\t.asciz\t\"GNU\"\n\t.long\t3221225474\n\t.long\t4\n\t.long\t1\n\t.p2align\t3, 0x0\n\t.text\n");
 	else
 		tb_s(&hdr, "\t.text\n");
 	bool dbg = o->debug && !DARWIN(c) && !WASM(c);

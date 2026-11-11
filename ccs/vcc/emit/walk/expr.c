@@ -169,6 +169,8 @@ VPRIV int32_t wk_local(ecx *e, uint32_t s)
 
 	if (W->sgen[s] != W->gen) {
 		W->sgen[s] = W->gen;
+		if (W->canary && (is_array(c, c->syms[s].ty) || is_agg(c, c->syms[s].ty) || e->E->lnoreg[s]))
+			W->spneed = true;	/* (clang's -fstack-protector-strong, a superset) */
 		if (T(c, c->syms[s].ty)->flags & TF_VLA)
 			W->soff[s] = wk_slot(e, 24, 8);	/* { address, sp before it, bytes } */
 		else
@@ -845,6 +847,7 @@ VPRIV void wk_vla_decl(ecx *e, uint32_t s, bool zero)
 	}
 	if (al > 16)	/* over-allocated, the address rounded up */
 		r = LO(bin)(e, T_PLUS, 8, false, wk_vreg(r), vconst((i128)(al - 16))).r;
+	e->wk->spneed |= e->wk->canary != 0;	/* (alloca'd memory below the frame) */
 	p = LO(alloca)(e, wk_vreg(r));
 	if (al > 16) {
 		p = LO(bin)(e, T_PLUS, 8, false, p, vconst((i128)(al - 1)));
