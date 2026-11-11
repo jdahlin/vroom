@@ -28,15 +28,15 @@ VPRIV int x64_i_crdr(As *a, char *mn, XOp *o, int nops)
 		return x64_emit(a, &F(.w = g->kind == XK_REG && g->size == 8, .opsz16 = g->kind == XK_REG && g->size == 2,
 				      .op = OPB(0x8c), .nop = 1, .reg = sn, .rm = g));
 	}
-	/* ---- mov to and from control and debug registers (always 64-bit) ---- */
-	if (nops == 2 && (!strcmp(mn, "mov") || !strcmp(mn, "movq")) &&
+	/* ---- mov to and from control and debug registers (64-bit; 32-bit after .code32) ---- */
+	if (nops == 2 && (!strcmp(mn, "mov") || !strcmp(mn, "movq") || (a->x64_code32 && !strcmp(mn, "movl"))) &&
 	    ((o[0].kind == XK_REG && (o[0].cls == XR_CR || o[0].cls == XR_DR)) ||
 	     (o[1].kind == XK_REG && (o[1].cls == XR_CR || o[1].cls == XR_DR)))) {
 		bool to = o[1].cls == XR_CR || o[1].cls == XR_DR;
 		XOp *sr = to ? &o[1] : &o[0], *g = to ? &o[0] : &o[1];
 		uint8_t ops[2] = { 0x0f, (uint8_t)((sr->cls == XR_CR ? 0x20 : 0x21) | (to ? 2 : 0)) };
 
-		if (g->kind != XK_REG || g->cls != XR_GPR || g->size != 8)
+		if (g->kind != XK_REG || g->cls != XR_GPR || g->size != (a->x64_code32 ? 4 : 8))
 			return err(a, "invalid operand for instruction");
 		return x64_emit(a, &F(.op = ops, .nop = 2, .reg = sr->reg, .rm = g));
 	}
@@ -123,6 +123,8 @@ VPRIV int x64_i_sys(As *a, char *mn, XOp *o, int nops)
 			{ "lgdt", 0, 0x0f, 0x01, 2, 0, 0 }, { "lidt", 0, 0x0f, 0x01, 3, 0, 0 }, { "sgdt", 0, 0x0f, 0x01, 0, 0, 0 },
 			{ "sidt", 0, 0x0f, 0x01, 1, 0, 0 }, { "lgdtq", 0, 0x0f, 0x01, 2, 0, 0 }, { "lidtq", 0, 0x0f, 0x01, 3, 0, 0 },
 			{ "sgdtq", 0, 0x0f, 0x01, 0, 0, 0 }, { "sidtq", 0, 0x0f, 0x01, 1, 0, 0 }, { "invlpg", 0, 0x0f, 0x01, 7, 0, 0 },
+			{ "lgdtl", 0, 0x0f, 0x01, 2, 0, 0 }, { "lidtl", 0, 0x0f, 0x01, 3, 0, 0 }, { "sgdtl", 0, 0x0f, 0x01, 0, 0, 0 },
+			{ "sidtl", 0, 0x0f, 0x01, 1, 0, 0 },
 			{ "lmsw", 0, 0x0f, 0x01, 6, 0, 1 }, { "smsw", 0, 0x0f, 0x01, 4, 0, 1 },
 			{ "lldt", 0, 0x0f, 0x00, 2, 0, 1 }, { "ltr", 0, 0x0f, 0x00, 3, 0, 1 }, { "sldt", 0, 0x0f, 0x00, 0, 0, 1 }, { "str", 0, 0x0f, 0x00, 1, 0, 1 },
 			{ "verw", 0, 0x0f, 0x00, 5, 0, 1 }, { "verr", 0, 0x0f, 0x00, 4, 0, 1 },

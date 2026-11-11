@@ -260,8 +260,8 @@ static bool collect(pp *p, const pmacro *m, const ptok *name, margs *a, ptok *rp
 static bool needs_pre(pp *p, const ptok *t, uint32_t n)
 {
 	for (uint32_t i = 0; i < n; i++)
-		if (t[i].kind == T_IDENT && mread_tok(p, &t[i], 1))
-			return true;
+		if (t[i].kind == T_IDENT && (mread_tok(p, &t[i], 1) || (unlikely(p->o->asm_mode) && t[i].s[0] == '$' && t[i].len > 1)))
+			return true;	/* (asm: "$NAME" may hold a macro, as next_exp splits it) */
 	return false;
 }
 
@@ -296,6 +296,8 @@ static __attribute__((noinline)) void preexpand_run(pp *p, margs *a, uint32_t k,
 				uintptr_t me;
 
 				*w = pt[i];
+				if (unlikely(p->o->asm_mode) && pt[i].kind == T_IDENT && pt[i].s[0] == '$' && pt[i].len > 1)
+					break;	/* "$NAME": next_exp() splits it */
 				if (pt[i].kind == T_IDENT && !(pt[i].flags & PF_NOEXP) && (me = mget(p, pt[i].id))) {
 					if (!(me & 1))
 						break;	/* a macro: next_exp() */

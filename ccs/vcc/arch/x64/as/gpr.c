@@ -46,6 +46,32 @@ VPRIV int x64_i_jump(As *a, char *mn, XOp *o, int nops)
 				return 0;
 			}
 	}
+	/* ljmp/lcall $sel, $off (32-bit mode): ea/9a, the offset (4 bytes), the selector */
+	if (nops == 2 && o[0].kind == XK_IMM && o[1].kind == XK_IMM &&
+	    (!strcmp(mn, "ljmp") || !strcmp(mn, "ljmpl") || !strcmp(mn, "lcall") || !strcmp(mn, "lcalll"))) {
+		int64_t sel = 0, off = 0;
+		Val ov = o[1].v;
+
+		if (!a->x64_code32)
+			return err(a, "direct far jumps and calls require 32-bit mode");
+		if (!isconst(a, &o[0].v, &sel))
+			return err(a, "expected an absolute selector");
+		int sym = !isconst(a, &ov, &off);
+		uint32_t fr = a->cur;
+		uint64_t at;
+		uint8_t *p;
+
+		elf_code(a->o, fr);
+		at = elf_frag(a->o, fr)->size;
+		p = elf_grow(a->o, fr, 7);
+		p[0] = mn[1] == 'j' ? 0xea : 0x9a;
+		for (int k = 0; k < 4; k++)
+			p[1 + k] = sym ? 0 : (uint8_t)((uint64_t)off >> 8 * k);
+		p[5] = (uint8_t)sel, p[6] = (uint8_t)(sel >> 8);
+		if (sym)
+			elf_fixup(a->o, fr, at + 1, p + 1, R_X86_64_32, o[1].v);
+		return 0;
+	}
 	/* ljmp/lcall through memory: ff /5, ff /3 (l: 32-bit offset, q: REX.W) */
 	if (nops == 1 && (o[0].star || o[0].kind == XK_MEM) &&
 	    (!strcmp(mn, "ljmp") || !strcmp(mn, "ljmpl") || !strcmp(mn, "ljmpq") || !strcmp(mn, "ljmpw") ||
@@ -235,6 +261,23 @@ VPRIV int x64_i_int(As *a, char *mn, XOp *o, int nops)
 				for (int i = 0; i < 2; i++)
 					if (o[i].kind == XK_EXPR)
 						o[i].kind = XK_MEM;
+				if (a->x64_code32 && z != 8) {
+					/* 32-bit mode: the accumulator and an absolute address, a0-a3 moffs32 (MC) */
+					XOp *m = s->kind == XK_MEM ? s : d, *r = s->kind == XK_MEM ? d : s;
+
+					if (m->kind == XK_MEM && r->kind == XK_REG && r->cls == XR_GPR && r->reg == 0 && !r->hi8 &&
+					    m->base < 0 && m->index < 0 && !m->seg) {
+						uint8_t op = (uint8_t)((m == s ? 0xa0 : 0xa2) + (z != 1));
+						XForm f = F(.opsz16 = z == 2, .op = &op, .nop = 1, .isz = 4);
+						int64_t c = 0;
+						XOp im = *m;
+
+						im.kind = XK_IMM;
+						x64_imm(a, &im, &f, &c);
+						f.imm = c;
+						return x64_emit(a, &f);
+					}
+				}
 				if (s->kind == XK_IMM) {
 					int64_t c = 0;
 					XForm f = F(.w = z == 8, .opsz16 = z == 2, .rex8 = rex8(d), .immsgn = 1);
@@ -318,6 +361,8 @@ VPRIV int x64_i_int(As *a, char *mn, XOp *o, int nops)
 
 					if (o[0].kind == XK_EXPR)
 						o[0].kind = XK_MEM;
+					if (a->x64_code32 && o[0].kind == XK_REG && z != 1)	/* 40+r / 48+r: 32-bit mode only */
+						return x64_emit(a, &F(.opsz16 = z == 2, .op = m[0] == 'd' ? OPB(0x48) : OPB(0x40), .nop = 1, .oreg = o[0].reg + 1));
 					return x64_emit(a, &F(.w = z == 8, .opsz16 = z == 2, .op = z == 1 ? OPB(0xfe) : OPB(0xff), .nop = 1,
 							      .reg = m[0] == 'd', .rm = &o[0], .rex8 = rex8(&o[0])));
 				}
@@ -351,23 +396,25 @@ VPRIV int x64_i_int(As *a, char *mn, XOp *o, int nops)
 			if ((!strcmp(m, "push") || !strcmp(m, "pop")) && nops == 1) {
 				int pop = m[1] == 'o';
 
-				if (o[0].kind == XK_REG)
-					return x64_emit(a, &F(.op = pop ? OPB(0x58) : OPB(0x50), .nop = 1, .oreg = o[0].reg + 1));
+				int w16 = sz == 2 || (o[0].kind == XK_REG && o[0].size == 2);
+
+				if (o[0].kind == XK_REG && o[0].cls == XR_GPR)
+					return x64_emit(a, &F(.opsz16 = w16, .op = pop ? OPB(0x58) : OPB(0x50), .nop = 1, .oreg = o[0].reg + 1));
 				if (o[0].kind == XK_IMM && !pop) {
 					int64_t c = 0;
-					XForm f = F(.immsgn = 1);
+					XForm f = F(.immsgn = 1, .opsz16 = w16);
 					int sym = x64_imm(a, &o[0], &f, &c);
 
 					f.imm = c;
 					if (!sym && fits8(c))
 						f.op = OPB(0x6a), f.nop = 1, f.isz = 1;
 					else
-						f.op = OPB(0x68), f.nop = 1, f.isz = 4;
+						f.op = OPB(0x68), f.nop = 1, f.isz = w16 ? 2 : 4;
 					return x64_emit(a, &f);
 				}
 				if (o[0].kind == XK_EXPR)
 					o[0].kind = XK_MEM;
-				return x64_emit(a, &F(.op = pop ? OPB(0x8f) : OPB(0xff), .nop = 1, .reg = pop ? 0 : 6, .rm = &o[0]));
+				return x64_emit(a, &F(.opsz16 = w16, .op = pop ? OPB(0x8f) : OPB(0xff), .nop = 1, .reg = pop ? 0 : 6, .rm = &o[0]));
 			}
 			if ((!strcmp(m, "bsf") || !strcmp(m, "bsr") || !strcmp(m, "popcnt") || !strcmp(m, "lzcnt") || !strcmp(m, "tzcnt")) && nops == 2) {
 				int z = x64_size(a, sz, &o[0], &o[1]);

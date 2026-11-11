@@ -340,7 +340,12 @@ VPRIV int x64_emit(As *a, XForm *f)
 			dv = rm->v;
 			dsym = !isconst(a, &dv, &disp);
 		}
-		if (base == 16) {	/* rip-relative */
+		if (a->x64_code32 && (base == 16 || (!rm->a32 && (base >= 0 || index >= 0))))
+			return err(a, base == 16 ? "rip-relative addressing requires 64-bit mode" : "invalid base register");
+		if (a->x64_code32 && base < 0 && index < 0) {	/* absolute in 32-bit mode: ModRM disp32, no SIB */
+			modrm[nm++] = (uint8_t)((f->reg & 7) << 3 | 5);
+			dispsz = 4;
+		} else if (base == 16) {	/* rip-relative */
 			modrm[nm++] = (uint8_t)((f->reg & 7) << 3 | 5);
 			dispsz = 4, ripfix = 1;
 		} else if (base < 0 && index < 0) {	/* absolute: SIB with no base, no index */
@@ -374,7 +379,9 @@ VPRIV int x64_emit(As *a, XForm *f)
 		rex |= 0x40;
 	if (seg)
 		eb(&x, seg);
-	if (rm && rm->kind == XK_MEM && rm->a32)
+	if (a->x64_code32 && ((rex & 15) || f->rex8 || (f->vex && (f->w || f->reg > 7 || f->vvvv > 7))))
+		return err(a, "instruction requires 64-bit mode");
+	if (rm && rm->kind == XK_MEM && rm->a32 && !a->x64_code32)
 		eb(&x, 0x67);
 	if (f->opsz16 && !f->vex)
 		eb(&x, 0x66);
@@ -593,7 +600,7 @@ VPRIV int x64_branch(As *a, int cc, XOp *t, int call)
 		p = elf_grow(a->o, fr, 5);
 		memcpy(p, x.b, 5);
 		v.c -= 4;
-		elf_fixup(a->o, fr, off + 1, p + 1, R_X86_64_PLT32, v);
+		elf_fixup(a->o, fr, off + 1, p + 1, a->x64_code32 ? R_X86_64_PC32 : R_X86_64_PLT32, v);	/* (MC: no PLT in 32-bit code) */
 		if (t->mod == XM_PLT)
 			((ElfFix *)a->o->fixes.base)[a->o->nfix - 1].pad = 1;	/* sym@PLT: never resolved in place (MC) */
 		return 0;
