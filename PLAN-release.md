@@ -80,6 +80,26 @@ kan gå parallellt.
 
 ## Status
 
+### Status 2026-11-11: G5/G7, delade heltalsidentiteter
+
+`emit/opt/identity.c` delar nu typkorrekta heltalsidentiteter mellan alla
+bakändar; tvåpotensregeln ligger separat i `divpow2.c`. Unity och
+fil-för-fil klarar 32 kod-/körkontroller vid O0–O3. Egna sviter: x86
+131/131, arm64 136/136. Effekter och smala/höga registerbitar täcks av
+regressioner. Mätbrus hindrar slutsats om små kompilator-CPU-skillnader;
+se OPT1 i `PLAN-fas2.md`. G5/G7 och hela O2-målet är fortsatt öppna.
+
+### Status 2026-11-11: G5/G7, första gemensamma regel implementerad
+
+Unsigned konstant tvåpotensdivision/-rest sänks nu genom samma hjälpare
+för x86, arm64 och wasm32/64. Alla 16 mål-/nivåkombinationer klarar
+kodkrav och literalbaserad körkontroll, även fil-för-fil. Egna sviter:
+x86 130/130, arm64 135/135. Wasm-testvägen använder vcc:s egna objekt
+och länkare plus systemets Node 24/25, utan Emscripten; full
+runtimeersättning är W9 i `PLAN-wasm.md`. Korta före/efter-mätningar
+och begränsningarna för hårdvaruräknare är dokumenterade vid OPT1
+i `PLAN-fas2.md`. Detta är delprogress; G5/G7 är fortsatt öppna.
+
 ### Status 2026-11-11: G5/G7, gemensam implementationsplan
 
 `PLAN-fas2.md` **Gemensam optimerare utan SSA** äger nu OPT0–OPT8 efter

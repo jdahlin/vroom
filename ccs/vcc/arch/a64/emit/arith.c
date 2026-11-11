@@ -325,6 +325,25 @@ VPRIV val arith(ecx *e, int op, qty ty, val a, val b)
 		a = b;
 		b = t;
 	}
+	if (b.k == V_CONST) {
+		int id = em_bin_identity(c, ty, op, b.i);
+
+		if (id == EM_ID_LEFT) {
+			if (a.k == V_CONST)
+				return vconst(em_trunc_to(c, a.i, ty));
+			/* A 32-bit operation clears high bits even after a lazy narrowing cast. */
+			if (!x) {
+				ra = toreg(e, &a);
+				extend(e, ra, ra, 4, false);
+			}
+			return a;
+		}
+		if (id == EM_ID_ZERO || id == EM_ID_ONES) {
+			val_free(e, &a);
+			return vconst(id == EM_ID_ZERO ? 0 : em_trunc_to(c, -1, ty));
+		}
+		em_divpow2(c, ty, &op, &b.i);
+	}
 	ra = toreg(e, &a);
 	if (b.k == V_CONST) {
 		int64_t k = (int64_t)b.i;

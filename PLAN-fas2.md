@@ -668,7 +668,7 @@ en ny bas innan någon prestandajämförelse. De gamla resultaten skrivs inte om
 
 | Gemensamt ansvar | Föreslagen plats | Målets ansvar |
 | --- | --- | --- |
-| Typkorrekta algebraregler, konstantdivisionens parametrar | `emit/opt/arith.c`, `opt.h` | Shift/mask/mulhi/div, immediatgränser och kostnad för en sekvens |
+| Typkorrekta algebraregler, konstantdivisionens parametrar | `emit/opt/identity.c`, `divpow2.c` och separata regelfiler | Shift/mask/mulhi/div, immediatgränser och kostnad för en sekvens |
 | Nåbarhet, bevarade sidoeffekter, lokala fakta | `emit/opt/flow.c`, befintligt `prepass.c` | Hur gren/etikett/retur emitteras |
 | Inliningens behörighet och budget | `emit/opt/inline.c` | Argument/resultat, register, ABI och målbegränsningar |
 | Urval av lokaler som kan bo utanför minnet | `emit/opt/locals.c` | Fysiska register eller wasm-lokaler, callee-save, prolog och spill |
@@ -703,6 +703,10 @@ att båda är 16 byte. `emit_SRC` i `ccs/Makefile` behöver ta med nya
 
 Alla OPT-steg nedan är **planerade**; endast den tidigare x86-auditen finns.
 Implementera små steg med egen commit och uppdaterad status/mätning här.
+
+**Uppdatering 2026-11-11:** OPT1:s första del är nu implementerad;
+statusen och mätningen nedan gäller bara unsigned tvåpotensdivision/-rest.
+Övriga rader är fortsatt planerade.
 
 | Steg | Leverans och beroende | Bevis innan klart |
 | --- | --- | --- |
@@ -793,6 +797,16 @@ för att börja dela regler eller postpass.
   räcker en avgränsad efterstädning, ingen generell fixpunkt. Debug/CFI
   får inte referera till gamla postindex eller borttagna sparningar.
 
+### Filstruktur för optimeringar
+
+Varje avgränsad optimering eller tätt sammanhängande regelfamilj får en
+namngiven fil: nu `emit/opt/identity.c` och `emit/opt/divpow2.c`.
+Gemensamma postpass får motsvarande filer under `emit/rec/`. Lägg inte
+algoritmerna i en växande `walk.c` eller uttrycksvandrare. Vandrarna och
+bakändarna behåller små anrop/adaptrar för operandutvärdering, typer,
+register och wasm-stack. Undvik att dela upp en liten sammanhängande
+regel i en fil per operator. Fil-för-fil-bygget verifierar gränserna.
+
 ### Nivåer, testkrav och mätning
 
 `-O0` får billiga direkta sänkningsregler utan att starta dataflowpass.
@@ -800,7 +814,10 @@ Vilka regler som är default mäts, inte antas. O1 är de budgeterade
 gemensamma förbättringarna ovan. O2/O3 förblir ärligt samma tills en
 separat, mätt policy finns; ändra inte bara makron eller nivånamn för
 att påstå Clang-paritet. LICM, global GVN, automatisk vektorisering,
-loop-unrolling/unswitching och generell IPA är uppskjutna. Begränsad
+loop-unrolling/unswitching och generell IPA ligger efter den första serien
+OPT0–OPT8, men ingår i det fortsatta målet att täcka Clang/GCC O2 på
+alla tre bakändar. Skapa IR/SSA först för de analyser som behöver det;
+varje senare pass måste ha en mätt CPU-budget. Begränsad
 blocklokal CSE kan läggas efter OPT4 när dess nytta motiverar en
 värdecache med fast storlek; ingen helfunktionssökning eller generell aliasanalys.
 
@@ -827,6 +844,105 @@ inklusive uteslutna fall och saknade verktyg. Befintlig `vbench.py gate`
 gäller; tills dess x86-stöd är bekräftat får den inte anges som körd
 x86-grind. Godkänn ingen tänkt passbudget som en uppmätt siffra. Spara
 basrevision, binärhash och mätresultat vid varje färdigt OPT-steg här.
+
+### Status OPT0/OPT1 (2026-11-11): första delade aritmetikregeln
+
+Ny bas byggd på `990c9fe` (main-kod från `4daebd9`); vpp SHA256
+`b1d0c06a74de9695c8c04e67993c81e686d91d946afd8f32ecea169843af91f3`.
+Basens x86-egensvit går 130/130, fem filtrerade fall. Basen sparades som
+`build/linux/opt-baseline/vpp` före ändringen.
+
+`emit/opt/divpow2.c:em_divpow2` äger nu en gemensam regel för unsigned
+vanliga heltal upp till 64 bitar: division med konstant 2^k blir logiskt
+högerskift och rest blir AND med 2^k−1. Divisorn normaliseras till
+operationens promoverade typ före testet; noll, signed, pekare, FP,
+vektorer, _BitInt och bredare heltal faller tillbaka. Ingen allokering,
+AST-modifiering, SSA eller passloop; regeln gäller även O0.
+
+Anslutningar: arm64:s centrala `arith`, x86-vandrarens `wk_arith`, och
+wasms `wbinary`/`wassign`. Binära uttryck samt skalära `/=` och `%=`
+omfattas. Registermålens operander är redan utvärderade; wasm byter bara
+en bevisat effektfri konstant RHS och behåller övrig evaluation och
+stacktyper. Vektorlaner med dynamisk representation och andra algebra-
+identiteter är inte nya leveranser i detta steg.
+
+`tests/vcc/unsigned_pow2.c` testar literalbaserade svar, 32/64-bitars
+maxvärden/högbit, divisor 1, trunkerade/signed-konverterade konstanter,
+signed/non-power/dynamiska kontrollfall, volatile-effekter, anrop,
+comma-RHS och compound-tilldelningar. `bench/vcc-opt-rules.py` granskar
+funktionerna separat vid O0–O3 och kan köra utan libc på alla fyra mål.
+Wasm använder vpp:s egna C→objektväg och vlink, inte Emscripten; se
+`PLAN-wasm.md` W9. En .s-fil genom vpp -c väljer i dag inte wasm-
+assemblern, så testet kompilerar samma C med samma nivå till eget objekt.
+Detta är en känd driverlucka, inte en LLVM-fallback i testet.
+
+Kandidat SHA256 före dokumentation
+`77c05982e3bc056476aeeac6cc02c3309cba10026db19ecbd5e3a846b1dde440`.
+Kort interfolierad mätning på Ryzen 7 9700X: tre repetitioner, åtta
+6000-funktions-TU:er, seriell batch, warm=1, O1 -S, utan header-/declcache.
+Median för summan av jobbtiderna (ms, bas→kandidat):
+
+| Mål | Tvåpotensaritmetik | Oförändrat kontrollkorpus |
+| --- | --- | --- |
+| x86-64 | 44,370 → 37,864 | 36,940 → 36,176 |
+| arm64 | 57,737 → 54,005 | 53,619 → 53,747 |
+| wasm64 | 34,475 → 35,131 | 32,468 → 32,616 |
+
+Detta är väggtid i korta varma jobb, inte hårdvaruinstruktioner eller
+bevis på en 1 %-grind: perf är blockerat (perf_event_paranoid=4) och
+Linux-vperf ger noll. Ingen systeminställning ändrad. Små differenser är
+brus; mätningen visar ingen stor kontrollregression. Källor, kommandon,
+rådata och parade resultat finns i `build/linux/opt-perf/paired.json`.
+Två minimala kodexempel, unsigned /8 och %8: x86 16→12 instruktioner
+vardera; arm64 11→10 för division och 12→10 för rest; wasm32/64 får
+shr_u/and i stället för div_u/rem_u med lika många stackoperationer.
+Ingen påstådd förbättring av programmets körtid är uppmätt här.
+
+Verifierat: kandidatens x86-egensvit 130/130 (samma fem filtrerade fall
+som basen), arm64-egensvit 135/135 via QEMU, med -j 6 och --no-cache.
+Unity och fullt fil-för-fil-bygge gröna; båda byggsätten klarar alla
+16 kombinationer av fyra mål och O0–O3 i kod-/körharnessen. Systemets
+Node 24.22.2 och därefter 25.9.0 klarar wasm32/64 utan SDK-sökväg.
+Den nya kodgrinden avvisar före-basens division på alla fyra mål, så
+den detekterar själva optimeringsluckan utöver korrekt C-resultat.
+Syntaxkontroll av Python och shell samt `git diff --check` gröna.
+GHA-hookar är tillagda men ingen fjärr-CI eller full Emscripten-baserad
+wasm-svit har körts i detta steg.
+
+OPT1 är därmed **påbörjat**, inte helt klart: identiteterna och övriga
+OPT-steg återstår. Emscripten-oberoende wasm-testväg är levererad separat
+från ersättningen av full runtime/explorer. G5/G7 är fortsatt öppna.
+
+### Status OPT1 (2026-11-11): separata filer och heltalsidentiteter
+
+Tvåpotensregeln har flyttats oförändrad till `emit/opt/divpow2.c`.
+`emit/opt/identity.c` äger nu typkontrollerade RHS-regler för +0, −0,
+*0/*1, /1, %1, &0/&alla-ettor, |0/|alla-ettor, ^0 och skift med noll.
+Alla tre generatorer använder samma recept. Operandeffekter behålls;
+32-bitars registerresultat normaliseras även efter lat trunkering.
+FP, pekare, vektorer, _BitInt och bredare heltal omfattas inte.
+Ingen allokering, ny IR eller analysloop införs.
+
+Bas: `e4c1c9a`, vpp SHA256
+`77c05982e3bc056476aeeac6cc02c3309cba10026db19ecbd5e3a846b1dde440`.
+Kandidat före dokumentation:
+`f3899f1f5e51ff895d15903f547797bf6096ba16c8f2016f00aa005e1c70178f`.
+Verifierat unity och fil-för-fil: 32 kod-/körkombinationer (två regler,
+fyra mål, O0–O3), utan Emscripten. Systemets Node 26.13.0 kör wasm.
+X86-egensvit 131/131 (samma fem filtrerade fall), arm64 136/136 via QEMU,
+-j 6 och --no-cache. Regressioner täcker smala typer, högbitar efter
+trunkering, signed extremvärden, volatile och exakt en sidoeffekt.
+
+Kort parad kompilatormätning finns i
+`build/linux/opt-identity-perf/paired.json`. Stort värdtidsbrus och
+blockerade hårdvaruräknare hindrar slutsatser om små CPU-skillnader;
+ingen 1 %-grind eller programkörtidsvinst påstås. Minimala /1-funktioner
+minskar från 16→12 instruktioner på x86, 11→10 på arm64 och 9→7 på
+wasm32/64. Kontrollkorpus och rådata sparades separat.
+
+OPT1:s identiteter och unsigned tvåpotenser är levererade. Detta slutför
+inte OPT2–OPT8 eller hela O2-målet; nästa steg är separat gemensam
+fallthrough-städning med bevarad debug-remapping.
 
 ## Risker
 - **GNU C-ytan och inline asm** är det stora jobbet. Uppskattat: lexer + pp ~2 kloc,

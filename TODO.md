@@ -1154,6 +1154,13 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
   register assignment, ABI and structured wasm lowering stay with targets.
   The first rule must be consumed by all three backends, including wasm32
   and wasm64 for supported types. No new IR/SSA or unbounded pass loops.
+  First delivered slice (2026-11-11): unsigned power-of-two div/rem in
+  `emit/opt/divpow2.c`, all three consumers, codegen/runtime checks at O0–O3.
+  Integer identities now live in separate `emit/opt/identity.c`, shared by
+  all targets; keep future algorithms in named files, with small walker
+  adapters. Both build modes pass 32 target/level/rule checks.
+  Wasm checks use our assembler/linker and plain Node; full replacement
+  of Emscripten's test/explorer runtime is tracked in `PLAN-wasm.md` W9.
   *Validate:* common C semantics plus target-specific code assertions;
   extraction commits preserve output byte for byte, activation commits
   pass suites/ABI/stress and relevant debug/kernel gates. Measure compiler
