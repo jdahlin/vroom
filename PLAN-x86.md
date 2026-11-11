@@ -763,3 +763,10 @@ villkorsuttryck. x86:s egna tester: 47/56 godkända, mot 46/56 före
 
 Övriga steg inte påbörjade. Lagerindelningen (vandrare, sänkning, gemensamma
 pass) beslutad 2026-11-10; arm64 och wasm flyttas senare (TODO.md).
+
+### OPT3-integration med X5 (2026-11-11)
+
+Registerlokaler använder samma csslot/CFI som asm. Privata asm-snapshots
+bevarar aktuella hem på alla kanter; riktiga unwind-tester återvinner
+anroparens callee-save-värden genom vanliga och justerade ramar (O1/O2).
+Se OPT3:s PR-status i PLAN-fas2.md; full O2 och prestandagrind kvarstår.

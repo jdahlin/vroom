@@ -1513,3 +1513,27 @@ X86:s nytillkomna debugrader remappas nu genom både onåbarhets- och
 fallthrough-kompaktering, och slutraden remappas även genom twoaddr.
 `bench/vcc-opt-debug.py` kontrollerar källrader vid levande operationer,
 .text med/utan -g och dwarfdump --verify vid O0–O3; ingår i CI.
+
+### OPT3 på aktuell main (PR-serie, 2026-11-11)
+
+Registerhemmens ABI-sparning använder nu x86-skrivarens befintliga csslot
+för prolog/epilog och korrekt CFI, även vid realignment. Den separata
+lsave-/restore-hooken är borttagen. Asm tar dessutom privata snapshots av
+aktuella registerhem när fasta operand-/clobber-register överlappar dem;
+temporärägandet återställs på varje kant. Alla asm-output hålls adresserbara
+av prepassens lnoreg-regel, så deras resultat skrivs före snapshot-restore.
+Fasta RBX-output och asm-goto-output testas mot ett samtidigt levande hem.
+
+Rebaserad unity och fil-för-fil bygger. Unity: 116 fokuserade
+regel/nivå/mål-kombinationer med körning, inklusive smala parametrar och
+setjmp/alignment. Relevanta åtta x86-local/nonlocal-fall även fil-för-fil.
+X86 kors-ABI 22/22. `bench/vcc-x86-unwind-locals.py` använder libgcc:s riktiga
+unwinder för att återvinna anroparens RBX/R13–R15 genom vcc-funktioner med
+vanlig och 64-byte-justerad ram vid O1/O2, båda byggsätten. Clang-referensen
+klarar testet; äldre audit-binär avvisas. Skriptet kräver native x86 Linux,
+CI:s arm64-jobb kör fortfarande de libc-fria x86-proberna under QEMU.
+`bench/vcc-opt-debug.py` och ASan/UBSan-effektkontrakt gröna.
+
+Dessa resultat ersätter inte en ny prestandagrind på aktuell main.
+De tidigare mätningarna ovan behåller sina dokumenterade baser/hashar.
+G5/G7 och full O2-täckning är fortsatt öppna.

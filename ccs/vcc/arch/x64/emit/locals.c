@@ -22,9 +22,9 @@ static bool x64_local_profitable(ecx *e, uint32_t s)
 	return true;
 }
 
-/* Inline asm already saves every allocated or explicitly clobbered register
-   and restores it on fallthrough and all goto edges (asm.c). Persistent homes
-   therefore remain usable even when another asm names these same registers. */
+/* Callee saves share the printer's prologue slots with inline asm, including
+   CFI for normal and realigned frames. Asm separately snapshots current home
+   values across its fixed operands/clobbers and every goto edge. */
 VPRIV void x64_locals_begin(ecx *e, uint32_t s)
 {
 	static const uint8_t regs[] = { RBX, R13, R14, R15 };
@@ -44,10 +44,8 @@ VPRIV void x64_locals_begin(ecx *e, uint32_t s)
 			X->lsym[X->nlreg++] = X->lsym[i];
 	for (unsigned i = 0; i < X->nlreg; i++) {
 		X->lreg[i] = regs[i];
-		X->lsave[i] = wk_slot(e, 8, 8);
-		lval save = { .k = L_FRAME, .off = X->lsave[i], .align = 8 };
-
-		x64_store(e, X->lreg[i], &save, 8);
+		if (!X->csslot[X->lreg[i]])
+			X->csslot[X->lreg[i]] = wk_slot(e, 8, 8);
 	}
 }
 
@@ -65,15 +63,4 @@ VPRIV bool x64_local(ecx *e, uint32_t s, lval *l)
 			return true;
 		}
 	return false;
-}
-
-VPRIV void x64_locals_restore(ecx *e)
-{
-	xst *X = e->x64;
-
-	for (unsigned i = 0; i < X->nlreg; i++) {
-		lval save = { .k = L_FRAME, .off = X->lsave[i], .align = 8 };
-
-		x64_load(e, X->lreg[i], &save, 8, false);
-	}
 }

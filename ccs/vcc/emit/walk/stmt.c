@@ -1212,7 +1212,6 @@ VPRIV void wk_function(ecx *e, uint32_t s)
 		LO(ret)(e, &z, prim(TY_INT), W->retlbl);	/* falling off the end of main returns 0 */
 	}
 	wk_label(e, W->retlbl);
-	LO(locals_restore)(e);
 	LO(finish)(e, s);
 	if (pa != pabuf) free(pa);
 }

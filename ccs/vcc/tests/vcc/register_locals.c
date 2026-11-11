@@ -115,6 +115,25 @@ NI int rl_asm(int n)
                      : "+m"(x) : : "rbx", "r13", "r14", "r15", "memory");
     return x + 7;
 }
+/* The output object stays address-backed, while n lives in the same physical
+   register selected by the fixed output constraint. Preserve both values. */
+NI int rl_fixed_output(int n)
+{
+    n += 3;
+    int out;
+    __asm__ volatile("mov $17, %0" : "=b"(out));
+    return n + n + n + n + out;
+}
+NI int rl_goto_output(int n)
+{
+    n += 3;
+    int out;
+    __asm__ goto("mov $17, %0; test %1, %1; jz %l[zero]"
+                 : "=b"(out) : "r"(n) : "cc" : zero);
+    return n + n + n + n + out;
+zero:
+    return n + n + n + n + out + 1;
+}
 NI long rl_fixed(long n)
 {
     register long x __asm__("r13") = n + 3;
@@ -239,6 +258,8 @@ int main(void)
 #endif
 #if defined(__x86_64__)
     if (rl_nested_asm(5) != 27) return 13;
+    if (rl_fixed_output(5) != 49) return 24;
+    if (rl_goto_output(5) != 49 || rl_goto_output(-3) != 18) return 25;
 #endif
     if (rl_asm_four(5) != 380) return 15;
     if (rl_asm_goto_four(5, 0) != 380 || rl_asm_goto_four(5, 1) != 385) return 16;

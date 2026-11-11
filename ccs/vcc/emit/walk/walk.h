@@ -206,7 +206,6 @@ VPRIV int LO(va_arg)(ecx *e, int rap, qty t);		/* the next argument's address */
 /* the function: before its body, and once it is generated (frame, prologue, output) */
 VPRIV void LO(begin)(ecx *e, uint32_t s);
 VPRIV void LO(locals_begin)(ecx *e, uint32_t s);
-VPRIV void LO(locals_restore)(ecx *e);
 VPRIV bool LO(local)(ecx *e, uint32_t s, lval *l);
 VPRIV void LO(finish)(ecx *e, uint32_t s);
 

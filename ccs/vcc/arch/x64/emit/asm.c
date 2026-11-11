@@ -304,17 +304,21 @@ VPRIV void x64_asm(ecx *e, uint32_t n)
 	}
 	if (fixed & ((1u << RSP) | (1u << RBP)))
 		efatal(e, x->loc, "x86-64: asm clobbering rsp or rbp is not supported");
-	/* temporaries live in them now: saved, and held so evaluation does not use them */
+	/* Preserve current register-local values independently of the prologue's
+	   original caller values. These homes are not expression temporaries. */
+	uint32_t homes = 0;
+	for (unsigned i = 0; i < X->nlreg; i++) homes |= 1u << X->lreg[i];
+	/* Fixed registers stay reserved while operands are evaluated. */
 	for (int r = 0; r < 32; r++)
 		if (fixed & (1u << r)) {
-			if (X->live & (1u << r)) {
+			if ((X->live | homes) & (1u << r)) {
 				lval s = { .k = L_FRAME, .off = sslot[r] = wk_slot(e, r >= XMM0 ? 16 : 8, 16), .align = 8 };
 
 				x64_mem(e, X_ST, r >= XMM0 ? 16 : 8, r, &s, false);
 				saved |= 1u << r;
-			} else {
-				reserved |= 1u << r;
 			}
+			/* A home gets a snapshot but no lasting temporary ownership. */
+			if (!(X->live & (1u << r))) reserved |= 1u << r;
 			X->live |= 1u << r;
 		}
 	/* outputs: lvalues; a register's value read first for + */
@@ -673,7 +677,10 @@ VPRIV void x64_asm(ecx *e, uint32_t n)
 	for (uint32_t edge = 0; edge <= a->nlabel; edge++) {
 		X->live = asm_live;
 		if (edge) x64_label(e, edges[edge - 1]);
-		/* outputs stored */
+		/* The prepass keeps every output address-backed (lnoreg). Its
+		   address was evaluated after fixed registers were reserved, so it
+		   uses an independent temporary, never a persistent home. Store the
+		   physical result before restoring any overlapping saved home. */
 		for (uint32_t i = 0; i < a->nout; i++) {
 			xopnd *o = &op[i];
 
