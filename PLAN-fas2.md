@@ -2951,3 +2951,24 @@ kompilatorerna på respektive wasm-mål redovisas separat. Grinden på 1 %
 passerar. Källträds-/binärhashar, exakta kommandon och fall finns i
 `work/opt-profile/consolidated-main-cost/result.json`. Detta är en liten fast
 korpus med kompilatorinstruktioner, inte en gräns för vägg- eller CPU-tid.
+
+### Typgränser skrivna som konstantuttryck (2026-11-11)
+
+`emit/opt/cmpbounds.c` känner nu även igen rena, begränsade heltalsuttryck
+som typgränser, exempelvis `x < (-2147483647-1)` och `x <= (unsigned)-1`.
+Ett högst 16 noder stort uttryck kontrolleras före den befintliga
+konstantevaluatorn; anrop, variabelläsningar och okända uttryck faller tillbaka
+till vanlig kodgenerering. Den andra operandens sidoeffekter bevaras.
+Fokuserade körnings- och kodgenereringstester passerar O0–O3 på x86, arm64,
+wasm32 och wasm64 med både unity- och filvis bygge. O0 och `VCC_NOOPT=1`
+gav byteidentisk assembler mot basen på alla fyra mål. Vcc-sviten passerar
+252/252 med en befintlig xfail, och x86-regressionen passerar.
+
+Matchad seriell Callgrind-profil mot `90b5cf8` gav förändringar i
+kompilatorinstruktioner på −0,017 % för x86, −0,014 % för arm64, −0,031 %
+för wasm32 och −0,026 % för wasm64. Den fasta 1 %-grinden passerar; 12/12
+nativefiler, 10 wasm32 och 11 wasm64 ingår, medan atomic_ops/bitint_runtime
+som avvisas av båda på respektive wasm-mål redovisas separat. Proveniens,
+kommandon och fall finns i `work/opt-profile/bounds-expressions-cost/result.json`.
+Detta är en liten korpus och instruktionstal, inte ett mått på CPU-tid.
+Generell O2-täckning och G5/G7 återstår.
