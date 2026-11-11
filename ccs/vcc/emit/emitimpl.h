@@ -565,6 +565,10 @@ typedef struct em_switch_case {
 enum { EM_SWITCH_LINEAR, EM_SWITCH_TREE, EM_SWITCH_TABLE };
 VPRIV int em_switch_strategy(uint32_t n, i128 lo, i128 hi, bool ranges, bool tables);
 VPRIV bool em_switch_prepare(em_switch_case *cases, uint32_t n, unsigned bits, bool sg);
+/* opt/unusedinit.c: bounded recipes for never-referenced integer declarations. */
+enum { EM_UNUSED_KEEP, EM_UNUSED_OMIT, EM_UNUSED_EVAL };
+VPRIV bool em_unused_local(ecx *e, uint32_t s, uint32_t fn);
+VPRIV unsigned em_unused_init(ecx *e, const node *decl, uint32_t fn, unsigned budget);
 /* opt/locals.c: eligibility and bounded selection from the existing prepass. */
 /* opt/tail.c: exact direct forwarding wrappers; target capability/ABI checks follow. */
 VPRIV bool em_tail_candidate(ecx *e, uint32_t fn, uint32_t expr, uint32_t maxargs, uint32_t *callee);

@@ -35,7 +35,7 @@ VPRIV unsigned em_select_locals(ecx *e, uint32_t fn, uint32_t *cand, unsigned ma
 	for (uint32_t s = lo; s <= hi; s++) {
 		unsigned j;
 
-		if (!E->luse[s] || !em_local_eligible(e, s) || !target_ok(e->c, e->c->syms[s].ty))
+		if (!E->luse[s] || em_unused_local(e, s, fn) || !em_local_eligible(e, s) || !target_ok(e->c, e->c->syms[s].ty))
 			continue;
 		if (k == max && E->luse[cand[k - 1]] >= E->luse[s])
 			continue;

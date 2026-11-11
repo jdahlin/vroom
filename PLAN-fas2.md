@@ -2485,3 +2485,37 @@ Bounded-flow efter stackintegration med signed/tail/u64 (`661d552`): unity,
 sanitiserade flow-/dead-result-kontrakt, 16 mål-/nivåprov med körning och
 x86-debug O0–O3 passerar. Tidigare hela sviter och Ir-mätningar ovan gäller
 sina exakta angivna versioner; integrationen är ingen ny kostnadsmätning.
+
+
+### OPT6: oanvända skalära lokala initierare (avgränsat delsteg)
+
+Implementation under verifiering: `emit/opt/unusedinit.c` delar behörighet och
+recept mellan a64, x64 och wasm32/64. Befintlig `SA_USED` från prepasset avvisar
+refererade objekt direkt; ingen ny funktionsgenomgång, CFG eller SSA tillkommer.
+Endast aldrig refererade automatiska heltalsobjekt på högst 64 bitar omfattas.
+Volatile/atomic, cleanup, VLA/variabelt modifierade typer, statisk lagring,
+adressflykt, `used`, asm-register och `_BitInt` behåller befintlig väg.
+O0, `VCC_NOOPT` och uttryckligt känd `optnone`-funktion avvisas också.
+
+En kandidatbunden heltalslista får besöka högst 64 AST-noder. Den utesluter
+minnesindirektion, division/rest, skift, FP, anrop, builtins och okända noder.
+Ett bevisat rent initialiseringsuttryck utelämnas. I annat fall evalueras
+heltalsuttrycket som ett värde och frigörs/droppas; endast destinationens lagring
+tas bort. Detta bevarar anrop, läsningar och interna konverteringar som den
+befintliga värdeemittern utför. Budgetslut behåller evalueringen. Brace-/zero-
+initialiseringsposter går kvar genom initialiseringsgången; de skickas aldrig
+till värdeemittern. `side_effects()` används inte som bevis för frånvaro av traps.
+Befintliga AST-/symboldata ändras inte; registerlokalvalet undviker att reservera
+ett hem för dessa oanvända objekt.
+
+Verifierat hittills: unitybygge samt fristående receptkontrakt normalt och med
+ASan/UBSan. Kontrakten täcker budget 0/1/exakt gräns, 64/65 noder, behörighet,
+attribut, okända noder, FP-/minnes-/divisionskontroller och initializer-fallback.
+Små O2-assemblerprober visar att x64:s döda multiplikation/addition/store och
+wasm32/64:s multiplikation/addition/lokal försvinner; a64:s befintliga efterpass
+hade redan tagit bort aritmetiken i just denna prob. Detta är inte generell
+DCE eller en fullständig lösning på OPT6.
+
+Återstår före färdig status: nonunitybygge, all-target runtime/kodgen med
+negativa kontroller, befintliga regressionssviter och matchad instruktionsmätning
+för kandidatfria och kandidatbelastade indata. Inga nya prestandasiffror hävdas än.

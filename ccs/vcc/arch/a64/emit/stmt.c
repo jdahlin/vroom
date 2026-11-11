@@ -845,6 +845,18 @@ static void gen_decl(ecx *e, const node *x)
 		gen_vla_decl(e, x, s);
 		return;
 	}
+	{
+		unsigned recipe = em_unused_init(e, x, e->f->fn, 64);
+
+		if (recipe != EM_UNUSED_KEEP) {
+			if (recipe == EM_UNUSED_EVAL) {
+				val v = gen(e, x->b);
+
+				val_free(e, &v);
+			}
+			return;
+		}
+	}
 	if (x->b && !(e->E->sflags[s] & SA_WRITTEN) && !is_agg(c, y->ty) && !(QQ(y->ty) & Q_VOLATILE) &&
 	    !is_wide(c, y->ty) && y->sc != SC_REGISTER && !sym_attrs(c, s)->cleanup) {
 		val v = gen(e, x->b);
