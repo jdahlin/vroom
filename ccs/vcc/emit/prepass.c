@@ -508,3 +508,27 @@ VPRIV int u32_cmp(const void *a, const void *b)
 
 	return x < y ? -1 : x > y;
 }
+
+/* Inlining preserves a never-written pointer parameter's incoming object
+   bound. No AST substitution: emission can run concurrently for other callers.
+   Only direct parameters and effect-free actual arguments are covered here. */
+VPRIV bool inline_object_size(ecx *e, uint32_t fn, uint32_t call, uint32_t pointer, uint32_t mode, i128 *size)
+{
+	cc *c = e->c;
+	if (!fn || !call) return false;
+	while (N(pointer)->op == N_CAST) pointer = N(pointer)->a;
+	if (N(pointer)->op != N_VAR) return false;
+	uint32_t p = N(pointer)->a;
+	if (!is_ptr(c, c->syms[p].ty) || (c->syms[p].flags & SF_ADDR_TAKEN) ||
+	    (e->E->sflags[p] & (SA_WRITTEN | SA_CWRITE)) || (QQ(c->syms[p].ty) & Q_VOLATILE))
+		return false;
+	const node *body = N(c->syms[fn].body), *x = N(call);
+	cval cv;
+	if (!cc_eval(c, mode, &cv) || cv.kind != CV_INT || cv.i < 0 || cv.i > 3) return false;
+	for (uint32_t i = 0; i < body->aux && i < x->c; i++) {
+		if (c->lists[body->a + i] != p) continue;
+		uint32_t arg = c->lists[x->b + i];
+		return !side_effects(c, arg) && cc_object_size(c, arg, (unsigned)cv.i, size);
+	}
+	return false;
+}

@@ -728,6 +728,19 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
   `B(__clang__)`) it is 1 and the error is clang's "expected ']'" (not
   "expected attribute name").  The `]` fix-it line and clang's later errors there belong to
   the error recovery item.)
+- [ ] **General object-size provenance** [P]. The Linux milestone on base
+  `9d022c3` handles strict-flex levels 0–3, declared subobjects without padding,
+  minimum mode 3, stable `counted_by` pointer fields (dynamic modes 0–2), and
+  direct immutable inline pointer parameters. Volatile pointer/base expressions
+  stay unknown without reads. Five unchanged GCC cases (`pr101836_1/2/3`,
+  `pr39343`, `pointer-counted-by-8`) and permanent regressions cover this scope.
+  Still missing: general control-flow/alias provenance, transitive inline
+  bindings, `alloc_size` inference, and dynamic side-effecting expressions.
+  Do not infer a whole allocation from a known subobject or treat unknown as
+  known. Full S4 and non-Linux targets remain separate gates.
+  *Validate:* unity and file-by-file builds; own x86/ARM runtime suites;
+  `vcc-gcc-dg.py` on those five sources; strict-flex 0–3, volatile/null-base and
+  raw allocation probes; kernel `vcc-sema.py run` and `batch` (887 TUs).
 - [x] **Attributes without effect**: none left.  Accepted
   and needing nothing today: `returns_twice` (locals live in memory:
   `tests/vcc/returns_twice.c`; the optimizer item must honour it when

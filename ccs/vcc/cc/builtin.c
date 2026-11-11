@@ -443,9 +443,23 @@ static uint64_t object_element_size(cc *c, qty pointer)
 	return KIND(c, base) == TY_VOID || KIND(c, base) == TY_FUNC ? 1 : ty_size(c, base);
 }
 
-static bool object_pointer_bound(cc *c, uint32_t n, object_bound *b, unsigned depth);
+/* Only the last array member can use the historical struct-hack bound. */
+static bool object_flexible_member(cc *c, const node *x)
+{
+	qty t = node_field(c, x)->ty;
+	if (!is_array(c, t) || x->c + 1 != c->tags[x->b].nfield)
+		return false;
+	if (T(c, t)->flags & TF_INCOMPLETE)
+		return true;
+	uint64_t n = arr_len(c, t);
+	return c->o->strict_flex_arrays == 0 ||
+	       (c->o->strict_flex_arrays == 1 && n <= 1) ||
+	       (c->o->strict_flex_arrays == 2 && n == 0);
+}
 
-static bool object_lvalue_bound(cc *c, uint32_t n, object_bound *b, unsigned depth)
+static bool object_pointer_bound(cc *c, uint32_t n, object_bound *b, unsigned depth, unsigned mode);
+
+static bool object_lvalue_bound(cc *c, uint32_t n, object_bound *b, unsigned depth, unsigned mode)
 {
 	if (!n || depth > 64)
 		return false;
@@ -468,19 +482,31 @@ static bool object_lvalue_bound(cc *c, uint32_t n, object_bound *b, unsigned dep
 		return true;
 	case N_MEMBER: {
 		const field *f = node_field(c, x);
-		if (f->bitfield || !object_lvalue_bound(c, x->a, b, depth + 1))
+		if (f->bitfield)
 			return false;
+		bool flexible = object_flexible_member(c, x);
+		if (!object_lvalue_bound(c, x->a, b, depth + 1, mode)) {
+			/* The array's declared subobject bound is independent of the
+			   unknown enclosing allocation. Do not invent a whole bound. */
+			if (!is_array(c, f->ty) || (T(c, f->ty)->flags & TF_INCOMPLETE) || (flexible && mode != 3))
+				return false;
+			*b = (object_bound){ .whole = -1, .sub = ty_size(c, f->ty), .storage = f->ty };
+			return true;
+		}
 		b->offset += f->off / 8;
 		/* Clang treats a trailing array as extending through its enclosing
 		   allocation, even when a fixed bound is written (the struct hack).
 		   A nested record's endpoint was retained by the enclosing member. */
-		if (!(is_array(c, f->ty) && x->c + 1 == c->tags[x->b].nfield))
+		/* A declared record object (including an element of a declared
+		   array) does not give its trailing member the record's padding.
+		   Raw allocations/reinterpreted storage still permit the struct hack. */
+		if (mode == 3 || !flexible || (b->storage && !(T(c, f->ty)->flags & TF_INCOMPLETE)))
 			b->sub = b->offset + ty_size(c, f->ty);
 		b->storage = f->ty;
 		return true;
 	}
 	case N_INDEX:
-		if (!object_pointer_bound(c, x->a, b, depth + 1) || !eval(c, x->b, &index) || index.kind != CV_INT)
+		if (!object_pointer_bound(c, x->a, b, depth + 1, mode) || !eval(c, x->b, &index) || index.kind != CV_INT)
 			return false;
 		b->offset += index.i * object_element_size(c, N(x->a)->ty);
 		if (is_record(c, x->ty) && b->storage &&
@@ -491,20 +517,20 @@ static bool object_lvalue_bound(cc *c, uint32_t n, object_bound *b, unsigned dep
 			b->storage = T(c, b->storage)->base;
 		return true;
 	case N_DEREF:
-		return object_pointer_bound(c, x->a, b, depth + 1);
+		return object_pointer_bound(c, x->a, b, depth + 1, mode);
 	default:
 		return false;
 	}
 }
 
-static bool object_pointer_bound(cc *c, uint32_t n, object_bound *b, unsigned depth)
+static bool object_pointer_bound(cc *c, uint32_t n, object_bound *b, unsigned depth, unsigned mode)
 {
 	if (!n || depth > 64)
 		return false;
 	const node *x = N(n);
 	cval index;
 	if (x->op == N_VAR && (c->syms[x->a].flags & SF_BOS_INIT))
-		return object_pointer_bound(c, c->syms[x->a].body, b, depth + 1);
+		return object_pointer_bound(c, c->syms[x->a].body, b, depth + 1, mode);
 	if (x->op == N_CALL && !c->o->no_builtin) {
 		uint32_t callee = x->a;
 		while (N(callee)->op == N_CAST || N(callee)->op == N_ADDR)
@@ -546,27 +572,42 @@ static bool object_pointer_bound(cc *c, uint32_t n, object_bound *b, unsigned de
 		return true;
 	}
 	if (x->op == N_ADDR || (x->op == N_CAST && x->aux == CK_DECAY))
-		return object_lvalue_bound(c, x->a, b, depth + 1);
+		return object_lvalue_bound(c, x->a, b, depth + 1, mode);
 	if (x->op == N_CAST && is_ptr(c, N(x->a)->ty)) {
-		if (!object_pointer_bound(c, x->a, b, depth + 1))
+		if (!object_pointer_bound(c, x->a, b, depth + 1, mode))
 			return false;
-		if (is_ptr(c, x->ty) && is_record(c, T(c, x->ty)->base) &&
-		    QUNQ(T(c, x->ty)->base) != QUNQ(T(c, N(x->a)->ty)->base))
-			b->sub = b->whole;
+		if (is_ptr(c, x->ty) && is_record(c, T(c, x->ty)->base)) {
+			qty base = T(c, x->ty)->base;
+			if (!b->storage || (QUNQ(b->storage) != QUNQ(base) &&
+			    !(is_array(c, b->storage) && QUNQ(T(c, b->storage)->base) == QUNQ(base)))) {
+				b->sub = b->whole;
+				b->storage = 0;
+			}
+		}
 		return true;
 	}
 	if (is_array(c, x->ty))
-		return object_lvalue_bound(c, n, b, depth + 1);
+		return object_lvalue_bound(c, n, b, depth + 1, mode);
 	if (x->op == N_BINARY && (x->aux == T_PLUS || x->aux == T_MINUS)) {
 		uint32_t p = x->a, i = x->b;
 		if (!is_ptr(c, N(p)->ty) && x->aux == T_PLUS) p = x->b, i = x->a;
-		if (!is_ptr(c, N(p)->ty) || !object_pointer_bound(c, p, b, depth + 1) ||
+		if (!is_ptr(c, N(p)->ty) || !object_pointer_bound(c, p, b, depth + 1, mode) ||
 		    !eval(c, i, &index) || index.kind != CV_INT)
 			return false;
 		b->offset += (x->aux == T_MINUS ? -index.i : index.i) * object_element_size(c, N(p)->ty);
 		return true;
 	}
 	return false;
+}
+
+bool cc_object_size(cc *c, uint32_t pointer, unsigned mode, i128 *size)
+{
+	object_bound b;
+	if (mode > 3 || !object_pointer_bound(c, pointer, &b, 0, mode)) return false;
+	i128 end = (mode & 1) && (b.whole < 0 || b.sub < b.whole) ? b.sub : b.whole;
+	if (end < 0) return false;
+	*size = b.offset < 0 || b.offset > end ? 0 : end - b.offset;
+	return true;
 }
 
 VPRIV bool eval_builtin(cc *c, const node *x, cval *v)
@@ -581,9 +622,10 @@ VPRIV bool eval_builtin(cc *c, const node *x, cval *v)
 		object_bound b;
 		if (!eval(c, arg[1], &a) || a.kind != CV_INT)
 			return false;
-		if (object_pointer_bound(c, arg[0], &b, 0)) {
-			const i128 end = (a.i & 1) && b.sub < b.whole ? b.sub : b.whole;
-			v->i = b.offset < 0 || b.offset > end ? 0 : end - b.offset;
+		if (object_pointer_bound(c, arg[0], &b, 0, (unsigned)a.i)) {
+			const i128 end = (a.i & 1) && (b.whole < 0 || b.sub < b.whole) ? b.sub : b.whole;
+			v->i = end < 0 ? (a.i & 2 ? 0 : (i128)(uint64_t)-1) :
+			       b.offset < 0 || b.offset > end ? 0 : end - b.offset;
 		} else
 			v->i = a.i & 2 ? 0 : (i128)(uint64_t)-1;
 		v->ice = false;
@@ -779,8 +821,34 @@ static qty unqual_array(cc *c, qty t)
 	}
 }
 
+static bool elementwise_abs_effects(cc *c, uint32_t n, bool load);
+
 VPRIV uint32_t mk_builtin(cc *c, int id, qty ty, uint32_t loc, const vec *args)
 {
+	/* A counted pointer has a runtime extent even if its allocation is
+	   unknown. Read the sibling count at the query, not at declaration.
+	   Restrict this lowering to a stable base so no operand effects are lost. */
+	if (id == BI_DYNAMIC_OBJECT_SIZE && args->n == 2) {
+		uint32_t m = args->v[0];
+		cval mode;
+		while (N(m)->op == N_CAST)
+			m = N(m)->a;
+		if (N(m)->op == N_MEMBER && is_ptr(c, N(m)->ty) &&
+		    !elementwise_abs_effects(c, args->v[0], true) && eval(c, args->v[1], &mode) &&
+		    mode.kind == CV_INT && mode.i >= 0 && mode.i <= 2) {
+			uint32_t count = node_field(c, N(m))->counted_by;
+			const tag *r = &c->tags[N(m)->b];
+			for (uint32_t i = 0; count && i < r->nfield; i++) {
+				if (r->f[i].name != count || !is_integer(c, r->f[i].ty))
+					continue;
+				uint32_t base = N(m)->a;
+				uint64_t size = ty_size(c, T(c, N(m)->ty)->base);
+				if (!size) break;
+				uint32_t cnt = convert(c, rvalue(c, member(c, base, count, loc)), c->t_size);
+				return mk_bin(c, T_STAR, c->t_size, cnt, mk_int(c, size, c->t_size, loc), loc);
+			}
+		}
+	}
 	uint32_t n = mk(c, N_BUILTIN, ty, loc);
 
 	N(n)->aux = (uint16_t)id;

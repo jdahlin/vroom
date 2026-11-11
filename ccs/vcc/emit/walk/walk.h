@@ -45,7 +45,7 @@ typedef struct wkcase { i128 lo, hi; uint32_t node; } wkcase;
 /* an inlined call: where its returns go */
 typedef struct wkinl {
 	struct wkinl *up;
-	uint32_t fn, endlbl, inst;
+	uint32_t fn, endlbl, inst, call;
 	qty rty;
 	int64_t rslot;		/* the result's slot (a value held by address: its object) */
 	int cbase;		/* the cleanups live at the call */

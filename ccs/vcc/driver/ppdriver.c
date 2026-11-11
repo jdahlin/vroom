@@ -867,7 +867,7 @@ static __attribute__((noinline)) int ppd_run1(int argc, char **argv, const ppd_e
 	double t0;
 	pp *p;
 	int comments = 0, nomarkers = 0;
-	int dmacros = 0, showinc = 0, ddefs = 0, syntax = 0, layout = 0, ms_anon = 0, short_wchar = 0, tokhash = 0, emit = 0, objmode = 0;
+	int dmacros = 0, showinc = 0, ddefs = 0, syntax = 0, layout = 0, ms_anon = 0, short_wchar = 0, strict_flex_arrays = 0, tokhash = 0, emit = 0, objmode = 0;
 	const char *stdver = NULL, *macos_min = NULL;
 	int fast_root4 = 0;
 	int macos_min_flag = 0, uchar = -1, fmath = 0;	/* fmath: 1 finite-only, 2 no errno, 4 __FAST_MATH__, 8 -pthread, 16 errno, 32 __ARM_FP_FAST */
@@ -894,6 +894,15 @@ static __attribute__((noinline)) int ppd_run1(int argc, char **argv, const ppd_e
 		}
 		if (!strcmp(a, "-dD")) { ddefs = 1; continue; }
 		if (!strcmp(a, "-fms-anonymous-structs") || !strcmp(a, "-fms-extensions")) { ms_anon = 1; continue; }
+		if (!strncmp(a, "-fstrict-flex-arrays=", 21)) {
+			if (a[21] < '0' || a[21] > '3' || a[22]) {
+				dprintf(errfd, "vcc: error: invalid argument '%s' to -fstrict-flex-arrays=\n", a + 21);
+				status = 2;
+				goto out;
+			}
+			strict_flex_arrays = a[21] - '0';
+			continue;
+		}
 		if (!strcmp(a, "-fshort-wchar")) { short_wchar = 1; continue; }
 		if (!strcmp(a, "-funsigned-char") || !strcmp(a, "-fno-signed-char")) { uchar = 1; continue; }
 		if (!strcmp(a, "-fsigned-char") || !strcmp(a, "-fno-unsigned-char")) { uchar = 0; continue; }
@@ -1585,7 +1594,7 @@ static __attribute__((noinline)) int ppd_run1(int argc, char **argv, const ppd_e
 		goto done;
 	}
 	if (syntax) {
-		cc_opts co = { .target = po.target, .unsigned_char = po.unsigned_char, .dump_layouts = layout, .ms_anon = ms_anon, .short_wchar = short_wchar,
+		cc_opts co = { .target = po.target, .unsigned_char = po.unsigned_char, .dump_layouts = layout, .ms_anon = ms_anon, .short_wchar = short_wchar, .strict_flex_arrays = strict_flex_arrays,
 				.std = std, .c2y = std == 23 && stdver && !strcmp(stdver, "202400L"), .implicit_int = std == 89 || wimpl_int, .implicit_fn = std == 89 || wimpl_fn, .conv_warn = conv_warn,
 				.strict_std = strict,
 				.fast_math = fast_root4 && (fmath & 7) == 7, .gnu89_inline = gnu89_inline, .no_builtin = freestanding || nobuiltin, .instrument = instr, .wasm_sjlj = sjlj,
