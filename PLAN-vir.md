@@ -246,9 +246,4 @@ fixpunkter utan budget (samma regel som `emit/flow/`).
   utan x86-64 och hade en egen AST-byggare och arm64 som första mål.  Efter
   läsning av `main` är byggaren i stället ett virtuellt `LO`-mål, x86-64 är
   första mål, och VIR ligger på `-O2`.
-- Grenen `claude/ir-design-compiler-lessons-ba8931` ligger 566 commits efter
-  `main`; en sammanslagning ger konflikter i `TODO.md` och `cc/ccint.h`.
-  AGENTS.md och PLAN-release.md är därför inte ändrade här: raderna dit
-  (Layout: `PLAN-vir.md`, `RESEARCH-vir.md`; G5 pekar hit) läggs till när
-  filerna kommer in på `main`.
 - Ingen kod ändrad.

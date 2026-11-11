@@ -23,6 +23,10 @@ assembler, linker, behind `vcc`/`vas`/`vld` shims and the `vccd` server.
 - `PLAN-release.md`: what vcc 1.0 is and its release gates G0-G9 (Swedish);
   work toward the release should move a gate, and update its status there.
 - `RESEARCH-preprocessor.md`: preprocessor design and prior art.
+- `PLAN-vir.md` (Swedish, steps V0-V7), `SPEC-vir.md` (VIR format, draft) and
+  `RESEARCH-vir.md` (LLVM IR's problems): VIR, an SSA IR used only at `-O2`,
+  built by compiling the shared walker a second time against a virtual
+  lowering target.  Update the status of a step in `PLAN-vir.md`.
 - `ccs/`: our code; `ccs/Makefile` builds into `build/ccs/`.  Under `ccs/vcc/`
   generic code is in the component directories, code for one target CPU in
   `arch/<cpu>/<component>/`, code for one target OS in `platform/<os>/`
