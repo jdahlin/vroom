@@ -569,6 +569,7 @@ static void wk_switch(ecx *e, uint32_t n)
 				efatal(e, x->loc, "statements nested too deeply");
 			W->loop[W->nloop++] = (wkloop){ lbrk, 0, W->nclean };
 			W->swon = true, W->swsel = sel;
+			LO(jump)(e, sel ? wk_caselabel(e, sel) : lbrk);	/* (a user label before it is no fall-through) */
 			e->reach = false;
 			wk_stmt(e, x->b);
 			W->swon = on0, W->swsel = sel0;
@@ -1113,7 +1114,7 @@ VPRIV bool wk_can_inline(ecx *e, uint32_t s)
 		if ((y->flags & SF_NOINLINE) || (!(y->flags & SF_INLINE) && y->sc != SC_STATIC))
 			return false;
 		walk_fn(e, s);
-		if (e->E->fnsize[s] > ((y->flags & SF_INLINE) ? WK_INLINE_NODES : 16))
+		if (e->E->fnsize[s] > WK_INLINE_NODES)
 			return false;	/* (a tiny static function too, as clang: an empty stub drops its arguments) */
 		if (!(y->flags & SF_INLINE) && !wk_tiny_ok(c, y->body))
 			return false;
