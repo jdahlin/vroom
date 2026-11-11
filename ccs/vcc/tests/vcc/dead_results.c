@@ -63,7 +63,9 @@ NI unsigned dr_loop(unsigned x, unsigned n)
     return x;
 }
 #if defined(__x86_64__) || defined(__aarch64__)
-/* A valid naked body consists only of opaque asm; its ABI is authored there. */
+/* Compile-only naked probe: vpp currently still emits a prologue for this
+   valid asm-only body, so executing its raw return would skip frame restore.
+   Keep that existing gap visible without making this DCE test execute it. */
 __attribute__((naked, noinline)) unsigned dr_naked(void)
 {
 #if defined(__x86_64__)
@@ -71,6 +73,17 @@ __attribute__((naked, noinline)) unsigned dr_naked(void)
 #else
     __asm__("mov w0, #17; ret");
 #endif
+}
+/* This ordinary callable function does trigger the absorbing-result gate.
+   Opaque asm must make the whole-function liveness adapter decline safely. */
+NI unsigned dr_opaque(unsigned x)
+{
+#if defined(__x86_64__)
+    __asm__ volatile("# dr_opaque_barrier" : : : "cc");
+#else
+    __asm__ volatile("// dr_opaque_barrier" : : : "cc");
+#endif
+    return (x * 13u) & 0u;
 }
 NI U dr_asm(U x)
 {
@@ -103,7 +116,7 @@ int main(void)
     if (f.first != 4.75 || f.second != 4.5 || dr_fp_div(9.0, 4.0) != 2.25) return 12;
     if (dr_call(3) || dr_seen != 39 || dr_loop(11, 4) != 17) return 13;
 #if defined(__x86_64__) || defined(__aarch64__)
-    if (dr_asm(11) != 234 || dr_naked() != 17) return 14;
+    if (dr_asm(11) != 234 || dr_opaque(11)) return 14;
 #endif
     return 0;
 }

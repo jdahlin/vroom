@@ -66,6 +66,8 @@ arm64)
 	step rec-effects  python3 bench/vcc-rec-effects.py
 	step rec-slots python3 bench/vcc-rec-slots.py --sanitize
 	step rec-slot-values python3 bench/vcc-rec-slot-values.py --sanitize
+	step flow-contracts python3 bench/vcc-flow.py --sanitize
+	step rec-dead python3 bench/vcc-rec-dead.py --sanitize
 	step slot-observable python3 bench/vcc-slot-observable.py --check-mutation
 	step opt-debug-x86 python3 bench/vcc-opt-debug.py
 	step rec-copies python3 bench/vcc-rec-copies.py

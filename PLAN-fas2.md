@@ -1979,3 +1979,62 @@ flerfältsfall är i praktiken oförändrade. Båda belastningarna finns kvar i
 hela slutversionens basjämförelser finns i `stream-collectors-prune{,-large}-cost`.
 Separat x86-integration rapporterar 13 397 färre Ir i sin riktiga grind;
 det är inte en full grind för denna arm64-/wasm-ändring. Ingen emissionsändring.
+
+### OPT4 fortsättning: budgeterad flödeskärna och första x86-konsument (2026-11-11)
+
+`emit/flow/{graph,maskflow}.c` bygger validerad blockadjacens med valfria
+föregångare och löser bakåtriktad 64-bitars may-liveness. Källpositioner,
+register/effekter och omskrivningar tillhör adaptern; kärnan antar varken
+maskinposter, fysisk registermodell, wasm-stack eller SSA. Arrayer återanvänds
+per worker. Varje block-/kantbesök belastar en uttrycklig arbetsbudget;
+resultatet är giltigt först efter full konvergens. Felaktiga kanter,
+allokeringsfel eller budgetslut ger inga beroende omskrivningar.
+
+Första nyttan finns i `arch/x64/emit/dead.c`: en absorberande heltalsregel
+som lämnar ett redan emitterat registerresultat oanvänt sätter en billig
+kandidatflagga. Utan den byggs ingen graf. Konsumenten tar bara bort rena,
+icke-trappande registeroperationer vars samtliga utdata är döda. Läsningar,
+lagringar, atomics, FP-effekter, anrop och barriärer bevaras. Flaggläsningar
+propageras konservativt bakåt; en flaggskrivning antas inte döda hela
+flaggtillståndet. Partialregister och implicita register tas ur målets
+befintliga effekter. Epilogens ABI-resultat, frame-/stackbaser och
+callee-saved-register är konservativt levande vid utgång.
+
+Gränserna är 256 block, 1024 kanter och 65536 poster; solverbudgeten är
+`n + 32*(block+kanter) + 64` besök. Det är implementationens fallbackgränser,
+inte en uppmätt kompilatorkostnadsgrind. Okända/indirekta flöden, rå/named
+asm, label-adresser och interrupt-/noreturn-konventioner avstår helt.
+Alla ändringar väntar tills analysen lyckats; kompaktering använder befintlig
+`dbg_remap` före tvåadresspasset. Arm64:s befintliga block-/livenessanalys är
+oförändrad. Wasm använder ännu **inte** denna graf; nästa separata konsument
+kräver typade kontrollhändelser, inte parsning av text eller återanvända
+branch-depth-tal som blockidentitet.
+
+Kodformsbevis mot exakt uppdaterad förälder `0dde275`: `unsigned f(unsigned
+x) { return (x*13u)&0u; }` behåller `imull $13` i basen men inte i kandidaten
+på `7f88daa`. Skyddade stackläsningar står kvar. Detta visar en verklig
+begränsad lucka/vinst, inte generell DCE eller uppmätt körtid. Basbinärens
+SHA256 är `a26750515e4e215f6485e3f75624a5422d9b29b25d9268bb81c9e3dfbb2fc8c6`;
+assembly och bygg-/testloggar finns i `build/linux/flow-evidence/`.
+Värdflaggorna skiljer mellan dessa byggen, så de används inte för kostnads-
+jämförelse. Slutlig main-integrering och identiska värdbyggen återstår.
+
+Verifierat hittills: unitybygge med `-j 1`; `--rule deadresults --run`
+passerar 16/16 nivå-/målkombinationer (x86, arm64/QEMU, wasm32/64 med Node
+26.13). Positiva x86-kodkrav gäller O1–O3; kontroller behåller division,
+volatile access, anrop och opaque-asm-fallback. `vcc-flow.py` jämför med en
+oberoende bitvis vägnåbarhetsmodell, inklusive loopar, joins, dublett-/self-
+kanter, exakta/tomma budgetar och återanvändning efter fel. `vcc-rec-dead.py`
+prövar riktiga posteffekter, ABI, flaggor/carry, partialregister,
+kompakterings-/debugcallback och transaktionellt budget-/opaque-fallback.
+Båda kontrakten passerar ASan/UBSan och ligger i den snabba CI-grinden.
+
+Naked-proben är kodformsunderlag: giltig asm-kropp är opaque och avstår.
+Vcc:s befintliga ignorerade naked-attribut ger fel prolog för direkt asm-ret;
+detta reproducerades även utan det nya passet. Proben kör därför inte den
+unsupported funktionen. Clang 23 avvisar motsvarande rena C-kropp med
+`non-ASM statement in naked function is not supported`. Vanlig asm med
+absorberande uttryck provas däremot både i kodform och vid körning.
+Bred regression/ABI/debug, fil-för-fil, O0/noopt-paritet, helkompilatorns
+kostnad, fjärr-CI och nästa wasm-konsument återstår. OPT4/O2 och G5/G7 är
+fortsatt öppna.

@@ -432,6 +432,9 @@ def check_deadresults(assembly, arch):
     text = body(assembly, 'dr_fp_div', False)
     if not re.search(r'\bdivsd\b', text):
         raise RuntimeError(f'dr_fp_div: removed returned floating-point operation\n{text}')
+    text = body(assembly, 'dr_opaque', False)
+    if 'dr_opaque_barrier' not in text or not re.search(r'\bimul[lq]?\b', text):
+        raise RuntimeError(f'dr_opaque: opaque whole-function fallback was lost\n{text}')
 
 
 def x64_start(check_preserved):
