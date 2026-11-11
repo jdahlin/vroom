@@ -685,6 +685,35 @@ Separat tidsgränsprob: `compound_assign_simplify1` på x86, en arbetare och
 vid 5 s ändras inte; detta är tidsgränsevidens, inte en semantisk rättning.
 Artefakter: `work/results/kefir-slow-probe-x86`.
 
+**Ny fullständig baslinje 2026-11-11, committad `2dc4ea3`:** samma
+875 oförändrade runtime-par, Clang 23.1.6, sex arbetare och tidsgränserna
+30 s kompilering / 5 s körning. Binär SHA256:
+`c4eeb51f8c14f3718fedb17322663386155788d723ade6b06aef2a3c55aa2206`.
+X86 kördes först, därefter ARM64 under QEMU.
+
+| mål | alla fyra kombinationer godkända | vcc-fel | vcc signal/timeout | referenskompilering avvisad | referenslänk avvisad | referens signal/timeout | unsupported |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| x86-64 Linux | 481 | 99 | 10 | 161 | 6 | 52 | 66 |
+| ARM64 Linux/QEMU | 455 | 3 | 7 | 249 | 6 | 51 | 104 |
+
+Ingen tidigare godkänd fallrad tappar godkännandet på något mål. X86 får
+33 nya godkända fall, samtliga tidigare vcc-fel. ARM får 41, varav 37
+var tidigare vcc-fel och fyra tidigare referensfel. Referens-/tidsvariation
+är inte kompilatorrättningar. Signal/timeout omfattar även körprogrammets
+assertionsfel; antalen är inte antal unika buggar eller kompilatorkrascher.
+Båda fullkörningarna avslutas fortfarande med status 1. Breda BitInt-typer
+över 128 bitar blockerar merparten av återstående x86-kompileringsfall;
+även flera `int128_*`- och `constexpr*`-fall innehåller sådana typer.
+Nästa rättningar verifieras mot dessa oförändrade kontrakt.
+
+Artefakter: `work/results/kefir-main2dc-{x86,arm}/results.json`,
+`work/results/linux-baseline-2dc4ea3/{manifest,comparison}.json`.
+Manifestet binder källcommit, träd, binär och harnesshashar till körningarna.
+Den äldre x86-baslinjen har flyttats från tmpfs till
+`work/results/kefir-archives/kefir-final-x86`; den ursprungliga
+`/tmp/kefir-final-x86`-sökvägen bevaras med en symbolisk länk.
+S5b och releasegrind G1/G2 är fortsatt öppna.
+
 ### S6 ABI-generatorer — rigg klar, fel rättas
 `gcc.dg/compat/struct-layout-1_generate.c` och clangs `utils/ABITest`
 genererar tusentals anrop mellan två kompilatorer.  Kopplas in i
