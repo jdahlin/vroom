@@ -1,5 +1,0 @@
-broken.c:2:11: error: expected ')'
-  the source line is: if (1 { return 0; }
-broken.c:2:8: note: to match this '('
-  the source line is: if (1 { return 0; }
-1 error generated.

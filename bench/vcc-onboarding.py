@@ -21,6 +21,7 @@ import re
 import shutil
 import subprocess
 import tempfile
+import tomllib
 
 from hostenv import BUILD, llvm
 
@@ -80,28 +81,88 @@ def clang_records(text):
             for m in re.finditer(pattern, text, re.M)]
 
 
-def check_snapshot(path, actual, bless=False):
-    """An independent, checked-in expected message; never accept a regex alone."""
-    if bless:
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(actual)
-    if not path.is_file():
-        return f'missing diagnostic snapshot {path.name}; generate with --bless and review'
-    expected = path.read_text()
+TARGETS = ('x86_64-linux-gnu', 'aarch64-linux-gnu')
+SECTION = re.compile(r'^=== ([a-zA-Z0-9_.-]+) ===\n', re.M)
+
+
+def compare_message(expected, actual, label):
+    if expected is None:
+        return f'missing expected message {label}; generate with --bless and review'
     if expected == actual:
         return None
     diff = '\n'.join(difflib.unified_diff(expected.splitlines(), actual.splitlines(),
-                                         str(path), 'actual diagnostic', n=2))
+                                         label, 'actual diagnostic', n=2))
     return 'diagnostic snapshot differs:\n' + diff
 
 
+def parse_case(text, path):
+    markers = list(SECTION.finditer(text))
+    if not markers:
+        raise ValueError(f'{path}: no fixture sections')
+    case = tomllib.loads(text[:markers[0].start()])
+    sections = {}
+    allowed = {'broken.c', 'fixed.c', 'valid.c', 'stderr', 'narrated'} | {
+        f'{style}.{target}' for style in ('stderr', 'narrated') for target in TARGETS}
+    for i, marker in enumerate(markers):
+        name = marker[1]
+        if name not in allowed or name in sections:
+            raise ValueError(f'{path}: unknown or duplicate section {name}')
+        end = markers[i + 1].start() if i + 1 < len(markers) else len(text)
+        sections[name] = text[marker.end():end]
+    case.update(_path=str(path), _sections=sections)
+    case.setdefault('phase', 'syntax')
+    for variant in ('broken', 'fixed', 'valid'):
+        case[variant] = variant + '.c'
+    return case
+
+
+def expected_message(case, target, style):
+    name = 'stderr' if style in ('vcc', 'link') else style
+    sections = case['_sections']
+    return sections.get(f'{name}.{target}', sections.get(name))
+
+
+def save_case(case):
+    # Share identical messages between targets; keep only genuine differences.
+    sections = dict(case['_sections'])
+    styles = ('stderr',) if case['phase'] == 'link' else ('stderr', 'narrated')
+    for style in styles:
+        values = {t: sections.get(f'{style}.{t}', sections.get(style)) for t in TARGETS}
+        if all(value is not None for value in values.values()):
+            sections[style] = values[TARGETS[0]]
+            for target, value in values.items():
+                sections.pop(f'{style}.{target}', None)
+                if value != sections[style]:
+                    sections[f'{style}.{target}'] = value
+    quote = lambda value: json.dumps(value, ensure_ascii=False)
+    lines = [f'id = {quote(case["id"])}', f'title = {quote(case["title"])}']
+    if case['phase'] != 'syntax':
+        lines.append(f'phase = {quote(case["phase"])}')
+    if case.get('flags'):
+        lines.append('flags = [' + ', '.join(map(quote, case['flags'])) + ']')
+    lines.append('expect = [')
+    for want in case['expect']:
+        fields = ', '.join(f'{key} = {quote(value)}' for key, value in want.items())
+        lines.append('  { ' + fields + ' },')
+    lines.append(']')
+    gap = case.get('known_gap')
+    if gap:
+        value = ('{ ' + ', '.join(f'{quote(k)} = {quote(v)}' for k, v in gap.items()) + ' }'
+                 if isinstance(gap, dict) else quote(gap))
+        lines.append('known_gap = ' + value)
+    text = '\n'.join(lines) + '\n\n'
+    names = ['broken.c', 'fixed.c', 'valid.c']
+    for style in styles:
+        names += [style] + [f'{style}.{t}' for t in TARGETS]
+    for name in names:
+        if name in sections:
+            text += f'=== {name} ===\n' + sections[name]
+    Path(case['_path']).write_text(text)
+    case['_sections'] = sections
+
+
 def load_cases(corpus=CORPUS):
-    cases = []
-    for config in sorted(corpus.glob('*/case.json')):
-        case = json.loads(config.read_text())
-        case['_directory'] = str(config.parent.resolve())
-        cases.append(case)
-    return cases
+    return [parse_case(path.read_text(), path) for path in sorted(corpus.glob('*.test'))]
 
 
 def validate_cases(cases, corpus=CORPUS):
@@ -111,10 +172,8 @@ def validate_cases(cases, corpus=CORPUS):
         if not case['expect']:
             raise ValueError(f"{case['id']}: missing independent diagnostic contract")
         for variant in ('broken', 'fixed', 'valid'):
-            directory = Path(case['_directory'])
-            path = (directory / case[variant]).resolve()
-            if not directory.is_relative_to(corpus.resolve()) or not path.is_relative_to(directory) or not path.is_file():
-                raise ValueError(f"{case['id']}: invalid {variant} path")
+            if case[variant] not in case['_sections']:
+                raise ValueError(f"{case['id']}: missing {variant} source section")
         for want in case['expect']:
             re.compile(want['pattern'])
             if want['severity'] not in ('warning', 'error', 'note'):
@@ -122,12 +181,22 @@ def validate_cases(cases, corpus=CORPUS):
 
 
 def one(case, args, includes, vpp):
+    with tempfile.TemporaryDirectory(prefix='onboarding-case-') as wd:
+        directory = Path(wd)
+        for variant in ('broken', 'fixed', 'valid'):
+            (directory / case[variant]).write_text(case['_sections'][case[variant]])
+        return evaluate(case, args, includes, vpp, directory)
+
+
+def evaluate(case, args, includes, vpp, case_dir):
     evidence, problems = {}, []
-    case_dir = Path(case['_directory'])
-    snapshot_dir = case_dir / 'expected' / args.target
 
     def snapshot(style, actual):
-        problem = check_snapshot(snapshot_dir / f"{style}.stderr", actual, args.bless)
+        name = 'stderr' if style in ('vcc', 'link') else style
+        if args.bless:
+            case['_sections'][f'{name}.{args.target}'] = actual
+        problem = compare_message(expected_message(case, args.target, style), actual,
+                                  f"{case['_path']} [{name}, {args.target}]")
         if problem:
             problems.append(problem)
     base = [f'--target={args.target}', '-std=c17', '-Wall', '-Wextra', '-Wconversion',
@@ -198,6 +267,8 @@ def one(case, args, includes, vpp):
             problems.append(f'invalid structured diagnostic: {e}')
         evidence['clang']['missing_expectations'] = check_expectations(
             clang_records(evidence['clang']['broken']['stderr']), case['expect'], Path(case['broken']).name)
+    if args.bless:
+        save_case(case)
     status = 'FAIL' if problems else 'GAP' if missing else 'PASS'
     known_gap = case.get('known_gap')
     if isinstance(known_gap, dict):

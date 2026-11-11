@@ -79,7 +79,7 @@ bara uppåt.  Varje rättad lucka committas med den nya siffran här.
 
 ### S2b Diagnostik för nya C-programmerare — testkorpus klar
 `bench/vcc-onboarding.py` kör 25 konkreta misstag, med reparerad kod och
-avsiktligt giltig grannkod för varje fall (75 C-filer). Kontrakten kontrollerar
+avsiktligt giltig grannkod för varje fall (25 fallfiler med 75 C-exempel). Kontrakten kontrollerar
 innehåll, plats och nivå samt ID, JSON/text och SARIF. Ett länkfall visar
 uttryckligen den externa länkarens fel, inte vcc:s egen länkarutmatning.
 Båda Linuxmålen verifierade: x86 10 täckta/15 diagnostikluckor, arm64 11/14.

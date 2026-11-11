@@ -1,0 +1,24 @@
+id = "B16"
+title = "String input has no bound for a known buffer"
+expect = [
+  { line = 4, severity = "warning", pattern = "(unbounded|width|bound|overflow|buffer).*(scanf|%s|string|input)|scanf.*(bound|width|overflow)|%s.*(bound|width)" },
+]
+known_gap = "Desired bounded-input warning for known arrays. %c is raw fixed-count input and does not append a terminator; never apply the %s rule to it."
+
+=== broken.c ===
+int scanf(const char *, ...);
+int main(void) {
+    char name[8];
+    return scanf("%s", name) == 1 ? 0 : 1;
+}
+=== fixed.c ===
+int scanf(const char *, ...);
+int main(void) {
+    char name[8];
+    return scanf("%7s", name) == 1 ? 0 : 1;
+}
+=== valid.c ===
+int scanf(const char *, ...);
+int main(void) { char bytes[8]; return scanf("%8c", bytes) == 1 ? 0 : 1; }
+=== stderr ===
+=== narrated ===

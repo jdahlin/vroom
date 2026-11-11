@@ -1,0 +1,27 @@
+id = "B03"
+title = "Misspelled visible variable"
+expect = [
+  { line = 3, severity = "error", pattern = "(undeclared|unknown|did you mean).*coutn|coutn.*(undeclared|count)" },
+]
+
+=== broken.c ===
+int main(void) {
+    int count = 3;
+    return coutn != 3;
+}
+=== fixed.c ===
+int main(void) {
+    int count = 3;
+    return count != 3;
+}
+=== valid.c ===
+int main(void) { int count = 3, coutn = 4; return count == coutn; }
+=== stderr ===
+broken.c:3:12: error: use of undeclared identifier 'coutn'
+    3 |     return coutn != 3;
+      |            ^~~~~
+1 error generated.
+=== narrated ===
+broken.c:3:12: error: use of undeclared identifier 'coutn'
+  the source line is: return coutn != 3;
+1 error generated.

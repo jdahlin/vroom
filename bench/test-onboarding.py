@@ -44,36 +44,50 @@ class DiagnosticContracts(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, 'exactly 25'):
             onboarding.validate_cases([])
 
-    def test_every_case_keeps_its_inputs_and_messages_together(self):
+    def test_every_case_is_one_file_with_its_sources_and_messages(self):
         cases = onboarding.load_cases()
         onboarding.validate_cases(cases)
         for case in cases:
-            directory = Path(case['_directory'])
+            self.assertEqual(Path(case['_path']).suffix, '.test')
             for variant in ('broken', 'fixed', 'valid'):
-                self.assertEqual(Path(case[variant]).parent, Path('.'))
+                self.assertIn(case[variant], case['_sections'])
             styles = ('link',) if case['phase'] == 'link' else ('vcc', 'narrated')
-            for target in ('x86_64-linux-gnu', 'aarch64-linux-gnu'):
+            for target in onboarding.TARGETS:
                 for style in styles:
-                    self.assertTrue((directory / 'expected' / target / (style + '.stderr')).is_file())
+                    self.assertIsNotNone(onboarding.expected_message(case, target, style))
 
     def test_exact_wording_and_display_are_verified(self):
         expected = "broken.c:3:5: error: expected ';'\n    3 | int n\n      |      ^\nnote: declaration ends here\n"
-        with tempfile.TemporaryDirectory() as td:
-            path = Path(td) / 'B01.vcc.stderr'
-            self.assertIn('missing diagnostic snapshot', onboarding.check_snapshot(path, expected))
-            path.write_text(expected)
-            self.assertIsNone(onboarding.check_snapshot(path, expected))
-            for actual in (expected.replace('expected', 'missing'),
-                           expected.replace('      ^', '     ^'),
-                           expected.replace('note: declaration ends here\n', '')):
-                self.assertIn('snapshot differs', onboarding.check_snapshot(path, actual))
+        self.assertIn('missing expected message', onboarding.compare_message(None, expected, 'test'))
+        self.assertIsNone(onboarding.compare_message(expected, expected, 'test'))
+        for actual in (expected.replace('expected', 'missing'),
+                       expected.replace('      ^', '     ^'),
+                       expected.replace('note: declaration ends here\n', '')):
+            self.assertIn('snapshot differs', onboarding.compare_message(expected, actual, 'test'))
 
-    def test_empty_snapshot_does_not_hide_new_output(self):
+    def test_empty_expectation_does_not_hide_new_output(self):
+        self.assertIsNone(onboarding.compare_message('', '', 'test'))
+        self.assertIn('snapshot differs', onboarding.compare_message('', 'warning: integer division\n', 'test'))
+
+    def test_fixture_roundtrip_preserves_exact_text_and_deduplicates_targets(self):
         with tempfile.TemporaryDirectory() as td:
-            path = Path(td) / 'B10.vcc.stderr'
-            path.write_text('')
-            self.assertIsNone(onboarding.check_snapshot(path, ''))
-            self.assertIn('snapshot differs', onboarding.check_snapshot(path, 'warning: integer division\n'))
+            case = dict(onboarding.load_cases()[0])
+            case['_path'] = str(Path(td) / 'example.test')
+            case['_sections'] = dict(case['_sections'])
+            diagnostic = 'broken.c:2:14: error: example\n      |       ^  \n\n'
+            for target in onboarding.TARGETS:
+                case['_sections']['stderr.' + target] = diagnostic
+            onboarding.save_case(case)
+            loaded = onboarding.parse_case(Path(case['_path']).read_text(), Path(case['_path']))
+            self.assertEqual(loaded['_sections']['broken.c'], case['_sections']['broken.c'])
+            self.assertEqual(loaded['_sections']['stderr'], diagnostic)
+            self.assertNotIn('stderr.' + onboarding.TARGETS[0], loaded['_sections'])
+            for target in onboarding.TARGETS:
+                self.assertEqual(onboarding.expected_message(loaded, target, 'vcc'), diagnostic)
+
+    def test_duplicate_sections_are_rejected(self):
+        with self.assertRaisesRegex(ValueError, 'duplicate'):
+            onboarding.parse_case('id="B01"\n=== stderr ===\nfirst\n=== stderr ===\nsecond\n', Path('test'))
 
 
 if __name__ == '__main__':

@@ -1,0 +1,37 @@
+id = "B14"
+title = "Input and output formats must match argument types"
+expect = [
+  { line = 4, severity = "warning", pattern = "format.*(int|%d).*(long|argument)|expects?.*int.*long" },
+]
+known_gap = { "x86_64-linux-gnu" = "Observed x86 vcc baseline is silent under -Wall -Wextra -Wconversion for printf int-versus-long mismatch; do not hide the missing format diagnostic." }
+
+=== broken.c ===
+int printf(const char *, ...);
+int main(void) {
+    long count = 42;
+    printf("%d", count);
+    return 0;
+}
+=== fixed.c ===
+int printf(const char *, ...);
+int main(void) {
+    long count = 42;
+    printf("%ld", count);
+    return 0;
+}
+=== valid.c ===
+int printf(const char *, ...);
+int main(void) { float value = 1.5f; printf("%f", value); return 0; }
+=== stderr ===
+=== stderr.aarch64-linux-gnu ===
+broken.c:4:18: warning: format specifies type 'int' but the argument has type 'long' [-Wformat]
+    4 |     printf("%d", count);
+      |             ~~   ^~~~~
+      |             %ld
+1 warning generated.
+=== narrated ===
+=== narrated.aarch64-linux-gnu ===
+broken.c:4:18: warning: format specifies type 'int' but the argument has type 'long' [-Wformat]
+  the source line is: printf("%d", count);
+  fix: replace the text with '%ld' at line 4, column 13
+1 warning generated.

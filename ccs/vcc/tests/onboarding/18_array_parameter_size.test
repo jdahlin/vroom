@@ -1,0 +1,22 @@
+id = "B18"
+title = "Pointer-size calculation mistaken for element count"
+expect = [
+  { line = 2, severity = "warning", pattern = "sizeof.*(pointer|array.*parameter)|pointer.*(size|array)" },
+]
+known_gap = "Observed x86 vcc baseline is silent for sizeof on the adjusted array parameter; explain pointer size versus element count."
+
+=== broken.c ===
+unsigned long count(int a[10]) {
+    return sizeof a / sizeof a[0];
+}
+int main(void) { int a[10]={0}; return count(a) != 10; }
+=== fixed.c ===
+unsigned long count(int a[10], unsigned long n) {
+    (void)a;
+    return n;
+}
+int main(void) { int a[10]={0}; return count(a, sizeof a / sizeof a[0]) != 10; }
+=== valid.c ===
+int main(void) { int a[10]={0}; return sizeof a / sizeof a[0] != 10; }
+=== stderr ===
+=== narrated ===

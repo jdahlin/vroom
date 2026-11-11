@@ -1,0 +1,22 @@
+id = "B20"
+title = "String address comparison mistaken for text comparison"
+expect = [
+  { line = 3, severity = "warning", pattern = "string.*(compar|address|literal)|comparison.*string|compar.*unspecified" },
+]
+known_gap = "Observed x86 vcc baseline is silent for comparison against a string literal; preserve intentional address comparisons and avoid automatic strcmp rewrites."
+
+=== broken.c ===
+int main(void) {
+    char answer[] = "yes";
+    return answer == "yes" ? 0 : 1;
+}
+=== fixed.c ===
+int strcmp(const char *, const char *);
+int main(void) {
+    char answer[] = "yes";
+    return strcmp(answer, "yes") == 0 ? 0 : 1;
+}
+=== valid.c ===
+int main(void) { char answer[]="yes"; char *alias=answer; return alias==answer ? 0 : 1; }
+=== stderr ===
+=== narrated ===
