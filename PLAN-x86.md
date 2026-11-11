@@ -349,15 +349,15 @@ kärnan och kan vänta.
   xmm, 32 byte tillbaka i xmm0:xmm1 som clang utan AVX); etikettadresser
   (`.Ltmp.lbl.N` som datainitierarna) och beräknat `goto`; cleanup-variabler
   (blockslut, `break`/`continue`, `return` med värdet parkerat, `goto` ut ur
-  scopes via ett träd från förskanningen, `for`-satsens första led).
-- `bench/vcc-x86.py`: 1659/1770, lika i `--pie` och `--pic` (vcc-sidan
+  scopes via ett träd från förskanningen, `for`-satsens första led); alignment
+  över 16 (lokaler från rbx = justerad ram, stackargument via sparad och
+  justerad rsp); bit-fält över en 8-bytegräns (delat vid gränsen).
+- `bench/vcc-x86.py`: 1667/1770, lika i `--pie` och `--pic` (vcc-sidan
   `-fPIE`/`-fPIC`, länkad `-pie`). Körfel bara där clangs optimerare krävs
   (`20030125-1`, `bcp-1`, `builtin-constant`) och 11 länkfel av samma slag eller
-  `__builtin_setjmp`. `vcc-abi.py --target x86_64`: 10/12, med tre nya tester
-  (`int_records`, `fp_records`, `complex_args`) som klarar alla fyra
-  kombinationerna; resten stannar vid alignment > 16 och bit-fält över 8 byte.
-- Kvar i X3: vektorer av `__int128`, alignment
-  över 16, `__float128`-aritmetik (libgcc `__addtf3` ...), inlining av
+  `__builtin_setjmp`. `vcc-abi.py --target x86_64`: 12/12, med tre nya tester
+  (`int_records`, `fp_records`, `complex_args`).
+- Kvar i X3: vektorer av `__int128`, bit-fält bredare än 64 bitar, `__float128`-aritmetik (libgcc `__addtf3` ...), inlining av
   `__always_inline` med `need_fold` och `constant_p` efter inlining,
   `-mgeneral-regs-only`/`-mno-sse`, UTF-8-namn citerade som clang, `VCC_WALKLOG`.
 
