@@ -417,6 +417,21 @@ Med den isolerade rättningen och vcc-byggda stödobjekt går **309 ARM-prov**,
 tre referensbyggfel och 31 referenskörfel. Dessa är riktade/isolerade
 resultat; harnessen och den kombinerade milstolpen verifieras separat.
 
+`bench/vcc-libc-test.py` följer nu upstreams Makefile/.mk-graf för alla
+343 dynamiska functional/math/regression-binärer. Varje kompilator bygger
+sina egna stödobjekt och DSO:er; clang assemblerar/länkar. Riggen behåller
+flaggor, källor, kommandon, binärer, status och kompilatorhash i en ny
+artefaktkatalog. ARM använder QEMU och en explicit privat libcrypt-overlay
+med verifierade glibc-symbolkrav; `-lcrypt` tas inte bort. De fulla resultaten
+ovan är verifierade; sju checkout-only harnessprov går i premerge.
+Vanliga clang-avvisningar/libc-avvikelser filtreras separat, medan
+kompilatorkrascher, timeout, saknade verktyg/regler och oförklarade makefel
+måste ge felstatus även om andra tester passerar. Injicerad clang-SIGSEGV
+är verifierad röd; normal pow10-avvisning tillsammans med giltiga prover
+och hela x86-körningen avslutas korrekt. API:s compile-only-aggregat,
+statiska varianter och musl-interna kategorier ingår ännu inte; hela S8
+påstås därför inte vara färdig.
+
 musl:s libc-test kräver en riktig libc.  Det görs när vcc bygger musl, eller
 mot glibc i Linux-containern.  Funktionstesterna och math-testerna
 (gränsfall i flyttal) är de intressanta.
