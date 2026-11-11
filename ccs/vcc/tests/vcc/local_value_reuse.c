@@ -3,6 +3,9 @@ static volatile unsigned observed;
 static unsigned global_value;
 static unsigned update(void) { global_value++; return 7; }
 unsigned lvr_square(unsigned a, unsigned b) { return (a + b) * (a + b); }
+unsigned lvr_nested(unsigned a, unsigned b, unsigned c) { return ((a+b)^(c+3U))*((a+b)^(c+3U)); }
+unsigned lvr_distinct(unsigned a, unsigned b) { return (a-b)*(b-a); }
+unsigned lvr_atomic(_Atomic unsigned *p) { return (__c11_atomic_load(p,5)+1)*(__c11_atomic_load(p,5)+1); }
 unsigned lvr_reuse(unsigned a, unsigned b) { unsigned x = a + b; return x * (a + b); }
 unsigned lvr_commute(unsigned a, unsigned b) { return (a + b) ^ (b + a); }
 unsigned lvr_kill(unsigned a, unsigned b) { unsigned x = a + b; a++; return x + (a + b); }
@@ -14,9 +17,12 @@ int main(void)
 {
  unsigned v = 3, w = 5;
  if (lvr_square(2, 3) != 25 || lvr_reuse(2, 3) != 25 || lvr_commute(3, 4) ||
+     lvr_nested(2, 3, 4) != 4 || lvr_distinct(5, 2) != (3U * (0U-3U)) ||
      lvr_kill(2, 3) != 11 || lvr_join(2, 3, 0) != 10 || lvr_join(2, 3, 1) != 11) return 1;
  global_value = 4;
  if (lvr_call() != 22 || global_value != 5) return 2;
+ _Atomic unsigned atom = 3;
+ if (lvr_atomic(&atom) != 16) return 5;
  observed = 3;
  if (lvr_volatile() != 16) return 3;
  if (lvr_alias(&v, &v) != 14 || v != 7 || lvr_alias(&v, &w) != 18 || w != 7) return 4;

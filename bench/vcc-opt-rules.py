@@ -53,6 +53,10 @@ def check_localvalues(assembly, arch):
     load = r'i32\.load\b' if wasm else r'\bldr\s+w' if arch == 'aarch64' else r'observed\(%rip\)'
     if len(re.findall(load, text)) != 2:
         raise RuntimeError(f'volatile reads must both remain\n{text}')
+    text = body(assembly, 'lvr_atomic', wasm)
+    atomic = r'i32\.load\b' if wasm else r'(?:\bldar\b|\.inst\b)' if arch == 'aarch64' else r'\bmovl\s+\(%r'
+    if len(re.findall(atomic, text)) != 2:
+        raise RuntimeError(f'atomic reads must both remain\n{text}')
 
 
 def check_double_unary(assembly, arch):
