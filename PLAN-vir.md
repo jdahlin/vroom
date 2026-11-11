@@ -300,6 +300,77 @@ SPEC rättad till utkast 0.4 i egen commit (lista i PR:en).
   mikrobenchmarkarna i SPEC 22.8.  Inga pass finns, så `PASSES:` godtar bara
   `canon`.
 
+### V4, första delen (2026-11-11): allokeraren och kontrollen på ett syntetiskt mål
+
+Gren `claude/vir-regalloc-impl-f22a1d` på `main` (V1:s första halva);
+ingen kod i V1 ändrad.
+- **Gjort:** SPEC 15.1–15.2 som gränssnitt (`vir/alloc.h`: `vir_regs`,
+  `vir_fix`, `vir_alloc_out` i trådens reservationer), loopskogen som
+  intervall av blockföljden (`loops.c`, `vir_loops_build`, ersätts av
+  `vir_canon` i V2), `vir_alloc_check` (`allocchk.c`, skrevs före
+  allokeraren), ett syntetiskt mål (`synth.c`: N heltals- och M
+  flyttalsregister, callee-sparad delmängd, x86-lika fasta register:
+  tvåadress, skiftantal, div, anrop), svep 5 och 6 (`alloc.c`: linjärt läge,
+  tips, loopkorrigeringar, delade spillplatser, huvudregeln, anrop,
+  konstanter, parallella flyttar med cykelbrott via fritt register, `xchg`
+  eller scratch), textdump och verktyget `viralloc` (`allocdump.c`,
+  `viralloc.c`: dump och räknare, `--sweep`, `--time`, `--mutate`).
+  Inline-asm (15.10) och `dce`-sammanslagningen ingår inte.
+- **Tester:** 16 filer i `ccs/vcc/tests/vir-alloc/` med förväntade dumpar
+  (rak kod, diamant, nästlade loopar, genomlevande värden, kritiska kanter,
+  blockargument som byter plats och roterar, anrop, fasta x86-register,
+  `ibr` till `VB_ADDR`, irreducibelt, linjärt läge); varje fil körs vid alla
+  registerantal ned till minimum (3 heltal, 2 flyttal), tre callee-varianter,
+  x86 av och på och linjärt läge: 618 konfigurationer, kontrollen grön på
+  alla.  `bench/vir-alloc.py random`: 1000 slumpenheter (8000 funktioner,
+  frö 1–600 och 1000–1299) gröna, 60 enheter med ASan+UBSan gröna;
+  `mutate`: kontrollen fångar 2869 av 2979 förstörda allokeringar (missarna
+  är `br`-byten som bara är information och döda resultat).
+- **Fel som slumptesterna hittade, alla i irreducibelt flöde och nu regler
+  i SPEC 0.5 med ett test var som faller utan regeln:** `lend` måste sättas
+  vid varje bakkants mål, inte bara loophuvudet (`irr-merged.vir`); en kant in
+  i mitten av en loop för med sig värdena som lever runt loopen
+  (`irr-entry.vir`); ett värde som lever runt en loop med ett block som
+  startar i stackplatser behöver plats (`addr-loop.vir`).  Dessutom:
+  callee-sparat register som bara en redigering skriver (`x86-shift.vir`),
+  tvåadress utan fritt register (första operanden kastas ut), en onödig
+  självväxling efter `xchg` (`rotate.vir`).
+- **Tid (bästa av fem, M1 Pro, delad maskin):** tolkformad funktion
+  (`big_interp`: 2927 instruktioner, 514 block, 25 blockparametrar i
+  slingan) 177 ns/instruktion vid 14+14 register, 172 vid 6+4; slumpade
+  funktioner 81–83 ns.  **Över budgeten 60 ns.**  Profilering gav −13 till
+  −16 %: trådlokal åtkomst via pekare (`_tlv_get_addr` kostade 3–4 %), inget
+  rensat registerfält per block, ingen poängsättning eller kantflytt för
+  ensam föregångare, operandlistor från svep 5 till svep 6, operandfälten
+  utan iterator, kölista för parallella flyttar.  Kvar: kostnad per block
+  proportionell mot antalet levande värden (W byggs om, live-in-poolen,
+  inträdestillstånd), utkastning (avstånd per register), `fixed()` per
+  instruktion och `br` med 25 argument.  Tolkformen är värsta fallet (5,7
+  instruktioner per block); siffran på riktig kod kommer med V2.
+- **Räknare på testmängden** (vid varje fils översta registerantal): 27
+  spill, 34 omladdningar, 17 rematerialiseringar, 15 kanter med flyttar, 2
+  `xchg`, 7 callee-sparade.  Tolkformen vid 14+14: 697 spill, 1617
+  omladdningar, 257 kanter med 1183 lagringar till stackplats (slingans
+  parametrar startar i plats enligt huvudregeln: ett kvalitetsproblem att
+  mäta mot clang i V2).
+- **Mål för V4 som helhet:** `bench/sqlite/run.py all` (på en annan gren):
+  speedtest1 gcc 2,55 s, clang 2,62 s, vcc 4,01 s; VDBE-tolken är den
+  form allokeraren ska göra bättre.  Kan inte köras genom VIR förrän V2.
+- **Det som hindrade i V1:s format:** parsern sätter inte `blk.depth`;
+  `vir_cfg` skriver om `extra`/`nextra` (allokeraren anropar den varje gång);
+  `vir_term_of`/`vir_succ_csr` är `VPRIV` och statiska i enhetsbygget, så
+  allokeraren bygger sina egna efterföljarlistor; formatet säger inte var en
+  `proj` står (allokeraren kräver att den följer sitt anrop direkt) eller att
+  block 0 börjar med sina `param`; ingen loopskog.
+- **Väntar på V2:** riktiga `vir_regs` för x86-64 (och arm64), sänkningen
+  15.3, C som indata, kvalitet mot dagens `-O2` och clang, sqlite.  **V5:**
+  `dce` i svep 5.  **V5b:** inline-asm (15.10).
+- **Standardbygget oförändrat:** `bench/vbench.py check --quick` 66/66
+  identiska mot ögonblicksbilden (`2d122cf1`) och mot commiten före den
+  (`1327df46`); mot sammanfogningsbasen med `main` skiljer 15, från de
+  osammanfogade grenarna under den här, inte från den.  `bench/vir-test.py`
+  118/118.
+
 ### Underlag för V4 (2026-11-11): registerallokering, ingen kod
 
 - `RESEARCH-regalloc.md`: vad GCC (IRA, LRA) och LLVM (Greedy, Fast, PBQP,
