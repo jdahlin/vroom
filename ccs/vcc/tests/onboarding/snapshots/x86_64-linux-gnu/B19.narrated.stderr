@@ -1,5 +1,0 @@
-19_array_off_by_one/broken.c:3:12: warning: array index 3 is past the end of the array (that has type 'int[3]') [-Warray-bounds]
-  the source line is: return a[3];
-19_array_off_by_one/broken.c:2:5: note: array 'a' declared here
-  the source line is: int a[3] = {0};
-1 warning generated.

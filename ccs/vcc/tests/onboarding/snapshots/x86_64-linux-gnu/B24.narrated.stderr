@@ -1,3 +1,0 @@
-24_return_local_address/broken.c:3:13: warning: address of stack memory associated with local variable 'n' returned [-Wreturn-stack-address]
-  the source line is: return &n;
-1 warning generated.

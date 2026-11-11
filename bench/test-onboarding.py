@@ -42,7 +42,19 @@ class DiagnosticContracts(unittest.TestCase):
 
     def test_empty_or_partial_corpus_is_rejected(self):
         with self.assertRaisesRegex(ValueError, 'exactly 25'):
-            onboarding.validate_manifest([])
+            onboarding.validate_cases([])
+
+    def test_every_case_keeps_its_inputs_and_messages_together(self):
+        cases = onboarding.load_cases()
+        onboarding.validate_cases(cases)
+        for case in cases:
+            directory = Path(case['_directory'])
+            for variant in ('broken', 'fixed', 'valid'):
+                self.assertEqual(Path(case[variant]).parent, Path('.'))
+            styles = ('link',) if case['phase'] == 'link' else ('vcc', 'narrated')
+            for target in ('x86_64-linux-gnu', 'aarch64-linux-gnu'):
+                for style in styles:
+                    self.assertTrue((directory / 'expected' / target / (style + '.stderr')).is_file())
 
     def test_exact_wording_and_display_are_verified(self):
         expected = "broken.c:3:5: error: expected ';'\n    3 | int n\n      |      ^\nnote: declaration ends here\n"

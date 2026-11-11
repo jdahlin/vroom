@@ -1,0 +1,17 @@
+{
+  "id": "B17",
+  "title": "Character input follows numeric input without a whitespace policy",
+  "phase": "syntax",
+  "flags": [],
+  "broken": "broken.c",
+  "fixed": "fixed.c",
+  "valid": "valid.c",
+  "expect": [
+    {
+      "line": 5,
+      "severity": "warning",
+      "pattern": "(newline|white.?space|remaining.*character|leftover).*|%c.*(consume|skip)"
+    }
+  ],
+  "known_gap": "Optional pedagogical heuristic only: consuming newline with %c can be intentional. Demonstration requires input such as 12 followed by newline; no automatic whitespace insertion."
+}

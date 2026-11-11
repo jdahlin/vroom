@@ -95,15 +95,25 @@ def check_snapshot(path, actual, bless=False):
     return 'diagnostic snapshot differs:\n' + diff
 
 
-def validate_manifest(cases, corpus=CORPUS):
+def load_cases(corpus=CORPUS):
+    cases = []
+    for config in sorted(corpus.glob('*/case.json')):
+        case = json.loads(config.read_text())
+        case['_directory'] = str(config.parent.resolve())
+        cases.append(case)
+    return cases
+
+
+def validate_cases(cases, corpus=CORPUS):
     if len(cases) != 25 or len({c['id'] for c in cases}) != 25:
-        raise ValueError('manifest must contain exactly 25 distinct cases')
+        raise ValueError('suite must contain exactly 25 distinct cases')
     for case in cases:
         if not case['expect']:
             raise ValueError(f"{case['id']}: missing independent diagnostic contract")
         for variant in ('broken', 'fixed', 'valid'):
-            path = (corpus / case[variant]).resolve()
-            if not path.is_relative_to(corpus.resolve()) or not path.is_file():
+            directory = Path(case['_directory'])
+            path = (directory / case[variant]).resolve()
+            if not directory.is_relative_to(corpus.resolve()) or not path.is_relative_to(directory) or not path.is_file():
                 raise ValueError(f"{case['id']}: invalid {variant} path")
         for want in case['expect']:
             re.compile(want['pattern'])
@@ -113,10 +123,11 @@ def validate_manifest(cases, corpus=CORPUS):
 
 def one(case, args, includes, vpp):
     evidence, problems = {}, []
-    snapshot_dir = CORPUS / 'snapshots' / args.target
+    case_dir = Path(case['_directory'])
+    snapshot_dir = case_dir / 'expected' / args.target
 
     def snapshot(style, actual):
-        problem = check_snapshot(snapshot_dir / f"{case['id']}.{style}.stderr", actual, args.bless)
+        problem = check_snapshot(snapshot_dir / f"{style}.stderr", actual, args.bless)
         if problem:
             problems.append(problem)
     base = [f'--target={args.target}', '-std=c17', '-Wall', '-Wextra', '-Wconversion',
@@ -125,7 +136,7 @@ def one(case, args, includes, vpp):
         evidence[compiler] = {}
         for variant in ('broken', 'fixed', 'valid'):
             src = case[variant]
-            run = invoke([exe, *base, '-fsyntax-only', src], CORPUS)
+            run = invoke([exe, *base, '-fsyntax-only', src], case_dir)
             evidence[compiler][variant] = run
             if run['returncode'] is None or run['returncode'] < 0:
                 problems.append(f'{compiler} {variant}: crash/timeout')
@@ -141,9 +152,9 @@ def one(case, args, includes, vpp):
                 evidence[compiler]['link'] = {}
                 for variant in ('broken', 'fixed', 'valid'):
                     asm, obj, binary = [Path(wd) / (compiler + variant + ext) for ext in ('.s', '.o', '.exe')]
-                    compile_run = invoke([exe, *base, '-S', case[variant], '-o', asm], CORPUS)
-                    assembly = invoke([args.clang, f'--target={args.target}', '-c', asm, '-o', obj], CORPUS) if compile_run['returncode'] == 0 else compile_run
-                    link = invoke([args.clang, f'--target={args.target}', '-fuse-ld=lld', '-no-pie', obj, '-o', binary], CORPUS) if assembly['returncode'] == 0 else assembly
+                    compile_run = invoke([exe, *base, '-S', case[variant], '-o', asm], case_dir)
+                    assembly = invoke([args.clang, f'--target={args.target}', '-c', asm, '-o', obj], case_dir) if compile_run['returncode'] == 0 else compile_run
+                    link = invoke([args.clang, f'--target={args.target}', '-fuse-ld=lld', '-no-pie', obj, '-o', binary], case_dir) if assembly['returncode'] == 0 else assembly
                     evidence[compiler]['link'][variant] = {'compile': compile_run, 'assembly': assembly, 'link': link}
                     if compile_run['returncode'] != 0 or assembly['returncode'] != 0:
                         problems.append(f'{compiler} {variant}: failed before linking')
@@ -156,12 +167,12 @@ def one(case, args, includes, vpp):
                         snapshot('link', link['stderr'].replace(wd, '<temporary>'))
     else:
         snapshot('vcc', broken['stderr'])
-        narrated = invoke([vpp, *base, '-fsyntax-only', '-fdiagnostics-style=narrated', case['broken']], CORPUS)
+        narrated = invoke([vpp, *base, '-fsyntax-only', '-fdiagnostics-style=narrated', case['broken']], case_dir)
         evidence['vcc']['narrated'] = narrated
         snapshot('narrated', narrated['stderr'])
         if narrated['returncode'] != broken['returncode']:
             problems.append('narrated/text exit status differs')
-        structured = invoke([vpp, *base, '-fsyntax-only', '-fdiagnostics-format=json', case['broken']], CORPUS)
+        structured = invoke([vpp, *base, '-fsyntax-only', '-fdiagnostics-format=json', case['broken']], case_dir)
         evidence['vcc']['json'] = structured
         try:
             records = [json.loads(line) for line in structured['stderr'].splitlines() if line.strip()]
@@ -171,15 +182,15 @@ def one(case, args, includes, vpp):
                     problems.append('diagnostic lacks a stable ID')
                 if record.get('level') in ('error', 'fatal error') and broken['returncode'] == 0:
                     problems.append('error diagnostic accompanied by successful exit')
-            if args.render.render(structured['stderr'].splitlines(), str(CORPUS)).decode() != broken['stderr']:
+            if args.render.render(structured['stderr'].splitlines(), str(case_dir)).decode() != broken['stderr']:
                 problems.append('structured records do not reproduce the diagnostic text')
-            clang_style = invoke([vpp, *base, '-fsyntax-only', '-fdiagnostics-style=clang', case['broken']], CORPUS)
+            clang_style = invoke([vpp, *base, '-fsyntax-only', '-fdiagnostics-style=clang', case['broken']], case_dir)
             evidence['vcc']['clang_style'] = clang_style
-            if args.render.render(structured['stderr'].splitlines(), str(CORPUS), style='clang').decode() != clang_style['stderr']:
+            if args.render.render(structured['stderr'].splitlines(), str(case_dir), style='clang').decode() != clang_style['stderr']:
                 problems.append('structured records do not reproduce clang-style text')
             if structured['returncode'] != broken['returncode']:
                 problems.append('text/JSON exit status differs')
-            sarif_run = invoke([vpp, *base, '-fsyntax-only', '-fdiagnostics-format=sarif', case['broken']], CORPUS)
+            sarif_run = invoke([vpp, *base, '-fsyntax-only', '-fdiagnostics-format=sarif', case['broken']], case_dir)
             evidence['vcc']['sarif'] = sarif_run
             if args.sarif.check(json.loads(sarif_run['stderr'])):
                 problems.append('invalid SARIF diagnostic structure')
@@ -211,8 +222,8 @@ def main():
     args = ap.parse_args()
     if not 1 <= args.j <= 6:
         ap.error('jobs must be 1..6')
-    cases = json.loads((CORPUS / 'manifest.json').read_text())
-    validate_manifest(cases)
+    cases = load_cases()
+    validate_cases(cases)
     cases = [c for c in cases if re.search(args.pattern, str(c['id']) + ' ' + c['title'])]
     if not cases:
         ap.error('no cases matched')

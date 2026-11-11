@@ -1,0 +1,17 @@
+{
+  "id": "B13",
+  "title": "Numeric input receives a value instead of an address",
+  "phase": "syntax",
+  "flags": [],
+  "broken": "broken.c",
+  "fixed": "fixed.c",
+  "valid": "valid.c",
+  "expect": [
+    {
+      "line": 4,
+      "severity": "warning",
+      "pattern": "format.*int.*\\*.*(argument|type)|expects?.*(int.*\\*|pointer|address)|scanf.*address"
+    }
+  ],
+  "known_gap": "Observed x86 vcc baseline is silent under -Wall -Wextra -Wconversion for the scanf format/address mismatch; format warnings must be enabled consistently."
+}

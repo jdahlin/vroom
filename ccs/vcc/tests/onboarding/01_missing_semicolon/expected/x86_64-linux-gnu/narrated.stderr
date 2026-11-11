@@ -1,0 +1,4 @@
+broken.c:2:14: error: expected ';' at end of declaration
+  the source line is: int n = 3
+  fix: insert ';' at line 2, column 14
+1 error generated.

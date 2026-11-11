@@ -1,0 +1,17 @@
+{
+  "id": "B16",
+  "title": "String input has no bound for a known buffer",
+  "phase": "syntax",
+  "flags": [],
+  "broken": "broken.c",
+  "fixed": "fixed.c",
+  "valid": "valid.c",
+  "expect": [
+    {
+      "line": 4,
+      "severity": "warning",
+      "pattern": "(unbounded|width|bound|overflow|buffer).*(scanf|%s|string|input)|scanf.*(bound|width|overflow)|%s.*(bound|width)"
+    }
+  ],
+  "known_gap": "Desired bounded-input warning for known arrays. %c is raw fixed-count input and does not append a terminator; never apply the %s rule to it."
+}

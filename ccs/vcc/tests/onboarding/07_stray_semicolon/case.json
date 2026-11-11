@@ -1,0 +1,20 @@
+{
+  "id": "B07",
+  "title": "Empty if body before apparently conditional statement",
+  "phase": "syntax",
+  "flags": [
+    "-Wempty-body",
+    "-Wmisleading-indentation"
+  ],
+  "broken": "broken.c",
+  "fixed": "fixed.c",
+  "valid": "valid.c",
+  "expect": [
+    {
+      "line": 3,
+      "severity": "warning",
+      "pattern": "empty.*(body|if)|if.*empty|misleading.*indent"
+    }
+  ],
+  "known_gap": "Observed x86 vcc baseline is silent with -Wempty-body and -Wmisleading-indentation; preserve deliberate empty bodies while diagnosing the suspicious if body."
+}

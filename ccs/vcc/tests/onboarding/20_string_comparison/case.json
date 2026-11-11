@@ -1,0 +1,17 @@
+{
+  "id": "B20",
+  "title": "String address comparison mistaken for text comparison",
+  "phase": "syntax",
+  "flags": [],
+  "broken": "broken.c",
+  "fixed": "fixed.c",
+  "valid": "valid.c",
+  "expect": [
+    {
+      "line": 3,
+      "severity": "warning",
+      "pattern": "string.*(compar|address|literal)|comparison.*string|compar.*unspecified"
+    }
+  ],
+  "known_gap": "Observed x86 vcc baseline is silent for comparison against a string literal; preserve intentional address comparisons and avoid automatic strcmp rewrites."
+}

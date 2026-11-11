@@ -17,12 +17,28 @@ Each directory contains three complete programs:
   deliberate assignment, pointer identity comparison, one-past pointer formation,
   raw character arrays, or returning a local pointer to allocated storage.
 
-`manifest.json` is a list of 25 objects. Each contains `id`, `title`, `phase`, additional
-`flags`, the three relative source paths, `expect`, and `known_gap` (a reason for both targets, or a map keyed by target). Expectations
-name a source line, severity, and case-insensitive regular expression describing
-useful diagnostic content. They describe the issue independently of a snapshot;
-matching a generic unrelated warning does not satisfy an expectation. IDs in the
-compiler's diagnostic stream are evidence to record, not invented requirements.
+Each test is self-contained. For example:
+
+```text
+01_missing_semicolon/
+  broken.c
+  fixed.c
+  valid.c
+  case.json
+  expected/
+    x86_64-linux-gnu/vcc.stderr
+    x86_64-linux-gnu/narrated.stderr
+    aarch64-linux-gnu/vcc.stderr
+    aarch64-linux-gnu/narrated.stderr
+```
+
+`case.json` holds only that test's ID, title, phase, flags, relative source names,
+semantic message expectations, and any documented gap. The runner discovers these
+files directly; there is no combined manifest or combined expected-message file.
+Expected messages are readable plain-text `.stderr` files in the same test folder.
+Source paths in messages are local (`broken.c`), so the test has no dependency on
+its parent directory's name. Each semantic expectation names a source line,
+severity, and case-insensitive pattern; matching an unrelated warning is insufficient.
 
 Default language/warning flags belong to the runner (`-std=c17 -Wall -Wextra
 -Wconversion`). Per-case flags enable a targeted warning where useful. Most cases
@@ -34,7 +50,7 @@ use the compiler's `__SIZE_TYPE__` for exact `size_t` declarations without a hea
 B05 is a final-link failure. Its fixed program provides the definition in the same
 file. An unresolved reference in an object compiled with `-c` is normal and must not
 be turned into a frontend error. The link diagnostic may lack source coordinates;
-the manifest's line identifies the source reference, not a promise that every linker
+the case configuration's line identifies the source reference, not a promise that every linker
 has debug information or prints that location.
 
 `known_gap` records a concrete missing capability or an intent-dependent diagnostic
@@ -61,7 +77,7 @@ warning-free output for every compiler version.
 
 Initial fixture validation (2026-11-11): GCC 15.2 and Clang 23.1.6 accepted all 50
 fixed/valid programs under `-std=c17 -Wall -Wextra -Wconversion -fsyntax-only`
-(100 checks). All 25 manifest IDs, expectation regexes and line numbers were checked.
+(100 checks). All 25 case IDs, expectation regexes and line numbers were checked.
 This does not establish that vcc detects all 25 cases, or that every expectation has
 already been met on ARM. The dedicated runner reports those results.
 
@@ -76,8 +92,8 @@ starting baseline, not a green completion gate or proof of pedagogical effective
 ## Running and interpreting the suite
 
 ```sh
-LLVM=/usr/lib/llvm-23 python3 bench/vcc-onboarding.py --json build/onboarding/x86_64.json
-LLVM=/usr/lib/llvm-23 python3 bench/vcc-onboarding.py --target aarch64-linux-gnu --json build/onboarding/aarch64.json
+LLVM=/usr/lib/llvm-23 python3 bench/vcc-onboarding.py
+LLVM=/usr/lib/llvm-23 python3 bench/vcc-onboarding.py --target aarch64-linux-gnu
 ```
 
 The normal command fails for every missing explanation (`GAP`), including documented
@@ -90,25 +106,25 @@ The runner checks issue-specific diagnostic content, source line, severity, stab
 IDs, exact text reconstruction from JSON in both text styles, and valid SARIF. It
 also requires all 50 repaired/intentional examples to compile without diagnostics
 in both vcc and Clang. Link tests build corrected examples but never execute any
-program. Broken programs are never executed. Seven verifier regression tests guard
+program. Broken programs are never executed. Eight verifier regression tests guard
 against matching source snippets, unrelated locations, or incomplete corpora.
 
 Validated baseline on both Linux targets: x86 has 10 covered cases and 15 gaps;
 ARM has 11 covered cases and 14 gaps. B14 format checking currently meets the
 contract only on ARM, so its gap marker is target-specific. One covered case on
-each target is the external-linker story. See `BASELINE.md` for captured messages.
+each target is the external-linker story. Read each test's `expected/` files for the captured messages.
 B09 explicitly uses `-Wno-error=parentheses`: Clang 23 otherwise diagnoses this
 legal chained comparison as an error by default; this corpus tests explaining its
 meaning without requiring language rejection.
 
 ## Exact expected messages
 
-`snapshots/TARGET/Bxx.vcc.stderr` and `Bxx.narrated.stderr` are checked-in expected
-messages. Every normal run compares the complete output byte for byte: wording,
+Each test's `expected/TARGET/vcc.stderr` and `narrated.stderr` are checked-in
+expected messages. Every normal run compares the complete output byte for byte: wording,
 line/column, source excerpts, caret placement, fix-it display, notes, help, and
 summary. A changed or missing snapshot fails even with `--baseline`; semantic
 regex checks and JSON reconstruction remain additional requirements. The link case
-has `B05.link.stderr`, with only its generated temporary-directory name normalized.
+has `expected/TARGET/link.stderr`, with only its generated temporary-directory name normalized.
 Caret-padding spaces are preserved deliberately.
 
 To update messages after an intentional change:
@@ -116,7 +132,7 @@ To update messages after an intentional change:
 ```sh
 LLVM=/usr/lib/llvm-23 python3 bench/vcc-onboarding.py --baseline --bless
 LLVM=/usr/lib/llvm-23 python3 bench/vcc-onboarding.py --baseline --bless --target aarch64-linux-gnu
-git diff -- ccs/vcc/tests/onboarding/snapshots
+git diff -- ccs/vcc/tests/onboarding
 ```
 
 Review every changed message; ordinary tests and CI never bless output. Empty
@@ -128,3 +144,12 @@ message and remove its matching gap marker together.
 Some repairs require additional statements or a changed API. B24 demonstrates
 static storage when a shared persistent object is intended; it is not a general
 recommendation to make locals static or an automatic fix for every lifetime error.
+
+Run one test by its ID, for example:
+
+```sh
+LLVM=/usr/lib/llvm-23 python3 bench/vcc-onboarding.py --baseline B01
+```
+
+`--json PATH` can optionally save a generated execution report for tooling; tests
+never read it as expected output. All authoritative messages remain per-test files.
