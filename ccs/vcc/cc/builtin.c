@@ -569,6 +569,8 @@ static bool object_pointer_bound(cc *c, uint32_t n, object_bound *b, unsigned de
 	return false;
 }
 
+static bool elementwise_abs_effects(cc *c, uint32_t n, bool load);
+
 VPRIV bool eval_builtin(cc *c, const node *x, cval *v)
 {
 	const uint32_t *arg = &c->lists[x->b];
@@ -656,8 +658,8 @@ VPRIV bool eval_builtin(cc *c, const node *x, cval *v)
 		v->kind = CV_FLT, v->ld = true, v->f = q_to_d(v->q), v->ice = false;
 		return true;
 	}
-	case BI_ISNAN: case BI_ISINF: case BI_ISFINITE: case BI_ISNORMAL: case BI_SIGNBIT: {
-		if (!eval(c, arg[0], &a) || a.kind != CV_FLT)
+	case BI_ISNAN: case BI_ISINF: case BI_ISINF_SIGN: case BI_ISFINITE: case BI_ISNORMAL: case BI_SIGNBIT: {
+		if (elementwise_abs_effects(c, arg[0], true) || !eval(c, arg[0], &a) || a.kind != CV_FLT)
 			return false;
 		u128 q = a.ld ? a.q : q_of_d(a.f);
 		unsigned exponent = (unsigned)(q >> 112) & 0x7fff;
@@ -667,9 +669,39 @@ VPRIV bool eval_builtin(cc *c, const node *x, cval *v)
 		switch (x->aux) {
 		case BI_ISNAN: v->i = q_isnan(q); break;
 		case BI_ISINF: v->i = q_isinf(q); break;
+		case BI_ISINF_SIGN: v->i = q_isinf(q) ? (q >> 127 ? -1 : 1) : 0; break;
 		case BI_ISFINITE: v->i = exponent != 0x7fff; break;
 		case BI_ISNORMAL: v->i = exponent >= minimum && exponent != 0x7fff; break;
 		default: v->i = q >> 127; break;
+		}
+		v->ice = false;
+		return true;
+	}
+	case BI_ISGREATER: case BI_ISGREATEREQUAL: case BI_ISLESS: case BI_ISLESSEQUAL:
+	case BI_ISLESSGREATER: case BI_ISUNORDERED: {
+		cval b;
+		if (x->c != 2 || elementwise_abs_effects(c, arg[0], true) || elementwise_abs_effects(c, arg[1], true) ||
+		    !eval(c, arg[0], &a) || !eval(c, arg[1], &b) ||
+		    (a.kind != CV_FLT && a.kind != CV_INT) || (b.kind != CV_FLT && b.kind != CV_INT))
+			return false;
+		int p = 0;
+		for (unsigned i = 0; i < 2; i++) if (is_float(c, N(arg[i])->ty)) {
+			int kind = KIND(c, N(arg[i])->ty);
+			int bits = kind == TY_BFLOAT16 ? 7 : kind == TY_FLOAT16 ? 10 : kind == TY_FLOAT ? 23 :
+			           kind == TY_DOUBLE || c->o->target == PP_DARWIN ? 52 : q_prec(c, N(arg[i])->ty);
+			if (bits > p) p = bits;
+		}
+		if (!p) return false;
+		u128 l = a.kind == CV_FLT ? (a.ld ? a.q : q_of_d(a.f)) : q_of_ip(a.i, is_signed(c, N(arg[0])->ty), p);
+		u128 r = b.kind == CV_FLT ? (b.ld ? b.q : q_of_d(b.f)) : q_of_ip(b.i, is_signed(c, N(arg[1])->ty), p);
+		int order = q_cmp(l, r);
+		switch (x->aux) {
+		case BI_ISGREATER: v->i = order == 1; break;
+		case BI_ISGREATEREQUAL: v->i = order == 1 || order == 0; break;
+		case BI_ISLESS: v->i = order == -1; break;
+		case BI_ISLESSEQUAL: v->i = order == -1 || order == 0; break;
+		case BI_ISLESSGREATER: v->i = order == -1 || order == 1; break;
+		default: v->i = order == 2; break;
 		}
 		v->ice = false;
 		return true;
@@ -1365,19 +1397,26 @@ static bool elementwise_abs_effects(cc *c, uint32_t n, bool load)
 VPRIV uint32_t fp_sign_call(cc *c, const char *name, size_t len, qty ft, const vec *args, uint32_t loc)
 {
 	bool copy = (len == 8 && !memcmp(name, "copysign", 8)) ||
-		    (len == 9 && !memcmp(name, "copysignf", 9));
+		    (len == 9 && (!memcmp(name, "copysignf", 9) || !memcmp(name, "copysignl", 9)));
 	bool abs = (len == 4 && !memcmp(name, "fabs", 4)) ||
-		   (len == 5 && !memcmp(name, "fabsf", 5));
+		   (len == 5 && (!memcmp(name, "fabsf", 5) || !memcmp(name, "fabsl", 5)));
 	if (!copy && !abs) return 0;
-	bool single = name[len - 1] == 'f';
-	qty t = prim(single ? TY_FLOAT : TY_DOUBLE);
+	bool single = name[len - 1] == 'f', extended = name[len - 1] == 'l';
+	qty t = prim(extended ? TY_LDOUBLE : single ? TY_FLOAT : TY_DOUBLE);
 	if ((T(c, ft)->flags & (TF_NOPROTO | TF_VARIADIC)) || args->n != (copy ? 2 : 1) ||
-	    !compatible(c, ft, sig_func_type(c, copy ? (single ? "fff" : "ddd") : (single ? "ff" : "dd"))))
+	    !compatible(c, ft, sig_func_type(c, copy ? (extended ? "DDD" : single ? "fff" : "ddd") : (extended ? "DD" : single ? "ff" : "dd"))))
 		return 0;
 	cval a, b;
 	if (!elementwise_abs_effects(c, args->v[0], true) && cc_eval(c, args->v[0], &a) && a.kind == CV_FLT &&
 	    (!copy || (!elementwise_abs_effects(c, args->v[1], true) && cc_eval(c, args->v[1], &b) && b.kind == CV_FLT)))
-		return mk_flt(c, __builtin_copysign(a.f, copy ? b.f : 1.0), t, loc);
+	{
+		u128 q = a.ld ? a.q : q_of_d(a.f);
+		u128 sign = copy ? (b.ld ? b.q : q_of_d(b.f)) & ((u128)1 << 127) : 0;
+		/* Keep the original constant node: converting through host double
+		   would quiet or canonicalize a signaling NaN payload. */
+		return ((q ^ sign) >> 127) ? neg(c, args->v[0]) : args->v[0];
+	}
+	if (extended) return 0;
 	if (c->o->target != PP_LINUX_X86_64 && c->o->target != PP_LINUX_AARCH64)
 		return 0;
 	if (c->o->general_regs_only) {
