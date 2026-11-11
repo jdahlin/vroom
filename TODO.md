@@ -189,6 +189,11 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
   so a kernel built with them lacks the protection.
   *Validate:* `ccs/vcc/tests/vcc/autoinit_zero.c` (xfail on arm64).
 
+- [ ] **arm64: `x & 0` / `x * 0` with `x` not constant are not folded.**
+  The x86 walker folds them (an inlined `IS_DAX(i)` = `i->i_flags & 0`
+  removes a call to an undefined function); arm64 keeps the call.
+  *Validate:* `ccs/vcc/tests/vcc/and_zero_fold.c` (xfail on arm64).
+
 - [x] **Branch range: no relaxation for b.cond/cbz/tbz/adr** [P].  Done for
   functions without inline asm (`r_relax` in emit.c: b.!cond .+8; b label,
   iterated to a fixed point, only for functions over 1 MB); with inline asm,
