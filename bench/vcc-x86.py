@@ -32,6 +32,7 @@ VPP = ct.VPP
 OUT = f'{BUILD}/x86tests'
 TGT = '--target=x86_64-linux-gnu'
 BASE = [TGT, '-nostdinc', '-I', f'{ct.RT}/include', '-isystem', ct.RES, '-fno-PIE', '-O2']
+BASE += os.environ.get('VCC_CFLAGS', '').split()	# e.g. -g -fasynchronous-unwind-tables (both compilers)
 LINK = [CL, TGT, '-no-pie']
 RTO = f'{OUT}/rt.o'
 # tests that need what the x86-64 target or glibc does not give the same way

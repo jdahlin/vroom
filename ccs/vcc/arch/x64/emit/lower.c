@@ -491,6 +491,22 @@ VPRIV void x64_brz(ecx *e, val a, int size, bool nz, uint32_t lbl)
 
 /* ---------------- control ---------------- */
 
+/* -g: a line-table row at the next record (arm64's dbg_row, on x86's records) */
+VPRIV void x64_dbgrow(ecx *e, uint32_t loc)
+{
+	uint32_t file, line, col, nin = e->x64->nin;
+
+	if (!dbg_where(e, loc, &file, &line, &col))
+		return;
+	if (e->ndl && e->dl[e->ndl - 1].k >= nin)
+		e->ndl--;	/* nothing emitted for the previous one */
+	if (e->ndl == e->dlcap) {
+		e->dlcap = e->dlcap ? 2 * e->dlcap : 256;
+		e->dl = realloc(e->dl, e->dlcap * sizeof *e->dl);
+	}
+	e->dl[e->ndl++] = (struct dbgrow){ nin, file, line, col };
+}
+
 VPRIV void x64_label(ecx *e, uint32_t l)
 {
 	x64_put(e, X_LABEL)->label = l;
@@ -548,6 +564,7 @@ VPRIV void x64_begin(ecx *e, uint32_t s)
 	X->live = 0;
 	X->pushes = 0;
 	memset(X->csslot, 0, sizeof X->csslot);
+	e->ndl = 0;
 	e->raw.n = 0;
 	e->asmk = 0;
 }

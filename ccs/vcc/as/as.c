@@ -704,6 +704,8 @@ static int d_section(As *a, const char *p, const char *e, int push)
 
 /* ---------------------------------------------------------------- data */
 
+static _Thread_local uint32_t as_dtype;	/* x86 data with sym@MOD: the relocation type emit_value uses */
+
 VPRIV int emit_value(As *a, int size, Val *v)
 {
 	ElfObj *o = a->o;
@@ -729,7 +731,7 @@ VPRIV int emit_value(As *a, int size, Val *v)
 	memset(p, 0, (size_t)size);
 	uint32_t t = size == 8 ? R_AARCH64_ABS64 : size == 4 ? R_AARCH64_ABS32 : size == 2 ? R_AARCH64_ABS16 : R_VCC_ABS8;
 	if (o->machine == EM_X86_64)
-		t = size == 8 ? R_X86_64_64 : size == 4 ? R_X86_64_32 : size == 2 ? R_X86_64_16 : R_X86_64_8;
+		t = as_dtype ? as_dtype : size == 8 ? R_X86_64_64 : size == 4 ? R_X86_64_32 : size == 2 ? R_X86_64_16 : R_X86_64_8;
 	elf_fixup(o, a->cur, off, p, t, *v);
 	return 0;
 }
@@ -854,7 +856,27 @@ static int d_data(As *a, const char *p, const char *e, int size)
 	for (;;) {
 		Val v;
 		if (val_expr(a, &p, e, &v)) return -1;
-		if (emit_value(a, size, &v)) return -1;
+		p = ws(p, e);
+		if (a->o->machine == EM_X86_64 && p < e && *p == '@') {
+			/* sym@DTPOFF, @TPOFF, @GOTOFF, @GOTPCREL, @PLT (debug info of TLS, tables) */
+			const char *m = ++p;
+			while (p < e && isidc((unsigned char)*p)) p++;
+			Sv w = { m, (uint32_t)(p - m) };
+			as_dtype = sveq(w, "DTPOFF") ? (size == 8 ? R_X86_64_DTPOFF64 : R_X86_64_DTPOFF32) :
+				   sveq(w, "TPOFF") ? (size == 8 ? R_X86_64_TPOFF64 : R_X86_64_TPOFF32) :
+				   sveq(w, "GOTOFF") ? R_X86_64_GOTOFF64 : sveq(w, "GOTPCREL") ? R_X86_64_GOTPCREL :
+				   sveq(w, "PLT") ? R_X86_64_PLT32 : 0;
+			if (!as_dtype) return err(a, "invalid variant '%.*s'", (int)w.n, w.s);
+			p = ws(p, e);
+			if (p < e && (*p == '+' || *p == '-')) {
+				int64_t k;
+				if (abs_expr(a, &p, e, &k)) return -1;
+				v.c += k;
+			}
+		}
+		int r = emit_value(a, size, &v);
+		as_dtype = 0;
+		if (r) return -1;
 		p = ws(p, e);
 		if (p >= e) return 0;
 		if (*p != ',') return err(a, "unexpected token in directive");
@@ -2236,7 +2258,7 @@ static int directive(As *a, Sv w, const char *p, const char *e)
 			a->nsv++;
 			return 0;
 		}
-		if (IS("word")) return d_data(a, p, e, 4);
+		if (IS("word")) return d_data(a, p, e, a->o->machine == EM_X86_64 ? 2 : 4);	/* (x86: 2 bytes, as GNU as) */
 		if (IS("weak")) return d_symattr(a, p, e, 'w');
 		if (IS("warning")) {
 			Sv t = trim(p, e);
@@ -2970,9 +2992,9 @@ static int dw_num(As *a, const char **pp, const char *e, uint64_t *v)
 	return 0;
 }
 
-static uint32_t dw_dir(As *a, Sv d)
+static uint32_t dw_dir_from(As *a, Sv d, uint32_t from)
 {
-	for (uint32_t i = 0; i < a->ndwd; i++) if (a->dwd[i].n == d.n && !memcmp(a->dwd[i].s, d.s, d.n)) return i;
+	for (uint32_t i = from; i < a->ndwd; i++) if (a->dwd[i].n == d.n && !memcmp(a->dwd[i].s, d.s, d.n)) return i;
 	if (a->ndwd == a->dwdcap) {
 		uint32_t nc = a->dwdcap ? a->dwdcap * 2 : 16;
 		Sv *t = rget(&a->defs, sizeof *t * nc);
@@ -2982,6 +3004,8 @@ static uint32_t dw_dir(As *a, Sv d)
 	a->dwd[a->ndwd] = d;
 	return a->ndwd++;
 }
+
+static uint32_t dw_dir(As *a, Sv d) { return dw_dir_from(a, d, 0); }
 
 /* .file N ["dir"] "name" [md5 0x...] */
 static int d_dwfile(As *a, const char *p, const char *e)
@@ -3031,12 +3055,14 @@ static int d_dwfile(As *a, const char *p, const char *e)
 	}
 	if (n >= a->ndwf) a->ndwf = (uint32_t)n + 1;
 	struct DwFile *f = &a->dwf[n];
+	int split = 0;
 	if (!two && n) {	/* "sub/y.h": directory "sub", name "y.h" (MC's tryGetFile) */
 		const char *sl = 0;
 		for (uint32_t i = 0; i < name.n; i++) if (name.s[i] == '/') sl = name.s + i;
 		if (sl && sl + 1 < name.s + name.n && sl > name.s) {
 			dir = (Sv){ name.s, (uint32_t)(sl - name.s) };
 			name = (Sv){ sl + 1, (uint32_t)(name.s + name.n - sl - 1) };
+			split = 1;
 		}
 	}
 	if (!a->ndwd) {	/* directory 0: the root file's, else the compilation directory */
@@ -3051,7 +3077,8 @@ static int d_dwfile(As *a, const char *p, const char *e)
 	if (n == 0) a->dwd[0] = dir;
 	f->name = name; f->set = 1; f->hasmd5 = (uint8_t)hasmd5;
 	if (hasmd5) memcpy(f->md5, md5, 16);
-	f->dir = n == 0 || !dir.n ? 0 : dw_dir(a, dir);
+	/* (a directory split from the name goes in MC's list of the others: never entry 0) */
+	f->dir = n == 0 || !dir.n ? 0 : split && a->o->machine == EM_X86_64 ? dw_dir_from(a, dir, 1) : dw_dir(a, dir);
 	if (!two && n && f->dir == 0 && dir.n) f->dir = dw_dir(a, dir);
 	a->dwtab = 1;
 	return 0;
@@ -3254,13 +3281,14 @@ static void dwline_finish(As *a)
 	memcpy(q, b.p, b.n);
 	uint32_t lsym = elf_sec(o, elf_frag(o, ls)->sec)->sym;
 	for (uint32_t i = 0; i < nsfix; i++)
-		elf_fixup(o, sec, at + sfix[2 * i], q + sfix[2 * i], R_AARCH64_ABS32, (Val){ lsym, 0, (int64_t)sfix[2 * i + 1] });
+		elf_fixup(o, sec, at + sfix[2 * i], q + sfix[2 * i], o->machine == EM_X86_64 ? R_X86_64_32 : R_AARCH64_ABS32,
+			  (Val){ lsym, 0, (int64_t)sfix[2 * i + 1] });
 	for (uint32_t i = 0; i < nafix; i++) {
 		struct DwLoc *l = &a->dwl[afix[2 * i + 1]];
 		uint32_t y = elf_sym_anon(o, ".Ltmp", 5);
 		elf_symp(o, y)->flags |= ESYM_TEMP;
 		elf_define(o, y, l->frag, l->off);
-		elf_fixup(o, sec, at + afix[2 * i], q + afix[2 * i], R_AARCH64_ABS64, (Val){ y, 0, 0 });
+		elf_fixup(o, sec, at + afix[2 * i], q + afix[2 * i], o->machine == EM_X86_64 ? R_X86_64_64 : R_AARCH64_ABS64, (Val){ y, 0, 0 });
 	}
 }
 

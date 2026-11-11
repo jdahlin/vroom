@@ -180,6 +180,7 @@ VPRIV void LO(spset)(ecx *e, int r);			/* the stack pointer = r (r freed) */
 VPRIV val LO(fbits)(ecx *e, val v, int size);		/* a float's bits in an integer register */
 /* control */
 VPRIV void LO(asm)(ecx *e, uint32_t n);			/* an asm statement (the CPU's constraints and syntax) */
+VPRIV void LO(dbgrow)(ecx *e, uint32_t loc);		/* -g: a line-table row at the next instruction */
 VPRIV void LO(label)(ecx *e, uint32_t l);
 VPRIV void LO(jump)(ecx *e, uint32_t l);
 VPRIV void LO(jumpr)(ecx *e, int r);			/* to the address in r (computed goto) */

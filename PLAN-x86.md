@@ -346,8 +346,14 @@ kärnan och kan vänta.
   vasm mot `clang -c`): 3679/3680 identiska (SSE2-heltal, x87-former, `shld`/`bt`/`prefetch`,
   CFI med x86:s CIE och `.eh_frame` som `SHT_X86_64_UNWIND`, MC:s relaxering mot förra
   passets layout). Kvar: `20050224-1 -O2`, ett relaxeringsfall vid en `.prefalign`.
-- Kvar: kodning direkt från posterna (utan text), CFI och DWARF med x86-registernummer,
-  hela ISA:n (AVX, AVX-512 för kärnans krypto) och `vas-corpus.py`/`vas-enc.py` för x86-64.
+- CFI (`-fasynchronous-unwind-tables`: prolog och epilog som clang, sparade callee-saved)
+  och `-g` (radtabell från vandraren, `.loc` före posterna, `twoaddr` flyttar raderna) i
+  x86-skrivaren; `.word` är 2 byte på x86; DWARF-katalogen för en delad `.file`-sökväg som
+  MC; `.quad x@DTPOFF` m.fl. i data. Med `VCC_CFLAGS='-g -fasynchronous-unwind-tables'`:
+  sviten 1767/1775 med `-S` och `--obj`, `--objcmp` 1846/1846; `backtrace()` och gdb går
+  genom vcc:s funktioner; `vas-corpus` med `-g` 3679/3680.
+- Kvar: kodning direkt från posterna (utan text), hela ISA:n (AVX, AVX-512 för kärnans
+  krypto) och `vas-enc.py` för x86-64.
 
 ### X3 (2026-11-10): pågår, i gren `claude/x86-x3-main` (PR jdahlin/vroom#11; #9 hamnade i #4:s gren efter att #4 slagits ihop)
 - Klart: biblioteksinbyggda som anrop; aggregat (initierare, kopior, sammansatta

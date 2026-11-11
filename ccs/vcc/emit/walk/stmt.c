@@ -533,6 +533,8 @@ VPRIV void wk_stmt(ecx *e, uint32_t n)
 	if (!e->reach && !(e->E->nflags[n] & NA_LABEL))
 		return;	/* dead: after a jump, no label in it (clang -O2 drops it too) */
 	e->curloc = x->loc;
+	if (unlikely(e->E->o->debug) && x->op != N_BLOCK)
+		LO(dbgrow)(e, x->loc);
 	switch (x->op) {
 	case N_BLOCK: {
 		uint32_t vs = 0;	/* the block's first VLA: its saved sp is restored at the end */
