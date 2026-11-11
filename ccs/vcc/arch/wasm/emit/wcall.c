@@ -1,5 +1,6 @@
 /* vcc code generator for WebAssembly: calls, variadic arguments, builtins (wimpl.h) */
 #include "wimpl.h"
+#include "../../../lib/f128.h"
 
 /* the direct callee of a call: its reference (0: an indirect call) */
 static uint32_t wcallee(cc *c, uint32_t fn)
@@ -1270,9 +1271,28 @@ VPRIV int wbuiltin(ecx *e, uint32_t n, bool want)
 			wconst(e, WT_I32, wconstant_p(e, warg_n(c, n, 0)));
 		return want ? WT_I32 : WT_NONE;
 	}
-	if (cc_eval(c, n, &cv) && (cv.kind == CV_INT || (cv.kind == CV_FLT && !cv.ld))) {
-		if (k == WT_F32 || k == WT_F64)
-			wfconst(e, k, cv.kind == CV_FLT ? cv.f : (double)cv.i);
+	if (cc_eval(c, n, &cv) && (cv.kind == CV_INT || cv.kind == CV_FLT)) {
+		if (cv.kind == CV_FLT && k == WT_MEM) {
+			/* Binary128 builtins use the same address-valued representation
+			   as N_FNUM, including infinities and exact NaN payloads. */
+			u128 q = cv.ld ? cv.q : q_of_d(cv.f);
+			uint64_t sl = wslot(e, 16, 16);
+			wslot_addr(e, sl);
+			wconst(e, WT_I64, (int64_t)(uint64_t)q);
+			wiu(e, "i64.store", 0);
+			wslot_addr(e, sl);
+			wconst(e, WT_I64, (int64_t)(uint64_t)(q >> 64));
+			wiu(e, "i64.store", 8);
+			wslot_addr(e, sl);
+			return WPT(c);
+		}
+		if (cv.kind == CV_FLT && cv.ld && q_isnan(cv.q) && (k == WT_F32 || k == WT_F64)) {
+			/* Host floating conversions can quiet a signaling NaN. */
+			wconst(e, k == WT_F32 ? WT_I32 : WT_I64,
+			       (int64_t)q_nan_storage(cv.q, k == WT_F32 ? 23 : 52, k == WT_F32 ? 8 : 11));
+			wi(e, k == WT_F32 ? "f32.reinterpret_i32" : "f64.reinterpret_i64");
+		} else if (k == WT_F32 || k == WT_F64)
+			wfconst(e, k, cv.kind == CV_FLT ? cv.ld ? q_to_d(cv.q) : cv.f : (double)cv.i);
 		else if (k == WT_I32 || k == WT_I64)
 			wconst(e, k, (int64_t)em_trunc_to(c, cv.i, x->ty));
 		else if (k == WT_NONE)

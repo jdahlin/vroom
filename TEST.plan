@@ -205,6 +205,16 @@ direktobjekt-kontroller går grönt. Dessa siffror gäller frysta trädet före
 asm-rättningen; de är inte ett påstående om färdig premerge. Wasm-CI har
 22 nytäckta fel som utreds mot upstreams kompilator separat.
 
+**CI-uppföljning:** asm-rättningen på `837cc15` har nu full x86-compile-
+evidens: åter **1859 godkända, inga vcc-fel/krascher**, 155 filtrerade och
+två kända clang-krascher. Wasm-jämförelsen mot `2339f69` skiljer en verklig
+FP-konstantregression från tidigare luckor. NaN-payload/signaleringsbitar och
+binary128-konstanter är rättade och får ett nytt omarkerat regressionstest;
+Unicode-lokala statiska symbolers namn är också rättade. De återstående 20
+Wasm-fallen dokumenteras individuellt i TODO.md och körs som uttryckliga
+XFAIL, inte skip. En framtida rättning ger XPASS-fel tills markören tas bort.
+Detta är inte ett påstående om att dessa 20 Wasm-buggar är rättade.
+
 ### S4 gcc.dg — påbörjad (2026-11-11)
 `bench/vcc-gcc-dg.py -j 6 --target x86_64-linux-gnu` kör direkta
 `gcc.dg/*.c` med `dg-do run` (1276 filer) och direkta

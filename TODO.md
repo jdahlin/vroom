@@ -524,6 +524,32 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
   `bcp-1` needs `__builtin_constant_p` of an inlined argument.  They are
   `WASM_XFAIL` in `bench/vcc-wasm.py` (premerge's wasm job).
   *Validate:* `bench/vcc-wasm.py -j 6` reports them as XPASS; remove the entries.
+- [ ] **wasm: Linux-correctness coverage gaps** [C]. The Linux milestone
+  adds tests for behavior fixed in the x86/ARM emitters but still missing in
+  the separate Wasm emitter. All 20 tests below also fail with upstream
+  `2339f69`; some fail earlier in its parser, so this is a capability boundary,
+  not evidence that their newly reachable Wasm lowering is correct.
+  `bench/vcc-wasm.py` records each as an explicit expected failure, executes it
+  against clang, and rejects XPASS. They are not skipped.
+  - Runtime classification/comparison: `fp_classify_builtin`, `fpclassify`,
+    `fp_compare_builtin`, `isfpclass`, `signaling_nan`; long-double
+    classification in `complex_div_runtime`.
+  - Integer/aggregate lowering: `atomic_record` (128-bit atomic value conversion),
+    `generic_bitcount` (_BitInt runtime precision), `int128_shift_count`
+    (wide shift counts), `deep_conditional` (wide GNU omitted-middle values),
+    `transparent_union_redecl` (member calling convention).
+  - Expression/call lowering: `gnu_conditional_float` (GNU floating conditional),
+    `parenthesized_function` (nested function-pointer return signature),
+    `void_lvalue` (void expressions leave stack values), `fabs_asm_identity`
+    and `math_library_identity` (asm-renamed functions mistaken for intrinsics).
+  - Optimization/inlining: `array_constants`, `dead_branch_entries`,
+    `optimized_conditions` leave unreachable references; `inline_constants`
+    needs argument propagation into `__builtin_constant_p`.
+  The actual `fp_class_builtins` regression and Unicode static-symbol collision
+  are fixed and must pass without expected-failure markers.
+  *Validate:* `bench/vcc-wasm.py -j 6 --suite vcc --no-cache -v` using emcc 7
+  and Node 24; every named probe must become XPASS when repaired, then remove
+  its corresponding entry and rerun. Also retain the unmarked GCC/TCC gates.
 - [ ] **PIC/PIE** [P]: done: `cc_opts.pic` from the driver (PIE the hosted
   default, `-fno-pic`), `sym_needs_got` (arch/a64/emit/value.c) as clang:
   `-fPIC` every default-visibility non-static symbol, `-fPIE` those not

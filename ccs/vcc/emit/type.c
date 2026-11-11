@@ -75,7 +75,7 @@ VPRIV void sym_name(cc *c, tbuf *b, uint32_t s)
 		/* LLVM's wasm and x86 assemblers require quotes around non-ASCII names. */
 		tb_c(b, '"');
 		tb_put(b, vintern_ents[y->name].s, vintern_ents[y->name].len);
-		if (X86(c) && y->depth > 0 && y->kind == S_VAR && y->sc == SC_STATIC) {
+		if (y->depth > 0 && y->kind == S_VAR && y->sc == SC_STATIC) {
 			tb_c(b, '.');
 			tb_u(b, s);
 		}
