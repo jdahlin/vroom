@@ -1378,7 +1378,11 @@ static val wk_ternary(ecx *e, uint32_t n)
 		/* a condition known here (after inlining, or from its form): one arm only, as
 		   clang -O2 (an error() call or a link_error in the other is gone) */
 		if (!(e->E->nflags[x->b] & NA_LABEL) && !(e->E->nflags[x->c] & NA_LABEL)) {
+			cval kc;
+
 			k = cond_fold(e, x->a);
+			if (k < 0 && cc_eval(c, x->a, &kc) && kc.kind == CV_INT)
+				k = kc.i != 0;	/* (sizeof(t) == sizeof(t[1]) && ...: the kernel's _IOC_TYPECHECK) */
 			if (k < 0 && !side_effects(c, x->a) && wk_isconst(e, x->a)) {
 				val kv = wk_conv(e, wk_gen(e, x->a), N(x->a)->ty, prim(TY_BOOL));
 

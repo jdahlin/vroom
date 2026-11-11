@@ -352,11 +352,18 @@ static void wk_decl(ecx *e, const node *x)
 		if (!LO(local)(e, s, &l))
 			l.off = wk_local(e, s);
 		if (!x->b && e->E->o->autozero && tsize(c, y->ty) && !(y->sc == SC_REGISTER && sym_attrs(c, s)->asmname)) {
-			/* -ftrivial-auto-var-init=zero: a local without an initializer starts as zeros */
-			int rd = LO(laddr)(e, &l);
+			/* -ftrivial-auto-var-init=zero: a local without an initializer starts as zeros
+			   (a scalar by a store: it may live in a register) */
+			if (wk_mem(e, y->ty) || is_array(c, y->ty)) {
+				int rd = LO(laddr)(e, &l);
 
-			LO(zero)(e, rd, tsize(c, y->ty));
-			LO(tfree)(e, rd);
+				LO(zero)(e, rd, tsize(c, y->ty));
+				LO(tfree)(e, rd);
+			} else {
+				val z = wk_conv(e, vconst(0), prim(TY_INT), y->ty);
+
+				wk_store(e, &l, y->ty, &z);
+			}
 		}
 		wk_init(e, &l, y->ty, x->b);
 	}
