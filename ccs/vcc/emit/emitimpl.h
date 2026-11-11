@@ -256,7 +256,7 @@ typedef struct loopctx {
 } loopctx;
 
 typedef struct fnctx {		/* one function instance: the emitted function or an inlined body */
-	uint32_t fn, inst;
+	uint32_t fn, inst, call;
 	uint32_t retlbl;
 	int64_t retslot;
 	uint8_t retreg;		/* inlined: the result's temporary + 1 (0: in retslot) */
@@ -389,7 +389,8 @@ enum { FN_MEMCPY, FN_MEMSET, FN_MEMMOVE, FN_UDIVTI3, FN_DIVTI3, FN_UMODTI3, FN_M
        FN_EXTENDDFTF2, FN_EXTENDSFTF2, FN_TRUNCTFDF2, FN_TRUNCTFSF2, FN_FLOATSITF, FN_FLOATDITF, FN_FLOATUNSITF,
        FN_FLOATUNDITF, FN_FLOATTITF, FN_FLOATUNTITF, FN_FIXTFSI, FN_FIXTFDI, FN_FIXUNSTFSI, FN_FIXUNSTFDI,
        FN_FIXTFTI, FN_FIXUNSTFTI, FN_EXTENDXFTF2, FN_TRUNCTFXF2, FN_EXTENDBFSF2, FN_TRUNCSFBF2, FN_TRUNCDFBF2, FN_TRUNCXFBF2, FN_TRUNCTFBF2, FN_EXTENDHFSF2, FN_TRUNCSFHF2, FN_TRUNCDFHF2, FN_TRUNCXFHF2, FN_TRUNCTFHF2,
-       FN_FLOATTIXF, FN_FLOATUNTIXF, FN_FIXXFTI, FN_FIXUNSXFTI };
+       FN_FLOATTIXF, FN_FLOATUNTIXF, FN_FIXXFTI, FN_FIXUNSXFTI,
+       FN_FLOORF, FN_CEILF, FN_TRUNCF, FN_ROUNDF, FN_RINTF, FN_NEARBYINTF, FN_FABSF };
 #define FIXED(k) REF(RK_NAME, 0x8000000u + (k))
 
 /* ---------------- object backend: records -> machine code ---------------- */
@@ -748,7 +749,8 @@ VPRIV void kv_track(ecx *e, uint32_t s, const val *v);
 VPRIV int ael_slot(ecx *e, uint32_t n, bool create);
 VPRIV bool const_var(ecx *e, uint32_t s, const val *v);
 VPRIV bool can_inline(ecx *e, uint32_t s);
-VPRIV val inline_call(ecx *e, uint32_t s, carg *args, int n);
+VPRIV val inline_call(ecx *e, uint32_t s, carg *args, int n, uint32_t call);
+VPRIV bool inline_object_size(ecx *e, uint32_t fn, uint32_t call, uint32_t pointer, uint32_t mode, i128 *size);
 VPRIV uint32_t direct_callee(cc *c, uint32_t fn, uint32_t *ref);
 VPRIV val gen_call(ecx *e, uint32_t n);
 /* builtin.c */

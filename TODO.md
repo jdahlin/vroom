@@ -182,6 +182,13 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
   if 32 bits).  x86-64's walker does it right.
   *Validate:* `ccs/vcc/tests/vcc/vec_wide_lanes.c` (xfail on arm64).
 
+- [ ] **arm64: the hardening options are accepted and ignored.**
+  `-ftrivial-auto-var-init=zero`, `-fstack-protector*`, `-fpatchable-function-entry`
+  (and on x86 only `-fcf-protection`, `-mfunction-return=`, `-mretpoline-external-thunk`)
+  are implemented for x86-64 (cc_opts.xcf ...); arm64 accepts them silently,
+  so a kernel built with them lacks the protection.
+  *Validate:* `ccs/vcc/tests/vcc/autoinit_zero.c` (xfail on arm64).
+
 - [x] **Branch range: no relaxation for b.cond/cbz/tbz/adr** [P].  Done for
   functions without inline asm (`r_relax` in emit.c: b.!cond .+8; b label,
   iterated to a fixed point, only for functions over 1 MB); with inline asm,
@@ -749,6 +756,23 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
   `B(__clang__)`) it is 1 and the error is clang's "expected ']'" (not
   "expected attribute name").  The `]` fix-it line and clang's later errors there belong to
   the error recovery item.)
+- [ ] **General object-size provenance** [P]. The Linux milestone on base
+  `9d022c3` handles strict-flex levels 0–3, declared subobjects without padding,
+  minimum mode 3, stable `counted_by` pointer fields (dynamic modes 0–2), and
+  direct immutable inline pointer parameters. Volatile pointer/base expressions
+  stay unknown without reads. Five unchanged GCC cases (`pr101836_1/2/3`,
+  `pr39343`, `pointer-counted-by-8`) and permanent regressions cover this scope.
+  Still missing: general control-flow/alias provenance, transitive inline
+  bindings, `alloc_size` inference, and dynamic side-effecting expressions.
+  Wasm inline argument-bound propagation remains unsupported: the unchanged
+  `object_size_inline` regression gives identical assembly and runtime failure
+  with main `9d022c3` and this milestone on wasm32/64; Clang passes. Its
+  expected-failure marker executes the test and rejects XPASS.
+  Do not infer a whole allocation from a known subobject or treat unknown as
+  known. Full S4 and non-Linux targets remain separate gates.
+  *Validate:* unity and file-by-file builds; own x86/ARM runtime suites;
+  `vcc-gcc-dg.py` on those five sources; strict-flex 0–3, volatile/null-base and
+  raw allocation probes; kernel `vcc-sema.py run` and `batch` (887 TUs).
 - [x] **Attributes without effect**: none left.  Accepted
   and needing nothing today: `returns_twice` (locals live in memory:
   `tests/vcc/returns_twice.c`; the optimizer item must honour it when

@@ -38,6 +38,16 @@ VPRIV rec *x64_put(ecx *e, int op)
 	xst *X = e->x64;
 	rec *r;
 
+	if (!e->reach && op != X_LABEL) {
+		/* unreachable code is not emitted (as arm64): it may name a string or a symbol
+		   nobody claimed (note_ref skips them) */
+		static _Thread_local rec sink;
+
+		memset(&sink, 0, sizeof sink);
+		sink.op = (uint8_t)op;
+		sink.r[0] = sink.r[1] = sink.r[2] = sink.r[3] = XNOREG;
+		return &sink;
+	}
 	if (unlikely(X->nin == X->capin))
 		efatal(e, e->curloc, "function too large");
 	r = &X->in[X->nin++];
@@ -135,6 +145,18 @@ VPRIV int x64_treg(ecx *e)
 			X->live |= 1u << x64_order[k];
 			return x64_order[k];
 		}
+	if (X->asmcs) {
+		/* an asm that clobbers every temporary (call_on_stack): its operands in callee-saved
+		   registers, as clang (the prologue saves them) */
+		static const int cs[] = { RBX, R12, R13, R14, R15 };
+
+		for (int k = 0; k < 5; k++)
+			if (!(X->live & (1u << cs[k]))) {
+				X->live |= 1u << cs[k];
+				x64_csused(e, cs[k]);
+				return cs[k];
+			}
+	}
 	efatal(e, e->curloc, "x86-64: expression too complex (out of registers)");
 }
 
@@ -551,8 +573,9 @@ VPRIV void x64_dbgrow(ecx *e, uint32_t loc)
 
 VPRIV void x64_label(ecx *e, uint32_t l)
 {
+	e->reach = true;
 	x64_put(e, X_LABEL)->label = l;
-	e->reach = true;	/* (the walker skips label-free statements after a jump) */
+	wk_ael_clear(e, UINT32_MAX);	/* (other edges come in: element values unknown) */	/* (the walker skips label-free statements after a jump) */
 }
 VPRIV void x64_jump(ecx *e, uint32_t l) { x64_put(e, X_JMP)->label = l; }
 VPRIV void x64_jumpr(ecx *e, int r) { x64_op3(e, X_JMPR, 8, XNOREG, r, XNOREG); x64_tfree(e, r); }
@@ -609,6 +632,19 @@ VPRIV void x64_finish(ecx *e, uint32_t s)
 	start = b->n;
 	sym_header(e, b, s, true, "\t.text\n", 16);
 	x64_print(e, b, s);
+	if (e->E->o->pfe_n) {
+		/* the patchable entry's address (the M nops before it, else the entry itself) */
+		tb_s(b, "\t.pushsection\t__patchable_function_entries,\"awo\",@progbits,");
+		sym_name(e->c, b, s);
+		tb_s(b, "\n\t.p2align\t3\n\t.quad\t");
+		if (e->E->o->pfe_m) {
+			tb_s(b, ".Lpfe");
+			tb_u(b, s);
+		} else {
+			sym_name(e->c, b, s);
+		}
+		tb_s(b, "\n\t.popsection\n");
+	}
 	{
 		const attrs *a = sym_attrs(e->c, s);
 

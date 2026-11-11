@@ -321,6 +321,8 @@ static void wk_decl(ecx *e, const node *x)
 	uint32_t s = x->a;
 	const sym *y = &c->syms[s];
 
+	wk_ael_clear(e, s);
+
 	if (!x->aux && unlikely(vm_type(c, y->ty)))
 		wk_vla_fix(e, y->ty, false);
 	if (y->kind != S_VAR || y->sc == SC_STATIC || y->sc == SC_EXTERN || y->sc == SC_TYPEDEF)
@@ -335,8 +337,10 @@ static void wk_decl(ecx *e, const node *x)
 		cval cv;
 		uint8_t f = e->E->sflags[s];
 
-		if (!(f & (SA_WRITTEN | SA_CWRITE)) && !(QQ(y->ty) & Q_VOLATILE) && y->sc != SC_REGISTER &&
-		    (is_integer(c, y->ty) || is_ptr(c, y->ty)) && !wk_mem(e, y->ty) && cc_eval(c, x->b, &cv) && cv.kind == CV_INT) {
+		if (!(f & (SA_WRITTEN | SA_CMULTI)) && !(QQ(y->ty) & Q_VOLATILE) && y->sc != SC_REGISTER &&
+		    (is_integer(c, y->ty) || is_ptr(c, y->ty)) && !wk_mem(e, y->ty) && cc_eval(c, x->b, &cv) && cv.kind == CV_INT &&
+		    (!(f & SA_CWRITE) || (is_integer(c, y->ty) && e->E->cwval[s] == em_trunc_to(c, cv.i, y->ty)))) {
+			/* (SA_CWRITE: every assignment stores this same constant, as set_uncached = IS_ENABLED(...)) */
 			e->wk->kgen[s] = e->wk->gen;
 			e->wk->kval[s] = vconst(em_trunc_to(c, cv.i, y->ty));
 			return;
@@ -347,6 +351,20 @@ static void wk_decl(ecx *e, const node *x)
 
 		if (!LO(local)(e, s, &l))
 			l.off = wk_local(e, s);
+		if (!x->b && e->E->o->autozero && tsize(c, y->ty) && !(y->sc == SC_REGISTER && sym_attrs(c, s)->asmname)) {
+			/* -ftrivial-auto-var-init=zero: a local without an initializer starts as zeros
+			   (a scalar by a store: it may live in a register) */
+			if (wk_mem(e, y->ty) || is_array(c, y->ty)) {
+				int rd = LO(laddr)(e, &l);
+
+				LO(zero)(e, rd, tsize(c, y->ty));
+				LO(tfree)(e, rd);
+			} else {
+				val z = wk_conv(e, vconst(0), prim(TY_INT), y->ty);
+
+				wk_store(e, &l, y->ty, &z);
+			}
+		}
 		wk_init(e, &l, y->ty, x->b);
 	}
 	if (sym_attrs(c, s)->cleanup) {
@@ -477,6 +495,14 @@ VPRIV bool wk_branch_entry(cc *c, uint32_t n)
 			if (wk_branch_entry(c, a->ops[i].expr)) return true;
 		return false;
 	}
+	case N_DECL: {
+		/* (a VLA or a cleanup variable needs its scope walked; else only its initializer) */
+		const sym *y = &c->syms[x->a];
+
+		if (y->kind == S_VAR && ((T(c, y->ty)->flags & TF_VLA) || sym_attrs(c, x->a)->cleanup))
+			return true;
+		return y->kind == S_VAR && y->sc != SC_STATIC && y->sc != SC_EXTERN && wk_branch_entry(c, x->b);
+	}
 	default:
 		return true;
 	}
@@ -562,8 +588,43 @@ static void wk_switch(ecx *e, uint32_t n)
 	int w = wk_size(c, ct) > 4 ? 8 : 4;
 	bool sg = wk_signed(c, ct);
 	uint32_t c0 = W->ncases, lbrk = wk_newlabel(e), ldef = lbrk;
-	val v = wk_gen(e, x->a);
-	int r = wk_reg(e, &v, ct);
+	val v;
+	int r;
+
+	if (!side_effects(c, x->a) && !wk_mem(e, ct) && wk_isconst(e, x->a)) {
+		/* a constant (switch (sizeof(x)) in the kernel's macros): only the selected case,
+		   the others dead as clang -O2 drops them (their __bad_size() calls) */
+		bool on0 = W->swon;
+		uint32_t sel0 = W->swsel, sel = 0;
+		i128 k;
+
+		v = wk_gen(e, x->a);
+		if (v.k == V_CONST) {
+			k = em_trunc_to(c, v.i, ct);
+			wk_cases(e, x->b);
+			for (uint32_t i = c0; i < W->ncases && !sel; i++)
+				if (N(W->cases[i].node)->op == N_CASE && W->cases[i].lo <= k && k <= W->cases[i].hi)
+					sel = W->cases[i].node;
+			for (uint32_t i = c0; i < W->ncases && !sel; i++)
+				if (N(W->cases[i].node)->op == N_DEFAULT)
+					sel = W->cases[i].node;
+			W->ncases = c0;
+			if (W->nloop == WK_MAXLOOP)
+				efatal(e, x->loc, "statements nested too deeply");
+			W->loop[W->nloop++] = (wkloop){ lbrk, 0, W->nclean };
+			W->swon = true, W->swsel = sel;
+			LO(jump)(e, sel ? wk_caselabel(e, sel) : lbrk);	/* (a user label before it is no fall-through) */
+			e->reach = false;
+			wk_stmt(e, x->b);
+			W->swon = on0, W->swsel = sel0;
+			W->nloop--;
+			LO(label)(e, lbrk);
+			return;
+		}
+		wk_free(e, &v);
+	}
+	v = wk_gen(e, x->a);
+	r = wk_reg(e, &v, ct);
 
 	wk_cases(e, x->b);
 	uint32_t count = W->ncases - c0;
@@ -633,7 +694,13 @@ static void wk_switch(ecx *e, uint32_t n)
 	if (W->nloop == WK_MAXLOOP)
 		efatal(e, x->loc, "statements nested too deeply");
 	W->loop[W->nloop++] = (wkloop){ lbrk, 0, W->nclean };
-	wk_stmt(e, x->b);
+	{
+		bool on0 = W->swon;
+
+		W->swon = false;	/* (its cases are this switch's) */
+		wk_stmt(e, x->b);
+		W->swon = on0;
+	}
 	W->nloop--;
 	wk_label(e, lbrk);
 }
@@ -741,6 +808,8 @@ VPRIV void wk_stmt(ecx *e, uint32_t n)
 	if (!n)
 		return;
 	x = N(n);
+	if (!e->reach && !(e->E->nflags[n] & NA_LABEL) && x->op != N_BLOCK)
+		return;	/* unreachable and no label or case in it: nothing to generate */
 	e->curloc = x->loc;
 	if (unlikely(e->E->o->debug) && x->op != N_BLOCK)
 		LO(dbgrow)(e, x->loc);
@@ -777,6 +846,15 @@ VPRIV void wk_stmt(ecx *e, uint32_t n)
 		return;
 	}
 	case N_EXPR:
+		if (x->a && e->E->o->opt && !side_effects(c, x->a)) {
+			/* a plain load whose value is dropped: not even made, as clang -O2 ((void)RCU) */
+			uint32_t t = x->a;
+
+			while (N(t)->op == N_CAST && N(t)->a)
+				t = N(t)->a;
+			if (N(t)->op == N_VAR || N(t)->op == N_NUM)
+				return;
+		}
 		if (x->a) {
 			val v = wk_gen(e, x->a);
 
@@ -794,7 +872,14 @@ VPRIV void wk_stmt(ecx *e, uint32_t n)
 			return;
 		}
 		val test = vnone();
-		if ((cc_eval(c, x->a, &cv) && cv.kind == CV_INT) || wk_isconst(e, x->a)) {
+		uint32_t tc = x->a;
+
+		while ((N(tc)->op == N_CAST && N(tc)->a) || (N(tc)->op == N_UNARY && N(tc)->aux == T_EXCLAIM))
+			tc = N(tc)->a;
+		/* (a call too: an inlined function or a folded builtin may give a constant,
+		   if (!__builtin_strcmp(op, "<")), if (dax_mapping(m))) */
+		if ((cc_eval(c, x->a, &cv) && cv.kind == CV_INT) || wk_isconst(e, x->a) || N(tc)->op == N_CALL ||
+		    (N(tc)->op == N_STMTEXPR && !(e->E->nflags[tc] & NA_LABEL))) {	/* (WARN_ON_ONCE(1): a constant from a statement expression) */
 			/* Front-end constant_p can change after binding inline arguments.
 			   Trust the generated value and retain condition effects exactly once. */
 			test = wk_gen(e, x->a);
@@ -805,10 +890,21 @@ VPRIV void wk_stmt(ecx *e, uint32_t n)
 		}
 		uint32_t lelse = wk_newlabel(e), lend = wk_newlabel(e);
 
-		if (test.k == V_NONE)
+		if (test.k == V_NONE) {
+			e->wk->cjump = false;
 			wk_cond(e, x->a, false, lelse);
-		else
+			if (e->wk->cjump && e->reach && !(e->E->nflags[x->b] & NA_LABEL)) {
+				/* false whatever its operands (0 << x != 0, a dead && operand): the then branch is dead */
+				e->wk->cjump = false;
+				wk_label(e, lelse);
+				if (x->c)
+					wk_stmt(e, x->c);
+				wk_label(e, lend);
+				return;
+			}
+		} else {
 			LO(brz)(e, wk_conv(e, test, N(x->a)->ty, prim(TY_BOOL)), 4, false, lelse);
+		}
 		wk_stmt(e, x->b);
 		if (x->c) {
 			LO(jump)(e, lend);
@@ -878,7 +974,8 @@ VPRIV void wk_stmt(ecx *e, uint32_t n)
 		wk_switch(e, n);
 		return;
 	case N_CASE: case N_DEFAULT:
-		wk_label(e, wk_caselabel(e, n));
+		if (!W->swon || n == W->swsel)
+			wk_label(e, wk_caselabel(e, n));	/* (a constant switch: the selected case only) */
 		wk_stmt(e, x->c);
 		return;
 	case N_LABEL:
@@ -889,6 +986,7 @@ VPRIV void wk_stmt(ecx *e, uint32_t n)
 		return;
 	case N_GOTO:
 		wk_goto(e, x->a);
+		e->reach = false;	/* (what follows is dead until a label: not emitted) */
 		return;
 	case N_BREAK: case N_CONTINUE: {
 		int i = W->nloop - 1;
@@ -899,6 +997,7 @@ VPRIV void wk_stmt(ecx *e, uint32_t n)
 			efatal(e, x->loc, "break/continue outside a loop");
 		wk_cleanups(e, W->loop[i].cdepth);
 		LO(jump)(e, x->op == N_BREAK ? W->loop[i].brk : W->loop[i].cont);
+		e->reach = false;
 		return;
 	}
 	case N_RETURN:
@@ -932,6 +1031,7 @@ VPRIV void wk_stmt(ecx *e, uint32_t n)
 			}
 			wk_cleanups(e, I->cbase);
 			LO(jump)(e, I->endlbl);
+			e->reach = false;
 			return;
 		}
 		if (x->a && wk_mem(e, W->rty)) {
@@ -986,6 +1086,7 @@ VPRIV void wk_stmt(ecx *e, uint32_t n)
 			wk_cleanups(e, 0);
 			LO(ret)(e, NULL, prim(TY_VOID), W->retlbl);
 		}
+		e->reach = false;
 		return;
 	case N_ASM: {
 		e->kvalid = 0;
@@ -1037,6 +1138,36 @@ VPRIV bool wk_const_sym(ecx *e, uint32_t s, val *v)
  * inlining).  Not: variadic or unprototyped, recursive, a label address
  * taken (one copy only), deeper than 16.
  */
+/* a tiny static function clang would inline: no inline asm, no locals aligned above 16
+   (either could need registers the caller's frame holds) */
+static bool wk_tiny_ok(cc *c, uint32_t n)
+{
+	const node *x;
+
+	if (!n)
+		return true;
+	x = N(n);
+	switch (x->op) {
+	case N_ASM:
+		return false;
+	case N_DECL:
+		return c->syms[x->a].kind != S_VAR || sym_align(c, x->a) <= 16;
+	case N_BLOCK:
+		for (uint32_t i = 0; i < x->c; i++)
+			if (!wk_tiny_ok(c, c->lists[x->b + i]))
+				return false;
+		return true;
+	case N_IF:
+		return wk_tiny_ok(c, x->b) && wk_tiny_ok(c, x->c);
+	case N_WHILE: case N_DO: case N_SWITCH: case N_LABEL: case N_CASE: case N_DEFAULT:
+		return wk_tiny_ok(c, x->op == N_LABEL || x->op == N_CASE || x->op == N_DEFAULT ? x->c : x->b);
+	case N_FOR:
+		return wk_tiny_ok(c, c->lists[x->c + 1]);
+	default:
+		return true;
+	}
+}
+
 VPRIV bool wk_can_inline(ecx *e, uint32_t s)
 {
 	cc *c = e->c;
@@ -1051,10 +1182,12 @@ VPRIV bool wk_can_inline(ecx *e, uint32_t s)
 	if (!(y->flags & SF_ALWAYS_INLINE)) {
 		if (!e->E->o->opt)
 			return false;
-		if ((y->flags & SF_NOINLINE) || !(y->flags & SF_INLINE))
+		if ((y->flags & SF_NOINLINE) || (!(y->flags & SF_INLINE) && y->sc != SC_STATIC))
 			return false;
 		walk_fn(e, s);
 		if (e->E->fnsize[s] > WK_INLINE_NODES)
+			return false;	/* (a tiny static function too, as clang: an empty stub drops its arguments) */
+		if (!(y->flags & SF_INLINE) && !wk_tiny_ok(c, y->body))
 			return false;
 	}
 	ensure_walked(e->E, c, s);
@@ -1073,11 +1206,12 @@ VPRIV val wk_inline(ecx *e, uint32_t n, uint32_t s)
 	cc *c = e->c;
 	wkst *W = e->wk;
 	const node *x = N(n), *body = N(c->syms[s].body);
-	wkinl I = { .up = W->inl, .fn = s, .endlbl = wk_newlabel(e), .rty = T(c, c->syms[s].ty)->base, .cbase = W->nclean,
+	wkinl I = { .up = W->inl, .fn = s, .call = n, .endlbl = wk_newlabel(e), .rty = T(c, c->syms[s].ty)->base, .cbase = W->nclean,
 		    .cst_ok = true };
 	uint32_t inst0 = W->inst;
 	val res;
 
+	memcpy(I.ael0, W->ael, sizeof I.ael0), I.nael0 = W->nael;
 	walk_fn(e, s);
 	if (KIND(c, I.rty) != TY_VOID)
 		I.rslot = wk_slot(e, tsize(c, I.rty) ? tsize(c, I.rty) : 8, talign(c, I.rty) < 8 ? 8 : talign(c, I.rty));
@@ -1090,10 +1224,17 @@ VPRIV val wk_inline(ecx *e, uint32_t n, uint32_t s)
 		for (uint32_t i = 0; i < body->aux; i++) {
 			uint32_t p = c->lists[body->a + i];
 			qty pt = c->syms[p].ty;
-			val v = i < x->c ? wk_gen(e, c->lists[x->b + i]) : vconst(0);
+			/* an argument the copy never reads, without side effects: not evaluated, as clang
+			   (the kernel's __acquire_shared_ctx_lock(RCU): RCU is an extern never defined) */
+			val v = i < x->c && ((e->E->sflags[p] & SA_USED) || side_effects(c, c->lists[x->b + i]) ||
+					     wk_mem(e, pt) || is_flt(c, pt))
+				? wk_gen(e, c->lists[x->b + i]) : vconst(0);
 
 			as[i] = 0;
-			if (v.k != V_CONST || wk_mem(e, pt) || is_flt(c, pt)) {
+			/* (an address constant, &key, stays one too: an asm "i" operand in the copy) */
+			bool kaddr = v.k == V_ADDR && is_ptr(c, pt) && !wk_weak0(c, v);
+
+			if ((v.k != V_CONST && !kaddr) || wk_mem(e, pt) || is_flt(c, pt)) {
 				lval l = { .k = L_FRAME, .off = wk_slot(e, tsize(c, pt) ? tsize(c, pt) : 8, talign(c, pt) < 8 ? 8 : talign(c, pt)), .align = 8 };
 
 				as[i] = (int64_t)l.off;
@@ -1118,10 +1259,20 @@ VPRIV val wk_inline(ecx *e, uint32_t n, uint32_t s)
 			if (!as[i] && !(e->E->sflags[p] & (SA_WRITTEN | SA_CWRITE)) && !(QQ(pt) & Q_VOLATILE) &&
 			    !sym_attrs(c, p)->cleanup) {
 				W->kgen[p] = W->gen;
-				W->kval[p] = vconst(em_trunc_to(c, av[i].i, pt));
+				W->kval[p] = av[i].k == V_ADDR ? av[i] : vconst(em_trunc_to(c, av[i].i, pt));
 				continue;
 			}
 			W->kgen[p] = 0;
+			if ((av[i].k == V_CONST || (av[i].k == V_ADDR && is_ptr(c, pt) && !wk_weak0(c, av[i]))) && !wk_mem(e, pt) &&
+			    !is_flt(c, pt) && W->npk < 16) {
+				int k;
+
+				for (int j = 0; j < W->npk; j++)	/* (an earlier copy's binding) */
+					if (W->pk[j].s == p)
+						W->pk[j] = W->pk[--W->npk], j--;
+				k = W->npk++;
+				W->pk[k].s = p, W->pk[k].gen = W->gen, W->pk[k].inst = 0, W->pk[k].v = av[i];
+			}
 			v = as[i] ? wk_reload(e, &t, pt) : av[i];
 			if (wk_mem(e, pt)) {
 				v = wk_putmem(e, &l, pt, v);
@@ -1153,6 +1304,9 @@ VPRIV val wk_inline(ecx *e, uint32_t n, uint32_t s)
 	W->inl = I.up;
 	W->inst = inst0;
 	wk_label(e, I.endlbl);
+	/* the callee cannot touch the caller's non-escaping local arrays: their known
+	   elements (the snapshot at the call) hold past the copy's labels */
+	memcpy(W->ael, I.ael0, sizeof I.ael0), W->nael = I.nael0;
 	if (KIND(c, I.rty) == TY_VOID)
 		return vconst(0);
 	if (I.any && I.cst_ok)
@@ -1215,6 +1369,8 @@ VPRIV void wk_function(ecx *e, uint32_t s)
 	}
 	if (!pa)
 		efatal(e, y->loc, "out of memory");
+	W->canary = e->E->o->sprot ? wk_slot(e, 8, 8) : 0;
+	W->spneed = e->E->o->sprot == 3;
 	if (KIND(c, W->rty) != TY_VOID) {
 		int k = KIND(c, W->rty);
 

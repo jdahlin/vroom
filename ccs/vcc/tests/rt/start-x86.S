@@ -6,6 +6,23 @@
 _start:
 	xorl	%ebp, %ebp
 	andq	$-16, %rsp
+	/* a static PIE relocates itself: R_X86_64_RELATIVE only, the load bias
+	   being where _start is less where link-x86.ld put it (.text.start first) */
+	leaq	_start(%rip), %rdx
+	subq	$0x401000, %rdx
+	leaq	__rela_start(%rip), %rsi
+	leaq	__rela_end(%rip), %rdi
+1:	cmpq	%rdi, %rsi
+	jae	2f
+	cmpl	$8, 8(%rsi)			/* R_X86_64_RELATIVE */
+	jne	3f
+	movq	16(%rsi), %rax
+	addq	%rdx, %rax
+	movq	(%rsi), %rcx
+	movq	%rax, (%rcx,%rdx)
+3:	addq	$24, %rsi
+	jmp	1b
+2:
 	/* tp: 16 KB into the 4 KB-aligned area; the block below it (its tpoff) */
 	leaq	tls_area+16384(%rip), %rbx
 	movq	%rbx, (%rbx)			/* the TCB's self pointer (%fs:0) */
