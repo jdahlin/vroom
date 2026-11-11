@@ -256,6 +256,7 @@ VPRIV void LO(params)(ecx *e, wkarg *a, int n, const wkarg *r, bool variadic);
 VPRIV bool LO(tail_return)(ecx *e, uint32_t expr);
 VPRIV void LO(ret)(ecx *e, val *v, qty t, uint32_t lbl);	/* a scalar result of type t (v may be NULL), then to lbl */
 VPRIV void LO(retrec)(ecx *e, int raddr, const wkarg *r, uint32_t lbl);	/* a record result from the object at raddr */
+VPRIV val LO(intrinsic)(ecx *e, uint32_t n);
 VPRIV val LO(pcmpstr)(ecx *e, uint32_t n);
 VPRIV void LO(va_start)(ecx *e, int rap);			/* the va_list at rap */
 VPRIV int LO(va_arg)(ecx *e, int rap, qty t);		/* the next argument's address */

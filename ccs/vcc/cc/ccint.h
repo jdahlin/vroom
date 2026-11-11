@@ -6,6 +6,7 @@
  */
 #include <setjmp.h>
 #include "cc.h"
+#include "../arch/x64/intrinsics.h"
 #include "../lib/intern.h"
 
 #define unlikely(x) __builtin_expect(!!(x), 0)
@@ -327,7 +328,7 @@ enum {
 	BI_LIB,	/* plain library call with a prototype */
 	BI_NANS, BI_ISSIGNALING,
 	BI_ISFPCLASS, BI_ISSUBNORMAL, BI_ISZERO,
-	BI_X86_SIMD, BI_X86_PCMPSTR, BI_X86_BLENDVB,
+	BI_X86, BI_X86_OVERLOAD, BI_X86_PCMPSTR, BI_X86_BLENDVB,
 	BI_ELEMENTWISE_ABS,
 	BI_STDC_ROTL, BI_STDC_ROTR,
 	BI_FAST_SQRT,	/* internal hardware sqrt, full fast-math only */
