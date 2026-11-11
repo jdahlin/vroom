@@ -3352,3 +3352,15 @@ icke-matchande unary-uttryck kostade +1,86 % compiler-instruktioner x86 och
 och −4,25 %. Detta är syntetiska extremfall. Proveniens finns i
 `work/opt-profile/local-values-unary-{cost,cputime,saturated}/`. Generell
 CSE och G5/G7 återstår.
+
+En billig strukturell kontroll avvisar nu vissa olika unära operatorer före
+värdetabellen. Samma mättade kontroll gav −1,54 % x86 och −1,76 % wasm64
+compiler-instruktioner mot basen med identisk assembler; det positiva fallet
+−5,29 % respektive −4,17 %. Dessa syntetiska resultat kan påverkas av
+kompilatorns kodlayout. Den matchade blandade korpusen gav +0,016 % x86,
++0,014 % arm64, +0,023 % wasm32 och +0,023 % wasm64. Sju växelvisa rundor
+med samma 28 kärnfiler gav median användar-CPU 0,77263 → 0,78845 s på delad
+värd; variationen och det korta samplet medger ingen generell tidsgräns.
+Fyrmålsprov O0–O3 i båda bygglägen, O0/noopt-paritet samt vcc 258/258 och en
+befintlig xfail passerar. Proveniens finns i `work/opt-profile/local-values-
+unary-prefilter-{cost,cputime,saturated}/`.
