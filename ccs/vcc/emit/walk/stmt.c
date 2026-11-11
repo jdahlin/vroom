@@ -898,7 +898,15 @@ static void wk_stmt1(ecx *e, uint32_t n)
 			if (!vs && d->op == N_DECL && c->syms[d->a].kind == S_VAR && c->syms[d->a].sc != SC_TYPEDEF &&
 			    c->syms[d->a].sc != SC_STATIC && c->syms[d->a].sc != SC_EXTERN && (T(c, c->syms[d->a].ty)->flags & TF_VLA))
 				vs = d->a;
-			wk_stmt(e, c->lists[x->b + i]);
+			uint32_t from, to;
+			if (i && em_decl_return_values(e, c->lists[x->b + i - 1], c->lists[x->b + i], &from, &to)) {
+				uint32_t oldfrom = e->reuse_from, oldto = e->reuse_to;
+				e->reuse_from = from; e->reuse_to = to;
+				wk_stmt(e, c->lists[x->b + i]);
+				e->reuse_from = oldfrom; e->reuse_to = oldto;
+			} else {
+				wk_stmt(e, c->lists[x->b + i]);
+			}
 			if (d->op == N_DECL && c->syms[d->a].kind == S_VAR && c->syms[d->a].sc != SC_TYPEDEF &&
 			    c->syms[d->a].sc != SC_STATIC && c->syms[d->a].sc != SC_EXTERN && (T(c, c->syms[d->a].ty)->flags & TF_VLA)) {
 				if (W->nvla == WK_MAXCLEAN) efatal(e, d->loc, "too many cleanup variables in scope");

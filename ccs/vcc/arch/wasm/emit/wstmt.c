@@ -205,7 +205,15 @@ static void wstmts(ecx *e, const node *x, uint32_t i0, uint32_t i1)
 
 		if (dead && !wlabels(c, s))
 			continue;
-		wstmt(e, s);
+		uint32_t from, to;
+		if (i > i0 && em_decl_return_values(e, c->lists[x->b + i - 1], s, &from, &to)) {
+			uint32_t oldfrom = e->reuse_from, oldto = e->reuse_to;
+			e->reuse_from = from; e->reuse_to = to;
+			wstmt(e, s);
+			e->reuse_from = oldfrom; e->reuse_to = oldto;
+		} else {
+			wstmt(e, s);
+		}
 		dead = wterm(c, s);
 	}
 }

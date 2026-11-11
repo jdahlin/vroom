@@ -290,7 +290,15 @@ VPRIV val gen_block(ecx *e, uint32_t n, bool want)
 			}
 			break;
 		}
-		gen_stmt(e, s);
+		uint32_t from, to;
+		if (i && em_decl_return_values(e, c->lists[x->b + i - 1], s, &from, &to)) {
+			uint32_t oldfrom = e->reuse_from, oldto = e->reuse_to;
+			e->reuse_from = from; e->reuse_to = to;
+			gen_stmt(e, s);
+			e->reuse_from = oldfrom; e->reuse_to = oldto;
+		} else {
+			gen_stmt(e, s);
+		}
 	}
 	if (e->nclean > cmark) {
 		run_cleanups(e, cmark);

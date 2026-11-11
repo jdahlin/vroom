@@ -49,6 +49,9 @@ def check_localvalues(assembly, arch):
     add = r'i32\.add\b' if wasm else r'\badd\s+w' if arch == 'aarch64' else r'\baddl\b'
     if len(re.findall(add, text)) != 1:
         raise RuntimeError(f'sibling value must be computed once\n{text}')
+    text = body(assembly, 'lvr_reuse', wasm)
+    if len(re.findall(add, text)) != 1:
+        raise RuntimeError(f'declaration value must be reused in return\n{text}')
     text = body(assembly, 'lvr_volatile', wasm)
     load = r'i32\.load\b' if wasm else r'\bldr\s+w' if arch == 'aarch64' else r'observed\(%rip\)'
     if len(re.findall(load, text)) != 2:
