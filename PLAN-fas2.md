@@ -2008,6 +2008,168 @@ frame-moves (382 till 378 instruktioner). Motsvarande wasm32-fall går från
 46 till 32 i32.load och 31 till 29 i32.store mot tidigare referensbinär.
 Det sista är en avgränsad jämförelse mellan binärer, inte isolerad kostnad.
 
+OPT5 gemensam cellklassificering: em_slot_collect samlar intervall i en enda
+ström. Första exakta intervallet sparas när en allokering övergår från ett till
+flera intervall; alla följande intervall går direkt till gemensam klassificering.
+Anropare behöver varken spela upp posterna eller skapa en separat indexbuffert.
+Blanda inte insamlingslägen efter övergången till flera intervall.
+ASan/UBSan: samma deterministiska intervalloracle för båda API-lägena,
+400 slumpade återanvändningar av scratch, sortgränser 15/16/17, överlappningar,
+ID0-förgiftning, escapes, duplicerade första intervall och ogiltiga ID/storlekar.
+Mutationen som tappar första intervallet avvisas. x86 används först;
+arm64/wasm kan byta till hjälparen separat med paritets- och kostnadskontroll.
+
+
+OPT5 strömmande arm64-/wasm-insamling (2026-11-11): båda adaptrarna använder
+nu `em_slot_collect`; den andra hela genomgången av poster/händelser försvinner.
+Hjälparen validerar kända intervall en gång och uppdaterar allokeringsstatus direkt;
+ID0 använder oförändrad fysisk förgiftning. Klassificering, värdeflöde och utskrift
+är oförändrade. Separata backendfiler behålls.
+
+Matchad v3-mätning (`-O3 -march=x86-64-v3`, hela processens Callgrind-Ir,
+O1/O2, bas 781ca69 mot 54580f7 + dessa ändringar) ger för tvåfält/500 funktioner
+arm64 −0,294 %, wasm32/64 −0,160 %; för 16 fält/100 funktioner −0,453 %
+respektive −0,145 %. Ett fält/500 funktioner kostar +0,053 % respektive
++0,050 %. Skalär kontroll +0,006–0,007 %, loopkontroll arm64 +0,071 %,
+wasm +0,006 %. Detta är instruktionskostnad vid kompilering, inte körtid.
+Första access+collect-varianten och en mellanvariant avvisades: wasm ökade
+på stora fallet (+0,246 %). Slutversionen behålls eftersom flerfältsfallen
+förbättras på båda mål utan stor enkelfältsregression. Rådata, exakta kommandon,
+käll-/binärhashar och byteparitet finns lokalt under
+`work/opt-profile/stream-collectors-{direct-cost,direct-large-cost,parity}`;
+avvisade `stream-collectors-{cost,first-range-cost,large-cost}` finns kvar.
+Basens kompilatorfiler matchar 54580f7; endast testfixturen från PR48 skiljer.
+
+Verifiering: ASan/UBSan för slumpad intervalloracle i båda API-lägena och
+mutation som tappar första intervallet; 118 byteidentiska par (O1/O2, fyra mål,
+inklusive 24 arm64-objekt), separat observerbara volatile-/atomic-accesser med
+mutation samt wasm32/64 celltester O0–O3. Två wasm32 atomic_ops-par avvisas
+identiskt av basen p.g.a. testets LP64-antaganden och räknas inte som godkända.
+Unity- och separatfilbygge med j2 passerar, liksom värdetillståndets sanitizerkontrakt.
+Ingen ny emissionsregel eller full O2-täckning; full prestandagrind återstår.
+
+
+OPT5 fysisk förgiftning, liten uppföljning: när två senast insamlade ID0-intervall
+har exakt samma offset och storlek sparas bara ett. Klassificeringen använder
+intervallens union; validering sker fortfarande före jämförelsen. Ingen ny
+buffert eller status införs. Slumporaclet innehåller nu upprepade poison-runs;
+en andra mutation som ignorerar storleken avvisas av ett samma-offset/bredare-fall.
+ASan/UBSan, båda mutationer, 118 byteparitetspar och observerbarhetskontrakt
+passerar. Mot föregående d870b64 minskar en avgränsad upprepad volatile-range
+kompileringens Ir med 0,042 % på wasm och 0,039 % på arm64; alternerande
+intervall utan träff kostar 0,116 % respektive 0,105 %. Tidigare kontroller och
+flerfältsfall är i praktiken oförändrade. Båda belastningarna finns kvar i
+`work/opt-profile/stream-collectors-prune-poison{,-repeat}-cost/result.json`;
+hela slutversionens basjämförelser finns i `stream-collectors-prune{,-large}-cost`.
+Separat x86-integration rapporterar 13 397 färre Ir i sin riktiga grind;
+det är inte en full grind för denna arm64-/wasm-ändring. Ingen emissionsändring.
+
+### Fortsatt O0–O2-täckning: familjeledger efter OPT0–OPT8 (2026-11-11)
+
+**OPT0–OPT8 är första delsteg, inte hela O2-målet.** Den här kartan binder
+fortsättningen till verkliga inventarier och källkod i den privata
+kombinationen `da64f05` (ingen ny kompilatormätning i detta dokumentsteg).
+`bench/optaudit/coverage-ledger.json` grupperar **varje** distinkt post i
+rapportens GCC-`enabled_options` och LLVM-`observed_passes`, O0/O1/O2, exakt
+en gång i 20 familjer. Där finns fullständiga namn, nivåmedlemskap,
+konkreta kodfiler per mål, familjestatus och återstående arbete. Det är en
+avprickad *inventariemappning*, inte full optimeringstäckning.
+
+Underlag: `work/opt-profile/audit-switch-integrated/report.json`, SHA256
+`cb92d9f847cc89ce574ef6fccc91c2ad8ab862a0989f0fa19c76cf607a1658ca`.
+Rapportens vcc-revision är `54580f7`, alltså **före** kodkombinationen ovan;
+dess assemblymått får inte märkas om till `da64f05`. Referenserna är GCC
+15.2.0 (Ubuntu 15.2.0-16ubuntu1) och Ubuntu Clang 23.1.6 (byggrevision
+c47d7823685a), på Ryzen 7 9700X. Samma 29 C-funktioner används vid
+`-march=x86-64 -fno-pie -fno-stack-protector -fcf-protection=none`.
+Probe-/anroparkällornas SHA256, vpp-binärhash, full versionssträng och
+SHA256 för granskade kompilatorkällor finns i annexet.
+
+| Inventarium | O0 | O1 | O2 | Union O0–O2 |
+| --- | ---: | ---: | ---: | ---: |
+| GCC: booleska alternativ märkta `[enabled]` | 50 | 92 | 141 | 142 |
+| LLVM: unika observerade `Running pass`-namn | 6 | 74 | 87 | 88 |
+
+Aktiverat GCC-alternativ betyder inte att motsvarande transform kördes
+eller ändrade något; även O0 listar flera sådana alternativ. Namn som
+`-fno-inline-stringops`, FP-/aliasregler och unwind är dessutom policy.
+Ett observerat LLVM-pass kan vara en tom genomgång, en wrapper eller
+metadatahantering. Rapportens GCC-`configured_passes_on` är ett separat
+inventarium och ingår inte i denna namnmappning. Parameterstyrda GCC-val,
+fullständiga maskinpass, körordning/antal, andra ISA:er, O3, LTO och PGO
+är inte inventerade här. Backendkolumnerna nedan är källgranskning,
+**inte** nya GCC/Clang-inventarier på arm64/wasm eller nya körbevis.
+
+I tabellen betyder **delvis** att en verklig begränsad implementation
+finns, inte att alla flaggor/pass i familjen täcks. **Saknas generellt**
+betyder att ingen motsvarande generell analys/transform identifierades
+i den granskade kodvägen; **overifierat** kräver riktade prober innan
+ett påstående om stöd eller avsaknad görs.
+
+| Familj, exempel ur inventariet | Faktiskt underlag i vcc och kvarvarande lucka |
+| --- | --- |
+| Heltalsförenkling: InstCombine, reassoc, div/rem | **Delvis, alla tre.** `opt/{identity,divpow2,sdivpow2,udivconst}.c` med separata adaptrar. U32-reciproker har målkostnad/fallback; inte generell InstCombine. Små konstantmultiplikationer, fler bitregler, delat kvot/rest-recept och signed/u64-reciproker återstår. Float2Int är inte bevisat av heltalsreglerna. |
+| Värdefakta, CSE/PRE, intervall: CCP, GVN, SCCP | **Delvis lokalt.** `rec/copies.c`, `rec/slot-values.c` och förpassfakta; a64:s `opt.c`, x64:s `copies.c`/`extensions.c`, wasms `slots.c`. Ingen gemensam global GVN/PRE/SCCP eller generell intervallanalys. Börja med begränsad blocklokal cache för rena uttryck. |
+| Död kod och minne: DCE/DSE, store merging | **Delvis.** Gemensamma exakta frame-celler/storefakta och nåbarhetsstädning; a64 har egna dead-result-pass, x64 effektbeskrivning, wasm typade accesshändelser. Heap/global-DSE, bitvis DCE, allokeringseliminering, generell last/store-motion och looplasteliminering återstår/är overifierade. |
+| Kontroll och switch: SimplifyCFG, jump threading, bit tests | **Delvis.** `opt/control.c`, `opt/switch.c`, `rec/{fallthrough,unreachable}.c`; alla mål använder delade beslut, wasm har tät `br_table`. Värdetabeller/bitset-kluster, generell threading, compare merging och tail merging återstår. |
+| Skalär ersättning/promotion: SROA, mem2reg | **Delvis.** `opt/locals.c`, förpass och celler; a64 registerbindning, x64 fyra valda GPR-hem, wasm typade lokaler. Detta är inte generell aggregatsplittring eller join-medveten mem2reg. |
+| Loopmotion/induktion: LICM, IV opts, loop sink | **Saknas generellt.** Alla mål sänker loopar; förpassets loopviktade lokalval är inte LICM. CFG, dominans, loop-/beroendefakta och bevis om noll iterationer behövs före säker hoisting/IV-omskrivning. |
+| Loopform: rotation, deletion, unroll, unswitch/distribute | **Saknas generellt.** Målen har direkt satssänkning, inte dessa transformpass. Kräver trip-count-/effekt-/entrybevis och kodstorleksbudget; börja eventuellt med små exakt konstanta loopar. |
+| Vektorisering: loop, SLP, VectorCombine | **Delvis endast explicit.** A64 `expr.c:gen_vbin` har utvalda NEON-operationer plus lanefallback; x64-walkern och wasm `wexpr.c` använder lanevis väg för granskade GNU-vektorer. Packed SSE2/simd128-sänkning är ett eget tidigare steg. Automatisk loop/SLP kräver beroende-, alignment-, reduktions-, tail- och kostnadsmodell. |
+| Inlining/anrop: early/partial inline, TailCallElim | **Delvis, asymmetriskt.** A64 `call.c:can_inline`, x64 `walk/stmt.c:wk_can_inline` har olika behörighet; x64 stöder redan små vanliga statiska funktioner. Wasm `wcall.c` saknar motsvarande inliner. Delad policy, wasm-instansiering och begränsade tail calls återstår; general varargs/partial inline är senare arbete. |
+| IPA/globalt: IPSCCP, attrs, global DCE, ICF | **Begränsade förpassfakta; generell IPA saknas.** `prepass.c`/`tu.c` och native-inlining är inte helprogramsanalys. Callgraph, linkage/interposition och escape/modref-sammanfattningar behövs. Länkarens section-GC är inte compiler-GlobalDCE eller ICF; C++-devirtualisering är en annan språkfråga. |
+| Bibliotek/idiom: strlen, CRC, MemCpyOpt | **Delvis.** Delad literal-`__builtin_strcmp`, utvalda native-minnesbuiltins; wasm har sin egen anropsväg. Loopidiom, generella memcpy-kedjor och strlen/printf/CRC-förenklingar är inte etablerade. Behåll freestanding-, builtin-, bounds- och overlap-kontrakt. |
+| Registerpolicy: IRA/LRA, remat, caller saves | **Delvis, annan modell.** Gemensamt lokalurval, a64 `bind.c`/`opt.c`, x64 `locals.c` och temporärpooler. Ingen generell live-range-splitting/IRA/LRA identifierad. Wasm-lokaler är VM-lokaler, inte ett krav på samma fysiska allocator. |
+| Maskinkombinering/adresser: peephole, compare elim, REE | **Delvis.** A64 aritmetik/ext-fakta, x64 `lower.c` och sista-post-u32-faktum i `extensions.c`; wasm stack-/uttryckssänkning. Delade adress-/konstantrecept kan hjälpa, men SIB/NEON/SSE/flags är målmekanik. Generell compare-/combine-paritet är overifierad. |
+| Layout/schemaläggning: align/reorder/sched, CGProfile | **Overifierad policy; generell scheduler saknas i granskningen.** `tu.c` och målens printers har ordning/alignment; detta bevisar inte profilbaserad placering eller latensschemaläggning. Börja med sannolika grenar och mät code-size/fetch. Wasm behöver egen strukturerad policy. |
+| ABI/ram/debug/säkerhet: omit-frame, shrink-wrap, unwind | **Delvis policy.** X64 `frame.c` bevisar ramfri leaf; målens prolog/CFI har egna kontrakt. Inte generell shrink wrapping. Stack-clash, assignment tracking, instrumentering, PLT/interposition är separata användar-/korrekthetskrav; GCC-default i inventariet bevisar inte vcc-flaggstöd. |
+| FP-semantik: signed-zero, errno, trapping | **Policy, exakt flaggparitet overifierad.** `cc/const.c`, `lib/f128.h`, native `fp.c` och wasm FP-sänkning finns. Dessa flaggor är främst begränsningar för tillåtna omskrivningar, inte bevis på fast-math eller tillstånd att återassociera FP. |
+| Alias/alignment/assumptions: PTA, strict-alias, InferAlignment | **Delvis exakta objekt.** Förpass/escape/cellöverlapp finns på målen, inte generell TBAA/points-to/global-AA. Utöka objekt-/disjunkthetsfakta före minnesmotion; språkpolicy och char/union/overlap måste testas separat. Analysinvalidering är infrastruktur. |
+| Pipeline/metadata: annotations, intrinsic lowering, remarks | **Ingen ett-till-ett-lucka.** LLVM:s passmanager, metadata och representationssänkning kräver inte samma vcc-pass. AllocToken/MemProf och intrinsicer måste kopplas till verklig källsemantik före eventuell implementation. |
+| Andra språk: Coro*, OpenMP* | **Utanför den här C-probens transformbevis.** Att passnamnen körts säger inget om coroutine-/OpenMP-optimering i provet. Eventuellt språkstöd planeras separat. |
+| Atomics/unreachable-policy | **Delvis sänkning; flaggparitet overifierad.** `cc/builtin.c` och måladaptrar har atomic-vägar. Inline/libcall-val, ordering, featurefallback och unreachable-trap-policy behöver egna konkreta kontrakt; de är relevanta C-krav. |
+
+**Nästa implementationer, i kostnadsordning:**
+
+1. **Billiga gemensamma recept utan ny IR/SSA.** Slutför källnära
+   OPT6/OPT7: oanvända *rena* lokala initierare, små multiplikationer/
+   bitregler, typade skalade adresser och konstant-store-hook. Använd
+   befintliga förpassfakta och O(1)-beslut, inte upprepad AST-sökning.
+   Lägg till bounded switch-värdetabeller/bitset-kluster där målet visar
+   vinst. Explicit packed vektorsänkning använder gemensam semantik men
+   målets instruktioner/features; den kräver inte en autovektoriserare.
+2. **Begränsade lokala värdefakta.** En faststor cache per block för rena
+   uttryck/konstanter, med registerversioner, exakta clobbers och tydlig
+   invalidation. Återanvänd cellkärnan för små icke-flydda aggregatfält.
+   Bevara trapping/volatile/atomic och implicit flags/asm. Kvot/rest-delning
+   och rematerialisering prövas på konkreta tryckfall, inte som nya
+   helfunktionspass utan mätt nytta.
+3. **Anrop med målkontrakt.** Gemensam bounded inline-behörighet och
+   kostnad, därefter wasms egna parameter-/resultat-/scope-mekanismer.
+   Inför begränsade sibling calls med ABI-, ramflykt-, cleanup- och
+   unwindbevis. Delad policy ensam levererar ingen wasm-inliner/tail call.
+4. **Gemensam CFG innan globala omskrivningar.** Extrahera återanvändbara
+   block/edges, komplett label-entry och konservativ liveness utan att
+   försämra a64:s befintliga analys. Sätt arbetsbudget för dominans och
+   dataflow; budgetslut ger fallback, aldrig ofärdiga säkerhetsbevis.
+   Därefter join-medveten konstant/intervallpropagering, branch threading,
+   dead-result/DSE över block och de första säkra loopinvarianterna.
+5. **Avancerad O2 i separata familjesteg.** Global GVN/PRE, aggregat-
+   promotion, loop-/induktionsomskrivning, autovektorisering och IPA får
+   varsin korrekthets-/kodformsgrind och mätt CPU-/minnesbudget. SSA är
+   motiverat att utvärdera för många join-värden, sparsam global dataflow,
+   GVN och loopomskrivning; varken CFG, lokal CSE, AST-inlining eller ett
+   enkelt säkert LICM-fall kräver automatiskt SSA. Auto-SIMD behöver även
+   minnesberoenden och målkostnad, inte bara en ny representation.
+
+Varje familjesteg kräver ett negativt basfall som visar luckan, ett
+positivt per-mål-kodkrav och C-resultat/effektkontroller på a64/x64/wasm32/
+wasm64. Mät hela kompilatorns extra arbete, undvik pass när kandidater
+saknas och redovisa vad som inte täcks. Separata O1/O2-policyer införs först
+när mätningar motiverar dem; ingen nivå döps om för att hävda paritet.
+G5/G7 och full O2-täckning förblir öppna. Detta dokumentsteg kör inga byggen
+eller nya benchmarks; annexets mängd-/unikhets-/nivå-/filhashkontroller
+är datakontroller av befintligt underlag.
 OPT8-integrering: implementationen är 58263be; därefter har main54580f7
 (PR48:s genererade minnesregression) mergats som 6b0e195. Konflikten gällde
 bara denna plan; båda statusblocken är bevarade. Kompilatorkällorna är
@@ -2016,6 +2178,64 @@ sanitiserade reciprok-/tryckkontrakten passerar på kombinationen, liksom
 221/221 arm64-regressioner (ett befintligt xfail) och 216/216 x86-regressioner
 (sex referensskips). Mätningarnas JSON anger exakt 781ca69→58263be och
 `compiler-sources.json` binder de tio ändrade kompilatorfilerna med SHA256.
+
+### Status OPT8 (2026-11-11): första begränsade native-tail-calls, integration pågår
+
+`emit/opt/tail.c` bevisar samma enkla wrapperform för båda registermålen:
+hela kroppen är en direkt return-call, identiska 32/64-bitars heltals-/pekartyper,
+argument är egna formaler eller typade literaler, fasta prototyper och högst
+målets registerkapacitet. Ingen ny hel AST-vandring eller SSA. Målens egna
+`tail.c` parkerar argument före ABI-placering; en terminal markör håller alla
+utgående argument levande till epilogen. X86 hoppar efter återställd ram/CFA;
+arm64 skriver symbolgrenen som JUMP26 även direkt till objekt och återställer
+CFI före grenen. Stackargument, lokaler/adressflykt, cleanup/VLA, konverteringar,
+indirekta anrop, flyttal och allmänna svanspositioner återstår.
+
+`-f[no-]optimize-sibling-calls` tolkas i ordning och finns i cacheidentiteten.
+Attributen returns_twice, disable_tail_calls, not_tail_called och optnone
+lagras/ärvs; den nya regeln respekterar dem. Övriga pass har ännu inte full
+optnone-policy. Standard-wasm behåller vanligt call: clang 23 O2 gör samma sak;
+return_call kräver explicit tail-call-feature och assemblerstöd, som inte ingår
+här. Detta är ingen implementerad wasm-tail-transform.
+
+Checkpoint på PR50-bas 10e2cb3: unity bygger; 16 fokuserade O0–O3-mål/nivåer
+klarar kodkrav och körning, native även CFI. Verkligt kärnunderlag finns:
+preprocessor-baslinje 881/881 och kandidatens sema 887/887 både per process och
+batch. Detta är historisk evidens för den basen, inte bevis på senaste main.
+Uppdaterad integration `2506518` inkluderar PR50 `0a3c988` och main `f97d16d`.
+På den källan är sema grön 887/887 både per process och batch; verklig
+kärnparitet är 881/881. Egna x86-prov klarar 223/223 med sex uttryckliga
+referensundantag; egna arm64-prov klarar 228/228 samt ett befintligt xfail.
+ABI är 32/32 på vardera x86 och arm64. Alla fyra måls
+O0–O3-prov körs korrekt; native provar också CFI. Arm64:s direkta C-till-objekt
+har rätt JUMP26/CALL26-relokeringar och körs korrekt under qemu. 48 blandade
+flagg-/attributjobb med deklarationscache av/på är gröna. Ramregression,
+verklig signal-unwind och registerhems-unwind (vanlig och 64-alignerad ram)
+är gröna. Ändrade C-filer klarar separat syntaxkompilering; effektkontrakten
+är gröna. De snabba cache- och direktobjektproven ingår nu i CI.
+
+Två kalla 501-funktionsprofiler med exakt bas `0a3c988` och kandidat
+`2506518`, båda byggda med `VCC_OPT='-O3 -march=x86-64-v3'`, visar:
+enkla heltalswrappers med en formal och en literal går från 17 934 254 till
+15 767 383 kompilerarinstruktioner (−12,082 %) och 32 064 till 24 038
+`.text`-byte. Icke kvalificerade aritmetiska returer går från 17 211 605 till
+17 269 849 (+0,338 %); assemblern och 24 039 textbyte är identiska.
+`work/opt-profile/tail-cost/report.json` innehåller kommandon, alla spårade
+kompilatorkällors hash, indatakällor och binärhashar; `measure-tail.py`
+återskapar profilerna. Basbinärens SHA256 är
+`d8e6b3b2bc693eb75374d41f4f7f3f871fba1aad78b1eb1a04bf5d65ba99d8cc`,
+kandidatens `dcb4323027bc076c74904eb179d3a9575cb06224a114cf2f31e005fcbc7ad0c2`.
+Detta är två avgränsade Ir-profiler, inte generell kompilerarfart eller
+programkörtid; maskinen var delad och inga väggtidsanspråk görs. G5/G7 och
+hela O2-målet är fortsatt öppna. Allmänna svanspositioner, stack-/FP-/aggregat-
+ABI och uttryckliga wasm-tail-features återstår.
+
+Tail-integrering efter main `103cdee` (#51/#60): båda planblocken och
+harnessens tails/udivconst-regler är bevarade. Unity, fyra måls O0–O3-tailprov,
+48 blandade cachekontroller, native-konstantkontroller, båda natives unsigned-
+regler och reciprokontrakt passerar. Hela CI var grön på `8532f90` före denna
+merge. Kärn-/svitbevis och Ir-profiler ovan gäller sina angivna källversioner;
+main-integreringen är inte en ny kostnadsmätning.
 
 ### OPT8 status: unsigned64 reciprokdivision (2026-11-11)
 

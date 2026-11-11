@@ -198,6 +198,11 @@ VPRIV bool LO(ldmem)(void);
 VPRIV bool LO(i128mem)(void);
 VPRIV val LO(wconst)(ecx *e, i128 v);
 VPRIV val LO(wbitint)(ecx *e, val v, unsigned bits, bool sgn);
+/* Integer objects wider than 128 bits, canonical little-endian limbs. */
+VPRIV val LO(bigconst)(ecx *e, qty t, const uint32_t *words, i128 small);
+VPRIV val LO(bigbin)(ecx *e, int op, qty t, val a, val b);
+VPRIV val LO(bigcmp)(ecx *e, int op, qty t, val a, val b);
+VPRIV val LO(bigcvt)(ecx *e, val v, qty from, qty to);
 VPRIV val LO(wbin)(ecx *e, int op, bool sgn, val a, val b);	/* b an int for << >> */
 VPRIV val LO(wun)(ecx *e, int op, val a);			/* T_MINUS T_TILDE */
 VPRIV val LO(wcmp)(ecx *e, int op, bool sgn, val a, val b);
@@ -243,6 +248,7 @@ VPRIV val LO(call)(ecx *e, uint32_t ref, val *fn, const wkarg *a, int n, bool va
 /* Incoming arguments to their slots or selected register homes; a parameter
    left on the stack keeps the caller's location as its slot. */
 VPRIV void LO(params)(ecx *e, wkarg *a, int n, const wkarg *r, bool variadic);
+VPRIV bool LO(tail_return)(ecx *e, uint32_t expr);
 VPRIV void LO(ret)(ecx *e, val *v, qty t, uint32_t lbl);	/* a scalar result of type t (v may be NULL), then to lbl */
 VPRIV void LO(retrec)(ecx *e, int raddr, const wkarg *r, uint32_t lbl);	/* a record result from the object at raddr */
 VPRIV val LO(pcmpstr)(ecx *e, uint32_t n);

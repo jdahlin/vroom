@@ -32,8 +32,8 @@ typedef uint64_t rmask;
 
 /* operand roles */
 enum { RD_R = 1, RN_R = 2, RM_R = 4, RA_R = 8, RD_W = 16, RA_W = 32, RN_W = 64, OP_ALL = 128, OP_CALL = 256, OP_ASM = 512,
-       OP_RET = 2048, OP_TLV = 4096 };
-#define OP_SLOW (OP_ALL | OP_CALL | OP_ASM | OP_RET | OP_TLV)	/* reads()/writes() beyond the operand fields */
+       OP_RET = 2048, OP_TLV = 4096, OP_TAIL = 8192 };
+#define OP_SLOW (OP_ALL | OP_CALL | OP_ASM | OP_RET | OP_TLV | OP_TAIL)	/* reads()/writes() beyond the operand fields */
 
 /* the function's raw text, for the registers of inline asm (RAW_MASKS) */
 static _Thread_local const char *rawp;
@@ -80,6 +80,8 @@ static unsigned roles_sw(const ins *i)
 		return RN_R;
 	case I_RET:
 		return OP_RET;	/* reads x0, x1 */
+	case I_TAIL:
+		return OP_TAIL;	/* outgoing x0-x7 survive until the sibling branch */
 	case I_LABEL: case I_B: case I_BC: case I_NOP:
 	case I_BRK:	/* a trap (BUG, WARN, __builtin_trap): the handler may print registers, needs none */
 		return 0;
@@ -127,7 +129,7 @@ static int brkind_sw(const ins *i)
 	switch (i->op) {
 	case I_B: return BR_UNCOND;
 	case I_BC: case I_CBZ: case I_CBNZ: return BR_COND;
-	case I_RET: return BR_END;
+	case I_RET: case I_TAIL: return BR_END;
 	case I_BR: return BR_INDIRECT;
 	default: return BR_NONE;
 	}
@@ -154,6 +156,8 @@ __attribute__((noinline)) static rmask reads_slow(const ins *i, unsigned ro)
 		s |= RB(9) - 1;	/* x0-x8: arguments, indirect result */
 	if (ro & OP_RET)
 		s |= retreads;
+	if (ro & OP_TAIL)
+		s |= RB(8) - 1;
 	return s;
 }
 
@@ -486,7 +490,7 @@ static void slots(ecx *e)
 			continue;
 		id = SLOT_TAG(i);
 		if (i->op == I_LD || i->op == I_ST) {
-			em_slot_access(cells, id, i->imm, 1u << i->sz);
+			em_slot_collect(cells, id, i->imm, 1u << i->sz);
 		} else {
 			if (!id)
 				return; /* an address vcc cannot place */
@@ -494,13 +498,6 @@ static void slots(ecx *e)
 			if (SLOT_TAG2(i) < na)
 				em_slot_escape(cells, SLOT_TAG2(i));
 		}
-	}
-	/* Only allocations with several exact ranges need the sorted detail list. */
-	for (uint32_t k = 0; cells->multi && k < n; k++) {
-		const ins *i = &in[k];
-
-		if (i->rn == FRAME && (i->op == I_LD || i->op == I_ST))
-			em_slot_detail(cells, SLOT_TAG(i), i->imm, 1u << i->sz);
 	}
 	if (!em_slot_finish(cells))
 		return;

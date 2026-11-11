@@ -298,6 +298,12 @@ static unsigned enc(const ins *i, uint32_t *w, pfix *f, const uint32_t *loff, ui
 			*f = (pfix){ 0, 1, i->op == I_B ? R_AARCH64_JUMP26 : R_AARCH64_CONDBR19, i->label, 0 };
 		return 1;
 	}
+	case I_TAIL:
+		if (!i->cond)
+			return 0;
+		w[0] = 0x14000000u;
+		*f = (pfix){ 0, 0, R_AARCH64_JUMP26, i->ref, 0 };
+		return 1;
 	case I_BL:
 		w[0] = 0x94000000u;
 		*f = (pfix){ 0, 0, R_AARCH64_CALL26, i->ref, 0 };

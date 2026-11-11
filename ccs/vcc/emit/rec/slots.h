@@ -36,6 +36,12 @@ typedef struct em_slot_cells {
  */
 VPRIV bool em_slot_begin(em_slot_cells *s, uint32_t allocations);
 VPRIV void em_slot_access(em_slot_cells *s, uint32_t id, int64_t off, uint32_t size);
+/* Single-pass alternative: collects exact details when an allocation first
+ * becomes multi-range, so callers do not replay their complete record stream.
+ * Use collect for every access, without a separate detail phase. Never mix
+ * modes after an allocation has become multi-range; access alone retains no
+ * exact history for subsequent streaming collection. */
+VPRIV void em_slot_collect(em_slot_cells *s, uint32_t id, int64_t off, uint32_t size);
 VPRIV void em_slot_escape(em_slot_cells *s, uint32_t id);
 VPRIV void em_slot_detail(em_slot_cells *s, uint32_t id, int64_t off, uint32_t size);
 VPRIV bool em_slot_finish(em_slot_cells *s);

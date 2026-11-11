@@ -136,6 +136,48 @@ volatile/high-bit/signed-regressioner; båda byggsätt och sanitiserade
 kontrakt verifierade. 500-funktions v3-instruktionsprober mot14379fe ger
 +0,23% loop och −0,74% kontroll för kombinationen. Profilens räckvidd
 är begränsad; vbench/native helkorpus och hela G5/G7/O2-målet kvarstår.
+### Status 2026-11-11: G1, breda BitInt på Linux
+
+Skalära `_BitInt` över 128 bitar har nu limb-baserad kodgenerering för
+Linux x86-64 och arm64, med de befintliga snabbvägarna för högst 128 bitar
+bevarade. Milstolpen omfattar heltalsaritmetik, jämförelser, konvertering
+mellan heltal, bitfält, generiska biträkningar, konstantuttryck och replay.
+Körtidskonvertering till/från flyttal, vektorelement över 128 bitar och
+switch-gränser utanför signed 128-bitars representation avvisas uttryckligen.
+Detta slutför inte C23 eller G1.
+
+Validering av integrationen på `ae941cb`: unity och separata filer,
+egna x86-prov 184/184 med fem referensundantag och ARM 189/189. Oberoende
+säkerhets- och avvisningsprober passerar 36/36 över båda byggsätten och
+målen. Kärnans sema passerar 887/887 individuellt och i batch för båda
+byggsätten. Bred aritmetik och biträkning passerar tolv bredder 129–7001,
+konstantproven 128 värden plus positiva/negativa kontrakt, replay åtta
+översättningsenheter på två mål och bred ABI 24 former i fyra riktningar
+per mål och byggsätt (384 körningar). Diagnostik: 220/220 per byggsätt.
+Optimizerregler O0–O3 och registereffekter med ASan passerar.
+Fullständiga kommandon och resultat finns i
+`work/results/bitint-integration/`. ARM:s Clang 23 saknar native-stöd för
+bredder över 128; ARM:s breda ABI-prov använder dokumenterade C-aggregat
+som proxy och får inte beskrivas som native Clang BitInt-paritet.
+
+**Återintegration på main `2dc4ea3`:** båda byggsätten passerar egna
+Linux x86 222/222 med sex referensundantag och ARM 227/227 med ett kört
+befintligt XFAIL. Full egen Wasm64-svit: 180/180, 37 körda befintliga
+XFAIL och elva referensundantag. Kärnsema är 887/887 i båda körsätt och
+byggen. Oberoende BitInt-prober är 36/36; dagens leaf-frame-, cell-,
+kopierings- och konstantkontrollgrindar passerar på båda byggena.
+Körtidskonvertering till/från flyttal är fortfarande uttryckligen
+utanför denna integration. Exakta kommandon, resultat och källmanifest:
+`work/results/bitint-main2dc/`. Den fulla vendrade Linux-körkorpusen
+passerar därefter 1942/1942 x86 (130 undantag) och 1945/1945 ARM/QEMU
+(126 undantag och ett befintligt kört XFAIL), utan cacheåteranvändning.
+Hela Kefirs 875 runtime-par har också körts först på x86, sedan ARM:
+x86 572 godkända (+91), 8 vcc-fel och 10 signal/timeout; ARM 455 godkända,
+3 vcc-fel och 7 signal/timeout. Inga tidigare godkännanden förloras;
+referensfel och unsupported är oförändrade och räknas inte som pass.
+Binär SHA256 `f2a6f04804de1393357a2b4341059f8bc9cbc30c8b5361808df43f203d6e0b74`.
+G1/G2 och övrig testplan är fortsatt öppna.
+
 
 ### Status 2026-11-11: G1, padding i BitInt-uttryck
 
@@ -307,6 +349,16 @@ byte-identiska och extra Callgrind-kompileringsarbete högst +0,180 %; ett
 riktat x86-switchprov minskar exekverade instruktioner 48,39 %. Avgränsning,
 rådata och kvarvarande OPT6-delar står i PLAN-fas2. G5/G7 och full O2 är öppna.
 
+
+### Status 2026-11-11: G5/G7, billigare gemensam cellinsamling
+
+Arm64/wasm använder den delade strömmande intervallinsamlaren utan ändrad
+kodgenerering. Matchade O1/O2-mikrofall minskar hela kompileringens Ir med
+0,145–0,453 % för flera fält; ett fält kostar 0,050–0,053 % och kontroller
+0,006–0,071 %. Randomiserad sanitizer-/mutationsoracle, 118 byteparitetspar,
+observerbara accesser och fokuserade wasm-körfall passerar. Detaljer och
+avvisade varianter finns i PLAN-fas2. Ingen bred prestandagrind eller ny
+optimeringsregel ingår; G5/G7 och full O2 är fortsatt öppna.
 ### Status 2026-11-11: G5/G7, unsigned32 reciprokdivision
 
 OPT8:s u32-del använder gemensamma reciproker för native kvot/rest och
@@ -388,6 +440,19 @@ avgränsat x86-körprov −69,26 % barn-CPU. Historiska siffror ovan och fulla
 Efter main2dc4ea3 (#50:s x86-blad): unity, 16 division-/nivå-/målfall,
 sanitiserade reciprok-/registereffektkontrakt och bladramens policy, cache-,
 debug-/härdnings- och signal-unwindprov passerar. Båda statusblock behålls.
+
+### Status 2026-11-11: G5/G7, begränsade native-tail-calls
+
+Gemensam semantisk kontroll och separata måladaptrar ersätter enkla direkta
+return-call-wrappers med epilog följd av symbolgren på x86 och arm64 vid
+O1–O3. Flaggordning, ärvda attribut, ABI-register, CFI och arm64:s direkta
+objektrelokeringar är verifierade. Standard-wasm behåller vanligt call,
+liksom clang utan explicit tail-call-feature. Kärnsema/paritet på integrerad
+main-bas, egna x86-/arm64-prov, båda native-ABI-sviterna och verklig unwind är gröna.
+Två exakta 501-funktions-Ir-profiler visar −12,082 % för wrapperfallet och
++0,338 % för oförändrad aritmetisk kontroll; bara wrapperfallet minskar text.
+Hashar, omfattning och kvarvarande undantag står i OPT8 i PLAN-fas2.md.
+Detta bevisar ingen generell fartvinst. G5/G7 och full O2 är fortsatt öppna.
 
 U64 har också integrerat main2dc4ea3 via PR51head15551a7: 196 riktade fall,
 sanitiserade kontrakt och hela bladramsharnessen passerar. Reciprokfilerna är

@@ -28,7 +28,7 @@ static void park(ecx *e, carg *a)
 		return;		/* parked while the arguments were evaluated */
 	if (is_agg(c, a->t)) {
 		uint64_t sz = (tsize(c, a->t) + 7) & ~(uint64_t)7;
-		int64_t sl = slot(e, sz ? sz : 8, talign(c, a->t) > 8 ? 16 : 8);
+		int64_t sl = slot(e, sz ? sz : 8, em_bigint(c, a->t) ? talign(c, a->t) : talign(c, a->t) > 8 ? 16 : 8);
 		int rs = toreg(e, &a->v), rd = treg(e);
 
 		opi(e, I_ADDI, 1, rd, FRAME, sl);

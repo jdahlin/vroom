@@ -45,6 +45,7 @@ enum {
 	X_JCC,		/* cond, label */
 	X_CALL,		/* ref; cond 1: variadic (al already set) */
 	X_CALLR,	/* r1 */
+	X_TAIL,		/* ref: terminal sibling-call marker, emitted after the epilogue */
 	X_PUSH, X_POP,	/* r1 / r0 */
 	X_ADJSP,	/* rsp += imm */
 	X_CQO,		/* rdx = sign of rax (sz 4: cltd, 8: cqto) */
@@ -124,6 +125,8 @@ VPRIV int x64_ftreg(ecx *e);
 VPRIV void x64_csused(ecx *e, int r);	/* a callee-saved register used: the prologue saves it */
 VPRIV rec *x64_put(ecx *e, int op);
 VPRIV void x64_twoaddr(ecx *e);
+VPRIV bool x64_tail_return(ecx *e, uint32_t expr);
+VPRIV uint32_t x64_tail_ref(const ecx *e);
 VPRIV bool x64_framefree_candidate(ecx *e);
 VPRIV bool x64_framefree_record(ecx *e, const rec *i);
 VPRIV bool x64_copy_forward_at(ecx *e, uint32_t k);
