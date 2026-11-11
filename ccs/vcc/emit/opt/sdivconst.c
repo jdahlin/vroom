@@ -1,7 +1,12 @@
 /* Signed32/64 reciprocal recipes, using the positive-magnitude construction
  * from Hacker's Delight ch.10 / libdivide's signed branchfull generator.
  * C truncation toward zero needs the final sign-bit addition. Divisor sign
- * affects only quotient negation; remainder uses the positive quotient. */
+ * affects only quotient negation; remainder uses the positive quotient.
+ * The equality case also needs no add: with H=2^(W-1), l=floor(log2 d),
+ * m*d=2^(W-1+l)+2^l gives n*m/2^(W-1+l)=n/d+n/(d*H).
+ * For 0<=n<H, writing n=a*d+r leaves 0<=r+n/H<d. For n=-u,
+ * 0<u<=H, 0<r+u/H<=d; floor is -a-1 and the sign correction adds one.
+ * Thus equality preserves every signed input, including the minimum. */
 #include "../emitimpl.h"
 
 VPRIV bool em_sdivconst32(int32_t divisor, bool remainder, em_sdivconst_recipe *r)
@@ -15,7 +20,7 @@ VPRIV bool em_sdivconst32(int32_t divisor, bool remainder, em_sdivconst_recipe *
 	uint64_t numerator = UINT64_C(1) << (31 + log);
 	uint64_t magic = numerator / d;
 	uint32_t rem = (uint32_t)(numerator - magic * d);
-	r->add = d - rem >= (UINT32_C(1) << log);
+	r->add = d - rem > (UINT32_C(1) << log);
 	if (r->add)
 		magic = magic * 2 + ((uint64_t)rem * 2 >= d);
 	r->magic = (int32_t)(uint32_t)(magic + 1);
@@ -35,7 +40,7 @@ VPRIV bool em_sdivconst64(int64_t divisor, bool remainder, em_sdivconst_recipe *
 	u128 numerator = (u128)1 << (63 + log);
 	u128 magic = numerator / d;
 	uint64_t rem = (uint64_t)(numerator - magic * d);
-	r->add = d - rem >= (UINT64_C(1) << log);
+	r->add = d - rem > (UINT64_C(1) << log);
 	if (r->add)
 		magic = magic * 2 + ((u128)rem * 2 >= d);
 	r->magic = (int64_t)(uint64_t)(magic + 1);

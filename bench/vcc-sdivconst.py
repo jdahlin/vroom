@@ -103,7 +103,11 @@ int main(void)
             divisor(bits==32 ? (int32_t)random64() : (int64_t)random64(),bits);
     }
     em_sdivconst_recipe r;
-    assert(em_sdivconst32(3,false,&r) && r.magic==-INT32_C(1431655765) && r.shift==1 && r.add);
+    assert(em_sdivconst32(3,false,&r) && r.magic==INT32_C(0x55555556) && r.shift==0 && !r.add);
+    assert(em_sdivconst32(6,false,&r) && r.magic==INT32_C(0x55555556) && r.shift==1 && !r.add);
+    assert(em_sdivconst64(3,false,&r) && r.magic==INT64_C(0x5555555555555556) && r.shift==0 && !r.add);
+    assert(em_sdivconst64(6,false,&r) && r.magic==INT64_C(0x5555555555555556) && r.shift==1 && !r.add);
+    assert(em_sdivconst64(9,false,&r) && r.magic==INT64_C(0x71c71c71c71c71c8) && r.shift==2 && !r.add);
     assert(em_sdivconst32(7,false,&r) && r.magic==-INT32_C(1840700269) && r.shift==2 && r.add);
     assert(em_sdivconst64(7,false,&r) && r.magic==INT64_C(0x4924924924924925) && r.shift==1 && !r.add);
     return 0;

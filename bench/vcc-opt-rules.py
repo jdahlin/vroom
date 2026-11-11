@@ -352,10 +352,10 @@ def check_copies(assembly, arch):
 def check_sdivconst(assembly, arch, optimized=True):
     wasm = arch.startswith('wasm')
     divide = r'\b(?:i(?:32|64)\.(?:div|rem)_s|sdiv|idiv[lq]?)\b'
-    suffixes = ['p3', 'n3', 'p7', 'n7', 'p10', 'n10', 'p37', 'n37',
+    suffixes = ['p3', 'n3', 'p6', 'n6', 'p12', 'n12', 'p7', 'n7', 'p10', 'n10', 'p37', 'n37',
                 'plarge', 'nlarge', 'pmax', 'nmax']
     for width in [32, 64]:
-        selected = suffixes + (['pwide', 'nwide'] if width == 64 else [])
+        selected = suffixes + (['p9', 'n9', 'p129', 'n129', 'pwide', 'nwide'] if width == 64 else [])
         for operation in ['q', 'r']:
             for suffix in selected:
                 name = f'sd{width}_{operation}_{suffix}'

@@ -11,12 +11,19 @@
     NI long long sd64_q_##name(long long x) { return x / (divisor); } \
     NI long long sd64_r_##name(long long x) { return x % (divisor); }
 DIV32(p3, 3) DIV32(n3, -3)
+/* Equality in the reciprocal bound, including nonzero short shifts. */
+DIV32(p6, 6) DIV32(n6, -6)
+DIV32(p12, 12) DIV32(n12, -12)
 DIV32(p7, 7) DIV32(n7, -7)
 DIV32(p10, 10) DIV32(n10, -10)
 DIV32(p37, 37) DIV32(n37, -37)
 DIV32(plarge, 1073741825) DIV32(nlarge, -1073741825)
 DIV32(pmax, IMAX) DIV32(nmax, -IMAX)
 DIV64(p3, 3LL) DIV64(n3, -3LL)
+DIV64(p6, 6LL) DIV64(n6, -6LL)
+DIV64(p12, 12LL) DIV64(n12, -12LL)
+DIV64(p9, 9LL) DIV64(n9, -9LL)
+DIV64(p129, 129LL) DIV64(n129, -129LL)
 DIV64(p7, 7LL) DIV64(n7, -7LL)
 DIV64(p10, 10LL) DIV64(n10, -10LL)
 DIV64(p37, 37LL) DIV64(n37, -37LL)
@@ -52,12 +59,15 @@ struct case64 { long long d; long long (*q)(long long), (*r)(long long); };
 #define CASE64(name, divisor) { divisor, sd64_q_##name, sd64_r_##name }
 static const struct case32 cases32[] = {
     CASE32(p3, 3), CASE32(n3, -3), CASE32(p7, 7), CASE32(n7, -7),
+    CASE32(p6, 6), CASE32(n6, -6), CASE32(p12, 12), CASE32(n12, -12),
     CASE32(p10, 10), CASE32(n10, -10), CASE32(p37, 37), CASE32(n37, -37),
     CASE32(plarge, 1073741825), CASE32(nlarge, -1073741825),
     CASE32(pmax, IMAX), CASE32(nmax, -IMAX),
 };
 static const struct case64 cases64[] = {
     CASE64(p3, 3LL), CASE64(n3, -3LL), CASE64(p7, 7LL), CASE64(n7, -7LL),
+    CASE64(p6, 6LL), CASE64(n6, -6LL), CASE64(p12, 12LL), CASE64(n12, -12LL),
+    CASE64(p9, 9LL), CASE64(n9, -9LL), CASE64(p129, 129LL), CASE64(n129, -129LL),
     CASE64(p10, 10LL), CASE64(n10, -10LL), CASE64(p37, 37LL), CASE64(n37, -37LL),
     CASE64(pwide, 4294967297LL), CASE64(nwide, -4294967297LL),
     CASE64(plarge, 4611686018427387905LL), CASE64(nlarge, -4611686018427387905LL),
