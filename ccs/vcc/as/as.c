@@ -1998,6 +1998,12 @@ static int directive(As *a, Sv w, const char *p, const char *e)
 	const char *d = w.s + 1;
 	size_t n = w.n - 1;
 #define IS(x) (n == sizeof(x) - 1 && !memcmp(d, x, n))
+	if (a->o->machine == EM_X86_64) {
+		if (IS("att_syntax") || IS("code64"))
+			return 0;	/* (AT&T, 64-bit: what x86-64 text is anyway) */
+		if (IS("intel_syntax"))
+			return err(a, "Intel syntax is not supported");
+	}
 	switch (d[0]) {
 	case 'a':
 		if (IS("altmacro")) { a->altmacro = 1; return 0; }
@@ -2082,6 +2088,7 @@ static int directive(As *a, Sv w, const char *p, const char *e)
 		break;
 	case 'g':
 		if (IS("globl") || IS("global")) return d_symattr(a, p, e, 'g');
+
 		break;
 	case 'h':
 		if (IS("hword") || IS("half")) return d_data(a, p, e, 2);
@@ -2430,9 +2437,37 @@ enum { CF_DEF_CFA, CF_DEF_CFA_OFFSET, CF_DEF_CFA_REGISTER, CF_ADJUST, CF_OFFSET,
        CF_NEGATE_RA };
 
 /* a DWARF register: x0-x30/w0-w30, sp/wsp, fp, lr, v/b/h/s/d/q 0-31 (64+), or a number */
+/* x86-64's DWARF register numbers (the SysV psABI's) */
+static int cfi_reg86(const char *s, size_t n)
+{
+	static const char *const nm[17] = { "rax", "rdx", "rcx", "rbx", "rsi", "rdi", "rbp", "rsp",
+					    "r8", "r9", "r10", "r11", "r12", "r13", "r14", "r15", "rip" };
+	char b[8];
+
+	if (n >= sizeof b)
+		return -1;
+	for (size_t i = 0; i < n; i++)
+		b[i] = (char)c_lower((unsigned char)s[i]);
+	b[n] = 0;
+	for (int i = 0; i < 17; i++)
+		if (!strcmp(b, nm[i]))
+			return i;
+	if (!strncmp(b, "xmm", 3) && c_digit((unsigned char)b[3]) && atoi(b + 3) < 16)
+		return 17 + atoi(b + 3);
+	return -1;
+}
+
 static int cfi_reg(As *a, const char **pp, const char *e, uint32_t *r)
 {
 	const char *p = ws(*pp, e), *s = p;
+	if (a->o->machine == EM_X86_64 && p < e && *p == '%') {
+		int k;
+		s = ++p;
+		while (p < e && (isidc((unsigned char)*p) || c_digit((unsigned char)*p))) p++;
+		if ((k = cfi_reg86(s, (size_t)(p - s))) < 0) return err(a, "invalid register name");
+		*pp = p; *r = (uint32_t)k;
+		return 0;
+	}
 	while (p < e && isidc((unsigned char)*p)) p++;
 	size_t n = (size_t)(p - s);
 	if (!n) return err(a, "expected register");
@@ -2503,7 +2538,7 @@ static int d_cfi(As *a, Sv w, const char *p, const char *e)
 		memset(f, 0, sizeof *f);
 		Sv t = trim(p, e);
 		if (t.n) { if (!sveq(t, "simple")) return err(a, "unexpected token"); f->simple = 1; }
-		f->start = here(a); f->first = a->ncfi; f->ra = 30;
+		f->start = here(a); f->first = a->ncfi; f->ra = a->o->machine == EM_X86_64 ? 16 : 30;
 		a->infde = 1;
 		return 0;
 	}
@@ -2575,7 +2610,8 @@ static void cfi_finish(As *a)
 	ElfObj *o = a->o;
 	if (a->infde) { err(a, "unfinished frame"); return; }
 	if (!a->nfde || a->cfi_eh) return;
-	uint32_t sec = elf_section(o, ".eh_frame", 9, SHT_PROGBITS, SHF_ALLOC, 0, 0);
+	int x86 = o->machine == EM_X86_64;
+	uint32_t sec = elf_section(o, ".eh_frame", 9, x86 ? 0x70000001u /* SHT_X86_64_UNWIND */ : SHT_PROGBITS, SHF_ALLOC, 0, 0);
 	uint32_t fr = sec;
 	if (elf_sec(o, sec)->align < 3) elf_sec(o, sec)->align = 3;
 	elf_data(o, fr);
@@ -2616,10 +2652,13 @@ static void cfi_finish(As *a)
 			if (f->sig) b.p[b.n++] = 'S';
 			if (f->bkey) b.p[b.n++] = 'B';
 			b.p[b.n++] = 0;
-			uleb(&b, 1); sleb(&b, -4);
+			uleb(&b, 1); sleb(&b, x86 ? -8 : -4);
 			b.p[b.n++] = (uint8_t)f->ra;
 			uleb(&b, 1); b.p[b.n++] = 0x1b;	/* augmentation: pcrel sdata4 */
-			if (!f->simple) { b.p[b.n++] = 0x0c; uleb(&b, 31); uleb(&b, 0); }
+			if (!f->simple && x86) {	/* cfa = rsp + 8, the return address at cfa - 8 */
+				b.p[b.n++] = 0x0c; uleb(&b, 7); uleb(&b, 8);
+				b.p[b.n++] = 0x80 | 16; uleb(&b, 1);
+			} else if (!f->simple) { b.p[b.n++] = 0x0c; uleb(&b, 31); uleb(&b, 0); }
 			while ((b.n - st) & 3) b.p[b.n++] = 0;
 			uint32_t len = (uint32_t)(b.n - st - 4);
 			memcpy(b.p + st, &len, 4);
@@ -2657,7 +2696,7 @@ static void cfi_finish(As *a)
 			case CF_OFFSET: case CF_REL_OFFSET: {
 				int64_t v = c->off;
 				if (c->op == CF_REL_OFFSET) v -= cfa;
-				v /= -4;
+				v /= x86 ? -8 : -4;
 				if (v < 0) { b.p[b.n++] = 0x11; uleb(&b, c->reg); sleb(&b, v); }
 				else if (c->reg < 64) { b.p[b.n++] = (uint8_t)(0x80 | c->reg); uleb(&b, (uint64_t)v); }
 				else { b.p[b.n++] = 0x05; uleb(&b, c->reg); uleb(&b, (uint64_t)v); }
@@ -2688,8 +2727,8 @@ static void cfi_finish(As *a)
 	for (uint32_t oi = 0; oi < a->nfde; oi++) {
 		uint32_t i = ord[oi];
 		struct Fde *f = &a->fde[i];
-		elf_fixup(o, fr, at + pcbs[i], q + pcbs[i], R_AARCH64_PREL32, (Val){ f->start, 0, 0 });
-		elf_fixup(o, fr, at + pcbs[i] + 4, q + pcbs[i] + 4, R_AARCH64_ABS32, (Val){ f->end, f->start, 0 });
+		elf_fixup(o, fr, at + pcbs[i], q + pcbs[i], x86 ? R_X86_64_PC32 : R_AARCH64_PREL32, (Val){ f->start, 0, 0 });
+		elf_fixup(o, fr, at + pcbs[i] + 4, q + pcbs[i] + 4, x86 ? R_X86_64_32 : R_AARCH64_ABS32, (Val){ f->end, f->start, 0 });
 	}
 }
 
