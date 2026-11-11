@@ -2973,6 +2973,24 @@ kommandon och fall finns i `work/opt-profile/bounds-expressions-cost/result.json
 Detta är en liten korpus och instruktionstal, inte ett mått på CPU-tid.
 Generell O2-täckning och G5/G7 återstår.
 
+### Identiska heltalsoperander (2026-11-11)
+
+Ett gemensamt recept i `emit/opt/repeated.c` förenklar `x-x` och `x^x` till
+noll och `x&x`/`x|x` till en läsning för samma ordinära automatiska
+heltalsvariabel. Adresstagna, volatile, atomiska, statiska och externa värden
+avvisas; inga godtyckliga uttryck jämförs. Alla tre emitterfamiljer använder
+beslutet. Fokuserade O0–O3-prov passerar på x86, arm64, wasm32 och wasm64
+med både unity och filvis bygge; två volatile-läsningar bevaras. O0 och
+`VCC_NOOPT=1` ger byteidentisk assembler mot basen. Vcc-sviten passerar
+253/253 med en befintlig xfail.
+
+Matchad seriell Callgrind-grind mot `22a91b8` gav förändringar i
+kompilatorinstruktioner +0,099 % x86, +0,121 % arm64, +0,115 % wasm32 och
++0,123 % wasm64; 1 %-grinden passerar. 12 nativefiler, 10 wasm32 och 11
+wasm64 ingår; wasm-fall som båda avvisar och mätproveniens finns i
+`work/opt-profile/repeated-integer-cost/result.json`. Det är en liten korpus
+med instruktionstal, inte CPU-tid; generell O2-täckning och G5/G7 återstår.
+
 ### Wasm: heltalsjämförelse med noll (2026-11-11)
 
 Ett gemensamt, begränsat recept i `emit/opt/cmpzero.c` känner igen
@@ -2993,3 +3011,60 @@ wasm64 ingår; fallen atomic_ops/bitint_runtime som båda avvisar på respektive
 wasm-mål är redovisade i `work/opt-profile/zero-comparisons-cost/result.json`.
 Det är en liten korpus och instruktionstal, inte CPU-tid. G5/G7 och generell
 O2-täckning är fortsatt öppna.
+
+Samma recept omfattar nu också heltalsjämförelser mellan två läsningar av
+samma ordinära lokala variabel, även direkt i x86:s villkorssänkning.
+Flyttalsjämförelser behålls på grund av NaN. Utökade fokuserade O0–O3-prov
+passerar på fyra mål i båda bygglägen; vcc-sviten 254/254 med en befintlig
+xfail och O0/noopt-assembler identisk med den stackade föräldern. Matchad
+Callgrind mot PR #89:s `16d5feb` för hela den utökade regeln: x86 +0,133 %,
+arm64 +0,123 %, wasm32 +0,139 %, wasm64 +0,109 % kompilatorinstruktioner;
+1 %-grinden passerar på samma begränsade korpus. Exakta fall och proveniens:
+`work/opt-profile/repeated-expanded-cost/result.json`. Detta mäter inte CPU-tid.
+
+Kompletterande kort CPU-tidsprofil mot PR #89:s binär: fem växelvisa
+`perf stat task-clock:u`-körningar per binär på syntetiska filer med 12 000
+funktioner. Median bas → kandidat, x86: identitetsmättad 25,21 → 23,18 ms,
+kontroll utan träff 28,80 → 28,21 ms; wasm64: mättad 22,83 → 22,32 ms,
+kontroll 25,19 → 25,87 ms. Kontrollernas assembler är identisk. Den lilla,
+delade värdens korta sampel varierar och visar inte att CPU-tidspåslaget på
+verkliga projekt är under 1 %. Mätkommandon, binär-/indatahashar och alla
+sampel finns i `work/opt-profile/repeated-cputime/{measure.py,result.json}`.
+
+Kompletterande verkliga indata: två förprocessade Linux-TU:er bland de första
+30 tillgängliga accepterades av den fristående `-O2 -ffreestanding`-proben.
+Fem växelvisa `task-clock:u`-sampel per binär gav median bas → kandidat
+23,03 → 23,02 ms för `kernel__printk__sysctl.o.i` och 15,89 → 15,59 ms för
+`fs__fs_dirent.o.i`; assemblern var identisk i båda fallen. De övriga 28
+misslyckades i denna förenklade körning och ingår inte: detta selektiva,
+lilla urval bevisar inte kompilatorns kostnad på ett helt bygge. Kommandon,
+hashar och sampel finns i `work/opt-profile/repeated-cputime/kernel*.{py,json}`.
+
+Bredare CPU-tidsprov för samma binärer: efter att ha återställt relevanta
+flaggor från kärnans `.cmd` accepterades 28 av de första 30 förprocessade
+Linux-TU:erna av båda. Tre växelvisa seriella rundor av samtliga 28 gav
+median användar-CPU 0,78945 → 0,79150 s (+0,26 %); system-CPU och väggtid
+finns också i rådata. Två TU:er exkluderades efter kandidatens preflight.
+Urvalet är litet, värden är delad och mätningen avser arm64-målet, inte ett
+helt kärnbygge eller wasm. Exakta flaggor, käll-/binärhashar och sampel finns i
+`work/opt-profile/repeated-cputime/kernel-batch{.py,-result.json}`.
+
+### Dubbla unära heltalsoperationer (2026-11-11)
+
+`emit/opt/double-unary.c` identifierar `-(-x)` och `~(~x)` för likatypade
+32-/64-bitars heltal; varje emitter evaluerar då `x` en gång. Flyttal,
+BitInt och mellanliggande typkonverteringar lämnas till vanlig sänkning.
+Fokuserade körnings-/kodgenereringsprov O0–O3 passerar på fyra mål i båda
+bygglägen, inklusive anrop, volatile och smal konvertering. O0/noopt ger
+byteidentisk assembler mot den stackade föräldern; vcc-sviten passerar
+255/255 med en befintlig xfail.
+
+Matchad Callgrind mot `e1391de` gav compiler-Ir +0,045 % x86, +0,049 %
+arm64, +0,106 % wasm32 och +0,119 % wasm64 på den fasta lilla korpusen;
+1 %-grinden passerar, med samma explicit redovisade wasm-uteslutningar.
+Tre växelvisa seriella rundor på 28 förprocessade Linux-TU:er med arm64-flaggor
+gav median användar-CPU 0,79154 → 0,78655 s. Två TU:er är exkluderade och
+den delade värdens lilla urval bevisar ingen generell tidsvinst. Proveniens,
+flaggor och sampel: `work/opt-profile/double-unary-cost/result.json` och
+`work/opt-profile/double-unary-cputime/kernel-batch-result.json`. G5/G7 och
+generell O2-täckning återstår.
