@@ -207,6 +207,12 @@ static int parse_number(Lx *l, Val *v)
 			for (const char *q = s; q < p; q++) x = x * 10 + (uint64_t)(*q - '0');
 		}
 	}
+	/* U, L, UL, ULL ... after a number: accepted and ignored, as MC (C headers' constants in .S) */
+	{
+		const char *q = p;
+		while (q < e && (*q == 'u' || *q == 'U' || *q == 'l' || *q == 'L')) q++;
+		if (q > p && (q >= e || !isidc((unsigned char)*q))) p = q;
+	}
 	l->p = p;
 	*v = (Val){ 0, 0, (int64_t)x };
 	return 0;
