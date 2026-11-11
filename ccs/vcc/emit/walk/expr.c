@@ -174,9 +174,9 @@ VPRIV int64_t wk_local(ecx *e, uint32_t s)
 		if (W->canary && (is_array(c, c->syms[s].ty) || is_agg(c, c->syms[s].ty) || e->E->lnoreg[s]))
 			W->spneed = true;	/* (clang's -fstack-protector-strong, a superset) */
 		if (T(c, c->syms[s].ty)->flags & TF_VLA)
-			W->soff[s] = wk_slot(e, 24, 8);	/* { address, sp before it, bytes } */
+			W->soff[s] = wk_pslot(e, 24, 8);	/* { address, sp before it, bytes } */
 		else
-			W->soff[s] = wk_slot(e, tsize(c, c->syms[s].ty) ? tsize(c, c->syms[s].ty) : 1, sym_align(c, s));
+			W->soff[s] = wk_pslot(e, tsize(c, c->syms[s].ty) ? tsize(c, c->syms[s].ty) : 1, sym_align(c, s));
 	}
 	return W->soff[s];
 }
@@ -1024,7 +1024,7 @@ VPRIV void wk_vla_fix(ecx *e, qty t, bool pure)
 			}
 			val v = wk_conv(e, wk_gen(e, a->n), N(a->n)->ty, c->t_size);
 			int r = wk_reg(e, &v, c->t_size);
-			lval l = { .k = L_FRAME, .off = wk_slot(e, 8, 8), .align = 8 };
+			lval l = { .k = L_FRAME, .off = wk_pslot(e, 8, 8), .align = 8 };	/* (sizeof reads it later) */
 
 			LO(store)(e, r, &l, 8);
 			LO(tfree)(e, r);

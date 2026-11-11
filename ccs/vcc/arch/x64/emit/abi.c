@@ -655,7 +655,7 @@ VPRIV void x64_params(ecx *e, wkarg *a, int n, const wkarg *r, bool variadic)
 		uint32_t skip = wk_newlabel(e);
 		rec *j;
 
-		X->save = wk_slot(e, 48 + 128, 16);
+		X->save = wk_pslot(e, 48 + 128, 16);
 		for (int k = gp; k < 6; k++) {
 			lval d = x64_fr(X->save + 8 * k);
 
