@@ -1922,6 +1922,11 @@ static val wk_fpattern(ecx *e, qty t, int64_t sl, int *eb)
 	qty u = prim(TY_ULONG);
 
 	h.off += 8;
+	if (k == TY_FLOAT16 || k == TY_BFLOAT16) {
+		LO(load)(e, r, &l, 2, false);
+		*eb = k == TY_BFLOAT16 ? 8 : 5;
+		return wk_arith(e, T_LESSLESS, u, wk_vreg(r), vconst(49));
+	}
 	if (k == TY_FLOAT || k == TY_DOUBLE) {
 		LO(load)(e, r, &l, k == TY_FLOAT ? 4 : 8, false);
 		*eb = k == TY_FLOAT ? 8 : 11;
@@ -2026,7 +2031,7 @@ static val wk_fpclass(ecx *e, uint32_t n)
 		int k = KIND(c, t), r;
 		val inf = wk_fptest(e, BI_ISINF, t, sl), sg;
 
-		l.off += k == TY_FLOAT ? 3 : k == TY_DOUBLE ? 7 : k == TY_LDOUBLE ? 9 : 15;
+		l.off += k == TY_FLOAT16 || k == TY_BFLOAT16 ? 1 : k == TY_FLOAT ? 3 : k == TY_DOUBLE ? 7 : k == TY_LDOUBLE ? 9 : 15;
 		r = LO(treg)(e);
 		LO(load)(e, r, &l, 1, false);
 		sg = LO(bin)(e, T_GREATERGREATER, 4, false, wk_vreg(r), vconst(7));

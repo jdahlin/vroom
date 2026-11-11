@@ -467,7 +467,17 @@ Detta är 20 genererade prov, inte en långkörning.
 **Klart när:** 24 h per generator utan avvikelse, på båda målen
 (PLAN-release G1).
 
-### S8 libc-test (TODO T13) — ej påbörjad
+### S8 libc-test (TODO T13) — påbörjad
+Första körningen av de 343 dynamiska functional/math/regression-proven
+mot glibc ger **303 clang-giltiga/vcc-godkända på x86**, tre referensbyggfel
+och 37 referenskörfel. ARM:s gemensamma testbibliotek blockerades av
+`__builtin_isinf_sign` för long double. Rättningen stöder alla FP-format
+på ARM och korrigerar även x86:s half/BF16-test och signbyte; båda byggsätten,
+fem FP-regressioner per mål och alla 65536 half/BF16-mönster går grönt.
+Med den isolerade rättningen och vcc-byggda stödobjekt går **309 ARM-prov**,
+tre referensbyggfel och 31 referenskörfel. Dessa är riktade/isolerade
+resultat; harnessen och den kombinerade milstolpen verifieras separat.
+
 musl:s libc-test kräver en riktig libc.  Det görs när vcc bygger musl, eller
 mot glibc i Linux-containern.  Funktionstesterna och math-testerna
 (gränsfall i flyttal) är de intressanta.
