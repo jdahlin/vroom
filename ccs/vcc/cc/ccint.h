@@ -328,10 +328,11 @@ enum {
 	BI_COUNT
 };
 
-enum { CV_NONE, CV_INT, CV_FLT, CV_ADDR };
+enum { CV_NONE, CV_INT, CV_FLT, CV_ADDR, CV_BIGINT };
 
 typedef struct cval {
 	int kind;
+	uint32_t big, nbig;	/* CV_BIGINT: immutable LE32 storage words in lists */
 	bool ice;		/* integer constant expression (C11 6.6p6, clang's rules) */
 	i128 i;			/* CV_INT; CV_ADDR: byte offset */
 	double f;		/* CV_FLT; with ld, the nearest double of q */

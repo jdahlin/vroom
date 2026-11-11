@@ -420,6 +420,9 @@ VPRIV void wsj_end(ecx *e);
 /* sdivpow2.c */
 VPRIV bool wsdivpow2_ok(const em_sdivpow2_recipe *r);
 VPRIV void wsdivpow2(ecx *e, qty ty, const em_sdivpow2_recipe *r);
+/* udivconst.c */
+VPRIV bool wudivconst_ok(const em_udivconst_recipe *r);
+VPRIV void wudivconst(ecx *e, const em_udivconst_recipe *r);
 /* reachability.c: conservative proofs, without state or allocations */
 VPRIV bool wlabels(cc *c, uint32_t n);
 VPRIV bool wterm(cc *c, uint32_t n);

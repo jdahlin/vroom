@@ -708,6 +708,53 @@ Separat tidsgränsprob: `compound_assign_simplify1` på x86, en arbetare och
 vid 5 s ändras inte; detta är tidsgränsevidens, inte en semantisk rättning.
 Artefakter: `work/results/kefir-slow-probe-x86`.
 
+**Ny fullständig baslinje 2026-11-11, committad `2dc4ea3`:** samma
+875 oförändrade runtime-par, Clang 23.1.6, sex arbetare och tidsgränserna
+30 s kompilering / 5 s körning. Binär SHA256:
+`c4eeb51f8c14f3718fedb17322663386155788d723ade6b06aef2a3c55aa2206`.
+X86 kördes först, därefter ARM64 under QEMU.
+
+| mål | alla fyra kombinationer godkända | vcc-fel | vcc signal/timeout | referenskompilering avvisad | referenslänk avvisad | referens signal/timeout | unsupported |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| x86-64 Linux | 481 | 99 | 10 | 161 | 6 | 52 | 66 |
+| ARM64 Linux/QEMU | 455 | 3 | 7 | 249 | 6 | 51 | 104 |
+
+Ingen tidigare godkänd fallrad tappar godkännandet på något mål. X86 får
+33 nya godkända fall, samtliga tidigare vcc-fel. ARM får 41, varav 37
+var tidigare vcc-fel och fyra tidigare referensfel. Referens-/tidsvariation
+är inte kompilatorrättningar. Signal/timeout omfattar även körprogrammets
+assertionsfel; antalen är inte antal unika buggar eller kompilatorkrascher.
+Båda fullkörningarna avslutas fortfarande med status 1. Breda BitInt-typer
+över 128 bitar blockerar merparten av återstående x86-kompileringsfall;
+även flera `int128_*`- och `constexpr*`-fall innehåller sådana typer.
+Nästa rättningar verifieras mot dessa oförändrade kontrakt.
+
+Artefakter: `work/results/kefir-main2dc-{x86,arm}/results.json`,
+`work/results/linux-baseline-2dc4ea3/{manifest,comparison}.json`.
+Manifestet binder källcommit, träd, binär och harnesshashar till körningarna.
+Den äldre x86-baslinjen har flyttats från tmpfs till
+`work/results/kefir-archives/kefir-final-x86`; den ursprungliga
+`/tmp/kefir-final-x86`-sökvägen bevaras med en symbolisk länk.
+S5b och releasegrind G1/G2 är fortsatt öppna.
+
+**Breda BitInt, fryst implementation `b0b6107` på `2dc4ea3`:** hela
+875-parskörningen upprepas med samma kontrakt och tidsgränser. X86 får
+572 godkända, 8 vcc-fel och 10 vcc signal/timeout: **91 tidigare vcc-fel
+passerar nu**, utan förlorade godkännanden. ARM behåller 455 godkända,
+3 vcc-fel och 7 vcc signal/timeout, också utan förlorade godkännanden.
+Referens-/unsupported-kategorierna är oförändrade på båda mål. ARM:s
+Clang-referens avvisar bredder över 128; bred ARM-aritmetik verifieras
+separat mot Python och dess ABI mot dokumenterade aggregatproxyer.
+Den oförändrade fulla runtime-korpusen utanför Kefir passerar samtidigt
+1942/1942 på x86 (130 undantag) och 1945/1945 på ARM/QEMU
+(126 undantag och ett befintligt kört XFAIL), med nya separata cachekataloger.
+Binär SHA256:
+`f2a6f04804de1393357a2b4341059f8bc9cbc30c8b5361808df43f203d6e0b74`.
+Kefir-loggar: `work/results/kefir-wide-main2dc-{x86,arm}/`;
+manifest/jämförelse/fullgrindar: `work/results/bitint-main2dc/`.
+Körtidskonvertering mellan breda heltal och flyttal återstår separat.
+S5b och G1/G2 är fortfarande öppna.
+
 ### S6 ABI-generatorer — rigg klar, fel rättas
 `gcc.dg/compat/struct-layout-1_generate.c` och clangs `utils/ABITest`
 genererar tusentals anrop mellan två kompilatorer.  Kopplas in i
