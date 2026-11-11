@@ -445,8 +445,26 @@ VPRIV bool compatible(cc *c, qty a, qty b)
 	case TY_ARRAY:
 		if (!compatible_q(c, x->base, y->base))
 			return false;
-		if ((x->flags | y->flags) & (TF_INCOMPLETE | TF_VLA))
+		if ((x->flags | y->flags) & TF_INCOMPLETE)
 			return true;
+		if ((x->flags | y->flags) & TF_VLA) {
+			/* A constant outer bound of an array of VLAs still participates
+			 * in compatibility. Only genuinely variable bounds are ignored. */
+			cval xv, yv;
+			uint64_t xn = arr_len(c, a), yn = arr_len(c, b);
+
+			if (x->flags & TF_VLA) {
+				if (!x->n || !eval(c, x->n, &xv) || xv.kind != CV_INT || !xv.ice)
+					return true;
+				xn = (uint64_t)xv.i;
+			}
+			if (y->flags & TF_VLA) {
+				if (!y->n || !eval(c, y->n, &yv) || yv.kind != CV_INT || !yv.ice)
+					return true;
+				yn = (uint64_t)yv.i;
+			}
+			return xn == yn;
+		}
 		return x->n == y->n && x->aux == y->aux;
 	case TY_FUNC:
 		if (!compatible(c, x->base, y->base) || QQ(x->base) != QQ(y->base))

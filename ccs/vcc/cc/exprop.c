@@ -37,6 +37,8 @@ static uint32_t align_of_expr(cc *c, uint32_t e)
 	const node *x = N(e);
 	uint32_t a = ty_align(c, x->ty);
 
+	if (x->op == N_MEMBER)
+		return c->tags[x->b].f[x->c].align;
 	if (x->op == N_VAR && c->syms[x->a].align > a)
 		a = c->syms[x->a].align;
 	if (is_array(c, x->ty)) {

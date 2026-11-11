@@ -83,6 +83,7 @@ static void lay_bitfield(cc *c, layout *l, field *f, uint32_t fattr_align, bool 
 			ufoff = align_to(ufoff, explicit_align);
 	}
 	f->off = off;
+	f->align = (uint32_t)((falign + 7) / 8);
 	if (l->is_union) {
 		uint64_t rs = l->ms_struct ? (fsize ? unit : 8) : align_to(fsize, 8);
 
@@ -137,6 +138,7 @@ static void lay_field(cc *c, layout *l, field *f, uint32_t fattr_align, bool fpa
 	falign = packed ? palign : ualign;
 	off = align_to(off, falign);
 	f->off = off;
+	f->align = (uint32_t)((falign + 7) / 8);
 	if (l->is_union) {
 		if (fsize > l->data_size)
 			l->data_size = fsize;

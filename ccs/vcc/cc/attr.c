@@ -116,6 +116,8 @@ VPRIV int mode_kind(cc *c, uint32_t id, bool sgn)
 		return 0;
 	memcpy(b, s, (size_t)l);
 	(void)c;
+	if (!strcmp(b, "SF")) return TY_FLOAT;
+	if (!strcmp(b, "DF")) return TY_DOUBLE;
 	if (!strcmp(b, "QI")) return sgn ? TY_SCHAR : TY_UCHAR;
 	if (!strcmp(b, "HI")) return sgn ? TY_SHORT : TY_USHORT;
 	if (!strcmp(b, "SI")) return sgn ? TY_INT : TY_UINT;

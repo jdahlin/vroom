@@ -1,0 +1,4 @@
+file_vm_pointer.c:2:14: error: variably modified type declaration not allowed at file scope
+    2 | static int (*p)[n = 1];
+      |              ^
+1 error generated.

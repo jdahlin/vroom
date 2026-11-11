@@ -79,6 +79,7 @@ typedef struct field {
 	uint32_t name;		/* identifier id, 0 for anonymous members and unnamed bit-fields */
 	qty ty;
 	uint64_t off;		/* bits */
+	uint32_t align;		/* effective field alignment, including packed/aligned/pragma pack */
 	uint16_t width;		/* bit-field width */
 	uint8_t bitfield;
 	uint8_t invalid;	/* its type was an error: uses say nothing more (clang) */

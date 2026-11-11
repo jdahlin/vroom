@@ -205,6 +205,7 @@ static void code_ptrs(coder *k, char **img, const cc *c, bool enc)
 static void code_cc(coder *k, cc *s, bool enc)
 {
 #define P(x) ((x) = enc ? enc_ptr(k, (x)) : dec_ptr(k, (x)))
+	P(s->ptag);
 	P(s->tyhash);
 	P(s->fnhash);	/* (dops: the TU keeps its own, see snap_restore) */
 	for (uint32_t i = 0; i < NDIR; i++) {

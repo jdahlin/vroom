@@ -19,7 +19,8 @@ static bool param_list(cc *c, dop *op)
 	if (!c->in_proto)
 		c->nptag = 0;
 	if (is(c, T_RPAREN)) {
-		fl |= TF_NOPROTO;
+		if (kwmap != kwmap_c23)
+			fl |= TF_NOPROTO;
 	} else if (iskw(c, KW_void) && peek(c, 1)->kind == T_RPAREN) {
 		next(c);
 	} else if (is(c, T_IDENT) && !kwof(tok(c)) && !is_typedef_name(c, tok(c)) &&
@@ -270,7 +271,8 @@ VPRIV void declarator(cc *c, declr *d, bool abstract_ok, uint32_t *first, uint32
 					q |= DQ_ATOMIC;
 				else if (is_nullability(c, tok(c)))
 					;
-				else if (kw == KW___attribute__ || kw == KW___attribute) {
+				else if (kw == KW___attribute__ || kw == KW___attribute ||
+					 (is(c, T_LSQUARE) && peek(c, 1)->kind == T_LSQUARE)) {
 					attribute_list(c, &d->at);
 					continue;
 				} else

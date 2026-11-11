@@ -275,7 +275,7 @@ static uint32_t declare(cc *c, const dspec *ds, declr *d, qty t, bool file)
 	merge_attrs(&at, &ds->at);
 	if (ds->align > at.aligned)
 		at.aligned = ds->align;
-	if (d->at.mode && is_integer(c, t)) {
+	if (d->at.mode && is_arith(c, t)) {
 		int k = mode_kind(c, d->at.mode, is_signed(c, t));
 
 		if (k)
@@ -886,12 +886,15 @@ VPRIV void declaration(cc *c, vec *out, bool file)
 {
 	dspec ds;
 	uint32_t dbeg = tok(c)->loc;
+	bool attr_decl = is(c, T_LSQUARE) && peek(c, 1)->kind == T_LSQUARE;
 
 	if (iskw(c, KW__Static_assert)) {
 		static_assert_decl(c);
 		return;
 	}
 	if (!decl_specs(c, &ds, true)) {
+		if (attr_decl && accept(c, T_SEMI))
+			return;
 		int k = peek(c, 1)->kind;
 
 		if (file && ((is(c, T_IDENT) && !kwof(tok(c)) &&
@@ -924,6 +927,18 @@ VPRIV void declaration(cc *c, vec *out, bool file)
 
 		declarator(c, &d, false, &first, &nops);
 		t = apply_declarator(c, ds.ty, first, nops);
+		if (file) {
+			qty vm = t;
+
+			while (is_array(c, vm) || KIND(c, vm) == TY_PTR) {
+				if (T(c, vm)->flags & TF_VLA) {
+					cc_error(c, d.loc, "variably modified type declaration not allowed at file scope");
+					ds.invalid = true;
+					break;
+				}
+				vm = T(c, vm)->base;
+			}
+		}
 		c->ndops = first;
 		asm_label(c, &d.at);
 		if (unlikely(file && (ds.sc == SC_AUTO || (ds.sc == SC_REGISTER && !d.at.asmname))) && d.name) {

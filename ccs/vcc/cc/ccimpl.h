@@ -307,6 +307,7 @@ static inline uint32_t dget(uint32_t **dir, uint32_t id);
 VPRIV void scope_open(cc *c);
 VPRIV void scope_close(cc *c);
 VPRIV void scope_close_proto(cc *c);
+VPRIV void proto_binding(cc *c, uint32_t s);
 VPRIV void unused_statics(cc *c);
 VPRIV void unused_typedefs(cc *c);
 VPRIV uint32_t sym_new(cc *c, int kind, uint32_t name, qty ty, uint32_t loc);

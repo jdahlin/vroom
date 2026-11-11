@@ -110,8 +110,7 @@ static uint32_t tag_lookup_or_new(cc *c, int kind, uint32_t name, uint32_t loc, 
 
 			c->syms[ns].val = ti;
 			sym_bind(c, ns);
-			if (c->in_proto == 1 && c->nptag < 8)
-				c->ptag[c->nptag++] = ns;
+			proto_binding(c, ns);
 		}
 		return ti;
 	}

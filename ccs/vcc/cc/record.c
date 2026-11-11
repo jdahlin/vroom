@@ -271,6 +271,7 @@ VPRIV void enum_body(cc *c, uint32_t ti, attrs *after)
 			apply_sym_attrs(c, &c->syms[s], &ea);
 		c->syms[s].val = (int64_t)v;
 		sym_bind(c, s);
+		proto_binding(c, s);
 		vpush(c, &cs, s);
 		if (!accept(c, T_COMMA))
 			break;

@@ -279,14 +279,31 @@ static uint32_t lit_char(cc *c, const char **ps, const char *e, const ptok *t, b
 	case 'v': v = 11; s++; break;
 	case 'e': case 'E': v = 27; s++; break;
 	case '\\': case '\'': case '"': case '?': v = *s++; break;
-	case 'x':
+	case 'x': {
+		uint32_t limit = t->kind == T_U16CHAR || t->kind == T_U16STRING ? 0xffffu :
+			(t->kind == T_WCHAR || t->kind == T_WSTRING) ? (c->o->short_wchar ? 0xffffu : UINT32_MAX) :
+			(t->kind == T_U32CHAR || t->kind == T_U32STRING) ? UINT32_MAX : 0xffu;
+		bool overflow = false;
+
 		s++;
 		v = 0;
 		while ((const char *)s < e && ((*s >= '0' && *s <= '9') || ((*s | 32) >= 'a' && (*s | 32) <= 'f'))) {
-			v = v * 16 + (uint32_t)(*s <= '9' ? *s - '0' : (*s | 32) - 'a' + 10);
+			uint32_t digit = (uint32_t)(*s <= '9' ? *s - '0' : (*s | 32) - 'a' + 10);
+
+			overflow |= v > (limit - digit) / 16;
+			v = v * 16 + digit;
 			s++;
 		}
+		if (overflow) {
+			uint32_t loc = t->loc;
+
+			if (!(t->flags & (TF_DIRTY | PF_MACRO)))
+				loc += (uint32_t)(*ps - (e + 1 - t->len)) +
+				       (t->kind == T_U8CHAR && t->s[0] == '\'' ? 2 : 0);
+			cc_error(c, loc, "hex escape sequence out of range");
+		}
 		break;
+	}
 	case 'u': case 'U': {
 		int nd = *s == 'u' ? 4 : 8;
 
@@ -358,7 +375,7 @@ VPRIV uint32_t string_lit(cc *c)
 
 		if (!is_strtok(t->kind))
 			break;
-		if (t->kind != T_STRING && t->kind != T_U8STRING)
+		if (t->kind != T_STRING && (t->kind != T_U8STRING || kind == T_STRING))
 			kind = t->kind;
 		if (k >= 2) {	/* the lookahead buffer is small: just stop counting */
 			break;
@@ -403,7 +420,7 @@ VPRIV uint32_t string_lit(cc *c)
 			}
 			v = lit_char(c, &s, e, t, &ok);
 			if (esz == 1) {
-				if (v & 0x80000000u)
+				if (!ok && (v & 0x80000000u))
 					n += utf8_enc(v & 0x7fffffffu, buf + n);
 				else
 					buf[n++] = (char)v;
@@ -419,7 +436,8 @@ VPRIV uint32_t string_lit(cc *c)
 						cp = cp << 6 | ((unsigned char)*s & 63);
 					v = cp;
 				}
-				v &= 0x7fffffffu;
+				if (!ok)
+					v &= 0x7fffffffu;
 				if (esz == 2 && v >= 0x10000) {
 					uint16_t hi = (uint16_t)(0xD800 + ((v - 0x10000) >> 10)), lo = (uint16_t)(0xDC00 + ((v - 0x10000) & 0x3ff));
 
@@ -455,7 +473,7 @@ VPRIV uint32_t string_lit(cc *c)
 		qty et;
 
 		c->strs[si] = (cstr){ keep, (uint32_t)(n / (size_t)esz), (uint8_t)esz, (uint8_t)kind };
-		et = esz == 1 ? prim(TY_CHAR) : kind == T_WSTRING ? c->t_wchar : kind == T_U16STRING ? c->t_char16 : c->t_char32;
+		et = esz == 1 ? prim(kind == T_U8STRING && kwmap == kwmap_c23 ? TY_UCHAR : TY_CHAR) : kind == T_WSTRING ? c->t_wchar : kind == T_U16STRING ? c->t_char16 : c->t_char32;
 		{
 			uint32_t r = mk(c, N_STR, ty_array(c, et, n / (size_t)esz, 0), loc);
 
@@ -486,7 +504,7 @@ VPRIV uint32_t char_lit(cc *c)
 		uint32_t x = lit_char(c, &s, e, t, &ok);
 
 		if (kind == T_CHAR) {
-			if (x & 0x80000000u) {
+			if (!ok && (x & 0x80000000u)) {
 				char u[4];
 				size_t k = utf8_enc(x & 0x7fffffffu, u);
 
@@ -507,7 +525,7 @@ VPRIV uint32_t char_lit(cc *c)
 					cp = cp << 6 | ((unsigned char)*s & 63);
 				x = cp;
 			}
-			v = x & 0x7fffffffu;
+			v = ok ? x : x & 0x7fffffffu;
 			nch++;
 		}
 	}
