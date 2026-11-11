@@ -1,6 +1,6 @@
 # VIR 1.0 specification
 
-Status: **draft 0.2, 2026-11-11**. Nothing here is implemented. Plan and steps
+Status: **draft 0.3, 2026-11-11**. Nothing here is implemented. Plan and steps
 are in `PLAN-vir.md`; the reasons behind the rules are in `RESEARCH-vir.md`
 (rule numbers R1-R20 refer to its section 5).
 
@@ -16,7 +16,8 @@ Contents: 1 scope, 2 model, 3 in-memory format, 4 types, 5 values and
 constants, 6 memory model, 7 instructions, 8 control flow, 9 ABI signatures,
 10 effects and what passes may do, 11 text form, 12 verifier, 13 interpreter,
 14 passes, 15 register allocation and lowering, 16 tools, 17 tests, 18 limits,
-19 integration with the walker, 20 open issues, 21 traceability.
+19 integration with the walker, 20 open issues, 21 traceability,
+22 performance design.
 
 ## 1. Scope
 
@@ -120,7 +121,7 @@ typedef struct vir_fn {
 	vir_blk  *blk;   uint32_t nblk;
 	vir_slot *slot;  uint32_t nslot;
 	uint32_t *extra; uint32_t nextra;
-	uint32_t *loc;		/* per value: source location, 0 none */
+	vir_loc  *loc;   uint32_t nloc;	/* runs of (first instruction, source location), 22.7 */
 	uint32_t *tmp;		/* per value: scratch for the running pass, undefined between passes */
 } vir_fn;
 ```
@@ -1032,7 +1033,7 @@ Of the 69 operations the walker calls, by how VIR handles them:
 | R8 flat instructions, no use lists | 3.1, 3.6 |
 | R9 nothing shared between functions | 2.1, 3.4 |
 | R10 block parameters | 3.2, 8.2 |
-| R11 locations in a side array | 3.4, 11.7 |
+| R11 locations in a side array | 3.4, 11.7, 22.7 |
 | R12 two levels | 15.3 |
 | R13 SSA on the fly | X1, X3, X9 |
 | R14 fixed pass list, budgets | 10.4, 14 |
@@ -1042,3 +1043,124 @@ Of the 69 operations the walker calls, by how VIR handles them:
 | R18 `unreachable` is a trap | 8.1, 15.4 |
 | R19 explicit width, alignment, volatility | 6.10, 7.2 |
 | R20 one set of FP operations | 7.3, 7.4 |
+
+## 22. Performance design
+
+The format in section 3 decides what is stored; this section decides what
+building and transforming it may cost. The numbers are budgets to be measured
+in V1 and V2 with `bench/vbench.py`, not results.
+
+### 22.1 Budgets
+
+| Quantity | Budget | Reference today |
+|---|---|---|
+| Calls to `malloc`, `mmap`, `free` per function | 0 after the thread's first function | The walker and x86 lowering already work this way |
+| Bytes cleared per function | Proportional to what the function used, never to capacity | — |
+| Building, per VIR instruction (the `vir_*` operations only) | 30 ns | The arm64 emitter spends 103 ns per machine instruction in total (PLAN-fas2, status 2.6) |
+| Sweeps over the instruction array at `-O2`, build to lowered records | 7 | — |
+| `-O0` and `-O1` | No VIR code runs; output byte-identical | — |
+
+### 22.2 Where the memory comes from
+
+- **Not the stack for anything that grows with the function.** A function can
+  have millions of instructions, the emitter runs on up to 64 worker threads
+  with ordinary stacks, and a stack array cannot be kept warm between
+  functions. The stack is used for small bounded scratch with a fallback, as
+  `wk_function` does with `pabuf[256]`: argument lists, a `switch`'s cases, the
+  parallel-move worklist.
+- **Per-thread reservations for everything else,** the emitter's existing
+  idiom (`reserve()` in `emit/tu.c`: `mmap` with `MAP_NORESERVE`, made once per
+  thread). VIR adds, per thread: two instruction arrays (source and
+  destination of a copying sweep), `blk`, `slot`, `extra`, the location table,
+  `tmp`, and the builder's tables below. Starting a function sets counts to
+  zero. The pages a previous function touched are still mapped and in cache,
+  so a small function builds entirely in memory that is already hot. This is
+  as cheap as a stack frame (a pointer bump) without its limits.
+- A function that exceeds a reservation fails with `too_large` (X8); nothing
+  grows or moves.
+
+### 22.3 Nothing is cleared
+
+Every per-function table is validated by a generation number, the scheme the
+walker uses for `sgen`/`kgen`: an entry carries the generation it was written
+in and is empty if that is not the current one. Bumping one counter resets the
+table. This applies to the constant table, the per-block CSE table, the
+variable definitions, the frame-range tables and `tmp`. No `memset` of a
+table, ever; arrays indexed by value are written before they are read.
+
+### 22.4 The builder's tables
+
+| Table | Shape | Cost per use |
+|---|---|---|
+| Current SSA value of a walker register name (X9) | `uint32_t cur[255]` plus the block it was set in | One load or store. `treg` gives a fresh instance, so nothing is searched |
+| Definitions of an `L_VAR` local per block (X3) | Per variable, the newest (block, value) pair inline; older pairs in a bump-allocated chain | One compare when the read is in the block of the last write, the common case; otherwise a walk up single predecessors |
+| Constants | Open-addressed table of value ids keyed by (op, ty, a, b, c), generation-stamped | One probe |
+| Local CSE of pure instructions | The same table, with the block generation in the key | One probe; cleared by entering a block |
+| Frame offset to slot (X2) | Array indexed by offset / 8, generation-stamped | One load |
+| Last value stored to a frame range (X4) | Per slot: value and block generation | One load; this is what makes argument slots free |
+| Label to block | Array indexed by the walker's label number | One load |
+
+Braun's algorithm needs a block **sealed** (all predecessors known) before a
+read in it can be answered without a provisional parameter. A label that is
+jumped to only from above is sealed when it is placed. A label that may still
+get a jump from below (a loop head, a user label with `LR_BACK`) stays open
+until the function ends, and every variable read in it gets a provisional
+block parameter. The finalizing sweep removes the ones that turn out to carry
+a single value. If measurement shows the provisional parameters matter, the
+walker can say when a loop is complete (one call at the end of each loop
+statement); the format does not change.
+
+### 22.5 From built to canonical in one sweep
+
+The builder appends in the walker's order with a few `nop`s and provisional
+parameters. One finalizing sweep (`vir_canon`) does all of the following
+while copying to the second array: drops `nop`s and unreachable blocks,
+resolves the alias table (a removed parameter becomes its value), writes
+`br` argument lists, renumbers values, and orders constants by first use. When
+the walker's order already has every block after its immediate dominator (true
+for structured code that does not rotate loops) the block order is kept;
+otherwise blocks are emitted in reverse postorder in the same sweep. Dominators
+are computed once here (Cooper-Harvey-Kennedy on the block array) and stored
+per block with preorder and postorder numbers, so "does A dominate B" is two
+compares for every later pass.
+
+### 22.6 Sweeps at `-O2`
+
+| # | Sweep | Direction | Does |
+|---|---|---|---|
+| 1 | Build | Walker order | Folding, local CSE, SSA construction (14.1) |
+| 2 | Canon | Forward, copying | 22.5 |
+| 3 | `simplify` + `gvn` | Forward | One pass does both: the value table is global and a hit counts if its defining block dominates (22.5), so no scoped table and no dominator-tree walk |
+| 4 | `mem` | Forward | Exposure, forwarding, dead stores |
+| 5 | `dce` + liveness | Backward | One pass marks live instructions and builds the allocator's live intervals (loop heads extend intervals to the loop end, as in linear scan on SSA; no iterative dataflow) |
+| 6 | Allocation | Forward over intervals | 15.2 |
+| 7 | Lowering | Forward | 15.3 |
+
+Section 14 describes `simplify`, `gvn` and `dce` as separate contracts; they
+stay separately callable for tests (`VCC_VIR_PASSES`), and the default
+pipeline fuses them as above.
+
+### 22.7 Smaller choices
+
+- **Source locations** are a run table, not a per-value array: one
+  (first instruction index, location) pair each time the location changes,
+  written by `vir_dbgrow`. A statement's instructions share one entry.
+- **No `tmp` initialization:** a pass that uses `tmp` writes every entry it
+  later reads, or stamps it.
+- **`extra` is append-only** during building; lists are never edited in place.
+- **Use counts** are a `uint8_t` per value saturating at 255, computed in
+  sweep 5 where the allocator and lowering need "used once".
+- **No pass allocates** except from the thread's reservations; a pass that
+  needs a worklist uses `tmp` as an intrusive list.
+- **The verifier is not on this path:** it runs in test and sanitizer builds
+  and under `VCC_VIR_VERIFY=1` only (section 12).
+
+### 22.8 Measuring
+
+- V1 adds `virgen`-driven microbenchmarks to `bench/vbench.py`: appends per
+  second, canon, each sweep, in instructions executed per VIR instruction.
+- From V2, `vbench.py ab emit` reports the emit phase with `VCC_VIR=1` against
+  without, per corpus, and `VCC_VIR_STATS=1` prints per-sweep time and the
+  count of provisional parameters created and removed.
+- The gate from V2 on: with the flag off, emit within 0.1 % of the merge
+  base; with it on, the numbers go into `PLAN-vir.md` with each step.
