@@ -118,7 +118,7 @@ static inline bool inline_only(const sym *y)
 #include "flow/flow.h"
 
 /* references to things with a symbol: kind in the top 4 bits */
-enum { RK_SYM = 0, RK_STR = 1, RK_LBL = 2, RK_NAME = 3 };
+enum { RK_SYM = 0, RK_STR = 1, RK_LBL = 2, RK_NAME = 3, RK_TABLE = 4 };
 #define REF(k, i) (((uint32_t)(k) << 28) | (uint32_t)(i))
 #define RKIND(r) ((r) >> 28)
 #define RIDX(r) ((r) & 0x0fffffffu)
@@ -383,6 +383,7 @@ typedef struct ecx {
 	struct wst *w;		/* WASM: arch/wasm/emit/ state (wimpl.h) */
 	struct wkst *wk;	/* X86: the walker's state (emit/walk/walk.h) */
 	struct xst *x64;	/* X86: arch/x64/emit/ state (x64impl.h) */
+	struct em_switch_values_data *switch_values; /* accepted tables of this real function */
 } ecx;
 enum { FN_MEMCPY, FN_MEMSET, FN_MEMMOVE, FN_UDIVTI3, FN_DIVTI3, FN_UMODTI3, FN_MODTI3, FN_STRLEN,
        FN_ASHLTI3, FN_LSHRTI3, FN_ASHRTI3, FN_FLOATTISF, FN_FLOATTIDF, FN_FLOATUNTISF, FN_FLOATUNTIDF,
@@ -497,6 +498,23 @@ typedef struct carg {
 
 /* ---------------- across files ---------------- */
 
+/* opt/switch-values.c: bounded integer-result tables, no AST mutation. */
+typedef struct em_switch_values_recipe {
+ i128 lo;
+ uint64_t values[256], fallback;
+ qty ty;
+ uint32_t destination;
+ uint16_t slots;
+ uint8_t selector_bits, element_bytes;
+ bool is_return;
+} em_switch_values_recipe;
+VPRIV bool em_switch_values_plan(cc *c, uint32_t n, em_switch_values_recipe *r);
+VPRIV bool em_switch_values_queue(ecx *e, uint32_t n, const em_switch_values_recipe *r);
+VPRIV void em_switch_values_reset(ecx *e);
+VPRIV void em_switch_values_emit(ecx *e);
+VPRIV bool a64_switch_values(ecx *e, uint32_t n);
+VPRIV bool wk_switch_values(ecx *e, uint32_t n);
+VPRIV bool wswitch_values(ecx *e, uint32_t n);
 /* tu.c */
 VPRIV void *reserve(size_t n);
 VPRIV double now(void);

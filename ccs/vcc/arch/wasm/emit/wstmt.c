@@ -995,6 +995,7 @@ static void wswitch_tree(ecx *e, const em_switch_case *v, uint32_t n,
 
 static void wswitch(ecx *e, uint32_t n)
 {
+	if (wswitch_values(e,n)) return;
 	wflow_reject(e);
 	cc *c = e->c;
 	wst *W = e->w;

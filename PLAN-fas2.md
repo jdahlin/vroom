@@ -2299,7 +2299,7 @@ ett påstående om stöd eller avsaknad görs.
 | Heltalsförenkling: InstCombine, reassoc, div/rem | **Delvis, alla tre.** `opt/{identity,divpow2,sdivpow2,udivconst}.c` med separata adaptrar. U32-reciproker har målkostnad/fallback; inte generell InstCombine. Små konstantmultiplikationer, fler bitregler, delat kvot/rest-recept och signed/u64-reciproker återstår. Float2Int är inte bevisat av heltalsreglerna. |
 | Värdefakta, CSE/PRE, intervall: CCP, GVN, SCCP | **Delvis lokalt.** `rec/copies.c`, `rec/slot-values.c` och förpassfakta; a64:s `opt.c`, x64:s `copies.c`/`extensions.c`, wasms `slots.c`. Ingen gemensam global GVN/PRE/SCCP eller generell intervallanalys. Börja med begränsad blocklokal cache för rena uttryck. |
 | Död kod och minne: DCE/DSE, store merging | **Delvis.** Gemensamma exakta frame-celler/storefakta och nåbarhetsstädning; a64 har egna dead-result-pass, x64 effektbeskrivning, wasm typade accesshändelser. Heap/global-DSE, bitvis DCE, allokeringseliminering, generell last/store-motion och looplasteliminering återstår/är overifierade. |
-| Kontroll och switch: SimplifyCFG, jump threading, bit tests | **Delvis.** `opt/control.c`, `opt/switch.c`, `rec/{fallthrough,unreachable}.c`; alla mål använder delade beslut, wasm har tät `br_table`. Värdetabeller/bitset-kluster, generell threading, compare merging och tail merging återstår. |
+| Kontroll och switch: SimplifyCFG, jump threading, bit tests | **Delvis.** `opt/control.c`, `opt/switch.c`, `rec/{fallthrough,unreachable}.c`; alla mål använder delade beslut, wasm har tät `br_table`. Begränsade värdetabeller finns för heltalsresultat; bitset-kluster, generell threading, compare merging och tail merging återstår. |
 | Skalär ersättning/promotion: SROA, mem2reg | **Delvis.** `opt/locals.c`, förpass och celler; a64 registerbindning, x64 fyra valda GPR-hem, wasm typade lokaler. Detta är inte generell aggregatsplittring eller join-medveten mem2reg. |
 | Loopmotion/induktion: LICM, IV opts, loop sink | **Saknas generellt.** Alla mål sänker loopar; förpassets loopviktade lokalval är inte LICM. CFG, dominans, loop-/beroendefakta och bevis om noll iterationer behövs före säker hoisting/IV-omskrivning. |
 | Loopform: rotation, deletion, unroll, unswitch/distribute | **Saknas generellt.** Målen har direkt satssänkning, inte dessa transformpass. Kräver trip-count-/effekt-/entrybevis och kodstorleksbudget; börja eventuellt med små exakt konstanta loopar. |
@@ -2762,3 +2762,21 @@ ASan/UBSan. `build/linux/postfix-evidence/integration-*.log` innehåller resulta
 Den tidigare breda sviten och matchade Ir-proven har inte körts om; inga
 integreringsfel motiverade det. Rättningen är fortfarande avgränsad till
 registerrepresenterad postfix och ligger kvar ovanpå multiplikationsföräldern.
+
+### Begränsade switch-värdetabeller (2026-11-11)
+
+Status: lokalt implementerat för x86-64, arm64 och wasm32/64 vid O1–O3.
+En gemensam budgeterad analys accepterar täta, högst 256 element stora
+intervall med explicit default och konstanta heltalsresultat, antingen direkta
+returer eller tilldelning till samma lokala variabel följd av break. Hål får
+standardvärdet och väljaren evalueras en gång. Cleanup, inlining på native,
+Darwin och osäkra kontrollflöden behåller ordinarie switchsänkning. Data läggs
+efter funktionens storlek och debug-/CFI-avslut i en alignerad läsbar sektion.
+
+`vcc-opt-rules.py --rule switchvalues --run` passerar O0–O3 på alla fyra mål
+samt O2 med `VCC_NOOPT`; testet täcker gränsvärden, intervall, hål, sidoeffekter,
+volatile, flera tabeller och avvisade kontrollflöden. Arm64-direktobjekt med
+PIC, debug och CFI körs också under qemu och dess sektioner, symboler och
+relokeringar överensstämmer med extern assemblering av vcc:s assembler.
+Separat kostnadsmätning för dessa tabeller återstår; resultatet här är ingen
+uppmätt generell kompileringstid eller programhastighet.

@@ -625,6 +625,7 @@ static void wk_switch_tree(ecx *e, const em_switch_case *cases, uint32_t n,
 /* Evaluate once; small and wide switches retain their comparison chain. */
 static void wk_switch(ecx *e, uint32_t n)
 {
+	if (wk_switch_values(e,n)) return;
 	cc *c = e->c;
 	wkst *W = e->wk;
 	const node *x = N(n);
@@ -1435,6 +1436,7 @@ static bool wk_is_main(cc *c, uint32_t s)
 
 VPRIV void wk_function(ecx *e, uint32_t s)
 {
+	em_switch_values_reset(e);
 	cc *c = e->c;
 	const sym *y = &c->syms[s];
 	const ctype *ft = T(c, y->ty);
