@@ -57,6 +57,9 @@ def check_wasm_inline(assembly, arch):
         text = body(assembly, name, True)
         if len(re.findall(r'\bcall\s+side\b', text)) != count or re.search(r'\bcall\s+wrapper', text):
             raise RuntimeError(f'{name}: wrapper must inline while retaining side effects\n{text}')
+    text = body(assembly, 'wi_deep_cast', True)
+    if not re.search(r'\bcall\s+deep_cast_wrapper\b', text):
+        raise RuntimeError(f'deep callee casts must respect the scan budget\n{text}')
     text = body(assembly, 'wi_mutual', True)
     if not re.search(r'\bcall\s+mutual_a\b', text):
         raise RuntimeError(f'mutual recursion must retain a call\n{text}')

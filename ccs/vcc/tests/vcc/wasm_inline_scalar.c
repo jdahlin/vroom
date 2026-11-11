@@ -14,6 +14,12 @@ static const char *advance(const char *p, int n) { return p + n; }
 static double half(double x) { return x * 0.5; }
 static int choose(int x, int y) { return x ? x : y; }
 static int side(int x) { return ++effects + x; }
+static int add1(int x) { return x + 1; }
+#define CAST_FN(x) ((int (*)(int))(x))
+#define CAST_10(x) CAST_FN(CAST_FN(CAST_FN(CAST_FN(CAST_FN(CAST_FN(CAST_FN(CAST_FN(CAST_FN(CAST_FN(x))))))))))
+static int deep_cast_wrapper(int x) { return CAST_10(CAST_10(CAST_10(CAST_10(CAST_10(CAST_10(add1))))))(x); }
+#undef CAST_10
+#undef CAST_FN
 static int wrapper(int x) { return side(x) + 1; }
 static int wrapper_twice(int x) { return wrapper(x) + wrapper(x); }
 static int mutual_b(int x);
@@ -87,6 +93,7 @@ int wi_narrow(int x) { return narrow(x); }
 double wi_float(double x) { return half(x); }
 int wi_choose(int x, int y) { return choose(x, y); }
 int wi_side(int x) { return side(x); }
+int wi_deep_cast(int x) { return deep_cast_wrapper(x); }
 int wi_wrapper(int x) { return wrapper(x); }
 int wi_wrapper_twice(int x) { return wrapper_twice(x); }
 int wi_mutual(int x) { return mutual_a(x); }
@@ -101,7 +108,7 @@ int main(void)
  if (wi_effect(5) != 7 || effects != 1 || wi_unused(5) != 5 || effects != 2 || wi_side(5) != 8 || effects != 3) return 3;
  const char *p = "abcd";
  if (wi_pointer(p) != p + 2) return 5;
- if (wi_wrapper(5) != 10 || effects != 4 || wi_wrapper_twice(5) != 23 || effects != 6) return 8;
+ if (wi_deep_cast(5) != 6 || wi_wrapper(5) != 10 || effects != 4 || wi_wrapper_twice(5) != 23 || effects != 6) return 8;
  if (wi_mutual(8) != 8 || wi_recurse(4) != 4 || wi_noinline(4) != 5) return 4;
  return 0;
 }
