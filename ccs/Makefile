@@ -75,7 +75,7 @@ VCC_FAST   = $(VCC_CFLAGS) $(VCC_OPT) -pthread
 VCC_LDFLAGS = -O3 $(VCC_SAN) $(VCC_SANLD) $(VCC_LTO) $(if $(VCC_LTO),$(LTO_LINK))
 OBJ        = $(OUT)/obj
 
-vcc: $(OUT)/vcc $(OUT)/vsh/sh $(OUT)/vld $(OUT)/vas $(OUT)/var $(OUT)/vcc-nm $(OUT)/vcc-objcopy $(OUT)/vccd $(OUT)/lextest $(OUT)/vpp $(OUT)/vlink $(OUT)/vasm $(OUT)/virtest
+vcc: $(OUT)/vcc $(OUT)/vsh/sh $(OUT)/vld $(OUT)/vas $(OUT)/var $(OUT)/vcc-nm $(OUT)/vcc-objcopy $(OUT)/vccd $(OUT)/lextest $(OUT)/vpp $(OUT)/vlink $(OUT)/vasm $(OUT)/virtest $(OUT)/viralloc
 
 o = $(patsubst vcc/%.c,$(OBJ)/%.o,$(1))
 AS_FILES = vcc/arch/a64/as/enc.c vcc/platform/darwin/macho.c vcc/arch/wasm/as/as.c vcc/platform/wasm/wasm.c
@@ -153,6 +153,11 @@ $(OUT)/vasm: $(call o,vcc/as/vasm.c) $(AS_OBJ)
 
 # virtest: VIR's parser, verifier and printer (SPEC-vir.md 16); depends on nothing else
 $(OUT)/virtest: $(call o,vcc/vir/virtest.c) $(call mod,vir)
+	$(VCC_CC) $(VCC_LDFLAGS) $^ -o $@
+
+# viralloc: VIR register allocation with a synthetic target (PLAN-vir.md V4), not yet part of vir_SRC
+VIRALLOC_SRC = vcc/vir/loops.c vcc/vir/alloc.c vcc/vir/allocchk.c vcc/vir/allocdump.c vcc/vir/synth.c
+$(OUT)/viralloc: $(call o,vcc/vir/viralloc.c $(VIRALLOC_SRC)) $(call mod,vir)
 	$(VCC_CC) $(VCC_LDFLAGS) $^ -o $@
 
 # vlink: the linker (ld.c) as a standalone tool; vobjcopy/vnm by argv[0]

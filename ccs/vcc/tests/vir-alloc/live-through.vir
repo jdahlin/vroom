@@ -1,0 +1,62 @@
+; values live through a loop without a use in it: with few registers the
+; header rule keeps them in their slots instead of reloading on the back edge
+; REGS: 4,2,0,0
+; SWEEP: yes
+vir 1
+target x86_64-linux
+sig %s = (int, int, int, int) -> int
+func @f %s {
+b0:
+  v0:i64 = param 0.0
+  v1:i64 = param 1.0
+  v2:i64 = param 2.0
+  v3:i64 = param 3.0
+  br b1(0:i64, 0:i64)
+b1(v4:i64, v5:i64) loop:
+  v6:i64 = mul v4, v4
+  v7:i64 = add v5, v6
+  v8:i64 = add v4, 1
+  v9:i64 = xor v7, v8
+  v10:i32 = icmp.slt v8, 100
+  brif v10, b2, b3
+b2:
+  br b1(v8, v9)
+b3:
+  v11:i64 = add v9, v0
+  v12:i64 = add v11, v1
+  v13:i64 = add v12, v2
+  v14:i64 = add v13, v3
+  ret v14
+}
+; ---
+; alloc @f regs 4,2,0,0
+func @f %s0 {
+b0:
+  v0:i64 = param 0.0                    ; -> r0 [ss0]
+  v1:i64 = param 1.0                    ; -> r1 [ss1]
+  v2:i64 = param 2.0                    ; -> r2 [ss2]
+  v3:i64 = param 3.0                    ; -> r3
+  br b1(0, 0)                           ; -, -
+b1(v4:i64, v5:i64) loop:                ; loop to b2 depth 1; v4 r0, v5 r1
+  v6:i64 = mul v4, v4                   ; r0, r0 -> r2
+  v7:i64 = add v5, v6                   ; r1, r2 -> r1
+  v8:i64 = add v4, 1                    ; r0, - -> r0
+  v9:i64 = xor v7, v8                   ; r1, r0 -> r1
+  v10:i32 = icmp.slt v8, 100            ; r0, - -> r2
+  brif v10, b2, b3                      ; r2
+b2:
+  br b1(v8, v9)                         ; r0, r1
+b3:
+  ; reload r0 <- v0 (ss0)
+  v11:i64 = add v9, v0                  ; r1, r0 -> r0
+  ; reload r1 <- v1 (ss1)
+  v12:i64 = add v11, v1                 ; r0, r1 -> r0
+  ; reload r2 <- v2 (ss2)
+  v13:i64 = add v12, v2                 ; r0, r2 -> r0
+  v14:i64 = add v13, v3                 ; r0, r3 -> r0
+  ret v14                               ; r0
+}
+; edge b0.0 -> b1: r0 <- 0; r1 <- 0
+; spill slots: ss0(8): v0 ss1(8): v1 ss2(8): v2
+; spills 3 reloads 3 remats 0 moves 0 swaps 0; edges 1: moves 0 reloads 0 remats 2 stores 0 xchg 0; slots 3 callee 0
+; sweep @f: 24 configurations, 0 failed

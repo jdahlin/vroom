@@ -1,0 +1,52 @@
+; a diamond: one arm uses a value, the other does not; the join reconciles both
+; REGS: 3,2,0,0
+; SWEEP: yes
+vir 1
+target x86_64-linux
+sig %s = (int, int, int) -> int
+func @f %s {
+b0:
+  v0:i64 = param 0.0
+  v1:i64 = param 1.0
+  v2:i64 = param 2.0
+  v3:i32 = icmp.slt v0, v1
+  brif v3, b1, b2
+b1:
+  v4:i64 = mul v0, v2
+  v5:i64 = add v4, v1
+  br b3(v5)
+b2:
+  v6:i64 = sub v1, v2
+  br b3(v6)
+b3(v7:i64):
+  v8:i64 = add v7, v0
+  v9:i64 = add v8, v2
+  ret v9
+}
+; ---
+; alloc @f regs 3,2,0,0
+func @f %s0 {
+b0:
+  v0:i64 = param 0.0                    ; -> r0 [ss1]
+  v1:i64 = param 1.0                    ; -> r1 [ss0]
+  v2:i64 = param 2.0                    ; -> r2
+  v3:i32 = icmp.slt v0, v1              ; r0, r1 -> r1
+  brif v3, b1, b2                       ; r1
+b1:
+  v4:i64 = mul v0, v2                   ; r0, r2 -> r1
+  ; reload r0 <- v1 (ss0)
+  v5:i64 = add v4, v1                   ; r1, r0 -> r0
+  br b3(v5)                             ; r0
+b2:
+  ; reload r1 <- v1 (ss0)
+  v6:i64 = sub v1, v2                   ; r1, r2 -> r1
+  br b3(v6)                             ; r1
+b3(v7:i64):                             ; v7 r1
+  v8:i64 = add v7, v0                   ; r1, r0 -> r0
+  v9:i64 = add v8, v2                   ; r0, r2 -> r0
+  ret v9                                ; r0
+}
+; edge b1.0 -> b3: r1 <- r0 (v5); r0 <- ss1 (v0)
+; spill slots: ss0(8): v1 ss1(8): v0
+; spills 2 reloads 2 remats 0 moves 0 swaps 0; edges 1: moves 1 reloads 1 remats 0 stores 0 xchg 0; slots 2 callee 0
+; sweep @f: 12 configurations, 0 failed
