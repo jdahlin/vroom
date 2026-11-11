@@ -2094,3 +2094,67 @@ x86-bladramens policy/cache/debug/härdning/signal-unwind passerar igen.
 Reciprok- och högproduktkällorna är oförändrade av integrationen.
 Profilernas exakta 54c8f3f→d8957b3-avgränsning behålls; inga nya kostnads-
 eller generella fartpåståenden görs för denna integration av bladramar.
+
+### OPT8 status: signed32/64 reciprokdivision (2026-11-11)
+
+Delsteget ovanpå exakt `f585591` använder `emit/opt/sdivconst.c` för en
+gemensam reciprok för signed32 och signed64. Separata native-adaptrar
+använder signed högprodukt, eventuell addition av täljaren, aritmetiskt
+skift och en teckenbitskorrektion för C:s avrundning mot noll. Negativ
+divisor negerar bara kvoten; resten beräknas med positiv divisormagnitud.
+Noll, ±1 och tvåpotenser behåller befintliga regler. _BitInt, FP, pekare,
+vektorer och andra bredder avvisas. Wasm behåller sin `div_s`/`rem_s`,
+liksom clang23 för samma små prov.
+
+Receptet byggs bara för konstant högeroperand vid O1+ utanför `noopt`.
+Signed32 använder en host64-division; bara signed64 använder host-u128.
+Tryckgränsen är högst två extra temporärer plus eventuell materialisering
+av input; otillräckligt utrymme behåller vanlig division. x86:s separata
+signed högprodukt återanvänder unsigned-variantens ägarskap och skydd för
+RAX/RDX. Ingen SSA, ny AST-genomgång eller dynamisk allokering tillkommer.
+
+Likhetsfallet i reciprokens felgräns tillåts utan extra täljaraddition.
+Ett fullbreddsbevis i hjälparens kommentar omfattar även INT_MIN. Därmed
+får `/3` samma korta magiska multiplikator som clang (`0x55555556` respektive
+`0x5555555555555556`), utan att kräva samma register-/ramkod. Regressioner
+täcker ±3/6/7/10/12/37, stora divisorer, extrema täljare, grannar till
+multipler, signed64 ±9/129, lazy narrowing, compound-lvärden och effekter.
+
+Aktuell integration bygger unity och de åtta ändrade/nya implementationerna
+kompilerar var för sig. Fyra mål × O0–O3 passerar körning och kodkrav;
+ytterligare fyra O2-`VCC_NOOPT`-kontroller passerar. Sanitiserade matematik-,
+tryck- och signed/unsigned registerparskontrakt passerar. Native-sviterna ger
+230 arm64-PASS (ett befintligt xfail) och 225 x86-PASS (sex uttryckliga
+referensundantag). ABI ger 32 PASS per native-mål. x86:s debugrader O0–O3
+och verklig unwind genom vanliga/överjusterade ramar vid O1/O2 passerar.
+O0/noopt-assemblern är dessutom byte-identisk med `f585591` i åtta
+mål-/policyjämförelser.
+
+Parade Callgrind-mätningar använder nya binärer från exakt
+`f585591`→`fbc7105`, båda med clang23 och `-O3 -march=x86-64-v3`.
+500-funktionskontrollen har identisk assembler och kostar +0,0261 % x86,
++0,0270 % arm64. Loopkontrollen kostar +0,00795 % respektive +0,00091 %.
+Wasm-kontrollerna och signed-korpusen har identisk assembler och ändras
+högst 0,000214 % i instruktioner. Avsiktligt mättade native-korpusar med
+500 funktioner (`x/7 + x%10`) visar kostnaden för extra kompilatorarbete:
+
+| Mål | Signed32, kompilator-Ir | Signed64, kompilator-Ir |
+| --- | ---: | ---: |
+| x86-64 | +14,21 % | +17,79 % |
+| arm64 | +30,03 % | +20,44 % |
+
+Samma fixerade 12-filsmix som u64-steget kostar +0,00256 % x86 (12 filer),
++0,00572 % arm64 (12), +0,000141 % wasm32 (10) och −0,000034 % wasm64
+(11). Basstödsundantagen är synliga: wasm32 atomic_ops/bitint_runtime,
+wasm64 bitint_runtime; inga nya målundantag har lagts till.
+
+Ett separat seedat x86-körprov summerar signed64 `/-37`, `%129` och
+signed32 `/3`, `%-7` för tre miljoner fullbreddstäljare. Samtliga svar
+matchar clang. Nio alternerade barn-CPU-prov efter två uppvärmningar ger
+median **18,217→6,633 ms (−63,59 %)**, inklusive processstart. Det är ett
+avgränsat prov, inte ett generellt fartlöfte eller mätning på arm64-hårdvara.
+Käll-/binärhashar, exakta kommandon och rådata finns i
+`work/opt-profile/sdivconst/`: `compiler-sources.json`,
+`compiler-profile.json`, `mixed/result.json`, `native-runtime-profile.json`
+och `noopt-identity.json` med respektive mätskript. Full G7 och full
+O2-täckning återstår.

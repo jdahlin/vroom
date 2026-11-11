@@ -392,3 +392,21 @@ debug-/härdnings- och signal-unwindprov passerar. Båda statusblock behålls.
 U64 har också integrerat main2dc4ea3 via PR51head15551a7: 196 riktade fall,
 sanitiserade kontrakt och hela bladramsharnessen passerar. Reciprokfilerna är
 oförändrade; mätningarna förblir bundna till sina tidigare exakta hashvärden.
+
+### Status 2026-11-11: G5/G7, signed32/64 reciprokdivision
+
+OPT8:s signed-del ovanpå `f585591` har gemensamma typade reciproker och
+separata x86/arm64-adaptrar. Kvot och rest följer C:s avrundning mot noll,
+även för negativa divisorer och INT_MIN; wasm behåller motorns signed
+division/rest. Ett bevisat likhetsfall tar bort onödig täljaraddition för
+bland annat `/3`. O0, `noopt` och högt registertryck behåller tidigare väg.
+
+Unity/fristående implementationer, 16 mål-/nivåkörningar och fyra noopt-
+kontroller passerar, liksom sanitiserade matematik-/tryck-/registerparskontrakt.
+Native ger 230 arm64-PASS (ett befintligt xfail), 225 x86-PASS (sex synliga
+referensundantag), ABI 32 per mål samt x86 debug/unwind. Parade v3-mätningar
+av exakt `f585591`→`fbc7105` ger fixerad mix högst +0,00572 % extra
+kompilatorinstruktioner. Mättad native signed32/64-kod kostar +14,21…+30,03 %;
+ett avgränsat x86-körprov ger −63,59 % barn-CPU, med clang-identiska svar.
+Åtta O0/noopt-assemblerjämförelser är byte-identiska. Fulla G5/G7 förblir öppna.
+Implementations- och valideringsgränserna står i PLAN-fas2:s signed-status.
