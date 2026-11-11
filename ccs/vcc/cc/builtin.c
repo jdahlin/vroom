@@ -40,6 +40,7 @@ static const builtin builtins[] = {
 	{ "__builtin_trap", BI_TRAP, 0, "v" }, { "__builtin_debugtrap", BI_DEBUGTRAP, 0, "v" },
 	{ "__builtin_return_address", BI_RETURN_ADDRESS, 0, "pu" },
 	{ "__builtin_frame_address", BI_FRAME_ADDRESS, 0, "pu" },
+	{ "__builtin_setjmp", BI_SETJMP, 0, "ip" }, { "__builtin_longjmp", BI_LONGJMP, 0, "vpi" },
 	{ "__builtin_extract_return_addr", BI_EXTRACT_RETURN_ADDR, 0, "pp" },
 	{ "__builtin_add_overflow", BI_ADD_OVERFLOW, 0, "b." },
 	{ "__builtin_sub_overflow", BI_SUB_OVERFLOW, 0, "b." },

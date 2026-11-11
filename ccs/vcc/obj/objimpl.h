@@ -44,6 +44,10 @@ typedef struct Out Out;
 
 /* arch/<cpu>/obj/fixup.c: a fixup resolved in place or turned into a relocation */
 VPRIV void elf_resolve(ElfObj *o, Out *w, ElfFix *x);
+/* arch/x64/obj/fixup.c */
+VPRIV void x64_resolve(ElfObj *o, Out *w, ElfFix *x);
+VPRIV void x64_patch(ElfObj *o, ElfFix *x, int64_t v);
+VPRIV int x64_keepsym(uint32_t t, int *tls);
 /* platform/linux/elf.c: a relocation record for fixup x */
 VPRIV void elf_reloc(ElfObj *o, Out *w, ElfFix *x, uint64_t P, uint32_t type, ElfSym *a, uint32_t aid, int64_t add);
 

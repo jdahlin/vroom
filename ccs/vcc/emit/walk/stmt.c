@@ -105,6 +105,8 @@ static uint32_t wk_ulabel(ecx *e, uint32_t l)
 	return W->ulbl[l];
 }
 
+VPRIV uint32_t wk_userlabel(ecx *e, uint32_t l) { return wk_ulabel(e, l); }
+
 static uint32_t wk_caselabel(ecx *e, uint32_t n)
 {
 	wkst *W = e->wk;
@@ -528,7 +530,11 @@ VPRIV void wk_stmt(ecx *e, uint32_t n)
 	if (!n)
 		return;
 	x = N(n);
+	if (!e->reach && !(e->E->nflags[n] & NA_LABEL))
+		return;	/* dead: after a jump, no label in it (clang -O2 drops it too) */
 	e->curloc = x->loc;
+	if (unlikely(e->E->o->debug) && x->op != N_BLOCK)
+		LO(dbgrow)(e, x->loc);
 	switch (x->op) {
 	case N_BLOCK: {
 		uint32_t vs = 0;	/* the block's first VLA: its saved sp is restored at the end */
@@ -568,6 +574,36 @@ VPRIV void wk_stmt(ecx *e, uint32_t n)
 	case N_IF: {
 		uint32_t lelse = wk_newlabel(e), lend = wk_newlabel(e);
 
+		if (!side_effects(c, x->a) && wk_isconst(e, x->a)) {
+			/* a constant condition: the other branch only for its labels (dead code, as clang -O2) */
+			val v = wk_conv(e, wk_gen(e, x->a), N(x->a)->ty, prim(TY_BOOL));
+
+			if (v.k == V_CONST) {
+				bool r0 = e->reach;
+
+				if (v.i != 0) {
+					wk_stmt(e, x->b);
+					if (x->c)
+						LO(jump)(e, lend);
+					e->reach = false;
+					wk_stmt(e, x->c);	/* (its labels only) */
+				} else {
+					if (e->E->nflags[x->b] & NA_LABEL)
+						LO(jump)(e, lelse);	/* (code reaches the else, not the labels) */
+					e->reach = false;
+					wk_stmt(e, x->b);	/* (its labels only) */
+					if (e->reach)	/* (a label in it was reached: past the else) */
+						LO(jump)(e, lend);
+					e->reach = r0;
+					LO(label)(e, lelse);
+					e->reach = r0;
+					wk_stmt(e, x->c);
+				}
+				LO(label)(e, lend);
+				return;
+			}
+			wk_free(e, &v);
+		}
 		wk_cond(e, x->a, false, lelse);
 		wk_stmt(e, x->b);
 		if (x->c) {
@@ -666,6 +702,7 @@ VPRIV void wk_stmt(ecx *e, uint32_t n)
 			wk_cleanups(e, k);
 		}
 		LO(jump)(e, wk_ulabel(e, x->a));
+		e->reach = false;
 		return;
 	case N_BREAK: case N_CONTINUE: {
 		int i = W->nloop - 1;
@@ -676,6 +713,7 @@ VPRIV void wk_stmt(ecx *e, uint32_t n)
 			efatal(e, x->loc, "break/continue outside a loop");
 		wk_cleanups(e, W->loop[i].cdepth);
 		LO(jump)(e, x->op == N_BREAK ? W->loop[i].brk : W->loop[i].cont);
+		e->reach = false;
 		return;
 	}
 	case N_RETURN:
@@ -709,6 +747,7 @@ VPRIV void wk_stmt(ecx *e, uint32_t n)
 			}
 			wk_cleanups(e, I->cbase);
 			LO(jump)(e, I->endlbl);
+			e->reach = false;
 			return;
 		}
 		if (x->a && wk_mem(e, W->rty)) {
@@ -763,13 +802,16 @@ VPRIV void wk_stmt(ecx *e, uint32_t n)
 			wk_cleanups(e, 0);
 			LO(ret)(e, NULL, prim(TY_VOID), W->retlbl);
 		}
+		e->reach = false;
 		return;
 	case N_ASM:
-		efatal(e, x->loc, "x86-64: inline asm is not supported yet (PLAN-x86.md X6)");
+		LO(asm)(e, n);
+		return;
 	case N_GOTO_IND: {
 		val v = wk_gen(e, x->a);
 
 		LO(jumpr)(e, wk_reg(e, &v, prim(TY_ULONG)));
+		e->reach = false;
 		return;
 	}
 	default:
@@ -943,7 +985,7 @@ VPRIV void wk_function(ecx *e, uint32_t s)
 	const ctype *ft = T(c, y->ty);
 	const node *body = N(y->body);
 	wkst *W = wk_state(e);
-	wkarg pa[256];
+	wkarg *pa;
 
 	walk_fn(e, s);
 	W->gen++;
@@ -972,8 +1014,7 @@ VPRIV void wk_function(ecx *e, uint32_t s)
 		if (k == TY_FLOAT16 || ((k == TY_INT128 || k == TY_UINT128) && !LO(i128mem)()))
 			efatal(e, y->loc, "x86-64: this return type is not supported yet (PLAN-x86.md X3)");
 	}
-	if (body->aux > 256)
-		efatal(e, y->loc, "x86-64: more than 256 parameters");
+	pa = alloca((body->aux ? body->aux : 1) * sizeof(wkarg));
 	W->retlbl = wk_newlabel(e);
 	if (wk_mem(e, W->rty)) {
 		LO(classify)(e, W->rty, &W->rrec);

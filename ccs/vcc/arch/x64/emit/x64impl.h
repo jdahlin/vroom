@@ -59,6 +59,8 @@ enum {
 	X_CMPXCHG,	/* lock cmpxchg: if [r1 + off] == rax then = r2, else rax = [r1 + off] */
 	X_MFENCE,
 	X_JMPR,		/* jmp *r1 */
+	X_LEAL,		/* r0 = the address of local label `label` */
+	X_RAW,		/* inline asm: e->raw's text at off, ref bytes */
 	X_NAMED,	/* ref's name as a label here */
 	X_BSF, X_BSR,	/* r0 = index of the lowest / highest set bit of r1 */
 	X_BSWAP,	/* r0 = r0 byte-reversed (sz 4, 8) */
@@ -94,6 +96,7 @@ typedef struct xst {
 	int32_t stk;		/* bytes of named stack arguments */
 	int32_t sret;		/* frame slot of the hidden result pointer (0: none) */
 	int32_t save;		/* variadic: the register save area's slot (0: none) */
+	int32_t csslot[16];	/* callee-saved registers inline asm uses: the prologue saves them here */
 } xst;
 
 /* the integer argument registers, in order */
@@ -113,6 +116,7 @@ VPRIV void x64_print(ecx *e, tbuf *b, uint32_t s);
 VPRIV int x64_tlsaddr(ecx *e, uint32_t ref, int model);
 VPRIV bool sym_needs_got(cc *c, uint32_t ref);	/* arch/a64/emit/value.c (shared) */
 VPRIV int x64_base(ecx *e, const lval *l, uint32_t *ref);
-VPRIV void x64_nofp(ecx *e);	/* fatal under -mgeneral-regs-only / -mno-sse */
+VPRIV void x64_nofp(ecx *e);
+VPRIV void x64_x87(ecx *e, int xf, const lval *l, int sz);	/* an x87 record (fp.c) */	/* fatal under -mgeneral-regs-only / -mno-sse */
 
 #endif

@@ -439,7 +439,7 @@ static void wk_bf_store(ecx *e, const lval *l, qty t, int rv)
 }
 
 /* r stored to l as type t (a bit-field or not); r stays */
-static void wk_put(ecx *e, const lval *l, qty t, int r)
+VPRIV void wk_put(ecx *e, const lval *l, qty t, int r)
 {
 	if (l->bf)
 		wk_bf_store(e, l, t, r);
@@ -496,7 +496,7 @@ static void wk_store(ecx *e, const lval *l, qty t, val *v)
 /* ---------------- conversions ---------------- */
 
 /* v (of type from) as type to */
-static val wk_conv(ecx *e, val v, qty from, qty to)
+VPRIV val wk_conv(ecx *e, val v, qty from, qty to)
 {
 	cc *c = e->c;
 	int fs = wk_size(c, from), ts = wk_size(c, to);
@@ -871,40 +871,48 @@ static val wk_vlanes(ecx *e, int op, qty at, val a, qty bt, val b, qty rt, bool 
 	unsigned nl = (unsigned)(tsize(c, vt) / tsize(c, et));
 	int ra, rb = -1;
 	lval d = { .k = L_FRAME, .off = wk_slot(e, tsize(c, rt), 16), .align = talign(c, re) };
+	/* a constant of a lane type (__int128 and long double lanes are objects, by address) */
+#define WK_LK(t, k) (wk_wide(c, t) ? LO(wconst)(e, (k)) : is_flt(c, t) ? wk_conv(e, vconst(k), prim(TY_INT), t) : vconst(k))
 
-	if (wk_mem(e, et) || wk_mem(e, re))
-		efatal(e, e->curloc, "x86-64: a vector of __int128 or long double is not supported yet (PLAN-x86.md X3)");
-	ra = wk_reg(e, &a, is_vec(c, at) ? prim(TY_ULONG) : at);
-
+	ra = wk_reg(e, &a, is_vec(c, at) || wk_mem(e, at) ? prim(TY_ULONG) : at);
 	if (!unary)
-		rb = wk_reg(e, &b, is_vec(c, bt) ? prim(TY_ULONG) : bt);
+		rb = wk_reg(e, &b, is_vec(c, bt) || wk_mem(e, bt) ? prim(TY_ULONG) : bt);
 	for (unsigned i = 0; i < nl; i++) {
 		val x = wk_lane(e, at, ra, i), r;
 
 		if (unary) {
 			if (op == T_EXCLAIM)
-				r = wk_arith(e, T_MINUS, re, vconst(0), wk_cmpv(e, T_EQUALEQUAL, et, x, is_flt(c, et) ? wk_conv(e, vconst(0), prim(TY_INT), et) : vconst(0)));
+				r = wk_arith(e, T_MINUS, re, WK_LK(re, 0), wk_conv(e, wk_cmpv(e, T_EQUALEQUAL, et, x, WK_LK(et, 0)), prim(TY_INT), re));
 			else if (op == T_MINUS)
-				r = is_flt(c, et) ? LO(fneg)(e, et, x) : wk_arith(e, T_MINUS, et, vconst(0), x);
+				r = is_flt(c, et) ? LO(fneg)(e, et, x) : wk_arith(e, T_MINUS, et, WK_LK(et, 0), x);
 			else
-				r = wk_arith(e, T_CARET, et, x, vconst(-1));
+				r = wk_arith(e, T_CARET, et, x, WK_LK(et, -1));
 		} else {
 			val y = wk_lane(e, bt, rb, i);
 
 			if (wk_is_cmp(op))
-				r = wk_arith(e, T_MINUS, re, vconst(0), wk_cmpv(e, op, et, x, y));
+				r = wk_arith(e, T_MINUS, re, WK_LK(re, 0), wk_conv(e, wk_cmpv(e, op, et, x, y), prim(TY_INT), re));
+			else if ((op == T_LESSLESS || op == T_GREATERGREATER) && wk_wide(c, et))	/* (a 128-bit shift counts in an int) */
+				r = wk_arith(e, op, et, x, wk_conv(e, y, is_vec(c, bt) ? T(c, bt)->base : bt, prim(TY_INT)));
 			else
 				r = wk_arith(e, op, et, x, y);
 		}
 		{
-			int rr = wk_reg(e, &r, re);
 			lval l = d;
 
 			l.off += (int64_t)(i * es);
-			LO(store)(e, rr, &l, (int)es);
-			LO(tfree)(e, rr);
+			if (wk_mem(e, re)) {
+				r = wk_putmem(e, &l, re, r);
+				wk_free(e, &r);
+			} else {
+				int rr = wk_reg(e, &r, re);
+
+				LO(store)(e, rr, &l, (int)es);
+				LO(tfree)(e, rr);
+			}
 		}
 	}
+#undef WK_LK
 	LO(tfree)(e, ra);
 	if (rb >= 0)
 		LO(tfree)(e, rb);
@@ -1398,11 +1406,11 @@ static val wk_call(ecx *e, uint32_t n)
 	const ctype *f = T(c, ft);
 	uint32_t ref = 0;
 	val fn = { 0 };
-	wkarg args[64], r = { 0 };
+	wkarg *args = alloca((x->c ? x->c : 1) * sizeof(wkarg)), r = { 0 };
 	bool var = (f->flags & (TF_VARIADIC | TF_NOPROTO)) != 0, rec_ = wk_mem(e, f->base);
 
-	if (x->c > 64)
-		wk_unsup(e, n, "a call with more than 64 arguments");
+	if (x->c > 4096)
+		wk_unsup(e, n, "a call with more than 4096 arguments");
 	if (KIND(c, f->base) != TY_VOID)
 		wk_scalar(e, n, f->base);
 	if (fx->op == N_CAST && fx->aux == CK_FDECAY && N(fx->a)->op == N_VAR) {
@@ -1451,6 +1459,7 @@ static val wk_stmtexpr(ecx *e, uint32_t n)
 	const node *b = N(N(n)->a);
 
 	int cmark = e->wk->nclean;
+	bool r0 = e->reach;	/* (a jump inside does not make what follows the expression dead) */
 	val v = vconst(0);
 
 	for (uint32_t i = 0; i + 1 < b->c; i++)
@@ -1471,13 +1480,14 @@ static val wk_stmtexpr(ecx *e, uint32_t n)
 			wk_unsup(e, n, "a statement expression's value with cleanups");
 		e->wk->nclean = cmark;
 	}
+	e->reach = r0;
 	return v;
 }
 
 /* ---------------- builtins ---------------- */
 
 /* n is a constant once the bound constants are known (no loads, calls or side effects) */
-static bool wk_isconst(ecx *e, uint32_t n)
+VPRIV bool wk_isconst(ecx *e, uint32_t n)
 {
 	cc *c = e->c;
 	const node *x = N(n);
@@ -1931,9 +1941,9 @@ static val wk_builtin(ecx *e, uint32_t n)
 	case BI_RETURN_ADDRESS: case BI_FRAME_ADDRESS: {
 		val v = wk_gen(e, arg[0]);
 
-		if (v.k != V_CONST || v.i != 0)
-			wk_unsup(e, n, "a return or frame address beyond level 0");
-		return LO(frame)(e, x->aux == BI_RETURN_ADDRESS);
+		if (v.k != V_CONST || v.i < 0 || v.i > 4096)
+			wk_unsup(e, n, "a return or frame address of a level not a constant");
+		return LO(frame)(e, x->aux == BI_RETURN_ADDRESS, (int)v.i);
 	}
 	case BI_OBJECT_SIZE: case BI_DYNAMIC_OBJECT_SIZE: {
 		val t = wk_gen(e, arg[1]);
@@ -2000,6 +2010,58 @@ static val wk_builtin(ecx *e, uint32_t n)
 			wk_free(e, &a);
 		}
 		return vconst(1);
+	case BI_SETJMP: case BI_LONGJMP: {
+		val p = wk_gen(e, arg[0]);
+		int r = wk_reg(e, &p, prim(TY_ULONG));
+
+		if (x->aux == BI_SETJMP) {
+			if (e->wk->falign > 16)
+				wk_unsup(e, n, "__builtin_setjmp in a function with locals aligned above 16");
+			return LO(setjmp)(e, r);
+		}
+		{
+			val k = wk_gen(e, arg[1]);	/* (GCC requires 1) */
+
+			wk_free(e, &k);
+		}
+		LO(longjmp)(e, r);
+		return vconst(0);
+	}
+	case BI_ADD_OVERFLOW: case BI_SUB_OVERFLOW: case BI_MUL_OVERFLOW:
+		if (wk_size(c, N(arg[0])->ty) <= 8 && wk_size(c, N(arg[1])->ty) <= 8 && wk_size(c, T(c, N(arg[2])->ty)->base) == 16 &&
+		    LO(i128mem)()) {
+			/*
+			 * Operands of up to 64 bits, a 128-bit result: the exact value fits 128 bits
+			 * (two unsigned 64-bit factors as unsigned 128, the rest as signed 128), so
+			 * the overflow is its sign against the result's signedness.
+			 */
+			qty ta = N(arg[0])->ty, tb = N(arg[1])->ty, tr = T(c, N(arg[2])->ty)->base, w = prim(TY_INT128);
+			int op = x->aux == BI_ADD_OVERFLOW ? T_PLUS : x->aux == BI_SUB_OVERFLOW ? T_MINUS : T_STAR;
+			bool uu = op == T_STAR && !wk_signed(c, ta) && !wk_signed(c, tb);
+			val a = wk_conv(e, wk_gen(e, arg[0]), ta, w), b = wk_conv(e, wk_gen(e, arg[1]), tb, w), r, d;
+			lval hi;
+			int rr, s;
+
+			r = LO(wbin)(e, op, true, a, b);
+			d = wk_gen(e, arg[2]);
+			{
+				lval l = wk_fromval(e, d, tr);
+
+				r = wk_putmem(e, &l, tr, r);	/* (the stored object's address) */
+			}
+			rr = wk_reg(e, &r, prim(TY_ULONG));
+			if (uu == wk_signed(c, tr)) {
+				/* unsigned x unsigned into signed, or anything else into unsigned: the sign bit */
+				hi = (lval){ .k = L_REG, .r = (uint8_t)rr, .off = 8, .align = 8 };
+				s = LO(treg)(e);
+				LO(load)(e, s, &hi, 8, false);
+				LO(tfree)(e, rr);
+				return LO(bin)(e, T_GREATERGREATER, 8, false, wk_vreg(s), vconst(63));
+			}
+			LO(tfree)(e, rr);
+			return vconst(0);
+		}
+		goto ovf64;
 	case BI_ALLOCA: case BI_ALLOCA_UNINIT: {
 		val v = wk_gen(e, arg[0]);
 
@@ -2113,7 +2175,7 @@ static val wk_builtin(ecx *e, uint32_t n)
 			return LO(bin)(e, T_PIPE, 4, false, u, w);
 		}
 	}
-	case BI_ADD_OVERFLOW: case BI_SUB_OVERFLOW: case BI_MUL_OVERFLOW: {
+	ovf64: {
 		/* the exact result in 128 bits; overflow when it differs from the stored one extended back */
 		qty ta = N(arg[0])->ty, tb = N(arg[1])->ty, tr = T(c, N(arg[2])->ty)->base, w = prim(TY_INT128);
 		int op = x->aux == BI_ADD_OVERFLOW ? T_PLUS : x->aux == BI_SUB_OVERFLOW ? T_MINUS : T_STAR;

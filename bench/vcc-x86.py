@@ -32,6 +32,7 @@ VPP = ct.VPP
 OUT = f'{BUILD}/x86tests'
 TGT = '--target=x86_64-linux-gnu'
 BASE = [TGT, '-nostdinc', '-I', f'{ct.RT}/include', '-isystem', ct.RES, '-fno-PIE', '-O2']
+BASE += os.environ.get('VCC_CFLAGS', '').split()	# e.g. -g -fasynchronous-unwind-tables (both compilers)
 LINK = [CL, TGT, '-no-pie']
 RTO = f'{OUT}/rt.o'
 # tests that need what the x86-64 target or glibc does not give the same way
@@ -51,6 +52,7 @@ def rt_obj():
 # --pie / --pic: vcc's side compiled -fPIE / -fPIC and linked -pie (clang's
 # reference stays the -fno-PIE build: the behaviour is the same)
 PIC = None
+OBJ = False	# --obj: vcc's side by vpp -c
 
 def link(objs, exe, pie=False):
     rc, _, err = sh((LINK[:-1] + ['-pie'] if pie else LINK) + objs + [RTO, '-lm', '-o', exe], timeout=60)
@@ -92,7 +94,7 @@ def reference(suite, name, path, flags, wd):
 def one(t):
     suite, name, path = t
     src = open(path, 'rb').read().decode('latin-1')
-    if suite == 'tcc' and name in ct.TCC_SKIP:
+    if suite == 'tcc' and name in ct.TCC_SKIP and ct.TCC_SKIP[name] != 'x86 asm':	# (those run here)
         return t, 'skip', 'tcc-specific', ct.TCC_SKIP[name]
     if suite == 'gcc' and name in ct.GCC_SKIP:
         return t, 'skip', 'compiler-specific', ct.GCC_SKIP[name]
@@ -110,12 +112,20 @@ def one(t):
     if 'skip' in ref:
         return t, 'skip', ref['skip'], ref['why']
     vfl = [PIC if a == '-fno-PIE' and PIC else a for a in BASE] + ct.CLFL + flags
-    rc, _, err = sh([VPP, '-S'] + vfl + [path, '-o', f'{wd}/vcc.s'], cwd=cwd)
+    if OBJ:
+        # --obj: vpp -c (vcc's assembler and object writer), linked and run the same way
+        rc, _, err = sh([VPP, '-c'] + vfl + [path, '-o', f'{wd}/vcc.o'], cwd=cwd)
+        if rc:
+            e = err.decode(errors='replace')
+            return t, 'fail', 'emit', ct.first_err(e) if rc != 'timeout' and rc > 0 else f'vpp: signal/timeout {rc}: ' + ct.first_err(e)
+        open(f'{wd}/vcc.s', 'wb').write(open(f'{wd}/vcc.o', 'rb').read())	# (the pass key: the object's bytes)
+    else:
+        rc, _, err = sh([VPP, '-S'] + vfl + [path, '-o', f'{wd}/vcc.s'], cwd=cwd)
     if rc:
         e = err.decode(errors='replace')
         return t, 'fail', 'emit', ct.first_err(e) if rc != 'timeout' and rc > 0 else f'vpp: signal/timeout {rc}: ' + ct.first_err(e)
     pk = hashlib.sha1(open(f'{wd}/vcc.s', 'rb').read() + ref['key'].encode()).hexdigest()
-    pf = f'{OUT}/pass{PIC or ""}/{suite}/{name}'
+    pf = f'{OUT}/pass{PIC or ""}{"-obj" if OBJ else ""}/{suite}/{name}'
     if not NOCACHE:
         try:
             if open(pf).read() == pk:
@@ -123,7 +133,7 @@ def one(t):
                 return t, 'pass', '', ''
         except OSError:
             pass
-    rc, _, err = sh([CL, TGT, '-c', f'{wd}/vcc.s', '-o', f'{wd}/vcc.o'])
+    rc, _, err = (0, b'', b'') if OBJ else sh([CL, TGT, '-c', f'{wd}/vcc.s', '-o', f'{wd}/vcc.o'])
     if rc:
         m = re.search(r'error: (.*)', err.decode(errors='replace'))
         return t, 'fail', 'as', re.sub(r'\d+', 'N', m.group(1)) if m else ct.first_err(err.decode(errors='replace'))
@@ -148,6 +158,99 @@ NOCACHE = False
 # register nor an SSE/x87 instruction (the kernel traps on them)
 FPREG = re.compile(r'%(?:[xyz]mm\d+|st\b|st\(\d\)|mm\d)')
 FPOP = re.compile(r'^\t(?:f[a-z]+|(?:v?)(?:mov(?:ss|sd|aps|apd|ups|upd|dq[au]|q2dq)|cvt\w+|u?comis[sd]|(?:add|sub|mul|div|xor|and|or|sqrt|min|max)[ps][sd]|p(?:xor|and|or|add|sub|cmp|unpck|shuf|mov[dq]|ins|ext)\w*|ldmxcsr|stmxcsr))\b')
+
+# --objcmp: the generated .s assembled by vasm and by clang -c, the objects compared byte
+# for byte (vcc's assembler and object writer against LLVM MC, PLAN-x86.md X5/X6)
+VASM = os.path.join(os.path.dirname(VPP), 'vasm')
+
+def objcmp(t):
+    suite, name, path = t
+    wd = f'{OUT}/oc/{suite}/{name}'
+    os.makedirs(wd, exist_ok=True)
+    src = open(path, 'rb').read().decode('latin-1')
+    flags = ct.dg_flags(src) if suite == 'gcc' else ct.exec_marks(src)[0] if suite == 'vcc' else []
+    rc, _, err = sh([VPP, '-S'] + BASE + ct.CLFL + flags + [path, '-o', f'{wd}/vcc.s'], cwd=os.path.dirname(path))
+    if rc:
+        return t, 'skip', 'emit', ct.first_err(err.decode(errors='replace'))
+    rc, _, err = sh([CL, TGT, '-c', f'{wd}/vcc.s', '-o', f'{wd}/ref.o'])
+    if rc:
+        return t, 'skip', 'clang-as', ct.first_err(err.decode(errors='replace'))
+    rc, _, err = sh([VASM, TGT, f'{wd}/vcc.s', '-o', f'{wd}/vas.o'])
+    if rc:
+        e = err.decode(errors='replace')
+        m = re.search(r'error: (.*)', e)
+        return t, 'fail', 'vasm', (m.group(1) if m else ct.first_err(e))[:120]
+    a, b = open(f'{wd}/ref.o', 'rb').read(), open(f'{wd}/vas.o', 'rb').read()
+    if a != b:
+        return t, 'fail', 'differs', f'{len(a)} vs {len(b)} bytes'
+    shutil.rmtree(wd, ignore_errors=True)
+    return t, 'pass', '', ''
+
+# --vlink: the bare runtime (tests/rt: rt.c, start-x86.S, link-x86.ld, libgcc), static: clang's
+# object linked by lld is the reference; vcc's (vpp -c) is linked by lld and by vlink, whose
+# loaded images and program headers must be identical, and vlink's program is run
+# (PLAN-x86.md X7, as VCC_LDCMP for arm64)
+RTO86 = f'{OUT}/rt86'
+LIBGCC = subprocess.run(['gcc', '-print-libgcc-file-name'], capture_output=True, text=True).stdout.strip() if shutil.which('gcc') else ''
+VLINK = os.path.join(os.path.dirname(VPP), 'vlink')
+LLD = os.path.join(os.path.dirname(CL), 'ld.lld')
+
+def rt86():
+    os.makedirs(RTO86, exist_ok=True)
+    for src, o in (('rt.c', 'rt.o'), ('start-x86.S', 'start.o')):
+        if not os.path.exists(f'{RTO86}/{o}') or os.path.getmtime(f'{RTO86}/{o}') < os.path.getmtime(f'{ct.RT}/{src}'):
+            subprocess.run([CL, TGT, '-O2', '-fno-PIE', '-ffreestanding', '-fno-builtin', '-I', f'{ct.RT}/include', '-c',
+                            f'{ct.RT}/{src}', '-o', f'{RTO86}/{o}'], check=True)
+            subprocess.run([os.path.join(os.path.dirname(CL), 'llvm-objcopy'), '--weaken', f'{RTO86}/{o}'], check=True)
+
+def link86(ld, objs, exe):
+    rc, _, err = sh([ld, '-static', '-T', f'{ct.RT}/link-x86.ld', f'{RTO86}/start.o'] + objs + [f'{RTO86}/rt.o', LIBGCC, '-o', exe], timeout=60)
+    return rc, err.decode(errors='replace')
+
+def vlink1(t):
+    suite, name, path = t
+    if suite == 'tcc' and name in ct.TCC_SKIP and ct.TCC_SKIP[name] != 'x86 asm':
+        return t, 'skip', 'tcc-specific', ct.TCC_SKIP[name]
+    if suite == 'gcc' and name in ct.GCC_SKIP:
+        return t, 'skip', 'compiler-specific', ct.GCC_SKIP[name]
+    wd = f'{OUT}/vl/{suite}/{name}'
+    os.makedirs(wd, exist_ok=True)
+    cwd = os.path.dirname(path)
+    src = open(path, 'rb').read().decode('latin-1')
+    flags = ct.dg_flags(src) if suite == 'gcc' else ct.exec_marks(src)[0] if suite == 'vcc' else []
+    fl = BASE + ct.CLFL + flags
+    if sh([CL] + fl + ['-c', path, '-o', f'{wd}/ref.o'], cwd=cwd)[0]:
+        return t, 'skip', 'clang-rejects', ''
+    rc, err = link86(LLD, [f'{wd}/ref.o'], f'{wd}/ref')
+    if rc:
+        m = re.search(r'undefined symbol: (\S+)', err)
+        return t, 'skip', 'ref-fail', 'link: ' + (m.group(1) if m else ct.first_err(err))
+    rrc, rout = run(f'{wd}/ref')
+    if suite in ('gcc', 'vcc') and rrc != 0:
+        return t, 'skip', 'ref-fail', f'clang build exits {rrc}'
+    rc, _, err = sh([VPP, '-c'] + fl + [path, '-o', f'{wd}/vcc.o'], cwd=cwd)
+    if rc:
+        return t, 'skip', 'emit', ct.first_err(err.decode(errors='replace'))
+    rc, err = link86(LLD, [f'{wd}/vcc.o'], f'{wd}/vcc.lld')
+    if rc:
+        return t, 'skip', 'lld', ct.first_err(err)
+    rc, err = link86(VLINK, [f'{wd}/vcc.o'], f'{wd}/vcc.vl')
+    if rc:
+        return t, 'fail', 'vlink', ct.first_err(err)[:120]
+    oc = os.path.join(os.path.dirname(CL), 'llvm-objcopy')
+    sh([oc, '-O', 'binary', f'{wd}/vcc.lld', f'{wd}/l.bin']); sh([oc, '-O', 'binary', f'{wd}/vcc.vl', f'{wd}/v.bin'])
+    if open(f'{wd}/l.bin', 'rb').read() != open(f'{wd}/v.bin', 'rb').read():
+        return t, 'fail', 'image', 'loaded image differs from lld'
+    rd = os.path.join(os.path.dirname(CL), 'llvm-readelf')
+    ph = [[l.split() for l in subprocess.run([rd, '-lW', e], capture_output=True, text=True).stdout.splitlines()
+           if l.strip()[:4] in ('LOAD', 'TLS ', 'GNU_', 'PHDR', 'NOTE')] for e in (f'{wd}/vcc.lld', f'{wd}/vcc.vl')]
+    if ph[0] != ph[1]:
+        return t, 'fail', 'phdrs', 'program headers differ from lld'
+    rc, out = run(f'{wd}/vcc.vl')
+    if rc != rrc or out != rout:
+        return t, 'fail', 'run', f'exit {rc} (clang {rrc})' if rc != rrc else 'output differs'
+    shutil.rmtree(wd, ignore_errors=True)
+    return t, 'pass', '', ''
 
 def fpcheck(t):
     suite, name, path = t
@@ -179,9 +282,14 @@ if __name__ == '__main__':
     av = [a for a in av if a != '--no-cache']
     if '-v' in av: verbose = True; av.remove('-v')
     fpmode = '--fpcheck' in av
-    av = [a for a in av if a != '--fpcheck']
+    ocmode = '--objcmp' in av
+    vlmode = '--vlink' in av
+    av = [a for a in av if a not in ('--fpcheck', '--objcmp', '--vlink')]
+    if vlmode:
+        rt86()
     for o, f in (('--pie', '-fPIE'), ('--pic', '-fPIC')):
         if o in av: PIC = f; av.remove(o)
+    if '--obj' in av: OBJ = True; av.remove('--obj')
     for opt in ('-j', '--suite', '--show'):
         if opt in av:
             k = av.index(opt); v = av[k + 1]; del av[k:k + 2]
@@ -193,7 +301,7 @@ if __name__ == '__main__':
     t0 = time.time()
     rt_obj()
     with Pool(j, initializer=init, initargs=(nocache,)) as pool:
-        res = pool.map(fpcheck if fpmode else one, ts, chunksize=1)
+        res = pool.map(fpcheck if fpmode else objcmp if ocmode else vlink1 if vlmode else one, ts, chunksize=1)
     by = defaultdict(Counter)
     whys = defaultdict(Counter)
     for (s, n, _), st, cat, why in res:

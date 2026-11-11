@@ -330,6 +330,31 @@ kärnan och kan vänta.
 
 ## Status
 
+### X5/X6 (2026-11-11): assembler och objekt, påbörjat
+- `arch/x64/as/asm.c`: AT&T-parser och kodare (heltal, SSE, x87, prefix, `@PLT`/`@GOTPCREL`/
+  TLS-modifierare), med MC:s val av form (ackumulatorformer, imm8/disp8, `c7`/`b8`, `d1` för
+  skift med 1); hopp till etiketter som relaxerade poster i `as.c` (`VI_X86BR`, kort tills
+  avståndet eller målet kräver nära form med `PC32`/`PLT32`). `arch/x64/obj/fixup.c`:
+  x86:s fixups (lösta på plats som MC, GOT/TLS behåller symbolen); `ElfObj.machine`
+  (EM_X86_64: inga mappningssymboler, MC:s nop-utfyllnad); `#`-kommentarer, citerade
+  etiketter. `vasm --target=x86_64-linux-gnu`; `-c` för x86-64 går genom texten
+  (`E.objtext`) och assemblern.
+- `vcc-x86.py --objcmp`: vcc:s `.s` genom vasm och genom `clang -c`, objekten byte för
+  byte: 1846/1846. `vcc-x86.py --obj` (vcc:s sida med `vpp -c`): 1768/1776, som med `-S`;
+  lika med `--pic`. arm64: `vas-obj.py` 45/45.
+- `vas-corpus.py --target x86_64-linux-gnu` (clangs `-S` av testfilerna vid `-O0`/`-O2`,
+  vasm mot `clang -c`): 3679/3680 identiska (SSE2-heltal, x87-former, `shld`/`bt`/`prefetch`,
+  CFI med x86:s CIE och `.eh_frame` som `SHT_X86_64_UNWIND`, MC:s relaxering mot förra
+  passets layout). Kvar: `20050224-1 -O2`, ett relaxeringsfall vid en `.prefalign`.
+- CFI (`-fasynchronous-unwind-tables`: prolog och epilog som clang, sparade callee-saved)
+  och `-g` (radtabell från vandraren, `.loc` före posterna, `twoaddr` flyttar raderna) i
+  x86-skrivaren; `.word` är 2 byte på x86; DWARF-katalogen för en delad `.file`-sökväg som
+  MC; `.quad x@DTPOFF` m.fl. i data. Med `VCC_CFLAGS='-g -fasynchronous-unwind-tables'`:
+  sviten 1767/1775 med `-S` och `--obj`, `--objcmp` 1846/1846; `backtrace()` och gdb går
+  genom vcc:s funktioner; `vas-corpus` med `-g` 3679/3680.
+- Kvar: kodning direkt från posterna (utan text), hela ISA:n (AVX, AVX-512 för kärnans
+  krypto) och `vas-enc.py` för x86-64.
+
 ### X3 (2026-11-10): pågår, i gren `claude/x86-x3-main` (PR jdahlin/vroom#11; #9 hamnade i #4:s gren efter att #4 slagits ihop)
 - Klart: biblioteksinbyggda som anrop; aggregat (initierare, kopior, sammansatta
   literaler, medlemmar av rvärden); bit-fält; System V-anrop (klassning,
@@ -361,13 +386,15 @@ kärnan och kan vänta.
   före bindning, etiketter och case per kopia, förskanning per kopia),
   konstanta lokaler och parametrar, `__builtin_constant_p` efter inlining;
   `-mgeneral-regs-only`/`-mno-sse`/`-mno-sse2`/`-mno-mmx` (makron som clang, inga
-  vektorregister, flyttal ett fel; `vcc-x86.py --fpcheck`); UTF-8-namn citerade.
-- `bench/vcc-x86.py`: 1680/1773, lika i `--pie` och `--pic` (vcc-sidan
-  `-fPIE`/`-fPIC`, länkad `-pie`). Körfel bara där clangs optimerare krävs
-  (`20030125-1`: `floor` -> `floorf`) och 11 länkfel av samma slag eller
-  `__builtin_setjmp`. `vcc-abi.py --target x86_64`: 12/12, med tre nya tester
+  vektorregister, flyttal ett fel; `vcc-x86.py --fpcheck`); UTF-8-namn citerade;
+  inline asm för `-S` (X6:s del i emittern: AT&T, begränsningar, modifierare, x87
+  `t`/`u`, `asm goto`); `__builtin_setjmp`; död kod efter hopp och i konstanta
+  `if` som clang -O2; vektorer av `__int128`/`long double`.
+- `bench/vcc-x86.py`: 1768/1776, lika i `--pie` och `--pic` (vcc-sidan
+  `-fPIE`/`-fPIC`, länkad `-pie`). Kvar: körfelet `20030125-1` (clangs `floor` -> `floorf`) och 7
+  länkfel där clang -O2 tar bort ett `link_error`-anrop (X4:s pass). `vcc-abi.py --target x86_64`: 12/12, med tre nya tester
   (`int_records`, `fp_records`, `complex_args`).
-- Kvar i X3: vektorer av `__int128`, bit-fält bredare än 64 bitar, 128-bitars overflow-inbyggda, `__builtin_setjmp`, `need_fold` (ett
+- Kvar i X3: bit-fält bredare än 64 bitar, 128-bitars overflow-inbyggda med 128-bitars operander, `need_fold` (ett
   error()-anrop kvar efter inlining), `VCC_WALKLOG`.
 
 ### X2 (2026-11-10): påbörjat, i gren `claude/x86-x2-walker`

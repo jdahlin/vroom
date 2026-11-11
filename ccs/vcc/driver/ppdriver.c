@@ -1207,6 +1207,7 @@ static __attribute__((noinline)) int ppd_run1(int argc, char **argv, const ppd_e
 			goto out;
 		}
 		as_set_dir(tl_as, env->cwd);
+		elf_set_machine(tl_obj, x86 ? EM_X86_64 : EM_AARCH64);
 		size_t tn = (size_t)got;
 
 		if (darwin) {
@@ -1222,12 +1223,6 @@ static __attribute__((noinline)) int ppd_run1(int argc, char **argv, const ppd_e
 		} else
 			status = write_obj(env->cwd, out, env->outfd, errfd, darwin);
 		free(t);
-		goto out;
-	}
-	if (objmode && x86) {
-		/* x86-64 objects come with its encoder and assembler (PLAN-x86.md X5, X6) */
-		dprintf(errfd, "vcc: error: -c is not supported for x86_64 yet; use -S and an assembler\n");
-		status = 1;
 		goto out;
 	}
 	if (objmode) {

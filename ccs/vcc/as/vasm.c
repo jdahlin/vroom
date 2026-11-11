@@ -86,11 +86,12 @@ int main(int argc, char **argv)
 	for (int i = 1; i < argc; i++) {
 		if (!strcmp(argv[i], "-o") && i + 1 < argc) out = argv[++i];
 		else if (!strncmp(argv[i], "--target=wasm", 13)) wasm = strncmp(argv[i] + 13, "32", 2) ? 64 : 32;
+		else if (!strncmp(argv[i], "--target=x86_64", 15)) elf_set_machine(o, EM_X86_64);
 		else if (!strncmp(argv[i], "--target=", 9) && (strstr(argv[i], "darwin") || strstr(argv[i], "apple") ||
 							       strstr(argv[i], "macos"))) macho = 1;
 		else in = argv[i];
 	}
-	if (!in) { fprintf(stderr, "usage: vasm [--target=wasm64-...|arm64-apple-macos] [-o out.o] in.s\n"); return 2; }
+	if (!in) { fprintf(stderr, "usage: vasm [--target=wasm64-...|arm64-apple-macos|x86_64-linux-gnu] [-o out.o] in.s\n"); return 2; }
 	size_t n; const char *p = map(in, &n);
 	const char *msg;
 	if (wasm) {

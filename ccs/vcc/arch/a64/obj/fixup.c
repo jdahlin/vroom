@@ -23,6 +23,11 @@ void elf_patch(ElfObj *o, ElfFix *x, int64_t v)
 {
 	uint8_t *p = x->p;
 	uint32_t w;
+
+	if (o->machine == EM_X86_64) {
+		x64_patch(o, x, v);
+		return;
+	}
 	switch (x->type) {
 	case R_AARCH64_ABS64: case R_AARCH64_PREL64: put(p, (uint64_t)v, 8); return;
 	case R_AARCH64_ABS32: case R_AARCH64_PREL32:
@@ -76,6 +81,11 @@ void elf_patch(ElfObj *o, ElfFix *x, int64_t v)
 
 VPRIV void elf_resolve(ElfObj *o, Out *w, ElfFix *x)
 {
+	if (o->machine == EM_X86_64) {
+		x64_resolve(o, w, x);
+		return;
+	}
+	{
 	ElfFrag *f = elf_frag(o, x->frag);
 	uint32_t S = f->sec;
 	uint64_t P = f->base + x->off;
@@ -113,4 +123,5 @@ VPRIV void elf_resolve(ElfObj *o, Out *w, ElfFix *x)
 		return;
 	}
 	elf_reloc(o, w, x, P, type, a, x->v.add, c);
+	}
 }

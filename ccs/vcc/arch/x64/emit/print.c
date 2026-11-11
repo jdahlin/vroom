@@ -26,9 +26,13 @@ VPRIV void x64_twoaddr(ecx *e)
 	uint32_t n = 0;
 	rec *o = X->tw;
 
+	uint32_t j = 0;
+
 	for (uint32_t k = 0; k < X->nin; k++) {
 		rec i = X->in[k];
 
+		if (e->ndl)
+			dbg_remap(e, &j, k, n);	/* (-g rows: to the first record emitted for k) */
 		if (x64_tied(i.op) && i.r[0] != i.r[1]) {
 			if (i.r[2] != XNOREG && i.r[0] == i.r[2]) {
 				if (x64_commutes(i.op)) {
@@ -125,12 +129,22 @@ VPRIV void x64_print(ecx *e, tbuf *b, uint32_t s)
 					   [X_SHR] = "shr", [X_SAR] = "sar", [X_NEG] = "neg", [X_NOT] = "not" };
 	int32_t frame = (e->wk->foff + 15) & ~15;
 	uint32_t A = e->wk->falign;
+	bool cfi = e->E->o->cfi;	/* unwind tables: .cfi_* as clang writes them */
+	uint32_t dj = 0;		/* -g: the next row */
 
-	tb_s(b, "\tpushq\t%rbp\n\tmovq\t%rsp, %rbp\n");
+	if (unlikely(e->E->o->debug)) {
+		/* the function's own line (its body's '{', column 0), as clang */
+		uint32_t f, l, cl;
+
+		if (dbg_where(e, c->syms[s].body ? N(c->syms[s].body)->loc : c->syms[s].loc, &f, &l, &cl))
+			tb_f(b, "\t.loc\t%u %u 0\n", f, l);
+	}
+	tb_s(b, cfi ? "\t.cfi_startproc\n\tpushq\t%rbp\n\t.cfi_def_cfa_offset 16\n\t.cfi_offset %rbp, -16\n"
+		      "\tmovq\t%rsp, %rbp\n\t.cfi_def_cfa_register %rbp\n" : "\tpushq\t%rbp\n\tmovq\t%rsp, %rbp\n");
 	if (A > 16) {
 		/* locals aligned above 16: their base is rbx = (rsp + frame + A - 1) & -A
 		   (rbx saved at -8(%rbp)); incoming arguments stay rbp's */
-		tb_s(b, "\tpushq\t%rbx\n\tsubq\t$");
+		tb_s(b, cfi ? "\tpushq\t%rbx\n\t.cfi_offset %rbx, -24\n\tsubq\t$" : "\tpushq\t%rbx\n\tsubq\t$");
 		tb_i(b, frame + (int32_t)A + 8);
 		tb_s(b, ", %rsp\n\tleaq\t");
 		tb_i(b, frame + (int32_t)A - 1);
@@ -149,9 +163,24 @@ VPRIV void x64_print(ecx *e, tbuf *b, uint32_t s)
 		tb_i(b, frame);
 		tb_s(b, ", %rsp\n");
 	}
+	for (int r = 0; r < 16; r++)
+		if (X->csslot[r]) {
+			tb_s(b, "\tmovq\t%");
+			tb_s(b, x64_r64[r]);
+			tb_s(b, ", ");
+			tb_i(b, X->csslot[r]);
+			tb_s(b, A > 16 ? "(%rbx)\n" : "(%rbp)\n");
+			if (cfi && A <= 16)	/* (the cfa is rbp + 16) */
+				tb_f(b, "\t.cfi_offset %%%s, %d\n", x64_r64[r], X->csslot[r] - 16);
+		}
 	for (uint32_t k = 0; k < X->nin; k++) {
 		const rec *i = &X->in[k];
 		int sz = i->sz;
+
+		for (; dj < e->ndl && e->dl[dj].k == k; dj++)
+			if (dj + 1 == e->ndl || e->dl[dj + 1].k != k)	/* the last of several at one place */
+				tb_f(b, dj ? "\t.loc\t%u %u %u\n" : "\t.loc\t%u %u %u prologue_end\n",
+				     e->dl[dj].file, e->dl[dj].line, e->dl[dj].col);
 
 		switch (i->op) {
 		case X_LABEL:
@@ -333,6 +362,17 @@ VPRIV void x64_print(ecx *e, tbuf *b, uint32_t s)
 			tb_s(b, ", ");
 			x64_memop(c, b, i);
 			break;
+		case X_RAW:
+			tb_s(b, "#APP\n");
+			tb_put(b, e->raw.p + i->off, i->ref);
+			tb_s(b, "\n#NO_APP");
+			break;
+		case X_LEAL:
+			tb_s(b, "\tleaq\t");
+			x64_lbl(b, s, i->label);
+			tb_s(b, "(%rip), ");
+			x64_reg(b, i->r[0], 8);
+			break;
 		case X_JMPR:
 			tb_s(b, "\tjmpq\t*");
 			x64_reg(b, i->r[1], 8);
@@ -482,9 +522,22 @@ VPRIV void x64_print(ecx *e, tbuf *b, uint32_t s)
 		}
 		tb_c(b, '\n');
 	}
+	for (int r = 0; r < 16; r++)
+		if (X->csslot[r]) {
+			tb_s(b, "\tmovq\t");
+			tb_i(b, X->csslot[r]);
+			tb_s(b, e->wk->falign > 16 ? "(%rbx), %" : "(%rbp), %");
+			tb_s(b, x64_r64[r]);
+			tb_c(b, '\n');
+		}
+	for (; dj < e->ndl; dj++)
+		if (dj + 1 == e->ndl)
+			tb_f(b, dj ? "\t.loc\t%u %u %u\n" : "\t.loc\t%u %u %u prologue_end\n",
+			     e->dl[dj].file, e->dl[dj].line, e->dl[dj].col);
 	if (e->wk->falign > 16)
 		tb_s(b, "\tmovq\t-8(%rbp), %rbx\n");
-	tb_s(b, "\tmovq\t%rbp, %rsp\n\tpopq\t%rbp\n\tretq\n.Lfunc_end");
+	tb_s(b, cfi ? "\tmovq\t%rbp, %rsp\n\tpopq\t%rbp\n\t.cfi_def_cfa %rsp, 8\n\tretq\n\t.cfi_endproc\n.Lfunc_end" :
+		      "\tmovq\t%rbp, %rsp\n\tpopq\t%rbp\n\tretq\n.Lfunc_end");
 	tb_u(b, s);
 	tb_s(b, ":\n\t.size\t");
 	sym_name(c, b, s);
