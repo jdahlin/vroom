@@ -228,6 +228,22 @@ VPRIV val x64_call(ecx *e, uint32_t ref, val *fn, const wkarg *a, int n, bool va
 	for (int k = 0; k < n; k++) {
 		if (place[k] < 0)
 			continue;
+		if (a[k].size > 128) {
+			/* A large by-value aggregate must not expand to one record per
+			   word. Preserve live values (including an indirect callee)
+			   while using the same REP copy as ordinary record assignment. */
+			static const uint8_t regs[] = { RDI, RSI, RCX };
+			uint32_t sv = x64_save(e, regs, 3, -1, -1);
+			lval s = x64_fr(a[k].slot);
+			lval d = { .k = L_REG, .r = RSP, .off = place[k] + 8 * __builtin_popcount(sv) };
+
+			x64_mem(e, X_LEA, 8, RSI, &s, false);
+			x64_mem(e, X_LEA, 8, RDI, &d, false);
+			x64_movi(e, RCX, (int64_t)a[k].size);
+			x64_put(e, X_REP)->cond = 0;
+			x64_restore(e, sv);
+			continue;
+		}
 		for (uint64_t o = 0; o < a[k].size; o += 8) {
 			lval s = x64_fr(a[k].slot + (int64_t)o), d = { .k = L_REG, .r = RSP, .off = place[k] + (int64_t)o };
 

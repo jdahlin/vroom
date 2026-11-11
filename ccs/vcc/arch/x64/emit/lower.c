@@ -222,10 +222,14 @@ VPRIV uint32_t x64_save(ecx *e, const uint8_t *regs, int n, int k0, int k1)
 	uint32_t sv = 0;
 
 	for (int k = 0; k < n; k++)
-		if ((X->live & (1u << regs[k])) && regs[k] != k0 && regs[k] != k1) {
-			x64_op3(e, X_PUSH, 8, XNOREG, regs[k], XNOREG);
-			X->pushes++;
+		if ((X->live & (1u << regs[k])) && regs[k] != k0 && regs[k] != k1)
 			sv |= 1u << regs[k];
+	/* x64_restore pops in descending register order, independent of the
+	   caller's list order. Match it even when several registers are live. */
+	for (int r = 0; r < 16; r++)
+		if (sv & (1u << r)) {
+			x64_op3(e, X_PUSH, 8, XNOREG, r, XNOREG);
+			X->pushes++;
 		}
 	return sv;
 }
