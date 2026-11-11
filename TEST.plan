@@ -1,0 +1,136 @@
+# Testplan: externa testsviter för vcc
+
+**Mål:** vcc valideras mot en stor samling C-tester, inte bara mot det vi
+skrivit själva.  Det finns ingen fri motsvarighet till JavaScripts test262
+för C.  De kommersiella konformanssviterna (Solid Sands SuperTest, Plum Hall,
+Perennial CVSA) kostar licens.  Den fria samlingen täcker ändå det mesta:
+clangs `-verify`-tester för front end och diagnostik, gcc:s testsvit för
+kodgenerering, slumpprogram för det som ingen har skrivit tester för, och
+riktiga program med egna testsviter.
+
+Allt hämtas med `bench/fetch-testsuites.sh` till `work/testsuites/`.  Där är
+det git-ignorerat och låst vid commits som står i skriptet.  Det är cirka
+320 MB och tar en halv minut.  Vad som finns där står i
+`ccs/vcc/tests/README.md`.  Varje steg nedan ska ge ett skript med grönt/rött
+resultat (PLAN-release G0) och flytta G1 (korrekthet) eller G2 (korpus).
+
+Princip för alla steg: **clang är orakel och filter.**  Ett test räknas bara
+om clang (Homebrew, samma omskrivna kommandorad) klarar det.  Om clang
+underkänner ett test är det inte vcc:s fel.  Om harnessen tolkar ett test
+annorlunda än sviten själv räknas testet inte heller.
+
+## Steg
+
+### S1 Hämtning — klar (2026-11-10, c1098d5)
+`bench/fetch-testsuites.sh [NAME...]`: grunda och glesa kloner vid låsta
+commits, `work/testsuites/MANIFEST`.
+
+| svit | innehåll (C-filer) | licens |
+|---|---|---|
+| llvm | clang `test/C` (150), `Sema` (1195), `Preprocessor` (325), `Lexer` (84), `Parser` (118), `utils/ABITest` | Apache-2.0 + LLVM-undantag |
+| gcc | `gcc.c-torture` (compile 2016, execute 1926), `gcc.dg` (19 792), `c-c++-common` (3436), `gcc.target/aarch64` (9681) | GPL-3.0+ |
+| c-testsuite | 220 små program med förväntad utdata | per test |
+| llvm-test-suite | `SingleSource` med referensutdata (2520) | Apache-2.0 + LLVM-undantag |
+| csmith, yarpgen | slumpprogramgeneratorer (källkod) | BSD-2 / Apache-2.0 |
+| libc-test | musl:s libc-tester (466) | MIT |
+| chibicc, cproc | kompilatorernas egna tester (50, 213) | MIT / ISC |
+
+### S2 clangs -verify-tester — påbörjad (62ea29a, TODO T20)
+`bench/vcc-verify.py -j 6 [-v] [PAT]`.  Varje `%clang_cc1 … -verify`-rad i
+`test/{C,Sema,Preprocessor,Lexer,Parser}` är ett test.  Förväntade
+diagnostiker står i filen (`// expected-error {{...}}`).  `test/C` är ordnad
+per standard, WG14-paper och Defect Report (`drs/`), och är det som ligger
+närmast test262.  Harnessen läser direktiven ur rå källkod med `#line`;
+överhoppade `#if`-grenar tar den reda på via clang.  Matchningen följer
+clangs VerifyDiagnosticConsumer.  Clangs sida cachas.  `results.json` visar
+tester som gått från godkänd till underkänd.
+
+**Status 2026-11-10:** 412/1841 giltiga tester godkända (22 %), 1 krasch.
+
+| katalog | godkända / giltiga |
+|---|---|
+| C/drs | 29 / 70 |
+| C/C99 | 18 / 32 |
+| C/C11 | 3 / 15 |
+| C/C23 | 9 / 49 |
+| C/C2y | 32 / 95 |
+| Preprocessor | 49 / 124 |
+| Lexer | 15 / 72 |
+| Parser | 21 / 108 |
+| Sema | 236 / 1276 |
+
+Räknas inte: 570 som clang 23 själv underkänner (nyare tester), 443
+C++/ObjC/OpenCL/OpenMP-rader, 66 som harnessen inte tolkar som clang, 59
+med lit-substitutioner (`%t`, `%{...}`).
+
+Kvar:
+1. Kraschen: segfault på `Sema/attr-tls_model.c` (`tls_model` med två
+   argument).  Rättas först, med ett test i `tests/diag`.
+2. De största luckorna, i ordning efter hur många tester de blockerar:
+   - SVE/SME-typer (`__SVInt8_t` …) och kontrollerna av streaming-funktioner.
+   - `__bf16`, `__mfp8`.
+   - `__builtin_bit_cast`, `_Countof`, `__scoped_atomic_*`.
+   - `_Static_assert` i en struct.
+   - `//`-kommentarer under `-std=c89`.
+3. Harnessens egna luckor: `%t`-tester (`split-file`), `-verify-ignore-unexpected`.
+
+**Klart när:** ingen krasch; C/ och drs/ helt gröna; antalet godkända går
+bara uppåt.  Varje rättad lucka committas med den nya siffran här.
+
+### S3 gcc c-torture, resten — ej påbörjad
+`bench/vcc-ctests.py` kör redan `execute/` (1701 filer, vendrade).  Utöka:
+- `execute/ieee/` och `execute/builtins/`: körs som de andra
+  (`builtins/` behöver sina `-lib.c`-filer).
+- `compile/` (2016): endast `-c`.  vcc ska varken krascha eller avvisa det
+  clang tar.
+
+**Klart när:** inga krascher i `compile/`; `ieee/` och `builtins/` lika
+gröna som `execute/`.
+
+### S4 gcc.dg — ej påbörjad
+- `dg-do run` (3338) och `gcc.dg/torture/` (2261): körs som c-torture under
+  qemu.  Harnessen läser `dg-options`, `dg-require-*` och `dg-skip-if`; clang
+  är filter.
+- `dg-error` (1720) används omvänt: vcc ska avvisa varje rad som clang
+  avvisar och godta resten.  Raden räknas, inte texten.
+
+**Klart när:** körtesterna lika gröna som clangs; ingen fil som clang godtar
+avvisas av vcc.
+
+### S5 Små körsviter — ej påbörjad
+c-testsuite (220, `.expected`), chibicc (50), cproc (213), llvm-test-suite
+`SingleSource/UnitTests` och `Regression/C` (med `reference_output`).
+Samma rigg som `vcc-ctests.py`: bygg med clang och vcc, kör under qemu,
+jämför utdata.
+
+**Klart när:** allt som clang klarar klarar också vcc.
+
+### S6 ABI-generatorer — ej påbörjad
+`gcc.dg/compat/struct-layout-1_generate.c` och clangs `utils/ABITest`
+genererar tusentals anrop mellan två kompilatorer.  Kopplas in i
+`bench/vcc-abi.py`: clang/vcc × anropare/anropad, Linux under qemu och
+Apple nativt.
+
+**Klart när:** N genererade fall per plattform utan skillnad.
+
+### S7 Slumpprogram (TODO T10) — ej påbörjad
+csmith och yarpgen byggs från `work/testsuites/`.  `bench/vcc-csmith.py`
+bygger programmen med clang -O0 och vcc, kör dem och jämför checksummor.
+Avvikelser reduceras med creduce till tester i `tests/vcc`.
+
+**Klart när:** 24 h per generator utan avvikelse, på båda målen
+(PLAN-release G1).
+
+### S8 libc-test (TODO T13) — ej påbörjad
+musl:s libc-test kräver en riktig libc.  Det görs när vcc bygger musl, eller
+mot glibc i Linux-containern.  Funktionstesterna och math-testerna
+(gränsfall i flyttal) är de intressanta.
+
+### S9 Kommersiell svit — beslut
+SuperTest (eller Plum Hall) behövs bara om 1.0 ska hävda konformans
+formellt.  Beslutet tas när S2–S7 är gröna.
+
+## Ordning
+S2 (kraschen, sedan luckorna efter storlek) → S3 → S5 → S4 → S6 → S7.  S3
+och S5 är nästan gratis med den befintliga riggen.  S7 hittar mest felaktig
+kod per timme, men kräver att S3–S5 först har tagit de kända felen.

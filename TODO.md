@@ -160,6 +160,16 @@ Existing gates that every change must keep green: `vcc-diff.py cmp`
   `used` (`ASAN_POISON_MEMORY_REGION` under `__has_feature`), so
   over-reads there are reported.  *Validate:* an injected over-read in a
   test build is reported; ASan runs of the gates stay clean.
+- [ ] **T20 clang's -verify tests.**  (started: `bench/vcc-verify.py`.)
+  clang/test/{C,Sema,Preprocessor,Lexer,Parser} (`bench/fetch-testsuites.sh
+  llvm`): each `%clang_cc1 -verify` RUN line whose rewritten command clang
+  23 passes is run by vcc and its diagnostics matched against the
+  `expected-*` directives.  2026-11-10: 412/1841 pass (C/drs 29/70, C/C2y
+  32/95, Sema 236/1276), 1 crash (Sema/attr-tls_model.c).  Largest gaps:
+  SVE/SME types and builtins (`__SVInt8_t`, streaming checks), `__bf16`,
+  `__mfp8`, `__builtin_bit_cast`, `_Countof`, `__scoped_atomic_*`,
+  `_Static_assert` in a struct, `//` comments under -std=c89.  *Validate:*
+  no crash; pass count only goes up (results.json lists regressions).
 
 Order once Tier 1 is clear: T10 (finds most wrong code per hour), T2's
 generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
