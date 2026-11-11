@@ -80,6 +80,14 @@ kan gå parallellt.
 
 ## Status
 
+### Status 2026-11-11: G2/G7, PostgreSQL på Linux
+
+PostgreSQL-harnessen kan nu isolera käll- och byggträd på Linux, förbereda
+hela kommandodatabasen och kontrollera att varje kompileringsjobb verkligen
+lyckades innan hastighet jämförs. Snabba kontraktsprov körs i CI utan en
+PostgreSQL-checkout. G2 och G7 är fortsatt öppna: harnessen ensam bevisar
+varken att aktuell main bygger PostgreSQL eller att dess prestandamål uppnås.
+
 ### Status 2026-11-11: G5/G7, wasm-lagringar över strukturerade joins
 
 På `1d8e29a` använder wasm32/64 den gemensamma budgeterade flödeslösaren
