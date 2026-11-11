@@ -297,3 +297,18 @@ med b63c269 bygger unity/fil-för-fil och passerar 164 riktade kör-/kodkrav,
 byte-identiska och extra Callgrind-kompileringsarbete högst +0,180 %; ett
 riktat x86-switchprov minskar exekverade instruktioner 48,39 %. Avgränsning,
 rådata och kvarvarande OPT6-delar står i PLAN-fas2. G5/G7 och full O2 är öppna.
+
+### Status 2026-11-11: G5/G7, rena konstanta kontrollbeslut
+
+OPT6:s gemensamma kontrollhjälpare används av x86, arm64 och wasm med
+respektive måls befintliga `constant_p`-policy. Det nya delsteget bevarar
+O0/noopt i 64 bytejämförelser på fyra mål, passerar 164 befintliga och
+16 nya riktade nivå-/målkontroller samt fil-för-fil-bygge. Två tidigare
+wasm-xfail (`if_call_const`, `cond_dead_and`) är obligatoriska på wasm32/64.
+Globala volatile-/atomic-laddningar och exakt en utvärdering kontrolleras
+uttryckligen. Mot exakt 781ca69 med lika värdflaggor är avgränsade
+500-funktionskontroller inom +0,095 % extra Callgrind-arbete; det positiva
+kontrollprovet minskar kompilatorns instruktioner 2,75–18,36 % beroende på
+mål. Detta ersätter inte full prestandagrind eller CI och belägger ingen
+generell förbättring i programmets körtid. G5/G7 och full O2 är öppna;
+rådata, återstående delar och begränsningar står i PLAN-fas2.
