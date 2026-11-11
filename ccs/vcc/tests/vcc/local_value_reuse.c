@@ -14,6 +14,13 @@ unsigned lvr_decl_write(unsigned a, unsigned b) { unsigned x=a+b; unsigned z=(x+
 unsigned lvr_intervening(unsigned a, unsigned b) { unsigned x = a+b; unsigned y = a^b; return x*y+(a+b); }
 unsigned lvr_intervening_assign(unsigned a, unsigned b) { unsigned x = a+b; unsigned y = (a=3); return x*y+(a+b); }
 unsigned lvr_intervening_call(unsigned a, unsigned b) { unsigned x = a+b; unsigned y = update(); return x*y+(a+b); }
+unsigned lvr_independent(unsigned a, unsigned b, unsigned z) { unsigned x=a+b; z=z^7U; return x*z+(a+b); }
+unsigned lvr_independent_compound(unsigned a, unsigned b, unsigned z) { unsigned x=a+b; z^=7U; return x*z+(a+b); }
+unsigned lvr_independent_inc(unsigned a, unsigned b, unsigned z) { unsigned x=a+b; z++; return x*z+(a+b); }
+unsigned lvr_dep_compound(unsigned a, unsigned b) { unsigned x=a+b; a^=1U; return x*a+(a+b); }
+unsigned lvr_value_inc(unsigned a, unsigned b) { unsigned x=a+b; x++; return x*x+(a+b); }
+unsigned lvr_dep_written(unsigned a, unsigned b) { unsigned x=a+b; a=a^1U; return x*a+(a+b); }
+unsigned lvr_value_written(unsigned a, unsigned b) { unsigned x=a+b; x=x^7U; return x*x+(a+b); }
 unsigned lvr_intervening_write(unsigned a, unsigned b) { unsigned x = a+b; a++; unsigned y = a^b; return x*y+(a+b); }
 unsigned lvr_intervening_volatile(unsigned a, unsigned b) { unsigned x = a+b; unsigned y = observed; return x*y+(a+b); }
 unsigned lvr_written(unsigned a, unsigned b) { unsigned x = a+b; return (x++)*(a+b); }
@@ -29,6 +36,8 @@ int main(void)
  if (lvr_square(2, 3) != 25 || lvr_reuse(2, 3) != 25 || lvr_commute(3, 4) ||
      lvr_nested(2, 3, 4) != 4 || lvr_distinct(5, 2) != (3U * (0U-3U)) ||
      lvr_decl(2, 3) != 25 || lvr_decl_chain(2, 3) != 10 || lvr_decl_write(2, 3) != 25 ||
+     lvr_independent(2, 3, 3) != 25 || lvr_independent_compound(2, 3, 3) != 25 ||
+     lvr_independent_inc(2, 3, 3) != 25 || lvr_dep_compound(2, 3) != 21 || lvr_value_inc(2, 3) != 41 || lvr_dep_written(2, 3) != 21 || lvr_value_written(2, 3) != 9 ||
      lvr_intervening(2, 3) != 10 || lvr_intervening_assign(2, 3) != 21 || lvr_intervening_write(2, 3) != 6 ||
      lvr_written(2, 3) != 25 || lvr_volatile_local(2, 3) != 25 ||
      lvr_kill(2, 3) != 11 || lvr_join(2, 3, 0) != 10 || lvr_join(2, 3, 1) != 11) return 1;

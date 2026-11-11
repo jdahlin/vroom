@@ -55,6 +55,12 @@ def check_localvalues(assembly, arch):
     text = body(assembly, 'lvr_decl', wasm)
     if len(re.findall(add, text)) != 1:
         raise RuntimeError(f'declaration value must be reused in later declaration\n{text}')
+    text = body(assembly, 'lvr_independent', wasm)
+    if len(re.findall(add, text)) != 2:
+        raise RuntimeError(f'value must survive an independent local write\n{text}')
+    text = body(assembly, 'lvr_independent_compound', wasm)
+    if len(re.findall(add, text)) != 2:
+        raise RuntimeError(f'value must survive an independent compound write\n{text}')
     text = body(assembly, 'lvr_intervening', wasm)
     if len(re.findall(add, text)) != 2:
         raise RuntimeError(f'value must survive a pure declaration\n{text}')

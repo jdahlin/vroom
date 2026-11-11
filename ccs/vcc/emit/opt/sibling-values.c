@@ -5,6 +5,9 @@ typedef struct em_sibling_state {
  em_value_table table;
  uint32_t next, nodes;
  uint32_t target, match, symbol, symnode;
+ const uint32_t *killed;
+ uint32_t nkilled;
+ bool check_killed;
  em_value_key last_key, target_key;
 } em_sibling_state;
 
@@ -20,6 +23,9 @@ static uint32_t em_sibling_value(cc *c, em_sibling_state *s, uint32_t n)
  if (!is_integer(c, x->ty) || em_bitint(c, x->ty) ||
      (tsize(c, x->ty) != 4 && tsize(c, x->ty) != 8)) return 0;
  if (x->op == N_VAR) {
+  if (s->check_killed)
+   for (uint32_t i = 0; i < s->nkilled; i++)
+    if (s->killed[i] == x->a) return 0;
   sym = &c->syms[x->a];
   if (!is_local_var(c, x->a) || sym->kind != S_VAR || sym->sc == SC_STATIC || sym->sc == SC_EXTERN ||
       (sym->flags & SF_ADDR_TAKEN) || (QQ(sym->ty) & Q_VOLATILE) ||
@@ -87,22 +93,26 @@ VPRIV bool em_sibling_values(ecx *e, uint32_t n)
  * consumer must already reference that local, so unused-init elimination
  * cannot remove its definition. The value-numbering scan fails closed. */
 static __attribute__((noinline)) bool em_decl_reuse_match(cc *c, uint32_t init, uint32_t ret,
-                                                            uint32_t symbol, uint32_t *from, uint32_t *to)
+                                                            uint32_t symbol, const uint32_t *killed, uint32_t nkilled,
+                                                            uint32_t *from, uint32_t *to)
 {
  em_sibling_state s = {0};
  uint32_t result;
  s.next = c->nsym + 1; s.nodes = 32; s.symbol = symbol;
+ s.killed = killed; s.nkilled = nkilled; s.check_killed = true;
  em_values_reset(&s.table, 64);
  s.target = em_sibling_value(c, &s, init);
  if (!s.target) return false;
  s.target_key = s.last_key;
+ s.check_killed = false;
  result = em_sibling_value(c, &s, ret);
  if (!result || !s.match || !s.symnode) return false;
  *from = s.match; *to = s.symnode;
  return true;
 }
 
-VPRIV bool em_decl_reuse_values(ecx *e, uint32_t decl, uint32_t consumer, uint32_t *from, uint32_t *to)
+VPRIV bool em_decl_reuse_values(ecx *e, uint32_t decl, uint32_t consumer,
+                                const uint32_t *killed, uint32_t nkilled, uint32_t *from, uint32_t *to)
 {
  cc *c = e->c;
  const node *d, *r;
@@ -112,6 +122,7 @@ VPRIV bool em_decl_reuse_values(ecx *e, uint32_t decl, uint32_t consumer, uint32
  d = N(decl); r = N(consumer);
  if (d->op != N_DECL || !d->b || N(d->b)->op != N_BINARY || c->nsym >= UINT32_MAX - 32) return false;
  s = &c->syms[d->a];
+ for (uint32_t i = 0; i < nkilled; i++) if (killed[i] == d->a) return false;
  if (!is_local_var(c, d->a) || s->kind != S_VAR || s->sc == SC_STATIC || s->sc == SC_EXTERN ||
      (s->flags & SF_ADDR_TAKEN) || (QQ(s->ty) & Q_VOLATILE) || (T(c, s->ty)->flags & TF_ATOMIC) ||
      sym_attrs(c, d->a)->cleanup || sym_attrs(c, d->a)->asmname ||
@@ -127,7 +138,7 @@ VPRIV bool em_decl_reuse_values(ecx *e, uint32_t decl, uint32_t consumer, uint32
   expr = r->b;
  } else return false;
  if (!expr || N(expr)->op != N_BINARY) return false;
- return em_decl_reuse_match(c, d->b, expr, d->a, from, to);
+ return em_decl_reuse_match(c, d->b, expr, d->a, killed, nkilled, from, to);
 }
 
 /* A declaration of a new, nonobservable scalar with a pure initializer cannot
@@ -151,20 +162,59 @@ static __attribute__((noinline)) bool em_value_pure_decl(ecx *e, uint32_t n)
  return em_sibling_value(c, &s, d->b) != 0;
 }
 
-/* Scan at most eight immediately preceding pure local declarations. Any
- * other statement is a barrier; no facts cross a branch or side effect. */
+/* Identify an ordinary local write whose RHS is pure. Division, remainder,
+ * shifts, memory writes and unknown compound operations remain barriers. */
+static __attribute__((noinline)) bool em_value_local_assignment(ecx *e, uint32_t n, uint32_t *written)
+{
+ cc *c = e->c;
+ const node *stmt = N(n), *a, *lhs;
+ const sym *y;
+ em_sibling_state s = {0};
+ bool increment;
+ if (stmt->op != N_EXPR || !stmt->a) return false;
+ a = N(stmt->a);
+ increment = a->op == N_PREINC || a->op == N_PREDEC || a->op == N_POSTINC || a->op == N_POSTDEC;
+ if (!increment && (a->op != N_ASSIGN || !a->b ||
+     (a->aux && a->aux != T_PLUS && a->aux != T_MINUS && a->aux != T_STAR &&
+      a->aux != T_AMP && a->aux != T_PIPE && a->aux != T_CARET))) return false;
+ if (!a->a) return false;
+ lhs = N(a->a);
+ if (lhs->op != N_VAR) return false;
+ y = &c->syms[lhs->a];
+ if (!is_local_var(c, lhs->a) || y->kind != S_VAR || y->sc == SC_STATIC || y->sc == SC_EXTERN ||
+     (y->flags & SF_ADDR_TAKEN) || (QQ(y->ty) & Q_VOLATILE) || (T(c, y->ty)->flags & TF_ATOMIC) ||
+     sym_attrs(c, lhs->a)->asmname || !is_integer(c, y->ty) || em_bitint(c, y->ty) ||
+     (tsize(c, y->ty) != 4 && tsize(c, y->ty) != 8) || c->nsym >= UINT32_MAX - 32) return false;
+ if (!increment) {
+  if (QUNQ(y->ty) != QUNQ(N(a->b)->ty)) return false;
+  s.next = c->nsym + 1; s.nodes = 32;
+  em_values_reset(&s.table, 64);
+  if (!em_sibling_value(c, &s, a->b)) return false;
+ }
+ *written = lhs->a;
+ return true;
+}
+
+/* Scan at most eight preceding declarations or pure local assignments.
+ * A written dependency invalidates a candidate; all other effects stop. */
 VPRIV bool em_block_value_reuse(ecx *e, const node *block, uint32_t first, uint32_t i,
                                    uint32_t *from, uint32_t *to)
 {
  cc *c = e->c;
- uint32_t consumer, count = 0;
+ uint32_t consumer, count = 0, killed[8], nkilled = 0;
  if (!e->E->o->opt || e->E->noopt || i <= first) return false;
  consumer = c->lists[block->b + i];
  if (N(consumer)->op != N_RETURN && N(consumer)->op != N_DECL) return false;
  while (i > first && count++ < 8) {
   uint32_t prev = c->lists[block->b + --i];
+  if (N(prev)->op == N_EXPR) {
+   uint32_t written;
+   if (!em_value_local_assignment(e, prev, &written)) break;
+   killed[nkilled++] = written;
+   continue;
+  }
   if (N(prev)->op != N_DECL) break;
-  if (em_decl_reuse_values(e, prev, consumer, from, to)) return true;
+  if (em_decl_reuse_values(e, prev, consumer, killed, nkilled, from, to)) return true;
   if (!em_value_pure_decl(e, prev)) break;
  }
  return false;
