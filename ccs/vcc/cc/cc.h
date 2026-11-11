@@ -259,11 +259,11 @@ static inline int vcc_tls_model(const char *m)
 	       !strcmp(m, "initial-exec") ? VCC_TLS_IE : !strcmp(m, "local-exec") ? VCC_TLS_LE : 0;
 }
 
+enum { CC_DISABLED_BUILTIN_WORDS = 6 };	/* generated libbuiltins.inc indices */
+
 typedef struct cc_opts {	/* fields before outfd: parse options, all in the decl cache key */
 	int target;		/* PP_LINUX_AARCH64 / PP_DARWIN / PP_WASM64 */
 	int unsigned_char;
-enum { CC_DISABLED_BUILTIN_WORDS = 6 };	/* generated libbuiltins.inc indices */
-
 	int ms_anon;		/* -fms-anonymous-structs / -fms-extensions: "struct S;" members */
 	int short_wchar;	/* -fshort-wchar */
 	int std;		/* -std=: 89, 99, 11, 17, 23 (0: gnu17) */
@@ -296,11 +296,11 @@ enum { CC_DISABLED_BUILTIN_WORDS = 6 };	/* generated libbuiltins.inc indices */
 	struct vbuf *wasm_obj;	/* emit == 2 for wasm64: the object's bytes (arch/wasm/as) */
 } cc_opts;
 
+void cc_disable_builtin(uint64_t *bits, const char *name);
+
 typedef struct cc cc;
 
 /* parse and analyse the whole TU; returns the number of errors */
-void cc_disable_builtin(uint64_t *bits, const char *name);
-
 int cc_run(pp *p, const cc_opts *o);
 /* lazy bodies kept and parsed so far (all TUs of the process) */
 void cc_lz_stats(char *buf, size_t n);
