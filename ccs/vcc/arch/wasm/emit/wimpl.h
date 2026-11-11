@@ -451,6 +451,8 @@ VPRIV void wudivconst(ecx *e, const em_udivconst_recipe *r);
 VPRIV bool wlabels(cc *c, uint32_t n);
 VPRIV bool wterm(cc *c, uint32_t n);
 /* wstmt.c */
+VPRIV bool wswitch_bitset(ecx *e, uint32_t body, uint32_t sw0, uint32_t ncase,
+			 uint32_t nlabels, uint32_t t, int k, bool sg, int dflt, const int *sb);
 VPRIV void wgoto_scan(ecx *e, uint32_t body);
 VPRIV void wvla_bytes(ecx *e, qty t);
 VPRIV int wknown(ecx *e, uint32_t n);

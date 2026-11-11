@@ -1179,6 +1179,10 @@ static void wswitch(ecx *e, uint32_t n)
 		}
 		wbr(e, "br", dseg != UINT32_MAX ? sb[dseg] : brk, false);
 		wfree(e, th);
+	} else if (e->E->o->opt && !e->E->noopt && !em_bitint(c, ct) &&
+		   wswitch_bitset(e, x->b, sw0, ncase, ncase + (dseg != UINT32_MAX), t, k,
+				  is_signed(c, ct), dseg != UINT32_MAX ? sb[dseg] : brk, sb)) {
+		/* The shared proof selected one destination and bounded membership. */
 	} else if (em_switch_strategy(ncase, lo, hi, ranges, true) == EM_SWITCH_TABLE) {
 		/* dense: a branch table on t - lo */
 		uint32_t span = (uint32_t)(hi - lo) + 1;

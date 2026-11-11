@@ -78,6 +78,8 @@ arm64)
 	step opt-debug-x86 python3 bench/vcc-opt-debug.py
 	step x86-leaf-frame python3 bench/vcc-x86-leaf-frame.py --no-run
 	step rec-copies python3 bench/vcc-rec-copies.py
+	step switch-bitsets-arm64 python3 bench/vcc-switch-bitsets.py --target aarch64-linux-gnu --run
+	step switch-bitsets-x86 python3 bench/vcc-switch-bitsets.py --target x86_64-linux-gnu --run
 	step opt-rules-arm64 python3 bench/vcc-opt-rules.py --target aarch64-linux-gnu
 	step switch-values-arm64 python3 bench/vcc-opt-rules.py --target aarch64-linux-gnu --rule switchvalues --run
 	step tail-controls python3 bench/vcc-tail-controls.py
@@ -143,6 +145,8 @@ tsan)
 	;;
 wasm)
 	build vcc
+	step switch-bitsets-wasm32 python3 bench/vcc-switch-bitsets.py --target wasm32-unknown-emscripten --run
+	step switch-bitsets-wasm64 python3 bench/vcc-switch-bitsets.py --target wasm64-unknown-emscripten --run
 	step opt-rules-wasm32 python3 bench/vcc-opt-rules.py --target wasm32-unknown-emscripten --run
 	step opt-rules-wasm64 python3 bench/vcc-opt-rules.py --target wasm64-unknown-emscripten --run
 	step wasm-cells python3 bench/vcc-wasm-cells.py

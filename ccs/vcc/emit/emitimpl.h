@@ -573,6 +573,10 @@ VPRIV bool em_sdivconst64(int64_t divisor, bool remainder, em_sdivconst_recipe *
 VPRIV bool em_sdivconst(cc *c, qty ty, int op, i128 rhs, em_sdivconst_recipe *r);
 VPRIV bool a64_sdivconst_ok(ecx *e, val a, const em_sdivconst_recipe *r);
 VPRIV val a64_sdivconst(ecx *e, val a, const em_sdivconst_recipe *r);
+/* opt/mulshift.c and opt/xor-not.c: machine recipes, no operand evaluation. */
+VPRIV int em_cmpbounds(ecx *e, uint32_t n, uint32_t *operand);
+VPRIV bool em_mulshift(cc *c, qty ty, int *op, i128 *rhs);
+VPRIV bool em_xor_not(cc *c, qty ty, int op, i128 rhs);
 /* opt/identity.c */
 enum { EM_ID_NONE, EM_ID_LEFT, EM_ID_ZERO, EM_ID_ONES };
 VPRIV int em_bin_identity(cc *c, qty ty, int op, i128 rhs);
@@ -586,6 +590,18 @@ typedef struct em_switch_case {
 enum { EM_SWITCH_LINEAR, EM_SWITCH_TREE, EM_SWITCH_TABLE };
 VPRIV int em_switch_strategy(uint32_t n, i128 lo, i128 hi, bool ranges, bool tables);
 VPRIV bool em_switch_prepare(em_switch_case *cases, uint32_t n, unsigned bits, bool sg);
+/* One bounded membership test for a run of stacked case labels. The original
+ * body remains intact; node names its final case label, not a new destination. */
+typedef struct em_switch_bitset_recipe {
+	i128 lo;
+	uint64_t mask;
+	uint32_t node;
+	uint8_t span, bits;
+} em_switch_bitset_recipe;
+VPRIV bool em_switch_bitset_plan(cc *c, uint32_t body, uint32_t nlabels,
+				 unsigned bits, bool sg, em_switch_bitset_recipe *out);
+VPRIV bool a64_switch_bitset(ecx *e, uint32_t body, uint32_t base, int r,
+			    int cx, bool sg, uint32_t dflt);
 /* opt/unusedinit.c: bounded recipes for never-referenced integer declarations. */
 enum { EM_UNUSED_KEEP, EM_UNUSED_OMIT, EM_UNUSED_EVAL };
 VPRIV bool em_unused_local(ecx *e, uint32_t s, uint32_t fn);

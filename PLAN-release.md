@@ -389,6 +389,15 @@ grindarna: `vcc-diff.py`, `vcc-sema.py`, `vcc-ctests.py`, `vcc-abi.py`,
 LICENSE, x86-64-backend, wasm-backend, -O1, SQLite-korpus, Debian-urval,
 Csmith/YARPGen-rigg och paketering.
 
+### Status 2026-11-11: G5/G7, switchmedlemskap med bitmask
+
+OPT6 känner igen begränsade staplade case med en gemensam destination och
+sänker dem till en intervallskyddad bitmask på arm64, x86 och båda wasm-målen.
+Riktade kör- och kodkontroller passerar O0–O3 och `VCC_NOOPT`; vcc-sviten
+passerar 246/246 med en befintlig xfail. Ett riktat x86-exempel minskar från
+131 till 85 byte. Mätningens begränsningar och kvarvarande arbete finns i
+PLAN-fas2; G5/G7 och full O2 är fortsatt öppna.
+
 ### Status 2026-11-11: G5/G7, balanserad switchdispatch
 
 OPT6:s första del använder gemensamt strategival/sortering och balanserade
@@ -619,3 +628,8 @@ med befintliga undantag. Wasm64-preflight går 189/189 med 38 körda XFAIL;
 ExtInt-provet täcker den redan verifierade BitInt-ABI-luckan på Wasm32/64.
 Exakta kommandon, oförändrad kompilatorkod och testmarkörens föräldraprov:
 `work/results/native-stack64-ci-preflight/`.
+
+OPT1-utökningen med tvåpotensmultiplikation och bitkomplement är implementerad
+för x86, arm64 och wasm och har fokuserad O0–O3-validering och en liten
+matchad kompilatorkostnadsprofil i PLAN-fas2.md. G5/G7 och generell O2-täckning
+är fortsatt öppna.

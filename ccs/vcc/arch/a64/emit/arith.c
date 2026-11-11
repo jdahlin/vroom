@@ -352,6 +352,12 @@ VPRIV val arith(ecx *e, int op, qty ty, val a, val b)
 			val_free(e, &a);
 			return vconst(id == EM_ID_ZERO ? 0 : em_trunc_to(c, -1, ty));
 		}
+		if (e->E->o->opt && !e->E->noopt && em_xor_not(c, ty, op, b.i)) {
+			ra = toreg(e, &a);
+			op3(e, I_ORN, x, ra, ZR, ra);
+			return a;
+		}
+
 		if (e->E->o->opt && !e->E->noopt && (op == T_SLASH || op == T_PERCENT)) {
 			em_udivconst_recipe recipe;
 			em_sdivconst_recipe signed_recipe;

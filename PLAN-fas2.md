@@ -1797,6 +1797,26 @@ funktionsavgränsade debug-/text-/DWARF-kontroller är gröna. Ny CI följer
 PR:n; CPU-mätningarna och instruktionsprofilen ovan har sina uttryckliga
 äldre baser och är inte ett generellt godkännande av G5.
 
+### OPT6 status: bitmask för switchmedlemskap (2026-11-11)
+
+En begränsad gemensam analys känner igen minst fyra staplade case-etiketter
+med samma ingång och högst 64 möjliga värden. Arm64, x86, wasm32 och wasm64
+använder vid O1–O3 en bitmask med unsigned intervallkontroll före skiftet;
+default, kroppar och fallthrough behåller sina ursprungliga etiketter. Täta
+masker, skilda ingångar, dolda case, `_BitInt` och större spann använder
+befintlig dispatch. O0 och `VCC_NOOPT` påverkas inte.
+
+`vcc-switch-bitsets.py --run` passerar O0–O3 och `VCC_NOOPT` på alla fyra mål,
+inklusive signed/unsigned-gränser, intervall, sidoeffekter och fallback. Unity
+och fil-för-fil bygger; fil-för-fil kör också x86 och wasm64-testen. Vcc-sviten
+passerar 246/246 med en befintlig xfail. På exakt föräldern 032e9dc jämfört
+med ändringen är x86-O2-funktionen `bs64` 131 → 85 byte (utan alignment),
+ett riktat kodstorleksprov. Tolv alternerande körningar av en korpus med 500
+matchande switchfunktioner gav median 4,52 → 4,34 ms för hela kompilatorn
+(intervall 4,27–5,06 respektive 4,13–4,76 ms); dessa korta väggtider är inte
+en generell prestandagrind. Hårdvaruräknare var otillgängliga på värden.
+Värdetabeller och bitset-kluster med flera destinationer återstår.
+
 ### OPT6 status: balanserad switchdispatch (2026-11-11)
 
 Gemensam policy, 32/64-bitars normalisering och sortering finns i
@@ -2299,7 +2319,7 @@ ett påstående om stöd eller avsaknad görs.
 | Heltalsförenkling: InstCombine, reassoc, div/rem | **Delvis, alla tre.** `opt/{identity,divpow2,sdivpow2,udivconst}.c` med separata adaptrar. U32-reciproker har målkostnad/fallback; inte generell InstCombine. Små konstantmultiplikationer, fler bitregler, delat kvot/rest-recept och signed/u64-reciproker återstår. Float2Int är inte bevisat av heltalsreglerna. |
 | Värdefakta, CSE/PRE, intervall: CCP, GVN, SCCP | **Delvis lokalt.** `rec/copies.c`, `rec/slot-values.c` och förpassfakta; a64:s `opt.c`, x64:s `copies.c`/`extensions.c`, wasms `slots.c`. Ingen gemensam global GVN/PRE/SCCP eller generell intervallanalys. Börja med begränsad blocklokal cache för rena uttryck. |
 | Död kod och minne: DCE/DSE, store merging | **Delvis.** Gemensamma exakta frame-celler/storefakta och nåbarhetsstädning; a64 har egna dead-result-pass, x64 effektbeskrivning, wasm typade accesshändelser. Heap/global-DSE, bitvis DCE, allokeringseliminering, generell last/store-motion och looplasteliminering återstår/är overifierade. |
-| Kontroll och switch: SimplifyCFG, jump threading, bit tests | **Delvis.** `opt/control.c`, `opt/switch.c`, `rec/{fallthrough,unreachable}.c`; alla mål använder delade beslut, wasm har tät `br_table`. Begränsade värdetabeller finns för heltalsresultat; bitset-kluster, generell threading, compare merging och tail merging återstår. |
+| Kontroll och switch: SimplifyCFG, jump threading, bit tests | **Delvis.** `opt/control.c`, `opt/switch.c`, `rec/{fallthrough,unreachable}.c`; alla mål använder delade beslut, begränsade medlemsmasker och värdetabeller, wasm har tät `br_table`. Bitset-kluster med flera destinationer, generell threading, compare merging och tail merging återstår. |
 | Skalär ersättning/promotion: SROA, mem2reg | **Delvis.** `opt/locals.c`, förpass och celler; a64 registerbindning, x64 fyra valda GPR-hem, wasm typade lokaler. Detta är inte generell aggregatsplittring eller join-medveten mem2reg. |
 | Loopmotion/induktion: LICM, IV opts, loop sink | **Saknas generellt.** Alla mål sänker loopar; förpassets loopviktade lokalval är inte LICM. CFG, dominans, loop-/beroendefakta och bevis om noll iterationer behövs före säker hoisting/IV-omskrivning. |
 | Loopform: rotation, deletion, unroll, unswitch/distribute | **Saknas generellt.** Målen har direkt satssänkning, inte dessa transformpass. Kräver trip-count-/effekt-/entrybevis och kodstorleksbudget; börja eventuellt med små exakt konstanta loopar. |
@@ -2633,7 +2653,7 @@ sina exakta angivna versioner; integrationen är ingen ny kostnadsmätning.
 
 ### OPT6: oanvända skalära lokala initierare (avgränsat delsteg)
 
-Implementation under verifiering: `emit/opt/unusedinit.c` delar behörighet och
+Implementerat: `emit/opt/unusedinit.c` delar behörighet och
 recept mellan a64, x64 och wasm32/64. Befintlig `SA_USED` från prepasset avvisar
 refererade objekt direkt; ingen ny funktionsgenomgång, CFG eller SSA tillkommer.
 Endast aldrig refererade automatiska heltalsobjekt på högst 64 bitar omfattas.
@@ -2674,7 +2694,28 @@ Manifest, kommandon, käll-/binärhashar och reproduktionsskript finns i
 `work/opt-profile/unused-init-cost/{result.json,measure.py}`. Detta mäter hela
 kompilatorprocessens användarinstruktioner, inte hårdvarucykler, väggtid eller
 programmens körtid. Det är ett avgränsat exact-parent-prov; den kombinerade
-optimeringsstackens kostnad behöver en separat gate.
+optimeringsstackens separata mätning följer nedan.
+
+Den kombinerade kostnadsgaten (`bench/vcc-opt-cost.py`) passerar: högst 1 %
+ökning per mål, både mot `4a839ba` före stacken och mot `7be5f64` före detta
+delsteg. Kandidaten var `59c686c`; alla tre binärer byggdes med Clang 23
+`-O3 -march=x86-64-v3`. Serien mäter Callgrind-Ir för hela `vpp -O2 -S` på
+ett fast korpus av befintliga regressionsfiler, med samma kandidatprofil i båda
+jämförelserna:
+
+| Mål | Filer | Mot `4a839ba` | Mot `7be5f64` |
+|---|---:|---:|---:|
+| x86-64 | 12 | +0,194974 % | +0,066731 % |
+| arm64 | 12 | +0,113848 % | +0,062119 % |
+| wasm32 | 10 | +0,248758 % | +0,057039 % |
+| wasm64 | 11 | +0,233999 % | +0,057260 % |
+
+Wasm32 saknar `atomic_ops` och `bitint_runtime`, wasm64 saknar
+`bitint_runtime`; samma fall avvisas av alla tre kompilatorerna. Rapporten
+innehåller kommandon, hashvärden, stödutfall och instruktionstal i
+`work/opt-profile/stack-cost/final/result.json`; körloggen finns i
+`work/opt-profile/stack-cost/final-run.log`. Detta är en begränsad gate för
+kompilatorarbete, inte ett mått på körhastighet hos genererade program.
 
 Efter integrering av postfix-föräldern (`e92a939`) passerar unity och nonunity
 alla 16 target×O0–O3 runtime-/kodgenfall vardera, plus fyra `VCC_NOOPT`-fall
@@ -2780,3 +2821,31 @@ PIC, debug och CFI körs också under qemu och dess sektioner, symboler och
 relokeringar överensstämmer med extern assemblering av vcc:s assembler.
 Separat kostnadsmätning för dessa tabeller återstår; resultatet här är ingen
 uppmätt generell kompileringstid eller programhastighet.
+### OPT1: två bitregler (2026-11-11)
+
+Multiplikation med en tvåpotens sänks direkt till maskinskift för 32-/64-bitars
+heltal; XOR med enbart ettor blir komplement. Recepten ligger i separata
+målgeneriska filer, utan ny AST-vandring. O0 och VCC_NOOPT är oförändrade;
+_BitInt och bredare typer ingår inte. O1–O3, bieffekter och operandkonvertering
+kontrolleras på x86, arm64, wasm32 och wasm64. Unity och filvis bygge samt
+36 O0/noopt/overflow-paritetsprov passerade.
+
+Matchad seriell Callgrind-profil (`work/opt-profile/bit-rule-audit/result.json`,
+kompilatorkällor och binärhashar i manifestet) mäter hela kompilatorprocessens
+instruktioner, inte cykler eller programkörtid. Fyra blandade x86-prov gav
++0,0112 %; 200 regelfria funktioner +0,052–0,469 % beroende på mål; 200
+regelmättade funktioner −1,39–1,79 %. Detta är små prov, inte en fullständig
+prestandagrind. Jämförelseregler för heltalsgränser och bred O2-täckning återstår.
+
+### OPT1: heltalsjämförelser vid gränsvärden (2026-11-11)
+
+Ett gemensamt recept i `emit/opt/cmpbounds.c` känner igen relationer med
+konstant resultat vid lägsta/högsta värdet för konverterade 32-/64-bitars
+heltal. Operanden evalueras fortfarande: anrop och volatila/atomiska läsningar
+bevaras. Endast numeriska AST-litteraler med identisk konverterad typ ingår;
+pekare, flyttal, _BitInt, bredare typer och övriga konstantuttryck faller
+igenom. Värde och gren testas på x86, arm64, wasm32 och wasm64 O0–O3;
+assemblerkontroller verifierar även anrop och volatila/atomiska läsningar.
+O0 och VCC_NOOPT är byteidentiska mot föräldern på testfilen för alla fyra mål.
+Unity och filvis bygge passerar. Ytterligare gränsregler och kostnadsprofilering
+återstår innan denna gren är klar för granskning.

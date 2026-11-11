@@ -13,6 +13,9 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--vpp', default=str(Path(BUILD) / 'vpp'))
     parser.add_argument('--baseline', required=True)
+    parser.add_argument('--source', default='multiply_constants.c',
+                        help='C fixture under tests/vcc for disabled optimization parity')
+    parser.add_argument('--factors', default='3,5,9', help='overflow control factors')
     args = parser.parse_args()
     total = 0
     with tempfile.TemporaryDirectory(prefix='vcc-mulconst-parity-') as tmp:
@@ -21,14 +24,14 @@ def main():
         functions = []
         for tag, ty in [('s32', 'int'), ('u32', 'unsigned'),
                         ('s64', 'long long'), ('u64', 'unsigned long long')]:
-            for factor in [3, 5, 9]:
+            for factor in map(int, args.factors.split(',')):
                 functions.append(f'int ov_{tag}_{factor}({ty} x,{ty} *p)'
                                  f'{{return __builtin_mul_overflow(x,({ty}){factor},p);}}')
         overflow.write_text('\n'.join(functions) + '\n')
         for target in ['x86_64-linux-gnu', 'aarch64-linux-gnu',
                        'wasm32-unknown-emscripten', 'wasm64-unknown-emscripten']:
             for level in range(4):
-                for source in [Path(R) / 'ccs/vcc/tests/vcc/multiply_constants.c', overflow]:
+                for source in [Path(R) / 'ccs/vcc/tests/vcc' / args.source, overflow]:
                     # Real noopt policy is the VCC_NOOPT environment, not an
                     # optnone attribute (which this compiler currently ignores).
                     for noopt in ([False, True] if source != overflow else [False]):
