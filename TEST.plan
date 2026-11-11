@@ -310,6 +310,19 @@ båda Linux-målen bland clang-giltiga fall. ARM-evidens:
 `work/abi-generated/empty-fixed-arm/results.json`. Utökning av frön/antal
 och senare ABI-ändringar kräver nya körningar.
 
+**Kombinerad omkörning `5e17f47`:** efter de senare frame-, atomic-
+och kopieringsrättningarna går återigen alla clang-giltiga fall i alla
+fyra anroparkombinationer. X86: **777 GCC + 1000 LLVM godkända**, 222
+filtrerade decimalfall och en clang-krasch (GCC 466). ARM/QEMU: **778
+GCC + 1000 LLVM godkända**, 222 filtrerade decimalfall, inga referensfel.
+Inga vcc-fel eller vcc-krascher på något mål. Rapporter:
+`work/abi-generated/milestone-{x86,arm}/results.json`; båda lagrar samma
+kompilatorhash som S3:s compile-milstolpe. Kernelkontrollerna för samma
+commit är också gröna: sema run/batch **887/887** vardera och PP-paritet
+**920/920**. Testharnessen för compile-milstolpen finns separat i
+[PR #27](https://github.com/jdahlin/vroom/pull/27); kompilatorrättningarnas
+upstream-integration valideras för en följande PR.
+
 **Klart när:** N genererade fall per plattform utan skillnad.
 
 ### S7 Slumpprogram (TODO T10) — rigg klar, långkörningar återstår
