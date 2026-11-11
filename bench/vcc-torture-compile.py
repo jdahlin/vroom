@@ -4,8 +4,8 @@
     LLVM=/usr/lib/llvm-23 bench/vcc-torture-compile.py [-j N] [-v] [PAT]
 
 Fetch the pinned GCC tree with bench/fetch-testsuites.sh gcc first. Known Linux target selectors and requirements follow DejaGNU; unknown
-directives are reported as skips, never silently run under different conditions. Clang's -c is the oracle; vcc's
-x86 backend currently emits assembly, which clang then assembles (X5).
+directives are reported as skips, never silently run under different conditions.
+Clang's -c is the oracle; vcc's assembly is then checked with Clang's assembler.
 """
 import argparse
 from collections import Counter
