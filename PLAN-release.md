@@ -728,3 +728,7 @@ avgränsade kompilatorkostnadsprov finns i PLAN-fas2.md. G5/G7 återstår.
 En första budgeterad värdetabell återanvänder säkra identiska syskonuttryck
 på alla mål; tester och avgränsade kompilatorkostnader finns i PLAN-fas2.md.
 Generell lokal CSE, G5/G7 och full O2-täckning återstår.
+
+En lokal heltalsinitiering kan återanvändas i en direkt efterföljande ren retur
+på alla mål; verifiering och avgränsade kostnader finns i PLAN-fas2.md.
+Generell lokal CSE samt G5/G7 återstår.

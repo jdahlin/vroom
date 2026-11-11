@@ -3138,3 +3138,26 @@ Callgrind-grinden ger nu compiler-Ir +0,112 % x86, +0,113 % arm64, +0,119 %
 wasm32 och +0,117 % wasm64; 1 %-grinden passerar med samma redovisade
 wasm-uteslutningar. Denna mätning ersätter inte CPU-tid och underlag finns i
 `work/opt-profile/local-values-main-cost/result.json`.
+
+### Lokal initiering följd av ren retur (2026-11-11)
+
+Det begränsade värdenumreringsreceptet återanvänder nu även ett ordinärt lokalt
+heltalsvärde i en direkt efterföljande ren retur: `unsigned x=a+b; return
+x*(a+b);` beräknar summan en gång på x86, arm64 och wasm. Returnoden måste
+redan läsa `x`, så dess initiering inte kan försvinna som oanvänd. Samma
+32-nods-/64-tabellbudget och rena heltalskrav används; annan sats, skrivning,
+anrop, indirekt minne, volatile, atomic, adresstagna variabler och obevisade
+uttryck avstår. Substitutionen gäller endast under den retursatsen och sparas/
+återställs per emitterkontext. Detta är ännu inte generell blocklokal CSE.
+
+O0–O3 körnings-/kodgenereringsprov passerar på fyra mål i båda bygglägen,
+inklusive skrivning och volatile-lokal som negativa fall. O0/noopt-assembler
+är identisk mot `597c521`; vcc-sviten passerar 256/256 med en befintlig xfail.
+Matchad Callgrind mot den föräldern gav compiler-Ir +0,102 % x86, +0,088 %
+arm64, −0,003 % wasm32 och +0,004 % wasm64 på den fasta lilla korpusen; 1 %-
+grinden passerar. Tre växelvisa seriella rundor på 28 förprocessade arm64-
+kärn-TU:er gav median användar-CPU 0,79289 → 0,78492 s; två TU:er är
+uteslutna och det lilla urvalet på delad värd bevisar ingen generell tidsvinst.
+Detaljer och hashad proveniens: `work/opt-profile/decl-return-cost/result.json`
+och `work/opt-profile/decl-return-cputime/kernel-batch-result.json`.
+Generell lokal CSE, G5/G7 och full O2-täckning återstår.
