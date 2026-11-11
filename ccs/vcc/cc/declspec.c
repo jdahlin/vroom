@@ -799,8 +799,8 @@ again:
 			open = expect_lparen(c);
 			const_expr(c, &width, NULL);
 			expect_match(c, T_RPAREN, open);
-			if (width < 1 || width > 128) {
-				cc_error(c, loc, "_BitInt width must be between 1 and 128");
+			if (width < 1 || width > 8388608) {
+				cc_error(c, loc, "_BitInt width must be between 1 and 8388608");
 				width = 2;
 			}
 			bitwidth = (unsigned)width;

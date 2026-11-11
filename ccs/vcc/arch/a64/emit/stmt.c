@@ -430,6 +430,31 @@ static void gen_switch(ecx *e, uint32_t n)
 			}
 		}
 		jump(e, target);
+	} else if (em_bigint(c, ct)) {
+		int source = toreg(e, &v);
+		for (uint32_t k = base; k < e->ncases; k++) {
+			const node *cn = N(e->cases[k]);
+			if (cn->op != N_CASE) continue;
+			i128 lo = c->ipool[cn->a], hi = c->ipool[cn->b];
+			uint32_t next = newlabel(e);
+			int copy = treg(e);
+			mov(e, 1, copy, source);
+			val test = a64_bigcmp(e, lo == hi ? T_EQUALEQUAL : T_GREATEREQ,
+			                     ct, vreg(copy), vconst(lo));
+			cbz(e, false, 1, toreg(e, &test), next);
+			val_free(e, &test);
+			if (lo != hi) {
+				copy = treg(e);
+				mov(e, 1, copy, source);
+				test = a64_bigcmp(e, T_LESSEQ, ct, vreg(copy), vconst(hi));
+				cbz(e, false, 1, toreg(e, &test), next);
+				val_free(e, &test);
+			}
+			jump(e, e->caselbl[e->cases[k]]);
+			deflabel(e, next);
+		}
+		val_free(e, &v);
+		jump(e, dflt);
 	} else if (is_wide(c, ct)) {
 		/* 128-bit: v - lo <= hi - lo, unsigned, in two words (a single value: hi == lo) */
 		int t0 = treg(e), t1 = treg(e);

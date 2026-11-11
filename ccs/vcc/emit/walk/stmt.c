@@ -492,7 +492,7 @@ VPRIV bool wk_branch_entry(cc *c, uint32_t n)
 	if (!n) return false;
 	const node *x = N(n);
 	switch (x->op) {
-	case N_NONE: case N_NUM: case N_FNUM: case N_STR: case N_VAR:
+	case N_NONE: case N_NUM: case N_BIGNUM: case N_FNUM: case N_STR: case N_VAR:
 	case N_LABELADDR: case N_ZERO: case N_GOTO: case N_BREAK: case N_CONTINUE:
 		return false;
 	case N_LABEL: case N_CASE: case N_DEFAULT:
@@ -692,7 +692,7 @@ static void wk_switch(ecx *e, uint32_t n)
 		}
 		if (wk_mem(e, ct)) {
 			/* __int128: each test a 0/1 value (the value is an object, r its address) */
-			val t = LO(wcmp)(e, k->lo == k->hi ? T_EQUALEQUAL : T_GREATEREQ, sg, (val){ .k = V_REG, .r = (uint8_t)r }, vconst(k->lo));
+			val t = em_bigint(c, ct) ? LO(bigcmp)(e, k->lo == k->hi ? T_EQUALEQUAL : T_GREATEREQ, ct, (val){ .k = V_REG, .r = (uint8_t)r }, vconst(k->lo)) : LO(wcmp)(e, k->lo == k->hi ? T_EQUALEQUAL : T_GREATEREQ, sg, (val){ .k = V_REG, .r = (uint8_t)r }, vconst(k->lo));
 			uint32_t skip = wk_newlabel(e);
 
 			LO(tkeep)(e, r);
@@ -701,7 +701,7 @@ static void wk_switch(ecx *e, uint32_t n)
 				continue;
 			}
 			LO(brz)(e, t, 4, false, skip);
-			t = LO(wcmp)(e, T_LESSEQ, sg, (val){ .k = V_REG, .r = (uint8_t)r }, vconst(k->hi));
+			t = em_bigint(c, ct) ? LO(bigcmp)(e, T_LESSEQ, ct, (val){ .k = V_REG, .r = (uint8_t)r }, vconst(k->hi)) : LO(wcmp)(e, T_LESSEQ, sg, (val){ .k = V_REG, .r = (uint8_t)r }, vconst(k->hi));
 			LO(tkeep)(e, r);
 			LO(brz)(e, t, 4, true, l);
 			wk_label(e, skip);

@@ -201,6 +201,7 @@ static void node_kinds(const node *x, uint8_t k[3])
 	switch (x->op) {
 	case N_NONE: case N_ZERO: case N_BREAK: case N_CONTINUE: break;
 	case N_NUM: k[0] = K_IPOOL; break;
+	case N_BIGNUM: k[0] = K_LIST; break;
 	case N_FNUM: k[0] = K_FPOOL; break;
 	case N_STR: k[0] = K_STR; break;
 	case N_VAR: k[0] = K_SYM; break;
@@ -2122,6 +2123,7 @@ static void rec_close(cc *c, uint64_t endpos)
 			if (d->aux)
 				MARK(d->a, d->aux, K_SYM, false);
 			break;
+		case N_BIGNUM: MARK(d->a, d->b, LK_IMM, false); break;
 		case N_INIT:
 			if (d->aux == 1)
 				MARK(d->b, d->c * 3, j_ % 3 == 2 ? K_NODE : LK_IMM, false);

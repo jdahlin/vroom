@@ -348,6 +348,36 @@ def check_copies(assembly, arch):
     # than prescribing their physical register allocation.
 
 
+def check_udivconst(assembly, arch):
+    wasm = arch.startswith('wasm')
+    divide = r'\b(?:i(?:32|64)\.(?:div|rem)_[su]|[su]div|idiv[lq]?|div[lq]?)\b'
+    divisors = [3, 5, 6, 7, 9, 10, 11, 14, 19, 31, 37, 1000, 65535,
+                65537, 2147483647, 2147483649, 4294967295]
+    # Wasm deliberately retains expensive correction/remainder sequences.
+    # The simple quotient recipe uses one widened multiplication and shift.
+    selected = [3, 5, 6, 9, 10, 11, 1000, 65535, 65537, 2147483649, 4294967295] if wasm else divisors
+    probes = ['ud_q' + str(d) for d in selected] + ['ud_truncated', 'ud_negative_literal']
+    if not wasm:
+        probes += ['ud_r' + str(d) for d in divisors]
+        probes += ['ud_cast', 'ud_castrem', 'ud_compound', 'ud_compoundrem']
+    for name in probes:
+        text = body(assembly, name, wasm)
+        if re.search(divide, text):
+            raise RuntimeError(f'{name}: retained constant division/remainder\n{text}')
+    for name in ['ud_effect', 'ud_effectrem', 'ud_rhs', 'ud_rhsrem', 'ud_compound_rhs']:
+        text = body(assembly, name, wasm)
+        if len(re.findall(r'\b(?:callq?|bl)\s+next\b', text)) != 1:
+            raise RuntimeError(f'{name}: expected one call to next\n{text}')
+    if wasm:
+        for name in ['ud_q7', 'ud_r3']:
+            if not re.search(divide, body(assembly, name, True)):
+                raise RuntimeError(f'{name}: expanded an expensive wasm fallback')
+    if arch == 'aarch64' and not re.search(divide, body(assembly, 'ud_pressure', False)):
+        raise RuntimeError('ud_pressure: missing conservative register-pressure fallback')
+    if not re.search(divide, body(assembly, 'ud_dynamic', wasm)):
+        raise RuntimeError('ud_dynamic: lost genuine runtime division')
+
+
 def check_switches(assembly, arch):
     # The old sparse chain contains equality/range tests only. A balanced
     # dispatch must split both halves, with bounded native decision paths.
@@ -538,7 +568,7 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument('--vpp', default=str(Path(BUILD) / 'vpp'))
     ap.add_argument('--target', default='x86_64-linux-gnu')
-    ap.add_argument('--rule', choices=['pow2', 'signedpow2', 'identities', 'fallthrough', 'loopback', 'unreachable', 'locals', 'localjmp', 'copies', 'extensions', 'switches', 'tails', 'all'], default='all')
+    ap.add_argument('--rule', choices=['pow2', 'signedpow2', 'identities', 'fallthrough', 'loopback', 'unreachable', 'locals', 'localjmp', 'copies', 'extensions', 'switches', 'tails', 'udivconst', 'all'], default='all')
     ap.add_argument('--run', action='store_true', help='also execute literal-answer correctness checks')
     ap.add_argument('--cfi', action='store_true', help='also check unwind state with tail calls')
     ap.add_argument('--sibling-calls', choices=['default', 'on', 'off'], default='default',
@@ -576,7 +606,8 @@ def main():
              'copies': ('record_copies.c', check_copies),
              'extensions': ('known_extensions.c', check_extensions),
              'switches': ('switch_dispatch.c', check_switches),
-             'tails': ('tail_calls.c', check_tails)}
+             'tails': ('tail_calls.c', check_tails),
+             'udivconst': ('unsigned_divconst.c', check_udivconst)}
     selected = rules if args.rule == 'all' else {args.rule: rules[args.rule]}
     with tempfile.TemporaryDirectory(prefix='vcc-opt-rules-') as tmp:
         directory = Path(tmp)
@@ -595,7 +626,7 @@ def main():
                 checked = ((arch == 'x86_64' and level >= 1) if rule in ['locals', 'copies', 'extensions'] else
                            (not arch.startswith('wasm') and level >= 1) if rule in ['fallthrough', 'unreachable'] else
                            arch.startswith('wasm') if rule == 'loopback' else True)
-                checked = checked and check is not None and (rule != 'switches' or level >= 1)
+                checked = checked and check is not None and (rule not in ['switches', 'udivconst'] or level >= 1)
                 if checked:
                     if rule == 'tails':
                         check(assembly.read_text(), arch, level, args.cfi, args.sibling_calls == 'off')
