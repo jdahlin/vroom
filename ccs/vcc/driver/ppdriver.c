@@ -1194,10 +1194,10 @@ static __attribute__((noinline)) int ppd_run1(int argc, char **argv, const ppd_e
 				continue;
 			if (!strncmp(w, "no-", 3))
 				w += 3;
+			if (!strcmp(w, "error") || !strcmp(w, "everything"))
+				continue;	/* (-Wno-error) */
 			if (!strncmp(w, "error=", 6))
 				w += 6;
-			else if (!strncmp(w, "no-error=", 9))
-				w += 9;
 			n = strcspn(w, "=");
 			if (!n || n >= sizeof name)
 				continue;
