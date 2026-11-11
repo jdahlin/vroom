@@ -3164,3 +3164,24 @@ Generell lokal CSE, G5/G7 och full O2-täckning återstår.
 Samma 28-TU-prov vid O0 gav median användar-CPU 0,76171 → 0,76136 s över
 tre växelvisa rundor. Detta korta sampel på delad värd är inte en generell
 CPU-tidsgrind; rådata finns i `work/opt-profile/decl-return-o0-cputime/`.
+
+Utökning: returregeln söker nu bakåt över högst åtta rena lokala
+heltalsdeklarationer i samma block. Skrivningar, anrop, volatile/atomic,
+cleanup, kontrollflöde och obevisade initierare stoppar sökningen. En fast
+kandidats nyckel bevaras under sökningen även om den direktmappade tabellen
+får en kollision; budgetslut avstår fortfarande. Fokuserade kodforms- och
+körningsprov täcker ren mellanliggande deklaration samt skrivnings-, anrops-
+och volatilebarriärer på alla fyra mål O0–O3 och båda bygglägen. O0/noopt är
+byteidentiskt mot föräldern; vcc-sviten 256/256 med en befintlig xfail och
+x86-debugrader O0–O3 passerar.
+
+Ny matchad Callgrind-profil mot `597c521`: compiler-Ir +0,114 % x86, +0,094 %
+arm64, +0,010 % wasm32, +0,015 % wasm64; 1 %-grinden passerar på den fasta
+begränsade korpusen med tidigare redovisade wasm-uteslutningar. Sju växelvisa
+rundor på 28 förprocessade arm64-kärn-TU:er gav median användar-CPU O2
+0,78091 → 0,78181 s och O0 0,76889 → 0,76712 s. Ett tidigare tresampelsprov
+varierade mer; dessa små, selektiva prover på delad värd ger inte en generell
+CPU-tidsgräns. Rådata och hashad proveniens finns i
+`work/opt-profile/decl-return-expanded-cost/`, `decl-return-expanded-cputime/`,
+`decl-return-expanded-cputime7/` och `decl-return-expanded-o0-7/`. Sökning över
+andra satser, joinpunkter och generell CSE återstår.
