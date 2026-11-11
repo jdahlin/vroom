@@ -3,7 +3,8 @@
 
   bench/vas-obj.py [DIR...]     default: ccs/vcc/tests/vas-obj
 
-Each file is assembled by clang (--target=aarch64-linux-gnu) and by vasm;
+Each file is assembled by clang (--target=aarch64-linux-gnu; x86-*.s files
+--target=x86_64-linux-gnu, vasm --target=x86_64) and by vasm;
 the objects must be byte-identical.  On a mismatch llvm-readelf shows the
 difference.  A file clang rejects must fail in vasm too, with clang's first
 errors at the same file:lines.  Directives, symbol tables and relocations, <1 s.
@@ -22,8 +23,10 @@ def main():
     with tempfile.TemporaryDirectory() as t:
         for f in files:
             c, v = f'{t}/c.o', f'{t}/v.o'
-            p = subprocess.run([CL, '--target=aarch64-linux-gnu', '-c', f, '-o', c], capture_output=True, text=True)
-            q = subprocess.run([VAS, f, '-o', v], capture_output=True, text=True)
+            x86 = os.path.basename(f).startswith('x86-')
+            p = subprocess.run([CL, '--target=x86_64-linux-gnu' if x86 else '--target=aarch64-linux-gnu', '-c', f, '-o', c],
+                               capture_output=True, text=True)
+            q = subprocess.run([VAS] + (['--target=x86_64'] if x86 else []) + [f, '-o', v], capture_output=True, text=True)
             if p.returncode:    # an error test: the same file:line of every error
                 import re
                 ce = re.findall(r'^(\S+?):(\d+):\d+: (?:error|note)', p.stderr, re.M)
