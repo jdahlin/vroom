@@ -1,0 +1,9 @@
+; a signature that is never declared
+vir 1
+target x86_64-linux
+func @f %nosuch {
+b0:
+  ret
+}
+; ---
+bad/syntax-undeclared-signature.vir:4:9: undeclared signature %nosuch

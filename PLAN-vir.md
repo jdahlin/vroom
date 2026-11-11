@@ -274,3 +274,26 @@ gjorda (SPEC-vir.md avsnitt 19, X1–X3); inget under `ccs/vcc/vir/`.
   171/171; `vcc-ctests.py --suite vcc` 252/252 (1 xfail); `vcc-sema.py batch`
   878/879 (modpost.c, som väntat); `vbench.py gate --base` ok (högst +0,09 %
   instruktioner).  Båda byggena (unity och `VCC_UNITY=`) utan nya varningar.
+
+### V1, första halvan (2026-11-11): format, textform och verifierare
+
+Klart: `ccs/vcc/vir/` (modul `vir_SRC`, egen unity-TU, länkad bara in i
+`virtest`; inget i `vpp`, `vccd` eller `emit/` ändrat).  `vir.h` (format,
+opkodstabell som skrivare, parser och verifierare delar), konstruktion med
+hash-consade konstanter, `vir_cfg`, `vir_dom` (Cooper–Harvey–Kennedy, pre/post
+per block), `vir_uses`, `vir_canon`, `print.c`, `parse.c`, `verify.c` (alla
+27 regler i SPEC avsnitt 12), verktyget `virtest` och `bench/vir-test.py`.
+SPEC rättad till utkast 0.4 i egen commit (lista i PR:en).
+
+- **Tester:** 118/118 (`ccs/vcc/tests/vir/`): 9 operationsfiler där varje
+  instruktion och flagga skrivs–läses–skrivs identiskt, 56 verifierarfall (minst
+  ett per regel, exakt den regelns id), 39 syntaxfel, 7 canon-fall, 6
+  dominatorfall (tre irreducibla grafer) och `--selftest` för byggar-API:t.
+- **ASan+UBSan** (`make vcc-asan`): 118/118, och 9000 slumpade mutanter av
+  testenheterna (`--mutate`) utan krasch.
+- **Standardutdata oförändrad:** `vbench.py check --base` (bas = `origin/main`)
+  171/171 identiska; `vbench.py gate --base` ok (högst +0,07 %).  Båda byggena
+  (unity och `VCC_UNITY=`) utan nya varningar.
+- **Återstår av V1:** tolken `virrun`, `virgen`, `fuzz-vir`, `--equiv` och
+  mikrobenchmarkarna i SPEC 22.8.  Inga pass finns, så `PASSES:` godtar bara
+  `canon`.

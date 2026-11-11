@@ -1,0 +1,12 @@
+; a load width that is not 1, 2, 4 or 8
+vir 1
+target x86_64-linux
+sig %s = (int) -> int
+func @f %s {
+b0:
+  v0:i64 = param 0.0
+  v1:i32 = load.3u v0
+  ret v0
+}
+; ---
+bad/syntax-width.vir:8:12: the width must be 1, 2, 4 or 8

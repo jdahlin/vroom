@@ -1,0 +1,12 @@
+; a load wider than its type
+vir 1
+target x86_64-linux
+sig %s = (int) -> int
+func @f %s {
+b0:
+  v0:ptr = param 0.0
+  v1:i32 = load.8u v0
+  ret 0:i64
+}
+; ---
+@f b0.1: T4: load: width 8 does not fit i32

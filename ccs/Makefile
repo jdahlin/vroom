@@ -75,7 +75,7 @@ VCC_FAST   = $(VCC_CFLAGS) $(VCC_OPT) -pthread
 VCC_LDFLAGS = -O3 $(VCC_SAN) $(VCC_SANLD) $(VCC_LTO) $(if $(VCC_LTO),$(LTO_LINK))
 OBJ        = $(OUT)/obj
 
-vcc: $(OUT)/vcc $(OUT)/vsh/sh $(OUT)/vld $(OUT)/vas $(OUT)/var $(OUT)/vcc-nm $(OUT)/vcc-objcopy $(OUT)/vccd $(OUT)/lextest $(OUT)/vpp $(OUT)/vlink $(OUT)/vasm
+vcc: $(OUT)/vcc $(OUT)/vsh/sh $(OUT)/vld $(OUT)/vas $(OUT)/var $(OUT)/vcc-nm $(OUT)/vcc-objcopy $(OUT)/vccd $(OUT)/lextest $(OUT)/vpp $(OUT)/vlink $(OUT)/vasm $(OUT)/virtest
 
 o = $(patsubst vcc/%.c,$(OBJ)/%.o,$(1))
 AS_FILES = vcc/arch/a64/as/enc.c vcc/platform/darwin/macho.c vcc/arch/wasm/as/as.c vcc/platform/wasm/wasm.c
@@ -91,6 +91,8 @@ VCCD_SRC = vcc/vccd/vccd.c vcc/vccd/dstore.c vcc/vccd/caps.c vcc/vccd/fixdep.c v
 # the headers).  `make VCC_UNITY=` compiles the files one by one.
 SPLIT_MODS = cc pp emit
 # the object writer: the model, the CPU's fixups, the ELF writer (linked with as)
+# VIR (SPEC-vir.md): the format and its tools; linked into nothing but virtest yet
+vir_SRC  = vcc/vir/table.c vcc/vir/vir.c vcc/vir/print.c vcc/vir/parse.c vcc/vir/verify.c
 obj_SRC  = vcc/obj/obj.c vcc/arch/a64/obj/fixup.c vcc/arch/x64/obj/fixup.c vcc/platform/linux/elf.c
 cc_SRC   = $(wildcard vcc/cc/*.c)
 pp_SRC   = $(filter-out vcc/pp/dircache.c,$(wildcard vcc/pp/*.c))
@@ -110,7 +112,7 @@ $(OBJ)/%.o: vcc/%.c | $(OBJ)
 	$(VCC_CC) $(VCC_FAST) $(VCC_LTO) $(XFLAGS) -MMD -MP -c $< -o $@
 
 # rewritten only when the list of files changes
-UNITY_C = $(patsubst %,$(OBJ)/unity/%.c,$(SPLIT_MODS) as obj)
+UNITY_C = $(patsubst %,$(OBJ)/unity/%.c,$(SPLIT_MODS) as obj vir)
 $(UNITY_C): $(OBJ)/unity/%.c: FORCE
 	@mkdir -p $(dir $@)
 	@(echo '#define VCC_UNITY 1'; for f in $(abspath $($*_SRC)); do echo "#include \"$$f\""; done) > $@.tmp
@@ -147,6 +149,10 @@ $(OUT)/lextest: $(patsubst vcc/%.c,$(OBJ)/no/%.o,vcc/lex/lextest.c vcc/platform/
 	$(VCC_CC) -O3 $(VCC_SAN) $(VCC_SANLD) -pthread $^ -o $@
 
 $(OUT)/vasm: $(call o,vcc/as/vasm.c) $(AS_OBJ)
+	$(VCC_CC) $(VCC_LDFLAGS) $^ -o $@
+
+# virtest: VIR's parser, verifier and printer (SPEC-vir.md 16); depends on nothing else
+$(OUT)/virtest: $(call o,vcc/vir/virtest.c) $(call mod,vir)
 	$(VCC_CC) $(VCC_LDFLAGS) $^ -o $@
 
 # vlink: the linker (ld.c) as a standalone tool; vobjcopy/vnm by argv[0]

@@ -1,0 +1,7 @@
+; a string without its closing quote
+vir 1
+target x86_64-linux
+sig %s = (int) -> int
+asm !0 "nop outs() ins() clobber()
+; ---
+bad/syntax-unterminated-string.vir:5:8: unterminated string

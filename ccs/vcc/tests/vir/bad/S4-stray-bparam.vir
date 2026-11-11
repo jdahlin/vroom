@@ -1,0 +1,12 @@
+; a block parameter after the first instruction
+vir 1
+target x86_64-linux
+sig %s = (int) -> int
+func @f %s {
+b0:
+  v0:i64 = param 0.0
+  v1:i64 = bparam
+  ret v0
+}
+; ---
+@f b0.1: S4: a block parameter after the first instruction

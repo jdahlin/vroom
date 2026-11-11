@@ -1,0 +1,15 @@
+; a switch case with lo above hi
+vir 1
+target x86_64-linux
+sig %s = (int) -> int
+func @f %s {
+b0:
+  v0:i64 = param 0.0
+  switch v0, b1 [5..1: b2]
+b1:
+  ret v0
+b2:
+  ret v0
+}
+; ---
+@f b0.1: C5: switch: case 0 has lo above hi

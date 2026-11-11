@@ -1,0 +1,13 @@
+; a memory operand whose value is not a pointer
+vir 1
+target x86_64-linux
+sig %s = (int) -> int
+asm !0 "str $1, $0" outs("=m") ins("r") clobber()
+func @f %s {
+b0:
+  v0:i64 = param 0.0
+  asm !0 outs() ins(0 v0, 1 v0)
+  ret v0
+}
+; ---
+@f b0.1: A4: memory operand 0 has a value of type i64, not ptr

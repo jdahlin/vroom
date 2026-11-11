@@ -1,0 +1,18 @@
+; an asmgoto target with another predecessor
+vir 1
+target x86_64-linux
+sig %s = (int) -> int
+asm !0 "jmp $l" outs() ins("r") clobber() labels 1
+func @f %s {
+b0:
+  v0:i64 = param 0.0
+  brif v0, b1, b2
+b1:
+  asmgoto !0 outs() ins(0 v0) -> b3 [b2]
+b2:
+  ret v0
+b3:
+  ret v0
+}
+; ---
+@f b1.0: C7: asmgoto target b2 has another predecessor

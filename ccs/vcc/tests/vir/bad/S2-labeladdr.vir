@@ -1,0 +1,14 @@
+; labeladdr of a block without VB_ADDR
+vir 1
+target x86_64-linux
+sig %s = (int) -> int
+func @f %s {
+b0:
+  v1:ptr = labeladdr &b1
+  v2:i64 = p2i v1
+  br b1
+b1:
+  ret v2
+}
+; ---
+@f: S2: constant 1 (labeladdr): the block has no VB_ADDR

@@ -1,0 +1,6 @@
+; bytes that are not text
+vir 1
+target x86_64-linux
+ÿş€
+; ---
+bad/syntax-binary.vir:4:1: unexpected character 0xff

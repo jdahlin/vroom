@@ -1,0 +1,159 @@
+; signatures, calls, params, projections, varargs, inline assembly
+vir 1
+target x86_64-linux
+extern @ext
+sig %regs = (int, f64, f32:f64) -> int
+sig %var = (int, ...) -> int
+sig %multi = (int) -> int:f64
+sig %big = (mem 24 align 8, int) -> sret
+sig %none = () -> none
+sig %fl = (f64) -> f32
+sig %lone = (...) -> none
+sig %va3 = (int, int, f64) -> int
+asm !0 "mov $0, $1" outs("=r") ins("r") clobber("memory")
+asm !1 "nop" outs() ins() clobber()
+asm !2 "str $1, $0" outs("=m") ins("r") clobber("cc", "memory")
+asm !3 "xchg $0, $1" outs("=r", "=r") ins() clobber()
+asm !4 "jmp $l" outs() ins("r") clobber() labels 1
+
+func @variadic %var {
+  slot $0 size 24 align 8
+b0:
+  v0:i64 = param 0.0
+  va_start $0
+  v1:ptr = va_arg $0, int
+  v2:ptr = va_arg $0, f64
+  v3:ptr = va_arg $0, mem 16 align 8
+  v4:ptr = va_arg $0, f32:f64
+  ret v0
+}
+
+func @sret %big {
+b0:
+  v0:ptr = param 0.0
+  v1:i64 = param 1.0
+  v2:ptr = param 0xffff.0
+  store.8 v2, v1
+  ret
+}
+
+func @regs %regs local {
+b0:
+  v0:i64 = param 0.0
+  v1:f64 = param 1.0
+  v2:f32 = param 2.0
+  v3:f64 = param 2.1
+  ret v0
+}
+
+func @calls %regs {
+  slot $0 size 24 align 8
+b0:
+  v0:i64 = param 0.0
+  v1:f64 = param 1.0
+  v2:f32 = param 2.0
+  v3:f64 = param 2.1
+  v4:i64 = call @regs %regs (v0, v1, v2, v3)
+  v5:i64 = call @regs %regs (7:i64, 0x1p+0:f64, 0x1p-1:f32, v3) pure
+  v6:i64 = call @ext %regs (v0, v1, v2, v3) const
+  v7:ptr = i2p v4
+  v8:i64 = call v7 %regs (v0, v1, v2, v3)
+  v9:multi = call @ext %multi (v0)
+  v10:i64 = proj v9, 0
+  v11:f64 = proj v9, 1
+  call @ext %none ()
+  v12:f32 = call @ext %fl (v11)
+  call @ext %big ($0, $0+8, v0)
+  v13:i64 = call @ext %va3 (v0, v0, v1)
+  call @ext %lone ()
+  v14:i64 = asm !0 outs(0) ins(1 v0)
+  asm !1 outs() ins()
+  asm !2 outs() ins(0 $0, 1 v14)
+  v15:multi = asm !3 outs(0, 1) ins()
+  v16:i64 = proj v15, 0
+  v17:ptr = proj v15, 1
+  v18:i64 = add v10, v16
+  call @abort %none () noreturn
+  trap
+}
+
+extern @abort
+; ---
+vir 1
+target x86_64-linux
+extern @ext
+extern @abort
+sig %s0 = (int, f64, f32:f64) -> int
+sig %s1 = (int, ...) -> int
+sig %s2 = (int) -> int:f64
+sig %s3 = (mem 24 align 8, int) -> sret
+sig %s4 = () -> none
+sig %s5 = (f64) -> f32
+sig %s6 = (...) -> none
+sig %s7 = (int, int, f64) -> int
+asm !0 "mov $0, $1" outs("=r") ins("r") clobber("memory")
+asm !1 "nop" outs() ins() clobber()
+asm !2 "str $1, $0" outs("=m") ins("r") clobber("cc", "memory")
+asm !3 "xchg $0, $1" outs("=r", "=r") ins() clobber()
+asm !4 "jmp $l" outs() ins("r") clobber() labels 1
+
+func @variadic %s1 {
+  slot $0 size 24 align 8
+b0:
+  v0:i64 = param 0.0
+  va_start $0
+  v1:ptr = va_arg $0, int
+  v2:ptr = va_arg $0, f64
+  v3:ptr = va_arg $0, mem 16 align 8
+  v4:ptr = va_arg $0, f32:f64
+  ret v0
+}
+
+func @sret %s3 {
+b0:
+  v0:ptr = param 0.0
+  v1:i64 = param 1.0
+  v2:ptr = param 0xffff.0
+  store.8 v2, v1
+  ret
+}
+
+func @regs %s0 local {
+b0:
+  v0:i64 = param 0.0
+  v1:f64 = param 1.0
+  v2:f32 = param 2.0
+  v3:f64 = param 2.1
+  ret v0
+}
+
+func @calls %s0 {
+  slot $0 size 24 align 8
+b0:
+  v0:i64 = param 0.0
+  v1:f64 = param 1.0
+  v2:f32 = param 2.0
+  v3:f64 = param 2.1
+  v4:i64 = call @regs %s0 (v0, v1, v2, v3)
+  v5:i64 = call @regs %s0 (7:i64, 0x1p+0:f64, 0x1p-1:f32, v3) pure
+  v6:i64 = call @ext %s0 (v0, v1, v2, v3) const
+  v7:ptr = i2p v4
+  v8:i64 = call v7 %s0 (v0, v1, v2, v3)
+  v9:multi = call @ext %s2 (v0)
+  v10:i64 = proj v9, 0
+  v11:f64 = proj v9, 1
+  call @ext %s4 ()
+  v12:f32 = call @ext %s5 (v11)
+  call @ext %s3 ($0:ptr, $0+8:ptr, v0)
+  v13:i64 = call @ext %s7 (v0, v0, v1)
+  call @ext %s6 ()
+  v14:i64 = asm !0 outs(0) ins(1 v0)
+  asm !1 outs() ins()
+  asm !2 outs() ins(0 $0:ptr, 1 v14)
+  v15:multi = asm !3 outs(0, 1) ins()
+  v16:i64 = proj v15, 0
+  v17:ptr = proj v15, 1
+  v18:i64 = add v10, v16
+  call @abort %s4 () noreturn
+  trap
+}

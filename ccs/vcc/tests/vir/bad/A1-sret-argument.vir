@@ -1,0 +1,14 @@
+; sret as an argument group
+vir 1
+target x86_64-linux
+sig %s = (int) -> int
+sig %c = (sret) -> int
+extern @ext
+func @f %s {
+b0:
+  v0:i64 = param 0.0
+  v1:i64 = call @ext %c ()
+  ret v1
+}
+; ---
+@f b0.1: A1: call: sret is only the result group

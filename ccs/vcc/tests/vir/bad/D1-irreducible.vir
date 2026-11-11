@@ -1,0 +1,19 @@
+; in an irreducible loop neither entry dominates the other
+vir 1
+target x86_64-linux
+sig %s = (int) -> int
+func @f %s {
+b0:
+  v0:i64 = param 0.0
+  brif v0, b1, b2
+b1:
+  v1:i64 = add v0, 1
+  brif v0, b2, b3
+b2:
+  v2:i64 = add v1, 2
+  brif v0, b1, b3
+b3:
+  ret v0
+}
+; ---
+@f b2.0: D1: add uses a value of b1, which does not dominate b2

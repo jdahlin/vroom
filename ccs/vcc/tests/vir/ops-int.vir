@@ -1,0 +1,117 @@
+; every integer instruction and its flags, i32 and i64
+vir 1
+target x86_64-linux
+sig %s = (int, int) -> int
+func @ints %s {
+b0:
+  v0:i64 = param 0.0
+  v1:i64 = param 1.0
+  v2:i32 = trunc v0
+  v3:i32 = trunc v1
+  v4:i64 = add v0, v1
+  v5:i64 = add v0, v1 nsw
+  v6:i64 = add v0, v1 nuw
+  v7:i64 = add v0, v1 nsw nuw
+  v8:i32 = sub v2, v3 nsw
+  v9:i64 = mul v0, 3 nuw
+  v10:i64 = sdiv v0, v1
+  v11:i64 = sdiv v0, v1 exact
+  v12:i32 = udiv v2, v3 exact
+  v13:i64 = srem v0, v1
+  v14:i32 = urem v2, v3
+  v15:i64 = and v0, -1
+  v16:i32 = or v2, 0xff
+  v17:i64 = xor v0, v1
+  v18:i64 = shl v0, 3 nsw nuw
+  v19:i32 = lshr v2, 31 exact
+  v20:i64 = ashr v0, 63 exact
+  v21:i64 = umulhi v0, v1
+  v22:i64 = smulhi v0, v1
+  v23:i64 = neg v0 nsw
+  v24:i32 = not v2
+  v25:i64 = clz v0 nz
+  v26:i32 = ctz v2 nz
+  v27:i64 = clz v1
+  v28:i32 = popcnt v3
+  v29:i64 = bswap v0
+  v30:i32 = bswap v2
+  v31:i64 = ext.1s v2
+  v32:i64 = ext.2u v2
+  v33:i64 = ext.4s v2
+  v34:i32 = ext.1u v3
+  v35:i64 = ext.8u v1
+  v36:i32 = icmp.eq v0, v1
+  v37:i32 = icmp.ne v0, 5
+  v38:i32 = icmp.slt v2, v3
+  v39:i32 = icmp.sle v2, -1
+  v40:i32 = icmp.sgt v0, v1
+  v41:i32 = icmp.sge v0, v1
+  v42:i32 = icmp.ult v0, v1
+  v43:i32 = icmp.ule v0, v1
+  v44:i32 = icmp.ugt v0, v1
+  v45:i32 = icmp.uge v0, v1
+  v46:i32 = icmp.eq 1:i32, 2:i32
+  v47:i64 = select v36, v0, v1
+  v48:i32 = select v37, 7, v2
+  v49:i64 = select 1:i64, v0, 0
+  ret v47
+}
+; ---
+vir 1
+target x86_64-linux
+sig %s0 = (int, int) -> int
+
+func @ints %s0 {
+b0:
+  v0:i64 = param 0.0
+  v1:i64 = param 1.0
+  v2:i32 = trunc v0
+  v3:i32 = trunc v1
+  v4:i64 = add v0, v1
+  v5:i64 = add v0, v1 nsw
+  v6:i64 = add v0, v1 nuw
+  v7:i64 = add v0, v1 nsw nuw
+  v8:i32 = sub v2, v3 nsw
+  v9:i64 = mul v0, 3 nuw
+  v10:i64 = sdiv v0, v1
+  v11:i64 = sdiv v0, v1 exact
+  v12:i32 = udiv v2, v3 exact
+  v13:i64 = srem v0, v1
+  v14:i32 = urem v2, v3
+  v15:i64 = and v0, -1
+  v16:i32 = or v2, 255
+  v17:i64 = xor v0, v1
+  v18:i64 = shl v0, 3 nsw nuw
+  v19:i32 = lshr v2, 31 exact
+  v20:i64 = ashr v0, 63 exact
+  v21:i64 = umulhi v0, v1
+  v22:i64 = smulhi v0, v1
+  v23:i64 = neg v0 nsw
+  v24:i32 = not v2
+  v25:i64 = clz v0 nz
+  v26:i32 = ctz v2 nz
+  v27:i64 = clz v1
+  v28:i32 = popcnt v3
+  v29:i64 = bswap v0
+  v30:i32 = bswap v2
+  v31:i64 = ext.1s v2
+  v32:i64 = ext.2u v2
+  v33:i64 = ext.4s v2
+  v34:i32 = ext.1u v3
+  v35:i64 = ext.8u v1
+  v36:i32 = icmp.eq v0, v1
+  v37:i32 = icmp.ne v0, 5
+  v38:i32 = icmp.slt v2, v3
+  v39:i32 = icmp.sle v2, -1
+  v40:i32 = icmp.sgt v0, v1
+  v41:i32 = icmp.sge v0, v1
+  v42:i32 = icmp.ult v0, v1
+  v43:i32 = icmp.ule v0, v1
+  v44:i32 = icmp.ugt v0, v1
+  v45:i32 = icmp.uge v0, v1
+  v46:i32 = icmp.eq 1:i32, 2:i32
+  v47:i64 = select v36, v0, v1
+  v48:i32 = select v37, 7, v2
+  v49:i64 = select 1:i64, v0, 0
+  ret v47
+}

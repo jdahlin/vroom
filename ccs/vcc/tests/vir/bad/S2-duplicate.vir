@@ -1,0 +1,15 @@
+; two equal constants in the constant region
+vir 1
+target x86_64-linux
+sig %s = (int) -> int
+func @f %s {
+b0:
+  v0:i64 = param 0.0
+  v1:i64 = iconst 5
+  v2:i64 = iconst 5
+  v3:i64 = add v1, v2
+  v4:i64 = add v3, v0
+  ret v4
+}
+; ---
+@f: S2: constant 2 (iconst) is a duplicate
