@@ -42,6 +42,7 @@
 #include "../lib/arena.h"
 #include "../lib/ldhash.h"
 #include "../lib/buf.h"
+#include "../lib/defer.h"
 
 #ifdef __APPLE__
 #define ST_MTIME_NS(st) ((unsigned long long)(st)->st_mtimespec.tv_sec * 1000000000ull + (unsigned long long)(st)->st_mtimespec.tv_nsec)
@@ -204,15 +205,14 @@ static int refhash_read(const char *refpath, const struct stat *st, uint64_t *h)
 {
 	char path[4096], b[128];
 	unsigned long long sz, mt, nt, hv;
-	int fd;
 	ssize_t r;
 
 	snprintf(path, sizeof(path), "%s.th", refpath);
-	fd = open(path, O_RDONLY | O_CLOEXEC);
+	VAUTOCLOSE int fd = open(path, O_RDONLY | O_CLOEXEC);
 	if (fd < 0)
 		return 0;
 	r = read(fd, b, sizeof(b) - 1);
-	close(fd);
+	VCLOSE(fd);
 	if (r <= 0)
 		return 0;
 	b[r] = 0;
@@ -244,7 +244,7 @@ static void refhash_write(const char *refpath, const struct stat *st, uint32_t n
 int ppd_compare(const char *ours, size_t on, const char *refpath)
 {
 	vintern_init();
-	int fd = open(refpath, O_RDONLY);
+	VAUTOCLOSE int fd = open(refpath, O_RDONLY);
 	struct stat st;
 	vlex_file A, B;
 	static _Thread_local char *ba, *bb;
@@ -265,7 +265,6 @@ int ppd_compare(const char *ours, size_t on, const char *refpath)
 	cached = !getenv("VPP_CMP_NOCACHE") && refhash_read(refpath, &st, &rh);
 	if (cached && tokstream_hash(&A) == rh) {
 		vlex_no_intern = 0;
-		close(fd);
 		printf("same: %u tokens\n", A.ntok);
 		lexfree(&A);
 		return 0;
@@ -273,7 +272,7 @@ int ppd_compare(const char *ours, size_t on, const char *refpath)
 	{
 		char *m = mmap(NULL, (size_t)st.st_size + 1, PROT_READ, MAP_PRIVATE, fd, 0);
 
-		close(fd);
+		VCLOSE(fd);
 		B = lexbuf(m, (size_t)st.st_size);
 		vlex_no_intern = 0;
 		munmap(m, (size_t)st.st_size + 1);
@@ -1112,24 +1111,21 @@ static __attribute__((noinline)) int ppd_run1(int argc, char **argv, const ppd_e
 			out = obj_name(main_file, objbuf, sizeof(objbuf));
 		snprintf(path, sizeof(path), "%s%s%s", main_file[0] == '/' || !env->cwd ? "" : env->cwd,
 			 main_file[0] == '/' || !env->cwd ? "" : "/", main_file);
-		int fd = open(path, O_RDONLY);
+		VAUTOCLOSE int fd = open(path, O_RDONLY);
 		struct stat st;
 
 		if (fd < 0 || fstat(fd, &st)) {
 			dprintf(errfd, "vcc: error: no such file or directory: '%s'\n", main_file);
-			if (fd >= 0)
-				close(fd);
 			status = 1;
 			goto out;
 		}
 		/* padded: the lexer reads 16 bytes past the end */
-		char *t = calloc(1, (size_t)st.st_size + 64);
+		VAUTOFREE char *t = calloc(1, (size_t)st.st_size + 64);
 		ssize_t got = t ? read(fd, t, (size_t)st.st_size) : -1;
 
-		close(fd);
+		VCLOSE(fd);
 		if (got != st.st_size) {
 			dprintf(errfd, "vcc: error: cannot read '%s'\n", main_file);
-			free(t);
 			status = 1;
 			goto out;
 		}
@@ -1148,7 +1144,6 @@ static __attribute__((noinline)) int ppd_run1(int argc, char **argv, const ppd_e
 			status = 1;
 		} else
 			status = write_obj(env->cwd, out, env->outfd, errfd, darwin);
-		free(t);
 		goto out;
 	}
 	if (objmode) {

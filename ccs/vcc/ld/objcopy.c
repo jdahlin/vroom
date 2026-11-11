@@ -23,6 +23,7 @@
  */
 #include "ld.h"
 #include "../lib/hash.h"
+#include "../lib/defer.h"
 #include "ldelf.h"
 
 #include <ctype.h>
@@ -157,7 +158,7 @@ static bool elf_valid(Elf *e)
 static int elf_open(Elf *e, int dirfd, const char *path)
 {
 	memset(e, 0, sizeof *e);
-	int fd = openat(dirfd, path, O_RDONLY);
+	VAUTOCLOSE int fd = openat(dirfd, path, O_RDONLY);
 	if (fd < 0) {
 		oerror("'%s': %s", path, strerror(errno));
 		return -1;
@@ -166,7 +167,6 @@ static int elf_open(Elf *e, int dirfd, const char *path)
 	fstat(fd, &st);
 	e->size = st.st_size;
 	e->buf = e->size ? mmap(NULL, e->size, PROT_READ, MAP_PRIVATE, fd, 0) : NULL;
-	close(fd);
 	if (e->buf == MAP_FAILED || e->size < sizeof(Ehdr) || memcmp(e->buf, "\177ELF\2\1", 6)) {
 		oerror("'%s': not an ELF64 little-endian file", path);
 		e->buf = NULL;
@@ -466,7 +466,7 @@ static int write_file(int dirfd, const char *path, const uint8_t *b, uint64_t n,
 		return 0;
 	char tmp[4096];
 	snprintf(tmp, sizeof tmp, "%s.vobjcopy-tmp", path);
-	int fd = openat(dirfd, tmp, O_WRONLY | O_CREAT | O_TRUNC, mode);
+	VAUTOCLOSE int fd = openat(dirfd, tmp, O_WRONLY | O_CREAT | O_TRUNC, mode);
 	if (fd < 0) {
 		oerror("'%s': %s", path, strerror(errno));
 		return 1;
@@ -476,12 +476,10 @@ static int write_file(int dirfd, const char *path, const uint8_t *b, uint64_t n,
 		ssize_t w = write(fd, b + off, n - off > (1u << 30) ? (1u << 30) : n - off);
 		if (w <= 0) {
 			oerror("write '%s': %s", path, strerror(errno));
-			close(fd);
 			return 1;
 		}
 		off += w;
 	}
-	close(fd);
 	/* rename over the target: the input may be the output */
 	if (renameat(dirfd, tmp, dirfd, path)) {
 		oerror("rename '%s': %s", path, strerror(errno));
@@ -493,27 +491,24 @@ static int write_file(int dirfd, const char *path, const uint8_t *b, uint64_t n,
 /* -I binary: the file as .data with _binary_<name>_start/_end/_size, laid out as llvm-objcopy */
 static int binary_in(int dirfd)
 {
-	int fd = openat(dirfd, oc.in, O_RDONLY);
+	VAUTOCLOSE int fd = openat(dirfd, oc.in, O_RDONLY);
 	struct stat st;
 
 	if (fd < 0 || fstat(fd, &st) < 0) {
 		oerror("'%s': %s", oc.in, strerror(errno));
-		if (fd >= 0)
-			close(fd);
 		return 1;
 	}
 	size_t dsz = (size_t)st.st_size;
-	uint8_t *data = xcalloc(dsz + 1, 1);
+	VAUTOFREE uint8_t *data = xcalloc(dsz + 1, 1);
 	if (dsz && read(fd, data, dsz) != (ssize_t)dsz)
 		oerror("'%s': short read", oc.in);
-	close(fd);
 	char base[4096], nm[3][4200];
 	size_t bl = 0;
 	for (const char *c = oc.in; *c && bl + 1 < sizeof base; c++)
 		base[bl++] = isalnum((unsigned char)*c) ? *c : '_';
 	base[bl] = 0;
 	static const char *const suf[3] = { "start", "end", "size" };
-	StrTab t = {0};
+	VCLEANUP(st_free) StrTab t = {0};
 	for (int i = 0; i < 3; i++) {
 		snprintf(nm[i], sizeof nm[i], "_binary_%s_%s", base, suf[i]);
 		st_add(&t, nm[i]);
@@ -524,7 +519,7 @@ static int binary_in(int dirfd)
 	st_finalize(&t);
 	uint64_t stroff = sizeof(Ehdr), symoff = alignto(stroff + t.size, 8), datoff = symoff + 4 * sizeof(Sym);
 	uint64_t shoff = alignto(datoff + dsz, 8), total = shoff + 4 * sizeof(Shdr);
-	uint8_t *b = xcalloc(total, 1);
+	VAUTOFREE uint8_t *b = xcalloc(total, 1);
 	Ehdr *h = (Ehdr *)b;
 	memcpy(h->e_ident, "\177ELF\2\1\1", 7);
 	h->e_type = 1;
@@ -549,22 +544,42 @@ static int binary_in(int dirfd)
 		       .sh_size = 4 * sizeof(Sym), .sh_link = 1, .sh_info = 1, .sh_addralign = 8, .sh_entsize = sizeof(Sym)};
 	sh[3] = (Shdr){.sh_name = (uint32_t)st_find(&t, ".data"), .sh_type = SHT_PROGBITS, .sh_flags = SHF_WRITE | SHF_ALLOC,
 		       .sh_offset = datoff, .sh_size = dsz, .sh_addralign = 1};
-	int rc = oerrors ? 1 : write_file(dirfd, oc.out, b, total, 0666);
-	st_free(&t);
-	free(b);
-	free(data);
-	return rc;
+	return oerrors ? 1 : write_file(dirfd, oc.out, b, total, 0666);
+}
+
+/* what objcopy_run owns besides plain allocations: the generated contents of
+   sections and the new names of symbols (the arrays are zeroed, so the whole
+   capacity can be walked) */
+typedef struct {
+	OSec *sec;
+	uint32_t nsec;
+	OSym *sym;
+	uint32_t nsym;
+} OOwn;
+
+static void oown_done(OOwn *o)
+{
+	for (uint32_t k = 0; k < o->nsec; k++) {
+		free(o->sec[k].gen);
+		free(o->sec[k].newname);
+	}
+	for (uint32_t i = 0; i < o->nsym; i++)
+		free(o->sym[i].newname);
+	free(o->sec);
+	free(o->sym);
 }
 
 static int objcopy_run(int dirfd)
 {
-	Elf e;
+	VCLEANUP(elf_close) Elf e;
 	if (elf_open(&e, dirfd, oc.in))
 		return 1;
 	const Ehdr *eh = e.eh;
 	bool rel = eh->e_type == 1;
 	uint32_t ns = e.nsh;
-	OSec *sec = xcalloc(ns + oc.nadd + 1, sizeof *sec);
+	VCLEANUP(oown_done) OOwn own = { 0 };
+	OSec *sec = own.sec = xcalloc(ns + oc.nadd + 1, sizeof *sec);
+	own.nsec = ns + oc.nadd + 1;
 	for (uint32_t i = 0; i < ns; i++) {
 		const Shdr *h = &e.sh[i];
 		OSec *s = &sec[i];
@@ -638,12 +653,10 @@ static int objcopy_run(int dirfd)
 		const char *eq = strchr(oc.add[a], '=');
 		OSec *s = &sec[ns];
 		struct stat st;
-		int fd = openat(dirfd, eq + 1, O_RDONLY);
+		VAUTOCLOSE int fd = openat(dirfd, eq + 1, O_RDONLY);
 
 		if (fd < 0 || fstat(fd, &st) < 0) {
 			oerror("'%s': %s", eq + 1, strerror(errno));
-			if (fd >= 0)
-				close(fd);
 			continue;
 		}
 		s->newname = strndup(oc.add[a], (size_t)(eq - oc.add[a]));
@@ -658,13 +671,12 @@ static int objcopy_run(int dirfd)
 			oerror("'%s': short read", eq + 1);
 		if (s->type == SHT_NOTE && s->size && s->size < 12)
 			oerror("'%s': %s data must be either empty or at least 12 bytes long", oc.in, s->name);
-		close(fd);
 		ns++;
 	}
 	/* --add-gnu-debuglink (after --add-section): .gnu_debuglink = basename, NUL, padding to 4, CRC-32 of the file */
 	if (oc.debuglink) {
 		OSec *s = &sec[ns];
-		int fd = openat(dirfd, oc.debuglink, O_RDONLY);
+		VAUTOCLOSE int fd = openat(dirfd, oc.debuglink, O_RDONLY);
 		struct stat st;
 		const char *base = strrchr(oc.debuglink, '/') ? strrchr(oc.debuglink, '/') + 1 : oc.debuglink;
 		size_t bl = strlen(base), sz = (bl + 4) / 4 * 4 + 4;
@@ -694,13 +706,11 @@ static int objcopy_run(int dirfd)
 			memcpy(s->gen + sz - 4, &crc, 4);
 			ns++;
 		}
-		if (fd >= 0)
-			close(fd);
 	}
 
 	/* segments: real ones, then the ELF header and program header "segments" */
 	uint32_t ng = e.nph + 2;
-	OSeg *seg = xcalloc(ng, sizeof *seg);
+	VAUTOFREE OSeg *seg = xcalloc(ng, sizeof *seg);
 	for (uint32_t i = 0; i < e.nph; i++) {
 		seg[i].p = e.ph[i];
 		seg[i].origoff = seg[i].off = e.ph[i].p_offset;
@@ -797,7 +807,8 @@ static int objcopy_run(int dirfd)
 		const Sym *ys = (const Sym *)st->data;
 		const char *str = (const char *)e.buf + e.sh[st->link].sh_offset;
 		nsym = st->size / sizeof(Sym);
-		sym = xcalloc(nsym, sizeof *sym);
+		sym = own.sym = xcalloc(nsym, sizeof *sym);
+		own.nsym = nsym;
 		for (uint32_t i = 0; i < nsym; i++) {
 			sym[i].name = str + ys[i].st_name;
 			sym[i].info = ys[i].st_info;
@@ -808,7 +819,7 @@ static int objcopy_run(int dirfd)
 			if (i && sym[i].shndx && sym[i].shndx < 0xff00 && sym[i].shndx < ns && sec[sym[i].shndx].removed)
 				sym[i].removed = true;
 		}
-		bool *referenced = NULL;
+		VAUTOFREE bool *referenced = NULL;
 		if (oc.nunneeded && rel) {
 			referenced = xcalloc(nsym, 1);
 			for (uint32_t k = 1; k < ns; k++) {
@@ -850,7 +861,6 @@ static int objcopy_run(int dirfd)
 					y->removed = true;
 			}
 		}
-		free(referenced);
 		uint32_t idx = 0;
 		for (uint32_t i = 0; i < nsym; i++)
 			if (!sym[i].removed)
@@ -897,7 +907,7 @@ static int objcopy_run(int dirfd)
 	if (oc.binary) {
 		/* BinaryWriter: alloc sections with contents at LMA - min LMA */
 		uint64_t min = UINT64_MAX, total = 0;
-		uint64_t *lma = xcalloc(ns, 8);
+		VAUTOFREE uint64_t *lma = xcalloc(ns, 8);
 		for (uint32_t k = 1; k < ns; k++) {
 			OSec *s = &sec[k];
 			if (s->removed || !(s->flags & SHF_ALLOC))
@@ -925,11 +935,6 @@ static int objcopy_run(int dirfd)
 		int rc = oerrors ? 1 : write_file(dirfd, oc.out, b, total, 0777);
 		if (b)
 			munmap(b, total);
-		free(lma);
-		free(sec);
-		free(seg);
-		free(sym);
-		elf_close(&e);
 		return rc;
 	}
 
@@ -939,7 +944,7 @@ static int objcopy_run(int dirfd)
 		if (!sec[k].removed)
 			sec[k].idx = ++nkept;
 	/* string tables */
-	StrTab names = {0}, symnames = {0};
+	VCLEANUP(st_free) StrTab names = {0}, symnames = {0};
 	bool shared_str = symtab_i != NONE && sec[symtab_i].link == shstr_i;
 	for (uint32_t k = 1; k < ns; k++)
 		if (!sec[k].removed)
@@ -1010,7 +1015,7 @@ static int objcopy_run(int dirfd)
 	}
 
 	/* layout: segments, then sections outside segments by original offset */
-	uint32_t *order = xcalloc(ng, 4);
+	VAUTOFREE uint32_t *order = xcalloc(ng, 4);
 	for (uint32_t i = 0; i < ng; i++)
 		order[i] = i;
 	for (uint32_t i = 1; i < ng; i++) {
@@ -1031,7 +1036,8 @@ static int objcopy_run(int dirfd)
 		if (g->off + g->filesz > off)
 			off = g->off + g->filesz;
 	}
-	uint32_t *outside = xcalloc(ns, 4), nout = 0;
+	VAUTOFREE uint32_t *outside = xcalloc(ns, 4);
+	uint32_t nout = 0;
 	for (uint32_t k = 1; k < ns; k++) {
 		OSec *s = &sec[k];
 		if (s->removed)
@@ -1109,20 +1115,6 @@ static int objcopy_run(int dirfd)
 	}
 	int rc = oerrors ? 1 : write_file(dirfd, oc.out, b, total, rel ? 0666 : 0777);
 	munmap(b, total);
-	for (uint32_t k = 0; k < ns; k++) {
-		free(sec[k].gen);
-		free(sec[k].newname);
-	}
-	for (uint32_t i = 0; i < nsym; i++)
-		free(sym[i].newname);
-	st_free(&names);
-	st_free(&symnames);
-	free(order);
-	free(outside);
-	free(sec);
-	free(seg);
-	free(sym);
-	elf_close(&e);
 	return rc;
 }
 
@@ -1301,14 +1293,12 @@ static void nin_push(NIn **v, int *n, NIn x)
 
 static void nm_inputs(int dirfd, const char *path, NIn **v, int *n)
 {
-	int fd = openat(dirfd, path, O_RDONLY);
+	VAUTOCLOSE int fd = openat(dirfd, path, O_RDONLY);
 	struct stat st;
 	char magic[8];
 
 	if (fd < 0 || fstat(fd, &st) < 0 || st.st_size < 8 || pread(fd, magic, 8, 0) != 8 ||
 	    (memcmp(magic, "!<arch>\n", 8) && memcmp(magic, "!<thin>\n", 8))) {
-		if (fd >= 0)
-			close(fd);
 		nin_push(v, n, (NIn){.label = strdup(path), .path = strdup(path)});
 		return;
 	}
@@ -1319,7 +1309,7 @@ static void nm_inputs(int dirfd, const char *path, NIn **v, int *n)
 	size_t longsz = 0;
 	const char *slash = strrchr(path, '/');
 
-	close(fd);
+	VCLOSE(fd);	/* (the mapping outlives the descriptor) */
 	if (b == MAP_FAILED) {
 		oerror("'%s': %s", path, strerror(errno));
 		return;

@@ -30,6 +30,7 @@
  */
 #include "ld.h"
 #include "../lib/buf.h"
+#include "../lib/defer.h"
 #include "../lib/vec.h"
 #include "../lib/ldhash.h"
 #include "../lib/vperf.h"
@@ -92,12 +93,13 @@ static void diag(const char *kind, const char *fmt, va_list ap)
 	va_end(aq);
 	if (!m)
 		m = small;
-	pthread_mutex_lock(&errlock);
-	if (prev_multi)
-		fputc('\n', errf);
-	prev_multi = strchr(m, '\n') != NULL;
-	fprintf(errf, "%s: %s: %s\n", argv0, kind, m);
-	pthread_mutex_unlock(&errlock);
+	{
+		VLOCK(errlock);
+		if (prev_multi)
+			fputc('\n', errf);
+		prev_multi = strchr(m, '\n') != NULL;
+		fprintf(errf, "%s: %s: %s\n", argv0, kind, m);
+	}
 	if (m != small)
 		free(m);
 }
@@ -106,9 +108,8 @@ static void error(const char *fmt, ...)
 	int n = atomic_fetch_add(&nerrors, 1);
 	if (error_limit && n >= error_limit) {
 		if (n == error_limit) {
-			pthread_mutex_lock(&errlock);
+			VLOCK(errlock);
 			fprintf(errf, "%s: error: too many errors emitted, stopping now\n", argv0);
-			pthread_mutex_unlock(&errlock);
 		}
 		return;
 	}
@@ -198,10 +199,11 @@ static void *alloc(size_t n)
 		size_t bs = n + sizeof(Block) + 16 > ARENA_BLOCK ? n + sizeof(Block) + 16 : ARENA_BLOCK;
 		Block *b = bigalloc(bs);
 		b->size = bs;
-		pthread_mutex_lock(&blocklock);
-		b->next = blocks;
-		blocks = b;
-		pthread_mutex_unlock(&blocklock);
+		{
+			VLOCK(blocklock);
+			b->next = blocks;
+			blocks = b;
+		}
 		acur = (uint8_t *)b + 32;
 		aend = (uint8_t *)b + bs;
 	}
@@ -256,16 +258,18 @@ static void *worker(void *unused)
 	(void)unused;
 	unsigned seen = 0;
 	for (;;) {
-		pthread_mutex_lock(&plock);
-		while (job.gen == seen)
-			pthread_cond_wait(&pcv, &plock);
-		seen = job.gen;
-		pthread_mutex_unlock(&plock);
+		{
+			VLOCK(plock);
+			while (job.gen == seen)
+				pthread_cond_wait(&pcv, &plock);
+			seen = job.gen;
+		}
 		run_job();
-		pthread_mutex_lock(&plock);
-		if (--job.active == 0)
-			pthread_cond_signal(&pdone);
-		pthread_mutex_unlock(&plock);
+		{
+			VLOCK(plock);
+			if (--job.active == 0)
+				pthread_cond_signal(&pdone);
+		}
 	}
 	return NULL;
 }
@@ -285,20 +289,20 @@ static void pfor(size_t n, pfn fn, void *arg)
 			pthread_create(&pool[t], NULL, worker, NULL);
 		pool_started = nthreads;
 	}
-	pthread_mutex_lock(&plock);
-	job.fn = fn;
-	job.arg = arg;
-	job.n = n;
-	atomic_store(&job.next, 0);
-	job.active = pool_started - 1;
-	job.gen++;
-	pthread_cond_broadcast(&pcv);
-	pthread_mutex_unlock(&plock);
+	{
+		VLOCK(plock);
+		job.fn = fn;
+		job.arg = arg;
+		job.n = n;
+		atomic_store(&job.next, 0);
+		job.active = pool_started - 1;
+		job.gen++;
+		pthread_cond_broadcast(&pcv);
+	}
 	run_job();
-	pthread_mutex_lock(&plock);
+	VLOCK(plock);
 	while (job.active)
 		pthread_cond_wait(&pdone, &plock);
-	pthread_mutex_unlock(&plock);
 }
 
 /* ---------------- options ---------------- */
@@ -5840,12 +5844,11 @@ static pthread_mutex_t ldlock = PTHREAD_MUTEX_INITIALIZER;
 
 int ld_main(int argc, char **argv, int dirfd, FILE *err)
 {
-	pthread_mutex_lock(&ldlock);
+	VLOCK(ldlock);
 	errf = err ? err : stderr;
 	dirfd_base = dirfd;
 	int rc = run(argc, argv);
 	free_arenas();
-	pthread_mutex_unlock(&ldlock);
 	return rc;
 }
 
