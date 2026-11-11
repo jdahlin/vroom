@@ -54,6 +54,18 @@ assembler, linker, behind `vcc`/`vas`/`vld` shims and the `vccd` server.
   - `obj/`: the in-memory object (`obj.h`: sections, frags, symbols, fixups)
     and its layout; with `arch/<cpu>/obj/fixup.c` and `platform/linux/elf.c`
     one module (`obj_SRC`, internal header `objimpl.h`).
+  - `vir/`: VIR, the SSA IR of `-O2` (SPEC-vir.md; one module `vir_SRC`, a unity
+    TU like `as`, linked into no compiler tool yet): `vir.h` the public format
+    (instruction, block, slot, function, the opcode table `table.c` that the
+    printer, parser and verifier all read), `vir.c` the thread's reservations
+    and construction (hash-consed constants, `extra` lists), `vir_cfg`,
+    `vir_dom`, `vir_uses`, `vir_canon`, and the unit tables of the text form;
+    `print.c`, `parse.c` (arbitrary bytes fail as `file:line:col`, never crash)
+    and `verify.c` (every rule of SPEC section 12); `virimpl.h` is internal.
+    Depends on nothing in `cc/`, `emit/` or `arch/`.  `virtest.c` is the tool
+    (`virtest FILE`; `--no-verify`, `--bless`, `--selftest` for the builder API).
+    The interpreter, `virgen` and the fuzz target (the rest of step V1) are not
+    written yet.  Tests: `tests/vir/` (`bad/RULE-name.vir`, `canon/`, `dom/`).
   - `ld/`: the linker `vlink` (`ld.c`, one TU; also linked into vccd, which
     calls `ld_main` per link) and `vobjcopy`/`vnm`;
     `wasmld.c` is vlink for WebAssembly (as `wasm-ld` or with `-mwasm64`).
@@ -155,6 +167,8 @@ bench/vcc-dwarf.py -j 6             # -g line tables: dwarfdump --verify, .text 
 bench/vlink-bad.py                  # corrupt objects/archives: vlink (ASan) fails cleanly (<1 s)
 bench/vlink-opts.py                 # vlink options vs ld.lld: errors and loaded image (<1 s)
 bench/vcc-pic.py                    # GOT and TLS relocations per -fno-pic/-fPIE/-fPIC vs clang (<1 s)
+bench/vir-test.py -j 6              # VIR: parser/printer round trip, verifier rules, canon, dominators (ccs/vcc/tests/vir, ~1 s)
+bench/vir-test.py --mutate 3000 --bin-dir build/ccs-asan   # random mutants of those units: virtest never crashes (~1 min)
 bench/vcc-ctests.py -j 6 --suite vcc # our own regression tests (ccs/vcc/tests/vcc), ~1 s
 bench/vcc-ctests.py -j 6 --cpu cortex-a53   # vcc's binaries on a CPU without LSE (atomics as LL/SC)
 VCC_LDCMP=1 bench/vcc-ctests.py -j 6 --no-cache  # also link with vlink: loaded image byte-identical to lld's (VCC_LD=vlink: run vlink's)
