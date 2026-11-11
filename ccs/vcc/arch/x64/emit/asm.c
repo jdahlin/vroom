@@ -17,6 +17,7 @@ typedef struct xopnd {
 	val v;			/* XO_IMM: the value; an input's value until it is placed */
 	lval l;			/* XO_MEM: the memory; outputs: where the result goes */
 	int32_t park;		/* a fixed input's value parked in this slot (0: none) */
+	int32_t lpark;		/* a register output's address parked in this slot until the store (0: none) */
 	qty t;
 	uint32_t name;
 } xopnd;
@@ -262,6 +263,14 @@ VPRIV void x64_asm(ecx *e, uint32_t n)
 		o->kind = XO_REG;
 		if (o->inout)
 			o->v = wk_reload(e, &o->l, o->t);
+		if (o->l.k == L_REG && !o->l.bf) {
+			/* the address waits in a slot: four outputs through pointers and four fixed
+			   registers (cpuid) would leave no temporaries */
+			lval s = { .k = L_FRAME, .off = o->lpark = wk_slot(e, 8, 8), .align = 8 };
+
+			x64_mem(e, X_ST, 8, o->l.r, &s, false);
+			x64_tfree(e, o->l.r);
+		}
 	}
 	/* inputs */
 	for (uint32_t i = a->nout; i < nops; i++) {
@@ -582,6 +591,12 @@ VPRIV void x64_asm(ecx *e, uint32_t n)
 
 		if (o->kind != XO_REG || o->sp)
 			continue;
+		if (o->lpark) {
+			lval s = { .k = L_FRAME, .off = o->lpark, .align = 8 };
+
+			o->l.r = (uint8_t)x64_treg(e);
+			x64_mem(e, X_LD, 8, o->l.r, &s, false);
+		}
 		if (o->l.bf) {
 			val v = { .k = V_REG, .r = o->reg };
 
