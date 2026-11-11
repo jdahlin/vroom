@@ -15,7 +15,7 @@ VPRIV int wk_size(cc *c, qty t)
 VPRIV bool wk_signed(cc *c, qty t) { return !is_ptr(c, t) && is_integer(c, t) && is_signed(c, t); }
 
 /* the width an integer operation of type t runs at */
-static int opw(cc *c, qty t) { return wk_size(c, t) > 4 ? 8 : 4; }
+static int wk_opw(cc *c, qty t) { return wk_size(c, t) > 4 ? 8 : 4; }
 
 static __attribute__((noinline, cold, noreturn)) void wk_unsup(ecx *e, uint32_t n, const char *what)
 {
@@ -975,7 +975,7 @@ static val wk_arith(ecx *e, int op, qty t, val a, val b)
 		}
 		if (b.k == V_CONST) {
 			if (em_xor_not(c, t, op, b.i))
-				return LO(un)(e, T_TILDE, opw(c, t), a);
+				return LO(un)(e, T_TILDE, wk_opw(c, t), a);
 			em_mulshift(c, t, &op, &b.i);
 		}
 	}
@@ -1035,7 +1035,7 @@ static val wk_arith(ecx *e, int op, qty t, val a, val b)
 	if (a.k == V_ADDR && b.k == V_CONST && (op == T_PLUS || op == T_MINUS))
 		return (val){ .k = V_ADDR, .ref = a.ref, .i = op == T_PLUS ? a.i + b.i : a.i - b.i };
 	{
-		val v = LO(bin)(e, op, opw(c, t), wk_signed(c, t), a, b);
+		val v = LO(bin)(e, op, wk_opw(c, t), wk_signed(c, t), a, b);
 
 		if (wk_size(c, t) < 4)
 			LO(ext)(e, v.r, wk_size(c, t), wk_signed(c, t));
@@ -1256,7 +1256,7 @@ static val wk_cmpv(ecx *e, int op, qty t, val a, val b)
 		return LO(wcmp)(e, op, wk_signed(c, t), a, b);
 	if (a.k == V_CONST && b.k == V_CONST)
 		return vconst(wk_fold_cmp(op, wk_signed(c, t), em_trunc_to(c, a.i, t), em_trunc_to(c, b.i, t)));
-	return LO(cmp)(e, op, is_ptr(c, t) ? 8 : opw(c, t), wk_signed(c, t), a, b);
+	return LO(cmp)(e, op, is_ptr(c, t) ? 8 : wk_opw(c, t), wk_signed(c, t), a, b);
 }
 
 /* lane i of the vector at r (type t), or (t a scalar) a copy of the scalar in r */
@@ -1400,7 +1400,7 @@ static val wk_binary(ecx *e, uint32_t n)
 			return LO(wcmp)(e, op, wk_signed(c, lt), a, b);
 		if (a.k == V_CONST && b.k == V_CONST)
 			return vconst(wk_fold_cmp(op, wk_signed(c, lt), em_trunc_to(c, a.i, lt), em_trunc_to(c, b.i, lt)));
-		return LO(cmp)(e, op, is_ptr(c, lt) ? 8 : opw(c, lt), wk_signed(c, lt), a, b);
+		return LO(cmp)(e, op, is_ptr(c, lt) ? 8 : wk_opw(c, lt), wk_signed(c, lt), a, b);
 	}
 	wk_scalar(e, n, x->ty);
 	a = wk_gen(e, x->a);
@@ -1998,7 +1998,7 @@ static val wk_unary(ecx *e, uint32_t n)
 	if (a.k == V_CONST)
 		return wk_const(c, x->aux == T_MINUS ? -a.i : ~a.i, x->ty);
 	{
-		val v = LO(un)(e, x->aux, opw(c, x->ty), a);
+		val v = LO(un)(e, x->aux, wk_opw(c, x->ty), a);
 
 		if (wk_size(c, x->ty) < 4)
 			LO(ext)(e, v.r, wk_size(c, x->ty), wk_signed(c, x->ty));
@@ -3625,7 +3625,7 @@ VPRIV void wk_cond(ecx *e, uint32_t n, bool jump_if, uint32_t lbl)
 			if (!jump_if)
 				op = op == T_LESS ? T_GREATEREQ : op == T_LESSEQ ? T_GREATER : op == T_GREATER ? T_LESSEQ :
 				     op == T_GREATEREQ ? T_LESS : op == T_EQUALEQUAL ? T_EXCLAIMEQ : T_EQUALEQUAL;
-			LO(cmpbr)(e, op, is_ptr(c, lt) ? 8 : opw(c, lt), wk_signed(c, lt), a, b, lbl);
+			LO(cmpbr)(e, op, is_ptr(c, lt) ? 8 : wk_opw(c, lt), wk_signed(c, lt), a, b, lbl);
 			return;
 		}
 		break;
@@ -3666,6 +3666,6 @@ VPRIV void wk_cond(ecx *e, uint32_t n, bool jump_if, uint32_t lbl)
 				LO(jump)(e, lbl), wk_state(e)->cjump = true;	/* (always: what follows is dead) */
 			return;
 		}
-		LO(brz)(e, v, is_ptr(c, x->ty) ? 8 : opw(c, x->ty), jump_if, lbl);
+		LO(brz)(e, v, is_ptr(c, x->ty) ? 8 : wk_opw(c, x->ty), jump_if, lbl);
 	}
 }
