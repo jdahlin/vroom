@@ -695,7 +695,17 @@ VPRIV val gen_call(ecx *e, uint32_t n)
 		    (args[i].v.k == V_REG || args[i].v.k == V_REG2))
 			park(e, &args[i]);
 	}
-	if (inl) {
+	if (!s && RKIND(ref) == RK_NAME && RIDX(ref) < 0x8000000u && na == 1 &&
+	    is_ld(c, x->ty) && !strcmp(cc_builtin_name(RIDX(ref)), "__builtin_fabsl")) {
+		/* Clear binary128's sign without touching a signaling NaN payload. */
+		r = args[0].v;
+		if (r.k == V_CONST)
+			r.i = (i128)((u128)r.i & ~((u128)1 << 127));
+		else {
+			toreg2(e, &r, false);
+			opi(e, I_ANDI, 1, r.r2, r.r2, INT64_MAX);
+		}
+	} else if (inl) {
 		r = inline_call(e, s, args, na);
 	} else if (!s && ref && na == 3 && RKIND(ref) == RK_NAME && mem_inline(e, ref, args, &r)) {
 		/* inlined */

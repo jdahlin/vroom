@@ -169,6 +169,24 @@ static lval x64_fr(int64_t off) { return (lval){ .k = L_FRAME, .off = off, .alig
 VPRIV val x64_call(ecx *e, uint32_t ref, val *fn, const wkarg *a, int n, bool variadic, const wkarg *r, qty rt)
 {
 	cc *c = e->c;
+
+	/* An explicit builtin needs no libm symbol. Copy the x87 representation
+	 * and clear only its sign, without an FP load that could alter a NaN. */
+	if (RKIND(ref) == RK_NAME && RIDX(ref) < 0x8000000u && n == 1 && r && r->x87 &&
+	    KIND(c, rt) == TY_LDOUBLE && !strcmp(cc_builtin_name(RIDX(ref)), "__builtin_fabsl")) {
+		int q = x64_treg(e);
+		lval src = x64_fr(a[0].slot), dst = x64_fr(r->slot);
+
+		x64_mem(e, X_LD, 8, q, &src, false);
+		x64_mem(e, X_ST, 8, q, &dst, false);
+		src.off += 8;
+		dst.off += 8;
+		x64_mem(e, X_LD, 2, q, &src, false);
+		x64_op3(e, X_ANDI, 8, q, q, XNOREG)->imm = 0x7fff;
+		x64_mem(e, X_ST, 2, q, &dst, false);
+		x64_tfree(e, q);
+		return vconst(0);
+	}
 	xst *X = e->x64;
 	uint32_t saved = X->live & X_TEMPS, fsaved = X->live & X_FTEMPS;
 	int retsize = KIND(c, rt) == TY_VOID ? 0 : wk_size(c, rt);
