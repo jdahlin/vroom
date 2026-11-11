@@ -113,6 +113,8 @@ VPRIV wabi wclassify(cc *c, qty t)
 		if (tsize(c, t) == 0)
 			return (wabi){ WA_IGNORE, 0, 0, 0 };
 		s = wsingle(c, t);
+		if (s && is_bvec(c, s))
+			return wclassify(c, s);
 		if (s && !is_record(c, s) && !is_vec(c, s)) {
 			k = wty(c, s);
 			if (k != WT_MEM)
@@ -128,7 +130,7 @@ VPRIV wabi wclassify(cc *c, qty t)
 		/* lane by lane (no simd128), as clang */
 		qty b = T(c, t)->base;
 
-		return (wabi){ WA_PAIR, (uint8_t)wrep(c, wty(c, b)), t, (uint32_t)(tsize(c, t) / tsize(c, b)) };
+		return (wabi){ WA_PAIR, (uint8_t)wrep(c, wty(c, b)), t, T(c, t)->ext ?: T(c, t)->n };
 	}
 	return (wabi){ WA_IND, (uint8_t)WPT(c), t, 0 };
 }
@@ -418,8 +420,7 @@ VPRIV bool wreg_ok(ecx *e, uint32_t s)
 	const sym *y = &c->syms[s];
 	int k = wty(c, y->ty);
 
-	return k != WT_MEM && k != WT_NONE && !e->E->lnoreg[s] && !(y->flags & SF_ADDR_TAKEN) &&
-	       !(QQ(y->ty) & Q_VOLATILE) && !sym_attrs(c, s)->cleanup && !(T(c, y->ty)->flags & TF_ATOMIC);
+	return k != WT_MEM && k != WT_NONE && em_local_eligible(e, s);
 }
 
 /* the parameters: wasm locals 0.. as the ABI passes them, bound to locals or frame slots */
@@ -493,6 +494,7 @@ static void wparams(ecx *e, uint32_t s, uint32_t *np)
 			for (uint32_t j = 0; j < a.n; j++) {
 				wlv l = { .k = WL_MEM, .off = j * es };
 
+				if (is_bvec(c, a.ft)) l.off = j / 8, l.bf = 1, l.width = 1, l.bitoff = j % 8;
 				wslot_addr(e, b->off);
 				wget(e, idx++);
 				wstore(e, &l, pt1);

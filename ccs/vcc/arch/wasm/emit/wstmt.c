@@ -32,8 +32,14 @@ static void welems(ecx *e, uint64_t off, qty ty, uint32_t init)
 			uint64_t es = tsize(c, et);
 
 			for (uint32_t i = 0; i < x->c; i++)
-				for (uint64_t k = v[3 * i]; k <= v[3 * i + 1]; k++)
-					welems(e, off + k * es, et, v[3 * i + 2]);
+				for (uint64_t k = v[3 * i]; k <= v[3 * i + 1]; k++) {
+					if (is_bvec(c, ty)) {
+						wlv l = { .k = WL_MEM, .bf = 1, .width = 1, .bitoff = k % 8, .off = k / 8 };
+						wslot_addr(e, off);
+						wexpr(e, v[3*i+2], true);
+						wstore(e, &l, et);
+					} else welems(e, off + k * es, et, v[3 * i + 2]);
+				}
 			return;
 		}
 		{
@@ -168,56 +174,6 @@ static void wasm_asm(ecx *e, const node *x)
 }
 
 /* ---------------- dead code ---------------- */
-
-/* does statement n hold a label (a case, a goto target): it cannot be dropped */
-static bool wlabels(cc *c, uint32_t n)
-{
-	const node *x;
-
-	if (!n)
-		return false;
-	x = N(n);
-	switch (x->op) {
-	case N_LABEL: case N_CASE: case N_DEFAULT:
-		return true;
-	case N_BLOCK:
-		for (uint32_t i = 0; i < x->c; i++)
-			if (wlabels(c, c->lists[x->b + i]))
-				return true;
-		return false;
-	case N_IF:
-		return wlabels(c, x->b) || wlabels(c, x->c);
-	case N_WHILE: case N_DO:
-		return wlabels(c, x->b);
-	case N_FOR:
-		return wlabels(c, c->lists[x->c + 1]);
-	case N_SWITCH:
-		/* its case labels are its own */
-		return false;
-	default:
-		return false;
-	}
-}
-
-/* does statement n never complete normally (what follows it is dead until a label) */
-static bool wterm(cc *c, uint32_t n)
-{
-	const node *x;
-
-	if (!n)
-		return false;
-	x = N(n);
-	switch (x->op) {
-	case N_RETURN: case N_BREAK: case N_CONTINUE: case N_GOTO: case N_GOTO_IND:
-		return true;
-	case N_BLOCK:
-		return x->c && wterm(c, c->lists[x->b + x->c - 1]);
-	case N_IF:
-		return x->c && wterm(c, x->b) && wterm(c, x->c);
-	default:
-		return false;
-	}
-}
 
 /* the statements [i0, i1) of compound x: those after a jump are dropped up to a label */
 static void wstmts(ecx *e, const node *x, uint32_t i0, uint32_t i1)
@@ -1397,7 +1353,9 @@ VPRIV void wstmt(ecx *e, uint32_t n)
 		}
 		W->brk = b, W->cont = l;
 		wstmt(e, x->b);
-		wbr(e, "br", l);
+		/* continue already branches to l; other terminal paths leave the loop. */
+		if (!wterm(c, x->b))
+			wbr(e, "br", l);
 		W->brk = ob, W->cont = oc;
 		wend(e, "end_loop");
 		wend(e, "end_block");

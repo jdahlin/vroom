@@ -123,6 +123,10 @@ VPRIV val do_call(ecx *e, uint32_t ref, val *fnv, carg *args, int n, qty rty, bo
 	for (int i = 0; i < n; i++) {
 		carg *a = &args[i];
 
+		if (!DARWIN(c) && nfix >= 0 && i >= nfix && is_bvec(c, a->t) &&
+		    (T(c, a->t)->n == 64 || T(c, a->t)->n == 128))
+			efatal(e, e->curloc, "arm64: variadic transport of 64/128-lane packed boolean vectors is not supported");
+
 		if (nfix >= 0 && i >= nfix && DARWIN(c))
 			classify_va(e, a->t, &nsaa, &a->a);
 		else
@@ -181,6 +185,14 @@ VPRIV val do_call(ecx *e, uint32_t ref, val *fnv, carg *args, int n, qty rty, bo
 		carg *a = &args[i];
 
 		switch (a->a.kind) {
+		case A_BOOL_LANES:
+			for (unsigned k = 0; k < T(c, a->t)->n; k++) {
+				int rd = k < a->a.nreg ? a->a.reg + k : R_X16;
+				mem(e, I_LD, 0, 0, rd, FRAME, a->slot + k / 8);
+				opbf(e, I_UBFM, 1, rd, rd, k % 8, k % 8);
+				if (k >= a->a.nreg) mem(e, I_ST, 3, 0, rd, SP, a->a.stk + (k - a->a.nreg) * 8);
+			}
+			break;
 		case A_REG:
 			for (int k = 0; k < a->a.nreg; k++)
 				arg_word(e, a, k, a->a.reg + k);
@@ -239,6 +251,12 @@ VPRIV val do_call(ecx *e, uint32_t ref, val *fnv, carg *args, int n, qty rty, bo
 		int r = treg(e);
 
 		opi(e, I_ADDI, 1, r, FRAME, rslot);
+		res = vreg(r);
+	} else if (is_bvec(c, rty)) {
+		int64_t sl = slot(e, 8, 8);
+		int r = treg(e);
+		bvec_res(e, rty, sl);
+		opi(e, I_ADDI, 1, r, FRAME, sl);
 		res = vreg(r);
 	} else if (is_recabi(c, rty) && hfa(c, rty, &hn)) {
 		int hb = hfa(c, rty, &hn);

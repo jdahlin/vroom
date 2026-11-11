@@ -116,7 +116,9 @@ static void mark_written(pre *P, uint32_t n, bool addr)
 	for (;;) {
 		const node *x = N(n);
 
-		if (x->op == N_MEMBER || (x->op == N_CAST && (x->aux == CK_NOP || x->aux == CK_DECAY))) {
+		if (x->op == N_COMMA) {
+			n = x->b;	/* match the emitters' comma-lvalue addressing */
+		} else if (x->op == N_MEMBER || (x->op == N_CAST && (x->aux == CK_NOP || x->aux == CK_DECAY))) {
 			n = x->a;
 		} else if (x->op == N_INDEX) {
 			const node *b = N(x->a);
@@ -314,7 +316,7 @@ static int walk(pre *P, uint32_t n)
 		lab = walk(P, x->a);
 		break;
 	case N_CAST:
-		if (x->aux == CK_DECAY)
+		if (x->aux == CK_DECAY || (x->aux == CK_BITS && (N(x->a)->flags & NF_LVALUE)))
 			mark_written(P, x->a, true);
 		lab = walk(P, x->a);
 		break;

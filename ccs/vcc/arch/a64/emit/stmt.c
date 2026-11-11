@@ -66,6 +66,14 @@ static void init_elems(ecx *e, const lval *d, qty ty, uint32_t init)
 				for (uint64_t k = lo; k <= hi; k++) {
 					lval el = *d;
 
+					if (is_bvec(c, ty)) {
+						val bv = gen(e, val_);
+						el.off += (int64_t)(k / 8);
+						el.bf = 1, el.width = 1, el.bitoff = k % 8;
+						store(e, &el, et, &bv);
+						val_free(e, &bv);
+						continue;
+					}
 					el.off += (int64_t)(k * es);
 					el.align = align_at((uint64_t)el.off, d->align);
 					init_elems(e, &el, et, val_);
@@ -503,9 +511,11 @@ static void gen_return(ecx *e, const node *x)
 				v = load(e, &l, rt);
 			}
 		}
-		int hn, hb = is_recabi(c, rt) ? hfa(c, rt, &hn) : 0;
+		int hn, hb = is_recabi(c, rt) && !is_sret(c, rt) ? hfa(c, rt, &hn) : 0;
 
-		if (hb) {
+		if (is_bvec(c, rt) && !is_sret(c, rt)) {
+			bvec_ret(e, rt, toreg(e, &v));
+		} else if (hb) {
 			int rs = toreg(e, &v);
 
 			for (int k = 0; k < hn; k++)
@@ -515,7 +525,7 @@ static void gen_return(ecx *e, const node *x)
 		} else if (is_recabi(c, rt)) {
 			int rs = toreg(e, &v);
 
-			if (tsize(c, rt) > 16) {
+			if (is_sret(c, rt)) {
 				int rd = treg(e);
 
 				mem(e, I_LD, 3, 0, rd, FRAME, f->retslot);	/* the caller's buffer (x8 at entry) */

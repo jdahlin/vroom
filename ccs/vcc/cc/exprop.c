@@ -178,6 +178,11 @@ static __attribute__((noinline)) uint32_t unary_op(cc *c)
 		n = cast_expr(c);
 		if (ISERR(n))
 			return n;
+		if (is_bool_vector(c, N(n)->ty)) {
+			r = mk(c, N_UNARY, QUNQ(N(n)->ty), loc);
+			N(r)->aux = T_TILDE, N(r)->a = rvalue(c, n);
+			return r;
+		}
 		n = scalar_cond(c, rvalue(c, n), "'!'");
 		r = mk(c, N_UNARY, prim(TY_INT), loc);
 		N(r)->aux = T_EXCLAIM;
@@ -316,6 +321,12 @@ static uint32_t explicit_cast(cc *c, uint32_t n, qty to, uint32_t loc)
 			report(c, "error", loc, &sp, 1, NULL, 0, "cast to union type from type '%s' not present in union", tyname(c, N(n)->ty));
 		}
 		return cast_node(c, n, QUNQ(to), CK_UNION);
+	}
+	if (is_bool_vector(c, to) && is_arith(c, N(n)->ty))
+		return convert(c, n, to); /* explicit scalar casts splat the converted boolean */
+	if ((is_bool_vector(c, to) || is_bool_vector(c, N(n)->ty)) && !compatible(c, to, N(n)->ty)) {
+		cc_error(c, loc, "invalid conversion between vector type '%s' and type '%s'", tyname(c, to), tyname(c, N(n)->ty));
+		return cast_node(c, n, QUNQ(to), CK_NOP);
 	}
 	if (is_vector(c, to) && is_vector(c, N(n)->ty) && T(c, to)->size == T(c, N(n)->ty)->size)
 		return cast_node(c, n, QUNQ(to), CK_NOP);
@@ -978,7 +989,8 @@ static __attribute__((noinline)) uint32_t cond_rest(cc *c, uint32_t cnd)
 		int k;
 
 		next(c);
-		cnd = scalar_cond(c, decay(c, cnd), "conditional");
+		if (!is_bool_vector(c, N(cnd)->ty))
+			cnd = scalar_cond(c, decay(c, cnd), "conditional");
 		k = cc_eval(c, cnd, &cv) && cv.kind == CV_INT ? cv.i != 0 : -1;
 		c->dead += k == 0;
 		c->cnd++;
