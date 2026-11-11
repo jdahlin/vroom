@@ -1840,3 +1840,14 @@ riktat kodkvalitetsprov, ingen generell runtime-/nativekostnadsgrind.
 `switch-runtime-profile.json` innehåller hash/kommandon för just detta prov.
 Värdetabeller, utökad inlining och oanvända lokala initierare återstår i OPT6;
 övriga O2-steg och de breda G5/G7-grindarna är fortsatt öppna.
+
+OPT6-integrering: 19c6a63 är switchimplementationen ovan, därefter har PR47:s
+main-uppdatering b63c269 mergats. På kombinationen passerar unitybygget,
+16/16 riktade switchfall, sanitiserade plankontrakt och 219/219 arm64-körtester
+(ett befintligt xfail) samt 214/214 x86-körtester (sex referensskips).
+Fil-för-fil-bygget hittade en ärvd synlighetsmiss i autozero-koden:
+`stmt.c` anropade `expr.c`-lokala `wk_store`. Hjälparen är nu VPRIV med
+prototyp i walk.h. Efter fixen bygger fil-för-fil och passerar samtliga
+164 regel-/nivå-/målkombinationer med körning samt x86-debugkontrollen O0–O3.
+Mätningarna ovan avser uttryckligen fded15a + 19c6a63:s kompilatorkod,
+inte main-uppdateringens separata ändringar.

@@ -710,7 +710,7 @@ static val wk_load(ecx *e, lval l, qty t)
 }
 
 /* v stored to l as type t; v is consumed, l is not */
-static void wk_store(ecx *e, const lval *l, qty t, val *v)
+VPRIV void wk_store(ecx *e, const lval *l, qty t, val *v)
 {
 	int r = wk_reg(e, v, t);
 
