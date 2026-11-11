@@ -364,3 +364,10 @@ och registereffektkontrakt passerar. Båda planernas status behålls.
 Efter mainf97d16d (#47/#52/#55): unity, 16 unsigned32-mål-/nivåfall,
 16 konstanta kontrollfall och sanitiserade reciprok-/registereffektskontrakt
 passerar igen; de två planernas oberoende statusblock är bevarade.
+
+U64 integrerat med mainf97d16d/PR51head54c8f3f: 196 regelprov, 16 kontrollprov,
+229 arm64-/224 x86-regressioner, ABI, unity/fil-för-fil och sanitizerkontrakt
+passerar. Ny exakt föräldramätning54c8f3f→d8957b3: fixerad mix högst
++0,01955 %, mättad u64-korpus +13,55 % x86/+17,97 % arm64 kompilatorarbete;
+avgränsat x86-körprov −69,26 % barn-CPU. Historiska siffror ovan och fulla
+öppna G5/G7-grindar behålls; se PLAN-fas2 för hashvärden och provens gränser.
