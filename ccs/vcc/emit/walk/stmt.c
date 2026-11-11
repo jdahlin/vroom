@@ -1270,6 +1270,8 @@ VPRIV val wk_inline(ecx *e, uint32_t n, uint32_t s)
 	uint32_t inst0 = W->inst;
 	val res;
 
+	uint32_t lmark = W->nlu;
+
 	memcpy(I.ael0, W->ael, sizeof I.ael0), I.nael0 = W->nael;
 	walk_fn(e, s);
 	if (KIND(c, I.rty) != TY_VOID)
@@ -1309,6 +1311,7 @@ VPRIV val wk_inline(ecx *e, uint32_t n, uint32_t s)
 			}
 			av[i] = v;
 		}
+		W->inlocal++;
 		for (uint32_t i = 0; i < body->aux; i++) {
 			uint32_t p = c->lists[body->a + i];
 			qty pt = c->syms[p].ty;
@@ -1360,6 +1363,15 @@ VPRIV val wk_inline(ecx *e, uint32_t n, uint32_t s)
 	W->depth++;
 	wk_stmt(e, c->syms[s].body);
 	W->depth--;
+	W->inlocal--;
+	/* the copy's locals and parameters are dead: their slots free, the symbols unbound */
+	while (W->nlu > lmark) {
+		struct wklslot l = W->lu[--W->nlu];
+
+		W->sgen[l.sym] = 0;
+		if (W->ntf < WK_MAXTSLOT)
+			W->tf[W->ntf++] = (struct wktslot){ l.off, l.size, l.align };
+	}
 	W->inl = I.up;
 	W->inst = inst0;
 	wk_label(e, I.endlbl);
@@ -1406,7 +1418,7 @@ VPRIV void wk_function(ecx *e, uint32_t s)
 	W->gen++;
 	W->foff = 0;
 	W->falign = 16;
-	W->ntu = W->ntf = W->sdepth = 0;
+	W->ntu = W->ntf = W->sdepth = W->nlu = W->inlocal = 0;
 	W->nlabel = 0;
 	W->nloop = 0;
 	W->ncases = 0;
