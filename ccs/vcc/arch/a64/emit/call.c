@@ -715,39 +715,11 @@ static bool mem_inline(ecx *e, int kind, carg *args, val *res)
 	return true;
 }
 
-/* memcpy/memmove/memset declared by a header: clang's builtin at -O1 and up (not under
- * -ffreestanding/-fno-builtin[-NAME]); a size of 64 bytes or less is inlined */
-static int plain_mem_kind(ecx *e, uint32_t s, int na)
-{
-	cc *c = e->c;
-	const sym *y = &c->syms[s];
-	uint32_t id = y->name;
-
-	if (na != 3 || e->E->o->opt < 1 || e->E->o->no_builtin || y->sc == SC_STATIC || !(y->flags & SF_GLOBAL) ||
-	    sym_attrs(c, s)->asmname)
-		return 0;
-	for (unsigned i = 0; i < CC_DISABLED_BUILTIN_WORDS; i++)
-		if (e->E->o->disabled_builtins[i])
-			return 0;
-	return EM_IDENT_IS(id, "memcpy") ? CC_LIB_MEMCPY : EM_IDENT_IS(id, "memmove") ? CC_LIB_MEMMOVE :
-	       EM_IDENT_IS(id, "memset") ? CC_LIB_MEMSET : 0;
-}
-
-/* __builtin___mem*_chk and friends whose check cannot fail (object size unknown, (size_t)-1, or
- * a constant length within a constant object size) are the plain function, as clang's
- * fortify simplification; its warnings come from the front end.  New callee or -1. */
 static int64_t chk_plain(const carg *args, int na, int64_t bi)
 {
-	int64_t p = cc_builtin_plain(bi);
-	const val *o = &args[na - 1].v;
-	bool ok;
+	const val *o = &args[na - 1].v, *l = &args[na >= 2 ? na - 2 : 0].v;
 
-	if (p < 0 || na < 3 || o->k != V_CONST)
-		return -1;
-	ok = (uint64_t)o->i == ~(uint64_t)0;
-	if (!ok && na >= 4 && args[na - 2].v.k == V_CONST)	/* the length is the argument before the size */
-		ok = (uint64_t)args[na - 2].v.i <= (uint64_t)o->i;
-	return ok ? p : -1;
+	return cc_chk_simplify(bi, na, o->k == V_CONST, (uint64_t)o->i, l->k == V_CONST, (uint64_t)l->i);
 }
 
 /* Keep the argument scratch buffer out of gen_inner's recursive frame.
@@ -825,8 +797,8 @@ __attribute__((noinline)) VPRIV val gen_call(ecx *e, uint32_t n)
 	} else if (!s && ref && na == 3 && RKIND(ref) == RK_NAME && RIDX(ref) < 0x8000000u &&
 		   mem_inline(e, cc_builtin_libkind(RIDX(ref)), args, &r)) {
 		/* inlined */
-	} else if (s && plain_mem_kind(e, s, na) && args[2].v.k == V_CONST && (uint64_t)args[2].v.i <= 64 &&
-		   mem_inline(e, plain_mem_kind(e, s, na), args, &r)) {
+	} else if (s && em_plain_mem_kind(e, s, na) && args[2].v.k == V_CONST && (uint64_t)args[2].v.i <= 64 &&
+		   mem_inline(e, em_plain_mem_kind(e, s, na), args, &r)) {
 		/* inlined */
 	} else {
 		qty ft = N(x->a)->ty;

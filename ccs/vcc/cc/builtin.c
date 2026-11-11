@@ -267,6 +267,21 @@ static const builtin builtins[] = {
 const char *cc_builtin_name(int64_t i) { return builtins[i].name; }
 int cc_builtin_libkind(int64_t i) { return builtins[i].flags >> 1; }
 
+/* A fortified call (CC_LIB_CHK builtin bi, na arguments, the object size last, the length before it) whose
+ * check cannot fail: the object size is unknown ((size_t)-1) or a constant length is within a constant
+ * size.  Then the plain builtin's index (call it without the last argument), else -1.  Clang's fortify
+ * simplification; its warnings come from the front end. */
+int64_t cc_chk_simplify(int64_t bi, int na, bool osz_const, uint64_t osz, bool len_const, uint64_t len)
+{
+	int64_t p = cc_builtin_plain(bi);
+
+	if (p < 0 || na < 3 || !osz_const)
+		return -1;
+	if (osz == ~(uint64_t)0 || (na >= 4 && len_const && len <= osz))
+		return p;
+	return -1;
+}
+
 /* __builtin___X_chk -> __builtin_X (fortified call with the object size dropped), -1: none */
 int64_t cc_builtin_plain(int64_t i)
 {
