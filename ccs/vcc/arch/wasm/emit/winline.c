@@ -23,7 +23,17 @@ static uint32_t winline_target(cc *c, uint32_t n, unsigned *budget)
 			n = x->a;
 			continue;
 		}
-		return x->op == N_VAR && c->syms[x->a].kind == S_FUNC ? canon_sym(c, x->a) : 0;
+		if (x->op == N_VAR && c->syms[x->a].kind == S_FUNC) {
+			uint32_t s = x->a;
+			/* Match canon_sym while charging each shadowed declaration. */
+			while (c->syms[s].next && c->syms[s].depth > 0) {
+				if (!*budget) return 0;
+				--*budget;
+				s = c->syms[s].next;
+			}
+			return s;
+		}
+		return 0;
 	}
 	return 0;
 }
