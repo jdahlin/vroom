@@ -241,6 +241,9 @@ enum { NF_LVALUE = 1, NF_BITFIELD = 2, NF_PAREN = 4, NF_NPC = 8,
        NF_ERR = 16,
        NF_MACRO = 32, NF_BOUNDS = 64, NF_OVF = 128 };	/* NF_OVF: a constant subexpression overflowed (-Winteger-overflow given once) */	/* NF_BOUNDS: a[CONST] already checked (-Warray-bounds) */	/* NF_MACRO: the operator came from a macro expansion (no style warnings) */	/* NF_ERR: stands in for an expression already diagnosed (no follow-on errors) */
 
+/* N_COMMA result facts, attached by semantic lowering. NaNs are permitted. */
+enum { NC_FP_NONNEG = 1 };
+
 typedef struct node {
 	uint8_t op, flags;
 	uint16_t aux;

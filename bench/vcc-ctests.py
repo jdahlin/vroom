@@ -389,7 +389,7 @@ if __name__ == '__main__':
         if st != 'pass':
             by[s][f'{st}:{cat}'] += 1
             whys[(st, cat)][why] += 1
-        if verbose and st in ('fail', 'error'):
+        if st in ('fail', 'error'):
             print(f'{st.upper()} {cat:5s} {s}/{n}: {why}')
         if show and st != 'pass' and cat == show:
             print(f'{st} {cat} {s}/{n}: {why}')

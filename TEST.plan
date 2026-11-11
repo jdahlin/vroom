@@ -520,6 +520,21 @@ per Linux-mål, diagnostik 217/217, faktisk wasm64-svit 126/126 plus
 27 dokumenterade XFAIL/10 referensundantag, samt två upprepade TSan-
 trådningsregressioner. Hela testplanen återstår fortsatt att slutföra.
 
+**CI-följdrättningar, fryst `b97022e` (2026-11-11):** sanitizer-körningen
+avslöjade signed host-overflow när giltig unsigned128-aritmetik värderades
+i frontend och ARM-emitter. Addition, subtraktion och negation använder nu
+unsigned modularitet före måltypens trunkering. En separat regression i
+`20020720-1` kom från att fabs signmaskslowering tappade resultatets
+icke-negativa faktum; faktumet behålls nu utan att argumentens sidoeffekter
+eller NaN-beteende ändras. Kombinerad Linux-körning klarar **160/160 egna
+x86-tester** (fem befintliga referens-/målundantag) och **1882/1882 ARM-test**:
+1612 GCC, 105 TCC och 165 egna, med 127 oförändrade externa filtreringar.
+Varje rättning klarar unity/nonunity och kernel-sema **887/887** individuellt
+och i batch; unsigned-rättningen även ASan-sema. Kombinerad ASan/UBSan-körning
+klarar **165/165 egna ARM-test**, utan filtreringar. Testriggen skriver nu alltid
+namnet på varje felande fall. Dessa siffror gäller den vendorerade
+körsviten, inte den större externa S4-korpusen ovan.
+
 Kombinerat fryst checkpoint `7afcdea`, före signmask-/typnamnsrättningarna,
 är verifierat i båda byggsätten: **145/145 x86** (fem referensundantag),
 **150/150 ARM/QEMU**, tvåfils-constexpr-ABI samt tre ursprungliga GCC-fall

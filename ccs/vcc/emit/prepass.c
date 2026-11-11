@@ -164,6 +164,8 @@ static void note_fwrite(pre *P, uint32_t s, uint32_t rhs)
 			k = cv.q == 0 ? FF_NONNEG | FF_ZERO : !(cv.q >> 127) && (cv.q << 1) <= ((u128)0x7fff << 113) ? FF_NONNEG : 0;
 		else
 			k = v == 0 && !__builtin_signbit(v) ? FF_NONNEG | FF_ZERO : v >= 0 ? FF_NONNEG : 0;
+	} else if (N(rhs)->op == N_COMMA && (N(rhs)->aux & NC_FP_NONNEG)) {
+		k = FF_NONNEG;
 	} else if (N(rhs)->op == N_CALL && (callee = direct_callee(c, N(rhs)->a, &ref))) {
 		const sym *fn = &c->syms[callee];
 		const vident *nm = &vintern_ents[fn->name];

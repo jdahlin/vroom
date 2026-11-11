@@ -592,7 +592,7 @@ static val gen_unary(ecx *e, uint32_t n)
 		if (is_flt(c, x->ty))
 			return f_neg(e, v, x->ty);
 		if (v.k == V_CONST)
-			return vconst(em_trunc_to(c, -v.i, x->ty));
+			return vconst(em_trunc_to(c, (i128)((u128)0 - (u128)v.i), x->ty));
 		if (is_wide(c, x->ty)) {
 			toreg2(e, &v, is_signed(c, x->ty));
 			op3(e, I_SUBS, 1, v.r, ZR, v.r);
