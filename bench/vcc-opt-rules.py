@@ -480,8 +480,8 @@ def check_switches(assembly, arch):
                 depth -= 1
         if maximum != 4:
             raise RuntimeError(f'sw_sparse32: expected four balanced split levels, got {maximum}')
-        if not re.search(r'\bbr_table\b', body(assembly, 'sw_dense', True)):
-            raise RuntimeError('sw_dense: lost existing wasm branch table')
+        if not re.search(r'\bbr_table\b', body(assembly, 'sw_dense_branch', True)):
+            raise RuntimeError('sw_dense_branch: lost existing wasm branch table')
         return
     # Count the maximum conditional decisions along the actual emitted CFG.
     # The probe is acyclic and contains no calls/loops; labels/directives do
@@ -974,6 +974,8 @@ def main():
                         check(assembly.read_text(), arch, level, args.cfi, args.sibling_calls == 'off')
                     else:
                         check(assembly.read_text(), arch)
+                if rule == 'switchvalues' and arch.startswith('wasm') and level >= 1:
+                    run([args.clang, f'--target={args.target}', '-c', assembly, '-o', directory / 'clang-switch-values.o'])
                 if args.run:
                     execute(args, directory, assembly, arch, source, level)
                 print(f'{args.target} {rule} O{level}: ' +

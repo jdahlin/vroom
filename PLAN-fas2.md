@@ -2872,3 +2872,9 @@ kompilatorinstruktioner. Värdetabellsteget ensamt mot jämförelseföräldern
 bitint_runtime är redovisade, inte godkända. Exakt källträds- och binärproveniens,
 kommandon och felkontroll finns i `work/opt-profile/full-stack-cost/result.json`.
 Grinden är en liten fast korpus och upphäver inte det högre mättade switchprovet.
+
+CI-uppföljning: wasm-tabellernas assemblertext får nu en explicit `.size`,
+som LLVM:s assembler kräver. Det fokuserade tabellprovet assembleras även med
+clang för wasm32/64; ett separat switchprov med variabla resultat bevarar
+kontrollen av wasm `br_table`. Båda proven körs O0–O3 på fyra mål. Den
+föregående kostnadsprofilen gäller före denna lilla metadatatilläggning.

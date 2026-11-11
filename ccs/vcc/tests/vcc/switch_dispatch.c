@@ -162,6 +162,21 @@ NI int sw_dense(int x)
     default: return -1;
     }
 }
+/* Variable results retain a real wasm br_table alongside value-table cases. */
+NI int sw_dense_branch(int x)
+{
+    switch (x) {
+    case -3: return x + 15;
+    case -2: return x + 11;
+    case -1: return x + 73;
+    case 0: return x + 5;
+    case 1: return x + 32;
+    case 2: return x + 39;
+    case 3: return x + 96;
+    case 4: return x + 13;
+    default: return -1;
+    }
+}
 static NI int control(int x, int enter)
 {
     int s = 0;
@@ -248,7 +263,8 @@ int main(void)
         if (sw_cross32(cross[i]) != cross_expected[i]) return 15;
     const int dense[] = {12, 9, 72, 5, 33, 41, 99, 17};
     for (int i = -4; i <= 5; i++)
-        if (sw_dense(i) != (i >= -3 && i <= 4 ? dense[i+3] : -1)) return 7;
+        if (sw_dense(i) != (i >= -3 && i <= 4 ? dense[i+3] : -1) ||
+            sw_dense_branch(i) != (i >= -3 && i <= 4 ? dense[i+3] : -1)) return 7;
     if (control(-1000, 0) != 7 || control(-100, 0) != 2 ||
         control(7, 0) != 37 || control(-10, 0) != 3 || control(88, 0) != 19 ||
         control(100000, 0) != 100000 || evaluations != 6) return 8;

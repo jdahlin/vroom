@@ -204,6 +204,10 @@ VPRIV void em_switch_values_emit(ecx *e)
   } else {
    ref_name(e->c,&e->out,ref);tb_s(&e->out,":\n");
    for (size_t i=0;i<len;i++) tb_f(&e->out,"\t.byte\t%u\n",t->data[i]);
+   if (WASM(e->c)) {
+    tb_s(&e->out,"\t.size\t");ref_name(e->c,&e->out,ref);
+    tb_f(&e->out,", %llu\n",(unsigned long long)len);
+   }
   }
  }
  em_switch_values_reset(e);
