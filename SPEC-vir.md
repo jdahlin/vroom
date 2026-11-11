@@ -1,6 +1,6 @@
 # VIR 1.0 specification
 
-Status: **draft 0.1, 2026-11-11**. Nothing here is implemented. Plan and steps
+Status: **draft 0.2, 2026-11-11**. Nothing here is implemented. Plan and steps
 are in `PLAN-vir.md`; the reasons behind the rules are in `RESEARCH-vir.md`
 (rule numbers R1-R20 refer to its section 5).
 
@@ -16,7 +16,7 @@ Contents: 1 scope, 2 model, 3 in-memory format, 4 types, 5 values and
 constants, 6 memory model, 7 instructions, 8 control flow, 9 ABI signatures,
 10 effects and what passes may do, 11 text form, 12 verifier, 13 interpreter,
 14 passes, 15 register allocation and lowering, 16 tools, 17 tests, 18 limits,
-19 changes needed outside `vir/`, 20 open issues, 21 traceability.
+19 integration with the walker, 20 open issues, 21 traceability.
 
 ## 1. Scope
 
@@ -32,7 +32,9 @@ macOS. All are little-endian with 64-bit pointers; VIR 1.0 assumes both.
 takes the ordinary path): calls to `returns_twice` functions, `setjmp`,
 `alloca` and VLAs, `__int128`/`_BitInt` values wider than 64 bits, x87
 `long double` and binary128 as values, vector types, `_Float16`, tail calls,
-`naked` functions, interrupt calling conventions.
+`naked` functions, interrupt calling conventions, and (until the step that
+splits the target's asm handling, X6) inline assembly other than an empty
+barrier.
 
 1.4 Non-goals of 1.0: an on-disk binary form, a stable C API for outside
 users, cross-function optimization, loop transformations.
@@ -686,12 +688,13 @@ register; values live across a call prefer callee-saved registers; an asm
 operand takes the first constraint alternative the allocator can satisfy.
 
 15.3 **Lowering** walks the blocks once and calls the target's operations with
-the assigned registers. A value used once, by the next selected instruction in
+the assigned registers, by the protocol in X7. A value used once, by the next selected instruction in
 the same block, may be folded into that instruction by the target (an
 immediate, an addressing mode, a compare into a branch). The target then runs
 its existing record passes, frame layout and output.
 
-15.4 `switch` is lowered by the shared strategy in `emit/opt/switch.c`.
+15.4 `switch` is lowered by the shared strategy in `emit/opt/switch.c` (the
+1.0 builder does not produce it, X5).
 `trap` is the target's trapping instruction. A block that consists of one `br`
 without moves produces no code.
 
@@ -753,20 +756,255 @@ expectations.
 | `switch` cases | 2^20 (the walker's `WK_MAXCASE`) |
 | Loop depth | Saturates at 65,535 |
 
-## 19. Changes needed outside `vir/`
+## 19. Integration with the walker
 
-These are requirements on existing code that this specification assumes; each
-is settled in the step that needs it.
+Read against `origin/main` on 2026-11-11 (`emit/walk/walk.h`, `expr.c`,
+`stmt.c`; `arch/x64/emit/lower.c`, `locals.c`, `abi.c`, `asm.c`). File and
+function names below are from that tree. Each item states what the code does
+today, what VIR needs, and the smallest change that gives it.
 
-| # | Change | Needed by |
-|---|---|---|
-| X1 | The walker instantiated a second time with `LO(name)` as `vir_##name` | Builder |
-| X2 | The walker tells the target when it allocates a frame slot (`wk_slot`, `wk_pslot`, `wk_local`: offset, size, alignment), so slots are objects and not bare offsets | 3.3, 6.8 |
-| X3 | `LO(local)` can answer "this local is a variable" for locals without `lnoreg` | SSA construction |
-| X4 | Call arguments reach `LO(call)` as values, not only as bytes in frame slots | Section 9 |
-| X5 | `switch` reaches the target as one operation with its case list | 8.1, 15.4 |
-| X6 | The target exposes an asm node's operands (constraint, direction, expression) separately from emitting it | 8.6 |
-| X7 | The real `LO` operations accept a requested result register | 15.3 |
+Summary:
+
+| # | Subject | Change outside `vir/` | First needed |
+|---|---|---|---|
+| X1 | A second instantiation of the walker | A symbol-prefix mechanism for `emit/walk/` | V2 |
+| X2 | Slot identity | One notification per frame allocation | V2 |
+| X3 | Locals as variables | A new `lval` kind | V2 |
+| X4 | Calls and parameters | None for building; two new target operations for good code | V4 |
+| X5 | `switch` | None: the walker's lowering is kept | — |
+| X6 | Inline assembly | Split `x64_asm` into planning and emission | its own step |
+| X7 | Result registers | A hint operation and a table of fixed registers | V4 |
+| X8 | Deciding whether to build VIR | A check before the walk; walks must be repeatable | V2 |
+| X9 | 8-bit register numbers | None: VIR uses a bounded pool of names | V2 |
+
+### X1. A second instantiation of the walker
+
+**Today.** `walk.h` has `#define LO(name) x64_##name`. The walker's own
+functions are `wk_*`, `VPRIV` (static in the unity TU, external with
+`make VCC_UNITY=`). `emit/tu.c:do_item` picks `wk_function` for x86. Apart
+from `x64_ecx_free` (`stmt.c:48`) the walker names no x86 function.
+
+**Needed.** The same source compiled twice in one program: once with `LO` as
+`x64_`, once as `vir_`, with distinct `wk_*` names, in both the unity and the
+file-by-file build.
+
+**Change.** A generated header `emit/walk/prefix.h` that, when `WK_PREFIX` is
+defined, maps every `wk_*` name to `WK_PREFIX##wk_*`, and `LO(name)` to
+`LO_PREFIX##name`. `bench/gen-walkprefix.py [--check]` regenerates it from the
+definitions (as `gen-diagids.py` does for diagnostics). The VIR instantiation
+is one more file, `emit/vir/walk.c`, that sets the two prefixes and includes
+`walk/*.c`. This is the mechanism the arm64 move needs as well (PLAN-x86,
+layer 2), so it is built once. Shared state (`wkst`, `ecx`) is not duplicated:
+only one walker runs for a function at a time.
+
+### X2. Slot identity
+
+**Today.** `wk_pslot` (`stmt.c:110`) bumps `foff` and returns a frame offset.
+`wk_slot` (`stmt.c:85`) reuses a free temporary slot of the same size and
+alignment; `wk_local` (`expr.c:167`) does the same for locals of inline
+copies. The target only ever sees `lval{L_FRAME, off}`. So the same offset
+means different objects at different times, and nothing tells the target when.
+
+**Needed.** Section 6 treats slots as objects (3.3, 6.8). The shared cell
+analysis has the same requirement: `emit/rec/slots.h` says allocation
+identities "must survive stack-offset reuse".
+
+**Change.** One call each time an offset is handed out, fresh or reused:
+`LO(slot)(e, off, size, align, kind)` from `wk_pslot`, both reuse paths of
+`wk_slot`, and `wk_local`; `kind` is temporary, local, parameter or
+whole-function. `x64_slot` does nothing today (and can feed `em_slot_*` ids
+when OPT5 wants them). `vir_slot` creates a `vir_slot` with `hint = off` and
+makes it the current object for that offset range; a later `L_FRAME` access is
+resolved to the slot that currently owns its offset. Accesses spanning two
+slots are an internal error.
+
+### X3. Locals as variables
+
+**Today.** `LO(local)(e, s, &l)` already lets the target claim a local:
+`x64_local` (`locals.c:52`) answers with `lval{L_VREG, r}` for up to four
+selected scalars and refuses inside inline copies (`e->wk->inst`). The walker
+never looks at `L_VREG`; it passes the `lval` back to `LO(load)`/`LO(store)`.
+`lval.r` is 8 bits.
+
+**Needed.** Every scalar local without `lnoreg` as an SSA variable, including
+those of inline copies, with no limit of 256.
+
+**Change.** A new kind `L_VAR` in `emitimpl.h`'s `lval`, with the variable
+number in the existing 32-bit `ref` field. `vir_local` returns it for an
+eligible local, keyed by (symbol, inline instance) so recursive expansion
+gets separate variables. `vir_load`/`vir_store` on `L_VAR` read and write the
+variable (Braun: per-block current definition, block parameters at joins).
+`LO(laddr)` on `L_VAR` is an internal error, as it is for `L_VREG` today;
+`lnoreg` guarantees it does not happen. Eligibility is the existing shared
+rule (`em_select_locals`' type and escape tests in `emit/opt/locals.c`)
+without the top-K limit. No walker source changes beyond the enum.
+
+### X4. Calls and parameters
+
+**Today.** `wk_argslot` (`expr.c:1990`) stores every argument into a fresh
+8-byte-word frame slot; `LO(call)` receives `wkarg[]` with those slots and
+loads the argument registers itself. `LO(params)` (`abi.c:571`) moves incoming
+registers to slots, or to the home `LO(local)` chose. A record result is
+received in a slot. Because arguments wait in slots, no temporary is live
+across a call.
+
+**Building needs no change.** `vir_store` keeps, per block, the value last
+stored to each frame range. `vir_call` reads each piece through that table and
+gets the SSA value directly; when a label intervened it emits a `load` and the
+`mem` pass forwards it. The stores to the argument slots become dead (the slot
+is not exposed) and `mem` removes them. A memory-class argument passes its
+slot's address (`VG_MEM`). The signature (section 9) is filled from the
+`wkarg` array: `n`, `cls[]`, `mem`, `size`, `align`, `unnamed`. An argument
+with `x87`, `vector` or `wide_record` set makes the function ineligible in 1.0.
+
+**Lowering needs two operations** to keep values in registers at calls:
+- `LO(callv)(e, ref, fn, a, n, variadic, r, rt, const val *pieces)`: as
+  `LO(call)`, but each register-class piece is a `val` (register or constant)
+  instead of a word in `a[i].slot`; the target performs the parallel move into
+  its argument registers.
+- `LO(paramv)(e, a, n, r, variadic, const uint8_t *home)`: as `LO(params)`,
+  with the register each incoming piece must end up in (or none: leave it in
+  its slot).
+
+Until they exist (V2, V3) lowering stores to slots and calls `LO(call)` and
+`LO(params)` unchanged, which is correct and slow.
+
+### X5. `switch`
+
+**Today.** `wk_switch` (`stmt.c:626`) picks a strategy with
+`em_switch_strategy` and emits it through ordinary operations: a compare tree
+(`LO(cmpbr)`), a bit-set test (`LO(switch_bitset)`), or a value table. The
+target never sees a switch.
+
+**Decision.** Keep that. The 1.0 builder therefore never produces the
+`switch` terminator; it sees `brif` trees, and `vir_switch_bitset` expands the
+recipe into `sub`, `lshr`, `and`, `brif`. The `switch` instruction stays in
+the format, verifier, interpreter and `virtest` so that a later walker hook
+(`LO(switch)` with the sorted case list) needs no format change. 15.4's
+reference to `emit/opt/switch.c` applies from then.
+
+### X6. Inline assembly
+
+**Today.** `LO(asm)(e, n)` gets the AST node. `x64_asm` (`asm.c:214`, about
+600 lines) does everything in one function: chooses a constraint alternative,
+evaluates the operand expressions by calling back into the walker, places
+values in registers and slots (`xopnd`), substitutes the template, emits the
+raw text record, stores outputs, and handles `asm goto` edges. An empty asm
+with only `memory`/`cc` clobbers is `LO(barrier)`.
+
+**Needed.** For VIR the operands must be values before the template is
+emitted, and registers must come from the allocator (8.6, 15.2).
+
+**Change.** Split `x64_asm` in two, with a target-neutral description between
+them:
+
+```c
+typedef struct em_asmop {
+	uint8_t kind;		/* register, memory, immediate */
+	uint8_t dir;		/* in, out, inout */
+	uint8_t cls;		/* integer or float register class */
+	uint8_t size;
+	int16_t fixed;		/* a specific register the constraint names, -1 none */
+	int8_t tied;		/* the output an input shares a register with, -1 none */
+	uint32_t expr;		/* the operand's AST node */
+	qty t;
+} em_asmop;
+bool LO(asm_plan)(ecx *e, uint32_t n, em_asmop *ops, uint64_t *clobber, bool *memory);
+void LO(asm_emit)(ecx *e, uint32_t n, const em_asmop *ops, const val *in, val *out, const uint32_t *labels);
+```
+
+`asm_plan` selects the alternative and classifies; the walker (not the
+target) evaluates the operand expressions; `asm_emit` substitutes and emits
+with the registers it is given. `x64_asm` becomes plan, evaluate, emit in
+sequence with unchanged output, which `bench/vas-corpus.py` and the kernel
+objects check. `vir_asm` records the plan as an `asm`/`asmgoto` instruction.
+
+**Scope.** This is the largest change outside `vir/`, and it touches code the
+x86 kernel build depends on. It is its own step after register allocation.
+Until then `LO(barrier)` is supported and any other asm makes the function
+ineligible (`asm_unsupported`).
+
+### X7. Result registers
+
+**Today.** x86 operations are destructive on physical registers:
+`x64_bin` (`lower.c:432`) brings `a` into a register, emits
+`op ra, ra, rb`, frees `rb` and returns `a`. Operations that need a new
+register take the first free one in a fixed order (`x64_treg`, `lower.c:139`)
+from the `live` mask. Shifts, division, `rep movs` and compare-exchange use
+specific registers.
+
+**Needed.** After allocation every VIR value has a register; lowering must get
+each result there without a copy per instruction, and the target's own scratch
+registers must not hold a live value.
+
+**Protocol** (no change to existing operations):
+1. Before each instruction lowering sets the target's `live` mask to the
+   registers holding values live across it (`tkeep`/`tfree`).
+2. For an operation that returns its first operand's register: if the result
+   register differs from that operand's, lowering emits `LO(mov)` into the
+   result register first and passes that. The allocator hints the result to
+   the first operand's register when the operand dies here, so the move is
+   usually absent.
+3. For an operation that allocates its result, lowering calls
+   `LO(prefer)(e, r)` first: the next `treg`/`ftreg` returns `r` if it is
+   free.
+4. If the returned register is still not the assigned one, lowering emits
+   `LO(mov)` and frees the other. `emit/rec/copies.c` removes what remains.
+
+**Changes.** `LO(prefer)` (a few lines per target), and a table the allocator
+reads through `vir_regs.fixed` (15.1): per operation and width, the registers
+it writes or requires (x86: variable shifts `rcx`; division `rax`, `rdx`;
+`copy`/`zero` `rdi`, `rsi`, `rcx`; compare-exchange `rax`; calls the
+caller-saved set). The allocator keeps values that live across such an
+instruction out of those registers and leaves two integer registers and one
+float register unallocated as scratch.
+
+### X8. Deciding whether to build VIR
+
+**Today.** A walk has side effects in the emitter (`note_ref`, the asm serial
+`e->asmk`, known-value state) and no restart path: `efatal` jumps to
+`e->bail` and the function is dropped.
+
+**Needed.** A function that VIR cannot handle must come out exactly as it
+does without VIR.
+
+**Change.** Eligibility is decided before any walk, by `vir_eligible(e, s)`,
+from the AST and the prepass tables: a scan of the body for the node kinds and
+types listed in 1.3 and 16 (asm other than a barrier, `setjmp`-like callees,
+`alloca`/VLA, wide integers, `long double`, vectors, record arguments the
+target passes specially). If it says no, `wk_function` runs as today. If it
+says yes, the VIR walker runs and must succeed; a failure after that point is
+an internal compiler error in development builds, and in release builds falls
+back by walking again with the real target. That fallback requires the
+walker's emitter side effects to be repeatable; `VCC_VIR_STATS` counts such
+late failures and the target is zero.
+
+### X9. 8-bit register numbers
+
+**Today.** `val.r`, `val.r2` and `lval.r` are `uint8_t`, and the walker casts
+`treg` results to it.
+
+**Decision.** No change. The VIR target hands out names from a pool: 0-191
+integer, 192-254 float, 255 none. A name is a variable for SSA construction
+(`mov`, `ext` and reuse after `tfree` redefine it). The walker holds few
+temporaries at once, so the pool does not run out in practice; if it does the
+function fails with `too_large` (X8). `vir_nfree` reports the free count, so
+the walker's "wait in a slot" paths (`wk_short`, `expr.c:1227`) are not taken.
+Locals do not use these names (X3).
+
+### What VIR's implementation of `LO` consists of
+
+Of the 69 operations the walker calls, by how VIR handles them:
+
+| Handling | Operations |
+|---|---|
+| One instruction, or a constant | `bin un cmp ext mov toreg fconst fbin fneg fsqrt fcmp cvt fbits umulhi smulhi bitop atomic tlsaddr frame trap barrier copy zero laddr load store va_start va_arg` |
+| Control flow | `label jump cmpbr brz jumpr named ret retrec` |
+| Bookkeeping only | `treg ftreg tfree tkeep nfree nffree dbgrow begin locals_begin local finish slot` |
+| Signatures and calls | `classify call params` (the real target classifies) |
+| Expanded into several instructions | `switch_bitset root4 pcmpstr` |
+| Answered by the real target | `ldmem i128mem` |
+| Function not eligible in 1.0 | `wconst wbitint wbin wun wcmp wcvt bigconst bigbin bigcmp bigcvt alloca spget spset setjmp longjmp tail_return asm` |
 
 ## 20. Open issues
 
@@ -796,7 +1034,7 @@ is settled in the step that needs it.
 | R10 block parameters | 3.2, 8.2 |
 | R11 locations in a side array | 3.4, 11.7 |
 | R12 two levels | 15.3 |
-| R13 SSA on the fly | X1, X3 |
+| R13 SSA on the fly | X1, X3, X9 |
 | R14 fixed pass list, budgets | 10.4, 14 |
 | R15 calls carry the classification | 9 |
 | R16 asm constraints kept | 8.6, 15.2 |

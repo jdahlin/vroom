@@ -186,9 +186,10 @@ fixpunkter utan budget (samma regel som `emit/flow/`).
 | V0 | **Underlag och plan.** `RESEARCH-vir.md`, `PLAN-vir.md` | Granskade av Johan |
 | V1 | **Format och verktyg.** `vir.h`, skrivare, parser, verifierare, tolk, `virtest`, `fuzz-vir` | Skriv–läs–skriv identiskt på alla tester; verifieraren avvisar en mutationsmängd; standardbygget byte-identiskt (`vbench.py check`) |
 | V2 | **Byggare och enklaste sänkning på x86-64.** Vandraren mot `vir_*`; sänkning där varje värde bor i en stackplats; `VCC_VIR=1`; reträtt per funktion | Med `VCC_VIR=1`: `bench/vcc-x86.py`, `vcc-abi.py --target x86_64`, gcc-torture samma godkända som utan; täckning rapporterad per korpus; utan flaggan byte-identiskt |
-| V3 | **Täckning.** Bit-fält, poster i anrop, varargs, atomära, flyttal, switch, beräknad goto, asm och asm goto | Täckning ≥ 99 % av x86-kärnans funktioner, ≥ 95 % av PostgreSQL:s; x86-kärnan bootar med `VCC_VIR=1`; objtool utan varningar |
+| V3 | **Täckning.** Bit-fält, poster i anrop, varargs, atomära, flyttal, switch (vandrarens sänkning), beräknad goto | Täckning ≥ 95 % av PostgreSQL:s funktioner och av vcc:s egna; x86-kärnan bootar med `VCC_VIR=1` (asm-funktioner går den vanliga vägen); objtool utan varningar |
 | V4 | **Registerallokering.** Linjär genomsökning, fasta register, parallella flyttar | Instruktioner på en fast TU-mängd under dagens `-O2`; allokerarens tid redovisad för sig |
 | V5 | **Pass.** Förenkling, värdenumrering, minnesvidarebefordran, död kod | Per pass: tolkekvivalens, instruktioner och `vbench.py`-tid före och efter, i planen |
+| V5b | **Inline asm.** `x64_asm` delas i planering och emission (SPEC X6); `asm` och `asmgoto` byggs | Utan flaggan: kärnobjekten och `vas-corpus.py` byte-identiska; med: täckning ≥ 99 % av x86-kärnans funktioner |
 | V6 | **arm64.** Kräver att arm64 har en `LO`-sänkning (TODO.md "arm64 and wasm on the shared walker"); VIR driver flytten eller väntar på den | ctests 1729/1729, `vcc-abi.py`, arm64-kärnan bootar med `VCC_VIR=1`; `vcc-obj.py` 840/840 |
 | V7 | **VIR är standard på `-O2`.** | Förslag: ≤ 1,25× clang -O2 i statiska instruktioner; steg 2-självbygge ≤ 1,5× långsammare än clang-bygget (2,6× i dag); `-O2`-kompilering ≤ +15 % totalt; `-O0`/`-O1` byte-identiska hela vägen |
 | senare | `NSW` och typtaggar används; SROA av oflydda poster; `returns_twice` med onormala kanter; VLA; `__int128`; wasm | — |
@@ -209,10 +210,10 @@ fixpunkter utan budget (samma regel som `emit/flow/`).
 
 - **G5 mäter `-O1`.** VIR är beslutat till `-O2`, så G5 (`-O1` inom X % av
   clang -O1) måste nås av OPT0–OPT8 ensamt.  VIR:s egen grind är V7.
-- **`LO` med begärt resultatregister.**  I dag väljer målet själv register
-  (`treg`) och returnerar ett `val`.  Sänkningen från VIR måste kunna säga
-  vilket register resultatet ska till, annars blir det en `mov` per operation
-  som `rec/copies.c` får städa.  Det är V2:s största gränssnittsfråga.
+- **Ändringar i vandraren och x86-sänkningen** är genomgångna mot koden i
+  SPEC-vir.md avsnitt 19 (X1–X9).  Störst är X6 (inline asm: `x64_asm` delas
+  i två) och X1 (vandraren instansieras två gånger); anrop med värden i
+  register (X4) och önskat resultatregister (X7) behövs först vid V4.
 - **`LO` är inte rent.**  `wkarg` och delar av `walk.h` är SysV-specifika.
   VIR ärver det tills arm64 flyttar; V6 beror på den flytten.
 - **Var x86-64 testas.**  `bench/vcc-x86.py` körs på en x86-64-värd.  V2–V5
