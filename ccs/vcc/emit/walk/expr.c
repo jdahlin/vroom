@@ -1060,7 +1060,15 @@ static val wk_condval(ecx *e, uint32_t n)
 	val one = vconst(1), zero = vconst(0);
 	int r;
 
+	e->wk->cjump = false;
 	wk_cond(e, n, false, lf);
+	if (e->wk->cjump) {
+		/* false whatever it evaluated (x && 0, the operands' effects done): the constant, so an
+		   inlined function returning it (dax_mapping) folds its callers' tests */
+		e->wk->cjump = false;
+		LO(label)(e, lf);
+		return vconst(0);
+	}
 	wk_store(e, &l, prim(TY_INT), &one);
 	LO(jump)(e, lj);
 	LO(label)(e, lf);
@@ -1573,6 +1581,20 @@ static val wk_call(ecx *e, uint32_t n)
 
 			if (!strncmp(bn, "__builtin_", 10))
 				bn += 10;
+			if (x->c == 2 && !strcmp(bn, "strcmp")) {
+				/* two string literals: folded (the kernel's vruntime_cmp(a, "<", b)) */
+				uint32_t sa = c->lists[x->b], sb = c->lists[x->b + 1];
+
+				while (N(sa)->op == N_CAST)
+					sa = N(sa)->a;
+				while (N(sb)->op == N_CAST)
+					sb = N(sb)->a;
+				if (N(sa)->op == N_STR && N(sb)->op == N_STR && c->strs[N(sa)->a].esz == 1 && c->strs[N(sb)->a].esz == 1) {
+					int r = strcmp(c->strs[N(sa)->a].s, c->strs[N(sb)->a].s);
+
+					return vconst(r < 0 ? -1 : r > 0);
+				}
+			}
 			/* memcpy/memmove/memset of a constant size up to 64 bytes: inline, as clang (8 stores
 			   of 8 bytes; a freestanding vDSO has no memcpy) */
 			if (x->c == 3 && (!strcmp(bn, "memcpy") || !strcmp(bn, "memmove") || !strcmp(bn, "memset")) &&

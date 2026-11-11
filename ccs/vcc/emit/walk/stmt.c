@@ -312,8 +312,10 @@ static void wk_decl(ecx *e, const node *x)
 		cval cv;
 		uint8_t f = e->E->sflags[s];
 
-		if (!(f & (SA_WRITTEN | SA_CWRITE)) && !(QQ(y->ty) & Q_VOLATILE) && y->sc != SC_REGISTER &&
-		    (is_integer(c, y->ty) || is_ptr(c, y->ty)) && !wk_mem(e, y->ty) && cc_eval(c, x->b, &cv) && cv.kind == CV_INT) {
+		if (!(f & (SA_WRITTEN | SA_CMULTI)) && !(QQ(y->ty) & Q_VOLATILE) && y->sc != SC_REGISTER &&
+		    (is_integer(c, y->ty) || is_ptr(c, y->ty)) && !wk_mem(e, y->ty) && cc_eval(c, x->b, &cv) && cv.kind == CV_INT &&
+		    (!(f & SA_CWRITE) || (is_integer(c, y->ty) && e->E->cwval[s] == em_trunc_to(c, cv.i, y->ty)))) {
+			/* (SA_CWRITE: every assignment stores this same constant, as set_uncached = IS_ENABLED(...)) */
 			e->wk->kgen[s] = e->wk->gen;
 			e->wk->kval[s] = vconst(em_trunc_to(c, cv.i, y->ty));
 			return;
