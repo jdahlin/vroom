@@ -225,6 +225,8 @@ VPRIV uint32_t ty_hash(const ctype *t);
 VPRIV uint32_t fn_hash(qty ret, const qty *par, uint32_t n, int flags);
 VPRIV uint32_t ty_intern(cc *c, const ctype *t);
 VPRIV uint32_t ty_new(cc *c, int kind);
+VPRIV qty ty_bitint(cc *c, unsigned bits, bool unsign);
+VPRIV unsigned int_bits(cc *c, qty t);
 VPRIV qty ty_ptr(cc *c, qty base);
 VPRIV qty ty_array(cc *c, qty elem, uint64_t n, int flags);
 VPRIV uint64_t arr_len(cc *c, qty t);

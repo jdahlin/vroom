@@ -8,7 +8,7 @@ static __attribute__((noinline)) uint32_t fold_f2i(cc *c, uint32_t n, qty to)
 
 	if (eval(c, n, &v) && v.kind == CV_FLT && v.f > -9.3e18 && v.f < 1.8e19) {
 		u128 q = v.ld ? v.q : q_of_d(v.f);
-		int bits = (int)ty_size(c, to) * 8;
+		int bits = (int)int_bits(c, to);
 		bool sg = is_signed(c, to);
 		i128 i = q_to_int(q, 128, true);
 
@@ -56,7 +56,7 @@ VPRIV qty promoted(cc *c, uint32_t n)
 	qty t = QUNQ(N(n)->ty);
 	const field *f = bitfield_of(c, n);
 
-	if (f && is_integer(c, t) && KIND(c, t) != TY_BOOL) {
+	if (f && is_integer(c, t) && KIND(c, t) != TY_BOOL && !T(c, t)->n) {
 		if (f->width < 32)
 			return prim(TY_INT);
 		if (f->width == 32 && rank(c, t) <= 4)
@@ -468,7 +468,7 @@ static void literal_conv(cc *c, uint32_t n, qty to)
 			return;
 		snprintf(ts, sizeof ts, "%s", v != 0 ? "true" : "false");
 	} else {
-		int w = (int)ty_size(c, to) * 8;
+		int w = (int)int_bits(c, to);
 		bool sg = is_signed(c, to);
 		double lo = sg ? -ldexp(1, w - 1) : 0, hi = sg ? ldexp(1, w - 1) : ldexp(1, w);
 
@@ -537,7 +537,7 @@ static void const_conv(cc *c, uint32_t n, qty to)
 	if (!is_integer(c, to) || !is_integer(c, from) || KIND(c, to) == TY_BOOL || KIND(c, from) == TY_BOOL ||
 	    c->unevaluated || !cc_eval(c, n, &cv) || cv.kind != CV_INT)
 		return;
-	tw = (int)ty_size(c, to) * 8, sw = (int)ty_size(c, from) * 8;
+	tw = (int)int_bits(c, to), sw = (int)int_bits(c, from);
 	if (tw >= sw || tw > 64)
 		return;
 	tnn = !is_signed(c, to);

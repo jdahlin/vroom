@@ -125,6 +125,7 @@ VPRIV bool LO(ldmem)(void);
 /* __int128: by address too when LO(i128mem) */
 VPRIV bool LO(i128mem)(void);
 VPRIV val LO(wconst)(ecx *e, i128 v);
+VPRIV val LO(wbitint)(ecx *e, val v, unsigned bits, bool sgn);
 VPRIV val LO(wbin)(ecx *e, int op, bool sgn, val a, val b);	/* b an int for << >> */
 VPRIV val LO(wun)(ecx *e, int op, val a);			/* T_MINUS T_TILDE */
 VPRIV val LO(wcmp)(ecx *e, int op, bool sgn, val a, val b);

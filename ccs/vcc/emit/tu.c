@@ -702,7 +702,7 @@ extern _Atomic unsigned long long ppd_ns_emit;
 
 int emit_tu(cc *c, const cc_opts *o)
 {
-	if (!sve_codegen_ok(c))
+	if (!sve_codegen_ok(c) || !bitint_codegen_ok(c))
 		return 1;
 
 	double t0 = now();

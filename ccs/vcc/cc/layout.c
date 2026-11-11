@@ -399,6 +399,14 @@ static void type_str(cc *c, qty t, const char *inner, vfixbuf *out, bool *ok)
 	default: {
 		const char *n = int_name(x->kind);
 
+		if (is_int_kind(x->kind) && x->n && !(x->flags & TF_ATOMIC)) {
+			char bn[64];
+
+			snprintf(bn, sizeof(bn), "%s_BitInt(%u)", is_signed(c, t) ? "" : "unsigned ", x->n);
+			vfixbuf_puts(&b, bn);
+			break;
+		}
+
 		if (!n)
 			*ok = false;
 		else

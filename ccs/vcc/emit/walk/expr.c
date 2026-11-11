@@ -1971,7 +1971,7 @@ static val wk_builtin(ecx *e, uint32_t n)
 	}
 	case BI_ADD_OVERFLOW: case BI_SUB_OVERFLOW: case BI_MUL_OVERFLOW: {
 		if (wk_size(c, N(arg[0])->ty) <= 8 && wk_size(c, N(arg[1])->ty) <= 8 && (KIND(c, T(c, N(arg[2])->ty)->base) == TY_INT128 || KIND(c, T(c, N(arg[2])->ty)->base) == TY_UINT128) &&
-		    LO(i128mem)()) {
+		    !em_bitint(c, T(c, N(arg[2])->ty)->base) && LO(i128mem)()) {
 			/*
 			 * Operands of up to 64 bits, a 128-bit result: the exact value fits 128 bits
 			 * (two unsigned 64-bit factors as unsigned 128, the rest as signed 128), so
@@ -2020,6 +2020,12 @@ static val wk_builtin(ecx *e, uint32_t n)
 		cp = LO(treg)(e);
 		LO(mov)(e, cp, rr);
 		lo = wk_conv(e, (val){ .k = V_REG, .r = (uint8_t)cp }, w, tr);
+		if (em_bitint(c, tr) && T(c, tr)->n < 64) {
+			unsigned shift = 64 - T(c, tr)->n;
+
+			lo = LO(bin)(e, T_LESSLESS, 8, false, lo, vconst(shift));
+			lo = LO(bin)(e, T_GREATERGREATER, 8, is_signed(c, tr), lo, vconst(shift));
+		}
 		rs = wk_reg(e, &lo, tr);
 		LO(store)(e, rs, &l, wk_size(c, tr));
 		wk_lfree(e, &l);
@@ -2163,7 +2169,35 @@ static val wk_builtin(ecx *e, uint32_t n)
 
 /* ---------------- expressions ---------------- */
 
+static val wk_gen_inner(ecx *e, uint32_t n);
+
+/* Integer storage and operation widths need not equal _BitInt precision.
+   Normalize every produced value, including loads and call results, before
+   another expression observes it. Wide values use private temporary storage. */
 VPRIV val wk_gen(ecx *e, uint32_t n)
+{
+	cc *c = e->c;
+	qty t = N(n)->ty;
+
+	if (likely(!em_bitint(c, t)))
+		return wk_gen_inner(e, n);
+	val v = wk_gen_inner(e, n);
+	{
+		unsigned bits = T(c, t)->n;
+
+		if (bits > 64)
+			return LO(wbitint)(e, v, bits, is_signed(c, t));
+		if (v.k == V_CONST)
+			return wk_const(c, v.i, t);
+		if (bits < 64) {
+			v = LO(bin)(e, T_LESSLESS, 8, false, v, vconst(64 - bits));
+			v = LO(bin)(e, T_GREATERGREATER, 8, is_signed(c, t), v, vconst(64 - bits));
+		}
+	}
+	return v;
+}
+
+static val wk_gen_inner(ecx *e, uint32_t n)
 {
 	cc *c = e->c;
 	const node *x = N(n);

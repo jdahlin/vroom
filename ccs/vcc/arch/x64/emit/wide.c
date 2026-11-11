@@ -40,6 +40,26 @@ static int x64_waddr(ecx *e, val *v)
 	return x64_toreg(e, v, 8);
 }
 
+/* Preserve the source object (which may be a const global or an lvalue):
+   a bit-precise value's high word is extended in a fresh 16-byte temporary. */
+VPRIV val x64_wbitint(ecx *e, val v, unsigned bits, bool sgn)
+{
+	if (bits == 128)
+		return v;
+	int rs = x64_waddr(e, &v), rd = x64_wnew(e, NULL);
+	lval slo = x64_wat(rs, 0), shi = x64_wat(rs, 8);
+	lval dlo = x64_wat(rd, 0), dhi = x64_wat(rd, 8);
+
+	x64_mem(e, X_LD, 8, R11, &slo, false);
+	x64_mem(e, X_ST, 8, R11, &dlo, false);
+	x64_mem(e, X_LD, 8, R11, &shi, false);
+	x64_op3(e, X_SHLI, 8, R11, R11, XNOREG)->imm = 128 - bits;
+	x64_op3(e, sgn ? X_SARI : X_SHRI, 8, R11, R11, XNOREG)->imm = 128 - bits;
+	x64_mem(e, X_ST, 8, R11, &dhi, false);
+	x64_tfree(e, rs);
+	return x64_wv(rd);
+}
+
 /* ---------------- libgcc calls ---------------- */
 
 /*

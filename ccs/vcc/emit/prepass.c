@@ -36,6 +36,29 @@ VPRIV bool sve_codegen_ok(cc *c)
 	return false;
 }
 
+/* Linux x86 and arm64 lower bit-precise values. Keep the other targets
+   explicit until their runtime precision and calling conventions are checked. */
+VPRIV bool bitint_codegen_ok(cc *c)
+{
+	if (c->o->target == PP_LINUX_X86_64 || c->o->target == PP_LINUX_AARCH64)
+		return true;
+	for (uint32_t i = 1; i < c->nsym; i++) {
+		const sym *s = &c->syms[i];
+		const ctype *t = T(c, s->ty);
+		bool bad = false;
+
+		if (s->kind != S_FUNC || !s->body)
+			continue;
+		bad = em_bitint(c, t->base);
+		for (uint32_t j = 0; j < t->n && !bad; j++)
+			bad = em_bitint(c, c->params[t->aux + j]);
+		if (bad) {
+			pp_diag_emit(c->p, pp_diag_begin(c->p, VDL_ERROR, s->loc, "_BitInt runtime ABI is not supported on this target yet"));
+			return false;
+		}
+	}
+	return true;
+}
 
 typedef struct pre {
 	emitter *E;

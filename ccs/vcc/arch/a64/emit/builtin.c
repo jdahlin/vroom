@@ -140,12 +140,12 @@ static val gen_overflow(ecx *e, const node *x, const uint32_t *arg)
 	cc *c = e->c;
 	qty ta = N(arg[0])->ty, tb = N(arg[1])->ty, tr = T(c, N(arg[2])->ty)->base;
 	val a = gen(e, arg[0]), b = gen(e, arg[1]), p = gen(e, arg[2]);
-	int bits = (int)tsize(c, tr) * 8;
+	int bits = em_bitint(c, tr) ? (int)T(c, tr)->n : (int)tsize(c, tr) * 8;
 	bool sr = is_signed(c, tr);
 	int lo, hi, t, ok;
 	lval l;
 
-	if (tsize(c, ta) > 8 || tsize(c, tb) > 8)
+	if (tsize(c, ta) > 8 || tsize(c, tb) > 8 || (em_bitint(c, tr) && bits > 64))
 		efatal(e, x->loc, "128-bit overflow builtins are not supported");
 	/* exact result in 128 bits */
 	{

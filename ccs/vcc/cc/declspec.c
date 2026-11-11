@@ -425,7 +425,7 @@ static __attribute__((noinline, cold)) bool late_width_sign(cc *c, int base, int
 			cc_error(c, loc, "'long %.*s' is invalid", IDF(base)), ds->invalid = true;
 		return true;
 	}
-	if (base == KW_int || base == KW_char || base == KW_short || base == KW___int128)
+	if (base == KW_int || base == KW_char || base == KW_short || base == KW___int128 || base == KW__BitInt)
 		return false;
 	cc_error(c, loc, "'%.*s' cannot be signed or unsigned", IDF(base));
 	ds->invalid = true;
@@ -622,6 +622,7 @@ static __attribute__((noinline, cold)) void implicit_int_error(cc *c)
 VPRIV bool decl_specs(cc *c, dspec *ds, bool allow_sc)
 {
 	int nlong = 0, sgn = 0, base = 0, q = 0;
+	unsigned bitwidth = 0;
 	bool any = false, cplx = false, c23auto = false;
 	qty named = 0;
 	bool have_named = false;
@@ -744,6 +745,25 @@ again:
 			expect_match(c, T_RPAREN, open);
 			if (a > ds->align)
 				ds->align = a;
+			continue;
+		}
+		case KW__BitInt: {
+			i128 width = 0;
+			uint32_t loc = t->loc, open;
+
+			if (base || have_named || nlong)
+				cc_error(c, loc, "invalid combination of type specifiers with _BitInt");
+			base = KW__BitInt;
+			any = true;
+			next(c);
+			open = expect_lparen(c);
+			const_expr(c, &width, NULL);
+			expect_match(c, T_RPAREN, open);
+			if (width < 1 || width > 128) {
+				cc_error(c, loc, "_BitInt width must be between 1 and 128");
+				width = 2;
+			}
+			bitwidth = (unsigned)width;
 			continue;
 		}
 		case KW_void: case KW__Bool: case KW_char: case KW_short: case KW_int: case KW_float:
@@ -919,6 +939,12 @@ done:
 		ds->ty = named;
 		if (ds->tdef && c->syms[ds->tdef].ty != named)
 			ds->tdef = 0;
+	} else if (base == KW__BitInt) {
+		if (bitwidth == 1 && sgn >= 0) {
+			cc_error(c, ds->loc, "signed _BitInt must have a bit size of at least 2");
+			bitwidth = 2;
+		}
+		ds->ty = ty_bitint(c, bitwidth, sgn < 0);
 	} else if (base == KW_void) {
 		ds->ty = prim(TY_VOID);
 	} else if (base == KW__Bool) {
@@ -950,7 +976,9 @@ done:
 	if (cplx) {
 		if (!base && !nlong && !sgn && !have_named)
 			ds->ty = prim(TY_DOUBLE);	/* plain _Complex: double (GNU) */
-		if (KIND(c, ds->ty) == TY_BFLOAT16)
+		if (is_integer(c, ds->ty) && T(c, ds->ty)->n)
+			cc_error(c, ds->loc, "'_Complex _BitInt' is invalid");
+		else if (KIND(c, ds->ty) == TY_BFLOAT16)
 			cc_error(c, ds->loc, "_Complex __bf16 is invalid");
 		else if (!is_arith(c, ds->ty))
 			cc_error(c, ds->loc, "_Complex requires an arithmetic element type");

@@ -913,7 +913,36 @@ static val gen_incdec(ecx *e, uint32_t n)
 	return nv;
 }
 
+static val gen_inner(ecx *e, uint32_t n);
+
 VPRIV val gen(ecx *e, uint32_t n)
+{
+	cc *c = e->c;
+	qty t = N(n)->ty;
+
+	if (likely(!em_bitint(c, t)))
+		return gen_inner(e, n);
+	val v = gen_inner(e, n);
+	{
+		unsigned bits = T(c, t)->n;
+		bool sgn = is_signed(c, t);
+
+		if (v.k == V_CONST)
+			return vconst(em_trunc_to(c, v.i, t));
+		if (bits > 64) {
+			toreg2(e, &v, sgn);
+			if (bits < 128)
+				opbf(e, sgn ? I_SBFM : I_UBFM, 1, v.r2, v.r2, 0, bits - 65);
+		} else if (bits < 64) {
+			int r = toreg(e, &v);
+
+			opbf(e, sgn ? I_SBFM : I_UBFM, 1, r, r, 0, bits - 1);
+		}
+	}
+	return v;
+}
+
+static val gen_inner(ecx *e, uint32_t n)
 {
 	cc *c = e->c;
 	const node *x = N(n);

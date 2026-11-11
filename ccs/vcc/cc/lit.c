@@ -92,7 +92,7 @@ static uint32_t number_s(cc *c, const ptok *t, const char *s, size_t n)
 	size_t i = 0;
 	unsigned base = 10;
 	u128 v = 0;
-	bool over = false, u = false, isf = false;
+	bool over = false, over128 = false, u = false, isf = false, wb = false;
 	int l = 0;
 	char buf[256];
 
@@ -173,12 +173,21 @@ static uint32_t number_s(cc *c, const ptok *t, const char *s, size_t n)
 		}
 		if (v > (UINT64_MAX - d) / base)
 			over = true;
+		if (v > (~(u128)0 - d) / base)
+			over128 = true;
 		v = v * base + d;
 	}
+	size_t suffix = i;
 	for (; i < n; i++) {
 		char ch = s[i];
 
-		if (ch == 'u' || ch == 'U')
+		if ((ch == 'w' && i + 1 < n && s[i + 1] == 'b') ||
+		    (ch == 'W' && i + 1 < n && s[i + 1] == 'B')) {
+			if (wb || l)
+				cc_error(c, t->loc, "invalid suffix on bit-precise integer constant");
+			wb = true;
+			i++;
+		} else if (ch == 'u' || ch == 'U')
 			u = true;
 		else if (ch == 'l' || ch == 'L')
 			l++;
@@ -186,6 +195,19 @@ static uint32_t number_s(cc *c, const ptok *t, const char *s, size_t n)
 			cc_error(c, t->loc, "invalid suffix '%.*s' on integer constant", (int)(n - i), s + i);
 			break;
 		}
+	}
+	if (wb) {
+		if (n - suffix != (u ? 3u : 2u))
+			cc_error(c, t->loc, "invalid suffix on bit-precise integer constant");
+		unsigned bits = v >> 64 ? 128 - (unsigned)__builtin_clzll((uint64_t)(v >> 64)) :
+			v ? 64 - (unsigned)__builtin_clzll((uint64_t)v) : 1;
+
+		bits += !u;
+		if (bits > 128 || over128 || l) {
+			cc_error(c, t->loc, "bit-precise integer literal exceeds 128 bits");
+			bits = 128;
+		}
+		return mk_int(c, (i128)v, ty_bitint(c, bits, u), t->loc);
 	}
 	if (over)
 		cc_error(c, t->loc, "integer literal is too large to be represented in any integer type");

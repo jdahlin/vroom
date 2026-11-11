@@ -4,17 +4,16 @@
 VPRIV i128 trunc_to(cc *c, i128 v, qty t)
 {
 	int k = KIND(c, t);
-	uint64_t sz;
+	unsigned bits;
 
 	if (k == TY_BOOL)
 		return v != 0;
 	if (k == TY_PTR)
 		return (i128)(uint64_t)v;
-	sz = ty_size(c, t);
-	if (sz >= 16)
+	bits = int_bits(c, t);
+	if (bits >= 128)
 		return is_signed(c, t) ? v : (i128)(u128)v;
 	{
-		unsigned bits = (unsigned)sz * 8;
 		u128 m = ((u128)1 << bits) - 1;
 		u128 x = (u128)v & m;
 
@@ -249,7 +248,7 @@ VPRIV bool eval(cc *c, uint32_t n, cval *v)
 			if (a.kind != CV_FLT)
 				return false;
 			v->kind = CV_INT;
-			v->i = trunc_to(c, q_to_int(get_q(&a, true), (int)ty_size(c, to) * 8, is_signed(c, to)), to);
+			v->i = trunc_to(c, q_to_int(get_q(&a, true), (int)int_bits(c, to), is_signed(c, to)), to);
 			v->ld = false;
 			v->ice = is_flt_lit(c, x->a);
 			return true;
@@ -476,7 +475,7 @@ VPRIV bool eval(cc *c, uint32_t n, cval *v)
 			qty ot = N(x->a)->ty;	/* operands are converted to the common type */
 			bool sg = is_signed(c, ot);
 			i128 l = a.i, r = b.i;
-			uint64_t bits = ty_size(c, ot) * 8;
+			uint64_t bits = int_bits(c, ot);
 
 			ok = true;
 			switch (op) {
@@ -497,7 +496,7 @@ VPRIV bool eval(cc *c, uint32_t n, cval *v)
 			case T_GREATERGREATER: {
 				/* as clang's C folding (shift-count-overflow warns): a count over the
 				   width is width - 1, a negative count shifts the other way */
-				uint64_t w = ty_size(c, x->ty) * 8;
+				uint64_t w = int_bits(c, x->ty);
 				bool left = op == T_LESSLESS;
 
 				if (r < 0) {

@@ -140,6 +140,10 @@ def reference(suite, name, path, flags, wd):
 def one(t):
     t, st, cat, why = one_(t)
     xf = WASM_XFAIL.get(t[1]) if t[0] == 'gcc' else None
+    if t[0] == 'vcc':
+        marker = re.search(r'/\*\s*vcc-xfail-wasm:(.*?)\*/', open(t[2]).read(), re.S)
+        if marker:
+            xf = ' '.join(marker.group(1).split())
     if xf and st == 'fail':
         return t, 'xfail', cat, f'{xf} [{why}]'
     if xf and st == 'pass':

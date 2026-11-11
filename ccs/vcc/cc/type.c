@@ -110,6 +110,26 @@ VPRIV uint32_t ty_new(cc *c, int kind)
 	return idx;
 }
 
+/* Bit-precise integers retain a storage kind for scalar lowering, but their
+   precision makes them distinct from all standard integer types. */
+VPRIV qty ty_bitint(cc *c, unsigned bits, bool unsign)
+{
+	unsigned size = bits <= 8 ? 1 : bits <= 16 ? 2 : bits <= 32 ? 4 : bits <= 64 ? 8 : 16;
+	int kind = size == 1 ? TY_SCHAR : size == 2 ? TY_SHORT : size == 4 ? TY_INT : size == 8 ? TY_LLONG : TY_INT128;
+	ctype t = { .kind = (uint8_t)(kind + unsign), .size = size, .align = size > 8 && (c->o->target == PP_LINUX_X86_64 || PP_IS_WASM(c->o->target)) ? 8 : size, .n = bits };
+
+	return QT(ty_intern(c, &t), 0);
+}
+
+VPRIV unsigned int_bits(cc *c, qty t)
+{
+	if (KIND(c, t) == TY_ENUM)
+		return int_bits(c, T(c, t)->base);
+	if (is_int_kind(KIND(c, t)) && !(T(c, t)->flags & TF_ATOMIC) && T(c, t)->n)
+		return T(c, t)->n;
+	return (unsigned)ty_size(c, t) * 8;
+}
+
 VPRIV qty ty_ptr(cc *c, qty base)
 {
 	uint32_t i = c->ptrc[base];
@@ -294,6 +314,10 @@ VPRIV qty ty_atomic(cc *c, qty t, uint32_t loc)
 		fwd_note(c, t);
 		return t;
 	}
+	if (is_int_kind(v.kind) && v.n) {
+		cc_error(c, loc, "_Atomic cannot be applied to integer type '%s' ", tyname(c, t));
+		return t;
+	}
 	if (v.kind == TY_VECTOR) {
 		cc_error(c, loc, "_Atomic vector types are not supported by vcc");
 		return t;
@@ -352,6 +376,8 @@ VPRIV qty prim(int k) { return QT(k, 0); }
 
 VPRIV qty unsigned_of(cc *c, qty t)
 {
+	if (is_int_kind(KIND(c, t)) && T(c, t)->n && !(T(c, t)->flags & TF_ATOMIC))
+		return ty_bitint(c, T(c, t)->n, true);
 	switch (KIND(c, t)) {
 	case TY_CHAR: case TY_SCHAR: return prim(TY_UCHAR);
 	case TY_SHORT: return prim(TY_USHORT);
@@ -380,7 +406,7 @@ VPRIV qty promote(cc *c, qty t)
 
 	if (k == TY_ENUM)
 		return promote(c, T(c, t)->base);
-	if (is_int_kind(k) && rank(c, t) < 4)
+	if (is_int_kind(k) && !T(c, t)->n && rank(c, t) < 4)
 		return prim(TY_INT);
 	return QT(T(c, t)->canon, 0);
 }
@@ -402,6 +428,11 @@ VPRIV qty arith_conv(cc *c, qty a, qty b)
 		bool sa = is_signed(c, a), sb = is_signed(c, b);
 		int ra = rank(c, a), rb = rank(c, b);
 
+		if (T(c, a)->n || T(c, b)->n) {
+			ra = (int)int_bits(c, a) * 16 + (T(c, a)->n ? 0 : ra);
+			rb = (int)int_bits(c, b) * 16 + (T(c, b)->n ? 0 : rb);
+		}
+
 		if (sa == sb)
 			return ra >= rb ? a : b;
 		if (!sa && ra >= rb)
@@ -409,9 +440,9 @@ VPRIV qty arith_conv(cc *c, qty a, qty b)
 		if (!sb && rb >= ra)
 			return b;
 		/* signed operand has greater rank */
-		if (sa && ty_size(c, a) > ty_size(c, b))
+		if (sa && int_bits(c, a) > int_bits(c, b))
 			return a;
-		if (sb && ty_size(c, b) > ty_size(c, a))
+		if (sb && int_bits(c, b) > int_bits(c, a))
 			return b;
 		return unsigned_of(c, sa ? a : b);
 	}
@@ -456,6 +487,8 @@ VPRIV bool compatible(cc *c, qty a, qty b)
 	if (y->kind == TY_ENUM && x->kind != TY_ENUM)
 		return compatible(c, a, y->base);
 	if (x->kind != y->kind)
+		return false;
+	if (is_int_kind(x->kind) && x->n != y->n)
 		return false;
 	switch (x->kind) {
 	case TY_PTR:

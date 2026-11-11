@@ -132,9 +132,9 @@ __attribute__((noinline)) VPRIV void struct_body(cc *c, uint32_t ti)
 					w = 0;
 				else if (w < 0)
 					cc_error(c, d.loc, "bit-field '%.*s' has negative width (%lld)", IDF(d.name), (long long)w), w = 0;
-				else if ((uint64_t)w > ty_size(c, t) * 8)
+				else if ((uint64_t)w > int_bits(c, t))
 					cc_error(c, d.loc, "width of bit-field '%.*s' (%lld bits) exceeds the width of its type (%llu bits)",
-					      IDF(d.name), (long long)w, (unsigned long long)ty_size(c, t) * 8), w = 0;
+					      IDF(d.name), (long long)w, (unsigned long long)int_bits(c, t)), w = 0;
 				else if (w == 0 && d.name)
 					report(c, "error", d.loc, &wr, 1, NULL, 0, "named bit-field '%.*s' has zero width", IDF(d.name));
 				f.bitfield = 1;

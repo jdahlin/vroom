@@ -723,6 +723,7 @@ VPRIV void wasm_tail(cc *c, tbuf *t, _Atomic uint8_t *claimed);
 VPRIV bool is_aconst(cc *c, uint32_t n);
 VPRIV uint32_t aconst_idx(cc *c, uint32_t n);
 VPRIV bool sve_codegen_ok(cc *c);
+VPRIV bool bitint_codegen_ok(cc *c);
 VPRIV void ensure_walked(emitter *E, cc *c, uint32_t s);
 VPRIV int u32_cmp(const void *a, const void *b);
 /* tu.c */
@@ -733,6 +734,11 @@ VPRIV void enqueue(emitter *E, uint32_t item);
 static inline qty prim(int k) { return QT(k, 0); }
 static inline bool k_int(int k) { return (k >= TY_BOOL && k <= TY_UINT128) || k == TY_ENUM; }
 static inline bool is_integer(cc *c, qty t) { return k_int(KIND(c, t)); }
+static inline bool em_bitint(cc *c, qty t)
+{
+	return KIND(c, t) >= TY_CHAR && KIND(c, t) <= TY_UINT128 &&
+	       !(T(c, t)->flags & TF_ATOMIC) && T(c, t)->n;
+}
 static inline bool is_ptr(cc *c, qty t) { return KIND(c, t) == TY_PTR; }
 static inline bool is_flt(cc *c, qty t) { int k = KIND(c, t); return k >= TY_BFLOAT16 && k <= TY_LDOUBLE; }
 static inline bool is_record(cc *c, qty t) { int k = KIND(c, t); return k == TY_STRUCT || k == TY_UNION; }

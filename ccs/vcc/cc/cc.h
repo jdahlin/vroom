@@ -68,7 +68,7 @@ typedef struct ctype {
 	uint32_t align;		/* bytes */
 	uint64_t size;		/* bytes; arrays: elem size * n */
 	qty base;		/* pointee / element / return / enum underlying */
-	uint32_t n;		/* array length; function: number of params; VLA: size node */
+	uint32_t n;		/* integer: _BitInt precision (0: standard); array length; function: params; VLA: size node */
 	uint32_t aux;		/* function: index into params; record/enum: tag index */
 	uint32_t canon;		/* canonical type index (itself unless an aligned variant) */
 } ctype;

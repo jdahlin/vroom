@@ -626,6 +626,18 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
   `= {}`, `[[...]]` standard attributes, `#embed` (pp).
   *Validate:* T1 `c23-*.c` with `vcc-flags: -std=c23`; T4 that the same
   keywords are identifiers under `-std=c99` (`int bool = 1;`).
+- [ ] **`_BitInt` widths above 128 and remaining targets**: the front end supports
+  distinct signed/unsigned types of 1–128 bits (signed starts at 2), `wb`/`uwb`
+  literals, target layout, integer rank and constant arithmetic. Linux x86 and
+  arm64 now normalize runtime arithmetic, loads, conversions and call results
+  to the declared precision. Their clang/vcc cross-call tests cover scalar
+  arguments/returns, callbacks, register exhaustion, varargs and aggregates.
+  Wider integers and runtime support on other targets remain to implement;
+  overflow builtins with BitInt operands/destinations above 64 bits are still
+  explicitly diagnosed (the existing wide-overflow lowering limitation).
+  *Validate:* `tests/vcc/bitint_constants.c`, `bitint_runtime.c` (16 widths,
+  eight boundary/pattern inputs, native x86 and ARM/QEMU), `tests/abi/bitint/`
+  (all four compiler combinations on each Linux target), cproc's three cases.
 - [ ] **Builtins**: ~~`__builtin_shufflevector`, `__builtin_convertvector`~~ (done:
   tests/vcc/vector_builtins.c; vector diagnostics spell clang's unnamed form, without the
   `(vector of N 'T' values)` note and typedef names) [P].  Library builtins (clang's `F`

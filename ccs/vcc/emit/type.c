@@ -4,17 +4,17 @@
 VPRIV i128 em_trunc_to(cc *c, i128 v, qty t)
 {
 	int k = KIND(c, t);
-	uint64_t sz;
+	unsigned bits;
 
 	if (k == TY_BOOL)
 		return v != 0;
 	if (k == TY_PTR)
 		return (i128)(uint64_t)v;
-	sz = tsize(c, t);
-	if (sz >= 16)
+	bits = is_integer(c, t) && T(c, t)->n && !(T(c, t)->flags & TF_ATOMIC) ?
+		T(c, t)->n : (unsigned)tsize(c, t) * 8;
+	if (bits >= 128)
 		return is_signed(c, t) ? v : (i128)(u128)v;
 	{
-		unsigned bits = (unsigned)sz * 8;
 		u128 m = ((u128)1 << bits) - 1;
 		u128 x = (u128)v & m;
 
