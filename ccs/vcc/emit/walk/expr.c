@@ -2630,6 +2630,18 @@ static val wk_overflow_wide(ecx *e, const uint32_t *arg, int op)
 	return LO(cmp)(e, T_EXCLAIMEQ, 4, false, different, vconst(0));
 }
 
+/* The same non-emitting constant_p policy serves values and control proofs. */
+static int wk_constant_p(ecx *e, uint32_t arg)
+{
+	cc *c = e->c;
+	cval cv;
+
+	if (cc_eval(c, arg, &cv) && (cv.kind == CV_INT || cv.kind == CV_FLT ||
+	    (cv.kind == CV_ADDR && cv.str && cv.i == 0 && !cv.sym && !cv.label)))
+		return 1;
+	return !side_effects(c, arg) && wk_isconst(e, arg);
+}
+
 static val wk_builtin(ecx *e, uint32_t n)
 {
 	cc *c = e->c;
@@ -2640,17 +2652,8 @@ static val wk_builtin(ecx *e, uint32_t n)
 	switch (x->aux) {
 	case BI_FAST_ROOT4:
 		return LO(root4)(e, wk_gen(e, arg[0]));
-	case BI_CONSTANT_P: {
-		/* clang's rule without the optimizer: 1 if the front end folds the operand (a pointer
-		   only as a string literal at offset 0), else 0 (the operand is not evaluated) */
-		cval cv;
-
-		if (cc_eval(c, arg[0], &cv) && (cv.kind == CV_INT || cv.kind == CV_FLT ||
-						(cv.kind == CV_ADDR && cv.str && cv.i == 0 && !cv.sym && !cv.label)))
-			return vconst(1);
-		/* after inlining and constant locals: built from constants only, without side effects */
-		return vconst(!side_effects(c, arg[0]) && wk_isconst(e, arg[0]));
-	}
+	case BI_CONSTANT_P:
+		return vconst(wk_constant_p(e, arg[0]));
 	case BI_EXPECT: case BI_EXPECT_PROB: case BI_ASSUME_ALIGNED: case BI_EXTRACT_RETURN_ADDR: {
 		/* the value of the first argument; the others are evaluated first */
 		val v;
@@ -3297,10 +3300,7 @@ static bool wk_ival(ecx *e, uint32_t n, i128 *out)
 	val k;
 	if (!is_integer(c, x->ty)) return false;
 	if (x->op == N_BUILTIN && x->aux == BI_CONSTANT_P) {
-		uint32_t arg = c->lists[x->b];
-		*out = (cc_eval(c, arg, &cv) && (cv.kind == CV_INT || cv.kind == CV_FLT ||
-			(cv.kind == CV_ADDR && cv.str && cv.i == 0 && !cv.sym && !cv.label))) ||
-			(!side_effects(c, arg) && wk_isconst(e, arg));
+		*out = wk_constant_p(e, c->lists[x->b]);
 		return true;
 	}
 	if ((x->op == N_NUM || x->op == N_VAR || x->op == N_BUILTIN) &&
@@ -3384,7 +3384,10 @@ static bool wk_ival(ecx *e, uint32_t n, i128 *out)
 VPRIV int wk_condfold(ecx *e, uint32_t n)
 {
 	i128 v;
-	if (!e->E->o->opt || side_effects(e->c, n))
+	if (!e->E->o->opt) return -1;
+	int known = !e->E->noopt ? em_const_truth(e, n, wk_constant_p) : -1;
+	if (known >= 0) return known;
+	if (side_effects(e->c, n))
 		return -1;
 	if (wk_ival(e, n, &v)) return v != 0;
 	if (e->E->o->no_builtin) return -1;
