@@ -153,8 +153,6 @@ static lval wk_fromval(ecx *e, val v, qty t)
 
 static val wk_ptradd_vla(ecx *e, val p, val i, qty it, qty pt, bool sub);
 static val wk_atomic_rmw(ecx *e, uint32_t n);
-static val wk_reload(ecx *e, const lval *l, qty t);
-static val wk_putmem(ecx *e, lval *l, qty t, val v);
 static val wk_incval(ecx *e, qty t, bool dec, val a);
 
 static void wk_lfree(ecx *e, const lval *l)
@@ -1038,7 +1036,7 @@ static val wk_ternary(ecx *e, uint32_t n)
 }
 
 /* l's value in a new register (l and its register stay) */
-static val wk_reload(ecx *e, const lval *l, qty t)
+VPRIV val wk_reload(ecx *e, const lval *l, qty t)
 {
 	int r;
 
@@ -1060,7 +1058,7 @@ static val wk_reload(ecx *e, const lval *l, qty t)
 }
 
 /* the bytes of the object at v (type t, held by address) into l; l's address is the value */
-static val wk_putmem(ecx *e, lval *l, qty t, val v)
+VPRIV val wk_putmem(ecx *e, lval *l, qty t, val v)
 {
 	int rs = wk_reg(e, &v, prim(TY_ULONG)), rd = LO(laddr)(e, l);
 
@@ -1412,6 +1410,8 @@ static val wk_call(ecx *e, uint32_t n)
 
 		if (c->syms[s].kind == S_BUILTIN) {
 			ref = REF(RK_NAME, (uint32_t)c->syms[s].val);	/* a library function by name */
+		} else if (wk_can_inline(e, s)) {
+			return wk_inline(e, n, s);
 		} else {
 			note_ref(e, REF(RK_SYM, s));
 			ref = REF(RK_SYM, s);
@@ -1475,6 +1475,31 @@ static val wk_stmtexpr(ecx *e, uint32_t n)
 }
 
 /* ---------------- builtins ---------------- */
+
+/* n is a constant once the bound constants are known (no loads, calls or side effects) */
+static bool wk_isconst(ecx *e, uint32_t n)
+{
+	cc *c = e->c;
+	const node *x = N(n);
+	val k;
+
+	switch (x->op) {
+	case N_NUM: case N_FNUM:
+		return true;
+	case N_VAR:
+		return c->syms[x->a].kind == S_ENUMCONST || wk_const_sym(e, x->a, &k);
+	case N_CAST:
+		return x->aux != CK_DECAY && x->aux != CK_FDECAY && x->aux != CK_VADDR && wk_isconst(e, x->a);
+	case N_UNARY:
+		return wk_isconst(e, x->a);
+	case N_BINARY:
+		return wk_isconst(e, x->a) && wk_isconst(e, x->b);
+	case N_COND:
+		return wk_isconst(e, x->a) && (!x->b || wk_isconst(e, x->b)) && wk_isconst(e, x->c);
+	default:
+		return false;
+	}
+}
 
 /* a va_list operand's address in a temporary (x86-64's is an array: it decays) */
 static int wk_valist(ecx *e, uint32_t n)
@@ -1876,8 +1901,11 @@ static val wk_builtin(ecx *e, uint32_t n)
 		   only as a string literal at offset 0), else 0 (the operand is not evaluated) */
 		cval cv;
 
-		return vconst(cc_eval(c, arg[0], &cv) && (cv.kind == CV_INT || cv.kind == CV_FLT ||
-							  (cv.kind == CV_ADDR && cv.str && cv.i == 0 && !cv.sym && !cv.label)));
+		if (cc_eval(c, arg[0], &cv) && (cv.kind == CV_INT || cv.kind == CV_FLT ||
+						(cv.kind == CV_ADDR && cv.str && cv.i == 0 && !cv.sym && !cv.label)))
+			return vconst(1);
+		/* after inlining and constant locals: built from constants only, without side effects */
+		return vconst(!side_effects(c, arg[0]) && wk_isconst(e, arg[0]));
 	}
 	case BI_EXPECT: case BI_EXPECT_PROB: case BI_ASSUME_ALIGNED: case BI_EXTRACT_RETURN_ADDR: {
 		/* the value of the first argument; the others are evaluated first */
@@ -2184,6 +2212,12 @@ VPRIV val wk_gen(ecx *e, uint32_t n)
 
 			note_ref(e, REF(RK_SYM, s));
 			return (val){ .k = V_ADDR, .ref = REF(RK_SYM, s) };
+		}
+		{
+			val k;
+
+			if (wk_const_sym(e, x->a, &k))
+				return k;
 		}
 		wk_scalar(e, n, x->ty);
 		return wk_load(e, wk_lval(e, n), x->ty);
