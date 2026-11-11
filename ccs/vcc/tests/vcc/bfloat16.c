@@ -29,6 +29,7 @@ int main(void){
   if(!!__builtin_isfinite(z)!=(mag<0x7f80))return 8;
 #if defined(__aarch64__)
   /* Clang x86 currently quiets signaling bf16 on a scalar copy. */
+  if(!!__builtin_issignaling(z)!=(mag>0x7f80&&mag<0x7fc0))return 9;
 #endif
   if(mag>0x7f80)continue;
   y.f=narrow(wide(x.f));if(y.u!=x.u)return 10;

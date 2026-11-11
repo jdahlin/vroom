@@ -25,6 +25,7 @@ int main(void)
         volatile half z = x.h;
         unsigned mag = i & 0x7fff;
         if (!!__builtin_signbit(z) != !!(i & 0x8000)) return 7;
+        if (!!__builtin_issignaling(z) != (mag > 0x7c00 && mag < 0x7e00)) return 12;
         if (!!__builtin_isnan(z) != (mag > 0x7c00)) return 8;
         if (!!__builtin_isinf(z) != (mag == 0x7c00)) return 9;
         if (!!__builtin_isfinite(z) != (mag < 0x7c00)) return 10;
