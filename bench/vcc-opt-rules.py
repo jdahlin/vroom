@@ -45,6 +45,12 @@ def body(assembly, name, wasm):
 
 def check_localvalues(assembly, arch):
     wasm = arch.startswith('wasm')
+    shift = r'i32\.(?:shl|shr_[us])\b' if wasm else r'\b(?:lsl|lsr|asr)\s+w' if arch == 'aarch64' else r'\b(?:shl|shr|sar)l\b'
+    for name, count in [('lvr_shift', 1), ('lvr_shift_decl', 1), ('lvr_shift_signed', 1),
+                        ('lvr_shift_kill', 2), ('lvr_shift_order', 2), ('lvr_shift_volatile', 2)]:
+        text = body(assembly, name, wasm)
+        if len(re.findall(shift, text)) != count:
+            raise RuntimeError(f'{name}: shift reuse or barrier failed\n{text}')
     text = body(assembly, 'lvr_square', wasm)
     add = r'i32\.add\b' if wasm else r'\badd\s+w' if arch == 'aarch64' else r'\baddl\b'
     if len(re.findall(add, text)) != 1:

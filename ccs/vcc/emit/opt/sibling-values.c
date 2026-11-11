@@ -44,6 +44,7 @@ static uint32_t em_sibling_value(cc *c, em_sibling_state *s, uint32_t n)
   key.left = left;
  } else if (x->op == N_BINARY && (x->aux == T_PLUS || x->aux == T_MINUS || x->aux == T_STAR ||
                                   x->aux == T_AMP || x->aux == T_PIPE || x->aux == T_CARET ||
+                                  x->aux == T_LESSLESS || x->aux == T_GREATERGREATER ||
                                   x->aux == T_EQUALEQUAL || x->aux == T_EXCLAIMEQ ||
                                   x->aux == T_LESS || x->aux == T_LESSEQ ||
                                   x->aux == T_GREATER || x->aux == T_GREATEREQ)) {
