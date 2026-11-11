@@ -256,6 +256,15 @@ Rättningar av vektoranrop, packade returvärden, unionsinitialisering,
 fältalignering och homogena ARM-aggregat verifieras nu mot samma fall.
 Siffrorna är baslinjer, inte ett påstående om slutligt gröna körningar.
 
+Ny isolerad körning av den committade kompilatorn `1009175`: x86 GCC
+**777 godkända, 0 vcc-fel, 222 clang-filtrerade och 1 clang-krasch**;
+LLVM **1000/1000**. ARM GCC **769 godkända, 9 fel, 222 filtrerade**;
+LLVM **1000/1000**. De nio ARM-fallen verifieras mot ännu ej committade
+rättningar för tomma aggregat/HFA och varargs. Att den kombinerade
+arbetskopian tidigare gick grönt ersätter inte isolerad verifiering av
+committade ändringar. Källor/kommandon finns i
+`work/abi-generated/committed-{x86,arm}/`.
+
 **Klart när:** N genererade fall per plattform utan skillnad.
 
 ### S7 Slumpprogram (TODO T10) — rigg klar, långkörningar återstår
