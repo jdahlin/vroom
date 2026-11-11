@@ -69,7 +69,7 @@ WASM_XFAIL.update({
     'deep_conditional': 'TODO.md wasm: Linux-correctness coverage gaps: nested GNU omitted-middle conditionals mishandle __int128 values',
     'fabs_asm_identity': 'TODO.md wasm: Linux-correctness coverage gaps: fabs/fabsf intrinsic selection ignores asm-renamed function identity',
     'fp_classify_builtin': 'TODO.md wasm: Linux-correctness coverage gaps: runtime __builtin_isnormal/__builtin_fpclassify are not lowered',
-    'fp_compare_builtin': 'TODO.md wasm: Linux-correctness coverage gaps: ordered/unordered floating comparison builtins are not lowered',
+    'fp_compare_builtin': 'TODO.md wasm: Linux-correctness coverage gaps: long-double ordered/unordered comparison builtins are not lowered',
     'fpclassify': 'TODO.md wasm: Linux-correctness coverage gaps: runtime __builtin_isnormal/__builtin_fpclassify are not lowered',
     'generic_bitcount': 'TODO.md wasm: Linux-correctness coverage gaps: _BitInt runtime precision and generic bitcount lowering are not implemented',
     'gnu_conditional_float': 'TODO.md wasm: Linux-correctness coverage gaps: GNU omitted-middle floating conditional mishandles truth/value conversion',
@@ -83,6 +83,27 @@ WASM_XFAIL.update({
     'transparent_union_redecl': 'TODO.md wasm: Linux-correctness coverage gaps: transparent-union redeclarations do not use the member calling convention',
     'void_lvalue': 'TODO.md wasm: Linux-correctness coverage gaps: void lvalue evaluation leaves unwanted Wasm stack values',
 })
+
+def unsupported_requirement(suite, src):
+    """Honor an explicit upstream contract, never infer support from a failure.
+
+    LLVM Wasm cannot represent escaping GNU label addresses (PLAN-wasm.md,
+    "Referenskontrakt"). Some examples optimize away, but that does not provide
+    the label_values target capability required by these GCC tests.
+    """
+    if suite == 'gcc' and re.search(
+            r'(?m)^\s*/\*\s*\{\s*dg-require-effective-target\s+label_values\s*\}\s*\*/', src):
+        return 'wasm: dg-require-effective-target label_values is unsupported (PLAN-wasm.md: Referenskontrakt)'
+    return None
+
+
+def report_case(suite, name, status, category, why, verbose=False, show=None):
+    # Unexpected results must identify the source even in the default CI log.
+    if status in ('fail', 'error') or (verbose and status == 'xfail'):
+        print(f'{status.upper()} {category:5s} {suite}/{name}: {why}')
+    if show and status != 'pass' and category == show:
+        print(f'{status} {category} {suite}/{name}: {why}')
+
 
 def set_target(w32):
     """wasm32 (W7) instead of wasm64: the target, emcc's memory, the work directory"""
@@ -135,37 +156,52 @@ def vlink_env():
         os.rename(shim + '.tmp', shim)
     return dict(os.environ, EM_LLVM_ROOT=shim, EM_FROZEN_CACHE='1', EM_IGNORE_SANITY='1')
 
-def run(js):
+def run(js, diagnostics=False):
     rc, out, err = sh([NODE, js], timeout=20, stdin=subprocess.DEVNULL)
-    return rc, out.decode('latin-1')
+    result = (rc, out.decode('latin-1'))
+    return (*result, err) if diagnostics else result
 
 def reference(suite, name, path, flags, wd):
-    key = hashlib.sha1((open(path, 'rb').read().decode('latin-1') + ' '.join(flags) + ' '.join(ct.CLFL) + ' '.join(LINK) + 'rt1').encode()).hexdigest()[:16]
+    with open(path, 'rb') as source:
+        src = source.read().decode('latin-1')
+    key = hashlib.sha1(('oracle-status-v2 ' + src + ' '.join(flags) + ' '.join(ct.CLFL) + ' '.join(LINK) + 'rt1').encode()).hexdigest()[:16]
     cf = f'{OUT}/ref/{suite}/{name}.json'
     try:
-        r = json.load(open(cf))
-        if r['key'] == key:
+        with open(cf) as cache:
+            r = json.load(cache)
+        if r['key'] == key and 'error' not in r:
             return r
     except (OSError, ValueError, KeyError):
         pass
     r = {'key': key}
     sj = SJLJ in [flags[i:i + 2] for i in range(len(flags))]
+    timeout = ct.reference_timeout(path)
     rc, _, err = sh([CL] + BASE + ct.CLFL + flags + (SJLJ_CL if sj else []) + ['-c', path, '-o', f'{wd}/ref.o'],
-                    cwd=os.path.dirname(path))
+                    cwd=os.path.dirname(path), timeout=timeout)
+    failure = ct.oracle_error(rc, err, 'compile', timeout)
+    if failure:
+        return dict(r, **failure)
     if rc:
         r['skip'] = 'clang-rejects'; r['why'] = ct.first_err(err.decode(errors='replace'))
     else:
         rc, err = link([f'{wd}/ref.o'], f'{wd}/ref.js', extra=SJLJ_LINK if sj else ())
+        failure = ct.oracle_error(rc, err, 'link', 120)
+        if failure:
+            return dict(r, **failure)
         if rc:
             m = re.search(r'undefined symbol: (\S+)', err)
             r['skip'] = 'ref-fail'; r['why'] = 'link: ' + (m.group(1) if m else ct.first_err(err))
         else:
-            rc, out = run(f'{wd}/ref.js')
+            rc, out, err = run(f'{wd}/ref.js', diagnostics=True)
+            failure = ct.oracle_error(rc, err, 'run', 20)
+            if failure:
+                return dict(r, **failure)
             r['rc'] = rc; r['out'] = out
             if suite in ('gcc', 'vcc') and rc != 0:
                 r['skip'] = 'ref-fail'; r['why'] = f'clang build exits {rc}'
     os.makedirs(os.path.dirname(cf), exist_ok=True)
-    json.dump(r, open(cf, 'w'))
+    with open(cf, 'w') as cache:
+        json.dump(r, cache)
     return r
 
 def one(t):
@@ -188,6 +224,9 @@ def one_(t):
         return t, 'skip', 'tcc-specific', ct.TCC_SKIP[name]
     if suite == 'gcc' and name in ct.GCC_SKIP:
         return t, 'skip', 'compiler-specific', ct.GCC_SKIP[name]
+    unsupported = unsupported_requirement(suite, src)
+    if unsupported:
+        return t, 'skip', 'unsupported-target', unsupported
     if name in WASM_SKIP:
         return t, 'skip', 'wasm', WASM_SKIP[name]
     flags = ct.dg_flags(src) if suite == 'gcc' else ct.exec_marks(src)[0] if suite == 'vcc' else []
@@ -202,6 +241,8 @@ def one_(t):
     os.makedirs(wd, exist_ok=True)
     cwd = os.path.dirname(path)
     ref = reference(suite, name, path, flags, wd)
+    if 'error' in ref:
+        return t, 'error', ref['error'], ref['why']
     if 'skip' in ref:
         return t, 'skip', ref['skip'], ref['why']
     vfl = BASE + ct.CLFL + flags
@@ -209,12 +250,12 @@ def one_(t):
         rc, _, err = sh([VPP, '-c'] + vfl + [path, '-o', f'{wd}/vcc.o'], cwd=cwd)
         if rc:
             e = err.decode(errors='replace')
-            return t, 'fail', 'emit', ct.first_err(e) if rc != 'timeout' and rc > 0 else f'vpp: signal/timeout {rc}: ' + ct.first_err(e)
+            return t, 'fail', 'emit', ct.first_err(e) if isinstance(rc, int) and rc > 0 else f'vpp: signal/timeout {rc}: ' + ct.first_err(e)
     else:
         rc, _, err = sh([VPP, '-S'] + vfl + [path, '-o', f'{wd}/vcc.s'], cwd=cwd)
         if rc:
             e = err.decode(errors='replace')
-            return t, 'fail', 'emit', ct.first_err(e) if rc != 'timeout' and rc > 0 else f'vpp: signal/timeout {rc}: ' + ct.first_err(e)
+            return t, 'fail', 'emit', ct.first_err(e) if isinstance(rc, int) and rc > 0 else f'vpp: signal/timeout {rc}: ' + ct.first_err(e)
         eh = ['-mexception-handling'] if sj else []
         rc, _, err = sh([CL, TGT] + eh + ['-c', f'{wd}/vcc.s', '-o', f'{wd}/vcc.o'])
         if rc and all('call_indirect' in l for l in re.findall(r'error: .*\n(.*)', err.decode(errors='replace'))):
@@ -304,14 +345,9 @@ if __name__ == '__main__':
         if st != 'pass':
             by[s][f'{st}:{cat}'] += 1
             whys[(st, cat)][why] += 1
-        if verbose and st == 'fail':
-            print(f'FAIL {cat:5s} {s}/{n}: {why}')
-        if verbose and st == 'xfail':
-            print(f'XFAIL {cat:5s} {s}/{n}: {why}')
-        if show and st != 'pass' and cat == show:
-            print(f'{st} {cat} {s}/{n}: {why}')
+        report_case(s, n, st, cat, why, verbose, show)
     for (st, cat), c in sorted(whys.items()):
-        if st == 'fail' or verbose:
+        if st in ('fail', 'error') or verbose:
             print(f'--- {st} {cat}: {sum(c.values())}')
             for w, k in c.most_common(int(os.environ.get('SHOW', 8))):
                 print(f'  {k:4d}  {w[:150]}')
@@ -319,9 +355,9 @@ if __name__ == '__main__':
     for s in sorted(by):
         tot.update(by[s])
     for s, c in sorted(by.items()) + [('all', tot)]:
-        run_ = c['pass'] + c['fail']
+        run_ = c['pass'] + c['fail'] + c['error']
         det = ' '.join(f'{k}={v}' for k, v in sorted(c.items()) if ':' in k)
         xf = f', {c["xfail"]} xfail' if c['xfail'] else ''
         print(f'{s:4s} {c["pass"]}/{run_} pass ({100 * c["pass"] / max(run_, 1):.1f}%){xf}, {c["skip"]} skipped   {det}')
     print(f'{time.time() - t0:.1f} s')
-    sys.exit(1 if tot['fail'] else 0)
+    sys.exit(1 if tot['fail'] or tot['error'] else 0)

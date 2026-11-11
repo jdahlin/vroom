@@ -56,6 +56,7 @@ build() {	# build MAKE-TARGET: a build failure ends the job
 case $JOB in
 arm64)
 	build vcc
+	step runtime-exceptions python3 bench/test-runtime-exceptions.py
 	step ctests       python3 bench/vcc-ctests.py -j "$J"
 	step rec-effects  python3 bench/vcc-rec-effects.py
 	step opt-debug-x86 python3 bench/vcc-opt-debug.py
@@ -67,6 +68,7 @@ arm64)
 	step stress-vccd  python3 bench/vcc-stress.py --vccd
 	step vccd         python3 bench/vccd-test.py
 	step abi          python3 bench/vcc-abi.py
+	step atomic       python3 bench/vcc-atomic.py --bin-dir "$BUILD" --target aarch64-linux-gnu
 	step pic          python3 bench/vcc-pic.py
 	step vas-obj      python3 bench/vas-obj.py
 	step vlink-opts   python3 bench/vlink-opts.py
@@ -74,6 +76,8 @@ arm64)
 	step torture-dg   python3 bench/test-torture-directives.py
 	step gcc-dg       python3 bench/test-gcc-dg.py
 	step libc-test-harness python3 bench/test-libc-test.py
+	step kefir-harness python3 bench/test-kefir.py
+	step runtime-oracle-harness python3 bench/test-runtime-oracle.py
 	step verify-contract python3 bench/test-verify.py
 	step onboarding-verifier python3 bench/test-onboarding.py
 	step onboarding   python3 bench/vcc-onboarding.py --target aarch64-linux-gnu --baseline
@@ -89,6 +93,7 @@ asan)
 	# its arenas and caches mapped, by design, so every compile would "leak"
 	export ASAN_OPTIONS=${ASAN_OPTIONS:+$ASAN_OPTIONS:}detect_leaks=0
 	step ctests-vcc   env VCC_BIN="$B" python3 bench/vcc-ctests.py -j "$J" --suite vcc
+	step atomic       python3 bench/vcc-atomic.py --bin-dir "$B" --target aarch64-linux-gnu
 	step diag         python3 bench/vcc-diag.py -j "$J" --bin-dir "$B"
 	step stress       python3 bench/vcc-stress.py --bin-dir "$B"
 	step vccd         python3 bench/vccd-test.py --bin-dir "$B"

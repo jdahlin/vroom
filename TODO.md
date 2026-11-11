@@ -208,12 +208,15 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
   *Validate:* T1 `align_local.c` (`_Alignas(32/64/128/4096)` locals, arrays
   and VLAs of over-aligned types, inside recursion and alongside alloca;
   check `(uintptr_t)&x % A == 0`).
-- [ ] **Atomic complex increment/decrement** [P]. Non-atomic complex
+- [x] **Atomic complex increment/decrement** [P]. Non-atomic complex
   `++`/`--` update only the real component and preserve the imaginary bits.
-  `_Atomic(_Complex T)` still requires a whole-object compare-exchange loop;
-  reject it explicitly rather than lowering to a non-atomic component write.
-  *Validate:* concurrent increments on `_Atomic(_Complex float/double)` on
-  both Linux targets, including unchanged imaginary NaN/signed-zero bits.
+  Atomic complex values up to eight bytes use a whole-object compare-exchange
+  loop (`tests/vcc/atomic_complex_incdec.c`, `tests/atomic/complex_concurrent.c`).
+  Linux wider complex values use the generic libatomic whole-object ABI and
+  CAS retries. Validated concurrent double/long-double increments, imaginary
+  signed-zero retention, 64-byte aggregate snapshots and 128-bit integer RMW
+  on both Linux targets (`tests/atomic/wide.c`, link with `-latomic -pthread`).
+  Wider atomic operations on other targets remain unsupported.
 
 - [x] **`_Atomic` dropped** [P].  Done: `_Atomic(T)` and the qualifier
   (also `T *_Atomic`) make a type of its own (`TF_ATOMIC`, `ty_atomic()` in
@@ -221,9 +224,11 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
   T; emit loads with `ldar`, stores with `stlr`, and every compound
   assignment and `++`/`--` is a `casal` loop around the operator's usual
   code (`atomic_rmw`, emit/expr.c).  Tests: `atomic_layout.c`,
-  `atomic_ops.c`.  Left, each a clean error today: 16-byte atomics
-  (`_Atomic __int128`, `long double`; needs `caspal`), loads and stores of
-  whole `_Atomic` structs/unions, `_Atomic` vectors.  Differs from clang on
+  `atomic_ops.c`. Linux whole-object records and wider integer, FP and complex
+  accesses use the libatomic pointer ABI when a native 1/2/4/8-byte access is
+  unavailable; native 16-byte instructions remain an optimization. Atomic
+  vector types remain unsupported by the frontend.
+  Differs from clang on
   purpose: clang 21/23 zero-extend a signed old value when the compound
   operation leaves int arithmetic (`x /= -2` on `_Atomic signed char` -2
   gives -127); vcc gives 1 as C says.  Clang rejects `+=` on an atomic
@@ -531,6 +536,18 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
   `bcp-1` needs `__builtin_constant_p` of an inlined argument.  They are
   `WASM_XFAIL` in `bench/vcc-wasm.py` (premerge's wasm job).
   *Validate:* `bench/vcc-wasm.py -j 6` reports them as XPASS; remove the entries.
+- [ ] **wasm: 128-bit overflow builtins** [C]. `overflow128` covers standard
+  integer operands and destinations independently of `_BitInt`;
+  `overflow128_effects` checks evaluation counts and result stores on overflow.
+  Both are rejected by the Wasm emitter on the same sources with the
+  `1f4c8d2` baseline compiler (code-identical to `b97022e`) and the current
+  compiler, on wasm32 and wasm64. Implement full-width add/subtract/multiply
+  overflow and mixed signedness without truncating operands. The separate
+  `overflow128_bitint` also requires the remaining-target `_BitInt` ABI work.
+  All three remain required on Linux; Wasm expected failures are executed and
+  must become XPASS when fixed, never skipped.
+  *Validate:* `bench/vcc-wasm.py -j 6 --suite vcc --no-cache overflow128`
+  and `--wasm32`; remove each marker after its full runtime test passes.
 - [ ] **wasm: wide integer bitfields** [C]. `bitfield_int128` and
   `bitfield_int128_static` exercise packed fields with `__int128` base types,
   signed extension and neighboring bits. The Wasm emitter handles these as
@@ -550,7 +567,7 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
   `bench/vcc-wasm.py` records each as an explicit expected failure, executes it
   against clang, and rejects XPASS. They are not skipped.
   - Runtime classification/comparison: `fp_classify_builtin`, `fpclassify`,
-    `fp_compare_builtin`, `isfpclass`, `signaling_nan`; long-double
+    `fp_compare_builtin` (long-double comparisons), `isfpclass`, `signaling_nan`; long-double
     classification in `complex_div_runtime`.
   - Integer/aggregate lowering: `atomic_record` (128-bit atomic value conversion),
     `generic_bitcount` (_BitInt runtime precision), `int128_shift_count`
@@ -682,9 +699,13 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
   arm64 now normalize runtime arithmetic, loads, conversions and call results
   to the declared precision. Their clang/vcc cross-call tests cover scalar
   arguments/returns, callbacks, register exhaustion, varargs and aggregates.
+  The dirty-padding compound-assignment regression is executed as a Wasm
+  expected failure: its unchanged source fails with the same unsupported
+  runtime diagnostic on 1f4c8d2, 9d022c3 and 7eca264 for wasm32 and wasm64;
+  both Clang reference programs pass.
   Wider integers and runtime support on other targets remain to implement;
-  overflow builtins with BitInt operands/destinations above 64 bits are still
-  explicitly diagnosed (the existing wide-overflow lowering limitation).
+  On Wasm, overflow builtins with BitInt operands/destinations above 64 bits
+  are still explicitly diagnosed; the Linux 128-bit paths are implemented.
   *Validate:* `tests/vcc/bitint_constants.c`, `bitint_runtime.c` (16 widths,
   eight boundary/pattern inputs, native x86 and ARM/QEMU), `tests/abi/bitint/`
   (all four compiler combinations on each Linux target), cproc's three cases.
