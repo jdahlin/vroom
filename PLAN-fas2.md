@@ -3138,3 +3138,138 @@ Callgrind-grinden ger nu compiler-Ir +0,112 % x86, +0,113 % arm64, +0,119 %
 wasm32 och +0,117 % wasm64; 1 %-grinden passerar med samma redovisade
 wasm-uteslutningar. Denna mätning ersätter inte CPU-tid och underlag finns i
 `work/opt-profile/local-values-main-cost/result.json`.
+
+### Lokal initiering följd av ren retur (2026-11-11)
+
+Det begränsade värdenumreringsreceptet återanvänder nu även ett ordinärt lokalt
+heltalsvärde i en direkt efterföljande ren retur: `unsigned x=a+b; return
+x*(a+b);` beräknar summan en gång på x86, arm64 och wasm. Returnoden måste
+redan läsa `x`, så dess initiering inte kan försvinna som oanvänd. Samma
+32-nods-/64-tabellbudget och rena heltalskrav används; annan sats, skrivning,
+anrop, indirekt minne, volatile, atomic, adresstagna variabler och obevisade
+uttryck avstår. Substitutionen gäller endast under den retursatsen och sparas/
+återställs per emitterkontext. Detta är ännu inte generell blocklokal CSE.
+
+O0–O3 körnings-/kodgenereringsprov passerar på fyra mål i båda bygglägen,
+inklusive skrivning och volatile-lokal som negativa fall. O0/noopt-assembler
+är identisk mot `597c521`; vcc-sviten passerar 256/256 med en befintlig xfail.
+Matchad Callgrind mot den föräldern gav compiler-Ir +0,102 % x86, +0,088 %
+arm64, −0,003 % wasm32 och +0,004 % wasm64 på den fasta lilla korpusen; 1 %-
+grinden passerar. Tre växelvisa seriella rundor på 28 förprocessade arm64-
+kärn-TU:er gav median användar-CPU 0,79289 → 0,78492 s; två TU:er är
+uteslutna och det lilla urvalet på delad värd bevisar ingen generell tidsvinst.
+Detaljer och hashad proveniens: `work/opt-profile/decl-return-cost/result.json`
+och `work/opt-profile/decl-return-cputime/kernel-batch-result.json`.
+Generell lokal CSE, G5/G7 och full O2-täckning återstår.
+Samma 28-TU-prov vid O0 gav median användar-CPU 0,76171 → 0,76136 s över
+tre växelvisa rundor. Detta korta sampel på delad värd är inte en generell
+CPU-tidsgrind; rådata finns i `work/opt-profile/decl-return-o0-cputime/`.
+
+Utökning: returregeln söker nu bakåt över högst åtta rena lokala
+heltalsdeklarationer i samma block. Skrivningar, anrop, volatile/atomic,
+cleanup, kontrollflöde och obevisade initierare stoppar sökningen. En fast
+kandidats nyckel bevaras under sökningen även om den direktmappade tabellen
+får en kollision; budgetslut avstår fortfarande. Fokuserade kodforms- och
+körningsprov täcker ren mellanliggande deklaration samt skrivnings-, anrops-
+och volatilebarriärer på alla fyra mål O0–O3 och båda bygglägen. O0/noopt är
+byteidentiskt mot föräldern; vcc-sviten 256/256 med en befintlig xfail och
+x86-debugrader O0–O3 passerar.
+
+Ny matchad Callgrind-profil mot `597c521`: compiler-Ir +0,114 % x86, +0,094 %
+arm64, +0,010 % wasm32, +0,015 % wasm64; 1 %-grinden passerar på den fasta
+begränsade korpusen med tidigare redovisade wasm-uteslutningar. Sju växelvisa
+rundor på 28 förprocessade arm64-kärn-TU:er gav median användar-CPU O2
+0,78091 → 0,78181 s och O0 0,76889 → 0,76712 s. Ett tidigare tresampelsprov
+varierade mer; dessa små, selektiva prover på delad värd ger inte en generell
+CPU-tidsgräns. Rådata och hashad proveniens finns i
+`work/opt-profile/decl-return-expanded-cost/`, `decl-return-expanded-cputime/`,
+`decl-return-expanded-cputime7/` och `decl-return-expanded-o0-7/`. Sökning över
+andra satser, joinpunkter och generell CSE återstår.
+
+Samma begränsade blockskanning återanvänder nu värden även i en senare ren
+lokal heltalsinitiering, inte enbart i retur. Mottagaren måste redan läsa den
+tidigare lokalen; skrivning, anrop, volatile/atomic och övriga barriärer
+avvisas som tidigare. Nya körnings- och kodformskrav passerar O0–O3 på fyra
+mål i båda bygglägen, inklusive en skrivande initierare som negativfall.
+O0/noopt-assembler är byteidentisk mot `597c521`; vcc-sviten är 256/256 med
+en befintlig xfail och x86:s debugprov passerar.
+
+Den uppdaterade fasta Callgrind-korpusen mot samma bas ger compiler-Ir
++0,151 % x86, +0,130 % arm64, +0,036 % wasm32 och +0,031 % wasm64; 1 %-
+grinden passerar med tidigare redovisade uteslutningar. Sju växelvisa O2-
+rundor på 28 förprocessade arm64-kärn-TU:er gav median användar-CPU 0,78387 →
+0,78438 s; tre O0-rundor gav 0,76742 → 0,75814 s. Två TU:er exkluderades och
+korta prover på delad värd ger ingen generell tidsgräns. Proveniens och sampel:
+`work/opt-profile/local-values-decl-cost/`, `local-values-decl-cputime/` och
+`local-values-decl-o0/`. Generell blocklokal CSE och reuse över joins återstår.
+
+Den begränsade blockskanningen kan nu passera ordinära lokala tilldelningar,
+inkrement och enkla sammansatta tilldelningar. Skrivna symboler samlas upp;
+kandidaten avvisas om den cachade lokalen eller någon indata har skrivits.
+Pekare, volatile/atomic, anrop, dolda skrivningar, division/shift och andra
+obevisade effekter är barriärer. Renhetskontrollen av en tilldelnings högerled
+skjuts upp tills en kandidat överlevt invalidationskontrollen; enkla skrivna
+indata avvisas innan tabellen skapas. Testerna täcker oberoende skrivning,
+skriven indata, skrivet cachat värde, sammansatt tilldelning, inkrement och
+dold skrivning/anrop/volatile; fyra mål O0–O3 och båda bygglägen passerar.
+O0/noopt ger byteidentisk assembler mot `597c521`; vcc 256/256 med en
+befintlig xfail, x86-debug och ASan/UBSan-tabellkontrakt passerar.
+
+Matchad Callgrind mot samma förälder: compiler-Ir +0,156 % x86, +0,147 %
+arm64, +0,044 % wasm32 och +0,046 % wasm64; 1 %-grinden passerar med samma
+redovisade uteslutningar. Sju växelvisa O2-rundor på 28 förprocessade
+arm64-kärn-TU:er gav median användar-CPU 0,78569 → 0,78586 s; två TU:er är
+uteslutna och det korta urvalet på delad värd visar ingen generell tidsgräns.
+Ett avsiktligt mättat kontrollprov med 2 000 ogiltigförklarade kandidater gav
++2,32 % compiler-Ir på x86 och +2,52 % på wasm64, med identisk assembler.
+Före den uppskjutna kontrollen och snabbavvisningen var motsvarande +3,77 %
+och +4,26 %. Det är ett verkligt avgränsat kostnadsfall, inte hela projektets
+kostnad. Exakta kommandon, binär-/källhashar och sampel finns i
+`work/opt-profile/local-values-writes-fast-cost/`,
+`local-values-writes-fast-cputime/`, `local-values-writes-saturated/` och
+`local-values-writes-fast-saturated/`. Generell CSE och joins återstår.
+
+### Lokal värdeåteranvändning i tilldelningar (2026-11-11)
+
+Den budgeterade blockskanningen kan nu återanvända en tidigare lokal i
+högerledet till en ordinär lokal heltalstilldelning, även utvalda sammansatta
+tilldelningar. Målet kan vara den cachade lokalen eller en av dess indata:
+substitutionen gäller bara det rena högerledet före skrivningen. Tidigare
+skrivningar invaliderar som förut; indirekta, volatile och atomiska mål och
+högerled med sidoeffekter avvisas. Rena heltalskonverteringar kan nu ingå i
+det begränsade värdenumreringsbeviset; flyttalskonverteringar förblir
+barriärer. Detta är fortfarande inte generell CSE eller återanvändning över
+kontrollflödesjoin.
+
+Fyrmålsprov O0–O3 i båda bygglägen täcker vanliga och sammansatta mål,
+skrivning till cachat värde/indata före respektive under konsumtion,
+volatile och dold skrivning, heltals-/flyttalskonvertering samt kodform.
+O0/noopt är byteidentiskt mot `143e9c0`; vcc-sviten passerar 256/256 med en
+befintlig xfail, x86-debug och ASan/UBSan-tabellkontrakt passerar. Matchad
+Callgrind-korpus mot den föräldern gav compiler-Ir +0,057 % x86, +0,046 %
+arm64, +0,074 % wasm32 och +0,060 % wasm64; 1 %-grinden passerar med tidigare
+redovisade wasm-uteslutningar. Sju växelvisa O2-rundor med 28 förprocessade
+arm64-kärn-TU:er gav median användar-CPU 0,78612 → 0,79193 s; två TU:er är
+uteslutna och korta sampel på delad värd visar ingen generell tidsgräns.
+En avsiktligt mättad kontroll med 2 000 ogiltigförklarade kandidater gav
++1,83 % compiler-Ir x86 och +2,22 % wasm64, med identisk assembler. Resultat,
+kommandon och hashad proveniens finns i `work/opt-profile/local-values-assign-
+{cost,cputime,saturated}/`. G5/G7 och generell O2-täckning återstår.
+
+### Integration av lokal värdeåteranvändning
+
+PR #97 och #100 hade slagits ihop i redan integrerade featuregrenar. De
+integreras därför ovanpå main `94c93d3a` (inklusive switch-jumptabeller) i
+merge `345796ab`. Localvalues- och switchproven passerar O0–O3 på x86, arm64,
+wasm32 och wasm64 i unity- och separatfilbygge; O0 och O2 med VCC_NOOPT är
+byteidentiska med main. Vcc-sviten passerar 258/258 med en befintlig xfail;
+ASan/UBSan-provet för värdetabellen passerar.
+
+Matchad Callgrind-korpus mot main ger compiler-Ir +0,204 % x86, +0,174 %
+arm64, +0,112 % wasm32 och +0,104 % wasm64, under 1 %-budgeten. Korpusen har
+12 filer för de inhemska målen, 10 för wasm32 och 11 för wasm64; atomics och
+BitInt-fall som inte stöds av respektive mål uteslöts på båda sidor. Sju
+växelvisa rundor med 28 förprocessade arm64-kärnfiler gav median användar-CPU
+0,825 → 0,791 s; två filer uteslöts efter preflight och korta sampel på delad
+värd visar ingen generell hastighetsförändring. Proveniens finns i
+`work/opt-profile/local-values-integration-{cost,cputime}/`.

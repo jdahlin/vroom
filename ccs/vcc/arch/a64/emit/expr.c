@@ -1077,6 +1077,7 @@ static val gen_inner(ecx *e, uint32_t n);
 
 VPRIV val gen(ecx *e, uint32_t n)
 {
+	if (n && n == e->reuse_from) n = e->reuse_to;
 	cc *c = e->c;
 	qty t = N(n)->ty;
 
