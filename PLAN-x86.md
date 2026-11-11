@@ -330,6 +330,46 @@ kärnan och kan vänta.
 
 ## Status
 
+### X3 (2026-11-11): utökade Linux-körningar
+
+Den kombinerade arbetskopian klarar 1807/1815 vendrade körtest på x86
+(134 filtrerade); kvar är åtta GCC-optimeringsfall. Egna tester går
+100/100. ARM/QEMU går 1822/1822, egna tester 105/105. Nonlocal jumps,
+FP-registerspill, breda vektorlaner, ramdjup och 128-bitars overflowresultat
+för högst 64-bitars operander har isolerade unity/nonunity-byggen och
+riktade tester på båda målen. GCC:s ABI-generator har ett återstående
+x86-fel av 777 clang-giltiga fall; LLVM:s generator går 1000/1000.
+Detta flyttar X3 men är inte ett godkännande av återstående steg.
+
+### X3 (2026-11-11): x87-operander i inline asm
+
+- `t`/`u`-operander läggs på x87-stacken efter att uttrycken har evaluerats;
+  utdata lagras med sin rätta bredd och kvarvarande indata poppas. `st(1)`
+  i clobberlistan beskriver den pop som själva asm-mallen gör. Blandade
+  x87/GPR-operander och andra x87-constraints stöds ännu inte.
+- Matchande GPR-operander får olika bredder (t.ex. 64-bitars indata och
+  32-bitars utdata i samma register), som clang.
+- GCC `990413-2`, `20030222-1` och `stkalign` passerar x86. De två senare
+  passerar även arm64/QEMU. `asm_x86_x87` kör sqrt för float/double/long
+  double, fpatan, fsincos, read/write och trunkering, 32 gånger för att
+  fånga läckta x87-stackposter. Separat kompilering av ändrade C-filer grön.
+
+### X3 (2026-11-11): överjusterad stack
+
+- Lokala objekt med alignment över 16 får en dynamiskt justerad rambas i
+  `r12`; `rbp` behåller inkommande argument och returadressen. VLA:er får
+  separat utfyllnad och en justerad objektpekare. Utgående stackargument
+  justeras efter argumentens största alignment och stackpekaren återställs
+  efter anropet.
+- `stack_overalign`: fasta objekt (64/128/256), VLA (256), rekursion,
+  stackargument, variadiska argument och 64-justerad struktur som värde
+  passerar på x86-64 och arm64/QEMU. Korsanrop clang/vcc i båda riktningar
+  passerar på båda målen (`tests/abi/stack_overalign`). cproc:s 12
+  alignmentfall passerar kompilering på båda målen. `vla_zero` passerar också:
+  nollningsslingans byteräknare rundas upp till hela 8-byteord.
+- Inline asm som explicit använder `r12` i en överjusterad funktion ger
+  tills vidare en diagnos: registret används som rambas.
+
 ### X3 (2026-11-11): GNU-villkor och debug-assembler
 GNU `a ?: b` omvandlar det sparade värdet till bool för grenen, också
 när a är float/double/long double. DWARF använder portabla
@@ -386,10 +426,9 @@ villkorsuttryck. x86:s egna tester: 47/56 godkända, mot 46/56 före
   `__builtin_setjmp`. `vcc-abi.py --target x86_64`: 10/12, med tre nya tester
   (`int_records`, `fp_records`, `complex_args`) som klarar alla fyra
   kombinationerna; resten stannar vid alignment > 16 och bit-fält över 8 byte.
-- Kvar i X3: vektorer av `__int128`, alignment
-  över 16, `__float128`-aritmetik (libgcc `__addtf3` ...), inlining av
+- Kvar i X3: explicit `r12` i inline asm med överjusterad rambas, `__float128`-aritmetik (libgcc `__addtf3` ...), inlining av
   `__always_inline` med `need_fold` och `constant_p` efter inlining,
-  `-mgeneral-regs-only`/`-mno-sse`, UTF-8-namn citerade som clang, `VCC_WALKLOG`.
+  `-mgeneral-regs-only`/`-mno-sse`, `VCC_WALKLOG`.
 
 ### X2 (2026-11-10): påbörjat, i gren `claude/x86-x2-walker`
 - Lagren finns i minsta form: `emit/rec/rec.h` (posthuvudet, `opdesc`),
