@@ -3021,3 +3021,12 @@ Callgrind mot PR #89:s `16d5feb` för hela den utökade regeln: x86 +0,133 %,
 arm64 +0,123 %, wasm32 +0,139 %, wasm64 +0,109 % kompilatorinstruktioner;
 1 %-grinden passerar på samma begränsade korpus. Exakta fall och proveniens:
 `work/opt-profile/repeated-expanded-cost/result.json`. Detta mäter inte CPU-tid.
+
+Kompletterande kort CPU-tidsprofil mot PR #89:s binär: fem växelvisa
+`perf stat task-clock:u`-körningar per binär på syntetiska filer med 12 000
+funktioner. Median bas → kandidat, x86: identitetsmättad 25,21 → 23,18 ms,
+kontroll utan träff 28,80 → 28,21 ms; wasm64: mättad 22,83 → 22,32 ms,
+kontroll 25,19 → 25,87 ms. Kontrollernas assembler är identisk. Den lilla,
+delade värdens korta sampel varierar och visar inte att CPU-tidspåslaget på
+verkliga projekt är under 1 %. Mätkommandon, binär-/indatahashar och alla
+sampel finns i `work/opt-profile/repeated-cputime/{measure.py,result.json}`.
