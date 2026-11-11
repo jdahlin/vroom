@@ -513,3 +513,10 @@ kompilatorinstruktioner. Mättad native signed32/64-kod kostar +14,21…+30,03 %
 ett avgränsat x86-körprov ger −63,59 % barn-CPU, med clang-identiska svar.
 Åtta O0/noopt-assemblerjämförelser är byte-identiska. Fulla G5/G7 förblir öppna.
 Implementations- och valideringsgränserna står i PLAN-fas2:s signed-status.
+
+
+OPT1-integrationskontroll på 60027c7 efter wasm-föräldern 6d60e73:
+båda bygglägen, 16 fulla assemblerpar, 16 mål/nivå-körfall, sanitiserade
+recept-/postkontrakt och 36 policy-/overflow-paritetsjämförelser passerar.
+Tidigare kompilatorkostnad gäller fortfarande historiska 69c1bd7 till f92b67b;
+den tillskrivs inte denna nya förälder. Integrations-CI och full G7 återstår.

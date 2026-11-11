@@ -2629,3 +2629,21 @@ Bounded-flow efter stackintegration med signed/tail/u64 (`661d552`): unity,
 sanitiserade flow-/dead-result-kontrakt, 16 mål-/nivåprov med körning och
 x86-debug O0–O3 passerar. Tidigare hela sviter och Ir-mätningar ovan gäller
 sina exakta angivna versioner; integrationen är ingen ny kostnadsmätning.
+
+
+OPT1 integration efter wasm-flödesföräldern: på `60027c7` med förälder
+`6d60e73` passerar unity och fil-för-fil (j2), 16 kompletta byteidentiska
+assemblerpar mellan bygglägena, samtliga 16 multiplikationsfall O0–O3 på
+x86/arm64/wasm32/wasm64, sanitiserat recept med mutation och posteffektskontrakt.
+36 O0/VCC_NOOPT/overflow-jämförelser mot förälderns binär är byteidentiska
+(byggd 1458a90, produktionskällor verifierat identiska med 6d60e73).
+Native-körharnessen kontrollerar nu även bevarade register för detta fall.
+CI-/harness-unionen behåller tails, deadresults, flödeskontrakt, wasm-flow och
+mulconst. Aktuell unity-binär har SHA256
+`398f139ca1489cd83a8822c0db8958f54df72cc73cc7fb252e5add4781a30a2e`;
+kommandon/binärhashar och 16 par finns i
+`work/opt-profile/mulconst-integration-parity/result.json`, kör-/kontraktsloggar
+i `work/mulconst-integration-{contracts,policy,runtime}.log`.
+Ingen historisk kostnadsprofil har upprepats: talen ovan gäller fortfarande
+exakt 69c1bd7 till f92b67b, inte denna integrationsförälder. Integrations-CI
+återstår; G5/G7 och hela O2 är fortsatt öppna.
