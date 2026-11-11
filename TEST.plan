@@ -359,6 +359,22 @@ runtime-regressioner per mål, 84 flaggkontroller, 28 strikta IEEE-prov,
 grönt. Befintliga driver/predefine-fel är exakt oförändrade mot basen
 (137/212, samma 75 fel); tolv riktade makro-/ordningsprov går grönt.
 
+Full omkörning på `ad4cf9a`, samtliga 3484 konfigurationer per mål:
+**x86 1811 godkända, 75 fel, 1596 filtrerade, två orakelfel**;
+**ARM 1792 godkända, 65 fel, 1625 filtrerade, två orakelfel**.
+Det är åtta respektive nio rättade fall från den frysta baslinjen, inga
+tidigare godkända fall regredierar, inga kompilatorkrascher och oförändrade
+filtreringar/orakelfel. Full jämförelse: `work/results/s4-integrated-summary.json`.
+Siffrorna gäller direkturvalet vid standardkonfiguration, inte hela
+optimeringsmatrisen eller nästlade delsviter.
+
+Statisk initiering av breda bitfält behåller nu alla 128 konstantbitar före
+fältbreddens trunkering, utan odefinierade skift av ett 64-bitars värde.
+Det återstående `pr89037` går därmed på båda målen; tre andra bitfältsfall
+var redan gröna. Ny regression täcker signerade 66-bitarsfält, packade
+119-bitarsfält, 128-bitarsfält och grannbitar. Fyra GCC-prov och sex
+riktade runtime-prov går per mål, unity/nonunity samt ny regression vid -O0.
+
 Kvar:
 - Alla återstående matchande filer och optimeringskonfigurationer; nästlade
   kataloger med egna `.exp`-drivrutiner och LTO har ännu ingen motsvarighet.
