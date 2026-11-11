@@ -722,6 +722,7 @@ VPRIV void wasm_tail(cc *c, tbuf *t, _Atomic uint8_t *claimed);
 /* prepass.c */
 VPRIV bool is_aconst(cc *c, uint32_t n);
 VPRIV uint32_t aconst_idx(cc *c, uint32_t n);
+VPRIV bool sve_codegen_ok(cc *c);
 VPRIV void ensure_walked(emitter *E, cc *c, uint32_t s);
 VPRIV int u32_cmp(const void *a, const void *b);
 /* tu.c */

@@ -8,6 +8,10 @@ static uint32_t sizeof_type(cc *c, qty t, uint32_t loc, uint32_t e, pp_span r)
 {
 	int k = KIND(c, t);
 
+	if (k == TY_SVE) {
+		cc_error(c, loc, "invalid application of 'sizeof' to sizeless type '%s'", tyname(c, t));
+		return mk_int(c, 0, c->t_size, loc);
+	}
 	if (k == TY_ARRAY && (T(c, t)->flags & TF_VLA)) {
 		uint32_t n = mk(c, N_SIZEOF_VLA, c->t_size, loc);
 
@@ -95,6 +99,8 @@ static __attribute__((noinline)) uint32_t unary_op(cc *c)
 			return n;
 		need_lvalue(c, n, t->loc);
 		need_scalar(c, n, "increment");
+		if (is_ptr(c, N(n)->ty) && KIND(c, T(c, N(n)->ty)->base) == TY_SVE)
+			cc_error(c, loc, "arithmetic on a pointer to sizeless type '%s'", tyname(c, T(c, N(n)->ty)->base));
 		{
 			uint32_t r = mk(c, op, QUNQ(N(n)->ty), loc);
 
@@ -224,8 +230,12 @@ static __attribute__((noinline)) uint32_t unary_op(cc *c)
 			if (KIND(c, ty) == TY_VOID || KIND(c, ty) == TY_FUNC)
 				EXT_WARN(c, "pointer-arith", w_ped, loc, "invalid application of 'alignof' to a %s type",
 					 KIND(c, ty) == TY_VOID ? "void" : "function");
+			if (KIND(c, ty) == TY_SVE)
+				cc_error(c, loc, "invalid application of 'alignof' to sizeless type '%s'", tyname(c, ty));
 			return mk_int(c, ty_align(c, ty), c->t_size, loc);
 		}
+		if (KIND(c, N(n)->ty) == TY_SVE)
+			cc_error(c, loc, "invalid application of 'alignof' to sizeless type '%s'", tyname(c, N(n)->ty));
 		return mk_int(c, align_of_expr(c, n), c->t_size, loc);
 	}
 	case KW___extension__:

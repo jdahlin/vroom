@@ -576,8 +576,8 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
   *Validated:* `tests/vcc/float16.c` exhausts all 65,536 encodings;
   `tests/abi/float16` checks all clang/vcc caller/callee combinations on
   both Linux targets. Kernel sema 887/887 and preprocessing parity 920/920.
-- [x] **`__bf16` on Linux x86-64 and arm64.** Distinct type, binary16
-  exponent/bfloat significand layout, literals/conversions/arithmetic and ABI.
+- [x] **`__bf16` on Linux x86-64 and arm64.** Distinct type, two-byte
+  bfloat exponent/significand layout, literals/conversions/arithmetic and ABI.
   *Validated:* all 65,536 encodings in `tests/vcc/bfloat16.c`, cross-compiler
   `tests/abi/bfloat16` calls on both Linux targets, invalid-complex diagnostic,
   unity/nonunity builds and kernel sema 887/887 (run and batch).
@@ -642,7 +642,12 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
   argument has side effects.  Sized `__sync_*_N`, `__sync_swap`, `__c11_atomic_*`, `__builtin_rotate{left,right}N` and the ACLE `__builtin_arm_{nop,yield,wfe,wfi,sev,sevl,clrex,isb,dmb,dsb,trap,clz,clz64,rbit,rbit64,cls,cls64}`: tests/vcc/builtin_rotate_arm.c.  Atomic nand/max/min (`__atomic_*`, `__c11_atomic_*`, `__sync_*` with clang's -Wsync-fetch-and-nand-semantics-changed: diag `sync_nand.c`; LSE ld{s,u}{max,min}al, LL/SC without LSE, nand as a loop), `__atomic_test_and_set`/`clear`, `__c11_atomic_compare_exchange_{strong,weak}`, `__c11_atomic_is_lock_free`: tests/vcc/atomic_nand_minmax.c (also `--cpu cortex-a53`, wasm).  Left in that group: floating `__atomic_fetch_{max,min}` and `fmaximum`/`fminimum`, `uinc`/`udec`.)
   ~~`__has_builtin` answers 0 for names absent from the kernel/SDK~~ (done for what vcc
   implements, see above; the rest are builtins vcc lacks).
-- [ ] **SVE in the front end**: `arm_sve.h` types, `target("+sve")`.
+- [ ] **SVE in the front end**: baseline AArch64 builtin sizeless types and
+  libc declarations work; invalid size, array, field, storage and pointer
+  arithmetic uses are diagnosed. Four diagnostics and declaration runtime
+  checks pass on Linux x86/ARM; ARM c-testsuite 220/220. Full `arm_sve.h`
+  tuple/intrinsic APIs, `target("+sve")` validation and scalable lowering
+  remain unsupported and are diagnosed explicitly.
   *Validate:* T1 under `qemu -cpu max`, layout checks for the types.
 - [x] **`ext_vector_type` silently dropped; unknown attributes no warning** [P].
   Done: `ext_vector_type` (tests/vcc/ext_vector.c);

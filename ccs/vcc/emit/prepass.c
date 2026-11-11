@@ -3,6 +3,40 @@
 
 /* ---------------- prepass: what the emitter needs to know before it starts ---------------- */
 
+/* Declarations of SVE types are useful without SVE lowering (notably libc's
+   math prototypes). Reject actual values before any fixed-size frame/ABI work. */
+VPRIV bool sve_codegen_ok(cc *c)
+{
+	uint32_t loc = 0;
+
+	if (c->o->target != PP_LINUX_AARCH64 && c->o->target != PP_DARWIN)
+		return true;
+	for (uint32_t i = 1; i < c->nsym && !loc; i++) {
+		const sym *s = &c->syms[i];
+		const ctype *t = T(c, s->ty);
+
+		if (s->kind != S_FUNC || !s->body)
+			continue;
+		if (KIND(c, t->base) == TY_SVE)
+			loc = s->loc;
+		for (uint32_t j = 0; j < t->n && !loc; j++)
+			if (KIND(c, c->params[t->aux + j]) == TY_SVE)
+				loc = s->loc;
+	}
+	for (uint32_t i = 1; i < c->nnode && !loc; i++) {
+		const node *n = &c->nodes[i];
+
+		if (KIND(c, n->ty) == TY_SVE ||
+		    (n->op == N_DECL && KIND(c, c->syms[n->a].ty) == TY_SVE))
+			loc = n->loc;
+	}
+	if (!loc)
+		return true;
+	pp_diag_emit(c->p, pp_diag_begin(c->p, VDL_ERROR, loc, "SVE value code generation is not supported yet"));
+	return false;
+}
+
+
 typedef struct pre {
 	emitter *E;
 	cc *c;

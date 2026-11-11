@@ -39,6 +39,7 @@ enum {
 	TY_FLOAT128,	/* __float128 (x86-64): binary128 */
 	TY_PTR, TY_ARRAY, TY_FUNC, TY_STRUCT, TY_UNION, TY_ENUM,
 	TY_VECTOR,	/* GNU vector_size: base element, n lanes */
+	TY_SVE,		/* AArch64 builtin scalable type: sizeless; aux is its interned name */
 	TY_NKINDS
 };
 

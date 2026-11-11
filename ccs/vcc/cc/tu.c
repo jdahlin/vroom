@@ -148,6 +148,24 @@ static void cc_init(cc *c, pp *p, const cc_opts *o)
 		sym_bind(c, s);
 		s = sym_new(c, S_TYPEDEF, vintern_copy("__uint128_t\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0", 11), prim(TY_UINT128), 0);
 		sym_bind(c, s);
+		/* Clang exposes these builtin types even without +sve: libc uses them
+		   in declarations. They are distinct sizeless types, not fixed vectors. */
+		if (o->target == PP_LINUX_AARCH64 || o->target == PP_DARWIN) {
+			static const char *const names[] = {
+				"__SVInt8_t", "__SVInt16_t", "__SVInt32_t", "__SVInt64_t",
+				"__SVUint8_t", "__SVUint16_t", "__SVUint32_t", "__SVUint64_t",
+				"__SVFloat16_t", "__SVFloat32_t", "__SVFloat64_t",
+				"__SVBfloat16_t", "__SVMfloat8_t", "__SVBool_t", "__SVCount_t"
+			};
+
+			for (size_t i = 0; i < sizeof(names) / sizeof(names[0]); i++) {
+				uint32_t name = vintern_cstr(names[i]);
+				ctype t = { .kind = TY_SVE, .align = 1, .aux = name };
+
+				s = sym_new(c, S_TYPEDEF, name, QT(ty_intern(c, &t), 0), 0);
+				sym_bind(c, s);
+			}
+		}
 	}
 }
 

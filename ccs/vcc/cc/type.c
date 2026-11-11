@@ -281,6 +281,10 @@ VPRIV qty ty_atomic(cc *c, qty t, uint32_t loc)
 
 	if (v.flags & TF_ATOMIC)
 		return t;
+	if (v.kind == TY_SVE) {
+		cc_error(c, loc, "_Atomic cannot be applied to sizeless type '%s'", tyname(c, t));
+		return t;
+	}
 	if (v.kind == TY_ARRAY || v.kind == TY_FUNC) {
 		cc_error(c, loc, "_Atomic cannot be applied to %s type '%s' ", v.kind == TY_ARRAY ? "array" : "function", tyname(c, t));
 		return t;

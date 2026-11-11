@@ -241,6 +241,15 @@ static void type_str(cc *c, qty t, const char *inner, vfixbuf *out, bool *ok)
 		return;
 	}
 	switch (x->kind) {
+	case TY_SVE:
+		quals(&b, QQ(t));
+		vfixbuf_put(&b, idstr_(x->aux), idlen_(x->aux));
+		if (inner[0]) {
+			vfixbuf_puts(&b, " ");
+			vfixbuf_puts(&b, inner);
+		}
+		vfixbuf_put(out, b.s, b.n);
+		return;
 	case TY_PTR: {
 		vfixbuf in;
 		const ctype *bt = T(c, x->base);

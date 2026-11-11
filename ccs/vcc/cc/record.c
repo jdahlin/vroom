@@ -154,6 +154,10 @@ __attribute__((noinline)) VPRIV void struct_body(cc *c, uint32_t ti)
 			f.depr = unlikely(d.at.depr) ? new_attrs(c, &d.at) : 0;
 			if (is_func(c, t))
 				cc_error(c, d.loc, "field '%.*s' declared as a function", IDF(d.name));
+			else if (KIND(c, t) == TY_SVE) {
+				cc_error(c, d.loc, "field has sizeless type '%s'", tyname(c, t));
+				f.invalid = 1;
+			}
 			else if (!ds.invalid && !complete(c, t) && !(is_array(c, t) && (T(c, t)->flags & TF_INCOMPLETE))) {
 				cc_error(c, d.loc, "field has incomplete type '%s'", tyname(c, t));
 				fwd_note(c, t);

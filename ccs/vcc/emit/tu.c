@@ -702,6 +702,9 @@ extern _Atomic unsigned long long ppd_ns_emit;
 
 int emit_tu(cc *c, const cc_opts *o)
 {
+	if (!sve_codegen_ok(c))
+		return 1;
+
 	double t0 = now();
 	vperf v0 = vperf_now();
 	const char *r = getenv("VCC_EMIT_REPEAT");

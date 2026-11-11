@@ -16,6 +16,10 @@ static inline void void_ptr_arith(cc *c, qty pt, uint32_t loc, bool two)
 {
 	static const char *const g[] = { "pointer-arith", "gnu", "pedantic", NULL };
 
+	if (unlikely(KIND(c, T(c, pt)->base) == TY_SVE)) {
+		cc_error(c, loc, "arithmetic on a pointer to sizeless type '%s'", tyname(c, T(c, pt)->base));
+		return;
+	}
 	if (unlikely(KIND(c, T(c, pt)->base) == TY_VOID))
 		EXT_WARN(c, "gnu-pointer-arith", g, loc,
 			 two ? "arithmetic on pointers to void is a GNU extension" : "arithmetic on a pointer to void is a GNU extension");
@@ -1243,6 +1247,8 @@ VPRIV __attribute__((noinline)) uint32_t postfix_ops(cc *c, uint32_t n)
 				n = err_node(c, loc);
 				continue;
 			}
+			if (KIND(c, T(c, at)->base) == TY_SVE)
+				void_ptr_arith(c, at, loc, false);
 			r = mk2(c, N_INDEX, T(c, at)->base, loc, n, convert(c, ix, prim(TY_LONG)));
 			N(r)->flags = NF_LVALUE;
 			n = r;
@@ -1318,6 +1324,8 @@ VPRIV __attribute__((noinline)) uint32_t postfix_ops(cc *c, uint32_t n)
 			next(c);
 			need_lvalue(c, n, loc);
 			need_scalar(c, n, "increment");
+			if (is_ptr(c, N(n)->ty) && KIND(c, T(c, N(n)->ty)->base) == TY_SVE)
+				void_ptr_arith(c, N(n)->ty, loc, false);
 			r = mk(c, op, QUNQ(N(n)->ty), loc);
 			N(r)->a = n;
 			n = r;

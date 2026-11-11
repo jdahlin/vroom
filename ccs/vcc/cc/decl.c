@@ -939,6 +939,11 @@ VPRIV void declaration(cc *c, vec *out, bool file)
 			kr_params(c, &d);
 		else if (d.kr)
 			cc_error(c, d.plb, "a parameter list without types is only allowed in a function definition");
+		if (KIND(c, t) == TY_SVE && ds.sc != SC_TYPEDEF &&
+		    (file || ds.sc == SC_STATIC || ds.sc == SC_EXTERN || ds.thread)) {
+			cc_error(c, d.loc, "non-local variable with sizeless type '%s'", tyname(c, t));
+			ds.invalid = true;
+		}
 		s = declare(c, &ds, &d, t, file);
 		if (unlikely(ds.invalid | d.invalid)) {
 			c->syms[s].flags |= SF_INVALID;	/* its type was an error: uses say nothing more */
