@@ -122,6 +122,10 @@ VPRIV void ref_name(cc *c, tbuf *b, uint32_t r)
 		tb_s(b, ".Ltmp.lbl.");
 		tb_u(b, i);
 		break;
+	case RK_TABLE:
+		tb_s(b, ".Lswitch.values.");
+		tb_u(b, i);
+		break;
 	case RK_NAME:
 		if (DARWIN(c))
 			tb_c(b, '_');

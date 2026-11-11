@@ -665,6 +665,7 @@ VPRIV void x64_finish(ecx *e, uint32_t s)
 			ctor_entry(e->c, b, s, true);
 	}
 	e->E->nfn++;
+	em_switch_values_emit(e);
 	out_chunk(e, (uint64_t)s << 1, start);
 }
 

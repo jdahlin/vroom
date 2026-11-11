@@ -116,6 +116,7 @@ static void ecx_init(ecx *e, emitter *E, vmreg *r)
 /* (after the stitch: the chunks point into e->out) */
 static void ecx_free(ecx *e, vmreg *r)
 {
+	em_switch_values_reset(e);
 	cc *c = e->c;
 
 	/* written before read (put, newlabel, the case collection, ...): handed back as is */

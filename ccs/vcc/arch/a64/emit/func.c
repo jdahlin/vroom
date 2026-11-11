@@ -201,6 +201,7 @@ static void finish_direct(ecx *e, uint32_t s, uint32_t align, const int *cs, int
 	}
 	e->E->nins += e->nin;
 	e->E->nfn++;
+	em_switch_values_emit(e);
 	out_chunk(e, (uint64_t)s << 1, start);
 }
 
@@ -446,6 +447,7 @@ static void finish_function(ecx *e, uint32_t s)
 	}
 	e->E->nins += e->nin;
 	e->E->nfn++;
+	em_switch_values_emit(e);
 	out_chunk(e, (uint64_t)s << 1, start);
 }
 
@@ -479,6 +481,7 @@ static void choose_lregs(ecx *e, uint32_t s, int max)
 /* true: out of temporaries with register variables, generate it again without */
 static bool emit_function1(ecx *e, uint32_t s, int nlreg)
 {
+	em_switch_values_reset(e);
 	cc *c = e->c;
 	const sym *y = &c->syms[s];
 	const node *body = N(y->body);

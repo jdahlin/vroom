@@ -120,7 +120,7 @@ static inline bool inline_only(const sym *y)
 #include "flow/flow.h"
 
 /* references to things with a symbol: kind in the top 4 bits */
-enum { RK_SYM = 0, RK_STR = 1, RK_LBL = 2, RK_NAME = 3 };
+enum { RK_SYM = 0, RK_STR = 1, RK_LBL = 2, RK_NAME = 3, RK_TABLE = 4 };
 #define REF(k, i) (((uint32_t)(k) << 28) | (uint32_t)(i))
 #define RKIND(r) ((r) >> 28)
 #define RIDX(r) ((r) & 0x0fffffffu)
@@ -385,6 +385,7 @@ typedef struct ecx {
 	struct wst *w;		/* WASM: arch/wasm/emit/ state (wimpl.h) */
 	struct wkst *wk;	/* X86: the walker's state (emit/walk/walk.h) */
 	struct xst *x64;	/* X86: arch/x64/emit/ state (x64impl.h) */
+	struct em_switch_values_data *switch_values; /* accepted tables of this real function */
 } ecx;
 enum { FN_MEMCPY, FN_MEMSET, FN_MEMMOVE, FN_UDIVTI3, FN_DIVTI3, FN_UMODTI3, FN_MODTI3, FN_STRLEN,
        FN_ASHLTI3, FN_LSHRTI3, FN_ASHRTI3, FN_FLOATTISF, FN_FLOATTIDF, FN_FLOATUNTISF, FN_FLOATUNTIDF,
@@ -499,6 +500,23 @@ typedef struct carg {
 
 /* ---------------- across files ---------------- */
 
+/* opt/switch-values.c: bounded integer-result tables, no AST mutation. */
+typedef struct em_switch_values_recipe {
+ i128 lo;
+ uint64_t values[256], fallback;
+ qty ty;
+ uint32_t destination;
+ uint16_t slots;
+ uint8_t selector_bits, element_bytes;
+ bool is_return;
+} em_switch_values_recipe;
+VPRIV bool em_switch_values_plan(cc *c, uint32_t n, em_switch_values_recipe *r);
+VPRIV bool em_switch_values_queue(ecx *e, uint32_t n, const em_switch_values_recipe *r);
+VPRIV void em_switch_values_reset(ecx *e);
+VPRIV void em_switch_values_emit(ecx *e);
+VPRIV bool a64_switch_values(ecx *e, uint32_t n);
+VPRIV bool wk_switch_values(ecx *e, uint32_t n);
+VPRIV bool wswitch_values(ecx *e, uint32_t n);
 /* tu.c */
 VPRIV void *reserve(size_t n);
 VPRIV double now(void);
@@ -557,6 +575,10 @@ VPRIV bool em_sdivconst64(int64_t divisor, bool remainder, em_sdivconst_recipe *
 VPRIV bool em_sdivconst(cc *c, qty ty, int op, i128 rhs, em_sdivconst_recipe *r);
 VPRIV bool a64_sdivconst_ok(ecx *e, val a, const em_sdivconst_recipe *r);
 VPRIV val a64_sdivconst(ecx *e, val a, const em_sdivconst_recipe *r);
+/* opt/mulshift.c and opt/xor-not.c: machine recipes, no operand evaluation. */
+VPRIV int em_cmpbounds(ecx *e, uint32_t n, uint32_t *operand);
+VPRIV bool em_mulshift(cc *c, qty ty, int *op, i128 *rhs);
+VPRIV bool em_xor_not(cc *c, qty ty, int op, i128 rhs);
 /* opt/identity.c */
 enum { EM_ID_NONE, EM_ID_LEFT, EM_ID_ZERO, EM_ID_ONES };
 VPRIV int em_bin_identity(cc *c, qty ty, int op, i128 rhs);
@@ -570,6 +592,18 @@ typedef struct em_switch_case {
 enum { EM_SWITCH_LINEAR, EM_SWITCH_TREE, EM_SWITCH_TABLE };
 VPRIV int em_switch_strategy(uint32_t n, i128 lo, i128 hi, bool ranges, bool tables);
 VPRIV bool em_switch_prepare(em_switch_case *cases, uint32_t n, unsigned bits, bool sg);
+/* One bounded membership test for a run of stacked case labels. The original
+ * body remains intact; node names its final case label, not a new destination. */
+typedef struct em_switch_bitset_recipe {
+	i128 lo;
+	uint64_t mask;
+	uint32_t node;
+	uint8_t span, bits;
+} em_switch_bitset_recipe;
+VPRIV bool em_switch_bitset_plan(cc *c, uint32_t body, uint32_t nlabels,
+				 unsigned bits, bool sg, em_switch_bitset_recipe *out);
+VPRIV bool a64_switch_bitset(ecx *e, uint32_t body, uint32_t base, int r,
+			    int cx, bool sg, uint32_t dflt);
 /* opt/unusedinit.c: bounded recipes for never-referenced integer declarations. */
 enum { EM_UNUSED_KEEP, EM_UNUSED_OMIT, EM_UNUSED_EVAL };
 VPRIV bool em_unused_local(ecx *e, uint32_t s, uint32_t fn);

@@ -1797,6 +1797,26 @@ funktionsavgränsade debug-/text-/DWARF-kontroller är gröna. Ny CI följer
 PR:n; CPU-mätningarna och instruktionsprofilen ovan har sina uttryckliga
 äldre baser och är inte ett generellt godkännande av G5.
 
+### OPT6 status: bitmask för switchmedlemskap (2026-11-11)
+
+En begränsad gemensam analys känner igen minst fyra staplade case-etiketter
+med samma ingång och högst 64 möjliga värden. Arm64, x86, wasm32 och wasm64
+använder vid O1–O3 en bitmask med unsigned intervallkontroll före skiftet;
+default, kroppar och fallthrough behåller sina ursprungliga etiketter. Täta
+masker, skilda ingångar, dolda case, `_BitInt` och större spann använder
+befintlig dispatch. O0 och `VCC_NOOPT` påverkas inte.
+
+`vcc-switch-bitsets.py --run` passerar O0–O3 och `VCC_NOOPT` på alla fyra mål,
+inklusive signed/unsigned-gränser, intervall, sidoeffekter och fallback. Unity
+och fil-för-fil bygger; fil-för-fil kör också x86 och wasm64-testen. Vcc-sviten
+passerar 246/246 med en befintlig xfail. På exakt föräldern 032e9dc jämfört
+med ändringen är x86-O2-funktionen `bs64` 131 → 85 byte (utan alignment),
+ett riktat kodstorleksprov. Tolv alternerande körningar av en korpus med 500
+matchande switchfunktioner gav median 4,52 → 4,34 ms för hela kompilatorn
+(intervall 4,27–5,06 respektive 4,13–4,76 ms); dessa korta väggtider är inte
+en generell prestandagrind. Hårdvaruräknare var otillgängliga på värden.
+Värdetabeller och bitset-kluster med flera destinationer återstår.
+
 ### OPT6 status: balanserad switchdispatch (2026-11-11)
 
 Gemensam policy, 32/64-bitars normalisering och sortering finns i
@@ -2299,7 +2319,7 @@ ett påstående om stöd eller avsaknad görs.
 | Heltalsförenkling: InstCombine, reassoc, div/rem | **Delvis, alla tre.** `opt/{identity,divpow2,sdivpow2,udivconst}.c` med separata adaptrar. U32-reciproker har målkostnad/fallback; inte generell InstCombine. Små konstantmultiplikationer, fler bitregler, delat kvot/rest-recept och signed/u64-reciproker återstår. Float2Int är inte bevisat av heltalsreglerna. |
 | Värdefakta, CSE/PRE, intervall: CCP, GVN, SCCP | **Delvis lokalt.** `rec/copies.c`, `rec/slot-values.c` och förpassfakta; a64:s `opt.c`, x64:s `copies.c`/`extensions.c`, wasms `slots.c`. Ingen gemensam global GVN/PRE/SCCP eller generell intervallanalys. Börja med begränsad blocklokal cache för rena uttryck. |
 | Död kod och minne: DCE/DSE, store merging | **Delvis.** Gemensamma exakta frame-celler/storefakta och nåbarhetsstädning; a64 har egna dead-result-pass, x64 effektbeskrivning, wasm typade accesshändelser. Heap/global-DSE, bitvis DCE, allokeringseliminering, generell last/store-motion och looplasteliminering återstår/är overifierade. |
-| Kontroll och switch: SimplifyCFG, jump threading, bit tests | **Delvis.** `opt/control.c`, `opt/switch.c`, `rec/{fallthrough,unreachable}.c`; alla mål använder delade beslut, wasm har tät `br_table`. Värdetabeller/bitset-kluster, generell threading, compare merging och tail merging återstår. |
+| Kontroll och switch: SimplifyCFG, jump threading, bit tests | **Delvis.** `opt/control.c`, `opt/switch.c`, `rec/{fallthrough,unreachable}.c`; alla mål använder delade beslut, begränsade medlemsmasker och värdetabeller, wasm har tät `br_table`. Bitset-kluster med flera destinationer, generell threading, compare merging och tail merging återstår. |
 | Skalär ersättning/promotion: SROA, mem2reg | **Delvis.** `opt/locals.c`, förpass och celler; a64 registerbindning, x64 fyra valda GPR-hem, wasm typade lokaler. Detta är inte generell aggregatsplittring eller join-medveten mem2reg. |
 | Loopmotion/induktion: LICM, IV opts, loop sink | **Saknas generellt.** Alla mål sänker loopar; förpassets loopviktade lokalval är inte LICM. CFG, dominans, loop-/beroendefakta och bevis om noll iterationer behövs före säker hoisting/IV-omskrivning. |
 | Loopform: rotation, deletion, unroll, unswitch/distribute | **Saknas generellt.** Målen har direkt satssänkning, inte dessa transformpass. Kräver trip-count-/effekt-/entrybevis och kodstorleksbudget; börja eventuellt med små exakt konstanta loopar. |
@@ -2814,3 +2834,95 @@ filvis bygge passerar; före/efter-kärnans sema 887/887 i batch och individuell
 187 x86-klobberstavningar, fyra måls O0–O3-kontrollflöde samt ASan/UBSan-
 kontrakt. Vidare genomgång av de kvarvarande jämförelserna och realistisk
 vägg-/CPU-tidsmätning återstår.
+
+### Begränsade switch-värdetabeller (2026-11-11)
+
+Status: lokalt implementerat för x86-64, arm64 och wasm32/64 vid O1–O3.
+En gemensam budgeterad analys accepterar täta, högst 256 element stora
+intervall med explicit default och konstanta heltalsresultat, antingen direkta
+returer eller tilldelning till samma lokala variabel följd av break. Hål får
+standardvärdet och väljaren evalueras en gång. Cleanup, inlining på native,
+Darwin och osäkra kontrollflöden behåller ordinarie switchsänkning. Data läggs
+efter funktionens storlek och debug-/CFI-avslut i en alignerad läsbar sektion.
+
+`vcc-opt-rules.py --rule switchvalues --run` passerar O0–O3 på alla fyra mål
+samt O2 med `VCC_NOOPT`; testet täcker gränsvärden, intervall, hål, sidoeffekter,
+volatile, flera tabeller och avvisade kontrollflöden. Arm64-direktobjekt med
+PIC, debug och CFI körs också under qemu och dess sektioner, symboler och
+relokeringar överensstämmer med extern assemblering av vcc:s assembler.
+Kostnadsproven nedan ger inte generell kompileringstid eller programhastighet.
+### OPT1: två bitregler (2026-11-11)
+
+Multiplikation med en tvåpotens sänks direkt till maskinskift för 32-/64-bitars
+heltal; XOR med enbart ettor blir komplement. Recepten ligger i separata
+målgeneriska filer, utan ny AST-vandring. O0 och VCC_NOOPT är oförändrade;
+_BitInt och bredare typer ingår inte. O1–O3, bieffekter och operandkonvertering
+kontrolleras på x86, arm64, wasm32 och wasm64. Unity och filvis bygge samt
+36 O0/noopt/overflow-paritetsprov passerade.
+
+Matchad seriell Callgrind-profil (`work/opt-profile/bit-rule-audit/result.json`,
+kompilatorkällor och binärhashar i manifestet) mäter hela kompilatorprocessens
+instruktioner, inte cykler eller programkörtid. Fyra blandade x86-prov gav
++0,0112 %; 200 regelfria funktioner +0,052–0,469 % beroende på mål; 200
+regelmättade funktioner −1,39–1,79 %. Detta är små prov, inte en fullständig
+prestandagrind. Jämförelseregler för heltalsgränser och bred O2-täckning återstår.
+
+### OPT1: heltalsjämförelser vid gränsvärden (2026-11-11)
+
+Ett gemensamt recept i `emit/opt/cmpbounds.c` känner igen relationer med
+konstant resultat vid lägsta/högsta värdet för konverterade 32-/64-bitars
+heltal. Operanden evalueras fortfarande: anrop och volatila/atomiska läsningar
+bevaras. Endast numeriska AST-litteraler med identisk konverterad typ ingår;
+pekare, flyttal, _BitInt, bredare typer och övriga konstantuttryck faller
+igenom. Värde och gren testas på x86, arm64, wasm32 och wasm64 O0–O3;
+assemblerkontroller verifierar även anrop och volatila/atomiska läsningar.
+O0 och VCC_NOOPT är byteidentiska mot föräldern på testfilen för alla fyra mål.
+Unity och filvis bygge passerar. Ytterligare gränsregler återstår.
+
+Matchad seriell Callgrind-profil mot bitset-föräldern (`work/opt-profile/
+cmpbounds-cost/result.json`, med käll- och binärhashar) mäter instruktioner för
+hela kompilatorprocessen. Fyra blandade x86-filer gav +0,181 %; 200 funktioner
+utan gränsjämförelse gav +0,252–0,295 % och mättade positiva prov −1,35–8,53 %
+beroende på mål. Detta är små prov, inte en fullständig prestandagrind.
+
+Värdetabellernas separata matchade Callgrind-prov mot basen före dessa senare
+steg finns i `work/opt-profile/switch-values-cost/result.json`. Ett prov med
+200 funktioner utan switch ändrade kompilatorarbetet +0,003–0,023 %; ett
+avsiktligt mättat prov med 200 värdetabell-switchar ökade det +6,16–6,36 %
+på native och +20,05–20,16 % på wasm. Detta är kompilatorinstruktioner, inte
+cykler, och kräver en realistisk korpus före generell slutsats. Ett separat
+syntetiskt x86-program med 100 000 anrop minskade instruktioner för hela
+programmet från 4 544 608 till 4 217 359 (−7,2 %); det är inte ett generellt
+körtidsmått. Den sammansatta stacken mäts separat nedan.
+
+Hela stacken inklusive värdetabeller klarar den fasta 1 %-grinden mot
+`4a839ba`: x86 +0,375 %, arm64 +0,292 %, wasm32 +0,556 %, wasm64 +0,515 %
+kompilatorinstruktioner. Värdetabellsteget ensamt mot jämförelseföräldern
+`dc3e54d` gav +0,032 %, +0,023 %, +0,045 % respektive +0,043 %. Det är
+12/12 native-filer, 10 wasm32 och 11 wasm64; avvisade atomic_ops och/eller
+bitint_runtime är redovisade, inte godkända. Exakt källträds- och binärproveniens,
+kommandon och felkontroll finns i `work/opt-profile/full-stack-cost/result.json`.
+Grinden är en liten fast korpus och upphäver inte det högre mättade switchprovet.
+
+CI-uppföljning: wasm-tabellernas assemblertext får nu en explicit `.size`,
+som LLVM:s assembler kräver. Det fokuserade tabellprovet assembleras även med
+clang för wasm32/64; ett separat switchprov med variabla resultat bevarar
+kontrollen av wasm `br_table`. Båda proven körs O0–O3 på fyra mål. Den
+föregående kostnadsprofilen gäller före denna lilla metadatatilläggning.
+
+### Switch-värdetabeller: snabbare utmatning (2026-11-11)
+
+`perf record` och Callgrind på ett switchmättat wasm64-prov pekade på
+`vsnprintf` via `tb_f` för varje tabellbyte. Byteutmatningen använder nu
+`tb_s`/`tb_u`/`tb_c` i stället och producerar byteidentisk assembler. Matchad
+Clang 23 `-O3 -march=x86-64-v3`, `096ead5` → `0a06d20`: fem växelvisa
+`perf stat`-körningar per binär på 2 000 switchfunktioner gav medianer för
+kompilatorprocessens user-instruktioner / user-cykler: x86 −17,91 / −13,28 %,
+arm64 −17,02 / −12,85 %, wasm32 −18,67 / −14,13 %, wasm64 −18,65 / −13,64 %.
+Regelfria x86/wasm64-kontroller ändrade instruktioner −0,0013 / −0,0017 %;
+cykeltal på denna delade maskin varierar och är inte en generell hastighetsvinst.
+En separat Callgrind-mätning med 200 switchfunktioner gav −12,1–13,1 % Ir.
+Kommandon, binär-/indatahashar och alla mätvärden finns i
+`work/opt-profile/switch-speed/{perf-stat.json,run.log}`. O0–O3-körning och
+optimeringskontroller passerar på fyra mål; wasm assembleras även av clang.
+Detta mäter kompilering, inte den genererade kodens körtid.

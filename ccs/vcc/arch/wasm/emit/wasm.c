@@ -560,6 +560,7 @@ VPRIV void wasm_emit_function(ecx *e, uint32_t s)
 	size_t start;
 	wabi r;
 
+	em_switch_values_reset(e);
 	walk_fn(e, s);
 	W->b.n = 0;
 	W->fn.n = 0;
@@ -707,5 +708,6 @@ VPRIV void wasm_emit_function(ecx *e, uint32_t s)
 	start = e->out.n;
 	tb_put(&e->out, f->p, f->n);
 	e->E->nfn++;
+	em_switch_values_emit(e);
 	out_chunk(e, (uint64_t)s << 1, start);
 }

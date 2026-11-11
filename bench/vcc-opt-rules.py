@@ -43,6 +43,27 @@ def body(assembly, name, wasm):
     return tail[:end.start()]
 
 
+def check_cmpbounds(assembly, arch):
+    wasm = arch.startswith('wasm')
+    compare = r'\b(?:cmp[lq]?|[cs]et[a-z]+|i(?:32|64)\.(?:lt|gt|le|ge)_[su])\b'
+    for name in ['cb_low', 'cb_high', 'cb_reverse', 'cb_effect', 'cb_branch', 'cb_volatile', 'cb_smax', 'cb_u64', 'cb_atomic']:
+        text = body(assembly, name, wasm)
+        if re.search(compare, text):
+            raise RuntimeError(f'{name}: retained comparison against a bound\n{text}')
+    for name in ['cb_effect', 'cb_branch']:
+        text = body(assembly, name, wasm)
+        if len(re.findall(r'\b(?:callq?|bl)\s+next\b', text)) != 1:
+            raise RuntimeError(f'{name}: expected one call to next\n{text}')
+    volatile = body(assembly, 'cb_volatile', wasm)
+    atomic = body(assembly, 'cb_atomic', wasm)
+    loads = {'x86_64': (r'observed\(%rip\)', r'mov[lq]\s+\(%r'),
+             'aarch64': (r'\bldr\b[^\n]*observed', r'(?:\bldar\b|\.inst\b)'),
+             'wasm32': (r'i32\.load', r'i32\.load'),
+             'wasm64': (r'i32\.load', r'i32\.load')}
+    if not re.search(loads[arch][0], volatile) or not re.search(loads[arch][1], atomic):
+        raise RuntimeError('volatile or atomic read disappeared')
+
+
 def check_pow2(assembly, arch):
     wasm = arch.startswith('wasm')
     divide = r'\b(?:i(?:32|64)\.(?:div|rem)_[su]|[su]div|idiv[lq]?|div[lq]?)\b'
@@ -459,8 +480,8 @@ def check_switches(assembly, arch):
                 depth -= 1
         if maximum != 4:
             raise RuntimeError(f'sw_sparse32: expected four balanced split levels, got {maximum}')
-        if not re.search(r'\bbr_table\b', body(assembly, 'sw_dense', True)):
-            raise RuntimeError('sw_dense: lost existing wasm branch table')
+        if not re.search(r'\bbr_table\b', body(assembly, 'sw_dense_branch', True)):
+            raise RuntimeError('sw_dense_branch: lost existing wasm branch table')
         return
     # Count the maximum conditional decisions along the actual emitted CFG.
     # The probe is acyclic and contains no calls/loops; labels/directives do
@@ -497,6 +518,31 @@ def check_switches(assembly, arch):
     maximum = path(0)
     if maximum > 10:
         raise RuntimeError(f'sw_sparse32: {maximum} decisions, expected <=10 for 31 cases')
+
+
+def check_switchvalues(assembly, arch, optimized=True):
+    wasm = arch.startswith('wasm')
+    positive = ['sv_return', 'sv_assign', 'sv_signed64', 'sv_unsigned64',
+                'sv_signed32', 'sv_narrow', 'sv_short', 'sv_range', 'sv_twice',
+                'sv_effect', 'sv_volatile']
+    for name in positive:
+        text = body(assembly, name, wasm)
+        tables = re.findall(r'\.Lswitch\.values\.\d+', text)
+        if bool(tables) != optimized:
+            raise RuntimeError(f'{name}: result-table eligibility changed\n{text}')
+        if optimized and name == 'sv_twice' and len(set(tables)) != 2:
+            raise RuntimeError('two switches must have distinct tables')
+    for name in ['sv_cleanup', 'sv_fallthrough', 'sv_missing', 'sv_label',
+                 'sv_nested', 'sv_sparse']:
+        if '.Lswitch.values.' in body(assembly, name, wasm):
+            raise RuntimeError(f'{name}: unsafe switch converted to table')
+    if optimized:
+        text = body(assembly, 'sv_effect', wasm)
+        if len(re.findall(r'\b(?:callq?|bl)\s+sv_next\b', text)) != 1:
+            raise RuntimeError('switch selector call must execute once')
+    # Native inlining initially declines tables; wasm keeps a real function.
+    if not wasm and '.Lswitch.values.' in body(assembly, 'sv_inline_twice', False):
+        raise RuntimeError('inline table identity is not enabled')
 
 
 def check_tails(assembly, arch, level, cfi=False, disabled=False):
@@ -653,6 +699,37 @@ def check_postfix(assembly, arch):
         if scalar_memory_accesses(text, arch) != (1, 1):
             raise RuntimeError(f'pe_fixed_address: expected one scalar update\n{text}')
 
+def check_bitrules(assembly, arch):
+    wasm = arch.startswith('wasm')
+    multiply = r'\b(?:imul[lq]?|mul|madd|i(?:32|64)\.mul)\b'
+    for name in ['br_mul32', 'br_signed32', 'br_mul64', 'br_signed64',
+                 'br_high32', 'br_high64', 'br_left', 'br_narrow', 'br_extend',
+                 'br_compound', 'br_call', 'br_pointer_mul', 'br_volatile']:
+        text = body(assembly, name, wasm)
+        if re.search(multiply, text):
+            raise RuntimeError(f'{name}: retained power-of-two multiply\n{text}')
+    for name in ['br_not32', 'br_not64', 'br_not_signed', 'br_not_left',
+                 'br_xor_compound', 'br_pointer_xor', 'br_volatile_xor']:
+        text = body(assembly, name, wasm)
+        good = (len(re.findall(r'\bi(?:32|64)\.xor\b', text)) == 1 if wasm else
+                bool(re.search(r'\b(?:mvn|orn)\b', text)) if arch == 'aarch64' else
+                bool(re.search(r'\bnot[lq]?\b', text)))
+        if not good:
+            raise RuntimeError(f'{name}: missing single complement\n{text}')
+    for name, callee in [('br_call', 'br_next'), ('br_rhs', 'br_next'),
+                         ('br_pointer_mul', 'br_pointer'), ('br_pointer_xor', 'br_pointer')]:
+        text = body(assembly, name, wasm)
+        if len(re.findall(r'\b(?:callq?|bl)\s+' + callee + r'\b', text)) != 1:
+            raise RuntimeError(f'{name}: expected one operand call\n{text}')
+    for name in ['br_volatile', 'br_volatile_xor']:
+        text = body(assembly, name, wasm)
+        load = (r'\bi32\.load\b' if wasm else
+                r'\bldr\s+w[^\n]*:lo12:br_observed' if arch == 'aarch64' else
+                r'\bmovl\s+br_observed\(%rip\),')
+        if not re.search(load, text):
+            raise RuntimeError(f'{name}: lost volatile global load\n{text}')
+
+
 def check_mulconst(assembly, arch):
     wasm = arch.startswith('wasm')
     probes = [(f'mc_{tag}_{factor}', shift) for tag in ['u32', 's32', 'u64', 's64']
@@ -807,13 +884,22 @@ def execute(args, directory, assembly, arch, source, level):
         if arch == 'x86_64' and (args.qemu_x86 or platform.machine() != 'x86_64'):
             runner = [args.qemu_x86 or 'qemu-x86_64']
         run(runner + [exe])
+        if arch == 'aarch64' and source.name == 'switch_values.c' and level == 2:
+            # Exercise the direct emitter's per-function table data and its
+            # interaction with PIC, line tables, and unwind directives.
+            run([args.vpp, f'--target={args.target}', '-O2', '-ffreestanding',
+                 '-fno-stack-protector', '-fPIC', '-g', '-fasynchronous-unwind-tables',
+                 '-c', source, '-o', obj])
+            run([args.clang, f'--target={args.target}', '-fuse-ld=lld',
+                 '-nostdlib', '-static', '-Wl,-e,_start', start, obj, '-o', exe])
+            run(runner + [exe])
 
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument('--vpp', default=str(Path(BUILD) / 'vpp'))
     ap.add_argument('--target', default='x86_64-linux-gnu')
-    ap.add_argument('--rule', choices=['pow2', 'signedpow2', 'identities', 'fallthrough', 'loopback', 'unreachable', 'locals', 'localjmp', 'copies', 'extensions', 'switches', 'tails', 'udivconst', 'udivconst64', 'sdivconst', 'deadresults', 'mulconst', 'postfix', 'unusedinit', 'all'], default='all')
+    ap.add_argument('--rule', choices=['pow2', 'signedpow2', 'identities', 'fallthrough', 'loopback', 'unreachable', 'locals', 'localjmp', 'copies', 'extensions', 'switches', 'tails', 'udivconst', 'udivconst64', 'sdivconst', 'deadresults', 'mulconst', 'bitrules', 'cmpbounds', 'postfix', 'unusedinit', 'switchvalues', 'all'], default='all')
     ap.add_argument('--run', action='store_true', help='also execute literal-answer correctness checks')
     ap.add_argument('--cfi', action='store_true', help='also check unwind state with tail calls')
     ap.add_argument('--sibling-calls', choices=['default', 'on', 'off'], default='default',
@@ -851,12 +937,15 @@ def main():
              'copies': ('record_copies.c', check_copies),
              'extensions': ('known_extensions.c', check_extensions),
              'switches': ('switch_dispatch.c', check_switches),
+             'switchvalues': ('switch_values.c', check_switchvalues),
              'tails': ('tail_calls.c', check_tails),
              'udivconst': ('unsigned_divconst.c', check_udivconst),
              'udivconst64': ('unsigned_divconst64.c', check_udivconst64),
              'sdivconst': ('signed_divconst.c', check_sdivconst),
              'deadresults': ('dead_results.c', check_deadresults),
              'mulconst': ('multiply_constants.c', check_mulconst),
+             'bitrules': ('integer_bit_rules.c', check_bitrules),
+             'cmpbounds': ('integer_cmp_bounds.c', check_cmpbounds),
              'postfix': ('postfix_eval.c', check_postfix),
              'unusedinit': ('unused_scalar_init.c', check_unusedinit)}
     selected = rules if args.rule == 'all' else {args.rule: rules[args.rule]}
@@ -877,20 +966,22 @@ def main():
                 checked = ((arch == 'x86_64' and level >= 1) if rule in ['locals', 'copies', 'extensions', 'deadresults'] else
                            (not arch.startswith('wasm') and level >= 1) if rule in ['fallthrough', 'unreachable'] else
                            arch.startswith('wasm') if rule == 'loopback' else True)
-                checked = checked and check is not None and (rule not in ['switches', 'udivconst', 'udivconst64', 'mulconst'] or level >= 1)
+                checked = checked and check is not None and (rule not in ['switches', 'udivconst', 'udivconst64', 'mulconst', 'bitrules', 'cmpbounds'] or level >= 1)
                 if checked:
-                    if rule in ['sdivconst', 'unusedinit']:
+                    if rule in ['sdivconst', 'unusedinit', 'switchvalues']:
                         check(assembly.read_text(), arch, optimized=level >= 1)
                     elif rule == 'tails':
                         check(assembly.read_text(), arch, level, args.cfi, args.sibling_calls == 'off')
                     else:
                         check(assembly.read_text(), arch)
+                if rule == 'switchvalues' and arch.startswith('wasm') and level >= 1:
+                    run([args.clang, f'--target={args.target}', '-c', assembly, '-o', directory / 'clang-switch-values.o'])
                 if args.run:
                     execute(args, directory, assembly, arch, source, level)
                 print(f'{args.target} {rule} O{level}: ' +
                       ('codegen' if checked else 'compile') +
                       (' and execution' if args.run else '') + ' OK')
-            if rule in ['sdivconst', 'unusedinit']:
+            if rule in ['sdivconst', 'unusedinit', 'switchvalues']:
                 # Check the debugging escape hatch independently of O0.
                 assembly = directory / (rule + '-noopt.s')
                 run([args.vpp, f'--target={args.target}', '-O2',

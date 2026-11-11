@@ -446,7 +446,14 @@ static val gen_binary(ecx *e, uint32_t n)
 	qty lt = N(x->a)->ty, rt = N(x->b)->ty, ty = x->ty;
 	int known = em_is_cmp(op) ? cond_fold(e, n) : -1;
 	val a, b;
+	uint32_t operand;
+	int bound = em_cmpbounds(e, n, &operand);
 
+	if (bound >= 0) {
+		val v = gen(e, operand);
+		val_free(e, &v);
+		return vconst(bound);
+	}
 	if (known >= 0)
 		return vconst(known);
 	if (unlikely(vstack_low()))	/* nested operators recurse here: an error before the stack runs out */
