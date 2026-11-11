@@ -421,3 +421,15 @@ passerar igen; de två planernas oberoende statusblock är bevarade.
 Efter main2dc4ea3 (#50:s x86-blad): unity, 16 division-/nivå-/målfall,
 sanitiserade reciprok-/registereffektkontrakt och bladramens policy, cache-,
 debug-/härdnings- och signal-unwindprov passerar. Båda statusblock behålls.
+
+### Status 2026-11-11: G1, promotion av bitfältsuttryck
+
+Smala unsigned-bitfält behåller sin promotionsbredd genom tilldelning,
+sammansatt tilldelning, komma och prefixinkrement. `sizeof`/`typeof`,
+postfix och explicita kast behåller sina separata deklarerade typregler.
+Det rättar två oförändrade Kefir-kontrakt på Linux x86-64 och ARM64/QEMU,
+alla fyra Clang/vcc-parningar. Regressionen provar även sidoeffekter.
+Unity/separata filer, sema run/batch 887/887 och egna körsviter
+223/223 x86 respektive 228/228 ARM är verifierade; sex x86-referensundantag
+och ett befintligt kört ARM-XFAIL redovisas separat. Hela Kefir-sviten och
+G1/G2 återstår. Evidens: `work/agents/kefir-bitfield/results/evidence.txt`.
