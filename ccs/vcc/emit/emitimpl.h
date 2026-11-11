@@ -390,6 +390,9 @@ typedef struct ecx {
 	struct wst *w;		/* WASM: arch/wasm/emit/ state (wimpl.h) */
 	struct wkst *wk;	/* X86: the walker's state (emit/walk/walk.h) */
 	struct xst *x64;	/* X86: arch/x64/emit/ state (x64impl.h) */
+	struct vwst *vw;	/* the VIR builder's state (emit/vir/, PLAN-vir.md) */
+	bool vtry;		/* the VIR walker runs: an error is not reported, it makes the function fall back */
+	const char *vfail;	/* ... and why (NULL: it did not fail) */
 	struct em_switch_values_data *switch_values; /* accepted tables of this real function */
 } ecx;
 enum { FN_MEMCPY, FN_MEMSET, FN_MEMMOVE, FN_UDIVTI3, FN_DIVTI3, FN_UMODTI3, FN_MODTI3, FN_STRLEN,
@@ -886,6 +889,8 @@ VPRIV void wasm_emit_function(ecx *e, uint32_t s);
 VPRIV void wasm_ecx_free(ecx *e);
 VPRIV void wk_function(ecx *e, uint32_t s);
 VPRIV void wk_ecx_free(ecx *e);
+VPRIV bool vw_try(ecx *e, uint32_t s);	/* emit/vir/: s through VIR (VCC_VIR); false: emit it as before */
+VPRIV void vw_wk_ecx_free(ecx *e);
 VPRIV void wasm_data_ref(ecx *e, uint32_t ref);
 VPRIV void wasm_header(cc *c, tbuf *hdr, ecx *ctx, int nthr);
 VPRIV void wasm_tail(cc *c, tbuf *t, _Atomic uint8_t *claimed);

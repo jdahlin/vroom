@@ -34,6 +34,11 @@ VPRIV void eerror(ecx *e, uint32_t loc, const char *fmt, ...)
 	pp_diag_pc = __builtin_return_address(0);
 	va_list ap;
 
+	if (e->vtry) {	/* the VIR walker: the function falls back (emit/vir/) */
+		if (!e->vfail)
+			e->vfail = fmt;
+		return;
+	}
 	{
 		VLOCK(e->E->emu);
 		va_start(ap, fmt);
@@ -49,6 +54,11 @@ VPRIV void efatal(ecx *e, uint32_t loc, const char *fmt, ...)
 	pp_diag_pc = __builtin_return_address(0);
 	va_list ap;
 
+	if (e->vtry) {	/* the VIR walker: no diagnostic, the function falls back (emit/vir/) */
+		if (!e->vfail)
+			e->vfail = fmt;
+		_longjmp(e->bail, 1);
+	}
 	{	/* (the lock is dropped before the longjmp: cleanups do not run on it) */
 		VLOCK(e->E->emu);
 		va_start(ap, fmt);
@@ -140,6 +150,7 @@ static void ecx_free(ecx *e, vmreg *r)
 	vmpool_give(&ecxpool, r);
 	wasm_ecx_free(e);
 	wk_ecx_free(e);
+	vw_wk_ecx_free(e);
 }
 
 /* a function the previous round generated, if nothing it asked about has been marked since */
@@ -186,7 +197,7 @@ static void do_item(ecx *e, uint32_t it)
 	} else if (c->syms[it].kind == S_FUNC && X86(c)) {
 		wk_function(e, it);
 	} else if (c->syms[it].kind == S_FUNC) {
-		if (!reuse(e, it))
+		if (!reuse(e, it) && !vw_try(e, it))
 			emit_function(e, it);
 	} else {
 		emit_object(e, it);
