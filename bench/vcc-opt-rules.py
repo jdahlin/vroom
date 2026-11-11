@@ -49,6 +49,25 @@ def check_localvalues(assembly, arch):
     add = r'i32\.add\b' if wasm else r'\badd\s+w' if arch == 'aarch64' else r'\baddl\b'
     if len(re.findall(add, text)) != 1:
         raise RuntimeError(f'sibling value must be computed once\n{text}')
+    text = body(assembly, 'lvr_reuse', wasm)
+    if len(re.findall(add, text)) != 1:
+        raise RuntimeError(f'declaration value must be reused in return\n{text}')
+    text = body(assembly, 'lvr_decl', wasm)
+    if len(re.findall(add, text)) != 1:
+        raise RuntimeError(f'declaration value must be reused in later declaration\n{text}')
+    text = body(assembly, 'lvr_independent', wasm)
+    if len(re.findall(add, text)) != 2:
+        raise RuntimeError(f'value must survive an independent local write\n{text}')
+    text = body(assembly, 'lvr_independent_compound', wasm)
+    if len(re.findall(add, text)) != 2:
+        raise RuntimeError(f'value must survive an independent compound write\n{text}')
+    text = body(assembly, 'lvr_intervening', wasm)
+    if len(re.findall(add, text)) != 2:
+        raise RuntimeError(f'value must survive a pure declaration\n{text}')
+    for name in ['lvr_assignment_call', 'lvr_assignment_volatile', 'lvr_assignment_hidden_write']:
+        text = body(assembly, name, wasm)
+        if len(re.findall(add, text)) < 3:
+            raise RuntimeError(f'{name}: effectful assignment must remain a barrier\n{text}')
     text = body(assembly, 'lvr_volatile', wasm)
     load = r'i32\.load\b' if wasm else r'\bldr\s+w' if arch == 'aarch64' else r'observed\(%rip\)'
     if len(re.findall(load, text)) != 2:
