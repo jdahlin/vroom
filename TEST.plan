@@ -503,6 +503,22 @@ på båda Linux-målen är byte-identiska mot `6cda644`; verkligt kernelobjekt
 skrivningar går i normal/nonunity/TSan på båda mål, sex-trådsreproduceraren
 är ren och permanent test kräver upprepad trådad emission.
 
+Full omkörning på fryst `573f23b`, 3484 konfigurationer per mål:
+**x86 1831 godkända, 55 fel, 1596 filtrerade, två orakelfel**;
+**ARM 1812 godkända, 45 fel, 1625 filtrerade, två orakelfel**.
+Tjugo tidigare fel per mål är rättade jämfört med `ad4cf9a`, inga
+tidigare godkända fall regredierar och filtreringar/orakelfel är oförändrade.
+Unity/nonunity klarar egna tillämpliga runtimeprov (155 x86, 160 ARM),
+diagnostik 217/217, sexton cachebatcher och kernel-sema 887/887 run/batch.
+En kall Clang-referens för `branch_far` tog timeout; samma källas behållna,
+byteverifierade referens verifierar dess separata byggsätt. Artefakter:
+`work/results/candidate-573f23b-validation.json`, `s4-573f23b-summary.json`.
+Siffrorna gäller före de två sista VLA-följdrättningarna och prepassfixen.
+Slutlig kod `0757803` är dessutom verifierad med 15/15 berörda runtimeprov
+per Linux-mål, diagnostik 217/217, faktisk wasm64-svit 126/126 plus
+27 dokumenterade XFAIL/10 referensundantag, samt två upprepade TSan-
+trådningsregressioner. Hela testplanen återstår fortsatt att slutföra.
+
 Kombinerat fryst checkpoint `7afcdea`, före signmask-/typnamnsrättningarna,
 är verifierat i båda byggsätten: **145/145 x86** (fem referensundantag),
 **150/150 ARM/QEMU**, tvåfils-constexpr-ABI samt tre ursprungliga GCC-fall
