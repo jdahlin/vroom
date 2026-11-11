@@ -1884,3 +1884,32 @@ ASan/UBSan: samma deterministiska intervalloracle för båda API-lägena,
 ID0-förgiftning, escapes, duplicerade första intervall och ogiltiga ID/storlekar.
 Mutationen som tappar första intervallet avvisas. x86 används först;
 arm64/wasm kan byta till hjälparen separat med paritets- och kostnadskontroll.
+
+
+OPT5 strömmande arm64-/wasm-insamling (2026-11-11): båda adaptrarna använder
+nu `em_slot_collect`; den andra hela genomgången av poster/händelser försvinner.
+Hjälparen validerar kända intervall en gång och uppdaterar allokeringsstatus direkt;
+ID0 använder oförändrad fysisk förgiftning. Klassificering, värdeflöde och utskrift
+är oförändrade. Separata backendfiler behålls.
+
+Matchad v3-mätning (`-O3 -march=x86-64-v3`, hela processens Callgrind-Ir,
+O1/O2, bas 781ca69 mot 54580f7 + dessa ändringar) ger för tvåfält/500 funktioner
+arm64 −0,294 %, wasm32/64 −0,160 %; för 16 fält/100 funktioner −0,453 %
+respektive −0,145 %. Ett fält/500 funktioner kostar +0,053 % respektive
++0,050 %. Skalär kontroll +0,006–0,007 %, loopkontroll arm64 +0,071 %,
+wasm +0,006 %. Detta är instruktionskostnad vid kompilering, inte körtid.
+Första access+collect-varianten och en mellanvariant avvisades: wasm ökade
+på stora fallet (+0,246 %). Slutversionen behålls eftersom flerfältsfallen
+förbättras på båda mål utan stor enkelfältsregression. Rådata, exakta kommandon,
+käll-/binärhashar och byteparitet finns lokalt under
+`work/opt-profile/stream-collectors-{direct-cost,direct-large-cost,parity}`;
+avvisade `stream-collectors-{cost,first-range-cost,large-cost}` finns kvar.
+Basens kompilatorfiler matchar 54580f7; endast testfixturen från PR48 skiljer.
+
+Verifiering: ASan/UBSan för slumpad intervalloracle i båda API-lägena och
+mutation som tappar första intervallet; 118 byteidentiska par (O1/O2, fyra mål,
+inklusive 24 arm64-objekt), separat observerbara volatile-/atomic-accesser med
+mutation samt wasm32/64 celltester O0–O3. Två wasm32 atomic_ops-par avvisas
+identiskt av basen p.g.a. testets LP64-antaganden och räknas inte som godkända.
+Unity- och separatfilbygge med j2 passerar, liksom värdetillståndets sanitizerkontrakt.
+Ingen ny emissionsregel eller full O2-täckning; full prestandagrind återstår.
