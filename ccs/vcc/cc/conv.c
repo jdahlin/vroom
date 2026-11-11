@@ -53,11 +53,28 @@ VPRIV const field *bitfield_of(cc *c, uint32_t n)
 	return NULL;
 }
 
+/* Some non-lvalue expressions retain bit-field width for integer
+ * promotion. This is separate from bitfield_of: sizeof/typeof may inspect
+ * assignment, comma and prefix-increment results. Postfix results instead
+ * have the ordinary declared type, as do explicit casts. */
+static const field *promotion_bitfield(cc *c, uint32_t n)
+{
+	for (;;) {
+		const node *x = N(n);
+		if (x->op == N_COMMA)
+			n = x->b;
+		else if (x->op == N_ASSIGN || x->op == N_PREINC || x->op == N_PREDEC)
+			n = x->a;
+		else
+			return bitfield_of(c, n);
+	}
+}
+
 /* the type of n as an rvalue after integer promotion (bit-fields included) */
 VPRIV qty promoted(cc *c, uint32_t n)
 {
 	qty t = QUNQ(N(n)->ty);
-	const field *f = bitfield_of(c, n);
+	const field *f = promotion_bitfield(c, n);
 
 	if (f && is_integer(c, t) && KIND(c, t) != TY_BOOL && !T(c, t)->n) {
 		if (f->width < 32)
@@ -973,7 +990,7 @@ VPRIV uint32_t rvalue(cc *c, uint32_t n)
 	n = decay(c, n);
 	x = N(n), t = T(c, x->ty);
 	/* int and wider, not a bit-field: already promoted */
-	if (t->kind >= TY_INT && t->kind <= TY_UINT128 && t->canon == QI(x->ty) && !(x->op == N_MEMBER && (x->flags & NF_BITFIELD)))
+	if (t->kind >= TY_INT && t->kind <= TY_UINT128 && t->canon == QI(x->ty) && !promotion_bitfield(c, n))
 		return n;
 	if (!is_int_kind(t->kind) && t->kind != TY_ENUM)
 		return n;
