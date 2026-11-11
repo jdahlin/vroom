@@ -410,6 +410,30 @@ def check_switches(assembly, arch):
         raise RuntimeError(f'sw_sparse32: {maximum} decisions, expected <=10 for 31 cases')
 
 
+def check_deadresults(assembly, arch):
+    # Assert the semantic operation family, not register choices, instruction
+    # totals or a full assembly snapshot. The discarded result still requires
+    # evaluating effects and potentially trapping instructions.
+    for name in ['dr_mul', 'dr_mul64', 'dr_diamond', 'dr_chain',
+                 'dr_zero_left', 'dr_ones', 'dr_rem_one']:
+        text = body(assembly, name, False)
+        if re.search(r'\bimul[lq]?\b', text):
+            raise RuntimeError(f'{name}: retained dead pure multiplication\n{text}')
+    for name in ['dr_div', 'dr_remainder']:
+        text = body(assembly, name, False)
+        if not re.search(r'\bdiv[lq]?\b', text):
+            raise RuntimeError(f'{name}: removed potentially trapping division\n{text}')
+    text = body(assembly, 'dr_volatile', False)
+    if not re.search(r'\bmovl\s+(?:-?[0-9]+)?\(%(?!rbp\b|rsp\b)\w+\)\s*,\s*%', text):
+        raise RuntimeError(f'dr_volatile: removed volatile operand read\n{text}')
+    text = body(assembly, 'dr_call', False)
+    if len(re.findall(r'\bcallq?\s+dr_effect\b', text)) != 1:
+        raise RuntimeError(f'dr_call: expected exactly one effectful call\n{text}')
+    text = body(assembly, 'dr_fp_div', False)
+    if not re.search(r'\bdivsd\b', text):
+        raise RuntimeError(f'dr_fp_div: removed returned floating-point operation\n{text}')
+
+
 def x64_start(check_preserved):
     if not check_preserved:
         return 'call main\nmov %eax, %edi\nmov $60, %eax\nsyscall\n'
@@ -449,7 +473,7 @@ def execute(args, directory, assembly, arch, source, level):
         run([assembler, f'--target={args.target}', '-c', assembly, '-o', obj])
         start = directory / 'start.s'
         start.write_text('.text\n.globl _start\n_start:\n' +
-                         (x64_start(args.rule in ['locals', 'localjmp', 'all'])
+                         (x64_start(args.rule in ['locals', 'localjmp', 'deadresults', 'all'])
                           if arch == 'x86_64' else
                           'bl main\nmov x8, #93\nsvc #0\n'))
         run([args.clang, f'--target={args.target}', '-fuse-ld=lld',
@@ -464,7 +488,7 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument('--vpp', default=str(Path(BUILD) / 'vpp'))
     ap.add_argument('--target', default='x86_64-linux-gnu')
-    ap.add_argument('--rule', choices=['pow2', 'signedpow2', 'identities', 'fallthrough', 'loopback', 'unreachable', 'locals', 'localjmp', 'copies', 'extensions', 'switches', 'all'], default='all')
+    ap.add_argument('--rule', choices=['pow2', 'signedpow2', 'identities', 'fallthrough', 'loopback', 'unreachable', 'locals', 'localjmp', 'copies', 'extensions', 'switches', 'deadresults', 'all'], default='all')
     ap.add_argument('--run', action='store_true', help='also execute literal-answer correctness checks')
     ap.add_argument('--clang', default=llvm('clang'))
     ap.add_argument('--vlink', default=str(Path(BUILD) / 'vlink'))
@@ -493,7 +517,8 @@ def main():
              'localjmp': ('register_locals_setjmp.c', None),
              'copies': ('record_copies.c', check_copies),
              'extensions': ('known_extensions.c', check_extensions),
-             'switches': ('switch_dispatch.c', check_switches)}
+             'switches': ('switch_dispatch.c', check_switches),
+             'deadresults': ('dead_results.c', check_deadresults)}
     selected = rules if args.rule == 'all' else {args.rule: rules[args.rule]}
     with tempfile.TemporaryDirectory(prefix='vcc-opt-rules-') as tmp:
         directory = Path(tmp)
@@ -505,7 +530,7 @@ def main():
                 assembly = directory / f'{rule}-O{level}.s'
                 run([args.vpp, f'--target={args.target}', f'-O{level}',
                      '-ffreestanding', '-fno-stack-protector', '-S', source, '-o', assembly])
-                checked = ((arch == 'x86_64' and level >= 1) if rule in ['locals', 'copies', 'extensions'] else
+                checked = ((arch == 'x86_64' and level >= 1) if rule in ['locals', 'copies', 'extensions', 'deadresults'] else
                            (not arch.startswith('wasm') and level >= 1) if rule in ['fallthrough', 'unreachable'] else
                            arch.startswith('wasm') if rule == 'loopback' else True)
                 checked = checked and check is not None and (rule != 'switches' or level >= 1)

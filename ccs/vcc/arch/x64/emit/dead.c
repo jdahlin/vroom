@@ -26,7 +26,7 @@ static _Thread_local struct {
  */
 static uint64_t x64_dead_exit(void)
 {
-	return X_DEAD_BIT(RAX) | X_DEAD_BIT(RDX) | X_DEAD_BIT(XMM0) | X_DEAD_BIT(XMM1) |
+	return X_DEAD_BIT(RAX) | X_DEAD_BIT(RDX) | X_DEAD_BIT(XMM0) | X_DEAD_BIT(XMM0 + 1) |
 	       X_DEAD_BIT(RSP) | X_DEAD_BIT(RBP) | X_DEAD_BIT(R12) | X_DEAD_BIT(RBX) |
 	       X_DEAD_BIT(R13) | X_DEAD_BIT(R14) | X_DEAD_BIT(R15);
 }
@@ -73,7 +73,11 @@ VPRIV void x64_dead_budget(ecx *e, uint32_t budget)
 	uint32_t *start = x64_dead_work.start;
 	em_flow_transfer *transfer = x64_dead_work.transfer;
 
-	if (n < 2 || n > X_DEAD_RECORDS)
+	/* The normal epilogue contract below does not cover interrupt returns.
+	 * Opaque asm (including valid naked bodies) is rejected by the scan.
+	 */
+	if (x->interrupt || (e->c && e->wk->fsym && (e->c->syms[e->wk->fsym].flags & SF_NORETURN)) ||
+	    n < 2 || n > X_DEAD_RECORDS)
 		return;
 	start[0] = 0;
 	for (uint32_t k = 0; k < n; k++) {
@@ -174,5 +178,6 @@ VPRIV void x64_dead_budget(ecx *e, uint32_t budget)
 
 VPRIV void x64_dead(ecx *e)
 {
-	x64_dead_budget(e, UINT32_MAX);
+	if (e->discarded_scalar)
+		x64_dead_budget(e, UINT32_MAX);
 }

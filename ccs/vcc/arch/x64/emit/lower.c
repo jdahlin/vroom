@@ -597,6 +597,7 @@ VPRIV void x64_begin(ecx *e, uint32_t s)
 	X->nin = 0;
 	X->live = 0;
 	X->pushes = 0;
+	e->discarded_scalar = false;
 	memset(X->csslot, 0, sizeof X->csslot);
 	e->ndl = 0;
 	e->raw.n = 0;
