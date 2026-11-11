@@ -963,3 +963,10 @@ inte bara borttagna instruktioner. Dessa två små syntetiska TU:er mäter varke
 programkörtid, helkorpus eller någon allmän kompilatorförbättring; G5/G7 är öppna.
 Nästa separata kvalitetslucka är kallt använda parametrars vanliga stackhem:
 den nuvarande direkta ABI-bindningen gäller bara lönsamma, utvalda registerhem.
+
+PR50 integration 2026-11-11: uppdaterad mot 9b18f642 (main genom 4bb6d52
+plus PR49). Interrupt-prolog/epilog och nya x86-funktionsmål bevaras;
+ramfri policy gäller uttryckligen bara vanliga funktioner. Unity -j1,
+bladens flagg-/cache-/hårdningsprov inklusive interrupt-undantaget,
+riktig signal-unwind genom ett ramfritt blad, befintlig vanlig/64-alignad
+unwind O1/O2 samt debugrader O0–O3 passerar. CI för integrationshuvudet återstår.
