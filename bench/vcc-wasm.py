@@ -62,6 +62,9 @@ WASM_XFAIL.update({
     'cond_dead_and': 'wasm: the dead operand of a known && is generated (the x86 walker drops it)',
     'and_zero_fold': 'wasm: x & 0 with x not constant is not folded (the x86 walker folds it)',
     'if_stmtexpr_const': 'wasm: a statement expression constant does not decide an if (the x86 walker folds it)',
+    'dead_after_inline_return': 'wasm: statements after an inlined return are generated (the x86 walker drops them)',
+    'inline_unused_arg': 'wasm: an inlined function evaluates its unused arguments (the x86 walker skips them)',
+    'warn_once_const': 'wasm: a statement expression constant does not decide an if (the x86 walker folds it)',
     'autoinit_zero': 'wasm: -ftrivial-auto-var-init=zero is x86-64 only so far (TODO.md tier 1)',
 })
 
