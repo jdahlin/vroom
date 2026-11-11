@@ -332,8 +332,9 @@ VPRIV void declarator(cc *c, declr *d, bool abstract_ok, uint32_t *first, uint32
 				fatal(c, tok(c)->loc, "declarator too complex");
 			if (unlikely(!param_list(c, &sufs[ns])))
 				d->invalid = true;
-			/* the innermost function declarator next to the name gives the parameters */
-			if (!inner && !d->has_func && ns == 0) {
+			/* Grouping a name adds no operators: (f)(int x) still defines x.
+			 * A pointer/array/function inside the group does take precedence. */
+			if (!inops && !d->has_func && ns == 0) {
 				d->psyms = sufs[ns].a + sufs[ns].b;
 				d->npsyms = sufs[ns].np;
 				d->kr = sufs[ns].kr;
