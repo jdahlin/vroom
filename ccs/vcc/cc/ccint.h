@@ -36,6 +36,14 @@ typedef struct label {
 	uint8_t addr_taken;
 } label;
 
+/* Call-site restrictions kept with declaration attributes, including redeclarations. */
+enum {
+	AF_TAIL_RETURNS_TWICE = 1u << 0,
+	AF_TAIL_DISABLE = 1u << 1,
+	AF_TAIL_NOT_CALLED = 1u << 2,
+	AF_OPTNONE = 1u << 3,	/* currently prevents the new sibling-call transformation */
+};
+
 typedef struct attrs {		/* the attributes of one declaration */
 	uint32_t aligned;	/* bytes; 0: none */
 	uint32_t section, alias, asmname;	/* string index + 1, 0: none */
@@ -54,7 +62,7 @@ typedef struct attrs {		/* the attributes of one declaration */
 	uint32_t ms_struct;	/* Microsoft record layout */
 	uint32_t tlsloc;		/* tls_model attribute location */
 	uint32_t visibility;
-	uint32_t flags;		/* SF_* */
+	uint32_t flags;		/* AF_* declaration/call restrictions */
 	uint8_t packed, transparent, used, unused, weak, noreturn, constructor, destructor;
 	uint8_t nonstring, may_alias, cold, gnu_inline, always_inline, noinline, ainline, error_fn;
 	uint8_t overloadable, noinstr;

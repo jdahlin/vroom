@@ -202,6 +202,7 @@ VPRIV void x64_print(ecx *e, tbuf *b, uint32_t s)
 	uint32_t A = e->wk->falign;
 	bool cfi = e->E->o->cfi;	/* unwind tables: .cfi_* as clang writes them */
 	uint32_t dj = 0;		/* -g: the next row */
+	uint32_t tail = x64_tail_ref(e);
 
 	if (unlikely(e->E->o->debug)) {
 		/* the function's own line (its body's '{', column 0), as clang */
@@ -399,6 +400,8 @@ VPRIV void x64_print(ecx *e, tbuf *b, uint32_t s)
 			tb_c(b, '\t');
 			x64_lbl(b, s, i->label);
 			break;
+		case X_TAIL:
+			continue; /* argument uses stay in records; branch follows the epilogue */
 		case X_CALL:
 			tb_s(b, "\tcallq\t");
 			ref_name(c, b, i->ref);
@@ -648,8 +651,15 @@ VPRIV void x64_print(ecx *e, tbuf *b, uint32_t s)
 	}
 	if (!X->framefree)
 		tb_s(b, cfi ? "\tmovq\t%rbp, %rsp\n\tpopq\t%rbp\n\t.cfi_def_cfa %rsp, 8\n" : "\tmovq\t%rbp, %rsp\n\tpopq\t%rbp\n");
-	/* -mfunction-return=thunk-extern: the return through __x86_return_thunk (cs-prefixed as clang) */
-	tb_s(b, (e->E->o->xcf & 2) ? ((e->E->o->xcf & 8) ? "\tcs\n\tjmp\t__x86_return_thunk\n" : "\tjmp\t__x86_return_thunk\n") : "\tretq\n");
+	if (tail) {
+		tb_s(b, "\tjmp\t");
+		ref_name(c, b, tail);
+		if (c->o->pic && sym_needs_got(c, tail)) tb_s(b, "@PLT");
+		tb_c(b, '\n');
+	} else {
+		/* A sibling jump is a direct call edge, not a return-thunk edge. */
+		tb_s(b, (e->E->o->xcf & 2) ? ((e->E->o->xcf & 8) ? "\tcs\n\tjmp\t__x86_return_thunk\n" : "\tjmp\t__x86_return_thunk\n") : "\tretq\n");
+	}
 	if (e->wk->spneed)
 		tb_f(b, ".Lspfail%u:\n\tcallq\t__stack_chk_fail%s\n", s, e->E->o->pic ? "@PLT" : "");
 	tb_s(b, cfi ? "\t.cfi_endproc\n.Lfunc_end" : ".Lfunc_end");

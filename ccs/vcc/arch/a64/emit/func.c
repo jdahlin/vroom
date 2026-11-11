@@ -139,6 +139,7 @@ static void finish_direct(ecx *e, uint32_t s, uint32_t align, const int *cs, int
 	code_hdr *ch;
 	ins *in;
 	uint32_t n = 0, sym_labels = 0;
+	uint32_t tail = a64_tail_ref(e);
 
 	b->n = (b->n + 7) & ~(size_t)7;
 	start = b->n;
@@ -174,7 +175,10 @@ static void finish_direct(ecx *e, uint32_t s, uint32_t align, const int *cs, int
 		PUT(.op = I_MOV, .sz = 1, .rd = SP, .rn = R_FP);
 		PUT(.op = I_LDP, .sz = 1, .rd = R_FP, .ra = R_LR, .rn = SP, .cond = 2, .imm = 16);
 	}
-	PUT(.op = I_RET);
+	if (tail)
+		PUT(.op = I_TAIL, .cond = 1, .ref = tail);
+	else
+		PUT(.op = I_RET);
 #undef PUT
 	/* give back the unused room, then the inline asm text */
 	b->n -= ((size_t)e->nin + 2 * (size_t)ncs + 8 - n) * sizeof(ins);
@@ -405,7 +409,24 @@ static void finish_function(ecx *e, uint32_t s)
 		tb_f(b, "\tldp\tx%d, x%d, [x29, #%d]\n", cs[k], cs[k + 1], -csave + 8 * k);
 	if (ncs & 1)
 		tb_f(b, "\tldr\tx%d, [x29, #%d]\n", cs[ncs - 1], -csave + 8 * (ncs - 1));
-	tb_s(b, leaf ? "\tret\n" : "\tmov\tsp, x29\n\tldp\tx29, x30, [sp], #16\n\tret\n");
+	uint32_t tail = a64_tail_ref(e);
+
+	if (!leaf)
+		tb_s(b, "\tmov\tsp, x29\n\tldp\tx29, x30, [sp], #16\n");
+	if (tail) {
+		if (cfi) {
+			for (int k = 0; k < ncs; k++)
+				tb_f(b, "\t.cfi_restore w%d\n", cs[k]);
+			if (!leaf)
+				tb_s(b, "\t.cfi_restore w29\n\t.cfi_restore w30\n");
+			tb_s(b, "\t.cfi_def_cfa wsp, 0\n");
+		}
+		ins i = { .op = I_TAIL, .cond = 1, .ref = tail };
+
+		print_ins(c, b, &i, s, e->raw.p);
+	} else {
+		tb_s(b, "\tret\n");
+	}
 	if (cfi)
 		tb_s(b, "\t.cfi_endproc\n");
 	tb_s(b, ".Lfe");

@@ -1873,3 +1873,31 @@ på samma experimentella x86-binär med slots av/på går från 88 till 77
 frame-moves (382 till 378 instruktioner). Motsvarande wasm32-fall går från
 46 till 32 i32.load och 31 till 29 i32.store mot tidigare referensbinär.
 Det sista är en avgränsad jämförelse mellan binärer, inte isolerad kostnad.
+
+### Status OPT8 (2026-11-11): första begränsade native-tail-calls, integration pågår
+
+`emit/opt/tail.c` bevisar samma enkla wrapperform för båda registermålen:
+hela kroppen är en direkt return-call, identiska 32/64-bitars heltals-/pekartyper,
+argument är egna formaler eller typade literaler, fasta prototyper och högst
+målets registerkapacitet. Ingen ny hel AST-vandring eller SSA. Målens egna
+`tail.c` parkerar argument före ABI-placering; en terminal markör håller alla
+utgående argument levande till epilogen. X86 hoppar efter återställd ram/CFA;
+arm64 skriver symbolgrenen som JUMP26 även direkt till objekt och återställer
+CFI före grenen. Stackargument, lokaler/adressflykt, cleanup/VLA, konverteringar,
+indirekta anrop, flyttal och allmänna svanspositioner återstår.
+
+`-f[no-]optimize-sibling-calls` tolkas i ordning och finns i cacheidentiteten.
+Attributen returns_twice, disable_tail_calls, not_tail_called och optnone
+lagras/ärvs; den nya regeln respekterar dem. Övriga pass har ännu inte full
+optnone-policy. Standard-wasm behåller vanligt call: clang 23 O2 gör samma sak;
+return_call kräver explicit tail-call-feature och assemblerstöd, som inte ingår
+här. Detta är ingen implementerad wasm-tail-transform.
+
+Checkpoint på PR50-bas 10e2cb3: unity bygger; 16 fokuserade O0–O3-mål/nivåer
+klarar kodkrav och körning, native även CFI. Verkligt kärnunderlag finns:
+preprocessor-baslinje 881/881 och kandidatens sema 887/887 både per process och
+batch. Detta är historisk evidens för den basen, inte bevis på senaste main.
+Ny kontrollrigg för blandade flagg-/attributcacher och arm64:s direkta
+objektväg är tillagd men ännu inte körd. Nuvarande main/PR50 ska integreras
+före fler breda regressioner, kostnadsprofil och slutlig granskning. G5/G7 och
+hela O2-målet är fortsatt öppna.
