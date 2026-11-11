@@ -46,22 +46,31 @@ def body(assembly, name, wasm):
 def check_cmpbounds(assembly, arch):
     wasm = arch.startswith('wasm')
     compare = r'\b(?:cmp[lq]?|[cs]et[a-z]+|i(?:32|64)\.(?:lt|gt|le|ge)_[su])\b'
-    for name in ['cb_low', 'cb_high', 'cb_reverse', 'cb_effect', 'cb_branch', 'cb_volatile', 'cb_smax', 'cb_u64', 'cb_atomic']:
+    for name in ['cb_low', 'cb_high', 'cb_reverse', 'cb_effect', 'cb_branch', 'cb_volatile', 'cb_smax', 'cb_u64', 'cb_atomic',
+                 'cb_expr_enum', 'cb_expr_enum_zero', 'cb_expr_smin', 'cb_expr_smin_reverse', 'cb_expr_s64min', 'cb_expr_umax',
+                 'cb_expr_u64max', 'cb_expr_trunc', 'cb_expr_zero', 'cb_expr_complement', 'cb_expr_shift', 'cb_expr_div', 'cb_expr_effect',
+                 'cb_expr_effect_left', 'cb_expr_volatile', 'cb_expr_atomic']:
         text = body(assembly, name, wasm)
         if re.search(compare, text):
             raise RuntimeError(f'{name}: retained comparison against a bound\n{text}')
-    for name in ['cb_effect', 'cb_branch']:
+    for name in ['cb_effect', 'cb_branch', 'cb_expr_effect', 'cb_expr_effect_left']:
         text = body(assembly, name, wasm)
         if len(re.findall(r'\b(?:callq?|bl)\s+next\b', text)) != 1:
             raise RuntimeError(f'{name}: expected one call to next\n{text}')
-    volatile = body(assembly, 'cb_volatile', wasm)
-    atomic = body(assembly, 'cb_atomic', wasm)
+    for name in ['cb_impure_rhs', 'cb_impure_tree']:
+        text = body(assembly, name, wasm)
+        if len(re.findall(r'\b(?:callq?|bl)\s+next\b', text)) != 1:
+            raise RuntimeError(f'{name}: expected one call to next\n{text}')
     loads = {'x86_64': (r'observed\(%rip\)', r'mov[lq]\s+\(%r'),
              'aarch64': (r'\bldr\b[^\n]*observed', r'(?:\bldar\b|\.inst\b)'),
              'wasm32': (r'i32\.load', r'i32\.load'),
              'wasm64': (r'i32\.load', r'i32\.load')}
-    if not re.search(loads[arch][0], volatile) or not re.search(loads[arch][1], atomic):
-        raise RuntimeError('volatile or atomic read disappeared')
+    for name in ['cb_volatile', 'cb_expr_volatile']:
+        if not re.search(loads[arch][0], body(assembly, name, wasm)):
+            raise RuntimeError(f'{name}: volatile read disappeared')
+    for name in ['cb_atomic', 'cb_expr_atomic']:
+        if not re.search(loads[arch][1], body(assembly, name, wasm)):
+            raise RuntimeError(f'{name}: atomic read disappeared')
 
 
 def check_pow2(assembly, arch):
