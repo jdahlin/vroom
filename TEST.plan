@@ -247,6 +247,25 @@ AArch64-TSan-ramen i `gen_inner` från 8608 till 432 byte. Det oförändrade
 workerstack; stackgränser, test och sanitizerkontroller har inte ändrats.
 
 ### S4 gcc.dg — påbörjad (2026-11-11)
+
+**Samlad semantisk följdmilstolpe på `74f6ec4`:** C90, nästlade
+GNU-ranginitialiseringar, deklarationslivstid efter etiketter och breda
+rotationer har validerats tillsammans. Fyra berörda oförändrade GCC-fall
+passerar på båda Linuxmålen och båda byggena; fem fokuserade runtimeprov
+passerar även O2/O3. Fullständiga grindar, explicita referensundantag och
+Wasm/ASan-resultat finns i PLAN-release.md och
+`work/results/semantic-stack-74/`. Ingen full S4-passökning hävdas.
+
+**C90-digrafer och satsscope (2026-11-11):** de oförändrade
+`c90-digraph-1.c` och `c90-scope-1.c` går nu från runtime-abort till godkänt
+på Linux x86-64 och arm64, både unity och nonunity. Strikt C89/C90 läser
+inte digrafer; C94 och GNU89 gör det. Urval/loopar får egna implicita scope
+först i C99, medan explicita block alltid behåller sitt scope.
+`bench/vcc-c90.py` kontrollerar sju lägen mot Clang, tokenklistring,
+stdin/-D och 21 blandade headercache-jobb per mål/build. Full PP-paritet
+är 920/920 i både cmp och batch före och efter lexerändringen; sema run
++ batch är 887/887 efteråt. Ingen upstreamflagga har tagits bort.
+
 `bench/vcc-gcc-dg.py -j 6 --target x86_64-linux-gnu` kör direkta
 `gcc.dg/*.c` med `dg-do run` (1276 filer) och direkta
 `gcc.dg/torture/*.c` (2208 filer). `--target aarch64-linux-gnu` använder
@@ -639,6 +658,20 @@ Detta är fortfarande inte runtime- eller QBE-ekvivalens.
 **Klart när:** allt som clang klarar klarar också vcc.
 
 ### S5b Kefir — importerad, Linux-baslinje uppmätt
+
+**Deklaration direkt efter etikett (2026-11-11, bas `a41361e`):**
+Frontendens syntetiska deklarationspaket plattas nu ut i det omgivande
+blocket. Paketet är ingen ny lexikal scope: ARM får inte återanvända dess
+stackplatser medan variablerna lever, och cleanup får inte köras tidigt
+på något mål. Oförändrade Kefir `std_attributes18` passerar alla fyra
+Clang/vcc-kombinationer på x86 och ARM, både unity och filvis bygge.
+Minimal baseline ger ARM-fel för två levande volatile-lokaler; separat
+cleanup-regression avslöjar samma scope-fel även på x86. Ny regression
+samt switch-/statement-expression-prober passerar 36/36 kombinationer
+(Clang/unity/filvis × O0/O2/O3 × två mål × två källor). Egna sviter:
+x86 233/233 med sex befintliga referensundantag, ARM 238/238 med ett
+befintligt xfail; sema run/batch 887/887 på båda byggen, diagnostik 225/225.
+Evidens: `work/arm-computed-goto/`. Ingen ny full Kefir-baslinje påstås.
 
 **Legacy `_ExtInt` (2026-11-11):** nyckelordet går genom samma parser- och
 typväg som `_BitInt`, med `-Wdeprecated-type` som hos Clang. Oförändrade
