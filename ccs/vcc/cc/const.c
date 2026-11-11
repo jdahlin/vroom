@@ -131,11 +131,14 @@ VPRIV int clz128(u128 x, unsigned bits)
 }
 
 /* Initializers may refer back to themselves, directly or through another const.
-   Keep the recursion path on the C stack without modifying symbol bodies. */
+   Emit workers evaluate the same immutable cc concurrently: keep each recursion
+   path thread-local, and distinguish symbols from different translation units. */
 struct const_eval {
 	struct const_eval *prev;
 	uint32_t sym;
+	cc *owner;
 };
+static _Thread_local struct const_eval *const_eval_path;
 
 /* Aggregate copies keep a reference to the source object in the AST. Follow
    only certified constant objects, with the same cycle guard as evaluation. */
@@ -156,72 +159,85 @@ static bool constexpr_unwrap(cc *c, uint32_t n, uint32_t *out, bool *ice)
 
 		if (!(s->flags & SF_CONSTEXPR) || !s->body || (s->flags & SF_INVALID))
 			return false;
-		for (struct const_eval *p = c->const_eval; p; p = p->prev)
-			if (p->sym == x->a)
+		for (struct const_eval *p = const_eval_path; p; p = p->prev)
+			if (p->owner == c && p->sym == x->a)
 				return false;
-		struct const_eval frame = { c->const_eval, x->a };
+		struct const_eval frame = { const_eval_path, x->a, c };
 
-		c->const_eval = &frame;
+		const_eval_path = &frame;
 		bool ok = constexpr_unwrap(c, s->body, out, ice);
-		c->const_eval = frame.prev;
+		const_eval_path = frame.prev;
 		return ok;
 	}
 	*out = n;
 	return true;
 }
 
+/* A zero initializer or a string element need not exist as an AST node.
+   Keep those values here rather than appending nodes/pool entries while emit
+   workers are traversing the already parsed translation unit. */
+typedef struct const_object {
+	uint32_t init;          /* 0: implicit zero or the integer value below */
+	qty ty;
+	i128 integer;
+} const_object;
+
+static bool constexpr_object_unwrap(cc *c, const_object *obj, bool *ice)
+{
+	if (!obj->init) return true;
+	if (!constexpr_unwrap(c, obj->init, &obj->init, ice)) return false;
+	obj->ty = N(obj->init)->ty;
+	return true;
+}
+
 /* Resolve a constant aggregate subobject to the initializer which supplies it.
    Identity matters: a const object is not a C23 constexpr object. */
-static bool constexpr_subobject(cc *c, uint32_t n, uint32_t *out, bool *ice)
+static bool constexpr_subobject(cc *c, uint32_t n, const_object *out, bool *ice)
 {
 	const node *x = N(n);
-	uint32_t init;
+	const_object obj;
 
+	*out = (const_object){ .ty = x->ty };
 	switch (x->op) {
 	case N_VAR:
 		if (!(c->syms[x->a].flags & SF_CONSTEXPR) || !c->syms[x->a].body ||
 		    (c->syms[x->a].flags & SF_INVALID))
 			return false;
-		*out = c->syms[x->a].body;
+		out->init = c->syms[x->a].body;
 		return true;
 	case N_COMPLIT:
-		*out = x->a;
+		out->init = x->a;
 		*ice = false;
 		return x->a != 0;
 	case N_CAST:
 		if (x->aux != CK_NOP && x->aux != CK_DECAY)
 			return false;
 		return constexpr_subobject(c, x->a, out, ice);
-	case N_MEMBER:
-		if (!constexpr_subobject(c, x->a, &init, ice))
+	case N_MEMBER: {
+		if (!constexpr_subobject(c, x->a, &obj, ice) || !constexpr_object_unwrap(c, &obj, ice))
 			return false;
-		if (!constexpr_unwrap(c, init, &init, ice))
-			return false;
-		if (N(init)->op == N_ZERO) {
-			*out = mk(c, N_ZERO, x->ty, x->loc);
+		uint32_t init = obj.init;
+		if (!init || N(init)->op == N_ZERO)
 			return true;
-		}
 		if (N(init)->op == N_CPLX && x->c < 2) {
-			*out = x->c ? N(init)->b : N(init)->a;
+			out->init = x->c ? N(init)->b : N(init)->a;
 			return true;
 		}
 		if (N(init)->op != N_INIT || N(init)->aux == 1 || x->c >= N(init)->c ||
 		    (N(init)->aux == 2 && N(init)->a != x->c))
 			return false;
-		*out = c->lists[N(init)->b + x->c];
-		if (!*out)
-			*out = mk(c, N_ZERO, x->ty, x->loc);
+		out->init = c->lists[N(init)->b + x->c];
 		return true;
+	}
 	case N_INDEX: {
 		cval v;
 
-		if (!constexpr_subobject(c, x->a, &init, ice) || !constexpr_unwrap(c, init, &init, ice) ||
-		    !eval(c, x->b, &v) || v.kind != CV_INT || v.i < 0 || (u128)v.i >= (u128)arr_len(c, N(init)->ty))
+		if (!constexpr_subobject(c, x->a, &obj, ice) || !constexpr_object_unwrap(c, &obj, ice) ||
+		    !eval(c, x->b, &v) || v.kind != CV_INT || v.i < 0 || (u128)v.i >= (u128)arr_len(c, obj.ty))
 			return false;
-		if (N(init)->op == N_ZERO) {
-			*out = mk(c, N_ZERO, x->ty, x->loc);
+		uint32_t init = obj.init;
+		if (!init || N(init)->op == N_ZERO)
 			return true;
-		}
 		if (N(init)->op == N_STR) {
 			const cstr *str = &c->strs[N(init)->a];
 			i128 value = 0;
@@ -230,7 +246,7 @@ static bool constexpr_subobject(cc *c, uint32_t n, uint32_t *out, bool *ice)
 				return false;
 			for (unsigned k = 0; k < str->esz; k++)
 				value |= (i128)(unsigned char)str->s[(size_t)v.i * str->esz + k] << (8*k);
-			*out = mk_int(c, trunc_to(c, value, x->ty), QUNQ(x->ty), x->loc);
+			out->integer = trunc_to(c, value, x->ty);
 			return true;
 		}
 		if (N(init)->op != N_INIT || N(init)->aux != 1)
@@ -239,10 +255,9 @@ static bool constexpr_subobject(cc *c, uint32_t n, uint32_t *out, bool *ice)
 
 		for (uint32_t i = 0; i < N(init)->c; i++)
 			if ((u128)v.i >= a[3*i] && (u128)v.i <= a[3*i+1]) {
-				*out = a[3*i+2];
+				out->init = a[3*i+2];
 				return true;
 			}
-		*out = mk(c, N_ZERO, x->ty, x->loc);
 		return true;
 	}
 	default:
@@ -252,20 +267,30 @@ static bool constexpr_subobject(cc *c, uint32_t n, uint32_t *out, bool *ice)
 
 static bool constexpr_value(cc *c, uint32_t n, cval *v)
 {
-	uint32_t init, root = n;
+	const_object obj;
+	uint32_t root = n;
 	bool ice = true;
 
 	while (N(root)->op == N_MEMBER || N(root)->op == N_INDEX || N(root)->op == N_CAST)
 		root = N(root)->a;
 	uint32_t sym = N(root)->op == N_VAR ? N(root)->a : 0;
-	for (struct const_eval *p = c->const_eval; sym && p; p = p->prev)
-		if (p->sym == sym)
+	for (struct const_eval *p = const_eval_path; sym && p; p = p->prev)
+		if (p->owner == c && p->sym == sym)
 			return false;
-	struct const_eval frame = { c->const_eval, sym };
+	struct const_eval frame = { const_eval_path, sym, c };
 
-	c->const_eval = &frame;
-	bool ok = constexpr_subobject(c, n, &init, &ice) && init != n && eval(c, init, v);
-	c->const_eval = frame.prev;
+	const_eval_path = &frame;
+	bool ok = constexpr_subobject(c, n, &obj, &ice) && obj.init != n;
+	if (ok) {
+		if (obj.init) ok = eval(c, obj.init, v);
+		else {
+			memset(v, 0, sizeof *v);
+			v->kind = is_float(c, obj.ty) ? CV_FLT : CV_INT;
+			v->i = obj.integer;
+			ok = is_scalar(c, obj.ty);
+		}
+	}
+	const_eval_path = frame.prev;
 	if (ok)
 		v->ice = ice && v->kind == CV_INT;
 	return ok;
@@ -277,7 +302,7 @@ VPRIV bool constexpr_init_ok(cc *c, uint32_t n)
 {
 	const node *x;
 	cval v;
-	uint32_t init;
+	const_object obj;
 	bool ice = true;
 
 	if (!n)
@@ -300,18 +325,18 @@ VPRIV bool constexpr_init_ok(cc *c, uint32_t n)
 		return true;
 	}
 	case N_VAR: {
-		for (struct const_eval *p = c->const_eval; p; p = p->prev)
-			if (p->sym == x->a)
+		for (struct const_eval *p = const_eval_path; p; p = p->prev)
+			if (p->owner == c && p->sym == x->a)
 				return false;
-		struct const_eval frame = { c->const_eval, x->a };
+		struct const_eval frame = { const_eval_path, x->a, c };
 
-		c->const_eval = &frame;
-		bool ok = constexpr_subobject(c, n, &init, &ice) && init != n && constexpr_init_ok(c, init);
-		c->const_eval = frame.prev;
+		const_eval_path = &frame;
+		bool ok = constexpr_subobject(c, n, &obj, &ice) && obj.init != n && constexpr_init_ok(c, obj.init);
+		const_eval_path = frame.prev;
 		return ok;
 	}
 	case N_MEMBER: case N_INDEX:
-		return eval(c, n, &v) && constexpr_subobject(c, n, &init, &ice) && init != n && constexpr_init_ok(c, init);
+		return eval(c, n, &v) && constexpr_subobject(c, n, &obj, &ice) && obj.init != n && constexpr_init_ok(c, obj.init);
 	case N_COMPLIT:
 		return constexpr_init_ok(c, x->a);
 	case N_CAST: case N_UNARY:
@@ -464,14 +489,14 @@ VPRIV bool eval(cc *c, uint32_t n, cval *v)
 		const sym *s = &c->syms[x->a];
 
 		if (s->kind == S_VAR && (QQ(s->ty) & (Q_CONST | Q_VOLATILE)) == Q_CONST && (is_integer(c, s->ty) || (s->flags & SF_CONSTEXPR)) && s->body && !(s->flags & SF_INVALID)) {
-			for (struct const_eval *p = c->const_eval; p; p = p->prev)
-				if (p->sym == x->a)
+			for (struct const_eval *p = const_eval_path; p; p = p->prev)
+				if (p->owner == c && p->sym == x->a)
 					return false;
-			struct const_eval frame = { c->const_eval, x->a };
+			struct const_eval frame = { const_eval_path, x->a, c };
 
-			c->const_eval = &frame;
+			const_eval_path = &frame;
 			bool ok = eval(c, s->body, v) && (v->kind == CV_INT || (s->flags & SF_CONSTEXPR));
-			c->const_eval = frame.prev;
+			const_eval_path = frame.prev;
 			if (ok) {
 				v->ice = (s->flags & SF_CONSTEXPR) && v->kind == CV_INT;
 				return true;
@@ -602,7 +627,7 @@ VPRIV bool eval(cc *c, uint32_t n, cval *v)
 			return false;
 		}
 		switch (x->aux) {
-		case T_MINUS: v->i = trunc_to(c, -a.i, x->ty); break;
+		case T_MINUS: v->i = trunc_to(c, (i128)((u128)0 - (u128)a.i), x->ty); break;
 		case T_TILDE: v->i = trunc_to(c, ~a.i, x->ty); break;
 		case T_EXCLAIM: v->i = a.i == 0; break;
 		}
@@ -774,8 +799,8 @@ VPRIV bool eval(cc *c, uint32_t n, cval *v)
 
 			ok = true;
 			switch (op) {
-			case T_PLUS: v->i = l + r; break;
-			case T_MINUS: v->i = l - r; break;
+			case T_PLUS: v->i = (i128)((u128)l + (u128)r); break;
+			case T_MINUS: v->i = (i128)((u128)l - (u128)r); break;
 			case T_STAR: v->i = sg ? l * r : (i128)((u128)l * (u128)r); break;
 			case T_SLASH:
 			case T_PERCENT:

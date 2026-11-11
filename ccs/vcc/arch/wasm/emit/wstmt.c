@@ -814,7 +814,7 @@ static void wdecl_stmt(ecx *e, const node *x)
 	}
 	if (y->kind != S_VAR || y->sc == SC_STATIC || y->sc == SC_EXTERN || y->sc == SC_TYPEDEF)
 		return;
-	if (vm_type(c, y->ty))
+	if (!x->aux && vm_type(c, y->ty))
 		wvla_fix(e, y->ty, false);
 	if (T(c, y->ty)->kind == TY_ARRAY && (T(c, y->ty)->flags & TF_VLA)) {
 		/* below the stack pointer, as alloca; the block gives it back (wvla_block) */

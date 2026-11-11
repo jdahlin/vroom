@@ -36,6 +36,7 @@ static const char *const fixed_names[] = {
 	"__fixtfti", "__fixunstfti", "__extendxftf2", "__trunctfxf2",
 	"__extendbfsf2", "__truncsfbf2", "__truncdfbf2", "__truncxfbf2", "__trunctfbf2",
 	"__extendhfsf2", "__truncsfhf2", "__truncdfhf2", "__truncxfhf2", "__trunctfhf2",
+	"__floattixf", "__floatuntixf", "__fixxfti", "__fixunsxfti",
 };
 
 VPRIV uint32_t canon_sym(cc *c, uint32_t s)

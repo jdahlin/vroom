@@ -80,11 +80,14 @@ static void data_init(ecx *e, uint64_t off, qty ty, uint32_t init)
 				if (!v[i])
 					continue;
 				if (f->bitfield) {
-					uint64_t bo = f->off, w = f->width, bits;
+					uint64_t bo = f->off, w = f->width;
+					u128 bits;
 
 					if (!cc_eval(c, v[i], &cv) || cv.kind != CV_INT)
 						efatal(e, x->loc, "initializer element is not a compile-time constant");
-					bits = (uint64_t)cv.i & (w >= 64 ? ~(uint64_t)0 : (((uint64_t)1 << w) - 1));
+					/* The per-bit loop truncates to the field width. Keep the
+					   full constant so shifts through bit 127 remain defined. */
+					bits = (u128)cv.i;
 					for (uint64_t k = 0; k < w; k++) {
 						uint64_t at = off + (bo + k) / 8;
 						uint8_t m = (uint8_t)(1u << ((bo + k) % 8));

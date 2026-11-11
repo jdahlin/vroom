@@ -70,6 +70,7 @@ enum {
 	/* SSE (X_LD/X_ST/X_MOV take xmm registers too) */
 	X_FADD, X_FSUB, X_FMUL, X_FDIV,	/* r0 = r1 op r2 (sz 4 ss, 8 sd) */
 	X_FXOR,		/* r0 = r1 ^ r2 (xorps) */
+	X_FSQRT,	/* scalar square root r0 = sqrt(r1) */
 	X_FCMP,		/* flags: ucomis r1 ? r2 */
 	X_FSETCC,	/* r0 = (cond 0: ==, 1: !=) after X_FCMP/x87 compare, NaN-aware (r11 scratch) */
 	X_CVTI2F,	/* xmm r0 = gpr r1: sz float size, sh int size (4, 8) */

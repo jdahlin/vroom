@@ -516,6 +516,12 @@ VPRIV void x64_print(ecx *e, tbuf *b, uint32_t s)
 			tb_s(b, ", ");
 			x64_reg(b, i->r[0], 8);
 			break;
+		case X_FSQRT:
+			tb_s(b, "\tsqrtsd\t");
+			x64_reg(b, i->r[1], 8);
+			tb_s(b, ", ");
+			x64_reg(b, i->r[0], 8);
+			break;
 		case X_FCMP:
 			tb_s(b, sz == 4 ? "\tucomiss\t" : "\tucomisd\t");
 			x64_reg(b, i->r[2], 8);

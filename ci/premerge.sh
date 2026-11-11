@@ -61,6 +61,7 @@ arm64)
 	step opt-debug-x86 python3 bench/vcc-opt-debug.py
 	step opt-rules-arm64 python3 bench/vcc-opt-rules.py --target aarch64-linux-gnu
 	step opt-rules-x86 python3 bench/vcc-opt-rules.py --target x86_64-linux-gnu --run
+	step c2y-cache    python3 bench/vcc-c2y-cache.py
 	step diag         python3 bench/vcc-diag.py -j "$J"
 	step stress       python3 bench/vcc-stress.py
 	step stress-vccd  python3 bench/vcc-stress.py --vccd

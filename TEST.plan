@@ -274,6 +274,271 @@ och ett assembleringsfel. `pow`/`fabsl`-länkfelen är verkliga skillnader i
 lowering/optimering, inte skäl att lägga till `-lm` i riggen när upstream
 inte begär det. Resultat: `work/results/vroom-milestone-s4-pr-{x86,arm}.json`.
 
+Efter baslinjen är två frontendluckor rättade: `__builtin_c23_va_start`
+(även ellipsis utan namngiven parameter och ignorerad valfri andra operand)
+och generiska `__builtin_stdc_rotate_left/right` med typbevarande modulo-
+rotation och engångsevaluering. `pr48731` och `pr117492-1` kompilerar och
+assembleras på båda Linux-målen. Två runtime-regressioner per mål och
+ogiltiga operandtyper kontrolleras; unity/nonunity samt kernelns sema
+887/887 i båda körsätten går grönt. Detta är riktad evidens; S4:s fulla
+baslinjesiffror ovan har inte räknats om efter rättningen.
+
+Samma bitbredd vid signed skalär till unsigned vektorlane accepteras nu
+som clang: `pr103181` och `pr127379` kompilerar och assembleras på båda
+Linux-målen; det första körs också och matchar clang. Regressioner behåller
+avvisning av unsigned till signed och bredare skalärer. Unity/nonunity,
+positiva/negativa prover och kernel sema 887/887 i run/batch går grönt.
+Detta är en separat frontendrättning efter CI-milstolpens frysta träd;
+PR #28:s gröna CI gäller dess eget träd och verifierar inte denna senare ändring.
+
+**Full direkt S4-baslinje, fryst `aa584e2` (2026-11-11):** nu körs alla
+**3484 filer per mål**, 1276 direkta `dg-do run` och 2208 direkta
+torture-filer vid -O0, utan `--limit` eller PR-namnfilter. X86:
+**1803 godkända, 83 fel, 1596 filtrerade, 2 referensfel**. ARM/QEMU:
+**1783 godkända, 74 fel, 1625 filtrerade, 2 referensfel**. Ingen
+kompilatorkrasch. X86-felen är 36 runtime-, 29 kompilerings- och 18
+länkfel; ARM har 31 runtime-, 24 kompilerings-, 17 länk- och 2
+assembleringsfel. Båda målen har clang-timeout i `float-exact-1.c` och
+clang SIGSEGV i `vla-tert-1.c`. Felantalet är testfall, inte unika buggar.
+83 x86-fel grupperas i 32 signaturer, bland annat VLA-biverkningar,
+breda bitfält, interrupt-ABI, intrinsicstöd och optimeringskontrakt.
+`fwrapv-2.c` och två tag-alias-tester kräver särskild UB-/optimeringsanalys;
+deras aborter är inte i sig bevis för felgenerering av väldefinierad C.
+Rapporter: `work/results/s4-all-{x86,arm}.json`, `s4-all-summary.json` och
+`s4-all-classification.txt`. Kompilator SHA-256:
+`21aba03551f35a89d577a36a268051fee25dc757f296161981261a1d2b91bdbb`.
+Den tidigare PR-delmängden ersätter inte denna fulla baslinje. Hela
+optimeringsmatrisen och nästlade sviter återstår fortfarande.
+
+Samma frysta kompilators egna runtime-regressioner går **135/135 x86**
+(fem uttryckliga referens-/målundantag) och **140/140 ARM** (inga
+undantag). C23-va_start och signed-vektorskalärer går även på Wasm;
+rotationstestets `_BitInt`-del träffar en verifierad äldre Wasm-lucka och
+måste hållas synlig vid nästa premerge. De tre `pr84682`-asmfallen är nu
+riktat gröna på båda Linux-målen utan nya kodändringar; asm-runtime går
+7/7 x86 med två tidigare undantag och 9/9 ARM.
+
+128-bitars bitfält är rättade på båda Linux-målen: ARM:s ogiltiga
+`UBFM #64` och x86:s råa objektläsning ersätts av ordvis extraktion och
+inlagring med signerad utvidgning. `pr89091` går i fem GCC-konfigurationer
+per mål (en explicit upstream-filtrering). Regressioner täcker 63–128
+bitars fält, packade offset, höga ord, trunkerade tilldelningsresultat,
+inkrement och grannfält, inklusive objekt mot en skyddssida. Unity/nonunity
+och riktade runtime-prov vid -O0/-O2 går grönt på båda målen. De fulla
+baslinjesiffrorna ovan gäller fortfarande före denna rättning.
+
+VLA-`sizeof` tappar inte längre operandens biverkningar: alla tre
+emittervägarna evaluerar arrayadressoperanden, och prepass besöker den och
+VLA-gränserna så konstantlokaloptimering inte använder gamla värden.
+`typename-vla-{1,2}` och `vla-stexp-9` går nu på båda Linux-målen.
+Regressionen täcker komma, pekarinkrement och statement expressions,
+inklusive att fast `sizeof` förblir oevaluerad. Unity/nonunity samt
+-O0/-O2 körprov går grönt; sex andra fall i VLA-klustret återstår.
+
+`vla-24` är också rättad: explicit `alloca` flyttar redan aktiva
+VLA-skopers sparade stackpekare, så funktionslivslång lagring överlever
+skopslutet. Senare VLA-skop återtar fortfarande lagring, verifierat med
+16384 iterationer efter en äldre alloca (ingen generell avstängning av
+stackåtertagning). Fryst kombination av `5e6f247` och rättningen bygger i
+unity/nonunity; hela egna runtime-sviten ger **143/143 x86** (fem befintliga
+referensundantag) och **148/148 ARM/QEMU**, utan cache. Fyra riktade
+VLA-regressioner per mål går vid -O0 samt i nonunity-bygget; ursprungligt
+GCC-prov går 1/1 per mål. Resultat: `s4-vla-lifetime-integrated-{x86,arm}.json`.
+Wasm är separat assembleringskontrollerat, inte runtime-verifierat här.
+Återstående VLA-gränsers biverkningar och inline-alloca är inte rättade.
+
+Med full `-ffast-math` sänks en korrekt identifierad extern
+`pow(double, 0.25)` nu till två hårdvarukvadratrötter på Linux x86/ARM.
+Lokala/asm-namngivna funktioner, avstängda builtins och striktare
+FP-flaggor behåller sina anrop; `-mgeneral-regs-only` avvisar operationen
+innan FP-utdata skrivs. `pr41094` går i x86-harnessen; ARM-oraklet vid -O0
+kräver självt libm och filtreras, medan separat -O2-orakel och båda
+vcc-utdatavägarna kör originalprovet utan libm. Unity/nonunity, fyra
+runtime-regressioner per mål, 84 flaggkontroller, 28 strikta IEEE-prov,
+24 no-FP-kontroller och separering i båda deklarationscachevägarna går
+grönt. Befintliga driver/predefine-fel är exakt oförändrade mot basen
+(137/212, samma 75 fel); tolv riktade makro-/ordningsprov går grönt.
+
+Full omkörning på `ad4cf9a`, samtliga 3484 konfigurationer per mål:
+**x86 1811 godkända, 75 fel, 1596 filtrerade, två orakelfel**;
+**ARM 1792 godkända, 65 fel, 1625 filtrerade, två orakelfel**.
+Det är åtta respektive nio rättade fall från den frysta baslinjen, inga
+tidigare godkända fall regredierar, inga kompilatorkrascher och oförändrade
+filtreringar/orakelfel. Full jämförelse: `work/results/s4-integrated-summary.json`.
+Siffrorna gäller direkturvalet vid standardkonfiguration, inte hela
+optimeringsmatrisen eller nästlade delsviter.
+
+Statisk initiering av breda bitfält behåller nu alla 128 konstantbitar före
+fältbreddens trunkering, utan odefinierade skift av ett 64-bitars värde.
+Det återstående `pr89037` går därmed på båda målen; tre andra bitfältsfall
+var redan gröna. Ny regression täcker signerade 66-bitarsfält, packade
+119-bitarsfält, 128-bitarsfält och grannbitar. Fyra GCC-prov och sex
+riktade runtime-prov går per mål, unity/nonunity samt ny regression vid -O0.
+
+Filskopsdeklarerade C23-`constexpr`-objekt får intern länkning även efter
+en tidigare `extern`-deklaration. `c23-constexpr-2a` länkar och kör nu på
+båda Linux-målen. Nytt tvåfilsprov kontrollerar separata skalär-, array-
+och strukturobjekt med samma namn i alla fyra clang/vcc-kombinationer,
+unity/nonunity på x86 och ARM/QEMU. ABI-riggen stöder befintligt
+`vcc-flags`-format per källfil för språkversionen. Kernel-sema är
+887/887 i både per-process- och batchläge. Övriga lagringsklassdiagnoser
+har inte ändrats av denna länkfix.
+
+`__builtin_powi/powif/powil` använder kompilatorruntime-symbolerna
+`__powidf2`, `__powisf2` respektive målets `__powixf2`/`__powitf2`.
+Det stoppar rekursion till användarens egna wrapper-funktioner i
+`pr19402-2`, utan att ändra vanliga funktionsanrop. Isolerad rättning
+mot `ad4cf9a` klarar originalprovet och regression på båda Linux-målen,
+unity/nonunity; regressionen täcker hjälpar-ABI, en evaluering av varje
+operand, negativa exponenter, INT_MIN, signed zero och NaN/inf upphöjt
+till noll. Kernel-sema 887/887 i båda lägena. Kombinerade fulla totalsiffror
+ovan gäller före denna rättning och följande integration verifieras separat.
+
+Skalära float/double-`fabs` och `copysign`, både explicit builtin och
+korrekt identifierad biblioteksdeklaration, sänks till heltalsmasker.
+Det bevarar signaling-NaN-bitar och signed zero utan onödiga libm-anrop.
+Varje operand evalueras en gång; lokala/asm-omdöpta eller avstängda
+biblioteksfunktioner förblir anrop. De fyra GCC-fallen
+`builtins-{48,49,50}` och `pr56125` går på båda Linux-målen i båda
+byggsätten. Bitvis regression, flagg-/namnprov och kernel-sema
+887/887 i båda lägen är verifierade på isolerad rättning mot `ad4cf9a`.
+Integration med den kommande x86-funktionsspecifika target-policyn kräver
+en separat effektiv-feature-kontroll; detta påstås inte färdigverifierat här.
+
+VLA-gränser i nya cast-/compound-literal-/`va_arg`-typnamn evalueras och
+sparas nu där typen skapas. Tidigare typedef-gränser återanvänds;
+`__auto_type` låter initialiseraren styra ordningen utan dubbel evaluering.
+Prepass ser deklarationsgränserna och replay flyttar VLA-typoperanden som
+typ, inte heltal. `vla-{12,13,14}` och `vla-stexp-7` går därmed på båda
+Linux-målen (det senare kraschade tidigare på ARM). Isolerad rättning
+klarar unity/nonunity, -O0/-O2 regressioner och kernel-sema 887/887 i båda
+lägen. Nya regressionen kör också grönt i wasm64 via emsdk/node.
+Två `typeof`-fall, `pr114831-2` och `vla-15`, samt inline-alloca återstår.
+
+Efterföljande `typeof`-rättning evaluerar VM-operanden en gång och sparar
+nya dimensioner från de ursprungliga cachade dimensionerna, även om
+operanden ändrar gränsvariablerna. Därmed går också `pr114831-2` och
+`vla-15`: sex riktade upstream-prov per Linux-mål, inga undantag.
+Ny flerdimensionell regression går med clang/vcc vid -O0/-O2 i båda
+byggsätten, samt faktiskt wasm64-runtime (två VLA-prov). Kernel-sema
+är 887/887 i båda lägen. Separat kvarstående fel: senare variabeldeklaration
+med en VM-typedef kan fortfarande evaluera om dess redan sparade gräns;
+den generella typedef-återanvändningen och inline-alloca är inte färdiga.
+
+Efterföljande emitterrättning återanvänder nu VM-typedefens sparade
+gränser också vid senare variabeldeklarationer. Cachen skiljer funktion
+och inline-instans; samma deklarations kod körs fortfarande på varje
+loopvarv. Ny regression kontrollerar ändrade gränsvariabler, nästlade
+typedefs, nitton loopvarv och två inline-instanser. Sju relevanta
+runtimeprov per Linux-mål/byggsätt, -O0/-O2 och tre faktiska wasm64-prov
+går grönt. Större VLA-urval har ännu ett fel (`vla-16`, compound-literal
+lvalue), tio oförändrade referens-/kontraktsfiltreringar och Clangs
+befintliga frontendkrasch i `vla-tert-1`; dessa döljs inte.
+
+VM-compound literals behåller nu lvalue-kategorin genom en intern
+adresssekvens, och prefixinkrement kan parsa compound-literal-operander.
+Wasm reserverar dimensionscacheposten före rekursiv gränsemission.
+Därmed går även `vla-16`: hela direkta VLA-urvalets clang-giltiga
+konfigurationer är **11/11 per Linux-mål**, tio oförändrade uttryckliga
+referens-/kontraktsfiltreringar och en Clang-krasch redovisas separat.
+Åtta egna VLA-prov per mål/byggsätt, -O0/-O2, fyra faktiska wasm64-prov,
+kernel-sema 887/887 i båda lägen och diagnostik 217/217 går grönt.
+
+`__builtin_complex` konstruerar komplexa tal utan att tappa signed zero,
+NaN-bitar eller argumentbiverkningar. Komplexa `++`/`--` uppdaterar bara
+realdelen med en läsning, en beräkning och en skrivning; imaginärdelen
+bevaras. C2y-läget skiljs från C23 även i replay-cachens nyckel, och
+case ranges accepteras korrekt i C2y. Fyra ursprungliga komplexprov och
+nya regressioner går på båda Linux-målen, unity/nonunity; kernel-sema
+887/887 i båda lägen. Sexton blandade C23/C2y-cachebatcher kontrollerar
+båda varmordningarna och cachevägarna. Atomära komplexa uppdateringar
+avvisas ännu uttryckligen och följs separat i TODO.md.
+
+x87→unsigned64 använder nu båda värdehalvorna runt 2^63 i stället för
+enbart signerad `fistp`. Regressionen kontrollerar gränser, trunkering,
+en operandevaluering och återställd x87-kontrollordning. Ursprungligt
+`fp-int-convert-long-double` samt ny regression går på båda Linux-målen
+i unity/nonunity; ARM:s befintliga binary128-väg hålls separat.
+
+x87↔128-bitars heltal använder XF-runtime-hjälpare med den vanliga
+anropsklassificeraren (stack/x87 respektive heltalsregister), inte TF:s
+binary128-ABI. Ny regression täcker signerade/osignerade gränser,
+trunkering och en operandevaluering på båda Linux-målen och byggsätten.
+Motsvarande oförändrade GCC timode-prov går nu på x86.
+
+ARM:s konstanta heltal→float avrundas direkt till float och tappar inte
+sticky-biten genom en mellanliggande double. Heltal→binary128 använder
+befintlig nearest-even-hjälpare i stället för trunkering. Nya 64/128-bitars
+gränsprov går på båda mål/byggsätt. Oförändrad tillämplig GCC-konverteringsmatris
+är nu **35 godkända x86-konfigurationer** och **30 ARM-konfigurationer**,
+noll fel; befintliga upstream-/orakelfiltreringar är oförändrade.
+
+Wasm-förkontrollen behåller generiska rotationsprov som obligatoriska och
+lägger BitInt-delproven i en separat körbar regression. Konstant
+`fabs`/`copysign` viks måloberoende; powi-provet jämför negativ oändlighet
+direkt i stället för att kräva en separat ännu ostödd long-double-builtin.
+Dessa tre fulla regressioner kör grönt i wasm64 och på båda Linux-målen.
+Två breda bitfältsprov och separat BitInt-rotation är uttryckliga,
+fortfarande körda Wasm-XFAIL med TODO-referenser: samma källor fallerar
+redan med byteverifierad uppströmsbas `2339f69`. Linuxproven är fortsatt
+obligatoriska. Wasm-felen döljs inte som godkända eller överhoppade prov.
+
+TSan hittade en verklig kapplöpning när parallella emittertrådar värderade
+konstanta initialiserare: delad rekursionskedja pekade in i andra trådars
+stackar, och implicita noll-/strängelement skapade nya AST-noder under
+emissionen. Rekursionskedjan är nu trådlokal och nycklad per cc/symbol;
+allokeringsfria delobjektsbeskrivningar ersätter AST-mutationerna.
+Ursprungsreproduceraren går från TSan exit66 till grönt med sex trådar.
+Normal/nonunity/TSan klarar tre constexpr-runtimeprov på båda Linux-målen,
+cykeldiagnostik samt kernel-sema 887/887 i båda lägen. Ny permanent
+500-globalsregression använder riggens `vcc-threads-same`-markör för
+upprepade parallella emissioner även i TSan-CI.
+
+En separat TSan-kapplöpning i prepassens skriv-/konstantmetadata är också
+rättad: funktionslokala fakta ägs av respektive lazy walk; globala fakta
+initialiseras konservativt före arbetstrådarna. Emittertrådarna förblir
+parallella, och lokal konstantpropagering behålls. **8036/8036** O0/O2-utdata
+på båda Linux-målen är byte-identiska mot `6cda644`; verkligt kernelobjekt
+`map_kernel.o` är oförändrat. Ny 200-funktionsregression med delade globala
+skrivningar går i normal/nonunity/TSan på båda mål, sex-trådsreproduceraren
+är ren och permanent test kräver upprepad trådad emission.
+
+Full omkörning på fryst `573f23b`, 3484 konfigurationer per mål:
+**x86 1831 godkända, 55 fel, 1596 filtrerade, två orakelfel**;
+**ARM 1812 godkända, 45 fel, 1625 filtrerade, två orakelfel**.
+Tjugo tidigare fel per mål är rättade jämfört med `ad4cf9a`, inga
+tidigare godkända fall regredierar och filtreringar/orakelfel är oförändrade.
+Unity/nonunity klarar egna tillämpliga runtimeprov (155 x86, 160 ARM),
+diagnostik 217/217, sexton cachebatcher och kernel-sema 887/887 run/batch.
+En kall Clang-referens för `branch_far` tog timeout; samma källas behållna,
+byteverifierade referens verifierar dess separata byggsätt. Artefakter:
+`work/results/candidate-573f23b-validation.json`, `s4-573f23b-summary.json`.
+Siffrorna gäller före de två sista VLA-följdrättningarna och prepassfixen.
+Slutlig kod `0757803` är dessutom verifierad med 15/15 berörda runtimeprov
+per Linux-mål, diagnostik 217/217, faktisk wasm64-svit 126/126 plus
+27 dokumenterade XFAIL/10 referensundantag, samt två upprepade TSan-
+trådningsregressioner. Hela testplanen återstår fortsatt att slutföra.
+
+**CI-följdrättningar, fryst `b97022e` (2026-11-11):** sanitizer-körningen
+avslöjade signed host-overflow när giltig unsigned128-aritmetik värderades
+i frontend och ARM-emitter. Addition, subtraktion och negation använder nu
+unsigned modularitet före måltypens trunkering. En separat regression i
+`20020720-1` kom från att fabs signmaskslowering tappade resultatets
+icke-negativa faktum; faktumet behålls nu utan att argumentens sidoeffekter
+eller NaN-beteende ändras. Kombinerad Linux-körning klarar **160/160 egna
+x86-tester** (fem befintliga referens-/målundantag) och **1882/1882 ARM-test**:
+1612 GCC, 105 TCC och 165 egna, med 127 oförändrade externa filtreringar.
+Varje rättning klarar unity/nonunity och kernel-sema **887/887** individuellt
+och i batch; unsigned-rättningen även ASan-sema. Kombinerad ASan/UBSan-körning
+klarar **165/165 egna ARM-test**, utan filtreringar. Testriggen skriver nu alltid
+namnet på varje felande fall. Dessa siffror gäller den vendorerade
+körsviten, inte den större externa S4-korpusen ovan.
+
+Kombinerat fryst checkpoint `7afcdea`, före signmask-/typnamnsrättningarna,
+är verifierat i båda byggsätten: **145/145 x86** (fem referensundantag),
+**150/150 ARM/QEMU**, tvåfils-constexpr-ABI samt tre ursprungliga GCC-fall
+per mål. Fulla binärhashar/loggar: `work/results/checkpoint-7afcdea-validation.json`.
+
 Kvar:
 - Alla återstående matchande filer och optimeringskonfigurationer; nästlade
   kataloger med egna `.exp`-drivrutiner och LTO har ännu ingen motsvarighet.
