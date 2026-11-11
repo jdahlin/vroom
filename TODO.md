@@ -727,16 +727,32 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
   x86 wide ABI checks use Clang cross-calls. Clang 23 rejects native ARM types
   above 128 bits, so ARM wide ABI checks use explicitly documented ordinary-C
   aggregate proxies; they are not native Clang wide-integer ABI verification.
-  Runtime wide integer/floating conversions remain explicitly unsupported,
-  as do vector elements wider than 128 bits and switch bounds outside signed
-  128-bit representation. Constant floating conversions are implemented.
+  Linux wide integer/floating conversions use full-width magnitude and one
+  nearest-even rounding, or exponent/significand decoding with truncation
+  toward zero. Exact IEEE probes cover 129, 193, 310, 500 and 7001 bits in
+  six x86 formats and five ARM formats; dynamic rounding is not implemented.
+  Vector elements wider than 128 bits and switch bounds outside signed
+  128-bit representation remain explicitly unsupported.
   Runtime support on other targets remains incomplete. The dirty-padding
   compound-assignment regression stays a verified Wasm expected failure;
   Wasm overflow builtins above 64 bits remain explicitly diagnosed.
   *Validate:* `bench/vcc-bitint.py`, `vcc-bitint-constants.py`,
-  `vcc-bitint-abi.py`, `vcc-bitint-replay.py`, existing
+  `vcc-bitint-abi.py`, `vcc-bitint-replay.py`, `vcc-bitint-float.py`, existing
   `tests/vcc/bitint_constants.c`, `bitint_runtime.c`,
   `bitint_compound_padding.c` and `tests/abi/bitint/`.
+- [ ] **Strict floating environment for wide integer casts**: Linux wide
+  integer-to-float lowering currently constructs nearest-even bits and does
+  not raise inexact/overflow flags. Accepting `-frounding-math` or
+  `-ffp-model=strict` only disables selected fast-math transforms; it does
+  not establish dynamic-rounding or exception support. Do not claim strict
+  floating-environment conformance for these casts.
+  *Validate:* convert volatile unsigned `_BitInt(193)` `(1 << 53) + 1` to
+  double under all four `fesetround` modes and check `fetestexcept`:
+  upward must produce `0x1.0000000000001p53`, while nearest/downward/toward-zero
+  produce `0x1p53`, all with inexact raised. Also test signed values and
+  destination overflow. The current default-mode Clang 23 cast likewise
+  ignores the environment; its `-frounding-math` wide cast fails in the
+  backend, so use exact IEEE expectations rather than that failed oracle.
 - [ ] **Builtins**: ~~`__builtin_shufflevector`, `__builtin_convertvector`~~ (done:
   tests/vcc/vector_builtins.c; vector diagnostics spell clang's unnamed form, without the
   `(vector of N 'T' values)` note and typedef names) [P].  Library builtins (clang's `F`

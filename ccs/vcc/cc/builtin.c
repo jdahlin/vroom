@@ -1160,7 +1160,7 @@ static void bitcount_statement(cc *c, vec *body, uint32_t n, uint32_t loc)
 	vpush(c, body, mkstmt(c, N_EXPR, loc, n, 0, 0));
 }
 
-static uint32_t big_bitcount(cc *c, int id, uint32_t x, uint32_t fallback, unsigned bits, uint32_t loc)
+VPRIV uint32_t big_bitcount(cc *c, int id, uint32_t x, uint32_t fallback, unsigned bits, uint32_t loc)
 {
 	cval cv;
 	unsigned limbs = (bits + 63) / 64;

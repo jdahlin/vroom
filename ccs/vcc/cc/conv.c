@@ -29,7 +29,20 @@ VPRIV uint32_t cast_node(cc *c, uint32_t n, qty to, int kind)
 
 	N(r)->a = n;
 	N(r)->aux = (uint16_t)kind;
-	return big_fold_node(c, r);
+	r = big_fold_node(c, r);
+	if (N(r)->op == N_CAST && ((kind == CK_I2F && is_bigint(c, N(n)->ty)) ||
+	    (kind == CK_F2I && is_bigint(c, to)))) {
+		cval v;
+		if (eval(c, r, &v) && v.kind == CV_FLT) {
+			/* Keep the original cast for constant-expression grammar checks.
+			 * The emitter uses its already rounded floating value. */
+			N(r)->c = v.ld ? mk_fltq(c, v.q, to, N(n)->loc) : mk_flt(c, v.f, to, N(n)->loc);
+		} else {
+			if (c->o->target == PP_LINUX_X86_64 || c->o->target == PP_LINUX_AARCH64)
+				return big_float_cast(c, n, to);
+		}
+	}
+	return r;
 }
 
 VPRIV __attribute__((noinline)) uint32_t decay_slow(cc *c, uint32_t n, qty t, int k)
