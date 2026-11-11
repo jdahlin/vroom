@@ -67,6 +67,10 @@ def check_repeated(assembly, arch):
     loads = (r'i32\.load' if wasm else r'\bldr(?:sw)?\b' if arch == 'aarch64' else r'\bmov(?:l|slq)\s+\(%r')
     if len(re.findall(loads, text)) < 2:
         raise RuntimeError(f'volatile pointer must be read twice\n{text}')
+    text = body(assembly, 'ri_atomic_ptr', wasm)
+    atomic = (r'i32\.load' if wasm else r'(?:\bldar\b|\.inst\b)' if arch == 'aarch64' else r'\bmovl\s+\(%r')
+    if len(re.findall(atomic, text)) < 2:
+        raise RuntimeError(f'atomic pointer must be read twice\n{text}')
 
 def check_cmpzero(assembly, arch):
     if not arch.startswith('wasm'):
