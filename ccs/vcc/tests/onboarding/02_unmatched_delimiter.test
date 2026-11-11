@@ -1,0 +1,32 @@
+id = "B02"
+title = "Missing closing parenthesis"
+expect = [
+  { line = 2, severity = "error", pattern = "expected.*'\\)'|missing.*(parenthes|\\))" },
+]
+
+=== broken.c ===
+int main(void) {
+    if (1 { return 0; }
+    return 1;
+}
+=== fixed.c ===
+int main(void) {
+    if (1) { return 0; }
+    return 1;
+}
+=== valid.c ===
+int main(void) { if ((1)) { return 0; } return 1; }
+=== stderr ===
+broken.c:2:11: error: expected ')'
+    2 |     if (1 { return 0; }
+      |        -  ^
+      |        |
+      |        to match this '('
+broken.c:2:8: note: to match this '('
+1 error generated.
+=== narrated ===
+broken.c:2:11: error: expected ')'
+  the source line is: if (1 { return 0; }
+broken.c:2:8: note: to match this '('
+  the source line is: if (1 { return 0; }
+1 error generated.

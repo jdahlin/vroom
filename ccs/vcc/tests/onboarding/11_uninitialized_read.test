@@ -1,0 +1,49 @@
+id = "B11"
+title = "Value is missing on one branch"
+expect = [
+  { line = 3, severity = "warning", pattern = "uninitialized|uninitialised|without.*(initializ|assign)" },
+]
+
+=== broken.c ===
+int choose(int ready) {
+    int n;
+    if (ready) n = 1;
+    return n;
+}
+int main(void) { return choose(0); }
+=== fixed.c ===
+int choose(int ready) {
+    int n = 0;
+    if (ready) n = 1;
+    return n;
+}
+int main(void) { return choose(0); }
+=== valid.c ===
+static int n;
+int main(void) { return n; }
+=== stderr ===
+broken.c:3:9: warning: variable 'n' is used uninitialized whenever 'if' condition is false [-Wsometimes-uninitialized]
+    3 |     if (ready) n = 1;
+      |     ----^~~~~--
+      |     |
+      |     remove the 'if' if its condition is always true
+    4 |     return n;
+      |            - uninitialized use occurs here
+broken.c:4:12: note: uninitialized use occurs here
+broken.c:3:5: note: remove the 'if' if its condition is always true
+broken.c:2:10: note: initialize the variable 'n' to silence this warning
+    2 |     int n;
+      |          ^
+      |           = 0
+1 warning generated.
+=== narrated ===
+broken.c:3:9: warning: variable 'n' is used uninitialized whenever 'if' condition is false [-Wsometimes-uninitialized]
+  the source line is: if (ready) n = 1;
+broken.c:4:12: note: uninitialized use occurs here
+  the source line is: return n;
+broken.c:3:5: note: remove the 'if' if its condition is always true
+  the source line is: if (ready) n = 1;
+broken.c:2:10: note: initialize the variable 'n' to silence this warning
+  the source line is: int n;
+  fix: insert ' = 0' at line 2, column 10
+1 warning generated.

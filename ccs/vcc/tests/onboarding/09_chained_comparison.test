@@ -1,0 +1,22 @@
+id = "B09"
+title = "Chained comparison does not test a mathematical range"
+flags = ["-Wno-error=parentheses"]
+expect = [
+  { line = 3, severity = "warning", pattern = "comparisons?.*(mathematical|meaning|constant|always)|comparison.*(bool|boolean)|chained" },
+]
+known_gap = "Observed x86 vcc baseline is silent for chained comparisons; preserve deliberate comparisons of boolean/integer results."
+
+=== broken.c ===
+int main(void) {
+    int x = 20;
+    return 0 < x < 10;
+}
+=== fixed.c ===
+int main(void) {
+    int x = 20;
+    return 0 < x && x < 10;
+}
+=== valid.c ===
+int main(void) { int x = 20; return (0 < x) == 1 ? 0 : 1; }
+=== stderr ===
+=== narrated ===

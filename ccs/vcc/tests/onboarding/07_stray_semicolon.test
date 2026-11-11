@@ -1,0 +1,26 @@
+id = "B07"
+title = "Empty if body before apparently conditional statement"
+flags = ["-Wempty-body", "-Wmisleading-indentation"]
+expect = [
+  { line = 3, severity = "warning", pattern = "empty.*(body|if)|if.*empty|misleading.*indent" },
+]
+known_gap = "Observed x86 vcc baseline is silent with -Wempty-body and -Wmisleading-indentation; preserve deliberate empty bodies while diagnosing the suspicious if body."
+
+=== broken.c ===
+int main(void) {
+    int n = 0;
+    if (n == 1);
+        n = 2;
+    return n != 2;
+}
+=== fixed.c ===
+int main(void) {
+    int n = 0;
+    if (n == 1)
+        n = 2;
+    return n != 2;
+}
+=== valid.c ===
+int main(void) { int n = 0; while (n++ < 2) { /* Deliberate empty body. */ } return n != 3; }
+=== stderr ===
+=== narrated ===
