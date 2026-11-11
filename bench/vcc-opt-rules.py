@@ -43,6 +43,46 @@ def body(assembly, name, wasm):
     return tail[:end.start()]
 
 
+def check_double_unary(assembly, arch):
+    wasm = arch.startswith('wasm')
+    for name in ['du_neg', 'du_not', 'du_call', 'du_volatile']:
+        text = body(assembly, name, wasm)
+        pattern = r'i(?:32|64)\.(?:sub|xor)\b' if wasm else r'\b(?:negs?|not[lq]?|mvn)\b'
+        if re.search(pattern, text):
+            raise RuntimeError(f'{name}: retained double unary operation\n{text}')
+    if wasm and not re.search(r'i32\.xor\b', body(assembly, 'du_narrow', True)):
+        raise RuntimeError('narrowing conversion must not be removed')
+
+
+def check_repeated(assembly, arch):
+    wasm = arch.startswith('wasm')
+    operations = {'ri_sub': r'(?:\bsubl\b|\bsub\s+w|\bi32\.sub\b)',
+                  'ri_xor': r'\b(?:xor[lq]?|i64\.xor)\b',
+                  'ri_and': r'\b(?:and[lq]?|i32\.and)\b',
+                  'ri_or': r'\b(?:or[lq]?|i32\.or)\b'}
+    for name, op in operations.items():
+        text = body(assembly, name, wasm)
+        # Native backends may use xor as the zeroing instruction.
+        if name == 'ri_xor' and not wasm:
+            continue
+        if re.search(op, text):
+            raise RuntimeError(f'{name}: retained repeated operation\n{text}')
+    if wasm:
+        for name in ['ri_eq', 'ri_ne', 'ri_lt', 'ri_ge', 'ri_cmp_branch']:
+            text = body(assembly, name, True)
+            if re.search(r'i(?:32|64)\.(?:eq|ne|lt_s|ge_u)\b', text):
+                raise RuntimeError(f'{name}: retained self-comparison\n{text}')
+        if not re.search(r'f64\.eq\b', body(assembly, 'ri_float', True)):
+            raise RuntimeError('floating self-comparison must retain NaN behavior')
+    text = body(assembly, 'ri_volatile_ptr', wasm)
+    loads = (r'i32\.load' if wasm else r'\bldr(?:sw)?\b' if arch == 'aarch64' else r'\bmov(?:l|slq)\s+\(%r')
+    if len(re.findall(loads, text)) < 2:
+        raise RuntimeError(f'volatile pointer must be read twice\n{text}')
+    text = body(assembly, 'ri_atomic_ptr', wasm)
+    atomic = (r'i32\.load' if wasm else r'(?:\bldar\b|\.inst\b)' if arch == 'aarch64' else r'\bmovl\s+\(%r')
+    if len(re.findall(atomic, text)) < 2:
+        raise RuntimeError(f'atomic pointer must be read twice\n{text}')
+
 def check_cmpzero(assembly, arch):
     if not arch.startswith('wasm'):
         return
@@ -921,7 +961,7 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument('--vpp', default=str(Path(BUILD) / 'vpp'))
     ap.add_argument('--target', default='x86_64-linux-gnu')
-    ap.add_argument('--rule', choices=['pow2', 'signedpow2', 'identities', 'fallthrough', 'loopback', 'unreachable', 'locals', 'localjmp', 'copies', 'extensions', 'switches', 'tails', 'udivconst', 'udivconst64', 'sdivconst', 'deadresults', 'mulconst', 'bitrules', 'cmpbounds', 'cmpzero', 'postfix', 'unusedinit', 'switchvalues', 'all'], default='all')
+    ap.add_argument('--rule', choices=['pow2', 'signedpow2', 'identities', 'fallthrough', 'loopback', 'unreachable', 'locals', 'localjmp', 'copies', 'extensions', 'switches', 'tails', 'udivconst', 'udivconst64', 'sdivconst', 'deadresults', 'mulconst', 'bitrules', 'cmpbounds', 'cmpzero', 'repeated', 'doubleunary', 'postfix', 'unusedinit', 'switchvalues', 'all'], default='all')
     ap.add_argument('--run', action='store_true', help='also execute literal-answer correctness checks')
     ap.add_argument('--cfi', action='store_true', help='also check unwind state with tail calls')
     ap.add_argument('--sibling-calls', choices=['default', 'on', 'off'], default='default',
@@ -968,6 +1008,9 @@ def main():
              'mulconst': ('multiply_constants.c', check_mulconst),
              'bitrules': ('integer_bit_rules.c', check_bitrules),
              'cmpbounds': ('integer_cmp_bounds.c', check_cmpbounds),
+             'repeated': ('repeated_integer.c', check_repeated),
+             'doubleunary': ('double_unary.c', check_double_unary),
+
              'cmpzero': ('integer_cmp_zero.c', check_cmpzero),
              'postfix': ('postfix_eval.c', check_postfix),
              'unusedinit': ('unused_scalar_init.c', check_unusedinit)}
@@ -989,7 +1032,7 @@ def main():
                 checked = ((arch == 'x86_64' and level >= 1) if rule in ['locals', 'copies', 'extensions', 'deadresults'] else
                            (not arch.startswith('wasm') and level >= 1) if rule in ['fallthrough', 'unreachable'] else
                            arch.startswith('wasm') if rule == 'loopback' else True)
-                checked = checked and check is not None and (rule not in ['switches', 'udivconst', 'udivconst64', 'mulconst', 'bitrules', 'cmpbounds', 'cmpzero'] or level >= 1)
+                checked = checked and check is not None and (rule not in ['switches', 'udivconst', 'udivconst64', 'mulconst', 'bitrules', 'cmpbounds', 'cmpzero', 'repeated', 'doubleunary'] or level >= 1)
                 if checked:
                     if rule in ['sdivconst', 'unusedinit', 'switchvalues']:
                         check(assembly.read_text(), arch, optimized=level >= 1)

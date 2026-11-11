@@ -1355,6 +1355,18 @@ static int wbinary(ecx *e, uint32_t n)
 	qty lt = N(x->a)->ty, rt = N(x->b)->ty, ty = x->ty;
 	uint32_t operand;
 	int bound = em_cmpbounds(e, n, &operand);
+	int repeated = em_repeated_integer(e, n);
+
+	if (repeated == EM_ID_ZERO) {
+		wconst(e, wty(c, ty), 0);
+		return wty(c, ty);
+	}
+	if (repeated == EM_ID_TRUE) {
+		wconst(e, WT_I32, 1);
+		return WT_I32;
+	}
+	if (repeated == EM_ID_LEFT)
+		return wexpr(e, x->a, true);
 
 	if (bound >= 0) {
 		wexpr(e, operand, false);
@@ -2072,7 +2084,10 @@ static int wexpr1(ecx *e, uint32_t n, bool want)
 			return k;
 		}
 		}
-	case N_UNARY:
+	case N_UNARY: {
+		uint32_t operand = em_double_unary(e, n);
+		if (operand)
+			return wexpr(e, operand, want);
 		switch (x->aux) {
 		case T_PLUS:
 			return wexpr(e, x->a, want);
@@ -2119,6 +2134,7 @@ static int wexpr1(ecx *e, uint32_t n, bool want)
 			return WT_I32;
 		}
 		efatal(e, x->loc, "wasm: unsupported unary operator");
+	}
 	case N_PREINC: case N_PREDEC: case N_POSTINC: case N_POSTDEC:
 		return wincdec(e, n, want);
 	case N_BINARY:
