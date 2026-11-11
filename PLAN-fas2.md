@@ -3130,3 +3130,11 @@ urvalet på delad värd bevisar inte helt bygges eller wasm-kostnad. Proveniens
 finns i `work/opt-profile/local-values-cost/result.json` och
 `work/opt-profile/local-values-cputime/kernel-batch-result.json`. Återbruk över
 satser/block, generell CSE och G5/G7 återstår.
+
+Efter att #93 mergats till main och arm64:s ABI-ändringar tillkommit byggdes
+båda sidor om mot exakt main `87975fa`. Fyrmålsproven passerar i båda
+bygglägen och arm64:s korskompilator-ABI passerar 34/34. Den matchade fasta
+Callgrind-grinden ger nu compiler-Ir +0,112 % x86, +0,113 % arm64, +0,119 %
+wasm32 och +0,117 % wasm64; 1 %-grinden passerar med samma redovisade
+wasm-uteslutningar. Denna mätning ersätter inte CPU-tid och underlag finns i
+`work/opt-profile/local-values-main-cost/result.json`.
