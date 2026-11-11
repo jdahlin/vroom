@@ -76,6 +76,7 @@ static void x64_scan_relocs(void *arg, size_t i)
 		return;
 	Obj *o = objs.v[is->obj];
 	Target t;
+	uint32_t nd = 0;	/* R_X86_64_RELATIVE entries this section needs (-pie, -shared) */
 
 	for (uint32_t r = 0; r < is->nrela; r++) {
 		const Rela *rl = &is->rela[r];
@@ -97,6 +98,17 @@ static void x64_scan_relocs(void *arg, size_t i)
 			if (opt.shared && (type == R_X86_64_GOTTPOFF || type == R_X86_64_TLSGD))
 				error("%s:(%s+0x%llx): TLS relocation %u in a shared object is not supported", o->path,
 				      is->name, (unsigned long long)rl->r_offset, type);
+			if (pic && (is->flags & SHF_ALLOC) && !t.abs && !t.undef && !t.discarded) {
+				/* an absolute address in position-independent output: RELATIVE at run time (lld) */
+				if (type == R_X86_64_64 && opt.shared && t.global && !opt.bsymbolic)
+					error("%s:(%s+0x%llx): R_X86_64_64 against a preemptible symbol is not supported yet",
+					      o->path, is->name, (unsigned long long)rl->r_offset);
+				else if (type == R_X86_64_64)
+					nd++;
+				else if (type == R_X86_64_32 || type == R_X86_64_32S || type == R_X86_64_16 || type == R_X86_64_8)
+					error("%s:(%s+0x%llx): relocation %u cannot be used against a relocatable address; recompile with -fPIC",
+					      o->path, is->name, (unsigned long long)rl->r_offset, type);
+			}
 			break;
 		case R_X86_64_GOTPCREL: case R_X86_64_GOTPCRELX: case R_X86_64_REX_GOTPCRELX:
 			if (x64_needs_got(o, is, rl)) {
@@ -111,7 +123,7 @@ static void x64_scan_relocs(void *arg, size_t i)
 			      (unsigned long long)rl->r_offset, type);
 		}
 	}
-	is->ndyn = 0;
+	is->ndyn = nd;
 }
 
 static void x64_relocate_isec(uint32_t si, uint8_t *buf)
@@ -120,6 +132,7 @@ static void x64_relocate_isec(uint32_t si, uint8_t *buf)
 	Obj *o = objs.v[is->obj];
 	uint64_t secva = isec_va(si, 0);
 	Target t;
+	uint32_t nd = 0;
 
 	for (uint32_t r = 0; r < is->nrela; r++) {
 		const Rela *rl = &is->rela[r];
@@ -137,6 +150,13 @@ static void x64_relocate_isec(uint32_t si, uint8_t *buf)
 		case R_X86_64_NONE:
 			break;
 		case R_X86_64_64:
+			if (pic && (is->flags & SHF_ALLOC) && !t.abs && !t.undef && !t.discarded && nd < is->ndyn && reladyn_buf) {
+				Rela *dyn = reladyn_buf + is->dyn0 + nd++;
+
+				dyn->r_offset = P;
+				dyn->r_info = 8;	/* R_X86_64_RELATIVE */
+				dyn->r_addend = (int64_t)t.va;
+			}
 			wr64(loc, t.va);
 			break;
 		case R_X86_64_PC64:

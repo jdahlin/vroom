@@ -24,6 +24,13 @@ CLANG = os.environ.get("VROOM_REAL_CC") or ("/opt/homebrew/opt/llvm/bin/clang" i
 
 def main():
     args = sys.argv[1:]
+    if os.environ.get("VROOM_LD_LOG"):	# each link's command line, one per line (debugging a linker)
+        with open(os.environ["VROOM_LD_LOG"], "a") as f:
+            f.write(os.getcwd() + "\t" + " ".join(args) + "\n")
+    global LLD
+    # 32-bit links (the x86 kernel's vdso32, realmode): vlink is x86-64/arm64 only, so ld.lld
+    if any(a in ("elf_i386", "-melf_i386") for a in args):
+        LLD = shutil.which("ld.lld") or LLD
     p = subprocess.run([LLD, "--error-limit=0"] + args, stderr=subprocess.PIPE)
     if p.returncode == 0:
         sys.stderr.buffer.write(p.stderr)

@@ -385,9 +385,14 @@ TU:er (`vcc -c` mot `vcc -S | vasm`: samma objekt), tid per TU (vbench).
   asm-flaggutdata (`=@ccc`, boot_cpu_has), scoped_guard (städningen kördes
   två gånger), och ramarna (16 KiB-stacken räckte inte: temporära slottar och
   inline-kopiornas lokala återanvänds nu, kedjan 20,6 KB -> 13,3 KB).
-- Kvar: de 25 clang-objekten (`.code32`/`.code16`: realmode, efi-mixed,
-  vdso32, kompat-entry; AVX-512 (EVEX) i krypto; `.org`-mål), länkning med
-  vlink i stället för vroom-ld, objtool.
+- 2026-11-11, senare: 8 objekt kvar via clang (bara i386: realmode, vdso32);
+  `.code32`, `.org` över fragment, AVX-512 (EVEX), BMI, 32-bitarsadresser,
+  `.debug_frame` i assemblern.  vlink länkar kärnan (`--emit-relocs`, `-pie`,
+  `-u`, `AT()`, `-r` med SHF_LINK_ORDER), utom 32-bitarsdelarna (setup.elf,
+  vdso32, realmode: ld.lld via vroom-ld); bootar Debian under KVM på 3,9 s.
+  Stubbar kvar: `__scoped_seqlock_bug` (fältvärde genom en loop) och
+  `vma_thp_gfp_mask` (konstant argument över anrop), båda X4.
+- Kvar: i386-objekten (ELF32, i386-relokeringar), de två stubbarna (X4).
 
 ### X4 (2026-11-11): påbörjat, vikningar i vandraren
 
