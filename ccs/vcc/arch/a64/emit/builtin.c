@@ -176,15 +176,15 @@ static val gen_overflow(ecx *e, const node *x, const uint32_t *arg)
 	val_free(e, &b);
 	if (bits == 128) {
 		/*
-		 * Operands of at most 64 bits: the 128 bits are the exact result,
-		 * signed if an operand is.  Signed into unsigned overflows when
-		 * negative; unsigned into signed when the top bit is set.
+		 * Only two unsigned factors can produce a positive result above
+		 * signed 128-bit range.  Addition and subtraction fit signed 128,
+		 * even for unsigned operands (subtraction can be negative).
 		 */
-		bool sx = is_signed(c, ta) || is_signed(c, tb);
+		bool uu = x->aux == BI_MUL_OVERFLOW && !is_signed(c, ta) && !is_signed(c, tb);
 		val r = { .k = V_REG2, .r = (uint8_t)lo, .r2 = (uint8_t)hi };
 
 		ok = treg(e);
-		if (sx != sr)
+		if (uu == sr)
 			shift_imm(e, I_LSRV, 1, ok, hi, 63);
 		else
 			movi(e, 0, ok, 0);
@@ -882,16 +882,31 @@ VPRIV val gen_builtin(ecx *e, uint32_t n)
 		if (e->reach)
 			put(e, I_BRK)->imm = 0xf000;
 		return vnone();
-	case BI_RETURN_ADDRESS: {
+	case BI_RETURN_ADDRESS: case BI_FRAME_ADDRESS: {
+		val depth = gen(e, arg[0]);
 		int r = treg(e);
+		uint32_t level;
 
-		mem(e, I_LD, 3, 0, r, R_FP, 8);
-		return vreg(r);
-	}
-	case BI_FRAME_ADDRESS: {
-		int r = treg(e);
-
+		if (depth.k != V_CONST)
+			efatal(e, x->loc, "a return or frame address requires a constant level");
+		level = (uint32_t)depth.i;
 		mov(e, 1, r, R_FP);
+		if (level <= 4) {
+			for (uint32_t k = 0; k < level; k++)
+				mem(e, I_LD, 3, 0, r, r, 0);
+		} else {
+			int count = treg(e);
+			uint32_t loop = newlabel(e);
+
+			movi(e, 0, count, level);
+			deflabel_loop(e, loop, true);
+			mem(e, I_LD, 3, 0, r, r, 0);
+			opi(e, I_SUBI, 0, count, count, 1);
+			cbz(e, true, 0, count, loop);
+			tfree(e, count);
+		}
+		if (x->aux == BI_RETURN_ADDRESS)
+			mem(e, I_LD, 3, 0, r, r, 8);
 		return vreg(r);
 	}
 	case BI_OBJECT_SIZE:

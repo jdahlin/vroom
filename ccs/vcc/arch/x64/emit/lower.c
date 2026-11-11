@@ -737,16 +737,33 @@ VPRIV int x64_atomic(ecx *e, int op, int size, int rp, int rv, int rexp)
 VPRIV void x64_trap(ecx *e) { x64_put(e, X_UD2); }
 VPRIV void x64_barrier(ecx *e) { x64_put(e, X_BARRIER); }
 
-VPRIV val x64_frame(ecx *e, bool ret)
+VPRIV val x64_frame(ecx *e, bool ret, uint32_t level)
 {
 	int r = x64_treg(e);
+	lval l = { .k = L_REG, .r = (uint8_t)r };
 
-	if (ret) {
-		lval l = { .k = L_REG, .r = RBP, .off = 8 };
-
-		x64_mem(e, X_LD, 8, r, &l, false);
+	x64_mov(e, r, RBP);
+	if (level <= 4) {
+		for (uint32_t k = 0; k < level; k++)
+			x64_mem(e, X_LD, 8, r, &l, false);
 	} else {
-		x64_mov(e, r, RBP);
+		/* Keep code size bounded even for a large constant frame depth. */
+		int count = x64_treg(e);
+		uint32_t loop = wk_newlabel(e);
+		rec *j;
+
+		x64_movi(e, count, level);
+		x64_label(e, loop);
+		x64_mem(e, X_LD, 8, r, &l, false);
+		x64_op3(e, X_SUBI, 4, count, count, XNOREG)->imm = 1;
+		j = x64_put(e, X_JCC);
+		j->cond = CC_NE;
+		j->label = loop;
+		x64_tfree(e, count);
+	}
+	if (ret) {
+		l.off = 8;
+		x64_mem(e, X_LD, 8, r, &l, false);
 	}
 	return (val){ .k = V_REG, .r = (uint8_t)r };
 }

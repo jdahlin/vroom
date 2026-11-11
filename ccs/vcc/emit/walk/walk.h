@@ -142,7 +142,7 @@ VPRIV void LO(asm)(ecx *e, uint32_t n);
 VPRIV void LO(barrier)(ecx *e);			/* compiler barrier: no machine instruction */
 VPRIV val LO(setjmp)(ecx *e, int rbuf);
 VPRIV void LO(longjmp)(ecx *e, int rbuf);
-VPRIV val LO(frame)(ecx *e, bool ret);			/* the return address (ret) or the frame address */
+VPRIV val LO(frame)(ecx *e, bool ret, uint32_t level);			/* the return address (ret) or the frame address */
 VPRIV val LO(bitop)(ecx *e, int bi, int size, val a);	/* BI_CLZ.. BI_BSWAP64: a nonzero where the builtin requires it */
 VPRIV val LO(alloca)(ecx *e, val n);			/* n bytes on the stack, 16-aligned */
 VPRIV int LO(tlsaddr)(ecx *e, uint32_t ref, int model);	/* a thread-local's address: 0 local-exec, 1 initial-exec, 2 general dynamic */

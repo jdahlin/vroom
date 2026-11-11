@@ -1820,9 +1820,9 @@ static val wk_builtin(ecx *e, uint32_t n)
 	case BI_RETURN_ADDRESS: case BI_FRAME_ADDRESS: {
 		val v = wk_gen(e, arg[0]);
 
-		if (v.k != V_CONST || v.i != 0)
-			wk_unsup(e, n, "a return or frame address beyond level 0");
-		return LO(frame)(e, x->aux == BI_RETURN_ADDRESS);
+		if (v.k != V_CONST)
+			wk_unsup(e, n, "a return or frame address of a level not a constant");
+		return LO(frame)(e, x->aux == BI_RETURN_ADDRESS, (uint32_t)v.i);
 	}
 	case BI_OBJECT_SIZE: case BI_DYNAMIC_OBJECT_SIZE: {
 		val t = wk_gen(e, arg[1]);
@@ -1905,6 +1905,39 @@ static val wk_builtin(ecx *e, uint32_t n)
 		return LO(bitop)(e, x->aux, sz, v);
 	}
 	case BI_ADD_OVERFLOW: case BI_SUB_OVERFLOW: case BI_MUL_OVERFLOW: {
+		if (wk_size(c, N(arg[0])->ty) <= 8 && wk_size(c, N(arg[1])->ty) <= 8 && (KIND(c, T(c, N(arg[2])->ty)->base) == TY_INT128 || KIND(c, T(c, N(arg[2])->ty)->base) == TY_UINT128) &&
+		    LO(i128mem)()) {
+			/*
+			 * Operands of up to 64 bits, a 128-bit result: the exact value fits 128 bits
+			 * (two unsigned 64-bit factors as unsigned 128, the rest as signed 128), so
+			 * the overflow is its sign against the result's signedness.
+			 */
+			qty ta = N(arg[0])->ty, tb = N(arg[1])->ty, tr = T(c, N(arg[2])->ty)->base, w = prim(TY_INT128);
+			int op = x->aux == BI_ADD_OVERFLOW ? T_PLUS : x->aux == BI_SUB_OVERFLOW ? T_MINUS : T_STAR;
+			bool uu = op == T_STAR && !wk_signed(c, ta) && !wk_signed(c, tb);
+			val a = wk_conv(e, wk_gen(e, arg[0]), ta, w), b = wk_conv(e, wk_gen(e, arg[1]), tb, w), r, d;
+			lval hi;
+			int rr, s;
+
+			r = LO(wbin)(e, op, true, a, b);
+			d = wk_gen(e, arg[2]);
+			{
+				lval l = wk_fromval(e, d, tr);
+
+				r = wk_putmem(e, &l, tr, r);	/* (the stored object's address) */
+			}
+			rr = wk_reg(e, &r, prim(TY_ULONG));
+			if (uu == wk_signed(c, tr)) {
+				/* unsigned x unsigned into signed, or anything else into unsigned: the sign bit */
+				hi = (lval){ .k = L_REG, .r = (uint8_t)rr, .off = 8, .align = 8 };
+				s = LO(treg)(e);
+				LO(load)(e, s, &hi, 8, false);
+				LO(tfree)(e, rr);
+				return LO(bin)(e, T_GREATERGREATER, 8, false, wk_vreg(s), vconst(63));
+			}
+			LO(tfree)(e, rr);
+			return vconst(0);
+		}
 		/* the exact result in 128 bits; overflow when it differs from the stored one extended back */
 		qty ta = N(arg[0])->ty, tb = N(arg[1])->ty, tr = T(c, N(arg[2])->ty)->base, w = prim(TY_INT128);
 		int op = x->aux == BI_ADD_OVERFLOW ? T_PLUS : x->aux == BI_SUB_OVERFLOW ? T_MINUS : T_STAR;
