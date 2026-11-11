@@ -250,6 +250,14 @@ ogiltiga operandtyper kontrolleras; unity/nonunity samt kernelns sema
 887/887 i båda körsätten går grönt. Detta är riktad evidens; S4:s fulla
 baslinjesiffror ovan har inte räknats om efter rättningen.
 
+Samma bitbredd vid signed skalär till unsigned vektorlane accepteras nu
+som clang: `pr103181` och `pr127379` kompilerar och assembleras på båda
+Linux-målen; det första körs också och matchar clang. Regressioner behåller
+avvisning av unsigned till signed och bredare skalärer. Unity/nonunity,
+positiva/negativa prover och kernel sema 887/887 i run/batch går grönt.
+Detta är en separat frontendrättning efter CI-milstolpens frysta träd;
+PR #28:s pågående CI får inte räknas som verifiering av denna ändring.
+
 Kvar:
 - Alla återstående matchande filer och optimeringskonfigurationer; nästlade
   kataloger med egna `.exp`-drivrutiner och LTO har ännu ingen motsvarighet.

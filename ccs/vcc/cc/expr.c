@@ -49,7 +49,10 @@ static bool vec_scalar_ok(cc *c, uint32_t s, qty et)
 				return v.i >= -((i128)1 << (b - 1)) && v.i < ((i128)1 << (b - 1));
 			return v.i >= -((i128)1 << (b - 1)) && (b >= 128 || v.i < ((i128)1 << b));	/* (clang: -18 into unsigned lanes) */
 		}
-		return ty_size(c, st) < ty_size(c, et) || (ty_size(c, st) == ty_size(c, et) && is_signed(c, st) == is_signed(c, et));
+		/* Signed-to-unsigned at the same width preserves every source bit.
+		 * The reverse conversion can lose the unsigned scalar's top bit. */
+		return ty_size(c, st) < ty_size(c, et) ||
+		       (ty_size(c, st) == ty_size(c, et) && (!is_signed(c, et) || is_signed(c, st)));
 	}
 	if (k && v.kind == CV_INT)
 		return ty_size(c, et) == 4 ? (i128)(float)v.i == v.i : (i128)(double)v.i == v.i;
