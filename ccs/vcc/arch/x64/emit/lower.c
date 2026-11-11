@@ -38,6 +38,16 @@ VPRIV rec *x64_put(ecx *e, int op)
 	xst *X = e->x64;
 	rec *r;
 
+	if (!e->reach && op != X_LABEL) {
+		/* unreachable code is not emitted (as arm64): it may name a string or a symbol
+		   nobody claimed (note_ref skips them) */
+		static _Thread_local rec sink;
+
+		memset(&sink, 0, sizeof sink);
+		sink.op = (uint8_t)op;
+		sink.r[0] = sink.r[1] = sink.r[2] = sink.r[3] = XNOREG;
+		return &sink;
+	}
 	if (unlikely(X->nin == X->capin))
 		efatal(e, e->curloc, "function too large");
 	r = &X->in[X->nin++];
@@ -521,9 +531,9 @@ VPRIV void x64_dbgrow(ecx *e, uint32_t loc)
 
 VPRIV void x64_label(ecx *e, uint32_t l)
 {
+	e->reach = true;
 	x64_put(e, X_LABEL)->label = l;
-	wk_ael_clear(e, UINT32_MAX);	/* (other edges come in: element values unknown) */
-	e->reach = true;	/* (the walker skips label-free statements after a jump) */
+	wk_ael_clear(e, UINT32_MAX);	/* (other edges come in: element values unknown) */	/* (the walker skips label-free statements after a jump) */
 }
 VPRIV void x64_jump(ecx *e, uint32_t l) { x64_put(e, X_JMP)->label = l; }
 /* buf: rbp, the resume label, rsp (as clang); 0 now, 1 at the label */
