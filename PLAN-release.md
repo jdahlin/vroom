@@ -80,6 +80,20 @@ kan gå parallellt.
 
 ## Status
 
+### Status 2026-11-11: G1/G4, kombinerad native-stack ovanpå 1c5b5d1
+
+Sju separata native-rättningar har kombinerats och validerats på exakt
+stacktoppen `1c5b5d1`. Unity/filvis: egna Linux-sviter x86 232/232 och ARM
+237/237 med befintliga referensundantag/xfail, ABI 33/33 och atomik 3/3.
+PP-paritet cmp/batch är 920/920; sema run/batch 887/887 på båda byggen.
+Sex fokuserade Kefir-fall passerar alla fyra kombinationer på x86;
+ARM:s tre aktiva fall passerar medan två Clang-avvisningar och x86-vakten
+redovisas separat. ExtInt- och alloca-kantfall samt GCC pr113596 är gröna;
+breda strängars tidigare x86-assertionsfel är nu rättat. Se `TEST.plan`
+S5b och `work/native-stack64/` för exakt evidens och återstående gränser.
+Ingen full Kefir-/GCC-grind eller ytterligare plattformstäckning påstås;
+G1/G4 är fortsatt öppna.
+
 ### Status 2026-11-11: G1/G4, livstid för inlinad alloca
 
 På basen `103cdee` återställs stacken vid den inlinade funktionens gemensamma

@@ -793,6 +793,38 @@ resultat är inte en ny fullständig 875-parskörning.
 Evidens: `work/results/bitint-float-main-reviewed/` och
 `work/results/kefir-float-final-{x86,arm}/`.
 
+**Samlad native-milstolpe ovanpå stacktoppen `1c5b5d1` (2026-11-11):**
+Sju separata rättningar kombinerar x86-arrayobjektsalignment, stegvis
+bindning av parkerade ARM-inlineargument, atomiska lock-free-frågor,
+minnesalternativ för skalära FP-asm-inputs, korrekt ELF-lagring av breda
+strängar med inbäddade nollor, `_ExtInt`-alias och inlinad alloca-livstid.
+Explicit variabelalignment och typalignment bevaras; dynamiska Linux-
+atomikfrågor använder libatomic och evaluerar olösta argument en gång.
+Statiskt avgjorda frågor evaluerar inte pekaruttrycket. Alloca återställer
+callee-stacklivstiden efter cleanup/returvärde utan att radera argumentens
+eller anroparens levande allokeringar.
+
+Slutligt kombinerat unity- och filvis bygge: egna tester x86 232/232 med
+sex befintliga referensundantag; ARM 237/237 med ett befintligt xfail.
+ABI 33/33, hosted atomik 3/3 och sju fokuserade regressioner passerar på
+båda mål och byggen. PP cmp 920/920 före aliasändringen; efter samtliga
+ändringar cmp och batch 920/920. Sema run/batch 887/887 på båda byggen,
+diagnostik 225/225. Oberoende alloca-kantfall passerar 18/18 (Clang/unity/
+filvis × O0/O2/O3 × Linux x86/ARM). GCC:s oförändrade `pr113596` med sina
+`-O2`-direktiv passerar på båda mål och byggen; hela S4 kördes inte om.
+
+Sex oförändrade Kefir-fall (`atomic_builtins7`, `int128_function_call3`,
+`pointer_subscr_const1`, `wide_string_literals1`, `extint1`,
+`inline_assembly_fp3`) passerar alla fyra kompilatorkombinationer på x86
+för båda byggen. ARM passerar de första tre; breda strängfallet avvisas av
+Clang på grund av upstreams signed-wchar-typedef, `extint1` avvisas på
+grund av 310-bitars referenstyp. FP-asm-fallet har x86-vakt och räknas inte
+som ARM-täckning. Separat ExtInt-orakel passerar 24 kombinationer på x86
+och 20 på ARM; ARM310 kontrolleras mot Python-bytes i ett ytterligare
+bridge-fall. Ingen ny full 875-falls-baslinje påstås. Reproducerbara
+kommandon, exakta käll-/binärhashar och symlänkar finns i
+`work/native-stack64/{run-gates.py,manifest.json,final-evidence.json,logs/}`.
+
 ### S6 ABI-generatorer — rigg klar, fel rättas
 `gcc.dg/compat/struct-layout-1_generate.c` och clangs `utils/ABITest`
 genererar tusentals anrop mellan två kompilatorer.  Kopplas in i
