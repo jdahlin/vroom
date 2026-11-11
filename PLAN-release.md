@@ -353,3 +353,13 @@ registerhem. SSE4-poster har explicita register-/flaggeffekter; fasta
 variadiska boolparametrar verifieras även via indirekta anrop. Båda bygglägen
 klarar egna Linuxsviter (176 x86, 181 ARM), ABI 32 per mål, 220 diagnostikprov
 och 887 kernel-TU:er i båda semalägena. G1/G2/G5 förblir öppna.
+
+
+### Status 2026-11-11: G5/G7, enoperationsrecept för gånger 3/5/9
+
+Ett delat konstanttidsrecept väljer separata native-adaptrar: skalad LEA på
+x86 och skiftad ADD på arm64, O1+ utan VCC_NOOPT. Wasm behåller mul enligt
+referensens kostnadsval. O0/NOOPT/overflow-paritet, modulär sanitizer-/mutationsoracle,
+posteffekter, två bygglägen och fyra måls O0–O3-körfall passerar. Kodformsvinst
+är belagd; matchad kompilatorkostnad och integrations-CI återstår. Faktorer
+6/7/10/15 och bredare aritmetikregler är öppna. G5/G7 och full O2 förblir öppna.

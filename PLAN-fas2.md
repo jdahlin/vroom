@@ -2086,3 +2086,38 @@ när mätningar motiverar dem; ingen nivå döps om för att hävda paritet.
 G5/G7 och full O2-täckning förblir öppna. Detta dokumentsteg kör inga byggen
 eller nya benchmarks; annexets mängd-/unikhets-/nivå-/filhashkontroller
 är datakontroller av befintligt underlag.
+
+
+### OPT1: små konstantmultiplikationer med målkostnad (2026-11-11)
+
+Implementerat första avgränsade steget: `opt/mulconst.c` normaliserar konstanten
+till 32/64 bitar och väljer i konstant tid skift 1/2/3 för faktorerna 3/5/9.
+Separata `arch/{a64,x64}/emit/mulconst.c` använder receptet vid O1+ och utan
+`VCC_NOOPT`: arm64 väljer befintlig ADD med skiftad operand, x86 en ny ren
+skalad LEA-post med båda registeranvändningarna och utan flagg-/minneseffekter.
+32-bitarsresultatet nollutvidgas innan en eventuell senare teckenutvidgning.
+Ingen extra temp, AST-genomgång eller operandutvärdering behövs. Wasm behåller
+mul, som Clang 23; ett påtvingat skift/add-recept skulle lägga till operationer.
+
+Lokal audit mot 69c1bd7 (aritmetikfiler identiska med main 2dc4ea3) och
+Clang 23.1.6/GCC 15.2.0 visar att detta saknas på båda native-målen.
+Arm64 har redan multiplikation med tvåpotenser; noll/ett finns i gemensam regel.
+Faktorer 6/7/10/15 skjuts upp: referenserna använder två operationer där x86
+har en omedelbar imul och arm64 två mov/madd; bredare målkostnad krävs.
+Manifest med käll-/binärhashar, samtliga 36 auditkommandon och assembler ligger
+lokalt i `work/opt-profile/multiply-audit/`. Basbinären har SHA256
+`61249ca189d71743da9c506100c3d3dc8451cb3338e2898bc904b03d7cda87f4`.
+Detta är kodformsbelägg, inte uppmätt körtidsvinst.
+
+Verifierat före kostnadsmätning: unity och fil-för-fil med j2, 16 fullständigt
+byteidentiska assemblerpar mellan byggena, 16 mål/nivå-kombinationer O0–O3
+med bokstavliga körsvar och avsedda kodformer. Fallen omfattar signed/unsigned
+32/64, negativa definierade produkter, wraparound, smalning med smutsiga höga
+bitar, efterföljande utvidgning, *=, kommuterad konstant, en enda pekar-/värdefunktion
+samt global volatile-laddning. 36 bytejämförelser mot basen bevarar O0,
+`VCC_NOOPT` och overflow-builtins. Det redan ignorerade attributet optnone
+utgör inget nytt löfte. ASan/UBSan för receptets modulära oracle och mutation,
+samt x86-posternas användningar/definitioner/flaggor/nollutvidgning passerar.
+CI kör den nya receptkontrollen och befintlig opt-rules tar automatiskt det nya
+fallet. Matchad kompileringskostnad och slutlig integrations-CI återstår.
+Ingen SSA, generell InstCombine eller full O2-täckning är implementerad.

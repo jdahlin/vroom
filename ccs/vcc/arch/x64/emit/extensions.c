@@ -19,6 +19,7 @@ VPRIV bool x64_last_u32(const ecx *e, int r)
 		return false;
 	switch (i->op) {
 	case X_MOV:
+	case X_LEASCALE:
 	case X_ADD: case X_SUB: case X_AND: case X_OR: case X_XOR:
 	case X_IMUL: case X_ADC: case X_SBB:
 	case X_ADDI: case X_SUBI: case X_ANDI: case X_ORI: case X_XORI: case X_IMULI:

@@ -66,6 +66,7 @@ arm64)
 	step rec-effects  python3 bench/vcc-rec-effects.py
 	step rec-slots python3 bench/vcc-rec-slots.py --sanitize
 	step rec-slot-values python3 bench/vcc-rec-slot-values.py --sanitize
+	step rec-mulconst python3 bench/vcc-rec-mulconst.py --sanitize --check-mutation
 	step slot-observable python3 bench/vcc-slot-observable.py --check-mutation
 	step opt-debug-x86 python3 bench/vcc-opt-debug.py
 	step x86-leaf-frame python3 bench/vcc-x86-leaf-frame.py --no-run
