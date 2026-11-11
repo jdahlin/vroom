@@ -1936,6 +1936,56 @@ Kommandon, källor, hashvärden och rådata finns i `work/opt-profile/udivconst/
 Signed och u64 konstantreciproker, billigare wasm-rest/korrektion, tail calls,
 bredare G5/G7-grindar och full O2-täckning är fortsatt öppna.
 
+### OPT6: gemensamma rena kontrollbeslut (delsteg)
+
+`emit/opt/control.c` bevisar konstanta heltalsvillkor, logisk negation,
+kortslutning och `__builtin_strcmp` mellan rena smala strängliteraler. Den
+gemensamma besökaren stannar efter högst 64 noder och besöker aldrig en död
+högeroperand. Okända anrop, volatile/atomic, satser och inlining lämnas till
+den befintliga genereringen; ingen SSA eller AST-mutation tillkommer.
+`__builtin_constant_p` använder respektive måls befintliga policy genom en
+callback. Arm64:s callback behåller sin befintliga dry-generering med
+återställning, och x86:s tidigare dubbla formel i builtin-/villkorsvägen är
+sammanslagen. Det gemensamma beviset anropas en gång vid respektive faktisk
+villkorsingång, inte igen via den delade range-hjälparen `cond_fold`.
+
+Nya beslut gäller O1–O3 med optimeringar aktiva. Åtta fokuserade källfiler
+är byteidentiska mot `781ca69` för både O0 och O2 med `VCC_NOOPT=1`, på
+x86, arm64, wasm32 och wasm64: 64 jämförelser. Native-målens gamla O0-regler
+för strängjämförelser är bevarade. Det nya kör-/kodformsprovet passerar
+16 nivå-/målkombinationer, även fil-för-fil, och kontrollerar exakt en
+utvärdering, bevarade globala volatile-/atomic-laddningar, vanliga
+användardefinierade strcmp-anrop samt höga strängbyte och inbäddad NUL.
+Nio befintliga native-test för constant_p/inlining passerar. Wasm32/64
+passerar båda `if_call_const` och `cond_dead_and`; bara dessa två xfail
+är borttagna. Övriga sex granskade luckor kräver fortsatt arbete med
+switchsegment, värdefakta för statement expressions eller inlining.
+
+Kostnaden mäts mot exakt `781ca69`, lika värdflaggor
+`-O3 -march=x86-64-v3`, hela processen i Callgrind, 500 funktioner per
+prov, O1/O2. De rena skalärkontrollerna är i praktiken oförändrade.
+Pekarslingans kostnad är cirka +0,094 % x86, +0,065 % arm64 och −0,002 %
+wasm. Positivt kortslutnings-/constant_p-prov minskar värdinstruktionerna
+med cirka 16,90 % x86, 2,75 % arm64 och 18,15–18,36 % wasm. Detta är
+avgränsad kompileringskostnad, inte hårdvarucykler eller en full grind.
+Den första provvarianten med null-callback på native gav extra arbete
+utan vinst och ersattes; dess profiler är sparade separat. Bredare
+prestandagrind, CI och full O2-täckning är fortsatt öppna.
+
+Slutlig verifiering av samma implementation: 164 befintliga regel-/nivå-/
+målkombinationer passerar med körning. De nya 16 kombinationerna passerar
+också efter fil-för-fil-bygge. Råprofiler, kommandon och käll-/binärhashar
+finns lokalt i `work/opt-profile/control-final-cost/result.json`; O0/noopt-
+jämförelserna ligger i `work/opt-profile/control-parity/result.json`.
+Den generella algoritmen gör ingen extra helträdsanalys för accepterade
+bevis; wasm:s befintliga fallback för övriga former är avsiktligt kvar.
+
+Efter integration av `54580f7` (PR48:s regressionsunderlag) bygger unity
+och alla 16 nya nivå-/målkontroller passerar igen. Hela egna native-sviten
+ger 216/216 x86-PASS med sex synliga referensundantag och 221/221 arm64-PASS
+med ett befintligt kört XFAIL. Loggar finns i
+`work/opt-pr-tmp/control-integrated-{build,x86,arm}.log`.
+
 ### OPT5 regressionsunderlag: genererade minnesceller (2026-11-11)
 
 `bench/gen-memory-cells.py` skapar deterministiskt 12 funktioner med totalt
@@ -1967,13 +2017,54 @@ sanitiserade reciprok-/tryckkontrakten passerar på kombinationen, liksom
 (sex referensskips). Mätningarnas JSON anger exakt 781ca69→58263be och
 `compiler-sources.json` binder de tio ändrade kompilatorfilerna med SHA256.
 
-### OPT8 pågår: unsigned64 reciprokdivision (2026-11-11)
+### OPT8 status: unsigned64 reciprokdivision (2026-11-11)
 
-Arbetsgrenen från 046c6dc utökar det gemensamma receptet med separat u64-
-konstruktion i host-u128; u32 behåller sin egen billigare konstruktion.
-Native använder befintlig UMULH/MULW via en ny walker-hook, med sparning av
-levande implicita RAX/RDX och samma explicita toppbudget för temporärer.
-Wasm avvisar u64-reciproker före konstruktionen och väljer bara kvot genom
-jämförelse vid divisor>2^63. Sexton nya mål-/nivåprober och sanitiserade
-u64-matematik-/registerparskontrakt passerar; breda tester, fil-för-fil,
-ABI/unwind och parade kostnadsmätningar mot exakt 046c6dc återstår före PR.
+Delsteget från exakt 046c6dc utökar `emit/opt/udivconst.c` med separat u64-
+konstruktion i host-u128, kontrollerad mot libdivides u64-generator ovan.
+U32 behåller sin egen billigare konstruktion. Native använder befintlig
+UMULH/MULW via en separat walker-hook, med sparning av levande implicita
+RAX/RDX. Budgeten räknar lat input, magic och sparat original/korrektion;
+registertryck behåller vanlig division. Ingen SSA eller ny AST-genomgång.
+Wasm avvisar vanliga u64-reciproker före konstruktionen och väljer bara
+jämförelsekvot vid divisor>2^63, som clang23:s faktiska wasm-sänkning.
+U64-rest och låga divisorer behåller wasm `div_u`/`rem_u`.
+
+Sanitiserade kontrakt prövar 4096 fullbreddsdivisorer, 32 slumpdivisorer per
+exakt bredd 2–63, tvåpotensgrannar, extremvärden och multipler mot oberoende
+division/modulo; de gamla u32-kontrakten kvarstår. Den faktiska x86-hooken
+prövas i 1536 register-/alias-/livemaskfall inklusive RAX/RDX. Körprovet har
+18 divisorklasser, fullbreddsinput, multipler ±1, /= och %=, volatile,
+sidoeffekter en gång, fasta RAX/RDX och nästlat adress-/registertryck.
+Unity och fil-för-fil bygger. 196/196 regel-/nivå-/målkombinationer passerar
+på x86, arm64, wasm32 och wasm64, även de 16 nya u64-fallen med fil-för-fil.
+222 arm64-regressioner (ett befintligt xfail), 217 x86-regressioner (sex
+referensskips), ABI 32/32 per native-mål, libgcc-unwind och x86-debug passerar.
+Den oberoende läsgranskningen fann ingen kvarvarande blockerare.
+
+Parade Callgrind-mätningar använder exakt 046c6dc mot e1fdb3d:s kompilatorkod,
+clang23 `-O3 -march=x86-64-v3`. På fyra mål är 500-funktionskontroller och
+loopkontroller högst +0,00021 % extra arbete. Befintlig mättad u32-korpus
+kostar +0,052…+0,122 %, med identisk assembler. Inga av dessa eller wasm:s
+avvisade u64-fall exekverar hostens `__udivti3`. En konfigurerad oförändrad
+12-filers native-mix kostar −0,00303 % på x86 och +0,00082 % på arm64;
+10 respektive 11 basstödda wasm-filer kostar −0,00794 %/−0,00462 %.
+Wasm-mixen utesluter befintligt ej stödda atomics/BitInt-fall enligt JSON.
+Detta är avgränsad kontroll-/mix-evidens, inte hela G7-grinden.
+
+Den mättade nya u64-korpusen (`x/7ULL+x%10ULL`, 500 funktioner) kostar
+**+14,10 % på x86 och +17,99 % på arm64 att kompilera**. Den avvägningen
+är uttrycklig: reciproksekvenser och host-u128-konstruktion gör mer arbete.
+På x86 kör en separat loop med tre miljoner seedade fullbredds-LCG-input
+samma kvot-/restsumma: två uppvärmningar och nio alternerande barnprocesser
+per binär ger median CPU 10,920→3,325 ms (−69,55 %), med identiskt
+clang-verifierat svar. Detta gäller denna korpus/värd och inkluderar
+processstart; det är inget generellt hastighetslöfte. Arm64 har statisk
+UMULH-/restkod verifierad men ingen mätning på verklig arm64-hårdvara.
+Wasm behåller sin dyrare klass enligt kostnadspolicyn.
+
+Källor, exakta kommandon, binär-/källhashar och råa prov finns under
+`work/opt-profile/udivconst64/`: `compiler-profile.json`, `mixed/result.json`
+och `native-runtime-profile.json` med respektive `*-measure.py`.
+Signed reciproker, billigare wasm-u64/rest/korrektion, bredare registerallokering,
+fulla G5/G7-grindar och full O2-täckning återstår. U32-statusens äldre
++19,54 % mättade arm64-kostnad gäller fortfarande dess separata basmätning.

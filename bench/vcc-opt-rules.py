@@ -378,7 +378,8 @@ def check_udivconst64(assembly, arch):
     wasm = arch.startswith('wasm')
     divide = r'\b(?:i64\.(?:div|rem)_[su]|[su]div|idiv[lq]?|div[lq]?)\b'
     divisors = [3,5,7,10,11,14,19,37,63,4294967295,4294967297,
-                9223372036854775807,9223372036854775809,18446744073709551615]
+                9223372036854775807,9223372036854775809,18446744073709551615,
+                1099511640121,281474976722345,72057594038002501,1152921504625935719]
     selected = [9223372036854775809,18446744073709551615] if wasm else divisors
     probes = ['u64_q'+str(d) for d in selected]
     if not wasm:

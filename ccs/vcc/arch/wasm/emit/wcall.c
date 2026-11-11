@@ -318,7 +318,8 @@ static const char *wmath_insn(cc *c, uint32_t ref, const ctype *f)
 	if (c->o->no_builtin || !ref || RKIND(ref) != RK_SYM)
 		return NULL;
 	y = &c->syms[RIDX(ref)];
-	if (!y->name || y->sc == SC_STATIC || (f->flags & (TF_NOPROTO | TF_VARIADIC)))
+	if (!y->name || y->sc == SC_STATIC || sym_attrs(c, RIDX(ref))->asmname ||
+	    (f->flags & (TF_NOPROTO | TF_VARIADIC)))
 		return NULL;
 	nm = vintern_ents[y->name].s;
 	len = vintern_ents[y->name].len;
@@ -398,6 +399,13 @@ VPRIV int wcall(ecx *e, uint32_t n, bool want)
 	bool lib = false;
 
 	uint32_t def = 0;
+	i128 constant;
+
+	if (c->o->opt && !e->E->noopt && em_const_strcmp(c, n, &constant)) {
+		if (want)
+			wconst(e, WT_I32, (int64_t)constant);
+		return want ? WT_I32 : WT_NONE;
+	}
 
 	if (ref && RKIND(ref) == RK_SYM && x->c == 1 && !(c->syms[RIDX(ref)].flags & SF_DEFINED) &&
 	    c->syms[RIDX(ref)].name &&

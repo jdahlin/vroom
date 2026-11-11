@@ -134,6 +134,12 @@ int main(void)
         divisor64(d-1);divisor64(d);divisor64(d+1);
     }
     for (unsigned i=0;i<4096;i++) divisor64(random64());
+    /* Full-width uniform samples mostly exercise very large divisors. Add
+     * independent samples at each width to vary reciprocal/postshift classes. */
+    for (unsigned bits=2;bits<64;bits++) for (unsigned i=0;i<32;i++) {
+        uint64_t d=(random64() & ((UINT64_C(1)<<bits)-1)) | (UINT64_C(1)<<(bits-1));
+        divisor64(d);
+    }
     divisor64(UINT64_MAX);divisor64(UINT64_MAX-1);
     em_udivconst_recipe r;
     assert(em_udivconst64(3,false,&r) && r.magic==UINT64_C(0xaaaaaaaaaaaaaaab) && r.shift==1 && !r.add);
