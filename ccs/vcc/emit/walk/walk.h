@@ -43,6 +43,8 @@ typedef struct wkloop { uint32_t brk, cont; int cdepth; } wkloop;	/* cdepth: the
 typedef struct wkcase { i128 lo, hi; uint32_t node; } wkcase;
 
 /* an inlined call: where its returns go */
+typedef struct wkael { uint32_t s, gen, inst; int64_t idx; i128 v; } wkael;	/* a[K] = constant (wkst.ael) */
+
 typedef struct wkinl {
 	struct wkinl *up;
 	uint32_t fn, endlbl, inst;
@@ -51,6 +53,8 @@ typedef struct wkinl {
 	int cbase;		/* the cleanups live at the call */
 	bool any, cst_ok;	/* a return seen; every return so far the constant cst */
 	val cst;
+	wkael ael0[16];		/* the caller's known array elements at the call (restored after the copy) */
+	int nael0;
 } wkinl;
 
 typedef struct wkst {
@@ -93,7 +97,7 @@ typedef struct wkst {
 	bool cjump;	/* wk_cond jumped whatever the condition (N_IF: the branch it skips is dead) */
 	/* a[K] = constant for local arrays used only as a[CONST] (no SA_AESC): straight-line
 	   code only (a label drops them all), as arm64's ael */
-	struct { uint32_t s, gen, inst; int64_t idx; i128 v; } ael[16];
+	wkael ael[16];
 	int nael;
 	/* a parameter of an inlined copy that is written later, bound to its constant argument
 	   until its first write or a label: only an asm "i" operand reads it (rip_rel_ptr) */

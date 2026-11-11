@@ -1066,6 +1066,36 @@ VPRIV bool wk_const_sym(ecx *e, uint32_t s, val *v)
  * inlining).  Not: variadic or unprototyped, recursive, a label address
  * taken (one copy only), deeper than 16.
  */
+/* a tiny static function clang would inline: no inline asm, no locals aligned above 16
+   (either could need registers the caller's frame holds) */
+static bool wk_tiny_ok(cc *c, uint32_t n)
+{
+	const node *x;
+
+	if (!n)
+		return true;
+	x = N(n);
+	switch (x->op) {
+	case N_ASM:
+		return false;
+	case N_DECL:
+		return c->syms[x->a].kind != S_VAR || sym_align(c, x->a) <= 16;
+	case N_BLOCK:
+		for (uint32_t i = 0; i < x->c; i++)
+			if (!wk_tiny_ok(c, c->lists[x->b + i]))
+				return false;
+		return true;
+	case N_IF:
+		return wk_tiny_ok(c, x->b) && wk_tiny_ok(c, x->c);
+	case N_WHILE: case N_DO: case N_SWITCH: case N_LABEL: case N_CASE: case N_DEFAULT:
+		return wk_tiny_ok(c, x->op == N_LABEL || x->op == N_CASE || x->op == N_DEFAULT ? x->c : x->b);
+	case N_FOR:
+		return wk_tiny_ok(c, c->lists[x->c + 1]);
+	default:
+		return true;
+	}
+}
+
 VPRIV bool wk_can_inline(ecx *e, uint32_t s)
 {
 	cc *c = e->c;
@@ -1080,10 +1110,12 @@ VPRIV bool wk_can_inline(ecx *e, uint32_t s)
 	if (!(y->flags & SF_ALWAYS_INLINE)) {
 		if (!e->E->o->opt)
 			return false;
-		if ((y->flags & SF_NOINLINE) || !(y->flags & SF_INLINE))
+		if ((y->flags & SF_NOINLINE) || (!(y->flags & SF_INLINE) && y->sc != SC_STATIC))
 			return false;
 		walk_fn(e, s);
-		if (e->E->fnsize[s] > WK_INLINE_NODES)
+		if (e->E->fnsize[s] > ((y->flags & SF_INLINE) ? WK_INLINE_NODES : 16))
+			return false;	/* (a tiny static function too, as clang: an empty stub drops its arguments) */
+		if (!(y->flags & SF_INLINE) && !wk_tiny_ok(c, y->body))
 			return false;
 	}
 	ensure_walked(e->E, c, s);
@@ -1107,6 +1139,7 @@ VPRIV val wk_inline(ecx *e, uint32_t n, uint32_t s)
 	uint32_t inst0 = W->inst;
 	val res;
 
+	memcpy(I.ael0, W->ael, sizeof I.ael0), I.nael0 = W->nael;
 	walk_fn(e, s);
 	if (KIND(c, I.rty) != TY_VOID)
 		I.rslot = wk_slot(e, tsize(c, I.rty) ? tsize(c, I.rty) : 8, talign(c, I.rty) < 8 ? 8 : talign(c, I.rty));
@@ -1195,6 +1228,9 @@ VPRIV val wk_inline(ecx *e, uint32_t n, uint32_t s)
 	W->inl = I.up;
 	W->inst = inst0;
 	wk_label(e, I.endlbl);
+	/* the callee cannot touch the caller's non-escaping local arrays: their known
+	   elements (the snapshot at the call) hold past the copy's labels */
+	memcpy(W->ael, I.ael0, sizeof I.ael0), W->nael = I.nael0;
 	if (KIND(c, I.rty) == TY_VOID)
 		return vconst(0);
 	if (I.any && I.cst_ok)
