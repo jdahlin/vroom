@@ -1913,3 +1913,19 @@ mutation samt wasm32/64 celltester O0–O3. Två wasm32 atomic_ops-par avvisas
 identiskt av basen p.g.a. testets LP64-antaganden och räknas inte som godkända.
 Unity- och separatfilbygge med j2 passerar, liksom värdetillståndets sanitizerkontrakt.
 Ingen ny emissionsregel eller full O2-täckning; full prestandagrind återstår.
+
+
+OPT5 fysisk förgiftning, liten uppföljning: när två senast insamlade ID0-intervall
+har exakt samma offset och storlek sparas bara ett. Klassificeringen använder
+intervallens union; validering sker fortfarande före jämförelsen. Ingen ny
+buffert eller status införs. Slumporaclet innehåller nu upprepade poison-runs;
+en andra mutation som ignorerar storleken avvisas av ett samma-offset/bredare-fall.
+ASan/UBSan, båda mutationer, 118 byteparitetspar och observerbarhetskontrakt
+passerar. Mot föregående d870b64 minskar en avgränsad upprepad volatile-range
+kompileringens Ir med 0,042 % på wasm och 0,039 % på arm64; alternerande
+intervall utan träff kostar 0,116 % respektive 0,105 %. Tidigare kontroller och
+flerfältsfall är i praktiken oförändrade. Båda belastningarna finns kvar i
+`work/opt-profile/stream-collectors-prune-poison{,-repeat}-cost/result.json`;
+hela slutversionens basjämförelser finns i `stream-collectors-prune{,-large}-cost`.
+Separat x86-integration rapporterar 13 397 färre Ir i sin riktiga grind;
+det är inte en full grind för denna arm64-/wasm-ändring. Ingen emissionsändring.
