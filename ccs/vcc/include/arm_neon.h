@@ -28,6 +28,11 @@ typedef struct uint8x8x2_t { uint8x8_t val[2]; } uint8x8x2_t;
 typedef struct uint8x16x2_t { uint8x16_t val[2]; } uint8x16x2_t;
 typedef struct uint8x16x4_t { uint8x16_t val[4]; } uint8x16x4_t;
 
+/* Signed 128-bit tuples used by the ACLE zip/unzip intrinsics. */
+typedef struct int8x16x2_t { int8x16_t val[2]; } int8x16x2_t;
+typedef struct int16x8x2_t { int16x8_t val[2]; } int16x8x2_t;
+typedef struct int32x4x2_t { int32x4_t val[2]; } int32x4x2_t;
+
 /* loads and stores */
 #define __vcc_ld(T, p) ({ T __r; __builtin_memcpy(&__r, (p), sizeof __r); __r; })
 #define __vcc_st(T, p, v) ({ T __v = (v); __builtin_memcpy((p), &__v, sizeof __v); (void)0; })
@@ -39,6 +44,49 @@ typedef struct uint8x16x4_t { uint8x16_t val[4]; } uint8x16x4_t;
 #define vst1q_u64(p, v) __vcc_st(uint64x2_t, (unsigned long long *)(p), v)
 #define vst1_u8(p, v) __vcc_st(uint8x8_t, (unsigned char *)(p), v)
 
+/* Signed load/store forms preserve the unaligned ACLE memory semantics. */
+#define vld1q_s8(p) __vcc_ld(int8x16_t, (const int8_t *)(p))
+#define vld1q_s16(p) __vcc_ld(int16x8_t, (const int16_t *)(p))
+#define vld1q_s32(p) __vcc_ld(int32x4_t, (const int32_t *)(p))
+#define vst1q_s8(p, v) __vcc_st(int8x16_t, (int8_t *)(p), v)
+#define vst1q_s16(p, v) __vcc_st(int16x8_t, (int16_t *)(p), v)
+#define vst1q_s32(p, v) __vcc_st(int32x4_t, (int32_t *)(p), v)
+#define vdupq_n_s8(x) ((int8x16_t)vdupq_n_u8((uint8_t)(x)))
+#define vdupq_n_s16(x) ({ int16_t __s = (x); int16x8_t __r = { __s, __s, __s, __s, __s, __s, __s, __s }; __r; })
+#define vdupq_n_s32(x) ((int32x4_t)vdupq_n_u32((uint32_t)(x)))
+#define vmovq_n_s8(x) vdupq_n_s8(x)
+#define vmovq_n_s16(x) vdupq_n_s16(x)
+#define vmovq_n_s32(x) vdupq_n_s32(x)
+#define vaddq_s8(a, b) ((int8x16_t)((uint8x16_t)(a) + (uint8x16_t)(b)))
+#define vaddq_s16(a, b) ((int16x8_t)((uint16x8_t)(a) + (uint16x8_t)(b)))
+#define vaddq_s32(a, b) ((int32x4_t)((uint32x4_t)(a) + (uint32x4_t)(b)))
+
+/* ACLE's pair forms return two vectors, and evaluate each operand once.
+ * The first output must not overwrite either input before instruction two. */
+#ifdef __aarch64__
+#define __VCC_PAIR(T, V, N, op, arr, a, b) ({ V __pa = (a), __pb = (b); T __pr; \
+ __asm__(op "1 %0." arr ", %2." arr ", %3." arr "\n\t" \
+     op "2 %1." arr ", %2." arr ", %3." arr \
+     : "=&w"(__pr.val[0]), "=w"(__pr.val[1]) : "w"(__pa), "w"(__pb)); __pr; })
+#define __VCC_ZIP(T, V, N, arr, a, b) __VCC_PAIR(T, V, N, "zip", arr, a, b)
+#define __VCC_UZP(T, V, N, arr, a, b) __VCC_PAIR(T, V, N, "uzp", arr, a, b)
+#else
+#define __VCC_ZIP(T, V, N, arr, a, b) ({ V __pa = (a), __pb = (b); T __pr; \
+ for (int __k = 0; __k < (N); ++__k) { \
+   __pr.val[__k / ((N)/2)][2 * (__k % ((N)/2))] = __pa[__k]; \
+   __pr.val[__k / ((N)/2)][2 * (__k % ((N)/2)) + 1] = __pb[__k]; } __pr; })
+#define __VCC_UZP(T, V, N, arr, a, b) ({ V __pa = (a), __pb = (b); T __pr; \
+ for (int __k = 0; __k < (N); ++__k) { \
+   __pr.val[__k & 1][__k / 2] = __pa[__k]; \
+   __pr.val[__k & 1][__k / 2 + (N)/2] = __pb[__k]; } __pr; })
+#endif
+#define vzipq_s8(a, b) __VCC_ZIP(int8x16x2_t, int8x16_t, 16, "16b", a, b)
+#define vzipq_s16(a, b) __VCC_ZIP(int16x8x2_t, int16x8_t, 8, "8h", a, b)
+#define vzipq_s32(a, b) __VCC_ZIP(int32x4x2_t, int32x4_t, 4, "4s", a, b)
+#define vuzpq_s8(a, b) __VCC_UZP(int8x16x2_t, int8x16_t, 16, "16b", a, b)
+#define vuzpq_s16(a, b) __VCC_UZP(int16x8x2_t, int16x8_t, 8, "8h", a, b)
+#define vuzpq_s32(a, b) __VCC_UZP(int32x4x2_t, int32x4_t, 4, "4s", a, b)
+
 /* bitwise */
 #define veorq_u8(a, b) ((uint8x16_t)(a) ^ (uint8x16_t)(b))
 #define veorq_u64(a, b) ((uint64x2_t)(a) ^ (uint64x2_t)(b))
@@ -48,8 +96,8 @@ typedef struct uint8x16x4_t { uint8x16_t val[4]; } uint8x16x4_t;
 #define vorrq_u64(a, b) ((uint64x2_t)(a) | (uint64x2_t)(b))
 
 /* lanes and moves */
-#define vdupq_n_u8(x) ({ uint8x16_t __r; asm("dup %0.16b, %w1" : "=w"(__r) : "r"((unsigned int)(unsigned char)(x))); __r; })
-#define vdupq_n_u64(x) ({ uint64x2_t __r; asm("dup %0.2d, %x1" : "=w"(__r) : "r"((unsigned long long)(x))); __r; })
+#define vdupq_n_u8(x) ({ uint8x16_t __r; __asm__("dup %0.16b, %w1" : "=w"(__r) : "r"((unsigned int)(unsigned char)(x))); __r; })
+#define vdupq_n_u64(x) ({ uint64x2_t __r; __asm__("dup %0.2d, %x1" : "=w"(__r) : "r"((unsigned long long)(x))); __r; })
 #define vgetq_lane_u64(v, i) ({ uint64x2_t __v = (v); __v[(i) & 1]; })
 #define vgetq_lane_u8(v, i) ({ uint8x16_t __v = (v); __v[(i) & 15]; })
 #define vget_low_u8(v) ({ uint8x16_t __v = (v); uint8x8_t __r; __builtin_memcpy(&__r, &__v, 8); __r; })
@@ -57,31 +105,31 @@ typedef struct uint8x16x4_t { uint8x16_t val[4]; } uint8x16x4_t;
 #define vcombine_u8(l, h) ({ uint8x8_t __l = (l), __h = (h); uint8x16_t __r; __builtin_memcpy(&__r, &__l, 8); \
 	__builtin_memcpy((char *)&__r + 8, &__h, 8); __r; })
 #define vextq_u8(a, b, n) ({ uint8x16_t __r, __a = (a), __b = (b); \
-	asm("ext %0.16b, %1.16b, %2.16b, %3" : "=w"(__r) : "w"(__a), "w"(__b), "i"(n)); __r; })
+	__asm__("ext %0.16b, %1.16b, %2.16b, %3" : "=w"(__r) : "w"(__a), "w"(__b), "i"(n)); __r; })
 #define vextq_u64(a, b, n) ({ uint64x2_t __r, __a = (a), __b = (b); \
-	asm("ext %0.16b, %1.16b, %2.16b, %3" : "=w"(__r) : "w"(__a), "w"(__b), "i"(8 * (n))); __r; })
+	__asm__("ext %0.16b, %1.16b, %2.16b, %3" : "=w"(__r) : "w"(__a), "w"(__b), "i"(8 * (n))); __r; })
 
 /* shifts */
-#define vshrq_n_u8(a, n) ({ uint8x16_t __r, __a = (a); asm("ushr %0.16b, %1.16b, %2" : "=w"(__r) : "w"(__a), "i"(n)); __r; })
-#define vshrq_n_s8(a, n) ({ int8x16_t __r, __a = (a); asm("sshr %0.16b, %1.16b, %2" : "=w"(__r) : "w"(__a), "i"(n)); __r; })
-#define vshlq_n_u8(a, n) ({ uint8x16_t __r, __a = (a); asm("shl %0.16b, %1.16b, %2" : "=w"(__r) : "w"(__a), "i"(n)); __r; })
-#define vshrq_n_u64(a, n) ({ uint64x2_t __r, __a = (a); asm("ushr %0.2d, %1.2d, %2" : "=w"(__r) : "w"(__a), "i"(n)); __r; })
-#define vshlq_n_u64(a, n) ({ uint64x2_t __r, __a = (a); asm("shl %0.2d, %1.2d, %2" : "=w"(__r) : "w"(__a), "i"(n)); __r; })
+#define vshrq_n_u8(a, n) ({ uint8x16_t __r, __a = (a); __asm__("ushr %0.16b, %1.16b, %2" : "=w"(__r) : "w"(__a), "i"(n)); __r; })
+#define vshrq_n_s8(a, n) ({ int8x16_t __r, __a = (a); __asm__("sshr %0.16b, %1.16b, %2" : "=w"(__r) : "w"(__a), "i"(n)); __r; })
+#define vshlq_n_u8(a, n) ({ uint8x16_t __r, __a = (a); __asm__("shl %0.16b, %1.16b, %2" : "=w"(__r) : "w"(__a), "i"(n)); __r; })
+#define vshrq_n_u64(a, n) ({ uint64x2_t __r, __a = (a); __asm__("ushr %0.2d, %1.2d, %2" : "=w"(__r) : "w"(__a), "i"(n)); __r; })
+#define vshlq_n_u64(a, n) ({ uint64x2_t __r, __a = (a); __asm__("shl %0.2d, %1.2d, %2" : "=w"(__r) : "w"(__a), "i"(n)); __r; })
 
 /* table lookups and polynomial multiplies */
 #define vqtbl1q_u8(t, i) ({ uint8x16_t __r, __t = (t), __i = (i); \
-	asm("tbl %0.16b, {%1.16b}, %2.16b" : "=w"(__r) : "w"(__t), "w"(__i)); __r; })
+	__asm__("tbl %0.16b, {%1.16b}, %2.16b" : "=w"(__r) : "w"(__t), "w"(__i)); __r; })
 #define vqtbl4q_u8(t, i) ({ uint8x16x4_t __t = (t); uint8x16_t __i = (i), __r; const unsigned char *__b = (const unsigned char *)&__t; \
 	for (int __k = 0; __k < 16; __k++) __r[__k] = __i[__k] < 64 ? __b[__i[__k]] : 0; __r; })
 #define vtbl2_u8(t, i) ({ uint8x8x2_t __t = (t); uint8x8_t __i = (i), __r; uint8x16_t __q = vcombine_u8(__t.val[0], __t.val[1]); \
-	asm("tbl %0.8b, {%1.16b}, %2.8b" : "=w"(__r) : "w"(__q), "w"(__i)); __r; })
+	__asm__("tbl %0.8b, {%1.16b}, %2.8b" : "=w"(__r) : "w"(__q), "w"(__i)); __r; })
 #define vmulq_p8(a, b) ({ poly8x16_t __r, __a = (a), __b = (b); \
-	asm("pmul %0.16b, %1.16b, %2.16b" : "=w"(__r) : "w"(__a), "w"(__b)); __r; })
+	__asm__("pmul %0.16b, %1.16b, %2.16b" : "=w"(__r) : "w"(__a), "w"(__b)); __r; })
 #define vmull_p64(a, b) ({ uint64x2_t __a = { (a), 0 }, __b = { (b), 0 }, __r; \
-	asm(".arch_extension aes\n\tpmull %0.1q, %1.1d, %2.1d" : "=w"(__r) : "w"(__a), "w"(__b)); \
+	__asm__(".arch_extension aes\n\tpmull %0.1q, %1.1d, %2.1d" : "=w"(__r) : "w"(__a), "w"(__b)); \
 	poly128_t __p; __builtin_memcpy(&__p, &__r, 16); __p; })
 #define vmull_high_p64(a, b) ({ poly64x2_t __a = (a), __b = (b); uint64x2_t __r; \
-	asm(".arch_extension aes\n\tpmull2 %0.1q, %1.2d, %2.2d" : "=w"(__r) : "w"(__a), "w"(__b)); \
+	__asm__(".arch_extension aes\n\tpmull2 %0.1q, %1.2d, %2.2d" : "=w"(__r) : "w"(__a), "w"(__b)); \
 	poly128_t __p; __builtin_memcpy(&__p, &__r, 16); __p; })
 
 /* reinterpretations */
@@ -91,7 +139,7 @@ typedef struct uint8x16x4_t { uint8x16_t val[4]; } uint8x16x4_t;
 #define vget_lane_u64(v, i) ({ uint64x1_t __v = (v); (void)(i); __v[0]; })
 #define vshrn_n_u16(a, n) ({ uint16x8_t __a = (a); uint8x8_t __r; \
 	for (int __k = 0; __k < 8; __k++) __r[__k] = (unsigned char)(__a[__k] >> (n)); __r; })
-#define vsriq_n_u8(a, b, n) ({ uint8x16_t __r = (a), __b = (b); asm("sri %0.16b, %1.16b, %2" : "+w"(__r) : "w"(__b), "i"(n)); __r; })
+#define vsriq_n_u8(a, b, n) ({ uint8x16_t __r = (a), __b = (b); __asm__("sri %0.16b, %1.16b, %2" : "+w"(__r) : "w"(__b), "i"(n)); __r; })
 #define vreinterpretq_u8_u64(x) ((uint8x16_t)(x))
 #define vreinterpretq_p64_u64(x) ((poly64x2_t)(x))
 #define vreinterpretq_u64_p64(x) ((uint64x2_t)(x))
@@ -105,7 +153,7 @@ typedef struct uint8x16x4_t { uint8x16_t val[4]; } uint8x16x4_t;
 #define vsubq_u8(a, b) ((uint8x16_t)(a) - (uint8x16_t)(b))
 #define vld1q_dup_u8(p) vdupq_n_u8(*(const unsigned char *)(p))
 #define __VCC_CMP(op, a, b) ({ uint8x16_t __r, __a = (a), __b = (b); \
-	asm(op " %0.16b, %1.16b, %2.16b" : "=w"(__r) : "w"(__a), "w"(__b)); __r; })
+	__asm__(op " %0.16b, %1.16b, %2.16b" : "=w"(__r) : "w"(__a), "w"(__b)); __r; })
 #define vceqq_u8(a, b) __VCC_CMP("cmeq", a, b)
 #define vtstq_u8(a, b) __VCC_CMP("cmtst", a, b)
 #define vcleq_u8(a, b) __VCC_CMP("cmhs", b, a)
@@ -115,27 +163,27 @@ typedef struct uint8x16x4_t { uint8x16_t val[4]; } uint8x16x4_t;
 
 /* used by PostgreSQL (port/simd.h, pg_popcount_aarch64.c) */
 #define vld1q_u32(p) __vcc_ld(uint32x4_t, (const unsigned int *)(p))
-#define vdupq_n_u32(x) ({ uint32x4_t __r; asm("dup %0.4s, %w1" : "=w"(__r) : "r"((unsigned int)(x))); __r; })
+#define vdupq_n_u32(x) ({ uint32x4_t __r; __asm__("dup %0.4s, %w1" : "=w"(__r) : "r"((unsigned int)(x))); __r; })
 #define vorrq_u32(a, b) ((uint32x4_t)(a) | (uint32x4_t)(b))
 #define vaddq_u64(a, b) ((uint64x2_t)(a) + (uint64x2_t)(b))
 #define __VCC_V3(T, op, arr, a, b) ({ T __r, __a = (a), __b = (b); \
-	asm(op " %0." arr ", %1." arr ", %2." arr : "=w"(__r) : "w"(__a), "w"(__b)); __r; })
+	__asm__(op " %0." arr ", %1." arr ", %2." arr : "=w"(__r) : "w"(__a), "w"(__b)); __r; })
 #define vqsubq_u8(a, b) __VCC_V3(uint8x16_t, "uqsub", "16b", a, b)
 #define vminq_u8(a, b) __VCC_V3(uint8x16_t, "umin", "16b", a, b)
 #define vmaxq_u8(a, b) __VCC_V3(uint8x16_t, "umax", "16b", a, b)
 #define vceqq_u32(a, b) __VCC_V3(uint32x4_t, "cmeq", "4s", a, b)
 #define vzip1q_u8(a, b) __VCC_V3(uint8x16_t, "zip1", "16b", a, b)
-#define vcntq_u8(a) ({ uint8x16_t __r, __a = (a); asm("cnt %0.16b, %1.16b" : "=w"(__r) : "w"(__a)); __r; })
-#define vcnt_u8(a) ({ uint8x8_t __r, __a = (a); asm("cnt %0.8b, %1.8b" : "=w"(__r) : "w"(__a)); __r; })
-#define vpaddlq_u8(a) ({ uint8x16_t __a = (a); uint16x8_t __r; asm("uaddlp %0.8h, %1.16b" : "=w"(__r) : "w"(__a)); __r; })
-#define vpaddlq_u16(a) ({ uint16x8_t __a = (a); uint32x4_t __r; asm("uaddlp %0.4s, %1.8h" : "=w"(__r) : "w"(__a)); __r; })
-#define vpadalq_u32(a, b) ({ uint64x2_t __r = (a); uint32x4_t __b = (b); asm("uadalp %0.2d, %1.4s" : "+w"(__r) : "w"(__b)); __r; })
+#define vcntq_u8(a) ({ uint8x16_t __r, __a = (a); __asm__("cnt %0.16b, %1.16b" : "=w"(__r) : "w"(__a)); __r; })
+#define vcnt_u8(a) ({ uint8x8_t __r, __a = (a); __asm__("cnt %0.8b, %1.8b" : "=w"(__r) : "w"(__a)); __r; })
+#define vpaddlq_u8(a) ({ uint8x16_t __a = (a); uint16x8_t __r; __asm__("uaddlp %0.8h, %1.16b" : "=w"(__r) : "w"(__a)); __r; })
+#define vpaddlq_u16(a) ({ uint16x8_t __a = (a); uint32x4_t __r; __asm__("uaddlp %0.4s, %1.8h" : "=w"(__r) : "w"(__a)); __r; })
+#define vpadalq_u32(a, b) ({ uint64x2_t __r = (a); uint32x4_t __b = (b); __asm__("uadalp %0.2d, %1.4s" : "+w"(__r) : "w"(__b)); __r; })
 /* across lanes: the result is lane 0 of a vector register (the rest is zeroed) */
-#define vmaxvq_u8(a) ({ uint8x16_t __r, __a = (a); asm("umaxv %b0, %1.16b" : "=w"(__r) : "w"(__a)); (uint8_t)__r[0]; })
-#define vmaxvq_u32(a) ({ uint32x4_t __r, __a = (a); asm("umaxv %s0, %1.4s" : "=w"(__r) : "w"(__a)); (uint32_t)__r[0]; })
-#define vaddvq_u16(a) ({ uint16x8_t __r, __a = (a); asm("addv %h0, %1.8h" : "=w"(__r) : "w"(__a)); (uint16_t)__r[0]; })
-#define vaddv_u8(a) ({ uint8x8_t __r, __a = (a); asm("addv %b0, %1.8b" : "=w"(__r) : "w"(__a)); (uint8_t)__r[0]; })
-#define vaddvq_u64(a) ({ uint64x2_t __r, __a = (a); asm("addp %d0, %1.2d" : "=w"(__r) : "w"(__a)); (uint64_t)__r[0]; })
+#define vmaxvq_u8(a) ({ uint8x16_t __r, __a = (a); __asm__("umaxv %b0, %1.16b" : "=w"(__r) : "w"(__a)); (uint8_t)__r[0]; })
+#define vmaxvq_u32(a) ({ uint32x4_t __r, __a = (a); __asm__("umaxv %s0, %1.4s" : "=w"(__r) : "w"(__a)); (uint32_t)__r[0]; })
+#define vaddvq_u16(a) ({ uint16x8_t __r, __a = (a); __asm__("addv %h0, %1.8h" : "=w"(__r) : "w"(__a)); (uint16_t)__r[0]; })
+#define vaddv_u8(a) ({ uint8x8_t __r, __a = (a); __asm__("addv %b0, %1.8b" : "=w"(__r) : "w"(__a)); (uint8_t)__r[0]; })
+#define vaddvq_u64(a) ({ uint64x2_t __r, __a = (a); __asm__("addp %d0, %1.2d" : "=w"(__r) : "w"(__a)); (uint64_t)__r[0]; })
 #define vqtbx4q_u8(d, t, i) ({ uint8x16_t __r = (d), __i = (i); uint8x16x4_t __t = (t); \
 	const unsigned char *__b = (const unsigned char *)&__t; \
 	for (int __k = 0; __k < 16; __k++) if (__i[__k] < 64) __r[__k] = __b[__i[__k]]; __r; })
@@ -150,9 +198,9 @@ typedef struct uint8x16x4_t { uint8x16_t val[4]; } uint8x16x4_t;
 #define vreinterpretq_u32_u8(x) ((uint32x4_t)(x))
 #define vreinterpretq_u64_u32(x) ((uint64x2_t)(x))
 #define vreinterpretq_u8_u32(x) ((uint8x16_t)(x))
-#define vrev32q_u16(a) ({ uint16x8_t __r, __a = (a); asm("rev32 %0.8h, %1.8h" : "=w"(__r) : "w"(__a)); __r; })
-#define vshlq_n_u32(a, n) ({ uint32x4_t __r, __a = (a); asm("shl %0.4s, %1.4s, %2" : "=w"(__r) : "w"(__a), "i"(n)); __r; })
-#define vsriq_n_u32(a, b, n) ({ uint32x4_t __r = (a), __b = (b); asm("sri %0.4s, %1.4s, %2" : "+w"(__r) : "w"(__b), "i"(n)); __r; })
+#define vrev32q_u16(a) ({ uint16x8_t __r, __a = (a); __asm__("rev32 %0.8h, %1.8h" : "=w"(__r) : "w"(__a)); __r; })
+#define vshlq_n_u32(a, n) ({ uint32x4_t __r, __a = (a); __asm__("shl %0.4s, %1.4s, %2" : "=w"(__r) : "w"(__a), "i"(n)); __r; })
+#define vsriq_n_u32(a, b, n) ({ uint32x4_t __r = (a), __b = (b); __asm__("sri %0.4s, %1.4s, %2" : "+w"(__r) : "w"(__b), "i"(n)); __r; })
 #define vtrn1q_u32(a, b) __VCC_V3(uint32x4_t, "trn1", "4s", a, b)
 #define vtrn2q_u32(a, b) __VCC_V3(uint32x4_t, "trn2", "4s", a, b)
 #define vtrn1q_u64(a, b) __VCC_V3(uint64x2_t, "trn1", "2d", a, b)

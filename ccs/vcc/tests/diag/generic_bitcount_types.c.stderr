@@ -1,0 +1,19 @@
+generic_bitcount_types.c:1:49: error: 1st argument must be a scalar unsigned integer type of at most 128 bits
+    1 | int signed_input(int x) { return __builtin_clzg(x); }
+      |                                                 ^
+generic_bitcount_types.c:2:59: error: 1st argument must be a scalar unsigned integer type of at most 128 bits
+    2 | int floating_input(double x) { return __builtin_popcountg(x); }
+      |                                                           ^
+generic_bitcount_types.c:3:58: error: 2nd argument must have type int after integer promotion
+    3 | int long_fallback(unsigned x) { return __builtin_clzg(x, 1L); }
+      |                                                          ^
+generic_bitcount_types.c:4:62: error: 2nd argument must have type int after integer promotion
+    4 | int unsigned_fallback(unsigned x) { return __builtin_ctzg(x, 1U); }
+      |                                                              ^
+generic_bitcount_types.c:5:62: error: 2nd argument must have type int after integer promotion
+    5 | int floating_fallback(unsigned x) { return __builtin_clzg(x, 1.0); }
+      |                                                              ^
+generic_bitcount_types.c:6:60: error: 2nd argument must have type int after integer promotion
+    6 | int bitint_fallback(unsigned x) { return __builtin_ctzg(x, (_BitInt(32))1); }
+      |                                                            ^
+6 errors generated.

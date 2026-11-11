@@ -3,6 +3,63 @@
 
 /* ---------------- prepass: what the emitter needs to know before it starts ---------------- */
 
+/* Declarations of SVE types are useful without SVE lowering (notably libc's
+   math prototypes). Reject actual values before any fixed-size frame/ABI work. */
+VPRIV bool sve_codegen_ok(cc *c)
+{
+	uint32_t loc = 0;
+
+	if (c->o->target != PP_LINUX_AARCH64 && c->o->target != PP_DARWIN)
+		return true;
+	for (uint32_t i = 1; i < c->nsym && !loc; i++) {
+		const sym *s = &c->syms[i];
+		const ctype *t = T(c, s->ty);
+
+		if (s->kind != S_FUNC || !s->body)
+			continue;
+		if (KIND(c, t->base) == TY_SVE)
+			loc = s->loc;
+		for (uint32_t j = 0; j < t->n && !loc; j++)
+			if (KIND(c, c->params[t->aux + j]) == TY_SVE)
+				loc = s->loc;
+	}
+	for (uint32_t i = 1; i < c->nnode && !loc; i++) {
+		const node *n = &c->nodes[i];
+
+		if (KIND(c, n->ty) == TY_SVE ||
+		    (n->op == N_DECL && KIND(c, c->syms[n->a].ty) == TY_SVE))
+			loc = n->loc;
+	}
+	if (!loc)
+		return true;
+	pp_diag_emit(c->p, pp_diag_begin(c->p, VDL_ERROR, loc, "SVE value code generation is not supported yet"));
+	return false;
+}
+
+/* Linux x86 and arm64 lower bit-precise values. Keep the other targets
+   explicit until their runtime precision and calling conventions are checked. */
+VPRIV bool bitint_codegen_ok(cc *c)
+{
+	if (c->o->target == PP_LINUX_X86_64 || c->o->target == PP_LINUX_AARCH64)
+		return true;
+	for (uint32_t i = 1; i < c->nsym; i++) {
+		const sym *s = &c->syms[i];
+		const ctype *t = T(c, s->ty);
+		bool bad = false;
+
+		if (s->kind != S_FUNC || !s->body)
+			continue;
+		bad = em_bitint(c, t->base);
+		for (uint32_t j = 0; j < t->n && !bad; j++)
+			bad = em_bitint(c, c->params[t->aux + j]);
+		if (bad) {
+			pp_diag_emit(c->p, pp_diag_begin(c->p, VDL_ERROR, s->loc, "_BitInt runtime ABI is not supported on this target yet"));
+			return false;
+		}
+	}
+	return true;
+}
+
 typedef struct pre {
 	emitter *E;
 	cc *c;
@@ -108,9 +165,19 @@ static void note_fwrite(pre *P, uint32_t s, uint32_t rhs)
 		else
 			k = v == 0 && !__builtin_signbit(v) ? FF_NONNEG | FF_ZERO : v >= 0 ? FF_NONNEG : 0;
 	} else if (N(rhs)->op == N_CALL && (callee = direct_callee(c, N(rhs)->a, &ref))) {
-		const vident *nm = &vintern_ents[c->syms[callee].name];
-
-		if ((nm->len == 4 && !memcmp(nm->s, "fabs", 4)) || (nm->len == 5 && !memcmp(nm->s, "fabsf", 5)))
+		const sym *fn = &c->syms[callee];
+		const vident *nm = &vintern_ents[fn->name];
+		const ctype *ft = T(c, fn->ty);
+		int want = nm->len == 4 && !memcmp(nm->s, "fabs", 4) ? TY_DOUBLE :
+			   nm->len == 5 && !memcmp(nm->s, "fabsf", 5) ? TY_FLOAT : -1;
+		bool enabled = !P->E->o->no_builtin;
+		/* The per-name option table belongs to the front end; conservatively
+		   avoid library facts whenever any named builtin was disabled. */
+		for (unsigned i = 0; i < CC_DISABLED_BUILTIN_WORDS; i++)
+			if (P->E->o->disabled_builtins[i]) enabled = false;
+		if (enabled && want >= 0 && (fn->flags & SF_GLOBAL) && fn->sc != SC_STATIC && !sym_attrs(c, callee)->asmname &&
+		    ft->kind == TY_FUNC && KIND(c, ft->base) == want && ft->n == 1 &&
+		    KIND(c, c->params[ft->aux]) == want)
 			k = FF_NONNEG;
 	}
 	*f = (uint8_t)(*f & FF_SEEN ? (*f & ~(FF_NONNEG | FF_ZERO)) | (*f & k & (FF_NONNEG | FF_ZERO)) | (k & FF_BAD)

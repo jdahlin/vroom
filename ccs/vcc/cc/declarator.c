@@ -5,8 +5,30 @@ enum { DQ_ATOMIC = 8 };	/* dop.q: _Atomic on a pointer (beside Q_*) */
 
 /* ---------------- declarators ---------------- */
 
+/* GNU vector_size modifies the scalar leaf, retaining declarator layers. */
+VPRIV qty vector_attribute(cc *c, qty t, uint32_t size, uint32_t loc)
+{
+	int kind = KIND(c, t);
+	if (kind == TY_PTR || kind == TY_ARRAY || kind == TY_FUNC) {
+		ctype outer = *T(c, t);
+		outer.base = vector_attribute(c, outer.base, size, loc);
+		if (kind == TY_ARRAY) {
+			outer.align = ty_align(c, outer.base);
+			if (!(outer.flags & (TF_VLA | TF_INCOMPLETE)))
+				outer.size = ty_size(c, outer.base) * outer.n;
+		}
+		return QT(ty_intern(c, &outer), QQ(t));
+	}
+	if (!is_arith(c, t) || is_complex(c, t) || !ty_size(c, t) ||
+	    ty_size(c, t) > size || size % ty_size(c, t)) {
+		cc_error(c, loc, "invalid vector element type '%s'", tyname(c, t));
+		return t;
+	}
+	return QT(QI(ty_vector(c, t, size)), QQ(t));
+}
+
 /* false when the list did not end in its ')' (the declaration is invalid, clang) */
-static bool param_list(cc *c, dop *op)
+static bool param_list(cc *c, dop *op, const attrs *leading)
 {
 	vec ptys, psyms;
 	int fl = 0;
@@ -19,7 +41,8 @@ static bool param_list(cc *c, dop *op)
 	if (!c->in_proto)
 		c->nptag = 0;
 	if (is(c, T_RPAREN)) {
-		fl |= TF_NOPROTO;
+		if (kwmap != kwmap_c23)
+			fl |= TF_NOPROTO;
 	} else if (iskw(c, KW_void) && peek(c, 1)->kind == T_RPAREN) {
 		next(c);
 	} else if (is(c, T_IDENT) && !kwof(tok(c)) && !is_typedef_name(c, tok(c)) &&
@@ -66,6 +89,15 @@ static bool param_list(cc *c, dop *op)
 					fatal(c, tok(c)->loc, "expected parameter declarator");
 				}
 			}
+			if (leading && !ptys.n) {
+				merge_attrs(&ds.at, leading);
+				if (leading->mode) {
+					int kind = mode_kind(c, leading->mode, is_signed(c, ds.ty));
+					if (kind) ds.ty = prim(kind);
+				}
+			}
+			if (ds.constexpr_)
+				cc_error(c, ds.loc, "function parameter cannot be constexpr");
 			declarator(c, &d, true, &first, &nops);
 			if (!d.name && !d.loc)
 				d.loc = tok(c)->loc;	/* an unnamed parameter: where its name would be (clang) */
@@ -76,12 +108,7 @@ static bool param_list(cc *c, dop *op)
 				/* int __attribute__((vector_size(16))) p: a vector parameter, as a declaration */
 				uint32_t vs = d.at.vecsize ? d.at.vecsize : ds.at.vecsize;
 
-				if (vs) {
-					if (!is_arith(c, t) || ty_size(c, t) > vs || vs % ty_size(c, t))
-						cc_error(c, d.loc, "invalid vector element type '%s'", tyname(c, t));
-					else
-						t = QT(QI(ty_vector(c, t, vs)), QQ(t));
-				}
+				if (vs) t = vector_attribute(c, t, vs, d.loc);
 			}
 			/* adjustments (C11 6.7.6.3p7-8) */
 			uint32_t vsize = 0;
@@ -154,6 +181,7 @@ static void array_suffix(cc *c, dop *op, uint32_t name)
 	int q = 0;
 
 	op->kind = 1;
+	op->loc = c->prevloc;
 	op->fl = 0;
 	for (;;) {
 		int kw = kwof(tok(c));
@@ -238,9 +266,27 @@ static bool nested_declarator(cc *c, bool abstract_ok)
  * order they apply to the base type (pointers, suffixes right to left, then
  * the nested declarator's ops).
  */
+/* Arena-backed growth keeps flat declarators off the C stack. Recovery resets
+ * ndops; temporary buffers are reclaimed with the translation unit arena. */
+static dop *dop_grow(cc *c, dop *old, uint32_t used, uint32_t *cap, uint32_t need)
+{
+	uint32_t nc = *cap;
+	dop *p;
+
+	if (need > DOPS_MAX)
+		fatal(c, tok(c)->loc, "declarator too complex");
+	while (nc < need)
+		nc *= 2;
+	p = halloc(c, nc * sizeof(*p));
+	memcpy(p, old, used * sizeof(*p));
+	*cap = nc;
+	return p;
+}
+
 VPRIV void declarator(cc *c, declr *d, bool abstract_ok, uint32_t *first, uint32_t *nops)
 {
-	dop ptrs[1024], sufs[64];	/* (clang: no limit; DOPS_MAX bounds the whole) */
+	dop ptrbuf[16], sufbuf[8], *ptrs = ptrbuf, *sufs = sufbuf;
+	uint32_t pcap = 16, scap = 8;
 	int np = 0, ns = 0;
 	uint32_t ifirst = 0, inops = 0;
 	bool inner = false;
@@ -270,15 +316,16 @@ VPRIV void declarator(cc *c, declr *d, bool abstract_ok, uint32_t *first, uint32
 					q |= DQ_ATOMIC;
 				else if (is_nullability(c, tok(c)))
 					;
-				else if (kw == KW___attribute__ || kw == KW___attribute) {
+				else if (kw == KW___attribute__ || kw == KW___attribute ||
+					 (is(c, T_LSQUARE) && peek(c, 1)->kind == T_LSQUARE)) {
 					attribute_list(c, &d->at);
 					continue;
 				} else
 					break;
 				next(c);
 			}
-			if (np >= 1024)
-				fatal(c, tok(c)->loc, "declarator too complex");
+			if ((uint32_t)np == pcap)
+				ptrs = dop_grow(c, ptrs, np, &pcap, pcap + 1);
 			ptrs[np++] = (dop){ .kind = 0, .q = (uint8_t)q, .fl = (uint16_t)(blk ? TF_BLOCK : 0) };
 			continue;
 		}
@@ -293,16 +340,29 @@ VPRIV void declarator(cc *c, declr *d, bool abstract_ok, uint32_t *first, uint32
 
 		next(c);
 		attribute_list(c, &d->at);
-		declarator(c, &id, abstract_ok, &ifirst, &inops);
-		expect_match(c, T_RPAREN, plb0);
-		d->name = id.name;
-		d->loc = id.loc;
-		merge_attrs(&d->at, &id.at);
-		if (id.has_func) {
-			d->psyms = id.psyms, d->npsyms = id.npsyms, d->kr = id.kr, d->has_func = true;
-			d->plb = id.plb, d->ple = id.ple;
+		if (abstract_ok && is_decl_start(c, tok(c))) {
+			/* (attributes type ...) starts an abstract function parameter
+			   list, while (attributes *name) still groups a declarator. */
+			attrs leading = d->at;
+			memset(&d->at, 0, sizeof d->at);
+			if (!param_list(c, &sufs[ns], &leading)) d->invalid = true;
+			d->psyms = sufs[ns].a + sufs[ns].b;
+			d->npsyms = sufs[ns].np;
+			d->kr = sufs[ns].kr, d->has_func = true;
+			d->plb = plb0, d->ple = c->prevloc;
+			ns++;
+		} else {
+			declarator(c, &id, abstract_ok, &ifirst, &inops);
+			expect_match(c, T_RPAREN, plb0);
+			d->name = id.name;
+			d->loc = id.loc;
+			merge_attrs(&d->at, &id.at);
+			if (id.has_func) {
+				d->psyms = id.psyms, d->npsyms = id.npsyms, d->kr = id.kr, d->has_func = true;
+				d->plb = id.plb, d->ple = id.ple;
+			}
+			inner = true;
 		}
-		inner = true;
 	} else if (is(c, T_IDENT) && !kwof(tok(c))) {
 		d->name = tok(c)->id;
 		d->loc = tok(c)->loc;
@@ -320,20 +380,21 @@ VPRIV void declarator(cc *c, declr *d, bool abstract_ok, uint32_t *first, uint32
 	attribute_list(c, &d->at);
 	for (;;) {
 		if (accept(c, T_LSQUARE)) {
-			if (ns >= 64)
-				fatal(c, tok(c)->loc, "declarator too complex");
+			if ((uint32_t)ns == scap)
+				sufs = dop_grow(c, sufs, ns, &scap, scap + 1);
 			array_suffix(c, &sufs[ns++], d->name);
 		} else if (is(c, T_LPAREN)) {
 			uint32_t plb;
 
 			next(c);
 			plb = tok(c)->loc;
-			if (ns >= 64)
-				fatal(c, tok(c)->loc, "declarator too complex");
-			if (unlikely(!param_list(c, &sufs[ns])))
+			if ((uint32_t)ns == scap)
+				sufs = dop_grow(c, sufs, ns, &scap, scap + 1);
+			if (unlikely(!param_list(c, &sufs[ns], NULL)))
 				d->invalid = true;
-			/* the innermost function declarator next to the name gives the parameters */
-			if (!inner && !d->has_func && ns == 0) {
+			/* Grouping a name adds no operators: (f)(int x) still defines x.
+			 * A pointer/array/function inside the group does take precedence. */
+			if (!inops && !d->has_func && ns == 0) {
 				d->psyms = sufs[ns].a + sufs[ns].b;
 				d->npsyms = sufs[ns].np;
 				d->kr = sufs[ns].kr;
@@ -351,19 +412,16 @@ VPRIV void declarator(cc *c, declr *d, bool abstract_ok, uint32_t *first, uint32
 		uint32_t at = c->ndops;
 		uint32_t n = (uint32_t)np + (uint32_t)ns + inops;
 
-		if (at + n > DOPS_MAX)
-			fatal(c, tok(c)->loc, "declarator too complex");
+		if (at + n > c->capdops)
+			c->dops = dop_grow(c, c->dops, c->ndops, &c->capdops, at + n);
 		/* the inner ops sit at [ifirst, ifirst + inops) which is below at */
 		if (inner) {
-			dop tmp[inops ? inops : 1];
-
-			memcpy(tmp, &c->dops[ifirst], inops * sizeof(dop));
 			at = ifirst;
+			memmove(&c->dops[at + np + ns], &c->dops[ifirst], inops * sizeof(dop));
 			for (int i = 0; i < np; i++)
 				c->dops[at + (uint32_t)i] = ptrs[i];
 			for (int i = 0; i < ns; i++)
 				c->dops[at + (uint32_t)np + (uint32_t)i] = sufs[ns - 1 - i];
-			memcpy(&c->dops[at + (uint32_t)np + (uint32_t)ns], tmp, inops * sizeof(dop));
 		} else {
 			for (int i = 0; i < np; i++)
 				c->dops[at + (uint32_t)i] = ptrs[i];
@@ -394,6 +452,12 @@ VPRIV qty apply_declarator(cc *c, qty t, uint32_t first, uint32_t nops)
 				t = ty_atomic(c, t, 0);
 			break;
 		case 1:
+			if (!complete(c, t)) {
+				cc_error(c, o->loc, "array has incomplete element type '%s'", tyname(c, t));
+				fwd_note(c, t);
+			}
+			if (KIND(c, t) == TY_SVE)
+				cc_error(c, o->np, "array has sizeless element type '%s'", tyname(c, t));
 			if (is_func(c, t))
 				cc_error(c, tok(c)->loc, "array of functions is not allowed");
 			if (o->fl & TF_VLA)
@@ -435,8 +499,7 @@ VPRIV qty type_name(cc *c)
 		uint32_t vs = d.at.vecsize ? d.at.vecsize : ds.at.vecsize;
 
 		/* (__attribute__((vector_size(N))) T) */
-		if (vs && is_arith(c, t) && ty_size(c, t) <= vs && !(vs % ty_size(c, t)))
-			t = QT(QI(ty_vector(c, t, vs)), QQ(t));
+		if (vs) t = vector_attribute(c, t, vs, d.loc);
 	}
 	c->tn_tdef = ds.tdef && QUNQ(t) == QUNQ(ds.ty) ? ds.tdef : 0;
 	return t;

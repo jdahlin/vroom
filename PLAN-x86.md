@@ -414,6 +414,76 @@ kärnan och kan vänta.
 - Kvar: kodning direkt från posterna (utan text), hela ISA:n (AVX, AVX-512 för kärnans
   krypto) och `vas-enc.py` för x86-64.
 
+### X3 (2026-11-11): utökade Linux-körningar
+
+Den kombinerade arbetskopian klarar 1807/1815 vendrade körtest på x86
+(134 filtrerade); kvar är åtta GCC-optimeringsfall. Egna tester går
+100/100. ARM/QEMU går 1822/1822, egna tester 105/105. Nonlocal jumps,
+FP-registerspill, breda vektorlaner, ramdjup och 128-bitars overflowresultat
+för högst 64-bitars operander har isolerade unity/nonunity-byggen och
+riktade tester på båda målen. GCC:s ABI-generator har ett återstående
+x86-fel av 777 clang-giltiga fall; LLVM:s generator går 1000/1000.
+Detta flyttar X3 men är inte ett godkännande av återstående steg.
+
+### X3 (2026-11-11): x87-operander i inline asm
+
+- `t`/`u`-operander läggs på x87-stacken efter att uttrycken har evaluerats;
+  utdata lagras med sin rätta bredd och kvarvarande indata poppas. `st(1)`
+  i clobberlistan beskriver den pop som själva asm-mallen gör. Blandade
+  x87/GPR-operander och andra x87-constraints stöds ännu inte.
+- Matchande GPR-operander får olika bredder (t.ex. 64-bitars indata och
+  32-bitars utdata i samma register), som clang.
+- GCC `990413-2`, `20030222-1` och `stkalign` passerar x86. De två senare
+  passerar även arm64/QEMU. `asm_x86_x87` kör sqrt för float/double/long
+  double, fpatan, fsincos, read/write och trunkering, 32 gånger för att
+  fånga läckta x87-stackposter. Separat kompilering av ändrade C-filer grön.
+
+### X3 (2026-11-11): överjusterad stack
+
+- Lokala objekt med alignment över 16 får en dynamiskt justerad rambas i
+  `r12`; `rbp` behåller inkommande argument och returadressen. VLA:er får
+  separat utfyllnad och en justerad objektpekare. Utgående stackargument
+  justeras efter argumentens största alignment och stackpekaren återställs
+  efter anropet.
+- `stack_overalign`: fasta objekt (64/128/256), VLA (256), rekursion,
+  stackargument, variadiska argument och 64-justerad struktur som värde
+  passerar på x86-64 och arm64/QEMU. Korsanrop clang/vcc i båda riktningar
+  passerar på båda målen (`tests/abi/stack_overalign`). cproc:s 12
+  alignmentfall passerar kompilering på båda målen. `vla_zero` passerar också:
+  nollningsslingans byteräknare rundas upp till hela 8-byteord.
+- Inline asm som explicit använder `r12` i en överjusterad funktion ger
+  tills vidare en diagnos: registret används som rambas.
+
+### X3 (2026-11-11): GNU-villkor och debug-assembler
+GNU `a ?: b` omvandlar det sparade värdet till bool för grenen, också
+när a är float/double/long double. DWARF använder portabla
+`.long`/`.short`/`.quad` i stället för arm64-specifika direktiv.
+Regressionsfallen kör på x86; GCC `20121107-1.c` och `pr41679.c`
+assembleras, och `llvm-dwarfdump --verify` godtar debug-objektet.
+
+### X6 (2026-11-11): tomma compiler barriers
+Tom inline asm utan operander, med `memory`/`cc`-clobber, bevaras som
+en barrier-post utan maskininstruktion. Andra asm-former återstår.
+GCC IEEE ger nu 49 godkända, inga fel, 30 filtrerade på x86 Linux,
+samma som arm64/QEMU. Regression: `asm_barrier.c`.
+
+### X3 (2026-11-11): flyttalsinbyggda
+Vandraren sänker nu ordnade/oordnade jämförelseinbyggda för float,
+double och x87 long double, och konstantfoldade NaN/infinity-värden.
+Runtime-klassning (`isnan`, `isinf`, `isfinite`, `isnormal`) använder
+bitmönstren utan flyttalsundantag. GCC IEEE: 48 godkända, ett fel
+(tom inline asm med memory-clobber), 30 filtrerade. Regressionerna
+`fp_compare_builtin.c` och `fp_classify_builtin.c` passerar på x86;
+fil-för-fil-bygget passerar också.
+
+### X3 (2026-11-11): void-lvärden
+GCC:s `compile/20000701-1.c` kraschade när ett void-lvärde gav en
+minnesläsning med storlek noll. Vandraren utvärderar nu adressen och
+frigör dess register utan att läsa minnet, även för `volatile void`.
+`tests/vcc/void_lvalue.c` kontrollerar också sid-effekter i adresser och
+villkorsuttryck. x86:s egna tester: 47/56 godkända, mot 46/56 före
+ändringen; de nio tidigare funktionsluckorna återstår.
+
 ### X3 (2026-11-10): pågår, i gren `claude/x86-x3-main` (PR jdahlin/vroom#11; #9 hamnade i #4:s gren efter att #4 slagits ihop)
 - Klart: biblioteksinbyggda som anrop; aggregat (initierare, kopior, sammansatta
   literaler, medlemmar av rvärden); bit-fält; System V-anrop (klassning,
@@ -455,6 +525,19 @@ kärnan och kan vänta.
   (`int_records`, `fp_records`, `complex_args`).
 - Kvar i X3: bit-fält bredare än 64 bitar, 128-bitars overflow-inbyggda med 128-bitars operander, `need_fold` (ett
   error()-anrop kvar efter inlining), `VCC_WALKLOG`.
+
+#### Historisk status i den lokala grenen före integreringen
+
+>   scopes via ett träd från förskanningen, `for`-satsens första led).
+> - `bench/vcc-x86.py`: 1659/1770, lika i `--pie` och `--pic` (vcc-sidan
+>   `-fPIE`/`-fPIC`, länkad `-pie`). Körfel bara där clangs optimerare krävs
+>   (`20030125-1`, `bcp-1`, `builtin-constant`) och 11 länkfel av samma slag eller
+>   `__builtin_setjmp`. `vcc-abi.py --target x86_64`: 10/12, med tre nya tester
+>   (`int_records`, `fp_records`, `complex_args`) som klarar alla fyra
+>   kombinationerna; resten stannar vid alignment > 16 och bit-fält över 8 byte.
+> - Kvar i X3: explicit `r12` i inline asm med överjusterad rambas, `__float128`-aritmetik (libgcc `__addtf3` ...), inlining av
+>   `__always_inline` med `need_fold` och `constant_p` efter inlining,
+>   `-mgeneral-regs-only`/`-mno-sse`, `VCC_WALKLOG`.
 
 ### X2 (2026-11-10): påbörjat, i gren `claude/x86-x2-walker`
 - Lagren finns i minsta form: `emit/rec/rec.h` (posthuvudet, `opdesc`),

@@ -18,7 +18,8 @@ VPRIV bool side_effects(cc *c, uint32_t n)
 	if (!n)
 		return false;
 	x = N(n);
-	if ((QQ(x->ty) & Q_VOLATILE) && (x->op == N_VAR || x->op == N_DEREF || x->op == N_MEMBER || x->op == N_INDEX))
+	if (((QQ(x->ty) & Q_VOLATILE) || (T(c, x->ty)->flags & TF_ATOMIC)) &&
+	    (x->op == N_VAR || x->op == N_DEREF || x->op == N_MEMBER || x->op == N_INDEX))
 		return true;
 	switch (x->op) {
 	case N_NUM: case N_FNUM: case N_STR: case N_VAR: case N_ZERO: case N_LABELADDR:
@@ -80,7 +81,7 @@ VPRIV val dry(ecx *e, uint32_t n)
 {
 	uint32_t nin = e->nin, live = e->live, usedcs = e->usedcs;
 	size_t raw = e->raw.n;
-	int32_t foff = e->foff;
+	int64_t foff = e->foff;
 	bool reach = e->reach, calls = e->calls;
 	int nclean = e->nclean, nloop = e->nloop;
 	uint32_t nvsz = e->nvsz;
@@ -140,12 +141,12 @@ static val gen_overflow(ecx *e, const node *x, const uint32_t *arg)
 	cc *c = e->c;
 	qty ta = N(arg[0])->ty, tb = N(arg[1])->ty, tr = T(c, N(arg[2])->ty)->base;
 	val a = gen(e, arg[0]), b = gen(e, arg[1]), p = gen(e, arg[2]);
-	int bits = (int)tsize(c, tr) * 8;
+	int bits = em_bitint(c, tr) ? (int)T(c, tr)->n : (int)tsize(c, tr) * 8;
 	bool sr = is_signed(c, tr);
 	int lo, hi, t, ok;
 	lval l;
 
-	if (tsize(c, ta) > 8 || tsize(c, tb) > 8)
+	if (tsize(c, ta) > 8 || tsize(c, tb) > 8 || (em_bitint(c, tr) && bits > 64))
 		efatal(e, x->loc, "128-bit overflow builtins are not supported");
 	/* exact result in 128 bits */
 	{
@@ -176,15 +177,15 @@ static val gen_overflow(ecx *e, const node *x, const uint32_t *arg)
 	val_free(e, &b);
 	if (bits == 128) {
 		/*
-		 * Operands of at most 64 bits: the 128 bits are the exact result,
-		 * signed if an operand is.  Signed into unsigned overflows when
-		 * negative; unsigned into signed when the top bit is set.
+		 * Only two unsigned factors can produce a positive result above
+		 * signed 128-bit range.  Addition and subtraction fit signed 128,
+		 * even for unsigned operands (subtraction can be negative).
 		 */
-		bool sx = is_signed(c, ta) || is_signed(c, tb);
+		bool uu = x->aux == BI_MUL_OVERFLOW && !is_signed(c, ta) && !is_signed(c, tb);
 		val r = { .k = V_REG2, .r = (uint8_t)lo, .r2 = (uint8_t)hi };
 
 		ok = treg(e);
-		if (sx != sr)
+		if (uu == sr)
 			shift_imm(e, I_LSRV, 1, ok, hi, 63);
 		else
 			movi(e, 0, ok, 0);
@@ -311,7 +312,8 @@ VPRIV val va_arg_(ecx *e, const node *x)
 	uint64_t size = tsize(c, t);
 	bool big = is_recabi(c, t) && size > 16;
 	int nreg = big ? 1 : (int)((size + 7) / 8);
-	bool al16 = !big && abi_align(c, t) == 16;
+	/* Empty aggregates consume neither registers nor stack alignment. */
+	bool al16 = size != 0 && !big && abi_align(c, t) == 16;
 	lval l = gen_lval(e, x->a);
 	val a = laddr(e, &l);
 	int ra = toreg(e, &a), off = treg(e), addr = treg(e);
@@ -346,7 +348,7 @@ VPRIV val va_arg_(ecx *e, const node *x)
 
 	if (hb) {
 		/* an HFA: hn v registers, copied together into a temporary */
-		int32_t sl = slot(e, 64, 16);
+		int64_t sl = slot(e, 64, 16);
 
 		mem(e, I_LD, 2, 1, off, ra, 28);
 		opi(e, I_SUBSI, 1, ZR, off, 0);
@@ -725,7 +727,7 @@ VPRIV val gen_builtin(ecx *e, uint32_t n)
 		unsigned na = (unsigned)(tsize(c, at) / tsize(c, ae)), nr = (unsigned)(tsize(c, x->ty) / tsize(c, re));
 		val a = gen(e, arg[0]), b = x->aux == BI_SHUFFLEVECTOR ? gen(e, arg[1]) : vconst(0);
 		int ra = toreg(e, &a), rb = x->aux == BI_SHUFFLEVECTOR ? toreg(e, &b) : -1;
-		int32_t sl = slot(e, tsize(c, x->ty), 16);
+		int64_t sl = slot(e, tsize(c, x->ty), 16);
 		int rd = treg(e);
 
 		opi(e, I_ADDI, 1, rd, FRAME, sl);
@@ -882,23 +884,39 @@ VPRIV val gen_builtin(ecx *e, uint32_t n)
 		if (e->reach)
 			put(e, I_BRK)->imm = 0xf000;
 		return vnone();
-	case BI_RETURN_ADDRESS: {
+	case BI_RETURN_ADDRESS: case BI_FRAME_ADDRESS: {
+		val depth = gen(e, arg[0]);
 		int r = treg(e);
+		uint32_t level;
 
-		mem(e, I_LD, 3, 0, r, R_FP, 8);
-		return vreg(r);
-	}
-	case BI_FRAME_ADDRESS: {
-		int r = treg(e);
-
+		if (depth.k != V_CONST)
+			efatal(e, x->loc, "a return or frame address requires a constant level");
+		level = (uint32_t)depth.i;
 		mov(e, 1, r, R_FP);
+		if (level <= 4) {
+			for (uint32_t k = 0; k < level; k++)
+				mem(e, I_LD, 3, 0, r, r, 0);
+		} else {
+			int count = treg(e);
+			uint32_t loop = newlabel(e);
+
+			movi(e, 0, count, level);
+			deflabel_loop(e, loop, true);
+			mem(e, I_LD, 3, 0, r, r, 0);
+			opi(e, I_SUBI, 0, count, count, 1);
+			cbz(e, true, 0, count, loop);
+			tfree(e, count);
+		}
+		if (x->aux == BI_RETURN_ADDRESS)
+			mem(e, I_LD, 3, 0, r, r, 8);
 		return vreg(r);
 	}
 	case BI_OBJECT_SIZE:
 	case BI_DYNAMIC_OBJECT_SIZE: {
-		val t = gen(e, arg[1]);
-
-		return vconst(t.k == V_CONST && (t.i & 2) ? 0 : (i128)(uint64_t)-1);
+		cval cv;
+		if (cc_eval(c, n, &cv) && cv.kind == CV_INT)
+			return vconst(cv.i);
+		return vconst((i128)(uint64_t)-1);
 	}
 	case BI_IS_CONSTANT_EVALUATED:
 		return vconst(0);
@@ -1065,6 +1083,140 @@ runtime:
 		}
 		return v;
 	}
+	case BI_ISGREATER: case BI_ISGREATEREQUAL: case BI_ISLESS: case BI_ISLESSEQUAL:
+	case BI_ISLESSGREATER: case BI_ISUNORDERED: {
+		qty at = N(arg[0])->ty, bt = N(arg[1])->ty;
+		qty ct = is_ld(c, at) ? at : is_ld(c, bt) ? bt :
+		         (is_flt(c, at) && tsize(c, at) == 8) ||
+		         (is_flt(c, bt) && tsize(c, bt) == 8) ? prim(TY_DOUBLE) : prim(TY_FLOAT);
+		val a = cast(e, gen(e, arg[0]), at, ct, CK_INT);
+		val b = cast(e, gen(e, arg[1]), bt, ct, CK_INT);
+		int op = x->aux == BI_ISGREATER ? T_GREATER :
+		         x->aux == BI_ISGREATEREQUAL ? T_GREATEREQ :
+		         x->aux == BI_ISLESS ? T_LESS :
+		         x->aux == BI_ISLESSEQUAL ? T_LESSEQ : T_EXCLAIMEQ;
+
+		if (!is_ld(c, ct)) {
+			int cond = f_cmp(e, op, fpk(e, ct), &a, &b);
+			val_free(e, &b);
+			if (x->aux == BI_ISUNORDERED)
+				cond = C_VS;
+			cset(e, a.r, cond);
+			if (x->aux == BI_ISLESSGREATER) {
+				int ordered = treg(e);
+				cset(e, ordered, C_VC);
+				op3(e, I_AND, 0, a.r, a.r, ordered);
+				tfree(e, ordered);
+			}
+			return vreg(a.r);
+		}
+		if (x->aux != BI_ISUNORDERED && x->aux != BI_ISLESSGREATER)
+			return f_compare(e, op, ct, a, b);
+
+		/* Binary128 NaNs: exponent all ones and a nonzero fraction.
+		 * Inspect bits so quiet NaNs do not raise FE_INVALID. Keep the
+		 * original operands for the ordered inequality when needed. */
+		lval saved[2];
+		val operands[2] = { a, b };
+		int nanregs[2];
+		for (int i = 0; i < 2; i++) {
+			if (x->aux == BI_ISLESSGREATER) {
+				saved[i] = (lval){ .k = L_FRAME, .off = slot(e, 16, 16), .align = 16 };
+				store(e, &saved[i], ct, &operands[i]);
+			}
+			toreg2(e, &operands[i], false);
+			int lo = operands[i].r, hi = operands[i].r2;
+			opi(e, I_SUBSI, 1, ZR, lo, 0);
+			cset(e, lo, C_NE);
+			shift_imm(e, T_LESSLESS, 1, hi, hi, 1);
+			op3(e, I_ORR, 1, hi, hi, lo);
+			tfree(e, lo);
+			opi(e, I_SUBSI, 1, ZR, hi, (int64_t)0xfffe000000000000ULL);
+			cset(e, hi, C_HI);
+			nanregs[i] = hi;
+		}
+		op3(e, I_ORR, 0, nanregs[0], nanregs[0], nanregs[1]);
+		tfree(e, nanregs[1]);
+		if (x->aux == BI_ISUNORDERED)
+			return vreg(nanregs[0]);
+		opi(e, I_EORI, 0, nanregs[0], nanregs[0], 1);
+		a = load(e, &saved[0], ct);
+		b = load(e, &saved[1], ct);
+		val ne = f_compare(e, T_EXCLAIMEQ, ct, a, b);
+		toreg(e, &ne);
+		op3(e, I_AND, 0, ne.r, ne.r, nanregs[0]);
+		tfree(e, nanregs[0]);
+		return ne;
+	}
+	case BI_ISINF_SIGN: {
+		/* Inspect the representation once: return +1/-1 for infinities,
+		   zero for every other value, without quieting signaling NaNs. */
+		qty at = N(arg[0])->ty;
+		val a = gen(e, arg[0]);
+		bool ld = is_ld(c, at), half = KIND(c, at) == TY_FLOAT16 || KIND(c, at) == TY_BFLOAT16;
+		bool bf = KIND(c, at) == TY_BFLOAT16;
+		int d = ld || fpk(e, at), r, sign = treg(e);
+		uint64_t inf;
+		if (ld) {
+			toreg2(e, &a, false);
+			r = a.r2;
+			shift_imm(e, I_ASRV, 1, sign, r, 63);
+			opi(e, I_SUBSI, 1, ZR, a.r, 0);
+			cset(e, a.r, C_NE);
+			shift_imm(e, T_LESSLESS, 1, r, r, 1);
+			op3(e, I_ORR, 1, r, r, a.r);
+			tfree(e, a.r);
+			inf = UINT64_C(0xfffe000000000000);
+		} else {
+			r = toreg(e, &a);
+			if (half) {
+				shift_imm(e, T_LESSLESS, 0, sign, r, 16);
+				shift_imm(e, I_ASRV, 0, sign, sign, 31);
+				opi(e, I_ANDI, 0, r, r, 0x7fff);
+				inf = bf ? 0x7f80 : 0x7c00;
+			} else {
+				shift_imm(e, I_ASRV, d, sign, r, d ? 63 : 31);
+				shift_imm(e, T_LESSLESS, d, r, r, 1);
+				inf = d ? UINT64_C(0xffe0000000000000) : UINT64_C(0xff000000);
+			}
+		}
+		opi(e, I_ORRI, 0, sign, sign, 1);
+		opi(e, I_SUBSI, d, ZR, r, (int64_t)inf);
+		cset(e, r, C_EQ);
+		op3(e, I_SUB, 0, r, ZR, r);
+		op3(e, I_AND, 0, r, r, sign);
+		tfree(e, sign);
+		return vreg(r);
+	}
+	case BI_ISSIGNALING: {
+		qty at = N(arg[0])->ty;
+		val a = gen(e, arg[0]);
+		int r, d;
+		uint64_t inf, quiet;
+		if (is_ld(c, at)) {
+			/* Fold low payload bits into a sticky bit after discarding sign. */
+			toreg2(e, &a, false);
+			r = a.r2, d = 1;
+			opi(e, I_SUBSI, 1, ZR, a.r, 0);
+			cset(e, a.r, C_NE);
+			shift_imm(e, T_LESSLESS, 1, r, r, 1);
+			op3(e, I_ORR, 1, r, r, a.r);
+			tfree(e, a.r);
+			inf = UINT64_C(0xfffe000000000000), quiet = UINT64_C(1) << 48;
+		} else {
+			bool half = KIND(c, at) == TY_FLOAT16 || KIND(c, at) == TY_BFLOAT16;
+			bool bf = KIND(c, at) == TY_BFLOAT16;
+			d = fpk(e, at);
+			r = toreg(e, &a);
+			opi(e, I_ANDI, d, r, r, half ? 0x7fff : d ? INT64_MAX : 0x7fffffff);
+			inf = bf ? UINT64_C(0x7f80) : half ? UINT64_C(0x7c00) : d ? UINT64_C(0x7ff0000000000000) : UINT64_C(0x7f800000);
+			quiet = UINT64_C(1) << (bf ? 6 : half ? 9 : d ? 51 : 22);
+		}
+		opi(e, I_SUBI, d, r, r, (int64_t)(inf + 1));
+		opi(e, I_SUBSI, d, ZR, r, (int64_t)(quiet - 1));
+		cset(e, r, C_LO);
+		return vreg(r);
+	}
 	case BI_ISNAN: case BI_ISINF: case BI_ISFINITE: case BI_SIGNBIT: case BI_ISNORMAL: {
 		cval cv;
 
@@ -1100,6 +1252,25 @@ runtime:
 			tfree(e, v.r);
 		} else {
 			r = toreg(e, &v);
+		}
+		if (KIND(c, at) == TY_FLOAT16 || KIND(c, at) == TY_BFLOAT16) {
+			bool bf = KIND(c, at) == TY_BFLOAT16;
+			if (x->aux == BI_SIGNBIT) {
+				shift_imm(e, I_LSRV, 0, r, r, 15);
+				opi(e, I_ANDI, 0, r, r, 1);
+				return vreg(r);
+			}
+			opi(e, I_ANDI, 0, r, r, 0x7fff);
+			if (x->aux == BI_ISNORMAL) {
+				shift_imm(e, I_LSRV, 0, r, r, bf ? 7 : 10);
+				opi(e, I_SUBI, 0, r, r, 1);
+				opi(e, I_SUBSI, 0, ZR, r, bf ? 254 : 30);
+				cset(e, r, C_LO);
+			} else {
+				opi(e, I_SUBSI, 0, ZR, r, bf ? 0x7f80 : 0x7c00);
+				cset(e, r, x->aux == BI_ISNAN ? C_HI : x->aux == BI_ISINF ? C_EQ : C_LO);
+			}
+			return vreg(r);
 		}
 		if (x->aux == BI_SIGNBIT) {
 			shift_imm(e, I_LSRV, d, r, r, bits - 1);

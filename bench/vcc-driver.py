@@ -51,6 +51,67 @@ ERR_ROWS = [
 DIAG_SRC = 'int counter;\nint a = countr;\nint b = countr;\nint c = 1 +;\n'
 
 
+def return_rows(d):
+    """Default errors controlled by return-type/return-mismatch, including pragmas."""
+    import re
+    cases = [(flags, '') for flags in [
+        '', '-w', '-Wno-error', '-Wno-error=return-type', '-Wno-error=return-mismatch',
+        '-Wno-return-type', '-Wno-return-mismatch', '-Werror=return-mismatch',
+        '-Wno-error=return-type -Werror', '-Wno-error=return-type -Werror=return-mismatch',
+        '-Wno-return-type -Wreturn-type', '-w -Wno-error=return-type',
+        '-w -Werror=return-type', '-Wno-error=return-mismatch -Werror=return-type',
+    ]]
+    cases += [('-Werror', '#pragma clang diagnostic ' + state + ' "-Wreturn-type"\n')
+              for state in ('ignored', 'warning', 'error')]
+    cases += [('', '#pragma clang diagnostic push\n#pragma clang diagnostic ignored "-Wreturn-mismatch"\n'
+                   '#pragma clang diagnostic pop\n')]
+    rows = []
+    for target in ('x86_64-linux-gnu', 'aarch64-linux-gnu'):
+        for i, (flags, pragma) in enumerate(cases):
+            src = os.path.join(d, f'return-{target}-{i}.c')
+            open(src, 'w').write(pragma + 'void f(void) { return 3; }\nint g(void) { return; }\n')
+            def check(src=src, flags=flags, target=target):
+                answers = []
+                for compiler in (vd.CL, vd.VPP):
+                    rc, _, err = run([compiler, '--target=' + target, '-fsyntax-only',
+                                      '-fno-color-diagnostics'] + flags.split(), src)
+                    answers.append((rc, re.findall(r': (error|warning):', err)))
+                return answers[0] == answers[1]
+            rows.append((f'return policy {target} {flags or "default"} {i}', check))
+    for target in ('x86_64-linux-gnu', 'aarch64-linux-gnu'):
+        for flags in ('', '-ferror-limit=1', '-ferror-limit=2', '-ferror-limit=0',
+                      '-Wno-error=return-type', '-Werror=return-type -ferror-limit=1',
+                      '-Wno-return-type -Wreturn-type -Werror -ferror-limit=1'):
+            src = os.path.join(d, 'return-emit.c')
+            open(src, 'w').write('void f(void) { return 1; }\nvoid g(void) { return 2; }\nvoid h(void) { return 3; }\n')
+            def check_emit(target=target, flags=flags, src=src):
+                answers = []
+                for i, compiler in enumerate((vd.CL, vd.VPP)):
+                    output = os.path.join(d, f'return-emit-{i}.s')
+                    if os.path.exists(output): os.unlink(output)
+                    rc, _, err = run([compiler, '--target=' + target, '-S', '-o', output,
+                                      '-fno-color-diagnostics'] + flags.split(), src)
+                    answers.append((rc, os.path.exists(output),
+                                    re.findall(r': (?:fatal )?(error|warning):', err),
+                                    'too many errors emitted' in err))
+                return answers[0] == answers[1]
+            rows.append((f'return emit/limit {target} {flags or "default"}', check_emit))
+    for target in ('x86_64-linux-gnu', 'aarch64-linux-gnu'):
+        for limit in (0, 1, 2):
+            src = os.path.join(d, 'independent-errors.c')
+            open(src, 'w').write('int a = ;\nint b = ;\nint c = ;\n')
+            def check_errors(target=target, limit=limit, src=src):
+                answers = []
+                for compiler in (vd.CL, vd.VPP):
+                    rc, _, err = run([compiler, '--target=' + target, '-fsyntax-only',
+                                      '-fno-color-diagnostics', f'-ferror-limit={limit}'], src)
+                    answers.append((rc, re.findall(r': (?:fatal )?(error|warning):', err),
+                                    'too many errors emitted' in err))
+                return answers[0] == answers[1]
+            rows.append((f'independent error limit {target} {limit}', check_errors))
+    return rows
+
+
 def diag_rows(d):
     import json
     spec = importlib.util.spec_from_file_location('sc', os.path.join(os.path.dirname(os.path.abspath(__file__)), 'sarif-check.py'))
@@ -151,7 +212,7 @@ def main():
     verbose = '-v' in sys.argv
     bad = 0
     with tempfile.TemporaryDirectory() as d:
-        drows = diag_rows(d)
+        drows = diag_rows(d) + return_rows(d)
         for name, fn in drows:
             ok = fn()
             bad += not ok

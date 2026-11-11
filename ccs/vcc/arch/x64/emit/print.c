@@ -68,7 +68,16 @@ static const char *const x64_r8[] = { "al", "cl", "dl", "bl", "spl", "bpl", "sil
 				      "r8b", "r9b", "r10b", "r11b", "r12b", "r13b", "r14b", "r15b" };
 static const char *const x64_ccn[] = { "o", "no", "b", "ae", "e", "ne", "be", "a", "s", "ns", "p", "np", "l", "ge", "le", "g" };
 
-static void x64_reg(tbuf *b, int r, int sz)
+VPRIV int x64_asm_namedreg(const char *name)
+{
+	if (*name == '%') name++;
+	for (int r = 0; r < 16; r++)
+		if (!strcmp(name, x64_r64[r]) || !strcmp(name, x64_r32[r]) ||
+		    !strcmp(name, x64_r16[r]) || !strcmp(name, x64_r8[r])) return r;
+	return -1;
+}
+
+VPRIV void x64_reg(tbuf *b, int r, int sz)
 {
 	if (IS_XMM(r)) {
 		tb_s(b, "%xmm");
@@ -81,7 +90,7 @@ static void x64_reg(tbuf *b, int r, int sz)
 
 static char x64_sfx(int sz) { return sz == 8 ? 'q' : sz == 4 ? 'l' : sz == 2 ? 'w' : 'b'; }
 
-static void x64_lbl(tbuf *b, uint32_t s, uint32_t l)
+VPRIV void x64_lbl(tbuf *b, uint32_t s, uint32_t l)
 {
 	tb_s(b, ".LBB");
 	tb_u(b, s);
@@ -89,8 +98,14 @@ static void x64_lbl(tbuf *b, uint32_t s, uint32_t l)
 	tb_u(b, l);
 }
 
-static void x64_memop(cc *c, tbuf *b, const rec *i)
+static void x64_memop(ecx *e, tbuf *b, const rec *i)
 {
+	cc *c = e->c;
+	int base = i->r[1];
+
+	/* Incoming stack arguments retain rbp; local slots use the realigned base. */
+	if (base == RBP && i->off < 0 && e->wk->falign > 16)
+		base = R12;
 	if (i->r[1] == RIP) {
 		ref_off(c, b, i->ref, i->off);
 		tb_s(b, "(%rip)");
@@ -99,7 +114,7 @@ static void x64_memop(cc *c, tbuf *b, const rec *i)
 	if (i->off)
 		tb_i(b, i->off);
 	tb_c(b, '(');
-	x64_reg(b, i->r[1], 8);
+	x64_reg(b, base, 8);
 	tb_c(b, ')');
 }
 
@@ -130,6 +145,43 @@ static void x64_guard(ecx *e, tbuf *b)
 		tb_f(b, "\tmovq\t%%%s:40, %%r11\n", o->sp_gs ? "gs" : "fs");
 }
 
+/* Prologue callee-save slots can follow a frame larger than disp32. */
+static void x64_cs_access(ecx *e, tbuf *b, int r, bool load)
+{
+	int64_t off = e->x64->csslot[r];
+	int base = e->wk->falign > 16 ? R12 : RBP;
+	if (off < INT32_MIN || off > INT32_MAX) {
+		tb_s(b, "\tmovabsq\t$"); tb_i(b, off);
+		tb_s(b, ", %r11\n\taddq\t"); x64_reg(b, base, 8);
+		tb_s(b, ", %r11\n");
+		base = R11, off = 0;
+	}
+	tb_s(b, "\tmovq\t");
+	if (!load) { x64_reg(b, r, 8); tb_s(b, ", "); }
+	if (off) tb_i(b, off);
+	tb_c(b, '('); x64_reg(b, base, 8); tb_c(b, ')');
+	if (load) { tb_s(b, ", "); x64_reg(b, r, 8); }
+	tb_c(b, '\n');
+}
+
+/* CFA stays rbp+16, but a realigned save slot is addressed through r12. */
+static void x64_cs_cfi(tbuf *b, int r, int64_t off)
+{
+	uint8_t leb[10];
+	unsigned n = 0;
+	for (;;) {
+		unsigned byte = (unsigned)off & 127;
+		off >>= 7;
+		bool last = (off == 0 && !(byte & 64)) || (off == -1 && (byte & 64));
+		leb[n++] = (uint8_t)(byte | (last ? 0 : 128));
+		if (last) break;
+	}
+	/* DW_CFA_expression, register (rbx/r12-r15), length, DW_OP_breg12. */
+	tb_f(b, "\t.cfi_escape 0x10, %u, %u, 0x7c", (unsigned)r, n + 1);
+	for (unsigned i = 0; i < n; i++) tb_f(b, ", %u", (unsigned)leb[i]);
+	tb_c(b, '\n');
+}
+
 VPRIV void x64_print(ecx *e, tbuf *b, uint32_t s)
 {
 	cc *c = e->c;
@@ -138,7 +190,7 @@ VPRIV void x64_print(ecx *e, tbuf *b, uint32_t s)
 					   [X_IMUL] = "imul", [X_ADC] = "adc", [X_SBB] = "sbb", [X_ADDI] = "add", [X_SUBI] = "sub", [X_ANDI] = "and", [X_ORI] = "or",
 					   [X_XORI] = "xor", [X_SHLI] = "shl", [X_SHRI] = "shr", [X_SARI] = "sar", [X_SHL] = "shl",
 					   [X_SHR] = "shr", [X_SAR] = "sar", [X_NEG] = "neg", [X_NOT] = "not" };
-	int32_t frame = (e->wk->foff + 15) & ~15;
+	int64_t frame = (e->wk->foff + 15) & ~(int64_t)15;
 	uint32_t A = e->wk->falign;
 	bool cfi = e->E->o->cfi;	/* unwind tables: .cfi_* as clang writes them */
 	uint32_t dj = 0;		/* -g: the next row */
@@ -159,22 +211,16 @@ VPRIV void x64_print(ecx *e, tbuf *b, uint32_t s)
 	tb_s(b, cfi ? "\tpushq\t%rbp\n\t.cfi_def_cfa_offset 16\n\t.cfi_offset %rbp, -16\n"
 		      "\tmovq\t%rsp, %rbp\n\t.cfi_def_cfa_register %rbp\n" : "\tpushq\t%rbp\n\tmovq\t%rsp, %rbp\n");
 	if (A > 16) {
-		/* locals aligned above 16: their base is rbx = (rsp + frame + A - 1) & -A
-		   (rbx saved at -8(%rbp)); incoming arguments stay rbp's */
-		tb_s(b, cfi ? "\tpushq\t%rbx\n\t.cfi_offset %rbx, -24\n\tsubq\t$" : "\tpushq\t%rbx\n\tsubq\t$");
-		tb_i(b, frame + (int32_t)A + 8);
-		tb_s(b, ", %rsp\n\tleaq\t");
-		tb_i(b, frame + (int32_t)A - 1);
-		tb_s(b, "(%rsp), %rbx\n\tandq\t$");
+		tb_s(b, "\tpushq\t%r12\n");
+		if (cfi) tb_s(b, "\t.cfi_offset %r12, -24\n");
+		tb_s(b, "\tandq\t$");
 		tb_i(b, -(int64_t)A);
-		tb_s(b, ", %rbx\n");
-		for (uint32_t k = 0; k < X->nin; k++) {
-			rec *i = &X->in[k];
-
-			if ((i->op == X_LD || i->op == X_ST || i->op == X_LEA || i->op == X_X87 || i->op == X_XCHG ||
-			     i->op == X_XADD || i->op == X_CMPXCHG) && i->r[1] == RBP && i->off < 0)
-				i->r[1] = RBX;
-		}
+		tb_s(b, ", %rsp\n\tmovq\t%rsp, %r12\n");
+	}
+	if (frame > INT32_MAX) {
+		tb_s(b, "\tmovabsq\t$");
+		tb_i(b, frame);
+		tb_s(b, ", %r11\n\tsubq\t%r11, %rsp\n");
 	} else if (frame) {
 		tb_s(b, "\tsubq\t$");
 		tb_i(b, frame);
@@ -183,17 +229,15 @@ VPRIV void x64_print(ecx *e, tbuf *b, uint32_t s)
 	if (e->wk->spneed) {
 		/* -fstack-protector: the guard into the canary slot (r11: no argument lives there) */
 		x64_guard(e, b);
-		tb_f(b, "\tmovq\t%%r11, %d(%s)\n", e->wk->canary, A > 16 ? "%rbx" : "%rbp");
+		tb_f(b, "\tmovq\t%%r11, %d(%s)\n", e->wk->canary, A > 16 ? "%r12" : "%rbp");
 	}
 	for (int r = 0; r < 16; r++)
 		if (X->csslot[r]) {
-			tb_s(b, "\tmovq\t%");
-			tb_s(b, x64_r64[r]);
-			tb_s(b, ", ");
-			tb_i(b, X->csslot[r]);
-			tb_s(b, A > 16 ? "(%rbx)\n" : "(%rbp)\n");
-			if (cfi && A <= 16)	/* (the cfa is rbp + 16) */
-				tb_f(b, "\t.cfi_offset %%%s, %d\n", x64_r64[r], X->csslot[r] - 16);
+			x64_cs_access(e, b, r, false);
+			if (cfi) {
+				if (A > 16) x64_cs_cfi(b, r, X->csslot[r]);
+				else tb_f(b, "\t.cfi_offset %%%s, %lld\n", x64_r64[r], (long long)(X->csslot[r] - 16));
+			}
 		}
 	for (uint32_t k = 0; k < X->nin; k++) {
 		const rec *i = &X->in[k];
@@ -249,7 +293,7 @@ VPRIV void x64_print(ecx *e, tbuf *b, uint32_t s)
 		case X_LD:
 			if (IS_XMM(i->r[0])) {
 				tb_s(b, sz == 4 ? "\tmovss\t" : sz == 8 ? "\tmovsd\t" : "\tmovups\t");
-				x64_memop(c, b, i);
+				x64_memop(e, b, i);
 				tb_s(b, ", ");
 				x64_reg(b, i->r[0], 8);
 				break;
@@ -259,7 +303,7 @@ VPRIV void x64_print(ecx *e, tbuf *b, uint32_t s)
 			static const char *const zx[] = { [1] = "\tmovzbl\t", [2] = "\tmovzwl\t", [4] = "\tmovl\t", [8] = "\tmovq\t" };
 
 			tb_s(b, i->cond ? sx[sz] : zx[sz]);
-			x64_memop(c, b, i);
+			x64_memop(e, b, i);
 			tb_s(b, ", ");
 			x64_reg(b, i->r[0], i->cond || sz == 8 ? 8 : 4);
 			break;
@@ -271,11 +315,11 @@ VPRIV void x64_print(ecx *e, tbuf *b, uint32_t s)
 				x64_ins(b, "mov", sz);
 			x64_reg(b, i->r[2], sz);
 			tb_s(b, ", ");
-			x64_memop(c, b, i);
+			x64_memop(e, b, i);
 			break;
 		case X_LEA:
 			x64_ins(b, "lea", 8);
-			x64_memop(c, b, i);
+			x64_memop(e, b, i);
 			tb_s(b, ", ");
 			x64_reg(b, i->r[0], 8);
 			break;
@@ -381,24 +425,26 @@ VPRIV void x64_print(ecx *e, tbuf *b, uint32_t s)
 			x64_ins(b, i->op == X_XCHG ? "xchg" : "lock xadd", sz);
 			x64_reg(b, i->r[0], sz);
 			tb_s(b, ", ");
-			x64_memop(c, b, i);
+			x64_memop(e, b, i);
 			break;
 		case X_CMPXCHG:
 			x64_ins(b, "lock cmpxchg", sz);
 			x64_reg(b, i->r[2], sz);
 			tb_s(b, ", ");
-			x64_memop(c, b, i);
-			break;
-		case X_RAW:
-			tb_s(b, "#APP\n");
-			tb_put(b, e->raw.p + i->off, i->ref);
-			tb_s(b, "\n#NO_APP");
+			x64_memop(e, b, i);
 			break;
 		case X_LEAL:
 			tb_s(b, "\tleaq\t");
 			x64_lbl(b, s, i->label);
 			tb_s(b, "(%rip), ");
 			x64_reg(b, i->r[0], 8);
+			break;
+		case X_RAW:
+			if (i->cond && e->wk->falign > 16)
+				efatal(e, e->curloc, "inline asm r12 operand or clobber conflicts with aligned frame base");
+			tb_s(b, "#APP\n");
+			tb_put(b, e->raw.p + i->off, i->ref);
+			tb_s(b, "\n#NO_APP");
 			break;
 		case X_JMPR:
 			if (e->E->o->xcf & 4) {
@@ -417,6 +463,9 @@ VPRIV void x64_print(ecx *e, tbuf *b, uint32_t s)
 			break;
 		case X_MFENCE:
 			tb_s(b, "\tmfence");
+			break;
+		case X_BARRIER:
+			tb_s(b, "\t# compiler barrier");
 			break;
 		case X_GOT:
 			tb_s(b, "\tmovq\t");
@@ -544,7 +593,7 @@ VPRIV void x64_print(ecx *e, tbuf *b, uint32_t s)
 				tb_s(b, xn[i->cond]);
 			if (i->r[1] != XNOREG) {
 				tb_c(b, '\t');
-				x64_memop(c, b, i);
+				x64_memop(e, b, i);
 			}
 			break;
 		}
@@ -558,22 +607,21 @@ VPRIV void x64_print(ecx *e, tbuf *b, uint32_t s)
 	}
 	if (e->wk->spneed) {
 		x64_guard(e, b);
-		tb_f(b, "\tcmpq\t%d(%s), %%r11\n\tjne\t.Lspfail%u\n", e->wk->canary, e->wk->falign > 16 ? "%rbx" : "%rbp", s);
+		tb_f(b, "\tcmpq\t%d(%s), %%r11\n\tjne\t.Lspfail%u\n", e->wk->canary, e->wk->falign > 16 ? "%r12" : "%rbp", s);
 	}
 	for (int r = 0; r < 16; r++)
 		if (X->csslot[r]) {
-			tb_s(b, "\tmovq\t");
-			tb_i(b, X->csslot[r]);
-			tb_s(b, e->wk->falign > 16 ? "(%rbx), %" : "(%rbp), %");
-			tb_s(b, x64_r64[r]);
-			tb_c(b, '\n');
+			x64_cs_access(e, b, r, true);
+			if (cfi) tb_f(b, "\t.cfi_same_value %%%s\n", x64_r64[r]);
 		}
 	for (; dj < e->ndl; dj++)
 		if (dj + 1 == e->ndl)
 			tb_f(b, dj ? "\t.loc\t%u %u %u\n" : "\t.loc\t%u %u %u prologue_end\n",
 			     e->dl[dj].file, e->dl[dj].line, e->dl[dj].col);
-	if (e->wk->falign > 16)
-		tb_s(b, "\tmovq\t-8(%rbp), %rbx\n");
+	if (e->wk->falign > 16) {
+		tb_s(b, "\tmovq\t-8(%rbp), %r12\n");
+		if (cfi) tb_s(b, "\t.cfi_same_value %r12\n");
+	}
 	tb_s(b, cfi ? "\tmovq\t%rbp, %rsp\n\tpopq\t%rbp\n\t.cfi_def_cfa %rsp, 8\n" : "\tmovq\t%rbp, %rsp\n\tpopq\t%rbp\n");
 	/* -mfunction-return=thunk-extern: the return through __x86_return_thunk (cs-prefixed as clang) */
 	tb_s(b, (e->E->o->xcf & 2) ? ((e->E->o->xcf & 8) ? "\tcs\n\tjmp\t__x86_return_thunk\n" : "\tjmp\t__x86_return_thunk\n") : "\tretq\n");

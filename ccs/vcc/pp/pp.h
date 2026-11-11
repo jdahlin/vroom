@@ -259,6 +259,7 @@ void pp_diag_macro(vdiag *d, const char *ms, uint32_t mlen);
 /* a warning's flag (" [-Wflag]"; werror: " [-Werror,-Wflag]") */
 void pp_diag_flag(vdiag *d, const char *flag);
 /* the level a warning of flag is reported at, at loc: VDL_WARNING, VDL_ERROR (-Werror), or -1 (off) */
+int pp_diag_elevel(pp *p, const char *flag, const char *const *groups, uint32_t loc);
 int pp_diag_wlevel(pp *p, const char *flag, bool on, const char *const *groups, uint32_t loc);
 /* render (and keep) the record; a fatal error ends the TU */
 void pp_diag_emit(pp *p, vdiag *d);

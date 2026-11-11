@@ -47,6 +47,11 @@ static bool cplx_pure(cc *c, uint32_t n, int d)
 	switch (x->op) {
 	case N_NUM: case N_FNUM:
 		return true;
+	case N_BUILTIN: {
+		cval v;
+
+		return cc_eval(c, n, &v) && (v.kind == CV_INT || v.kind == CV_FLT);
+	}
 	case N_VAR:
 		return !(QQ(x->ty) & Q_VOLATILE);
 	case N_MEMBER: case N_CAST: case N_UNARY: case N_DEREF:
@@ -177,6 +182,129 @@ VPRIV void bad_operands(cc *c, int op, uint32_t l, uint32_t r, uint32_t loc)
 	       tyname(c, N(l)->ty), tyname(c, N(r)->ty));
 }
 
+/* Scale without first constructing a power outside binary128's range. */
+static u128 cplx_scale(u128 q, int shift)
+{
+	int sign, exp;
+	u128 mant;
+
+	if (!q_nz(q) || q_isinf(q) || q_isnan(q))
+		return q;
+	q_un(q, &sign, &exp, &mant);
+	return q_rndp(sign, exp + shift, mant << 3, 112);
+}
+
+static u128 cplx_round(cc *c, qty t, u128 q)
+{
+	if (is_q(c, t))
+		return q_to_p(q, q_prec(c, t));
+	if (KIND(c, t) == TY_FLOAT16)
+		return q_of_d(h_to_d(q_to_h(q)));
+	return q_of_d(KIND(c, t) == TY_FLOAT ? (double)q_to_f(q) : q_to_d(q));
+}
+
+/* Clang's Annex G constant division: scale the denominator, rounding every
+ * operation at the target precision, including static initializers. */
+static uint32_t cplx_divconst(cc *c, qty ct, qty et, uint32_t *args, uint32_t loc)
+{
+	u128 q[4], den, re, im;
+	int be = 0;
+
+	for (int i = 0; i < 4; i++) {
+		cval v;
+
+		if (!cc_eval(c, args[i], &v) || v.kind != CV_FLT)
+			return 0;
+		q[i] = v.ld ? v.q : q_of_d(v.f);
+	}
+	u128 max = q[2] & ~Q_SIGN, other = q[3] & ~Q_SIGN;
+	if (q_isnan(max) || (!q_isnan(other) && other > max))
+		max = other;
+	if (q_nz(max) && !q_isnan(max) && !q_isinf(max)) {
+		int sign, exp;
+		u128 mant;
+
+		q_un(max, &sign, &exp, &mant);
+		q_norm(&exp, &mant);
+		be = exp - 16383;
+	}
+#define CR(x) cplx_round(c, et, (x))
+#define CM(a, b) CR(q_mul((a), (b)))
+#define CA(a, b) CR(q_add((a), (b)))
+#define CS(a, b) CR(q_sub((a), (b)))
+#define CD(a, b) CR(q_div((a), (b)))
+	q[2] = CR(cplx_scale(q[2], -be));
+	q[3] = CR(cplx_scale(q[3], -be));
+	den = CA(CM(q[2], q[2]), CM(q[3], q[3]));
+	re = CR(cplx_scale(CD(CA(CM(q[0], q[2]), CM(q[1], q[3])), den), -be));
+	im = CR(cplx_scale(CD(CS(CM(q[1], q[2]), CM(q[0], q[3])), den), -be));
+	/* Annex G recovery, matching the helpers for zero and infinite operands. */
+	if (q_isnan(re) && q_isnan(im)) {
+		u128 inf = (u128)0x7fff << 112, one = (u128)16383 << 112;
+		if (!q_nz(den) && (!q_isnan(q[0]) || !q_isnan(q[1]))) {
+			inf |= q[2] & Q_SIGN;
+			re = CM(inf, q[0]);
+			im = CM(inf, q[1]);
+		} else if ((q_isinf(q[0]) || q_isinf(q[1])) &&
+		           !q_isinf(q[2]) && !q_isnan(q[2]) && !q_isinf(q[3]) && !q_isnan(q[3])) {
+			q[0] = (q[0] & Q_SIGN) | (q_isinf(q[0]) ? one : 0);
+			q[1] = (q[1] & Q_SIGN) | (q_isinf(q[1]) ? one : 0);
+			re = CM(inf, CA(CM(q[0], q[2]), CM(q[1], q[3])));
+			im = CM(inf, CS(CM(q[1], q[2]), CM(q[0], q[3])));
+		} else if ((q_isinf(q[2]) || q_isinf(q[3])) &&
+		           !q_isinf(q[0]) && !q_isnan(q[0]) && !q_isinf(q[1]) && !q_isnan(q[1])) {
+			q[2] = (q[2] & Q_SIGN) | (q_isinf(q[2]) ? one : 0);
+			q[3] = (q[3] & Q_SIGN) | (q_isinf(q[3]) ? one : 0);
+			re = CM(0, CA(CM(q[0], q[2]), CM(q[1], q[3])));
+			im = CM(0, CS(CM(q[1], q[2]), CM(q[0], q[3])));
+		}
+	}
+#undef CR
+#undef CM
+#undef CA
+#undef CS
+#undef CD
+	if (is_q(c, et))
+		return mk_cplx(c, ct, mk_fltq(c, q_to_p(re, q_prec(c, et)), et, loc),
+		               mk_fltq(c, q_to_p(im, q_prec(c, et)), et, loc), loc);
+	if (KIND(c, et) == TY_FLOAT16)
+		return mk_cplx(c, ct, mk_flt(c, h_to_d(q_to_h(re)), et, loc),
+		               mk_flt(c, h_to_d(q_to_h(im)), et, loc), loc);
+	return mk_cplx(c, ct, mk_flt(c, KIND(c, et) == TY_FLOAT ? q_to_f(re) : q_to_d(re), et, loc),
+	               mk_flt(c, KIND(c, et) == TY_FLOAT ? q_to_f(im) : q_to_d(im), et, loc), loc);
+}
+
+/* The runtime helper owns overflow/underflow scaling and IEEE special cases.
+ * It returns the real complex ABI type, rather than an ordinary two-field struct. */
+static uint32_t cplx_divcall(cc *c, qty ct, qty et, uint32_t *a, uint32_t loc)
+{
+	qty result_ty = ct;
+	if (KIND(c, et) == TY_FLOAT16) {
+		et = prim(TY_FLOAT);
+		ct = ty_complex(c, et);
+	}
+	const char *name = KIND(c, et) == TY_FLOAT ? "__divsc3" : !is_q(c, et) ? "__divdc3" :
+	                   q_prec(c, et) == Q_P80 ? "__divxc3" : "__divtc3";
+	uint32_t id = vintern_cstr(name), s, fn, n;
+	qty params[4] = { et, et, et, et };
+	qty ft = ty_func(c, ct, params, 4, 0);
+	vec args;
+
+	s = sym_new(c, S_FUNC, id, ft, loc);
+	c->syms[s].sc = SC_EXTERN;
+	c->syms[s].flags |= SF_GLOBAL | SF_USED;
+	fn = mk(c, N_VAR, ft, loc);
+	N(fn)->a = s;
+	vinit(&args);
+	for (int i = 0; i < 4; i++)
+		vpush(c, &args, convert(c, rvalue(c, a[i]), et));
+	n = mk(c, N_CALL, ct, loc);
+	N(n)->a = decay(c, fn);
+	N(n)->b = vfreeze(c, &args);
+	N(n)->c = 4;
+	return to_complex(c, n, result_ty);
+}
+
 /* l op r with a complex operand: + - * / == != on the parts */
 VPRIV uint32_t cplx_binop(cc *c, int op, uint32_t l, uint32_t r, uint32_t loc)
 {
@@ -218,6 +346,14 @@ VPRIV uint32_t cplx_binop(cc *c, int op, uint32_t l, uint32_t r, uint32_t loc)
 		if (!rc) {
 			x = B(T_SLASH, a, cr), y = B(T_SLASH, b, cr);
 		} else {
+			if (is_float(c, et)) {
+				uint32_t args[4] = { a, lc ? b : zero_of(c, et, loc), cr, d };
+				uint32_t result = cplx_divconst(c, ct, et, args, loc);
+
+				if (!result)
+					result = cplx_divcall(c, ct, et, args, loc);
+				return with_pre(c, p1, with_pre(c, p2, result));
+			}
 			uint32_t den = B(T_PLUS, B(T_STAR, cr, cr), B(T_STAR, d, d));
 
 			if (!lc) {

@@ -1,0 +1,10 @@
+atomic_type_constraints.c:3:1: error: _Atomic cannot be applied to atomic type 'int'
+    3 | _Atomic(A) nested;
+      | ^
+atomic_type_constraints.c:4:1: error: _Atomic cannot be applied to qualified type 'const int'
+    4 | _Atomic(const int) qualified;
+      | ^
+atomic_type_constraints.c:5:31: error: incompatible pointer types initializing 'int *' with an expression of type 'int *' [-Wincompatible-pointer-types]
+    5 | void f(_Atomic int *p) { int *q = p; (void)q; }
+      |                               ^   ~
+3 errors generated.

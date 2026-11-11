@@ -1,0 +1,22 @@
+hex_escape_range.c:2:10: error: hex escape sequence out of range
+    2 | int a = '\x100';
+      |          ^
+hex_escape_range.c:3:12: error: hex escape sequence out of range
+    3 | int b = u8'\x100';
+      |            ^
+hex_escape_range.c:4:16: error: hex escape sequence out of range
+    4 | unsigned c = u'\x10000';
+      |                ^
+hex_escape_range.c:5:16: error: hex escape sequence out of range
+    5 | unsigned d = U'\x100000000';
+      |                ^
+hex_escape_range.c:6:16: error: hex escape sequence out of range
+    6 | unsigned e = L'\x100000000';
+      |                ^
+hex_escape_range.c:7:16: error: hex escape sequence out of range
+    7 | unsigned f = U'\x10000000000000000';
+      |                ^
+hex_escape_range.c:8:12: error: hex escape sequence out of range
+    8 | char *s = "\x100";
+      |            ^
+7 errors generated.

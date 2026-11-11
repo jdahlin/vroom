@@ -1,0 +1,7 @@
+unknown_escape_error.c:2:12: error: unknown escape sequence '\j' [-Werror,-Wunknown-escape-sequence]
+    2 | char *s = "\j";
+      |            ^
+unknown_escape_error.c:3:10: error: unknown escape sequence '\q' [-Werror,-Wunknown-escape-sequence]
+    3 | int c = '\q';
+      |          ^
+2 errors generated.

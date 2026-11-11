@@ -16,7 +16,7 @@ typedef struct xopnd {
 	int size;		/* the operand's size in bytes (register names) */
 	val v;			/* XO_IMM: the value; an input's value until it is placed */
 	lval l;			/* XO_MEM: the memory; outputs: where the result goes */
-	int32_t park;		/* a fixed input's value parked in this slot (0: none) */
+	int64_t park;		/* a fixed input's value parked in this slot (0: none) */
 	int32_t lpark;		/* a register output's address parked in this slot until the store (0: none) */
 	qty t;
 	uint32_t name;
@@ -103,7 +103,7 @@ static void x64_asmreg(tbuf *b, int r, int size, bool h)
 static void x64_asmlabel(ecx *e, tbuf *b, uint32_t l)
 {
 	tb_s(b, ".LBB");
-	tb_u(b, e->top);
+	tb_u(b, e->wk->fsym);
 	tb_c(b, '_');
 	tb_u(b, l);
 }
@@ -145,14 +145,53 @@ static bool x64_immok(int ch, i128 v)
 	}
 }
 
+/* A GPR constraint transports object bits, independently of the C value's
+ * normal register class (SSE scalars and address-held small aggregates). */
+static val x64_asmbits(ecx *e, val v, qty t, int size)
+{
+	if (size != 1 && size != 2 && size != 4 && size != 8)
+		efatal(e, e->curloc, "x86-64: unsupported asm GPR operand size");
+	if (wk_mem(e, t)) {
+		int r = wk_reg(e, &v, t), dst = x64_treg(e);
+		lval l = { .k = L_REG, .r = (uint8_t)r };
+		x64_load(e, dst, &l, size, false);
+		wk_free(e, &v);
+		return (val){ .k = V_REG, .r = (uint8_t)dst };
+	}
+	if (is_flt(e->c, t)) {
+		int r = wk_reg(e, &v, t);
+		lval l = { .k = L_FRAME, .off = wk_slot(e, 8, 8) };
+		x64_store(e, r, &l, size);
+		wk_free(e, &v);
+		r = x64_treg(e);
+		x64_load(e, r, &l, size, false);
+		return (val){ .k = V_REG, .r = (uint8_t)r };
+	}
+	return v;
+}
+
+/* Fixed operands are loaded only after all expressions have been evaluated.
+ * Park their input values immediately so several read/write outputs do not
+ * consume the few temporaries left after reserving the fixed registers. */
+static void x64_asmpark(ecx *e, xopnd *o)
+{
+	if (!o->flt) o->v = x64_asmbits(e, o->v, o->t, o->size);
+	int r = wk_reg(e, &o->v, o->flt ? o->t : prim(TY_ULLONG));
+	lval l = { .k = L_FRAME, .off = o->park = wk_slot(e, 8, 8), .align = 8 };
+
+	x64_store(e, r, &l, o->flt ? o->size : 8);
+	wk_free(e, &o->v);
+	o->v = (val){ 0 };
+}
+
 /* a callee-saved register the asm uses: saved by the prologue */
 VPRIV void x64_csused(ecx *e, int r)
 {
 	xst *X = e->x64;
 
 	if (r == RBX || (r >= R12 && r <= R15)) {
-		if (r == RBX && e->wk->falign > 16)
-			efatal(e, e->curloc, "x86-64: asm using rbx in a function with locals aligned above 16 is not supported");
+		if (r == R12 && e->wk->falign > 16)
+			efatal(e, e->curloc, "x86-64: asm using r12 in a function with locals aligned above 16 is not supported");
 		if (!X->csslot[r])
 			X->csslot[r] = wk_slot(e, 8, 8);
 	}
@@ -166,9 +205,12 @@ VPRIV void x64_asm(ecx *e, uint32_t n)
 	const casm *a = &c->asms[x->a];
 	const char *tp = c->strs[a->tmpl - 1].s;
 	uint32_t nops = a->nout + a->nin;
-	bool basic = nops == 0 && a->nclob == 0 && a->nlabel == 0;
+	bool basic = !a->extended;
+	uint32_t serial = e->asmk++, nplus = 0;
+	uint32_t edges[64], done = 0;
+	const char *csop[64];
 	uint32_t fixed = 0, saved = 0, reserved = 0;
-	int32_t sslot[32] = { 0 };
+	int64_t sslot[32] = { 0 };
 	xopnd *op;
 	tbuf *rb = &e->raw;
 	size_t start;
@@ -176,15 +218,49 @@ VPRIV void x64_asm(ecx *e, uint32_t n)
 
 	if (nops > 64 || a->nlabel > 64)
 		efatal(e, x->loc, "too many asm operands");
-	/* asm goto with outputs: each label is reached through a trampoline that stores the
-	   outputs as the fall-through does (a copy of its records), then jumps on */
-	uint32_t tl[64];
-	bool tramp = false;
-
-	for (uint32_t i = 0; a->nlabel && i < a->nout; i++)
-		tramp = true;
-	for (uint32_t k = 0; tramp && k < a->nlabel; k++)
-		tl[k] = wk_newlabel(e);
+	/* Select one common alternative, before evaluating any operand. */
+	unsigned alternatives = 1;
+	for (uint32_t i = 0; i < nops; i++) {
+		const char *cs = c->strs[a->ops[i].constraint - 1].s;
+		unsigned count = 1;
+		nplus += i < a->nout && strchr(cs, '+') != NULL;
+		for (; *cs; cs++) count += *cs == ',';
+		if (count > alternatives) alternatives = count;
+	}
+	bool selected = false;
+	for (unsigned alt = 0; alt < alternatives; alt++) {
+		bool valid = true;
+		uint32_t occupied = 0, early = 0;
+		for (uint32_t i = 0; i < a->nclob; i++) {
+			int r = x64_rname(c->strs[a->clob[i] - 1].s);
+			if (r >= 0) occupied |= 1u << r;
+		}
+		for (uint32_t i = 0; i < nops; i++) {
+			const char *original = c->strs[a->ops[i].constraint - 1].s, *cs = original;
+			for (unsigned k = 0; k < alt && cs; k++) {
+				cs = strchr(cs, ',');
+				if (cs) cs++;
+			}
+			if (!cs) { valid = false; break; }
+			size_t len = strcspn(cs, ",");
+			char *copy = alloca(len + 2);
+			copy[0] = i < a->nout ? original[0] : ' ';
+			memcpy(copy + 1, cs, len);
+			copy[len + 1] = 0;
+			csop[i] = copy;
+			int r = -1;
+			for (const char *q = copy; *q && *q != '[' && r < 0; q++) r = x64_creg(*q);
+			if (r >= 0) {
+				if ((occupied | early) & (1u << r)) valid = false;
+				if (i < a->nout && strchr(copy, '&')) early |= 1u << r;
+				if (i >= a->nout) occupied |= 1u << r;
+			}
+		}
+		if (valid) { selected = true; break; }
+	}
+	if (!selected) efatal(e, x->loc, "no allocatable x86 inline asm constraint alternative");
+	for (uint32_t i = 0; i < a->nlabel; i++) edges[i] = wk_newlabel(e);
+	if (a->nlabel) done = wk_newlabel(e);
 	op = alloca((nops + 1) * sizeof(xopnd));
 	memset(op, 0, (nops + 1) * sizeof(xopnd));
 	/* the fixed registers: clobbers and register constraints */
@@ -197,11 +273,11 @@ VPRIV void x64_asm(ecx *e, uint32_t n)
 		}
 	}
 	for (uint32_t i = 0; i < nops; i++) {
-		const char *cs = c->strs[a->ops[i].constraint - 1].s;
+		const char *cs = csop[i];
 		uint32_t en = a->ops[i].expr;
 		int r = -1;
 
-		for (const char *p = cs; *p && r < 0; p++)
+		for (const char *p = cs; *p && *p != '[' && r < 0; p++)
 			r = x64_creg(*p);
 		if (r < 0 && N(en)->op == N_VAR && sym_attrs(c, N(en)->a)->asmname && (c->syms[N(en)->a].sc == SC_REGISTER))
 			r = x64_rname(c->strs[sym_attrs(c, N(en)->a)->asmname - 1].s);	/* register long x asm("rdx") */
@@ -217,6 +293,21 @@ VPRIV void x64_asm(ecx *e, uint32_t n)
 			x64_csused(e, r);
 		}
 	}
+	/* Q and R restrict the GPR class; reserve a suitable register before
+	   evaluating operands, exactly like an explicit register constraint. */
+	for (uint32_t i = 0; i < nops; i++) {
+		const char *cs = csop[i];
+		if (op[i].fixed || strpbrk(cs, "rqgX[")) continue;
+		uint32_t allowed = strchr(cs, 'Q') ? 15u : strchr(cs, 'R') ? 0xcfu : 0;
+		if (!allowed) continue;
+		allowed &= ~fixed;
+		if (!allowed) efatal(e, x->loc, "no allocatable x86 inline asm register class");
+		int r = __builtin_ctz(allowed);
+		op[i].fixed = 1;
+		op[i].reg = (uint8_t)r;
+		fixed |= 1u << r;
+		x64_csused(e, r);
+	}
 	if (fixed & ((1u << RSP) | (1u << RBP)))
 		efatal(e, x->loc, "x86-64: asm clobbering rsp or rbp is not supported");
 	/* temporaries live in them now: saved, and held so evaluation does not use them */
@@ -225,7 +316,7 @@ VPRIV void x64_asm(ecx *e, uint32_t n)
 			if (X->live & (1u << r)) {
 				lval s = { .k = L_FRAME, .off = sslot[r] = wk_slot(e, r >= XMM0 ? 16 : 8, 16), .align = 8 };
 
-				x64_mem(e, X_ST, 8, r, &s, false);
+				x64_mem(e, X_ST, r >= XMM0 ? 16 : 8, r, &s, false);
 				saved |= 1u << r;
 			} else {
 				reserved |= 1u << r;
@@ -244,10 +335,10 @@ VPRIV void x64_asm(ecx *e, uint32_t n)
 			pkm |= 1ull << i;
 	/* outputs: lvalues; a register's value read first for + */
 	for (uint32_t i = 0; i < a->nout; i++) {
-		const char *cs = c->strs[a->ops[i].constraint - 1].s;
+		const char *cs = csop[i];
 		uint32_t en = a->ops[i].expr;
 		xopnd *o = &op[i];
-		bool mem_ok = strpbrk(cs, "mogV") != NULL, reg_ok = strpbrk(cs, "rqQRgabcdSDxyl") != NULL || o->fixed;
+		bool mem_ok = strpbrk(cs, "mogVX") != NULL, reg_ok = strpbrk(cs, "rqQRgXabcdSDxyl") != NULL || o->fixed;
 
 		o->out = 1;
 		o->tied = -1;
@@ -255,15 +346,16 @@ VPRIV void x64_asm(ecx *e, uint32_t n)
 		o->t = N(en)->ty;
 		o->name = a->ops[i].name;
 		o->size = wk_size(c, o->t);
+		o->flt = strpbrk(cs, "xy") != NULL && is_flt(c, o->t);
 		if (o->sp) {
 			o->kind = XO_REG;
 			continue;
 		}
-		o->flt = strpbrk(cs, "xy") != NULL && is_flt(c, o->t);
 		o->l = wk_lval(e, en);
 		if (strpbrk(cs, "tu") && is_flt(c, o->t)) {
 			o->kind = XO_X87;
 			o->reg = strchr(cs, 'u') ? 1 : 0;
+			if (o->inout) o->v = wk_x87val(e, wk_reload(e, &o->l, o->t), o->t);
 			continue;
 		}
 		if (mem_ok && !reg_ok) {
@@ -273,8 +365,12 @@ VPRIV void x64_asm(ecx *e, uint32_t n)
 			continue;
 		}
 		o->kind = XO_REG;
-		if (o->inout)
+		if (wk_mem(e, o->t) && (o->flt || o->size > 8))
+			efatal(e, x->loc, "x86-64: address-held asm register operand is not supported");
+		if (o->inout) {
 			o->v = wk_reload(e, &o->l, o->t);
+			if (o->fixed) x64_asmpark(e, o);
+		}
 		if (o->l.k == L_REG && !o->l.bf) {
 			/* the address waits in a slot: four outputs through pointers and four fixed
 			   registers (cpuid) would leave no temporaries */
@@ -286,10 +382,10 @@ VPRIV void x64_asm(ecx *e, uint32_t n)
 	}
 	/* inputs */
 	for (uint32_t i = a->nout; i < nops; i++) {
-		const char *cs = c->strs[a->ops[i].constraint - 1].s;
+		const char *cs = csop[i];
 		uint32_t en = a->ops[i].expr;
 		xopnd *o = &op[i];
-		bool reg_ok = strpbrk(cs, "rqQRgabcdSDxyl") != NULL || o->fixed, mem_ok = strpbrk(cs, "mogV") != NULL;
+		bool reg_ok = strpbrk(cs, "rqQRgXabcdSDxyl") != NULL || o->fixed, mem_ok = strpbrk(cs, "mogVX") != NULL;
 		int tied = -1;
 		val v;
 
@@ -302,9 +398,16 @@ VPRIV void x64_asm(ecx *e, uint32_t n)
 			o->kind = XO_REG;
 			continue;
 		}
-		for (const char *p = cs; *p; p++)
-			if (*p >= '0' && *p <= '9')
-				tied = atoi(p);
+		for (const char *p = cs; *p; p++) {
+			if (*p >= '0' && *p <= '9') { tied = atoi(p); break; }
+			if (*p == '[') {
+				const char *end = strchr(p, ']');
+				for (uint32_t j = 0; end && j < a->nout; j++)
+					if (op[j].name && vintern_ents[op[j].name].len == (uint32_t)(end - p - 1) &&
+					    !memcmp(vintern_ents[op[j].name].s, p + 1, (size_t)(end - p - 1))) tied = (int)j;
+				break;
+			}
+		}
 		if (tied >= 0 && (uint32_t)tied < a->nout && op[tied].kind == XO_X87) {
 			o->kind = XO_X87;
 			o->reg = op[tied].reg;
@@ -327,6 +430,7 @@ VPRIV void x64_asm(ecx *e, uint32_t n)
 				wk_free(e, &to->v);
 			to->v = v;
 			to->inout = 1;
+			if (to->fixed) x64_asmpark(e, to);
 			o->kind = XO_REG;
 			o->tied = (int8_t)tied;
 			continue;
@@ -343,8 +447,6 @@ VPRIV void x64_asm(ecx *e, uint32_t n)
 		}
 		{
 			cval cv;
-
-			/* an integer constant expression as the front end folds it (__builtin_clzll(63), ...) */
 			uint32_t an = en;
 
 			while (N(an)->op == N_CAST && (N(an)->aux == CK_NOP || N(an)->aux == CK_P2P || N(an)->aux == CK_DECAY ||
@@ -355,18 +457,17 @@ VPRIV void x64_asm(ecx *e, uint32_t n)
 			if (i < 64 && (pkm >> i & 1)) {
 				v = pkv[i];	/* an inlined parameter still holding its constant argument */
 			} else if (is_integer(e->c, N(en)->ty) && cc_eval(e->c, en, &cv) && cv.kind == CV_INT) {
+				/* an integer constant expression as the front end folds it (__builtin_clzll(63), ...) */
 				v = vconst(em_trunc_to(e->c, cv.i, N(en)->ty));
 			} else if (e->c->o->pic && N(an)->op == N_VAR && (c->syms[N(an)->a].kind == S_FUNC ||
-				   (c->syms[N(an)->a].kind == S_VAR && !is_local_var(c, N(an)->a))) &&
-				   !sym_needs_got(c, REF(RK_SYM, canon_sym(c, N(an)->a)))) {
-				/* &sym of a DSO-local symbol under -fPIC: an immediate (the kernel's -fPIC startup code) */
+				   (c->syms[N(an)->a].kind == S_VAR && !is_local_var(c, N(an)->a)))) {
+				/* &sym under -fPIC: an immediate, as clang (the asm names the symbol) */
 				v = (val){ .k = V_ADDR, .ref = REF(RK_SYM, canon_sym(c, N(an)->a)) };
-				note_ref(e, v.ref);
 			} else {
 				v = wk_gen(e, en);
 			}
 		}
-		if (v.k == V_CONST || v.k == V_ADDR) {	/* (an address is an immediate under -fPIC too, as clang: the asm names the symbol) */
+		if (v.k == V_CONST || v.k == V_ADDR) {	/* (an address is an immediate under -fPIC too, as clang) */
 			bool imm = false;
 
 			for (const char *p = cs; *p; p++)
@@ -398,17 +499,20 @@ VPRIV void x64_asm(ecx *e, uint32_t n)
 			continue;
 		}
 		o->kind = XO_REG;
-		if (wk_mem(e, o->t))
+		if (wk_mem(e, o->t) && (o->flt || o->size > 8))
+			efatal(e, x->loc, "x86-64: address-held asm register operand is not supported");
+		if (!o->flt) v = x64_asmbits(e, v, o->t, o->size);
+		if (!o->flt && o->size > 8)
 			efatal(e, x->loc, "x86-64: an asm register operand of this type is not supported");
 		if (o->fixed) {
 			/* parked until the fixed registers are loaded, last */
 			lval s = { .k = L_FRAME, .off = o->park = wk_slot(e, 8, 8), .align = 8 };
-			int r = wk_reg(e, &v, o->t);
+			int r = wk_reg(e, &v, o->flt ? o->t : prim(TY_ULLONG));
 
-			x64_mem(e, X_ST, 8, r, &s, false);
+			x64_mem(e, X_ST, o->flt ? o->size : 8, r, &s, false);
 			x64_tfree(e, r);
 		} else {
-			wk_reg(e, &v, o->t);
+			wk_reg(e, &v, o->flt ? o->t : prim(TY_ULLONG));
 			o->reg = v.r;
 			o->v = v;
 		}
@@ -417,21 +521,11 @@ VPRIV void x64_asm(ecx *e, uint32_t n)
 	for (uint32_t i = 0; i < a->nout; i++) {
 		xopnd *o = &op[i];
 
-		if (o->kind != XO_REG || o->sp)
+		if (o->kind != XO_REG || o->fixed)
 			continue;
-		if (o->fixed) {
-			if (o->inout) {
-				lval s = { .k = L_FRAME, .off = o->park = wk_slot(e, 8, 8), .align = 8 };
-				int r = wk_reg(e, &o->v, o->t);
-
-				x64_mem(e, X_ST, 8, r, &s, false);
-				x64_tfree(e, r);
-				o->v = (val){ 0 };
-			}
-			continue;
-		}
+		if (o->inout && !o->flt) o->v = x64_asmbits(e, o->v, o->t, o->size);
 		if (o->inout) {
-			wk_reg(e, &o->v, o->t);
+			wk_reg(e, &o->v, o->flt ? o->t : prim(TY_ULLONG));
 			o->reg = o->v.r;
 		} else {
 			o->reg = (uint8_t)(o->flt ? x64_ftreg(e) : x64_treg(e));
@@ -443,18 +537,25 @@ VPRIV void x64_asm(ecx *e, uint32_t n)
 		if (op[i].park) {
 			lval s = { .k = L_FRAME, .off = op[i].park, .align = 8 };
 
-			x64_mem(e, X_LD, 8, op[i].reg, &s, false);
+			x64_mem(e, X_LD, op[i].flt ? op[i].size : 8, op[i].reg, &s, false);
 		}
 	/* x87 inputs pushed: st(1) first, then st(0) */
 	for (int st = 1; st >= 0; st--)
-		for (uint32_t i = a->nout; i < nops; i++)
-			if (op[i].kind == XO_X87 && op[i].reg == st) {
+		for (uint32_t i = 0; i < nops; i++)
+			if (op[i].kind == XO_X87 && (!op[i].out || op[i].inout) && op[i].reg == st) {
 				lval m = { .k = L_REG, .r = op[i].v.r };
 
 				x64_x87(e, XF_LDT, &m, 10);
 				x64_tfree(e, op[i].v.r);
 				break;
 			}
+	/* Raw text cannot defer frame-base selection to the printer. Materialize
+	   frame operands through the regular address record, including realignment. */
+	for (uint32_t i = 0; i < nops; i++)
+		if (op[i].kind == XO_MEM && op[i].l.k == L_FRAME) {
+			int r = x64_laddr(e, &op[i].l);
+			op[i].l = (lval){ .k = L_REG, .r = (uint8_t)r };
+		}
 	/* the template: {att|intel} alternatives keep the first */
 	start = rb->n;
 	if (basic) {
@@ -486,7 +587,7 @@ VPRIV void x64_asm(ecx *e, uint32_t n)
 			p++;
 			if (*p == '%') { tb_c(rb, '%'); continue; }
 			if (*p == '=') {
-				tb_u(rb, (uint64_t)e->top * 1024 + (uint64_t)(e->asmk++ & 1023));
+				tb_u(rb, ((uint64_t)e->top << 32) | serial);
 				continue;
 			}
 			if (*p == '{' || *p == '|' || *p == '}') { tb_c(rb, *p); continue; }
@@ -504,7 +605,7 @@ VPRIV void x64_asm(ecx *e, uint32_t n)
 						const label *lb = &c->labels[a->labels[k]];
 
 						if (vintern_ents[lb->name].len == len && !memcmp(vintern_ents[lb->name].s, p + 1, len))
-							idx = (int)(nops + k);
+							idx = (int)(nops + nplus + k);
 					}
 				if (idx < 0)
 					efatal(e, x->loc, "unknown asm operand name '%.*s'", (int)len, p + 1);
@@ -517,13 +618,20 @@ VPRIV void x64_asm(ecx *e, uint32_t n)
 			} else {
 				efatal(e, x->loc, "invalid %% escape in inline assembly string");
 			}
-			if ((uint32_t)idx >= nops) {
-				uint32_t k = (uint32_t)idx - nops;
+			if (mod == 'l') {
+				uint32_t k = (uint32_t)idx - nops - nplus;
 
 				if (k >= a->nlabel)
 					efatal(e, x->loc, "invalid operand number %d in inline asm string", idx);
-				x64_asmlabel(e, rb, tramp ? tl[k] : wk_userlabel(e, a->labels[k]));
+				x64_asmlabel(e, rb, edges[k]);
 				continue;
+			}
+			if ((uint32_t)idx >= nops) {
+				uint32_t extra = (uint32_t)idx - nops;
+				idx = -1;
+				for (uint32_t j = 0; j < a->nout; j++)
+					if (op[j].inout && !extra--) { idx = (int)j; break; }
+				if (idx < 0) efatal(e, x->loc, "invalid inline asm operand number");
 			}
 			{
 				xopnd *o = &op[idx];
@@ -555,12 +663,10 @@ VPRIV void x64_asm(ecx *e, uint32_t n)
 				case XO_IMM:
 					if (mod != 'c' && mod != 'P' && mod != 'a' && mod != 'n')
 						tb_c(rb, '$');
-					if (o->v.k == V_ADDR) {
-						ref_off(c, rb, o->v.ref, (int64_t)o->v.i);
-						if (mod == 'a')
-							tb_s(rb, "(%rip)");	/* (clang: %a of a symbol is RIP-relative) */
-					} else
-						tb_i(rb, mod == 'n' ? -(int64_t)o->v.i : (int64_t)o->v.i);
+					if (o->v.k == V_ADDR)
+						ref_off(c, rb, o->v.ref, (int64_t)o->v.i), mod == 'a' ? tb_s(rb, "(%rip)") : (void)0;	/* (clang: %a of a symbol is RIP-relative) */
+					else
+						tb_i(rb, mod == 'n' ? (int64_t)(0 - (uint64_t)o->v.i) : (int64_t)o->v.i);
 					break;
 				}
 			}
@@ -569,7 +675,7 @@ VPRIV void x64_asm(ecx *e, uint32_t n)
 	ri = x64_put(e, X_RAW);
 	ri->off = (int32_t)start;
 	ri->ref = (uint32_t)(rb->n - start);
-	uint32_t post = X->nin;	/* (the fall-through's records from here: copied per trampoline) */
+	ri->cond = !!(fixed & (1u << R12));
 	/* the x87 stack after the asm: its outputs from st(0) up, then the inputs it did not pop
 	   (one in st(1) is popped by the asm when it clobbers st(1), as GCC's rules) */
 	{
@@ -616,27 +722,42 @@ VPRIV void x64_asm(ecx *e, uint32_t n)
 		next:;
 		}
 	}
-	/* outputs stored */
-	for (uint32_t i = 0; i < a->nout; i++) {
-		xopnd *o = &op[i];
+	uint32_t asm_live = X->live;
+	for (uint32_t edge = 0; edge <= a->nlabel; edge++) {
+		X->live = asm_live;
+		if (edge) x64_label(e, edges[edge - 1]);
+		/* outputs stored */
+		for (uint32_t i = 0; i < a->nout; i++) {
+			xopnd *o = &op[i];
 
-		if (o->kind != XO_REG || o->sp)
-			continue;
-		if (o->lpark) {
-			lval s = { .k = L_FRAME, .off = o->lpark, .align = 8 };
+			if (o->kind != XO_REG || o->sp)
+				continue;
+			if (o->lpark) {
+				lval s = { .k = L_FRAME, .off = o->lpark, .align = 8 };
 
-			o->l.r = (uint8_t)x64_treg(e);
-			x64_mem(e, X_LD, 8, o->l.r, &s, false);
+				o->l.r = (uint8_t)x64_treg(e);
+				x64_mem(e, X_LD, 8, o->l.r, &s, false);
+			}
+			if (o->l.bf) {
+				val v = { .k = V_REG, .r = o->reg };
+
+				(void)v;
+				wk_put(e, &o->l, o->t, o->reg);
+			} else {
+				x64_store(e, o->reg, &o->l, o->size);
+			}
 		}
-		if (o->l.bf) {
-			val v = { .k = V_REG, .r = o->reg };
+		for (int r = 0; r < 32; r++)
+			if (saved & (1u << r)) {
+				lval s = { .k = L_FRAME, .off = sslot[r], .align = 8 };
 
-			(void)v;
-			wk_put(e, &o->l, o->t, o->reg);
-		} else {
-			x64_store(e, o->reg, &o->l, o->size);
-		}
+				x64_mem(e, X_LD, r >= XMM0 ? 16 : 8, r, &s, false);
+			}
+		if (edge) wk_goto(e, a->labels[edge - 1]);
+		else if (done) x64_jump(e, done);
 	}
+	if (done) x64_label(e, done);
+	X->live = asm_live;
 	/* temporaries given back, the saved ones restored */
 	for (uint32_t i = 0; i < nops; i++) {
 		xopnd *o = &op[i];
@@ -654,25 +775,5 @@ VPRIV void x64_asm(ecx *e, uint32_t n)
 	}
 	X->live &= ~reserved;
 	X->asmcs = false;
-	for (int r = 0; r < 32; r++)
-		if (saved & (1u << r)) {
-			lval s = { .k = L_FRAME, .off = sslot[r], .align = 8 };
 
-			x64_mem(e, X_LD, 8, r, &s, false);
-		}
-	if (tramp && e->reach) {
-		uint32_t end = X->nin, cont = wk_newlabel(e);
-
-		x64_jump(e, cont);
-		for (uint32_t k = 0; k < a->nlabel; k++) {
-			x64_label(e, tl[k]);
-			for (uint32_t r = post; r < end; r++) {
-				rec *d = x64_put(e, X->in[r].op);
-
-				*d = X->in[r];
-			}
-			x64_jump(e, wk_userlabel(e, a->labels[k]));
-		}
-		x64_label(e, cont);
-	}
 }

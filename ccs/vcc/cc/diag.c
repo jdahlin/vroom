@@ -3,14 +3,15 @@
 
 /* ---------------- diagnostics ---------------- */
 
-/* clang's -ferror-limit (default 20, 0: none): stop the TU with its fatal error */
+/* Clang's implicit limit permits 19 errors plus the fatal record; an explicit
+ * -ferror-limit=N permits N errors before the fatal (0 means unlimited). */
 VPRIV void error_limit(cc *c)
 {
 	int lim = pp_error_limit(c->p);
 
 	if (!lim)
-		lim = 20;
-	if (lim > 0 && pp_errors(c->p) + 1 >= lim) {
+		lim = 19;
+	if (lim > 0 && pp_errors(c->p) >= lim) {
 		pp_dinfo d = { "fatal error", UINT32_MAX, NULL, 0, NULL, 0, NULL, 0 };
 
 		pp_diagx(c->p, &d, "too many errors emitted, stopping now [-ferror-limit=]");
@@ -139,7 +140,7 @@ VPRIV void rec_save(cc *c, recov *r)
 {
 	r->prev = c->rec;
 	r->depth = c->depth, r->ndops = c->ndops, r->ncase = c->ncase, r->case_base = c->case_base;
-	r->dead = c->dead, r->fn = c->fn;
+	r->dead = c->dead, r->fn = c->fn, r->constexpr_init = c->constexpr_init;
 	r->in_loop = c->in_loop, r->in_switch = c->in_switch, r->in_stmtexpr = c->in_stmtexpr;
 	r->unevaluated = c->unevaluated, r->in_struct = c->in_struct, r->ibr = c->ibr, r->in_tyname = c->in_tyname;
 	r->switch_cases = c->switch_cases, r->switch_ty = c->switch_ty;
@@ -239,7 +240,7 @@ VPRIV void rec_restore(cc *c, recov *r, int mode)
 	while (c->depth > r->depth)
 		scope_close(c);
 	c->ndops = r->ndops, c->ncase = r->ncase, c->case_base = r->case_base;
-	c->dead = r->dead, c->fn = r->fn;
+	c->dead = r->dead, c->fn = r->fn, c->constexpr_init = r->constexpr_init;
 	c->in_loop = r->in_loop, c->in_switch = r->in_switch, c->in_stmtexpr = r->in_stmtexpr;
 	c->unevaluated = r->unevaluated, c->in_struct = r->in_struct, c->in_tyname = r->in_tyname;
 	int open = is(c, T_SEMI) ? 0 : c->ibr - r->ibr;	/* initializer braces left open, unless a ';' ends them */
@@ -410,6 +411,27 @@ VPRIV bool cc_warnx(cc *c, const char *flag, bool on, const char *const *groups,
 	return true;
 }
 
+/* A default error that participates in named -W controls and pragmas. */
+__attribute__((format(printf, 7, 8)))
+VPRIV void cc_errorx(cc *c, const char *flag, const char *const *groups, uint32_t loc,
+                   const pp_span *r, int nr, const char *fmt, ...)
+{
+	int lv = pp_diag_elevel(c->p, flag, groups, loc);
+	va_list ap;
+
+	if (lv < 0) { c->dms = NULL; return; }
+	pp_diag_pc = __builtin_return_address(0);
+	if (lv == VDL_ERROR)
+		unknown_toks(c), error_limit(c), c->errors++;
+	c->ndiag++;
+	va_start(ap, fmt);
+	vdiag *d = rec(c, lv, loc, r, nr, NULL, 0, fmt, ap);
+	va_end(ap);
+	pp_diag_flag(d, flag);
+	d->werror = lv == VDL_ERROR && pp_werror_named(c->p, flag, groups) > 0;
+	pp_diag_emit(c->p, d);
+}
+
 /* a warning record of clang's flag to fill in (labels, help) and pp_diag_emit; NULL if off */
 __attribute__((format(printf, 6, 7)))
 VPRIV vdiag *cc_warn_begin(cc *c, const char *flag, bool on, const char *const *groups, uint32_t loc, const char *fmt, ...)
@@ -441,7 +463,7 @@ const char *const w_ped[] = { "pedantic", NULL };
 
 /* every flag ext_on is asked about, and every group they are in: whether any can be on */
 static const char *const ext_flags[] = {
-	"c23-extensions", "c2y-extensions", "extra-semi", "gnu-conditional-omitted-operand", "gnu-empty-struct",
+	"c23-extensions", "c2y-extensions", "extra-semi", "gnu-conditional-omitted-operand", "gnu-compound-literal-initializer", "gnu-empty-struct",
 	"gnu-label-as-value", "gnu-pointer-arith", "gnu-statement-expression",
 	"gnu-statement-expression-from-macro-expansion", "language-extension-token", "pedantic", "pointer-arith",
 	"zero-length-array", NULL

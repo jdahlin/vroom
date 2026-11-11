@@ -388,7 +388,7 @@ VPRIV void gen_asm(ecx *e, uint32_t n)
 			if (!reg_ok && !strchr(cs, 'Z')) {
 				if (mem_ok) {
 					/* a value for a memory operand: put it in a slot */
-					int32_t sl = slot(e, tsize(c, o->t) ? tsize(c, o->t) : 8, 16);
+					int64_t sl = slot(e, tsize(c, o->t) ? tsize(c, o->t) : 8, 16);
 					lval l = { .k = L_FRAME, .off = sl, .align = 16 };
 					int r;
 

@@ -3,6 +3,10 @@
 
   bench/vcc-abi.py [-v] [--host | --target wasm64|wasm32|x86_64 [--vlink]] [PAT]
 
+--generated dispatches to vcc-abi-generated.py for the pinned GCC/LLVM
+cross-call generators. It accepts --count, --start, --suite, -j and Linux
+--target triples (or x86_64). See that harness's --help for coverage.
+
 Every ccs/vcc/tests/abi/NAME/ has caller.c (main, the checks) and callee.c
 (the functions it calls, and callbacks into the caller); a header there is
 on the include path.  Each half is built by clang and by vcc, and all four
@@ -111,6 +115,13 @@ def one(name, wd, verbose):
 def main():
     global HOST
     av = sys.argv[1:]
+    if '--generated' in av:
+        av.remove('--generated')
+        if '--target' in av:
+            i = av.index('--target') + 1
+            if i < len(av) and av[i] == 'x86_64':
+                av[i] = 'x86_64-linux-gnu'
+        os.execv(sys.executable, [sys.executable, f'{B}/vcc-abi-generated.py', *av])
     verbose = '-v' in av
     HOST = '--host' in av
     av = [a for a in av if a not in ('-v', '--host')]

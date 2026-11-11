@@ -229,8 +229,9 @@ static bool il_full(const ilist *l, uint64_t pos)
 {
 	if (l->array)
 		return !l->unknown && pos >= l->n;
+	/* Unnamed bit-fields can precede the first initializable union member. */
 	if (l->isunion)
-		return pos >= 1 || l->uset;
+		return pos >= l->n || l->uset;
 	return pos >= l->n;
 }
 
@@ -274,6 +275,28 @@ static pp_span skip_braces(cc *c)
 /* a string literal for a char array of known size: longer than it (the terminator may go) */
 static void str_fit(cc *c, qty arr, uint32_t s)
 {
+	if (unlikely(c->constexpr_init) && is_array(c, arr) && N(s)->op == N_STR) {
+		const cstr *str = &c->strs[N(s)->a];
+		qty from = T(c, N(s)->ty)->base, to = T(c, arr)->base;
+		uint64_t count = str->n;
+
+		if (!(T(c, arr)->flags & TF_INCOMPLETE) && count > arr_len(c, arr))
+			count = arr_len(c, arr);
+		for (uint64_t i = 0; i < count; i++) {
+			i128 value = 0;
+
+			for (unsigned k = 0; k < str->esz; k++)
+				value |= (i128)(unsigned char)str->s[i * str->esz + k] << (8*k);
+			value = trunc_to(c, value, from);
+			if (trunc_to(c, value, to) != value) {
+				char text[48];
+
+				i128s_(text, sizeof text, value);
+				cc_error(c, N(s)->loc, "constexpr initializer evaluates to %s which is not exactly representable in type '%s'", text, tyname(c, to));
+				break;
+			}
+		}
+	}
 	if (is_array(c, arr) && !(T(c, arr)->flags & (TF_INCOMPLETE | TF_VLA)) && N(s)->op == N_STR &&
 	    c->strs[N(s)->a].esz == 1 && c->strs[N(s)->a].n - 1 > T(c, arr)->n) {
 		pp_span r = rng(c, s);
@@ -377,6 +400,8 @@ static void il_elem(cc *c, ilist *l, uint64_t pos, uint32_t v, bool st)
 	}
 	if (!l->array && is_record(c, l->ty) && c->tags[T(c, l->ty)->aux].f[pos].bitfield)
 		bitfield_const(c, &c->tags[T(c, l->ty)->aux].f[pos], decay(c, v), 0);
+	if (unlikely(c->constexpr_init))
+		constexpr_conversion(c, decay(c, v), et);
 	il_set(c, l, pos, is_record(c, et) && !is_complex(c, et) ? v : convert(c, decay(c, v), et), NULL);
 }
 
@@ -520,6 +545,8 @@ static uint64_t il_designation(cc *c, ilist *l, bool st)
 				il_run(c, l, lo, hi, 0, s);
 			} else {
 				if (!(is_array(c, et) || is_record(c, et) || is_vector(c, et))) {
+					if (unlikely(c->constexpr_init))
+						constexpr_conversion(c, decay(c, v), et);
 					v = convert(c, decay(c, v), et);
 				}
 				il_run(c, l, lo, hi, v, NULL);
@@ -661,6 +688,51 @@ static uint32_t init_braced(cc *c, qty ty, bool st)
 	return v;
 }
 
+/* Clang's GNU array-copy extension accepts nonconstant reads, but not
+   observable effects in the compound literal (including volatile reads). */
+static bool array_copy_effects(cc *c, uint32_t n, bool load, unsigned depth)
+{
+	if (!n) return false;
+	if (depth > 128) return true;
+	const node *x = N(n);
+	if (load && (x->flags & NF_LVALUE) && (QQ(x->ty) & Q_VOLATILE))
+		return true;
+	switch (x->op) {
+	case N_INIT:
+		for (uint32_t i = 0; i < x->c; i++)
+			if (array_copy_effects(c, c->lists[x->b + (x->aux == 1 ? 3 * i + 2 : i)], true, depth + 1))
+				return true;
+		return false;
+	case N_COMPLIT: case N_UNARY: case N_DEREF:
+		return array_copy_effects(c, x->a, true, depth + 1);
+	case N_ADDR: case N_MEMBER:
+		return array_copy_effects(c, x->a, false, depth + 1);
+	case N_CAST:
+		return array_copy_effects(c, x->a, x->aux != CK_DECAY && x->aux != CK_FDECAY, depth + 1);
+	case N_CALL: {
+		uint32_t fn = x->a;
+		while (N(fn)->op == N_CAST) fn = N(fn)->a;
+		if (N(fn)->op != N_VAR) return true;
+		const sym *f = &c->syms[N(fn)->a];
+		if (!f->attrs || !c->attr[f->attrs].pure) return true;
+		for (uint32_t i = 0; i < x->c; i++)
+			if (array_copy_effects(c, c->lists[x->b + i], true, depth + 1)) return true;
+		return false;
+	}
+	case N_BUILTIN: {
+		cval v;
+		return !eval(c, n, &v);
+	}
+	case N_INDEX: case N_BINARY: case N_LOGAND: case N_LOGOR: case N_COMMA: case N_CPLX:
+		return array_copy_effects(c, x->a, true, depth + 1) || array_copy_effects(c, x->b, true, depth + 1);
+	case N_COND:
+		return array_copy_effects(c, x->a, true, depth + 1) || array_copy_effects(c, x->b, true, depth + 1) ||
+		       array_copy_effects(c, x->c, true, depth + 1);
+	default:
+		return has_side_effects(c, n);
+	}
+}
+
 VPRIV uint32_t initializer(cc *c, qty *ty, bool st)
 {
 	uint32_t loc = tok(c)->loc;
@@ -706,18 +778,36 @@ VPRIV uint32_t initializer(cc *c, qty *ty, bool st)
 		uint32_t v = assign_expr(c);
 
 		if (is_array(c, t)) {
+			if (N(v)->op == N_COMPLIT && is_array(c, N(v)->ty)) {
+				uint32_t at = c->cv_what == CX_INIT ? c->cv_loc : loc;
+				if (!compatible(c, t, N(v)->ty)) {
+					cc_error(c, at, "cannot initialize array of type '%s' with array of type '%s'",
+						 tyname(c, t), tyname(c, N(v)->ty));
+					return v;
+				}
+				if (array_copy_effects(c, N(v)->a, true, 0)) {
+					cc_error(c, at, "cannot initialize array of type '%s' with non-constant array of type '%s'",
+						 tyname(c, t), tyname(c, N(v)->ty));
+					return v;
+				}
+				EXT_WARN(c, "gnu-compound-literal-initializer", w_gnu, at,
+					 "initialization of an array of type '%s' from a compound literal of type '%s' is a GNU extension",
+					 tyname(c, t), tyname(c, N(v)->ty));
+				if (T(c, t)->flags & TF_INCOMPLETE)
+					*ty = QT(QI(N(v)->ty), QQ(t));
+				return v;
+			}
 			if (!string_initializes(c, t, v)) {
 				cc_error(c, c->cv_what == CX_INIT ? c->cv_loc : loc, "array initializer must be an initializer list");
 				return v;
 			}
+			str_fit(c, t, v);
 			if (T(c, t)->flags & TF_INCOMPLETE)
 				*ty = QT(QI(ty_array(c, T(c, t)->base, c->strs[N(v)->a].n, 0)), QQ(t));
-			else
-				str_fit(c, t, v);
 			return v;
 		}
 		if (is_record(c, t) && !is_complex(c, t)) {
-			if (!compatible(c, N(v)->ty, t))
+			if (!compatible(c, ty_unatomic(c, N(v)->ty), ty_unatomic(c, t)))
 				cc_error(c, loc, "initializing with an expression of incompatible type");
 			return v;
 		}

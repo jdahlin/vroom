@@ -1,0 +1,26 @@
+subscript_element.c:5:5: error: subscript of pointer to function type 'void (void)'
+    5 |     function[0];
+      |     ^~~~~~~~
+subscript_element.c:6:7: error: subscript of pointer to function type 'void (void)'
+    6 |     0[function];
+      |       ^~~~~~~~
+subscript_element.c:7:11: error: subscript of pointer to incomplete type 'struct Forward'
+    2 | struct Forward;
+      |        - forward declaration of 'struct Forward'
+  ...
+    7 |     object[0];
+      |     ~~~~~~^
+subscript_element.c:2:8: note: forward declaration of 'struct Forward'
+subscript_element.c:8:6: error: subscript of pointer to incomplete type 'struct Forward'
+    8 |     0[object];
+      |      ^~~~~~~
+subscript_element.c:2:8: note: forward declaration of 'struct Forward'
+    2 | struct Forward;
+      |        ^
+subscript_element.c:9:10: error: array subscript is not an integer
+    9 |     array[1.5];
+      |     ~~~~~^~~~
+subscript_element.c:10:8: error: array subscript is not an integer
+   10 |     1.5[array];
+      |     ~~~^~~~~~
+6 errors generated.

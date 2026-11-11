@@ -1,6 +1,5 @@
 /* GNU vectors of __int128 and long double: arithmetic, shifts, comparisons, unary ops
    lane by lane (the lanes are objects held by address). */
-/* vcc-xfail: arm64: unary minus on __int128 vector lanes keeps 32 bits (TODO.md tier 1) */
 int printf(const char*, ...);
 typedef __int128 W __attribute__((vector_size(32))); typedef unsigned __int128 U __attribute__((vector_size(32)));
 typedef long double L __attribute__((vector_size(32)));

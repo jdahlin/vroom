@@ -30,6 +30,8 @@ def bin_dir():
     d = os.environ.get('VCC_BIN', BUILD)
     if '--bin-dir' in sys.argv:
         k = sys.argv.index('--bin-dir'); d = sys.argv[k+1]; del sys.argv[k:k+2]
+        # Spawn/forkserver workers import this module after argv was consumed.
+        os.environ['VCC_BIN'] = os.path.abspath(d)
     return os.path.abspath(d)
 BIN = bin_dir(); VPP = os.environ.get('VPP', f'{BIN}/vpp')
 

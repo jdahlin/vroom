@@ -279,7 +279,8 @@ def init(nocache):
     NOCACHE = nocache
 
 if __name__ == '__main__':
-    av = sys.argv[1:]
+    av = [part for arg in sys.argv[1:]
+          for part in (('-j', arg[2:]) if re.fullmatch(r'-j[0-9]+', arg) else (arg,))]
     j, suite, show, verbose = 6, None, None, False
     nocache = '--no-cache' in av
     av = [a for a in av if a != '--no-cache']
@@ -301,6 +302,8 @@ if __name__ == '__main__':
             else: show = v
     pat = av[0] if av else None
     ts = ct.tests(suite, pat)
+    if not ts:
+        sys.exit('no tests matched the requested suite/pattern')
     t0 = time.time()
     rt_obj()
     with Pool(j, initializer=init, initargs=(nocache,)) as pool:

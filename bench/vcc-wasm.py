@@ -59,6 +59,31 @@ WASM_XFAIL.update({
     'vec_wide_lanes': 'wasm: __int128/double vector lanes (TODO.md tier 1, as arm64)',
 })
 
+# New coverage of existing Wasm gaps; never skip the compile/run or accept XPASS.
+# See TODO.md "wasm: Linux-correctness coverage gaps" for baseline and probes.
+WASM_XFAIL.update({
+    'array_constants': 'TODO.md wasm: Linux-correctness coverage gaps: array-address constant conditions leave unreachable calls',
+    'atomic_record': 'TODO.md wasm: Linux-correctness coverage gaps: 128-bit atomic record value conversions are not lowered',
+    'complex_div_runtime': 'TODO.md wasm: Linux-correctness coverage gaps: long-double classification builtins used by complex division are not lowered',
+    'dead_branch_entries': 'TODO.md wasm: Linux-correctness coverage gaps: constant branches retain unreachable prefixes before live labels',
+    'deep_conditional': 'TODO.md wasm: Linux-correctness coverage gaps: nested GNU omitted-middle conditionals mishandle __int128 values',
+    'fabs_asm_identity': 'TODO.md wasm: Linux-correctness coverage gaps: fabs/fabsf intrinsic selection ignores asm-renamed function identity',
+    'fp_classify_builtin': 'TODO.md wasm: Linux-correctness coverage gaps: runtime __builtin_isnormal/__builtin_fpclassify are not lowered',
+    'fp_compare_builtin': 'TODO.md wasm: Linux-correctness coverage gaps: ordered/unordered floating comparison builtins are not lowered',
+    'fpclassify': 'TODO.md wasm: Linux-correctness coverage gaps: runtime __builtin_isnormal/__builtin_fpclassify are not lowered',
+    'generic_bitcount': 'TODO.md wasm: Linux-correctness coverage gaps: _BitInt runtime precision and generic bitcount lowering are not implemented',
+    'gnu_conditional_float': 'TODO.md wasm: Linux-correctness coverage gaps: GNU omitted-middle floating conditional mishandles truth/value conversion',
+    'inline_constants': 'TODO.md wasm: Linux-correctness coverage gaps: no inliner for __builtin_constant_p of call arguments',
+    'int128_shift_count': 'TODO.md wasm: Linux-correctness coverage gaps: __int128 shift-count operands are not narrowed correctly',
+    'isfpclass': 'TODO.md wasm: Linux-correctness coverage gaps: runtime __builtin_isfpclass/__builtin_issignaling are not lowered',
+    'math_library_identity': 'TODO.md wasm: Linux-correctness coverage gaps: math intrinsic selection ignores asm-renamed function identity',
+    'optimized_conditions': 'TODO.md wasm: Linux-correctness coverage gaps: constant-condition optimization leaves unreachable calls',
+    'parenthesized_function': 'TODO.md wasm: Linux-correctness coverage gaps: nested function-pointer return call has an incorrect Wasm signature',
+    'signaling_nan': 'TODO.md wasm: Linux-correctness coverage gaps: runtime __builtin_issignaling is not lowered',
+    'transparent_union_redecl': 'TODO.md wasm: Linux-correctness coverage gaps: transparent-union redeclarations do not use the member calling convention',
+    'void_lvalue': 'TODO.md wasm: Linux-correctness coverage gaps: void lvalue evaluation leaves unwanted Wasm stack values',
+})
+
 def set_target(w32):
     """wasm32 (W7) instead of wasm64: the target, emcc's memory, the work directory"""
     global OUT, TGT, BASE, LINK, RTO
@@ -146,6 +171,10 @@ def reference(suite, name, path, flags, wd):
 def one(t):
     t, st, cat, why = one_(t)
     xf = WASM_XFAIL.get(t[1]) if t[0] in ('gcc', 'vcc') else None
+    if t[0] == 'vcc':
+        marker = re.search(r'/\*\s*vcc-xfail-wasm:(.*?)\*/', open(t[2]).read(), re.S)
+        if marker:
+            xf = ' '.join(marker.group(1).split())
     if xf and st == 'fail':
         return t, 'xfail', cat, f'{xf} [{why}]'
     if xf and st == 'pass':

@@ -1,0 +1,4 @@
+bfloat_complex.c:1:1: error: _Complex __bf16 is invalid
+    1 | _Complex __bf16 invalid;
+      | ^
+1 error generated.
