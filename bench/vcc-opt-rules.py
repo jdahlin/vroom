@@ -61,6 +61,9 @@ def check_localvalues(assembly, arch):
             raise RuntimeError(f'{name}: unary expression reuse or distinction failed')
     if len(re.findall(add, text)) != 1:
         raise RuntimeError(f'sibling value must be computed once\n{text}')
+    add64 = r'i64\.add\b' if wasm else r'\badd\s+x' if arch == 'aarch64' else r'\baddq\b'
+    if len(re.findall(add64, body(assembly, 'lvr_unary_64', wasm))) != 1:
+        raise RuntimeError('64-bit unary expression must be computed once')
     text = body(assembly, 'lvr_reuse', wasm)
     if len(re.findall(add, text)) != 1:
         raise RuntimeError(f'declaration value must be reused in return\n{text}')
