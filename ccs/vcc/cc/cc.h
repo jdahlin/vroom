@@ -90,6 +90,7 @@ typedef struct field {
 enum {
 	RF_COMPLETE = 1, RF_UNION = 2, RF_PACKED = 4, RF_FLEX = 8, RF_ENUM = 16,
 	RF_BEING_DEFINED = 32,
+	RF_MS_STRUCT = 128,	/* Microsoft allocation units for bit-fields */
 	RF_COMPLEX = 64,	/* _Complex T: struct { T re, im; } (AAPCS64 passes it like that) */
 };
 

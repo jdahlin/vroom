@@ -397,7 +397,7 @@ static uint32_t key_hash(const void *he, unsigned ctr, uint32_t pack, uint64_t s
 /* the #pragma pack state a region sees: its depth (lazy bodies) and the alignment in effect */
 static uint32_t pack_key(const cc *c)
 {
-	return c->npack ? (uint32_t)c->npack << 24 | c->pack[c->npack - 1] : 0;
+	return (c->npack ? (uint32_t)c->npack << 24 | c->pack[c->npack - 1] : 0) | ((uint32_t)c->ms_struct << 23);
 }
 
 /*

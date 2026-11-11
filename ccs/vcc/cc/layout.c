@@ -7,7 +7,8 @@
 static uint64_t align_to(uint64_t v, uint64_t a) { return a ? (v + a - 1) / a * a : v; }
 
 typedef struct layout {
-	bool is_union, packed;
+	bool is_union, packed, ms_struct;
+	uint64_t last_unit;	/* Microsoft bit-field storage-unit size, or zero */
 	uint64_t max_field_align;	/* bits; #pragma pack */
 	uint64_t data_size, size;	/* bits */
 	uint64_t unfilled;		/* bits unfilled in the last bit-field unit */
@@ -34,6 +35,15 @@ static void lay_bitfield(cc *c, layout *l, field *f, uint32_t fattr_align, bool 
 	uint64_t ufoff;
 	uint64_t mfa = l->max_field_align;
 
+	if (l->ms_struct) {
+		falign = unit;
+		if (l->last_unit != unit || l->unfilled < fsize) {
+			if (!l->last_unit && !fsize)
+				falign = 1; /* zero-width after a non-bitfield has no effect */
+			l->unfilled = 0;
+			l->last_unit = 0;
+		}
+	}
 	off = l->is_union ? 0 : l->data_size - l->unfilled;
 	/* AArch64: useBitFieldTypeAlignment and useZeroLengthBitfieldAlignment */
 	ufalign = falign;
@@ -50,8 +60,15 @@ static void lay_bitfield(cc *c, layout *l, field *f, uint32_t fattr_align, bool 
 		else
 			falign = falign < mfa ? falign : mfa;
 	}
+	if (l->ms_struct && l->is_union)
+		falign = ufalign = 1;
 	ufoff = off;
-	{
+	if (l->ms_struct) {
+		if (!fsize || fsize > l->unfilled) {
+			off = align_to(off, falign);
+			l->unfilled = 0;
+		}
+	} else {
 		bool allow_pad = mfa == 0;
 
 		bool exp = explicit_align && (mfa == 0 || explicit_align <= mfa);	/* useExplicitBitFieldAlignment */
@@ -67,19 +84,26 @@ static void lay_bitfield(cc *c, layout *l, field *f, uint32_t fattr_align, bool 
 	}
 	f->off = off;
 	if (l->is_union) {
-		uint64_t rs = align_to(fsize, 8);
+		uint64_t rs = l->ms_struct ? (fsize ? unit : 8) : align_to(fsize, 8);
 
 		if (rs > l->data_size)
 			l->data_size = rs;
+	} else if (l->ms_struct && fsize) {
+		if (!l->unfilled)
+			l->data_size = off + unit, l->unfilled = unit;
+		l->unfilled -= fsize;
+		l->last_unit = unit;
 	} else {
 		uint64_t ns = off + fsize;
+
+		l->last_unit = 0;
 
 		l->data_size = align_to(ns, 8);
 		l->unfilled = l->data_size - ns;
 	}
 	if (l->data_size > l->size)
 		l->size = l->data_size;
-	if (c->o->target != PP_LINUX_AARCH64 && !f->name)
+	if (!l->ms_struct && c->o->target != PP_LINUX_AARCH64 && !f->name)
 		falign = ufalign = 8;	/* Apple, wasm (no useZeroLengthBitfieldAlignment): unnamed bit-fields leave the record's alignment */
 	lay_update(l, falign, ufalign);
 }
@@ -95,6 +119,7 @@ static void lay_field(cc *c, layout *l, field *f, uint32_t fattr_align, bool fpa
 	}
 	off = l->is_union ? 0 : l->data_size;
 	l->unfilled = 0;
+	l->last_unit = 0;
 	falign = (uint64_t)ty_align(c, f->ty) * 8;
 	fsize = is_array(c, f->ty) && (T(c, f->ty)->flags & TF_INCOMPLETE) ? 0 : ty_size(c, f->ty) * 8;
 	packed = l->packed || fpacked;
@@ -129,7 +154,7 @@ static void lay_field(cc *c, layout *l, field *f, uint32_t fattr_align, bool fpa
 VPRIV void lay_record(cc *c, tag *r, const uint32_t *fa, const uint8_t *fp)
 {
 	layout l = { .is_union = (r->flags & RF_UNION) != 0, .packed = (r->flags & RF_PACKED) != 0,
-		     .align = 8, .unpacked_align = 8 };
+		     .ms_struct = (r->flags & RF_MS_STRUCT) != 0, .align = 8, .unpacked_align = 8 };
 
 	if (c->npack && c->pack[c->npack - 1])
 		l.max_field_align = (uint64_t)c->pack[c->npack - 1] * 8;

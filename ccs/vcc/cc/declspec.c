@@ -862,7 +862,7 @@ again:
 					tag_body_end(c, kind);
 				} else {
 					DR_TAGWRITE(c, ti);
-					c->tags[ti].flags |= (pre.packed ? RF_PACKED : 0);
+					c->tags[ti].flags |= (pre.packed ? RF_PACKED : 0) | ((pre.ms_struct || c->ms_struct) ? RF_MS_STRUCT : 0);
 					c->tags[ti].maxalign = pre.aligned;
 					struct_body(c, ti);
 					tag_body_end(c, kind);

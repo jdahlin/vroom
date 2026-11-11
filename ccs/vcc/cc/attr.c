@@ -4,7 +4,7 @@
 /* ---------------- attributes ---------------- */
 
 enum {
-	A_NONE, A_ALIGNED, A_PACKED, A_SECTION, A_MODE, A_CLEANUP, A_ALIAS, A_WEAK, A_USED, A_UNUSED,
+	A_NONE, A_MS_STRUCT, A_ALIGNED, A_PACKED, A_SECTION, A_MODE, A_CLEANUP, A_ALIAS, A_WEAK, A_USED, A_UNUSED,
 	A_NORETURN, A_ALWAYS_INLINE, A_NOINLINE, A_GNU_INLINE, A_TRANSPARENT_UNION, A_VISIBILITY,
 	A_CONSTRUCTOR, A_DESTRUCTOR, A_COUNTED_BY, A_VECTOR_SIZE, A_COLD, A_NONSTRING, A_MAY_ALIAS,
 	A_WEAKREF, A_NAKED, A_NOCF, A_ERROR, A_OVERLOADABLE, A_NOINSTR, A_TLS_MODEL, A_EXT_VECTOR, A_DEPRECATED, A_WUR, A_NODISCARD, A_IFUNC, A_NONNULL, A_FORMAT, A_FORMAT_ARG,
@@ -13,7 +13,7 @@ enum {
 };
 
 static const char *const attr_names[A_COUNT] = {
-	[A_ALIGNED] = "aligned", [A_PACKED] = "packed", [A_SECTION] = "section", [A_MODE] = "mode",
+	[A_MS_STRUCT] = "ms_struct", [A_ALIGNED] = "aligned", [A_PACKED] = "packed", [A_SECTION] = "section", [A_MODE] = "mode",
 	[A_CLEANUP] = "cleanup", [A_ALIAS] = "alias", [A_WEAK] = "weak", [A_USED] = "used",
 	[A_UNUSED] = "unused", [A_NORETURN] = "noreturn", [A_ALWAYS_INLINE] = "always_inline",
 	[A_NOINLINE] = "noinline", [A_GNU_INLINE] = "gnu_inline", [A_TRANSPARENT_UNION] = "transparent_union",
@@ -527,6 +527,7 @@ __attribute__((noinline)) VPRIV void attribute_list_(cc *c, attrs *a)
 					a->extvec = (uint32_t)v;
 				continue;
 			}
+			case A_MS_STRUCT: a->ms_struct = 1; break;
 			case A_PACKED: a->packed = 1; break;
 			case A_WEAK: a->weak = 1; break;
 			case A_USED: a->used = 1; break;
@@ -617,6 +618,7 @@ VPRIV void merge_attrs(attrs *to, const attrs *from)
 		return;
 	if (from->aligned > to->aligned)
 		to->aligned = from->aligned;
+	if (from->ms_struct) to->ms_struct = from->ms_struct;
 	if (from->section) to->section = from->section;
 	if (from->alias) to->alias = from->alias;
 	if (from->asmname) to->asmname = from->asmname;

@@ -51,6 +51,7 @@ typedef struct attrs {		/* the attributes of one declaration */
 	uint32_t ifunc;		/* ifunc("resolver"): alias is the resolver, an STT_GNU_IFUNC symbol */
 	uint32_t counted_by;	/* identifier id */
 	uint32_t errmsg;	/* error("..."): string index + 1, 0: none */
+	uint32_t ms_struct;	/* Microsoft record layout */
 	uint32_t tlsloc;		/* tls_model attribute location */
 	uint32_t visibility;
 	uint32_t flags;		/* SF_* */
@@ -236,6 +237,7 @@ struct cc {
 	uint32_t pack[64];	/* #pragma pack stack (bytes, 0: none) */
 	uint64_t packid[64];	/* labels (token.c pragma_pack) */
 	int npack;
+	bool ms_struct;		/* #pragma ms_struct on/off/reset */
 	/* #pragma weak (decl.c): waiting for key's declaration (alias: 0, or the weak alias of key) */
 	struct pweak { uint32_t key, alias, loc, sym; } *pweak;
 	uint32_t npweak, cpweak;	/* (the done aliases, sym set, stay for the end-of-TU check) */

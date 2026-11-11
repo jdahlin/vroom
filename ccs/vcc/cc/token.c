@@ -402,6 +402,14 @@ static void pragma(cc *c, const ptok *t)
 		pragma_weak(c, s + 4, e, t->s, t->loc);
 		return;
 	}
+	if (e - s >= 9 && !memcmp(s, "ms_struct", 9) && (e - s == 9 || s[9] == ' ' || s[9] == '\t')) {
+		if (unlikely(c->dr_on))
+			dr_pragma(c, 2);
+		s += 9;
+		while (s < e && (*s == ' ' || *s == '\t')) s++;
+		c->ms_struct = e - s >= 2 && !memcmp(s, "on", 2);
+		return;
+	}
 	if ((size_t)(e - s) < 4 || memcmp(s, "pack", 4))
 		return;
 	if (unlikely(c->dr_on))

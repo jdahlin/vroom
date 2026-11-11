@@ -191,6 +191,8 @@ __attribute__((noinline)) VPRIV void struct_body(cc *c, uint32_t ti)
 	r->nfield = nf;
 	tag_deprecate(c, ti, &post);
 	r = &c->tags[ti];
+	if (post.ms_struct)
+		r->flags |= RF_MS_STRUCT;
 	if (post.packed)
 		r->flags |= RF_PACKED;
 	if (post.aligned > r->maxalign)
