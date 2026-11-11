@@ -1066,6 +1066,31 @@ static inline __attribute__((always_inline)) void raw_fast(pp *p, ptok *t)
 }
 
 /* the next fully expanded token */
+/*
+ * assembler-with-cpp: '$' is no identifier character (clang), so in "$APIC_ID"
+ * the macro APIC_ID expands: t becomes the '$' and the name is read next.
+ * (vcc's lexer is shared with C, where '$' is one: the split is made here.)
+ */
+static __attribute__((noinline, cold)) void dollar_split(pp *p, ptok *t)
+{
+	uint32_t id;
+
+	if (t->len < 2 || t->s[0] != '$' || (t->flags & TF_DIRTY) || t->s[1] == '$' || (t->s[1] >= '0' && t->s[1] <= '9'))
+		return;
+	id = vintern_find(t->s + 1, t->len - 1, vintern_hash(t->s + 1, t->len - 1));
+	if (!id || !mget(p, id))
+		return;
+	{
+		ptok *n = varena_alloc(&p->tmp, sizeof(*n));
+
+		*n = *t;
+		n->s = t->s + 1, n->len = t->len - 1, n->id = id, n->loc = t->loc + 1;
+		n->flags &= (uint8_t)~(TF_SOL | TF_SPACE);
+		push_ptok(p, n, 1, 0, 0, 0);
+		t->len = 1, t->id = 0, t->kind = T_UNKNOWN;
+	}
+}
+
 static inline __attribute__((always_inline)) void next_exp(pp *p, ptok *t)
 {
 	uintptr_t e;
@@ -1074,8 +1099,11 @@ static inline __attribute__((always_inline)) void next_exp(pp *p, ptok *t)
 	if (t->kind != T_IDENT || (t->flags & PF_NOEXP))
 		return;
 	e = mread_tok(p, t, 0);
-	if (likely(!e))
+	if (likely(!e)) {
+		if (unlikely(p->o->asm_mode) && t->s[0] == '$')
+			dollar_split(p, t);
 		return;
+	}
 	next_exp_slow(p, t, e);
 }
 
