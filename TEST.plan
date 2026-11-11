@@ -247,6 +247,17 @@ AArch64-TSan-ramen i `gen_inner` från 8608 till 432 byte. Det oförändrade
 workerstack; stackgränser, test och sanitizerkontroller har inte ändrats.
 
 ### S4 gcc.dg — påbörjad (2026-11-11)
+
+**C90-digrafer och satsscope (2026-11-11):** de oförändrade
+`c90-digraph-1.c` och `c90-scope-1.c` går nu från runtime-abort till godkänt
+på Linux x86-64 och arm64, både unity och nonunity. Strikt C89/C90 läser
+inte digrafer; C94 och GNU89 gör det. Urval/loopar får egna implicita scope
+först i C99, medan explicita block alltid behåller sitt scope.
+`bench/vcc-c90.py` kontrollerar sju lägen mot Clang, tokenklistring,
+stdin/-D och 21 blandade headercache-jobb per mål/build. Full PP-paritet
+är 920/920 i både cmp och batch före och efter lexerändringen; sema run
++ batch är 887/887 efteråt. Ingen upstreamflagga har tagits bort.
+
 `bench/vcc-gcc-dg.py -j 6 --target x86_64-linux-gnu` kör direkta
 `gcc.dg/*.c` med `dg-do run` (1276 filer) och direkta
 `gcc.dg/torture/*.c` (2208 filer). `--target aarch64-linux-gnu` använder

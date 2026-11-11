@@ -836,9 +836,9 @@ static uint32_t sub_statement(cc *c)
 {
 	uint32_t n;
 
-	scope_open(c);
+	if (c->o->std != 89) scope_open(c);
 	n = statement(c);
-	scope_close(c);
+	if (c->o->std != 89) scope_close(c);
 	return n;
 }
 
@@ -1055,7 +1055,7 @@ VPRIV uint32_t statement(cc *c)
 		uint32_t cnd, th, el = 0;
 
 		next(c);
-		scope_open(c);	/* C99 6.8.4p3: a selection statement is a block, and so is each substatement */
+		if (c->o->std != 89) scope_open(c);	/* C99 6.8.4p3: a selection statement is a block, and so is each substatement */
 		cnd = cond_of(c, "if");
 		{
 			/* clang: runtime-behaviour warnings only in reachable code */
@@ -1077,7 +1077,7 @@ VPRIV uint32_t statement(cc *c)
 				setspan(c, el, eb);
 			}
 			c->cnd--;
-			scope_close(c);
+			if (c->o->std != 89) scope_close(c);
 			n = mkstmt(c, N_IF, loc, cnd, th, el);
 			c->span[n] = (pp_span){ loc, rp };
 			return n;
@@ -1087,19 +1087,19 @@ VPRIV uint32_t statement(cc *c)
 		uint32_t cnd, body;
 
 		next(c);
-		scope_open(c);
+		if (c->o->std != 89) scope_open(c);
 		cnd = cond_of(c, "while");
 		c->in_loop++;
 		c->cnd++, body = sub_statement(c), c->cnd--;
 		c->in_loop--;
-		scope_close(c);
+		if (c->o->std != 89) scope_close(c);
 		return mkstmt(c, N_WHILE, loc, cnd, body, 0);
 	}
 	case KW_do: {
 		uint32_t cnd, body;
 
 		next(c);
-		scope_open(c);
+		if (c->o->std != 89) scope_open(c);
 		c->in_loop++;
 		c->cnd++, body = sub_statement(c), c->cnd--;
 		c->in_loop--;
@@ -1107,7 +1107,7 @@ VPRIV uint32_t statement(cc *c)
 			fatal(c, tok(c)->loc, "expected 'while' in do/while loop");
 		next(c);
 		cnd = cond_of(c, "while");
-		scope_close(c);
+		if (c->o->std != 89) scope_close(c);
 		expect_semi(c, "after do/while statement");
 		return mkstmt(c, N_DO, loc, cnd, body, 0);
 	}
@@ -1122,7 +1122,7 @@ VPRIV uint32_t statement(cc *c)
 		if (unlikely(!is(c, T_LPAREN)))
 			lparen_fail(c, "for");
 		next(c);
-		scope_open(c);
+		if (c->o->std != 89) scope_open(c);
 		if (REC_ARM(c, &r)) {	/* an error in the header: on with the body */
 			rec_restore(c, &r, REC_FOR);
 			init = cnd = step = 0;
@@ -1161,7 +1161,7 @@ VPRIV uint32_t statement(cc *c)
 			set_only(c, N(init)->a), unused_value(c, N(init)->a, false);
 		if (step)
 			set_only(c, step);
-		scope_close(c);
+		if (c->o->std != 89) scope_close(c);
 		vinit(&sb);
 		vpush(c, &sb, step);
 		vpush(c, &sb, body);
@@ -1174,7 +1174,7 @@ VPRIV uint32_t statement(cc *c)
 		qty saved = c->switch_ty;
 
 		next(c);
-		scope_open(c);
+		if (c->o->std != 89) scope_open(c);
 		open = tok(c)->loc;
 		if (unlikely(!is(c, T_LPAREN)))
 			lparen_fail(c, "switch");
@@ -1225,7 +1225,7 @@ VPRIV uint32_t statement(cc *c)
 		}
 		c->in_switch--;
 		c->switch_ty = saved;
-		scope_close(c);
+		if (c->o->std != 89) scope_close(c);
 		return mkstmt(c, N_SWITCH, loc, cnd, body, 0);
 	}
 	case KW_break:

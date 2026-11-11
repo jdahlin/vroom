@@ -543,6 +543,12 @@ static ptok paste(pp *p, const ptok *l, const ptok *r)
 	w = spell_to16(w, r);
 	memset(w, 0, 17);
 	k = classify(b, (size_t)(w - b), r->kind);
+	if (p->o->no_digraphs && ((w - b == 2 &&
+	    ((b[0] == '<' && (b[1] == ':' || b[1] == '%')) ||
+	     (b[0] == ':' && b[1] == '>') ||
+	     (b[0] == '%' && (b[1] == '>' || b[1] == ':')))) ||
+	    (w - b == 4 && !memcmp(b, "%:%:", 4))))
+		k = -1;
 	if (k < 0) {
 		error(p, l->loc, "pasting formed '%.*s', an invalid preprocessing token", (int)(w - b), b);
 		return *l;

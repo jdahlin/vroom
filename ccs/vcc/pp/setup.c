@@ -121,6 +121,10 @@ pp *pp_open(const pp_opts *o)
 
 	if (o->main_src) {
 		mf = stdin_file(p, o);
+		if (o->trigraphs) mf = vlex_trigraphs(mf);
+		if (o->c89) mf = vlex_c89(mf);
+		if (o->no_digraphs) mf = vlex_nodigraphs(mf);
+		if (o->c23) mf = vlex_digitsep(mf);
 	} else {
 		/* the caller's string is unpadded; vlex_get hashes by words (ASan) */
 		size_t ml = strlen(o->main);
@@ -174,6 +178,8 @@ pp *pp_open(const pp_opts *o)
 	p->builtin.ntok = vlex(src, n, tok, scratch);
 	p->builtin.tok = tok;
 	vmreg_put(&ppr[7], VMREG_SCRATCH);
+	if (o->no_digraphs)
+		p->builtin = *vlex_nodigraphs(&p->builtin);
 	enter_file(p, &p->builtin, "<built-in>", -1);
 	return p;
 }

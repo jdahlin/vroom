@@ -1551,6 +1551,7 @@ static __attribute__((noinline)) int ppd_run1(int argc, char **argv, const ppd_e
 	po.edirs = dirs_e, po.nedirs = ne;
 	po.c23 = std == 23;
 	po.c89 = std == 89 && strict;
+	po.no_digraphs = po.c89 && !stdver;
 	po.deps = mdeps || depfile;
 	po.show_includes = showinc;
 	po.comments = comments;
