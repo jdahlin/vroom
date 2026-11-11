@@ -944,7 +944,7 @@ static uint32_t atomic_call(cc *c, const builtin *b, uint32_t loc)
 	}
 	t = QUNQ(T(c, pt)->base);
 	tp = ty_ptr(c, t);
-	if (!(T(c, t)->size == 1 || T(c, t)->size == 2 || T(c, t)->size == 4 || T(c, t)->size == 8 || T(c, t)->size == 16)) {
+	if (!(T(c, t)->size == 1 || T(c, t)->size == 2 || T(c, t)->size == 4 || T(c, t)->size == 8 || T(c, t)->size == 16) && !(((id >= BI_ATOMIC_LOAD && id <= BI_ATOMIC_CMPXCHG) || !strncmp(b->name, "__c11_atomic_", 13)) && ty_size(c, t))) {
 		cc_error(c, loc, "address argument to atomic builtin must be a pointer to 1,2,4,8 or 16 byte type ('%s' invalid)", tyname(c, pt));
 		return mk_int(c, 0, prim(TY_INT), loc);
 	}
@@ -1006,6 +1006,8 @@ static uint32_t atomic_call(cc *c, const builtin *b, uint32_t loc)
 	}
 	for (int i = want - (id == BI_ATOMIC_CMPXCHG_N || id == BI_ATOMIC_CMPXCHG ? 2 : 1); i < want; i++)
 		args.v[i] = convert(c, args.v[i], prim(TY_INT));
+	if (((id >= BI_ATOMIC_LOAD_N && id <= BI_ATOMIC_MIN_FETCH) || id == BI_SYNC_VAL_CAS || id == BI_SYNC_BOOL_CAS) && atomic_wide(c, t))
+		return atomic_builtin_expr(c, id, t, &args, loc);
 	return mk_builtin(c, id, rt, loc, &args);
 }
 

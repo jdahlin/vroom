@@ -258,6 +258,9 @@ VPRIV uint32_t assign(cc *c, int op, uint32_t l, uint32_t r, uint32_t loc)
 		return err_node(c, loc);	/* clang: the assignment is invalid */
 	bounds_warn(c, l, false);
 	r = decay(c, r);
+	if ((T(c, N(l)->ty)->flags & TF_ATOMIC) &&
+	    (atomic_wide(c, N(l)->ty) || (op && is_complex(c, lt))))
+		return atomic_assign_expr(c, l, r, op, false, loc);
 	if (op && (is_complex(c, lt) || is_complex(c, N(r)->ty)))	/* l = l op r (l evaluated twice) */
 		return assign(c, 0, l, cplx_binop(c, op, rvalue(c, l), rvalue(c, r), loc), loc);
 	if (!op) {
@@ -1397,6 +1400,10 @@ VPRIV __attribute__((noinline)) uint32_t postfix_ops(cc *c, uint32_t n)
 			need_lvalue(c, n, loc);
 			if (is_complex(c, N(n)->ty)) {
 				n = cplx_incdec(c, n, op, loc);
+				continue;
+			}
+			if ((T(c, N(n)->ty)->flags & TF_ATOMIC) && atomic_wide(c, N(n)->ty)) {
+				n = atomic_assign_expr(c, n, 0, op == N_POSTINC ? T_PLUS : T_MINUS, true, loc);
 				continue;
 			}
 			need_scalar(c, n, "increment");
