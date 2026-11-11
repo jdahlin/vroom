@@ -48,6 +48,11 @@ static bool x64_cls(cc *c, qty t, uint64_t off, int cls[2])
 		}
 		return true;
 	}
+	/* Natural alignment applies even to zero-length arrays: a packed
+	   array at an unaligned offset still gives the record MEMORY class. */
+	uint32_t align = c->ty[x->canon].align;
+	if (align && off % align)
+		return false;
 	if (k == TY_ARRAY) {
 		uint64_t es = tsize(c, x->base), n = es ? tsize(c, t) / es : 0;
 
@@ -56,11 +61,6 @@ static bool x64_cls(cc *c, qty t, uint64_t off, int cls[2])
 				return false;
 		return true;
 	}
-	/* ABI alignment is that of the scalar representation, even when a
-	   typedef reduces its source alignment. Such packed leaves use memory. */
-	uint32_t align = c->ty[x->canon].align;
-	if (align && off % align)
-		return false;
 	if (k == TY_VECTOR) {
 		/* clang's classes for vectors: up to 4 bytes INTEGER; 8 bytes SSE (<1 x double>
 		   memory, <1 x i64> SSE); 16 bytes SSE + SSEUP; larger: memory (no AVX) */
