@@ -264,6 +264,15 @@ def check_signedpow2(assembly, arch):
             raise RuntimeError(f'{name}: dropped volatile access\n{text}')
 
 
+def check_extensions(assembly, arch):
+    if arch != 'x86_64':
+        return
+    for name in ['ke_load', 'ke_add', 'ke_index']:
+        text = body(assembly, name, False)
+        if re.search(r'\bmovl\s+%(\w+)\s*,\s*%\1\b', text):
+            raise RuntimeError(f'{name}: repeated unsigned extension\n{text}')
+
+
 def check_locals(assembly, arch):
     if arch != 'x86_64':
         return
@@ -391,7 +400,7 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument('--vpp', default=str(Path(BUILD) / 'vpp'))
     ap.add_argument('--target', default='x86_64-linux-gnu')
-    ap.add_argument('--rule', choices=['pow2', 'signedpow2', 'identities', 'fallthrough', 'loopback', 'unreachable', 'locals', 'localjmp', 'copies', 'all'], default='all')
+    ap.add_argument('--rule', choices=['pow2', 'signedpow2', 'identities', 'fallthrough', 'loopback', 'unreachable', 'locals', 'localjmp', 'copies', 'extensions', 'all'], default='all')
     ap.add_argument('--run', action='store_true', help='also execute literal-answer correctness checks')
     ap.add_argument('--clang', default=llvm('clang'))
     ap.add_argument('--vlink', default=str(Path(BUILD) / 'vlink'))
@@ -418,7 +427,8 @@ def main():
              'unreachable': ('unreachable_records.c', check_unreachable),
              'locals': ('register_locals.c', check_locals),
              'localjmp': ('register_locals_setjmp.c', None),
-             'copies': ('record_copies.c', check_copies)}
+             'copies': ('record_copies.c', check_copies),
+             'extensions': ('known_extensions.c', check_extensions)}
     selected = rules if args.rule == 'all' else {args.rule: rules[args.rule]}
     with tempfile.TemporaryDirectory(prefix='vcc-opt-rules-') as tmp:
         directory = Path(tmp)
@@ -430,7 +440,7 @@ def main():
                 assembly = directory / f'{rule}-O{level}.s'
                 run([args.vpp, f'--target={args.target}', f'-O{level}',
                      '-ffreestanding', '-fno-stack-protector', '-S', source, '-o', assembly])
-                checked = ((arch == 'x86_64' and level >= 1) if rule in ['locals', 'copies'] else
+                checked = ((arch == 'x86_64' and level >= 1) if rule in ['locals', 'copies', 'extensions'] else
                            (not arch.startswith('wasm') and level >= 1) if rule in ['fallthrough', 'unreachable'] else
                            arch.startswith('wasm') if rule == 'loopback' else True)
                 checked = checked and check is not None

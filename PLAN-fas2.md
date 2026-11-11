@@ -1669,3 +1669,36 @@ med saknad X_FSQRT-effektmetadata är åtgärdat, med riktade kontrakt för
 skalära FP-resultat och bevarade övre SIMD-lanes. DNS-felet från första
 ASan-installationen återkom inte. OPT4:s nya kopiearbete ligger kvar i
 separat lokal gren och är ännu inte publicerat på grund av kostnadsfrågan.
+
+### OPT4: direkt känd nollutvidgning och instruktionsprofil (2026-11-11)
+
+`arch/x64/emit/extensions.c` bevisar nu från endast föregående post att ett
+GPR-resultat redan är nollutvidgat från 32 bitar. `x64_ext` utelämnar då
+sin redundanta unsigned 32→64-normalisering vid O1+, !noopt. Inga nya
+vandringar, tabeller eller allokeringar. Regeln gäller explicita fulla
+32-bitarsskrivningar och unsigned laddningar/utvidgningar, inte okända
+poster, etiketter, partiella/signed skrivningar, shifts eller BSF/BSR.
+Signed normalisering behålls. Arm64:s befintliga extensionspass och wasm:s
+typade operandstack ändras inte av denna instruktionsegenskap.
+
+Nya known_extensions.c kör O0–O3 på x86, arm64, wasm32 och wasm64.
+X86:s funktionsavgränsade kodkrav avvisar äldre binären. Höga 64-bitar,
+negativa värden, smala typer, wraparound, skift0 och volatile läsning
+kontrolleras; register-/breddkontrakt klarar ASan/UBSan. Debugproben är grön.
+
+Valgrind3.26 installerades endast i en lokal artefaktkatalog, inte i
+systemet. Native-march-byggen använder AVX512 som verktyget inte stöder;
+båda profileringsbinärerna byggdes därför identiskt med -O3
+-march=x86-64-v3. Bas är14379fe. 500-funktions-TU:er, mål x86-64 O1 -S,
+hela processen inklusive uppstart, Callgrind Ir:
+
+| Korpus | Bas | Kopiepass | Kopior + direkt utvidgningsregel |
+| --- | --- | --- | --- |
+| Loop | 35 695 355 | 36 202 950 (+1,42%) | 35 775 862 (+0,23%) |
+| Kontroll | 16 278 936 | 16 328 031 (+0,30%) | 16 158 711 (−0,74%) |
+
+Detta gör kostnaden reproducerbar för dessa v3-prober; det är inte en ny
+vbench-/native-CPU-/helkorpusgrind. Native CPU-sampel ovan har stor värdlast-
+variation. Råprofiler, versionerad lokal verktygspaketfil och binärer finns
+i `/source/vroom/work/opt-profile/`. Slutlig verifiering och CI på aktuell
+main krävs fortfarande före leverans av OPT4.
