@@ -2319,7 +2319,7 @@ ett påstående om stöd eller avsaknad görs.
 | Heltalsförenkling: InstCombine, reassoc, div/rem | **Delvis, alla tre.** `opt/{identity,divpow2,sdivpow2,udivconst}.c` med separata adaptrar. U32-reciproker har målkostnad/fallback; inte generell InstCombine. Små konstantmultiplikationer, fler bitregler, delat kvot/rest-recept och signed/u64-reciproker återstår. Float2Int är inte bevisat av heltalsreglerna. |
 | Värdefakta, CSE/PRE, intervall: CCP, GVN, SCCP | **Delvis lokalt.** `rec/copies.c`, `rec/slot-values.c` och förpassfakta; a64:s `opt.c`, x64:s `copies.c`/`extensions.c`, wasms `slots.c`. Ingen gemensam global GVN/PRE/SCCP eller generell intervallanalys. Börja med begränsad blocklokal cache för rena uttryck. |
 | Död kod och minne: DCE/DSE, store merging | **Delvis.** Gemensamma exakta frame-celler/storefakta och nåbarhetsstädning; a64 har egna dead-result-pass, x64 effektbeskrivning, wasm typade accesshändelser. Heap/global-DSE, bitvis DCE, allokeringseliminering, generell last/store-motion och looplasteliminering återstår/är overifierade. |
-| Kontroll och switch: SimplifyCFG, jump threading, bit tests | **Delvis.** `opt/control.c`, `opt/switch.c`, `rec/{fallthrough,unreachable}.c`; alla mål använder delade beslut och begränsade medlemsmasker, wasm har tät `br_table`. Värdetabeller/bitset-kluster med flera destinationer, generell threading, compare merging och tail merging återstår. |
+| Kontroll och switch: SimplifyCFG, jump threading, bit tests | **Delvis.** `opt/control.c`, `opt/switch.c`, `rec/{fallthrough,unreachable}.c`; alla mål använder delade beslut, begränsade medlemsmasker och värdetabeller, wasm har tät `br_table`. Bitset-kluster med flera destinationer, generell threading, compare merging och tail merging återstår. |
 | Skalär ersättning/promotion: SROA, mem2reg | **Delvis.** `opt/locals.c`, förpass och celler; a64 registerbindning, x64 fyra valda GPR-hem, wasm typade lokaler. Detta är inte generell aggregatsplittring eller join-medveten mem2reg. |
 | Loopmotion/induktion: LICM, IV opts, loop sink | **Saknas generellt.** Alla mål sänker loopar; förpassets loopviktade lokalval är inte LICM. CFG, dominans, loop-/beroendefakta och bevis om noll iterationer behövs före säker hoisting/IV-omskrivning. |
 | Loopform: rotation, deletion, unroll, unswitch/distribute | **Saknas generellt.** Målen har direkt satssänkning, inte dessa transformpass. Kräver trip-count-/effekt-/entrybevis och kodstorleksbudget; börja eventuellt med små exakt konstanta loopar. |
@@ -2804,6 +2804,22 @@ Den tidigare breda sviten och matchade Ir-proven har inte körts om; inga
 integreringsfel motiverade det. Rättningen är fortfarande avgränsad till
 registerrepresenterad postfix och ligger kvar ovanpå multiplikationsföräldern.
 
+### Begränsade switch-värdetabeller (2026-11-11)
+
+Status: lokalt implementerat för x86-64, arm64 och wasm32/64 vid O1–O3.
+En gemensam budgeterad analys accepterar täta, högst 256 element stora
+intervall med explicit default och konstanta heltalsresultat, antingen direkta
+returer eller tilldelning till samma lokala variabel följd av break. Hål får
+standardvärdet och väljaren evalueras en gång. Cleanup, inlining på native,
+Darwin och osäkra kontrollflöden behåller ordinarie switchsänkning. Data läggs
+efter funktionens storlek och debug-/CFI-avslut i en alignerad läsbar sektion.
+
+`vcc-opt-rules.py --rule switchvalues --run` passerar O0–O3 på alla fyra mål
+samt O2 med `VCC_NOOPT`; testet täcker gränsvärden, intervall, hål, sidoeffekter,
+volatile, flera tabeller och avvisade kontrollflöden. Arm64-direktobjekt med
+PIC, debug och CFI körs också under qemu och dess sektioner, symboler och
+relokeringar överensstämmer med extern assemblering av vcc:s assembler.
+Kostnadsproven nedan ger inte generell kompileringstid eller programhastighet.
 ### OPT1: två bitregler (2026-11-11)
 
 Multiplikation med en tvåpotens sänks direkt till maskinskift för 32-/64-bitars
@@ -2837,3 +2853,28 @@ cmpbounds-cost/result.json`, med käll- och binärhashar) mäter instruktioner f
 hela kompilatorprocessen. Fyra blandade x86-filer gav +0,181 %; 200 funktioner
 utan gränsjämförelse gav +0,252–0,295 % och mättade positiva prov −1,35–8,53 %
 beroende på mål. Detta är små prov, inte en fullständig prestandagrind.
+
+Värdetabellernas separata matchade Callgrind-prov mot basen före dessa senare
+steg finns i `work/opt-profile/switch-values-cost/result.json`. Ett prov med
+200 funktioner utan switch ändrade kompilatorarbetet +0,003–0,023 %; ett
+avsiktligt mättat prov med 200 värdetabell-switchar ökade det +6,16–6,36 %
+på native och +20,05–20,16 % på wasm. Detta är kompilatorinstruktioner, inte
+cykler, och kräver en realistisk korpus före generell slutsats. Ett separat
+syntetiskt x86-program med 100 000 anrop minskade instruktioner för hela
+programmet från 4 544 608 till 4 217 359 (−7,2 %); det är inte ett generellt
+körtidsmått. Den sammansatta stacken mäts separat nedan.
+
+Hela stacken inklusive värdetabeller klarar den fasta 1 %-grinden mot
+`4a839ba`: x86 +0,375 %, arm64 +0,292 %, wasm32 +0,556 %, wasm64 +0,515 %
+kompilatorinstruktioner. Värdetabellsteget ensamt mot jämförelseföräldern
+`dc3e54d` gav +0,032 %, +0,023 %, +0,045 % respektive +0,043 %. Det är
+12/12 native-filer, 10 wasm32 och 11 wasm64; avvisade atomic_ops och/eller
+bitint_runtime är redovisade, inte godkända. Exakt källträds- och binärproveniens,
+kommandon och felkontroll finns i `work/opt-profile/full-stack-cost/result.json`.
+Grinden är en liten fast korpus och upphäver inte det högre mättade switchprovet.
+
+CI-uppföljning: wasm-tabellernas assemblertext får nu en explicit `.size`,
+som LLVM:s assembler kräver. Det fokuserade tabellprovet assembleras även med
+clang för wasm32/64; ett separat switchprov med variabla resultat bevarar
+kontrollen av wasm `br_table`. Båda proven körs O0–O3 på fyra mål. Den
+föregående kostnadsprofilen gäller före denna lilla metadatatilläggning.

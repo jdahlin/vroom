@@ -634,6 +634,14 @@ för x86, arm64 och wasm och har fokuserad O0–O3-validering och en liten
 matchad kompilatorkostnadsprofil i PLAN-fas2.md. G5/G7 och generell O2-täckning
 är fortsatt öppna.
 
+Begränsade switch-värdetabeller har validerats på fyra mål; syntetiska
+kompilatorkostnader och deras begränsningar finns i PLAN-fas2.md. G5/G7 och
+en realistisk sammansatt kostnadsgrind återstår.
+
 Avgränsade heltalsjämförelser vid typgränser är implementerade för alla fyra
 mål och har fokuserade korrekthets- och kompilatorkostnadsprov i PLAN-fas2.md.
 G5/G7 och generell O2-täckning är fortsatt öppna.
+
+Den sammansatta optimeringsstacken med värdetabeller klarar den begränsade
+1 %-kompilatorkostnadsgrinden på fyra mål (PLAN-fas2.md); den mättade
+switchkostnaden och releasegrindarna G5/G7 återstår att följa upp.

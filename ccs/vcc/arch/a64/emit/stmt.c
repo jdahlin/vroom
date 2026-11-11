@@ -400,6 +400,7 @@ static bool a64_switch_dispatch(ecx *e, uint32_t base, int r, int cx,
 
 static void gen_switch(ecx *e, uint32_t n)
 {
+	if (a64_switch_values(e,n)) return;
 	cc *c = e->c;
 	const node *x = N(n);
 	qty ct = N(x->a)->ty;

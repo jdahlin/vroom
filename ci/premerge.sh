@@ -81,6 +81,7 @@ arm64)
 	step switch-bitsets-arm64 python3 bench/vcc-switch-bitsets.py --target aarch64-linux-gnu --run
 	step switch-bitsets-x86 python3 bench/vcc-switch-bitsets.py --target x86_64-linux-gnu --run
 	step opt-rules-arm64 python3 bench/vcc-opt-rules.py --target aarch64-linux-gnu
+	step switch-values-arm64 python3 bench/vcc-opt-rules.py --target aarch64-linux-gnu --rule switchvalues --run
 	step tail-controls python3 bench/vcc-tail-controls.py
 	step tail-object-arm64 python3 bench/vcc-opt-rules.py --target aarch64-linux-gnu --rule tails --run --tail-obj --cfi
 	step const-control-arm64 python3 bench/vcc-constant-control.py --target aarch64-linux-gnu
