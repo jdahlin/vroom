@@ -9,7 +9,11 @@ p=argparse.ArgumentParser(description=__doc__);p.add_argument('--clang',default=
 empty=tempfile.NamedTemporaryFile(suffix='.c');empty.write(b'\n');empty.flush()
 data=json.loads((ROOT/'bench/data/x86features-oracle.json').read_text())
 controlled=set(data['feature_macros'])|set(data['cpu_macro_names'])
-def macros(text):return {k:v for k,v in re.findall(r'^#define (\S+) ?(.*)$',text,re.M)}
+# These strings identify the compiler build that supplied the frozen tables,
+# including its distribution packaging. They are not target-feature facts.
+# Keep numeric compiler version macros and every target macro in the oracle.
+BUILD_IDENTITY={'__VERSION__','__clang_version__'}
+def macros(text):return {k:v for k,v in re.findall(r'^#define (\S+) ?(.*)$',text,re.M) if k not in BUILD_IDENTITY}
 def run(args):
  r=subprocess.run(args,text=True,capture_output=True)
  if r.returncode:raise RuntimeError(' '.join(args)+'\n'+r.stderr)
