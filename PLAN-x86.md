@@ -449,6 +449,15 @@ konkreta filer, beroenden, kostnadsgränser och tester på alla tre backends.
 De tidigare auditernas x86-regler är fynd/prioritering, inte beslut att
 implementera dem i x86:s `lower.c`. Ingen optimering implementerad; X4 öppet.
 
+### Registerlokaler, delprogress 2026-11-11
+
+OPT3 i `PLAN-fas2.md` har gemensamt urval och x86:s fyra callee-save-hem,
+med asm-/nonlocal-/alignmentsäkerhet. Egna sviten 137/137, kors-ABI 22/22;
+alla kalla auditprober oförändrade efter lönsamhetsfilter. En liten loop
+förbättras men kompilator-CPU-grinden är fortsatt öppen. Direkt ABI-bindning är nu levererad och verifierad med smala argument,
+stackargument, sret och varargs. Kopiestädning återstår; full O2-paritet
+är inte uppnådd. Se OPT3:s nästa statusblock för parade mätningar.
+
 ### X4 (2026-11-11): reproducerbar nivåmatris och testprober
 
 `bench/vcc-optaudit.py` jämför 29 funktioner i
@@ -815,3 +824,10 @@ villkorsuttryck. x86:s egna tester: 47/56 godkända, mot 46/56 före
 
 Övriga steg inte påbörjade. Lagerindelningen (vandrare, sänkning, gemensamma
 pass) beslutad 2026-11-10; arm64 och wasm flyttas senare (TODO.md).
+
+### OPT3-integration med X5 (2026-11-11)
+
+Registerlokaler använder samma csslot/CFI som asm. Privata asm-snapshots
+bevarar aktuella hem på alla kanter; riktiga unwind-tester återvinner
+anroparens callee-save-värden genom vanliga och justerade ramar (O1/O2).
+Se OPT3:s PR-status i PLAN-fas2.md; full O2 och prestandagrind kvarstår.

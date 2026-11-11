@@ -22,6 +22,7 @@ VPRIV bool is_array(cc *c, qty t) { return KIND(c, t) == TY_ARRAY; }
 VPRIV bool is_func(cc *c, qty t) { return KIND(c, t) == TY_FUNC; }
 VPRIV bool is_record(cc *c, qty t) { int k = KIND(c, t); return k == TY_STRUCT || k == TY_UNION; }
 VPRIV bool is_vector(cc *c, qty t) { return KIND(c, t) == TY_VECTOR; }
+VPRIV bool is_bool_vector(cc *c, qty t) { return is_vector(c, t) && KIND(c, T(c, t)->base) == TY_BOOL; }
 /* initialized by a list of elements */
 VPRIV bool is_complex(cc *c, qty t) { return KIND(c, t) == TY_STRUCT && (c->tags[T(c, t)->aux].flags & RF_COMPLEX); }
 VPRIV bool is_ilagg(cc *c, qty t) { int k = KIND(c, t); return (k == TY_STRUCT && !is_complex(c, t)) || k == TY_UNION || k == TY_ARRAY || k == TY_VECTOR; }
@@ -393,6 +394,7 @@ VPRIV qty unsigned_of(cc *c, qty t)
 /* the result of comparing vectors of type v: signed integers of the lane size */
 VPRIV qty vec_mask_type(cc *c, qty v)
 {
+	if (is_bool_vector(c, v)) return QUNQ(v);
 	uint32_t es = (uint32_t)T(c, T(c, v)->base)->size;
 	int k = es == 1 ? TY_SCHAR : es == 2 ? TY_SHORT : es == 4 ? TY_INT : es == 8 ? CC_I64(c, false) : TY_INT128;
 

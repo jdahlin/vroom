@@ -357,6 +357,30 @@ VPRIV void wlval(ecx *e, uint32_t n, wlv *l, qty t)
 		int64_t k;
 
 		wexpr(e, x->a, true);
+		if (x->aux == 1) {
+			l->bf = 1, l->width = 1;
+			if (wnum(e, x->b, &k) && k >= 0) {
+				l->off = (uint64_t)k / 8, l->bitoff = k % 8;
+				break;
+			}
+			wexpr(e, x->b, true);
+			wconv(e, N(x->b)->ty, prim(TY_UINT));
+			uint32_t ix = wtmp(e, WT_I32);
+			wset(e, ix);
+			l->bf = 2, l->dynbit_slot = wslot(e, 4, 4);
+			wslot_addr(e, l->dynbit_slot);
+			wget(e, ix);
+			wconst(e, WT_I32, 7);
+			wi(e, "i32.and");
+			wiu(e, "i32.store", 0);
+			wget(e, ix);
+			wconst(e, WT_I32, 3);
+			wi(e, "i32.shr_u");
+			wto_ptr(e, prim(TY_UINT));
+			wpop(e, "add");
+			wfree(e, ix);
+			break;
+		}
 		if (es && wnum(e, x->b, &k) && (k * (int64_t)es) >= 0) {
 			l->off = (uint64_t)(k * (int64_t)es);
 			break;
@@ -455,6 +479,15 @@ VPRIV void wload(ecx *e, wlv *l, qty t)
 		wfold_off(e, l);
 		return;
 	}
+	if (l->bf == 2) {
+		wiu(e, "i32.load8_u", l->off);
+		wslot_addr(e, l->dynbit_slot);
+		wiu(e, "i32.load", 0);
+		wi(e, "i32.shr_u");
+		wconst(e, WT_I32, 1);
+		wi(e, "i32.and");
+		return;
+	}
 	if (l->bf) {
 		int nb = wbf_bytes(e, l);
 
@@ -519,6 +552,32 @@ VPRIV void wstore(ecx *e, wlv *l, qty t)
 	}
 	if (wty(c, t) == WT_MEM) {
 		wcopy(e, tsize(c, t));
+		return;
+	}
+	if (l->bf == 2) {
+		uint32_t tv = wtmp(e, WT_I32), ta = wtmp(e, WPT(c)), tm = wtmp(e, WT_I32);
+		wset(e, tv);
+		wset(e, ta);
+		wconst(e, WT_I32, 1);
+		wslot_addr(e, l->dynbit_slot);
+		wiu(e, "i32.load", 0);
+		wi(e, "i32.shl");
+		wset(e, tm);
+		wget(e, ta);
+		wget(e, ta);
+		wiu(e, "i32.load8_u", l->off);
+		wget(e, tm);
+		wconst(e, WT_I32, -1);
+		wi(e, "i32.xor");
+		wi(e, "i32.and");
+		wconst(e, WT_I32, 0);
+		wget(e, tv);
+		wi(e, "i32.sub");
+		wget(e, tm);
+		wi(e, "i32.and");
+		wi(e, "i32.or");
+		wiu(e, "i32.store8", l->off);
+		wfree(e, tv), wfree(e, ta), wfree(e, tm);
 		return;
 	}
 	if (l->bf) {
@@ -1067,7 +1126,7 @@ static void wvlanes(ecx *e, int op, qty at, qty bt, qty rt, bool unary)
 	bool av = is_vec(c, at), bv = !unary && is_vec(c, bt);
 	qty vt = av ? at : bt, et = T(c, vt)->base, rte = T(c, rt)->base;
 	qty yt = unary ? et : bv ? T(c, bt)->base : bt, xt = av ? et : at;
-	uint32_t n = (uint32_t)(tsize(c, vt) / tsize(c, et));
+	uint32_t n = T(c, vt)->n;
 	uint32_t ta, tb = UINT32_MAX;
 	uint64_t sl = wslot(e, tsize(c, rt), 16);
 	int k = wty(c, et);
@@ -1082,6 +1141,8 @@ static void wvlanes(ecx *e, int op, qty at, qty bt, qty rt, bool unary)
 	for (uint32_t i = 0; i < n; i++) {
 		wlv la = { .k = WL_MEM, .off = i * tsize(c, et) }, lr = { .k = WL_MEM, .off = i * tsize(c, rte) };
 
+		if (is_bvec(c, at)) la.off = i / 8, la.bf = 1, la.width = 1, la.bitoff = i % 8;
+		if (is_bvec(c, rt)) lr.off = i / 8, lr.bf = 1, lr.width = 1, lr.bitoff = i % 8;
 		wslot_addr(e, sl);
 		if (unary && op == T_MINUS && k != WT_F32 && k != WT_F64)
 			wconst(e, k, 0);
@@ -1101,6 +1162,7 @@ static void wvlanes(ecx *e, int op, qty at, qty bt, qty rt, bool unary)
 			if (bv) {
 				wlv lb = { .k = WL_MEM, .off = i * tsize(c, yt) };
 
+				if (is_bvec(c, bt)) lb.off = i / 8, lb.bf = 1, lb.width = 1, lb.bitoff = i % 8;
 				wget(e, tb);
 				wload(e, &lb, yt);
 			} else {
@@ -1204,6 +1266,54 @@ VPRIV void wcompare(ecx *e, int op, qty t)
 	wop(e, k, o);
 }
 
+/* The shared rules consume a known RHS; wasm owns its effects and stack. */
+static bool wbinrule(cc *c, uint32_t n, qty ty, int *op, i128 *rhs, int *identity, bool pure)
+{
+	cval cv;
+
+	switch (*op) {
+	case T_PLUS: case T_MINUS: case T_STAR: case T_SLASH: case T_PERCENT:
+	case T_AMP: case T_PIPE: case T_CARET: case T_LESSLESS: case T_GREATERGREATER:
+		break;
+	default:
+		return false;
+	}
+	if (!cc_eval(c, n, &cv) || cv.kind != CV_INT)
+		return false;
+	*rhs = cv.i;
+	*identity = em_bin_identity(c, ty, *op, *rhs);
+	if (*identity == EM_ID_NONE && !em_divpow2(c, ty, op, rhs)) {
+		em_sdivpow2_recipe recipe;
+
+		if (!em_sdivpow2(c, ty, *op, *rhs, &recipe) || !wsdivpow2_ok(&recipe))
+			return false;
+	}
+	return pure || !side_effects(c, n);
+}
+
+/* stack: [lhs] converted to ty; omit a pure RHS and apply its shared rule. */
+static void wbinreduced(ecx *e, qty ty, int op, i128 rhs, int identity)
+{
+	if (identity == EM_ID_LEFT)
+		return;
+	if (identity == EM_ID_ZERO || identity == EM_ID_ONES) {
+		wi(e, "drop");
+		wconst(e, wty(e->c, ty), identity == EM_ID_ZERO ? 0 : (int64_t)em_trunc_to(e->c, -1, ty));
+		return;
+	}
+	{
+		em_sdivpow2_recipe recipe;
+
+		if (em_sdivpow2(e->c, ty, op, rhs, &recipe) && wsdivpow2_ok(&recipe)) {
+			wsdivpow2(e, ty, &recipe);
+			return;
+		}
+	}
+	/* The replacement RHS already has the operation's wasm stack type. */
+	wconst(e, wty(e->c, ty), (int64_t)rhs);
+	warith(e, op, ty, 0);
+}
+
 static int wbinary(ecx *e, uint32_t n)
 {
 	cc *c = e->c;
@@ -1266,13 +1376,21 @@ static int wbinary(ecx *e, uint32_t n)
 		wcompare(e, op, t);
 		return WT_I32;
 	}
+	int reduced_op = op;
+	i128 rhs = 0;
+	int identity = EM_ID_NONE;
+	bool reduced = wbinrule(c, x->b, ty, &reduced_op, &rhs, &identity, false);
 	wexpr(e, x->a, true);
 	if (QUNQ(lt) != QUNQ(ty) && op != T_LESSLESS && op != T_GREATERGREATER)
 		wconv(e, lt, ty);
-	wexpr(e, x->b, true);
-	if (QUNQ(rt) != QUNQ(ty) && op != T_LESSLESS && op != T_GREATERGREATER)
-		wconv(e, rt, ty);
-	warith(e, op, ty, (op == T_LESSLESS || op == T_GREATERGREATER) ? rt : 0);
+	if (reduced) {
+		wbinreduced(e, ty, reduced_op, rhs, identity);
+	} else {
+		wexpr(e, x->b, true);
+		if (QUNQ(rt) != QUNQ(ty) && op != T_LESSLESS && op != T_GREATERGREATER)
+			wconv(e, rt, ty);
+		warith(e, op, ty, (op == T_LESSLESS || op == T_GREATERGREATER) ? rt : 0);
+	}
 	return wty(c, ty);
 }
 
@@ -1515,16 +1633,28 @@ static int wassign(ecx *e, uint32_t n, bool want)
 			wscale(e, lt, es);
 			wpop(e, op == T_PLUS ? "add" : "sub");
 		} else {
+			int reduced_op = op;
+			i128 rhs = 0;
+			int identity = EM_ID_NONE;
+			bool reduced = false;
+
 			if (!pt)
 				pt = lt;
+			/* No RHS effects: otherwise it was evaluated into tb above. */
+			if (tb == UINT32_MAX)
+				reduced = wbinrule(c, x->b, pt, &reduced_op, &rhs, &identity, true);
 			wconv(e, lt, pt);
-			if (tb != UINT32_MAX)
-				wget(e, tb);
-			else
-				wexpr(e, x->b, true);
-			if (op != T_LESSLESS && op != T_GREATERGREATER && QUNQ(bt) != QUNQ(pt))
-				wconv(e, bt, pt);
-			warith(e, op, pt, (op == T_LESSLESS || op == T_GREATERGREATER) ? bt : 0);
+			if (reduced) {
+				wbinreduced(e, pt, reduced_op, rhs, identity);
+			} else {
+				if (tb != UINT32_MAX)
+					wget(e, tb);
+				else
+					wexpr(e, x->b, true);
+				if (op != T_LESSLESS && op != T_GREATERGREATER && QUNQ(bt) != QUNQ(pt))
+					wconv(e, bt, pt);
+				warith(e, op, pt, (op == T_LESSLESS || op == T_GREATERGREATER) ? bt : 0);
+			}
 			wconv(e, pt, lt);
 		}
 		if (!want) {
@@ -1781,6 +1911,43 @@ static int wexpr1(ecx *e, uint32_t n, bool want)
 		case CK_VOID:
 			wexpr(e, x->a, false);
 			return WT_NONE;
+		case CK_BITS: {
+			qty from = N(x->a)->ty;
+			uint64_t sl = wslot(e, tsize(c, x->ty), talign(c, x->ty));
+			wlv d = { .k = WL_MEM };
+			wslot_addr(e, sl);
+			if (N(x->a)->flags & NF_LVALUE) {
+				wlv src;
+				wlval(e, x->a, &src, prim(TY_VOID));
+				if (src.bf) {
+					uint32_t addr = wtmp(e, WPT(c));
+					wset(e, addr); wi(e, "drop"); /* retain the source, replace dst per byte */
+					for (unsigned i = 0; i < tsize(c, from); i++) {
+						unsigned bit = i * 8;
+						wlv byte = { .k = WL_MEM, .off = i };
+						wslot_addr(e, sl);
+						if (bit < src.width || src.sgn) {
+							wlv part = src;
+							unsigned start = bit < src.width ? bit : src.width - 1;
+							part.off += (src.bitoff + start) / 8;
+							part.bitoff = (src.bitoff + start) % 8;
+							part.width = bit >= src.width ? 1 : src.width - bit < 8 ? src.width - bit : 8;
+							part.sgn = src.sgn && bit + 8 >= src.width;
+							wget(e, addr); wload(e, &part, prim(TY_UCHAR));
+						} else wconst(e, WT_I32, 0);
+						wstore(e, &byte, prim(TY_UCHAR));
+					}
+					wfree(e, addr);
+
+				} else {
+					wfold_off(e, &src);
+					wpconst(e, (int64_t)tsize(c, from)); wi(e, "memory.copy\t0, 0");
+				}
+			} else { wexpr(e, x->a, true); wstore(e, &d, from); }
+			wslot_addr(e, sl);
+			if (k != WT_MEM) wload(e, &d, x->ty);
+			return k;
+		}
 		case CK_UNION: {
 			qty at = N(x->a)->ty;
 			uint64_t sl = wslot(e, tsize(c, x->ty), talign(c, x->ty));
@@ -1798,7 +1965,7 @@ static int wexpr1(ecx *e, uint32_t n, bool want)
 		}
 		case CK_SPLAT: {	/* the scalar into every lane of a new vector */
 			qty et = T(c, x->ty)->base;
-			uint64_t es = tsize(c, et), nl = tsize(c, x->ty) / es, sl = wslot(e, tsize(c, x->ty), 16);
+			uint64_t es = tsize(c, et), nl = T(c, x->ty)->n, sl = wslot(e, tsize(c, x->ty), 16);
 			uint32_t t;
 
 			wexpr(e, x->a, true);
@@ -1807,6 +1974,7 @@ static int wexpr1(ecx *e, uint32_t n, bool want)
 			for (uint64_t i = 0; i < nl; i++) {
 				wlv l = { .k = WL_MEM, .off = i * es };
 
+				if (is_bvec(c, x->ty)) l.off = i / 8, l.bf = 1, l.width = 1, l.bitoff = i % 8;
 				wslot_addr(e, sl);
 				wget(e, t);
 				wstore(e, &l, et);

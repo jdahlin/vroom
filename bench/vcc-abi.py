@@ -7,6 +7,9 @@
 cross-call generators. It accepts --count, --start, --suite, -j and Linux
 --target triples (or x86_64). See that harness's --help for coverage.
 
+A caller comment `/* abi-targets: linux; reason */` requires the fixture only
+on Linux; other targets report the explicit contract exclusion, never a pass.
+
 Every ccs/vcc/tests/abi/NAME/ has caller.c (main, the checks) and callee.c
 (the functions it calls, and callbacks into the caller); a header there is
 on the include path. Each half can specify extra compiler options with
@@ -65,6 +68,9 @@ def compile_(cc, src, obj, inc):
 def one(name, wd, verbose):
     d = f'{D}/{name}'
     src = open(f'{d}/caller.c').read()
+    contract = re.search(r'/\*\s*abi-targets:\s*linux;(.*?)\*/', src, re.S)
+    if contract and (HOST or WASM):
+        return 'skip', 'Linux-only ABI contract: ' + ' '.join(contract.group(1).split()), None
     xf = re.search(r'/\*\s*vcc-xfail:(.*?)\*/', src, re.S) or (HOST and re.search(r'/\*\s*vcc-xfail-host:(.*?)\*/', src, re.S)) \
         or (WASM and re.search(r'/\*\s*vcc-xfail-wasm:(.*?)\*/', src, re.S)) \
         or (X86 and re.search(r'/\*\s*vcc-xfail-x86:(.*?)\*/', src, re.S))
@@ -162,8 +168,7 @@ def main():
         st, why, xf = one(n, wd, verbose)
         if st == 'skip':
             skips += 1
-            if verbose:
-                print(f'skip  {n}: {why}', flush=True)
+            print(f'skip  {n}: {why}', flush=True)
             continue
         if st == 'test':
             st = 'FAIL'; why = 'broken test: ' + why; fails += 1

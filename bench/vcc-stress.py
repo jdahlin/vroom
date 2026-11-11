@@ -87,6 +87,18 @@ def cases(d):
         return 'volatile long a[64];\nlong f(long x) { return ' + e + '; }\n'
     # right-nested expressions past the temporaries: spilled; far past the stack: an error or code, no crash (clang crashes)
     case('expr-right-nest-250', 'ok', {'a.c': rnest(250)}, 'a.c')
+    # More than 1,000 independent representation proofs followed by a deep tail.
+    # The normal harness timeout detects lost memoization without a tight timing
+    # assertion; valid input must compile rather than hit a fixed cache limit.
+    bit_leaf = '__builtin_bit_cast(unsigned,__builtin_bit_cast(float,1u))'
+    bit_tail = nest('__builtin_bit_cast(unsigned,', ')', 40, '1u')
+    bit_source = ('struct S { unsigned a[601]; };\nconstexpr struct S s = '
+                  '__builtin_bit_cast(struct S,(struct S){{' + ','.join([bit_leaf] * 600 + [bit_tail]) + '}});\n'
+                  'static_assert(s.a[0] == 1 && s.a[600] == 1);\n')
+    for target in ('x86_64', 'aarch64'):
+        case('bit-cast-memo-growth-' + target, 'ok', {'a.c': bit_source}, 'a.c',
+             args=('--target=' + target + '-linux-gnu', '-std=c23', '-fsyntax-only'))
+
     case('expr-right-nest-10k', 'any', {'a.c': rnest(10000)}, 'a.c')	# vccd's stacks are bigger: it compiles
     case('struct-10k-members', 'ok', {'a.c': 'struct s {' + ''.join(f' int m{i};' for i in range(10000)) + ' } v;\n'}, 'a.c')
     case('declarator-100-ptrs', 'ok', {'a.c': 'int ' + '*' * 100 + 'p;\n'}, 'a.c')

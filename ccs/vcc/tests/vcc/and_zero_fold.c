@@ -1,5 +1,4 @@
 /* x & 0 is 0 whatever x is (the kernel's IS_DAX(i) with S_DAX 0): an inlined test folds, the dead call is gone, as clang -O2 */
-/* vcc-xfail: arm64: x & 0 with x not constant is not folded on arm64 (TODO.md tier 1) */
 extern void never(void);
 struct inode { unsigned f; };
 struct m { struct inode *host; };

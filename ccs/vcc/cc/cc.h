@@ -232,6 +232,7 @@ enum {
 	CK_UNION,	/* -> transparent union / GNU cast to union */
 	CK_NULL,	/* null pointer constant -> pointer */
 	CK_SPLAT,	/* scalar (already the element type) -> every lane of an ext_vector_type */
+	CK_BITS,	/* __builtin_bit_cast: a is the source object, without array decay */
 	CK_VBITS,	/* GNU vector -> scalar of the same size (the bits) */
 	CK_VADDR,	/* GNU vector rvalue -> pointer to its first lane (v[i] on an rvalue) */
 };

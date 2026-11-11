@@ -48,8 +48,25 @@ static void data_init(ecx *e, uint64_t off, qty ty, uint32_t init)
 	if (!init)
 		return;
 	x = N(init);
+	if (x->op == N_CAST && x->aux == CK_BITS) {
+		for (uint64_t pos = 0, size = tsize(c, ty); pos < size;) {
+			unsigned char bytes[16], known[16];
+			unsigned len = size - pos > 16 ? 16 : (unsigned)(size - pos);
+			if (!cc_bitcast_read(c, init, pos, len, bytes, known)) efatal(e, x->loc, "initializer element is not a compile-time constant");
+			for (unsigned i = 0; i < len; i++) data_put(e, off + pos + i, bytes[i] & known[i], 1);
+			pos += len;
+		}
+		return;
+	}
 	if (x->op == N_ZERO)
 		return;
+	if (is_bvec(c, ty) && x->op == N_CAST && x->aux == CK_SPLAT) {
+		if (!cc_eval(c, x->a, &cv) || cv.kind != CV_INT)
+			efatal(e, x->loc, "initializer element is not a compile-time constant");
+		for (uint64_t k = 0; k < T(c, ty)->n; k++)
+			if (cv.i) data_or(e, off + k / 8, 1u << (k % 8));
+		return;
+	}
 	if (x->op == N_INIT) {
 		const uint32_t *v = &c->lists[x->b];
 
@@ -59,6 +76,19 @@ static void data_init(ecx *e, uint64_t off, qty ty, uint32_t init)
 
 			uint64_t n = 0;
 
+			if (is_bvec(c, ty)) {
+				for (uint32_t i = 0; i < x->c; i++) {
+					if (!cc_eval(c, v[3*i+2], &cv) || cv.kind != CV_INT)
+						efatal(e, x->loc, "initializer element is not a compile-time constant");
+					for (uint64_t k = v[3*i]; k <= v[3*i+1]; k++) {
+						uint64_t at = off + k / 8;
+						unsigned m = 1u << (k % 8);
+						data_or(e, at, 0);
+						e->data.p[at] = (char)((e->data.p[at] & ~m) | (cv.i ? m : 0));
+					}
+				}
+				return;
+			}
 			for (uint32_t i = 0; i < x->c; i++) {
 				for (uint64_t k = v[3 * i]; k <= v[3 * i + 1]; k++)
 					data_init(e, off + k * es, et, v[3 * i + 2]);

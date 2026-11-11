@@ -29,7 +29,7 @@ VPRIV bool side_effects(cc *c, uint32_t n)
 		return true;
 	case N_BUILTIN:
 		switch (x->aux) {
-		case BI_VA_START: case BI_VA_COPY: case BI_VA_END: case BI_ALLOCA: case BI_TRAP:
+		case BI_VA_START: case BI_VA_COPY: case BI_VA_END: case BI_ALLOCA: case BI_TRAP: case BI_DEBUGTRAP:
 		case BI_UNREACHABLE:
 		case BI_ADD_OVERFLOW: case BI_SUB_OVERFLOW: case BI_MUL_OVERFLOW:	/* store the result */
 		case BI_ADDC: case BI_SUBC:
@@ -309,6 +309,8 @@ VPRIV val va_arg_(ecx *e, const node *x)
 {
 	cc *c = e->c;
 	qty t = x->ty;
+	if (!DARWIN(c) && is_bvec(c, t) && (T(c, t)->n == 64 || T(c, t)->n == 128))
+		efatal(e, e->curloc, "arm64: variadic transport of 64/128-lane packed boolean vectors is not supported");
 	uint64_t size = tsize(c, t);
 	bool big = is_recabi(c, t) && size > 16;
 	int nreg = big ? 1 : (int)((size + 7) / 8);
@@ -724,7 +726,7 @@ VPRIV val gen_builtin(ecx *e, uint32_t n)
 	case BI_SHUFFLEVECTOR: case BI_CONVERTVECTOR: {
 		/* lane by lane through a frame slot (vectors are addresses here) */
 		qty at = N(arg[0])->ty, ae = T(c, at)->base, re = T(c, x->ty)->base;
-		unsigned na = (unsigned)(tsize(c, at) / tsize(c, ae)), nr = (unsigned)(tsize(c, x->ty) / tsize(c, re));
+		unsigned na = T(c, at)->ext ?: T(c, at)->n, nr = T(c, x->ty)->ext ?: T(c, x->ty)->n;
 		val a = gen(e, arg[0]), b = x->aux == BI_SHUFFLEVECTOR ? gen(e, arg[1]) : vconst(0);
 		int ra = toreg(e, &a), rb = x->aux == BI_SHUFFLEVECTOR ? toreg(e, &b) : -1;
 		int64_t sl = slot(e, tsize(c, x->ty), 16);
@@ -740,13 +742,16 @@ VPRIV val gen_builtin(ecx *e, uint32_t n)
 				lval s = { .k = L_REG, .r = (uint8_t)(k < (int64_t)na ? ra : rb),
 					   .off = (k < (int64_t)na ? k : k - (int64_t)na) * (int64_t)tsize(c, ae), .align = talign(c, ae) };
 
+				if (is_bvec(c, at)) { int64_t j = k < (int64_t)na ? k : k - na; s.off = j / 8, s.bf = 1, s.width = 1, s.bitoff = j % 8; }
 				v = k < 0 ? vconst(0) : load(e, &s, ae);
 			} else {
 				lval s = { .k = L_REG, .r = (uint8_t)ra, .off = (int64_t)i * (int64_t)tsize(c, ae), .align = talign(c, ae) };
 				int ck = is_flt(c, ae) ? (is_flt(c, re) ? CK_F2F : CK_F2I) : is_flt(c, re) ? CK_I2F : CK_INT;
 
-				v = cast(e, load(e, &s, ae), ae, re, ck);
+				if (is_bvec(c, at)) s.off = i / 8, s.bf = 1, s.width = 1, s.bitoff = i % 8;
+				v = cast(e, load(e, &s, ae), ae, re, KIND(c, re) == TY_BOOL ? CK_BOOL : ck);
 			}
+			if (is_bvec(c, x->ty)) d.off = i / 8, d.bf = 1, d.width = 1, d.bitoff = i % 8;
 			store(e, &d, re, &v);
 			val_free(e, &v);
 		}
