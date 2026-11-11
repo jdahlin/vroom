@@ -45,11 +45,18 @@ enum { WM_FENCE, WM_LOAD, WM_STORE, WM_POISON };
 typedef struct wmem {
 	size_t begin, end;
 	uint64_t off;
-	uint32_t id, size, source, cache;
+	uint32_t id, size, source, cache, epoch;
 	uint8_t kind, type;
-	bool dead, capture;
+	bool dead, capture, control;
 } wmem;
 typedef struct walloc { uint64_t off, size; bool escaped; } walloc;
+
+enum { WF_BLOCK, WF_IF, WF_LOOP, WF_UNKNOWN, WF_ELSE, WF_END, WF_BR, WF_BR_IF };
+/* Token = the opening event's monotonically increasing index, not wasm depth. */
+typedef struct wflow_event {
+	uint32_t at, token, end, alternate;
+	uint8_t kind;
+} wflow_event;
 
 /* a switch case: its range and segment */
 typedef struct wswc { i128 lo, hi; uint32_t seg; bool dflt; } wswc;
@@ -110,6 +117,11 @@ typedef struct wst {
 	em_slot_values values;
 	bool memopt, memfailed, memchanged;
 	uint32_t memopaque;
+	wflow_event *flow;
+	uint32_t nflow, capflow, flowstack[256], flowdepth, flowjoins, flowstores;
+	bool flowfailed;
+	em_flow_graph flowgraph;
+	em_flow_live flowlive;
 	struct wst *next;	/* the free list */
 } wst;
 
@@ -175,10 +187,18 @@ VPRIV uint32_t wmem_id(ecx *e, uint64_t off);
 VPRIV void wmem_lval(ecx *e, wlv *l, uint64_t off);
 VPRIV void wmem_escape(ecx *e, uint32_t id);
 VPRIV void wmem_fence(ecx *e);
+VPRIV void wmem_control_fence(ecx *e);
 VPRIV void wmem_access(ecx *e, const wlv *l, qty t, bool store, size_t begin);
 VPRIV void wmem_poison(ecx *e, const wlv *l, uint64_t size);
 VPRIV void wmem_optimize(ecx *e);
 VPRIV void wmem_render(ecx *e, tbuf *out);
+VPRIV void wflow_begin(ecx *e);
+VPRIV void wflow_open(ecx *e, int kind);
+VPRIV void wflow_else(ecx *e, int kind);
+VPRIV void wflow_end(ecx *e);
+VPRIV void wflow_branch(ecx *e, int depth, bool conditional);
+VPRIV void wflow_reject(ecx *e);
+VPRIV void wflow_optimize(ecx *e);
 
 /* ---------------- printing ---------------- */
 
@@ -268,9 +288,10 @@ static inline void waddr_ref(ecx *e, uint32_t ref, int64_t off)
 	tb_c(b, '\n');
 }
 
-static inline void wboundary(ecx *e, const char *op)
+static inline void wboundary(ecx *e, const char *op, int kind)
 {
-	wmem_fence(e);
+	wflow_else(e, kind);
+	wmem_control_fence(e);
 	wi(e, op);
 }
 
@@ -348,23 +369,26 @@ static inline void wslot_addr(ecx *e, uint64_t off)
 
 /* ---------------- blocks ---------------- */
 
-static inline int wblock(ecx *e, const char *kind)
+static inline int wblock(ecx *e, const char *kind, int flowkind)
 {
-	wmem_fence(e);
+	wflow_open(e, flowkind);
+	wmem_control_fence(e);
 	wi(e, kind);
 	return e->w->depth++;
 }
 
 static inline void wend(ecx *e, const char *kind)
 {
+	wflow_end(e);
 	e->w->depth--;
-	wmem_fence(e);
+	wmem_control_fence(e);
 	wi(e, kind);
 }
 
-static inline void wbr(ecx *e, const char *op, int target)
+static inline void wbr(ecx *e, const char *op, int target, bool conditional)
 {
-	wmem_fence(e);
+	wflow_branch(e, target, conditional);
+	wmem_control_fence(e);
 	wiu(e, op, (uint64_t)(e->w->depth - 1 - target));
 }
 
@@ -420,6 +444,9 @@ VPRIV void wsj_end(ecx *e);
 /* sdivpow2.c */
 VPRIV bool wsdivpow2_ok(const em_sdivpow2_recipe *r);
 VPRIV void wsdivpow2(ecx *e, qty ty, const em_sdivpow2_recipe *r);
+/* udivconst.c */
+VPRIV bool wudivconst_ok(const em_udivconst_recipe *r);
+VPRIV void wudivconst(ecx *e, const em_udivconst_recipe *r);
 /* reachability.c: conservative proofs, without state or allocations */
 VPRIV bool wlabels(cc *c, uint32_t n);
 VPRIV bool wterm(cc *c, uint32_t n);

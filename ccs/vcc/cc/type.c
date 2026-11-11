@@ -12,6 +12,7 @@ const basic_ty basic[TY_PTR] = {
 	[TY_BFLOAT16] = { 2, 2 }, [TY_FLOAT16] = { 2, 2 }, [TY_FLOAT] = { 4, 4 }, [TY_DOUBLE] = { 8, 8 },
 	[TY_LDOUBLE] = { 16, 16 }, [TY_FLOAT128] = { 16, 16 },
 };
+VPRIV bool is_bigint(cc *c, qty t) { int k = KIND(c, t); return k == TY_BITINT || k == TY_UBITINT; }
 VPRIV bool is_integer(cc *c, qty t) { int k = KIND(c, t); return is_int_kind(k) || k == TY_ENUM; }
 VPRIV bool is_float(cc *c, qty t) { return is_flt_kind(KIND(c, t)); }
 VPRIV bool is_arith(cc *c, qty t) { return is_integer(c, t) || is_float(c, t); }
@@ -37,7 +38,7 @@ VPRIV bool is_signed(cc *c, qty t)
 		return is_signed(c, T(c, t)->base);
 	if (k == TY_CHAR)
 		return !c->o->unsigned_char;
-	return k == TY_SCHAR || k == TY_SHORT || k == TY_INT || k == TY_LONG || k == TY_LLONG || k == TY_INT128;
+	return k == TY_SCHAR || k == TY_SHORT || k == TY_INT || k == TY_LONG || k == TY_LLONG || k == TY_INT128 || k == TY_BITINT;
 }
 
 VPRIV uint32_t ty_hash(const ctype *t)
@@ -115,6 +116,10 @@ VPRIV uint32_t ty_new(cc *c, int kind)
    precision makes them distinct from all standard integer types. */
 VPRIV qty ty_bitint(cc *c, unsigned bits, bool unsign)
 {
+	if (bits > 128) {
+		ctype t = { .kind = unsign ? TY_UBITINT : TY_BITINT, .size = 8 * (((uint64_t)bits + 63) / 64), .align = 8, .n = bits };
+		return QT(ty_intern(c, &t), 0);
+	}
 	unsigned size = bits <= 8 ? 1 : bits <= 16 ? 2 : bits <= 32 ? 4 : bits <= 64 ? 8 : 16;
 	int kind = size == 1 ? TY_SCHAR : size == 2 ? TY_SHORT : size == 4 ? TY_INT : size == 8 ? TY_LLONG : TY_INT128;
 	ctype t = { .kind = (uint8_t)(kind + unsign), .size = size, .align = size > 8 && (c->o->target == PP_LINUX_X86_64 || PP_IS_WASM(c->o->target)) ? 8 : size, .n = bits };
@@ -368,6 +373,7 @@ VPRIV int rank(cc *c, qty t)
 	case TY_LONG: case TY_ULONG: return 5;
 	case TY_LLONG: case TY_ULLONG: return 6;
 	case TY_INT128: case TY_UINT128: return 7;
+	case TY_BITINT: case TY_UBITINT: return 8;
 	case TY_ENUM: return rank(c, T(c, t)->base);
 	default: return 0;
 	}

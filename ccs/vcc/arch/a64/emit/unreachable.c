@@ -20,8 +20,8 @@ VPRIV void a64_unreachable(ecx *e)
 	 * resumable (__debugtrap and __arm_trap), so it does not end a region.
 	 */
 #define A64_NEXT(op) [op] = EM_FLOW_NEXT
-	static const uint8_t flow[I_TLV + 1] = {
-		[I_B] = EM_FLOW_STOP, [I_RET] = EM_FLOW_STOP,
+	static const uint8_t flow[I_TAIL + 1] = {
+		[I_B] = EM_FLOW_STOP, [I_RET] = EM_FLOW_STOP, [I_TAIL] = EM_FLOW_STOP,
 		A64_NEXT(I_ADD), A64_NEXT(I_SUB), A64_NEXT(I_ADDS), A64_NEXT(I_SUBS),
 		A64_NEXT(I_AND), A64_NEXT(I_ORR), A64_NEXT(I_EOR), A64_NEXT(I_ANDS),
 		A64_NEXT(I_BIC), A64_NEXT(I_ORN), A64_NEXT(I_ADC), A64_NEXT(I_SBC),

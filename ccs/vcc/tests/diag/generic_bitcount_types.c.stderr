@@ -1,7 +1,7 @@
-generic_bitcount_types.c:1:49: error: 1st argument must be a scalar unsigned integer type of at most 128 bits
+generic_bitcount_types.c:1:49: error: 1st argument must be a scalar unsigned integer type
     1 | int signed_input(int x) { return __builtin_clzg(x); }
       |                                                 ^
-generic_bitcount_types.c:2:59: error: 1st argument must be a scalar unsigned integer type of at most 128 bits
+generic_bitcount_types.c:2:59: error: 1st argument must be a scalar unsigned integer type
     2 | int floating_input(double x) { return __builtin_popcountg(x); }
       |                                                           ^
 generic_bitcount_types.c:3:58: error: 2nd argument must have type int after integer promotion

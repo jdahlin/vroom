@@ -115,6 +115,7 @@ static inline bool inline_only(const sym *y)
 
 #include "../arch/a64/emit/ins.h"
 #include "rec/rec.h"
+#include "flow/flow.h"
 
 /* references to things with a symbol: kind in the top 4 bits */
 enum { RK_SYM = 0, RK_STR = 1, RK_LBL = 2, RK_NAME = 3 };
@@ -346,6 +347,7 @@ typedef struct ecx {
 	int64_t cl_top;		/* frame offset above the block's compound literals (kept past statements) */
 	int64_t outmax;		/* outgoing stack argument bytes */
 	bool dyn, calls, vararg;
+	bool discarded_scalar;	/* lowering exposed an already-emitted unused scalar result */
 	int64_t vaslot;		/* variadic register save area */
 	int ngr_named, nstk_named;	/* variadic: named GPR args, named stack bytes */
 	int nvr_named;
@@ -527,6 +529,32 @@ typedef struct em_sdivpow2_recipe {
 VPRIV bool em_sdivpow2(cc *c, qty ty, int op, i128 rhs, em_sdivpow2_recipe *r);
 /* opt/mulconst.c: shift for x + (x << shift), or zero to retain multiply. */
 VPRIV unsigned em_mulconst(unsigned bits, i128 rhs);
+
+/* opt/udivconst.c: unsigned32/64 reciprocal; quotient = high_bits(n*magic),
+ * optional ((n-q)>>1)+q correction, then shift. compare means q=(n>=d). */
+typedef struct em_udivconst_recipe {
+	uint64_t divisor, magic;
+	uint8_t bits, shift;
+	bool add, compare, remainder;
+} em_udivconst_recipe;
+VPRIV bool em_udivconst32(uint32_t divisor, bool remainder, em_udivconst_recipe *r);
+VPRIV bool em_udivconst64(uint64_t divisor, bool remainder, em_udivconst_recipe *r);
+VPRIV bool em_udivconst(cc *c, qty ty, int op, i128 rhs, em_udivconst_recipe *r);
+VPRIV bool a64_udivconst_ok(ecx *e, val a, const em_udivconst_recipe *r);
+VPRIV val a64_udivconst(ecx *e, val a, const em_udivconst_recipe *r);
+/* opt/sdivconst.c: reciprocal for a positive divisor magnitude. Signed high
+ * product, optional numerator addition, arithmetic shift, then sign correction. */
+typedef struct em_sdivconst_recipe {
+	uint64_t divisor;
+	int64_t magic;
+	uint8_t bits, shift;
+	bool add, negative, remainder;
+} em_sdivconst_recipe;
+VPRIV bool em_sdivconst32(int32_t divisor, bool remainder, em_sdivconst_recipe *r);
+VPRIV bool em_sdivconst64(int64_t divisor, bool remainder, em_sdivconst_recipe *r);
+VPRIV bool em_sdivconst(cc *c, qty ty, int op, i128 rhs, em_sdivconst_recipe *r);
+VPRIV bool a64_sdivconst_ok(ecx *e, val a, const em_sdivconst_recipe *r);
+VPRIV val a64_sdivconst(ecx *e, val a, const em_sdivconst_recipe *r);
 /* opt/identity.c */
 enum { EM_ID_NONE, EM_ID_LEFT, EM_ID_ZERO, EM_ID_ONES };
 VPRIV int em_bin_identity(cc *c, qty ty, int op, i128 rhs);
@@ -541,6 +569,10 @@ enum { EM_SWITCH_LINEAR, EM_SWITCH_TREE, EM_SWITCH_TABLE };
 VPRIV int em_switch_strategy(uint32_t n, i128 lo, i128 hi, bool ranges, bool tables);
 VPRIV bool em_switch_prepare(em_switch_case *cases, uint32_t n, unsigned bits, bool sg);
 /* opt/locals.c: eligibility and bounded selection from the existing prepass. */
+/* opt/tail.c: exact direct forwarding wrappers; target capability/ABI checks follow. */
+VPRIV bool em_tail_candidate(ecx *e, uint32_t fn, uint32_t expr, uint32_t maxargs, uint32_t *callee);
+VPRIV bool a64_tail_return(ecx *e, uint32_t expr);
+VPRIV uint32_t a64_tail_ref(const ecx *e);
 VPRIV bool em_local_eligible(ecx *e, uint32_t s);
 VPRIV bool em_local_gpr_type(cc *c, qty ty);
 VPRIV unsigned em_select_locals(ecx *e, uint32_t fn, uint32_t *cand, unsigned max,
@@ -813,11 +845,12 @@ VPRIV void enqueue(emitter *E, uint32_t item);
 /* ---------------- types (the few predicates the emitter needs) ---------------- */
 
 static inline qty prim(int k) { return QT(k, 0); }
-static inline bool k_int(int k) { return (k >= TY_BOOL && k <= TY_UINT128) || k == TY_ENUM; }
+static inline bool k_int(int k) { return (k >= TY_BOOL && k <= TY_UINT128) || k == TY_BITINT || k == TY_UBITINT || k == TY_ENUM; }
+static inline bool em_bigint(cc *c, qty t) { int k = KIND(c, t); return k == TY_BITINT || k == TY_UBITINT; }
 static inline bool is_integer(cc *c, qty t) { return k_int(KIND(c, t)); }
 static inline bool em_bitint(cc *c, qty t)
 {
-	return KIND(c, t) >= TY_CHAR && KIND(c, t) <= TY_UINT128 &&
+	return ((KIND(c, t) >= TY_CHAR && KIND(c, t) <= TY_UINT128) || em_bigint(c, t)) &&
 	       !(T(c, t)->flags & TF_ATOMIC) && T(c, t)->n;
 }
 static inline bool is_ptr(cc *c, qty t) { return KIND(c, t) == TY_PTR; }
@@ -829,8 +862,8 @@ static inline bool is_void(cc *c, qty t) { return KIND(c, t) == TY_VOID; }
 static inline bool is_vec(cc *c, qty t) { return KIND(c, t) == TY_VECTOR; }
 static inline bool is_bvec(cc *c, qty t) { return is_vec(c, t) && KIND(c, T(c, t)->base) == TY_BOOL; }
 /* passed and returned like a record (vcc's own convention for vectors) */
-static inline bool is_recabi(cc *c, qty t) { return is_record(c, t) || is_vec(c, t); }
-static inline bool is_agg(cc *c, qty t) { return is_record(c, t) || is_array(c, t) || is_vec(c, t); }
+static inline bool is_recabi(cc *c, qty t) { return is_record(c, t) || is_vec(c, t) || em_bigint(c, t); }
+static inline bool is_agg(cc *c, qty t) { return is_record(c, t) || is_array(c, t) || is_vec(c, t) || em_bigint(c, t); }
 static inline uint64_t tsize(cc *c, qty t) { return T(c, t)->size; }
 
 /* Apple arm64: an integer under 4 bytes in a register is extended to 32 bits by its producer */
