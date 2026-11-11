@@ -26,6 +26,7 @@ VPRIV void wmem_begin(ecx *e)
 	W->memfailed = W->memchanged = false;
 	W->memopaque = W->nmem = 0;
 	W->nalloc = 1;
+	wflow_begin(e);
 }
 
 VPRIV void wmem_alloc(ecx *e, uint64_t off, uint64_t size)
@@ -95,9 +96,31 @@ VPRIV void wmem_fence(ecx *e)
 {
 	wst *W = e->w;
 
+	if (!W->nmem)
+		return;
+	if (W->mem[W->nmem - 1].kind == WM_FENCE && W->mem[W->nmem - 1].epoch == W->nflow) {
+		/* Upgrade only within one topology interval. Moving an effect
+		 * barrier back across an empty else/join would miss another path. */
+		W->mem[W->nmem - 1].control = false;
+		return;
+	}
+	wmem *m = wm_event(e, WM_FENCE);
+	if (m)
+		m->epoch = W->nflow;
+}
+
+VPRIV void wmem_control_fence(ecx *e)
+{
+	wst *W = e->w;
+	wmem *m;
+
 	if (!W->nmem || W->mem[W->nmem - 1].kind == WM_FENCE)
 		return;
-	(void)wm_event(e, WM_FENCE);
+	m = wm_event(e, WM_FENCE);
+	if (m) {
+		m->control = true;
+		m->epoch = W->nflow;
+	}
 }
 
 VPRIV void wmem_poison(ecx *e, const wlv *l, uint64_t size)
@@ -152,6 +175,7 @@ VPRIV void wmem_access(ecx *e, const wlv *l, qty t, bool store, size_t begin)
 		m->off = l->celloff;
 		m->size = (uint32_t)sz;
 		m->type = (uint8_t)type;
+		W->flowstores += store;
 	}
 }
 
@@ -207,6 +231,7 @@ VPRIV void wmem_optimize(ecx *e)
 	for (uint32_t i = 0; i < W->nmem; i++)
 		if (W->mem[i].capture)
 			W->mem[i].cache = wnewloc(e, W->mem[i].type);
+	wflow_optimize(e);
 }
 
 VPRIV void wmem_render(ecx *e, tbuf *out)

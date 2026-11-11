@@ -257,11 +257,11 @@ static int wsetjmp(ecx *e, uint32_t n, bool want)
 	wget(e, W->sjl);
 	wconst(e, WT_I32, k + 1);
 	wi(e, "i32.eq");
-	wblock(e, "if\ti32");
+	wblock(e, "if\ti32", WF_IF);
 	wconst(e, WT_I32, 0);
 	wset(e, W->sjl);
 	wget(e, W->sjv);
-	wboundary(e, "else");
+	wboundary(e, "else", WF_ELSE);
 	wexpr(e, c->lists[x->b], true);
 	wconst(e, WT_I32, k + 1);
 	wslot_addr(e, W->sjfid);
@@ -291,6 +291,7 @@ static int wlongjmp(ecx *e, uint32_t n)
 		wconv(e, N(a1)->ty, prim(TY_INT));
 	tb_s(&e->w->decl, WASM32(c) ? "__wasm_longjmp\t(i32, i32) -> ()\n" : "__wasm_longjmp\t(i64, i32) -> ()\n");
 	wi(e, "call\t__wasm_longjmp");
+	wflow_reject(e);
 	wi(e, "unreachable");
 	return WT_NONE;
 }
@@ -886,14 +887,14 @@ static int wbi_atomic(ecx *e, uint32_t n, bool want)
 		if (!sync)
 			wload(e, &l, vt);
 		wop(e, k, "eq");
-		wblock(e, "if\ti32");
+		wblock(e, "if\ti32", WF_IF);
 		wget(e, tp);
 		wget(e, v2);
 		if (gen)
 			wload(e, &l, vt);
 		wstore(e, &l, vt);
 		wconst(e, WT_I32, 1);
-		wboundary(e, "else");
+		wboundary(e, "else", WF_ELSE);
 		if (!sync) {
 			wget(e, v1);
 			wget(e, cur);
@@ -1071,6 +1072,7 @@ VPRIV int wbuiltin(ecx *e, uint32_t n, bool want)
 	case BI_UNREACHABLE:
 	case BI_TRAP:
 	case BI_DEBUGTRAP:
+		wflow_reject(e);
 		wi(e, "unreachable");
 		return WT_NONE;
 	case BI_RETURN_ADDRESS:
