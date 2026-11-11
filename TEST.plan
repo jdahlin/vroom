@@ -115,12 +115,32 @@ riktade rättningar verifieras separat innan nästa fulla körning.
 **Klart när:** inga krascher i `compile/`; `ieee/` och `builtins/` lika
 gröna som `execute/`.
 
-### S4 gcc.dg — ej påbörjad
-- `dg-do run` (3338) och `gcc.dg/torture/` (2261): körs som c-torture under
-  qemu.  Harnessen läser `dg-options`, `dg-require-*` och `dg-skip-if`; clang
-  är filter.
+### S4 gcc.dg — påbörjad (2026-11-11)
+`bench/vcc-gcc-dg.py -j 6 --target x86_64-linux-gnu` kör direkta
+`gcc.dg/*.c` med `dg-do run` (1276 filer) och direkta
+`gcc.dg/torture/*.c` (2208 filer). `--target aarch64-linux-gnu` använder
+QEMU och Linux-sysroot. Harnessen läser målfilter, options och companion-filer;
+clang är orakel och filter. Rotens standardflaggor följer `dg.exp`
+(`-ansi -pedantic-errors`, ersatta av `dg-options`). Torture kör som standard
+vid -O0; `--matrix` väljer de sex icke-LTO-konfigurationerna i `gcc-dg.exp`.
+Okända direktiv/selektorer hoppas uttryckligen över; lyckad exit följer
+`dg-do run`, medan ännu ostödda `dg-output`/`dg-final` inte räknas.
+
+**Avgränsad baslinje:** `--suite torture --limit 400 '^torture/pr'`
+ger x86 270 godkända/11 fel/119 filtrerade och arm64 273/8/119,
+inga kompilatorkrascher. Detta är 400 av 1563 matchande PR-filer vid -O0,
+inte hela sviten. Ett hittat runtime-segfault (`pr116454-1`) är rättat:
+retur av en skalär till `_Complex` konverteras nu innan kodgenerering.
+Båda upstreamfallen `pr116454-{1,2}` och en regression med skalära och
+komplexa returkonverteringar går på båda målen.
+
+Kvar:
+- Alla återstående matchande filer och optimeringskonfigurationer; nästlade
+  kataloger med egna `.exp`-drivrutiner och LTO har ännu ingen motsvarighet.
+- Fler verifierade effektiva mål och villkorliga direktiv; okända kontrakt
+  får inte bli tysta godkännanden.
 - `dg-error` (1720) används omvänt: vcc ska avvisa varje rad som clang
-  avvisar och godta resten.  Raden räknas, inte texten.
+  avvisar och godta resten. Raden räknas, inte texten. Den riggen återstår.
 
 **Klart när:** körtesterna lika gröna som clangs; ingen fil som clang godtar
 avvisas av vcc.
@@ -146,21 +166,49 @@ Underkatalogernas egna CMake-flaggor och tester återstår.
 för QBE-fallen, tokenparitet för `.pp`, och avvisning för `.err`, med
 clang som filter. Det jämför inte QBE IR eller runtime-semantik.
 Baslinje: x86 166 godkända/17 fel/13 filtrerade, arm64 168/15/13.
+Efter rättningar: 183 godkända/0 fel/13 filtrerade på båda målen.
+Detta är fortfarande inte runtime- eller QBE-ekvivalens.
 
 **Klart när:** allt som clang klarar klarar också vcc.
 
-### S6 ABI-generatorer — ej påbörjad
+### S6 ABI-generatorer — rigg klar, fel rättas
 `gcc.dg/compat/struct-layout-1_generate.c` och clangs `utils/ABITest`
 genererar tusentals anrop mellan två kompilatorer.  Kopplas in i
 `bench/vcc-abi.py`: clang/vcc × anropare/anropad, Linux under qemu och
 Apple nativt.
 
+`bench/vcc-abi.py --generated --target x86_64|aarch64` kör alla fyra
+kombinationer av clang/vcc som anropare/anropad. Källor, kommandon och
+utdata sparas. Baslinje med 1000 fall per generator: x86 GCC 654 godkända,
+122 fel, 1 vcc-krasch, 222 clang-filtrerade och 1 clang-krasch; LLVM
+857/143. ARM GCC 673/105/222 filtrerade och LLVM 987/13.
+Rättningar av vektoranrop, packade returvärden, unionsinitialisering,
+fältalignering och homogena ARM-aggregat verifieras nu mot samma fall.
+Siffrorna är baslinjer, inte ett påstående om slutligt gröna körningar.
+
 **Klart när:** N genererade fall per plattform utan skillnad.
 
-### S7 Slumpprogram (TODO T10) — ej påbörjad
+### S7 Slumpprogram (TODO T10) — rigg klar, långkörningar återstår
 csmith och yarpgen byggs från `work/testsuites/`.  `bench/vcc-csmith.py`
 bygger programmen med clang -O0 och vcc, kör dem och jämför checksummor.
 Avvikelser reduceras med creduce till tester i `tests/vcc`.
+
+Status 2026-11-11: båda pinnade generatorerna byggda med CMake.
+`LLVM=/usr/lib/llvm-23 bench/vcc-csmith.py --count 3 -j 2` sparar källor,
+frön, kommandon, utdata och kompilatorhash i `work/random-tests/`.
+Clang -O0, -O2 och UBSan med trap måste ge samma checksumma före jämförelsen;
+fel i oraklet redovisas som skip, aldrig pass. Körningen använder en egen
+kopia av vpp så samtidiga ombyggnader inte byter kompilator mitt i ett prov.
+YARPGen begränsas i röktestet till två arraydimensioner (`--max-array-dims=0`
+återställer generatorns standard); standardens frö 1 gav över 14 GB globala
+arrayer och clang kunde inte länka det med den lilla kodmodellen.
+Frön 1–3: x86 Csmith 3/3, YARPGen 2/3 (frö 3 träffar X3:s gräns på
+64 anropsargument); ARM/QEMU Csmith 3/3, YARPGen 3/3. Gränserna på
+64 anropsargument och 256 parametrar har därefter tagits bort; en separat
+återkörning av frö 3 matchar clang på båda målen, och ett ABI-test med
+291 parametrar går i alla fyra kompilatorkombinationer. Ingen 24h-körning
+eller reducering påstås vara klar; S2–S6 och det kvarvarande x86-felet
+måste verifieras först.
 
 **Klart när:** 24 h per generator utan avvikelse, på båda målen
 (PLAN-release G1).
