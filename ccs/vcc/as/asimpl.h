@@ -105,7 +105,7 @@ struct As {
 	uint32_t ncfi, cficap;
 	struct Fde { uint32_t start, end, first, n, ra; uint8_t simple, sig, bkey; } *fde;
 	uint32_t nfde, fdecap;
-	int infde, cfi_eh;	/* inside .cfi_startproc; .cfi_sections without .eh_frame: 1 */
+	int infde, cfi_eh, cfi_dbg;	/* inside .cfi_startproc; .cfi_sections without .eh_frame: 1; with .debug_frame: 1 */
 	struct { uint32_t orig, ver, rm; } *sv; uint32_t nsv, svcap;	/* .symver */
 	uint32_t *asg; uint32_t nasg, asgcap;	/* .addrsig_sym */
 	/* .file N / .loc: DWARF line table (MC's MCDwarfLineTable, version 5) */
