@@ -907,7 +907,10 @@ VPRIV val wk_inline(ecx *e, uint32_t n, uint32_t s)
 			val v = i < x->c ? wk_gen(e, c->lists[x->b + i]) : vconst(0);
 
 			as[i] = 0;
-			if (v.k != V_CONST || wk_mem(e, pt) || is_flt(c, pt)) {
+			/* (an address constant, &key, stays one too: an asm "i" operand in the copy) */
+			bool kaddr = v.k == V_ADDR && is_ptr(c, pt) && !wk_weak0(c, v);
+
+			if ((v.k != V_CONST && !kaddr) || wk_mem(e, pt) || is_flt(c, pt)) {
 				lval l = { .k = L_FRAME, .off = wk_slot(e, tsize(c, pt) ? tsize(c, pt) : 8, talign(c, pt) > 16 ? 16 : 8), .align = 8 };
 
 				as[i] = (int32_t)l.off;
@@ -932,7 +935,7 @@ VPRIV val wk_inline(ecx *e, uint32_t n, uint32_t s)
 			if (!as[i] && !(e->E->sflags[p] & (SA_WRITTEN | SA_CWRITE)) && !(QQ(pt) & Q_VOLATILE) &&
 			    !sym_attrs(c, p)->cleanup) {
 				W->kgen[p] = W->gen;
-				W->kval[p] = vconst(em_trunc_to(c, av[i].i, pt));
+				W->kval[p] = av[i].k == V_ADDR ? av[i] : vconst(em_trunc_to(c, av[i].i, pt));
 				continue;
 			}
 			W->kgen[p] = 0;

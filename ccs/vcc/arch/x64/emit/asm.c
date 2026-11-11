@@ -11,7 +11,7 @@
 enum { XO_REG, XO_MEM, XO_IMM, XO_X87 };	/* XO_X87: on the x87 stack, reg 0 st(0) (t), 1 st(1) (u) */
 
 typedef struct xopnd {
-	uint8_t kind, reg, out, inout, flt, fixed;
+	uint8_t kind, reg, out, inout, flt, fixed, sp;	/* sp: register ... asm("rsp") (ASM_CALL_CONSTRAINT): %rsp itself, nothing moved */
 	int8_t tied;		/* an input: the output it shares a register with, -1 none */
 	int size;		/* the operand's size in bytes (register names) */
 	val v;			/* XO_IMM: the value; an input's value until it is placed */
@@ -202,6 +202,11 @@ VPRIV void x64_asm(ecx *e, uint32_t n)
 			r = x64_creg(*p);
 		if (r < 0 && N(en)->op == N_VAR && sym_attrs(c, N(en)->a)->asmname && (c->syms[N(en)->a].sc == SC_REGISTER))
 			r = x64_rname(c->strs[sym_attrs(c, N(en)->a)->asmname - 1].s);	/* register long x asm("rdx") */
+		if (r == RSP && N(en)->op == N_VAR && c->syms[N(en)->a].sc == SC_REGISTER) {
+			op[i].fixed = op[i].sp = 1;
+			op[i].reg = RSP;
+			continue;
+		}
 		if (r >= 0) {
 			op[i].fixed = 1;
 			op[i].reg = (uint8_t)r;
@@ -237,6 +242,10 @@ VPRIV void x64_asm(ecx *e, uint32_t n)
 		o->t = N(en)->ty;
 		o->name = a->ops[i].name;
 		o->size = wk_size(c, o->t);
+		if (o->sp) {
+			o->kind = XO_REG;
+			continue;
+		}
 		o->flt = strpbrk(cs, "xy") != NULL && is_flt(c, o->t);
 		o->l = wk_lval(e, en);
 		if (strpbrk(cs, "tu") && is_flt(c, o->t)) {
@@ -268,6 +277,10 @@ VPRIV void x64_asm(ecx *e, uint32_t n)
 		o->size = wk_size(c, o->t);
 		o->flt = strpbrk(cs, "xy") != NULL && is_flt(c, o->t);
 		o->tied = -1;
+		if (o->sp) {
+			o->kind = XO_REG;
+			continue;
+		}
 		for (const char *p = cs; *p; p++)
 			if (*p >= '0' && *p <= '9')
 				tied = atoi(p);
@@ -307,7 +320,15 @@ VPRIV void x64_asm(ecx *e, uint32_t n)
 				continue;
 			}
 		}
-		v = wk_gen(e, en);
+		{
+			cval cv;
+
+			/* an integer constant expression as the front end folds it (__builtin_clzll(63), ...) */
+			if (is_integer(e->c, N(en)->ty) && cc_eval(e->c, en, &cv) && cv.kind == CV_INT)
+				v = vconst(em_trunc_to(e->c, cv.i, N(en)->ty));
+			else
+				v = wk_gen(e, en);
+		}
 		if (v.k == V_CONST || (v.k == V_ADDR && !e->c->o->pic)) {
 			bool imm = false;
 
@@ -359,7 +380,7 @@ VPRIV void x64_asm(ecx *e, uint32_t n)
 	for (uint32_t i = 0; i < a->nout; i++) {
 		xopnd *o = &op[i];
 
-		if (o->kind != XO_REG)
+		if (o->kind != XO_REG || o->sp)
 			continue;
 		if (o->fixed) {
 			if (o->inout) {
@@ -559,7 +580,7 @@ VPRIV void x64_asm(ecx *e, uint32_t n)
 	for (uint32_t i = 0; i < a->nout; i++) {
 		xopnd *o = &op[i];
 
-		if (o->kind != XO_REG)
+		if (o->kind != XO_REG || o->sp)
 			continue;
 		if (o->l.bf) {
 			val v = { .k = V_REG, .r = o->reg };

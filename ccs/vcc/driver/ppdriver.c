@@ -1164,6 +1164,22 @@ static __attribute__((noinline)) int ppd_run1(int argc, char **argv, const ppd_e
 			status = 1;
 			goto out;
 		}
+	} else {
+		/* a device or pipe (kbuild's probes compile /dev/null): read whole, as stdin */
+		struct stat dst;
+
+		if (!stat(main_file, &dst) && !S_ISREG(dst.st_mode) && !S_ISDIR(dst.st_mode)) {
+			int dfd = open(main_file, O_RDONLY);
+
+			if (dfd < 0 || read_stdin_all(dfd, errfd, &stdin_src, &stdin_len)) {
+				if (dfd >= 0)
+					close(dfd);
+				dprintf(errfd, "vcc: error: %s: cannot read\n", main_file);
+				status = 1;
+				goto out;
+			}
+			close(dfd);
+		}
 	}
 	if (emit == 1 && !objmode && !out && !layout) {
 		/* clang: -S writes the source's basename with .s */

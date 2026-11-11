@@ -143,6 +143,27 @@ VPRIV void fold(As *a, Val *v)
 	}
 }
 
+/* v is a temporary defined by a deferred expression (elf_expr_sym) */
+static int is_xsym(As *a, const Val *v)
+{
+	int op; ElfVal x, y;
+	return v->add && !v->sub && !v->c && elf_expr_get(a->o, v->add, &op, &x, &y);
+}
+
+/* a value the layout settles: a constant, a label difference, a deferred expression */
+static int deferrable(As *a, const Val *v)
+{
+	return is_abs(a, (Val *)v) || (v->add && v->sub) || is_xsym(a, v);
+}
+
+/* x op y as a temporary the layout defines (x and y deferrable) */
+static void defer_op(As *a, int op, Val *x, const Val *y)
+{
+	uint32_t t = tmpsym(a);
+	elf_expr_sym(a->o, t, op, *x, *y);
+	*x = (Val){ t, 0, 0 };
+}
+
 typedef struct { As *a; const char *p, *e; } Lx;
 
 static int expr(Lx *l, Val *v);
@@ -211,8 +232,15 @@ static int primary(Lx *l, Val *v)
 		if (c == '+') return 0;
 		if (c == '-') {
 			if (v->add && v->sub) { uint32_t t = v->add; v->add = v->sub; v->sub = t; v->c = -v->c; return 0; }
+			if (is_xsym(a, v)) { Val z = { 0, 0, 0 }, y = *v; *v = z; defer_op(a, '-', v, &y); return 0; }
 			if (!is_abs(a, v)) return err(a, "unsupported negation of a symbol");
 			v->c = -v->c; return 0;
+		}
+		if (is_xsym(a, v) || (v->add && v->sub)) {	/* ~x = x ^ -1, !x = x == 0 */
+			Val k = { 0, 0, c == '~' ? -1 : 0 };
+			defer_op(a, c == '~' ? '^' : 'E', v, &k);
+			if (c == '!') { Val one = { 0, 0, 0 }; Val m = *v; *v = one; defer_op(a, '-', v, &m); }	/* (GNU !: 1, not -1) */
+			return 0;
 		}
 		if (!is_abs(a, v)) return err(a, "expected absolute expression");
 		v->c = c == '~' ? ~v->c : !v->c;
@@ -301,12 +329,19 @@ static int apply(As *a, int op, Val *x, Val *y)
 {
 	if (op == '+' || op == '-') {
 		Val r = *y;
+		if ((is_xsym(a, x) || is_xsym(a, y)) && deferrable(a, x) && deferrable(a, y)) {
+			defer_op(a, op, x, y);
+			return 0;
+		}
 		if (op == '-') { r.add = y->sub; r.sub = y->add; r.c = -y->c; }
 		if ((x->add && r.add) || (x->sub && r.sub)) {
 			/* try to cancel: x.add - r.sub etc. handled by fold below */
 			Val t = { x->add, r.sub, 0 }, u = { r.add, x->sub, 0 };
 			fold(a, &t); fold(a, &u);
-			if (t.add && t.sub && u.add && u.sub) return err(a, "expression too complex for a relocation");
+			if (t.add && t.sub && u.add && u.sub) {
+				if (deferrable(a, x) && deferrable(a, y)) { defer_op(a, op, x, y); return 0; }	/* (a-b) - (c-d) across frags */
+				return err(a, "expression too complex for a relocation");
+			}
 			Val res = { 0, 0, x->c + r.c + t.c + u.c };
 			if (t.add) res.add = t.add; if (t.sub) res.sub = t.sub;
 			if (u.add) { if (res.add) return err(a, "expression too complex"); res.add = u.add; }
@@ -324,8 +359,8 @@ static int apply(As *a, int op, Val *x, Val *y)
 	if (!is_abs(a, x) || !is_abs(a, y)) {
 		/* (label difference) op constant, e.g. (end - start) >> 5 with end not yet placed:
 		   a temporary symbol that gets its value once the layout is known */
-		int diff_x = is_abs(a, x) || (x->add && x->sub), diff_y = is_abs(a, y) || (y->add && y->sub);
-		if (!diff_x || !diff_y || !strchr("*/%LR&|^!", op)) return err(a, "expected absolute expression");
+		int diff_x = deferrable(a, x), diff_y = deferrable(a, y);
+		if (!diff_x || !diff_y || !strchr("*/%LR&|^!AOEN<>lg", op)) return err(a, "expected absolute expression");
 		uint32_t t = tmpsym(a);
 		elf_expr_sym(a->o, t, op, *x, *y);
 		*x = (Val){ t, 0, 0 };
@@ -595,7 +630,7 @@ static int d_loc(As *a, const char *p, const char *e);
 static void loc_row(As *a);
 static uint64_t frag_base(As *a, uint32_t frag);
 static int d_prefalign(As *a, const char *p, const char *e);
-enum { VI_PREFALIGN, VI_ALIGN, VI_ULEB, VI_SLEB, VI_X86BR };	/* VI_X86BR: jmp (code 16) / jcc (code cc) to v */
+enum { VI_PREFALIGN, VI_ALIGN, VI_ULEB, VI_SLEB, VI_X86BR, VI_SKIP };	/* VI_SKIP: .skip v, fill with v settled by the layout */	/* VI_X86BR: jmp (code 16) / jcc (code cc) to v */
 static struct VarItem *var_item(As *a, int kind);
 /* .section name [, "flags" [, @type [, entsize]]] ; push = .pushsection */
 static int d_section(As *a, const char *p, const char *e, int push)
@@ -696,7 +731,7 @@ static int d_section(As *a, const char *p, const char *e, int push)
 	if (group) { elf_reg(a->o, group); elf_sec(a->o, s)->comdat = (uint8_t)comdat; }
 	{	/* MC: a code section is at least 4-aligned once switched to */
 		ElfSec *se = elf_sec(a->o, s);
-		if ((se->flags & SHF_EXECINSTR) && se->align < 2) se->align = 2;
+		if ((se->flags & SHF_EXECINSTR) && se->align < 2 && a->o->machine != EM_X86_64) se->align = 2;
 	}
 	switch_to(a, elf_subsection(a->o, s, (int32_t)sub));
 	return 0;
@@ -1134,6 +1169,22 @@ static int d_leb(As *a, const char *p, const char *e, int sgn)
 static int d_space(As *a, const char *p, const char *e)
 {
 	int64_t n, fill = 0;
+	{
+		/* a count only the layout knows (the kernel's ALTERNATIVE: -((b-a)-(d-c) > 0) * ...) */
+		const char *q = p;
+		Val v;
+		if (val_expr(a, &q, e, &v)) return -1;
+		if (!is_abs(a, &v)) {
+			if (!deferrable(a, &v)) return err(a, "expected absolute expression");
+			q = ws(q, e);
+			if (q < e && *q == ',') { q++; if (abs_expr(a, &q, e, &fill)) return -1; }
+			elf_data(a->o, a->cur);
+			struct VarItem *it = var_item(a, VI_SKIP);
+			it->v = v;
+			it->fill = (uint8_t)fill;
+			return 0;
+		}
+	}
 	if (abs_expr(a, &p, e, &n)) return -1;
 	p = ws(p, e);
 	if (p < e && *p == ',') { p++; if (abs_expr(a, &p, e, &fill)) return -1; }
@@ -2042,7 +2093,8 @@ static int directive(As *a, Sv w, const char *p, const char *e)
 			a->asg[a->nasg++] = sym(a, nm.s, nm.n);
 			return 0;
 		}
-		if (IS("align") || IS("p2align")) return d_align(a, p, e, 1);
+		if (IS("p2align") || (IS("align") && a->o->machine != EM_X86_64)) return d_align(a, p, e, 1);
+		if (IS("align")) return d_align(a, p, e, 0);	/* (x86: a byte count, as .balign) */
 		if (IS("ascii")) return d_ascii(a, p, e, 0);
 		if (IS("asciz")) return d_ascii(a, p, e, 1);
 		if (IS("arch") || IS("arch_extension")) return 0;
@@ -2850,6 +2902,29 @@ static int leb_len(int64_t v, int sgn)
 	return (int)b.n;
 }
 
+/* v under the current layout: label differences in one section, deferred expressions */
+static int lay_eval(As *a, Val v, int64_t *out, int depth)
+{
+	int64_t x = v.c, k[2] = { 0, 0 };
+	uint32_t y[2] = { v.add, v.sub }, sc[2] = { 0, 0 };
+	int rel[2] = { 0, 0 };
+	if (depth > 64) return -1;
+	for (int i = 0; i < 2; i++) {
+		if (!y[i]) continue;
+		ElfSym *s = elf_symp(a->o, y[i]);
+		int op; ElfVal ex, ey;
+		if (s->flags & ESYM_ABS) k[i] = (int64_t)s->value;
+		else if (elf_expr_get(a->o, y[i], &op, &ex, &ey)) {
+			int64_t p, q;
+			if (lay_eval(a, ex, &p, depth + 1) || lay_eval(a, ey, &q, depth + 1) || !elf_expr_op(op, p, q, &k[i])) return -1;
+		} else if (!sym_secoff(a, y[i], &sc[i], &k[i])) rel[i] = 1;
+		else return -1;
+	}
+	if (rel[0] != rel[1] || (rel[0] && sc[0] != sc[1])) return -1;
+	*out = x + k[0] - k[1];
+	return 0;
+}
+
 static int var_eval(As *a, struct VarItem *v, int64_t *val)
 {
 	int64_t x = v->v.c, o1, o2;
@@ -2897,6 +2972,13 @@ static void var_finish(As *a)
 					unsigned lg = (unsigned)__builtin_ctzll(al);
 					if (lg > s->align) s->align = lg;
 				}
+			} else if (v->kind == VI_SKIP) {
+				int64_t x;
+				var_prev = prev;
+				int r = lay_eval(a, v->v, &x, 0);
+				var_prev = NULL;
+				if (r) { err(a, "expected absolute expression"); return; }
+				ns = x > 0 ? (uint64_t)x : 0;
 			} else if (v->kind == VI_X86BR) {
 				/* the short form while the target is a local label of this section within reach */
 				uint64_t big = v->code == 16 ? 5 : 6;
@@ -2969,7 +3051,7 @@ static void var_finish(As *a)
 			memcpy(q, t, pad);
 			continue;
 		}
-		if (!v->code) { memset(q, v->fill, pad); continue; }
+		if (!v->code || v->kind == VI_SKIP) { memset(q, v->fill, pad); continue; }
 		if (o->machine == EM_X86_64) { elf_x86_nops(q, pad); continue; }
 		uint64_t z = pad & 3;
 		memset(q, 0, z);

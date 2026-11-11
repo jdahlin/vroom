@@ -208,7 +208,8 @@ static int x64_operand(As *a, const char **pp, const char *e, XOp *o)
 		return 0;
 	}
 mem:
-	if (p < e && *p != '(') {
+	/* a displacement may start with a parenthesis: (2f)(%rip), (a+b)*4(%rax) */
+	if (p < e && (*p != '(' || (ws(p + 1, e) < e && *ws(p + 1, e) != '%' && *ws(p + 1, e) != ','))) {
 		if (x64_expr(a, &p, e, &o->v, &o->mod))
 			return -1;
 		o->hasv = 1;

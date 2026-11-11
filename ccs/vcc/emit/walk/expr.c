@@ -1091,6 +1091,8 @@ static val wk_ternary(ecx *e, uint32_t n)
 			v = wk_gen(e, k ? x->b : x->c);
 			if (vd)
 				return wk_free(e, &v), vconst(0);
+			if (v.k == V_CONST && is_integer(c, t))	/* (stays a constant: an asm "i" operand) */
+				return vconst(em_trunc_to(c, v.i, t));
 			r = wk_reg(e, &v, t);
 			LO(store)(e, r, &l, 8);
 			LO(tfree)(e, r);

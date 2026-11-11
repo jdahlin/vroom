@@ -209,6 +209,8 @@ static inline void elf_vis(ElfObj *o, uint32_t s, int vis) { ElfSym *y = elf_sym
 void elf_size_expr(ElfObj *o, uint32_t sym, ElfVal v);	/* .size sym, expr */
 /* sym = x op y (op: as.c's operator codes), x and y absolute once the layout is known */
 void elf_expr_sym(ElfObj *o, uint32_t sym, int op, ElfVal x, ElfVal y);
+int elf_expr_get(ElfObj *o, uint32_t sym, int *op, ElfVal *x, ElfVal *y);
+int elf_expr_op(int op, int64_t p, int64_t q, int64_t *r);
 /* Registration fixes symbol-table order (MC registers a symbol when it is
  * defined, given an attribute, or used in an emitted value/instruction).
  * elf_define(), elf_fixup() and the mapping symbols register on their own. */
