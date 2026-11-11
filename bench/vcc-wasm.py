@@ -52,6 +52,11 @@ WASM_SKIP = {}
 _WOPT = 'wasm: no inliner or dead-code removal (TODO.md)'
 WASM_XFAIL = {n: _WOPT for n in ('20020720-1', '20030216-1', '20041114-1', 'compare-3',
                                  'pure-1', 'shiftopt-1', 'bcp-1')}
+# ... and tests of our own suite (ccs/vcc/tests/vcc) the wasm emitter does not handle yet
+WASM_XFAIL.update({
+    'fp_class_runtime': 'wasm: __builtin_isfpclass/__builtin_fpclassify not lowered (PLAN-wasm.md W4)',
+    'inline_walk': 'wasm: inlining (const parameters, labels per instance) only in the shared walker, not the wasm emitter',
+})
 
 def set_target(w32):
     """wasm32 (W7) instead of wasm64: the target, emcc's memory, the work directory"""
@@ -139,7 +144,7 @@ def reference(suite, name, path, flags, wd):
 
 def one(t):
     t, st, cat, why = one_(t)
-    xf = WASM_XFAIL.get(t[1]) if t[0] == 'gcc' else None
+    xf = WASM_XFAIL.get(t[1]) if t[0] in ('gcc', 'vcc') else None
     if xf and st == 'fail':
         return t, 'xfail', cat, f'{xf} [{why}]'
     if xf and st == 'pass':
