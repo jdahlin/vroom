@@ -69,6 +69,8 @@ arm64)
 	step rec-effects  python3 bench/vcc-rec-effects.py
 	step rec-slots python3 bench/vcc-rec-slots.py --sanitize
 	step rec-slot-values python3 bench/vcc-rec-slot-values.py --sanitize
+	step rec-mulconst python3 bench/vcc-rec-mulconst.py --sanitize --check-mutation
+
 	step flow-contracts python3 bench/vcc-flow.py --sanitize
 	step rec-dead python3 bench/vcc-rec-dead.py --sanitize
 	step slot-observable python3 bench/vcc-slot-observable.py --check-mutation
@@ -135,6 +137,7 @@ wasm)
 	step opt-rules-wasm32 python3 bench/vcc-opt-rules.py --target wasm32-unknown-emscripten --run
 	step opt-rules-wasm64 python3 bench/vcc-opt-rules.py --target wasm64-unknown-emscripten --run
 	step wasm-cells python3 bench/vcc-wasm-cells.py
+	step wasm-flow python3 bench/vcc-wasm-flow.py
 	step const-control-wasm32 python3 bench/vcc-constant-control.py --target wasm32-unknown-emscripten
 	step const-control-wasm64 python3 bench/vcc-constant-control.py --target wasm64-unknown-emscripten
 	step wasm64       python3 bench/vcc-wasm.py -j "$J"

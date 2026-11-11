@@ -384,6 +384,8 @@ VPRIV val arith(ecx *e, int op, qty ty, val a, val b)
 			opi(e, I_SUBI, x, ra, ra, x ? k : (int32_t)k);
 			return a;
 		case T_STAR:
+			if (a64_mulconst(e, ty, ra, b.i))
+				return a;
 			if (m && !(m & (m - 1))) {
 				shift_imm(e, T_LESSLESS, x, ra, ra, __builtin_ctzll(m));
 				return a;

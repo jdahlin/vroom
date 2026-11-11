@@ -1556,21 +1556,21 @@ static int wcond_expr(ecx *e, uint32_t n, bool want)
 		case WT_F32: wfconst(e, WT_F32, 0); wi(e, "f32.ne"); break;
 		case WT_F64: wfconst(e, WT_F64, 0); wi(e, "f64.ne"); break;
 		}
-		wblock(e, wif(k));
+		wblock(e, wif(k), WF_IF);
 		if (want) {
 			wget(e, t);
 			wconv(e, at, x->ty);
 		}
-		wboundary(e, "else");
+		wboundary(e, "else", WF_ELSE);
 		wexpr(e, x->c, want);
 		wend(e, "end_if");
 		wfree(e, t);
 		return k;
 	}
 	wtruth(e, x->a);
-	wblock(e, wif(k));
+	wblock(e, wif(k), WF_IF);
 	wexpr(e, x->b, want);
-	wboundary(e, "else");
+	wboundary(e, "else", WF_ELSE);
 	wexpr(e, x->c, want);
 	wend(e, "end_if");
 	return k;
@@ -2121,17 +2121,17 @@ static int wexpr1(ecx *e, uint32_t n, bool want)
 		if (!want) {
 			if (x->op == N_LOGOR)
 				wi(e, "i32.eqz");
-			wblock(e, "if");
+			wblock(e, "if", WF_IF);
 			wexpr(e, x->b, false);
 			wend(e, "end_if");
 			return WT_NONE;
 		}
-		wblock(e, "if\ti32");
+		wblock(e, "if\ti32", WF_IF);
 		if (x->op == N_LOGAND)
 			wbool(e, x->b);
 		else
 			wconst(e, WT_I32, 1);
-		wboundary(e, "else");
+		wboundary(e, "else", WF_ELSE);
 		if (x->op == N_LOGAND)
 			wconst(e, WT_I32, 0);
 		else
