@@ -1586,7 +1586,8 @@ static bool rel_build(drent *e)
 		e->dn[a][RO_DA + 1] = t;
 		e->dof[a] = malloc((t + 1) * sizeof(uint32_t));
 		for (int k = 0; k <= RO_DA; k++) {
-			memcpy(e->dof[a] + e->dn[a][k], rl[a].d[k].v, rl[a].d[k].n * sizeof(uint32_t));
+			if (rl[a].d[k].n)
+				memcpy(e->dof[a] + e->dn[a][k], rl[a].d[k].v, rl[a].d[k].n * sizeof(uint32_t));
 			free(rl[a].d[k].v);
 		}
 	}
