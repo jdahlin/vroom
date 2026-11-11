@@ -291,11 +291,12 @@ inbyggda namn; 119 har granskade direkta sänkningar och 162 heltalsöverlagring
 både `-S` och `-c`; 136 immediate-fall samt deklarationscache och replay går
 också igenom. `bench/vcc-x86-wide.py` testar AVX-512 inklusive maskad läsning
 mot en skyddad sida. `vas-obj.py` går 64/64; tre av 1800 slumpade kodningar
-använder likvärdig, längre VEX-form än LLVM. PostgreSQL med snapshot5 byggde
-och testade 309 fall, 21 hoppades över, inga fel (som clang); snapshot6
-kompilerade 1580/1580 jobb i samtliga mätlägen. Slutlig bred builtin-täckning,
+använder likvärdig, längre VEX-form än LLVM. PostgreSQL på den kombinerade kompilatorn byggdes utan fallback och testade
+309 fall, 21 hoppades över, inga fel (som clang). Snapshot6 kompilerade
+1580/1580 jobb i samtliga mätlägen; tiderna gäller den äldre snapshoten. Slutlig bred builtin-täckning,
 funktions-/featurekanter och releasegrindarna G1/G4 återstår. Snapshot6 är
-före den sista assemblerns gränskontroll och säkerhetsspärr.
+före den sista assemblerns gränskontroll och säkerhetsspärr. Den separata
+PIC-buggen som orsakar DT_TEXTREL-länkvarningar återstår.
 
 Ordningen gör att varje steg syns: X2 ger körbara program via clangs assembler och
 alla tre lagren i minsta form, X4 optimerad kod, X5 egna objekt, X8 kärnan. X0 är förutsättningen för allt (inget går att köra här

@@ -398,8 +398,9 @@ körtidsmål; G5 är fortsatt öppet och benchmarksvitens X är inte fastställt
 
 X9 har granskade sänkningar och fristående körnings-, immediate- och
 cachetester, inklusive en AVX-512-läsning mot skyddad sida. PostgreSQL på
-x86-64 passerar samma 309 tester som clang i snapshot5; snapshot6 kompilerar
-1580/1580 jobb i varje mätläge. Mer builtin- och featuretäckning och bredare
+x86-64 passerar samma 309 tester som clang med den kombinerade kompilatorn
+utan fallback; snapshot6 kompilerar 1580/1580 jobb i varje mätläge. Den
+separata x86-PIC-buggen som ger DT_TEXTREL-länkvarningar är öppen. Mer builtin- och featuretäckning och bredare
 målvalidering återstår; G1/G4 är öppna. Omfattning och evidens: `PLAN-x86.md` X9.
 
 ### Status 2026-11-11: x86-funktionsmål, SSE4 och matematik
