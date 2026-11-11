@@ -71,12 +71,12 @@ VPRIV int32_t wk_slot(ecx *e, uint64_t size, uint32_t align)
 
 	if (align < 1)
 		align = 1;
-	if (align > 16)
-		efatal(e, e->curloc, "x86-64: alignment above 16 is not supported yet (PLAN-x86.md X3)");
 	if (size > ((uint64_t)1 << 30))
 		efatal(e, e->curloc, "x86-64: frame too large");
 	o = (int64_t)W->foff + (int64_t)size;
 	o = (o + align - 1) & ~(int64_t)(align - 1);
+	if (o > INT32_MAX - 15)
+		efatal(e, e->curloc, "x86-64: frame too large");
 	W->foff = (int32_t)o;
 	if (align > W->falign)
 		W->falign = align;
@@ -497,6 +497,73 @@ static void wk_loop_push(ecx *e, uint32_t brk, uint32_t cont)
 	W->loop[W->nloop++] = (wkloop){ brk, cont, W->nclean };
 }
 
+VPRIV bool wk_branch_entry(cc *c, uint32_t n)
+{
+	if (!n) return false;
+	const node *x = N(n);
+	switch (x->op) {
+	case N_NONE: case N_NUM: case N_FNUM: case N_STR: case N_VAR:
+	case N_LABELADDR: case N_ZERO: case N_GOTO: case N_BREAK: case N_CONTINUE:
+		return false;
+	case N_LABEL: case N_CASE: case N_DEFAULT:
+		return true;
+	case N_BLOCK: case N_BUILTIN:
+		for (uint32_t i = 0; i < x->c; i++)
+			if (wk_branch_entry(c, c->lists[x->b + i])) return true;
+		return false;
+	case N_CALL:
+		if (wk_branch_entry(c, x->a)) return true;
+		for (uint32_t i = 0; i < x->c; i++)
+			if (wk_branch_entry(c, c->lists[x->b + i])) return true;
+		return false;
+	case N_MEMBER: case N_UNARY: case N_ADDR: case N_DEREF:
+	case N_PREINC: case N_PREDEC: case N_POSTINC: case N_POSTDEC:
+	case N_STMTEXPR: case N_VAARG: case N_EXPR: case N_RETURN: case N_GOTO_IND:
+		return wk_branch_entry(c, x->a);
+	case N_CAST:
+		return (T(c, x->ty)->flags & TF_VLA) || wk_branch_entry(c, x->a);
+	case N_INDEX: case N_BINARY: case N_LOGAND: case N_LOGOR:
+	case N_ASSIGN: case N_COMMA: case N_CPLX:
+	case N_WHILE: case N_DO: case N_SWITCH:
+		return wk_branch_entry(c, x->a) || wk_branch_entry(c, x->b);
+	case N_COND: case N_IF:
+		return wk_branch_entry(c, x->a) || wk_branch_entry(c, x->b) || wk_branch_entry(c, x->c);
+	case N_FOR:
+		return wk_branch_entry(c, x->a) || wk_branch_entry(c, x->b) ||
+		       wk_branch_entry(c, c->lists[x->c]) || wk_branch_entry(c, c->lists[x->c + 1]);
+	case N_ASM: {
+		const casm *a = &c->asms[x->a];
+		for (uint32_t i = 0; i < a->nout + a->nin; i++)
+			if (wk_branch_entry(c, a->ops[i].expr)) return true;
+		return false;
+	}
+	default:
+		return true;
+	}
+}
+
+VPRIV void wk_goto(ecx *e, uint32_t label)
+{
+	wkst *W = e->wk;
+
+	if (W->nclean) {
+		/* the cleanups of the scopes left: those not around the target label */
+		uint32_t t = W->lcg[label] == W->gen ? W->lcn[label] : 0;
+		int k = W->nclean;
+
+		for (; k > 0; k--) {
+			uint32_t s2 = W->clean[k - 1], id = W->csg[s2] == W->gen ? W->csn[s2] : 0, a = t;
+
+			while (a && a != id)
+				a = W->cn[a].parent;
+			if (id && a == id)
+				break;
+		}
+		wk_cleanups(e, k);
+	}
+	LO(jump)(e, wk_ulabel(e, label));
+}
+
 VPRIV void wk_stmt(ecx *e, uint32_t n)
 {
 	cc *c = e->c;
@@ -544,6 +611,17 @@ VPRIV void wk_stmt(ecx *e, uint32_t n)
 		wk_decl(e, x);
 		return;
 	case N_IF: {
+		cval cv;
+		if (cc_eval(c, x->a, &cv) && cv.kind == CV_INT &&
+		    !wk_branch_entry(c, cv.i ? x->c : x->b)) {
+			/* cc_eval permits a comma with side effects: emit the condition once
+			   even when its value determines which branch is reachable. */
+			val v = wk_gen(e, x->a);
+			wk_free(e, &v);
+			wk_stmt(e, cv.i ? x->b : x->c);
+			return;
+		}
+
 		uint32_t lelse = wk_newlabel(e), lend = wk_newlabel(e);
 
 		wk_cond(e, x->a, false, lelse);
@@ -626,22 +704,7 @@ VPRIV void wk_stmt(ecx *e, uint32_t n)
 		wk_stmt(e, x->c);
 		return;
 	case N_GOTO:
-		if (W->nclean) {
-			/* the cleanups of the scopes left: those not around the target label */
-			uint32_t t = W->lcg[x->a] == W->gen ? W->lcn[x->a] : 0;
-			int k = W->nclean;
-
-			for (; k > 0; k--) {
-				uint32_t s2 = W->clean[k - 1], id = W->csg[s2] == W->gen ? W->csn[s2] : 0, a = t;
-
-				while (a && a != id)
-					a = W->cn[a].parent;
-				if (id && a == id)
-					break;
-			}
-			wk_cleanups(e, k);
-		}
-		LO(jump)(e, wk_ulabel(e, x->a));
+		wk_goto(e, x->a);
 		return;
 	case N_BREAK: case N_CONTINUE: {
 		int i = W->nloop - 1;
@@ -655,6 +718,7 @@ VPRIV void wk_stmt(ecx *e, uint32_t n)
 		return;
 	}
 	case N_RETURN:
+
 		if (x->a && wk_mem(e, W->rty)) {
 			/* the object's address; a size not a multiple of 8 through a slot of whole words */
 			val v = wk_gen(e, x->a);
@@ -723,7 +787,8 @@ VPRIV void wk_stmt(ecx *e, uint32_t n)
 			LO(barrier)(e);
 			return;
 		}
-		efatal(e, x->loc, "x86-64: inline asm is not supported yet (PLAN-x86.md X6)");
+		LO(asm)(e, n);
+		return;
 	}
 	case N_GOTO_IND: {
 		val v = wk_gen(e, x->a);
@@ -753,7 +818,9 @@ VPRIV void wk_function(ecx *e, uint32_t s)
 	const ctype *ft = T(c, y->ty);
 	const node *body = N(y->body);
 	wkst *W = wk_state(e);
-	wkarg pa[256];
+	wkarg pabuf[256];
+	wkarg *pa = body->aux > sizeof pabuf / sizeof *pabuf ?
+		malloc((size_t)body->aux * sizeof *pa) : pabuf;
 
 	walk_fn(e, s);
 	W->gen++;
@@ -771,16 +838,18 @@ VPRIV void wk_function(ecx *e, uint32_t s)
 	e->calls = false;
 	e->curloc = y->loc;
 	LO(begin)(e, s);
-	if (_setjmp(e->bail))
+	if (_setjmp(e->bail)) {
+		if (pa != pabuf) free(pa);
 		return;	/* efatal: the function is not emitted, the error counted */
+	}
+	if (!pa)
+		efatal(e, y->loc, "out of memory");
 	if (KIND(c, W->rty) != TY_VOID) {
 		int k = KIND(c, W->rty);
 
 		if (((k == TY_INT128 || k == TY_UINT128) && !LO(i128mem)()) || k == TY_FLOAT128)
 			efatal(e, y->loc, "x86-64: this return type is not supported yet (PLAN-x86.md X3)");
 	}
-	if (body->aux > 256)
-		efatal(e, y->loc, "x86-64: more than 256 parameters");
 	W->retlbl = wk_newlabel(e);
 	if (wk_mem(e, W->rty)) {
 		LO(classify)(e, W->rty, &W->rrec);
@@ -838,4 +907,5 @@ VPRIV void wk_function(ecx *e, uint32_t s)
 	}
 	LO(label)(e, W->retlbl);
 	LO(finish)(e, s);
+	if (pa != pabuf) free(pa);
 }

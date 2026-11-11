@@ -77,7 +77,7 @@ typedef struct casm {
 	asmop *ops;		/* outputs then inputs */
 	uint32_t *clob;		/* string indices */
 	uint32_t *labels;	/* label indices */
-	uint8_t vol, go, inl;
+	uint8_t vol, go, inl, extended;
 } casm;
 
 /*

@@ -73,6 +73,7 @@ typedef struct wkst {
 } wkst;
 
 VPRIV wkst *wk_state(ecx *e);
+VPRIV bool wk_branch_entry(cc *c, uint32_t n);
 VPRIV void wk_function(ecx *e, uint32_t s);	/* emit/walk/func.c: what emit/tu.c calls for x86-64 */
 VPRIV int32_t wk_slot(ecx *e, uint64_t size, uint32_t align);
 VPRIV int32_t wk_local(ecx *e, uint32_t s);	/* a local's slot, made on first use (a goto may reach a use first) */
@@ -92,6 +93,7 @@ VPRIV bool wk_signed(cc *c, qty t);
 VPRIV void wk_vla_fix(ecx *e, qty t, bool pure);	/* the VLA sizes in t evaluated now, into slots */
 VPRIV val wk_vla_bytes(ecx *e, qty t);		/* sizeof t (a VLA: computed) */
 VPRIV void wk_vla_decl(ecx *e, uint32_t s, bool zero);	/* a VLA's storage below sp */
+VPRIV void wk_goto(ecx *e, uint32_t label);
 VPRIV void wk_cleanups(ecx *e, int to);	/* the cleanups above depth `to` run, innermost first (not popped) */
 
 /* ---------------- the lowering interface (layer 2) ---------------- */
@@ -135,6 +137,7 @@ VPRIV val LO(fcmp)(ecx *e, int op, qty t, val a, val b);	/* 0 or 1, false when u
 VPRIV val LO(cvt)(ecx *e, val v, qty from, qty to);	/* a float on either side (to may be _Bool) */
 /* builtins the CPU does */
 VPRIV void LO(trap)(ecx *e);				/* __builtin_trap, __builtin_unreachable */
+VPRIV void LO(asm)(ecx *e, uint32_t n);
 VPRIV void LO(barrier)(ecx *e);			/* compiler barrier: no machine instruction */
 VPRIV val LO(frame)(ecx *e, bool ret);			/* the return address (ret) or the frame address */
 VPRIV val LO(bitop)(ecx *e, int bi, int size, val a);	/* BI_CLZ.. BI_BSWAP64: a nonzero where the builtin requires it */

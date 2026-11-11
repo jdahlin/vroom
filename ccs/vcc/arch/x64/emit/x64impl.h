@@ -58,6 +58,7 @@ enum {
 	X_XADD,		/* lock xadd: r0 = [r1 + off], [r1 + off] += old r0 */
 	X_CMPXCHG,	/* lock cmpxchg: if [r1 + off] == rax then = r2, else rax = [r1 + off] */
 	X_MFENCE,
+	X_RAW,		/* raw inline asm: off/length in e->raw */
 	X_BARRIER,	/* empty asm: a compiler memory/flags barrier, no machine instruction */
 	X_JMPR,		/* jmp *r1 */
 	X_NAMED,	/* ref's name as a label here */
@@ -110,7 +111,11 @@ VPRIV int x64_ftreg(ecx *e);
 VPRIV rec *x64_put(ecx *e, int op);
 VPRIV void x64_twoaddr(ecx *e);
 VPRIV void x64_print(ecx *e, tbuf *b, uint32_t s);
+VPRIV void x64_x87(ecx *e, int xf, const lval *l, int sz);
 
+VPRIV void x64_lbl(tbuf *b, uint32_t s, uint32_t l);
+VPRIV void x64_reg(tbuf *b, int r, int sz);
+VPRIV int x64_asm_namedreg(const char *name);
 VPRIV int x64_tlsaddr(ecx *e, uint32_t ref, int model);
 VPRIV bool sym_needs_got(cc *c, uint32_t ref);	/* arch/a64/emit/value.c (shared) */
 VPRIV int x64_base(ecx *e, const lval *l, uint32_t *ref);

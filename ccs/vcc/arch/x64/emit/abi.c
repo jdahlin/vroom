@@ -175,6 +175,8 @@ VPRIV val x64_call(ecx *e, uint32_t ref, val *fn, const wkarg *a, int n, bool va
 	bool retsgn = wk_signed(c, rt), retf = is_flt(c, rt) && !r;
 	int gp = r && r->mem && !r->x87 && !r->up ? 1 : 0, fp = 0;
 	int64_t total = 0, pad;
+	uint32_t stackalign = 16;
+	int32_t savedsp = 0;
 	int64_t *place = calloc((size_t)(n ? n : 1), sizeof *place);	/* stack offset, or -1: registers */
 	rec *i;
 
@@ -190,6 +192,8 @@ VPRIV val x64_call(ecx *e, uint32_t ref, val *fn, const wkarg *a, int n, bool va
 			place[k] = -1;
 			continue;
 		}
+		if (a[k].align > stackalign)
+			stackalign = a[k].align;
 		total = (total + a[k].align - 1) & ~(int64_t)(a[k].align - 1);
 		place[k] = total;
 		total += (int64_t)((a[k].size + 7) & ~(uint64_t)7);
@@ -207,12 +211,19 @@ VPRIV val x64_call(ecx *e, uint32_t ref, val *fn, const wkarg *a, int n, bool va
 			x64_mem(e, X_ST, 8, q, &d, false);
 			X->pushes++;
 		}
+	if (stackalign > 16) {
+		lval slot = x64_fr(savedsp = wk_slot(e, 8, 8));
+
+		x64_mem(e, X_ST, 8, RSP, &slot, false);
+	}
 	total = (total + 15) & ~(int64_t)15;
 	pad = (X->pushes * 8 + total) % 16 ? 8 : 0;
 	if (total + pad) {
 		x64_put(e, X_ADJSP)->imm = -(total + pad);
 		X->pushes += (int)((total + pad) / 8);
 	}
+	if (stackalign > 16)
+		x64_op3(e, X_ANDI, 8, RSP, RSP, XNOREG)->imm = -(int64_t)stackalign;
 	/* stack arguments: their slots' words into the outgoing area */
 	for (int k = 0; k < n; k++) {
 		if (place[k] < 0)
@@ -252,7 +263,12 @@ VPRIV val x64_call(ecx *e, uint32_t ref, val *fn, const wkarg *a, int n, bool va
 		i->ref = ref;
 		i->cond = variadic;
 	}
-	if (total + pad) {
+	if (savedsp) {
+		lval slot = x64_fr(savedsp);
+
+		x64_mem(e, X_LD, 8, RSP, &slot, false);
+		X->pushes -= (int)((total + pad) / 8);
+	} else if (total + pad) {
 		x64_put(e, X_ADJSP)->imm = total + pad;
 		X->pushes -= (int)((total + pad) / 8);
 	}

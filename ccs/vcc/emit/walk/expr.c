@@ -772,8 +772,7 @@ VPRIV void wk_vla_decl(ecx *e, uint32_t s, bool zero)
 	val n = wk_vla_bytes(e, c->syms[s].ty), p;
 	int r;
 
-	if (sym_align(c, s) > 16)
-		efatal(e, e->curloc, "x86-64: alignment above 16 is not supported yet (PLAN-x86.md X3)");
+	uint32_t align = sym_align(c, s);
 	lsp.off += 8, ln.off += 16;
 	r = wk_reg(e, &n, prim(TY_ULONG));
 	LO(store)(e, r, &ln, 8);
@@ -795,7 +794,18 @@ VPRIV void wk_vla_decl(ecx *e, uint32_t s, bool zero)
 		LO(store)(e, t, &lsp, 8);
 		LO(tfree)(e, t);
 	}
+	/* Leave enough padding to round the returned pointer up independently
+	   of the stack pointer; the saved stack pointer still releases it all. */
+	if (align > 16) {
+		n = wk_arith(e, T_PLUS, prim(TY_ULONG), wk_vreg(r), vconst(align - 16));
+		r = wk_reg(e, &n, prim(TY_ULONG));
+	}
 	p = LO(alloca)(e, wk_vreg(r));
+	if (align > 16) {
+		p = wk_arith(e, T_PLUS, prim(TY_ULONG), p, vconst(align - 1));
+		p = wk_arith(e, T_AMP, prim(TY_ULONG), p, vconst(-(int64_t)align));
+		wk_reg(e, &p, prim(TY_ULONG));
+	}
 	LO(store)(e, p.r, &la, 8);
 	if (zero) {
 		/* = {}: the bytes rounded up to 8 (still inside the 16-aligned allocation) */
@@ -804,6 +814,8 @@ VPRIV void wk_vla_decl(ecx *e, uint32_t s, bool zero)
 		val zv = vconst(0);
 
 		LO(load)(e, k, &ln, 8, false);
+		k = LO(bin)(e, T_PLUS, 8, false, wk_vreg(k), vconst(7)).r;
+		k = LO(bin)(e, T_AMP, 8, false, wk_vreg(k), vconst(-8)).r;
 		LO(label)(e, top);
 		LO(brz)(e, wk_vreg(k), 8, false, done);
 		LO(tkeep)(e, k);
@@ -1416,11 +1428,13 @@ static val wk_call(ecx *e, uint32_t n)
 	const ctype *f = T(c, ft);
 	uint32_t ref = 0;
 	val fn = { 0 };
-	wkarg args[64], r = { 0 };
+	wkarg argbuf[64], *args = argbuf, r = { 0 };
 	bool var = (f->flags & (TF_VARIADIC | TF_NOPROTO)) != 0, rec_ = wk_mem(e, f->base);
 
-	if (x->c > 64)
-		wk_unsup(e, n, "a call with more than 64 arguments");
+	/* Keep common calls on the stack; large calls scale with their arity. */
+	if (x->c > sizeof argbuf / sizeof *argbuf &&
+	    !(args = malloc((size_t)x->c * sizeof *args)))
+		efatal(e, x->loc, "out of memory");
 	if (KIND(c, f->base) != TY_VOID)
 		wk_scalar(e, n, f->base);
 	if (fx->op == N_CAST && fx->aux == CK_FDECAY && N(fx->a)->op == N_VAR) {
@@ -1428,6 +1442,7 @@ static val wk_call(ecx *e, uint32_t n)
 
 		if (c->syms[s].kind == S_BUILTIN) {
 			ref = REF(RK_NAME, (uint32_t)c->syms[s].val);	/* a library function by name */
+
 		} else {
 			note_ref(e, REF(RK_SYM, s));
 			ref = REF(RK_SYM, s);
@@ -1454,6 +1469,8 @@ static val wk_call(ecx *e, uint32_t n)
 		val v = LO(call)(e, ref, ref ? NULL : &fn, args, (int)x->c, var, rec_ ? &r : NULL, f->base);
 		lval l = { .k = L_FRAME, .off = r.slot, .align = 8 };
 
+		if (args != argbuf)
+			free(args);
 		if (!rec_)
 			return v;
 		return wk_vreg(LO(laddr)(e, &l));	/* a record result: its object's address */

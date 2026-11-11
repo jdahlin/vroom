@@ -534,6 +534,7 @@ VPRIV uint32_t asm_stmt(cc *c, bool toplevel)
 	expect(c, T_LPAREN, "'('");
 	a->tmpl = asm_string(c);
 	if (!toplevel && asm_colons(c, &pending)) {
+		a->extended = 1;
 		if (!pending)
 			asm_operands(c, &outs, true);
 		if (asm_colons(c, &pending)) {

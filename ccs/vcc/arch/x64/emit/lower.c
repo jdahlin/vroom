@@ -84,6 +84,25 @@ VPRIV int x64_base(ecx *e, const lval *l, uint32_t *ref)
 
 VPRIV void x64_mem(ecx *e, int op, int sz, int r, const lval *l, bool sgn)
 {
+	/* x86 memory displacements are signed 32-bit, but C address offsets are
+	   pointer-width. Materialize a full address before the final memory op. */
+	if (l->off < INT32_MIN || l->off > INT32_MAX) {
+		if (op == X_ST && r == R11 && l->k == L_SYM && sym_needs_got(e->c, l->ref))
+			efatal(e, e->curloc, "internal error: a store through the GOT from r11");
+		uint32_t live = e->x64->live;
+		if (r < 32) e->x64->live |= 1u << r;
+		if (l->k == L_REG && l->r < 32) e->x64->live |= 1u << l->r;
+		int address = x64_treg(e), offset = x64_treg(e);
+		lval origin = *l;
+		origin.off = 0;
+		x64_mem(e, X_LEA, 8, address, &origin, false);
+		x64_movi(e, offset, l->off);
+		x64_op3(e, X_ADD, 8, address, address, offset);
+		lval at = { .k = L_REG, .r = (uint8_t)address };
+		x64_mem(e, op, sz, r, &at, sgn);
+		e->x64->live = live;
+		return;
+	}
 	uint32_t ref;
 	int base = x64_base(e, l, &ref);
 	rec *i;
@@ -92,8 +111,6 @@ VPRIV void x64_mem(ecx *e, int op, int sz, int r, const lval *l, bool sgn)
 		efatal(e, e->curloc, "internal error: a store through the GOT from r11");
 	i = x64_put(e, op);
 
-	if (l->off < INT32_MIN || l->off > INT32_MAX)
-		efatal(e, e->curloc, "x86-64: offset out of range");
 	i->sz = (uint8_t)sz;
 	i->cond = sgn;
 	i->off = (int32_t)l->off;

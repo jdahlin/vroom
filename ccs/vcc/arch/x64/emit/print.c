@@ -64,7 +64,16 @@ static const char *const x64_r8[] = { "al", "cl", "dl", "bl", "spl", "bpl", "sil
 				      "r8b", "r9b", "r10b", "r11b", "r12b", "r13b", "r14b", "r15b" };
 static const char *const x64_ccn[] = { "o", "no", "b", "ae", "e", "ne", "be", "a", "s", "ns", "p", "np", "l", "ge", "le", "g" };
 
-static void x64_reg(tbuf *b, int r, int sz)
+VPRIV int x64_asm_namedreg(const char *name)
+{
+	if (*name == '%') name++;
+	for (int r = 0; r < 16; r++)
+		if (!strcmp(name, x64_r64[r]) || !strcmp(name, x64_r32[r]) ||
+		    !strcmp(name, x64_r16[r]) || !strcmp(name, x64_r8[r])) return r;
+	return -1;
+}
+
+VPRIV void x64_reg(tbuf *b, int r, int sz)
 {
 	if (IS_XMM(r)) {
 		tb_s(b, "%xmm");
@@ -77,7 +86,7 @@ static void x64_reg(tbuf *b, int r, int sz)
 
 static char x64_sfx(int sz) { return sz == 8 ? 'q' : sz == 4 ? 'l' : sz == 2 ? 'w' : 'b'; }
 
-static void x64_lbl(tbuf *b, uint32_t s, uint32_t l)
+VPRIV void x64_lbl(tbuf *b, uint32_t s, uint32_t l)
 {
 	tb_s(b, ".LBB");
 	tb_u(b, s);
@@ -85,8 +94,14 @@ static void x64_lbl(tbuf *b, uint32_t s, uint32_t l)
 	tb_u(b, l);
 }
 
-static void x64_memop(cc *c, tbuf *b, const rec *i)
+static void x64_memop(ecx *e, tbuf *b, const rec *i)
 {
+	cc *c = e->c;
+	int base = i->r[1];
+
+	/* Incoming stack arguments retain rbp; local slots use the realigned base. */
+	if (base == RBP && i->off < 0 && e->wk->falign > 16)
+		base = R12;
 	if (i->r[1] == RIP) {
 		ref_off(c, b, i->ref, i->off);
 		tb_s(b, "(%rip)");
@@ -95,7 +110,7 @@ static void x64_memop(cc *c, tbuf *b, const rec *i)
 	if (i->off)
 		tb_i(b, i->off);
 	tb_c(b, '(');
-	x64_reg(b, i->r[1], 8);
+	x64_reg(b, base, 8);
 	tb_c(b, ')');
 }
 
@@ -126,6 +141,11 @@ VPRIV void x64_print(ecx *e, tbuf *b, uint32_t s)
 	int32_t frame = (e->wk->foff + 15) & ~15;
 
 	tb_s(b, "\tpushq\t%rbp\n\tmovq\t%rsp, %rbp\n");
+	if (e->wk->falign > 16) {
+		tb_s(b, "\tpushq\t%r12\n\tandq\t$");
+		tb_i(b, -(int64_t)e->wk->falign);
+		tb_s(b, ", %rsp\n\tmovq\t%rsp, %r12\n");
+	}
 	if (frame) {
 		tb_s(b, "\tsubq\t$");
 		tb_i(b, frame);
@@ -180,7 +200,7 @@ VPRIV void x64_print(ecx *e, tbuf *b, uint32_t s)
 		case X_LD:
 			if (IS_XMM(i->r[0])) {
 				tb_s(b, sz == 4 ? "\tmovss\t" : sz == 8 ? "\tmovsd\t" : "\tmovups\t");
-				x64_memop(c, b, i);
+				x64_memop(e, b, i);
 				tb_s(b, ", ");
 				x64_reg(b, i->r[0], 8);
 				break;
@@ -190,7 +210,7 @@ VPRIV void x64_print(ecx *e, tbuf *b, uint32_t s)
 			static const char *const zx[] = { [1] = "\tmovzbl\t", [2] = "\tmovzwl\t", [4] = "\tmovl\t", [8] = "\tmovq\t" };
 
 			tb_s(b, i->cond ? sx[sz] : zx[sz]);
-			x64_memop(c, b, i);
+			x64_memop(e, b, i);
 			tb_s(b, ", ");
 			x64_reg(b, i->r[0], i->cond || sz == 8 ? 8 : 4);
 			break;
@@ -202,11 +222,11 @@ VPRIV void x64_print(ecx *e, tbuf *b, uint32_t s)
 				x64_ins(b, "mov", sz);
 			x64_reg(b, i->r[2], sz);
 			tb_s(b, ", ");
-			x64_memop(c, b, i);
+			x64_memop(e, b, i);
 			break;
 		case X_LEA:
 			x64_ins(b, "lea", 8);
-			x64_memop(c, b, i);
+			x64_memop(e, b, i);
 			tb_s(b, ", ");
 			x64_reg(b, i->r[0], 8);
 			break;
@@ -307,13 +327,13 @@ VPRIV void x64_print(ecx *e, tbuf *b, uint32_t s)
 			x64_ins(b, i->op == X_XCHG ? "xchg" : "lock xadd", sz);
 			x64_reg(b, i->r[0], sz);
 			tb_s(b, ", ");
-			x64_memop(c, b, i);
+			x64_memop(e, b, i);
 			break;
 		case X_CMPXCHG:
 			x64_ins(b, "lock cmpxchg", sz);
 			x64_reg(b, i->r[2], sz);
 			tb_s(b, ", ");
-			x64_memop(c, b, i);
+			x64_memop(e, b, i);
 			break;
 		case X_JMPR:
 			tb_s(b, "\tjmpq\t*");
@@ -325,6 +345,11 @@ VPRIV void x64_print(ecx *e, tbuf *b, uint32_t s)
 			break;
 		case X_MFENCE:
 			tb_s(b, "\tmfence");
+			break;
+		case X_RAW:
+			if (i->cond && e->wk->falign > 16)
+				efatal(e, e->curloc, "inline asm r12 operand or clobber conflicts with aligned frame base");
+			tb_put(b, e->raw.p + i->off, i->ref);
 			break;
 		case X_BARRIER:
 			tb_s(b, "\t# compiler barrier");
@@ -455,7 +480,7 @@ VPRIV void x64_print(ecx *e, tbuf *b, uint32_t s)
 				tb_s(b, xn[i->cond]);
 			if (i->r[1] != XNOREG) {
 				tb_c(b, '\t');
-				x64_memop(c, b, i);
+				x64_memop(e, b, i);
 			}
 			break;
 		}
@@ -467,6 +492,8 @@ VPRIV void x64_print(ecx *e, tbuf *b, uint32_t s)
 		}
 		tb_c(b, '\n');
 	}
+	if (e->wk->falign > 16)
+		tb_s(b, "\tmovq\t-8(%rbp), %r12\n");
 	tb_s(b, "\tmovq\t%rbp, %rsp\n\tpopq\t%rbp\n\tretq\n.Lfunc_end");
 	tb_u(b, s);
 	tb_s(b, ":\n\t.size\t");

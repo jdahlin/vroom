@@ -10,7 +10,7 @@ static int x64_fsz(cc *c, qty t) { return KIND(c, t) == TY_FLOAT ? 4 : 8; }
 static val x64_vr(int r) { return (val){ .k = V_REG, .r = (uint8_t)r }; }
 
 /* an x87 instruction, with its memory operand l (NULL: none) */
-static void x64_x87(ecx *e, int xf, const lval *l, int sz)
+VPRIV void x64_x87(ecx *e, int xf, const lval *l, int sz)
 {
 	uint32_t ref = 0;
 	int base = l ? x64_base(e, l, &ref) : 0;
