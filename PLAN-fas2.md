@@ -626,6 +626,208 @@ ingen emulering. Samma image fungerar i en qemu-system-aarch64-gäst med `-accel
 3. vroom-build.sh (zsh, perl för tid) portabelt, och shimmen statisk utan libc-init på
    Linux.
 
+## Gemensam optimerare utan SSA
+
+### Beslut och kodläge (2026-11-11)
+
+Implementationsplan efter x86-auditen i `PLAN-x86.md` X4. Detta avsnitt
+äger de gemensamma optimeringarna; x86-planen äger målens instruktioner,
+ABI, kodning och inkoppling. Ingen ny optimering är implementerad av denna
+plan. G5:s kvalitetsmål och G7:s kompileringstid måste mätas separat.
+
+Kodgranskningen är gjord efter rebase på main `4daebd9`; auditens siffror
+gäller uttryckligen dess äldre bas `52261ef`. Nästa kodsteg bygger och mäter
+en ny bas innan någon prestandajämförelse. De gamla resultaten skrivs inte om.
+
+- `emit/tu.c` väljer tre generatorer. `emit/walk/` används bara av x86;
+  `walk.h` har hårdkodat `LO(name) x64_##name`. `wkarg` och dess
+  SSE/eightbyte-klasser är också SysV-specifika. Katalogens namn betyder
+  därför inte att arm64/wasm redan använder den.
+- `emit/prepass.c` har redan `luse`, `lnoreg`, `lspan`, `sflags`,
+  `fnsize`, skrivnings- och adressflyktsfakta. Återanvänd dem, med
+  konservativ komplettering där de inte bevisar vad en ny regel behöver.
+- arm64:s `choose_lregs`/`bind_lreg` håller utvalda skalärer i register.
+  `arch/a64/emit/opt.c` har block/liveness, kopior, stackceller, kända
+  utvidgningar och döda resultat. `finish_function` väljer ram och sparade
+  register efter städningen. Det är befintlig funktionalitet att extrahera,
+  inte en ny optimerare att skriva en gång till för x86.
+- x86:s `wk_arith`, `wk_decl`, `wk_const_if`, `wk_can_inline` innehåller
+  semantiska regler; `x64_finish` kör bara `x64_twoaddr` och skrivaren.
+  `rec.h` har ett 16-byte-format och `opdesc`, men ingen inkopplad
+  gemensam passmotor eller fullständig x86-op-tabell.
+- Wasm håller redan lämpliga skalärer i wasm-lokaler. Dess operandstack
+  och strukturerade kontrollflöde kräver inte fysisk registerliveness.
+  Dela C-regler, analyser och strategier med wasm; tvinga inte in dess
+  värden i en registermaskins representation för att kalla koden gemensam.
+  Konkreta anslutningar: `wexpr.c` har `wbinary`/`warith`, `wknown`,
+  `wlocal` och `wvlanes`; `wstmt.c` har `wswitch`, `wlabels`, `wterm` och
+  strukturerade grenar inklusive `br_table`; `wcall.c:wcall` har anropen.
+  Dessa överlappar redan x86/arm64 i semantik, men inte i värderepresentation.
+
+### Gränser mellan gemensamt och mål
+
+| Gemensamt ansvar | Föreslagen plats | Målets ansvar |
+| --- | --- | --- |
+| Typkorrekta algebraregler, konstantdivisionens parametrar | `emit/opt/arith.c`, `opt.h` | Shift/mask/mulhi/div, immediatgränser och kostnad för en sekvens |
+| Nåbarhet, bevarade sidoeffekter, lokala fakta | `emit/opt/flow.c`, befintligt `prepass.c` | Hur gren/etikett/retur emitteras |
+| Inliningens behörighet och budget | `emit/opt/inline.c` | Argument/resultat, register, ABI och målbegränsningar |
+| Urval av lokaler som kan bo utanför minnet | `emit/opt/locals.c` | Fysiska register eller wasm-lokaler, callee-save, prolog och spill |
+| Switchens sortering, densitet och strategival | `emit/opt/switch.c` | Trädgrenar, kod-/värdetabeller, relokeringar eller wasm `br_table` |
+| Blockgränser, kopior, döda resultat, stackceller, utvidgningsfakta | `emit/rec/` | Op-beskrivningar, faktaöverföring för målinstruktioner, säkra omskrivningar |
+| Adressens bas/index/skala/displacement och typbredd | Gemensam adressbeskrivning vid `lval`/walk | x86 SIB/LEA, arm64:s index-/offsetformer, wasm-adressberäkning |
+| Explicit vektoroperations semantik och fallback | Gemensam regel vid vektoruttrycket | SSE2/NEON/wasm SIMD, målfeatures, alignment och ABI |
+| Tail calls: semantisk tillåtlighet | Gemensamt retur-/anropsbeslut | Stacklayout, ABI-kompatibilitet och epilog + jump |
+
+`emit/opt/` är rena emitterhjälpare, inte en ny graf/IR eller ett nytt
+optimeringssteg över hela AST:t. Små beslut/sekvensbeskrivningar får
+returneras utan allokering. De tar typer, flaggor och explicit anropskontext;
+ingen modifiering av delat AST, `ccsnap` eller funktionskroppar som flera
+trådar/inlininginstanser använder. Reglerna får inte känna x86-opkoder,
+registernummer eller `DARWIN`. Målanpassningen får inte kopiera reglerna.
+
+**Tre konsumenter är leveranskravet.** En generell heltals-/flödesregel
+är inte klar när den bara anropas från x86. Koppla in och testa den i
+x86, arm64 och både wasm32/wasm64 för typer som målet stöder. Ett saknat
+wasm-verktyg rapporteras som overifierat, inte som ett godkänt steg.
+Registermaskinens postpass kräver två konsumenter (x86 och arm64); wasm
+har i stället samma semantiska regel och en egen strukturerad sänkning.
+
+Det befintliga AST:t och maskinposterna behålls. `ins` och `rec` har samma
+fältpositioner men olika betydelse: arm64:s `sz` är inte x86:s bytebredd,
+och stores använder olika registerfält. Använd uttryckliga adaptrar; gör
+ingen aliasande cast mellan struct-typer och anta inte samma semantik av
+att båda är 16 byte. `emit_SRC` i `ccs/Makefile` behöver ta med nya
+`emit/opt/*.c` och `emit/rec/*.c`; varje fil skall fungera även utan unity.
+
+### Ordning, leveranser och verifiering
+
+Alla OPT-steg nedan är **planerade**; endast den tidigare x86-auditen finns.
+Implementera små steg med egen commit och uppdaterad status/mätning här.
+
+| Steg | Leverans och beroende | Bevis innan klart |
+| --- | --- | --- |
+| OPT0 | Ny byggd bas efter rebase; dela probe-förväntningar i C-semantik och per-mål-kodkrav. Utöka auditens anropare med befintliga arm64/wasm-runners utan krav på att alla referenser finns i CI. | Befintligt x86-resultat reproducerat; tillgängliga mål kör samma definierade indata. Separata resultat för optflagga och mål. Inget gammalt mätvärde ges en ny revision. |
+| OPT1 | Extrahera och koppla in gemensamma heltalsregler i alla tre generatorerna: `+0`, `-0`, `*1`, bitidentiteter, unsigned `/1`, `/2^k`, `%2^k`. Återanvänd befintlig vikning och normalisering. Kräver OPT0. | Semantiska tester på x86/arm64/wasm; riktade shift/mask-krav där målet stödjer dem, negativa tester för volatile och sidoeffekter. Oförändrad kod för exempel utan regeln. |
+| OPT2 | Gemensamma effekt- och postkontrakt, komplett op-tabell för x86 och adapter för arm64. Extrahera blockidentifiering/kompaktering ur arm64; första generiska städning tar bara säkra fallthrough-hopp och död kod efter terminator. Kräver OPT0. | Arm64:s extraktion byte-identisk; x86:s onödiga hopp/döda arm försvinner; asm goto, `&&label`, switch/case i if(0), noreturn, VLA/cleanup och debug-remapping korrekta. |
+| OPT3 | Flytta kandidaturvalet ur `choose_lregs` till gemensam `locals.c`, koppla till x86:s bindningar. Begränsad top-K efter befintliga loopviktade `luse`; målet anger K/register. Wasm återanvänder behörighetsreglerna, inte en artificiell registergräns. Kräver OPT0 och effektkontraktet i OPT2. | Parametrar/lokaler slutar gå genom stacken i proberna; blandade anrop, rekursion, fasta asm-register, varargs, returns_twice, överjusterad ram, VLA och registertryck. Arm64:s ursprungliga val och utdata identiska i extraktionscommitten. |
+| OPT4 | Återanvänd arm64:s kopie-/dead-result-/utvidgningsalgoritmer i `emit/rec/`, först per block på x86. Måltabeller beskriver registeröverlapp, flaggor och omskrivningar. OPT2 krävs; OPT3 ger större kodvinst men är inte ett krav. | Positiva och negativa kodkrav; inga fel över anrop/asm/blockgränser. 32-bitars självmove på x86 tas bara bort om övre halvan redan är noll. FP- och implicita register/flags bevaras. |
+| OPT5 | Extrahera arm64:s stackcellsalgoritm och anslut x86 via explicit allokerings-/accessmetadata. Återanvänd samma algoritm för load forwarding och DSE. Kräver OPT2/OPT4; välj exakta icke-flydda frame-celler först. | Arm64:s t8/t10-egenskaper portade till C-regressioner: scope-återanvändning, överlapp/union, smala typer, adressflykt, pekare precis efter objekt, anrop/asm/atomics. Volatila läsningar/skrivningar kvar. |
+| OPT6 | Gemensamt switchval och utökad inliningbehörighet. Separata commits: först balanserade switchträd och värdetabeller; sedan små vanliga statiska funktioner och oanvända lokala initierare. Kräver OPT1/OPT2; inliningens stacktrafik motiverar OPT3/OPT5 först. | Täta/glesa/signed/range-case, overflow vid densitetsräkning och computed goto. Inlining: recursion, labels, VLA, cleanup, asm-immediater och sidoeffekter. Oanvänd init tas bara bort när både objektet och init saknar observerbar effekt. |
+| OPT7 | Gemensam beskrivning för skalade adresser, direkt explicit vektoroperation och store-constant-hook med scalar/register-fallback. Därefter små målspecifika regler för LEA/SIB, NEON/SSE2 och instruktionsfeatures. Kräver OPT1; metadata från OPT2 följer med. | Samma C-resultat på målen; målkrav visar indexerad load/packed add/store-immediate. Negativa alignment-, bredd-, alias-, lane- och featurefall; baseline får aldrig native-instruktioner av misstag. |
+| OPT8 | Gemensam konstantdivisionsalgoritm för signed tvåpotenser och övriga konstanter; targetsänkt mulhi/shift eller normal div enligt målbudget. Begränsade tail calls med gemensam kontroll och ABI-hook i egen commit. Kräver OPT1 och, för tail calls, OPT2/OPT3. | Division/remainder 32/64 bitar, negativa tal, extremvärden, slump och gränser kring multipler. Tail calls: inga pekare till egen ram, stackargument, cleanup eller ABI-konverteringar utan uttryckligt stöd. |
+
+**Första kodcommit:** OPT0 + extraktion av en enda heltalsregel i OPT1,
+anropad av x86, arm64 och wasm32/wasm64 för stödda typer. Det
+visar delningen i faktisk användning innan fler regler läggs till. OPT2
+kan förberedas därefter; registerarbetet OPT3 har högre prioritet än
+mer aggressiv inlining. Ingen stor flytt av hela arm64-generatorn krävs
+för att börja dela regler eller postpass.
+
+### Kontrakt som styr implementationen
+
+- **Wasm-integrering:** aritmetikhjälparen returnerar ett typat beslut,
+  inte ett `val` med fysiskt register. `wbinary` kan välja beslut innan
+  operandstacken fylls; om en operand redan emitterats måste adapterkoden
+  bevara rätt stackdjup och använda drop/local vid behov. Gemensamma
+  faktabindningar är per funktions-/inlininginstans. Wasm-inlining kräver
+  egna parameterlokaler, strukturerad resultat-/returblockhantering och
+  remappade goto/cleanup/VLA-scope; delad policy ensam är ingen inliner.
+  `wswitch` återanvänder strategivalet men behåller `br_table` och
+  segment/goto-modellen. Wasm32 normaliserar pekare som 32 bitar även på
+  denna 64-bitars värd. Explicit SIMD kräver målfeature; utan den behålls
+  lane-fallback. Magic division utan billig mulhi och tail call utan
+  aktiverad/stödd wasm-tail-call-funktion behåller vanlig div/anrop.
+- **Typer och effekter:** första aritmetikreglerna gäller vanliga heltal
+  upp till 64 bitar; `_BitInt`, 128 bitar, FP och pekare har explicit
+  fallback tills deras regel verifierats. Använd operationens promoverade
+  bredd och signedness; signed division avrundar mot noll. Tvåpotens-
+  kontroll måste utesluta noll. Ingen FP-identitet eller fast-math-regel
+  smygs in. Operander med anrop, volatile eller atomics utvärderas exakt
+  som tidigare även när resultatet blir konstant. Valnivåregler efter
+  operandgenerering behåller effekter; överhoppning på AST-nivå kräver
+  separat effektbevis. Återkommande effektfrågor cacheas per instans eller
+  tas ur förpasset, inte rekursiva omvandringar med kvadratisk kostnad.
+- **Register:** gemensamt urval är policy, registerbindning är målmekanik.
+  Börja som arm64 med ett fåtal callee-saved GPR för icke adressflydda,
+  icke-volatila/atomiska heltal och pekare. x86 måste reservera dem från
+  temporärpoolen och hantera r12 som rambas samt asm-clobbers. Använda
+  callee-saved-register sparas/återställs enligt mål-ABI, inklusive
+  unwind/debug. Återförsök är högst ett konservativt utan lokala register;
+  kvarvarande tryck använder befintlig spill/felväg. FP och registerpar
+  är senare separata utvidgningar. Lägg inte samtidigt ett konkurrerande
+  generellt registercache ovanpå bindningarna.
+  Wasm behåller även sina redan stödda flyttalslokaler; gemensamma
+  behörighetsregler parametriseras av målets typstöd och får inte göra
+  registermaskinernas första GPR-begränsning till en wasm-regression.
+- **Posteffekter:** tabellerna behöver reads/writes inklusive implicita
+  register, flaggor/partiella flaggskrivningar, minnesläsning/skrivning,
+  volatile/atomic/order, trap/terminator/barriär, stackförändring och
+  externa etikettinträden. Okänd instruktion/asm är konservativ. En load
+  kan vara observerbar eller kasta fel även om resultatregistret är dött.
+  Börja DCE med rena registeroperationer och bevisat säkra frame-läsningar.
+  Anrop/TLS, x87-stack och x86:s delregister kräver egna beskrivningar.
+- **Minnesidentitet:** återanvänd inte slot-offset som objektidentitet.
+  Behåll stabilt allokerings-id, intervall/bredd, accessart och escape;
+  byteoffset är 64 bitar efter mains ramändringar. Överlapp och
+  one-past-adresser hanteras konservativt som arm64 redan gör. Föredra
+  lat sidometadata i optläget framför att göra varje 16-byte-post större;
+  byt inte ut arm64:s taggar förrän ersättningen är bytevis verifierad.
+  Sidometadata måste följa insertion/kompaktering/twoaddr och debugrader.
+- **Passkostnad:** opcode-tabell på snabbvägen, målcallback bara när en
+  verklig omskrivning eller avvikande instruktion kräver det. Buffertar
+  återanvänds per worker, utan lås och utan allokering per nod/post.
+  Kör inte ett pass utan relevanta instruktioner/celler. Konstantstor
+  registerfakta ger O(n); top-K är O(lokaler*K) med litet fast K;
+  switchsortering O(k log k) och tabellstorlek har tak. Magisk division
+  får O(bitbredd) per ny konstant och begränsad cache, inte sökning.
+- **CFG-budget:** inga globala fixpunktsanalyser krävs för första x86-
+  passen. Vid blockslut är okända live-out konservativt levande, inte
+  döda. Senare delad CFG-liveness får separat arbetsbudget; om den tar
+  slut används säkra fakta/utdata utan beroende omskrivningar. Ofärdig
+  liveness får aldrig godtas som korrekt. Arm64:s befintliga analyser
+  behålls tills delad ersättning ger minst samma korrekthet och uppmätt
+  kostnad; en lokal variant får inte tyst försämra dess befintliga O1.
+- **Kodordning:** semantikregler vid AST-sänkning; delade record-pass på
+  giltiga effekter; x86 tvåadress efter delade pass; målspecifik städning;
+  slutligt register-/rambeslut och kodning. Om tvåadress inför nya kopior
+  räcker en avgränsad efterstädning, ingen generell fixpunkt. Debug/CFI
+  får inte referera till gamla postindex eller borttagna sparningar.
+
+### Nivåer, testkrav och mätning
+
+`-O0` får billiga direkta sänkningsregler utan att starta dataflowpass.
+Vilka regler som är default mäts, inte antas. O1 är de budgeterade
+gemensamma förbättringarna ovan. O2/O3 förblir ärligt samma tills en
+separat, mätt policy finns; ändra inte bara makron eller nivånamn för
+att påstå Clang-paritet. LICM, global GVN, automatisk vektorisering,
+loop-unrolling/unswitching och generell IPA är uppskjutna. Begränsad
+blocklokal CSE kan läggas efter OPT4 när dess nytta motiverar en
+värdecache med fast storlek; ingen helfunktionssökning eller generell aliasanalys.
+
+Varje semantisk regel får C-regressioner i `tests/vcc` som kör på alla
+stödda mål. Positiva kodkrav är arkitekturspecifika; negativa kontroller
+för effekter är gemensamma. Upstream GCC:s C-fall är komplettering, inte
+ersättning för kontroll av deras `dg-final`. Lägg en liten vcc-only
+regressionskörning i `ci/premerge.sh` för mål där den kan köras; den
+interaktiva trekompilatorsauditen skall inte bli CI:s beroende av native
+GCC, GNU objdump eller alla valfria runners.
+
+Rena extraktionscommits kräver byte-identiska utdata mot före-bas på
+berörda mål, unity och nonunity. När regeln aktiveras får bara de
+avsedda kodskillnaderna uppstå: kör suites/ABI/stress för berörda mål,
+arm64:s slot/asm/extension-regressioner, och de CFI/DWARF-/kernel- eller
+hostkontroller som förändringen faktiskt berör. Parser/pp ändras inte
+för emitteroptimeringar. Om de ändå måste ändras gäller AGENTS.md:s
+sema-/paritetsgrindar före ändringen. G1/G2 blir inte klara av denna plan.
+
+Mät före/efter med korta körningar och högst `-j 6`: kompilatorns
+instruktioner/cykler och minne, genererad kodstorlek/instruktioner och
+riktig körtid på ett fast litet korpus. Redovisa O0/O1 och per mål,
+inklusive uteslutna fall och saknade verktyg. Befintlig `vbench.py gate`
+gäller; tills dess x86-stöd är bekräftat får den inte anges som körd
+x86-grind. Godkänn ingen tänkt passbudget som en uppmätt siffra. Spara
+basrevision, binärhash och mätresultat vid varje färdigt OPT-steg här.
+
 ## Risker
 - **GNU C-ytan och inline asm** är det stora jobbet. Uppskattat: lexer + pp ~2 kloc,
   parser + sema ~10–15 kloc, emitter ~5 kloc, assembler ~4 kloc, länkare ~3 kloc.
