@@ -42,6 +42,12 @@ int debug_dead_result(int x) {
 #line 810
     return zero + x + 66666;
 }
+int debug_unused_init(int x) {
+#line 900
+    int dead = x * 13 + 7;
+#line 910
+    return x + 77777;
+}
 """
 
 
@@ -49,7 +55,7 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument('--vpp', default=str(Path(os.environ.get('VCC_BIN', BUILD)) / 'vpp'))
     args = ap.parse_args()
-    expected = {22222: 201, 33333: 301, 44444: 501, 55555: 710, 66666: 810}
+    expected = {22222: 201, 33333: 301, 44444: 501, 55555: 710, 66666: 810, 77777: 910}
     with tempfile.TemporaryDirectory(prefix='vcc-debug-flow-') as td:
         src = Path(td) / 'flow.c'
         src.write_text(SOURCE)

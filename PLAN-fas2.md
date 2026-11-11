@@ -2676,8 +2676,28 @@ kompilatorprocessens användarinstruktioner, inte hårdvarucykler, väggtid elle
 programmens körtid. Det är ett avgränsat exact-parent-prov; den kombinerade
 optimeringsstackens kostnad behöver en separat gate.
 
-Återstår före färdig status: all-target runtime/kodgen med negativa kontroller
-samt befintliga regressionssviter. Prestandaprovet ersätter inte dessa tester.
+Efter integrering av postfix-föräldern (`e92a939`) passerar unity och nonunity
+alla 16 target×O0–O3 runtime-/kodgenfall vardera, plus fyra `VCC_NOOPT`-fall
+vardera. Kontrollerna omfattar rena uttryck, anrop en gång, short circuit,
+volatile/atomic destination/läsning, division/minnesläsning/FP-konvertering,
+cleanup/VLA/brace-init, `used`/`optnone`/asm-register och återanvänd inlinad AST.
+Det exakta `f7327bd`-baslinjeverktyget underkänns av det nya x64-positivprovet,
+så kodgenkravet skiljer faktisk ny förmåga från ett redan godkänt utfall.
+ABI-korsanrop passerar 32/32 på x64 och 32/32 på a64. Debugprovet har en egen
+oanvänd initierare före en överlevande radmarkör och passerar O0–O3, inklusive
+DWARF-verifiering och byte-identisk `.text` med/utan `-g`.
+
+Native-regressionskontrollen på samma produktionskälla gav 230 godkända x86-
+fall och 235 arm64-fall, plus ett befintligt arm64-XFAIL. Den nya fixturen
+avvisades först av clang: GNU:s `__atomic_fetch_add` tog en `_Atomic`-pekare.
+Fixturen rättades till typade `__c11_atomic_fetch_add`, som clang godtar;
+det berörda fallet kördes därefter separat och passerar på båda native-målen.
+Sammanlagt verifieras därmed 231 x86-fall (sex referensundantag) och 236
+arm64-fall samt ett befintligt XFAIL. Ingen produktionskod ändrades vid
+rättningen. Alla fyra måls O0–O3-kör-/kodkrav och O2/noopt-prov kördes om
+och passerar med den rättade fixturen. Loggar: `work/opt-pr-tmp/unused-stack-
+{x86,a64}.log`; de två nya separata 1/1-resultaten är berörda-fixtur-körningar,
+inte nya hela svitkörningar. Den kombinerade stackens kostnadsgrind återstår.
 
 ### Gemensam walker: en värdeläsning för skalär postfix (2026-11-11)
 
