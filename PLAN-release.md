@@ -641,3 +641,7 @@ en realistisk sammansatt kostnadsgrind återstår.
 Avgränsade heltalsjämförelser vid typgränser är implementerade för alla fyra
 mål och har fokuserade korrekthets- och kompilatorkostnadsprov i PLAN-fas2.md.
 G5/G7 och generell O2-täckning är fortsatt öppna.
+
+Den sammansatta optimeringsstacken med värdetabeller klarar den begränsade
+1 %-kompilatorkostnadsgrinden på fyra mål (PLAN-fas2.md); den mättade
+switchkostnaden och releasegrindarna G5/G7 återstår att följa upp.

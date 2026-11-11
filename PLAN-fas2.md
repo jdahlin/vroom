@@ -2864,3 +2864,12 @@ cykler, och kräver en realistisk korpus före generell slutsats. Ett separat
 syntetiskt x86-program med 100 000 anrop minskade instruktioner för hela
 programmet från 4 544 608 till 4 217 359 (−7,2 %); det är inte ett generellt
 körtidsmått. De nya stackföräldrarnas sammansatta kostnad har inte mätts här.
+
+Hela stacken inklusive värdetabeller klarar den fasta 1 %-grinden mot
+`4a839ba`: x86 +0,375 %, arm64 +0,292 %, wasm32 +0,556 %, wasm64 +0,515 %
+kompilatorinstruktioner. Värdetabellsteget ensamt mot jämförelseföräldern
+`dc3e54d` gav +0,032 %, +0,023 %, +0,045 % respektive +0,043 %. Det är
+12/12 native-filer, 10 wasm32 och 11 wasm64; avvisade atomic_ops och/eller
+bitint_runtime är redovisade, inte godkända. Exakt källträds- och binärproveniens,
+kommandon och felkontroll finns i `work/opt-profile/full-stack-cost/result.json`.
+Grinden är en liten fast korpus och upphäver inte det högre mättade switchprovet.
