@@ -19,6 +19,17 @@ om clang (Homebrew, samma omskrivna kommandorad) klarar det.  Om clang
 underkänner ett test är det inte vcc:s fel.  Om harnessen tolkar ett test
 annorlunda än sviten själv räknas testet inte heller.
 
+## Aktuell prioritering
+
+Frontend- och backendbuggar går först: krascher, giltig C som avvisas,
+ogiltig C som accepteras, felaktiga konstanta värden, felgenererad kod
+och ABI-avvikelser. Varje rättning ska få ett minimalt regressionstest;
+körning valideras först på Linux x86 och sedan ARM/QEMU. Diagnostikens
+formulering och presentation har lägre prioritet. En avvikelse i
+externa förväntade noter, antal eller källrader är inte i sig bevis för
+en semantisk kompilatorbugg. Sådana kontraktsfel redovisas separat i
+utredningen och får inte beskrivas som lika många kompilatorbuggar.
+
 ## Steg
 
 ### S1 Hämtning — klar (2026-11-10, c1098d5)
