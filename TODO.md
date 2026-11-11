@@ -189,6 +189,12 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
   so a kernel built with them lacks the protection.
   *Validate:* `ccs/vcc/tests/vcc/autoinit_zero.c` (xfail on arm64).
 
+- [ ] **arm64: asm flag outputs (`"=@cc<cond>"`) are not implemented.**
+  The output gets an unset register (`cmp w9, #0` then `str w10`): any
+  `"=@cceq"` reads garbage.  x86-64 has them (`set<cond>` + `movzbl`; the
+  kernel's CC_SET in test_bit/boot_cpu_has).
+  *Validate:* `ccs/vcc/tests/vcc/asm_flag_out.c` with an arm64 branch.
+
 - [x] **Branch range: no relaxation for b.cond/cbz/tbz/adr** [P].  Done for
   functions without inline asm (`r_relax` in emit.c: b.!cond .+8; b label,
   iterated to a fixed point, only for functions over 1 MB); with inline asm,
@@ -582,8 +588,7 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
     `transparent_union_redecl` (member calling convention).
   - Expression/call lowering: `gnu_conditional_float` (GNU floating conditional),
     `parenthesized_function` (wasm64 only: nested function-pointer return signature; wasm32 passes on baseline f866a31),
-    `void_lvalue` (void expressions leave stack values), `fabs_asm_identity`
-    and `math_library_identity` (asm-renamed functions mistaken for intrinsics).
+    `void_lvalue` (void expressions leave stack values).
   - Optimization/inlining: `array_constants`, `dead_branch_entries`,
     `optimized_conditions` leave unreachable references; `inline_constants`
     needs argument propagation into `__builtin_constant_p`.

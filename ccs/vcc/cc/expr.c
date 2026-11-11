@@ -1184,34 +1184,11 @@ static __attribute__((noinline)) uint32_t call(cc *c, uint32_t fn, uint32_t loc)
 		if ((y->flags & SF_GLOBAL) && y->sc != SC_STATIC && !(y->attrs && c->attr[y->attrs].asmname) &&
 		    !lib_builtin_disabled(c->o, idstr_(y->name), idlen_(y->name))) {
 			uint32_t result = fp_sign_call(c, idstr_(y->name), idlen_(y->name), ft, &args, loc);
+			if (!result) result = fast_math_call(c, idstr_(y->name), idlen_(y->name), ft, &args, loc);
 			if (result) {
 				N(result)->flags |= aflags & NF_ERR;
 				return result;
 			}
-		}
-	}
-	/* Under full fast-math, pow(x, 1/4) has the same relaxed contract as
-	 * sqrt(sqrt(x)). Match only the library declaration and a literal exponent:
-	 * neither a renamed/local function nor exponent side effects may disappear. */
-	if (c->o->fast_math && !c->o->no_builtin && !lib_builtin_disabled(c->o, "pow", 3) &&
-	    (c->o->target == PP_LINUX_X86_64 || c->o->target == PP_LINUX_AARCH64) &&
-	    args.n == 2 && N(callee)->op == N_VAR && c->syms[N(callee)->a].kind == S_FUNC) {
-		const sym *y = &c->syms[N(callee)->a];
-		cval exponent;
-
-		if ((y->flags & SF_GLOBAL) && y->sc != SC_STATIC && !(y->attrs && c->attr[y->attrs].asmname) &&
-		    idlen_(y->name) == 3 && !memcmp(idstr_(y->name), "pow", 3) &&
-		    f->n == 2 && !(f->flags & (TF_NOPROTO | TF_VARIADIC)) &&
-		    compatible(c, ft, sig_func_type(c, "ddd")) && N(args.v[1])->op == N_FNUM &&
-		    cc_eval(c, args.v[1], &exponent) && exponent.kind == CV_FLT && !exponent.ld && exponent.f == 0.25) {
-			if (c->o->general_regs_only) {
-				cc_error(c, loc, "floating-point root operation is not supported with '-mgeneral-regs-only'");
-				return err_node(c, loc);
-			}
-			args.n = 1;
-			uint32_t root = mk_builtin(c, BI_FAST_ROOT4, prim(TY_DOUBLE), loc, &args);
-			N(root)->flags |= aflags & NF_ERR;
-			return root;
 		}
 	}
 	if (!c->o->no_builtin && args.n == 1 && N(callee)->op == N_VAR && c->syms[N(callee)->a].kind == S_FUNC &&
@@ -1254,6 +1231,11 @@ static __attribute__((noinline)) uint32_t call(cc *c, uint32_t fn, uint32_t loc)
 					if (r == r && (q != 5 || cv.f >= 0) && (q != 4 && q != 9 ? 1 : cv.f > 0))
 						return mk_flt(c, r, prim(TY_DOUBLE), loc);
 				}
+	}
+	if (N(callee)->op == N_VAR) {
+		const sym *fns = &c->syms[N(callee)->a];
+		if (fns->attrs && c->attr[fns->attrs].interrupt)
+			cc_error(c, loc, "interrupt service routine cannot be called directly");
 	}
 	n = mk(c, N_CALL, QUNQ(T(c, ft)->base), loc);
 	N(n)->a = fn;

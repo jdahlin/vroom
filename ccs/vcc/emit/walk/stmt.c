@@ -81,8 +81,33 @@ VPRIV void wk_ecx_free(ecx *e)
 	e->wk = NULL;
 }
 
-/* a frame slot of size bytes: its offset from the frame base (negative) */
+/* a temporary frame slot: a free one of the same size and alignment, else new */
 VPRIV int64_t wk_slot(ecx *e, uint64_t size, uint32_t align)
+{
+	wkst *W = e->wk;
+
+	if (!W->sdepth || size > UINT32_MAX)
+		return wk_pslot(e, size, align);
+	if (align < 1)
+		align = 1;
+	for (uint32_t i = W->ntf; i-- > 0;)
+		if (W->tf[i].size == size && W->tf[i].align == align) {
+			struct wktslot t = W->tf[i];
+
+			W->tf[i] = W->tf[--W->ntf];
+			if (W->ntu < WK_MAXTSLOT)
+				W->tu[W->ntu++] = t;
+			return t.off;
+		}
+	int64_t o = wk_pslot(e, size, align);
+
+	if (W->ntu < WK_MAXTSLOT)
+		W->tu[W->ntu++] = (struct wktslot){ o, (uint32_t)size, align };
+	return o;
+}
+
+/* a frame slot of size bytes for the whole function: its offset from the frame base (negative) */
+VPRIV int64_t wk_pslot(ecx *e, uint64_t size, uint32_t align)
 {
 	wkst *W = e->wk;
 	int64_t o;
@@ -299,7 +324,7 @@ VPRIV void wk_cleanups(ecx *e, int to)
 		wkarg a;
 		val r;
 
-		LO(classify)(e, prim(TY_ULONG), &a);
+		LO(classify)(e, prim(TY_ULONG), &a, false);
 		a.slot = wk_slot(e, 8, 8);
 		{
 			int ra = LO(laddr)(e, &l);
@@ -436,6 +461,13 @@ static void wk_vla_scan(ecx *e, uint32_t n, uint32_t *top)
 	case N_FOR: {
 		uint32_t t = *top;
 
+		/* a cleanup variable of the first clause is around the body's labels
+		   (scoped_guard: the step's goto into the body runs no cleanup) */
+		if (x->a && N(x->a)->op == N_BLOCK)
+			for (uint32_t i = 0; i < N(x->a)->c; i++)
+				wk_vla_scan(e, c->lists[N(x->a)->b + i], &t);
+		else
+			wk_vla_scan(e, x->a, &t);
 		wk_vla_scan(e, c->lists[x->c + 1], &t);
 		return;
 	}
@@ -799,7 +831,23 @@ static void wk_const_if(ecx *e, const node *x, bool truth)
 	wk_label(e, join);
 }
 
+static void wk_stmt1(ecx *e, uint32_t n);
+
 VPRIV void wk_stmt(ecx *e, uint32_t n)
+{
+	wkst *W = e->wk;
+	uint32_t mark = W->ntu;
+
+	W->sdepth++;
+	wk_stmt1(e, n);
+	W->sdepth--;
+	/* the statement's temporaries are free for the next ones */
+	while (W->ntu > mark && W->ntf < WK_MAXTSLOT)
+		W->tf[W->ntf++] = W->tu[--W->ntu];
+	W->ntu = mark;
+}
+
+static void wk_stmt1(ecx *e, uint32_t n)
 {
 	cc *c = e->c;
 	wkst *W = e->wk;
@@ -1176,6 +1224,17 @@ VPRIV bool wk_can_inline(ecx *e, uint32_t s)
 
 	if (!(y->flags & SF_DEFINED) || !y->body || (ft->flags & (TF_VARIADIC | TF_NOPROTO)) || N(y->body)->aux > 64)
 		return false;
+	if (X86(c)) {
+		uint32_t caller = e->wk->inl ? e->wk->inl->fn : e->wk->fsym;
+		x86_features need = cc_x86_features(c, s), have = cc_x86_features(c, caller);
+		if (!x86_features_subset(need, have)) {
+			if (y->flags & SF_ALWAYS_INLINE)
+				for (unsigned bit = 0; bit < X86_FEATURE_COUNT; bit++)
+					if (x86_feature_has(need, bit) && !x86_feature_has(have, bit))
+						efatal(e, e->curloc, "always_inline function requires target feature '%s', but the caller is compiled without it", x86_feature_names[bit]);
+			return false;
+		}
+	}
 	for (uint32_t i = 0; i < N(y->body)->aux; i++)
 		if (vm_type(c, c->syms[c->lists[N(y->body)->a + i]].ty))
 			return false;	/* (a parameter's VLA sizes) */
@@ -1347,6 +1406,7 @@ VPRIV void wk_function(ecx *e, uint32_t s)
 	W->gen++;
 	W->foff = 0;
 	W->falign = 16;
+	W->ntu = W->ntf = W->sdepth = 0;
 	W->nlabel = 0;
 	W->nloop = 0;
 	W->ncases = 0;
@@ -1380,7 +1440,7 @@ VPRIV void wk_function(ecx *e, uint32_t s)
 	W->retlbl = wk_newlabel(e);
 	LO(locals_begin)(e, s);
 	if (wk_mem(e, W->rty)) {
-		LO(classify)(e, W->rty, &W->rrec);
+		LO(classify)(e, W->rty, &W->rrec, false);
 		W->rrec.slot = wk_slot(e, 8, 8);	/* (memory: the hidden pointer's slot) */
 	}
 	/* Parameters: slots unless the lowering selected a persistent register home. */
@@ -1393,7 +1453,7 @@ VPRIV void wk_function(ecx *e, uint32_t s)
 			efatal(e, c->syms[p].loc, "x86-64: this parameter type is not supported yet (PLAN-x86.md X3)");
 		if ((ft->flags & TF_NOPROTO) && k == TY_FLOAT)
 			pt = prim(TY_DOUBLE);	/* K&R: received as the caller promoted it */
-		LO(classify)(e, pt, &pa[i]);
+		LO(classify)(e, pt, &pa[i], false);
 		lval home;
 		pa[i].slot = LO(local)(e, p, &home) ? 0 :
 			wk_slot(e, pa[i].size > 8 ? (pa[i].size + 7) & ~(uint64_t)7 : 8, pa[i].align);
