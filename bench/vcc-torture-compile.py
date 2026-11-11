@@ -3,9 +3,8 @@
 
     LLVM=/usr/lib/llvm-23 bench/vcc-torture-compile.py [-j N] [-v] [PAT]
 
-Fetch the pinned GCC tree with bench/fetch-testsuites.sh gcc first. Tests with
-conditional or otherwise unsupported DejaGNU directives are reported as skips,
-not silently run under different conditions. Clang's -c is the oracle; vcc's
+Fetch the pinned GCC tree with bench/fetch-testsuites.sh gcc first. Known Linux target selectors and requirements follow DejaGNU; unknown
+directives are reported as skips, never silently run under different conditions. Clang's -c is the oracle; vcc's
 x86 backend currently emits assembly, which clang then assembles (X5).
 """
 import argparse
@@ -14,7 +13,6 @@ from concurrent.futures import ThreadPoolExecutor
 import os
 from pathlib import Path
 import re
-import shlex
 import subprocess
 import sys
 import tempfile
@@ -38,32 +36,7 @@ def system_includes(target='x86_64-linux-gnu'):
     return [arg for line in listing.splitlines() for arg in ('-isystem', line.strip()) if line.strip()]
 
 
-DIRECTIVE = re.compile(r'\{\s*(dg-[\w-]+)\b([^\n]*)')
-OPTIONS = re.compile(r'^\s*"([^"\n]*)"\s*\}')
-DO = re.compile(r'^\s*compile\s*\}')
-
-
-def flags_for(src):
-    """Return unconditional options, or a reason we cannot run the test."""
-    flags = []
-    for match in DIRECTIVE.finditer(src):
-        directive, tail = match.groups()
-        if directive in ('dg-options', 'dg-additional-options'):
-            m = OPTIONS.match(tail)
-            if not m:
-                return None, 'conditional or malformed options'
-            try:
-                flags.extend(shlex.split(m.group(1)))
-            except ValueError:
-                return None, 'malformed options'
-        elif directive == 'dg-do':
-            if not DO.match(tail):
-                return None, 'conditional or non-compile dg-do'
-        else:
-            # Requirements, skip/xfail selectors, diagnostic expectations,
-            # additional sources and final scans all affect the test contract.
-            return None, 'unsupported ' + directive
-    return flags, ''
+from torture_directives import flags_for
 
 
 def run(cmd, cwd):
@@ -82,7 +55,7 @@ def detail(err):
 
 
 def one(path):
-    flags, why = flags_for(path.read_text(errors='replace'))
+    flags, why = flags_for(path.read_text(errors='replace'), BASE[0].split("=", 1)[1])
     if flags is None:
         return path.name, 'skip', why
     with tempfile.TemporaryDirectory(prefix='vcc-torture-') as wd:

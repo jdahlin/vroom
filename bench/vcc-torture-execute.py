@@ -5,8 +5,8 @@ LLVM=/usr/lib/llvm-23 bench/vcc-torture-execute.py -j 6 --target x86_64-linux-gn
 Use --target aarch64-linux-gnu for qemu-aarch64 and the cross glibc sysroot.
 Builtins run at -O0: the GCC-specific optimization passes disabled by
 builtins.exp are inactive there. Optimized builtins configurations are reported
-unsupported, never silently substituted. Unknown dg directives and legacy .x
-scripts are also explicit skips. Each builtin's companion and main.c are built
+unsupported, never silently substituted. Known Linux selectors and the builtins .x scripts are interpreted conservatively;
+unknown directives or script contents remain explicit skips. Each builtin's companion and main.c are built
 by the tested compiler, in separate translation units as in builtins.exp.
 """
 import argparse
@@ -24,6 +24,8 @@ import tempfile
 spec = importlib.util.spec_from_file_location('torture_compile', Path(__file__).with_name('vcc-torture-compile.py'))
 tc = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(tc)
+from torture_directives import legacy_options, replaces_default_options
+
 ROOT = tc.ROOT.parent / 'execute'
 
 
@@ -40,25 +42,25 @@ def one(path, args, base, runner):
     def result(status, reason=''):
         return {'name': name, 'status': status, 'reason': reason}
     suite = path.parent.name
-    if path.with_suffix('.x').exists():
-        return result('skip', 'unsupported legacy .x script')
+    legacy_flags, why = legacy_options(path.with_suffix('.x'), args.opt)
+    if why:
+        return result('skip', why)
     if suite == 'builtins' and args.opt != '0':
         return result('skip', 'optimized builtins require GCC-specific pass controls')
     src = path.read_text(errors='replace')
-    # The compile parser is deliberately conservative; dg-do run is the sole
-    # directive whose meaning differs for these suites.
-    src = re.sub(r'(\{\s*dg-do\s+)run(\s*\})', r'\1compile\2', src)
-    flags, reason = tc.flags_for(src)
+    flags, reason = tc.flags_for(src, args.target, 'run')
     if flags is None:
         return result('skip', reason)
     sources = [path]
     defaults = ['-fno-inline'] if suite == 'ieee' else ['-fno-inline-functions']
+    if legacy_flags is not None:
+        defaults = legacy_flags
     if suite == 'builtins':
         sources += [path.with_name(path.stem + '-lib.c'), path.parent / 'lib/main.c']
         if not all(p.exists() for p in sources):
             return result('error', 'missing builtin companion source')
     # dg-options replaces IEEE_CFLAGS; dg-additional-options augments it.
-    if re.search(r'\{\s*dg-options\b', src):
+    if replaces_default_options(src, args.target):
         defaults = []
     opts = [*base, *defaults, *flags]
     with tempfile.TemporaryDirectory(prefix='vcc-torture-run-') as wd:

@@ -46,8 +46,8 @@ clangs VerifyDiagnosticConsumer.  Clangs sida cachas.  `results.json` visar
 tester som gått från godkänd till underkänd.
 
 **Linux x86-64 2026-11-11:** `bench/vcc-verify.py --target
-x86_64-linux-gnu -j 6` ger 398/1640 godkända och två krascher
-(`Sema/attr-tls_model.c` och `Sema/constexpr.c`). Resultat och referenser
+x86_64-linux-gnu -j 6` ger 399/1640 godkända och inga krascher efter rättningar av
+`Sema/attr-tls_model.c` och `Sema/constexpr.c`. Resultat och referenser
 hålls skilda per mål; arm64 väljs med `--target aarch64-linux-gnu`.
 
 **Status 2026-11-10:** 412/1841 giltiga tester godkända (22 %), 1 krasch.
@@ -69,8 +69,8 @@ C++/ObjC/OpenCL/OpenMP-rader, 66 som harnessen inte tolkar som clang, 59
 med lit-substitutioner (`%t`, `%{...}`).
 
 Kvar:
-1. Kraschen: segfault på `Sema/attr-tls_model.c` (`tls_model` med två
-   argument).  Rättas först, med ett test i `tests/diag`.
+1. De två kända krascherna är rättade med regressionstester; behåll
+   kraschfri körning när täckningen utökas.
 2. De största luckorna, i ordning efter hur många tester de blockerar:
    - SVE/SME-typer (`__SVInt8_t` …) och kontrollerna av streaming-funktioner.
    - `__bf16`, `__mfp8`.
@@ -103,7 +103,14 @@ aarch64-linux-gnu` kör under QEMU. IEEE: 49 godkända, inga fel och
 30 filtrerade på båda målen. Villkorliga direktiv som riggen ännu inte
 tolkar räknas som överhoppade; det är inte full täckning. Builtins körs
 vid -O0; optimerade varianter behöver motsvarigheter till GCC:s
-avstängda optimeringspass. Sprintf-felet är rättat; strncmp återstår.
+avstängda optimeringspass. Sprintf och strncmp är rättade.
+
+Utökad DejaGNU-tolkning (målvillkor, krav och kända `.x`-skript) ger
+1801 godkända/57 fel/156 överhoppade i compile, utan vcc-krascher
+(två clang-fel). Körning efter generisk `-fno-builtin-NAME`: x86
+101 godkända/19 fel/18 överhoppade, arm64 101/3/34. Kvarvarande fel
+är komplex division, signalerande NaN och x86 inline-asm. Senare
+riktade rättningar verifieras separat innan nästa fulla körning.
 
 **Klart när:** inga krascher i `compile/`; `ieee/` och `builtins/` lika
 gröna som `execute/`.
@@ -129,7 +136,10 @@ jämför utdata.
 Efter rättningen av okända escape-sekvenser är chibicc grön bland de
 clang-giltiga fallen: x86 12 godkända/29 filtrerade, arm64 11/30.
 `--suite llvm` täcker direkta C-filer i UnitTests och Regression/C:
-x86 121 godkända/8 fel, arm64 120/2 och 7 uppströms arkitekturexkluderingar.
+x86 128 godkända/1 fel, arm64 121/1 och 7 uppströms arkitekturexkluderingar
+efter bitfälts-, Microsoft-layout- och sizeless SVE-deklarationsstöd.
+Återstående fel i denna delmängd är `_Float16`. C-testsuite är nu
+220/220 på båda målen.
 Underkatalogernas egna CMake-flaggor och tester återstår.
 
 `bench/vcc-cproc.py --target x86_64|aarch64` ger kompilering/assemblering
