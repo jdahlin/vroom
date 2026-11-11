@@ -1942,8 +1942,11 @@ static val wk_unary(ecx *e, uint32_t n)
 {
 	cc *c = e->c;
 	const node *x = N(n);
+	uint32_t operand = em_double_unary(e, n);
 	val a;
 
+	if (operand)
+		return wk_gen(e, operand);
 	if (unlikely(is_vec(c, x->ty))) {
 		a = wk_gen(e, x->a);
 		if (x->aux == T_PLUS)

@@ -606,7 +606,12 @@ static val gen_unary(ecx *e, uint32_t n)
 	cc *c = e->c;
 	const node *x = N(n);
 	qty t = N(x->a)->ty;
-	val v = gen(e, x->a);
+	uint32_t operand = em_double_unary(e, n);
+	val v;
+
+	if (operand)
+		return gen(e, operand);
+	v = gen(e, x->a);
 
 	if (is_vec(c, x->ty) && (x->aux == T_MINUS || x->aux == T_TILDE))
 		return gen_vlanes(e, x->aux, t, &v, t, NULL, x->ty, true);

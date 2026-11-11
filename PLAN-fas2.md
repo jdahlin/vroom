@@ -3048,3 +3048,23 @@ finns också i rådata. Två TU:er exkluderades efter kandidatens preflight.
 Urvalet är litet, värden är delad och mätningen avser arm64-målet, inte ett
 helt kärnbygge eller wasm. Exakta flaggor, käll-/binärhashar och sampel finns i
 `work/opt-profile/repeated-cputime/kernel-batch{.py,-result.json}`.
+
+### Dubbla unära heltalsoperationer (2026-11-11)
+
+`emit/opt/double-unary.c` identifierar `-(-x)` och `~(~x)` för likatypade
+32-/64-bitars heltal; varje emitter evaluerar då `x` en gång. Flyttal,
+BitInt och mellanliggande typkonverteringar lämnas till vanlig sänkning.
+Fokuserade körnings-/kodgenereringsprov O0–O3 passerar på fyra mål i båda
+bygglägen, inklusive anrop, volatile och smal konvertering. O0/noopt ger
+byteidentisk assembler mot den stackade föräldern; vcc-sviten passerar
+255/255 med en befintlig xfail.
+
+Matchad Callgrind mot `e1391de` gav compiler-Ir +0,045 % x86, +0,049 %
+arm64, +0,106 % wasm32 och +0,119 % wasm64 på den fasta lilla korpusen;
+1 %-grinden passerar, med samma explicit redovisade wasm-uteslutningar.
+Tre växelvisa seriella rundor på 28 förprocessade Linux-TU:er med arm64-flaggor
+gav median användar-CPU 0,79154 → 0,78655 s. Två TU:er är exkluderade och
+den delade värdens lilla urval bevisar ingen generell tidsvinst. Proveniens,
+flaggor och sampel: `work/opt-profile/double-unary-cost/result.json` och
+`work/opt-profile/double-unary-cputime/kernel-batch-result.json`. G5/G7 och
+generell O2-täckning återstår.
