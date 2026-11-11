@@ -15,6 +15,7 @@ static void arity(cc *c, uint32_t loc, unsigned want, const vec *args)
 }
 
 static const builtin builtins[] = {
+	{ "__builtin_elementwise_abs", BI_ELEMENTWISE_ABS, 1, "i." },
 	{ "__builtin_ia32_movmskps", BI_X86_SIMD, 1, "iF" },
 	{ "__builtin_ia32_shufps", BI_X86_SIMD, 1, "FFFi" },
 	{ "__builtin_ia32_maxps", BI_X86_SIMD, 1, "FFF" },
@@ -1128,7 +1129,7 @@ VPRIV uint32_t fold_strncmp_zero(cc *c, const vec *args, uint32_t loc)
 
 /* SSE operations expressed in ordinary vector lanes, preserving argument
  * evaluation and the instruction's second-operand choice for NaNs and ties. */
-static uint32_t x86_simd_lane(cc *c, uint32_t v, qty et, unsigned i, uint32_t loc)
+static uint32_t builtin_vector_lane(cc *c, uint32_t v, qty et, unsigned i, uint32_t loc)
 {
 	uint32_t p = cast_node(c, rvalue(c, v), ty_ptr(c, et), CK_VADDR);
 	uint32_t n = mk2(c, N_INDEX, et, loc, p, mk_int(c, i, prim(TY_LONG), loc));
@@ -1163,7 +1164,7 @@ static uint32_t x86_simd_call(cc *c, const builtin *b, vec *args, qty rt, uint32
 		for (unsigned i = 0; i < 4; i++) {
 			vec one;
 			vinit(&one);
-			vpush(c, &one, rvalue(c, x86_simd_lane(c, saved, prim(TY_FLOAT), i, loc)));
+			vpush(c, &one, rvalue(c, builtin_vector_lane(c, saved, prim(TY_FLOAT), i, loc)));
 			uint32_t sign = mk_builtin(c, BI_SIGNBIT, prim(TY_INT), loc, &one);
 			sign = convert(c, convert(c, sign, prim(TY_BOOL)), prim(TY_INT));
 			sign = mk_bin(c, T_LESSLESS, prim(TY_INT), sign, mk_int(c, i, prim(TY_INT), loc), loc);
@@ -1188,7 +1189,7 @@ static uint32_t x86_simd_call(cc *c, const builtin *b, vec *args, qty rt, uint32
 	uint32_t out = mk(c, N_VAR, vt, loc); N(out)->a = sym; N(out)->flags = NF_LVALUE;
 	uint32_t result = cast_node(c, rvalue(c, out), rt, CK_NOP);
 	for (unsigned i = 16 / ty_size(c, et); i--;) {
-		uint32_t a = rvalue(c, x86_simd_lane(c, saved[0], shift ? et : prim(TY_FLOAT), i, loc));
+		uint32_t a = rvalue(c, builtin_vector_lane(c, saved[0], shift ? et : prim(TY_FLOAT), i, loc));
 		uint32_t value;
 		if (shift) {
 			uint32_t count = convert(c, rvalue(c, saved[1]), prim(TY_UINT));
@@ -1197,11 +1198,11 @@ static uint32_t x86_simd_call(cc *c, const builtin *b, vec *args, qty rt, uint32
 			value = conditional(c, valid, value, mk_int(c, 0, prim(TY_UINT), loc), loc);
 			value = convert(c, value, et);
 		} else {
-			uint32_t rhs = rvalue(c, x86_simd_lane(c, saved[1], prim(TY_FLOAT), i, loc));
+			uint32_t rhs = rvalue(c, builtin_vector_lane(c, saved[1], prim(TY_FLOAT), i, loc));
 			uint32_t cond = mk_bin(c, cmp ? T_LESSEQ : !strcmp(name, "maxps") ? T_GREATER : T_LESS, prim(TY_INT), a, rhs, loc);
 			value = cmp ? conditional(c, cond, mk_int(c, 0, et, loc), mk_int(c, -1, et, loc), loc) : conditional(c, cond, a, rhs, loc);
 		}
-		uint32_t dst = x86_simd_lane(c, out, et, i, loc);
+		uint32_t dst = builtin_vector_lane(c, out, et, i, loc);
 		result = with_pre(c, mk2(c, N_ASSIGN, et, loc, dst, value), result);
 	}
 	return with_pre(c, pre[0], with_pre(c, pre[1], result));
@@ -1244,12 +1245,87 @@ VPRIV uint32_t narrow_math_call(cc *c, const char *name, size_t len, uint32_t ar
 	return 0;
 }
 
+/* abs has no integer promotions and INT_MIN maps to itself. Do the
+ * negation in the unsigned type so that the generated operation cannot
+ * acquire signed-overflow semantics. */
+static uint32_t elementwise_abs_lane(cc *c, uint32_t a, qty et, uint32_t loc)
+{
+	if (is_integer(c, et)) {
+		qty u = unsigned_of(c, et);
+		uint32_t neg = convert(c, mk_bin(c, T_MINUS, u, mk_int(c, 0, u, loc), convert(c, a, u), loc), et);
+		uint32_t cond = mk_bin(c, T_LESS, prim(TY_INT), a, mk_int(c, 0, et, loc), loc);
+		return convert(c, conditional(c, cond, neg, a, loc), et);
+	}
+	if (ty_size(c, et) == 2) {
+		/* Clearing the sign bit directly also preserves signaling NaNs;
+		 * converting through float would quiet them. */
+		uint32_t sym = sym_new(c, S_VAR, 0, et, loc);
+		c->syms[sym].sc = SC_AUTO;
+		uint32_t tmp = mk(c, N_VAR, et, loc); N(tmp)->a = sym; N(tmp)->flags = NF_LVALUE;
+		uint32_t p = cast_node(c, addr_of(c, tmp, loc), ty_ptr(c, prim(TY_USHORT)), CK_P2P);
+		uint32_t bits = mk(c, N_DEREF, prim(TY_USHORT), loc); N(bits)->a = p; N(bits)->flags = NF_LVALUE;
+		uint32_t masked = mk_bin(c, T_AMP, prim(TY_USHORT), rvalue(c, bits), mk_int(c, 0x7fff, prim(TY_USHORT), loc), loc);
+		uint32_t write = mk2(c, N_ASSIGN, prim(TY_USHORT), loc, bits, masked);
+		return with_pre(c, mk2(c, N_ASSIGN, et, loc, tmp, a), with_pre(c, write, rvalue(c, tmp)));
+	}
+	const char *name = KIND(c, et) == TY_FLOAT ? "__builtin_fabsf" : KIND(c, et) == TY_DOUBLE ? "__builtin_fabs" : "__builtin_fabsl";
+	const builtin *b = builtins;
+	while (strcmp(b->name, name)) b++;
+	qty ft = builtin_type(c, b);
+	uint32_t sym = sym_new(c, S_BUILTIN, 0, ft, loc);
+	c->syms[sym].val = b - builtins;
+	uint32_t fn = mk(c, N_VAR, ft, loc); N(fn)->a = sym;
+	vec args; vinit(&args); vpush(c, &args, a);
+	uint32_t n = mk(c, N_CALL, et, loc);
+	N(n)->a = decay(c, fn); N(n)->b = vfreeze(c, &args); N(n)->c = 1;
+	return n;
+}
+
+static uint32_t elementwise_abs_call(cc *c, const builtin *b, uint32_t loc)
+{
+	vec args;
+	args_list(c, &args);
+	if (args.n != 1) { arity(c, loc, 1, &args); return err_node(c, loc); }
+	uint32_t arg = decay(c, args.v[0]);
+	qty t = QUNQ(N(arg)->ty), et = is_vector(c, t) ? T(c, t)->base : t;
+	int k = KIND(c, et);
+	if ((!is_float(c, et) && (!is_integer(c, et) || !is_signed(c, et))) || k == TY_ENUM || k == TY_BOOL) {
+		cc_error(c, loc, "argument to '%s' must be a scalar or vector of signed integer or floating-point type", b->name);
+		return err_node(c, loc);
+	}
+	/* Retain constant-expression support for scalar integer/floating args. */
+	cval cv;
+	if (!is_vector(c, t) && cc_eval(c, arg, &cv)) {
+		if (cv.kind == CV_FLT)
+			return cv.ld ? mk_fltq(c, cv.q & ~((u128)1 << 127), et, loc) : mk_flt(c, __builtin_fabs(cv.f), et, loc);
+		return elementwise_abs_lane(c, arg, et, loc);
+	}
+	uint32_t sym = sym_new(c, S_VAR, 0, t, loc);
+	c->syms[sym].sc = SC_AUTO;
+	uint32_t saved = mk(c, N_VAR, t, loc); N(saved)->a = sym; N(saved)->flags = NF_LVALUE;
+	uint32_t pre = mk2(c, N_ASSIGN, t, loc, saved, arg);
+	if (!is_vector(c, t))
+		return with_pre(c, pre, elementwise_abs_lane(c, rvalue(c, saved), et, loc));
+	sym = sym_new(c, S_VAR, 0, t, loc); c->syms[sym].sc = SC_AUTO;
+	uint32_t out = mk(c, N_VAR, t, loc); N(out)->a = sym; N(out)->flags = NF_LVALUE;
+	uint32_t result = rvalue(c, out);
+	for (unsigned i = ty_size(c, t) / ty_size(c, et); i--;) {
+		uint32_t lane = rvalue(c, builtin_vector_lane(c, saved, et, i, loc));
+		uint32_t value = elementwise_abs_lane(c, lane, et, loc);
+		uint32_t dst = builtin_vector_lane(c, out, et, i, loc);
+		result = with_pre(c, mk2(c, N_ASSIGN, et, loc, dst, value), result);
+	}
+	return with_pre(c, pre, result);
+}
+
 VPRIV uint32_t builtin_call(cc *c, const builtin *b, uint32_t loc)
 {
 	vec args;
 	qty rt = sigtype(c, b->sig[0]);
 
 	switch (b->id) {
+	case BI_ELEMENTWISE_ABS:
+		return elementwise_abs_call(c, b, loc);
 	case BI_ISFPCLASS: case BI_ISSUBNORMAL: case BI_ISZERO: {
 		i128 mask = b->id == BI_ISSUBNORMAL ? 144 : 96;
 		unsigned nargs = b->id == BI_ISFPCLASS ? 2 : 1;
