@@ -322,6 +322,19 @@ Efter integrering med main54580f7: samma kompilatorkod, 180/180 riktade fall,
 221/221 arm64-regressioner (ett befintligt xfail), 216/216 x86-regressioner
 (sex referensskips) samt sanitiserade reciprok-/tryckkontrakt passerar.
 
+### Status 2026-11-11: G5/G7, x86-blad utan ram
+
+Verkligt ramfria x86-blad kan nu hoppa över rbp-prolog/epilog; policy och
+begränsad effektkontroll ligger i en egen frame.c och den redan befintliga
+postvandringen. Explicit frame-pointer-policy och blandade deklarationscacher
+är testade. CFI/debug, hårdningsinträden och en riktig signal-unwind genom ett
+ramfritt blad är verifierade; övriga funktioner behåller sin ram. Egna x86-prov
+215/215, ABI 32/32 och befintliga registerhems-unwindprov är gröna.
+Två kalla 501-funktions-profiler ger −0,176 %/−0,537 % Ir; kontrollens assembler
+är identisk. Käll-/binärhashar, flaggor och bytebegränsningar står i PLAN-x86.md.
+Ingen generell fart- eller programkörtidsvinst är bevisad. G5/G7 och hela O2
+är fortsatt öppna; parameterhem och bredare mätningar återstår.
+
 ### Status 2026-11-11: G5/G7, rena konstanta kontrollbeslut
 
 OPT6:s gemensamma kontrollhjälpare används av x86, arm64 och wasm med
@@ -352,3 +365,7 @@ och registereffektkontrakt passerar. Båda planernas status behålls.
 Efter mainf97d16d (#47/#52/#55): unity, 16 unsigned32-mål-/nivåfall,
 16 konstanta kontrollfall och sanitiserade reciprok-/registereffektskontrakt
 passerar igen; de två planernas oberoende statusblock är bevarade.
+
+Efter main2dc4ea3 (#50:s x86-blad): unity, 16 division-/nivå-/målfall,
+sanitiserade reciprok-/registereffektkontrakt och bladramens policy, cache-,
+debug-/härdnings- och signal-unwindprov passerar. Båda statusblock behålls.

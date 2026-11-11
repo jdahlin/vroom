@@ -69,6 +69,7 @@ arm64)
 	step rec-slot-values python3 bench/vcc-rec-slot-values.py --sanitize
 	step slot-observable python3 bench/vcc-slot-observable.py --check-mutation
 	step opt-debug-x86 python3 bench/vcc-opt-debug.py
+	step x86-leaf-frame python3 bench/vcc-x86-leaf-frame.py --no-run
 	step rec-copies python3 bench/vcc-rec-copies.py
 	step opt-rules-arm64 python3 bench/vcc-opt-rules.py --target aarch64-linux-gnu
 	step const-control-arm64 python3 bench/vcc-constant-control.py --target aarch64-linux-gnu
