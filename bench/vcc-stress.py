@@ -4,7 +4,8 @@
   bench/vcc-stress.py [--vccd] [--bin-dir DIR] [-v] [PAT]
 
 Every case is generated into a temporary directory and compiled with
-`vpp -c --target=aarch64-linux-gnu`.  What a case expects:
+`vpp -c --target=aarch64-linux-gnu` (front-end-only cases use `-S`,
+including explicit x86-64 targets). What a case expects:
   ok     valid input clang accepts: exit 0
   error  invalid or unreasonable input: exit 1..127 and a diagnostic
          ("error" on stderr, and the case's regex if it has one)
@@ -64,6 +65,11 @@ def cases(d):
     case('case-labels-late-duplicate', 'error',
          {'a.c': 'int f(int n) { switch(n) {' + labels + 'case 10:return 1;}return 0;}\n'},
          'a.c', regex='duplicate case')
+    for target in ('x86_64', 'aarch64'):
+        case('record-nest-100k-' + target, 'error',
+             {'a.c': ''.join(f'struct s{i} {{' for i in range(100000)) + 'int x;' + '} x;' * 100000 + '\n'},
+             'a.c', args=('--target=' + target + '-linux-gnu', '-fsyntax-only'),
+             regex='record nested too deeply')
     # preprocessor recursion
     case('pp-if-parens-200k', 'any', {'a.c': '#if ' + nest('(', ')', 200000, '1') + '\nint x;\n#endif\n'}, 'a.c')
     case('pp-macro-nest-100k', 'any', {'a.c': '#define F(x) x\nint y = ' + nest('F(', ')', 100000, '1') + ';\n'}, 'a.c')
@@ -134,7 +140,10 @@ class Vccd:
 
 def run(c, d, vccd):
     out = f'{d}/out.o'
-    argv = TARGET + c['args'] + ['-c', '-o', out, c['main']]
+    # -S also routes front-end-only jobs through vccd's compile path, and
+    # permits x86-64 checks without its unsupported direct-object mode.
+    mode = ['-S' if '-fsyntax-only' in c['args'] else '-c', '-o', out]
+    argv = TARGET + c['args'] + mode + [c['main']]
     if vccd:
         cmd, env = [f'{vd.BIN}/vcc'] + argv, dict(os.environ, VCC_SOCK=vccd.sock)
     else:
