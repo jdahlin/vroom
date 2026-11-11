@@ -1,5 +1,6 @@
 /* vcc code generator: record-level clean-ups once a function is generated */
 #include "../../../emit/emitimpl.h"
+#include "../../../emit/rec/loads.h"
 
 /*
  * Register liveness over the function's records (basic blocks split at
@@ -584,7 +585,7 @@ static void slots(ecx *e)
 /* ---------------- repeated loads ---------------- */
 
 /*
- * emit/rec/loads.c per block: a load of memory a register still holds (from
+ * emit/rec/loads.h per block: a load of memory a register still holds (from
  * a load or a 64-bit store of it) is a mov.  Volatile accesses are marked by
  * mem() (rm 1) or untagged (frame), and neither use nor make an entry.
  */
@@ -634,8 +635,17 @@ static void loads(ecx *e)
 	};
 	uint32_t nb = W.blk[e->nin - 1] + 1;
 
-	for (uint32_t b = 0; b < nb; b++)
-		em_rec_load_reuse(&scan, W.bs[b], W.be[b]);
+	for (uint32_t b = 0; b < nb; b++) {
+		uint32_t lo = W.bs[b], hi = W.be[b];
+
+		/* from the first access to the last load: nothing is reused outside */
+		while (lo <= hi && e->in[lo].op != I_LD && !(e->in[lo].op == I_ST && e->in[lo].sz == 3))
+			lo++;
+		while (hi > lo && e->in[hi].op != I_LD)
+			hi--;
+		if (lo < hi)
+			em_rec_load_reuse(&scan, lo, hi);
+	}
 }
 
 /* ---------------- known extensions ---------------- */

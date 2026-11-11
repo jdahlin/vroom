@@ -656,7 +656,7 @@ typedef struct em_rec_copy_scan {
 	void *ctx;
 } em_rec_copy_scan;
 VPRIV bool em_rec_copy_forward(const em_rec_copy_scan *s, uint32_t k, uint32_t end, uint8_t t, uint8_t v);
-/* rec/loads.c: what a record does to memory, for the repeated-load scan.
+/* rec/loads.h: what a record does to memory, for the repeated-load scan.
  * LOAD: a plain load of reg from base+imm+ref (volatile and atomic ones are OTHER);
  * STORE: a plain store (forward: reg holds the value a load of that size and
  * extension 0 would give); OTHER: may write memory (calls, atomics, barriers,
@@ -681,7 +681,7 @@ typedef struct em_rec_load_scan {
 	void (*reuse)(void *ctx, uint32_t k, uint8_t from, uint32_t pos);
 	void *ctx;
 } em_rec_load_scan;
-VPRIV void em_rec_load_reuse(const em_rec_load_scan *s, uint32_t begin, uint32_t end);
+/* rec/loads.h: static inline em_rec_load_reuse(scan, begin, end) */
 /* insn.c */
 extern const char cond_name[][8];
 VPRIV bool logimm_ok(uint64_t v, int x);

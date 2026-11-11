@@ -1,7 +1,8 @@
-/* Repeated loads in a block (emit/rec/loads.c): x86 says which records read
+/* Repeated loads in a block (emit/rec/loads.h): x86 says which records read
  * and write what.  Volatile accesses carry sh 1 (x64_mem) and are left alone.
  */
 #include "x64impl.h"
+#include "../../../emit/rec/loads.h"
 
 static void x64_mem_inspect(void *ctx, uint32_t k, em_rec_mem *m)
 {
