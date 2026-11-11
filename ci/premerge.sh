@@ -56,6 +56,7 @@ build() {	# build MAKE-TARGET: a build failure ends the job
 case $JOB in
 arm64)
 	build vcc
+	step runtime-exceptions python3 bench/test-runtime-exceptions.py
 	step ctests       python3 bench/vcc-ctests.py -j "$J"
 	step c2y-cache    python3 bench/vcc-c2y-cache.py
 	step diag         python3 bench/vcc-diag.py -j "$J"

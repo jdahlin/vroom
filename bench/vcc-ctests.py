@@ -104,15 +104,15 @@ def tests(suite, pat):
         ts = [t for t in ts if re.search(pat, f'{t[0]}/{t[1]}')]
     return ts
 
-DG = re.compile(r'\{\s*(dg-options|dg-additional-options)\s+"([^"]*)"\s*(\{[^}]*\})?\s*\}')
+DG = re.compile(r'\{\s*(dg-options|dg-additional-options)\s+(?P<brace>\{\s*)?"(?P<flags>[^"]*)"\s*(?(brace)\}\s*)(?P<selector>\{[^}]*\})?\s*\}')
 def dg_flags(src):
     """options from dg-options/dg-additional-options that apply to aarch64-linux"""
     fl = []
     for m in DG.finditer(src):
-        sel = m.group(3)
+        sel = m.group("selector")
         if sel and not re.search(r'aarch64|\*-\*-\*|lp64|int128|!', sel):
             continue
-        fl += [x for x in m.group(2).split() if not x.startswith(('-m', '-fno-tree', '-ftree', '-fdump'))]
+        fl += [x for x in m.group("flags").split() if not x.startswith(('-m', '-fno-tree', '-ftree', '-fdump'))]
     return fl
 
 def sh(cmd, timeout=60, **kw):
@@ -258,6 +258,8 @@ def reference(suite, name, path, flags, rthash, wd):
             r['rc'] = rc; r['out'] = out
             if suite in ('gcc', 'vcc') and rc != 0:
                 r['skip'] = 'ref-fail'; r['why'] = f'clang build exits {rc}'
+                if err.strip():
+                    r['why'] += ': ' + first_err(err.decode(errors='replace'))
             elif suite == 'tcc':
                 exp = f'{os.path.dirname(path)}/{name}.expect'
                 r['expect_ok'] = os.path.exists(exp) and norm(open(exp, errors='replace').read()) == norm(out)

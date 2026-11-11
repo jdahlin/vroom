@@ -84,6 +84,27 @@ WASM_XFAIL.update({
     'void_lvalue': 'TODO.md wasm: Linux-correctness coverage gaps: void lvalue evaluation leaves unwanted Wasm stack values',
 })
 
+def unsupported_requirement(suite, src):
+    """Honor an explicit upstream contract, never infer support from a failure.
+
+    LLVM Wasm cannot represent escaping GNU label addresses (PLAN-wasm.md,
+    "Referenskontrakt"). Some examples optimize away, but that does not provide
+    the label_values target capability required by these GCC tests.
+    """
+    if suite == 'gcc' and re.search(
+            r'(?m)^\s*/\*\s*\{\s*dg-require-effective-target\s+label_values\s*\}\s*\*/', src):
+        return 'wasm: dg-require-effective-target label_values is unsupported (PLAN-wasm.md: Referenskontrakt)'
+    return None
+
+
+def report_case(suite, name, status, category, why, verbose=False, show=None):
+    # Unexpected results must identify the source even in the default CI log.
+    if status in ('fail', 'error') or (verbose and status == 'xfail'):
+        print(f'{status.upper()} {category:5s} {suite}/{name}: {why}')
+    if show and status != 'pass' and category == show:
+        print(f'{status} {category} {suite}/{name}: {why}')
+
+
 def set_target(w32):
     """wasm32 (W7) instead of wasm64: the target, emcc's memory, the work directory"""
     global OUT, TGT, BASE, LINK, RTO
@@ -203,6 +224,9 @@ def one_(t):
         return t, 'skip', 'tcc-specific', ct.TCC_SKIP[name]
     if suite == 'gcc' and name in ct.GCC_SKIP:
         return t, 'skip', 'compiler-specific', ct.GCC_SKIP[name]
+    unsupported = unsupported_requirement(suite, src)
+    if unsupported:
+        return t, 'skip', 'unsupported-target', unsupported
     if name in WASM_SKIP:
         return t, 'skip', 'wasm', WASM_SKIP[name]
     flags = ct.dg_flags(src) if suite == 'gcc' else ct.exec_marks(src)[0] if suite == 'vcc' else []
@@ -321,12 +345,7 @@ if __name__ == '__main__':
         if st != 'pass':
             by[s][f'{st}:{cat}'] += 1
             whys[(st, cat)][why] += 1
-        if verbose and st in ('fail', 'error'):
-            print(f'{st.upper()} {cat:5s} {s}/{n}: {why}')
-        if verbose and st == 'xfail':
-            print(f'XFAIL {cat:5s} {s}/{n}: {why}')
-        if show and st != 'pass' and cat == show:
-            print(f'{st} {cat} {s}/{n}: {why}')
+        report_case(s, n, st, cat, why, verbose, show)
     for (st, cat), c in sorted(whys.items()):
         if st in ('fail', 'error') or verbose:
             print(f'--- {st} {cat}: {sum(c.values())}')

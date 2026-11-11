@@ -13,11 +13,14 @@ both sides, glibc behind them, with rt/wasm.c's __rt_assert.
 
 Failures by stage: emit (vpp fails; "not supported yet" names the plan
 step), as (clang rejects vcc's assembly), link, run.  Clang's results are
-cached in build/.../x86tests/ref (keyed by the source and flags); a vcc
+cached in build/.../x86tests/ref (keyed by the source and flags). A signal
+from the native reference is an explicit ref-runtime-fail exclusion with its
+signal and stderr recorded; compiler/linker failures and execution timeouts
+remain fatal oracle errors. A vcc
 assembly text byte-identical to one that passed before passes again
 without being assembled, linked or run (--no-cache runs all).
 """
-import hashlib, importlib.util, json, os, re, shutil, subprocess, sys, time
+import hashlib, importlib.util, json, os, re, shutil, signal, subprocess, sys, time
 from collections import Counter, defaultdict
 from multiprocessing import Pool
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -35,6 +38,15 @@ BASE = [TGT, '-nostdinc', '-I', f'{ct.RT}/include', '-isystem', ct.RES, '-fno-PI
 BASE += os.environ.get('VCC_CFLAGS', '').split()	# e.g. -g -fasynchronous-unwind-tables (both compilers)
 LINK = [CL, TGT, '-no-pie']
 RTO = f'{OUT}/rt.o'
+# Header corrections must invalidate references built with the old ABI declarations.
+_header_hash = hashlib.sha1()
+for _directory, _, _files in sorted(os.walk(f'{ct.RT}/include')):
+    for _file in sorted(_files):
+        _path = os.path.join(_directory, _file)
+        _header_hash.update(os.path.relpath(_path, ct.RT).encode())
+        with open(_path, 'rb') as _header:
+            _header_hash.update(_header.read())
+HEADER_HASH = _header_hash.hexdigest()
 # tests that need what the x86-64 target or glibc does not give the same way
 X86_SKIP = {}
 
@@ -65,10 +77,30 @@ def run(exe, diagnostics=False):
     result = (rc, out.decode('latin-1'))
     return (*result, err) if diagnostics else result
 
+def native_reference_failure(rc, err):
+    """A native test is the program under test, not an oracle tool process.
+
+    Compiler/linker, QEMU and Node signals still go through oracle_error.
+    Only the directly executed native reference has this runtime outcome.
+    """
+    if not isinstance(rc, int) or rc >= 0:
+        return None
+    try:
+        name = signal.Signals(-rc).name
+    except ValueError:
+        name = 'signal ' + str(-rc)
+    detail = err.decode(errors='replace') if isinstance(err, bytes) else err
+    why = f'native reference terminated by {name} (return code {rc})'
+    if detail.strip():
+        why += ': ' + ct.first_err(detail)
+    return {'skip': 'ref-runtime-fail', 'why': why, 'phase': 'native-run',
+            'rc': rc, 'signal': name, 'stderr': detail}
+
+
 def reference(suite, name, path, flags, wd):
     with open(path, 'rb') as source:
         src = source.read().decode('latin-1')
-    key = hashlib.sha1(('oracle-status-v2 ' + src + ' '.join(flags) + ' '.join(ct.CLFL) + ' '.join(BASE + LINK) + 'rt1').encode()).hexdigest()[:16]
+    key = hashlib.sha1(('oracle-status-v3-native-runtime ' + src + ' '.join(flags) + ' '.join(ct.CLFL) + ' '.join(BASE + LINK) + 'rt1 ' + HEADER_HASH).encode()).hexdigest()[:16]
     cf = f'{OUT}/ref/{suite}/{name}.json'
     try:
         with open(cf) as cache:
@@ -95,12 +127,17 @@ def reference(suite, name, path, flags, wd):
             r['skip'] = 'ref-fail'; r['why'] = 'link: ' + (m.group(1) if m else ct.first_err(err))
         else:
             rc, out, err = run(f'{wd}/ref', diagnostics=True)
-            failure = ct.oracle_error(rc, err, 'run', 20)
-            if failure:
-                return dict(r, **failure)
-            r['rc'] = rc; r['out'] = out
-            if suite in ('gcc', 'vcc') and rc != 0:
-                r['skip'] = 'ref-fail'; r['why'] = f'clang build exits {rc}'
+            runtime_failure = native_reference_failure(rc, err)
+            if runtime_failure:
+                r.update(runtime_failure)
+                r['out'] = out
+            else:
+                failure = ct.oracle_error(rc, err, 'run', 20)
+                if failure:
+                    return dict(r, **failure)
+                r['rc'] = rc; r['out'] = out
+                if suite in ('gcc', 'vcc') and rc != 0:
+                    r['skip'] = 'ref-fail'; r['why'] = f'clang build exits {rc}'
     os.makedirs(os.path.dirname(cf), exist_ok=True)
     with open(cf, 'w') as cache:
         json.dump(r, cache)
@@ -254,6 +291,9 @@ def vlink1(t):
         m = re.search(r'undefined symbol: (\S+)', err)
         return t, 'skip', 'ref-fail', 'link: ' + (m.group(1) if m else ct.first_err(err))
     rrc, rout, err = run(f'{wd}/ref', diagnostics=True)
+    runtime_failure = native_reference_failure(rrc, err)
+    if runtime_failure:
+        return t, 'skip', runtime_failure['skip'], runtime_failure['why']
     failure = ct.oracle_error(rrc, err, 'run', 20)
     if failure:
         return t, 'error', failure['error'], failure['why']

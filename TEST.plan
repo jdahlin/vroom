@@ -544,10 +544,25 @@ Runtime-riggarna skiljer nu referenskompilatorns signal/timeout/verktygsfel
 från vanliga källkodsavvisningar. Orakelfel ger felstatus, ingår i
 sammanfattningen och cachas inte som permanenta undantag. Gamla missvisande
 cacheposter invalideras. Det stora `branch_far` har en uttrycklig begränsad
-referenstid på 300 sekunder; övriga prov behåller 60. Sju offlinegrupper
+referenstid på 300 sekunder; övriga prov behåller 60. Fjorton offlinegrupper
 injicerar fel i alla tre riggar, och en full CLI-injektion ger 0 godkända,
 0 överhoppade, ett orakelfel och exit1. Verkliga `branch_far` och
 `signaling_nan` går 2/2 på x86 och ARM/QEMU med nya klassificeringen.
+
+CI-följdkontrollen återställde braced `dg-options`, bland annat den
+`-fwrapv` som `930529-1` kräver; samma Wasm-referens går från 20 s timeout
+till exit0 på 0,020 s. ARM-gästens undantagsvektor ger nu exit125 med
+diagnostik vid verkligt gästfel, medan en oändlig loop fortfarande är ett
+orakelfel. Native-referensprogrammets signal redovisas som avvisat
+runtime-kontrakt med signal och stderr; kompilator-/länkar-/QEMU-/Node-fel
+och timeouter förblir orakelfel. Saknade `freopen`/`fscanf`-prototyper i
+riggens stdio-header rättades: två felande native-referenser passerar nu.
+Full GCC-körning: **1615/1615 x86**, 86 explicita undantag; ARM:s kompletta
+vendorerade körsvit **1883/1883**, 126 undantag. Wasm64 klarar **1825/1825**,
+34 XFAIL och 150 undantag; 19 av dessa följer svitens uttryckliga
+`label_values`-krav som Wasm saknar. Inget testnamn används för det filtret,
+och identiska backendfel utan direktivet förblir fel. Alla oväntade
+Wasm-utfall skriver nu testnamnet även utan verbose-läge.
 
 Kvar:
 - Alla återstående matchande filer och optimeringskonfigurationer; nästlade
