@@ -168,8 +168,15 @@ byggen. Oberoende BitInt-prober är 36/36; dagens leaf-frame-, cell-,
 kopierings- och konstantkontrollgrindar passerar på båda byggena.
 Körtidskonvertering till/från flyttal är fortfarande uttryckligen
 utanför denna integration. Exakta kommandon, resultat och källmanifest:
-`work/results/bitint-main2dc/`. Hela externa Linux-korpusen och G1/G2
-är fortsatt öppna; dessa integrationsgrindar ersätter inte den körningen.
+`work/results/bitint-main2dc/`. Den fulla vendrade Linux-körkorpusen
+passerar därefter 1942/1942 x86 (130 undantag) och 1945/1945 ARM/QEMU
+(126 undantag och ett befintligt kört XFAIL), utan cacheåteranvändning.
+Hela Kefirs 875 runtime-par har också körts först på x86, sedan ARM:
+x86 572 godkända (+91), 8 vcc-fel och 10 signal/timeout; ARM 455 godkända,
+3 vcc-fel och 7 signal/timeout. Inga tidigare godkännanden förloras;
+referensfel och unsupported är oförändrade och räknas inte som pass.
+Binär SHA256 `f2a6f04804de1393357a2b4341059f8bc9cbc30c8b5361808df43f203d6e0b74`.
+G1/G2 och övrig testplan är fortsatt öppna.
 
 
 ### Status 2026-11-11: G1, padding i BitInt-uttryck
