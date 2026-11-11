@@ -791,6 +791,9 @@ again:
 			i128 width = 0;
 			uint32_t loc = t->loc, open;
 
+			if (t->id == KW__ExtInt)
+				cc_warnx(c, "deprecated-type", true, NULL, loc, NULL, 0, NULL, 0,
+					 "'_ExtInt' is deprecated; use '_BitInt' instead");
 			if (base || have_named || nlong)
 				cc_error(c, loc, "invalid combination of type specifiers with _BitInt");
 			base = KW__BitInt;

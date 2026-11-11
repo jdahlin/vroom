@@ -80,6 +80,31 @@ kan gå parallellt.
 
 ## Status
 
+### Status 2026-11-11: G1/G4, kombinerad native-stack ovanpå 1c5b5d1
+
+Sju separata native-rättningar har kombinerats och validerats på exakt
+stacktoppen `1c5b5d1`. Unity/filvis: egna Linux-sviter x86 232/232 och ARM
+237/237 med befintliga referensundantag/xfail, ABI 33/33 och atomik 3/3.
+PP-paritet cmp/batch är 920/920; sema run/batch 887/887 på båda byggen.
+Sex fokuserade Kefir-fall passerar alla fyra kombinationer på x86;
+ARM:s tre aktiva fall passerar medan två Clang-avvisningar och x86-vakten
+redovisas separat. ExtInt- och alloca-kantfall samt GCC pr113596 är gröna;
+breda strängars tidigare x86-assertionsfel är nu rättat. Se `TEST.plan`
+S5b och `work/native-stack64/` för exakt evidens och återstående gränser.
+Ingen full Kefir-/GCC-grind eller ytterligare plattformstäckning påstås;
+G1/G4 är fortsatt öppna.
+
+### Status 2026-11-11: G1/G4, livstid för inlinad alloca
+
+På basen `103cdee` återställs stacken vid den inlinade funktionens gemensamma
+returpunkt på Linux x86/ARM, efter argumentens evaluering. Anroparens VLA-
+sparpunkter ändras inte av den inlinade funktionens alloca. GCC:s oförändrade
+`gcc.dg/pr113596.c` behåller `-O2`; regressionen täcker nästlad inlining,
+tidiga returer och levande VLA/alloca i anroparen, även vid `-O0`.
+Resultat från unity/separatfilbygge, egna körsviter och semantik run/batch:
+`work/results/pr113596/validation.json`. Hela S4 har inte körts om;
+G1/G4 och andra mål förblir separata öppna grindar.
+
 ### Status 2026-11-11: G5/G7, wasm frame-cell forwarding
 
 Wasm32/64 använder nu den gemensamma cell-/värdekärnan för exakta
@@ -142,8 +167,8 @@ Skalära `_BitInt` över 128 bitar har nu limb-baserad kodgenerering för
 Linux x86-64 och arm64, med de befintliga snabbvägarna för högst 128 bitar
 bevarade. Milstolpen omfattar heltalsaritmetik, jämförelser, konvertering
 mellan heltal, bitfält, generiska biträkningar, konstantuttryck och replay.
-Körtidskonvertering till/från flyttal, vektorelement över 128 bitar och
-switch-gränser utanför signed 128-bitars representation avvisas uttryckligen.
+Vektorelement över 128 bitar och switch-gränser utanför signed 128-bitars
+representation avvisas uttryckligen. Flyttalskonvertering följer nedan.
 Detta slutför inte C23 eller G1.
 
 Validering av integrationen på `ae941cb`: unity och separata filer,
@@ -433,3 +458,65 @@ Unity/separata filer, sema run/batch 887/887 och egna körsviter
 223/223 x86 respektive 228/228 ARM är verifierade; sex x86-referensundantag
 och ett befintligt kört ARM-XFAIL redovisas separat. Hela Kefir-sviten och
 G1/G2 återstår. Evidens: `work/agents/kefir-bitfield/results/evidence.txt`.
+
+### Status 2026-11-11: G1/G2, strängprefix, embed och VLA-gränser
+
+Sen kodningsprefix styr nu hela följden av angränsande strängliteraler och
+föregående escape-sekvenser. C23:s citerade `#embed` söker arbetskatalogen
+efter inkluderarens katalog och före explicita embed-kataloger. Vikbara
+arraygränser med sidoeffekter utvärderas som VLA i stället för att tappa anropen.
+Fyra oförändrade Kefir-fall passerar alla Clang/vcc-kombinationer på x86;
+ARM/QEMU passerar embed och VLA, medan två strängfall avvisas av Clang
+på grund av upstreams signed-wchar-antaganden. Portabla strängregressioner
+passerar ARM. Unity/separata filer: egna x86 224/224 med sex referensundantag,
+ARM 229/229 med ett befintligt kört XFAIL, diagnostik 224/224 och 40 embed-
+orakeljämförelser. Kernelns sema 887/887 och full PP-paritet 920/920
+passerar både per process och i batch. G1/G2 är fortsatt öppna.
+Fryst källkod och verifieringsunderlag: `86c7352`,
+`work/results/frontend-milestone-2dc/`.
+
+### Status 2026-11-11: G1, breda heltal till/från flyttal
+
+Linux-konverteringar använder hela heltalsmagnituden med guard/sticky-bitar
+och en avrundning till närmaste jämna, respektive avkodning av flyttalets
+exponent och signifikand med trunkering mot noll. Ingen körtids-Clang eller
+128-bitars trunkering av heltalsindata används. Dynamiska avrundningslägen
+ingår inte; detta slutför inte G1.
+
+På den privata milstolpen `7a1691f` passerar 6871 exakta x86-konverteringsprov
+och 5667 ARM-prov över fem heltalsbredder 129–7001, med sex respektive fem
+flyttalsformat. Unity och separata filer ger samma resultat. Clang-avvikelser
+för BF16, x87 och unsigned binary128 registreras separat; vcc måste alltid
+matcha den oberoende Python-orakeln. Oförändrat Kefir `bitint_cast_fix2`
+passerar fyra x86-kombinationer och två ARM-kombinationer med vcc-kallee;
+Clang stöder inte ARM-typens bredd. Snapshot/replay passerar med ASan/UBSan
+efter en separat rättning av ett befintligt nollängds-`memcpy` med nullkälla.
+Verifieringsunderlag: `work/results/bitint-float-reviewed/`.
+
+Återintegrationen på `b0b6107` bevarar de nyare konstant- och aliasoptimeringarna.
+Unity och separata filer passerar samma IEEE-matris, 222/222 egna x86-prov
+(med sex befintliga referensundantag), 227/227 ARM-prov (ett befintligt xfail,
+inga hoppade prov) och kärnans sema
+887/887 både individuellt och i batch. IEEE-matrisen passerar även med `-O3`
+på båda målen. Reglerna O0–O3, constant-control, leaf-frame, slot-values,
+slot-observable, switch-plan och debugrader passerar i båda byggsätten.
+ASan/UBSan passerar IEEE, konstantprov och snapshot/replay på båda målen.
+CI kör nu flyttalsmatrisen och sanitizer-replay. Evidens:
+`work/results/bitint-float-main-reviewed/`.
+
+Importen ovanpå PR #60 behåller dess fulla Linux-baslinjer och ändrar
+endast flyttalsuppföljningen. Båda oförändrade x86-Kefir-fallen
+`bitint_cast_fix2` och `bitint_typeconv6` är nu 2/2 godkända med fyra
+kompilatorkombinationer vardera; motsvarande standard-ARM-körning
+redovisar två Clang-referensavvisningar. Det breda ARM-värdebeviset
+kommer från IEEE-matrisen och de separat redovisade vcc-kalleeanropen.
+G1/G2 och strikt flyttalsmiljö är fortsatt öppna.
+
+Fulla Kefir-omkörningar på den frysta stacken `a41361e` ger 585 godkända
+x86-fall och 461 ARM/QEMU-fall, utan vcc-kompileringsfel. Sex respektive fyra
+runtime-/tidsfel och samtliga referens-/unsupported-kategorier behålls;
+G1/G2 är fortsatt öppna. Linux-ASan/UBSan går 232/232 x86 och 237/237 ARM
+med befintliga undantag. Wasm64-preflight går 189/189 med 38 körda XFAIL;
+ExtInt-provet täcker den redan verifierade BitInt-ABI-luckan på Wasm32/64.
+Exakta kommandon, oförändrad kompilatorkod och testmarkörens föräldraprov:
+`work/results/native-stack64-ci-preflight/`.

@@ -213,7 +213,8 @@ static void node_kinds(const node *x, uint8_t k[3])
 	case N_COND: case N_IF: k[0] = k[1] = k[2] = K_NODE; break;
 	case N_CALL: k[0] = K_NODE, k[1] = K_LIST; break;
 	case N_BUILTIN: case N_INIT: k[1] = K_LIST; break;
-	case N_CAST: case N_UNARY: case N_ADDR: case N_DEREF: case N_PREINC: case N_PREDEC: case N_POSTINC:
+	case N_CAST: k[0] = k[2] = K_NODE; break;
+	case N_UNARY: case N_ADDR: case N_DEREF: case N_PREINC: case N_PREDEC: case N_POSTINC:
 	case N_POSTDEC: case N_STMTEXPR: case N_VAARG: case N_EXPR: case N_GOTO_IND: case N_RETURN:
 		k[0] = K_NODE;
 		break;
@@ -1586,7 +1587,8 @@ static bool rel_build(drent *e)
 		e->dn[a][RO_DA + 1] = t;
 		e->dof[a] = malloc((t + 1) * sizeof(uint32_t));
 		for (int k = 0; k <= RO_DA; k++) {
-			memcpy(e->dof[a] + e->dn[a][k], rl[a].d[k].v, rl[a].d[k].n * sizeof(uint32_t));
+			if (rl[a].d[k].n)
+				memcpy(e->dof[a] + e->dn[a][k], rl[a].d[k].v, rl[a].d[k].n * sizeof(uint32_t));
 			free(rl[a].d[k].v);
 		}
 	}

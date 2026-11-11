@@ -180,15 +180,6 @@ VPRIV lval local_lval(ecx *e, uint32_t s)
 	return l;
 }
 
-VPRIV uint32_t sym_align(cc *c, uint32_t s)
-{
-	uint32_t a = talign(c, c->syms[s].ty);
-
-	if (c->syms[s].align > a)
-		a = c->syms[s].align;
-	return a;
-}
-
 VPRIV bool is_local_var(cc *c, uint32_t s)
 {
 	const sym *y = &c->syms[s];

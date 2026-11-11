@@ -2604,7 +2604,7 @@ static val wk_fpconst(ecx *e, qty t, double d, u128 q)
 		}
 
 		if (KIND(c, t) == TY_BFLOAT16)
-			return LO(fconst)(e, q_to_bf(q), 2);
+			return LO(fconst)(e, q_to_bf(q_of_d(d)), 2);
 		if (KIND(c, t) == TY_FLOAT16)
 			return LO(fconst)(e, q_to_h(q_of_d(d)), 2);
 		if (KIND(c, t) == TY_FLOAT)
@@ -2866,7 +2866,7 @@ static val wk_builtin(ecx *e, uint32_t n)
 		if (e->wk->nvla) {
 			int sp = LO(spget)(e);
 
-			for (int i = 0; i < e->wk->nvla; ++i) {
+			for (int i = e->wk->inl ? e->wk->inl->vbase : 0; i < e->wk->nvla; ++i) {
 				lval saved = { .k = L_FRAME, .off = wk_local(e, e->wk->vla[i]) + 8, .align = 8 };
 				LO(store)(e, sp, &saved, 8);
 			}
@@ -3272,6 +3272,7 @@ static val wk_gen_inner(ecx *e, uint32_t n)
 		return wk_vreg(LO(laddr)(e, &l));
 	}
 	case N_CAST: {
+		if (x->c) return wk_gen(e, x->c);
 		cval cv;
 
 		/* (int)k for a const double k = 1.0: folded, as clang -O2 */

@@ -640,6 +640,41 @@ Detta är fortfarande inte runtime- eller QBE-ekvivalens.
 
 ### S5b Kefir — importerad, Linux-baslinje uppmätt
 
+**Legacy `_ExtInt` (2026-11-11):** nyckelordet går genom samma parser- och
+typväg som `_BitInt`, med `-Wdeprecated-type` som hos Clang. Oförändrade
+`extint1` passerar alla fyra Clang/vcc-kombinationer på x86-64. ARM:s
+Clang-referens avvisar 310 bitar och förblir filtrerad; separat körs dess
+oförändrade Clang-host mot vcc-callee under QEMU. `bench/vcc-extint.py`
+kontrollerar typidentitet, C89/C11/C23 och varningsflaggor, 24 anrops-
+kombinationer på x86 samt 20 på ARM upp till 120 bitar. ARM 310 bitar
+kontrolleras separat mot Python-genererade bytes, inte mot en obefintlig
+Clang-referens. Unity och filvis bygge ger samma resultat. PP-paritet:
+920/920 före och efter, i både processvis och batchkörning. Artefakter:
+`work/results/extint-alias/`, `work/results/extint-{before,after}-{cmp,batch}.log`.
+
+**Samlad frontendmilstolpe (2026-11-11, bas 2dc4ea3):** Tre avgränsade
+rättningar: hela följden av strängliteral bestämmer kodningen före
+avkodning (även sena `u`/`U`/`L` och hex-escapes); citerad `#embed` söker
+arbetskatalogen efter inkluderarens katalog och före `--embed-dir`;
+konstantvikbara VLA-gränser behåller evaluerade biverkningar. Portabla
+runtimeprov, diagnostikprov och en ny CI-orakel för embed-sökning ingår.
+
+Unity och filvis bygge passerar tillsammans. Kernel-sema: 887/887 både
+per process och batch; full PP-paritet inklusive host: 920/920 i båda
+lägena. Båda kompilatorbyggena: egna x86-prov 224 godkända + 6 explicita
+referensskip; ARM/QEMU 229 godkända + 1 befintlig xfail, inga skip;
+diagnostik 224/224; embed-orakel 40 jämförelser över båda Linuxmålen.
+Runtime kördes även utan resultatcache för det filvisa bygget.
+
+Oförändrade Kefir `string_literals1`, `wide_string_literals2`,
+`preprocessor_embed7` och `vla1` passerar på x86-64 i alla fyra
+Clang/vcc-kombinationer med båda byggena. På ARM passerar embed/VLA;
+Clang avvisar de två strängfallens antaganden om signerad `wchar_t`,
+vilka redovisas som `reference-compile-fail`, aldrig som godkända.
+Den portabla strängregressionen passerar på ARM/QEMU. Detta är ett
+riktat urval, inte en grön full Kefir-svit. Fryst patch, bundle,
+käll-/binärmanifest och körloggar: `work/results/frontend-milestone-2dc`.
+
 Officiella repot är nu `https://git.protopopov.lv/kefir.git`, låst till
 `7c59547068eaa0723b4db83d3fb70f448b0f0cb1`; gamla sr.ht HEAD innehåller
 bara flyttmeddelandet. Käll-/licensmetadata finns i `bench/kefir-source.json`.
@@ -742,6 +777,85 @@ nya provet på båda mål; sema run/batch 887/887, egna x86-prov 223/223 med
 sex referensundantag och ARM 228/228 med ett befintligt kört XFAIL.
 Detta är riktad evidens, inte en ny fullständig Kefir-körning.
 Artefakter: `work/agents/kefir-bitfield/results/`.
+
+**Flyttalsuppföljning på den breda milstolpen:** de oförändrade
+`bitint_cast_fix2` och `bitint_typeconv6` passerar nu båda på x86 i alla fyra
+kompilatorkombinationer. ARM:s Clang avvisar deras breda kalleetyper;
+standardharnessen redovisar två referenskompileringsfel, inte två pass.
+Separata oförändrade anrop av `bitint_cast_fix2` med vcc-kallee passerar
+med både Clang- och vcc-anropare på ARM/QEMU. Den oberoende IEEE-matrisen
+passerar 6871 x86- och 5667 ARM-värden över bredderna 129–7001, både normalt
+och med `-O3`, med unity och separata filer. Snapshot/replay är också
+ASan/UBSan-grön efter en separat nollängds-kopieringsrättning.
+Dynamiskt avrundningsläge och FP-undantagsflaggor återstår uttryckligen;
+standardläget använder en avrundning till närmaste jämna. Dessa fokuserade
+resultat är inte en ny fullständig 875-parskörning.
+Evidens: `work/results/bitint-float-main-reviewed/` och
+`work/results/kefir-float-final-{x86,arm}/`.
+
+**Samlad native-milstolpe ovanpå stacktoppen `1c5b5d1` (2026-11-11):**
+Sju separata rättningar kombinerar x86-arrayobjektsalignment, stegvis
+bindning av parkerade ARM-inlineargument, atomiska lock-free-frågor,
+minnesalternativ för skalära FP-asm-inputs, korrekt ELF-lagring av breda
+strängar med inbäddade nollor, `_ExtInt`-alias och inlinad alloca-livstid.
+Explicit variabelalignment och typalignment bevaras; dynamiska Linux-
+atomikfrågor använder libatomic och evaluerar olösta argument en gång.
+Statiskt avgjorda frågor evaluerar inte pekaruttrycket. Alloca återställer
+callee-stacklivstiden efter cleanup/returvärde utan att radera argumentens
+eller anroparens levande allokeringar.
+
+Slutligt kombinerat unity- och filvis bygge: egna tester x86 232/232 med
+sex befintliga referensundantag; ARM 237/237 med ett befintligt xfail.
+ABI 33/33, hosted atomik 3/3 och sju fokuserade regressioner passerar på
+båda mål och byggen. PP cmp 920/920 före aliasändringen; efter samtliga
+ändringar cmp och batch 920/920. Sema run/batch 887/887 på båda byggen,
+diagnostik 225/225. Oberoende alloca-kantfall passerar 18/18 (Clang/unity/
+filvis × O0/O2/O3 × Linux x86/ARM). GCC:s oförändrade `pr113596` med sina
+`-O2`-direktiv passerar på båda mål och byggen; hela S4 kördes inte om.
+
+Sex oförändrade Kefir-fall (`atomic_builtins7`, `int128_function_call3`,
+`pointer_subscr_const1`, `wide_string_literals1`, `extint1`,
+`inline_assembly_fp3`) passerar alla fyra kompilatorkombinationer på x86
+för båda byggen. ARM passerar de första tre; breda strängfallet avvisas av
+Clang på grund av upstreams signed-wchar-typedef, `extint1` avvisas på
+grund av 310-bitars referenstyp. FP-asm-fallet har x86-vakt och räknas inte
+som ARM-täckning. Separat ExtInt-orakel passerar 24 kombinationer på x86
+och 20 på ARM; ARM310 kontrolleras mot Python-bytes i ett ytterligare
+bridge-fall. Ingen ny full 875-falls-baslinje påstås. Reproducerbara
+kommandon, exakta käll-/binärhashar och symlänkar finns i
+`work/native-stack64/{run-gates.py,manifest.json,final-evidence.json,logs/}`.
+
+**Sammanlagd Linux-stack, fryst `a41361e` ovanpå `1c5b5d1`:**
+hela Kefirs 875 runtime-par är körda först på x86, därefter ARM/QEMU,
+med sex arbetare, 30 s kompilering och 5 s körning. X86: **585 godkända,
+0 vcc-kompileringsfel, 6 körfel/tidsgränser**, 161 referenskompileringsfel,
+6 referenslänkfel, 51 referenssignal/tidsgräns och 66 unsupported.
+ARM: **461 godkända, 0 vcc-kompileringsfel, 4 körfel**, 249/6/51
+referensfel enligt samma kategorier och 104 unsupported. Båda körningarna
+avslutas med status 1; varken undantag eller kvarvarande fel räknas som pass.
+
+Rättningarna omfattar atomiska lock-free-frågor, ARM:s parkerade inline-
+argument, x86-arrayalignering, tillåtna minnesoperander för FP-asm,
+breda strängars inbäddade nollor, äldre `_ExtInt` samt inline-`alloca`-
+allokeringars livstid. Det sista rättar även GCC:s `pr113596.c` på båda mål.
+Båda byggena passerar egna Linux-prov **232 x86 / 237 ARM**, ABI 33 per mål,
+PP-paritet 920, sema 887 i båda lägen och diagnostik 225. ASan/UBSan passerar
+samma egna Linuxprov. Wasm64: 189 godkända, 38 körda kända XFAIL och elva
+referensundantag. Det nya `_ExtInt`-provets XFAIL följer den befintliga
+BitInt-ABI-luckan: en motsvarande `_BitInt`-version avvisas identiskt av
+föräldrakompilatorn på Wasm32 och Wasm64; inget nytt native-fel döljs.
+
+Kvarvarande x86-fall har underlag för ospecificerad padding/inkompatibla
+funktionssignaturer, odefinierade skift, ett ogiltigt asm-kontrakt,
+`__builtin_unreachable` och en tidsgräns. ARM:s `std_attributes18` har ett
+kvarvarande faktiskt runtimefel under utredning. Övriga ARM-fall kräver
+separat klassificering av negativa float-till-unsigned-konverteringar och
+pekare efter objektlivstid; de står kvar som fel. Hela S5b/G1/G2 är öppna.
+
+Evidens: `work/results/kefir-native-stack-{x86,arm}/`,
+`work/native-stack64/{manifest,final-evidence}.json` och
+`work/results/native-stack64-ci-preflight/`. Fryst kompilator SHA256:
+`9eeab468752c45bfec75b211fc822eddaa926343d498b35d20c3114cc86b64cf`.
 
 ### S6 ABI-generatorer — rigg klar, fel rättas
 `gcc.dg/compat/struct-layout-1_generate.c` och clangs `utils/ABITest`
