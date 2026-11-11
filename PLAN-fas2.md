@@ -2068,3 +2068,29 @@ och `native-runtime-profile.json` med respektive `*-measure.py`.
 Signed reciproker, billigare wasm-u64/rest/korrektion, bredare registerallokering,
 fulla G5/G7-grindar och full O2-täckning återstår. U32-statusens äldre
 +19,54 % mättade arm64-kostnad gäller fortfarande dess separata basmätning.
+
+U64 efter integration med PR51 `54c8f3f` och main `f97d16d`: kompilatorkod
+`d8957b3` bygger unity/fil-för-fil och passerar 196 regelprov, 16 separata
+kontrollprov, 229 arm64-PASS (ett befintligt xfail), 224 x86-PASS (sex synliga
+referensundantag), ABI 32 per native-mål, unwind/debug och sanitiserade
+reciprok-/registerparskontrakt. Fil-för-fil kör de 16 u64-fallen på fyra mål;
+O0/noopt-assemblern är byte-identisk mot den nya föräldern i åtta jämförelser.
+Båda sidors planstatus och main:s x86-ändringar behålls.
+
+Nya parade mätningar av exakt `54c8f3f`→`d8957b3`, samma clang23/v3-flaggor,
+finns separat i `work/opt-profile/udivconst64-integrated/` med källhashmanifest.
+Kontroll/loop är högst +0,000105 %; u32 +0,052…+0,121 % med identisk assembler.
+Mättad u64-korpus kostar **+13,55 % x86/+17,97 % arm64** att kompilera.
+Samma fixerade mix kostar +0,00429 % x86 (12 filer), +0,00065 % arm64 (12),
+−0,00458 % wasm32 (10) och +0,01954 % wasm64 (11); samma basstödsundantag.
+Det seedade x86-provet ger nu median 11,047→3,396 ms (−69,26 %) och identiska
+körbinärhashar/svar som den historiska jämförelsen. De tidigare
++14,10 %/+17,99 % gäller fortsatt uttryckligen 046c6dc→e1fdb3d. Ingen av
+mätningarna ersätter full G7 eller ger ett generellt körprestandalöfte.
+
+U64 efter main2dc4ea3 via uppdaterad PR51head15551a7: unitybygge, samtliga
+196 riktade kör-/kodkrav, sanitiserade matematik-/registerparskontrakt och
+x86-bladramens policy/cache/debug/härdning/signal-unwind passerar igen.
+Reciprok- och högproduktkällorna är oförändrade av integrationen.
+Profilernas exakta 54c8f3f→d8957b3-avgränsning behålls; inga nya kostnads-
+eller generella fartpåståenden görs för denna integration av bladramar.

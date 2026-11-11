@@ -98,6 +98,7 @@ typedef struct xst {
 	uint32_t live;		/* temporaries in use (bit = register) */
 	bool asmcs;		/* inside an asm: out of temporaries, take a callee-saved register (saved by the prologue) */
 	int pushes;		/* 8-byte pushes outstanding (the call alignment) */
+	bool framefree;		/* frame.c: no frame/stack dependency in the final body */
 	/* locals.c: persistent homes, disjoint from expression temporaries and R12. */
 	uint32_t lsym[4];
 	uint8_t lreg[4], nlreg;
@@ -123,6 +124,8 @@ VPRIV int x64_ftreg(ecx *e);
 VPRIV void x64_csused(ecx *e, int r);	/* a callee-saved register used: the prologue saves it */
 VPRIV rec *x64_put(ecx *e, int op);
 VPRIV void x64_twoaddr(ecx *e);
+VPRIV bool x64_framefree_candidate(ecx *e);
+VPRIV bool x64_framefree_record(ecx *e, const rec *i);
 VPRIV bool x64_copy_forward_at(ecx *e, uint32_t k);
 VPRIV bool x64_last_u32(const ecx *e, int r);
 VPRIV void x64_locals_begin(ecx *e, uint32_t s);
