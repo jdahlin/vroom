@@ -1679,14 +1679,32 @@ static val wk_atomic(ecx *e, uint32_t n)
 		break;
 	}
 	default: {
-		/* and, or, xor: old = *p; do new = old op v while CAS(p, old, new) != old (old = what it held) */
+		/* and, or, xor, nand, max, min: old = *p; do new = old op v while CAS(p, old, new) != old
+		   (old = what it held) */
 		int base = id >= BI_ATOMIC_ADD_FETCH ? id - BI_ATOMIC_ADD_FETCH : id - BI_ATOMIC_FETCH_ADD;
 		static const int bop[] = { T_PLUS, T_MINUS, T_AMP, T_PIPE, T_CARET };
 		uint32_t top = wk_newlabel(e), done = wk_newlabel(e);
 		int old = LO(atomic)(e, WK_ALOAD, sz, rp, -1, -1), nw, got;
 
 		LO(label)(e, top);
-		nw = LO(bin)(e, bop[base], 8, false, wk_vreg(wk_dup(e, old)), wk_vreg(wk_dup(e, r1))).r;
+		if (base < 5) {
+			nw = LO(bin)(e, bop[base], 8, false, wk_vreg(wk_dup(e, old)), wk_vreg(wk_dup(e, r1))).r;
+		} else if (base == 5) {	/* nand: ~(old & v) */
+			nw = LO(bin)(e, T_AMP, 8, false, wk_vreg(wk_dup(e, old)), wk_vreg(wk_dup(e, r1))).r;
+			nw = LO(un)(e, T_TILDE, 8, wk_vreg(nw)).r;
+		} else {	/* max, min as the object's type compares */
+			uint32_t keep = wk_newlabel(e);
+			int a = wk_dup(e, old), b = wk_dup(e, r1);
+
+			if (sz < 4) {
+				LO(ext)(e, a, sz, sg);
+				LO(ext)(e, b, sz, sg);
+			}
+			nw = wk_dup(e, old);
+			LO(cmpbr)(e, base == 6 ? T_GREATEREQ : T_LESSEQ, sz > 4 ? 8 : 4, sg, wk_vreg(a), wk_vreg(b), keep);
+			LO(mov)(e, nw, r1);
+			LO(label)(e, keep);
+		}
 		got = LO(atomic)(e, WK_ACAS, sz, rp, nw, old);
 		LO(cmpbr)(e, T_EQUALEQUAL, 8, false, wk_vreg(got), wk_vreg(old), done);
 		LO(tkeep)(e, got);
@@ -1711,8 +1729,8 @@ static val wk_atomic(ecx *e, uint32_t n)
 	LO(tfree)(e, rp);
 	if (r < 0)
 		return vconst(0);
-	if (sg && sz < 8)
-		LO(ext)(e, r, sz, true);
+	if (sz < 8)
+		LO(ext)(e, r, sz, sg);
 	return wk_vreg(r);
 }
 
@@ -1871,6 +1889,8 @@ static val wk_builtin(ecx *e, uint32_t n)
 	case BI_ATOMIC_FETCH_ADD: case BI_ATOMIC_FETCH_SUB: case BI_ATOMIC_FETCH_AND: case BI_ATOMIC_FETCH_OR:
 	case BI_ATOMIC_FETCH_XOR: case BI_ATOMIC_ADD_FETCH: case BI_ATOMIC_SUB_FETCH: case BI_ATOMIC_AND_FETCH:
 	case BI_ATOMIC_OR_FETCH: case BI_ATOMIC_XOR_FETCH: case BI_SYNC_VAL_CAS: case BI_SYNC_BOOL_CAS:
+	case BI_ATOMIC_FETCH_NAND: case BI_ATOMIC_FETCH_MAX: case BI_ATOMIC_FETCH_MIN:
+	case BI_ATOMIC_NAND_FETCH: case BI_ATOMIC_MAX_FETCH: case BI_ATOMIC_MIN_FETCH:
 		return wk_atomic(e, n);
 	case BI_ATOMIC_THREAD_FENCE: case BI_ATOMIC_SIGNAL_FENCE: {
 		val m = wk_gen(e, arg[0]);
@@ -1881,10 +1901,10 @@ static val wk_builtin(ecx *e, uint32_t n)
 		return vconst(0);
 	}
 	case BI_ATOMIC_LOCK_FREE: {
-		val a = wk_gen(e, arg[0]), b = wk_gen(e, arg[1]);
-
-		wk_free(e, &a);
-		wk_free(e, &b);
+		for (uint32_t i = 0; i < x->c; i++) {
+			val a = wk_gen(e, arg[i]);
+			wk_free(e, &a);
+		}
 		return vconst(1);
 	}
 	case BI_ALLOCA: case BI_ALLOCA_UNINIT: {
@@ -1903,6 +1923,50 @@ static val wk_builtin(ecx *e, uint32_t n)
 		if (wk_size(c, at) < 4)
 			v = wk_conv(e, v, at, prim(TY_UINT));
 		return LO(bitop)(e, x->aux, sz, v);
+	}
+	case BI_CLRSB: case BI_CLRSBL: case BI_CLRSBLL: {
+		/* clz(((x ^ (x >> (bits - 1))) << 1) | 1): the redundant sign bits, never clz of 0 */
+		qty at = N(arg[0])->ty;
+		int sz = wk_size(c, at) > 4 ? 8 : 4;
+		val v = wk_conv(e, wk_gen(e, arg[0]), at, sz == 8 ? prim(TY_LONG) : prim(TY_INT)), t;
+		int r = wk_reg(e, &v, prim(TY_LONG));
+
+		t = LO(bin)(e, T_GREATERGREATER, sz, true, wk_vreg(wk_dup(e, r)), vconst(sz * 8 - 1));
+		v = LO(bin)(e, T_CARET, sz, false, wk_vreg(r), t);
+		v = LO(bin)(e, T_LESSLESS, sz, false, v, vconst(1));
+		v = LO(bin)(e, T_PIPE, sz, false, v, vconst(1));
+		return LO(bitop)(e, sz == 8 ? BI_CLZLL : BI_CLZ, sz, v);
+	}
+	case BI_BITREVERSE8: case BI_BITREVERSE16: case BI_BITREVERSE32: case BI_BITREVERSE64: {
+		/* bits swapped in pairs, pairs in nibbles, nibbles in bytes; then the bytes; then shifted down */
+		static const uint64_t m[3] = { 0x5555555555555555ull, 0x3333333333333333ull, 0x0f0f0f0f0f0f0f0full };
+		qty at = N(arg[0])->ty;
+		int bits = 8 << (x->aux - BI_BITREVERSE8);
+		val v = wk_gen(e, arg[0]);
+		int r;
+
+		if (v.k == V_CONST) {
+			uint64_t u = (uint64_t)v.i & (bits == 64 ? ~0ull : (1ull << bits) - 1), o = 0;
+
+			for (int i = 0; i < bits; i++)
+				o |= ((u >> i) & 1) << (bits - 1 - i);
+			return vconst((i128)o);
+		}
+		r = wk_reg(e, &v, at);
+		if (bits < 64)
+			LO(ext)(e, r, bits / 8, false);
+		for (int k = 0; k < 3; k++) {
+			val lo = LO(bin)(e, T_AMP, 8, false, wk_vreg(wk_dup(e, r)), vconst((i128)m[k]));
+			val hi = LO(bin)(e, T_GREATERGREATER, 8, false, wk_vreg(r), vconst(1 << k));
+
+			hi = LO(bin)(e, T_AMP, 8, false, hi, vconst((i128)m[k]));
+			lo = LO(bin)(e, T_LESSLESS, 8, false, lo, vconst(1 << k));
+			r = LO(bin)(e, T_PIPE, 8, false, lo, hi).r;
+		}
+		v = LO(bitop)(e, BI_BSWAP64, 8, wk_vreg(r));
+		if (bits < 64)
+			v = LO(bin)(e, T_GREATERGREATER, 8, false, v, vconst(64 - bits));
+		return v;
 	}
 	case BI_ADD_OVERFLOW: case BI_SUB_OVERFLOW: case BI_MUL_OVERFLOW: {
 		if (wk_size(c, N(arg[0])->ty) <= 8 && wk_size(c, N(arg[1])->ty) <= 8 && (KIND(c, T(c, N(arg[2])->ty)->base) == TY_INT128 || KIND(c, T(c, N(arg[2])->ty)->base) == TY_UINT128) &&
