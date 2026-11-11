@@ -242,7 +242,7 @@ VPRIV uint32_t number(cc *c, const ptok *t)
 }
 
 /* one (possibly multi-byte UTF-8) escape or character of a literal */
-static uint32_t lit_char(cc *c, const char **ps, const char *e, uint32_t loc, bool *wide_ok)
+static uint32_t lit_char(cc *c, const char **ps, const char *e, const ptok *t, bool *wide_ok)
 {
 	const unsigned char *s = (const unsigned char *)*ps;
 	uint32_t v;
@@ -294,7 +294,13 @@ static uint32_t lit_char(cc *c, const char **ps, const char *e, uint32_t loc, bo
 			for (int k = 0; k < 3 && *s >= '0' && *s <= '7'; k++, s++)
 				v = v * 8 + (uint32_t)(*s - '0');
 		} else {
-			cc_error(c, loc, "unknown escape sequence '\\%c'", *s);
+			uint32_t loc = t->loc;
+
+			/* Spliced or expanded spelling has no direct byte offset in the source. */
+			if (!(t->flags & (TF_DIRTY | PF_MACRO)))
+				loc += (uint32_t)(*ps - t->s);
+			cc_warnx(c, "unknown-escape-sequence", true, NULL, loc, NULL, 0, NULL, 0,
+				 "unknown escape sequence '\\%c'", *s);
 			v = *s++;
 		}
 	}
@@ -385,7 +391,7 @@ VPRIV uint32_t string_lit(cc *c)
 				if (s == e)
 					break;
 			}
-			v = lit_char(c, &s, e, t->loc, &ok);
+			v = lit_char(c, &s, e, t, &ok);
 			if (esz == 1) {
 				if (v & 0x80000000u)
 					n += utf8_enc(v & 0x7fffffffu, buf + n);
@@ -467,7 +473,7 @@ VPRIV uint32_t char_lit(cc *c)
 	s++;
 	while (s < e) {
 		bool ok;
-		uint32_t x = lit_char(c, &s, e, t->loc, &ok);
+		uint32_t x = lit_char(c, &s, e, t, &ok);
 
 		if (kind == T_CHAR) {
 			if (x & 0x80000000u) {
