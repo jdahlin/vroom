@@ -1610,6 +1610,23 @@ static val wk_call(ecx *e, uint32_t n)
 			ref = REF(RK_NAME, (uint32_t)c->syms[s].val);	/* a library function by name */
 		} else if (wk_can_inline(e, s)) {
 			return wk_inline(e, n, s);
+		} else if (unlikely(sym_attrs(c, s)->error_fn) && e->reach) {
+			/* a call to an error() function folding did not remove (__compiletime_assert_N,
+			   __bad_copy_to): clang -O2 removed it with value ranges vcc lacks.  The kernel's
+			   own -O0 fallback drops it (arm64's call.c does the same); elsewhere an error */
+			if (!e->E->o->vcc_kernel) {
+				const vident *nm = &vintern_ents[c->syms[s].name];
+				const attrs *at = sym_attrs(c, s);
+
+				efatal(e, N(x->a)->loc, "call to '%.*s' declared with 'error' attribute: %s", (int)nm->len, nm->s,
+				       at->errmsg ? c->strs[at->errmsg - 1].s : "");
+			}
+			for (uint32_t i = 0; i < x->c; i++) {	/* (the arguments' side effects) */
+				val v = wk_gen(e, c->lists[x->b + i]);
+
+				wk_free(e, &v);
+			}
+			return KIND(c, f->base) == TY_VOID ? vconst(0) : vconst(0);
 		} else if (wk_shrink(e, n, s)) {
 			int k = wk_shrink(e, n, s) - 1;
 			uint32_t an = N(c->lists[x->b])->a;	/* the float */
