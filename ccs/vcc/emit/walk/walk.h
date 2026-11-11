@@ -194,6 +194,11 @@ VPRIV bool LO(ldmem)(void);
 VPRIV bool LO(i128mem)(void);
 VPRIV val LO(wconst)(ecx *e, i128 v);
 VPRIV val LO(wbitint)(ecx *e, val v, unsigned bits, bool sgn);
+/* Integer objects wider than 128 bits, canonical little-endian limbs. */
+VPRIV val LO(bigconst)(ecx *e, qty t, const uint32_t *words, i128 small);
+VPRIV val LO(bigbin)(ecx *e, int op, qty t, val a, val b);
+VPRIV val LO(bigcmp)(ecx *e, int op, qty t, val a, val b);
+VPRIV val LO(bigcvt)(ecx *e, val v, qty from, qty to);
 VPRIV val LO(wbin)(ecx *e, int op, bool sgn, val a, val b);	/* b an int for << >> */
 VPRIV val LO(wun)(ecx *e, int op, val a);			/* T_MINUS T_TILDE */
 VPRIV val LO(wcmp)(ecx *e, int op, bool sgn, val a, val b);
