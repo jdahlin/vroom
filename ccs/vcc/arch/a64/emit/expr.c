@@ -452,6 +452,8 @@ static val gen_binary(ecx *e, uint32_t n)
 
 	if (repeated == EM_ID_ZERO)
 		return vconst(0);
+	if (repeated == EM_ID_TRUE)
+		return vconst(1);
 	if (repeated == EM_ID_LEFT)
 		return gen(e, x->a);
 

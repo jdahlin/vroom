@@ -56,6 +56,13 @@ def check_repeated(assembly, arch):
             continue
         if re.search(op, text):
             raise RuntimeError(f'{name}: retained repeated operation\n{text}')
+    if wasm:
+        for name in ['ri_eq', 'ri_ne', 'ri_lt', 'ri_ge', 'ri_cmp_branch']:
+            text = body(assembly, name, True)
+            if re.search(r'i(?:32|64)\.(?:eq|ne|lt_s|ge_u)\b', text):
+                raise RuntimeError(f'{name}: retained self-comparison\n{text}')
+        if not re.search(r'f64\.eq\b', body(assembly, 'ri_float', True)):
+            raise RuntimeError('floating self-comparison must retain NaN behavior')
     text = body(assembly, 'ri_volatile_ptr', wasm)
     loads = (r'i32\.load' if wasm else r'\bldr(?:sw)?\b' if arch == 'aarch64' else r'\bmov(?:l|slq)\s+\(%r')
     if len(re.findall(loads, text)) < 2:

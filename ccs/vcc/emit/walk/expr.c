@@ -1361,6 +1361,8 @@ static val wk_binary(ecx *e, uint32_t n)
 
 	if (repeated == EM_ID_ZERO)
 		return vconst(0);
+	if (repeated == EM_ID_TRUE)
+		return vconst(1);
 	if (repeated == EM_ID_LEFT)
 		return wk_gen(e, x->a);
 
@@ -3579,6 +3581,12 @@ VPRIV void wk_cond(ecx *e, uint32_t n, bool jump_if, uint32_t lbl)
 	case N_BINARY: {
 		uint32_t operand;
 		int bound = em_cmpbounds(e, n, &operand);
+		int repeated = em_repeated_integer(e, n);
+		if (repeated == EM_ID_ZERO || repeated == EM_ID_TRUE) {
+			if ((repeated == EM_ID_TRUE) == jump_if)
+				LO(jump)(e, lbl), wk_state(e)->cjump = true;
+			return;
+		}
 		if (bound >= 0) {
 			val v = wk_gen(e, operand);
 			wk_free(e, &v);
