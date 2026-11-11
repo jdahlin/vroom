@@ -296,6 +296,13 @@ typedef struct cc_opts {	/* fields before outfd: parse options, all in the decl 
 	const char *dbg_dir, *dbg_name;	/* the compilation directory and the main file, as named */
 	int tlsmodel;		/* -ftls-model=: VCC_TLS_*, 0: the default */
 	int pic;		/* ELF: 0 none (-fno-pic), 1 PIE (-fpie, the hosted default), 2 PIC (-fpic) */
+	/* x86-64 hardening, as clang (the kernel): xcf bits 1 -fcf-protection=branch (endbr64, IBT
+	   note), 2 -mfunction-return=thunk-extern, 4 -mretpoline-external-thunk, 8
+	   -mindirect-branch-cs-prefix; -fpatchable-function-entry=N,M; -fstack-protector (1),
+	   -strong (2), -all (3) with its guard (sp_gs: %gs, sp_sym: the symbol, else %fs:40);
+	   -ftrivial-auto-var-init=zero */
+	int xcf, pfe_n, pfe_m, sprot, sp_gs, autozero;
+	const char *sp_sym;
 	int nthreads;		/* emitter threads (0: 1) */
 	struct ElfObj *obj;	/* emit == 2: the object (reset first; the caller finishes it) */
 	struct As *as;		/* emit == 2: the assembler bound to obj (one per thread) */

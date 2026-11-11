@@ -11,12 +11,13 @@
 enum { XO_REG, XO_MEM, XO_IMM, XO_X87 };	/* XO_X87: on the x87 stack, reg 0 st(0) (t), 1 st(1) (u) */
 
 typedef struct xopnd {
-	uint8_t kind, reg, out, inout, flt, fixed;
+	uint8_t kind, reg, out, inout, flt, fixed, sp;	/* sp: register ... asm("rsp") (ASM_CALL_CONSTRAINT): %rsp itself, nothing moved */
 	int8_t tied;		/* an input: the output it shares a register with, -1 none */
 	int size;		/* the operand's size in bytes (register names) */
 	val v;			/* XO_IMM: the value; an input's value until it is placed */
 	lval l;			/* XO_MEM: the memory; outputs: where the result goes */
 	int64_t park;		/* a fixed input's value parked in this slot (0: none) */
+	int32_t lpark;		/* a register output's address parked in this slot until the store (0: none) */
 	qty t;
 	uint32_t name;
 } xopnd;
@@ -184,7 +185,7 @@ static void x64_asmpark(ecx *e, xopnd *o)
 }
 
 /* a callee-saved register the asm uses: saved by the prologue */
-static void x64_csused(ecx *e, int r)
+VPRIV void x64_csused(ecx *e, int r)
 {
 	xst *X = e->x64;
 
@@ -280,6 +281,11 @@ VPRIV void x64_asm(ecx *e, uint32_t n)
 			r = x64_creg(*p);
 		if (r < 0 && N(en)->op == N_VAR && sym_attrs(c, N(en)->a)->asmname && (c->syms[N(en)->a].sc == SC_REGISTER))
 			r = x64_rname(c->strs[sym_attrs(c, N(en)->a)->asmname - 1].s);	/* register long x asm("rdx") */
+		if (r == RSP && N(en)->op == N_VAR && c->syms[N(en)->a].sc == SC_REGISTER) {
+			op[i].fixed = op[i].sp = 1;
+			op[i].reg = RSP;
+			continue;
+		}
 		if (r >= 0) {
 			op[i].fixed = 1;
 			op[i].reg = (uint8_t)r;
@@ -321,6 +327,16 @@ VPRIV void x64_asm(ecx *e, uint32_t n)
 			if (!(X->live & (1u << r))) reserved |= 1u << r;
 			X->live |= 1u << r;
 		}
+	X->asmcs = true;	/* (operands may take callee-saved registers from here) */
+	/* inputs that are inlined parameters still holding their constant: read before an
+	   output writes them (rip_rel_ptr: "=r"(p) : "i"(p)) */
+	val pkv[64];
+	uint64_t pkm = 0;
+
+	for (uint32_t i = a->nout; i < nops && i < 64; i++)
+		if (N(a->ops[i].expr)->op == N_VAR && strpbrk(c->strs[a->ops[i].constraint - 1].s, "in") &&
+		    wk_pk_get(e, N(a->ops[i].expr)->a, &pkv[i]))
+			pkm |= 1ull << i;
 	/* outputs: lvalues; a register's value read first for + */
 	for (uint32_t i = 0; i < a->nout; i++) {
 		const char *cs = csop[i];
@@ -335,6 +351,10 @@ VPRIV void x64_asm(ecx *e, uint32_t n)
 		o->name = a->ops[i].name;
 		o->size = wk_size(c, o->t);
 		o->flt = strpbrk(cs, "xy") != NULL && is_flt(c, o->t);
+		if (o->sp) {
+			o->kind = XO_REG;
+			continue;
+		}
 		o->l = wk_lval(e, en);
 		if (strpbrk(cs, "tu") && is_flt(c, o->t)) {
 			o->kind = XO_X87;
@@ -355,6 +375,14 @@ VPRIV void x64_asm(ecx *e, uint32_t n)
 			o->v = wk_reload(e, &o->l, o->t);
 			if (o->fixed) x64_asmpark(e, o);
 		}
+		if (o->l.k == L_REG && !o->l.bf) {
+			/* the address waits in a slot: four outputs through pointers and four fixed
+			   registers (cpuid) would leave no temporaries */
+			lval s = { .k = L_FRAME, .off = o->lpark = wk_slot(e, 8, 8), .align = 8 };
+
+			x64_mem(e, X_ST, 8, o->l.r, &s, false);
+			x64_tfree(e, o->l.r);
+		}
 	}
 	/* inputs */
 	for (uint32_t i = a->nout; i < nops; i++) {
@@ -370,6 +398,10 @@ VPRIV void x64_asm(ecx *e, uint32_t n)
 		o->size = wk_size(c, o->t);
 		o->flt = strpbrk(cs, "xy") != NULL && is_flt(c, o->t);
 		o->tied = -1;
+		if (o->sp) {
+			o->kind = XO_REG;
+			continue;
+		}
 		for (const char *p = cs; *p; p++) {
 			if (*p >= '0' && *p <= '9') { tied = atoi(p); break; }
 			if (*p == '[') {
@@ -417,8 +449,29 @@ VPRIV void x64_asm(ecx *e, uint32_t n)
 				continue;
 			}
 		}
-		v = wk_gen(e, en);
-		if (v.k == V_CONST || (v.k == V_ADDR && !e->c->o->pic)) {
+		{
+			cval cv;
+			uint32_t an = en;
+
+			while (N(an)->op == N_CAST && (N(an)->aux == CK_NOP || N(an)->aux == CK_P2P || N(an)->aux == CK_DECAY ||
+						       N(an)->aux == CK_FDECAY))
+				an = N(an)->a;
+			if (N(an)->op == N_ADDR)
+				an = N(an)->a;
+			if (i < 64 && (pkm >> i & 1)) {
+				v = pkv[i];	/* an inlined parameter still holding its constant argument */
+			} else if (is_integer(e->c, N(en)->ty) && cc_eval(e->c, en, &cv) && cv.kind == CV_INT) {
+				/* an integer constant expression as the front end folds it (__builtin_clzll(63), ...) */
+				v = vconst(em_trunc_to(e->c, cv.i, N(en)->ty));
+			} else if (e->c->o->pic && N(an)->op == N_VAR && (c->syms[N(an)->a].kind == S_FUNC ||
+				   (c->syms[N(an)->a].kind == S_VAR && !is_local_var(c, N(an)->a)))) {
+				/* &sym under -fPIC: an immediate, as clang (the asm names the symbol) */
+				v = (val){ .k = V_ADDR, .ref = REF(RK_SYM, canon_sym(c, N(an)->a)) };
+			} else {
+				v = wk_gen(e, en);
+			}
+		}
+		if (v.k == V_CONST || v.k == V_ADDR) {	/* (an address is an immediate under -fPIC too, as clang) */
 			bool imm = false;
 
 			for (const char *p = cs; *p; p++)
@@ -615,7 +668,7 @@ VPRIV void x64_asm(ecx *e, uint32_t n)
 					if (mod != 'c' && mod != 'P' && mod != 'a' && mod != 'n')
 						tb_c(rb, '$');
 					if (o->v.k == V_ADDR)
-						ref_off(c, rb, o->v.ref, (int64_t)o->v.i);
+						ref_off(c, rb, o->v.ref, (int64_t)o->v.i), mod == 'a' ? tb_s(rb, "(%rip)") : (void)0;	/* (clang: %a of a symbol is RIP-relative) */
 					else
 						tb_i(rb, mod == 'n' ? (int64_t)(0 - (uint64_t)o->v.i) : (int64_t)o->v.i);
 					break;
@@ -684,8 +737,14 @@ VPRIV void x64_asm(ecx *e, uint32_t n)
 		for (uint32_t i = 0; i < a->nout; i++) {
 			xopnd *o = &op[i];
 
-			if (o->kind != XO_REG)
+			if (o->kind != XO_REG || o->sp)
 				continue;
+			if (o->lpark) {
+				lval s = { .k = L_FRAME, .off = o->lpark, .align = 8 };
+
+				o->l.r = (uint8_t)x64_treg(e);
+				x64_mem(e, X_LD, 8, o->l.r, &s, false);
+			}
 			if (o->l.bf) {
 				val v = { .k = V_REG, .r = o->reg };
 
@@ -722,5 +781,6 @@ VPRIV void x64_asm(ecx *e, uint32_t n)
 			x64_tfree(e, o->l.r);
 	}
 	X->live &= ~reserved;
+	X->asmcs = false;
 
 }

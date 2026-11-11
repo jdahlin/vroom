@@ -2,6 +2,7 @@
 """Bootar en arm64-kärna med Debian 13 nocloud i QEMU (hvf) och väntar på login-prompten.
 
     python3 bench/boot-test.py [--kernel work/build-min/arch/arm64/boot/Image] [--timeout 120]
+    python3 bench/boot-test.py --arch x86_64 --kernel work/build-x86/arch/x86/boot/bzImage   # KVM (PLAN-x86.md X8)
 
 Exit 0 om "login:" syns på seriekonsolen (= userspace nådd), annars 1.
 Hela konsolloggen sparas i results/boot-<tid>.log.
@@ -56,25 +57,31 @@ def main():
     ap.add_argument("--append", default="")
     ap.add_argument("--allow-degraded", action="store_true")
     ap.add_argument("--no-login", action="store_true", help="nöj dig med login-prompten")
+    ap.add_argument("--arch", default="arm64", choices=["arm64", "x86_64"])
     ap.add_argument("--overlay", default=os.path.join(WORK, "debian/overlay.qcow2"),
                     help="egen overlay om flera sessioner bootar samtidigt")
     a = ap.parse_args()
 
+    base = BASE if a.arch == "arm64" else os.path.join(WORK, "debian/debian-13-nocloud-amd64.qcow2")
     overlay = a.overlay
     if os.path.exists(overlay):
         os.remove(overlay)
-    subprocess.run(["qemu-img", "create", "-q", "-f", "qcow2", "-F", "qcow2", "-b", BASE, overlay],
+    subprocess.run(["qemu-img", "create", "-q", "-f", "qcow2", "-F", "qcow2", "-b", base, overlay],
                    check=True)
 
-    cmd = ["qemu-system-aarch64", "-M", "virt", "-accel", "hvf", "-cpu", "host",
+    x86 = a.arch == "x86_64"
+    cmd = ["qemu-system-x86_64", "-M", "q35", "-accel", "kvm" if os.access("/dev/kvm", os.R_OK | os.W_OK) else "tcg",
+           "-cpu", "host" if os.access("/dev/kvm", os.R_OK | os.W_OK) else "max"] if x86 else \
+          ["qemu-system-aarch64", "-M", "virt", "-accel", "hvf", "-cpu", "host"]
+    cmd += [
            "-smp", "4", "-m", "2048", "-nographic", "-no-reboot",
            "-kernel", a.kernel,
-           "-append", (f"root=/dev/vda1 rw console=ttyAMA0 panic=-1 systemd.firstboot=off "
+           "-append", (f"root=/dev/vda1 rw console={'ttyS0' if x86 else 'ttyAMA0'} panic=-1 systemd.firstboot=off "
                       f"systemd.run_success_action=none systemd.run=\"/bin/sh -c '{CHECK}'\" "
                       f"{a.append}").strip(),
            "-drive", f"file={overlay},if=none,id=hd0,format=qcow2",
-           "-device", "virtio-blk-device,drive=hd0",
-           "-device", "virtio-rng-device"]
+           "-device", "virtio-blk-pci,drive=hd0" if x86 else "virtio-blk-device,drive=hd0",
+           "-device", "virtio-rng-pci" if x86 else "virtio-rng-device"]
     os.makedirs(os.path.join(ROOT, "results"), exist_ok=True)
     logpath = os.path.join(ROOT, "results", time.strftime("boot-%Y%m%d-%H%M%S.log"))
     t0 = time.monotonic()

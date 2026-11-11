@@ -274,6 +274,8 @@ static uint32_t declare(cc *c, const dspec *ds, declr *d, qty t, bool file)
 	bool inherit_type = true;
 
 	merge_attrs(&at, &ds->at);
+	if (!at.visibility && c->nvis && file)
+		at.visibility = c->visstk[c->nvis - 1];	/* #pragma GCC visibility push */
 	if (ds->align > at.aligned)
 		at.aligned = ds->align;
 	if (d->at.mode && is_arith(c, t)) {

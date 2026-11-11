@@ -37,11 +37,14 @@ VPRIV void unused_result(cc *c, uint32_t e, bool last)
 {
 	if (N(e)->op == N_STMTEXPR) {
 		uint32_t b = N(e)->a, n = N(b)->c;
+		/* clang: a statement expression from a macro (drmm_mutex_init) does not warn for its
+		   value dropped */
+		bool mac = last && (N(e)->flags & NF_MACRO);
 
 		for (uint32_t i = 0; i < n; i++) {
 			uint32_t s = c->lists[N(b)->b + i];
 
-			if (N(s)->op == N_EXPR && N(s)->a && (i + 1 < n ? !last : last))
+			if (N(s)->op == N_EXPR && N(s)->a && (i + 1 < n ? !last : last && !mac))
 				unused_result(c, N(s)->a, true);
 		}
 		return;

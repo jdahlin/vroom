@@ -236,6 +236,8 @@ struct cc {
 	uint32_t pack[64];	/* #pragma pack stack (bytes, 0: none) */
 	uint64_t packid[64];	/* labels (token.c pragma_pack) */
 	int npack;
+	uint32_t visstk[16];	/* #pragma GCC visibility push: the visibilities (string + 1), innermost last */
+	int nvis;
 	bool ms_struct;		/* #pragma ms_struct on/off/reset */
 	/* #pragma weak (decl.c): waiting for key's declaration (alias: 0, or the weak alias of key) */
 	struct pweak { uint32_t key, alias, loc, sym; } *pweak;
