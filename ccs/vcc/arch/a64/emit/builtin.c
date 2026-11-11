@@ -789,6 +789,14 @@ VPRIV val gen_builtin(ecx *e, uint32_t n)
 		v = dry(e, arg[0]);
 		return vconst(v.k == V_CONST);
 	}
+	case BI_FAST_ROOT4:
+		v = gen(e, arg[0]);
+		toreg(e, &v);
+		word(e, f_in(1, 16, v.r));
+		word(e, 0x1e61c000u | 16u << 5 | 16u); /* fsqrt d16, d16 */
+		word(e, 0x1e61c000u | 16u << 5 | 16u);
+		word(e, f_out(1, v.r, 16));
+		return v;
 	case BI_EXPECT:
 	case BI_EXPECT_PROB:
 		/* the hint is still evaluated (argument order is unspecified: first, so that
@@ -946,6 +954,18 @@ VPRIV val gen_builtin(ecx *e, uint32_t n)
 		if (e->reach) {
 			i = put(e, I_ADDI);
 			i->sz = 1, i->rd = (uint8_t)r, i->rn = SP, i->imm = 0, i->cond = 0xee;	/* + outgoing area */
+		}
+		/* Older VLA scopes must not reclaim this function-lifetime allocation. */
+		for (int k = 0; k < e->nclean; ++k) {
+			uint32_t sym = e->clean[k];
+			const bind *b = binding(e, sym);
+
+			if ((T(c, c->syms[sym].ty)->flags & TF_VLA) && b->kind == B_INDIRECT) {
+				int sp = treg(e);
+				mov(e, 1, sp, SP);
+				mem(e, I_ST, 3, 0, sp, FRAME, b->slot + 8);
+				tfree(e, sp);
+			}
 		}
 		return s;
 	}

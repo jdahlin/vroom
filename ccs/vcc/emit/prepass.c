@@ -129,12 +129,12 @@ static void mark_written(pre *P, uint32_t n, bool addr)
 			break;
 		}
 	}
-	if (N(n)->op == N_VAR) {
+	if (N(n)->op == N_VAR && is_local_var(c, N(n)->a)) {
 		P->E->sflags[N(n)->a] |= SA_WRITTEN | SA_AESC, P->E->ffacts[N(n)->a] |= FF_BAD;
 		if (addr && is_local_var(P->c, N(n)->a))
 			P->E->lnoreg[N(n)->a] = 1;
 	}
-	else if (N(n)->op == N_COMPLIT)
+	else if (N(n)->op == N_COMPLIT && is_local_var(c, N(n)->b))
 		P->E->sflags[N(n)->b] |= SA_WRITTEN;
 }
 
@@ -164,6 +164,8 @@ static void note_fwrite(pre *P, uint32_t s, uint32_t rhs)
 			k = cv.q == 0 ? FF_NONNEG | FF_ZERO : !(cv.q >> 127) && (cv.q << 1) <= ((u128)0x7fff << 113) ? FF_NONNEG : 0;
 		else
 			k = v == 0 && !__builtin_signbit(v) ? FF_NONNEG | FF_ZERO : v >= 0 ? FF_NONNEG : 0;
+	} else if (N(rhs)->op == N_COMMA && (N(rhs)->aux & NC_FP_NONNEG)) {
+		k = FF_NONNEG;
 	} else if (N(rhs)->op == N_CALL && (callee = direct_callee(c, N(rhs)->a, &ref))) {
 		const sym *fn = &c->syms[callee];
 		const vident *nm = &vintern_ents[fn->name];
@@ -190,7 +192,7 @@ static void note_assign(pre *P, uint32_t s, uint32_t rhs)
 	emitter *E = P->E;
 	cval cv;
 
-	if (E->sflags[s] & SA_WRITTEN)
+	if (!is_local_var(c, s) || (E->sflags[s] & SA_WRITTEN))
 		return;
 	if (!is_integer(c, c->syms[s].ty) || !cc_eval(c, rhs, &cv) || cv.kind != CV_INT) {
 		E->sflags[s] |= SA_WRITTEN;
@@ -209,7 +211,9 @@ static void note_assign(pre *P, uint32_t s, uint32_t rhs)
  * The prepass runs per function, the first time a function is emitted or
  * inlined: most of a TU's functions are header inlines nobody uses.  The
  * facts it records (writes to params and locals, labels) belong to that
- * function alone, so one walk per function is all that is needed.
+ * function alone, so one walk per function is all that is needed. Nonlocal
+ * variables have conservative immutable facts installed before workers start;
+ * no lazy walk may update them.
  */
 static int walk(pre *P, uint32_t n);
 
@@ -290,8 +294,14 @@ static int walk(pre *P, uint32_t n)
 				P->E->sflags[P->fn] |= SA_NOINL;
 		}
 		return false;
-	case N_NUM: case N_FNUM: case N_STR: case N_ZERO: case N_SIZEOF_VLA:
+	case N_NUM: case N_FNUM: case N_STR: case N_ZERO:
 		return false;
+	case N_SIZEOF_VLA:
+		lab = walk(P, x->a);
+		for (qty t = x->b; is_array(c, t); t = T(c, t)->base)
+			if ((T(c, t)->flags & TF_VLA) && T(c, t)->n)
+				lab |= walk(P, T(c, t)->n);
+		break;
 	case N_LABELADDR:
 		P->E->lref[x->a] |= LR_REF | LR_BACK;
 		return false;
@@ -319,8 +329,12 @@ static int walk(pre *P, uint32_t n)
 	case N_ASSIGN:
 		if (!x->aux && N(x->a)->op == N_VAR)
 			note_assign(P, N(x->a)->a, x->b), note_fwrite(P, N(x->a)->a, x->b);
-		else if (!x->aux && is_aconst(c, x->a))
-			P->E->sflags[N(N(N(x->a)->a)->a)->a] |= SA_WRITTEN;
+		else if (!x->aux && is_aconst(c, x->a)) {
+			uint32_t s = N(N(N(x->a)->a)->a)->a;
+
+			if (is_local_var(c, s))
+				P->E->sflags[s] |= SA_WRITTEN;
+		}
 		else
 			mark_written(P, x->a, false);
 		lab = walk(P, x->a) | walk(P, x->b);
@@ -390,6 +404,10 @@ static int walk(pre *P, uint32_t n)
 		const sym *y = &c->syms[x->a];
 
 		lab = walk(P, x->b);
+		if (!x->aux)
+			for (qty t = y->ty; is_array(c, t) || is_ptr(c, t); t = T(c, t)->base)
+				if ((T(c, t)->flags & TF_VLA) && T(c, t)->n)
+					lab |= walk(P, T(c, t)->n);
 		if (x->b && y->kind == S_VAR)
 			note_fwrite(P, x->a, x->b);
 		if (is_local_var(c, x->a)) {

@@ -208,6 +208,13 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
   *Validate:* T1 `align_local.c` (`_Alignas(32/64/128/4096)` locals, arrays
   and VLAs of over-aligned types, inside recursion and alongside alloca;
   check `(uintptr_t)&x % A == 0`).
+- [ ] **Atomic complex increment/decrement** [P]. Non-atomic complex
+  `++`/`--` update only the real component and preserve the imaginary bits.
+  `_Atomic(_Complex T)` still requires a whole-object compare-exchange loop;
+  reject it explicitly rather than lowering to a non-atomic component write.
+  *Validate:* concurrent increments on `_Atomic(_Complex float/double)` on
+  both Linux targets, including unchanged imaginary NaN/signed-zero bits.
+
 - [x] **`_Atomic` dropped** [P].  Done: `_Atomic(T)` and the qualifier
   (also `T *_Atomic`) make a type of its own (`TF_ATOMIC`, `ty_atomic()` in
   cc/type.c) with clang's layout; lvalue conversion (`decay_slow`) yields
@@ -524,6 +531,17 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
   `bcp-1` needs `__builtin_constant_p` of an inlined argument.  They are
   `WASM_XFAIL` in `bench/vcc-wasm.py` (premerge's wasm job).
   *Validate:* `bench/vcc-wasm.py -j 6` reports them as XPASS; remove the entries.
+- [ ] **wasm: wide integer bitfields** [C]. `bitfield_int128` and
+  `bitfield_int128_static` exercise packed fields with `__int128` base types,
+  signed extension and neighboring bits. The Wasm emitter handles these as
+  whole memory values before examining the bitfield metadata; it needs
+  width-aware extraction, signed extension and masked stores without touching
+  adjacent bytes. Both tests fail on the same sources with upstream `2339f69`
+  (runtime exits 61 and 1); after the shared static-initializer fix the latter
+  advances to exit 8, the signed 66-bit `-1` extraction check. Their explicit
+  Wasm expected failures remain executed against Clang and reject XPASS.
+  *Validate:* `bench/vcc-wasm.py -j 6 --suite vcc --no-cache bitfield_int128`;
+  remove each marker only when its full test passes. Linux coverage is required.
 - [ ] **wasm: Linux-correctness coverage gaps** [C]. The Linux milestone
   adds tests for behavior fixed in the x86/ARM emitters but still missing in
   the separate Wasm emitter. All 20 tests below also fail with upstream

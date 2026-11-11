@@ -39,6 +39,7 @@ VPRIV wkst *wk_state(ecx *e)
 		W->lcg = reserve(((size_t)c->nlabel + 64) * sizeof(uint32_t));
 		W->zgen = reserve(((size_t)c->nsym + 64) * sizeof(uint32_t));
 		W->vgen = reserve(((size_t)c->nnode + 64) * sizeof(uint32_t));
+		W->vinst = reserve(((size_t)c->nnode + 64) * sizeof(uint32_t));
 		W->voff = reserve(((size_t)c->nnode + 64) * sizeof(int64_t));
 	}
 	return W;
@@ -72,6 +73,7 @@ VPRIV void wk_ecx_free(ecx *e)
 		munmap(W->lcg, ((size_t)c->nlabel + 64) * sizeof(uint32_t));
 		munmap(W->zgen, ((size_t)c->nsym + 64) * sizeof(uint32_t));
 		munmap(W->vgen, ((size_t)c->nnode + 64) * sizeof(uint32_t));
+		munmap(W->vinst, ((size_t)c->nnode + 64) * sizeof(uint32_t));
 		munmap(W->voff, ((size_t)c->nnode + 64) * sizeof(int64_t));
 	}
 	munmap(W->cases, WK_MAXCASE * sizeof(wkcase));
@@ -313,7 +315,7 @@ static void wk_decl(ecx *e, const node *x)
 	uint32_t s = x->a;
 	const sym *y = &c->syms[s];
 
-	if (unlikely(vm_type(c, y->ty)))
+	if (!x->aux && unlikely(vm_type(c, y->ty)))
 		wk_vla_fix(e, y->ty, false);
 	if (y->kind != S_VAR || y->sc == SC_STATIC || y->sc == SC_EXTERN || y->sc == SC_TYPEDEF)
 		return;
@@ -684,7 +686,7 @@ VPRIV void wk_stmt(ecx *e, uint32_t n)
 	switch (x->op) {
 	case N_BLOCK: {
 		uint32_t vs = 0;	/* the block's first VLA: its saved sp is restored at the end */
-		int cmark = W->nclean;
+		int cmark = W->nclean, vmark = W->nvla;
 
 		for (uint32_t i = 0; i < x->c; i++) {
 			const node *d = N(c->lists[x->b + i]);
@@ -693,7 +695,13 @@ VPRIV void wk_stmt(ecx *e, uint32_t n)
 			    c->syms[d->a].sc != SC_STATIC && c->syms[d->a].sc != SC_EXTERN && (T(c, c->syms[d->a].ty)->flags & TF_VLA))
 				vs = d->a;
 			wk_stmt(e, c->lists[x->b + i]);
+			if (d->op == N_DECL && c->syms[d->a].kind == S_VAR && c->syms[d->a].sc != SC_TYPEDEF &&
+			    c->syms[d->a].sc != SC_STATIC && c->syms[d->a].sc != SC_EXTERN && (T(c, c->syms[d->a].ty)->flags & TF_VLA)) {
+				if (W->nvla == WK_MAXCLEAN) efatal(e, d->loc, "too many cleanup variables in scope");
+				W->vla[W->nvla++] = d->a;
+			}
 		}
+		W->nvla = vmark;
 		if (W->nclean > cmark) {
 			wk_cleanups(e, cmark);
 			W->nclean = cmark;
@@ -1131,7 +1139,7 @@ VPRIV void wk_function(ecx *e, uint32_t s)
 	W->fsym = s;
 	e->nkv = e->nael = e->kvalid = 0;
 	W->rrec = (wkarg){ 0 };
-	W->nclean = 0;
+	W->nclean = W->nvla = 0;
 	W->inst = 0;
 	W->inl = NULL;
 	W->depth = 0;
