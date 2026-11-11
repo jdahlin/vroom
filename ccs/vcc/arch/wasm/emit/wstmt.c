@@ -35,6 +35,7 @@ static void welems(ecx *e, uint64_t off, qty ty, uint32_t init)
 				for (uint64_t k = v[3 * i]; k <= v[3 * i + 1]; k++) {
 					if (is_bvec(c, ty)) {
 						wlv l = { .k = WL_MEM, .bf = 1, .width = 1, .bitoff = k % 8, .off = k / 8 };
+						wmem_lval(e, &l, off + k / 8);
 						wslot_addr(e, off);
 						wexpr(e, v[3*i+2], true);
 						wstore(e, &l, et);
@@ -54,6 +55,7 @@ static void welems(ecx *e, uint64_t off, qty ty, uint32_t init)
 					wlv l = { .k = WL_MEM, .bf = 1, .bitoff = (uint16_t)(f->off % 8), .width = f->width,
 						  .sgn = is_signed(c, f->ty), .off = off + f->off / 8 };
 
+					wmem_lval(e, &l, off + f->off / 8);
 					if (wzero_init(c, v[i]))
 						continue;
 					wget(e, wfp(e));
@@ -82,6 +84,8 @@ static void welems(ecx *e, uint64_t off, qty ty, uint32_t init)
 	{
 		wlv l = { .k = WL_MEM, .off = off };
 
+		wmem_lval(e, &l, off);
+
 		wget(e, wfp(e));
 		if (wty(c, ty) == WT_MEM)
 			wfold_off(e, &l);
@@ -91,7 +95,7 @@ static void welems(ecx *e, uint64_t off, qty ty, uint32_t init)
 }
 
 /* initialise the frame object at off (zeroed: already zero) */
-VPRIV void winit(ecx *e, uint64_t off, qty ty, uint32_t init, bool zeroed)
+static void winit_impl(ecx *e, uint64_t off, qty ty, uint32_t init, bool zeroed)
 {
 	cc *c = e->c;
 	const node *x = N(init);
@@ -103,6 +107,7 @@ VPRIV void winit(ecx *e, uint64_t off, qty ty, uint32_t init, bool zeroed)
 			wslot_addr(e, off);
 			wconst(e, WT_I32, 0);
 			wpconst(e, (int64_t)tsize(c, ty));
+			wmem_fence(e);
 			wi(e, "memory.fill\t0");
 		}
 		welems(e, off, ty, init);
@@ -111,12 +116,23 @@ VPRIV void winit(ecx *e, uint64_t off, qty ty, uint32_t init, bool zeroed)
 	{
 		wlv l = { .k = WL_MEM, .off = off };
 
+		wmem_lval(e, &l, off);
+
 		wget(e, wfp(e));
 		if (wty(c, ty) == WT_MEM)
 			wfold_off(e, &l);
 		wexpr(e, init, true);
 		wstore(e, &l, ty);
 	}
+}
+
+VPRIV void winit(ecx *e, uint64_t off, qty ty, uint32_t init, bool zeroed)
+{
+	bool observable = (QQ(ty) & Q_VOLATILE) || (T(e->c, ty)->flags & TF_ATOMIC);
+
+	e->w->memopaque += observable;
+	winit_impl(e, off, ty, init, zeroed);
+	e->w->memopaque -= observable;
 }
 
 /* ---------------- inline asm ---------------- */
@@ -128,6 +144,7 @@ VPRIV void winit(ecx *e, uint64_t off, qty ty, uint32_t init, bool zeroed)
  */
 static void wasm_asm(ecx *e, const node *x)
 {
+	wmem_fence(e);
 	cc *c = e->c;
 	const casm *a = &c->asms[x->a];
 	const char *t = c->strs[a->tmpl - 1].s;
@@ -171,6 +188,7 @@ static void wasm_asm(ecx *e, const node *x)
 		if (l.k == WL_MEM)
 			wi(e, "drop");
 	}
+	wmem_fence(e);
 }
 
 /* ---------------- dead code ---------------- */
@@ -202,6 +220,8 @@ static void wcleanup(ecx *e, uint32_t s)
 	wbind *b = wlocal(e, s);
 	tbuf *tb = &e->w->b;
 
+	wmem_escape(e, b->cellid);
+	wmem_fence(e);
 	if (b->k == WB_FRAME)
 		wslot_addr(e, b->off);
 	else if (b->k == WB_PTR)
@@ -721,7 +741,7 @@ VPRIV void wsj_end(ecx *e)
 	int b;
 
 	/* the exception's payload: { void *env; int val; } */
-	wi(e, "catch\t__c_longjmp");
+	wboundary(e, "catch\t__c_longjmp");
 	wset(e, W->sjp);
 	wget(e, W->sjsp);
 	wi(e, "global.set\t__stack_pointer");
@@ -846,6 +866,7 @@ static void wdecl_stmt(ecx *e, const node *x)
 			wget(e, b->loc);
 			wconst(e, WT_I32, 0);
 			wvla_bytes(e, y->ty);
+			wmem_fence(e);
 			wi(e, "memory.fill\t0");
 		}
 		return;
@@ -1316,7 +1337,7 @@ VPRIV void wstmt(ecx *e, uint32_t n)
 			wi(e, "i32.eqz");
 			wblock(e, "if\ti32");
 			wtruth(e, x->a);
-			wi(e, "else");
+			wboundary(e, "else");
 			wget(e, st);
 			wconst(e, WT_I32, 1);
 			wi(e, "i32.eq");
@@ -1332,7 +1353,7 @@ VPRIV void wstmt(ecx *e, uint32_t n)
 		W->notop = kn == 0 ? x->b : 0;
 		wstmt(e, x->b);
 		if (x->c) {
-			wi(e, "else");
+			wboundary(e, "else");
 			W->notop = kn == 1 ? x->c : 0;
 			wstmt(e, x->c);
 		}
@@ -1425,6 +1446,7 @@ VPRIV void wstmt(ecx *e, uint32_t n)
 			efatal(e, x->loc, "wasm: a case label in a nested statement of a switch whose body is not a compound statement");
 		/* fall through */
 	case N_LABEL:
+		wmem_fence(e);
 		wstmt(e, x->c);
 		break;
 	case N_GOTO:
