@@ -113,6 +113,11 @@ hashar, mätmetod och återstående arbete. G5/G7/O2-målet fortsatt öppna.
 
 ### Status 2026-11-11: G5/G7, delad stackcellanalys
 
+Nästa del delar nu värde-/storefakta i `emit/rec/slot-values.c`. 6108
+byte-identiska arm64-resultat och separata sanitiserade kontrakt verifierar
+flytten. X86-/wasm-anslutning och kombinerad kostnadsgrind pågår; G5/G7
+är fortsatt öppna.
+
 Arm64 använder nu en gemensam analys av exakta allokeringsceller,
 överlapp och adressflykt i `emit/rec/slots.c`. 6069 byte-identiska
 objekt-/textjämförelser, 177 egna arm64-körtester och ett sanitiserat

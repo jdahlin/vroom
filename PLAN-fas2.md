@@ -768,6 +768,25 @@ stabila allokerings-ID:n och volatile/atomic-fakta från walkern. Wasm
 behöver stabila värde-ID:n och strukturerade minnesoperationer före
 textemission. OPT5, G5/G7 och hela O2-målet är fortsatt öppna.
 
+### OPT5 status: gemensamma värde- och storefakta (2026-11-11)
+
+`emit/rec/slot-values.c` delar nu arm64:s värdetillgänglighet och
+besluten för överskrivna/olästa lagringar. Målet äger värde-ID och
+skrivversioner: ett native-register eller en stabil wasm-lokal ryms i
+samma uint32-kontrakt. Blockgenerationer hindrar vidarebefordran över
+joins utan analys; globala kvarvarande laddningar räknas över alla
+block. Escape kräver också samma minnesversion, och hindrar DSE.
+Ingen SSA eller ny post-/effekttabell. Befintlig scratch för värdefakta
+och load-räknare har slagits ihop till en återanvänd per-cell-tabell.
+
+På eeac13c-basen: 6108/6108 arm64-objekt/text byte-identiska (2036 filer,
+O1-objekt/O2-objekt/O2-text), 190/190 egna körtester samt nytt stack_cells
+körfall. Isolerade ASan/UBSan-kontrakt testar blockgränser, källclobbers,
+minnesversioner, lästa/vidarebefordrade loads, stora osignerade värde-ID:n
+och återanvänd kapacitet; en andra agent har granskat adapterflytten.
+X86-/wasm-adaptrar och kostnadsmätning av kombinationen pågår i separata
+arbetskopior; detta är fortsatt delprogress i OPT5, inte full O2-täckning.
+
 ### Kontrakt som styr implementationen
 
 - **Wasm-integrering:** aritmetikhjälparen returnerar ett typat beslut,
