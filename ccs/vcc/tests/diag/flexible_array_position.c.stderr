@@ -1,0 +1,9 @@
+flexible_array_position.c:1:29: error: flexible array member 'data' with type 'int[]' is not at the end of struct
+    1 | struct invalid { int n; int data[]; int tail; };
+      |                             ^           - next field declaration is here
+flexible_array_position.c:1:41: note: next field declaration is here
+flexible_array_position.c:2:23: error: flexible array member 'data' with type 'int[]' is not at the end of struct
+    2 | struct comma { int n, data[], tail; };
+      |                       ^       - next field declaration is here
+flexible_array_position.c:2:31: note: next field declaration is here
+2 errors generated.

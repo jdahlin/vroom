@@ -1,0 +1,4 @@
+sve_array.c:2:19: error: array has sizeless element type '__SVInt32_t'
+    2 | __SVInt32_t array[2];
+      |                   ^
+1 error generated.

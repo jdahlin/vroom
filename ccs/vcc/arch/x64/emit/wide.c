@@ -10,12 +10,12 @@ static val x64_wv(int r) { return (val){ .k = V_REG, .r = (uint8_t)r }; }
 static lval x64_wat(int r, int off) { return (lval){ .k = L_REG, .r = (uint8_t)r, .off = off, .align = 8 }; }
 
 /* a new 16-byte object: its frame slot, and its address in a temporary */
-static int x64_wnew(ecx *e, int32_t *slot)
+static int x64_wnew(ecx *e, int64_t *slot)
 {
 	lval l = { .k = L_FRAME, .off = wk_slot(e, 16, 16), .align = 16 };
 
 	if (slot)
-		*slot = (int32_t)l.off;
+		*slot = (int64_t)l.off;
 	return x64_laddr(e, &l);
 }
 
@@ -40,6 +40,26 @@ static int x64_waddr(ecx *e, val *v)
 	return x64_toreg(e, v, 8);
 }
 
+/* Preserve the source object (which may be a const global or an lvalue):
+   a bit-precise value's high word is extended in a fresh 16-byte temporary. */
+VPRIV val x64_wbitint(ecx *e, val v, unsigned bits, bool sgn)
+{
+	if (bits == 128)
+		return v;
+	int rs = x64_waddr(e, &v), rd = x64_wnew(e, NULL);
+	lval slo = x64_wat(rs, 0), shi = x64_wat(rs, 8);
+	lval dlo = x64_wat(rd, 0), dhi = x64_wat(rd, 8);
+
+	x64_mem(e, X_LD, 8, R11, &slo, false);
+	x64_mem(e, X_ST, 8, R11, &dlo, false);
+	x64_mem(e, X_LD, 8, R11, &shi, false);
+	x64_op3(e, X_SHLI, 8, R11, R11, XNOREG)->imm = 128 - bits;
+	x64_op3(e, sgn ? X_SARI : X_SHRI, 8, R11, R11, XNOREG)->imm = 128 - bits;
+	x64_mem(e, X_ST, 8, R11, &dhi, false);
+	x64_tfree(e, rs);
+	return x64_wv(rd);
+}
+
 /* ---------------- libgcc calls ---------------- */
 
 /*
@@ -48,7 +68,7 @@ static int x64_waddr(ecx *e, val *v)
  * around the call.  The result's rax, rdx (or xmm0) stored to the frame
  * slot res.
  */
-static void x64_lcall(ecx *e, int fn, const int32_t *words, int nw, int xmmarg, int32_t res, int resw, bool fres)
+static void x64_lcall(ecx *e, int fn, const int64_t *words, int nw, int xmmarg, int64_t res, int resw, bool fres)
 {
 	xst *X = e->x64;
 	uint32_t saved = X->live & X_TEMPS, fsaved = X->live & X_FTEMPS;
@@ -105,13 +125,13 @@ static void x64_lcall(ecx *e, int fn, const int32_t *words, int nw, int xmmarg, 
 }
 
 /* the 8-byte word at [r + off] copied to a new frame slot */
-static int32_t x64_wword(ecx *e, int r, int off)
+static int64_t x64_wword(ecx *e, int r, int off)
 {
 	lval s = x64_wat(r, off), d = { .k = L_FRAME, .off = wk_slot(e, 8, 8), .align = 8 };
 
 	x64_mem(e, X_LD, 8, R11, &s, false);
 	x64_mem(e, X_ST, 8, R11, &d, false);
-	return (int32_t)d.off;
+	return (int64_t)d.off;
 }
 
 /* ---------------- arithmetic ---------------- */
@@ -119,11 +139,11 @@ static int32_t x64_wword(ecx *e, int r, int off)
 VPRIV val x64_wbin(ecx *e, int op, bool sgn, val a, val b)
 {
 	int ra, rb, rd;
-	int32_t slot;
+	int64_t slot;
 
 	if (op == T_LESSLESS || op == T_GREATERGREATER) {
 		/* b is an int: __ashlti3, __lshrti3, __ashrti3 (a, (int)b) */
-		int32_t w[3];
+		int64_t w[3];
 		int rc;
 
 		ra = x64_waddr(e, &a);
@@ -134,7 +154,7 @@ VPRIV val x64_wbin(ecx *e, int op, bool sgn, val a, val b)
 			lval d = { .k = L_FRAME, .off = wk_slot(e, 8, 8), .align = 8 };
 
 			x64_mem(e, X_ST, 8, rc, &d, false);
-			w[2] = (int32_t)d.off;
+			w[2] = (int64_t)d.off;
 		}
 		x64_tfree(e, ra);
 		x64_tfree(e, rc);
@@ -145,7 +165,7 @@ VPRIV val x64_wbin(ecx *e, int op, bool sgn, val a, val b)
 	ra = x64_waddr(e, &a);
 	rb = x64_waddr(e, &b);
 	if (op == T_SLASH || op == T_PERCENT) {
-		int32_t w[4] = { x64_wword(e, ra, 0), x64_wword(e, ra, 8), x64_wword(e, rb, 0), x64_wword(e, rb, 8) };
+		int64_t w[4] = { x64_wword(e, ra, 0), x64_wword(e, ra, 8), x64_wword(e, rb, 0), x64_wword(e, rb, 8) };
 
 		x64_tfree(e, ra);
 		x64_tfree(e, rb);
@@ -166,7 +186,7 @@ VPRIV val x64_wbin(ecx *e, int op, bool sgn, val a, val b)
 			 * of them.
 			 */
 			static const uint8_t rr[2] = { RAX, RDX };
-			int32_t w[4] = { x64_wword(e, ra, 0), x64_wword(e, ra, 8), x64_wword(e, rb, 0), x64_wword(e, rb, 8) }, ds;
+			int64_t w[4] = { x64_wword(e, ra, 0), x64_wword(e, ra, 8), x64_wword(e, rb, 0), x64_wword(e, rb, 8) }, ds;
 			lval s0 = { .k = L_FRAME, .off = w[0] }, s1 = { .k = L_FRAME, .off = w[1] };
 			lval s2 = { .k = L_FRAME, .off = w[2] }, s3 = { .k = L_FRAME, .off = w[3] };
 			lval flo, fhi;
@@ -291,7 +311,7 @@ VPRIV val x64_wcvt(ecx *e, val v, qty from, qty to)
 	cc *c = e->c;
 	bool fw = KIND(c, from) == TY_INT128 || KIND(c, from) == TY_UINT128;
 	bool tw = KIND(c, to) == TY_INT128 || KIND(c, to) == TY_UINT128;
-	int32_t slot;
+	int64_t slot;
 
 	if (fw && tw)
 		return v;
@@ -301,14 +321,14 @@ VPRIV val x64_wcvt(ecx *e, val v, qty from, qty to)
 		return x64_wconst(e, wk_signed(c, from) ? v.i : (i128)(u128)(uint64_t)v.i);
 	if (tw && is_flt(c, from)) {
 		int fs = wk_size(c, from), rd;
-		int32_t w[1];
+		int64_t w[1];
 		lval d = { .k = L_FRAME, .off = wk_slot(e, 8, 8), .align = 8 };
 
 		if (KIND(c, from) == TY_LDOUBLE)
 			efatal(e, e->curloc, "x86-64: long double to __int128 is not supported yet (PLAN-x86.md X3)");
 		x64_mem(e, X_ST, 8, v.r, &d, false);
 		x64_tfree(e, v.r);
-		w[0] = (int32_t)d.off;
+		w[0] = (int64_t)d.off;
 		rd = x64_wnew(e, &slot);
 		x64_lcall(e, KIND(c, to) == TY_INT128 ? (fs == 4 ? FN_FIXSFTI : FN_FIXDFTI) : (fs == 4 ? FN_FIXUNSSFTI : FN_FIXUNSDFTI),
 			  w, 1, 0, slot, 2, false);
@@ -344,14 +364,14 @@ VPRIV val x64_wcvt(ecx *e, val v, qty from, qty to)
 	}
 	if (is_flt(c, to)) {
 		int ra = x64_waddr(e, &v), ts = wk_size(c, to), x;
-		int32_t w[2] = { x64_wword(e, ra, 0), x64_wword(e, ra, 8) };
+		int64_t w[2] = { x64_wword(e, ra, 0), x64_wword(e, ra, 8) };
 		lval d = { .k = L_FRAME, .off = wk_slot(e, 8, 8), .align = 8 };
 
 		if (KIND(c, to) == TY_LDOUBLE)
 			efatal(e, e->curloc, "x86-64: __int128 to long double is not supported yet (PLAN-x86.md X3)");
 		x64_tfree(e, ra);
 		x64_lcall(e, KIND(c, from) == TY_INT128 ? (ts == 4 ? FN_FLOATTISF : FN_FLOATTIDF) : (ts == 4 ? FN_FLOATUNTISF : FN_FLOATUNTIDF),
-			  w, 2, -1, (int32_t)d.off, 1, true);
+			  w, 2, -1, (int64_t)d.off, 1, true);
 		x = x64_ftreg(e);
 		x64_mem(e, X_LD, ts, x, &d, false);
 		return x64_wv(x);

@@ -58,6 +58,7 @@ enum {
 	X_XADD,		/* lock xadd: r0 = [r1 + off], [r1 + off] += old r0 */
 	X_CMPXCHG,	/* lock cmpxchg: if [r1 + off] == rax then = r2, else rax = [r1 + off] */
 	X_MFENCE,
+	X_BARRIER,	/* empty asm: a compiler memory/flags barrier, no machine instruction */
 	X_JMPR,		/* jmp *r1 */
 	X_LEAL,		/* r0 = the address of local label `label` */
 	X_RAW,		/* inline asm: e->raw's text at off, ref bytes */
@@ -94,9 +95,9 @@ typedef struct xst {
 	/* the function's incoming arguments (abi.c) */
 	int ngp, nfp;		/* named arguments in general and vector registers */
 	int32_t stk;		/* bytes of named stack arguments */
-	int32_t sret;		/* frame slot of the hidden result pointer (0: none) */
-	int32_t save;		/* variadic: the register save area's slot (0: none) */
-	int32_t csslot[16];	/* callee-saved registers inline asm uses: the prologue saves them here */
+	int64_t sret;		/* frame slot of the hidden result pointer (0: none) */
+	int64_t save;		/* variadic: the register save area's slot (0: none) */
+	int64_t csslot[16];	/* callee-saved registers inline asm uses: the prologue saves them here */
 } xst;
 
 /* the integer argument registers, in order */
@@ -112,7 +113,11 @@ VPRIV int x64_ftreg(ecx *e);
 VPRIV rec *x64_put(ecx *e, int op);
 VPRIV void x64_twoaddr(ecx *e);
 VPRIV void x64_print(ecx *e, tbuf *b, uint32_t s);
+VPRIV void x64_x87(ecx *e, int xf, const lval *l, int sz);
 
+VPRIV void x64_lbl(tbuf *b, uint32_t s, uint32_t l);
+VPRIV void x64_reg(tbuf *b, int r, int sz);
+VPRIV int x64_asm_namedreg(const char *name);
 VPRIV int x64_tlsaddr(ecx *e, uint32_t ref, int model);
 VPRIV bool sym_needs_got(cc *c, uint32_t ref);	/* arch/a64/emit/value.c (shared) */
 VPRIV int x64_base(ecx *e, const lval *l, uint32_t *ref);

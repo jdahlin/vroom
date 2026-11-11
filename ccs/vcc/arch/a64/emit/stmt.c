@@ -224,7 +224,7 @@ VPRIV val gen_block(ecx *e, uint32_t n, bool want)
 {
 	cc *c = e->c;
 	const node *x = N(n);
-	int32_t mark = e->foff, cl_top = e->cl_top;
+	int64_t mark = e->foff, cl_top = e->cl_top;
 	int cmark = e->nclean;
 	val v = vnone();
 	uint32_t vstmt = 0;
@@ -241,7 +241,7 @@ VPRIV val gen_block(ecx *e, uint32_t n, bool want)
 		}
 	}
 	/* an aggregate value must outlive the block's slots */
-	int32_t vslot = 1;
+	int64_t vslot = 1;
 
 	if (vstmt && is_agg(c, vt))
 		vslot = slot(e, tsize(c, vt), talign(c, vt));
@@ -475,7 +475,7 @@ static void gen_return(ecx *e, const node *x)
 				/* clang returns the local itself (NRVO): its cleanups' changes are seen */
 				run_cleanups(e, f->cbase);
 			} else if (is_agg(c, rt)) {
-				int32_t sl = slot(e, tsize(c, rt), 16);
+				int64_t sl = slot(e, tsize(c, rt), 16);
 				int rs = toreg(e, &v), rd = treg(e);
 
 				opi(e, I_ADDI, 1, rd, FRAME, sl);
@@ -487,7 +487,7 @@ static void gen_return(ecx *e, const node *x)
 				opi(e, I_ADDI, 1, rd, FRAME, sl);
 				v = vreg(rd);
 			} else {
-				int32_t sl = slot(e, 16, 16);
+				int64_t sl = slot(e, 16, 16);
 				lval l = { .k = L_FRAME, .off = sl, .align = 16 };
 
 				store(e, &l, rt, &v);
@@ -587,7 +587,7 @@ VPRIV void vla_fix(ecx *e, qty t, bool pure)
 		if ((a->flags & TF_VLA) && a->n && N(a->n)->op != N_NUM && !(pure && side_effects(c, a->n))) {
 			val v = cast(e, gen(e, a->n), N(a->n)->ty, c->t_size, CK_INT);
 			int r = toreg(e, &v);
-			int32_t sl = slot(e, 8, 8);
+			int64_t sl = slot(e, 8, 8);
 
 			mem(e, I_ST, 3, 0, r, FRAME, sl);
 			val_free(e, &v);
@@ -633,7 +633,7 @@ static void gen_vla_decl(ecx *e, const node *x, uint32_t s)
 	bind *b = binding(e, s);
 	val n = vla_bytes(e, c->syms[s].ty);
 	int r = toreg(e, &n), t = treg(e);
-	int32_t sl = slot(e, 24, 8);
+	int64_t sl = slot(e, 24, 8);
 	uint32_t al = talign(c, c->syms[s].ty);
 	ins *i;
 
@@ -864,7 +864,7 @@ static void gen_stmt1(ecx *e, uint32_t n)
 {
 	cc *c = e->c;
 	const node *x;
-	int32_t mark;
+	int64_t mark;
 
 	if (!n)
 		return;
@@ -949,7 +949,7 @@ static void gen_stmt1(ecx *e, uint32_t n)
 		}
 		deflabel_loop(e, lhead, e->E->nflags[n] & NA_LABEL);
 		if (x->b) {
-			int32_t m2 = e->foff;
+			int64_t m2 = e->foff;
 
 			gen_cond(e, x->b, false, lbrk);
 			e->foff = keep_cl(e, m2);
@@ -959,7 +959,7 @@ static void gen_stmt1(ecx *e, uint32_t n)
 		e->nloop--;
 		deflabel(e, lcont);
 		if (step) {
-			int32_t m2 = e->foff;
+			int64_t m2 = e->foff;
 			val v = gen(e, step);
 
 			val_free(e, &v);

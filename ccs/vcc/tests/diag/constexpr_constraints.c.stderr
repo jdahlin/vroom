@@ -1,0 +1,49 @@
+constexpr_constraints.c:6:15: error: constexpr variable 'not_constant' must be initialized by a constant expression
+    6 | constexpr int not_constant = ordinary;
+      |               ^
+constexpr_constraints.c:7:31: error: constexpr initializer evaluates to -1 which is not exactly representable in type 'const unsigned int'
+    7 | constexpr unsigned negative = -1;
+      |                               ^
+constexpr_constraints.c:8:27: error: constexpr initializer evaluates to 0.1 which is not exactly representable in type 'const float'
+    8 | constexpr float rounded = 0.1;
+      |                           ^
+constexpr_constraints.c:9:32: error: constexpr initializer for type 'const int' is of type 'double'
+    9 | constexpr int wrong_category = 0.5;
+      |                                ^
+constexpr_constraints.c:10:24: error: constexpr variable cannot have type 'const volatile int'
+   10 | constexpr volatile int volatile_object = 0;
+      |                        ^
+constexpr_constraints.c:11:15: error: constexpr variable 'uninitialized' must be initialized by a constant expression
+   11 | constexpr int uninitialized;
+      |               ^
+constexpr_constraints.c:12:27: error: constexpr pointer initializer is not null
+   12 | constexpr int *non_null = (int *)4;
+      |                           ^
+constexpr_constraints.c:14:36: error: constexpr initializer evaluates to 300 which is not exactly representable in type 'unsigned char'
+   14 | constexpr struct Record record = { 300, 0.1 };
+      |                                    ^
+constexpr_constraints.c:14:41: error: constexpr initializer evaluates to 0.1 which is not exactly representable in type 'float'
+   14 | constexpr struct Record record = { 300, 0.1 };
+      |                                         ^
+constexpr_constraints.c:15:37: error: constexpr initializer evaluates to -1 which is not exactly representable in type 'const unsigned char'
+   15 | constexpr unsigned char bytes[] = { -1, 256 };
+      |                                     ^
+constexpr_constraints.c:15:41: error: constexpr initializer evaluates to 256 which is not exactly representable in type 'const unsigned char'
+   15 | constexpr unsigned char bytes[] = { -1, 256 };
+      |                                         ^
+constexpr_constraints.c:16:32: error: constexpr initializer evaluates to 255 which is not exactly representable in type 'const signed char'
+   16 | constexpr signed char text[] = u8"\xFF";
+      |                                ^
+constexpr_constraints.c:17:15: error: constexpr can only be used in variable declarations
+   17 | constexpr int returns_value(void) { return 0; }
+      |               ^
+constexpr_constraints.c:18:23: error: constexpr can only be used in variable declarations
+   18 | typedef constexpr int not_an_object;
+      |                       ^
+constexpr_constraints.c:19:16: error: function parameter cannot be constexpr
+   19 | void parameter(constexpr int value);
+      |                ^
+constexpr_constraints.c:24:31: error: expected expression
+   24 |     constexpr int malformed = ;
+      |                               ^
+16 errors generated.

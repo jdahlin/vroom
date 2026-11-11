@@ -26,7 +26,7 @@ static int hfa_walk(cc *c, qty t, int *base, uint64_t *n)
 		*n = 1;
 		return 1;
 	}
-	if (y->kind == TY_FLOAT || y->kind == TY_DOUBLE || y->kind == TY_LDOUBLE) {	/* Apple: long double is 8 bytes */
+	if (y->kind == TY_BFLOAT16 || y->kind == TY_FLOAT16 || y->kind == TY_FLOAT || y->kind == TY_DOUBLE || y->kind == TY_LDOUBLE) {	/* Apple: long double is 8 bytes */
 		int b = (int)y->size;
 
 		if (*base && *base != b)
@@ -50,6 +50,12 @@ static int hfa_walk(cc *c, qty t, int *base, uint64_t *n)
 		for (uint32_t k = 0; k < g->nfield; k++) {
 			uint64_t m;
 
+			/* Empty fields and zero-width bit-fields contribute no
+			   homogeneous members. Any padding they introduce is rejected
+			   by the size check below. */
+			if ((g->f[k].bitfield && !g->f[k].width) ||
+			    (!g->f[k].bitfield && tsize(c, g->f[k].ty) == 0))
+				continue;
 			if (g->f[k].bitfield || !hfa_walk(c, g->f[k].ty, base, &m))
 				return 0;
 			if (y->kind == TY_UNION)
@@ -105,7 +111,7 @@ VPRIV void vec_small_ret(ecx *e, qty t, int rs)
 }
 
 /* v0 (a call's result) into the slot at sl */
-VPRIV void vec_small_res(ecx *e, qty t, int32_t sl)
+VPRIV void vec_small_res(ecx *e, qty t, int64_t sl)
 {
 	cc *c = e->c;
 	uint32_t n = T(c, t)->n, size = (uint32_t)tsize(c, t), es = n ? size / n : size, w = n > 1 ? 8 / n : 0;

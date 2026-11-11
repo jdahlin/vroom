@@ -174,6 +174,23 @@ VPRIV void scope_close_proto(cc *c)
 	scope_pop(c, false);
 }
 
+/* Save bindings from the defining parameter list for its function body. */
+VPRIV void proto_binding(cc *c, uint32_t s)
+{
+	if (c->in_proto != 1)
+		return;
+	if (c->nptag == c->cptag) {
+		uint32_t cap = c->cptag ? c->cptag * 2 : 16;
+		uint32_t *p = halloc(c, (size_t)cap * sizeof(*p));
+
+		if (c->nptag)
+			memcpy(p, c->ptag, (size_t)c->nptag * sizeof(*p));
+		c->ptag = p;
+		c->cptag = cap;
+	}
+	c->ptag[c->nptag++] = s;
+}
+
 VPRIV uint32_t sym_new(cc *c, int kind, uint32_t name, qty ty, uint32_t loc)
 {
 	uint32_t i = c->nsym++;

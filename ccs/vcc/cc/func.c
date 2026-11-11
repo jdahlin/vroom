@@ -736,10 +736,42 @@ static __attribute__((noinline)) void return_type_warn(cc *c, uint32_t s, uint32
 		free(f.lab);
 }
 
+/* A deliberately conservative provenance pass, only for functions that ask
+   about object sizes. An unaliased automatic pointer never assigned after its
+   initializer has the initializer's bound. Labels/cases can bypass an
+   initializer; assembly can write operands without an N_ASSIGN node. Leave
+   those functions unknown until a full control-flow analysis handles them. */
+static void object_size_locals(cc *c, uint32_t sym0, uint32_t node0)
+{
+	for (uint32_t n = node0; n < c->nnode; n++) {
+		int op = N(n)->op;
+		if (op == N_LABEL || op == N_CASE || op == N_DEFAULT || op == N_GOTO ||
+		    op == N_GOTO_IND || op == N_ASM)
+			return;
+	}
+	for (uint32_t i = sym0; i < c->nsym; i++) {
+		sym *s = &c->syms[i];
+		if (s->kind == S_VAR && is_ptr(c, s->ty) && s->body &&
+		    !(s->flags & (SF_GLOBAL | SF_PARAM | SF_ADDR_TAKEN | SF_INVALID)) &&
+		    s->sc != SC_STATIC && !s->asmname && !(QQ(s->ty) & Q_VOLATILE))
+			s->flags |= SF_BOS_INIT;
+	}
+	for (uint32_t n = node0; n < c->nnode; n++) {
+		const node *x = N(n);
+		if (x->op == N_ASSIGN || x->op == N_PREINC || x->op == N_PREDEC ||
+		    x->op == N_POSTINC || x->op == N_POSTDEC) {
+			const node *a = N(x->a);
+			if (a->op == N_VAR)
+				c->syms[a->a].flags &= ~SF_BOS_INIT;
+		}
+	}
+}
+
 VPRIV void function_def(cc *c, uint32_t s, const declr *d)
 {
 	bool clean;
 	uint32_t body, first_label = c->nlabel;
+	uint32_t object_sym0 = c->nsym, object_node0 = c->nnode;
 	uint32_t saved_fn = c->fn;
 	int saved_fnerr = c->fnerr;
 	uint32_t saved_fnconv = c->fnconv;
@@ -840,6 +872,8 @@ VPRIV void function_def(cc *c, uint32_t s, const declr *d)
 	if (c->o->instrument && !(c->syms[s].flags & (SF_NOINSTR | SF_ALWAYS_INLINE)))
 		body = instrument(c, s, body);
 	c->syms[s].body = body;
+	if (clean && (c->syms[s].flags & SF_BOS_QUERY))
+		object_size_locals(c, object_sym0, object_node0);
 	/* for the emitter: the parameter syms, on the body block */
 	N(body)->a = d->psyms;
 	N(body)->aux = (uint16_t)d->npsyms;

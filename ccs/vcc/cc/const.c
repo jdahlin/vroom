@@ -4,17 +4,16 @@
 VPRIV i128 trunc_to(cc *c, i128 v, qty t)
 {
 	int k = KIND(c, t);
-	uint64_t sz;
+	unsigned bits;
 
 	if (k == TY_BOOL)
 		return v != 0;
 	if (k == TY_PTR)
 		return (i128)(uint64_t)v;
-	sz = ty_size(c, t);
-	if (sz >= 16)
+	bits = int_bits(c, t);
+	if (bits >= 128)
 		return is_signed(c, t) ? v : (i128)(u128)v;
 	{
-		unsigned bits = (unsigned)sz * 8;
 		u128 m = ((u128)1 << bits) - 1;
 		u128 x = (u128)v & m;
 
@@ -131,6 +130,302 @@ VPRIV int clz128(u128 x, unsigned bits)
 	return n;
 }
 
+/* Initializers may refer back to themselves, directly or through another const.
+   Keep the recursion path on the C stack without modifying symbol bodies. */
+struct const_eval {
+	struct const_eval *prev;
+	uint32_t sym;
+};
+
+/* Aggregate copies keep a reference to the source object in the AST. Follow
+   only certified constant objects, with the same cycle guard as evaluation. */
+static bool constexpr_unwrap(cc *c, uint32_t n, uint32_t *out, bool *ice)
+{
+	const node *x = N(n);
+
+	if (vstack_low())
+		return false;
+	if (x->op == N_CAST && x->aux == CK_NOP)
+		return constexpr_unwrap(c, x->a, out, ice);
+	if (x->op == N_COMPLIT) {
+		*ice = false;
+		return constexpr_unwrap(c, x->a, out, ice);
+	}
+	if (x->op == N_VAR) {
+		const sym *s = &c->syms[x->a];
+
+		if (!(s->flags & SF_CONSTEXPR) || !s->body || (s->flags & SF_INVALID))
+			return false;
+		for (struct const_eval *p = c->const_eval; p; p = p->prev)
+			if (p->sym == x->a)
+				return false;
+		struct const_eval frame = { c->const_eval, x->a };
+
+		c->const_eval = &frame;
+		bool ok = constexpr_unwrap(c, s->body, out, ice);
+		c->const_eval = frame.prev;
+		return ok;
+	}
+	*out = n;
+	return true;
+}
+
+/* Resolve a constant aggregate subobject to the initializer which supplies it.
+   Identity matters: a const object is not a C23 constexpr object. */
+static bool constexpr_subobject(cc *c, uint32_t n, uint32_t *out, bool *ice)
+{
+	const node *x = N(n);
+	uint32_t init;
+
+	switch (x->op) {
+	case N_VAR:
+		if (!(c->syms[x->a].flags & SF_CONSTEXPR) || !c->syms[x->a].body ||
+		    (c->syms[x->a].flags & SF_INVALID))
+			return false;
+		*out = c->syms[x->a].body;
+		return true;
+	case N_COMPLIT:
+		*out = x->a;
+		*ice = false;
+		return x->a != 0;
+	case N_CAST:
+		if (x->aux != CK_NOP && x->aux != CK_DECAY)
+			return false;
+		return constexpr_subobject(c, x->a, out, ice);
+	case N_MEMBER:
+		if (!constexpr_subobject(c, x->a, &init, ice))
+			return false;
+		if (!constexpr_unwrap(c, init, &init, ice))
+			return false;
+		if (N(init)->op == N_ZERO) {
+			*out = mk(c, N_ZERO, x->ty, x->loc);
+			return true;
+		}
+		if (N(init)->op == N_CPLX && x->c < 2) {
+			*out = x->c ? N(init)->b : N(init)->a;
+			return true;
+		}
+		if (N(init)->op != N_INIT || N(init)->aux == 1 || x->c >= N(init)->c ||
+		    (N(init)->aux == 2 && N(init)->a != x->c))
+			return false;
+		*out = c->lists[N(init)->b + x->c];
+		if (!*out)
+			*out = mk(c, N_ZERO, x->ty, x->loc);
+		return true;
+	case N_INDEX: {
+		cval v;
+
+		if (!constexpr_subobject(c, x->a, &init, ice) || !constexpr_unwrap(c, init, &init, ice) ||
+		    !eval(c, x->b, &v) || v.kind != CV_INT || v.i < 0 || (u128)v.i >= (u128)arr_len(c, N(init)->ty))
+			return false;
+		if (N(init)->op == N_ZERO) {
+			*out = mk(c, N_ZERO, x->ty, x->loc);
+			return true;
+		}
+		if (N(init)->op == N_STR) {
+			const cstr *str = &c->strs[N(init)->a];
+			i128 value = 0;
+
+			if ((u128)v.i >= str->n)
+				return false;
+			for (unsigned k = 0; k < str->esz; k++)
+				value |= (i128)(unsigned char)str->s[(size_t)v.i * str->esz + k] << (8*k);
+			*out = mk_int(c, trunc_to(c, value, x->ty), QUNQ(x->ty), x->loc);
+			return true;
+		}
+		if (N(init)->op != N_INIT || N(init)->aux != 1)
+			return false;
+		const uint32_t *a = &c->lists[N(init)->b];
+
+		for (uint32_t i = 0; i < N(init)->c; i++)
+			if ((u128)v.i >= a[3*i] && (u128)v.i <= a[3*i+1]) {
+				*out = a[3*i+2];
+				return true;
+			}
+		*out = mk(c, N_ZERO, x->ty, x->loc);
+		return true;
+	}
+	default:
+		return false;
+	}
+}
+
+static bool constexpr_value(cc *c, uint32_t n, cval *v)
+{
+	uint32_t init, root = n;
+	bool ice = true;
+
+	while (N(root)->op == N_MEMBER || N(root)->op == N_INDEX || N(root)->op == N_CAST)
+		root = N(root)->a;
+	uint32_t sym = N(root)->op == N_VAR ? N(root)->a : 0;
+	for (struct const_eval *p = c->const_eval; sym && p; p = p->prev)
+		if (p->sym == sym)
+			return false;
+	struct const_eval frame = { c->const_eval, sym };
+
+	c->const_eval = &frame;
+	bool ok = constexpr_subobject(c, n, &init, &ice) && init != n && eval(c, init, v);
+	c->const_eval = frame.prev;
+	if (ok)
+		v->ice = ice && v->kind == CV_INT;
+	return ok;
+}
+
+/* Constant-initializer grammar. Ordinary const variables can be folded as an
+   extension elsewhere, but cannot make a constexpr definition valid. */
+VPRIV bool constexpr_init_ok(cc *c, uint32_t n)
+{
+	const node *x;
+	cval v;
+	uint32_t init;
+	bool ice = true;
+
+	if (!n)
+		return true;
+	x = N(n);
+	if (ISERR(n))
+		return true;
+	switch (x->op) {
+	case N_NUM: case N_FNUM: case N_ZERO: case N_STR:
+		return true;
+	case N_INIT: {
+		const uint32_t *a = &c->lists[x->b];
+
+		for (uint32_t i = 0; i < x->c; i++) {
+			if (x->aux == 2 && i != x->a)
+				continue;
+			if (!constexpr_init_ok(c, a[x->aux == 1 ? 3*i+2 : i]))
+				return false;
+		}
+		return true;
+	}
+	case N_VAR: {
+		for (struct const_eval *p = c->const_eval; p; p = p->prev)
+			if (p->sym == x->a)
+				return false;
+		struct const_eval frame = { c->const_eval, x->a };
+
+		c->const_eval = &frame;
+		bool ok = constexpr_subobject(c, n, &init, &ice) && init != n && constexpr_init_ok(c, init);
+		c->const_eval = frame.prev;
+		return ok;
+	}
+	case N_MEMBER: case N_INDEX:
+		return eval(c, n, &v) && constexpr_subobject(c, n, &init, &ice) && init != n && constexpr_init_ok(c, init);
+	case N_COMPLIT:
+		return constexpr_init_ok(c, x->a);
+	case N_CAST: case N_UNARY:
+		return constexpr_init_ok(c, x->a) && eval(c, n, &v);
+	case N_BINARY:
+		return constexpr_init_ok(c, x->a) && constexpr_init_ok(c, x->b) && eval(c, n, &v);
+	case N_LOGAND: case N_LOGOR:
+		if (!constexpr_init_ok(c, x->a) || !eval(c, x->a, &v))
+			return false;
+		if ((v.kind == CV_INT && (v.i != 0) == (x->op == N_LOGOR)) ||
+		    (v.kind == CV_FLT && cv_nz(&v) == (x->op == N_LOGOR)))
+			return true;
+		return constexpr_init_ok(c, x->b) && eval(c, n, &v);
+	case N_COND:
+		if (!constexpr_init_ok(c, x->a) || !eval(c, x->a, &v))
+			return false;
+		return constexpr_init_ok(c, (v.kind == CV_INT ? v.i != 0 : cv_nz(&v)) ?
+					      (x->b ? x->b : x->a) : x->c) && eval(c, n, &v);
+	case N_CPLX:
+		return constexpr_init_ok(c, x->a) && constexpr_init_ok(c, x->b);
+	case N_BUILTIN:
+		return eval(c, n, &v) && (v.ice || x->aux == BI_INF || x->aux == BI_INFF ||
+			x->aux == BI_HUGE_VAL || x->aux == BI_HUGE_VALF || x->aux == BI_NAN ||
+			x->aux == BI_NANF || x->aux == BI_NANS);
+	default:
+		return false;
+	}
+}
+
+static bool constexpr_variably_modified(cc *c, qty t)
+{
+	while (is_array(c, t) || is_ptr(c, t)) {
+		if (T(c, t)->flags & TF_VLA)
+			return true;
+		t = T(c, t)->base;
+	}
+	return false;
+}
+
+/* Constraints apply recursively to array elements and aggregate members, but
+   not through pointers: pointer-to-volatile is a valid constexpr null pointer. */
+VPRIV bool constexpr_type_ok(cc *c, qty t)
+{
+	if ((QQ(t) & (Q_VOLATILE | Q_RESTRICT)) || (T(c, t)->flags & TF_ATOMIC) || constexpr_variably_modified(c, t))
+		return false;
+	if (is_array(c, t))
+		return constexpr_type_ok(c, T(c, t)->base);
+	if (is_record(c, t)) {
+		const tag *r = &c->tags[T(c, t)->aux];
+
+		for (uint32_t i = 0; i < r->nfield; i++)
+			if (!constexpr_type_ok(c, r->f[i].ty))
+				return false;
+	}
+	return true;
+}
+
+/* Called before the implicit initialization conversion, so an explicit cast
+   remains a deliberate rounding/truncation in the source expression. */
+VPRIV void constexpr_conversion(cc *c, uint32_t n, qty to)
+{
+	qty from = N(n)->ty;
+	cval a, b;
+	bool exact = true;
+
+	if (is_ptr(c, to)) {
+		if (eval(c, n, &a) && (a.kind == CV_ADDR || (a.kind == CV_INT && a.i != 0)))
+			cc_error(c, expr_loc(c, n), "constexpr pointer initializer is not null");
+		return;
+	}
+	if (is_complex(c, from) && !is_complex(c, to)) {
+		cc_error(c, expr_loc(c, n), "constexpr initializer for type '%s' is of type '%s'", tyname(c, to), tyname(c, from));
+		return;
+	}
+	if (!is_arith(c, to) || !eval(c, n, &a))
+		return;
+	if (is_integer(c, to) && a.kind == CV_FLT) {
+		cc_error(c, expr_loc(c, n), "constexpr initializer for type '%s' is of type '%s'", tyname(c, to), tyname(c, from));
+		return;
+	}
+	if (is_integer(c, to) && a.kind == CV_INT)
+		exact = trunc_to(c, a.i, to) == a.i;
+	else if (is_float(c, to) && (a.kind == CV_INT || a.kind == CV_FLT)) {
+		uint32_t converted = convert(c, n, to);
+
+		if (!eval(c, converted, &b) || b.kind != CV_FLT)
+			return;
+		u128 aq = get_q(&a, is_signed(c, from)), bq = get_q(&b, true);
+
+		exact = (q_isnan(aq) && q_isnan(bq)) || q_cmp(aq, bq) == 0;
+		if (q_isnan(aq) && !(aq & ((u128)1 << 111)) && KIND(c, from) != KIND(c, to))
+			exact = false;
+		if (a.kind == CV_INT) {
+			u128 magnitude = is_signed(c, from) && a.i < 0 ? (u128)0 - (u128)a.i : (u128)a.i;
+			unsigned bits = 128u - (unsigned)clz128(magnitude, 128);
+			unsigned precision = KIND(c, to) == TY_FLOAT16 ? 11 : KIND(c, to) == TY_BFLOAT16 ? 8 :
+				KIND(c, to) == TY_FLOAT ? 24 : KIND(c, to) == TY_DOUBLE ? 53 : (unsigned)q_prec(c, to) + 1;
+
+			/* Converting back can saturate at an integer endpoint and conceal rounding. */
+			if (bits > precision && (magnitude & (((u128)1 << (bits - precision)) - 1)))
+				exact = false;
+		}
+	}
+	if (!exact) {
+		char value[96];
+
+		if (a.kind == CV_INT)
+			i128s_(value, sizeof value, a.i);
+		else
+			snprintf(value, sizeof value, "%.9g", a.f);
+		cc_error(c, expr_loc(c, n), "constexpr initializer evaluates to %s which is not exactly representable in type '%s'", value, tyname(c, to));
+	}
+}
+
 VPRIV bool eval(cc *c, uint32_t n, cval *v)
 {
 	const node *x = N(n);
@@ -158,14 +453,29 @@ VPRIV bool eval(cc *c, uint32_t n, cval *v)
 			v->q = fnum_q(c, x->a), v->ld = true;
 		v->ice = true;	/* only as the operand of a cast; arithmetic clears it */
 		return true;
+	case N_ZERO:
+		v->kind = is_float(c, x->ty) ? CV_FLT : CV_INT;
+		v->ice = true;
+		return is_scalar(c, x->ty);
+	case N_MEMBER:
+		return constexpr_value(c, n, v);
 	case N_VAR: {
 		/* a const integer variable with a constant initializer folds (not an ICE) */
 		const sym *s = &c->syms[x->a];
 
-		if (s->kind == S_VAR && (QQ(s->ty) & (Q_CONST | Q_VOLATILE)) == Q_CONST && is_integer(c, s->ty) &&
-		    s->body && eval(c, s->body, v) && v->kind == CV_INT) {
-			v->ice = false;
-			return true;
+		if (s->kind == S_VAR && (QQ(s->ty) & (Q_CONST | Q_VOLATILE)) == Q_CONST && (is_integer(c, s->ty) || (s->flags & SF_CONSTEXPR)) && s->body && !(s->flags & SF_INVALID)) {
+			for (struct const_eval *p = c->const_eval; p; p = p->prev)
+				if (p->sym == x->a)
+					return false;
+			struct const_eval frame = { c->const_eval, x->a };
+
+			c->const_eval = &frame;
+			bool ok = eval(c, s->body, v) && (v->kind == CV_INT || (s->flags & SF_CONSTEXPR));
+			c->const_eval = frame.prev;
+			if (ok) {
+				v->ice = (s->flags & SF_CONSTEXPR) && v->kind == CV_INT;
+				return true;
+			}
 		}
 		return false;
 	}
@@ -222,23 +532,32 @@ VPRIV bool eval(cc *c, uint32_t n, cval *v)
 				return true;
 			}
 			v->f = is_signed(c, N(x->a)->ty) ? (double)a.i : (double)(u128)a.i;
-			if (KIND(c, to) == TY_FLOAT)
+			if (KIND(c, to) == TY_BFLOAT16)
+				v->f = bf_to_d(q_to_bf(q_of_i(a.i, is_signed(c, N(x->a)->ty))));
+			else if (KIND(c, to) == TY_FLOAT16)
+				v->f = h_to_d(q_to_h(q_of_i(a.i, is_signed(c, N(x->a)->ty))));
+			else if (KIND(c, to) == TY_FLOAT)
 				v->f = is_signed(c, N(x->a)->ty) ? (double)(float)a.i : (double)(float)(u128)a.i;	/* one rounding */
 			return true;
 		case CK_F2I:
 			if (a.kind != CV_FLT)
 				return false;
 			v->kind = CV_INT;
-			v->i = trunc_to(c, q_to_int(get_q(&a, true), (int)ty_size(c, to) * 8, is_signed(c, to)), to);
+			v->i = trunc_to(c, q_to_int(get_q(&a, true), (int)int_bits(c, to), is_signed(c, to)), to);
 			v->ld = false;
 			v->ice = is_flt_lit(c, x->a);
 			return true;
 		case CK_F2F:
 			if (a.kind != CV_FLT)
 				return false;
+			if (a.ld && q_isnan(a.q)) a.q |= (u128)1 << 111;
 			v->ice = false;
 			if (is_q(c, to))
 				set_q(v, q_to_p(get_q(&a, true), q_prec(c, to)));
+			else if (KIND(c, to) == TY_BFLOAT16)
+				v->f = bf_to_d(q_to_bf(get_q(&a, true))), v->ld = false;
+			else if (KIND(c, to) == TY_FLOAT16)
+				v->f = h_to_d(q_to_h(get_q(&a, true))), v->ld = false;
 			else if (a.ld && KIND(c, to) == TY_FLOAT)
 				v->f = q_to_f(a.q), v->ld = false;	/* one rounding */
 			else if (KIND(c, to) == TY_FLOAT)
@@ -439,6 +758,10 @@ VPRIV bool eval(cc *c, uint32_t n, cval *v)
 			case T_EXCLAIMEQ: v->i = l != r; break;
 			default: return false;
 			}
+			if (v->kind == CV_FLT && KIND(c, x->ty) == TY_BFLOAT16)
+				v->f = bf_to_d(q_to_bf(q_of_d(v->f)));
+			if (v->kind == CV_FLT && KIND(c, x->ty) == TY_FLOAT16)
+				v->f = h_to_d(q_to_h(q_of_d(v->f)));
 			if (v->kind == CV_FLT && KIND(c, x->ty) == TY_FLOAT)
 				v->f = (float)v->f;
 			return true;
@@ -447,7 +770,7 @@ VPRIV bool eval(cc *c, uint32_t n, cval *v)
 			qty ot = N(x->a)->ty;	/* operands are converted to the common type */
 			bool sg = is_signed(c, ot);
 			i128 l = a.i, r = b.i;
-			uint64_t bits = ty_size(c, ot) * 8;
+			uint64_t bits = int_bits(c, ot);
 
 			ok = true;
 			switch (op) {
@@ -468,7 +791,7 @@ VPRIV bool eval(cc *c, uint32_t n, cval *v)
 			case T_GREATERGREATER: {
 				/* as clang's C folding (shift-count-overflow warns): a count over the
 				   width is width - 1, a negative count shifts the other way */
-				uint64_t w = ty_size(c, x->ty) * 8;
+				uint64_t w = int_bits(c, x->ty);
 				bool left = op == T_LESSLESS;
 
 				if (r < 0) {
@@ -564,6 +887,8 @@ VPRIV bool eval(cc *c, uint32_t n, cval *v)
 		return true;
 	case N_INDEX:
 	case N_DEREF: {
+		if (x->op == N_INDEX && constexpr_value(c, n, v))
+			return true;
 		/* "abc"[1], *"abc": an element of a string literal folds (clang) */
 		const cstr *st;
 		size_t sz = is_integer(c, x->ty) ? ty_size(c, x->ty) : 0;

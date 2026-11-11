@@ -1291,7 +1291,7 @@ static const char *uv_zero(cc *c, qty t)
 
 	if (k == TY_ENUM || ((k == TY_STRUCT || k == TY_UNION) && !is_complex(c, t)))
 		return NULL;
-	if (k >= TY_FLOAT16 && k <= TY_FLOAT128)
+	if (k >= TY_BFLOAT16 && k <= TY_FLOAT128)
 		return " = 0.0";
 	if (k == TY_BOOL && pp_defined(c->p, vintern_cstr("false")))
 		return " = false";

@@ -1,0 +1,4 @@
+bool_bitfield_width.c:3:9: error: width of bit-field 'invalid' (2 bits) exceeds the width of its type (1 bit)
+    3 |   _Bool invalid : 2;
+      |         ^
+1 error generated.

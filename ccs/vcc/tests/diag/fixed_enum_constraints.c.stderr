@@ -1,0 +1,37 @@
+fixed_enum_constraints.c:3:6: error: enumeration redeclared with different underlying type 'unsigned short' (was 'unsigned char')
+    2 | enum A : unsigned char;
+      |      - previous declaration is here
+    3 | enum A : unsigned short { A0 };
+      |      ^
+fixed_enum_constraints.c:2:6: note: previous declaration is here
+fixed_enum_constraints.c:5:6: error: enumeration previously declared with nonfixed underlying type
+    4 | enum B;
+      |      - previous declaration is here
+    5 | enum B : int { B0 };
+      |      ^
+fixed_enum_constraints.c:4:6: note: previous declaration is here
+fixed_enum_constraints.c:7:6: error: enumeration previously declared with fixed underlying type
+    6 | enum C : int;
+      |      - previous declaration is here
+    7 | enum C { C0 };
+      |      ^
+fixed_enum_constraints.c:6:6: note: previous declaration is here
+fixed_enum_constraints.c:8:26: error: enumerator value is not representable in underlying type 'unsigned char'
+    8 | enum D : unsigned char { D0 = 256 };
+      |                          ^
+fixed_enum_constraints.c:9:36: error: enumerator value 256 is not representable in underlying type 'unsigned char'
+    9 | enum E : unsigned char { E0 = 255, E1 };
+      |                                    ^
+fixed_enum_constraints.c:10:24: error: enumerator value is not representable in underlying type 'signed char'
+   10 | enum F : signed char { F0 = -129 };
+      |                        ^
+fixed_enum_constraints.c:11:61: error: enumerator value 18446744073709551616 is not representable in underlying type 'unsigned long long'
+   11 | enum G : unsigned long long { G0 = 18446744073709551615ULL, G1 };
+      |                                                             ^
+fixed_enum_constraints.c:12:10: error: 'float' is an invalid underlying type
+   12 | enum H : float { H0 };
+      |          ^
+fixed_enum_constraints.c:13:8: error: non-defining declaration of enumeration with a fixed underlying type must be standalone [-Welaborated-enum-base]
+   13 | enum J : int j;
+      |        ^
+9 errors generated.

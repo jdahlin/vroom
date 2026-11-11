@@ -8,7 +8,7 @@ static __attribute__((noinline)) uint32_t fold_f2i(cc *c, uint32_t n, qty to)
 
 	if (eval(c, n, &v) && v.kind == CV_FLT && v.f > -9.3e18 && v.f < 1.8e19) {
 		u128 q = v.ld ? v.q : q_of_d(v.f);
-		int bits = (int)ty_size(c, to) * 8;
+		int bits = (int)int_bits(c, to);
 		bool sg = is_signed(c, to);
 		i128 i = q_to_int(q, 128, true);
 
@@ -56,7 +56,7 @@ VPRIV qty promoted(cc *c, uint32_t n)
 	qty t = QUNQ(N(n)->ty);
 	const field *f = bitfield_of(c, n);
 
-	if (f && is_integer(c, t) && KIND(c, t) != TY_BOOL) {
+	if (f && is_integer(c, t) && KIND(c, t) != TY_BOOL && !T(c, t)->n) {
 		if (f->width < 32)
 			return prim(TY_INT);
 		if (f->width == 32 && rank(c, t) <= 4)
@@ -99,7 +99,7 @@ VPRIV int conv_kind(cc *c, qty from, qty to, uint32_t n)
 			return n && is_npc(c, n) ? CK_NULL : CK_I2P;
 		return -1;
 	}
-	if ((tk == TY_STRUCT || tk == TY_UNION) && compatible(c, from, to))
+	if ((tk == TY_STRUCT || tk == TY_UNION) && compatible(c, ty_unatomic(c, from), ty_unatomic(c, to)))
 		return CK_NOP;
 	/* vectors of one size convert lane-agnostically (clang's lax integer vector conversions) */
 	if (tk == TY_VECTOR && fk == TY_VECTOR && T(c, to)->size == T(c, from)->size)
@@ -287,6 +287,8 @@ static bool ptr_ok_(cc *c, qty a, qty b, bool top)
 	ka = KIND(c, a), kb = KIND(c, b);
 	if (compatible(c, a, b) || (top && (ka == TY_VOID || kb == TY_VOID)))
 		return true;
+	if ((T(c, a)->flags ^ T(c, b)->flags) & TF_ATOMIC)
+		return false;
 	if (ka == TY_PTR && kb == TY_PTR)
 		return ptr_ok_(c, T(c, a)->base, T(c, b)->base, false);
 	if (top && (is_integer(c, a) || ka == TY_ENUM) && (is_integer(c, b) || kb == TY_ENUM))
@@ -468,7 +470,7 @@ static void literal_conv(cc *c, uint32_t n, qty to)
 			return;
 		snprintf(ts, sizeof ts, "%s", v != 0 ? "true" : "false");
 	} else {
-		int w = (int)ty_size(c, to) * 8;
+		int w = (int)int_bits(c, to);
 		bool sg = is_signed(c, to);
 		double lo = sg ? -ldexp(1, w - 1) : 0, hi = sg ? ldexp(1, w - 1) : ldexp(1, w);
 
@@ -537,7 +539,7 @@ static void const_conv(cc *c, uint32_t n, qty to)
 	if (!is_integer(c, to) || !is_integer(c, from) || KIND(c, to) == TY_BOOL || KIND(c, from) == TY_BOOL ||
 	    c->unevaluated || !cc_eval(c, n, &cv) || cv.kind != CV_INT)
 		return;
-	tw = (int)ty_size(c, to) * 8, sw = (int)ty_size(c, from) * 8;
+	tw = (int)int_bits(c, to), sw = (int)int_bits(c, from);
 	if (tw >= sw || tw > 64)
 		return;
 	tnn = !is_signed(c, to);
@@ -650,6 +652,8 @@ VPRIV uint32_t convert_as(cc *c, uint32_t n, qty to, int what, uint32_t loc)
 	uint32_t sl = c->cv_loc;
 
 	c->cv_what = (uint8_t)what, c->cv_loc = loc;
+	if (unlikely(c->constexpr_init && what == CX_INIT) && !ISERR(n))
+		constexpr_conversion(c, n, to);
 	if (what) {
 		n = conv_check(c, n, to);
 		if (!(N(n)->flags & NF_ERR))

@@ -35,10 +35,11 @@ enum {
 	TY_VOID, TY_BOOL,
 	TY_CHAR, TY_SCHAR, TY_UCHAR, TY_SHORT, TY_USHORT, TY_INT, TY_UINT,
 	TY_LONG, TY_ULONG, TY_LLONG, TY_ULLONG, TY_INT128, TY_UINT128,
-	TY_FLOAT16, TY_FLOAT, TY_DOUBLE, TY_LDOUBLE,
+	TY_BFLOAT16, TY_FLOAT16, TY_FLOAT, TY_DOUBLE, TY_LDOUBLE,
 	TY_FLOAT128,	/* __float128 (x86-64): binary128 */
 	TY_PTR, TY_ARRAY, TY_FUNC, TY_STRUCT, TY_UNION, TY_ENUM,
 	TY_VECTOR,	/* GNU vector_size: base element, n lanes */
+	TY_SVE,		/* AArch64 builtin scalable type: sizeless; aux is its interned name */
 	TY_NKINDS
 };
 
@@ -67,7 +68,7 @@ typedef struct ctype {
 	uint32_t align;		/* bytes */
 	uint64_t size;		/* bytes; arrays: elem size * n */
 	qty base;		/* pointee / element / return / enum underlying */
-	uint32_t n;		/* array length; function: number of params; VLA: size node */
+	uint32_t n;		/* integer: _BitInt precision (0: standard); array length; function: params; VLA: size node */
 	uint32_t aux;		/* function: index into params; record/enum: tag index */
 	uint32_t canon;		/* canonical type index (itself unless an aligned variant) */
 } ctype;
@@ -78,6 +79,7 @@ typedef struct field {
 	uint32_t name;		/* identifier id, 0 for anonymous members and unnamed bit-fields */
 	qty ty;
 	uint64_t off;		/* bits */
+	uint32_t align;		/* effective field alignment, including packed/aligned/pragma pack */
 	uint16_t width;		/* bit-field width */
 	uint8_t bitfield;
 	uint8_t invalid;	/* its type was an error: uses say nothing more (clang) */
@@ -90,6 +92,8 @@ typedef struct field {
 enum {
 	RF_COMPLETE = 1, RF_UNION = 2, RF_PACKED = 4, RF_FLEX = 8, RF_ENUM = 16,
 	RF_BEING_DEFINED = 32,
+	RF_ENUM_FIXED = 256, RF_ENUM_DEFINED = 512, RF_ENUM_DECLARED = 1024,
+	RF_MS_STRUCT = 128,	/* Microsoft allocation units for bit-fields */
 	RF_COMPLEX = 64,	/* _Complex T: struct { T re, im; } (AAPCS64 passes it like that) */
 };
 
@@ -139,6 +143,9 @@ enum {
 	SF_WUR = 1u << 20,	/* warn_unused_result / nodiscard (attrs record's wur) */
 	SF_NONNULL = 1u << 21,	/* a parameter declared nonnull */
 	SF_INVALID = 1u << 23,	/* declared with an error (incomplete type): uses report nothing more (clang) */
+	SF_BOS_QUERY = 1u << 24,	/* function contains an object-size query */
+	SF_CONSTEXPR = 1u << 26,	/* C23 constant object: initializer is a constant expression */
+	SF_BOS_INIT = 1u << 25,	/* local pointer has a certified immutable initializer */
 	SF_UVPEND = 1u << 22,	/* -Wuninitialized: declared without an initializer, not yet assigned in the text */
 };
 
@@ -252,6 +259,8 @@ static inline int vcc_tls_model(const char *m)
 	       !strcmp(m, "initial-exec") ? VCC_TLS_IE : !strcmp(m, "local-exec") ? VCC_TLS_LE : 0;
 }
 
+enum { CC_DISABLED_BUILTIN_WORDS = 6 };	/* generated libbuiltins.inc indices */
+
 typedef struct cc_opts {	/* fields before outfd: parse options, all in the decl cache key */
 	int target;		/* PP_LINUX_AARCH64 / PP_DARWIN / PP_WASM64 */
 	int unsigned_char;
@@ -265,6 +274,7 @@ typedef struct cc_opts {	/* fields before outfd: parse options, all in the decl 
 	int lse;		/* target has LSE atomics (else ldaxr/stlxr loops) */
 	int general_regs_only;	/* -mgeneral-regs-only: no FP/SIMD registers (variadic: no v0-v7 save area) */
 	int no_builtin;		/* -ffreestanding / -fno-builtin: abs() etc. are plain calls */
+	uint64_t disabled_builtins[CC_DISABLED_BUILTIN_WORDS]; /* -fno-builtin-NAME */
 	int wasm_sjlj;		/* -mllvm -wasm-enable-sjlj: setjmp/longjmp through wasm exceptions */
 	int implicit_fn;	/* implicit function declarations allowed (... implicit-function-declaration) */
 	int strict_std;		/* -std=cNN (not gnuNN): clang's GNU-only library functions are not known */
@@ -285,6 +295,8 @@ typedef struct cc_opts {	/* fields before outfd: parse options, all in the decl 
 	struct As *as;		/* emit == 2: the assembler bound to obj (one per thread) */
 	struct vbuf *wasm_obj;	/* emit == 2 for wasm64: the object's bytes (arch/wasm/as) */
 } cc_opts;
+
+void cc_disable_builtin(uint64_t *bits, const char *name);
 
 typedef struct cc cc;
 

@@ -227,7 +227,7 @@ typedef struct bind {
 	uint8_t kind;
 	uint8_t reg;		/* register variable: asm("xN") (0xff: none) */
 	uint8_t kv;		/* known-value tracking: index + 1 (0: untracked) */
-	int32_t slot;		/* B_SLOT, B_INDIRECT */
+	int64_t slot;		/* B_SLOT, B_INDIRECT */
 	val v;			/* B_CONST */
 } bind;
 
@@ -253,7 +253,7 @@ typedef struct loopctx {
 typedef struct fnctx {		/* one function instance: the emitted function or an inlined body */
 	uint32_t fn, inst;
 	uint32_t retlbl;
-	int32_t retslot;
+	int64_t retslot;
 	uint8_t retreg;		/* inlined: the result's temporary + 1 (0: in retslot) */
 	qty rty;
 	bool inl;
@@ -272,8 +272,8 @@ typedef struct fnctx {		/* one function instance: the emitted function or an inl
 
 /* a stack slot handed out by slot() (offsets are reused across scopes) */
 typedef struct slotal {
-	int32_t off;
-	uint32_t size;
+	int64_t off;
+	uint64_t size;
 } slotal;
 #define CAPSLA (1u << 20)
 /*
@@ -333,17 +333,18 @@ typedef struct ecx {
 	uint32_t nkvs;
 	uint32_t inst_next;
 	/* frame */
-	int32_t foff, fmax;
+	int64_t foff, fmax;
 	uint32_t falign;	/* largest slot alignment; over 16 the prologue realigns sp */
 	/* VLA sizes, evaluated where their declaration is reached (stmt.c vla_fix) */
-	struct { uint32_t node, inst; int32_t slot; } vsz[NVSZ];
+	struct { uint32_t node, inst; int64_t slot; } vsz[NVSZ];
 	uint32_t nvsz;
-	int32_t cl_top;		/* frame offset above the block's compound literals (kept past statements) */
-	int32_t outmax;		/* outgoing stack argument bytes */
+	int64_t cl_top;		/* frame offset above the block's compound literals (kept past statements) */
+	int64_t outmax;		/* outgoing stack argument bytes */
 	bool dyn, calls, vararg;
-	int32_t vaslot;		/* variadic register save area */
+	int64_t vaslot;		/* variadic register save area */
 	int ngr_named, nstk_named;	/* variadic: named GPR args, named stack bytes */
-	int nvr_named, vrslot;		/* variadic (Linux): named FP/SIMD args, the v0-v7 save area */
+	int nvr_named;
+	int64_t vrslot;		/* variadic (Linux): named FP/SIMD args, the v0-v7 save area */
 	int nsrn;		/* classify: next SIMD/FP argument register */
 	/* temporaries */
 	uint32_t live;		/* bit i: tempregs[i] in use */
@@ -379,10 +380,10 @@ typedef struct ecx {
 enum { FN_MEMCPY, FN_MEMSET, FN_MEMMOVE, FN_UDIVTI3, FN_DIVTI3, FN_UMODTI3, FN_MODTI3, FN_STRLEN,
        FN_ASHLTI3, FN_LSHRTI3, FN_ASHRTI3, FN_FLOATTISF, FN_FLOATTIDF, FN_FLOATUNTISF, FN_FLOATUNTIDF,
        FN_FIXSFTI, FN_FIXDFTI, FN_FIXUNSSFTI, FN_FIXUNSDFTI,
-       FN_ADDTF3, FN_SUBTF3, FN_MULTF3, FN_DIVTF3, FN_EQTF2, FN_NETF2, FN_LTTF2, FN_LETF2, FN_GTTF2, FN_GETF2,
+       FN_ADDTF3, FN_SUBTF3, FN_MULTF3, FN_DIVTF3, FN_EQTF2, FN_NETF2, FN_LTTF2, FN_LETF2, FN_GTTF2, FN_GETF2, FN_UNORDTF2,
        FN_EXTENDDFTF2, FN_EXTENDSFTF2, FN_TRUNCTFDF2, FN_TRUNCTFSF2, FN_FLOATSITF, FN_FLOATDITF, FN_FLOATUNSITF,
        FN_FLOATUNDITF, FN_FLOATTITF, FN_FLOATUNTITF, FN_FIXTFSI, FN_FIXTFDI, FN_FIXUNSTFSI, FN_FIXUNSTFDI,
-       FN_FIXTFTI, FN_FIXUNSTFTI, FN_EXTENDXFTF2, FN_TRUNCTFXF2 };
+       FN_FIXTFTI, FN_FIXUNSTFTI, FN_EXTENDXFTF2, FN_TRUNCTFXF2, FN_EXTENDBFSF2, FN_TRUNCSFBF2, FN_TRUNCDFBF2, FN_TRUNCXFBF2, FN_TRUNCTFBF2, FN_EXTENDHFSF2, FN_TRUNCSFHF2, FN_TRUNCDFHF2, FN_TRUNCXFHF2, FN_TRUNCTFHF2 };
 #define FIXED(k) REF(RK_NAME, 0x8000000u + (k))
 
 /* ---------------- object backend: records -> machine code ---------------- */
@@ -470,7 +471,7 @@ typedef struct abiarg {
 
 typedef struct spill {
 	uint32_t mask;
-	int32_t slot[NTEMP];
+	int64_t slot[NTEMP];
 } spill;
 
 #define RLOG_CAP ((size_t)1 << 28)
@@ -481,7 +482,7 @@ typedef struct carg {
 	val v;
 	qty t;
 	abiarg a;
-	int32_t slot;		/* value parked in a frame slot (-1: v is a constant/address) */
+	int64_t slot;		/* value parked in a frame slot (-1: v is a constant/address) */
 } carg;
 
 /* ---------------- across files ---------------- */
@@ -575,7 +576,7 @@ VPRIV void cbz(ecx *e, bool nz, int x, int r, uint32_t l);
 VPRIV int treg(ecx *e);
 VPRIV void tfree(ecx *e, int r);
 VPRIV void val_free(ecx *e, const val *v);
-VPRIV int32_t slot(ecx *e, uint64_t size, uint32_t align);
+VPRIV int64_t slot(ecx *e, uint64_t size, uint32_t align);
 VPRIV void slot_tag(ecx *e, ins *i, int64_t off, int64_t len);
 static inline val vconst(i128 i);
 static inline val vreg(int r);
@@ -597,7 +598,7 @@ VPRIV void zero_mem(ecx *e, int dst, uint64_t n);
 VPRIV int hfa(cc *c, qty t, int *n);
 VPRIV bool vec_small(cc *c, qty t);
 VPRIV void vec_small_ret(ecx *e, qty t, int rs);
-VPRIV void vec_small_res(ecx *e, qty t, int32_t sl);
+VPRIV void vec_small_res(ecx *e, qty t, int64_t sl);
 VPRIV bool is_sret(cc *c, qty t);
 VPRIV void classify_va(ecx *e, qty t, int *nsaa, abiarg *a);
 VPRIV uint32_t abi_align(cc *c, qty t);
@@ -606,14 +607,14 @@ VPRIV void spill_live(ecx *e, spill *s);
 VPRIV void unspill(ecx *e, const spill *s);
 VPRIV void call_fixed(ecx *e, int fn, int a0, int a1, int a2, int64_t n);
 /* bind.c */
-static inline int32_t keep_cl(const ecx *e, int32_t mark);
+static inline int64_t keep_cl(const ecx *e, int64_t mark);
 static inline int X(cc *c, qty t);
 static inline void rlog(ecx *e, uint32_t tag, uint32_t v);
 VPRIV void note_ref(ecx *e, uint32_t ref);
 VPRIV void claim_ref(ecx *e, uint32_t ref);
 VPRIV bind *binding(ecx *e, uint32_t s);
 VPRIV int regvar_reg(cc *c, uint32_t s);
-VPRIV int32_t bind_slot(ecx *e, uint32_t s);
+VPRIV int64_t bind_slot(ecx *e, uint32_t s);
 VPRIV lval local_lval(ecx *e, uint32_t s);
 VPRIV uint32_t sym_align(cc *c, uint32_t s);
 VPRIV bool is_local_var(cc *c, uint32_t s);
@@ -650,8 +651,8 @@ static inline uint32_t f_out(int d, int r, int vr);
 VPRIV val f_const(int d, double x);
 static inline uint32_t q_in_hi(int vr, int r);
 static inline uint32_t q_out_hi(int r, int vr);
-VPRIV void vr_store(ecx *e, int sz, int vr, int base, int32_t off);
-VPRIV void vr_load(ecx *e, int sz, int vr, int base, int32_t off);
+VPRIV void vr_store(ecx *e, int sz, int vr, int base, int64_t off);
+VPRIV void vr_load(ecx *e, int sz, int vr, int base, int64_t off);
 VPRIV i128 ld_of_d(double x);
 VPRIV val f_const_cv(ecx *e, qty t, const cval *cv);
 VPRIV val f_const_t(ecx *e, qty t, double x);
@@ -722,6 +723,8 @@ VPRIV void wasm_tail(cc *c, tbuf *t, _Atomic uint8_t *claimed);
 /* prepass.c */
 VPRIV bool is_aconst(cc *c, uint32_t n);
 VPRIV uint32_t aconst_idx(cc *c, uint32_t n);
+VPRIV bool sve_codegen_ok(cc *c);
+VPRIV bool bitint_codegen_ok(cc *c);
 VPRIV void ensure_walked(emitter *E, cc *c, uint32_t s);
 VPRIV int u32_cmp(const void *a, const void *b);
 /* tu.c */
@@ -732,8 +735,13 @@ VPRIV void enqueue(emitter *E, uint32_t item);
 static inline qty prim(int k) { return QT(k, 0); }
 static inline bool k_int(int k) { return (k >= TY_BOOL && k <= TY_UINT128) || k == TY_ENUM; }
 static inline bool is_integer(cc *c, qty t) { return k_int(KIND(c, t)); }
+static inline bool em_bitint(cc *c, qty t)
+{
+	return KIND(c, t) >= TY_CHAR && KIND(c, t) <= TY_UINT128 &&
+	       !(T(c, t)->flags & TF_ATOMIC) && T(c, t)->n;
+}
 static inline bool is_ptr(cc *c, qty t) { return KIND(c, t) == TY_PTR; }
-static inline bool is_flt(cc *c, qty t) { int k = KIND(c, t); return k >= TY_FLOAT16 && k <= TY_FLOAT128; }	/* (__float128: x86-64 only) */
+static inline bool is_flt(cc *c, qty t) { int k = KIND(c, t); return k >= TY_BFLOAT16 && k <= TY_FLOAT128; }
 static inline bool is_record(cc *c, qty t) { int k = KIND(c, t); return k == TY_STRUCT || k == TY_UNION; }
 static inline bool is_array(cc *c, qty t) { return KIND(c, t) == TY_ARRAY; }
 static inline bool is_func(cc *c, qty t) { return KIND(c, t) == TY_FUNC; }
@@ -784,7 +792,7 @@ static inline bool ref_weak(const cc *c, uint32_t ref)
 static inline val vnone(void) { val v = { .k = V_NONE }; return v; }
 
 /* a statement's temporaries end with it; compound literals live on to the end of their block */
-static inline int32_t keep_cl(const ecx *e, int32_t mark)
+static inline int64_t keep_cl(const ecx *e, int64_t mark)
 {
 	return mark > e->cl_top ? mark : e->cl_top;
 }

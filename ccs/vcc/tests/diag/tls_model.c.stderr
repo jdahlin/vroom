@@ -1,0 +1,25 @@
+tls_model.c:1:28: error: 'tls_model' attribute only applies to thread-local variables
+    1 | int f(void) __attribute__((tls_model("global-dynamic")));
+      |                            ^
+tls_model.c:2:22: error: 'tls_model' attribute only applies to thread-local variables
+    2 | int x __attribute__((tls_model("global-dynamic")));
+      |                      ^
+tls_model.c:4:38: error: 'tls_model' attribute takes one argument
+    4 | static __thread int a __attribute__((tls_model("local", "dynamic")));
+      |                                      ^
+tls_model.c:5:48: error: expected string literal as argument of 'tls_model' attribute
+    5 | static __thread int b __attribute__((tls_model(123)));
+      |                                                ^
+tls_model.c:6:48: error: tls_model must be "global-dynamic", "local-dynamic", "initial-exec" or "local-exec"
+    6 | static __thread int c __attribute__((tls_model("foobar")));
+      |                                                ^
+tls_model.c:7:38: error: 'tls_model' attribute takes one argument
+    7 | static __thread int d __attribute__((tls_model()));
+      |                                      ^
+tls_model.c:8:38: error: 'tls_model' attribute takes one argument
+    8 | static __thread int e __attribute__((tls_model));
+      |                                      ^
+tls_model.c:9:52: error: expected string literal as argument of 'tls_model' attribute
+    9 | static __thread int extra __attribute__((tls_model(123, 456)));
+      |                                                    ^
+8 errors generated.

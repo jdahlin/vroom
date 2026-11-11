@@ -1,0 +1,23 @@
+/* Nested ordinary/GNU conditionals must not retain one register per arm.
+   Probes make the evaluation count and short-circuit behavior observable. */
+static volatile int chosen, calls;
+__attribute__((noinline)) static int probe(int n) { calls++; return chosen == n; }
+__attribute__((noinline)) static double fp_probe(int n) { calls++; return chosen == n ? n + 0.5 : -0.0; }
+__attribute__((noinline)) static __int128 wide_probe(int n) { calls++; return chosen == n ? ((__int128)1 << 80) + n : 0; }
+__attribute__((noinline)) static int ordinary(void) { return probe(0) ? 0+100 : (probe(1) ? 1+100 : (probe(2) ? 2+100 : (probe(3) ? 3+100 : (probe(4) ? 4+100 : (probe(5) ? 5+100 : (probe(6) ? 6+100 : (probe(7) ? 7+100 : (probe(8) ? 8+100 : (probe(9) ? 9+100 : (probe(10) ? 10+100 : (probe(11) ? 11+100 : (probe(12) ? 12+100 : (probe(13) ? 13+100 : (probe(14) ? 14+100 : (probe(15) ? 15+100 : (probe(16) ? 16+100 : (probe(17) ? 17+100 : (probe(18) ? 18+100 : (probe(19) ? 19+100 : (probe(20) ? 20+100 : (probe(21) ? 21+100 : (probe(22) ? 22+100 : (probe(23) ? 23+100 : (probe(24) ? 24+100 : (probe(25) ? 25+100 : (probe(26) ? 26+100 : (probe(27) ? 27+100 : (probe(28) ? 28+100 : (probe(29) ? 29+100 : (probe(30) ? 30+100 : (probe(31) ? 31+100 : (probe(32) ? 32+100 : (probe(33) ? 33+100 : (probe(34) ? 34+100 : (probe(35) ? 35+100 : (probe(36) ? 36+100 : (probe(37) ? 37+100 : (probe(38) ? 38+100 : (probe(39) ? 39+100 : (999)))))))))))))))))))))))))))))))))))))))); }
+__attribute__((noinline)) static int omitted(void) { return (probe(0) ? 0+1 : 0) ?: ((probe(1) ? 1+1 : 0) ?: ((probe(2) ? 2+1 : 0) ?: ((probe(3) ? 3+1 : 0) ?: ((probe(4) ? 4+1 : 0) ?: ((probe(5) ? 5+1 : 0) ?: ((probe(6) ? 6+1 : 0) ?: ((probe(7) ? 7+1 : 0) ?: ((probe(8) ? 8+1 : 0) ?: ((probe(9) ? 9+1 : 0) ?: ((probe(10) ? 10+1 : 0) ?: ((probe(11) ? 11+1 : 0) ?: ((probe(12) ? 12+1 : 0) ?: ((probe(13) ? 13+1 : 0) ?: ((probe(14) ? 14+1 : 0) ?: ((probe(15) ? 15+1 : 0) ?: ((probe(16) ? 16+1 : 0) ?: ((probe(17) ? 17+1 : 0) ?: ((probe(18) ? 18+1 : 0) ?: ((probe(19) ? 19+1 : 0) ?: ((probe(20) ? 20+1 : 0) ?: ((probe(21) ? 21+1 : 0) ?: ((probe(22) ? 22+1 : 0) ?: ((probe(23) ? 23+1 : 0) ?: ((probe(24) ? 24+1 : 0) ?: ((probe(25) ? 25+1 : 0) ?: ((probe(26) ? 26+1 : 0) ?: ((probe(27) ? 27+1 : 0) ?: ((probe(28) ? 28+1 : 0) ?: ((probe(29) ? 29+1 : 0) ?: ((probe(30) ? 30+1 : 0) ?: ((probe(31) ? 31+1 : 0) ?: ((probe(32) ? 32+1 : 0) ?: ((probe(33) ? 33+1 : 0) ?: ((probe(34) ? 34+1 : 0) ?: ((probe(35) ? 35+1 : 0) ?: ((probe(36) ? 36+1 : 0) ?: ((probe(37) ? 37+1 : 0) ?: ((probe(38) ? 38+1 : 0) ?: ((probe(39) ? 39+1 : 0) ?: (999)))))))))))))))))))))))))))))))))))))))); }
+__attribute__((noinline)) static double fp(void) { return fp_probe(0) ?: (fp_probe(1) ?: (fp_probe(2) ?: (fp_probe(3) ?: (fp_probe(4) ?: (fp_probe(5) ?: (fp_probe(6) ?: (fp_probe(7) ?: (fp_probe(8) ?: (fp_probe(9) ?: (fp_probe(10) ?: (fp_probe(11) ?: (fp_probe(12) ?: (fp_probe(13) ?: (fp_probe(14) ?: (fp_probe(15) ?: (fp_probe(16) ?: (fp_probe(17) ?: (fp_probe(18) ?: (fp_probe(19) ?: (fp_probe(20) ?: (fp_probe(21) ?: (fp_probe(22) ?: (fp_probe(23) ?: (fp_probe(24) ?: (fp_probe(25) ?: (fp_probe(26) ?: (fp_probe(27) ?: (fp_probe(28) ?: (fp_probe(29) ?: (fp_probe(30) ?: (fp_probe(31) ?: (fp_probe(32) ?: (fp_probe(33) ?: (fp_probe(34) ?: (fp_probe(35) ?: (fp_probe(36) ?: (fp_probe(37) ?: (fp_probe(38) ?: (fp_probe(39) ?: (999.5)))))))))))))))))))))))))))))))))))))))); }
+__attribute__((noinline)) static __int128 wide(void) { return wide_probe(0) ?: (wide_probe(1) ?: (wide_probe(2) ?: (wide_probe(3) ?: (wide_probe(4) ?: (wide_probe(5) ?: (wide_probe(6) ?: (wide_probe(7) ?: (wide_probe(8) ?: (wide_probe(9) ?: (wide_probe(10) ?: (wide_probe(11) ?: (wide_probe(12) ?: (wide_probe(13) ?: (wide_probe(14) ?: (wide_probe(15) ?: (wide_probe(16) ?: (wide_probe(17) ?: (wide_probe(18) ?: (wide_probe(19) ?: (wide_probe(20) ?: (wide_probe(21) ?: (wide_probe(22) ?: (wide_probe(23) ?: (wide_probe(24) ?: (wide_probe(25) ?: (wide_probe(26) ?: (wide_probe(27) ?: (wide_probe(28) ?: (wide_probe(29) ?: (wide_probe(30) ?: (wide_probe(31) ?: (wide_probe(32) ?: (wide_probe(33) ?: (wide_probe(34) ?: (wide_probe(35) ?: (wide_probe(36) ?: (wide_probe(37) ?: (wide_probe(38) ?: (wide_probe(39) ?: (((__int128)1 << 90))))))))))))))))))))))))))))))))))))))))); }
+int main(void) {
+ for (int i=0;i<=40;i++) {
+  chosen=i; calls=0;
+  if (ordinary() != (i<40 ? i+100 : 999) || calls != (i<40 ? i+1 : 40)) return 1;
+  calls=0;
+  if (omitted() != (i<40 ? i+1 : 999) || calls != (i<40 ? i+1 : 40)) return 2;
+  calls=0;
+  if (fp() != (i<40 ? i+0.5 : 999.5) || calls != (i<40 ? i+1 : 40)) return 3;
+  calls=0;
+  if (wide() != (i<40 ? ((__int128)1<<80)+i : ((__int128)1<<90)) || calls != (i<40 ? i+1 : 40)) return 4;
+ }
+ return 0;
+}

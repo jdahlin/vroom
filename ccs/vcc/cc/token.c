@@ -12,7 +12,7 @@ VPRIV void init_keywords(void)
 		KW__Bool, KW__Complex, KW___complex__, KW___complex, KW_struct, KW_union, KW_enum, KW_const, KW_volatile, KW_restrict,
 		KW__Atomic, KW_typeof, KW___typeof__, KW___typeof, KW___typeof_unqual__, KW___const__,
 		KW___const, KW___signed__, KW___signed, KW___volatile__, KW___volatile, KW___restrict__,
-		KW___restrict, KW___int128, KW__Float16, KW___fp16, KW___float128, KW__Alignas, KW___attribute__,
+		KW___restrict, KW___int128, KW__BitInt, KW__Float16, KW___bf16, KW___fp16, KW___float128, KW__Alignas, KW___attribute__,
 		KW___attribute, KW___auto_type,
 	};
 	static const uint16_t decls[] = {
@@ -400,6 +400,14 @@ static void pragma(cc *c, const ptok *t)
 		if (unlikely(c->dr_on))
 			dr_pragma(c, 1);
 		pragma_weak(c, s + 4, e, t->s, t->loc);
+		return;
+	}
+	if (e - s >= 9 && !memcmp(s, "ms_struct", 9) && (e - s == 9 || s[9] == ' ' || s[9] == '\t')) {
+		if (unlikely(c->dr_on))
+			dr_pragma(c, 2);
+		s += 9;
+		while (s < e && (*s == ' ' || *s == '\t')) s++;
+		c->ms_struct = e - s >= 2 && !memcmp(s, "on", 2);
 		return;
 	}
 	if ((size_t)(e - s) < 4 || memcmp(s, "pack", 4))

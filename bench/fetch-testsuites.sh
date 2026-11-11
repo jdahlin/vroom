@@ -59,7 +59,12 @@ echo "$SUITES" | while IFS='|' read -r name url p paths; do
   [ -n "$name" ] || continue
   [ "$want" = "  " ] || case "$want" in *" $name "*) ;; *) continue;; esac
   fetch "$name" "$url" "$(pin "$p")" "$paths"
-done | tee "$DST/MANIFEST.new"
+done > "$DST/MANIFEST.new"
+cat "$DST/MANIFEST.new"
 # keep the lines of suites not fetched this time
-[ -f "$DST/MANIFEST" ] && awk 'NR==FNR{s[$1]=1;next} !($1 in s)' "$DST/MANIFEST.new" "$DST/MANIFEST" >>"$DST/MANIFEST.new" || true
-sort -o "$DST/MANIFEST" "$DST/MANIFEST.new"; rm "$DST/MANIFEST.new"
+cp "$DST/MANIFEST.new" "$DST/MANIFEST.all"
+if [ -f "$DST/MANIFEST" ]; then
+  awk 'NR==FNR{s[$1]=1;next} !($1 in s)' "$DST/MANIFEST.new" "$DST/MANIFEST" >>"$DST/MANIFEST.all"
+fi
+sort -o "$DST/MANIFEST" "$DST/MANIFEST.all"
+rm "$DST/MANIFEST.new" "$DST/MANIFEST.all"

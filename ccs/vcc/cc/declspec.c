@@ -110,8 +110,7 @@ static uint32_t tag_lookup_or_new(cc *c, int kind, uint32_t name, uint32_t loc, 
 
 			c->syms[ns].val = ti;
 			sym_bind(c, ns);
-			if (c->in_proto == 1 && c->nptag < 8)
-				c->ptag[c->nptag++] = ns;
+			proto_binding(c, ns);
 		}
 		return ti;
 	}
@@ -426,7 +425,7 @@ static __attribute__((noinline, cold)) bool late_width_sign(cc *c, int base, int
 			cc_error(c, loc, "'long %.*s' is invalid", IDF(base)), ds->invalid = true;
 		return true;
 	}
-	if (base == KW_int || base == KW_char || base == KW_short || base == KW___int128)
+	if (base == KW_int || base == KW_char || base == KW_short || base == KW___int128 || base == KW__BitInt)
 		return false;
 	cc_error(c, loc, "'%.*s' cannot be signed or unsigned", IDF(base));
 	ds->invalid = true;
@@ -623,6 +622,7 @@ static __attribute__((noinline, cold)) void implicit_int_error(cc *c)
 VPRIV bool decl_specs(cc *c, dspec *ds, bool allow_sc)
 {
 	int nlong = 0, sgn = 0, base = 0, q = 0;
+	unsigned bitwidth = 0;
 	bool any = false, cplx = false, c23auto = false;
 	qty named = 0;
 	bool have_named = false;
@@ -691,8 +691,12 @@ again:
 		case KW__Thread_local: case KW___thread:
 			ds->thread = true;
 			break;
+		case KW_constexpr:
+			ds->constexpr_ = true;
+			if (!allow_sc)
+				cc_error(c, t->loc, "type name does not allow constexpr");
+			break;
 		case KW_const: case KW___const__: case KW___const:
-		case KW_constexpr:	/* C23: a const object with a constant initializer (not checked) */
 			q |= Q_CONST;
 			break;
 		case KW_volatile: case KW___volatile__: case KW___volatile:
@@ -709,7 +713,18 @@ again:
 				uint32_t open = tok(c)->loc;
 
 				next(c);
-				named = ty_atomic(c, type_name(c), aloc);
+				qty operand = type_name(c);
+
+				if (T(c, operand)->flags & TF_ATOMIC) {
+					cc_error(c, aloc, "_Atomic cannot be applied to atomic type '%s'", tyname(c, operand));
+					ds->invalid = true;
+				} else if (QQ(operand)) {
+					cc_error(c, aloc, "_Atomic cannot be applied to qualified type '%s'", tyname(c, operand));
+					ds->invalid = true;
+				}
+				int errors = c->errors;
+				named = ty_atomic(c, operand, aloc);
+				ds->invalid |= c->errors != errors;
 				have_named = true;
 				expect_match(c, T_RPAREN, open);
 				any = true;
@@ -747,8 +762,27 @@ again:
 				ds->align = a;
 			continue;
 		}
+		case KW__BitInt: {
+			i128 width = 0;
+			uint32_t loc = t->loc, open;
+
+			if (base || have_named || nlong)
+				cc_error(c, loc, "invalid combination of type specifiers with _BitInt");
+			base = KW__BitInt;
+			any = true;
+			next(c);
+			open = expect_lparen(c);
+			const_expr(c, &width, NULL);
+			expect_match(c, T_RPAREN, open);
+			if (width < 1 || width > 128) {
+				cc_error(c, loc, "_BitInt width must be between 1 and 128");
+				width = 2;
+			}
+			bitwidth = (unsigned)width;
+			continue;
+		}
 		case KW_void: case KW__Bool: case KW_char: case KW_short: case KW_int: case KW_float:
-		case KW_double: case KW___int128: case KW__Float16: case KW___fp16: case KW___float128:
+		case KW_double: case KW___int128: case KW__Float16: case KW___bf16: case KW___fp16: case KW___float128:
 			if (have_named) {
 				if (unlikely(ds->tagdecl) && !base) {
 					spec_clash(c, ds, 0);
@@ -852,19 +886,21 @@ again:
 				tag *r = &c->tags[ti];
 
 				tag_deprecate(c, ti, &pre);
-				if (r->flags & RF_COMPLETE) {
+				if ((r->flags & RF_COMPLETE) && kind != TY_ENUM) {
 					cc_error(c, loc, "redefinition of '%.*s'", IDF(name));
 					note(c, r->loc, "previous definition is here");
 				}
 				if (kind == TY_ENUM) {
 					merge_attrs(&post, &pre);
-					enum_body(c, ti, &post);
+					enum_body(c, ti, &post, loc);
 					tag_body_end(c, kind);
 				} else {
 					DR_TAGWRITE(c, ti);
-					c->tags[ti].flags |= (pre.packed ? RF_PACKED : 0);
+					c->tags[ti].flags |= (pre.packed ? RF_PACKED : 0) | ((pre.ms_struct || c->ms_struct) ? RF_MS_STRUCT : 0);
 					c->tags[ti].maxalign = pre.aligned;
 					struct_body(c, ti);
+					if (kind == TY_UNION && pre.transparent)
+						c->ty[c->tags[ti].ty].flags |= TF_TRANSPARENT;
 					tag_body_end(c, kind);
 					if (unlikely(ext_on(c, "gnu-empty-struct", w_gnu))) {
 						const tag *r = &c->tags[ti];
@@ -880,6 +916,8 @@ again:
 			} else {
 				ds->tag_bare = true;
 			}
+			if (kind == TY_ENUM)
+				c->tags[ti].flags |= RF_ENUM_DECLARED;
 			ds->tagdecl = ti;
 			named = QT(c->tags[ti].ty, 0);
 			have_named = true;
@@ -918,12 +956,20 @@ done:
 		ds->ty = named;
 		if (ds->tdef && c->syms[ds->tdef].ty != named)
 			ds->tdef = 0;
+	} else if (base == KW__BitInt) {
+		if (bitwidth == 1 && sgn >= 0) {
+			cc_error(c, ds->loc, "signed _BitInt must have a bit size of at least 2");
+			bitwidth = 2;
+		}
+		ds->ty = ty_bitint(c, bitwidth, sgn < 0);
 	} else if (base == KW_void) {
 		ds->ty = prim(TY_VOID);
 	} else if (base == KW__Bool) {
 		ds->ty = prim(TY_BOOL);
 	} else if (base == KW_float) {
 		ds->ty = prim(TY_FLOAT);
+	} else if (base == KW___bf16) {
+		ds->ty = prim(TY_BFLOAT16);
 	} else if (base == KW__Float16 || base == KW___fp16) {
 		ds->ty = prim(TY_FLOAT16);
 	} else if (base == KW_double) {
@@ -947,7 +993,11 @@ done:
 	if (cplx) {
 		if (!base && !nlong && !sgn && !have_named)
 			ds->ty = prim(TY_DOUBLE);	/* plain _Complex: double (GNU) */
-		if (!is_arith(c, ds->ty))
+		if (is_integer(c, ds->ty) && T(c, ds->ty)->n)
+			cc_error(c, ds->loc, "'_Complex _BitInt' is invalid");
+		else if (KIND(c, ds->ty) == TY_BFLOAT16)
+			cc_error(c, ds->loc, "_Complex __bf16 is invalid");
+		else if (!is_arith(c, ds->ty))
 			cc_error(c, ds->loc, "_Complex requires an arithmetic element type");
 		else
 			ds->ty = ty_complex(c, ds->ty);

@@ -1,0 +1,19 @@
+argument_incomplete.c:9:18: error: argument type 'void' is incomplete
+    9 |     unprototyped(value());
+      |                  ^~~~~~~
+argument_incomplete.c:10:17: error: argument type 'void' is incomplete
+   10 |     variadic(1, value());
+      |                 ^~~~~~~
+argument_incomplete.c:11:18: error: argument type 'struct incomplete' is incomplete
+   11 |     unprototyped(missing);
+      |                  ^~~~~~~
+argument_incomplete.c:5:8: note: forward declaration of 'struct incomplete'
+    5 | struct incomplete;
+      |        ^
+argument_incomplete.c:12:17: error: argument type 'struct incomplete' is incomplete
+   12 |     variadic(1, missing);
+      |                 ^~~~~~~
+argument_incomplete.c:5:8: note: forward declaration of 'struct incomplete'
+    5 | struct incomplete;
+      |        ^
+4 errors generated.
