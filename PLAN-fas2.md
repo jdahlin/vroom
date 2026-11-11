@@ -2630,6 +2630,43 @@ sanitiserade flow-/dead-result-kontrakt, 16 mål-/nivåprov med körning och
 x86-debug O0–O3 passerar. Tidigare hela sviter och Ir-mätningar ovan gäller
 sina exakta angivna versioner; integrationen är ingen ny kostnadsmätning.
 
+### Gemensam walker: en värdeläsning för skalär postfix (2026-11-11)
+
+Status: implementerat och lokalt verifierat i `opt/postfix-eval`, före
+integreringscommit. `wk_incdec` i `emit/walk/expr.c` läser ett ordinärt
+registerrepresenterat värde en gång, behåller det gamla värdet och gör en
+registerkopia i rätt registerklass före den destruktiva aritmetiken. Detta är
+en evalueringsrättning vid O0–O3, utan optimeringspass, SSA eller kostsam analys.
+Den gemensamma walkern används fortfarande bara av x86; arm64 och wasm behåller
+sina befintliga vägar och valideras av samma semantiska test.
+
+Avgränsning: `_Atomic` går oförändrat genom sin separata RMW/CAS-väg. Typer
+som `wk_mem` håller via adress, exempelvis x86 `__int128` och `long double`,
+behåller också sin befintliga snapshot-/läsningsväg; detta delsteg lovar inte en
+enda originalläsning för dem. Postfix-bitfält använder den nya registerkopian:
+två behållarläsningar återstår, en för fältvärdet och en för att bevara grannbitar,
+som i de undersökta clang/GCC-fallen. Prefix-bitfältens extra resultatläsning och
+fältbreddsnormalisering ändras inte här.
+
+Validering: `postfix_eval.c` och `vcc-opt-rules.py --rule postfix --run`
+kontrollerar exakt en ordinär skalär läsning och skrivning (eller en kombinerad
+RMW), gamla/nya värden, bortkastat och castat resultat, smala heltal, bool,
+FP/GPR-registertryck, fasta adressregister, pekarsteg, sidoeffekt i adressen,
+bitfältsgrannar och separata atomiska/adressbaserade kontroller. Unity och
+filvis bygge klarar samtliga 32 kombinationer av fyra mål och O0–O3. Den tidigare
+oförändrade parent69-postfixvägen avvisas av läsningskontrollen: två läsningar i
+stället för en. x86:s egna C-svit klarar 228/228, med sex befintliga överhoppade.
+Loggar: `build/linux/postfix-evidence/`. Ingen ytterligare bred testkörning behövs
+för detta delsteg. En liten matchad Ir-jämförelse efter checkpoint 6a726c0 finns i
+`build/linux/postfix-evidence/cost/result.json`: samma clang23,
+`-O3 -march=x86-64-v3`, exakt f7327bd-baslinje och en seriell Callgrind-körning
+per binär/källa, inklusive processstart. För 64 funktioner utan postfix ändras
+6 703 455 till 6 703 542 Ir (+87; +0,0013 %), med identisk assemblertext.
+För 64 postfix-funktioner ändras 6 717 886 till 6 731 413 Ir (+13 527;
++0,2014 %), samtidigt som varje funktions ordinära objektläsningar minskar
+från två till en. Detta mäter kompilatorarbete i två små prov, inte en full
+1 %-grind eller körtid/hastighetsvinst hos det genererade programmet.
+
 
 OPT1 integration efter wasm-flödesföräldern: på `60027c7` med förälder
 `6d60e73` passerar unity och fil-för-fil (j2), 16 kompletta byteidentiska
@@ -2647,3 +2684,12 @@ i `work/mulconst-integration-{contracts,policy,runtime}.log`.
 Ingen historisk kostnadsprofil har upprepats: talen ovan gäller fortfarande
 exakt 69c1bd7 till f92b67b, inte denna integrationsförälder. Integrations-CI
 återstår; G5/G7 och hela O2 är fortsatt öppna.
+
+Postfix-integrering efter multiplikationsföräldern: e63bf47 staplar rättningen
+på PR71/f295999. Aktuellt unity-bygge är grönt. Samtliga 16 postfix- och 16
+konstantmultiplikationsfall (fyra mål, O0–O3) klarar kodgenereringskontroller och
+körning; multiplikationsrecept med mutationskontroll och registereffekter klarar
+ASan/UBSan. `build/linux/postfix-evidence/integration-*.log` innehåller resultaten.
+Den tidigare breda sviten och matchade Ir-proven har inte körts om; inga
+integreringsfel motiverade det. Rättningen är fortfarande avgränsad till
+registerrepresenterad postfix och ligger kvar ovanpå multiplikationsföräldern.

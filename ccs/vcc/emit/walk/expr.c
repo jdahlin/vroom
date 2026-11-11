@@ -1852,10 +1852,21 @@ static val wk_incdec(ecx *e, uint32_t n)
 		lval cp = { .k = L_FRAME, .off = wk_slot(e, tsize(c, t), talign(c, t)), .align = talign(c, t) };
 
 		old = wk_putmem(e, &cp, t, wk_reload(e, &l, t));
-	} else if (post) {
-		old = wk_reload(e, &l, t);
+		nv = wk_incval(e, t, dec, wk_reload(e, &l, t));
+	} else {
+		nv = wk_reload(e, &l, t);
+		if (post) {
+			/* One lvalue read supplies both results. The arithmetic consumes
+			 * its register, so keep the old value and increment a typed copy.
+			 */
+			old = nv;
+			int copy = wk_treg(e, t);
+
+			LO(mov)(e, copy, wk_reg(e, &nv, t));
+			nv = wk_vreg(copy);
+		}
+		nv = wk_incval(e, t, dec, nv);
 	}
-	nv = wk_incval(e, t, dec, wk_reload(e, &l, t));
 	if (wk_mem(e, t)) {
 		nv = wk_putmem(e, &l, t, nv);
 		if (post) {

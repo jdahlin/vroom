@@ -589,6 +589,70 @@ def check_deadresults(assembly, arch):
         raise RuntimeError(f'dr_opaque: opaque whole-function fallback was lost\n{text}')
 
 
+def scalar_memory_accesses(text, arch):
+    """Count accesses in probes with one data object; ignore frame/literals.
+
+    A memory RMW supplies one read and one write. No arbitrary CFG or alias
+    inference is needed: these named probes contain only a single update.
+    """
+    if arch.startswith('wasm'):
+        return (len(re.findall(r'\b(?:i32|i64|f32|f64)\.load\w*\b', text)),
+                len(re.findall(r'\b(?:i32|i64|f32|f64)\.store\w*\b', text)))
+    reads = writes = 0
+    for line in text.splitlines():
+        line = line.strip()
+        if not line or line.startswith(('.', '#', '//')):
+            continue
+        fields = line.split(None, 1)
+        if len(fields) != 2:
+            continue
+        op, operands = fields
+        if arch == 'aarch64':
+            if '[' not in operands or re.search(r'\[(?:sp|x29)\b|\.LC', operands):
+                continue
+            reads += op.startswith('ld')
+            writes += op.startswith('st')
+            continue
+        if op.startswith('lea'):
+            continue
+        for index, operand in enumerate(operands.split(',')):
+            if '(' not in operand or re.search(r'\(%(?:rbp|rsp)\b|\.LC', operand):
+                continue
+            destination = index == len(operands.split(',')) - 1
+            if op.startswith('mov'):
+                writes += destination
+                reads += not destination
+            else:
+                reads += 1
+                writes += destination and not op.startswith(('cmp', 'test'))
+    return reads, writes
+
+
+def check_postfix(assembly, arch):
+    probes = ['pe_global_post', 'pe_global_pre', 'pe_global_postdec', 'pe_global_predec',
+              'pe_global_unused', 'pe_global_cast', 'pe_global_post64', 'pe_byte_post',
+              'pe_byte_pre', 'pe_bool_post', 'pe_bool_pre', 'pe_float_post', 'pe_double_post',
+              'pe_pointer_post', 'pe_post', 'pe_pre', 'pe_postdec', 'pe_predec', 'pe_unused',
+              'pe_short_post', 'pe_char_post', 'pe_plain', 'pe_address_post']
+    for name in probes + ['pe_bits_post', 'pe_bits_unused']:
+        text = body(assembly, name, arch.startswith('wasm'))
+        expected = (2 if name.startswith('pe_bits_') else 1, 1)
+        actual = scalar_memory_accesses(text, arch)
+        if actual != expected:
+            raise RuntimeError(f'{name}: expected reads/writes {expected}, found {actual}\n{text}')
+    text = body(assembly, 'pe_address_post', arch.startswith('wasm'))
+    if len(re.findall(r'\b(?:callq?|bl)\s+pe_address\b', text)) != 1:
+        raise RuntimeError(f'pe_address_post: address must be evaluated once\n{text}')
+    if arch == 'x86_64':
+        for name in ['pe_atomic_post', 'pe_atomic_pre']:
+            text = body(assembly, name, False)
+            if not re.search(r'\block\s+(?:cmpxchg|xadd)\w*\b', text):
+                raise RuntimeError(f'{name}: lost atomic RMW protocol\n{text}')
+    if not arch.startswith('wasm'):
+        text = body(assembly, 'pe_fixed_address', False)
+        if scalar_memory_accesses(text, arch) != (1, 1):
+            raise RuntimeError(f'pe_fixed_address: expected one scalar update\n{text}')
+
 def check_mulconst(assembly, arch):
     wasm = arch.startswith('wasm')
     probes = [(f'mc_{tag}_{factor}', shift) for tag in ['u32', 's32', 'u64', 's64']
@@ -685,7 +749,7 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument('--vpp', default=str(Path(BUILD) / 'vpp'))
     ap.add_argument('--target', default='x86_64-linux-gnu')
-    ap.add_argument('--rule', choices=['pow2', 'signedpow2', 'identities', 'fallthrough', 'loopback', 'unreachable', 'locals', 'localjmp', 'copies', 'extensions', 'switches', 'tails', 'udivconst', 'udivconst64', 'sdivconst', 'deadresults', 'mulconst', 'all'], default='all')
+    ap.add_argument('--rule', choices=['pow2', 'signedpow2', 'identities', 'fallthrough', 'loopback', 'unreachable', 'locals', 'localjmp', 'copies', 'extensions', 'switches', 'tails', 'udivconst', 'udivconst64', 'sdivconst', 'deadresults', 'mulconst', 'postfix', 'all'], default='all')
     ap.add_argument('--run', action='store_true', help='also execute literal-answer correctness checks')
     ap.add_argument('--cfi', action='store_true', help='also check unwind state with tail calls')
     ap.add_argument('--sibling-calls', choices=['default', 'on', 'off'], default='default',
@@ -728,7 +792,8 @@ def main():
              'udivconst64': ('unsigned_divconst64.c', check_udivconst64),
              'sdivconst': ('signed_divconst.c', check_sdivconst),
              'deadresults': ('dead_results.c', check_deadresults),
-             'mulconst': ('multiply_constants.c', check_mulconst)}
+             'mulconst': ('multiply_constants.c', check_mulconst),
+             'postfix': ('postfix_eval.c', check_postfix)}
     selected = rules if args.rule == 'all' else {args.rule: rules[args.rule]}
     with tempfile.TemporaryDirectory(prefix='vcc-opt-rules-') as tmp:
         directory = Path(tmp)
