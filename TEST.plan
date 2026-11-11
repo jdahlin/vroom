@@ -219,8 +219,16 @@ Frön 1–3: x86 Csmith 3/3, YARPGen 2/3 (frö 3 träffar X3:s gräns på
 64 anropsargument och 256 parametrar har därefter tagits bort; en separat
 återkörning av frö 3 matchar clang på båda målen, och ett ABI-test med
 291 parametrar går i alla fyra kompilatorkombinationer. Ingen 24h-körning
-eller reducering påstås vara klar; S2–S6 och det kvarvarande x86-felet
-måste verifieras först.
+eller reducering påstås vara klar; S2–S6 måste verifieras först.
+
+En begränsad x86-Csmith-körning med fyra arbetare, `--duration 1800
+--max-failures 100`, gav **1159 godkända, 0 vcc-fel och 200 filtrerade**.
+151 filtrerades vid clang -O0:s körning (timeout), 49 vid UBSan (trap).
+Källor, kommandon och sammanfattning finns i
+`work/random-tests/20261111-083106-752654-x86_64-linux-gnu/`.
+Riggen sparar mellanresultat och slutar schemalägga när tid eller felgräns
+nås; redan körande prov avslutas. Felgränsen räknar felande prov, inte
+unika kompilatorbuggar. Detta ersätter inte 24h-grinden.
 
 **Klart när:** 24 h per generator utan avvikelse, på båda målen
 (PLAN-release G1).
