@@ -102,6 +102,68 @@ class Harness(unittest.TestCase):
             self.assertTrue(h.make_error(2, log, commands, observed))
             self.assertTrue(h.make_error(-11, log, commands, observed))
 
+    def test_complete_mapping_preserves_upstream_variants(self):
+        bins = ['functional/a', 'functional/a-static', 'math/sin', 'api/main',
+                'musl/pleval', 'musl/pleval-static']
+        sources = ['functional/a.c', 'functional/helper.c', 'math/sin.c',
+                   'api/assert.c', 'api/main.c', 'musl/pleval.c']
+        names, mapping = h.corpus(bins, sources, 'full', 'both', ['*'])
+        self.assertEqual(len(names), 8)
+        self.assertNotIn('functional/helper', names)
+        self.assertNotIn('math/sin-static', names)
+        self.assertIn('api/assert.o', names)
+        self.assertIn('api/main.o', names)
+        self.assertIn('api/main', names)
+        self.assertEqual(mapping['implicit_dynamic_prerequisites'], ['functional/a', 'musl/pleval'])
+        static, _ = h.corpus(bins, sources, 'all', 'static', ['*'])
+        self.assertEqual(static, ['functional/a-static'])
+        api, static_map = h.corpus(bins, sources, 'api', 'static', ['*'])
+        self.assertIn('api/main', api)
+        self.assertNotIn('api/main', static_map['mapped_static'])
+        overridden, _ = h.corpus(bins, sources, 'api', 'dynamic', ['*'], ['api/main.o'])
+        self.assertEqual(overridden, ['api/main', 'api/main.o'])
+
+    def test_api_and_disabled_run_need_distinct_contracts(self):
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            (root / 'api').mkdir()
+            (root / 'api/assert.o').touch()
+            self.assertEqual(h.outcomes(root, ['api/assert.o', 'api/stdio.o', 'musl/pleval']),
+                             {'api/assert.o': 'pass', 'api/stdio.o': 'build-fail',
+                              'musl/pleval': 'unsupported-upstream'})
+            self.assertEqual(h.outcomes(root, ['api/assert.o'], completed=set()), {'api/assert.o': 'build-fail'})
+            self.assertEqual(h.outcomes(root, ['api/assert.o'], completed={str(root / 'api/assert.o')}), {'api/assert.o': 'pass'})
+            self.assertEqual(h.build_target('api/assert.o'), 'api/assert.o')
+            self.assertEqual(h.build_target('api/main'), 'api/main.err')
+            self.assertEqual(h.build_target('functional/a-static'), 'functional/a-static.err')
+
+    def test_generated_api_header_uses_candidate_preprocessor(self):
+        with tempfile.TemporaryDirectory() as d:
+            cfg = Path(d) / 'cfg.json'
+            cfg.write_text(json.dumps(dict(mode='vcc', clang='clang', vpp='vpp', target='x86_64-linux-gnu', includes=['-isystem', '/headers'], logs=d, compile_timeout=7)))
+            with patch.object(h, 'execute', return_value=0) as run:
+                self.assertEqual(h.compiler(cfg, ['-E', '-']), 0)
+                self.assertEqual(run.call_args.args[0], ['vpp', '--target=x86_64-linux-gnu', '-isystem', '/headers', '-E', '-'])
+            def reject(cmd, timeout, log):
+                log.write_text(json.dumps({'returncode': 1, 'error': None}))
+                return 1
+            with patch.object(h, 'execute', side_effect=reject):
+                self.assertEqual(h.compiler(cfg, ['-E', '-']), 1)
+            logs = list(Path(d).glob('*.preprocess.json'))
+            self.assertEqual(len(logs), 1)
+            self.assertEqual(json.loads(logs[0].read_text())['error'], 'support-preprocess-fail')
+
+    def test_disabled_recipe_is_verified_not_name_only(self):
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            mk = root / 'src/musl/pleval.mk'
+            mk.parent.mkdir(parents=True)
+            mk.write_text('$(B)/$(N).err:\n\ttouch $@\n')
+            self.assertIn('musl/pleval', h.disabled_rules(root))
+            mk.write_text('$(B)/$(N).err:\n\t$(RUN_TEST) $< >$@\n')
+            self.assertEqual(h.disabled_rules(root), {})
+            self.assertEqual(h.outcomes(root, ['musl/pleval'], disabled={}), {'musl/pleval': 'build-fail'})
+
 
 if __name__ == '__main__':
     unittest.main()

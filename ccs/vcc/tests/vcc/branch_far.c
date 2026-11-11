@@ -1,3 +1,4 @@
+/* vcc-ref-timeout: 300 */
 /* Conditional branches and loops around more than 1 MB of code: b.cond and
    cbz/cbnz reach +-1 MB, so the compiler must relax them (TODO.md tier 1,
    "Branch range").  The bulk is 100k volatile increments, ~1.6 MB.  The
